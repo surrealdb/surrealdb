@@ -129,6 +129,10 @@ pub struct TypeDef {
 	pub ctx: Option<Expr>,
 	pub also_range: bool,
 	pub format: Format,
+	/// Further formats the type encodes under, by the same steps as under
+	/// [`Self::format`]. Only `Encode` is emitted for these: the type's key,
+	/// bound and decoder traits all use [`Self::format`].
+	pub also_formats: Vec<Type>,
 	pub derives: Vec<Ident>,
 	pub lifetime: bool,
 	/// Schema ident, for diagnostics and for the keyspace map.
@@ -770,6 +774,32 @@ fn build(
 		}
 	};
 
+	let also_formats = attrs.also_formats.clone();
+	for t in &also_formats {
+		let described = t.to_token_stream().to_string().replace(' ', "");
+		if matches!(format, Format::Generic) {
+			errors.push(
+				t.span(),
+				"`#[also_format(..)]` on a format-generic item: it already encodes under every \
+				 format",
+			);
+		} else if described == format.describe() {
+			errors.push(
+				t.span(),
+				format!("`#[also_format({described})]` repeats the format the item is pinned to"),
+			);
+		}
+	}
+	for (i, t) in also_formats.iter().enumerate() {
+		let described = t.to_token_stream().to_string().replace(' ', "");
+		if also_formats[..i]
+			.iter()
+			.any(|u| u.to_token_stream().to_string().replace(' ', "") == described)
+		{
+			errors.push(t.span(), format!("`#[also_format({described})]` is declared twice"));
+		}
+	}
+
 	// Derived prefixes inherit their entry's format by construction. That is what
 	// makes it impossible for a prefix and its key to disagree on encoding (R6).
 	let prefixes = cuts
@@ -796,6 +826,7 @@ fn build(
 				ctx: None,
 				also_range: true,
 				format: format.clone(),
+				also_formats: also_formats.clone(),
 				derives,
 				lifetime,
 				source: source.clone(),
@@ -827,6 +858,7 @@ fn build(
 		ctx: opts.ctx.clone(),
 		also_range: opts.also_range || role == Role::Root,
 		format,
+		also_formats,
 		derives,
 		lifetime,
 		source: source.clone(),

@@ -35,8 +35,8 @@
 //!   (`0x00`) and escape (`0x01`).
 //! - **R5** every field type must be declared, and floats are rejected outright — in an alias
 //!   expansion as well as where written. Enforced during resolution, where types are looked up.
-//! - **R6** a derived prefix always shares its entry's format. Structural: the prefix is built from
-//!   the entry, and this rule re-verifies it.
+//! - **R6** a derived prefix always shares its entry's format, and every format the entry also
+//!   encodes under. Structural: the prefix is built from the entry, and this rule re-verifies it.
 //! - **R7** one key's bytes may be a strict prefix of another's only when the longer one declares
 //!   `extends`.
 //! - **R8** every type used to build a bound must begin with a literal byte other than `0xFF`, so
@@ -50,9 +50,9 @@
 //!   compiler, with a diagnostic attached by the generated code.
 //! - **R12** an enum's discriminants must be distinct, or two logically different keys encode to
 //!   the same bytes and one decodes back as the other.
-//! - **R13** a level root whose subtree holds keys of another `storekey` format must be
-//!   `format_generic`, which is what makes the compiler prove its own bytes are the same under
-//!   every format and so that its range really does cover that subtree.
+//! - **R13** a level root whose subtree holds keys of another `storekey` format, pinned or declared
+//!   with `also_format`, must be `format_generic`, which is what makes the compiler prove its own
+//!   bytes are the same under every format and so that its range really does cover that subtree.
 //! - **R14** every inherited field of a key must exist on the level root that builds it, so a
 //!   builder can never invent the data identifying a parent.
 //! - **R15** value types must have distinct generated variant names, so the reverse decoder's enum
@@ -349,27 +349,35 @@ fn tag_bytes(model: &Model, errors: &mut Errors) {
 /// on how a field is encoded. Prefixes are built from their entry, so this rule
 /// verifies a structural property rather than a schema-authored one.
 fn prefix_formats(model: &Model, errors: &mut Errors) {
-	let by_source: BTreeMap<String, &Format> = model
+	/// Every format a type encodes under, pinned one first.
+	fn formats(def: &TypeDef) -> String {
+		let mut out = def.format.describe();
+		for t in &def.also_formats {
+			out.push_str(" + ");
+			out.push_str(&quote::ToTokens::to_token_stream(t).to_string().replace(' ', ""));
+		}
+		out
+	}
+
+	let by_source: BTreeMap<String, String> = model
 		.types
 		.iter()
 		.filter(|d| d.role != Role::Prefix)
-		.map(|d| (d.source.to_string(), &d.format))
+		.map(|d| (d.source.to_string(), formats(d)))
 		.collect();
 
 	for def in model.types.iter().filter(|d| d.role == Role::Prefix) {
 		let Some(entry) = by_source.get(&def.source.to_string()) else {
 			continue;
 		};
-		if entry.describe() != def.format.describe() {
+		let own = formats(def);
+		if *entry != own {
 			errors.push(
 				def.name.span(),
 				format!(
 					"prefix `{}` encodes under format `{}` but its entry `{}` uses `{}`; a scan \
 					 bound must share its entry's format",
-					def.name,
-					def.format.describe(),
-					def.source,
-					entry.describe()
+					def.name, own, def.source, entry
 				),
 			);
 		}
@@ -392,21 +400,23 @@ fn subtree_formats(model: &Model, errors: &mut Errors) {
 			continue;
 		}
 		for def in model.types.iter().filter(|d| d.role != Role::Prefix && nested(root, d)) {
-			if def.format.describe() == root.format.describe() {
+			let also = def
+				.also_formats
+				.iter()
+				.map(|t| quote::ToTokens::to_token_stream(t).to_string().replace(' ', ""));
+			let root_format = root.format.describe();
+			let Some(format) =
+				std::iter::once(def.format.describe()).chain(also).find(|f| *f != root_format)
+			else {
 				continue;
-			}
+			};
 			errors.push(
 				def.source.span(),
 				format!(
 					"`{}` encodes under format `{}` but its enclosing level `{}` uses `{}`, so \
 					 `{}`'s range is not guaranteed to cover this key; declare `{}` as \
 					 `(format_generic)` so its own bytes are the same under either format",
-					def.source,
-					def.format.describe(),
-					root.source,
-					root.format.describe(),
-					root.name,
-					root.source,
+					def.source, format, root.source, root_format, root.name, root.source,
 				),
 			);
 			errors.push(root.source.span(), format!("`{}` is declared here", root.source));

@@ -15,11 +15,22 @@
 //! numbers reads them in numeric order. Both entry shapes store an
 //! [`IndexEntryValue`].
 //!
-//! [`IndexKeyspace::stored_key`] is the one place a write decides where an
-//! entry goes, and [`IndexKeyspace::equality`], [`IndexKeyspace::range`] and
-//! [`IndexKeyspace::compound`] are the ranges a read scans for a predicate.
-//! The ranges are half-open, `[start, end)`, and contain exactly the keys
-//! [`IndexKeyspace::stored_key`] writes for values the predicate admits.
+//! Each index holds one spelling of a `Datetime`, chosen by its format-version
+//! stamp (see [`DatetimeSpelling`]): an index stamped at
+//! [`DATETIME_ORDER_FORMAT_VERSION`] or later spells it so its keys sort
+//! chronologically, and one stamped earlier spells it as RFC 3339 text. Every
+//! key below is encoded for the stamp of the index it belongs to, so a write, a
+//! delete, a unique-slot check and a read of one index all agree.
+//!
+//! [`IndexKeyspace`] is the only builder of these keys: nothing else names
+//! `EntryKey`, `UniqueKey` or the bounds cut from `EntryKey` with indexed
+//! values in them, which a test in this module checks over the workspace's
+//! sources. [`IndexKeyspace::stored_key`] is the one place a write decides
+//! where an entry goes, and [`IndexKeyspace::equality`],
+//! [`IndexKeyspace::range`] and [`IndexKeyspace::compound`] are the ranges a
+//! read scans for a predicate. The ranges are half-open, `[start, end)`, and
+//! contain exactly the keys [`IndexKeyspace::stored_key`] writes for values
+//! the predicate admits.
 
 use std::borrow::Cow;
 use std::ops::Bound;
@@ -27,12 +38,14 @@ use std::slice;
 
 use anyhow::Result;
 
-use crate::catalog::{DatabaseId, IndexDefinition, IndexId, NamespaceId};
+use crate::catalog::{
+	DATETIME_ORDER_FORMAT_VERSION, DatabaseId, IndexDefinition, IndexId, NamespaceId,
+};
 use crate::entry::IndexEntryValue;
 use crate::expr::BinaryOperator;
 use crate::key::schema::{EntryFdOpenPrefix, EntryFdPrefix, EntryKey, EntryPrefix, UniqueKey};
-use crate::key::{KVKey, KVRange, KVSubspace, KVValue, Key, KeyRange, TypedRange};
-use crate::val::{RecordId, RecordIdKey, TableName, Value};
+use crate::key::{KVKey, KVRange, KVValue, Key, KeyRange, TypedRange};
+use crate::val::{IndexFormat, IndexIdFormat, RecordId, RecordIdKey, TableName, Value};
 
 /// Where an entry for one tuple of indexed values is stored.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,49 +74,107 @@ impl KVKey for StoredKey {
 	fn value_context(&self) {}
 }
 
-/// One index's keyspace: every key of its entries starts with these fields.
+/// How the keys of one index spell a `Datetime` among its indexed values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DatetimeSpelling {
+	/// RFC 3339 text, under `IndexIdFormat`: the spelling of an index stamped
+	/// below [`DATETIME_ORDER_FORMAT_VERSION`]. Its bytes do not sort
+	/// chronologically.
+	Text,
+	/// Seconds then nanoseconds since the Unix epoch, under `IndexFormat`: the
+	/// spelling of an index stamped at [`DATETIME_ORDER_FORMAT_VERSION`] or
+	/// later. Its bytes sort chronologically.
+	Chronological,
+}
+
+impl DatetimeSpelling {
+	/// The spelling an index stamped with `format_version` holds.
+	pub fn of(format_version: u16) -> Self {
+		if format_version >= DATETIME_ORDER_FORMAT_VERSION {
+			Self::Chronological
+		} else {
+			Self::Text
+		}
+	}
+
+	/// `key`'s bytes, with its indexed values in this spelling. Every key and
+	/// bound in this module is encoded here. A value with no key encoding
+	/// fails as [`surrealdb_kvs::key::Error::Unencodable`], the error every
+	/// other key encoder raises for it.
+	fn encode<K>(self, key: &K) -> Result<Key<'static>>
+	where
+		K: storekey::Encode<IndexFormat> + storekey::Encode<IndexIdFormat>,
+	{
+		let bytes = match self {
+			Self::Text => storekey::encode_vec_format::<IndexIdFormat, _>(key),
+			Self::Chronological => storekey::encode_vec_format::<IndexFormat, _>(key),
+		};
+		Ok(Key::from(bytes.map_err(|_| surrealdb_kvs::key::Error::Unencodable)?))
+	}
+}
+
+/// One index's keyspace: every key of its entries starts with these fields,
+/// and spells its indexed values for the index's format-version stamp.
 #[derive(Debug, Clone, Copy)]
 pub struct IndexKeyspace<'a> {
-	pub ns: NamespaceId,
-	pub db: DatabaseId,
-	pub tb: &'a TableName,
-	pub ix: IndexId,
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &'a TableName,
+	ix: IndexId,
+	spelling: DatetimeSpelling,
 }
 
 impl<'a> IndexKeyspace<'a> {
 	/// The keyspace of index `ix`, defined in database `db` of namespace `ns`.
 	pub fn of(ns: NamespaceId, db: DatabaseId, ix: &'a IndexDefinition) -> Self {
+		Self::new(ns, db, &ix.table_name, ix.index_id, ix.format_version)
+	}
+
+	/// The keyspace of index `ix` on table `tb` in database `db` of namespace
+	/// `ns`, stamped with `format_version`. [`Self::of`] takes these from the
+	/// index's definition, which is where a caller holding one takes them.
+	pub fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a TableName,
+		ix: IndexId,
+		format_version: u16,
+	) -> Self {
 		Self {
 			ns,
 			db,
-			tb: &ix.table_name,
-			ix: ix.index_id,
+			tb,
+			ix,
+			spelling: DatetimeSpelling::of(format_version),
 		}
+	}
+
+	/// How this index's keys spell a `Datetime`.
+	pub fn spelling(&self) -> DatetimeSpelling {
+		self.spelling
 	}
 
 	/// The key of a non-unique entry for values `fd` of the record keyed `id`.
 	pub fn entry_key(&self, fd: &[Value], id: &RecordIdKey) -> Result<Key<'static>> {
-		EntryKey {
+		self.spelling.encode(&EntryKey {
 			ns: self.ns,
 			db: self.db,
 			tb: Cow::Borrowed(self.tb),
 			ix: self.ix,
 			fd: Cow::Borrowed(fd),
 			id: Cow::Borrowed(id),
-		}
-		.encode_key()
+		})
 	}
 
 	/// The unique slot for values `fd`.
 	pub fn unique_key(&self, fd: &[Value]) -> Result<Key<'static>> {
-		UniqueKey {
+		self.spelling.encode(&UniqueKey {
 			ns: self.ns,
 			db: self.db,
 			tb: Cow::Borrowed(self.tb),
 			ix: self.ix,
 			fd: Cow::Borrowed(fd),
-		}
-		.encode_key()
+		})
 	}
 
 	/// Where the entry for values `fd` of the record keyed `id` is stored, on
@@ -124,8 +195,9 @@ impl<'a> IndexKeyspace<'a> {
 
 	/// Every entry of the index.
 	pub fn all(&self) -> Result<TypedRange<IndexEntryValue>> {
-		let prefix = self.prefix();
-		Ok(self.typed((prefix.encode_bound()?..prefix.skip_extensions()?).into()))
+		let prefix = self.spelling.encode(&self.prefix())?;
+		let end = prefix.clone().next_neighbour_expect();
+		Ok(self.typed((prefix..end).into()))
 	}
 
 	/// The entries whose values are exactly `[value]`.
@@ -138,14 +210,15 @@ impl<'a> IndexKeyspace<'a> {
 			let end = key.as_borrowed().next();
 			Ok(self.typed((key..end).into()))
 		} else {
-			EntryFdPrefix {
+			// Every entry for exactly these values, whatever record it names.
+			let bound = self.spelling.encode(&EntryFdPrefix {
 				ns: self.ns,
 				db: self.db,
 				tb: Cow::Borrowed(self.tb),
 				ix: self.ix,
 				fd: Cow::Borrowed(fd),
-			}
-			.range()
+			})?;
+			Ok(self.typed(bound.prefix_expect()))
 		}
 	}
 
@@ -160,12 +233,12 @@ impl<'a> IndexKeyspace<'a> {
 		let start = match from {
 			Bound::Included(x) => self.lower_inclusive(unique, x)?,
 			Bound::Excluded(x) => self.upper_inclusive(unique, x)?,
-			Bound::Unbounded => self.prefix().encode_bound()?,
+			Bound::Unbounded => self.spelling.encode(&self.prefix())?,
 		};
 		let end = match to {
 			Bound::Included(x) => self.upper_inclusive(unique, x)?,
 			Bound::Excluded(x) => self.lower_inclusive(unique, x)?,
-			Bound::Unbounded => self.prefix().skip_extensions()?,
+			Bound::Unbounded => self.spelling.encode(&self.prefix())?.next_neighbour_expect(),
 		};
 		Ok(self.typed((start..end).into()))
 	}
@@ -179,7 +252,7 @@ impl<'a> IndexKeyspace<'a> {
 		prefix: &[Value],
 		range: Option<(&BinaryOperator, &Value)>,
 	) -> Result<TypedRange<IndexEntryValue>> {
-		let without = || self.open(prefix).encode_bound();
+		let without = || self.open(prefix);
 		let Some((op, value)) = range else {
 			return Ok(self.typed(without()?.prefix_expect()));
 		};
@@ -187,7 +260,7 @@ impl<'a> IndexKeyspace<'a> {
 			let mut fd = Vec::with_capacity(prefix.len() + 1);
 			fd.extend_from_slice(prefix);
 			fd.push(value.clone());
-			self.open(&fd).encode_bound()
+			self.open(&fd)
 		};
 		let range: KeyRange<'static> = match op {
 			BinaryOperator::Equal | BinaryOperator::ExactEqual => with()?.prefix_expect(),
@@ -207,7 +280,7 @@ impl<'a> IndexKeyspace<'a> {
 		if unique && !x.is_nullish() {
 			self.unique_key(slice::from_ref(x))
 		} else {
-			self.open(slice::from_ref(x)).encode_bound()
+			self.open(slice::from_ref(x))
 		}
 	}
 
@@ -216,7 +289,7 @@ impl<'a> IndexKeyspace<'a> {
 		if unique && !x.is_nullish() {
 			Ok(self.unique_key(slice::from_ref(x))?.next_neighbour_expect())
 		} else {
-			self.open(slice::from_ref(x)).skip_extensions()
+			Ok(self.open(slice::from_ref(x))?.next_neighbour_expect())
 		}
 	}
 
@@ -229,18 +302,17 @@ impl<'a> IndexKeyspace<'a> {
 		}
 	}
 
-	/// The bound over every entry whose values start with `fd`.
-	fn open<'b>(&self, fd: &'b [Value]) -> EntryFdOpenPrefix<'b>
-	where
-		'a: 'b,
-	{
-		EntryFdOpenPrefix {
+	/// The bound over every entry whose values start with `fd`: the first
+	/// key such an entry may sit at, and, past its last byte that is not
+	/// `0xFF`, the first key after all of them.
+	fn open(&self, fd: &[Value]) -> Result<Key<'static>> {
+		self.spelling.encode(&EntryFdOpenPrefix {
 			ns: self.ns,
 			db: self.db,
 			tb: Cow::Borrowed(self.tb),
 			ix: self.ix,
 			fd: Cow::Borrowed(fd),
-		}
+		})
 	}
 
 	/// A range within the index's entries, which all store an
@@ -265,16 +337,11 @@ pub fn decode_record_id(bytes: &[u8]) -> Result<RecordId> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+	use crate::catalog::{DatabaseId, INDEX_FORMAT_VERSION, IndexId, NamespaceId};
 	use crate::val::{Array, Number, Object};
 
 	fn space(tb: &TableName) -> IndexKeyspace<'_> {
-		IndexKeyspace {
-			ns: NamespaceId(1),
-			db: DatabaseId(2),
-			tb,
-			ix: IndexId(3),
-		}
+		IndexKeyspace::new(NamespaceId(1), DatabaseId(2), tb, IndexId(3), INDEX_FORMAT_VERSION)
 	}
 
 	fn contains(range: &TypedRange<IndexEntryValue>, key: &Key<'_>) -> bool {
@@ -454,6 +521,186 @@ mod tests {
 			let r = ks.equality(unique, &one).unwrap();
 			assert!(all.start() <= r.start() && r.end() <= all.end());
 		}
+	}
+
+	fn at_version(tb: &TableName, format_version: u16) -> IndexKeyspace<'_> {
+		IndexKeyspace::new(NamespaceId(1), DatabaseId(2), tb, IndexId(3), format_version)
+	}
+
+	fn datetime(text: &str) -> Value {
+		Value::Datetime(text.parse().unwrap())
+	}
+
+	/// Whether `key` holds `text` as a storekey string.
+	fn holds_text(key: &Key<'_>, text: &str) -> bool {
+		let mut needle = text.as_bytes().to_vec();
+		needle.push(0);
+		key.as_slice().windows(needle.len()).any(|w| w == needle)
+	}
+
+	#[test]
+	fn the_stamp_selects_the_datetime_spelling() {
+		let tb = TableName::from("t");
+		let text = at_version(&tb, DATETIME_ORDER_FORMAT_VERSION - 1);
+		let chrono = at_version(&tb, DATETIME_ORDER_FORMAT_VERSION);
+		assert_eq!(text.spelling(), DatetimeSpelling::Text);
+		assert_eq!(chrono.spelling(), DatetimeSpelling::Chronological);
+		assert_eq!(at_version(&tb, 0).spelling(), DatetimeSpelling::Text);
+		assert_eq!(
+			at_version(&tb, INDEX_FORMAT_VERSION).spelling(),
+			DatetimeSpelling::Chronological
+		);
+
+		let id = RecordIdKey::from("r".to_owned());
+		// As the text spelling writes them: UTC, with the fraction in groups
+		// of three digits.
+		for spelled in ["2026-08-28T09:00:00Z", "2026-08-28T09:00:00.500Z"] {
+			let v = datetime(spelled);
+			let fd = slice::from_ref(&v);
+			let nested = [Value::Array(Array::from(vec![Value::from(1), v.clone()]))];
+			for unique in [false, true] {
+				let old = text.stored_key(unique, fd, &id).unwrap().key;
+				let new = chrono.stored_key(unique, fd, &id).unwrap().key;
+				assert!(holds_text(&old, spelled), "{spelled}: {old:?}");
+				assert!(!holds_text(&new, spelled), "{spelled}: {new:?}");
+				// Each spelling's entry lies in its own index's equality range
+				// and in no range of the other, so an index read, written,
+				// deleted and checked for uniqueness in one spelling agrees with
+				// itself.
+				assert!(contains(&text.equality(unique, &v).unwrap(), &old));
+				assert!(contains(&chrono.equality(unique, &v).unwrap(), &new));
+				assert!(!contains(&text.equality(unique, &v).unwrap(), &new));
+				assert!(!contains(&chrono.equality(unique, &v).unwrap(), &old));
+				let old = text.stored_key(unique, &nested, &id).unwrap().key;
+				let new = chrono.stored_key(unique, &nested, &id).unwrap().key;
+				assert!(holds_text(&old, spelled) && !holds_text(&new, spelled), "{spelled}");
+			}
+		}
+		// Every other value, and a record id holding a Datetime, is spelled
+		// alike under both stamps.
+		let dated = RecordIdKey::Array(Array::from(vec![datetime("2026-08-28T09:00:00Z")]));
+		for v in kinds() {
+			for unique in [false, true] {
+				let fd = slice::from_ref(&v);
+				assert_eq!(
+					text.stored_key(unique, fd, &dated).unwrap(),
+					chrono.stored_key(unique, fd, &dated).unwrap(),
+					"{v:?}"
+				);
+			}
+			let (a, b) = (
+				text.compound(slice::from_ref(&v), None).unwrap(),
+				chrono.compound(slice::from_ref(&v), None).unwrap(),
+			);
+			assert_eq!((a.start(), a.end()), (b.start(), b.end()), "{v:?}");
+		}
+		assert_eq!(text.all().unwrap().start(), chrono.all().unwrap().start());
+		assert_eq!(text.all().unwrap().end(), chrono.all().unwrap().end());
+	}
+
+	/// The stamp chooses the order a range over Datetimes reads: chronological
+	/// from the Datetime-order format, and the text's order below it.
+	#[test]
+	fn a_datetime_range_reads_in_the_order_of_the_stamp() {
+		let tb = TableName::from("t");
+		let id = RecordIdKey::from("r".to_owned());
+		let whole = datetime("2026-08-28T09:00:00Z");
+		let fraction = datetime("2026-08-28T09:00:00.5Z");
+		let later = datetime("2026-08-28T09:00:01Z");
+		for unique in [false, true] {
+			let chrono = at_version(&tb, DATETIME_ORDER_FORMAT_VERSION);
+			let key = |v: &Value| chrono.stored_key(unique, slice::from_ref(v), &id).unwrap().key;
+			let r = chrono.range(unique, Bound::Included(&whole), Bound::Excluded(&later)).unwrap();
+			assert!(contains(&r, &key(&whole)) && contains(&r, &key(&fraction)));
+			assert!(!contains(&r, &key(&later)));
+
+			// `...:00Z` sorts after `...:00.5Z` as text, so a range from the
+			// whole second misses the fraction within it.
+			let text = at_version(&tb, DATETIME_ORDER_FORMAT_VERSION - 1);
+			let key = |v: &Value| text.stored_key(unique, slice::from_ref(v), &id).unwrap().key;
+			let r = text.range(unique, Bound::Included(&whole), Bound::Excluded(&later)).unwrap();
+			assert!(contains(&r, &key(&whole)) && !contains(&r, &key(&fraction)));
+		}
+	}
+
+	/// The keys of index entries and unique slots, and the bounds over their
+	/// values, are built in this module alone, so every one of them is spelled
+	/// for its index's stamp. Each generated type, and each builder that makes
+	/// one from a level root, encodes under one format of its own accord, so a
+	/// key built anywhere else would be spelled for the current stamp whatever
+	/// the index's is.
+	#[test]
+	fn entry_and_unique_keys_are_built_only_here() {
+		let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+		// The schema declares the types and checks their layout, and the macro
+		// crate names them in its own tests of the schema language. The planner's
+		// `PhysFactReq` has a variant of the same name as a unique key type, a
+		// requirement on the physical plan that builds no key: its declaration
+		// is allowed here and its uses are skipped below.
+		let allowed = [
+			std::path::Path::new("idx/src/kernels/btree.rs"),
+			std::path::Path::new("datastore/src/key/schema.rs"),
+			std::path::Path::new("core/src/exec/ir/iface/egraph.rs"),
+		];
+		let skipped = std::path::Path::new("keyspace-macro");
+		const NAMES: [&str; 4] = ["EntryKey", "UniqueKey", "EntryFdPrefix", "EntryFdOpenPrefix"];
+		const BUILDERS: [&str; 2] = [".entry_fd_prefix(", ".entry_fd_open_prefix("];
+		let word = |line: &str, name: &str| {
+			line.match_indices(name).any(|(at, _)| {
+				let ident = |c: char| c.is_alphanumeric() || c == '_';
+				!line[..at].ends_with(ident) && !line[at + name.len()..].starts_with(ident)
+			})
+		};
+		let mut stack = vec![workspace.clone()];
+		let mut scanned = 0usize;
+		let mut found = Vec::new();
+		while let Some(dir) = stack.pop() {
+			for entry in std::fs::read_dir(&dir).unwrap() {
+				let path = entry.unwrap().path();
+				let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+				if path.is_dir() {
+					let macro_crate = path.strip_prefix(&workspace).is_ok_and(|r| r == skipped);
+					if name != "target" && !name.starts_with('.') && !macro_crate {
+						stack.push(path);
+					}
+					continue;
+				}
+				if path.extension().is_none_or(|e| e != "rs") {
+					continue;
+				}
+				let relative = path.strip_prefix(&workspace).unwrap();
+				if allowed.contains(&relative) {
+					continue;
+				}
+				scanned += 1;
+				let source = std::fs::read_to_string(&path).unwrap();
+				for (n, line) in source.lines().enumerate() {
+					if line.trim_start().starts_with("//") || line.contains("PhysFactReq::") {
+						continue;
+					}
+					let named = NAMES.iter().any(|name| word(line, name));
+					let built = BUILDERS.iter().any(|b| line.contains(b));
+					if named || built {
+						found.push(format!("{}:{}: {}", relative.display(), n + 1, line.trim()));
+					}
+				}
+				// A level root's `entry` and `unique` builders.
+				for (at, _) in source.match_indices("IdxRoot") {
+					let statement = source[at..].split(';').next().unwrap_or_default();
+					let statement: String =
+						statement.chars().filter(|c| !c.is_whitespace()).collect();
+					if statement.contains(".entry(") || statement.contains(".unique(") {
+						found.push(format!("{}: an `IdxRoot` builds an entry", relative.display()));
+					}
+				}
+			}
+		}
+		assert!(scanned > 100, "scanned only {scanned} files under {}", workspace.display());
+		assert!(
+			found.is_empty(),
+			"index entry keys built outside `IndexKeyspace`:\n{}",
+			found.join("\n")
+		);
 	}
 
 	#[test]

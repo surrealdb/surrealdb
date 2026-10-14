@@ -32,7 +32,7 @@ use rust_decimal::prelude::*;
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql, fmt_non_finite_f64, write_sql};
 
-use super::IndexFormat;
+use super::{IndexFormat, IndexIdFormat};
 use crate::expr::Error;
 use crate::expr::decimal::{DecimalLexEncoder, LexDecimal};
 use crate::val::{TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
@@ -1369,6 +1369,24 @@ impl<'de> BorrowDecode<'de, IndexFormat> for Number {
 	) -> std::result::Result<Self, storekey::DecodeError> {
 		let slice = r.read_cow()?;
 		Number::from_decimal_buf(slice.as_ref()).map_err(|_| storekey::DecodeError::InvalidFormat)
+	}
+}
+
+/// A number inside an index key's record id is spelled as an indexed number is.
+impl Encode<IndexIdFormat> for Number {
+	fn encode<W: std::io::Write>(
+		&self,
+		w: &mut storekey::Writer<W>,
+	) -> std::result::Result<(), storekey::EncodeError> {
+		Encode::<IndexFormat>::encode(self, w)
+	}
+}
+
+impl<'de> BorrowDecode<'de, IndexIdFormat> for Number {
+	fn borrow_decode(
+		r: &mut storekey::BorrowReader<'de>,
+	) -> std::result::Result<Self, storekey::DecodeError> {
+		BorrowDecode::<'de, IndexFormat>::borrow_decode(r)
 	}
 }
 

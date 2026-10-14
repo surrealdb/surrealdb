@@ -3281,6 +3281,7 @@ ec6dc84b35f98481 language-tests/tests/reproductions/7460_a_select_permission_map
 02298110dbc3b08f language-tests/tests/reproductions/7460_set_containment_reads_the_documents.surql
 30f6cbbec66ec4ff language-tests/tests/reproductions/7460_set_containment_reads_the_documents_plan.surql
 3ca0ca3b8fe739d1 language-tests/tests/reproductions/7460_versioned_containment_over_a_set_finds_every_record.surql
+30cd172b9b4e9ee9 language-tests/tests/reproductions/7493_datetime_index_subsecond_collation.surql
 233eca5df4942ddb language-tests/tests/reproductions/7495_compound_index_key_across_tables.surql
 33e3c8eb5b62566d language-tests/tests/reproductions/7495_compound_index_key_across_tables_plan.surql
 5e0f5d35601afd88 language-tests/tests/reproductions/7524_define_index_nullable_subfield.surql
@@ -3486,6 +3487,7 @@ b9c6f4e7253c14b9 language-tests/tests/reproductions/a_table_select_permission_re
 f640d3aaa84fa5ad language-tests/tests/reproductions/a_timeout_clause_is_read_before_the_work.surql
 6659eb90887aa8ba language-tests/tests/reproductions/a_union_field_is_checked_only_where_every_input_proves_it.surql
 bd6f790db942148a language-tests/tests/reproductions/a_union_with_int_refuses_a_fractional_decimal.surql
+25edf07db3251662 language-tests/tests/reproductions/a_unique_duplicate_recovery_query_lists_what_the_index_refuses.surql
 fec3bd6488d38a0e language-tests/tests/reproductions/a_value_source_is_not_an_object.surql
 a5623945dcc92d7d language-tests/tests/reproductions/a_versioned_btree_read_matches_its_noindex_twin.surql
 5bdffa28b04b3898 language-tests/tests/reproductions/a_versioned_count_reads_the_stamp.surql
@@ -4157,6 +4159,15 @@ e44009839182b2a6 language-tests/tests/upgrade/define/3.00.00_index_btree_numeric
 17e00c9a112dd5b5 language-tests/tests/upgrade/define/3.00.00_index_compound_fanout_rebuild.surql
 7ab732ab4843b438 language-tests/tests/upgrade/define/3.00.00_index_count.surql
 c6fddf9d32202870 language-tests/tests/upgrade/define/3.00.00_index_count_import.surql
+41f9e505f04bc426 language-tests/tests/upgrade/define/3.00.00_index_datetime_array.surql
+edbf8b20aab11ee9 language-tests/tests/upgrade/define/3.00.00_index_datetime_array_import.surql
+68449be8d1a1dd04 language-tests/tests/upgrade/define/3.00.00_index_datetime_collation.surql
+f161c864a6fe69d6 language-tests/tests/upgrade/define/3.00.00_index_datetime_collation_current.surql
+e4eeb3cf9340a048 language-tests/tests/upgrade/define/3.00.00_index_datetime_collation_import.surql
+f13cb0d60d9f0464 language-tests/tests/upgrade/define/3.00.00_index_datetime_compound.surql
+40a4135a303766fc language-tests/tests/upgrade/define/3.00.00_index_datetime_compound_import.surql
+c0a6eb77c53a894c language-tests/tests/upgrade/define/3.00.00_index_datetime_nested.surql
+b05650e83f6f1b7a language-tests/tests/upgrade/define/3.00.00_index_datetime_nested_import.surql
 50c582c459dd5406 language-tests/tests/upgrade/define/3.00.00_index_fulltext.surql
 8285e42e2efdc2a2 language-tests/tests/upgrade/define/3.00.00_index_fulltext_current.surql
 ca2b755f76362821 language-tests/tests/upgrade/define/3.00.00_index_fulltext_import.surql
@@ -4176,6 +4187,8 @@ c017a2b760e756e0 language-tests/tests/upgrade/define/3.00.00_index_numeric_extre
 9d74ba2d697b4a84 language-tests/tests/upgrade/define/3.00.00_index_standard.surql
 ca3fa1212b8d5189 language-tests/tests/upgrade/define/3.00.00_index_standard_import.surql
 eb366549b03ffdf7 language-tests/tests/upgrade/define/3.00.00_index_unique.surql
+a3707b577dff32f6 language-tests/tests/upgrade/define/3.00.00_index_unique_datetime.surql
+0cc5581f07838efc language-tests/tests/upgrade/define/3.00.00_index_unique_datetime_import.surql
 e59256a1802c5053 language-tests/tests/upgrade/define/3.00.00_index_unique_import.surql
 a8f1317050059b65 language-tests/tests/upgrade/define/3.00.00_index_unique_nullish_single.surql
 88a24ffd0c731d88 language-tests/tests/upgrade/define/3.00.00_index_unique_nullish_single_current.surql
@@ -4249,6 +4262,8 @@ f0b86c63d797fca1 language-tests/tests/upgrade/define/3.01.00_index_diskann_rebui
 36db459a7a95e0ea language-tests/tests/upgrade/define/3.01.00_index_hnsw_compound_id.surql
 dc30fbc9ed70e263 language-tests/tests/upgrade/define/3.01.00_index_hnsw_compound_id_import.surql
 ba07d46cc8277feb language-tests/tests/upgrade/define/3.01.00_index_hnsw_compound_id_rebuild.surql
+3932af8ed2b05e20 language-tests/tests/upgrade/define/3.02.04_index_record_id_datetime.surql
+1f07ef33b2082339 language-tests/tests/upgrade/define/3.02.04_index_record_id_datetime_import.surql
 e340f6a1748387c5 language-tests/tests/upgrade/define/3.03.00_function_eval.surql
 d8f22fc397e712e0 language-tests/tests/upgrade/define/3.03.00_function_eval_import.surql
 603b3eac010fcd69 language-tests/tests/upgrade/define/3.03.00_index_vector_prefilter.surql
@@ -4270,6 +4285,8 @@ e0f1192062bf353e language-tests/tests/upgrade/value/3.00.00_record_id_numeric_co
 dc91217394a8afbb language-tests/tests/upgrade/value/3.00.00_set_import.surql
 00ff048c4ef5ef5e language-tests/tests/upgrade/value/3.00.00_table.surql
 1125dc8eee9c653d language-tests/tests/upgrade/value/3.00.00_table_import.surql
+59867fb22d30bbf6 language-tests/tests/upgrade/value/3.02.04_record_id_datetime.surql
+aba665116c67e954 language-tests/tests/upgrade/value/3.02.04_record_id_datetime_import.surql
 dc28998526b8cf61 surrealdb/parser-next/tests/corpus/bugs/integer_token_not_properly_eaten.surql
 c35fab8af6586476 surrealdb/parser-next/tests/corpus/bugs/table_named_tb.surql
 3e31762a0e569b0d surrealdb/parser-next/tests/corpus/comments.surql

@@ -155,13 +155,7 @@ impl<'a> IndexOperation<'a> {
 	/// with). Numbers of every kind share key bytes, so `0`, `0f` and `0dec`
 	/// collide on a `UNIQUE` index.
 	fn stored_key(&self, unique: bool, v: &[Value]) -> Result<StoredKey> {
-		IndexKeyspace {
-			ns: self.ns,
-			db: self.db,
-			tb: &self.table_name,
-			ix: self.ix.index_id,
-		}
-		.stored_key(unique, v, &self.rid.key)
+		IndexKeyspace::of(self.ns, self.db, self.ix).stored_key(unique, v, &self.rid.key)
 	}
 
 	/// The value stored in this index's entries: the record ID, plus the

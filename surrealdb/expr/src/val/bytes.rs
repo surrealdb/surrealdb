@@ -5,12 +5,13 @@ use storekey::{BorrowDecode, Encode};
 use surrealdb_collections::bounded;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::val::IndexFormat;
+use crate::val::{IndexFormat, IndexIdFormat};
 
 #[revisioned(revision = 1, deserialize = false, skip = true, walk = true)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
+#[storekey(format = "IndexIdFormat")]
 #[repr(transparent)]
 pub struct Bytes(pub ::bytes::Bytes);
 

@@ -11,12 +11,15 @@ use ulid::Ulid;
 
 use crate::expr::{self};
 use crate::val::table_name_public::{IntoPublicTable, IntoTableName};
-use crate::val::{Array, IndexFormat, Number, Object, Range, Strand, TableName, Uuid, Value};
+use crate::val::{
+	Array, IndexFormat, IndexIdFormat, Number, Object, Range, Strand, TableName, Uuid, Value,
+};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
+#[storekey(format = "IndexIdFormat")]
 pub struct RecordIdKeyRange {
 	pub start: Bound<RecordIdKey>,
 	pub end: Bound<RecordIdKey>,
@@ -177,7 +180,7 @@ impl PartialEq<Range> for RecordIdKeyRange {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
-#[storekey(format = "IndexFormat")]
+#[storekey(format = "IndexIdFormat")]
 pub enum RecordIdKey {
 	Number(i64),
 	String(Strand),
@@ -185,6 +188,26 @@ pub enum RecordIdKey {
 	Array(Array),
 	Object(Object),
 	Range(Box<RecordIdKeyRange>),
+}
+
+/// A record id under [`IndexFormat`] is its [`IndexIdFormat`] encoding, so a
+/// `Datetime` nested in an array or object id is the same text in every index
+/// key, whichever spelling the index gives its indexed values.
+impl Encode<IndexFormat> for RecordIdKey {
+	fn encode<W: std::io::Write>(
+		&self,
+		w: &mut storekey::Writer<W>,
+	) -> std::result::Result<(), storekey::EncodeError> {
+		Encode::<IndexIdFormat>::encode(self, w)
+	}
+}
+
+impl<'de> BorrowDecode<'de, IndexFormat> for RecordIdKey {
+	fn borrow_decode(
+		r: &mut storekey::BorrowReader<'de>,
+	) -> std::result::Result<Self, storekey::DecodeError> {
+		BorrowDecode::<'de, IndexIdFormat>::borrow_decode(r)
+	}
 }
 
 /// A record id carried inside a key as an *identity*, encoded losslessly
@@ -590,6 +613,7 @@ impl ToSql for RecordIdKey {
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
+#[storekey(format = "IndexIdFormat")]
 pub struct RecordId {
 	pub table: TableName,
 	pub key: RecordIdKey,

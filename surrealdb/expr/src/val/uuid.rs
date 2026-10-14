@@ -9,7 +9,7 @@ use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::Datetime;
-use crate::val::IndexFormat;
+use crate::val::{IndexFormat, IndexIdFormat};
 
 #[revisioned(revision = 1)]
 #[derive(
@@ -18,6 +18,7 @@ use crate::val::IndexFormat;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
+#[storekey(format = "IndexIdFormat")]
 pub struct Uuid(pub uuid::Uuid);
 
 impl Uuid {

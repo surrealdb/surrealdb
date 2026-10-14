@@ -147,7 +147,7 @@ pub(crate) enum KeyField<'a> {
 /// as [`encode`] encodes one from an object holding the same fields.
 pub(crate) fn encode_fields(name: &str, fields: &[(&str, KeyField<'_>)]) -> Result<Vec<u8>> {
 	let route = route(name)?;
-	let indexed = indexed_format(route.format);
+	let indexed = indexed_format(route)?;
 	let mut out = Vec::with_capacity(64);
 	let find = |name: &str| {
 		fields
@@ -178,10 +178,24 @@ pub(crate) fn encode_fields(name: &str, fields: &[(&str, KeyField<'_>)]) -> Resu
 }
 
 /// Whether a route's fields are encoded under the index format, which orders
-/// the numbers of every kind as one and gives each value the byte form an
-/// index compares.
-fn indexed_format(format: &str) -> bool {
-	format.ends_with("IndexFormat")
+/// the numbers of every kind as one, orders a datetime by time, and gives each
+/// value the byte form an index compares, rather than under the default format.
+///
+/// The schema names the format exactly as the route declares it. A route
+/// pinned to any other format is refused: encoding its fields under one of
+/// these two would write bytes that are not that route's key.
+fn indexed_format(route: &KeyRoute) -> Result<bool> {
+	match route.format {
+		// A format-generic route encodes the same under every format.
+		"()" | "<generic>" => Ok(false),
+		"IndexFormat" => Ok(true),
+		other => {
+			bail!(
+				"key `{}` is encoded under `{other}`, a format the VM does not encode",
+				route.name
+			)
+		}
+	}
 }
 
 fn encode_borrowed(ty: &str, value: KeyField<'_>, indexed: bool, out: &mut Vec<u8>) -> Result<()> {
@@ -361,5 +375,43 @@ fn decode_field<'b>(ty: &str, bytes: &'b [u8]) -> Result<(Value, &'b [u8])> {
 			Ok((Value::String(s.into()), &bytes[i + 1..]))
 		}
 		ty => bail!("the VM does not decode a `{ty}` key field"),
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use surrealdb_kvs::key::{KeyRole, KeyRoute};
+
+	use super::indexed_format;
+
+	fn pinned(format: &'static str) -> KeyRoute {
+		KeyRoute {
+			name: "PinnedKey",
+			route: "/pinned",
+			role: KeyRole::Key,
+			value: None,
+			format,
+			steps: &[],
+		}
+	}
+
+	/// Only the index format itself selects it; a format whose name merely
+	/// ends the same way is refused rather than encoded as another one.
+	#[test]
+	fn a_route_format_is_matched_exactly() {
+		assert!(!indexed_format(&pinned("()")).unwrap());
+		assert!(!indexed_format(&pinned("<generic>")).unwrap());
+		assert!(indexed_format(&pinned("IndexFormat")).unwrap());
+		for other in ["IndexIdFormat", "crate::val::IndexFormat", "MyIndexFormat"] {
+			assert!(indexed_format(&pinned(other)).is_err(), "{other}");
+		}
+	}
+
+	/// Every route the schema declares names a format the VM encodes.
+	#[test]
+	fn every_schema_route_names_a_known_format() {
+		for route in surrealdb_datastore::key::schema::KEY_ROUTES {
+			indexed_format(route).unwrap();
+		}
 	}
 }

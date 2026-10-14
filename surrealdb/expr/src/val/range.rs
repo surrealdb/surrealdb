@@ -10,7 +10,7 @@ use super::value::CoerceErrorExt;
 use crate::expr;
 use crate::expr::kind::HasKind;
 use crate::val::value::{Coerce, CoerceError};
-use crate::val::{Array, IndexFormat, Number, Value};
+use crate::val::{Array, IndexFormat, IndexIdFormat, Number, Value};
 
 /// A range of surrealql values,
 ///
@@ -19,6 +19,7 @@ use crate::val::{Array, IndexFormat, Number, Value};
 #[derive(Debug, Eq, PartialEq, Clone, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
+#[storekey(format = "IndexIdFormat")]
 pub struct Range {
 	pub start: Bound<Value>,
 	pub end: Bound<Value>,

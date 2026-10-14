@@ -16,7 +16,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::expr::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::syn;
-use crate::val::{Datetime, IndexFormat, TryAdd, TrySub, Value};
+use crate::val::{Datetime, IndexFormat, IndexIdFormat, TryAdd, TrySub, Value};
 
 #[revisioned(revision = 1, deserialize = false, skip = true, walk = true)]
 #[derive(
@@ -24,6 +24,7 @@ use crate::val::{Datetime, IndexFormat, TryAdd, TrySub, Value};
 )]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
+#[storekey(format = "IndexIdFormat")]
 pub struct Duration(pub time::Duration);
 
 /// Reads exactly what the derived serializer writes (revision 1: seconds as a varint `u64`, then

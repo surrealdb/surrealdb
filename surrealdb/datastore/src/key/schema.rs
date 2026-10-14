@@ -22,7 +22,9 @@ use std::borrow::Cow;
 
 use surrealdb_catalog::{DatabaseId, IndexId, NamespaceId, Record, RecordContext};
 use surrealdb_expr::expr::dir::Dir;
-use surrealdb_expr::val::{IndexFormat, RecordId, RecordIdKey, RecordIdentity, Value};
+use surrealdb_expr::val::{
+	IndexFormat, IndexIdFormat, RecordId, RecordIdKey, RecordIdentity, Value,
+};
 use surrealdb_keyspace_macro::keyspace;
 // The generated code refers to the key error by this name.
 use surrealdb_kvs::key::Error as KeyError;
@@ -559,6 +561,16 @@ keyspace! {
 						/// a record id follows, `0x02` where the index is unique and
 						/// the values alone identify the row.
 						///
+						/// One index holds one spelling of its values, which its
+						/// format-version stamp selects: `IndexFormat` from version 4,
+						/// which orders a `Datetime` chronologically, and below it
+						/// `IndexIdFormat`, which spells a `Datetime` as RFC 3339 text
+						/// and every other value as `IndexFormat` does. Both spell the
+						/// id alike. `KVKey` encodes under `IndexFormat` alone, so these
+						/// keys and their bounds are built only by the index keyspace
+						/// (`idx::kernels::btree::IndexKeyspace`), which chooses the
+						/// spelling from the index definition.
+						///
 						/// The id keeps the erased spelling. Two records whose ids
 						/// differ only in a nested value's numeric variant therefore
 						/// share one entry, the later write replacing the earlier, and
@@ -569,10 +581,13 @@ keyspace! {
 						/// TODO(surrealdb/surrealdb#7437): spell the id as an identity
 						/// behind a format bump.
 						#[format(IndexFormat)]
+						#[also_format(IndexIdFormat)]
 						entry = ["*", @, fd: [Value..], @open, @, raw 0x03, id: Id]
 							=> crate::values::entry::IndexEntryValue (derive(-Eq));
 
+						/// A unique slot. Its values are spelled as an `entry`'s are.
 						#[format(IndexFormat)]
+						#[also_format(IndexIdFormat)]
 						unique = ["*", fd: [Value..], raw 0x02]
 							=> crate::values::entry::IndexEntryValue (derive(-Eq));
 

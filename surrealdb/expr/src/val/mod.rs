@@ -78,7 +78,24 @@ pub use self::value::{CastError, CoerceError};
 
 /// Marker type for a different serialization format for value which does not encode type
 /// information which is not required for indexing.
+///
+/// A `Datetime` under this format is its seconds and nanoseconds since the
+/// Unix epoch, whose bytes sort chronologically. A b-tree index spells its
+/// indexed values under this format when its format-version stamp is
+/// `DATETIME_ORDER_FORMAT_VERSION` or later, and under [`IndexIdFormat`]
+/// below it; each index holds the one spelling its stamp selects.
 pub enum IndexFormat {}
+
+/// Marker type for the index format with a `Datetime` spelled as RFC 3339
+/// text, the text a record key spells it with.
+///
+/// It is [`IndexFormat`] for every value but a `Datetime`. It spells:
+///
+/// - a record id inside any index key: a [`RecordIdKey`] encoded under [`IndexFormat`] encodes its
+///   contents under this format, so a `Datetime` in an id is the same text in every index key,
+///   whatever the index's stamp;
+/// - the indexed values of a b-tree index stamped below `DATETIME_ORDER_FORMAT_VERSION`.
+pub enum IndexIdFormat {}
 
 /// Marker type for value conversions from Value::None
 #[derive(Clone, Copy, Eq, PartialEq, PartialOrd)]
@@ -114,6 +131,7 @@ pub struct Null;
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
+#[storekey(format = "IndexIdFormat")]
 pub enum Value {
 	#[default]
 	#[revision(size = "inline")]

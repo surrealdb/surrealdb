@@ -5,7 +5,7 @@ use surrealdb_collections::{VecSet, VecSetIntoIter, bounded};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::expr::Expr;
-use crate::val::{IndexFormat, Value};
+use crate::val::{IndexFormat, IndexIdFormat, Value};
 
 /// Internal Set type that stores unique values
 ///
@@ -20,6 +20,7 @@ use crate::val::{IndexFormat, Value};
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
+#[storekey(format = "IndexIdFormat")]
 pub struct Set(#[revision(indexed_set)] pub VecSet<Value>);
 
 /// Reads exactly what the derived serializer writes.

@@ -6793,6 +6793,116 @@ async fn btree_index_pre_doc_id_format_stays_maintainable() -> Result<()> {
 	Ok(())
 }
 
+/// Every entry and unique slot of `table`'s index `index`, as raw keys, in key
+/// order.
+#[cfg(feature = "kv-mem")]
+async fn index_entry_keys(ds: &Datastore, table: &str, index: &str) -> Result<Vec<Vec<u8>>> {
+	let (ns, db, _, ix) = get_table_index(ds, table, index).await?;
+	let range = crate::idx::kernels::btree::IndexKeyspace::of(ns, db, &ix).all()?;
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let keys = catch!(tx, tx.keys(range, 10_000, 0, None).await);
+	tx.cancel().await?;
+	Ok(keys)
+}
+
+/// Whether `key` holds `text` as a storekey string: its bytes, then the
+/// terminator.
+#[cfg(feature = "kv-mem")]
+fn holds_text(key: &[u8], text: &str) -> bool {
+	let mut needle = text.as_bytes().to_vec();
+	needle.push(0);
+	key.windows(needle.len()).any(|w| w == needle)
+}
+
+/// An index stamped below the Datetime-order format spells a `Datetime` as
+/// RFC 3339 text in every key it builds — writes, guarded deletes, unique
+/// slots and seeks alike — so the entries the current binary writes to it sit
+/// beside the ones an older binary wrote, in one spelling: a duplicate is
+/// refused, an update or delete leaves no stale entry, and a seek finds the
+/// row. An index at the current stamp spells it as integers, and `REBUILD
+/// INDEX` moves an index onto that stamp.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn btree_index_keeps_the_datetime_spelling_of_its_stamp() -> Result<()> {
+	use crate::catalog::{DATETIME_ORDER_FORMAT_VERSION, INDEX_FORMAT_VERSION};
+
+	const WHOLE: &str = "2026-08-28T09:00:00Z";
+	// As the text spelling writes it: the fraction in groups of three digits.
+	const FRACTION: &str = "2026-08-28T09:00:00.500Z";
+	const LATER: &str = "2026-08-29T00:00:00Z";
+
+	for (unique, kind) in [(true, " UNIQUE"), (false, "")] {
+		let (ds, session) = new_index_test_ds().await?;
+		execute_all(&ds, &session, &format!("DEFINE INDEX ix ON t FIELDS at{kind};")).await?;
+		downgrade_index_format(&ds, "t", "ix", DATETIME_ORDER_FORMAT_VERSION - 1).await?;
+		execute_all(
+			&ds,
+			&session,
+			&format!("CREATE t:1 SET at = d'{WHOLE}'; CREATE t:2 SET at = d'{FRACTION}';"),
+		)
+		.await?;
+
+		// The keys are the text spelling, which is not the current one.
+		let keys = index_entry_keys(&ds, "t", "ix").await?;
+		assert_eq!(keys.len(), 2, "{kind}");
+		assert!(keys.iter().any(|k| holds_text(k, WHOLE)), "{kind}: {keys:?}");
+		assert!(keys.iter().any(|k| holds_text(k, FRACTION)), "{kind}: {keys:?}");
+		let (ns, db, tb, ix) = get_table_index(&ds, "t", "ix").await?;
+		let at = Value::Datetime(WHOLE.parse().expect("a datetime"));
+		let id = RecordIdKey::from(1);
+		let text = crate::idx::kernels::btree::IndexKeyspace::of(ns, db, &ix).stored_key(
+			unique,
+			std::slice::from_ref(&at),
+			&id,
+		)?;
+		let current = crate::idx::kernels::btree::IndexKeyspace::new(
+			ns,
+			db,
+			&tb,
+			ix.index_id,
+			INDEX_FORMAT_VERSION,
+		)
+		.stored_key(unique, std::slice::from_ref(&at), &id)?;
+		assert!(keys.contains(&text.key.to_vec()), "{kind}: the written key is the text one");
+		assert_ne!(text.key, current.key, "{kind}: the two spellings differ");
+
+		// A seek on the index finds the row.
+		let seek = format!("SELECT * FROM t WHERE at = d'{WHOLE}'");
+		assert_eq!(query_array_len(&ds, &session, &seek).await?, 1, "{kind}");
+
+		// A duplicate instant, in either spelling of it, is refused.
+		if unique {
+			for dup in [WHOLE, "2026-08-28T11:00:00+02:00"] {
+				let sql = format!("CREATE t:3 SET at = d'{dup}';");
+				let err = execute_all(&ds, &session, &sql).await.expect_err("a duplicate");
+				assert!(err.to_string().contains("already contains"), "{dup}: {err}");
+			}
+		}
+
+		// An update and a delete remove the entries they replace.
+		execute_all(&ds, &session, &format!("UPDATE t:1 SET at = d'{LATER}'; DELETE t:2;")).await?;
+		let keys = index_entry_keys(&ds, "t", "ix").await?;
+		assert_eq!(keys.len(), 1, "{kind}: {keys:?}");
+		assert!(holds_text(&keys[0], LATER), "{kind}: {keys:?}");
+		assert_eq!(query_array_len(&ds, &session, &seek).await?, 0, "{kind}");
+		// The freed instant takes a new row.
+		execute_all(&ds, &session, &format!("CREATE t:3 SET at = d'{WHOLE}';")).await?;
+		assert_eq!(query_array_len(&ds, &session, &seek).await?, 1, "{kind}");
+
+		// A rebuild restamps the index, and its keys move to integers.
+		execute_all(&ds, &session, "REBUILD INDEX ix ON t;").await?;
+		wait_for_index_ready(&ds, &session, "t", "ix").await?;
+		let (_, _, _, ix) = get_table_index(&ds, "t", "ix").await?;
+		assert_eq!(ix.format_version, INDEX_FORMAT_VERSION, "{kind}");
+		let keys = index_entry_keys(&ds, "t", "ix").await?;
+		assert_eq!(keys.len(), 2, "{kind}: {keys:?}");
+		assert!(!keys.iter().any(|k| holds_text(k, WHOLE) || holds_text(k, LATER)), "{kind}");
+		assert_eq!(query_array_len(&ds, &session, &seek).await?, 1, "{kind}");
+	}
+	Ok(())
+}
+
 /// A full-text index whose stored format predates the shared table-level
 /// doc-ID space (simulated by downgrading `format_version` to 0) serves
 /// MATCHES. Its maintenance stays on the private per-index doc-ID layout — the table allocates no

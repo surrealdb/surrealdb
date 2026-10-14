@@ -19,7 +19,9 @@
 //! - `*` a step down a level: namespace, database, table, then record
 //! - `$` per-node state, `&` access grants at the root and references on a table
 //! - `#` change feed, `%` live events, `~` graph edges
-//! - `+` an index, whose entries are the only keys that encode under `storekey`'s `IndexFormat`
+//! - `+` an index, whose entries encode under `storekey`'s `IndexFormat`, or under `IndexIdFormat`
+//!   for an index stamped below format version 4, which spells a `Datetime` as RFC 3339 text rather
+//!   than as seconds and nanoseconds
 //!
 //! The map below is generated from the same schema as the encoders and checked in
 //! as `schema::KEYSPACE_MAP`, so it cannot drift from the code: a test fails if

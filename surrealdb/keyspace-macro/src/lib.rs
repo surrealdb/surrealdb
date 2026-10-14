@@ -60,7 +60,11 @@
 //! # What it generates
 //!
 //! For every entry: the struct, `storekey::Encode`/`BorrowDecode`, `KVKey` with
-//! its value binding, `KVKeyDecode`, and a `new` constructor. For every level: a
+//! its value binding, `KVKeyDecode`, and a `new` constructor. An entry marked
+//! `#[also_format(T)]` also implements `storekey::Encode<T>`, writing the same
+//! steps with its fields encoded under `T`, and so do the bounds cut from it;
+//! its `KVKey`, bound and decoder traits stay on the format it is pinned to, so
+//! encoding under `T` is always an explicit `storekey` call. For every level: a
 //! root type naming the whole subtree, plus a builder method per descendant. For
 //! every truncation point: a bound type with `range`, `range_subtree`,
 //! `range_where` and `skip_extensions`, all built from `Key::next` and

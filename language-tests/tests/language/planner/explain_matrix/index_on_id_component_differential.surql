@@ -10,10 +10,10 @@ allow-eval-query = true
 
 [test]
 reason = """
-A b-tree index over a datetime component of the record id holds each entry as
-the datetime's key text, in which a fraction of a second sorts before the whole
-second it follows, so a range over it is widened to the whole seconds of its
-bounds and the predicate is judged again over every record it reaches. Rows of
+A b-tree index over a datetime component of the record id, defined on this
+release, holds each entry as a chronological key, so a range over it seeks its
+bounds as written and the predicate is judged again over every record it
+reaches. Rows of
 three feeds sit at whole seconds, a nanosecond past them, at every fraction
 from a millisecond to the last nanosecond of a second, and a nanosecond before
 the next one. Every bound among those instants, on either side and inclusive or
@@ -65,7 +65,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ differ: 0, indexed: 206, total: 406 }]"
+value = "[{ differ: 0, indexed: 210, total: 406 }]"
 
 [[test.results]]
 value = "[]"

@@ -364,6 +364,78 @@ fn r6_rejects_pinning_a_format_and_asking_for_a_generic_one() {
 	assert_reports(&diags, "mutually exclusive");
 }
 
+#[test]
+fn r6_prefixes_inherit_the_formats_an_entry_also_encodes_under() {
+	let p = prelude();
+	let model = resolved(quote! {
+		#p
+		root = ["/"] (format_generic) {
+			#[format(IndexFormat)]
+			#[also_format(TextFormat)]
+			entry = ["!ix", @, fd: [Value..], @open, @, raw 0x03, id: Str] => V;
+		}
+	});
+	let also = |name: &str| -> Vec<String> {
+		let def = model.types.iter().find(|t| t.name == name).expect(name);
+		def.also_formats.iter().map(|t| quote!(#t).to_string()).collect()
+	};
+	for name in ["EntryKey", "EntryPrefix", "EntryFdPrefix", "EntryFdOpenPrefix"] {
+		assert_eq!(also(name), ["TextFormat"], "{name}");
+	}
+}
+
+#[test]
+fn also_format_rejects_a_format_generic_item() {
+	let p = prelude();
+	let diags = diagnostics(quote! {
+		#p
+		root = ["/"] {
+			#[also_format(TextFormat)]
+			entry = ["!ix", fd: Value] => V (format_generic);
+		}
+	});
+	assert_reports(&diags, "already encodes under every format");
+}
+
+#[test]
+fn also_format_rejects_repeating_a_format() {
+	let p = prelude();
+	let diags = diagnostics(quote! {
+		#p
+		root = ["/"] (format_generic) {
+			#[format(IndexFormat)]
+			#[also_format(IndexFormat)]
+			entry = ["!ix", fd: Value] => V;
+		}
+	});
+	assert_reports(&diags, "repeats the format the item is pinned to");
+	let diags = diagnostics(quote! {
+		#p
+		root = ["/"] (format_generic) {
+			#[format(IndexFormat)]
+			#[also_format(TextFormat)]
+			#[also_format(TextFormat)]
+			entry = ["!ix", fd: Value] => V;
+		}
+	});
+	assert_reports(&diags, "is declared twice");
+}
+
+#[test]
+fn r13_covers_a_format_a_key_also_encodes_under() {
+	let p = prelude();
+	let diags = diagnostics(quote! {
+		#p
+		#[format(IndexFormat)]
+		root = ["/"] {
+			#[format(IndexFormat)]
+			#[also_format(TextFormat)]
+			entry = ["!ix", fd: Value] => V;
+		}
+	});
+	assert_reports(&diags, "encodes under format `TextFormat`");
+}
+
 // ---------------------------------------------------------------------------
 // R7: extensions must be declared
 // ---------------------------------------------------------------------------

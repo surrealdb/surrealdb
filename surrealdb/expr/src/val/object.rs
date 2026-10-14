@@ -11,7 +11,7 @@ use surrealdb_collections::{Entry as VecMapEntry, VecMap, VecMapIntoIter, bounde
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::expr::literal::ObjectEntry;
-use crate::val::{IndexFormat, RecordId, Strand, Value};
+use crate::val::{IndexFormat, IndexIdFormat, RecordId, Strand, Value};
 
 /// Invariant: Keys never contain NUL bytes.
 ///
@@ -26,6 +26,7 @@ use crate::val::{IndexFormat, RecordId, Strand, Value};
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
+#[storekey(format = "IndexIdFormat")]
 pub struct Object(#[revision(indexed_map)] pub VecMap<Strand, Value>);
 
 /// Reads exactly what the derived serializer writes.

@@ -25,7 +25,7 @@
 //! opt        := "also_range" | "format_generic" | "ignore_trailing"
 //!             | "derive" "(" ("+"|"-") ident ("," ..)* ")"
 //!             | "ctx" "=" expr
-//! attr       := "#[cfg(..)]" | "#[format(ty)]" | doc comment
+//! attr       := "#[cfg(..)]" | "#[format(ty)]" | "#[also_format(ty)]" | doc comment
 //!             | "#[waive(overlaps = ident, at = str, tracked = str)]"
 //! ```
 //!
@@ -180,6 +180,9 @@ pub struct ItemAttrs {
 	pub passthrough: PassthroughAttrs,
 	/// `#[format(T)]`: pin this item's `storekey` format parameter.
 	pub format: Option<Type>,
+	/// `#[also_format(T)]`, once per `T`: also encode this item, by the same
+	/// steps, under format `T`.
+	pub also_formats: Vec<Type>,
 	/// `#[waive(overlaps = other)]`: grandfather a known ambiguity.
 	pub waives: Vec<Waive>,
 }
@@ -496,6 +499,8 @@ fn parse_item_attrs(input: ParseStream) -> syn::Result<ItemAttrs> {
 	for attr in raw {
 		if attr.path().is_ident("format") {
 			out.format = Some(attr.parse_args()?);
+		} else if attr.path().is_ident("also_format") {
+			out.also_formats.push(attr.parse_args()?);
 		} else if attr.path().is_ident("waive") {
 			out.waives.push(parse_waive(&attr)?);
 		} else {
@@ -560,7 +565,7 @@ fn parse_passthrough(attrs: &[Attribute]) -> syn::Result<PassthroughAttrs> {
 		} else {
 			return Err(syn::Error::new_spanned(
 				attr,
-				"unsupported attribute; expected `cfg`, `doc`, `format` or `waive`",
+				"unsupported attribute; expected `cfg`, `doc`, `format`, `also_format` or `waive`",
 			));
 		}
 	}

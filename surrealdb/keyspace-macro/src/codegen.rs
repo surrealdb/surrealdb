@@ -351,10 +351,29 @@ fn concrete_format(def: &TypeDef) -> TokenStream {
 	}
 }
 
+/// `storekey::Encode` under the type's own format, and under each format it
+/// also encodes under. Every impl writes the same steps; only the format the
+/// fields are encoded under differs.
 fn encode_impl(def: &TypeDef) -> TokenStream {
+	let (generics, fmt) = format_generics(def);
+	let primary = encode_impl_as(def, &generics, &fmt);
+	let lt = def.lifetime.then(|| quote!(<'a>));
+	// The caller puts the type's `cfg` on the first impl only, so each further
+	// one carries its own.
+	let cfgs: Vec<_> = def.attrs.cfgs.iter().collect();
+	let also = def.also_formats.iter().map(|t| {
+		let also = encode_impl_as(def, &quote!(#lt), &quote!(#t));
+		quote!(#(#cfgs)* #also)
+	});
+	quote! {
+		#primary
+		#(#also)*
+	}
+}
+
+fn encode_impl_as(def: &TypeDef, generics: &TokenStream, fmt: &TokenStream) -> TokenStream {
 	let name = &def.name;
 	let lifetime = def.lifetime_toks();
-	let (generics, fmt) = format_generics(def);
 
 	let steps = def.emit.iter().map(|step| match step {
 		Emit::Lit(bytes) => {

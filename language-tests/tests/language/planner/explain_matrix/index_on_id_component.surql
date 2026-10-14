@@ -12,19 +12,15 @@ reason = """
 	predicate on that component as for a stored field, and every case returns
 	what a scan of the table returns.
 
-	The index entry of a datetime orders by its whole second only, so a range
-	over a datetime component is widened to the whole seconds its bounds lie in
-	and the predicate is judged again over the records the scan lists: the plan
-	keeps its Filter and its scan reads the widened bound (`>` the whole second
-	`00:00:01Z` seeks from the instant before it, a bound inside a second seeks
-	from the instant before that second, `<=` a whole second seeks to it). The
-	rows of the imported table cluster around whole seconds, so each of the
-	bounds sits next to rows that a bound too narrow would lose. An equality is
-	exact and is not widened. An ordering by a datetime component is not
-	delivered by the index, so its Sort stays, and a count over a widened range
-	reads the records instead of the index entries. An int component is an
-	ordinary exact column: its range is not widened and its count is read from
-	the index. The record id an index entry ends with is keyed as the record
+	The index entry of a datetime in an index defined on this release orders
+	chronologically, so a range over a datetime component seeks the bound as
+	written, and the plan keeps its Filter: the predicate is judged again over
+	the records the scan lists. The rows of the imported table cluster around
+	whole seconds, so each of the bounds sits next to rows that a bound too
+	narrow or too wide would lose. An equality is exact. An ordering by a
+	datetime component is delivered by the index, which holds no Sort. A count
+	over a range is read from the index entries, as are an equality's and an
+	int component's. The record id an index entry ends with is keyed as the record
 	is, so where the id holds a datetime no index scan, and no union of index
 	scans, delivers `ORDER BY id`, and a union over a composite index delivers
 	no order by a datetime column after its prefix. Bounds that cross inside
@@ -41,9 +37,9 @@ value = "NONE"
 [[test.results]]
 value = "NONE"
 
-# A lower bound at a whole second seeks from the instant before it.
+# A lower bound at a whole second is that bound, exclusive.
 [[test.results]]
-match = '''string::contains($result, "IndexScan") AND string::contains($result, "index: by_at") AND string::contains($result, "access: >=d'2024-01-01T00:00:00.999999999Z'") AND string::contains($result, "Filter [") AND !string::contains($result, "TableScan")'''
+match = '''string::contains($result, "IndexScan") AND string::contains($result, "index: by_at") AND string::contains($result, "access: >d'2024-01-01T00:00:01Z'") AND string::contains($result, "Filter [") AND !string::contains($result, "TableScan")'''
 error = false
 
 [[test.results]]
@@ -52,7 +48,7 @@ value = "[4, 7, 10]"
 [[test.results]]
 value = "[6, 9, 4, 7, 10]"
 
-# An upper bound at a whole second is the whole second; the Filter stays.
+# An upper bound at a whole second is that bound; the Filter stays.
 [[test.results]]
 match = '''string::contains($result, "IndexScan") AND string::contains($result, "index: by_at") AND string::contains($result, "access: <=d'2024-01-01T00:00:01Z'") AND string::contains($result, "Filter [") AND !string::contains($result, "TableScan")'''
 error = false
@@ -63,9 +59,9 @@ value = "[0, 3, 2, 8, 1, 5, 6, 9]"
 [[test.results]]
 value = "[0, 3, 2, 8, 1, 5]"
 
-# Both sides, each inside a second.
+# Both sides, each inside a second, each exact.
 [[test.results]]
-match = '''string::contains($result, "IndexScan") AND string::contains($result, "index: by_at") AND string::contains($result, "access: >=d'2023-12-31T23:59:59.999999999Z' <=d'2024-01-01T00:00:01Z'") AND string::contains($result, "Filter [") AND !string::contains($result, "TableScan")'''
+match = '''string::contains($result, "IndexScan") AND string::contains($result, "index: by_at") AND string::contains($result, "access: >d'2024-01-01T00:00:00.500Z' <=d'2024-01-01T00:00:01.250Z'") AND string::contains($result, "Filter [") AND !string::contains($result, "TableScan")'''
 error = false
 
 [[test.results]]
@@ -92,7 +88,7 @@ value = "NONE"
 
 # The compound index, its leading component pinned and the datetime ranged.
 [[test.results]]
-match = '''string::contains($result, "IndexScan") AND string::contains($result, "index: by_feed_at") AND string::contains($result, "access: ['f'] MoreThanEqual d'2024-01-01T00:00:00.999999999Z'") AND string::contains($result, "Filter [") AND !string::contains($result, "TableScan")'''
+match = '''string::contains($result, "IndexScan") AND string::contains($result, "index: by_feed_at") AND string::contains($result, "access: ['f'] MoreThan d'2024-01-01T00:00:01Z'") AND string::contains($result, "Filter [") AND !string::contains($result, "TableScan")'''
 error = false
 
 [[test.results]]
@@ -114,7 +110,7 @@ value = "[0, 3, 2, 1, 5, 6]"
 [[test.results]]
 value = "NONE"
 
-# An ordering by the datetime keeps its Sort, which a LIMIT bounds.
+# An ordering by the datetime is delivered by the index, which a LIMIT bounds.
 [[test.results]]
 value = "[0, 3]"
 
@@ -122,19 +118,18 @@ value = "[0, 3]"
 value = "[10, 7, 4]"
 
 [[test.results]]
-match = '''string::contains($result, "Sort") AND !string::contains($result, "IndexScan")'''
+match = '''string::contains($result, "IndexScan") AND string::contains($result, "index: by_at") AND !string::contains($result, "Sort")'''
 error = false
 
 [[test.results]]
 value = "[6, 9, 4]"
 
-# Counts: a widened range reads the records, an equality and an int range
-# read the index.
+# Counts: a range, an equality and an int range are read from the index.
 [[test.results]]
 value = "[{ count: 3 }]"
 
 [[test.results]]
-match = '''string::contains($result, "IndexScan") AND !string::contains($result, "IndexCountScan")'''
+match = '''string::contains($result, "IndexCountScan")'''
 error = false
 
 [[test.results]]

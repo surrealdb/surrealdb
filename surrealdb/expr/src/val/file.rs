@@ -3,13 +3,14 @@ use storekey::{BorrowDecode, Encode};
 use surrealdb_collections::bounded;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::val::IndexFormat;
+use crate::val::{IndexFormat, IndexIdFormat};
 
 #[revisioned(revision = 1, deserialize = false, skip = true, walk = true)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Encode, BorrowDecode)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
+#[storekey(format = "IndexIdFormat")]
 pub struct File {
 	pub bucket: String,
 	pub key: String,

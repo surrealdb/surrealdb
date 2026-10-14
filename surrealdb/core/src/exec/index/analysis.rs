@@ -120,7 +120,12 @@ impl<'a> IndexAnalyzer<'a> {
 		let Some(key) = self.key.as_deref() else {
 			return index_ref;
 		};
-		let index_ref = match super::derived_columns::coarse_columns(key, &self.indexes[idx].cols) {
+		let definition = &self.indexes[idx];
+		let index_ref = match super::derived_columns::coarse_columns(
+			key,
+			&definition.cols,
+			definition.format_version,
+		) {
 			Some(coarse) => index_ref.with_coarse_columns(coarse),
 			None => index_ref,
 		};

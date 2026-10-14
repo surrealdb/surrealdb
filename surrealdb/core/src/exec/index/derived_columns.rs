@@ -16,9 +16,10 @@
 //!
 //! # Datetime order
 //!
-//! A datetime is keyed as its RFC 3339 text, in which a fraction of a second
-//! sorts before the whole second it follows, so only the whole second of an
-//! entry orders chronologically ([`Datetime::key_second_prefix`]). A range over
+//! An index stamped below [`DATETIME_ORDER_FORMAT_VERSION`] keys a datetime as
+//! its RFC 3339 text, in which a fraction of a second sorts before the whole
+//! second it follows, so only the whole second of an entry orders
+//! chronologically ([`Datetime::key_second_prefix`]). A range over
 //! a datetime component is therefore widened to the whole seconds its bounds lie
 //! in ([`widen_access`]); the scan then lists records its predicate rejects, so
 //! it answers no conjunct ([`range_is_widened`]) and the predicate is judged
@@ -29,14 +30,18 @@
 //! column are in no `id` order either ([`id_orders_coarsely`]), whichever
 //! column the index holds.
 //!
-//! # The switch
+//! An index stamped at [`DATETIME_ORDER_FORMAT_VERSION`] or later keys a
+//! datetime as a chronological integer, so its entries order exactly and none
+//! of the above applies to it.
 //!
-//! [`derived_datetime_index_needs_widening`] is the only switch. While it
-//! returns `true`, [`coarse_column`] marks the datetime components of an index,
-//! and every behaviour above follows from that mark. It returns `false` only
-//! when datetime index entries order chronologically; then no column is marked,
-//! and `widen_access`, `range_is_widened` and `IndexRef::orders_coarsely` answer
-//! as they do for a column that is not one. No other module reads the switch.
+//! # Which indexes widen
+//!
+//! [`derived_datetime_index_needs_widening`] is the one switch, answered from an
+//! index's format-version stamp. While it is `true`, [`coarse_column`] marks the
+//! datetime components of that index, and every behaviour above follows from the
+//! mark. For an index it answers `false` for, no column is marked, and
+//! `widen_access`, `range_is_widened` and `IndexRef::orders_coarsely` answer as
+//! they do for a column that is not one. No other module reads the switch.
 
 use std::borrow::Cow;
 use std::ops::Bound;
@@ -44,37 +49,44 @@ use std::ops::Bound;
 use chrono::TimeDelta;
 
 use super::access_path::{BTreeAccess, BoundOperand, ColumnFlags, IndexRef};
-use crate::catalog::{ComponentOrder, KeyOrigin, KeyStructure};
+use crate::catalog::{ComponentOrder, DATETIME_ORDER_FORMAT_VERSION, KeyOrigin, KeyStructure};
 use crate::exec::logical::reads::KeyColumn;
 use crate::expr::logical::LogicalExpr;
 use crate::expr::{BinaryOperator, Expr, Idiom};
 use crate::val::{Datetime, Value};
 
-/// Whether a b-tree index over a datetime component of the record id must
-/// widen the bounds of a range over it.
+/// Whether a b-tree index stamped `format_version`, over a datetime component
+/// of the record id, must widen the bounds of a range over it.
 ///
-/// `true`: the index entry for a datetime is its RFC 3339 key text, whose order
-/// is chronological only down to the whole second. Every widening, refusal of an
-/// exact answer and withheld ordering over such a column is decided from the
-/// mark that [`coarse_column`] gives.
-pub(crate) const fn derived_datetime_index_needs_widening() -> bool {
-	true
+/// `true` while the index entry for a datetime is its RFC 3339 key text, whose
+/// order is chronological only down to the whole second: an index stamped below
+/// [`DATETIME_ORDER_FORMAT_VERSION`]. This is the one place that says so; every
+/// widening, every refusal of an exact answer and every withheld ordering over
+/// such a column starts from the mark it gives ([`coarse_column`]).
+pub(crate) const fn derived_datetime_index_needs_widening(format_version: u16) -> bool {
+	format_version < DATETIME_ORDER_FORMAT_VERSION
 }
 
-/// Whether `col` addresses a datetime component of `key`, whose index entries
-/// order only by the whole second.
-pub(crate) fn coarse_column(key: &KeyStructure, col: &Idiom) -> bool {
-	derived_datetime_index_needs_widening()
+/// Whether `col` addresses a datetime component of `key`, whose entries in an
+/// index stamped `format_version` order only by the whole second.
+pub(crate) fn coarse_column(key: &KeyStructure, col: &Idiom, format_version: u16) -> bool {
+	derived_datetime_index_needs_widening(format_version)
 		&& key.origin == KeyOrigin::IdField
 		&& key
 			.component_of(col)
 			.is_some_and(|position| key.order(position) == ComponentOrder::CoarseSecond)
 }
 
-/// For each of `cols`, whether it addresses a datetime component of `key`
-/// ([`coarse_column`]); `None` when none does.
-pub(crate) fn coarse_columns(key: &KeyStructure, cols: &[Idiom]) -> Option<ColumnFlags> {
-	let flags: ColumnFlags = cols.iter().map(|col| coarse_column(key, col)).collect();
+/// For each of `cols`, whether it addresses a datetime component of `key` in
+/// an index stamped `format_version` ([`coarse_column`]); `None` when none
+/// does.
+pub(crate) fn coarse_columns(
+	key: &KeyStructure,
+	cols: &[Idiom],
+	format_version: u16,
+) -> Option<ColumnFlags> {
+	let flags: ColumnFlags =
+		cols.iter().map(|col| coarse_column(key, col, format_version)).collect();
 	flags.contains(&true).then_some(flags)
 }
 
@@ -85,7 +97,7 @@ pub(crate) fn coarse_columns(key: &KeyStructure, cols: &[Idiom]) -> Option<Colum
 /// on every column of the index then have no `id` order between them.
 ///
 /// This holds whatever [`derived_datetime_index_needs_widening`] answers: the
-/// id an entry ends with is encoded as the record key is.
+/// id an entry ends with is encoded as the record key is, under every stamp.
 pub(crate) fn id_orders_coarsely(key: &KeyStructure) -> bool {
 	key.origin == KeyOrigin::IdField && !key.all_exactly_ordered()
 }
@@ -328,7 +340,7 @@ mod tests {
 	/// An index over `cols`, as the analyzer references it under the key.
 	fn index(cols: &[&str]) -> IndexRef {
 		let cols: Vec<Idiom> = cols.iter().map(|col| idiom(col)).collect();
-		let flags = coarse_columns(&key(), &cols);
+		let flags = coarse_columns(&key(), &cols, 1);
 		let defs = vec![IndexDefinition {
 			index_id: IndexId(1),
 			name: Strand::from("i"),
@@ -373,24 +385,30 @@ mod tests {
 
 	#[test]
 	fn the_switch_is_on_while_datetime_entries_order_by_their_text() {
-		assert!(derived_datetime_index_needs_widening());
+		assert!(derived_datetime_index_needs_widening(DATETIME_ORDER_FORMAT_VERSION - 1));
+		assert!(!derived_datetime_index_needs_widening(DATETIME_ORDER_FORMAT_VERSION));
 	}
 
 	#[test]
 	fn only_a_datetime_component_orders_by_the_second() {
 		let key = key();
-		assert!(coarse_column(&key, &idiom("time")));
-		assert!(coarse_column(&key, &idiom("id[1]")));
-		assert!(!coarse_column(&key, &idiom("city")));
-		assert!(!coarse_column(&key, &idiom("seq")));
-		assert!(!coarse_column(&key, &idiom("other")));
+		let old = DATETIME_ORDER_FORMAT_VERSION - 1;
+		assert!(coarse_column(&key, &idiom("time"), old));
+		assert!(coarse_column(&key, &idiom("id[1]"), old));
+		assert!(!coarse_column(&key, &idiom("city"), old));
+		assert!(!coarse_column(&key, &idiom("seq"), old));
+		assert!(!coarse_column(&key, &idiom("other"), old));
 		// A path beneath a component is no component.
-		assert!(!coarse_column(&key, &idiom("time.x")));
+		assert!(!coarse_column(&key, &idiom("time.x"), old));
 		assert_eq!(
-			coarse_columns(&key, &[idiom("city"), idiom("time"), idiom("seq")]).as_deref(),
+			coarse_columns(&key, &[idiom("city"), idiom("time"), idiom("seq")], old).as_deref(),
 			Some(&[false, true, false][..])
 		);
-		assert!(coarse_columns(&key, &[idiom("city"), idiom("seq")]).is_none());
+		assert!(coarse_columns(&key, &[idiom("city"), idiom("seq")], old).is_none());
+		// An index stamped at the datetime order version orders exactly.
+		let current = DATETIME_ORDER_FORMAT_VERSION;
+		assert!(!coarse_column(&key, &idiom("time"), current));
+		assert!(coarse_columns(&key, &[idiom("city"), idiom("time")], current).is_none());
 	}
 
 	#[test]

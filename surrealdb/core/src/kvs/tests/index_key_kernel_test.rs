@@ -231,12 +231,13 @@ async fn datastore() -> (Arc<Datastore>, Session) {
 /// A keyspace for comparing values' key bytes outside any datastore: the
 /// bytes after the keyspace's prefix do not depend on the prefix.
 fn keyspace(tb: &TableName) -> IndexKeyspace<'_> {
-	IndexKeyspace {
-		ns: crate::catalog::NamespaceId(1),
-		db: crate::catalog::DatabaseId(2),
+	IndexKeyspace::new(
+		crate::catalog::NamespaceId(1),
+		crate::catalog::DatabaseId(2),
 		tb,
-		ix: crate::catalog::IndexId(3),
-	}
+		crate::catalog::IndexId(3),
+		crate::catalog::INDEX_FORMAT_VERSION,
+	)
 }
 
 fn record(tb: &str, id: &RecordIdKey) -> Value {

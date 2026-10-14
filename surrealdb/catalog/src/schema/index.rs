@@ -74,10 +74,10 @@ impl From<u32> for IndexId {
 }
 
 /// Current on-disk format version stamped on newly defined or rebuilt indexes.
-/// Bump when any index kind's persisted layout changes. Existing indexes keep
-/// their original version and are read through their legacy doc-ID layout until
-/// explicitly rebuilt.
-pub const INDEX_FORMAT_VERSION: u16 = 3;
+/// Bump when any index kind's persisted layout changes. An existing index keeps
+/// the version it was stamped with, and is read and written in that version's
+/// layout until `REBUILD INDEX` restamps it.
+pub const INDEX_FORMAT_VERSION: u16 = 4;
 
 /// Format version at which full-text, HNSW and DiskAnn indexes migrated onto
 /// the shared table-level doc-ID space.
@@ -89,6 +89,15 @@ pub const DOC_IDS_FORMAT_VERSION: u16 = 1;
 /// this version only gates eligibility for doc-ID-based plans such as roaring
 /// bitmap candidate fusion.
 pub const BTREE_ENTRY_DOC_IDS_FORMAT_VERSION: u16 = 2;
+
+/// Format version from which a b-tree (`Idx`/`Uniq`) index spells a `Datetime`
+/// among its indexed values as its seconds and nanoseconds since the Unix epoch,
+/// whose key bytes sort chronologically. An index stamped below it spells one as
+/// RFC 3339 text, which sorts by its characters: `...:00Z` after `...:00.5Z`,
+/// and signed years apart from four-digit ones. Every key of one index — the
+/// entries and unique slots it writes and deletes, and the bounds it seeks — is
+/// spelled for its stamp, so each index is consistent with itself either way.
+pub const DATETIME_ORDER_FORMAT_VERSION: u16 = 4;
 
 /// Format version at which HNSW and DiskANN indexes keep a doc-ID → elements
 /// mapping (`!hk` / `!dk`) alongside their vector → elements + doc-IDs mapping,

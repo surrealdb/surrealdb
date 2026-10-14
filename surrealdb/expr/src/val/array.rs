@@ -8,7 +8,7 @@ use surrealdb_collections::bounded;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::expr::{Error, Expr};
-use crate::val::{IndexFormat, Set, Value};
+use crate::val::{IndexFormat, IndexIdFormat, Set, Value};
 
 /// - **Rev 1** — `u16 revision || Vec<Value>` (length-prefixed). Byte-identical to the legacy
 ///   on-disk encoding.
@@ -21,6 +21,7 @@ use crate::val::{IndexFormat, Set, Value};
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
+#[storekey(format = "IndexIdFormat")]
 pub struct Array(#[revision(indexed_seq)] pub Vec<Value>);
 
 /// Set on the leading byte of an indexed sequence body when its offset table is present.

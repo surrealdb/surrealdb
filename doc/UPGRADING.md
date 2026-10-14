@@ -286,7 +286,7 @@ transaction bound for the first time holds nothing again. A `LET` inside a
 transaction that commits keeps its value. A client that read a parameter bound
 inside a cancelled transaction must bind it again outside the transaction.
 
-## v3.4.0 — export/import contract changes, vector indexes that lost records sharing a vector, a doc-ID → elements mapping on vector indexes, JACCARD/PEARSON as distances, named record-id components, and pre-filtered KNN choosing its strategy by cost
+## v3.4.0 — export/import contract changes, vector indexes that lost records sharing a vector, a doc-ID → elements mapping on vector indexes, JACCARD/PEARSON as distances, named record-id components, pre-filtered KNN choosing its strategy by cost, and chronological Datetime order in new and rebuilt indexes
 
 **Impact**:
 
@@ -340,6 +340,13 @@ inside a cancelled transaction must bind it again outside the transaction.
   records, and a KNN query checks a range condition during the search. Rows are
   unchanged. `REBUILD INDEX`, once every node runs this release, restores the
   index plans for a field that never held an array. See below.
+- An index defined or rebuilt on this release orders `Datetime` values
+  chronologically. An index an earlier release wrote keeps the order it had
+  there and needs nothing; `REBUILD INDEX` is optional and gives it
+  chronological order. Finish upgrading every node before running
+  `DEFINE INDEX` or `REBUILD INDEX` on any index that may hold or later receive
+  a `Datetime`, an empty or schemaless table's included: a node on an earlier
+  release writes the old spelling into the new index.
 - A table whose `id` field names the components of its array ids, such as
   `DEFINE FIELD id ON reading TYPE [city: string, time: datetime]`, cannot be
   read by an earlier release. Defining one while any node still runs an earlier
@@ -649,6 +656,77 @@ not declared as one is not found through the index under that spelling.
 **What to do**: where every stored value of the field is an array, write the
 condition with the flatten — `field.* CONTAINS v`, `field[*] CONTAINS v`,
 `field.* CONTAINSANY [..]` — to keep the index seek.
+
+### Datetime order in an index, and the optional rebuild
+
+Earlier releases spell a `Datetime` in an index entry the way it is displayed:
+RFC 3339 text with only as many fractional digits as the value needs
+(`2026-08-28T09:00:00Z`, `2026-08-28T09:00:00.152Z`). Index entries are compared
+byte by byte, and `.` sorts before `Z`, so a whole second sorts after the
+fractions within it, and an index returns rows out of order or leaves rows out
+of a range — `WHERE ts >= d'2026-08-28T09:00:00Z' ORDER BY ts` leaves out every
+row with a fraction in that first second. The same text sorts years before 0000
+backwards (`-0100` before `-0200`) and years after 9999 (`+10000`) before every
+other year.
+
+An index defined or rebuilt on this release is stamped at index format version
+4, and spells a `Datetime` as 12 bytes: its seconds since the Unix epoch and its
+nanoseconds, as fixed-width integers whose byte order is numeric order. Its
+order is chronological for every year a `Datetime` can hold, and one instant
+written at any precision or UTC offset is one entry.
+
+An index an earlier release wrote is stamped below version 4 and keeps the text
+spelling. Every key this release builds for it — equality seeks, range bounds,
+writes, deletes and `UNIQUE` checks — uses that spelling, so the index answers
+as it did on the release that wrote it, including the ordering above, and a
+`UNIQUE` index refuses a duplicate of a value written before the upgrade. One
+difference comes from index plans, not from this change: such an index recorded
+nothing about the value shapes it stores, so a range open at its upper end
+(`WHERE ts >= $since`) is read from the table and returns every row it should,
+where the index's text order would have left some out.
+
+Record ids are unaffected. A record id holding a `Datetime`
+(`reading:['London', d'2026-08-28T09:00:00Z']`) keeps the text spelling, both in
+the record's own key and where an index entry names the record, whatever the
+index's stamp. Ranges over those ids keep the text ordering, in which a whole
+second sorts after its fractions.
+
+**What to do**: nothing is required. To give an existing index chronological
+order, run `REBUILD INDEX <name> ON <table>` once every node runs this release.
+It matters only for an index whose indexed values hold `Datetime`s, including
+compound and `UNIQUE` indexes and values nested in arrays or objects. While an
+index rebuilds, queries do not use it and read the table instead.
+
+Finish upgrading every node before running `DEFINE INDEX` or `REBUILD INDEX` on
+any B-tree index that may hold or later receive a `Datetime`, which includes an
+index on an empty or schemaless table and one over a field with no declared
+type: the stamp is written when the index is defined, and a node on an earlier
+release can add a `Datetime` to it afterwards. Alternatively, stop the earlier
+nodes' writes to the table until every node is upgraded. A node still on an
+earlier release spells a `Datetime` as text whatever the index's stamp, so while
+it serves writes to an index stamped at version 4, the entries it writes are
+missed by seeks and ranges, its updates and deletes leave the index's own
+entries behind, and a `UNIQUE` index can accept a duplicate. Running
+`REBUILD INDEX` again once no earlier release is serving rewrites the index from
+the records. If the rebuild of a `UNIQUE` index then refuses a duplicate, find
+the duplicated values with a table scan, for an index over the field `u` of
+table `t`. `SPLIT u` gives an array-valued `u` one row per element, as the index
+keys it, and leaves any other value as it is. An empty array is one row the
+index does not key, so the query leaves those out before splitting:
+
+```surql
+SELECT * FROM (
+    SELECT u, count() AS n FROM (
+        SELECT u FROM t WITH NOINDEX
+        WHERE !(type::is_array(u) AND array::len(u) = 0)
+        SPLIT u
+    ) GROUP BY u
+) WHERE n > 1 AND u != NONE AND u != NULL;
+```
+
+A `UNIQUE` index keeps `NONE`, `NULL` and an empty array (which it keys as
+`NONE`) as non-unique entries, so those are left out. Then update or delete
+records until each remaining value is held once, and rebuild again.
 
 ### A named record id cannot be read by an earlier release
 

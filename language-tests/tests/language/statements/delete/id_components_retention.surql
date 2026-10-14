@@ -11,8 +11,8 @@ reason = """
 	read through the index into a parameter, and deleting them removes the rows
 	and every index entry they held, so nothing leaks into a later read, count
 	or UNIQUE check. The bound lies inside a second shared with a row that must
-	survive (a datetime index orders by the whole second, so its scan lists the
-	row and the predicate refuses it), and a DELETE with the WHERE itself
+	survive (the index seeks the bound exactly, and the predicate stays above
+	the scan as a residual), and a DELETE with the WHERE itself
 	removes the same rows of a range that ends inside a second. `ret` is keyed
 	by a feed, a datetime and an int: eight rows, `n` 0 to 7, one every 400ms
 	from 2024-01-01T00:00:00Z, the feed `f` for an even `n` and `g` for an odd
@@ -48,7 +48,7 @@ value = "NONE"
 value = "4"
 
 [[test.results]]
-match = '''string::contains($result, "IndexScan") AND string::contains($result, "index: by_at") AND string::contains($result, "access: <=d'2024-01-01T00:00:01Z'") AND string::contains($result, "Filter [") AND !string::contains($result, "TableScan")'''
+match = '''string::contains($result, "IndexScan") AND string::contains($result, "index: by_at") AND string::contains($result, "access: <d'2024-01-01T00:00:01.600Z'") AND string::contains($result, "Filter [") AND !string::contains($result, "TableScan")'''
 error = false
 
 [[test.results]]
