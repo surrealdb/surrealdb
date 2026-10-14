@@ -164,17 +164,19 @@ async fn unreachable_after_raise() {
 	assert_eq!(reasons(&ir), [EliminationReason::Unreachable; 2]);
 }
 
-/// A region whose `RETURN` lands outside it is not dead, though every op in it is pure.
+/// A region whose `RETURN` lands outside it is not dead, though every op in it is pure: a
+/// statement `IF` passes a `RETURN` outward, where a block would catch it.
 #[tokio::test]
 async fn control_escaping_region_is_kept() {
 	let mut ir = empty_ir();
 	let mut facts = FactCache::new();
 	let block = top_block(&ir);
 	let mut rw = Rewriter::new(&mut ir, &mut facts);
+	let (_, condition) = create(&mut rw, InsertPoint::End(block), literal(1), &[], 1);
 	let (owner, _) =
-		create(&mut rw, InsertPoint::End(block), OpKind::Logical(LogOp::Block), &[], 1);
+		create(&mut rw, InsertPoint::End(block), OpKind::Logical(LogOp::If), &[condition[0]], 1);
 	let (_, inner) =
-		rw.create_region(owner, RegionKind::Block, &[]).expect("the region is created");
+		rw.create_region(owner, RegionKind::StatementIf, &[]).expect("the region is created");
 	let (_, held) = create(&mut rw, InsertPoint::End(inner), literal(1), &[], 1);
 	create(&mut rw, InsertPoint::End(inner), OpKind::Logical(LogOp::Return), &[held[0]], 0);
 

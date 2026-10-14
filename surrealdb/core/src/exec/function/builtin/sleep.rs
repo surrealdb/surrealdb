@@ -43,7 +43,7 @@ async fn sleep_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
 // Function definition using the macro
 // =========================================================================
 
-define_async_function!(Sleep, "sleep", effects: EffectSet::BLOCKING, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT), (duration: Duration) -> None, sleep_impl);
+define_async_function!(Sleep, "sleep", effects: EffectSet::BLOCKING, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (duration: Duration) -> None, sleep_impl);
 
 // =========================================================================
 // Registration

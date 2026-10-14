@@ -13,7 +13,7 @@
 //!
 //! A row name (`$this`, `$value`, `$before`, ...) is a [`OccurrenceClass::Row`] only where the
 //! binder declares it: inside the region of a clause that binds that name, per the region tables
-//! of `build/logical.rs` (`ROW_ONLY`, `WITH_INPUT`, `WITH_IMAGES`, `FIELD_VALUE`,
+//! of `build/logical.rs` (`ROW_ONLY`, `STATEMENT_ROW`, `WITH_INPUT`, `WITH_IMAGES`, `FIELD_VALUE`,
 //! `EVENT_IMAGES` and the per-row loop of a `SELECT`). Anywhere else the binder reads it as a
 //! free name, so it has a slot. A region isolated from above (a closure, a function body, a
 //! permission, field or event clause) sees only the names it declares itself. `$parent` is
@@ -40,13 +40,16 @@ use crate::expr::statements::{
 use crate::expr::visit::{Visit, Visitor};
 use crate::expr::{Block, ClosureExpr, Literal, Output, Param};
 
-/// The row names bound around the rows a `SELECT` reads, and around a write's clause values and
-/// condition, and by a permission clause.
+/// The row names bound by a permission clause and a `COMPUTED` field.
 const ROW_ONLY: &[&str] = &["this", "self", "value"];
+/// The row names a clause of a statement gives the row it is evaluated against: the projection,
+/// condition and split of a `SELECT`, and a write's clause values and condition. `$value` is no
+/// name of the row there: it reads the parameter of the frame around the statement.
+const STATEMENT_ROW: &[&str] = &["this", "self"];
 /// The row names bound around the `ON DUPLICATE KEY UPDATE` clause of an `INSERT`.
-const WITH_INPUT: &[&str] = &["this", "self", "value", "input"];
+const WITH_INPUT: &[&str] = &["this", "self", "input"];
 /// The row names bound around the `RETURN` projection of a write.
-const WITH_IMAGES: &[&str] = &["this", "self", "value", "after", "before"];
+const WITH_IMAGES: &[&str] = &["this", "self", "after", "before"];
 /// The row names bound around the `VALUE`, `DEFAULT` and `ASSERT` clauses of a field.
 const FIELD_VALUE: &[&str] = &["this", "self", "value", "after", "before", "input"];
 /// The row names bound around the `WHEN` and `THEN` of an event.
@@ -223,8 +226,17 @@ impl Walker {
 	/// The condition of a write, which is judged against the row being written.
 	fn write_cond(&mut self, cond: Option<&crate::expr::Expr>) -> Result<(), Infallible> {
 		match cond {
-			Some(cond) => self.within_rows(ROW_ONLY, false, |walker| walker.visit_expr(cond)),
+			Some(cond) => self.within_rows(STATEMENT_ROW, false, |walker| walker.visit_expr(cond)),
 			None => Ok(()),
+		}
+	}
+
+	/// A `VERSION` or `TIMEOUT` clause. The parser holds an absent clause as `NONE`, which is not a
+	/// literal of the statement text, so it is not visited.
+	fn optional_clause(&mut self, clause: &crate::expr::Expr) -> Result<(), Infallible> {
+		match clause {
+			crate::expr::Expr::Literal(Literal::None) => Ok(()),
+			clause => self.visit_expr(clause),
 		}
 	}
 
@@ -337,7 +349,7 @@ impl Visitor for Walker {
 		if select.group.is_some() {
 			self.visit_fields(&select.fields)?;
 		} else {
-			self.within_rows(ROW_ONLY, false, |walker| walker.visit_fields(&select.fields))?;
+			self.within_rows(STATEMENT_ROW, false, |walker| walker.visit_fields(&select.fields))?;
 		}
 		for omit in &select.omit {
 			self.visit_expr(omit)?;
@@ -345,7 +357,7 @@ impl Visitor for Walker {
 		for what in &select.what {
 			self.visit_expr(what)?;
 		}
-		self.within_rows(ROW_ONLY, false, |walker| {
+		self.within_rows(STATEMENT_ROW, false, |walker| {
 			if let Some(cond) = &select.cond {
 				walker.visit_expr(&cond.0)?;
 			}
@@ -367,12 +379,16 @@ impl Visitor for Walker {
 		if let Some(limit) = &select.limit {
 			self.visit_expr(&limit.0)?;
 		}
+		if let Some(start) = &select.start {
+			self.visit_expr(&start.0)?;
+		}
 		if let Some(fetch) = &select.fetch {
 			for fetch in fetch.iter() {
 				self.visit_expr(&fetch.0)?;
 			}
 		}
-		self.visit_expr(&select.version)
+		self.optional_clause(&select.version)?;
+		self.optional_clause(&select.timeout)
 	}
 
 	fn visit_create(&mut self, create: &CreateStatement) -> Result<(), Self::Error> {
@@ -380,10 +396,10 @@ impl Visitor for Walker {
 			self.visit_expr(what)?;
 		}
 		if let Some(data) = &create.data {
-			self.within_rows(ROW_ONLY, false, |walker| walker.visit_data(data))?;
+			self.within_rows(STATEMENT_ROW, false, |walker| walker.visit_data(data))?;
 		}
 		self.write_output(create.output.as_ref())?;
-		self.visit_expr(&create.timeout)
+		self.optional_clause(&create.timeout)
 	}
 
 	fn visit_update(&mut self, update: &UpdateStatement) -> Result<(), Self::Error> {
@@ -391,10 +407,11 @@ impl Visitor for Walker {
 			self.visit_expr(what)?;
 		}
 		if let Some(data) = &update.data {
-			self.within_rows(ROW_ONLY, false, |walker| walker.visit_data(data))?;
+			self.within_rows(STATEMENT_ROW, false, |walker| walker.visit_data(data))?;
 		}
 		self.write_output(update.output.as_ref())?;
-		self.write_cond(update.cond.as_ref().map(|cond| &cond.0))
+		self.write_cond(update.cond.as_ref().map(|cond| &cond.0))?;
+		self.optional_clause(&update.timeout)
 	}
 
 	fn visit_upsert(&mut self, upsert: &UpsertStatement) -> Result<(), Self::Error> {
@@ -402,10 +419,11 @@ impl Visitor for Walker {
 			self.visit_expr(what)?;
 		}
 		if let Some(data) = &upsert.data {
-			self.within_rows(ROW_ONLY, false, |walker| walker.visit_data(data))?;
+			self.within_rows(STATEMENT_ROW, false, |walker| walker.visit_data(data))?;
 		}
 		self.write_output(upsert.output.as_ref())?;
-		self.write_cond(upsert.cond.as_ref().map(|cond| &cond.0))
+		self.write_cond(upsert.cond.as_ref().map(|cond| &cond.0))?;
+		self.optional_clause(&upsert.timeout)
 	}
 
 	fn visit_delete(&mut self, delete: &DeleteStatement) -> Result<(), Self::Error> {
@@ -414,7 +432,7 @@ impl Visitor for Walker {
 		}
 		self.write_cond(delete.cond.as_ref().map(|cond| &cond.0))?;
 		self.write_output(delete.output.as_ref())?;
-		self.visit_expr(&delete.timeout)
+		self.optional_clause(&delete.timeout)
 	}
 
 	fn visit_relate(&mut self, relate: &RelateStatement) -> Result<(), Self::Error> {
@@ -422,10 +440,10 @@ impl Visitor for Walker {
 		self.visit_expr(&relate.from)?;
 		self.visit_expr(&relate.to)?;
 		if let Some(data) = &relate.data {
-			self.within_rows(ROW_ONLY, false, |walker| walker.visit_data(data))?;
+			self.within_rows(STATEMENT_ROW, false, |walker| walker.visit_data(data))?;
 		}
 		self.write_output(relate.output.as_ref())?;
-		self.visit_expr(&relate.timeout)
+		self.optional_clause(&relate.timeout)
 	}
 
 	fn visit_insert(&mut self, insert: &InsertStatement) -> Result<(), Self::Error> {
@@ -437,7 +455,7 @@ impl Visitor for Walker {
 			self.within_rows(WITH_INPUT, false, |walker| walker.visit_data(update))?;
 		}
 		self.write_output(insert.output.as_ref())?;
-		self.visit_expr(&insert.timeout)
+		self.optional_clause(&insert.timeout)
 	}
 
 	fn visit_define_field(&mut self, define: &DefineFieldStatement) -> Result<(), Self::Error> {

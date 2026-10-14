@@ -23,8 +23,8 @@ use super::state::{
 	report_status_from_phase,
 };
 use super::{
-	AcquiredBuild, BUILD_CLOSING_SLEEP, BuildGeneration, IndexBuildPhase, IndexBuildReportStatus,
-	IndexBuildState, IndexBuilding, build_abort_deadline,
+	AcquiredBuild, BUILD_CLOSING_SLEEP, BUILD_OWNER_LEASE_SECS, BuildGeneration, IndexBuildPhase,
+	IndexBuildReportStatus, IndexBuildState, IndexBuilding, build_abort_deadline,
 };
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::catalog::{DatabaseId, Index, IndexDefinition, IndexId, NamespaceId, TableId};
@@ -227,8 +227,20 @@ impl IndexBuilder {
 		// fall out of scope instead would drop it here, at the end of this
 		// function, and report every build finished before it had begun.
 		let guard = BuildingFinishGuard(Arc::clone(&building));
+		// No statement awaits a build started without a result channel, so it
+		// waits for the statement's transaction to close before it reads the
+		// catalog ([`Building::await_statement_closed`]).
+		let awaits_statement = sdr.is_none();
 		common::rt::spawn_detached(async move {
-			let r = b.run_acquired(acquired).await;
+			let r = if awaits_statement {
+				match b.await_statement_closed(acquired.generation, acquired.phase).await {
+					Ok(true) => b.run_acquired(acquired).await,
+					Ok(false) => Ok(()),
+					Err(err) => Err(err),
+				}
+			} else {
+				b.run_acquired(acquired).await
+			};
 			let generation = b.build_generation.load(Ordering::Acquire);
 			if let Err(err) = &r {
 				// Shutdown and memory-threshold failures are transient: the
@@ -541,6 +553,14 @@ pub(super) struct Building {
 	/// [`Building::defer_ownership_release`] clears it for every build a
 	/// statement started, before that build is spawned.
 	release_gate: AtomicU8,
+	/// Wakes [`Building::await_statement_closed`] once the statement half of
+	/// `release_gate` has arrived or the build has been aborted.
+	statement_closed: Notify,
+	/// The transaction of the statement that started this build, unset for a
+	/// build no statement started. A transaction dropped without being
+	/// committed or cancelled runs neither hook, so the half it owes never
+	/// arrives; [`Building::await_statement_closed`] reads its liveness here.
+	statement_tx: std::sync::OnceLock<std::sync::Weak<Transaction>>,
 	/// Wakes [`Building::wait_finished`] once `finished` is set. Private because
 	/// the two must move together: a notification without the flag is a lost
 	/// wake-up for every waiter that has not registered yet.
@@ -583,6 +603,8 @@ impl Building {
 			aborted: AtomicBool::new(false),
 			finished: AtomicBool::new(false),
 			release_gate: AtomicU8::new(RELEASE_GATE_STATEMENT),
+			statement_closed: Notify::new(),
+			statement_tx: std::sync::OnceLock::new(),
 			finished_notify: Notify::new(),
 			compiled: OnceCell::new(),
 			key: OnceCell::new(),
@@ -1357,9 +1379,10 @@ impl Building {
 	/// blocking build, until after it returns. Every other node reads the
 	/// previous definition for that whole window, so ownership — the one signal
 	/// that is durable before the definition is — has to outlast it. That holds
-	/// however the statement started the build: `CONCURRENTLY` returns as soon
-	/// as the task is spawned, which on a small index can finish and release
-	/// before the commit lands. Registered on both outcomes: a rolled-back
+	/// however the statement started the build: a `CONCURRENTLY` build owns its
+	/// generation from the moment it is spawned, and waits for this half before
+	/// it reads anything ([`Building::await_statement_closed`]). Registered on
+	/// both outcomes: a rolled-back
 	/// statement leaves the previous definition in place, which is the one
 	/// background compaction was already reading, so no fence is needed for it.
 	///
@@ -1374,6 +1397,7 @@ impl Building {
 			return;
 		};
 		self.release_gate.store(0, Ordering::Release);
+		let _ = self.statement_tx.set(Arc::downgrade(txn));
 		txn.on_commit(Box::new(ReleaseBuildOwnership(Arc::clone(self)))).await;
 		txn.on_rollback(Box::new(ReleaseBuildOwnership(Arc::clone(self)))).await;
 	}
@@ -1382,6 +1406,104 @@ impl Building {
 	/// arrival was the one that completed it.
 	fn arrive_at_release_gate(&self, arrival: u8) -> bool {
 		(self.release_gate.fetch_or(arrival, Ordering::AcqRel) | arrival) == RELEASE_GATE_OPEN
+	}
+
+	/// Wait until the statement that started this build has closed its
+	/// transaction, answering whether the build goes on.
+	///
+	/// A build no statement awaits is spawned while the statement's
+	/// transaction is still open. What that transaction stages beside the
+	/// definition, such as an analyzer the index names or a `PREPARE REMOVE` of
+	/// the index, is invisible to the build's own transactions until it
+	/// commits, so the build reads the catalog only once the transaction has
+	/// closed. The statement half of [`Building::release_gate`] arrives on
+	/// commit and on rollback, so the wait ends either way, and a build with no
+	/// statement behind it starts with that half arrived. Answers `false` once
+	/// the build is aborted, as the rollback of a fresh definition aborts it,
+	/// and once the transaction is dropped without closing, which stages
+	/// nothing; ownership then lapses with the lease, as it does for a build
+	/// whose node stops.
+	/// Ownership is heartbeated while the transaction stays open, so the lease
+	/// outlasts a long one.
+	///
+	/// A blocking build must not wait here: it is awaited inside the
+	/// statement's transaction, which cannot close before it.
+	async fn await_statement_closed(
+		&self,
+		generation: BuildGeneration,
+		phase: IndexBuildPhase,
+	) -> Result<bool> {
+		let heartbeat_every = Duration::from_secs((BUILD_OWNER_LEASE_SECS / 4) as u64);
+		let mut heartbeat_at = Instant::now();
+		// Register for the wake-up before checking the gate or `aborted`, as
+		// `notify_waiters` only wakes waiters that are already registered.
+		// Every notification follows a change that never reverts, `aborted` or
+		// the statement half of the gate, and the check below ends the loop
+		// on it, so one registration serves the whole wait.
+		let notified = self.statement_closed.notified();
+		tokio::pin!(notified);
+		notified.as_mut().enable();
+		loop {
+			if self.is_aborted().await {
+				return Ok(false);
+			}
+			// Read before the gate: a transaction runs its hooks before it is
+			// dropped, so one seen gone here has already set the gate if it
+			// closed.
+			let dropped =
+				self.statement_tx.get().is_some_and(|statement| statement.strong_count() == 0);
+			if self.release_gate.load(Ordering::Acquire) & RELEASE_GATE_STATEMENT != 0 {
+				return Ok(true);
+			}
+			if dropped {
+				return Ok(false);
+			}
+			if heartbeat_at.elapsed() >= heartbeat_every {
+				self.heartbeat_ownership(generation, phase).await?;
+				heartbeat_at = Instant::now();
+			}
+			// A transaction dropped without closing wakes nothing, so it is
+			// polled.
+			tokio::select! {
+				() = &mut notified => {}
+				() = sleep(BUILD_CLOSING_SLEEP) => {}
+			}
+		}
+	}
+
+	/// Heartbeat ownership of `generation` in a transaction of its own.
+	async fn heartbeat_ownership(
+		&self,
+		generation: BuildGeneration,
+		phase: IndexBuildPhase,
+	) -> Result<()> {
+		loop {
+			let ctx = self.new_write_tx_ctx().await?;
+			let tx = ctx.tx();
+			if let Err(err) = self.maintain_build_ownership(&tx, generation, &[phase]).await {
+				if self
+					.cancel_and_retryable_conflict(
+						&tx,
+						&err,
+						"transient conflict maintaining build ownership, retrying",
+					)
+					.await
+				{
+					continue;
+				}
+				return Err(err);
+			}
+			if self
+				.commit_and_retryable_conflict(
+					&tx,
+					"transient conflict committing build ownership, retrying",
+				)
+				.await?
+			{
+				continue;
+			}
+			return Ok(());
+		}
 	}
 
 	/// Release durable ownership of a published generation.
@@ -2629,9 +2751,8 @@ impl Building {
 
 	/// Abort the current indexing process.
 	pub(super) fn abort(&self) {
-		// We use `Ordering::Relaxed` as the caller does not require synchronization.
-		// We just want the current builder to eventually stop.
-		self.aborted.store(true, Ordering::Relaxed);
+		self.aborted.store(true, Ordering::Release);
+		self.statement_closed.notify_waiters();
 	}
 
 	/// Check if the indexing process should stop at the next check point.
@@ -2641,10 +2762,7 @@ impl Building {
 	/// before they apply, so the task exits on that error without any durable
 	/// change and the build resumes after restart.
 	pub(super) async fn is_aborted(&self) -> bool {
-		// We use `Ordering::Relaxed` as there are no shared data accesses requiring
-		// synchronization. This method is only called by the single thread building
-		// the index.
-		self.aborted.load(Ordering::Relaxed)
+		self.aborted.load(Ordering::Acquire)
 	}
 
 	pub(super) fn is_beyond_threshold(&self, count: Option<usize>) -> Result<()> {
@@ -2697,15 +2815,17 @@ impl Building {
 /// Releases durable build ownership once the statement that publishes the
 /// build's definition has closed its transaction.
 ///
-/// Registered on both outcomes, and the same either way: a committed statement
-/// has made its definition visible to every node, and a rolled-back one has
-/// left the definition background compaction was already reading. See
+/// Registered on both outcomes: a committed statement has made its definition
+/// visible to every node, and a rolled-back one aborts any build still waiting
+/// on the statement and releases the fence on one that already finished. See
 /// [`Building::defer_ownership_release`].
 struct ReleaseBuildOwnership(IndexBuilding);
 
 impl ReleaseBuildOwnership {
 	async fn release(self) {
-		if self.0.arrive_at_release_gate(RELEASE_GATE_STATEMENT) {
+		let open = self.0.arrive_at_release_gate(RELEASE_GATE_STATEMENT);
+		self.0.statement_closed.notify_waiters();
+		if open {
 			let generation = self.0.build_generation.load(Ordering::Acquire);
 			self.0.release_build_ownership(generation).await;
 		}
@@ -2731,6 +2851,7 @@ impl RollbackAction for ReleaseBuildOwnership {
 		_drain_started_at: Instant,
 	) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
 		Box::pin(async move {
+			self.0.abort();
 			(*self).release().await;
 			Ok(())
 		})

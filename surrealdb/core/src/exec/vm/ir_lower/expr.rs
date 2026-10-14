@@ -2512,9 +2512,16 @@ impl<'a> Lowerer<'a> {
 		};
 		let (registered, executor_tables) = (attr.registered, attr.executor_tables.clone());
 		let left_expr = path_expr(ir, left);
-		let field = left_expr.as_ref().and_then(LogicalExpr::field_path);
-		let (probe, right_expr, read_query) = match (left_expr.is_some(), query_operand(ir, right))
-		{
+		// A left operand the container is handed as a value reads the position the decision
+		// resolved. Only a single field: a longer path crosses a record link, which is read off
+		// the row, and the handed value is not the row.
+		let decided = match &left_expr {
+			Some(_) => None,
+			None => attr.field.clone().filter(|path| path.segments().len() == 1),
+		};
+		let path = left_expr.is_some() || decided.is_some();
+		let field = left_expr.as_ref().and_then(LogicalExpr::field_path).or(decided);
+		let (probe, right_expr, read_query) = match (path, query_operand(ir, right)) {
 			(path, QueryOperand::Literal(value)) => {
 				let query = value.to_raw_string();
 				// Errors name the query the index searches for, which a probe resolves.

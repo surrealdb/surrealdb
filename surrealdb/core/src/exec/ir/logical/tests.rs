@@ -1269,14 +1269,15 @@ fn the_clauses_of_the_maintained_views_are_regions_of_the_stage() {
 		views.regions.iter().map(|body| matches!(body, ViewBody::Fields(_))).collect();
 	assert_eq!(&shape[..3], &[false, true, true]);
 	assert!(shape[3..].iter().all(|fields| !fields));
-	let a_group = match &defs[2].view {
+	let (groups, arguments) = match &defs[2].view {
 		Some(crate::catalog::ViewDefinition::Aggregated {
 			analysis,
 			..
-		}) => analysis.group_expressions.len() + analysis.aggregate_arguments.len(),
+		}) => (analysis.group_expressions.len(), analysis.aggregate_arguments.len()),
 		_ => panic!("the third view is aggregated"),
 	};
-	assert_eq!(views.regions.len(), 3 + 1 + 1 + a_group + 3);
+	assert_eq!(groups, 1);
+	assert_eq!(views.regions.len(), 3 + 1 + groups + arguments + 3);
 
 	// A table that feeds no view states nothing.
 	let none = views_over(&std::sync::Arc::from(Vec::new()));
@@ -1290,7 +1291,10 @@ fn the_clauses_of_the_maintained_views_are_regions_of_the_stage() {
 fn a_subscript_a_group_name_embeds_is_a_region_after_its_field() {
 	use super::stages::{view_table_for_test, views_over};
 
-	let embedded = view_table_for_test("g", "tags[0], count() AS n", None, Some(&["tags[0]"]));
+	// A field's name is its alias, or its expression simplified, which keeps no subscript: the
+	// subscript the name embeds is written in the alias.
+	let embedded =
+		view_table_for_test("g", "tags[0] AS first[0], count() AS n", None, Some(&["tags[0]"]));
 	let defs: std::sync::Arc<[crate::catalog::TableDefinition]> =
 		std::sync::Arc::from(vec![embedded]);
 	let views = views_over(&defs);
@@ -6068,9 +6072,10 @@ mod binding {
 		assert_eq!(seen, 2, "the array reads the argument and the free name");
 	}
 
-	/// The region a write's clause or an index's column is evaluated in binds `$this`, `$self` and
-	/// `$value` to the row it receives, and the names the write exposes to its own arguments:
-	/// `$input` of `ON DUPLICATE KEY UPDATE` and `$before` and `$after` of a `RETURN`.
+	/// The region a write's clause or an index's column is evaluated in binds `$this` and `$self`
+	/// to the row it receives, and the names the write exposes to its own arguments: `$input` of
+	/// `ON DUPLICATE KEY UPDATE` and `$before` and `$after` of a `RETURN`. `$value` is no name of
+	/// the row there: it reads the parameter of the frame around the statement.
 	#[test]
 	fn a_write_clause_binds_its_row_names_to_its_arguments() {
 		let env = Env::new();
@@ -6090,10 +6095,10 @@ mod binding {
 		};
 		let set = RegionKind::Clause(ClauseRole::SetValue);
 		enter_row_region(&mut cx, owner, set, |cx, row| {
-			for name in ["this", "self", "value"] {
+			for name in ["this", "self"] {
 				assert_eq!(bound(cx, name), Some(row), "${name} in a SET");
 			}
-			for name in ["input", "before", "after", "event"] {
+			for name in ["value", "input", "before", "after", "event"] {
 				assert_eq!(bound(cx, name), None, "${name} in a SET");
 			}
 			Ok(())
@@ -6103,10 +6108,10 @@ mod binding {
 		// `$self` and `@`, not the target the loop around the stage holds.
 		let column = RegionKind::Clause(ClauseRole::IndexColumn);
 		enter_row_region(&mut cx, owner, column, |cx, row| {
-			for name in ["this", "self", "value"] {
+			for name in ["this", "self"] {
 				assert_eq!(bound(cx, name), Some(row), "${name} in an index column");
 			}
-			for name in ["input", "before", "after"] {
+			for name in ["value", "input", "before", "after"] {
 				assert_eq!(bound(cx, name), None, "${name} in an index column");
 			}
 			Ok(())
@@ -6240,15 +6245,22 @@ mod binding {
 		assert!(bind_request(&input, &env.cx()).await.is_ok());
 	}
 
-	/// The element of a `SELECT` loop answers to `$this`, `$self` and `$value`, so a read of one
-	/// is a value and not a free name.
+	/// The element of a `SELECT` loop answers to `$this` and `$self`, so a read of one is a value
+	/// and not a free name. `$value` is no name of the element: it reads the parameter of the
+	/// frame around the statement.
 	#[tokio::test]
 	async fn select_row_names_are_bound() {
-		let ir = bind("SELECT VALUE [$this, $self, $value] FROM t").await;
+		let ir = bind("SELECT VALUE [$this, $self] FROM t").await;
 		assert!(
 			ops_where(&ir, |kind| matches!(kind, OpKind::Expr(ExprOp::FreeParam { .. })))
 				.is_empty()
 		);
+		let ir = bind("SELECT VALUE $value FROM t").await;
+		let free = ops_where(
+			&ir,
+			|kind| matches!(kind, OpKind::Expr(ExprOp::FreeParam { name }) if name.as_str() == "value"),
+		);
+		assert_eq!(free.len(), 1);
 	}
 
 	/// The first rejection of the request `sql` binds to, from the checked binding.

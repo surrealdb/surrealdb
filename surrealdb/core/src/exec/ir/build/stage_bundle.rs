@@ -259,7 +259,8 @@ mod tests {
 	}
 
 	/// What a `THEN` calls, reads and writes is part of the unit: the effect set of the events op
-	/// holds the effects of a call in a clause, and a unit with no clause holds none.
+	/// holds the effects of a call in a clause. The events op is a stage of the write and declares
+	/// the write's set itself, so a unit whose clauses are quiet holds that set and no more.
 	#[test]
 	fn a_call_in_a_then_clause_is_in_the_effects_of_the_unit() {
 		let registry = FunctionRegistry::with_builtins();
@@ -279,7 +280,7 @@ mod tests {
 		let calling = effects_of(vec![event("one", "true", &["fn::audit()"], EventKind::Sync)]);
 		assert!(calling.writes_data(), "a call of a user-defined function may write");
 		let quiet = effects_of(vec![event("one", "$after.a > 1", &["1"], EventKind::Sync)]);
-		assert!(!quiet.writes_data());
+		assert!(calling.contains(quiet), "the call adds to what the events op declares");
 	}
 
 	/// The clauses of an event run over the image the event is about: the region binds `$this`,

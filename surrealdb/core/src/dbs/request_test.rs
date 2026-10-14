@@ -8,13 +8,22 @@
 use std::sync::Arc;
 
 use crate::catalog::providers::CatalogProvider;
-use crate::dbs::Session;
+use crate::dbs::{Capabilities, Session};
 use crate::exec::compiles;
 use crate::kvs::{Datastore, TransactionType};
 
 /// A datastore with the test namespace and database in place.
 async fn datastore() -> Arc<Datastore> {
-	let ds = Datastore::new("memory").await.expect("a memory datastore");
+	datastore_with(Capabilities::default()).await
+}
+
+/// [`datastore`], running with `capabilities`.
+async fn datastore_with(capabilities: Capabilities) -> Arc<Datastore> {
+	let ds = Datastore::builder()
+		.with_capabilities(capabilities)
+		.build_with_path("memory")
+		.await
+		.expect("a memory datastore");
 	let tx = ds.transaction(TransactionType::Write).await.expect("a write transaction");
 	tx.ensure_ns_db(None, "test", "test").await.expect("the test namespace and database");
 	tx.commit().await.expect("committing the namespace");
@@ -43,7 +52,17 @@ async fn run(ds: &Datastore, sql: &str) -> Rendered {
 /// many request compilations it started and how many compilations it made
 /// after it arrived.
 async fn measured(setup: &str, sql: &str, per_statement: bool) -> (Rendered, usize, usize) {
-	let ds = datastore().await;
+	measured_with(Capabilities::default(), setup, sql, per_statement).await
+}
+
+/// [`measured`] on a datastore running with `capabilities`.
+async fn measured_with(
+	capabilities: Capabilities,
+	setup: &str,
+	sql: &str,
+	per_statement: bool,
+) -> (Rendered, usize, usize) {
+	let ds = datastore_with(capabilities).await;
 	if !setup.is_empty() {
 		for result in run(&ds, setup).await {
 			result.expect("every setup statement succeeds");
@@ -418,7 +437,8 @@ fn the_statements_of_a_block_read_a_clock_each() {
 #[cfg(feature = "scripting")]
 #[test]
 fn a_script_reads_the_statement_clock() {
-	let results = answers(
+	let results = answers_with(
+		Capabilities::default().with_scripting(true),
 		"",
 		"{ SLEEP 30ms; \
 		   LET $b = [function() { return surrealdb.functions.time.now(); }, time::now()]; \
@@ -434,11 +454,16 @@ fn a_script_reads_the_statement_clock() {
 /// What `sql` answers after `setup`, once compiled whole and once planned a
 /// statement at a time, which must agree.
 fn answers(setup: &str, sql: &str) -> Rendered {
+	answers_with(Capabilities::default(), setup, sql)
+}
+
+/// [`answers`] on datastores running with `capabilities`.
+fn answers_with(capabilities: Capabilities, setup: &str, sql: &str) -> Rendered {
 	let runtime =
 		tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a runtime");
 	runtime.block_on(async {
-		let (expected, _, _) = measured(setup, sql, true).await;
-		let (whole, _, _) = measured(setup, sql, false).await;
+		let (expected, _, _) = measured_with(capabilities.clone(), setup, sql, true).await;
+		let (whole, _, _) = measured_with(capabilities, setup, sql, false).await;
 		assert_eq!(whole, expected, "`{sql}` answered differently when compiled whole");
 		whole
 	})

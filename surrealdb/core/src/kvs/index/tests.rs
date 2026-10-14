@@ -6024,9 +6024,10 @@ async fn index_compaction_defers_to_an_online_build_that_has_not_released() -> R
 /// Run a build the way a statement does: inside a write transaction that stays
 /// open across it and is the caller's to close.
 ///
-/// Returns once the build task has exited, whether the statement waited on it
-/// (`blocking`) or only spawned it, so a caller can assert on what the finished
-/// build left behind while its statement is still uncommitted.
+/// A `blocking` build returns once the build task has exited, so a caller can
+/// assert on what the finished build left behind while its statement is still
+/// uncommitted. Any other build returns once its task is spawned, as the task
+/// waits for the statement's transaction to close before it reads the catalog.
 #[cfg(feature = "kv-mem")]
 async fn build_index_inside_an_open_statement_transaction(
 	ds: &Arc<Datastore>,
@@ -6046,22 +6047,20 @@ async fn build_index_inside_an_open_statement_transaction(
 	let index_id = ix.index_id;
 	let rcv =
 		builder.build(&ctx, ds.setup_options(session), table_def.table_id, ix, blocking).await?;
-	match rcv {
-		Some(rcv) => rcv.await.expect("the build task must report its result")?,
-		None => {
-			let building = local_builder_for_key(ds, ns, db, table, index_id)
-				.await?
-				.expect("the build registers a local builder");
-			wait_for_finished_builder(&building).await?;
-		}
+	if let Some(rcv) = rcv {
+		rcv.await.expect("the build task must report its result")?;
+	} else {
+		local_builder_for_key(ds, ns, db, table, index_id)
+			.await?
+			.expect("the build registers a local builder");
 	}
 	Ok(txn)
 }
 
-/// `CONCURRENTLY` returns as soon as the build task is spawned, so its
-/// statement transaction — the one staging the definition the build is made
-/// against — is still uncommitted while the build runs and can outlast it on a
-/// small index. Ownership has to cover that too, not just the blocking case.
+/// `CONCURRENTLY` returns as soon as the build task is spawned, while its
+/// statement transaction, the one staging the definition the build is made
+/// against, is still uncommitted. The build holds ownership and reads nothing
+/// until that transaction closes, then builds and releases ownership.
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread")]
 async fn build_ownership_outlives_a_concurrent_build_until_its_statement_commits() -> Result<()> {
@@ -6086,18 +6085,105 @@ async fn build_ownership_outlives_a_concurrent_build_until_its_statement_commits
 		false,
 	)
 	.await?;
+	let building = local_builder_for_key(&ds, ns, db, &table, ix.index_id)
+		.await?
+		.expect("the build registers a local builder");
 
+	sleep(Duration::from_millis(300)).await;
+	assert!(!building.is_finished(), "a concurrent build must wait for its statement to close");
 	let state = durable_build_state(&ds, &ikb).await?;
-	assert_eq!(state.phase, IndexBuildPhase::Online);
+	assert_eq!(state.phase, IndexBuildPhase::Building);
 	assert!(
 		state.owner.is_some(),
 		"a concurrent build must hold the fence until its statement transaction closes"
 	);
 
 	txn.commit().await?;
+	wait_for_finished_builder(&building).await?;
 
 	let state = durable_build_state(&ds, &ikb).await?;
-	assert_eq!(state.owner, None, "the commit must release the fence");
+	assert_eq!(state.phase, IndexBuildPhase::Online);
+	assert_eq!(state.owner, None, "the build must release the fence once both halves arrive");
+	Ok(())
+}
+
+/// A statement transaction dropped without being committed or cancelled runs
+/// neither of its hooks, so the half of the gate a concurrent build waits for
+/// never arrives. The build stops waiting once that transaction is gone,
+/// without building.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_concurrent_build_whose_statement_transaction_is_dropped_stops_waiting() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;
+		 CREATE t:1 SET vec = [1.0, 0.0];",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "hx").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	let txn = build_index_inside_an_open_statement_transaction(
+		&ds,
+		&session,
+		ns,
+		db,
+		&table,
+		Arc::clone(&ix),
+		false,
+	)
+	.await?;
+	let building = local_builder_for_key(&ds, ns, db, &table, ix.index_id)
+		.await?
+		.expect("the build registers a local builder");
+
+	drop(txn);
+	wait_for_finished_builder(&building).await?;
+
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.phase, IndexBuildPhase::Building, "the build must not have scanned");
+	Ok(())
+}
+
+/// Rolling back the statement that spawned a concurrent build aborts the build
+/// before it scans and clears durable ownership.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_concurrent_build_whose_statement_rolls_back_aborts_without_building() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;
+		 CREATE t:1 SET vec = [1.0, 0.0];",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "hx").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	let txn = build_index_inside_an_open_statement_transaction(
+		&ds,
+		&session,
+		ns,
+		db,
+		&table,
+		Arc::clone(&ix),
+		false,
+	)
+	.await?;
+	let building = local_builder_for_key(&ds, ns, db, &table, ix.index_id)
+		.await?
+		.expect("the build registers a local builder");
+
+	txn.cancel().await?;
+	wait_for_finished_builder(&building).await?;
+
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.phase, IndexBuildPhase::Error, "the rolled-back build must be aborted");
+	assert_eq!(state.report_status, Some(IndexBuildReportStatus::Aborted));
+	assert_eq!(state.owner, None, "aborting must release durable build ownership");
 	Ok(())
 }
 

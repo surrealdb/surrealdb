@@ -137,18 +137,20 @@ async fn pure_literal_expressions_are_eligible() {
 	}
 }
 
-/// A `LET` value is a slot, not a leaf, so it is refused. A stored function is refused because
-/// its effects are unknown. A value an error-catching region evaluates is never folded.
+/// A top-level `LET` binds a session variable, which a later statement reads from the session at
+/// run time, so it is refused. A stored function is refused because its effects are unknown,
+/// and the unknown effects include the clock. A
+/// value an error-catching region evaluates is never folded.
 #[tokio::test]
 async fn eligible_refuses_slots_and_error_scopes() {
 	assert_eq!(
 		judge("LET $p = 1; RETURN $p + 1").await,
-		Err(NotFoldable::NotConstantInputs),
-		"a LET value is not a leaf"
+		Err(NotFoldable::ContextDep(ContextDep::PrincipalValue)),
+		"a LET value is read from the session"
 	);
 	assert_eq!(
 		judge("RETURN fn::f()").await,
-		Err(NotFoldable::HostRefused("udf")),
+		Err(NotFoldable::Clock),
 		"a stored function is not folded"
 	);
 

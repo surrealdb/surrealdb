@@ -989,7 +989,7 @@ mod tests {
 		assert_eq!(tags.last(), Some(&LogTag::Yield));
 	}
 
-	/// A sort and a limit follow the projection's loop, and the closing projection of `*` reads the
+	/// A sort and a limit follow the loop that binds the rows, and the closing projection reads the
 	/// limited rows in a loop of its own.
 	#[test]
 	fn a_sort_and_a_limit_stand_between_the_projection_and_the_closing_loop() {
@@ -1002,7 +1002,6 @@ mod tests {
 					LogTag::Source,
 					LogTag::Loop,
 					LogTag::BindStep,
-					LogTag::Loop,
 					LogTag::Sort,
 					LogTag::Limit,
 					LogTag::Loop,

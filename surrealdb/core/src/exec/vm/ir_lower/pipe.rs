@@ -5291,25 +5291,40 @@ pub(super) mod tests {
 		assert_eq!(program.pipelines[0].source, Source::Once);
 	}
 
-	/// A statement in value position that is an `EXPLAIN ANALYZE` answers the refusal of the
-	/// top-level one, never the rows of the statement it explains.
+	/// A statement in value position that is an `EXPLAIN ANALYZE` is a unit that answers the
+	/// rendering of what the run of the explained statement measured, as `RETURN (EXPLAIN ANALYZE
+	/// ...)` does, and never the rows of that statement: the explained statement is the program's
+	/// one group, and the program's own pipeline runs once.
 	#[test]
 	fn an_analysed_explain_in_value_position_is_not_the_rows_it_explains() {
 		let mut b = Builder::new();
 		let explained = explained_scan(&mut b, true);
 		b.create_kind(OpKind::Phys(PhysOp::Yield), &[explained], 0);
 		let b = placed(b);
-		match super::super::dispatch::lower_subquery_unit(
+		let program = match super::super::dispatch::lower_subquery_unit(
 			&mut LowerCx::detached(),
 			&b.ir,
 			&FactCache::new(),
 		) {
-			Err(IrError::NotYet {
-				what,
-			}) => assert_eq!(what, phys_refusal(PhysTag::Explain)),
-			Err(error) => panic!("an unexpected error: {error}"),
-			Ok(_) => panic!("the unit lowers"),
-		}
+			Ok(lowered) => lowered.program,
+			Err(error) => panic!("the unit lowers: {error}"),
+		};
+		assert!(program.scalar);
+		assert_eq!(program.groups.len(), 1);
+		assert_eq!(program.analyses.len(), 1);
+		assert_eq!(program.pipelines.len(), 2);
+		assert!(matches!(program.pipelines[0].source, Source::Scan { .. }));
+		assert_eq!(program.pipelines[0].group, Some(0));
+		assert_eq!(program.pipelines[1].source, Source::Once);
+		assert_eq!(program.pipelines[1].group, None);
+		assert!(program.pipelines[1].code.iter().any(|instr| matches!(
+			instr,
+			Instr::Block(crate::exec::vm::program::BlockInstr::RunAnalyzed {
+				statement: 0,
+				analysis: 0,
+				..
+			})
+		)));
 	}
 
 	#[test]
@@ -6372,17 +6387,17 @@ pub(super) mod tests {
 				range: None,
 			}
 		);
-		assert_eq!(
-			program.pipelines[1].source,
+		// Each later pipeline reads the rows of its own sort; the sorts are numbered in the order
+		// lowering reaches them, which is no order of the pipelines.
+		let sorted = |at: usize| match program.pipelines[at].source {
 			Source::Sorted {
-				sort: 0
-			}
-		);
-		assert_eq!(
-			program.pipelines[2].source,
-			Source::Sorted {
-				sort: 1
-			}
-		);
+				sort,
+			} => sort,
+			ref other => panic!("pipeline {at} reads a sort: {other:?}"),
+		};
+		let mut sorts = vec![sorted(1), sorted(2)];
+		sorts.sort_unstable();
+		assert_eq!(sorts, vec![0, 1]);
+		assert_eq!(program.sorts.len(), 2);
 	}
 }

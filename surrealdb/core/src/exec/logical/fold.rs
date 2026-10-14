@@ -386,14 +386,15 @@ mod tests {
 		use super::super::super::rules::test_support::{rewritten, rewritten_sql};
 		use crate::expr::logical::{LogicalExpr, LogicalOp};
 
-		/// `time::now()` is one value for the statement in a `WHERE`, where an
-		/// index range needs a literal, and a call evaluated per row in the
-		/// projection of the same statement.
+		/// `time::now()` is read when the statement runs, never at plan time:
+		/// both the `WHERE` and the projection keep the call, and no instant is
+		/// baked into the plan.
 		#[test]
-		fn the_clock_folds_in_a_where_and_not_in_a_projection() {
+		fn the_clock_is_not_folded_in_a_where_or_a_projection() {
 			let plan = rewritten_sql("SELECT time::now() AS at FROM t WHERE ts < time::now()");
 			assert!(plan.contains("time::now() AS at"), "the projection keeps the call:\n{plan}");
-			assert!(plan.contains("ts < d'"), "the condition folds to a literal:\n{plan}");
+			assert!(plan.contains("ts < time::now()"), "the condition keeps the call:\n{plan}");
+			assert!(!plan.contains("d'"), "no instant is baked into the plan:\n{plan}");
 		}
 
 		/// Entropy is drawn per row even in a condition: `WHERE rand::float() <

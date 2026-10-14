@@ -1810,7 +1810,7 @@ fn a_builtin_with_a_visible_closure_is_a_loop_site() -> Result<(), IrError> {
 			slot: 1
 		}]
 	);
-	assert_eq!(host.tags(), [ExprTag::ClosureCreate, ExprTag::Field]);
+	assert_eq!(host.tags(), [ExprTag::ClosureCreate], "the host binds the arguments of the site");
 
 	// A free name is not a visible closure: the call stays a call, with the name as an operand.
 	let mut host = TestHost::with_row();

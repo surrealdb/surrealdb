@@ -3664,21 +3664,14 @@ mod tests {
 		}
 	}
 
+	/// A stage the lowering has no form for names itself in its refusal. `GenerateRecordId` has a
+	/// form for an `id` DEFAULT: the stage hosts it as a region
+	/// (`the_default_of_the_id_field_is_a_host_pipeline_of_the_stage_that_generates_the_id`), and
+	/// an image that states one the stage hosts no region for is an invariant break.
 	#[test]
 	fn a_clause_the_lowering_has_no_form_for_names_its_stage() {
 		for (run, stage) in [
 			(viewed(ImageView::Dynamic), WriteStageKind::OutputWrite),
-			(
-				StageRun {
-					image: WriteImage {
-						view: ImageView::Plain,
-						keyed: false,
-						id_default: true,
-					},
-					..run()
-				},
-				WriteStageKind::GenerateRecordId,
-			),
 			(run(), WriteStageKind::StoreIndexData),
 		] {
 			assert!(
@@ -3686,6 +3679,18 @@ mod tests {
 				"{stage:?} answers NotYet"
 			);
 		}
+		let unhosted = StageRun {
+			image: WriteImage {
+				view: ImageView::Plain,
+				keyed: false,
+				id_default: true,
+			},
+			..run()
+		};
+		assert!(matches!(
+			emitted(&unhosted, WriteStageKind::GenerateRecordId),
+			Err(IrError::Invariant { .. })
+		));
 	}
 
 	/// The code of a gate stage under `run`.
@@ -7061,8 +7066,12 @@ mod tests {
 	#[test]
 	fn a_subscript_a_field_name_embeds_is_a_host_pipeline_of_its_step() {
 		let mut b = Builder::new();
-		let defs =
-			vec![view_table_for_test("g", "tags[0], count() AS n", None, Some(&["tags[0]"]))];
+		let defs = vec![view_table_for_test(
+			"g",
+			"tags[0] AS first[0], count() AS n",
+			None,
+			Some(&["tags[0]"]),
+		)];
 		let count = view_region_count(&defs);
 		let regions = view_regions(&mut b, view_frame(), &vec![Some("a"); count]);
 		let run = viewing(defs, regions);
@@ -7088,7 +7097,7 @@ mod tests {
 		else {
 			panic!("the first field lands at a name and a subscript: {:?}", fields[0].0);
 		};
-		assert_eq!(name, "tags");
+		assert_eq!(name, "first");
 		// The subscript runs once with no record in scope: one pipeline that emits its value.
 		let subscript = &program.host_code[usize::from(*expr)];
 		assert!(matches!(subscript.source, Source::Once));

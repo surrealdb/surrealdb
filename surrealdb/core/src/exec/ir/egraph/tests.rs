@@ -908,8 +908,8 @@ fn opaque_regions_never_entered() {
 	];
 	assert!(importable_kinds.iter().all(|kind| importable(*kind)));
 
-	// Each always-opaque kind, owned by an op node, imports as an opaque leaf that holds none of
-	// the region's ops.
+	// Each always-opaque kind, owned by an op, imports as an opaque leaf that holds none of the
+	// region's ops.
 	let env = Env::new();
 	let mut fx = Fixture::new();
 	let operand = fx.add(literal(Value::Bool(true)), &[], 1);
@@ -924,8 +924,8 @@ fn opaque_regions_never_entered() {
 		owned.push((owner, region, inner));
 	}
 
-	// A `Clause(Where)` whose body holds an op that is not encodable is opaque too, and one whose
-	// body is encodable is a region node.
+	// A `Clause(Where)` whose body holds an op that is not encodable is never entered: its owner
+	// is a leaf. One whose body is encodable is a region node.
 	let guarded = fx.add(truthy(), &[operand_value], 1);
 	let (guarded_region, guarded_block) =
 		fx.region(guarded, RegionKind::Clause(ClauseRole::Where), 0);
@@ -944,12 +944,21 @@ fn opaque_regions_never_entered() {
 	let at_limit = fx.add(text(EGRAPH_LITERAL_MAX_BYTES), &[], 1);
 	let over_limit = fx.add(text(EGRAPH_LITERAL_MAX_BYTES + 1), &[], 1);
 
+	// An owner the import holds as a leaf never has its region reached; an owner that is a node
+	// holds the region as a leaf.
 	let classified = islands(&fx.ir, &mut fx.facts, fx.stmt);
 	for (owner, region, inner) in &owned {
-		assert_eq!(classified.regions.get(region), Some(&RegionRole::Leaf));
+		let expected = match classified.ops.get(owner) {
+			Some(OpRole::Node) => Some(&RegionRole::Leaf),
+			Some(OpRole::Leaf) => None,
+			other => panic!("{owner:?} is classified as {other:?}"),
+		};
+		assert_eq!(classified.regions.get(region), expected, "{owner:?}");
 		assert!(!classified.ops.contains_key(inner), "{owner:?} entered a region it must not");
 	}
-	assert_eq!(classified.regions.get(&guarded_region), Some(&RegionRole::Leaf));
+	assert_eq!(classified.ops.get(&guarded), Some(&OpRole::Leaf));
+	assert_eq!(classified.regions.get(&guarded_region), None);
+	assert!(!classified.ops.contains_key(&pending));
 	assert_eq!(classified.regions.get(&plain_region), Some(&RegionRole::Node));
 	assert_eq!(classified.ops.get(&body), Some(&OpRole::Node));
 	assert_eq!(classified.ops.get(&over_limit), Some(&OpRole::Leaf));
@@ -957,12 +966,16 @@ fn opaque_regions_never_entered() {
 
 	let imp = fx.import(&env);
 	for (owner, _, _) in &owned {
-		let node = &imp.eg[class_of(&imp, fx.result(*owner))].nodes[0];
+		let class = class_of(&imp, fx.result(*owner));
+		if classified.ops.get(owner) == Some(&OpRole::Leaf) {
+			assert!(is_opaque(shape_of(&imp, class)), "{owner:?}");
+			continue;
+		}
+		let node = &imp.eg[class].nodes[0];
 		assert_eq!(node.kids.len(), 2);
 		assert!(is_opaque(shape_of(&imp, node.kids[1])));
 	}
-	let guarded_node = &imp.eg[class_of(&imp, fx.result(guarded))].nodes[0];
-	assert!(is_opaque(shape_of(&imp, guarded_node.kids[1])));
+	assert!(is_opaque(shape_of(&imp, class_of(&imp, fx.result(guarded)))));
 	let plain_node = &imp.eg[class_of(&imp, fx.result(plain))].nodes[0];
 	assert!(matches!(shape_of(&imp, plain_node.kids[1]), NodeShape::Region { .. }));
 	assert!(is_opaque(shape_of(&imp, class_of(&imp, fx.result(over_limit)))));
@@ -3558,8 +3571,9 @@ fn golden_diff(rule: &'static RuleDecl, build: fn(&mut Fixture) -> OpId) -> Rewr
 
 /// `truthy(1 AND false)` loses the literal operand, the short circuit with its lazy region, and
 /// the truthy: the two literals go and one fresh `false` stands for the truthy, so the net literal
-/// count falls by one and nothing is added. Every dropped op but the truthy is dead and pure; the
-/// truthy is covered by the new literal's provenance, not eliminated.
+/// count falls by one and nothing is added. The fresh literal's provenance holds the truthy and one
+/// of the literals, which are therefore not recorded as eliminated; every other dropped op is dead
+/// and pure.
 #[test]
 fn golden_diff_and_false_truthy() {
 	let (diff, outcome) = golden_run(&AND_FALSE_TRUTHY, lr5);
@@ -3571,16 +3585,14 @@ fn golden_diff_and_false_truthy() {
 	);
 	assert!(diff.added.is_empty());
 	let dead = |tag: &str| (tag.to_owned(), "DeadPure".to_owned());
-	assert_eq!(
-		diff.eliminated,
-		vec![dead("Literal"), dead("Literal"), dead("ShortCircuit"), dead("Yield")]
-	);
+	assert_eq!(diff.eliminated, vec![dead("Literal"), dead("ShortCircuit"), dead("Yield")]);
 }
 
 /// `truthy(1 OR true)` loses the literal operand, the short circuit with its lazy region, and the
 /// truthy: the two literals go and one fresh `true` stands for the truthy, so the net literal
-/// count falls by one and nothing is added. Every dropped op but the truthy is dead and pure; the
-/// truthy is covered by the new literal's provenance, not eliminated.
+/// count falls by one and nothing is added. The fresh literal's provenance holds the truthy and one
+/// of the literals, which are therefore not recorded as eliminated; every other dropped op is dead
+/// and pure.
 #[test]
 fn golden_diff_or_true_truthy() {
 	let (diff, outcome) = golden_run(&OR_TRUE_TRUTHY, lr6);
@@ -3592,10 +3604,7 @@ fn golden_diff_or_true_truthy() {
 	);
 	assert!(diff.added.is_empty());
 	let dead = |tag: &str| (tag.to_owned(), "DeadPure".to_owned());
-	assert_eq!(
-		diff.eliminated,
-		vec![dead("Literal"), dead("Literal"), dead("ShortCircuit"), dead("Yield")]
-	);
+	assert_eq!(diff.eliminated, vec![dead("Literal"), dead("ShortCircuit"), dead("Yield")]);
 }
 
 /// `7 * 0` loses the other operand and the product: the built `int 0` is the literal the statement
@@ -4078,9 +4087,23 @@ mod kv {
 	/// Each statement's outcome as SurrealQL text, or its error message; or the error of the
 	/// request itself.
 	async fn run(sql: &str) -> Result<Vec<Result<String, String>>, String> {
+		run_on(&*datastore().await, sql).await
+	}
+
+	/// [`run`] of `query` in a request of its own, over a datastore that [`PRELUDE`] has already
+	/// built. A statement after a catalog change in its own request is planned late-bound, when the
+	/// request reaches it, so the prelude runs first for the query to plan with the request.
+	async fn run_over_prelude(query: &str) -> Result<Vec<Result<String, String>>, String> {
+		let ds = datastore().await;
+		let built = run_on(&ds, PRELUDE).await.expect("the prelude runs");
+		assert!(built.iter().all(Result::is_ok), "the prelude runs: {built:?}");
+		run_on(&ds, query).await
+	}
+
+	/// [`run`] over the datastore `ds`.
+	async fn run_on(ds: &Datastore, sql: &str) -> Result<Vec<Result<String, String>>, String> {
 		use surrealdb_types::ToSql;
 
-		let ds = datastore().await;
 		let session = crate::dbs::Session::owner().with_ns("test").with_db("test");
 		ds.execute(sql, &session, None)
 			.await
@@ -4119,17 +4142,16 @@ mod kv {
 	/// no rule; the request reaches the planner in both runs, and the rule rewrites a statement
 	/// in the first and none in the second.
 	async fn rewrite_then_run_equals_run(query: &str, rule: &'static RuleDecl) {
-		let sql = format!("{PRELUDE} {query}");
 		let before = counts();
 		let with = {
 			let _forced = ForcedPlanning::new(EgraphMode::Default, Some(rule_set(&[rule])))
 				.with_limits(UNHURRIED);
-			run(&sql).await
+			run_over_prelude(query).await
 		};
 		let between = counts();
 		let without = {
 			let _forced = ForcedPlanning::new(EgraphMode::Default, Some(rule_set(&[])));
-			run(&sql).await
+			run_over_prelude(query).await
 		};
 		let after = counts();
 		assert_eq!(with, without);
@@ -4175,7 +4197,7 @@ mod kv {
 	/// the request reaches the planner, the answers are equal and no statement is adopted.
 	#[tokio::test]
 	async fn rewrite_leaves_a_field_product_alone() {
-		let sql = format!("{PRELUDE} SELECT VALUE (SELECT VALUE y * 0 FROM u) FROM t;");
+		let query = "SELECT VALUE (SELECT VALUE y * 0 FROM u) FROM t;";
 		let before = counts();
 		let with = {
 			let _forced = ForcedPlanning::new(
@@ -4183,12 +4205,12 @@ mod kv {
 				Some(rule_set(&[&MUL_ZERO_INT_R, &MUL_ZERO_INT_L])),
 			)
 			.with_limits(UNHURRIED);
-			run(&sql).await
+			run_over_prelude(query).await
 		};
 		let between = counts();
 		let without = {
 			let _forced = ForcedPlanning::new(EgraphMode::Default, Some(rule_set(&[])));
-			run(&sql).await
+			run_over_prelude(query).await
 		};
 		assert_eq!(with, without);
 		assert!(between.planned > before.planned, "the request did not reach the e-graph planner");
@@ -4262,6 +4284,9 @@ mod kv {
 	/// e-graph.
 	const NONDETERMINISTIC: &[&str] = &[
 		"rand::",
+		// `ORDER BY rand()` draws a fresh order on every run.
+		"rand()",
+		"RAND()",
 		// `array::shuffle` and its method form draw a fresh order on every call.
 		"shuffle",
 		"uuid",
@@ -4276,6 +4301,8 @@ mod kv {
 		"bcrypt",
 		"pbkdf2",
 		"scrypt",
+		// A bearer grant draws a fresh key and stamps the time it was made.
+		"GRANT FOR",
 	];
 
 	fn deterministic_corpus() -> Vec<(String, String)> {
@@ -4337,8 +4364,8 @@ mod kv {
 
 	/// `answers` with each record id key the engine generates (twenty lowercase letters and
 	/// digits), each UUID (a request id the engine generates) and each wall-clock time an
-	/// `EXPLAIN ANALYZE` reports (`elapsed: 1.2ms`) replaced by one marker, so two runs that
-	/// generate them compare equal.
+	/// `EXPLAIN ANALYZE` reports (`elapsed: 1.2ms` in text, `elapsed_ns: 1200000` in JSON)
+	/// replaced by one marker, so two runs that generate them compare equal.
 	fn without_generated_ids(answers: &Result<Vec<Result<String, String>>, String>) -> String {
 		let generated = regex::Regex::new(r"\b([A-Za-z_][A-Za-z0-9_]*):[0-9a-z]{20}\b")
 			.expect("the pattern compiles");
@@ -4349,8 +4376,11 @@ mod kv {
 			regex::Regex::new(r"elapsed: [0-9.]+(?:ns|µs|ms|s)\b").expect("the pattern compiles");
 		let answers = format!("{answers:?}");
 		let answers = generated.replace_all(&answers, "$1:<generated>");
+		let elapsed_ns =
+			regex::Regex::new(r"\belapsed_ns: [0-9]+\b").expect("the pattern compiles");
 		let answers = uuid.replace_all(&answers, "<uuid>");
-		elapsed.replace_all(&answers, "elapsed: <elapsed>").into_owned()
+		let answers = elapsed.replace_all(&answers, "elapsed: <elapsed>");
+		elapsed_ns.replace_all(&answers, "elapsed_ns: <elapsed>").into_owned()
 	}
 
 	/// With the registered rules, the logical-only run answers every statement of the corpus as
@@ -4376,16 +4406,15 @@ mod kv {
 		assert!(forced_calls > 0, "no request reached the e-graph planner");
 
 		for query in MATCHING {
-			let sql = format!("{PRELUDE} {query}");
 			let off = {
 				let _forced = ForcedPlanning::new(EgraphMode::ForceOff, Some(rules));
-				run(&sql).await
+				run_over_prelude(query).await
 			};
 			let before = counts();
 			let on = {
 				let _forced = ForcedPlanning::new(EgraphMode::ForceOnLogicalOnly, Some(rules))
 					.with_limits(UNHURRIED);
-				run(&sql).await
+				run_over_prelude(query).await
 			};
 			assert_eq!(on, off, "{query}");
 			assert!(

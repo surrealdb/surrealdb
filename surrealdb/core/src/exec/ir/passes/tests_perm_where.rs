@@ -11,7 +11,7 @@ use super::perm_where::{
 use super::tests_support::{Env, create, empty_ir, literal, ops_of_tag};
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::Ir;
-use crate::exec::ir::core::rewriter::{InsertPoint, Rewriter};
+use crate::exec::ir::core::rewriter::{InsertPoint, Provenance, Rewriter};
 use crate::exec::ir::core::value::ValueDef;
 use crate::exec::ir::expr::ops::{ExprOp, ExprTag};
 use crate::exec::ir::iface::conversion::EliminationReason;
@@ -365,25 +365,39 @@ fn guarded_layer(ir: &mut Ir, facts: &mut FactCache, verdict: bool) -> (OpId, Op
 	(filter, yielded, row[0])
 }
 
-/// A guard that yields `false` makes every read of its masked field read `NONE`.
+/// A guard that yields `false` makes every read of its masked field read `NONE`. The `NONE` stands
+/// for the read it replaces: its provenance holds the read, which is therefore not recorded as
+/// eliminated.
 #[tokio::test]
 async fn a_false_field_guard_hides_its_reads() {
 	let mut ir = empty_ir();
 	let mut facts = FactCache::new();
 	let (_, yielded, _) = guarded_layer(&mut ir, &mut facts, false);
 	// The read of the stored field in the field frame stays; only the filter's read is masked.
-	assert_eq!(ops_of_tag(&ir, FIELD).len(), 2);
+	let reads = ops_of_tag(&ir, FIELD);
+	assert_eq!(reads.len(), 2);
 
 	let report = run(&SpecialiseGuards, &mut ir, &PassConfig::RELEASE).await;
 	assert_eq!(report.rewrites, 1);
-	assert_eq!(ops_of_tag(&ir, FIELD).len(), 1);
-	assert!(reasons(&ir).contains(&EliminationReason::InvisibleToPrincipal));
+	let kept = ops_of_tag(&ir, FIELD);
+	let [hidden] =
+		reads.iter().copied().filter(|read| !kept.contains(read)).collect::<Vec<_>>()[..]
+	else {
+		panic!("one read is hidden: {reads:?} became {kept:?}");
+	};
 	let value = ir.op(yielded).expect("the yield stays").operands[0];
-	let kind = &ir.op(definer(&ir, value)).expect("the definer stays").kind;
+	let none = ir.op(definer(&ir, value)).expect("the definer stays");
 	assert!(
-		matches!(kind, OpKind::Expr(ExprOp::Literal(held)) if matches!(**held, Value::None)),
-		"{kind:?}"
+		matches!(&none.kind, OpKind::Expr(ExprOp::Literal(held)) if matches!(**held, Value::None)),
+		"{:?}",
+		none.kind
 	);
+	assert!(
+		matches!(&none.provenance, Provenance::From(held) if held.contains(&hidden)),
+		"{:?}",
+		none.provenance
+	);
+	assert!(ir.eliminated().iter().all(|(op, _)| *op != hidden));
 }
 
 /// A guard that yields `true` over a field frame that only reads the stored field points the

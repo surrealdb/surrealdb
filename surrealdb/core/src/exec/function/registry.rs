@@ -783,7 +783,11 @@ pub(crate) const FALLIBILITY: &[(FnKind, &str, Fallibility)] = &[
 	(FnKind::Scalar, "set::remove", Fallibility::VALUE),
 	(FnKind::Scalar, "set::slice", Fallibility::VALUE),
 	(FnKind::Scalar, "set::union", Fallibility::VALUE),
-	(FnKind::Scalar, "sleep", Fallibility::VALUE.union(Fallibility::CONTEXT)),
+	(
+		FnKind::Scalar,
+		"sleep",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
 	(FnKind::Scalar, "string::capitalize", Fallibility::INFALLIBLE),
 	(FnKind::Scalar, "string::concat", Fallibility::VALUE),
 	(FnKind::Scalar, "string::contains", Fallibility::INFALLIBLE),

@@ -1063,12 +1063,13 @@ mod tests {
 		let mut cx = LowerCx::detached();
 		let (operand, program, _) = lower_in(&mut cx, &b.ir, result).expect("the loop lowers");
 		let code = code_of(&program);
-		// The capability check comes first, then the collection and the closure in order.
+		// Making the closure has no effect and comes first. The capability check comes before the
+		// collection is read, and both come before the call.
 		let allowed = position(code, |i| matches!(i, Instr::CallAllowed { .. }));
 		let collection = position(code, |i| matches!(i, Instr::LoadParam { .. }));
 		let make = position(code, |i| matches!(i, Instr::MakeClosure { .. }));
 		let call = position(code, |i| matches!(i, Instr::Call { .. }));
-		assert!(allowed < collection && collection < make && make < call);
+		assert!(make < allowed && allowed < collection && collection < call);
 		let Instr::Call {
 			call: spec,
 			args,
@@ -1118,11 +1119,13 @@ mod tests {
 		let mut cx = LowerCx::detached();
 		let (operand, program, _) = lower_in(&mut cx, &b.ir, result).expect("the loop lowers");
 		let code = code_of(&program);
+		// Making the closure has no effect and comes first. The method is resolved on the receiver,
+		// which is read first, and only then called.
 		let receiver = position(code, |i| matches!(i, Instr::LoadParam { .. }));
 		let resolve = position(code, |i| matches!(i, Instr::MethodResolve { .. }));
 		let make = position(code, |i| matches!(i, Instr::MakeClosure { .. }));
 		let call = position(code, |i| matches!(i, Instr::Method { .. }));
-		assert!(receiver < resolve && resolve < make && make < call);
+		assert!(make < receiver && receiver < resolve && resolve < call);
 		let Instr::Method {
 			method,
 			args,

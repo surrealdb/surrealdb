@@ -1010,6 +1010,9 @@ mod tests {
 		assert!(matches!(program.pipelines[0].code[0], Instr::LoadParam { .. }));
 	}
 
+	/// An aliased body that reads a value the destructure's own pipeline computed is a host
+	/// pipeline that computes that value itself: it holds no register of the pipeline it is
+	/// called from.
 	#[test]
 	fn a_destructure_whose_aliased_body_reads_the_pipelines_register_is_not_yet() {
 		let mut b = Builder::new();
@@ -1032,7 +1035,29 @@ mod tests {
 			b.binary(BinaryOperator::Add, outer, outer)
 		});
 		let value = b.result_of(owner);
-		assert!(matches!(lower_seeded(&b.ir, value, |_| {}), Err(IrError::NotYet { .. })));
+		let (operand, program, _) = lower_seeded(&b.ir, value, |_| {}).expect("the value lowers");
+		assert!(matches!(operand, Operand::Reg(_)));
+		assert!(matches!(
+			program.pipelines[0].code.iter().find(|i| matches!(i, Instr::Destructure { .. })),
+			Some(Instr::Destructure { fields, .. })
+				if matches!(fields.as_ref(), [DestructureStep::Aliased(_, 0)])
+		));
+		let [body] = program.host_code.as_slice() else {
+			panic!("one aliased body: {:?}", program.host_code);
+		};
+		assert!(matches!(body.source, Source::Once));
+		let call = body
+			.code
+			.iter()
+			.position(|i| matches!(i, Instr::Call { .. }))
+			.expect("the body calls the builtin itself");
+		let sum = body
+			.code
+			.iter()
+			.position(|i| matches!(i, Instr::Arith { .. }))
+			.expect("the body adds what it computed");
+		assert!(call < sum);
+		assert!(matches!(body.code[body.code.len() - 2..], [Instr::Emit { .. }, Instr::EndRow]));
 	}
 
 	#[test]

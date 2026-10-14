@@ -264,13 +264,31 @@ async fn nondeterministic_calls_are_distinct() {
 	);
 }
 
+/// The calls of the builtin `name` in `ir`, in pre-order.
+fn calls_named(ir: &Ir, name: &str) -> Vec<OpId> {
+	ops_tagged(ir, OpTag::Expr(ExprTag::Call))
+		.into_iter()
+		.filter(|op| {
+			matches!(kind_of(ir, *op), OpKind::Expr(ExprOp::Call(call))
+				if call.function == Function::Normal(name.to_owned()))
+		})
+		.collect()
+}
+
+/// `time::now()` reads the statement's instant when the statement runs: the binder keeps each
+/// read a call, so the capability check runs, and the two calls are one value of the statement.
 #[tokio::test]
 async fn clock_reads_are_one_value() {
 	let env = Env::new();
 	let ir = bind("RETURN [time::now(), time::now()]").await;
 	let mut facts = FactCache::new();
-	let clocks = ops_tagged(&ir, OpTag::Expr(ExprTag::Now));
+	assert!(ops_tagged(&ir, OpTag::Expr(ExprTag::Literal)).is_empty(), "no read is a literal");
+	let clocks = calls_named(&ir, "time::now");
 	assert_eq!(clocks.len(), 2, "both reads of the clock are in the statement");
+	for clock in &clocks {
+		let effects = effects::of_with(&ir, &mut facts, &env.cx(), *clock);
+		assert!(effects.set.contains(EffectSet::CLOCK), "the call reads the clock");
+	}
 	let first = identity::key_with(&ir, &mut facts, &env.cx(), clocks[0]);
 	let second = identity::key_with(&ir, &mut facts, &env.cx(), clocks[1]);
 	assert_eq!(first, second, "the clock is one value within a statement");
@@ -421,8 +439,14 @@ async fn types_classify_sources() {
 		assert_eq!(knowledge_of(&ir, read), TypeKnowledge::Unknown, "`{sql}`");
 	}
 
-	// The element of a loop over an array of known element kind has that kind.
+	// A compound literal has no kind, so the element of a loop over one is unknown.
 	let ir = bind("FOR $i IN [1, 2] { RETURN $i }").await;
+	let each = loop_of(&ir, LoopKind::For);
+	let element = multiplicity::loop_element(&ir, each).expect("the loop has an element");
+	assert_eq!(types::classify(&ir, &mut FactCache::new(), element), TypeKnowledge::Unknown);
+
+	// The element of a loop over an array of known element kind has that kind.
+	let ir = bind("FOR $i IN <array<int>> $p { RETURN $i }").await;
 	let each = loop_of(&ir, LoopKind::For);
 	let element = multiplicity::loop_element(&ir, each).expect("the loop has an element");
 	assert_eq!(fact_kind(&types::classify(&ir, &mut FactCache::new(), element)), Some(&Kind::Int));
@@ -496,7 +520,9 @@ async fn multiplicity_facts_mirror() {
 			Multiplicity::Distinct,
 			ElemPath::Id,
 		),
-		("SELECT * FROM <set> [1, 2]", Multiplicity::Distinct, ElemPath::Elem),
+		// A set literal collapses to one literal under its conversion, which is not read as
+		// distinct.
+		("SELECT * FROM <set> [1, 2]", Multiplicity::MayRepeat, ElemPath::Elem),
 		("SELECT 1 AS id FROM w", Multiplicity::MayRepeat, ElemPath::Elem),
 		("SELECT * FROM t SPLIT a", Multiplicity::MayRepeat, ElemPath::Elem),
 		("SELECT * FROM t, t", Multiplicity::MayRepeat, ElemPath::Elem),
@@ -607,14 +633,14 @@ async fn row_dep_cases() {
 		"the frozen entry point answers under the default context"
 	);
 
-	// A call of a function the container holds no body for answers the top, so it is not
-	// invariant even over a fixed value.
+	// A call of a function the container holds no body for takes the row it is called for, so it
+	// varies with the row even over a fixed value.
 	let ir = bind("SELECT *, fn::f($auth) FROM user").await;
 	let select = loop_of(&ir, LoopKind::Select);
 	let call = first_tagged(&ir, OpTag::Expr(ExprTag::Call));
 	let answer =
 		row_dep::invariant_in_with(&ir, &mut FactCache::new(), &cx, result_of(&ir, call), select);
-	assert!(matches!(answer, Invariance::Dependent(DepCause::Effect(_))), "{answer:?}");
+	assert!(matches!(answer, Invariance::Dependent(DepCause::BlockArg(_))), "{answer:?}");
 
 	// A call that takes the row varies with it.
 	let ir = bind("SELECT *, fn::f($this) FROM user").await;
@@ -1001,10 +1027,18 @@ async fn slice_cases() {
 	let each = loop_of(&ir, LoopKind::For);
 	let held = slice::of(&ir, &mut FactCache::new(), &cx, each);
 	let later = *field_reads(&ir, "seen").last().expect("the loop reads `seen` back");
-	let subject = *ops_below(&ir, each)
+	let write = *ops_below(&ir, each)
 		.iter()
-		.find(|op| matches!(kind_of(&ir, **op), OpKind::Logical(LogOp::Source(_))))
-		.expect("`UPDATE $u` reads its subject");
+		.find(|op| multiplicity::loop_kind(&ir, **op) == Some(LoopKind::Write))
+		.expect("`UPDATE $u` writes");
+	let source = ir.op(write).expect("the write exists").operands[0];
+	let crate::exec::ir::core::value::ValueDef::OpResult {
+		op: subject,
+		..
+	} = ir.value(source).expect("`UPDATE $u` reads its subject").def
+	else {
+		panic!("the subject is an op's value");
+	};
 	assert_eq!(exclusion_of(&held, subject), None, "the `UPDATE $u` subject read is compute");
 	assert_eq!(
 		exclusion_of(&held, later),
@@ -1089,7 +1123,8 @@ async fn certainty_cases() {
 		"the arm may not be taken"
 	);
 
-	// A read in a loop nested in the body runs once per element of a source that may be empty.
+	// A `RETURN` in the body ends the outer loop, so no read below it is certain to run in an
+	// iteration: the answer is the weakest.
 	let ir = bind("FOR $x IN (SELECT * FROM t) { FOR $y IN $x.tags { RETURN t:1.n } }").await;
 	let outer = loop_of(&ir, LoopKind::For);
 	let reads = field_reads(&ir, "n");
@@ -1097,8 +1132,8 @@ async fn certainty_cases() {
 	for read in reads {
 		assert_eq!(
 			certainty::of(&ir, &mut FactCache::new(), &cx, outer, read),
-			ReadCertainty::Conditional,
-			"the nested loop may run zero times"
+			ReadCertainty::PastExit,
+			"the `RETURN` may end the loop before the read"
 		);
 	}
 

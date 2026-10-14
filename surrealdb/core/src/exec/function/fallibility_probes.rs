@@ -5,9 +5,9 @@
 //! projection function as a `SELECT` over one row) against a `kv-mem` datastore, with arguments
 //! drawn from a fixed corpus of well-kinded values for each argument's [`Kind`]. Each call runs
 //! under two principals (root owner, database editor) and two capability sets that both allow
-//! the builtin (everything allowed, and everything allowed with a network allow-list), so a
-//! denial by name, which is the call rule's capability dependency and not the builtin's class,
-//! never enters the comparison.
+//! the builtin (everything allowed, every experimental feature included, and the same with a
+//! network allow-list), so a denial by name or by experimental gate, which is the call rule's
+//! capability dependency and not the builtin's class, never enters the comparison.
 //!
 //! An outcome is `Ok` or the error's kind. A class is checked by its strongest member
 //! ([`Fallibility::class`]):
@@ -217,8 +217,11 @@ async fn contexts() -> Vec<Context> {
 		["127.0.0.1".parse::<NetTarget>().expect("a network target")].into(),
 	);
 	let sets = [
-		("all", Capabilities::all()),
-		("all+net-allow-list", Capabilities::all().with_network_targets(net)),
+		("all", Capabilities::all().with_experimental(Targets::All)),
+		(
+			"all+net-allow-list",
+			Capabilities::all().with_experimental(Targets::All).with_network_targets(net),
+		),
 	];
 	let mut out = Vec::new();
 	for (caps_name, caps) in sets {

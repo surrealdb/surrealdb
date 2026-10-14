@@ -154,10 +154,13 @@ fn slot_table_row_names_follow_their_regions() {
 	let free = OccurrenceClass::Free(SlotId(0));
 	let row = OccurrenceClass::Row;
 	let cases: [(&str, &[OccurrenceClass]); 8] = [
-		("SELECT * FROM t WHERE $this.a = $value AND b = $before", &[row, row, free]),
+		(
+			"SELECT * FROM t WHERE $this.a = $value AND b = $before",
+			&[row, free, OccurrenceClass::Free(SlotId(1))],
+		),
 		("SELECT a, $value FROM t GROUP BY a", &[free]),
 		("SELECT * FROM t LIMIT $this", &[free]),
-		("UPDATE t SET a = $value", &[row]),
+		("UPDATE t SET a = $value", &[free]),
 		("UPDATE t SET a = $input", &[free]),
 		("UPDATE t SET a = 1 RETURN $before, $after", &[row, row]),
 		("INSERT INTO t (a) VALUES ($input) ON DUPLICATE KEY UPDATE a = $input", &[free, row]),
@@ -236,6 +239,27 @@ fn literal_ordinals_follow_visit_order() {
 		2
 	);
 	assert_eq!(table_of("RETURN $a").literal_count(), 0);
+	assert_eq!(table_of("SELECT * FROM t LIMIT 10 START 5 TIMEOUT 5s").literal_count(), 3);
+	assert_eq!(table_of("UPDATE t SET a = 1 TIMEOUT 5s").literal_count(), 2);
+	assert_eq!(table_of("UPSERT t SET a = 1 TIMEOUT 5s").literal_count(), 2);
+}
+
+/// `START` and `TIMEOUT` clauses on `SELECT`, `UPDATE`, and `UPSERT` are visited outside any row
+/// region.
+#[test]
+fn slot_table_visits_start_and_timeout_clauses() {
+	let select = table_of("SELECT * FROM t LIMIT $lim START $off TIMEOUT $tm");
+	assert_eq!(select.id_of("lim"), Some(SlotId(0)));
+	assert_eq!(select.id_of("off"), Some(SlotId(1)));
+	assert_eq!(select.id_of("tm"), Some(SlotId(2)));
+
+	let update = table_of("UPDATE t SET a = $v TIMEOUT $tm");
+	assert_eq!(update.id_of("v"), Some(SlotId(0)));
+	assert_eq!(update.id_of("tm"), Some(SlotId(1)));
+
+	let upsert = table_of("UPSERT t SET a = $v TIMEOUT $tm");
+	assert_eq!(upsert.id_of("v"), Some(SlotId(0)));
+	assert_eq!(upsert.id_of("tm"), Some(SlotId(1)));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -293,7 +317,12 @@ fn names_collect_only_free_names_of_the_text() {
 		collect(&statement("RETURN [$value, $input, $parent]")).params,
 		BTreeSet::from(["value".to_owned(), "input".to_owned()])
 	);
-	assert!(collect(&statement("SELECT * FROM t WHERE a = $value")).params.is_empty());
+	assert!(collect(&statement("SELECT * FROM t WHERE a = $this.b")).params.is_empty());
+	assert_eq!(
+		collect(&statement("SELECT * FROM t WHERE a = $value")).params,
+		BTreeSet::from(["value".to_owned()]),
+		"`$value` is no row name of a statement's clause"
+	);
 	assert!(collect(&statement("RETURN { FOR $i IN [1] { $i }; 1 }")).params.is_empty());
 }
 
@@ -906,6 +935,7 @@ mod datastore {
 	use crate::ctx::FrozenContext;
 	use crate::exec::ir::cache::answer::{CatalogAnswer, ExactAnswer, FreeName, SessionValues};
 	use crate::exec::ir::cache::planning::PlanBinding;
+	use crate::exec::ir::core::ir::{Walk, WalkOrder};
 	use crate::exec::ir::egraph::{EgraphMode, set_mode};
 	use crate::exec::ir::error::IrError;
 	use crate::exec::ir::iface::IndexRef;
@@ -1988,6 +2018,17 @@ mod datastore {
 		sql: &str,
 		vars: &[(&str, Value)],
 	) -> Result<Vec<(usize, ValueDeps)>, IrError> {
+		Ok(planned_as(session, setup, sql, vars).await?.outcome.deps)
+	}
+
+	/// `sql` planned by `plan_request` as `session` with `vars` bound, in a read transaction
+	/// opened after `setup` has been run and committed.
+	async fn planned_as(
+		session: &crate::dbs::Session,
+		setup: &str,
+		sql: &str,
+		vars: &[(&str, Value)],
+	) -> Result<crate::exec::ir::PlannedRequest, IrError> {
 		use crate::dbs::{Capabilities, Options};
 		use crate::exec::config::ExecConfig;
 		use crate::exec::ir::core::ir::IrScope;
@@ -2030,7 +2071,7 @@ mod datastore {
 			held: Vec::new(),
 			session: &plan_session,
 		};
-		Ok(plan_request(&input, &planning).await?.outcome.deps)
+		plan_request(&input, &planning).await
 	}
 
 	async fn planned_record_on(
@@ -2220,22 +2261,25 @@ mod datastore {
 		assert!(guarded.contains("p"));
 	}
 
-	/// The statement clock is read when the statement runs, so no dependence names it: the only
-	/// value the record can hold is the duration literal of the text.
+	/// The statement clock is read when the statement runs, never at plan time: the planned
+	/// container bakes no instant in, and the only literal of the text is the duration.
 	#[tokio::test]
 	async fn now_is_a_statement_constant() {
 		let sql = "SELECT * FROM t WHERE at > time::now() - 1d";
 		assert_eq!(table_of(sql).literal_count(), 1);
-		let record =
-			last_record(planned_record_on(INDEXED, sql, &[]).await.expect("the request plans"));
-		assert!(
-			record
-				.deps()
-				.iter()
-				.all(|dep| matches!(dep.value, ValueRef::Literal(LiteralOrdinal(0)))),
-			"{:?}",
-			record.deps()
-		);
-		assert!(!record.overflowed());
+		let planned =
+			planned_as(&TestDb::owner(), INDEXED, sql, &[]).await.expect("the request plans");
+		let ir = &planned.ir;
+		let mut baked = Vec::new();
+		ir.walk(ir.top(), WalkOrder::PreOrder, &mut |op| {
+			if let Some(data) = ir.op(op) {
+				let kind = format!("{:?}", data.kind);
+				if kind.contains("Datetime(") {
+					baked.push(kind);
+				}
+			}
+			Walk::Continue
+		});
+		assert!(baked.is_empty(), "no instant is baked into the plan: {baked:?}");
 	}
 }

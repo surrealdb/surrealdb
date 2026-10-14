@@ -59,6 +59,10 @@ pub(crate) struct MatchesAttr {
 	pub(crate) registered: bool,
 	/// The tables whose rows an index answers the operator for.
 	pub(crate) executor_tables: ExecutorTables,
+	/// The declared position the operator's left operand reads off the row ([`field_path`]),
+	/// resolved where the operator is decided. A container the decision is carried into may hold
+	/// the left operand as a value it is handed, which names no position of its own.
+	pub(crate) field: Option<FieldPath>,
 	/// Whether the stages of the loop that decided this register any operator: a loop nested in it
 	/// whose own stages register none leaves this decision in force.
 	scoped: bool,
@@ -403,6 +407,7 @@ pub(crate) fn run(ir: &mut Ir, registry: &FunctionRegistry) {
 			let attr = MatchesAttr {
 				registered: is_registered,
 				executor_tables: executor_tables.clone(),
+				field: left_field(ir, op),
 				scoped,
 			};
 			table.matches.insert(op, attr);
@@ -513,6 +518,7 @@ fn subjects_scopes(ir: &Ir, registry: &FunctionRegistry, table: &mut MatchesTabl
 				MatchesAttr {
 					registered: is_registered,
 					executor_tables: executor_tables.clone(),
+					field: left_field(ir, op),
 					scoped,
 				},
 			);
@@ -693,6 +699,11 @@ fn clause_of(ir: &Ir, op: OpId) -> Option<Clause> {
 		field: field_path(ir, *left),
 		query,
 	})
+}
+
+/// The declared position the left operand of the `MATCHES` operator `op` reads off a row.
+fn left_field(ir: &Ir, op: OpId) -> Option<FieldPath> {
+	field_path(ir, *ir.op(op)?.operands.first()?)
 }
 
 /// The declared position `value` reads off a row: fields, accesses and `.*` over a block argument.

@@ -4,7 +4,7 @@
 use super::driver::{LoPass, PassConfig, PassReport, run_passes};
 use super::fold::{AlgebraicRules, FactRules, FoldPass};
 use super::tests_support::{
-	Env, RecordingObserver, ScriptedFolder, bind, create, empty_ir, kind_of, ops_of_tag,
+	Env, RecordingObserver, ScriptedFolder, bind, create, empty_ir, kind_of, ops_of_tag, spec,
 	verify_logical,
 };
 use crate::exec::ir::core::facts::FactCache;
@@ -16,9 +16,10 @@ use crate::exec::ir::expr::ops::{ExprOp, ExprTag, FoldedError};
 use crate::exec::ir::iface::conversion::ExprDialect;
 use crate::exec::ir::iface::fold::{FoldConsumer, FoldOutcome, NotYetFolder};
 use crate::exec::ir::iface::premise::PremiseSet;
+use crate::exec::ir::iface::types::{FactSource, TypeKnowledge};
 use crate::exec::ir::logical::ops::LogTag;
 use crate::exec::ir::op_kind::{OpKind, OpTag};
-use crate::expr::BinaryOperator;
+use crate::expr::{BinaryOperator, Kind};
 use crate::val::Value;
 
 const SHORT_CIRCUIT: OpTag = OpTag::Expr(ExprTag::ShortCircuit);
@@ -149,15 +150,21 @@ async fn observer_sees_each_consumed_fold() {
 	assert_eq!(observer.defined, [true, true]);
 }
 
-/// An arm holding a `RETURN` that leaves it is not collapsed, because inlining it would move the
-/// place the `RETURN` lands.
+/// An arm holding a `BREAK` that leaves it is not collapsed, because inlining it would move the
+/// place the `BREAK` lands. A value arm catches a `RETURN` written in it, so an arm whose `RETURN`
+/// lands in a nested arm is collapsed.
 #[tokio::test]
-async fn an_arm_with_an_escaping_return_keeps_its_if() {
-	let mut ir = bind("LET $r = IF true { IF $p { RETURN 3 }; 4 }; RETURN $r").await;
+async fn an_arm_with_escaping_control_keeps_its_if() {
+	let mut ir = bind("FOR $i IN [1, 2] { IF true { IF $p { BREAK }; 4 } }").await;
 	let before = ifs(&ir);
-	let folder = ScriptedFolder::new();
-	fold(&mut ir, &folder, &mut RecordingObserver::default()).await;
-	assert_eq!(ifs(&ir), before);
+	assert_eq!(before, 2);
+	fold(&mut ir, &ScriptedFolder::new(), &mut RecordingObserver::default()).await;
+	assert_eq!(ifs(&ir), before, "the `BREAK` lands on the loop, beyond the arm");
+
+	let mut ir = bind("LET $r = IF true { IF $p { RETURN 3 }; 4 }; RETURN $r").await;
+	assert_eq!(ifs(&ir), 2);
+	fold(&mut ir, &ScriptedFolder::new(), &mut RecordingObserver::default()).await;
+	assert_eq!(ifs(&ir), 1, "the `RETURN` lands on the nested arm, inside the collapsed one");
 }
 
 /// A conjunct that folds to `true` leaves the `AND` chain and one that folds to `false` stays as
@@ -245,8 +252,14 @@ async fn fact_rules_erase_convert_and_truthy() {
 	let mut facts = FactCache::new();
 	let block = ir.region(ir.top()).expect("the top region exists").blocks[0];
 	let mut rw = Rewriter::new(&mut ir, &mut facts);
-	let truth = OpKind::Expr(ExprOp::Literal(Box::new(Value::Bool(true))));
-	let (_, held) = create(&mut rw, InsertPoint::End(block), truth, &[], 1);
+	// A literal carries the kind the binder gives it, a fact sourced from the literal.
+	let mut truth = spec(OpKind::Expr(ExprOp::Literal(Box::new(Value::Bool(true)))), &[], 1);
+	truth.results[0] = TypeKnowledge::Fact {
+		kind: Kind::Bool,
+		source: FactSource::Literal,
+	};
+	let literal = rw.create(InsertPoint::End(block), truth).expect("the op is created");
+	let held = rw.ir().op(literal).expect("the op exists").results.clone();
 	let truthy = OpKind::Expr(ExprOp::Truthy);
 	let (_, coerced) = create(&mut rw, InsertPoint::End(block), truthy, &[held[0]], 1);
 	let add = OpKind::Expr(ExprOp::Binary {
@@ -266,16 +279,26 @@ async fn fact_rules_erase_convert_and_truthy() {
 	assert_eq!(ir.op(user).expect("the user stays").operands.as_slice(), [held[0], held[0]]);
 }
 
-/// A clock read in a `WHERE` container is never folded. The fold host refuses any value that reads
-/// the clock, so `expr.now` stays in the container after the fold pass runs with the real folder.
+/// A clock read in a `WHERE` container is never folded. The binder keeps `time::now()` a call, and
+/// the fold host refuses any value that reads the clock, so the call stays in the container after
+/// the fold pass runs with the real folder: the clock is read when the statement runs, never baked
+/// into the plan as a literal.
 #[tokio::test]
-async fn a_clock_read_in_a_where_container_keeps_expr_now() {
+async fn a_clock_read_in_a_where_container_stays_a_call() {
 	use crate::exec::ir::fold::evaluate::{BUILTIN_FOLDER, eligible};
 	use crate::exec::ir::iface::fold::NotFoldable;
 
 	let mut ir = bind("SELECT * FROM t WHERE at > time::now() - 1d").await;
-	let now = OpTag::Expr(ExprTag::Now);
-	assert_eq!(ops_of_tag(&ir, now).len(), 1, "the binder lowers the call to `expr.now`");
+	let clock_calls = |ir: &Ir| {
+		ops_of_tag(ir, OpTag::Expr(ExprTag::Call))
+			.into_iter()
+			.filter(|op| {
+				matches!(kind_of(ir, *op), OpKind::Expr(ExprOp::Call(call))
+					if call.function == crate::expr::Function::Normal("time::now".to_owned()))
+			})
+			.count()
+	};
+	assert_eq!(clock_calls(&ir), 1, "the binder keeps the clock read a call");
 
 	let env = Env::new();
 	let cx = env.cx();
@@ -292,7 +315,8 @@ async fn a_clock_read_in_a_where_container_keeps_expr_now() {
 	)
 	.await
 	.expect("the pass runs");
-	assert_eq!(ops_of_tag(&ir, now).len(), 1, "the fold pass left the clock read in place");
+	assert_eq!(clock_calls(&ir), 1, "the fold pass left the clock read in place");
+	assert!(!has_literal(&ir, "Datetime"), "no instant is baked into the container");
 
 	// The value `time::now() - 1d` computes is refused for the clock.
 	let subtract = ops_of_tag(&ir, OpTag::Expr(ExprTag::Binary))

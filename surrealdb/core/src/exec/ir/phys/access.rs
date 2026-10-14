@@ -4322,11 +4322,16 @@ mod convert_tests {
 	}
 
 	/// A bitmap fused from an `OR` states the index union it replaced as its one `Pipeline`
-	/// region, the read that answers when a branch of the bitmap overflows.
+	/// region, the read that answers when a branch of the bitmap overflows. Only an index whose
+	/// entries carry document ids is a branch of a bitmap.
 	#[tokio::test]
 	async fn a_bitmap_of_an_or_holds_the_union_it_replaced_as_a_region() {
 		let (ir, _) = statement(table_source(), None, &[Conjunct::Either("x", 1, "y", 2)]);
-		let held = indexed(vec![index(1, "ix", "x", Index::Idx), index(2, "iy", "y", Index::Idx)]);
+		let current = |id, name, col| IndexDefinition {
+			format_version: crate::catalog::INDEX_FORMAT_VERSION,
+			..index(id, name, col, Index::Idx)
+		};
+		let held = indexed(vec![current(1, "ix", "x"), current(2, "iy", "y")]);
 		let ir = converted(ir, &held).await.expect("the source converts");
 		let (attrs, kinds, bodies) = bitmap_of(&ir);
 		assert!(attrs.fallback);
