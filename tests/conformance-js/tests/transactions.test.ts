@@ -197,26 +197,27 @@ test("THROW inside BEGIN/COMMIT rolls back prior statements", async () => {
 	await db.close();
 });
 
-test("RETURN inside a transaction exits the block early but still commits prior writes", async () => {
+test("RETURN inside a transaction is a value statement and later statements still run", async () => {
 	const { db } = await rootClient(server);
 	await db.query("DEFINE TABLE tf");
 
-	// 5 statements, but only 4 responses: the statement AFTER the RETURN is
-	// never executed and gets no response slot at all.
+	// A RETURN standing directly in the block is an ordinary value statement:
+	// it takes a response slot holding its value, and the statements after it
+	// run and commit. 5 statements, 5 responses.
 	// .json() before .responses() maps rich values (RecordId) to JSON strings.
 	const res = await db
 		.query("BEGIN; CREATE tf:1 SET n = 1; RETURN 'early'; CREATE tf:2 SET n = 2; COMMIT")
 		.json()
 		.responses();
-	expect(res).toHaveLength(4);
+	expect(res).toHaveLength(5);
 	expect(res.every((r) => r.success)).toBe(true);
 	expect(res[1].success && res[1].result).toEqual([{ id: "tf:1", n: 1 }]);
 	expect(res[2].success && res[2].result).toBe("early");
+	expect(res[3].success && res[3].result).toEqual([{ id: "tf:2", n: 2 }]);
 
-	// The transaction committed: the pre-RETURN write persisted, the
-	// post-RETURN statement never ran.
-	const [rows] = await db.query<[Array<{ id: string }>]>("SELECT * FROM tf").json();
-	expect(rows.map((r) => r.id)).toEqual(["tf:1"]);
+	// The transaction committed both writes, the one after the RETURN included.
+	const [rows] = await db.query<[Array<{ id: string }>]>("SELECT * FROM tf ORDER BY id").json();
+	expect(rows.map((r) => r.id)).toEqual(["tf:1", "tf:2"]);
 
 	await db.close();
 });
