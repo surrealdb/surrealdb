@@ -1855,6 +1855,21 @@ pub async fn client_side_transactions(new_db: impl CreateDb) {
 	let users: Vec<User> = db.select("user").await.unwrap();
 	assert_eq!(users.len(), 3); // John, Alice, Bob
 
+	// Test 4: Reinsert the same record id after deleting it in a transaction
+	let id = Resource::from(("tx_reinsert", "same"));
+	let _: Value = db.insert(id.clone()).await.unwrap();
+	let _: Value = db.delete(id.clone()).await.unwrap();
+	let _: Value = db.insert(id.clone()).await.unwrap();
+	let _: Value = db.delete(id.clone()).await.unwrap();
+
+	let txn = db.begin().await.unwrap();
+	let _: Value = txn.insert(id.clone()).await.unwrap();
+	let _: Value = txn.delete(id.clone()).await.unwrap();
+	let _: Value = txn.insert(id).await.unwrap();
+	let db = txn.commit().await.unwrap();
+	let records: Vec<Value> = db.select("tx_reinsert").await.unwrap();
+	assert_eq!(records.len(), 1);
+
 	drop(permit);
 }
 

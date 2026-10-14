@@ -97,6 +97,26 @@ pub async fn put(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 }
 
+pub async fn put_after_delete(new_ds: impl CreateDs) {
+	// Create a new datastore
+	let node_id = Uuid::parse_str("025a7ced-a8ac-40c9-bd15-3400b714dacc").unwrap();
+	let (ds, _) = new_ds.create_ds(node_id).await;
+	// Create a writeable transaction
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
+	tx.put(&"test", &"one".as_bytes().to_vec()).await.unwrap();
+	tx.commit().await.unwrap();
+	// Create a writeable transaction
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
+	tx.del(&"test").await.unwrap();
+	tx.put(&"test", &"two".as_bytes().to_vec()).await.unwrap();
+	tx.commit().await.unwrap();
+	// Create a readonly transaction
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
+	let val = tx.get(&"test", None).await.unwrap();
+	assert!(matches!(val.as_deref(), Some(b"two")));
+	tx.cancel().await.unwrap();
+}
+
 pub async fn putc(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("705bb520-bc2b-4d52-8e64-d1214397e408").unwrap();
@@ -1173,6 +1193,12 @@ macro_rules! define_tests {
 		#[serial_test::serial]
 		async fn put() {
 			super::raw::put($new_ds).await;
+		}
+
+		#[tokio::test]
+		#[serial_test::serial]
+		async fn put_after_delete() {
+			super::raw::put_after_delete($new_ds).await;
 		}
 
 		#[tokio::test]
