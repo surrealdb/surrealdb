@@ -222,22 +222,27 @@ impl<'a> IndexKeyspace<'a> {
 		}
 	}
 
-	/// The entries of a single-column index whose value lies between `from`
-	/// and `to`.
+	/// The entries whose first value lies between `from` and `to`, whatever
+	/// values follow it on a compound index.
+	///
+	/// A bound on a value admits or excludes every key that begins with that
+	/// value: a single-column unique slot, the unique slots of a compound
+	/// index, which go on to the further values, and plain entries, which go
+	/// on to the record id. The range is therefore the same for a unique index
+	/// as for a non-unique one.
 	pub fn range(
 		&self,
-		unique: bool,
 		from: Bound<&Value>,
 		to: Bound<&Value>,
 	) -> Result<TypedRange<IndexEntryValue>> {
 		let start = match from {
-			Bound::Included(x) => self.lower_inclusive(unique, x)?,
-			Bound::Excluded(x) => self.upper_inclusive(unique, x)?,
+			Bound::Included(x) => self.first_under(x)?,
+			Bound::Excluded(x) => self.past(x)?,
 			Bound::Unbounded => self.spelling.encode(&self.prefix())?,
 		};
 		let end = match to {
-			Bound::Included(x) => self.upper_inclusive(unique, x)?,
-			Bound::Excluded(x) => self.lower_inclusive(unique, x)?,
+			Bound::Included(x) => self.past(x)?,
+			Bound::Excluded(x) => self.first_under(x)?,
 			Bound::Unbounded => self.spelling.encode(&self.prefix())?.next_neighbour_expect(),
 		};
 		Ok(self.typed((start..end).into()))
@@ -275,22 +280,14 @@ impl<'a> IndexKeyspace<'a> {
 		Ok(self.typed(range))
 	}
 
-	/// The first key an entry for `[x]` may sit at.
-	fn lower_inclusive(&self, unique: bool, x: &Value) -> Result<Key<'static>> {
-		if unique && !x.is_nullish() {
-			self.unique_key(slice::from_ref(x))
-		} else {
-			self.open(slice::from_ref(x))
-		}
+	/// The first key an entry whose first value is `x` may sit at.
+	fn first_under(&self, x: &Value) -> Result<Key<'static>> {
+		self.open(slice::from_ref(x))
 	}
 
-	/// The first key past every entry for `[x]`.
-	fn upper_inclusive(&self, unique: bool, x: &Value) -> Result<Key<'static>> {
-		if unique && !x.is_nullish() {
-			Ok(self.unique_key(slice::from_ref(x))?.next_neighbour_expect())
-		} else {
-			Ok(self.open(slice::from_ref(x))?.next_neighbour_expect())
-		}
+	/// The first key past every entry whose first value is `x`.
+	fn past(&self, x: &Value) -> Result<Key<'static>> {
+		Ok(self.open(slice::from_ref(x))?.next_neighbour_expect())
 	}
 
 	fn prefix(&self) -> EntryPrefix<'a> {
@@ -427,13 +424,51 @@ mod tests {
 				(Bound::Excluded(&values[3]), Bound::Unbounded, 4..=5),
 			];
 			for (from, to, admitted) in cases {
-				let range = ks.range(unique, from, to).unwrap();
+				let range = ks.range(from, to).unwrap();
 				for (i, v) in values.iter().enumerate() {
 					assert_eq!(
 						contains(&range, &key(v)),
 						admitted.contains(&i),
 						"unique={unique} {from:?}..{to:?} on {v:?}"
 					);
+				}
+			}
+		}
+	}
+
+	#[test]
+	fn a_range_on_the_leading_value_admits_every_tuple_under_its_bounds() {
+		// The entries of a compound index for one leading value all begin with
+		// it, whatever follows: the further values, then the end of a unique
+		// slot or, for a plain entry (a unique tuple holding NONE or NULL is
+		// one), the record id. A bound on the leading value takes all of them
+		// or none.
+		let tb = TableName::from("t");
+		let ks = space(&tb);
+		let id = RecordIdKey::from("r".to_owned());
+		let one = Value::from(1);
+		let rest = [Value::None, Value::Null, Value::from(0), Value::from(5), Value::from("z")];
+		type Case<'a> = (Bound<&'a Value>, Bound<&'a Value>, fn(i64) -> bool);
+		let cases: [Case<'_>; 5] = [
+			(Bound::Excluded(&one), Bound::Unbounded, |a| a > 1),
+			(Bound::Included(&one), Bound::Unbounded, |a| a >= 1),
+			(Bound::Unbounded, Bound::Excluded(&one), |a| a < 1),
+			(Bound::Unbounded, Bound::Included(&one), |a| a <= 1),
+			(Bound::Included(&one), Bound::Included(&one), |a| a == 1),
+		];
+		for unique in [false, true] {
+			for (from, to, admits) in cases {
+				let range = ks.range(from, to).unwrap();
+				for a in 0..3 {
+					for b in &rest {
+						let fd = [Value::from(a), b.clone()];
+						let key = ks.stored_key(unique, &fd, &id).unwrap().key;
+						assert_eq!(
+							contains(&range, &key),
+							admits(a),
+							"unique={unique} {from:?}..{to:?} on ({a}, {b:?})"
+						);
+					}
 				}
 			}
 		}
@@ -516,7 +551,7 @@ mod tests {
 		let all = ks.all().unwrap();
 		let one = Value::from(1);
 		for unique in [false, true] {
-			let r = ks.range(unique, Bound::Unbounded, Bound::Unbounded).unwrap();
+			let r = ks.range(Bound::Unbounded, Bound::Unbounded).unwrap();
 			assert_eq!((r.start(), r.end()), (all.start(), all.end()));
 			let r = ks.equality(unique, &one).unwrap();
 			assert!(all.start() <= r.start() && r.end() <= all.end());
@@ -610,7 +645,7 @@ mod tests {
 		for unique in [false, true] {
 			let chrono = at_version(&tb, DATETIME_ORDER_FORMAT_VERSION);
 			let key = |v: &Value| chrono.stored_key(unique, slice::from_ref(v), &id).unwrap().key;
-			let r = chrono.range(unique, Bound::Included(&whole), Bound::Excluded(&later)).unwrap();
+			let r = chrono.range(Bound::Included(&whole), Bound::Excluded(&later)).unwrap();
 			assert!(contains(&r, &key(&whole)) && contains(&r, &key(&fraction)));
 			assert!(!contains(&r, &key(&later)));
 
@@ -618,7 +653,7 @@ mod tests {
 			// whole second misses the fraction within it.
 			let text = at_version(&tb, DATETIME_ORDER_FORMAT_VERSION - 1);
 			let key = |v: &Value| text.stored_key(unique, slice::from_ref(v), &id).unwrap().key;
-			let r = text.range(unique, Bound::Included(&whole), Bound::Excluded(&later)).unwrap();
+			let r = text.range(Bound::Included(&whole), Bound::Excluded(&later)).unwrap();
 			assert!(contains(&r, &key(&whole)) && !contains(&r, &key(&fraction)));
 		}
 	}

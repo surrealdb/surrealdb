@@ -42,7 +42,7 @@ pub(super) fn entry_range(
 	let resolved = access.resolve(ctx.ctx().statement_clock()).map_err(ControlFlow::Err)?;
 	let range = match &resolved {
 		Some(KeyAccess::Equality(value)) => ks.equality(unique, value),
-		Some(KeyAccess::Range(range)) => ks.range(unique, range.start.as_ref(), range.end.as_ref()),
+		Some(KeyAccess::Range(range)) => ks.range(range.start.as_ref(), range.end.as_ref()),
 		Some(KeyAccess::Compound {
 			prefix,
 			range,

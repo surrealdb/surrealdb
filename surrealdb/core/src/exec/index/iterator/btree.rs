@@ -226,7 +226,7 @@ impl IndexRangeForwardIterator {
 		from: Bound<&Value>,
 		to: Bound<&Value>,
 	) -> Result<Self> {
-		let range = IndexKeyspace::of(ns, db, ix).range(false, from, to)?;
+		let range = IndexKeyspace::of(ns, db, ix).range(from, to)?;
 
 		Ok(Self {
 			range,
@@ -276,7 +276,7 @@ impl IndexRangeBackwardIterator {
 		from: Bound<&Value>,
 		to: Bound<&Value>,
 	) -> Result<Self> {
-		let range = IndexKeyspace::of(ns, db, ix).range(false, from, to)?;
+		let range = IndexKeyspace::of(ns, db, ix).range(from, to)?;
 
 		Ok(Self {
 			range,
@@ -377,7 +377,7 @@ impl UniqueRangeForwardIterator {
 		from: Bound<&Value>,
 		to: Bound<&Value>,
 	) -> Result<Self> {
-		let range = IndexKeyspace::of(ns, db, ix).range(true, from, to)?;
+		let range = IndexKeyspace::of(ns, db, ix).range(from, to)?;
 
 		Ok(Self {
 			range,
@@ -425,7 +425,7 @@ impl UniqueRangeBackwardIterator {
 		from: Bound<&Value>,
 		to: Bound<&Value>,
 	) -> Result<Self> {
-		let range = IndexKeyspace::of(ns, db, ix).range(true, from, to)?;
+		let range = IndexKeyspace::of(ns, db, ix).range(from, to)?;
 
 		Ok(Self {
 			range,
@@ -833,7 +833,7 @@ pub(crate) fn bitmap_scan_range(
 	Ok(match access.resolve(clock)? {
 		Some(KeyAccess::Equality(v)) => IndexKeyspace::of(ns, db, ix).equality(unique, &v)?,
 		Some(KeyAccess::Range(range)) => {
-			IndexKeyspace::of(ns, db, ix).range(unique, range.start.as_ref(), range.end.as_ref())?
+			IndexKeyspace::of(ns, db, ix).range(range.start.as_ref(), range.end.as_ref())?
 		}
 		Some(KeyAccess::Compound {
 			prefix,
