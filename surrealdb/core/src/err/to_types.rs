@@ -291,30 +291,7 @@ pub fn into_types_error(error: Error) -> TypesError {
 		NoRecordFound => TypesError::not_found(message, None),
 
 		// KVS: preserve type information for wire and client retry/UX
-		Kvs(kvs_err) => match kvs_err {
-			KvsError::TransactionConflict(_) => {
-				TypesError::query(message, QueryError::TransactionConflict)
-			}
-			KvsError::ConnectionFailed(_) => {
-				TypesError::connection(message, ConnectionError::ConnectionFailed)
-			}
-			KvsError::TransactionKeyAlreadyExists => TypesError::already_exists(message, None),
-			KvsError::ReadAndDeleteOnly => TypesError::not_allowed(message, None),
-			KvsError::TransactionTooLarge
-			| KvsError::TransactionKeyTooLarge
-			| KvsError::TransactionRangeTooLarge(_) => {
-				TypesError::validation(message, ValidationError::InvalidParams)
-			}
-			KvsError::TransactionFinished
-			| KvsError::TransactionReadonly
-			| KvsError::TransactionConditionNotMet => TypesError::query(message, None),
-			KvsError::UnsupportedVersionedQueries => TypesError::configuration(message, None),
-			KvsError::Datastore(_)
-			| KvsError::Transaction(_)
-			| KvsError::TimestampInvalid(_)
-			| KvsError::Internal(_)
-			| KvsError::CompactionNotSupported => TypesError::internal(message),
-		},
+		Kvs(kvs_err) => kvs_into_types_error(&kvs_err, message),
 
 		// Internal and everything else
 		Internal(..) => TypesError::internal(message),
@@ -339,5 +316,37 @@ pub fn into_types_error(error: Error) -> TypesError {
 		mapped.with_cause(cause)
 	} else {
 		mapped
+	}
+}
+
+/// Converts a key-value store error into the public wire-friendly error type, with the given
+/// message.
+///
+/// A kvs error arrives either wrapped in [`Error::Kvs`], whose message prefixes the kvs error's
+/// own, or bare, as `Transaction::commit` returns it, with its own message.
+pub(super) fn kvs_into_types_error(error: &KvsError, message: String) -> TypesError {
+	match error {
+		KvsError::TransactionConflict(_) => {
+			TypesError::query(message, QueryError::TransactionConflict)
+		}
+		KvsError::ConnectionFailed(_) => {
+			TypesError::connection(message, ConnectionError::ConnectionFailed)
+		}
+		KvsError::TransactionKeyAlreadyExists => TypesError::already_exists(message, None),
+		KvsError::ReadAndDeleteOnly => TypesError::not_allowed(message, None),
+		KvsError::TransactionTooLarge
+		| KvsError::TransactionKeyTooLarge
+		| KvsError::TransactionRangeTooLarge(_) => {
+			TypesError::validation(message, ValidationError::InvalidParams)
+		}
+		KvsError::TransactionFinished
+		| KvsError::TransactionReadonly
+		| KvsError::TransactionConditionNotMet => TypesError::query(message, None),
+		KvsError::UnsupportedVersionedQueries => TypesError::configuration(message, None),
+		KvsError::Datastore(_)
+		| KvsError::Transaction(_)
+		| KvsError::TimestampInvalid(_)
+		| KvsError::Internal(_)
+		| KvsError::CompactionNotSupported => TypesError::internal(message),
 	}
 }

@@ -11,8 +11,7 @@ use surrealdb_types::{
 use uuid::Uuid;
 
 use crate::api::err::ApiError;
-use crate::err;
-use crate::err::into_types_error;
+use crate::err::anyhow_to_types_error;
 
 /// Parse error (invalid message format).
 pub fn parse_error() -> TypesError {
@@ -125,8 +124,8 @@ pub fn session_expired() -> TypesError {
 /// Tries, in order:
 /// 1. `TypesError` — already a wire error, return as-is.
 /// 2. `ApiError` — convert via `to_types_error()`.
-/// 3. `err::Error` (core database error) — convert via `into_types_error()`.
-/// 4. Fallback — convert with chain-preserving internal error details.
+/// 3. Anything else — convert via `anyhow_to_types_error()`, which maps a core database error or a
+///    bare key-value store error, and otherwise preserves the chain as an internal error.
 pub fn types_error_from_anyhow(error: anyhow::Error) -> TypesError {
 	// If the error is already a TypesError, return it directly (preserves kind/details/cause)
 	match error.downcast::<TypesError>() {
@@ -135,11 +134,8 @@ pub fn types_error_from_anyhow(error: anyhow::Error) -> TypesError {
 			if let Some(api_error) = error.downcast_ref::<ApiError>() {
 				return api_error.to_types_error();
 			}
-			// Try to downcast to database Error
-			error
-				.downcast::<err::Error>()
-				.map(into_types_error)
-				.unwrap_or_else(TypesError::from_anyhow_with_chain)
+			// Try to downcast to a database or key-value store error
+			anyhow_to_types_error(error)
 		}
 	}
 }

@@ -33,11 +33,16 @@ pub(crate) use to_types::into_types_error;
 /// Convert an [`anyhow::Error`] into a structured [`surrealdb_types::Error`].
 ///
 /// If the inner error is a core database error, it is downcast and converted using the full
-/// typed mapping. Otherwise the anyhow chain is preserved as an internal error chain.
+/// typed mapping. A bare key-value store error, as `Transaction::commit` returns it, is mapped as
+/// [`Error::Kvs`] would be, but keeps its own message. Otherwise the anyhow chain is preserved as
+/// an internal error chain.
 pub fn anyhow_to_types_error(error: anyhow::Error) -> surrealdb_types::Error {
 	match error.downcast::<Error>() {
 		Ok(e) => into_types_error(e),
-		Err(e) => surrealdb_types::Error::from_anyhow_with_chain(e),
+		Err(e) => match e.downcast_ref::<KvsError>() {
+			Some(kvs_error) => to_types::kvs_into_types_error(kvs_error, kvs_error.to_string()),
+			None => surrealdb_types::Error::from_anyhow_with_chain(e),
+		},
 	}
 }
 
