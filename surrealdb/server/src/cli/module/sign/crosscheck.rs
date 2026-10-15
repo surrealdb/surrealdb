@@ -19,15 +19,15 @@ use surrealism_verify::{Signer, SigstoreSigner, verify};
 
 use super::{bundle, ssh};
 
-fn fixtures() -> PathBuf {
+pub(crate) fn fixtures() -> PathBuf {
 	PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../surrealism/verify/tests/fixtures")
 }
 
-fn read(path: &Path) -> Vec<u8> {
+pub(crate) fn read(path: &Path) -> Vec<u8> {
 	std::fs::read(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
-fn json(path: &Path) -> Value {
+pub(crate) fn json(path: &Path) -> Value {
 	serde_json::from_slice(&read(path)).unwrap()
 }
 
@@ -122,7 +122,7 @@ fn an_imported_conformance_bundle_verifies() {
 
 /// A `trusted_root.json` holding the private Sigstore of `case` among the
 /// staging root's entries, so that selection has decoys to pass over.
-fn private_trusted_root(case: &str) -> Vec<u8> {
+pub(crate) fn private_trusted_root(case: &str) -> Vec<u8> {
 	let s = json(&fixtures().join("private").join(case).join("signer.json"));
 	let chain = |certs: &Value| {
 		serde_json::json!({ "certificates": certs

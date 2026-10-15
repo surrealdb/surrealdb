@@ -19,11 +19,11 @@
 mod archive;
 mod bundle;
 #[cfg(test)]
-mod crosscheck;
+pub(crate) mod crosscheck;
 mod keyless;
-mod signer;
-mod ssh;
-mod trusted_root;
+pub(crate) mod signer;
+pub(crate) mod ssh;
+pub(crate) mod trusted_root;
 
 use std::path::{Path, PathBuf};
 
@@ -69,7 +69,7 @@ pub struct SignArgs {
 }
 
 /// The signature to store, by source.
-enum Source<'a> {
+pub(crate) enum Source<'a> {
 	Keyless(keyless::Endpoints),
 	Key(&'a Path),
 	Bundle(&'a Path),
@@ -113,7 +113,7 @@ pub async fn init(args: SignArgs) -> Result<()> {
 /// that also holds `root` reduced to the anchors that verify it. The root is
 /// loaded before anything is signed, so a missing root costs no log entry, and
 /// nothing is written unless the envelope verifies offline.
-async fn sign(
+pub(crate) async fn sign(
 	input: &Path,
 	output: &Path,
 	source: Source<'_>,

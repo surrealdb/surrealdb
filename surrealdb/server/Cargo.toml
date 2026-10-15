@@ -53,6 +53,7 @@ surrealism = [
     "dep:hex",
     "dep:sha2",
     "dep:surrealism-runtime",
+    "dep:surrealism-verify",
     "dep:tar",
     "dep:wasm-encoder",
     "dep:wasm-opt",
@@ -62,17 +63,18 @@ surrealism = [
     "dep:wasmtime-wizer",
     "dep:zstd",
 ]
-# `surreal extension sign`: Sigstore keyless signing (CI identity token,
-# Fulcio, Rekor, TUF) and the verifier its output is checked with. A server
-# that only verifies signatures does not need it; the verifier the server
-# checks archives with is part of `surrealdb-core/surrealism`.
+# The Sigstore client: `surreal extension sign` (keyless signing with a CI
+# identity token, Fulcio, Rekor) and the installer's online checks (Sigstore's
+# public trust root over TUF, Rekor inclusion proofs). A server that only
+# verifies signatures does not need it. Without it, `extension install`
+# reports both online checks as not checked, as under `--offline`.
 extension-sign = [
     "surrealism",
+    "dep:sigstore-merkle",
     "dep:sigstore-oidc",
     "dep:sigstore-rekor",
     "dep:sigstore-sign",
     "dep:sigstore-trust-root",
-    "dep:surrealism-verify",
 ]
 storage-mem = ["surrealdb/kv-mem", "surrealdb-core/kv-mem"]
 storage-indxdb = ["surrealdb/kv-indxdb", "surrealdb-core/kv-indxdb"]
@@ -228,6 +230,9 @@ base64 = { workspace = true, optional = true }
 dialoguer = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
+# The install client proves a signature's entry in the public Rekor v2 log
+# (RFC 9162 inclusion).
+sigstore-merkle = { workspace = true, optional = true }
 surrealdb-mcp = { workspace = true, optional = true }
 surrealism-runtime = { workspace = true, optional = true }
 sigstore-oidc = { workspace = true, optional = true }

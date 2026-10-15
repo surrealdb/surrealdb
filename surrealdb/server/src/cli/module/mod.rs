@@ -6,7 +6,15 @@ mod init_cmd;
 mod run;
 mod sig;
 #[cfg(feature = "extension-sign")]
-mod sign;
+pub(crate) mod sign;
+/// Without `extension-sign`, only the `[signer]` checks the installer shares
+/// with `sign`; signing itself is not built.
+#[cfg(not(feature = "extension-sign"))]
+#[allow(dead_code)]
+pub(crate) mod sign {
+	mod archive;
+	pub(crate) mod signer;
+}
 mod snapshot;
 mod version;
 mod wasm_target;
@@ -109,6 +117,14 @@ enum ModuleCommand {
 	/// Read and change the project's package.toml
 	Config(config_cmd::ConfigArgs),
 
+	/// Install an extension into a database: inspect, approve, define
+	#[command(long_about = crate::cli::extension::INSTALL_HELP)]
+	Install(crate::cli::extension::InstallArgs),
+
+	/// Upgrade an installed extension: compare signer and capabilities, redefine
+	#[command(long_about = crate::cli::extension::UPGRADE_HELP)]
+	Upgrade(crate::cli::extension::UpgradeArgs),
+
 	/// Output the Surrealism version information
 	Version,
 }
@@ -151,6 +167,30 @@ pub async fn init(
 		#[cfg(feature = "extension-sign")]
 		ModuleCommand::Sign(args) => sign::init(args).await,
 		ModuleCommand::Config(args) => config_cmd::init(args).await,
+		ModuleCommand::Install(args) => crate::cli::extension::install(args).await,
+		ModuleCommand::Upgrade(args) => crate::cli::extension::upgrade(args).await,
 		ModuleCommand::Version => version::init().await,
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use clap::CommandFactory as _;
+
+	use super::*;
+
+	#[test]
+	fn install_and_upgrade_help_explain_the_connection() {
+		for name in ["install", "upgrade"] {
+			let mut cmd = ModuleCommandArgs::command();
+			let sub = cmd.find_subcommand_mut(name).expect("subcommand");
+			let help = sub.render_long_help().to_string();
+			for needle in ["--auth-level", "SURREAL_USER", "DEFINE EXTENSION", "--trust-signer"] {
+				assert!(help.contains(needle), "`{needle}` missing from `{name} --help`:\n{help}");
+			}
+			for gone in ["--yes", "--upload-to", "--grant "] {
+				assert!(!help.contains(gone), "`{gone}` in `{name} --help`:\n{help}");
+			}
+		}
 	}
 }

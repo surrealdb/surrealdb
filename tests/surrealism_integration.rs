@@ -2780,6 +2780,7 @@ mod surrealism_integration {
 				organisation: "test".to_string(),
 				name: "roundtrip".to_string(),
 				version: semver::Version::new(0, 1, 0),
+				repository: None,
 			},
 			capabilities: Default::default(),
 			abi: AbiVersion::CURRENT,

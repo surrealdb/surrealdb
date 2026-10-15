@@ -354,6 +354,11 @@ pub struct SurrealismMeta {
 	pub organisation: String,
 	pub name: String,
 	pub version: Version,
+	/// The source repository the author declares, e.g.
+	/// `https://github.com/acme/color`. Install clients show whether it
+	/// matches the repository a Sigstore signer names; nothing trusts it.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub repository: Option<String>,
 }
 
 impl SurrealismConfig {
@@ -484,6 +489,7 @@ version = "0.1.0"
 				organisation: "test".to_string(),
 				name: "roundtrip".to_string(),
 				version: Version::new(0, 1, 0),
+				repository: None,
 			},
 			capabilities: Default::default(),
 			abi: AbiVersion::CURRENT,
@@ -511,6 +517,7 @@ version = "0.1.0"
 				organisation: "surrealdb".to_string(),
 				name: "demo".to_string(),
 				version: Version::new(1, 2, 3),
+				repository: None,
 			},
 			capabilities: Default::default(),
 			abi: AbiVersion::CURRENT,

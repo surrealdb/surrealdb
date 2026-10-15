@@ -246,6 +246,7 @@ fn write_package_toml(path: &Path, target: Target, org: &str, name: &str) -> Res
 			organisation: org.to_string(),
 			name: name.to_string(),
 			version: Version::new(1, 0, 0),
+			repository: None,
 		},
 	)?;
 	package.save().prefix_err(|| format!("Failed to write {PACKAGE_FILE}"))?;

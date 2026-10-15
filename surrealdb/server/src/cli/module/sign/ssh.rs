@@ -100,7 +100,7 @@ fn ssh_string(input: &[u8]) -> Result<(&[u8], &[u8])> {
 }
 
 #[cfg(test)]
-pub(super) mod tests {
+pub(crate) mod tests {
 	use std::path::PathBuf;
 
 	use super::*;

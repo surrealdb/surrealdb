@@ -33,7 +33,7 @@ DEFINE EXTENSION ext::color FROM f"modules:/color.surli" SIGNER { key: "ssh-ed25
 DEFINE EXTENSION ext::palette FROM silo::surrealdb::palette<1.0.0> UNSIGNED;
 ```
 
-A silo package is downloaded from `{surrealism_silo_endpoint}/{org}/{pkg}/{major}.{minor}.{patch}.surli`, so it needs no local build and no bucket.
+A silo package is downloaded from `{surrealism_silo_endpoint}/{org}/{pkg}/{major}.{minor}.{patch}.surli`, so it needs no local build and no bucket. That URL and the optional package API that clients use to resolve and describe a version are specified in `SILO.md`.
 
 The keyword before the executable is `FROM`, not `AS`: what follows is the extension's source, and `AS` would invert the sense it carries everywhere else in SurrealQL, where the alias sits on the right.
 

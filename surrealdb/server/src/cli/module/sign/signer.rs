@@ -78,7 +78,27 @@ pub fn ensure_token_matches(claims: &serde_json::Value, signer: &PackageSigner) 
 		.map_err(|e| anyhow::anyhow!("Not requesting a certificate: {e}"))
 }
 
-fn check(claims: &Claims, signer: &PackageSigner) -> Result<()> {
+/// The identity with its `@<ref>` suffix removed, so that every ref of one
+/// workflow compares equal: everything from the first `@` after the URL's
+/// path starts. An identity without a scheme (an e-mail address) or without
+/// a path has no ref and is returned unchanged.
+///
+/// `extension sign`, install and upgrade all use this one rule.
+pub(crate) fn identity_without_ref(identity: &str) -> &str {
+	let Some(scheme_end) = identity.find("://") else {
+		return identity;
+	};
+	let after_scheme = scheme_end + 3;
+	let Some(path_start) = identity[after_scheme..].find('/').map(|i| after_scheme + i) else {
+		return identity;
+	};
+	match identity[path_start..].find('@') {
+		Some(i) => &identity[..path_start + i],
+		None => identity,
+	}
+}
+
+pub(crate) fn check(claims: &Claims, signer: &PackageSigner) -> Result<()> {
 	match (claims, signer) {
 		(
 			Claims::Sigstore {
@@ -137,12 +157,9 @@ fn check_sigstore(
 		);
 	}
 	// Any ref of the named workflow: `…/release.yml@refs/tags/v1` matches
-	// `…/release.yml`. Any other identity, such as an email address, is
-	// compared as it is.
-	let workflow = match identity.strip_prefix("https://") {
-		Some(_) => identity.split_once('@').map_or(identity, |(workflow, _)| workflow),
-		None => identity,
-	};
+	// `…/release.yml`. An identity without a scheme, such as an email
+	// address, is compared as it is.
+	let workflow = identity_without_ref(identity);
 	if workflow != expected.identity {
 		bail!(
 			"The certificate's identity is {identity}, but [signer.sigstore] names {}",

@@ -850,6 +850,7 @@ attach = { fs = { "/" = "fs", "/models" = "../m" } }
 					organisation: "a b".into(),
 					name: "c".into(),
 					version: Version::new(1, 0, 0),
+					repository: None,
 				},
 			)
 			.is_err()
@@ -883,6 +884,7 @@ attach = { fs = { "/" = "fs", "/models" = "../m" } }
 				organisation: "acme".into(),
 				name: "color".into(),
 				version: Version::new(1, 0, 0),
+				repository: None,
 			},
 		)
 		.unwrap();

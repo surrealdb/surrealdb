@@ -3,6 +3,8 @@
 pub(crate) mod abstraction;
 mod config;
 mod export;
+#[cfg(feature = "surrealism")]
+mod extension;
 mod fix;
 mod import;
 mod isready;

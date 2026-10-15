@@ -74,6 +74,23 @@ Reads and changes the project's `package.toml`, only through `surrealism_runtime
 - `signer ssh <file.pub>` stores the key blob without its comment; `signer remove` clears `[signer]`.
 - `fs add <dir> --as <path>` and `fs remove <path>` change the `[attach] fs` mounts, which `build` assembles into one directory.
 
+### `install` and `upgrade` (`../extension/`)
+
+`surreal extension install <source> --as <name>` and `surreal extension upgrade <name> [<source>]` live in `cli/extension/`, because they talk to a database rather than to a project. Both split into a read-only `prepare_*` that fetches the archive, checks the four archive rules, computes `DIGEST`, verifies `SIGNATURE` and builds the statement, and a `commit` that runs the statement, the only write either makes. Sources are Silo packages and archives already in a bucket; the installer never uploads an archive. Both connect as the user the standard connection flags name, so that user needs to be allowed to define extensions in the database and to read the bucket. The prompt is rendered from the plan in between.
+
+| File | Purpose |
+|------|---------|
+| `source.rs` | `silo::org::pkg[<x.y.z>]` (`pkg::<x.y.z>` is read too) or `f"bucket:/path"`; the `FROM` operand |
+| `archive.rs` | `inspect_archive`: the runtime loader's archive rules, `DIGEST`, package metadata |
+| `verify.rs` | Offline: `verify_envelope` (the trust root a Sigstore SIGNATURE carries, through `surrealism_verify::verify_offline`), or `load_trust_root` + `prove_signer` for a `--trust-root` override; SSH through `prove_signer` |
+| `online.rs` | Best effort: is the anchor in Sigstore's public trust root (`sigstore-trust-root` over TUF, verified from the embedded public-good TUF root), and is the entry in the public Rekor v2 log (the served entry, proved by RFC 9162 inclusion with `sigstore-merkle` under a checkpoint the public log key signs, checked with `sigstore_sign::crypto`); each reported ✓/⚠/✗, never silently passed |
+| `silo.rs` | `SiloClient`: resolve a version, describe it from the package API or the archive, download it (contract: `surrealism/SILO.md`) |
+| `installed.rs` | Reads an installed definition from the `extensions` key of `INFO FOR DB STRUCTURE` |
+| `capabilities.rs` | The `CAPABILITIES` object: request, `--with-capability` tokens, upgrade carry-over, diff, high-risk set |
+| `signer.rs` | The `SIGNER` clause, same-signer comparison, labels and fingerprints |
+| `statement.rs` | `DEFINE EXTENSION` text; `OVERWRITE` for an upgrade |
+| `prompt.rs` | The install and upgrade prompts |
+
 ## `DemoHost` (`host.rs`)
 
 A minimal `InvocationContext` implementation for CLI use. When a module calls `sql()` or `run()`, it prints the query/function to stdout and reads a result from stdin. This enables interactive testing of modules outside the database.
