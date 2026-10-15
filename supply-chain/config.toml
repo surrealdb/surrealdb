@@ -110,7 +110,7 @@ version = "0.2.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.ammonia]]
-version = "4.1.4"
+version = "4.1.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.approx]]

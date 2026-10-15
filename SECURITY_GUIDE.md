@@ -532,12 +532,20 @@ Flag when changes touch:
   (users, access grants, functions at higher privilege than the importer).
 - CLI import connecting to a local datastore must not silently disable authentication.
 - Export must respect table and field permissions. Secrets must be redacted.
+- The one exception is `POST /kvexport`, which serves the stored bytes of the whole
+  keyspace, unredacted, for migrating an instance to another storage engine. It must
+  stay off unless the operator enables the experimental `kvexport` capability, keep an
+  HTTP route target of its own so it can be denied without denying `/export`, refuse
+  every principal but a root owner before it reads the request body, and never log a
+  request or response body. Its frames include users' token-signing keys, so a reader
+  can mint tokens that outlive a password change.
 
 ### Review Triggers
 
 Flag when changes touch:
 
 - Import endpoint or streaming parser buffer handling
+- `/kvexport` enablement, its authorization, or what its frames carry
 - `OPTION IMPORT` authorization or flag propagation
 - Per-statement authorization during import execution
 - Export permission filtering or secret redaction

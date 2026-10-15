@@ -136,6 +136,7 @@ dirs = "6.0.0"
 # Other crates
 async-graphql = { workspace = true, default-features = false, optional = true }
 async-graphql-axum = { workspace = true, optional = true }
+blake3.workspace = true
 bytes.workspace = true
 futures.workspace = true
 futures-util.workspace = true

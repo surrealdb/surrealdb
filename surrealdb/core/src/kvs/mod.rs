@@ -21,6 +21,7 @@ mod api;
 mod batch;
 mod clock;
 mod consts;
+pub mod copy;
 mod cursor;
 mod direction;
 mod ds;
