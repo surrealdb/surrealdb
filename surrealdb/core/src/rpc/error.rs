@@ -168,4 +168,17 @@ mod tests {
 
 		assert!(types_error.cause().is_none(), "{types_error:?}");
 	}
+
+	#[test]
+	fn test_types_error_from_anyhow_passes_types_error_through() {
+		let types_error = TypesError::query(
+			"Cannot COMMIT: Transaction conflict".to_string(),
+			QueryError::TransactionConflict,
+		)
+		.with_cause(TypesError::internal("Transaction conflict".to_string()));
+
+		let converted = types_error_from_anyhow(anyhow::Error::new(types_error.clone()));
+
+		assert_eq!(converted, types_error);
+	}
 }

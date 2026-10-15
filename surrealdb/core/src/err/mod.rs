@@ -33,14 +33,14 @@ pub(crate) use to_types::into_types_error;
 /// Convert an [`anyhow::Error`] into a structured [`surrealdb_types::Error`].
 ///
 /// If the inner error is a core database error, it is downcast and converted using the full
-/// typed mapping. A bare key-value store error, as `Transaction::commit` returns it, is mapped as
-/// [`Error::Kvs`] would be, but keeps its own message. Otherwise the anyhow chain is preserved as
-/// an internal error chain.
+/// typed mapping. A bare key-value store error, as `Transaction::commit` returns it, gets the kind
+/// that [`Error::Kvs`] maps it to, but keeps the message that the anyhow error displays. Otherwise
+/// the anyhow chain is preserved as an internal error chain.
 pub fn anyhow_to_types_error(error: anyhow::Error) -> surrealdb_types::Error {
 	match error.downcast::<Error>() {
 		Ok(e) => into_types_error(e),
 		Err(e) => match e.downcast_ref::<KvsError>() {
-			Some(kvs_error) => to_types::kvs_into_types_error(kvs_error, kvs_error.to_string()),
+			Some(kvs_error) => to_types::kvs_to_types_error(kvs_error, e.to_string()),
 			None => surrealdb_types::Error::from_anyhow_with_chain(e),
 		},
 	}
@@ -1490,6 +1490,24 @@ mod tests {
 		assert_eq!(types_error.message(), message);
 
 		assert!(types_error.cause().is_none(), "{types_error:?}");
+	}
+
+	#[test]
+	fn test_anyhow_to_types_error_bare_kvs_error_keeps_context_message() {
+		let error = anyhow::Error::new(KvsError::TransactionConflict(
+			"Write conflict, retry the transaction".to_string(),
+		))
+		.context("Couldn't commit the transaction");
+
+		let types_error = anyhow_to_types_error(error);
+
+		assert_eq!(
+			types_error.query_details(),
+			Some(&surrealdb_types::QueryError::TransactionConflict),
+			"{types_error:?}"
+		);
+
+		assert_eq!(types_error.message(), "Couldn't commit the transaction");
 	}
 
 	#[test]

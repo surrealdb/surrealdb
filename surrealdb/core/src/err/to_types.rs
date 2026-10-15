@@ -17,9 +17,9 @@ use crate::kvs::Error as KvsError;
 /// Converts a core database error into the public wire-friendly error type.
 ///
 /// Takes ownership so owned data (e.g. message strings, IAM details) can be moved instead of
-/// cloned. For `anyhow::Error`, use `downcast` to consume and recover the core `Error`:
-/// `e.downcast::<Error>().map(into_types_error).unwrap_or_else(|e|
-/// TypesError::internal(e.to_string()))`.
+/// cloned. For an `anyhow::Error`, use
+/// [`anyhow_to_types_error`](crate::err::anyhow_to_types_error), which also maps a bare key-value
+/// store error.
 pub fn into_types_error(error: Error) -> TypesError {
 	use Error::*;
 	let message = error.to_string();
@@ -291,7 +291,7 @@ pub fn into_types_error(error: Error) -> TypesError {
 		NoRecordFound => TypesError::not_found(message, None),
 
 		// KVS: preserve type information for wire and client retry/UX
-		Kvs(kvs_err) => kvs_into_types_error(&kvs_err, message),
+		Kvs(kvs_err) => kvs_to_types_error(&kvs_err, message),
 
 		// Internal and everything else
 		Internal(..) => TypesError::internal(message),
@@ -324,7 +324,7 @@ pub fn into_types_error(error: Error) -> TypesError {
 ///
 /// A kvs error arrives either wrapped in [`Error::Kvs`], whose message prefixes the kvs error's
 /// own, or bare, as `Transaction::commit` returns it, with its own message.
-pub(super) fn kvs_into_types_error(error: &KvsError, message: String) -> TypesError {
+pub(super) fn kvs_to_types_error(error: &KvsError, message: String) -> TypesError {
 	match error {
 		KvsError::TransactionConflict(_) => {
 			TypesError::query(message, QueryError::TransactionConflict)
