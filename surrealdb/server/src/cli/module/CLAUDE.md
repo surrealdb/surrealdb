@@ -1,10 +1,10 @@
 # CLI Module Subcommands
 
-Essential context for AI assistants working with the `surreal module` CLI.
+Essential context for AI assistants working with the `surreal extension` CLI.
 
 ## Overview
 
-The `surreal module` command provides tooling for developing, building, and inspecting Surrealism WASM modules. All subcommands are defined in `mod.rs` via `clap::Subcommand`.
+The `surreal extension` command (also reachable as `surreal module`) provides tooling for developing, building, and inspecting Surrealism extensions. All subcommands are defined in `mod.rs` via `clap::Subcommand`.
 
 ## Subcommands
 
@@ -12,7 +12,7 @@ The `surreal module` command provides tooling for developing, building, and insp
 
 Scaffolds a new Surrealism module project.
 
-- Creates `Cargo.toml`, `surrealism.toml`, `.cargo/config.toml` (Tokio WASIp2 flags), and `src/lib.rs` with starter code.
+- Creates `Cargo.toml`, `package.toml`, `.cargo/config.toml` (Tokio WASIp2 flags), and `src/lib.rs` with starter code.
 - Supports interactive and headless (`--headless --org <org>`) modes.
 - Pins the `surrealism` SDK dependency to `SURREALISM_VERSION` and `surrealdb-types` to `SURREALDB_VERSION`. The full `surrealdb` crate is omitted by default (commented in `Cargo.toml`) to keep WASM builds fast; most modules only need `surrealdb-types` for `SurrealValue` and related types.
 - Only Rust target is currently supported.
@@ -22,7 +22,7 @@ Scaffolds a new Surrealism module project.
 Compiles a Rust project into a distributable `.surli` archive.
 
 Pipeline:
-1. Load and validate `surrealism.toml` config.
+1. Load and validate the package file: `package.toml`, or `surrealism.toml` when `package.toml` is absent. When both exist, `surrealism.toml` is ignored and a warning names it.
 2. Read `cargo metadata` to find the WASM target artifact.
 3. Run `cargo build --target wasm32-wasip2` (release or debug). No build flags are needed: the guest SDK's `async fn` support comes from the component model's async ABI, not an embedded executor.
 4. Validate the `surrealism` SDK version matches the server's expected version.

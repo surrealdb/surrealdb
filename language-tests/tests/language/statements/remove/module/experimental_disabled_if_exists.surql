@@ -7,11 +7,11 @@ reason = "The `surrealism` capability gate on REMOVE MODULE fires before IF EXIS
 
 [test.results]
 parsing-error = """
-Surrealism modules are not enabled
+Surrealism extensions are not enabled
   --> [18:8]
    |
 18 | REMOVE MODULE IF EXISTS mod::test;
-   |        ^^^^^^ Use of `REMOVE MODULE` requires Surrealism modules
+   |        ^^^^^^ Use of `REMOVE MODULE` requires Surrealism extensions
 """
 */
 

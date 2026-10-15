@@ -15,7 +15,7 @@ pub struct AlterModuleStatement {
 
 impl ToSql for AlterModuleStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		write_sql!(f, fmt, "ALTER MODULE");
+		write_sql!(f, fmt, "ALTER EXTENSION");
 		if self.if_exists {
 			write_sql!(f, fmt, " IF EXISTS");
 		}

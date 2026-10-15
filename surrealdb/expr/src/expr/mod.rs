@@ -90,7 +90,7 @@ pub use self::expression::{ExplainFormat, Expr};
 pub use self::fetch::{Fetch, Fetchs};
 pub use self::field::{Field, Fields};
 pub use self::filter::Filter;
-pub use self::function::{Function, FunctionCall};
+pub use self::function::{ExtPrefix, Function, FunctionCall};
 pub use self::group::{Group, Groups};
 pub use self::idiom::Idiom;
 pub use self::key_names::{KeyNames, KeyNamesError, KeyedKinds};

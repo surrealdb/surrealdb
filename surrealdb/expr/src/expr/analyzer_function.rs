@@ -1,11 +1,14 @@
-//! Helpers for analyzer `FUNCTION` clause references (`fn::` and `mod::`).
+//! Helpers for analyzer `FUNCTION` clause references (`fn::` and `ext::`).
+//!
+//! An analyzer stores an extension function as `mod::path`, a fixed storage
+//! form that every release reads; SurrealQL writes it as `ext::path`.
 
 use common::fmt::EscapeKwFreeIdent;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 pub fn fmt_analyzer_function(f: &mut String, sql_fmt: SqlFormat, name: &str) {
 	let (kind, path) = if let Some(rest) = name.strip_prefix("mod::") {
-		("mod", rest)
+		("ext", rest)
 	} else if let Some(rest) = name.strip_prefix("fn::") {
 		("fn", rest)
 	} else {
@@ -19,8 +22,11 @@ pub fn fmt_analyzer_function(f: &mut String, sql_fmt: SqlFormat, name: &str) {
 	}
 }
 
+/// The name of a stored analyzer function reference as SurrealQL spells it.
 pub fn qualified_name(name: &str) -> String {
-	if name.starts_with("mod::") || name.starts_with("fn::") {
+	if let Some(rest) = name.strip_prefix("mod::") {
+		format!("ext::{rest}")
+	} else if name.starts_with("fn::") {
 		name.to_owned()
 	} else {
 		format!("fn::{name}")
@@ -38,7 +44,7 @@ pub fn function_from_storage(name: &str) -> crate::expr::Function {
 		} else {
 			Some(sub)
 		};
-		crate::expr::Function::Module(module, sub)
+		crate::expr::Function::Module(module, sub, crate::expr::ExtPrefix::Ext)
 	} else {
 		let name = name.strip_prefix("fn::").unwrap_or(name);
 		crate::expr::Function::Custom(name.to_owned())
@@ -69,7 +75,7 @@ mod tests {
 	fn function_from_storage_mod() {
 		assert!(matches!(
 			function_from_storage("mod::demo::math::add"),
-			crate::expr::Function::Module(m, Some(s)) if m == "demo" && s == "math::add"
+			crate::expr::Function::Module(m, Some(s), _) if m == "demo" && s == "math::add"
 		));
 	}
 }

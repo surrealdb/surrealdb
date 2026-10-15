@@ -107,6 +107,9 @@ pub struct ParserSettings {
 	/// Whether to allow JSON-style UTF-16 surrogate pairs in \uXXXX escapes.
 	/// Only enabled when parsing JSON input, not SurrealQL.
 	pub json_string_escapes: bool,
+	/// Whether the text is an import. See [`Limits::import`]: the definition
+	/// forms an export or a 3.x dump writes parse only under it.
+	pub import: bool,
 }
 
 impl Default for ParserSettings {
@@ -120,6 +123,7 @@ impl Default for ParserSettings {
 			files_enabled: false,
 			surrealism_enabled: false,
 			json_string_escapes: false,
+			import: false,
 		}
 	}
 }
@@ -165,6 +169,7 @@ impl ParserSettings {
 		files_enabled: true,
 		surrealism_enabled: true,
 		json_string_escapes: false,
+		import: false,
 	};
 
 	/// Settings for reading back a value this engine stored, in the SurrealQL
@@ -220,6 +225,7 @@ impl ParserSettings {
 			files_enabled: false,
 			surrealism_enabled: false,
 			json_string_escapes: false,
+			import: false,
 		}
 	}
 
@@ -270,6 +276,7 @@ impl ParserSettings {
 				regex: Some(super::is_regex),
 				no_files: !s.files_enabled,
 				no_surrealism: !s.surrealism_enabled,
+				import: s.import,
 			},
 			opts: Options {
 				legacy_strands: s.legacy_strands,

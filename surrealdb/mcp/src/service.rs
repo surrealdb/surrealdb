@@ -923,7 +923,7 @@ impl McpService {
 	}
 
 	#[tool(
-		description = "Enumerate schema entities of a single kind. `kind` is one of: namespaces, nodes, databases, tables, functions, analyzers, params, apis, buckets, models, modules, sequences, configs, users, accesses, fields, indexes, events. Set `table` for fields/indexes/events. Set `scope` (root|ns|db) for users/accesses.",
+		description = "Enumerate schema entities of a single kind. `kind` is one of: namespaces, nodes, databases, tables, functions, analyzers, params, apis, buckets, models, extensions, sequences, configs, users, accesses, fields, indexes, events. Set `table` for fields/indexes/events. Set `scope` (root|ns|db) for users/accesses.",
 		annotations(
 			title = "List schema entities",
 			read_only_hint = true,

@@ -597,7 +597,7 @@ fn function_release(function: &Function) -> Release {
 		Function::Custom(_)
 		| Function::Script(_)
 		| Function::Model(_)
-		| Function::Module(_, _)
+		| Function::Module(..)
 		| Function::Silo {
 			..
 		} => FIRST,

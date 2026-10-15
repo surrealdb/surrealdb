@@ -6,7 +6,7 @@
 //! fixed by the established grammar; what a clause means, including the checks
 //! on combinations of clauses, is left to lowering, which replays them in order.
 
-use crate::ast::{Cl, DefineKind, define, jwt, vector};
+use crate::ast::{Cl, DefineKind, define, ext, jwt, vector};
 use crate::parse::*;
 
 impl<'a, 's> Parser<'a, 's> {
@@ -79,17 +79,26 @@ impl<'a, 's> Parser<'a, 's> {
 			Kw::Config => DefineKind::Config,
 			Kw::Bucket => DefineKind::Bucket,
 			Kw::Sequence => DefineKind::Sequence,
-			Kw::Module => DefineKind::Module,
+			Kw::Extension | Kw::Module => DefineKind::Module,
 			_ => return Err(self.unexpected("a define statement keyword")),
 		};
 		if self.limits.no_files && kind == DefineKind::Bucket {
 			return Err(self.files_off(t));
 		}
 		self.bump();
-		if self.limits.no_surrealism && kind == DefineKind::Module {
-			return Err(
-				self.surrealism_off(t, "Use of `DEFINE MODULE` requires Surrealism modules")
-			);
+		let mut deprecated = 0;
+		if kind == DefineKind::Module {
+			if t.kw == Kw::Module {
+				deprecated |= ext::MODULE_KEYWORD;
+			}
+			if self.limits.no_surrealism {
+				let label = if t.kw == Kw::Module {
+					"Use of `DEFINE MODULE` requires Surrealism extensions"
+				} else {
+					"Use of `DEFINE EXTENSION` requires Surrealism extensions"
+				};
+				return Err(self.surrealism_off(t, label));
+			}
 		}
 		let mut rec = [NONE; define::LEN];
 		rec[define::EXIST] = if self.eat_kw(Kw::If) {
@@ -235,11 +244,11 @@ impl<'a, 's> Parser<'a, 's> {
 					self.expr_clause(Cl::Timeout)?;
 				}
 			}
-			DefineKind::Module => self.define_module(&mut rec)?,
+			DefineKind::Module => deprecated |= self.define_module(&mut rec)?,
 		}
 		rec[define::CLAUSES] = self.list_from(mark).0;
 		let idx = self.record(&rec);
-		self.stmt_node(Tag::Define, kind as u8, idx, 0, start, first)
+		self.stmt_node(Tag::Define, kind as u8, idx, deprecated, start, first)
 	}
 
 	/// `CHANGEFEED duration [INCLUDE ORIGINAL]`.
@@ -1383,7 +1392,8 @@ impl<'a, 's> Parser<'a, 's> {
 		Ok(())
 	}
 
-	/// An analyzer's `FUNCTION fn::…` or `FUNCTION mod::…`.
+	/// An analyzer's `FUNCTION fn::…` or `FUNCTION ext::…` (or its alias
+	/// `mod::…`).
 	pub(crate) fn analyzer_function_clause(&mut self) -> R<()> {
 		let t = self.tok;
 		self.bump();
@@ -1391,12 +1401,15 @@ impl<'a, 's> Parser<'a, 's> {
 		let f = self.tok;
 		let name = match f.kw {
 			Kw::Fn if f.kind == T::Ident => self.custom_function_name()?,
-			Kw::Mod if f.kind == T::Ident => {
+			Kw::Ext | Kw::Mod if f.kind == T::Ident => {
 				self.bump();
 				if self.limits.no_surrealism {
-					return Err(
-						self.surrealism_off(f, "Use of `mod::` requires Surrealism modules")
-					);
+					let label = if f.kw == Kw::Mod {
+						"Use of `mod::` requires Surrealism extensions"
+					} else {
+						"Use of `ext::` requires Surrealism extensions"
+					};
+					return Err(self.surrealism_off(f, label));
 				}
 				self.expect(T::PathSep, "::")?;
 				let s = self.ident()?;
@@ -1404,7 +1417,12 @@ impl<'a, 's> Parser<'a, 's> {
 				while self.eat(T::PathSep) {
 					end = self.ident()?.end;
 				}
-				self.leaf_span(Tag::Name, 2, 0, 0, f.start, end)
+				let deprecated = if f.kw == Kw::Mod {
+					ext::MOD_PREFIX
+				} else {
+					0
+				};
+				self.leaf_span(Tag::Name, 2, 0, deprecated, f.start, end)
 			}
 			Kw::Ml if f.kind == T::Ident => {
 				let d = Diag::message(f.start, f.end, "Analyzers cannot use model functions")
@@ -1416,7 +1434,7 @@ impl<'a, 's> Parser<'a, 's> {
 					.with_label("Silo functions cannot be used in an analyzer `FUNCTION` clause");
 				return Err(self.diag(d));
 			}
-			_ => return Err(self.unexpected("`fn::` or `mod::`")),
+			_ => return Err(self.unexpected("`fn::` or `ext::`")),
 		};
 		if self.at(T::LParen) {
 			let t = self.tok;
@@ -1426,7 +1444,7 @@ impl<'a, 's> Parser<'a, 's> {
 				"Analyzer FUNCTION expects a function name, not a function call",
 			)
 			.with_label(
-				"Remove `()` from the analyzer FUNCTION clause (for example: `fn::some` or `mod::demo::some`)",
+				"Remove `()` from the analyzer FUNCTION clause (for example: `fn::some` or `ext::demo::some`)",
 			);
 			return Err(self.diag(d));
 		}
@@ -1434,12 +1452,37 @@ impl<'a, 's> Parser<'a, 's> {
 		Ok(())
 	}
 
-	pub(crate) fn define_module(&mut self, rec: &mut [u32]) -> R<()> {
-		if self.at_kw(Kw::Mod) {
+	/// `ext::name FROM executable` and the clauses of `DEFINE EXTENSION`,
+	/// returning the [`ext`] bits of the deprecated spellings it read.
+	///
+	/// A definition names its extension. Under [`Limits::import`], the forms
+	/// an export or a 3.x dump writes are also read: the unnamed silo form
+	/// (`DEFINE EXTENSION silo::org::pkg<v>`), flagged [`ext::SILO_NAME`], and
+	/// `AS` in place of `FROM`.
+	///
+	/// `UNSIGNED` is optional in the grammar. Whether a definition without it
+	/// may be stored is the executor's decision.
+	pub(crate) fn define_module(&mut self, rec: &mut [u32]) -> R<u32> {
+		let n = self.tok;
+		let deprecated = match n.kw {
+			Kw::Ext if n.kind == T::Ident => 0,
+			Kw::Mod if n.kind == T::Ident => ext::MOD_PREFIX,
+			Kw::Silo if n.kind == T::Ident && self.limits.import => ext::SILO_NAME,
+			Kw::Silo if n.kind == T::Ident => {
+				let d = Diag::message(n.start, n.end, "An extension needs a name").with_label(
+					"Name the package and call it through that name: `DEFINE EXTENSION ext::name FROM silo::…`, then `ext::name::fn()`",
+				);
+				return Err(self.diag(d));
+			}
+			_ => return Err(self.unexpected("an extension name")),
+		};
+		if deprecated & ext::SILO_NAME == 0 {
 			self.bump();
 			self.expect(T::PathSep, "::")?;
 			rec[define::NAME] = self.name()?;
-			self.expect_kw(Kw::From, "FROM")?;
+			if !(self.limits.import && self.eat_kw(Kw::As)) {
+				self.expect_kw(Kw::From, "FROM")?;
+			}
 		}
 		let t = self.tok;
 		rec[define::X1] = match t.kind {
@@ -1452,8 +1495,7 @@ impl<'a, 's> Parser<'a, 's> {
 				self.expect(T::PathSep, "::")?;
 				let pkg = self.name()?;
 				self.vals.push(pkg);
-				self.expect(T::PathSep, "::")?;
-				self.model_version()?;
+				self.silo_version()?;
 				rec[define::X2] = 1;
 				self.list_from(mark).0
 			}
@@ -1461,32 +1503,66 @@ impl<'a, 's> Parser<'a, 's> {
 				self.bump();
 				self.leaf(Tag::Str, b'f', t)
 			}
-			_ => return Err(self.unexpected("a module executable")),
+			_ => return Err(self.unexpected("an extension executable")),
 		};
-		let mut unsigned = false;
 		loop {
 			match self.tok.kw {
-				Kw::Unsigned => {
-					unsigned = true;
-					self.flag_clause(Cl::Unsigned)?
-				}
+				Kw::Unsigned => self.flag_clause(Cl::Unsigned)?,
 				Kw::Comment => self.expr_clause(Cl::Comment)?,
 				Kw::Permissions => self.perm_value_clause()?,
 				_ => break,
 			}
 		}
-		if !unsigned {
-			let d = Diag::message(
-				self.prev_start,
-				self.prev_end,
-				"Expected the `UNSIGNED` keyword on this module definition",
-			)
-			.with_label(
-				"Surrealism modules are not signature-verified yet, so a module must be defined as `UNSIGNED`",
-			);
-			return Err(self.diag(d));
+		Ok(deprecated)
+	}
+
+	/// The name of an existing extension, after `ALTER` or `REMOVE
+	/// EXTENSION`: `ext::name`, its alias `mod::name`, or `silo::org::pkg::<v>`
+	/// for an unnamed silo definition an earlier release wrote. Returns the
+	/// name (the `Name` after `ext::`, or the list `[org, pkg, major, minor,
+	/// patch]`), whether it is a silo, and the [`ext`] bits of a deprecated
+	/// spelling.
+	pub(crate) fn extension_name(&mut self) -> R<(NodeId, bool, u32)> {
+		let m = self.tok;
+		match m.kw {
+			Kw::Ext | Kw::Mod if m.kind == T::Ident => {
+				self.bump();
+				self.expect_adjacent(T::PathSep, "::")?;
+				let deprecated = if m.kw == Kw::Mod {
+					ext::MOD_PREFIX
+				} else {
+					0
+				};
+				Ok((self.name()?, false, deprecated))
+			}
+			Kw::Silo if m.kind == T::Ident => {
+				self.bump();
+				self.expect(T::PathSep, "::")?;
+				let mark = self.vals.len() as u32;
+				let org = self.name()?;
+				self.vals.push(org);
+				self.expect(T::PathSep, "::")?;
+				let pkg = self.name()?;
+				self.vals.push(pkg);
+				self.silo_version()?;
+				Ok((self.list_from(mark).0, true, ext::SILO_NAME))
+			}
+			_ => Err(self.unexpected("an extension name")),
 		}
-		Ok(())
+	}
+
+	/// The version of a silo package, `<major.minor.patch>` or
+	/// `::<major.minor.patch>`, directly after the package name. Both spell the
+	/// same version: a package path is never a value on its own, so a `<`
+	/// after it can only open one.
+	pub(crate) fn silo_version(&mut self) -> R<()> {
+		if self.at(T::PathSep) && !self.tok.ws() {
+			self.bump();
+		}
+		if !self.at(T::Lt) || self.tok.ws() {
+			return Err(self.unexpected("<"));
+		}
+		self.model_version()
 	}
 
 	/// `<major.minor.patch>`, pushing the three numbers onto the value stack.

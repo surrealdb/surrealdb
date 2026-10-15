@@ -9,7 +9,7 @@ pub enum Function {
 	Custom(String),
 	Script(Script),
 	Model(Model),
-	Module(String, Option<String>),
+	Module(String, Option<String>, ExtPrefix),
 	Silo {
 		org: String,
 		pkg: String,
@@ -18,6 +18,29 @@ pub enum Function {
 		patch: u32,
 		sub: Option<String>,
 	},
+}
+
+/// The prefix an extension call is written with. Both name the same
+/// extension and run the same export; the prefix is what the call renders
+/// with and what its implicit field name starts with, so a projection keeps
+/// the key it was written to produce.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
+pub enum ExtPrefix {
+	/// `ext::`.
+	#[default]
+	Ext,
+	/// `mod::`, the deprecated alias.
+	Mod,
+}
+
+impl ExtPrefix {
+	/// The prefix as written, `ext` or `mod`.
+	pub fn as_str(self) -> &'static str {
+		match self {
+			ExtPrefix::Ext => "ext",
+			ExtPrefix::Mod => "mod",
+		}
+	}
 }
 
 impl Function {
@@ -29,9 +52,9 @@ impl Function {
 			Self::Normal(f) => Idiom::field(f.to_owned()),
 			Self::Custom(f) => Idiom::field(format!("fn::{f}")),
 			Self::Model(m) => Idiom::field(m.to_sql()),
-			Self::Module(m, s) => match s {
-				Some(s) => Idiom::field(format!("mod::{m}::{s}")),
-				None => Idiom::field(format!("mod::{m}")),
+			Self::Module(m, s, p) => match s {
+				Some(s) => Idiom::field(format!("{}::{m}::{s}", p.as_str())),
+				None => Idiom::field(format!("{}::{m}", p.as_str())),
 			},
 			Self::Silo {
 				org,
@@ -42,9 +65,9 @@ impl Function {
 				sub,
 			} => match sub {
 				Some(s) => {
-					Idiom::field(format!("silo::{org}::{pkg}::<{major}.{minor}.{patch}>::{s}"))
+					Idiom::field(format!("silo::{org}::{pkg}<{major}.{minor}.{patch}>::{s}"))
 				}
-				None => Idiom::field(format!("silo::{org}::{pkg}::<{major}.{minor}.{patch}>")),
+				None => Idiom::field(format!("silo::{org}::{pkg}<{major}.{minor}.{patch}>")),
 			},
 		}
 	}
@@ -54,7 +77,7 @@ impl Function {
 		match self {
 			Self::Custom(_)
 			| Self::Script(_)
-			| Self::Module(_, _)
+			| Self::Module(..)
 			| Self::Silo {
 				..
 			} => false,
@@ -110,9 +133,8 @@ impl ToSql for FunctionCall {
 			Function::Model(ref m) => {
 				write_sql!(f, fmt, "{m}");
 			}
-			Function::Module(ref m, ref s) => {
-				f.push_str("mod::");
-				write_sql!(f, fmt, " {}", EscapeKwFreeIdent(m));
+			Function::Module(ref m, ref s, p) => {
+				write_sql!(f, fmt, "{}::{}", p.as_str(), EscapeKwFreeIdent(m));
 				if let Some(s) = s {
 					for segment in s.split("::") {
 						write_sql!(f, fmt, "::{}", EscapeKwFreeIdent(segment));
@@ -130,7 +152,7 @@ impl ToSql for FunctionCall {
 				write_sql!(
 					f,
 					fmt,
-					"silo::{}::{}::<{major}.{minor}.{patch}>",
+					"silo::{}::{}<{major}.{minor}.{patch}>",
 					EscapeKwFreeIdent(org),
 					EscapeKwFreeIdent(pkg),
 				);

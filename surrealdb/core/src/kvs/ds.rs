@@ -6645,10 +6645,16 @@ impl Datastore {
 	/// import text is a fresh statement at the query boundary, not text this
 	/// engine rendered, so the experimental-syntax gates apply to
 	/// it as they do to any other operator-supplied query.
+	///
+	/// The text is marked as an import, so the definition forms an export or
+	/// a 3.x dump writes (an unnamed silo extension, `AS` for `FROM`, a
+	/// definition without `UNSIGNED`) are read back; an ordinary query refuses
+	/// the first two, and the executor refuses the third outside an import.
 	fn import_parser_settings(capabilities: &Capabilities) -> ParserSettings {
 		ParserSettings {
 			files_enabled: capabilities.allows_experimental(&ExperimentalTarget::Files),
 			surrealism_enabled: capabilities.allows_experimental(&ExperimentalTarget::Surrealism),
+			import: true,
 			..ParserSettings::for_value_depth(MAX_VALUE_DEPTH)
 		}
 	}

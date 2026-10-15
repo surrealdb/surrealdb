@@ -2,13 +2,15 @@
 [env.capabilities]
 allow-experimental = []
 
+[test]
+
 [test.results]
 parsing-error = """
 Analyzer FUNCTION expects a function name, not a function call
-  --> [15:66]
+  --> [17:66]
    |
-15 | ...e_function();
-   |              ^ Remove `()` from the analyzer FUNCTION clause (for example: `fn::some` or `mod::demo::some`)
+17 | ...e_function();
+   |              ^ Remove `()` from the analyzer FUNCTION clause (for example: `fn::some` or `ext::demo::some`)
 """
 */
 

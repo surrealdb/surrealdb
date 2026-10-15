@@ -18,14 +18,14 @@ pub struct DefineModuleStatement {
 
 impl ToSql for DefineModuleStatement {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		f.push_str("DEFINE MODULE");
+		f.push_str("DEFINE EXTENSION");
 		match self.kind {
 			DefineKind::Default => {}
 			DefineKind::Overwrite => f.push_str(" OVERWRITE"),
 			DefineKind::IfNotExists => f.push_str(" IF NOT EXISTS"),
 		}
 		if let Some(name) = &self.name {
-			write_sql!(f, sql_fmt, " mod::{} FROM", EscapeKwFreeIdent(name));
+			write_sql!(f, sql_fmt, " ext::{} FROM", EscapeKwFreeIdent(name));
 		}
 		write_sql!(f, sql_fmt, " {}", self.executable);
 		if self.unsigned {

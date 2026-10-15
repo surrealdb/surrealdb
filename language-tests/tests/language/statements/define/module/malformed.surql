@@ -7,11 +7,11 @@ reason = "A DEFINE MODULE with no module executable reports the unavailability d
 
 [test.results]
 parsing-error = """
-Surrealism modules are not enabled
+Surrealism extensions are not enabled
   --> [18:8]
    |
 18 | DEFINE MODULE;
-   |        ^^^^^^ Use of `DEFINE MODULE` requires Surrealism modules
+   |        ^^^^^^ Use of `DEFINE MODULE` requires Surrealism extensions
 """
 */
 

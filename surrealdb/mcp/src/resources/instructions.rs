@@ -20,7 +20,7 @@ This MCP server provides direct access to a SurrealDB database instance.
 
 ### Schema Introspection
 - **info**: Dump full schema for a scope ('root', 'ns', 'db', or a table name). Use when you want everything at once.
-- **list**: Enumerate entities of a single kind (namespaces, databases, tables, fields, indexes, events, functions, params, analyzers, apis, buckets, models, modules, sequences, configs, users, accesses, nodes). Set `table` for fields/indexes/events; set `scope` for users/accesses.
+- **list**: Enumerate entities of a single kind (namespaces, databases, tables, fields, indexes, events, functions, params, analyzers, apis, buckets, models, extensions, sequences, configs, users, accesses, nodes). Set `table` for fields/indexes/events; set `scope` for users/accesses.
 
 ### Context
 - **use**: Switch the active namespace and/or database for the rest of the connection. Provide `namespace`, `database`, or both in one call. Requires a protocol version older than `2026-07-28`; from that revision on nothing persists between requests, so `use` is rejected and scope must be passed per call instead.

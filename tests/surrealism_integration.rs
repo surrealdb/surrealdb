@@ -466,8 +466,10 @@ mod surrealism_integration {
 			.unwrap_or_else(|e| panic!("Failed to parse response JSON: {e}\nbody: {body}"))
 	}
 
-	/// Run the DEFINE BUCKET + DEFINE MODULE setup queries for a fresh
-	/// namespace/database.
+	/// Run the DEFINE BUCKET + DEFINE EXTENSION setup queries for a fresh
+	/// namespace/database. The tests call the extension through the `mod::`
+	/// alias, so every call also covers the alias resolving an `ext::`
+	/// definition.
 	async fn setup_module(addr: &str, ns: &str, db: &str, bucket_dir: &Path) {
 		setup_named_module(addr, ns, db, bucket_dir, "demo", "demo.surli").await;
 	}
@@ -484,7 +486,7 @@ mod surrealism_integration {
 		let dir = bucket_dir.to_string_lossy();
 		let setup = format!(
 			"DEFINE BUCKET IF NOT EXISTS test BACKEND \"file:{dir}\";\
-			 DEFINE MODULE mod::{module} FROM f\"test:/{archive}\" UNSIGNED;"
+			 DEFINE EXTENSION ext::{module} FROM f\"test:/{archive}\" UNSIGNED;"
 		);
 		let results = sql_query(addr, ns, db, &setup).await;
 		for (i, r) in results.iter().enumerate() {
@@ -1373,8 +1375,9 @@ mod surrealism_integration {
 		assert_eq!(results[0].status, "OK", "INFO FOR DB STRUCTURE: {:?}", results[0].result);
 
 		let db_info = &results[0].result;
-		let modules = db_info["modules"].as_array().expect("modules should be an array");
-		assert!(!modules.is_empty(), "at least one module should be defined");
+		let modules = db_info["extensions"].as_array().expect("extensions should be an array");
+		assert!(!modules.is_empty(), "at least one extension should be defined");
+		assert!(db_info.get("modules").is_none(), "INFO answers no `modules` key");
 
 		let module = &modules[0];
 		assert_eq!(module["name"], "demo");
@@ -1601,6 +1604,56 @@ mod surrealism_integration {
 		check_operator_port_deny(&DEMO_DIR.canonical).await
 	}
 
+	/// A function capability written in either extension spelling covers a
+	/// call written in either: `ext::` and `mod::` name the same extension,
+	/// an allow entry in one admits a call in the other, and a deny entry in
+	/// one refuses a call in the other.
+	async fn check_extension_capability_spellings(
+		bucket_dir: &Path,
+	) -> Result<(), Box<dyn std::error::Error>> {
+		let calls = ["RETURN ext::demo::can_drive(21);", "RETURN mod::demo::can_drive(21);"];
+
+		// Denied under `ext::`: both spellings of the call are refused.
+		let (addr, _server) =
+			start_surrealism_server_full(bucket_dir, HashMap::new(), "--deny-funcs ext::*").await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		setup_module(&addr, &ns, &db, bucket_dir).await;
+		for call in calls {
+			let results = sql_query(&addr, &ns, &db, call).await;
+			assert_ne!(results[0].status, "OK", "{call} under --deny-funcs ext::*");
+			let error = results[0].result.to_string();
+			assert!(
+				error.contains("ext::demo::can_drive") && error.contains("not allowed"),
+				"{call}: unexpected error: {error}"
+			);
+		}
+
+		// Allowed under the `mod` family only, beside the functions the package
+		// itself requests: both spellings of the call run.
+		let (addr, _server) = start_surrealism_server_full(
+			bucket_dir,
+			HashMap::new(),
+			"--allow-funcs fn::*,file::*,sequence::*,mod::*",
+		)
+		.await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		setup_module(&addr, &ns, &db, bucket_dir).await;
+		for call in calls {
+			let results = sql_query(&addr, &ns, &db, call).await;
+			assert_eq!(results[0].status, "OK", "{call}: {:?}", results[0].result);
+			assert_eq!(results[0].result, serde_json::json!(true), "{call}");
+		}
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_capability_spellings() -> Result<(), Box<dyn std::error::Error>> {
+		check_extension_capability_spellings(&DEMO_DIR.canonical).await
+	}
+
 	#[test(tokio::test)]
 	async fn module_dns_denied_hostname() -> Result<(), Box<dyn std::error::Error>> {
 		check_dns_denied_hostname(&DEMO_DIR.canonical).await
@@ -1640,7 +1693,7 @@ mod surrealism_integration {
 	/// runs like any other.
 	async fn check_silo_module(bucket_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
 		// The demo package's own coordinates: organisation `surrealdb`, name
-		// `demo`, version 1.0.0 -- see surrealism/demo/surrealism.toml.
+		// `demo`, version 1.0.0 -- see surrealism/demo/package.toml.
 		let package = std::fs::read(bucket_dir.join("demo.surli"))?;
 		let registry = LocalSiloRegistry::start("/surrealdb/demo/1.0.0.surli", package)?;
 
@@ -1651,26 +1704,34 @@ mod surrealism_integration {
 		let ns = Ulid::new().to_string();
 		let db = Ulid::new().to_string();
 
-		let results =
-			sql_query(&addr, &ns, &db, "DEFINE MODULE silo::surrealdb::demo::<1.0.0> UNSIGNED;")
-				.await;
-		assert_eq!(results[0].status, "OK", "silo DEFINE MODULE failed: {:?}", results[0].result);
+		let results = sql_query(
+			&addr,
+			&ns,
+			&db,
+			"DEFINE EXTENSION ext::demo FROM silo::surrealdb::demo::<1.0.0> UNSIGNED;",
+		)
+		.await;
+		assert_eq!(
+			results[0].status, "OK",
+			"silo DEFINE EXTENSION failed: {:?}",
+			results[0].result
+		);
 
-		// The module is keyed by its package coordinates, so that is also how
-		// its exports are called.
-		let results =
-			sql_query(&addr, &ns, &db, "RETURN silo::surrealdb::demo::<1.0.0>::math(5);").await;
+		// A silo extension is named like any other, and called through that name.
+		let results = sql_query(&addr, &ns, &db, "RETURN ext::demo::math(5);").await;
 		assert_eq!(results[0].status, "OK", "silo math(5) failed: {:?}", results[0].result);
 		assert_eq!(results[0].result, serde_json::json!(10));
 
-		// INFO renders the definition back with the keyword it was defined with.
+		// INFO renders the definition in the EXTENSION spelling.
 		let results = sql_query(&addr, &ns, &db, "INFO FOR DB;").await;
 		assert_eq!(results[0].status, "OK", "INFO FOR DB failed: {:?}", results[0].result);
-		let rendered = results[0].result["modules"]["silo::surrealdb::demo::<1.0.0>"]
+		let rendered = results[0].result["extensions"]["ext::demo"]
 			.as_str()
-			.expect("silo module missing from INFO FOR DB");
+			.expect("silo extension missing from INFO FOR DB");
 		assert!(
-			rendered.starts_with("DEFINE MODULE silo::surrealdb::demo::<1.0.0> UNSIGNED"),
+			rendered.starts_with(
+				"DEFINE EXTENSION ext::demo FROM silo::surrealdb::demo<1.0.0> UNSIGNED"
+			),
 			"unexpected rendering: {rendered}"
 		);
 
@@ -1699,13 +1760,20 @@ mod surrealism_integration {
 
 		// The definition itself is recorded -- an unreachable package is a
 		// warning at define time -- but calling it surfaces the miss.
-		let results =
-			sql_query(&addr, &ns, &db, "DEFINE MODULE silo::surrealdb::demo::<9.9.9> UNSIGNED;")
-				.await;
-		assert_eq!(results[0].status, "OK", "silo DEFINE MODULE failed: {:?}", results[0].result);
+		let results = sql_query(
+			&addr,
+			&ns,
+			&db,
+			"DEFINE EXTENSION ext::demo FROM silo::surrealdb::demo::<9.9.9> UNSIGNED;",
+		)
+		.await;
+		assert_eq!(
+			results[0].status, "OK",
+			"silo DEFINE EXTENSION failed: {:?}",
+			results[0].result
+		);
 
-		let results =
-			sql_query(&addr, &ns, &db, "RETURN silo::surrealdb::demo::<9.9.9>::math(5);").await;
+		let results = sql_query(&addr, &ns, &db, "RETURN ext::demo::math(5);").await;
 		assert_eq!(results[0].status, "ERR", "expected a miss: {:?}", results[0].result);
 		let error = results[0].result.to_string();
 		assert!(error.contains("was not found"), "unexpected error: {error}");
@@ -1737,12 +1805,16 @@ mod surrealism_integration {
 			(Ulid::new().to_string(), Ulid::new().to_string()),
 		];
 		for (ns, db) in &tenants {
-			let results =
-				sql_query(&addr, ns, db, "DEFINE MODULE silo::surrealdb::demo::<1.0.0> UNSIGNED;")
-					.await;
+			let results = sql_query(
+				&addr,
+				ns,
+				db,
+				"DEFINE EXTENSION ext::demo FROM silo::surrealdb::demo::<1.0.0> UNSIGNED;",
+			)
+			.await;
 			assert_eq!(
 				results[0].status, "OK",
-				"silo DEFINE MODULE failed: {:?}",
+				"silo DEFINE EXTENSION failed: {:?}",
 				results[0].result
 			);
 		}
@@ -1750,23 +1822,17 @@ mod surrealism_integration {
 		let (ns_a, db_a) = &tenants[0];
 		let (ns_b, db_b) = &tenants[1];
 
-		let results =
-			sql_query(&addr, ns_a, db_a, "RETURN silo::surrealdb::demo::<1.0.0>::set_state(42);")
-				.await;
+		let results = sql_query(&addr, ns_a, db_a, "RETURN ext::demo::set_state(42);").await;
 		assert_eq!(results[0].status, "OK", "set_state: {:?}", results[0].result);
 
 		// The writing tenant still sees its own value.
-		let results =
-			sql_query(&addr, ns_a, db_a, "RETURN silo::surrealdb::demo::<1.0.0>::get_state();")
-				.await;
+		let results = sql_query(&addr, ns_a, db_a, "RETURN ext::demo::get_state();").await;
 		assert_eq!(results[0].status, "OK", "get_state: {:?}", results[0].result);
 		assert_eq!(results[0].result, serde_json::json!(42));
 
 		// The other tenant must not: a module is cached per namespace/database,
 		// so it gets its own instances and its own linear memory.
-		let results =
-			sql_query(&addr, ns_b, db_b, "RETURN silo::surrealdb::demo::<1.0.0>::get_state();")
-				.await;
+		let results = sql_query(&addr, ns_b, db_b, "RETURN ext::demo::get_state();").await;
 		assert_eq!(results[0].status, "OK", "get_state: {:?}", results[0].result);
 		assert_eq!(
 			results[0].result,

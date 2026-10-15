@@ -174,6 +174,7 @@ fn probe(parser: &str, family: &str, depth: usize, stack: usize) -> ! {
 					regex: None,
 					no_files: false,
 					no_surrealism: false,
+					import: false,
 				};
 				parse_script(&src, limits, &mut ast, &mut scratch);
 				scratch.diags.is_empty()
@@ -465,6 +466,7 @@ fn main() {
 					regex: None,
 					no_files: false,
 					no_surrealism: false,
+					import: false,
 				};
 				parse_script(&src, limits, &mut ast, &mut scratch);
 				black_box(&ast);

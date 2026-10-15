@@ -26,7 +26,9 @@ use crate::expr::statements::{
 	CreateStatement, DeleteStatement, InsertStatement, KillStatement, LiveStatement,
 	RelateStatement, SelectStatement, UpdateStatement, UpsertStatement,
 };
-use crate::expr::{Data as SqlData, Expr, Fields, Function, FunctionCall, Literal, Model, Output};
+use crate::expr::{
+	Data as SqlData, Expr, ExtPrefix, Fields, Function, FunctionCall, Literal, Model, Output,
+};
 use crate::kvs::{Datastore, Dialect, QueryRequest, QuerySource, TransactionType};
 use crate::observe::{
 	AuthAction, AuthEvent, AuthEventSafe, AuthScope, Outcome, RpcEvent, RpcEventSafe,
@@ -2436,7 +2438,7 @@ pub trait RpcProtocol {
 		let segments = name.split("::").collect::<Vec<&str>>();
 		let name = match segments.first() {
 			Some(&"fn") => Function::Custom(segments[1..].join("::")),
-			Some(&"mod") => {
+			Some(&prefix @ ("ext" | "mod")) => {
 				if !self
 					.kvs()
 					.get_capabilities()
@@ -2448,7 +2450,7 @@ pub trait RpcProtocol {
 				}
 
 				let Some(name) = segments.get(1).map(|x| (*x).to_string()) else {
-					return Err(invalid_params("Expected module name".to_string()));
+					return Err(invalid_params("Expected an extension name".to_string()));
 				};
 
 				let sub = if segments.len() > 2 {
@@ -2457,7 +2459,12 @@ pub trait RpcProtocol {
 					None
 				};
 
-				Function::Module(name, sub)
+				let prefix = if prefix == "mod" {
+					ExtPrefix::Mod
+				} else {
+					ExtPrefix::Ext
+				};
+				Function::Module(name, sub, prefix)
 			}
 			Some(&"silo") => {
 				if !self

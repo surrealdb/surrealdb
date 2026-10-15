@@ -326,6 +326,7 @@ impl<'de> Deserialize<'de> for TestDuration {
 					files_enabled: true,
 					surrealism_enabled: true,
 					json_string_escapes: false,
+					import: false,
 				};
 
 				let v = surrealdb_core::syn::runtime::value_with_settings(&x, settings)
@@ -743,6 +744,7 @@ impl<'de> Deserialize<'de> for SurrealConfigValue {
 			files_enabled: true,
 			surrealism_enabled: true,
 			json_string_escapes: false,
+			import: false,
 		};
 
 		let v = surrealdb_core::syn::runtime::value_with_settings(&source, settings)
@@ -805,6 +807,7 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 			files_enabled: true,
 			surrealism_enabled: true,
 			json_string_escapes: false,
+			import: false,
 		};
 
 		let v = surrealdb_core::syn::runtime::value_with_settings(&source, settings)
@@ -847,6 +850,7 @@ impl<'de> Deserialize<'de> for SurrealObject {
 			files_enabled: true,
 			surrealism_enabled: true,
 			json_string_escapes: false,
+			import: false,
 		};
 
 		let v = surrealdb_core::syn::runtime::value_with_settings(&source, settings)

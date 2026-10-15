@@ -94,7 +94,7 @@ pub use conformance::{
 	definition_digest,
 };
 pub use database::*;
-pub use error::Error;
+pub use error::{Error, extension_name};
 pub use feature::StoredFeatureLevel;
 pub use generation::{Generation, GenerationMark, GenerationRing, TableMigrations};
 pub use layout::{

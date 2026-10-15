@@ -573,7 +573,8 @@ mod tests {
 					"a definition under the older derivation was reachable before the migration"
 				);
 			};
-			assert!(e.to_string().contains(DERIVED_SILO), "unexpected error: {e}");
+			let named = crate::catalog::extension_name(DERIVED_SILO);
+			assert!(e.to_string().contains(named.as_ref()), "unexpected error: {e}");
 
 			run_with(&ds, MIGRATIONS, &[], &StorageVersion::current(), false).await.unwrap();
 

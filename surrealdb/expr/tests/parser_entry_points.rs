@@ -42,7 +42,8 @@ fn function_names() {
 	assert_eq!(name("string::len").expect("valid"), r#"Normal("string::len")"#);
 	assert_eq!(name("fn::a::b").expect("valid"), r#"Custom("a::b")"#);
 	assert_eq!(name("fn::`x y`").expect("valid"), r#"Custom("x y")"#);
-	assert!(name("mod::m::f").is_ok());
+	assert_eq!(name("ext::m::f").expect("valid"), r#"Module("m", Some("f"), Ext)"#);
+	assert_eq!(name("mod::m::f").expect("valid"), r#"Module("m", Some("f"), Mod)"#);
 	assert!(name("silo::o::p::<1.2.3>::f").is_ok());
 	assert!(name("ml::model<1.2.3>").is_ok());
 	assert_eq!(name("count rest").expect("valid"), r#"Normal("count")"#);
@@ -61,6 +62,7 @@ fn surrogate_pairs_are_json_only() {
 	assert!(parser::expr(text).is_err());
 	let json = ParserSettings {
 		json_string_escapes: true,
+		import: false,
 		..Default::default()
 	};
 	assert!(parser::json_with_settings(text, json).is_ok());
@@ -82,7 +84,7 @@ fn module_executables_lower_by_kind() {
 	let _ = parser::parse(src);
 	let ast = parser::parse(
 		"DEFINE MODULE mod::test FROM f\"bucket:/module.wasm\" UNSIGNED;\n\
-		 DEFINE MODULE silo::acme::pkg::<1.0.0> UNSIGNED;",
+		 DEFINE MODULE mod::pkg FROM silo::acme::pkg::<1.0.0> UNSIGNED;",
 	)
 	.expect("both forms parse");
 	assert_eq!(ast.expressions.len(), 2);

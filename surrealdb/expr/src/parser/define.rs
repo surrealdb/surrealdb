@@ -587,6 +587,7 @@ impl Lower<'_> {
 				DefineStatement::Sequence(s)
 			}
 			_ => {
+				self.warn_deprecated_extension(n.b, n.start);
 				let exe = rec[define::X1];
 				// `X1` is a list index for a silo package, a node otherwise.
 				let executable = if rec[define::X2] != 1 {
@@ -608,6 +609,7 @@ impl Lower<'_> {
 				};
 				let mut s = DefineModuleStatement {
 					kind,
+					// An unnamed silo definition, which only an import reads.
 					name: if rec[define::NAME] == NONE {
 						None
 					} else {
@@ -1151,21 +1153,13 @@ impl Lower<'_> {
 				name: Strand::new(self.path(rec[rm::NAME])?),
 				if_exists,
 			}),
-			x if x == K::Module as u8 => RemoveStatement::Module(RemoveModuleStatement {
-				name: if rec[rm::ON] == 1 {
-					let l = self.list(rec[rm::NAME]);
-					ModuleName::Silo(
-						self.name(l[0])?,
-						self.name(l[1])?,
-						self.uint(l[2])?,
-						self.uint(l[3])?,
-						self.uint(l[4])?,
-					)
-				} else {
-					ModuleName::Module(self.name(rec[rm::NAME])?)
-				},
-				if_exists,
-			}),
+			x if x == K::Module as u8 => {
+				self.warn_deprecated_extension(n.b, n.start);
+				RemoveStatement::Module(RemoveModuleStatement {
+					name: self.module_name(rec)?,
+					if_exists,
+				})
+			}
 			x if x == K::Access as u8 => RemoveStatement::Access(RemoveAccessStatement {
 				name: name()?,
 				base: Self::base(rec[rm::ON]),
@@ -1272,16 +1266,22 @@ impl Lower<'_> {
 			.collect()
 	}
 
+	/// The stored form of an analyzer's `FUNCTION` reference: the path of a
+	/// `fn::` function, or `mod::` and the path of an extension function,
+	/// whichever prefix the source spelled.
 	fn analyzer_function(&self, c: &Node) -> R<String> {
 		let f = self.n(c.a);
 		let path = self.path(c.a)?;
 		if f.op == 1 {
 			Ok(path)
 		} else {
-			if path.starts_with("mod") && !self.opts.surrealism {
+			if !self.opts.surrealism {
 				return Err(Reject::new(SURREALISM_DISABLED));
 			}
-			Ok(path.split_whitespace().collect())
+			self.warn_deprecated_extension(f.b, f.start);
+			let path: String = path.split_whitespace().collect();
+			let rest = path.split_once("::").map_or(path.as_str(), |(_, rest)| rest);
+			Ok(format!("mod::{rest}"))
 		}
 	}
 
@@ -1310,6 +1310,8 @@ impl Lower<'_> {
 		})
 	}
 
+	/// The extension name in the `NAME` and `ON` slots shared by the `ALTER`
+	/// and `REMOVE` records.
 	fn module_name(&self, rec: &[u32]) -> R<ModuleName> {
 		Ok(if rec[2] == 1 {
 			let l = self.list(rec[1]);
@@ -1775,6 +1777,7 @@ impl Lower<'_> {
 				AlterStatement::Api(s)
 			}
 			_ => {
+				self.warn_deprecated_extension(n.b, n.start);
 				let mut s = AlterModuleStatement {
 					name: self.module_name(rec)?,
 					if_exists,

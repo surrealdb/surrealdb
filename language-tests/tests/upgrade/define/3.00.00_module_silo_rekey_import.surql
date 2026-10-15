@@ -30,9 +30,9 @@ run this script stops at a `.` followed by a digit, reading `1.2.3` as the start
 of a float. The spacing is a parsing detail only; the stored name is formatted
 from the three numbers and carries none of it."""
 run = false
-# The released spelling of a silo executable has no `::` before its version and
-# no `UNSIGNED` keyword, neither of which the current parser accepts, so this
-# script is only ever replayed against a spawned release.
+# The spaced version triple and `AS` outside an import are spellings the current
+# parser refuses, so this script is only ever replayed against a spawned
+# release.
 legacy-syntax = true
 */
 -- The subject. The COMMENT is carried across the upgrade verbatim, so it also

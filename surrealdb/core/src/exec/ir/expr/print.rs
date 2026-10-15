@@ -601,11 +601,12 @@ fn print_function(out: &mut String, function: &Function) {
 			print_string(map.key("version"), model.version.as_str());
 			map.close();
 		}
-		Function::Module(name, sub) => {
+		Function::Module(name, sub, prefix) => {
 			out.push_str("module ");
 			let mut map = Map::open(out);
 			print_string(map.key("name"), name);
 			print_option(map.key("sub"), sub.as_ref(), |out, sub| print_string(out, sub));
+			print_string(map.key("prefix"), prefix.as_str());
 			map.close();
 		}
 		Function::Silo {
@@ -1801,8 +1802,13 @@ fn read_function(node: Node) -> Result<Function, ParseError> {
 			let mut map = arg.map()?;
 			let name = map.take("name")?.string()?;
 			let sub = map.take("sub")?.option(Node::string)?;
+			let prefix = match map.take("prefix")?.string()?.as_str() {
+				"ext" => crate::expr::ExtPrefix::Ext,
+				"mod" => crate::expr::ExtPrefix::Mod,
+				other => return Err(error(format!("unknown extension prefix `{other}`"))),
+			};
 			map.done()?;
-			Ok(Function::Module(name, sub))
+			Ok(Function::Module(name, sub, prefix))
 		}
 		("silo", Some(arg)) => {
 			let mut map = arg.map()?;
@@ -2682,8 +2688,8 @@ mod tests {
 				name: strand_of("ml::m"),
 				version: strand_of("1.0.0"),
 			}),
-			Function::Module("m".to_owned(), None),
-			Function::Module("m".to_owned(), Some("sub".to_owned())),
+			Function::Module("m".to_owned(), None, crate::expr::ExtPrefix::Ext),
+			Function::Module("m".to_owned(), Some("sub".to_owned()), crate::expr::ExtPrefix::Mod),
 			Function::Silo {
 				org: "o".to_owned(),
 				pkg: "p".to_owned(),

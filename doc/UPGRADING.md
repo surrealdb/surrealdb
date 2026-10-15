@@ -286,6 +286,20 @@ transaction bound for the first time holds nothing again. A `LET` inside a
 transaction that commits keeps its value. A client that read a parameter bound
 inside a cancelled transaction must bind it again outside the transaction.
 
+### `ext::` in stored text is not downgrade-safe
+
+An extension call keeps the prefix it is written with, `ext::` or the
+deprecated `mod::`, in every definition that stores its text: a field's
+`VALUE` or `DEFAULT`, an event, a function body, a view, a permission. A 3.x
+release does not parse `ext::`, so a definition written with it fails to
+compile on a 3.x node, and the field, event or function it belongs to stops
+working there. A definition written with `mod::` keeps `mod::` and stays
+readable. An analyzer's `FUNCTION` clause is stored as `mod::` whichever prefix
+it is written with, so analyzers stay readable by 3.x.
+
+**Impact**: before going back to a 3.x release, rewrite `ext::` calls in stored
+definitions as `mod::`.
+
 ## v3.4.0 — export/import contract changes, vector indexes that lost records sharing a vector, a doc-ID → elements mapping on vector indexes, JACCARD/PEARSON as distances, named record-id components, pre-filtered KNN choosing its strategy by cost, and chronological Datetime order in new and rebuilt indexes
 
 **Impact**:

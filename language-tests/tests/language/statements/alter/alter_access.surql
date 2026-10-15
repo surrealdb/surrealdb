@@ -9,19 +9,19 @@ reason = "Test ALTER ACCESS with all variations"
 value = "NONE"
 
 [[test.results]]
-value = """{ accesses: { my_access: "DEFINE ACCESS my_access ON DATABASE TYPE JWT ALGORITHM HS256 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION 1d" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
+value = """{ accesses: { my_access: "DEFINE ACCESS my_access ON DATABASE TYPE JWT ALGORITHM HS256 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION 1d" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = """{ accesses: { my_access: "DEFINE ACCESS my_access ON DATABASE TYPE JWT ALGORITHM HS256 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 2h, FOR SESSION 2d COMMENT 'updated access'" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
+value = """{ accesses: { my_access: "DEFINE ACCESS my_access ON DATABASE TYPE JWT ALGORITHM HS256 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 2h, FOR SESSION 2d COMMENT 'updated access'" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = """{ accesses: { my_access: "DEFINE ACCESS my_access ON DATABASE TYPE JWT ALGORITHM HS256 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN NONE, FOR SESSION NONE" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
+value = """{ accesses: { my_access: "DEFINE ACCESS my_access ON DATABASE TYPE JWT ALGORITHM HS256 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN NONE, FOR SESSION NONE" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
 
 [[test.results]]
 value = "NONE"

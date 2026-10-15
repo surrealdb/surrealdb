@@ -1,7 +1,7 @@
-//! Calling a module's exported function.
+//! Calling an extension's exported function.
 //!
-//! A `DEFINE MODULE` names an executable — a Surrealism package in a bucket, or
-//! a Silo package by version — and `mod::<name>()` calls one of its exports.
+//! A `DEFINE EXTENSION` names an executable — a Surrealism package in a bucket,
+//! or a Silo package by version — and `ext::<name>()` calls one of its exports.
 //! Resolving a signature and running a call both need the execution
 //! environment: the context's runtime cache, the session's capabilities, and
 //! the namespace and database the options select. That is why this lives here

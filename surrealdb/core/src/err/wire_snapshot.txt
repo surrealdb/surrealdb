@@ -160,7 +160,7 @@ NsNotFound	{ cause: NONE, code: -32000, details: { details: { name: 'sample' }, 
 DbNotFound	{ cause: NONE, code: -32000, details: { details: { name: 'sample' }, kind: 'Database' }, kind: 'NotFound', message: "The database 'sample' does not exist" }
 EvNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The event 'sample' does not exist" }
 FcNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The function 'sample' does not exist" }
-MdNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The module 'sample' does not exist" }
+MdNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The extension 'sample' does not exist" }
 FdNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The field 'sample' does not exist" }
 MlNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The model 'ml::sample' does not exist" }
 NdNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The node 'sample' does not exist" }
@@ -188,7 +188,7 @@ DbAlreadyExists	{ cause: NONE, code: -32000, details: { details: { name: 'sample
 EvAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The event 'sample' already exists" }
 FdAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The field 'sample' already exists" }
 FcAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The function 'sample' already exists" }
-MdAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The module 'sample' already exists" }
+MdAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The extension 'sample' already exists" }
 IxAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The index 'sample' already exists" }
 MlAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The model 'sample' already exists" }
 NsAlreadyExists	{ cause: NONE, code: -32000, details: { details: { name: 'sample' }, kind: 'Namespace' }, kind: 'AlreadyExists', message: "The namespace 'sample' already exists" }
@@ -292,6 +292,7 @@ IdFieldKeywordConflict	{ cause: NONE, code: -32000, kind: 'Internal', message: '
 IdFieldUnsupportedKind	{ cause: NONE, code: -32000, kind: 'Internal', message: "Cannot use the `sample` type on the `id` field, as that's not a valid record id key." }
 ComputedFieldCannotBeIndexed	{ cause: NONE, code: -32000, kind: 'Internal', message: "Computed fields cannot be indexed. Index: 'sample' - Field: 'sample'" }
 IdComponentUnsupportedKind	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'The record id component `value` of `reading` cannot have the type `float`: only string, int, datetime, uuid, duration, bool and record components keep their order in storage' }
+ExtensionNeedsTrust	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'DEFINE EXTENSION needs SIGNER {…} or UNSIGNED' }
 IdComponentNameUnsupported	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'Cannot name the record id component `the city` of `reading`: a component name must be a plain identifier of ASCII letters, digits and underscores that does not start with a digit and is not NaN or Infinity' }
 IdComponentsOnRelation	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'Cannot name the parts of the record id of `edge`: it is a relation table' }
 IdComponentsOnView	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'Cannot name the parts of the record id of `v`: it is a view' }

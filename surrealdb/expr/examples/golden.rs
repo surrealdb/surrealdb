@@ -120,6 +120,7 @@ fn entry_points() -> Vec<(&'static str, Run)> {
 			},
 			legacy_strands,
 			json_string_escapes: true,
+			import: false,
 			..Default::default()
 		}
 	}

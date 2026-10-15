@@ -53,7 +53,7 @@ value = "[false]"
 value = "{ x: 1 }"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: { knows: 'DEFINE TABLE knows TYPE RELATION SCHEMALESS PERMISSIONS NONE', person: 'DEFINE TABLE person TYPE ANY SCHEMALESS PERMISSIONS NONE', post: 'DEFINE TABLE post TYPE ANY SCHEMALESS PERMISSIONS NONE', t: 'DEFINE TABLE t TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: { knows: 'DEFINE TABLE knows TYPE RELATION SCHEMALESS PERMISSIONS NONE', person: 'DEFINE TABLE person TYPE ANY SCHEMALESS PERMISSIONS NONE', post: 'DEFINE TABLE post TYPE ANY SCHEMALESS PERMISSIONS NONE', t: 'DEFINE TABLE t TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"
 
 [[test.results]]
 value = '''

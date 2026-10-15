@@ -750,11 +750,13 @@ const EXPORTED_SECTIONS: &[(&str, &str)] = &[
 	("SEQUENCES", "a_sequence_definition_survives"),
 	("TABLE", "table_kinds_and_schema_modes_survive, and every fixture defining a table"),
 	("TABLE DATA", "table_kinds_and_schema_modes_survive, and the phase comparing records"),
-	// Sections whose definitions this file does not build: an API and a module
-	// need a body to serve, a bucket needs a storage backend to point at.
+	// Sections whose definitions this file does not build: an API and an
+	// extension need a body to serve, a bucket needs a storage backend to point
+	// at. An unnamed silo extension's round trip is pinned in
+	// `kvs::tests::export_legacy_extension_test`.
 	("APIS", "not covered here"),
 	("BUCKETS", "not covered here"),
-	("MODULES", "not covered here"),
+	("EXTENSIONS", "not covered here"),
 ];
 
 /// Export-config fields whose section is not their own name in capitals.
@@ -762,7 +764,7 @@ const EXPORTED_SECTIONS: &[(&str, &str)] = &[
 /// Each table is emitted under a heading naming that table, so the field that
 /// selects them all matches a section heading in the singular.
 const RENAMED_CONFIG_FIELDS: &[(&str, &str)] =
-	&[("tables", "TABLE"), ("database_definition", "DATABASE")];
+	&[("tables", "TABLE"), ("database_definition", "DATABASE"), ("modules", "EXTENSIONS")];
 
 /// Export-config fields that select no section of their own, with what they do
 /// instead.

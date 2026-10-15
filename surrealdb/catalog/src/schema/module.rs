@@ -47,7 +47,12 @@ impl StoredModuleDefinition {
 impl_kv_value_catalog!(StoredModuleDefinition);
 
 impl StoredModuleDefinition {
-	/// This function is used to get the storage name of a module.
+	/// The name the catalog keys this extension under: `mod::name`, or for an
+	/// unnamed silo definition its package coordinates.
+	///
+	/// The `mod::` prefix is part of the key, not of the language: SurrealQL
+	/// calls the extension `ext::name`, and the key keeps the spelling every
+	/// release has stored, so no definition needs re-keying.
 	pub fn get_storage_name(&self) -> anyhow::Result<String> {
 		if let Some(name) = &self.name {
 			Ok(format!("mod::{}", name))
@@ -75,6 +80,16 @@ impl ModuleDefinition {
 				.clone()
 				.map(|x| runtime::Expr::Literal(runtime::Literal::String(x.into())))
 				.unwrap_or(runtime::Expr::Literal(runtime::Literal::None)),
+		}
+	}
+
+	/// The name SurrealQL addresses this extension by: `ext::name`, or for an
+	/// unnamed silo definition its package coordinates,
+	/// `silo::org::pkg<major.minor.patch>`.
+	pub fn get_name(&self) -> anyhow::Result<String> {
+		match &self.name {
+			Some(name) => Ok(format!("ext::{name}")),
+			None => self.get_storage_name().map(|n| crate::extension_name(&n).into_owned()),
 		}
 	}
 
@@ -154,7 +169,7 @@ impl FromStored for ModuleDefinition {
 		}
 		build(stored).with_context(|| {
 			format!(
-				"the stored definition of module `{}` no longer compiles",
+				"the stored definition of extension `{}` no longer compiles",
 				stored.name.as_deref().unwrap_or("<unnamed>")
 			)
 		})

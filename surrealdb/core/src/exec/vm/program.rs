@@ -2047,7 +2047,8 @@ pub(super) enum Definitions {
 	Analyzer,
 	Bucket,
 	Function,
-	Module,
+	/// Extensions, keyed by the name SurrealQL calls them by (`ext::name`).
+	Extension,
 	Model,
 	Param,
 	Table,
@@ -2809,6 +2810,9 @@ pub(super) enum StatementError {
 	/// A table with views over it; the argument is an object of the
 	/// `table`'s name and its `views`' definitions.
 	TbHasViews,
+	/// A `DEFINE EXTENSION` with neither `SIGNER` nor `UNSIGNED`, outside an
+	/// import; the argument is unused.
+	MdNeedsTrust,
 	/// A method an API defines in more than one `FOR` clause; the argument is
 	/// an object of the API's `value` (its path as given) and the `method`.
 	ApMethodDuplicate,

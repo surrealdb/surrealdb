@@ -554,6 +554,11 @@ async fn step_inner(
 				StatementError::TbHasViews => {
 					return Err(ControlFlow::Err(views_error(&read(regs, *arg))));
 				}
+				StatementError::MdNeedsTrust => {
+					return Err(ControlFlow::Err(anyhow::Error::new(
+						crate::exec::Error::ExtensionNeedsTrust,
+					)));
+				}
 				StatementError::ComputedFieldCannotBeIndexed => {
 					let detail = read(regs, *arg);
 					return Err(ControlFlow::Err(anyhow::Error::new(
@@ -761,6 +766,7 @@ async fn step_inner(
 					name,
 				},
 				StatementError::TbHasViews
+				| StatementError::MdNeedsTrust
 				| StatementError::ComputedFieldCannotBeIndexed
 				| StatementError::ApMethodDuplicate
 				| StatementError::AzInUse
@@ -1761,29 +1767,43 @@ async fn step_inner(
 				let ns = crate::catalog::NamespaceId(id_of(&read(regs, *ns))?);
 				let db = crate::catalog::DatabaseId(id_of(&read(regs, *db))?);
 				let md: crate::catalog::StoredModuleDefinition = rust(&read(regs, *module))?;
-				let storage_name = md.get_storage_name().ok();
-				let md =
-					crate::catalog::ModuleDefinition::from_stored(&md).map_err(ControlFlow::Err)?;
-				let lookup = match &md.executable {
-					ModuleExecutable::Surrealism(surrealism) => {
-						SurrealismCacheLookup::File(&ns, &db, &surrealism.bucket, &surrealism.key)
+				// A definition without `UNSIGNED` reaches the store only in an
+				// import, as a legacy row that does not run, so it is not loaded.
+				if md.unsigned {
+					let storage_name = md.get_storage_name().ok();
+					let md = crate::catalog::ModuleDefinition::from_stored(&md)
+						.map_err(ControlFlow::Err)?;
+					let lookup = match &md.executable {
+						ModuleExecutable::Surrealism(surrealism) => SurrealismCacheLookup::File(
+							&ns,
+							&db,
+							&surrealism.bucket,
+							&surrealism.key,
+						),
+						ModuleExecutable::Silo(silo) => SurrealismCacheLookup::Silo(
+							&ns,
+							&db,
+							&silo.organisation,
+							&silo.package,
+							silo.major,
+							silo.minor,
+							silo.patch,
+						),
+					};
+					// The eager load reads the bucket the definition names, a load a
+					// running program is allowed, so it is declared unsealed.
+					let loaded = crate::kvs::catalog_reads::sealed(
+						false,
+						ctx.ctx().get_surrealism_runtime(lookup),
+					)
+					.await;
+					if let Err(e) = loaded {
+						tracing::warn!(
+							module = ?storage_name,
+							error = %e,
+							"Failed to eagerly load surrealism module into cache"
+						);
 					}
-					ModuleExecutable::Silo(silo) => SurrealismCacheLookup::Silo(
-						&ns,
-						&db,
-						&silo.organisation,
-						&silo.package,
-						silo.major,
-						silo.minor,
-						silo.patch,
-					),
-				};
-				if let Err(e) = ctx.ctx().get_surrealism_runtime(lookup).await {
-					tracing::warn!(
-						module = ?storage_name,
-						error = %e,
-						"Failed to eagerly load surrealism module into cache"
-					);
 				}
 			}
 			#[cfg(not(feature = "surrealism"))]

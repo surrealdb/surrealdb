@@ -7,11 +7,11 @@ reason = "DEFINE MODULE is rejected at parse time when the `surrealism` experime
 
 [test.results]
 parsing-error = """
-Surrealism modules are not enabled
+Surrealism extensions are not enabled
   --> [18:8]
    |
 18 | DEFINE MODULE mod::test AS f"module.wasm";
-   |        ^^^^^^ Use of `DEFINE MODULE` requires Surrealism modules
+   |        ^^^^^^ Use of `DEFINE MODULE` requires Surrealism extensions
 """
 */
 

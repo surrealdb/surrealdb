@@ -1,5 +1,10 @@
-//! `.surli` archive format: tar + zstd containing `mod.wasm`, config, exports,
-//! and optional `surrealism/fs/` filesystem. Only WASM components are accepted.
+//! `.surli` archive format: tar + zstd containing `mod.wasm`, the package file,
+//! exports, and optional `surrealism/fs/` filesystem. Only WASM components are
+//! accepted.
+//!
+//! The package file is `surrealism/package.toml`. The loader also accepts the
+//! legacy `surrealism/surrealism.toml`, and reads it only when the archive has
+//! no `surrealism/package.toml`.
 
 use std::fs::File;
 use std::io::{BufReader, Read};
@@ -10,7 +15,7 @@ use tar::Archive;
 use tempfile::TempDir;
 use zstd::stream::read::Decoder;
 
-use crate::config::SurrealismConfig;
+use crate::config::{LEGACY_PACKAGE_FILE, PACKAGE_FILE, SurrealismConfig};
 use crate::exports::ExportsManifest;
 
 /// The 8-byte preamble of a WASM component (layer 1, version 0x0d).
@@ -54,6 +59,12 @@ pub fn verify_logo(bytes: &[u8]) -> SurrealismResult<()> {
 	}
 	Ok(())
 }
+
+/// Archive path of the package file.
+const PACKAGE_ENTRY: &str = "surrealism/package.toml";
+
+/// Archive path of the legacy package file.
+const LEGACY_PACKAGE_ENTRY: &str = "surrealism/surrealism.toml";
 
 /// The tar path prefix used for filesystem attachments inside the archive.
 const FS_PREFIX: &str = "surrealism/fs/";
@@ -187,7 +198,8 @@ impl SurrealismPackage {
 		let mut archive = Archive::new(zstd_decoder);
 
 		let mut wasm: Option<Vec<u8>> = None;
-		let mut config: Option<SurrealismConfig> = None;
+		let mut package_toml: Option<String> = None;
+		let mut legacy_package_toml: Option<String> = None;
 		let mut exports: Option<ExportsManifest> = None;
 		let mut fs_dir: Option<TempDir> = None;
 		let mut logo: Option<Vec<u8>> = None;
@@ -205,15 +217,16 @@ impl SurrealismPackage {
 					.prefix_err(|| "Failed to read WASM file from archive")?;
 				verify_component(&buffer)?;
 				wasm = Some(buffer);
-			} else if entry_str == "surrealism/surrealism.toml" {
+			} else if entry_str == PACKAGE_ENTRY || entry_str == LEGACY_PACKAGE_ENTRY {
 				let mut buffer = String::new();
 				entry
 					.read_to_string(&mut buffer)
-					.prefix_err(|| "Failed to read config file from archive")?;
-				config = Some(
-					SurrealismConfig::parse(&buffer)
-						.prefix_err(|| "Failed to parse surrealism.toml")?,
-				);
+					.prefix_err(|| format!("Failed to read {entry_str} from archive"))?;
+				if entry_str == PACKAGE_ENTRY {
+					package_toml = Some(buffer);
+				} else {
+					legacy_package_toml = Some(buffer);
+				}
 			} else if entry_str == "surrealism/exports.toml" {
 				let mut buffer = String::new();
 				entry
@@ -274,8 +287,17 @@ impl SurrealismPackage {
 		}
 
 		let wasm = wasm.ok_or_else(|| anyhow::anyhow!("mod.wasm not found in archive"))?;
-		let config =
-			config.ok_or_else(|| anyhow::anyhow!("surrealism.toml not found in archive"))?;
+		let config = match (package_toml, legacy_package_toml) {
+			(Some(toml), _) => SurrealismConfig::parse(&toml)
+				.prefix_err(|| format!("Failed to parse {PACKAGE_FILE}"))?,
+			(None, Some(toml)) => SurrealismConfig::parse(&toml)
+				.prefix_err(|| format!("Failed to parse {LEGACY_PACKAGE_FILE}"))?,
+			(None, None) => {
+				return Err(SurrealismError::Other(anyhow::anyhow!(
+					"{PACKAGE_FILE} not found in archive"
+				)));
+			}
+		};
 		let exports =
 			exports.ok_or_else(|| anyhow::anyhow!("exports.toml not found in archive"))?;
 
@@ -344,8 +366,8 @@ impl SurrealismPackage {
 		config_header.set_size(config_bytes.len() as u64);
 		config_header.set_mode(0o644);
 		archive
-			.append_data(&mut config_header, "surrealism/surrealism.toml", &mut config_reader)
-			.prefix_err(|| "Failed to add surrealism.toml to archive")?;
+			.append_data(&mut config_header, PACKAGE_ENTRY, &mut config_reader)
+			.prefix_err(|| format!("Failed to add {PACKAGE_FILE} to archive"))?;
 
 		let exports_str =
 			self.exports.to_toml().prefix_err(|| "Failed to serialize exports manifest")?;
@@ -379,5 +401,118 @@ impl SurrealismPackage {
 		encoder.finish().prefix_err(|| "Failed to finish zstd encoder")?;
 
 		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn package_toml(name: &str) -> String {
+		format!("[package]\norganisation = \"test\"\nname = \"{name}\"\nversion = \"1.0.0\"\n")
+	}
+
+	/// Build a `.surli` archive in memory from `(path, contents)` entries.
+	fn archive(entries: &[(&str, &[u8])]) -> Vec<u8> {
+		let encoder = zstd::stream::Encoder::new(Vec::new(), 0).unwrap();
+		let mut builder = tar::Builder::new(encoder);
+		for (path, data) in entries {
+			let mut header = tar::Header::new_gnu();
+			header.set_size(data.len() as u64);
+			header.set_mode(0o644);
+			builder.append_data(&mut header, path, *data).unwrap();
+		}
+		builder.into_inner().unwrap().finish().unwrap()
+	}
+
+	fn load(entries: &[(&str, &[u8])]) -> SurrealismResult<SurrealismPackage> {
+		SurrealismPackage::from_reader(archive(entries).as_slice(), &UnpackOptions::default())
+	}
+
+	const EXPORTS: &[u8] = b"functions = []\n";
+
+	#[test]
+	fn archive_with_package_toml_only() {
+		let current = package_toml("current");
+		let pkg = load(&[
+			("surrealism/mod.wasm", &COMPONENT_PREAMBLE),
+			(PACKAGE_ENTRY, current.as_bytes()),
+			("surrealism/exports.toml", EXPORTS),
+		])
+		.unwrap();
+		assert_eq!(pkg.config.meta.name, "current");
+	}
+
+	#[test]
+	fn archive_with_surrealism_toml_only() {
+		let legacy = package_toml("legacy");
+		let pkg = load(&[
+			("surrealism/mod.wasm", &COMPONENT_PREAMBLE),
+			(LEGACY_PACKAGE_ENTRY, legacy.as_bytes()),
+			("surrealism/exports.toml", EXPORTS),
+		])
+		.unwrap();
+		assert_eq!(pkg.config.meta.name, "legacy");
+	}
+
+	#[test]
+	fn archive_with_both_prefers_package_toml() {
+		let current = package_toml("current");
+		// Unparseable, so the test fails if the loader reads it.
+		let legacy = b"not toml [";
+		for entries in [
+			[
+				("surrealism/mod.wasm", &COMPONENT_PREAMBLE[..]),
+				(LEGACY_PACKAGE_ENTRY, &legacy[..]),
+				(PACKAGE_ENTRY, current.as_bytes()),
+				("surrealism/exports.toml", EXPORTS),
+			],
+			[
+				("surrealism/mod.wasm", &COMPONENT_PREAMBLE[..]),
+				(PACKAGE_ENTRY, current.as_bytes()),
+				(LEGACY_PACKAGE_ENTRY, &legacy[..]),
+				("surrealism/exports.toml", EXPORTS),
+			],
+		] {
+			let pkg = load(&entries).unwrap();
+			assert_eq!(pkg.config.meta.name, "current");
+		}
+	}
+
+	#[test]
+	fn archive_without_package_file_is_rejected() {
+		let Err(err) = load(&[
+			("surrealism/mod.wasm", &COMPONENT_PREAMBLE),
+			("surrealism/exports.toml", EXPORTS),
+		]) else {
+			panic!("an archive without a package file must not load");
+		};
+		assert!(err.to_string().contains("package.toml not found"), "{err}");
+	}
+
+	#[test]
+	fn pack_writes_package_toml() {
+		let dir = tempfile::tempdir().unwrap();
+		let out = dir.path().join("test.surli");
+		let pkg = SurrealismPackage {
+			config: SurrealismConfig::parse(&package_toml("packed")).unwrap(),
+			wasm: COMPONENT_PREAMBLE.to_vec(),
+			exports: ExportsManifest::parse(std::str::from_utf8(EXPORTS).unwrap()).unwrap(),
+			fs: None,
+			logo: None,
+		};
+		pkg.pack(out.clone(), None).unwrap();
+
+		let mut archive = Archive::new(Decoder::new(File::open(&out).unwrap()).unwrap());
+		let paths: Vec<String> = archive
+			.entries()
+			.unwrap()
+			.map(|e| e.unwrap().path().unwrap().to_string_lossy().into_owned())
+			.collect();
+		assert!(paths.iter().any(|p| p == PACKAGE_ENTRY), "{paths:?}");
+		assert!(!paths.iter().any(|p| p == LEGACY_PACKAGE_ENTRY), "{paths:?}");
+
+		let unpacked = SurrealismPackage::from_file(out).unwrap();
+		assert_eq!(unpacked.config.meta.name, "packed");
 	}
 }

@@ -3,7 +3,9 @@ use std::process::Command;
 use std::{fs, mem};
 
 use anyhow::Result;
-use surrealism_runtime::config::{AbiVersion, SurrealismConfig, Target};
+use surrealism_runtime::config::{
+	AbiVersion, LEGACY_PACKAGE_FILE, PACKAGE_FILE, PackageFile, SurrealismConfig, Target,
+};
 use surrealism_runtime::exports::{ExportsManifest, FunctionExport};
 use surrealism_runtime::package::SurrealismPackage;
 use surrealism_runtime::runtime::Runtime;
@@ -132,18 +134,29 @@ async fn extract_exports(wasm: &[u8], config: &SurrealismConfig) -> Result<Expor
 	})
 }
 
-/// Parse the `surrealism.toml` configuration from the project directory.
+/// Parse the package file from the project directory: `package.toml` if it
+/// exists, otherwise `surrealism.toml`. When both exist, `surrealism.toml` is
+/// not read and a warning names it.
 ///
 /// The ABI version is always stamped to `AbiVersion::CURRENT` because the
 /// build toolchain targets the current SDK; user-supplied values are ignored.
 fn load_config(path: &Path) -> Result<SurrealismConfig> {
-	let surrealism_toml = path.join("surrealism.toml");
-	if !surrealism_toml.exists() {
-		anyhow::bail!("surrealism.toml not found in the current directory");
+	let Some(package) = PackageFile::locate(path) else {
+		anyhow::bail!(
+			"Neither {PACKAGE_FILE} nor {LEGACY_PACKAGE_FILE} found in {}",
+			path.display()
+		);
+	};
+	if let Some(ignored) = &package.ignored {
+		eprintln!(
+			"Warning: ignoring {} because {PACKAGE_FILE} is present; remove it to silence this warning",
+			ignored.display()
+		);
 	}
 
+	let file_name = package.path.file_name().unwrap_or_default().to_string_lossy();
 	let mut config = SurrealismConfig::parse(
-		&fs::read_to_string(&surrealism_toml).prefix_err(|| "Failed to read surrealism.toml")?,
+		&fs::read_to_string(&package.path).prefix_err(|| format!("Failed to read {file_name}"))?,
 	)?;
 	config.abi = AbiVersion::CURRENT;
 	Ok(config)
@@ -479,5 +492,50 @@ fn resolve_output_path(out: Option<PathBuf>, config: &SurrealismConfig) -> Resul
 				Ok(cwd()?.join(out_path))
 			}
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn package_toml(name: &str) -> String {
+		format!(
+			"abi = 1\n[package]\norganisation = \"test\"\nname = \"{name}\"\nversion = \"1.0.0\"\n"
+		)
+	}
+
+	#[test]
+	fn load_config_package_toml_only() {
+		let dir = tempfile::tempdir().unwrap();
+		fs::write(dir.path().join(PACKAGE_FILE), package_toml("current")).unwrap();
+		let config = load_config(dir.path()).unwrap();
+		assert_eq!(config.meta.name, "current");
+		assert_eq!(config.abi, AbiVersion::CURRENT);
+	}
+
+	#[test]
+	fn load_config_surrealism_toml_only() {
+		let dir = tempfile::tempdir().unwrap();
+		fs::write(dir.path().join(LEGACY_PACKAGE_FILE), package_toml("legacy")).unwrap();
+		let config = load_config(dir.path()).unwrap();
+		assert_eq!(config.meta.name, "legacy");
+	}
+
+	#[test]
+	fn load_config_both_prefers_package_toml() {
+		let dir = tempfile::tempdir().unwrap();
+		fs::write(dir.path().join(PACKAGE_FILE), package_toml("current")).unwrap();
+		// Unparseable, so the test fails if `load_config` reads it.
+		fs::write(dir.path().join(LEGACY_PACKAGE_FILE), "not toml [").unwrap();
+		let config = load_config(dir.path()).unwrap();
+		assert_eq!(config.meta.name, "current");
+	}
+
+	#[test]
+	fn load_config_neither() {
+		let dir = tempfile::tempdir().unwrap();
+		let err = load_config(dir.path()).unwrap_err();
+		assert!(err.to_string().contains("package.toml"), "{err}");
 	}
 }

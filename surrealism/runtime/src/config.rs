@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use surrealism_types::err::{PrefixErr, SurrealismResult};
@@ -69,6 +71,48 @@ impl<'de> Deserialize<'de> for AbiVersion {
 			}
 		}
 		deserializer.deserialize_any(Visitor)
+	}
+}
+
+/// File name of the package file, in a project directory and inside an archive
+/// (as `surrealism/package.toml`).
+pub const PACKAGE_FILE: &str = "package.toml";
+
+/// Legacy file name of the package file. It is read only when no
+/// [`PACKAGE_FILE`] is present beside it.
+pub const LEGACY_PACKAGE_FILE: &str = "surrealism.toml";
+
+/// The package file selected in a project directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageFile {
+	/// The file to read: [`PACKAGE_FILE`] if it exists, else [`LEGACY_PACKAGE_FILE`].
+	pub path: PathBuf,
+	/// [`LEGACY_PACKAGE_FILE`] when it exists beside a [`PACKAGE_FILE`]. Its
+	/// contents are never read; callers report it so the author can remove it.
+	pub ignored: Option<PathBuf>,
+}
+
+impl PackageFile {
+	/// Select the package file in `dir`. A name is present when anything is
+	/// at that path, without following a symlink: a directory, a dangling
+	/// symlink or an unreadable file under [`PACKAGE_FILE`] is selected, so
+	/// reading it fails, rather than letting [`LEGACY_PACKAGE_FILE`] stand in
+	/// for it. Returns `None` when neither name is present.
+	pub fn locate(dir: &Path) -> Option<Self> {
+		let current = dir.join(PACKAGE_FILE);
+		let legacy = dir.join(LEGACY_PACKAGE_FILE);
+		let present = |path: &Path| path.symlink_metadata().is_ok();
+		match (present(&current), present(&legacy)) {
+			(true, legacy_exists) => Some(Self {
+				path: current,
+				ignored: legacy_exists.then_some(legacy),
+			}),
+			(false, true) => Some(Self {
+				path: legacy,
+				ignored: None,
+			}),
+			(false, false) => None,
+		}
 	}
 }
 
@@ -271,5 +315,60 @@ version = "0.1.0"
 "#;
 		let config = SurrealismConfig::parse(toml).unwrap();
 		assert!(config.attach.fs.is_none());
+	}
+
+	#[test]
+	fn locate_package_toml_only() {
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::write(dir.path().join(PACKAGE_FILE), "").unwrap();
+		let found = PackageFile::locate(dir.path()).unwrap();
+		assert_eq!(found.path, dir.path().join(PACKAGE_FILE));
+		assert_eq!(found.ignored, None);
+	}
+
+	#[test]
+	fn locate_surrealism_toml_only() {
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::write(dir.path().join(LEGACY_PACKAGE_FILE), "").unwrap();
+		let found = PackageFile::locate(dir.path()).unwrap();
+		assert_eq!(found.path, dir.path().join(LEGACY_PACKAGE_FILE));
+		assert_eq!(found.ignored, None);
+	}
+
+	#[test]
+	fn locate_both_prefers_package_toml() {
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::write(dir.path().join(PACKAGE_FILE), "").unwrap();
+		std::fs::write(dir.path().join(LEGACY_PACKAGE_FILE), "").unwrap();
+		let found = PackageFile::locate(dir.path()).unwrap();
+		assert_eq!(found.path, dir.path().join(PACKAGE_FILE));
+		assert_eq!(found.ignored, Some(dir.path().join(LEGACY_PACKAGE_FILE)));
+	}
+
+	#[test]
+	fn locate_selects_a_package_toml_that_is_not_a_file() {
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::create_dir(dir.path().join(PACKAGE_FILE)).unwrap();
+		std::fs::write(dir.path().join(LEGACY_PACKAGE_FILE), "").unwrap();
+		let found = PackageFile::locate(dir.path()).unwrap();
+		assert_eq!(found.path, dir.path().join(PACKAGE_FILE));
+		assert!(std::fs::read_to_string(&found.path).is_err());
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn locate_selects_a_dangling_package_toml_symlink() {
+		let dir = tempfile::tempdir().unwrap();
+		std::os::unix::fs::symlink(dir.path().join("missing"), dir.path().join(PACKAGE_FILE))
+			.unwrap();
+		std::fs::write(dir.path().join(LEGACY_PACKAGE_FILE), "").unwrap();
+		let found = PackageFile::locate(dir.path()).unwrap();
+		assert_eq!(found.path, dir.path().join(PACKAGE_FILE));
+	}
+
+	#[test]
+	fn locate_neither() {
+		let dir = tempfile::tempdir().unwrap();
+		assert_eq!(PackageFile::locate(dir.path()), None);
 	}
 }

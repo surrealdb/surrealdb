@@ -70,7 +70,8 @@ pub enum ListKind {
 	Apis,
 	Buckets,
 	Models,
-	Modules,
+	#[serde(alias = "modules")]
+	Extensions,
 	Sequences,
 	Configs,
 	// Multi-scope (require `scope`)
@@ -151,7 +152,7 @@ fn resolve_list_target(p: &ListParams) -> Result<(String, &'static str), ErrorDa
 		Apis => db_scope(p, "apis"),
 		Buckets => db_scope(p, "buckets"),
 		Models => db_scope(p, "models"),
-		Modules => db_scope(p, "modules"),
+		Extensions => db_scope(p, "extensions"),
 		Sequences => db_scope(p, "sequences"),
 		Configs => db_scope(p, "configs"),
 		// Multi-scope

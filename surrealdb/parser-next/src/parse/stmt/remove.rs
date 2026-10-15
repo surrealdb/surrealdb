@@ -1,6 +1,6 @@
 //! `REMOVE` statements.
 
-use crate::ast::{DefineKind, remove};
+use crate::ast::{DefineKind, ext, remove};
 use crate::parse::*;
 
 impl<'a, 's> Parser<'a, 's> {
@@ -16,7 +16,7 @@ impl<'a, 's> Parser<'a, 's> {
 			Kw::Namespace => DefineKind::Namespace,
 			Kw::Database => DefineKind::Database,
 			Kw::Function => DefineKind::Function,
-			Kw::Module => DefineKind::Module,
+			Kw::Extension | Kw::Module => DefineKind::Module,
 			Kw::Access => DefineKind::Access,
 			Kw::Param => DefineKind::Param,
 			Kw::Table | Kw::Tb => DefineKind::Table,
@@ -32,10 +32,19 @@ impl<'a, 's> Parser<'a, 's> {
 			_ => return Err(self.unexpected("a remove statement keyword")),
 		};
 		self.bump();
-		if self.limits.no_surrealism && kind == DefineKind::Module {
-			return Err(
-				self.surrealism_off(t, "Use of `REMOVE MODULE` requires Surrealism modules")
-			);
+		let mut deprecated = 0;
+		if kind == DefineKind::Module {
+			if t.kw == Kw::Module {
+				deprecated |= ext::MODULE_KEYWORD;
+			}
+			if self.limits.no_surrealism {
+				let label = if t.kw == Kw::Module {
+					"Use of `REMOVE MODULE` requires Surrealism extensions"
+				} else {
+					"Use of `REMOVE EXTENSION` requires Surrealism extensions"
+				};
+				return Err(self.surrealism_off(t, label));
+			}
 		}
 		let mut rec = [NONE; remove::LEN];
 		let mut flags = 0;
@@ -57,33 +66,12 @@ impl<'a, 's> Parser<'a, 's> {
 				}
 			}
 			DefineKind::Module => {
-				let m = self.tok;
-				rec[remove::NAME] = match m.kw {
-					Kw::Mod if m.kind == T::Ident => {
-						self.bump();
-						self.expect_adjacent(T::PathSep, "::")?;
-						self.name()?
-					}
-					Kw::Silo if m.kind == T::Ident => {
-						self.bump();
-						self.expect(T::PathSep, "::")?;
-						let mark = self.vals.len() as u32;
-						let org = self.name()?;
-						self.vals.push(org);
-						self.expect(T::PathSep, "::")?;
-						let pkg = self.name()?;
-						self.vals.push(pkg);
-						self.expect(T::PathSep, "::")?;
-						if !self.at(T::Lt) || self.tok.ws() {
-							return Err(self.unexpected("<"));
-						}
-						self.model_version()?;
-						let list = self.list_from(mark).0;
-						rec[remove::ON] = 1;
-						list
-					}
-					_ => return Err(self.unexpected("a module name")),
-				};
+				let (name, silo, name_deprecated) = self.extension_name()?;
+				rec[remove::NAME] = name;
+				if silo {
+					rec[remove::ON] = 1;
+				}
+				deprecated |= name_deprecated;
 				if self.eat(T::LParen) {
 					self.expect(T::RParen, ")")?;
 				}
@@ -120,6 +108,6 @@ impl<'a, 's> Parser<'a, 's> {
 		}
 		rec[remove::FLAGS] = flags;
 		let idx = self.record(&rec);
-		self.stmt_node(Tag::Remove, kind as u8, idx, 0, start, first)
+		self.stmt_node(Tag::Remove, kind as u8, idx, deprecated, start, first)
 	}
 }

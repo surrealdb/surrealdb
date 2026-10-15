@@ -92,10 +92,11 @@ pub enum Tag {
 	/// `op`: 0 `a..`, 1 `a>..`; `a`: operand.
 	PostfixRange,
 	/// `a`: the callee `Name`, `b`: argument list. `op` 0 a builtin path, 1
-	/// `fn::` (the `Name` spans the path after `fn::`), 2 `mod::`, 3 `silo::`,
-	/// 4 `ml::`; for 2–4 the `Name`'s `a` indexes `extra` for its parts:
-	/// `[name, sub path or NONE]`, `[org, pkg, major, minor, patch, sub or
-	/// NONE]`, `[path, major, minor, patch]`.
+	/// `fn::` (the `Name` spans the path after `fn::`), 2 `ext::` (or its
+	/// alias `mod::`), 3 `silo::`, 4 `ml::`; for 2–4 the `Name`'s `a` indexes
+	/// `extra` for its parts: `[name, sub path or NONE]`, `[org, pkg, major,
+	/// minor, patch, sub or NONE]`, `[path, major, minor, patch]`. For 2 and 3
+	/// the `Name`'s `b` holds the [`ext`] bits of a deprecated spelling.
 	Call,
 	/// `a`: callee expression, `b`: argument list.
 	CallExpr,
@@ -227,15 +228,17 @@ pub enum Tag {
 	/// `a`: index into `extra` of `[index Name, table Name, flags]`; flags
 	/// bit 0 `IF EXISTS`, bit 1 `CONCURRENTLY`.
 	Rebuild,
-	/// `op`: [`DefineKind`]; `a`: index into `extra` of the [`define`] record.
+	/// `op`: [`DefineKind`]; `a`: index into `extra` of the [`define`] record;
+	/// `b`: for [`DefineKind::Module`], the [`ext`] bits of a deprecated
+	/// spelling, otherwise 0.
 	Define,
 	/// `op`: the [`DefineKind`] removed; `a`: index into `extra` of the
-	/// [`remove`] record.
+	/// [`remove`] record; `b` as for [`Tag::Define`].
 	Remove,
 	/// `op`: the [`DefineKind`] altered, or [`ALTER_SYSTEM`]; `a`: index into
 	/// `extra` of `[if exists, name, on, clause list]`, as in [`remove`] for
-	/// the name and `on` slots. `COMMENT` clauses hold a string, and duration
-	/// clauses a duration or `NONE` for `NONE`.
+	/// the name and `on` slots; `b` as for [`Tag::Define`]. `COMMENT` clauses
+	/// hold a string, and duration clauses a duration or `NONE` for `NONE`.
 	Alter,
 	/// A clause of a definition: `op` a [`Cl`] code, `a` and `b` its payload as
 	/// documented there. Clauses are kept in source order; a later clause of
@@ -262,24 +265,41 @@ pub enum DefineKind {
 	Config,
 	Bucket,
 	Sequence,
+	/// `EXTENSION`, or its alias `MODULE`.
 	Module,
+}
+
+/// Deprecated spellings of an extension, as bits of the `b` of a
+/// [`Tag::Define`], [`Tag::Alter`] or [`Tag::Remove`] node of
+/// [`DefineKind::Module`], or of an extension call's callee `Name`. Each
+/// spelling means exactly what its replacement means; the bits only let the
+/// consumer report the deprecation.
+pub mod ext {
+	/// The `MODULE` keyword, for `EXTENSION`.
+	pub const MODULE_KEYWORD: u32 = 1;
+	/// The `mod::` prefix, for `ext::`.
+	pub const MOD_PREFIX: u32 = 2;
+	/// An unnamed silo package addressed by its coordinates,
+	/// `silo::org::pkg::<1.2.3>`, rather than by an `ext::` name.
+	pub const SILO_NAME: u32 = 4;
 }
 
 /// Slots of the `DEFINE` record in `extra`. Absent parts are `NONE`.
 pub mod define {
 	/// 0 plain, 1 `IF NOT EXISTS`, 2 `OVERWRITE`.
 	pub const EXIST: usize = 0;
-	/// The name: an expression, or a `Name` (`fn::` path of a function,
-	/// module alias), or a `Param` (`DEFINE PARAM`). `NONE` for `CONFIG`.
+	/// The name: an expression, or a `Name` (`fn::` path of a function, the
+	/// name after `ext::` of an extension), or a `Param` (`DEFINE PARAM`).
+	/// `NONE` for `CONFIG`.
 	pub const NAME: usize = 1;
 	/// `ON` target: a table expression (events, fields, indexes), or a base
 	/// code (users, accesses). For `CONFIG`, 0 `API`, 1 `GRAPHQL`, 2 `DEFAULT`.
 	pub const ON: usize = 2;
-	/// Function: list of alternating parameter and kind. Module: the
-	/// executable (a `Name` list `[org, pkg, major, minor, patch]` as
-	/// `Int`s, or a file string).
+	/// Function: list of alternating parameter and kind. Extension: the
+	/// executable (a list `[org Name, pkg Name, major, minor, patch]` with
+	/// the version as `Int`s, or a file string).
 	pub const X1: usize = 3;
-	/// Function: the return kind. Module: 1 when `X1` is a silo package,
+	/// Function: the return kind. Extension: 1 when `X1` is a silo package,
 	/// `NONE` when it is a file string.
 	pub const X2: usize = 4;
 	/// Function: the body block.
@@ -295,11 +315,12 @@ pub const ALTER_SYSTEM: u8 = 16;
 pub mod remove {
 	/// Bit 0 `IF EXISTS`, bit 1 `AND EXPUNGE`.
 	pub const FLAGS: usize = 0;
-	/// The name: an expression, a function `Name`, a `Param`, a module
-	/// `Name`, or for a silo module a list `[org, pkg, major, minor, patch]`.
+	/// The name: an expression, a function `Name`, a `Param`, the `Name`
+	/// after `ext::` of an extension, or for an unnamed silo extension a list
+	/// `[org, pkg, major, minor, patch]`.
 	pub const NAME: usize = 1;
 	/// The `ON` table expression or base code; for `CONFIG` 0 `GRAPHQL`, 1
-	/// `API`, 2 `DEFAULT`; for a module 1 when it is a silo.
+	/// `API`, 2 `DEFAULT`; for an extension 1 when it is an unnamed silo.
 	pub const ON: usize = 2;
 	pub const LEN: usize = 3;
 }
@@ -407,7 +428,8 @@ pub enum Cl {
 	/// `a`: list of tokenizer `Name`s; a `SEGMENT(lang)` tokenizer is a
 	/// `Name` whose `op` is 1 and whose `a` is the language `Name`.
 	Tokenizers,
-	/// `a`: function `Name` (`op` 0 `fn::`, 1 `mod::`).
+	/// `a`: function `Name` (`op` 1 `fn::`, 2 `ext::` or its alias `mod::`,
+	/// with the [`ext`] bits in `b`).
 	Function,
 	/// `a`: expression.
 	Authenticate,

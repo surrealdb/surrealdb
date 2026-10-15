@@ -2944,7 +2944,7 @@ impl<'a> Lowerer<'a> {
 					version: model.version.to_string(),
 				},
 			),
-			Function::Module(module, sub) => self.host_call(
+			Function::Module(module, sub, _) => self.host_call(
 				data,
 				call,
 				ExternalCallee::Module {

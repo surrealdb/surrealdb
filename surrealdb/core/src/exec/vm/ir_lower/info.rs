@@ -977,7 +977,7 @@ impl InfoLowerer<'_, '_> {
 			("analyzers", ("AnalyzerPrefix", "AnalyzerDefinition", Definitions::Analyzer)),
 			("buckets", ("BucketPrefix", "StoredBucketDefinition", Definitions::Bucket)),
 			("functions", ("FunctionPrefix", "StoredFunctionDefinition", Definitions::Function)),
-			("modules", ("ModulePrefix", "StoredModuleDefinition", Definitions::Module)),
+			("extensions", ("ModulePrefix", "StoredModuleDefinition", Definitions::Extension)),
 			("models", ("MlModelPrefix", "StoredMlModelDefinition", Definitions::Model)),
 			("params", ("ParamPrefix", "StoredParamDefinition", Definitions::Param)),
 			("tables", ("TablePrefix", "StoredTableDefinition", Definitions::Table)),

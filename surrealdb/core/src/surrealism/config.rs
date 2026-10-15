@@ -30,7 +30,7 @@ pub(crate) struct SurrealismConfig {
 	/// via `min()` to produce the effective deadline.
 	pub surrealism_max_execution_time: Option<u64>,
 	/// Maximum aggregate size in bytes for attached filesystem entries in `.surli` archives
-	/// (default: 100 MiB). Applied when unpacking module archives during `DEFINE MODULE` or
+	/// (default: 100 MiB). Applied when unpacking extension archives during `DEFINE EXTENSION` or
 	/// eager loading.
 	pub surrealism_max_fs_bytes: u64,
 	/// Per-module controller pool size ceiling for Surrealism WASM modules (default: 8).

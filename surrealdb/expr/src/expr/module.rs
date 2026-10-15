@@ -53,7 +53,7 @@ impl ToSql for SiloExecutable {
 		write_sql!(
 			f,
 			fmt,
-			"silo::{}::{}::<{}.{}.{}>",
+			"silo::{}::{}<{}.{}.{}>",
 			self.organisation,
 			self.package,
 			self.major,
@@ -63,10 +63,13 @@ impl ToSql for SiloExecutable {
 	}
 }
 
-/// The parsed name of a module: a plain module or a silo package release.
+/// The parsed name of an extension: an `ext::` name, or the package release
+/// of an unnamed silo definition.
 ///
 /// Not persisted itself; [`ModuleName::get_storage_name`] is the single point
 /// that derives the storage name both the statements and the catalog use.
+/// The storage name of a named extension keeps the `mod::` prefix, which is
+/// part of its catalog key; the SurrealQL and display forms write `ext::`.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ModuleName {
 	Module(String),
@@ -110,9 +113,9 @@ impl<'a> TryFrom<&'a crate::expr::statements::DefineModuleStatement> for ModuleN
 impl Display for ModuleName {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			ModuleName::Module(name) => write!(f, "mod::{}", name),
+			ModuleName::Module(name) => write!(f, "ext::{}", name),
 			ModuleName::Silo(org, pkg, major, minor, patch) => {
-				write!(f, "silo::{org}::{pkg}::<{major}.{minor}.{patch}>")
+				write!(f, "silo::{org}::{pkg}<{major}.{minor}.{patch}>")
 			}
 		}
 	}
@@ -121,12 +124,12 @@ impl Display for ModuleName {
 impl ToSql for ModuleName {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			ModuleName::Module(name) => write_sql!(f, fmt, "mod::{}", EscapeKwFreeIdent(name)),
+			ModuleName::Module(name) => write_sql!(f, fmt, "ext::{}", EscapeKwFreeIdent(name)),
 			ModuleName::Silo(org, pkg, major, minor, patch) => {
 				write_sql!(
 					f,
 					fmt,
-					"silo::{}::{}::<{major}.{minor}.{patch}>",
+					"silo::{}::{}<{major}.{minor}.{patch}>",
 					EscapeKwFreeIdent(org),
 					EscapeKwFreeIdent(pkg)
 				);

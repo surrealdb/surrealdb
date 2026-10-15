@@ -1583,7 +1583,7 @@ mod tests {
 		}));
 		ops.push(call("no::such::function"));
 		ops.push(ExprOp::call(Function::Custom("x".to_owned())));
-		ops.push(ExprOp::call(Function::Module("m".to_owned(), None)));
+		ops.push(ExprOp::call(Function::Module("m".to_owned(), None, crate::expr::ExtPrefix::Ext)));
 		ops.push(ExprOp::call(Function::Silo {
 			org: "o".to_owned(),
 			pkg: "p".to_owned(),
@@ -2335,7 +2335,10 @@ mod tests {
 		for name in ["search::score", "search::highlight", "search::offsets"] {
 			assert_eq!(call(name).lowers_natively(isa), NativeLowering::UnitCall, "{name}");
 		}
-		for function in [Function::Custom("f".to_owned()), Function::Module("m".to_owned(), None)] {
+		for function in [
+			Function::Custom("f".to_owned()),
+			Function::Module("m".to_owned(), None, crate::expr::ExtPrefix::Ext),
+		] {
 			let what = format!("{function:?}");
 			let op = ExprOp::call(function);
 			assert_eq!(op.lowers_natively(isa), NativeLowering::UnitCall, "{what}");

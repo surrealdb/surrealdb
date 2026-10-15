@@ -10,7 +10,7 @@
 //! - **Fast**: No epoch interruption. WASM runs at full native speed. Timeouts cannot be enforced —
 //!   the module must be trusted to complete within a reasonable time.
 //!
-//! Modules opt in via `strict_timeout` in `surrealism.toml` (default `true`
+//! Modules opt in via `strict_timeout` in `package.toml` (default `true`
 //! → guarded engine). Compute-heavy trusted modules can set it to `false`.
 //!
 //! Both engines use Cranelift. Winch cannot compile the component model's async

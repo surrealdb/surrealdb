@@ -12,7 +12,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: { follows: 'DEFINE TABLE follows TYPE RELATION IN person OUT person ENFORCED LIGHTWEIGHT SCHEMALESS PERMISSIONS NONE', liked: 'DEFINE TABLE liked TYPE RELATION IN person OUT person ENFORCED LIGHTWEIGHT SCHEMALESS PERMISSIONS NONE', person: 'DEFINE TABLE person TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: { follows: 'DEFINE TABLE follows TYPE RELATION IN person OUT person ENFORCED LIGHTWEIGHT SCHEMALESS PERMISSIONS NONE', liked: 'DEFINE TABLE liked TYPE RELATION IN person OUT person ENFORCED LIGHTWEIGHT SCHEMALESS PERMISSIONS NONE', person: 'DEFINE TABLE person TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"
 
 [[test.results]]
 error = "An error occurred: a LIGHTWEIGHT relation requires explicit IN and OUT tables: the record-less scan enumerates its edges from the IN tables' adjacency"

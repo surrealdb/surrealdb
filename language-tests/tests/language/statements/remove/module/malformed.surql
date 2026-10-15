@@ -7,7 +7,7 @@ reason = "With the `surrealism` experimental capability granted, REMOVE MODULE r
 
 [test.results]
 parsing-error = """
-Unexpected token `;`, expected a module name
+Unexpected token `;`, expected an extension name
   --> [18:14]
    |
 18 | REMOVE MODULE;

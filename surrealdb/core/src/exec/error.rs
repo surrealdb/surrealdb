@@ -450,6 +450,12 @@ pub(crate) enum Error {
 		kind: String,
 	},
 
+	/// A `DEFINE EXTENSION` outside an import that states neither how its
+	/// code is trusted (`SIGNER`) nor that it is not (`UNSIGNED`). An import
+	/// stores such a definition as a legacy row.
+	#[error("DEFINE EXTENSION needs SIGNER {{…}} or UNSIGNED")]
+	ExtensionNeedsTrust,
+
 	/// A component of a named record id is given a name that is not a plain
 	/// identifier (`KeyStructure::is_plain_name`): the fields of a record are
 	/// keyed by their raw names, which escape any other name.
@@ -662,6 +668,7 @@ impl LeafError for Error {
 			Error::IdComponentUnsupportedKind {
 				..
 			}
+			| Error::ExtensionNeedsTrust
 			| Error::IdComponentNameUnsupported {
 				..
 			}

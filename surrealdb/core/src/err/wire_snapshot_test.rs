@@ -1326,6 +1326,7 @@ fn every_exec_variant() -> Vec<(&'static str, ExecError)> {
 				kind: "float".to_string(),
 			},
 		),
+		("ExtensionNeedsTrust", ExecError::ExtensionNeedsTrust),
 		(
 			"IdComponentNameUnsupported",
 			ExecError::IdComponentNameUnsupported {

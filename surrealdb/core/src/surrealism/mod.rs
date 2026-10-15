@@ -40,7 +40,7 @@ pub(crate) fn validate_surrealism_capabilities(
 						e
 					)
 				})?;
-				if !caps.allows_function_target(&target) {
+				if !caps.allows_extension_function_target(&target) {
 					bail!(
 						"Surrealism package requires function pattern '{}', but it is not allowed by the server",
 						pattern

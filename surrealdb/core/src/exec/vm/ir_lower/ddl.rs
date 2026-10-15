@@ -1945,9 +1945,10 @@ impl Ddl<'_, '_> {
 			DefineObject::Module {
 				name,
 				executable,
+				unsigned,
 				comment,
 				..
-			} => self.define_module(attrs, name, executable, *comment),
+			} => self.define_module(attrs, name, executable, *unsigned, *comment),
 			DefineObject::Access(access) => self.define_access(attrs, access),
 			DefineObject::Config(config) => self.define_config(attrs, config),
 			DefineObject::Api(api) => self.define_api(attrs, api),
@@ -2480,19 +2481,33 @@ impl Ddl<'_, '_> {
 		self.answer_none()
 	}
 
-	/// `DEFINE MODULE`: a module that exists is evicted from the process under `OVERWRITE`, and
-	/// the new one is loaded after it is written.
+	/// `DEFINE EXTENSION`: an extension that exists is evicted from the process under `OVERWRITE`,
+	/// and the new one is loaded after it is written. A definition without `UNSIGNED` is refused
+	/// outside an import; an import stores it as a legacy row, the way a 3.x catalog row reads.
 	fn define_module(
 		&mut self,
 		attrs: &DefineAttrs,
 		name: &Option<String>,
 		executable: &ModuleExecutable,
+		unsigned: bool,
 		comment: OperandSlot,
 	) -> Result<(), IrError> {
 		let storage = module_storage_name(name, executable)?;
 		self.guard()?;
 		let (ns, db) = self.ids_creating()?;
 		let md = self.constant(Value::String(storage.as_str().into()))?;
+		if !unsigned {
+			let import = self.label()?;
+			self.store(StoreInstr::JumpIfImport {
+				target: import,
+			});
+			let arg = self.load(md)?;
+			self.store(StoreInstr::Raise {
+				error: StatementError::MdNeedsTrust,
+				arg,
+			});
+			self.bind(import)?;
+		}
 		let key = self.object(&[("ns", Operand::Reg(ns)), ("db", Operand::Reg(db)), ("md", md)])?;
 		let existing = self.reg()?;
 		self.store(StoreInstr::Get {
@@ -2777,8 +2792,8 @@ impl Ddl<'_, '_> {
 		self.answer_none()
 	}
 
-	/// `REMOVE MODULE`: the definition, at its storage name, and the process's loaded runtime for
-	/// it.
+	/// `REMOVE EXTENSION`: the definition, at its storage name, and the process's loaded runtime
+	/// for it.
 	fn remove_module(&mut self, storage: &str, if_exists: bool) -> Result<(), IrError> {
 		self.guard()?;
 		let (ns, db) = self.session_ids()?;
@@ -3657,7 +3672,7 @@ impl Ddl<'_, '_> {
 		self.answer_none()
 	}
 
-	/// `ALTER MODULE`: the module at its storage name, rewritten at that name.
+	/// `ALTER EXTENSION`: the extension at its storage name, rewritten at that name.
 	fn alter_module(&mut self, attrs: &AlterAttrs, storage: &str) -> Result<(), IrError> {
 		let template = Self::alter_template(attrs)?;
 		self.guard()?;

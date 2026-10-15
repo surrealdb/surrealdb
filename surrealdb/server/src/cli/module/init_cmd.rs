@@ -6,7 +6,9 @@ use anyhow::Result;
 use dialoguer::Input;
 use semver::Version;
 use surrealism_runtime::PrefixErr;
-use surrealism_runtime::config::{AbiVersion, SurrealismConfig, SurrealismMeta, Target};
+use surrealism_runtime::config::{
+	AbiVersion, PACKAGE_FILE, SurrealismConfig, SurrealismMeta, Target,
+};
 
 const SURREALISM_VERSION: &str = surrealism_runtime::SDK_VERSION;
 const SURREALDB_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -32,10 +34,10 @@ pub async fn init(
 		Target::Rust => scaffold_rust(&path, &name)?,
 	}
 
-	write_surrealism_toml(&path, target, &org, &name)?;
+	write_package_toml(&path, target, &org, &name)?;
 
 	println!();
-	println!("Surrealism module initialised at {}", path.display());
+	println!("Surrealism extension initialised at {}", path.display());
 	println!();
 	println!("  Organisation : {org}");
 	println!("  Module name  : {name}");
@@ -43,7 +45,7 @@ pub async fn init(
 	println!();
 	println!("Next steps:");
 	println!("  cd {}", path.display());
-	println!("  surreal module build");
+	println!("  surreal extension build");
 	println!();
 
 	Ok(())
@@ -85,7 +87,7 @@ fn validate_directory(path: &Path) -> Result<()> {
 	if has_unexpected_entries {
 		anyhow::bail!(
 			"Directory is not empty: {}\n\
-			 Run `surreal module init` in a new or empty directory.",
+			 Run `surreal extension init` in a new or empty directory.",
 			path.display()
 		);
 	}
@@ -234,10 +236,10 @@ fn add(a: i64, b: i64) -> i64 {
 }
 
 // ---------------------------------------------------------------------------
-// surrealism.toml generation (shared across all targets)
+// package.toml generation (shared across all targets)
 // ---------------------------------------------------------------------------
 
-fn write_surrealism_toml(path: &Path, target: Target, org: &str, name: &str) -> Result<()> {
+fn write_package_toml(path: &Path, target: Target, org: &str, name: &str) -> Result<()> {
 	let config = SurrealismConfig {
 		target,
 		meta: SurrealismMeta {
@@ -249,10 +251,10 @@ fn write_surrealism_toml(path: &Path, target: Target, org: &str, name: &str) -> 
 		abi: AbiVersion::CURRENT,
 		attach: Default::default(),
 	};
-	let toml = config.to_toml().prefix_err(|| "Failed to serialize surrealism.toml")?;
+	let toml = config.to_toml().prefix_err(|| format!("Failed to serialize {PACKAGE_FILE}"))?;
 
-	fs::write(path.join("surrealism.toml"), toml)
-		.prefix_err(|| "Failed to write surrealism.toml")?;
+	fs::write(path.join(PACKAGE_FILE), toml)
+		.prefix_err(|| format!("Failed to write {PACKAGE_FILE}"))?;
 
 	Ok(())
 }

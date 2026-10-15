@@ -7,7 +7,7 @@ pub struct Options {
 	pub legacy_strands: bool,
 	/// File literals and buckets are allowed (`files_enabled`).
 	pub files: bool,
-	/// Surrealism modules are allowed (`surrealism_enabled`).
+	/// Surrealism extensions are allowed (`surrealism_enabled`).
 	pub surrealism: bool,
 }
 

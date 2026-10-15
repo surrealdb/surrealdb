@@ -1403,7 +1403,8 @@ impl<'a, 's> Parser<'a, 's> {
 		self.node(Tag::Point, 0, x, y, start, 1).map(Some)
 	}
 
-	/// `mod::…(…)`, `silo::org::pkg::<1.2.3>[::…](…)` or `ml::name<1.2.3>(…)`
+	/// `ext::…(…)` (or its alias `mod::…(…)`), `silo::org::pkg::<1.2.3>[::…](…)`
+	/// or `ml::name<1.2.3>(…)`
 	/// at its first keyword: a call whose callee is a `Name` with `op` 2, 3 or
 	/// 4 and `a` an index into `extra` of its parts.
 	fn special_call(&mut self, t: Tok) -> R<NodeId> {
@@ -1424,20 +1425,27 @@ impl<'a, 's> Parser<'a, 's> {
 		Ok(PUSHED)
 	}
 
-	/// The callee of [`Self::special_call`]: a `Name` with `op` 2 (`mod`), 3
-	/// (`silo`) or 4 (`ml`) whose `a` indexes its parts in `extra`.
+	/// The callee of [`Self::special_call`]: a `Name` with `op` 2 (`ext` or
+	/// `mod`), 3 (`silo`) or 4 (`ml`) whose `a` indexes its parts in `extra`
+	/// and whose `b` holds the [`ext`](crate::ast::ext) bits of a deprecated
+	/// spelling.
 	fn special_callee(&mut self, t: Tok) -> R<NodeId> {
 		self.bump();
 		if self.limits.no_surrealism {
 			match t.kw {
+				Kw::Ext => {
+					return Err(
+						self.surrealism_off(t, "Use of `ext::` requires Surrealism extensions")
+					);
+				}
 				Kw::Mod => {
 					return Err(
-						self.surrealism_off(t, "Use of `mod::` requires Surrealism modules")
+						self.surrealism_off(t, "Use of `mod::` requires Surrealism extensions")
 					);
 				}
 				Kw::Silo => {
 					return Err(
-						self.surrealism_off(t, "Use of `silo::` requires Surrealism modules")
+						self.surrealism_off(t, "Use of `silo::` requires Surrealism extensions")
 					);
 				}
 				_ => {}
@@ -1453,8 +1461,12 @@ impl<'a, 's> Parser<'a, 's> {
 			Ok(p.leaf_span(Tag::Name, 0, 0, 0, first.start, end))
 		};
 		let mark = self.vals.len() as u32;
+		let mut deprecated = 0;
 		let op = match t.kw {
-			Kw::Mod => {
+			Kw::Ext | Kw::Mod => {
+				if t.kw == Kw::Mod {
+					deprecated = crate::ast::ext::MOD_PREFIX;
+				}
 				let name = self.name()?;
 				self.vals.push(name);
 				let sub = if self.eat(T::PathSep) {
@@ -1471,17 +1483,14 @@ impl<'a, 's> Parser<'a, 's> {
 				self.expect(T::PathSep, "::")?;
 				let pkg = self.name()?;
 				self.vals.push(pkg);
-				self.expect(T::PathSep, "::")?;
-				if !self.at(T::Lt) || self.tok.ws() {
-					return Err(self.unexpected("<"));
-				}
-				self.model_version()?;
+				self.silo_version()?;
 				let sub = if self.eat(T::PathSep) {
 					path(self)?
 				} else {
 					NONE
 				};
 				self.vals.push(sub);
+				deprecated = crate::ast::ext::SILO_NAME;
 				3
 			}
 			_ => {
@@ -1492,7 +1501,7 @@ impl<'a, 's> Parser<'a, 's> {
 			}
 		};
 		let parts = self.list_from_raw(mark);
-		Ok(self.leaf_span(Tag::Name, op, parts, 0, t.start, self.prev_end))
+		Ok(self.leaf_span(Tag::Name, op, parts, deprecated, t.start, self.prev_end))
 	}
 
 	/// A function name without arguments, read as the function-name entry
@@ -1506,7 +1515,9 @@ impl<'a, 's> Parser<'a, 's> {
 				self.expect(T::PathSep, "::")?;
 				true
 			}
-			Kw::Mod | Kw::Silo | Kw::Ml if t.is_ident() => return self.special_callee(t),
+			Kw::Ext | Kw::Mod | Kw::Silo | Kw::Ml if t.is_ident() => {
+				return self.special_callee(t);
+			}
 			_ if t.is_ident() => false,
 			_ => return Err(self.unexpected("a function name")),
 		};
@@ -1597,7 +1608,7 @@ impl<'a, 's> Parser<'a, 's> {
 				self.bump();
 				return self.path_call(t.start, true);
 			}
-			Kw::Mod | Kw::Silo | Kw::Ml if self.peek1().kind == T::PathSep => {
+			Kw::Ext | Kw::Mod | Kw::Silo | Kw::Ml if self.peek1().kind == T::PathSep => {
 				return self.special_call(t);
 			}
 			Kw::Function => return self.js_function(t),

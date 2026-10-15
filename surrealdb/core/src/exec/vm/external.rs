@@ -142,7 +142,7 @@ async fn judge(
 	}
 	use crate::expr::logical::LogicalPermissionRef;
 	let denied = || crate::exec::Error::FunctionPermissions {
-		name: name.to_owned(),
+		name: crate::catalog::extension_name(name).into_owned(),
 	};
 	match body.logical_ref()? {
 		LogicalPermissionRef::Full => Ok(()),

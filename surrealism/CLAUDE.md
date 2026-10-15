@@ -40,7 +40,7 @@ The keyword before the executable is `FROM`, not `AS`: what follows is the modul
 
 ## Security Model
 
-- **Capabilities-based:** Modules declare needs in `surrealism.toml` (`[capabilities]`). Server validates at load time and can further restrict.
+- **Capabilities-based:** Modules declare needs in `package.toml` (`[capabilities]`). Server validates at load time and can further restrict.
 - **Non-ambient host access:** `sql` and `run` are methods on a `transaction` handle the host lends for one `invoke` call and revokes on return. An export lent no handle — `init` and the introspection exports — has no route to the datastore, and a retained handle traps. This replaces the old swap-a-context-on-the-store scheme.
 - **Runtime scoping:** When a module calls `sql()` or `run()`, the host creates a derived context whose capabilities are narrowed to the module's declared `allow_scripting`, `allow_functions`, and `allow_net`. Server deny-lists are always preserved.
 - **Read-only is enforced:** a function declares whether it needs write access, which reaches the host as the `writeable` flag in the exports manifest. When it is `false`, `Host::new` installs `NoWriteFrame::SurrealismReadOnly`, and a data-modifying statement is refused where it is reached — the same enforcement point that stops a `SELECT` `PERMISSIONS` predicate and a `COMPUTED` body from writing (`legacy/expr/expression.rs`). A definition-time check could not stand in for it: the guest composes its query as a string at runtime, so only reaching the statement settles whether it writes. How the declaration is spelled is the guest language's business — in the Rust SDK it is `Transaction` versus `Transaction<ReadWrite>`. Covered by `module_read_only_write_refused`.
@@ -54,13 +54,19 @@ The keyword before the executable is `FROM`, not `AS`: what follows is the modul
 `.surli` = zstd-compressed tar archive containing:
 
 - `surrealism/mod.wasm` — WASM component binary
-- `surrealism/surrealism.toml` — config (package meta, capabilities, ABI)
+- `surrealism/package.toml` — package file (package meta, capabilities, ABI)
 - `surrealism/exports.toml` — function signatures (args/returns) extracted at build
 - `surrealism/fs/*` — optional read-only filesystem attachment
 
+The package file has a legacy name, `surrealism.toml`. Both names resolve the same way (`PackageFile::locate` in a project, `SurrealismPackage::from_reader` in an archive):
+
+- `package.toml` is read if it exists, otherwise `surrealism.toml`.
+- When both exist, `package.toml` wins and `surrealism.toml` is not parsed. `surreal extension build` prints a warning naming the ignored file.
+- `surreal extension build` always writes `surrealism/package.toml`, and `surreal extension init` scaffolds only `package.toml`.
+
 ## ABI Versioning
 
-ABI version 3 is current. Stored in `surrealism.toml`. Build tool stamps `abi = 3`; user values are ignored. Older `p1`/`1` for Preview 1 is legacy.
+ABI version 3 is current. Stored in `package.toml`. Build tool stamps `abi = 3`; user values are ignored. Older `p1`/`1` for Preview 1 is legacy.
 
 An archive whose `abi` does not match is rejected at load with `UnsupportedAbi`, so a module built against an older SDK must be rebuilt rather than failing later with a missing-import error from the linker.
 

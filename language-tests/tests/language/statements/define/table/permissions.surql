@@ -24,9 +24,9 @@ value = """{
 	apis: {},
 	buckets: {},
 	configs: {},
+	extensions: {},
 	functions: {},
 	models: {},
-	modules: {},
 	params: {},
 	sequences: {},
 	tables: {

@@ -2,8 +2,8 @@ use std::sync::LazyLock;
 
 use anyhow::Result;
 
-/// The Surrealism version string shown by `surreal module version` and
-/// `surreal module --version`.
+/// The Surrealism version string shown by `surreal extension version` and
+/// `surreal extension --version`.
 pub static MODULE_RELEASE: LazyLock<String> = LazyLock::new(|| {
 	format!(
 		"{} for {} on {}",

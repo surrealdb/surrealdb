@@ -72,6 +72,6 @@ All `serialized-*` types are FlatBuffer byte buffers. Schemas live in `surrealdb
 ## ABI Stability
 
 Protocol changes should be minimized. WIT changes can break compatibility. ABI
-version in `surrealism.toml` tracks compatibility; current is 3. It is bumped at
+version in `package.toml` tracks compatibility; current is 3. It is bumped at
 most once per release that changes this world — see the ABI section in
 `surrealism/CLAUDE.md` for what that gate catches and what it does not.

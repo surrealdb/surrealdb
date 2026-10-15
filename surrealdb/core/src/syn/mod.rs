@@ -142,6 +142,7 @@ pub fn json(input: &str) -> Result<PublicValue> {
 
 	let settings = ParserSettings {
 		json_string_escapes: true,
+		import: false,
 		..Default::default()
 	};
 
@@ -251,6 +252,7 @@ pub fn json_legacy_strand(input: &str, config: &ParserConfig) -> Result<PublicVa
 		query_recursion_limit: 0,
 		legacy_strands: true,
 		json_string_escapes: true,
+		import: false,
 		..Default::default()
 	};
 

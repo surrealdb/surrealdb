@@ -8,16 +8,10 @@ auth = { level = "owner" }
 allow-experimental = ["surrealism", "files"]
 
 [test]
-reason = "No module source is signature-verified yet, so DEFINE MODULE requires the trailing UNSIGNED clause and rejects a definition that omits it. Requiring the opt-out now rather than once verification exists means a definition written today keeps its meaning when the keyword starts gating a real check."
+reason = "A DEFINE EXTENSION outside an import must state how its code is trusted: with neither SIGNER nor UNSIGNED it parses, and the executor refuses it."
 
-[test.results]
-parsing-error = """
-Expected the `UNSIGNED` keyword on this module definition
-  --> [23:30]
-   |
-23 | DEFINE MODULE mod::test FROM f"bucket:/module.wasm";
-   |                              ^^^^^^^^^^^^^^^^^^^^^^ Surrealism modules are not signature-verified yet, so a module must be defined as `UNSIGNED`
-"""
+[[test.results]]
+error = "DEFINE EXTENSION needs SIGNER {…} or UNSIGNED"
 */
 
 DEFINE MODULE mod::test FROM f"bucket:/module.wasm";

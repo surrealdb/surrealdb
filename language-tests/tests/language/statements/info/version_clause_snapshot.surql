@@ -57,13 +57,13 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: { f: 'DEFINE FUNCTION fn::f() { RETURN 1 } PERMISSIONS FULL' }, models: {  }, modules: {  }, params: { p: 'DEFINE PARAM $p VALUE 1 PERMISSIONS FULL' }, sequences: { s1: 'DEFINE SEQUENCE s1 BATCH 1000 START 0' }, tables: { a: 'DEFINE TABLE a TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, extensions: {  }, functions: { f: 'DEFINE FUNCTION fn::f() { RETURN 1 } PERMISSIONS FULL' }, models: {  }, params: { p: 'DEFINE PARAM $p VALUE 1 PERMISSIONS FULL' }, sequences: { s1: 'DEFINE SEQUENCE s1 BATCH 1000 START 0' }, tables: { a: 'DEFINE TABLE a TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: { f: 'DEFINE FUNCTION fn::f() { RETURN 1 } PERMISSIONS FULL', g: 'DEFINE FUNCTION fn::g() { RETURN 2 } PERMISSIONS FULL' }, models: {  }, modules: {  }, params: { p: 'DEFINE PARAM $p VALUE 1 PERMISSIONS FULL', q: 'DEFINE PARAM $q VALUE 2 PERMISSIONS FULL' }, sequences: { s1: 'DEFINE SEQUENCE s1 BATCH 1000 START 0', s2: 'DEFINE SEQUENCE s2 BATCH 1000 START 0' }, tables: { a: 'DEFINE TABLE a TYPE ANY SCHEMALESS PERMISSIONS NONE', b: 'DEFINE TABLE b TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, extensions: {  }, functions: { f: 'DEFINE FUNCTION fn::f() { RETURN 1 } PERMISSIONS FULL', g: 'DEFINE FUNCTION fn::g() { RETURN 2 } PERMISSIONS FULL' }, models: {  }, params: { p: 'DEFINE PARAM $p VALUE 1 PERMISSIONS FULL', q: 'DEFINE PARAM $q VALUE 2 PERMISSIONS FULL' }, sequences: { s1: 'DEFINE SEQUENCE s1 BATCH 1000 START 0', s2: 'DEFINE SEQUENCE s2 BATCH 1000 START 0' }, tables: { a: 'DEFINE TABLE a TYPE ANY SCHEMALESS PERMISSIONS NONE', b: 'DEFINE TABLE b TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"
 
 [[test.results]]
-value = "{ accesses: [], analyzers: [], apis: [], buckets: [], configs: [], functions: [{ args: [], block: '{ RETURN 1 }', name: 'f', permissions: true }], models: [], modules: [], params: [{ name: 'p', permissions: true, value: '1' }], sequences: [{ batch: '1000', name: 's1', resume: '0', start: '0', timeout: NONE }], tables: [{ drop: false, id: 0, kind: { kind: 'ANY' }, name: 'a', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false }], users: [] }"
+value = "{ accesses: [], analyzers: [], apis: [], buckets: [], configs: [], extensions: [], functions: [{ args: [], block: '{ RETURN 1 }', name: 'f', permissions: true }], models: [], params: [{ name: 'p', permissions: true, value: '1' }], sequences: [{ batch: '1000', name: 's1', resume: '0', start: '0', timeout: NONE }], tables: [{ drop: false, id: 0, kind: { kind: 'ANY' }, name: 'a', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false }], users: [] }"
 
 [[test.results]]
 value = "{ accesses: {  }, databases: { d1: 'DEFINE DATABASE d1', test: 'DEFINE DATABASE test' }, users: {  } }"
@@ -78,7 +78,7 @@ value = "{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } 
 value = "{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"
 */
 DEFINE TABLE a;
 DEFINE FUNCTION fn::f() { RETURN 1 };

@@ -185,7 +185,8 @@ enum Commands {
 	#[command(subcommand, about = "Manage SurrealML models within an existing database")]
 	Ml(MlCommand),
 	#[cfg(feature = "surrealism")]
-	Module(ModuleCommandArgs),
+	#[command(name = "extension", alias = "module")]
+	Extension(ModuleCommandArgs),
 	#[command(
 		about = "Check if the SurrealDB server is ready to accept connections",
 		visible_alias = "isready"
@@ -311,7 +312,7 @@ pub async fn init<
 		Commands::Mcp(args) => mcp::init::<C>(composer, args, runtime.clone()).await,
 		Commands::Ml(args) => ml::init(args).await,
 		#[cfg(feature = "surrealism")]
-		Commands::Module(args) => module::init(args).await,
+		Commands::Extension(args) => module::init(args).await,
 		Commands::IsReady(args) => isready::init(args).await,
 		Commands::Validate(args) => validate::init(args).await,
 		Commands::Fix(args) => fix::init::<C>(composer, args).await,

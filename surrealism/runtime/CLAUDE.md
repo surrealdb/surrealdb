@@ -76,7 +76,7 @@ Both use Cranelift, in every profile: Winch rejects
 `wasm_component_model_async`, which `invoke` and the `transaction` methods
 require.
 
-Modules choose via `strict_timeout` in `surrealism.toml` (default `true` → guarded). Compute-heavy trusted modules set `strict_timeout = false` for the fast engine. **Security:** `strict_timeout = false` means no timeout enforcement at all; the module can run indefinitely. Only explicitly trusted modules should use this. Code signing (planned) will gate access.
+Modules choose via `strict_timeout` in `package.toml` (default `true` → guarded). Compute-heavy trusted modules set `strict_timeout = false` for the fast engine. **Security:** `strict_timeout = false` means no timeout enforcement at all; the module can run indefinitely. Only explicitly trusted modules should use this. Code signing (planned) will gate access.
 
 - Guarded: shared global ticker increments epoch every `EPOCH_TICK_MS` (10ms).
 - Effective timeout = `min(context_remaining, module_limit, server_cap)`.

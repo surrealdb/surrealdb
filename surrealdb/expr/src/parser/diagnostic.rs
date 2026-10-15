@@ -119,6 +119,7 @@ pub fn token_name(src: &str, at: u32) -> Cow<'static, str> {
 					Kw::Fn => "fn",
 					Kw::Silo => "silo",
 					Kw::Mod => "mod",
+					Kw::Ext => "ext",
 					Kw::Ml => "ml",
 					Kw::Scope => "SCOPE",
 					k => k.text(),

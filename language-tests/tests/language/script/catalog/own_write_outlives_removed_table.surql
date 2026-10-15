@@ -15,7 +15,7 @@ value = "[{ id: t:1 }, { id: t:2 }, { id: t:3 }]"
 error = "The table 't' does not exist"
 
 [[test.results]]
-value = """{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: { x: 'DEFINE FUNCTION fn::x() { RETURN function() { return surrealdb.query("REMOVE TABLE IF EXISTS t") } } PERMISSIONS FULL' }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
+value = """{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, extensions: {  }, functions: { x: 'DEFINE FUNCTION fn::x() { RETURN function() { return surrealdb.query("REMOVE TABLE IF EXISTS t") } } PERMISSIONS FULL' }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
 */
 DEFINE FUNCTION fn::x() { RETURN function() { return surrealdb.query("REMOVE TABLE IF EXISTS t") } };
 CREATE t:1, t:2, t:3;

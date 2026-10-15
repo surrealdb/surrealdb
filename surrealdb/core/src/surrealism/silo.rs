@@ -8,7 +8,7 @@
 //! ```
 //!
 //! The endpoint is `surrealism_silo_endpoint`, so an operator can point the
-//! whole resolution at a mirror without touching any `DEFINE MODULE`
+//! whole resolution at a mirror without touching any `DEFINE EXTENSION`
 //! statement. Packages are public and immutable per version, so the fetch
 //! carries no credentials and the result is cached under
 //! [`SurrealismCacheLookup::Silo`](crate::surrealism::cache::SurrealismCacheLookup).
@@ -106,7 +106,7 @@ async fn fetch_package_capped(
 	let status = response.status();
 	if status == http::StatusCode::NOT_FOUND {
 		bail!(
-			"The silo module `silo::{organisation}::{package}::<{major}.{minor}.{patch}>` was not found"
+			"The silo package `silo::{organisation}::{package}<{major}.{minor}.{patch}>` was not found"
 		);
 	}
 	if !status.is_success() {
@@ -229,7 +229,7 @@ mod tests {
 			.unwrap_err()
 			.to_string();
 
-		assert!(err.contains("silo::surrealdb::base58::<9.9.9>"), "{err}");
+		assert!(err.contains("silo::surrealdb::base58<9.9.9>"), "{err}");
 		assert!(err.contains("was not found"), "{err}");
 	}
 

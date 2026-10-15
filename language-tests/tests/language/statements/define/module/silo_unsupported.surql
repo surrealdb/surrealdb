@@ -7,11 +7,11 @@ reason = "The DEFINE MODULE gate fires before the module executable is parsed, s
 
 [test.results]
 parsing-error = """
-Surrealism modules are not enabled
+Surrealism extensions are not enabled
   --> [18:8]
    |
 18 | DEFINE MODULE silo::acme::pkg::<1.0.0>;
-   |        ^^^^^^ Use of `DEFINE MODULE` requires Surrealism modules
+   |        ^^^^^^ Use of `DEFINE MODULE` requires Surrealism extensions
 """
 */
 

@@ -256,7 +256,7 @@ async fn async_result(should_fail: bool) -> Result<String> {
 ///
 /// `api_base` may name a host rather than an address: the guest resolves it
 /// through `wasi:sockets/ip-name-lookup`, which the host filters against the
-/// module's `allow_net`. Add the host to `allow_net` in `surrealism.toml`.
+/// extension's `allow_net`. Add the host to `allow_net` in `package.toml`.
 #[surrealism]
 async fn fetch_pokemon(api_base: String, name: String) -> Result<String> {
 	let url = url::Url::parse(&format!(

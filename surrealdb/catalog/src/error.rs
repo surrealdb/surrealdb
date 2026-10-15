@@ -50,8 +50,9 @@ pub enum Error {
 		name: String,
 	},
 
-	/// The requested module does not exist
-	#[error("The module '{name}' does not exist")]
+	/// The requested extension does not exist. `name` is its storage name;
+	/// the message names it as SurrealQL addresses it.
+	#[error("The extension '{}' does not exist", extension_name(.name))]
 	MdNotFound {
 		name: String,
 	},
@@ -230,8 +231,9 @@ pub enum Error {
 		name: String,
 	},
 
-	/// The requested module already exists
-	#[error("The module '{name}' already exists")]
+	/// The requested extension already exists. `name` is its storage name;
+	/// the message names it as SurrealQL addresses it.
+	#[error("The extension '{}' already exists", extension_name(.name))]
 	MdAlreadyExists {
 		name: String,
 	},
@@ -657,4 +659,20 @@ impl LeafError for Error {
 			} => internal_todo(message),
 		}
 	}
+}
+
+/// The name SurrealQL addresses an extension by, from its storage name: a
+/// named extension is stored as `mod::name` and addressed as `ext::name`; an
+/// unnamed silo definition is stored as `silo::org::pkg::<v>` and addressed
+/// as `silo::org::pkg<v>`. Any other name is returned as it is.
+pub fn extension_name(storage: &str) -> std::borrow::Cow<'_, str> {
+	if let Some(rest) = storage.strip_prefix("mod::") {
+		return std::borrow::Cow::Owned(format!("ext::{rest}"));
+	}
+	if storage.starts_with("silo::")
+		&& let Some(at) = storage.find("::<")
+	{
+		return std::borrow::Cow::Owned(format!("{}{}", &storage[..at], &storage[at + 2..]));
+	}
+	std::borrow::Cow::Borrowed(storage)
 }

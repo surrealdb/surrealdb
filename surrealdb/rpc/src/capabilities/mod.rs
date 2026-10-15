@@ -895,6 +895,26 @@ impl Capabilities {
 		self.allow_funcs.matches(target) && !self.deny_funcs.matches(target)
 	}
 
+	/// Check whether the extension function `target` is covered by the
+	/// server's function capability configuration.
+	///
+	/// `ext::` and its alias `mod::` name the same extensions, so `target` is
+	/// matched under both families: an allow entry in either admits it and a
+	/// deny entry in either refuses it. Which family `target` or the
+	/// configuration is written in never changes the outcome. A target in any
+	/// other family is checked as [`Self::allows_function_target`] checks it.
+	pub fn allows_extension_function_target(&self, target: &FuncTarget) -> bool {
+		let alias = match target.0.as_str() {
+			"ext" => "mod",
+			"mod" => "ext",
+			_ => return self.allows_function_target(target),
+		};
+		let other = FuncTarget(alias.to_string(), target.1.clone());
+		let allowed = self.allow_funcs.matches(target) || self.allow_funcs.matches(&other);
+		let denied = self.deny_funcs.matches(target) || self.deny_funcs.matches(&other);
+		allowed && !denied
+	}
+
 	pub fn allows_experimental(&self, target: &ExperimentalTarget) -> bool {
 		self.allow_experimental.matches(target) && !self.deny_experimental.matches(target)
 	}
@@ -1247,6 +1267,37 @@ mod tests {
 			!Targets::<FuncTarget>::Some([FuncTarget::from_str("http::get").unwrap()].into())
 				.matches("http::post")
 		);
+	}
+
+	/// `ext::` and `mod::` name the same extensions, so a capability written
+	/// in either family covers a target written in either.
+	#[test]
+	fn extension_targets_match_under_both_families() {
+		let t = |s: &str| FuncTarget::from_str(s).unwrap();
+		let allow = |list: &[&str]| {
+			Capabilities::default()
+				.with_functions(Targets::Some(list.iter().map(|s| t(s)).collect()))
+		};
+		for (caps, target, allowed) in [
+			(allow(&["ext::*"]), "mod::demo::f", true),
+			(allow(&["mod::*"]), "ext::demo::f", true),
+			(allow(&["mod::demo::f"]), "ext::demo::f", true),
+			(allow(&["ext::other"]), "mod::demo::f", false),
+			(
+				allow(&["ext::*"]).without_functions(Targets::Some([t("mod::*")].into())),
+				"ext::demo::f",
+				false,
+			),
+			(
+				allow(&["mod::*"]).without_functions(Targets::Some([t("ext::demo::f")].into())),
+				"mod::demo::f",
+				false,
+			),
+			(allow(&["fn::*"]), "mod::demo::f", false),
+			(allow(&["ext::*"]), "fn::demo", false),
+		] {
+			assert_eq!(caps.allows_extension_function_target(&t(target)), allowed, "{target}");
+		}
 	}
 
 	#[test]

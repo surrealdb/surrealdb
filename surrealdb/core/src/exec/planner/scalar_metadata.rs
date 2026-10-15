@@ -110,7 +110,7 @@ impl Planner<'_> {
 						{
 							self.index_function_context(name, &mut call.args.clone())?;
 						}
-						Function::Module(module, sub) => {
+						Function::Module(module, sub, _) => {
 							self.resolve_module_writeable(module, sub.as_deref()).await?;
 						}
 						Function::Silo {

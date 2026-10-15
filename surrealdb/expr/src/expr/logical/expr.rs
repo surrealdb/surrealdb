@@ -4093,9 +4093,8 @@ impl ToSql for LogicalCall {
 				return;
 			}
 			Function::Model(model) => write_sql!(f, fmt, "{model}"),
-			Function::Module(module, sub) => {
-				f.push_str("mod::");
-				write_sql!(f, fmt, " {}", EscapeKwFreeIdent(module));
+			Function::Module(module, sub, prefix) => {
+				write_sql!(f, fmt, "{}::{}", prefix.as_str(), EscapeKwFreeIdent(module));
 				if let Some(sub) = sub {
 					for segment in sub.split("::") {
 						write_sql!(f, fmt, "::{}", EscapeKwFreeIdent(segment));
@@ -4113,7 +4112,7 @@ impl ToSql for LogicalCall {
 				write_sql!(
 					f,
 					fmt,
-					"silo::{}::{}::<{major}.{minor}.{patch}>",
+					"silo::{}::{}<{major}.{minor}.{patch}>",
 					EscapeKwFreeIdent(org),
 					EscapeKwFreeIdent(pkg),
 				);

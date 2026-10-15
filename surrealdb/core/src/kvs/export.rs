@@ -241,10 +241,10 @@ async fn export_metadata(
 		export_section("BUCKETS", buckets.iter(), chn).await?;
 	}
 
-	// Output MODULES
+	// Output EXTENSIONS
 	if cfg.modules {
 		let modules = tx.all_db_modules(ns, db, None).await?;
-		export_section("MODULES", modules.iter(), chn).await?;
+		export_section("EXTENSIONS", modules.iter(), chn).await?;
 	}
 
 	// Output CONFIGS

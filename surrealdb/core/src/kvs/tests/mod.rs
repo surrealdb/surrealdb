@@ -21,6 +21,8 @@ mod changefeed_gc_test;
 #[cfg(feature = "kv-mem")]
 mod export_id_components_test;
 #[cfg(feature = "kv-mem")]
+mod export_legacy_extension_test;
+#[cfg(feature = "kv-mem")]
 mod export_views_test;
 #[cfg(feature = "kv-mem")]
 mod graph_degree_test;

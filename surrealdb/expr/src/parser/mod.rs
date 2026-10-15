@@ -25,6 +25,7 @@
 
 use std::cell::Cell;
 use std::ops::Bound;
+use std::sync::atomic::{self, AtomicU32};
 use std::time::Duration;
 
 use common::range::TypedRange;
@@ -57,10 +58,10 @@ use crate::expr::statements::{
 	SleepStatement, UpdateStatement, UpsertStatement, UseStatement,
 };
 use crate::expr::{
-	Base, Block, ClosureExpr as Closure, Cond, Data, Dir, Explain, ExplainFormat, Expr, Fetch,
-	Fetchs, Field, Fields, Function, FunctionCall, Group, Groups, Idiom, KeyNames, Kind, Limit,
-	Literal, Lookup, Mock, Model, Param, Part, RecordIdKeyGen, RecordIdKeyLit, RecordIdKeyRangeLit,
-	RecordIdLit, Script, Split, Splits, Start, With,
+	Base, Block, ClosureExpr as Closure, Cond, Data, Dir, Explain, ExplainFormat, Expr, ExtPrefix,
+	Fetch, Fetchs, Field, Fields, Function, FunctionCall, Group, Groups, Idiom, KeyNames, Kind,
+	Limit, Literal, Lookup, Mock, Model, Param, Part, RecordIdKeyGen, RecordIdKeyLit,
+	RecordIdKeyRangeLit, RecordIdLit, Script, Split, Splits, Start, With,
 };
 
 pub mod api;
@@ -98,7 +99,56 @@ pub struct Lower<'a> {
 }
 
 pub(crate) const FILES_DISABLED: &str = "the experimental files feature to be enabled";
-pub(crate) const SURREALISM_DISABLED: &str = "Surrealism modules are not enabled";
+pub(crate) const SURREALISM_DISABLED: &str = "Surrealism extensions are not enabled";
+
+/// The deprecation warning for each spelling in `bits`, a set of
+/// [`ast::ext`] bits. `MODULE` and `mod::` mean exactly what `EXTENSION` and
+/// `ext::` mean, so they are reported and never refused. An unnamed silo
+/// name (`silo::org::pkg::<v>`) is reported wherever it is accepted: in a
+/// call, `ALTER` and `REMOVE` always, and in `DEFINE` only in an import; a
+/// `DEFINE` outside one is refused.
+pub fn deprecated_extension_spellings(bits: u32) -> impl Iterator<Item = &'static str> {
+	[
+		(ast::ext::MODULE_KEYWORD, "`MODULE` is deprecated, use `EXTENSION`"),
+		(ast::ext::MOD_PREFIX, "The `mod::` prefix is deprecated, use `ext::`"),
+		(
+			ast::ext::SILO_NAME,
+			"Addressing an unnamed silo extension as `silo::org::pkg<version>` is deprecated; \
+			 define the package with a name (`DEFINE EXTENSION ext::name FROM silo::…`) and use \
+			 `ext::name`",
+		),
+	]
+	.into_iter()
+	.filter(move |(bit, _)| bits & bit != 0)
+	.map(|(_, message)| message)
+}
+
+/// The [`ast::ext`] bits already reported by this process.
+static WARNED_EXTENSION_SPELLINGS: AtomicU32 = AtomicU32::new(0);
+
+impl Lower<'_> {
+	/// Logs the warning of each deprecated spelling in `bits` (see
+	/// [`deprecated_extension_spellings`]) that this process has not reported
+	/// yet, so a spelling is reported once however often statements using it,
+	/// stored definitions among them, are lowered. `at` is the byte offset of
+	/// the spelling in the source; the warning carries its line and column and
+	/// no source text.
+	pub(crate) fn warn_deprecated_extension(&self, bits: u32, at: u32) {
+		if bits == 0 {
+			return;
+		}
+		let new = bits & !WARNED_EXTENSION_SPELLINGS.fetch_or(bits, atomic::Ordering::Relaxed);
+		if new == 0 {
+			return;
+		}
+		let before = &self.src[..(at as usize).min(self.src.len())];
+		let line = before.matches('\n').count() + 1;
+		let column = before.rsplit('\n').next().map_or(0, |l| l.chars().count()) + 1;
+		for message in deprecated_extension_spellings(new) {
+			tracing::warn!(line, column, "{message}");
+		}
+	}
+}
 
 pub use support::{Options, Reject};
 type R<T> = Result<T, Reject>;
@@ -889,6 +939,7 @@ impl<'a> Lower<'a> {
 				if !self.opts.surrealism {
 					return Err(Reject::new(SURREALISM_DISABLED));
 				}
+				self.warn_deprecated_extension(callee.b, callee.start);
 				let p = &self.ast.extra[callee.a as usize + 1..];
 				Function::Module(
 					self.name(p[0])?,
@@ -897,12 +948,18 @@ impl<'a> Lower<'a> {
 					} else {
 						Some(self.path_name(p[1])?)
 					},
+					if callee.b & ast::ext::MOD_PREFIX != 0 {
+						ExtPrefix::Mod
+					} else {
+						ExtPrefix::Ext
+					},
 				)
 			}
 			3 => {
 				if !self.opts.surrealism {
 					return Err(Reject::new(SURREALISM_DISABLED));
 				}
+				self.warn_deprecated_extension(callee.b, callee.start);
 				let p = &self.ast.extra[callee.a as usize + 1..];
 				let v = |i: usize| {
 					u32::try_from(Ast::int(self.n(p[i]))).map_err(|_| Reject::new("u32"))

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// Module-level capabilities declared in `surrealism.toml`.
+/// Module-level capabilities declared in `package.toml`.
 ///
 /// These are validated against the server-level capabilities when the module is
 /// loaded. The server can further restrict what a module is allowed to do, but
@@ -113,18 +113,27 @@ impl FunctionTargets {
 /// Mirrors SurrealDB's `FuncTarget::matches` logic:
 /// - `"family::name"` requires exact match on both family and name.
 /// - `"family::*"` or `"family"` (no `::name`) matches any function in that family.
+///
+/// `ext` and its alias `mod` are one family, as the server's capability check
+/// treats them: a pattern written in either matches a call written in either.
 fn func_pattern_matches(pattern: &str, fnc: &str) -> bool {
-	if let Some(family) = pattern.strip_suffix("::*") {
-		let f = fnc.split_once("::").map(|(f, _)| f).unwrap_or(fnc);
-		f == family
+	fn family(f: &str) -> &str {
+		if f == "mod" {
+			"ext"
+		} else {
+			f
+		}
+	}
+	let fnc_family = || family(fnc.split_once("::").map(|(f, _)| f).unwrap_or(fnc));
+	if let Some(pfam) = pattern.strip_suffix("::*") {
+		fnc_family() == family(pfam)
 	} else if let Some((pfam, pname)) = pattern.split_once("::") {
 		let Some((ffam, fname)) = fnc.split_once("::") else {
 			return false;
 		};
-		pfam == ffam && pname == fname
+		family(pfam) == family(ffam) && pname == fname
 	} else {
-		let f = fnc.split_once("::").map(|(f, _)| f).unwrap_or(fnc);
-		f == pattern
+		fnc_family() == family(pattern)
 	}
 }
 
@@ -213,6 +222,19 @@ mod tests {
 		let targets = FunctionTargets::None;
 		assert!(!targets.allows("http::get"));
 		assert!(!targets.allows("fn::anything"));
+	}
+
+	#[test]
+	fn function_targets_read_ext_and_mod_as_one_family() {
+		let t = |p: &[&str]| FunctionTargets::Some(p.iter().map(|s| s.to_string()).collect());
+		assert!(t(&["mod::*"]).allows("ext::helpers::f"));
+		assert!(t(&["ext::*"]).allows("mod::helpers::f"));
+		assert!(t(&["mod"]).allows("ext::helpers::f"));
+		assert!(t(&["ext::helpers::f"]).allows("mod::helpers::f"));
+		assert!(t(&["mod::helpers::f"]).allows("ext::helpers::f"));
+		assert!(!t(&["ext::helpers::g"]).allows("mod::helpers::f"));
+		assert!(!t(&["ext::*"]).allows("fn::helpers"));
+		assert!(!t(&["fn::*"]).allows("ext::helpers::f"));
 	}
 
 	#[test]

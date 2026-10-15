@@ -34,7 +34,7 @@ one just as firmly. Restore the coverage by lowering `importing-version` to the
 first release that ships ABI 3, once there is one."""
 
 [[test.results]]
-match = '''string::contains($result.modules['mod::demo'], 'demo.surli') AND string::contains($result.modules['mod::demo'], 'UNSIGNED') AND string::contains($result.buckets.mods, 'file:')'''
+match = '''string::contains($result.extensions['ext::demo'], 'demo.surli') AND string::contains($result.extensions['ext::demo'], 'UNSIGNED') AND string::contains($result.extensions['ext::demo'], 'DEFINE EXTENSION ext::demo FROM') AND $result.modules IS NONE AND string::contains($result.buckets.mods, 'file:')'''
 
 [[test.results]]
 value = "true"
@@ -45,9 +45,12 @@ value = "5"
 [[test.results]]
 value = "[{ drives: true, half: 5, id: wasm_marker:1 }]"
 
+[[test.results]]
+value = "true"
+
 */
 -- 0: the definition the old binary wrote still renders, through the bucket it
--- named
+-- named, under `extensions` by `ext::` name
 INFO FOR DB;
 -- 1, 2: the new binary loads the same wasm object out of that bucket and runs
 -- it, so the module is executed across the upgrade rather than merely listed
@@ -55,3 +58,5 @@ RETURN mod::demo::can_drive(21);
 RETURN mod::demo::safe_divide(10, 2);
 -- 3: and it agrees with what the old binary computed from the same object
 SELECT * FROM wasm_marker;
+-- 4: the `ext::` spelling calls the definition the old binary wrote as `mod::`
+RETURN ext::demo::can_drive(21);

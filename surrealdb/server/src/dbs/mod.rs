@@ -96,7 +96,7 @@ pub struct StartCommandDbsOptions {
 	#[arg(env = "SURREAL_NO_DEFAULTS", long = "no-defaults", conflicts_with_all = ["default_namespace", "default_database"])]
 	#[arg(default_value_t = false)]
 	no_defaults: bool,
-	#[arg(help = "Load Surrealism modules lazily on first use instead of eagerly at startup")]
+	#[arg(help = "Load Surrealism extensions lazily on first use instead of eagerly at startup")]
 	#[arg(env = "SURREAL_LAZY_SURREALISM", long = "lazy-surrealism")]
 	#[arg(default_value_t = false)]
 	lazy_surrealism: bool,

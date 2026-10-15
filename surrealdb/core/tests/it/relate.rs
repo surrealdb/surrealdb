@@ -313,9 +313,9 @@ async fn relate_enforced() -> Result<()> {
 	apis: {},
 	buckets: {},
 	configs: {},
+	extensions: {},
 	functions: {},
 	models: {},
-	modules: {},
 	params: {},
 	sequences: {},
 	tables: {

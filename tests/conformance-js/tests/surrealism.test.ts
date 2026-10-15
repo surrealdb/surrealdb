@@ -1,6 +1,6 @@
-// Surrealism module surface over the SDK wire path: `DEFINE MODULE` loads a
+// Surrealism module surface over the SDK wire path: `DEFINE EXTENSION` loads a
 // `.surli` archive from a filesystem bucket and publishes its exports as
-// callable `mod::<module>::<export>` functions, with the module recorded in the
+// callable `ext::<module>::<export>` functions, with the module recorded in the
 // database catalog. What this file pins beyond the HTTP-level Rust suite is the
 // CBOR/SDK mapping: guest return values arrive as JS values, and every failing
 // call arrives as a rejected promise whose message names its cause.
@@ -79,7 +79,7 @@ async function defineModule(): Promise<Surreal> {
 	const responses = await db
 		.query(
 			`DEFINE BUCKET test BACKEND "file:${bucketDir}";
-			 DEFINE MODULE mod::demo FROM f"test:/demo.surli" UNSIGNED;`,
+			 DEFINE EXTENSION ext::demo FROM f"test:/demo.surli" UNSIGNED;`,
 		)
 		.responses();
 	for (const r of responses) expect(r.success).toBe(true);
@@ -129,35 +129,35 @@ test("the packed demo module is supplied under CI", () => {
 });
 
 moduleTest(
-	"module exports are callable as mod:: functions and return typed values",
+	"module exports are callable as ext:: functions and return typed values",
 	async () => {
 		const db = moduleClient();
 
 		// Top-level export, both branches of its predicate.
-		expect(await call<boolean>(db, "mod::demo::can_drive(21)")).toBe(true);
-		expect(await call<boolean>(db, "mod::demo::can_drive(15)")).toBe(false);
+		expect(await call<boolean>(db, "ext::demo::can_drive(21)")).toBe(true);
+		expect(await call<boolean>(db, "ext::demo::can_drive(15)")).toBe(false);
 
 		// The unnamed default export is invoked as the module itself.
-		expect(await call<boolean>(db, "mod::demo(21)")).toBe(true);
-		expect(await call<boolean>(db, "mod::demo(15)")).toBe(false);
+		expect(await call<boolean>(db, "ext::demo(21)")).toBe(true);
+		expect(await call<boolean>(db, "ext::demo(15)")).toBe(false);
 
 		// A mod namespace: its default export, a named export, and a nested mod.
-		expect(await call<number>(db, "mod::demo::math(5)")).toBe(10);
-		expect(await call<number>(db, "mod::demo::math::add(3, 4)")).toBe(7);
-		expect(await call<number>(db, "mod::demo::math::add(-10, 3)")).toBe(-7);
-		expect(await call<number>(db, "mod::demo::util::nested::deep(1)")).toBe(101);
+		expect(await call<number>(db, "ext::demo::math(5)")).toBe(10);
+		expect(await call<number>(db, "ext::demo::math::add(3, 4)")).toBe(7);
+		expect(await call<number>(db, "ext::demo::math::add(-10, 3)")).toBe(-7);
+		expect(await call<number>(db, "ext::demo::util::nested::deep(1)")).toBe(101);
 
 		// A `name` override is the only reachable name, at both function and mod
 		// level: `can_drive_bla` -> `other`, `mul` -> `multiply`,
 		// `utility_helpers` -> `util`, `neg` -> `negate`.
-		expect(await call<boolean>(db, "mod::demo::other(21)")).toBe(true);
-		expect(await call<boolean>(db, "mod::demo::other(15)")).toBe(false);
-		expect(await call<number>(db, "mod::demo::math::multiply(3, 4)")).toBe(12);
-		expect(await call<number>(db, "mod::demo::util::negate(5)")).toBe(-5);
+		expect(await call<boolean>(db, "ext::demo::other(21)")).toBe(true);
+		expect(await call<boolean>(db, "ext::demo::other(15)")).toBe(false);
+		expect(await call<number>(db, "ext::demo::math::multiply(3, 4)")).toBe(12);
+		expect(await call<number>(db, "ext::demo::util::negate(5)")).toBe(-5);
 
 		// A function returning Result maps its Ok branch to a plain value.
-		expect(await call<number>(db, "mod::demo::safe_divide(10, 2)")).toBe(5);
-		expect(await call<number>(db, "mod::demo::parse_number('42')")).toBe(42);
+		expect(await call<number>(db, "ext::demo::safe_divide(10, 2)")).toBe(5);
+		expect(await call<number>(db, "ext::demo::parse_number('42')")).toBe(42);
 	},
 	30000,
 );
@@ -168,42 +168,42 @@ moduleTest(
 		const db = moduleClient();
 
 		// A renamed export is not reachable under its Rust name, at either level.
-		expect(await failure(db, "mod::demo::can_drive_bla(21)")).toContain("can_drive_bla");
-		expect(await failure(db, "mod::demo::math::mul(3, 4)")).toContain("math::mul");
-		expect(await failure(db, "mod::demo::utility_helpers::negate(5)")).toContain(
+		expect(await failure(db, "ext::demo::can_drive_bla(21)")).toContain("can_drive_bla");
+		expect(await failure(db, "ext::demo::math::mul(3, 4)")).toContain("math::mul");
+		expect(await failure(db, "ext::demo::utility_helpers::negate(5)")).toContain(
 			"utility_helpers::negate",
 		);
 
 		// Neither is a name the module never exported, at any nesting depth.
-		expect(await failure(db, "mod::demo::nonexistent_function(1)")).toContain(
+		expect(await failure(db, "ext::demo::nonexistent_function(1)")).toContain(
 			"nonexistent_function",
 		);
-		expect(await failure(db, "mod::demo::math::nonexistent(1)")).toContain("math::nonexistent");
-		expect(await failure(db, "mod::demo::util::nested::nonexistent(1)")).toContain(
+		expect(await failure(db, "ext::demo::math::nonexistent(1)")).toContain("math::nonexistent");
+		expect(await failure(db, "ext::demo::util::nested::nonexistent(1)")).toContain(
 			"util::nested::nonexistent",
 		);
 
 		// A module that was never defined is an error, not a silent NONE.
-		expect(await failure(db, "mod::missing::can_drive(21)")).toContain("mod::missing");
+		expect(await failure(db, "ext::missing::can_drive(21)")).toContain("ext::missing");
 
 		// Arity is checked against the export manifest, before the guest runs.
-		const tooFew = await failure(db, "mod::demo::math::add(1)");
-		expect(tooFew).toContain("mod::demo::math::add");
+		const tooFew = await failure(db, "ext::demo::math::add(1)");
+		expect(tooFew).toContain("ext::demo::math::add");
 		expect(tooFew).toMatch(/expects 2 arguments, but 1/);
-		expect(await failure(db, "mod::demo::math::add(1, 2, 3)")).toMatch(
+		expect(await failure(db, "ext::demo::math::add(1, 2, 3)")).toMatch(
 			/expects 2 arguments, but 3/,
 		);
-		expect(await failure(db, "mod::demo::can_drive()")).toMatch(/expects 1 arguments, but 0/);
+		expect(await failure(db, "ext::demo::can_drive()")).toMatch(/expects 1 arguments, but 0/);
 
 		// So are argument types: a non-numeric string cannot coerce to `int`.
-		const badType = await failure(db, "mod::demo::can_drive('twenty-one')");
+		const badType = await failure(db, "ext::demo::can_drive('twenty-one')");
 		expect(badType).toMatch(/coerce/i);
 		expect(badType).toContain("int");
 
 		// The Err branch of a Result surfaces the guest's own message rather than
 		// mapping to NONE.
-		expect(await failure(db, "mod::demo::safe_divide(10, 0)")).toContain("Division by zero");
-		expect(await failure(db, "mod::demo::parse_number('not_a_number')")).toContain(
+		expect(await failure(db, "ext::demo::safe_divide(10, 0)")).toContain("Division by zero");
+		expect(await failure(db, "ext::demo::parse_number('not_a_number')")).toContain(
 			"invalid digit",
 		);
 	},
@@ -215,15 +215,16 @@ moduleTest(
 	async () => {
 		const db = moduleClient();
 
-		// INFO FOR DB keys modules by their storage name.
+		// INFO FOR DB keys extensions by their `ext::` name and renders them as
+		// DEFINE EXTENSION, whichever spelling defined them.
 		const [info] = await db
-			.query<[{ modules: Record<string, string> }]>("INFO FOR DB")
+			.query<[{ extensions: Record<string, string> }]>("INFO FOR DB")
 			.json();
-		expect(Object.keys(info.modules)).toContain("mod::demo");
-		expect(info.modules["mod::demo"]).toContain("DEFINE MODULE");
+		expect(Object.keys(info.extensions)).toContain("ext::demo");
+		expect(info.extensions["ext::demo"]).toContain("DEFINE EXTENSION");
 		// The definition renders back with the UNSIGNED keyword it was defined
 		// with, so an exported catalog re-imports.
-		expect(info.modules["mod::demo"]).toContain("UNSIGNED");
+		expect(info.extensions["ext::demo"]).toContain("UNSIGNED");
 
 		// The STRUCTURE form carries the extracted export manifest, including the
 		// writeable flag the host uses to decide whether a call may mutate data.
@@ -234,11 +235,11 @@ moduleTest(
 			writeable: boolean;
 		}
 		const [structure] = await db
-			.query<[{ modules: Array<{ name: string; exports: Export[] }> }]>(
+			.query<[{ extensions: Array<{ name: string; exports: Export[] }> }]>(
 				"INFO FOR DB STRUCTURE",
 			)
 			.json();
-		const demo = structure.modules.find((m) => m.name === "demo");
+		const demo = structure.extensions.find((m) => m.name === "demo");
 		expect(demo).toBeDefined();
 
 		const exports = (demo as { exports: Export[] }).exports;

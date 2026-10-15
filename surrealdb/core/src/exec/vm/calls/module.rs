@@ -20,14 +20,37 @@ use crate::expr::FlowResult;
 #[cfg(feature = "surrealism")]
 use crate::val::Value;
 
-/// The name a call of export `sub` of the module stored as `mod_name`
-/// reports itself by.
+/// The storage name of export `sub` of the module stored as `mod_name`, which
+/// the capability lists are matched against. Errors name the export by
+/// [`crate::catalog::extension_name`] of it.
 #[cfg(feature = "surrealism")]
 fn export_name(mod_name: &str, sub: Option<&str>) -> String {
 	match sub {
 		Some(sub) => format!("{mod_name}::{sub}"),
 		None => mod_name.to_owned(),
 	}
+}
+
+/// Checks the server's function capabilities for a call of `fnc_name`, an
+/// export named under its module's storage name.
+///
+/// A named extension is stored under `mod::` and called as `ext::` or, as an
+/// alias, `mod::`, so its export is matched under both spellings: an allow
+/// entry in either admits the call and a deny entry in either refuses it.
+/// Which spelling the query or the capability list used never changes the
+/// outcome. An unnamed silo export has the one spelling it is stored under.
+#[cfg(feature = "surrealism")]
+fn check_allowed_export(ctx: &EvalContext<'_>, fnc_name: &str) -> anyhow::Result<()> {
+	use crate::dbs::capabilities::{Error as CapabilitiesError, FuncTarget};
+
+	let Some(rest) = fnc_name.strip_prefix("mod::") else {
+		return ctx.check_allowed_function(fnc_name);
+	};
+	let target = FuncTarget("ext".to_string(), Some(rest.to_string()));
+	if !ctx.capabilities().allows_extension_function_target(&target) {
+		return Err(CapabilitiesError::FunctionNotAllowed(format!("ext::{rest}")).into());
+	}
+	Ok(())
 }
 
 /// The definition of the module stored as `mod_name` that a call of its
@@ -42,11 +65,13 @@ pub(crate) async fn read_module(
 	ctx: &EvalContext<'_>,
 ) -> FlowResult<Arc<ModuleDefinition>> {
 	let fnc_name = export_name(mod_name, sub);
-	ctx.check_allowed_function(&fnc_name)?;
-	let db_ctx = ctx
-		.exec_ctx
-		.database()
-		.map_err(|_| anyhow::anyhow!("Module function '{}' requires database context", fnc_name))?;
+	check_allowed_export(ctx, &fnc_name)?;
+	let db_ctx = ctx.exec_ctx.database().map_err(|_| {
+		anyhow::anyhow!(
+			"Extension function '{}' requires database context",
+			crate::catalog::extension_name(&fnc_name)
+		)
+	})?;
 	let ns_id = db_ctx.ns_ctx.ns.namespace_id;
 	let db_id = db_ctx.db.database_id;
 	let txn = ctx.txn();
@@ -104,7 +129,7 @@ pub(crate) async fn run_module_export(
 ) -> FlowResult<Value> {
 	use crate::doc::CursorDoc;
 
-	let fnc_name = export_name(mod_name, sub);
+	let fnc_name = crate::catalog::extension_name(&export_name(mod_name, sub)).into_owned();
 	let signature = &export.signature;
 	// Validate argument count against signature
 	if args.len() != signature.args.len() {
@@ -135,7 +160,7 @@ pub(crate) async fn run_module_export(
 	let opt = options_for_frame(
 		ctx.exec_ctx
 			.options()
-			.ok_or_else(|| anyhow::anyhow!("Module functions require Options context"))?,
+			.ok_or_else(|| anyhow::anyhow!("Extension functions require Options context"))?,
 		ctx.skip_fetch_perms,
 		ctx.exec_ctx.root().no_write,
 		ctx.exec_ctx.version_stamp(),
@@ -160,16 +185,17 @@ pub(crate) async fn run_module_export(
 	validate_return(&fnc_name, signature.returns.as_ref(), result).map_err(Into::into)
 }
 
-/// The error a call of a module export raises in a build without the
-/// Surrealism runtime: `name` is the module's storage name followed by the
-/// export for a `mod::` call, and the package's storage name for a `silo::`
-/// call.
+/// The error a call of an extension export raises in a build without the
+/// Surrealism runtime: `name` is the extension's storage name followed by the
+/// export for an `ext::` call, and the package's storage name for a `silo::`
+/// call. A named extension is reported by its `ext::` name.
 #[cfg(not(feature = "surrealism"))]
 pub(crate) fn module_runtime_missing(name: &str, silo: bool) -> crate::expr::ControlFlow {
+	let name = crate::catalog::extension_name(name);
 	let kind = if silo {
 		"Silo"
 	} else {
-		"Module"
+		"Extension"
 	};
 	anyhow::anyhow!("{kind} function '{name}' requires the 'surrealism' feature to be enabled")
 		.into()

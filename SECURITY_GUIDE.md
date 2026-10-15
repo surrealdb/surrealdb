@@ -1573,6 +1573,12 @@ remnants of the pre-crate-split layout and are not where the grammar lives.
   must be resolved in a way that does not silently change query semantics.
 - Wire protocol listeners (`pgwire`, `mywire`) must be capability-gated via
   `RouteTarget::Postgres` and `RouteTarget::MySql`.
+- The import-only definition forms parse only under `ParserSettings::import`
+  (`Limits::import`), which only `Datastore::import_parser_settings` sets: an
+  unnamed silo extension (`DEFINE EXTENSION silo::org::pkg<v>`) and `AS` in
+  place of `FROM`. A `DEFINE EXTENSION` without `UNSIGNED` parses everywhere and
+  is refused by the executor (`MdNeedsTrust`) unless the statement runs under
+  `OPTION IMPORT`, where it is stored as a legacy row that is not loaded.
 
 ### Review Triggers
 
@@ -1587,6 +1593,7 @@ Flag when changes touch:
   the `/gql` HTTP route)
 - The PostgreSQL and MySQL front-ends (`pgsql/`, `mysql/`, `pgwire/`, `mywire/`)
 - Capability routing for wire protocols (`RouteTarget::Postgres`, `RouteTarget::MySql`)
+- Where `ParserSettings::import` / `Limits::import` is set, or a new form gated on it
 
 ---
 

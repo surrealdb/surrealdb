@@ -36,7 +36,7 @@ const CARGO_CONFIG: &str = r#"# Uncomment when a dependency needs Tokio's `net` 
 
 /// Write `.cargo/config.toml` into a freshly scaffolded module project.
 ///
-/// Only called by `surreal module init`. An existing file is left untouched, so
+/// Only called by `surreal extension init`. An existing file is left untouched, so
 /// re-running init never overwrites an author's own flags.
 pub fn write_cargo_config(project_dir: &Path) -> Result<()> {
 	let cargo_dir = project_dir.join(".cargo");

@@ -68,9 +68,13 @@ pub struct Limits {
 	/// File literals and buckets are rejected, at the established positions,
 	/// with the files feature off.
 	pub no_files: bool,
-	/// Surrealism modules are rejected, at the established positions, with
+	/// Surrealism extensions are rejected, at the established positions, with
 	/// the feature off.
 	pub no_surrealism: bool,
+	/// The source is an import. Definition forms that only an export or a 3.x
+	/// dump writes — an unnamed silo extension, `AS` for `FROM` — are
+	/// accepted, flagged as deprecated; every other source refuses them.
+	pub import: bool,
 }
 
 /// What a builtin path names, as [`Limits::builtin`] reports it.
@@ -95,6 +99,7 @@ impl Default for Limits {
 			regex: None,
 			no_files: false,
 			no_surrealism: false,
+			import: false,
 		}
 	}
 }
@@ -127,6 +132,7 @@ impl Limits {
 			regex: None,
 			no_files: false,
 			no_surrealism: false,
+			import: false,
 		}
 	}
 }
@@ -645,7 +651,8 @@ impl<'a, 's> Parser<'a, 's> {
 	/// keyword `t` it follows; `what` names the construct.
 	fn surrealism_off(&mut self, t: Tok, label: &'static str) -> Stop {
 		self.diag(
-			Diag::message(t.start, t.end, "Surrealism modules are not enabled").with_label(label),
+			Diag::message(t.start, t.end, "Surrealism extensions are not enabled")
+				.with_label(label),
 		)
 	}
 
@@ -1435,6 +1442,59 @@ mod test {
 		let tags: Vec<_> = ast.stmts.iter().map(|&s| ast.node(s).tag).collect();
 		assert_eq!(tags, [Tag::Error, Tag::Error, Tag::Create, Tag::Error]);
 		assert_eq!(diags.len(), 3);
+	}
+
+	/// The deprecated-spelling bits each extension statement or call
+	/// records: the statement node's `b`, or the callee `Name`'s `b`.
+	#[test]
+	fn records_deprecated_extension_spellings() {
+		use crate::ast::DefineKind;
+		use crate::ast::ext::{MOD_PREFIX, MODULE_KEYWORD, SILO_NAME};
+		let stmt = |src: &str| {
+			let (ast, diags) = run(src);
+			assert!(diags.is_empty(), "{src}: {diags:?}");
+			let n = *ast.node(ast.stmts[0]);
+			assert_eq!(n.op, DefineKind::Module as u8, "{src}");
+			n.b
+		};
+		let f = "f\"b:/m.wasm\" UNSIGNED";
+		assert_eq!(stmt(&format!("DEFINE EXTENSION ext::a FROM {f}")), 0);
+		assert_eq!(stmt(&format!("DEFINE MODULE ext::a FROM {f}")), MODULE_KEYWORD);
+		assert_eq!(stmt(&format!("DEFINE EXTENSION mod::a FROM {f}")), MOD_PREFIX);
+		assert_eq!(stmt(&format!("DEFINE MODULE mod::a FROM {f}")), MODULE_KEYWORD | MOD_PREFIX);
+		assert_eq!(stmt("DEFINE EXTENSION ext::a FROM silo::o::p::<1.2.3> UNSIGNED"), 0);
+		assert_eq!(stmt("ALTER EXTENSION ext::a COMMENT 'c'"), 0);
+		assert_eq!(stmt("ALTER MODULE mod::a COMMENT 'c'"), MODULE_KEYWORD | MOD_PREFIX);
+		assert_eq!(stmt("REMOVE EXTENSION ext::a"), 0);
+		assert_eq!(stmt("REMOVE EXTENSION silo::o::p::<1.2.3>"), SILO_NAME);
+		assert_eq!(stmt("REMOVE MODULE mod::a"), MODULE_KEYWORD | MOD_PREFIX);
+
+		let call = |src: &str| {
+			let (ast, diags) = run(src);
+			assert!(diags.is_empty(), "{src}: {diags:?}");
+			let c = ast.nodes.iter().find(|n| n.tag == Tag::Call).expect("a call");
+			let callee = ast.node(c.a);
+			(callee.op, callee.b)
+		};
+		assert_eq!(call("RETURN ext::a::f()"), (2, 0));
+		assert_eq!(call("RETURN mod::a::f()"), (2, MOD_PREFIX));
+		assert_eq!(call("RETURN silo::o::p::<1.2.3>::f()"), (3, SILO_NAME));
+	}
+
+	/// A new extension needs a name, in either keyword spelling, and the
+	/// unnamed silo form is refused with a message saying so.
+	#[test]
+	fn refuses_unnamed_extensions() {
+		for src in [
+			"DEFINE EXTENSION silo::o::p::<1.2.3> UNSIGNED",
+			"DEFINE MODULE silo::o::p::<1.2.3> UNSIGNED",
+		] {
+			let (_, diags) = run(src);
+			assert_eq!(diags.len(), 1, "{src}");
+			assert_eq!(diags[0].msg, "An extension needs a name", "{src}");
+		}
+		let (_, diags) = run("DEFINE EXTENSION f\"b:/m.wasm\" UNSIGNED");
+		assert_eq!(diags[0].msg, "an extension name");
 	}
 
 	fn run_with(src: &str, limits: Limits) -> (Ast, Vec<Diag>) {

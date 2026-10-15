@@ -90,7 +90,7 @@ pub(super) async fn render(
 				Ok(v.name.to_string())
 			})
 		}
-		Definitions::Module => {
+		Definitions::Extension => {
 			let modules = compiled::<catalog::ModuleDefinition>(values)?;
 			if structured {
 				let (ns, db) = scope.ok_or_else(|| {
@@ -104,7 +104,7 @@ pub(super) async fn render(
 				)
 				.await);
 			}
-			listed(modules, false, |v| v.get_storage_name())
+			listed(modules, false, |v| v.get_name())
 		}
 		Definitions::Model => {
 			listed(compiled::<catalog::MlModelDefinition>(values)?, structured, |v| {

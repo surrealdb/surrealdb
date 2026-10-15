@@ -508,8 +508,6 @@ pub(crate) fn first_error(src: &str, from: u32, e: Error, json: bool) -> Error {
 		Error::Syntax(d) if d.msg.starts_with("Chained relational") => d.end,
 		// Checked once the whole statement is read.
 		Error::Syntax(d) if d.msg.starts_with("Parameter declarations without `let`") => d.end,
-		// Reported over the module source, once it is decoded.
-		Error::Syntax(d) if d.msg.starts_with("Expected the `UNSIGNED` keyword") => d.end,
 		Error::Syntax(d) => d.start,
 		Error::Lower(r) if r.msg.starts_with(PATH) => r.span.map_or(u32::MAX, |(_, e)| e),
 		Error::Lower(r) => r.span.map_or(u32::MAX, |(s, _)| s),

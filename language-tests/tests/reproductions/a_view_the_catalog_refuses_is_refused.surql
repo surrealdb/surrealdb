@@ -11,7 +11,7 @@ reason = "DEFINE TABLE .. AS SELECT whose aggregation the catalog refuses fails 
 error = "Invalid aggregation: the selector `VALUE` clause is not supported on DEFINE TABLE .. AS SELECT .. GROUP .. aggregates"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"
 */
 DEFINE TABLE v AS SELECT VALUE count() FROM t GROUP ALL;
 INFO FOR DB;

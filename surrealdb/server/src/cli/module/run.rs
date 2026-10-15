@@ -25,7 +25,7 @@ pub async fn init(
 
 	controller.init().await?;
 
-	// `surreal module run` answers `sql`/`run` from stdin, so it lends a handle
+	// `surreal extension run` answers `sql`/`run` from stdin, so it lends a handle
 	// where the server would — and withholds it where the server would, which
 	// is for a function the manifest says declared no transaction parameter.
 	let declares_transaction =

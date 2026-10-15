@@ -14,12 +14,12 @@ use clap::{Parser, Subcommand};
 
 use self::version::MODULE_RELEASE;
 
-/// Module command arguments
+/// Arguments of `surreal extension`, which `surreal module` also names.
 #[derive(Debug, Parser)]
 #[command(
-	name = "module",
+	name = "extension",
 	display_name = "Surrealism command-line interface",
-	about = "Manage and execute WASM modules",
+	about = "Build, inspect and run Surrealism extensions",
 	version = MODULE_RELEASE.as_str(),
 	arg_required_else_help = true,
 )]

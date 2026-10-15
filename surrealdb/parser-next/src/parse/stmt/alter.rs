@@ -1,6 +1,6 @@
 //! `ALTER` statements, as clause lists like `DEFINE`'s.
 
-use crate::ast::{ALTER_SYSTEM, Cl, DefineKind};
+use crate::ast::{ALTER_SYSTEM, Cl, DefineKind, ext};
 use crate::parse::*;
 
 impl<'a, 's> Parser<'a, 's> {
@@ -28,15 +28,26 @@ impl<'a, 's> Parser<'a, 's> {
 			Kw::Access => DefineKind::Access as u8,
 			Kw::Config => DefineKind::Config as u8,
 			Kw::Api => DefineKind::Api as u8,
-			Kw::Module => DefineKind::Module as u8,
+			Kw::Extension | Kw::Module => DefineKind::Module as u8,
 			_ => return Err(self.unexpected("a alter statement keyword")),
 		};
 		if self.limits.no_files && kind == DefineKind::Bucket as u8 {
 			return Err(self.files_off(t));
 		}
 		self.bump();
-		if self.limits.no_surrealism && kind == DefineKind::Module as u8 {
-			return Err(self.surrealism_off(t, "Use of `ALTER MODULE` requires Surrealism modules"));
+		let mut deprecated = 0;
+		if kind == DefineKind::Module as u8 {
+			if t.kw == Kw::Module {
+				deprecated |= ext::MODULE_KEYWORD;
+			}
+			if self.limits.no_surrealism {
+				let label = if t.kw == Kw::Module {
+					"Use of `ALTER MODULE` requires Surrealism extensions"
+				} else {
+					"Use of `ALTER EXTENSION` requires Surrealism extensions"
+				};
+				return Err(self.surrealism_off(t, label));
+			}
 		}
 		let mut rec = [0, NONE, NONE, NONE];
 		let mark = self.vals.len() as u32;
@@ -52,7 +63,7 @@ impl<'a, 's> Parser<'a, 's> {
 				self.expect_kw(Kw::Exists, "EXISTS")?;
 				rec[0] = 1;
 			}
-			self.alter_target(kind, &mut rec)?;
+			deprecated |= self.alter_target(kind, &mut rec)?;
 			let field_is_id = kind == DefineKind::Field as u8 && self.is_bare_id(rec[1]);
 			if kind == DefineKind::Config as u8 {
 				// One optional `COMMENT` or `DROP COMMENT`.
@@ -72,7 +83,7 @@ impl<'a, 's> Parser<'a, 's> {
 		}
 		rec[3] = self.list_from(mark).0;
 		let idx = self.record(&rec);
-		self.stmt_node(Tag::Alter, kind, idx, 0, start, first)
+		self.stmt_node(Tag::Alter, kind, idx, deprecated, start, first)
 	}
 
 	fn alter_system(&mut self) -> R<()> {
@@ -113,8 +124,9 @@ impl<'a, 's> Parser<'a, 's> {
 		Ok(())
 	}
 
-	/// The name and `ON` part of an altered definition.
-	fn alter_target(&mut self, kind: u8, rec: &mut [u32]) -> R<()> {
+	/// The name and `ON` part of an altered definition, returning the
+	/// [`ext`] bits of a deprecated extension name.
+	fn alter_target(&mut self, kind: u8, rec: &mut [u32]) -> R<u32> {
 		const TABLE: u8 = DefineKind::Table as u8;
 		const EVENT: u8 = DefineKind::Event as u8;
 		const INDEX: u8 = DefineKind::Index as u8;
@@ -179,36 +191,16 @@ impl<'a, 's> Parser<'a, 's> {
 				}
 			}
 			MODULE => {
-				let m = self.tok;
-				match m.kw {
-					Kw::Mod if m.kind == T::Ident => {
-						self.bump();
-						self.expect_adjacent(T::PathSep, "::")?;
-						rec[1] = self.name()?;
-					}
-					Kw::Silo if m.kind == T::Ident => {
-						self.bump();
-						self.expect(T::PathSep, "::")?;
-						let mark = self.vals.len() as u32;
-						let org = self.name()?;
-						self.vals.push(org);
-						self.expect(T::PathSep, "::")?;
-						let pkg = self.name()?;
-						self.vals.push(pkg);
-						self.expect(T::PathSep, "::")?;
-						if !self.at(T::Lt) || self.tok.ws() {
-							return Err(self.unexpected("<"));
-						}
-						self.model_version()?;
-						rec[1] = self.list_from(mark).0;
-						rec[2] = 1;
-					}
-					_ => return Err(self.unexpected("a module name")),
+				let (name, silo, deprecated) = self.extension_name()?;
+				rec[1] = name;
+				if silo {
+					rec[2] = 1;
 				}
+				return Ok(deprecated);
 			}
 			_ => rec[1] = self.expr(true)?,
 		}
-		Ok(())
+		Ok(0)
 	}
 
 	/// A `DROP x` clause, where `x` must be one of `allowed`; anything else
