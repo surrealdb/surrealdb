@@ -150,7 +150,7 @@ pub(crate) fn generate_registration_body(
 
 			#(#gates)*
 			fn #invoke_ident<'__sr>(
-				__sr_tx: Option<&'__sr ::surrealism::bindings::surrealism::plugin::host::Transaction>,
+				__sr_tx: Option<&'__sr ::surrealism::bindings::surrealism::extension::host::Transaction>,
 				raw_args: &'__sr [u8],
 			) -> ::surrealism::registry::InvokeFuture<'__sr> {
 				Box::pin(async move {

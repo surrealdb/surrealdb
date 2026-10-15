@@ -96,11 +96,11 @@ pub(super) async fn render(
 				let (ns, db) = scope.ok_or_else(|| {
 					ControlFlow::Err(anyhow!("structured modules rendered with no database"))
 				})?;
-				return Ok(crate::fnc::module::process_modules(
-					ctx.ctx(),
-					ns,
-					db,
-					Arc::from(modules),
+				// Each module's exports are read through its archive, whose
+				// bucket definition is a catalog load made here, unsealed.
+				return Ok(crate::kvs::catalog_reads::sealed(
+					false,
+					crate::fnc::module::process_modules(ctx.ctx(), ns, db, Arc::from(modules)),
 				)
 				.await);
 			}

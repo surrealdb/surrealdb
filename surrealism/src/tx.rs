@@ -35,7 +35,7 @@ use anyhow::Result;
 use surrealdb_types::{Object, SurrealValue, Value};
 use surrealism_types::args::Args;
 
-use crate::bindings::surrealism::plugin::host;
+use crate::bindings::surrealism::extension::host;
 
 /// Read-only access. The default mode.
 ///

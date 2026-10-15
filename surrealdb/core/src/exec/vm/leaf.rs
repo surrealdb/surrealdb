@@ -300,6 +300,9 @@ fn store(instr: &StoreInstr) -> Class {
 		} => Class::NonLeaf(Bar::Script),
 		StoreInstr::ConnectBucket {
 			..
+		}
+		| StoreInstr::VerifyModule {
+			..
 		} => Class::NonLeaf(Bar::Network),
 		// An access statement reads or writes the grants of an access method
 		// in the catalog, and a filter of its grants runs host code.

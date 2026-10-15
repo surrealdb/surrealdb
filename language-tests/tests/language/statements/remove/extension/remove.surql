@@ -30,13 +30,14 @@ error = "The extension 'ext::a' does not exist"
 
 [[test.results]]
 value = "NONE"
+
 */
 
 -- 0
-DEFINE EXTENSION ext::a FROM f"bucket:/a.wasm" UNSIGNED;
+DEFINE EXTENSION ext::a FROM f"bucket:/a.wasm" DIGEST "sha256:5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d" UNSIGNED;
 
 -- 1
-DEFINE EXTENSION ext::b FROM f"bucket:/b.wasm" UNSIGNED;
+DEFINE EXTENSION ext::b FROM f"bucket:/b.wasm" DIGEST "sha256:5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d" UNSIGNED;
 
 -- 2: the new spelling
 REMOVE EXTENSION ext::a;

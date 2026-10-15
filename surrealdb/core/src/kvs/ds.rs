@@ -2333,6 +2333,7 @@ impl Datastore {
 			bucket: String,
 			key: String,
 			display_name: String,
+			definition: crate::catalog::ModuleDefinition,
 		}
 
 		let mut lookups = Vec::new();
@@ -2362,6 +2363,11 @@ impl Datastore {
 					}
 				};
 				for md in modules.iter() {
+					// A definition stored before revision 3 records no DIGEST
+					// and does not run, so there is nothing to load.
+					if md.needs_reinstall() {
+						continue;
+					}
 					if let crate::catalog::ModuleExecutable::Surrealism(s) = &md.executable {
 						lookups.push(ModuleLookup {
 							ns_id: ns.namespace_id,
@@ -2372,6 +2378,7 @@ impl Datastore {
 								.name
 								.clone()
 								.unwrap_or_else(|| "<unnamed>".to_string()),
+							definition: md.clone(),
 						});
 					}
 				}
@@ -2405,7 +2412,7 @@ impl Datastore {
 					&lookup.bucket,
 					&lookup.key,
 				);
-				match ctx.get_surrealism_runtime(cache_lookup).await {
+				match ctx.get_surrealism_runtime(cache_lookup, (&lookup.definition).into()).await {
 					Ok(_) => {
 						debug!(
 							target: TARGET,

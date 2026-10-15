@@ -90,26 +90,27 @@ fn import(src: &str) -> String {
 fn an_import_reads_the_legacy_definition_forms() {
 	assert_eq!(
 		import("DEFINE EXTENSION silo::o::p<1.2.3> UNSIGNED"),
-		"DEFINE EXTENSION silo::o::p<1.2.3> UNSIGNED PERMISSIONS FULL;"
+		"DEFINE EXTENSION silo::o::p<1.2.3> UNSIGNED CAPABILITIES {} PERMISSIONS FULL;"
 	);
 	assert_eq!(
 		import("DEFINE MODULE silo::acme::w<1.0.0> PERMISSIONS FULL"),
-		"DEFINE EXTENSION silo::acme::w<1.0.0> PERMISSIONS FULL;"
+		"DEFINE EXTENSION silo::acme::w<1.0.0> CAPABILITIES {} PERMISSIONS FULL;"
 	);
 	assert_eq!(
 		import(r#"DEFINE MODULE mod::x AS f"b:/x.surli" PERMISSIONS FULL"#),
-		r#"DEFINE EXTENSION ext::x FROM f"b:/x.surli" PERMISSIONS FULL;"#
+		r#"DEFINE EXTENSION ext::x FROM f"b:/x.surli" CAPABILITIES {} PERMISSIONS FULL;"#
 	);
 	assert!(parser::parse(r#"DEFINE MODULE mod::x AS f"b:/x.surli""#).is_err());
 }
 
-/// `UNSIGNED` is optional in the grammar; the executor refuses a definition
-/// without it outside an import.
+/// `UNSIGNED` and `SIGNER` are optional in the grammar; the executor refuses
+/// a definition with neither outside an import. A parsed definition always
+/// records `CAPABILITIES`.
 #[test]
 fn unsigned_is_optional_in_the_grammar() {
 	assert_eq!(
 		rendered(r#"DEFINE EXTENSION ext::x FROM f"b:/x.surli""#),
-		r#"DEFINE EXTENSION ext::x FROM f"b:/x.surli" PERMISSIONS FULL;"#
+		r#"DEFINE EXTENSION ext::x FROM f"b:/x.surli" CAPABILITIES {} PERMISSIONS FULL;"#
 	);
 }
 

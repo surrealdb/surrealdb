@@ -4,11 +4,11 @@ Essential context for AI assistants working with the WIT protocol.
 
 ## Overview
 
-The `surrealism:plugin` package defines the contract between SurrealDB (host) and guest WASM modules. All crossing-boundary data is FlatBuffers-serialized; WIT uses `list<u8>` aliases for those buffers.
+The `surrealism:extension` package defines the contract between SurrealDB (host) and guest WASM modules. All crossing-boundary data is FlatBuffers-serialized; WIT uses `list<u8>` aliases for those buffers.
 
 ## Host Interface
 
-Imported by the guest (`surrealism:plugin/host`). Nothing is ambient: both
+Imported by the guest (`surrealism:extension/host`). Nothing is ambient: both
 functions are methods on a `transaction` resource the host lends per call.
 
 ```wit

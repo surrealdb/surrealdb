@@ -41,6 +41,7 @@ mod compiled_test;
 mod durable_session;
 pub(crate) mod fixtures;
 mod generator;
+mod module_definition;
 mod stored_record;
 mod tests;
 

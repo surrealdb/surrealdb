@@ -1505,9 +1505,51 @@ impl<'a, 's> Parser<'a, 's> {
 			}
 			_ => return Err(self.unexpected("an extension executable")),
 		};
+		// The token of the first `SIGNER` or `UNSIGNED`, and of the first
+		// `DIGEST` and `CAPABILITIES`: each may appear once.
+		let mut trust: Option<Tok> = None;
+		let mut digest: Option<Tok> = None;
+		let mut capabilities: Option<Tok> = None;
 		loop {
-			match self.tok.kw {
-				Kw::Unsigned => self.flag_clause(Cl::Unsigned)?,
+			let t = self.tok;
+			match t.kw {
+				Kw::Unsigned | Kw::Signer => {
+					if let Some(first) = trust {
+						return Err(self.repeated_clause(
+							t,
+							first,
+							"Remove one of `SIGNER` and `UNSIGNED`",
+						));
+					}
+					trust = Some(t);
+					if t.kw == Kw::Unsigned {
+						self.flag_clause(Cl::Unsigned)?
+					} else {
+						self.expr_clause(Cl::Signer)?
+					}
+				}
+				Kw::Digest => {
+					if let Some(first) = digest {
+						return Err(self.repeated_clause(
+							t,
+							first,
+							"An extension definition takes one `DIGEST`",
+						));
+					}
+					digest = Some(t);
+					self.string_clause(Cl::Digest)?
+				}
+				Kw::Capabilities => {
+					if let Some(first) = capabilities {
+						return Err(self.repeated_clause(
+							t,
+							first,
+							"An extension definition takes one `CAPABILITIES` object",
+						));
+					}
+					capabilities = Some(t);
+					self.expr_clause(Cl::Capabilities)?
+				}
 				Kw::Comment => self.expr_clause(Cl::Comment)?,
 				Kw::Permissions => self.perm_value_clause()?,
 				_ => break,
@@ -1563,6 +1605,15 @@ impl<'a, 's> Parser<'a, 's> {
 			return Err(self.unexpected("<"));
 		}
 		self.model_version()
+	}
+
+	/// The error for an extension clause `t` that repeats, or contradicts, the
+	/// clause `first`.
+	fn repeated_clause(&mut self, t: Tok, first: Tok, label: &'static str) -> Stop {
+		let d = Diag::message(t.start, t.end, "Conflicting clause on this extension definition")
+			.with_label(label)
+			.with_extra(first.start, first.end, "First given here");
+		self.diag(d)
 	}
 
 	/// `<major.minor.patch>`, pushing the three numbers onto the value stack.

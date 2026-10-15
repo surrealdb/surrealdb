@@ -552,7 +552,10 @@ pub(crate) enum DefineObject {
 	Module {
 		name: Option<String>,
 		executable: ModuleExecutable,
+		/// `UNSIGNED`.
 		unsigned: bool,
+		/// Whether the statement names a `SIGNER`.
+		signed: bool,
 		comment: OperandSlot,
 		permissions: PermissionShape,
 	},

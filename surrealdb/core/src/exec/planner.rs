@@ -1340,6 +1340,13 @@ impl<'ctx> Planner<'ctx> {
 					return Err(EngineError::Internal(e.to_string()).into());
 				}
 			};
+		// A definition with no DIGEST has no archive this plan may load: one a
+		// release before revision 3 stored, or one a speculative run of a
+		// `DEFINE` in the same block wrote before its DIGEST was pinned. The
+		// call resolves the definition again when it runs.
+		if val.digest.is_none() {
+			return Ok(true);
+		}
 		let executable: ModuleExecutable = val.executable.clone().into();
 		// The planner's self.ctx does not carry a transaction (the executor
 		// sets it after planning). Derive a context with the planner's txn
@@ -1350,6 +1357,7 @@ impl<'ctx> Planner<'ctx> {
 		let frozen = plan_ctx.freeze();
 		let sig = crate::fnc::module::module_executable_signature(
 			&executable,
+			(&*val).into(),
 			&frozen,
 			&db_def.namespace_id,
 			&db_def.database_id,
@@ -1415,6 +1423,29 @@ impl<'ctx> Planner<'ctx> {
 			minor,
 			patch,
 		};
+		// The archive is checked against the definition the call resolves to,
+		// stored under the package's coordinates. Without one, the invocation
+		// repeats this lookup and fails on it, as in resolve_module_writeable.
+		let storage_name = format!("silo::{org}::{pkg}::<{major}.{minor}.{patch}>");
+		let definition = match txn
+			.get_db_module(db_def.namespace_id, db_def.database_id, &storage_name, None)
+			.await
+		{
+			Ok(definition) => definition,
+			Err(e) => {
+				if let Some(crate::catalog::Error::MdNotFound {
+					..
+				}) = e.downcast_ref::<crate::catalog::Error>()
+				{
+					return Ok(false);
+				}
+				return Err(EngineError::Internal(e.to_string()).into());
+			}
+		};
+		// As in resolve_module_writeable: no DIGEST, no archive to load here.
+		if definition.digest.is_none() {
+			return Ok(true);
+		}
 		// Same as resolve_module_writeable: derive a context with the
 		// planner's transaction so signature resolution can access stores.
 		let mut plan_ctx = Context::new_child(&self.ctx);
@@ -1422,6 +1453,7 @@ impl<'ctx> Planner<'ctx> {
 		let frozen = plan_ctx.freeze();
 		let sig = crate::fnc::module::silo_executable_signature(
 			&executable,
+			(&*definition).into(),
 			&frozen,
 			&db_def.namespace_id,
 			&db_def.database_id,

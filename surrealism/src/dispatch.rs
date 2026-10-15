@@ -1,5 +1,5 @@
 use crate::bindings::Guest;
-use crate::bindings::surrealism::plugin::host;
+use crate::bindings::surrealism::extension::host;
 use crate::registry::{SurrealismEntry, SurrealismInit};
 
 fn find_entry(name: Option<&str>) -> Result<&'static SurrealismEntry, String> {

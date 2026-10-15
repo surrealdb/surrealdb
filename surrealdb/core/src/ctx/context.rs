@@ -23,8 +23,6 @@ use web_time::Instant;
 
 use crate::buc::Error as BucError;
 use crate::buc::manager::BucketsManager;
-#[cfg(feature = "surrealism")]
-use crate::buc::store::ObjectKey;
 use crate::buc::store::ObjectStore;
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider, NamespaceProvider};
 use crate::catalog::{DatabaseId, Error as CatalogError, NamespaceId};
@@ -46,6 +44,8 @@ use crate::exec::Error as ExecError;
 use crate::exec::context::ForbiddenRow;
 use crate::exec::function::FunctionRegistry;
 use crate::expr::Base;
+#[cfg(feature = "surrealism")]
+use crate::extension::archive::{ArchiveSource, fetch_archive};
 #[cfg(feature = "http")]
 use crate::http::HttpClient;
 use crate::iam::{Action, ResourceKind};
@@ -1728,16 +1728,45 @@ impl Context {
 		self.surrealism_cache.as_ref().map(Arc::clone)
 	}
 
+	/// The compiled module the archive at `lookup` holds, once the archive may
+	/// run under `trust`, the definition being called.
+	///
+	/// The check is [`TrustStore::ensure`](crate::extension::trust::TrustStore::ensure):
+	/// before an archive is compiled into the cache, and again on every call,
+	/// since one cached archive can serve definitions that name different
+	/// signers. The cache is keyed by source and `DIGEST`, so definitions that
+	/// pin different archives at one source keep separate modules.
+	///
+	/// A failure to build the module is recorded per database, source,
+	/// `DIGEST` and signer, and repeated without refetching for
+	/// [`REFETCH_AFTER_REFUSAL`](crate::extension::trust::REFETCH_AFTER_REFUSAL),
+	/// so a failing definition does not fetch, unpack and verify its archive on
+	/// every call.
 	#[cfg(feature = "surrealism")]
 	pub(crate) async fn get_surrealism_module(
 		&self,
 		lookup: SurrealismCacheLookup<'_>,
+		trust: crate::extension::trust::Trust<'_>,
+	) -> Result<SurrealismCachedModule> {
+		self.get_surrealism_module_from(lookup, trust, None).await
+	}
+
+	/// As [`Self::get_surrealism_module`], building from `prefetched`, the
+	/// archive's bytes, when they were just fetched and checked, rather than
+	/// fetching them again.
+	#[cfg(feature = "surrealism")]
+	pub(crate) async fn get_surrealism_module_from(
+		&self,
+		lookup: SurrealismCacheLookup<'_>,
+		trust: crate::extension::trust::Trust<'_>,
+		prefetched: Option<bytes::Bytes>,
 	) -> Result<SurrealismCachedModule> {
 		if !self.get_capabilities().allows_experimental(&ExperimentalTarget::Surrealism) {
 			bail!(
 				"Failed to get surrealism runtime: Experimental capability `surrealism` is not enabled"
 			);
 		}
+		let pinned = trust.pinned()?;
 
 		let Some(cache) = self.get_surrealism_cache() else {
 			bail!("Surrealism cache is not available");
@@ -1749,143 +1778,165 @@ impl Context {
 		#[cfg(feature = "http")]
 		let config = self.config.http.clone();
 
-		cache
-			.get_or_insert_with(&lookup, async || {
-				// Both executable forms resolve to the bytes of one `.surli`
-				// archive; only where those bytes come from differs.
-				let (surli, temp_prefix) = match lookup {
-					SurrealismCacheLookup::File(ns, db, bucket, key) => {
-						let bucket = self.get_bucket_store(*ns, *db, bucket).await?;
-						let key = ObjectKey::new(key);
-						let surli = bucket
-							.get(&key)
-							.await
-							.map_err(|e| anyhow::anyhow!("failed to get file: {}", e))?;
+		// Both executable forms resolve to the bytes of one `.surli` archive;
+		// only where those bytes come from differs.
+		let (ns, db, source, temp_prefix) = match lookup {
+			SurrealismCacheLookup::File(ns, db, bucket, key) => {
+				let safe_key =
+					crate::buc::store::ObjectKey::new(key).to_string().replace(['/', '\\'], "_");
+				(
+					*ns,
+					*db,
+					ArchiveSource::File {
+						bucket,
+						key,
+					},
+					format!("SURREAL_MODFS_{ns}_{db}_{safe_key}_"),
+				)
+			}
+			SurrealismCacheLookup::Silo(ns, db, org, pkg, major, minor, patch) => (
+				*ns,
+				*db,
+				ArchiveSource::Silo {
+					organisation: org,
+					package: pkg,
+					major,
+					minor,
+					patch,
+				},
+				format!("SURREAL_MODFS_silo_{ns}_{db}_{org}_{pkg}_{major}_{minor}_{patch}_"),
+			),
+		};
 
-						let Some(surli) = surli else {
-							bail!("file not found");
-						};
+		let refusal = crate::extension::trust::RefusalKey::new(ns, db, source, pinned, &trust);
+		cache.trust().check_refusal(&refusal)?;
 
-						let safe_key = key.to_string().replace(['/', '\\'], "_");
-						(surli, format!("SURREAL_MODFS_{ns}_{db}_{safe_key}_"))
-					}
-					SurrealismCacheLookup::Silo(ns, db, org, pkg, major, minor, patch) => {
-						#[cfg(not(feature = "http"))]
-						{
-							let _ = (ns, db, org, pkg, major, minor, patch);
-							bail!(
-								"Failed to get surrealism runtime: silo module packages are fetched over HTTP, which this build does not support"
-							);
-						}
-						#[cfg(feature = "http")]
-						{
-							let endpoint = &self.config.surrealism.surrealism_silo_endpoint;
-							let url = crate::surrealism::silo::package_url(
-								endpoint, org, pkg, major, minor, patch,
-							)?;
-							// A silo fetch is first-party package resolution
-							// rather than user-directed traffic, so it needs no
-							// `allow_net` grant. An operator's explicit deny is
-							// still honoured.
-							let allow = match url.host() {
-								Some(host) => Targets::Some(
-									[NetTarget::Host(
-										host.to_owned(),
-										url.port_or_known_default(),
-									)]
-									.into_iter()
-									.collect(),
-								),
-								None => bail!("The silo module endpoint `{endpoint}` has no host"),
-							};
-							let client = HttpClient::new(
-								allow,
-								self.capabilities.denied_network_targets_ref().clone(),
-								&config,
-							)
-							.context("Failed to create http client for silo module packages")?;
+		let prefetched = parking_lot::Mutex::new(prefetched);
+		let build = async || {
+			let prefetched = prefetched.lock().take();
+			let surli = match prefetched {
+				Some(surli) => surli,
+				None => fetch_archive(self, ns, db, source).await?,
+			};
 
-							let surli = crate::surrealism::silo::fetch_package(
-								&client, &url, org, pkg, major, minor, patch,
-							)
-							.await?;
-
-							(
-								surli,
-								format!(
-									"SURREAL_MODFS_silo_{ns}_{db}_{org}_{pkg}_{major}_{minor}_{patch}_"
-								),
-							)
-						}
-					}
-				};
-
-				let unpack_opts = UnpackOptions {
-					#[cfg(storage)]
-					temp_base: self.temporary_directory().map(|p| p.as_path()),
-					#[cfg(not(storage))]
-					temp_base: None,
-					temp_prefix: &temp_prefix,
-					max_fs_bytes: self.config.surrealism.surrealism_max_fs_bytes,
-				};
-				let package =
-					SurrealismPackage::from_reader(std::io::Cursor::new(surli), &unpack_opts)?;
-
-				crate::surrealism::validate_surrealism_capabilities(
-					&self.get_capabilities(),
-					&package.config.capabilities,
-				)?;
-
-				let org = package.config.meta.organisation.clone();
-				let name = package.config.meta.name.clone();
-
-				#[cfg(feature = "http")]
-				let module_net_targets =
-					crate::surrealism::host::module_allow_net_targets(&package.config.capabilities);
-
-				// The operator's deny rules travel with the runtime. The
-				// module's declared `allow_net` narrows the SurrealQL path via
-				// `module_scoped_capabilities`, but the guest's own WASI sockets
-				// are checked by the policy inside the runtime, which has no
-				// other way to learn what the server forbids.
-				let deny_net =
-					crate::surrealism::host::surrealism_deny_net(&self.get_capabilities());
-
-				let runtime = tokio::task::spawn_blocking(move || {
-					Runtime::new(package, max_pool_size, max_memory, max_execution_time, deny_net)
-				})
-				.await
-				.context("WASM compile task aborted")??;
-				let runtime = Arc::new(runtime);
-
-				let module_display_name: Arc<str> = format!("{org}::{name}").into();
-
-				#[cfg(feature = "http")]
-				let client = if module_net_targets.is_empty() {
-					Arc::new(
-						HttpClient::new(Targets::None, Targets::All, &config)
-							.context("Failed to create http client for WASM module")?,
-					)
-				} else {
-					let allow = Targets::Some(module_net_targets);
-					Arc::new(
-						HttpClient::new(
-							allow,
-							self.capabilities.denied_network_targets_ref().clone(),
-							&config,
-						)
-						.context("Failed to create http client for WASM module")?,
-					)
-				};
-
-				Ok(SurrealismCachedModule {
-					runtime,
-					module_display_name,
-					#[cfg(feature = "http")]
-					client,
-				})
+			let max_fs_bytes = self.config.surrealism.surrealism_max_fs_bytes;
+			// Nothing in the archive is unpacked, parsed or compiled until it
+			// is the pinned one and, with a SIGNER, a signature proves it. Only
+			// MANIFEST and SIGNATURE are read for that. The archive was fetched
+			// from the definition's source just now, so its SIGNATURE is the
+			// current one and nothing is fetched again. Decompressing is CPU
+			// work, so it runs off the async task.
+			let read = surli.clone();
+			let files = tokio::task::spawn_blocking(move || {
+				surrealism_runtime::package::trust_files_from_reader(read.as_ref(), max_fs_bytes)
 			})
 			.await
+			.context("archive read task aborted")??;
+			let digest = files.manifest.digest().0;
+			cache
+				.trust()
+				.ensure(self, ns, db, None, &digest, files.signature.as_deref(), trust)
+				.await?;
+			let signature: Option<Arc<[u8]>> = files.signature.map(Arc::from);
+
+			// The full read checks every file against that same MANIFEST.
+			#[cfg(storage)]
+			let temp_base = self.temporary_directory().map(|p| p.as_ref().clone());
+			#[cfg(not(storage))]
+			let temp_base: Option<std::path::PathBuf> = None;
+			let temp_prefix = temp_prefix.clone();
+			let package = tokio::task::spawn_blocking(move || {
+				let unpack_opts = UnpackOptions {
+					temp_base: temp_base.as_deref(),
+					temp_prefix: &temp_prefix,
+					max_fs_bytes,
+				};
+				SurrealismPackage::from_reader(std::io::Cursor::new(surli), &unpack_opts)
+			})
+			.await
+			.context("archive unpack task aborted")??;
+			crate::extension::trust::ensure_digest(
+				&package
+					.digest()
+					.ok_or_else(|| anyhow::anyhow!("The extension's archive has no MANIFEST"))?
+					.0,
+				&digest,
+			)?;
+
+			crate::surrealism::validate_surrealism_capabilities(
+				&self.get_capabilities(),
+				&package.config.capabilities,
+			)?;
+
+			let org = package.config.meta.organisation.clone();
+			let name = package.config.meta.name.clone();
+
+			#[cfg(feature = "http")]
+			let module_net_targets =
+				crate::surrealism::host::module_allow_net_targets(&package.config.capabilities);
+
+			// The operator's deny rules travel with the runtime. The
+			// module's declared `allow_net` narrows the SurrealQL path via
+			// `module_scoped_capabilities`, but the guest's own WASI sockets
+			// are checked by the policy inside the runtime, which has no
+			// other way to learn what the server forbids.
+			let deny_net = crate::surrealism::host::surrealism_deny_net(&self.get_capabilities());
+
+			let runtime = tokio::task::spawn_blocking(move || {
+				Runtime::new(package, max_pool_size, max_memory, max_execution_time, deny_net)
+			})
+			.await
+			.context("WASM compile task aborted")??;
+			let runtime = Arc::new(runtime);
+
+			let module_display_name: Arc<str> = format!("{org}::{name}").into();
+
+			#[cfg(feature = "http")]
+			let client = if module_net_targets.is_empty() {
+				Arc::new(
+					HttpClient::new(Targets::None, Targets::All, &config)
+						.context("Failed to create http client for WASM module")?,
+				)
+			} else {
+				let allow = Targets::Some(module_net_targets);
+				Arc::new(
+					HttpClient::new(
+						allow,
+						self.capabilities.denied_network_targets_ref().clone(),
+						&config,
+					)
+					.context("Failed to create http client for WASM module")?,
+				)
+			};
+
+			Ok(SurrealismCachedModule {
+				runtime,
+				digest,
+				signature,
+				module_display_name,
+				#[cfg(feature = "http")]
+				client,
+			})
+		};
+
+		let built = cache.get_or_insert_with(&lookup, pinned, build).await;
+		if built.is_err() {
+			cache.trust().record(refusal, &built);
+		}
+		let module = built?;
+		// The module may have been built for another definition of the same
+		// source, so its source's signature is checked against this one's
+		// SIGNER. When the source has been re-signed since, the current
+		// signature proves it and the module is dropped, so the next load
+		// rebuilds it with that signature.
+		let resigned = cache
+			.trust()
+			.ensure(self, ns, db, Some(source), &module.digest, module.signature.as_deref(), trust)
+			.await?;
+		if resigned {
+			cache.remove(&lookup, pinned);
+		}
+		Ok(module)
 	}
 
 	#[cfg(feature = "http")]
@@ -1897,8 +1948,9 @@ impl Context {
 	pub(crate) async fn get_surrealism_runtime(
 		&self,
 		lookup: SurrealismCacheLookup<'_>,
+		trust: crate::extension::trust::Trust<'_>,
 	) -> Result<Arc<Runtime>> {
-		Ok(self.get_surrealism_module(lookup).await?.runtime)
+		Ok(self.get_surrealism_module(lookup, trust).await?.runtime)
 	}
 }
 

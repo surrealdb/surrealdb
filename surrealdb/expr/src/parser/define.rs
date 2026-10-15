@@ -616,13 +616,19 @@ impl Lower<'_> {
 						Some(self.name(rec[define::NAME])?)
 					},
 					executable,
+					digest: None,
+					signer: None,
 					unsigned: false,
+					capabilities: Some(Default::default()),
 					comment: Expr::Literal(Literal::None),
 					permissions: Permission::default(),
 				};
 				for c in clauses {
 					match cl(c) {
 						Cl::Unsigned => s.unsigned = true,
+						Cl::Signer => s.signer = Some(self.signer(c.a)?),
+						Cl::Digest => s.digest = Some(self.digest(c.a)?),
+						Cl::Capabilities => s.capabilities = Some(self.capabilities(c.a)?),
 						Cl::Comment => s.comment = self.expr(c.a)?,
 						_ => s.permissions = self.perm(c.a)?,
 					}

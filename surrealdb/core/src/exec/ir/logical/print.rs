@@ -2546,6 +2546,7 @@ text_enum!(DefineObject {
 			name: Option<String>,
 			executable: ModuleExecutable,
 			unsigned: bool,
+			signed: bool,
 			comment: u16,
 			permissions: PermissionShape
 		},

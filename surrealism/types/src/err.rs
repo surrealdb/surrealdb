@@ -33,7 +33,10 @@ pub enum SurrealismError {
 		waited: Duration,
 		pool_size: usize,
 	},
-	#[error("Unsupported ABI version: expected {expected}, got {got}")]
+	#[error(
+		"Unsupported ABI version: expected {expected}, got {got}. Rebuild the extension with the \
+		 SurrealDB 4.0 SDK"
+	)]
 	UnsupportedAbi {
 		expected: u32,
 		got: u32,

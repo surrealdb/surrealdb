@@ -156,7 +156,7 @@ regex-unicode = ["surrealdb-types/regex-unicode"]
 http = ["dep:reqwest", "url"]
 ml = ["dep:surrealml-core"]
 jwks = ["dep:reqwest", "surrealdb-datastore/jwks"]
-surrealism = ["dep:surrealism-runtime", "dep:async-trait"]
+surrealism = ["dep:surrealism-runtime", "dep:surrealism-verify", "dep:async-trait"]
 allocator = ["dep:jemallocator", "dep:jemalloc-sys", "dep:mimalloc", "dep:mimalloc-sys"]
 arbitrary = [
     "surrealdb-expr/arbitrary",
@@ -337,6 +337,7 @@ tokio-tungstenite = { workspace = true, optional = true }
 tokio-util.workspace = true
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 surrealism-runtime = { workspace = true, optional = true }
+surrealism-verify = { workspace = true, optional = true }
 
 # OS-SPECIFIC ALLOCATOR DEPENDENCIES
 [target.'cfg(all(any(target_arch = "x86_64", target_arch = "x86"), any(target_os = "linux", target_os = "macos"), not(target_env = "msvc")))'.dependencies]

@@ -1,0 +1,1 @@
+DEFINE MODULE mod::bla FROM f"abc" UNSIGNED CAPABILITIES {} CAPABILITIES { write: true };

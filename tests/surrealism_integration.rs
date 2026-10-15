@@ -1722,18 +1722,26 @@ mod surrealism_integration {
 		assert_eq!(results[0].status, "OK", "silo math(5) failed: {:?}", results[0].result);
 		assert_eq!(results[0].result, serde_json::json!(10));
 
-		// INFO renders the definition in the EXTENSION spelling.
+		// INFO renders the definition in the EXTENSION spelling, with the
+		// DIGEST the definition computed from the package it fetched.
 		let results = sql_query(&addr, &ns, &db, "INFO FOR DB;").await;
 		assert_eq!(results[0].status, "OK", "INFO FOR DB failed: {:?}", results[0].result);
 		let rendered = results[0].result["extensions"]["ext::demo"]
 			.as_str()
 			.expect("silo extension missing from INFO FOR DB");
-		assert!(
-			rendered.starts_with(
-				"DEFINE EXTENSION ext::demo FROM silo::surrealdb::demo<1.0.0> UNSIGNED"
-			),
-			"unexpected rendering: {rendered}"
-		);
+		let digest = rendered
+			.strip_prefix(
+				"DEFINE EXTENSION ext::demo FROM silo::surrealdb::demo<1.0.0> DIGEST 'sha256:",
+			)
+			.and_then(|rest| rest.strip_suffix("' UNSIGNED CAPABILITIES {} PERMISSIONS FULL"))
+			.unwrap_or_else(|| panic!("unexpected rendering: {rendered}"));
+		// The DIGEST is sha256 of the archive's MANIFEST, not of its bytes.
+		let archive = std::fs::read(bucket_dir.join("demo.surli"))?;
+		let manifest = surrealism_runtime::package::trust_files_from_reader(
+			archive.as_slice(),
+			surrealism_runtime::package::DEFAULT_MAX_FS_BYTES,
+		)?;
+		assert_eq!(format!("sha256:{digest}"), manifest.manifest.digest().to_string());
 
 		Ok(())
 	}
@@ -1758,8 +1766,8 @@ mod surrealism_integration {
 		let ns = Ulid::new().to_string();
 		let db = Ulid::new().to_string();
 
-		// The definition itself is recorded -- an unreachable package is a
-		// warning at define time -- but calling it surfaces the miss.
+		// Without a DIGEST the definition fetches the package to pin it, so the
+		// miss is reported by DEFINE and nothing is recorded.
 		let results = sql_query(
 			&addr,
 			&ns,
@@ -1767,16 +1775,18 @@ mod surrealism_integration {
 			"DEFINE EXTENSION ext::demo FROM silo::surrealdb::demo::<9.9.9> UNSIGNED;",
 		)
 		.await;
-		assert_eq!(
-			results[0].status, "OK",
-			"silo DEFINE EXTENSION failed: {:?}",
-			results[0].result
-		);
-
-		let results = sql_query(&addr, &ns, &db, "RETURN ext::demo::math(5);").await;
 		assert_eq!(results[0].status, "ERR", "expected a miss: {:?}", results[0].result);
 		let error = results[0].result.to_string();
 		assert!(error.contains("was not found"), "unexpected error: {error}");
+
+		// The failed DEFINE wrote nothing, not even the database it would
+		// have created.
+		let results = sql_query(&addr, &ns, &db, "INFO FOR DB;").await;
+		assert!(
+			results[0].result["extensions"]["ext::demo"].is_null(),
+			"the failed definition was recorded: {:?}",
+			results[0].result
+		);
 
 		Ok(())
 	}
@@ -1848,6 +1858,341 @@ mod surrealism_integration {
 		check_silo_state_is_per_database(&DEMO_DIR.canonical).await
 	}
 
+	/// `OVERWRITE` drops the runtime the replaced definition loaded, keyed by
+	/// the DIGEST that definition pinned. The new statement gives no DIGEST,
+	/// so only the stored row names the runtime to drop; without that, the old
+	/// instances, and the state in their linear memory, would serve the
+	/// redefined extension.
+	async fn check_overwrite_evicts_the_replaced_runtime(
+		bucket_dir: &Path,
+	) -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		setup_module(&addr, &ns, &db, bucket_dir).await;
+
+		let results = sql_query(&addr, &ns, &db, "RETURN ext::demo::set_state(42);").await;
+		assert_eq!(results[0].status, "OK", "set_state: {:?}", results[0].result);
+		let results = sql_query(&addr, &ns, &db, "RETURN ext::demo::get_state();").await;
+		assert_eq!(results[0].result, serde_json::json!(42));
+
+		let overwrite = "DEFINE EXTENSION OVERWRITE ext::demo FROM f\"test:/demo.surli\" UNSIGNED;";
+		let results = sql_query(&addr, &ns, &db, overwrite).await;
+		assert_eq!(results[0].status, "OK", "overwrite: {:?}", results[0].result);
+
+		let results = sql_query(&addr, &ns, &db, "RETURN ext::demo::get_state();").await;
+		assert_eq!(results[0].status, "OK", "get_state: {:?}", results[0].result);
+		assert_eq!(
+			results[0].result,
+			serde_json::json!(0),
+			"the runtime the overwritten definition loaded still serves calls"
+		);
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_overwrite_evicts_the_replaced_runtime() -> Result<(), Box<dyn std::error::Error>>
+	{
+		check_overwrite_evicts_the_replaced_runtime(&DEMO_DIR.canonical).await
+	}
+
+	/// An extension defined and called in one block: the call is planned
+	/// while the definition is not yet committed and has no DIGEST pinned, and
+	/// must still plan and run.
+	async fn check_define_and_call_in_one_block(
+		bucket_dir: &Path,
+	) -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		let dir = bucket_dir.to_string_lossy();
+		let results =
+			sql_query(&addr, &ns, &db, &format!("DEFINE BUCKET test BACKEND \"file:{dir}\";"))
+				.await;
+		assert_eq!(results[0].status, "OK", "DEFINE BUCKET: {:?}", results[0].result);
+
+		let transaction = "BEGIN;\
+			DEFINE EXTENSION ext::txn FROM f\"test:/demo.surli\" UNSIGNED;\
+			RETURN ext::txn::math(5);\
+			COMMIT;";
+		let results = sql_query(&addr, &ns, &db, transaction).await;
+		for (i, r) in results.iter().enumerate() {
+			assert_eq!(r.status, "OK", "transaction statement {i}: {:?}", r.result);
+		}
+		// BEGIN, DEFINE, RETURN, COMMIT.
+		assert_eq!(results[2].result, serde_json::json!(10));
+
+		let block = "{ DEFINE EXTENSION ext::blk FROM f\"test:/demo.surli\" UNSIGNED; \
+			RETURN ext::blk::math(5); };";
+		let results = sql_query(&addr, &ns, &db, block).await;
+		assert_eq!(results[0].status, "OK", "block: {:?}", results[0].result);
+		assert_eq!(results[0].result, serde_json::json!(10));
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_define_and_call_in_one_block() -> Result<(), Box<dyn std::error::Error>> {
+		check_define_and_call_in_one_block(&DEMO_DIR.canonical).await
+	}
+
+	// -------------------------------------------------------------------
+	// DIGEST and SIGNER: checked at DEFINE and before every load
+	// -------------------------------------------------------------------
+
+	/// An SSH key made for one test, and the demo archive signed with it by
+	/// `surreal extension sign --key`. `None` when `ssh-keygen` is missing.
+	struct SignedDemo {
+		_keys: tempfile::TempDir,
+		/// The public key line, for `SIGNER { key: … }`.
+		key: String,
+		/// Another key's public line, which signed nothing.
+		other_key: String,
+		/// The signed archive's file name in the bucket directory.
+		signed: String,
+		/// `sha256(MANIFEST)` of the demo archive, signed or not.
+		digest: String,
+	}
+
+	fn ssh_keygen(dir: &Path, name: &str) -> Option<String> {
+		let path = dir.join(name);
+		let status = Command::new("ssh-keygen")
+			.args(["-q", "-t", "ed25519", "-N", "", "-C", "trust@test", "-f"])
+			.arg(&path)
+			.status()
+			.ok()?;
+		assert!(status.success(), "ssh-keygen failed");
+		Some(std::fs::read_to_string(path.with_extension("pub")).ok()?.trim().to_owned())
+	}
+
+	fn sign_demo(bucket_dir: &Path) -> Option<SignedDemo> {
+		// `surreal extension sign` exists only with `extension-sign`.
+		if cfg!(not(feature = "extension-sign")) {
+			return None;
+		}
+		let keys = tempfile::TempDir::new().expect("temp dir for keys");
+		let key = ssh_keygen(keys.path(), "release")?;
+		let other_key = ssh_keygen(keys.path(), "other")?;
+		let signed = format!("signed-{}.surli", Ulid::new());
+		let result = Command::new(surreal_bin())
+			.args(["extension", "sign", "--key"])
+			.arg(keys.path().join("release"))
+			.arg("-o")
+			.arg(bucket_dir.join(&signed))
+			.arg(bucket_dir.join("demo.surli"))
+			.output()
+			.expect("run surreal extension sign");
+		assert!(
+			result.status.success(),
+			"surreal extension sign failed: {}",
+			String::from_utf8_lossy(&result.stderr)
+		);
+		let archive = std::fs::read(bucket_dir.join("demo.surli")).expect("read demo.surli");
+		let files = surrealism_runtime::package::trust_files_from_reader(
+			archive.as_slice(),
+			surrealism_runtime::package::DEFAULT_MAX_FS_BYTES,
+		)
+		.expect("read demo MANIFEST");
+		Some(SignedDemo {
+			_keys: keys,
+			key,
+			other_key,
+			signed,
+			digest: files.manifest.digest().to_string(),
+		})
+	}
+
+	fn first_error(results: &[QueryResult]) -> String {
+		assert_eq!(results[0].status, "ERR", "expected an error: {:?}", results[0].result);
+		results[0].result.to_string()
+	}
+
+	/// `DEFINE EXTENSION` fetches the archive and refuses it unless its
+	/// MANIFEST digest is the DIGEST and, with a SIGNER, its SIGNATURE proves
+	/// that signer.
+	async fn check_trust_at_define(bucket_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+		let Some(demo) = sign_demo(bucket_dir) else {
+			eprintln!("skipping: needs ssh-keygen on PATH and the `extension-sign` feature");
+			return Ok(());
+		};
+		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		let dir = bucket_dir.to_string_lossy();
+		let results =
+			sql_query(&addr, &ns, &db, &format!("DEFINE BUCKET test BACKEND \"file:{dir}\";"))
+				.await;
+		assert_eq!(results[0].status, "OK", "DEFINE BUCKET: {:?}", results[0].result);
+
+		// Signed by the recorded key: defined, pinned and callable.
+		let define = format!(
+			"DEFINE EXTENSION ext::signed FROM f\"test:/{}\" SIGNER {{ key: \"{}\" }};",
+			demo.signed, demo.key
+		);
+		let results = sql_query(&addr, &ns, &db, &define).await;
+		assert_eq!(results[0].status, "OK", "signed DEFINE: {:?}", results[0].result);
+		let results = sql_query(&addr, &ns, &db, "RETURN ext::signed::math(5);").await;
+		assert_eq!(results[0].status, "OK", "signed call: {:?}", results[0].result);
+		assert_eq!(results[0].result, serde_json::json!(10));
+		let results = sql_query(&addr, &ns, &db, "INFO FOR DB;").await;
+		let rendered = results[0].result["extensions"]["ext::signed"].as_str().unwrap_or_default();
+		assert!(rendered.contains(&format!("DIGEST '{}'", demo.digest)), "{rendered}");
+
+		// Another key signed nothing here.
+		let define = format!(
+			"DEFINE EXTENSION ext::other FROM f\"test:/{}\" SIGNER {{ key: \"{}\" }};",
+			demo.signed, demo.other_key
+		);
+		let error = first_error(&sql_query(&addr, &ns, &db, &define).await);
+		assert!(error.contains("does not prove its SIGNER"), "{error}");
+
+		// An archive no signature was ever seen for.
+		let define = format!(
+			"DEFINE EXTENSION ext::nosig FROM f\"test:/restricted.surli\" SIGNER {{ key: \"{}\" }};",
+			demo.key
+		);
+		let error = first_error(&sql_query(&addr, &ns, &db, &define).await);
+		assert!(error.contains("carries no SIGNATURE"), "{error}");
+
+		// The unsigned copy of the signed code. This server has verified the
+		// signed copy of the same DIGEST, but only the definition's own source
+		// counts, so every node reaches the same verdict.
+		let define = format!(
+			"DEFINE EXTENSION ext::copy FROM f\"test:/demo.surli\" SIGNER {{ key: \"{}\" }};",
+			demo.key
+		);
+		let error = first_error(&sql_query(&addr, &ns, &db, &define).await);
+		assert!(error.contains("carries no SIGNATURE"), "{error}");
+
+		// A DIGEST that is not the archive's is refused, signed or not.
+		let wrong = format!("sha256:{}", "0".repeat(64));
+		let define = format!(
+			"DEFINE EXTENSION ext::pinned FROM f\"test:/demo.surli\" DIGEST \"{wrong}\" UNSIGNED;"
+		);
+		let error = first_error(&sql_query(&addr, &ns, &db, &define).await);
+		assert!(error.contains("MANIFEST digest is"), "{error}");
+
+		let results = sql_query(&addr, &ns, &db, "RETURN (INFO FOR DB).extensions.keys();").await;
+		assert_eq!(results[0].result, serde_json::json!(["ext::signed"]));
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_trust_at_define() -> Result<(), Box<dyn std::error::Error>> {
+		check_trust_at_define(&DEMO_DIR.canonical).await
+	}
+
+	/// A definition whose archive cannot be fetched is accepted when it gives
+	/// DIGEST, as an import does, and the archive is checked when it loads:
+	/// whatever the source holds by then must be the pinned code, signed by
+	/// the recorded signer. A refusal is repeated without fetching for
+	/// `REFETCH_AFTER_REFUSAL`, and the source is read again after it.
+	async fn check_trust_at_load(bucket_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+		let Some(demo) = sign_demo(bucket_dir) else {
+			eprintln!("skipping: needs ssh-keygen on PATH and the `extension-sign` feature");
+			return Ok(());
+		};
+		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		let dir = bucket_dir.to_string_lossy();
+		let late = format!("late-{}.surli", Ulid::new());
+		let define = format!(
+			"DEFINE BUCKET test BACKEND \"file:{dir}\";\
+			 DEFINE EXTENSION ext::late FROM f\"test:/{late}\" DIGEST \"{}\" SIGNER {{ key: \"{}\" }};",
+			demo.digest, demo.key
+		);
+		for (i, r) in sql_query(&addr, &ns, &db, &define).await.iter().enumerate() {
+			assert_eq!(r.status, "OK", "statement {i}: {:?}", r.result);
+		}
+		let call = "RETURN ext::late::math(5);";
+		// A failure to load is repeated without fetching the archive again
+		// until `REFETCH_AFTER_REFUSAL` (10 s) has passed, so each change to the
+		// archive is first met with the previous refusal.
+		let after_refusal = || tokio::time::sleep(Duration::from_secs(11));
+
+		// The eager load after DEFINE found no archive, and that refusal holds.
+		std::fs::copy(bucket_dir.join("restricted.surli"), bucket_dir.join(&late))?;
+		let error = first_error(&sql_query(&addr, &ns, &db, call).await);
+		assert!(error.contains("not found"), "{error}");
+
+		// Other code under the pinned name.
+		after_refusal().await;
+		let error = first_error(&sql_query(&addr, &ns, &db, call).await);
+		assert!(error.contains("MANIFEST digest is"), "{error}");
+
+		// The pinned code, but unsigned.
+		std::fs::copy(bucket_dir.join("demo.surli"), bucket_dir.join(&late))?;
+		after_refusal().await;
+		let error = first_error(&sql_query(&addr, &ns, &db, call).await);
+		assert!(error.contains("carries no SIGNATURE"), "{error}");
+
+		// The pinned code, signed by the recorded key.
+		std::fs::copy(bucket_dir.join(&demo.signed), bucket_dir.join(&late))?;
+		after_refusal().await;
+		let results = sql_query(&addr, &ns, &db, call).await;
+		assert_eq!(results[0].status, "OK", "signed call: {:?}", results[0].result);
+		assert_eq!(results[0].result, serde_json::json!(10));
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_trust_at_load() -> Result<(), Box<dyn std::error::Error>> {
+		check_trust_at_load(&DEMO_DIR.canonical).await
+	}
+
+	/// A module cached from a copy without a signature does not serve a
+	/// definition with a SIGNER. Once its source is signed, that definition
+	/// loads from the source's current signature, and the stale module is
+	/// replaced by one built with that signature.
+	async fn check_a_resigned_source_replaces_the_cached_module(
+		bucket_dir: &Path,
+	) -> Result<(), Box<dyn std::error::Error>> {
+		let Some(demo) = sign_demo(bucket_dir) else {
+			eprintln!("skipping: needs ssh-keygen on PATH and the `extension-sign` feature");
+			return Ok(());
+		};
+		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		let dir = bucket_dir.to_string_lossy();
+		let shared = format!("shared-{}.surli", Ulid::new());
+		std::fs::copy(bucket_dir.join("demo.surli"), bucket_dir.join(&shared))?;
+
+		let define = format!(
+			"DEFINE BUCKET test BACKEND \"file:{dir}\";\
+			 DEFINE EXTENSION ext::open FROM f\"test:/{shared}\" UNSIGNED;"
+		);
+		for (i, r) in sql_query(&addr, &ns, &db, &define).await.iter().enumerate() {
+			assert_eq!(r.status, "OK", "statement {i}: {:?}", r.result);
+		}
+		let results = sql_query(&addr, &ns, &db, "RETURN ext::open::math(5);").await;
+		assert_eq!(results[0].result, serde_json::json!(10), "{:?}", results[0].result);
+
+		// The same code, now signed at the same source.
+		std::fs::copy(bucket_dir.join(&demo.signed), bucket_dir.join(&shared))?;
+		let define = format!(
+			"DEFINE EXTENSION ext::signed FROM f\"test:/{shared}\" SIGNER {{ key: \"{}\" }};",
+			demo.key
+		);
+		let results = sql_query(&addr, &ns, &db, &define).await;
+		assert_eq!(results[0].status, "OK", "signed DEFINE: {:?}", results[0].result);
+		for _ in 0..2 {
+			let results = sql_query(&addr, &ns, &db, "RETURN ext::signed::math(5);").await;
+			assert_eq!(results[0].status, "OK", "signed call: {:?}", results[0].result);
+			assert_eq!(results[0].result, serde_json::json!(10));
+		}
+		// The UNSIGNED definition of the same source still runs.
+		let results = sql_query(&addr, &ns, &db, "RETURN ext::open::math(5);").await;
+		assert_eq!(results[0].result, serde_json::json!(10), "{:?}", results[0].result);
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_a_resigned_source_replaces_the_cached_module()
+	-> Result<(), Box<dyn std::error::Error>> {
+		check_a_resigned_source_replaces_the_cached_module(&DEMO_DIR.canonical).await
+	}
+
 	// -------------------------------------------------------------------
 	// Pack/unpack round-trip test (unit-level, no server needed)
 	// -------------------------------------------------------------------
@@ -1881,13 +2226,16 @@ mod surrealism_integration {
 			exports: surrealism_runtime::exports::ExportsManifest::empty(),
 			fs: None,
 			logo: None,
+			manifest: None,
+			signature: None,
 		};
 
 		let tmp = tempfile::TempDir::new().expect("Failed to create temp dir");
 		let surli_path = tmp.path().join("test.surli");
-		package.pack(surli_path.clone(), Some(&fs_dir)).expect("pack failed");
+		let digest = package.pack(surli_path.clone(), Some(&fs_dir)).expect("pack failed");
 
 		let unpacked = SurrealismPackage::from_file(surli_path).expect("from_file failed");
+		assert_eq!(unpacked.digest(), Some(digest), "digest survives the round trip");
 
 		assert!(unpacked.fs.is_some(), "unpacked package should have fs");
 		let fs_temp = unpacked.fs.as_ref().unwrap();

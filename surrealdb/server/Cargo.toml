@@ -31,6 +31,7 @@ default = [
     "scripting",
     "http",
     "surrealism",
+    "extension-sign",
     "graphql",
     "gql",
     "mcp",
@@ -47,11 +48,28 @@ ml = ["surrealdb/ml", "dep:surrealml-core"]
 scripting = ["surrealdb-core/scripting"]
 surrealism = [
     "surrealdb-core/surrealism",
+    "dep:base64",
     "dep:dialoguer",
+    "dep:hex",
+    "dep:sha2",
     "dep:surrealism-runtime",
+    "dep:tar",
     "dep:wasm-encoder",
     "dep:wasm-opt",
     "dep:wasmparser",
+    "dep:zstd",
+]
+# `surreal extension sign`: Sigstore keyless signing (CI identity token,
+# Fulcio, Rekor, TUF) and the verifier its output is checked with. A server
+# that only verifies signatures does not need it; the verifier the server
+# checks archives with is part of `surrealdb-core/surrealism`.
+extension-sign = [
+    "surrealism",
+    "dep:sigstore-oidc",
+    "dep:sigstore-rekor",
+    "dep:sigstore-sign",
+    "dep:sigstore-trust-root",
+    "dep:surrealism-verify",
 ]
 storage-mem = ["surrealdb/kv-mem", "surrealdb-core/kv-mem"]
 storage-indxdb = ["surrealdb/kv-indxdb", "surrealdb-core/kv-indxdb"]
@@ -203,12 +221,22 @@ uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
 web-time.workspace = true
 
 # Optional crates
+base64 = { workspace = true, optional = true }
 dialoguer = { workspace = true, optional = true }
+hex = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
 surrealdb-mcp = { workspace = true, optional = true }
 surrealism-runtime = { workspace = true, optional = true }
+sigstore-oidc = { workspace = true, optional = true }
+sigstore-rekor = { workspace = true, optional = true }
+sigstore-sign = { workspace = true, optional = true }
+sigstore-trust-root = { workspace = true, optional = true }
+surrealism-verify = { workspace = true, optional = true }
+tar = { workspace = true, optional = true }
 wasm-encoder = { workspace = true, optional = true }
 wasm-opt = { workspace = true, optional = true }
 wasmparser = { workspace = true, optional = true }
+zstd = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]
 nu-ansi-term = "0.50.3"

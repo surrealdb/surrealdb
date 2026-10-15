@@ -25,6 +25,7 @@ surrealism-types = { workspace = true, features = ["host"] }
 tar.workspace = true
 zstd.workspace = true
 semver.workspace = true
+sha2.workspace = true
 wasmtime-wasi.workspace = true
 toml.workspace = true
 tempfile.workspace = true

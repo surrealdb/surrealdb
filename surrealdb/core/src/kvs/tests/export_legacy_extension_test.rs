@@ -94,6 +94,10 @@ async fn with_legacy_row() -> (Arc<Datastore>, Session) {
 			patch: 3,
 		}),
 		unsigned: true,
+		// A row a 3.x release wrote records no digest, signer or capabilities.
+		digest: None,
+		signer: None,
+		capabilities: None,
 	};
 	txn.set_key(&ModuleKey::new(db.namespace_id, db.database_id, Cow::Borrowed(LEGACY)), &row)
 		.await
@@ -176,8 +180,10 @@ async fn a_definition_outside_an_import_needs_unsigned() {
 	assert!(err.to_string().contains("DEFINE EXTENSION needs SIGNER"), "{err}");
 }
 
-/// An imported definition with `UNSIGNED` over a file is loaded eagerly once
-/// it is written, and the load reads the bucket it names.
+/// An imported definition with `DIGEST` and `UNSIGNED` over a file is loaded
+/// eagerly once it is written, and the load reads the bucket it names. The
+/// archive is not there yet, which an import accepts for a definition with
+/// `DIGEST`.
 #[tokio::test]
 async fn an_imported_file_extension_is_loaded_unsealed() {
 	let ds = ds().await;
@@ -187,10 +193,57 @@ async fn an_imported_file_extension_is_loaded_unsealed() {
 	{
 		result.result.unwrap();
 	}
-	let dump = r#"OPTION IMPORT;
-DEFINE EXTENSION ext::x FROM f"b:/x.surli" UNSIGNED PERMISSIONS FULL;"#;
-	for result in ds.import(dump, &ses).await.unwrap() {
+	let digest = format!("sha256:{}", "5d".repeat(32));
+	let dump = format!(
+		"OPTION IMPORT;\nDEFINE EXTENSION ext::x FROM f\"b:/x.surli\" DIGEST '{digest}' UNSIGNED PERMISSIONS FULL;"
+	);
+	for result in ds.import(&dump, &ses).await.unwrap() {
 		result.result.unwrap();
 	}
 	assert!(extensions(&ds, &ses).await.contains("ext::x"));
+}
+
+/// An imported definition without `DIGEST`, or without both `SIGNER` and
+/// `UNSIGNED`, is a legacy row like a 3.x catalog row: a call refuses it before
+/// any archive is fetched, and says to reinstall it.
+#[tokio::test]
+async fn an_imported_legacy_row_is_refused_when_called() {
+	let ds = ds().await;
+	let ses = session();
+	for result in
+		ds.execute("DEFINE NAMESPACE test; DEFINE DATABASE test;", &ses, None).await.unwrap()
+	{
+		result.result.unwrap();
+	}
+	let digest = format!("sha256:{}", "5d".repeat(32));
+	let dump = format!(
+		"{DUMP_3X}\nDEFINE EXTENSION ext::y FROM f\"b:/y.surli\" DIGEST '{digest}' CAPABILITIES {{}} PERMISSIONS FULL;"
+	);
+	for result in ds.import(&dump, &ses).await.unwrap() {
+		result.result.unwrap();
+	}
+	let listed = extensions(&ds, &ses).await;
+	assert!(!listed.contains("DIGEST"), "an imported legacy row records no DIGEST: {listed}");
+	// Without the `surrealism` feature every extension call is refused for the
+	// missing feature before the definition is read.
+	#[cfg(feature = "surrealism")]
+	for call in ["silo::acme::w<1.0.0>::f()", "ext::x::f()", "ext::y::f()"] {
+		let mut res = ds.execute(&format!("RETURN {call}"), &ses, None).await.unwrap();
+		let err = res.remove(0).result.expect_err("a legacy row does not run");
+		assert!(err.to_string().contains(crate::catalog::REINSTALL_WARNING), "{call}: {err}");
+	}
+	let structure = ds
+		.execute("(INFO FOR DB STRUCTURE).extensions", &ses, None)
+		.await
+		.unwrap()
+		.remove(0)
+		.result
+		.unwrap()
+		.into_array()
+		.unwrap();
+	assert_eq!(structure.len(), 3, "{structure:?}");
+	for extension in structure {
+		let text = format!("{extension:?}");
+		assert!(text.contains(crate::catalog::REINSTALL_WARNING), "{text}");
+	}
 }

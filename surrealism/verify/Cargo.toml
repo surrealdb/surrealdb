@@ -1,0 +1,32 @@
+[package]
+name = "surrealism-verify"
+version = "0.7.0-nightly"
+description = "Signature verification for Surrealism extension archives"
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license-file.workspace = true
+
+[dependencies]
+base64.workspace = true
+ed25519-dalek.workspace = true
+p256 = { workspace = true, features = ["ecdsa"] }
+p384 = { workspace = true, features = ["ecdsa"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+signature.workspace = true
+ssh-key.workspace = true
+thiserror.workspace = true
+x509-parser.workspace = true
+
+# The reference verifier for `tests/differential.rs`. It does not build for
+# wasm32, so it is a native-only dev-dependency.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+sigstore-verify.workspace = true
+
+[lints]
+workspace = true

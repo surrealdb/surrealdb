@@ -209,8 +209,9 @@ pub fn implement_host_functions(
 	linker: &mut wasmtime::component::Linker<StoreData>,
 ) -> SurrealismResult<()> {
 	let mut root = linker.root();
-	let mut host =
-		root.instance("surrealism:plugin/host").prefix_err(|| "failed to define host instance")?;
+	let mut host = root
+		.instance("surrealism:extension/host")
+		.prefix_err(|| "failed to define host instance")?;
 
 	// The guest only ever holds `borrow<transaction>`, which the canonical ABI
 	// revokes at return, so this destructor is not reached in practice. It is

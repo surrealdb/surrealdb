@@ -1065,7 +1065,10 @@ impl Visitor for ArrivalVisitor {
 			kind: _,
 			name: _,
 			executable: _,
+			digest: _,
+			signer: _,
 			unsigned: _,
+			capabilities: _,
 			comment: _,
 			permissions: _,
 		} []

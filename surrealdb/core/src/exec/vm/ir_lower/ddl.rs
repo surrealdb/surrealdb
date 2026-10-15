@@ -1946,9 +1946,10 @@ impl Ddl<'_, '_> {
 				name,
 				executable,
 				unsigned,
+				signed,
 				comment,
 				..
-			} => self.define_module(attrs, name, executable, *unsigned, *comment),
+			} => self.define_module(attrs, name, executable, *unsigned || *signed, *comment),
 			DefineObject::Access(access) => self.define_access(attrs, access),
 			DefineObject::Config(config) => self.define_config(attrs, config),
 			DefineObject::Api(api) => self.define_api(attrs, api),
@@ -2481,22 +2482,23 @@ impl Ddl<'_, '_> {
 		self.answer_none()
 	}
 
-	/// `DEFINE EXTENSION`: an extension that exists is evicted from the process under `OVERWRITE`,
-	/// and the new one is loaded after it is written. A definition without `UNSIGNED` is refused
+	/// `DEFINE EXTENSION`: under `OVERWRITE`, the runtime the stored definition loaded is evicted
+	/// from the process, and the new one is loaded after it is written. `trust_stated` is whether
+	/// the statement names a `SIGNER` or says `UNSIGNED`: a definition with neither is refused
 	/// outside an import; an import stores it as a legacy row, the way a 3.x catalog row reads.
 	fn define_module(
 		&mut self,
 		attrs: &DefineAttrs,
 		name: &Option<String>,
 		executable: &ModuleExecutable,
-		unsigned: bool,
+		trust_stated: bool,
 		comment: OperandSlot,
 	) -> Result<(), IrError> {
 		let storage = module_storage_name(name, executable)?;
 		self.guard()?;
 		let (ns, db) = self.ids_creating()?;
 		let md = self.constant(Value::String(storage.as_str().into()))?;
-		if !unsigned {
+		if !trust_stated {
 			let import = self.label()?;
 			self.store(StoreInstr::JumpIfImport {
 				target: import,
@@ -2530,10 +2532,13 @@ impl Ddl<'_, '_> {
 				Ok(())
 			},
 			|l| {
+				// The runtime to drop is the one the stored row loaded, keyed by
+				// the DIGEST that row pinned; the new statement's DIGEST, if it
+				// gives one, names another archive.
 				l.store(StoreInstr::EvictModule {
 					ns,
 					db,
-					module: definition,
+					module: existing,
 				});
 				Ok(())
 			},
@@ -2541,6 +2546,11 @@ impl Ddl<'_, '_> {
 		self.bind(missing)?;
 		let comment = self.comment(comment)?;
 		self.set_comment(definition, &comment)?;
+		self.store(StoreInstr::VerifyModule {
+			ns,
+			db,
+			module: definition,
+		});
 		let stored_name = self.constant(Value::String(storage.as_str().into()))?;
 		let stored_at = self.object(&[
 			("ns", Operand::Reg(ns)),

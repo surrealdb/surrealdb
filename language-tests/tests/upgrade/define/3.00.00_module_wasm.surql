@@ -9,9 +9,9 @@ allow-experimental = ["files", "surrealism"]
 upgrade = true
 # The fixture is built by the current toolchain and loaded by the source binary,
 # so the source has to accept the ABI the current toolchain stamps. That ABI is
-# now 3, which no released binary accepts — the check is an equality, so a 3.2.x
+# 4, which no released binary accepts — the check is an equality, so a 3.2.x
 # binary refuses the fixture outright ("Unsupported ABI version: expected 2, got
-# 3"). The lower bound is therefore the first release that can load an ABI 3
+# 4"). The lower bound is therefore the first release that can load an ABI 4
 # module, and until one ships no source version matches and this pair runs
 # nowhere. These gates also keep the ordinary runner away, since it matches both
 # against its own version.
@@ -31,7 +31,7 @@ Both halves need one ABI. The object is what the two binaries share, so a run
 needs a source binary that loads the ABI the current toolchain stamps; an object
 built at the older ABI cannot stand in, because the reading binary refuses that
 one just as firmly. Restore the coverage by lowering `importing-version` to the
-first release that ships ABI 3, once there is one."""
+first release that ships ABI 4, once there is one."""
 
 [[test.results]]
 match = '''string::contains($result.extensions['ext::demo'], 'demo.surli') AND string::contains($result.extensions['ext::demo'], 'UNSIGNED') AND string::contains($result.extensions['ext::demo'], 'DEFINE EXTENSION ext::demo FROM') AND $result.modules IS NONE AND string::contains($result.buckets.mods, 'file:')'''

@@ -4,6 +4,8 @@ mod info;
 mod init_cmd;
 mod run;
 mod sig;
+#[cfg(feature = "extension-sign")]
+mod sign;
 mod version;
 mod wasm_target;
 
@@ -98,6 +100,10 @@ enum ModuleCommand {
 		path: Option<PathBuf>,
 	},
 
+	/// Sign a .surli archive: Sigstore keyless from CI, an SSH key, or an imported bundle
+	#[cfg(feature = "extension-sign")]
+	Sign(sign::SignArgs),
+
 	/// Output the Surrealism version information
 	Version,
 }
@@ -137,6 +143,8 @@ pub async fn init(
 			out,
 			path,
 		} => build::init(path, out, debug).await,
+		#[cfg(feature = "extension-sign")]
+		ModuleCommand::Sign(args) => sign::init(args).await,
 		ModuleCommand::Version => version::init().await,
 	}
 }

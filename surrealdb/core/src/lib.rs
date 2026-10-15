@@ -52,6 +52,7 @@ mod ddl;
 #[doc(hidden)]
 pub mod doc;
 mod exe;
+mod extension;
 #[cfg(test)]
 mod fmt_roundtrip_test;
 mod fnc;

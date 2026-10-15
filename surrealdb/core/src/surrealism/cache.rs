@@ -7,28 +7,56 @@ use quick_cache::{Equivalent, Weighter};
 use surrealism_runtime::runtime::Runtime;
 
 use crate::catalog::{DatabaseId, NamespaceId};
+use crate::extension::trust::TrustStore;
 #[cfg(feature = "http")]
 use crate::http::HttpClient;
 
+/// A cache entry's key: where the archive comes from and the `DIGEST` it was
+/// built for, so two definitions that name one source but pin different
+/// archives hold separate entries instead of evicting each other.
+type ModuleKey = (SurrealismCacheKey, [u8; 32]);
+
+/// The borrowed form of a [`ModuleKey`], so a hit allocates nothing. It hashes
+/// as the tuple does: the source, then the digest.
+#[derive(Hash)]
+struct EntryLookup<'a, 'b>(&'a SurrealismCacheLookup<'b>, [u8; 32]);
+
+impl Equivalent<ModuleKey> for EntryLookup<'_, '_> {
+	fn equivalent(&self, key: &ModuleKey) -> bool {
+		self.1 == key.1 && self.0.equivalent(&key.0)
+	}
+}
+
 pub struct SurrealismCache {
-	cache: quick_cache::sync::Cache<SurrealismCacheKey, SurrealismCacheValue, Weight>,
+	cache: quick_cache::sync::Cache<ModuleKey, SurrealismCacheValue, Weight>,
+	trust: TrustStore,
 }
 
 impl SurrealismCache {
 	pub fn new(size: usize) -> Self {
 		Self {
 			cache: quick_cache::sync::Cache::with_weighter(size, size as u64, Weight),
+			trust: TrustStore::default(),
 		}
 	}
 
-	pub fn remove(&self, lookup: &SurrealismCacheLookup) {
-		self.cache.remove(lookup);
+	/// The signatures seen per `DIGEST` and the signers they proved.
+	pub(crate) fn trust(&self) -> &TrustStore {
+		&self.trust
 	}
 
-	/// Gets the runtime from the cache or computes it if not present using the provided function
+	/// Drops the module built from the archive at `lookup` with `digest`.
+	pub fn remove(&self, lookup: &SurrealismCacheLookup, digest: [u8; 32]) {
+		self.cache.remove(&EntryLookup(lookup, digest));
+	}
+
+	/// The module built from the archive at `lookup` with `digest`, computing
+	/// it with `compute` when it is not cached. An error is returned and not
+	/// cached.
 	pub async fn get_or_insert_with<F, Fut>(
 		&self,
 		lookup: &SurrealismCacheLookup<'_>,
+		digest: [u8; 32],
 		compute: F,
 	) -> Result<SurrealismCachedModule>
 	where
@@ -36,13 +64,15 @@ impl SurrealismCache {
 		Fut: Future<Output = Result<SurrealismCachedModule>>,
 	{
 		// This match is only needed to avoid allocating for the key in the fast path
-		let value = match self.cache.get(lookup) {
+		let value = match self.cache.get(&EntryLookup(lookup, digest)) {
 			Some(cached) => cached,
 			None => {
 				let compute = async {
 					let value = compute().await?;
 					let wrapped = SurrealismCacheValue {
 						runtime: value.runtime,
+						digest: value.digest,
+						signature: value.signature,
 						module_display_name: value.module_display_name,
 						#[cfg(feature = "http")]
 						client: value.client,
@@ -50,12 +80,14 @@ impl SurrealismCache {
 					Result::<_, Error>::Ok(wrapped)
 				};
 
-				self.cache.get_or_insert_async(&lookup.to_key(), compute).await?
+				self.cache.get_or_insert_async(&(lookup.to_key(), digest), compute).await?
 			}
 		};
 
 		Ok(SurrealismCachedModule {
 			runtime: value.runtime,
+			digest: value.digest,
+			signature: value.signature,
 			module_display_name: value.module_display_name,
 			#[cfg(feature = "http")]
 			client: value.client,
@@ -137,6 +169,11 @@ impl Equivalent<SurrealismCacheKey> for SurrealismCacheLookup<'_> {
 #[derive(Clone)]
 pub(crate) struct SurrealismCachedModule {
 	pub runtime: Arc<Runtime>,
+	/// `sha256(surrealism/MANIFEST)` of the archive the runtime was built from.
+	pub digest: [u8; 32],
+	/// The `SIGNATURE` that archive carried, as fetched from its source. Every
+	/// load checks it against the loading definition's `SIGNER`.
+	pub signature: Option<Arc<[u8]>>,
 	/// `organisation::name` for logging / host context.
 	pub module_display_name: Arc<str>,
 	/// Http client with the right filter the module
@@ -147,6 +184,8 @@ pub(crate) struct SurrealismCachedModule {
 #[derive(Clone)]
 pub struct SurrealismCacheValue {
 	pub(crate) runtime: Arc<Runtime>,
+	pub(crate) digest: [u8; 32],
+	pub(crate) signature: Option<Arc<[u8]>>,
 	pub(crate) module_display_name: Arc<str>,
 	#[cfg(feature = "http")]
 	pub(crate) client: Arc<HttpClient>,
@@ -155,8 +194,8 @@ pub struct SurrealismCacheValue {
 #[derive(Clone)]
 pub(crate) struct Weight;
 
-impl Weighter<SurrealismCacheKey, SurrealismCacheValue> for Weight {
-	fn weight(&self, _key: &SurrealismCacheKey, _val: &SurrealismCacheValue) -> u64 {
+impl Weighter<ModuleKey, SurrealismCacheValue> for Weight {
+	fn weight(&self, _key: &ModuleKey, _val: &SurrealismCacheValue) -> u64 {
 		// Uniform weight: each cached module counts as 1 toward the budget,
 		// giving a hard cap of SURREALISM_CACHE_SIZE modules. Size-proportional
 		// weighting was removed because (a) typical WASM binaries (50 KB–5 MB)
@@ -213,5 +252,18 @@ mod tests {
 
 		let file = SurrealismCacheLookup::File(&ns, &db, "bucket", "key");
 		assert_eq!(hash_of(&file), hash_of(&file.to_key()));
+	}
+
+	/// The borrowed entry key hashes and compares as the owned one, and two
+	/// digests of one source are two entries.
+	#[test]
+	fn an_entry_is_keyed_by_source_and_digest() {
+		let ns = NamespaceId(7);
+		let db = DatabaseId(9);
+		let file = SurrealismCacheLookup::File(&ns, &db, "bucket", "key");
+		let key: ModuleKey = (file.to_key(), [1; 32]);
+		assert_eq!(hash_of(&EntryLookup(&file, [1; 32])), hash_of(&key));
+		assert!(EntryLookup(&file, [1; 32]).equivalent(&key));
+		assert!(!EntryLookup(&file, [2; 32]).equivalent(&key));
 	}
 }

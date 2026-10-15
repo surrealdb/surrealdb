@@ -30,7 +30,7 @@ value = "{ wrap: 'DEFINE FUNCTION fn::wrap() { RETURN mod::test::run(1) } PERMIS
 */
 
 -- 0
-DEFINE EXTENSION ext::test FROM f"bucket:/module.wasm" UNSIGNED;
+DEFINE EXTENSION ext::test FROM f"bucket:/module.wasm" DIGEST "sha256:5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d" UNSIGNED;
 
 -- 1
 RETURN ext::test::run();

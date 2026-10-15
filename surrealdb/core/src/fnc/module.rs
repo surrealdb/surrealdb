@@ -32,6 +32,8 @@ use crate::doc::CursorDoc;
 use crate::expr::module::{ModuleExecutable, Signature, SiloExecutable, SurrealismExecutable};
 use crate::expr::statements::info::InfoStructure;
 #[cfg(feature = "surrealism")]
+use crate::extension::trust::Trust;
+#[cfg(feature = "surrealism")]
 use crate::surrealism::cache::SurrealismCacheLookup;
 #[cfg(feature = "surrealism")]
 use crate::surrealism::cache::SurrealismCachedModule;
@@ -44,6 +46,7 @@ use crate::val::Value;
 #[cfg(feature = "surrealism")]
 pub(crate) async fn module_executable_signature(
 	this: &ModuleExecutable,
+	trust: Trust<'_>,
 	ctx: &FrozenContext,
 	ns: &NamespaceId,
 	db: &DatabaseId,
@@ -51,15 +54,18 @@ pub(crate) async fn module_executable_signature(
 ) -> Result<Signature> {
 	match this {
 		ModuleExecutable::Surrealism(surrealism) => {
-			surrealism_executable_signature(surrealism, ctx, ns, db, sub).await
+			surrealism_executable_signature(surrealism, trust, ctx, ns, db, sub).await
 		}
-		ModuleExecutable::Silo(silo) => silo_executable_signature(silo, ctx, ns, db, sub).await,
+		ModuleExecutable::Silo(silo) => {
+			silo_executable_signature(silo, trust, ctx, ns, db, sub).await
+		}
 	}
 }
 
 #[cfg(feature = "surrealism")]
 pub(crate) async fn module_executable_run(
 	this: &ModuleExecutable,
+	trust: Trust<'_>,
 	ctx: &FrozenContext,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
@@ -68,15 +74,18 @@ pub(crate) async fn module_executable_run(
 ) -> Result<Value> {
 	match this {
 		ModuleExecutable::Surrealism(surrealism) => {
-			surrealism_executable_run(surrealism, ctx, opt, doc, args, sub).await
+			surrealism_executable_run(surrealism, trust, ctx, opt, doc, args, sub).await
 		}
-		ModuleExecutable::Silo(silo) => silo_executable_run(silo, ctx, opt, doc, args, sub).await,
+		ModuleExecutable::Silo(silo) => {
+			silo_executable_run(silo, trust, ctx, opt, doc, args, sub).await
+		}
 	}
 }
 
 #[cfg(feature = "surrealism")]
 pub(crate) async fn surrealism_executable_signature(
 	this: &SurrealismExecutable,
+	trust: Trust<'_>,
 	ctx: &FrozenContext,
 	ns: &NamespaceId,
 	db: &DatabaseId,
@@ -84,13 +93,15 @@ pub(crate) async fn surrealism_executable_signature(
 ) -> Result<Signature> {
 	check_surrealism_enabled(ctx)?;
 	let lookup = SurrealismCacheLookup::File(ns, db, &this.0.bucket, &this.0.key);
-	let runtime = crate::exec::vm::descriptor::object(ctx.get_surrealism_runtime(lookup)).await?;
+	let runtime =
+		crate::exec::vm::descriptor::object(ctx.get_surrealism_runtime(lookup, trust)).await?;
 	signature_from_runtime(&runtime, sub)
 }
 
 #[cfg(feature = "surrealism")]
 pub(crate) async fn surrealism_executable_run(
 	this: &SurrealismExecutable,
+	trust: Trust<'_>,
 	ctx: &FrozenContext,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
@@ -100,13 +111,15 @@ pub(crate) async fn surrealism_executable_run(
 	check_surrealism_enabled(ctx)?;
 	let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 	let lookup = SurrealismCacheLookup::File(&ns, &db, &this.0.bucket, &this.0.key);
-	let cached = crate::exec::vm::descriptor::object(ctx.get_surrealism_module(lookup)).await?;
+	let cached =
+		crate::exec::vm::descriptor::object(ctx.get_surrealism_module(lookup, trust)).await?;
 	run_on_runtime(cached, ctx, opt, doc, args, sub).await
 }
 
 #[cfg(feature = "surrealism")]
 pub(crate) async fn silo_executable_signature(
 	this: &SiloExecutable,
+	trust: Trust<'_>,
 	ctx: &FrozenContext,
 	ns: &NamespaceId,
 	db: &DatabaseId,
@@ -122,13 +135,15 @@ pub(crate) async fn silo_executable_signature(
 		this.minor,
 		this.patch,
 	);
-	let runtime = crate::exec::vm::descriptor::object(ctx.get_surrealism_runtime(lookup)).await?;
+	let runtime =
+		crate::exec::vm::descriptor::object(ctx.get_surrealism_runtime(lookup, trust)).await?;
 	signature_from_runtime(&runtime, sub)
 }
 
 #[cfg(feature = "surrealism")]
 pub(crate) async fn silo_executable_run(
 	this: &SiloExecutable,
+	trust: Trust<'_>,
 	ctx: &FrozenContext,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
@@ -146,7 +161,8 @@ pub(crate) async fn silo_executable_run(
 		this.minor,
 		this.patch,
 	);
-	let cached = crate::exec::vm::descriptor::object(ctx.get_surrealism_module(lookup)).await?;
+	let cached =
+		crate::exec::vm::descriptor::object(ctx.get_surrealism_module(lookup, trust)).await?;
 	run_on_runtime(cached, ctx, opt, doc, args, sub).await
 }
 
@@ -179,6 +195,7 @@ pub(crate) async fn run_on_runtime(
 		module_display_name,
 		#[cfg(feature = "http")]
 		client,
+		..
 	} = cached;
 	// The declared mode decides whether writes are permitted for this call, and
 	// whether a handle is lent at all. Read both before building the host, from
@@ -247,31 +264,24 @@ pub(crate) fn signature_from_runtime(
 	})
 }
 
+/// The exports of `definition`, for `INFO`. They are read from the compiled
+/// module, so only from an archive that passed the definition's `DIGEST` and
+/// `SIGNER` check; `None` when it did not, or when it cannot be loaded.
 #[cfg(feature = "surrealism")]
 pub(crate) async fn get_module_exports(
 	ctx: &FrozenContext,
 	ns: &crate::catalog::NamespaceId,
 	db: &crate::catalog::DatabaseId,
-	executable: &crate::catalog::ModuleExecutable,
+	definition: &crate::catalog::ModuleDefinition,
 ) -> Option<Value> {
-	use crate::buc::store::ObjectKey;
 	use crate::catalog::ModuleExecutable;
 	use crate::surrealism::cache::SurrealismCacheLookup;
 
-	match executable {
+	let trust = Trust::from(definition);
+	match &definition.executable {
 		ModuleExecutable::Surrealism(s) => {
-			if let Ok(bucket) = ctx.get_bucket_store(*ns, *db, &s.bucket).await {
-				let key = ObjectKey::new(s.key.clone());
-				if let Ok(Some(bytes)) = bucket.get(&key).await
-					&& let Ok(manifest) = surrealism_runtime::package::exports_manifest_from_reader(
-						std::io::Cursor::new(bytes),
-					) {
-					return Some(surrealism_exports_manifest_to_value(&manifest));
-				}
-			}
-
 			let lookup = SurrealismCacheLookup::File(ns, db, &s.bucket, &s.key);
-			let runtime = match ctx.get_surrealism_runtime(lookup).await {
+			let runtime = match ctx.get_surrealism_runtime(lookup, trust).await {
 				Ok(r) => r,
 				Err(e) => {
 					tracing::trace!("Could not load module runtime for exports: {e}");
@@ -290,7 +300,7 @@ pub(crate) async fn get_module_exports(
 				s.minor,
 				s.patch,
 			);
-			let runtime = match ctx.get_surrealism_runtime(lookup).await {
+			let runtime = match ctx.get_surrealism_runtime(lookup, trust).await {
 				Ok(r) => r,
 				Err(e) => {
 					tracing::trace!("Could not load module runtime for exports: {e}");
@@ -316,7 +326,7 @@ pub(crate) async fn process_modules(
 		let mut val = module.clone().structure();
 		#[cfg(feature = "surrealism")]
 		if let Value::Object(ref mut obj) = val
-			&& let Some(exports) = get_module_exports(ctx, &ns, &db, &module.executable).await
+			&& let Some(exports) = get_module_exports(ctx, &ns, &db, module).await
 		{
 			obj.insert("exports", exports);
 		}

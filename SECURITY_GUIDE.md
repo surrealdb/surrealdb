@@ -1392,6 +1392,65 @@ Flag when changes touch:
   what `access_mode` reports, and so still what licenses core's per-row fan-out to
   evaluate two *invocations* side by side — which only refusing the write closes
   (`Options::no_write`).
+- Extension signatures are verified by `surrealism-verify` (`surrealism/verify/`),
+  whose `verify(digest, signature, signer)` is a pure function. Every anchor comes
+  from the `Signer` the statement records: the crate holds no keys, no roots and no
+  defaults, and adding one is a finding. It reads no clock; the only time it trusts
+  is an RFC 3161 timestamp that verifies against the `tsa` anchor.
+- Certificates a bundle or a timestamp carries never act as anchors. The leaf must
+  chain to `ca`, the timestamp's signing certificate must itself be one of `tsa`, and
+  every certificate on either path must be valid at the stamped time.
+- The 10-minute validity of a Sigstore signing certificate is what makes a key copied
+  out of a CI job useless afterwards, so every timestamp that verifies against `tsa`
+  must lie inside that validity. One that lies outside refuses the signature; it is
+  not merely skipped.
+- A checkpoint signature line counts only when its name equals the checkpoint's
+  origin, its key hint matches the `log` key, and it verifies. Witness cosignatures
+  are ignored, so a bundle cannot satisfy `log` with someone else's line.
+- `repository_id` and `owner_id` are the defence against a renamed and re-registered
+  repository. A signer without them accepts only a certificate that carries neither,
+  so omitting them never widens what verifies.
+- An SSH signature must use namespace `surrealism` and hash `sha256` (so that
+  `H(MANIFEST)` is the `DIGEST`), and its key blob must equal the recorded key's; the
+  comment is not part of the key.
+- Nothing from an extension archive is compiled or run until the archive may run
+  under the definition being called (`extension/trust.rs`, `TrustStore::ensure`):
+  `sha256(surrealism/MANIFEST)` equals the definition's `DIGEST`, and with a
+  `SIGNER`, a `SIGNATURE` proves it. `UNSIGNED` waives only the signature, never
+  the `DIGEST`. The check reads only `MANIFEST` and `SIGNATURE` and runs before
+  anything else in the archive is unpacked, parsed or compiled into the cache, and on
+  every call that takes a module from it (`Context::get_surrealism_module`), since
+  one cached archive serves every definition that names its source. A path that
+  loads a module without a `Trust` taken from the definition is a finding.
+- A definition with no `DIGEST` never loads: a catalog row from before revision 3,
+  or an imported definition without `DIGEST` or without both `SIGNER` and
+  `UNSIGNED`, which the import stores without a `DIGEST`. Outside an import, a
+  `DEFINE EXTENSION` with neither `SIGNER` nor `UNSIGNED` is refused.
+- A Sigstore `SIGNATURE` may be an envelope that embeds a trust root, so the archive
+  verifies offline (`surrealism_verify::verify_offline`). `verify(digest, signature,
+  signer)` unwraps the envelope and never reads that root; the server's anchors come
+  only from the definition's `SIGNER`. A path that lets the embedded root, or anything
+  else from the archive, stand in for the `SIGNER`'s anchors is a finding.
+- `DEFINE EXTENSION` runs the same check when it can fetch the archive
+  (`extension::archive::verify_definition`), and pins `DIGEST` there when the
+  statement gave none. An archive it cannot fetch is accepted only when the
+  statement gives `DIGEST`, so an export restores before its archives are in
+  place; the load-time check is what holds the invariant.
+  An imported definition without `DIGEST` is restored with no capabilities, so it
+  never loads until it is defined again.
+- Only the `SIGNATURE` of the definition's own source counts. A copy of a `DIGEST`
+  whose source carries no signature that proves the `SIGNER` is refused, even when
+  the process has verified a signed copy of that digest from another source, so
+  every node and every restart reaches the same verdict from the same source. A
+  cached module keeps the signature its source carried, and every load checks it
+  against the loading definition's `SIGNER`. Proofs are cached per (`DIGEST`,
+  SHA-256 of the `SIGNER`'s encoding, SHA-256 of the signature): a cached proof
+  answers only for those exact signature bytes. A path that accepts an archive on a
+  proof made from another source's signature is a finding. A refusal is repeated without refetching for 10 seconds
+  (`REFETCH_AFTER_REFUSAL`), which bounds the fetches a failing definition causes. A
+  refusal is keyed by namespace, database, source, `DIGEST` and signer, and consulted
+  only for the same source of the same database: a refusal keyed more coarsely would
+  let one tenant refuse another's definition and read its error.
 - The `eval::surql` / `eval::gql` functions (`fnc/eval.rs`) evaluate a runtime
   query string in the caller's transaction. They must remain gated by **all** of:
   the function-family capability (enforced by the engine before dispatch), the
@@ -1433,6 +1492,8 @@ Flag when changes touch:
 - Function dispatch table (`fnc/mod.rs`)
 - JavaScript runtime engine
 - WASM runtime, host functions, or WASI configuration
+- Extension signature verification (`surrealism/verify/`), the formats it accepts,
+  or anything that supplies it an anchor other than the recorded `SIGNER`
 - Scripting or network capability defaults
 - HTTP client pooling, DNS resolution, or redirect handling
 - New experimental features with function-level gating

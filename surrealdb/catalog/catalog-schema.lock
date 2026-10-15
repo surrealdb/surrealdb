@@ -70,6 +70,10 @@ type BearerAccessType enum since=4.0 reserved=[]
   1 Bearer unit since=4.0
   2 Refresh unit since=4.0
 type BucketId transparent:int:u32 since=4.0
+type CapabilityTargets enum since=4.0 reserved=[]
+  1 None unit since=4.0
+  2 All unit since=4.0
+  3 Some item:list<string> since=4.0
 type ChangeFeed struct since=4.0 reserved=[]
   2 expiry duration critical since=4.0 absent=required
   4 store_diff bool critical since=4.0 absent=required
@@ -125,6 +129,18 @@ type EventKind enum since=4.0 reserved=[]
   2 Async fields since=4.0
     2 retry int:u16 critical since=4.0 absent=required
     4 max_depth int:u16 critical since=4.0 absent=required
+type ExtensionCapabilities struct since=4.0 reserved=[]
+  2 net CapabilityTargets critical since=4.0 absent=required
+  4 functions CapabilityTargets critical since=4.0 absent=required
+  6 queries bool critical since=4.0 absent=required
+  8 scripting bool critical since=4.0 absent=required
+  10 write bool critical since=4.0 absent=required
+  12 memory option<int:u64> critical since=4.0 absent=none
+  14 timeout option<duration> critical since=4.0 absent=none
+  16 strict_timeout bool critical since=4.0 absent=required
+type ExtensionSigner enum since=4.0 reserved=[]
+  1 Sigstore item:SigstoreSigner since=4.0
+  2 Key item:string since=4.0
 type FieldClaim struct since=4.0 reserved=[]
   2 field string critical since=4.0 absent=required
   4 definition int:i64 critical since=4.0 absent=required
@@ -242,6 +258,8 @@ type Location enum since=4.0 reserved=[]
   2 Fixed item:int:u32 since=4.0
   3 Var item:int:u32 since=4.0
   4 None unit since=4.0
+type ManifestDigest enum since=4.0 reserved=[]
+  1 Sha256 item:bytes since=4.0
 type MiddlewareDefinition struct since=4.0 reserved=[]
   2 name string critical since=4.0 absent=required
   4 args list<value> critical since=4.0 absent=required
@@ -366,6 +384,14 @@ type SequenceDefinition struct since=4.0 reserved=[]
   4 batch int:u32 critical since=4.0 absent=required
   6 start int:i64 critical since=4.0 absent=required
   8 timeout option<duration> critical since=4.0 absent=none
+type SigstoreSigner struct since=4.0 reserved=[]
+  2 ca list<string> critical since=4.0 absent=required
+  4 log string critical since=4.0 absent=required
+  6 tsa list<string> critical since=4.0 absent=required
+  8 issuer string critical since=4.0 absent=required
+  10 identity string critical since=4.0 absent=required
+  12 repository_id option<string> critical since=4.0 absent=none
+  14 owner_id option<string> critical since=4.0 absent=none
 type SiloExecutable struct since=4.0 reserved=[]
   2 organisation string critical since=4.0 absent=required
   4 package string critical since=4.0 absent=required
@@ -472,6 +498,9 @@ type StoredModuleDefinition struct since=4.0 reserved=[]
   4 permissions StoredPermission critical since=4.0 absent=required
   6 executable ModuleExecutable critical since=4.0 absent=required
   8 unsigned bool critical since=4.0 absent=required
+  10 digest option<ManifestDigest> critical since=4.0 absent=none
+  12 signer option<ExtensionSigner> critical since=4.0 absent=none
+  14 capabilities option<ExtensionCapabilities> critical since=4.0 absent=none
 type StoredParamDefinition struct since=4.0 reserved=[]
   1 comment option<string> ignorable since=4.0 absent=none independent="a comment is text for people and no other field reads it"
   2 name string critical since=4.0 absent=required

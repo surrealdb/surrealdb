@@ -1,8 +1,8 @@
-/// The Surrealism plugin interface defines the contract between a SurrealDB host
-/// and a guest WASM module (plugin). All structured data crossing the boundary is
+/// The Surrealism extension interface defines the contract between a SurrealDB
+/// host and a guest WASM component (an extension). All structured data crossing the boundary is
 /// serialized with FlatBuffers; the `serialized-*` type aliases carry those opaque
 /// byte buffers.
-package surrealism:plugin;
+package surrealism:extension;
 
 /// Shared serialization types used by both host and guest.
 ///
@@ -41,7 +41,7 @@ interface host {
     /// Why a host call failed.
     ///
     /// Classified so the host can count and alert on capability denials
-    /// separately from a plugin's own errors, and so a guest can match on the
+    /// separately from an extension's own errors, and so a guest can match on the
     /// class rather than parsing a message. A denied call never runs.
     variant host-error {
         /// The module's declared capabilities forbid this call.
@@ -79,7 +79,7 @@ interface host {
     }
 }
 
-/// The `plugin` world is the top-level contract that every surrealism guest
+/// The `extension` world is the top-level contract that every surrealism guest
 /// module must satisfy.
 ///
 /// ## Lifecycle
@@ -97,7 +97,7 @@ interface host {
 /// `list-functions`, `function-args`, and `function-returns` allow the host
 /// (and tooling such as `surreal module info`) to discover the module's API
 /// surface without executing any functions.
-world plugin {
+world extension {
     import host;
     use host.{transaction};
     use types.{serialized-value, serialized-args, serialized-kind, serialized-arguments};

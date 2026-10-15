@@ -1827,6 +1827,15 @@ pub(super) enum StoreInstr {
 		db: Reg,
 		module: Reg,
 	},
+	/// Check the archive of the module defined in `module`, of the database
+	/// in `ns`/`db`, against the definition's `DIGEST` and `SIGNER`, and record
+	/// its digest when the definition has none
+	/// (`extension::archive::verify_definition`); raise when it fails.
+	VerifyModule {
+		ns: Reg,
+		db: Reg,
+		module: Reg,
+	},
 	/// Load the process's runtime for the module defined in `module`, of the
 	/// database in `ns`/`db`, logging rather than raising a failure.
 	LoadModule {

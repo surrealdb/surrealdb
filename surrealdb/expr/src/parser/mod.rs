@@ -71,6 +71,7 @@ pub use execution::{ExecutionStatement, LogicalStatement, StatementKind, Stateme
 pub use query::{Query, TopLevelExpr};
 mod define;
 pub mod entry;
+mod extension;
 pub(crate) mod geometry;
 pub mod lit;
 mod logical;

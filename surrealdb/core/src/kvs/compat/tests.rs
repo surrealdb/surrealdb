@@ -73,10 +73,8 @@ fn version_writes_current_format(version_name: &str, type_name: &str, fixture: &
 	const V3_3_0_EMBEDS_A_BUMPED_TYPE: &[&str] = &["table_mutations_def"];
 	/// Bumped after the newest snapshot was captured, so *every* frozen file
 	/// holds the pre-bump encoding and none of them can pin the current one:
-	/// `StoredModuleDefinition` gained `unsigned` (1 -> 2), and
-	/// Bumped after the newest snapshot was captured, so *every* frozen file
-	/// holds the pre-bump encoding and none of them can pin the current one:
-	/// `StoredModuleDefinition` gained `unsigned` (1 -> 2),
+	/// `StoredModuleDefinition` is at revision 3 (its revisions 2 and 3 are
+	/// pinned in `module_definition.rs`),
 	/// `StoredAccessDefinition` embeds `JwtAccess`, which gained `audience`
 	/// (1 -> 2), and `StoredTableDefinition` gained the graph markers
 	/// (3 -> 4). Their fixtures still decode — the field defaults in — but

@@ -67,6 +67,7 @@ pub mod view;
 pub mod with;
 
 pub mod decimal;
+pub mod extension;
 pub mod module;
 
 pub mod closure;
@@ -87,6 +88,9 @@ pub use self::dir::Dir;
 pub use self::error::Error;
 pub use self::explain::Explain;
 pub use self::expression::{ExplainFormat, Expr};
+pub use self::extension::{
+	CapabilityTargets, ExtensionCapabilities, ExtensionSigner, ManifestDigest, SigstoreSigner,
+};
 pub use self::fetch::{Fetch, Fetchs};
 pub use self::field::{Field, Fields};
 pub use self::filter::Filter;

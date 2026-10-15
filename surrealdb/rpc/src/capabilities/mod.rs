@@ -787,6 +787,10 @@ impl Capabilities {
 		&self.allow_funcs
 	}
 
+	pub fn denied_functions_ref(&self) -> &Targets<FuncTarget> {
+		&self.deny_funcs
+	}
+
 	pub fn with_experimental(mut self, allow_experimental: Targets<ExperimentalTarget>) -> Self {
 		self.allow_experimental = allow_experimental;
 		self
@@ -834,6 +838,10 @@ impl Capabilities {
 	pub fn with_network_targets(mut self, allow_net: Targets<NetTarget>) -> Self {
 		self.allow_net = allow_net;
 		self
+	}
+
+	pub fn allowed_network_targets_ref(&self) -> &Targets<NetTarget> {
+		&self.allow_net
 	}
 
 	pub fn allowed_network_targets_mut(&mut self) -> &mut Targets<NetTarget> {

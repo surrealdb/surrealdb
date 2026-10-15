@@ -14,6 +14,7 @@ Surrealism is SurrealDB's WASM plugin system. Guest modules are compiled to WASM
 | **surrealism-runtime** | Host. Compiles, instantiates, and executes guest modules. Integrates with SurrealDB. |
 | **surrealism-types** | Shared types and encoding. Used by both host and guest. |
 | **surrealism-macros** | Proc macros. Expands `#[surrealism]` into WIT exports and inventory registration. |
+| **surrealism-verify** | Archive signature verification: `verify(DIGEST, SIGNATURE, SIGNER)`. Pure, no I/O or clock, builds for wasm32. Accepts Sigstore bundle v0.3 (Rekor v2 + RFC 3161 timestamp) and SSH signatures. |
 
 ## Build / Test / Deploy Workflow
 
@@ -25,18 +26,18 @@ Archives are self-contained; load them via `SurrealismPackage::from_file(path)`.
 
 ## Loading a module from SurrealQL
 
-A module executable is either a `.surli` in a bucket or a Silo package named by exact version:
+An extension's archive is either a `.surli` in a bucket or a Silo package named by exact version:
 
 ```surql
-DEFINE MODULE mod::color FROM f"modules:/color.surli" UNSIGNED;
-DEFINE MODULE silo::surrealdb::color::<1.0.0> UNSIGNED;
+DEFINE EXTENSION ext::color FROM f"modules:/color.surli" SIGNER { key: "ssh-ed25519 AAAA… release@acme" };
+DEFINE EXTENSION ext::palette FROM silo::surrealdb::palette<1.0.0> UNSIGNED;
 ```
 
-A silo package is downloaded from `{surrealism_silo_endpoint}/{org}/{pkg}/{major}.{minor}.{patch}.surli`, so it needs no local build and no bucket. The named form takes a `mod::` name; the silo form is keyed by its package coordinates and takes none.
+A silo package is downloaded from `{surrealism_silo_endpoint}/{org}/{pkg}/{major}.{minor}.{patch}.surli`, so it needs no local build and no bucket.
 
-The keyword before the executable is `FROM`, not `AS`: what follows is the module's source, and `AS` would invert the sense it carries everywhere else in SurrealQL, where the alias sits on the right.
+The keyword before the executable is `FROM`, not `AS`: what follows is the extension's source, and `AS` would invert the sense it carries everywhere else in SurrealQL, where the alias sits on the right.
 
-`UNSIGNED` is a trailing clause, unordered with `COMMENT` and `PERMISSIONS`, and mandatory on both forms. No module source is signature-verified yet, so every module opts out of verification explicitly; once Silo signs on upload, the keyword becomes the opt-out it names and definitions written today keep their meaning.
+Every definition pins `DIGEST` (`sha256(surrealism/MANIFEST)`, computed at `DEFINE` when the statement leaves it out) and states at most one of `SIGNER` and `UNSIGNED`. Outside an import it must state one; an import stores a definition with neither, or without `DIGEST`, as a legacy row that does not run until it is defined again. The server runs an archive only when its manifest digest equals `DIGEST` and, with a `SIGNER`, a `surrealism/SIGNATURE` proves that signer through `surrealism-verify`. It checks at `DEFINE` and before every load; see `surrealdb/core/src/extension/trust.rs`. `UNSIGNED` waives the signature only.
 
 ## Security Model
 
@@ -57,6 +58,27 @@ The keyword before the executable is `FROM`, not `AS`: what follows is the modul
 - `surrealism/package.toml` — package file (package meta, capabilities, ABI)
 - `surrealism/exports.toml` — function signatures (args/returns) extracted at build
 - `surrealism/fs/*` — optional read-only filesystem attachment
+- `surrealism/MANIFEST` — every other file with its SHA-256 hash; its own hash is the archive's digest
+- `surrealism/SIGNATURE` — optional; the only file the manifest does not list. Either an armored SSH signature, or for Sigstore a JSON envelope (`application/vnd.surrealdb.extension-signature.v1+json`) holding the bundle and a `trusted_root.json` reduced to the anchors that verify it, so the archive verifies offline (`surrealism_verify::verify_offline`). The server ignores the embedded root and verifies only against the definition's `SIGNER`
+
+The manifest's bytes are exact, because the digest hashes them: UTF-8 with no
+BOM, one line per file, `sha256:` + 64 lowercase hex + two spaces + the path,
+LF after every line, paths sorted by raw bytes. `manifest.rs` writes and parses
+it; `Manifest::parse` accepts only what `Manifest::from_entries` writes.
+
+`SurrealismPackage::from_reader` hashes each file in its single pass and returns
+the package only if the archive passes four rules:
+
+1. The manifest lists every file except `SIGNATURE`, and every listed path is a file in the archive with a matching hash.
+2. No path appears twice.
+3. Paths are canonical: no `./`, no `..`, no empty segment, no backslash, no `:` and no Windows device name (`CON`, `NUL`, `COM1`, …) as a segment, and no PAX or long-name header that renames an entry (a GNU long name whose header holds the truncated path is allowed). `mod.wasm` is read only up to `MAX_WASM_BYTES`.
+4. Entries are regular files or directories only, and every directory holds a file the manifest lists (`pack` writes no empty directory).
+
+Every reader decompresses at most `archive_byte_limit(max_fs_bytes)` bytes: `MAX_WASM_BYTES`, the server's attached-file bound, and 64 MiB for the rest.
+
+`digest()` is `sha256(MANIFEST)`; `signature()` returns the raw `SIGNATURE`
+bytes without interpreting them. `pack` writes the manifest and returns the
+digest.
 
 The package file has a legacy name, `surrealism.toml`. Both names resolve the same way (`PackageFile::locate` in a project, `SurrealismPackage::from_reader` in an archive):
 
@@ -66,9 +88,9 @@ The package file has a legacy name, `surrealism.toml`. Both names resolve the sa
 
 ## ABI Versioning
 
-ABI version 3 is current. Stored in `package.toml`. Build tool stamps `abi = 3`; user values are ignored. Older `p1`/`1` for Preview 1 is legacy.
+ABI version 4 is current: WIT package `surrealism:extension`, world `extension`, and an archive with a `MANIFEST`. Stored in `package.toml`. Build tool stamps `abi = 4`; user values are ignored. Older `p1`/`1` for Preview 1 is legacy.
 
-An archive whose `abi` does not match is rejected at load with `UnsupportedAbi`, so a module built against an older SDK must be rebuilt rather than failing later with a missing-import error from the linker.
+An archive whose `abi` does not match is rejected at load with `UnsupportedAbi`, which tells the user to rebuild with the 4.0 SDK, rather than failing later with a missing-import error from the linker.
 
 The number moves at most once per release that changes the world, not once per
 change. Inside a release cycle the world may move several times under one ABI

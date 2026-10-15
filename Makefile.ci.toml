@@ -629,6 +629,12 @@ script = '''
             --target wasm32-unknown-unknown \
             -- -D warnings
     done
+
+    # The extension signature verifier. Every build that loads extensions
+    # verifies them, wasm32 hosts included, and nothing above depends on it.
+    cargo clippy --locked --package surrealism-verify \
+        --target wasm32-unknown-unknown \
+        -- -D warnings
 '''
 
 [tasks.ci-wasm-size-budget]

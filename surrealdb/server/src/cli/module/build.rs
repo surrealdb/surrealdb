@@ -60,9 +60,14 @@ pub async fn init(path: Option<PathBuf>, out: Option<PathBuf>, debug: bool) -> R
 		exports,
 		fs: None,
 		logo,
+		manifest: None,
+		signature: None,
 	};
 	let out = resolve_output_path(out, &package.config)?;
-	package.pack(out, fs_dir.as_deref()).prefix_err(|| "Failed to pack Surrealism package")?;
+	let digest = package
+		.pack(out.clone(), fs_dir.as_deref())
+		.prefix_err(|| "Failed to pack Surrealism package")?;
+	println!("Packed {} (digest {digest})", out.display());
 
 	Ok(())
 }
@@ -78,6 +83,8 @@ async fn extract_exports(wasm: &[u8], config: &SurrealismConfig) -> Result<Expor
 		exports: ExportsManifest::empty(),
 		fs: None,
 		logo: None,
+		manifest: None,
+		signature: None,
 	};
 
 	// A local build, so there is no server deny list to apply.

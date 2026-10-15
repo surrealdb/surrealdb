@@ -280,6 +280,9 @@ mod tests {
 				patch,
 			}),
 			unsigned: true,
+			digest: None,
+			signer: None,
+			capabilities: None,
 		}
 	}
 
@@ -295,6 +298,9 @@ mod tests {
 				key: format!("/{name}.wasm"),
 			}),
 			unsigned: true,
+			digest: None,
+			signer: None,
+			capabilities: None,
 		}
 	}
 
@@ -598,6 +604,9 @@ mod tests {
 					key: "/anonymous.wasm".to_string(),
 				}),
 				unsigned: true,
+				digest: None,
+				signer: None,
+				capabilities: None,
 			};
 			assert!(nameless.get_storage_name().is_err());
 			write_at(&ds, ns, db, "mod::anonymous", &nameless).await;

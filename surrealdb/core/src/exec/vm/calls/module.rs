@@ -81,28 +81,59 @@ pub(crate) async fn read_module(
 }
 
 /// An export of a module, resolved against the context a call runs in: the
-/// module's executable and the export's signature.
+/// module's executable, the `DIGEST` and `SIGNER` its archive is checked
+/// against, and the export's signature.
 #[cfg(feature = "surrealism")]
 pub(crate) struct ModuleExport {
 	executable: crate::expr::module::ModuleExecutable,
+	/// The definition the call resolved to, shared rather than copied: its
+	/// `SIGNER` can carry KBs of certificates.
+	definition: Arc<ModuleDefinition>,
+	/// The [`crate::extension::trust::signer_fingerprint`] of the definition's
+	/// `SIGNER`, computed once for every check the call makes.
+	fingerprint: Option<[u8; 32]>,
 	signature: crate::expr::module::Signature,
+}
+
+#[cfg(feature = "surrealism")]
+impl ModuleExport {
+	fn trust(&self) -> crate::extension::trust::Trust<'_> {
+		crate::extension::trust::Trust {
+			digest: self.definition.digest.as_ref(),
+			signer: self.definition.signer.as_ref().zip(self.fingerprint),
+			unsigned: self.definition.unsigned,
+		}
+	}
 }
 
 /// Export `sub` of module `definition`, resolved for a call from `ctx`: the
 /// executable's signature for it, read before the call's arguments are
 /// evaluated.
+///
+/// A definition without `DIGEST` (see [`ModuleDefinition::needs_reinstall`])
+/// is refused before its archive is touched: it was built for an earlier ABI
+/// and pins no code.
 #[cfg(feature = "surrealism")]
 pub(crate) async fn module_export(
-	definition: &ModuleDefinition,
+	definition: &Arc<ModuleDefinition>,
 	sub: Option<&str>,
 	ctx: &EvalContext<'_>,
 ) -> FlowResult<ModuleExport> {
+	if definition.needs_reinstall() {
+		let name = definition.get_name().map_err(crate::expr::ControlFlow::Err)?;
+		return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
+			"The extension `{name}` cannot run: {}",
+			crate::catalog::REINSTALL_WARNING
+		)));
+	}
 	let db_ctx = ctx.exec_ctx.database().map_err(|e| crate::expr::ControlFlow::Err(e.into()))?;
 	let ns_id = db_ctx.ns_ctx.ns.namespace_id;
 	let db_id = db_ctx.db.database_id;
 	let executable: crate::expr::module::ModuleExecutable = definition.executable.clone().into();
+	let trust = crate::extension::trust::Trust::from(&**definition);
 	let signature = crate::fnc::module::module_executable_signature(
 		&executable,
+		trust,
 		ctx.exec_ctx.ctx(),
 		&ns_id,
 		&db_id,
@@ -111,6 +142,8 @@ pub(crate) async fn module_export(
 	.await?;
 	Ok(ModuleExport {
 		executable,
+		definition: Arc::clone(definition),
+		fingerprint: trust.signer.map(|(_, fingerprint)| fingerprint),
 		signature,
 	})
 }
@@ -173,6 +206,7 @@ pub(crate) async fn run_module_export(
 
 	let result = crate::fnc::module::module_executable_run(
 		&export.executable,
+		export.trust(),
 		ctx.exec_ctx.ctx(),
 		&opt,
 		doc.as_ref(),

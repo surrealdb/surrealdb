@@ -31,7 +31,7 @@ impl std::fmt::Display for Target {
 pub struct AbiVersion(pub u32);
 
 impl AbiVersion {
-	pub const CURRENT: Self = Self(3);
+	pub const CURRENT: Self = Self(4);
 }
 
 impl Serialize for AbiVersion {
@@ -196,7 +196,7 @@ version = "0.1.0"
 	#[test]
 	fn parse_full_config() {
 		let toml = r#"
-abi = 3
+abi = 4
 
 [package]
 organisation = "acme"

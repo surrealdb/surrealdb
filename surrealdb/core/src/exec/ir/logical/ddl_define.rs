@@ -659,7 +659,10 @@ pub(super) fn plan_define(define: &DefineStatement, checks: DdlChecks) -> Planne
 			let definition = crate::catalog::ModuleDefinition {
 				name: stmt.name.clone(),
 				executable: stmt.executable.clone().into(),
+				digest: stmt.digest.clone(),
+				signer: stmt.signer.clone(),
 				unsigned: stmt.unsigned,
+				capabilities: stmt.capabilities.clone(),
 				comment: comment_text(&stmt.comment),
 				permissions: stmt.permissions.clone(),
 				permissions_body: crate::catalog::LogicalPermissionBody::of(&stmt.permissions),
@@ -671,6 +674,7 @@ pub(super) fn plan_define(define: &DefineStatement, checks: DdlChecks) -> Planne
 					name: stmt.name.clone(),
 					executable: stmt.executable.clone(),
 					unsigned: stmt.unsigned,
+					signed: stmt.signer.is_some(),
 					comment,
 					permissions,
 				},

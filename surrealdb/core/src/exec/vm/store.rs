@@ -1750,10 +1750,81 @@ async fn step_inner(
 						silo.patch,
 					),
 				};
-				cache.remove(&lookup);
+				if let Some(digest) =
+					md.digest.as_ref().and_then(|d| crate::extension::trust::digest_bytes(d).ok())
+				{
+					cache.remove(&lookup, digest);
+				}
 			}
 			#[cfg(not(feature = "surrealism"))]
 			let _ = (ns, db, module);
+		}
+		StoreInstr::VerifyModule {
+			ns,
+			db,
+			module,
+		} => {
+			let mut md: crate::catalog::StoredModuleDefinition = rust(&read(regs, *module))?;
+			// An export writes DIGEST, and SIGNER or UNSIGNED, for every
+			// definition that records them, so an imported definition without
+			// DIGEST, or without both SIGNER and UNSIGNED, is one a release
+			// before revision 3 wrote. It is restored as such a release stored
+			// it: no DIGEST, signer or capabilities, so it does not run until it
+			// is defined again. Nothing is fetched.
+			let legacy = md.digest.is_none() || (md.signer.is_none() && !md.unsigned);
+			if legacy && ctx.options().is_some_and(|options| options.import) {
+				md.digest = None;
+				md.signer = None;
+				md.capabilities = None;
+				let value = md.into_vm_value().map_err(|e| ControlFlow::Err(e.into()))?;
+				write(regs, *module, value);
+				return Ok(None);
+			}
+			let ns = crate::catalog::NamespaceId(id_of(&read(regs, *ns))?);
+			let db = crate::catalog::DatabaseId(id_of(&read(regs, *db))?);
+			let given = md.digest.is_some();
+			// Reading the archive's bucket reads the bucket's definition: a
+			// load this instruction makes at run time, so it is unsealed.
+			let archive = crate::kvs::catalog_reads::sealed(
+				false,
+				crate::extension::archive::verify_definition(
+					ctx.ctx(),
+					ns,
+					db,
+					&md.executable,
+					&mut md.digest,
+					md.signer.as_ref(),
+					md.unsigned,
+				),
+			)
+			.await
+			.map_err(ControlFlow::Err)?;
+			// The archive just fetched and checked builds the module now, so the
+			// `LoadModule` after the catalog write finds it cached instead of
+			// fetching it again. A failure here is recorded by the cache and
+			// reported by `LoadModule`.
+			#[cfg(feature = "surrealism")]
+			if let Some(archive) = archive {
+				use crate::catalog::FromStored as _;
+				let definition =
+					crate::catalog::ModuleDefinition::from_stored(&md).map_err(ControlFlow::Err)?;
+				let lookup = surrealism_lookup(&ns, &db, &definition.executable);
+				let _ = crate::kvs::catalog_reads::sealed(
+					false,
+					ctx.ctx().get_surrealism_module_from(
+						lookup,
+						(&definition).into(),
+						Some(archive),
+					),
+				)
+				.await;
+			}
+			#[cfg(not(feature = "surrealism"))]
+			let _ = archive;
+			if !given {
+				let value = md.into_vm_value().map_err(|e| ControlFlow::Err(e.into()))?;
+				write(regs, *module, value);
+			}
 		}
 		StoreInstr::LoadModule {
 			ns,
@@ -1767,43 +1838,41 @@ async fn step_inner(
 				let ns = crate::catalog::NamespaceId(id_of(&read(regs, *ns))?);
 				let db = crate::catalog::DatabaseId(id_of(&read(regs, *db))?);
 				let md: crate::catalog::StoredModuleDefinition = rust(&read(regs, *module))?;
-				// A definition without `UNSIGNED` reaches the store only in an
-				// import, as a legacy row that does not run, so it is not loaded.
-				if md.unsigned {
-					let storage_name = md.get_storage_name().ok();
-					let md = crate::catalog::ModuleDefinition::from_stored(&md)
-						.map_err(ControlFlow::Err)?;
-					let lookup = match &md.executable {
-						ModuleExecutable::Surrealism(surrealism) => SurrealismCacheLookup::File(
-							&ns,
-							&db,
-							&surrealism.bucket,
-							&surrealism.key,
-						),
-						ModuleExecutable::Silo(silo) => SurrealismCacheLookup::Silo(
-							&ns,
-							&db,
-							&silo.organisation,
-							&silo.package,
-							silo.major,
-							silo.minor,
-							silo.patch,
-						),
-					};
-					// The eager load reads the bucket the definition names, a load a
-					// running program is allowed, so it is declared unsealed.
-					let loaded = crate::kvs::catalog_reads::sealed(
-						false,
-						ctx.ctx().get_surrealism_runtime(lookup),
-					)
-					.await;
-					if let Err(e) = loaded {
-						tracing::warn!(
-							module = ?storage_name,
-							error = %e,
-							"Failed to eagerly load surrealism module into cache"
-						);
+				let storage_name = md.get_storage_name().ok();
+				let md =
+					crate::catalog::ModuleDefinition::from_stored(&md).map_err(ControlFlow::Err)?;
+				// A definition without `DIGEST` does not run, so there is
+				// nothing to load; see `ModuleDefinition::needs_reinstall`.
+				if md.needs_reinstall() {
+					return Ok(None);
+				}
+				let lookup = match &md.executable {
+					ModuleExecutable::Surrealism(surrealism) => {
+						SurrealismCacheLookup::File(&ns, &db, &surrealism.bucket, &surrealism.key)
 					}
+					ModuleExecutable::Silo(silo) => SurrealismCacheLookup::Silo(
+						&ns,
+						&db,
+						&silo.organisation,
+						&silo.package,
+						silo.major,
+						silo.minor,
+						silo.patch,
+					),
+				};
+				// The eager load reads the bucket the definition names, a load a
+				// running program is allowed, so it is declared unsealed.
+				let loaded = crate::kvs::catalog_reads::sealed(
+					false,
+					ctx.ctx().get_surrealism_runtime(lookup, (&md).into()),
+				)
+				.await;
+				if let Err(e) = loaded {
+					tracing::warn!(
+						module = ?storage_name,
+						error = %e,
+						"Failed to eagerly load surrealism module into cache"
+					);
 				}
 			}
 			#[cfg(not(feature = "surrealism"))]
@@ -2149,6 +2218,32 @@ fn stamp_of(value: &Value) -> FlowResult<u64> {
 	}
 }
 
+/// The cache lookup of the archive `executable` names, in the database
+/// `ns`/`db`.
+#[cfg(feature = "surrealism")]
+fn surrealism_lookup<'a>(
+	ns: &'a crate::catalog::NamespaceId,
+	db: &'a crate::catalog::DatabaseId,
+	executable: &'a crate::catalog::ModuleExecutable,
+) -> crate::surrealism::cache::SurrealismCacheLookup<'a> {
+	use crate::catalog::ModuleExecutable;
+	use crate::surrealism::cache::SurrealismCacheLookup;
+	match executable {
+		ModuleExecutable::Surrealism(surrealism) => {
+			SurrealismCacheLookup::File(ns, db, &surrealism.bucket, &surrealism.key)
+		}
+		ModuleExecutable::Silo(silo) => SurrealismCacheLookup::Silo(
+			ns,
+			db,
+			&silo.organisation,
+			&silo.package,
+			silo.major,
+			silo.minor,
+			silo.patch,
+		),
+	}
+}
+
 /// The Rust value of a register's value, for a service that holds one: the
 /// conversion of the type's own schema, the inverse of the one that builds the
 /// value from a stored definition.
@@ -2267,6 +2362,7 @@ fn speculative_skip(instr: &StoreInstr) -> bool {
 			| StoreInstr::LoadAnalyzer { .. }
 			| StoreInstr::CleanupMappers { .. }
 			| StoreInstr::EvictModule { .. }
+			| StoreInstr::VerifyModule { .. }
 			| StoreInstr::LoadModule { .. }
 			| StoreInstr::ConnectBucket { .. }
 			| StoreInstr::SequenceDefinedHere { .. }

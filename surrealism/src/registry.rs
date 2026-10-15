@@ -1,7 +1,7 @@
 use core::future::Future;
 use core::pin::Pin;
 
-use crate::bindings::surrealism::plugin::host;
+use crate::bindings::surrealism::extension::host;
 
 /// A boxed future returned by a registered function's invoke thunk.
 ///

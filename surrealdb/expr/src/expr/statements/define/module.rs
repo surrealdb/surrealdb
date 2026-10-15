@@ -3,15 +3,28 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
 use crate::expr::permission::Permission;
-use crate::expr::{CoverStmts, Expr, Literal, ModuleExecutable};
+use crate::expr::{
+	CoverStmts, Expr, ExtensionCapabilities, ExtensionSigner, Literal, ManifestDigest,
+	ModuleExecutable,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineModuleStatement {
 	pub kind: DefineKind,
 	pub name: Option<String>,
 	pub executable: ModuleExecutable,
-	/// See [`crate::expr::statements::define::module::DefineModuleStatement::unsigned`].
+	/// `DIGEST`. `None` when the statement leaves it out, in which case
+	/// executing the statement computes it from the archive.
+	pub digest: Option<ManifestDigest>,
+	/// `SIGNER`. A statement has at most one of `SIGNER` and `UNSIGNED`.
+	pub signer: Option<ExtensionSigner>,
+	/// `UNSIGNED`. A definition with neither clause is refused outside an
+	/// import; an import stores it as a definition to reinstall.
 	pub unsigned: bool,
+	/// `CAPABILITIES`; an absent clause parses as the default, which grants
+	/// nothing. `None` only renders a definition stored before the clause
+	/// existed, which must be reinstalled.
+	pub capabilities: Option<ExtensionCapabilities>,
 	pub comment: Expr,
 	pub permissions: Permission,
 }
@@ -28,8 +41,16 @@ impl ToSql for DefineModuleStatement {
 			write_sql!(f, sql_fmt, " ext::{} FROM", EscapeKwFreeIdent(name));
 		}
 		write_sql!(f, sql_fmt, " {}", self.executable);
-		if self.unsigned {
+		if let Some(digest) = &self.digest {
+			write_sql!(f, sql_fmt, " DIGEST {}", digest);
+		}
+		if let Some(signer) = &self.signer {
+			write_sql!(f, sql_fmt, " SIGNER {}", signer);
+		} else if self.unsigned {
 			f.push_str(" UNSIGNED");
+		}
+		if let Some(capabilities) = &self.capabilities {
+			write_sql!(f, sql_fmt, " CAPABILITIES {}", capabilities);
 		}
 		if !matches!(self.comment, Expr::Literal(Literal::None)) {
 			write_sql!(f, sql_fmt, " COMMENT {}", CoverStmts(&self.comment));

@@ -1603,9 +1603,12 @@ pub fn module_surrealism() -> StoredModuleDefinition {
 			bucket: "my_bucket".to_string(),
 			key: "module_key".to_string(),
 		}),
-		// Definitions serialized before revision 2 predate signing, so they
-		// decode as unsigned.
+		// Definitions serialized before revision 3 decode as unsigned and
+		// record no digest, signer or capabilities.
 		unsigned: true,
+		digest: None,
+		signer: None,
+		capabilities: None,
 	}
 }
 
@@ -1623,6 +1626,9 @@ pub fn module_silo() -> StoredModuleDefinition {
 			patch: 3,
 		}),
 		unsigned: true,
+		digest: None,
+		signer: None,
+		capabilities: None,
 	}
 }
 
@@ -1637,6 +1643,9 @@ pub fn module_no_name() -> StoredModuleDefinition {
 			key: "anonymous_module".to_string(),
 		}),
 		unsigned: true,
+		digest: None,
+		signer: None,
+		capabilities: None,
 	}
 }
 

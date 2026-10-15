@@ -1,4 +1,4 @@
 wit_bindgen::generate!({
-	world: "plugin",
+	world: "extension",
 	path: "wit/surrealism.wit",
 });

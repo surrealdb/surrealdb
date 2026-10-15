@@ -17,23 +17,24 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = '''{ "ext::test": "DEFINE EXTENSION ext::test FROM f\"bucket:/module.wasm\" UNSIGNED COMMENT 'first' PERMISSIONS FULL" }'''
+value = '''{ "ext::test": "DEFINE EXTENSION ext::test FROM f\"bucket:/module.wasm\" DIGEST 'sha256:5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d' UNSIGNED CAPABILITIES {} COMMENT 'first' PERMISSIONS FULL" }'''
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = '''{ "ext::test": "DEFINE EXTENSION ext::test FROM f\"bucket:/module.wasm\" UNSIGNED COMMENT 'second' PERMISSIONS FULL" }'''
+value = '''{ "ext::test": "DEFINE EXTENSION ext::test FROM f\"bucket:/module.wasm\" DIGEST 'sha256:5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d' UNSIGNED CAPABILITIES {} COMMENT 'second' PERMISSIONS FULL" }'''
 
 [[test.results]]
 error = "The extension 'ext::missing' does not exist"
 
 [[test.results]]
 value = "NONE"
+
 */
 
 -- 0
-DEFINE EXTENSION ext::test FROM f"bucket:/module.wasm" UNSIGNED;
+DEFINE EXTENSION ext::test FROM f"bucket:/module.wasm" DIGEST "sha256:5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d" UNSIGNED;
 
 -- 1: the new spelling
 ALTER EXTENSION ext::test COMMENT 'first';

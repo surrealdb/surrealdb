@@ -502,6 +502,14 @@ pub enum Cl {
 	AlterDrop,
 	/// `FOR methods DROP THEN`: `a` list of method `Name`s.
 	ApiDropAction,
+	/// `DIGEST`: `a` the digest string.
+	Digest,
+	/// `SIGNER`: `a` expression, which lowering requires to be an object
+	/// literal.
+	Signer,
+	/// `CAPABILITIES`: `a` expression, which lowering requires to be an object
+	/// literal.
+	Capabilities,
 }
 
 /// Slots of an HNSW or DiskANN record in `extra`. Absent parts are `NONE`.
