@@ -105,10 +105,10 @@ use crate::exec::ir::logical::seam::{
 	BindCx, BindNotes, Built, Control, ExprHost, LoopSite, NameRef, bind_body, bind_expr, invariant,
 };
 use crate::exec::ir::logical::stages::{
-	Derivation, SchemaRegion, TableGates, TableIndexes, TableRepairs, TableSchema, TableViews,
-	ViewBody, catalog_fixed_of, derivations_of, gates_of, image_of, indexes_of, into_text_of,
-	observed_of, repairs_of, schema_of, stage_run, static_mark, stored_of, views_of, write_body,
-	written_table,
+	CondVerdict, Derivation, SchemaRegion, TableGates, TableIndexes, TableRepairs, TableSchema,
+	TableViews, ViewBody, catalog_fixed_of, cond_verdict, derivations_of, gates_of, image_of,
+	indexes_of, into_text_of, observed_of, repairs_of, schema_of, stage_run, static_mark,
+	stored_of, views_of, write_body, written_table,
 };
 use crate::exec::ir::logical::txn::{StatementBody, StatementSlot, TopRegion, regions_of};
 use crate::exec::ir::logical::verify::{loop_body_args, timestamp_arg};
@@ -116,7 +116,7 @@ use crate::exec::ir::op_kind::OpKind;
 use crate::exec::ir::unit::{UnitForm, UnitKind};
 use crate::exec::ir::{RequestInput, RequestStatement};
 use crate::exec::logical::may_read_clock;
-use crate::exec::operators::write::plan::WriteFacts;
+use crate::exec::operators::write::plan::{WriteFacts, WriteForm as PlanForm};
 use crate::exec::operators::{SplitTarget, split_target};
 use crate::exec::planner::analyse_aggregation;
 use crate::exec::planner::fold::{changes_the_catalog, computed_reads, permission_subject};
@@ -2999,8 +2999,9 @@ fn bind_write(cx: &mut BindCx<'_>, write: &LogicalWrite) -> Result<Flow, IrError
 	// The write of a view row runs the view table's order for the action its view's maintenance
 	// settled, whatever statement stands for it.
 	if bundle.as_ref().is_some_and(|bundle| bundle.view_row) {
-		facts.form = crate::exec::operators::write::plan::WriteForm::View;
+		facts.form = PlanForm::View;
 	}
+	let bundled = bundle.is_some();
 	let run = stage_run(facts.form, facts);
 	// A write that may meet definitions the bind cannot read (one after a statement of its list
 	// that may change the catalog, one in a statement that may change it while it runs, or one
@@ -3049,6 +3050,12 @@ fn bind_write(cx: &mut BindCx<'_>, write: &LogicalWrite) -> Result<Flow, IrError
 	attrs.stored.image_layers = field_view.layers;
 	let observed = observed_of(cx.catalog(), table.as_ref());
 	attrs.derived = gates.derived_attr(observed.as_deref());
+	// A statement `UPDATE` or `DELETE` whose condition is a literal no record satisfies states it:
+	// no record passes its `WHERE` stage. The stages after it are bound all the same, and the
+	// physical phase decides from the table's definitions whether they are removed.
+	attrs.flags.where_never = matches!(facts.form, PlanForm::Update | PlanForm::Delete)
+		&& !bundled
+		&& cond_verdict(write.cond.as_ref()) == CondVerdict::Never;
 	let Some(into) = bind_into(cx, write)? else {
 		return Ok(Flow::Diverged);
 	};
@@ -3231,6 +3238,7 @@ fn write_attrs_of(
 			ignore,
 			relation,
 			or_update: write.duplicate_update.is_some() || relate_or_update,
+			where_never: false,
 		},
 		body: write_body(facts.form, facts, run, write.cond.is_some())?,
 		gates: WriteGates::default(),

@@ -88,6 +88,7 @@ use crate::exec::ir::iface::types::TypeKnowledge;
 use crate::exec::ir::logical::ops::{LogOp, LogTag, LoopKind, SourceAttrs, SourceRefShape};
 use crate::exec::ir::logical::seam::invariant;
 use crate::exec::ir::op_kind::OpKind;
+use crate::exec::logical::effects::Oracle;
 use crate::exec::logical::{Descend, visit_binding_pruning};
 use crate::exec::operators::scan::MergeMode;
 use crate::exec::operators::scan::pipeline::determine_scan_direction;
@@ -99,7 +100,7 @@ use crate::exec::planner::{RestrictedPrefixes, decide_union_merge};
 use crate::exec::vm::payload::{CountSelect, KnnFilter, KnnPrefilter, Refusal, ValuesRead};
 use crate::exec::vm::plain::ValueData;
 use crate::expr::logical::{
-	LogicalExpr, LogicalLiteral, LogicalOrdering, LogicalRecordIdKey, Schema,
+	LogicalExpr, LogicalLiteral, LogicalOrdering, LogicalRecordIdKey, Schema, effects_of,
 };
 use crate::expr::with::With;
 use crate::expr::{BinaryOperator, Function};
@@ -775,6 +776,28 @@ fn settled_false(predicate: &Reconstructed) -> bool {
 		.iter()
 		.any(|(_, expr)| matches!(expr, LogicalExpr::Literal(LogicalLiteral::Bool(false))))
 		&& empties_unobserved(predicate)
+}
+
+/// Whether a write under `predicate` takes no subject: [`settled_false`], and every conjunct
+/// before the first literal `false` only reads. A conjunct that does anything else, such as a
+/// call that advances state or draws entropy, is evaluated for each subject the write reads, so
+/// the subjects are read for it.
+fn write_settled_false(predicate: &Reconstructed, registry: &FunctionRegistry) -> bool {
+	let first_false = predicate
+		.conjuncts
+		.iter()
+		.find(|(_, expr)| matches!(expr, LogicalExpr::Literal(LogicalLiteral::Bool(false))))
+		.map(|(at, _)| *at);
+	let Some(first_false) = first_false else {
+		return false;
+	};
+	let oracle = Oracle::new(registry);
+	settled_false(predicate)
+		&& predicate
+			.conjuncts
+			.iter()
+			.filter(|(at, _)| *at < first_false)
+			.all(|(_, expr)| effects_of(expr, &oracle).effect_free())
 }
 
 /// The op of the decision, and the residual it leaves.
@@ -1483,9 +1506,11 @@ fn plan_source(ir: &Ir, op: OpId, cx: &PhysCx<'_>) -> Result<Option<Planned>, Ir
 	// A member of a union of sources whose predicate holds a `KNN` operator is searched when the
 	// predicate over the union's rows gives it a `KNN` scan. The subjects of a write are read by
 	// the access path the write's `WHERE` chooses, as a read under it would be; a write's `KNN`
-	// scan must know its query vector. A `WHERE` that reads no row leaves the write's subjects the
-	// table's: the write still meets the table it names, which raises where it is not defined.
-	// Any other is read as no predicate reaches it.
+	// scan must know its query vector. A `WHERE` that reads no row empties the subjects of a write
+	// over a table whose definitions the plan holds. Over any other table the write's subjects stay
+	// the table's: the write still meets the table it names, which raises where it is not defined
+	// and answers for the definitions it finds where a catalog change precedes it. Any other is
+	// read as no predicate reaches it.
 	let write = writes_subjects(ir, op);
 	let across = match stages.as_ref() {
 		Some(stages) => (stages.united && !ranks) || write,
@@ -1502,11 +1527,17 @@ fn plan_source(ir: &Ir, op: OpId, cx: &PhysCx<'_>) -> Result<Option<Planned>, Ir
 		}
 		false => None,
 	};
+	let holds_definitions = answers.defined
+		&& !attrs.may_meet_change
+		&& !matches!(answers.restricted, RestrictedSelect::Unresolved);
+	let emptied = |predicate: &Reconstructed| {
+		holds_definitions && write_settled_false(predicate, cx.effects.registry)
+	};
 	let searched = |(offer, choice): &(Offer, AccessChoice)| {
 		if let PhysOp::KnnScan(attrs) = &choice.access {
 			!offer.in_write || !attrs.vector.is_empty()
 		} else {
-			offer.in_write && !matches!(choice.access, PhysOp::Union)
+			offer.in_write && (!matches!(choice.access, PhysOp::Union) || emptied(&offer.predicate))
 		}
 	};
 	let (offer, mut choice) = match across {
@@ -1550,14 +1581,19 @@ fn plan_source(ir: &Ir, op: OpId, cx: &PhysCx<'_>) -> Result<Option<Planned>, Ir
 	}
 	// A member of a union of sources under a predicate settled false, which the fold leaves only
 	// where no member's rows can dereference a record, lists nothing: every row of the union is
-	// refused, so the table's read is the empty scan.
+	// refused, so the table's read is the empty scan. The subjects of a write under a `WHERE`
+	// settled false are no rows either, where the plan holds the table's definitions.
 	if matches!(attrs.source_ref, SourceRefShape::Table(_))
 		&& choice.refusal.is_none()
 		&& choice.knn.is_none()
 		&& !matches!(choice.access, PhysOp::Union)
 	{
 		let across = offer_across(ir, op)?;
-		if across.united && !across.in_write && settled_false(&across.predicate) {
+		let empty = match across.in_write {
+			true => emptied(&across.predicate),
+			false => across.united && settled_false(&across.predicate),
+		};
+		if empty {
 			choice.access = PhysOp::Union;
 			choice.fallback = None;
 			choice.point_lookup = None;

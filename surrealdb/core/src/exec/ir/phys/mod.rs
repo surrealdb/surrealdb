@@ -67,7 +67,10 @@ pub(crate) mod reg;
 pub(crate) mod rewrite;
 pub(crate) mod schedule;
 pub(crate) mod seed_host;
+#[cfg(all(test, feature = "kv-mem"))]
+mod tests_write_prune;
 pub(crate) mod verify;
+mod write_prune;
 
 use ops::{
 	ComputedReadsShape, CountShape, KnnTargetShape, MatchStepAttrs, OmissionShape, ProjectionShape,
@@ -1104,6 +1107,7 @@ pub(crate) async fn plan_physical(
 		},
 		other => other,
 	})?;
+	write_prune::run(ir, facts, cx)?;
 	let top = ir.top();
 	pipeline::build(ir, facts, top)?;
 	pipeline::assign(ir, facts)?;

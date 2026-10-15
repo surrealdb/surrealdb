@@ -1051,12 +1051,23 @@ async fn show(program: &Program, instr: &WriteInstr, state: &mut State) -> FlowR
 			let as_is = !matches!(source, Value::Object(_))
 				|| row.id.is_none()
 				|| (!*checked && *image == RecordImage::Current && row.fields_computed);
-			let source = source.clone();
 			let shown = match view {
+				// A pipeline may raise, and the record's failure handlers then
+				// see the row as it stood, so it runs over a copy.
 				Some(view) if !as_is => {
+					let source = source.clone();
 					run_image(program, *view, source, None, state, &exec).await?
 				}
-				_ => source,
+				// No pipeline runs: the output stage is the last of every order,
+				// so nothing reads the image once it is shown, and the output
+				// takes it.
+				_ => std::mem::replace(
+					match image {
+						RecordImage::Current => &mut row.current,
+						RecordImage::Initial => &mut row.initial,
+					},
+					Value::None,
+				),
 			};
 			let write = state
 				.write
@@ -1561,4 +1572,73 @@ fn spec_of<'p>(program: &'p Program, state: &State) -> FlowResult<&'p WriteSpec>
 
 fn write_state(state: &mut State) -> FlowResult<&mut WriteState> {
 	state.write.as_deref_mut().ok_or_else(|| internal("a write source with no write state"))
+}
+
+#[cfg(all(test, feature = "kv-mem"))]
+mod tests {
+	use surrealdb_types::ToSql as _;
+
+	use crate::dbs::Session;
+	use crate::exec::operators::test_util::TestDb;
+
+	const SETUP: &str = "
+		DEFINE TABLE user SCHEMALESS; CREATE user:alice;
+		DEFINE ACCESS user ON DATABASE TYPE RECORD SIGNIN (SELECT * FROM type::record('user', $id))
+			DURATION FOR TOKEN 1h, FOR SESSION 1h;
+		DEFINE TABLE plain SCHEMALESS PERMISSIONS FULL;
+		CREATE plain:1 SET n = 1, tag = 'a';
+		CREATE plain:2 SET n = 1, tag = 'a';
+		CREATE plain:3 SET n = 1, tag = 'a';
+	";
+
+	/// What `sql` answers as `session`, one string per statement.
+	async fn answers(db: &TestDb, session: &Session, sql: &str) -> Vec<String> {
+		let responses = db.datastore().execute(sql, session, None).await.expect("it executes");
+		responses
+			.into_iter()
+			.map(|response| match response.result {
+				Ok(value) => value.to_sql(),
+				Err(error) => format!("error: {error}"),
+			})
+			.collect()
+	}
+
+	/// An image shown through no pipeline is taken out of the row, and is the image the record
+	/// held: the pre-image and the post-image, for a caller whose reads are checked and one whose
+	/// reads are not.
+	#[tokio::test]
+	async fn an_image_shown_without_a_pipeline_is_the_image_as_it_stood() {
+		let record = Session::for_record(
+			"test",
+			"test",
+			"user",
+			surrealdb_types::Value::RecordId(surrealdb_types::RecordId::new("user", "alice")),
+		);
+		for session in [TestDb::owner(), record] {
+			let db = TestDb::new(SETUP).await;
+			let sql = "
+				UPDATE plain:1 SET n = 2 RETURN BEFORE;
+				UPDATE plain:2 SET n = 2 RETURN AFTER;
+				UPDATE plain:3 SET n = 2 RETURN DIFF;
+				UPDATE plain:1 SET n = 3;
+				UPDATE plain:1 SET n = 4 RETURN id, $before.n, $after.n;
+				DELETE plain:2 RETURN BEFORE;
+				CREATE plain:4 SET n = 9 RETURN AFTER;
+			";
+			let held = answers(&db, &session, sql).await;
+			assert_eq!(
+				held,
+				[
+					"[{ id: plain:1, n: 1, tag: 'a' }]",
+					"[{ id: plain:2, n: 2, tag: 'a' }]",
+					"[[{ op: 'replace', path: '/n', value: 2 }]]",
+					"[{ id: plain:1, n: 3, tag: 'a' }]",
+					"[{ \"$after.n\": 4, \"$before.n\": 3, id: plain:1 }]",
+					"[{ id: plain:2, n: 2, tag: 'a' }]",
+					"[{ id: plain:4, n: 9 }]",
+				],
+				"{session:?}"
+			);
+		}
+	}
 }

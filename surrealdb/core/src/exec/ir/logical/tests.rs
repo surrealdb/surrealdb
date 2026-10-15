@@ -1922,6 +1922,7 @@ fn rich_fixtures() -> Vec<LogOp> {
 				ignore: true,
 				relation: true,
 				or_update: true,
+				where_never: true,
 			},
 			body: crate::exec::ir::logical::ops::WriteBody::default(),
 			gates: crate::exec::ir::logical::ops::WriteGates::default(),
@@ -2623,6 +2624,35 @@ fn only_a_layer_names_computed_fields() {
 			op_with_regions(rw, block, project, &[input])
 		});
 		assert_eq!(answer, rejected);
+	}
+}
+
+/// An events op states no event dormant: only the physical write-prune pass does, so a container
+/// of the logical phase that holds a dormant event is rejected.
+#[test]
+fn an_event_is_never_dormant_in_the_logical_phase() {
+	use crate::catalog::auth::AuthLimit;
+	use crate::catalog::{EventDefinition, EventKind};
+
+	for dormant in [false, true] {
+		let answer = rejection_of(|rw, top| {
+			let block = statement_block(rw, top);
+			let definition = EventDefinition::new(
+				"e".into(),
+				"t".into(),
+				crate::syn::expr("($event = 'DELETE')").expect("a clause"),
+				vec![crate::syn::expr("1").expect("a clause")],
+				EventKind::Sync,
+				AuthLimit::new_no_limit(),
+				None,
+			);
+			let mut attrs =
+				super::stages::events_over(&std::sync::Arc::from(vec![definition]), Action::Update)
+					.attrs;
+			attrs.events[0].dormant = dormant;
+			op_with_regions(rw, block, LogOp::Events(Box::new(attrs)), &[])
+		});
+		assert_eq!(answer, dormant.then_some(VerifyRule::PerOp), "dormant: {dormant}");
 	}
 }
 

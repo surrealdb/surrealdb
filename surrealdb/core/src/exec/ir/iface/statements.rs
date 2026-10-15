@@ -97,6 +97,12 @@ pub(crate) struct WriteFlags {
 	/// that carries an `ON DUPLICATE KEY UPDATE` clause, held as a `Clause(DuplicateUpdate)`
 	/// region of the subject loop's body, and `RELATE OR UPDATE`, which has no clause.
 	pub(crate) or_update: bool,
+	/// The statement is an `UPDATE` or a `DELETE` whose `WHERE` condition is a literal that no
+	/// record satisfies (`false`, `NONE` or `NULL`), so that no record passes the `WHERE` stage
+	/// and the stages after it run for none. Stated at bind from the written condition alone; it
+	/// says nothing of the table, which the physical phase reads to decide whether the stages
+	/// after the `WHERE` stage are removed.
+	pub(crate) where_never: bool,
 }
 
 /// What a `logical.content` op writes the record from.

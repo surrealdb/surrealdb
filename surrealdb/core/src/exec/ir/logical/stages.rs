@@ -44,7 +44,7 @@ use crate::exec::ir::error::IrError;
 use crate::exec::ir::iface::catalog::{CatalogAnswer, SemanticCatalog};
 use crate::exec::ir::iface::ids::OpId;
 use crate::exec::ir::iface::region_kind::{ClauseRole, FieldRole, RegionKind};
-use crate::exec::ir::iface::statements::WriteForm;
+use crate::exec::ir::iface::statements::{OutputShape, WriteForm};
 use crate::exec::ir::op_kind::OpKind;
 use crate::exec::ir::phys::ops::PhysOp;
 use crate::exec::operators::scan::pipeline::narrowing_auth_limit;
@@ -53,11 +53,14 @@ use crate::exec::operators::write::plan::{
 };
 use crate::exec::operators::write::stage::StageId;
 use crate::expr::logical::{
-	EvalFrame, GuardKind, LogicalExpr, LogicalFields, LogicalOp, LogicalPermission, LogicalWrite,
-	LogicalWriteSource, LogicalWriteStatement,
+	EvalFrame, GuardKind, LogicalExpr, LogicalFields, LogicalLiteral, LogicalOp, LogicalPermission,
+	LogicalWrite, LogicalWriteSource, LogicalWriteStatement,
 };
+use crate::expr::operator::{BinaryOperator, PrefixOperator};
 use crate::expr::reference::ReferenceDeleteStrategy;
 use crate::expr::{Expr, Part};
+use crate::fnc::operate;
+use crate::val::Value;
 
 /// The one table `write` writes to, when the statement names it. A table or record id target counts
 /// (a `RELATE`'s target is its `through`), and so does an `INSERT`'s `INTO`. With no `INTO`, the
@@ -387,6 +390,57 @@ pub(crate) fn plan_form(form: WriteForm) -> PlanForm {
 	}
 }
 
+/// Whether the `WHERE` condition of a statement write can admit a record.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CondVerdict {
+	/// The condition may be truthy for some record, or the statement has none.
+	Open,
+	/// The condition is a literal no record can satisfy: the `WHERE` stage skips every record
+	/// that reaches it.
+	Never,
+}
+
+/// The verdict on the condition `cond` of a write, from the condition's written form alone.
+///
+/// `Never` exactly when the condition is the literal `false`, `NONE` or `NULL`, the values the
+/// `WHERE` stage skips on (it skips on a value that is not truthy). Any other condition, and no
+/// condition, is `Open`: a computed condition is never decided here, whatever it would fold to.
+pub(crate) fn cond_verdict(cond: Option<&LogicalExpr>) -> CondVerdict {
+	match cond {
+		Some(LogicalExpr::Literal(
+			LogicalLiteral::Bool(false) | LogicalLiteral::None | LogicalLiteral::Null,
+		)) => CondVerdict::Never,
+		Some(_) | None => CondVerdict::Open,
+	}
+}
+
+/// The positions of the stage ops of a write that no record reaches when its `WHERE` condition
+/// admits none ([`CondVerdict::Never`]): the stages after its `WHERE` stage.
+///
+/// `kinds` are the stage ops of the write's loop body, in order, and `body` is the body that names
+/// them. The write must run one order with nothing chosen or retried after the `WHERE` stage, so
+/// that the stages after it are reached by no record: a body that does not branch among one order,
+/// that names a second order, that names a position beyond `kinds`, or that holds no `WHERE` stage
+/// is an invariant failure. The positions answer [`without_stages`].
+pub(crate) fn after_cond(body: &WriteBody, kinds: &[WriteStageKind]) -> Result<Vec<u16>, IrError> {
+	if body.branching != WriteBranching::Sole || !body.second.is_empty() {
+		return Err(invariant("a write cut after its WHERE stage holds more than one order"));
+	}
+	let mut at_cond = None;
+	for (at, position) in body.first.iter().enumerate() {
+		let kind = kinds
+			.get(usize::from(*position))
+			.ok_or_else(|| invariant("a position beyond the stages of a write"))?;
+		if *kind == WriteStageKind::CheckWhereCondition {
+			at_cond = Some(at);
+			break;
+		}
+	}
+	let at_cond =
+		at_cond.ok_or_else(|| invariant("an order cut after its WHERE stage holds none"))?;
+	Ok(body.first[at_cond + 1..].to_vec())
+}
+
 /// The orders `form` selects between, each with the stages the write plan lists for it.
 ///
 /// `facts` shape the orders; its own `form` is replaced by `form`, so the two cannot disagree.
@@ -628,6 +682,299 @@ pub(crate) fn write_body(
 	})
 }
 
+/// Whether the `WHEN` clause `when` of an event is never truthy for a record written by `action`.
+///
+/// The answer is `true` only when the clause is built from literals, `$event`, `!`, `AND`/`&&`,
+/// `OR`/`||`, `=`, `==`, `!=`, `IN`, `NOT IN`, `CONTAINS` and `CONTAINSNOT` alone, and evaluates
+/// to `false`, `NONE` or `NULL`. A literal is a scalar, or an array or an object of literals. Any
+/// other form answers `false`: a block or a closure could rebind `$event`, a call, a field read,
+/// a subquery or another parameter needs a row or a capability, and an operator outside the list is
+/// not decided here. `0`, `""`, `[]` and `{}` are falsy but are not decided either, so the clause
+/// that holds one runs.
+///
+/// `$event` is the name of `action`, as the frame an event runs in binds it. Each operator is
+/// applied by the function the VM's comparison and negation instructions apply, an operator that
+/// fails decides nothing, and `AND` and `OR` answer the operand that decides them without
+/// evaluating the other, as the VM's short circuit does.
+pub(crate) fn when_never_fires(when: &LogicalExpr, action: Action) -> bool {
+	let event = Value::from(match action {
+		Action::Create => "CREATE",
+		Action::Update => "UPDATE",
+		Action::Delete => "DELETE",
+	});
+	admitted(when)
+		&& matches!(when_value(when, &event), Some(Value::Bool(false) | Value::None | Value::Null))
+}
+
+/// Whether every node of `expr` is of the form [`when_never_fires`] admits, including the operand
+/// of an `AND` or an `OR` that the evaluation does not reach.
+#[allow(clippy::wildcard_enum_match_arm)]
+fn admitted(expr: &LogicalExpr) -> bool {
+	match expr {
+		LogicalExpr::Literal(_) | LogicalExpr::Array(_) | LogicalExpr::Object(_) => {
+			is_literal(expr)
+		}
+		LogicalExpr::Param(param) => param.as_str() == "event",
+		LogicalExpr::Prefix {
+			op: PrefixOperator::Not,
+			expr,
+		} => admitted(expr),
+		LogicalExpr::Binary {
+			left,
+			op,
+			right,
+		} => {
+			matches!(
+				op,
+				BinaryOperator::And
+					| BinaryOperator::Or
+					| BinaryOperator::Equal
+					| BinaryOperator::ExactEqual
+					| BinaryOperator::NotEqual
+					| BinaryOperator::Inside
+					| BinaryOperator::NotInside
+					| BinaryOperator::Contain
+					| BinaryOperator::NotContain
+			) && admitted(left)
+				&& admitted(right)
+		}
+		_ => false,
+	}
+}
+
+/// The value of the clause `expr` of the admitted form ([`when_never_fires`]) when `$event` is
+/// `event`, or `None` for a clause outside the form or an operator that fails.
+fn when_value(expr: &LogicalExpr, event: &Value) -> Option<Value> {
+	match expr {
+		LogicalExpr::Literal(_) | LogicalExpr::Array(_) | LogicalExpr::Object(_) => {
+			literal_value(expr)
+		}
+		LogicalExpr::Param(param) => (param.as_str() == "event").then(|| event.clone()),
+		LogicalExpr::Prefix {
+			op: PrefixOperator::Not,
+			expr,
+		} => operate::not(when_value(expr, event)?).ok(),
+		LogicalExpr::Binary {
+			left,
+			op,
+			right,
+		} => match op {
+			BinaryOperator::And | BinaryOperator::Or => {
+				let left = when_value(left, event)?;
+				let decided = left.is_truthy() == matches!(op, BinaryOperator::Or);
+				if decided {
+					Some(left)
+				} else {
+					when_value(right, event)
+				}
+			}
+			BinaryOperator::Equal => compare(operate::equal, left, right, event),
+			BinaryOperator::ExactEqual => compare(operate::exact, left, right, event),
+			BinaryOperator::NotEqual => compare(operate::not_equal, left, right, event),
+			BinaryOperator::Inside => compare(operate::inside, left, right, event),
+			BinaryOperator::NotInside => compare(operate::not_inside, left, right, event),
+			BinaryOperator::Contain => compare(operate::contain, left, right, event),
+			BinaryOperator::NotContain => compare(operate::not_contain, left, right, event),
+			BinaryOperator::Subtract
+			| BinaryOperator::Add
+			| BinaryOperator::Multiply
+			| BinaryOperator::Divide
+			| BinaryOperator::Remainder
+			| BinaryOperator::Power
+			| BinaryOperator::AllEqual
+			| BinaryOperator::AnyEqual
+			| BinaryOperator::NullCoalescing
+			| BinaryOperator::TenaryCondition
+			| BinaryOperator::LessThan
+			| BinaryOperator::LessThanEqual
+			| BinaryOperator::MoreThan
+			| BinaryOperator::MoreThanEqual
+			| BinaryOperator::ContainAll
+			| BinaryOperator::ContainAny
+			| BinaryOperator::ContainNone
+			| BinaryOperator::AllInside
+			| BinaryOperator::AnyInside
+			| BinaryOperator::NoneInside
+			| BinaryOperator::Outside
+			| BinaryOperator::Intersects
+			| BinaryOperator::Range
+			| BinaryOperator::RangeInclusive
+			| BinaryOperator::RangeSkip
+			| BinaryOperator::RangeSkipInclusive
+			| BinaryOperator::Matches(_)
+			| BinaryOperator::NearestNeighbor(_) => None,
+		},
+		LogicalExpr::Prefix {
+			..
+		}
+		| LogicalExpr::Set(_)
+		| LogicalExpr::RecordId(_)
+		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
+		| LogicalExpr::Constant(_)
+		| LogicalExpr::Field(_)
+		| LogicalExpr::Doc
+		| LogicalExpr::Current
+		| LogicalExpr::Access {
+			..
+		}
+		| LogicalExpr::Index {
+			..
+		}
+		| LogicalExpr::First(_)
+		| LogicalExpr::Last(_)
+		| LogicalExpr::Each(_)
+		| LogicalExpr::Flatten {
+			..
+		}
+		| LogicalExpr::Filter {
+			..
+		}
+		| LogicalExpr::Method {
+			..
+		}
+		| LogicalExpr::Destructure {
+			..
+		}
+		| LogicalExpr::Optional {
+			..
+		}
+		| LogicalExpr::Lookup {
+			..
+		}
+		| LogicalExpr::Recurse(_)
+		| LogicalExpr::RepeatRecurse(_)
+		| LogicalExpr::Broadcast {
+			..
+		}
+		| LogicalExpr::SetField {
+			..
+		}
+		| LogicalExpr::Postfix {
+			..
+		}
+		| LogicalExpr::Invoke {
+			..
+		}
+		| LogicalExpr::Call(_)
+		| LogicalExpr::Closure(_)
+		| LogicalExpr::If(_)
+		| LogicalExpr::Throw(_)
+		| LogicalExpr::Break
+		| LogicalExpr::Continue
+		| LogicalExpr::Subquery(_) => None,
+	}
+}
+
+/// `apply` over the values of the operands `left` and `right`, or `None` when either is outside the
+/// admitted form or the operator fails.
+fn compare(
+	apply: fn(&Value, &Value) -> anyhow::Result<Value>,
+	left: &LogicalExpr,
+	right: &LogicalExpr,
+	event: &Value,
+) -> Option<Value> {
+	apply(&when_value(left, event)?, &when_value(right, event)?).ok()
+}
+
+/// The value of the literal `expr` ([`is_literal`]), or `None` for any other expression.
+fn literal_value(expr: &LogicalExpr) -> Option<Value> {
+	if is_literal(expr) {
+		crate::exec::planner::util::try_literal_to_value(expr)
+	} else {
+		None
+	}
+}
+
+/// Whether `expr` is a scalar literal, or an array or an object whose elements are literals. A
+/// regex, a geometry, a file and an unbounded range are not: they have no scalar value to compare.
+fn is_literal(expr: &LogicalExpr) -> bool {
+	match expr {
+		LogicalExpr::Literal(literal) => match literal {
+			LogicalLiteral::None
+			| LogicalLiteral::Null
+			| LogicalLiteral::Bool(_)
+			| LogicalLiteral::Float(_)
+			| LogicalLiteral::Integer(_)
+			| LogicalLiteral::Decimal(_)
+			| LogicalLiteral::String(_)
+			| LogicalLiteral::Bytes(_)
+			| LogicalLiteral::Duration(_)
+			| LogicalLiteral::Datetime(_)
+			| LogicalLiteral::Uuid(_) => true,
+			LogicalLiteral::UnboundedRange
+			| LogicalLiteral::Regex(_)
+			| LogicalLiteral::Geometry(_)
+			| LogicalLiteral::File(_) => false,
+		},
+		LogicalExpr::Array(items) => items.iter().all(is_literal),
+		LogicalExpr::Object(entries) => entries.iter().all(|(_, item)| is_literal(item)),
+		LogicalExpr::Set(_)
+		| LogicalExpr::RecordId(_)
+		| LogicalExpr::Param(_)
+		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
+		| LogicalExpr::Constant(_)
+		| LogicalExpr::Field(_)
+		| LogicalExpr::Doc
+		| LogicalExpr::Current
+		| LogicalExpr::Access {
+			..
+		}
+		| LogicalExpr::Index {
+			..
+		}
+		| LogicalExpr::First(_)
+		| LogicalExpr::Last(_)
+		| LogicalExpr::Each(_)
+		| LogicalExpr::Flatten {
+			..
+		}
+		| LogicalExpr::Filter {
+			..
+		}
+		| LogicalExpr::Method {
+			..
+		}
+		| LogicalExpr::Destructure {
+			..
+		}
+		| LogicalExpr::Optional {
+			..
+		}
+		| LogicalExpr::Lookup {
+			..
+		}
+		| LogicalExpr::Recurse(_)
+		| LogicalExpr::RepeatRecurse(_)
+		| LogicalExpr::Broadcast {
+			..
+		}
+		| LogicalExpr::SetField {
+			..
+		}
+		| LogicalExpr::Prefix {
+			..
+		}
+		| LogicalExpr::Postfix {
+			..
+		}
+		| LogicalExpr::Invoke {
+			..
+		}
+		| LogicalExpr::Binary {
+			..
+		}
+		| LogicalExpr::Call(_)
+		| LogicalExpr::Closure(_)
+		| LogicalExpr::If(_)
+		| LogicalExpr::Throw(_)
+		| LogicalExpr::Break
+		| LogicalExpr::Continue
+		| LogicalExpr::Subquery(_) => false,
+	}
+}
+
 /// The subject loop that yields the subjects of the write `write`. It is the write loop that the
 /// write's first operand is the result of, or the write loop held by the `phys.pipeline` of that
 /// operand, which is where placement leaves a loop that fans out. `None` when the first operand is
@@ -737,6 +1084,116 @@ pub(crate) fn body_fault(body: &WriteBody, stages: usize) -> Option<&'static str
 		return Some("a stage of a write belongs to no order");
 	}
 	None
+}
+
+/// Whether `stage` is a stage whose verdict nothing observes under the statement's `output`, so
+/// only its evaluation (a raise or an effect) can be seen.
+///
+/// Under `RETURN NONE` a record's output is `None` whether `CheckSelectPermissions` admits or
+/// skips it. A skip after the store changes neither the affected count, which follows the
+/// record's mutation, nor the matched count, which is set at the `WHERE` stage. Nothing else is
+/// output-blind: `RETURN NULL` emits a row per record, so its gate decides whether a row exists,
+/// and every other stage decides what is stored, matched or raised.
+pub(crate) fn output_blind(output: OutputShape, stage: WriteStageKind) -> bool {
+	match stage {
+		WriteStageKind::CheckSelectPermissions(_) => output == OutputShape::None,
+		WriteStageKind::CheckRecordUserAccess
+		| WriteStageKind::CheckRecordExists
+		| WriteStageKind::CheckTableNotView
+		| WriteStageKind::CheckTableNotLightweight(_)
+		| WriteStageKind::CheckTableType(_)
+		| WriteStageKind::CheckPermissionsQuickCreate
+		| WriteStageKind::CheckUpdatePermissions
+		| WriteStageKind::CheckDeletePermissions
+		| WriteStageKind::CheckCreatePermissions
+		| WriteStageKind::RecheckUpdatePermissions
+		| WriteStageKind::CheckWhereCondition
+		| WriteStageKind::ComputeInputData
+		| WriteStageKind::CheckDataFields
+		| WriteStageKind::ProcessRecordData
+		| WriteStageKind::ProcessMergeData
+		| WriteStageKind::DefaultRecordData
+		| WriteStageKind::GenerateRecordId
+		| WriteStageKind::ProcessTableFields
+		| WriteStageKind::CleanupTableFields
+		| WriteStageKind::CleanupTableReferences
+		| WriteStageKind::ClearRecordData
+		| WriteStageKind::StoreRecordData
+		| WriteStageKind::StoreEdgesData
+		| WriteStageKind::StoreInlineAdjacencyData
+		| WriteStageKind::StoreIndexData
+		| WriteStageKind::ReclaimDocId
+		| WriteStageKind::PurgeRecordData
+		| WriteStageKind::MaterialiseObservedFields
+		| WriteStageKind::ProcessTableReferences
+		| WriteStageKind::ProcessTableViews(_)
+		| WriteStageKind::ProcessTableEvents(_)
+		| WriteStageKind::ProcessTableLives(_)
+		| WriteStageKind::ProcessChangefeeds
+		| WriteStageKind::OutputWrite => false,
+	}
+}
+
+/// The body `body` of a write whose loop body held `run_len` stage ops, for the same write with the
+/// stage ops at the positions `dropped` removed.
+///
+/// A position of either order that is not dropped moves down by the number of dropped positions
+/// below it, so the surviving stage ops are numbered densely and each order keeps its relative
+/// order. `branching` and `deferable` are carried over. A `Retry` savepoint counts the stages of
+/// the creating order that run before it, and a dropped stage before it would change what the
+/// savepoint covers, so a drop there is refused rather than remapped.
+///
+/// Fails with an invariant error when a position falls beyond the stage ops, when a drop empties
+/// the first order, when a dropped stage of the first order lies before the savepoint, or when the
+/// result is not a body of `run_len - dropped` stage ops ([`body_fault`]).
+pub(crate) fn without_stages(
+	body: &WriteBody,
+	run_len: usize,
+	dropped: &[u16],
+) -> Result<WriteBody, IrError> {
+	let mut gone: SmallVec<[u16; 4]> = SmallVec::new();
+	for position in dropped {
+		if usize::from(*position) >= run_len {
+			return Err(invariant("a dropped stage lies beyond the stages of a write"));
+		}
+		if !gone.contains(position) {
+			gone.push(*position);
+		}
+	}
+	let remap = |order: &[u16]| -> Result<Box<[u16]>, IrError> {
+		order
+			.iter()
+			.filter(|position| !gone.contains(position))
+			.map(|position| {
+				let below = gone.iter().filter(|held| *held < position).count();
+				u16::try_from(usize::from(*position) - below)
+					.map_err(|_| invariant("a stage position beyond the stages of a write"))
+			})
+			.collect()
+	};
+	let first = remap(&body.first)?;
+	if first.is_empty() {
+		return Err(invariant("dropping stages leaves a write no stage for its first order"));
+	}
+	if let WriteBranching::Retry(retry) = body.branching
+		&& body
+			.first
+			.iter()
+			.take(usize::from(retry.savepoint_after))
+			.any(|position| gone.contains(position))
+	{
+		return Err(invariant("a dropped stage lies before the savepoint of a write"));
+	}
+	let result = WriteBody {
+		branching: body.branching,
+		first,
+		second: remap(&body.second)?,
+		deferable: body.deferable,
+	};
+	match body_fault(&result, run_len - gone.len()) {
+		Some(detail) => Err(invariant(detail)),
+		None => Ok(result),
+	}
 }
 
 /// The `PERMISSIONS FOR` clauses of a written table, as the write states them and as its gate
@@ -1966,6 +2423,7 @@ pub(crate) fn events_over(
 		shapes.push(EventShape {
 			when,
 			then: then.into_boxed_slice(),
+			dormant: false,
 		});
 	}
 	TableEvents {
@@ -2439,6 +2897,255 @@ mod tests {
 		assert_eq!(body_fault(&two(WriteBranching::UpFront, &[0, 1, 2], &[0, 2, 1]), 3), None);
 	}
 
+	/// Every stage kind, each payload kind once and `CheckSelectPermissions` over both images.
+	/// [`stage_index`] is exhaustive, so a stage added to the enum fails to compile until it is
+	/// listed here.
+	fn every_stage() -> Vec<WriteStageKind> {
+		use crate::exec::operators::write::stage::{LightweightReason, RecordImage, TableTypeFor};
+		let all = vec![
+			WriteStageKind::CheckRecordUserAccess,
+			WriteStageKind::CheckRecordExists,
+			WriteStageKind::CheckTableNotView,
+			WriteStageKind::CheckTableNotLightweight(LightweightReason::Updated),
+			WriteStageKind::CheckTableType(TableTypeFor::Create),
+			WriteStageKind::CheckPermissionsQuickCreate,
+			WriteStageKind::CheckUpdatePermissions,
+			WriteStageKind::CheckDeletePermissions,
+			WriteStageKind::CheckCreatePermissions,
+			WriteStageKind::RecheckUpdatePermissions,
+			WriteStageKind::CheckWhereCondition,
+			WriteStageKind::ComputeInputData,
+			WriteStageKind::CheckDataFields,
+			WriteStageKind::ProcessRecordData,
+			WriteStageKind::ProcessMergeData,
+			WriteStageKind::DefaultRecordData,
+			WriteStageKind::GenerateRecordId,
+			WriteStageKind::ProcessTableFields,
+			WriteStageKind::CleanupTableFields,
+			WriteStageKind::CleanupTableReferences,
+			WriteStageKind::ClearRecordData,
+			WriteStageKind::StoreRecordData,
+			WriteStageKind::StoreEdgesData,
+			WriteStageKind::StoreInlineAdjacencyData,
+			WriteStageKind::StoreIndexData,
+			WriteStageKind::ReclaimDocId,
+			WriteStageKind::PurgeRecordData,
+			WriteStageKind::MaterialiseObservedFields,
+			WriteStageKind::ProcessTableReferences,
+			WriteStageKind::ProcessTableViews(Action::Update),
+			WriteStageKind::ProcessTableEvents(Action::Update),
+			WriteStageKind::ProcessTableLives(Action::Update),
+			WriteStageKind::ProcessChangefeeds,
+			WriteStageKind::CheckSelectPermissions(RecordImage::Initial),
+			WriteStageKind::CheckSelectPermissions(RecordImage::Current),
+			WriteStageKind::OutputWrite,
+		];
+		let mut seen: Vec<usize> = all.iter().map(|stage| stage_index(*stage)).collect();
+		seen.sort_unstable();
+		seen.dedup();
+		assert_eq!(seen, (0..=34).collect::<Vec<_>>(), "every stage kind is listed");
+		all
+	}
+
+	/// The position of each stage kind in [`every_stage`]'s list, both images of the select gate
+	/// sharing one.
+	fn stage_index(stage: WriteStageKind) -> usize {
+		match stage {
+			WriteStageKind::CheckRecordUserAccess => 0,
+			WriteStageKind::CheckRecordExists => 1,
+			WriteStageKind::CheckTableNotView => 2,
+			WriteStageKind::CheckTableNotLightweight(_) => 3,
+			WriteStageKind::CheckTableType(_) => 4,
+			WriteStageKind::CheckPermissionsQuickCreate => 5,
+			WriteStageKind::CheckUpdatePermissions => 6,
+			WriteStageKind::CheckDeletePermissions => 7,
+			WriteStageKind::CheckCreatePermissions => 8,
+			WriteStageKind::RecheckUpdatePermissions => 9,
+			WriteStageKind::CheckWhereCondition => 10,
+			WriteStageKind::ComputeInputData => 11,
+			WriteStageKind::CheckDataFields => 12,
+			WriteStageKind::ProcessRecordData => 13,
+			WriteStageKind::ProcessMergeData => 14,
+			WriteStageKind::DefaultRecordData => 15,
+			WriteStageKind::GenerateRecordId => 16,
+			WriteStageKind::ProcessTableFields => 17,
+			WriteStageKind::CleanupTableFields => 18,
+			WriteStageKind::CleanupTableReferences => 19,
+			WriteStageKind::ClearRecordData => 20,
+			WriteStageKind::StoreRecordData => 21,
+			WriteStageKind::StoreEdgesData => 22,
+			WriteStageKind::StoreInlineAdjacencyData => 23,
+			WriteStageKind::StoreIndexData => 24,
+			WriteStageKind::ReclaimDocId => 25,
+			WriteStageKind::PurgeRecordData => 26,
+			WriteStageKind::MaterialiseObservedFields => 27,
+			WriteStageKind::ProcessTableReferences => 28,
+			WriteStageKind::ProcessTableViews(_) => 29,
+			WriteStageKind::ProcessTableEvents(_) => 30,
+			WriteStageKind::ProcessTableLives(_) => 31,
+			WriteStageKind::ProcessChangefeeds => 32,
+			WriteStageKind::CheckSelectPermissions(_) => 33,
+			WriteStageKind::OutputWrite => 34,
+		}
+	}
+
+	/// Only the select gate under `RETURN NONE` is output-blind.
+	#[test]
+	fn only_the_select_gate_under_return_none_is_output_blind() {
+		for output in [
+			OutputShape::Default,
+			OutputShape::None,
+			OutputShape::Null,
+			OutputShape::Diff,
+			OutputShape::After,
+			OutputShape::Before,
+			OutputShape::Fields,
+		] {
+			// Adding an output shape fails to compile here until its row of the table is stated.
+			let blind_gate = match output {
+				OutputShape::None => true,
+				OutputShape::Default
+				| OutputShape::Null
+				| OutputShape::Diff
+				| OutputShape::After
+				| OutputShape::Before
+				| OutputShape::Fields => false,
+			};
+			for stage in every_stage() {
+				let gate = matches!(stage, WriteStageKind::CheckSelectPermissions(_));
+				assert_eq!(output_blind(output, stage), gate && blind_gate, "{output:?} {stage:?}");
+			}
+		}
+	}
+
+	/// The stages of an order, by position, as `body` names them over `run`.
+	fn named_order(run: &[WriteStageKind], positions: &[u16]) -> Vec<WriteStageKind> {
+		positions.iter().map(|at| run[usize::from(*at)]).collect()
+	}
+
+	/// Dropping a stage of any form's body leaves each order its other stages in their order, and
+	/// the body of the remaining stages. A drop is refused only for a reason the contract names.
+	#[test]
+	fn dropping_a_stage_keeps_the_rest_of_each_order() {
+		for (form, facts) in every_facts() {
+			let run = stage_run(form, facts);
+			let body = write_body(form, facts, &run, false).expect("the body derives");
+			for at in 0..run.len() {
+				let dropped = u16::try_from(at).expect("a position");
+				let stage = run[at];
+				let kept: Vec<WriteStageKind> = run
+					.iter()
+					.copied()
+					.enumerate()
+					.filter(|(i, _)| *i != at)
+					.map(|(_, s)| s)
+					.collect();
+				let before_savepoint = match body.branching {
+					WriteBranching::Retry(retry) => body
+						.first
+						.iter()
+						.take(usize::from(retry.savepoint_after))
+						.any(|position| *position == dropped),
+					WriteBranching::Sole | WriteBranching::UpFront | WriteBranching::ByAction => {
+						false
+					}
+				};
+				let empties_first = body.first.iter().all(|position| *position == dropped);
+				let empties_second = !body.second.is_empty()
+					&& body.second.iter().all(|position| *position == dropped);
+				match without_stages(&body, run.len(), &[dropped]) {
+					Ok(result) => {
+						assert!(
+							!before_savepoint && !empties_first && !empties_second,
+							"{form:?} {facts:?} {stage:?} was refused for a reason it was not"
+						);
+						assert_eq!(body_fault(&result, kept.len()), None, "{form:?} {stage:?}");
+						let named = |body: &WriteBody, run: &[WriteStageKind]| {
+							(named_order(run, &body.first), named_order(run, &body.second))
+						};
+						let (first, second) = named(&body, &run);
+						let strip = |order: Vec<WriteStageKind>| -> Vec<WriteStageKind> {
+							let mut order = order;
+							order.retain(|held| *held != stage);
+							order
+						};
+						// A run holds each stage kind once except a view row's, so a kind and a
+						// position name the same stage.
+						assert_eq!(
+							named(&result, &kept),
+							(strip(first), strip(second)),
+							"{form:?} {facts:?} {stage:?}"
+						);
+						assert_eq!(result.branching, body.branching);
+						assert_eq!(result.deferable, body.deferable);
+					}
+					Err(_) => assert!(
+						before_savepoint || empties_first || empties_second,
+						"{form:?} {facts:?} {stage:?} was refused"
+					),
+				}
+			}
+		}
+	}
+
+	/// The select gate of every form's body can be dropped, whatever the form.
+	#[test]
+	fn the_select_gate_of_every_form_can_be_dropped() {
+		for (form, facts) in every_facts() {
+			let run = stage_run(form, facts);
+			let body = write_body(form, facts, &run, false).expect("the body derives");
+			for (at, stage) in run.iter().enumerate() {
+				if !matches!(stage, WriteStageKind::CheckSelectPermissions(_)) {
+					continue;
+				}
+				let dropped = u16::try_from(at).expect("a position");
+				let result = without_stages(&body, run.len(), &[dropped])
+					.unwrap_or_else(|error| panic!("{form:?} {facts:?}: {error}"));
+				assert_eq!(body_fault(&result, run.len() - 1), None, "{form:?} {facts:?}");
+				assert_eq!(result.branching, body.branching);
+			}
+		}
+	}
+
+	#[test]
+	fn dropping_stages_renumbers_the_survivors_and_keeps_the_savepoint() {
+		let retry = WriteRetry {
+			savepoint_after: 2,
+			retry_conflict: true,
+			skip_failures: false,
+			carry_schema_failure: false,
+		};
+		let body = WriteBody {
+			branching: WriteBranching::Retry(retry),
+			first: [0, 1, 2, 3, 4].into(),
+			second: [0, 4, 2, 1].into(),
+			deferable: true,
+		};
+		let result = without_stages(&body, 5, &[3]).expect("a stage after the savepoint drops");
+		assert_eq!(&*result.first, &[0, 1, 2, 3]);
+		assert_eq!(&*result.second, &[0, 3, 2, 1]);
+		assert_eq!(result.branching, WriteBranching::Retry(retry));
+		assert!(result.deferable);
+		// Several drops, and a repeated one, are one drop.
+		let result = without_stages(&body, 5, &[3, 4, 3]).expect("two stages drop");
+		assert_eq!(&*result.first, &[0, 1, 2]);
+		assert_eq!(&*result.second, &[0, 2, 1]);
+		// A stage before the savepoint, one beyond the stages, and every stage of the first order.
+		assert!(without_stages(&body, 5, &[1]).is_err());
+		assert!(without_stages(&body, 5, &[5]).is_err());
+		assert!(without_stages(&sole(&[0, 1], &[]), 2, &[0, 1]).is_err());
+		assert!(without_stages(&sole(&[0], &[]), 1, &[0]).is_err());
+		// A second order left empty is no body of a form with two orders.
+		let up_front = WriteBody {
+			branching: WriteBranching::UpFront,
+			first: [0, 1].into(),
+			second: [2].into(),
+			deferable: false,
+		};
+		assert!(without_stages(&up_front, 3, &[2]).is_err());
+		assert!(without_stages(&up_front, 3, &[1]).is_ok());
+	}
+
 	/// A clause that reads a computed field derives it, and every computed field it reads in turn,
 	/// and nothing else.
 	#[test]
@@ -2461,5 +3168,286 @@ mod tests {
 		assert_eq!(reached(&["total"]), ["tax", "total"]);
 		assert_eq!(reached(&["tax", "owner"]), ["tax"]);
 		assert!(reached(&["owner", "net"]).is_empty());
+	}
+
+	/// The `WHEN` clause `sql` as the logical expression an event's region binds.
+	fn when_of(sql: &str) -> LogicalExpr {
+		// Parenthesised, since a bare `$event = …` is a parameter declaration.
+		let parsed = crate::syn::parse(&format!("({sql})")).expect("the clause parses");
+		let top = parsed.expressions.into_iter().next().expect("one expression");
+		let surrealdb_expr::parser::TopLevelExpr::Expr(expr) = top else {
+			panic!("a bare expression");
+		};
+		let lowered = crate::expr::logical::lower(expr).expect("the clause lowers");
+		// A block or a statement is a subquery in the position of an expression.
+		if let LogicalOp::Eval(eval) = lowered {
+			eval.expr
+		} else {
+			LogicalExpr::Subquery(Box::new(lowered))
+		}
+	}
+
+	#[test]
+	fn a_when_that_is_never_truthy_is_dormant_for_the_action_it_names() {
+		let cases: &[(&str, [bool; 3])] = &[
+			// [CREATE, UPDATE, DELETE]
+			("false", [true, true, true]),
+			("NONE", [true, true, true]),
+			("NULL", [true, true, true]),
+			("!true", [true, true, true]),
+			("true", [false, false, false]),
+			("!false", [false, false, false]),
+			("$event = 'DELETE'", [true, true, false]),
+			("$event == 'CREATE'", [false, true, true]),
+			("$event IN ['DELETE']", [true, true, false]),
+			("$event IN ['CREATE', 'UPDATE']", [false, false, true]),
+			("$event NOT IN ['DELETE']", [false, false, true]),
+			("$event != $event", [true, true, true]),
+			("$event = 'UPDATE' AND false", [true, true, true]),
+			("$event = 'UPDATE' AND true", [true, false, true]),
+			("$event = 'UPDATE' OR $event = 'DELETE'", [true, false, false]),
+			("['a', 'b'] CONTAINS $event", [true, true, true]),
+			("['CREATE'] CONTAINS $event", [false, true, true]),
+			("['CREATE'] CONTAINSNOT $event", [true, false, false]),
+			("{ a: 1 } = { a: 2 }", [true, true, true]),
+			// The value decides the answer, not a coercion of it: a falsy value outside
+			// `false`, `NONE` and `NULL` runs.
+			("0", [false, false, false]),
+			("''", [false, false, false]),
+			("[]", [false, false, false]),
+			("NONE OR NULL", [true, true, true]),
+			("0 AND $event", [false, false, false]),
+		];
+		for (sql, expected) in cases {
+			let when = when_of(sql);
+			for (action, expected) in
+				[Action::Create, Action::Update, Action::Delete].into_iter().zip(expected)
+			{
+				assert_eq!(when_never_fires(&when, action), *expected, "{sql} for {action:?}");
+			}
+		}
+	}
+
+	#[test]
+	fn a_when_outside_the_admitted_form_is_never_dormant() {
+		for sql in [
+			"{ LET $event = 'UPDATE'; ($event = 'DELETE') }",
+			"{ false }",
+			"(|| false)()",
+			"(SELECT * FROM ONLY t:1) = 1",
+			"fn::f()",
+			"math::abs(1) = 2",
+			"<int> 'x'",
+			"$after.flag",
+			"flag",
+			"$before = 1",
+			"$other = 1",
+			"$event < 'A'",
+			"$event ?? false",
+			"$event = 'UPDATE' ?: false",
+			"/a/ = 'b'",
+			"t:1 = t:2",
+			"t = u",
+			"1 + 1 = 3",
+			"1 > 2",
+			"1..2 = 3",
+			"1 / 0 = 1",
+			"$event *= 'A'",
+			"false AND fn::f()",
+			"true AND fn::f()",
+			"!fn::f()",
+		] {
+			let when = when_of(sql);
+			for action in [Action::Create, Action::Update, Action::Delete] {
+				assert!(!when_never_fires(&when, action), "{sql} for {action:?}");
+			}
+		}
+	}
+
+	/// What each admitted operator answers over each kind of literal and `$event` is what the
+	/// engine answers for the same expression, or an error the fold does not decide.
+	#[tokio::test]
+	async fn the_fold_of_a_when_is_the_value_the_engine_computes() {
+		use crate::exec::operators::test_util::TestDb;
+
+		let operands = [
+			"true",
+			"false",
+			"0",
+			"1",
+			"1.0",
+			"1.5",
+			"1dec",
+			"'a'",
+			"'UPDATE'",
+			"''",
+			"NONE",
+			"NULL",
+			"[]",
+			"[1]",
+			"[1.0]",
+			"['UPDATE']",
+			"[NONE]",
+			"{ a: 1 }",
+			"{}",
+			"1s",
+			"$event",
+		];
+		let operators =
+			["=", "==", "!=", "IN", "NOT IN", "CONTAINS", "CONTAINSNOT", "AND", "OR", "&&", "||"];
+		let mut sources = Vec::new();
+		for operator in operators {
+			for left in operands {
+				for right in operands {
+					sources.push(format!("{left} {operator} {right}"));
+				}
+			}
+		}
+		for operand in operands {
+			sources.push(format!("!{operand}"));
+		}
+		let db = TestDb::new("").await;
+		for action in [Action::Create, Action::Update, Action::Delete] {
+			let name = match action {
+				Action::Create => "CREATE",
+				Action::Update => "UPDATE",
+				Action::Delete => "DELETE",
+			};
+			let event = Value::from(name);
+			let script = sources
+				.iter()
+				.map(|source| {
+					format!("RETURN ({});", source.replace("$event", &format!("'{name}'")))
+				})
+				.collect::<String>();
+			let responses = db
+				.datastore()
+				.execute(&script, &TestDb::owner(), None)
+				.await
+				.expect("the script executes");
+			assert_eq!(responses.len(), sources.len());
+			let mut decided = 0;
+			for (source, response) in sources.iter().zip(responses) {
+				let folded = when_value(&when_of(source), &event);
+				match (folded, response.result) {
+					(Some(folded), Ok(ran)) => {
+						decided += 1;
+						let ran = crate::val::convert_public_value_to_internal(ran);
+						assert_eq!(folded.to_sql(), ran.to_sql(), "{source} for {name}");
+						assert_eq!(
+							matches!(folded, Value::Bool(false) | Value::None | Value::Null),
+							matches!(ran, Value::Bool(false) | Value::None | Value::Null),
+							"{source} for {name}"
+						);
+					}
+					(None, Err(_)) => {}
+					(folded, ran) => {
+						panic!("{source} for {name}: folded {folded:?}, ran {ran:?}")
+					}
+				}
+			}
+			assert!(decided > sources.len() / 2, "most expressions fold: {decided}");
+		}
+	}
+
+	#[test]
+	fn only_a_falsy_literal_condition_is_never() {
+		let verdict = |sql: &str| cond_verdict(Some(&when_of(sql)));
+		for sql in ["false", "NONE", "NULL"] {
+			assert_eq!(verdict(sql), CondVerdict::Never, "{sql}");
+		}
+		for sql in
+			["true", "0", "''", "[]", "1 > 2", "!true", "false AND true", "a", "$p", "rand() < 0"]
+		{
+			assert_eq!(verdict(sql), CondVerdict::Open, "{sql}");
+		}
+		assert_eq!(cond_verdict(None), CondVerdict::Open);
+	}
+
+	/// The stage ops of the loop body of an `UPDATE` or a `DELETE` with the facts `facts`, and the
+	/// body that names them.
+	fn bound(form: PlanForm, facts: WriteFacts) -> (Vec<WriteStageKind>, WriteBody) {
+		let run = stage_run(form, facts);
+		let body = write_body(form, facts, &run, true).expect("the body derives");
+		(run, body)
+	}
+
+	#[test]
+	fn the_stages_after_the_where_stage_of_an_update_and_a_delete_are_cut_whole() {
+		for (form, facts) in every_facts() {
+			let (run, body) = bound(form, facts);
+			match form {
+				PlanForm::Update | PlanForm::Delete => {
+					let dropped =
+						after_cond(&body, &run).expect("the stages after the WHERE stage");
+					assert!(!dropped.is_empty(), "{form:?}");
+					let cut = without_stages(&body, run.len(), &dropped).expect("the cut body");
+					let held = run.len() - dropped.len();
+					assert_eq!(body_fault(&cut, held), None, "{form:?}");
+					assert_eq!(cut.branching, WriteBranching::Sole);
+					assert_eq!(cut.first.len(), held);
+					assert!(cut.second.is_empty());
+					let order: Vec<WriteStageKind> =
+						cut.first.iter().map(|at| run[usize::from(*at)]).collect();
+					assert_eq!(
+						order.last(),
+						Some(&WriteStageKind::CheckWhereCondition),
+						"{form:?}"
+					);
+					assert_eq!(order[..], run[..held], "{form:?} keeps the prefix");
+					let after: Vec<WriteStageKind> =
+						dropped.iter().map(|at| run[usize::from(*at)]).collect();
+					assert!(!after.contains(&WriteStageKind::CheckWhereCondition), "{form:?}");
+				}
+				PlanForm::Create
+				| PlanForm::Upsert
+				| PlanForm::Insert
+				| PlanForm::Relate
+				| PlanForm::View => {
+					assert!(
+						after_cond(&body, &run).is_err(),
+						"{form:?} has no one order to cut after a WHERE stage"
+					);
+				}
+			}
+		}
+	}
+
+	#[test]
+	fn a_body_that_branches_or_holds_no_where_stage_is_not_cut() {
+		let facts = WriteFacts {
+			form: PlanForm::Update,
+			has_data: true,
+			on_duplicate_key_update: false,
+			ignore: false,
+			repeatable: false,
+		};
+		let (run, body) = bound(PlanForm::Update, facts);
+		let upfront = WriteBody {
+			branching: WriteBranching::UpFront,
+			..body.clone()
+		};
+		assert!(after_cond(&upfront, &run).is_err());
+		let second = WriteBody {
+			second: body.first.clone(),
+			..body.clone()
+		};
+		assert!(after_cond(&second, &run).is_err());
+		let beyond = WriteBody {
+			first: vec![u16::try_from(run.len()).expect("a position")].into_boxed_slice(),
+			..body.clone()
+		};
+		assert!(after_cond(&beyond, &run).is_err());
+		let no_where: Vec<WriteStageKind> = run
+			.iter()
+			.map(|stage| {
+				if *stage == WriteStageKind::CheckWhereCondition {
+					WriteStageKind::OutputWrite
+				} else {
+					*stage
+				}
+			})
+			.collect();
+		assert!(after_cond(&body, &no_where).is_err());
 	}
 }

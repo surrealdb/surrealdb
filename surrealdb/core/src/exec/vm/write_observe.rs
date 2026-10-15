@@ -129,9 +129,14 @@ pub(in crate::exec::vm) struct LoweredEvents {
 /// One event's clauses as host pipelines: its `WHEN`, and for a synchronous
 /// event its `THEN` clauses in order. An `ASYNC` event's `THEN` clauses run in
 /// the drain, not here, and are not lowered.
+///
+/// A dormant event, whose `WHEN` is never truthy for the action, runs no
+/// clause: it holds no `WHEN` pipeline and no `THEN` pipelines, and a record
+/// spends of the budget only what entering its `WHEN` would.
 #[derive(Debug, Clone, PartialEq)]
 pub(in crate::exec::vm) struct EventClauses {
-	pub(in crate::exec::vm) when: u16,
+	/// The `WHEN` pipeline, or `None` for a dormant event.
+	pub(in crate::exec::vm) when: Option<u16>,
 	pub(in crate::exec::vm) then: Vec<u16>,
 	/// What evaluating the `WHEN` spends of the computation-depth budget.
 	pub(in crate::exec::vm) when_depth: ClauseDepth,
@@ -528,14 +533,25 @@ async fn fire(
 	state: &mut State,
 	exec: &ExecutionContext,
 ) -> FlowResult<()> {
-	let row = state
-		.write
-		.as_deref_mut()
-		.ok_or_else(|| internal("a write body with no write state"))?
-		.row()?;
-	let before = row.initial.clone();
-	let after = row.current.clone();
+	// The images are copied for the first event that runs a clause. A dormant event before it runs
+	// nothing that could change them.
+	let mut images: Option<(Value, Value)> = None;
 	for (event, clauses) in lowered.events.iter().zip(&lowered.clauses) {
+		let Some(when) = clauses.when else {
+			enter_check(exec, clauses.when_depth)
+				.map_err(|e| ControlFlow::Err(event_failure(&event.name, ControlFlow::Err(e))))?;
+			continue;
+		};
+		if images.is_none() {
+			let row = state
+				.write
+				.as_deref_mut()
+				.ok_or_else(|| internal("a write body with no write state"))?
+				.row()?;
+			images = Some((row.initial.clone(), row.current.clone()));
+		}
+		let (before, after) =
+			images.as_ref().ok_or_else(|| internal("the images of a record in flight"))?;
 		let (frame, subject) = event_frame(
 			exec,
 			event,
@@ -548,8 +564,7 @@ async fn fire(
 		)
 		.map_err(ControlFlow::Err)?;
 		let when =
-			clause(program, clauses.when, clauses.when_depth, &subject, &frame, state, exec, event)
-				.await?;
+			clause(program, when, clauses.when_depth, &subject, &frame, state, exec, event).await?;
 		if !when.is_truthy() {
 			continue;
 		}
@@ -569,6 +584,19 @@ async fn fire(
 	Ok(())
 }
 
+/// The check entering a clause that spends `depth` of the budget makes: the budget must cover the
+/// deepest nesting the clause reaches and the dive the clause's own write makes.
+///
+/// [`clause`] makes it on the event's frame before the dive, and a dormant event, whose frame is
+/// not derived, makes it on `exec`, the context the frame derives from. The two answer alike
+/// because the frame leaves the budget as `exec` holds it: the privileged frame, `$before`,
+/// `$after`, `$event`, `$value` and `$input`, and the event's `AUTH LIMIT` change nothing the
+/// budget is read from. It answers the failure a clause raises for a budget too small for it,
+/// before the name of the event is added.
+fn enter_check(ctx: &ExecutionContext, depth: ClauseDepth) -> anyhow::Result<()> {
+	ctx.check_dive_by(depth.deepest).and_then(|()| ctx.check_dive_by(depth.write))
+}
+
 /// Evaluate one clause of `event` against the image the event is about, in its
 /// frame, spending what `depth` says the clause spends of the
 /// computation-depth budget. A `RETURN` in the clause is the clause's value;
@@ -585,8 +613,7 @@ async fn clause(
 	exec: &ExecutionContext,
 	event: &EventDefinition,
 ) -> FlowResult<Value> {
-	let entered = frame
-		.check_dive_by(depth.deepest)
+	let entered = enter_check(frame, depth)
 		.and_then(|()| frame.dive_by(depth.write))
 		.map(|frame| frame.entering_stored_code(0, true));
 	let ran = match entered {
@@ -621,8 +648,80 @@ fn event_failure(event: &str, signal: ControlFlow) -> anyhow::Error {
 
 #[cfg(test)]
 mod tests {
-	use super::event_failure;
+	use super::{ClauseDepth, enter_check, event_failure};
+	use crate::catalog::auth::{AuthLevel, AuthLimit};
+	use crate::catalog::{EventDefinition, EventKind};
+	use crate::doc::Action;
+	use crate::exec::operators::test_util::root_ctx_with_options;
+	use crate::exec::permission::{EventImages, event_frame};
 	use crate::expr::ControlFlow;
+	use crate::val::Value;
+
+	fn event(auth: AuthLimit) -> EventDefinition {
+		EventDefinition::new(
+			"e".into(),
+			"t".into(),
+			crate::syn::expr("(true)").expect("a clause"),
+			Vec::new(),
+			EventKind::Sync,
+			auth,
+			None,
+		)
+	}
+
+	/// The frame an event's clauses run in holds the budget its caller holds, whether or not the
+	/// event narrows the caller. So the entry check `clause` makes on the frame and the one a
+	/// dormant event makes on the caller answer alike, and the dive that follows the check in
+	/// `clause` succeeds exactly when the check does. A failure is raised under the event's name.
+	#[test]
+	fn a_dormant_events_depth_check_is_the_one_its_clause_makes() {
+		let narrowing =
+			AuthLimit::new(AuthLevel::Namespace("test".to_owned()), Some("Viewer".to_owned()));
+		let ctx = root_ctx_with_options();
+		let budget = ctx.options().expect("the context has options").dive;
+		assert!(budget > 0);
+		for auth in [AuthLimit::new_no_limit(), narrowing] {
+			let definition = event(auth);
+			for consumed in 0..=budget.min(300) + 1 {
+				let exec = ctx.entering_stored_code(consumed, false);
+				let images = || EventImages {
+					before: Value::from(1),
+					after: Value::from(2),
+					input: Value::from(3),
+				};
+				let (frame, _) =
+					event_frame(&exec, &definition, Action::Update, images()).expect("a frame");
+				assert_eq!(
+					frame.options().map(|options| options.dive),
+					exec.options().map(|options| options.dive),
+					"the frame holds the budget of its caller"
+				);
+				for depth in [(0, 0), (1, 0), (1, 1), (4, 2), (9, 9), (250, 3), (255, 255)] {
+					let depth = ClauseDepth {
+						deepest: depth.0,
+						write: depth.1,
+					};
+					let live = enter_check(&frame, depth);
+					let dormant = enter_check(&exec, depth);
+					assert_eq!(
+						live.as_ref().map_err(ToString::to_string),
+						dormant.as_ref().map_err(ToString::to_string),
+						"{consumed} consumed, {depth:?}"
+					);
+					if live.is_ok() {
+						assert!(
+							frame.dive_by(depth.write).is_ok(),
+							"the dive after the check, {consumed} consumed, {depth:?}"
+						);
+					}
+					if let Err(error) = dormant {
+						let raised = event_failure("e", ControlFlow::Err(error)).to_string();
+						assert!(raised.starts_with("Error while processing event e: "), "{raised}");
+					}
+				}
+			}
+		}
+	}
 
 	const BARRIER: &str =
 		"Invalid control flow statement, break or continue statement found outside of loop.";

@@ -102,6 +102,7 @@ fn own_rules(ir: &Ir, op: OpId, data: &OpData, kind: &PhysOp) -> Result<(), Veri
 				None => Ok(()),
 			}
 		}
+		PhysOp::Events(attrs) => check_events(op, attrs),
 		PhysOp::KeyRangeScan(attrs) => check_key_range(op, &attrs.access, data.operands.len()),
 		PhysOp::Join(attrs) => check_join(ir, op, data, attrs),
 		PhysOp::TableScan(_)
@@ -185,7 +186,6 @@ fn own_rules(ir: &Ir, op: OpId, data: &OpData, kind: &PhysOp) -> Result<(), Veri
 		| PhysOp::WriteStage {
 			..
 		}
-		| PhysOp::Events(..)
 		| PhysOp::Timeout
 		| PhysOp::VersionScope
 		| PhysOp::Only
@@ -472,6 +472,34 @@ fn stage_position(stage: WriteStageKind) -> u8 {
 		WriteStageKind::ProcessChangefeeds => 32,
 		WriteStageKind::CheckSelectPermissions(_) => 33,
 		WriteStageKind::OutputWrite => 34,
+	}
+}
+
+/// An event the op marks dormant has a `WHEN` clause that is never truthy for the op's action
+/// ([`when_never_fires`](crate::exec::ir::logical::stages::when_never_fires)), read from the same
+/// definition the clause's region was bound from. An op that states no clause marks none.
+fn check_events(
+	op: OpId,
+	attrs: &crate::exec::ir::logical::ops::EventsAttrs,
+) -> Result<(), VerifyError> {
+	use crate::exec::ir::logical::stages::when_never_fires;
+
+	if !attrs.events.iter().any(|event| event.dormant) {
+		return Ok(());
+	}
+	let live = attrs.unlowerable
+		|| attrs.events.len() != attrs.defs.definitions().len()
+		|| attrs.events.iter().zip(attrs.defs.iter()).any(|(shape, definition)| {
+			shape.dormant
+				&& !definition.when_logical().is_ok_and(|when| when_never_fires(when, attrs.action))
+		});
+	match live {
+		true => Err(fault(
+			op,
+			VerifyRule::PerOp,
+			"an event is dormant though its WHEN clause can be truthy".to_owned(),
+		)),
+		false => Ok(()),
 	}
 }
 
@@ -951,6 +979,61 @@ mod tests {
 			op
 		});
 		(ir, op)
+	}
+
+	/// The events of a table for an update, one for each `WHEN` clause, as the physical phase holds
+	/// them with the events in `dormant` marked.
+	fn events_op(whens: &[&str], dormant: &[usize], unlowerable: bool) -> (Ir, OpId) {
+		use crate::catalog::auth::AuthLimit;
+		use crate::catalog::{EventDefinition, EventKind};
+
+		let definitions: Vec<EventDefinition> = whens
+			.iter()
+			.map(|when| {
+				EventDefinition::new(
+					"e".into(),
+					"t".into(),
+					crate::syn::expr(&format!("({when})")).expect("a clause"),
+					vec![crate::syn::expr("1").expect("a clause")],
+					EventKind::Sync,
+					AuthLimit::new_no_limit(),
+					None,
+				)
+			})
+			.collect();
+		let mut attrs = crate::exec::ir::logical::stages::events_over(
+			&std::sync::Arc::from(definitions),
+			crate::doc::Action::Update,
+		)
+		.attrs;
+		for at in dormant {
+			attrs.events[*at].dormant = true;
+		}
+		attrs.unlowerable = unlowerable;
+		lone(PhysOp::Events(Box::new(attrs)), 0)
+	}
+
+	/// A dormant event has a `WHEN` clause that is never truthy for the op's action, and an op that
+	/// states no clause has no dormant event.
+	#[test]
+	fn a_dormant_event_whose_when_can_be_truthy_is_refused() {
+		let whens = ["$event = 'DELETE'", "$event = 'UPDATE'", "$after.flag", "false"];
+		let (ir, op) = events_op(&whens, &[], false);
+		assert_eq!(broken(&ir, op), None);
+		for (dormant, refused) in [
+			(&[0][..], false),
+			(&[3][..], false),
+			(&[0, 3][..], false),
+			(&[1][..], true),
+			(&[2][..], true),
+			(&[0, 1][..], true),
+		] {
+			let (ir, op) = events_op(&whens, dormant, false);
+			let expected = refused.then_some(VerifyRule::PerOp);
+			assert_eq!(broken(&ir, op), expected, "{dormant:?}");
+		}
+		let (ir, op) = events_op(&whens[..1], &[0], true);
+		assert_eq!(broken(&ir, op), Some(VerifyRule::PerOp), "an op that states no clause");
 	}
 
 	#[test]

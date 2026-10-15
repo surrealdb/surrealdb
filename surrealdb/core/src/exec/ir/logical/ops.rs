@@ -1274,6 +1274,12 @@ pub(crate) struct EventShape {
 	/// The `THEN` clauses. An `ASYNC` event's run in the drain, from the stored definition, and
 	/// are not clauses of the program: it states none.
 	pub(crate) then: Box<[EventClause]>,
+	/// Whether the `WHEN` clause is never truthy for the action the op is for
+	/// ([`when_never_fires`](super::stages::when_never_fires)), so that no record fires the event.
+	/// Stated only by the physical write-prune pass: `false` before the physical phase. A
+	/// dormant event's clauses stay regions of the op, whole, and its definition stays in
+	/// [`EventsAttrs::defs`].
+	pub(crate) dormant: bool,
 }
 
 /// The events of one table that fire for one action, as the table's definitions say at the version

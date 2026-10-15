@@ -140,11 +140,22 @@ fn event_clauses(
 			then.push(clause(lowerer, regions, *stated, source)?);
 			then_depths.push(depth(*stated));
 		}
-		clauses.push(EventClauses {
-			when,
-			then,
-			when_depth: depth(shape.when),
-			then_depths,
+		// Every region is lowered above, so that a clause the lowering refuses refuses the unit
+		// whether or not the event is dormant. A dormant event runs no clause, so its pipelines
+		// are held by the program and read by no event.
+		clauses.push(match shape.dormant {
+			true => EventClauses {
+				when: None,
+				then: Vec::new(),
+				when_depth: depth(shape.when),
+				then_depths: Vec::new(),
+			},
+			false => EventClauses {
+				when: Some(when),
+				then,
+				when_depth: depth(shape.when),
+				then_depths,
+			},
 		});
 	}
 	if regions.next().is_some() {
@@ -373,11 +384,74 @@ mod tests {
 		let events = events_of(&lowered);
 		assert_eq!(events.action, Action::Update);
 		assert_eq!(events.events.len(), 3);
-		let shapes: Vec<(u16, Vec<u16>)> =
+		let shapes: Vec<(Option<u16>, Vec<u16>)> =
 			events.clauses.iter().map(|clauses| (clauses.when, clauses.then.clone())).collect();
-		assert_eq!(shapes, vec![(0, vec![1, 2]), (3, vec![]), (4, vec![])]);
+		assert_eq!(shapes, vec![(Some(0), vec![1, 2]), (Some(3), vec![]), (Some(4), vec![])]);
 		assert_eq!(lowered.program.host_code.len(), 5);
 		assert!(lowered.program.pipelines.is_empty(), "the unit runs no pipeline of its own");
+	}
+
+	/// A dormant event holds no clause of its own: the program still holds the pipelines every
+	/// region lowers to, in the order of the regions, and the clauses of the events after it are
+	/// numbered as they are without it. The depth its `WHEN` spends is kept.
+	#[test]
+	fn a_dormant_event_lowers_every_region_and_runs_no_clause() {
+		let definitions = || {
+			vec![
+				sync("first", "true", &["1", "2"]),
+				sync("second", "false", &["(CREATE a)"]),
+				asynchronous("third", "false"),
+				sync("fourth", "true", &["3"]),
+			]
+		};
+		let live = lower(&container(definitions(), truth)).expect("the unit lowers");
+		let b = container_with(
+			definitions(),
+			|attrs| {
+				attrs.events[1].dormant = true;
+				attrs.events[2].dormant = true;
+			},
+			None,
+			truth,
+		);
+		let lowered = lower(&b).expect("the unit lowers");
+		let events = events_of(&lowered);
+		let whens: Vec<Option<u16>> = events.clauses.iter().map(|clauses| clauses.when).collect();
+		let thens: Vec<Vec<u16>> =
+			events.clauses.iter().map(|clauses| clauses.then.clone()).collect();
+		assert_eq!(whens, vec![Some(0), None, None, Some(6)]);
+		assert_eq!(thens, vec![vec![1, 2], vec![], vec![], vec![7]]);
+		assert!(events.clauses[1].then_depths.is_empty());
+		assert_eq!(
+			events.clauses[1].when_depth,
+			events_of(&live).clauses[1].when_depth,
+			"the depth of the WHEN stays"
+		);
+		assert_eq!(lowered.program.host_code.len(), live.program.host_code.len());
+	}
+
+	/// A clause the lowering refuses refuses the unit whether or not its event is dormant. The
+	/// refusal is driven with a region built directly, since no SurrealQL clause reaches the
+	/// lowering's own refusal without first meeting the error of an earlier stage.
+	#[test]
+	fn a_dormant_event_still_refuses_what_its_regions_refuse() {
+		let definitions =
+			|| vec![sync("one", "true", &[]), sync("two", "false", &["(SELECT * FROM audit)"])];
+		let limit = || Some(surrealdb_iam::AuthLimit::new(surrealdb_iam::Level::Root, None));
+		// The `THEN` of the second event is the third region, and it makes a closure.
+		let closing = |b: &mut Builder, args: &[ValueId], at: usize| match at {
+			2 => b.closure(),
+			_ => truth(b, args, at),
+		};
+		for dormant in [false, true] {
+			let b = container_with(
+				definitions(),
+				|attrs| attrs.events[1].dormant = dormant,
+				limit(),
+				closing,
+			);
+			assert!(matches!(lower(&b), Err(IrError::NotYet { .. })), "dormant: {dormant}");
+		}
 	}
 
 	/// What a clause spends of the computation-depth budget is what its shape states, and the run

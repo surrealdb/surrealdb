@@ -75,9 +75,15 @@ pub(crate) struct WriteRow {
 	/// not on which order was selected: an order chosen as creating may still
 	/// have had a record id put into it by the data clause, and overwriting one
 	/// under a create permission is the write the two-sided test refuses.
+	///
+	/// `OutputWrite` is the last stage of every order. Once it has shown an
+	/// image, the row may no longer hold that image.
 	pub(crate) initial: Value,
 	/// Post-image the stages build and `store_record_data` writes verbatim.
 	/// Starts as a clone of `initial`.
+	///
+	/// `OutputWrite` is the last stage of every order. Once it has shown an
+	/// image, the row may no longer hold that image.
 	pub(crate) current: Value,
 	/// Permission-reduced counterparts, derived on demand. The data clause
 	/// reads the reduced pre-image, so a caller's data clause cannot observe a

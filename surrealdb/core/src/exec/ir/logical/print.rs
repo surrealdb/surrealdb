@@ -2751,7 +2751,8 @@ text_struct!(EdgeQuantifier { min: u32, max: Option<u32> });
 text_struct!(WriteFlags {
 	ignore: bool,
 	relation: bool,
-	or_update: bool
+	or_update: bool,
+	where_never: bool
 });
 text_struct!(WriteAttrs {
 	form: WriteForm,
@@ -2843,7 +2844,8 @@ text_struct!(EventsAttrs {
 });
 text_struct!(EventShape {
 	when: EventClause,
-	then: Box<[EventClause]>
+	then: Box<[EventClause]>,
+	dormant: bool
 });
 text_struct!(EventClause {
 	deepest: u8,

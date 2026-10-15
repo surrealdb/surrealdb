@@ -34,7 +34,7 @@ use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
 use crate::exec::ir::iface::region_kind::{
 	ClauseRole, FieldRole, RegionKind, RegionProperties, StoredRole,
 };
-use crate::exec::ir::iface::statements::AccessOp;
+use crate::exec::ir::iface::statements::{AccessOp, WriteForm};
 use crate::exec::ir::iface::types::{FactSource, TypeKnowledge};
 use crate::exec::ir::op_kind::{OpKind, OperandRule, Terminator};
 use crate::exec::ir::phys::ops::PhysOp;
@@ -106,6 +106,13 @@ fn layer_computed(op: OpId, log: &LogOp) -> Result<(), VerifyError> {
 /// A write's body must match the stage ops of its subject loop.
 fn write_body(ir: &Ir, op: OpId, data: &OpData, log: &LogOp) -> Result<(), VerifyError> {
 	if let LogOp::Events(attrs) = log {
+		if attrs.events.iter().any(|event| event.dormant) {
+			return Err(fail(
+				op,
+				VerifyRule::PerOp,
+				"an event is dormant before the physical phase states it".into(),
+			));
+		}
 		return match attrs.fault() {
 			Some(detail) => Err(fail(op, VerifyRule::PerOp, detail.into())),
 			None => Ok(()),
@@ -119,6 +126,19 @@ fn write_body(ir: &Ir, op: OpId, data: &OpData, log: &LogOp) -> Result<(), Verif
 	};
 	if let Some(detail) = super::stages::body_fault(&attrs.body, run.len()) {
 		return Err(fail(op, VerifyRule::PerOp, detail.into()));
+	}
+	if attrs.flags.where_never {
+		let cut = matches!(attrs.form, WriteForm::Update | WriteForm::Delete)
+			&& super::stages::after_cond(&attrs.body, &run).is_ok();
+		if !cut {
+			return Err(fail(
+				op,
+				VerifyRule::PerOp,
+				"a write states its WHERE condition never satisfied, and is not an UPDATE or a DELETE \
+				 of one order with a WHERE stage"
+					.into(),
+			));
+		}
 	}
 	let hosts = super::stages::write_gate_hosts(ir, data).unwrap_or_default();
 	if let Some(detail) = super::stages::gates_fault(attrs.gates, &hosts) {
