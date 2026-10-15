@@ -253,6 +253,54 @@ pub(crate) fn implied_definitions(name: &Idiom, kind: Option<&Kind>) -> Vec<(Idi
 	out
 }
 
+/// Whether a field of kind `kind`, nested at `path` in a field of kind
+/// `holder`, has a kind `holder` admits there.
+///
+/// Each `*` that leads `path` is the place of the definition `holder` implies
+/// for the elements of its arrays and sets ([`implied_definitions`]), and is
+/// judged as that definition's kind when each member of `holder` is an array,
+/// a set, or a kind that holds no elements, as `string` and `NONE` do: a member
+/// with no elements says nothing of `*`, and the elements of the others are the
+/// union of their element kinds. So a definition a kind implies is admitted as
+/// INFO lists it and an export writes it, and a field nested in one is judged
+/// against its kind. An object, a literal array or object, and `any` hold
+/// elements the implied definition does not describe, so a `*` over a kind with
+/// such a member is judged, with the rest of `path`, by
+/// [`Kind::allows_nested_kind`], which holds each member of a union but `NONE`
+/// to the nested kind.
+pub(crate) fn admits_nested_kind(holder: &Kind, path: &[Part], kind: &Kind) -> bool {
+	// A union implied for elements can hold another union, and a union of one
+	// judges as the kind it holds.
+	let mut holder = Kind::either(holder.clone().flatten());
+	let mut rest = path;
+	while let Some((Part::All, tail)) = rest.split_first()
+		&& implied_element_kind_describes_every_element(&holder)
+		&& let Some(element) = implied_element_kind(&holder)
+	{
+		holder = Kind::either(element.flatten());
+		rest = tail;
+	}
+	holder.allows_nested_kind(rest, &Kind::either(kind.clone().flatten()))
+}
+
+/// Whether [`implied_element_kind`] of `kind`, a kind no member of which is a
+/// union, is the kind of every element a value of `kind` holds: whether each
+/// member of `kind` is an array, a set, or a kind that holds no elements.
+fn implied_element_kind_describes_every_element(kind: &Kind) -> bool {
+	let members = match kind {
+		Kind::Either(kinds) => kinds.as_slice(),
+		kind => std::slice::from_ref(kind),
+	};
+	members.iter().all(|member| {
+		!matches!(
+			member,
+			Kind::Any
+				| Kind::Object
+				| Kind::Literal(KindLiteral::Array(_) | KindLiteral::Object(_))
+		)
+	})
+}
+
 fn kind_text(def: &catalog::FieldDefinition) -> String {
 	def.field_kind.as_ref().map_or_else(|| Kind::Any.to_sql(), ToSql::to_sql)
 }
@@ -277,9 +325,9 @@ fn kind_text(def: &catalog::FieldDefinition) -> String {
 /// the field that holds it second is refused as surely as the reverse, and so
 /// is changing the kind of a field that already holds others. A field nested
 /// in `def` that declares a `TYPE` is also judged against what `def`'s kind
-/// says of that place, as `DEFINE FIELD` judges a new nested field against
-/// the fields holding it. A statement that changes neither leaves the field's
-/// place as it found it, and is not judged.
+/// says of that place ([`admits_nested_kind`]), as `DEFINE FIELD` judges a new
+/// nested field against the fields holding it. A statement that changes
+/// neither leaves the field's place as it found it, and is not judged.
 pub(crate) fn nesting_restrictions(
 	def: &catalog::FieldDefinition,
 	previous: Option<&catalog::FieldDefinition>,
@@ -357,7 +405,7 @@ pub(crate) fn nested_field_restrictions(
 			// of one, which judges as the kind it holds.
 			let nested_kind = Kind::either(nested_kind.clone().flatten());
 			ensure!(
-				kind.allows_nested_kind(rest, &nested_kind),
+				admits_nested_kind(kind, rest, &nested_kind),
 				ExecError::MismatchedFieldTypes {
 					name: nested.name.to_sql(),
 					kind: nested_kind.to_sql(),

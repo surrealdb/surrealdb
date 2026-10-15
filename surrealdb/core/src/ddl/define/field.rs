@@ -11,7 +11,7 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::exec::Error as ExecError;
 use crate::exec::field_rules::{
-	define_field_nesting_restrictions, implied_definition, implied_definitions,
+	admits_nested_kind, define_field_nesting_restrictions, implied_definition, implied_definitions,
 	implied_definitions_dropped,
 };
 use crate::expr::statements::define::DefineKind;
@@ -324,6 +324,10 @@ pub(crate) async fn define_field_definition_apply(
 	Ok(Value::None)
 }
 
+/// Refuse `definition` when its kind is not one each field it is nested in
+/// admits at its place ([`admits_nested_kind`]). The check runs under an import
+/// too, so it admits every definition an export writes, the ones a kind
+/// implies for its elements among them.
 pub(crate) async fn define_field_statement_disallow_mismatched_types(
 	txn: &Transaction,
 	ns: NamespaceId,
@@ -344,7 +348,7 @@ pub(crate) async fn define_field_statement_disallow_mismatched_types(
 				&& let Some(fd_kind) = &fd.field_kind
 			{
 				let path = definition.name[fd.name.len()..].to_vec();
-				if !fd_kind.allows_nested_kind(&path, self_kind) {
+				if !admits_nested_kind(fd_kind, &path, self_kind) {
 					// A parent that cannot hold a field at all is refused by the
 					// nesting rule, whose error names why.
 					define_field_nesting_restrictions(&fds, definition)?;
