@@ -88,7 +88,10 @@ use self::opt::{Endpoint, EndpointKind, WaitFor};
 // Channel for waiters
 type Waiter = (watch::Sender<Option<WaitFor>>, watch::Receiver<Option<WaitFor>>);
 
-const SUPPORTED_VERSIONS: &str = ">=3.0.0-alpha.1, <4.0.0";
+/// The server versions this client connects to. A server outside the range is
+/// refused on connect, unless it denies the `version` RPC method. Pre-release
+/// tags are stripped before matching, so `4.0.0-beta.1` is judged as `4.0.0`.
+const SUPPORTED_VERSIONS: &str = ">=3.0.0-alpha.1, <5.0.0";
 
 /// Connection trait implemented by supported engines
 pub trait Connection: conn::Sealed {}
@@ -303,9 +306,7 @@ where
 	C: Connection,
 {
 	async fn check_server_version(&self, version: &Version) -> Result<()> {
-		// invalid version requirements should be caught during development
-		let req = VersionReq::parse(SUPPORTED_VERSIONS).expect("valid supported versions");
-		if !req.matches(version) {
+		if !server_version_supported(version) {
 			return Err(Error::internal(format!(
 				"server version `{version}` does not match the range supported by the client `{SUPPORTED_VERSIONS}`"
 			)));
@@ -320,11 +321,7 @@ where
 	// connection is still usable.
 	async fn verify_server_version(&self) -> Result<()> {
 		match self.version().await {
-			Ok(mut version) => {
-				// we would like to be able to connect to pre-releases too
-				version.pre = Default::default();
-				self.check_server_version(&version).await
-			}
+			Ok(version) => self.check_server_version(&version).await,
 			Err(e) if matches!(e.not_allowed_details(), Some(NotAllowedError::Method { .. })) => {
 				debug!(
 					"Skipping server version check; the `version` RPC method is denied by server capabilities"
@@ -397,6 +394,34 @@ impl OnceLockExt for OnceLock<Router> {
 	}
 }
 
+/// Whether a server reporting `version` is inside [`SUPPORTED_VERSIONS`].
+///
+/// semver matches a pre-release only against a bound that names a pre-release
+/// of the same release, so `4.0.0-beta.1` or `3.4.0-nightly` alone would fail
+/// `>=3.0.0-alpha.1, <5.0.0`. A pre-release the requirement does not match is
+/// therefore judged by its release version, so a client accepts the betas,
+/// release candidates and nightlies of every release it accepts. The exception
+/// is a release a bound names a pre-release of (`3.0.0`): there the pre-release
+/// order decides, so `3.0.0-alpha.0` stays below the `3.0.0-alpha.1` floor.
+fn server_version_supported(version: &Version) -> bool {
+	// invalid version requirements should be caught during development
+	let req = VersionReq::parse(SUPPORTED_VERSIONS).expect("valid supported versions");
+	if req.matches(version) {
+		return true;
+	}
+	if version.pre.is_empty() {
+		return false;
+	}
+	let release = Version::new(version.major, version.minor, version.patch);
+	let bound_names_this_release = req.comparators.iter().any(|bound| {
+		!bound.pre.is_empty()
+			&& bound.major == release.major
+			&& bound.minor == Some(release.minor)
+			&& bound.patch == Some(release.patch)
+	});
+	!bound_names_this_release && req.matches(&release)
+}
+
 /// Used by engine code (HTTP, local, any, and WS on wasm) when converting std/io errors.
 #[allow(dead_code)]
 fn std_error_to_types_error(error: impl std::fmt::Display) -> Error {
@@ -407,17 +432,40 @@ fn std_error_to_types_error(error: impl std::fmt::Display) -> Error {
 mod tests {
 	use super::*;
 
+	fn supported(version: &str) -> bool {
+		server_version_supported(&Version::parse(version).unwrap())
+	}
+
 	#[test]
 	fn test_supported_versions() {
-		let req = VersionReq::parse(SUPPORTED_VERSIONS).expect("valid supported versions");
-		assert!(req.matches(&Version::parse("3.0.0-alpha.1").unwrap()));
-		assert!(req.matches(&Version::parse("3.0.0-beta.3").unwrap()));
-		assert!(req.matches(&Version::parse("3.0.0-rc.2").unwrap()));
-		assert!(req.matches(&Version::parse("3.0.0").unwrap()));
-		assert!(req.matches(&Version::parse("3.0.1").unwrap()));
-		assert!(req.matches(&Version::parse("3.9.0").unwrap()));
+		assert!(supported("3.0.0-alpha.1"));
+		assert!(supported("3.0.0-beta.3"));
+		assert!(supported("3.0.0-rc.2"));
+		assert!(supported("3.0.0"));
+		assert!(supported("3.0.1"));
+		assert!(supported("3.4.0-nightly"));
+		assert!(supported("3.9.0"));
 
-		assert!(!req.matches(&Version::parse("2.9.0").unwrap()));
-		assert!(!req.matches(&Version::parse("4.0.0").unwrap()));
+		assert!(!supported("2.9.0"));
+		assert!(!supported("2.6.2"));
+		assert!(!supported("3.0.0-alpha.0"));
+		assert!(!supported("2.9.0-rc.1"));
+	}
+
+	#[test]
+	fn test_supported_versions_accepts_4x() {
+		assert!(supported("4.0.0-alpha.1"));
+		assert!(supported("4.0.0-beta.2"));
+		assert!(supported("4.0.0-rc.1"));
+		assert!(supported("4.0.0"));
+		assert!(supported("4.0.3"));
+		assert!(supported("4.9.0"));
+	}
+
+	#[test]
+	fn test_supported_versions_rejects_5x() {
+		assert!(!supported("5.0.0-alpha.1"));
+		assert!(!supported("5.0.0"));
+		assert!(!supported("6.1.0"));
 	}
 }
