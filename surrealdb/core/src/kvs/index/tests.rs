@@ -11781,3 +11781,124 @@ async fn planning_shares_the_shapes_of_finished_builds_only() -> Result<()> {
 	tx.cancel().await?;
 	Ok(())
 }
+
+/// A governor that decides as a [`FairGovernor`] decides and counts the
+/// leases it opens and closes.
+///
+/// [`FairGovernor`]: crate::exec::memory::FairGovernor
+struct CountingGovernor {
+	inner: crate::exec::memory::FairGovernor,
+	opened: std::sync::atomic::AtomicUsize,
+	closed: std::sync::atomic::AtomicUsize,
+}
+
+impl crate::exec::memory::MemoryGovernor for CountingGovernor {
+	fn opened(&self, lease: &Arc<crate::exec::memory::Lease>) {
+		self.opened.fetch_add(1, Ordering::SeqCst);
+		self.inner.opened(lease);
+	}
+
+	fn grow(&self, lease: &crate::exec::memory::Lease, bytes: usize) -> bool {
+		self.inner.grow(lease, bytes)
+	}
+
+	fn closed(&self, lease: &crate::exec::memory::Lease) {
+		self.closed.fetch_add(1, Ordering::SeqCst);
+		self.inner.closed(lease);
+	}
+
+	fn admit(
+		&self,
+		lease: &crate::exec::memory::Lease,
+		bytes: usize,
+		may_wait: bool,
+	) -> crate::exec::memory::Admit {
+		self.inner.admit(lease, bytes, may_wait)
+	}
+
+	fn changed(&self, epoch: u64) -> crate::exec::memory::BoxFut<'_, ()> {
+		self.inner.changed(epoch)
+	}
+
+	fn released(&self, lease: &crate::exec::memory::Lease) {
+		self.inner.released(lease);
+	}
+
+	fn overcommitted(&self, lease: &crate::exec::memory::Lease, bytes: usize) {
+		crate::exec::memory::MemoryGovernor::overcommitted(&self.inner, lease, bytes);
+	}
+
+	fn unwait(&self, lease: &crate::exec::memory::Lease) {
+		self.inner.unwait(lease);
+	}
+
+	fn limit(&self) -> Option<usize> {
+		crate::exec::memory::MemoryGovernor::limit(&self.inner)
+	}
+}
+
+/// A build the builder remembers once it has finished holds no lease from the
+/// node's memory governor: neither the lease of the query that defined the
+/// index, which ended before the build is forgotten, nor one its batches
+/// opened. Every lease opened is closed, so the governor grants nothing.
+#[tokio::test]
+async fn a_finished_build_holds_no_memory_lease() -> Result<()> {
+	let governor = Arc::new(CountingGovernor {
+		inner: crate::exec::memory::FairGovernor::new(64 << 20),
+		opened: Default::default(),
+		closed: Default::default(),
+	});
+	let ds = Datastore::builder()
+		.without_maintenance_tasks()
+		.with_memory_governor(Arc::clone(&governor) as Arc<dyn crate::exec::memory::MemoryGovernor>)
+		.build_with_path("memory")
+		.await?;
+	let session = Session::owner().with_ns("test").with_db("test");
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.ensure_ns_db(None, "test", "test").await?;
+	tx.commit().await?;
+	// The rows are written by the query that defines the index, so the
+	// query's writes open its lease before the build starts.
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE TABLE t;
+		 FOR $i IN 0..200 { CREATE type::record('t', $i) SET n = $i };
+		 DEFINE INDEX ix ON t FIELDS n;",
+	)
+	.await?;
+	let (ns, db, tb, ix) = get_table_index(&ds, "t", "ix").await?;
+	let building = local_builder_for_key(&ds, ns, db, &tb, ix.index_id)
+		.await?
+		.expect("the builder remembers the build");
+	wait_for_finished_builder(&building).await?;
+	assert!(governor.opened.load(Ordering::SeqCst) > 0, "the defining query opened no lease");
+	let deadline = Instant::now() + Duration::from_secs(5);
+	while governor.inner.granted() > 0 && Instant::now() < deadline {
+		sleep(Duration::from_millis(10)).await;
+	}
+	assert_eq!(
+		governor.inner.granted(),
+		0,
+		"a lease stayed open: {} opened, {} closed",
+		governor.opened.load(Ordering::SeqCst),
+		governor.closed.load(Ordering::SeqCst),
+	);
+	assert_eq!(governor.opened.load(Ordering::SeqCst), governor.closed.load(Ordering::SeqCst));
+	// The build is still remembered: what it held was released while it was.
+	assert!(local_builder_for_key(&ds, ns, db, &tb, ix.index_id).await?.is_some());
+	// The build's context carries nothing of the defining statement's query.
+	assert!(building.ctx.memory().is_none());
+	assert!(building.ctx.statement_counters().is_none());
+	// A batch is bounded by a query memory of its own, whose lease closes when
+	// the batch's context drops.
+	let batch = building.new_write_tx_ctx().await?;
+	let memory = Arc::clone(batch.memory().expect("a batch is bounded by the node's governor"));
+	let lease = Arc::clone(memory.lease());
+	assert_eq!(governor.inner.granted(), lease.grant());
+	batch.tx().cancel().await?;
+	drop((batch, memory, lease));
+	assert_eq!(governor.inner.granted(), 0, "the batch's lease outlived its context");
+	assert_eq!(governor.opened.load(Ordering::SeqCst), governor.closed.load(Ordering::SeqCst));
+	Ok(())
+}

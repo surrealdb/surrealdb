@@ -539,8 +539,20 @@ impl Context {
 	/// This context is not linked to the parent context,
 	/// and won't be cancelled if the parent is cancelled.
 	///
-	/// No statement clock is carried: the context runs a background task of its
-	/// own, outside any top-level statement.
+	/// No statement clock and no statement counters are carried: the context
+	/// runs a background task of its own, outside any top-level statement, and
+	/// nothing written beneath it is a row the statement that started the task
+	/// affected.
+	///
+	/// No query memory is carried either. A query's memory holds its lease from
+	/// the node's governor, and the lease, with the minimum the governor
+	/// guarantees it, stays reserved until the last context holding that memory
+	/// drops. This context outlives the query `from` belongs to — the
+	/// `Building` holding it lives for as long as the `IndexBuilder` remembers
+	/// the build — so it would keep that lease from every other query. Work
+	/// beneath it is bounded by a query memory installed in a context derived
+	/// from it, as each build batch's context holds one of its own, whose lease
+	/// closes when that context drops.
 	///
 	/// `index_builder` is intentionally cleared: the only caller is the
 	/// background index `Building` task, which lives inside the
@@ -574,7 +586,7 @@ impl Context {
 			#[cfg(feature = "surrealism")]
 			server_capabilities: Arc::clone(&from.server_capabilities),
 			redact_volatile_explain_attrs: from.redact_volatile_explain_attrs,
-			statement_counters: from.statement_counters.clone(),
+			statement_counters: None,
 			statement_clock: None,
 			request_params: None,
 			call_boundary: false,
@@ -597,7 +609,7 @@ impl Context {
 			live: from.live,
 			broker: from.broker.clone(),
 			scheduler: from.scheduler.clone(),
-			memory: from.memory.clone(),
+			memory: None,
 		}
 	}
 

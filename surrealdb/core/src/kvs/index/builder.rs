@@ -32,6 +32,7 @@ use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::exec::context::{NamespaceContext, RootContext};
+use crate::exec::memory::MemoryHost;
 use crate::exec::permission::{PhysicalIndexEntry, index_entry_physical};
 use crate::exec::planner::Planner;
 use crate::exec::{DatabaseContext, ExecutionContext};
@@ -578,6 +579,17 @@ pub(super) struct Building {
 	/// its `id` field names their components; read once for the whole build
 	/// ([`Self::table_key_structure`]).
 	key: OnceCell<Option<Arc<crate::catalog::KeyStructure>>>,
+	/// The node's memory governor and temporary store, which bound each batch
+	/// of the build; `None` where the context the build was started from bounds
+	/// nothing.
+	///
+	/// The build holds no query's memory: [`Self::ctx`] carries none, and each
+	/// batch's context holds a query memory of its own under this host
+	/// ([`Self::new_write_tx_ctx`], [`Self::new_read_tx_ctx`]). What a batch
+	/// charges opens that memory's lease, and the lease closes when the batch's
+	/// context drops, so between batches, and once the build has finished, the
+	/// build keeps nothing reserved from the governor.
+	memory: Option<MemoryHost>,
 }
 
 impl Building {
@@ -608,6 +620,7 @@ impl Building {
 			finished_notify: Notify::new(),
 			compiled: OnceCell::new(),
 			key: OnceCell::new(),
+			memory: ctx.memory().map(|memory| memory.host().clone()),
 		})
 	}
 
@@ -1748,6 +1761,9 @@ impl Building {
 		self.tf.transaction(TransactionType::Read, self.ctx.try_get_sequences()?.clone()).await
 	}
 
+	/// Creates a child context for one batch of the build, backed by a write
+	/// transaction and holding a query memory of the batch's own (see
+	/// [`Building::memory`]).
 	pub(super) async fn new_write_tx_ctx(&self) -> Result<FrozenContext> {
 		let tx = self
 			.tf
@@ -1756,10 +1772,12 @@ impl Building {
 			.into();
 		let mut ctx = Context::new_child(&self.ctx);
 		ctx.set_transaction(tx);
+		ctx.set_memory(self.memory.as_ref().map(MemoryHost::query));
 		Ok(ctx.freeze())
 	}
 
-	/// Creates a child context backed by a read transaction for preparing compaction plans.
+	/// Creates a child context backed by a read transaction for preparing compaction plans,
+	/// holding a query memory of its own as [`Self::new_write_tx_ctx`] does.
 	pub(super) async fn new_read_tx_ctx(&self) -> Result<FrozenContext> {
 		let tx = self
 			.tf
@@ -1768,6 +1786,7 @@ impl Building {
 			.into();
 		let mut ctx = Context::new_child(&self.ctx);
 		ctx.set_transaction(tx);
+		ctx.set_memory(self.memory.as_ref().map(MemoryHost::query));
 		Ok(ctx.freeze())
 	}
 

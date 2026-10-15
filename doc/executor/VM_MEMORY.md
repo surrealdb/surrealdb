@@ -22,7 +22,11 @@ callers in `exec/vm`.
   the query borrows from the node's free memory. The minimum includes the
   *headroom*: the part buffer a spilled run is written through and the read
   buffers a merge holds, so a query can always spill. A lease's *pinned* bytes
-  are those it cannot spill; the rest of what it holds is *spillable*.
+  are those it cannot spill; the rest of what it holds is *spillable*. A lease
+  closes when the last context holding its query's memory drops, so a context
+  that outlives its query carries none of it: a background index build holds no
+  lease between its batches, and each batch is bounded by a lease of its own
+  that closes with the batch's context.
 - **Fair share.** The limit divided among the open leases, never below a
   lease's minimum. Growth up to the fair share is always granted and never
   waits.

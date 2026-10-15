@@ -197,6 +197,11 @@ impl QueryMemory {
 		self.host.store.clone()
 	}
 
+	/// The governor and store the query's memory is held under.
+	pub(crate) fn host(&self) -> &MemoryHost {
+		&self.host
+	}
+
 	/// What the query's operators may hold: its grant less its headroom.
 	pub(crate) fn working(&self) -> usize {
 		let lease = self.lease();
