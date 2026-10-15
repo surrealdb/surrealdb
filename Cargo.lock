@@ -7072,6 +7072,7 @@ name = "surreal"
 version = "3.4.0-nightly"
 dependencies = [
  "assert_fs",
+ "blake3",
  "chrono",
  "ciborium",
  "futures",

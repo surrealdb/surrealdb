@@ -13,6 +13,7 @@ pub mod health;
 pub mod import;
 mod input;
 pub mod key;
+pub mod kvexport;
 #[cfg(feature = "mcp")]
 pub mod mcp;
 pub mod ml;
@@ -129,6 +130,21 @@ const LOG: &str = "surrealdb::net";
 pub trait RouterFactory: TransactionBuilderFactory {
 	/// Build and return the base Router. The server will attach shared state and layers.
 	fn configure_router(router_state: Self::RouterState) -> Router<Arc<RpcState>>;
+
+	/// Paths of this composer's own routes that answer while the instance is still
+	/// starting, as `/ready` and `/health` do. Everything else is refused with
+	/// `503` until the deferred startup work has completed.
+	///
+	/// Until startup completes, the readiness gate removes the `Authorization`
+	/// header from every request it lets through, so a route listed here sees an
+	/// anonymous session and its credentials are never checked against a
+	/// datastore that is not settled yet. Such a route is reachable by any caller
+	/// that can reach the listener, so list only one whose handler decides what to
+	/// reveal without a session, and reveals nothing an anonymous caller may not
+	/// see. Community lists none.
+	fn startup_routes() -> &'static [&'static str] {
+		&[]
+	}
 }
 
 /// Default router implementation for the community edition.
@@ -162,6 +178,7 @@ pub fn community_router(exclude: &[&str]) -> Router<Arc<RpcState>> {
 	}
 	router = router
 		.merge(export::router())
+		.merge(kvexport::router())
 		.merge(import::router())
 		.merge(rpc::router())
 		.merge(grpc::router())
@@ -400,7 +417,10 @@ impl SurrealRouter {
 		let opt = opt.into();
 		// Clone the readiness flag for the gate layer before moving `readiness`
 		// into the shared app state.
-		let gate_ready = Arc::clone(&readiness.ready);
+		let gate = ready::Gate {
+			ready: Arc::clone(&readiness.ready),
+			startup_routes: F::startup_routes(),
+		};
 		let app_state = AppState {
 			client_ip: opt.client_ip,
 			datastore: Arc::clone(&ds),
@@ -434,7 +454,11 @@ impl SurrealRouter {
 					// Don't compress gRPC
 					.and(NotForContentType::GRPC)
 					// Don't compress images
-					.and(NotForContentType::IMAGES),
+					.and(NotForContentType::IMAGES)
+					// Don't compress a keyspace copy: the stored bytes are mostly
+					// compact already, and deflating them costs the source more
+					// CPU than the transfer saves
+					.and(NotForContentType::const_new(kvexport::CONTENT_TYPE)),
 			),
 		);
 
@@ -510,7 +534,7 @@ impl SurrealRouter {
 			// Gate user-facing endpoints with 503 until startup completes. Sits
 			// ahead of auth so gated requests short-circuit before authentication
 			// touches the (still-initialising) datastore.
-			.layer(middleware::from_fn_with_state(gate_ready, ready::readiness_gate))
+			.layer(middleware::from_fn_with_state(gate, ready::readiness_gate))
 			// Apply CORS headers to relevant responses. Sits ahead of the rate
 			// limiter and the auth layer so the responses they emit — 429s
 			// with Retry-After in particular — carry CORS headers that

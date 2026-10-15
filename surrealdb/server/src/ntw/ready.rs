@@ -7,7 +7,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Extension, Router};
 use http::HeaderValue;
-use http::header::RETRY_AFTER;
+use http::header::{AUTHORIZATION, RETRY_AFTER};
 
 use super::AppState;
 use crate::ntw::error::Error as NetError;
@@ -83,9 +83,23 @@ fn always_available(path: &str) -> bool {
 	matches!(path, "/" | "/status" | "/health" | "/version" | "/ready" | "/metrics")
 }
 
+/// What the readiness gate reads: whether startup has finished, and the paths a
+/// composer lets through before it has.
+#[derive(Clone)]
+pub(super) struct Gate {
+	pub(super) ready: Arc<AtomicBool>,
+	/// Paths of the composer's own routes that answer while the instance is still
+	/// starting. Until then they are reached without credentials: a route listed
+	/// here is reachable by anyone who can reach the listener, so it must reveal
+	/// nothing a caller without credentials may not see (see
+	/// [`RouterFactory::startup_routes`](super::RouterFactory::startup_routes)).
+	pub(super) startup_routes: &'static [&'static str],
+}
+
 /// Middleware that returns `503 Service Unavailable` for user-facing endpoints
 /// until the instance is ready to serve (the deferred startup work has
-/// completed).
+/// completed). The paths [`always_available`] names, and the composer's
+/// [`Gate::startup_routes`], answer throughout.
 ///
 /// The web server binds its listener before any of that work runs — including
 /// the version check and this node's cluster registration — so this gate keeps
@@ -93,12 +107,24 @@ fn always_available(path: &str) -> bool {
 /// initialised, while liveness/version/metrics and the probe endpoints stay
 /// reachable. It sits ahead of the auth layer so gated requests short-circuit
 /// before authentication touches the datastore.
+///
+/// A request it lets through before startup completes loses its
+/// `Authorization` header, so the auth layer behind it gives that request an
+/// anonymous session. Verifying credentials would read users and access methods
+/// from a datastore that a composer may still be filling, and an access
+/// method's `AUTHENTICATE` clause could write to it before its version is
+/// settled.
 pub(super) async fn readiness_gate(
-	State(ready): State<Arc<AtomicBool>>,
-	request: Request,
+	State(gate): State<Gate>,
+	mut request: Request,
 	next: Next,
 ) -> Response {
-	if ready.load(Ordering::SeqCst) || always_available(request.uri().path()) {
+	if gate.ready.load(Ordering::SeqCst) {
+		return next.run(request).await;
+	}
+	let path = request.uri().path();
+	if always_available(path) || gate.startup_routes.contains(&path) {
+		request.headers_mut().remove(AUTHORIZATION);
 		return next.run(request).await;
 	}
 	let mut response = NetError::NotReady.into_response();
@@ -120,6 +146,10 @@ mod tests {
 	use super::*;
 
 	fn app(ready: bool) -> Router {
+		app_with(ready, &[])
+	}
+
+	fn app_with(ready: bool, startup_routes: &'static [&'static str]) -> Router {
 		let flag = Arc::new(AtomicBool::new(ready));
 		Router::new()
 			.route("/", get(|| async { "ok" }))
@@ -131,7 +161,20 @@ mod tests {
 			.route("/sql", get(|| async { "ok" }))
 			.route("/rpc", get(|| async { "ok" }))
 			.route("/key/{tb}/{id}", get(|| async { "ok" }))
-			.layer(from_fn_with_state(flag, readiness_gate))
+			.route("/migrate", get(|| async { "ok" }))
+			.route(
+				"/credentials",
+				get(|request: Request<Body>| async move {
+					request.headers().contains_key(AUTHORIZATION).to_string()
+				}),
+			)
+			.layer(from_fn_with_state(
+				Gate {
+					ready: flag,
+					startup_routes,
+				},
+				readiness_gate,
+			))
 	}
 
 	async fn status_of(app: Router, uri: &str) -> StatusCode {
@@ -161,6 +204,37 @@ mod tests {
 				"{uri} should be gated while starting"
 			);
 		}
+	}
+
+	/// A path a composer names answers while the instance is starting, and nothing
+	/// else it did not name does; once ready the list changes nothing.
+	#[tokio::test]
+	async fn a_composer_route_answers_while_starting_only_when_it_is_named() {
+		assert_eq!(status_of(app(false), "/migrate").await, StatusCode::SERVICE_UNAVAILABLE);
+		let named = app_with(false, &["/migrate"]);
+		assert_eq!(status_of(named.clone(), "/migrate").await, StatusCode::OK);
+		assert_eq!(status_of(named, "/sql").await, StatusCode::SERVICE_UNAVAILABLE);
+		assert_eq!(status_of(app(true), "/migrate").await, StatusCode::OK);
+	}
+
+	/// Before startup completes, a request the gate lets through reaches the
+	/// route without its credentials; once ready, it keeps them.
+	#[tokio::test]
+	async fn credentials_are_dropped_until_startup_completes() {
+		async fn sees_credentials(app: Router) -> String {
+			let request = Request::builder()
+				.uri("/credentials")
+				.header(AUTHORIZATION, "Basic cm9vdDpyb290")
+				.body(Body::empty())
+				.unwrap();
+			let response = app.oneshot(request).await.unwrap();
+			assert_eq!(response.status(), StatusCode::OK);
+			let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+			String::from_utf8(body.to_vec()).unwrap()
+		}
+
+		assert_eq!(sees_credentials(app_with(false, &["/credentials"])).await, "false");
+		assert_eq!(sees_credentials(app_with(true, &["/credentials"])).await, "true");
 	}
 
 	#[tokio::test]

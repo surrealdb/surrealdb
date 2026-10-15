@@ -410,7 +410,7 @@ pub async fn init<
 	// datastore itself: a composer that does not return its builder until its
 	// engine is ready to serve holds the bind for that long regardless.
 	let (datastore, recv, router_state, pending_startup) =
-		dbs::init::<C>(composer, &config, canceller.clone(), combined_observer, dbs).await?;
+		dbs::init::<C>(&composer, &config, canceller.clone(), combined_observer, dbs).await?;
 	// Tracks whether the instance has finished starting up and is ready to serve
 	// user-facing queries. Until it flips to `true`, query/auth endpoints return
 	// 503 and `/ready` reports not-ready.
@@ -456,7 +456,7 @@ pub async fn init<
 					// another version, or storage that never came up, has to act
 					// on it, and an exit status is both what reaches them and
 					// what restarts the pod.
-					if let Err(err) = dbs::initialise_datastore(&ds, &pending_startup).await {
+					if let Err(err) = dbs::initialise_datastore(&composer, &ds, &pending_startup).await {
 						error!("Failed to initialise the datastore: {err}");
 						// The error goes first, so a tripped `fatal` always has one
 						// to report.

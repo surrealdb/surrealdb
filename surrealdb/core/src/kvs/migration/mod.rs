@@ -56,7 +56,7 @@
 //!   read-write.
 //!
 //! Every migration a 4.x build adds at startup takes the compatible class.
-//! [`ledger_verdict`] is the one place that reads the classes. An id this build has a registry row
+//! [`judge_ledger`] is the one place that reads the classes. An id this build has a registry row
 //! for is never judged by its class.
 //!
 //! # Version history
@@ -314,37 +314,50 @@ pub(crate) enum LedgerVerdict {
 	},
 }
 
-/// Judges the ledger's entries that `registry` has no row for, by class.
+/// Judges the datastore's ledger with [`judge_ledger`].
+///
+/// The ids come from the keys and the descriptions from the values, and a value that will not
+/// decode still yields its id: a record written in a revision this build cannot read is the
+/// strongest possible evidence that the datastore has moved past it, so it must not turn into a
+/// decode error.
+pub(crate) async fn ledger_verdict(
+	ds: &Datastore,
+	registry: &[Migration],
+) -> Result<LedgerVerdict> {
+	let entries = ds.applied_migration_ids().await?.into_iter().map(|(id, described)| {
+		let text = match described {
+			Some(record) => format!("{} ({}, id {id})", record.name, record.version),
+			None => format!("id {id}, unreadable record"),
+		};
+		(id, text)
+	});
+	Ok(judge_ledger(entries, registry))
+}
+
+/// Judges the ledger entries that `registry` has no row for, by class. Each entry is a ledger id
+/// and the text that names it in the verdict.
 ///
 /// The ledger is the evidence, not the version stamp: a migration that ran and was then rolled
 /// away from is by definition absent from this build's registry, so comparing versions against
 /// that registry could never name it. Matched on the ledger id, which is a migration's identity.
 /// The recorded name is documentation and may be reworded between releases, so comparing on it
-/// would read a rename as an unknown migration and refuse the start.
-///
-/// The ids come from the keys and the descriptions from the values, and a value that will not
-/// decode still yields its id: a record written in a revision this build cannot read is the
-/// strongest possible evidence that the datastore has moved past it, so it must not turn into a
-/// decode error. The class is read from the id, never from the value.
+/// would read a rename as an unknown migration and refuse the start. The class is read from the
+/// id, never from the value.
 ///
 /// An incompatible or reserved-class entry makes the verdict [`LedgerVerdict::Refused`], whatever
 /// else the ledger holds; failing that, a read-only compatible entry makes it
 /// [`LedgerVerdict::ReadOnly`]. Entries that are compatible are logged and otherwise ignored.
-pub(crate) async fn ledger_verdict(
-	ds: &Datastore,
+pub(crate) fn judge_ledger(
+	entries: impl IntoIterator<Item = (u32, String)>,
 	registry: &[Migration],
-) -> Result<LedgerVerdict> {
+) -> LedgerVerdict {
 	let mut refused = Vec::new();
 	let mut read_only = Vec::new();
 	let mut ignored = Vec::new();
-	for (id, described) in ds.applied_migration_ids().await? {
+	for (id, text) in entries {
 		if registry.iter().any(|m| m.id == id) {
 			continue;
 		}
-		let text = match described {
-			Some(record) => format!("{} ({}, id {id})", record.name, record.version),
-			None => format!("id {id}, unreadable record"),
-		};
 		match LedgerId::from_raw(id).class() {
 			LedgerClass::Incompatible | LedgerClass::Reserved => refused.push(text),
 			LedgerClass::ReadOnlyCompatible => read_only.push(text),
@@ -352,14 +365,14 @@ pub(crate) async fn ledger_verdict(
 		}
 	}
 	if !refused.is_empty() {
-		return Ok(LedgerVerdict::Refused {
+		return LedgerVerdict::Refused {
 			migrations: refused.join(", "),
-		});
+		};
 	}
 	if !read_only.is_empty() {
-		return Ok(LedgerVerdict::ReadOnly {
+		return LedgerVerdict::ReadOnly {
 			features: read_only.join(", "),
-		});
+		};
 	}
 	if !ignored.is_empty() {
 		info!(
@@ -368,7 +381,7 @@ pub(crate) async fn ledger_verdict(
 			"The ledger holds entries this build does not know and may ignore"
 		);
 	}
-	Ok(LedgerVerdict::Open)
+	LedgerVerdict::Open
 }
 
 /// Whether the ledger lets this build write to the datastore.

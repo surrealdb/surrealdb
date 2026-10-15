@@ -565,6 +565,54 @@ pub trait TransactionBuilderFactory: Send + Sync + 'static {
 	fn http_endpoint(&self) -> Option<String> {
 		None
 	}
+
+	/// Runs on every start, after the backend can take writes and before
+	/// [`Datastore::check_version`] settles the storage version.
+	///
+	/// Community's implementation does nothing. A composer that fills this datastore
+	/// from another keyspace does so here: the keys it writes are what
+	/// `check_version` then finds, so a store that arrives with its version key is
+	/// gated and migrated as an existing store, not created and recorded as already
+	/// migrated. Its root users are the store's, so credentials given on the command
+	/// line are not created alongside them, as with a startup import that brings its
+	/// own.
+	///
+	/// Every start runs it, including a restart of a store that has served traffic
+	/// and a node joining a populated cluster. The datastore may hold a complete
+	/// copy, a partial one, or a store that was never a copy, so a composer decides
+	/// from its own state whether there is anything to fill. The maintenance
+	/// schedule has not started, and the readiness gate admits only the probe routes
+	/// and the composer's own startup routes, without credentials. The datastore is
+	/// built without startup transactions, so its feature level is not settled
+	/// either: `check_version` settles it from what the fill leaves.
+	///
+	/// A fill keeps the rules [`crate::kvs::copy`] sets out, which are what make a
+	/// fill cut short safe to restart:
+	///
+	/// - Check the source with [`crate::kvs::copy::KeyspaceVersion::check`] before writing
+	///   anything, so a source this build cannot start from is refused before the copy rather than
+	///   after it.
+	/// - Write the version key last. Until it lands, the copied keys read as a store from before
+	///   versioning and `check_version` refuses them, so a partial copy is never started from.
+	/// - Never write the bootstrap sentinel, and keep the composer's own state at or above `0xff`,
+	///   outside the range a copy carries and the version gate probes.
+	///
+	/// Must not call [`Datastore::get_version`] or [`Datastore::check_version`]:
+	/// `get_version` writes the version key when it is missing, which would stamp
+	/// the store this hook is about to fill.
+	///
+	/// The call is outside the startup operation timeout and its retries, so it may
+	/// take as long as the fill does and owns whatever deadline it needs. An error
+	/// ends startup.
+	fn before_check_version(
+		&self,
+		datastore: &Arc<Datastore>,
+	) -> impl Future<Output = Result<()>> + Send {
+		async move {
+			let _ = datastore;
+			Ok(())
+		}
+	}
 }
 
 impl TransactionBuilderFactory for CommunityComposer {
@@ -1372,7 +1420,7 @@ impl Datastore {
 	/// # Ordering
 	///
 	/// The sentinel is only a fallback: nothing may write to a datastore before
-	/// its version is settled, with one exception beside the sentinel itself.
+	/// its version is settled, with two exceptions beside the sentinel itself.
 	/// That ordering is structural — the builder settles the version before it
 	/// starts any maintenance task, and a caller that starts them itself does so
 	/// after this has run (see [`Datastore::start_maintenance_tasks`]). The
@@ -1380,12 +1428,18 @@ impl Datastore {
 	/// storage engine with keys of its own — from turning a fresh datastore into
 	/// an unstartable one.
 	///
-	/// The exception is `!fl`, the feature level a new datastore records when
-	/// the builder creates it ([`Datastore::settle_feature_level`]). Like `!bv`
-	/// it sorts before `!v`, outside the range the emptiness probe scans, so it
-	/// never makes a datastore that holds nothing else read as data of unknown
+	/// The first exception is `!fl`, the feature level a new datastore records
+	/// when the builder creates it ([`Datastore::settle_feature_level`]). Like
+	/// `!bv` it sorts before `!v`, outside the range the emptiness probe scans, so
+	/// it never makes a datastore that holds nothing else read as data of unknown
 	/// provenance. It is written only into a datastore that holds no key but
 	/// `!bv`.
+	///
+	/// The second is [`TransactionBuilderFactory::before_check_version`], which
+	/// may fill the datastore from another keyspace before [`Self::check_version`]
+	/// runs. It writes `!v` last and never writes the sentinel, so a fill cut
+	/// short reads here as storage from before `!v` and is refused, rather than
+	/// completed as a new datastore with its migrations recorded and never run.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)

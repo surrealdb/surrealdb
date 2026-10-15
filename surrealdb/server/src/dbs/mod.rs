@@ -836,7 +836,7 @@ fn is_permanent_storage_error(e: &anyhow::Error) -> bool {
 /// # Generic parameters
 /// - `F`: Transaction builder factory type implementing `TransactionBuilderFactory`
 pub async fn init<C: TransactionBuilderFactory>(
-	composer: C,
+	composer: &C,
 	opt: &Config,
 	canceller: CancellationToken,
 	observer: Arc<dyn ExecutionObserver>,
@@ -1088,7 +1088,15 @@ impl PendingStartup {
 ///
 /// The order is load-bearing:
 ///
-/// - `check_version` first, and the maintenance schedule only after it. Every maintenance task
+/// - The wait for the backend to become serve-ready comes before all of it, and is not part of the
+///   retry budget the steps share.
+/// - `before_check_version` next, outside the retry budget the steps below share. Community's
+///   implementation is empty. A composer that fills this datastore from another keyspace does so
+///   here, so `check_version` finds the copied keys and the 3.x data migrations run on them. The
+///   fill writes the version key last, so a fill cut short is refused by `check_version` rather
+///   than started from (see `surrealdb_core::kvs::copy`). The hook must not call `get_version` or
+///   `check_version`.
+/// - `check_version` next, and the maintenance schedule only after it. Every maintenance task
 ///   writes, and a write that lands before the version key does makes a datastore this process just
 ///   created look like one written before that key existed — which `check_version` is obliged to
 ///   refuse, permanently, on this and every later start.
@@ -1098,9 +1106,8 @@ impl PendingStartup {
 /// - `insert_node` before the first node-maintenance pass, so the id this process is about to serve
 ///   under is already active when that pass takes its snapshot (see
 ///   [`spawn_first_node_maintenance_pass`]).
-/// - The wait for the backend to become serve-ready comes before all of it, and is not part of the
-///   retry budget the steps share.
-pub(crate) async fn initialise_datastore(
+pub(crate) async fn initialise_datastore<C: TransactionBuilderFactory>(
+	composer: &C,
 	dbs: &Arc<Datastore>,
 	pending: &PendingStartup,
 ) -> Result<()> {
@@ -1111,6 +1118,7 @@ pub(crate) async fn initialise_datastore(
 	// fail a start that was only ever going to be slow. The readiness gate
 	// covers the window, and the caller cancels this task at shutdown.
 	dbs.wait_until_serve_ready().await?;
+	composer.before_check_version(dbs).await?;
 	// Ensure the storage version is up to date to prevent corruption.
 	let (_, is_new) = retry_with_timeout_check(
 		"check_version",
@@ -2179,12 +2187,17 @@ mod tests {
 		let dbs_opts = TestCli::try_parse_from(["surrealdb"])?.dbs;
 		let config = node_maintenance_config(path, Duration::ZERO)?;
 		let canceller = CancellationToken::new();
-		let (dbs, _recv, _router_state, pending) =
-			init(CommunityComposer(), &config, canceller.clone(), Arc::new(NoopObserver), dbs_opts)
-				.await?;
+		let (dbs, _recv, _router_state, pending) = init(
+			&CommunityComposer(),
+			&config,
+			canceller.clone(),
+			Arc::new(NoopObserver),
+			dbs_opts,
+		)
+		.await?;
 		// `init` only builds the datastore; the steps under test are the deferred
 		// ones the server runs once its listener is bound.
-		initialise_datastore(&dbs, &pending).await?;
+		initialise_datastore(&CommunityComposer(), &dbs, &pending).await?;
 
 		let (node, nlq) = seeded_rows_present(&dbs, &node_key, &nlq_key).await?;
 		assert!(node, "startup removed the archived node");
@@ -2223,12 +2236,17 @@ mod tests {
 		let dbs_opts = TestCli::try_parse_from(["surrealdb"])?.dbs;
 		let config = node_maintenance_config(path, Duration::from_secs(3600))?;
 		let canceller = CancellationToken::new();
-		let (dbs, _recv, _router_state, pending) =
-			init(CommunityComposer(), &config, canceller.clone(), Arc::new(NoopObserver), dbs_opts)
-				.await?;
+		let (dbs, _recv, _router_state, pending) = init(
+			&CommunityComposer(),
+			&config,
+			canceller.clone(),
+			Arc::new(NoopObserver),
+			dbs_opts,
+		)
+		.await?;
 		// `init` only builds the datastore; the steps under test are the deferred
 		// ones the server runs once its listener is bound.
-		initialise_datastore(&dbs, &pending).await?;
+		initialise_datastore(&CommunityComposer(), &dbs, &pending).await?;
 
 		// The pass is spawned, so poll for its effect rather than assuming it has
 		// already landed when the initialisation returns.
@@ -2268,9 +2286,14 @@ mod tests {
 		let dbs_opts = TestCli::try_parse_from(["surrealdb"])?.dbs;
 		let config = node_maintenance_config("memory".to_string(), Duration::from_secs(3600))?;
 		let canceller = CancellationToken::new();
-		let (dbs, _recv, _router_state, pending) =
-			init(CommunityComposer(), &config, canceller.clone(), Arc::new(NoopObserver), dbs_opts)
-				.await?;
+		let (dbs, _recv, _router_state, pending) = init(
+			&CommunityComposer(),
+			&config,
+			canceller.clone(),
+			Arc::new(NoopObserver),
+			dbs_opts,
+		)
+		.await?;
 
 		assert!(
 			!dbs.maintenance_tasks_running(),
@@ -2283,7 +2306,7 @@ mod tests {
 
 		// The deferred phase is what performs them, so nothing is dropped by
 		// being held back.
-		initialise_datastore(&dbs, &pending).await?;
+		initialise_datastore(&CommunityComposer(), &dbs, &pending).await?;
 		assert!(
 			dbs.maintenance_tasks_running(),
 			"the deferred initialisation started no maintenance schedule"
@@ -2375,6 +2398,7 @@ mod tests {
 			gate: CancellationToken,
 			ready: Arc<AtomicBool>,
 			opened_early: Arc<AtomicBool>,
+			hook_calls: Arc<AtomicUsize>,
 		}
 
 		impl TransactionBuilderFactory for GatedComposer {
@@ -2399,15 +2423,25 @@ mod tests {
 			fn path_valid(&self, v: &str) -> Result<String> {
 				CommunityComposer().path_valid(v)
 			}
+
+			/// Opens a transaction, which the gate records as early if the hook
+			/// ran before serve-readiness.
+			async fn before_check_version(&self, datastore: &Arc<Datastore>) -> Result<()> {
+				self.hook_calls.fetch_add(1, Ordering::SeqCst);
+				datastore.transaction(TransactionType::Read).await?.cancel().await?;
+				Ok(())
+			}
 		}
 
 		let gate = CancellationToken::new();
 		let ready = Arc::new(AtomicBool::new(false));
 		let opened_early = Arc::new(AtomicBool::new(false));
+		let hook_calls = Arc::new(AtomicUsize::new(0));
 		let composer = GatedComposer {
 			gate: gate.clone(),
 			ready: Arc::clone(&ready),
 			opened_early: Arc::clone(&opened_early),
+			hook_calls: Arc::clone(&hook_calls),
 		};
 
 		let _budget = EnvGuard::set(STARTUP_OPERATION_TIMEOUT_ENV, "1s");
@@ -2415,7 +2449,7 @@ mod tests {
 		let config = node_maintenance_config("memory".to_string(), Duration::from_secs(3600))?;
 		let canceller = CancellationToken::new();
 		let (dbs, _recv, _router_state, pending) =
-			init(composer, &config, canceller.clone(), Arc::new(NoopObserver), dbs_opts).await?;
+			init(&composer, &config, canceller.clone(), Arc::new(NoopObserver), dbs_opts).await?;
 		assert!(!ready.load(Ordering::SeqCst), "init waited for the backend to become serve-ready");
 		assert_eq!(
 			pending.timeout, SHORT_BUDGET,
@@ -2424,7 +2458,7 @@ mod tests {
 
 		let mut deferred = tokio::spawn({
 			let dbs = Arc::clone(&dbs);
-			async move { initialise_datastore(&dbs, &pending).await }
+			async move { initialise_datastore(&composer, &dbs, &pending).await }
 		});
 
 		// The gate is closed, so the wait cannot complete however long this waits.
@@ -2433,6 +2467,11 @@ mod tests {
 		assert!(
 			tokio::time::timeout(SHORT_BUDGET + SHORT_BUDGET / 2, &mut deferred).await.is_err(),
 			"the deferred initialisation ran without waiting for serve-readiness"
+		);
+		assert_eq!(
+			hook_calls.load(Ordering::SeqCst),
+			0,
+			"before_check_version ran before the backend reported serve-readiness"
 		);
 		assert!(
 			!opened_early.load(Ordering::SeqCst),
@@ -2446,6 +2485,11 @@ mod tests {
 		assert!(
 			!opened_early.load(Ordering::SeqCst),
 			"a transaction was opened before the backend reported serve-readiness"
+		);
+		assert_eq!(
+			hook_calls.load(Ordering::SeqCst),
+			1,
+			"before_check_version did not run exactly once after serve-readiness"
 		);
 
 		canceller.cancel();
@@ -2475,12 +2519,17 @@ mod tests {
 		let dbs_opts = TestCli::try_parse_from(["surrealdb"])?.dbs;
 		let config = node_maintenance_config("memory".to_string(), Duration::from_secs(3600))?;
 		let canceller = CancellationToken::new();
-		let (dbs, _recv, _router_state, pending) =
-			init(CommunityComposer(), &config, canceller.clone(), Arc::new(NoopObserver), dbs_opts)
-				.await?;
+		let (dbs, _recv, _router_state, pending) = init(
+			&CommunityComposer(),
+			&config,
+			canceller.clone(),
+			Arc::new(NoopObserver),
+			dbs_opts,
+		)
+		.await?;
 		// `init` only builds the datastore; the steps under test are the deferred
 		// ones the server runs once its listener is bound.
-		initialise_datastore(&dbs, &pending).await?;
+		initialise_datastore(&CommunityComposer(), &dbs, &pending).await?;
 
 		assert!(
 			dbs.maintenance_tasks_running(),
@@ -2494,6 +2543,197 @@ mod tests {
 		dbs.shutdown().await?;
 		Ok(())
 	}
+	/// A composer that fills the datastore from a `/kvexport` stream of `source`,
+	/// as the migration target does, in batches of two keys.
+	#[cfg(feature = "storage-mem")]
+	struct CopyingComposer {
+		source: Arc<Datastore>,
+		copied: Arc<AtomicUsize>,
+		/// Stops the fill before the version key, as a fill cut short does.
+		stop_before_version: bool,
+	}
+
+	#[cfg(feature = "storage-mem")]
+	impl TransactionBuilderFactory for CopyingComposer {
+		type RouterState = ();
+
+		async fn new_transaction_builder(
+			&self,
+			path: &str,
+			canceller: CancellationToken,
+			config: ConfigMap,
+		) -> Result<surrealdb_core::kvs::TransactionBuilderParts<Self::RouterState>> {
+			surrealdb_core::CommunityComposer()
+				.new_transaction_builder(path, canceller, config)
+				.await
+		}
+
+		fn path_valid(&self, v: &str) -> Result<String> {
+			surrealdb_core::CommunityComposer().path_valid(v)
+		}
+
+		async fn before_check_version(&self, datastore: &Arc<Datastore>) -> Result<()> {
+			use futures::StreamExt;
+			use surrealdb_core::kvs::copy::{self, KeyRole};
+			use surrealdb_kvs::{Key, TransactionType};
+
+			use crate::ntw::kvexport::{Opened, open, wire};
+
+			let tx = datastore.transaction(TransactionType::Read).await?;
+			let keys = tx.scan_raw(copy::keyspace(), 1, 0, None).await;
+			tx.cancel().await?;
+			// Nothing, the feature level included, may precede the fill: the target
+			// settles its feature level from what the copy leaves.
+			anyhow::ensure!(keys?.is_empty(), "the datastore was written to before the hook ran");
+
+			let Opened::Stream(body) = open(&self.source, None, false).await? else {
+				anyhow::bail!("a memory source keeps no history");
+			};
+			let mut stream = body.into_data_stream();
+			let mut bytes = Vec::new();
+			while let Some(chunk) = stream.next().await {
+				bytes.extend_from_slice(&chunk.map_err(|err| anyhow::anyhow!("{err}"))?);
+			}
+			let response = wire::decode(&bytes)?;
+			response.version.check()?;
+			for batch in response.frames.chunks(2) {
+				let write = datastore.transaction(TransactionType::Write).await?;
+				for (key, value) in batch {
+					if self.stop_before_version && copy::key_role(key) == KeyRole::Version {
+						write.cancel().await?;
+						return Ok(());
+					}
+					write.set(Key::from(key.clone()), value.clone()).await?;
+					self.copied.fetch_add(1, Ordering::SeqCst);
+				}
+				write.commit().await?;
+			}
+			Ok(())
+		}
+	}
+
+	/// A source with a catalog of its own, a namespace the target's defaults would
+	/// never create, owing the data migration it returns: its ledger entry is
+	/// removed, as on a store written before that migration existed. It also
+	/// carries a bootstrap sentinel as residue, which a copy must not move.
+	#[cfg(feature = "storage-mem")]
+	async fn copy_source() -> Result<(Arc<Datastore>, u32)> {
+		use surrealdb_datastore::key::schema::{BootstrapKey, MigrationKey};
+		use surrealdb_datastore::version::MajorVersion;
+		use surrealdb_kvs::TransactionType;
+
+		let source =
+			Datastore::builder().without_maintenance_tasks().build_with_path("memory").await?;
+		source.check_version().await?;
+		source.initialise_defaults("copied", "copied").await?;
+		let owed = source
+			.applied_migration_ids()
+			.await?
+			.first()
+			.map(|(id, _)| *id)
+			.ok_or_else(|| anyhow::anyhow!("this build ships no data migration to owe"))?;
+		let tx = source.transaction(TransactionType::Write).await?;
+		tx.del_key(&MigrationKey::new(owed)).await?;
+		tx.set_key(&BootstrapKey {}, &MajorVersion::latest()).await?;
+		tx.commit().await?;
+		Ok((source, owed))
+	}
+
+	/// A keyspace the hook copies in is an existing store, not a creation.
+	///
+	/// The hook runs while the datastore is still empty — `init` built it without
+	/// stamping `!v` — and everything it writes is there for `check_version` to
+	/// find. The version key arrives last, with the copy whole, so the gate
+	/// reports an existing store: the default namespace is not created over the
+	/// copied catalog, and the migration the source owes runs against the copied
+	/// keys instead of being recorded as already applied.
+	#[cfg(feature = "storage-mem")]
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn a_keyspace_copied_by_the_hook_is_an_existing_store() -> Result<()> {
+		use surrealdb_catalog::providers::NamespaceProvider;
+		use surrealdb_core::kvs::copy;
+		use surrealdb_kvs::{Key, TransactionType};
+		use surrealdb_observe::NoopObserver;
+
+		let (source, owed) = copy_source().await?;
+		let copied = Arc::new(AtomicUsize::new(0));
+		let composer = CopyingComposer {
+			source: Arc::clone(&source),
+			copied: Arc::clone(&copied),
+			stop_before_version: false,
+		};
+		let dbs_opts = TestCli::try_parse_from(["surrealdb"])?.dbs;
+		let config = node_maintenance_config("memory".to_string(), Duration::from_secs(3600))?;
+		let canceller = CancellationToken::new();
+		let (dbs, _recv, _router_state, pending) =
+			init(&composer, &config, canceller.clone(), Arc::new(NoopObserver), dbs_opts).await?;
+		assert!(!pending.no_defaults, "this test needs the default namespace to be eligible");
+		initialise_datastore(&composer, &dbs, &pending).await?;
+
+		assert!(
+			copied.load(Ordering::SeqCst) > 2,
+			"the copy spanned fewer keys than one batch, so the batching went untested"
+		);
+		let (_, is_new) = dbs.check_version().await?;
+		assert!(!is_new, "the version gate treated the copied store as one it created");
+		let tx = dbs.transaction(TransactionType::Read).await?;
+		let names: Vec<String> =
+			tx.all_ns(None).await?.iter().map(|ns| ns.name.to_string()).collect();
+		let sentinel = tx.get(Key::from(copy::BOOTSTRAP_KEY), None).await?;
+		tx.cancel().await?;
+		assert_eq!(
+			names,
+			["copied"],
+			"the target must hold the copied catalog and not a default namespace created over it"
+		);
+		assert_eq!(sentinel, None, "the copy moved the bootstrap sentinel");
+		let applied = |ids: Vec<(u32, Option<_>)>| ids.iter().any(|(id, _)| *id == owed);
+		assert!(!applied(source.applied_migration_ids().await?), "the source no longer owes it");
+		assert!(
+			applied(dbs.applied_migration_ids().await?),
+			"the migration the source owed did not run against the copied keys"
+		);
+
+		canceller.cancel();
+		dbs.shutdown().await?;
+		source.shutdown().await?;
+		Ok(())
+	}
+
+	/// A copy that stops before the version key is refused, not served: the copied
+	/// keys without `!v` read as a store from before versioning, and the gate
+	/// refuses that permanently rather than start with keys missing.
+	#[cfg(feature = "storage-mem")]
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn a_copy_cut_short_before_the_version_key_is_refused() -> Result<()> {
+		use surrealdb_observe::NoopObserver;
+
+		let (source, _) = copy_source().await?;
+		let copied = Arc::new(AtomicUsize::new(0));
+		let composer = CopyingComposer {
+			source: Arc::clone(&source),
+			copied: Arc::clone(&copied),
+			stop_before_version: true,
+		};
+		let dbs_opts = TestCli::try_parse_from(["surrealdb"])?.dbs;
+		let config = node_maintenance_config("memory".to_string(), Duration::from_secs(3600))?;
+		let canceller = CancellationToken::new();
+		let (dbs, _recv, _router_state, pending) =
+			init(&composer, &config, canceller.clone(), Arc::new(NoopObserver), dbs_opts).await?;
+		let err = initialise_datastore(&composer, &dbs, &pending).await.unwrap_err();
+
+		assert!(copied.load(Ordering::SeqCst) > 2, "the copy wrote too little to test anything");
+		assert!(
+			is_permanent_storage_error(&err) && err.to_string().contains("out-of-date"),
+			"a partial copy was not refused as a store from before versioning: {err}"
+		);
+
+		canceller.cancel();
+		dbs.shutdown().await?;
+		source.shutdown().await?;
+		Ok(())
+	}
+
 	/// A volume whose first boot was interrupted between claiming the datastore
 	/// and stamping it starts, rather than being refused for the life of the
 	/// volume.
@@ -2519,12 +2759,17 @@ mod tests {
 		let dbs_opts = TestCli::try_parse_from(["surrealdb"])?.dbs;
 		let config = node_maintenance_config(path, Duration::from_secs(3600))?;
 		let canceller = CancellationToken::new();
-		let (dbs, _recv, _router_state, pending) =
-			init(CommunityComposer(), &config, canceller.clone(), Arc::new(NoopObserver), dbs_opts)
-				.await?;
+		let (dbs, _recv, _router_state, pending) = init(
+			&CommunityComposer(),
+			&config,
+			canceller.clone(),
+			Arc::new(NoopObserver),
+			dbs_opts,
+		)
+		.await?;
 		// `init` only builds the datastore; the steps under test are the deferred
 		// ones the server runs once its listener is bound.
-		initialise_datastore(&dbs, &pending).await?;
+		initialise_datastore(&CommunityComposer(), &dbs, &pending).await?;
 
 		assert_eq!(
 			dbs.get_version().await?,

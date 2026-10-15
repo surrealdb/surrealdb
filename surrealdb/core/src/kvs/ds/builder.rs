@@ -381,7 +381,7 @@ impl Builder {
 	where
 		F: TransactionBuilderFactory + 'static,
 	{
-		let (datastore, _) = self.build_with_factory_path_and_router_state(path, composer).await?;
+		let (datastore, _) = self.build_with_factory_path_and_router_state(path, &composer).await?;
 		Ok(datastore)
 	}
 
@@ -393,7 +393,7 @@ impl Builder {
 	pub async fn build_with_factory_path_and_router_state<F>(
 		self,
 		path: &str,
-		composer: F,
+		composer: &F,
 	) -> Result<(Arc<Datastore>, F::RouterState)>
 	where
 		F: TransactionBuilderFactory + 'static,
@@ -766,7 +766,7 @@ mod tests {
 
 		let (_datastore, router_state) = Builder::new()
 			.without_maintenance_tasks()
-			.build_with_factory_path_and_router_state("test:", composer)
+			.build_with_factory_path_and_router_state("test:", &composer)
 			.await?;
 
 		assert!(Arc::ptr_eq(&expected, &router_state.0));
