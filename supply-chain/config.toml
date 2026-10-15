@@ -1550,7 +1550,7 @@ version = "4.1.0"
 criteria = "safe-to-run"
 
 [[exemptions.rustls]]
-version = "0.23.45"
+version = "0.23.46"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls-platform-verifier-android]]
