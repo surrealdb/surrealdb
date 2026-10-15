@@ -1360,21 +1360,32 @@ Flag when changes touch:
   resolver, silently — and the operator's `deny_net` reaches this path, not only the
   SurrealQL one, or a guest socket becomes the way out that the deny list does not
   cover.
-- A cached Surrealism `Runtime` is stateful: it pools controllers whose WASM linear
-  memory (heap, statics) survives between invocations, so unlike the JavaScript
-  runtime it is not rebuilt per invocation. Every `SurrealismCacheKey` variant
-  (`surrealism/cache.rs`) must therefore be scoped by namespace and database. A key
-  that identifies a module only by where its bytes come from — for silo packages,
-  organisation/package/version — lets two databases share one runtime, and
-  module-local state written under one tenant becomes readable by another.
-- A pooled controller must not carry a guest's open connection across callers. Linear
-  memory is preserved deliberately; a socket is not, because one left in the store's
-  `ResourceTable` stays reachable from the next caller's query through the handle
-  index the guest kept. `Runtime::release_controller` retires a controller that ends
-  its invocation holding a socket it did not start with. Sockets specifically, not
-  table occupancy: WASI pushes the stdio streams and the instance network into that
-  table lazily and never drops them, so counting entries would retire every module
-  that prints.
+- A hostname in the operator's `deny_net` must also hold against a guest that
+  connects to that host's address directly. When the grant allows by address (`*`,
+  a CIDR or an IP), `NetPolicy::for_invocation` resolves each denied hostname for
+  the invocation and refuses those addresses at the connect. If a denied hostname
+  does not resolve in time, the invocation fails closed: it may connect only to
+  addresses the DNS shim vended. A path that admits an IP literal under an
+  address allow without consulting them is a finding.
+- Every Surrealism invocation runs in fresh memory: `SurrealismRunner` instantiates
+  from the archive's `InstancePre` into a pooling-allocator slot and drops the store
+  when the call returns (`surrealism/runner.rs`, `surrealism/runtime/src/runtime.rs`).
+  Nothing a call writes (statics, heap, WASI resources such as sockets) survives it.
+  That is what lets prepared code be cached by `DIGEST` alone, with no namespace or
+  database in the key (`surrealism/cache.rs`), and shared by every tenant whose
+  definition pins that archive. Anything that keeps an instance, a store or a
+  `ResourceTable` alive from one invocation to the next breaks the tenant boundary
+  and is a finding.
+- An invocation's capabilities come only from its definition's `CAPABILITIES`,
+  intersected with the datastore's capabilities
+  (`extension::capabilities::effective_capabilities`). The archive's own
+  `[capabilities]` request is never read. The datastore side is
+  `Context::server_capabilities`, never the context a call is made from: an extension
+  that another one calls through `tx.run` runs with its own definition's grant, and
+  whether the caller may call it at all is checked against the caller's grant first.
+  Grants are cached per (`CAPABILITIES`, datastore capabilities `Arc`), with the `Arc`
+  compared by identity, so a capabilities swap never serves a grant built from the
+  replaced ones.
 - A `transaction` handle is lent only to a function whose manifest entry declares one,
   and revoked on every path out of `invoke`. The manifest is user-supplied and is no
   evidence about the component beside it; the property rests on the manifest being the
@@ -1418,9 +1429,9 @@ Flag when changes touch:
   `sha256(surrealism/MANIFEST)` equals the definition's `DIGEST`, and with a
   `SIGNER`, a `SIGNATURE` proves it. `UNSIGNED` waives only the signature, never
   the `DIGEST`. The check reads only `MANIFEST` and `SIGNATURE` and runs before
-  anything else in the archive is unpacked, parsed or compiled into the cache, and on
-  every call that takes a module from it (`Context::get_surrealism_module`), since
-  one cached archive serves every definition that names its source. A path that
+  anything else in the archive is unpacked, parsed or prepared, and on every call
+  that takes a module from the cache (`Context::get_surrealism_module`), since one
+  prepared archive serves every definition, in any database, that pins its digest. A path that
   loads a module without a `Trust` taken from the definition is a finding.
 - A definition with no `DIGEST` never loads: a catalog row from before revision 3,
   or an imported definition without `DIGEST` or without both `SIGNER` and

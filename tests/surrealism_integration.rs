@@ -133,14 +133,14 @@ mod surrealism_integration {
 		}
 	}
 
-	/// The demo, repacked with `localhost` taken out of its `allow_net`.
+	/// The demo, repacked with `localhost` taken out of the network request in
+	/// its package file, as `restricted.surli`.
 	///
-	/// The same component and the same manifest, so the two archives differ in
-	/// exactly one thing: whether the module is allowed to resolve `localhost`.
-	/// That is what lets `check_dns_denied_hostname` point both halves at one
-	/// live listener under one name and attribute the difference to the name
-	/// filter alone. Repacked from the built archive rather than built from a
-	/// second crate, so it costs no second wasm build.
+	/// The same component, so it runs exactly like `demo.surli`, but its
+	/// MANIFEST, and so its DIGEST, differ: the trust tests use it as a second
+	/// archive. The request it changes grants nothing; only a definition's
+	/// `CAPABILITIES` does. Repacked from the built archive rather than built
+	/// from a second crate, so it costs no second wasm build.
 	fn repack_without_localhost(output_dir: &Path) {
 		use surrealism_runtime::package::UnpackOptions;
 
@@ -466,15 +466,26 @@ mod surrealism_integration {
 			.unwrap_or_else(|e| panic!("Failed to parse response JSON: {e}\nbody: {body}"))
 	}
 
+	/// What the demo is granted: every function family its exports call, its
+	/// own exports through `tx.run`, arbitrary queries, writes, and the local
+	/// test listeners by name and by address.
+	///
+	/// `localhost` is matched by name by the DNS shim; `127.0.0.1` is the
+	/// explicit IP rule that readmits the loopback address the name resolves
+	/// to, which the shim would otherwise reject as special.
+	const DEMO_CAPABILITIES: &str = "CAPABILITIES { net: [\"localhost\", \"127.0.0.1\"], \
+		functions: [\"fn::*\", \"file::*\", \"sequence::*\", \"ext::*\"], queries: true, write: true }";
+
 	/// Run the DEFINE BUCKET + DEFINE EXTENSION setup queries for a fresh
 	/// namespace/database. The tests call the extension through the `mod::`
 	/// alias, so every call also covers the alias resolving an `ext::`
 	/// definition.
 	async fn setup_module(addr: &str, ns: &str, db: &str, bucket_dir: &Path) {
-		setup_named_module(addr, ns, db, bucket_dir, "demo", "demo.surli").await;
+		setup_named_module(addr, ns, db, bucket_dir, "demo", "demo.surli", DEMO_CAPABILITIES).await;
 	}
 
-	/// Define one module in the bucket under a chosen name and archive.
+	/// Define one module in the bucket under a chosen name and archive,
+	/// granted `capabilities`, a `CAPABILITIES { … }` clause.
 	async fn setup_named_module(
 		addr: &str,
 		ns: &str,
@@ -482,11 +493,12 @@ mod surrealism_integration {
 		bucket_dir: &Path,
 		module: &str,
 		archive: &str,
+		capabilities: &str,
 	) {
 		let dir = bucket_dir.to_string_lossy();
 		let setup = format!(
 			"DEFINE BUCKET IF NOT EXISTS test BACKEND \"file:{dir}\";\
-			 DEFINE EXTENSION ext::{module} FROM f\"test:/{archive}\" UNSIGNED;"
+			 DEFINE EXTENSION ext::{module} FROM f\"test:/{archive}\" UNSIGNED {capabilities};"
 		);
 		let results = sql_query(addr, ns, db, &setup).await;
 		for (i, r) in results.iter().enumerate() {
@@ -627,18 +639,19 @@ mod surrealism_integration {
 
 		setup_module(&addr, &ns, &db, bucket_dir).await;
 
-		// First call: init() populates the OnceLock, cached_greeting() reads it
+		// Every invocation runs `init` on a fresh instance, which populates the
+		// OnceLock that cached_greeting() reads.
 		let results = sql_query(&addr, &ns, &db, "RETURN mod::demo::cached_greeting();").await;
 		assert_eq!(results[0].status, "OK", "cached_greeting (1st): {:?}", results[0].result);
 		let first_value = results[0].result.clone();
 		assert!(first_value.is_string(), "cached_greeting should return a string");
 
-		// Second call: persistent state survives, returns the same value
+		// Second call: a fresh instance initialises to the same value
 		let results = sql_query(&addr, &ns, &db, "RETURN mod::demo::cached_greeting();").await;
 		assert_eq!(results[0].status, "OK", "cached_greeting (2nd): {:?}", results[0].result);
 		assert_eq!(
 			results[0].result, first_value,
-			"persistent state should survive across invocations"
+			"init should produce the same state for every invocation"
 		);
 
 		// Third call: one more round to be sure
@@ -1200,10 +1213,9 @@ mod surrealism_integration {
 	/// the write is reached — the same enforcement point that stops a `SELECT`
 	/// `PERMISSIONS` predicate and a `COMPUTED` body from writing.
 	///
-	/// The assertions deliberately check *why* the call failed: an earlier
-	/// version of this test passed only because the demo had not declared
-	/// `allow_arbitrary_queries`, so the write was denied by capability and
-	/// nothing about read-only enforcement was exercised.
+	/// The assertions check *why* the call failed: a definition without
+	/// `queries` would refuse the write by capability, which says nothing
+	/// about read-only enforcement.
 	async fn check_read_only_write_refused(
 		bucket_dir: &Path,
 	) -> Result<(), Box<dyn std::error::Error>> {
@@ -1221,7 +1233,7 @@ mod surrealism_integration {
 		);
 
 		// The refusal must be the read-only frame, not a missing capability: the
-		// demo declares `allow_arbitrary_queries`, so a `permission denied` here
+		// demo is granted `queries`, so a `permission denied` here
 		// would mean this test is passing for the wrong reason and proving
 		// nothing about read-only enforcement.
 		let message = results[0].result.to_string();
@@ -1240,6 +1252,164 @@ mod surrealism_integration {
 	#[test(tokio::test)]
 	async fn module_read_only_write_refused() -> Result<(), Box<dyn std::error::Error>> {
 		check_read_only_write_refused(&DEMO_DIR.canonical).await
+	}
+
+	/// A writing export of a definition that does not grant `write` runs under
+	/// the read-only frame, so its write is refused there.
+	async fn check_write_needs_the_grant(
+		bucket_dir: &Path,
+	) -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		setup_named_module(
+			&addr,
+			&ns,
+			&db,
+			bucket_dir,
+			"nowrite",
+			"demo.surli",
+			"CAPABILITIES { queries: true }",
+		)
+		.await;
+
+		let results =
+			sql_query(&addr, &ns, &db, "RETURN ext::nowrite::registered::add_note('hi');").await;
+		assert_ne!(results[0].status, "OK", "the write must be refused: {:?}", results[0].result);
+		let message = results[0].result.to_string();
+		assert!(message.contains("read-only Surrealism function"), "{message}");
+
+		// The same export of a definition that grants `write` writes.
+		setup_named_module(
+			&addr,
+			&ns,
+			&db,
+			bucket_dir,
+			"writer",
+			"demo.surli",
+			"CAPABILITIES { queries: true, write: true }",
+		)
+		.await;
+		let results =
+			sql_query(&addr, &ns, &db, "RETURN ext::writer::registered::add_note('hi');").await;
+		assert_eq!(results[0].status, "OK", "{:?}", results[0].result);
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_write_needs_the_grant() -> Result<(), Box<dyn std::error::Error>> {
+		check_write_needs_the_grant(&DEMO_DIR.canonical).await
+	}
+
+	/// A definition's `memory` limit stops a guest that grows past it, and one
+	/// that stays under it runs.
+	async fn check_memory_limit_stops_a_guest(
+		bucket_dir: &Path,
+	) -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		setup_named_module(
+			&addr,
+			&ns,
+			&db,
+			bucket_dir,
+			"small",
+			"demo.surli",
+			"CAPABILITIES { memory: 33554432 }",
+		)
+		.await;
+
+		let results = sql_query(&addr, &ns, &db, "RETURN ext::small::allocate(1);").await;
+		assert_eq!(results[0].status, "OK", "1 MiB fits: {:?}", results[0].result);
+		let results = sql_query(&addr, &ns, &db, "RETURN ext::small::allocate(64);").await;
+		assert_ne!(results[0].status, "OK", "64 MiB must not: {:?}", results[0].result);
+		// The refused grow surfaces in the guest as an allocation failure.
+		let message = results[0].result.to_string();
+		assert!(message.contains("rust_oom"), "{message}");
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_memory_limit_stops_a_guest() -> Result<(), Box<dyn std::error::Error>> {
+		check_memory_limit_stops_a_guest(&DEMO_DIR.canonical).await
+	}
+
+	/// A definition's `timeout` stops a guest that computes without calling
+	/// the host, well before it would finish.
+	async fn check_timeout_stops_a_guest(
+		bucket_dir: &Path,
+	) -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		setup_named_module(
+			&addr,
+			&ns,
+			&db,
+			bucket_dir,
+			"quick",
+			"demo.surli",
+			"CAPABILITIES { timeout: 200ms }",
+		)
+		.await;
+
+		let start = std::time::Instant::now();
+		let results = sql_query(&addr, &ns, &db, "RETURN ext::quick::spin(20000);").await;
+		assert_ne!(results[0].status, "OK", "the spin must time out: {:?}", results[0].result);
+		let message = results[0].result.to_string();
+		assert!(message.contains("timed out (epoch interrupt)"), "{message}");
+		assert!(start.elapsed() < Duration::from_secs(10), "took {:?}", start.elapsed());
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_timeout_stops_a_guest() -> Result<(), Box<dyn std::error::Error>> {
+		check_timeout_stops_a_guest(&DEMO_DIR.canonical).await
+	}
+
+	/// `strict_timeout: false` selects the engine without timeouts only on a
+	/// server that allows unbounded execution; elsewhere the `timeout` still
+	/// stops the guest.
+	async fn check_unbounded_execution_needs_the_server(
+		bucket_dir: &Path,
+	) -> Result<(), Box<dyn std::error::Error>> {
+		const UNBOUNDED: &str = "CAPABILITIES { timeout: 200ms, strict_timeout: false }";
+		let query = "RETURN ext::loose::spin(1000);";
+
+		let (addr, server) = start_surrealism_server(bucket_dir).await?;
+		let (ns, db) = (Ulid::new().to_string(), Ulid::new().to_string());
+		setup_named_module(&addr, &ns, &db, bucket_dir, "loose", "demo.surli", UNBOUNDED).await;
+		let results = sql_query(&addr, &ns, &db, query).await;
+		assert_ne!(
+			results[0].status, "OK",
+			"without the server setting the timeout still applies: {:?}",
+			results[0].result
+		);
+		let message = results[0].result.to_string();
+		assert!(message.contains("timed out (epoch interrupt)"), "{message}");
+		drop(server);
+
+		let allowed = HashMap::from([(
+			"SURREAL_SURREALISM_ALLOW_UNBOUNDED_EXECUTION".to_string(),
+			"true".to_string(),
+		)]);
+		let (addr, _server) = start_surrealism_server_with(bucket_dir, allowed).await?;
+		let (ns, db) = (Ulid::new().to_string(), Ulid::new().to_string());
+		setup_named_module(&addr, &ns, &db, bucket_dir, "loose", "demo.surli", UNBOUNDED).await;
+		let results = sql_query(&addr, &ns, &db, query).await;
+		assert_eq!(
+			results[0].status, "OK",
+			"with it the fast engine runs past the timeout: {:?}",
+			results[0].result
+		);
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_unbounded_execution_needs_the_server() -> Result<(), Box<dyn std::error::Error>>
+	{
+		check_unbounded_execution_needs_the_server(&DEMO_DIR.canonical).await
 	}
 
 	/// A read-only function cannot advance a sequence either.
@@ -1416,6 +1586,97 @@ mod surrealism_integration {
 	}
 
 	// -------------------------------------------------------------------
+	// Functions added with `surrealism::register` during init
+	// -------------------------------------------------------------------
+
+	/// The build reads the function table from the snapshot taken after
+	/// `init`, so functions the demo registers there reach `exports.toml`
+	/// beside the macro's, with the metadata they were registered with.
+	async fn check_registered_exports(bucket_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
+		setup_module(&addr, &ns, &db, bucket_dir).await;
+
+		let results = sql_query(&addr, &ns, &db, "INFO FOR DB STRUCTURE;").await;
+		assert_eq!(results[0].status, "OK", "INFO FOR DB STRUCTURE: {:?}", results[0].result);
+		let exports = results[0].result["extensions"][0]["exports"]
+			.as_array()
+			.expect("exports should be an array");
+		let export = |name: &str| {
+			exports
+				.iter()
+				.find(|e| e["name"] == name)
+				.unwrap_or_else(|| panic!("{name} missing from exports: {exports:?}"))
+		};
+
+		assert!(exports.iter().any(|e| e["name"] == "can_drive"), "macro exports remain");
+
+		let shout = export("registered::shout");
+		assert_eq!(shout["writeable"], false);
+		assert_eq!(shout["comment"], "Upper-case a string.", "{shout:?}");
+		assert_eq!(shout["args"][0]["name"], "text", "{shout:?}");
+		assert_eq!(shout["args"][0]["kind"], "string", "{shout:?}");
+		assert_eq!(shout["returns"], "string", "{shout:?}");
+
+		let add_note = export("registered::add_note");
+		assert_eq!(add_note["writeable"], true, "{add_note:?}");
+
+		let sneaky = export("registered::sneaky_write");
+		assert_eq!(sneaky["writeable"], false, "{sneaky:?}");
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_registered_exports() -> Result<(), Box<dyn std::error::Error>> {
+		check_registered_exports(&DEMO_DIR.canonical).await
+	}
+
+	/// Registered functions are invoked through the same dispatch as the
+	/// macro's, and the host enforces their declared transaction mode.
+	async fn check_registered_calls(bucket_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
+		setup_module(&addr, &ns, &db, bucket_dir).await;
+
+		let results =
+			sql_query(&addr, &ns, &db, "RETURN mod::demo::registered::shout('hello');").await;
+		assert_eq!(results[0].status, "OK", "shout: {:?}", results[0].result);
+		assert_eq!(results[0].result, serde_json::json!("HELLO"));
+
+		// Declares a writeable transaction: the write lands.
+		let results =
+			sql_query(&addr, &ns, &db, "RETURN mod::demo::registered::add_note('kept');").await;
+		assert_eq!(results[0].status, "OK", "add_note: {:?}", results[0].result);
+		assert_eq!(results[0].result, serde_json::json!("kept"));
+		let results = sql_query(&addr, &ns, &db, "SELECT VALUE text FROM note;").await;
+		assert_eq!(results[0].result, serde_json::json!(["kept"]));
+
+		// Declares a read-only transaction: the read-only frame refuses it.
+		let results =
+			sql_query(&addr, &ns, &db, "RETURN mod::demo::registered::sneaky_write();").await;
+		assert_ne!(results[0].status, "OK", "write must be refused: {:?}", results[0].result);
+		let message = results[0].result.to_string();
+		assert!(
+			message.contains("read-only Surrealism function"),
+			"expected the read-only frame to refuse the write, got: {message}"
+		);
+		let results = sql_query(&addr, &ns, &db, "SELECT VALUE text FROM note;").await;
+		assert_eq!(results[0].result, serde_json::json!(["kept"]));
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_registered_calls() -> Result<(), Box<dyn std::error::Error>> {
+		check_registered_calls(&DEMO_DIR.canonical).await
+	}
+
+	// -------------------------------------------------------------------
 	// Async networking test (local API)
 	// -------------------------------------------------------------------
 
@@ -1463,7 +1724,7 @@ mod surrealism_integration {
 
 	/// A guest can reach a host by **name**, not just by literal address.
 	///
-	/// This is what the DNS shim buys: `allow_net` entries are matched as names
+	/// This is what the DNS shim buys: granted `net` entries are matched as names
 	/// at resolution time rather than pre-resolved at module load, so a record
 	/// that rotates does not strand the module on a stale address.
 	async fn check_dns_allowed_hostname(
@@ -1495,7 +1756,7 @@ mod surrealism_integration {
 		check_dns_allowed_hostname(&DEMO_DIR.canonical).await
 	}
 
-	/// A name outside the module's `allow_net` must not reach a listener that is
+	/// A name outside the definition's `net` must not reach a listener that is
 	/// running and reachable under exactly that name.
 	///
 	/// The refused name has to be one that genuinely resolves, or the test
@@ -1503,13 +1764,13 @@ mod surrealism_integration {
 	/// a reserved `.example` name fails to resolve through wasmtime's own
 	/// resolver too, so a test using one would pass with the name filter
 	/// deleted. So both halves fetch `localhost`, the live listener, through the
-	/// same component; the only difference is that one archive lists
-	/// `localhost` in `allow_net` and the other does not.
+	/// same archive; the only difference is that one definition grants
+	/// `localhost` in `net` and the other does not.
 	///
 	/// Deleting the `allows_name` check in `surrealism/runtime/src/dns.rs`, or
 	/// unbinding the shim, makes the denied half start succeeding: the address
-	/// `localhost` resolves to is covered by the `127.0.0.1` rule both archives
-	/// keep, so nothing downstream refuses the connect.
+	/// `localhost` resolves to is covered by the `127.0.0.1` rule both
+	/// definitions grant, so nothing downstream refuses the connect.
 	async fn check_dns_denied_hostname(
 		bucket_dir: &Path,
 	) -> Result<(), Box<dyn std::error::Error>> {
@@ -1520,9 +1781,18 @@ mod surrealism_integration {
 		let db = Ulid::new().to_string();
 
 		setup_module(&addr, &ns, &db, bucket_dir).await;
-		setup_named_module(&addr, &ns, &db, bucket_dir, "restricted", "restricted.surli").await;
+		setup_named_module(
+			&addr,
+			&ns,
+			&db,
+			bucket_dir,
+			"restricted",
+			"demo.surli",
+			"CAPABILITIES { net: [\"127.0.0.1\"] }",
+		)
+		.await;
 
-		// The control: the module that lists `localhost`.
+		// The control: the definition that grants `localhost`.
 		let allowed = sql_query(
 			&addr,
 			&ns,
@@ -1537,8 +1807,8 @@ mod surrealism_integration {
 		);
 		assert_eq!(allowed[0].result, serde_json::json!("pikachu"));
 
-		// The same component, the same name, the same listener — without the
-		// name in `allow_net`.
+		// The same archive, the same name, the same listener — without the
+		// name in `net`.
 		let denied = sql_query(
 			&addr,
 			&ns,
@@ -1550,11 +1820,87 @@ mod surrealism_integration {
 		.await;
 		assert_ne!(
 			denied[0].status, "OK",
-			"a hostname outside allow_net must not resolve, got: {:?}",
+			"a hostname outside the granted net must not resolve, got: {:?}",
 			denied[0].result
 		);
 
 		Ok(())
+	}
+
+	/// An extension called by another one through `tx.run` runs with its own
+	/// definition's grant, even where that is more than its caller's.
+	///
+	/// `ext::caller` may call extensions but reach no network; `ext::netter`
+	/// may reach the local listener. Both are the demo archive. The caller's
+	/// `fetch_via` reaches the listener through `netter`, and the caller's own
+	/// `fetch_pokemon` does not. Each order is run on a fresh server, so the
+	/// grant cache is first filled by the nested call in one and by the direct
+	/// call in the other, and the outcome is the same in both.
+	async fn check_nested_extension_has_its_own_grant(
+		bucket_dir: &Path,
+		nested_first: bool,
+	) -> Result<(), Box<dyn std::error::Error>> {
+		let api = LocalPokemonApi::start()?;
+		let base = api.base_url();
+		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
+		setup_named_module(
+			&addr,
+			&ns,
+			&db,
+			bucket_dir,
+			"caller",
+			"demo.surli",
+			"CAPABILITIES { functions: [\"ext::*\"] }",
+		)
+		.await;
+		setup_named_module(
+			&addr,
+			&ns,
+			&db,
+			bucket_dir,
+			"netter",
+			"demo.surli",
+			"CAPABILITIES { net: [\"127.0.0.1\"] }",
+		)
+		.await;
+
+		let nested = format!("RETURN ext::caller::fetch_via('netter', '{base}', 'pikachu');");
+		let direct = format!("RETURN ext::netter::fetch_pokemon('{base}', 'pikachu');");
+		let own = format!("RETURN ext::caller::fetch_pokemon('{base}', 'pikachu');");
+		let order = if nested_first {
+			[&nested, &direct]
+		} else {
+			[&direct, &nested]
+		};
+		for query in order {
+			let results = sql_query(&addr, &ns, &db, query).await;
+			assert_eq!(results[0].status, "OK", "{query} failed: {:?}", results[0].result);
+			assert_eq!(results[0].result, serde_json::json!("pikachu"));
+		}
+
+		let results = sql_query(&addr, &ns, &db, &own).await;
+		assert_ne!(
+			results[0].status, "OK",
+			"the caller's own grant has no network, got: {:?}",
+			results[0].result
+		);
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_nested_extension_has_its_own_grant_nested_first()
+	-> Result<(), Box<dyn std::error::Error>> {
+		check_nested_extension_has_its_own_grant(&DEMO_DIR.canonical, true).await
+	}
+
+	#[test(tokio::test)]
+	async fn module_nested_extension_has_its_own_grant_direct_first()
+	-> Result<(), Box<dyn std::error::Error>> {
+		check_nested_extension_has_its_own_grant(&DEMO_DIR.canonical, false).await
 	}
 
 	/// A port-bearing `--deny-net` rule binds for a guest socket, as it does for
@@ -1579,7 +1925,7 @@ mod surrealism_integration {
 		let ns = Ulid::new().to_string();
 		let db = Ulid::new().to_string();
 
-		// The module declares `allow_net = ["localhost", "127.0.0.1"]` and still
+		// The definition grants `net: ["localhost", "127.0.0.1"]` and still
 		// loads: the operator denied one port, not the host.
 		setup_module(&addr, &ns, &db, bucket_dir).await;
 
@@ -1649,9 +1995,52 @@ mod surrealism_integration {
 		Ok(())
 	}
 
+	/// A hostname in `--deny-net` holds against a guest that connects to the
+	/// host's address literal, under a grant that allows by address.
+	///
+	/// `net: true` grants what the server allows, `127.0.0.1` and `localhost`
+	/// here, so `127.0.0.1` is allowed by address. The operator denies
+	/// `localhost`, which resolves to it: the connect to `127.0.0.1` is
+	/// refused. The control is the same fetch on a server without the deny.
+	async fn check_operator_host_deny_by_address(
+		bucket_dir: &Path,
+	) -> Result<(), Box<dyn std::error::Error>> {
+		const OPEN: &str = "CAPABILITIES { net: true }";
+		let api = LocalPokemonApi::start()?;
+		let fetch = format!(
+			"RETURN ext::open::fetch_pokemon('http://127.0.0.1:{}', 'pikachu');",
+			api.addr.port()
+		);
+
+		let (addr, server) = start_surrealism_server(bucket_dir).await?;
+		let (ns, db) = (Ulid::new().to_string(), Ulid::new().to_string());
+		setup_named_module(&addr, &ns, &db, bucket_dir, "open", "demo.surli", OPEN).await;
+		let allowed = sql_query(&addr, &ns, &db, &fetch).await;
+		assert_eq!(allowed[0].status, "OK", "the control must connect: {:?}", allowed[0].result);
+		drop(server);
+
+		let (addr, _server) =
+			start_surrealism_server_full(bucket_dir, HashMap::new(), "--deny-net localhost")
+				.await?;
+		let (ns, db) = (Ulid::new().to_string(), Ulid::new().to_string());
+		setup_named_module(&addr, &ns, &db, bucket_dir, "open", "demo.surli", OPEN).await;
+		let denied = sql_query(&addr, &ns, &db, &fetch).await;
+		assert_ne!(
+			denied[0].status, "OK",
+			"the address of a denied host must not be reachable: {:?}",
+			denied[0].result
+		);
+		Ok(())
+	}
+
 	#[test(tokio::test)]
 	async fn module_capability_spellings() -> Result<(), Box<dyn std::error::Error>> {
 		check_extension_capability_spellings(&DEMO_DIR.canonical).await
+	}
+
+	#[test(tokio::test)]
+	async fn module_operator_host_deny_by_address() -> Result<(), Box<dyn std::error::Error>> {
+		check_operator_host_deny_by_address(&DEMO_DIR.canonical).await
 	}
 
 	#[test(tokio::test)]
@@ -1668,14 +2057,14 @@ mod surrealism_integration {
 	/// mode has no other signal.
 	#[test(tokio::test)]
 	async fn module_dns_filter_is_bound() -> Result<(), Box<dyn std::error::Error>> {
-		use surrealism_runtime::NetDeny;
+		use surrealism_runtime::epoch::{EngineSettings, engines};
 		use surrealism_runtime::package::{SurrealismPackage, UnpackOptions};
 		use surrealism_runtime::runtime::Runtime;
 
 		let surli = std::fs::read(DEMO_DIR.canonical.join("demo.surli"))?;
 		let package =
 			SurrealismPackage::from_reader(std::io::Cursor::new(surli), &UnpackOptions::default())?;
-		let runtime = Runtime::new(package, 1, None, None, NetDeny::Nothing)?;
+		let runtime = Runtime::new(package, engines(EngineSettings::default()))?;
 		assert!(
 			runtime.dns_filtered(),
 			"the demo imports wasi:sockets/ip-name-lookup, so the filtering \
@@ -1796,10 +2185,11 @@ mod surrealism_integration {
 		check_silo_missing_version(&DEMO_DIR.canonical).await
 	}
 
-	/// A silo runtime keeps its KV store and WASM memory between invocations, so
-	/// two databases defining the same package must each get their own. What one
-	/// tenant writes into module state must not be visible to another.
-	async fn check_silo_state_is_per_database(
+	/// Two databases defining the same silo package share its compiled code,
+	/// but never its memory: each invocation starts from the module's image.
+	/// What one invocation writes into module state is visible to nothing
+	/// after it — not the same tenant's next call, and not another tenant.
+	async fn check_silo_state_is_per_invocation(
 		bucket_dir: &Path,
 	) -> Result<(), Box<dyn std::error::Error>> {
 		let package = std::fs::read(bucket_dir.join("demo.surli"))?;
@@ -1832,37 +2222,197 @@ mod surrealism_integration {
 		let (ns_a, db_a) = &tenants[0];
 		let (ns_b, db_b) = &tenants[1];
 
-		let results = sql_query(&addr, ns_a, db_a, "RETURN ext::demo::set_state(42);").await;
-		assert_eq!(results[0].status, "OK", "set_state: {:?}", results[0].result);
+		// `set_state` returns the value it replaced: the image's zero, every time.
+		for _ in 0..2 {
+			let results = sql_query(&addr, ns_a, db_a, "RETURN ext::demo::set_state(42);").await;
+			assert_eq!(results[0].status, "OK", "set_state: {:?}", results[0].result);
+			assert_eq!(results[0].result, serde_json::json!(0));
+		}
 
-		// The writing tenant still sees its own value.
-		let results = sql_query(&addr, ns_a, db_a, "RETURN ext::demo::get_state();").await;
-		assert_eq!(results[0].status, "OK", "get_state: {:?}", results[0].result);
-		assert_eq!(results[0].result, serde_json::json!(42));
-
-		// The other tenant must not: a module is cached per namespace/database,
-		// so it gets its own instances and its own linear memory.
-		let results = sql_query(&addr, ns_b, db_b, "RETURN ext::demo::get_state();").await;
-		assert_eq!(results[0].status, "OK", "get_state: {:?}", results[0].result);
-		assert_eq!(
-			results[0].result,
-			serde_json::json!(0),
-			"silo module state leaked across the namespace/database boundary"
-		);
+		for (ns, db) in [(ns_a, db_a), (ns_b, db_b)] {
+			let results = sql_query(&addr, ns, db, "RETURN ext::demo::get_state();").await;
+			assert_eq!(results[0].status, "OK", "get_state: {:?}", results[0].result);
+			assert_eq!(
+				results[0].result,
+				serde_json::json!(0),
+				"module state survived its invocation"
+			);
+		}
 
 		Ok(())
 	}
 
 	#[test(tokio::test)]
-	async fn module_silo_state_is_per_database() -> Result<(), Box<dyn std::error::Error>> {
-		check_silo_state_is_per_database(&DEMO_DIR.canonical).await
+	async fn module_silo_state_is_per_invocation() -> Result<(), Box<dyn std::error::Error>> {
+		check_silo_state_is_per_invocation(&DEMO_DIR.canonical).await
 	}
 
-	/// `OVERWRITE` drops the runtime the replaced definition loaded, keyed by
-	/// the DIGEST that definition pinned. The new statement gives no DIGEST,
-	/// so only the stored row names the runtime to drop; without that, the old
-	/// instances, and the state in their linear memory, would serve the
-	/// redefined extension.
+	// -------------------------------------------------------------------
+	// Isolation: fresh memory per invocation
+	// -------------------------------------------------------------------
+
+	/// A static counter returns zero on every call, sequential or concurrent:
+	/// each invocation increments its own fresh copy of the module's memory.
+	async fn check_static_counter(bucket_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		setup_module(&addr, &ns, &db, bucket_dir).await;
+
+		// Several calls in one query, then several queries.
+		let results = sql_query(
+			&addr,
+			&ns,
+			&db,
+			"RETURN [mod::demo::hit(), mod::demo::hit(), mod::demo::hit()];",
+		)
+		.await;
+		assert_eq!(results[0].status, "OK", "hit: {:?}", results[0].result);
+		assert_eq!(results[0].result, serde_json::json!([0, 0, 0]));
+
+		let mut handles = Vec::new();
+		for _ in 0..16 {
+			let (addr, ns, db) = (addr.clone(), ns.clone(), db.clone());
+			handles.push(tokio::spawn(async move {
+				let results = sql_query(&addr, &ns, &db, "RETURN mod::demo::hit();").await;
+				assert_eq!(results[0].status, "OK", "hit: {:?}", results[0].result);
+				results[0].result.clone()
+			}));
+		}
+		for handle in handles {
+			assert_eq!(handle.await?, serde_json::json!(0));
+		}
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_static_counter_is_per_invocation() -> Result<(), Box<dyn std::error::Error>> {
+		check_static_counter(&DEMO_DIR.canonical).await
+	}
+
+	/// With one invocation slot, a nested call finds the only slot held by its
+	/// caller. It must fail at once rather than wait for a slot that can only
+	/// free once it has itself returned.
+	async fn check_nested_fails_fast(bucket_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+		let mut vars = HashMap::new();
+		vars.insert("SURREAL_SURREALISM_MAX_CONCURRENT_INVOCATIONS".to_string(), "1".to_string());
+		let (addr, _server) = start_surrealism_server_with(bucket_dir, vars).await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		setup_module(&addr, &ns, &db, bucket_dir).await;
+
+		// The control: a top-level call takes the one slot and returns it.
+		let results = sql_query(&addr, &ns, &db, "RETURN mod::demo::hit();").await;
+		assert_eq!(results[0].status, "OK", "hit: {:?}", results[0].result);
+
+		let started = Instant::now();
+		let results = sql_query(&addr, &ns, &db, "RETURN mod::demo::nested_hit();").await;
+		let elapsed = started.elapsed();
+		assert_ne!(results[0].status, "OK", "nested call ran with no free slot");
+		let message = results[0].result.to_string();
+		assert!(
+			message.contains("nested Surrealism invocation"),
+			"expected the nested-slot error, got: {message}"
+		);
+		assert!(elapsed < Duration::from_secs(10), "the nested call waited {elapsed:?}");
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_nested_invocation_fails_fast() -> Result<(), Box<dyn std::error::Error>> {
+		check_nested_fails_fast(&DEMO_DIR.canonical).await
+	}
+
+	/// An extension may call extensions up to eight invocations deep, counting
+	/// the outermost; one more fails.
+	async fn check_depth_limit(bucket_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		setup_module(&addr, &ns, &db, bucket_dir).await;
+
+		// `recurse(7)` runs eight invocations: the outermost and seven nested.
+		let results = sql_query(&addr, &ns, &db, "RETURN mod::demo::recurse(7);").await;
+		assert_eq!(results[0].status, "OK", "recurse(7): {:?}", results[0].result);
+		assert_eq!(results[0].result, serde_json::json!(7));
+
+		let results = sql_query(&addr, &ns, &db, "RETURN mod::demo::recurse(8);").await;
+		assert_ne!(results[0].status, "OK", "recurse(8) went past the depth limit");
+		let message = results[0].result.to_string();
+		assert!(message.contains("depth exceeded"), "expected the depth error, got: {message}");
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_nesting_depth_is_limited() -> Result<(), Box<dyn std::error::Error>> {
+		check_depth_limit(&DEMO_DIR.canonical).await
+	}
+
+	/// One compiled component, two invocations granted different network
+	/// policies. The policy travels with the invocation rather than living in
+	/// the linker, so the same `InstancePre` reaches the listener in one and is
+	/// refused in the other.
+	#[test(tokio::test)]
+	async fn module_net_policy_is_per_invocation() -> Result<(), Box<dyn std::error::Error>> {
+		use std::sync::Arc;
+
+		use surrealism_runtime::epoch::{EngineSettings, engines};
+		use surrealism_runtime::package::UnpackOptions;
+		use surrealism_runtime::runtime::{Call, InstanceSettings, Runtime};
+		use surrealism_runtime::{NetDeny, NetPolicy};
+
+		let api = LocalPokemonApi::start()?;
+		let base = format!("http://localhost:{}", api.base_url().rsplit(':').next().unwrap());
+
+		let surli = std::fs::read(DEMO_DIR.canonical.join("demo.surli"))?;
+		let mut package =
+			SurrealismPackage::from_reader(std::io::Cursor::new(surli), &UnpackOptions::default())?;
+		package.config.attach.fs = None;
+		let runtime = Arc::new(Runtime::new(package, engines(EngineSettings::default()))?);
+
+		let fetch = |net: Arc<NetPolicy>| {
+			let runtime = &runtime;
+			let base = base.clone();
+			async move {
+				runtime
+					.invoke(Call {
+						function: Some("fetch_pokemon".to_string()),
+						rows: vec![vec![
+							surrealdb_types::Value::String(base),
+							surrealdb_types::Value::String("pikachu".to_string()),
+						]],
+						tx: None,
+						settings: InstanceSettings {
+							net,
+							..InstanceSettings::local()
+						},
+						deadline: None,
+						nested: false,
+					})
+					.await
+			}
+		};
+
+		let allowed = NetPolicy::parse(
+			&["localhost".to_string(), "127.0.0.1".to_string()],
+			NetDeny::Nothing,
+		)?;
+		let refused = NetPolicy::parse(&["127.0.0.1".to_string()], NetDeny::Nothing)?;
+
+		let values = fetch(allowed).await?;
+		assert_eq!(values, vec![surrealdb_types::Value::String("pikachu".to_string())]);
+		assert!(
+			fetch(refused).await.is_err(),
+			"the second invocation reached a name its own policy does not allow"
+		);
+		Ok(())
+	}
+
+	/// Nothing the replaced definition's invocations wrote serves the
+	/// redefined extension. `OVERWRITE` drops the source entry the stored
+	/// definition resolved, keyed by the DIGEST that definition pinned (the new
+	/// statement gives none), and every invocation starts from fresh memory,
+	/// so state written before the overwrite is never read after it.
 	async fn check_overwrite_evicts_the_replaced_runtime(
 		bucket_dir: &Path,
 	) -> Result<(), Box<dyn std::error::Error>> {
@@ -1873,8 +2423,6 @@ mod surrealism_integration {
 
 		let results = sql_query(&addr, &ns, &db, "RETURN ext::demo::set_state(42);").await;
 		assert_eq!(results[0].status, "OK", "set_state: {:?}", results[0].result);
-		let results = sql_query(&addr, &ns, &db, "RETURN ext::demo::get_state();").await;
-		assert_eq!(results[0].result, serde_json::json!(42));
 
 		let overwrite = "DEFINE EXTENSION OVERWRITE ext::demo FROM f\"test:/demo.surli\" UNSIGNED;";
 		let results = sql_query(&addr, &ns, &db, overwrite).await;
@@ -1939,7 +2487,8 @@ mod surrealism_integration {
 	// DIGEST and SIGNER: checked at DEFINE and before every load
 	// -------------------------------------------------------------------
 
-	/// An SSH key made for one test, and the demo archive signed with it by
+	/// An SSH key made for one test, the demo archive repacked to name it as
+	/// `[signer.ssh]`, and that archive signed with it by
 	/// `surreal extension sign --key`. `None` when `ssh-keygen` is missing.
 	struct SignedDemo {
 		_keys: tempfile::TempDir,
@@ -1947,9 +2496,11 @@ mod surrealism_integration {
 		key: String,
 		/// Another key's public line, which signed nothing.
 		other_key: String,
+		/// The repacked archive's file name in the bucket directory, unsigned.
+		unsigned: String,
 		/// The signed archive's file name in the bucket directory.
 		signed: String,
-		/// `sha256(MANIFEST)` of the demo archive, signed or not.
+		/// `sha256(MANIFEST)` of the repacked demo archive, signed or not.
 		digest: String,
 	}
 
@@ -1972,13 +2523,30 @@ mod surrealism_integration {
 		let keys = tempfile::TempDir::new().expect("temp dir for keys");
 		let key = ssh_keygen(keys.path(), "release")?;
 		let other_key = ssh_keygen(keys.path(), "other")?;
+
+		// `sign` signs only as the package's [signer].
+		use surrealism_runtime::package::UnpackOptions;
+		let surli = std::fs::read(bucket_dir.join("demo.surli")).expect("read demo.surli");
+		let mut package =
+			SurrealismPackage::from_reader(std::io::Cursor::new(surli), &UnpackOptions::default())
+				.expect("unpack demo.surli");
+		package.config.attach.fs = None;
+		package.config.signer = Some(surrealism_runtime::config::PackageSigner::Ssh(
+			surrealism_runtime::config::SshSigner {
+				public_key: surrealism_runtime::config::SshSigner::normalise(&key)
+					.expect("an SSH public key"),
+			},
+		));
+		let unsigned = format!("signable-{}.surli", Ulid::new());
+		package.pack(bucket_dir.join(&unsigned), None).expect("pack the signable demo");
+
 		let signed = format!("signed-{}.surli", Ulid::new());
 		let result = Command::new(surreal_bin())
 			.args(["extension", "sign", "--key"])
 			.arg(keys.path().join("release"))
 			.arg("-o")
 			.arg(bucket_dir.join(&signed))
-			.arg(bucket_dir.join("demo.surli"))
+			.arg(bucket_dir.join(&unsigned))
 			.output()
 			.expect("run surreal extension sign");
 		assert!(
@@ -1986,7 +2554,7 @@ mod surrealism_integration {
 			"surreal extension sign failed: {}",
 			String::from_utf8_lossy(&result.stderr)
 		);
-		let archive = std::fs::read(bucket_dir.join("demo.surli")).expect("read demo.surli");
+		let archive = std::fs::read(bucket_dir.join(&unsigned)).expect("read the signable demo");
 		let files = surrealism_runtime::package::trust_files_from_reader(
 			archive.as_slice(),
 			surrealism_runtime::package::DEFAULT_MAX_FS_BYTES,
@@ -1996,6 +2564,7 @@ mod surrealism_integration {
 			_keys: keys,
 			key,
 			other_key,
+			unsigned,
 			signed,
 			digest: files.manifest.digest().to_string(),
 		})
@@ -2057,8 +2626,8 @@ mod surrealism_integration {
 		// signed copy of the same DIGEST, but only the definition's own source
 		// counts, so every node reaches the same verdict.
 		let define = format!(
-			"DEFINE EXTENSION ext::copy FROM f\"test:/demo.surli\" SIGNER {{ key: \"{}\" }};",
-			demo.key
+			"DEFINE EXTENSION ext::copy FROM f\"test:/{}\" SIGNER {{ key: \"{}\" }};",
+			demo.unsigned, demo.key
 		);
 		let error = first_error(&sql_query(&addr, &ns, &db, &define).await);
 		assert!(error.contains("carries no SIGNATURE"), "{error}");
@@ -2121,7 +2690,7 @@ mod surrealism_integration {
 		assert!(error.contains("MANIFEST digest is"), "{error}");
 
 		// The pinned code, but unsigned.
-		std::fs::copy(bucket_dir.join("demo.surli"), bucket_dir.join(&late))?;
+		std::fs::copy(bucket_dir.join(&demo.unsigned), bucket_dir.join(&late))?;
 		after_refusal().await;
 		let error = first_error(&sql_query(&addr, &ns, &db, call).await);
 		assert!(error.contains("carries no SIGNATURE"), "{error}");
@@ -2215,8 +2784,9 @@ mod surrealism_integration {
 			capabilities: Default::default(),
 			abi: AbiVersion::CURRENT,
 			attach: SurrealismAttach {
-				fs: Some("fs".to_string()),
+				fs: Some(surrealism_runtime::config::FsMounts::root("fs")),
 			},
+			signer: None,
 		};
 
 		// Component preamble (layer 1, version 0x0d)

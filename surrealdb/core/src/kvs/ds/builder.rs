@@ -38,6 +38,8 @@ use crate::observe::{ExecutionObserver, NoopObserver};
 use crate::options::EngineOptions;
 #[cfg(feature = "surrealism")]
 use crate::surrealism::cache::SurrealismCache;
+#[cfg(feature = "surrealism")]
+use crate::surrealism::runner::ExtensionRunner;
 use crate::types::PublicNotification;
 
 /// A builder struct for creating a Datastore.
@@ -90,8 +92,12 @@ pub struct Builder {
 	/// Embedders on platforms the built-in backends can't reach (e.g. a wasm
 	/// Durable Object backing buckets with an R2 binding) install their own here.
 	bucket_store_provider: Option<Box<dyn BucketStoreProvider>>,
+	/// Executes extensions. When unset, the composer's runner is used; with
+	/// neither, definitions are accepted but invocations fail.
 	#[cfg(feature = "surrealism")]
-	lazy_surrealism: bool,
+	extension_runner: Option<Arc<dyn ExtensionRunner>>,
+	#[cfg(feature = "surrealism")]
+	lazy_extensions: bool,
 	observer: Arc<dyn ExecutionObserver>,
 }
 
@@ -128,7 +134,9 @@ impl Builder {
 			feature_level: None,
 			bucket_store_provider: None,
 			#[cfg(feature = "surrealism")]
-			lazy_surrealism: false,
+			extension_runner: None,
+			#[cfg(feature = "surrealism")]
+			lazy_extensions: false,
 			observer: Arc::new(NoopObserver),
 		}
 	}
@@ -351,9 +359,22 @@ impl Builder {
 		self
 	}
 
+	/// Whether extensions are prepared on first invocation rather than at
+	/// startup. When `false`, the server prepares every archive in use when it
+	/// starts.
 	#[cfg(feature = "surrealism")]
-	pub fn with_lazy_surrealism(mut self, lazy_surrealism: bool) -> Self {
-		self.lazy_surrealism = lazy_surrealism;
+	pub fn with_lazy_extensions(mut self, lazy: bool) -> Self {
+		self.lazy_extensions = lazy;
+		self
+	}
+
+	/// Install the runner that executes extensions, overriding the composer's.
+	/// The `surreal` binary installs a
+	/// [`SurrealismRunner`](crate::extension::SurrealismRunner); an embedder
+	/// on a platform wasmtime cannot reach installs its own.
+	#[cfg(feature = "surrealism")]
+	pub fn with_extension_runner(mut self, runner: Arc<dyn ExtensionRunner>) -> Self {
+		self.extension_runner = Some(runner);
 		self
 	}
 
@@ -421,6 +442,10 @@ impl Builder {
 			&& let Some(channel) = this.notify_channel.as_ref()
 		{
 			this.live_query_broker = Some(composer.live_query_broker(channel.clone()));
+		}
+		#[cfg(feature = "surrealism")]
+		if this.extension_runner.is_none() {
+			this.extension_runner = composer.extension_runner(&this.config);
 		}
 		let bucket_store_provider =
 			this.bucket_store_provider.take().unwrap_or_else(|| Box::new(CommunityComposer()));
@@ -549,9 +574,10 @@ impl Builder {
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new(
 				config.surrealism.surrealism_cache_size,
+				self.extension_runner,
 			)),
 			#[cfg(feature = "surrealism")]
-			lazy_surrealism: self.lazy_surrealism,
+			lazy_extensions: self.lazy_extensions,
 			#[cfg(feature = "http")]
 			http_client: ArcSwap::new(http_client),
 			observer,

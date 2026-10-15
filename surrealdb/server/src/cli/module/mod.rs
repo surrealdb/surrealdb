@@ -1,4 +1,5 @@
 mod build;
+mod config_cmd;
 mod host;
 mod info;
 mod init_cmd;
@@ -6,6 +7,7 @@ mod run;
 mod sig;
 #[cfg(feature = "extension-sign")]
 mod sign;
+mod snapshot;
 mod version;
 mod wasm_target;
 
@@ -104,6 +106,9 @@ enum ModuleCommand {
 	#[cfg(feature = "extension-sign")]
 	Sign(sign::SignArgs),
 
+	/// Read and change the project's package.toml
+	Config(config_cmd::ConfigArgs),
+
 	/// Output the Surrealism version information
 	Version,
 }
@@ -145,6 +150,7 @@ pub async fn init(
 		} => build::init(path, out, debug).await,
 		#[cfg(feature = "extension-sign")]
 		ModuleCommand::Sign(args) => sign::init(args).await,
+		ModuleCommand::Config(args) => config_cmd::init(args).await,
 		ModuleCommand::Version => version::init().await,
 	}
 }

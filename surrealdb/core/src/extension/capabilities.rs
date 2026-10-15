@@ -56,12 +56,11 @@ pub struct EffectiveCapabilities {
 }
 
 impl EffectiveCapabilities {
+	/// Whether the extension's own sockets may reach `target`. The runner
+	/// enforces this through the network policy built from the same lists.
+	#[cfg(test)]
 	pub fn allows_network_target(&self, target: &NetTarget) -> bool {
 		self.allow_net.matches(target) && !self.deny_net.matches(target)
-	}
-
-	pub fn allows_function_target(&self, target: &FuncTarget) -> bool {
-		self.allow_functions.matches(target) && !self.deny_functions.matches(target)
 	}
 
 	/// Whether the extension may call the function named `name`, such as

@@ -23,15 +23,20 @@ pub enum SurrealismError {
 		module_limit: Option<Duration>,
 	},
 	#[error(
-		"No Surrealism controller became available within {waited:?}. The module's pool holds \
-		 {pool_size} controller(s), all of them checked out. A function that calls back into its \
-		 own module needs a free slot for the nested call while the outer one is still holding \
-		 its own; raise the module's `max_pool_size` above the call depth, or remove the \
-		 re-entrant call."
+		"No Surrealism invocation slot became free within {waited:?}; all {slots} are in use. \
+		 Raise SURREAL_SURREALISM_MAX_CONCURRENT_INVOCATIONS, or give the query a longer timeout."
 	)]
-	ControllerPoolExhausted {
+	NoInvocationSlot {
 		waited: Duration,
-		pool_size: usize,
+		slots: usize,
+	},
+	#[error(
+		"A nested Surrealism invocation found none of the {slots} invocation slots free. A call \
+		 made from inside an extension never waits for a slot, because the calls holding them may \
+		 be waiting on it."
+	)]
+	NestedInvocationNoSlot {
+		slots: usize,
 	},
 	#[error(
 		"Unsupported ABI version: expected {expected}, got {got}. Rebuild the extension with the \
@@ -48,46 +53,6 @@ pub enum SurrealismError {
 	Wasmtime(#[from] wasmtime::Error),
 	#[error("Other error: {0}")]
 	Other(#[from] anyhow::Error),
-}
-
-impl SurrealismError {
-	/// Whether this error represents a WASM trap — an unrecoverable fault
-	/// during execution that leaves the instance in an undefined state.
-	///
-	/// After a trap the controller must be dropped (not returned to the pool).
-	/// Non-trap errors (guest `Err` returns, host-side encoding failures, etc.)
-	/// go through normal control flow and leave the instance reusable.
-	pub fn is_trap(&self) -> bool {
-		match self {
-			// Epoch interrupt mid-execution — WASM state is undefined.
-			Self::Timeout {
-				..
-			} => true,
-			// Instantiation failure — no usable instance exists.
-			#[cfg(feature = "host")]
-			Self::Instantiation(_) => true,
-			// Wasmtime error from call_async (actual trap) or typed() (type
-			// mismatch). Conservative: treat all as traps since the instance
-			// may be in an unknown state.
-			#[cfg(feature = "host")]
-			Self::Wasmtime(_) => true,
-			// Compilation failure — no instance was ever created.
-			#[cfg(feature = "host")]
-			Self::Compilation(_) => false,
-			// Guest returned Err through normal control flow.
-			Self::FunctionCallError(_) => false,
-			// Host-side errors (encoding, decoding, config) — no WASM ran.
-			Self::UnsupportedAbi {
-				..
-			} => false,
-			Self::IntConversion(_) => false,
-			// No controller was ever obtained, so no instance ran.
-			Self::ControllerPoolExhausted {
-				..
-			} => false,
-			Self::Other(_) => false,
-		}
-	}
 }
 
 pub type SurrealismResult<T> = std::result::Result<T, SurrealismError>;

@@ -909,6 +909,11 @@ pub async fn init<C: TransactionBuilderFactory>(
 	let (send, recv) = surrealdb_core::channel::bounded(surrealdb_cnf::NOTIFICATIONS_CHANNEL_SIZE);
 
 	let config = ConfigMap::from_env();
+	// The binary runs Surrealism extensions on wasmtime, whichever composer
+	// builds the datastore.
+	#[cfg(feature = "surrealism")]
+	let extension_runner =
+		std::sync::Arc::new(surrealdb_core::extension::SurrealismRunner::from_config_map(&config));
 	// Parse and setup the desired kv datastore
 	let builder = Datastore::builder()
 		// The cadences the maintenance tasks run at, once this function starts
@@ -948,7 +953,8 @@ pub async fn init<C: TransactionBuilderFactory>(
 	};
 
 	#[cfg(feature = "surrealism")]
-	let builder = builder.with_lazy_surrealism(lazy_surrealism);
+	let builder =
+		builder.with_lazy_extensions(lazy_surrealism).with_extension_runner(extension_runner);
 
 	let (dbs, router_state) =
 		builder.build_with_factory_path_and_router_state::<C>(&opt.path, composer).await?;

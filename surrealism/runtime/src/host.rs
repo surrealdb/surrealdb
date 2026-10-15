@@ -21,7 +21,6 @@ use async_trait::async_trait;
 use surrealism_types::err::{HostCallError, HostCallResult, PrefixErr, SurrealismResult};
 use wasmtime::component::{Accessor, Resource};
 
-use crate::config::SurrealismConfig;
 use crate::store::StoreData;
 
 // ============================================================================
@@ -29,6 +28,10 @@ use crate::store::StoreData;
 // ============================================================================
 
 /// Context provided for each WASM function invocation.
+///
+/// What a call may do is the context's to decide: it carries the capabilities
+/// the invocation was granted, which can differ between two invocations of the
+/// same component.
 ///
 /// Methods take `&self` because a guest may hold several host calls in flight
 /// at once: each one is a component-model subtask, and the store is handed back
@@ -39,14 +42,12 @@ use crate::store::StoreData;
 pub trait InvocationContext: Send + Sync {
 	async fn sql(
 		&self,
-		config: &SurrealismConfig,
 		query: String,
 		vars: surrealdb_types::Object,
 	) -> HostCallResult<surrealdb_types::Value>;
 
 	async fn run(
 		&self,
-		config: &SurrealismConfig,
 		fnc: String,
 		version: Option<String>,
 		args: Vec<surrealdb_types::Value>,
@@ -173,7 +174,7 @@ fn lower(e: HostCallError) -> HostErrorWire {
 	}
 }
 
-/// Resolve a borrowed handle into the context and config it grants access to.
+/// Resolve a borrowed handle into the context it grants access to.
 ///
 /// [`Accessor::with`] is synchronous and cannot span an await, so everything a
 /// method needs from the store is cloned out here, before the first one.
@@ -186,7 +187,6 @@ fn resolve(accessor: &Accessor<StoreData>, this: &Resource<Transaction>) -> Host
 		let slot = admit(&tx.in_flight)?;
 		Ok(Lent {
 			context: Arc::clone(&tx.context),
-			config: Arc::clone(&data.config),
 			_slot: slot,
 		})
 	})
@@ -195,7 +195,6 @@ fn resolve(accessor: &Accessor<StoreData>, this: &Resource<Transaction>) -> Host
 /// What one host call needs out of the store, taken before the first await.
 struct Lent {
 	context: Arc<dyn InvocationContext>,
-	config: Arc<SurrealismConfig>,
 	/// Held for the rest of the call, so the place it took among the calls in
 	/// flight is released however the call ends.
 	_slot: CallSlot,
@@ -238,7 +237,7 @@ pub fn implement_host_functions(
 					let vars_vec = surrealdb_types::decode_string_key_values(&vars_bytes)
 						.map_err(|e| HostCallError::InvalidRequest(stringify(e)))?;
 					let vars = surrealdb_types::Object::from_iter(vars_vec);
-					let val = lent.context.sql(&lent.config, query, vars).await?;
+					let val = lent.context.sql(query, vars).await?;
 					surrealdb_types::encode(&val).map_err(|e| HostCallError::Other(stringify(e)))
 				}
 				.await;
@@ -263,7 +262,7 @@ pub fn implement_host_functions(
 					let lent = resolved?;
 					let args = surrealdb_types::decode_value_list(&args_bytes)
 						.map_err(|e| HostCallError::InvalidRequest(stringify(e)))?;
-					let val = lent.context.run(&lent.config, fnc, version, args).await?;
+					let val = lent.context.run(fnc, version, args).await?;
 					surrealdb_types::encode(&val).map_err(|e| HostCallError::Other(stringify(e)))
 				}
 				.await;

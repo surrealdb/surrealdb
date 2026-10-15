@@ -99,9 +99,9 @@ mod tests {
 	/// distinguishable from its default and asserts the field moved, which
 	/// catches both a dropped key and one wired to the wrong field.
 	///
-	/// Add a row whenever a key is added. The two keys deliberately absent are
-	/// `idiom_recursion_limit` and `surrealism_max_pool_size`: neither has ever
-	/// had a `parse_key` line, so both always hold their default.
+	/// Add a row whenever a key is added. The one key deliberately absent is
+	/// `idiom_recursion_limit`: it has never had a `parse_key` line, so it
+	/// always holds its default.
 	fn map_with(key: &str, value: &str) -> ConfigMap {
 		ConfigMap::empty().with_key_value(key, value)
 	}
@@ -253,6 +253,10 @@ mod tests {
 		assert_eq!(c.surrealism_max_execution_time, Some(7));
 		let c: SurrealismConfig = map_with("surrealism_max_fs_bytes", "7").load();
 		assert_eq!(c.surrealism_max_fs_bytes, 7);
+		let c: SurrealismConfig = map_with("surrealism_max_concurrent_invocations", "7").load();
+		assert_eq!(c.surrealism_max_concurrent_invocations, 7);
+		let c: SurrealismConfig = map_with("surrealism_allow_unbounded_execution", "true").load();
+		assert!(c.surrealism_allow_unbounded_execution);
 		let c: SurrealismConfig = map_with("surrealism_log_level", "trace").load();
 		assert_eq!(c.surrealism_log_level, "trace");
 	}
@@ -302,18 +306,10 @@ mod tests {
 		}
 	}
 
-	/// The two knobs that have never been settable stay that way.
+	/// The knob that has never been settable stays that way.
 	#[test]
 	fn unparsed_knobs_keep_their_defaults() {
 		let c: ExecConfig = map_with("idiom_recursion_limit", "7").load();
 		assert_eq!(c.idiom_recursion_limit, ExecConfig::default().idiom_recursion_limit);
-		#[cfg(feature = "surrealism")]
-		{
-			let c: SurrealismConfig = map_with("surrealism_max_pool_size", "7").load();
-			assert_eq!(
-				c.surrealism_max_pool_size,
-				SurrealismConfig::default().surrealism_max_pool_size
-			);
-		}
 	}
 }

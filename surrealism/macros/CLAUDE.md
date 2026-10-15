@@ -53,7 +53,7 @@ For each exported function (non-init):
 - `__sr_invoke_*` — decodes args, calls user fn, encodes result
 - `__sr_args_*` — returns kind list
 - `__sr_returns_*` — returns kind
-- `inventory::submit!(SurrealismEntry { ... })`
+- `inventory::submit!(SurrealismEntry { ... })`, whose `location` (`file:line` of the function) names this definition when `surrealism::register` is passed the same name
 
 For init:
 

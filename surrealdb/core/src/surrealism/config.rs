@@ -1,16 +1,16 @@
 //! Ceilings and sizing for Surrealism WASM modules.
 //!
-//! Most of these knobs are the server's half of a module's resource budget:
-//! where a module also declares a limit in its `.surli` config, the effective
+//! Most of these knobs are the server's half of an extension's resource
+//! budget: where a definition's `CAPABILITIES` also set a limit, the effective
 //! limit is the smaller of the two, so a value here can only tighten what a
-//! module asked for, never widen it. The rest size the datastore-wide cache of
+//! definition grants, never widen it. The rest size the datastore-wide cache of
 //! compiled modules, select the tracing level module output is recorded at,
 //! and name the host a `silo::` executable resolves against. This layer owns
 //! them because it is where a module is fetched, unpacked, compiled, pooled
 //! and invoked.
 //!
-//! The memory, execution-time and pool ceilings are read while a module is
-//! compiled into a cached runtime, so a module already in the cache keeps the
+//! The memory and execution-time ceilings are read when an invocation's grant
+//! is built, and grants are cached, so a grant already in the cache keeps the
 //! ceilings it was built with until it is evicted.
 
 use surrealdb_cnf as cnf;
@@ -33,13 +33,24 @@ pub(crate) struct SurrealismConfig {
 	/// (default: 100 MiB). Applied when unpacking extension archives during `DEFINE EXTENSION` or
 	/// eager loading.
 	pub surrealism_max_fs_bytes: u64,
-	/// Per-module controller pool size ceiling for Surrealism WASM modules (default: 8).
-	/// Each pooled controller holds an instantiated WASM store. Effective pool size is
-	/// `min(this, module_config.max_pool_size.unwrap_or(this))`.
-	///
-	/// Not settable through the config map: the `Config::parse` implementation
-	/// below has no line for this key, so it always holds its default.
-	pub surrealism_max_pool_size: usize,
+	/// How many Surrealism invocations may run at once across the datastore
+	/// (default: 64). This is the instance pool's slot count: every invocation
+	/// runs on a fresh instance in one slot, so it bounds address-space
+	/// reservations as well as concurrency: each slot reserves about 4 GiB of
+	/// virtual address space (not resident memory) on 64-bit hosts, which a
+	/// virtual memory limit such as `RLIMIT_AS` must allow. A quarter of the slots (at least
+	/// one, when there are two or more) is kept for invocations made from
+	/// inside another extension. A top-level invocation that finds every slot
+	/// it may take in use waits, within its query's timeout; a nested one
+	/// fails at once.
+	pub surrealism_max_concurrent_invocations: u32,
+	/// Whether a definition's `CAPABILITIES { strict_timeout: false }` takes
+	/// effect (default: false). `false` runs the extension on the engine
+	/// without epoch checks, so neither `surrealism_max_execution_time` nor
+	/// the query's timeout can stop it, and a busy guest holds its slot and its
+	/// worker thread until it returns. Unless this is set, every invocation
+	/// runs on the guarded engine whatever the definition says.
+	pub surrealism_allow_unbounded_execution: bool,
 	/// The tracing level a module's standard output is recorded at, one of `trace`,
 	/// `info`, `warn` or `error`; any other value records at `debug` (default:
 	/// "debug"). A module's standard error is always recorded at `warn`,
@@ -60,7 +71,8 @@ impl Default for SurrealismConfig {
 			surrealism_max_memory: None,
 			surrealism_max_execution_time: None,
 			surrealism_max_fs_bytes: 100 * 1024 * 1024,
-			surrealism_max_pool_size: 8,
+			surrealism_max_concurrent_invocations: 64,
+			surrealism_allow_unbounded_execution: false,
 			surrealism_log_level: "debug".to_string(),
 			surrealism_silo_endpoint: "https://silo.surrealdb.com".to_string(),
 		}
@@ -76,6 +88,14 @@ impl cnf::Config for SurrealismConfig {
 				&mut self.surrealism_max_execution_time,
 			)
 			.parse_key("surrealism_max_fs_bytes", &mut self.surrealism_max_fs_bytes)
+			.parse_key(
+				"surrealism_max_concurrent_invocations",
+				&mut self.surrealism_max_concurrent_invocations,
+			)
+			.parse_key(
+				"surrealism_allow_unbounded_execution",
+				&mut self.surrealism_allow_unbounded_execution,
+			)
 			.parse_key_with("surrealism_log_level", &mut self.surrealism_log_level, |s| {
 				Some(s.to_string())
 			})

@@ -2,7 +2,6 @@ use std::io::BufRead;
 
 use async_trait::async_trait;
 use surrealdb_types::ToSql;
-use surrealism_runtime::config::SurrealismConfig;
 use surrealism_runtime::host::InvocationContext;
 use surrealism_runtime::{HostCallError, HostCallResult};
 
@@ -20,7 +19,6 @@ use super::parse_value;
 impl InvocationContext for DemoHost {
 	async fn sql(
 		&self,
-		_config: &SurrealismConfig,
 		query: String,
 		vars: surrealdb_types::Object,
 	) -> HostCallResult<surrealdb_types::Value> {
@@ -56,7 +54,6 @@ impl InvocationContext for DemoHost {
 
 	async fn run(
 		&self,
-		_config: &SurrealismConfig,
 		fnc: String,
 		version: Option<String>,
 		args: Vec<surrealdb_types::Value>,

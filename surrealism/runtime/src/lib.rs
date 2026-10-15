@@ -1,7 +1,8 @@
 //! Host runtime for Surrealism WASM plugins.
 //!
-//! Runs on the SurrealDB server. Loads `.surli` packages, manages the
-//! controller pool, and executes guest functions with epoch-based timeouts.
+//! Runs on the SurrealDB server. Loads `.surli` packages, compiles them once,
+//! and runs every invocation on a fresh instance from a pooling allocator, with
+//! epoch-based timeouts.
 
 // TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
 #![allow(clippy::absolute_paths)]
@@ -16,6 +17,7 @@ pub mod host;
 pub mod manifest;
 pub mod net_allow;
 pub mod package;
+pub mod package_config;
 pub mod runtime;
 pub mod store;
 mod wasi_context;

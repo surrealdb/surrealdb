@@ -16,6 +16,9 @@
 //! log line here includes them.
 
 use anyhow::{Context, Result};
+use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64URL;
+use serde_json::Value;
 use sigstore_oidc::IdentityToken;
 use sigstore_rekor::RekorApiVersion;
 use sigstore_sign::{SigningContext, SigningServices};
@@ -53,7 +56,15 @@ impl Endpoints {
 }
 
 /// A Sigstore bundle v0.3 over `manifest`, as JSON.
-pub async fn sign(manifest: &Manifest, endpoints: &Endpoints) -> Result<Vec<u8>> {
+///
+/// The identity token's claims are compared with `expected` before Fulcio is
+/// asked for a certificate, so a job that is not the package's signer
+/// leaves no entry in the transparency log.
+pub async fn sign(
+	manifest: &Manifest,
+	endpoints: &Endpoints,
+	expected: &surrealism_runtime::config::PackageSigner,
+) -> Result<Vec<u8>> {
 	let token = IdentityToken::detect_ambient()
 		.await
 		.context("Failed to read the CI identity token")?
@@ -61,6 +72,7 @@ pub async fn sign(manifest: &Manifest, endpoints: &Endpoints) -> Result<Vec<u8>>
 			"No CI identity token: run in GitHub Actions with `permissions: id-token: write`, \
 			 or set SIGSTORE_ID_TOKEN (audience `sigstore`)",
 		)?;
+	super::signer::ensure_token_matches(&token_claims(token.expose_secret())?, expected)?;
 	let services = SigningServices::new(normalise(&endpoints.fulcio), normalise(&endpoints.rekor))
 		.with_rekor(normalise(&endpoints.rekor), RekorApiVersion::V2)
 		.with_tsa_url(normalise(&endpoints.tsa));
@@ -72,9 +84,26 @@ pub async fn sign(manifest: &Manifest, endpoints: &Endpoints) -> Result<Vec<u8>>
 	Ok(bundle.to_json().context("Failed to write the Sigstore bundle")?.into_bytes())
 }
 
+/// The identity token's payload, unverified: Fulcio verifies the token.
+fn token_claims(token: &str) -> Result<Value> {
+	let payload = token.split('.').nth(1).context("The identity token is not a JWT")?;
+	let payload = B64URL
+		.decode(payload.trim_end_matches('='))
+		.context("The identity token payload is not base64url")?;
+	serde_json::from_slice(&payload).context("The identity token payload is not JSON")
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn the_token_payload_is_read_without_its_signature() {
+		let payload = B64URL.encode(br#"{"iss":"https://gitlab.com","project_id":"1"}"#);
+		let claims = token_claims(&format!("e30.{payload}.sig")).unwrap();
+		assert_eq!(claims["iss"], "https://gitlab.com");
+		assert!(token_claims("not-a-jwt").is_err());
+	}
 
 	#[test]
 	fn the_public_good_endpoints_are_recognised_with_a_trailing_slash() {
@@ -90,8 +119,9 @@ mod tests {
 		assert!(!private.is_public_good());
 	}
 
-	/// Signs against public-good with a real CI token; needs network access
-	/// and `SIGSTORE_ID_TOKEN` or a GitHub Actions job.
+	/// Signs against public-good with a real CI token; needs network access,
+	/// `SIGSTORE_ID_TOKEN` or a GitHub Actions job, and the job's own signer in
+	/// `SIGNER_ISSUER` and `SIGNER_IDENTITY` (the workflow URI without `@ref`).
 	#[tokio::test]
 	#[ignore = "needs a CI identity token and network access"]
 	async fn keyless_signing_against_public_good() {
@@ -107,6 +137,14 @@ mod tests {
 				rekor: DEFAULT_REKOR_URL.into(),
 				tsa: DEFAULT_TSA_URL.into(),
 			},
+			&surrealism_runtime::config::PackageSigner::Sigstore(
+				surrealism_runtime::config::SigstoreSigner {
+					issuer: std::env::var("SIGNER_ISSUER").expect("SIGNER_ISSUER"),
+					identity: std::env::var("SIGNER_IDENTITY").expect("SIGNER_IDENTITY"),
+					repository_id: None,
+					owner_id: None,
+				},
+			),
 		)
 		.await
 		.unwrap();

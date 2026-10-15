@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-/// Module-level capabilities declared in `package.toml`.
+/// What a package asks for, declared in `package.toml`.
 ///
-/// These are validated against the server-level capabilities when the module is
-/// loaded. The server can further restrict what a module is allowed to do, but
-/// a module cannot exceed the server's limits.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+/// A request only: the server never reads it. What an extension may do comes
+/// from its definition's `CAPABILITIES`, which an installer can derive from
+/// this.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct SurrealismCapabilities {
 	/// Whether the module requires the scripting capability.
 	#[serde(default)]
@@ -14,6 +14,10 @@ pub struct SurrealismCapabilities {
 	/// the `sql()` host function. Checked at runtime, not at load time.
 	#[serde(default)]
 	pub allow_arbitrary_queries: bool,
+	/// Whether the module's functions that are marked as writing need to
+	/// write: the request behind a definition's `CAPABILITIES { write: true }`.
+	#[serde(default)]
+	pub allow_write: bool,
 	/// Which SurrealDB functions the module is allowed to call via `run()`.
 	///
 	/// - Omitted / empty array: **deny all** function calls (default).
@@ -34,7 +38,9 @@ pub struct SurrealismCapabilities {
 	/// Maximum wall-clock execution time per invocation. `None` means unlimited.
 	#[serde(default, with = "optional_duration")]
 	pub max_execution_time: Option<std::time::Duration>,
-	/// Maximum number of controllers to pool per module. `None` uses server default.
+	/// Accepted so existing manifests still parse, and ignored: every
+	/// invocation runs on a fresh instance, and concurrency is bounded server
+	/// wide by `SURREAL_SURREALISM_MAX_CONCURRENT_INVOCATIONS`.
 	#[serde(default)]
 	pub max_pool_size: Option<usize>,
 	/// Whether to enforce execution timeouts via epoch-based interruption.
@@ -70,6 +76,7 @@ impl Default for SurrealismCapabilities {
 		Self {
 			allow_scripting: false,
 			allow_arbitrary_queries: false,
+			allow_write: false,
 			allow_functions: FunctionTargets::default(),
 			allow_net: Vec::new(),
 			max_memory_bytes: None,
@@ -84,7 +91,7 @@ impl Default for SurrealismCapabilities {
 ///
 /// Default is `None` (deny all). Aligns with SurrealDB's `FuncTarget` pattern
 /// matching so that `"http::*"` matches any function in the `http` family.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub enum FunctionTargets {
 	/// Deny all function calls (default when omitted or empty).
 	#[default]
@@ -173,7 +180,8 @@ mod optional_duration {
 
 	pub fn serialize<S: Serializer>(val: &Option<Duration>, s: S) -> Result<S::Ok, S::Error> {
 		match val {
-			Some(d) => d.as_millis().serialize(s),
+			// TOML integers are 64-bit.
+			Some(d) => u64::try_from(d.as_millis()).unwrap_or(u64::MAX).serialize(s),
 			None => s.serialize_none(),
 		}
 	}

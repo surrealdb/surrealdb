@@ -57,6 +57,9 @@ surrealism = [
     "dep:wasm-encoder",
     "dep:wasm-opt",
     "dep:wasmparser",
+    "dep:wasmtime",
+    "dep:wasmtime-wasi",
+    "dep:wasmtime-wizer",
     "dep:zstd",
 ]
 # `surreal extension sign`: Sigstore keyless signing (CI identity token,
@@ -236,6 +239,9 @@ tar = { workspace = true, optional = true }
 wasm-encoder = { workspace = true, optional = true }
 wasm-opt = { workspace = true, optional = true }
 wasmparser = { workspace = true, optional = true }
+wasmtime = { workspace = true, optional = true }
+wasmtime-wasi = { workspace = true, optional = true }
+wasmtime-wizer = { workspace = true, optional = true }
 zstd = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]
@@ -279,6 +285,8 @@ futures.workspace = true
 reqwest = { workspace = true, default-features = false, features = ["http2"] }
 tempfile.workspace = true
 tokio-util.workspace = true
+# Assembles the hand-written components the build-time snapshot is tested on.
+wat.workspace = true
 
 [lints]
 workspace = true

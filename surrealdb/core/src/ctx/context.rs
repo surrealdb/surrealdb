@@ -6,16 +6,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-#[cfg(feature = "surrealism")]
-use anyhow::Context as _;
 use anyhow::{Result, bail};
 use surrealdb_cnf::PROTECTED_PARAM_NAMES;
 use surrealdb_cnf::dynamic::DynamicConfiguration;
 use surrealdb_strand::Strand;
-#[cfg(feature = "surrealism")]
-use surrealism_runtime::package::{SurrealismPackage, UnpackOptions};
-#[cfg(feature = "surrealism")]
-use surrealism_runtime::runtime::Runtime;
 #[cfg(feature = "http")]
 use url::Url;
 use uuid::Uuid;
@@ -36,8 +30,6 @@ use crate::dbs::capabilities::Error as CapabilitiesError;
 use crate::dbs::capabilities::ExperimentalTarget;
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
-#[cfg(all(feature = "http", feature = "surrealism"))]
-use crate::dbs::capabilities::Targets;
 use crate::dbs::{Capabilities, MessageBroker, Options, Session, StatementCounters, Variables};
 use crate::err::{EngineError, Error};
 use crate::exec::Error as ExecError;
@@ -138,6 +130,16 @@ pub struct Context {
 	// The surrealism cache
 	#[cfg(feature = "surrealism")]
 	surrealism_cache: Option<Arc<SurrealismCache>>,
+	/// How many extension invocations enclose this context: zero for a query,
+	/// one inside a host call an extension made, and so on. A child context
+	/// carries its parent's.
+	#[cfg(feature = "surrealism")]
+	extension_depth: u8,
+	/// The datastore's capabilities when this context's root was created.
+	/// Unlike [`Self::capabilities`], an extension's host call never narrows
+	/// it, so it is what an extension's `CAPABILITIES` are intersected with.
+	#[cfg(feature = "surrealism")]
+	server_capabilities: Arc<Capabilities>,
 	// When true, EXPLAIN ANALYZE omits elapsed durations for deterministic test output
 	redact_volatile_explain_attrs: bool,
 	// Per-statement counters, shared with the executor so it can read the
@@ -290,6 +292,10 @@ impl Context {
 			buckets: None,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: None,
+			#[cfg(feature = "surrealism")]
+			extension_depth: 0,
+			#[cfg(feature = "surrealism")]
+			server_capabilities: Arc::clone(&parent.server_capabilities),
 			redact_volatile_explain_attrs: false,
 			statement_counters: None,
 			statement_clock: parent.statement_clock,
@@ -356,6 +362,10 @@ impl Context {
 			buckets: parent.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: parent.surrealism_cache.clone(),
+			#[cfg(feature = "surrealism")]
+			extension_depth: parent.extension_depth,
+			#[cfg(feature = "surrealism")]
+			server_capabilities: Arc::clone(&parent.server_capabilities),
 			redact_volatile_explain_attrs: parent.redact_volatile_explain_attrs,
 			statement_counters: parent.statement_counters.clone(),
 			statement_clock: parent.statement_clock,
@@ -411,6 +421,10 @@ impl Context {
 			buckets: parent.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: parent.surrealism_cache.clone(),
+			#[cfg(feature = "surrealism")]
+			extension_depth: parent.extension_depth,
+			#[cfg(feature = "surrealism")]
+			server_capabilities: Arc::clone(&parent.server_capabilities),
 			redact_volatile_explain_attrs: parent.redact_volatile_explain_attrs,
 			statement_counters: parent.statement_counters.clone(),
 			statement_clock: parent.statement_clock,
@@ -489,6 +503,10 @@ impl Context {
 			buckets: from.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: from.surrealism_cache.clone(),
+			#[cfg(feature = "surrealism")]
+			extension_depth: from.extension_depth,
+			#[cfg(feature = "surrealism")]
+			server_capabilities: Arc::clone(&from.server_capabilities),
 			redact_volatile_explain_attrs: from.redact_volatile_explain_attrs,
 			statement_counters: from.statement_counters.clone(),
 			statement_clock: from.statement_clock,
@@ -551,6 +569,10 @@ impl Context {
 			buckets: from.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: from.surrealism_cache.clone(),
+			#[cfg(feature = "surrealism")]
+			extension_depth: from.extension_depth,
+			#[cfg(feature = "surrealism")]
+			server_capabilities: Arc::clone(&from.server_capabilities),
 			redact_volatile_explain_attrs: from.redact_volatile_explain_attrs,
 			statement_counters: from.statement_counters.clone(),
 			statement_clock: None,
@@ -601,6 +623,8 @@ impl Context {
 		config: Arc<RuntimeConfig>,
 		#[cfg(feature = "surrealism")] surrealism_cache: Arc<SurrealismCache>,
 	) -> Result<Context> {
+		#[cfg(feature = "surrealism")]
+		let server_capabilities = Arc::clone(&capabilities);
 		let mut ctx = Self {
 			values: HashMap::default(),
 			forbidden: Vec::new(),
@@ -621,6 +645,10 @@ impl Context {
 			buckets: Some(buckets),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Some(surrealism_cache),
+			#[cfg(feature = "surrealism")]
+			extension_depth: 0,
+			#[cfg(feature = "surrealism")]
+			server_capabilities,
 			redact_volatile_explain_attrs: false,
 			statement_counters: None,
 			statement_clock: None,
@@ -681,6 +709,10 @@ impl Context {
 			buckets: None,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: None,
+			#[cfg(feature = "surrealism")]
+			extension_depth: 0,
+			#[cfg(feature = "surrealism")]
+			server_capabilities: Arc::new(Capabilities::default()),
 			redact_volatile_explain_attrs: false,
 			statement_counters: None,
 			statement_clock: None,
@@ -1728,16 +1760,34 @@ impl Context {
 		self.surrealism_cache.as_ref().map(Arc::clone)
 	}
 
-	/// The compiled module the archive at `lookup` holds, once the archive may
-	/// run under `trust`, the definition being called.
+	/// How many extension invocations enclose this context.
+	#[cfg(feature = "surrealism")]
+	pub(crate) fn extension_depth(&self) -> u8 {
+		self.extension_depth
+	}
+
+	/// Mark this context as running inside one more extension invocation.
+	#[cfg(feature = "surrealism")]
+	pub(crate) fn enter_extension(&mut self) {
+		self.extension_depth = self.extension_depth.saturating_add(1);
+	}
+
+	/// The datastore's capabilities, which no extension's host call narrows.
+	#[cfg(feature = "surrealism")]
+	pub(crate) fn server_capabilities(&self) -> &Arc<Capabilities> {
+		&self.server_capabilities
+	}
+
+	/// The definition behind `lookup`, prepared, once its archive may run
+	/// under `trust`, the definition being called.
 	///
 	/// The check is [`TrustStore::ensure`](crate::extension::trust::TrustStore::ensure):
-	/// before an archive is compiled into the cache, and again on every call,
-	/// since one cached archive can serve definitions that name different
-	/// signers. The cache is keyed by source and `DIGEST`, so definitions that
-	/// pin different archives at one source keep separate modules.
+	/// before an archive is prepared, and again on every call, since one
+	/// prepared entry serves every definition whose archive has the same
+	/// digest, in any namespace or database, and those definitions can name
+	/// different signers.
 	///
-	/// A failure to build the module is recorded per database, source,
+	/// A failure to load the definition is recorded per database, source,
 	/// `DIGEST` and signer, and repeated without refetching for
 	/// [`REFETCH_AFTER_REFUSAL`](crate::extension::trust::REFETCH_AFTER_REFUSAL),
 	/// so a failing definition does not fetch, unpack and verify its archive on
@@ -1751,7 +1801,7 @@ impl Context {
 		self.get_surrealism_module_from(lookup, trust, None).await
 	}
 
-	/// As [`Self::get_surrealism_module`], building from `prefetched`, the
+	/// As [`Self::get_surrealism_module`], preparing `prefetched`, the
 	/// archive's bytes, when they were just fetched and checked, rather than
 	/// fetching them again.
 	#[cfg(feature = "surrealism")]
@@ -1771,167 +1821,81 @@ impl Context {
 		let Some(cache) = self.get_surrealism_cache() else {
 			bail!("Surrealism cache is not available");
 		};
-		let max_pool_size = self.config.surrealism.surrealism_max_pool_size;
-		let max_memory = self.config.surrealism.surrealism_max_memory;
-		let max_execution_time =
-			self.config.surrealism.surrealism_max_execution_time.map(Duration::from_millis);
-		#[cfg(feature = "http")]
-		let config = self.config.http.clone();
 
-		// Both executable forms resolve to the bytes of one `.surli` archive;
-		// only where those bytes come from differs.
-		let (ns, db, source, temp_prefix) = match lookup {
-			SurrealismCacheLookup::File(ns, db, bucket, key) => {
-				let safe_key =
-					crate::buc::store::ObjectKey::new(key).to_string().replace(['/', '\\'], "_");
-				(
-					*ns,
-					*db,
-					ArchiveSource::File {
-						bucket,
-						key,
-					},
-					format!("SURREAL_MODFS_{ns}_{db}_{safe_key}_"),
-				)
-			}
-			SurrealismCacheLookup::Silo(ns, db, org, pkg, major, minor, patch) => (
-				*ns,
-				*db,
+		let source = match lookup {
+			SurrealismCacheLookup::File(_, _, bucket, key) => ArchiveSource::File {
+				bucket,
+				key,
+			},
+			SurrealismCacheLookup::Silo(_, _, organisation, package, major, minor, patch) => {
 				ArchiveSource::Silo {
-					organisation: org,
-					package: pkg,
+					organisation,
+					package,
 					major,
 					minor,
 					patch,
-				},
-				format!("SURREAL_MODFS_silo_{ns}_{db}_{org}_{pkg}_{major}_{minor}_{patch}_"),
-			),
+				}
+			}
+		};
+		let (ns, db) = match lookup {
+			SurrealismCacheLookup::File(ns, db, ..) | SurrealismCacheLookup::Silo(ns, db, ..) => {
+				(*ns, *db)
+			}
 		};
 
 		let refusal = crate::extension::trust::RefusalKey::new(ns, db, source, pinned, &trust);
 		cache.trust().check_refusal(&refusal)?;
 
+		// Nothing is prepared until the archive is the pinned one and, with a
+		// SIGNER, a signature proves it. Only MANIFEST and SIGNATURE are read
+		// for that. The archive was fetched from the definition's source just
+		// now, so its SIGNATURE is the current one and nothing is fetched
+		// again. Decompressing is CPU work, so it runs off the async task.
 		let prefetched = parking_lot::Mutex::new(prefetched);
-		let build = async || {
+		let fetch = async || {
 			let prefetched = prefetched.lock().take();
-			let surli = match prefetched {
-				Some(surli) => surli,
+			let archive = match prefetched {
+				Some(archive) => archive,
 				None => fetch_archive(self, ns, db, source).await?,
 			};
-
 			let max_fs_bytes = self.config.surrealism.surrealism_max_fs_bytes;
-			// Nothing in the archive is unpacked, parsed or compiled until it
-			// is the pinned one and, with a SIGNER, a signature proves it. Only
-			// MANIFEST and SIGNATURE are read for that. The archive was fetched
-			// from the definition's source just now, so its SIGNATURE is the
-			// current one and nothing is fetched again. Decompressing is CPU
-			// work, so it runs off the async task.
-			let read = surli.clone();
+			let read = archive.clone();
 			let files = tokio::task::spawn_blocking(move || {
 				surrealism_runtime::package::trust_files_from_reader(read.as_ref(), max_fs_bytes)
 			})
 			.await
-			.context("archive read task aborted")??;
+			.map_err(|e| anyhow::anyhow!("archive read task aborted: {e}"))??;
 			let digest = files.manifest.digest().0;
 			cache
 				.trust()
 				.ensure(self, ns, db, None, &digest, files.signature.as_deref(), trust)
 				.await?;
-			let signature: Option<Arc<[u8]>> = files.signature.map(Arc::from);
-
-			// The full read checks every file against that same MANIFEST.
-			#[cfg(storage)]
-			let temp_base = self.temporary_directory().map(|p| p.as_ref().clone());
-			#[cfg(not(storage))]
-			let temp_base: Option<std::path::PathBuf> = None;
-			let temp_prefix = temp_prefix.clone();
-			let package = tokio::task::spawn_blocking(move || {
-				let unpack_opts = UnpackOptions {
-					temp_base: temp_base.as_deref(),
-					temp_prefix: &temp_prefix,
-					max_fs_bytes,
-				};
-				SurrealismPackage::from_reader(std::io::Cursor::new(surli), &unpack_opts)
-			})
-			.await
-			.context("archive unpack task aborted")??;
-			crate::extension::trust::ensure_digest(
-				&package
-					.digest()
-					.ok_or_else(|| anyhow::anyhow!("The extension's archive has no MANIFEST"))?
-					.0,
-				&digest,
-			)?;
-
-			crate::surrealism::validate_surrealism_capabilities(
-				&self.get_capabilities(),
-				&package.config.capabilities,
-			)?;
-
-			let org = package.config.meta.organisation.clone();
-			let name = package.config.meta.name.clone();
-
-			#[cfg(feature = "http")]
-			let module_net_targets =
-				crate::surrealism::host::module_allow_net_targets(&package.config.capabilities);
-
-			// The operator's deny rules travel with the runtime. The
-			// module's declared `allow_net` narrows the SurrealQL path via
-			// `module_scoped_capabilities`, but the guest's own WASI sockets
-			// are checked by the policy inside the runtime, which has no
-			// other way to learn what the server forbids.
-			let deny_net = crate::surrealism::host::surrealism_deny_net(&self.get_capabilities());
-
-			let runtime = tokio::task::spawn_blocking(move || {
-				Runtime::new(package, max_pool_size, max_memory, max_execution_time, deny_net)
-			})
-			.await
-			.context("WASM compile task aborted")??;
-			let runtime = Arc::new(runtime);
-
-			let module_display_name: Arc<str> = format!("{org}::{name}").into();
-
-			#[cfg(feature = "http")]
-			let client = if module_net_targets.is_empty() {
-				Arc::new(
-					HttpClient::new(Targets::None, Targets::All, &config)
-						.context("Failed to create http client for WASM module")?,
-				)
-			} else {
-				let allow = Targets::Some(module_net_targets);
-				Arc::new(
-					HttpClient::new(
-						allow,
-						self.capabilities.denied_network_targets_ref().clone(),
-						&config,
-					)
-					.context("Failed to create http client for WASM module")?,
-				)
-			};
-
-			Ok(SurrealismCachedModule {
-				runtime,
-				digest,
-				signature,
-				module_display_name,
-				#[cfg(feature = "http")]
-				client,
+			Ok(crate::surrealism::runner::VerifiedSource {
+				digest: crate::expr::ManifestDigest::sha256(digest),
+				archive,
+				#[cfg(storage)]
+				temp_base: self.temporary_directory().map(|p| p.as_path().to_path_buf()),
+				#[cfg(not(storage))]
+				temp_base: None,
+				max_fs_bytes,
+				signature: files.signature.map(Arc::from),
 			})
 		};
-
-		let built = cache.get_or_insert_with(&lookup, pinned, build).await;
+		let built =
+			cache.get_or_load(&lookup, &crate::expr::ManifestDigest::sha256(pinned), fetch).await;
 		if built.is_err() {
 			cache.trust().record(refusal, &built);
 		}
 		let module = built?;
-		// The module may have been built for another definition of the same
+		let digest = crate::extension::trust::digest_bytes(&module.digest)?;
+		// The module may have been prepared for another definition of the same
 		// source, so its source's signature is checked against this one's
 		// SIGNER. When the source has been re-signed since, the current
-		// signature proves it and the module is dropped, so the next load
-		// rebuilds it with that signature.
+		// signature proves it and the source entry is dropped, so the next load
+		// takes that signature with it.
 		let resigned = cache
 			.trust()
-			.ensure(self, ns, db, Some(source), &module.digest, module.signature.as_deref(), trust)
+			.ensure(self, ns, db, Some(source), &digest, module.signature.as_deref(), trust)
 			.await?;
 		if resigned {
 			cache.remove(&lookup, pinned);
@@ -1942,15 +1906,6 @@ impl Context {
 	#[cfg(feature = "http")]
 	pub(crate) fn http_client(&self) -> Arc<HttpClient> {
 		Arc::clone(&self.http_client)
-	}
-
-	#[cfg(feature = "surrealism")]
-	pub(crate) async fn get_surrealism_runtime(
-		&self,
-		lookup: SurrealismCacheLookup<'_>,
-		trust: crate::extension::trust::Trust<'_>,
-	) -> Result<Arc<Runtime>> {
-		Ok(self.get_surrealism_module(lookup, trust).await?.runtime)
 	}
 }
 

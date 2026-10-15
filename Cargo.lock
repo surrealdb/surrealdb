@@ -8427,6 +8427,10 @@ dependencies = [
  "wasm-encoder 0.245.1",
  "wasm-opt",
  "wasmparser 0.245.1",
+ "wasmtime",
+ "wasmtime-wasi",
+ "wasmtime-wizer",
+ "wat",
  "web-time",
  "wiremock",
  "zstd",
@@ -8631,6 +8635,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml",
+ "toml_edit",
  "tracing",
  "url",
  "wasmtime",
@@ -9295,6 +9300,7 @@ dependencies = [
  "indexmap",
  "toml_datetime 1.1.1+spec-1.1.0",
  "toml_parser",
+ "toml_writer",
  "winnow 1.0.3",
 ]
 
@@ -10377,6 +10383,18 @@ dependencies = [
  "bytes",
  "futures",
  "tracing",
+ "wasmtime",
+]
+
+[[package]]
+name = "wasmtime-wizer"
+version = "48.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87782f9575b921795291d631ff1447f67ece69936e0a20b8a9925474e2dab2f1"
+dependencies = [
+ "log",
+ "wasm-encoder 0.254.2",
+ "wasmparser 0.254.2",
  "wasmtime",
 ]
 

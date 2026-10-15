@@ -597,11 +597,11 @@ impl SurrealismPackage {
 
 		let config = match (package_toml, legacy_package_toml) {
 			(Some(toml), _) => Some(
-				SurrealismConfig::parse(&toml)
+				crate::package_config::PackageConfig::for_loader(&toml)
 					.prefix_err(|| format!("Failed to parse {PACKAGE_FILE}"))?,
 			),
 			(None, Some(toml)) => Some(
-				SurrealismConfig::parse(&toml)
+				crate::package_config::PackageConfig::for_loader(&toml)
 					.prefix_err(|| format!("Failed to parse {LEGACY_PACKAGE_FILE}"))?,
 			),
 			(None, None) => None,
@@ -673,7 +673,7 @@ impl SurrealismPackage {
 		match (&self.config.attach.fs, &fs_dir) {
 			(Some(cfg_fs), None) => {
 				tracing::warn!(
-					attach_fs = %cfg_fs,
+					attach_fs = ?cfg_fs,
 					"config.attach.fs is set but no fs_dir was provided to pack()"
 				);
 			}
@@ -690,7 +690,9 @@ impl SurrealismPackage {
 			verify_logo(logo_bytes)?;
 		}
 
-		let config = self.config.to_toml().prefix_err(|| "Failed to serialize config")?;
+		let config = crate::package_config::PackageConfig::from_config(self.config.clone())
+			.and_then(|package| package.render())
+			.prefix_err(|| "Failed to serialize config")?;
 		let exports =
 			self.exports.to_toml().prefix_err(|| "Failed to serialize exports manifest")?;
 

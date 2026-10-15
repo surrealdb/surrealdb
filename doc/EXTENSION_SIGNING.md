@@ -11,6 +11,54 @@ That digest is the extension's `DIGEST`. It does not cover the archive bytes.
   `surreal extension build`.
 - `-o FILE` writes the signed archive to `FILE` and leaves the input as it is.
   Without `-o`, the input is replaced. A failed run leaves it unchanged.
+- The archive's `package.toml` must name a `[signer]`, and the signature must
+  come from it. Otherwise the command refuses and does not change the archive.
+
+## The signer
+
+`[signer]` in `package.toml` names the one identity whose signatures the
+package's archives may carry. Set it with `surreal extension config signer`
+before you build; `MANIFEST` covers `package.toml`, so the signer is part of
+`DIGEST`.
+
+```toml
+[signer.sigstore]
+issuer = "https://token.actions.githubusercontent.com"
+identity = "https://github.com/acme/color/.github/workflows/release.yml"
+repository_id = "812345678"
+owner_id = "98765432"
+```
+
+- `identity` names the workflow without `@ref`, so a signature from any branch
+  or tag of that workflow matches. The certificate's identity is compared
+  without its `@ref`.
+- `issuer`, `repository_id` and `owner_id` must equal the certificate's
+  extensions `1.3.6.1.4.1.57264.1.8`, `.15` and `.17`. The two ids stop a
+  repository that was deleted and re-created under the same name.
+
+```toml
+[signer.ssh]
+public_key = "ssh-ed25519 AAAA…"
+```
+
+- The key blob only; a comment is dropped.
+
+```bash
+surreal extension config signer github --repo acme/color --workflow release.yml
+surreal extension config signer gitlab --project group/project
+surreal extension config signer ssh ~/.ssh/release.pub
+```
+
+`signer github` reads the two ids from `GET https://api.github.com/repos/acme/color`,
+and `signer gitlab` reads the project and namespace ids from the GitLab API.
+Give `--repository-id` and `--owner-id` to set them without the network.
+
+Keyless signing compares the CI identity token with `[signer]` before it asks
+Fulcio for a certificate, so a job that is not the package's signer leaves no
+entry in the transparency log. For GitHub Actions and GitLab CI the token says
+which workflow, repository and owner the certificate would name; for another
+provider only the issuer is checked first. The signature is checked against
+`[signer]` again once it is made.
 
 There are three ways to sign.
 
@@ -163,5 +211,6 @@ DSSE bundle (from `cosign attest-blob`) and the older cosign bundle format.
 
 `sign` verifies the bundle against the root you give it, so a signature it
 writes always verifies offline. It does not decide whether that root, or the
-signer's identity, should be trusted. The server checks the signature against
-the `SIGNER` clause of the definition.
+signer's identity, should be trusted, beyond comparing who the signature claims
+to come from with `[signer]`. The server checks the signature against the
+`SIGNER` clause of the definition.

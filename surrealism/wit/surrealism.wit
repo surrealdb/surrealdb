@@ -84,10 +84,13 @@ interface host {
 ///
 /// ## Lifecycle
 ///
-/// 1. The host instantiates the WASM component.
-/// 2. The host calls `init` (if exported). The module may use this to set up
-///    state or warm caches. If `init` returns an error the module is considered
-///    unhealthy and will not receive `invoke` calls.
+/// 1. `surreal extension build` calls `init` once, snapshots the memory it leaves
+///    as the component's initial state, and removes the `init` export. The
+///    module may use it to set up state or warm caches from its attached files.
+/// 2. The host instantiates the WASM component afresh for every invocation, and
+///    each instance starts in that state. The host never calls `init`: it
+///    refuses a component that still exports it, which was not built by
+///    `surreal extension build`.
 /// 3. For each incoming request the host reads the function's entry in the
 ///    baked `exports.toml`, lends a matching transaction, and calls `invoke`.
 ///    The handle is revoked when the call returns.
@@ -155,15 +158,18 @@ world extension {
     /// Returns `none` when the function has no comment.
     export function-comment: func(name: option<string>) -> result<option<string>, string>;
 
-    /// Optional initialization hook called once after instantiation.
+    /// Optional initialization hook, run once at build time.
     ///
-    /// If this returns an error, the host marks the module as failed and will
-    /// not route any `invoke` calls to it.
+    /// `surreal extension build` runs it and ships the memory it leaves as the
+    /// component's initial state, without this export. There it sees the
+    /// attached files but no network, and must close every WASI resource it
+    /// opens, or the build fails; an error it returns fails the build too.
+    /// Anything it reads, including randomness and the clock, is frozen into
+    /// the archive. The host refuses a component that still exports it.
     ///
-    /// Lent no transaction, and synchronous by contract. `init` runs once per
-    /// instance, under whichever request happened to create it, and its effects
-    /// persist in linear memory for every later request; it therefore must not
-    /// reach the datastore. A sync-lifted export also cannot block, so the
+    /// Lent no transaction, and synchronous by contract: its effects persist in
+    /// linear memory for every later request, so it must not reach the
+    /// datastore. A sync-lifted export also cannot block, so the
     /// `#[surrealism(init)]` macro rejects an `async fn`.
     export init: func() -> result<_, string>;
 }

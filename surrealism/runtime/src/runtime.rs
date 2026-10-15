@@ -1,127 +1,178 @@
-//! Compiled WASM runtime (shared, immutable, thread-safe).
+//! A compiled extension, and invocations of it.
 //!
 //! # Architecture
 //!
-//! - **`Runtime`**: Compiled WASM component. Thread-safe, shareable (`Arc<Runtime>`). Compile once,
-//!   instantiate many times. Holds a pool of initialized Controllers for reuse. A Tokio semaphore
-//!   caps **checked-out** controllers (in-flight use). Idle controllers in the pool **release**
-//!   their semaphore permits so waiters can proceed; permits are re-acquired when a pooled
-//!   controller is checked out again. `max_pool_size` bounds the pool size and the maximum
-//!   concurrent instances.
+//! - **`Runtime`**: one compiled component, prepared once and shared by every caller of the same
+//!   archive. Thread-safe (`Arc<Runtime>`). It holds no tenant or request state: the compiled code,
+//!   the resolved imports (`InstancePre`), the exports manifest and the attached filesystem, opened
+//!   once.
 //!
-//! - **`Controller`**: Per-execution instance. Single-threaded. Can be reused across invocations by
-//!   lending a fresh `transaction` handle per call, preserving WASM linear memory (statics, heap).
+//! - **`Controller`**: one fresh instance serving one invocation. It is created from the
+//!   `InstancePre` into a pooling-allocator slot, runs `init` when the module exports one, serves
+//!   the invocation's rows, and is dropped. Dropping it returns the slot with its memory reset to
+//!   the module's image.
 //!
-//! # Instance Reuse
+//! # Isolation
 //!
-//! Controllers are pooled inside the Runtime and hold no request state. Datastore access is
-//! granted per call by the `transaction` handle `invoke` lends, and revoked when it returns, so a
-//! pooled controller carries nothing from the request before it. The WASM linear memory persists,
-//! so Rust statics (`OnceLock`, etc.) survive across calls. Security is enforced by the lent
-//! handle, not by memory isolation — the module never sees user identity directly.
+//! Each invocation runs in memory initialised from the module's image, and nothing it writes
+//! survives it. Two invocations never share memory, whichever tenant made them. The rows of one
+//! batched invocation share that invocation's memory.
 //!
-//! # Concurrency Patterns
+//! What an invocation may do is its own, too: the network policy, memory limit and execution
+//! time limit arrive with each call in [`InstanceSettings`], so two definitions of one archive
+//! can grant it different capabilities.
+//!
+//! # Usage
 //!
 //! ```ignore
 //! use std::sync::Arc;
-//! use surrealism_runtime::{NetDeny, runtime::Runtime, package::SurrealismPackage};
+//! use surrealism_runtime::epoch::{EngineSettings, engines};
+//! use surrealism_runtime::runtime::{Call, InstanceSettings, Runtime};
 //!
-//! // Compile once (expensive)
-//! let runtime = Arc::new(Runtime::new(package, 8, None, None, NetDeny::Nothing)?);
+//! // Compile once (expensive, blocking).
+//! let runtime = Arc::new(Runtime::new(package, engines(EngineSettings::default()))?);
 //!
-//! // For each concurrent request:
-//! let runtime = runtime.clone();
-//! tokio::spawn(async move {
-//!     let context = Arc::new(MyContext::new());
-//!     let mut controller = runtime.acquire_controller(context.as_ref(), None).await?;
-//!     let result = controller.invoke(Some(context), None, args).await;
-//!     // Return to pool on success; drop on trap
-//!     if result.is_ok() {
-//!         runtime.release_controller(controller);
-//!     }
-//!     result
-//! });
-//! # Ok::<(), surrealism_types::err::SurrealismError>(())
+//! // Each invocation gets a fresh instance.
+//! let values = runtime.invoke(Call { .. }).await?;
 //! ```
 
 use std::fmt;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use surrealism_types::err::{PrefixErr, SurrealismError, SurrealismResult};
-use tokio::sync::Semaphore;
 use wasmtime::*;
 use web_time::Instant;
 
 use crate::config::{AbiVersion, SurrealismConfig};
 use crate::controller::Controller;
-use crate::epoch::{self, EngineHandle};
+use crate::epoch::{Engines, SlotWait};
 use crate::exports::ExportsManifest;
 use crate::host::{InvocationContext, implement_host_functions};
-use crate::net_allow::{NetDeny, NetPolicy};
+use crate::net_allow::NetPolicy;
 use crate::package::{AttachedFs, SurrealismPackage};
 use crate::store::StoreData;
+use crate::wasi_context::{StdioCallback, WasiTemplate};
 
-/// Compiled WASM runtime. Thread-safe, can be shared across threads via Arc.
-/// Compiles WASM once, then each controller gets its own isolated Store/Instance.
-/// Holds a pool of initialized controllers for reuse across invocations.
-pub struct Runtime {
-	/// Shared engine handle. Keeps the global epoch ticker alive.
-	engine_handle: EngineHandle,
+/// The longest a top-level invocation waits for a slot when its query has no
+/// timeout of its own.
+const SLOT_WAIT_WITHOUT_DEADLINE: Duration = Duration::from_secs(30);
+
+/// A compiled component for one engine flavour.
+struct Linked {
 	instance_pre: component::InstancePre<StoreData>,
-	config: Arc<SurrealismConfig>,
-	wasm_size: usize,
-	/// Holds the extracted filesystem alive for the lifetime of the runtime.
-	/// When present, its root is mounted as a read-only preopened dir for WASM modules.
-	fs_dir: Option<AttachedFs>,
-	/// Pool of initialized, reusable controllers (retention capped at `max_pool_size`).
-	/// Controllers in the pool hold no request state and have already run init().
-	/// Uses `parking_lot::Mutex` for non-poisoning, lower-overhead locking.
-	pool: parking_lot::Mutex<Vec<Controller>>,
-	/// Bounds concurrent **in-use** `Controller` instances. Permits are held only while a
-	/// controller is actively checked out; idle pooled controllers release their permits.
-	controller_slots: Arc<Semaphore>,
-	/// Function signatures loaded from the exports manifest at build time.
-	exports: ExportsManifest,
-	/// Effective pool size ceiling: `min(server_cap, module_config.unwrap_or(server_cap))`.
-	max_pool_size: usize,
-	/// Effective memory limit: `min(server_cap, module_config)` when both set.
-	max_memory_bytes: Option<usize>,
-	/// Effective per-invocation execution time limit from module config.
-	/// Combined with context timeout and server cap at invoke time.
-	module_execution_time: Option<Duration>,
-	/// The module's outbound network policy. Shared by the DNS shim (which
-	/// filters by name) and WASI's `socket_addr_check` (which filters connects).
-	net_policy: Arc<NetPolicy>,
+	/// The component's exports, looked up by name once here rather than on
+	/// every instantiation.
+	exports: ExportIndices,
 	/// Whether the filtering resolver shadowed the component's own import.
 	dns_filtered: bool,
 }
 
+/// Indices of the exports an instance is driven through. `None` for an
+/// optional export the component does not have.
+#[derive(Clone, Copy)]
+struct ExportIndices {
+	invoke: component::ComponentExportIndex,
+	args: Option<component::ComponentExportIndex>,
+	returns: Option<component::ComponentExportIndex>,
+	list: Option<component::ComponentExportIndex>,
+	writeable: Option<component::ComponentExportIndex>,
+	declares_tx: Option<component::ComponentExportIndex>,
+	comment: Option<component::ComponentExportIndex>,
+}
+
+/// One compiled extension. Thread-safe; share it as `Arc<Runtime>`.
+pub struct Runtime {
+	engines: Arc<Engines>,
+	/// The component bytes, kept to compile the second engine flavour should
+	/// an invocation ask for it.
+	wasm: Arc<[u8]>,
+	/// The component compiled for each engine flavour. Async cells, so that
+	/// callers racing for a flavour that is compiling wait for the one
+	/// compile without holding a thread.
+	guarded: tokio::sync::OnceCell<Linked>,
+	fast: tokio::sync::OnceCell<Linked>,
+	config: Arc<SurrealismConfig>,
+	/// Holds the extracted filesystem alive for the lifetime of the runtime.
+	/// When present, its root is mounted as a read-only preopened dir.
+	fs_dir: Option<AttachedFs>,
+	/// The WASI state every invocation starts from: the attached filesystem,
+	/// opened once.
+	wasi: WasiTemplate,
+	/// Function signatures loaded from the exports manifest at build time.
+	exports: ExportsManifest,
+}
+
 impl fmt::Debug for Runtime {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		let pool_size = self.pool.lock().len();
 		f.debug_struct("Runtime")
 			.field("config", &self.config)
-			.field("wasm_size", &self.wasm_size)
+			.field("wasm_size", &self.wasm.len())
 			.field("fs_dir", &self.fs_dir)
-			.field("pool_size", &pool_size)
-			.field("max_pool_size", &self.max_pool_size)
-			.field("max_memory_bytes", &self.max_memory_bytes)
-			.field("module_execution_time", &self.module_execution_time)
+			.field("guarded", &self.guarded.get().is_some())
+			.field("fast", &self.fast.get().is_some())
 			.field("exported_functions", &self.exports.functions.len())
 			.finish_non_exhaustive()
 	}
 }
 
+/// What one invocation was granted. Applied to the fresh instance that serves
+/// it, and to nothing else.
+#[derive(Clone)]
+pub struct InstanceSettings {
+	/// Where the guest may connect, checked by name in the DNS shim and by
+	/// address on every connect.
+	pub net: Arc<NetPolicy>,
+	/// The largest linear memory the instance may grow to.
+	pub max_memory_bytes: Option<usize>,
+	/// The longest one call into the guest may run, before the caller's own
+	/// remaining time is applied.
+	pub max_execution_time: Option<Duration>,
+	/// Whether the guest runs on the guarded engine, which enforces the
+	/// execution time limit. `false` runs it on the fast engine, which cannot.
+	pub strict_timeout: bool,
+	pub stdout: StdioCallback,
+	pub stderr: StdioCallback,
+}
+
+impl InstanceSettings {
+	/// No network, no limits, stdio to the process's own.
+	pub fn local() -> Self {
+		Self {
+			net: NetPolicy::deny_all(),
+			max_memory_bytes: None,
+			max_execution_time: None,
+			strict_timeout: true,
+			stdout: Arc::new(|output| print!("{output}")),
+			stderr: Arc::new(|output| eprint!("{output}")),
+		}
+	}
+}
+
+/// One invocation: a function, the rows to call it with, and what it may do.
+pub struct Call {
+	/// The export to call; `None` is the default export.
+	pub function: Option<String>,
+	/// One argument list per row. All rows run on the same instance, in order.
+	pub rows: Vec<Vec<surrealdb_types::Value>>,
+	/// The handle lent to the guest for each row, or `None` for a function
+	/// that declared no transaction parameter.
+	pub tx: Option<Arc<dyn InvocationContext>>,
+	pub settings: InstanceSettings,
+	/// When the caller's query times out. Bounds the wait for a slot as well
+	/// as each call into the guest.
+	pub deadline: Option<Instant>,
+	/// Whether this invocation was made from inside another one. A nested
+	/// invocation never waits for a slot.
+	pub nested: bool,
+}
+
 impl Runtime {
-	/// Compile the WASM and prepare the runtime.
-	/// This is expensive — do it once and share via `Arc<Runtime>`.
+	/// Unpack and compile a package. This is expensive and blocking — do it
+	/// once per archive and share the result.
 	///
-	/// `server_pool_size`, `server_max_memory` and `server_max_execution_time`
-	/// are the server-level ceilings from environment variables. `server_deny_net`
-	/// is the operator's `--deny-net`, which the module's own `allow_net` cannot
-	/// widen.
+	/// Compiles for the guarded engine; an invocation granted the other one
+	/// compiles it on demand through [`Self::prepare`].
 	pub fn new(
 		SurrealismPackage {
 			wasm,
@@ -132,10 +183,7 @@ impl Runtime {
 			manifest: _,
 			signature: _,
 		}: SurrealismPackage,
-		server_pool_size: usize,
-		server_max_memory: Option<usize>,
-		server_max_execution_time: Option<Duration>,
-		server_deny_net: NetDeny,
+		engines: Arc<Engines>,
 	) -> SurrealismResult<Self> {
 		if config.abi != AbiVersion::CURRENT {
 			return Err(SurrealismError::UnsupportedAbi {
@@ -143,104 +191,84 @@ impl Runtime {
 				got: config.abi.0,
 			});
 		}
-
-		let t0 = Instant::now();
-
-		let max_pool_size = config
-			.capabilities
-			.max_pool_size
-			.map(|m| m.min(server_pool_size))
-			.unwrap_or(server_pool_size);
-
-		let max_memory_bytes = match (server_max_memory, config.capabilities.max_memory_bytes) {
-			(Some(s), Some(m)) => Some(s.min(m)),
-			(s, m) => s.or(m),
-		};
-
-		let module_execution_time =
-			match (server_max_execution_time, config.capabilities.max_execution_time) {
-				(Some(s), Some(m)) => Some(s.min(m)),
-				(s, m) => s.or(m),
-			};
-
-		let config = Arc::new(config);
-		let wasm_size = wasm.len();
-		tracing::debug!(
-			wasm_size,
-			fs = fs.is_some(),
-			max_pool_size,
-			?max_memory_bytes,
-			?module_execution_time,
-			"Runtime::new starting"
-		);
-
-		let guarded = config.capabilities.strict_timeout;
-		let engine_handle = epoch::shared_engine(guarded);
-		tracing::debug!(
-			strict_timeout = guarded,
-			engine = if guarded {
-				"guarded"
-			} else {
-				"fast"
-			},
-			"Runtime::new: selected engine"
-		);
-		// No DNS here: hostnames are matched as names when the guest resolves
-		// them, so nothing is pinned at load time.
-		//
-		// The operator's deny rules are carried into the policy rather than
-		// checked only on the SurrealQL path: a guest's own WASI socket is a
-		// second way out of the process, and one that answered differently
-		// would let a module reach what a query from the same module cannot.
-		let net_policy = NetPolicy::parse(&config.capabilities.allow_net, server_deny_net)
-			.prefix_err(|| "Failed to parse allow_net entries")?;
-
-		let (instance_pre, dns_filtered) = Self::build(engine_handle.engine(), &wasm, &net_policy)?;
-		tracing::debug!(elapsed = ?t0.elapsed(), "Runtime::new build done");
-
-		let controller_slots = Arc::new(Semaphore::new(max_pool_size.max(1)));
-
-		Ok(Self {
-			engine_handle,
-			instance_pre,
-			config,
-			wasm_size,
+		let wasi = WasiTemplate::new(fs.as_ref().map(|fs| fs.path()))?;
+		let runtime = Self {
+			engines,
+			wasm: wasm.into(),
+			guarded: tokio::sync::OnceCell::new(),
+			fast: tokio::sync::OnceCell::new(),
+			config: Arc::new(config),
 			fs_dir: fs,
-			pool: parking_lot::Mutex::new(Vec::new()),
-			dns_filtered,
-			controller_slots,
+			wasi,
 			exports,
-			max_pool_size,
-			max_memory_bytes,
-			module_execution_time,
-			net_policy,
-		})
+		};
+		// The guarded engine is what a definition gets unless its
+		// `CAPABILITIES` set `strict_timeout: false`; the other flavour is
+		// compiled on the first invocation that asks for it.
+		runtime.prepare(true)?;
+		Ok(runtime)
 	}
 
 	/// Returns the size of the original WASM binary in bytes.
 	pub fn wasm_size(&self) -> usize {
-		self.wasm_size
+		self.wasm.len()
 	}
 
-	/// Returns the module configuration.
+	/// Returns the package configuration.
 	pub fn config(&self) -> &SurrealismConfig {
 		&self.config
 	}
 
-	/// The module's outbound network policy.
-	pub fn net_policy(&self) -> Arc<NetPolicy> {
-		Arc::clone(&self.net_policy)
+	/// The engine pool this runtime instantiates into.
+	pub fn engines(&self) -> &Arc<Engines> {
+		&self.engines
 	}
 
-	/// Compute the maximum epoch delta that won't overflow when wasmtime adds
-	/// it to the current epoch. Wasmtime uses wrapping `+` internally in
-	/// `set_epoch_deadline`, so `u64::MAX` overflows once the epoch > 0.
-	/// We subtract the shadow counter (which is always >= the real engine
-	/// epoch) plus a small margin to absorb any ticks that land between
-	/// the load and the `set_epoch_deadline` call.
-	pub(crate) fn epoch_deadline_max(&self) -> u64 {
-		let epoch = self.engine_handle.epoch_counter().load(Ordering::Acquire);
-		u64::MAX.saturating_sub(epoch).saturating_sub(1)
+	fn linked(&self, guarded: bool) -> &tokio::sync::OnceCell<Linked> {
+		if guarded {
+			&self.guarded
+		} else {
+			&self.fast
+		}
+	}
+
+	/// Whether the component is compiled for one engine flavour.
+	pub fn is_prepared(&self, guarded: bool) -> bool {
+		self.linked(guarded).get().is_some()
+	}
+
+	/// Compile the component for one engine flavour, if it is not already.
+	/// Expensive and blocking: for a caller that owns the runtime, such as
+	/// [`Self::new`] and the command-line tools. A server compiles with
+	/// [`Self::prepare_async`].
+	pub fn prepare(&self, guarded: bool) -> SurrealismResult<()> {
+		let cell = self.linked(guarded);
+		if cell.initialized() {
+			return Ok(());
+		}
+		let engine = self.engines.engine(guarded)?;
+		let linked = Self::build(&engine, &self.wasm)?;
+		// A compile that raced this one produced the same thing.
+		let _ = cell.set(linked);
+		Ok(())
+	}
+
+	/// Compile the component for one engine flavour, if it is not already,
+	/// on a blocking thread. Callers that race for the same flavour wait,
+	/// without a thread of their own, for the one compile.
+	pub async fn prepare_async(&self, guarded: bool) -> SurrealismResult<()> {
+		self.linked(guarded)
+			.get_or_try_init(|| async {
+				let engines = Arc::clone(&self.engines);
+				let wasm = Arc::clone(&self.wasm);
+				tokio::task::spawn_blocking(move || Self::build(&engines.engine(guarded)?, &wasm))
+					.await
+					.map_err(|e| {
+						SurrealismError::Other(anyhow::anyhow!("WASM compile task aborted: {e}"))
+					})?
+			})
+			.await?;
+		Ok(())
 	}
 
 	/// Whether the filtering DNS resolver is bound for this module.
@@ -250,21 +278,27 @@ impl Runtime {
 	/// because the shim failed to find the interface: the name it binds is read
 	/// off the component's own imports.
 	pub fn dns_filtered(&self) -> bool {
-		self.dns_filtered
+		self.guarded.get().or_else(|| self.fast.get()).is_some_and(|l| l.dns_filtered)
 	}
 
-	fn build(
-		engine: &Engine,
-		wasm: &[u8],
-		net_policy: &Arc<NetPolicy>,
-	) -> SurrealismResult<(component::InstancePre<StoreData>, bool)> {
+	fn build(engine: &Engine, wasm: &[u8]) -> SurrealismResult<Linked> {
 		let t0 = Instant::now();
 
 		let comp = component::Component::new(engine, wasm)
 			.prefix_err(|| "Failed to construct component from bytes")?;
 		tracing::debug!(elapsed = ?t0.elapsed(), "build: Component::new");
 
-		let t1 = Instant::now();
+		// `surreal extension build` runs `init` once and removes the export, so
+		// the snapshot is what every instance starts from. A component that
+		// still exports it was not built that way, and running `init` here
+		// would run it on every invocation, outside the query's deadline.
+		if comp.get_export_index(None, "init").is_some() {
+			return Err(SurrealismError::Other(anyhow::anyhow!(
+				"the component still exports `init`, so it was not pre-initialised; rebuild it \
+				 with `surreal extension build`"
+			)));
+		}
+
 		let mut linker: component::Linker<StoreData> = component::Linker::new(engine);
 		wasmtime_wasi::p2::add_to_linker_async(&mut linker)
 			.prefix_err(|| "failed to add WASI P2 to component linker")?;
@@ -272,120 +306,36 @@ impl Runtime {
 		// The name is taken from the component's own imports, so the shim binds
 		// the interface the guest actually calls whatever WASI version it was
 		// built against.
-		let dns_filtered = crate::dns::add_to_linker(engine, &comp, &mut linker, net_policy)
+		let dns_filtered = crate::dns::add_to_linker(engine, &comp, &mut linker)
 			.prefix_err(|| "failed to add the filtering DNS resolver")?;
 		implement_host_functions(&mut linker)
 			.prefix_err(|| "failed to implement host functions")?;
-		tracing::debug!(elapsed = ?t1.elapsed(), "build: linker setup");
 
-		let t2 = Instant::now();
 		let instance_pre = linker
 			.instantiate_pre(&comp)
 			.prefix_err(|| "failed to pre-instantiate component (import resolution)")?;
-		tracing::debug!(elapsed = ?t2.elapsed(), "build: instantiate_pre");
-
-		tracing::debug!(elapsed = ?t0.elapsed(), "build: total");
-		Ok((instance_pre, dns_filtered))
-	}
-
-	/// Acquire a controller ready for invocation. Reuses a pooled controller if available
-	/// (preserving WASM memory / statics from prior runs), otherwise creates and initializes
-	/// a fresh one — waiting on [`Semaphore`] if `max_pool_size` controllers are already checked
-	/// out.
-	///
-	/// The controller carries no request state; `context` is only used to point
-	/// the WASI stdio callbacks at this request's logging path. Datastore access
-	/// is granted separately, by the handle `invoke` lends.
-	///
-	/// The semaphore permit is acquired **before** checking the pool so that a
-	/// popped controller is never outstanding without a matching permit.
-	///
-	/// `wait` is how long the caller is prepared to wait for one, normally what
-	/// is left of its own query timeout. The wait is the shorter of that and
-	/// `SLOT_WAIT`, so a `TIMEOUT 1s` query does not sit here for
-	/// thirty seconds holding a transaction open.
-	#[tracing::instrument(skip_all)]
-	pub async fn acquire_controller(
-		&self,
-		context: &dyn InvocationContext,
-		wait: Option<Duration>,
-	) -> SurrealismResult<Controller> {
-		let permit = self.acquire_slot(wait).await?;
-
-		let pooled = {
-			let mut pool = self.pool.lock();
-			let size = pool.len();
-			let ctrl = pool.pop();
-			tracing::debug!(
-				pool_size_before = size,
-				got_pooled = ctrl.is_some(),
-				"acquire_controller: pool.pop()"
-			);
-			ctrl
+		let export = |name| comp.get_export_index(None, name);
+		let exports = ExportIndices {
+			invoke: export("invoke").ok_or_else(|| {
+				SurrealismError::Other(anyhow::anyhow!(
+					"component is missing required export 'invoke'. Ensure the module is \
+					 built with `surreal extension build`"
+				))
+			})?,
+			args: export("function-args"),
+			returns: export("function-returns"),
+			list: export("list-functions"),
+			writeable: export("function-writeable"),
+			declares_tx: export("function-declares-transaction"),
+			comment: export("function-comment"),
 		};
 
-		match pooled {
-			Some(mut ctrl) => {
-				tracing::debug!("acquire_controller: reusing pooled controller");
-				ctrl.attach_controller_slot(permit);
-				ctrl.reset_epoch_deadline();
-				ctrl.set_stdio(context);
-				Ok(ctrl)
-			}
-			None => {
-				tracing::info!("acquire_controller: creating NEW controller + init()");
-				let mut ctrl = self.create_controller(context, permit).await?;
-				ctrl.init().await?;
-				// Whatever `init` opened is this module's own and outlives every
-				// caller; a socket above this count later is the guest holding
-				// a connection across an invocation.
-				ctrl.mark_resource_baseline();
-				Ok(ctrl)
-			}
-		}
-	}
-
-	/// Return a controller to the pool for reuse. The WASI stdio callbacks are
-	/// reset to host defaults so no per-request logging context is retained.
-	/// WASM linear memory (statics, heap) is preserved for the next invocation.
-	///
-	/// A controller that ends its invocation holding a socket it did not start
-	/// with is retired instead: the pool is shared by every caller on this
-	/// namespace and database, and an open connection left in the table would
-	/// be reachable from the next caller's query. See
-	/// `Controller::retains_guest_resources`.
-	///
-	/// Do NOT release a controller after a WASM trap — drop it instead to discard
-	/// potentially inconsistent instance state.
-	pub fn release_controller(&self, mut controller: Controller) {
-		controller.clear_stdio();
-		if controller.retains_guest_resources() {
-			tracing::warn!(
-				"release_controller: guest left a socket open across the invocation; \
-				 retiring the controller rather than pooling it"
-			);
-			drop(controller.take_controller_slot());
-			return;
-		}
-		// Idle pool slots must not hold semaphore permits, or `acquire_owned` starves once the
-		// pool fills even though controllers are available (see controller pool + semaphore
-		// design).
-		drop(controller.take_controller_slot());
-		let mut pool = self.pool.lock();
-		if pool.len() < self.max_pool_size {
-			tracing::debug!(
-				pool_size_after = pool.len() + 1,
-				max_pool_size = self.max_pool_size,
-				"release_controller: returned to pool"
-			);
-			pool.push(controller);
-		} else {
-			tracing::info!(
-				pool_size = pool.len(),
-				max_pool_size = self.max_pool_size,
-				"release_controller: pool full, dropping controller"
-			);
-		}
+		tracing::debug!(elapsed = ?t0.elapsed(), "build: total");
+		Ok(Linked {
+			instance_pre,
+			exports,
+			dns_filtered,
+		})
 	}
 
 	/// Look up a function signature from the exports manifest.
@@ -406,140 +356,140 @@ impl Runtime {
 		&self.exports
 	}
 
-	/// Create a new Controller with its own isolated Store and Instance.
-	/// Import resolution is already done (in `InstancePre`); this only allocates
-	/// memory, initializes state, and runs any start functions.
+	/// Run one invocation on a fresh instance.
 	///
-	/// Prefer `acquire_controller` for the reuse path. This is the low-level constructor.
-	#[tracing::instrument(skip_all)]
-	pub async fn new_controller(
-		&self,
-		context: &dyn InvocationContext,
-	) -> SurrealismResult<Controller> {
-		let permit = self.acquire_slot(None).await?;
-		self.create_controller(context, permit).await
-	}
-
-	/// The longest anyone waits for a controller slot before the pool is
-	/// reported exhausted.
+	/// Takes a slot, instantiates, calls the function once per row, and drops
+	/// the instance. Returns one
+	/// value per row. A row that fails or traps fails the whole invocation.
 	///
-	/// The wait is bounded because it can be circular: a guest function that
-	/// calls back into its own module blocks here while the outer invocation
-	/// holds the permit the nested one needs, and nothing breaks that on its
-	/// own. The epoch deadline interrupts *guest* execution only, and this wait
-	/// is host-side. Unbounded, the request hangs holding an open transaction
-	/// and recovery depends on an outer `transaction_timeout` being configured.
+	/// A nested invocation runs on a task of its own. It is reached from a host
+	/// call, which the calling instance's component-model event loop is
+	/// polling, and wasmtime does not drive one store's event loop from inside
+	/// another's. The task is aborted if the caller stops waiting for it.
 	///
-	/// Generous enough that ordinary contention — every controller busy on a
-	/// loaded node — waits rather than fails. A caller with a shorter deadline
-	/// of its own passes it to [`Self::acquire_controller`] and waits that long
-	/// instead.
-	const SLOT_WAIT: Duration = Duration::from_secs(30);
-
-	async fn acquire_slot(
-		&self,
-		wait: Option<Duration>,
-	) -> SurrealismResult<tokio::sync::OwnedSemaphorePermit> {
-		let wait = wait.map_or(Self::SLOT_WAIT, |w| w.min(Self::SLOT_WAIT));
-		let slots = Arc::clone(&self.controller_slots);
-		match tokio::time::timeout(wait, slots.acquire_owned()).await {
-			Ok(Ok(permit)) => Ok(permit),
-			Ok(Err(_)) => Err(SurrealismError::Other(anyhow::anyhow!(
-				"Surrealism controller semaphore closed (runtime shutdown?)"
-			))),
-			Err(_) => {
-				tracing::error!(
-					pool_size = self.max_pool_size,
-					waited = ?wait,
-					"acquire_slot: no controller became available; the pool may be held by an \
-					 invocation waiting on a nested call into the same module"
-				);
-				Err(SurrealismError::ControllerPoolExhausted {
-					waited: wait,
-					pool_size: self.max_pool_size,
-				})
-			}
+	/// The flavour the call asks for must already be compiled
+	/// ([`Self::prepare`]); compiling is blocking, so it is the caller's to
+	/// schedule.
+	#[tracing::instrument(skip_all, fields(function = call.function.as_deref().unwrap_or("<default>")))]
+	pub async fn invoke(
+		self: &Arc<Self>,
+		call: Call,
+	) -> SurrealismResult<Vec<surrealdb_types::Value>> {
+		if call.nested {
+			let this = Arc::clone(self);
+			wasmtime_wasi::runtime::spawn(async move { this.run_invocation(call).await }).await
+		} else {
+			self.run_invocation(call).await
 		}
 	}
 
-	/// Inner constructor that takes a pre-acquired semaphore permit.
-	#[tracing::instrument(skip_all)]
-	async fn create_controller(
-		&self,
-		context: &dyn InvocationContext,
-		controller_slot: tokio::sync::OwnedSemaphorePermit,
-	) -> SurrealismResult<Controller> {
-		let t0 = Instant::now();
-
-		let fs_root = self.fs_dir.as_ref().map(|fs| fs.path());
-		let stdout_cb = crate::wasi_context::new_stdout_callback();
-		let stderr_cb = crate::wasi_context::new_stderr_callback();
-		*stdout_cb.lock() = context.stdout_callback();
-		*stderr_cb.lock() = context.stderr_callback();
-		let (wasi_ctx, table) = crate::wasi_context::build(
-			fs_root,
-			&self.net_policy,
-			Arc::clone(&stdout_cb),
-			Arc::clone(&stderr_cb),
-		)?;
-		tracing::debug!(elapsed = ?t0.elapsed(), "new_controller: wasi_context::build");
-
-		let mut limits_builder = StoreLimitsBuilder::new();
-		if let Some(max_mem) = self.max_memory_bytes {
-			limits_builder = limits_builder.memory_size(max_mem);
-		}
-		let limiter = limits_builder.build();
-
-		let store_data = StoreData {
-			wasi: wasi_ctx,
-			table,
-			config: Arc::clone(&self.config),
-			limiter,
-			stdout_cb,
-			stderr_cb,
+	async fn run_invocation(&self, call: Call) -> SurrealismResult<Vec<surrealdb_types::Value>> {
+		let wait = if call.nested {
+			SlotWait::Never
+		} else {
+			// Bounded by the caller's own deadline whatever `strict_timeout`
+			// says: that flag concerns the guest's execution, and this wait is
+			// the host's.
+			SlotWait::Bounded(call.deadline.map_or(SLOT_WAIT_WITHOUT_DEADLINE, |d| {
+				d.saturating_duration_since(Instant::now())
+			}))
 		};
-		let mut store = Store::new(self.engine_handle.engine(), store_data);
-		store.limiter(|data| &mut data.limiter);
-		store.set_epoch_deadline(self.epoch_deadline_max());
+		let slot = self.engines.acquire_slot(wait).await?;
+		let mut controller = self.instantiate(&call.settings, Some(slot), call.deadline).await?;
 
-		let t1 = Instant::now();
-		let instance = self
-			.instance_pre
-			.instantiate_async(&mut store)
-			.await
-			.map_err(SurrealismError::Instantiation)?;
-		tracing::debug!(elapsed = ?t1.elapsed(), "new_controller: instantiate_async");
+		let mut values = Vec::with_capacity(call.rows.len());
+		for row in call.rows {
+			let remaining = call.deadline.map(|d| d.saturating_duration_since(Instant::now()));
+			let value = controller
+				.invoke_with_timeout(call.tx.clone(), call.function.clone(), row, remaining)
+				.await?;
+			values.push(value);
+		}
+		Ok(values)
+	}
 
-		let t2 = Instant::now();
-
-		let invoke_fn = instance.get_func(&mut store, "invoke").ok_or_else(|| {
+	/// Create a fresh instance with the given settings.
+	///
+	/// `slot` is the invocation slot it occupies until dropped. Pass `None`
+	/// only outside the server's slot accounting, such as for the build tool:
+	/// the pooling allocator then fails rather than waits when it is full.
+	///
+	/// Instantiating can run guest code, the core modules' `start`
+	/// functions, so on the guarded engine it is bounded by the smaller of
+	/// `deadline` and the settings' execution time limit, and fails with
+	/// [`SurrealismError::Timeout`] past it.
+	#[tracing::instrument(skip_all)]
+	pub async fn instantiate(
+		&self,
+		settings: &InstanceSettings,
+		slot: Option<crate::epoch::SlotPermit>,
+		deadline: Option<Instant>,
+	) -> SurrealismResult<Controller> {
+		let linked = self.linked(settings.strict_timeout).get().ok_or_else(|| {
 			SurrealismError::Other(anyhow::anyhow!(
-				"component is missing required export 'invoke'. \
-				 Ensure the module is built with `surreal module build`"
+				"the component is not compiled for the {} engine",
+				if settings.strict_timeout {
+					"guarded"
+				} else {
+					"fast"
+				}
 			))
 		})?;
 
-		let args_fn = instance.get_func(&mut store, "function-args");
-		let returns_fn = instance.get_func(&mut store, "function-returns");
-		let list_fn = instance.get_func(&mut store, "list-functions");
-		let writeable_fn = instance.get_func(&mut store, "function-writeable");
-		let declares_tx_fn = instance.get_func(&mut store, "function-declares-transaction");
-		let comment_fn = instance.get_func(&mut store, "function-comment");
-		let init_fn = instance.get_func(&mut store, "init");
+		let net = settings.net.for_invocation().await;
+		let (wasi, table) =
+			self.wasi.instantiate(&net, Arc::clone(&settings.stdout), Arc::clone(&settings.stderr));
+		let mut limits = StoreLimitsBuilder::new();
+		if let Some(max_mem) = settings.max_memory_bytes {
+			limits = limits.memory_size(max_mem);
+		}
+		let store_data = StoreData {
+			wasi,
+			table,
+			net,
+			limiter: limits.build(),
+			deadline: None,
+		};
+		let mut store = Store::new(linked.instance_pre.engine(), store_data);
+		store.limiter(|data| &mut data.limiter);
+		let epoch_counter = Arc::clone(self.engines.epoch_counter());
+		if settings.strict_timeout {
+			crate::epoch::yield_until_deadline(&mut store, Arc::clone(&epoch_counter), |data| {
+				data.deadline
+			});
+		}
+		let remaining = deadline.map(|d| d.saturating_duration_since(Instant::now()));
+		let limit = crate::controller::effective_timeout(remaining, settings.max_execution_time);
+		store.data_mut().deadline =
+			limit.map(|limit| crate::epoch::deadline_after(&epoch_counter, limit));
 
-		tracing::debug!(
-			elapsed = ?t2.elapsed(),
-			has_invoke = true,
-			has_args = args_fn.is_some(),
-			has_returns = returns_fn.is_some(),
-			has_list = list_fn.is_some(),
-			has_writeable = writeable_fn.is_some(),
-			has_declares_tx = declares_tx_fn.is_some(),
-			has_comment = comment_fn.is_some(),
-			has_init = init_fn.is_some(),
-			"new_controller: export lookup"
-		);
-		tracing::info!(elapsed = ?t0.elapsed(), "new_controller: total");
+		let instance = linked.instance_pre.instantiate_async(&mut store).await.map_err(|e| {
+			if e.downcast_ref::<Trap>() == Some(&Trap::Interrupt) {
+				SurrealismError::Timeout {
+					effective: limit,
+					context_timeout: remaining,
+					module_limit: settings.max_execution_time,
+				}
+			} else {
+				SurrealismError::Instantiation(e)
+			}
+		})?;
+
+		let exports = &linked.exports;
+		let invoke_fn = instance.get_func(&mut store, exports.invoke).ok_or_else(|| {
+			SurrealismError::Other(anyhow::anyhow!(
+				"the component's 'invoke' export is not a function"
+			))
+		})?;
+		let mut func = |index: Option<component::ComponentExportIndex>| {
+			index.and_then(|index| instance.get_func(&mut store, index))
+		};
+		let args_fn = func(exports.args);
+		let returns_fn = func(exports.returns);
+		let list_fn = func(exports.list);
+		let writeable_fn = func(exports.writeable);
+		let declares_tx_fn = func(exports.declares_tx);
+		let comment_fn = func(exports.comment);
 
 		Ok(Controller::new(
 			store,
@@ -550,10 +500,92 @@ impl Runtime {
 			writeable_fn,
 			declares_tx_fn,
 			comment_fn,
-			init_fn,
-			self.module_execution_time,
-			Arc::clone(self.engine_handle.epoch_counter()),
-			controller_slot,
+			settings.max_execution_time,
+			epoch_counter,
+			slot,
 		))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::time::Duration;
+
+	use web_time::Instant;
+
+	use super::{InstanceSettings, Runtime};
+	use crate::epoch::{EngineSettings, engines};
+
+	/// Instantiating runs a core module's `start` function, and that is
+	/// bounded by the execution time limit like any other guest code.
+	#[tokio::test(flavor = "current_thread")]
+	async fn a_start_function_is_bounded_by_the_deadline() {
+		let engines = engines(EngineSettings {
+			max_concurrent_invocations: 2,
+			max_memory_bytes: Some(1 << 20),
+		});
+		let mut config = crate::package_config::PackageConfig::parse(
+			"[package]\norganisation = \"t\"\nname = \"spin\"\nversion = \"1.0.0\"\n",
+		)
+		.unwrap()
+		.into_config();
+		config.abi = crate::config::AbiVersion::CURRENT;
+		let package = crate::package::SurrealismPackage {
+			config,
+			wasm: br#"(component
+				(core module $m
+					(func $spin (loop br 0))
+					(start $spin)
+					(func (export "f")))
+				(core instance $i (instantiate $m))
+				(func (export "invoke") (canon lift (core func $i "f"))))"#
+				.to_vec(),
+			exports: crate::exports::ExportsManifest::empty(),
+			fs: None,
+			logo: None,
+			manifest: None,
+			signature: None,
+		};
+		let runtime = Runtime::new(package, engines).expect("compiles");
+		let settings = InstanceSettings {
+			max_execution_time: Some(Duration::from_millis(100)),
+			..InstanceSettings::local()
+		};
+		let start = Instant::now();
+		let err = runtime.instantiate(&settings, None, None).await.expect_err("times out");
+		assert!(matches!(err, crate::SurrealismError::Timeout { .. }), "{err}");
+		assert!(start.elapsed() < Duration::from_secs(5));
+
+		// The caller's deadline bounds it too.
+		let settings = InstanceSettings::local();
+		let deadline = Instant::now() + Duration::from_millis(100);
+		let err =
+			runtime.instantiate(&settings, None, Some(deadline)).await.expect_err("times out");
+		assert!(matches!(err, crate::SurrealismError::Timeout { .. }), "{err}");
+	}
+
+	/// A component that still exports `init` was not pre-initialised by
+	/// `surreal extension build`, and is refused before anything runs.
+	#[test]
+	fn a_component_exporting_init_is_refused() {
+		let engines = engines(EngineSettings {
+			max_concurrent_invocations: 1,
+			max_memory_bytes: Some(1 << 20),
+		});
+		let engine = engines.engine(true).expect("engine");
+		let component = |export: &str| {
+			format!(
+				r#"(component
+					(core module $m (func (export "f")))
+					(core instance $i (instantiate $m))
+					(func (export "{export}") (canon lift (core func $i "f"))))"#
+			)
+		};
+		let err = Runtime::build(&engine, component("init").as_bytes()).err().expect("refused");
+		assert!(err.to_string().contains("surreal extension build"), "{err}");
+		// The same component under another export name gets past the check
+		// and fails only where it lacks what a module needs.
+		let other = Runtime::build(&engine, component("other").as_bytes());
+		assert!(other.err().is_none_or(|e| !e.to_string().contains("`init`")));
 	}
 }

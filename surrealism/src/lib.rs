@@ -3,7 +3,7 @@
 //! Compiled into modules that run inside SurrealDB. Provides WIT bindings, the
 //! [`Transaction`] capability handle through which a plugin reaches the host,
 //! and the `#[surrealism]` macro for registering exported functions via
-//! inventory.
+//! inventory. [`register`] adds functions at run time, from `init`.
 //!
 //! There is no async runtime here. A plugin's `async fn` is driven by the
 //! component model itself: `invoke` is lifted async, so the host re-enters the
@@ -28,14 +28,16 @@
 #[allow(clippy::all, unused)]
 pub mod bindings;
 mod dispatch;
+pub mod register;
 pub mod registry;
 pub mod tx;
 
 pub use inventory;
+pub use register::{FunctionMeta, register};
 pub use registry::{SurrealismEntry, SurrealismInit};
 pub use surrealism_macros::surrealism;
 pub use surrealism_types as types;
-pub use tx::{ReadOnly, ReadWrite, Transaction, TxMode};
+pub use tx::{Declared, ReadOnly, ReadWrite, Transaction, TxMode};
 
 inventory::collect!(SurrealismEntry);
 inventory::collect!(SurrealismInit);

@@ -3,16 +3,18 @@ use std::process::Command;
 use std::{fs, mem};
 
 use anyhow::Result;
-use surrealism_runtime::config::{
-	AbiVersion, LEGACY_PACKAGE_FILE, PACKAGE_FILE, PackageFile, SurrealismConfig, Target,
-};
+use surrealism_runtime::PrefixErr;
+use surrealism_runtime::config::{AbiVersion, FsMounts, PACKAGE_FILE, SurrealismConfig, Target};
+use surrealism_runtime::epoch::{EngineSettings, engines};
 use surrealism_runtime::exports::{ExportsManifest, FunctionExport};
 use surrealism_runtime::package::SurrealismPackage;
-use surrealism_runtime::runtime::Runtime;
-use surrealism_runtime::{NetDeny, PrefixErr};
+use surrealism_runtime::package_config::PackageConfig;
+use surrealism_runtime::runtime::{InstanceSettings, Runtime};
 use tempfile::TempDir;
 use wasm_encoder::{ComponentSectionId, Encode, RawSection, Section};
 use wasm_opt::OptimizationOptions;
+
+use super::snapshot;
 
 /// Build a Surrealism WASM module from a Rust project, optimize the binary,
 /// and pack it into a `.surrealism` package file.
@@ -48,8 +50,28 @@ pub async fn init(path: Option<PathBuf>, out: Option<PathBuf>, debug: bool) -> R
 		optimize_component(&compiled)?
 	};
 
-	let fs_dir = resolve_attach_fs(&path, &config)?;
+	let attached = resolve_attach_fs(&path, &config)?;
+	let fs_dir = attached.as_ref().map(AttachedFs::path);
 	let logo = resolve_logo(&path)?;
+
+	// Before anything reads the component back, so the exports manifest is
+	// taken from, and the archive packs, exactly what will run.
+	println!("Pre-initialising...");
+	let wasm = match snapshot::snapshot(&wasm, fs_dir)
+		.await
+		.map_err(|e| anyhow::anyhow!("Failed to pre-initialise the module: {e:#}"))?
+	{
+		Some(snapshot) => {
+			for read in &snapshot.reads {
+				println!(
+					"Note: `init` read {read}. The value is frozen into the module, so every \
+					 invocation sees the same one."
+				);
+			}
+			snapshot.wasm
+		}
+		None => wasm,
+	};
 
 	println!("Extracting function signatures...");
 	let exports = extract_exports(&wasm, &config).await?;
@@ -64,9 +86,8 @@ pub async fn init(path: Option<PathBuf>, out: Option<PathBuf>, debug: bool) -> R
 		signature: None,
 	};
 	let out = resolve_output_path(out, &package.config)?;
-	let digest = package
-		.pack(out.clone(), fs_dir.as_deref())
-		.prefix_err(|| "Failed to pack Surrealism package")?;
+	let digest =
+		package.pack(out.clone(), fs_dir).prefix_err(|| "Failed to pack Surrealism package")?;
 	println!("Packed {} (digest {digest})", out.display());
 
 	Ok(())
@@ -74,9 +95,11 @@ pub async fn init(path: Option<PathBuf>, out: Option<PathBuf>, debug: bool) -> R
 
 /// Instantiate the compiled WASM temporarily to extract function signatures
 /// into an `ExportsManifest`.
+///
+/// `wasm` is the snapshot taken after `init`, so its memory already holds the
+/// functions `init` added with `surrealism::register`, and the introspection
+/// exports list them beside the `#[surrealism]` ones.
 async fn extract_exports(wasm: &[u8], config: &SurrealismConfig) -> Result<ExportsManifest> {
-	use crate::cli::module::host::DemoHost;
-
 	let temp_package = SurrealismPackage {
 		config: config.clone(),
 		wasm: wasm.to_vec(),
@@ -87,13 +110,20 @@ async fn extract_exports(wasm: &[u8], config: &SurrealismConfig) -> Result<Expor
 		signature: None,
 	};
 
-	// A local build, so there is no server deny list to apply.
-	let runtime = Runtime::new(temp_package, 1, None, None, NetDeny::Nothing)?;
+	let runtime = Runtime::new(
+		temp_package,
+		engines(EngineSettings {
+			max_concurrent_invocations: 1,
+			max_memory_bytes: None,
+		}),
+	)?;
 	// Signature extraction only calls the sync introspection exports, which are
-	// lent no transaction, so this context is never asked to serve a host call.
-	let host = DemoHost::new();
-	let mut controller =
-		runtime.new_controller(&host).await.prefix_err(|| "Failed to load WASM module")?;
+	// lent no transaction and need no network. It runs on the guarded engine,
+	// the one `Runtime::new` compiles.
+	let mut controller = runtime
+		.instantiate(&InstanceSettings::local(), None, None)
+		.await
+		.prefix_err(|| "Failed to load WASM module")?;
 
 	let names = controller.list().await.prefix_err(|| "Failed to list functions")?;
 
@@ -141,32 +171,22 @@ async fn extract_exports(wasm: &[u8], config: &SurrealismConfig) -> Result<Expor
 	})
 }
 
-/// Parse the package file from the project directory: `package.toml` if it
-/// exists, otherwise `surrealism.toml`. When both exist, `surrealism.toml` is
-/// not read and a warning names it.
+/// The project's package file ([`PackageConfig::open`]), with a warning
+/// naming a `surrealism.toml` that was not read because a `package.toml`
+/// exists.
 ///
 /// The ABI version is always stamped to `AbiVersion::CURRENT` because the
 /// build toolchain targets the current SDK; user-supplied values are ignored.
 fn load_config(path: &Path) -> Result<SurrealismConfig> {
-	let Some(package) = PackageFile::locate(path) else {
-		anyhow::bail!(
-			"Neither {PACKAGE_FILE} nor {LEGACY_PACKAGE_FILE} found in {}",
-			path.display()
-		);
-	};
-	if let Some(ignored) = &package.ignored {
+	let mut package = PackageConfig::open(path)?;
+	if let Some(ignored) = package.ignored() {
 		eprintln!(
 			"Warning: ignoring {} because {PACKAGE_FILE} is present; remove it to silence this warning",
 			ignored.display()
 		);
 	}
-
-	let file_name = package.path.file_name().unwrap_or_default().to_string_lossy();
-	let mut config = SurrealismConfig::parse(
-		&fs::read_to_string(&package.path).prefix_err(|| format!("Failed to read {file_name}"))?,
-	)?;
-	config.abi = AbiVersion::CURRENT;
-	Ok(config)
+	package.set_abi(AbiVersion::CURRENT);
+	Ok(package.into_config())
 }
 
 /// Verify that the project's resolved `surrealism` crate version is compatible
@@ -448,42 +468,91 @@ fn resolve_logo(project_root: &Path) -> Result<Option<Vec<u8>>> {
 	Ok(Some(bytes))
 }
 
-/// Resolve the `[attach] fs` directory path from the config.
+/// The directory packed as `surrealism/fs/`: the root mount's directory
+/// itself when it is the only mount, or a temporary directory holding every
+/// mount at its guest path.
+enum AttachedFs {
+	Dir(PathBuf),
+	Assembled(TempDir),
+}
+
+impl AttachedFs {
+	fn path(&self) -> &Path {
+		match self {
+			Self::Dir(dir) => dir,
+			Self::Assembled(dir) => dir.path(),
+		}
+	}
+}
+
+/// The `[attach] fs` mounts, resolved against `project_root` and assembled
+/// into one directory. `None` when nothing is attached.
 ///
-/// Returns `Some(path)` when a filesystem directory should be bundled, or
-/// `None` when no `[attach] fs` is configured.
-fn resolve_attach_fs(project_root: &Path, config: &SurrealismConfig) -> Result<Option<PathBuf>> {
-	let Some(ref fs_value) = config.attach.fs else {
+/// A mount whose guest path already exists in a mount above it is refused,
+/// so no file is silently shadowed.
+fn resolve_attach_fs(project_root: &Path, config: &SurrealismConfig) -> Result<Option<AttachedFs>> {
+	let Some(mounts) = &config.attach.fs else {
 		return Ok(None);
 	};
-
-	if fs_value.is_empty() {
-		return Ok(None);
+	let mut resolved = Vec::new();
+	for (guest, local) in mounts.iter() {
+		if local.is_empty() {
+			continue;
+		}
+		let local_path = PathBuf::from(local);
+		let dir = if local_path.is_absolute() {
+			local_path
+		} else {
+			project_root.join(&local_path)
+		};
+		if !dir.is_dir() {
+			anyhow::bail!(
+				"Attached filesystem directory for {guest} not found: {local} (resolved to {})",
+				dir.display()
+			);
+		}
+		resolved.push((guest, dir));
 	}
-
-	let fs_path = PathBuf::from(fs_value);
-	let resolved = if fs_path.is_absolute() {
-		fs_path
-	} else {
-		project_root.join(&fs_path)
-	};
-
-	if !resolved.exists() {
-		anyhow::bail!(
-			"Attached filesystem directory not found: {} (resolved to {})",
-			fs_value,
-			resolved.display()
-		);
+	match resolved.as_slice() {
+		[] => return Ok(None),
+		[(guest, dir)] if *guest == FsMounts::ROOT => {
+			return Ok(Some(AttachedFs::Dir(dir.clone())));
+		}
+		_ => {}
 	}
-	if !resolved.is_dir() {
-		anyhow::bail!(
-			"Attached filesystem path is not a directory: {} (resolved to {})",
-			fs_value,
-			resolved.display()
-		);
+	let assembled = TempDir::new().prefix_err(|| "Failed to create a directory for the mounts")?;
+	for (guest, dir) in resolved {
+		let target = assembled.path().join(guest.trim_start_matches('/'));
+		if guest != FsMounts::ROOT && target.exists() {
+			anyhow::bail!(
+				"The mount at {guest} collides with {guest} inside a mount above it; mount it \
+				 elsewhere or remove that directory"
+			);
+		}
+		copy_dir(&dir, &target)?;
 	}
+	Ok(Some(AttachedFs::Assembled(assembled)))
+}
 
-	Ok(Some(resolved))
+/// Copy the directory `from` into `to`, following symbolic links as packing
+/// does.
+fn copy_dir(from: &Path, to: &Path) -> Result<()> {
+	fs::create_dir_all(to).prefix_err(|| format!("Failed to create {}", to.display()))?;
+	for entry in fs::read_dir(from).prefix_err(|| format!("Failed to read {}", from.display()))? {
+		let entry = entry.prefix_err(|| format!("Failed to read {}", from.display()))?;
+		let source = entry.path();
+		let target = to.join(entry.file_name());
+		if fs::metadata(&source)
+			.prefix_err(|| format!("Failed to read {}", source.display()))?
+			.is_dir()
+		{
+			copy_dir(&source, &target)?;
+		} else {
+			fs::copy(&source, &target)
+				.prefix_err(|| format!("Failed to copy {}", source.display()))?;
+		}
+	}
+	Ok(())
 }
 
 /// Resolve the output path for the `.surrealism` package, defaulting to
@@ -524,7 +593,11 @@ mod tests {
 	#[test]
 	fn load_config_surrealism_toml_only() {
 		let dir = tempfile::tempdir().unwrap();
-		fs::write(dir.path().join(LEGACY_PACKAGE_FILE), package_toml("legacy")).unwrap();
+		fs::write(
+			dir.path().join(surrealism_runtime::config::LEGACY_PACKAGE_FILE),
+			package_toml("legacy"),
+		)
+		.unwrap();
 		let config = load_config(dir.path()).unwrap();
 		assert_eq!(config.meta.name, "legacy");
 	}
@@ -534,9 +607,36 @@ mod tests {
 		let dir = tempfile::tempdir().unwrap();
 		fs::write(dir.path().join(PACKAGE_FILE), package_toml("current")).unwrap();
 		// Unparseable, so the test fails if `load_config` reads it.
-		fs::write(dir.path().join(LEGACY_PACKAGE_FILE), "not toml [").unwrap();
+		fs::write(dir.path().join(surrealism_runtime::config::LEGACY_PACKAGE_FILE), "not toml [")
+			.unwrap();
 		let config = load_config(dir.path()).unwrap();
 		assert_eq!(config.meta.name, "current");
+	}
+
+	#[test]
+	fn mounts_are_assembled_at_their_guest_paths() {
+		let dir = tempfile::tempdir().unwrap();
+		fs::create_dir_all(dir.path().join("fs/static")).unwrap();
+		fs::write(dir.path().join("fs/static/a.txt"), "a").unwrap();
+		fs::create_dir_all(dir.path().join("models")).unwrap();
+		fs::write(dir.path().join("models/m.bin"), "m").unwrap();
+		let mut package = PackageConfig::open({
+			fs::write(dir.path().join(PACKAGE_FILE), package_toml("mounts")).unwrap();
+			dir.path()
+		})
+		.unwrap();
+		package.add_fs("fs", "/").unwrap();
+		let only_root = resolve_attach_fs(dir.path(), package.config()).unwrap().unwrap();
+		assert!(matches!(only_root, AttachedFs::Dir(_)));
+
+		package.add_fs("models", "/data/models").unwrap();
+		let both = resolve_attach_fs(dir.path(), package.config()).unwrap().unwrap();
+		assert_eq!(fs::read_to_string(both.path().join("static/a.txt")).unwrap(), "a");
+		assert_eq!(fs::read_to_string(both.path().join("data/models/m.bin")).unwrap(), "m");
+
+		package.add_fs("models", "/static").unwrap();
+		let err = resolve_attach_fs(dir.path(), package.config()).err().unwrap();
+		assert!(err.to_string().contains("collides"), "{err}");
 	}
 
 	#[test]

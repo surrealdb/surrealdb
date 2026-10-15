@@ -1,4 +1,4 @@
-use quote::{format_ident, quote};
+use quote::{format_ident, quote, quote_spanned};
 
 /// Encode a name for use in a Rust identifier. Escapes `_` and `::`
 /// to avoid collisions:
@@ -141,6 +141,12 @@ pub(crate) fn generate_registration_body(
 			Some(s) => quote! { Some(#s) },
 		};
 
+		// Spanned at the function name, so `line!()` reports the definition
+		// rather than the attribute.
+		let location_expr = quote_spanned! {fn_name.span()=>
+			::core::concat!(::core::file!(), ":", ::core::line!())
+		};
+
 		let wire_name_strs = arg_wire_names.iter().map(|n| n.as_str()).collect::<Vec<_>>();
 
 		let arg_sentinels = generate_arg_sentinels(export_name, arg_wire_names, gates);
@@ -193,6 +199,7 @@ pub(crate) fn generate_registration_body(
 			surrealism::inventory::submit!(surrealism::SurrealismEntry {
 				name: #name_expr,
 				comment: #comment_expr,
+				location: #location_expr,
 				invoke: #invoke_ident,
 				args: #args_ident,
 				returns: #returns_ident,

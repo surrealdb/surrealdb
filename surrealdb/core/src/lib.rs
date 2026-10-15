@@ -52,7 +52,7 @@ mod ddl;
 #[doc(hidden)]
 pub mod doc;
 mod exe;
-mod extension;
+pub mod extension;
 #[cfg(test)]
 mod fmt_roundtrip_test;
 mod fnc;
@@ -60,6 +60,7 @@ pub(crate) mod key;
 mod lq;
 #[cfg(feature = "surrealism")]
 mod surrealism;
+
 mod sys;
 
 pub mod api;

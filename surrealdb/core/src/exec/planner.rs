@@ -1350,7 +1350,7 @@ impl<'ctx> Planner<'ctx> {
 		let executable: ModuleExecutable = val.executable.clone().into();
 		// The planner's self.ctx does not carry a transaction (the executor
 		// sets it after planning). Derive a context with the planner's txn
-		// so that a cache-miss in get_surrealism_runtime can access the
+		// so that a cache-miss in get_surrealism_module can access the
 		// bucket store without panicking.
 		let mut plan_ctx = Context::new_child(&self.ctx);
 		plan_ctx.set_transaction(Arc::clone(txn));

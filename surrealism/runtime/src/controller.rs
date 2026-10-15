@@ -2,32 +2,29 @@
 
 use std::fmt;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use surrealism_types::args::Args;
 use surrealism_types::err::{SurrealismError, SurrealismResult};
-use tokio::sync::OwnedSemaphorePermit;
 use wasmtime::component::Resource;
 use wasmtime::*;
-use web_time::Instant;
 
-use crate::epoch::EPOCH_TICK_MS;
 use crate::host::{InvocationContext, Transaction};
 use crate::store::StoreData;
 
-fn effective_timeout(
+pub(crate) fn effective_timeout(
 	context_remaining: Option<Duration>,
 	module_limit: Option<Duration>,
 ) -> Option<Duration> {
 	[context_remaining, module_limit].into_iter().flatten().min()
 }
 
-/// Per-execution controller. Not thread-safe — use one at a time.
+/// One instance of a component, serving one invocation.
 ///
-/// Reusable across invocations: the controller holds no request state, because
-/// host access is granted per call by the `transaction` handle `invoke` lends.
-/// WASM linear memory persists between calls, so Rust statics survive.
+/// Created fresh from the component's `InstancePre` and dropped when the
+/// invocation returns, which hands its pool slot back with its memory reset to
+/// the module's image. Nothing it wrote — linear memory, globals, tables, the
+/// WASI resource table — survives it. Not thread-safe; use one at a time.
 pub struct Controller {
 	store: Store<StoreData>,
 	invoke_fn: component::Func,
@@ -43,22 +40,15 @@ pub struct Controller {
 	declares_tx_fn: Option<component::Func>,
 	/// Only present when the module exports the `function-comment` function.
 	comment_fn: Option<component::Func>,
-	init_fn: Option<component::Func>,
-	/// Effective execution time limit from module config + server cap (without
-	/// context timeout, which varies per invocation).
+	/// The execution time limit this invocation was granted, without the
+	/// caller's remaining query time, which is applied per call.
 	module_execution_time: Option<Duration>,
-	/// Shared epoch counter from the global engine, used to compute safe epoch deltas.
+	/// Shared epoch counter from the engine pool, used to compute safe epoch deltas.
 	epoch_counter: Arc<std::sync::atomic::AtomicU64>,
-	/// While [`None`], this controller is idle in the pool and does **not** consume a slot on
-	/// [`Runtime`](crate::runtime::Runtime)'s controller semaphore. While [`Some`], the permit
-	/// counts toward the concurrent-instance cap.
-	controller_slot: Option<OwnedSemaphorePermit>,
-	/// Sockets open in the store's resource table when this controller was
-	/// clean — after instantiation and `init`, before any invocation.
-	///
-	/// Set by [`Self::mark_resource_baseline`] and compared by
-	/// [`Self::retains_guest_resources`].
-	socket_baseline: usize,
+	/// The invocation slot this instance occupies, released on drop. `None`
+	/// for an instance created outside the slot accounting, such as the build
+	/// tool's.
+	_slot: Option<crate::epoch::SlotPermit>,
 }
 
 impl fmt::Debug for Controller {
@@ -78,10 +68,9 @@ impl Controller {
 		writeable_fn: Option<component::Func>,
 		declares_tx_fn: Option<component::Func>,
 		comment_fn: Option<component::Func>,
-		init_fn: Option<component::Func>,
 		module_execution_time: Option<Duration>,
 		epoch_counter: Arc<std::sync::atomic::AtomicU64>,
-		controller_slot: OwnedSemaphorePermit,
+		slot: Option<crate::epoch::SlotPermit>,
 	) -> Self {
 		Self {
 			store,
@@ -92,141 +81,22 @@ impl Controller {
 			writeable_fn,
 			declares_tx_fn,
 			comment_fn,
-			init_fn,
 			module_execution_time,
 			epoch_counter,
-			controller_slot: Some(controller_slot),
-			socket_baseline: 0,
+			_slot: slot,
 		}
 	}
 
-	/// Record how many sockets are open once instantiation and `init` are done
-	/// and before any invocation runs.
-	pub(crate) fn mark_resource_baseline(&mut self) {
-		self.socket_baseline = self.open_sockets();
+	/// Trap the next call `timeout` from now, or never for `None`. Takes
+	/// effect on the guarded engine only; the fast engine has no epoch checks.
+	fn set_deadline(&mut self, timeout: Option<Duration>) {
+		let deadline = timeout.map(|t| crate::epoch::deadline_after(&self.epoch_counter, t));
+		self.store.data_mut().deadline = deadline;
 	}
 
-	/// Whether the guest left a socket open in the store's table.
-	///
-	/// A controller is shared by every caller on its namespace and database,
-	/// and linear memory is deliberately preserved across them. An open socket
-	/// is different: a guest that connects during one caller's invocation,
-	/// keeps the handle index in linear memory and never drops it could read
-	/// and write that still-open connection during the next caller's query,
-	/// with whatever it buffered still there. So a controller that ends an
-	/// invocation holding a socket it did not start with is retired rather than
-	/// pooled.
-	///
-	/// Sockets specifically, not table occupancy: WASI pushes the stdio streams
-	/// and the instance network into this same table lazily, on first guest
-	/// use, and never drops them — so a module that merely prints would look
-	/// like it was leaking for ever after, and would never be pooled again.
-	/// Counting is also blind to net-zero churn, where a guest drops one entry
-	/// and opens a socket in the same invocation. A socket's own streams are
-	/// pushed as its children and cannot outlive it, so the socket is the whole
-	/// anchor.
-	///
-	/// The table's occupancy is bounded separately, by its maximum capacity.
-	pub(crate) fn retains_guest_resources(&mut self) -> bool {
-		self.open_sockets() > self.socket_baseline
-	}
-
-	fn open_sockets(&mut self) -> usize {
-		self.store
-			.data_mut()
-			.table
-			.iter_mut()
-			.filter(|entry| {
-				entry.is::<wasmtime_wasi::sockets::TcpSocket>()
-					|| entry.is::<wasmtime_wasi::sockets::UdpSocket>()
-			})
-			.count()
-	}
-
-	/// Attach a semaphore permit after taking this controller from the idle pool.
-	pub(crate) fn attach_controller_slot(&mut self, permit: OwnedSemaphorePermit) {
-		debug_assert!(self.controller_slot.is_none(), "controller already holds a slot permit");
-		self.controller_slot = Some(permit);
-	}
-
-	/// Remove and return the slot permit so the controller can sit in the pool without holding
-	/// capacity on the runtime semaphore.
-	pub(crate) fn take_controller_slot(&mut self) -> Option<OwnedSemaphorePermit> {
-		self.controller_slot.take()
-	}
-
-	/// Point the WASI stdio callbacks at this request's logging path, so guest
-	/// `println!` output is attributed to the right module, namespace and
-	/// database. Unlike `sql`/`run`, stdio has no handle to hang off:
-	/// `wasi:cli/stdout` is ambient, so it is still swapped per request.
-	pub fn set_stdio(&mut self, context: &dyn InvocationContext) {
-		let data = self.store.data_mut();
-		*data.stdout_cb.lock() = context.stdout_callback();
-		*data.stderr_cb.lock() = context.stderr_callback();
-	}
-
-	/// Reset WASI stdio to the host defaults. Called before returning a
-	/// controller to the pool so no per-request logging context is retained.
-	pub fn clear_stdio(&mut self) {
-		let data = self.store.data_mut();
-		*data.stdout_cb.lock() = Arc::new(|output| print!("{}", output));
-		*data.stderr_cb.lock() = Arc::new(|output| eprint!("{}", output));
-	}
-
-	/// Reset the epoch deadline to the maximum safe value. Wasmtime internally
-	/// computes `current_epoch + delta` with wrapping arithmetic, so passing
-	/// `u64::MAX` overflows once the epoch advances past 0. We subtract the
-	/// shadow counter (always >= engine epoch thanks to the ticker thread
-	/// increment ordering) plus a small margin so that a concurrent tick
-	/// between the load and the `set_epoch_deadline` call cannot overflow.
-	pub fn reset_epoch_deadline(&mut self) {
-		let epoch = self.epoch_counter.load(Ordering::Acquire);
-		self.store.set_epoch_deadline(u64::MAX.saturating_sub(epoch).saturating_sub(1));
-	}
-
-	/// Apply the module-level execution time limit as an epoch deadline.
-	/// If no limit is configured, resets to the maximum safe value.
+	/// Apply the module-level execution time limit as the deadline.
 	fn apply_module_deadline(&mut self) {
-		match self.module_execution_time {
-			Some(timeout) => {
-				let ticks = (timeout.as_millis() as u64) / EPOCH_TICK_MS;
-				self.store.set_epoch_deadline(ticks.max(1));
-			}
-			None => self.reset_epoch_deadline(),
-		}
-	}
-
-	#[tracing::instrument(skip_all)]
-	pub async fn init(&mut self) -> SurrealismResult<()> {
-		let t0 = Instant::now();
-		let Some(func) = self.init_fn else {
-			tracing::debug!("controller.init(): no init_fn, skipping");
-			return Ok(());
-		};
-		self.apply_module_deadline();
-		tracing::info!(
-			module_execution_time = ?self.module_execution_time,
-			"controller.init(): calling init function..."
-		);
-		let typed = func.typed::<(), (Result<(), String>,)>(&self.store)?;
-		match typed.call_async(&mut self.store, ()).await {
-			Ok((result,)) => {
-				tracing::info!(elapsed = ?t0.elapsed(), ok = result.is_ok(), "controller.init(): completed");
-				result.map_err(SurrealismError::FunctionCallError)
-			}
-			Err(e) => {
-				if e.downcast_ref::<Trap>() == Some(&Trap::Interrupt) {
-					tracing::error!(elapsed = ?t0.elapsed(), "controller.init(): timed out");
-					return Err(SurrealismError::Timeout {
-						effective: self.module_execution_time,
-						context_timeout: None,
-						module_limit: self.module_execution_time,
-					});
-				}
-				tracing::error!(elapsed = ?t0.elapsed(), error = %e, "controller.init(): WASM TRAP");
-				Err(e.into())
-			}
-		}
+		self.set_deadline(self.module_execution_time);
 	}
 
 	#[tracing::instrument(skip_all, fields(name))]
@@ -258,15 +128,7 @@ impl Controller {
 		let display_name = name.as_deref().unwrap_or("<default>");
 		let effective = effective_timeout(context_timeout, self.module_execution_time);
 
-		match effective {
-			Some(timeout) => {
-				let ticks = (timeout.as_millis() as u64) / EPOCH_TICK_MS;
-				self.store.set_epoch_deadline(ticks.max(1));
-			}
-			None => {
-				self.reset_epoch_deadline();
-			}
-		}
+		self.set_deadline(effective);
 
 		let args_values = args.to_values();
 		let args_bytes = surrealdb_types::encode_value_list(&args_values)?;
@@ -317,15 +179,14 @@ impl Controller {
 		};
 
 		// Revoke it before anything else can observe the result, including on the
-		// trap path. A retained handle then refers to nothing and traps on use.
+		// trap path. A retained handle then refers to nothing and traps on use;
+		// within a batch, the next row is lent a handle of its own.
 		//
 		// Logged rather than propagated: the delete can fail for reasons that say
 		// nothing about the call — the destructor already removed the entry, or
 		// borrow accounting still holds a child after an async-lifted `invoke`
 		// unwinds. Letting that replace `call_result` would throw away the
-		// `Trap`/`Timeout` the caller needs, and `run_on_runtime` would then read
-		// the generic error as "not a trap" and return a trapped component to the
-		// pool, where every later invocation fails with `CannotEnterComponent`.
+		// `Trap`/`Timeout` the caller needs.
 		if let Some(rep) = owned
 			&& let Err(e) = self.store.data_mut().table.delete(rep)
 		{

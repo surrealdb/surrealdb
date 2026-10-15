@@ -168,9 +168,9 @@ fn test_none_value() -> Result<Vec<surrealdb_types::Value>> {
 	Ok(vec![surrealdb_types::Value::None])
 }
 
-/// Mutable state in linear memory, shared by every invocation that reaches the
-/// same instance pool. A module is cached per namespace/database, so two
-/// tenants loading the same package must not observe each other's writes.
+/// Mutable state in linear memory. Every invocation starts from the module's
+/// initial image, so a write here is visible to nothing after the invocation
+/// that made it — not a later call, and not another tenant.
 static TENANT_STATE: AtomicI64 = AtomicI64::new(0);
 
 /// Store a value in linear memory and return the value it replaced.
@@ -179,16 +179,74 @@ fn set_state(value: i64) -> i64 {
 	TENANT_STATE.swap(value, Ordering::SeqCst)
 }
 
-/// Read back whatever `set_state` last stored for this instance pool.
+/// Read back whatever `set_state` stored earlier in this invocation.
 #[surrealism]
 fn get_state() -> i64 {
 	TENANT_STATE.load(Ordering::SeqCst)
 }
 
+static HITS: AtomicI64 = AtomicI64::new(0);
+
+/// Count a call and return how many came before it in this memory. Fresh
+/// memory per invocation makes that zero every time.
+#[surrealism]
+fn hit() -> i64 {
+	HITS.fetch_add(1, Ordering::SeqCst)
+}
+
+/// Call `hit` through the host, as an extension calling an extension.
+#[surrealism]
+async fn nested_hit(tx: Transaction) -> Result<i64> {
+	tx.run("ext::demo::hit", ()).await
+}
+
+/// Call itself through the host `depth` times, and return how deep it got.
+#[surrealism]
+async fn recurse(tx: Transaction, depth: i64) -> Result<i64> {
+	if depth <= 0 {
+		return Ok(0);
+	}
+	let inner: i64 = tx.run("ext::demo::recurse", (depth - 1,)).await?;
+	Ok(inner + 1)
+}
+
+/// Fetch a Pokémon through `fetch_pokemon` of the extension named `ext`,
+/// called through the host: an extension calling another one that may reach
+/// the network when the caller may not.
+#[surrealism]
+async fn fetch_via(tx: Transaction, ext: String, api_base: String, name: String) -> Result<String> {
+	tx.run(format!("ext::{ext}::fetch_pokemon"), (api_base, name)).await
+}
+
+/// Allocate `mib` MiB, touch every page, and return how many bytes it holds:
+/// for a definition's `memory` limit to stop.
+#[surrealism]
+fn allocate(mib: i64) -> Result<i64> {
+	let bytes = usize::try_from(mib)? * 1024 * 1024;
+	let mut held = vec![0u8; bytes];
+	for page in held.chunks_mut(64 * 1024) {
+		page[0] = 1;
+	}
+	Ok(held.iter().map(|b| i64::from(*b)).sum::<i64>() * 64 * 1024)
+}
+
+/// Busy-loop for `millis` milliseconds, reading only the clock, and return
+/// how many rounds it ran: for a definition's `timeout` to stop.
+#[surrealism]
+fn spin(millis: i64) -> Result<i64> {
+	let until =
+		std::time::Instant::now() + std::time::Duration::from_millis(u64::try_from(millis)?);
+	let mut rounds = 0i64;
+	while std::time::Instant::now() < until {
+		rounds = rounds.wrapping_add(1);
+	}
+	Ok(rounds)
+}
+
 static GREETING_CACHE: OnceLock<String> = OnceLock::new();
 
 #[surrealism(init)]
-fn init_greeting() -> Result<()> {
+fn init() -> Result<()> {
 	GREETING_CACHE.get_or_init(|| match std::fs::read_to_string("/greeting.txt") {
 		Ok(content) => content,
 		Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -200,7 +258,75 @@ fn init_greeting() -> Result<()> {
 			"Hello".to_string()
 		}
 	});
-	Ok(())
+	register_functions()
+}
+
+// ---------------------------------------------------------------------------
+// Functions registered at run time, from `init`
+// ---------------------------------------------------------------------------
+
+/// Add functions that have no `#[surrealism]` definition.
+///
+/// An engine that compiles scripts from the attached filesystem registers its
+/// functions this way. They appear in `exports.toml` and are called exactly
+/// like the macro's: `mod::demo::registered::shout('hi')`.
+fn register_functions() -> Result<()> {
+	use surrealdb_types::{Kind, Value};
+	use surrealism::{FunctionMeta, register};
+
+	fn one_string(args: &[Value]) -> Result<String> {
+		match args {
+			[Value::String(s)] => Ok(s.clone()),
+			_ => anyhow::bail!("expected one string argument"),
+		}
+	}
+
+	register(
+		Some("registered::shout"),
+		FunctionMeta {
+			args: vec![("text".into(), Kind::String)],
+			returns: Kind::String,
+			comment: Some("Upper-case a string.".into()),
+			..Default::default()
+		},
+		|_tx, args| async move { Ok(Value::String(one_string(&args)?.to_uppercase())) },
+	)?;
+
+	// Declares a writeable transaction, so the host lends one without the
+	// read-only frame.
+	register(
+		Some("registered::add_note"),
+		FunctionMeta {
+			args: vec![("text".into(), Kind::String)],
+			returns: Kind::Any,
+			writeable: true,
+			declares_transaction: true,
+			comment: Some("Store a note and return it.".into()),
+		},
+		|tx, args| async move {
+			let tx = tx.ok_or_else(|| anyhow::anyhow!("no transaction"))?;
+			let text = one_string(&args)?;
+			tx.sql_with_vars(
+				"CREATE ONLY note SET text = $text RETURN VALUE text",
+				[("text", text)],
+			)
+			.await
+		},
+	)?;
+
+	// Declares a read-only transaction, so the host refuses the write.
+	register(
+		Some("registered::sneaky_write"),
+		FunctionMeta {
+			returns: Kind::Any,
+			declares_transaction: true,
+			..Default::default()
+		},
+		|tx, _args| async move {
+			let tx = tx.ok_or_else(|| anyhow::anyhow!("no transaction"))?;
+			tx.sql("CREATE note SET text = 'mallory'").await
+		},
+	)
 }
 
 #[surrealism]
@@ -256,7 +382,7 @@ async fn async_result(should_fail: bool) -> Result<String> {
 ///
 /// `api_base` may name a host rather than an address: the guest resolves it
 /// through `wasi:sockets/ip-name-lookup`, which the host filters against the
-/// extension's `allow_net`. Add the host to `allow_net` in `package.toml`.
+/// definition's `CAPABILITIES { net: [...] }`.
 #[surrealism]
 async fn fetch_pokemon(api_base: String, name: String) -> Result<String> {
 	let url = url::Url::parse(&format!(

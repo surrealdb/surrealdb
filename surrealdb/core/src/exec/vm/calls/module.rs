@@ -82,7 +82,7 @@ pub(crate) async fn read_module(
 
 /// An export of a module, resolved against the context a call runs in: the
 /// module's executable, the `DIGEST` and `SIGNER` its archive is checked
-/// against, and the export's signature.
+/// against, its `CAPABILITIES`, and the export's signature.
 #[cfg(feature = "surrealism")]
 pub(crate) struct ModuleExport {
 	executable: crate::expr::module::ModuleExecutable,
@@ -204,9 +204,18 @@ pub(crate) async fn run_module_export(
 	// runs, whether or not the module reads it.
 	let doc = ctx.value_in_scope().read()?.map(|v| CursorDoc::new(None, v.clone()));
 
+	// `module_export` refuses a definition without CAPABILITIES.
+	let capabilities = export
+		.definition
+		.capabilities
+		.as_ref()
+		.ok_or_else(|| anyhow::anyhow!("The extension `{fnc_name}` records no CAPABILITIES"))?;
 	let result = crate::fnc::module::module_executable_run(
 		&export.executable,
-		export.trust(),
+		crate::fnc::module::CalledDefinition {
+			trust: export.trust(),
+			capabilities,
+		},
 		ctx.exec_ctx.ctx(),
 		&opt,
 		doc.as_ref(),

@@ -10,12 +10,18 @@
 //!   [`ssh`];
 //! - `--bundle`: a Sigstore bundle made elsewhere (for example by cosign) over the extracted
 //!   `MANIFEST`, checked against this archive's digest.
+//!
+//! Whatever the source, the signature must claim the `[signer]` the archive's
+//! own `package.toml` names, or nothing is written; see [`signer`]. Keyless
+//! signing also checks the CI identity token before it asks Fulcio for a
+//! certificate, so a job that is not the signer leaves no log entry.
 
 mod archive;
 mod bundle;
 #[cfg(test)]
 mod crosscheck;
 mod keyless;
+mod signer;
 mod ssh;
 mod trusted_root;
 
@@ -115,12 +121,13 @@ async fn sign(
 ) -> Result<String> {
 	let manifest = archive::read_manifest(input)?;
 	archive::check_files(input, &manifest)?;
+	let expected = signer::of_archive(input)?;
 	let root = match root {
 		Some(root) => Some(trusted_root::load(root).await?),
 		None => None,
 	};
 	let signature = match source {
-		Source::Keyless(endpoints) => keyless::sign(&manifest, &endpoints).await?,
+		Source::Keyless(endpoints) => keyless::sign(&manifest, &endpoints, &expected).await?,
 		Source::Key(key) => ssh::sign(key, manifest.as_bytes())?,
 		Source::Bundle(path) => {
 			let bytes = std::fs::read(path)
@@ -132,22 +139,58 @@ async fn sign(
 		Some(root) => trusted_root::seal(root, &manifest.digest().0, &signature)?,
 		None => signature,
 	};
+	signer::ensure_matches(&signature, &expected)?;
 	archive::write_signature(input, output, &manifest, &signature)?;
 	Ok(manifest.digest().to_string())
 }
 
 #[cfg(test)]
 mod tests {
+	use surrealism_runtime::config::{PackageSigner, SshSigner};
+
 	use super::archive::tests::{archive_with_manifest, dump};
 	use super::archive::{MANIFEST_PATH, SIGNATURE_PATH, read_manifest};
 	use super::*;
 
-	fn files() -> Vec<(&'static str, &'static [u8])> {
+	/// The files of an archive whose package names `signer`.
+	fn files(signer: Option<&PackageSigner>) -> Vec<(&'static str, Vec<u8>)> {
+		let mut package = String::from(
+			"[package]\norganisation = \"acme\"\nname = \"color\"\nversion = \"1.0.0\"\n",
+		);
+		match signer {
+			Some(PackageSigner::Ssh(ssh)) => {
+				package.push_str(&format!("[signer.ssh]\npublic_key = \"{}\"\n", ssh.public_key))
+			}
+			Some(PackageSigner::Sigstore(s)) => package.push_str(&format!(
+				"[signer.sigstore]\nissuer = \"{}\"\nidentity = \"{}\"\n",
+				s.issuer, s.identity
+			)),
+			None => {}
+		}
 		vec![
-			("surrealism/mod.wasm", b"\0asm\x0d\0\x01\0"),
-			("surrealism/package.toml", b"[meta]\nname = \"color\"\n"),
-			("surrealism/exports.toml", b"[functions]\n"),
+			("surrealism/mod.wasm", b"\0asm\x0d\0\x01\0".to_vec()),
+			("surrealism/package.toml", package.into_bytes()),
+			("surrealism/exports.toml", b"[functions]\n".to_vec()),
 		]
+	}
+
+	fn borrowed<'a>(files: &'a [(&'static str, Vec<u8>)]) -> Vec<(&'static str, &'a [u8])> {
+		files.iter().map(|(p, b)| (*p, b.as_slice())).collect()
+	}
+
+	fn archive(dir: &Path, signer: Option<&PackageSigner>) -> PathBuf {
+		archive_with_manifest(dir, &borrowed(&files(signer)))
+	}
+
+	fn ssh_signer(key: &Path) -> PackageSigner {
+		let public = std::fs::read_to_string(key.with_extension("pub")).unwrap();
+		PackageSigner::Ssh(SshSigner {
+			public_key: SshSigner::normalise(&public).unwrap(),
+		})
+	}
+
+	fn github() -> PackageSigner {
+		PackageSigner::Sigstore(signer::tests::github())
 	}
 
 	fn signature_of(path: &Path) -> Vec<u8> {
@@ -163,9 +206,9 @@ mod tests {
 			return;
 		}
 		let dir = tempfile::tempdir().unwrap();
-		let pkg = archive_with_manifest(dir.path(), &files());
-		let before = read_manifest(&pkg).unwrap();
 		let key = ssh::tests::generate_key(dir.path());
+		let pkg = archive(dir.path(), Some(&ssh_signer(&key)));
+		let before = read_manifest(&pkg).unwrap();
 
 		let digest = sign(&pkg, &pkg, Source::Key(&key), None).await.unwrap();
 		assert_eq!(digest, before.digest().to_string());
@@ -181,13 +224,57 @@ mod tests {
 		signature_of(&pkg);
 	}
 
+	#[tokio::test]
+	async fn a_key_the_package_does_not_name_is_refused_and_nothing_is_written() {
+		if !ssh::tests::have_ssh_keygen() {
+			eprintln!("skipping: ssh-keygen not on PATH");
+			return;
+		}
+		let dir = tempfile::tempdir().unwrap();
+		let (named_dir, other_dir) = (dir.path().join("named"), dir.path().join("other"));
+		std::fs::create_dir_all(&named_dir).unwrap();
+		std::fs::create_dir_all(&other_dir).unwrap();
+		let named = ssh::tests::generate_key(&named_dir);
+		let other = ssh::tests::generate_key(&other_dir);
+		let pkg = archive(dir.path(), Some(&ssh_signer(&named)));
+		let original = std::fs::read(&pkg).unwrap();
+
+		let err = sign(&pkg, &pkg, Source::Key(&other), None).await.unwrap_err();
+		assert!(err.to_string().contains("[signer.ssh] names"), "{err}");
+		assert_eq!(std::fs::read(&pkg).unwrap(), original);
+	}
+
+	#[tokio::test]
+	async fn a_package_without_a_signer_is_not_signed() {
+		let dir = tempfile::tempdir().unwrap();
+		let pkg = archive(dir.path(), None);
+		let original = std::fs::read(&pkg).unwrap();
+		let err = sign(&pkg, &pkg, Source::Key(Path::new("unused")), None).await.unwrap_err();
+		assert!(err.to_string().contains("surreal extension config signer"), "{err}");
+		assert_eq!(std::fs::read(&pkg).unwrap(), original);
+	}
+
+	#[tokio::test]
+	async fn a_bundle_whose_certificate_cannot_be_read_is_refused() {
+		let dir = tempfile::tempdir().unwrap();
+		let pkg = archive(dir.path(), Some(&github()));
+		let digest = read_manifest(&pkg).unwrap().digest().0;
+		let bundle_path = dir.path().join("bundle.json");
+		std::fs::write(&bundle_path, bundle::tests::cosign_bundle(&digest, &digest)).unwrap();
+		let out = dir.path().join("signed.surli");
+
+		let err = sign(&pkg, &out, Source::Bundle(&bundle_path), None).await.unwrap_err();
+		assert!(err.to_string().contains("claims to come from"), "{err}");
+		assert!(!out.exists());
+	}
+
 	/// An imported bundle is written only with a trusted root whose anchors
 	/// verify it. A cosign-shaped bundle with a dummy signature passes the
 	/// import checks but verifies against no root, so nothing is written.
 	#[tokio::test]
 	async fn an_imported_bundle_that_the_trusted_root_does_not_verify_is_refused() {
 		let dir = tempfile::tempdir().unwrap();
-		let pkg = archive_with_manifest(dir.path(), &files());
+		let pkg = archive(dir.path(), Some(&github()));
 		let original = std::fs::read(&pkg).unwrap();
 		let digest = read_manifest(&pkg).unwrap().digest().0;
 		let bundle_path = dir.path().join("bundle.json");
@@ -212,15 +299,16 @@ mod tests {
 	#[tokio::test]
 	async fn an_archive_whose_files_do_not_match_its_manifest_is_refused() {
 		let dir = tempfile::tempdir().unwrap();
-		let mut listed = files();
-		listed[0].1 = b"\0asm\x0d\0\x01\0 malicious";
+		let mut listed = files(Some(&github()));
+		listed[0].1 = b"\0asm\x0d\0\x01\0 malicious".to_vec();
 		let manifest = surrealism_runtime::manifest::Manifest::from_entries(
 			listed
 				.iter()
 				.map(|(p, b)| (p.to_string(), surrealism_runtime::manifest::Digest::of(b))),
 		)
 		.unwrap();
-		let mut entries = files();
+		let held = files(Some(&github()));
+		let mut entries = borrowed(&held);
 		entries.push((MANIFEST_PATH, manifest.as_bytes()));
 		let pkg = super::archive::tests::write_archive(&dir.path().join("pkg.surli"), &entries);
 		let original = std::fs::read(&pkg).unwrap();
@@ -236,7 +324,7 @@ mod tests {
 	#[tokio::test]
 	async fn a_bundle_for_another_manifest_is_refused_and_nothing_is_written() {
 		let dir = tempfile::tempdir().unwrap();
-		let pkg = archive_with_manifest(dir.path(), &files());
+		let pkg = archive(dir.path(), Some(&github()));
 		let original = std::fs::read(&pkg).unwrap();
 		let bundle_path = dir.path().join("bundle.json");
 		std::fs::write(&bundle_path, bundle::tests::cosign_bundle(&[0x42; 32], &[0x42; 32]))

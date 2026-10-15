@@ -36,7 +36,7 @@ use surrealdb_kvs::value::EncodeContext;
 use surrealdb_kvs::{DestroyRange, DestroyRangeHandle, FeatureLevel, Release, TransactionType};
 use surrealdb_types::{AuthError, Error as TypesError, SurrealValue, object};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, trace, warn};
+use tracing::{debug, error, trace, warn};
 use uuid::Uuid;
 
 use super::tx::Transaction;
@@ -458,10 +458,10 @@ pub struct Datastore {
 	// The surrealism cache
 	#[cfg(feature = "surrealism")]
 	surrealism_cache: Arc<SurrealismCache>,
-	/// When `true`, surrealism modules are loaded lazily on first use
-	/// instead of being eagerly compiled at startup.
+	/// When `true`, extensions are prepared on first invocation instead of
+	/// at startup.
 	#[cfg(feature = "surrealism")]
-	lazy_surrealism: bool,
+	lazy_extensions: bool,
 	/// Post-commit wake-ups shared with every transaction: async event
 	/// processing, and index compaction so the compactor runs on the write
 	/// instead of waiting out its interval.
@@ -613,6 +613,17 @@ pub trait TransactionBuilderFactory: Send + Sync + 'static {
 			Ok(())
 		}
 	}
+
+	/// The runner that executes extensions, used when the builder was given
+	/// none. `None` leaves the datastore without one: definitions are accepted,
+	/// invocations fail.
+	#[cfg(feature = "surrealism")]
+	fn extension_runner(
+		&self,
+		_config: &ConfigMap,
+	) -> Option<Arc<dyn crate::surrealism::runner::ExtensionRunner>> {
+		None
+	}
 }
 
 impl TransactionBuilderFactory for CommunityComposer {
@@ -632,6 +643,15 @@ impl TransactionBuilderFactory for CommunityComposer {
 
 	fn path_valid(&self, v: &str) -> Result<String> {
 		Ok(surrealdb_kvs_any::Backends::community().path_valid(v)?)
+	}
+
+	/// Surrealism archives, on wasmtime.
+	#[cfg(feature = "surrealism")]
+	fn extension_runner(
+		&self,
+		config: &ConfigMap,
+	) -> Option<Arc<dyn crate::surrealism::runner::ExtensionRunner>> {
+		Some(Arc::new(crate::surrealism::runner::SurrealismRunner::from_config_map(config)))
 	}
 }
 
@@ -846,9 +866,10 @@ impl Datastore {
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new(
 				self.config.surrealism.surrealism_cache_size,
+				self.surrealism_cache.runner(),
 			)),
 			#[cfg(feature = "surrealism")]
-			lazy_surrealism: self.lazy_surrealism,
+			lazy_extensions: self.lazy_extensions,
 			#[cfg(feature = "http")]
 			http_client: self.http_client,
 			observer: self.observer,
@@ -921,9 +942,10 @@ impl Datastore {
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new(
 				self.config.surrealism.surrealism_cache_size,
+				self.surrealism_cache.runner(),
 			)),
 			#[cfg(feature = "surrealism")]
-			lazy_surrealism: self.lazy_surrealism,
+			lazy_extensions: self.lazy_extensions,
 			#[cfg(feature = "http")]
 			http_client: ArcSwap::new(self.http_client.load_full()),
 			observer: Arc::clone(&self.observer),
@@ -1122,18 +1144,18 @@ impl Datastore {
 		self
 	}
 
-	/// Configure whether surrealism modules are loaded lazily on first use
-	/// rather than eagerly at startup.
+	/// Configure whether extensions are prepared on first invocation rather
+	/// than at startup.
 	#[cfg(feature = "surrealism")]
-	pub fn with_lazy_surrealism(mut self, lazy: bool) -> Self {
-		self.lazy_surrealism = lazy;
+	pub fn with_lazy_extensions(mut self, lazy: bool) -> Self {
+		self.lazy_extensions = lazy;
 		self
 	}
 
-	/// Returns `true` if surrealism modules are loaded lazily.
+	/// Returns `true` if extensions are prepared on first invocation.
 	#[cfg(feature = "surrealism")]
-	pub fn is_lazy_surrealism(&self) -> bool {
-		self.lazy_surrealism
+	pub fn is_lazy_extensions(&self) -> bool {
+		self.lazy_extensions
 	}
 
 	pub fn index_store(&self) -> &IndexStores {
@@ -2286,17 +2308,27 @@ impl Datastore {
 	}
 
 	// --------------------------------------------------
-	// Surrealism eager loading
+	// Extension preparation
 	// --------------------------------------------------
 
-	/// Pre-load all Surrealism module runtimes into the cache so that
-	/// subsequent query planning can resolve function metadata (e.g. the
-	/// `writeable` flag) without triggering on-demand compilation.
+	/// Start the extension runner when any extension is defined, and, unless
+	/// extensions load lazily, prepare every extension archive in use, so that
+	/// the first invocation and query planning (which reads each export's
+	/// `writeable` flag) find it compiled.
 	///
-	/// Modules are loaded in parallel using a `JoinSet`. Any individual
-	/// failure is logged but does not abort the overall loading process.
+	/// Starting the runner reserves what every invocation needs, such as the
+	/// guarded engine's address space, so a host that refuses it is reported
+	/// here, at startup, rather than on every call. A server with extensions
+	/// and no `surrealism_max_memory` is warned that every concurrent
+	/// invocation may grow to the full 32-bit address space.
+	///
+	/// Each definition is resolved to its archive's digest; definitions that
+	/// share a digest share one prepared entry, so it is compiled once.
+	/// Definitions are loaded in parallel, and a failure is logged without
+	/// stopping the others.
 	#[cfg(feature = "surrealism")]
-	pub async fn eager_load_surrealism_modules(&self) {
+	#[tracing::instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn prepare_extensions(&self) {
 		use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 		use crate::surrealism::cache::SurrealismCacheLookup;
 
@@ -2326,12 +2358,10 @@ impl Datastore {
 			}
 		};
 
-		// Collect all module lookups first, then load in parallel.
+		// Collect all definitions first, then load in parallel.
 		struct ModuleLookup {
 			ns_id: crate::catalog::NamespaceId,
 			db_id: crate::catalog::DatabaseId,
-			bucket: String,
-			key: String,
 			display_name: String,
 			definition: crate::catalog::ModuleDefinition,
 		}
@@ -2368,25 +2398,40 @@ impl Datastore {
 					if md.needs_reinstall() {
 						continue;
 					}
-					if let crate::catalog::ModuleExecutable::Surrealism(s) = &md.executable {
-						lookups.push(ModuleLookup {
-							ns_id: ns.namespace_id,
-							db_id: db.database_id,
-							bucket: s.bucket.clone(),
-							key: s.key.clone(),
-							display_name: md
-								.name
-								.clone()
-								.unwrap_or_else(|| "<unnamed>".to_string()),
-							definition: md.clone(),
-						});
-					}
+					lookups.push(ModuleLookup {
+						ns_id: ns.namespace_id,
+						db_id: db.database_id,
+						display_name: md.name.clone().unwrap_or_else(|| "<unnamed>".to_string()),
+						definition: md.clone(),
+					});
 				}
 			}
 		}
 
 		if lookups.is_empty() {
 			debug!(target: TARGET, "Surrealism eager load: no modules to load");
+			return;
+		}
+
+		if let Some(runner) = self.surrealism_cache.runner()
+			&& let Err(e) = runner.start()
+		{
+			error!(
+				target: TARGET,
+				runner = runner.name(),
+				error = %e,
+				"The extension runner could not start, so every extension call will fail"
+			);
+		}
+		if self.config.surrealism.surrealism_max_memory.is_none() {
+			warn!(
+				target: TARGET,
+				slots = self.config.surrealism.surrealism_max_concurrent_invocations,
+				"No SURREAL_SURREALISM_MAX_MEMORY is set: every concurrent extension invocation \
+				 may grow to 4 GiB of linear memory"
+			);
+		}
+		if self.lazy_extensions {
 			return;
 		}
 
@@ -2406,14 +2451,34 @@ impl Datastore {
 					.acquire_owned()
 					.await
 					.expect("Surrealism eager load semaphore must not be closed");
-				let cache_lookup = SurrealismCacheLookup::File(
-					&lookup.ns_id,
-					&lookup.db_id,
-					&lookup.bucket,
-					&lookup.key,
-				);
-				match ctx.get_surrealism_runtime(cache_lookup, (&lookup.definition).into()).await {
-					Ok(_) => {
+				let cache_lookup = match &lookup.definition.executable {
+					crate::catalog::ModuleExecutable::Surrealism(s) => {
+						SurrealismCacheLookup::File(&lookup.ns_id, &lookup.db_id, &s.bucket, &s.key)
+					}
+					crate::catalog::ModuleExecutable::Silo(s) => SurrealismCacheLookup::Silo(
+						&lookup.ns_id,
+						&lookup.db_id,
+						&s.organisation,
+						&s.package,
+						s.major,
+						s.minor,
+						s.patch,
+					),
+				};
+				// Prepared, and compiled for the engine its grant selects, so
+				// the first call compiles nothing.
+				let load = async {
+					let module = ctx
+						.get_surrealism_module(cache_lookup, (&lookup.definition).into())
+						.await?;
+					if let Some(capabilities) = &lookup.definition.capabilities {
+						let grant = crate::fnc::module::extension_grant(&ctx, capabilities).await?;
+						module.prepared.warm(&grant).await?;
+					}
+					anyhow::Ok(())
+				};
+				match load.await {
+					Ok(()) => {
 						debug!(
 							target: TARGET,
 							module = %lookup.display_name,

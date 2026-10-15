@@ -2,9 +2,10 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use surrealdb_types::ToSql;
+use surrealism_runtime::epoch::{EngineSettings, engines};
 use surrealism_runtime::package::SurrealismPackage;
-use surrealism_runtime::runtime::Runtime;
-use surrealism_runtime::{NetDeny, PrefixErr};
+use surrealism_runtime::runtime::{InstanceSettings, Runtime};
+use surrealism_runtime::{NetDeny, NetPolicy, PrefixErr};
 
 use crate::cli::module::host::DemoHost;
 
@@ -15,15 +16,31 @@ pub async fn init(
 ) -> Result<()> {
 	let package = SurrealismPackage::from_file(file)?;
 
-	// Load the WASM module
-	// A local run, so there is no server deny list to apply.
-	let runtime = Runtime::new(package, 8, None, None, NetDeny::Nothing)?;
+	// A local run grants the module what its own manifest asks for; there is
+	// no server deny list to apply.
+	let requested = &package.config.capabilities;
+	let settings = InstanceSettings {
+		net: NetPolicy::parse(&requested.allow_net, NetDeny::Nothing)?,
+		max_memory_bytes: requested.max_memory_bytes,
+		max_execution_time: requested.max_execution_time,
+		strict_timeout: requested.strict_timeout,
+		..InstanceSettings::local()
+	};
+	let runtime = Runtime::new(
+		package,
+		engines(EngineSettings {
+			max_concurrent_invocations: 1,
+			max_memory_bytes: None,
+		}),
+	)?;
+	// `Runtime::new` compiles only the guarded engine.
+	runtime.prepare(settings.strict_timeout)?;
 	let host: std::sync::Arc<dyn surrealism_runtime::host::InvocationContext> =
 		std::sync::Arc::new(DemoHost::new());
-	let mut controller =
-		runtime.new_controller(host.as_ref()).await.prefix_err(|| "Failed to load WASM module")?;
-
-	controller.init().await?;
+	let mut controller = runtime
+		.instantiate(&settings, None, None)
+		.await
+		.prefix_err(|| "Failed to load WASM module")?;
 
 	// `surreal extension run` answers `sql`/`run` from stdin, so it lends a handle
 	// where the server would — and withholds it where the server would, which

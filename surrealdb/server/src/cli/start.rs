@@ -465,18 +465,19 @@ pub async fn init<
 						fatal_canceller.cancel();
 						return;
 					}
-					// Eagerly load surrealism modules in the background unless
-					// opted out. Ordered behind the initialisation because the
+					// Start the extension runner and, unless extensions load
+					// lazily, prepare every extension in use, in the background.
+					// Ordered behind the initialisation because the
 					// load reads the catalog once and gives up with a warning: an
 					// engine that refuses transactions until it has joined a
 					// cluster would spend that one attempt against a datastore
 					// that cannot answer, leaving every module to load lazily on
 					// first use instead.
 					#[cfg(feature = "surrealism")]
-					if !ds.is_lazy_surrealism() {
+					{
 						let ds = Arc::clone(&ds);
 						tokio::spawn(async move {
-							ds.eager_load_surrealism_modules().await;
+							ds.prepare_extensions().await;
 						});
 					}
 					// The import and the root credentials, by contrast, leave a

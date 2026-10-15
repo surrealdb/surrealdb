@@ -47,12 +47,23 @@ pub struct ReadOnly;
 /// Read-write access. Opted into by writing `Transaction<ReadWrite>`.
 pub struct ReadWrite;
 
+/// The access declared in the [`FunctionMeta`](crate::FunctionMeta) of a
+/// function added with [`register`](crate::register).
+///
+/// A registered function has no Rust signature, so its mode is the
+/// `writeable` flag it was registered with rather than a type. The host
+/// enforces that flag exactly as it does for the other two modes. This mode
+/// has no [`TxMode`] impl, so `#[surrealism]` rejects it in a signature.
+pub struct Declared;
+
 mod sealed {
-	/// Sealed so a plugin cannot invent a third mode. Implemented only for
-	/// [`ReadOnly`](super::ReadOnly) and [`ReadWrite`](super::ReadWrite).
+	/// Sealed so a plugin cannot invent a mode. Implemented only for
+	/// [`ReadOnly`](super::ReadOnly), [`ReadWrite`](super::ReadWrite) and
+	/// [`Declared`](super::Declared).
 	pub trait Mode {}
 	impl Mode for super::ReadOnly {}
 	impl Mode for super::ReadWrite {}
+	impl Mode for super::Declared {}
 }
 
 pub use sealed::Mode;
@@ -93,7 +104,7 @@ impl<M: Mode> Transaction<M> {
 	///
 	/// `handle` must be a handle the host lent for the invocation currently
 	/// running, and the returned value must not outlive it. Called only by the
-	/// `#[surrealism]` macro.
+	/// `#[surrealism]` macro and the dispatch of registered functions.
 	#[doc(hidden)]
 	pub unsafe fn __from_borrow(handle: &host::Transaction) -> Self {
 		Self {
@@ -108,7 +119,7 @@ impl<M: Mode> Transaction<M> {
 
 	/// Execute a SurrealQL query with no bind variables.
 	///
-	/// Requires the `allow_arbitrary_queries` capability.
+	/// Requires the definition to grant `CAPABILITIES { queries: true }`.
 	///
 	/// This takes a string, so the mode marker cannot reject a write by itself.
 	/// The host does: a function that declared a read-only transaction runs
@@ -151,6 +162,9 @@ impl<M: Mode> Transaction<M> {
 	}
 
 	/// Call another surrealism function by fully-qualified name.
+	///
+	/// Requires the definition's `CAPABILITIES { functions: [...] }` to grant
+	/// the function.
 	pub async fn run<R: SurrealValue>(&self, fnc: impl Into<String>, args: impl Args) -> Result<R> {
 		self.run_versioned(fnc, None, args).await
 	}

@@ -6,34 +6,21 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use anyhow::Result;
-use parking_lot::Mutex;
 use surrealism_types::err::PrefixErr;
 use tokio::io::AsyncWrite;
 use wasmtime::component::ResourceTable;
 use wasmtime_wasi::cli::{IsTerminal, StdoutStream};
+use wasmtime_wasi::filesystem::WasiFilesystemCtx;
 use wasmtime_wasi::sockets::SocketAddrUse;
 use wasmtime_wasi::{FsPerms, WasiCtx, WasiCtxBuilder};
 
 use crate::net_allow::NetPolicy;
 
-/// Shared swappable callback for forwarding WASI stdio output.
+/// Where one invocation's WASI stdio output goes.
 ///
-/// Held by both the WASI output stream (which calls it on writes) and the
-/// controller (which swaps it when the invocation context changes).
-///
-/// The inner `Arc<dyn Fn>` allows writers to snapshot the callback with a
-/// cheap `Arc::clone` and release the lock before invoking it, so the
-/// mutex is never held during potentially expensive I/O (tracing, log
-/// formatting, etc.).
-pub type StdioCallback = Arc<Mutex<Arc<dyn Fn(&str) + Send + Sync>>>;
-
-pub fn new_stdout_callback() -> StdioCallback {
-	Arc::new(Mutex::new(Arc::new(|output| print!("{}", output))))
-}
-
-pub fn new_stderr_callback() -> StdioCallback {
-	Arc::new(Mutex::new(Arc::new(|output| eprint!("{}", output))))
-}
+/// Fixed for the life of the store: a store serves exactly one invocation, so
+/// the callbacks are the caller's from the moment the instance exists.
+pub type StdioCallback = Arc<dyn Fn(&str) + Send + Sync>;
 
 /// A [`StdoutStream`] backed by a shared [`StdioCallback`].
 ///
@@ -95,13 +82,8 @@ struct CallbackWriter {
 }
 
 impl CallbackWriter {
-	/// Snapshot the current callback so the mutex is not held during invocation.
-	fn snapshot_callback(&self) -> Arc<dyn Fn(&str) + Send + Sync> {
-		Arc::clone(&self.callback.lock())
-	}
-
 	fn emit_lines(&mut self) {
-		let cb = self.snapshot_callback();
+		let cb = &self.callback;
 		while let Some(pos) = self.buffer.iter().position(|&b| b == b'\n') {
 			let line = String::from_utf8_lossy(&self.buffer[..pos]);
 			cb(&line);
@@ -128,7 +110,7 @@ impl CallbackWriter {
 				n => n,
 			},
 		};
-		let cb = self.snapshot_callback();
+		let cb = &self.callback;
 		let chunk = String::from_utf8_lossy(&self.buffer[..split]);
 		cb(&chunk);
 		self.buffer.drain(..split);
@@ -136,7 +118,7 @@ impl CallbackWriter {
 
 	fn flush_remaining(&mut self) {
 		if !self.buffer.is_empty() {
-			let cb = self.snapshot_callback();
+			let cb = &self.callback;
 			let remaining = String::from_utf8_lossy(&self.buffer);
 			cb(&remaining);
 			self.buffer.clear();
@@ -185,57 +167,83 @@ fn socket_addr_allowed(reason: SocketAddrUse, addr: &SocketAddr, policy: &NetPol
 	}
 }
 
-pub fn build(
-	fs_root: Option<&Path>,
-	policy: &Arc<NetPolicy>,
-	stdout_cb: StdioCallback,
-	stderr_cb: StdioCallback,
-) -> Result<(WasiCtx, ResourceTable)> {
-	let mut builder = WasiCtxBuilder::new();
-	builder.stdout(CallbackStdoutStream {
-		callback: stdout_cb,
-	});
-	builder.stderr(CallbackStdoutStream {
-		callback: stderr_cb,
-	});
+/// The part of a WASI context that is the same for every invocation of one
+/// extension: its attached filesystem, opened once.
+///
+/// Opening a preopened directory is a syscall, and a fresh context per
+/// invocation would otherwise pay it every time. The directory handle is
+/// reference-counted, so each context shares it.
+#[derive(Clone, Default)]
+pub struct WasiTemplate {
+	filesystem: WasiFilesystemCtx,
+}
 
-	if policy.is_empty() {
-		builder.allow_tcp(false);
-		builder.allow_udp(false);
-		builder.allow_ip_name_lookup(false);
-	} else {
-		// wasmtime-wasi denies every socket by default, so TCP has to be switched
-		// on explicitly; each connection is still gated by the `socket_addr_check`
-		// below. UDP is left off, so modules get outbound TCP only.
-		builder.allow_tcp(true);
-		builder.allow_udp(false);
-		// Name lookup is switched on at this layer and filtered by name in
-		// `crate::dns`, which shadows `wasi:sockets/ip-name-lookup`. WASI has no
-		// per-name hook of its own, so leaving this off would be the only
-		// alternative — and would make hostnames unusable, forcing every plugin
-		// to hard-code addresses.
-		builder.allow_ip_name_lookup(true);
-		let filter = Arc::clone(policy);
-		builder.socket_addr_check(move |addr, reason| {
-			let allowed = socket_addr_allowed(reason, &addr, &filter);
-			Box::pin(async move { allowed })
+impl WasiTemplate {
+	/// Open `fs_root`, if there is one, as the read-only root directory.
+	pub fn new(fs_root: Option<&Path>) -> Result<Self> {
+		let mut builder = WasiCtxBuilder::new();
+		if let Some(root) = fs_root {
+			builder
+				.preopened_dir(root, "/", FsPerms::ReadOnly)
+				.prefix_err(|| "Failed to preopen filesystem directory")?;
+		}
+		let mut ctx = builder.build();
+		Ok(Self {
+			filesystem: ctx.filesystem().clone(),
+		})
+	}
+
+	/// A WASI context for one invocation, with that invocation's network
+	/// policy and stdio.
+	pub fn instantiate(
+		&self,
+		policy: &Arc<NetPolicy>,
+		stdout: StdioCallback,
+		stderr: StdioCallback,
+	) -> (WasiCtx, ResourceTable) {
+		let mut builder = WasiCtxBuilder::new();
+		builder.stdout(CallbackStdoutStream {
+			callback: stdout,
 		});
-	}
+		builder.stderr(CallbackStdoutStream {
+			callback: stderr,
+		});
 
-	if let Some(root) = fs_root {
-		builder
-			.preopened_dir(root, "/", FsPerms::ReadOnly)
-			.prefix_err(|| "Failed to preopen filesystem directory")?;
+		if policy.is_empty() {
+			builder.allow_tcp(false);
+			builder.allow_udp(false);
+			builder.allow_ip_name_lookup(false);
+		} else {
+			// wasmtime-wasi denies every socket by default, so TCP has to be switched
+			// on explicitly; each connection is still gated by the `socket_addr_check`
+			// below. UDP is left off, so modules get outbound TCP only.
+			builder.allow_tcp(true);
+			builder.allow_udp(false);
+			// Name lookup is switched on at this layer and filtered by name in
+			// `crate::dns`, which shadows `wasi:sockets/ip-name-lookup`. WASI has no
+			// per-name hook of its own, so leaving this off would be the only
+			// alternative — and would make hostnames unusable, forcing every plugin
+			// to hard-code addresses.
+			builder.allow_ip_name_lookup(true);
+			let filter = Arc::clone(policy);
+			builder.socket_addr_check(move |addr, reason| {
+				let allowed = socket_addr_allowed(reason, &addr, &filter);
+				Box::pin(async move { allowed })
+			});
+		}
+
+		let mut ctx = builder.build();
+		*ctx.filesystem() = self.filesystem.clone();
+		// Bounded, because entries are added at the guest's request — every stream
+		// it opens and every pollable it subscribes to takes one — and nothing
+		// charges them to a limit the module declares. `StoreLimits::memory_size`
+		// covers the guest's linear memory, not the host-side table behind its
+		// handles. Far above what any reasonable module holds at once, so it only
+		// bites a guest that is leaking or trying to.
+		let mut table = ResourceTable::new();
+		table.set_max_capacity(MAX_RESOURCE_TABLE_ENTRIES);
+		(ctx, table)
 	}
-	// Bounded, because entries are added at the guest's request — every stream
-	// it opens and every pollable it subscribes to takes one — and nothing
-	// charges them to a limit the module declares. `StoreLimits::memory_size`
-	// covers the guest's linear memory, not the host-side table behind its
-	// handles. Far above what any reasonable module holds at once, so it only
-	// bites a guest that is leaking or trying to.
-	let mut table = ResourceTable::new();
-	table.set_max_capacity(MAX_RESOURCE_TABLE_ENTRIES);
-	Ok((builder.build(), table))
 }
 
 #[cfg(test)]
@@ -261,9 +269,9 @@ mod tests {
 		let sink: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
 		let recorder = Arc::clone(&sink);
 		let writer = CallbackWriter {
-			callback: Arc::new(Mutex::new(Arc::new(move |line: &str| {
+			callback: Arc::new(move |line: &str| {
 				recorder.lock().push(line.to_owned());
-			}))),
+			}),
 			buffer: Vec::new(),
 		};
 		(writer, sink)

@@ -11,7 +11,9 @@ use std::io::{BufReader, Read, Write};
 use std::path::Path;
 
 use anyhow::{Context, Result, bail, ensure};
+use surrealism_runtime::config::{LEGACY_PACKAGE_FILE, PACKAGE_FILE};
 pub use surrealism_runtime::manifest::{MANIFEST_PATH, Manifest, SIGNATURE_PATH};
+use surrealism_runtime::package_config::PackageConfig;
 use tar::{Archive, EntryType, Header, PaxExtensions};
 use zstd::stream::read::Decoder;
 
@@ -110,6 +112,23 @@ pub fn check_files(path: &Path, manifest: &Manifest) -> Result<()> {
 		path.display()
 	);
 	Ok(())
+}
+
+/// Reads the package file inside an archive: `surrealism/package.toml`, or
+/// `surrealism/surrealism.toml` when there is none, as the server's loader
+/// does.
+pub fn read_package(path: &Path) -> Result<PackageConfig> {
+	let entries = read_entries(path)?;
+	for name in [PACKAGE_FILE, LEGACY_PACKAGE_FILE] {
+		let entry_path = format!("surrealism/{name}");
+		if let Some(entry) = entries.iter().find(|e| e.path == entry_path.as_bytes()) {
+			let text = std::str::from_utf8(&entry.file().data)
+				.map_err(|_| anyhow::anyhow!("{entry_path} is not UTF-8"))?;
+			return PackageConfig::parse(text)
+				.map_err(|e| anyhow::anyhow!("{entry_path} is not a valid package file: {e}"));
+		}
+	}
+	bail!("The archive has no surrealism/{PACKAGE_FILE}")
 }
 
 /// Reads and parses `surrealism/MANIFEST` from an archive.

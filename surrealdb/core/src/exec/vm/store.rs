@@ -1861,13 +1861,19 @@ async fn step_inner(
 					),
 				};
 				// The eager load reads the bucket the definition names, a load a
-				// running program is allowed, so it is declared unsealed.
-				let loaded = crate::kvs::catalog_reads::sealed(
-					false,
-					ctx.ctx().get_surrealism_runtime(lookup, (&md).into()),
-				)
-				.await;
-				if let Err(e) = loaded {
+				// running program is allowed, so it is declared unsealed. It
+				// compiles for the engine the definition's grant selects too, so
+				// the first call compiles nothing.
+				let load = async {
+					let module = ctx.ctx().get_surrealism_module(lookup, (&md).into()).await?;
+					if let Some(capabilities) = &md.capabilities {
+						let grant =
+							crate::fnc::module::extension_grant(ctx.ctx(), capabilities).await?;
+						module.prepared.warm(&grant).await?;
+					}
+					anyhow::Ok(())
+				};
+				if let Err(e) = crate::kvs::catalog_reads::sealed(false, load).await {
 					tracing::warn!(
 						module = ?storage_name,
 						error = %e,

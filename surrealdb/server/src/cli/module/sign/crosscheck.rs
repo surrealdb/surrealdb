@@ -214,3 +214,22 @@ fn a_signed_archive_verifies_offline_from_its_own_envelope() {
 		);
 	}
 }
+
+/// A real Fulcio certificate claims the `[signer.sigstore]` that names its
+/// workflow without the ref, and no other.
+#[test]
+fn a_real_certificate_is_matched_against_signer() {
+	use surrealism_runtime::config::{PackageSigner, SigstoreSigner as Named};
+
+	let made = read(&fixtures().join("conformance").join("happy-path.sigstore.json"));
+	let mut named = Named {
+		issuer: "https://token.actions.githubusercontent.com".into(),
+		identity: "https://github.com/sigstore-conformance/extremely-dangerous-public-oidc-beacon/.github/workflows/extremely-dangerous-oidc-beacon.yml".into(),
+		repository_id: Some("632596897".into()),
+		owner_id: Some("131804563".into()),
+	};
+	super::signer::ensure_matches(&made, &PackageSigner::Sigstore(named.clone())).unwrap();
+	named.owner_id = Some("1".into());
+	let err = super::signer::ensure_matches(&made, &PackageSigner::Sigstore(named)).unwrap_err();
+	assert!(err.to_string().contains("owner_id"), "{err}");
+}

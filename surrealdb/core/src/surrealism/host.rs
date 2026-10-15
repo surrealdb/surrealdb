@@ -1,23 +1,21 @@
-use std::collections::HashSet;
-use std::str::FromStr;
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use async_trait::async_trait;
-use surrealism_runtime::capabilities::{FunctionTargets, SurrealismCapabilities};
-use surrealism_runtime::config::SurrealismConfig;
 use surrealism_runtime::host::InvocationContext;
-use surrealism_runtime::{HostCallError, HostCallResult, NetDeny};
+use surrealism_runtime::{HostCallError, HostCallResult, NetDeny, NetPolicy};
 
 use crate::ctx::reason::Reason;
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
-use crate::dbs::capabilities::{Capabilities, FuncTarget, NetTarget, Targets};
+use crate::dbs::capabilities::{Capabilities, Targets};
 use crate::doc::CursorDoc;
 use crate::expr::function::Function;
 use crate::expr::{Expr, FunctionCall, Model};
+use crate::extension::capabilities::EffectiveCapabilities;
 #[cfg(feature = "http")]
 use crate::http::HttpClient;
+use crate::surrealism::runner::RunnerCapabilities;
 use crate::syn;
 use crate::types::{PublicObject, PublicValue};
 use crate::val::convert_value_to_public_value;
@@ -26,10 +24,11 @@ pub(crate) struct Host {
 	pub(crate) ctx: FrozenContext,
 	pub(crate) opt: Options,
 	pub(crate) doc: Option<CursorDoc>,
-	module_name: String,
-	#[cfg(feature = "http")]
-	/// Surrealism modules have their own http limitations so it needs it's own client.
-	http_client: Arc<HttpClient>,
+	/// What the guest's standard output and error are recorded with, shared
+	/// by both streams.
+	log: Arc<GuestLog>,
+	/// What this invocation may do, checked on every host call.
+	capabilities: Arc<RunnerCapabilities>,
 	/// Orders the host calls one invocation holds in flight.
 	///
 	/// A guest may await several `transaction.sql` / `transaction.run` calls at
@@ -75,9 +74,21 @@ impl Host {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		writeable: bool,
-		module_name: String,
-		#[cfg(feature = "http")] http_client: Arc<HttpClient>,
+		module_name: Arc<str>,
+		capabilities: Arc<RunnerCapabilities>,
 	) -> Self {
+		let log = Arc::new(GuestLog {
+			module: module_name,
+			ns: opt.ns().unwrap_or("?").into(),
+			db: opt.db().unwrap_or("?").into(),
+			stdout: match ctx.config.surrealism.surrealism_log_level.as_str() {
+				"trace" => tracing::Level::TRACE,
+				"info" => tracing::Level::INFO,
+				"warn" => tracing::Level::WARN,
+				"error" => tracing::Level::ERROR,
+				_ => tracing::Level::DEBUG,
+			},
+		});
 		Self {
 			ctx: Arc::clone(ctx),
 			opt: if writeable {
@@ -86,9 +97,8 @@ impl Host {
 				opt.new_for_read_only_module()
 			},
 			doc: doc.cloned(),
-			module_name,
-			#[cfg(feature = "http")]
-			http_client,
+			log,
+			capabilities,
 			writes: tokio::sync::RwLock::new(()),
 		}
 	}
@@ -148,41 +158,51 @@ impl Host {
 		}
 	}
 
-	/// Build a context whose capabilities are narrowed to the module's
-	/// declared permissions. `validate_surrealism_capabilities` guarantees
-	/// at load time that the module's requests are within the server's
-	/// bounds, so here we only need to restrict downward.
-	fn module_context(&self, config: &SurrealismConfig) -> Context {
-		let scoped = Arc::new(module_scoped_capabilities(
-			&self.ctx.get_capabilities(),
-			&config.capabilities,
-		));
-		Context::new_child_with_capabilities(
+	/// Build a context whose capabilities are narrowed to the invocation's
+	/// grant, one extension invocation deeper than the caller's.
+	fn module_context(&self) -> Context {
+		let mut ctx = Context::new_child_with_capabilities(
 			&self.ctx,
-			scoped,
+			Arc::clone(&self.capabilities.scoped),
 			#[cfg(feature = "http")]
-			Arc::clone(&self.http_client),
-		)
+			Arc::clone(&self.capabilities.http_client),
+		);
+		ctx.enter_extension();
+		ctx
 	}
 }
 
-/// Parse the module's `allow_net` entries as [`NetTarget`] (same strings as in config).
-pub(crate) fn module_allow_net_targets(module: &SurrealismCapabilities) -> HashSet<NetTarget> {
-	module
-		.allow_net
-		.iter()
-		.filter_map(|n| match NetTarget::from_str(n) {
-			Ok(t) => Some(t),
-			Err(e) => {
-				tracing::warn!(
-					pattern = %n,
-					error = %e,
-					"Ignoring unparseable network target pattern"
-				);
-				None
+/// Where a guest's standard output and error go: the module, namespace and
+/// database it ran for, and the level its standard output is recorded at.
+/// Standard error is always recorded at `warn`.
+struct GuestLog {
+	module: Arc<str>,
+	ns: Box<str>,
+	db: Box<str>,
+	stdout: tracing::Level,
+}
+
+impl GuestLog {
+	fn record(&self, level: tracing::Level, output: &str) {
+		let (module, ns, db) = (&*self.module, &*self.ns, &*self.db);
+		match level {
+			tracing::Level::TRACE => {
+				tracing::trace!(target: "surrealism::module", module, ns, db, "{output}")
 			}
-		})
-		.collect()
+			tracing::Level::DEBUG => {
+				tracing::debug!(target: "surrealism::module", module, ns, db, "{output}")
+			}
+			tracing::Level::INFO => {
+				tracing::info!(target: "surrealism::module", module, ns, db, "{output}")
+			}
+			tracing::Level::WARN => {
+				tracing::warn!(target: "surrealism::module", module, ns, db, "{output}")
+			}
+			tracing::Level::ERROR => {
+				tracing::error!(target: "surrealism::module", module, ns, db, "{output}")
+			}
+		}
+	}
 }
 
 /// The operator's `deny_net`, in the form the Surrealism runtime evaluates.
@@ -218,66 +238,16 @@ pub(crate) fn surrealism_deny_net(server: &Capabilities) -> NetDeny {
 	}
 }
 
-/// Narrow the server's `Capabilities` to only what the module declares.
-/// Server deny-lists are always preserved as defense in depth.
-fn module_scoped_capabilities(
-	server: &Capabilities,
-	module: &SurrealismCapabilities,
-) -> Capabilities {
-	let mut caps = server.clone();
-
-	if !module.allow_scripting {
-		caps = caps.with_scripting(false);
-	}
-
-	match &module.allow_functions {
-		FunctionTargets::None => {
-			caps = caps.with_functions(Targets::None);
-		}
-		FunctionTargets::Some(patterns) => {
-			let targets = patterns
-				.iter()
-				.filter_map(|p| match FuncTarget::from_str(p) {
-					Ok(t) => Some(t),
-					Err(e) => {
-						tracing::warn!(
-							pattern = %p,
-							error = %e,
-							"Ignoring unparseable function target pattern"
-						);
-						None
-					}
-				})
-				.collect();
-			caps = caps.with_functions(Targets::Some(targets));
-		}
-		FunctionTargets::All => {}
-	}
-
-	let net_targets = module_allow_net_targets(module);
-	let network = if net_targets.is_empty() {
-		Targets::None
-	} else {
-		Targets::Some(net_targets)
-	};
-	caps.with_network_targets(network)
-}
-
 #[async_trait]
 impl InvocationContext for Host {
-	async fn sql(
-		&self,
-		config: &SurrealismConfig,
-		query: String,
-		vars: PublicObject,
-	) -> HostCallResult<PublicValue> {
-		if !config.capabilities.allow_arbitrary_queries {
+	async fn sql(&self, query: String, vars: PublicObject) -> HostCallResult<PublicValue> {
+		if !self.capabilities.grant.queries {
 			return Err(HostCallError::PermissionDenied(
-				"module does not have the 'allow_arbitrary_queries' capability".to_string(),
+				"the extension's CAPABILITIES do not grant `queries`".to_string(),
 			));
 		}
 
-		let mut ctx = self.module_context(config);
+		let mut ctx = self.module_context();
 		if !vars.is_empty() {
 			ctx.attach_public_variables(vars.into())
 				.map_err(|e| HostCallError::InvalidRequest(e.to_string()))?;
@@ -310,14 +280,13 @@ impl InvocationContext for Host {
 
 	async fn run(
 		&self,
-		config: &SurrealismConfig,
 		fnc: String,
 		version: Option<String>,
 		args: Vec<PublicValue>,
 	) -> HostCallResult<PublicValue> {
-		if !config.capabilities.allow_functions.allows(&fnc) {
+		if !self.capabilities.grant.allows_function_name(&fnc) {
 			return Err(HostCallError::PermissionDenied(format!(
-				"module is not allowed to call function '{fnc}'"
+				"the extension's CAPABILITIES do not grant the function '{fnc}'"
 			)));
 		}
 
@@ -374,7 +343,7 @@ impl InvocationContext for Host {
 			arguments: args.into_iter().map(Expr::from_public_value).collect(),
 		}));
 
-		let ctx = self.module_context(config).freeze();
+		let ctx = self.module_context().freeze();
 		// Same ordering as `sql`. A `fn::` body and a module call are opaque to
 		// `read_only`, so they count as writing and run alone; a pure builtin
 		// overlaps.
@@ -393,36 +362,95 @@ impl InvocationContext for Host {
 	}
 
 	fn stdout_callback(&self) -> Arc<dyn Fn(&str) + Send + Sync> {
-		let module = self.module_name.clone();
-		let ns = self.opt.ns().unwrap_or("?").to_string();
-		let db = self.opt.db().unwrap_or("?").to_string();
-		let level = self.ctx.config.surrealism.surrealism_log_level.clone();
-		Arc::new(move |output| match level.as_str() {
-			"trace" => {
-				tracing::trace!(target: "surrealism::module", module = %module, ns = %ns, db = %db, "{output}")
-			}
-			"info" => {
-				tracing::info!(target: "surrealism::module", module = %module, ns = %ns, db = %db, "{output}")
-			}
-			"warn" => {
-				tracing::warn!(target: "surrealism::module", module = %module, ns = %ns, db = %db, "{output}")
-			}
-			"error" => {
-				tracing::error!(target: "surrealism::module", module = %module, ns = %ns, db = %db, "{output}")
-			}
-			_ => {
-				tracing::debug!(target: "surrealism::module", module = %module, ns = %ns, db = %db, "{output}")
-			}
-		})
+		let log = Arc::clone(&self.log);
+		Arc::new(move |output| log.record(log.stdout, output))
 	}
 
 	fn stderr_callback(&self) -> Arc<dyn Fn(&str) + Send + Sync> {
-		let module = self.module_name.clone();
-		let ns = self.opt.ns().unwrap_or("?").to_string();
-		let db = self.opt.db().unwrap_or("?").to_string();
-		Arc::new(
-			move |output| tracing::warn!(target: "surrealism::module", module = %module, ns = %ns, db = %db, "{output}"),
+		let log = Arc::clone(&self.log);
+		Arc::new(move |output| log.record(tracing::Level::WARN, output))
+	}
+}
+
+/// What a definition may do, in the form its invocations check, from its
+/// `CAPABILITIES` already intersected with the server's
+/// ([`effective_capabilities`](crate::extension::capabilities::effective_capabilities)).
+///
+/// The guest's own sockets get the granted network targets under the server's
+/// deny rules; `tx.sql` and `tx.run` run under the server's capabilities
+/// narrowed to the grant. The memory and execution time limits are the
+/// smaller of the grant and the server's ceiling. The grant's
+/// `strict_timeout: false` takes effect only when the server allows unbounded
+/// execution; otherwise the invocation runs on the guarded engine, where the
+/// ceiling and the query's timeout can stop it.
+pub(crate) fn runner_capabilities(
+	grant: EffectiveCapabilities,
+	server: &Capabilities,
+	config: &crate::config::RuntimeConfig,
+) -> Result<RunnerCapabilities> {
+	let allow_net: Vec<String> = match &grant.allow_net {
+		Targets::None => Vec::new(),
+		Targets::All => vec!["*".to_string()],
+		Targets::Some(targets) => targets.iter().map(|t| t.to_string()).collect(),
+	};
+	let net = NetPolicy::parse(&allow_net, surrealism_deny_net(server))
+		.context("Failed to parse the granted network targets")?;
+
+	let scoped = server
+		.clone()
+		.with_scripting(grant.scripting)
+		.with_functions(grant.allow_functions.clone())
+		.with_network_targets(grant.allow_net.clone());
+
+	#[cfg(feature = "http")]
+	let http_client = Arc::new(
+		HttpClient::new(grant.allow_net.clone(), grant.deny_net.clone(), &config.http)
+			.context("Failed to create http client for the extension")?,
+	);
+
+	let ceiling_memory = config.surrealism.surrealism_max_memory;
+	let ceiling_time =
+		config.surrealism.surrealism_max_execution_time.map(std::time::Duration::from_millis);
+	let memory = grant.memory.map(|m| usize::try_from(m).unwrap_or(usize::MAX));
+
+	Ok(RunnerCapabilities {
+		net,
+		memory: min_option(ceiling_memory, memory),
+		timeout: min_option(ceiling_time, grant.timeout),
+		strict_timeout: grant.strict_timeout
+			|| !config.surrealism.surrealism_allow_unbounded_execution,
+		grant,
+		scoped: Arc::new(scoped),
+		#[cfg(feature = "http")]
+		http_client,
+	})
+}
+
+fn min_option<T: Ord>(a: Option<T>, b: Option<T>) -> Option<T> {
+	match (a, b) {
+		(Some(a), Some(b)) => Some(a.min(b)),
+		(a, b) => a.or(b),
+	}
+}
+
+/// Capabilities that grant nothing, for tests that need a value.
+#[cfg(test)]
+pub(crate) fn test_capabilities() -> RunnerCapabilities {
+	RunnerCapabilities {
+		net: NetPolicy::deny_all(),
+		memory: None,
+		timeout: None,
+		strict_timeout: true,
+		grant: crate::extension::capabilities::effective_capabilities(
+			&Default::default(),
+			&Capabilities::default(),
 		)
+		.expect("an empty grant"),
+		scoped: Arc::new(Capabilities::default()),
+		#[cfg(feature = "http")]
+		http_client: Arc::new(
+			HttpClient::new(Targets::None, Targets::All, &Default::default()).expect("http client"),
+		),
 	}
 }
 
@@ -440,7 +468,34 @@ fn parse_semver(version: &str) -> Result<(u32, u32, u32)> {
 
 #[cfg(test)]
 mod tests {
-	use crate::expr::Expr;
+	use crate::dbs::Capabilities;
+	use crate::expr::{Expr, ExtensionCapabilities};
+	use crate::extension::capabilities::effective_capabilities;
+
+	/// `strict_timeout: false` in a definition reaches the runner only on a
+	/// server that allows unbounded execution; by default the invocation stays
+	/// on the guarded engine, where timeouts are enforced.
+	#[test]
+	fn unbounded_execution_needs_the_server_to_allow_it() {
+		let server = Capabilities::default();
+		let definition = ExtensionCapabilities {
+			strict_timeout: false,
+			..Default::default()
+		};
+		let runner = |allow: bool| {
+			let mut config = crate::config::RuntimeConfig::default();
+			config.surrealism.surrealism_allow_unbounded_execution = allow;
+			let grant = effective_capabilities(&definition, &server).expect("grant");
+			super::runner_capabilities(grant, &server, &config).expect("runner capabilities")
+		};
+		assert!(runner(false).strict_timeout);
+		assert!(!runner(true).strict_timeout);
+
+		let strict = effective_capabilities(&ExtensionCapabilities::default(), &server).unwrap();
+		let mut config = crate::config::RuntimeConfig::default();
+		config.surrealism.surrealism_allow_unbounded_execution = true;
+		assert!(super::runner_capabilities(strict, &server, &config).unwrap().strict_timeout);
+	}
 
 	/// The classification `Host::order` runs on, pinned per statement shape.
 	///

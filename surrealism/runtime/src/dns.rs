@@ -38,7 +38,6 @@ use wasmtime::component::{Component, Linker, Resource, ResourceAny, ResourceType
 use wasmtime_wasi::p2::{DynPollable, Pollable, subscribe};
 use wasmtime_wasi::runtime::AbortOnDropJoinHandle;
 
-use crate::net_allow::NetPolicy;
 use crate::store::StoreData;
 
 /// The interface this shim replaces, without its version.
@@ -164,11 +163,14 @@ fn is_ip_name_lookup(name: &str) -> bool {
 /// is guaranteed to reach this shim rather than wasmtime's unfiltered resolver
 /// on every import, because the names came from the component itself and all of
 /// them are shadowed or the whole load fails.
+///
+/// The policy is not captured here: the linker is shared by every invocation of
+/// a component, and two invocations of the same component may be granted
+/// different rules. Each lookup reads the policy from its own store.
 pub fn add_to_linker(
 	engine: &Engine,
 	component: &Component,
 	linker: &mut Linker<StoreData>,
-	policy: &Arc<NetPolicy>,
 ) -> SurrealismResult<bool> {
 	let interfaces = imported_interfaces(engine, component);
 	if interfaces.is_empty() {
@@ -186,7 +188,7 @@ pub fn add_to_linker(
 			interface = %interface,
 			"shadowing the resolver"
 		);
-		result = install(linker, interface, Arc::clone(policy));
+		result = install(linker, interface);
 		if result.is_err() {
 			break;
 		}
@@ -195,11 +197,7 @@ pub fn add_to_linker(
 	result.map(|()| true)
 }
 
-fn install(
-	linker: &mut Linker<StoreData>,
-	interface: &str,
-	policy: Arc<NetPolicy>,
-) -> SurrealismResult<()> {
+fn install(linker: &mut Linker<StoreData>, interface: &str) -> SurrealismResult<()> {
 	let mut instance =
 		linker.instance(interface).prefix_err(|| "failed to define the DNS instance")?;
 
@@ -211,8 +209,8 @@ fn install(
 		.prefix_err(|| "failed to register resolve-address-stream")?;
 
 	instance
-		.func_new_async("resolve-addresses", move |mut store, _ty, params, results| {
-			let policy = Arc::clone(&policy);
+		.func_new_async("resolve-addresses", |mut store, _ty, params, results| {
+			let policy = Arc::clone(&store.data().net);
 			Box::new(async move {
 				// The `network` borrow carries no policy we need, but it must
 				// still be dropped before returning.

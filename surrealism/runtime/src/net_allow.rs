@@ -6,11 +6,16 @@
 //!   which replaces wasmtime's `wasi:sockets/ip-name-lookup`.
 //! - **By address**, when the guest connects. Enforced by WASI's `socket_addr_check`.
 //!
-//! Hostnames are **not** resolved when the policy is built. A name is matched as
-//! a name, and the addresses the shim hands back for an allowed name are
-//! recorded so the later connect recognises them. Pre-resolving at load time
+//! Allowed hostnames are **not** resolved when the policy is built. A name is
+//! matched as a name, and the addresses the shim hands back for an allowed name
+//! are recorded so the later connect recognises them. Pre-resolving at load time
 //! would pin whatever the record pointed at then, which goes stale behind any
 //! rotating DNS and cannot be refreshed without reloading the module.
+//!
+//! Denied hostnames are resolved, once per invocation, when an allow rule admits
+//! a connect by address alone (`*`, a network or an IP): otherwise a guest could
+//! reach a denied host by connecting to its address literal. See
+//! [`NetPolicy::for_invocation`].
 //!
 //! A resolved address that is private or otherwise special is rejected unless an
 //! explicit IP rule covers it, even when the hostname that produced it was
@@ -56,6 +61,11 @@ const VENDED_TTL: Duration = Duration::from_secs(120);
 /// first; losing one costs a re-resolution, not a refusal.
 const MAX_VENDED: usize = 1024;
 
+/// How long [`NetPolicy::for_invocation`] waits for the operator's denied
+/// hostnames to resolve. Past it, the invocation may connect only to
+/// addresses its own lookups produced.
+const DENY_RESOLVE_TIMEOUT: Duration = Duration::from_secs(2);
+
 /// One parsed `allow_net` entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NetRule {
@@ -69,6 +79,10 @@ pub enum NetRule {
 		host: String,
 		port: Option<u16>,
 	},
+	/// Any hostname, and any address that is not special-use, on any port.
+	/// Spelled `*`. A special-use address is still reached only through an
+	/// explicit IP rule.
+	Any,
 }
 
 /// A queried name in the form the rules are stored in.
@@ -110,8 +124,9 @@ pub enum NetDeny {
 	Nothing,
 	/// The operator denied everything.
 	Everything,
-	/// The operator denied these targets.
-	Rules(Vec<NetRule>),
+	/// The operator denied these targets. Shared, because every invocation's
+	/// copy of a policy carries them.
+	Rules(Arc<[NetRule]>),
 }
 
 impl NetDeny {
@@ -120,11 +135,14 @@ impl NetDeny {
 		if entries.is_empty() {
 			return Ok(Self::Nothing);
 		}
+		if entries.iter().any(|e| e == "*") {
+			return Ok(Self::Everything);
+		}
 		let mut rules = Vec::with_capacity(entries.len());
 		for entry in entries {
 			rules.push(parse_one(entry)?);
 		}
-		Ok(Self::Rules(rules))
+		Ok(Self::Rules(rules.into()))
 	}
 
 	/// Whether resolving `name` is denied.
@@ -189,6 +207,8 @@ impl NetDeny {
 					| NetRule::Host {
 						..
 					} => false,
+					// `parse` turns `*` into `Everything`.
+					NetRule::Any => true,
 				})
 			}
 		}
@@ -211,6 +231,7 @@ impl NetDeny {
 					NetRule::Host {
 						..
 					} => false,
+					NetRule::Any => true,
 				})
 			}
 		}
@@ -254,7 +275,8 @@ struct VendedTable {
 /// A module's outbound network policy.
 #[derive(Debug)]
 pub struct NetPolicy {
-	rules: Vec<NetRule>,
+	/// Shared by every invocation's copy of the policy.
+	rules: Arc<[NetRule]>,
 	deny: NetDeny,
 	/// Addresses handed to the guest by the DNS shim for an allowed hostname.
 	///
@@ -262,6 +284,27 @@ pub struct NetPolicy {
 	/// address is recognised without the policy having pre-resolved anything.
 	/// Entries expire after [`VENDED_TTL`] and are capped at [`MAX_VENDED`].
 	vended: Mutex<VendedTable>,
+	/// What the operator's hostname deny rules resolved to when this
+	/// invocation's copy was made. See [`Self::for_invocation`].
+	denied_addrs: DeniedAddrs,
+}
+
+/// The addresses behind the operator's hostname deny rules, for one invocation.
+#[derive(Debug, Clone)]
+enum DeniedAddrs {
+	/// Each address with the port its rule pins, or `None` for every port.
+	/// Empty when nothing needed resolving.
+	Resolved(Arc<[(IpAddr, Option<u16>)]>),
+	/// A denied hostname did not resolve, or not within
+	/// [`DENY_RESOLVE_TIMEOUT`]. Its addresses are unknown, so a connect is
+	/// allowed only to an address the DNS shim vended for a name it checked.
+	Unknown,
+}
+
+impl DeniedAddrs {
+	fn none() -> Self {
+		Self::Resolved(Arc::new([]))
+	}
 }
 
 impl NetPolicy {
@@ -272,10 +315,61 @@ impl NetPolicy {
 			rules.push(parse_one(entry)?);
 		}
 		Ok(Arc::new(Self {
-			rules,
+			rules: rules.into(),
 			deny,
 			vended: Mutex::new(VendedTable::default()),
+			denied_addrs: DeniedAddrs::none(),
 		}))
+	}
+
+	/// A policy that allows nothing.
+	pub fn deny_all() -> Arc<Self> {
+		Arc::new(Self {
+			rules: Arc::new([]),
+			deny: NetDeny::Nothing,
+			vended: Mutex::new(VendedTable::default()),
+			denied_addrs: DeniedAddrs::none(),
+		})
+	}
+
+	/// The same rules with nothing vended yet, for one invocation.
+	///
+	/// The addresses the DNS shim hands out are what lets a later connect
+	/// through, so they belong to the invocation that resolved them. A copy per
+	/// invocation keeps one invocation from connecting on the strength of
+	/// another's lookup. A policy with no rules vends nothing, so it is
+	/// shared rather than copied. The rules themselves are shared either way.
+	///
+	/// When an allow rule matches addresses (`*`, a network or an IP) and the
+	/// operator denies a hostname, the copy also holds what that hostname
+	/// resolves to now, so a guest that connects to the address directly is
+	/// refused as one that resolved the name would be. The resolution is the
+	/// system resolver's, made once per invocation and bounded by
+	/// [`DENY_RESOLVE_TIMEOUT`]. If a denied name fails to resolve in that
+	/// time, its addresses are unknown and the copy fails closed: the guest
+	/// may connect only to addresses the DNS shim vended for names it checked.
+	/// Without an address allow rule an address is reachable only through such
+	/// a name, so nothing is resolved.
+	pub async fn for_invocation(self: &Arc<Self>) -> Arc<Self> {
+		if self.rules.is_empty() {
+			return Arc::clone(self);
+		}
+		let denied_addrs = if self.allows_by_address() {
+			resolve_denied_hosts(&self.deny).await
+		} else {
+			DeniedAddrs::none()
+		};
+		Arc::new(Self {
+			rules: Arc::clone(&self.rules),
+			deny: self.deny.clone(),
+			vended: Mutex::new(VendedTable::default()),
+			denied_addrs,
+		})
+	}
+
+	/// Whether an allow rule admits a connect by its address alone.
+	fn allows_by_address(&self) -> bool {
+		self.rules.iter().any(|r| matches!(r, NetRule::Any | NetRule::Net(_) | NetRule::IpPort(..)))
 	}
 
 	/// Whether the module declared any network access at all.
@@ -372,6 +466,20 @@ impl NetPolicy {
 			return false;
 		}
 		let ip = addr.ip();
+		let dst = destination(&ip);
+		match &self.denied_addrs {
+			DeniedAddrs::Resolved(denied) => {
+				if denied.iter().any(|(d, port)| *d == dst && port.is_none_or(|p| p == addr.port()))
+				{
+					return false;
+				}
+			}
+			DeniedAddrs::Unknown => {
+				if self.vended_entry(&ip).is_none() {
+					return false;
+				}
+			}
+		}
 		// Decided on the destination, so an IPv6 transition form cannot carry a
 		// special-use IPv4 address past a rule that names only the outer range.
 		// A literal connect never passes through `accept_resolved`, so this is
@@ -385,7 +493,6 @@ impl NetPolicy {
 		{
 			return false;
 		}
-		let dst = destination(&ip);
 		self.rules.iter().enumerate().any(|(index, r)| match r {
 			NetRule::Net(net) => net.contains(&dst),
 			NetRule::IpPort(rule_ip, port) => *rule_ip == dst && *port == addr.port(),
@@ -398,6 +505,9 @@ impl NetPolicy {
 				port.is_none_or(|p| p == addr.port())
 					&& vended.as_ref().is_some_and(|(by, _)| by.contains(&index))
 			}
+			// Special-use destinations were refused above unless an explicit
+			// IP rule names them.
+			NetRule::Any => true,
 		})
 	}
 
@@ -408,6 +518,7 @@ impl NetPolicy {
 				host,
 				..
 			} if host == lowered => Some(index),
+			NetRule::Any => Some(index),
 			_ => None,
 		})
 	}
@@ -438,7 +549,8 @@ fn rule_covers_ip(rule: &NetRule, ip: &IpAddr) -> bool {
 		NetRule::IpPort(rule_ip, _) => rule_ip == ip,
 		NetRule::Host {
 			..
-		} => false,
+		}
+		| NetRule::Any => false,
 	}
 }
 
@@ -455,7 +567,62 @@ fn prune(table: &mut VendedTable, now: Instant) {
 	}
 }
 
+/// What the hostname rules in `deny` resolve to now, each address with the
+/// port its rule pins; [`DeniedAddrs::Unknown`] if any of them fails to
+/// resolve within [`DENY_RESOLVE_TIMEOUT`].
+async fn resolve_denied_hosts(deny: &NetDeny) -> DeniedAddrs {
+	let NetDeny::Rules(rules) = deny else {
+		return DeniedAddrs::none();
+	};
+	let hosts: Vec<(String, Option<u16>)> = rules
+		.iter()
+		.filter_map(|r| match r {
+			NetRule::Host {
+				host,
+				port,
+			} => Some((host.clone(), *port)),
+			_ => None,
+		})
+		.collect();
+	if hosts.is_empty() {
+		return DeniedAddrs::none();
+	}
+	let resolve = async {
+		let mut addrs = Vec::new();
+		for (host, port) in &hosts {
+			match tokio::net::lookup_host((host.as_str(), 0)).await {
+				Ok(found) => {
+					addrs.extend(found.map(|a| (destination(&a.ip().to_canonical()), *port)))
+				}
+				Err(e) => {
+					tracing::warn!(
+						host = %host,
+						error = %e,
+						"A host in deny_net did not resolve: this invocation may connect only to addresses it looked up by name"
+					);
+					return None;
+				}
+			}
+		}
+		Some(addrs)
+	};
+	match tokio::time::timeout(DENY_RESOLVE_TIMEOUT, resolve).await {
+		Ok(Some(addrs)) => DeniedAddrs::Resolved(addrs.into()),
+		Ok(None) => DeniedAddrs::Unknown,
+		Err(_) => {
+			tracing::warn!(
+				timeout = ?DENY_RESOLVE_TIMEOUT,
+				"The hosts in deny_net did not resolve in time: this invocation may connect only to addresses it looked up by name"
+			);
+			DeniedAddrs::Unknown
+		}
+	}
+}
+
 fn parse_one(entry: &str) -> anyhow::Result<NetRule> {
+	if entry == "*" {
+		return Ok(NetRule::Any);
+	}
 	if let Ok(net) = entry.parse::<IpNet>() {
 		return Ok(NetRule::Net(net));
 	}
@@ -489,6 +656,112 @@ fn parse_one(entry: &str) -> anyhow::Result<NetRule> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	/// `*` reaches any name and any public address, but a special-use address
+	/// only through an explicit IP rule, as for a named host.
+	#[test]
+	fn any_allows_public_destinations_only() {
+		use std::net::SocketAddr;
+
+		let any = NetPolicy::parse(&["*".to_string()], NetDeny::Nothing).unwrap();
+		assert!(any.allows_name("api.example.com"));
+		assert!(any.allows_socket_addr(&"93.184.216.34:443".parse::<SocketAddr>().unwrap()));
+		assert!(!any.allows_socket_addr(&"127.0.0.1:80".parse::<SocketAddr>().unwrap()));
+		assert!(!any.allows_socket_addr(&"169.254.169.254:80".parse::<SocketAddr>().unwrap()));
+		assert!(
+			any.accept_resolved("metadata", vec!["169.254.169.254".parse().unwrap()]).is_empty()
+		);
+
+		let any_and_loopback =
+			NetPolicy::parse(&["*".to_string(), "127.0.0.1".to_string()], NetDeny::Nothing)
+				.unwrap();
+		assert!(
+			any_and_loopback.allows_socket_addr(&"127.0.0.1:80".parse::<SocketAddr>().unwrap())
+		);
+
+		let denied =
+			NetPolicy::parse(&["*".to_string()], NetDeny::parse(&["*".to_string()]).unwrap())
+				.unwrap();
+		assert!(!denied.allows_name("api.example.com"));
+	}
+
+	/// A hostname the operator denies stays denied when the guest connects to
+	/// its address directly under an allow rule that matches addresses: here
+	/// `*`, with `127.0.0.1` named so that a loopback address is reachable at
+	/// all.
+	#[tokio::test(flavor = "current_thread")]
+	async fn a_denied_hostname_is_refused_by_address_under_an_address_allow() {
+		use std::net::SocketAddr;
+
+		let allow = ["*".to_string(), "127.0.0.1".to_string()];
+		let loopback: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+
+		let open = NetPolicy::parse(&allow, NetDeny::Nothing).unwrap().for_invocation().await;
+		assert!(open.allows_socket_addr(&loopback), "the control is reachable");
+
+		let deny = NetDeny::parse(&["localhost".to_string()]).unwrap();
+		let denied = NetPolicy::parse(&allow, deny).unwrap().for_invocation().await;
+		assert!(!denied.allows_name("localhost"), "the name is refused at the DNS shim");
+		assert!(!denied.allows_socket_addr(&loopback), "and its address is refused too");
+
+		// A port-bearing deny refuses that port only.
+		let deny = NetDeny::parse(&["localhost:8080".to_string()]).unwrap();
+		let pinned = NetPolicy::parse(&allow, deny).unwrap().for_invocation().await;
+		assert!(!pinned.allows_socket_addr(&loopback));
+		assert!(pinned.allows_socket_addr(&"127.0.0.1:9090".parse().unwrap()));
+	}
+
+	/// Under a bare `*` allow, a public address a denied hostname resolved to
+	/// is refused while any other public address stays reachable.
+	#[test]
+	fn a_resolved_deny_refuses_its_address_under_any() {
+		use std::net::SocketAddr;
+
+		let deny = NetDeny::parse(&["api.internal.example".to_string()]).unwrap();
+		let base = NetPolicy::parse(&["*".to_string()], deny).unwrap();
+		let denied: IpAddr = "8.8.8.8".parse().unwrap();
+		let policy = NetPolicy {
+			rules: Arc::clone(&base.rules),
+			deny: base.deny.clone(),
+			vended: Mutex::new(VendedTable::default()),
+			denied_addrs: DeniedAddrs::Resolved(Arc::new([(denied, None)])),
+		};
+		assert!(!policy.allows_socket_addr(&SocketAddr::new(denied, 443)));
+		// The IPv4-mapped form reaches the same destination.
+		assert!(!policy.allows_socket_addr(&"[::ffff:8.8.8.8]:443".parse().unwrap()));
+		assert!(policy.allows_socket_addr(&"1.1.1.1:443".parse().unwrap()));
+	}
+
+	/// A denied hostname that does not resolve leaves its addresses unknown, so
+	/// the invocation may connect only to addresses its own lookups produced:
+	/// an IP literal is refused even where an IP rule names it.
+	#[tokio::test(flavor = "current_thread")]
+	async fn an_unresolvable_deny_fails_closed_under_an_address_allow() {
+		use std::net::SocketAddr;
+
+		let allow = ["*".to_string(), "127.0.0.1".to_string()];
+		let deny = NetDeny::parse(&["no-such-host.invalid".to_string()]).unwrap();
+		let policy = NetPolicy::parse(&allow, deny).unwrap().for_invocation().await;
+		let loopback: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+		assert!(!policy.allows_socket_addr(&loopback));
+		assert!(!policy.allows_socket_addr(&"1.1.1.1:443".parse().unwrap()));
+		// An address the shim vended for a checked name is still reachable.
+		let public: IpAddr = "1.1.1.1".parse().unwrap();
+		assert_eq!(policy.accept_resolved("one.example", vec![public]), vec![public]);
+		assert!(policy.allows_socket_addr(&SocketAddr::new(public, 443)));
+	}
+
+	/// Without an allow rule that matches addresses, nothing is resolved: an
+	/// address is reachable only through a name the DNS shim checked.
+	#[tokio::test(flavor = "current_thread")]
+	async fn a_deny_is_not_resolved_without_an_address_allow() {
+		let deny = NetDeny::parse(&["no-such-host.invalid".to_string()]).unwrap();
+		let policy = NetPolicy::parse(&["api.example.com".to_string()], deny)
+			.unwrap()
+			.for_invocation()
+			.await;
+		assert!(matches!(&policy.denied_addrs, DeniedAddrs::Resolved(a) if a.is_empty()));
+	}
 
 	fn policy(entries: &[&str]) -> Arc<NetPolicy> {
 		NetPolicy::parse(

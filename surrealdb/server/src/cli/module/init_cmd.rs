@@ -6,9 +6,8 @@ use anyhow::Result;
 use dialoguer::Input;
 use semver::Version;
 use surrealism_runtime::PrefixErr;
-use surrealism_runtime::config::{
-	AbiVersion, PACKAGE_FILE, SurrealismConfig, SurrealismMeta, Target,
-};
+use surrealism_runtime::config::{PACKAGE_FILE, SurrealismMeta, Target};
+use surrealism_runtime::package_config::PackageConfig;
 
 const SURREALISM_VERSION: &str = surrealism_runtime::SDK_VERSION;
 const SURREALDB_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -240,21 +239,15 @@ fn add(a: i64, b: i64) -> i64 {
 // ---------------------------------------------------------------------------
 
 fn write_package_toml(path: &Path, target: Target, org: &str, name: &str) -> Result<()> {
-	let config = SurrealismConfig {
-		target,
-		meta: SurrealismMeta {
+	let Target::Rust = target;
+	let mut package = PackageConfig::new(
+		path,
+		SurrealismMeta {
 			organisation: org.to_string(),
 			name: name.to_string(),
 			version: Version::new(1, 0, 0),
 		},
-		capabilities: Default::default(),
-		abi: AbiVersion::CURRENT,
-		attach: Default::default(),
-	};
-	let toml = config.to_toml().prefix_err(|| format!("Failed to serialize {PACKAGE_FILE}"))?;
-
-	fs::write(path.join(PACKAGE_FILE), toml)
-		.prefix_err(|| format!("Failed to write {PACKAGE_FILE}"))?;
-
+	)?;
+	package.save().prefix_err(|| format!("Failed to write {PACKAGE_FILE}"))?;
 	Ok(())
 }

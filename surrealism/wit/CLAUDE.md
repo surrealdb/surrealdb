@@ -42,7 +42,8 @@ Required / expected from the guest:
 - **function-returns** — `(name?)` → serialized kind
 - **function-writeable** — `(name?)` → whether the function may write
 - **function-comment** — `(name?)` → optional comment
-- **init** — optional; called once after instantiation. Sync, and lent no `tx`.
+- **init** — optional. Sync, and lent no `tx`. `surreal extension build` runs it
+  once and removes it (see Lifecycle), so an archive the tool built exports none.
 
 Only `invoke` is async-lifted. The introspection exports never call a host
 import, and a sync-lifted export cannot block, so they stay synchronous.
@@ -58,15 +59,20 @@ All `serialized-*` types are FlatBuffer byte buffers. Schemas live in `surrealdb
 
 ## Lifecycle
 
-1. Host instantiates the WASM component.
-2. Host calls **init** if exported. On error, module is marked unhealthy.
-3. Host reads the function's entry in the baked `exports.toml`, installs a
+0. At build time, `surreal extension build` runs **init** once under
+   `wasmtime-wizer`, writes the memory it leaves into the component as initial
+   data, and removes the export. An error, a trap, network use or a WASI
+   resource left open fails the build.
+1. Host instantiates the WASM component afresh for every invocation, and each
+   instance starts in the post-`init` state. The host never calls **init**: it
+   refuses a component that still exports it.
+2. Host reads the function's entry in the baked `exports.toml`, installs a
    no-write execution frame unless the entry is `writeable`, lends a
    `transaction`, and calls **invoke** with `(tx?, name?, args)`. The handle is
    revoked on return.
-4. Introspection (`list-functions`, `function-args`, `function-returns`,
+3. Introspection (`list-functions`, `function-args`, `function-returns`,
    `function-writeable`, `function-comment`) is read once by
-   `surreal module build`, which bakes the answers into `exports.toml`. The host
+   `surreal extension build`, which bakes the answers into `exports.toml`. The host
    reads that manifest at runtime and does not call these exports.
 
 ## ABI Stability

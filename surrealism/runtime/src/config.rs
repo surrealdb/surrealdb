@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use semver::Version;
@@ -116,7 +117,9 @@ impl PackageFile {
 	}
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+/// The contents of a package file. Read and written through
+/// [`PackageConfig`](crate::package_config::PackageConfig), never directly.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct SurrealismConfig {
 	#[serde(default)]
 	pub target: Target,
@@ -128,17 +131,225 @@ pub struct SurrealismConfig {
 	pub abi: AbiVersion,
 	#[serde(default)]
 	pub attach: SurrealismAttach,
+	/// Who may sign the package's archives. `surreal extension sign` refuses
+	/// to sign as anyone else.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub signer: Option<PackageSigner>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct SurrealismAttach {
-	/// Path to a directory whose contents are bundled into the archive and
-	/// mounted as a read-only filesystem for the WASM module. Can be relative
-	/// (resolved against the project root at build time) or absolute.
-	pub fs: Option<String>,
+	/// Directories bundled into the archive and mounted read-only for the
+	/// module. See [`FsMounts`].
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub fs: Option<FsMounts>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+/// Directories bundled under `surrealism/fs/` and seen by the module as one
+/// read-only filesystem: each local directory, relative to the project root
+/// or absolute, appears at its guest path.
+///
+/// Written as a string when the only mount is at `/`, the form older package
+/// files use, and as a table of guest path to local directory otherwise:
+///
+/// ```toml
+/// [attach]
+/// fs = "fs"
+///
+/// [attach.fs]
+/// "/" = "fs"
+/// "/models" = "../models"
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FsMounts(BTreeMap<String, String>);
+
+impl FsMounts {
+	/// The guest path the root mount appears at.
+	pub const ROOT: &str = "/";
+
+	/// `local` mounted at `/`, the form a string `fs = "…"` reads as.
+	pub fn root(local: impl Into<String>) -> Self {
+		Self(BTreeMap::from([(Self::ROOT.to_string(), local.into())]))
+	}
+
+	/// Every mount, as (guest path, local directory), shortest guest path first.
+	pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
+		self.0.iter().map(|(guest, local)| (guest.as_str(), local.as_str()))
+	}
+
+	pub fn is_empty(&self) -> bool {
+		self.0.is_empty()
+	}
+
+	/// Mount `local` at `guest`, replacing what was mounted there.
+	pub(crate) fn insert(&mut self, guest: String, local: String) {
+		self.0.insert(guest, local);
+	}
+
+	/// Unmount `guest`. Returns whether something was mounted there.
+	pub(crate) fn remove(&mut self, guest: &str) -> bool {
+		self.0.remove(guest).is_some()
+	}
+
+	/// `guest` in its stored form, `/` or `/a/b`, or why it is not a guest
+	/// path: every segment must be one an archive path may hold.
+	pub fn normalise_guest_path(guest: &str) -> Result<String, String> {
+		let trimmed = guest.trim_matches('/');
+		if trimmed.is_empty() {
+			return Ok(Self::ROOT.to_string());
+		}
+		crate::manifest::validate_path(trimmed)
+			.map_err(|e| format!("{guest:?} is not a mount path: {e}"))?;
+		Ok(format!("/{trimmed}"))
+	}
+}
+
+impl Serialize for FsMounts {
+	fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+		match self.0.iter().next() {
+			Some((guest, local)) if self.0.len() == 1 && guest == Self::ROOT => {
+				serializer.serialize_str(local)
+			}
+			_ => self.0.serialize(serializer),
+		}
+	}
+}
+
+impl<'de> Deserialize<'de> for FsMounts {
+	fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+		#[derive(Deserialize)]
+		#[serde(untagged)]
+		enum Form {
+			Root(String),
+			Mounts(BTreeMap<String, String>),
+		}
+		let mounts = match Form::deserialize(deserializer)? {
+			Form::Root(local) => BTreeMap::from([(Self::ROOT.to_string(), local)]),
+			Form::Mounts(mounts) => {
+				let mut normalised = BTreeMap::new();
+				for (guest, local) in mounts {
+					let guest =
+						Self::normalise_guest_path(&guest).map_err(serde::de::Error::custom)?;
+					normalised.insert(guest, local);
+				}
+				normalised
+			}
+		};
+		Ok(Self(mounts))
+	}
+}
+
+/// `[signer]`: the one identity whose signatures this package's archives may
+/// carry.
+///
+/// ```toml
+/// [signer.sigstore]
+/// issuer = "https://token.actions.githubusercontent.com"
+/// identity = "https://github.com/acme/color/.github/workflows/release.yml"
+/// repository_id = "812345678"
+/// owner_id = "98765432"
+/// ```
+///
+/// or
+///
+/// ```toml
+/// [signer.ssh]
+/// public_key = "ssh-ed25519 AAAA…"
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PackageSigner {
+	Sigstore(SigstoreSigner),
+	Ssh(SshSigner),
+}
+
+/// A Sigstore keyless signer: the certificate Fulcio issues to the CI job.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SigstoreSigner {
+	/// The OIDC issuer, certificate extension `1.3.6.1.4.1.57264.1.8`.
+	pub issuer: String,
+	/// The workflow identity, the certificate's subject alternative name
+	/// without its `@ref` suffix, so every ref of the workflow matches.
+	pub identity: String,
+	/// The repository's numeric id, extension `1.3.6.1.4.1.57264.1.15`.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub repository_id: Option<String>,
+	/// The repository owner's numeric id, extension `1.3.6.1.4.1.57264.1.17`.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub owner_id: Option<String>,
+}
+
+/// An SSH signer.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SshSigner {
+	/// The public key as `<type> <base64>`, without a comment.
+	pub public_key: String,
+}
+
+impl PackageSigner {
+	/// Refuse a signer no signature could ever match.
+	pub fn validate(&self) -> Result<(), String> {
+		match self {
+			Self::Sigstore(s) => {
+				if !s.issuer.starts_with("https://") {
+					return Err(format!(
+						"signer.sigstore.issuer {:?} is not an https URL",
+						s.issuer
+					));
+				}
+				if s.identity.trim().is_empty() || s.identity.trim() != s.identity {
+					return Err(format!(
+						"signer.sigstore.identity {:?} is empty or has surrounding spaces",
+						s.identity
+					));
+				}
+				// A workflow URI is named without its ref, so any ref matches.
+				// Any other identity, such as an email address from an
+				// interactive signing, is compared as written.
+				if s.identity.starts_with("https://") && s.identity.contains('@') {
+					return Err(format!(
+						"signer.sigstore.identity {:?} names a ref; give the workflow without `@…`, \
+						 so that every ref of it matches",
+						s.identity
+					));
+				}
+				for (field, id) in [("repository_id", &s.repository_id), ("owner_id", &s.owner_id)]
+				{
+					if let Some(id) = id
+						&& (id.is_empty() || !id.bytes().all(|b| b.is_ascii_digit()))
+					{
+						return Err(format!("signer.sigstore.{field} {id:?} is not a numeric id"));
+					}
+				}
+				Ok(())
+			}
+			Self::Ssh(s) => SshSigner::normalise(&s.public_key).map(|_| ()),
+		}
+	}
+}
+
+impl SshSigner {
+	/// `key`, an `authorized_keys` line or the contents of a `.pub` file, as
+	/// `<type> <base64>` with any comment dropped.
+	pub fn normalise(key: &str) -> Result<String, String> {
+		let mut parts = key.split_whitespace();
+		let (Some(kind), Some(blob)) = (parts.next(), parts.next()) else {
+			return Err(format!("{key:?} is not an SSH public key"));
+		};
+		if !(kind.starts_with("ssh-") || kind.starts_with("ecdsa-") || kind.starts_with("sk-")) {
+			return Err(format!("{kind:?} is not an SSH key type"));
+		}
+		let base64 = |b: u8| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'=');
+		if blob.len() % 4 != 0 || !blob.bytes().all(base64) {
+			return Err(format!("the {kind} key is not valid base64"));
+		}
+		Ok(format!("{kind} {blob}"))
+	}
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct SurrealismMeta {
 	pub organisation: String,
 	pub name: String,
@@ -146,11 +357,11 @@ pub struct SurrealismMeta {
 }
 
 impl SurrealismConfig {
-	pub fn parse(s: &str) -> SurrealismResult<Self> {
+	pub(crate) fn parse(s: &str) -> SurrealismResult<Self> {
 		toml::from_str(s).prefix_err(|| "Failed to parse Surrealism config")
 	}
 
-	pub fn to_toml(&self) -> SurrealismResult<String> {
+	pub(crate) fn to_toml(&self) -> SurrealismResult<String> {
 		toml::to_string(self).prefix_err(|| "Failed to serialize Surrealism config")
 	}
 
@@ -219,7 +430,8 @@ fs = "static"
 		assert!(config.capabilities.allow_functions.allows("http::get"));
 		assert!(config.capabilities.allow_functions.allows("fn::check"));
 		assert!(!config.capabilities.allow_functions.allows("string::len"));
-		assert_eq!(config.attach.fs.as_deref(), Some("static"));
+		let mounts: Vec<_> = config.attach.fs.as_ref().unwrap().iter().collect();
+		assert_eq!(mounts, [("/", "static")]);
 	}
 
 	#[test]
@@ -276,8 +488,9 @@ version = "0.1.0"
 			capabilities: Default::default(),
 			abi: AbiVersion::CURRENT,
 			attach: SurrealismAttach {
-				fs: Some("data".to_string()),
+				fs: Some(FsMounts::root("data")),
 			},
+			signer: None,
 		};
 
 		let toml_str = config.to_toml().unwrap();
@@ -286,7 +499,8 @@ version = "0.1.0"
 		assert_eq!(parsed.meta.organisation, "test");
 		assert_eq!(parsed.meta.name, "roundtrip");
 		assert_eq!(parsed.abi, AbiVersion::CURRENT);
-		assert_eq!(parsed.attach.fs.as_deref(), Some("data"));
+		assert_eq!(parsed.attach, config.attach);
+		assert!(toml_str.contains("fs = \"data\""), "a root mount is written as a string");
 	}
 
 	#[test]
@@ -301,6 +515,7 @@ version = "0.1.0"
 			capabilities: Default::default(),
 			abi: AbiVersion::CURRENT,
 			attach: Default::default(),
+			signer: None,
 		};
 		assert_eq!(config.file_name(), "surrealdb-demo-1.2.3.surli");
 	}
