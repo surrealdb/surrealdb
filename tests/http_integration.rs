@@ -953,6 +953,398 @@ mod http_integration {
 		Ok(())
 	}
 
+	/// One `POST /kvexport` response, taken apart and checked against its digest.
+	///
+	/// A reference reader of the wire format: it accepts a body only if the digest
+	/// matches every byte before it, the header and every frame are whole, the end
+	/// tag is present, and nothing follows it.
+	struct KvExport {
+		header: serde_json::Value,
+		frames: Vec<(Vec<u8>, Vec<u8>)>,
+	}
+
+	fn try_parse_kvexport(bytes: &[u8]) -> Result<KvExport, String> {
+		fn take<'a>(input: &mut &'a [u8]) -> Result<&'a [u8], String> {
+			let len = input.get(..4).ok_or("a length is truncated")?;
+			let len = u32::from_le_bytes(len.try_into().unwrap()) as usize;
+			let field = input.get(4..4 + len).ok_or("a field is truncated")?;
+			*input = &input[4 + len..];
+			Ok(field)
+		}
+		if bytes.len() <= 32 {
+			return Err("the body is shorter than a digest".into());
+		}
+		let (body, digest) = bytes.split_at(bytes.len() - 32);
+		if blake3::hash(body).as_bytes() != digest {
+			return Err("the digest does not match the body".into());
+		}
+		let rest = body.strip_prefix(b"SKVX").ok_or("the body does not open with the magic")?;
+		let (format, mut input) = rest.split_first().ok_or("the format byte is missing")?;
+		if *format != 1 {
+			return Err(format!("unknown format {format}"));
+		}
+		let header = serde_json::from_slice(take(&mut input)?).map_err(|err| err.to_string())?;
+		let mut frames = Vec::new();
+		loop {
+			let (tag, next) = input.split_first().ok_or("the frames end without an end tag")?;
+			input = next;
+			match tag {
+				0 => break,
+				1 => {
+					let key = take(&mut input)?.to_vec();
+					let value = take(&mut input)?.to_vec();
+					frames.push((key, value));
+				}
+				other => return Err(format!("unknown tag {other}")),
+			}
+		}
+		if !input.is_empty() {
+			return Err("bytes follow the end tag".into());
+		}
+		Ok(KvExport {
+			header,
+			frames,
+		})
+	}
+
+	fn parse_kvexport(bytes: &[u8]) -> KvExport {
+		try_parse_kvexport(bytes).expect("the response is a whole kvexport stream")
+	}
+
+	fn hex(key: &[u8]) -> String {
+		key.iter().map(|byte| format!("{byte:02x}")).collect()
+	}
+
+	async fn start_kvexport_server(args: &str) -> (String, common::Child) {
+		common::start_server(StartServerArguments {
+			args: args.to_string(),
+			..Default::default()
+		})
+		.await
+		.unwrap()
+	}
+
+	#[test(tokio::test)]
+	async fn kvexport_endpoint() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = start_kvexport_server("--allow-experimental kvexport").await;
+		let url = format!("http://{addr}/kvexport");
+		let client = Client::builder().connect_timeout(Duration::from_secs(5)).build()?;
+
+		// Some data for the keyspace to hold, beyond the catalog the server creates
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		ensure_namespace_and_database(&client, &addr, &ns, &db).await?;
+		let mut sql = String::from("DEFINE TABLE kvexported;");
+		for n in 0..25 {
+			sql.push_str(&format!("CREATE kvexported:{n} SET n = {n};"));
+		}
+		let res = client
+			.post(format!("http://{addr}/sql"))
+			.basic_auth(USER, Some(PASS))
+			.header("surreal-ns", &ns)
+			.header("surreal-db", &db)
+			.header(header::ACCEPT, "application/json")
+			.body(sql)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+
+		// Without credentials the keyspace is not served
+		let res = client.post(&url).send().await?;
+		assert_eq!(res.status(), 401);
+
+		// A root user below owner is refused, because the frames carry what an
+		// export redacts
+		let res = client
+			.post(format!("http://{addr}/sql"))
+			.basic_auth(USER, Some(PASS))
+			.header(header::ACCEPT, "application/json")
+			.body("DEFINE USER viewer ON ROOT PASSWORD 'viewer' ROLES VIEWER")
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+		let res = client.post(&url).basic_auth("viewer", Some("viewer")).send().await?;
+		assert_eq!(res.status(), 403);
+
+		// A request that cannot name a cursor is refused whole
+		for body in [
+			json!({"after": "abc"}),
+			json!({"after": "zz"}),
+			json!({"after": 7}),
+			json!({"latest_only": "yes"}),
+			json!({"limit_keys": 10}),
+		] {
+			let res = client
+				.post(&url)
+				.basic_auth(USER, Some(PASS))
+				.header(header::CONTENT_TYPE, "application/json")
+				.body(body.to_string())
+				.send()
+				.await?;
+			assert_eq!(res.status(), 400, "{body}");
+		}
+
+		// One request streams the whole keyspace, uncompressed even when the
+		// client accepts compression. This client leaves decoding to the test, so
+		// a compressed response would show its `Content-Encoding`.
+		let res = Client::builder()
+			.no_gzip()
+			.build()?
+			.post(&url)
+			.basic_auth(USER, Some(PASS))
+			.header(header::ACCEPT_ENCODING, "gzip, deflate, br, zstd")
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		assert_eq!(res.headers()[header::CONTENT_TYPE], "application/vnd.surrealdb.kvexport");
+		assert!(res.headers().get(header::CONTENT_ENCODING).is_none(), "the stream was compressed");
+		let whole = parse_kvexport(&res.bytes().await?);
+		let keys: Vec<&[u8]> = whole.frames.iter().map(|(key, _)| key.as_slice()).collect();
+		let (version, ordered) = keys.split_last().unwrap();
+		assert_eq!(*version, b"!v", "the version key comes last");
+		// The header describes the keyspace the frames carry
+		let stamped = u16::from_be_bytes(whole.frames.last().unwrap().1.as_slice().try_into()?);
+		assert_eq!(whole.header["major"], json!(stamped), "header: {}", whole.header);
+		assert!(
+			ordered.windows(2).all(|pair| pair[0] < pair[1]),
+			"keys before the version key are not in strictly ascending order"
+		);
+		assert!(!keys.contains(&b"!bv".as_slice()), "the bootstrap sentinel was served");
+		// The frames carry what a SurrealQL export redacts, which is why the route
+		// is opt-in
+		let user = whole
+			.frames
+			.iter()
+			.find(|(key, _)| key.starts_with(b"/!usviewer"))
+			.expect("the stream did not carry the user defined above");
+		assert!(
+			user.1.windows(b"argon2".len()).any(|w| w == b"argon2"),
+			"the stored password hash is not in the stream"
+		);
+		// A record key spells its table as a null-terminated string between `*`s
+		let table = b"*kvexported\0*";
+		let records: Vec<&[u8]> = keys
+			.iter()
+			.copied()
+			.filter(|key| key.windows(table.len()).any(|w| w == table))
+			.collect();
+		assert_eq!(records.len(), 25, "the stream carried {} of 25 seeded records", records.len());
+
+		// Resuming after a key carries what follows it, and the version key again
+		let cut = ordered.len() / 2;
+		let res = client
+			.post(&url)
+			.basic_auth(USER, Some(PASS))
+			.header(header::CONTENT_TYPE, "application/json")
+			.body(json!({"after": hex(ordered[cut])}).to_string())
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		let resumed = parse_kvexport(&res.bytes().await?);
+		let resumed_keys: Vec<&[u8]> =
+			resumed.frames.iter().map(|(key, _)| key.as_slice()).collect();
+		assert_eq!(resumed_keys.last(), Some(&b"!v".as_slice()));
+		assert_eq!(
+			resumed_keys.first().copied(),
+			ordered.get(cut + 1).copied(),
+			"the resumed stream did not start after the cursor"
+		);
+		assert_eq!(
+			resumed_keys.len(),
+			ordered.len() - cut,
+			"the resumed stream did not carry everything after the cursor and the version key"
+		);
+
+		Ok(())
+	}
+
+	/// A resume key is carried in the request body as hex, so one longer than a
+	/// megabyte makes a body larger than the 2 MiB default limit of a body
+	/// extractor. The route reads its own body with a limit of its own.
+	#[test(tokio::test)]
+	async fn kvexport_accepts_a_cursor_longer_than_the_default_body_limit()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = start_kvexport_server("--allow-experimental kvexport").await;
+		let url = format!("http://{addr}/kvexport");
+		let client = Client::builder().no_gzip().build()?;
+		let res = client.post(&url).basic_auth(USER, Some(PASS)).send().await?;
+		assert_eq!(res.status(), 200);
+		let whole = parse_kvexport(&res.bytes().await?);
+		let keys: Vec<&[u8]> = whole.frames.iter().map(|(key, _)| key.as_slice()).collect();
+		let (_, ordered) = keys.split_last().unwrap();
+		assert!(ordered.len() > 3, "the catalog the server creates is too small to resume in");
+
+		// A position between two stored keys that is 1.5 MiB long
+		let mut after = ordered[2].to_vec();
+		after.resize(after.len() + 1536 * 1024, 0);
+		let body = json!({"after": hex(&after)}).to_string();
+		assert!(body.len() > 2 * 1024 * 1024, "the request is under the default body limit");
+		let res = client
+			.post(&url)
+			.basic_auth(USER, Some(PASS))
+			.header(header::CONTENT_TYPE, "application/json")
+			.body(body)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		let resumed = parse_kvexport(&res.bytes().await?);
+		let resumed_keys: Vec<&[u8]> =
+			resumed.frames.iter().map(|(key, _)| key.as_slice()).collect();
+		assert_eq!(resumed_keys.first().copied(), ordered.get(3).copied());
+		assert_eq!(resumed_keys.len(), ordered.len() - 2);
+		Ok(())
+	}
+
+	/// A reader of the format does not accept a stream that stops early, or one
+	/// that has changed, however the damage falls.
+	#[test(tokio::test)]
+	async fn kvexport_streams_are_refused_by_a_reference_reader_when_damaged()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = start_kvexport_server("--allow-experimental kvexport").await;
+		let res = Client::builder()
+			.no_gzip()
+			.build()?
+			.post(format!("http://{addr}/kvexport"))
+			.basic_auth(USER, Some(PASS))
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		let body = res.bytes().await?.to_vec();
+		try_parse_kvexport(&body)?;
+		for len in (0..body.len()).step_by(97).chain([body.len() - 33, body.len() - 1]) {
+			assert!(try_parse_kvexport(&body[..len]).is_err(), "a body cut to {len} verified");
+		}
+		for at in (0..body.len()).step_by(89).chain([body.len() - 33, body.len() - 1]) {
+			let mut changed = body.clone();
+			changed[at] ^= 0x01;
+			assert!(
+				try_parse_kvexport(&changed).is_err(),
+				"a body with byte {at} changed verified"
+			);
+		}
+		Ok(())
+	}
+
+	/// The route is off unless enabled, answers to a route target of its own, and
+	/// is unaffected by denying `/export`.
+	#[test(tokio::test)]
+	async fn kvexport_is_opt_in_and_has_its_own_route_target()
+	-> Result<(), Box<dyn std::error::Error>> {
+		for (args, status) in [
+			// Off by default, and `--allow-all` does not turn on an experimental
+			// capability
+			("", 403),
+			("--allow-all", 403),
+			("--allow-experimental files,gql", 403),
+			("--allow-experimental kvexport", 200),
+			("--allow-experimental kvexport --deny-experimental kvexport", 403),
+			("--allow-experimental kvexport --deny-http kvexport", 403),
+			("--allow-experimental kvexport --deny-http export", 200),
+			("--deny-http export", 403),
+		] {
+			let (addr, _server) = start_kvexport_server(args).await;
+			let res = Client::default()
+				.post(format!("http://{addr}/kvexport"))
+				.basic_auth(USER, Some(PASS))
+				.send()
+				.await?;
+			assert_eq!(res.status(), status, "{args}: {}", res.text().await?);
+			// A caller who is not authorised learns nothing more than that
+			if status == 403 {
+				let res = Client::default().post(format!("http://{addr}/kvexport")).send().await?;
+				assert_eq!(res.status(), 403, "{args}: an anonymous caller was told more");
+			}
+		}
+		Ok(())
+	}
+
+	/// The capability can also be given through the environment, which is how a
+	/// deployment that does not edit the command line enables it.
+	#[test(tokio::test)]
+	async fn kvexport_is_enabled_by_the_environment() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server(StartServerArguments {
+			vars: Some(
+				[("SURREAL_CAPS_ALLOW_EXPERIMENTAL".to_string(), "kvexport".to_string())].into(),
+			),
+			..Default::default()
+		})
+		.await
+		.unwrap();
+		let res = Client::default()
+			.post(format!("http://{addr}/kvexport"))
+			.basic_auth(USER, Some(PASS))
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+		Ok(())
+	}
+
+	/// A datastore that answers versioned reads has history the stream does not
+	/// carry, so it is refused unless the caller accepts that. With `latest_only`
+	/// the stream carries each key's latest value, and a key that was overwritten
+	/// is served once.
+	#[cfg(feature = "storage-surrealkv")]
+	#[test(tokio::test)]
+	async fn kvexport_refuses_a_versioned_store_unless_latest_only()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let path = common::tmp_file("kvexport-versioned.db");
+		let (addr, _server) = common::start_server(StartServerArguments {
+			path: Some(format!("surrealkv://{path}?versioned=true&retention=1h")),
+			args: "--allow-experimental kvexport".to_string(),
+			..Default::default()
+		})
+		.await
+		.unwrap();
+		let url = format!("http://{addr}/kvexport");
+		let client = Client::builder().no_gzip().build()?;
+
+		// A record written twice leaves two versions behind
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		ensure_namespace_and_database(&client, &addr, &ns, &db).await?;
+		let res = client
+			.post(format!("http://{addr}/sql"))
+			.basic_auth(USER, Some(PASS))
+			.header("surreal-ns", &ns)
+			.header("surreal-db", &db)
+			.header(header::ACCEPT, "application/json")
+			.body("CREATE kvexported:1 SET n = 1; UPDATE kvexported:1 SET n = 2;")
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+
+		for body in [None, Some(json!({})), Some(json!({"latest_only": false}))] {
+			let mut req = client.post(&url).basic_auth(USER, Some(PASS));
+			if let Some(body) = &body {
+				req = req.header(header::CONTENT_TYPE, "application/json").body(body.to_string());
+			}
+			let res = req.send().await?;
+			assert_eq!(res.status(), 409, "{body:?}");
+			assert!(res.text().await?.contains("latest_only"), "{body:?}");
+		}
+		let res = client
+			.post(&url)
+			.basic_auth(USER, Some(PASS))
+			.header(header::CONTENT_TYPE, "application/json")
+			.body(json!({"latest_only": true}).to_string())
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		let whole = parse_kvexport(&res.bytes().await?);
+		assert_eq!(whole.frames.last().map(|(key, _)| key.as_slice()), Some(b"!v".as_slice()));
+		let keys: Vec<&[u8]> = whole.frames.iter().map(|(key, _)| key.as_slice()).collect();
+		let (_, ordered) = keys.split_last().unwrap();
+		assert!(
+			ordered.windows(2).all(|pair| pair[0] < pair[1]),
+			"a key was served more than once, or out of order"
+		);
+		let table = b"*kvexported\0*";
+		let records =
+			keys.iter().filter(|key| key.windows(table.len()).any(|w| w == table)).count();
+		assert_eq!(records, 1, "the overwritten record was not served exactly once");
+		Ok(())
+	}
+
 	#[test(tokio::test)]
 	async fn health_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();

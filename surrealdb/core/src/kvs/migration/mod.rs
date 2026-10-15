@@ -175,24 +175,18 @@ async fn check_downgrade(
 	stored: Option<&StorageVersion>,
 	current: &StorageVersion,
 ) -> Result<()> {
-	// Matched on the ledger id, which is a migration's identity. The recorded
-	// name is documentation and may be reworded between releases, so comparing
-	// on it would read a rename as an unknown migration and refuse the start.
-	//
 	// The ids come from the keys and the descriptions from the values, and a
 	// value that will not decode still yields its id: a record written in a
 	// revision this build cannot read is the strongest possible evidence that
 	// the datastore has moved past it, so it must not turn into a decode error.
-	let unknown: Vec<String> = ds
-		.applied_migration_ids()
-		.await?
-		.into_iter()
-		.filter(|(id, _)| !registry.iter().any(|m| m.id == *id))
-		.map(|(id, described)| match described {
+	let entries = ds.applied_migration_ids().await?.into_iter().map(|(id, described)| {
+		let text = match described {
 			Some(record) => format!("{} ({}, id {id})", record.name, record.version),
 			None => format!("id {id}, unreadable record"),
-		})
-		.collect();
+		};
+		(id, text)
+	});
+	let unknown = unknown_migrations(entries, registry);
 
 	if !unknown.is_empty() {
 		bail!(DatastoreError::MigratedBeyondStorageVersion {
@@ -218,6 +212,24 @@ async fn check_downgrade(
 		 running a mixed set of versions is not supported."
 	);
 	Ok(())
+}
+
+/// The text of each ledger entry that `registry` has no row for. Each entry is a
+/// ledger id and the text that names it.
+///
+/// Matched on the ledger id, which is a migration's identity. The recorded name is
+/// documentation and may be reworded between releases, so comparing on it would
+/// read a rename as an unknown migration and refuse the start. A build refuses a
+/// datastore whose ledger yields any text here.
+pub(crate) fn unknown_migrations(
+	entries: impl IntoIterator<Item = (u32, String)>,
+	registry: &[Migration],
+) -> Vec<String> {
+	entries
+		.into_iter()
+		.filter(|(id, _)| !registry.iter().any(|m| m.id == *id))
+		.map(|(_, text)| text)
+		.collect()
 }
 
 /// Every migration this build ships that a datastore could still owe, in the

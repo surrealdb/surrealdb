@@ -119,6 +119,8 @@ pub enum ExperimentalTarget {
 	Files,
 	Surrealism,
 	Gql,
+	/// `POST /kvexport`, which serves the stored bytes of the whole keyspace.
+	KvExport,
 }
 
 impl fmt::Display for ExperimentalTarget {
@@ -127,6 +129,7 @@ impl fmt::Display for ExperimentalTarget {
 			Self::Files => write!(f, "files"),
 			Self::Surrealism => write!(f, "surrealism"),
 			Self::Gql => write!(f, "gql"),
+			Self::KvExport => write!(f, "kvexport"),
 		}
 	}
 }
@@ -143,6 +146,7 @@ impl Target<str> for ExperimentalTarget {
 			Self::Files => elem.eq_ignore_ascii_case("files"),
 			Self::Surrealism => elem.eq_ignore_ascii_case("surrealism"),
 			Self::Gql => elem.eq_ignore_ascii_case("gql"),
+			Self::KvExport => elem.eq_ignore_ascii_case("kvexport"),
 		}
 	}
 }
@@ -171,6 +175,7 @@ impl std::str::FromStr for ExperimentalTarget {
 			"files" => Ok(ExperimentalTarget::Files),
 			"surrealism" => Ok(ExperimentalTarget::Surrealism),
 			"gql" => Ok(ExperimentalTarget::Gql),
+			"kvexport" => Ok(ExperimentalTarget::KvExport),
 			_ => Err(ParseExperimentalTargetError::InvalidName),
 		}
 	}
@@ -307,6 +312,7 @@ impl std::str::FromStr for MethodTarget {
 pub enum RouteTarget {
 	Health,
 	Export,
+	KvExport,
 	Import,
 	Rpc,
 	Version,
@@ -329,6 +335,7 @@ impl fmt::Display for RouteTarget {
 		match self {
 			RouteTarget::Health => write!(f, "health"),
 			RouteTarget::Export => write!(f, "export"),
+			RouteTarget::KvExport => write!(f, "kvexport"),
 			RouteTarget::Import => write!(f, "import"),
 			RouteTarget::Rpc => write!(f, "rpc"),
 			RouteTarget::Version => write!(f, "version"),
@@ -370,6 +377,7 @@ impl std::str::FromStr for RouteTarget {
 		match s {
 			"health" => Ok(RouteTarget::Health),
 			"export" => Ok(RouteTarget::Export),
+			"kvexport" => Ok(RouteTarget::KvExport),
 			"import" => Ok(RouteTarget::Import),
 			"rpc" => Ok(RouteTarget::Rpc),
 			"version" => Ok(RouteTarget::Version),
@@ -1034,6 +1042,38 @@ mod tests {
 		assert!(ExperimentalTarget::Gql.matches("GQL"));
 		assert!(!ExperimentalTarget::Gql.matches("files"));
 		assert!(!ExperimentalTarget::Files.matches("gql"));
+
+		assert_eq!(ExperimentalTarget::from_str("kvexport").unwrap(), ExperimentalTarget::KvExport);
+		assert_eq!(ExperimentalTarget::KvExport.to_string(), "kvexport");
+		assert!(ExperimentalTarget::KvExport.matches("KVEXPORT"));
+		assert!(!ExperimentalTarget::KvExport.matches("export"));
+	}
+
+	/// `/kvexport` answers to a target of its own, so it can be denied without
+	/// denying `/export`, and the reverse.
+	#[test]
+	fn the_kvexport_route_is_its_own_target() {
+		assert_eq!(RouteTarget::from_str("kvexport").unwrap(), RouteTarget::KvExport);
+		assert_eq!(RouteTarget::KvExport.to_string(), "kvexport");
+		let caps = Capabilities::default()
+			.without_http_routes(Targets::Some([RouteTarget::KvExport].into()));
+		assert!(!caps.allows_http_route(&RouteTarget::KvExport));
+		assert!(caps.allows_http_route(&RouteTarget::Export));
+		let caps = Capabilities::default()
+			.without_http_routes(Targets::Some([RouteTarget::Export].into()));
+		assert!(caps.allows_http_route(&RouteTarget::KvExport));
+		assert!(!caps.allows_http_route(&RouteTarget::Export));
+	}
+
+	/// The experimental capability that enables `/kvexport` is off by default,
+	/// including under `Capabilities::all()`.
+	#[test]
+	fn kvexport_is_not_enabled_by_default() {
+		assert!(!Capabilities::default().allows_experimental(&ExperimentalTarget::KvExport));
+		assert!(!Capabilities::all().allows_experimental(&ExperimentalTarget::KvExport));
+		let caps = Capabilities::default()
+			.with_experimental(Targets::Some([ExperimentalTarget::KvExport].into()));
+		assert!(caps.allows_experimental(&ExperimentalTarget::KvExport));
 	}
 
 	#[test]

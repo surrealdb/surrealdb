@@ -127,20 +127,19 @@ impl RawRange {
 	/// Every byte string from `0x00` up to (but excluding) `0xff`, declared or not.
 	///
 	/// A range no bound produced is the one thing a declared keyspace exists to
-	/// prevent, so this exists for the single use that cannot be expressed from a
-	/// bound by construction: looking for keys the keyspace does *not* describe.
-	/// That is what the leaked-key check after a test run does, and what a scan of
-	/// unknown data needs before the keyspace's reverse decoder can name what it
-	/// found.
+	/// prevent, so this exists for the uses that cannot be expressed from a bound
+	/// by construction, because they must reach keys the keyspace does *not*
+	/// describe: the leaked-key check after a test run, a scan of unknown data
+	/// before the keyspace's reverse decoder can name what it found, and a copy of
+	/// a whole keyspace (`surrealdb_core::kvs::copy`), which must carry undeclared
+	/// keys as faithfully as declared ones. Anything that means "the engine's own
+	/// keys" uses a declared bound instead.
 	///
 	/// The `0xff` ceiling is a limit of [`KeyRange`], which has no unbounded end: a
 	/// key at or above `0xff` is outside this range. Every declared key begins with
 	/// `/` or `!`, so nothing the engine writes is missed, but a stray key in that
-	/// band would not be reported.
-	///
-	/// Hidden rather than private because the language-test harness performs that
-	/// check from outside the engine. Nothing in the engine should reach for it.
-	#[doc(hidden)]
+	/// band would not be reported. A composer that keeps state of its own in the
+	/// datastore keeps it in that band, which is what keeps it out of a copy.
 	pub fn every_key() -> Self {
 		RawRange(KeyRange {
 			start: Key::from(&[0x00u8][..]),

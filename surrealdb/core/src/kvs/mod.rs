@@ -20,6 +20,7 @@ pub(crate) mod export;
 pub mod tasks;
 
 mod clock;
+pub mod copy;
 pub(crate) mod ds;
 
 #[cfg(test)]

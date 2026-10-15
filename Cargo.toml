@@ -380,6 +380,7 @@ nix = { workspace = true, features = ["signal", "user"] }
 
 [dev-dependencies]
 assert_fs = "1.1.3"
+blake3.workspace = true
 chrono.workspace = true
 web-time.workspace = true
 ciborium.workspace = true

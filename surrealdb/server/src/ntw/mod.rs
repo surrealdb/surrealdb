@@ -13,6 +13,7 @@ pub mod health;
 pub mod import;
 mod input;
 pub mod key;
+pub mod kvexport;
 #[cfg(feature = "mcp")]
 pub mod mcp;
 pub mod ml;
@@ -162,6 +163,7 @@ pub fn community_router(exclude: &[&str]) -> Router<Arc<RpcState>> {
 	}
 	router = router
 		.merge(export::router())
+		.merge(kvexport::router())
 		.merge(import::router())
 		.merge(rpc::router())
 		.merge(grpc::router())
@@ -434,7 +436,11 @@ impl SurrealRouter {
 					// Don't compress gRPC
 					.and(NotForContentType::GRPC)
 					// Don't compress images
-					.and(NotForContentType::IMAGES),
+					.and(NotForContentType::IMAGES)
+					// Don't compress a keyspace copy: the stored bytes are mostly
+					// compact already, and deflating them costs the source more
+					// CPU than the transfer saves
+					.and(NotForContentType::const_new(kvexport::CONTENT_TYPE)),
 			),
 		);
 
