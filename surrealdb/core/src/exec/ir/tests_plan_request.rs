@@ -93,6 +93,77 @@ pub(crate) async fn plan_on_as(
 	plan_request(input, &planning).await
 }
 
+/// A container bound over a database, and the catalog memo its binder read.
+pub(crate) struct Bound {
+	pub(crate) ir: super::core::ir::Ir,
+	pub(crate) catalog: super::cache::planning::PlanningCatalog,
+}
+
+impl Bound {
+	/// The effect context of the container over the catalog its binder read and `registry`.
+	pub(crate) fn cx<'a>(
+		&'a self,
+		registry: &'a crate::exec::function::FunctionRegistry,
+	) -> super::iface::catalog::EffectCx<'a> {
+		super::iface::catalog::EffectCx {
+			registry,
+			catalog: &self.catalog,
+			frames: self.ir.frames(),
+		}
+	}
+}
+
+/// The container the statements of `sql` bind to over a database `setup` builds, as the owner, in
+/// the logical dialect and planned no further. Each statement is resolved against the catalog as
+/// a unit's statement is ([`Planner::reading_session_values`], [`Planner::bind`]) and handed over
+/// bound: its plan holds the permission filters and the computed and guard layers the catalog
+/// declares for its reads, and reads the session's values when it runs.
+pub(crate) async fn bound(setup: &str, sql: &str) -> Bound {
+	bound_as(&TestDb::owner(), setup, sql).await
+}
+
+/// [`bound`] as `session`, whose namespace and database are `test`.
+pub(crate) async fn bound_as(session: &crate::dbs::Session, setup: &str, sql: &str) -> Bound {
+	let db = TestDb::new(setup).await;
+	let ctx = db.exec_ctx_as(session, TransactionType::Read).await;
+	let txn = ctx.try_txn().expect("a transaction");
+	let planner = Planner::with_txn(
+		ctx.ctx(),
+		ctx.function_registry(),
+		txn,
+		Some("test".to_owned()),
+		Some("test".to_owned()),
+	)
+	.with_auth(Arc::clone(&ctx.root().auth));
+	let parsed = crate::syn::parse(sql).expect("the request parses").expressions;
+	let mut resolved = Vec::new();
+	for statement in &parsed {
+		let TopLevelExpr::Expr(expr) = statement else {
+			panic!("each statement is an expression");
+		};
+		let op = lower(expr.clone()).expect("the statement has a logical form");
+		let unit = planner.reading_session_values();
+		resolved.push(unit.bind(op).await.expect("the statement resolves"));
+	}
+	let statements: Vec<RequestStatement<'_>> =
+		resolved.iter().map(RequestStatement::Logical).collect();
+	let input = RequestInput::request(&statements, request_scope());
+	let session = test_session();
+	let planning = PlanningInput {
+		planner: &planner,
+		capabilities: Arc::new(Capabilities::all()),
+		backend: BackendCaps::default(),
+		held: Vec::new(),
+		session: &session,
+	};
+	let (ir, catalog) =
+		super::bind_request_over(&input, &planning).await.expect("the request binds");
+	Bound {
+		ir,
+		catalog,
+	}
+}
+
 /// The text of the container `sql` plans to, planned as the statements of a request.
 async fn planned_text(setup: &str, sql: &str) -> Result<String, IrError> {
 	let parsed = crate::syn::parse(sql).expect("the request parses").expressions;

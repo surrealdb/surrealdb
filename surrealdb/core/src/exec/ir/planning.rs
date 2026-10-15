@@ -234,6 +234,29 @@ pub(crate) async fn request_rejection(
 	input: &RequestInput<'_>,
 	planning: &PlanningInput<'_>,
 ) -> Result<Option<RegionRejection>, IrError> {
+	bind_only(input, planning).await.map(|(_, rejection, _)| rejection)
+}
+
+/// The container `input` binds to, as [`plan_request`] binds it, in the logical dialect and
+/// planned no further, with the catalog memo the binder read. Answers the region-constraint
+/// rejection as an error, as [`plan_request`] does.
+#[cfg(all(test, feature = "kv-mem"))]
+pub(crate) async fn bind_request_over(
+	input: &RequestInput<'_>,
+	planning: &PlanningInput<'_>,
+) -> Result<(Ir, PlanningCatalog), IrError> {
+	match bind_only(input, planning).await? {
+		(_, Some(rejection), _) => Err(IrError::Rejected(Box::new(rejection.refusal()))),
+		(ir, None, memo) => Ok((ir, memo)),
+	}
+}
+
+/// The container `input` binds to over the catalog the planner's transaction holds, its
+/// region-constraint rejection, and the memo the binder read the catalog through.
+async fn bind_only(
+	input: &RequestInput<'_>,
+	planning: &PlanningInput<'_>,
+) -> Result<(Ir, Option<RegionRejection>, PlanningCatalog), IrError> {
 	let planner = planning.planner;
 	let (txn, ids) = request_catalog(planning).await?;
 	let (memo, lowered) = prepare(input, planning, txn, ids).await?;
@@ -247,7 +270,8 @@ pub(crate) async fn request_rejection(
 		late_bound: input.late_bound,
 	};
 	let registry = planner.function_registry();
-	bind_loaded(&bound, planner, registry, &memo, &frames).await.map(|(_, rejection, _)| rejection)
+	let (ir, rejection, _) = bind_loaded(&bound, planner, registry, &memo, &frames).await?;
+	Ok((ir, rejection, memo))
 }
 
 /// The transaction the compile reads the catalog through, and the ids of the session's namespace

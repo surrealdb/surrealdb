@@ -29,7 +29,7 @@ use super::ops::{
 	LoopSink, SortShape, SourceRefShape, StepAttrs, TxnRegionMode, UseTarget,
 };
 use crate::exec::ir::iface::catalog::EffectCx;
-use crate::exec::ir::iface::effects::{Determinism, IrFootprint, OpEffects, Rollback};
+use crate::exec::ir::iface::effects::{Determinism, IrFootprint, IrResource, OpEffects, Rollback};
 use crate::exec::ir::iface::fallibility::{ContextDep, Fallibility};
 use crate::exec::ir::iface::ids::RegionId;
 use crate::exec::ir::iface::region_kind::{
@@ -63,8 +63,8 @@ impl LogOp {
 	/// The op's own effects, excluding the ops of its regions.
 	///
 	/// `fallibility` is the op's [`LogOp::fallibility`], so the two answers cannot disagree. The
-	/// footprint is unknown for every op with an effect and empty for a pure one; keyed
-	/// footprints are computed by the analysis pass.
+	/// footprint is the one [`footprint_of`] derives from the effect set; keyed footprints are
+	/// computed by the analysis pass.
 	pub(crate) fn local_effects(&self, cx: &EffectCx<'_>) -> OpEffects {
 		let (set, rollback) = self.effect_class();
 		OpEffects {
@@ -1078,16 +1078,24 @@ impl LogOp {
 	}
 }
 
-/// The footprint of an op with the given effects: unknown when the set holds any effect, empty
-/// when it is pure.
+/// The footprint of an op with the given effects. It reads `Unknown` when the set holds any
+/// effect. It writes `Unknown` when the set changes state that outlives the op
+/// ([`EffectSet::mutates_state`]) or runs a body nothing is known about
+/// ([`EffectSet::OPAQUE_BODY`]), and writes nothing otherwise: an op that only reads, draws or
+/// waits leaves every resource as it found it.
 fn footprint_of(set: EffectSet) -> IrFootprint {
-	if set.is_pure() {
-		IrFootprint {
-			reads: SmallVec::new(),
-			writes: SmallVec::new(),
-		}
-	} else {
-		OpEffects::top().footprint
+	let unknown = || smallvec![IrResource::Unknown];
+	IrFootprint {
+		reads: if set.is_pure() {
+			SmallVec::new()
+		} else {
+			unknown()
+		},
+		writes: if set.mutates_state() || set.contains(EffectSet::OPAQUE_BODY) {
+			unknown()
+		} else {
+			SmallVec::new()
+		},
 	}
 }
 

@@ -262,13 +262,27 @@ async fn an_op_in_a_function_body_is_not_a_candidate() {
 	assert!(candidates(&ir, &mut FactCache::new(), &env.cx(), stmt).is_empty());
 }
 
-/// The table permission predicate a statement binds holds a candidate: `$auth.admin OR …` is the
-/// same for every row.
+/// The table permission predicate a record user's statement binds holds a candidate:
+/// `$auth = NONE OR …` is the same for every row. A field step off `$auth` fetches the record and
+/// derives its computed fields through bodies it does not show, so it is no candidate.
+#[cfg(feature = "kv-mem")]
 #[tokio::test]
 async fn the_bound_table_predicate_holds_the_auth_candidate() {
-	let sql = "DEFINE TABLE vault PERMISSIONS FOR select WHERE $auth.admin OR <int>'x' = 1; \
-		SELECT VALUE id FROM vault;";
-	let ir = bind(sql).await;
+	let setup = "DEFINE ACCESS user ON DATABASE TYPE RECORD; \
+		DEFINE TABLE vault PERMISSIONS FOR select WHERE $auth = NONE OR <int>'x' = 1;";
+	let reader = crate::dbs::Session::for_record(
+		"test",
+		"test",
+		"user",
+		crate::types::PublicValue::RecordId(surrealdb_types::RecordId::new("user", "reader")),
+	);
+	let ir = crate::exec::ir::tests_plan_request::bound_as(
+		&reader,
+		setup,
+		"SELECT VALUE id FROM vault;",
+	)
+	.await
+	.ir;
 	let found = all_candidates(&ir);
 	let in_predicate: Vec<&MemoCandidate> = found
 		.iter()

@@ -19,6 +19,8 @@
 
 use std::collections::{HashSet, VecDeque};
 
+use smallvec::SmallVec;
+
 use super::cx::default_cx;
 use super::slice::{self, OnFailure, Slice};
 use super::{effects, fallibility, footprint, multiplicity, types};
@@ -719,7 +721,8 @@ fn delivery_of(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, loop_op: OpId)
 }
 
 /// The first thing in the body of a loop, in body order, that makes the loop's effects
-/// unknowable or order-dependent. `body_ops` is the body in body order.
+/// unknowable or order-dependent. `body_ops` is the body in body order; the bodies of the closures
+/// it invokes ([`effects::collect_invoked`]) run where they are invoked, and are judged after it.
 ///
 /// Each op is judged by its own effects, in this order: a catalog change by a schema statement,
 /// or by any op that is not a write, is a catalog change, and one by a write defines its table
@@ -732,7 +735,23 @@ fn barrier_of(
 	body_ops: &[OpId],
 ) -> Option<BarrierCause> {
 	const DDL: [LogTag; 4] = [LogTag::Define, LogTag::Remove, LogTag::Alter, LogTag::Rebuild];
+	let mut creators = SmallVec::<[OpId; 2]>::new();
 	for op in body_ops.iter().copied() {
+		effects::collect_invoked(ir, op, &mut creators);
+	}
+	let mut judged = body_ops.to_vec();
+	for creator in creators {
+		let regions = ir.op(creator).map(|data| data.regions.to_vec()).unwrap_or_default();
+		for region in regions {
+			if ir.region(region).is_some_and(|info| info.kind == RegionKind::ClosureBody) {
+				ir.walk(region, WalkOrder::PreOrder, &mut |inner| {
+					judged.push(inner);
+					Walk::Continue
+				});
+			}
+		}
+	}
+	for op in judged {
 		let Some(data) = ir.op(op) else {
 			continue;
 		};

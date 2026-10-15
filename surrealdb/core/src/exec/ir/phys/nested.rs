@@ -58,7 +58,7 @@ use crate::exec::ir::core::walk::{ancestors, ops_in};
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::membership::is_membership_set;
 use crate::exec::ir::expr::ops::{ExprOp, KeyShape, NestedStrategy};
-use crate::exec::ir::iface::catalog::{CatalogAnswer, PhysCx, SourceKey};
+use crate::exec::ir::iface::catalog::{CatalogAnswer, EffectCx, PhysCx, SourceKey};
 use crate::exec::ir::iface::choose::IndexRef;
 use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
 use crate::exec::ir::iface::region_kind::RegionKind;
@@ -232,7 +232,7 @@ fn decide(
 		correlated: tree.correlated(ir, &none),
 		repeatable: tree.repeatable(ir, facts, cx, &none),
 		reads_rows: reads_rows(ir, region),
-		enclosing_writes: statement_writes(ir, facts, cx, owner),
+		enclosing_writes: statement_writes(ir, facts, &cx.effects, owner),
 	};
 	let join = if nested.correlated && nested.reads_rows {
 		join_site(ir, facts, cx, &tree, region)
@@ -341,7 +341,7 @@ fn holds_control(ir: &Ir, region: RegionId) -> bool {
 pub(super) fn statement_writes(
 	ir: &Ir,
 	facts: &mut FactCache,
-	cx: &PhysCx<'_>,
+	cx: &EffectCx<'_>,
 	owner: OpId,
 ) -> bool {
 	let mut ops = vec![owner];
@@ -357,7 +357,7 @@ pub(super) fn statement_writes(
 		Some(OpKind::Phys(kind)) => writes_by_shape(kind),
 		Some(OpKind::Expr(kind)) => {
 			!fetches(kind) && {
-				let set = effects::local(ir, facts, &cx.effects, op).set;
+				let set = effects::local(ir, facts, cx, op).set;
 				set.writes_data()
 					|| set.intersects(EffectSet::OPAQUE_BODY | EffectSet::WRITES_EXTERNAL)
 			}

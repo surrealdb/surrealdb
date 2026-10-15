@@ -2899,13 +2899,14 @@ mod tests {
 
 	/// A pre-filtered search whose conjuncts include a projection function call, which the index
 	/// analysis reads as the field it names, covers the indexed conjunct and leaves the call to
-	/// the search's own judgement, at its own position.
+	/// the search's own judgement, at its own position. The tag index has recorded storing no
+	/// array in its column, so it lists one entry per record.
 	#[test]
 	fn a_prefilter_residual_holds_a_projection_call_the_analysis_rewrites() {
 		use crate::catalog::{
-			BTREE_ENTRY_DOC_IDS_FORMAT_VERSION, Distance, FieldDefinition, HnswParams, VectorType,
+			BTREE_ENTRY_DOC_IDS_FORMAT_VERSION, Distance, HnswParams, VectorType,
 		};
-		use crate::expr::Kind;
+		use crate::exec::index::access_path::ColumnFlags;
 
 		let hnsw = Index::Hnsw(HnswParams {
 			dimension: 2,
@@ -2922,12 +2923,9 @@ mod tests {
 		let mut by_tag = idx(1, "ix_tag", &["tag"]);
 		by_tag.format_version = BTREE_ENTRY_DOC_IDS_FORMAT_VERSION;
 		let mut table = answers(vec![by_tag, idx_def(2, "hn", &["emb"], hnsw)]);
-		table.fields = Arc::from(vec![FieldDefinition {
-			name: Idiom::from_str("tag").expect("valid idiom"),
-			field_kind: Some(Kind::String),
-			..Default::default()
-		}]);
-		let table = refreshed(table);
+		let columns = table.columns.as_mut().expect("the columns are read");
+		let scalar: Vec<ColumnFlags> = vec![Box::new([true]), Box::default()];
+		columns.scalar = Some(scalar.into());
 		let choice = chosen(
 			&table,
 			"WHERE emb <|2,40|> [1.0, 2.0] AND tag = 'a' AND type::field('cat') = 'x'",

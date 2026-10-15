@@ -84,14 +84,41 @@ pub(crate) fn of_with(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, op: OpI
 /// The local answer of one op: its kind's own effects, never those of its regions.
 ///
 /// A physical op answers by [`phys_effects::of_op`], the fold of the logical ops its provenance
-/// names; every other op answers by its kind. A dangling id answers [`OpEffects::top`].
+/// names. An `expr.invoke` of a closure the container creates ([`closure_of`]) answers the
+/// invocation alone ([`visible_invocation`]): the closure's body is counted where it is invoked
+/// ([`closure_body`]). Every other op answers by its kind. A dangling id answers
+/// [`OpEffects::top`].
 pub(crate) fn local(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, op: OpId) -> OpEffects {
 	match ir.op(op) {
 		Some(data) => match &data.kind {
 			OpKind::Phys(_) => phys_effects::of_op(ir, facts, cx, op),
+			OpKind::Expr(ExprOp::Invoke)
+				if data
+					.operands
+					.first()
+					.is_some_and(|target| closure_of(ir, *target).is_some()) =>
+			{
+				visible_invocation(data.kind.local_effects(cx))
+			}
 			OpKind::Expr(_) | OpKind::Logical(_) => data.kind.local_effects(cx),
 		},
 		None => OpEffects::top(),
+	}
+}
+
+/// The answer of an invocation whose closure the container holds: the failures and context
+/// dependencies `declared` states for an invocation, and no effect, footprint or rollback of its
+/// own, since everything the call does is the closure body's.
+fn visible_invocation(declared: OpEffects) -> OpEffects {
+	OpEffects {
+		set: EffectSet::PURE,
+		footprint: IrFootprint {
+			reads: SmallVec::new(),
+			writes: SmallVec::new(),
+		},
+		rollback: Rollback::NoEffects,
+		determinism: Determinism::Deterministic,
+		..declared
 	}
 }
 

@@ -202,7 +202,9 @@ async fn auth_limit_id_field_assert() -> Result<()> {
 	";
 	let refused = dbs.execute(sql, &ses_editor, None).await.expect_err("the DEFINE is refused");
 	assert!(
-		refused.to_string().contains("a schema statement is not allowed in an ASSERT clause"),
+		refused
+			.to_string()
+			.contains("The ASSERT clause must not have effects: `DEFINE` changes the schema"),
 		"{refused}"
 	);
 
@@ -385,7 +387,9 @@ async fn auth_limit_field_value_statement() -> Result<()> {
 	let sql = "DEFINE FIELD x ON t VALUE (DEFINE USER escalate_value ON DATABASE ROLES OWNER PASSWORD 'pass');";
 	let refused = dbs.execute(sql, &ses_editor, None).await.expect_err("the DEFINE is refused");
 	assert!(
-		refused.to_string().contains("a schema statement is not allowed in a VALUE clause"),
+		refused
+			.to_string()
+			.contains("The VALUE clause must not have effects: `DEFINE` changes the schema"),
 		"{refused}"
 	);
 	let res = &mut dbs.execute("CREATE t:1;", &ses_owner, None).await?;

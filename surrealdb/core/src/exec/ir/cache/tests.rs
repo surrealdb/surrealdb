@@ -926,9 +926,8 @@ mod datastore {
 	use surrealdb_strand::Strand;
 
 	use super::{
-		BindingOrigin, FoldConsumer, FrameId, LiteralOrdinal, PlanningCatalog, SlotId, TableName,
-		ValueDep, ValueDeps, ValueRef, ValueUse, context_names, reads_principal, statement,
-		table_of,
+		BindingOrigin, FoldConsumer, FrameId, PlanningCatalog, SlotId, TableName, ValueDep,
+		ValueDeps, ValueRef, ValueUse, context_names, reads_principal, statement, table_of,
 	};
 	use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 	use crate::catalog::{DatabaseId, NamespaceId};
@@ -2009,18 +2008,6 @@ mod datastore {
 	// The record through the IR seam
 	// -----------------------------------------------------------------------------------------
 
-	/// The value-dependence record of each statement of `sql`, planned by `plan_request` as
-	/// `session` with `vars` bound, in a read transaction opened after `setup` has been run and
-	/// committed.
-	async fn planned_record_as(
-		session: &crate::dbs::Session,
-		setup: &str,
-		sql: &str,
-		vars: &[(&str, Value)],
-	) -> Result<Vec<(usize, ValueDeps)>, IrError> {
-		Ok(planned_as(session, setup, sql, vars).await?.outcome.deps)
-	}
-
 	/// `sql` planned by `plan_request` as `session` with `vars` bound, in a read transaction
 	/// opened after `setup` has been run and committed.
 	async fn planned_as(
@@ -2074,135 +2061,117 @@ mod datastore {
 		plan_request(&input, &planning).await
 	}
 
-	async fn planned_record_on(
+	/// `sql` planned as the owner over a database `setup` builds, with `vars` bound.
+	async fn planned_on(
 		setup: &str,
 		sql: &str,
 		vars: &[(&str, Value)],
-	) -> Result<Vec<(usize, ValueDeps)>, IrError> {
-		planned_record_as(&TestDb::owner(), setup, sql, vars).await
+	) -> crate::exec::ir::PlannedRequest {
+		planned_as(&TestDb::owner(), setup, sql, vars).await.expect("the request plans")
 	}
 
-	async fn planned_record(
-		sql: &str,
-		vars: &[(&str, Value)],
-	) -> Result<Vec<(usize, ValueDeps)>, IrError> {
-		planned_record_on("", sql, vars).await
+	/// The names `planned` reads when it runs: each `expr.free_param`, `expr.session_param` and
+	/// `expr.catalog_param` of its container, in pre-order.
+	fn run_time_reads(planned: &crate::exec::ir::PlannedRequest) -> Vec<String> {
+		use crate::exec::ir::expr::ops::ExprOp;
+		use crate::exec::ir::op_kind::OpKind;
+
+		let ir = &planned.ir;
+		let mut names = Vec::new();
+		ir.walk(ir.top(), WalkOrder::PreOrder, &mut |op| {
+			if let Some(OpKind::Expr(
+				ExprOp::FreeParam {
+					name,
+				}
+				| ExprOp::SessionParam {
+					name,
+				}
+				| ExprOp::CatalogParam {
+					name,
+				},
+			)) = ir.op(op).map(|data| &data.kind)
+			{
+				names.push(name.to_string());
+			}
+			Walk::Continue
+		});
+		names
 	}
 
-	/// The record of the last statement of a planned request.
-	fn last_record(records: Vec<(usize, ValueDeps)>) -> ValueDeps {
-		records.into_iter().last().map(|(_, deps)| deps).expect("the request has a record")
+	/// Whether `planned` consumed a value at plan time: a statement kept a record, or the
+	/// conversion's record names a value or is incomplete.
+	fn consumed_a_plan_time_value(planned: &crate::exec::ir::PlannedRequest) -> bool {
+		let (physical, complete) = &planned.outcome.physical_deps;
+		!planned.outcome.deps.is_empty() || !physical.deps().is_empty() || !complete
 	}
 
 	const INDEXED: &str = "DEFINE TABLE t SCHEMALESS; DEFINE INDEX ia ON t FIELDS a;
 		DEFINE FIELD at ON t TYPE datetime; DEFINE INDEX iat ON t FIELDS at;";
 
-	/// One case per planning decision that consumes a value.
+	/// One case per planning decision that may consume a value. A request plans every name it
+	/// reads, a client binding, a stored parameter and a name bound nowhere alike, as a read
+	/// when the statement runs: no decision consumes the value at plan time, so the plan keeps
+	/// no record of one.
 	#[tokio::test]
 	async fn value_deps_per_row() {
-		let slot0 = |consumer| dep_of(ValueRef::Slot(SlotId(0)), consumer, ValueUse::Exact);
-
-		// 1: a point lookup from a record id.
-		let record = last_record(
-			planned_record_on(INDEXED, "SELECT * FROM t WHERE id = $p", &[("p", val("t:1"))])
-				.await
-				.expect("the request plans"),
-		);
-		assert!(dep_set(&record).contains(&slot0(FoldConsumer::IndexChoice)), "row 1");
-
-		// 2: an index equality.
-		let record = last_record(
-			planned_record_on(INDEXED, "SELECT * FROM t WHERE a = $p", &[("p", val("1"))])
-				.await
-				.expect("the request plans"),
-		);
-		assert!(dep_set(&record).contains(&slot0(FoldConsumer::IndexChoice)), "row 2");
-
-		// 3: a `type::field` path the analyzer matches.
-		let record = last_record(
-			planned_record_on(
-				INDEXED,
-				"SELECT * FROM t WHERE type::field($f) = 1",
-				&[("f", val("'a'"))],
-			)
-			.await
-			.expect("the request plans"),
-		);
-		assert!(dep_set(&record).contains(&slot0(FoldConsumer::IndexChoice)), "row 3");
-
-		// 4: a source read from a record id.
-		let record = last_record(
-			planned_record_on(INDEXED, "SELECT * FROM $p", &[("p", val("t:1"))])
-				.await
-				.expect("the request plans"),
-		);
-		assert!(dep_set(&record).contains(&slot0(FoldConsumer::DynamicTargetTable)), "row 4");
-
-		// 5: a version stamp.
-		let record = last_record(
-			planned_record_on(
+		let stored = format!("{INDEXED} DEFINE PARAM $s VALUE 1 PERMISSIONS NONE;");
+		for (row, setup, sql, vars, name) in [
+			// A point lookup from a record id.
+			(1, INDEXED, "SELECT * FROM t WHERE id = $p", vec![("p", val("t:1"))], "p"),
+			// An index equality.
+			(2, INDEXED, "SELECT * FROM t WHERE a = $p", vec![("p", val("1"))], "p"),
+			// A `type::field` path.
+			(3, INDEXED, "SELECT * FROM t WHERE type::field($f) = 1", vec![("f", val("'a'"))], "f"),
+			// A source read from a record id.
+			(4, INDEXED, "SELECT * FROM $p", vec![("p", val("t:1"))], "p"),
+			// A version stamp.
+			(
+				5,
 				INDEXED,
 				"SELECT * FROM t VERSION $p",
-				&[("p", val("d'2024-01-01T00:00:00Z'"))],
-			)
-			.await
-			.expect("the request plans"),
-		);
-		assert!(dep_set(&record).contains(&slot0(FoldConsumer::TypeFact)), "row 5");
-
-		// 6: a name bound nowhere.
-		let record = last_record(
-			planned_record_on(INDEXED, "SELECT * FROM t WHERE a = $z", &[])
-				.await
-				.expect("the request plans"),
-		);
-		assert!(depends_on(&record, &ValueRef::Absent(Strand::from("z"))), "row 6");
-
-		// 7: a stored parameter that is not `FULL` stays a run-time read.
-		let setup = format!("{INDEXED} DEFINE PARAM $s VALUE 1 PERMISSIONS NONE;");
-		let record = last_record(
-			planned_record_on(&setup, "SELECT * FROM t WHERE a = $s", &[])
-				.await
-				.expect("the request plans"),
-		);
-		assert!(record.deps().is_empty(), "row 7");
-		assert!(!record.overflowed(), "row 7");
-
-		// 8: a folded condition holds the slot and the literal it combines.
-		let record = last_record(
-			planned_record_on(INDEXED, "SELECT * FROM t WHERE a = $p + 1", &[("p", val("1"))])
-				.await
-				.expect("the request plans"),
-		);
-		assert!(depends_on(&record, &ValueRef::Slot(SlotId(0))), "row 8");
-		assert!(depends_on(&record, &ValueRef::Literal(LiteralOrdinal(0))), "row 8");
+				vec![("p", val("d'2024-01-01T00:00:00Z'"))],
+				"p",
+			),
+			// A name bound nowhere.
+			(6, INDEXED, "SELECT * FROM t WHERE a = $z", vec![], "z"),
+			// A stored parameter.
+			(7, stored.as_str(), "SELECT * FROM t WHERE a = $s", vec![], "s"),
+			// A condition that combines a name with a literal.
+			(8, INDEXED, "SELECT * FROM t WHERE a = $p + 1", vec![("p", val("1"))], "p"),
+		] {
+			let planned = planned_on(setup, sql, &vars).await;
+			assert!(!consumed_a_plan_time_value(&planned), "row {row}");
+			assert!(run_time_reads(&planned).contains(&name.to_owned()), "row {row}: {sql}");
+		}
 	}
 
-	/// A literal of the statement text is named by its ordinal in the statement, whatever the
-	/// whitespace, the comments or the statement's place in the request.
+	/// A literal of the statement text is planned from where it stands, whatever the whitespace,
+	/// the comments or the statement's place in the request, and the plan keeps no record of it.
 	#[tokio::test]
 	async fn literal_dep_recorded() {
-		let expected = BTreeSet::from([dep_of(
-			ValueRef::Literal(LiteralOrdinal(0)),
-			FoldConsumer::IndexChoice,
-			ValueUse::Exact,
-		)]);
+		let mut texts = BTreeSet::new();
 		for sql in [
 			"SELECT * FROM t WHERE a = 1",
 			"SELECT  *  FROM t\n WHERE   a = 1",
 			"SELECT * FROM t /* a comment */ WHERE a = 1 -- trailing\n",
-			"RETURN 5; SELECT * FROM t WHERE a = 1",
 		] {
-			let record =
-				last_record(planned_record_on(INDEXED, sql, &[]).await.expect("the request plans"));
-			assert_eq!(dep_set(&record), expected, "{sql}");
+			let planned = planned_on(INDEXED, sql, &[]).await;
+			assert!(!consumed_a_plan_time_value(&planned), "{sql}");
+			texts.insert(crate::exec::ir::core::print::print(
+				&planned.ir,
+				planned.ir.top(),
+				Default::default(),
+			));
 		}
-		let record = last_record(planned_record("RETURN 1 + 1", &[]).await.expect("plans"));
-		assert!(record.deps().is_empty());
+		assert_eq!(texts.len(), 1, "every spelling plans to one container");
+		let planned = planned_on(INDEXED, "RETURN 5; SELECT * FROM t WHERE a = 1", &[]).await;
+		assert!(!consumed_a_plan_time_value(&planned));
+		let planned = planned_on("", "RETURN 1 + 1", &[]).await;
+		assert!(!consumed_a_plan_time_value(&planned));
 	}
 
-	/// The e-graph reorders and replaces ops. The record names each decision by its consumer,
-	/// so it does not depend on whether the e-graph runs.
+	/// The e-graph reorders and replaces ops. What the plan records of the values it consumed
+	/// does not depend on whether the e-graph runs.
 	#[tokio::test]
 	async fn value_deps_stable_across_rewrites() {
 		struct Mode(EgraphMode);
@@ -2219,19 +2188,22 @@ mod datastore {
 
 		let sql = "SELECT * FROM t WHERE a = $p AND a > 0";
 		let vars = [("p", val("1"))];
+		let records = |planned: crate::exec::ir::PlannedRequest| {
+			(planned.outcome.deps, planned.outcome.physical_deps)
+		};
 		let off = {
 			let _mode = Mode::set(EgraphMode::ForceOff);
-			last_record(planned_record_on(INDEXED, sql, &vars).await.expect("the request plans"))
+			records(planned_on(INDEXED, sql, &vars).await)
 		};
 		let seeded = {
 			let _mode = Mode::set(EgraphMode::ForceOnSeeded);
-			last_record(planned_record_on(INDEXED, sql, &vars).await.expect("the request plans"))
+			records(planned_on(INDEXED, sql, &vars).await)
 		};
 		assert_eq!(off, seeded);
 	}
 
-	/// A record user's own statement, indexed by `$auth.id`, plans from the principal's value and
-	/// records that it did.
+	/// A record user's own statement, indexed by `$auth.id`, reads the principal when it runs:
+	/// the principal is never folded into a plan, so the plan names no principal value.
 	#[tokio::test]
 	async fn auth_id_index_parity() {
 		let rid =
@@ -2241,24 +2213,24 @@ mod datastore {
 			DEFINE TABLE user SCHEMALESS PERMISSIONS FULL;
 			DEFINE TABLE t SCHEMALESS PERMISSIONS FULL;
 			DEFINE INDEX io ON t FIELDS owner;";
-		let record = last_record(
-			planned_record_as(&session, setup, "SELECT * FROM t WHERE owner = $auth.id", &[])
-				.await
-				.expect("the request plans"),
-		);
-		assert!(depends_on(&record, &ValueRef::Principal(Strand::from("auth"))));
-		assert!(reads_principal(&record));
+		let planned = planned_as(&session, setup, "SELECT * FROM t WHERE owner = $auth.id", &[])
+			.await
+			.expect("the request plans");
+		assert!(run_time_reads(&planned).contains(&"auth".to_owned()));
+		assert!(!consumed_a_plan_time_value(&planned));
+		assert!(!reads_principal(&planned.outcome.physical_deps.0));
 	}
 
-	/// A unit kept for a statement whose index decision consumed `$p` is guarded by the name.
+	/// A unit kept for a statement whose index decision reads `$p` is guarded by no name: the
+	/// plan reads `$p` when it runs, so no value of it is in the plan.
 	#[tokio::test]
 	async fn served_unit_guarded_by_context_deps() {
 		let sql = "SELECT * FROM t WHERE a = $p";
-		let record = last_record(
-			planned_record_on(INDEXED, sql, &[("p", val("1"))]).await.expect("the request plans"),
-		);
-		let guarded = context_names(&record, &table_of(sql)).expect("the record is complete");
-		assert!(guarded.contains("p"));
+		let planned = planned_on(INDEXED, sql, &[("p", val("1"))]).await;
+		assert!(run_time_reads(&planned).contains(&"p".to_owned()));
+		let guarded = context_names(&planned.outcome.physical_deps.0, &table_of(sql))
+			.expect("the record is complete");
+		assert!(guarded.is_empty(), "{guarded:?}");
 	}
 
 	/// The statement clock is read when the statement runs, never at plan time: the planned

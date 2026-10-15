@@ -3906,8 +3906,10 @@ fn plan_statement_counters() {
 	assert_eq!(format!("{:?}", fx.ir), held);
 }
 
-/// The work bounds decide the plan: under the default limits each statement is planned and
-/// written back exactly as it is with no wall at all, so the plan does not depend on load.
+/// The work bounds decide the plan; the wall is a safety stop. With no wall each statement
+/// saturates and adopts its rewrite. Under the default limits a run either plans and writes back
+/// exactly that, or meets the wall first (a debug build under load may) and keeps the statement as
+/// it was: the wall never picks a different rewrite.
 #[test]
 fn the_default_limits_plan_as_an_unbounded_wall_does() {
 	let env = Env::new();
@@ -3917,21 +3919,31 @@ fn the_default_limits_plan_as_an_unbounded_wall_does() {
 		..EGRAPH_DEFAULT
 	};
 	assert!(EGRAPH_DEFAULT.wall >= Duration::from_millis(5), "the wall is a safety stop");
+	let kinds_of = |fx: &Fixture| -> Vec<String> {
+		let region = fx.ir.op(fx.stmt).expect("the statement exists").regions[0];
+		crate::exec::ir::core::walk::ops_in(&fx.ir, region)
+			.map(|op| format!("{:?}", fx.ir.op(op).expect("the op exists").kind))
+			.collect()
+	};
 	for build in [lr5, lr6, lr7r, lr7l] {
 		let _forced = ForcedPlanning::new(EgraphMode::Default, Some(set));
-		let mut planned = Vec::new();
-		for limits in [EGRAPH_DEFAULT, unbounded] {
-			let mut fx = statement_of(build);
-			let outcome = plan_with(&mut fx, &env, set, limits, None, &CloneSurgery);
-			assert_eq!(outcome.stopped_by, None, "{limits:?}");
-			let region = fx.ir.op(fx.stmt).expect("the statement exists").regions[0];
-			let kinds: Vec<String> = crate::exec::ir::core::walk::ops_in(&fx.ir, region)
-				.map(|op| format!("{:?}", fx.ir.op(op).expect("the op exists").kind))
-				.collect();
-			planned.push((outcome, kinds));
+		let mut fx = statement_of(build);
+		let saturated = plan_with(&mut fx, &env, set, unbounded, None, &CloneSurgery);
+		assert_eq!(saturated.stopped_by, None, "the work bounds end the run");
+		assert!(saturated.chose_alternative);
+		let rewritten = kinds_of(&fx);
+
+		let mut fx = statement_of(build);
+		let as_built = kinds_of(&fx);
+		let bounded = plan_with(&mut fx, &env, set, EGRAPH_DEFAULT, None, &CloneSurgery);
+		match bounded.stopped_by {
+			None => assert_eq!((bounded, kinds_of(&fx)), (saturated, rewritten)),
+			Some(Limit::Wall) => {
+				assert!(!bounded.chose_alternative, "a run the wall stops adopts nothing");
+				assert_eq!(kinds_of(&fx), as_built, "a run the wall stops keeps the statement");
+			}
+			Some(other) => panic!("the default limits stopped the run at {other:?}"),
 		}
-		assert!(planned[1].0.chose_alternative);
-		assert_eq!(planned[0], planned[1]);
 	}
 }
 
@@ -4072,12 +4084,18 @@ mod kv {
 	use crate::exec::ir::{RequestInput, RequestStatement};
 	use crate::kvs::Datastore;
 
-	/// A datastore with the test namespace and database in place.
+	/// A datastore with the test namespace and database in place, built as the language-test
+	/// runner builds one: with no maintenance tasks, so nothing drains a queued event while a
+	/// request runs.
 	async fn datastore() -> Arc<Datastore> {
 		use crate::catalog::providers::CatalogProvider;
 		use crate::kvs::TransactionType;
 
-		let ds = Datastore::new("memory").await.expect("a memory datastore");
+		let ds = Datastore::builder()
+			.without_maintenance_tasks()
+			.build_with_path("memory")
+			.await
+			.expect("a memory datastore");
 		let tx = ds.transaction(TransactionType::Write).await.expect("a write transaction");
 		tx.ensure_ns_db(None, "test", "test").await.expect("the test namespace and database");
 		tx.commit().await.expect("committing the namespace");
@@ -4130,13 +4148,11 @@ mod kv {
 		CREATE u:1 SET y = 1, n = 5, tags = [1, 2]; CREATE u:2 SET y = 0, n = 7, tags = [1, 2]; \
 		CREATE u:3 SET y = 2, n = NONE, tags = [1, 2];";
 
-	/// Statements each of which a rule of the catalogue matches and rewrites.
-	const MATCHING: &[&str] = &[
-		"SELECT VALUE (SELECT VALUE tags[WHERE $this > 0 AND false] FROM u) FROM t;",
-		"SELECT VALUE (SELECT VALUE tags[WHERE $this > 0 OR true] FROM u) FROM t;",
-		"SELECT VALUE (SELECT VALUE (<array<int>> tags)[WHERE $this * 0 = 0] FROM u) FROM t;",
-		"SELECT VALUE (SELECT VALUE (<array<int>> tags)[WHERE 0 * $this = 0] FROM u) FROM t;",
-	];
+	/// Statements each of which a rule of the catalogue matches and rewrites. A loop is an opaque
+	/// leaf of the import, so each product stands outside every loop, beside a table read that
+	/// gives the gate a choice point.
+	const MATCHING: &[&str] =
+		&["RETURN [(SELECT VALUE id FROM t), 7 * 0];", "RETURN [(SELECT VALUE id FROM t), 0 * 7];"];
 
 	/// The statement runs to the same results, errors and order with `rule` registered and with
 	/// no rule; the request reaches the planner in both runs, and the rule rewrites a statement
@@ -4166,18 +4182,47 @@ mod kv {
 		assert_eq!(after.adopted, between.adopted, "a statement was rewritten with no rule");
 	}
 
+	/// The statement runs to the same results, errors and order with `rule` registered and with
+	/// no rule, the request reaches the planner in both runs, and no statement is rewritten in
+	/// either.
+	async fn reached_and_left_alone(query: &str, rule: &'static RuleDecl) {
+		let before = counts();
+		let with = {
+			let _forced = ForcedPlanning::new(EgraphMode::Default, Some(rule_set(&[rule])))
+				.with_limits(UNHURRIED);
+			run_over_prelude(query).await
+		};
+		let between = counts();
+		let without = {
+			let _forced = ForcedPlanning::new(EgraphMode::Default, Some(rule_set(&[])));
+			run_over_prelude(query).await
+		};
+		let after = counts();
+		assert_eq!(with, without);
+		assert!(
+			between.planned > before.planned && after.planned > between.planned,
+			"the request did not reach the e-graph planner"
+		);
+		assert_eq!(after.adopted, before.adopted, "a statement was rewritten");
+	}
+
+	/// `truthy(x AND false)` stands only in a loop body, an element filter's predicate or a
+	/// closure's, and a loop is an opaque leaf of the import (`import::islands`): the request
+	/// reaches the planner and the rule rewrites nothing.
 	#[tokio::test]
 	async fn rewrite_then_run_equals_run_lr5() {
-		rewrite_then_run_equals_run(
+		reached_and_left_alone(
 			"SELECT VALUE (SELECT VALUE tags[WHERE $this > 0 AND false] FROM u) FROM t;",
 			&AND_FALSE_TRUTHY,
 		)
 		.await;
 	}
 
+	/// `truthy(x OR true)` stands only in a loop body, as [`rewrite_then_run_equals_run_lr5`]
+	/// states for its conjunction.
 	#[tokio::test]
 	async fn rewrite_then_run_equals_run_lr6() {
-		rewrite_then_run_equals_run(
+		reached_and_left_alone(
 			"SELECT VALUE (SELECT VALUE tags[WHERE $this > 0 OR true] FROM u) FROM t;",
 			&OR_TRUE_TRUTHY,
 		)
@@ -4186,11 +4231,8 @@ mod kv {
 
 	#[tokio::test]
 	async fn rewrite_then_run_equals_run_lr7r() {
-		rewrite_then_run_equals_run(
-			"SELECT VALUE (SELECT VALUE (<array<int>> tags)[WHERE $this * 0 = 0] FROM u) FROM t;",
-			&MUL_ZERO_INT_R,
-		)
-		.await;
+		rewrite_then_run_equals_run("RETURN [(SELECT VALUE id FROM t), 7 * 0];", &MUL_ZERO_INT_R)
+			.await;
 	}
 
 	/// A product over a field read carries no type fact, so neither zero-product rule rewrites it:
@@ -4219,11 +4261,8 @@ mod kv {
 
 	#[tokio::test]
 	async fn rewrite_then_run_equals_run_lr7l() {
-		rewrite_then_run_equals_run(
-			"SELECT VALUE (SELECT VALUE (<array<int>> tags)[WHERE 0 * $this = 0] FROM u) FROM t;",
-			&MUL_ZERO_INT_L,
-		)
-		.await;
+		rewrite_then_run_equals_run("RETURN [(SELECT VALUE id FROM t), 0 * 7];", &MUL_ZERO_INT_L)
+			.await;
 	}
 
 	/// Whether the language suite runs the file `text` as a test: its header sets no `run = false`
@@ -4362,10 +4401,14 @@ mod kv {
 		assert!(extracted > 0, "no seeded run reached all-physical extraction");
 	}
 
-	/// `answers` with each record id key the engine generates (twenty lowercase letters and
-	/// digits), each UUID (a request id the engine generates) and each wall-clock time an
-	/// `EXPLAIN ANALYZE` reports (`elapsed: 1.2ms` in text, `elapsed_ns: 1200000` in JSON)
-	/// replaced by one marker, so two runs that generate them compare equal.
+	/// `answers` with each value the engine generates for a run replaced, so two runs that
+	/// generate them compare equal:
+	/// - a record id key (twenty lowercase letters and digits) and a UUID (a request id) by one
+	///   marker;
+	/// - a wall-clock time an `EXPLAIN ANALYZE` reports (`elapsed: 1.2ms` in text, `elapsed_ns:
+	///   1200000` in a structured plan) by one marker;
+	/// - a change feed's versionstamp, which the process-wide oracle numbers across datastores, by
+	///   its rank among the versionstamps of `answers`, so their order is kept.
 	fn without_generated_ids(answers: &Result<Vec<Result<String, String>>, String>) -> String {
 		let generated = regex::Regex::new(r"\b([A-Za-z_][A-Za-z0-9_]*):[0-9a-z]{20}\b")
 			.expect("the pattern compiles");
@@ -4374,49 +4417,64 @@ mod kv {
 				.expect("the pattern compiles");
 		let elapsed =
 			regex::Regex::new(r"elapsed: [0-9.]+(?:ns|µs|ms|s)\b").expect("the pattern compiles");
-		let answers = format!("{answers:?}");
-		let answers = generated.replace_all(&answers, "$1:<generated>");
 		let elapsed_ns =
 			regex::Regex::new(r"\belapsed_ns: [0-9]+\b").expect("the pattern compiles");
+		let versionstamp =
+			regex::Regex::new(r"\bversionstamp: ([0-9]+)\b").expect("the pattern compiles");
+		let answers = format!("{answers:?}");
+		let answers = generated.replace_all(&answers, "$1:<generated>");
 		let answers = uuid.replace_all(&answers, "<uuid>");
 		let answers = elapsed.replace_all(&answers, "elapsed: <elapsed>");
-		elapsed_ns.replace_all(&answers, "elapsed_ns: <elapsed>").into_owned()
+		let answers = elapsed_ns.replace_all(&answers, "elapsed_ns: <elapsed>");
+		let stamps: std::collections::BTreeSet<u128> = versionstamp
+			.captures_iter(&answers)
+			.filter_map(|stamp| stamp[1].parse().ok())
+			.collect();
+		let rank: BTreeMap<u128, usize> =
+			stamps.into_iter().enumerate().map(|(rank, stamp)| (stamp, rank)).collect();
+		versionstamp
+			.replace_all(&answers, |stamp: &regex::Captures<'_>| {
+				let at = stamp[1].parse::<u128>().ok().and_then(|value| rank.get(&value));
+				format!(
+					"versionstamp: <{}>",
+					at.map_or_else(|| stamp[1].to_owned(), usize::to_string)
+				)
+			})
+			.into_owned()
 	}
 
-	/// The stack of the thread [`forced_on_answers_equal`] runs on: the worker stack the language
-	/// tests' runner takes in an unoptimised build. A statement of the corpus recurses to the
-	/// computation-depth budget, and at that depth an unoptimised build's frames overflow the
-	/// test thread's default stack.
-	const CORPUS_STACK: usize = 20 * 1024 * 1024;
+	/// The stack the language-test runner gives a worker in an unoptimised build.
+	const RUNNER_STACK: usize = 20 << 20;
 
-	/// Runs the future `body` builds to completion on a current-thread runtime, on a thread of
-	/// [`CORPUS_STACK`] bytes, and resumes its panic on the calling thread.
-	fn on_corpus_stack<Fut: Future<Output = ()>>(body: impl FnOnce() -> Fut + Send + 'static) {
-		let thread = std::thread::Builder::new()
-			.stack_size(CORPUS_STACK)
+	/// Runs the future `body` makes to completion on a thread of [`RUNNER_STACK`] bytes, on a
+	/// runtime of its own. The corpus runs the language tests' statements, which a debug build
+	/// runs on that stack, so a statement that spends its computation-depth budget meets it before
+	/// the stack ends. The e-graph's mode, rules, limits and counts are per thread, so `body` sets
+	/// and reads them itself.
+	fn on_the_runner_stack<F: Future<Output = ()>>(body: impl FnOnce() -> F + Send + 'static) {
+		std::thread::Builder::new()
+			.stack_size(RUNNER_STACK)
 			.spawn(move || {
 				tokio::runtime::Builder::new_current_thread()
 					.enable_all()
 					.build()
-					.expect("a current-thread runtime")
+					.expect("a runtime")
 					.block_on(body())
 			})
-			.expect("the corpus thread spawns");
-		if let Err(panic) = thread.join() {
-			std::panic::resume_unwind(panic);
-		}
+			.expect("a thread")
+			.join()
+			.unwrap_or_else(|panic| std::panic::resume_unwind(panic));
 	}
 
 	/// With the registered rules, the logical-only run answers every statement of the corpus as
 	/// the forced-off run does, and it rewrites and adopts the statements those rules match. A
-	/// record id the engine generates is not part of the answer.
+	/// value the engine generates for a run is not part of the answer ([`without_generated_ids`]).
 	#[test]
 	fn forced_on_answers_equal() {
-		on_corpus_stack(forced_on_answers_equal_in);
+		on_the_runner_stack(forced_on_answers_equal_body);
 	}
 
-	/// The body of [`forced_on_answers_equal`].
-	async fn forced_on_answers_equal_in() {
+	async fn forced_on_answers_equal_body() {
 		let rules = registered();
 		let mut forced_calls = 0usize;
 		for (path, text) in deterministic_corpus() {

@@ -76,6 +76,8 @@ pub(crate) mod unit;
 use surrealdb_expr::parser::TopLevelExpr;
 
 use self::core::ir::IrScope;
+#[cfg(all(test, feature = "kv-mem"))]
+pub(crate) use self::planning::bind_request_over;
 #[allow(unused_imports)]
 pub(crate) use self::planning::{
 	PlanOutcome, PlannedRequest, PlanningInput, SubscriptionRequest, plan_request,

@@ -1353,8 +1353,9 @@ fn optional_and_destructure_bind_current() -> Result<(), IrError> {
 }
 
 /// A field read or `@` in an optional chain's `then` or a destructure alias's body reads the
-/// region's argument, the value the body is over, while a step's argument in it reads the
-/// document root; the row is back after the body.
+/// region's argument, the value the body is over. A step's argument reads the document root: the
+/// row in an optional chain's `then`, and in an alias's body the value destructured, which is the
+/// body's document. The row is back after the body.
 #[test]
 fn a_body_over_a_value_reads_its_fields_from_that_value() -> Result<(), IrError> {
 	let then = LogicalExpr::Index {
@@ -1388,11 +1389,16 @@ fn a_body_over_a_value_reads_its_fields_from_that_value() -> Result<(), IrError>
 	})?;
 	let first = host.ops_in(0);
 	assert_eq!(first[0].operands.as_slice(), [host.region_arg(0, 0)], "`c` reads the value");
-	assert_eq!(first[1].operands.as_slice(), [row], "the index `d` reads the document root");
+	assert_eq!(
+		first[1].operands.as_slice(),
+		[host.region_arg(0, 0)],
+		"the index `d` reads the value destructured, the body's document"
+	);
 	let second = host.ops_in(1);
 	assert_eq!(second[0].op().tag(), ExprTag::Doc);
 	assert_eq!(second[0].operands.as_slice(), [host.region_arg(1, 0)], "`@` reads the value");
 	assert_eq!(host.field_base, None);
+	assert_eq!(host.row, Some(row));
 	Ok(())
 }
 

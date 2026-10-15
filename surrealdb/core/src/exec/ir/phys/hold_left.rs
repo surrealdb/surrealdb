@@ -150,7 +150,7 @@ fn holds_one_row(
 	let Some((_, owner)) = enclosing_statement(ir, join) else {
 		return false;
 	};
-	!*writes.entry(owner).or_insert_with(|| statement_writes(ir, facts, cx, owner))
+	!*writes.entry(owner).or_insert_with(|| statement_writes(ir, facts, &cx.effects, owner))
 }
 
 /// Steps `value` through the containers a chain is read through, and answers the op that defines

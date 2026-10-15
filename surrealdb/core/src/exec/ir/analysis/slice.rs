@@ -16,8 +16,9 @@
 //!    another iteration may make, or one an earlier op of the same iteration makes;
 //! 4. a read that locks records does;
 //! 5. an op that uses a residue op's result, or that runs only if a residue op decides it, does,
-//!    and so does an op that uses a block argument of the body of a residue loop, since the element
-//!    and position of such a loop are produced in apply order. This repeats until no further op is
+//!    and so does an op that uses a block argument of the body of a residue loop or of a region of
+//!    a residue write stage, since the element and position of such a loop, and the record image a
+//!    stage's clause reads, are produced in apply order. This repeats until no further op is
 //!    excluded.
 
 #![deny(clippy::wildcard_enum_match_arm)]
@@ -279,7 +280,8 @@ fn memory_dependence(
 }
 
 /// Moves into the residue every op that uses the result of a residue op, or whose execution a
-/// residue op decides, until no op moves.
+/// residue op decides, or that reads an argument a residue loop's body or a residue write stage's
+/// region is given, until no op moves.
 fn propagate(ir: &Ir, body: &Body, reason: &mut [Option<SliceExclusion>]) {
 	let mut queue: VecDeque<usize> = (0..reason.len()).filter(|at| reason[*at].is_some()).collect();
 	while let Some(at) = queue.pop_front() {
@@ -298,7 +300,9 @@ fn propagate(ir: &Ir, body: &Body, reason: &mut [Option<SliceExclusion>]) {
 			if decides_execution(info.kind) {
 				collect_subtree(ir, region, &mut dependents);
 			}
-			if effects::is_loop(&data.kind) && effects::is_loop_body(info.kind) {
+			if (effects::is_loop(&data.kind) && effects::is_loop_body(info.kind))
+				|| matches!(data.kind, OpKind::Logical(LogOp::WriteStage { .. }))
+			{
 				collect_body_arg_users(ir, region, &mut dependents);
 			}
 		}
@@ -322,7 +326,7 @@ fn decides_execution(kind: RegionKind) -> bool {
 		|| kind == RegionKind::JoinLookupArm
 }
 
-/// Every op that uses an argument of a block of the loop body `region`.
+/// Every op that uses an argument of a block of `region`.
 fn collect_body_arg_users(ir: &Ir, region: RegionId, out: &mut SmallVec<[OpId; 8]>) {
 	let Some(info) = ir.region(region) else {
 		return;

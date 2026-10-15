@@ -23,7 +23,7 @@ use super::access::{ReadVersion, RestrictedSelect, TableAnswers, admissible_acce
 use super::ops::{MatchStepAttrs, PhysOp, ProjectionShape};
 use super::pipeline::{chain_of, enclosing_region_of, streams};
 use super::{chain, nested};
-use crate::exec::ir::analysis::footprint;
+use crate::exec::ir::analysis::cx::default_cx;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::value::ValueDef;
@@ -79,9 +79,8 @@ pub(crate) fn facts_of(
 /// consumes its rows and the facts of the logical ops it stands for.
 ///
 /// `writes` is true when the pipeline's sink writes, or when a statement that encloses the
-/// pipeline writes: the write footprint of the enclosing `Statement` regions, triggered and
-/// catalog-attached writes included, and the ops that lock or write by their own shape. Nested
-/// plans inherit it structurally, since a nested statement stands inside its host's region.
+/// pipeline writes ([`writes_within`] of each enclosing `Statement` region). Nested plans inherit
+/// it structurally, since a nested statement stands inside its host's region.
 /// `estimate` is always `None`: the plan carries no estimate of its rows.
 ///
 /// `reading` states how the nested statements are read ([`nested_use`]).
@@ -932,17 +931,20 @@ fn enclosing_writes(ir: &Ir, facts: &mut FactCache, pipeline_op: OpId) -> bool {
 	false
 }
 
-/// Whether the op `op` or an op in its regions writes: its write footprint is not empty, or an op
-/// within writes or locks by its own shape (a write, a schema statement, a write stage of a
-/// `MATCH`, a locked read). A locked read conflicts with a write as a write does, but it is not
-/// a footprint write, so the analysis lane does not record it.
+/// Whether the op `op` or an op in its regions writes or locks what it reads.
+///
+/// The answer is read from the ops themselves. A physical op's effects are those of the logical
+/// ops it stands for, which the physical container does not keep, so its effects are not
+/// consulted: an op writes when [`nested::statement_writes`] finds a write by shape or an
+/// expression that may write, or when a physical op changes the session, a grant, a
+/// subscription or a binding, or stands in a write's body ([`changes_state_by_shape`]).
 fn writes_within(ir: &Ir, facts: &mut FactCache, op: OpId) -> bool {
-	if !footprint::of(ir, facts, op).writes.is_empty() {
+	if nested::statement_writes(ir, facts, &default_cx(ir), op) {
 		return true;
 	}
 	let found = std::cell::Cell::new(false);
 	let mut visit = |inner: OpId| {
-		if phys_of(ir, inner).is_some_and(writes_by_shape) {
+		if phys_of(ir, inner).is_some_and(changes_state_by_shape) {
 			found.set(true);
 			Walk::Stop
 		} else {
@@ -961,6 +963,27 @@ fn writes_within(ir: &Ir, facts: &mut FactCache, op: OpId) -> bool {
 		}
 	}
 	found.get()
+}
+
+/// Whether the op changes state [`writes_by_shape`] does not name: the session (`USE`, `OPTION`,
+/// a `LET`), a grant, a subscription (`LIVE`, `KILL`, a subscriber) or the record a write's body
+/// stages.
+fn changes_state_by_shape(op: &PhysOp) -> bool {
+	matches!(
+		op,
+		PhysOp::Use { .. }
+			| PhysOp::Option { .. }
+			| PhysOp::Let(..)
+			| PhysOp::Access(..)
+			| PhysOp::Kill
+			| PhysOp::Live(..)
+			| PhysOp::Subscriber(..)
+			| PhysOp::WriteStage { .. }
+			| PhysOp::Events(..)
+			| PhysOp::Assign(..)
+			| PhysOp::Unset { .. }
+			| PhysOp::Content { .. }
+	)
 }
 
 /// Whether the op writes, or locks what it reads, whatever its footprint states.

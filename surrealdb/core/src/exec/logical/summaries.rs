@@ -752,7 +752,9 @@ mod tests {
 	use super::*;
 	use crate::dbs::Session;
 
-	/// Tables, functions and events for the summaries below.
+	/// Tables, functions and events for the summaries below. `DEFINE FIELD` refuses a COMPUTED body
+	/// whose callee advances state when the field is defined, so `fn::draw` takes its sequence
+	/// draw after the fields that call it; only the summary sees it.
 	pub(super) const SETUP: &str = "
 		DEFINE SEQUENCE s;
 		DEFINE TABLE task SCHEMALESS;
@@ -761,7 +763,7 @@ mod tests {
 		DEFINE FUNCTION fn::pure_caller($x: int) { RETURN fn::pure($x) * 2 };
 		DEFINE FUNCTION fn::noisy() { RETURN rand() };
 		DEFINE FUNCTION fn::noisy_caller() { RETURN fn::noisy() };
-		DEFINE FUNCTION fn::draw() { LET $n = 1; RETURN sequence::nextval('s') };
+		DEFINE FUNCTION fn::draw() { LET $n = 1; RETURN 0 };
 		DEFINE FUNCTION fn::clocked() { LET $n = 1; RETURN time::now() };
 		DEFINE FUNCTION fn::mk() { CREATE log:1 SET at = time::now() };
 		DEFINE FUNCTION fn::mk_caller() { RETURN fn::mk() };
@@ -788,6 +790,7 @@ mod tests {
 		DEFINE FIELD twice ON vault COMPUTED n * 2;
 		DEFINE FIELD drawn ON vault COMPUTED fn::draw();
 		DEFINE FIELD both ON vault COMPUTED r + twice;
+		DEFINE FUNCTION OVERWRITE fn::draw() { LET $n = 1; RETURN sequence::nextval('s') };
 	";
 
 	/// `sql` bound as `session`, and the summaries read for it.
@@ -1093,7 +1096,8 @@ mod tests {
 	}
 
 	/// A table permission judges its predicate over a copy of the row with the computed fields it
-	/// reads derived, and that derivation is in no operator of the plan.
+	/// reads derived, and that derivation is in no operator of the plan. `fn::draw` takes its
+	/// sequence draw after the field that calls it, which `DEFINE FIELD` would refuse.
 	#[tokio::test]
 	async fn a_computed_field_a_permission_derives_decides_the_chain() {
 		use ChainLegality::{Refused, RowLocal};
@@ -1108,9 +1112,10 @@ mod tests {
 			DEFINE TABLE ext PERMISSIONS FOR select WHERE e != NONE;
 			DEFINE FIELD e ON ext COMPUTED http::get('http://127.0.0.1:1/');
 			DEFINE SEQUENCE s;
-			DEFINE FUNCTION fn::draw() { LET $n = 1; RETURN sequence::nextval('s') };
+			DEFINE FUNCTION fn::draw() { LET $n = 1; RETURN 0 };
 			DEFINE TABLE drawn PERMISSIONS FOR select WHERE k >= 0;
 			DEFINE FIELD k ON drawn COMPUTED fn::draw();
+			DEFINE FUNCTION OVERWRITE fn::draw() { LET $n = 1; RETURN sequence::nextval('s') };
 			",
 		)
 		.await;
@@ -1136,8 +1141,8 @@ mod tests {
 
 	/// A computed field that calls a function with effects refuses the chain that derives it,
 	/// whether the answer holds the field or not. `DEFINE FIELD` refuses a COMPUTED body whose
-	/// callee writes when the field is defined, so the writing body of `fn::touch_page` is
-	/// defined after the field; only the summary sees it.
+	/// callee writes or advances state when the field is defined, so the bodies of
+	/// `fn::touch_page` and `fn::draw` are defined after the fields; only the summary sees them.
 	#[tokio::test]
 	async fn a_computed_field_calling_a_function_refuses_by_its_summary() {
 		let fixture = Fixture::new(
@@ -1145,9 +1150,10 @@ mod tests {
 			DEFINE SEQUENCE s;
 			DEFINE TABLE page SCHEMALESS;
 			DEFINE FUNCTION fn::touch_page($id: record) { RETURN time::now() };
-			DEFINE FUNCTION fn::draw() { LET $n = 1; RETURN sequence::nextval('s') };
+			DEFINE FUNCTION fn::draw() { LET $n = 1; RETURN 0 };
 			DEFINE FIELD last_read ON page COMPUTED fn::touch_page(id);
 			DEFINE FIELD drawn ON page COMPUTED fn::draw();
+			DEFINE FUNCTION OVERWRITE fn::draw() { LET $n = 1; RETURN sequence::nextval('s') };
 			DEFINE FUNCTION OVERWRITE fn::touch_page($id: record) {
 				UPSERT stats:reads SET n += 1;
 				RETURN time::now()

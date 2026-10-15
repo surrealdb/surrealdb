@@ -4148,7 +4148,8 @@ e012b9acd3b784c9 language-tests/tests/upgrade/define/3.00.00_bucket_import.surql
 3109c5a7109259e4 language-tests/tests/upgrade/define/3.00.00_changefeed.surql
 9cb4fc722bfd579f language-tests/tests/upgrade/define/3.00.00_changefeed_import.surql
 1f44c2733005b1a0 language-tests/tests/upgrade/define/3.00.00_changefeed_since_datetime.surql
-0662a3016e5be00a language-tests/tests/upgrade/define/3.00.00_clause_effects_stored.surql
+87e7d21cba30263e language-tests/tests/upgrade/define/3.00.00_clause_effects_stored.surql
+66a1280453618c01 language-tests/tests/upgrade/define/3.00.00_clause_effects_stored_current.surql
 d3f2583f3f7ca869 language-tests/tests/upgrade/define/3.00.00_clause_effects_stored_import.surql
 8fa610777e741322 language-tests/tests/upgrade/define/3.00.00_closure_capture_in_stored_clauses.surql
 f3949113c0d4e60f language-tests/tests/upgrade/define/3.00.00_closure_capture_in_stored_clauses_import.surql

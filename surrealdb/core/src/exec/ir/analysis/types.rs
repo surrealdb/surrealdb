@@ -27,7 +27,7 @@ use crate::exec::ir::expr::ops::{ExprOp, ExprTag, OnFail};
 use crate::exec::ir::iface::catalog::EffectCx;
 use crate::exec::ir::iface::ids::{OpId, ValueId};
 use crate::exec::ir::iface::types::{FactSource, HintSource, TypeKnowledge};
-use crate::exec::ir::logical::ops::{LogTag, LoopKind};
+use crate::exec::ir::logical::ops::{LogOp, LogTag, LoopKind, SourceRefShape};
 use crate::exec::ir::op_kind::{OpKind, OpTag};
 use crate::expr::{BinaryOperator, Kind, PrefixOperator};
 
@@ -268,12 +268,24 @@ pub(crate) fn subject_loop(ir: &Ir, write_op: OpId) -> Option<OpId> {
 }
 
 /// The values a write loop writes to: the operands of the array that gathers its targets, or the
-/// source value itself when it is not gathered.
+/// source value itself when it is not gathered. A source op that reads the record ids or key
+/// ranges its operand holds (`SourceRefShape::RecordId`) stands for that operand.
 pub(crate) fn loop_targets(ir: &Ir, write_loop: OpId) -> SmallVec<[ValueId; 1]> {
 	let mut out = SmallVec::new();
-	let Some(source) = ir.op(write_loop).and_then(|data| data.operands.first().copied()) else {
+	let Some(mut source) = ir.op(write_loop).and_then(|data| data.operands.first().copied()) else {
 		return out;
 	};
+	if let Some(ValueDef::OpResult {
+		op,
+		..
+	}) = ir.value(source).map(|data| data.def)
+		&& let Some(data) = ir.op(op)
+		&& let OpKind::Logical(LogOp::Source(attrs)) = &data.kind
+		&& matches!(attrs.source_ref, SourceRefShape::RecordId)
+		&& let Some(read) = data.operands.first().copied()
+	{
+		source = read;
+	}
 	let gathered = match ir.value(source).map(|data| data.def) {
 		Some(ValueDef::OpResult {
 			op,
