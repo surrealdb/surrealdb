@@ -416,7 +416,10 @@ where
 					.with_query_type(result.query_type);
 
 				match result.query_type {
-					QueryType::Other => {
+					// A `KILL` answers like any other statement: `NONE`, or the
+					// error the server refused it with, which `check` and
+					// `take_errors` must be able to report.
+					QueryType::Other | QueryType::Kill => {
 						indexed_results.results.insert(index, (stats, result.result));
 					}
 					QueryType::Live => {
@@ -441,7 +444,6 @@ where
 							.results
 							.insert(index, (stats, Ok(Value::Uuid(live_query_id))));
 					}
-					QueryType::Kill => {}
 				}
 			}
 

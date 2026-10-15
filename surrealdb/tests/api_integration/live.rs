@@ -21,6 +21,7 @@ use surrealdb::{Notification, Result};
 use tokio::sync::RwLock;
 use tracing::info;
 use ulid::Ulid;
+use uuid::Uuid;
 
 use super::CreateDb;
 use crate::api_integration::ApiRecordId;
@@ -728,6 +729,45 @@ pub async fn live_select_ignores_cancelled_client_side_transaction(new_db: impl 
 	drop(permit);
 }
 
+/// A `KILL` the server refuses is reported like any other failed statement.
+pub async fn kill_of_an_unknown_live_query_reports_its_error(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+
+	let mut response = db.query(format!("KILL u'{}'", Uuid::new_v4())).await.unwrap();
+	assert_eq!(response.num_statements(), 1, "the KILL statement has a result");
+	let errors = response.take_errors();
+	assert_eq!(errors.len(), 1, "the refused KILL is reported: {errors:?}");
+	assert!(errors.contains_key(&0));
+
+	drop(permit);
+}
+
+/// A `KILL` the server accepts answers `NONE` at its own index, so statements
+/// after it keep their indexes.
+pub async fn kill_of_a_live_query_reports_success(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+
+	let table = format!("table_{}", Ulid::new());
+	db.query(format!("DEFINE TABLE {table}")).await.unwrap();
+	let id: Value = db.query(format!("LIVE SELECT * FROM {table}")).await.unwrap().take(0).unwrap();
+
+	let mut response =
+		db.query("KILL $id; RETURN 1").bind(("id", id)).await.unwrap().check().unwrap();
+	assert_eq!(response.num_statements(), 2);
+	let killed: Value = response.take(0).unwrap();
+	assert_eq!(killed, Value::None);
+	let after: Option<i64> = response.take(1).unwrap();
+	assert_eq!(after, Some(1));
+
+	drop(permit);
+}
+
 define_include_tests!(live => {
 	#[test_log::test(tokio::test)]
 	signin_ends_the_previous_principals_live_queries,
@@ -749,4 +789,8 @@ define_include_tests!(live => {
 	live_select_sees_client_side_transaction,
 	#[test_log::test(tokio::test)]
 	live_select_ignores_cancelled_client_side_transaction,
+	#[test_log::test(tokio::test)]
+	kill_of_an_unknown_live_query_reports_its_error,
+	#[test_log::test(tokio::test)]
+	kill_of_a_live_query_reports_success,
 });
