@@ -304,7 +304,8 @@ impl Ddl<'_, '_> {
 	}
 
 	/// The view part of `DEFINE TABLE`, after the view table's definition `definition` is
-	/// written: the view table is emptied of what it held and every subscription on it killed;
+	/// written: the view table is emptied of what it held, the adjacency its edges left on their
+	/// endpoints with it, and every subscription on it killed;
 	/// each table it reads records the view as a foreign table and refreshes its views' stamp;
 	/// then the view is filled from them ([`Ddl::backfill_view`]). `name` is the view table's name
 	/// as an operand and in a register.
@@ -318,6 +319,14 @@ impl Ddl<'_, '_> {
 	) -> Result<(), IrError> {
 		let (ns_op, db_op) = (Operand::Reg(ns), Operand::Reg(db));
 		self.with_service(Service::Broker, |l| l.kill_table_subscriptions(ns, db, name_reg))?;
+		// An edge the table held is also a pointer on each of its endpoints, outside the table's
+		// keyspace, so those go while the edges are still there to name them.
+		self.store(StoreInstr::PurgeEdgePointers {
+			ns,
+			db,
+			tb: name_reg,
+			expunge: false,
+		});
 		let root = self.object(&[("ns", ns_op), ("db", db_op), ("tb", name_op)])?;
 		self.store(StoreInstr::DeleteRange {
 			route: RouteId::named("TblRoot"),
@@ -462,8 +471,9 @@ impl Ddl<'_, '_> {
 
 	/// `REMOVE TABLE`: a table a view reads from refuses the removal, and so does a non-empty
 	/// relation that uses the table as an endpoint, as the edges stand when the statement runs.
-	/// The table's indexes are retired and its subscriptions killed before the definition and its
-	/// data go; each table a view of it read is rewritten with its tables stamp refreshed.
+	/// The adjacency each of the table's edges left on its endpoints is purged, the table's indexes
+	/// are retired and its subscriptions killed before the definition and its data go; each table a
+	/// view of it read is rewritten with its tables stamp refreshed.
 	pub(super) fn remove_table(
 		&mut self,
 		name: OperandSlot,
@@ -517,6 +527,14 @@ impl Ddl<'_, '_> {
 			ns,
 			db,
 			tb,
+		});
+		// Each edge the table holds is also a pointer on each of its endpoints, outside the
+		// table's keyspace, so those go while the edges are still there to name them.
+		self.store(StoreInstr::PurgeEdgePointers {
+			ns,
+			db,
+			tb,
+			expunge,
 		});
 		self.retire_table_indexes(ns, db, table, tb, expunge)?;
 		self.with_service(Service::Broker, |l| l.kill_table_subscriptions(ns, db, tb))?;

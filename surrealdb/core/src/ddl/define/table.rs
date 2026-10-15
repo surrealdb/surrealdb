@@ -1,11 +1,15 @@
 use std::borrow::Cow;
 
 use anyhow::Result;
+use surrealdb_types::ToSql;
 
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{DatabaseId, NamespaceId, TableDefinition, TableType};
-use crate::key::schema::RecordPrefix;
-use crate::kvs::Transaction;
+use crate::catalog::{DatabaseId, NamespaceId, Record, StoredRecord, TableDefinition, TableType};
+use crate::exec::ExecutionContext;
+use crate::key::schema::{RecordKey, RecordPrefix};
+use crate::key::{KVKeyDecode, KVSubspace};
+use crate::kvs::{NORMAL_BATCH_SIZE, Transaction};
+use crate::val::{RecordId, TableName};
 
 /// Rejects a table-type change away from `RELATION` while the table still
 /// carries `INLINE` fields: their payloads ride the edges' adjacency
@@ -34,6 +38,90 @@ pub(crate) async fn validate_inline_fields_survive_type_change(
 	Ok(())
 }
 
+/// Refuses a change of a table's type that a record the table holds does not
+/// admit: `RELATION` while it holds a record that is no edge, `NORMAL` while it
+/// holds an edge. A record keeps its kind, and a write stores a record only in
+/// a table whose type admits its kind, so a table whose new type excluded one
+/// of its own records would hold a record no write could have stored — one its
+/// export writes back by its own kind and its import refuses.
+///
+/// `ANY` admits both kinds, so a change to it is never refused. A kind the
+/// previous type already excluded is not looked for, and a table with no
+/// previous definition holds no record. A definition that is a view is not
+/// judged: the statement that defines it replaces the table's records with the
+/// view's.
+///
+/// The records are read in pages sized to the fuel left, a unit charged per
+/// record, up to the first one refused. Whether a record is an edge is read off
+/// its envelope's header where it has one, so a record is decoded only when it
+/// was stored in the `revision` encoding.
+pub(crate) async fn validate_records_survive_type_change(
+	exec: &ExecutionContext,
+	txn: &Transaction,
+	existing: Option<&TableDefinition>,
+	def: &TableDefinition,
+) -> Result<()> {
+	let Some(existing) = existing else {
+		return Ok(());
+	};
+	let refuse_records = existing.allows_normal() && !def.allows_normal();
+	let refuse_edges = existing.allows_relation() && !def.allows_relation();
+	if def.view.is_some() || !(refuse_records || refuse_edges) {
+		return Ok(());
+	}
+	let (ns, db, table) = (existing.namespace_id, existing.database_id, &def.name);
+	let records = RecordPrefix {
+		ns,
+		db,
+		tb: Cow::Borrowed(table),
+	};
+	let mut next = Some(records.range()?);
+	while let Some(range) = next {
+		let size = crate::exec::vm::fuel::batch(NORMAL_BATCH_SIZE);
+		let page = txn.batch_keys_vals_raw(range, size, None).await?;
+		next = page.next.map(|range| records.raw(range));
+		if page.result.is_empty() {
+			break;
+		}
+		for (key, value) in &page.result {
+			let edge = match StoredRecord::parse(value)? {
+				Some(stored) => stored.is_edge(),
+				// The `revision` encoding names no layout generation, so it
+				// decodes without the table's layouts.
+				None => Record::decode_stored(value, None, record_id(table, key)?)?.is_edge(),
+			};
+			let record = || record_id(table, key).map(|id| id.to_sql());
+			if refuse_records && !edge {
+				anyhow::bail!(crate::exec::Error::TableTypeRelationOverRecord {
+					table: table.as_str().to_owned(),
+					record: record()?,
+				});
+			}
+			if refuse_edges && edge {
+				anyhow::bail!(crate::exec::Error::TableTypeNormalOverEdge {
+					table: table.as_str().to_owned(),
+					record: record()?,
+				});
+			}
+		}
+		crate::exec::vm::fuel::tick(exec, crate::exec::vm::fuel::units(page.result.len()))
+			.await
+			.map_err(|flow| match flow {
+				crate::expr::ControlFlow::Err(error) => error,
+				other => anyhow::anyhow!("the scan of the records was interrupted by {other}"),
+			})?;
+	}
+	Ok(())
+}
+
+/// The id of the record of `table` stored at `key`.
+fn record_id(table: &TableName, key: &[u8]) -> Result<RecordId> {
+	Ok(RecordId {
+		table: table.clone(),
+		key: RecordKey::decode_key(key)?.id.into_owned(),
+	})
+}
+
 /// Validates a table definition that declares — or previously declared — a
 /// lightweight relation, normalising what the flag implies.
 ///
@@ -53,8 +141,6 @@ pub(crate) async fn validate_lightweight_table(
 	existing: Option<&TableDefinition>,
 	def: &mut TableDefinition,
 ) -> Result<()> {
-	use surrealdb_types::ToSql;
-
 	use crate::exec::Error as ExecError;
 	use crate::kvs::lightweight::lightweight_relation;
 

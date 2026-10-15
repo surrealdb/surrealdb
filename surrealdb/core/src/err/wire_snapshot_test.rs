@@ -1337,6 +1337,20 @@ fn every_exec_variant() -> Vec<(&'static str, ExecError)> {
 		("IdComponentsOnRelation", ExecError::IdComponentsOnRelation("edge".to_string())),
 		("IdComponentsOnView", ExecError::IdComponentsOnView("v".to_string())),
 		(
+			"TableTypeRelationOverRecord",
+			ExecError::TableTypeRelationOverRecord {
+				table: "t".to_string(),
+				record: "t:1".to_string(),
+			},
+		),
+		(
+			"TableTypeNormalOverEdge",
+			ExecError::TableTypeNormalOverEdge {
+				table: "e".to_string(),
+				record: "e:1".to_string(),
+			},
+		),
+		(
 			"IdComponentsTableConversion",
 			ExecError::IdComponentsTableConversion {
 				table: "reading".to_string(),

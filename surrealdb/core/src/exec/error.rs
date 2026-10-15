@@ -476,6 +476,28 @@ pub(crate) enum Error {
 	#[error("Cannot name the parts of the record id of `{0}`: it is a view")]
 	IdComponentsOnView(String),
 
+	/// A table cannot become `TYPE RELATION` while it holds a record that is no
+	/// edge: no write could have stored it there, and an export of the table
+	/// would write it back as a record the restored table refuses.
+	#[error(
+		"Cannot make `{table}` TYPE RELATION: it holds `{record}`, which is not an edge. Delete the record first, or define the table TYPE ANY"
+	)]
+	TableTypeRelationOverRecord {
+		table: String,
+		record: String,
+	},
+
+	/// A table cannot become `TYPE NORMAL` while it holds an edge: no write
+	/// could have stored it there, and an export of the table would write it
+	/// back as an edge the restored table refuses.
+	#[error(
+		"Cannot make `{table}` TYPE NORMAL: it holds the edge `{record}`. Delete the edge first, or define the table TYPE ANY"
+	)]
+	TableTypeNormalOverEdge {
+		table: String,
+		record: String,
+	},
+
 	/// A table whose record id names its components cannot become a relation
 	/// table or a view. `to` reads "a relation table" or "a view".
 	#[error("Cannot make `{table}` {to}: its record id has named components")]
@@ -660,6 +682,15 @@ impl LeafError for Error {
 				..
 			}
 			| Error::FieldKindCannotHoldChild {
+				..
+			} => TypesError::validation(message, ValidationError::InvalidRequest),
+			// A table type the records the table holds do not admit: the author
+			// of the statement deletes the records or chooses a type that admits
+			// them.
+			Error::TableTypeRelationOverRecord {
+				..
+			}
+			| Error::TableTypeNormalOverEdge {
 				..
 			} => TypesError::validation(message, ValidationError::InvalidRequest),
 			// A record id whose components are named cannot take the definition:

@@ -407,7 +407,7 @@ async fn step_inner(
 			let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
 			let txn = ctx.txn();
 			crate::exec::vm::descriptor::schema(super::schema_host::refuse_redefining_table(
-				&txn, ns, db, definition,
+				ctx, &txn, ns, db, definition,
 			))
 			.await
 			.map_err(ControlFlow::Err)?;
@@ -519,6 +519,19 @@ async fn step_inner(
 				}
 			};
 			refused.map_err(ControlFlow::Err)?;
+		}
+		StoreInstr::PurgeEdgePointers {
+			ns,
+			db,
+			tb,
+			expunge,
+		} => {
+			let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
+			let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
+			let tb = table_named(&read(regs, *tb))?;
+			super::schema_host::purge_edge_pointers(ctx, ns, db, &tb, *expunge)
+				.await
+				.map_err(ControlFlow::Err)?;
 		}
 		StoreInstr::ViewSources {
 			ns,
@@ -2135,7 +2148,7 @@ async fn step_inner(
 					.await
 					.map_err(ControlFlow::Err)?;
 			}
-			super::schema_host::check_table_altered(&txn, &previous, &mut altered)
+			super::schema_host::check_table_altered(ctx, &txn, &previous, &mut altered)
 				.await
 				.map_err(ControlFlow::Err)?;
 			let normalised =
@@ -2374,6 +2387,7 @@ fn speculative_skip(instr: &StoreInstr) -> bool {
 			| StoreInstr::SequenceDefinedHere { .. }
 			| StoreInstr::EvictSequence { .. }
 			| StoreInstr::ValidateRecordKeys { .. }
+			| StoreInstr::PurgeEdgePointers { .. }
 	)
 }
 

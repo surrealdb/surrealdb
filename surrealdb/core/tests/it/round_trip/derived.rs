@@ -834,6 +834,116 @@ async fn a_restored_graph_edge_traverses_in_both_directions() -> Result<()> {
 	assert_target_renders(&round_trip, "SELECT VALUE ->knows FROM person:a", "[[knows:one]]").await
 }
 
+/// An edge table removed and defined again traverses as the edges it now holds.
+///
+/// An edge is filed under each of its endpoints as well as under its own table,
+/// so removing the table has to take the endpoints' entries with it. Left behind,
+/// they sit beside the entries a later edge of the same id writes: the source
+/// lists the reused edge twice and reaches a vertex no stored edge names, while
+/// the restore, which rebuilds the entries from the edge records alone, does
+/// not. Only a traversal on each side shows the difference.
+#[tokio::test]
+async fn an_edge_table_removed_and_defined_again_restores_its_traversals() -> Result<()> {
+	let round_trip = RoundTrip::run(
+		"DEFINE TABLE person SCHEMALESS;
+		 DEFINE TABLE knows TYPE RELATION IN person OUT person;
+		 CREATE person:a, person:b, person:c;
+		 RELATE person:a -> knows:one -> person:b;
+		 RELATE person:b -> knows:two -> person:a;
+		 REMOVE TABLE knows;
+		 DEFINE TABLE knows TYPE RELATION IN person OUT person;
+		 RELATE person:a -> knows:one -> person:c;",
+	)
+	.await?;
+
+	round_trip.assert_all().await?;
+
+	let edges = "SELECT VALUE ->knows FROM person ORDER BY id";
+	let forward = "SELECT VALUE ->knows->person FROM person ORDER BY id";
+	let reverse = "SELECT VALUE <-knows<-person FROM person ORDER BY id";
+	round_trip.assert_query_equal(edges).await?;
+	round_trip.assert_query_equal(forward).await?;
+	round_trip.assert_query_equal(reverse).await?;
+	assert_target_renders(&round_trip, edges, "[[knows:one], [], []]").await?;
+	assert_target_renders(&round_trip, forward, "[[person:c], [], []]").await?;
+	assert_target_renders(&round_trip, reverse, "[[], [], [person:a]]").await
+}
+
+/// A table holding records of both kinds restores, whatever type it reached
+/// them under.
+///
+/// A dump writes each record by its own kind — a plain `INSERT` for a record
+/// that is no edge, `INSERT RELATION` for an edge — after the table's
+/// definition, and the restored table admits only the kinds its type admits.
+/// A table's type therefore never moves to one that excludes a record it holds,
+/// and `TYPE ANY` is the type a table holding both kinds keeps. A relation keeps
+/// the `in` and `out` fields its type defined, so a record that is no edge
+/// written to it once it is `TYPE ANY` sets them, and is restored as a record
+/// that is no edge all the same.
+#[tokio::test]
+async fn a_table_holding_both_record_kinds_restores() -> Result<()> {
+	let round_trip = RoundTrip::run(
+		"DEFINE TABLE person SCHEMALESS;
+		 CREATE person:a, person:b;
+		 DEFINE TABLE mixed TYPE ANY;
+		 CREATE mixed:record SET a = 1;
+		 RELATE person:a -> mixed:edge -> person:b;
+		 DEFINE TABLE was_relation TYPE RELATION;
+		 RELATE person:a -> was_relation:edge -> person:b;
+		 ALTER TABLE was_relation TYPE ANY;
+		 CREATE was_relation:record SET in = person:a, out = person:b, a = 1;
+		 DEFINE TABLE was_normal TYPE NORMAL;
+		 CREATE was_normal:record SET a = 1;
+		 DEFINE TABLE OVERWRITE was_normal TYPE ANY;
+		 RELATE person:a -> was_normal:edge -> person:b;",
+	)
+	.await?;
+
+	round_trip.assert_all().await?;
+	for table in ["mixed", "was_relation", "was_normal"] {
+		let kinds = format!("SELECT VALUE [id, record::is_edge(id)] FROM {table} ORDER BY id");
+		round_trip.assert_query_equal(&kinds).await?;
+		let expected = format!("[[{table}:edge, true], [{table}:record, false]]");
+		assert_target_renders(&round_trip, &kinds, &expected).await?;
+		let forward = format!("SELECT VALUE ->{table}->person FROM person ORDER BY id");
+		round_trip.assert_query_equal(&forward).await?;
+		assert_target_renders(&round_trip, &forward, "[[person:b], []]").await?;
+	}
+	Ok(())
+}
+
+/// A relation whose IN, OUT and ENFORCED clauses were tightened over the edges
+/// it already held restores those edges.
+///
+/// The clauses constrain the edges written after them and are not judged
+/// against the edges a relation holds, so a relation can hold an edge whose
+/// endpoint its current clauses would refuse. The restore writes the edges
+/// under `OPTION IMPORT`, which judges neither, so the dump still restores, and
+/// the clauses are in force for what is written after it on both sides.
+#[tokio::test]
+async fn a_relation_tightened_over_its_edges_restores() -> Result<()> {
+	let round_trip = RoundTrip::run(
+		"DEFINE TABLE person SCHEMALESS;
+		 CREATE person:a, person:b;
+		 DEFINE TABLE likes TYPE RELATION;
+		 RELATE hub:missing -> likes:one -> person:b;
+		 DEFINE TABLE OVERWRITE likes TYPE RELATION IN person OUT person ENFORCED;",
+	)
+	.await?;
+
+	round_trip.assert_all().await?;
+	let reverse = "SELECT VALUE <-likes FROM person ORDER BY id";
+	round_trip.assert_query_equal(reverse).await?;
+	assert_target_renders(&round_trip, reverse, "[[], [likes:one]]").await?;
+	for (side, result) in [
+		("source", round_trip.source_query("RELATE hub:missing -> likes:two -> person:b").await),
+		("target", round_trip.target_query("RELATE hub:missing -> likes:two -> person:b").await),
+	] {
+		assert!(result.is_err(), "the {side} accepted an edge its clauses refuse");
+	}
+	Ok(())
+}
+
 /// A restored lightweight relation is traversable from both of its endpoints.
 ///
 /// A lightweight relation stores no edge record at all — the adjacency entries

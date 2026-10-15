@@ -1468,6 +1468,17 @@ pub(super) enum StoreInstr {
 		db: Reg,
 		tb: Reg,
 	},
+	/// Purge from their endpoints the adjacency of every edge the table `tb`
+	/// of the database `ns`, `db` holds, as the edges stand when the
+	/// instruction runs ([`crate::ddl::remove::table::purge_edge_pointers`]);
+	/// under `expunge` every earlier version of each key goes too. Skipped by a
+	/// speculative run, which leaves the records for the statement's real run.
+	PurgeEdgePointers {
+		ns: Reg,
+		db: Reg,
+		tb: Reg,
+		expunge: bool,
+	},
 	/// Raise [`crate::exec::Error::SchemaClauseEffect`] when a schema clause of
 	/// the definition in `definition`, stored as `object` names, has an effect
 	/// a schema clause must not have, judged against the catalog of the

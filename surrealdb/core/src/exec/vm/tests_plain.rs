@@ -309,6 +309,12 @@ const PLAN_TIME_FUNCTIONS: &[(&str, &str, &str)] = &[
 		 DEFINE FIELD and ALTER FIELD give it, as their bodies check them",
 	),
 	(
+		"schema_host.rs",
+		"purge_edge_pointers",
+		"declared schema service: the adjacency the edges of a table REMOVE TABLE removes left \
+		 on their endpoints, purged by the code that body purges it with",
+	),
+	(
 		"live.rs",
 		"compile",
 		"the compile of a subscription's unit, as its LIVE statement arrives or in a fault on a \

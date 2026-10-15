@@ -218,6 +218,111 @@ async fn vertex_delete_cascades_over_folded_edges() {
 	);
 }
 
+/// How many adjacency keys and packed blocks `rid` holds for `edge_table`, in
+/// either direction.
+async fn scope_keys(ds: &Datastore, rid: &RecordId, edge_table: &str) -> usize {
+	use std::borrow::Cow;
+
+	use crate::key::schema::{AdjacencyEdgeTablePrefix, GraphForeignTablePrefix};
+	use crate::val::TableName;
+	let txn = ds.transaction(Read).await.unwrap();
+	let db = txn.get_db_by_name("test", "test", None).await.unwrap().unwrap();
+	let edge_table = TableName::from(edge_table);
+	let mut count = 0;
+	for dir in [Dir::In, Dir::Out] {
+		let keys = GraphForeignTablePrefix {
+			ns: db.namespace_id,
+			db: db.database_id,
+			tb: Cow::Borrowed(&rid.table),
+			id: Cow::Borrowed(&rid.key),
+			dir,
+			foreign_table: Cow::Borrowed(&edge_table),
+		};
+		let blocks = AdjacencyEdgeTablePrefix {
+			ns: db.namespace_id,
+			db: db.database_id,
+			tb: Cow::Borrowed(&rid.table),
+			id: Cow::Borrowed(&rid.key),
+			dir,
+			edge_table: Cow::Borrowed(&edge_table),
+		};
+		count += txn.count(keys.range().unwrap(), None).await.unwrap();
+		count += txn.count(blocks.range().unwrap(), None).await.unwrap();
+	}
+	txn.cancel().await.unwrap();
+	count
+}
+
+/// `REMOVE TABLE` on an edge table purges what its edges left on their
+/// endpoints when those sit in packed blocks too: no key deletion reaches an
+/// edge inside a block, and a numeric block resolves its edges only through the
+/// removed table's doc-ID space, so the endpoint's whole scope for the table is
+/// deleted. The scopes of the other edge tables, folded into the same vertices,
+/// are left as they were, and a table defined again under the name starts from
+/// none of the removed edges, folded or not.
+#[tokio::test]
+async fn remove_table_purges_folded_edges_from_their_endpoints() {
+	use surrealdb_cnf::ConfigMap;
+
+	for numeric in ["false", "true"] {
+		let ds = Datastore::builder()
+			.without_maintenance_tasks()
+			.with_config(ConfigMap::empty().with_key_value("graph_numeric_ids", numeric))
+			.build_with_path("memory")
+			.await
+			.unwrap();
+		let ses = Session::owner().with_ns("test").with_db("test");
+		seed(&ds, &ses).await;
+		for n in 0..5 {
+			fold_vertex(&ds, &person(n)).await;
+		}
+		// Beside the blocks, a tombstone over a folded edge and an edge only a
+		// pointer key holds.
+		run(&ds, &ses, "DELETE likes:l02; RELATE person:p1->likes:l13->person:p3;").await;
+		assert!(scope_keys(&ds, &person(0), "likes").await > 0, "numeric = {numeric}");
+
+		run(&ds, &ses, "REMOVE TABLE likes;").await;
+		for n in 0..5 {
+			assert_eq!(scope_keys(&ds, &person(n), "likes").await, 0, "numeric = {numeric}");
+		}
+		assert_eq!(
+			run(&ds, &ses, "SELECT VALUE ->likes FROM person ORDER BY id;").await,
+			run(&ds, &ses, "RETURN [[], [], [], [], []];").await,
+			"numeric = {numeric}"
+		);
+		assert_eq!(
+			run(&ds, &ses, "SELECT VALUE <-likes FROM person ORDER BY id;").await,
+			run(&ds, &ses, "RETURN [[], [], [], [], []];").await,
+			"numeric = {numeric}"
+		);
+		assert_eq!(
+			run(&ds, &ses, "SELECT VALUE ->follows->person FROM person:p0;").await,
+			run(&ds, &ses, "RETURN [[person:p4]];").await,
+			"numeric = {numeric}"
+		);
+
+		run(&ds, &ses, "DEFINE TABLE likes TYPE RELATION; RELATE person:p0->likes:l01->person:p3;")
+			.await;
+		for fold in [false, true] {
+			if fold {
+				for n in 0..5 {
+					fold_vertex(&ds, &person(n)).await;
+				}
+			}
+			assert_eq!(
+				run(&ds, &ses, "SELECT VALUE ->likes->person FROM person:p0;").await,
+				run(&ds, &ses, "RETURN [[person:p3]];").await,
+				"numeric = {numeric}, folded = {fold}"
+			);
+			assert_eq!(
+				run(&ds, &ses, "SELECT VALUE <-likes<-person FROM person ORDER BY id;").await,
+				run(&ds, &ses, "RETURN [[], [], [], [person:p0], []];").await,
+				"numeric = {numeric}, folded = {fold}"
+			);
+		}
+	}
+}
+
 /// The production trigger pipeline, driven end to end on a stock datastore:
 /// a traversal over a scope carrying at least the built-in
 /// `graph_fold_threshold` unfolded keys observes it, an edge deletion on a

@@ -340,6 +340,9 @@ fn store(instr: &StoreInstr) -> Class {
 		| StoreInstr::RefuseRemovingLightweight {
 			..
 		}
+		| StoreInstr::PurgeEdgePointers {
+			..
+		}
 		| StoreInstr::RefuseClauseEffects {
 			..
 		}

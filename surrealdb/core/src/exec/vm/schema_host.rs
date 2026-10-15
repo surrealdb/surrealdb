@@ -137,8 +137,10 @@ pub(super) async fn check_index_column(
 }
 
 /// The checks `ALTER TABLE` makes of the table as altered against the table as
-/// it was; `altered` is normalised as they normalise it.
+/// it was, and against the records it holds; `altered` is normalised as they
+/// normalise it.
 pub(super) async fn check_table_altered(
+	ctx: &crate::exec::ExecutionContext,
 	txn: &Transaction,
 	previous: &TableDefinition,
 	altered: &mut TableDefinition,
@@ -165,6 +167,15 @@ pub(super) async fn check_table_altered(
 	crate::exec::vm::descriptor::schema(
 		crate::ddl::define::table::validate_named_id_survives_conversion(
 			txn, ns, db, previous, altered,
+		),
+	)
+	.await?;
+	crate::exec::vm::descriptor::schema(
+		crate::ddl::define::table::validate_records_survive_type_change(
+			ctx,
+			txn,
+			Some(previous),
+			altered,
 		),
 	)
 	.await
@@ -239,6 +250,23 @@ pub(super) async fn validate_record_keys(
 	.await
 }
 
+/// Purges from their endpoints the adjacency of every edge the table `table`
+/// of the database `ns`, `db` holds, before `REMOVE TABLE` deletes the table's
+/// own keyspace.
+pub(super) async fn purge_edge_pointers(
+	ctx: &crate::exec::ExecutionContext,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table: &TableName,
+	expunge: bool,
+) -> anyhow::Result<()> {
+	let txn = ctx.txn();
+	crate::exec::vm::descriptor::schema(crate::ddl::remove::table::purge_edge_pointers(
+		ctx, &txn, ns, db, table, expunge,
+	))
+	.await
+}
+
 /// What refuses removing table `name` from the database `ns`, `db`. A non-empty
 /// LIGHTWEIGHT relation that uses `name` as an endpoint is reported first, then
 /// a non-empty LIGHTWEIGHT `name` itself. Edges are read through `txn`.
@@ -278,9 +306,10 @@ pub(super) async fn refuse_removing_lightweight(
 
 /// What refuses `definition`, a table definition, in the database `ns`, `db`,
 /// as `txn` holds the table it redefines and that table's contents: as
-/// `DEFINE TABLE` judges a LIGHTWEIGHT relation and the INLINE fields of a
-/// relation changing its type.
+/// `DEFINE TABLE` judges a LIGHTWEIGHT relation, the INLINE fields of a
+/// relation changing its type, and a type the table's records do not admit.
 pub(super) async fn refuse_redefining_table(
+	ctx: &crate::exec::ExecutionContext,
 	txn: &Transaction,
 	ns: NamespaceId,
 	db: DatabaseId,
@@ -307,5 +336,11 @@ pub(super) async fn refuse_redefining_table(
 		)
 		.await?;
 	}
-	Ok(())
+	crate::ddl::define::table::validate_records_survive_type_change(
+		ctx,
+		txn,
+		existing.as_deref(),
+		&definition,
+	)
+	.await
 }
