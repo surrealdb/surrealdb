@@ -212,6 +212,7 @@ pub(super) fn plan_define(define: &DefineStatement, checks: DdlChecks) -> Planne
 				comment: comment_text(&stmt.comment),
 				changefeed: stmt.changefeed,
 				strict: stmt.strict,
+				compatibility: Default::default(),
 			};
 			(
 				DdlForm::DefineDatabase,
@@ -222,6 +223,7 @@ pub(super) fn plan_define(define: &DefineStatement, checks: DdlChecks) -> Planne
 					strict: stmt.strict,
 					changefeed: stmt.changefeed,
 					comment,
+					compatibility: stmt.compatibility,
 				},
 				template(
 					"DatabaseDefinition",
@@ -509,6 +511,7 @@ pub(super) fn plan_define(define: &DefineStatement, checks: DdlChecks) -> Planne
 					reference,
 					graphql_alias: stmt.graphql_alias.clone(),
 					graphql_deprecated: stmt.graphql_deprecated.clone(),
+					migrate: stmt.migrate.clone().map(Box::new),
 				})),
 				template(
 					"StoredFieldDefinition",

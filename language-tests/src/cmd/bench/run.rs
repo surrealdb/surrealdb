@@ -1212,7 +1212,8 @@ async fn populate(
 	// Use the per-variant dataset import chain (from `[bench].datasets`) when one
 	// was selected, otherwise fall back to the bench's own resolved imports.
 	let imports = run.config.imports.as_deref().unwrap_or(&run.case.imports);
-	if let Some(e) = util::run_imports_list(imports, session, dbs).await? {
+	let compatibility = run.case.test.config.parsed.env.compatibility;
+	if let Some(e) = util::run_imports_list(imports, session, compatibility, dbs).await? {
 		return Ok(Some(e));
 	}
 

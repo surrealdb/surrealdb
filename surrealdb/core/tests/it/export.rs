@@ -638,3 +638,91 @@ async fn restored_sequence_does_not_collide_with_imported_records() -> Result<()
 	);
 	Ok(())
 }
+
+/// A dump carries neither a table's layouts nor its migrations, and a restore
+/// stamps what it reads at its own generation, so a row that has not been
+/// through its table's steps has to be written as a read of it sees it: the
+/// migrated value, and without the field the step removed.
+#[tokio::test]
+async fn a_row_behind_a_migration_step_exports_as_it_reads() -> Result<()> {
+	let source = ds_with_batch_size(None).await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let mut res = source
+		.execute(
+			"DEFINE TABLE cfg SCHEMALESS;
+			 DEFINE FIELD n ON cfg TYPE option<string>;
+			 CREATE cfg:1 SET n = '5', legacy = 'x' RETURN NONE;
+			 ALTER FIELD n ON cfg TYPE option<int> MIGRATE EXISTING ROWS AS n_int USING <int>$value FALLBACK 0;
+			 ALTER TABLE cfg MIGRATE EXISTING ROWS AS drop_undeclared REMOVE UNDECLARED FIELDS;",
+			&ses,
+			None,
+		)
+		.await?;
+	for r in res.drain(..) {
+		r.result?;
+	}
+
+	const READ: &str = "SELECT * FROM cfg";
+	let read = source.execute(READ, &ses, None).await?.remove(0).result?;
+	assert_eq!(read, surrealdb_core::syn::value("[{ id: cfg:1, n: 5 }]")?);
+
+	let sql = export_text(&source, &ses).await?;
+	assert!(!sql.contains("legacy"), "a field the step removed must not be dumped: {sql}");
+	assert!(!sql.contains("'5'"), "the dump must carry the migrated value: {sql}");
+
+	let target = ds_with_batch_size(None).await?;
+	let mut res = target.execute(&sql, &ses, None).await?;
+	for r in res.drain(..) {
+		r.result?;
+	}
+	assert_eq!(target.execute(READ, &ses, None).await?.remove(0).result?, read);
+	Ok(())
+}
+
+/// A group is priced by the records it carries, and a migration step can make a
+/// record write more index entries than the bytes stored for it do: a dump of
+/// rows whose array a step expands has to group as tightly as rows that held
+/// the long array to begin with.
+#[tokio::test]
+async fn grouping_follows_what_a_migration_step_makes_of_a_record() -> Result<()> {
+	let ds = ds_with_batch_size(Some(1000)).await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let mut res = ds
+		.execute(
+			"DEFINE TABLE person SCHEMALESS;
+			 DEFINE FIELD tags ON person TYPE option<array<string>>;",
+			&ses,
+			None,
+		)
+		.await?;
+	for r in res.drain(..) {
+		r.result?;
+	}
+	for i in 0..40 {
+		let sql = format!("CREATE person:{i} SET tags = ['1'] RETURN NONE");
+		ds.execute(&sql, &ses, None).await?.remove(0).result?;
+	}
+	// The rows stay as they were stored: the step is replayed on read and by the
+	// rewrite job, and the index is defined over what a read of a row sees.
+	let mut res = ds
+		.execute(
+			"ALTER FIELD tags ON person TYPE option<array<int>> MIGRATE EXISTING ROWS AS widen USING array::concat(array::map($value, |$v| <int>$v), array::range(0, 400)) FALLBACK [];
+			 DEFINE INDEX ix_tags ON person FIELDS tags;",
+			&ses,
+			None,
+		)
+		.await?;
+	for r in res.drain(..) {
+		r.result?;
+	}
+
+	let sql = export_text(&ds, &ses).await?;
+	let groups = insert_group_sizes(&sql);
+	assert_eq!(groups.iter().sum::<usize>(), 40, "every record must still be exported");
+	let widest = *groups.iter().max().expect("the export must carry records");
+	assert!(
+		widest < 40,
+		"rows an array of 401 entries is read from must group more tightly than one: {groups:?}"
+	);
+	Ok(())
+}

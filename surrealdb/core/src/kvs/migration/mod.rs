@@ -89,6 +89,7 @@ mod doc_lookup_identity;
 mod kinds_as_text;
 mod module_keys;
 mod sequence_defs;
+mod store_defaults;
 mod stored_records;
 
 use std::future::Future;
@@ -210,7 +211,18 @@ pub(crate) static MIGRATIONS: &[Migration] = &[
 		run: |_| Box::pin(async { Ok(()) }),
 		on_demand: true,
 	},
+	Migration {
+		id: STORE_DEFAULTS.raw(),
+		name: "record the database defaults of the release that created the datastore",
+		version: (3, 4, 0),
+		run: |ds| Box::pin(store_defaults::record_the_defaults_of_an_earlier_release(ds)),
+		on_demand: false,
+	},
 ];
+
+/// The entry that records the database defaults of a datastore an earlier release created. It
+/// is compatible: a release that does not know it ignores the defaults it records.
+pub(crate) const STORE_DEFAULTS: LedgerId = LedgerId::new(LedgerClass::Compatible, 8);
 
 /// Brings the datastore's version stamp up to the running build, applying any
 /// data migrations the gap calls for.

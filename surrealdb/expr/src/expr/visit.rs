@@ -422,6 +422,9 @@ implement_visitor! {
 	}
 
 	fn visit_alter_database(this, a: &AlterDatabaseStatement){
+		if let Some(name) = a.name.as_ref(){
+			this.visit_expr(name)?;
+		}
 		Ok(())
 	}
 
@@ -533,6 +536,13 @@ implement_visitor! {
 			AlterKind::None |
 			AlterKind::Drop => {},
 			AlterKind::Set(ref x) => this.visit_reference(x)?,
+		}
+
+		if let Some(m) = a.migrate.as_ref(){
+			this.visit_expr(&m.using)?;
+			if let Some(f) = m.fallback.as_ref(){
+				this.visit_expr(f)?;
+			}
 		}
 
 		Ok(())
@@ -1132,6 +1142,12 @@ implement_visitor! {
 			this.visit_reference(r)?;
 		}
 		this.visit_expr(&d.comment)?;
+		if let Some(m) = d.migrate.as_ref(){
+			this.visit_expr(&m.using)?;
+			if let Some(f) = m.fallback.as_ref(){
+				this.visit_expr(f)?;
+			}
+		}
 		Ok(())
 	}
 
@@ -1965,6 +1981,9 @@ implement_visitor_mut! {
 	}
 
 	fn visit_mut_alter_database(this, a: &mut AlterDatabaseStatement){
+		if let Some(name) = a.name.as_mut(){
+			this.visit_mut_expr(name)?;
+		}
 		Ok(())
 	}
 
@@ -2076,6 +2095,13 @@ implement_visitor_mut! {
 			AlterKind::None |
 			AlterKind::Drop => {},
 			AlterKind::Set(ref mut x) => this.visit_mut_reference(x)?,
+		}
+
+		if let Some(m) = a.migrate.as_mut(){
+			this.visit_mut_expr(&mut m.using)?;
+			if let Some(f) = m.fallback.as_mut(){
+				this.visit_mut_expr(f)?;
+			}
 		}
 
 		Ok(())
@@ -2668,6 +2694,12 @@ implement_visitor_mut! {
 			this.visit_mut_reference(r)?;
 		}
 		this.visit_mut_expr(&mut d.comment)?;
+		if let Some(m) = d.migrate.as_mut(){
+			this.visit_mut_expr(&mut m.using)?;
+			if let Some(f) = m.fallback.as_mut(){
+				this.visit_mut_expr(f)?;
+			}
+		}
 		Ok(())
 	}
 

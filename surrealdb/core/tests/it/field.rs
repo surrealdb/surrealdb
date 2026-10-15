@@ -324,6 +324,7 @@ async fn field_definition_array_any() -> Result<()> {
 	fields: { custom: 'DEFINE FIELD custom ON user TYPE array PERMISSIONS FULL' },
 	indexes: {  },
 	lives: {  },
+	migrations: { generation: 2, guaranteed: [], migrations: [] },
 	tables: {  }
 }
 		",

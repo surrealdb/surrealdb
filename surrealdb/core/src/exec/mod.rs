@@ -80,6 +80,7 @@ pub(crate) mod ir;
 pub(crate) mod logical;
 pub mod memory;
 pub(crate) mod metrics;
+pub(crate) mod migrate;
 pub(crate) mod object_extract;
 pub(crate) mod operators;
 pub(crate) mod ordering;

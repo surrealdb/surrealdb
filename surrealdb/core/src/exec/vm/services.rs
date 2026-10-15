@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 use super::ir_host::{EngineIrHost, IrHostService};
 use super::program::DefHash;
-use crate::catalog::providers::{DatabaseProvider, TableProvider};
+use crate::catalog::providers::DatabaseProvider;
 use crate::catalog::{
 	DatabaseId, Error as CatalogError, FunctionDefinition, IndexId, NamespaceId, TableDefinition,
 };
@@ -511,18 +511,16 @@ impl Services for EngineServices<'_> {
 		policy: CachePolicy,
 	) -> FlowResult<Vec<Value>> {
 		let db_ctx = self.ctx.database().context("the VM requires a database context")?;
-		let records = self
-			.ctx
-			.txn()
-			.get_records(
-				db_ctx.ns_ctx.ns.namespace_id,
-				db_ctx.db.database_id,
-				rids,
-				version,
-				policy,
-			)
-			.await
-			.map_err(ControlFlow::Err)?;
+		let records = crate::exec::migrate::get_records(
+			self.ctx,
+			&self.ctx.txn(),
+			db_ctx.ns_ctx.ns.namespace_id,
+			db_ctx.db.database_id,
+			rids,
+			version,
+			policy,
+		)
+		.await?;
 		ensure_below_memory_threshold()?;
 		let values = records
 			.into_iter()

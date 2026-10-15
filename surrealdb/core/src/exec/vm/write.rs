@@ -535,18 +535,18 @@ impl WriteState {
 					.take()
 					.ok_or_else(|| internal("a retry with no record to update"))?;
 				let (row, ctx) = self.in_flight()?;
-				let stored = ctx
-					.txn()
-					.get_record(
-						ctx.ns.namespace_id,
-						ctx.db.database_id,
-						&target.table,
-						&target.key,
-						ctx.exec().version_stamp(),
-					)
-					.await
-					.map_err(ControlFlow::Err)?;
-				row.reset_for_update_retry(target, &stored);
+				let (stored, stamp) = crate::exec::migrate::stamped_record(
+					&ctx.txn(),
+					ctx.ns.namespace_id,
+					ctx.db.database_id,
+					&target.table,
+					&target.key,
+					ctx.exec().version_stamp(),
+				)
+				.await
+				.map_err(ControlFlow::Err)?;
+				row.reset_for_update_retry(target, &stored, stamp);
+				row.replay_stored(ctx.exec()).await?;
 				next
 			}
 			WriteInstr::CarryBegin => {
@@ -1396,7 +1396,7 @@ async fn run_targets(
 					Rows::Scan(scan_subjects(ctx, &table, range.as_deref()).await?)
 				}
 			};
-			while let Some(row) = rows.next().await? {
+			while let Some(row) = rows.next(ctx).await? {
 				write_state(state)?.row = Some(row);
 				run_value_row(program, pipeline, Value::None, state, ctx).await?;
 				flush(state, yielder, flush_at, ctx).await?;

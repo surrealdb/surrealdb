@@ -6,55 +6,55 @@ reason = "Test ALTER API with all variations"
 value = "NONE"
 
 [[test.results]]
-value = """{ accesses: {  }, analyzers: {  }, apis: { "/mytest": "DEFINE API '/mytest' FOR any PERMISSIONS FULL THEN { RETURN 'fallback' } FOR get PERMISSIONS FULL THEN { RETURN 'get handler' } FOR post, put PERMISSIONS FULL THEN { RETURN 'write handler' }" }, buckets: {  }, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
+value = """{ accesses: {  }, analyzers: {  }, apis: { "/mytest": "DEFINE API '/mytest' FOR any PERMISSIONS FULL THEN { RETURN 'fallback' } FOR get PERMISSIONS FULL THEN { RETURN 'get handler' } FOR post, put PERMISSIONS FULL THEN { RETURN 'write handler' }" }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = """{ accesses: {  }, analyzers: {  }, apis: { "/mytest": "DEFINE API '/mytest' FOR any PERMISSIONS FULL THEN { RETURN 'fallback' } FOR get PERMISSIONS FULL THEN { RETURN 'get handler' } FOR post, put PERMISSIONS FULL THEN { RETURN 'write handler' } COMMENT 'updated api'" }, buckets: {  }, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
+value = """{ accesses: {  }, analyzers: {  }, apis: { "/mytest": "DEFINE API '/mytest' FOR any PERMISSIONS FULL THEN { RETURN 'fallback' } FOR get PERMISSIONS FULL THEN { RETURN 'get handler' } FOR post, put PERMISSIONS FULL THEN { RETURN 'write handler' } COMMENT 'updated api'" }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = """{ accesses: {  }, analyzers: {  }, apis: { "/mytest": "DEFINE API '/mytest' FOR any PERMISSIONS FULL THEN { RETURN 'fallback' } FOR get PERMISSIONS FULL THEN { RETURN 'get handler' } FOR post, put PERMISSIONS FULL THEN { RETURN 'write handler' }" }, buckets: {  }, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
+value = """{ accesses: {  }, analyzers: {  }, apis: { "/mytest": "DEFINE API '/mytest' FOR any PERMISSIONS FULL THEN { RETURN 'fallback' } FOR get PERMISSIONS FULL THEN { RETURN 'get handler' } FOR post, put PERMISSIONS FULL THEN { RETURN 'write handler' }" }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = """{ accesses: {  }, analyzers: {  }, apis: { "/mytest": "DEFINE API '/mytest' FOR any PERMISSIONS FULL FOR get PERMISSIONS FULL THEN { RETURN 'get handler' } FOR post, put PERMISSIONS FULL THEN { RETURN 'write handler' }" }, buckets: {  }, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
+value = """{ accesses: {  }, analyzers: {  }, apis: { "/mytest": "DEFINE API '/mytest' FOR any PERMISSIONS FULL FOR get PERMISSIONS FULL THEN { RETURN 'get handler' } FOR post, put PERMISSIONS FULL THEN { RETURN 'write handler' }" }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = """{ accesses: {  }, analyzers: {  }, apis: { "/mytest": "DEFINE API '/mytest' FOR any PERMISSIONS FULL THEN { RETURN 'new fallback' } FOR get PERMISSIONS FULL THEN { RETURN 'get handler' } FOR post, put PERMISSIONS FULL THEN { RETURN 'write handler' }" }, buckets: {  }, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
+value = """{ accesses: {  }, analyzers: {  }, apis: { "/mytest": "DEFINE API '/mytest' FOR any PERMISSIONS FULL THEN { RETURN 'new fallback' } FOR get PERMISSIONS FULL THEN { RETURN 'get handler' } FOR post, put PERMISSIONS FULL THEN { RETURN 'write handler' }" }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = """{ accesses: {  }, analyzers: {  }, apis: { "/mytest": "DEFINE API '/mytest' FOR any PERMISSIONS FULL THEN { RETURN 'new fallback' } FOR post, put PERMISSIONS FULL THEN { RETURN 'write handler' } FOR get PERMISSIONS FULL THEN { RETURN 'new get handler' }" }, buckets: {  }, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
+value = """{ accesses: {  }, analyzers: {  }, apis: { "/mytest": "DEFINE API '/mytest' FOR any PERMISSIONS FULL THEN { RETURN 'new fallback' } FOR post, put PERMISSIONS FULL THEN { RETURN 'write handler' } FOR get PERMISSIONS FULL THEN { RETURN 'new get handler' }" }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = """{ accesses: {  }, analyzers: {  }, apis: { "/mytest": "DEFINE API '/mytest' FOR any PERMISSIONS FULL THEN { RETURN 'new fallback' } FOR post, put PERMISSIONS FULL THEN { RETURN 'write handler' }" }, buckets: {  }, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
+value = """{ accesses: {  }, analyzers: {  }, apis: { "/mytest": "DEFINE API '/mytest' FOR any PERMISSIONS FULL THEN { RETURN 'new fallback' } FOR post, put PERMISSIONS FULL THEN { RETURN 'write handler' }" }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = """{ accesses: {  }, analyzers: {  }, apis: { "/mytest": "DEFINE API '/mytest' FOR any PERMISSIONS FULL THEN { RETURN 'new fallback' } FOR put PERMISSIONS FULL THEN { RETURN 'write handler' }" }, buckets: {  }, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
+value = """{ accesses: {  }, analyzers: {  }, apis: { "/mytest": "DEFINE API '/mytest' FOR any PERMISSIONS FULL THEN { RETURN 'new fallback' } FOR put PERMISSIONS FULL THEN { RETURN 'write handler' }" }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = """{ accesses: {  }, analyzers: {  }, apis: { "/mytest": "DEFINE API '/mytest' FOR any PERMISSIONS FULL THEN { RETURN 'new fallback' } FOR get PERMISSIONS FULL THEN { RETURN 'restored get' } FOR delete PERMISSIONS FULL THEN { RETURN 'delete handler' }" }, buckets: {  }, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
+value = """{ accesses: {  }, analyzers: {  }, apis: { "/mytest": "DEFINE API '/mytest' FOR any PERMISSIONS FULL THEN { RETURN 'new fallback' } FOR get PERMISSIONS FULL THEN { RETURN 'restored get' } FOR delete PERMISSIONS FULL THEN { RETURN 'delete handler' }" }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
 
 [[test.results]]
 value = "NONE"

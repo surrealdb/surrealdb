@@ -26,6 +26,34 @@ pub enum DefineDefault {
 	Set(Expr),
 }
 
+/// `MIGRATE EXISTING ROWS AS <name> USING <expr> [FALLBACK <expr>]`: what a
+/// field definition does to the rows stored before it.
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct MigrateClause {
+	/// The migration's name, unique per table.
+	pub name: String,
+	/// The transform, over `$value`.
+	pub using: Expr,
+	/// The constant stored where the transform fails or its result does not
+	/// pass the definition.
+	pub fallback: Option<Expr>,
+}
+
+impl ToSql for MigrateClause {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(
+			f,
+			sql_fmt,
+			" MIGRATE EXISTING ROWS AS {} USING {}",
+			common::fmt::EscapeIdent(&self.name),
+			CoverStmts(&self.using)
+		);
+		if let Some(ref fallback) = self.fallback {
+			write_sql!(f, sql_fmt, " FALLBACK {}", CoverStmts(fallback));
+		}
+	}
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineFieldStatement {
 	pub kind: DefineKind,
@@ -49,6 +77,8 @@ pub struct DefineFieldStatement {
 	pub reference: Option<Reference>,
 	pub graphql_alias: Option<String>,
 	pub graphql_deprecated: Option<String>,
+	/// `MIGRATE EXISTING ROWS …`: what the definition does to stored rows.
+	pub migrate: Option<MigrateClause>,
 }
 
 impl Default for DefineFieldStatement {
@@ -71,6 +101,7 @@ impl Default for DefineFieldStatement {
 			reference: None,
 			graphql_alias: None,
 			graphql_deprecated: None,
+			migrate: None,
 		}
 	}
 }
@@ -161,6 +192,9 @@ impl ToSql for DefineFieldStatement {
 		}
 		if let Some(ref v) = self.reference {
 			write_sql!(f, sql_fmt, " REFERENCE {v}");
+		}
+		if let Some(ref migrate) = self.migrate {
+			migrate.fmt_sql(f, sql_fmt);
 		}
 		if !matches!(self.comment, Expr::Literal(Literal::None)) {
 			write_sql!(f, sql_fmt, " COMMENT {}", CoverStmts(&self.comment));

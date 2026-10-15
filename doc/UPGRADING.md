@@ -214,6 +214,40 @@ field definition of the table removes it, and so does an `OPTION IMPORT` write o
 a row stamped with a generation: two such imports into one table at once conflict
 over the removal, and the client retries the one that fails.
 
+### Database compatibility and field migrations
+
+A database has a **compatibility level**, `3` or `4`. At level 3 a table accepts
+any schema change, as 3.x did: a removed field keeps its stored values and a
+retyped field can leave rows that no longer conform. At level 4 a `SCHEMAFULL`
+table refuses a schema change its stored rows might not satisfy unless the
+statement carries `MIGRATE EXISTING ROWS AS <name> USING <expr>` to say what
+they become, and removing a field removes its stored values.
+
+- A database that records no level, such as one an earlier release defined, is
+  at level 3. A store this release creates takes level 4 for the databases it
+  creates; a store an earlier release created takes level 3, which the data
+  migration recorded as the Compatible ledger entry 8 stores beside the data.
+  `ALTER SYSTEM COMPATIBILITY 3|4` changes the default for databases created later, `DEFINE DATABASE … COMPATIBILITY` sets one database's level, and
+  `ALTER DATABASE COMPATIBILITY` raises or lowers an existing one. Raising a
+  database to 4 verifies its tables in the background and shows the rows that do
+  not conform in `INFO FOR TABLE`.
+- A level-4 database and any `MIGRATE` statement are written in the stored
+  grammar, so a store at Legacy refuses them with an error that names the
+  feature level. A level-3 database is written in `revision` and a 3.x release
+  reads it.
+- A migration is a step carried by the layout generation it mints. A row
+  stored before the generation passes through the step whenever it is read,
+  and a background job (one lease for every table) rewrites the rows. The job
+  does not move the table's floor: a row stamped before a step, such as one a
+  transaction that began before the migration committed after the job passed
+  it, is replayed whenever it is read. Rolling back to a release that does not
+  read a generation's descriptor refuses that generation's rows; see
+  `rollback_check`.
+- A field whose stored values all conform to its definition, verified by the
+  job once the transactions older than the change have ended, gets an entry in
+  the table's conformance record (`!fc`). A write that bypasses the schema
+  stage (`OPTION IMPORT`) removes the record, and the verification starts over.
+
 ### Going back to an earlier release
 
 - **3.3** reads the ledger. A store raised to the new format holds the

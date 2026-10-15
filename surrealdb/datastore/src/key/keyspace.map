@@ -13,6 +13,7 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /!vh                                                                                             VersionHistoryPrefix ->  (range)
 /!mg{id}                                                                                                 MigrationKey ->  crate::version::MigrationRecord
 /!mg                                                                                                  MigrationPrefix ->  (range)
+/!df                                                                                                 StoreDefaultsKey ->  crate::version::StoreDefaults
 /!ns{ns}                                                                                                 NamespaceKey ->  surrealdb_catalog::NamespaceDefinition
 /!ns                                                                                                  NamespacePrefix ->  (range)
 /!nd{nd}                                                                                                      NodeKey ->  surrealdb_catalog::node::Node
@@ -43,6 +44,10 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /!gf                                                                                                  GraphFoldPrefix ->  (range)
 /!gf{ns}{db}{tb}                                                                                    GraphFoldTbPrefix ->  (range)
 /!gf{ns}{db}{tb}{id}{dir}                                                                          GraphFoldDirPrefix ->  (range)
+/!tm{ns}{db}{tb}                                                                                    TableMigrationKey ->  crate::key::table_migration::TableMigrationState
+/!tm                                                                                             TableMigrationPrefix ->  (range)
+/!tm{ns}                                                                                       TableMigrationNsPrefix ->  (range)
+/!tm{ns}{db}                                                                                   TableMigrationDbPrefix ->  (range)
 /!rc{kind}{ns}{db}{tb}{ix}{expunge}{uid}                                                                   ReclaimKey ->  ReclaimState
 /!rc                                                                                                    ReclaimPrefix ->  (range)
 /!rc{kind}{ns}{db}{tb}                                                                                ReclaimTbPrefix ->  (range)
@@ -162,6 +167,8 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}*{tb}!lg                                                                                      LayoutPrefix ->  (range)
 /*{ns}*{db}*{tb}!mi                                                                                TableMigrationsKey ->  surrealdb_catalog::TableMigrations
 /*{ns}*{db}*{tb}!fc                                                                               TableConformanceKey ->  surrealdb_catalog::TableConformance
+/*{ns}*{db}*{tb}!mn{name}                                                                             MigrationRunKey ->  surrealdb_catalog::MigrationRun
+/*{ns}*{db}*{tb}!mn                                                                                MigrationRunPrefix ->  (range)
 /*{ns}*{db}*{tb}!dh{start}                                                                              DocIdBatchKey ->  crate::sequences::BatchValue
 /*{ns}*{db}*{tb}!dh                                                                                  DocIdBatchPrefix ->  (range)
 /*{ns}*{db}*{tb}!ds{nid}                                                                                DocIdStateKey ->  crate::sequences::SequenceState

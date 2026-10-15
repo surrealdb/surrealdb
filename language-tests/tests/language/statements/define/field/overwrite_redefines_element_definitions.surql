@@ -2,6 +2,7 @@
 [env]
 namespace = true
 database = true
+compatibility = 3
 
 [test]
 reason = """

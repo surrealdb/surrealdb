@@ -42,6 +42,8 @@ use crate::expr::match_plan::{
 use crate::expr::module::{ModuleExecutable, ModuleName};
 use crate::expr::statements::access::PurgeKind;
 use crate::expr::statements::alter::AlterKind;
+use crate::expr::statements::alter::table::TableMigrateClause;
+use crate::expr::statements::define::MigrateClause;
 pub(crate) use crate::expr::statements::show::ShowSince;
 use crate::expr::table_type::TableType;
 use crate::expr::{Algorithm, ApiMethod, Base, ChangeFeed, EventKind, Filter, Kind, Tokenizer};
@@ -503,6 +505,8 @@ pub(crate) enum DefineObject {
 		strict: bool,
 		changefeed: Option<ChangeFeed>,
 		comment: OperandSlot,
+		/// `COMPATIBILITY <level>`, when the statement writes it.
+		compatibility: Option<u8>,
 	},
 	Function(Box<DefineFunction>),
 	Analyzer {
@@ -630,6 +634,9 @@ pub(crate) struct DefineField {
 	pub(crate) reference: Option<ReferenceShape>,
 	pub(crate) graphql_alias: Option<String>,
 	pub(crate) graphql_deprecated: Option<String>,
+	/// `MIGRATE EXISTING ROWS`, as written: its transform is compiled, and its `FALLBACK` read
+	/// as a constant, where the statement commits the migration.
+	pub(crate) migrate: Option<Box<MigrateClause>>,
 }
 
 /// `DEFINE USER`.
@@ -761,12 +768,18 @@ pub(crate) enum AlterObject {
 	System {
 		query_timeout: AlterKind<OperandSlot>,
 		compact: bool,
+		/// `COMPATIBILITY <level>`: the level a database created without one takes.
+		compatibility: Option<u8>,
 	},
 	Namespace {
 		compact: bool,
 	},
 	Database {
+		/// The database the statement names, or `None` for the session's.
+		name: Option<OperandSlot>,
 		compact: bool,
+		/// `COMPATIBILITY <level>`, when the statement writes it.
+		compatibility: Option<u8>,
 	},
 	Table(Box<AlterTable>),
 	Api {
@@ -832,6 +845,8 @@ pub(crate) struct AlterTable {
 	pub(crate) kind: Option<TableType>,
 	pub(crate) inline_edges_cap: AlterKind<u32>,
 	pub(crate) inline_refs_cap: AlterKind<u32>,
+	/// `MIGRATE EXISTING ROWS`, as written.
+	pub(crate) migrate: Option<Box<TableMigrateClause>>,
 }
 
 /// `ALTER EVENT`.
@@ -864,6 +879,8 @@ pub(crate) struct AlterField {
 	pub(crate) permissions: Option<PermissionsShape>,
 	pub(crate) comment: AlterKind<String>,
 	pub(crate) reference: AlterKind<ReferenceShape>,
+	/// `MIGRATE EXISTING ROWS`, as written.
+	pub(crate) migrate: Option<Box<MigrateClause>>,
 }
 
 /// `ALTER FUNCTION`.

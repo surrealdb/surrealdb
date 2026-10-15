@@ -576,6 +576,7 @@ async fn dispatched(
 						.table_layouts(ns, db, &rid.table, version)
 						.await
 						.map_err(ControlFlow::Err)?;
+					let replay = crate::exec::migrate::Replay::of(&layouts, ns, db);
 					let gate =
 						crate::kvs::RowGate::new(layouts, ns, db, &rid.table, version, epoch)
 							.map_err(ControlFlow::Err)?;
@@ -590,9 +591,14 @@ async fn dispatched(
 						None,
 						None,
 						None,
+						replay.clone(),
 					);
 					while let Some(batch) = source.next().await {
-						for raw in batch?.into_values() {
+						let mut batch = batch?;
+						if let Some(replay) = &replay {
+							replay.apply_batch(ctx, &mut batch).await?;
+						}
+						for raw in batch.into_values() {
 							super::fuel::tick(ctx, 1).await?;
 							match deref
 								.read(ctx, &rid.table, raw, ctx.root().skip_fetch_perms)
@@ -719,9 +725,13 @@ async fn undispatched_table(
 	}
 	crate::exec::permission::validate_record_user_access(db_ctx)?;
 	let checked = crate::exec::permission::should_check_perms(db_ctx, crate::iam::Action::View)?;
-	// A table with no field and a select permission a checked caller is
-	// refused or granted whole is read as storage holds it.
+	// A table with migration steps has its records brought through the steps
+	// they have not passed before anything reads them.
+	let replay = descriptor.replay();
+	// A table with no field and no migration step, and a select permission a
+	// checked caller is refused or granted whole, is read as storage holds it.
 	let plain = fields.is_empty()
+		&& replay.is_none()
 		&& match &definition.permissions.select {
 			_ if !checked => true,
 			crate::catalog::Permission::None => return Ok(Values::Rows(Vec::new())),
@@ -745,6 +755,7 @@ async fn undispatched_table(
 		reads,
 		None,
 		None,
+		replay.clone(),
 	);
 	if plain {
 		return Ok(Values::Stream(records));
@@ -752,8 +763,12 @@ async fn undispatched_table(
 	let ctx = ctx.clone();
 	Ok(Values::Stream(Box::pin(records.then(move |batch| {
 		let ctx = ctx.clone();
+		let replay = replay.clone();
 		async move {
-			let batch = batch?;
+			let mut batch = batch?;
+			if let Some(replay) = &replay {
+				replay.apply_batch(&ctx, &mut batch).await?;
+			}
 			// The records the permission refuses spend the fuel here, as
 			// their rows never run.
 			let read = batch.len();

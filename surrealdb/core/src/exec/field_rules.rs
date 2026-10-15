@@ -441,6 +441,39 @@ pub(crate) fn define_field_nesting_restrictions(
 	nesting_restrictions(definition, previous, &after)
 }
 
+/// Refuse a kind for `definition` that a field of the table, `fields`, it is
+/// nested in does not admit at its place ([`admits_nested_kind`]): `labels.*`
+/// of `int` under `labels` of `set<string>`. A parent that cannot hold a field at all is refused by
+/// [`define_field_nesting_restrictions`], whose error names why. A derived
+/// record id component has no kind of its own to nest under.
+pub(crate) fn parent_kind_restrictions(
+	fields: &[catalog::FieldDefinition],
+	definition: &catalog::FieldDefinition,
+) -> Result<()> {
+	let Some(kind) = &definition.field_kind else {
+		return Ok(());
+	};
+	for parent in fields.iter().filter(|fd| !fd.is_key_part()) {
+		let Some(parent_kind) = &parent.field_kind else {
+			continue;
+		};
+		if !definition.name.starts_with(&parent.name) || definition.name == parent.name {
+			continue;
+		}
+		let path = definition.name[parent.name.len()..].to_vec();
+		if !admits_nested_kind(parent_kind, &path, kind) {
+			define_field_nesting_restrictions(fields, definition)?;
+			bail!(ExecError::MismatchedFieldTypes {
+				name: definition.name.to_sql(),
+				kind: kind.to_sql(),
+				existing_name: parent.name.to_sql(),
+				existing_kind: parent_kind.to_sql(),
+			});
+		}
+	}
+	Ok(())
+}
+
 /// The table's field definitions, `fields`, as defining `definition` leaves
 /// them: `definition` in place of the one it overwrites, the definitions its
 /// kind implies for the elements of an array or set in place of theirs, and

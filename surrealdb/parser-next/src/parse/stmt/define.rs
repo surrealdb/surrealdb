@@ -56,6 +56,33 @@ impl<'a, 's> Parser<'a, 's> {
 		self.push_clause(cl, n, 0, t.start, first)
 	}
 
+	/// `MIGRATE EXISTING ROWS AS name …`: on a field (`table` false)
+	/// `USING expr [FALLBACK expr]`, as a [`Cl::Migrate`] clause; on a table
+	/// `REMOVE UNDECLARED FIELDS`, as a [`Cl::MigrateRemoveUndeclared`] one.
+	pub(crate) fn migrate_clause(&mut self, table: bool) -> R<()> {
+		let t = self.bump();
+		let first = self.ast.nodes.len();
+		self.expect_kw(Kw::Existing, "EXISTING")?;
+		self.expect_kw(Kw::Rows, "ROWS")?;
+		self.expect_kw(Kw::As, "AS")?;
+		let name = self.name()?;
+		if table {
+			self.expect_kw(Kw::Remove, "REMOVE")?;
+			self.expect_kw(Kw::Undeclared, "UNDECLARED")?;
+			self.expect_kw(Kw::Fields, "FIELDS")?;
+			return self.push_clause(Cl::MigrateRemoveUndeclared, name, 0, t.start, first);
+		}
+		self.expect_kw(Kw::Using, "USING")?;
+		let using = self.expr(true)?;
+		let fallback = if self.eat_kw(Kw::Fallback) {
+			self.expr(true)?
+		} else {
+			NONE
+		};
+		let idx = self.record(&[using, fallback]);
+		self.push_clause(Cl::Migrate, name, idx, t.start, first)
+	}
+
 	/// `DEFINE …` after `DEFINE`.
 	pub(crate) fn define(&mut self, start: u32) -> R<NodeId> {
 		let first = self.ast.nodes.len();
@@ -125,6 +152,7 @@ impl<'a, 's> Parser<'a, 's> {
 						Kw::Comment => self.expr_clause(Cl::Comment)?,
 						Kw::ChangeFeed => self.changefeed()?,
 						Kw::Strict => self.flag_clause(Cl::Strict)?,
+						Kw::Compatibility => self.uint_clause(Cl::Compatibility)?,
 						_ => break,
 					}
 				}
@@ -1083,6 +1111,7 @@ impl<'a, 's> Parser<'a, 's> {
 				Kw::Computed => self.expr_clause(Cl::Computed)?,
 				Kw::GraphqlAlias => self.string_clause(Cl::GraphqlAlias)?,
 				Kw::GraphqlDeprecated => self.string_clause(Cl::GraphqlDeprecated)?,
+				Kw::Migrate => self.migrate_clause(false)?,
 				_ => return Ok(()),
 			}
 		}

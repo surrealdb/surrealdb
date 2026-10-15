@@ -46,7 +46,7 @@ value = "NONE"
 value = "[{ a: 'w', id: t:5 }]"
 
 [[test.results]]
-value = "[{ a: 'x', b: 1, id: t:2 }, { a: 'z', id: t:4, v: 'set' }, { a: 'w', id: t:5 }]"
+value = "[{ a: 'x', b: 1, id: t:2 }, { a: 'z', id: t:4 }, { a: 'w', id: t:5 }]"
 
 [[test.results]]
 value = "NONE"

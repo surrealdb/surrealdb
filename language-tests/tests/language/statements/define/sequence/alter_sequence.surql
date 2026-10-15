@@ -8,13 +8,13 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = '''{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: { seq: 'DEFINE SEQUENCE seq BATCH 1000 START 0 TIMEOUT 5s' }, tables: {  }, users: {  } }'''
+value = '''{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: { seq: 'DEFINE SEQUENCE seq BATCH 1000 START 0 TIMEOUT 5s' }, tables: {  }, users: {  } }'''
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = '''{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: { seq: 'DEFINE SEQUENCE seq BATCH 1000 START 0' }, tables: {  }, users: {  } }'''
+value = '''{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: { seq: 'DEFINE SEQUENCE seq BATCH 1000 START 0' }, tables: {  }, users: {  } }'''
 
 */
 DEFINE SEQUENCE seq;

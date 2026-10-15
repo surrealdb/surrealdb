@@ -19,6 +19,8 @@ mod blocking_rebuild_index_test;
 #[cfg(feature = "kv-mem")]
 mod changefeed_gc_test;
 #[cfg(feature = "kv-mem")]
+mod compatibility_test;
+#[cfg(feature = "kv-mem")]
 mod export_id_components_test;
 #[cfg(feature = "kv-mem")]
 mod export_implied_element_fields_test;
@@ -47,6 +49,8 @@ mod interrupted_write_test;
 #[cfg(feature = "kv-mem")]
 mod keyspace_test;
 #[cfg(feature = "kv-mem")]
+mod layout_oracle_test;
+#[cfg(feature = "kv-mem")]
 mod lightweight_test;
 mod reclaim_backends_test;
 #[cfg(feature = "kv-mem")]
@@ -57,6 +61,10 @@ mod rpc_session_test;
 mod select_for_update_test;
 #[cfg(feature = "kv-tikv")]
 mod sequences_tikv_test;
+#[cfg(feature = "kv-mem")]
+mod table_migration_resilience_test;
+#[cfg(feature = "kv-mem")]
+mod table_migration_test;
 #[cfg(feature = "kv-mem")]
 mod tx_cache_test;
 mod tx_cache_versioned_test;

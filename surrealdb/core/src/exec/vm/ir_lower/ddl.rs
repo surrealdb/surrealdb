@@ -1031,6 +1031,12 @@ impl Ddl<'_, '_> {
 			draw: 0,
 			reserved: None,
 		});
+		let level = self.reg()?;
+		self.store(StoreInstr::NewDatabaseCompatibility {
+			ns,
+			db: id,
+			dst: level,
+		});
 		let (none, no) = (self.constant(Value::None)?, self.constant(Value::Bool(false))?);
 		let created = self.object(&[
 			("namespace_id", Operand::Reg(ns)),
@@ -1039,6 +1045,7 @@ impl Ddl<'_, '_> {
 			("comment", none),
 			("changefeed", none),
 			("strict", no),
+			("compatibility", Operand::Reg(level)),
 		])?;
 		self.store(StoreInstr::Put {
 			route: RouteId::named("DatabaseKey"),
@@ -1068,13 +1075,22 @@ impl Ddl<'_, '_> {
 	/// (`NsNotFound` naming the namespace, or `DbNotFound` naming the database), a database that
 	/// does not exist `DbNotFound`.
 	fn selected_ids(&mut self, no_namespace: StatementError) -> Result<(Reg, Reg, Reg), IrError> {
-		let ns_name = self.reg()?;
-		self.store(StoreInstr::SessionNs {
-			dst: ns_name,
-		});
 		let db_name = self.reg()?;
 		self.store(StoreInstr::SessionDb {
 			dst: db_name,
+		});
+		self.named_database_ids(db_name, no_namespace)
+	}
+
+	/// [`Self::selected_ids`] for the database of the session's namespace named in `db_name`.
+	fn named_database_ids(
+		&mut self,
+		db_name: Reg,
+		no_namespace: StatementError,
+	) -> Result<(Reg, Reg, Reg), IrError> {
+		let ns_name = self.reg()?;
+		self.store(StoreInstr::SessionNs {
+			dst: ns_name,
 		});
 		let ns_key = self.object(&[("ns", Operand::Reg(ns_name))])?;
 		let namespace = self.reg()?;
@@ -1896,8 +1912,14 @@ impl Ddl<'_, '_> {
 				strict,
 				changefeed,
 				comment,
+				compatibility,
 				..
-			} => self.define_database(mode, *name, *strict, changefeed.as_ref(), *comment),
+			} => self.define_database(
+				mode,
+				*name,
+				(*strict, changefeed.as_ref(), *compatibility),
+				*comment,
+			),
 			DefineObject::Param {
 				name,
 				value,
@@ -2020,13 +2042,15 @@ impl Ddl<'_, '_> {
 	}
 
 	/// `DEFINE DATABASE`: the session's namespace is created when it does not exist, and the
-	/// database's id is the existing definition's, or a fresh one.
+	/// database's id is the existing definition's, or a fresh one. Its compatibility level is the
+	/// clause's, else the level the redefined database stands at, else the level a new database
+	/// takes; a redefinition that raises the level holds the stored rows to the rules of the new
+	/// one.
 	fn define_database(
 		&mut self,
 		mode: &DefineKind,
 		name: OperandSlot,
-		strict: bool,
-		changefeed: Option<&crate::expr::ChangeFeed>,
+		(strict, changefeed, compatibility): (bool, Option<&crate::expr::ChangeFeed>, Option<u8>),
 		comment: OperandSlot,
 	) -> Result<(), IrError> {
 		self.guard()?;
@@ -2042,8 +2066,32 @@ impl Ddl<'_, '_> {
 			dst: existing,
 		});
 		let id = self.reg()?;
+		let level = self.reg()?;
+		let written = match compatibility {
+			Some(written) => {
+				let written = self.constant(Value::from(i64::from(written)))?;
+				self.emit(Instr::Load {
+					dst: level,
+					src: written,
+				});
+				true
+			}
+			None => false,
+		};
 		let missing = self.exists(mode, existing, StatementError::DbAlreadyExists, name_reg)?;
 		self.get_field(existing, "database_id", id)?;
+		if written {
+			let previous = self.reg()?;
+			self.get_field(existing, "compatibility", previous)?;
+			self.store(StoreInstr::VerifyCompatibility {
+				ns,
+				db: id,
+				previous,
+				level,
+			});
+		} else {
+			self.get_field(existing, "compatibility", level)?;
+		}
 		let built = self.label()?;
 		self.emit(Instr::Jump {
 			target: built,
@@ -2057,6 +2105,13 @@ impl Ddl<'_, '_> {
 			draw: 0,
 			reserved: None,
 		});
+		if !written {
+			self.store(StoreInstr::NewDatabaseCompatibility {
+				ns,
+				db: id,
+				dst: level,
+			});
+		}
 		self.bind(built)?;
 		let comment = self.comment(comment)?.operand;
 		let changefeed_value = self.constant(match changefeed {
@@ -2071,6 +2126,7 @@ impl Ddl<'_, '_> {
 			("comment", comment),
 			("changefeed", changefeed_value),
 			("strict", strict),
+			("compatibility", Operand::Reg(level)),
 		])?;
 		self.store(StoreInstr::Put {
 			route: RouteId::named("DatabaseKey"),
@@ -2684,6 +2740,9 @@ impl Ddl<'_, '_> {
 			l.each_database(ns, |l, db| l.evict_database_sequences(ns, db))
 		})?;
 		self.delete("NamespaceKey", key, expunge);
+		// The table migration job's entries name the namespace by id.
+		let jobs = self.object(&[("ns", Operand::Reg(ns))])?;
+		self.delete_range("TableMigrationNsPrefix", jobs, false);
 		let (zero, empty) = self.unused_scope()?;
 		self.enqueue_reclaim(0, [Operand::Reg(ns), zero, empty, zero], expunge)?;
 		self.store(StoreInstr::ClearDatastoreCache);
@@ -2751,6 +2810,9 @@ impl Ddl<'_, '_> {
 		self.with_service(Service::Broker, |l| l.kill_database_subscriptions(ns, db))?;
 		self.with_service(Service::Sequences, |l| l.evict_database_sequences(ns, db))?;
 		self.delete("DatabaseKey", key, expunge);
+		// The table migration job's entries name the database by id.
+		let jobs = self.object(&[("ns", Operand::Reg(ns)), ("db", Operand::Reg(db))])?;
+		self.delete_range("TableMigrationDbPrefix", jobs, false);
 		let (zero, empty) = self.unused_scope()?;
 		self.enqueue_reclaim(1, [Operand::Reg(ns), Operand::Reg(db), empty, zero], expunge)?;
 		self.store(StoreInstr::ClearDatastoreCache);
@@ -3276,12 +3338,15 @@ impl Ddl<'_, '_> {
 				compact,
 			} => self.alter_namespace(*compact),
 			AlterObject::Database {
+				name,
 				compact,
-			} => self.alter_database(*compact),
+				compatibility,
+			} => self.alter_database(*name, *compact, *compatibility),
 			AlterObject::System {
 				query_timeout,
 				compact,
-			} => self.alter_system(query_timeout, *compact),
+				compatibility,
+			} => self.alter_system(query_timeout, *compact, *compatibility),
 			AlterObject::Table(table) => self.alter_table(attrs, table),
 			AlterObject::Api {
 				path,
@@ -3355,10 +3420,25 @@ impl Ddl<'_, '_> {
 		self.answer_none()
 	}
 
-	/// `ALTER DATABASE`: the session's database, which must exist, compacted.
-	fn alter_database(&mut self, compact: bool) -> Result<(), IrError> {
+	/// `ALTER DATABASE`: the named database of the session's namespace, or the session's
+	/// database, which must exist: compacted, and set to a compatibility level. Raising the level
+	/// to 4 is a change of the definition alone, and queues a verification of the stored rows of
+	/// each table that comes to enforce migrations; lowering it changes nothing else.
+	fn alter_database(
+		&mut self,
+		name: Option<OperandSlot>,
+		compact: bool,
+		compatibility: Option<u8>,
+	) -> Result<(), IrError> {
 		self.guard()?;
-		let (ns, db) = self.session_ids()?;
+		let (ns, db, database) = match name {
+			None => self.selected_ids(StatementError::DbNotFound)?,
+			Some(name) => {
+				let name = self.name(name, NameClause::Database)?;
+				let db_name = self.load(name.operand)?;
+				self.named_database_ids(db_name, StatementError::DbNotFound)?
+			}
+		};
 		if compact {
 			let root = self.object(&[("ns", Operand::Reg(ns)), ("db", Operand::Reg(db))])?;
 			self.store(StoreInstr::Compact {
@@ -3366,15 +3446,41 @@ impl Ddl<'_, '_> {
 				key: root,
 			});
 		}
+		if let Some(level) = compatibility {
+			let previous = self.reg()?;
+			self.get_field(database, "compatibility", previous)?;
+			let level = self.constant(Value::from(i64::from(level)))?;
+			self.set_field(database, "compatibility", level)?;
+			let name = self.reg()?;
+			self.get_field(database, "name", name)?;
+			let key = self.object(&[("ns", Operand::Reg(ns)), ("db", Operand::Reg(name))])?;
+			self.store(StoreInstr::Put {
+				route: RouteId::named("DatabaseKey"),
+				key,
+				ty: TypeId::named("DatabaseDefinition"),
+				value: database,
+			});
+			let level = self.load(level)?;
+			self.store(StoreInstr::VerifyCompatibility {
+				ns,
+				db,
+				previous,
+				level,
+			});
+			self.store(StoreInstr::ClearDatastoreCache);
+			self.store(StoreInstr::ClearCache);
+		}
 		self.answer_none()
 	}
 
 	/// `ALTER SYSTEM`: the compaction runs first, and the timeout is evaluated and cast to a
-	/// duration once it has.
+	/// duration once it has; then the compatibility level databases created later take by
+	/// default is set.
 	fn alter_system(
 		&mut self,
 		query_timeout: &AlterKind<OperandSlot>,
 		compact: bool,
+		compatibility: Option<u8>,
 	) -> Result<(), IrError> {
 		self.guard()?;
 		if compact {
@@ -3393,6 +3499,13 @@ impl Ddl<'_, '_> {
 		if let Some(timeout) = timeout {
 			self.store(StoreInstr::SetQueryTimeout {
 				timeout,
+			});
+		}
+		if let Some(level) = compatibility {
+			let level = self.constant(Value::from(i64::from(level)))?;
+			let level = self.load(level)?;
+			self.store(StoreInstr::SetDefaultCompatibility {
+				level,
 			});
 		}
 		self.answer_none()

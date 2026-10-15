@@ -78,6 +78,7 @@ pub fn database_basic() -> DatabaseDefinition {
 		database_id: DatabaseId(1),
 		name: "test".into(),
 		strict: false,
+		compatibility: Default::default(),
 		comment: None,
 		changefeed: None,
 	}
@@ -90,6 +91,7 @@ pub fn database_with_changefeed() -> DatabaseDefinition {
 		database_id: DatabaseId(456),
 		name: "events".into(),
 		strict: false,
+		compatibility: Default::default(),
 		comment: Some("Event store".to_string()),
 		changefeed: Some(ChangeFeed {
 			expiry: Duration::from_secs(3600).into(),
@@ -105,6 +107,7 @@ pub fn database_strict() -> DatabaseDefinition {
 		database_id: DatabaseId(2),
 		name: "strict_db".into(),
 		strict: true,
+		compatibility: Default::default(),
 		comment: Some("Strict mode database".to_string()),
 		changefeed: None,
 	}

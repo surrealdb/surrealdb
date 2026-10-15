@@ -10,12 +10,16 @@ use crate::expr::statements::alter::AlterKind;
 /// - `query_timeout`: set/drop a global query timeout which is enforced across queries. The value
 ///   is evaluated as a `Duration` expression at runtime.
 /// - `compact`: runs a storage compaction across the entire datastore.
+/// - `compatibility`: sets the compatibility level a database created without one takes. Databases
+///   that already exist keep theirs.
 pub struct AlterSystemStatement {
 	/// Global query timeout alteration. `Set` evaluates an expression to a
 	/// `Duration`; `Drop` clears the timeout; `None` leaves it unchanged.
 	pub query_timeout: AlterKind<Expr>,
 	/// When true, triggers a datastore-wide compaction.
 	pub compact: bool,
+	/// The store's default compatibility level for new databases.
+	pub compatibility: Option<u8>,
 }
 
 impl ToSql for AlterSystemStatement {
@@ -32,6 +36,9 @@ impl ToSql for AlterSystemStatement {
 		}
 		if self.compact {
 			write_sql!(f, fmt, " COMPACT");
+		}
+		if let Some(level) = self.compatibility {
+			write_sql!(f, fmt, " COMPATIBILITY {level}");
 		}
 	}
 }

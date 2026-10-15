@@ -126,6 +126,7 @@ use crate::{CommunityComposer, syn};
 
 mod builder;
 pub(crate) mod config;
+mod table_migration;
 
 pub use builder::Builder;
 pub use config::LiveQueryEngine;
@@ -7028,12 +7029,24 @@ impl Datastore {
 		// Retrieve the provided NS and DB
 		let (ns, db) = crate::iam::check::check_ns_db(sess)?;
 		// Create a new readonly transaction
-		let txn = self.transaction(Read).await?;
+		let txn = Arc::new(self.transaction(Read).await?);
 		let batch_size = self.config.datastore.export_batch_size;
+		// The frame the rows are read in: the export's own transaction, with
+		// the authority of root, because a dump is the rows as stored and
+		// permissions are judged by the check above.
+		let mut ctx = self.setup_ctx()?;
+		ctx.set_transaction(Arc::clone(&txn));
+		let frame = super::export::RowFrame {
+			ctx: ctx.freeze(),
+			opt: crate::dbs::Options::new(&self.config.exec)
+				.with_ns(Some(ns.as_str().into()))
+				.with_db(Some(db.as_str().into()))
+				.with_auth(Arc::new(crate::iam::Auth::for_root(crate::iam::Role::Owner))),
+		};
 		// Return an async export job
 		Ok(async move {
 			// Process the export
-			let res = super::export::export(&txn, &ns, &db, cfg, batch_size, chn).await;
+			let res = super::export::export(&txn, frame, &ns, &db, cfg, batch_size, chn).await;
 			txn.cancel().await?;
 			res
 		})

@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::sync::Arc;
 
 use anyhow::Result;
 use async_channel::Sender;
@@ -8,12 +9,13 @@ use surrealdb_types::ToSql;
 
 use super::Transaction;
 use crate::catalog::providers::{
-	ApiProvider, AuthorisationProvider, BucketProvider, DatabaseProvider, TableProvider,
-	UserProvider,
+	ApiProvider, AuthorisationProvider, BucketProvider, DatabaseProvider, NamespaceProvider,
+	TableProvider, UserProvider,
 };
 use crate::catalog::{
 	DatabaseId, Error, NamespaceId, Record, TableDefinition, TableType, ViewDefinition,
 };
+use crate::exec::ExecutionContext;
 use crate::expr::access::AccessDuration;
 use crate::expr::access_type::{
 	AccessType, BearerAccess, BearerAccessSubject, BearerAccessType, JwtAccess, JwtAccessIssue,
@@ -86,7 +88,20 @@ impl ToSql for DefineConfig<'_> {
 	}
 }
 
+/// What an export reads a table's rows in: the context a row is brought
+/// through its table's pending migration steps in, and the options it runs
+/// with. `ctx` carries the transaction the export reads in.
+pub(crate) struct RowFrame {
+	pub(crate) ctx: crate::ctx::FrozenContext,
+	pub(crate) opt: crate::dbs::Options,
+}
+
 /// Writes the full database contents as binary SQL.
+///
+/// A record is written as a read of it sees it: a row stamped before a
+/// migration step of its table is brought through the steps it has not passed,
+/// because a dump carries neither the layouts nor the migrations and a restore
+/// stamps what it reads at its own generation.
 ///
 /// Runs as a job a transport has already begun streaming, so a failure raised in
 /// here cannot change the status the caller was given. `Datastore::export_with_config`
@@ -94,6 +109,7 @@ impl ToSql for DefineConfig<'_> {
 /// for — before handing the job over, and that is where a new such rejection goes.
 pub(crate) async fn export(
 	tx: &Transaction,
+	frame: RowFrame,
 	ns: &str,
 	db: &str,
 	cfg: Config,
@@ -105,16 +121,29 @@ pub(crate) async fn export(
 			name: db.to_owned(),
 		})
 	})?;
+	let exec = ExecutionContext::privileged_database(
+		frame.ctx,
+		frame.opt,
+		tx.expect_ns_by_name(ns).await?,
+		Arc::clone(&db),
+	);
 
 	// Output OPTIONS, DATABASE, USERS, ACCESSES, PARAMS, FUNCTIONS, ANALYZERS
 	export_metadata(tx, &cfg, &chn, &db).await?;
 	// Output TABLES
-	export_tables(tx, &cfg, &chn, db.namespace_id, db.database_id, batch_size).await?;
+	export_tables(tx, &exec, &cfg, &chn, db.namespace_id, db.database_id, batch_size).await?;
 	Ok(())
 }
 
 /// The `DEFINE DATABASE` line carrying the clauses held by the database itself,
 /// or `None` for a database that holds none of them.
+///
+/// A database's compatibility level is one of its clauses: a level other than
+/// [`catalog::DatabaseCompatibility::LEVEL_4`], the level a store at the
+/// current feature level gives a new database, is carried like any other, and
+/// the line names the level whenever it is emitted. A database at level 4
+/// restored without the line takes the level the target store gives a new
+/// database.
 ///
 /// Emitted only when there is a clause to carry, because `DEFINE DATABASE` is
 /// authorized at `Edit` on `Database` in the namespace: a dump holding the line
@@ -142,7 +171,11 @@ pub(crate) async fn export(
 fn define_database_statement_from_definition(
 	def: &catalog::DatabaseDefinition,
 ) -> Option<DefineDatabaseStatement> {
-	if def.comment.is_none() && def.changefeed.is_none() && !def.strict {
+	if def.comment.is_none()
+		&& def.changefeed.is_none()
+		&& !def.strict
+		&& *def.compatibility == catalog::DatabaseCompatibility::LEVEL_4
+	{
 		return None;
 	}
 	Some(DefineDatabaseStatement {
@@ -159,6 +192,7 @@ fn define_database_statement_from_definition(
 			.map(|v| SqlExpr::Literal(SqlLiteral::String(v.into())))
 			.unwrap_or(SqlExpr::Literal(SqlLiteral::None)),
 		changefeed: def.changefeed,
+		compatibility: Some(def.compatibility.get()),
 	})
 }
 
@@ -302,6 +336,7 @@ where
 
 async fn export_tables(
 	tx: &Transaction,
+	exec: &ExecutionContext,
 	cfg: &Config,
 	chn: &Sender<Vec<u8>>,
 	ns: NamespaceId,
@@ -368,7 +403,7 @@ async fn export_tables(
 	for table in &read_by_a_view {
 		export_table_structure(tx, ns, db, table, chn).await?;
 		if cfg.records {
-			export_table_data(tx, ns, db, table, chn, batch_size).await?;
+			export_table_data(tx, exec, ns, db, table, chn, batch_size).await?;
 		}
 	}
 	// A view is derived state: replaying its `DEFINE TABLE` recomputes it from
@@ -476,7 +511,7 @@ async fn export_tables(
 		// have is a product decision rather than an exporter's, so the order
 		// is unchanged until it is made.
 		if cfg.records {
-			export_table_data(tx, ns, db, table, chn, batch_size).await?;
+			export_table_data(tx, exec, ns, db, table, chn, batch_size).await?;
 		}
 		export_table_structure(tx, ns, db, table, chn).await?;
 	}
@@ -493,7 +528,7 @@ async fn export_tables(
 	for table in &unread {
 		export_table_structure(tx, ns, db, table, chn).await?;
 		if cfg.records {
-			export_table_data(tx, ns, db, table, chn, batch_size).await?;
+			export_table_data(tx, exec, ns, db, table, chn, batch_size).await?;
 		}
 	}
 
@@ -987,25 +1022,23 @@ async fn keys_per_record(
 /// twice is threading decoded records through the emit path — which would hold a
 /// whole batch's `Value`s alive for the sake of a handful used to measure.
 ///
-/// The caller has admitted every row's generation against the table's layouts and passes the
-/// layouts that admitted them: a packed row is decoded through its generation's descriptor there.
-fn decode_sample(
+/// A record is read as the emit path reads it, through the table's pending migration steps: a
+/// step can change how many entries an index writes for a record, and the group is priced by the
+/// records it will carry.
+///
+/// The caller has admitted every row's generation against the table's layouts, and passes the
+/// generation each row was admitted at.
+async fn decode_sample(
 	batch: &[(Vec<u8>, Vec<u8>)],
-	layouts: Option<&catalog::TableLayouts>,
+	stamps: &[Option<catalog::Generation>],
+	rows: &RowSource<'_>,
 	limit: usize,
 ) -> Result<Vec<val::Value>> {
-	batch
-		.iter()
-		.take(limit)
-		.map(|(k, v)| {
-			let k = RecordKey::decode_key(k)?;
-			let rid = crate::val::RecordId {
-				table: k.tb.into_owned(),
-				key: k.id.into_owned(),
-			};
-			Ok(Record::decode_admitted(v, layouts, rid)?.data)
-		})
-		.collect()
+	let mut sample = Vec::with_capacity(limit.min(batch.len()));
+	for ((k, v), stamp) in batch.iter().zip(stamps).take(limit) {
+		sample.push(rows.read(k, v, *stamp).await?.data);
+	}
+	Ok(sample)
 }
 
 /// Chooses how many records to put in one emitted `INSERT`, from the keys the
@@ -1026,6 +1059,7 @@ fn records_per_insert(keys_per_record: usize, batch_size: u32) -> usize {
 
 async fn export_table_data(
 	tx: &Transaction,
+	exec: &ExecutionContext,
 	ns: NamespaceId,
 	db: DatabaseId,
 	table: &TableDefinition,
@@ -1097,6 +1131,11 @@ async fn export_table_data(
 	let mut next = Some(records.range()?);
 	// The table's layouts, loaded on the first row that names a generation above 0.
 	let mut layouts = LayoutSet::new(ns, db, None);
+	// The steps a row stamped before them is brought through; none for a table
+	// that has run no migration.
+	let replay = crate::exec::migrate::replay_for(exec, &tb_name, None)
+		.await
+		.map_err(crate::exec::migrate::into_error)?;
 
 	while let Some(rng) = next {
 		let batch = tx.batch_keys_vals_raw(rng, batch_size, None).await?;
@@ -1108,8 +1147,9 @@ async fn export_table_data(
 			break;
 		}
 		// Each row's generation is checked before any row is decoded.
+		let mut stamps = Vec::with_capacity(batch.result.len());
 		for (_, value) in &batch.result {
-			layouts.admit(tx, &tb_name, value).await?;
+			stamps.push(layouts.admit(tx, &tb_name, value).await?);
 		}
 		// The layouts that admitted the batch's rows: a packed row is decoded with them. The set
 		// holds none when no row names a generation above 0, and no row is then packed.
@@ -1117,13 +1157,18 @@ async fn export_table_data(
 		// Price this batch from its own records. Sizing needs to see the data
 		// because a value index over an array field writes one entry per
 		// element, which the schema does not state.
-		let sample = decode_sample(&batch.result, table_layouts, FAN_OUT_SAMPLE)?;
+		let rows = RowSource {
+			exec,
+			layouts: table_layouts,
+			replay: replay.as_ref(),
+		};
+		let sample = decode_sample(&batch.result, &stamps, &rows, FAN_OUT_SAMPLE).await?;
 		let per_insert = records_per_insert(
 			keys_per_record(tx, ns, db, &tb_name, &indexes, &fields, &sample).await?,
 			batch_size,
 		);
-		for group in batch.result.chunks(per_insert) {
-			export_regular_data(group, table_layouts, chn).await?;
+		for (group, stamps) in batch.result.chunks(per_insert).zip(stamps.chunks(per_insert)) {
+			export_regular_data(group, stamps, &rows, chn).await?;
 		}
 	}
 
@@ -1167,6 +1212,41 @@ fn process_record(record: &Record, records_relate: &mut String, records_normal: 
 	}
 }
 
+/// What a batch of a table's rows is decoded with and read through.
+struct RowSource<'a> {
+	/// The context the steps are evaluated in.
+	exec: &'a ExecutionContext,
+	/// The layouts that admitted the rows, which a packed row is decoded with.
+	layouts: Option<&'a catalog::TableLayouts>,
+	/// The table's migration steps, `None` for a table that has run none.
+	replay: Option<&'a crate::exec::migrate::Replay>,
+}
+
+impl RowSource<'_> {
+	/// The record stored under `key` as a read of it sees it: decoded, and brought through the
+	/// steps of its table the generation `stamp` it was admitted at has not passed.
+	async fn read(
+		&self,
+		key: &[u8],
+		value: &[u8],
+		stamp: Option<catalog::Generation>,
+	) -> Result<Record> {
+		let key = RecordKey::decode_key(key)?;
+		let rid = crate::val::RecordId {
+			table: key.tb.into_owned(),
+			key: key.id.into_owned(),
+		};
+		let mut record = Record::decode_admitted(value, self.layouts, rid)?;
+		if let Some(replay) = self.replay {
+			replay
+				.apply(self.exec, &mut record.data, stamp)
+				.await
+				.map_err(crate::exec::migrate::into_error)?;
+		}
+		Ok(record)
+	}
+}
+
 /// Exports regular data to the provided channel.
 ///
 /// This function processes a list of regular values, converting them into
@@ -1179,7 +1259,8 @@ fn process_record(record: &Record, records_relate: &mut String, records_normal: 
 /// * `regular_values` - A vector of tuples containing the regular values to be exported. Each tuple
 ///   consists of a key and a value. The caller has admitted each value's generation against its
 ///   table's layouts.
-/// * `layouts` - The layouts that admitted the values, which a packed value is decoded with.
+/// * `stamps` - The generation each value was admitted at, in the order of `regular_values`.
+/// * `rows` - What a value is decoded with and brought through the table's steps by.
 /// * `chn` - A reference to the channel to which the SQL commands will be sent.
 ///
 /// # Returns
@@ -1188,7 +1269,8 @@ fn process_record(record: &Record, records_relate: &mut String, records_normal: 
 ///   occurs.
 async fn export_regular_data(
 	regular_values: &[(Vec<u8>, Vec<u8>)],
-	layouts: Option<&catalog::TableLayouts>,
+	stamps: &[Option<catalog::Generation>],
+	rows: &RowSource<'_>,
 	chn: &Sender<Vec<u8>>,
 ) -> Result<()> {
 	// Initialize strings to hold normal records and graph edge records.
@@ -1197,13 +1279,8 @@ async fn export_regular_data(
 	let mut records_relate = String::new();
 
 	// Process each regular value.
-	for (k, v) in regular_values {
-		let k = RecordKey::decode_key(k)?;
-		let rid = crate::val::RecordId {
-			table: k.tb.into_owned(),
-			key: k.id.into_owned(),
-		};
-		let v = Record::decode_admitted(v, layouts, rid)?;
+	for ((k, v), stamp) in regular_values.iter().zip(stamps) {
+		let v = rows.read(k, v, *stamp).await?;
 		// Process the value and categorize it into records_relate or records_normal.
 		process_record(&v, &mut records_relate, &mut records_normal);
 	}
@@ -1476,6 +1553,37 @@ mod tests {
 			order.cyclic,
 			HashSet::<usize>::from([0, 1]),
 			"the cycle's members are named, and the view that can be ordered is not"
+		);
+	}
+
+	/// A database at level 4, which holds no other clause, is exported with no
+	/// `DEFINE DATABASE` line: the restored database takes the level of the
+	/// target. One at level 3 carries its level, and the line names the level
+	/// whenever another clause puts it in the dump.
+	#[test]
+	fn the_dump_carries_a_level_other_than_4() {
+		use crate::catalog::{DatabaseCompatibility, DatabaseDefinition};
+		let database = |compatibility: DatabaseCompatibility, strict: bool| DatabaseDefinition {
+			namespace_id: crate::catalog::NamespaceId(0),
+			database_id: crate::catalog::DatabaseId(0),
+			name: "test".into(),
+			comment: None,
+			changefeed: None,
+			strict,
+			compatibility: crate::val::stored::schema::Unrevisioned(compatibility),
+		};
+		let line = |def: &DatabaseDefinition| {
+			super::define_database_statement_from_definition(def)
+				.map(|stmt| surrealdb_types::ToSql::to_sql(&stmt))
+		};
+		assert_eq!(line(&database(DatabaseCompatibility::LEVEL_4, false)), None);
+		assert_eq!(
+			line(&database(DatabaseCompatibility::LEVEL_3, false)).as_deref(),
+			Some("DEFINE DATABASE OVERWRITE $session.db COMPATIBILITY 3")
+		);
+		assert_eq!(
+			line(&database(DatabaseCompatibility::LEVEL_4, true)).as_deref(),
+			Some("DEFINE DATABASE OVERWRITE $session.db STRICT COMPATIBILITY 4")
 		);
 	}
 }

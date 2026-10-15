@@ -1,5 +1,6 @@
 /**
 [env]
+compatibility = 3
 
 [test]
 reason = """

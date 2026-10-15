@@ -11,7 +11,7 @@ use std::cell::OnceCell;
 use surrealdb_types::ToSql;
 
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{Metadata, Record};
+use crate::catalog::{Generation, Metadata, Record};
 use crate::doc::alter::ComputedData;
 use crate::exec::Error as ExecError;
 use crate::exec::memory::size::value_bytes;
@@ -104,6 +104,13 @@ pub(crate) struct WriteRow {
 	/// The marker the before-image carried. An update of an existing edge
 	/// re-stamps nothing and must carry this through to the new write.
 	pub(crate) initial_metadata: Option<Metadata>,
+	/// The generation stamp of the stored record this row adopted, until its
+	/// migration steps have been replayed ([`WriteRow::replay_stored`]): the
+	/// outer `None` is a row with nothing to replay — one that adopted nothing
+	/// from storage, a creating order's subject or a row a row source produced,
+	/// whose value arrives as that source read it, or one already replayed —
+	/// and the inner `None` a record with no generation.
+	pub(crate) stored_stamp: Option<Option<Generation>>,
 
 	/// Whether `current` currently carries its `COMPUTED` field values.
 	///
@@ -307,6 +314,7 @@ impl WriteRow {
 			current_reduced: None,
 			metadata: None,
 			initial_metadata: None,
+			stored_stamp: None,
 			fields_computed: false,
 			initial_fields_computed: false,
 			input: None,
@@ -431,30 +439,64 @@ impl WriteRow {
 		let Some(id) = self.id.clone() else {
 			return Ok(());
 		};
-		let stored = ctx
-			.txn()
-			.get_record(
-				ctx.ns.namespace_id,
-				ctx.db.database_id,
-				&id.table,
-				&id.key,
-				ctx.exec().version_stamp(),
-			)
-			.await
-			.map_err(ControlFlow::Err)?;
-		self.adopt_stored(&stored);
+		let (stored, stamp) = crate::exec::migrate::stamped_record(
+			&ctx.txn(),
+			ctx.ns.namespace_id,
+			ctx.db.database_id,
+			&id.table,
+			&id.key,
+			ctx.exec().version_stamp(),
+		)
+		.await
+		.map_err(ControlFlow::Err)?;
+		self.adopt_stored(&stored, stamp);
+		self.replay_stored(ctx.exec()).await
+	}
+
+	/// Bring both images of a row that adopted a stored record through the
+	/// migration steps of its table that the record's stamp has not passed.
+	///
+	/// Every stage reads the pre-image, so replaying where it is adopted gives
+	/// every stage — the data clauses, the schema checks, `READONLY`, the
+	/// permission gates, events and notifications — the migrated values. The
+	/// store stamps what it writes with the table's head, which is after every
+	/// step. A row that adopted nothing from storage is left as it is, and a
+	/// row is replayed once per adoption.
+	pub(crate) async fn replay_stored(
+		&mut self,
+		exec: &crate::exec::ExecutionContext,
+	) -> Result<(), ControlFlow> {
+		let Some(stamp) = self.stored_stamp.take() else {
+			return Ok(());
+		};
+		let Some(id) = self.id.as_ref() else {
+			return Ok(());
+		};
+		if self.initial.is_none() {
+			return Ok(());
+		}
+		let Some(replay) = crate::exec::migrate::replay_for(exec, &id.table, None).await? else {
+			return Ok(());
+		};
+		if !replay.behind(stamp) {
+			return Ok(());
+		}
+		replay.apply(exec, &mut self.initial, stamp).await?;
+		self.current.clone_from(&self.initial);
 		Ok(())
 	}
 
-	/// Take both images and both markers from a record read from storage.
+	/// Take both images and both markers from a record read from storage,
+	/// stamped with `stamp`.
 	///
 	/// The before- and after-image start equal, as they do for every subject a
 	/// row source produced: the stages that follow are what move them apart.
-	pub(crate) fn adopt_stored(&mut self, stored: &Record) {
+	pub(crate) fn adopt_stored(&mut self, stored: &Record, stamp: Option<Generation>) {
 		self.initial.clone_from(&stored.data);
 		self.current.clone_from(&stored.data);
 		self.initial_metadata.clone_from(&stored.metadata);
 		self.metadata.clone_from(&stored.metadata);
+		self.stored_stamp = Some(stamp);
 	}
 
 	/// Hand a rolled-back creating attempt to the updating order, against the
@@ -466,7 +508,15 @@ impl WriteRow {
 	/// evaluated against the record, which has just changed. The mutation flag
 	/// is cleared so a record the attempt half-wrote is not counted, and
 	/// [`WriteRow::is_iteration_initial`] answers false from here on.
-	pub(crate) fn reset_for_update_retry(&mut self, id: RecordId, record: &Record) {
+	///
+	/// `stamp` is the stamp of `record`, as [`WriteRow::adopt_stored`] takes
+	/// it.
+	pub(crate) fn reset_for_update_retry(
+		&mut self,
+		id: RecordId,
+		record: &Record,
+		stamp: Option<Generation>,
+	) {
 		self.id = Some(id);
 		self.generate_in = None;
 		self.retry = true;
@@ -477,6 +527,7 @@ impl WriteRow {
 		self.current.clone_from(&record.data);
 		self.initial_metadata.clone_from(&record.metadata);
 		self.metadata.clone_from(&record.metadata);
+		self.stored_stamp = Some(stamp);
 		self.initial_reduced = None;
 		self.current_reduced = None;
 		self.fields_computed = false;

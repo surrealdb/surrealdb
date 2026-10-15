@@ -754,6 +754,53 @@ fn should_check_perms_at(root: &RootContext, level: Option<(&str, &str)>, action
 }
 
 impl ExecutionContext {
+	/// The database-level context a task that holds no session reads rows in:
+	/// `ns` and `db` as `ctx` and `opt` select them, with the authority of
+	/// `opt` and no permission evaluated, so a table's rows are read as stored
+	/// and brought through the table's migration steps for any principal alike.
+	///
+	/// `ctx` carries the transaction the task reads in, and no parameter is
+	/// bound.
+	pub(crate) fn privileged_database(
+		ctx: FrozenContext,
+		opt: Options,
+		ns: Arc<NamespaceDefinition>,
+		db: Arc<DatabaseDefinition>,
+	) -> Self {
+		let root = RootContext {
+			ctx,
+			auth: Arc::clone(&opt.auth),
+			options: Some(opt),
+			datastore: None,
+			cancellation: Arc::new(CancellationToken::new()),
+			session: None,
+			current_value: None,
+			current_row: None,
+			skip_fetch_perms: false,
+			perms_suppressed: true,
+			caller_perms_suppressed: true,
+			computing_record: None,
+			no_write: None,
+			version_stamp: None,
+			guard_verdicts: Default::default(),
+			writing: false,
+			forbidden_row: None,
+			inherited_knn: None,
+			session_effects: None,
+		};
+		Self::Database(DatabaseContext {
+			ns_ctx: NamespaceContext {
+				root,
+				ns,
+			},
+			db,
+			field_state_cache: Default::default(),
+			table_def_cache: Default::default(),
+			index_def_cache: Default::default(),
+			select_permission_cache: Default::default(),
+		})
+	}
+
 	/// Get root-level access (always succeeds).
 	///
 	/// Returns a reference to the root context, which is available at all levels.
@@ -1419,6 +1466,25 @@ impl ExecutionContext {
 		};
 		root.no_write = Some(frame);
 		new
+	}
+
+	/// Derive the frame a field migration's transform runs in: writes and
+	/// record dereference are refused, whatever frame encloses it.
+	pub(crate) fn migrating(self) -> Self {
+		let mut new = self;
+		let root = match &mut new {
+			Self::Root(r) => r,
+			Self::Namespace(n) => &mut n.root,
+			Self::Database(d) => &mut d.ns_ctx.root,
+		};
+		root.no_write = Some(crate::dbs::NoWriteFrame::Migration);
+		new
+	}
+
+	/// Whether this context evaluates a field migration's transform, which
+	/// may not dereference a record.
+	pub(crate) fn refuses_dereference(&self) -> bool {
+		self.root().no_write == Some(crate::dbs::NoWriteFrame::Migration)
 	}
 
 	/// Derive a context for code a write statement reaches

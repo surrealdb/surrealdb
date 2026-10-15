@@ -114,7 +114,8 @@ use crate::expr::part::Recurse;
 use crate::expr::scoring::Scoring;
 use crate::expr::statements::access::PurgeKind;
 use crate::expr::statements::alter::AlterKind;
-use crate::expr::statements::define::DefineKind;
+use crate::expr::statements::alter::table::{TableMigrateAction, TableMigrateClause};
+use crate::expr::statements::define::{DefineKind, MigrateClause};
 use crate::expr::table_type::{Relation, TableType};
 use crate::expr::tokenizer::SegmentLanguage;
 use crate::expr::{
@@ -1104,6 +1105,21 @@ impl Text for Arc<crate::expr::logical::LogicalWrite> {
 		match crate::exec::ir::logical::stages::statement_of_text(&text) {
 			Ok(write) => Ok(Arc::new(write)),
 			Err(e) => c.fail(e),
+		}
+	}
+}
+
+/// An expression a statement stores as written, as its SurrealQL text.
+impl Text for crate::expr::Expr {
+	fn put(&self, out: &mut String) {
+		put_str(out, &self.to_sql());
+	}
+
+	fn get(c: &mut Cursor<'_>) -> Result<Self, ParseError> {
+		let text = c.string()?;
+		match crate::syn::expr(&text) {
+			Ok(expr) => Ok(expr),
+			Err(e) => c.fail(format!("`{text}` is not an expression: {e}")),
 		}
 	}
 }
@@ -2508,7 +2524,8 @@ text_enum!(DefineObject {
 			name: u16,
 			strict: bool,
 			changefeed: Option<ChangeFeed>,
-			comment: u16
+			comment: u16,
+			compatibility: Option<u8>
 		},
 		Analyzer {
 			name: u16,
@@ -2605,9 +2622,9 @@ text_enum!(AlterObject {
 		Access(access: Box<AlterAccess>)
 	]
 	named [
-		System { query_timeout: AlterKind<u16>, compact: bool },
+		System { query_timeout: AlterKind<u16>, compact: bool, compatibility: Option<u8> },
 		Namespace { compact: bool },
-		Database { compact: bool },
+		Database { name: Option<u16>, compact: bool, compatibility: Option<u8> },
 		Api { path: u16, clauses: Box<[AlterApiClauseShape]>, comment: AlterKind<String> },
 		Index { name: u16, table: u16, prepare_remove: bool, comment: AlterKind<String> },
 		Sequence { name: u16, timeout: Option<u16> },
@@ -3169,7 +3186,20 @@ text_struct!(DefineField {
 	comment: u16,
 	reference: Option<ReferenceShape>,
 	graphql_alias: Option<String>,
-	graphql_deprecated: Option<String>
+	graphql_deprecated: Option<String>,
+	migrate: Option<Box<MigrateClause>>
+});
+text_struct!(MigrateClause {
+	name: String,
+	using: crate::expr::Expr,
+	fallback: Option<crate::expr::Expr>
+});
+text_struct!(TableMigrateClause {
+	name: String,
+	action: TableMigrateAction
+});
+text_unit_enum!(TableMigrateAction {
+	RemoveUndeclaredFields
 });
 text_struct!(DefineUser {
 	name: u16,
@@ -3206,7 +3236,8 @@ text_struct!(AlterTable {
 	compact: bool,
 	kind: Option<TableType>,
 	inline_edges_cap: AlterKind<u32>,
-	inline_refs_cap: AlterKind<u32>
+	inline_refs_cap: AlterKind<u32>,
+	migrate: Option<Box<TableMigrateClause>>
 });
 text_struct!(AlterEvent {
 	name: u16,
@@ -3228,7 +3259,8 @@ text_struct!(AlterField {
 	default: AlterDefaultShape,
 	permissions: Option<PermissionsShape>,
 	comment: AlterKind<String>,
-	reference: AlterKind<ReferenceShape>
+	reference: AlterKind<ReferenceShape>,
+	migrate: Option<Box<MigrateClause>>
 });
 text_struct!(AlterFunction {
 	name: Strand,

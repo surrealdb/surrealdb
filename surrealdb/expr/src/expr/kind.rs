@@ -159,7 +159,132 @@ pub enum Kind {
 	File(Vec<String>),
 }
 
+/// The value variants a kind's coercion accepts, as a bit set: what two kinds
+/// are disjoint by. Over-approximate by design: a kind whose accepted values
+/// are not known exactly claims every variant.
+mod coerce_domain {
+	pub const NONE: u32 = 1 << 0;
+	pub const NULL: u32 = 1 << 1;
+	pub const BOOL: u32 = 1 << 2;
+	pub const NUMBER: u32 = 1 << 3;
+	pub const STRING: u32 = 1 << 4;
+	pub const TABLE: u32 = 1 << 5;
+	pub const DATETIME: u32 = 1 << 6;
+	pub const DURATION: u32 = 1 << 7;
+	pub const UUID: u32 = 1 << 8;
+	pub const BYTES: u32 = 1 << 9;
+	pub const OBJECT: u32 = 1 << 10;
+	pub const ARRAY: u32 = 1 << 11;
+	pub const SET: u32 = 1 << 12;
+	pub const RECORD: u32 = 1 << 13;
+	pub const GEOMETRY: u32 = 1 << 14;
+	pub const REGEX: u32 = 1 << 15;
+	pub const RANGE: u32 = 1 << 16;
+	pub const CLOSURE: u32 = 1 << 17;
+	pub const FILE: u32 = 1 << 18;
+	pub const ALL: u32 = u32::MAX;
+}
+
 impl Kind {
+	/// Whether every value that conforms to `self` — one that coercion to
+	/// `self` returns unchanged — also conforms to `new`, unchanged. A field
+	/// retyped from `self` to `new` then keeps every stored value valid, so the
+	/// retype needs no migration and keeps the field's conformance.
+	///
+	/// Conservative: `true` only with proof, so a `false` may be a widening
+	/// this test does not recognise. A false positive would silently break a
+	/// guarantee, where a false negative only asks for a harmless migration.
+	///
+	/// A union coerces to its first arm that accepts the value, so `new` being
+	/// a union widens `self` only when an arm that `self` widens to comes
+	/// before every arm that could capture a value of `self` and change it:
+	/// `int` widens to `int | float` but not to `float | int`.
+	pub fn widens_to(&self, new: &Kind) -> bool {
+		if self == new || matches!(new, Kind::Any) {
+			return true;
+		}
+		match (self, new) {
+			// A value conforming to a union conforms, unchanged, to one of its
+			// arms.
+			(Kind::Either(old), _) => !old.is_empty() && old.iter().all(|k| k.widens_to(new)),
+			(_, Kind::Either(arms)) => {
+				let domain = self.coerce_domain();
+				for arm in arms {
+					if self.widens_to(arm) {
+						return true;
+					}
+					if domain & arm.coerce_domain() != 0 && !self.excludes_literal(arm) {
+						return false;
+					}
+				}
+				false
+			}
+			(Kind::Int | Kind::Float | Kind::Decimal, Kind::Number) => true,
+			(Kind::Array(old, old_len), Kind::Array(new, new_len))
+			| (Kind::Set(old, old_len), Kind::Set(new, new_len)) => {
+				(new_len.is_none() || old_len == new_len) && old.widens_to(new)
+			}
+			(Kind::Record(old), Kind::Record(new)) | (Kind::Table(old), Kind::Table(new)) => {
+				new.is_empty() || (!old.is_empty() && old.iter().all(|t| new.contains(t)))
+			}
+			(Kind::Geometry(old), Kind::Geometry(new)) => {
+				new.is_empty() || (!old.is_empty() && old.iter().all(|g| new.contains(g)))
+			}
+			(Kind::File(old), Kind::File(new)) => {
+				new.is_empty() || (!old.is_empty() && old.iter().all(|b| new.contains(b)))
+			}
+			_ => false,
+		}
+	}
+
+	/// Whether `self` and `other` are literal kinds no value conforms to both:
+	/// two string literals, or two integer literals, of different values. Any
+	/// other pair is not claimed disjoint, since a literal may coerce a value
+	/// of another kind.
+	fn excludes_literal(&self, other: &Kind) -> bool {
+		match (self, other) {
+			(Kind::Literal(KindLiteral::String(a)), Kind::Literal(KindLiteral::String(b))) => {
+				a != b
+			}
+			(Kind::Literal(KindLiteral::Integer(a)), Kind::Literal(KindLiteral::Integer(b))) => {
+				a != b
+			}
+			_ => false,
+		}
+	}
+
+	/// The value variants coercion to this kind accepts; see
+	/// [`coerce_domain`].
+	fn coerce_domain(&self) -> u32 {
+		use coerce_domain as d;
+		match self {
+			Kind::Any | Kind::Literal(_) => d::ALL,
+			Kind::None => d::NONE,
+			Kind::Null => d::NULL,
+			Kind::Bool => d::BOOL,
+			Kind::Int | Kind::Float | Kind::Decimal | Kind::Number => d::NUMBER,
+			Kind::String => d::STRING,
+			// A string coerces to a table name.
+			Kind::Table(_) => d::STRING | d::TABLE,
+			Kind::Datetime => d::DATETIME,
+			Kind::Duration => d::DURATION,
+			Kind::Uuid => d::UUID,
+			Kind::Bytes => d::BYTES,
+			Kind::Object => d::OBJECT,
+			// An array coerces to a set.
+			Kind::Array(..) | Kind::Set(..) => d::ARRAY | d::SET,
+			Kind::Record(_) => d::RECORD,
+			// A point coerces from an array of coordinates; objects are
+			// claimed too rather than proved disjoint.
+			Kind::Geometry(_) => d::GEOMETRY | d::ARRAY | d::OBJECT,
+			Kind::Regex => d::REGEX,
+			Kind::Range => d::RANGE,
+			Kind::Function(..) => d::CLOSURE,
+			Kind::File(_) => d::FILE,
+			Kind::Either(kinds) => kinds.iter().fold(0, |acc, k| acc | k.coerce_domain()),
+		}
+	}
+
 	/// Returns the kind of a type.
 	pub fn of<T: HasKind>() -> Kind {
 		T::kind()
@@ -1355,5 +1480,159 @@ mod round_trip_tests {
 	]))]
 	fn kind_round_trips_through_text(#[case] k: Kind) {
 		round_trip(&k);
+	}
+}
+
+#[cfg(test)]
+mod widening_tests {
+	use super::*;
+	use crate::val::Value;
+	use crate::val::convert_public::convert_public_value_to_internal;
+
+	const KINDS: &[&str] = &[
+		"any",
+		"none",
+		"null",
+		"bool",
+		"int",
+		"float",
+		"decimal",
+		"number",
+		"string",
+		"datetime",
+		"duration",
+		"uuid",
+		"object",
+		"option<int>",
+		"option<string>",
+		"int | string",
+		"string | int",
+		"int | float",
+		"float | int",
+		"number | string",
+		"array",
+		"array<int>",
+		"array<float>",
+		"array<number>",
+		"array<int, 2>",
+		"array<option<int>>",
+		"set<int>",
+		"set<number>",
+		"record",
+		"record<a>",
+		"record<a | b>",
+		"{ a: int }",
+		"{ a: number }",
+		"{ a: int, b: option<string> }",
+		"'a' | 'b'",
+		"'a' | 'b' | 'c'",
+		"'b' | 'a'",
+		"'c' | 'a' | 'b'",
+		"1 | 2",
+		"1 | 2 | 3",
+		"3 | 1 | 2",
+		"1 | 'a'",
+		"int | 'a'",
+		"'a' | int",
+	];
+
+	const VALUES: &[&str] = &[
+		"NONE",
+		"NULL",
+		"true",
+		"0",
+		"1",
+		"-7",
+		"9007199254740993",
+		"1.5f",
+		"2f",
+		"1e30f",
+		"3dec",
+		"'a'",
+		"'1'",
+		"'b'",
+		"d'2020-01-01T00:00:00Z'",
+		"1s",
+		"u'00000000-0000-0000-0000-000000000001'",
+		"[]",
+		"[1, 2]",
+		"[1.5f, 2]",
+		"[1, NONE]",
+		"{1, 2}",
+		"{}",
+		"{ a: 1 }",
+		"{ a: 1.5f }",
+		"{ a: 1, b: 'x' }",
+		"{ a: 1, c: 2 }",
+		"a:1",
+		"b:1",
+		"c:1",
+	];
+
+	fn kind(text: &str) -> Kind {
+		crate::syn::kind_for_definition(text)
+			.unwrap_or_else(|e| panic!("the kind {text:?} did not parse: {e}"))
+	}
+
+	fn value(text: &str) -> Value {
+		convert_public_value_to_internal(
+			crate::syn::value(text)
+				.unwrap_or_else(|e| panic!("the value {text:?} did not parse: {e}")),
+		)
+	}
+
+	/// `widens_to` is a promise about coercion: every value that conforms to
+	/// the old kind, one coercion to it returns unchanged, also conforms to
+	/// the new kind unchanged. Checked over every pair of a matrix of kinds
+	/// and values.
+	#[test]
+	fn a_widening_keeps_every_conforming_value_unchanged() {
+		let kinds: Vec<(&str, Kind)> = KINDS.iter().map(|text| (*text, kind(text))).collect();
+		let values: Vec<(&str, Value)> = VALUES.iter().map(|text| (*text, value(text))).collect();
+		let mut failures = Vec::new();
+		for (old_text, old) in &kinds {
+			for (new_text, new) in &kinds {
+				if !old.widens_to(new) {
+					continue;
+				}
+				for (value_text, value) in &values {
+					let conforms = value.clone().coerce_to_kind(old).is_ok_and(|v| v == *value);
+					if !conforms {
+						continue;
+					}
+					let kept = value.clone().coerce_to_kind(new).is_ok_and(|v| v == *value);
+					if !kept {
+						failures.push(format!("{old_text} -> {new_text} changes {value_text}"));
+					}
+				}
+			}
+		}
+		assert!(failures.is_empty(), "widenings that do not hold:\n{}", failures.join("\n"));
+	}
+
+	#[test]
+	fn the_obvious_widenings_are_recognised() {
+		for (old, new) in [
+			("int", "number"),
+			("int", "option<int>"),
+			("int", "int | string"),
+			("int", "any"),
+			("array<int>", "array<number>"),
+			("'a' | 'b'", "'a' | 'b' | 'c'"),
+			("'a' | 'b'", "'c' | 'a' | 'b'"),
+			("1 | 2", "1 | 2 | 3"),
+		] {
+			assert!(kind(old).widens_to(&kind(new)), "{old} -> {new}");
+		}
+		for (old, new) in [
+			("int", "float"),
+			("int", "float | int"),
+			("option<int>", "int"),
+			("'a' | 'b'", "'a'"),
+			("'a' | 'b' | 'c'", "'a' | 'b'"),
+			("1 | 2", "2"),
+		] {
+			assert!(!kind(old).widens_to(&kind(new)), "{old} -> {new}");
+		}
 	}
 }

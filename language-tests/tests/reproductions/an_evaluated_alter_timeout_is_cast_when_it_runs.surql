@@ -18,7 +18,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: { sq: 'DEFINE SEQUENCE sq BATCH 1000 START 0 TIMEOUT 2s' }, tables: {  }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: { sq: 'DEFINE SEQUENCE sq BATCH 1000 START 0 TIMEOUT 2s' }, tables: {  }, users: {  } }"
 
 [[test.results]]
 value = "NONE"
@@ -33,7 +33,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: { sq: 'DEFINE SEQUENCE sq BATCH 1000 START 0' }, tables: {  }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: { sq: 'DEFINE SEQUENCE sq BATCH 1000 START 0' }, tables: {  }, users: {  } }"
 
 [[test.results]]
 error = "Could not cast into `duration` using input `'abc'`"

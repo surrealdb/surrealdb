@@ -42,6 +42,35 @@ pub struct AlterTableStatement {
 	pub inline_edges_cap: AlterKind<u32>,
 	/// Set/drop the inline reference cache cap.
 	pub inline_refs_cap: AlterKind<u32>,
+	/// `MIGRATE EXISTING ROWS AS <name> …`: a migration of the table's rows.
+	pub migrate: Option<Box<TableMigrateClause>>,
+}
+
+/// `MIGRATE EXISTING ROWS AS <name> <action>` on `ALTER TABLE`: a named
+/// migration of every row stored before the statement.
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct TableMigrateClause {
+	/// The migration's name, unique per table.
+	pub name: String,
+	/// What the migration does to each row.
+	pub action: TableMigrateAction,
+}
+
+/// What a table-level migration does to each row stored before it.
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum TableMigrateAction {
+	/// `REMOVE UNDECLARED FIELDS`: clear every top-level field no definition
+	/// of the table declares.
+	RemoveUndeclaredFields,
+}
+
+impl ToSql for TableMigrateClause {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, " MIGRATE EXISTING ROWS AS {}", common::fmt::EscapeIdent(&self.name));
+		match self.action {
+			TableMigrateAction::RemoveUndeclaredFields => f.push_str(" REMOVE UNDECLARED FIELDS"),
+		}
+	}
 }
 
 impl Default for AlterTableStatement {
@@ -57,6 +86,7 @@ impl Default for AlterTableStatement {
 			kind: None,
 			inline_edges_cap: AlterKind::None,
 			inline_refs_cap: AlterKind::None,
+			migrate: None,
 		}
 	}
 }
@@ -136,6 +166,10 @@ impl ToSql for AlterTableStatement {
 
 		if self.compact {
 			write_sql!(f, fmt, " COMPACT");
+		}
+
+		if let Some(migrate) = &self.migrate {
+			migrate.fmt_sql(f, fmt);
 		}
 	}
 }

@@ -30,6 +30,7 @@ use surrealdb_kvs::value::KVValue;
 use surrealdb_kvs::{EncodeContext, Encoded};
 
 use crate::generation::{Generation, GenerationRing};
+use crate::migration::Migration;
 use crate::record::RecordFormat;
 use crate::stored::{
 	EntryError, SchemaError, Stored, StoredType, canonical, decode_entry, encode_stored,
@@ -82,6 +83,18 @@ pub struct LayoutDescriptor {
 	/// The layout of the generation's rows.
 	#[stored(n = 4)]
 	pub layout: RowLayout,
+	/// The migration the generation was minted for. A row stamped before the generation passes
+	/// through the step when it is read, so the step is as immutable as the descriptor and is
+	/// retired with it.
+	#[stored(n = 6)]
+	pub migration: Option<Migration>,
+	/// The newest generation, up to and including this one, whose descriptor carries a migration:
+	/// this generation itself when it carries one, and the one before it that does otherwise.
+	/// `None` when no generation of the ring up to this one does. The descriptor of the head
+	/// therefore says which rows may need a migration step without any other descriptor being
+	/// read.
+	#[stored(n = 8)]
+	pub migrated: Option<Generation>,
 }
 
 impl LayoutDescriptor {
@@ -90,7 +103,34 @@ impl LayoutDescriptor {
 		Self {
 			table,
 			layout: RowLayout::Document,
+			migration: None,
+			migrated: None,
 		}
+	}
+
+	/// This descriptor for a generation minted by `migration`.
+	pub fn with_migration(mut self, migration: Migration) -> Self {
+		self.migration = Some(migration);
+		self
+	}
+
+	/// Whether `other` lays rows out as this descriptor does: the same table and the same layout,
+	/// whatever migration either carries. Compared by canonical bytes, so two layouts of the same
+	/// meaning are the same layout.
+	pub fn has_layout_of(&self, other: &Self) -> anyhow::Result<bool> {
+		let bare = |descriptor: &Self| -> anyhow::Result<Vec<u8>> {
+			if descriptor.migration.is_none() && descriptor.migrated.is_none() {
+				return descriptor.kv_canonical();
+			}
+			Self {
+				table: descriptor.table.clone(),
+				layout: descriptor.layout.clone(),
+				migration: None,
+				migrated: None,
+			}
+			.kv_canonical()
+		};
+		Ok(bare(self)? == bare(other)?)
 	}
 
 	/// Checks the structural rules and the canonical form of the layout.
@@ -1100,6 +1140,121 @@ impl TableLayouts {
 		self.generations.iter().map(|(generation, entry)| (*generation, entry.layout(&self.table)))
 	}
 
+	/// The migrations a row stamped `stamp` has not passed through, oldest first, each with the
+	/// generation that carries it: the migration of every generation after `stamp` in ring order,
+	/// up to the head. `None` is a row with no generation, which is older than every generation
+	/// of the ring and passes through them all.
+	///
+	/// The listed generations are held in ring order, so the walk follows the ring across the
+	/// wrap of the generation number rather than the numeric order.
+	///
+	/// Every generation after `stamp` must be listed with a readable descriptor, because a gap
+	/// could hide a migration the row has not passed through: a refused descriptor answers
+	/// [`RecordLayoutError::RefusedGeneration`] and an unlisted generation answers
+	/// [`RecordLayoutError::UnknownGeneration`]. A stamp the ring does not hold is refused as
+	/// [`Self::admit`] refuses it.
+	pub fn pending_migrations(
+		&self,
+		stamp: Option<Generation>,
+	) -> Result<Vec<(Generation, &Migration)>, RecordLayoutError> {
+		let after = match stamp {
+			None => None,
+			Some(stamp) => {
+				self.admit(stamp)?;
+				self.ring.position(stamp)
+			}
+		};
+		let (Some(base), Some(head)) = (self.ring.base(), self.ring.head()) else {
+			return Ok(Vec::new());
+		};
+		let last = base.distance_to(head);
+		let mut next = after.map_or(0, |after| after + 1);
+		let mut out = Vec::new();
+		for (generation, entry) in self.generations.iter() {
+			let Some(position) = self.ring.position(*generation) else {
+				continue;
+			};
+			if position < next {
+				continue;
+			}
+			if position != next {
+				return Err(self.unlisted(base, next));
+			}
+			match entry.layout(&self.table) {
+				GenerationLayout::Readable(descriptor) => {
+					if let Some(migration) = &descriptor.migration {
+						out.push((*generation, migration));
+					}
+				}
+				GenerationLayout::Refused(cause) => {
+					return Err(RecordLayoutError::RefusedGeneration {
+						table: self.table.clone(),
+						generation: *generation,
+						cause: cause.clone(),
+					});
+				}
+			}
+			next = position.saturating_add(1);
+		}
+		if next <= last {
+			// The ring holds generations past the last listed one.
+			return Err(self.unlisted(base, next));
+		}
+		Ok(out)
+	}
+
+	/// The newest generation of the ring whose descriptor may carry a migration, `None` when no
+	/// generation does or the table has no ring. A row stamped at or after it has passed through
+	/// every migration of the table, so no row needs a step unless it is stamped before it.
+	///
+	/// It is read from the head's descriptor ([`LayoutDescriptor::migrated`]) with no other
+	/// descriptor decoded; the head is the last generation listed, since they are held in ring
+	/// order. A head the layouts do not list, or list as refused, may carry a
+	/// migration this build cannot see, so the head itself answers. A generation the ring has
+	/// retired is not one.
+	pub fn newest_migration(&self) -> Option<Generation> {
+		let head = self.ring.head()?;
+		match self.generations.last() {
+			Some((generation, entry)) if *generation == head => match entry.layout(&self.table) {
+				GenerationLayout::Readable(descriptor) => {
+					descriptor.migrated.filter(|migrated| self.ring.contains(*migrated))
+				}
+				GenerationLayout::Refused(_) => Some(head),
+			},
+			_ => Some(head),
+		}
+	}
+
+	/// Whether a row stamped `stamp` has migration steps to pass through: `stamp` is before
+	/// [`Self::newest_migration`] in the ring, or names no position of it, in which case
+	/// [`Self::pending_migrations`] refuses it. A row with no generation is before every
+	/// generation.
+	pub fn behind_migration(&self, stamp: Option<Generation>) -> bool {
+		let Some(newest) = self.newest_migration() else {
+			return false;
+		};
+		let Some(stamp) = stamp else {
+			return true;
+		};
+		match (self.ring.position(stamp), self.ring.position(newest)) {
+			(Some(at), Some(newest)) => at < newest,
+			_ => true,
+		}
+	}
+
+	/// The refusal of the generation `distance` positions after `base`, which the ring holds and no
+	/// descriptor is listed for.
+	fn unlisted(&self, base: Generation, distance: u16) -> RecordLayoutError {
+		let mut generation = base;
+		for _ in 0..distance {
+			generation = generation.next();
+		}
+		RecordLayoutError::UnknownGeneration {
+			table: self.table.clone(),
+			generation,
+		}
+	}
+
 	/// Admits a row of `generation`: the descriptor of a listed readable generation, and a typed
 	/// refusal for every other generation.
 	///
@@ -1316,7 +1471,9 @@ pub(crate) mod tests {
 	use surrealdb_strand::Strand;
 
 	use super::*;
+	use crate::IdiomText;
 	use crate::generation::tests::{check_frozen, g, refusal, with_floor};
+	use crate::migration::MigrationStep;
 	use crate::val::Array;
 
 	fn t() -> TableName {
@@ -1744,6 +1901,8 @@ pub(crate) mod tests {
 		LayoutDescriptor {
 			table: t(),
 			layout: RowLayout::Packed(packed()),
+			migration: None,
+			migrated: None,
 		}
 	}
 
@@ -1854,6 +2013,8 @@ pub(crate) mod tests {
 		GenerationLayout::Readable(Arc::new(LayoutDescriptor {
 			table: t(),
 			layout,
+			migration: None,
+			migrated: None,
 		}))
 	}
 
@@ -1949,6 +2110,64 @@ pub(crate) mod tests {
 		assert!(matches!(
 			TableLayouts::from_stored(ns(), db(), t(), ring(5, 9), vec![bytes(7), bytes(6)], 0),
 			Err(RecordLayoutError::Misnumbered { .. })
+		));
+	}
+
+	/// A descriptor carrying the migration `name`, as a minted generation holds it.
+	fn stepped(name: &str, migrated: Option<u16>) -> GenerationLayout {
+		GenerationLayout::Readable(Arc::new(LayoutDescriptor {
+			table: t(),
+			layout: RowLayout::Document,
+			migration: Some(Migration {
+				name: name.to_owned(),
+				step: MigrationStep::Remove {
+					path: IdiomText::from_raw("a"),
+				},
+			}),
+			migrated: migrated.map(g),
+		}))
+	}
+
+	#[test]
+	fn migrations_are_read_in_ring_order_across_the_wrap() {
+		// The ring is 65_534, 65_535, 1, 2: numeric order (1, 2, 65_534, 65_535) is not ring order,
+		// and the listed generations are held in ring order, so the head is the last one listed.
+		let table = layouts(
+			ring(65_534, 2),
+			vec![
+				(65_534, readable(RowLayout::Document)),
+				(65_535, stepped("first", Some(65_535))),
+				(1, readable(RowLayout::Document)),
+				(2, stepped("second", Some(2))),
+			],
+		);
+		assert_eq!(table.newest_migration(), Some(g(2)));
+		let pending = |stamp: Option<u16>| -> Vec<(u16, String)> {
+			table
+				.pending_migrations(stamp.map(g))
+				.expect("every generation after the stamp is listed")
+				.into_iter()
+				.map(|(generation, migration)| (generation.get(), migration.name.clone()))
+				.collect()
+		};
+		let first = (65_535, "first".to_owned());
+		let second = (2, "second".to_owned());
+		assert_eq!(pending(None), [first.clone(), second.clone()]);
+		assert_eq!(pending(Some(65_534)), [first, second.clone()]);
+		assert_eq!(pending(Some(65_535)), std::slice::from_ref(&second));
+		assert_eq!(pending(Some(1)), std::slice::from_ref(&second));
+		assert_eq!(pending(Some(2)), []);
+		assert!(table.behind_migration(Some(g(65_534))));
+		assert!(table.behind_migration(Some(g(1))));
+		assert!(!table.behind_migration(Some(g(2))));
+		// A generation the ring holds and no descriptor is listed for is refused, not skipped.
+		let gap = layouts(
+			ring(65_534, 2),
+			vec![(65_534, readable(RowLayout::Document)), (2, stepped("second", Some(2)))],
+		);
+		assert!(matches!(
+			gap.pending_migrations(Some(g(65_534))),
+			Err(RecordLayoutError::UnknownGeneration { generation, .. }) if generation == g(65_535)
 		));
 	}
 

@@ -3,7 +3,6 @@
 
 use surrealdb_strand::Strand;
 
-use crate::catalog::providers::TableProvider;
 use crate::exec::ExecutionContext;
 use crate::exec::fan_out::{RECORD_DEREFERENCE, evaluate_each};
 use crate::exec::permission::{
@@ -310,16 +309,16 @@ async fn fetch_raw_record_in(
 ) -> crate::expr::FlowResult<Option<Value>> {
 	let db_ctx = ctx.database().context("fetch_raw_record requires database context")?;
 	let txn = db_ctx.txn();
-	let record = txn
-		.get_record(
-			db_ctx.ns_ctx.ns.namespace_id,
-			db_ctx.db.database_id,
-			&rid.table,
-			&rid.key,
-			version,
-		)
-		.await
-		.context("Failed to fetch record")?;
+	let (record, generation) = crate::exec::migrate::stamped_record(
+		&txn,
+		db_ctx.ns_ctx.ns.namespace_id,
+		db_ctx.db.database_id,
+		&rid.table,
+		&rid.key,
+		version,
+	)
+	.await
+	.context("Failed to fetch record")?;
 	if record.data.is_none() {
 		if !(auth_reads_none && is_auth_record(ctx, rid))
 			&& db_ctx
@@ -335,8 +334,11 @@ async fn fetch_raw_record_in(
 		}
 		return Ok(None);
 	}
-
-	Ok(Some(record.data.clone()))
+	// The record as a read sees it: brought through the table's migration
+	// steps it has not passed.
+	let mut data = record.data.clone();
+	crate::exec::migrate::replay_record(ctx, &rid.table, &mut data, generation).await?;
+	Ok(Some(data))
 }
 
 /// Fetch a single raw record value as a locked read, registering the
@@ -354,20 +356,21 @@ pub(crate) async fn fetch_raw_record_for_update(
 ) -> crate::expr::FlowResult<Option<Value>> {
 	let db_ctx = ctx.database().context("fetch_raw_record_for_update requires database context")?;
 	let txn = db_ctx.txn();
-	let record = txn
-		.get_record_for_update(
-			db_ctx.ns_ctx.ns.namespace_id,
-			db_ctx.db.database_id,
-			&rid.table,
-			&rid.key,
-		)
-		.await
-		.context("Failed to fetch record")?;
+	let (record, generation) = crate::exec::migrate::stamped_record_for_update(
+		&txn,
+		db_ctx.ns_ctx.ns.namespace_id,
+		db_ctx.db.database_id,
+		&rid.table,
+		&rid.key,
+	)
+	.await
+	.context("Failed to fetch record")?;
 	if record.data.is_none() {
 		return Ok(None);
 	}
-
-	Ok(Some(record.data.clone()))
+	let mut data = record.data.clone();
+	crate::exec::migrate::replay_record(ctx, &rid.table, &mut data, generation).await?;
+	Ok(Some(data))
 }
 
 /// Process a fetched record: check table-level permissions, evaluate computed
@@ -467,6 +470,9 @@ pub(crate) async fn fetch_record_no_perms(
 	ctx: &ExecutionContext,
 	rid: &RecordId,
 ) -> crate::expr::FlowResult<Value> {
+	if ctx.refuses_dereference() {
+		return Err(anyhow::Error::new(crate::exec::migrate::MigrationError::Dereference).into());
+	}
 	// When the program has a unit for the record's table,
 	// the record is read through that unit.
 	if let Some(deref) = ctx.vm_deref()
@@ -509,6 +515,9 @@ pub(crate) async fn fetch_record(
 	ctx: &ExecutionContext,
 	rid: &RecordId,
 ) -> crate::expr::FlowResult<Value> {
+	if ctx.refuses_dereference() {
+		return Err(anyhow::Error::new(crate::exec::migrate::MigrationError::Dereference).into());
+	}
 	// When the program has a unit for the record's table,
 	// the record is read through that unit.
 	// A computed field whose value does not coerce to its kind fails the

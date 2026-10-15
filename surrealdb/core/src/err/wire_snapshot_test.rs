@@ -1017,6 +1017,19 @@ fn every_catalog_variant() -> Vec<(&'static str, CatalogError)> {
 				method: "sample".to_string(),
 			},
 		),
+		(
+			"MigrationNeedsStoredFormat",
+			CatalogError::MigrationNeedsStoredFormat {
+				table: "sample".to_string(),
+			},
+		),
+		(
+			"MigrationAlreadyRun",
+			CatalogError::MigrationAlreadyRun {
+				table: "sample".to_string(),
+				name: "sample".to_string(),
+			},
+		),
 	]
 }
 

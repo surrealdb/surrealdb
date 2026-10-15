@@ -1,5 +1,6 @@
 /**
 [env]
+compatibility = 3
 imports = ["upgrade/define/3.00.00_field_alter_remove_import.surql"]
 
 [test]

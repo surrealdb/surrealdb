@@ -17,7 +17,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = '''{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, extensions: { "ext::pkg": "DEFINE EXTENSION ext::pkg FROM silo::acme::pkg<1.0.0> DIGEST 'sha256:5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d' UNSIGNED CAPABILITIES {} COMMENT 'from silo' PERMISSIONS FULL", "ext::test": "DEFINE EXTENSION ext::test FROM f\"bucket:/module.wasm\" DIGEST 'sha256:5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d' UNSIGNED CAPABILITIES {} PERMISSIONS FULL" }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }'''
+value = '''{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: { "ext::pkg": "DEFINE EXTENSION ext::pkg FROM silo::acme::pkg<1.0.0> DIGEST 'sha256:5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d' UNSIGNED CAPABILITIES {} COMMENT 'from silo' PERMISSIONS FULL", "ext::test": "DEFINE EXTENSION ext::test FROM f\"bucket:/module.wasm\" DIGEST 'sha256:5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d' UNSIGNED CAPABILITIES {} PERMISSIONS FULL" }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }'''
 */
 
 -- 0: the file executable form

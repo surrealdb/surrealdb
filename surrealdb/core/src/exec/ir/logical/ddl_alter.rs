@@ -215,6 +215,7 @@ pub(super) fn plan_alter(alter: &AlterStatement, checks: DdlChecks) -> Planned<D
 				AlterObject::System {
 					query_timeout,
 					compact: stmt.compact,
+					compatibility: stmt.compatibility,
 				},
 				false,
 			)
@@ -227,14 +228,19 @@ pub(super) fn plan_alter(alter: &AlterStatement, checks: DdlChecks) -> Planned<D
 			},
 			false,
 		),
-		AlterStatement::Database(stmt) => (
-			DdlForm::AlterDatabase,
-			(EDIT, ResourceKind::Database, Base::Ns),
-			AlterObject::Database {
-				compact: stmt.compact,
-			},
-			false,
-		),
+		AlterStatement::Database(stmt) => {
+			let name = stmt.name.as_ref().map(|name| s.name(DdlOperand::Name, name)).transpose()?;
+			(
+				DdlForm::AlterDatabase,
+				(EDIT, ResourceKind::Database, Base::Ns),
+				AlterObject::Database {
+					name,
+					compact: stmt.compact,
+					compatibility: stmt.compatibility,
+				},
+				false,
+			)
+		}
 		AlterStatement::Table(stmt) => {
 			let name = s.name(DdlOperand::Name, &stmt.name)?;
 			let permissions = stmt
@@ -325,6 +331,7 @@ pub(super) fn plan_alter(alter: &AlterStatement, checks: DdlChecks) -> Planned<D
 					kind: stmt.kind.clone(),
 					inline_edges_cap: stmt.inline_edges_cap.clone(),
 					inline_refs_cap: stmt.inline_refs_cap.clone(),
+					migrate: stmt.migrate.clone(),
 				})),
 				stmt.if_exists,
 			)
@@ -606,6 +613,7 @@ pub(super) fn plan_alter(alter: &AlterStatement, checks: DdlChecks) -> Planned<D
 					permissions,
 					comment: stmt.comment.clone(),
 					reference,
+					migrate: stmt.migrate.clone().map(Box::new),
 				})),
 				stmt.if_exists,
 			)

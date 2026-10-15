@@ -37,6 +37,7 @@ async fn setup_tx_with_ns_db() -> (Arc<Datastore>, crate::kvs::Transaction, Name
 		database_id: DatabaseId(1),
 		name: "test".into(),
 		strict: false,
+		compatibility: Default::default(),
 		comment: None,
 		changefeed: None,
 	};
@@ -300,6 +301,7 @@ async fn test_single_tx_cache_invalidation_on_db_put_and_del() {
 		database_id: DatabaseId(1),
 		name: "testdb".into(),
 		strict: false,
+		compatibility: Default::default(),
 		comment: None,
 		changefeed: None,
 	};

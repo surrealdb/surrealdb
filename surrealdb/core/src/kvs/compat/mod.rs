@@ -38,7 +38,9 @@
 mod ann_pending;
 mod catalog_types_test;
 mod compiled_test;
+mod database_compatibility;
 mod durable_session;
+mod field_migrations;
 pub(crate) mod fixtures;
 mod generator;
 mod module_definition;

@@ -256,6 +256,7 @@ impl FieldDefinition {
 			reference: self.reference.clone(),
 			graphql_alias: self.graphql_alias.clone(),
 			graphql_deprecated: self.graphql_deprecated.clone(),
+			migrate: None,
 		}
 	}
 

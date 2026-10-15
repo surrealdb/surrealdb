@@ -28,7 +28,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "{ events: {  }, fields: { id: 'DEFINE FIELD id ON rel TYPE string PERMISSIONS FULL', in: 'DEFINE FIELD in ON rel TYPE record<a> PERMISSIONS FULL', out: 'DEFINE FIELD out ON rel TYPE record<c> PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }"
+value = "{ events: {  }, fields: { id: 'DEFINE FIELD id ON rel TYPE string PERMISSIONS FULL', in: 'DEFINE FIELD in ON rel TYPE record<a> PERMISSIONS FULL', out: 'DEFINE FIELD out ON rel TYPE record<c> PERMISSIONS FULL' }, indexes: {  }, lives: {  }, migrations: { generation: 2, guaranteed: [], migrations: [] }, tables: {  } }"
 
 [[test.results]]
 value = "NONE"

@@ -6,19 +6,19 @@ reason = "Test ALTER PARAM with all variations"
 value = "NONE"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: { test: 'DEFINE PARAM $test VALUE 42 PERMISSIONS FULL' }, sequences: {  }, tables: {  }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: { test: 'DEFINE PARAM $test VALUE 42 PERMISSIONS FULL' }, sequences: {  }, tables: {  }, users: {  } }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = """{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: { test: "DEFINE PARAM $test VALUE 100 COMMENT 'updated param' PERMISSIONS FULL" }, sequences: {  }, tables: {  }, users: {  } }"""
+value = """{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: { test: "DEFINE PARAM $test VALUE 100 COMMENT 'updated param' PERMISSIONS FULL" }, sequences: {  }, tables: {  }, users: {  } }"""
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: { test: 'DEFINE PARAM $test VALUE 100 PERMISSIONS NONE' }, sequences: {  }, tables: {  }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: { test: 'DEFINE PARAM $test VALUE 100 PERMISSIONS NONE' }, sequences: {  }, tables: {  }, users: {  } }"
 
 [[test.results]]
 value = "NONE"

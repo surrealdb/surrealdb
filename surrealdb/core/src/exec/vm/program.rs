@@ -1214,6 +1214,15 @@ impl NameClause {
 	}
 }
 
+/// What a `MIGRATE EXISTING ROWS` clause names: the migration's name and its
+/// transform. Its `FALLBACK` is a constant the instruction reads from a
+/// register.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct MigrateSpec {
+	pub(crate) name: String,
+	pub(crate) using: crate::expr::Expr,
+}
+
 /// The definition a [`StoreInstr::RefuseClauseEffects`] judges, by the
 /// stored type its register holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1555,6 +1564,28 @@ pub(super) enum StoreInstr {
 	/// it for `NONE`.
 	SetQueryTimeout {
 		timeout: Reg,
+	},
+	/// `dst` = the compatibility level a database created with no
+	/// `COMPATIBILITY` clause takes, under the ids in `ns` and `db`
+	/// (`Transaction::implicit_compatibility`).
+	NewDatabaseCompatibility {
+		ns: Reg,
+		db: Reg,
+		dst: Reg,
+	},
+	/// Set the compatibility level databases created later take by default
+	/// to the level in `level` (`Transaction::set_default_compatibility`).
+	SetDefaultCompatibility {
+		level: Reg,
+	},
+	/// Queue what the compatibility level of the database `ns`/`db` rising
+	/// from the level in `previous` to the one in `level` calls for
+	/// (`crate::exec::migrate::verify_database`).
+	VerifyCompatibility {
+		ns: Reg,
+		db: Reg,
+		previous: Reg,
+		level: Reg,
 	},
 	/// From each action in the array in `actions` (objects with a `methods`
 	/// array), remove the methods the array in `methods` holds; an action left
@@ -1950,12 +1981,14 @@ pub(super) enum StoreInstr {
 	},
 	/// Define the field the definition in `definition` describes, as
 	/// `DEFINE FIELD` defines it once its definition is formed: its checks of
-	/// the definition against the catalog, the field and its nested fields
-	/// written, and the table refreshed. `kind` decides what a field that
-	/// exists does.
+	/// the definition against the catalog, the rules of a table that enforces
+	/// migrations and the statement's `MIGRATE EXISTING ROWS` clause, the field
+	/// and its nested fields written, and the table refreshed. `kind` decides
+	/// what a field that exists does.
 	DefineField {
 		definition: Reg,
 		kind: crate::expr::statements::define::DefineKind,
+		migrate: Option<Box<crate::expr::statements::define::MigrateClause>>,
 	},
 	/// Remove the field the text in `name` names from the table named in
 	/// `table`, as `REMOVE FIELD` removes it once both are named.
@@ -1963,6 +1996,95 @@ pub(super) enum StoreInstr {
 		name: Reg,
 		table: Reg,
 		if_exists: bool,
+	},
+	/// Set `migrations` on the `INFO FOR TABLE` answer in `out` to what the
+	/// table named in `tb` of the database `ns`/`db` has migrated: its
+	/// current generation, each migration by name with the generation it
+	/// minted and the field it rewrote, and the fields whose types are
+	/// guaranteed. Sets nothing for a table that has run no migration.
+	InfoMigrations {
+		ns: Reg,
+		db: Reg,
+		tb: Reg,
+		out: Reg,
+	},
+	/// Commit the `MIGRATE EXISTING ROWS` clause `migrate` of the stored
+	/// field definition in `field`, which replaces the one in `previous`
+	/// (`NONE` for a new field), on the table named in `table` of the database
+	/// `ns`/`db`: check the migration, mint its generation with its step and
+	/// queue the rewrite and the verification of the field. Writes `true` to
+	/// `ran` when the table has already run the identical migration under its
+	/// name, so the statement does nothing, and `false` otherwise.
+	Migrate {
+		ns: Reg,
+		db: Reg,
+		table: Reg,
+		field: Reg,
+		previous: Reg,
+		fallback: Option<Reg>,
+		migrate: Box<MigrateSpec>,
+		ran: Reg,
+	},
+	/// Queue a verification pass of the stored field definition in `field`,
+	/// just stored with no migration over the one in `previous` (`NONE` for a
+	/// new field), on the table named in `table` of the database `ns`/`db`,
+	/// when the change could leave stored values that do not conform to it.
+	QueueVerification {
+		ns: Reg,
+		db: Reg,
+		table: Reg,
+		field: Reg,
+		previous: Reg,
+	},
+	/// Refuse the stored field definition in `field`, about to replace the
+	/// one in `previous` (`NONE` for a new field) on the table named in
+	/// `table` of the database `ns`/`db`, where the table enforces migrations
+	/// (`crate::exec::migrate::enforces_migrations`) and its rows might not
+	/// satisfy it; or, when `migrating`, where
+	/// its other clauses no longer fit a changed type. `kept` names the
+	/// clauses an `ALTER FIELD` left as they were. A stored field made
+	/// `COMPUTED` on such a table mints a step removing its values.
+	CheckFieldChange {
+		ns: Reg,
+		db: Reg,
+		table: Reg,
+		field: Reg,
+		previous: Reg,
+		migrating: bool,
+		kept: crate::exec::migrate::KeptClauses,
+	},
+	/// Mint a step removing the values of the stored field definition in
+	/// `field`, being removed from the table named in `table` of the
+	/// database `ns`/`db`, when the table enforces migrations
+	/// (`crate::exec::migrate::enforces_migrations`).
+	RemoveFieldStep {
+		ns: Reg,
+		db: Reg,
+		table: Reg,
+		field: Reg,
+	},
+	/// Commit the table-level migration `migrate` on the table named in
+	/// `table` of the database `ns`/`db`: check it, mint its generation and
+	/// store its step. Writes `true` to `ran` when the table has already run
+	/// such a migration under its name, so the statement does nothing, and
+	/// `false` otherwise.
+	MigrateTable {
+		ns: Reg,
+		db: Reg,
+		table: Reg,
+		migrate: Box<crate::expr::statements::alter::table::TableMigrateClause>,
+		ran: Reg,
+	},
+	/// Refuse an index of the table named in `table` of the database
+	/// `ns`/`db` over the field paths whose text the list in `columns` holds
+	/// while a migration step that clears the values of one of them is
+	/// pending, and any index of it in a transaction that has run a migration
+	/// of the table it has not committed, which the build cannot read.
+	CheckIndexMigrations {
+		ns: Reg,
+		db: Reg,
+		table: Reg,
+		columns: Reg,
 	},
 	/// Alter the field the text in `name` names of the table named in
 	/// `table` by the clauses of `statement`, as `ALTER FIELD` alters it once
@@ -1976,7 +2098,9 @@ pub(super) enum StoreInstr {
 	/// alters it once both are named, by the clauses the definition in `altered` holds for each of
 	/// `fields`: the stored definition the statement's clauses form, with the stored type's
 	/// default where a clause is not set. `kind_changed` is whether the statement sets or drops
-	/// the type, which decides whether the record id components it names are judged again.
+	/// the type, which decides whether the record id components it names are judged again. The
+	/// rules of a table that enforces migrations, and `migrate`, are judged once every other check
+	/// has passed, with `kept` the clauses a changed type leaves as they were.
 	AlterFieldClauses {
 		name: Reg,
 		table: Reg,
@@ -1984,6 +2108,8 @@ pub(super) enum StoreInstr {
 		fields: Vec<String>,
 		kind_changed: bool,
 		if_exists: bool,
+		migrate: Option<Box<crate::expr::statements::define::MigrateClause>>,
+		kept: crate::exec::migrate::KeptClauses,
 	},
 	/// Raise what `DEFINE INDEX` raises of the index `index` of the table
 	/// `table`, in the database `ns`/`db`, over the columns in the array
@@ -2692,8 +2818,9 @@ pub(super) enum FieldCheck {
 	/// The definition in `field`, which replaces the table's definition of the
 	/// field, is held by the fields of the table defined in `table` it is
 	/// nested in, and its kind holds those nested in it, with the definitions
-	/// it implies for its elements in place of theirs — the table's fields read
-	/// when the check runs (`define_field_nesting_restrictions`).
+	/// it implies for its elements in place of theirs, and the fields it is
+	/// nested in admit its kind — the table's fields read when the check runs
+	/// (`define_field_nesting_restrictions`, `parent_kind_restrictions`).
 	Nesting {
 		field: Reg,
 		table: Reg,
@@ -3503,7 +3630,7 @@ impl UnaryOp {
 			})),
 			UnaryOp::Cast {
 				kind,
-			} => value.cast_to_kind(&kinds[kind as usize]).map_err(|e| anyhow::anyhow!("{}", e))?,
+			} => value.cast_to_kind(&kinds[kind as usize]).map_err(anyhow::Error::new)?,
 		})
 	}
 }

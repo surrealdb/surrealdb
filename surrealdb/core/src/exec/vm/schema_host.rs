@@ -51,6 +51,7 @@ pub(super) fn parse_path(value: Value, into: &str) -> anyhow::Result<Idiom> {
 pub(super) async fn define_field(
 	kind: &DefineKind,
 	definition: &crate::catalog::FieldDefinition,
+	migration: crate::exec::migrate::FieldMigration<'_>,
 	ctx: &FrozenContext,
 	opt: &Options,
 ) -> anyhow::Result<()> {
@@ -59,7 +60,7 @@ pub(super) async fn define_field(
 	)
 	.await?;
 	crate::exec::vm::descriptor::schema(crate::ddl::define::field::define_field_definition_apply(
-		kind, definition, ctx, opt,
+		kind, definition, migration, ctx, opt,
 	))
 	.await?;
 	Ok(())
@@ -97,10 +98,12 @@ pub(super) async fn alter_field(
 
 /// `ALTER FIELD` once the field and its table are named, for a statement that holds its clauses
 /// as the definition they form.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn alter_field_clauses(
 	altered: &crate::catalog::FieldDefinition,
 	fields: &[String],
 	(kind_changed, if_exists): (bool, bool),
+	migration: crate::exec::migrate::FieldMigration<'_>,
 	name: Idiom,
 	table: TableName,
 	ctx: &FrozenContext,
@@ -110,6 +113,7 @@ pub(super) async fn alter_field_clauses(
 		altered,
 		fields,
 		(kind_changed, if_exists),
+		migration,
 		name,
 		table,
 		ctx,

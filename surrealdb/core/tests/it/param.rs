@@ -28,6 +28,7 @@ async fn define_global_param() -> Result<()> {
 			analyzers: {},
 			apis: {},
 			buckets: {},
+			compatibility: 4,
 			configs: {},
 			extensions: {},
 			functions: {},

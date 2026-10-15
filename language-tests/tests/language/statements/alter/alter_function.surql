@@ -6,19 +6,19 @@ reason = "Test ALTER FUNCTION with all variations"
 value = "NONE"
 
 [[test.results]]
-value = """{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, extensions: {  }, functions: { greet: "DEFINE FUNCTION fn::greet($name: string) -> string { RETURN 'hello ' + $name } PERMISSIONS FULL" }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
+value = """{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: { greet: "DEFINE FUNCTION fn::greet($name: string) -> string { RETURN 'hello ' + $name } PERMISSIONS FULL" }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = """{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, extensions: {  }, functions: { greet: "DEFINE FUNCTION fn::greet($name: string) -> string { RETURN 'hi ' + $name } COMMENT 'updated' PERMISSIONS NONE" }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
+value = """{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: { greet: "DEFINE FUNCTION fn::greet($name: string) -> string { RETURN 'hi ' + $name } COMMENT 'updated' PERMISSIONS NONE" }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = """{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, extensions: {  }, functions: { greet: "DEFINE FUNCTION fn::greet($name: string) -> string { RETURN 'hi ' + $name } PERMISSIONS NONE" }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
+value = """{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: { greet: "DEFINE FUNCTION fn::greet($name: string) -> string { RETURN 'hi ' + $name } PERMISSIONS NONE" }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
 
 [[test.results]]
 value = "NONE"

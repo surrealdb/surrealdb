@@ -30,7 +30,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::pipeline::{FieldState, build_field_state, materialise_fields_with_permissions};
-use crate::catalog::providers::TableProvider;
 use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, should_check_perms, validate_record_user_access,
 };
@@ -194,11 +193,18 @@ pub(crate) async fn resolve_with_field_state(
 	let db_id = db_ctx.db.database_id;
 
 	// One batched multi-get for the whole batch; `get_records` returns records
-	// positionally aligned with `rids` and splices the canonical id in.
-	let records = txn
-		.get_records(ns_id, db_id, rids, version, crate::kvs::CachePolicy::ReadWrite)
-		.await
-		.context("Failed to fetch records")?;
+	// positionally aligned with `rids` and splices the canonical id in, each
+	// brought through the migration steps of its table it has not passed.
+	let records = crate::exec::migrate::get_records(
+		ctx,
+		&txn,
+		ns_id,
+		db_id,
+		rids,
+		version,
+		crate::kvs::CachePolicy::ReadWrite,
+	)
+	.await?;
 
 	let mut out: Vec<Option<Value>> = Vec::with_capacity(rids.len());
 	for (rid, record) in rids.iter().zip(records) {

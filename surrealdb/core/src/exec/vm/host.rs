@@ -31,6 +31,7 @@ use crate::catalog::{StoredRecord, TableLayouts};
 use crate::exec::function::AccumulatorState;
 use crate::exec::index::access_path::access_repeats_records;
 use crate::exec::memory::runs::{BreakerKind, RunOrder, RunSpec};
+use crate::exec::migrate::{Replay, stamp_of};
 use crate::exec::operators::SortDirection;
 use crate::exec::operators::fetch::fetch_raw_record;
 use crate::exec::operators::limit::{PagingClause, paging_count};
@@ -1524,8 +1525,18 @@ pub(super) async fn run_storage_source(
 				None => {
 					let gate = descriptor.row_gate().map_err(ControlFlow::Err)?;
 					scan_range(
-						program, pipeline, range, gate, *direction, version, state, ctx, yielder,
-						flush_at, None,
+						program,
+						pipeline,
+						range,
+						gate,
+						descriptor.replay(),
+						*direction,
+						version,
+						state,
+						ctx,
+						yielder,
+						flush_at,
+						None,
 					)
 					.await
 				}
@@ -1594,6 +1605,7 @@ pub(super) async fn run_storage_source(
 						pipeline,
 						range,
 						gate,
+						descriptor.replay(),
 						crate::kvs::Direction::Forward,
 						version,
 						state,
@@ -1690,6 +1702,7 @@ pub(super) async fn run_storage_source(
 					pipeline,
 					range,
 					gate,
+					descriptor.replay(),
 					crate::kvs::Direction::Forward,
 					version,
 					state,
@@ -2596,6 +2609,7 @@ async fn scan_key_ranges(
 			pipeline,
 			range,
 			gate,
+			descriptor.replay(),
 			direction,
 			version,
 			state,
@@ -2617,14 +2631,19 @@ async fn scan_key_ranges(
 ///
 /// `gate` is the generation check of the table `range` reads: each record is
 /// admitted by it before the top-k probe, the pre-decode filter or the body
-/// reads any field of the record. With `coarse`, the scan stops before the
-/// first record past its cut.
+/// reads any field of the record. `replay` is the table's migration steps,
+/// when it has any: a record stamped at or after the newest step is read as
+/// stored, in place and by the pre-decode filter and the top-k probe alike,
+/// and any other is decoded and brought through the steps it has not passed
+/// before the body or a judge of its bytes sees it. With `coarse`, the scan
+/// stops before the first record past its cut.
 #[allow(clippy::too_many_arguments)]
 async fn scan_range(
 	program: &Arc<Program>,
 	pipeline: &Pipeline,
 	range: crate::key::RawRange,
 	gate: RowGate,
+	replay: Option<Replay>,
 	direction: crate::kvs::Direction,
 	version: Option<u64>,
 	state: &mut State,
@@ -2653,16 +2672,38 @@ async fn scan_range(
 			.await;
 		}
 		return scan_in_place(
-			program, pipeline, range, gate, direction, version, first, state, ctx, yielder,
-			flush_at, coarse,
+			program,
+			pipeline,
+			range,
+			gate,
+			replay.as_ref(),
+			direction,
+			version,
+			first,
+			state,
+			ctx,
+			yielder,
+			flush_at,
+			coarse,
 		)
 		.await;
 	}
 	if let Some(coarse) = coarse {
 		return out_of_line(|| {
 			scan_decoded_cut(
-				program, pipeline, range, gate, direction, version, first, state, ctx, yielder,
-				flush_at, coarse,
+				program,
+				pipeline,
+				range,
+				gate,
+				replay.as_ref(),
+				direction,
+				version,
+				first,
+				state,
+				ctx,
+				yielder,
+				flush_at,
+				coarse,
 			)
 		})
 		.await;
@@ -2685,6 +2726,7 @@ async fn scan_range(
 		first,
 		prefilter,
 		topk_probe,
+		replay.clone(),
 	);
 	// The rows of a program that does heavy work for each, reading only, are
 	// read and decoded on a task of their own, ahead of the work.
@@ -2706,10 +2748,15 @@ async fn scan_range(
 		// The source spends the records it reads and refuses before decoding
 		// them, and hands on an empty batch once that spends the fuel; the
 		// records it hands on are a unit each as their rows run.
-		let batch = match super::fuel::tick(ctx, 0).await.and(batch) {
+		let mut batch = match super::fuel::tick(ctx, 0).await.and(batch) {
 			Ok(batch) => batch,
 			Err(e) => return rows.fail(e, state, ctx, yielder, flush_at).await,
 		};
+		if let Some(replay) = &replay
+			&& let Err(e) = replay.apply_batch(ctx, &mut batch).await
+		{
+			return rows.fail(e, state, ctx, yielder, flush_at).await;
+		}
 		#[cfg(test)]
 		RECORDS_SCANNED.with(|scanned| scanned.set(scanned.get() + batch.len()));
 		for row in batch.into_values() {
@@ -2756,6 +2803,7 @@ async fn scan_decoded_cut(
 	pipeline: &Pipeline,
 	range: crate::key::RawRange,
 	mut gate: RowGate,
+	replay: Option<&Replay>,
 	direction: crate::kvs::Direction,
 	version: Option<u64>,
 	first: Option<u32>,
@@ -2784,6 +2832,9 @@ async fn scan_decoded_cut(
 		let size = super::fuel::batch(step);
 		coarse.refresh();
 		let mut decoded = Vec::with_capacity(size as usize);
+		// The generation each decoded record is stamped with, where the table
+		// has migration steps.
+		let mut stamps: Vec<Option<crate::catalog::Generation>> = Vec::new();
 		let mut failed = None;
 		let mut held: Option<(Vec<u8>, Vec<u8>)> = None;
 		let mut cut = false;
@@ -2810,7 +2861,15 @@ async fn scan_decoded_cut(
 						return Ok(std::ops::ControlFlow::Break(()));
 					}
 				}
-				if let Some(filter) = prefilter.as_deref()
+				let stamp = replay.map(|_| stamp_of(value));
+				// A record behind a migration step is judged as it reads after
+				// the steps, not by its stored bytes.
+				let judged = match (replay, stamp) {
+					(Some(replay), Some(stamp)) => !replay.behind(stamp),
+					_ => true,
+				};
+				if judged
+					&& let Some(filter) = prefilter.as_deref()
 					&& filter.apply(value) == PreDecodeFilterOutcome::Reject
 				{
 					return Ok(std::ops::ControlFlow::Continue(()));
@@ -2822,6 +2881,7 @@ async fn scan_decoded_cut(
 				) {
 					Ok(row) => {
 						decoded.push(row);
+						stamps.extend(stamp);
 						Ok(std::ops::ControlFlow::Continue(()))
 					}
 					Err(e) => {
@@ -2847,15 +2907,22 @@ async fn scan_decoded_cut(
 					)));
 				}
 			}
-			let refused = prefilter
-				.as_deref()
-				.is_some_and(|filter| filter.apply(&value) == PreDecodeFilterOutcome::Reject);
+			let stamp = replay.map(|_| stamp_of(&value));
+			let judged = match (replay, stamp) {
+				(Some(replay), Some(stamp)) => !replay.behind(stamp),
+				_ => true,
+			};
+			let refused = judged
+				&& prefilter
+					.as_deref()
+					.is_some_and(|filter| filter.apply(&value) == PreDecodeFilterOutcome::Reject);
 			if !refused {
 				decoded.push(crate::exec::operators::scan::pipeline::decode_record(
 					&key,
 					&value,
 					Some(&**gate.layouts()),
 				)?);
+				stamps.extend(stamp);
 			}
 		}
 		#[cfg(test)]
@@ -2867,7 +2934,12 @@ async fn scan_decoded_cut(
 		super::fuel::charge(super::fuel::units(refused));
 		super::fuel::tick(ctx, 0).await?;
 		let mut rows = Rows::of(program, pipeline, ctx).reading(Some(size));
-		for row in decoded {
+		for (at, mut row) in decoded.into_iter().enumerate() {
+			if let Some(replay) = replay
+				&& let Err(e) = replay.apply(ctx, &mut row, stamps.get(at).copied().flatten()).await
+			{
+				return rows.fail(e, state, ctx, yielder, flush_at).await;
+			}
 			if rows.row(program, pipeline, row, state, ctx, yielder, flush_at).await? {
 				return Ok(true);
 			}
@@ -2899,6 +2971,7 @@ async fn scan_in_place(
 	pipeline: &Pipeline,
 	range: crate::key::RawRange,
 	mut gate: RowGate,
+	replay: Option<&Replay>,
 	direction: crate::kvs::Direction,
 	version: Option<u64>,
 	mut first: Option<u32>,
@@ -2919,6 +2992,11 @@ async fn scan_in_place(
 		let mut failed = None;
 		let mut stopped = false;
 		let mut held: Option<(Vec<u8>, Vec<u8>)> = None;
+		// The record the chunk stopped on because it is stamped below the
+		// table's newest migration step: its stored bytes are not what a read
+		// of it sees, so it is decoded, brought through the steps and run as a
+		// value once the chunk ends.
+		let mut stale: Option<(Vec<u8>, Vec<u8>)> = None;
 		let chunk =
 			super::fuel::batch(first.take().map_or(crate::kvs::NORMAL_BATCH_SIZE, |first| {
 				first.clamp(1, crate::kvs::NORMAL_BATCH_SIZE)
@@ -2962,6 +3040,10 @@ async fn scan_in_place(
 						return Ok(std::ops::ControlFlow::Break(()));
 					}
 				}
+				if replay.is_some_and(|replay| !replay.current(value)) {
+					stale = Some((key.to_vec(), value.to_vec()));
+					return Ok(std::ops::ControlFlow::Break(()));
+				}
 				match scan_row(
 					program,
 					pipeline,
@@ -3000,17 +3082,32 @@ async fn scan_in_place(
 					)));
 				}
 			}
-			stopped = scan_row(
-				program,
-				pipeline,
-				topk_probe.as_ref(),
-				topk_threshold.as_deref(),
-				&key,
-				&value,
-				Some(&**gate.layouts()),
-				state,
-			)
-			.map_err(ControlFlow::Err)?;
+			stopped = if replay.is_some_and(|replay| !replay.current(&value)) {
+				stale = Some((key, value));
+				false
+			} else {
+				scan_row(
+					program,
+					pipeline,
+					topk_probe.as_ref(),
+					topk_threshold.as_deref(),
+					&key,
+					&value,
+					Some(&**gate.layouts()),
+					state,
+				)
+				.map_err(ControlFlow::Err)?
+			};
+		}
+		if let (Some((key, value)), Some(replay)) = (stale.take(), replay) {
+			let mut record = decode_record_value(&key, &value, Some(&**gate.layouts()))
+				.map_err(ControlFlow::Err)?;
+			replay.apply(ctx, &mut record, stamp_of(&value)).await?;
+			stopped = finish_in_place(run_in_place(program, pipeline, &ValueRow(&record), state))
+				.map_err(ControlFlow::Err)?;
+			if state.pending.is_some() {
+				state.settle(program, record);
+			}
 		}
 		#[cfg(test)]
 		RECORDS_SCANNED.with(|scanned| scanned.set(scanned.get() + stats.rows as usize));

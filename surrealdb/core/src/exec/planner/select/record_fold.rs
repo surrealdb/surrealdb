@@ -28,6 +28,9 @@
 //! - Every table the walk fetches from must define no computed fields: the runtime dereference
 //!   evaluates computed fields even when permission checks are disabled (see
 //!   [`process_fetched_record`](crate::exec::operators::fetch)).
+//! - Every table the walk fetches from must carry no migration step: the runtime dereference
+//!   replays a record stamped before the table's newest step through the pending steps, and the
+//!   plan-time walk reads the stored bytes as they are.
 //! - The path must be a literal record id followed by plain field accesses, and every intermediate
 //!   value must be an object, a record id (fetched, honouring the [`RecordIdKey::Object`]
 //!   key-component shortcut), or a scalar (which yields `NONE`, as at runtime). Arrays and
@@ -58,8 +61,8 @@ use crate::val::{RecordId, RecordIdKey, Strand, TableName, Value};
 /// the budget keeps a pathological predicate (hundreds of distinct record
 /// paths, or long traversal chains) from turning planning into unbounded
 /// storage I/O. One unit is charged per record hop, covering both the
-/// hop's field-metadata lookup (a catalog read on a per-table cache miss)
-/// and its record read. Generous relative to real predicates.
+/// hop's table lookups (catalog reads on a per-table cache miss) and its
+/// record read. Generous relative to real predicates.
 const FOLD_FETCH_BUDGET: u32 = 32;
 
 impl<'ctx> Planner<'ctx> {
@@ -105,7 +108,7 @@ impl<'ctx> Planner<'ctx> {
 		// A `None` entry records a failed fold, so duplicate occurrences of
 		// the same path don't repeat the walk and its storage reads.
 		let mut folded: HashMap<LogicalExpr, Option<LogicalExpr>> = HashMap::new();
-		let mut computed_cache: HashMap<TableName, bool> = HashMap::new();
+		let mut blocked_cache: HashMap<TableName, bool> = HashMap::new();
 		let mut fetch_budget = FOLD_FETCH_BUDGET;
 		for (path, rid, fields) in candidates {
 			if folded.contains_key(&path) {
@@ -117,7 +120,7 @@ impl<'ctx> Planner<'ctx> {
 				db_id,
 				rid,
 				&fields,
-				&mut computed_cache,
+				&mut blocked_cache,
 				&mut fetch_budget,
 			)
 			.await;
@@ -161,7 +164,7 @@ async fn fold_record_walk(
 	db_id: DatabaseId,
 	start: RecordId,
 	fields: &[Strand],
-	computed_cache: &mut HashMap<TableName, bool>,
+	blocked_cache: &mut HashMap<TableName, bool>,
 	fetch_budget: &mut u32,
 ) -> Option<Value> {
 	let mut pivot = Value::RecordId(start);
@@ -179,10 +182,10 @@ async fn fold_record_walk(
 					component.clone()
 				} else {
 					// Charge the budget before any storage access for this
-					// hop: the field-metadata lookup below reads the catalog
-					// on a (table) cache miss, so checking the budget only
-					// before the record read would leave catalog I/O
-					// unbounded for predicates with many distinct tables.
+					// hop: the table lookups below read the catalog on a
+					// (table) cache miss, so checking the budget only before
+					// the record read would leave catalog I/O unbounded for
+					// predicates with many distinct tables.
 					if *fetch_budget == 0 {
 						tracing::debug!(
 							table = %rid.table,
@@ -193,11 +196,10 @@ async fn fold_record_walk(
 					}
 					*fetch_budget -= 1;
 					// The runtime dereference evaluates computed fields on the
-					// fetched record; the plan-time walk cannot, so any
-					// computed field on the table disqualifies the fold.
-					if table_has_computed_fields(txn, ns_id, db_id, &rid.table, computed_cache)
-						.await?
-					{
+					// fetched record and replays its migration steps; the
+					// plan-time walk does neither, so a table with either
+					// disqualifies the fold.
+					if table_blocks_fold(txn, ns_id, db_id, &rid.table, blocked_cache).await? {
 						return None;
 					}
 					let record =
@@ -232,20 +234,24 @@ async fn fold_record_walk(
 	Some(pivot)
 }
 
-/// `true` when the table defines at least one computed field, matching the
-/// `has_computed` criterion of
-/// [`build_field_state_raw`](crate::exec::operators::scan::pipeline::build_field_state_raw).
-/// Returns `None` when the field definitions cannot be read — callers must
-/// treat that as "do not fold".
-async fn table_has_computed_fields(
+/// `true` when the runtime dereference of a record of `table` answers
+/// something the plan-time walk does not: the table defines at least one
+/// computed field, matching the `has_computed` criterion of
+/// [`build_field_state_raw`](crate::exec::operators::scan::pipeline::build_field_state_raw),
+/// or its layouts name a migration step
+/// ([`TableLayouts::newest_migration`](crate::catalog::TableLayouts::newest_migration)),
+/// which the dereference replays a record stamped before it through. Returns
+/// `None` when the field definitions or the layouts cannot be read — callers
+/// must treat that as "do not fold".
+async fn table_blocks_fold(
 	txn: &Arc<Transaction>,
 	ns_id: NamespaceId,
 	db_id: DatabaseId,
 	table: &TableName,
 	cache: &mut HashMap<TableName, bool>,
 ) -> Option<bool> {
-	if let Some(has) = cache.get(table) {
-		return Some(*has);
+	if let Some(blocked) = cache.get(table) {
+		return Some(*blocked);
 	}
 	let fields = match txn.all_tb_fields(ns_id, db_id, table, None).await {
 		Ok(fields) => fields,
@@ -259,9 +265,24 @@ async fn table_has_computed_fields(
 			return None;
 		}
 	};
-	let has = fields.iter().any(|fd| fd.computed.is_some());
-	cache.insert(table.clone(), has);
-	Some(has)
+	let blocked = if fields.iter().any(|fd| fd.computed.is_some()) {
+		true
+	} else {
+		match txn.table_layouts(ns_id, db_id, table, None).await {
+			Ok(layouts) => layouts.newest_migration().is_some(),
+			Err(e) => {
+				tracing::debug!(
+					table = %table,
+					error = %e,
+					"plan-time table layouts failed in fold_constant_record_paths; \
+					 leaving record path unfolded",
+				);
+				return None;
+			}
+		}
+	};
+	cache.insert(table.clone(), blocked);
+	Some(blocked)
 }
 
 /// Decompose a foldable path into its record id and the fields read from it:

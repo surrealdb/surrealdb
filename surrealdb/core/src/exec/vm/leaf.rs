@@ -532,6 +532,27 @@ fn store(instr: &StoreInstr) -> Class {
 		| StoreInstr::AlterFieldDefinition {
 			..
 		}
+		| StoreInstr::Migrate {
+			..
+		}
+		| StoreInstr::MigrateTable {
+			..
+		}
+		| StoreInstr::CheckIndexMigrations {
+			..
+		}
+		| StoreInstr::QueueVerification {
+			..
+		}
+		| StoreInstr::CheckFieldChange {
+			..
+		}
+		| StoreInstr::RemoveFieldStep {
+			..
+		}
+		| StoreInstr::InfoMigrations {
+			..
+		}
 		| StoreInstr::AlterFieldClauses {
 			..
 		}
@@ -539,6 +560,15 @@ fn store(instr: &StoreInstr) -> Class {
 			..
 		}
 		| StoreInstr::CheckTableAlter {
+			..
+		}
+		| StoreInstr::NewDatabaseCompatibility {
+			..
+		}
+		| StoreInstr::SetDefaultCompatibility {
+			..
+		}
+		| StoreInstr::VerifyCompatibility {
 			..
 		} => Class::NonLeaf(Bar::Schema),
 	}

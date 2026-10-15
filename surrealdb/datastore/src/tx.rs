@@ -32,15 +32,16 @@ use surrealdb_catalog::providers::{
 };
 use surrealdb_catalog::stored::{CATALOG_MARKER, EntryError};
 use surrealdb_catalog::{
-	self, Conformance, DatabaseDefinition, DatabaseId, DefaultConfig, Error as CatalogError,
-	FieldCandidate, FieldClaim, FromStored, Generation, GenerationLayout, GenerationMark,
-	GenerationRing, IndexId, LATEST_EDGE_VARIANT, LayoutDescriptor, LayoutRefusal, Metadata,
-	NamespaceDefinition, NamespaceId, Record, RecordFormat, RecordLayoutError, RecordType,
-	RecordWriter, StoredConfigDefinition, StoredFeatureLevel, StoredFieldDefinition, StoredRecord,
-	StoredTableDefinition, TableConformance, TableDefinition, TableId, TableLayouts,
-	TableMigrations, TableShape, TableType, birth_claims_of, decode_generation, definition_digest,
-	derive_layout,
+	self, Conformance, DatabaseCompatibility, DatabaseDefinition, DatabaseId, DefaultConfig,
+	Error as CatalogError, FieldCandidate, FieldClaim, FromStored, Generation, GenerationLayout,
+	GenerationMark, GenerationRing, IndexId, LATEST_EDGE_VARIANT, LayoutDescriptor, LayoutRefusal,
+	Metadata, Migration, MigrationRun, NamespaceDefinition, NamespaceId, Record, RecordFormat,
+	RecordLayoutError, RecordType, RecordWriter, StoredConfigDefinition, StoredFeatureLevel,
+	StoredFieldDefinition, StoredRecord, StoredTableDefinition, TableConformance, TableDefinition,
+	TableId, TableLayouts, TableMigrations, TableShape, TableType, birth_claims_of,
+	decode_generation, definition_digest, derive_layout,
 };
+use surrealdb_expr::val::stored::schema::Unrevisioned;
 use surrealdb_expr::val::{RecordId, RecordIdKey, RecordIdentity, TableName, Value};
 use surrealdb_kvs::api::{
 	Batch, KeyVisitor, KeysBatch, ScanChunkStats, ScanCursorKeys, ScanCursorVals, ValVisitor,
@@ -79,19 +80,21 @@ use crate::key::schema::{
 	FieldKey, FieldPrefix, ForeignTablePrefix, FunctionKey, FunctionPrefix, GenerationMarkKey,
 	GraphFoldKey, GraphPointerKey, IdxRoot, IndexBuildShapesKey, IndexCompactionKey, IndexCountKey,
 	IndexDefKey, IndexDefPrefix, IndexNameKey, IndexShapesKey, IndexShapesTrackedKey, LayoutKey,
-	LayoutPrefix, LiveEventsKey, MigrationKey, MlModelKey, MlModelPrefix, ModuleKey, ModulePrefix,
-	NamespaceKey, NamespacePrefix, NodeKey, NodePrefix, NodeReleaseKey, NsAccessMethodKey,
-	NsAccessMethodPrefix, NsAccessRoot, NsGrantKey, NsGrantPrefix, NsUserKey, NsUserPrefix,
-	ObjectVersionKey, ParamKey, ParamPrefix, ReclaimKey, ReclaimTbPrefix, RecordKey, RecordPrefix,
-	RootAccessMethodKey, RootAccessMethodPrefix, RootAccessRoot, RootConfigKey, RootGrantKey,
-	RootGrantPrefix, RootUserKey, RootUserPrefix, SequenceKey, SequencePrefix, SubscriptionPrefix,
-	TableConformanceKey, TableKey, TableMigrationsKey, TablePrefix, TermChangeBatchKey, VersionKey,
+	LayoutPrefix, LiveEventsKey, MigrationKey, MigrationRunKey, MigrationRunPrefix, MlModelKey,
+	MlModelPrefix, ModuleKey, ModulePrefix, NamespaceKey, NamespacePrefix, NodeKey, NodePrefix,
+	NodeReleaseKey, NsAccessMethodKey, NsAccessMethodPrefix, NsAccessRoot, NsGrantKey,
+	NsGrantPrefix, NsUserKey, NsUserPrefix, ObjectVersionKey, ParamKey, ParamPrefix, ReclaimKey,
+	ReclaimTbPrefix, RecordKey, RecordPrefix, RootAccessMethodKey, RootAccessMethodPrefix,
+	RootAccessRoot, RootConfigKey, RootGrantKey, RootGrantPrefix, RootUserKey, RootUserPrefix,
+	SequenceKey, SequencePrefix, StoreDefaultsKey, SubscriptionPrefix, TableConformanceKey,
+	TableKey, TableMigrationKey, TableMigrationsKey, TablePrefix, TermChangeBatchKey, VersionKey,
 };
 #[cfg(diskann)]
 use crate::key::schema::{
 	DiskannPendingKey, DiskannPendingPrefix, DiskannRecordPendingShardShardPrefix,
 	DiskannWriterLeaseKey, DiskannWriterLeaseShardPrefix,
 };
+use crate::key::table_migration::{TableMigrationState, VerifiedField};
 use crate::layouts::LayoutSet;
 use crate::obs::Instrument;
 use crate::sequences::{Sequence, Sequences};
@@ -117,7 +120,7 @@ use crate::values::index_build::{
 use crate::values::index_delta::{BufferedIndex, BufferedTerm, IndexDeltaBuffer};
 use crate::values::live_query::LiveEventBuffer;
 use crate::version::ledger::{RECORD_FORMAT_V1, RECORD_FORMAT_V1_NAME, RECORD_FORMAT_V1_VERSION};
-use crate::version::{MajorVersion, MigrationRecord, unix_millis_now};
+use crate::version::{MajorVersion, MigrationRecord, StoreDefaults, unix_millis_now};
 use crate::{
 	DatastoreError, Direction, Error as KvsError, IntoBytes, NORMAL_BATCH_SIZE, TransactionConfig,
 	TransactionFactory, TransactionType, Transactor, Val, cache, catalog,
@@ -328,6 +331,16 @@ fn held(prior: &Option<Option<Val>>) -> Option<Option<&[u8]>> {
 pub(crate) fn refused_by_release(err: &anyhow::Error) -> bool {
 	err.chain()
 		.any(|cause| matches!(EntryError::of_cause(cause), Some(EntryError::NeedsRelease { .. })))
+}
+
+/// The compatibility level a store's defaults name, refused when the stored number is no level.
+fn compatibility_of(defaults: &StoreDefaults) -> Result<DatabaseCompatibility> {
+	DatabaseCompatibility::new(defaults.compatibility).ok_or_else(|| {
+		anyhow::Error::new(EngineError::Internal(format!(
+			"the store's default compatibility level is not 3 or 4: {}",
+			defaults.compatibility
+		)))
+	})
 }
 
 /// The refusal of `layouts`' table, when the table's generation ring is one this build cannot
@@ -650,6 +663,11 @@ pub struct Transaction {
 	/// Did this transaction queue any index-compaction work?
 	trigger_index_compaction: AtomicBool,
 	trigger_graph_fold: AtomicBool,
+	/// Whether a commit of this transaction queued table migration work.
+	trigger_table_migration: AtomicBool,
+	/// The live-transaction bucket this transaction counted itself into
+	/// ([`crate::triggers::LiveTransactions`]), or [`crate::triggers::NO_LIVE_BUCKET`].
+	live_bucket: u8,
 	/// Write-cardinality guard: maximum number of individual key writes this
 	/// transaction may buffer before further writes fail. Unset by default,
 	/// leaving the transaction unbounded. Armed once — by the executor for
@@ -1167,6 +1185,14 @@ impl IndexBuildReservationRelease {
 	}
 }
 
+impl Drop for Transaction {
+	fn drop(&mut self) {
+		if self.live_bucket != crate::triggers::NO_LIVE_BUCKET {
+			self.triggers.live.close(self.live_bucket);
+		}
+	}
+}
+
 impl Deref for Transaction {
 	type Target = Transactor;
 
@@ -1542,6 +1568,8 @@ impl Transaction {
 			trigger_async_event: AtomicBool::new(false),
 			trigger_index_compaction: AtomicBool::new(false),
 			trigger_graph_fold: AtomicBool::new(false),
+			trigger_table_migration: AtomicBool::new(false),
+			live_bucket: crate::triggers::NO_LIVE_BUCKET,
 			write_keys_limit: OnceLock::new(),
 			write_guard_poisoned: AtomicBool::new(false),
 			save_point_poisoned: AtomicBool::new(false),
@@ -2351,6 +2379,10 @@ impl Transaction {
 			// fold task, for the same reason as the compaction trigger above.
 			self.triggers.graph_fold.notify_one();
 		}
+		if self.trigger_table_migration.load(Ordering::Relaxed) {
+			// Notify after commit so the queued table migration is visible to the job.
+			self.triggers.table_migration.notify_one();
+		}
 		self.emit_transaction_event(Outcome::Success);
 		Ok(())
 	}
@@ -2590,6 +2622,102 @@ impl Transaction {
 			}
 			None => Ok((Arc::new(Default::default()), None)),
 		}
+	}
+
+	/// [`TableProvider::get_records`] with the generation each record's bytes carry: `None` for a
+	/// `revision` record, stamp 0, a lightweight edge and an id that names no record.
+	///
+	/// A cached record carries the generation it was cached with. The batch fails at the first
+	/// record whose generation is refused.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
+	pub async fn get_stamped_records(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		rids: &[RecordId],
+		version: Option<u64>,
+		cache_policy: CachePolicy,
+	) -> Result<Vec<(Arc<Record>, Option<Generation>)>> {
+		if rids.is_empty() {
+			return Ok(Vec::new());
+		}
+		let mut out: Vec<Option<(Arc<Record>, Option<Generation>)>> = vec![None; rids.len()];
+		let mut uncached_rids: Vec<(usize, &RecordId)> = Vec::new();
+		if version.is_some() {
+			uncached_rids.extend(rids.iter().enumerate());
+		} else {
+			for (i, rid) in rids.iter().enumerate() {
+				let qey = cache::tx::Lookup::Record(ns, db, rid.table.as_str(), &rid.key);
+				match self.cache.get(&qey) {
+					Some(entry) => out[i] = Some(entry.try_into_stamped_record()?),
+					None => uncached_rids.push((i, rid)),
+				}
+			}
+		}
+		if !uncached_rids.is_empty() {
+			let keys: Vec<RecordKey<'_>> = uncached_rids
+				.iter()
+				.map(|(_, rid)| RecordKey {
+					ns,
+					db,
+					tb: Cow::Borrowed(&rid.table),
+					id: Cow::Borrowed(&rid.key),
+				})
+				.collect();
+			let values = self.getm_raw(keys, version).await?;
+			let values = self
+				.decode_records(ns, db, uncached_rids.iter().map(|(_, rid)| *rid), values, version)
+				.await?;
+			let mut misses: Vec<(usize, &RecordId)> = Vec::new();
+			for ((i, rid), slot) in uncached_rids.into_iter().zip(values) {
+				match slot {
+					Some((record, generation)) => {
+						// The cache is not versioned, and a read-only policy avoids eviction
+						// churn during large sequential scans.
+						if version.is_none()
+							&& (record.metadata.is_some() || !record.data.is_none())
+							&& matches!(cache_policy, CachePolicy::ReadWrite)
+						{
+							let qey =
+								cache::tx::Lookup::Record(ns, db, rid.table.as_str(), &rid.key);
+							let entry = cache::tx::Entry::Val(Arc::clone(&record), generation);
+							self.cache.insert(qey, entry);
+						}
+						out[i] = Some((record, generation));
+					}
+					None => misses.push((i, rid)),
+				}
+			}
+			// A miss can be a lightweight edge; resolve every miss in one batched adjacency read.
+			if !misses.is_empty() {
+				let miss_rids: Vec<&RecordId> = misses.iter().map(|(_, rid)| *rid).collect();
+				let records = self.lightweight_records(ns, db, &miss_rids, version).await?;
+				for ((i, rid), record) in misses.into_iter().zip(records) {
+					let record = match record {
+						Some(record) => record.into_read_only(),
+						None => Arc::new(Default::default()),
+					};
+					if version.is_none()
+						&& (record.metadata.is_some() || !record.data.is_none())
+						&& matches!(cache_policy, CachePolicy::ReadWrite)
+					{
+						let qey = cache::tx::Lookup::Record(ns, db, rid.table.as_str(), &rid.key);
+						self.cache.insert(qey, cache::tx::Entry::Val(Arc::clone(&record), None));
+					}
+					out[i] = Some((record, None));
+				}
+			}
+		}
+		out.into_iter()
+			.map(|o| {
+				o.ok_or_else(|| {
+					EngineError::Internal("missing record in multi-get batch".into()).into()
+				})
+			})
+			.collect()
 	}
 
 	/// Fetch every entry in a range, with its value decoded under the type the range
@@ -3814,8 +3942,9 @@ impl Transaction {
 
 	/// Gives `tb` the generation its rows are written in: mints the next generation of its ring
 	/// when the table has no readable head, or when the layout derived from its definition and
-	/// its field definitions ([`derive_layout`]) differs from the head's. The two are compared by
-	/// their canonical bytes. `stored` is the table's stored definition as the caller read and
+	/// its field definitions ([`derive_layout`]) differs from the head's. The two layouts are
+	/// compared by their canonical bytes, whatever migration the head carries. `stored` is the
+	/// table's stored definition as the caller read and
 	/// decoded it, `None` when this build does not decode it.
 	///
 	/// The table's layouts are read afresh, through this transaction, so the answer holds every
@@ -3849,11 +3978,11 @@ impl Transaction {
 			None => LayoutDescriptor::document(tb.clone()),
 		};
 		if let Some(head) = head
-			&& head.kv_canonical()? == descriptor.kv_canonical()?
+			&& head.has_layout_of(&descriptor)?
 		{
 			return Ok(());
 		}
-		self.mint_with(ns, db, tb, stored, &layouts, descriptor).await
+		self.mint_with(ns, db, tb, stored, &layouts, descriptor).await.map(|_| ())
 	}
 
 	/// Mints the generation after the head of `layouts`' ring, whatever the state of the current
@@ -3884,7 +4013,7 @@ impl Transaction {
 			.derive_table_layout(ns, db, tb, stored)
 			.await?
 			.unwrap_or_else(|| LayoutDescriptor::document(tb.clone()));
-		self.mint_with(ns, db, tb, stored, layouts, descriptor).await
+		self.mint_with(ns, db, tb, stored, layouts, descriptor).await.map(|_| ())
 	}
 
 	/// The layout a generation minted for `tb` gives its rows, derived from its definition `stored`
@@ -3948,7 +4077,8 @@ impl Transaction {
 	/// floor, 0. A ring in use keeps its floor. A table created by this transaction records that
 	/// its creation started the ring it holds ([`Birth::minted_ring`]). The transaction's layout
 	/// memo is updated with the minted generation and the layout epoch is advanced, so a writer
-	/// that resolved the table's format earlier resolves it again.
+	/// that resolved the table's format earlier resolves it again. The answer is the generation
+	/// minted.
 	async fn mint_with(
 		&self,
 		ns: NamespaceId,
@@ -3957,7 +4087,7 @@ impl Transaction {
 		stored: Option<&StoredTableDefinition>,
 		layouts: &TableLayouts,
 		descriptor: LayoutDescriptor,
-	) -> Result<()> {
+	) -> Result<Generation> {
 		if let Some(refusal) = ring_refusal_error(layouts) {
 			return Err(refusal);
 		}
@@ -4017,6 +4147,16 @@ impl Transaction {
 			}
 			.into());
 		}
+		// The descriptor names the newest generation, up to its own, that carries a migration, so
+		// the head's descriptor alone says which rows may need a step.
+		let descriptor = LayoutDescriptor {
+			migrated: if descriptor.migration.is_some() {
+				Some(next)
+			} else {
+				layouts.newest_migration()
+			},
+			..descriptor
+		};
 		self.put_compare_key(&layout_key, &descriptor, None).await?;
 		let written = self.get_key_raw(&layout_key, None).await?.ok_or_else(|| {
 			CatalogError::Layout(RecordLayoutError::CurrentMissing {
@@ -4054,7 +4194,7 @@ impl Transaction {
 		if let Some(stored) = first {
 			self.note_ring_minted(ns, db, tb, stored);
 		}
-		Ok(())
+		Ok(next)
 	}
 
 	/// The birth this transaction recorded for `tb` under the table id `stored` carries, if it
@@ -4253,6 +4393,273 @@ impl Transaction {
 			self.catalog_write_poisoned.store(true, Ordering::Relaxed);
 		}
 		written
+	}
+
+	/// Mints the generation of the migration `migration` of `tb`: the next generation of the
+	/// table's ring, with the layout derived from the table's definition and its fields as this
+	/// transaction sees them, carrying `migration`. Every row stamped before the generation passes
+	/// through the migration's step when it is read. The answer is the generation minted.
+	///
+	/// The generation is minted whether or not the layout differs from the head's. The name is
+	/// recorded under the table ([`MigrationRunKey`]) in the same transaction, so the table's
+	/// history keeps that the name has run after the descriptor is retired. Refused, with nothing
+	/// written:
+	///
+	/// - at a feature level that does not write the stored grammar
+	///   ([`CatalogError::MigrationNeedsStoredFormat`]), where a row carries no stamp;
+	/// - a table that is not defined ([`CatalogError::TbNotFound`]);
+	/// - a name the table has already run ([`CatalogError::MigrationAlreadyRun`]);
+	/// - a table whose ring this build cannot read ([`RecordLayoutError::RingRefused`]).
+	///
+	/// The generation's layout is the one the definitions this transaction holds when the call is
+	/// made derive. A statement that stores field definitions afterwards has its own stamp mint
+	/// the layout those definitions derive, when it differs from the head's, so a row written
+	/// after the statement is stamped with that later generation and never passes through the
+	/// step. A failure after the first write poisons the transaction, which then commits nothing.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(
+			level = "trace",
+			target = "surrealdb::core::kvs::tx",
+			skip(self, migration)
+		)
+	)]
+	pub async fn mint_tb_migration(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		migration: Migration,
+	) -> Result<Generation> {
+		if self.write_level().is_legacy() {
+			return Err(CatalogError::MigrationNeedsStoredFormat {
+				table: tb.as_str().to_owned(),
+			}
+			.into());
+		}
+		let name = migration.name.clone();
+		let run_key = MigrationRunKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+			name: Cow::Borrowed(name.as_str()),
+		};
+		if self.exists_key(&run_key, None).await? {
+			return Err(CatalogError::MigrationAlreadyRun {
+				table: tb.as_str().to_owned(),
+				name,
+			}
+			.into());
+		}
+		let Some(table) = self.table_stored(ns, db, tb).await? else {
+			return Err(CatalogError::TbNotFound {
+				name: tb.clone(),
+			}
+			.into());
+		};
+		let stored = StoredTableDefinition::kv_decode_value(&table, ()).ok();
+		let minted = async {
+			let layouts = self.reload_table_layouts(ns, db, tb, None).await?;
+			if let Some(refusal) = ring_refusal_error(&layouts) {
+				return Err(refusal);
+			}
+			let run = MigrationRun {
+				generation: Generation::FIRST,
+				field: migration.field().map(str::to_owned),
+			};
+			let descriptor = self
+				.derive_table_layout(ns, db, tb, stored.as_ref())
+				.await?
+				.unwrap_or_else(|| LayoutDescriptor::document(tb.clone()))
+				.with_migration(migration);
+			let generation =
+				self.mint_with(ns, db, tb, stored.as_ref(), &layouts, descriptor).await?;
+			self.set_key(
+				&run_key,
+				&MigrationRun {
+					generation,
+					..run
+				},
+			)
+			.await?;
+			Ok(generation)
+		}
+		.await;
+		if minted.is_err() {
+			self.catalog_write_poisoned.store(true, Ordering::Relaxed);
+		}
+		minted
+	}
+
+	/// The migrations `tb` has run, by name, as the table's permanent record holds them.
+	pub async fn tb_migration_runs(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<Vec<(String, MigrationRun)>> {
+		let range = MigrationRunPrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		}
+		.range()?;
+		let mut runs = Vec::new();
+		for (key, bytes) in self.getr_raw(range, None).await? {
+			let name = MigrationRunKey::decode_key(&key)?.name.into_owned();
+			runs.push((name, MigrationRun::kv_decode_value(&bytes, ())?));
+		}
+		Ok(runs)
+	}
+
+	/// The newest generation of `tb`'s ring that may carry a migration
+	/// ([`TableLayouts::newest_migration`]), as this transaction sees it. `None` when the table has
+	/// no ring or no generation of it carries one.
+	pub async fn newest_tb_migration(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<Option<Generation>> {
+		Ok(self.table_layouts(ns, db, tb, None).await?.newest_migration())
+	}
+
+	/// The table migration job's entry for table `tb`, if it has one.
+	pub async fn get_tb_migration_job(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<Option<TableMigrationState>> {
+		self.get_key(&Self::migration_job_key(ns, db, tb), None).await
+	}
+
+	/// Queue table `tb` for the rewrite job, in the transaction that mints a migration of it: the
+	/// entry is written whether or not one exists, so a page of a lap already under way conflicts
+	/// with this transaction and the job reads the new migration before it ends the lap.
+	pub async fn queue_tb_rewrite(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<()> {
+		let key = Self::migration_job_key(ns, db, tb);
+		let mut state = self.get_key(&key, None).await?.unwrap_or_else(|| TableMigrationState {
+			lap: 1,
+			..Default::default()
+		});
+		state.rewrite = true;
+		self.set_key(&key, &state).await?;
+		self.trigger_table_migration();
+		Ok(())
+	}
+
+	/// Queue `field` of table `tb` for verification, restarting the lap so it reads every row from
+	/// the start, after every transaction older than this one has ended.
+	pub async fn queue_tb_verification(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		field: VerifiedField,
+	) -> Result<()> {
+		let key = Self::migration_job_key(ns, db, tb);
+		let mut state = self.get_key(&key, None).await?.unwrap_or_default();
+		state.verify.retain(|f| f.name != field.name);
+		state.verify.push(field);
+		state.settled = false;
+		state.restart();
+		self.set_key(&key, &state).await?;
+		self.trigger_table_migration();
+		Ok(())
+	}
+
+	/// Restart the verification under way on table `tb`, if any, for a write that stores a record
+	/// without checking it (`OPTION IMPORT`).
+	///
+	/// The entry is read with a locked read, so on a backend whose locked reads are shared this
+	/// transaction conflicts with a page or promotion of the job that commits first, and the
+	/// job's compare-and-set fails if this transaction commits first: no pass promotes a field
+	/// over a row it could not judge.
+	pub async fn restart_tb_verification(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<()> {
+		let key = Self::migration_job_key(ns, db, tb);
+		let Some(mut state) = self.getu_key(&key).await? else {
+			return Ok(());
+		};
+		if !state.verify.iter().any(|f| !f.finished) {
+			return Ok(());
+		}
+		state.settled = false;
+		state.restart();
+		self.set_key(&key, &state).await?;
+		self.trigger_table_migration();
+		Ok(())
+	}
+
+	fn migration_job_key(ns: NamespaceId, db: DatabaseId, tb: &TableName) -> TableMigrationKey<'_> {
+		TableMigrationKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		}
+	}
+
+	/// Whether `tb` holds any record, read from its record range in this transaction.
+	pub async fn tb_has_records(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<bool> {
+		self.holds_record(ns, db, tb).await
+	}
+
+	/// The compatibility level a database created in this store without one takes: the store's
+	/// [`StoreDefaults`], or [`StoreDefaults::CURRENT`]'s where none is stored.
+	pub async fn default_compatibility(&self) -> Result<DatabaseCompatibility> {
+		let defaults = self.get_key(&StoreDefaultsKey {}, None).await?;
+		compatibility_of(&defaults.unwrap_or(StoreDefaults::CURRENT))
+	}
+
+	/// The compatibility level of the row an implicit creation writes for the database `db` of
+	/// `ns`: [`DatabaseCompatibility::LEVEL_3`] when the database already holds table definitions,
+	/// which were defined under the rules of a database that had no level, and the store's default
+	/// ([`Self::default_compatibility`]) otherwise. A store whose feature level does not write the
+	/// stored grammar has no way to record another level, so it answers level 3.
+	pub async fn implicit_compatibility(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<DatabaseCompatibility> {
+		if self.write_level().is_legacy() {
+			return Ok(DatabaseCompatibility::LEVEL_3);
+		}
+		let tables = TablePrefix {
+			ns,
+			db,
+		}
+		.range()?;
+		if !self.keys_raw(tables, 1, 0, None).await?.is_empty() {
+			return Ok(DatabaseCompatibility::LEVEL_3);
+		}
+		self.default_compatibility().await
+	}
+
+	/// Set the compatibility level a database created in this store without one takes. Databases
+	/// that already exist keep theirs.
+	pub async fn set_default_compatibility(&self, level: DatabaseCompatibility) -> Result<()> {
+		self.set_key(
+			&StoreDefaultsKey {},
+			&StoreDefaults {
+				compatibility: level.get(),
+			},
+		)
+		.await
 	}
 
 	/// The conformance record of `tb` as this transaction sees it, or as of `version`.
@@ -4977,10 +5384,10 @@ impl Transaction {
 	/// A created table is a birth ([`Births`]): it is recorded with the id the write gave it, and
 	/// its conformance is left for the next stamp to settle. A creation whose definition does not
 	/// decode records no birth, and drops any an earlier creation of the name left. A rewrite that
-	/// makes the table a view or a lightweight relation, or leaves a definition this build cannot
-	/// decode, forfeits the table's conformance, as does the removal of the definition, and leaves
-	/// a born table for the next stamp to settle again. Any other rewrite changes no row's
-	/// relation to the field definitions, and leaves the conformance as it is.
+	/// makes the table a view, a lightweight relation or `SCHEMAFULL`, or leaves a definition this
+	/// build cannot decode, forfeits the table's conformance, as does the removal of the
+	/// definition, and leaves a born table for the next stamp to settle again. Any other rewrite
+	/// changes no row's relation to the field definitions, and leaves the conformance as it is.
 	///
 	/// A forfeit awaits [`Self::forfeit_conformance`], which awaits no writer that reaches
 	/// [`Self::restamp_defined`], so the futures of the write methods stay finite.
@@ -6363,6 +6770,14 @@ impl Transaction {
 		self.sole_writer && !self.triggers.pending_guard_fences.assumes_shared_store()
 	}
 
+	/// Count this transaction as live in `bucket` of its datastore's
+	/// [`crate::triggers::LiveTransactions`], counted in before its snapshot was taken; it is
+	/// counted out when the transaction is dropped.
+	pub(crate) fn with_live_bucket(mut self, bucket: u8) -> Self {
+		self.live_bucket = bucket;
+		self
+	}
+
 	/// The count of events that change which generation of a table is current, what the
 	/// transaction holds of a table's conformance record, or whether the stored-format ledger entry
 	/// is part of this transaction: a mint, a floor move, a write or removal of a conformance
@@ -6444,6 +6859,19 @@ impl Transaction {
 			_ => HeldSpan::Unbounded,
 		};
 		tables.insert(tb.clone(), span);
+	}
+
+	/// The layouts of `tb` this transaction already holds, without a read: `None` when the next
+	/// current read of them goes to storage. A caller that only needs to know whether the table has
+	/// anything to say about its rows, as the read path of every record does, takes this before the
+	/// asynchronous [`Self::table_layouts`].
+	pub fn held_table_layouts(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Option<Arc<TableLayouts>> {
+		self.memoised_layouts(ns, db, tb)
 	}
 
 	/// What this transaction holds of `tb`'s layouts, if it holds any.
@@ -7464,6 +7892,8 @@ impl Transaction {
 			trigger_async_event: AtomicBool::new(false),
 			trigger_index_compaction: AtomicBool::new(false),
 			trigger_graph_fold: AtomicBool::new(false),
+			trigger_table_migration: AtomicBool::new(false),
+			live_bucket: crate::triggers::NO_LIVE_BUCKET,
 			write_keys_limit: OnceLock::new(),
 			write_guard_poisoned: AtomicBool::new(false),
 			save_point_poisoned: AtomicBool::new(false),
@@ -9317,6 +9747,12 @@ impl Transaction {
 		self.trigger_index_compaction.store(true, Ordering::Relaxed);
 	}
 
+	/// Mark that this transaction queued table migration work, so the job is woken once the
+	/// commit makes it visible.
+	pub fn trigger_table_migration(&self) {
+		self.trigger_table_migration.store(true, Ordering::Relaxed);
+	}
+
 	pub fn trigger_async_event(&self) {
 		self.trigger_async_event.store(true, Ordering::Relaxed);
 	}
@@ -9686,13 +10122,18 @@ impl DatabaseProvider for Transaction {
 							}
 						};
 
+						let database_id = self.get_next_db_id(ctx, ns_def.namespace_id).await?;
 						let db_def = DatabaseDefinition {
 							namespace_id: ns_def.namespace_id,
-							database_id: self.get_next_db_id(ctx, ns_def.namespace_id).await?,
+							database_id,
 							name: db.into(),
 							comment: None,
 							changefeed: None,
 							strict: false,
+							compatibility: Unrevisioned(
+								self.implicit_compatibility(ns_def.namespace_id, database_id)
+									.await?,
+							),
 						};
 
 						return self.put_db(ns_def.name.as_str(), db_def).await;
@@ -13291,8 +13732,10 @@ enum TableDefinitionChange {
 	/// definition does not decode.
 	Created(Option<TableId>),
 	/// The key held a definition and now holds different bytes. `forfeits` is whether the new
-	/// definition makes the table a view or a lightweight relation, or does not decode: whatever
-	/// was settled about the table's rows then does not hold.
+	/// definition makes the table a view or a lightweight relation, makes it `SCHEMAFULL`, or does
+	/// not decode: whatever was settled about the table's rows then does not hold. A `SCHEMAFULL`
+	/// table's definitions refuse a key none of them declares beneath an object, which the rows
+	/// written before it may hold.
 	Rewritten {
 		forfeits: bool,
 	},
@@ -13315,6 +13758,10 @@ impl TableDefinitionChange {
 					Ok(stored) => {
 						stored.view.is_some()
 							|| matches!(&stored.table_type, TableType::Relation(r) if r.lightweight)
+							|| (stored.schemafull
+								&& StoredTableDefinition::kv_decode_value(old, ())
+									.ok()
+									.is_none_or(|old| !old.schemafull))
 					}
 					Err(_) => true,
 				},

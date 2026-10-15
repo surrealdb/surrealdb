@@ -539,6 +539,9 @@ impl Ddl<'_, '_> {
 		self.retire_table_indexes(ns, db, table, tb, expunge)?;
 		self.with_service(Service::Broker, |l| l.kill_table_subscriptions(ns, db, tb))?;
 		self.delete("TableKey", key, expunge);
+		// The table migration job's entry, at the root, which the table's own range does not
+		// cover: its rewrite and verification end here.
+		self.delete("TableMigrationKey", key, false);
 		self.stamp(ns, db, name)?;
 		self.delete_range("TblRoot", key, expunge);
 		self.each(sources, |l, source| {
@@ -584,6 +587,26 @@ impl Ddl<'_, '_> {
 		});
 		let tb_reg = self.load(tb)?;
 		self.must_exist(attrs.if_exists, table, StatementError::TbNotFound, tb_reg)?;
+		// A migration the table has already run under its name makes the whole statement a
+		// no-op.
+		if let Some(migrate) = &alter.migrate {
+			let ran = self.reg()?;
+			self.store(StoreInstr::MigrateTable {
+				ns,
+				db,
+				table: tb_reg,
+				migrate: migrate.clone(),
+				ran,
+			});
+			let fresh = self.label()?;
+			self.emit(Instr::JumpIf {
+				cond: Operand::Reg(ran),
+				truthy: false,
+				target: fresh,
+			});
+			self.answer_none()?;
+			self.bind(fresh)?;
+		}
 		// What the rewrite is compared against, read before it.
 		let previous = self.load(Operand::Reg(table))?;
 		let (old_changefeed, old_edges, old_refs) = (self.reg()?, self.reg()?, self.reg()?);

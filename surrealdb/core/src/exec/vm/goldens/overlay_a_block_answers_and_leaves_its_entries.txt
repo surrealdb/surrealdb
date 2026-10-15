@@ -134,6 +134,7 @@ entries:
 error: The table 'fresh' does not exist
 [{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
 entries:
+/!tm\x00\x00\x00\x00\x00\x00\x00\x00t\x00 => f1c0c22949d04874 (24 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 2cd87bf3457da90c (169 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fda\x00 => 0af3064e949698de (80 bytes)
@@ -313,6 +314,7 @@ entries:
 []
 [{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
 entries:
+/!tm\x00\x00\x00\x00\x00\x00\x00\x00t\x00 => 9f7cf837dcd4a703 (25 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfresh\x00 => eba8d4f0aba80485 (17 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!gnfresh\x00 => a30e117dd8876ce9 (10 bytes)

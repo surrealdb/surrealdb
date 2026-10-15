@@ -23,6 +23,7 @@ value = """{
 	analyzers: {},
 	apis: {},
 	buckets: {},
+	compatibility: 4,
 	configs: {},
 	extensions: {},
 	functions: {},

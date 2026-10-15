@@ -36,6 +36,8 @@ pub struct AlterFieldStatement {
 	pub permissions: Option<Permissions>,
 	pub comment: AlterKind<String>,
 	pub reference: AlterKind<Reference>,
+	/// `MIGRATE EXISTING ROWS …`: what the alteration does to stored rows.
+	pub migrate: Option<crate::expr::statements::define::MigrateClause>,
 }
 
 impl Default for AlterFieldStatement {
@@ -55,6 +57,7 @@ impl Default for AlterFieldStatement {
 			permissions: None,
 			comment: AlterKind::None,
 			reference: AlterKind::None,
+			migrate: None,
 		}
 	}
 }
@@ -163,6 +166,9 @@ impl ToSql for AlterFieldStatement {
 			AlterKind::Set(ref x) => write_sql!(f, fmt, " REFERENCE {x}"),
 			AlterKind::Drop => write_sql!(f, fmt, " DROP REFERENCE"),
 			AlterKind::None => {}
+		}
+		if let Some(ref migrate) = self.migrate {
+			migrate.fmt_sql(f, fmt);
 		}
 	}
 }

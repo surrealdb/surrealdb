@@ -33,7 +33,7 @@
 
 // The keyspace lives with the crate that owns the transaction; these bind it to
 // core's own `crate::key::…` paths.
-pub(crate) use surrealdb_datastore::key::{reclaim, schema};
+pub(crate) use surrealdb_datastore::key::{reclaim, schema, table_migration};
 pub(crate) use surrealdb_kvs::key::{
 	AnyRange, Error, KVKey, KVKeyDecode, KVSubspace, RawRange, Resumable, TypedRange,
 };

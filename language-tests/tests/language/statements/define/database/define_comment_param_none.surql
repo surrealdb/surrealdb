@@ -18,7 +18,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = """{ accesses: {  }, databases: { test: 'DEFINE DATABASE test', test2: "DEFINE DATABASE test2 COMMENT 'Test'" }, users: {  } }"""
+value = """{ accesses: {  }, databases: { test: 'DEFINE DATABASE test COMPATIBILITY 4', test2: "DEFINE DATABASE test2 COMPATIBILITY 4 COMMENT 'Test'" }, users: {  } }"""
 
 */
 

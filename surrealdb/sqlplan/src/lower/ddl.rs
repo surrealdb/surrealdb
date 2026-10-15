@@ -95,6 +95,17 @@ pub fn map_mysql_type(type_str: &str) -> Kind {
 	}
 }
 
+/// The type of a column that may hold NULL unless a constraint forbids it, so
+/// a column added to a table with rows accepts the rows that have no value.
+fn column_kind(data_type: &surrealdb_pgsql::ast::expr::TypeName, not_null: bool) -> Kind {
+	let base_kind = map_pgsql_type(data_type);
+	if not_null || matches!(base_kind, Kind::Any) {
+		base_kind
+	} else {
+		Kind::either(vec![Kind::None, Kind::Null, base_kind])
+	}
+}
+
 fn not_null_assertion() -> Expr {
 	Expr::Binary {
 		left: Box::new(Expr::Param(Param::from("value".to_string()))),
@@ -139,12 +150,7 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 				.constraints
 				.iter()
 				.any(|c| matches!(c, ColumnConstraint::NotNull | ColumnConstraint::PrimaryKey));
-		let base_kind = map_pgsql_type(&col.data_type);
-		let field_kind = if is_not_null || matches!(base_kind, Kind::Any) {
-			base_kind
-		} else {
-			Kind::either(vec![Kind::None, Kind::Null, base_kind])
-		};
+		let field_kind = column_kind(&col.data_type, is_not_null);
 
 		let mut field_def = DefineFieldStatement {
 			name: Expr::Idiom(Idiom::field(col.name.as_str())),
@@ -413,10 +419,14 @@ pub fn lower_pgsql_alter_table(alter: &AlterTableStmt) -> Result<Vec<Expr>, Plan
 				if_not_exists,
 				column,
 			} => {
+				let not_null = column
+					.constraints
+					.iter()
+					.any(|c| matches!(c, ColumnConstraint::NotNull | ColumnConstraint::PrimaryKey));
 				let mut field_def = DefineFieldStatement {
 					name: Expr::Idiom(Idiom::field(column.name.as_str())),
 					what: Expr::Table(TableName::from(tbl_name)),
-					field_kind: Some(map_pgsql_type(&column.data_type)),
+					field_kind: Some(column_kind(&column.data_type, not_null)),
 					kind: if *if_not_exists {
 						DefineKind::IfNotExists
 					} else {

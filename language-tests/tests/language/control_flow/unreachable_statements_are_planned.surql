@@ -26,7 +26,7 @@ error = "'auth' is a protected variable and cannot be set"
 value = "1"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"
 */
 { RETURN 1; LET $auth = 2 };
 { RETURN 1; SELECT * FROM t WHERE a @@ 'x' };

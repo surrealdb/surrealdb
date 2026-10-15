@@ -512,6 +512,26 @@ fn test_lower_pgsql_complex_defaults() {
 }
 
 #[test]
+fn test_lower_pgsql_add_column_is_nullable_unless_not_null() {
+	let field_kind = |sql: &str| {
+		let stmt = surrealdb_pgsql::parse_statement(sql).expect("parse");
+		let exprs = lower_pgsql_ddl(&stmt).expect("lower");
+		match &exprs[0] {
+			Expr::Define(d) => match &**d {
+				DefineStatement::Field(f) => f.field_kind.clone(),
+				_ => panic!("Expected DefineField"),
+			},
+			_ => panic!("Expected Expr::Define"),
+		}
+	};
+	assert_eq!(
+		field_kind("ALTER TABLE users ADD COLUMN phone TEXT;"),
+		Some(Kind::either(vec![Kind::None, Kind::Null, Kind::String]))
+	);
+	assert_eq!(field_kind("ALTER TABLE users ADD COLUMN phone TEXT NOT NULL;"), Some(Kind::String));
+}
+
+#[test]
 fn test_lower_pgsql_alter_table_multiple_actions() {
 	let stmt = surrealdb_pgsql::parse_statement(
 		"ALTER TABLE accounts

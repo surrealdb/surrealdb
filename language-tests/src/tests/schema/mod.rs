@@ -125,6 +125,12 @@ pub struct TestEnv {
 	/// (see [`Backend::supports_versioning`]).
 	#[serde(default)]
 	pub versioned: bool,
+	/// The compatibility level of the test's database: `3` or `4`. The
+	/// runner defines the database with `COMPATIBILITY` set to it; without
+	/// it the database takes the datastore's default, level 4. Upgrade tests
+	/// accept only `3`, the level every released binary's databases stand
+	/// at.
+	pub compatibility: Option<u8>,
 	/// Whether EXPLAIN ANALYZE output omits elapsed durations, making
 	/// output deterministic for test assertions. Defaults to true in the
 	/// language test framework. Set to `false` explicitly if you need
@@ -174,6 +180,7 @@ impl Default for TestEnv {
 			capabilities: Default::default(),
 			backend: Default::default(),
 			versioned: Default::default(),
+			compatibility: None,
 			redact_volatile_explain_attrs: Default::default(),
 			remote_skip: None,
 			remote_exclusive: Default::default(),

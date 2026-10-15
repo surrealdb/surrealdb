@@ -247,6 +247,36 @@ pub struct MigrationRecord {
 
 impl_kv_value_revisioned!(MigrationRecord);
 
+/// What a database created in this store without a setting of its own takes, stored cluster-wide
+/// at `/!df`.
+///
+/// A store this release creates holds no entry and gives a new database
+/// [`StoreDefaults::CURRENT`]. The data migration that brings a store an earlier release created
+/// up to this one writes [`StoreDefaults::LEGACY`], and `ALTER SYSTEM COMPATIBILITY` writes the
+/// level it names.
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+pub struct StoreDefaults {
+	/// The compatibility level of a database created without one, by `DEFINE DATABASE` or
+	/// implicitly.
+	pub compatibility: u8,
+}
+
+impl_kv_value_revisioned!(StoreDefaults);
+
+impl StoreDefaults {
+	/// The defaults of a store this release creates.
+	pub const CURRENT: Self = Self {
+		compatibility: 4,
+	};
+
+	/// The defaults of a store an earlier release created: its databases keep the rules that
+	/// release applied.
+	pub const LEGACY: Self = Self {
+		compatibility: 3,
+	};
+}
+
 impl MigrationRecord {
 	/// The ledger record of an entry applied by `node` at `timestamp` (milliseconds since the
 	/// Unix epoch), naming the release `version` that introduced it.

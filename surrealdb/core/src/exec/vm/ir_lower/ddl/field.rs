@@ -14,7 +14,7 @@
 use std::sync::Arc;
 
 use super::{
-	AlterAttrs, AlterKind, AlterTemplate, Ddl, DdlGuard, DefineAttrs, DefineKind, IrError,
+	AlterAttrs, AlterKind, AlterTemplate, Ddl, DdlGuard, DefineAttrs, DefineKind, Instr, IrError,
 	NameClause, Operand, OperandSlot, Reg, RouteId, StatementError, StoreInstr, StoreRefusal,
 	TypeId, Value,
 };
@@ -23,7 +23,8 @@ use crate::exec::ir::iface::statements::{AlterField, DdlChecks, DefineField};
 use crate::exec::ir::logical::ddl::{
 	self as statement, field_definition_of, written_field_template,
 };
-use crate::exec::vm::program::{ClauseObject, FieldCheck, FieldRefusal, PathSource};
+use crate::exec::vm::program::{ClauseObject, FieldCheck, FieldRefusal, MigrateSpec, PathSource};
+use crate::expr::statements::define::MigrateClause;
 use crate::expr::{Idiom, Kind};
 use crate::val::TableName;
 
@@ -349,12 +350,28 @@ impl Ddl<'_, '_> {
 			previous: None,
 			object: ClauseObject::Field,
 		});
+		// The rules of a table that enforces migrations, and the migration, are judged once every
+		// other check of the definition has passed: either can mint a step, and a refusal leaves
+		// no step behind for a transaction its caller goes on to commit.
+		self.check_field_change(
+			(ns, db),
+			table_name,
+			(stored_field, existing),
+			field.migrate.is_some(),
+			crate::exec::migrate::KeptClauses::default(),
+		)?;
+		if let Some(migrate) = &field.migrate {
+			self.migrate((ns, db), table_name, (stored_field, existing), migrate)?;
+		}
 		self.store(StoreInstr::Put {
 			route: RouteId::named("FieldKey"),
 			key: fd_key,
 			ty: TypeId::named("StoredFieldDefinition"),
 			value: stored_field,
 		});
+		if field.migrate.is_none() {
+			self.queue_verification((ns, db), table_name, (stored_field, existing))?;
+		}
 		// Overwriting a reference field can strand the reference keys it wrote under target
 		// tables it no longer references; an import restores the keys verbatim.
 		if matches!(attrs.mode, DefineKind::Overwrite) {
@@ -438,6 +455,9 @@ impl Ddl<'_, '_> {
 		field: &DefineField,
 	) -> Result<(), IrError> {
 		self.refuse_no_write()?;
+		if field.migrate.is_some() && self.written_field(field.name, field.what)?.is_none() {
+			self.refuse_late_bound_migration();
+		}
 		let comment = self.comment(field.comment)?;
 		let name = self.field_path(field.name)?;
 		let table = self.name(field.what, NameClause::Table)?;
@@ -451,6 +471,7 @@ impl Ddl<'_, '_> {
 		self.store(StoreInstr::DefineField {
 			definition,
 			kind: attrs.mode.clone(),
+			migrate: field.migrate.clone(),
 		});
 		self.answer_none()
 	}
@@ -534,6 +555,20 @@ impl Ddl<'_, '_> {
 		});
 		let name_reg = self.load(fd)?;
 		self.must_exist(if_exists, field, StatementError::FdNotFound, name_reg)?;
+		// On a table that enforces migrations the field's stored values go with it; an import
+		// restores definitions as they were.
+		let import = self.label()?;
+		self.store(StoreInstr::JumpIfImport {
+			target: import,
+		});
+		let step_table = self.load(tb)?;
+		self.store(StoreInstr::RemoveFieldStep {
+			ns,
+			db,
+			table: step_table,
+			field,
+		});
+		self.bind(import)?;
 		// `del_tb_field`.
 		self.store(StoreInstr::Delete {
 			route: RouteId::named("FieldKey"),
@@ -727,6 +762,19 @@ impl Ddl<'_, '_> {
 			previous: Some(before),
 			object: ClauseObject::Field,
 		});
+		// The rules of a table that enforces migrations, and the migration, are judged once every
+		// other check of the definition has passed, as `DEFINE FIELD` judges them. The type is
+		// unchanged here, so no clause is kept over a new one.
+		self.check_field_change(
+			(ns, db),
+			tb,
+			(stored, before),
+			field.migrate.is_some(),
+			crate::exec::migrate::KeptClauses::default(),
+		)?;
+		if let Some(migrate) = &field.migrate {
+			self.migrate((ns, db), tb, (stored, before), migrate)?;
+		}
 		// `put_tb_field`.
 		self.store(StoreInstr::Put {
 			route: RouteId::named("FieldKey"),
@@ -734,6 +782,9 @@ impl Ddl<'_, '_> {
 			ty: TypeId::named("StoredFieldDefinition"),
 			value: stored,
 		});
+		if field.migrate.is_none() {
+			self.queue_verification((ns, db), tb, (stored, before))?;
+		}
 		// Dropping the reference or changing the record kind can strand the reference keys the
 		// field wrote; an import restores the keys verbatim.
 		let import = self.label()?;
@@ -783,6 +834,9 @@ impl Ddl<'_, '_> {
 		template: &AlterTemplate,
 	) -> Result<(), IrError> {
 		self.guard()?;
+		if field.migrate.is_some() && self.written_field(field.name, field.what)?.is_none() {
+			self.refuse_late_bound_migration();
+		}
 		self.session_ids()?;
 		let name = self.field_path(field.name)?;
 		let table = self.name(field.what, NameClause::Table)?;
@@ -790,14 +844,139 @@ impl Ddl<'_, '_> {
 		self.store(StoreInstr::RealRunOnly);
 		let altered = self.constant(template.value.clone())?;
 		let altered = self.load(altered)?;
+		// A changed type leaves the clauses the statement does not restate as they were.
+		let kind_changed = !matches!(field.kind, AlterKind::None);
+		let kept = crate::exec::migrate::KeptClauses {
+			value: kind_changed && matches!(field.value, AlterKind::None),
+			assert: kind_changed && matches!(field.assert, AlterKind::None),
+		};
 		self.store(StoreInstr::AlterFieldClauses {
 			name,
 			table,
 			altered,
 			fields: template.fields.iter().map(|field| field.as_str().to_owned()).collect(),
-			kind_changed: !matches!(field.kind, AlterKind::None),
+			kind_changed,
 			if_exists: attrs.if_exists,
+			migrate: field.migrate.clone(),
+			kept,
 		});
 		self.answer_none()
+	}
+
+	/// Queues a verification pass of the field definition in `field`, stored with no migration
+	/// over the one in `previous` on the table `table` names; an import, which restores
+	/// definitions as they were, queues none.
+	fn queue_verification(
+		&mut self,
+		(ns, db): (Reg, Reg),
+		table: Operand,
+		(field, previous): (Reg, Reg),
+	) -> Result<(), IrError> {
+		let import = self.label()?;
+		self.store(StoreInstr::JumpIfImport {
+			target: import,
+		});
+		let table = self.load(table)?;
+		self.store(StoreInstr::QueueVerification {
+			ns,
+			db,
+			table,
+			field,
+			previous,
+		});
+		self.bind(import)
+	}
+
+	/// Judges the field definition in `field`, about to replace the one in `previous`, against
+	/// the rules of a table that enforces migrations (`crate::exec::migrate::enforces_migrations`),
+	/// and the clause checks a changed type makes when `migrating`; an import, which restores
+	/// definitions as they were, is not judged.
+	fn check_field_change(
+		&mut self,
+		(ns, db): (Reg, Reg),
+		table: Operand,
+		(field, previous): (Reg, Reg),
+		migrating: bool,
+		kept: crate::exec::migrate::KeptClauses,
+	) -> Result<(), IrError> {
+		let import = self.label()?;
+		self.store(StoreInstr::JumpIfImport {
+			target: import,
+		});
+		let table = self.load(table)?;
+		self.store(StoreInstr::CheckFieldChange {
+			ns,
+			db,
+			table,
+			field,
+			previous,
+			migrating,
+			kept,
+		});
+		self.bind(import)
+	}
+
+	/// The `MIGRATE EXISTING ROWS` clause `clause` of a field definition, over the stored
+	/// definition in `field` that replaces the one in `previous` on the table `table` names:
+	/// commits the migration, and answers `NONE` at once when the table has already run it under
+	/// its name, so the statement does nothing. Every check that can refuse the statement
+	/// precedes it.
+	fn migrate(
+		&mut self,
+		(ns, db): (Reg, Reg),
+		table: Operand,
+		(field, previous): (Reg, Reg),
+		clause: &MigrateClause,
+	) -> Result<(), IrError> {
+		let fallback = match &clause.fallback {
+			None => None,
+			Some(expr) => match crate::exec::migrate::constant_fallback(expr) {
+				Some(value) => {
+					let value = self.constant(value)?;
+					Some(self.load(value)?)
+				}
+				None => {
+					self.store(StoreInstr::RefuseField {
+						refusal: FieldRefusal::Thrown(
+							"A migration's FALLBACK must be a constant".to_owned(),
+						),
+					});
+					None
+				}
+			},
+		};
+		let table = self.load(table)?;
+		let ran = self.reg()?;
+		self.store(StoreInstr::Migrate {
+			ns,
+			db,
+			table,
+			field,
+			previous,
+			fallback,
+			migrate: Box::new(MigrateSpec {
+				name: clause.name.clone(),
+				using: clause.using.clone(),
+			}),
+			ran,
+		});
+		let fresh = self.label()?;
+		self.emit(Instr::JumpIf {
+			cond: Operand::Reg(ran),
+			truthy: false,
+			target: fresh,
+		});
+		self.answer_none()?;
+		self.bind(fresh)
+	}
+
+	/// Refuses a migration whose field or table is evaluated: the checks a migration makes are
+	/// made against the definition it names as written.
+	fn refuse_late_bound_migration(&mut self) {
+		self.store(StoreInstr::RefuseField {
+			refusal: FieldRefusal::Thrown(
+				"MIGRATE EXISTING ROWS needs the field and the table written as names".to_owned(),
+			),
+		});
 	}
 }

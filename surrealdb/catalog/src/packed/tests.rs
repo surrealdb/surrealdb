@@ -283,6 +283,8 @@ pub(super) fn layout(packed: PackedDescriptor) -> Arc<LayoutDescriptor> {
 	Arc::new(LayoutDescriptor {
 		table: TableName::new("t"),
 		layout: RowLayout::Packed(packed),
+		migration: None,
+		migrated: None,
 	})
 }
 

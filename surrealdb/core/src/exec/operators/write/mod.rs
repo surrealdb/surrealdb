@@ -46,7 +46,7 @@ use surrealdb_types::ToSql;
 use self::row::WriteRow;
 use self::stage::StageOutcome;
 use self::subject::extract_table_and_rid_key;
-use crate::catalog::PermissionKind;
+use crate::catalog::{Generation, PermissionKind};
 use crate::exec::{Error as ExecError, ExecutionContext, ValueBatchStream};
 use crate::expr::mock::IntoIter as MockIds;
 use crate::expr::paths::{IN, OUT};
@@ -241,7 +241,8 @@ pub(crate) fn target_subjects(
 }
 
 /// The row for a record-id subject an updating form named, with the stored
-/// record as both of its images.
+/// record as both of its images, brought through the migration steps of its
+/// table that the record's stamp has not passed.
 ///
 /// A record that is not there leaves both empty, which the order's existence
 /// check turns into a subject the statement passes over.
@@ -250,8 +251,8 @@ pub(crate) async fn read_subject(
 	id: RecordId,
 ) -> Result<WriteRow, ControlFlow> {
 	let db = exec.database().context("a write requires a database context")?;
-	let stored = crate::catalog::providers::TableProvider::get_record(
-		&*exec.txn(),
+	let (stored, stamp) = crate::exec::migrate::stamped_record(
+		&exec.txn(),
 		db.ns_ctx.ns.namespace_id,
 		db.db.database_id,
 		&id.table,
@@ -261,7 +262,8 @@ pub(crate) async fn read_subject(
 	.await
 	.map_err(ControlFlow::Err)?;
 	let mut row = WriteRow::for_target(Value::RecordId(id))?;
-	row.adopt_stored(&stored);
+	row.adopt_stored(&stored, stamp);
+	row.replay_stored(exec).await?;
 	Ok(row)
 }
 
@@ -294,6 +296,10 @@ pub(crate) async fn scan_subjects(
 	let epoch = txn.layout_epoch();
 	let layouts =
 		txn.table_layouts(ns_id, db_id, table, version).await.map_err(ControlFlow::Err)?;
+	// The batches carry each record's stamp: the statement replays the steps
+	// the stored record has not passed as it takes the record up
+	// ([`WriteRow::replay_stored`]), since the write stamps what it writes.
+	let replay = crate::exec::migrate::Replay::of(&layouts, ns_id, db_id);
 	let gate = crate::kvs::RowGate::new(layouts, ns_id, db_id, table, version, epoch)
 		.map_err(ControlFlow::Err)?;
 	Ok(crate::exec::operators::scan::pipeline::kv_scan_stream(
@@ -307,6 +313,7 @@ pub(crate) async fn scan_subjects(
 		None,
 		None,
 		None,
+		replay,
 	))
 }
 
@@ -318,31 +325,50 @@ pub(crate) enum Rows {
 	/// Boxed for the same reason [`Subject::Row`] is.
 	One(Option<Box<WriteRow>>),
 	Scan(ValueBatchStream),
-	Batch(std::vec::IntoIter<Value>, ValueBatchStream),
+	/// A batch of stored records and, for a table with migration steps, the
+	/// generation each is stamped with.
+	Batch(
+		std::vec::IntoIter<Value>,
+		Option<std::vec::IntoIter<Option<Generation>>>,
+		ValueBatchStream,
+	),
 }
 
 impl Rows {
-	pub(crate) async fn next(&mut self) -> Result<Option<WriteRow>, ControlFlow> {
+	/// The next row. A record of a scan is brought through the migration steps
+	/// of its table that its stamp has not passed, in `exec`, before it is
+	/// handed on.
+	pub(crate) async fn next(
+		&mut self,
+		exec: &ExecutionContext,
+	) -> Result<Option<WriteRow>, ControlFlow> {
 		loop {
 			match self {
 				Self::One(row) => return Ok(row.take().map(|row| *row)),
 				Self::Scan(stream) => match stream.next().await {
 					Some(batch) => {
-						let batch = batch?.into_values().into_iter();
+						let (values, stamps) = batch?.into_stamped();
+						let batch = values.into_iter();
+						let stamps = stamps.map(Vec::into_iter);
 						// Replaced rather than nested: the stream moves into
 						// the batch state and back when the batch is spent, so
 						// the two never both hold it.
 						let Self::Scan(stream) = std::mem::replace(self, Self::One(None)) else {
 							unreachable!("the arm was just matched")
 						};
-						*self = Self::Batch(batch, stream);
+						*self = Self::Batch(batch, stamps, stream);
 					}
 					None => return Ok(None),
 				},
-				Self::Batch(batch, _) => match batch.next() {
-					Some(value) => return Ok(Some(WriteRow::for_record(value)?)),
+				Self::Batch(batch, stamps, _) => match batch.next() {
+					Some(value) => {
+						let mut row = WriteRow::for_record(value)?;
+						row.stored_stamp = stamps.as_mut().and_then(Iterator::next);
+						row.replay_stored(exec).await?;
+						return Ok(Some(row));
+					}
 					None => {
-						let Self::Batch(_, stream) = std::mem::replace(self, Self::One(None))
+						let Self::Batch(_, _, stream) = std::mem::replace(self, Self::One(None))
 						else {
 							unreachable!("the arm was just matched")
 						};

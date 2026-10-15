@@ -137,6 +137,28 @@ impl Ddl<'_, '_> {
 				self.bind(label)?;
 			}
 		}
+		// No index reads a field whose values a pending migration step clears, and none is built
+		// in a transaction holding a migration of its table that the build, reading committed
+		// rows, cannot see.
+		let migration_columns = match (&written, evaluated_cols) {
+			(_, Some(list)) => list,
+			(written, None) => {
+				let written: Vec<Value> = written
+					.iter()
+					.flatten()
+					.map(|idiom| Value::String(idiom.to_raw_string().into()))
+					.collect();
+				let written = self.constant(Value::Array(written.into()))?;
+				self.load(written)?
+			}
+		};
+		let migration_table = self.load(tb)?;
+		self.store(StoreInstr::CheckIndexMigrations {
+			ns,
+			db,
+			table: migration_table,
+			columns: migration_columns,
+		});
 
 		let comment = self.comment(comment)?;
 		let template = self.constant(attrs.template.value.clone())?;

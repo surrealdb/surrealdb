@@ -411,6 +411,25 @@ async fn step_inner(
 			))
 			.await
 			.map_err(ControlFlow::Err)?;
+			let existing = crate::exec::vm::descriptor::schema(
+				crate::catalog::providers::TableProvider::get_tb(
+					&*txn,
+					ns,
+					db,
+					&definition.name,
+					None,
+				),
+			)
+			.await
+			.map_err(ControlFlow::Err)?;
+			crate::exec::vm::descriptor::schema(crate::exec::migrate::check_table_change(
+				ctx,
+				ns,
+				db,
+				existing.as_deref(),
+				definition,
+			))
+			.await?;
 		}
 		StoreInstr::RefuseNamedIdConversion {
 			ns,
@@ -884,6 +903,46 @@ async fn step_inner(
 				other => return Err(ControlFlow::Err(anyhow!("a query timeout {other:?}"))),
 			};
 			ctx.ctx().dynamic_configuration().set_query_timeout(timeout);
+		}
+		StoreInstr::NewDatabaseCompatibility {
+			ns,
+			db,
+			dst,
+		} => {
+			let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
+			let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
+			let level =
+				crate::exec::vm::descriptor::schema(ctx.txn().implicit_compatibility(ns, db))
+					.await
+					.map_err(ControlFlow::Err)?;
+			write(regs, *dst, Value::from(i64::from(level.get())));
+		}
+		StoreInstr::SetDefaultCompatibility {
+			level,
+		} => {
+			let level = compatibility_of(&read(regs, *level))?;
+			crate::exec::vm::descriptor::schema(ctx.txn().set_default_compatibility(level))
+				.await
+				.map_err(ControlFlow::Err)?;
+		}
+		StoreInstr::VerifyCompatibility {
+			ns,
+			db,
+			previous,
+			level,
+		} => {
+			let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
+			let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
+			let previous = compatibility_of(&read(regs, *previous))?;
+			let level = compatibility_of(&read(regs, *level))?;
+			crate::exec::vm::descriptor::schema(crate::exec::migrate::verify_database(
+				ctx,
+				ns,
+				db,
+				previous.get(),
+				level.get(),
+			))
+			.await?;
 		}
 		StoreInstr::DropMethods {
 			actions,
@@ -1472,6 +1531,8 @@ async fn step_inner(
 						&field,
 					)
 					.map_err(ControlFlow::Err)?;
+					crate::exec::field_rules::parent_kind_restrictions(&descriptor.fields, &field)
+						.map_err(ControlFlow::Err)?;
 				}
 				FieldCheck::KeyComponents {
 					field: reg,
@@ -2024,6 +2085,7 @@ async fn step_inner(
 		StoreInstr::DefineField {
 			definition,
 			kind,
+			migrate,
 		} => {
 			use crate::catalog::FromStored as _;
 			let stored: crate::catalog::StoredFieldDefinition = rust(&read(regs, *definition))?;
@@ -2034,10 +2096,199 @@ async fn step_inner(
 			})?;
 			definition.auth_limit =
 				crate::iam::AuthLimit::new_from_auth(options.auth.as_ref()).into();
+			let migration = crate::exec::migrate::FieldMigration {
+				request: migrate
+					.as_deref()
+					.map(crate::exec::migrate::request_of)
+					.transpose()
+					.map_err(ControlFlow::Err)?,
+				kept: Default::default(),
+			};
 			let frozen = ctx.ctx();
-			super::schema_host::define_field(kind, &definition, frozen, options)
+			super::schema_host::define_field(kind, &definition, migration, frozen, options)
 				.await
 				.map_err(ControlFlow::Err)?;
+		}
+		StoreInstr::InfoMigrations {
+			ns,
+			db,
+			tb,
+			out,
+		} => {
+			let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
+			let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
+			let tb = table_name_of(&read(regs, *tb))?;
+			if let Some(section) = crate::exec::vm::descriptor::schema(
+				crate::exec::migrate::info_section(ctx, ns, db, &tb),
+			)
+			.await? && let Value::Object(mut answer) = read(regs, *out)
+			{
+				answer.insert("migrations", section);
+				write(regs, *out, Value::Object(answer));
+			}
+		}
+		StoreInstr::QueueVerification {
+			ns,
+			db,
+			table,
+			field,
+			previous,
+		} => {
+			let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
+			let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
+			let tb = table_name_of(&read(regs, *table))?;
+			if let Some(definition) = field_definition_of(&read(regs, *field))? {
+				let previous = field_definition_of(&read(regs, *previous))?;
+				crate::exec::vm::descriptor::schema(crate::exec::migrate::queue_verification(
+					ctx,
+					ns,
+					db,
+					&tb,
+					&definition,
+					previous.as_ref(),
+				))
+				.await?;
+			}
+		}
+		StoreInstr::Migrate {
+			ns,
+			db,
+			table,
+			field,
+			previous,
+			fallback,
+			migrate,
+			ran,
+		} => {
+			let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
+			let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
+			let tb = table_name_of(&read(regs, *table))?;
+			let Some(definition) = field_definition_of(&read(regs, *field))? else {
+				return Err(ControlFlow::Err(anyhow!("a migration of a field with no definition")));
+			};
+			let previous = field_definition_of(&read(regs, *previous))?;
+			let request = crate::exec::migrate::MigrateRequest {
+				name: &migrate.name,
+				using: &migrate.using,
+				fallback: fallback.map(|reg| read(regs, reg)),
+			};
+			let already = crate::exec::vm::descriptor::schema(crate::exec::migrate::define(
+				ctx,
+				ns,
+				db,
+				&tb,
+				&definition,
+				previous.as_ref(),
+				request,
+			))
+			.await?;
+			write(regs, *ran, Value::Bool(already));
+		}
+		StoreInstr::CheckFieldChange {
+			ns,
+			db,
+			table,
+			field,
+			previous,
+			migrating,
+			kept,
+		} => {
+			let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
+			let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
+			let tb = table_name_of(&read(regs, *table))?;
+			if let Some(definition) = field_definition_of(&read(regs, *field))? {
+				let previous = field_definition_of(&read(regs, *previous))?;
+				crate::exec::vm::descriptor::schema(crate::exec::migrate::check_field_change(
+					ctx,
+					ns,
+					db,
+					&tb,
+					&definition,
+					previous.as_ref(),
+					*migrating,
+					*kept,
+				))
+				.await?;
+			}
+		}
+		StoreInstr::RemoveFieldStep {
+			ns,
+			db,
+			table,
+			field,
+		} => {
+			let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
+			let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
+			let tb = table_name_of(&read(regs, *table))?;
+			if let Some(definition) = field_definition_of(&read(regs, *field))? {
+				crate::exec::vm::descriptor::schema(crate::exec::migrate::remove_field(
+					ctx,
+					ns,
+					db,
+					&tb,
+					&definition,
+				))
+				.await?;
+			}
+		}
+		StoreInstr::MigrateTable {
+			ns,
+			db,
+			table,
+			migrate,
+			ran,
+		} => {
+			let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
+			let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
+			let tb = table_name_of(&read(regs, *table))?;
+			let fresh = match migrate.action {
+				crate::expr::statements::alter::table::TableMigrateAction::RemoveUndeclaredFields => {
+					crate::exec::vm::descriptor::schema(crate::exec::migrate::remove_undeclared(
+						ctx,
+						ns,
+						db,
+						&tb,
+						&migrate.name,
+					))
+					.await?
+				}
+			};
+			write(regs, *ran, Value::Bool(!fresh));
+		}
+		StoreInstr::CheckIndexMigrations {
+			ns,
+			db,
+			table,
+			columns,
+		} => {
+			let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
+			let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
+			let table = table_name_of(&read(regs, *table))?;
+			let Value::Array(columns) = read(regs, *columns) else {
+				return Err(ControlFlow::Err(anyhow!("columns that are not a list")));
+			};
+			let columns =
+				columns.iter().map(idiom_of).collect::<FlowResult<Vec<crate::expr::Idiom>>>()?;
+			let txn = ctx.txn();
+			crate::exec::vm::descriptor::schema(crate::exec::migrate::check_index_columns(
+				&txn, ns, db, &table, &columns,
+			))
+			.await
+			.map_err(ControlFlow::Err)?;
+			// Without a builder no index is built, so no build can miss a step.
+			if let Some(builder) = ctx.ctx().get_index_builder() {
+				crate::exec::vm::descriptor::schema(
+					crate::exec::migrate::check_index_build_sees_migrations(
+						&txn,
+						&builder.transaction_factory(),
+						ns,
+						db,
+						&table,
+					),
+				)
+				.await
+				.map_err(ControlFlow::Err)?;
+			}
 		}
 		StoreInstr::RemoveFieldDefinition {
 			name,
@@ -2074,6 +2325,8 @@ async fn step_inner(
 			fields,
 			kind_changed,
 			if_exists,
+			migrate,
+			kept,
 		} => {
 			let name = idiom_of(&read(regs, *name))?;
 			let table = table_name_of(&read(regs, *table))?;
@@ -2084,10 +2337,19 @@ async fn step_inner(
 			let options = ctx.options().ok_or_else(|| {
 				ControlFlow::Err(anyhow!("a field altered without the session's options"))
 			})?;
+			let migration = crate::exec::migrate::FieldMigration {
+				request: migrate
+					.as_deref()
+					.map(crate::exec::migrate::request_of)
+					.transpose()
+					.map_err(ControlFlow::Err)?,
+				kept: *kept,
+			};
 			super::schema_host::alter_field_clauses(
 				&altered,
 				fields,
 				(*kind_changed, *if_exists),
+				migration,
 				name,
 				table,
 				ctx.ctx(),
@@ -2151,6 +2413,14 @@ async fn step_inner(
 			super::schema_host::check_table_altered(ctx, &txn, &previous, &mut altered)
 				.await
 				.map_err(ControlFlow::Err)?;
+			crate::exec::vm::descriptor::schema(crate::exec::migrate::check_table_change(
+				ctx,
+				previous.namespace_id,
+				previous.database_id,
+				Some(&previous),
+				&altered,
+			))
+			.await?;
 			let normalised =
 				altered.to_stored().into_vm_value().map_err(|e| ControlFlow::Err(e.into()))?;
 			write(regs, *updated, normalised);
@@ -2225,6 +2495,34 @@ fn idiom_of(value: &Value) -> FlowResult<crate::expr::Idiom> {
 		Value::String(text) => crate::expr::Idiom::from_str(text.as_str())
 			.map_err(|e| ControlFlow::Err(anyhow!("a field path that does not parse: {e}"))),
 		other => Err(ControlFlow::Err(anyhow!("a field path that is {other:?}, not text"))),
+	}
+}
+
+/// The compatibility level held in a register: 3 or 4.
+fn compatibility_of(value: &Value) -> FlowResult<crate::catalog::DatabaseCompatibility> {
+	match value {
+		Value::Number(crate::val::Number::Int(level)) => u8::try_from(*level)
+			.ok()
+			.and_then(crate::catalog::DatabaseCompatibility::new)
+			.ok_or_else(|| {
+				ControlFlow::Err(anyhow!("a compatibility level {level} is not 3 or 4"))
+			}),
+		other => Err(ControlFlow::Err(anyhow!("a compatibility level that is {other:?}"))),
+	}
+}
+
+/// The field definition a register holds: `None` for `NONE` and `NULL`, which
+/// stand for a field with no definition before the statement.
+fn field_definition_of(value: &Value) -> FlowResult<Option<crate::catalog::FieldDefinition>> {
+	match value {
+		Value::None | Value::Null => Ok(None),
+		value => {
+			use crate::catalog::FromStored as _;
+			let stored: crate::catalog::StoredFieldDefinition = rust(value)?;
+			crate::catalog::FieldDefinition::from_stored(&stored)
+				.map(Some)
+				.map_err(ControlFlow::Err)
+		}
 	}
 }
 

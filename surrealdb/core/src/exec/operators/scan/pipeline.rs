@@ -23,7 +23,8 @@ use common::future::stream::{self, Yielder};
 use smallvec::SmallVec;
 
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{Permission, TableLayouts};
+use crate::catalog::{Generation, Permission, TableLayouts};
+use crate::exec::migrate::{Replay, stamp_of};
 use crate::exec::permission::{
 	Derivation, GuardKind, PhysicalPermission, check_permission_for_value, judge_before_derivation,
 	plan_table_derivations, read_permission_to_physical,
@@ -245,6 +246,13 @@ pub(crate) fn determine_scan_direction(
 /// Iterates the cursor's borrowed `&[u8]` slices directly — record decode
 /// happens inline, no intermediate owned `Vec<u8>` allocation per row. The one
 /// row a reload holds is copied.
+///
+/// `replay` is the table's migration steps, when it has any. The pre-decode
+/// filter and the top-k probe judge only a row stamped at or after the table's
+/// newest step: a row behind a step is handed on decoded, for the consumer to
+/// bring through the steps first ([`Replay::apply`]), and every batch carries
+/// each row's stamp ([`ValueBatch::stamped`]). A table with no steps passes
+/// `None` and its batches carry no stamps.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn kv_scan_stream(
 	txn: Arc<Transaction>,
@@ -257,6 +265,7 @@ pub(crate) fn kv_scan_stream(
 	limit_hint: Option<u32>,
 	pre_decode_filter: Option<Arc<PreDecodeFilter>>,
 	topk_probe: Option<Arc<TopKThresholdProbe>>,
+	replay: Option<Replay>,
 ) -> ValueBatchStream {
 	let skip = pre_skip.min(u32::MAX as usize) as u32;
 	let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
@@ -295,6 +304,7 @@ pub(crate) fn kv_scan_stream(
 			// are never retained and the engine hands them over with no
 			// per-row copy.
 			let mut decoded: Vec<Value> = Vec::with_capacity(batch_size as usize);
+			let mut stamps: Vec<Option<Generation>> = Vec::new();
 			// A row's failure is a `ControlFlow`, which can't travel through
 			// the visitor's storage-error channel — stash it and re-raise it
 			// below, outside the cursor borrow.
@@ -334,8 +344,9 @@ pub(crate) fn kv_scan_stream(
 						probe: topk_probe.as_ref(),
 						threshold: topk_threshold.as_deref(),
 						layouts: Some(layouts),
+						replay: replay.as_ref(),
 					};
-					match row.read(key, val, &mut decoded, &mut topk_skipped) {
+					match row.read(key, val, &mut decoded, &mut stamps, &mut topk_skipped) {
 						Ok(()) => Ok(std::ops::ControlFlow::Continue(())),
 						Err(cf) => {
 							decode_err = Some(cf);
@@ -365,8 +376,9 @@ pub(crate) fn kv_scan_stream(
 					probe: topk_probe.as_ref(),
 					threshold: topk_threshold.as_deref(),
 					layouts: Some(&**gate.layouts()),
+					replay: replay.as_ref(),
 				}
-				.read(&key, &val, &mut decoded, &mut topk_skipped)?;
+				.read(&key, &val, &mut decoded, &mut stamps, &mut topk_skipped)?;
 			}
 			if topk_skipped > 0
 				&& let Some(m) = topk_probe.as_ref().and_then(|p| p.metrics())
@@ -389,7 +401,13 @@ pub(crate) fn kv_scan_stream(
 			let refused = (stats.rows as usize).saturating_sub(decoded.len());
 			let spent = crate::exec::vm::fuel::charge(crate::exec::vm::fuel::units(refused));
 			if !decoded.is_empty() || spent {
-				yielder.emit(ValueBatch::new(decoded)).await;
+				yielder
+					.emit(if replay.is_some() {
+						ValueBatch::stamped(decoded, stamps)
+					} else {
+						ValueBatch::new(decoded)
+					})
+					.await;
 			}
 		}
 		Ok(())
@@ -407,6 +425,8 @@ struct ScanRow<'a> {
 	/// The layouts the row's gate admits against: a packed row is decoded through its
 	/// generation's descriptor there.
 	layouts: Option<&'a TableLayouts>,
+	/// The table's migration steps, when it has any.
+	replay: Option<&'a Replay>,
 }
 
 impl ScanRow<'_> {
@@ -415,16 +435,25 @@ impl ScanRow<'_> {
 	///
 	/// The caller has admitted `val`'s generation ([`RowGate::admit`]), so
 	/// neither the filter nor the probe reads a field of a row the table's
-	/// layouts do not cover.
+	/// layouts do not cover. A row behind a migration step is judged by neither,
+	/// since its stored bytes are not what a read of it sees. When the table has
+	/// steps, the stamp of each decoded row is appended to `stamps`.
 	#[inline]
 	fn read(
 		&self,
 		key: &[u8],
 		val: &[u8],
 		decoded: &mut Vec<Value>,
+		stamps: &mut Vec<Option<Generation>>,
 		topk_skipped: &mut u64,
 	) -> Result<(), ControlFlow> {
-		if let Some(pdf) = self.pdf
+		let stamp = self.replay.map(|_| stamp_of(val));
+		let judged = match (self.replay, stamp) {
+			(Some(replay), Some(stamp)) => !replay.behind(stamp),
+			_ => true,
+		};
+		if judged
+			&& let Some(pdf) = self.pdf
 			&& pdf.apply(val) == PreDecodeFilterOutcome::Reject
 		{
 			// A rejected row still counts as scanned: the cursor read it.
@@ -433,13 +462,17 @@ impl ScanRow<'_> {
 		// After the (cheaper, more selective) WHERE probe: skip decode when
 		// the row's ORDER BY key provably cannot beat the downstream top-K
 		// heap's worst entry.
-		if let (Some(probe), Some(threshold)) = (self.probe, self.threshold)
+		if judged
+			&& let (Some(probe), Some(threshold)) = (self.probe, self.threshold)
 			&& probe.rejects(threshold, val)
 		{
 			*topk_skipped += 1;
 			return Ok(());
 		}
 		decoded.push(decode_record(key, val, self.layouts)?);
+		if let Some(stamp) = stamp {
+			stamps.push(stamp);
+		}
 		Ok(())
 	}
 }

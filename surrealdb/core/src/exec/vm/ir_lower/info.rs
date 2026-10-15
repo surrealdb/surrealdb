@@ -844,6 +844,12 @@ impl InfoLowerer<'_, '_> {
 
 	/// The session's namespace and database ids, which the executor resolved.
 	fn ids(&mut self) -> Result<(Reg, Reg), IrError> {
+		let (ns, db, _) = self.ids_and_database()?;
+		Ok((ns, db))
+	}
+
+	/// [`Self::ids`], and the database's definition in a register.
+	fn ids_and_database(&mut self) -> Result<(Reg, Reg, Reg), IrError> {
 		let ns = self.ns_id()?;
 		let db_name = self.em.reg()?;
 		self.store(StoreInstr::SessionDb {
@@ -864,7 +870,7 @@ impl InfoLowerer<'_, '_> {
 			name,
 			dst: db,
 		});
-		Ok((ns, db))
+		Ok((ns, db, database))
 	}
 
 	/// The id of the session's namespace, read by name, for a statement the executor resolved no
@@ -963,13 +969,22 @@ impl InfoLowerer<'_, '_> {
 		Ok(())
 	}
 
-	/// `INFO FOR DB`.
+	/// `INFO FOR DB`: the database's definitions, as the store stood at the version stamp when
+	/// there is one, and its compatibility level as it stands now.
 	fn db(&mut self, structured: bool, version: Option<ValueId>) -> Result<(), IrError> {
 		self.delegate = self.delegate.max(ContextLevel::Database);
 		self.allowed(Base::Db);
-		let (ns, db) = self.ids()?;
+		let (ns, db, database) = self.ids_and_database()?;
 		let version = self.version(version)?;
 		let out = self.new_object()?;
+		let compatibility = self.em.reg()?;
+		let name = self.em.field("compatibility")?;
+		self.store(StoreInstr::GetField {
+			src: database,
+			name,
+			dst: compatibility,
+		});
+		self.set(out, "compatibility", Operand::Reg(compatibility))?;
 		let scope = [("ns", Operand::Reg(ns)), ("db", Operand::Reg(db))];
 		let parts: [(&str, Part); 12] = [
 			("accesses", ("DbAccessMethodPrefix", "StoredAccessDefinition", Definitions::Access)),
@@ -1016,6 +1031,12 @@ impl InfoLowerer<'_, '_> {
 		for (name, part) in parts {
 			self.part(out, name, part, &scope, structured, None, version)?;
 		}
+		self.store(StoreInstr::InfoMigrations {
+			ns,
+			db,
+			tb,
+			out,
+		});
 		self.answer(out);
 		Ok(())
 	}

@@ -29,6 +29,7 @@ use crate::expr::module::ModuleName;
 use crate::expr::permission::{Permission, Permissions};
 use crate::expr::reference::{Reference, ReferenceDeleteStrategy};
 use crate::expr::statements::alter::field::AlterDefault;
+use crate::expr::statements::alter::table::{TableMigrateAction, TableMigrateClause};
 use crate::expr::statements::alter::{
 	AlterAccessStatement, AlterAnalyzerStatement, AlterApiClause, AlterApiStatement,
 	AlterBucketStatement, AlterConfigStatement, AlterDatabaseStatement, AlterEventStatement,
@@ -44,7 +45,7 @@ use crate::expr::statements::define::{
 	DefineBucketStatement, DefineConfigStatement, DefineDatabaseStatement, DefineDefault,
 	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
 	DefineKind, DefineNamespaceStatement, DefineParamStatement, DefineSequenceStatement,
-	DefineStatement, DefineTableStatement, kind_contains_object,
+	DefineStatement, DefineTableStatement, MigrateClause, kind_contains_object,
 };
 use crate::expr::statements::remove::{
 	RemoveAccessStatement, RemoveAnalyzerStatement, RemoveApiStatement, RemoveBucketStatement,
@@ -164,6 +165,28 @@ impl Lower<'_> {
 		})
 	}
 
+	/// The level of a [`Cl::Compatibility`] clause, which must be 3 or 4.
+	fn compatibility(&self, c: &Node) -> R<u8> {
+		let n = self.n(c.a);
+		match Ast::uint(n) {
+			level @ (3 | 4) => Ok(level as u8),
+			level => {
+				Err(Reject::new(format!("Invalid compatibility level {level}: expected 3 or 4"))
+					.at(n.start, n.end))
+			}
+		}
+	}
+
+	/// The migration of a [`Cl::Migrate`] clause.
+	fn migrate(&self, c: &Node) -> R<MigrateClause> {
+		let r = self.rec(c.b, 2);
+		Ok(MigrateClause {
+			name: self.name(c.a)?,
+			using: self.expr(r[0])?,
+			fallback: self.opt(r[1])?,
+		})
+	}
+
 	/// The `fn::` path of a `Name`, without `fn::`, its escaped segments
 	/// decoded.
 	fn path(&self, id: NodeId) -> R<String> {
@@ -205,6 +228,7 @@ impl Lower<'_> {
 					match cl(c) {
 						Cl::Comment => s.comment = self.expr(c.a)?,
 						Cl::Changefeed => s.changefeed = Some(self.changefeed(c)?),
+						Cl::Compatibility => s.compatibility = Some(self.compatibility(c)?),
 						_ => s.strict = true,
 					}
 				}
@@ -511,6 +535,13 @@ impl Lower<'_> {
 						}
 						Cl::Computed => s.computed = Some(self.expr(c.a)?),
 						Cl::GraphqlAlias => s.graphql_alias = Some(self.string(c.a)?),
+						Cl::Migrate if s.migrate.is_some() => {
+							return Err(second_migrate(
+								c,
+								"a field definition takes one MIGRATE clause",
+							));
+						}
+						Cl::Migrate => s.migrate = Some(self.migrate(c)?),
 						_ => s.graphql_deprecated = Some(self.string(c.a)?),
 					}
 				}
@@ -1098,6 +1129,12 @@ fn after_async(c: &Node, kw: &'static str) -> Reject {
 		.with_label(format!("{kw} must be set after ASYNC"))
 }
 
+/// The error for a second `MIGRATE` clause `c` of one statement, spanning
+/// its `MIGRATE`.
+fn second_migrate(c: &Node, msg: &'static str) -> Reject {
+	Reject::new(msg).at(c.start, c.start + "MIGRATE".len() as u32)
+}
+
 fn language(text: &str) -> Language {
 	match text.to_ascii_uppercase().as_str() {
 		"AR" | "ARA" | "ARABIC" => Language::Arabic,
@@ -1351,6 +1388,7 @@ impl Lower<'_> {
 					match (unsafe_cl(c.op), drop(c)) {
 						(_, Some(_)) => s.query_timeout = AlterKind::Drop,
 						(Cl::Compact, _) => s.compact = true,
+						(Cl::Compatibility, _) => s.compatibility = Some(self.compatibility(c)?),
 						_ => s.query_timeout = AlterKind::Set(self.expr(c.a)?),
 					}
 				}
@@ -1359,9 +1397,19 @@ impl Lower<'_> {
 			x if x == K::Namespace as u8 => AlterStatement::Namespace(AlterNamespaceStatement {
 				compact: true,
 			}),
-			x if x == K::Database as u8 => AlterStatement::Database(AlterDatabaseStatement {
-				compact: true,
-			}),
+			x if x == K::Database as u8 => {
+				let mut s = AlterDatabaseStatement {
+					name: self.opt(rec[1])?,
+					..Default::default()
+				};
+				for c in clauses {
+					match unsafe_cl(c.op) {
+						Cl::Compact => s.compact = true,
+						_ => s.compatibility = Some(self.compatibility(c)?),
+					}
+				}
+				AlterStatement::Database(s)
+			}
 			x if x == K::Table as u8 => {
 				let mut s = AlterTableStatement {
 					name: name()?,
@@ -1400,6 +1448,18 @@ impl Lower<'_> {
 						(Cl::Schemaless, _) => s.schemafull = AlterKind::Drop,
 						(Cl::Schemafull, _) => s.schemafull = AlterKind::Set(()),
 						(Cl::Permissions, _) => s.permissions = Some(self.permissions(c)?),
+						(Cl::MigrateRemoveUndeclared, _) if s.migrate.is_some() => {
+							return Err(second_migrate(
+								c,
+								"a table alteration takes one MIGRATE clause",
+							));
+						}
+						(Cl::MigrateRemoveUndeclared, _) => {
+							s.migrate = Some(Box::new(TableMigrateClause {
+								name: self.name(c.a)?,
+								action: TableMigrateAction::RemoveUndeclaredFields,
+							}));
+						}
 						_ => s.changefeed = AlterKind::Set(self.changefeed(c)?),
 					}
 				}
@@ -1517,6 +1577,13 @@ impl Lower<'_> {
 						}
 						(Cl::Permissions, _) => s.permissions = Some(self.permissions(c)?),
 						(Cl::Comment, _) => s.comment = self.str_alter(c)?,
+						(Cl::Migrate, _) if s.migrate.is_some() => {
+							return Err(second_migrate(
+								c,
+								"a field alteration takes one MIGRATE clause",
+							));
+						}
+						(Cl::Migrate, _) => s.migrate = Some(self.migrate(c)?),
 						_ => {
 							s.reference = AlterKind::Set(Reference {
 								on_delete: match c.a {

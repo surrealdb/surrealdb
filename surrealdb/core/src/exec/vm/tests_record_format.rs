@@ -110,8 +110,11 @@ async fn a_schemafull_table_is_written_packed_and_a_schemaless_one_as_documents(
 /// generation the rows after it carry.
 #[tokio::test]
 async fn rows_of_every_generation_read_as_their_schema_says() {
+	// At level 3 a removed field keeps its stored values, so `p:1` reads with the
+	// `legacy` it was written with.
 	let db = TestDb::new(
-		"DEFINE TABLE p SCHEMAFULL;
+		"ALTER DATABASE COMPATIBILITY 3;
+		 DEFINE TABLE p SCHEMAFULL;
 		 DEFINE FIELD name ON p TYPE string;
 		 DEFINE FIELD age ON p TYPE int;
 		 DEFINE FIELD legacy ON p TYPE option<string>;

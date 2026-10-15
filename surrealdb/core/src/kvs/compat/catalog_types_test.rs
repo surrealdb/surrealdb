@@ -30,6 +30,7 @@ use crate::val::{Datetime, TableName, Value};
 	database_id: DatabaseId(456),
 	name: "test".into(),
 	strict: false,
+	compatibility: Default::default(),
 	comment: Some("comment".to_string()),
 	changefeed: Some(ChangeFeed {
 		expiry: Duration::from_secs(123).into(),

@@ -1,4 +1,7 @@
 /**
+[env]
+compatibility = 3
+
 [test]
 reason = "A schemafull table's field an embedded script defines or overwrites types the writes after the call."
 

@@ -188,15 +188,16 @@ pub(crate) async fn alter_field_statement_apply(
 		AlterKind::None => {}
 	}
 
-	alter_field_write(
-		df,
-		old_definition,
-		!matches!(this.kind, AlterKind::None),
-		(&scope, &what),
-		ctx,
-		opt,
-	)
-	.await
+	let kind_changed = !matches!(this.kind, AlterKind::None);
+	let migration = crate::exec::migrate::FieldMigration {
+		request: this.migrate.as_ref().map(crate::exec::migrate::request_of).transpose()?,
+		kept: crate::exec::migrate::KeptClauses {
+			value: kind_changed && matches!(this.value, AlterKind::None),
+			assert: kind_changed && matches!(this.assert, AlterKind::None),
+		},
+	};
+	alter_field_write(df, old_definition, (kind_changed, migration), (&scope, &what), ctx, opt)
+		.await
 }
 
 /// Applies the clauses of a statement that holds them as one definition to the field `idiom`
@@ -204,10 +205,12 @@ pub(crate) async fn alter_field_statement_apply(
 ///
 /// `altered` is that definition, with the defaults of the stored type where a clause is not
 /// set. `kind_changed` is true when the statement sets or drops the type.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn alter_field_definition_apply(
 	altered: &catalog::FieldDefinition,
 	fields: &[String],
 	(kind_changed, if_exists): (bool, bool),
+	migration: crate::exec::migrate::FieldMigration<'_>,
 	idiom: crate::expr::Idiom,
 	what: TableName,
 	ctx: &FrozenContext,
@@ -252,15 +255,17 @@ pub(crate) async fn alter_field_definition_apply(
 			),
 		}
 	}
-	alter_field_write(df, old_definition, kind_changed, (&scope, &what), ctx, opt).await
+	alter_field_write(df, old_definition, (kind_changed, migration), (&scope, &what), ctx, opt)
+		.await
 }
 
-/// Validates the definition `df` that an `ALTER FIELD` produces from `old_definition`, then
-/// writes it, updates the definitions it implies, and clears the table cache.
+/// Validates the definition `df` that an `ALTER FIELD` produces from `old_definition`, judges it
+/// against the rules of a table that enforces migrations and commits the statement's migration,
+/// then writes it, updates the definitions it implies, and clears the table cache.
 async fn alter_field_write(
 	mut df: catalog::FieldDefinition,
 	old_definition: catalog::FieldDefinition,
-	kind_changed: bool,
+	(kind_changed, migration): (bool, crate::exec::migrate::FieldMigration<'_>),
 	(scope, what): (&Scope<'_>, &TableName),
 	ctx: &FrozenContext,
 	opt: &Options,
@@ -351,12 +356,13 @@ async fn alter_field_write(
 	}
 
 	// A `TYPE` the statement alters follows the rules `DEFINE FIELD` applies to a new one.
-	// The fields nested in the field are checked against it, and the definitions it implies
-	// for the elements of an array or set are written with it. Import skips this check, so
-	// exported definitions load as they were written.
+	// The fields nested in the field are checked against it, the fields it is nested in must
+	// admit it, and the definitions it implies for the elements of an array or set are written
+	// with it. Import skips this check, so exported definitions load as they were written.
 	if kind_changed && !opt.import {
 		let fields = txn.all_tb_fields(ns, db, what, None).await?;
 		crate::exec::field_rules::define_field_nesting_restrictions(&fields, &df)?;
+		crate::ddl::define_field_statement_disallow_mismatched_types(&txn, ns, db, &df).await?;
 	}
 
 	// A record id that names its components must admit every record the table
@@ -380,7 +386,27 @@ async fn alter_field_write(
 		.await?;
 	}
 
+	// The rules of a table that enforces migrations, and the statement's migration, are judged
+	// once every other check of the definition has passed: either can mint a step, and a refusal
+	// leaves no step behind for a transaction its caller goes on to commit.
+	let exec = crate::ddl::frame(ctx, opt, None).await;
+	let stored =
+		migration.before_store(&exec, opt.import, ns, db, what, &df, Some(&old_definition)).await?;
+	if stored == crate::exec::migrate::FieldStore::AlreadyRun {
+		return Ok(Value::None);
+	}
 	txn.put_tb_field(ns, db, what, &df).await?;
+	crate::exec::migrate::FieldMigration::after_store(
+		stored,
+		&exec,
+		opt.import,
+		ns,
+		db,
+		what,
+		&df,
+		Some(&old_definition),
+	)
+	.await?;
 	if kind_changed {
 		crate::ddl::define_field_statement_process_recursive_definitions(
 			ns,

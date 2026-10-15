@@ -102,6 +102,7 @@ type DatabaseDefinition struct since=4.0 reserved=[]
   6 name string critical since=4.0 absent=required
   8 changefeed option<ChangeFeed> critical since=4.0 absent=none
   10 strict bool critical since=4.0 absent=required
+  12 compatibility int:u8 critical since=4.0 absent=default(Default::default) unrevisioned
 type DefaultConfig struct since=4.0 reserved=[]
   2 namespace option<string> critical since=4.0 absent=none
   4 database option<string> critical since=4.0 absent=none
@@ -247,6 +248,8 @@ type Language enum since=4.0 reserved=[]
 type LayoutDescriptor struct since=4.0 reserved=[]
   2 table string critical since=4.0 absent=required
   4 layout RowLayout critical since=4.0 absent=required
+  6 migration option<Migration> critical since=4.0 absent=none
+  8 migrated option<int:u16> critical since=4.0 absent=none
 type Level enum since=4.0 reserved=[]
   1 No unit since=4.0
   2 Root unit since=4.0
@@ -263,6 +266,27 @@ type ManifestDigest enum since=4.0 reserved=[]
 type MiddlewareDefinition struct since=4.0 reserved=[]
   2 name string critical since=4.0 absent=required
   4 args list<value> critical since=4.0 absent=required
+type Migration struct since=4.0 reserved=[]
+  2 name string critical since=4.0 absent=required
+  4 step MigrationStep critical since=4.0 absent=required
+type MigrationRun struct since=4.0 reserved=[]
+  2 generation int:u16 critical since=4.0 absent=required
+  4 field option<string> critical since=4.0 absent=none
+type MigrationStep enum since=4.0 reserved=[]
+  1 Rewrite fields since=4.0
+    2 path text:idiom critical since=4.0 absent=required
+    4 using text:expr critical since=4.0 absent=required
+    6 fallback option<value> critical since=4.0 absent=none
+    8 test MigrationTest critical since=4.0 absent=required
+  2 Remove fields since=4.0
+    2 path text:idiom critical since=4.0 absent=required
+  3 RemoveUndeclared fields since=4.0
+    2 declared list<string> critical since=4.0 absent=required
+type MigrationTest struct since=4.0 reserved=[]
+  2 kind option<text:kind> critical since=4.0 absent=none
+  4 schemafull bool critical since=4.0 absent=required
+  6 flexible bool critical since=4.0 absent=required
+  8 assert option<text:expr> critical since=4.0 absent=none
 type ModuleExecutable enum since=4.0 reserved=[]
   1 Surrealism item:SurrealismExecutable since=4.0
   2 Silo item:SiloExecutable since=4.0

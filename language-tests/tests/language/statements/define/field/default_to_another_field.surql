@@ -1,4 +1,7 @@
 /**
+[env]
+compatibility = 3
+
 [test]
 
 [[test.results]]

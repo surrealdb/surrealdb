@@ -240,6 +240,7 @@ mod tests {
 			}),
 			comment: None,
 			strict: false,
+			compatibility: Default::default(),
 		};
 		let mut tb_def = TableDefinition::from_stored(&StoredTableDefinition::new(
 			namespace_id,

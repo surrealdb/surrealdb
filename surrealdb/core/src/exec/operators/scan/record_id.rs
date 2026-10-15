@@ -167,6 +167,7 @@ pub(crate) async fn execute_record_lookup(
 				epoch,
 			)
 			.map_err(ControlFlow::Err)?;
+			let replay = crate::exec::migrate::replay_for(ctx, &rid.table, version).await?;
 			let mut source = kv_scan_stream(
 				Arc::clone(&txn),
 				range,
@@ -179,6 +180,7 @@ pub(crate) async fn execute_record_lookup(
 				None,
 				// TopK threshold pushdown targets full table scans only.
 				None,
+				replay.clone(),
 			);
 
 			let mut pipeline = ScanPipeline::new(
@@ -196,6 +198,9 @@ pub(crate) async fn execute_record_lookup(
 					return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
 				}
 				let mut batch = batch_result?;
+				if let Some(replay) = &replay {
+					replay.apply_batch(ctx, &mut batch).await?;
+				}
 				let cont = pipeline.process_batch(batch.values_mut(), ctx).await?;
 				results.extend(batch.into_values());
 				if !cont {

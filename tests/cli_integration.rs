@@ -128,7 +128,8 @@ mod cli_integration {
 		}
 		assert_eq!(dumps[0], dumps[1], "`--only` wrote a different dump over gRPC than over HTTP");
 		assert!(
-			dumps[0].contains("DEFINE DATABASE OVERWRITE $session.db COMMENT 'kept'"),
+			dumps[0]
+				.contains("DEFINE DATABASE OVERWRITE $session.db COMPATIBILITY 4 COMMENT 'kept'"),
 			"`--only` leaves the database definition selected, so the dump carries it: {}",
 			dumps[0]
 		);

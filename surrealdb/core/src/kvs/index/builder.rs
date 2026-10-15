@@ -35,6 +35,7 @@ use crate::exec::context::{NamespaceContext, RootContext};
 use crate::exec::memory::MemoryHost;
 use crate::exec::permission::{PhysicalIndexEntry, index_entry_physical};
 use crate::exec::planner::Planner;
+use crate::exec::vm::closure::ClosureUnits;
 use crate::exec::{DatabaseContext, ExecutionContext};
 use crate::idx::IndexKeyBase;
 use crate::idx::index::IndexOperation;
@@ -640,6 +641,13 @@ impl Building {
 	/// The cancellation token is fresh and nothing signals it. A build's abort
 	/// signal is [`Building::aborted`], checked between records; the token is
 	/// what the context is shaped to hold rather than a second path.
+	///
+	/// The context holds a table of closure-body units of its own
+	/// ([`ClosureUnits`]), which every record of the batch shares. An index's
+	/// columns and guard are invoked as closure units: the batch's first record
+	/// links each into the table, and a linked unit keeps a handle on the
+	/// transaction it last checked its catalog reads in. The table is dropped
+	/// with the batch's context, so it keeps no transaction open past the batch.
 	pub(super) async fn exec_ctx(&self, ctx: &FrozenContext) -> Result<ExecutionContext> {
 		let tx = ctx.tx();
 		let ns = tx.expect_ns_by_name(self.opt.ns()?).await?;
@@ -682,7 +690,8 @@ impl Building {
 			table_def_cache: Arc::new(RwLock::new(HashMap::new())),
 			index_def_cache: Arc::new(RwLock::new(HashMap::new())),
 			select_permission_cache: Arc::new(RwLock::new(HashMap::new())),
-		}))
+		})
+		.with_vm_closures(Arc::new(ClosureUnits::default())))
 	}
 
 	/// This index's columns and `COUNT` guard, compiled on first use and once

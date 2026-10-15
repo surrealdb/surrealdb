@@ -17,7 +17,7 @@
 #![deny(clippy::wildcard_enum_match_arm)]
 
 use common::{LeafError, internal_todo};
-use surrealdb_types::{AlreadyExistsError, Error as TypesError, NotFoundError};
+use surrealdb_types::{AlreadyExistsError, Error as TypesError, NotFoundError, ValidationError};
 
 use crate::layout::{LayoutRefusal, RecordLayoutError};
 use crate::stored::EntryError;
@@ -372,6 +372,22 @@ pub enum Error {
 	/// A record could not be read or written because of its table's layouts.
 	#[error("{0}")]
 	Layout(RecordLayoutError),
+
+	/// A migration was asked of a store whose feature level does not yet write the stored
+	/// grammar: its rows carry no generation stamp.
+	#[error(
+		"Cannot migrate the rows of table '{table}': the datastore's feature level does not yet store records in the 4.0 format"
+	)]
+	MigrationNeedsStoredFormat {
+		table: String,
+	},
+
+	/// A migration was committed under a name its table has already run.
+	#[error("The table '{table}' has already run a migration named '{name}'")]
+	MigrationAlreadyRun {
+		table: String,
+		name: String,
+	},
 }
 
 /// The public kind of a refusal to read or write a stored entry.
@@ -421,6 +437,14 @@ impl LeafError for Error {
 				..
 			} => internal_todo(message),
 			Error::Entry(entry) => entry_kind(entry, message),
+			// The statement asked for something the store or the table's history refuses: the
+			// author can correct it.
+			Error::MigrationNeedsStoredFormat {
+				..
+			}
+			| Error::MigrationAlreadyRun {
+				..
+			} => TypesError::validation(message, ValidationError::InvalidRequest),
 			// A generation written by a newer release, or one the store's feature level does not
 			// yet allow, is a matter of how the deployment is configured. Every other refusal is
 			// a stored value or a set of layouts that cannot be used.

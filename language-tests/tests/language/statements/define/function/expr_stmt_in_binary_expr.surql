@@ -5,7 +5,7 @@
 value = "NONE"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, extensions: {  }, functions: { foo: 'DEFINE FUNCTION fn::foo() { RETURN (SELECT * FROM foo WHERE true) OR false } PERMISSIONS FULL' }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: { foo: 'DEFINE FUNCTION fn::foo() { RETURN (SELECT * FROM foo WHERE true) OR false } PERMISSIONS FULL' }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"
 
 [[test.results]]
 value = "[{ id: foo:v3cq5e4gkqdjz9xe4lrb }]"

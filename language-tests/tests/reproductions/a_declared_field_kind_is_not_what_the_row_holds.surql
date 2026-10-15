@@ -1,5 +1,6 @@
 /**
 [env]
+compatibility = 3
 namespace = true
 database = true
 auth = { level = "owner" }

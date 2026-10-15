@@ -431,6 +431,7 @@ mod tests {
 				database_id: db,
 				name: name.into(),
 				strict: false,
+				compatibility: Default::default(),
 				comment: None,
 				changefeed: None,
 			}

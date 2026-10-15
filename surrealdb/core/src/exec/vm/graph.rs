@@ -411,10 +411,16 @@ impl Run<'_> {
 			let mut records = if unanswered.is_empty() {
 				Vec::new()
 			} else {
-				at.txn
-					.get_records(at.ns, at.db, &unanswered, at.version, CachePolicy::ReadWrite)
-					.await
-					.context("Failed to fetch the payload-fallback edge records")?
+				crate::exec::migrate::get_records(
+					self.ctx,
+					&at.txn,
+					at.ns,
+					at.db,
+					&unanswered,
+					at.version,
+					CachePolicy::ReadWrite,
+				)
+				.await?
 			}
 			.into_iter();
 			for (entry, answered) in batch.into_iter().zip(candidates) {
@@ -470,11 +476,16 @@ impl Run<'_> {
 			)
 			.await;
 		}
-		let records = at
-			.txn
-			.get_records(at.ns, at.db, &reached, at.version, CachePolicy::ReadWrite)
-			.await
-			.context("Failed to fetch records")?;
+		let records = crate::exec::migrate::get_records(
+			self.ctx,
+			&at.txn,
+			at.ns,
+			at.db,
+			&reached,
+			at.version,
+			CachePolicy::ReadWrite,
+		)
+		.await?;
 		let mut values = Vec::with_capacity(reached.len());
 		for (rid, record) in reached.into_iter().zip(records) {
 			super::fuel::tick(self.ctx, 1).await?;

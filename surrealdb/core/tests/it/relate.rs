@@ -312,6 +312,7 @@ async fn relate_enforced() -> Result<()> {
 	analyzers: {},
 	apis: {},
 	buckets: {},
+	compatibility: 4,
 	configs: {},
 	extensions: {},
 	functions: {},

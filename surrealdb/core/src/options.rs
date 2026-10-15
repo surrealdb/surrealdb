@@ -45,6 +45,14 @@ pub struct EngineOptions {
 	///
 	/// Default: 5 seconds
 	pub graph_fold_interval: Duration,
+	/// Interval between table migration passes, which rewrite rows stamped
+	/// below a table's newest migration step and verify fields queued for
+	/// verification. A commit that queues work wakes the job sooner. Zero
+	/// disables the job: reads still apply the steps, and no field is
+	/// promoted by verification.
+	///
+	/// Default: 10 seconds
+	pub table_migration_interval: Duration,
 	/// Interval at which the per-node live-query router tails the dedicated
 	/// `lqe` keyspace and delivers notifications off the write path.
 	///
@@ -149,6 +157,7 @@ impl Default for EngineOptions {
 			index_build_resume_interval: Duration::from_secs(30),
 			event_processing_interval: Duration::from_secs(5),
 			graph_fold_interval: Duration::from_secs(5),
+			table_migration_interval: Duration::from_secs(10),
 			live_query_router_interval: Duration::from_millis(100),
 			reclaim_interval: Duration::from_secs(60),
 			reclaim_grace: Duration::from_secs(600),
@@ -186,6 +195,12 @@ impl EngineOptions {
 
 	pub fn with_index_build_resume_interval(mut self, interval: Duration) -> Self {
 		self.index_build_resume_interval = interval;
+		self
+	}
+
+	/// Set the table migration interval
+	pub fn with_table_migration_interval(mut self, interval: Duration) -> Self {
+		self.table_migration_interval = interval;
 		self
 	}
 

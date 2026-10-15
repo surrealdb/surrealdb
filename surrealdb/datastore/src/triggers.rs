@@ -11,7 +11,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use parking_lot::Mutex;
 use tokio::sync::{Notify, OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
@@ -396,6 +396,13 @@ pub struct CommitTriggers {
 	/// Graph adjacency folding, notified when a commit queues fold work or a
 	/// read observes a scope over the fold threshold.
 	pub graph_fold: Notify,
+	/// Table migration work, notified when a commit queues a table's rewrite
+	/// or verification so the job starts on the commit instead of waiting
+	/// out its interval.
+	pub table_migration: Notify,
+	/// The transactions open through the datastore, by the epoch they opened
+	/// in; see [`LiveTransactions`].
+	pub(crate) live: LiveTransactions,
 	/// Adjacency scopes a read found carrying enough unfolded keys to be
 	/// worth packing. In memory because reads cannot write a queue entry;
 	/// the fold task drains this set into the durable queue on its pass.
@@ -467,9 +474,76 @@ impl CommitTriggers {
 		self.graph_fold.notify_one();
 	}
 
+	/// The live-transaction epochs of the datastore; see
+	/// [`LiveTransactions`].
+	pub fn live_transactions(&self) -> &LiveTransactions {
+		&self.live
+	}
+
 	/// Drain the read-observed scopes for the fold task's pass.
 	pub fn drain_graph_fold_observations(&self) -> Vec<GraphFoldScope> {
 		self.graph_fold_observations.lock().drain().collect()
+	}
+}
+
+/// The transactions open through one datastore, counted by the epoch they
+/// opened in, so a caller can wait until every transaction that opened before
+/// a moment has ended.
+///
+/// Two buckets alternate. A transaction counts itself into the bucket of the
+/// current epoch before its snapshot is taken and out again when it is
+/// dropped. [`Self::advance`] moves new transactions to the other bucket,
+/// once that bucket is empty, and answers the bucket it left; once
+/// [`Self::drained`] reports that bucket empty, every transaction whose
+/// snapshot was taken before the advance has ended.
+///
+/// A transaction that read the epoch just before an advance and counts itself
+/// into the bucket left behind is waited for too; one that counts itself
+/// late into the other bucket takes its snapshot after the advance. Either
+/// way no transaction whose snapshot predates the advance is missed, provided
+/// a single caller advances and waits for each bucket to drain before it
+/// advances again: the table migration job, under its lease.
+#[derive(Default)]
+pub struct LiveTransactions {
+	epoch: AtomicU64,
+	counts: [AtomicUsize; 2],
+}
+
+/// The bucket a transaction that counts nothing is in.
+pub(crate) const NO_LIVE_BUCKET: u8 = u8::MAX;
+
+impl LiveTransactions {
+	/// Count a transaction about to open into the current epoch, answering
+	/// the bucket to hand to [`Self::close`].
+	pub(crate) fn open(&self) -> u8 {
+		let bucket = (self.epoch.load(Ordering::SeqCst) % 2) as usize;
+		self.counts[bucket].fetch_add(1, Ordering::SeqCst);
+		bucket as u8
+	}
+
+	/// Count a transaction counted into `bucket` out again.
+	pub(crate) fn close(&self, bucket: u8) {
+		if let Some(count) = self.counts.get(bucket as usize) {
+			count.fetch_sub(1, Ordering::SeqCst);
+		}
+	}
+
+	/// Move new transactions to the next epoch, answering the bucket of the
+	/// epoch left behind; `None`, advancing nothing, while transactions of
+	/// the epoch before it are still open.
+	pub fn advance(&self) -> Option<u8> {
+		let epoch = self.epoch.load(Ordering::SeqCst);
+		let next = ((epoch + 1) % 2) as usize;
+		if self.counts[next].load(Ordering::SeqCst) != 0 {
+			return None;
+		}
+		self.epoch.store(epoch + 1, Ordering::SeqCst);
+		Some((epoch % 2) as u8)
+	}
+
+	/// Whether every transaction counted into `bucket` has ended.
+	pub fn drained(&self, bucket: u8) -> bool {
+		self.counts.get(bucket as usize).is_none_or(|count| count.load(Ordering::SeqCst) == 0)
 	}
 }
 

@@ -77,9 +77,11 @@ pub struct ImportFailure {
 }
 
 /// Runs an explicit list of import cases against the datastore, after defining
-/// the session's namespace/database. Used by the test runner's embedded executor
-/// (which forwards the test's resolved imports) and by the bench runner, which
-/// may substitute a per-variant import chain (see `[bench].datasets`).
+/// the session's namespace/database, the database at the compatibility level
+/// `compatibility` when one is given. Used by the test runner's embedded
+/// executor (which forwards the test's resolved imports) and by the bench
+/// runner, which may substitute a per-variant import chain (see
+/// `[bench].datasets`).
 ///
 /// Imports always run as `Session::owner()` retargeted (via `process_use`) to the
 /// session's `(ns, db)`, so the populated data depends only on `(ns, db)` and the
@@ -89,6 +91,7 @@ pub struct ImportFailure {
 pub async fn run_imports_list(
 	imports: &[std::sync::Arc<crate::tests::case::TestCase>],
 	mut session: Session,
+	compatibility: Option<u8>,
 	dbs: &Datastore,
 ) -> Result<Option<ImportFailure>> {
 	if let Some(ref x) = session.ns {
@@ -98,7 +101,9 @@ pub async fn run_imports_list(
 	}
 
 	if let Some(ref x) = session.db {
-		dbs.execute(&format!("DEFINE DATABASE `{x}`"), &session, None).await?;
+		let level =
+			compatibility.map(|level| format!(" COMPATIBILITY {level}")).unwrap_or_default();
+		dbs.execute(&format!("DEFINE DATABASE `{x}`{level}"), &session, None).await?;
 	}
 
 	let mut import_session = Session::owner();

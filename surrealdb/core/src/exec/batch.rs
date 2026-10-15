@@ -7,6 +7,7 @@
 //! therefore what lets a second representation be added without a change at
 //! every use site.
 
+use crate::catalog::Generation;
 use crate::val::Value;
 
 /// A batch of values returned by an execution plan.
@@ -33,6 +34,11 @@ pub struct ValueBatch {
 	/// produces them, for the consumer that asked; [`Self::values`] and the
 	/// other row accessors do not see them.
 	encoded: Option<surrealdb_rpc::EncodedRows>,
+	/// The generation each row is stamped with, where the batch is a scan's
+	/// records as stored and the table has migration steps: one per row, in
+	/// row order. `None` once the rows may have been rewritten or reordered,
+	/// and for a batch of a table with no migration.
+	stamps: Option<Vec<Option<Generation>>>,
 }
 
 impl ValueBatch {
@@ -41,7 +47,30 @@ impl ValueBatch {
 		Self {
 			values,
 			encoded: None,
+			stamps: None,
 		}
+	}
+
+	/// A batch of stored records, each stamped with the generation beside it.
+	pub(crate) fn stamped(values: Vec<Value>, stamps: Vec<Option<Generation>>) -> Self {
+		debug_assert_eq!(values.len(), stamps.len());
+		Self {
+			values,
+			encoded: None,
+			stamps: Some(stamps),
+		}
+	}
+
+	/// The generation each row is stamped with, taken out of the batch, when
+	/// the batch is a scan's records as stored. The rows are not changed.
+	pub(crate) fn take_stamps(&mut self) -> Option<Vec<Option<Generation>>> {
+		self.stamps.take()
+	}
+
+	/// Consume the batch into its rows and, for a batch of stored records, the
+	/// generation each is stamped with.
+	pub(crate) fn into_stamped(self) -> (Vec<Value>, Option<Vec<Option<Generation>>>) {
+		(self.values, self.stamps)
 	}
 
 	/// A batch holding rows already encoded for the wire.
@@ -49,6 +78,7 @@ impl ValueBatch {
 		Self {
 			values: Vec::new(),
 			encoded: Some(rows),
+			stamps: None,
 		}
 	}
 
@@ -75,6 +105,7 @@ impl ValueBatch {
 
 	/// The batch's rows, for in-place filtering and rewriting.
 	pub(crate) fn values_mut(&mut self) -> &mut Vec<Value> {
+		self.stamps = None;
 		&mut self.values
 	}
 

@@ -70,6 +70,7 @@ mod generation;
 /// Row layouts of table generations.
 pub mod layout;
 mod layout_derive;
+mod migration;
 mod module;
 mod namespace;
 /// Cluster-node registration and liveness bookkeeping.
@@ -103,6 +104,7 @@ pub use layout::{
 	RecordLayoutError, RowLayout, TableLayouts, decode_generation,
 };
 pub use layout_derive::{TableShape, derive_layout};
+pub use migration::{Migration, MigrationRun, MigrationStep, MigrationTest};
 pub use module::*;
 pub use namespace::*;
 pub use record::*;

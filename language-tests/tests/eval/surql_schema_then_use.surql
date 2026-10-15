@@ -1,4 +1,7 @@
 /**
+[env]
+compatibility = 3
+
 [env.capabilities]
 allow-eval-query = ["system"]
 

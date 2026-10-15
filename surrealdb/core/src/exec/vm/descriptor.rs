@@ -95,6 +95,11 @@ impl TableDescriptor {
 		)
 	}
 
+	/// The migration steps of the table's rows, when its ring carries any.
+	pub(crate) fn replay(&self) -> Option<crate::exec::migrate::Replay> {
+		crate::exec::migrate::Replay::of(&self.layouts, self.ns, self.db)
+	}
+
 	/// The definition, or the error of a table that is not defined.
 	pub(crate) fn defined(&self) -> anyhow::Result<&Arc<TableDefinition>> {
 		self.definition.as_ref().ok_or_else(|| {
@@ -360,7 +365,7 @@ async fn from_cache<'a, V: Clone + Send + Sync + 'static>(
 /// its principal and permission contract, at the depth of a statement, with
 /// the session's own values read when the code runs. Its statements are
 /// planned with it, so none is left to be planned where it is evaluated.
-fn unit_planner<'a>(
+pub(crate) fn unit_planner<'a>(
 	ctx: &'a ExecutionContext,
 	db_ctx: &DatabaseContext,
 ) -> crate::exec::planner::Planner<'a> {

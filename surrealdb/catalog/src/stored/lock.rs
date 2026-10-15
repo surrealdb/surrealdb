@@ -67,6 +67,7 @@ use crate::conformance::TableConformance;
 use crate::feature::StoredFeatureLevel;
 use crate::generation::{GenerationMark, TableMigrations};
 use crate::layout::LayoutDescriptor;
+use crate::migration::MigrationRun;
 use crate::node::NodeRelease;
 
 /// The names of the rules [`check`] reports, as [`LockViolation::rule`] carries them.
@@ -152,6 +153,7 @@ pub fn all_schemas() -> Vec<&'static TypeSchema> {
 	GenerationMark::collect_schemas(&mut found);
 	TableMigrations::collect_schemas(&mut found);
 	TableConformance::collect_schemas(&mut found);
+	MigrationRun::collect_schemas(&mut found);
 	let mut seen: Vec<(&str, TypeLine)> = Vec::new();
 	let mut unique = Vec::new();
 	for schema in found {

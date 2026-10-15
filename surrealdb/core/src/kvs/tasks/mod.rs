@@ -178,6 +178,14 @@ fn start(dbs: &Arc<Datastore>, canceller: CancellationToken, opts: &EngineOption
 		canceller.clone(),
 		opts,
 	));
+	if !opts.table_migration_interval.is_zero() {
+		tasks.push(spawn_task_table_migration(
+			Weak::clone(&weak),
+			Arc::clone(triggers),
+			canceller.clone(),
+			opts,
+		));
+	}
 	for (group, slots) in [("maintenance", maintenance_slots(opts)), ("sweep", sweep_slots(opts))] {
 		// Every job in a group can be disabled by interval, so a group can end up
 		// empty; spawning a task that immediately exits would serve no purpose.
@@ -403,6 +411,44 @@ fn spawn_task_graph_fold(
 			}
 		}
 		trace!("Background task exited: Running graph fold");
+	})
+}
+
+/// Spawns the table migration task.
+///
+/// Runs at `opts.table_migration_interval` and wakes early when a commit
+/// queues a table's rewrite or verification. Keeps its own task rather than
+/// joining the maintenance scheduler because the scheduler sleeps to its next
+/// deadline and cannot be woken by a commit, and because a pass over a large
+/// table is unbounded: it holds the job's lease and yields between pages.
+fn spawn_task_table_migration(
+	dbs: Weak<Datastore>,
+	triggers: Arc<CommitTriggers>,
+	canceller: CancellationToken,
+	opts: &EngineOptions,
+) -> Task {
+	let interval = opts.table_migration_interval;
+	into_task(async move {
+		trace!("Running table migrations every {interval:?}");
+		let mut ticker = interval_ticker(interval).await;
+		loop {
+			tokio::select! {
+				biased;
+				_ = canceller.cancelled() => break,
+				_ = triggers.table_migration.notified() => {}
+				Some(_) = ticker.next() => {}
+			}
+			let Some(dbs) = dbs.upgrade() else {
+				break;
+			};
+			if let Err(e) = Datastore::table_migration(dbs, interval, canceller.clone()).await {
+				if canceller.is_cancelled() {
+					break;
+				}
+				error!("Error running table migrations: {e}");
+			}
+		}
+		trace!("Background task exited: Running table migrations");
 	})
 }
 
@@ -1195,9 +1241,9 @@ mod test {
 		let opt = EngineOptions::default();
 		let dbs = Datastore::new("memory").await.unwrap();
 		let tasks = tasks::init(&dbs, can.clone(), &opt);
-		// heartbeat, event processing, index compaction, graph fold,
-		// maintenance, sweeps.
-		assert_eq!(tasks.0.len(), 6);
+		// heartbeat, event processing, index compaction, graph fold, table
+		// migration, maintenance, sweeps.
+		assert_eq!(tasks.0.len(), 7);
 		can.cancel();
 		tasks.resolve().await.unwrap();
 	}
@@ -1213,7 +1259,7 @@ mod test {
 			.with_rpc_session_gc_interval(Duration::ZERO);
 		let dbs = Datastore::new("memory").await.unwrap();
 		let tasks = tasks::init(&dbs, can.clone(), &opt);
-		assert_eq!(tasks.0.len(), 5, "the empty sweep group should not be spawned");
+		assert_eq!(tasks.0.len(), 6, "the empty sweep group should not be spawned");
 		can.cancel();
 		tasks.resolve().await.unwrap();
 	}

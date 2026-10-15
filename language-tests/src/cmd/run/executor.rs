@@ -164,6 +164,9 @@ pub struct EmbeddedExecutor {
 	/// Built in [`EmbeddedExecutor::prepare`]; mutated by signin/signup and read
 	/// by the query and cleanup.
 	session: Session,
+	/// The compatibility level the test's database is defined at, when its
+	/// config names one.
+	compatibility: Option<u8>,
 	/// How a SurrealQL query under test is submitted: as one request, or as
 	/// the fragments of one stream.
 	mode: RunMode,
@@ -174,6 +177,7 @@ impl EmbeddedExecutor {
 		EmbeddedExecutor {
 			dbs,
 			session: Session::default(),
+			compatibility: None,
 			mode,
 		}
 	}
@@ -182,11 +186,12 @@ impl EmbeddedExecutor {
 impl Executor for EmbeddedExecutor {
 	async fn prepare(&mut self, config: &TestConfig) -> Result<()> {
 		self.session = util::session_from_test_config(config);
+		self.compatibility = config.env.compatibility;
 		Ok(())
 	}
 
 	async fn run_imports(&mut self, imports: &[Arc<TestCase>]) -> Result<Option<ImportFailure>> {
-		util::run_imports_list(imports, self.session.clone(), &self.dbs).await
+		util::run_imports_list(imports, self.session.clone(), self.compatibility, &self.dbs).await
 	}
 
 	async fn signup(&mut self, vars: Object) -> Result<()> {
@@ -739,6 +744,9 @@ use crate::cmd::util::ImportFailure;
 		/// when the test started, so every namespace, user and access method on it
 		/// reads as something the test created and gets removed.
 		root_snapshot: Option<RootSnapshot>,
+		/// The compatibility level the test's database is defined at, when its
+		/// config names one.
+		compatibility: Option<u8>,
 	}
 
 	impl<'a> RemoteExecutor<'a> {
@@ -755,6 +763,7 @@ use crate::cmd::util::ImportFailure;
 				pending_auth: PendingAuth::Root,
 				under_test_authed: false,
 				root_snapshot: None,
+				compatibility: None,
 			}
 		}
 
@@ -999,6 +1008,7 @@ use crate::cmd::util::ImportFailure;
 				} => env.namespace().map(str::to_owned),
 			};
 			self.db = env.database().map(str::to_owned);
+			self.compatibility = env.compatibility;
 			self.configured_ns = env.namespace().map(str::to_owned);
 			self.configured_db = env.database().map(str::to_owned);
 
@@ -1030,7 +1040,11 @@ use crate::cmd::util::ImportFailure;
 				self.conn.db.use_ns(ns).await?;
 			}
 			if let Some(db) = self.db.clone() {
-				self.run_checked(format!("DEFINE DATABASE `{db}`")).await?;
+				let level = self
+					.compatibility
+					.map(|level| format!(" COMPATIBILITY {level}"))
+					.unwrap_or_default();
+				self.run_checked(format!("DEFINE DATABASE `{db}`{level}")).await?;
 				self.conn.db.use_db(db).await?;
 			}
 

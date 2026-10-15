@@ -12,6 +12,10 @@ pub struct DefineDatabaseStatement {
 	pub id: Option<u32>,
 	pub name: Expr,
 	pub strict: bool,
+	/// `COMPATIBILITY <level>`: the database's compatibility level. Without
+	/// it, a new database takes the store's default and a redefined one keeps
+	/// its level.
+	pub compatibility: Option<u8>,
 	pub comment: Expr,
 	pub changefeed: Option<ChangeFeed>,
 }
@@ -25,6 +29,7 @@ impl Default for DefineDatabaseStatement {
 			comment: Expr::Literal(Literal::None),
 			changefeed: None,
 			strict: false,
+			compatibility: None,
 		}
 	}
 }
@@ -48,6 +53,9 @@ impl ToSql for DefineDatabaseStatement {
 		write_sql!(f, sql_fmt, " {}", CoverStmts(&self.name));
 		if self.strict {
 			f.push_str(" STRICT");
+		}
+		if let Some(level) = self.compatibility {
+			write_sql!(f, sql_fmt, " COMPATIBILITY {level}");
 		}
 		if !matches!(self.comment, Expr::Literal(Literal::None)) {
 			write_sql!(f, sql_fmt, " COMMENT {}", CoverStmts(&self.comment));

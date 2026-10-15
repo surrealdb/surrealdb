@@ -204,6 +204,8 @@ AccessNsAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "T
 AccessDbAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The access method 'sample' already exists in the database 'sample'" }
 AzInUse	{ cause: NONE, code: -32000, kind: 'Internal', message: "The analyzer 'sample' is in use by index 'sample' on table 'sample' and cannot be removed" }
 ApMethodDuplicate	{ cause: NONE, code: -32000, kind: 'Internal', message: "The method 'sample' is defined in more than one FOR clause on api 'sample'" }
+MigrationNeedsStoredFormat	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: "Cannot migrate the rows of table 'sample': the datastore's feature level does not yet store records in the 4.0 format" }
+MigrationAlreadyRun	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: "The table 'sample' has already run a migration named 'sample'" }
 TokenMakingFailed	{ cause: NONE, code: -32002, details: { details: { kind: 'TokenMakingFailed' }, kind: 'Auth' }, kind: 'NotAllowed', message: 'There was an error creating the token' }
 NoRecordFound	{ cause: NONE, code: -32000, kind: 'NotFound', message: 'No record was returned' }
 MissingUserOrPass	{ cause: NONE, code: -32002, details: { details: { kind: 'MissingUserOrPass' }, kind: 'Auth' }, kind: 'NotAllowed', message: 'Username or Password was not provided' }

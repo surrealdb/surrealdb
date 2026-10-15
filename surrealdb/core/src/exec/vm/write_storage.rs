@@ -1313,7 +1313,8 @@ async fn store(
 	// The generation the encoded bytes carry, which the transaction's cache holds the row under.
 	let generation = crate::catalog::written_generation(resolved.format(), row.metadata.as_ref());
 	// An `OPTION IMPORT` row skips the schema stage, so it may not hold what the table's
-	// conformance record states: the record is forfeited before such a row lands. A claim covers
+	// conformance record states: the record is forfeited before such a row lands, and a
+	// verification under way starts over, since the row is one it could not judge. A claim covers
 	// only the rows stamped with a generation, so a row stamped 0 forfeits nothing. A row of the
 	// statement's own table skips the call while the transaction's layout epoch is the one read
 	// after the last call, which a rollback of the forfeit moves.
@@ -1321,6 +1322,7 @@ async fn store(
 		let own = rid.table == ctx.table.name;
 		if !own || ctx.conformance_forfeit.load(Ordering::Acquire) != txn.layout_epoch() {
 			txn.forfeit_conformance(ns, db, &rid.table).await.map_err(ControlFlow::Err)?;
+			txn.restart_tb_verification(ns, db, &rid.table).await.map_err(ControlFlow::Err)?;
 			if own {
 				ctx.conformance_forfeit.store(txn.layout_epoch(), Ordering::Release);
 			}

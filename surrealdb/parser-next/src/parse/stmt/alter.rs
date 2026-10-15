@@ -53,11 +53,13 @@ impl<'a, 's> Parser<'a, 's> {
 		let mark = self.vals.len() as u32;
 		if kind == ALTER_SYSTEM {
 			self.alter_system()?;
-		} else if kind == DefineKind::Namespace as u8 || kind == DefineKind::Database as u8 {
+		} else if kind == DefineKind::Namespace as u8 {
 			if !self.at_kw(Kw::Compact) {
 				return Err(self.unexpected("`COMPACT`"));
 			}
 			self.flag_clause(Cl::Compact)?;
+		} else if kind == DefineKind::Database as u8 {
+			self.alter_database(&mut rec)?;
 		} else {
 			if self.eat_kw(Kw::If) {
 				self.expect_kw(Kw::Exists, "EXISTS")?;
@@ -107,6 +109,7 @@ impl<'a, 's> Parser<'a, 's> {
 					)?;
 				}
 				Kw::Compact => self.flag_clause(Cl::Compact)?,
+				Kw::Compatibility => self.uint_clause(Cl::Compatibility)?,
 				Kw::None if t.kind == T::Ident || t.kind == T::EscIdent => {
 					if self.ident_is(t, "QUERY_TIMEOUT", false) {
 						self.expr_clause(Cl::QueryTimeout)?;
@@ -119,7 +122,28 @@ impl<'a, 's> Parser<'a, 's> {
 			any = true;
 		}
 		if !any {
-			return Err(self.unexpected("`COMPACT`, `DROP` or `QUERY_TIMEOUT`"));
+			return Err(self.unexpected("`COMPACT`, `COMPATIBILITY`, `DROP` or `QUERY_TIMEOUT`"));
+		}
+		Ok(())
+	}
+
+	/// `[name] { COMPACT | COMPATIBILITY level }…` after `ALTER DATABASE`:
+	/// without a name the statement acts on the session's database, so a
+	/// clause keyword where the name would be starts the clauses.
+	fn alter_database(&mut self, rec: &mut [u32]) -> R<()> {
+		if !(self.at_kw(Kw::Compact) || self.at_kw(Kw::Compatibility)) {
+			rec[1] = self.expr(true)?;
+		}
+		let clauses = self.vals.len();
+		loop {
+			match self.tok.kw {
+				Kw::Compact => self.flag_clause(Cl::Compact)?,
+				Kw::Compatibility => self.uint_clause(Cl::Compatibility)?,
+				_ => break,
+			}
+		}
+		if self.vals.len() == clauses {
+			return Err(self.unexpected("`COMPACT` or `COMPATIBILITY`"));
 		}
 		Ok(())
 	}
@@ -349,6 +373,7 @@ impl<'a, 's> Parser<'a, 's> {
 		let is = |d: D| kind == d as u8;
 		match t.kw {
 			Kw::Compact if is(D::Table) => self.flag_clause(Cl::Compact)?,
+			Kw::Migrate if is(D::Table) => self.migrate_clause(true)?,
 			Kw::Inline if is(D::Table) => {
 				self.bump();
 				match self.tok.kw {
@@ -408,6 +433,7 @@ impl<'a, 's> Parser<'a, 's> {
 				let (a, b) = self.reference_strategy()?;
 				self.push_clause(Cl::Reference, a, b, t.start, first)?;
 			}
+			Kw::Migrate if is(D::Field) => self.migrate_clause(false)?,
 			Kw::Permissions
 				if is(D::Param) || is(D::Bucket) || is(D::Function) || is(D::Module) =>
 			{

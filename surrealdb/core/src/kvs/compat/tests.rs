@@ -76,16 +76,19 @@ fn version_writes_current_format(version_name: &str, type_name: &str, fixture: &
 	/// `StoredModuleDefinition` is at revision 3 (its revisions 2 and 3 are
 	/// pinned in `module_definition.rs`),
 	/// `StoredAccessDefinition` embeds `JwtAccess`, which gained `audience`
-	/// (1 -> 2), and `StoredTableDefinition` gained the graph markers
-	/// (3 -> 4). Their fixtures still decode — the field defaults in — but
-	/// re-encode a revision higher. Each name drops off this list once a
-	/// snapshot taken after its bump exists to pin it, exactly as
-	/// `V3_3_0_BUMPED` did at `v3_3_0`.
+	/// (1 -> 2), `StoredTableDefinition` gained the graph markers (3 -> 4),
+	/// `StoredFieldDefinition` gained `inline` (5 -> 6) and `conformance`
+	/// (6 -> 7), and `DatabaseDefinition` gained `compatibility` (1 -> 2).
+	/// Their fixtures still decode — the field defaults in — but re-encode a
+	/// revision higher. Each name drops off this list once a snapshot taken
+	/// after its bump exists to pin it, exactly as `V3_3_0_BUMPED` did at
+	/// `v3_3_0`.
 	const AFTER_NEWEST_SNAPSHOT_BUMPED: &[&str] = &[
 		"StoredModuleDefinition",
 		"StoredAccessDefinition",
 		"StoredTableDefinition",
 		"StoredFieldDefinition",
+		"DatabaseDefinition",
 	];
 	/// Fixtures of a type not itself bumped after the newest snapshot that
 	/// nonetheless *embed* one that was, so they carry its revision byte:

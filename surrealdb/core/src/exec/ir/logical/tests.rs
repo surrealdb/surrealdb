@@ -3284,6 +3284,7 @@ mod region_constraints {
 			reference: None,
 			graphql_alias: None,
 			graphql_deprecated: None,
+			migrate: None,
 		})))
 	}
 
@@ -4856,6 +4857,7 @@ mod binding {
 			"REMOVE FIELD $name ON $table",
 			&[DdlOperand::Table, DdlOperand::FieldName],
 		),
+		(DdlForm::AlterDatabase, "ALTER DATABASE $name COMPACT", &[DdlOperand::Name]),
 		(DdlForm::AlterTable, "ALTER TABLE $name COMPACT", &[DdlOperand::Name]),
 		(
 			DdlForm::AlterField,

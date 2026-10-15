@@ -109,6 +109,8 @@ pub fn derive_layout(table: TableShape<'_>, fields: &[&FieldCandidate]) -> Layou
 	let descriptor = LayoutDescriptor {
 		table: table.table.clone(),
 		layout: RowLayout::Packed(packed),
+		migration: None,
+		migrated: None,
 	};
 	match descriptor.validate() {
 		Ok(()) => descriptor,

@@ -129,6 +129,13 @@ keyspace! {
 		/// at the same moment.
 		migration = ["!mg", @, id: u32] => crate::version::MigrationRecord;
 
+		/// What a database created without a setting of its own takes: its
+		/// compatibility level. Written by the data migration that brings an
+		/// earlier release's store up to this one and by `ALTER SYSTEM
+		/// COMPATIBILITY`; a store with no entry gives a new database the
+		/// level of the release that created it.
+		store_defaults = ["!df"] => crate::version::StoreDefaults;
+
 		/// A namespace definition, keyed by name.
 		namespace = ["!ns", @, ns: Str] => surrealdb_catalog::NamespaceDefinition;
 
@@ -178,6 +185,17 @@ keyspace! {
 		/// observed to carry enough per-edge pointer keys to be worth packing.
 		graph_fold = ["!gf", @, ns: NamespaceId, db: DatabaseId, tb: Table,
 					  @, id: Id, dir: Dir, @, nid: Uuid, uid: Uuid] => ();
+
+		/// A table's work for the table migration job: rows to rewrite
+		/// through its migration steps, or fields to verify. One entry per
+		/// table, written in the transaction that queues the work. The
+		/// namespace, database and table are spelled out as fields, as in the
+		/// queues above, so an entry survives the deletion of the subtree it
+		/// refers to and the job can still delete it. The namespace and the
+		/// database each have a prefix of their own, which removing either
+		/// clears its entries by.
+		table_migration = ["!tm", @, ns: NamespaceId, @, db: DatabaseId, @, tb: Table]
+			=> crate::key::table_migration::TableMigrationState;
 
 		/// Resources awaiting reclamation after a drop.
 		reclaim = ["!rc", @, kind: ReclaimKind, ns: NamespaceId, db: DatabaseId,
@@ -463,6 +481,13 @@ keyspace! {
 					/// the entry (it then reads no claims and its forfeits remove the
 					/// entry).
 					table_conformance = ["!fc"] => surrealdb_catalog::TableConformance;
+
+					/// A migration the table has run, keyed by its name: the
+					/// permanent record that the name has run, which outlives the
+					/// descriptor of the generation that carried the migration.
+					/// Written by the transaction that mints that generation.
+					/// Removed with the table.
+					migration_run = ["!mn", @, name: Str] => surrealdb_catalog::MigrationRun;
 
 					/// The document id allocator's reserved batch and its state.
 					doc_id_batch = ["!dh", @, start: i64] => crate::sequences::BatchValue;

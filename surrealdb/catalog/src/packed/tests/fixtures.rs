@@ -52,6 +52,8 @@ fn case(
 		layout: LayoutDescriptor {
 			table: TableName::new("fixture"),
 			layout: RowLayout::Packed(descriptor(open, &named(children))),
+			migration: None,
+			migrated: None,
 		},
 		generation,
 		flags,

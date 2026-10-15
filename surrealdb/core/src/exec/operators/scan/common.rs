@@ -16,6 +16,7 @@ use super::pipeline::{FieldState, build_field_state, materialise_fields_with_per
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId, Record, StoredRecord, TableLayouts};
 use crate::err::EngineError;
+use crate::exec::migrate::{Replay, stamp_of};
 use crate::exec::object_extract::{
 	PathSegment, project_record_bytes, project_record_bytes_excluding,
 };
@@ -377,15 +378,41 @@ impl ReadAhead {
 		let mut values = Vec::new();
 		let mut decoded_bytes = 0;
 		let mut decoded_rows = 0;
+		// The steps of the table the previous record belongs to, which the
+		// next record of that table reuses.
+		let mut steps: Option<(TableName, Option<Replay>)> = None;
 		// The first decoded record is taken whatever the budget, so a batch
 		// always makes progress while records are held.
 		while decoded_rows == 0 || (decoded_bytes < self.budget && decoded_rows < self.row_cap) {
 			let Some((rid, record)) = self.records.pop_front() else {
 				break;
 			};
-			let data = match record {
+			let replay = match &steps {
+				Some((table, replay)) if *table == rid.table => replay.clone(),
+				_ => {
+					let replay =
+						crate::exec::migrate::replay_for(ctx, &rid.table, ctx.version_stamp())
+							.await?;
+					steps = Some((rid.table.clone(), replay.clone()));
+					replay
+				}
+			};
+			// The stamp of a record behind a migration step of its table, which
+			// is decoded whole and brought through the steps it has not passed:
+			// its stored bytes are not what a read of it sees.
+			let mut replaying = None;
+			let mut data = match record {
 				ReadAheadRecord::Stored(bytes, layouts) => {
-					match fields.and_then(|fields| fields.project(&bytes)) {
+					let stamp = replay.as_ref().map(|_| stamp_of(&bytes));
+					if let (Some(replay), Some(stamp)) = (&replay, stamp)
+						&& replay.behind(stamp)
+					{
+						replaying = Some(stamp);
+					}
+					match fields
+						.filter(|_| replaying.is_none())
+						.and_then(|fields| fields.project(&bytes))
+					{
 						Some(mut object) => {
 							object.0.insert(Strand::new_static("id"), Value::RecordId(rid));
 							Value::Object(object)
@@ -409,6 +436,9 @@ impl ReadAhead {
 			};
 			if data.is_none() {
 				continue;
+			}
+			if let (Some(replay), Some(stamp)) = (&replay, replaying) {
+				replay.apply(ctx, &mut data, stamp).await?;
 			}
 			decoded_bytes += approx_value_size(&data);
 			decoded_rows += 1;
@@ -628,10 +658,9 @@ pub(crate) async fn resolve_record_batch(
 		}
 	}
 
-	let records = txn
-		.get_records(ns_id, db_id, rids, version, cache_policy)
-		.await
-		.context("Failed to fetch records")?;
+	let records =
+		crate::exec::migrate::get_records(ctx, txn, ns_id, db_id, rids, version, cache_policy)
+			.await?;
 	ensure_below_memory_threshold()?;
 
 	// Per-table field state (computed fields + field-level SELECT

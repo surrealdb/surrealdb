@@ -1174,8 +1174,12 @@ async fn check_retained_keys(dbs: &Datastore) -> Result<Vec<Vec<u8>>> {
 	// like `/!nd`. `/!mg` are ledger entries: a store's first stored write, or the raise of its
 	// feature level, records the record-format entry, so the entry persists in any store that
 	// has stored a record in the stored-value grammar.
+	//
+	// `!df` is the store's defaults record, which `ALTER SYSTEM COMPATIBILITY` writes and a
+	// migration records for a store an earlier release created. It sits outside the `/` root
+	// like `!fl`.
 	const ALLOWED_KEY_PREFIXES: &[&[u8]] =
-		&[b"/!ni", b"/!nh", b"/!nd", b"/!nr", b"/!mg", b"/!ic", b"/!tl", b"!fl"];
+		&[b"/!ni", b"/!nh", b"/!nd", b"/!nr", b"/!mg", b"/!ic", b"/!tl", b"!fl", b"!df"];
 
 	let txn = dbs.transaction(surrealdb_kvs::TransactionType::Read).await?;
 	// The point of this check is to find keys the declared keyspace does *not*

@@ -589,7 +589,9 @@ async fn database_level_clauses_survive() -> Result<()> {
 
 	let rendered = single(round_trip.source_query("INFO FOR NS").await?, "INFO FOR NS")?.to_sql();
 	assert!(
-		rendered.contains("DEFINE DATABASE test STRICT COMMENT 'the source' CHANGEFEED 1d"),
+		rendered.contains(
+			"DEFINE DATABASE test STRICT COMPATIBILITY 4 COMMENT 'the source' CHANGEFEED 1d"
+		),
 		"`INFO FOR NS` does not carry the database's own clauses, so comparing it says nothing \
 		 about them:\n{rendered}"
 	);

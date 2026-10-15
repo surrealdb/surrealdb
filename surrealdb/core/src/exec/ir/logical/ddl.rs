@@ -352,7 +352,6 @@ pub(crate) fn guard_order(form: DdlForm) -> &'static [DdlStep] {
 		| DdlForm::RemoveModule
 		| DdlForm::RemoveConfig
 		| DdlForm::AlterNamespace
-		| DdlForm::AlterDatabase
 		| DdlForm::AlterFunction
 		| DdlForm::AlterModule
 		| DdlForm::RebuildIndex => &[W, A, S],
@@ -361,6 +360,7 @@ pub(crate) fn guard_order(form: DdlForm) -> &'static [DdlStep] {
 		DdlForm::RemoveField => &[W, A, TABLE, FIELD, S],
 		DdlForm::RemoveIndex | DdlForm::AlterEvent | DdlForm::AlterIndex => &[W, A, NAME, TABLE, S],
 		DdlForm::AlterSystem => &[W, A, TIMEOUT, S],
+		DdlForm::AlterDatabase => &[W, A, NAME, S],
 		DdlForm::AlterTable => &[NAME, W, A, S],
 		DdlForm::AlterApi => &[W, A, PATH, MIDDLEWARE, S],
 		DdlForm::AlterSequence => &[W, A, NAME, TIMEOUT, S],

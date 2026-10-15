@@ -137,8 +137,17 @@ impl TransactionFactory {
 		// The catalog commits finished before the transaction opens, read
 		// before it opens so that its snapshot holds at least those.
 		let settled = self.triggers.catalog_epoch.settled();
+		// Counted live before its snapshot is taken, so a wait for the
+		// transactions older than a moment never misses this one.
+		let live_bucket = self.triggers.live.open();
 		// Create a new transaction on the datastore
-		let (inner, local) = self.builder.new_transaction(write).await?;
+		let (inner, local) = match self.builder.new_transaction(write).await {
+			Ok(opened) => opened,
+			Err(e) => {
+				self.triggers.live.close(live_bucket);
+				return Err(e.into());
+			}
+		};
 		let sole_writer = inner.sole_writer();
 		let catalog_epoch = settled.filter(|_| sole_writer).unwrap_or(crate::tx::NO_CATALOG_EPOCH);
 		Ok(Transaction::new(
@@ -151,7 +160,8 @@ impl TransactionFactory {
 			catalog_epoch,
 			sole_writer,
 			Arc::clone(&self.feature),
-		))
+		)
+		.with_live_bucket(live_bucket))
 	}
 
 	/// Release the DiskANN writer leases this datastore holds on indexes it has

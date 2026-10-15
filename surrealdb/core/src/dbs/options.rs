@@ -79,9 +79,9 @@ pub enum Force {
 ///
 /// Each variant but [`Self::SurrealismReadOnly`] is a schema clause that must
 /// not have effects: a `PERMISSIONS` clause, a `COMPUTED`, `VALUE`, `DEFAULT`
-/// or `ASSERT` clause. A definition holding such an effect is refused where it
-/// is defined; this frame is where a clause stored before that rule is refused
-/// at the point the effect is reached, however many function calls deep it
+/// or `ASSERT` clause, or a field migration's `MIGRATE` transform. A definition holding such an
+/// effect is refused where it is defined; this frame is where a clause stored before that rule is
+/// refused at the point the effect is reached, however many function calls deep it
 /// sits or whichever branch selected it. It refuses a write and a schema
 /// statement, a `SLEEP`, and a builtin [`Self::refuses_builtin_call`] names,
 /// each with [`Self::side_effect_error`].
@@ -119,6 +119,9 @@ pub(crate) enum NoWriteFrame {
 	/// How the declaration is spelled is the guest language's business; the host
 	/// sees only the flag.
 	SurrealismReadOnly,
+	/// A field migration's transform. It depends on `$value` alone, so it may
+	/// neither write nor dereference a record.
+	Migration,
 }
 
 impl NoWriteFrame {
@@ -131,6 +134,7 @@ impl NoWriteFrame {
 			Self::FieldValue => Some("VALUE"),
 			Self::FieldDefault => Some("DEFAULT"),
 			Self::FieldAssert => Some("ASSERT"),
+			Self::Migration => Some("MIGRATE"),
 			Self::SurrealismReadOnly => None,
 		}
 	}
@@ -574,6 +578,7 @@ mod tests {
 			NoWriteFrame::FieldDefault,
 			NoWriteFrame::FieldAssert,
 			NoWriteFrame::SurrealismReadOnly,
+			NoWriteFrame::Migration,
 		];
 		for frame in frames {
 			let expected = match frame {
@@ -584,6 +589,7 @@ mod tests {
 				NoWriteFrame::FieldValue => Some("VALUE"),
 				NoWriteFrame::FieldDefault => Some("DEFAULT"),
 				NoWriteFrame::FieldAssert => Some("ASSERT"),
+				NoWriteFrame::Migration => Some("MIGRATE"),
 				NoWriteFrame::SurrealismReadOnly => None,
 			};
 			let raised = frame.side_effect_error("`CREATE` writes data");
@@ -616,6 +622,7 @@ mod tests {
 			(NoWriteFrame::WritePermission, true),
 			(NoWriteFrame::ComputedField, true),
 			(NoWriteFrame::FieldAssert, true),
+			(NoWriteFrame::Migration, true),
 			(NoWriteFrame::FieldValue, false),
 			(NoWriteFrame::FieldDefault, false),
 		];

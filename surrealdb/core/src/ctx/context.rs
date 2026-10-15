@@ -560,6 +560,15 @@ impl Context {
 	/// `Arc<RwLock<HashMap<.., Arc<Building>>>>` cycle that pins the
 	/// `Datastore` (and its storage handles, ~7 file descriptors per RocksDB
 	/// instance, ~3 per SurrealKV) until process exit.
+	///
+	/// `vm_closures` is cleared too. That table belongs to the run of the
+	/// program `from` was made in, and a unit linked into it keeps a handle on
+	/// the transaction it last checked its catalog reads in, so a context that
+	/// outlives the run — the `Building` does, for as long as the
+	/// `IndexBuilder` remembers it — would keep that transaction open with it.
+	/// A closure invoked beneath this context links its unit into a table
+	/// installed beneath it, as each build batch's context installs one, or
+	/// into a table of the invocation's own.
 	pub(crate) fn new_concurrent(from: &FrozenContext) -> Self {
 		Self {
 			values: HashMap::default(),
@@ -601,7 +610,7 @@ impl Context {
 			vm_served: from.vm_served.clone(),
 			vm_metrics: from.vm_metrics.clone(),
 			vm_edge_cascade: from.vm_edge_cascade.clone(),
-			vm_closures: from.vm_closures.clone(),
+			vm_closures: None,
 			tenant_identity: from.tenant_identity.clone(),
 			node_id: from.node_id,
 			auth_enabled: from.auth_enabled,

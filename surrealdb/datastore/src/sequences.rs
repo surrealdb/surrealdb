@@ -2162,6 +2162,7 @@ mod tests {
 				comment: None,
 				changefeed: None,
 				strict: false,
+				compatibility: Default::default(),
 			},
 		)
 		.await

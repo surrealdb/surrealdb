@@ -237,12 +237,15 @@ pub enum Tag {
 	Remove,
 	/// `op`: the [`DefineKind`] altered, or [`ALTER_SYSTEM`]; `a`: index into
 	/// `extra` of `[if exists, name, on, clause list]`, as in [`remove`] for
-	/// the name and `on` slots; `b` as for [`Tag::Define`]. `COMMENT` clauses
-	/// hold a string, and duration clauses a duration or `NONE` for `NONE`.
+	/// the name and `on` slots; `ALTER DATABASE` without a name has `NONE`.
+	/// `b` as for [`Tag::Define`]. `COMMENT` clauses hold a string, and
+	/// duration clauses a duration or `NONE` for `NONE`.
 	Alter,
 	/// A clause of a definition: `op` a [`Cl`] code, `a` and `b` its payload as
 	/// documented there. Clauses are kept in source order; a later clause of
-	/// the same kind overrides an earlier one, as earlier releases read it.
+	/// the same kind overrides an earlier one, as earlier releases read it,
+	/// except a second [`Cl::Migrate`] or [`Cl::MigrateRemoveUndeclared`],
+	/// which lowering refuses.
 	Clause,
 }
 
@@ -502,6 +505,15 @@ pub enum Cl {
 	AlterDrop,
 	/// `FOR methods DROP THEN`: `a` list of method `Name`s.
 	ApiDropAction,
+	/// `COMPATIBILITY a`: `a` the level, an integer; whether it is a level
+	/// is left to lowering.
+	Compatibility,
+	/// `MIGRATE EXISTING ROWS AS a USING …` on a field: `a` the migration
+	/// `Name`, `b` index into `extra` of `[transform, fallback or NONE]`.
+	Migrate,
+	/// `MIGRATE EXISTING ROWS AS a REMOVE UNDECLARED FIELDS` on a table: `a`
+	/// the migration `Name`.
+	MigrateRemoveUndeclared,
 	/// `DIGEST`: `a` the digest string.
 	Digest,
 	/// `SIGNER`: `a` expression, which lowering requires to be an object

@@ -63,7 +63,7 @@ error = "The field 'id[0]' does not exist"
 error = "The field 'select' does not exist"
 
 [[test.results]]
-value = "{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"
+value = "{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, migrations: { generation: 1, guaranteed: [], migrations: [] }, tables: {  } }"
 */
 
 -- Schemaless: every spelling of a path no field defines is accepted.

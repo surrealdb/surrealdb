@@ -53,6 +53,14 @@ pub(crate) async fn remove_field_statement_apply(
 			}
 		}
 	};
+	// On a table that enforces migrations the field's stored values go with
+	// it; an import restores definitions as they were.
+	if !opt.import {
+		let exec = crate::ddl::frame(ctx, opt, None).await;
+		crate::exec::migrate::remove_field(&exec, ns, db, &table_name, &fd)
+			.await
+			.map_err(crate::exec::migrate::into_error)?;
+	}
 	// Delete the definition, and every field nested in it: nothing is left
 	// nested in a field that is no longer defined.
 	let nested: Vec<catalog::FieldDefinition> = txn

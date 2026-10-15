@@ -9,7 +9,7 @@
 **Relates to:** ADR 0007 (the VM reads rows through `RowReader`), ADR 0008 (named record-id
 components, which a packed row leaves in the key), ADR 0010 (in-place reads of a record agree with
 its whole decode). Operator-facing behaviour is in
-`doc/UPGRADING.md`; the layouts and the proposed migration statements are in
+`doc/UPGRADING.md`; the layouts and the migration statements are in
 `doc/executor/RFC_RECORD_LAYOUT_AND_MIGRATE.md`; how a store reaches the format is in
 `doc/executor/RFC_RECORD_FORMAT_ROLLOUT.md`.
 
@@ -100,8 +100,10 @@ change for it.
 - A table upgraded from 3.x is mixed: its rows are `revision` at generation 0 and read through the
   general path, at the speed they read today. New writes are documents until the table's first
   stamp mints a generation, and packed after that. The rows converge when something rewrites them;
-  an ordinary write re-encodes the row it touches. The statements that rewrite a whole table
-  (`ALTER TABLE … REWRITE`, `MIGRATE EXISTING ROWS … USING`) are not part of this decision.
+  an ordinary write re-encodes the row it touches. `MIGRATE EXISTING ROWS` mints a generation
+  whose descriptor carries the step that brings an older row to its value, and a background job
+  rewrites the rows; the job does not move the floor, so a row stamped before a step is replayed
+  whenever it is read (`doc/executor/RFC_RECORD_LAYOUT_AND_MIGRATE.md` §5).
 - Rolling back to 3.x after the store is raised is refused. Rolling back within 4.x is supported
   until something uses a feature the earlier release lacks, and `Datastore::rollback_check` reports
   what an earlier release would refuse.

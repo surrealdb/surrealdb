@@ -16,10 +16,10 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "{ events: {  }, fields: { id: 'DEFINE FIELD id ON reading TYPE [city: string, time: datetime] PERMISSIONS FULL', temp: 'DEFINE FIELD temp ON reading TYPE int PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }"
+value = "{ events: {  }, fields: { id: 'DEFINE FIELD id ON reading TYPE [city: string, time: datetime] PERMISSIONS FULL', temp: 'DEFINE FIELD temp ON reading TYPE int PERMISSIONS FULL' }, indexes: {  }, lives: {  }, migrations: { generation: 2, guaranteed: [], migrations: [] }, tables: {  } }"
 
 [[test.results]]
-value = "{ events: [ ], fields: [ { components: [ { kind: 'string', name: 'city', position: 0 }, { kind: 'datetime', name: 'time', position: 1 } ], kind: '[string, datetime]', name: 'id', permissions: { create: true, select: true, update: true }, readonly: false, table: 'reading' }, { kind: 'int', name: 'temp', permissions: { create: true, select: true, update: true }, readonly: false, table: 'reading' } ], indexes: [ ], lives: [ ], tables: [ ] }"
+value = "{ events: [], fields: [{ components: [{ kind: 'string', name: 'city', position: 0 }, { kind: 'datetime', name: 'time', position: 1 }], kind: '[string, datetime]', name: 'id', permissions: { create: true, select: true, update: true }, readonly: false, table: 'reading' }, { kind: 'int', name: 'temp', permissions: { create: true, select: true, update: true }, readonly: false, table: 'reading' }], indexes: [], lives: [], migrations: { generation: 2, guaranteed: [], migrations: [] }, tables: [] }"
 */
 
 DEFINE TABLE reading SCHEMAFULL;

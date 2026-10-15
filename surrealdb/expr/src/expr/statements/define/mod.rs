@@ -24,7 +24,7 @@ pub use bucket::DefineBucketStatement;
 pub use config::DefineConfigStatement;
 pub use database::DefineDatabaseStatement;
 pub use event::DefineEventStatement;
-pub use field::{DefineDefault, DefineFieldStatement, kind_contains_object};
+pub use field::{DefineDefault, DefineFieldStatement, MigrateClause, kind_contains_object};
 pub use function::DefineFunctionStatement;
 pub use index::DefineIndexStatement;
 pub use model::DefineModelStatement;

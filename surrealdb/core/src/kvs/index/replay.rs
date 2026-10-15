@@ -637,6 +637,12 @@ impl Building {
 		// The analyzer's `FUNCTION` clause, compiled once for the batch rather
 		// than once per record, in the same frame the columns are evaluated in.
 		let az_fn = StreamingAnalyzerFunction::new(&exec);
+		// The index holds the values a read of the record sees, so a record
+		// stamped before a migration step of the table is brought through the
+		// steps it has not passed.
+		let replay = crate::exec::migrate::replay_for(&exec, self.ikb.table(), None)
+			.await
+			.map_err(crate::exec::migrate::into_error)?;
 		let result = async {
 			// A record is baselined from its first queued mutation, which an
 			// older node may have marked under its own spelling.
@@ -669,13 +675,19 @@ impl Building {
 				// its generation, so `lookup_tx`, opened after the batch was
 				// read, lists every generation the batch names. A packed record is
 				// decoded with the layouts that admitted it.
-				let (_, admitted) =
+				let (stamp, admitted) =
 					layouts.admit_with_layouts(&lookup_tx, &rid.table, v.as_slice()).await?;
-				let val = Record::decode_admitted_as_written(
+				let mut val = Record::decode_admitted_as_written(
 					v.as_slice(),
 					admitted.map(|held| &**held),
 					|| (*rid).clone(),
 				)?;
+				if let Some(replay) = &replay {
+					replay
+						.apply(&exec, &mut val.data, stamp)
+						.await
+						.map_err(crate::exec::migrate::into_error)?;
+				}
 				if count_progress.is_some() {
 					live_ids.insert(RecordIdentity(rid.key.clone()));
 					last_live_id = Some(rid.key.clone());

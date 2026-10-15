@@ -1,7 +1,7 @@
 # RFC: Record layouts, and migration
 
-**Status:** the layouts and generations of §§1–4 and 7–8 are built (ADR 0009). The statements that
-move rows between generations (§§5–6) are proposed.
+**Status:** built (ADR 0009 for the layouts and generations; §§5–6 for migration). §9 lists what
+is open.
 
 Companion: [`RFC_DURABLE_BYTECODE_RUNTIME.md`](RFC_DURABLE_BYTECODE_RUNTIME.md), on which a
 migration's backfill runs as a triggered program; [`RFC_RECORD_FORMAT_ROLLOUT.md`](RFC_RECORD_FORMAT_ROLLOUT.md),
@@ -111,128 +111,160 @@ rewritten.
   table is stamped, and when the layout derived from its field definitions differs from its newest
   descriptor the stamp mints the next generation. A statement that changes no declared field, kind
   or optionality mints nothing.
-- The table records its floor, the oldest generation any of its rows may carry (0 when unknown),
-  and a conformance record of the fields every row is known to conform to. They guide planning only.
+- The table records its ring (floor, base and head) and a conformance record of the fields every
+  row is known to conform to (§5.5). They guide planning only.
 - Moving the floor, which is what retires a generation's readers, must first make sure no row and
   no transaction that could still write one carries an earlier number, because a number reused
   after the ring wraps would otherwise read a row through the wrong descriptor.
 
 ## 5. Migration
 
-**Not built.** Two statements are planned to move rows between generations: `ALTER TABLE …
-REWRITE`, which re-encodes every row below the newest generation as it stands (a step with no
-transform), and `MIGRATE EXISTING ROWS … USING`, which applies a transform to each row. A
-`DEFINE FIELD` is never refused for want of either: DDL mints a generation whether or not the rows
-have moved. The
-rules below decide which transform is acceptable. They are stated for a transform from generation
-G to G+1.
+A migration is a step a generation carries. A row stamped before the generation passes through the
+step whenever it is read, and a background job rewrites the rows so that reading them costs nothing
+extra. The step is part of the generation's immutable descriptor, so what a row reads as never
+depends on whether the job has reached it.
 
-### 5.1 What makes a transform acceptable
+### 5.1 The statements
 
-A transform is accepted only when all of these are proven when `MIGRATE` is
-compiled; anything unproven is an error then, never a failure part-way
-through a backfill.
+- `DEFINE FIELD` and `ALTER FIELD … MIGRATE EXISTING ROWS AS <name> USING <expr> [FALLBACK
+  <literal>]` change a field's definition and say what each existing row's value becomes.
+- `ALTER TABLE … MIGRATE EXISTING ROWS AS <name> REMOVE UNDECLARED FIELDS` removes, from every row
+  stored before it, each top-level field the table did not declare when the step was minted.
+- `REMOVE FIELD` and a field made `COMPUTED` on a table that enforces migrations (§5.2) mint a
+  removal step for the field's stored values.
+- A database has a compatibility level, `3` or `4` (`DEFINE DATABASE … COMPATIBILITY`, `ALTER
+  DATABASE COMPATIBILITY`). The store has a default for the databases it creates (`ALTER SYSTEM
+  COMPATIBILITY`): level 4 for a store this release creates, level 3 for one an earlier release
+  created, recorded by a ledger migration. A database that records no level has level 3.
 
-1. **Pure.** `effects_of` over the body answers `EffectSet::PURE`: no data or catalog read, no
-   write, no clock, no entropy, no external call, no opaque body.
-2. **Reads only `$row` and constants.** No parameter, no record dereference, no subquery, no
-   lookup.
-3. **Infallible.** No node may raise for any input of the kinds it is proven to receive (§5.2).
-   `node_may_raise` (`expr/src/expr/logical/effects.rs`) is the starting classification; §5.2 is
-   what it needs to become kind-aware.
-4. **Typed.** Each field of the result has a kind, derived from G's field kinds, equal to the kind
-   G+1 declares for it, and the result has no field G+1 does not declare.
+A migration's name is unique per table. It is recorded in a permanent registry (`!mn`) that
+outlives the descriptor, so restating the statement after the generation is retired does not run
+it again.
 
-### 5.2 Infallibility is decided per node
+### 5.2 Compatibility levels
 
-Every node of the transform is judged, not only its calls: an expression
-raises through a cast, an arithmetic operator, a dereference or a call alike.
-The checker walks the body with the kind of every subexpression known —
-`$row`'s fields have G's kinds, literals have theirs — and accepts a node only
-when it cannot raise for any input of those kinds.
+At level 3 a table accepts any schema change, as the 3.x releases did: a removed field keeps its
+stored values and a retyped field leaves rows that do not conform. At level 4 a `SCHEMAFULL` table
+refuses a schema change its stored rows might not satisfy unless the statement carries `MIGRATE
+EXISTING ROWS` to say what they become, and a removed field's values are removed with a step.
+Raising a database to level 4 verifies its tables (§5.5). A table with no rows takes any change at
+either level.
 
-| node | accepted when | notes |
-|---|---|---|
-| literal, `$row`, a field of `$row` | always | a field absent from a G row reads `NONE`, which G's kind for it admits |
-| object, array and set constructors, `IF`, `??`, `?:` | every operand is accepted | |
-| comparisons, `AND`, `OR`, `NOT` | every operand is accepted | total for every pair of kinds (`operate`) |
-| cast `<K> e` | the conversion from `e`'s proven kind to `K` is total | see below |
-| arithmetic, unary `-` | never, in the first version | integer overflow raises; saturating forms may follow |
-| field access through a value that may hold a record id | never | it would fetch the record; a field of record kind may be copied, not dereferenced |
-| call | the builtin is declared total over the proven kinds of its arguments | see below |
-| `THROW`, subqueries, lookups, closures, methods, parameters other than `$row` | never | |
+A level-4 database, and any `MIGRATE` statement, is written in the stored grammar and so is refused
+by a store at the Legacy feature level; the refusal names the feature level. A level-3 database is
+written in `revision` and every 3.x release reads it.
 
-**Casts are total or not by the pair of kinds.** `<record> e` raises for most
-values, but not for a value already proven a record id; `<float> e` is total
-from `int`; `<int> e` is not total from `string`. The checker holds a table of
-conversions that cannot fail — identity, the numeric widenings, and whichever
-conversions to `string` hold for every value of their source kind — and every
-other cast is refused, however likely it is to succeed on the data at hand.
-Each entry of the table is verified by the same property test that verifies a
-builtin's totality. Where a conversion can fail, the transform
-uses a total form that answers `NONE` instead of raising — `type::try_int`,
-`type::try_record`, … — with `??` supplying the value.
+### 5.3 What a transform may do
 
-**A builtin states its totality.** No builtin declares today whether it can
-raise, so `node_may_raise` treats every call as raising. Each builtin declares
-whether it is total over the kinds it accepts, in the `define_*_function!`
-macros, required and default-partial like `EffectSet`. A declaration of
-totality is checked by a property test over generated inputs of every kind the
-builtin accepts: it is a claim the suite verifies, not one the checker trusts.
+A transform is checked when the statement is compiled; anything unproven is an error then, never a
+failure part-way through a backfill.
 
-**The result is exactly G+1's shape.** Assigning a value to a field of a
-declared type coerces it, and coercion raises. So the result's kinds must
-equal G+1's declared kinds (§5.1, rule 4) and no coercion ever runs: the
-transform, not the field definition, is where every conversion is written.
+1. **Pure.** Its effect set is exactly `EffectSet::PURE`: no data or catalog read, no write, no
+   clock, no entropy, no external call.
+2. **Reads only `$value` and constants.** No other parameter, no field of the row, no subquery, no
+   graph traversal, and no call whose body the transform does not hold (`fn::`, a model, a script,
+   a module). A step through a value that may be a record link, which would fetch the record, is
+   refused unless the kind of the value admits no link there.
+3. **Evaluated under a frame that refuses writes and record dereference.** A dereference that
+   slips the check raises a value error, which takes the `FALLBACK`.
+4. **Tested.** The `FALLBACK` is checked against the field's new kind when the migration is
+   defined, and a result is judged against the same test (the new kind, `SCHEMAFULL`/`FLEXIBLE` and
+   an `ASSERT` over `$value`) when the step runs. A result that fails it takes the `FALLBACK`.
+   A result passes the new kind only through a coercion that loses nothing: a number, at any
+   depth, may change representation only where it converts back to the value it was, and a set
+   must hold apart every element the result held apart, so the duplicates of an array are the
+   only elements a set merges.
 
-### 5.3 How rows move to G+1
+Only an error that depends on the value alone (a failed cast or coercion, an operator given
+operands of the wrong type, a builtin refusing its argument) takes the `FALLBACK`. A timeout,
+cancellation, memory or size limit, capability denial or storage failure propagates, so no node
+stores a fallback for a row another node converts. A step with no `FALLBACK` that meets a value it
+cannot migrate fails the read of that row.
 
-- **On read.** A reader meeting a G record applies the transform. The transform is a pure,
-  infallible native program, so it runs inside the row program as a prelude; a transform that only
-  renames, defaults and drops fields reduces to a field mapping in the reader.
-- **On write.** A writer touching a G record reads it through the transform, applies its change,
-  and writes G+1.
-- **In the background.** A backfill program rewrites cold ranges in batches, each record with a
-  conditional put — only while it is still G — so it never overwrites a concurrent writer. Its
-  progress is the last key it committed; any node resumes it from there
-  ([`RFC_DURABLE_BYTECODE_RUNTIME.md`](RFC_DURABLE_BYTECODE_RUNTIME.md)).
-- **Retirement.** When a scan finds no G record, the transform is dropped and the table's floor
-  moves past G (ADR 0009: the floor is recorded only once no row, and no transaction that could
-  still write one, carries an earlier generation).
+### 5.4 How rows move
 
-A transform is deterministic, so a record read through it and the same record
-after the backfill are identical; that equality is what the upgrade tests
-assert (§8).
+- **On read.** A record stored before a step's generation is brought through every step it has not
+  passed, oldest first, where it becomes a value of the engine: in a scan of the table's range, in
+  a read by id, and where a write adopts its pre-image. Replay never runs in the record decoder, so
+  the transaction's record cache holds records as stored with the generation they carry. A row with
+  no generation is before every step. The head generation's descriptor names the newest generation
+  that carries a step (`LayoutDescriptor::migrated`), so a scan of a table whose rows are all at or
+  past it does no per-row work beyond comparing the stamp.
+- **On write.** A write stamps the row with the table's head generation, so only rows stored before
+  the newest step ever need replay.
+- **In the background.** One lease (`TaskLeaseType::TableMigration`) covers the job for every
+  table. A table with work has one queue entry at `!tm` (`TableMigrationState`) holding a cursor
+  and the counts of the lap. The job reads a page of records from its own snapshot, brings each
+  through the steps it has not passed and stores it in the layout of the head generation, then
+  advances the entry by compare-and-set on the state it read. A page whose entry was replaced or
+  deleted meanwhile commits nothing. A lap ends when the table's newest step is the one the lap
+  began under; otherwise another lap begins. Any node resumes from the stored cursor.
+- **No retirement.** The job does not move the ring's floor. Moving it retires descriptors and
+  erases the `VERSION` history of the generations it passes, so it is an operator decision rather
+  than a side effect of a backfill. The steps stay in the ring, and a straggler row, one a
+  transaction that began before the migration committed after the lap passed it, is replayed
+  whenever it is read.
 
-### 5.4 Derived data
+A transform is deterministic, so a record read through it and the same record after the job are
+identical; that equality is what the replay tests and the upgrade tests assert (§8).
 
-An index, a `COUNT` index, a full-text index or a table view reads field
-values. A transform that changes the value of a field one of them reads would
-leave it describing G while reads describe G+1. The first version refuses such
-a transform. A later one rebuilds the affected structures, concurrently,
-before G+1 becomes visible.
+### 5.5 Verification and claims
 
-### 5.5 What a migration does not do
+A field whose definition may leave stored values that do not conform (a new field, or one whose
+`TYPE`, `FLEXIBLE` or `ASSERT` changed) is queued for verification: the job judges each record's
+value, brought through any pending step, without writing it, against the test a migration step of
+the field would apply. That is the field's type with the definitions beneath it folded in, so a key
+no definition declares beneath an object of a `SCHEMAFULL` table fails it, and its `ASSERT` over
+`$value`. A field every value of which conformed gets a claim in the table's conformance record
+(`!fc`): every row stamped with a generation of the ring holds, at every occupied path of the field,
+a value the claimed definition coerces. The claim records the digest of the definition it was
+settled against, so any change of the definition ends it. Any change of a table's field
+definitions, and a change that makes the table `SCHEMAFULL`, forfeits the table's claims; a pass
+under way starts over when the table becomes `SCHEMAFULL` or a definition beneath a field changes,
+since either changes what the pass judges a field against.
 
-A record read through a transform has not been written: no event, live query
-or changefeed fires for it, before or after the backfill. A migration changes
-representation, not data.
+A claim is made only when all of these hold: no value failed, the test was the field's whole
+definition (it is not where the `ASSERT` reads more than `$value`, or a definition beneath the
+field has a type the fold cannot carry), the lap began after every transaction that could still
+commit an unjudged row had ended (the datastore is the store's sole writer and the job waited for
+the transactions older than the change; any other store reports counts and makes no claim), the
+rewrite is done, the field is one the conformance record can state, and the store is not at the
+Legacy feature level. An absent value is judged as `NONE`. A pass that finds a value that does not
+conform withdraws the table's claims when one is on the definition it judged. A write the schema
+stage does not judge (`OPTION IMPORT`) forfeits the table's claims and restarts the verification.
+The failures found are shown in `INFO FOR TABLE`, with the migrations the table has run, the fields
+it guarantees and the progress of a lap under way.
 
-## 6. Plan changes (proposed)
+A claim lets a migration leave out `FALLBACK` only where its transform is `$value` itself, or a
+cast of it to a number kind, and the previous definition's test, folded as the claim vouches for
+it, widens to the step's test.
 
-- **Logical.** A migration lowers to its own `LogicalOp`. Binding resolves the table's current
-  generation and schema, which the transform is checked against (§5.1): the check is
-  catalog-bound, so it runs at bind, not at lowering.
-- **Physical.** The plan commits generation G+1 (the definitions and the layout derived from
-  them), stores the transform as a program, and triggers the backfill program, all in one
-  transaction.
-- **Reads.** Mapping a scan of a table in migration records both generations as dependencies, and
-  the row program gets the transform as a prelude for G records. Which generation a record is in is
-  read from its header, per row.
-- **Programs declare what they do.** The transform is stored as bytecode, and its acceptance is a
-  property of that bytecode, not of the SurrealQL it came from: a program declares its effects,
-  whether it writes, and whether it can fail, derived from its instructions
-  ([`RFC_DURABLE_BYTECODE_RUNTIME.md`](RFC_DURABLE_BYTECODE_RUNTIME.md) §3).
+### 5.6 Derived data
+
+An index, a `COUNT` index, a full-text index or a table view reads field values. An index on a
+field a pending removal step still clears is refused until the job has rewritten the rows, so an
+index never describes values a read no longer sees. A table view reads the replayed values.
+
+### 5.7 What a migration does not do
+
+A record read through a step has not been written: no event, live query or changefeed fires for
+it, before or after the job. A migration changes representation, not data.
+
+## 6. Plan changes
+
+- **Logical.** A migration is a schema statement (`LogicalOp::Ddl`) carrying its clause whole. The
+  transform is compiled when the statement runs, against the table's definitions as they stand.
+- **Physical.** The statement runs as a lowered program of store instructions
+  (`vm/store.rs`) in one transaction: it mints the generation that carries the step, stores the
+  field definition, and queues the rewrite and the verification. A statement run by a route that
+  resolves the definition before it runs refuses `MIGRATE` rather than run it late-bound.
+- **Reads.** A scan, a read by id and a write's pre-image take the table's replay (`Replay`) when
+  its head generation says a step may be pending. Per-row stamps travel with the batch
+  (`ValueBatch::stamped`). A row stored before the newest step is judged only after replay, so the
+  pre-decode filter and the top-k probe skip it, and an in-place scan decodes it.
+- **Programs declare what they do.** The step is stored as the text of its transform with the test
+  its result must pass, and is compiled once per `(namespace, database, table, generation)`; the
+  compiled step is validated against the stored step by equality before it is used.
 
 ## 7. How the VM reads each layout
 
@@ -256,7 +288,7 @@ representation, not data.
 2. A store writes the new encoding once its feature level is raised: a single-writer engine
    raises itself at startup, and any other engine waits for an operator, who raises it once no node
    older than 4.0 remains (`RFC_RECORD_FORMAT_ROLLOUT.md`).
-3. A table's old rows converge as writes touch them, and a rewrite (§5) moves the rest.
+3. A table's old rows converge as writes touch them, and a migration's job (§5.4) moves the rest.
 4. A later major release drops the `revision` record reader once the minimum supported upgrade path
    starts above 3.x and no generation 0 `revision` record remains.
 
@@ -272,6 +304,8 @@ read through its transform equals the record after the backfill.
 
 1. How `PAX` chunks are assigned: by key range, fixed count, or byte budget, and whether `COLUMNAR`
    follows `PAX`.
-2. The surface of a migration in progress: `INFO FOR TABLE` progress, pausing, cancelling, and what
-   a statement answers while a backfill runs.
-3. Whether turning on a table's required migrations queues its rewrite.
+2. Pausing and cancelling a migration in progress.
+3. Moving the ring's floor once a table's rows are all at the head, and what it does to `VERSION`
+   reads of the generations it retires.
+4. A totality check of a transform over the kinds it receives, which would make `FALLBACK` optional
+   for a transform proven total.

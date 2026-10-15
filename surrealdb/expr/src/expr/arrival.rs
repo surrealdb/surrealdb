@@ -846,9 +846,9 @@ impl Visitor for ArrivalVisitor {
 			session_duration: _,
 			comment: _,
 		} []
-		visit_alter_system(AlterSystemStatement) { query_timeout: _, compact: _ } []
+		visit_alter_system(AlterSystemStatement) { query_timeout: _, compact: _, compatibility: _ } []
 		visit_alter_namespace(AlterNamespaceStatement) { compact: _ } []
-		visit_alter_database(AlterDatabaseStatement) { compact: _ } []
+		visit_alter_database(AlterDatabaseStatement) { name: _, compact: _, compatibility: _ } []
 		visit_alter_table(AlterTableStatement) {
 			name: _,
 			if_exists: _,
@@ -860,6 +860,7 @@ impl Visitor for ArrivalVisitor {
 			kind: _,
 			inline_edges_cap: _,
 			inline_refs_cap: _,
+			migrate: _,
 		} [changefeed]
 		visit_alter_event(AlterEventStatement) {
 			name: _,
@@ -925,6 +926,7 @@ impl Visitor for ArrivalVisitor {
 			permissions: _,
 			comment: _,
 			reference: _,
+			migrate: _,
 			key_names: _,
 		} []
 		visit_upsert(UpsertStatement) {
@@ -1111,6 +1113,7 @@ impl Visitor for ArrivalVisitor {
 			reference: _,
 			graphql_alias: _,
 			graphql_deprecated: _,
+			migrate: _,
 			key_names: _,
 		} []
 		visit_reference(Reference) { on_delete: _ } []
@@ -1172,6 +1175,7 @@ impl Visitor for ArrivalVisitor {
 			id: _,
 			name: _,
 			strict: _,
+			compatibility: _,
 			comment: _,
 			changefeed,
 		} [changefeed]

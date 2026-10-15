@@ -6,19 +6,19 @@ reason = "Test ALTER BUCKET with all variations"
 value = "NONE"
 
 [[test.results]]
-value = """{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: { mybucket: "DEFINE BUCKET mybucket BACKEND 'memory' PERMISSIONS FULL" }, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
+value = """{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: { mybucket: "DEFINE BUCKET mybucket BACKEND 'memory' PERMISSIONS FULL" }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = """{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: { mybucket: "DEFINE BUCKET mybucket READONLY BACKEND 'memory' PERMISSIONS NONE COMMENT 'updated bucket'" }, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
+value = """{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: { mybucket: "DEFINE BUCKET mybucket READONLY BACKEND 'memory' PERMISSIONS NONE COMMENT 'updated bucket'" }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = """{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: { mybucket: "DEFINE BUCKET mybucket BACKEND 'memory' PERMISSIONS FULL" }, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
+value = """{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: { mybucket: "DEFINE BUCKET mybucket BACKEND 'memory' PERMISSIONS FULL" }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
 
 [[test.results]]
 value = "NONE"

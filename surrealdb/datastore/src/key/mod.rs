@@ -32,3 +32,4 @@
 
 pub mod reclaim;
 pub mod schema;
+pub mod table_migration;

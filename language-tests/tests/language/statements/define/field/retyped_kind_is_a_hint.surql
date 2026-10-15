@@ -2,6 +2,7 @@
 [env]
 namespace = true
 database = true
+compatibility = 3
 auth = { level = "owner" }
 
 [test]
@@ -11,7 +12,9 @@ reason = """
 	they held. A declared kind may select an instruction whose fallback
 	answers every value the field may hold; it never removes a check, never
 	reorders or merges a fallible expression, and never selects an unguarded
-	path. The cast of a literal is proven, the read of a field is not.
+	path. The cast of a literal is proven, the read of a field is not. The test
+	runs at compatibility level 3, where a retype leaves the rows as they are;
+	at level 4 a retype over rows needs MIGRATE EXISTING ROWS.
 """
 
 [[test.results]]

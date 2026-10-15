@@ -11,7 +11,7 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::exec::Error as ExecError;
 use crate::exec::field_rules::{
-	admits_nested_kind, define_field_nesting_restrictions, implied_definition, implied_definitions,
+	define_field_nesting_restrictions, implied_definition, implied_definitions,
 	implied_definitions_dropped,
 };
 use crate::expr::statements::define::DefineKind;
@@ -41,6 +41,7 @@ pub(crate) async fn define_field_definition_check_indexed(
 pub(crate) async fn define_field_definition_apply(
 	kind: &DefineKind,
 	definition: &catalog::FieldDefinition,
+	migration: crate::exec::migrate::FieldMigration<'_>,
 	ctx: &FrozenContext,
 	opt: &Options,
 ) -> Result<Value> {
@@ -204,8 +205,30 @@ pub(crate) async fn define_field_definition_apply(
 		crate::ddl::key_scan::validate_record_keys(&exec, &txn, ns, db, &tb_name, key).await?;
 	}
 
+	// The rules of a table that enforces migrations, and the statement's migration, are judged
+	// once every other check of the definition has passed: either can mint a step, and a refusal
+	// leaves no step behind for a transaction its caller goes on to commit.
+	let exec = crate::ddl::frame(ctx, opt, None).await;
+	let stored = migration
+		.before_store(&exec, opt.import, ns, db, &tb_name, definition, existing.as_deref())
+		.await?;
+	if stored == crate::exec::migrate::FieldStore::AlreadyRun {
+		return Ok(Value::None);
+	}
+
 	// Process the statement
 	txn.put_tb_field(ns, db, &tb_name, definition).await?;
+	crate::exec::migrate::FieldMigration::after_store(
+		stored,
+		&exec,
+		opt.import,
+		ns,
+		db,
+		&tb_name,
+		definition,
+		existing.as_deref(),
+	)
+	.await?;
 
 	// Overwriting an existing reference field can drop target tables it
 	// referenced (the REFERENCE clause removed, or the record kind narrowed
@@ -325,9 +348,10 @@ pub(crate) async fn define_field_definition_apply(
 }
 
 /// Refuse `definition` when its kind is not one each field it is nested in
-/// admits at its place ([`admits_nested_kind`]). The check runs under an import
-/// too, so it admits every definition an export writes, the ones a kind
-/// implies for its elements among them.
+/// admits at its place
+/// ([`parent_kind_restrictions`](crate::exec::field_rules::parent_kind_restrictions)).
+/// The check runs under an import too, so it admits every definition an
+/// export writes, the ones a kind implies for its elements among them.
 pub(crate) async fn define_field_statement_disallow_mismatched_types(
 	txn: &Transaction,
 	ns: NamespaceId,
@@ -335,35 +359,7 @@ pub(crate) async fn define_field_statement_disallow_mismatched_types(
 	definition: &catalog::FieldDefinition,
 ) -> Result<()> {
 	let fds = txn.all_tb_fields(ns, db, &definition.table, None).await?;
-
-	if let Some(self_kind) = &definition.field_kind {
-		for fd in fds.iter() {
-			// A derived component has no type of its own to nest under: a field
-			// under its name is refused as a clash.
-			if fd.is_key_part() {
-				continue;
-			}
-			if definition.name.starts_with(&fd.name)
-				&& definition.name != fd.name
-				&& let Some(fd_kind) = &fd.field_kind
-			{
-				let path = definition.name[fd.name.len()..].to_vec();
-				if !admits_nested_kind(fd_kind, &path, self_kind) {
-					// A parent that cannot hold a field at all is refused by the
-					// nesting rule, whose error names why.
-					define_field_nesting_restrictions(&fds, definition)?;
-					bail!(ExecError::MismatchedFieldTypes {
-						name: definition.name.to_sql(),
-						kind: self_kind.to_sql(),
-						existing_name: fd.name.to_sql(),
-						existing_kind: fd_kind.to_sql(),
-					});
-				}
-			}
-		}
-	}
-
-	Ok(())
+	crate::exec::field_rules::parent_kind_restrictions(&fds, definition)
 }
 
 /// The keys a definition of field `name` can be stored under: the raw name

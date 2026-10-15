@@ -1,4 +1,7 @@
 /**
+[env]
+compatibility = 3
+
 [test]
 reason = "A parenthesised path in a stored expression keeps its parentheses: the catalog holds the expression as canonical SurrealQL text, so dropping them would make every row compute a different value"
 

@@ -33,7 +33,7 @@ keyspace:
 ### DEFINE DATABASE other
 NONE
 keyspace:
-/*\x00\x00\x00\x00!dbother\x00 => c16aa0d735935b07 (24 bytes)
+/*\x00\x00\x00\x00!dbother\x00 => 3811a5d9394f0c3d (27 bytes)
 ### DEFINE DATABASE test
 error: The database 'test' already exists
 keyspace:
@@ -43,16 +43,16 @@ keyspace:
 ### DEFINE DATABASE OVERWRITE test COMMENT 'again' STRICT
 NONE
 keyspace:
-/*\x00\x00\x00\x00!dbtest\x00 => 1606415f004704ae (31 bytes)
+/*\x00\x00\x00\x00!dbtest\x00 => 56af854e4e3ce296 (34 bytes)
 ### DEFINE DATABASE feed CHANGEFEED 1h INCLUDE ORIGINAL
 NONE
 keyspace:
-/*\x00\x00\x00\x00!dbfeed\x00 => 8c6d15750e3b1b10 (41 bytes)
+/*\x00\x00\x00\x00!dbfeed\x00 => 53a5502ddfd0bbf8 (44 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x02!cf => a8c7f732281a3812 (8 bytes)
 ### DEFINE DATABASE ('fr' + 'esh')
 NONE
 keyspace:
-/*\x00\x00\x00\x00!dbfresh\x00 => 0ca521b992c986cd (24 bytes)
+/*\x00\x00\x00\x00!dbfresh\x00 => f9d7ad35d879fe77 (27 bytes)
 ### DEFINE DATABASE ('te' + 'st')
 error: The database 'test' already exists
 keyspace:
@@ -76,6 +76,7 @@ keyspace:
 ### DEFINE TABLE OVERWRITE person SCHEMAFULL COMMENT 'people'
 NONE
 keyspace:
+/!tm\x00\x00\x00\x00\x00\x00\x00\x00person\x00 => eb33d375002b66c2 (49 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!gnperson\x00 => a30e0e7dd88767d0 (10 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 9077dcda3e467b56 (183 bytes)
@@ -120,18 +121,21 @@ keyspace:
 ### DEFINE FIELD name ON person TYPE string
 NONE
 keyspace:
+/!tm\x00\x00\x00\x00\x00\x00\x00\x00person\x00 => 74fdbb1d6cab953b (45 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdname\x00 => 74fc473d9da84132 (88 bytes)
 ### DEFINE FIELD age ON person TYPE int VALUE $value + 0 ASSERT $value >= 0 DEFAULT 1
 NONE
 keyspace:
+/!tm\x00\x00\x00\x00\x00\x00\x00\x00person\x00 => 802c0b937d2adb6e (44 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdage\x00 => 1a44e73367b25de7 (112 bytes)
 ### DEFINE FIELD tags ON person TYPE array<string>
 NONE
 keyspace:
+/!tm\x00\x00\x00\x00\x00\x00\x00\x00person\x00 => 24d061ac2260dd32 (45 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdtags\x00 => bcb2063ab4fe9507 (95 bytes)
@@ -139,6 +143,7 @@ keyspace:
 ### DEFINE FIELD nested ON person TYPE array<array<int>>
 NONE
 keyspace:
+/!tm\x00\x00\x00\x00\x00\x00\x00\x00person\x00 => d577870f0b8d79a6 (47 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdnested\x00 => 70810c9e2b8a7acc (101 bytes)
@@ -181,6 +186,7 @@ keyspace:
 ### { DEFINE FIELD tags ON person TYPE array; DEFINE FIELD tags[0] ON person TYPE string }
 NONE
 keyspace:
+/!tm\x00\x00\x00\x00\x00\x00\x00\x00person\x00 => be9c0fff833acfd4 (45 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdtags\x00 => 7b7a9f423891860a (87 bytes)
@@ -188,6 +194,7 @@ keyspace:
 ### { DEFINE FIELD tags ON person TYPE array; DEFINE FIELD tags[*] ON person TYPE string }
 NONE
 keyspace:
+/!tm\x00\x00\x00\x00\x00\x00\x00\x00person\x00 => be9c0fff833acfd4 (45 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdtags\x00 => 7b7a9f423891860a (87 bytes)
@@ -201,6 +208,7 @@ keyspace:
 ### DEFINE FIELD friend ON person TYPE option<record<person>>
 NONE
 keyspace:
+/!tm\x00\x00\x00\x00\x00\x00\x00\x00person\x00 => c61a734bd616397e (47 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdfriend\x00 => 3abc5ea4e8f361b6 (105 bytes)
@@ -213,6 +221,7 @@ keyspace:
 ### DEFINE FIELD OVERWRITE existing ON person TYPE bool
 NONE
 keyspace:
+/!tm\x00\x00\x00\x00\x00\x00\x00\x00person\x00 => 3ab8f0acfc44fc2f (49 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdexisting\x00 => 2ede553306ff1685 (90 bytes)
@@ -1415,6 +1424,7 @@ keyspace:
 ### ALTER TABLE person SCHEMAFULL
 NONE
 keyspace:
+/!tm\x00\x00\x00\x00\x00\x00\x00\x00person\x00 => eb33d375002b66c2 (49 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!gnperson\x00 => a30e0e7dd88767d0 (10 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => d4b924df3fc29e61 (174 bytes)
@@ -1486,6 +1496,7 @@ keyspace:
 ### ALTER FIELD existing ON person TYPE int
 NONE
 keyspace:
+/!tm\x00\x00\x00\x00\x00\x00\x00\x00person\x00 => b2ae7e06aa0c319d (49 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdexisting\x00 => 0822aafc1f7962c2 (89 bytes)
@@ -1498,6 +1509,7 @@ keyspace:
 ### ALTER FIELD existing ON person VALUE $value + 1 ASSERT $value > 0 DEFAULT 1
 NONE
 keyspace:
+/!tm\x00\x00\x00\x00\x00\x00\x00\x00person\x00 => 704cd553fde10704 (49 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0cedac0021f47e70 (174 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdexisting\x00 => 222500a19e006903 (119 bytes)
@@ -2031,10 +2043,10 @@ keyspace:
 NONE
 keyspace:
 ### INFO FOR DB
-{ accesses: { db_jwt: "DEFINE ACCESS db_jwt ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, analyzers: { unused: 'DEFINE ANALYZER unused TOKENIZERS BLANK FILTERS LOWERCASE', words: 'DEFINE ANALYZER words TOKENIZERS BLANK' }, apis: { "/ping": "DEFINE API '/ping' FOR any PERMISSIONS FULL FOR get PERMISSIONS FULL THEN { { status: 200 } }" }, buckets: {  }, configs: { API: 'API MIDDLEWARE api::timeout(1s) PERMISSIONS FULL' }, extensions: {  }, functions: { one: 'DEFINE FUNCTION fn::one() { 1 } PERMISSIONS FULL' }, models: {  }, params: { limit: 'DEFINE PARAM $limit VALUE 10 PERMISSIONS FULL' }, sequences: { seq: 'DEFINE SEQUENCE seq BATCH 1000 START 0' }, tables: { by_person: 'DEFINE TABLE by_person TYPE ANY SCHEMALESS AS SELECT * FROM person PERMISSIONS NONE', carried: 'DEFINE TABLE carried TYPE RELATION IN person OUT person SCHEMALESS PERMISSIONS NONE', feedful: 'DEFINE TABLE feedful TYPE ANY SCHEMALESS CHANGEFEED 1d PERMISSIONS NONE', indexed: 'DEFINE TABLE indexed TYPE ANY SCHEMALESS PERMISSIONS NONE', keyed_by: 'DEFINE TABLE keyed_by TYPE ANY SCHEMALESS PERMISSIONS NONE', person: 'DEFINE TABLE person TYPE ANY SCHEMALESS PERMISSIONS NONE', sale: 'DEFINE TABLE sale TYPE ANY SCHEMALESS PERMISSIONS NONE', strict: 'DEFINE TABLE strict TYPE NORMAL SCHEMAFULL PERMISSIONS NONE', texts: 'DEFINE TABLE texts TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: { db_user: "DEFINE USER db_user ON DATABASE PASSHASH '[REDACTED]' PASSSCRAM '[REDACTED]' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE" } }
+{ accesses: { db_jwt: "DEFINE ACCESS db_jwt ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, analyzers: { unused: 'DEFINE ANALYZER unused TOKENIZERS BLANK FILTERS LOWERCASE', words: 'DEFINE ANALYZER words TOKENIZERS BLANK' }, apis: { "/ping": "DEFINE API '/ping' FOR any PERMISSIONS FULL FOR get PERMISSIONS FULL THEN { { status: 200 } }" }, buckets: {  }, compatibility: 4, configs: { API: 'API MIDDLEWARE api::timeout(1s) PERMISSIONS FULL' }, extensions: {  }, functions: { one: 'DEFINE FUNCTION fn::one() { 1 } PERMISSIONS FULL' }, models: {  }, params: { limit: 'DEFINE PARAM $limit VALUE 10 PERMISSIONS FULL' }, sequences: { seq: 'DEFINE SEQUENCE seq BATCH 1000 START 0' }, tables: { by_person: 'DEFINE TABLE by_person TYPE ANY SCHEMALESS AS SELECT * FROM person PERMISSIONS NONE', carried: 'DEFINE TABLE carried TYPE RELATION IN person OUT person SCHEMALESS PERMISSIONS NONE', feedful: 'DEFINE TABLE feedful TYPE ANY SCHEMALESS CHANGEFEED 1d PERMISSIONS NONE', indexed: 'DEFINE TABLE indexed TYPE ANY SCHEMALESS PERMISSIONS NONE', keyed_by: 'DEFINE TABLE keyed_by TYPE ANY SCHEMALESS PERMISSIONS NONE', person: 'DEFINE TABLE person TYPE ANY SCHEMALESS PERMISSIONS NONE', sale: 'DEFINE TABLE sale TYPE ANY SCHEMALESS PERMISSIONS NONE', strict: 'DEFINE TABLE strict TYPE NORMAL SCHEMAFULL PERMISSIONS NONE', texts: 'DEFINE TABLE texts TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: { db_user: "DEFINE USER db_user ON DATABASE PASSHASH '[REDACTED]' PASSSCRAM '[REDACTED]' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE" } }
 keyspace:
 ### INFO FOR DB STRUCTURE
-{ accesses: [{ duration: { session: NONE, token: 1h }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'JWT' }, name: 'db_jwt' }], analyzers: [{ filters: ['LOWERCASE'], name: 'unused', tokenizers: ['BLANK'] }, { name: 'words', tokenizers: ['BLANK'] }], apis: [{ actions: [{ action: '{ { status: 200 } }', config: { permissions: true }, methods: ['get'] }], config: { permissions: true }, path: '/ping' }], buckets: [], configs: [{ api: { middleware: { "api::timeout": ['1s'] }, permissions: true } }], extensions: [], functions: [{ args: [], block: '{ 1 }', name: 'one', permissions: true }], models: [], params: [{ name: 'limit', permissions: true, value: '10' }], sequences: [{ batch: '1000', name: 'seq', resume: '1', start: '0', timeout: NONE }], tables: [{ drop: false, id: 1, kind: { kind: 'ANY' }, name: 'by_person', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false, view: 'AS SELECT * FROM person' }, { drop: false, id: 4, kind: { enforced: false, in: [person], kind: 'RELATION', out: [person] }, name: 'carried', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false }, { changefeed: { expiry: 1d, original: false }, drop: false, id: 5, kind: { kind: 'ANY' }, name: 'feedful', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false }, { drop: false, id: 3, kind: { kind: 'ANY' }, name: 'indexed', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false }, { drop: false, id: 6, kind: { kind: 'ANY' }, name: 'keyed_by', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false }, { drop: false, id: 0, kind: { kind: 'ANY' }, name: 'person', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false }, { drop: false, id: 2, kind: { kind: 'ANY' }, name: 'sale', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false }, { drop: false, id: 7, kind: { kind: 'NORMAL' }, name: 'strict', permissions: { create: false, delete: false, select: false, update: false }, schemafull: true }, { drop: false, id: 8, kind: { kind: 'ANY' }, name: 'texts', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false }], users: [{ duration: { session: NONE, token: 1h }, hash: '[REDACTED]', name: 'db_user', roles: ['VIEWER'], scram: '[REDACTED]' }] }
+{ accesses: [{ duration: { session: NONE, token: 1h }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'JWT' }, name: 'db_jwt' }], analyzers: [{ filters: ['LOWERCASE'], name: 'unused', tokenizers: ['BLANK'] }, { name: 'words', tokenizers: ['BLANK'] }], apis: [{ actions: [{ action: '{ { status: 200 } }', config: { permissions: true }, methods: ['get'] }], config: { permissions: true }, path: '/ping' }], buckets: [], compatibility: 4, configs: [{ api: { middleware: { "api::timeout": ['1s'] }, permissions: true } }], extensions: [], functions: [{ args: [], block: '{ 1 }', name: 'one', permissions: true }], models: [], params: [{ name: 'limit', permissions: true, value: '10' }], sequences: [{ batch: '1000', name: 'seq', resume: '1', start: '0', timeout: NONE }], tables: [{ drop: false, id: 1, kind: { kind: 'ANY' }, name: 'by_person', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false, view: 'AS SELECT * FROM person' }, { drop: false, id: 4, kind: { enforced: false, in: [person], kind: 'RELATION', out: [person] }, name: 'carried', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false }, { changefeed: { expiry: 1d, original: false }, drop: false, id: 5, kind: { kind: 'ANY' }, name: 'feedful', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false }, { drop: false, id: 3, kind: { kind: 'ANY' }, name: 'indexed', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false }, { drop: false, id: 6, kind: { kind: 'ANY' }, name: 'keyed_by', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false }, { drop: false, id: 0, kind: { kind: 'ANY' }, name: 'person', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false }, { drop: false, id: 2, kind: { kind: 'ANY' }, name: 'sale', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false }, { drop: false, id: 7, kind: { kind: 'NORMAL' }, name: 'strict', permissions: { create: false, delete: false, select: false, update: false }, schemafull: true }, { drop: false, id: 8, kind: { kind: 'ANY' }, name: 'texts', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false }], users: [{ duration: { session: NONE, token: 1h }, hash: '[REDACTED]', name: 'db_user', roles: ['VIEWER'], scram: '[REDACTED]' }] }
 keyspace:
 ### INFO FOR TABLE person
 { events: { audit: 'DEFINE EVENT audit ON person WHEN true THEN (CREATE log)' }, fields: { existing: 'DEFINE FIELD existing ON person TYPE string PERMISSIONS FULL', loose: 'DEFINE FIELD loose ON person TYPE object PERMISSIONS FULL' }, indexes: { by_existing: 'DEFINE INDEX by_existing ON person FIELDS existing' }, lives: {  }, tables: { by_person: 'DEFINE TABLE by_person TYPE ANY SCHEMALESS AS SELECT * FROM person PERMISSIONS NONE' } }
@@ -2049,10 +2061,10 @@ keyspace:
 { events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }
 keyspace:
 ### INFO FOR NS
-{ accesses: { ns_jwt: "DEFINE ACCESS ns_jwt ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, databases: { second: 'DEFINE DATABASE second', test: 'DEFINE DATABASE test' }, users: { ns_user: "DEFINE USER ns_user ON NAMESPACE PASSHASH '[REDACTED]' PASSSCRAM '[REDACTED]' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE" } }
+{ accesses: { ns_jwt: "DEFINE ACCESS ns_jwt ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, databases: { second: 'DEFINE DATABASE second COMPATIBILITY 4', test: 'DEFINE DATABASE test COMPATIBILITY 4' }, users: { ns_user: "DEFINE USER ns_user ON NAMESPACE PASSHASH '[REDACTED]' PASSSCRAM '[REDACTED]' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE" } }
 keyspace:
 ### INFO FOR NS STRUCTURE
-{ accesses: [{ duration: { session: NONE, token: 1h }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'JWT' }, name: 'ns_jwt' }], databases: [{ id: 1, name: 'second' }, { id: 0, name: 'test' }], users: [{ duration: { session: NONE, token: 1h }, hash: '[REDACTED]', name: 'ns_user', roles: ['VIEWER'], scram: '[REDACTED]' }] }
+{ accesses: [{ duration: { session: NONE, token: 1h }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'JWT' }, name: 'ns_jwt' }], databases: [{ compatibility: 4, id: 1, name: 'second' }, { compatibility: 4, id: 0, name: 'test' }], users: [{ duration: { session: NONE, token: 1h }, hash: '[REDACTED]', name: 'ns_user', roles: ['VIEWER'], scram: '[REDACTED]' }] }
 keyspace:
 ### INFO FOR ROOT
 { accesses: { root_jwt: "DEFINE ACCESS root_jwt ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, config: { QUERY_TIMEOUT: NONE }, defaults: {  }, namespaces: { test: 'DEFINE NAMESPACE test' }, nodes: {  }, system: { <host metrics> }, users: { root_user: "DEFINE USER root_user ON ROOT PASSHASH '[REDACTED]' PASSSCRAM '[REDACTED]' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE" } }
@@ -2114,6 +2126,7 @@ NONE
 keyspace:
 /!nstest\x00 => removed
 /!rc\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => eaa0081875df2d0d (3 bytes)
+/!tm\x00\x00\x00\x00\x00\x00\x00\x00person\x00 => removed
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x00 => removed
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x01 => removed
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x02 => removed
@@ -2131,6 +2144,7 @@ NONE
 keyspace:
 /!nstest\x00 => removed
 /!rc\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => eaa0081875df2d0d (3 bytes)
+/!tm\x00\x00\x00\x00\x00\x00\x00\x00person\x00 => removed
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x00 => removed
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x01 => removed
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x02 => removed
@@ -2154,6 +2168,7 @@ NONE
 keyspace:
 /!nstest\x00 => removed
 /!rc\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => eaa0081875df2d0d (3 bytes)
+/!tm\x00\x00\x00\x00\x00\x00\x00\x00person\x00 => removed
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x00 => removed
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x01 => removed
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x02 => removed
@@ -2173,6 +2188,7 @@ keyspace:
 NONE
 keyspace:
 /!rc\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => eaa0081875df2d0d (3 bytes)
+/!tm\x00\x00\x00\x00\x00\x00\x00\x00person\x00 => removed
 /*\x00\x00\x00\x00!dbtest\x00 => removed
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x00 => removed
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x01 => removed
@@ -2201,6 +2217,7 @@ keyspace:
 NONE
 keyspace:
 /!rc\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => eaa0081875df2d0d (3 bytes)
+/!tm\x00\x00\x00\x00\x00\x00\x00\x00person\x00 => removed
 /*\x00\x00\x00\x00!dbtest\x00 => removed
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x00 => removed
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*indexed\x00!bs\x00\x00\x00\x01 => removed

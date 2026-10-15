@@ -2,6 +2,7 @@
 [env]
 namespace = true
 database = true
+compatibility = 3
 
 [test]
 reason = "A field is defined only inside a defined field that can hold it: a named field inside an object, `*` inside an object, array or set, and an index inside an array or set"

@@ -917,6 +917,20 @@ fn validate_upgrade_case(
 		}
 	}
 
+	// The import phase defines the database on a released binary, whose
+	// databases all stand at level 3 and which knows no `COMPATIBILITY`
+	// clause. Level 3 is what the test gets anyway, so the key may say so;
+	// any other level is a database the test never had.
+	if let Some(level) = cfg.env.compatibility
+		&& level != 3
+	{
+		bail!(
+			"`env.compatibility = {level}` cannot hold in an upgrade test: a released binary \
+			 defines the test's database, and every such database stands at level 3. Remove \
+			 the key, or raise the level in the test body with `ALTER DATABASE`."
+		)
+	}
+
 	let mut ignored = Vec::new();
 	if cfg.env.auth.is_some() {
 		ignored.push("env.auth");
