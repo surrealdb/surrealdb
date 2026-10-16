@@ -260,7 +260,9 @@ pub(in crate::exec::vm) enum StorageFact {
 	Absent,
 	/// No mutation phase changed the record.
 	Unmodified,
-	/// The record's table is declared `DROP`: its records are not stored.
+	/// The record's table is declared `DROP`: a write that would store the
+	/// record stores nothing. A record stored before the clause was declared
+	/// stays stored until it is deleted.
 	TableDropped,
 	/// The record's table is a lightweight relation, whose edges are their
 	/// adjacency keys alone.

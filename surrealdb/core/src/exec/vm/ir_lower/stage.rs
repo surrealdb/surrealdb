@@ -1377,9 +1377,9 @@ pub(super) fn emit_stage(
 		}
 		// The record's doc-id released once every index has let go of it: marked for the build's
 		// replay when an in-flight build took the record's delete, and otherwise dropped from the
-		// table's shared doc-id space, unless the table is being dropped or nothing on the table
-		// consumes that space, as the transaction's settled read of the table's graph marker
-		// confirms.
+		// table's shared doc-id space, unless nothing on the table consumes that space, as the
+		// transaction's settled read of the table's graph marker confirms. The purge removes the
+		// stored record of a `DROP` table as it does any other, so its doc-id goes with it.
 		WriteStageKind::ReclaimDocId => {
 			let release = em.label()?;
 			jump_if(em, StorageFact::DocIdDeferred, false, release);
@@ -1389,7 +1389,6 @@ pub(super) fn emit_stage(
 				target: done,
 			});
 			em.bind(release)?;
-			jump_if(em, StorageFact::TableDropped, true, done);
 			let consumed = em.label()?;
 			jump_if(em, StorageFact::DocIdConsumer, true, consumed);
 			jump_if(em, StorageFact::GraphDocIdsSettled, false, done);
@@ -1618,8 +1617,8 @@ pub(super) fn emit_stage(
 			no_clauses(run.stored.indexes, "the indexes of the written table")?;
 			if !run.stored.catalog_fixed {
 				let end = em.label()?;
-				for fact in [StorageFact::Unmaintained, StorageFact::TableDropped] {
-					jump_if(em, fact, true, end);
+				for fact in index_skips(run) {
+					jump_if(em, *fact, true, end);
 				}
 				em.emit(storage(StorageInstr::CheckIndexes {
 					lowered: Arc::new(LoweredIndexes::new(Arc::from(Vec::new()), Vec::new())),
@@ -2398,12 +2397,26 @@ fn take_derivations<'r, 'f>(
 		.collect()
 }
 
+/// The facts on which `StoreIndexData` leaves the record's entries alone, because the write leaves
+/// the record's storage alone: a record no mutation phase changed, unless the session forces index
+/// maintenance, and a record of a `DROP` table in a write that stores through `StoreRecordData`,
+/// which writes nothing for one. Every other write changes storage whatever the table's `DROP`
+/// clause says: a delete's purge removes the stored record, and a view's maintenance writes and
+/// removes its rows. An index holds an entry for exactly the records storage holds, so there the
+/// entries follow the record.
+fn index_skips(run: &StageRun) -> &'static [StorageFact] {
+	if run.stages.contains(&WriteStageKind::StoreRecordData) {
+		&[StorageFact::Unmaintained, StorageFact::TableDropped]
+	} else {
+		&[StorageFact::Unmaintained]
+	}
+}
+
 /// Brings every index of the written table in line with the record's two images, one instruction
 /// per index in the catalog's order: a B-tree or `UNIQUE` index's entries from its columns, written
 /// by the host from the values a host pipeline answers for an image, and any other kind through its
-/// own implementation from the same columns and, for a `COUNT` index, its guard. A record no
-/// mutation phase changed is left alone unless the session forces index maintenance, and a record
-/// of a `DROP` table has no entries.
+/// own implementation from the same columns and, for a `COUNT` index, its guard. The record is left
+/// alone where [`index_skips`] says storage is.
 ///
 /// The program names the definitions it was lowered from, and a record whose table holds other
 /// definitions by the time it is written fails the statement. The pipelines of every index compile
@@ -2458,8 +2471,8 @@ fn store_indexes(em: &mut Emitter, cx: &mut Stages<'_, '_>) -> Result<(), IrErro
 	}
 	let lowered = Arc::new(LoweredIndexes::new(Arc::clone(defs), per_index));
 	let end = em.label()?;
-	for fact in [StorageFact::Unmaintained, StorageFact::TableDropped] {
-		jump_if(em, fact, true, end);
+	for fact in index_skips(run) {
+		jump_if(em, *fact, true, end);
 	}
 	em.emit(storage(StorageInstr::CheckIndexes {
 		lowered: Arc::clone(&lowered),
@@ -3379,10 +3392,11 @@ mod tests {
 	use crate::iam::Action as GateAction;
 	use crate::val::Value;
 
-	/// A run over a table whose images are plain, for a caller whose reads are permission-checked.
+	/// An update's run over a table whose images are plain, for a caller whose reads are
+	/// permission-checked. It stores its record through `StoreRecordData`.
 	fn run() -> StageRun {
 		StageRun {
-			stages: Vec::new(),
+			stages: vec![WriteStageKind::StoreRecordData, WriteStageKind::StoreIndexData],
 			cond: None,
 			data: None,
 			output: OutputShape::After,
@@ -3594,24 +3608,29 @@ mod tests {
 
 	#[test]
 	fn a_released_doc_id_is_marked_pending_while_a_build_replays() {
-		let code = code(WriteStageKind::ReclaimDocId);
-		assert_eq!(
-			code.first(),
-			Some(&storage(StorageInstr::JumpIf {
-				fact: StorageFact::DocIdDeferred,
-				when: false,
-				target: 3,
-			}))
-		);
-		assert_eq!(code.get(1), Some(&storage(StorageInstr::MarkDocIdPending)));
-		assert_eq!(
-			code.get(2),
-			Some(&Instr::Jump {
-				target: 7
+		let jump = |fact, when, target| {
+			storage(StorageInstr::JumpIf {
+				fact,
+				when,
+				target,
 			})
+		};
+		// No fact about the table's `DROP` clause gates the release: the purge removes the stored
+		// record of a `DROP` table as it does any other.
+		assert_eq!(
+			code(WriteStageKind::ReclaimDocId),
+			[
+				jump(StorageFact::DocIdDeferred, false, 3),
+				storage(StorageInstr::MarkDocIdPending),
+				Instr::Jump {
+					target: 6
+				},
+				jump(StorageFact::DocIdConsumer, true, 5),
+				jump(StorageFact::GraphDocIdsSettled, false, 6),
+				storage(StorageInstr::ReleaseDocId),
+				Instr::EndRow,
+			]
 		);
-		assert_eq!(code.get(6), Some(&storage(StorageInstr::ReleaseDocId)));
-		assert_eq!(code.last(), Some(&Instr::EndRow));
 	}
 
 	#[test]
@@ -6699,6 +6718,73 @@ mod tests {
 			]
 		);
 		assert!(program.host_code.is_empty());
+	}
+
+	#[test]
+	fn the_indexes_of_a_drop_table_follow_every_write_that_changes_its_storage() {
+		use crate::exec::ir::logical::stages::stage_run;
+		use crate::exec::operators::write::plan::{WriteFacts, WriteForm as PlanForm};
+		let skips = |code: &[Instr]| -> Vec<StorageFact> {
+			code.iter()
+				.filter_map(|instr| {
+					let Instr::Write(WriteInstr::Storage(StorageInstr::JumpIf {
+						fact,
+						..
+					})) = instr
+					else {
+						return None;
+					};
+					Some(*fact)
+				})
+				.collect()
+		};
+		let def = index_def(1, "by_name", &["name"], crate::catalog::Index::Idx);
+		// A create or an update stores nothing for a record of a `DROP` table, so the record's
+		// entries are left as they are. A delete's purge removes the stored record, and a view's
+		// maintenance writes and removes its rows, whatever the clause says, so their entries
+		// follow the record. A table with no index is checked for one on the same terms.
+		for (form, dropped) in [
+			(PlanForm::Create, true),
+			(PlanForm::Update, true),
+			(PlanForm::Upsert, true),
+			(PlanForm::Insert, true),
+			(PlanForm::Relate, true),
+			(PlanForm::Delete, false),
+			(PlanForm::View, false),
+		] {
+			let stages = stage_run(
+				form,
+				WriteFacts {
+					form,
+					has_data: true,
+					on_duplicate_key_update: false,
+					ignore: false,
+					repeatable: false,
+				},
+			);
+			let expected = match dropped {
+				true => vec![StorageFact::Unmaintained, StorageFact::TableDropped],
+				false => vec![StorageFact::Unmaintained],
+			};
+			let mut b = Builder::new();
+			let regions = column_regions(&mut b, EvalFrame::caller(), &["name"]);
+			let indexed = StageRun {
+				stages: stages.clone(),
+				..indexing(vec![def.clone()], regions)
+			};
+			let (code, _) = emitted_program(&b.ir, &indexed, WriteStageKind::StoreIndexData)
+				.expect("it lowers");
+			assert_eq!(skips(&code), expected, "{form:?} over a table with an index");
+			let unindexed = StageRun {
+				stages,
+				..stored_run(WriteStored {
+					catalog_fixed: false,
+					..storing(Stored::Nothing)
+				})
+			};
+			let code = emitted(&unindexed, WriteStageKind::StoreIndexData).expect("it lowers");
+			assert_eq!(skips(&code), expected, "{form:?} over a table with no index");
+		}
 	}
 
 	#[test]
