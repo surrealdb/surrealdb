@@ -9898,6 +9898,37 @@ impl Transaction {
 	pub fn trigger_async_event(&self) {
 		self.trigger_async_event.store(true, Ordering::Relaxed);
 	}
+
+	/// The views among `registered`, the registrations stored under table `tb`, whose own
+	/// definition at `version` is a view that reads `tb`.
+	///
+	/// A registration is the copy of a view's definition that `DEFINE TABLE ... AS SELECT` writes
+	/// under each table the view reads. One whose view table has since been removed, or redefined
+	/// as a plain table or as a view over other tables, names a view `tb` no longer feeds, and is
+	/// left out. Answers `registered` itself when every registration is current.
+	async fn views_reading(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		registered: Arc<[TableDefinition]>,
+		version: Option<u64>,
+	) -> Result<Arc<[TableDefinition]>> {
+		let mut current = Vec::with_capacity(registered.len());
+		for registration in registered.iter() {
+			let reads =
+				self.get_tb(ns, db, &registration.name, version).await?.is_some_and(|view| {
+					view.view.as_ref().is_some_and(|view| view.source_tables().contains(tb))
+				});
+			if reads {
+				current.push(registration.clone());
+			}
+		}
+		if current.len() == registered.len() {
+			return Ok(registered);
+		}
+		Ok(current.into())
+	}
 }
 
 // --------------------------------------------------
@@ -11146,7 +11177,8 @@ impl TableProvider for Transaction {
 		)
 	}
 
-	/// Retrieve all view definitions for a specific table.
+	/// Retrieve all view definitions for a specific table: the registrations stored under it
+	/// whose view still reads it ([`Transaction::views_reading`]).
 	fn all_tb_views<'a>(
 		&'a self,
 		ns: NamespaceId,
@@ -11167,7 +11199,8 @@ impl TableProvider for Transaction {
 					let val = self.tr.getr(range.into_key_range(), version).await?;
 					let stored: Arc<[StoredTableDefinition]> =
 						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-					return catalog::from_stored_all(&stored);
+					let val = catalog::from_stored_all(&stored)?;
+					return self.views_reading(ns, db, tb, val, version).await;
 				}
 				let qey = cache::tx::Lookup::Fts(ns, db, tb.as_str());
 				match self.cache.get(&qey) {
@@ -11183,6 +11216,7 @@ impl TableProvider for Transaction {
 						let stored: Arc<[StoredTableDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let val = catalog::from_stored_all(&stored)?;
+						let val = self.views_reading(ns, db, tb, val, None).await?;
 						let entry = cache::tx::Entry::Fts(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)

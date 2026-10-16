@@ -45,8 +45,10 @@ impl Ddl<'_, '_> {
 	/// the definition is formed from the template with the ids, stamps and markers the program
 	/// fills, and the refusals its checks decided are raised where the body raises them. A
 	/// relation's `in` and `out` fields are defined with it, a changefeed is recorded, and a cache
-	/// built under one cap regime is cleared when the cap changes. A view is then filled from the
-	/// tables it reads ([`Ddl::define_view`]).
+	/// built under one cap regime is cleared when the cap changes. A definition that replaces a
+	/// view removes the view's registration from every table the view read, whatever the new
+	/// definition is; a view is then registered on the tables it reads and filled from them
+	/// ([`Ddl::define_view`]).
 	pub(super) fn define_table(
 		&mut self,
 		attrs: &DefineAttrs,
@@ -92,6 +94,14 @@ impl Ddl<'_, '_> {
 			key,
 			ty: TypeId::named("StoredTableDefinition"),
 			dst: existing,
+		});
+		// The tables the definition being replaced reads as a view, read before it is replaced.
+		let old_sources = self.reg()?;
+		self.store(StoreInstr::ViewSources {
+			ns,
+			db,
+			tb: name_reg,
+			dst: old_sources,
 		});
 		let table_id = self.reg()?;
 		let [folded, doc_ids, inline_gen, old_edges, old_refs] =
@@ -262,6 +272,9 @@ impl Ddl<'_, '_> {
 			value: definition,
 		});
 		self.stamp(ns, db, name_op)?;
+		// The tables the replaced definition read as a view feed it no longer. A view this
+		// statement defines registers on the tables it reads afterwards ([`Ddl::define_view`]).
+		self.unregister_view((ns, db), name_op, old_sources, false)?;
 
 		// A cache built under one cap regime is not trusted under another.
 		for (old, new, route) in [
@@ -506,23 +519,13 @@ impl Ddl<'_, '_> {
 			tb,
 			dst: sources,
 		});
-		let views = self.scan(
-			"ForeignTablePrefix",
-			&[("ns", ns_op), ("db", db_op), ("tb", name)],
-			"StoredTableDefinition",
-		)?;
-		let no_views = self.label()?;
-		self.emit(Instr::JumpIf {
-			cond: Operand::Reg(views),
-			truthy: false,
-			target: no_views,
+		// A view that still reads the table refuses the removal; a registration whose view no
+		// longer reads it refuses nothing.
+		self.store(StoreInstr::RefuseRemovingViewed {
+			ns,
+			db,
+			tb,
 		});
-		let detail = self.object(&[("table", name), ("views", Operand::Reg(views))])?;
-		self.store(StoreInstr::Raise {
-			error: StatementError::TbHasViews,
-			arg: detail,
-		});
-		self.bind(no_views)?;
 		// The check runs before the table's data is removed. A non-empty relation that uses the
 		// table as an endpoint refuses the removal, judged on the edges as they stand when this
 		// statement runs.
@@ -548,19 +551,46 @@ impl Ddl<'_, '_> {
 		self.delete_range("TableMigrationRequestTbPrefix", key, false);
 		self.stamp(ns, db, name)?;
 		self.delete_range("TblRoot", key, expunge);
-		self.each(sources, |l, source| {
-			let ft = Operand::Reg(source);
-			let foreign = l.object(&[("ns", ns_op), ("db", db_op), ("tb", ft), ("ft", name)])?;
-			l.delete("ForeignTableKey", foreign, expunge);
-			let ft_key = l.object(&[("ns", ns_op), ("db", db_op), ("tb", ft)])?;
-			let ft_name = l.load(ft)?;
-			let source_table = l.expect_table(ft_key, ft_name)?;
-			l.replace_table((ns, db, ft), ft_key, source_table, "cache_tables_ts")?;
-			l.store(StoreInstr::ClearCache);
-			Ok(())
-		})?;
+		self.unregister_view((ns, db), name, sources, expunge)?;
 		self.store(StoreInstr::ClearCache);
 		self.answer_none()
+	}
+
+	/// Removes the registration of the view named `name` from each table in the array in
+	/// `sources`, the tables its definition read, and refreshes each one's views stamp, so a
+	/// write to it no longer maintains the view. Under `EXPUNGE` every earlier version of a
+	/// registration goes too. A source that no longer exists holds no registration and is
+	/// passed over.
+	fn unregister_view(
+		&mut self,
+		(ns, db): (Reg, Reg),
+		name: Operand,
+		sources: Reg,
+		expunge: bool,
+	) -> Result<(), IrError> {
+		let (ns_op, db_op) = (Operand::Reg(ns), Operand::Reg(db));
+		self.each(sources, |l, source| {
+			let ft = Operand::Reg(source);
+			let ft_key = l.object(&[("ns", ns_op), ("db", db_op), ("tb", ft)])?;
+			let source_table = l.reg()?;
+			l.store(StoreInstr::Get {
+				route: RouteId::named("TableKey"),
+				key: ft_key,
+				ty: TypeId::named("StoredTableDefinition"),
+				dst: source_table,
+			});
+			let gone = l.label()?;
+			l.emit(Instr::JumpIf {
+				cond: Operand::Reg(source_table),
+				truthy: false,
+				target: gone,
+			});
+			let foreign = l.object(&[("ns", ns_op), ("db", db_op), ("tb", ft), ("ft", name)])?;
+			l.delete("ForeignTableKey", foreign, expunge);
+			l.replace_table((ns, db, ft), ft_key, source_table, "cache_tables_ts")?;
+			l.store(StoreInstr::ClearCache);
+			l.bind(gone)
+		})
 	}
 
 	/// `ALTER TABLE`: the clauses the template names replace the table's, which is then validated

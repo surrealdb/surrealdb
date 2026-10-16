@@ -1331,8 +1331,9 @@ pub(crate) enum DdlChecks {
 		flexible: Option<FieldRefusal>,
 	},
 	/// `REMOVE TABLE`, which checks nothing of the catalog when it is
-	/// planned: the tables a view reads from, and the edges of the relations
-	/// over the table, are read when it runs (`StoreInstr::ViewSources`,
+	/// planned: the tables a view reads from, the views that read the table
+	/// and the edges of the relations over it are read when it runs
+	/// (`StoreInstr::ViewSources`, `StoreInstr::RefuseRemovingViewed`,
 	/// `StoreInstr::RefuseRemovingLightweight`).
 	RemoveTable,
 	/// `REMOVE FIELD` and `ALTER FIELD`: the table, the field and the

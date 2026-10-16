@@ -1471,6 +1471,14 @@ pub(super) enum StoreInstr {
 		key: Arc<crate::catalog::KeyStructure>,
 	},
 	/// Raise what refuses the removal of table `tb` of the database `ns`,
+	/// `db` for the views over it: a view whose definition reads `tb`, as the
+	/// catalog holds the views when the instruction runs.
+	RefuseRemovingViewed {
+		ns: Reg,
+		db: Reg,
+		tb: Reg,
+	},
+	/// Raise what refuses the removal of table `tb` of the database `ns`,
 	/// `db`: a non-empty LIGHTWEIGHT relation using it as an endpoint, or the
 	/// table being a non-empty LIGHTWEIGHT relation, as the edges stand when
 	/// the instruction runs.
@@ -1932,7 +1940,9 @@ pub(super) enum StoreInstr {
 	/// view's fields), stands for under the source record's key, then run the
 	/// view table's own order for a created row: the order of the view table's
 	/// catalog version when the backfill meets the table
-	/// ([`super::fault::view_rows`]).
+	/// ([`super::fault::view_rows`]). A row the backfill already stored under
+	/// the key, from a record of another source table with the same id, is
+	/// replaced, and the order is run for an updated row.
 	BackfillRow {
 		table: Reg,
 		row: Reg,
@@ -2965,9 +2975,6 @@ pub(super) enum StatementError {
 	/// An analyzer an index uses; the argument is an object of the
 	/// analyzer's `name`, and the `table` and `index` using it.
 	AzInUse,
-	/// A table with views over it; the argument is an object of the
-	/// `table`'s name and its `views`' definitions.
-	TbHasViews,
 	/// A `DEFINE EXTENSION` with neither `SIGNER` nor `UNSIGNED`, outside an
 	/// import; the argument is unused.
 	MdNeedsTrust,

@@ -61,7 +61,7 @@ pub(super) use observe::{
 };
 pub(super) use schema::{FieldPermission, FieldPlan, FieldWrite, SchemaInstr, SchemaPlan};
 pub(super) use storage::{IndexPlan, LoweredIndexes, NativeIndexKind, StorageFact, StorageInstr};
-pub(super) use view::{LoweredView, LoweredViews, Recalc, ViewClause, ViewRows};
+pub(super) use view::{LoweredView, LoweredViews, Recalc, ViewClause, ViewRows, action_pipeline};
 
 /// A write statement's state across its records.
 pub(super) struct WriteState {

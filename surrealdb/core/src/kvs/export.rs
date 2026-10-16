@@ -380,9 +380,9 @@ async fn export_tables(
 	//
 	// So a stored table is emitted before the view definitions when a definition
 	// reads it, and after them when none does. What no order settles is a table
-	// that is both: one a view selects from and one holding a reference or an
-	// edge into a view. Its records have to come first, and the link they write
-	// is cleared.
+	// that is both: one a view reads and one holding a reference or an edge into
+	// a view. Its records have to come first, and the link they write is
+	// cleared.
 	//
 	// First is not a preference there. An import runs no view maintenance —
 	// `process_table_views` returns early under `OPTION IMPORT` — so a
@@ -391,12 +391,13 @@ async fn export_tables(
 	// restores with are the ones its definition recomputes at the moment it
 	// runs, or the ones this dump carried under the plain table when it does
 	// not run at all.
-	let view_sources: HashSet<&str> = views
-		.iter()
-		.filter_map(|table| table.view.as_ref())
-		.flat_map(|view| view.source_tables())
-		.map(|name| name.as_str())
-		.collect();
+	//
+	// A definition reads more than the tables it selects from: a subquery in its
+	// clauses reads the tables it names, and the definition fails when one is
+	// undefined ([`tables_read`]).
+	let reads: HashMap<&str, Vec<TableName>> =
+		views.iter().map(|table| (table.name.as_str(), tables_read(table))).collect();
+	let view_sources: HashSet<&str> = reads.values().flatten().map(|name| name.as_str()).collect();
 	let (read_by_a_view, unread): (Vec<&TableDefinition>, Vec<&TableDefinition>) =
 		stored.into_iter().partition(|table| view_sources.contains(table.name.as_str()));
 	// Emit the tables the views read first, structure then data, in name order.
@@ -407,24 +408,25 @@ async fn export_tables(
 		}
 	}
 	// A view is derived state: replaying its `DEFINE TABLE` recomputes it from
-	// the tables it selects from, and fails outright when one of them is
-	// absent. So a view's definition follows every table it reads, and a view
-	// this dump can replay carries no records — the definition writes those rows
-	// itself, and an `INSERT` carrying the same ids is refused as a duplicate
-	// record. The read-only rule on view tables does not stand in the way of
-	// that `INSERT`: a restore runs under `OPTION IMPORT`, which exempts it, so
-	// the statement reaches the record and fails on the id.
+	// the tables it reads, and fails outright when one of them is absent. So a
+	// view's definition follows every table it reads, and a view this dump can
+	// replay carries no records — the definition writes those rows itself, and
+	// an `INSERT` carrying the same ids is refused as a duplicate record. The
+	// read-only rule on view tables does not stand in the way of that `INSERT`:
+	// a restore runs under `OPTION IMPORT`, which exempts it, so the statement
+	// reaches the record and fails on the id.
 	//
 	// Recomputation reproduces the exported rows exactly when the projection is
 	// a function of its source rows, and not when it reads anything else —
 	// `time::now()`, `rand()`, a value from outside the database. Those rows
 	// come back recomputed, and that is the trade this makes rather than an
 	// oversight: what the restore holds is the view, recomputed.
-	for (table, deferral) in order_views(&views) {
+	for (table, deferral) in order_views(&views, &reads) {
 		// A reason the definition is already known not to replay is reported, in
 		// the log and in the dump alike — the log belongs to the server, and an
 		// operator running `surreal export` reads the file.
-		if let Some(reason) = unreplayable_view(table, &emitted, deferral) {
+		let read = reads.get(table.name.as_str()).map_or(&[][..], Vec::as_slice);
+		if let Some(reason) = unreplayable_view(table, read, &emitted, deferral) {
 			warn!("{reason}");
 			chn.send(bytes!("-- ------------------------------")).await?;
 			chn.send(bytes!(format!("-- NOTE: {}.", InlineCommentDisplay(&reason)))).await?;
@@ -520,11 +522,12 @@ async fn export_tables(
 	// is written into a range nothing clears again.
 	//
 	// The structure goes here with the records rather than ahead of the views,
-	// because a definition that reads a name outside the tables it selects from
-	// is one nothing here can order: it finds the name undefined and fails, and
-	// the rows this dump carried stay under the plain table it fell back to. A
-	// dump that defined every name up front would let that definition succeed
-	// against an empty table and recompute the rows away instead.
+	// because a definition that reaches a table through a name its text does not
+	// hold — a computed table name, a record link, a function body — is one
+	// nothing here can order: it finds the name undefined and fails, and the rows
+	// this dump carried stay under the plain table it fell back to. A dump that
+	// defined every name up front would let that definition succeed against an
+	// empty table and recompute the rows away instead.
 	for table in &unread {
 		export_table_structure(tx, ns, db, table, chn).await?;
 		if cfg.records {
@@ -533,6 +536,26 @@ async fn export_tables(
 	}
 
 	Ok(())
+}
+
+/// The tables replaying `table`'s view definition reads: the ones it selects
+/// from, then the ones its clauses name — the `FROM` of a subquery, a record id,
+/// a graph hop — other than the view's own.
+///
+/// A table a clause reaches only through a name its text does not hold — a
+/// computed table name, a record link, a function body — is not among them, and
+/// no order of the dump can place the definition after it.
+fn tables_read(table: &TableDefinition) -> Vec<TableName> {
+	let Some(view) = &table.view else {
+		return Vec::new();
+	};
+	let mut read = view.source_tables().to_vec();
+	for name in view.clause_tables() {
+		if name != table.name && !read.contains(&name) {
+			read.push(name);
+		}
+	}
+	read
 }
 
 /// Why replaying this view's `DEFINE TABLE` may not put its rows back, or
@@ -544,14 +567,15 @@ async fn export_tables(
 /// `DEFINE TABLE` that would recreate it, so its stored rows are state nothing
 /// can recompute. A definition cycle is the second: the catalog stores one, and
 /// whichever member an order emits first reads a name the dump has not defined
-/// yet. A source this dump does not define is the third: the definition reads
-/// whatever the target holds under that name, and raises `TbNotFound` when the
-/// target holds nothing.
+/// yet. A table in `read`, the tables the definition reads, that this dump does
+/// not define is the third: the definition reads whatever the target holds under
+/// that name, and raises `TbNotFound` when the target holds nothing.
 ///
 /// Only the first two are settled here. The third depends on the target, so what
 /// this reports is that the outcome is open, not that the replay will fail.
 fn unreplayable_view(
 	table: &TableDefinition,
+	read: &[TableName],
 	emitted: &HashSet<&str>,
 	deferral: Deferral,
 ) -> Option<String> {
@@ -574,14 +598,13 @@ fn unreplayable_view(
 		Deferral::BehindCycle => {
 			return Some(format!(
 				"Table '{}' is a view reading a definition cycle, so this dump defines a table it \
-				 selects from after it",
+				 reads after it",
 				InlineCommentDisplay(&table.name)
 			));
 		}
 		Deferral::None => {}
 	}
-	let missing: Vec<String> = view
-		.source_tables()
+	let missing: Vec<String> = read
 		.iter()
 		.filter(|t| !emitted.contains(t.as_str()))
 		.map(|t| format!("'{}'", InlineCommentDisplay(t)))
@@ -596,12 +619,16 @@ fn unreplayable_view(
 	))
 }
 
-/// Orders views so each one follows the views it selects from, pairing each with
-/// whether it is one this order cannot satisfy.
-fn order_views<'a>(views: &[&'a TableDefinition]) -> Vec<(&'a TableDefinition, Deferral)> {
+/// Orders views so each one follows the views it reads, as `reads` holds them by
+/// view name ([`tables_read`]), pairing each with whether it is one this order
+/// cannot satisfy.
+fn order_views<'a>(
+	views: &[&'a TableDefinition],
+	reads: &HashMap<&str, Vec<TableName>>,
+) -> Vec<(&'a TableDefinition, Deferral)> {
 	let graph: Vec<(&str, &[TableName])> = views
 		.iter()
-		.map(|t| (t.name.as_str(), t.view.as_ref().map_or(&[][..], |v| v.source_tables())))
+		.map(|t| (t.name.as_str(), reads.get(t.name.as_str()).map_or(&[][..], Vec::as_slice)))
 		.collect();
 	let order = view_order(&graph);
 	order

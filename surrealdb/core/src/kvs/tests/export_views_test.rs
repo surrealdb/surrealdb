@@ -949,3 +949,94 @@ async fn an_edge_into_a_views_records_restores() {
 		"the inbound half must survive the view definition that follows the edge writing it"
 	);
 }
+
+/// Seeds the statements of `seed` one at a time into a fresh `test`/`test`
+/// database, failing on the first one rejected.
+async fn seeded(seed: &[&str]) -> (Arc<Datastore>, Session) {
+	let ds = ds().await;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	for stmt in ["DEFINE NAMESPACE test;", "DEFINE DATABASE test;"].iter().chain(seed) {
+		ds.execute(stmt, &ses, None).await.unwrap().remove(0).result.unwrap();
+	}
+	(ds, ses)
+}
+
+/// A view whose subquery reads a table beside the ones it selects from restores
+/// as a view over that table's records.
+///
+/// Replaying the definition reads the subquery's table as much as its `FROM`
+/// tables: undefined, it fails the definition, and empty, it recomputes the rows
+/// without it. So the dump defines that table, records included, before the
+/// view, although its name sorts after the view's sources.
+#[tokio::test]
+async fn a_view_reading_a_table_through_a_subquery_restores_after_it() {
+	let (ds, ses) = seeded(&[
+		"DEFINE TABLE ka SCHEMAFULL;",
+		"DEFINE FIELD v ON ka TYPE int;",
+		"DEFINE TABLE kb SCHEMAFULL;",
+		"DEFINE FIELD v ON kb TYPE int;",
+		"CREATE ka:1 SET v = 1 RETURN NONE;",
+		"CREATE kb:1 SET v = 2 RETURN NONE;",
+		"DEFINE TABLE ksub AS SELECT id, (SELECT VALUE v FROM ONLY ka:1) AS pv FROM kb;",
+	])
+	.await;
+	let dump = export_text(&ds, &ses).await;
+	let records = dump
+		.find("-- TABLE DATA: ka")
+		.unwrap_or_else(|| panic!("the dump carries no records for `ka`:\n{dump}"));
+	let view = dump
+		.rfind("DEFINE TABLE ksub ")
+		.unwrap_or_else(|| panic!("the dump carries no definition for `ksub`:\n{dump}"));
+	assert!(
+		records < view,
+		"the records of the table the view's subquery reads must precede its definition:\n{dump}"
+	);
+
+	let (target, target_ses, errors) =
+		restore(&dump, "DEFINE NAMESPACE test; DEFINE DATABASE test;").await;
+	assert!(errors.is_empty(), "the dump must replay whole: {errors:?}");
+	assert_eq!(rows(&target, &target_ses, "ksub", "pv").await, "[1]");
+	// It came back as a view: a new source record writes a row into it.
+	target
+		.execute("CREATE kb:2 SET v = 3", &target_ses, None)
+		.await
+		.unwrap()
+		.remove(0)
+		.result
+		.unwrap();
+	assert_eq!(
+		rows(&target, &target_ses, "ksub", "pv").await,
+		"[1, 1]",
+		"the restored table must still be maintained as a view"
+	);
+}
+
+/// A view whose subquery reads another view restores after it, although its own
+/// name sorts first: the definition it reads has to have replayed, or the name
+/// is undefined.
+#[tokio::test]
+async fn a_view_reading_a_view_through_a_subquery_restores_after_it() {
+	let (ds, ses) = seeded(&[
+		"DEFINE TABLE src SCHEMALESS;",
+		"CREATE src:1 SET n = 1 RETURN NONE;",
+		"CREATE src:2 SET n = 2 RETURN NONE;",
+		"DEFINE TABLE z_count AS SELECT count() AS c FROM src GROUP ALL;",
+		"DEFINE TABLE a_seen AS SELECT id, (SELECT VALUE c FROM ONLY z_count:[]) AS c FROM src;",
+	])
+	.await;
+	assert_eq!(rows(&ds, &ses, "a_seen", "c").await, "[2, 2]");
+
+	let dump = export_text(&ds, &ses).await;
+	let read = dump
+		.rfind("DEFINE TABLE z_count ")
+		.unwrap_or_else(|| panic!("the dump carries no definition for `z_count`:\n{dump}"));
+	let reader = dump
+		.rfind("DEFINE TABLE a_seen ")
+		.unwrap_or_else(|| panic!("the dump carries no definition for `a_seen`:\n{dump}"));
+	assert!(read < reader, "the view a subquery reads must be defined first:\n{dump}");
+
+	let (target, target_ses, errors) =
+		restore(&dump, "DEFINE NAMESPACE test; DEFINE DATABASE test;").await;
+	assert!(errors.is_empty(), "the dump must replay whole: {errors:?}");
+	assert_eq!(rows(&target, &target_ses, "a_seen", "c").await, "[2, 2]");
+}

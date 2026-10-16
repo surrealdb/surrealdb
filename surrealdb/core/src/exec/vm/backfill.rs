@@ -7,10 +7,13 @@
 //! express — an aggregated row's stats — so they are written to storage
 //! directly, and then run through the view table's own order (its indexes, its
 //! second-order views, events, live queries and change feed), as the
-//! incremental path runs the order for a created row. The statement that
-//! defines the view changes the catalog the order is read from, so the order
-//! is the one of the view table's catalog version when the backfill meets the
-//! table, served from the compile cache ([`super::fault::view_rows`]).
+//! incremental path runs the order for a created row. A materialized row whose
+//! key the backfill already wrote, because two source tables hold a record
+//! with the same id, replaces that row as the incremental path does, and runs
+//! the order for an updated row. The statement that defines the view changes
+//! the catalog the order is read from, so the order is the one of the view
+//! table's catalog version when the backfill meets the table, served from the
+//! compile cache ([`super::fault::view_rows`]).
 
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -27,6 +30,7 @@ use super::write::WriteState;
 use crate::catalog::aggregation::{self, backfill_stats};
 use crate::catalog::providers::TableProvider as _;
 use crate::catalog::{Metadata, Record, RecordType, encode_whole_record_with};
+use crate::doc::Action;
 use crate::exec::operators::write::ctx::{RecordFormatSlot, ResolvedFormat, TableExistence};
 use crate::exec::operators::write::row::WriteRow;
 use crate::exec::operators::write::scope::{WritePurpose, WriteScope};
@@ -59,9 +63,6 @@ async fn row_format<'s>(
 		state.backfill_format.get_or_insert_with(|| (table.clone(), RecordFormatSlot::empty()));
 	slot.resolve(txn, ns, db, table).await.map_err(ControlFlow::Err)
 }
-
-/// The pipeline of a view table's order that takes a created row.
-const CREATE: usize = 0;
 
 /// Take backfill instruction `instr`, answering the instruction the body
 /// jumps to, or `None` to continue with the next.
@@ -103,6 +104,28 @@ pub(super) async fn step(
 				id: Cow::Borrowed(&id.key),
 			};
 			let txn = ctx.txn();
+			// A row is stored under its source record's key, so source records of different tables
+			// that share an id make one row. The view table was emptied before the backfill, so a
+			// row already under the key is one this backfill wrote, and it is replaced as
+			// maintaining the view replaces it: the source read last holds the row.
+			let before = match txn.get_key_raw(&key, None).await.map_err(ControlFlow::Err)? {
+				Some(bytes) => Some(
+					txn.decode_record_as_written(
+						ns,
+						db,
+						&table,
+						&bytes,
+						RecordId {
+							table: table.clone(),
+							key: id.key.clone(),
+						},
+						None,
+					)
+					.await
+					.map_err(ControlFlow::Err)?,
+				),
+				None => None,
+			};
 			// The row names no key, so it is never packed and its layouts are not checked against
 			// its table; a view's layout is the document layout.
 			let bytes = {
@@ -111,8 +134,9 @@ pub(super) async fn step(
 					.map_err(ControlFlow::Err)?
 			};
 			let key = key.encode_key().map_err(ControlFlow::Err)?;
-			txn.put(key, bytes).await.map_err(ControlFlow::Err)?;
-			maintain(state, ctx, &table, id.key, &record).await?;
+			txn.set(key, bytes).await.map_err(ControlFlow::Err)?;
+			txn.forget_record(ns, db, &table, &id.key);
+			maintain(state, ctx, &table, id.key, before.as_ref(), &record).await?;
 		}
 		StoreInstr::BackfillGroup {
 			backfill,
@@ -155,7 +179,7 @@ pub(super) async fn step(
 				.put_record(ns, db, &table, &key, Arc::clone(&record))
 				.await
 				.map_err(ControlFlow::Err)?;
-			maintain(state, ctx, &table, key, &record).await?;
+			maintain(state, ctx, &table, key, None, &record).await?;
 		}
 		_ => return Err(internal("a store instruction taken as a backfill instruction")),
 	}
@@ -200,14 +224,17 @@ fn stats(
 
 /// Run the order of view table `table` over `record`, the row just stored
 /// under `key`: a write of its own over a write state stacked on the
-/// statement's scope, in the view table's view-maintenance context. The order
-/// is the one of the table's catalog version, taken the first time the backfill
-/// meets the table ([`super::fault::view_rows`]) and held for the rest of it.
+/// statement's scope, in the view table's view-maintenance context. The row is
+/// created, or updated from `before` when it replaced a row the backfill wrote
+/// under the same key. The order is the one of the table's catalog version,
+/// taken the first time the backfill meets the table
+/// ([`super::fault::view_rows`]) and held for the rest of it.
 async fn maintain(
 	state: &mut State,
 	ctx: &ExecutionContext,
 	table: &TableName,
 	key: RecordIdKey,
+	before: Option<&Record>,
 	record: &Record,
 ) -> FlowResult<()> {
 	let rows = match &state.backfill_order {
@@ -229,10 +256,14 @@ async fn maintain(
 	};
 	let write_ctx = scope.write_ctx_for(&id.table, WritePurpose::ViewMaintenance).await?;
 	let exec = write_ctx.exec().clone();
-	let row = WriteRow::for_view_row(id, None, Some(record));
+	let action = match before {
+		Some(_) => Action::Update,
+		None => Action::Create,
+	};
+	let row = WriteRow::for_view_row(id, before, Some(record));
 	let pipeline = rows
 		.pipelines
-		.get(CREATE)
+		.get(super::write::action_pipeline(action))
 		.ok_or_else(|| internal("a view table's order the program does not hold"))?;
 	let mut nested = State::new(&rows, Vec::new(), exec.function_registry())?;
 	nested.frames = rows.permissions.iter().map(|spec| spec.context(&exec)).collect();

@@ -337,6 +337,9 @@ fn store(instr: &StoreInstr) -> Class {
 		| StoreInstr::ViewSources {
 			..
 		}
+		| StoreInstr::RefuseRemovingViewed {
+			..
+		}
 		| StoreInstr::RefuseRemovingLightweight {
 			..
 		}

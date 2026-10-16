@@ -72,6 +72,7 @@ pub(super) async fn step(
 			instr,
 			StoreInstr::Raise { .. }
 				| StoreInstr::RefuseField { .. }
+				| StoreInstr::RefuseRemovingViewed { .. }
 				| StoreInstr::RefuseRemovingLightweight { .. }
 				| StoreInstr::RefuseClauseEffects { .. }
 				| StoreInstr::RefuseRedefiningTable { .. }
@@ -459,6 +460,23 @@ async fn step_inner(
 				.await
 				.map_err(ControlFlow::Err)?;
 		}
+		StoreInstr::RefuseRemovingViewed {
+			ns,
+			db,
+			tb,
+		} => {
+			use crate::catalog::providers::TableProvider;
+			let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
+			let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
+			let tb = table_named(&read(regs, *tb))?;
+			let txn = ctx.txn();
+			let views = crate::exec::vm::descriptor::schema(txn.all_tb_views(ns, db, &tb, None))
+				.await
+				.map_err(ControlFlow::Err)?;
+			if !views.is_empty() {
+				return Err(ControlFlow::Err(views_error(&tb, &views)));
+			}
+		}
 		StoreInstr::RefuseRemovingLightweight {
 			ns,
 			db,
@@ -584,9 +602,6 @@ async fn step_inner(
 			arg,
 		} => {
 			match error {
-				StatementError::TbHasViews => {
-					return Err(ControlFlow::Err(views_error(&read(regs, *arg))));
-				}
 				StatementError::MdNeedsTrust => {
 					return Err(ControlFlow::Err(anyhow::Error::new(
 						crate::exec::Error::ExtensionNeedsTrust,
@@ -798,8 +813,7 @@ async fn step_inner(
 				StatementError::MlNotFound => crate::catalog::Error::MlNotFound {
 					name,
 				},
-				StatementError::TbHasViews
-				| StatementError::MdNeedsTrust
+				StatementError::MdNeedsTrust
 				| StatementError::ComputedFieldCannotBeIndexed
 				| StatementError::ApMethodDuplicate
 				| StatementError::AzInUse
@@ -2600,30 +2614,12 @@ async fn put_value(
 	.map_err(ControlFlow::Err)
 }
 
-/// The error removing a table with views over it raises, from an object of
-/// the `table`'s name and its `views`' definitions.
-fn views_error(detail: &Value) -> anyhow::Error {
-	let field = |name: &str| match detail {
-		Value::Object(object) => object.get(name).cloned().unwrap_or(Value::None),
-		_ => Value::None,
-	};
-	let table = match field("table") {
-		Value::String(s) => s.as_str().to_owned(),
-		other => surrealdb_types::ToSql::to_sql(&other),
-	};
-	let views: Vec<String> = match field("views") {
-		Value::Array(views) => views
-			.iter()
-			.map(|view| match view {
-				Value::Object(view) => match view.get("name") {
-					Some(Value::String(s)) => s.as_str().to_owned(),
-					other => format!("{other:?}"),
-				},
-				other => format!("{other:?}"),
-			})
-			.collect(),
-		_ => Vec::new(),
-	};
+/// The error removing table `table` raises when the views `views` read it.
+fn views_error(
+	table: &crate::val::TableName,
+	views: &[crate::catalog::TableDefinition],
+) -> anyhow::Error {
+	let views: Vec<&str> = views.iter().map(|view| view.name.as_str()).collect();
 	anyhow::Error::new(crate::exec::Error::Query {
 		message: format!(
 			"Cannot delete table `{table}` on which a view is defined, table(s) `{}` are defined as a view on this table.",

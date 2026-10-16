@@ -373,6 +373,56 @@ impl ViewDefinition {
 		Ok(())
 	}
 
+	/// The tables the view's clauses ([`ViewDefinition::visit_clauses`]) name,
+	/// in the statements nested in them too: a table expression such as a
+	/// subquery's `FROM`, the table of a record id, and the subject of a graph
+	/// hop. The tables the view selects from are among them only where a clause
+	/// names them as well. A table a clause reaches through a name its text does
+	/// not hold (a computed table name, a record link, a function body) is not.
+	pub fn clause_tables(&self) -> std::collections::BTreeSet<TableName> {
+		use crate::expr::lookup::LookupSubject;
+		use crate::expr::visit::{Visit as _, Visitor};
+
+		#[derive(Default)]
+		struct Named(std::collections::BTreeSet<TableName>);
+
+		impl Visitor for Named {
+			type Error = std::convert::Infallible;
+
+			fn visit_expr(&mut self, expr: &Expr) -> Result<(), Self::Error> {
+				if let Expr::Table(table) = expr {
+					self.0.insert(table.clone());
+				}
+				expr.visit(self)
+			}
+
+			fn visit_record_id(
+				&mut self,
+				id: &crate::expr::RecordIdLit,
+			) -> Result<(), Self::Error> {
+				self.0.insert(id.table.clone());
+				id.visit(self)
+			}
+
+			fn visit_lookup_subject(&mut self, subject: &LookupSubject) -> Result<(), Self::Error> {
+				let (LookupSubject::Table {
+					table,
+					..
+				}
+				| LookupSubject::Range {
+					table,
+					..
+				}) = subject;
+				self.0.insert(table.clone());
+				subject.visit(self)
+			}
+		}
+
+		let mut named = Named::default();
+		let Ok(()) = self.visit_clauses(&mut named);
+		named.0
+	}
+
 	/// A materialized view's `WHERE` clause as the logical scalar the
 	/// streaming engine evaluates, compiled on first call.
 	///
