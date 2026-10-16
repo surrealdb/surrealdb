@@ -37,7 +37,8 @@ use tracing::debug;
 use web_time::Instant;
 
 use crate::error::Error;
-use crate::parallel::SnapshotPool;
+use crate::parallel::ReadView;
+use crate::places::Ticket;
 use crate::trees::dynamicset::DynamicSet;
 use crate::trees::graph::encode_edges;
 use crate::trees::hnsw::docs::{ElementSink, VecDocs};
@@ -445,7 +446,13 @@ where
 		candidates.sort_unstable();
 		return Ok(candidates);
 	}
-	let Some(node_pt) = elements.get_vector(tx, &job.node).await? else {
+	// The node's vector and every candidate's, in one read of whatever the
+	// cache and the batch do not hold.
+	let mut wanted = Vec::with_capacity(candidates.len() + 1);
+	wanted.push(job.node);
+	wanted.extend_from_slice(&candidates);
+	let mut vectors = elements.get_vectors(tx, &wanted).await?.into_iter();
+	let Some(node_pt) = vectors.next().flatten() else {
 		// A committed node whose vector cannot be read has nothing to prune
 		// by. Keep what fits, in id order, rather than overfill the layer.
 		candidates.sort_unstable();
@@ -454,8 +461,8 @@ where
 	};
 	let mut graph = DoublePriorityQueue::default();
 	let mut batch = DoublePriorityQueue::default();
-	for id in candidates {
-		if let Some(pt) = elements.get_vector(tx, &id).await? {
+	for (id, pt) in candidates.into_iter().zip(vectors) {
+		if let Some(pt) = pt {
 			let d = elements.distance(&node_pt, &pt);
 			if input.position(id).is_some() {
 				batch.push(d, id);
@@ -483,6 +490,8 @@ pub(super) struct StagedGraph {
 	state: HnswState,
 	/// Every resolved node, as `(level, node, edges)`.
 	nodes: Vec<(usize, ElementId, Vec<ElementId>)>,
+	/// The task count the batch's steps were scheduled with.
+	tasks: usize,
 }
 
 impl StagedGraph {
@@ -492,6 +501,7 @@ impl StagedGraph {
 		input: &BatchInput,
 		jobs: &[LinkJob],
 		edges: Vec<Vec<ElementId>>,
+		tasks: usize,
 	) -> Self
 	where
 		L0: DynamicSet,
@@ -541,7 +551,18 @@ impl StagedGraph {
 			base,
 			state,
 			nodes,
+			tasks,
 		}
+	}
+
+	/// The task count the batch's steps were scheduled with: the count the
+	/// batch was given where the datastore gives a read view, and one where it
+	/// gives none. It is a ceiling: `parallel::run_jobs` runs on the calling
+	/// task and on as many workers beyond it as its ticket is granted places,
+	/// spawns at most one task per job, and none without a runtime to spawn
+	/// onto.
+	pub(super) fn tasks(&self) -> usize {
+		self.tasks
 	}
 
 	/// Writes the resolved nodes and the new state into the batch's transaction.
@@ -708,53 +729,64 @@ impl RollbackAction for InvalidateResident {
 	}
 }
 
-/// Builds a batch from its staged elements: steps 1 and 2 on up to `tasks`
-/// tasks, over the resident graph as it stands under `resident`.
+/// Builds a batch from its staged elements: steps 1 and 2, over the resident
+/// graph as it stands under `resident`. Every task beyond the calling one runs
+/// in a place taken through `places`.
 ///
-/// The steps read committed vectors through read-only snapshots leased from a
-/// pool opened alongside `tx`, one per running job, rather than through `tx`
-/// itself: every vector they read belongs to *G₀*, which was committed before
-/// this batch began, or to the batch, which they read from its own elements.
-/// The snapshots are cancelled before this returns.
+/// Every vector the steps read belongs to *G₀*, which was committed before this
+/// batch began, or to the batch, which they read from its own elements. Where
+/// the datastore gives a read view, the steps run on up to `tasks` tasks and
+/// read committed vectors through one view taken for them ([`ReadView`]),
+/// whose transaction is cancelled before this returns. They read nothing
+/// through `tx` then.
+///
+/// Where it gives none, the steps run on one task and read through `tx`, the
+/// batch's own transaction. That reads the same vectors: what `tx` has buffered
+/// for the batch is its new elements' vectors, which the batch's own elements
+/// answer first, and a staged batch rewrites no committed vector. The graph is
+/// the same either way, because it is a function of *G₀* and the batch alone.
 pub(super) async fn build(
 	resident: Arc<tokio::sync::OwnedRwLockReadGuard<ResidentGraph>>,
 	tx: Arc<Transaction>,
 	base: GraphBase,
 	elements: Vec<NewElement>,
+	places: &Ticket,
 	tasks: usize,
 ) -> Result<StagedGraph> {
-	let snapshots = SnapshotPool::new(tx);
-	let res = build_on(resident, &snapshots, base, elements, tasks).await;
-	snapshots.close().await;
+	let Some(view) = ReadView::open(&tx).await? else {
+		return build_on(resident, tx, None, base, elements, places, 1).await;
+	};
+	let view = Arc::new(view);
+	let res = build_on(resident, tx, Some(Arc::clone(&view)), base, elements, places, tasks).await;
+	view.close().await;
 	res
 }
 
+/// Steps 1 and 2 on up to `tasks` tasks, reading stored vectors through
+/// `reads` when given, and through `tx` otherwise.
 async fn build_on(
 	resident: Arc<tokio::sync::OwnedRwLockReadGuard<ResidentGraph>>,
-	snapshots: &Arc<SnapshotPool>,
+	tx: Arc<Transaction>,
+	reads: Option<Arc<ReadView>>,
 	base: GraphBase,
 	elements: Vec<NewElement>,
+	places: &Ticket,
 	tasks: usize,
 ) -> Result<StagedGraph> {
 	let input = Arc::new(BatchInput::new(base.next_element_id(), elements));
-	let view = Arc::new(
-		with_hnsw!(&resident.graph, h => h.elements.view(Some(Arc::new(input.overlay())))),
-	);
+	let view = with_hnsw!(&resident.graph, h => h.elements.view(Some(Arc::new(input.overlay()))));
+	let view = Arc::new(match reads {
+		Some(reads) => view.reading_through(reads),
+		None => view,
+	});
 	let started = Instant::now();
 	let selections = {
-		let (resident, snapshots, view, input) =
-			(Arc::clone(&resident), Arc::clone(snapshots), Arc::clone(&view), Arc::clone(&input));
-		crate::parallel::run_jobs(tasks, input.len(), move |i| {
-			let (resident, snapshots, view, input) = (
-				Arc::clone(&resident),
-				Arc::clone(&snapshots),
-				Arc::clone(&view),
-				Arc::clone(&input),
-			);
-			async move {
-				let snapshot = snapshots.lease().await?;
-				with_hnsw!(&resident.graph, h => select(h, snapshot.tx(), &view, &input, i).await)
-			}
+		let (resident, tx, view, input) =
+			(Arc::clone(&resident), Arc::clone(&tx), Arc::clone(&view), Arc::clone(&input));
+		crate::parallel::run_jobs(places, tasks, input.len(), move |i| {
+			let (resident, tx, view, input) =
+				(Arc::clone(&resident), Arc::clone(&tx), Arc::clone(&view), Arc::clone(&input));
+			async move { with_hnsw!(&resident.graph, h => select(h, &tx, &view, &input, i).await) }
 		})
 		.await?
 	};
@@ -763,27 +795,26 @@ async fn build_on(
 	let selections = Arc::new(selections);
 	let started = Instant::now();
 	let edges = {
-		let (resident, snapshots, view, input, selections, jobs) = (
+		let (resident, tx, view, input, selections, jobs) = (
 			Arc::clone(&resident),
-			Arc::clone(snapshots),
+			Arc::clone(&tx),
 			Arc::clone(&view),
 			Arc::clone(&input),
 			Arc::clone(&selections),
 			Arc::clone(&jobs),
 		);
-		crate::parallel::run_jobs(tasks, jobs.len(), move |j| {
-			let (resident, snapshots, view, input, selections, jobs) = (
+		crate::parallel::run_jobs(places, tasks, jobs.len(), move |j| {
+			let (resident, tx, view, input, selections, jobs) = (
 				Arc::clone(&resident),
-				Arc::clone(&snapshots),
+				Arc::clone(&tx),
 				Arc::clone(&view),
 				Arc::clone(&input),
 				Arc::clone(&selections),
 				Arc::clone(&jobs),
 			);
 			async move {
-				let snapshot = snapshots.lease().await?;
 				with_hnsw!(&resident.graph, h => {
-					link(h, snapshot.tx(), &view, &input, &selections, &jobs[j]).await
+					link(h, &tx, &view, &input, &selections, &jobs[j]).await
 				})
 			}
 		})
@@ -798,7 +829,7 @@ async fn build_on(
 		link_ms = started.elapsed().as_millis() as u64,
 		"built staged HNSW batch"
 	);
-	Ok(with_hnsw!(&resident.graph, h => StagedGraph::new(h, base, &input, &jobs, edges)))
+	Ok(with_hnsw!(&resident.graph, h => StagedGraph::new(h, base, &input, &jobs, edges, tasks)))
 }
 
 #[cfg(test)]
@@ -810,18 +841,22 @@ mod tests {
 	use ndarray::Array1;
 	use rand::rngs::SmallRng;
 	use rand::{Rng, SeedableRng};
+	use surrealdb_datastore::Transaction;
 	use surrealdb_kvs::TransactionType;
 
-	use super::{NewElement, StagedGraph, build};
+	use super::{NewElement, StagedGraph, build, build_on};
 	use crate::IndexKeyBase;
 	use crate::catalog::{
 		DOC_IDS_FORMAT_VERSION, DatabaseId, Distance, HnswParams, IndexId, NamespaceId, TableId,
 		VectorType,
 	};
-	use crate::test_env::TestIndexStore;
+	use crate::config::BuildParallelism;
+	use crate::env::IndexEnv;
+	use crate::key::{KVKey, RawRange};
+	use crate::test_env::{CountingPlaces, TestIndexEnv, TestIndexStore};
 	use crate::trees::hnsw::batch::GraphBase;
 	use crate::trees::hnsw::flavor::with_hnsw;
-	use crate::trees::hnsw::index::HnswIndex;
+	use crate::trees::hnsw::index::{HnswCompactionOutcome, HnswIndex, ResidentGraph};
 	use crate::trees::vector::{SharedVector, Vector};
 	use crate::val::{RecordIdKey, Value};
 
@@ -854,10 +889,14 @@ mod tests {
 		Vector::F32(Array1::from_vec(v)).into()
 	}
 
+	fn ikb() -> IndexKeyBase {
+		IndexKeyBase::new(NS, DB, "tb".into(), IX)
+	}
+
 	/// Commits a graph of `n` random vectors, built by the index's own
 	/// compaction.
 	async fn seed(ds: &TestIndexStore, p: &HnswParams, n: usize) -> Result<HnswIndex> {
-		let ikb = IndexKeyBase::new(NS, DB, "tb".into(), IX);
+		let ikb = ikb();
 		let env = ds.env(TransactionType::Read).await;
 		let h = HnswIndex::new(
 			ds.index_stores().vector_cache().clone(),
@@ -920,7 +959,9 @@ mod tests {
 
 	/// The graph a staged batch builds is a function of the committed graph
 	/// and the batch alone: however many tasks build it, every resolved node,
-	/// layer version and the entry point come out the same.
+	/// layer version and the entry point come out the same. The in-memory store
+	/// gives no read view, so the steps are run directly, on each task count,
+	/// through the one transaction.
 	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 	async fn staged_batch_graph_does_not_depend_on_the_task_count() -> Result<()> {
 		for (extend, keep) in [(false, false), (true, false), (false, true), (true, true)] {
@@ -935,7 +976,9 @@ mod tests {
 				let guard = Arc::new(Arc::clone(&resident).read_owned().await);
 				let (base, top) = with_hnsw!(&guard.graph, h => (GraphBase::of(h), h.layers.len()));
 				let elements = new_elements(base.next_element_id(), 120, top);
-				let staged = build(guard, env.tx(), base, elements, tasks).await?;
+				let staged =
+					build_on(guard, env.tx(), None, base, elements, &IndexEnv::places(&env), tasks)
+						.await?;
 				builds.push((tasks, fingerprint(&staged)));
 			}
 			env.tx().cancel().await?;
@@ -948,6 +991,224 @@ mod tests {
 				);
 			}
 		}
+		Ok(())
+	}
+
+	/// A store opened on a fresh RocksDB directory, which gives read views.
+	#[cfg(feature = "kv-rocksdb")]
+	async fn rocksdb_store() -> (temp_dir::TempDir, TestIndexStore) {
+		let dir = temp_dir::TempDir::new().unwrap();
+		let ds =
+			TestIndexStore::with_path(&format!("rocksdb:{}", dir.path().to_string_lossy())).await;
+		(dir, ds)
+	}
+
+	/// A read guard on the resident graph, its base and its layer count, with
+	/// the index's vectors dropped from the cache so the batch reads every
+	/// committed vector it needs from the store.
+	async fn cold_base(
+		h: &HnswIndex,
+		env: &TestIndexEnv,
+	) -> Result<(Arc<tokio::sync::OwnedRwLockReadGuard<ResidentGraph>>, GraphBase, usize)> {
+		h.check_state(env).await?;
+		let guard = Arc::new(h.resident().read_owned().await);
+		let (base, top) = with_hnsw!(&guard.graph, h => (GraphBase::of(h), h.layers.len()));
+		with_hnsw!(&guard.graph, h => h.elements.evict_index().await);
+		Ok((guard, base, top))
+	}
+
+	/// How many point reads a transaction has made so far.
+	fn gets(tx: &Transaction) -> u32 {
+		tx.metrics_snapshot_for_test().ops_get
+	}
+
+	/// Where a datastore gives read views, a staged batch's steps read through
+	/// one, taken from one read-only transaction opened for them whatever the
+	/// batch's task count, run on that task count, and read nothing through
+	/// the batch's own transaction.
+	#[cfg(feature = "kv-rocksdb")]
+	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+	async fn a_staged_batch_reads_through_one_view_whatever_its_task_count() -> Result<()> {
+		let (_dir, ds) = rocksdb_store().await;
+		let h = seed(&ds, &params(false, false), 150).await?;
+		for tasks in [1, 4, 16] {
+			let env = ds.env(TransactionType::Write).await;
+			let (guard, base, top) = cold_base(&h, &env).await?;
+			let elements = new_elements(base.next_element_id(), 120, top);
+			let (reads, gets_before) = (ds.reads_opened(), gets(&env.tx()));
+			let staged = build(guard, env.tx(), base, elements, &env.places(), tasks).await?;
+			assert_eq!(ds.reads_opened() - reads, 1, "tasks = {tasks}: read transactions opened");
+			assert_eq!(staged.tasks(), tasks, "tasks the steps ran on");
+			assert_eq!(
+				gets(&env.tx()),
+				gets_before,
+				"tasks = {tasks}: reads through the batch's own transaction"
+			);
+			env.tx().cancel().await?;
+		}
+		Ok(())
+	}
+
+	/// Where a datastore gives no read view, a staged batch's steps run on one
+	/// task, whatever task count the batch was given, read through the batch's
+	/// own transaction, and open no other transaction.
+	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+	async fn without_a_view_a_staged_batch_runs_on_one_task_through_its_transaction() -> Result<()>
+	{
+		let ds = TestIndexStore::new().await;
+		let h = seed(&ds, &params(false, false), 150).await?;
+		for tasks in [1, 4, 16] {
+			let env = ds.env(TransactionType::Write).await;
+			let (guard, base, top) = cold_base(&h, &env).await?;
+			let elements = new_elements(base.next_element_id(), 120, top);
+			let (reads, gets_before) = (ds.reads_opened(), gets(&env.tx()));
+			let staged = build(guard, env.tx(), base, elements, &env.places(), tasks).await?;
+			assert_eq!(ds.reads_opened() - reads, 0, "tasks = {tasks}: read transactions opened");
+			assert_eq!(staged.tasks(), 1, "tasks = {tasks}: tasks the steps ran on");
+			assert!(
+				gets(&env.tx()) > gets_before,
+				"tasks = {tasks}: no read through the batch's own transaction"
+			);
+			env.tx().cancel().await?;
+		}
+		Ok(())
+	}
+
+	/// A plan that only adds vectors is staged, not applied in place, on a
+	/// datastore that gives no read view, and applying it opens no other
+	/// transaction.
+	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+	async fn without_a_view_an_insert_only_plan_is_still_staged() -> Result<()> {
+		let ds = TestIndexStore::with_idx_config(|c| {
+			c.hnsw_build_parallelism = BuildParallelism::Fixed(4.try_into().unwrap());
+		})
+		.await;
+		let h = seed(&ds, &params(false, false), 150).await?;
+		{
+			let env = ds.env(TransactionType::Write).await;
+			let mut rng = SmallRng::seed_from_u64(13);
+			for i in 150..250 {
+				let content = vec![Value::from(random_vector(&mut rng).deref())];
+				h.index(&env, &RecordIdKey::Number(i), None, Some(content)).await?;
+			}
+			env.tx().commit().await?;
+		}
+		let env = ds.env(TransactionType::Write).await;
+		let plan = HnswIndex::prepare_compaction(&env, &ikb()).await?;
+		assert_eq!(plan.len(), 100, "the plan carries every new vector");
+		let reads = ds.reads_opened();
+		let outcome = h.apply_compaction(&env, plan).await?;
+		assert_eq!(outcome, HnswCompactionOutcome::Staged);
+		assert_eq!(ds.reads_opened() - reads, 0, "read transactions opened by the apply");
+		env.tx().cancel().await?;
+		Ok(())
+	}
+
+	/// The `!hn` and `!hs` entries `tx` holds for the index, as stored bytes.
+	async fn stored_graph(tx: &Transaction, layers: usize) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+		let ikb = ikb();
+		let mut entries = Vec::new();
+		for layer in 0..=layers {
+			entries.extend(tx.getr(ikb.new_hn_layer_range(layer as u16)?, None).await?);
+		}
+		let state = ikb.new_hs_key().encode_key()?;
+		let value = tx.get(state.clone(), None).await?.expect("a staged batch writes the state");
+		entries.push((state.as_slice().to_vec(), value));
+		Ok(entries)
+	}
+
+	/// One plan over one base graph writes byte-identical `!hn` and `!hs`
+	/// entries whether its steps read through a read view, on any task count,
+	/// or through the batch's own transaction.
+	async fn one_plan_writes_one_graph(ds: &TestIndexStore, views: bool) -> Result<()> {
+		let h = seed(ds, &params(true, true), 150).await?;
+		let mut writes = Vec::new();
+		for (tasks, as_built) in [(1, true), (4, true), (16, true), (1, false), (4, false)] {
+			let env = ds.env(TransactionType::Write).await;
+			let (guard, base, top) = cold_base(&h, &env).await?;
+			let elements = new_elements(base.next_element_id(), 120, top);
+			// As a batch builds itself, through a view where there is one, or
+			// forced through its own transaction.
+			let staged = if as_built {
+				build(Arc::clone(&guard), env.tx(), base, elements, &env.places(), tasks).await?
+			} else {
+				build_on(Arc::clone(&guard), env.tx(), None, base, elements, &env.places(), tasks)
+					.await?
+			};
+			if as_built {
+				let expected = if views {
+					tasks
+				} else {
+					1
+				};
+				assert_eq!(staged.tasks(), expected, "tasks the steps ran on");
+			}
+			with_hnsw!(&guard.graph, h => staged.write(h, &env.tx()).await)?;
+			writes.push((tasks, as_built, stored_graph(&env.tx(), top + 1).await?));
+			env.tx().cancel().await?;
+		}
+		let (_, _, first) = &writes[0];
+		assert!(first.len() > 120, "the batch must write committed nodes too");
+		for (tasks, as_built, written) in &writes[1..] {
+			assert!(
+				written == first,
+				"{tasks} tasks, as built = {as_built}: a different graph was written"
+			);
+		}
+		Ok(())
+	}
+
+	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+	async fn one_plan_writes_one_graph_without_a_view() -> Result<()> {
+		one_plan_writes_one_graph(&TestIndexStore::new().await, false).await
+	}
+
+	#[cfg(feature = "kv-rocksdb")]
+	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+	async fn one_plan_writes_one_graph_with_a_view_or_without() -> Result<()> {
+		let (_dir, ds) = rocksdb_store().await;
+		one_plan_writes_one_graph(&ds, true).await
+	}
+
+	/// The entries a staged batch writes, every `!hn` node and the `!hs`
+	/// state, are the same bytes whether its workers were granted places,
+	/// gave them back mid-run because another registration waited, or were
+	/// never granted one. The in-memory store gives no read view, so each batch
+	/// runs its steps on eight tasks through its own transaction, where `build`
+	/// would run them on one.
+	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+	async fn staged_batch_entries_do_not_depend_on_the_places_granted() -> Result<()> {
+		let p = params(true, false);
+		let ds = TestIndexStore::new().await;
+		let h = seed(&ds, &p, 150).await?;
+		let resident = h.resident();
+		let env = ds.env(TransactionType::Write).await;
+		h.check_state(&env).await?;
+		env.tx().cancel().await?;
+		let granted = CountingPlaces::new(8, 1);
+		let yielding = CountingPlaces::new(8, 1);
+		yielding.others_wait_from(6);
+		let never = CountingPlaces::new(0, 1);
+		let mut written = Vec::new();
+		for pool in [&granted, &yielding, &never] {
+			let env = ds.env(TransactionType::Write).await;
+			let guard = Arc::new(Arc::clone(&resident).read_owned().await);
+			let (base, top) = with_hnsw!(&guard.graph, h => (GraphBase::of(h), h.layers.len()));
+			let elements = new_elements(base.next_element_id(), 120, top);
+			let staged =
+				build_on(Arc::clone(&guard), env.tx(), None, base, elements, &pool.ticket(), 8)
+					.await?;
+			with_hnsw!(&guard.graph, h => staged.write(h, &env.tx()).await)?;
+			written.push(env.tx().scan_raw(RawRange::every_key(), u32::MAX, 0, None).await?);
+			env.tx().cancel().await?;
+			assert_eq!(pool.held(), 0, "every place went back");
+		}
+		assert!(granted.peak() > 1, "the first build ran on several places");
+		assert!(yielding.taken() > 0 && yielding.yields() > 0, "the second yielded mid-run");
+		assert_eq!(never.taken(), 0, "the third ran on the calling task alone");
+		assert!(written[0].len() > 150, "the scan reads the written graph");
+		assert!(written[1] == written[0], "a build that yielded mid-run wrote other bytes");
+		assert!(written[2] == written[0], "a build without a place wrote other bytes");
 		Ok(())
 	}
 }

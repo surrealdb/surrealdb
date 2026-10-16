@@ -4841,6 +4841,15 @@ async fn run_body(
 										// The surface's steps answer a boxed future already.
 										schema.backfill(program, instr, regs, state, ctx).await?
 									} else {
+										// A blocking build lends the statement's registration
+										// with the node's place pool to the build it waits on.
+										let lent = match instr {
+											StoreInstr::BuildIndex {
+												blocking: true,
+												..
+											} => Some(super::morsel::places::of(state).clone()),
+											_ => None,
+										};
 										schema
 											.step(
 												program,
@@ -4848,6 +4857,7 @@ async fn run_body(
 												regs,
 												&mut state.reserved_taken,
 												ctx,
+												lent,
 											)
 											.await?
 									}

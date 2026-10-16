@@ -72,7 +72,7 @@ use crate::trees::vector::{
 use crate::trees::{KnnCondFilter, KnnIteratorResult, doc_elements};
 use crate::val::{Number, RecordId, RecordIdKey, Value};
 use crate::{
-	IndexKeyBase, bump_compaction_generation, is_transaction_condition_not_met,
+	CompactionApply, IndexKeyBase, bump_compaction_generation, is_transaction_condition_not_met,
 	read_compaction_generation,
 };
 
@@ -1599,10 +1599,15 @@ impl DiskAnnIndex {
 	/// Applies a prepared compaction plan if its generation and captured keys are still current.
 	///
 	/// The transaction lifecycle is owned by this method:
-	///   * `Ok(true)` — mutations were applied and the transaction has been committed.
-	///   * `Ok(false)` — the plan was stale (generation drift, captured-key mismatch, or a commit
-	///     this process already made past the plan's snapshot); the transaction has been cancelled
-	///     and no mutations are in KV or in the process-local cache.
+	///   * [`CompactionApply::Applied`] — mutations were applied and the transaction has been
+	///     committed, or the plan captured no pending and a drained shard's guard was stepped in a
+	///     transaction of its own, the plan's transaction having been cancelled.
+	///   * [`CompactionApply::Empty`] — the plan captured no pending and no drained shard's guard
+	///     was stepped; the transaction has been cancelled. A guard left unstepped is stepped by a
+	///     later pass.
+	///   * [`CompactionApply::LostRace`] — the plan was stale (generation drift, captured-key
+	///     mismatch, or a commit this process already made past the plan's snapshot); the
+	///     transaction has been cancelled and no mutations are in KV or in the process-local cache.
 	///   * `Err(_)` — the apply or commit step failed; the transaction has been cancelled and, if
 	///     any graph mutations had been buffered, the per-index [`DiskAnnCache`] has been cleared
 	///     while the graph lock was still held so concurrent KNN searches cannot observe a cache
@@ -1615,7 +1620,7 @@ impl DiskAnnIndex {
 		&self,
 		env: &dyn IndexEnv,
 		plan: DiskAnnCompactionPlan,
-	) -> Result<bool> {
+	) -> Result<CompactionApply> {
 		let DiskAnnCompactionPlan {
 			generation,
 			pending_state: _,
@@ -1629,18 +1634,22 @@ impl DiskAnnIndex {
 		// transaction never writes a guard a writer covers.
 		if captured_keys.is_empty() {
 			cancel_silently(&tx).await;
-			return self.step_pending_guards(&tx, &cleared_shards).await;
+			return Ok(if self.step_pending_guards(&tx, &cleared_shards).await? {
+				CompactionApply::Applied
+			} else {
+				CompactionApply::Empty
+			});
 		}
 		if !bump_compaction_generation(&tx, &self.ikb.new_dg_key(), generation).await? {
 			cancel_silently(&tx).await;
-			return Ok(false);
+			return Ok(CompactionApply::LostRace);
 		}
 		for captured in &captured_keys {
 			match tx.del_compare(Key::from(&captured.key), Some(&captured.value)).await {
 				Ok(()) => {}
 				Err(e) if is_transaction_condition_not_met(&e) => {
 					cancel_silently(&tx).await;
-					return Ok(false);
+					return Ok(CompactionApply::LostRace);
 				}
 				Err(e) => {
 					cancel_silently(&tx).await;
@@ -1656,7 +1665,7 @@ impl DiskAnnIndex {
 		let mut graph = self.graph.write().await;
 		let Some(provider_context) = graph.open_frame(Arc::clone(&tx), generation) else {
 			cancel_silently(&tx).await;
-			return Ok(false);
+			return Ok(CompactionApply::LostRace);
 		};
 		let committed = provider_context.view.commit_generation();
 		let apply_result: Result<()> = async {
@@ -1693,7 +1702,7 @@ impl DiskAnnIndex {
 				"failed to step the DiskANN pending-state guards after a compaction: {e}"
 			);
 		}
-		Ok(true)
+		Ok(CompactionApply::Applied)
 	}
 
 	/// Steps the drained shards' guards to `Empty`, in a transaction of their own under the index's
@@ -2996,10 +3005,9 @@ mod tests {
 			plan
 		};
 		let ctx = new_ctx(ds, TransactionType::Write).await;
-		// `apply_compaction` now commits the tx itself when it returns Ok(true)
-		// and cancels it on Ok(false) / Err, so the test must not double-commit.
-		let applied = index.apply_compaction(&ctx, plan).await?;
-		Ok(applied)
+		// `apply_compaction` commits the tx itself when it reports `Applied` and
+		// cancels it otherwise, so the test must not double-commit.
+		Ok(index.apply_compaction(&ctx, plan).await?.applied())
 	}
 
 	/// Drains every pending update through prepare/apply until a prepared plan
@@ -4357,8 +4365,8 @@ mod tests {
 
 		{
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
-			// apply_compaction commits the tx internally on Ok(true).
-			assert!(index.apply_compaction(&ctx, plan).await?);
+			// apply_compaction commits the tx internally on `Applied`.
+			assert_eq!(index.apply_compaction(&ctx, plan).await?, CompactionApply::Applied);
 		}
 
 		// On a sole-writer store the pass that drains the shard confirms it empty
@@ -4419,8 +4427,8 @@ mod tests {
 			ctx.tx().commit().await?;
 		}
 
-		// apply_compaction commits the tx internally on Ok(true).
-		assert!(index.apply_compaction(&apply_ctx, plan).await?);
+		// apply_compaction commits the tx internally on `Applied`.
+		assert_eq!(index.apply_compaction(&apply_ctx, plan).await?, CompactionApply::Applied);
 
 		{
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
@@ -4466,8 +4474,8 @@ mod tests {
 		}
 		{
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
-			// apply_compaction now cancels the tx itself when it returns Ok(false).
-			assert!(!index.apply_compaction(&ctx, plan).await?);
+			// apply_compaction cancels the tx itself when it applies nothing.
+			assert_eq!(index.apply_compaction(&ctx, plan).await?, CompactionApply::Empty);
 		}
 
 		{
@@ -4515,8 +4523,8 @@ mod tests {
 		}
 		{
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
-			// apply_compaction commits the tx internally on Ok(true).
-			assert!(index.apply_compaction(&ctx, plan).await?);
+			// apply_compaction commits the tx internally on `Applied`.
+			assert_eq!(index.apply_compaction(&ctx, plan).await?, CompactionApply::Applied);
 		}
 
 		{
@@ -6676,7 +6684,7 @@ mod tests {
 		let [(plan_a, ctx_a), (plan_b, ctx_b)] = racing_plans(&index, &ds, &ikb).await?;
 
 		// Apply A first — succeeds and commits.
-		assert!(index.apply_compaction(&ctx_a, plan_a).await?);
+		assert_eq!(index.apply_compaction(&ctx_a, plan_a).await?, CompactionApply::Applied);
 
 		// Apply B — passes the write-time checks (its snapshot still sees the captured values and
 		// the pre-A generation), writes through during the apply phase, then must fail on commit
@@ -6711,12 +6719,16 @@ mod tests {
 		)
 		.await?;
 		let [(plan_a, ctx_a), (plan_b, ctx_b)] = racing_plans(&index, &ds, &ikb).await?;
-		assert!(index.apply_compaction(&ctx_a, plan_a).await?);
+		assert_eq!(index.apply_compaction(&ctx_a, plan_a).await?, CompactionApply::Applied);
 		assert_eq!(knn_len_with_k(&index, &ds, &[2.0, 0.0, 0.0, 0.0], 4).await?, 4);
 		let warmed = cache.weight();
 		assert!(warmed > 0);
 
-		assert!(!index.apply_compaction(&ctx_b, plan_b).await?, "a stale frame applies nothing");
+		assert_eq!(
+			index.apply_compaction(&ctx_b, plan_b).await?,
+			CompactionApply::LostRace,
+			"a stale frame applies nothing"
+		);
 		assert_eq!(cache.weight(), warmed, "a stale frame leaves the cache as it found it");
 		let view = index.graph.read().await.reader_view(Some(1));
 		let cache_index = (ikb.ns(), ikb.db(), TableId(4), ikb.index(), DOC_IDS_FORMAT_VERSION);
@@ -8143,6 +8155,10 @@ mod tests {
 
 		fn config(&self) -> &crate::config::IdxConfig {
 			self.inner.config()
+		}
+
+		fn places(&self) -> crate::places::Ticket {
+			self.inner.places()
 		}
 	}
 

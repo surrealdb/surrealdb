@@ -5,6 +5,12 @@
 //! HNSW index fails with an error naming the feature. The keyspace values and
 //! the vector cache stay, so stored HNSW state still decodes.
 
+/// Maximum number of pending key/value pairs captured by one compaction plan.
+///
+/// Declared whether or not the `vector-index` feature is enabled, so code that
+/// names the bound compiles in every build.
+pub const HNSW_COMPACTION_MAX_PENDING_KEYS: usize = 1024;
+
 #[cfg(feature = "vector-index")]
 mod batch;
 pub(crate) mod cache;
@@ -4038,6 +4044,10 @@ mod tests {
 
 		fn config(&self) -> &crate::config::IdxConfig {
 			self.inner.config()
+		}
+
+		fn places(&self) -> crate::places::Ticket {
+			self.inner.places()
 		}
 	}
 

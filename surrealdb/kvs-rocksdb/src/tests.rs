@@ -1440,6 +1440,283 @@ async fn get_many_equals_getm_at_the_views_moment() {
 	tx.cancel().await.unwrap();
 }
 
+/// Reads held inside a view's `get_many`, at the hook immediately before the batched read, and
+/// how many were held there at once.
+mod parked_reads {
+	use std::sync::{Arc, Condvar, Mutex};
+	use std::time::Duration;
+
+	use futures::FutureExt;
+	use surrealdb_kvs::{Error, Key, Snapshot, TransactionType};
+	use temp_dir::TempDir;
+
+	use crate::snapshot::hooks;
+	use crate::{Datastore as RocksDbDatastore, RocksDbConfig};
+
+	/// How many reads are parked at once.
+	const READERS: usize = 4;
+
+	/// How long a parked read waits to be released before it gives up and reads anyway. It bounds
+	/// a run in which fewer than [`READERS`] reads can ever be parked together; a run in which
+	/// they can releases them as soon as the last arrives.
+	const PARK_LIMIT: Duration = Duration::from_secs(5);
+
+	/// How long the test waits for the reads it started to be parked.
+	const ARRIVAL_LIMIT: Duration = Duration::from_secs(20);
+
+	#[derive(Default)]
+	struct State {
+		/// Reads parked now.
+		parked: usize,
+		/// The most reads parked at once.
+		most: usize,
+		/// Whether parked reads may continue.
+		released: bool,
+		/// Release every read once this many are parked at once.
+		release_at: Option<usize>,
+	}
+
+	#[derive(Default)]
+	struct Parking {
+		state: Mutex<State>,
+		changed: Condvar,
+	}
+
+	impl Parking {
+		/// Releasing once `n` reads are parked at once.
+		fn releasing_at(n: usize) -> Arc<Self> {
+			let parking = Self::default();
+			parking.state.lock().unwrap().release_at = Some(n);
+			Arc::new(parking)
+		}
+
+		/// The hook: park until released, or until [`PARK_LIMIT`] has passed.
+		fn park(&self) {
+			let mut state = self.state.lock().unwrap();
+			state.parked += 1;
+			state.most = state.most.max(state.parked);
+			if state.release_at == Some(state.parked) {
+				state.released = true;
+			}
+			self.changed.notify_all();
+			let (mut state, _) =
+				self.changed.wait_timeout_while(state, PARK_LIMIT, |s| !s.released).unwrap();
+			state.parked -= 1;
+			self.changed.notify_all();
+		}
+
+		fn release(&self) {
+			self.state.lock().unwrap().released = true;
+			self.changed.notify_all();
+		}
+
+		/// Whether `n` reads came to be parked at once within [`ARRIVAL_LIMIT`].
+		fn wait_parked(&self, n: usize) -> bool {
+			let state = self.state.lock().unwrap();
+			let (state, _) =
+				self.changed.wait_timeout_while(state, ARRIVAL_LIMIT, |s| s.parked < n).unwrap();
+			state.parked >= n
+		}
+
+		fn most(&self) -> usize {
+			self.state.lock().unwrap().most
+		}
+	}
+
+	fn keys(prefix: &str) -> Vec<Key<'static>> {
+		(0..8).map(|i| Key::from(format!("{prefix}{i:02}").into_bytes())).collect()
+	}
+
+	async fn seeded(prefix: &str) -> (TempDir, RocksDbDatastore) {
+		let dir = TempDir::new().unwrap();
+		let path = dir.path().to_string_lossy().to_string();
+		let ds = RocksDbDatastore::new(&path, RocksDbConfig::default()).await.unwrap();
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		// Every other key, so the reads mix hits and misses.
+		for key in keys(prefix).into_iter().step_by(2) {
+			let val = key.as_slice().to_vec();
+			tx.set(key, val).await.unwrap();
+		}
+		tx.commit().await.unwrap();
+		(dir, ds)
+	}
+
+	type Read = tokio::task::JoinHandle<surrealdb_kvs::Result<Vec<Option<Vec<u8>>>>>;
+
+	/// Starts [`READERS`] reads of `keys` through `view`, each on a task of its own.
+	fn start_reads(view: &Arc<dyn Snapshot>, keys: &[Key<'static>]) -> Vec<Read> {
+		(0..READERS)
+			.map(|_| {
+				let (view, keys) = (Arc::clone(view), keys.to_vec());
+				tokio::spawn(async move { Ok(view.get_many(&keys, None).await?.values) })
+			})
+			.collect()
+	}
+
+	/// Point reads through one view do not wait for each other: [`READERS`] callers are all
+	/// inside the batched read at once, and each answers what the transaction's `getm` does.
+	///
+	/// Each parked read blocks the thread it reads on, which is a tokio worker when the read runs
+	/// inline, so the runtime has a worker for each of them and for the test.
+	#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+	async fn get_many_reads_through_one_view_at_once() {
+		let prefix = "parked/at-once/";
+		let (_dir, ds) = seeded(prefix).await;
+		let tx = ds.transaction(TransactionType::Read).await.unwrap();
+		let view = tx.snapshot().expect("a read-only transaction gives a view");
+		let keys = keys(prefix);
+		let expected = tx.getm(&keys, None).await.unwrap().values;
+		let parking = Parking::releasing_at(READERS);
+		let hook = Arc::clone(&parking);
+		let _registered =
+			hooks::before_get_many_with(prefix.as_bytes(), Arc::new(move || hook.park()));
+		for read in start_reads(&view, &keys) {
+			assert_eq!(read.await.unwrap().unwrap(), expected);
+		}
+		assert_eq!(parking.most(), READERS, "reads in flight at once through one view");
+		tx.cancel().await.unwrap();
+	}
+
+	/// A point read through a view runs on the calling task when the runtime has room for it, as
+	/// the transaction's own point read does, rather than always hopping to the affinity pool.
+	#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+	async fn view_point_reads_run_inline_when_the_runtime_has_room() {
+		let prefix = "inline/view/";
+		let (_dir, ds) = seeded(prefix).await;
+		let tx = ds.transaction(TransactionType::Read).await.unwrap();
+		let view = tx.snapshot().expect("a read-only transaction gives a view");
+		let keys = keys(prefix);
+		let granted = || ds.collect_u64_metric(RocksDbDatastore::INLINE_BLOCKING_GRANTED).unwrap();
+		let before = granted();
+		for _ in 0..2 {
+			view.get_many(&keys, None).await.unwrap();
+		}
+		assert_eq!(granted() - before, 2, "view point reads granted an inline permit");
+		tx.cancel().await.unwrap();
+	}
+
+	/// Readers that keep reading through one view while its transaction is cancelled never see a
+	/// wrong answer, never keep the cancel waiting, and are all refused once it has completed.
+	///
+	/// Each round races [`READERS`] tasks, each reading in a loop until refused, against a cancel
+	/// issued once every reader has read at least once, so reads start before, during and after
+	/// the cancel begins to wait for the transaction. A wake-up lost between a read releasing its
+	/// keep-alive and the cancel waiting for it would leave the cancel waiting for ever, which
+	/// the time limit turns into a failure.
+	#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+	async fn readers_racing_a_cancel_read_correctly_and_let_it_finish() {
+		let prefix = "race/cancel/";
+		let (_dir, ds) = seeded(prefix).await;
+		let keys = keys(prefix);
+		for round in 0..32 {
+			let tx = ds.transaction(TransactionType::Read).await.unwrap();
+			let view = tx.snapshot().expect("a read-only transaction gives a view");
+			let expected = tx.getm(&keys, None).await.unwrap().values;
+			let started = Arc::new(tokio::sync::Barrier::new(READERS + 1));
+			let readers: Vec<_> = (0..READERS)
+				.map(|_| {
+					let (view, keys, expected, started) =
+						(Arc::clone(&view), keys.clone(), expected.clone(), Arc::clone(&started));
+					tokio::spawn(async move {
+						let mut reads = 0usize;
+						loop {
+							match view.get_many(&keys, None).await {
+								Ok(got) => {
+									assert_eq!(got.values, expected, "round {round}");
+									reads += 1;
+									if reads == 1 {
+										started.wait().await;
+									}
+								}
+								Err(Error::TransactionFinished) if reads > 0 => return reads,
+								Err(e) => panic!("round {round}: a read answered {e:?}"),
+							}
+							tokio::task::yield_now().await;
+						}
+					})
+				})
+				.collect();
+			started.wait().await;
+			tokio::time::timeout(ARRIVAL_LIMIT, tx.cancel())
+				.await
+				.expect("the cancel waited on readers for ever")
+				.unwrap();
+			let later = view.get_many(&keys, None).await;
+			assert!(
+				matches!(later, Err(Error::TransactionFinished)),
+				"round {round}: a read after the cancel answered {later:?}"
+			);
+			for reader in readers {
+				let reads = tokio::time::timeout(ARRIVAL_LIMIT, reader)
+					.await
+					.expect("a reader was never refused")
+					.unwrap();
+				assert!(reads > 0, "round {round}");
+			}
+		}
+	}
+
+	/// Finishing the transaction waits for the reads already inside a view's `get_many`, and a
+	/// read started after the finish fails with `TransactionFinished` without waiting for them.
+	#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+	async fn finishing_waits_for_reads_in_flight_and_refuses_later_ones() {
+		for commit in [false, true] {
+			let prefix = if commit {
+				"parked/commit/"
+			} else {
+				"parked/cancel/"
+			};
+			let (_dir, ds) = seeded(prefix).await;
+			let tt = if commit {
+				TransactionType::Write
+			} else {
+				TransactionType::Read
+			};
+			let tx = ds.transaction(tt).await.unwrap();
+			let view = tx.snapshot().expect("a transaction with no buffered write gives a view");
+			let keys = keys(prefix);
+			let expected = tx.getm(&keys, None).await.unwrap().values;
+			let parking = Arc::new(Parking::default());
+			let hook = Arc::clone(&parking);
+			let registered =
+				hooks::before_get_many_with(prefix.as_bytes(), Arc::new(move || hook.park()));
+			let reads = start_reads(&view, &keys);
+			let all_parked = tokio::task::block_in_place(|| parking.wait_parked(READERS));
+			assert!(all_parked, "commit = {commit}: {} reads parked at once", parking.most());
+
+			let mut finish = if commit {
+				tx.commit()
+			} else {
+				tx.cancel()
+			};
+			for round in 0..32 {
+				assert!(
+					finish.as_mut().now_or_never().is_none(),
+					"commit = {commit}: finished at round {round} with reads in flight"
+				);
+				tokio::task::yield_now().await;
+			}
+			let later = tokio::time::timeout(ARRIVAL_LIMIT, view.get_many(&keys, None))
+				.await
+				.expect("a read after the finish waited for the reads in flight");
+			assert!(
+				matches!(later, Err(Error::TransactionFinished)),
+				"commit = {commit}: a read after the finish answered {later:?}"
+			);
+
+			parking.release();
+			drop(registered);
+			for read in reads {
+				assert_eq!(read.await.unwrap().unwrap(), expected, "commit = {commit}");
+			}
+			tokio::time::timeout(ARRIVAL_LIMIT, finish)
+				.await
+				.expect("the finish did not complete once the reads had")
+				.unwrap();
+		}
+	}
+}
+
 /// Conformance of the read view a writable transaction gives while it has buffered no put or
 /// delete. The oracle is the transaction's own `get`, `getm`, `scan` and `scanr` over the test
 /// range, taken immediately before `snapshot()`.

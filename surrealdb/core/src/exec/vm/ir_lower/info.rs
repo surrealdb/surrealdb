@@ -1841,7 +1841,7 @@ mod tests {
 		use crate::exec::vm::store::{FULL_SCHEMA_STEPS, SchemaSteps, step_dml};
 		match instr.is_dml() {
 			true => step_dml(program, instr, regs, reserved_taken, ctx).await,
-			false => FULL_SCHEMA_STEPS.step(program, instr, regs, reserved_taken, ctx).await,
+			false => FULL_SCHEMA_STEPS.step(program, instr, regs, reserved_taken, ctx, None).await,
 		}
 	}
 

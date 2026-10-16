@@ -3870,6 +3870,7 @@ impl Ddl<'_, '_> {
 			index: existing,
 			blocking: !attrs.concurrently,
 			fresh: false,
+			prior: None,
 		});
 		self.answer_none()
 	}

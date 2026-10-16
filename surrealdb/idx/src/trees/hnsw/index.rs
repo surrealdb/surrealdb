@@ -85,8 +85,7 @@ async fn compacted_record_id(
 	.await
 }
 
-/// Maximum number of pending key/value pairs captured by one compaction plan.
-const HNSW_COMPACTION_MAX_PENDING_KEYS: usize = 1024;
+pub use crate::trees::hnsw::HNSW_COMPACTION_MAX_PENDING_KEYS;
 /// Maximum encoded pending key/value bytes captured by one compaction plan.
 const HNSW_COMPACTION_MAX_PENDING_BYTES: usize = 16 * 1024 * 1024;
 
@@ -650,16 +649,16 @@ impl HnswIndex {
 		} = plan;
 		let tx = env.tx();
 		if captured_keys.is_empty() {
-			return Ok(HnswCompactionOutcome::Skipped);
+			return Ok(HnswCompactionOutcome::Empty);
 		}
 		if !bump_compaction_generation(&tx, &self.ikb.new_hg_key(), generation).await? {
-			return Ok(HnswCompactionOutcome::Skipped);
+			return Ok(HnswCompactionOutcome::LostRace);
 		}
 		for captured in &captured_keys {
 			match tx.del_compare(Key::from(&captured.key), Some(&captured.value)).await {
 				Ok(()) => {}
 				Err(e) if is_transaction_condition_not_met(&e) => {
-					return Ok(HnswCompactionOutcome::Skipped);
+					return Ok(HnswCompactionOutcome::LostRace);
 				}
 				Err(e) => return Err(e),
 			}
@@ -748,14 +747,21 @@ impl HnswIndex {
 		} else {
 			let started = Instant::now();
 			let resident = Arc::new(resident.downgrade());
-			let staged =
-				batch::build(Arc::clone(&resident), Arc::clone(&tx), base.clone(), elements, tasks)
-					.await?;
+			let staged = batch::build(
+				Arc::clone(&resident),
+				Arc::clone(&tx),
+				base.clone(),
+				elements,
+				&env.places(),
+				tasks,
+			)
+			.await?;
 			let built = started.elapsed();
 			let started = Instant::now();
 			with_hnsw!(&resident.graph, h => staged.write(h, &tx).await)?;
 			debug!(
 				target: "surrealdb::idx::hnsw",
+				tasks = staged.tasks(),
 				allocate_ms = allocated.as_millis() as u64,
 				build_ms = built.as_millis() as u64,
 				write_ms = started.elapsed().as_millis() as u64,

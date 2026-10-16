@@ -42,13 +42,13 @@ mod pool {
 
 	/// A pool of places and the statements served from it.
 	#[derive(Debug)]
-	pub(in crate::exec::vm::morsel) struct Pool {
+	pub(crate) struct Pool {
 		books: Mutex<Books>,
 	}
 
 	impl Pool {
 		/// A pool of `places` places.
-		pub(in crate::exec::vm::morsel) fn new(places: usize) -> Arc<Self> {
+		pub(crate) fn new(places: usize) -> Arc<Self> {
 			Arc::new(Self {
 				books: Mutex::new(Books {
 					free: places,
@@ -63,7 +63,7 @@ mod pool {
 		}
 
 		/// Register a statement.
-		pub(in crate::exec::vm::morsel) fn register(self: &Arc<Self>) -> Statement {
+		pub(crate) fn register(self: &Arc<Self>) -> Statement {
 			let mut books = self.books();
 			let id = books.next;
 			books.next += 1;
@@ -91,11 +91,11 @@ mod pool {
 
 	/// A statement registered with a pool.
 	#[derive(Clone, Debug)]
-	pub(in crate::exec::vm) struct Statement(Arc<Registration>);
+	pub(crate) struct Statement(Arc<Registration>);
 
 	/// A place in the pool, held by a worker until it ends.
 	#[derive(Debug)]
-	pub(in crate::exec::vm::morsel) struct Place(Arc<Registration>);
+	pub(crate) struct Place(Arc<Registration>);
 
 	impl Drop for Place {
 		fn drop(&mut self) {
@@ -112,7 +112,20 @@ mod pool {
 		/// statement gets `None` at once and is not marked waiting. Otherwise a place is granted
 		/// only when the free places beyond the ones `policy` keeps back outnumber the waiting
 		/// statements owed a place before this one. If not, the statement is marked waiting.
-		pub(in crate::exec::vm::morsel) fn acquire(&self, policy: Policy) -> Option<Place> {
+		pub(crate) fn acquire(&self, policy: Policy) -> Option<Place> {
+			self.acquire_keeping_waiting(policy, false)
+		}
+
+		/// [`Self::acquire`], except that a grant leaves the statement marked waiting when
+		/// `keep_waiting` asks it to and it is still below its cap, under the same lock as the
+		/// grant, so no other statement sees it unmarked in between. The morsel runs never keep
+		/// waiting; the index engines do, for a registration one of whose users still waits
+		/// after another was granted a place.
+		pub(crate) fn acquire_keeping_waiting(
+			&self,
+			policy: Policy,
+			keep_waiting: bool,
+		) -> Option<Place> {
 			let mut books = self.0.pool.books();
 			let me = self.0.id;
 			let held = books.statements.get(&me).map_or(0, |entry| entry.held);
@@ -133,14 +146,14 @@ mod pool {
 				entry.waiting = true;
 				return None;
 			}
-			entry.waiting = false;
 			entry.held += 1;
+			entry.waiting = keep_waiting && entry.held < policy.place_cap();
 			books.free -= 1;
 			Some(Place(Arc::clone(&self.0)))
 		}
 
 		/// Clears this statement's waiting mark.
-		pub(in crate::exec::vm::morsel) fn stop_waiting(&self) {
+		pub(crate) fn stop_waiting(&self) {
 			if let Some(entry) = self.0.pool.books().statements.get_mut(&self.0.id) {
 				entry.waiting = false;
 			}
@@ -148,13 +161,38 @@ mod pool {
 
 		/// Whether a statement other than this one waits for a place, and holds no more than this
 		/// one does.
-		pub(in crate::exec::vm::morsel) fn others_wait(&self) -> bool {
+		pub(crate) fn others_wait(&self) -> bool {
 			let books = self.0.pool.books();
 			let held = books.statements.get(&self.0.id).map_or(0, |entry| entry.held);
 			books
 				.statements
 				.iter()
 				.any(|(id, entry)| *id != self.0.id && entry.waiting && entry.held <= held)
+		}
+
+		/// The places this statement holds.
+		#[cfg(test)]
+		pub(crate) fn held(&self) -> usize {
+			self.0.pool.books().statements.get(&self.0.id).map_or(0, |entry| entry.held)
+		}
+
+		/// Whether this statement is marked waiting.
+		#[cfg(test)]
+		pub(crate) fn waiting(&self) -> bool {
+			self.0.pool.books().statements.get(&self.0.id).is_some_and(|entry| entry.waiting)
+		}
+	}
+
+	#[cfg(test)]
+	impl Pool {
+		/// The places no statement holds.
+		pub(crate) fn free(&self) -> usize {
+			self.books().free
+		}
+
+		/// The statements registered.
+		pub(crate) fn registrations(&self) -> usize {
+			self.books().statements.len()
 		}
 	}
 
@@ -169,40 +207,50 @@ mod pool {
 }
 
 #[cfg(not(target_family = "wasm"))]
-pub(super) use pool::Place;
+pub(crate) use pool::Place;
+#[cfg(all(test, not(target_family = "wasm")))]
+pub(crate) use pool::Pool;
 #[cfg(not(target_family = "wasm"))]
-pub(in crate::exec::vm) use pool::Statement;
+pub(crate) use pool::Statement;
 
 /// A place in the pool; targets without worker threads never hold one.
 #[cfg(target_family = "wasm")]
-pub(super) type Place = std::convert::Infallible;
+pub(crate) type Place = std::convert::Infallible;
 
 /// A statement registered with the node's pool; targets without worker threads grant it none.
 #[cfg(target_family = "wasm")]
 #[derive(Clone, Debug)]
-pub(in crate::exec::vm) struct Statement;
+pub(crate) struct Statement;
 
 #[cfg(target_family = "wasm")]
 impl Statement {
-	pub(super) fn acquire(&self, _policy: Policy) -> Option<Place> {
+	pub(crate) fn acquire(&self, _policy: Policy) -> Option<Place> {
 		None
 	}
 
-	pub(super) fn stop_waiting(&self) {}
+	pub(crate) fn acquire_keeping_waiting(
+		&self,
+		_policy: Policy,
+		_keep_waiting: bool,
+	) -> Option<Place> {
+		None
+	}
 
-	pub(super) fn others_wait(&self) -> bool {
+	pub(crate) fn stop_waiting(&self) {}
+
+	pub(crate) fn others_wait(&self) -> bool {
 		false
 	}
 }
 
 /// Register a statement with the node's pool.
 #[cfg(not(target_family = "wasm"))]
-pub(super) fn register() -> Statement {
+pub(crate) fn register() -> Statement {
 	pool::node().register()
 }
 
 #[cfg(target_family = "wasm")]
-pub(super) fn register() -> Statement {
+pub(crate) fn register() -> Statement {
 	Statement
 }
 
@@ -231,6 +279,6 @@ impl Drop for Asking {
 /// The registration of the run `state` belongs to, created on the first request. Every request in
 /// the run draws its places through it, so the run holds at most the policy's cap and the pool
 /// serves the run as one statement.
-pub(super) fn of(state: &mut State) -> &Statement {
+pub(in crate::exec::vm) fn of(state: &mut State) -> &Statement {
 	state.places.get_or_insert_with(register)
 }

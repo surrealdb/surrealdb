@@ -282,6 +282,20 @@ impl Index {
 	pub fn supports_order(&self) -> bool {
 		matches!(self, Self::Idx | Self::Uniq)
 	}
+
+	/// Whether writes to an index of this kind queue compaction work (`!ic`):
+	/// a backlog of deltas or pendings that index compaction folds into the
+	/// structure the kind's queries read. B-tree kinds write their final
+	/// entries and queue nothing.
+	///
+	/// A property of the kind, whatever the build compiles in: where DiskANN
+	/// is not available the compactor has no pass for it and drops the request.
+	pub fn queues_compaction(&self) -> bool {
+		match self {
+			Self::FullText(_) | Self::Count(_) | Self::Hnsw(_) | Self::DiskAnn(_) => true,
+			Self::Idx | Self::Uniq => false,
+		}
+	}
 }
 
 impl InfoStructure for Index {

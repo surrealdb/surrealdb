@@ -66,6 +66,7 @@ pub mod index;
 pub mod inline_cache;
 pub mod kernels;
 pub(crate) mod parallel;
+pub mod places;
 #[cfg(test)]
 pub(crate) mod test_env;
 pub mod trees;
@@ -172,6 +173,32 @@ where
 /// Identifies the datastore error used for failed conditional writes/deletes.
 pub(crate) fn is_transaction_condition_not_met(e: &anyhow::Error) -> bool {
 	matches!(storage_error(e), Some(KvsError::TransactionConditionNotMet))
+}
+
+/// What applying one compaction plan did.
+///
+/// A plan records the compaction generation it read, and its apply advances it
+/// through [`bump_compaction_generation`], so of two plans read from one state
+/// at most one applies. The one that does not is reported apart from a plan
+/// that had nothing to apply: a caller that stops once there is nothing left to
+/// fold must not stop on a plan that was merely overtaken.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CompactionApply {
+	/// The plan's writes were applied.
+	Applied,
+	/// The plan captured nothing to apply, so there is nothing to commit.
+	Empty,
+	/// The plan was stale when applied, so what it wrote must not commit:
+	/// another compactor advanced the compaction generation first, or an entry
+	/// the plan captured changed before the write.
+	LostRace,
+}
+
+impl CompactionApply {
+	/// Whether the plan's writes were applied.
+	pub fn applied(self) -> bool {
+		matches!(self, Self::Applied)
+	}
 }
 
 /// Clears everything an index has stored, and advances its compaction

@@ -144,7 +144,7 @@ mod held;
 mod lease;
 mod merge;
 mod metrics;
-mod places;
+pub(crate) mod places;
 mod run;
 mod set;
 mod sorted;

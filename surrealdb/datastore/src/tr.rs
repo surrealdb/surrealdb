@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use surrealdb_kvs::api::{
 	Batch, GetMultiResult, KeysResult, ScanCursorKeys, ScanCursorVals, ScanResult, Transactable,
 };
+use surrealdb_kvs::snapshot::ViewCapabilities;
 use surrealdb_kvs::timestamp::{BoxTimeStamp, BoxTimeStampImpl};
 use surrealdb_kvs::{Direction, Estimate, Key, KeyRange, Snapshot, SplitTarget};
 
@@ -690,6 +691,14 @@ impl Transactor {
 			return None;
 		}
 		self.inner.snapshot()
+	}
+
+	/// What read views the storage can hand out: a fact of the datastore, the same for every
+	/// transaction opened on it, and an upper bound on what [`Self::snapshot`] returns.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::view_capabilities`].
+	pub fn view_capabilities(&self) -> ViewCapabilities {
+		self.inner.view_capabilities()
 	}
 
 	/// What a range holds, exactly when it holds fewer keys than the estimate budget and

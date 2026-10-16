@@ -3,6 +3,8 @@
 //! `split` and `estimate` are answered by every backend, natively or from the defaults, and the
 //! tests of them run against all of them. A view is offered only by a backend with a native one,
 //! and only for a read-only transaction; the tests of the cursors it opens run against RocksDB.
+//! The test of batched point reads runs against every backend: through the view where there is
+//! one, and through the transaction, as a caller falls back to, where there is none.
 
 use std::ops::ControlFlow;
 
@@ -496,6 +498,52 @@ async fn a_read_only_rocksdb_transaction_gives_a_view(b: &TestBackend) {
 }
 
 kvs_test!(a_read_only_rocksdb_transaction_gives_a_view, only = [rocksdb]);
+
+/// Batched point reads at the moment a read-only transaction's view is taken: through the view
+/// where the backend gives one, and through the transaction itself, a caller's fallback, where it
+/// gives none. Either answers what the transaction's `getm` answered then, hits and misses in
+/// input order with the same counts, whatever commits afterwards. A backend that declares no
+/// view for a read-only transaction gives none.
+async fn get_many_at_the_views_moment_with_or_without_a_view(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	let prefix = b"getm/";
+	seed(&ds, prefix, 16).await;
+	// Every seeded key, interleaved with keys between them that were never written.
+	let keys: Vec<Key<'static>> = (0..16)
+		.flat_map(|i| [id_key(prefix, i, 16), id_key(prefix, 2 * i + 1, 32)])
+		.map(Key::from)
+		.collect();
+	let tx = ds.transaction(Read).await.unwrap();
+	let expected = tx.getm(&keys, None).await.unwrap();
+	assert_eq!(expected.records, 16);
+	let view = tx.snapshot();
+	if !tx.view_capabilities().read_only {
+		assert!(view.is_none(), "a backend that declares no read-only view gave one");
+	}
+
+	// Committed after the view was taken: one key overwritten and one key that was missing.
+	let writer = ds.transaction(Write).await.unwrap();
+	writer.set(Key::from(id_key(prefix, 0, 16)), b"changed".to_vec()).await.unwrap();
+	writer.set(Key::from(id_key(prefix, 1, 32)), value()).await.unwrap();
+	writer.commit().await.unwrap();
+
+	let got = match &view {
+		Some(view) => view.get_many(&keys, None).await.unwrap(),
+		None => tx.getm(&keys, None).await.unwrap(),
+	};
+	let through = if view.is_some() {
+		"the view"
+	} else {
+		"the transaction"
+	};
+	assert_eq!(got.values, expected.values, "values read through {through}");
+	assert_eq!(got.records, expected.records, "records read through {through}");
+	assert_eq!(got.value_bytes, expected.value_bytes, "value bytes read through {through}");
+	drop(view);
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(get_many_at_the_views_moment_with_or_without_a_view);
 
 /// A backend with no native view answers none, and still divides a range.
 async fn memory_backends_give_no_view_and_split_by_default(b: &TestBackend) {

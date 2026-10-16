@@ -1,10 +1,7 @@
 use std::any::TypeId;
 use std::borrow::Cow;
-#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-use std::collections::HashMap;
-#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 use std::collections::hash_map::Entry;
-use std::collections::{BinaryHeap, HashSet};
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::fmt::{self, Display};
 #[cfg(storage)]
 use std::path::PathBuf;
@@ -21,7 +18,7 @@ use async_channel::Sender;
 use bytes::{Bytes, BytesMut};
 #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 use common::rt::spawn;
-use common::time::{Instant, sleep, timeout, timeout_at};
+use common::time::{Instant, MissedTickBehavior, interval, sleep, timeout, timeout_at};
 use futures::{Future, Stream, StreamExt};
 use rand::Rng;
 use rand::distr::{Alphanumeric, SampleString};
@@ -50,7 +47,7 @@ use crate::buc::manager::BucketsManager;
 use crate::catalog::providers::{
 	CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider, RootProvider, TableProvider,
 };
-use crate::catalog::{FromStored as _, Index, NodeLiveQuery, StoredFeatureLevel};
+use crate::catalog::{FromStored, Index, IndexDefinition, NodeLiveQuery, StoredFeatureLevel};
 use crate::config::RuntimeConfig;
 use crate::ctx::{CancelHandle, Context, FrozenContext};
 #[cfg(feature = "jwks")]
@@ -81,19 +78,19 @@ use crate::expr::{Base, Expr, Idiom, Literal};
 #[cfg(feature = "http")]
 use crate::http::HttpClient;
 use crate::iam::{Action, Auth, PolicyError, Resource, ResourceKind, Role};
-use crate::idx::IndexKeyBase;
 use crate::idx::index::IndexOperation;
 use crate::idx::trees::hnsw::index::HnswCompactionOutcome;
 use crate::idx::trees::store::IndexStores;
+use crate::idx::{CompactionApply, IndexKeyBase};
 use crate::key::reclaim::{Expunge, ReclaimKind, ReclaimState};
 use crate::key::schema::{
 	BootstrapKey, DatabasePrefix, DbRoot, DocKeyPrefix, DocLookupIdentityPrefix, DocLookupPrefix,
 	DocPendingPrefix, FeatureLevelKey, GraphFoldDirPrefix, GraphFoldKey, GraphFoldPrefix, IdxRoot,
-	IndexCompactionIxPrefix, IndexCompactionKey, IndexCompactionPrefix, IndexDefPrefix,
-	MigrationKey, MigrationPrefix, NamespacePrefix, NodeKey, NodeLiveQueryKey, NodeLiveQueryPrefix,
-	NodeReleaseKey, NodeReleasePrefix, NsRoot, ReclaimKey, ReclaimPrefix, RootUserPrefix,
-	SessionKey, SessionPrefix, StorageVersionKey, SubscriptionKey, TablePrefix,
-	VersionHistoryPrefix, VersionKey,
+	IndexCompactionIxPrefix, IndexCompactionKey, IndexCompactionPrefix, IndexDefKey,
+	IndexDefPrefix, IndexNameKey, MigrationKey, MigrationPrefix, NamespacePrefix, NodeKey,
+	NodeLiveQueryKey, NodeLiveQueryPrefix, NodeReleaseKey, NodeReleasePrefix, NsRoot, ReclaimKey,
+	ReclaimPrefix, RootUserPrefix, SessionKey, SessionPrefix, StorageVersionKey, SubscriptionKey,
+	TablePrefix, VersionHistoryPrefix, VersionKey,
 };
 use crate::key::{
 	AnyRange, KVKey, KVKeyDecode, KVSubspace, KVValue, Key, KeyRange, RawRange, Resumable,
@@ -708,6 +705,531 @@ impl PartialEq for ReclaimCandidate {
 }
 
 impl Eq for ReclaimCandidate {}
+
+/// Most compaction plans one pass over an index applies.
+///
+/// A pass that spends it with work left requeues its index and ends on
+/// [`CompactionPassOutcome::Budget`], so the queue batch that named the index,
+/// and every other index that batch names, waits on at most this many of its
+/// plans rather than on its whole backlog. The rotation in
+/// [`Datastore::index_compaction`] reaches the requeued index again after the
+/// indexes queued behind it; where that call ends after a short batch read
+/// from the head of the queue, the call the request's commit wakes does. Each
+/// plan is bounded by its kind's own caps, so this bounds the work one pass
+/// does, not how long it takes.
+pub(crate) const INDEX_COMPACTION_PASS_PLAN_BUDGET: usize = 4;
+
+/// Most retries one compaction pass makes, counting both retryable conflicts
+/// and plans that lost their race.
+///
+/// A pass that meets one more requeues its index, and returns the conflict or
+/// ends on [`CompactionPassOutcome::LostRace`], so a later pass retries the
+/// index rather than this one spinning against it, and the index does not wait
+/// for its next write either.
+pub(crate) const INDEX_COMPACTION_PASS_MAX_RETRIES: usize = 5;
+
+/// How often the index-compaction lease is maintained while a batch's passes
+/// run.
+///
+/// No longer than the shortest maintenance period [`LeaseHandler`] throttles
+/// its checks to, so a renewal it is due is never more than a tick late; a
+/// call it throttles costs nothing.
+const INDEX_COMPACTION_LEASE_TICK: Duration = Duration::from_secs(1);
+
+/// How one compaction pass over an index ended.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CompactionPassOutcome {
+	/// Nothing to fold: the first plan found no backlog, or the index has no
+	/// definition this pass compacts and no live build owner, so it has been
+	/// removed or its defining statement rolled back.
+	Empty,
+	/// The pass applied at least one plan and then ran out of work: the last
+	/// plan it applied reported nothing beyond it, or the next one found
+	/// nothing. The backlog the pass read is folded.
+	Short,
+	/// The pass stopped with work left and requeued its index: it applied
+	/// [`INDEX_COMPACTION_PASS_PLAN_BUDGET`] plans, or found its lease lost at a
+	/// plan boundary.
+	Budget,
+	/// A plan was stale when applied, and the pass had no retry left to read a
+	/// fresh one: another compactor advanced the compaction generation first,
+	/// or an entry the plan captured changed before its write. The pass
+	/// requeued its index, since what the stale plan captured may still be
+	/// unfolded.
+	LostRace,
+	/// A live build owner holds the vector index, so the pass left it to that
+	/// build. The pass did not act on its requests, so the batch keeps one.
+	Fenced,
+	/// The index has no definition this pass can read, but a live build owner
+	/// holds it: the statement defining it has not committed. The pass did not
+	/// act on its requests, so the batch keeps one, which the first pass after
+	/// that commit acts on.
+	NotVisible,
+}
+
+impl CompactionPassOutcome {
+	/// Whether the pass could not act on the requests that led to it, so the
+	/// batch keeps one of them in place for a later pass.
+	fn retains_request(self) -> bool {
+		matches!(self, Self::Fenced | Self::NotVisible)
+	}
+}
+
+/// How one pass over an index ended, as the queue batch that ran it needs to
+/// know.
+struct CompactionPassReport {
+	/// The pass's outcome, or the error that ended it.
+	result: Result<CompactionPassOutcome>,
+	/// Whether the pass owed its index a fresh compaction request and could
+	/// not queue it. The requests that led to the pass are then the only record
+	/// of the index's remaining work.
+	unqueued: bool,
+}
+
+/// What one queue batch's passes leave its cleanup to act on.
+#[derive(Default)]
+struct CompactionBatchReport {
+	/// Indexes whose pass failed, or could not queue the request it owed.
+	errors: usize,
+	/// Indexes left without the fresh request their pass owed them, whose
+	/// requests in the batch the cleanup keeps.
+	unqueued: HashSet<IndexKeyBase>,
+	/// Indexes whose pass could not act on their requests
+	/// ([`CompactionPassOutcome::retains_request`]), of whose requests in the
+	/// batch the cleanup keeps one.
+	retained: HashSet<IndexKeyBase>,
+	/// Whether a pass stopped at its budget with work left and queued the
+	/// request for it ([`CompactionPassOutcome::Budget`]).
+	budgeted: bool,
+}
+
+impl CompactionBatchReport {
+	/// Records how one index's pass ended. A pass ended by cancellation ends
+	/// the batch with its error.
+	fn record(
+		&mut self,
+		ikb: IndexKeyBase,
+		report: CompactionPassReport,
+		canceller: &CancellationToken,
+	) -> Result<()> {
+		let mut retains = false;
+		let failed = match report.result {
+			Ok(outcome) => {
+				trace!(target: TARGET, "Index compaction {ikb} ended: {outcome:?}");
+				retains = outcome.retains_request();
+				self.budgeted |= outcome == CompactionPassOutcome::Budget && !report.unqueued;
+				false
+			}
+			Err(e) if canceller.is_cancelled() => return Err(e),
+			Err(e) => {
+				warn!(target: TARGET, "Index compaction {ikb} fails: {e}");
+				true
+			}
+		};
+		if failed || report.unqueued {
+			self.errors += 1;
+		}
+		if report.unqueued {
+			self.unqueued.insert(ikb);
+		} else if retains {
+			self.retained.insert(ikb);
+		}
+		Ok(())
+	}
+}
+
+/// How one queue batch's cleanup ended.
+struct CompactionBatchCleanup {
+	/// Indexes whose pass failed, or could not queue the request it owed.
+	errors: usize,
+	/// Whether the cleanup committed.
+	deleted: bool,
+	/// The batch's keys the committed cleanup left queued.
+	kept: Vec<Vec<u8>>,
+	/// The indexes of which the committed cleanup kept one request, as their
+	/// pass could not act on it.
+	retained: HashSet<IndexKeyBase>,
+	/// Whether a pass stopped at its budget with work left, and queued the
+	/// request a later batch of the same drain acts on.
+	budgeted: bool,
+}
+
+/// What one drain of the compaction queue has left queued so far, which its
+/// later batches do not pass again, so a drain passes each index's kept
+/// requests at most once.
+#[derive(Default)]
+struct CompactionDrain {
+	/// The keys earlier batches left queued.
+	kept: HashSet<Vec<u8>>,
+	/// The indexes of which an earlier batch kept one request. A later batch
+	/// deletes their other requests without passing them again.
+	retained: HashSet<IndexKeyBase>,
+}
+
+impl CompactionDrain {
+	/// Whether a batch passes the index `key` names: an undecodable key never
+	/// passes, nor does a key this drain kept, nor one of an index it kept a
+	/// request for.
+	fn passes(&self, key: &[u8], ikb: Option<&IndexKeyBase>) -> bool {
+		ikb.is_some_and(|ikb| !self.kept.contains(key) && !self.retained.contains(ikb))
+	}
+}
+
+/// The index each queue key names, or `None` for a key that does not decode,
+/// which is reported here. An undecodable entry names no index to compact, so
+/// it has no pass, and the batch's cleanup deletes it, so one corrupt key
+/// cannot wedge every future compaction cycle.
+fn decode_index_compaction_keys(keys: &[Vec<u8>]) -> Vec<Option<IndexKeyBase>> {
+	keys.iter()
+		.map(|k| match IndexCompactionKey::decode_key(k) {
+			Ok(ic) => Some(IndexKeyBase::new(ic.ns, ic.db, ic.tb.into_owned(), ic.ix)),
+			Err(e) => {
+				warn!(target: TARGET, "Skipping undecodable index compaction queue entry: {e}");
+				None
+			}
+		})
+		.collect()
+}
+
+/// The index-compaction lease, as the passes of one queue batch observe it.
+///
+/// [`LeaseHandler::try_maintain_lease`] reads the store at most once per
+/// maintenance period and reports the lease held to every call in between, so
+/// only the call that made the read learns of a loss. This keeps that answer
+/// where every pass of the batch reads it at its plan boundaries.
+#[derive(Clone)]
+struct CompactionLease {
+	lh: LeaseHandler,
+	lost: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl CompactionLease {
+	fn new(lh: &LeaseHandler) -> Self {
+		Self {
+			lh: lh.clone(),
+			lost: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+		}
+	}
+
+	/// Renews the lease once its maintenance period has passed, and reports
+	/// whether this node still holds it. A loss, once seen, stands for the rest
+	/// of the batch.
+	async fn maintain(&self) -> Result<bool> {
+		if self.is_lost() {
+			return Ok(false);
+		}
+		if self.lh.try_maintain_lease().await? {
+			return Ok(true);
+		}
+		self.lost.store(true, std::sync::atomic::Ordering::Release);
+		Ok(false)
+	}
+
+	/// Whether a renewal has found the lease held by another node.
+	fn is_lost(&self) -> bool {
+		self.lost.load(std::sync::atomic::Ordering::Acquire)
+	}
+}
+
+/// A compaction pass's progress through its plan budget and its retries.
+#[derive(Default)]
+struct CompactionPassProgress {
+	/// Plans the pass has applied.
+	applied: usize,
+	/// Retryable conflicts the pass has retried.
+	retries: usize,
+}
+
+impl CompactionPassProgress {
+	/// How the pass ends on a plan with nothing to apply.
+	fn nothing_to_apply(&self) -> CompactionPassOutcome {
+		if self.applied == 0 {
+			CompactionPassOutcome::Empty
+		} else {
+			CompactionPassOutcome::Short
+		}
+	}
+
+	/// Counts an applied plan, and says how the pass ends if it ends there.
+	/// `has_more` is whether that plan stopped at its own cap with entries
+	/// behind it.
+	fn record_applied(&mut self, has_more: bool) -> Option<CompactionPassOutcome> {
+		self.applied += 1;
+		if !has_more {
+			Some(CompactionPassOutcome::Short)
+		} else if self.applied >= INDEX_COMPACTION_PASS_PLAN_BUDGET {
+			Some(CompactionPassOutcome::Budget)
+		} else {
+			None
+		}
+	}
+
+	/// Whether a plan that lost its race is retried from a fresh plan, while
+	/// the pass has retries left. A lost race is a plan read from a state
+	/// another writer has since moved past, not a sign that nothing is left to
+	/// fold, so the pass reads the state again rather than ending.
+	fn retry_lost_race(&mut self, ikb: &IndexKeyBase) -> bool {
+		if self.retries >= INDEX_COMPACTION_PASS_MAX_RETRIES {
+			return false;
+		}
+		self.retries += 1;
+		debug!(target: TARGET, "Index compaction plan for {ikb} lost its race, replanning");
+		true
+	}
+
+	/// Whether `err` is retried: a retryable conflict, while the pass has
+	/// retries left. Waits before a retry.
+	async fn retry(&mut self, err: &anyhow::Error, operation: impl Into<String>) -> bool {
+		if self.retries >= INDEX_COMPACTION_PASS_MAX_RETRIES {
+			return false;
+		}
+		if !Datastore::retry_index_operation_conflict(err, operation).await {
+			return false;
+		}
+		self.retries += 1;
+		true
+	}
+}
+
+/// What [`compaction_write_guard`] found in an apply's write transaction.
+enum CompactionWriteGuard {
+	/// The index is live under this definition and no build fences it, so the
+	/// apply may write.
+	Live(Arc<IndexDefinition>),
+	/// The index has no definition under its id, or is being removed, so
+	/// nothing may be written under its prefix.
+	Retired,
+	/// A live build owner holds the vector index.
+	Fenced,
+}
+
+/// Whether a live build owner fences background compaction off this kind of
+/// index: the kinds whose builders drain their own pendings.
+fn fenced_by_build_owner(index: &Index) -> bool {
+	match index {
+		Index::Hnsw(_) => true,
+		#[cfg(diskann)]
+		Index::DiskAnn(_) => true,
+		_ => false,
+	}
+}
+
+/// The check every compaction apply makes in its own write transaction, before
+/// its first write.
+///
+/// What a pass read before this transaction began — its dispatch and its plan —
+/// was read in transactions that have closed, so it binds nothing here. The
+/// index's catalog definition is taken with a locked read, resolved the way
+/// [`TableProvider::get_tb_index_by_id`] resolves it: the id to the name, then
+/// the definition stored under that name. A retirement deletes that
+/// definition, so one that commits between this read and the transaction's
+/// commit fails the commit with a retryable conflict, rather than letting the
+/// apply land index data under a prefix the catalog no longer names. An index
+/// [`fenced_by_build_owner`] also takes a locked read of its build state
+/// ([`build_owner_is_live_locked`]), so a build that acquires it after this
+/// read conflicts the same way.
+///
+/// The reads bind only the transaction that registers them, so `tx` must be
+/// the one the apply commits.
+async fn compaction_write_guard(
+	tx: &Transaction,
+	ikb: &IndexKeyBase,
+) -> Result<CompactionWriteGuard> {
+	let name = IndexNameKey {
+		ns: ikb.ns(),
+		db: ikb.db(),
+		tb: Cow::Borrowed(ikb.table()),
+		ix: ikb.index(),
+	};
+	let Some(name) = tx.get_key(&name, None).await? else {
+		return Ok(CompactionWriteGuard::Retired);
+	};
+	let definition = IndexDefKey {
+		ns: ikb.ns(),
+		db: ikb.db(),
+		tb: Cow::Borrowed(ikb.table()),
+		ix: Cow::Borrowed(name.as_str()),
+	};
+	let Some(stored) = tx.getu_key(&definition).await? else {
+		return Ok(CompactionWriteGuard::Retired);
+	};
+	let ix = IndexDefinition::from_stored(&stored)?;
+	if ix.index_id != ikb.index() || ix.prepare_remove {
+		return Ok(CompactionWriteGuard::Retired);
+	}
+	if fenced_by_build_owner(&ix.index) && build_owner_is_live_locked(tx, ikb).await? {
+		return Ok(CompactionWriteGuard::Fenced);
+	}
+	Ok(CompactionWriteGuard::Live(Arc::new(ix)))
+}
+
+/// Holds the compaction passes a node starts until a test releases them.
+#[cfg(test)]
+mod compaction_pass_park {
+	use std::collections::HashMap;
+	use std::sync::{Arc, LazyLock, Mutex};
+
+	use tokio::sync::Notify;
+	use tokio_util::sync::CancellationToken;
+	use uuid::Uuid;
+
+	use crate::idx::IndexKeyBase;
+
+	struct Park {
+		/// The one index whose passes park, or every index's when `None`.
+		only: Option<IndexKeyBase>,
+		parked: Notify,
+		release: CancellationToken,
+	}
+
+	static PARKS: LazyLock<Mutex<HashMap<Uuid, Arc<Park>>>> = LazyLock::new(Default::default);
+
+	/// The passes each node has started, per index.
+	static PASSES: LazyLock<Mutex<HashMap<(Uuid, IndexKeyBase), usize>>> =
+		LazyLock::new(Default::default);
+
+	/// Parks every compaction pass `node` starts, until the returned guard
+	/// releases them or is dropped.
+	pub(super) fn park(node: Uuid) -> ParkGuard {
+		park_passes(node, None)
+	}
+
+	/// Parks every compaction pass `node` starts over `ikb`, until the
+	/// returned guard releases them or is dropped.
+	pub(super) fn park_index(node: Uuid, ikb: IndexKeyBase) -> ParkGuard {
+		park_passes(node, Some(ikb))
+	}
+
+	fn park_passes(node: Uuid, only: Option<IndexKeyBase>) -> ParkGuard {
+		let park = Arc::new(Park {
+			only,
+			parked: Notify::new(),
+			release: CancellationToken::new(),
+		});
+		PARKS.lock().unwrap().insert(node, Arc::clone(&park));
+		ParkGuard {
+			node,
+			park,
+		}
+	}
+
+	/// The passes each node has ended, per index.
+	static ENDED: LazyLock<Mutex<HashMap<(Uuid, IndexKeyBase), usize>>> =
+		LazyLock::new(Default::default);
+
+	/// How many passes `node` has started over `ikb`.
+	pub(super) fn passes(node: Uuid, ikb: &IndexKeyBase) -> usize {
+		PASSES.lock().unwrap().get(&(node, ikb.clone())).copied().unwrap_or(0)
+	}
+
+	/// How many passes `node` has ended over `ikb`.
+	pub(super) fn ended(node: Uuid, ikb: &IndexKeyBase) -> usize {
+		ENDED.lock().unwrap().get(&(node, ikb.clone())).copied().unwrap_or(0)
+	}
+
+	/// Counts a pass as it ends.
+	pub(super) fn end(node: Uuid, ikb: &IndexKeyBase) {
+		*ENDED.lock().unwrap().entry((node, ikb.clone())).or_default() += 1;
+	}
+
+	/// Counts a pass as it starts, and waits here while its node is parked
+	/// for it.
+	pub(super) async fn wait(node: Uuid, ikb: &IndexKeyBase) {
+		*PASSES.lock().unwrap().entry((node, ikb.clone())).or_default() += 1;
+		let park = PARKS
+			.lock()
+			.unwrap()
+			.get(&node)
+			.filter(|park| park.only.as_ref().is_none_or(|only| only == ikb))
+			.map(Arc::clone);
+		if let Some(park) = park {
+			park.parked.notify_one();
+			park.release.cancelled().await;
+		}
+	}
+
+	pub(super) struct ParkGuard {
+		node: Uuid,
+		park: Arc<Park>,
+	}
+
+	impl ParkGuard {
+		/// Resolves once a pass has reached the park.
+		pub(super) async fn parked(&self) {
+			self.park.parked.notified().await;
+		}
+
+		/// Lets every parked pass, and every later one, go on.
+		pub(super) fn release(&self) {
+			PARKS.lock().unwrap().remove(&self.node);
+			self.park.release.cancel();
+		}
+	}
+
+	impl Drop for ParkGuard {
+		fn drop(&mut self) {
+			self.release();
+		}
+	}
+}
+/// The indexes a compaction loop has yet to claim, shared by the loop and its
+/// helpers.
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+type CompactionQueue = Arc<parking_lot::Mutex<std::collections::VecDeque<IndexKeyBase>>>;
+
+/// What a run of compaction passes, or one of its helpers, hands back: the
+/// report of every pass it ran, and the first failure that stopped it.
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+struct CompactionRun<R> {
+	results: Vec<(IndexKeyBase, R)>,
+	failure: Option<anyhow::Error>,
+}
+
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+impl<R> Default for CompactionRun<R> {
+	fn default() -> Self {
+		Self {
+			results: Vec::new(),
+			failure: None,
+		}
+	}
+}
+
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+impl<R> CompactionRun<R> {
+	/// Takes in what a joined helper ran. A helper that panicked or was
+	/// aborted fails the run. The first failure is kept; a later one is logged,
+	/// unless it is a cancellation the run already failed on.
+	fn absorb(&mut self, joined: std::result::Result<Self, common::rt::JoinError>) {
+		let failure = match joined {
+			Ok(helper) => {
+				self.results.extend(helper.results);
+				helper.failure
+			}
+			Err(e) => Some(anyhow::Error::from(e)),
+		};
+		let Some(failure) = failure else {
+			return;
+		};
+		if self.failure.is_none() {
+			self.failure = Some(failure);
+		} else if !matches!(crate::err::engine_error(&failure), Some(EngineError::QueryCancelled)) {
+			warn!("Index compaction fails while its run stops: {failure}");
+		}
+	}
+}
+
+/// The message a panicking compaction pass carried, as its payload holds it.
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+fn compaction_panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
+	if let Some(message) = payload.downcast_ref::<&str>() {
+		message
+	} else if let Some(message) = payload.downcast_ref::<String>() {
+		message
+	} else {
+		"a non-string payload"
+	}
+}
 
 impl Datastore {
 	pub fn builder() -> Builder {
@@ -3902,8 +4424,9 @@ impl Datastore {
 	/// The method scans the index compaction queue (stored as `Ic` keys) and
 	/// delegates to [`Self::index_compaction_loop`], which compacts each
 	/// distinct index exactly once — duplicate queue entries for the same
-	/// index are skipped. On native targets compaction tasks run in parallel
-	/// (one spawned task per index), while on wasm they run sequentially.
+	/// index are skipped. On native targets the indexes are compacted in
+	/// parallel as far as one compaction ticket is granted places of the
+	/// node's pool, while on wasm they run sequentially.
 	/// Indexes that support compaction include full-text, count, and HNSW.
 	///
 	/// The queue is read in a short-lived read transaction so that user
@@ -4069,12 +4592,23 @@ impl Datastore {
 		}
 		// Attempt a takeover for each candidate. `resume_stalled` is a cheap
 		// no-op for healthy/online/live builds, so this is safe to call for
-		// every index every pass.
+		// every index every pass. The snapshot may be stale by the time a
+		// candidate is taken up; `resume_stalled` adopts a build only while the
+		// catalog still holds the candidate's table and definition.
 		let index_builder = &self.index_builder;
 		let mut resumed = 0;
 		for (ns_id, ns_name, db_id, db_name, tb_id, ix) in candidates {
 			Self::ensure_not_cancelled(&canceller)?;
-			lh.try_maintain_lease().await?;
+			#[cfg(test)]
+			if let Some(hook) = test::take_before_resume_candidate(self.id) {
+				hook().await;
+			}
+			// A scan that has lost its lease adopts nothing more: the node now
+			// holding it recovers the stalled builds, one at a time.
+			if !lh.try_maintain_lease().await? {
+				trace!(target: TARGET, "Index build resume lease lost, stopping the scan");
+				break;
+			}
 			let ctx = self.setup_ctx()?.freeze();
 			let opt = self.setup_options(
 				&Session::owner().with_ns(ns_name.as_str()).with_db(db_name.as_str()),
@@ -4111,13 +4645,18 @@ impl Datastore {
 	/// Drains the index-compaction queue (`/!ic` keys) in bounded batches.
 	///
 	/// Each iteration scans at most [`INDEX_COMPACTION_QUEUE_BATCH_SIZE`]
-	/// queue keys, compacts every distinct index they reference, and then
-	/// deletes exactly those keys in one write transaction, so no single
+	/// queue keys, runs one pass over every distinct index they reference, and
+	/// then deletes exactly those keys in one write transaction, so no single
 	/// transaction's key cardinality exceeds the batch size regardless of how
 	/// many entries have accumulated. Entries enqueued after a batch's scan
 	/// are untouched by its cleanup and are picked up by a later iteration
 	/// (or a later invocation), so a queue entry is only ever removed after
-	/// its index has been compacted at-or-after the entry was written.
+	/// its index has been compacted at-or-after the entry was written, after
+	/// a pass that stopped short of that queued a fresh entry in its place (see
+	/// [`Self::run_index_compaction_pass`]), or after its index was found
+	/// removed. A pass that could not act on an index's entries keeps one of
+	/// them in place (see [`Self::index_compaction_batch`]); a drain visits such
+	/// an entry once, and ends with it still queued for the next drain.
 	///
 	/// Batches rotate across indexes: each batch's scan resumes past the last
 	/// index the previous batch covered and wraps at the end of the queue
@@ -4175,6 +4714,15 @@ impl Datastore {
 		// a wrap that finds nothing means the queue is drained.
 		let queue = IndexCompactionPrefix {}.range()?;
 		let mut window = queue.clone();
+		// What this drain's batches left queued, which later batches do not pass
+		// again (see `CompactionDrain`). A lap of the queue that finds nothing
+		// else ends the drain with those requests still queued. Keeping a
+		// request writes nothing and wakes nothing, so it waits for the next
+		// drain.
+		let mut drain = CompactionDrain::default();
+		// Whether the current lap of the queue acted on a request: passed it, or
+		// deleted it.
+		let mut lap_passed = false;
 		// We continue without interruptions while there are keys and the lease
 		'compaction: loop {
 			Self::ensure_not_cancelled(&canceller)?;
@@ -4212,37 +4760,55 @@ impl Datastore {
 			// nodes write to, their commits do not wake this node, so the pass keeps
 			// going until the queue is empty. A full batch, or one read part-way
 			// through the queue, is a backlog, and the pass keeps going until it is
-			// drained.
-			let whole_queue = sole_writer
+			// drained. So is a batch one of whose passes stopped at its budget: the
+			// request it queued is that pass's own work left, not writes still
+			// arriving, so the drain goes on with it at once rather than ending
+			// and waiting a debounce per budget for the wake-up its commit sent.
+			let mut whole_queue = sole_writer
 				&& window.start() == queue.start()
 				&& keys.len() < INDEX_COMPACTION_QUEUE_BATCH_SIZE as usize;
 			if keys.is_empty() {
-				if window.start() == queue.start() {
-					// Nothing left anywhere in the queue.
+				if window.start() == queue.start() || !lap_passed {
+					// Nothing left anywhere in the queue, or nothing but the
+					// requests this drain already kept.
 					return Ok((count_iteration, count_error));
 				}
 				// End of the range: wrap to re-scan entries that were
 				// skipped when the window seeked past a partially-drained
 				// index.
 				window = queue.clone();
+				lap_passed = false;
 				continue;
 			}
-			// Compact each distinct index referenced by this batch before
-			// deleting the batch's queue entries: an entry may only be
-			// removed once its index has been compacted at-or-after the
-			// entry was enqueued.
-			count_iteration += 1;
-			count_error +=
-				Self::index_compaction_loop(Arc::clone(&dbs), &lh, &keys, canceller.clone())
-					.await?;
+			// Every key the drain has not kept is either passed or deleted.
+			let acts = keys.iter().any(|k| !drain.kept.contains(k));
+			if acts {
+				let Some(cleanup) =
+					Self::index_compaction_batch(Arc::clone(&dbs), &lh, &keys, &drain, &canceller)
+						.await?
+				else {
+					// Another node holds the lease now, and the batch's requests
+					// are its to act on.
+					return Ok((count_iteration, count_error));
+				};
+				count_iteration += 1;
+				lap_passed = true;
+				count_error += cleanup.errors;
+				if !cleanup.deleted {
+					break 'compaction;
+				}
+				whole_queue &= !cleanup.budgeted;
+				drain.kept.extend(cleanup.kept);
+				drain.retained.extend(cleanup.retained);
+			}
 			// Seek the next batch past the last index this batch covered.
 			// Entries of that index beyond this batch are picked up again
 			// after the window wraps, so a continuously-refilling index
 			// cannot starve later-sorting ones. A key that fails to decode
 			// cannot name an index to seek past: fall back to resuming
-			// immediately after the key itself, so the scan still advances and
-			// the cleanup below still removes the undecodable entry (it
-			// references no valid index, so deleting it cannot violate the
+			// immediately after the key itself, so the scan still advances past
+			// the undecodable entry the batch's cleanup removed (it references
+			// no valid index, so deleting it cannot violate the
 			// compact-before-delete invariant).
 			if let Some(last_key) = keys.last() {
 				window = match IndexCompactionKey::decode_key(last_key) {
@@ -4264,66 +4830,8 @@ impl Datastore {
 					}
 				};
 			}
-			// Delete this batch's queue entries in a separate write
-			// transaction, bounded by the batch size. This avoids conflicts
-			// with concurrent user transactions that may enqueue new
-			// compaction requests. Failed indexes are not re-enqueued here;
-			// the next user write to the affected index will naturally
-			// trigger a new compaction request.
-			loop {
-				let txn = dbs.transaction(Write).await?;
-				if let Err(e) = Self::ensure_not_cancelled(&canceller) {
-					let _ = txn.cancel().await;
-					return Err(e);
-				}
-				// Deleted as bytes rather than through the decoded key, because
-				// the batch deliberately includes entries that do not decode. An
-				// undecodable entry names no index, so it can never be compacted
-				// and a typed delete could never address it; leaving it would
-				// park it at the head of the queue forever.
-				for k in &keys {
-					if let Err(e) = txn.del(Key::from(k)).await {
-						warn!(target: TARGET, "Failed to delete compaction queue entry: {e}");
-					}
-				}
-				if let Err(e) = Self::ensure_not_cancelled(&canceller) {
-					let _ = txn.cancel().await;
-					return Err(e);
-				}
-				#[cfg(test)]
-				if let Err(e) = maybe_inject_retryable_conflict(
-					RetryableConflictSite::IndexCompactionQueueCleanup,
-					dbs.id,
-				) {
-					if Self::cancel_and_retry_index_operation_conflict(
-						&txn,
-						&e,
-						"Retryable conflict committing compaction queue cleanup, retrying",
-					)
-					.await
-					{
-						continue;
-					}
-					warn!(target: TARGET, "Failed to commit compaction queue cleanup: {e}");
-					break 'compaction;
-				}
-				if let Err(e) = txn.commit().await {
-					if Self::cancel_and_retry_index_operation_conflict(
-						&txn,
-						&e,
-						"Retryable conflict committing compaction queue cleanup, retrying",
-					)
-					.await
-					{
-						continue;
-					}
-					warn!(target: TARGET, "Failed to commit compaction queue cleanup: {e}");
-					break 'compaction;
-				}
-				break;
-			}
 			#[cfg(test)]
-			if let Some(hook) = test::take_after_compaction_batch(dbs.id) {
+			if acts && let Some(hook) = test::take_after_compaction_batch(dbs.id) {
 				hook().await;
 			}
 			if whole_queue {
@@ -4331,6 +4839,233 @@ impl Datastore {
 			}
 		}
 		Ok((count_iteration, count_error))
+	}
+
+	/// Runs one pass over every distinct index a batch of queue keys names, and
+	/// then deletes the keys whose pass acted on them.
+	///
+	/// A request is deleted only by a pass that could act on it:
+	///
+	/// * A pass that compacted its index, or found it removed, deletes every key of the index in
+	///   the batch. One that stopped short of folding the backlog — with work left, on a lost race,
+	///   or on a retryable failure it could not retry away — has already queued a fresh request
+	///   under a key this batch does not hold. A pass that fails on anything else leaves its index
+	///   to its next write.
+	/// * A pass whose fresh request failed to commit keeps every key of the index in the batch, as
+	///   the only record of its remaining work.
+	/// * A pass that could not act on its requests ([`CompactionPassOutcome::retains_request`])
+	///   keeps one key of the index in place and deletes the rest, so a build that queues a request
+	///   per batch leaves the queue one request per index rather than one per batch. The key kept
+	///   is one the drain already kept, else the index's first key in the batch, so the request a
+	///   later call finds is the one kept first.
+	///
+	/// An index the drain has already passed is not passed again (see
+	/// [`CompactionDrain`]). Of an index whose one request an earlier batch kept,
+	/// the batch keeps that request if it holds it and deletes every other: the
+	/// index's request is already queued, so they record nothing more. Of any
+	/// other index whose keys in the batch the drain has all kept, the batch
+	/// keeps them.
+	///
+	/// The batch first confirms the lease. One that finds another node holds
+	/// it runs no pass, queues nothing and deletes nothing, leaving its requests
+	/// to that node, and returns `None`.
+	///
+	/// Returns what the committed cleanup left queued, for the drain to record.
+	async fn index_compaction_batch(
+		dbs: Arc<Datastore>,
+		lh: &LeaseHandler,
+		keys: &[Vec<u8>],
+		drain: &CompactionDrain,
+		canceller: &CancellationToken,
+	) -> Result<Option<CompactionBatchCleanup>> {
+		// Each key is decoded once, and the decoded form serves both the passes
+		// and the cleanup.
+		let decoded = decode_index_compaction_keys(keys);
+		// The indexes to pass, each once, in queue order.
+		let mut seen = HashSet::new();
+		let indexes: Vec<IndexKeyBase> = keys
+			.iter()
+			.zip(&decoded)
+			.filter_map(|(k, ikb)| ikb.as_ref().filter(|ikb| drain.passes(k, Some(ikb))))
+			.filter(|ikb| seen.insert(*ikb))
+			.cloned()
+			.collect();
+		let lease = CompactionLease::new(lh);
+		Self::ensure_not_cancelled(canceller)?;
+		if !lease.maintain().await? {
+			trace!(target: TARGET, "Index compaction lease lost, leaving the batch to its holder");
+			return Ok(None);
+		}
+		let report =
+			Self::index_compaction_loop(Arc::clone(&dbs), &lease, &indexes, canceller.clone())
+				.await?;
+		let (deletes, still_queued) =
+			Self::partition_index_compaction_batch(keys, &decoded, drain, &report);
+		let deleted = Self::delete_index_compaction_batch(&dbs, &deletes, canceller).await?;
+		Ok(Some(if deleted {
+			CompactionBatchCleanup {
+				errors: report.errors,
+				deleted,
+				kept: still_queued,
+				retained: report.retained,
+				budgeted: report.budgeted,
+			}
+		} else {
+			CompactionBatchCleanup {
+				errors: report.errors,
+				deleted,
+				kept: Vec::new(),
+				retained: HashSet::new(),
+				budgeted: false,
+			}
+		}))
+	}
+
+	/// Splits a batch's keys into those its cleanup deletes and those it keeps,
+	/// by the rules on [`Self::index_compaction_batch`].
+	///
+	/// Undecodable keys are always deleted: an undecodable entry names no
+	/// index, so it can never be compacted, and leaving it would park it at the
+	/// head of the queue forever.
+	fn partition_index_compaction_batch<'a>(
+		keys: &'a [Vec<u8>],
+		decoded: &[Option<IndexKeyBase>],
+		drain: &CompactionDrain,
+		report: &CompactionBatchReport,
+	) -> (Vec<&'a [u8]>, Vec<Vec<u8>>) {
+		let kept = &drain.kept;
+		// The indexes this batch passed.
+		let mut passed = HashSet::new();
+		// For each index that keeps one request, the key it keeps.
+		let mut chosen: HashMap<&IndexKeyBase, &[u8]> = HashMap::new();
+		for (key, ikb) in keys.iter().zip(decoded) {
+			let Some(ikb) = ikb else {
+				continue;
+			};
+			let already_kept = kept.contains(key);
+			if drain.passes(key, Some(ikb)) {
+				passed.insert(ikb);
+			}
+			if report.retained.contains(ikb) {
+				match chosen.entry(ikb) {
+					Entry::Vacant(e) => {
+						e.insert(key);
+					}
+					Entry::Occupied(mut e) => {
+						if already_kept && !kept.contains(*e.get()) {
+							e.insert(key);
+						}
+					}
+				}
+			}
+		}
+		let mut deletes = Vec::new();
+		let mut still_queued = Vec::new();
+		for (key, ikb) in keys.iter().zip(decoded) {
+			let keep = match ikb {
+				None => false,
+				Some(ikb) if report.unqueued.contains(ikb) => true,
+				Some(ikb) if drain.retained.contains(ikb) => kept.contains(key),
+				Some(ikb) if !passed.contains(ikb) => true,
+				Some(ikb) if report.retained.contains(ikb) => {
+					chosen.get(ikb).is_some_and(|c| *c == key.as_slice())
+				}
+				Some(_) => false,
+			};
+			if keep {
+				still_queued.push(key.clone());
+			} else {
+				deletes.push(key.as_slice());
+			}
+		}
+		(deletes, still_queued)
+	}
+
+	/// Deletes `deletes`, one batch's queue entries, in a write transaction of
+	/// its own, bounded by the batch size, which keeps the cleanup from
+	/// conflicting with the user transactions that enqueue new compaction
+	/// requests. The entries are deleted as bytes rather than through the
+	/// decoded key, because a batch deliberately includes entries that do not
+	/// decode, which a typed delete could never address.
+	///
+	/// Returns whether the cleanup committed. A retryable conflict on a delete
+	/// or the commit is retried, at most [`INDEX_COMPACTION_PASS_MAX_RETRIES`]
+	/// times and after the same wait as a pass's retries. A failure on
+	/// anything else, or a conflict that outlasts the retries, is logged and
+	/// leaves every entry queued, as the cleanup's transaction is discarded:
+	/// the cleanup never loses a request, and the drain that ran it stops.
+	async fn delete_index_compaction_batch(
+		dbs: &Datastore,
+		deletes: &[&[u8]],
+		canceller: &CancellationToken,
+	) -> Result<bool> {
+		if deletes.is_empty() {
+			Self::ensure_not_cancelled(canceller)?;
+			return Ok(true);
+		}
+		let mut retries = 0;
+		loop {
+			match Self::try_delete_index_compaction_batch(dbs, deletes, canceller).await? {
+				Ok(()) => return Ok(true),
+				Err(e) => {
+					if retries < INDEX_COMPACTION_PASS_MAX_RETRIES
+						&& Self::retry_index_operation_conflict(
+							&e,
+							"Retryable conflict cleaning up the compaction queue, retrying",
+						)
+						.await
+					{
+						retries += 1;
+						continue;
+					}
+					warn!(target: TARGET, "Failed to clean up the compaction queue: {e}");
+					return Ok(false);
+				}
+			}
+		}
+	}
+
+	/// One attempt of [`Self::delete_index_compaction_batch`]. The outer error
+	/// is a cancellation; the inner one is the failure of a delete or the
+	/// commit, after which the attempt's transaction has been discarded.
+	///
+	/// Each cancel here ignores its own error: the cancellation or the failure
+	/// before it is what the attempt returns, and a cleanup that has not
+	/// committed deletes no request, so a cancel that fails leaves every entry
+	/// queued, as the caller assumes.
+	async fn try_delete_index_compaction_batch(
+		dbs: &Datastore,
+		deletes: &[&[u8]],
+		canceller: &CancellationToken,
+	) -> Result<Result<()>> {
+		let txn = dbs.transaction(Write).await?;
+		if let Err(e) = Self::ensure_not_cancelled(canceller) {
+			let _ = txn.cancel().await;
+			return Err(e);
+		}
+		for k in deletes {
+			if let Err(e) = txn.del(Key::from(*k)).await {
+				let _ = txn.cancel().await;
+				return Ok(Err(e));
+			}
+		}
+		if let Err(e) = Self::ensure_not_cancelled(canceller) {
+			let _ = txn.cancel().await;
+			return Err(e);
+		}
+		#[cfg(test)]
+		if let Err(e) = maybe_inject_retryable_conflict(
+			RetryableConflictSite::IndexCompactionQueueCleanup,
+			dbs.id,
+		) {
+			let _ = txn.cancel().await;
+			return Ok(Err(e));
+		}
+		if let Err(e) = txn.commit().await {
+			let _ = txn.cancel().await;
+			return Ok(Err(e));
+		}
+		Ok(Ok(()))
 	}
 
 	/// Periodically drains the background reclaim queue (`/!rc` keys),
@@ -5043,36 +5778,25 @@ impl Datastore {
 		})
 	}
 
+	/// Logs how a pass ended once its batch had already failed. A pass ended
+	/// by the batch's own cancellation is expected and not logged.
 	#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-	async fn await_index_compaction_handle(
+	fn log_index_compaction_pass_after_failure(
 		ikb: &IndexKeyBase,
-		handle: &mut common::rt::JoinHandle<Result<()>>,
+		report: CompactionPassReport,
 		canceller: &CancellationToken,
 	) {
-		match handle.await {
-			Ok(Ok(())) => {}
-			Ok(Err(e))
+		match report.result {
+			Ok(_) => {}
+			Err(e)
 				if canceller.is_cancelled()
 					&& matches!(
 						crate::err::engine_error(&e),
 						Some(EngineError::QueryCancelled)
 					) => {}
-			Ok(Err(e)) => {
-				warn!("Index compaction {ikb} fails while awaiting cancellation: {e}");
-			}
 			Err(e) => {
-				warn!("Index compaction {ikb} join fails while awaiting cancellation: {e}");
+				warn!("Index compaction {ikb} fails after its batch failed: {e}");
 			}
-		}
-	}
-
-	#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-	async fn await_index_compaction_handles(
-		handles: &mut Vec<(IndexKeyBase, common::rt::JoinHandle<Result<()>>)>,
-		canceller: &CancellationToken,
-	) {
-		while let Some((ikb, mut handle)) = handles.pop() {
-			Self::await_index_compaction_handle(&ikb, &mut handle, canceller).await;
 		}
 	}
 
@@ -5384,135 +6108,467 @@ impl Datastore {
 		}
 	}
 
-	/// Off the browser, compaction tasks are spawned concurrently — one per
-	/// distinct index — and joined afterwards. Duplicate queue entries for
-	/// the same index are deduplicated via a [`HashMap`] so only one task is
-	/// spawned per index. Failures are logged but do not abort the loop.
+	/// Off the browser, the batch's distinct indexes, in queue order, are
+	/// passed under one compaction ticket registered with the node's place
+	/// pool: this task runs passes itself, and helpers run more only on places
+	/// the ticket is granted ([`Self::run_compaction_passes`]). Failures are
+	/// logged but do not abort the loop.
 	///
-	/// Returns the number of indexes that failed to compact.
+	/// The caller has just confirmed the lease, so the batch starts under a
+	/// lease it holds. It is renewed on a tick for as long as the run lasts —
+	/// the passes this task runs, the helpers it awaits, and the helpers it
+	/// still awaits once the batch has failed — since a pass can run past the
+	/// lease's duration; a pass that finds the lease lost stops at its next
+	/// plan boundary.
+	///
+	/// The first failure ends the batch: a cancellation, a pass that panicked
+	/// or whose task was aborted, or a pass ended by cancellation. It is
+	/// returned only once every pass the batch started has ended, so none runs
+	/// on past the batch's cleanup or under a lease another node has taken.
+	/// What a pass reports after the failure is only logged.
+	///
+	/// Returns what the passes leave the batch's cleanup to act on.
 	#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 	async fn index_compaction_loop(
 		dbs: Arc<Datastore>,
-		lh: &LeaseHandler,
-		keys: &[Vec<u8>],
+		lease: &CompactionLease,
+		indexes: &[IndexKeyBase],
 		canceller: CancellationToken,
-	) -> Result<usize> {
-		let mut compacted_indexes = HashMap::new();
-		for k in keys {
-			Self::ensure_not_cancelled(&canceller)?;
-			lh.try_maintain_lease().await?;
-			// An undecodable entry names no index to compact; skip it here
-			// and let the batch cleanup delete it, so one corrupt key cannot
-			// wedge every future compaction cycle.
-			let ic = match IndexCompactionKey::decode_key(k) {
-				Ok(ic) => ic,
-				Err(e) => {
-					warn!(target: TARGET, "Skipping undecodable index compaction queue entry: {e}");
-					continue;
+	) -> Result<CompactionBatchReport> {
+		Self::ensure_not_cancelled(&canceller)?;
+		let places = dbs.compaction_places();
+		let pass = {
+			let (dbs, canceller, lease, places) =
+				(Arc::clone(&dbs), canceller.clone(), lease.clone(), places.clone());
+			move |ikb: IndexKeyBase| {
+				let (dbs, canceller, lease, places) =
+					(Arc::clone(&dbs), canceller.clone(), lease.clone(), places.clone());
+				async move {
+					dbs.run_index_compaction_pass(&ikb, &canceller, Some(&lease), &places).await
 				}
-			};
-			let ikb = IndexKeyBase::new(ic.ns, ic.db, ic.tb.as_ref().clone(), ic.ix);
-			if let Entry::Vacant(e) = compacted_indexes.entry(ikb) {
-				e.insert(());
+			}
+		};
+		let run = {
+			let mut run = pin!(Self::run_compaction_passes(
+				&places,
+				indexes.iter().cloned(),
+				&canceller,
+				pass
+			));
+			// One ticker across the whole run, so the renewals keep their
+			// cadence however the passes' completions fall between its ticks.
+			// The lease was just confirmed, so the first renewal is due a full
+			// tick from now rather than at once.
+			let mut renewal = interval(INDEX_COMPACTION_LEASE_TICK);
+			renewal.set_missed_tick_behavior(MissedTickBehavior::Delay);
+			renewal.reset();
+			loop {
+				tokio::select! {
+					biased;
+					run = &mut run => break run,
+					_ = renewal.tick() => {
+						Self::maintain_index_compaction_lease(lease, &canceller).await;
+					}
+				}
+			}
+		};
+		let mut failure = run.failure;
+		let mut batch = CompactionBatchReport::default();
+		for (ikb, report) in run.results {
+			if failure.is_some() {
+				Self::log_index_compaction_pass_after_failure(&ikb, report, &canceller);
+				continue;
+			}
+			if let Err(e) = batch.record(ikb, report, &canceller) {
+				failure = Some(e);
 			}
 		}
-		let mut error_count = 0;
-		let mut handles: Vec<(IndexKeyBase, tokio::task::JoinHandle<Result<()>>)> =
-			Vec::with_capacity(compacted_indexes.len());
-		for (ikb, _) in compacted_indexes {
-			if let Err(e) = Self::ensure_not_cancelled(&canceller) {
-				Self::await_index_compaction_handles(&mut handles, &canceller).await;
-				return Err(e);
-			}
-			let dbs = Arc::clone(&dbs);
-			let canceller = canceller.clone();
-			let task_ikb = ikb.clone();
-			let jh = spawn(async move { dbs.process_index_compaction(&task_ikb, canceller).await });
-			handles.push((ikb, jh));
+		match failure {
+			Some(e) => Err(e),
+			None => Ok(batch),
 		}
-		while let Some((ikb, mut jh)) = handles.pop() {
-			let res = tokio::select! {
-				biased;
-				_ = canceller.cancelled() => {
-					Self::await_index_compaction_handle(&ikb, &mut jh, &canceller).await;
-					Self::await_index_compaction_handles(&mut handles, &canceller).await;
-					bail!(EngineError::QueryCancelled);
-				}
-				res = &mut jh => res?,
-			};
-			if let Err(e) = res {
-				if canceller.is_cancelled() {
-					Self::await_index_compaction_handles(&mut handles, &canceller).await;
-					return Err(e);
-				}
-				error_count += 1;
-				warn!("Index compaction {ikb} fails: {e}");
-			}
-		}
-		Ok(error_count)
 	}
 
-	/// Compacts each distinct index referenced by the given queue keys.
+	/// Runs `pass` over every index of `indexes`, under the compaction ticket
+	/// `places`, and returns what each pass reported.
 	///
-	/// The browser executor has no join handle, so there compactions run
-	/// sequentially. A [`HashSet`] is used to skip duplicate queue entries
-	/// for the same index. Failures are logged but do not abort the loop,
-	/// matching the other targets so that a single transient failure
-	/// does not prevent other indexes from being compacted.
+	/// This task claims indexes from a shared queue and runs their passes
+	/// itself, holding no place. Each time it claims one, it spawns a helper
+	/// for every place the ticket is granted while unclaimed indexes remain,
+	/// each helper claiming its first index as it is spawned, so the queue holds
+	/// only work nobody has claimed. A helper holds its place across the passes
+	/// it runs, claims more from the same queue, and between two passes gives
+	/// its place back when another registration waits. So a batch of one index
+	/// takes no place, an index never waits behind a running pass while a
+	/// place is free to start it, and the passes running at once are
+	/// never more than the places the ticket holds plus this task. The pool's
+	/// OLTP reserve, the ticket's cap and the pool's fairness bound them, and
+	/// the work a pass runs in parallel takes its places through the same
+	/// ticket. A refused ask's waiting mark is cleared at once, since this task
+	/// asks again only once its own pass has ended. Once the registration has
+	/// given a place way, by a helper or by the parallel work of any pass on
+	/// the ticket, the ticket asks for none while another registration waits
+	/// ([`crate::idx::places::Ticket::acquire`]), so the run never takes back
+	/// what was given way, though it may have registered first and win the
+	/// pool's tie.
 	///
-	/// Returns the number of indexes that failed to compact.
+	/// The run fails on a cancellation, which stops every task before its next
+	/// pass; on a pass this task ran that panicked; and on a helper that
+	/// panicked or was aborted. A failed run claims nothing more, but awaits
+	/// every helper it spawned before it returns, so no pass runs on past it,
+	/// and an index claimed but not passed is never reported. A pass's report
+	/// is returned as the pass made it, so telling a pass ended by
+	/// cancellation apart is the caller's.
+	#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+	async fn run_compaction_passes<F, Fut, R>(
+		places: &crate::idx::places::Ticket,
+		indexes: impl IntoIterator<Item = IndexKeyBase>,
+		canceller: &CancellationToken,
+		pass: F,
+	) -> CompactionRun<R>
+	where
+		F: Fn(IndexKeyBase) -> Fut + Send + Sync + 'static,
+		Fut: Future<Output = R> + Send + 'static,
+		R: Send + 'static,
+	{
+		use futures::FutureExt as _;
+
+		let queue: CompactionQueue =
+			Arc::new(parking_lot::Mutex::new(indexes.into_iter().collect()));
+		let pass = Arc::new(pass);
+		// The loop is one user of the ticket; a refused ask stops it waiting at
+		// once, since it asks again only once its own pass has ended.
+		let asking = places.asking();
+		let mut helpers: Vec<tokio::task::JoinHandle<CompactionRun<R>>> = Vec::new();
+		let mut run = CompactionRun::default();
+		loop {
+			if let Err(e) = Self::ensure_not_cancelled(canceller) {
+				run.failure = Some(e);
+				break;
+			}
+			// Helpers that have ended hand back what they ran, and free their
+			// slots for the places granted below.
+			let mut at = 0;
+			while at < helpers.len() && run.failure.is_none() {
+				if !helpers[at].is_finished() {
+					at += 1;
+					continue;
+				}
+				let joined = helpers.swap_remove(at).await;
+				run.absorb(joined);
+			}
+			if run.failure.is_some() {
+				break;
+			}
+			let Some(ikb) = queue.lock().pop_front() else {
+				break;
+			};
+			while !queue.lock().is_empty() {
+				let Some(place) = asking.acquire() else {
+					asking.stop_waiting();
+					break;
+				};
+				// Taken by a helper while this task asked: the place goes back.
+				let Some(first) = queue.lock().pop_front() else {
+					break;
+				};
+				helpers.push(spawn(Self::compaction_helper(
+					place,
+					first,
+					places.clone(),
+					Arc::clone(&queue),
+					Arc::clone(&pass),
+					canceller.clone(),
+				)));
+			}
+			// A panic in a pass this task runs is caught, so the run still
+			// awaits its helpers, as it does for a panic on a helper's task.
+			match std::panic::AssertUnwindSafe(pass(ikb.clone())).catch_unwind().await {
+				Ok(report) => run.results.push((ikb, report)),
+				Err(panic) => {
+					run.failure = Some(anyhow::anyhow!(
+						"Index compaction {ikb} panicked: {}",
+						compaction_panic_message(panic.as_ref())
+					));
+					break;
+				}
+			}
+		}
+		for helper in helpers {
+			let joined = helper.await;
+			run.absorb(joined);
+		}
+		run
+	}
+
+	/// A helper of [`Self::run_compaction_passes`]: runs passes in `place`,
+	/// over `first`, claimed for it as it was spawned, and then over each index
+	/// it claims from `queue`, until none is left, the loop is cancelled, or
+	/// another registration waits for a place once a pass has ended, when it
+	/// gives its place way through the ticket. Returns what its passes
+	/// reported, and the cancellation that stopped it before a pass it had
+	/// claimed.
+	#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+	async fn compaction_helper<F, Fut, R>(
+		place: crate::idx::places::Place,
+		first: IndexKeyBase,
+		places: crate::idx::places::Ticket,
+		queue: CompactionQueue,
+		pass: Arc<F>,
+		canceller: CancellationToken,
+	) -> CompactionRun<R>
+	where
+		F: Fn(IndexKeyBase) -> Fut,
+		Fut: Future<Output = R>,
+	{
+		let mut run = CompactionRun::default();
+		let mut next = Some(first);
+		loop {
+			let Some(ikb) = next.take() else {
+				// Nothing is left to claim, so the run will not ask again.
+				places.stop_waiting();
+				return run;
+			};
+			if let Err(e) = Self::ensure_not_cancelled(&canceller) {
+				run.failure = Some(e);
+				return run;
+			}
+			let report = pass(ikb.clone()).await;
+			run.results.push((ikb, report));
+			if places.others_wait() {
+				places.give_way(place);
+				return run;
+			}
+			next = queue.lock().pop_front();
+		}
+	}
+
+	/// A compaction ticket: a new registration with the node's place pool,
+	/// under this datastore's morsel policy, which the index compaction loop
+	/// holds for its run.
+	fn compaction_places(&self) -> crate::idx::places::Ticket {
+		#[cfg(all(test, not(target_family = "wasm")))]
+		if let Some(places) = test::compaction_places_for(self.id) {
+			return places;
+		}
+		crate::ctx::IndexPlaces::node(crate::exec::planner::placement::Policy::from_config(
+			&self.config.exec,
+		))
+	}
+
+	/// Runs one pass per index in `indexes`, the batch's distinct indexes in
+	/// queue order.
+	///
+	/// The browser executor has no join handle, so there the passes run
+	/// sequentially, under a compaction ticket that is never granted a place.
+	/// Failures are logged but do not abort the loop, matching
+	/// the other targets so that a single transient failure does not prevent
+	/// other indexes from being compacted.
+	///
+	/// The caller has just confirmed the lease, and it is renewed on a tick
+	/// while each pass runs, as on the other targets.
+	///
+	/// Returns what the passes leave the batch's cleanup to act on.
 	#[cfg(all(target_family = "wasm", target_os = "unknown"))]
 	async fn index_compaction_loop(
 		dbs: Arc<Datastore>,
-		lh: &LeaseHandler,
-		keys: &[Vec<u8>],
+		lease: &CompactionLease,
+		indexes: &[IndexKeyBase],
 		canceller: CancellationToken,
-	) -> Result<usize> {
-		let mut seen = HashSet::new();
-		let mut error_count = 0;
-		for k in keys {
+	) -> Result<CompactionBatchReport> {
+		Self::ensure_not_cancelled(&canceller)?;
+		let places = dbs.compaction_places();
+		let mut batch = CompactionBatchReport::default();
+		// The lease was just confirmed, so the first renewal is due a full tick
+		// from now rather than at once.
+		let mut renewal = interval(INDEX_COMPACTION_LEASE_TICK);
+		renewal.set_missed_tick_behavior(MissedTickBehavior::Delay);
+		renewal.reset();
+		for ikb in indexes {
 			Self::ensure_not_cancelled(&canceller)?;
-			lh.try_maintain_lease().await?;
-			// An undecodable entry names no index to compact; skip it here
-			// and let the batch cleanup delete it, so one corrupt key cannot
-			// wedge every future compaction cycle.
-			let ic = match IndexCompactionKey::decode_key(k) {
-				Ok(ic) => ic,
-				Err(e) => {
-					warn!(target: TARGET, "Skipping undecodable index compaction queue entry: {e}");
-					continue;
+			let report = {
+				let mut pass =
+					pin!(dbs.run_index_compaction_pass(ikb, &canceller, Some(lease), &places));
+				loop {
+					tokio::select! {
+						biased;
+						// As on the other targets, a cancelled batch still awaits
+						// its pass rather than dropping it part-way through a
+						// transaction: the pass observes the same canceller at its
+						// next boundary. The batch then ends on the cancellation,
+						// whatever the pass reported.
+						_ = canceller.cancelled() => {
+							if let Err(e) = (&mut pass).await.result
+								&& !matches!(
+									crate::err::engine_error(&e),
+									Some(EngineError::QueryCancelled)
+								)
+							{
+								warn!("Index compaction {ikb} fails while awaiting cancellation: {e}");
+							}
+							bail!(EngineError::QueryCancelled);
+						}
+						report = &mut pass => break report,
+						_ = renewal.tick() => {
+							Self::maintain_index_compaction_lease(lease, &canceller).await;
+						}
+					}
 				}
 			};
-			let ikb = IndexKeyBase::new(ic.ns, ic.db, ic.tb.as_ref().clone(), ic.ix);
-			if !seen.insert(ikb.clone()) {
-				continue;
-			}
-			let res: Result<()> =
-				async { dbs.process_index_compaction(&ikb, canceller.clone()).await }.await;
-			if let Err(e) = res {
-				if canceller.is_cancelled() {
-					return Err(e);
-				}
-				error_count += 1;
-				warn!("Index compaction {ikb} fails: {e}");
-			}
+			batch.record(ikb.clone(), report, &canceller)?;
 		}
-		Ok(error_count)
+		Ok(batch)
 	}
 
-	/// Performs the actual compaction of a single index.
+	/// Renews the index-compaction lease while a batch's passes run.
 	///
-	/// Looks up the index definition identified by `ikb` and dispatches to
-	/// the appropriate compaction implementation based on the index type:
-	/// full-text, count, HNSW, or DiskANN. Indexes that are being removed
-	/// (`prepare_remove`), not found, or of an unsupported type are silently
-	/// skipped with a trace log.
+	/// A renewal that fails is logged rather than returned: the passes it would
+	/// abandon are still running, and the next tick tries again.
+	async fn maintain_index_compaction_lease(
+		lease: &CompactionLease,
+		canceller: &CancellationToken,
+	) {
+		if let Err(e) = lease.maintain().await
+			&& !canceller.is_cancelled()
+		{
+			warn!(target: TARGET, "Failed to maintain the index compaction lease: {e}");
+		}
+	}
+
+	/// Runs one pass over a single index outside any lease, under a
+	/// compaction ticket of its own, as [`Self::run_index_compaction_pass`]
+	/// does.
+	#[cfg(test)]
 	async fn process_index_compaction(
 		&self,
 		ikb: &IndexKeyBase,
 		canceller: CancellationToken,
-	) -> Result<()> {
-		Self::ensure_not_cancelled(&canceller)?;
+	) -> Result<CompactionPassOutcome> {
+		self.run_index_compaction_pass(ikb, &canceller, None, &self.compaction_places())
+			.await
+			.result
+	}
+
+	/// Runs one compaction pass over a single index, and reports how it ended.
+	///
+	/// Looks up the index definition identified by `ikb` and dispatches to
+	/// the appropriate compaction implementation based on the index type:
+	/// full-text, count, HNSW, or DiskANN. An index that is being removed
+	/// (`prepare_remove`), not found, or of an unsupported type ends the pass
+	/// on [`CompactionPassOutcome::Empty`].
+	///
+	/// A pass applies at most [`INDEX_COMPACTION_PASS_PLAN_BUDGET`] plans and
+	/// makes at most [`INDEX_COMPACTION_PASS_MAX_RETRIES`] retries, each either a
+	/// retryable conflict or a plan that lost its race and is read again, and a
+	/// pass given a `lease` stops at its next plan boundary once the lease is
+	/// found lost. One that stops with work left
+	/// ([`CompactionPassOutcome::Budget`]), loses a race it has no retry left
+	/// for ([`CompactionPassOutcome::LostRace`]), or fails on a retryable
+	/// conflict it has no retry left for, queues a fresh compaction request for its index
+	/// before it returns — the request a write to the index queues — so the
+	/// index is compacted again without waiting for its next write, and the
+	/// report says when that request failed to commit. A pass that fails on
+	/// anything else queues nothing. The kinds that run work in parallel take
+	/// its places through `places`.
+	async fn run_index_compaction_pass(
+		&self,
+		ikb: &IndexKeyBase,
+		canceller: &CancellationToken,
+		lease: Option<&CompactionLease>,
+		places: &crate::idx::places::Ticket,
+	) -> CompactionPassReport {
+		#[cfg(test)]
+		compaction_pass_park::wait(self.id, ikb).await;
+		let result = self.index_compaction_pass(ikb, canceller, lease, places).await;
+		let owes_request = match &result {
+			Ok(outcome) => {
+				matches!(outcome, CompactionPassOutcome::Budget | CompactionPassOutcome::LostRace)
+			}
+			Err(e) => is_retryable_transaction_conflict(e),
+		};
+		let unqueued = owes_request
+			&& match self.requeue_index_compaction(ikb).await {
+				Ok(()) => false,
+				Err(e) => {
+					warn!(target: TARGET, "Failed to requeue index compaction for {ikb}: {e}");
+					true
+				}
+			};
+		#[cfg(test)]
+		compaction_pass_park::end(self.id, ikb);
+		CompactionPassReport {
+			result,
+			unqueued,
+		}
+	}
+
+	/// Queues a fresh compaction request for one index, under the key a write
+	/// to the index queues ([`IndexOperation::compaction_trigger`]), and wakes
+	/// the compactor when it commits.
+	///
+	/// A retryable conflict is retried, at most
+	/// [`INDEX_COMPACTION_PASS_MAX_RETRIES`] times and after the same wait as a
+	/// pass's retries, so only a failure that outlasts them leaves the index
+	/// without its request.
+	async fn requeue_index_compaction(&self, ikb: &IndexKeyBase) -> Result<()> {
+		let mut retries = 0;
+		loop {
+			let res = self.try_requeue_index_compaction(ikb).await;
+			match res {
+				Err(e)
+					if retries < INDEX_COMPACTION_PASS_MAX_RETRIES
+						&& Self::retry_index_operation_conflict(
+							&e,
+							format!(
+								"Retryable conflict requeuing index compaction for {ikb}, retrying"
+							),
+						)
+						.await =>
+				{
+					retries += 1;
+				}
+				res => return res,
+			}
+		}
+	}
+
+	/// One attempt of [`Self::requeue_index_compaction`].
+	///
+	/// Each cancel here ignores its own error: the failure before it is what
+	/// the attempt returns, and a request that has not committed is not queued,
+	/// so a cancel that fails changes nothing the caller reads.
+	async fn try_requeue_index_compaction(&self, ikb: &IndexKeyBase) -> Result<()> {
+		let txn = self.transaction(Write).await?;
+		if let Err(e) = IndexOperation::compaction_trigger(ikb, &txn, self.id).await {
+			let _ = txn.cancel().await;
+			return Err(e);
+		}
+		#[cfg(test)]
+		if let Err(e) =
+			maybe_inject_non_retryable_error(NonRetryableErrorSite::IndexCompactionRequeue, self.id)
+		{
+			let _ = txn.cancel().await;
+			return Err(e);
+		}
+		#[cfg(test)]
+		if let Err(e) =
+			maybe_inject_retryable_conflict(RetryableConflictSite::IndexCompactionRequeue, self.id)
+		{
+			let _ = txn.cancel().await;
+			return Err(e);
+		}
+		txn.commit().await
+	}
+
+	/// Dispatches one pass over a single index to its kind's pass.
+	async fn index_compaction_pass(
+		&self,
+		ikb: &IndexKeyBase,
+		canceller: &CancellationToken,
+		lease: Option<&CompactionLease>,
+		places: &crate::idx::places::Ticket,
+	) -> Result<CompactionPassOutcome> {
+		Self::ensure_not_cancelled(canceller)?;
 		// The catalog definition and the index's durable build state, read
 		// together so the ownership decision below costs no extra transaction.
 		let (ix, build_owner_live) = {
@@ -5528,72 +6584,85 @@ impl Datastore {
 			let _ = txn.cancel().await;
 			res?
 		};
-		Self::ensure_not_cancelled(&canceller)?;
-		match ix {
-			Some(ix) if !ix.prepare_remove => {
-				// A vector index whose build is still in flight is left to that
-				// build's own drain, because only the drain knows which on-disk
-				// layout to compact into. A `REBUILD INDEX` that migrates
-				// `format_version` holds the new definition in its uncommitted
-				// statement transaction, so the catalog read above still reports the
-				// retired one. Compacting from here would fold the pendings into the
-				// retired layout and leave the published index without them; and
-				// because the process-local vector-index wrapper is keyed without the
-				// format version, the two compactors would also evict each other's
-				// graph on every access.
-				//
-				// Durable state is the whole test, on every node including the one
-				// running the build. It is committed before the builder is
-				// registered locally and held until the statement that publishes
-				// the definition closes its transaction, so it already covers every
-				// window in which this catalog read can be stale. A process-local
-				// check would only add the tail between that release and the
-				// builder task's exit, where the build has finished publishing and
-				// skipping would discard the request that release just queued.
-				//
-				// The queue entry that led here is dropped with the rest of its
-				// batch, and for these two kinds that loses nothing: their builders
-				// drain the index's pendings before returning, so the entry is
-				// already redundant. Full-text and count builders have no such drain,
-				// which is why the test is scoped to the kinds that do rather than
-				// applied to every index — dropping one of their requests would leave
-				// deltas uncompacted until the next write to the index.
-				let drains_own_pendings = match &ix.index {
-					Index::Hnsw(_) => true,
-					#[cfg(diskann)]
-					Index::DiskAnn(_) => true,
-					_ => false,
-				};
-				if drains_own_pendings && build_owner_live {
-					trace!(target: TARGET, "Index compaction: Index {ikb:?} is being built, leaving it to its builder");
-					return Ok(());
-				}
-				match &ix.index {
-					Index::FullText(p) => {
-						self.process_fulltext_compaction(ikb, p, &canceller).await?;
-					}
-					Index::Count(_) => {
-						self.process_count_compaction(ikb, &canceller).await?;
-					}
-					Index::Hnsw(_) => {
-						// HNSW compaction owns its pending-key allocation and pending-range
-						// drain semantics separately from full-text/count compaction.
-						self.process_hnsw_compaction(ikb, ix.format_version, &canceller).await?;
-					}
-					#[cfg(diskann)]
-					Index::DiskAnn(_) => {
-						self.process_diskann_compaction(ikb, &canceller).await?;
-					}
-					_ => {
-						trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ikb);
-					}
-				}
+		Self::ensure_not_cancelled(canceller)?;
+		// A request is deleted only by a pass that could act on it. A pass that
+		// cannot reports an outcome that
+		// [`CompactionPassOutcome::retains_request`], and the batch keeps one of
+		// the index's requests in place, deleting the rest; keeping it writes
+		// nothing and wakes nothing, so it waits for the next pass that reads
+		// the queue. Whatever ends the condition — a release, a takeover, the
+		// commit of a defining statement, the clearing of a stranded owner —
+		// then finds the request already there, so no request is lost. A
+		// release also queues a request of its own, in the transaction that
+		// commits it, so that its commit wakes the compactor
+		// (`Building::requeue_compaction_with_release`); every other condition
+		// leaves the kept request to the next drain.
+		//
+		// An index with no readable definition is one of two things. With a
+		// live build owner, it is being defined by a statement that has not
+		// committed: the build writes deltas and requests under the index's id
+		// meanwhile, and the definition becomes readable when the statement
+		// commits, so the request is kept. Without one, the index was removed or
+		// its defining statement rolled back, and its requests are dropped. A
+		// removed index whose build state still names a live owner keeps its
+		// request until that state is retired, and a table recreated under an
+		// id the retained request names costs that index one pass with nothing
+		// to fold.
+		let ix = match ix {
+			Some(ix) if !ix.prepare_remove => ix,
+			Some(_) => {
+				trace!(target: TARGET, "Index compaction: Index {ikb:?} is being removed, skipping");
+				return Ok(CompactionPassOutcome::Empty);
 			}
+			None if build_owner_live => {
+				trace!(target: TARGET, "Index compaction: Index {ikb:?} is not yet defined, keeping its request");
+				return Ok(CompactionPassOutcome::NotVisible);
+			}
+			None => {
+				trace!(target: TARGET, "Index compaction: Index {ikb:?} not found, skipping");
+				return Ok(CompactionPassOutcome::Empty);
+			}
+		};
+		// A vector index whose build is still in flight is left to that
+		// build's own drain, because only the drain knows which on-disk
+		// layout to compact into. A `REBUILD INDEX` that migrates
+		// `format_version` holds the new definition in its uncommitted
+		// statement transaction, so the catalog read above still reports the
+		// retired one. Compacting from here would fold the pendings into the
+		// retired layout and leave the published index without them; and
+		// because the process-local vector-index wrapper is keyed without the
+		// format version, the two compactors would also evict each other's
+		// graph on every access.
+		//
+		// Durable state is the whole test, on every node including the one
+		// running the build. It is committed before the builder is
+		// registered locally and held until the statement that publishes
+		// the definition closes its transaction, so it already covers every
+		// window in which this catalog read can be stale.
+		//
+		// The fence is scoped to the kinds whose builders drain their own
+		// pendings. Full-text and count builders have no such drain, so their
+		// passes run under a live owner and fold what a build has written.
+		// The fenced pass keeps one request for the index, so the pendings a
+		// write commits after the build's last drain are folded by the first
+		// pass after the fence comes down.
+		if fenced_by_build_owner(&ix.index) && build_owner_live {
+			trace!(target: TARGET, "Index compaction: Index {ikb:?} is being built, leaving it to its builder");
+			return Ok(CompactionPassOutcome::Fenced);
+		}
+		match &ix.index {
+			Index::FullText(_) => self.process_fulltext_compaction(ikb, canceller, lease).await,
+			Index::Count(_) => self.process_count_compaction(ikb, canceller, lease).await,
+			// HNSW compaction owns its pending-key allocation and pending-range
+			// drain semantics separately from full-text/count compaction.
+			Index::Hnsw(_) => self.process_hnsw_compaction(ikb, canceller, lease, places).await,
+			#[cfg(diskann)]
+			Index::DiskAnn(_) => self.process_diskann_compaction(ikb, canceller, lease, places).await,
 			_ => {
-				trace!(target: TARGET, "Index compaction: Index {:?} not found, skipping", ikb);
+				trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ikb);
+				Ok(CompactionPassOutcome::Empty)
 			}
 		}
-		Ok(())
 	}
 
 	/// Discards the process-local HNSW wrapper and element caches for one index
@@ -5632,17 +6701,28 @@ impl Datastore {
 	/// took, so the wrapper is discarded; a write that was staged, or that
 	/// stopped at the guards, left the wrapper untouched and keeps it. The
 	/// discard targets the format version the write phase applied through — a
-	/// `REBUILD INDEX` can bump the catalog format after `format_version` was
-	/// captured, and both the wrapper and the cache entries are scoped per
+	/// `REBUILD INDEX` can bump the catalog format after the pass was
+	/// dispatched, and both the wrapper and the cache entries are scoped per
 	/// format.
+	///
+	/// A cancel this pass makes after a step fails, or after a plan turns out
+	/// to have nothing to apply, ignores its own error: the step's error or the
+	/// pass's outcome is what the pass acts on and reports, and the transaction
+	/// it cancels has not committed, so a cancel that fails discards nothing
+	/// that could apply.
 	async fn process_hnsw_compaction(
 		&self,
 		ikb: &IndexKeyBase,
-		format_version: u16,
 		canceller: &CancellationToken,
-	) -> Result<()> {
+		lease: Option<&CompactionLease>,
+		places: &crate::idx::places::Ticket,
+	) -> Result<CompactionPassOutcome> {
+		let mut progress = CompactionPassProgress::default();
 		loop {
 			Self::ensure_not_cancelled(canceller)?;
+			if lease.is_some_and(CompactionLease::is_lost) {
+				return Ok(CompactionPassOutcome::Budget);
+			}
 			let prepared = {
 				let txn = Arc::new(self.transaction(Read).await?);
 				let res: Result<
@@ -5673,54 +6753,62 @@ impl Datastore {
 				res?
 			};
 			let Some((tb, plan)) = prepared else {
-				return Ok(());
+				return Ok(progress.nothing_to_apply());
 			};
 			if !plan.has_work() {
-				return Ok(());
+				return Ok(progress.nothing_to_apply());
 			}
 			let has_more = plan.has_more();
 			Self::ensure_not_cancelled(canceller)?;
 
 			let txn = Arc::new(self.transaction(Write).await?);
-			// The apply phase re-reads the catalog and mutates the wrapper and
-			// cache belonging to that fresh format, so every failure-side
-			// recovery below must clear the same format, not the one captured at
-			// dispatch time.
-			let mut applied_format = format_version;
+			let ix = match compaction_write_guard(&txn, ikb).await {
+				Ok(CompactionWriteGuard::Live(ix)) => ix,
+				Ok(CompactionWriteGuard::Retired) => {
+					let _ = txn.cancel().await;
+					return Ok(progress.nothing_to_apply());
+				}
+				Ok(CompactionWriteGuard::Fenced) => {
+					let _ = txn.cancel().await;
+					return Ok(CompactionPassOutcome::Fenced);
+				}
+				Err(e) => {
+					let _ = txn.cancel().await;
+					if progress
+						.retry(
+							&e,
+							format!(
+								"Retryable conflict guarding HNSW compaction for {ikb}, retrying"
+							),
+						)
+						.await
+					{
+						continue;
+					}
+					return Err(e);
+				}
+			};
+			let Index::Hnsw(p) = &ix.index else {
+				let _ = txn.cancel().await;
+				return Ok(progress.nothing_to_apply());
+			};
+			// The apply mutates the wrapper and cache of the format the guard
+			// read, so every failure-side recovery below clears that format.
+			let applied_format = ix.format_version;
 			let res: Result<HnswCompactionOutcome> = async {
-				// Re-tested inside the write transaction, and under a conflict
-				// registration. The dispatch-time test is a snapshot taken in a
-				// transaction that has been cancelled, so a build acquired
-				// after it would otherwise be invisible to this apply; the
-				// registration makes such an acquisition conflict this commit
-				// instead, and the retry re-reads it.
-				if build_owner_is_live_locked(&txn, ikb).await? {
-					return Ok(HnswCompactionOutcome::Skipped);
-				}
-				match txn
-					.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
-					.await?
-				{
-					Some(ix) if !ix.prepare_remove => match &ix.index {
-						Index::Hnsw(p) => {
-							applied_format = ix.format_version;
-							let mut ctx = self.setup_ctx()?;
-							ctx.set_transaction(Arc::clone(&txn));
-							let ctx = ctx.freeze();
-							IndexOperation::apply_hnsw_compaction(
-								&ctx,
-								&self.index_stores,
-								ikb,
-								p,
-								ix.format_version,
-								plan,
-							)
-							.await
-						}
-						_ => Ok(HnswCompactionOutcome::Skipped),
-					},
-					_ => Ok(HnswCompactionOutcome::Skipped),
-				}
+				let mut ctx = self.setup_ctx()?;
+				ctx.set_transaction(Arc::clone(&txn));
+				ctx.set_index_places(places.clone());
+				let ctx = ctx.freeze();
+				IndexOperation::apply_hnsw_compaction(
+					&ctx,
+					&self.index_stores,
+					ikb,
+					p,
+					applied_format,
+					plan,
+				)
+				.await
 			}
 			.await;
 			match res {
@@ -5745,13 +6833,14 @@ impl Datastore {
 						if in_place {
 							self.discard_hnsw_index(tb, ikb, applied_format).await;
 						}
-						if Self::retry_index_operation_conflict(
-							&e,
-							format!(
-								"Retryable conflict committing HNSW compaction for {ikb}, retrying"
-							),
-						)
-						.await
+						if progress
+							.retry(
+								&e,
+								format!(
+									"Retryable conflict committing HNSW compaction for {ikb}, retrying"
+								),
+							)
+							.await
 						{
 							continue;
 						}
@@ -5762,31 +6851,42 @@ impl Datastore {
 						if in_place {
 							self.discard_hnsw_index(tb, ikb, applied_format).await;
 						}
-						if Self::retry_index_operation_conflict(
-							&e,
-							format!(
-								"Retryable conflict committing HNSW compaction for {ikb}, retrying"
-							),
-						)
-						.await
+						if progress
+							.retry(
+								&e,
+								format!(
+									"Retryable conflict committing HNSW compaction for {ikb}, retrying"
+								),
+							)
+							.await
 						{
 							continue;
 						}
 						return Err(e);
 					}
 				}
+				Ok(HnswCompactionOutcome::LostRace) => {
+					let _ = txn.cancel().await;
+					if progress.retry_lost_race(ikb) {
+						continue;
+					}
+					return Ok(CompactionPassOutcome::LostRace);
+				}
 				Ok(_) => {
 					let _ = txn.cancel().await;
-					return Ok(());
+					return Ok(progress.nothing_to_apply());
 				}
 				Err(e) => {
 					let _ = txn.cancel().await;
 					self.discard_hnsw_index(tb, ikb, applied_format).await;
-					if Self::retry_index_operation_conflict(
-						&e,
-						format!("Retryable conflict applying HNSW compaction for {ikb}, retrying"),
-					)
-					.await
+					if progress
+						.retry(
+							&e,
+							format!(
+								"Retryable conflict applying HNSW compaction for {ikb}, retrying"
+							),
+						)
+						.await
 					{
 						continue;
 					}
@@ -5794,121 +6894,179 @@ impl Datastore {
 				}
 			}
 			Self::ensure_not_cancelled(canceller)?;
-			if !has_more {
-				return Ok(());
-			}
-			// Defense-in-depth: every match arm above either commits (Ok(true))
-			// or cancels (Ok(false)/Err) the tx, so by here `closed()` should
-			// always be true. Catch any future regression where a `?` between
-			// the match and this point bypasses finalization. No-op today.
-			if !txn.closed() {
-				let _ = txn.cancel().await;
+			if let Some(outcome) = progress.record_applied(has_more) {
+				return Ok(outcome);
 			}
 		}
 	}
 
 	#[cfg(diskann)]
 	/// Runs DiskANN compaction as bounded read-plan/write-apply batches.
+	///
+	/// `apply_diskann_compaction` commits its own transaction, so a commit
+	/// conflict arrives as its error, which is retried like the other kinds'
+	/// commit conflicts.
+	///
+	/// A cancel this pass makes after a step fails, or after a plan turns out
+	/// to have nothing to apply, ignores its own error: the step's error or the
+	/// pass's outcome is what the pass acts on and reports, and the transaction
+	/// it cancels has not committed, so a cancel that fails discards nothing
+	/// that could apply.
 	async fn process_diskann_compaction(
 		&self,
 		ikb: &IndexKeyBase,
 		canceller: &CancellationToken,
-	) -> Result<()> {
+		lease: Option<&CompactionLease>,
+		places: &crate::idx::places::Ticket,
+	) -> Result<CompactionPassOutcome> {
+		let mut progress = CompactionPassProgress::default();
 		loop {
 			Self::ensure_not_cancelled(canceller)?;
-			let prepared = {
+			if lease.is_some_and(CompactionLease::is_lost) {
+				return Ok(CompactionPassOutcome::Budget);
+			}
+			let plan = {
 				let txn = Arc::new(self.transaction(Read).await?);
-				let res: Result<
-					Option<(
-						crate::catalog::TableId,
-						crate::idx::trees::diskann::index::DiskAnnCompactionPlan,
-					)>,
-				> = async {
-					let Some(tb) = txn.get_tb(ikb.ns(), ikb.db(), ikb.table(), None).await? else {
-						return Ok(None);
-					};
-					match txn
-						.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
-						.await?
-					{
-						Some(ix)
-							if !ix.prepare_remove && matches!(&ix.index, Index::DiskAnn(_)) =>
-						{
-							let mut ctx = self.setup_ctx()?;
-							ctx.set_transaction(Arc::clone(&txn));
-							let ctx = ctx.freeze();
-							let plan =
-								IndexOperation::prepare_diskann_compaction(&ctx, ikb).await?;
-							Ok(Some((tb.table_id, plan)))
+				let res: Result<Option<crate::idx::trees::diskann::index::DiskAnnCompactionPlan>> =
+					async {
+						if txn.get_tb(ikb.ns(), ikb.db(), ikb.table(), None).await?.is_none() {
+							return Ok(None);
 						}
-						_ => Ok(None),
+						match txn
+							.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
+							.await?
+						{
+							Some(ix)
+								if !ix.prepare_remove && matches!(&ix.index, Index::DiskAnn(_)) =>
+							{
+								let mut ctx = self.setup_ctx()?;
+								ctx.set_transaction(Arc::clone(&txn));
+								let ctx = ctx.freeze();
+								let plan =
+									IndexOperation::prepare_diskann_compaction(&ctx, ikb).await?;
+								Ok(Some(plan))
+							}
+							_ => Ok(None),
+						}
 					}
-				}
-				.await;
+					.await;
 				let _ = txn.cancel().await;
 				res?
 			};
-			let Some((_tb, plan)) = prepared else {
-				return Ok(());
+			let Some(plan) = plan else {
+				return Ok(progress.nothing_to_apply());
 			};
 			if !plan.requires_apply() {
-				return Ok(());
+				return Ok(progress.nothing_to_apply());
 			}
 			let has_more = plan.has_more();
 			Self::ensure_not_cancelled(canceller)?;
 
 			let txn = Arc::new(self.transaction(Write).await?);
-			let res: Result<bool> = async {
-				// See the HNSW counterpart: the dispatch-time ownership test is
-				// a cancelled snapshot, so it is re-tested here under a conflict
-				// registration that a concurrent build acquisition trips.
-				if build_owner_is_live_locked(&txn, ikb).await? {
-					return Ok(false);
+			let ix = match compaction_write_guard(&txn, ikb).await {
+				Ok(CompactionWriteGuard::Live(ix)) => ix,
+				Ok(CompactionWriteGuard::Retired) => {
+					let _ = txn.cancel().await;
+					return Ok(progress.nothing_to_apply());
 				}
-				match txn
-					.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
-					.await?
+				Ok(CompactionWriteGuard::Fenced) => {
+					let _ = txn.cancel().await;
+					return Ok(CompactionPassOutcome::Fenced);
+				}
+				Err(e) => {
+					let _ = txn.cancel().await;
+					if progress
+						.retry(
+							&e,
+							format!(
+								"Retryable conflict guarding DiskANN compaction for {ikb}, retrying"
+							),
+						)
+						.await
+					{
+						continue;
+					}
+					return Err(e);
+				}
+			};
+			let Index::DiskAnn(p) = &ix.index else {
+				let _ = txn.cancel().await;
+				return Ok(progress.nothing_to_apply());
+			};
+			// Raised in place of the apply, whose own commit would carry the
+			// conflict.
+			#[cfg(test)]
+			if let Err(e) =
+				maybe_inject_retryable_conflict(RetryableConflictSite::DiskAnnCompaction, self.id)
+			{
+				let _ = txn.cancel().await;
+				if progress
+					.retry(
+						&e,
+						format!(
+							"Retryable conflict applying DiskANN compaction for {ikb}, retrying"
+						),
+					)
+					.await
 				{
-					Some(ix) if !ix.prepare_remove => match &ix.index {
-						Index::DiskAnn(p) => {
-							let mut ctx = self.setup_ctx()?;
-							ctx.set_transaction(Arc::clone(&txn));
-							let ctx = ctx.freeze();
-							IndexOperation::apply_diskann_compaction(
-								&ctx,
-								&self.index_stores,
-								ikb,
-								p,
-								ix.format_version,
-								plan,
-							)
-							.await
-						}
-						_ => Ok(false),
-					},
-					_ => Ok(false),
+					continue;
 				}
+				return Err(e);
+			}
+			let res: Result<CompactionApply> = async {
+				let mut ctx = self.setup_ctx()?;
+				ctx.set_transaction(Arc::clone(&txn));
+				ctx.set_index_places(places.clone());
+				let ctx = ctx.freeze();
+				IndexOperation::apply_diskann_compaction(
+					&ctx,
+					&self.index_stores,
+					ikb,
+					p,
+					ix.format_version,
+					plan,
+				)
+				.await
 			}
 			.await;
 			// `apply_diskann_compaction` normally owns the transaction's
 			// lifecycle (commits on success, cancels on apply failure while
-			// holding the graph write lock — so no other writer interleaves). A few
-			// pre-apply paths inside `IndexOperation::apply_diskann_compaction`
-			// (missing table or catalog lookup errors) can return without
-			// finalizing the tx, so we add an idempotent safety net here:
-			// cancel only if the tx is still open. Cancel on an already-closed
-			// tx returns `TransactionFinished` and is harmlessly discarded.
+			// holding the graph write lock). A few pre-apply paths inside
+			// `IndexOperation::apply_diskann_compaction` (missing table or
+			// catalog lookup errors) can return without finalizing the tx, so
+			// this is an idempotent safety net: cancel only if the tx is still
+			// open. Cancel on an already-closed tx returns `TransactionFinished`
+			// and is harmlessly discarded.
 			if !txn.closed() {
 				let _ = txn.cancel().await;
 			}
 			match res {
-				Ok(true) => {}
-				Ok(false) => return Ok(()),
-				Err(e) => return Err(e),
+				Ok(CompactionApply::Applied) => {}
+				Ok(CompactionApply::LostRace) => {
+					if progress.retry_lost_race(ikb) {
+						continue;
+					}
+					return Ok(CompactionPassOutcome::LostRace);
+				}
+				Ok(CompactionApply::Empty) => return Ok(progress.nothing_to_apply()),
+				Err(e) => {
+					if progress
+						.retry(
+							&e,
+							format!(
+								"Retryable conflict applying DiskANN compaction for {ikb}, retrying"
+							),
+						)
+						.await
+					{
+						continue;
+					}
+					return Err(e);
+				}
 			}
 			Self::ensure_not_cancelled(canceller)?;
-			if !has_more {
-				return Ok(());
+			if let Some(outcome) = progress.record_applied(has_more) {
+				return Ok(outcome);
 			}
 		}
 	}
@@ -5917,70 +7075,107 @@ impl Datastore {
 	///
 	/// This avoids holding a mutable range scan over `!dc`/`!tt`; deltas
 	/// committed after the read snapshot remain for a later compaction.
+	///
+	/// A cancel this pass makes after a step fails, or after a plan turns out
+	/// to have nothing to apply, ignores its own error: the step's error or the
+	/// pass's outcome is what the pass acts on and reports, and the transaction
+	/// it cancels has not committed, so a cancel that fails discards nothing
+	/// that could apply.
 	async fn process_fulltext_compaction(
 		&self,
 		ikb: &IndexKeyBase,
-		p: &crate::catalog::FullTextParams,
 		canceller: &CancellationToken,
-	) -> Result<()> {
+		lease: Option<&CompactionLease>,
+	) -> Result<CompactionPassOutcome> {
+		let mut progress = CompactionPassProgress::default();
 		loop {
 			Self::ensure_not_cancelled(canceller)?;
+			if lease.is_some_and(CompactionLease::is_lost) {
+				return Ok(CompactionPassOutcome::Budget);
+			}
 			let plan = {
 				let txn = self.transaction(Read).await?;
-				let ix = txn
-					.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
-					.await?
-					.filter(|ix| !ix.prepare_remove);
-				let res = IndexOperation::prepare_fulltext_compaction(
-					&self.index_stores,
-					ikb,
-					&txn,
-					p,
-					&self.config.idx.file_allowlist,
-					match &ix {
-						Some(ix) if matches!(ix.index, crate::catalog::Index::FullText(_)) => {
-							ix.format_version
-						}
-						_ => return Ok(()),
-					},
-				)
+				// The plan is read under the definition this snapshot holds, as
+				// every other kind's is; the apply checks it again under its own
+				// locked read.
+				let res = async {
+					let Some(ix) = txn
+						.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
+						.await?
+						.filter(|ix| !ix.prepare_remove)
+					else {
+						return Ok(None);
+					};
+					let Index::FullText(p) = &ix.index else {
+						return Ok(None);
+					};
+					IndexOperation::prepare_fulltext_compaction(
+						&self.index_stores,
+						ikb,
+						&txn,
+						p,
+						&self.config.idx.file_allowlist,
+						ix.format_version,
+					)
+					.await
+					.map(Some)
+				}
 				.await;
 				let _ = txn.cancel().await;
 				res?
 			};
+			let Some(plan) = plan else {
+				return Ok(progress.nothing_to_apply());
+			};
 			if !plan.has_work() {
-				return Ok(());
+				return Ok(progress.nothing_to_apply());
 			}
 			let has_more = plan.has_more();
 			Self::ensure_not_cancelled(canceller)?;
 
 			let txn = self.transaction(Write).await?;
-			let res = async {
-				match txn
-					.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
-					.await?
-				{
-					Some(ix) if !ix.prepare_remove => match &ix.index {
-						Index::FullText(p) => {
-							IndexOperation::apply_fulltext_compaction(
-								&self.index_stores,
-								ikb,
-								&txn,
-								p,
-								&self.config.idx.file_allowlist,
-								ix.format_version,
-								plan,
-							)
-							.await
-						}
-						_ => Ok(false),
-					},
-					_ => Ok(false),
+			let ix = match compaction_write_guard(&txn, ikb).await {
+				Ok(CompactionWriteGuard::Live(ix)) => ix,
+				Ok(CompactionWriteGuard::Retired) => {
+					let _ = txn.cancel().await;
+					return Ok(progress.nothing_to_apply());
 				}
-			}
+				Ok(CompactionWriteGuard::Fenced) => {
+					let _ = txn.cancel().await;
+					return Ok(CompactionPassOutcome::Fenced);
+				}
+				Err(e) => {
+					let _ = txn.cancel().await;
+					if progress
+						.retry(
+							&e,
+							format!(
+								"Retryable conflict guarding full-text compaction for {ikb}, retrying"
+							),
+						)
+						.await
+					{
+						continue;
+					}
+					return Err(e);
+				}
+			};
+			let Index::FullText(p) = &ix.index else {
+				let _ = txn.cancel().await;
+				return Ok(progress.nothing_to_apply());
+			};
+			let res = IndexOperation::apply_fulltext_compaction(
+				&self.index_stores,
+				ikb,
+				&txn,
+				p,
+				&self.config.idx.file_allowlist,
+				ix.format_version,
+				plan,
+			)
 			.await;
 			match res {
-				Ok(true) => {
+				Ok(CompactionApply::Applied) => {
 					if let Err(e) = Self::ensure_not_cancelled(canceller) {
 						let _ = txn.cancel().await;
 						return Err(e);
@@ -5990,47 +7185,57 @@ impl Datastore {
 						RetryableConflictSite::FullTextCompaction,
 						self.id,
 					) {
-						if Self::cancel_and_retry_index_operation_conflict(
-							&txn,
-							&e,
-							format!(
-								"Retryable conflict committing full-text compaction for {ikb}, retrying"
-							),
-						)
-						.await
+						let _ = txn.cancel().await;
+						if progress
+							.retry(
+								&e,
+								format!(
+									"Retryable conflict committing full-text compaction for {ikb}, retrying"
+								),
+							)
+							.await
 						{
 							continue;
 						}
 						return Err(e);
 					}
 					if let Err(e) = txn.commit().await {
-						if Self::cancel_and_retry_index_operation_conflict(
-							&txn,
-							&e,
-							format!(
-								"Retryable conflict committing full-text compaction for {ikb}, retrying"
-							),
-						)
-						.await
+						let _ = txn.cancel().await;
+						if progress
+							.retry(
+								&e,
+								format!(
+									"Retryable conflict committing full-text compaction for {ikb}, retrying"
+								),
+							)
+							.await
 						{
 							continue;
 						}
 						return Err(e);
 					}
 				}
-				Ok(false) => {
+				Ok(CompactionApply::LostRace) => {
 					let _ = txn.cancel().await;
-					return Ok(());
+					if progress.retry_lost_race(ikb) {
+						continue;
+					}
+					return Ok(CompactionPassOutcome::LostRace);
+				}
+				Ok(CompactionApply::Empty) => {
+					let _ = txn.cancel().await;
+					return Ok(progress.nothing_to_apply());
 				}
 				Err(e) => {
 					let _ = txn.cancel().await;
-					if Self::retry_index_operation_conflict(
-						&e,
-						format!(
-							"Retryable conflict applying full-text compaction for {ikb}, retrying"
-						),
-					)
-					.await
+					if progress
+						.retry(
+							&e,
+							format!(
+								"Retryable conflict applying full-text compaction for {ikb}, retrying"
+							),
+						)
+						.await
 					{
 						continue;
 					}
@@ -6038,15 +7243,8 @@ impl Datastore {
 				}
 			}
 			Self::ensure_not_cancelled(canceller)?;
-			if !has_more {
-				return Ok(());
-			}
-			// Defense-in-depth: every match arm above either commits (Ok(true))
-			// or cancels (Ok(false)/Err) the tx, so by here `closed()` should
-			// always be true. Catch any future regression where a `?` between
-			// the match and this point bypasses finalization. No-op today.
-			if !txn.closed() {
-				let _ = txn.cancel().await;
+			if let Some(outcome) = progress.record_applied(has_more) {
+				return Ok(outcome);
 			}
 		}
 	}
@@ -6055,13 +7253,24 @@ impl Datastore {
 	///
 	/// The write phase deletes only keys captured in the plan, so concurrent
 	/// `!iu` deltas are preserved and included by later reads/compactions.
+	///
+	/// A cancel this pass makes after a step fails, or after a plan turns out
+	/// to have nothing to apply, ignores its own error: the step's error or the
+	/// pass's outcome is what the pass acts on and reports, and the transaction
+	/// it cancels has not committed, so a cancel that fails discards nothing
+	/// that could apply.
 	async fn process_count_compaction(
 		&self,
 		ikb: &IndexKeyBase,
 		canceller: &CancellationToken,
-	) -> Result<()> {
+		lease: Option<&CompactionLease>,
+	) -> Result<CompactionPassOutcome> {
+		let mut progress = CompactionPassProgress::default();
 		loop {
 			Self::ensure_not_cancelled(canceller)?;
+			if lease.is_some_and(CompactionLease::is_lost) {
+				return Ok(CompactionPassOutcome::Budget);
+			}
 			let plan = {
 				let txn = self.transaction(Read).await?;
 				let res = IndexOperation::prepare_count_compaction(ikb, &txn).await;
@@ -6069,26 +7278,47 @@ impl Datastore {
 				res?
 			};
 			if !plan.has_work() {
-				return Ok(());
+				return Ok(progress.nothing_to_apply());
 			}
 			let has_more = plan.has_more();
+			#[cfg(test)]
+			test::before_count_compaction_apply(self.id).await;
 			Self::ensure_not_cancelled(canceller)?;
 
 			let txn = self.transaction(Write).await?;
-			let res = async {
-				match txn
-					.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
-					.await?
-				{
-					Some(ix) if !ix.prepare_remove && matches!(&ix.index, Index::Count(_)) => {
-						IndexOperation::apply_count_compaction(ikb, &txn, plan).await
-					}
-					_ => Ok(false),
+			let ix = match compaction_write_guard(&txn, ikb).await {
+				Ok(CompactionWriteGuard::Live(ix)) => ix,
+				Ok(CompactionWriteGuard::Retired) => {
+					let _ = txn.cancel().await;
+					return Ok(progress.nothing_to_apply());
 				}
+				Ok(CompactionWriteGuard::Fenced) => {
+					let _ = txn.cancel().await;
+					return Ok(CompactionPassOutcome::Fenced);
+				}
+				Err(e) => {
+					let _ = txn.cancel().await;
+					if progress
+						.retry(
+							&e,
+							format!(
+								"Retryable conflict guarding count compaction for {ikb}, retrying"
+							),
+						)
+						.await
+					{
+						continue;
+					}
+					return Err(e);
+				}
+			};
+			if !matches!(&ix.index, Index::Count(_)) {
+				let _ = txn.cancel().await;
+				return Ok(progress.nothing_to_apply());
 			}
-			.await;
+			let res = IndexOperation::apply_count_compaction(ikb, &txn, plan).await;
 			match res {
-				Ok(true) => {
+				Ok(CompactionApply::Applied) => {
 					if let Err(e) = Self::ensure_not_cancelled(canceller) {
 						let _ = txn.cancel().await;
 						return Err(e);
@@ -6098,45 +7328,57 @@ impl Datastore {
 						RetryableConflictSite::CountCompaction,
 						self.id,
 					) {
-						if Self::cancel_and_retry_index_operation_conflict(
-							&txn,
-							&e,
-							format!(
-								"Retryable conflict committing count compaction for {ikb}, retrying"
-							),
-						)
-						.await
+						let _ = txn.cancel().await;
+						if progress
+							.retry(
+								&e,
+								format!(
+									"Retryable conflict committing count compaction for {ikb}, retrying"
+								),
+							)
+							.await
 						{
 							continue;
 						}
 						return Err(e);
 					}
 					if let Err(e) = txn.commit().await {
-						if Self::cancel_and_retry_index_operation_conflict(
-							&txn,
-							&e,
-							format!(
-								"Retryable conflict committing count compaction for {ikb}, retrying"
-							),
-						)
-						.await
+						let _ = txn.cancel().await;
+						if progress
+							.retry(
+								&e,
+								format!(
+									"Retryable conflict committing count compaction for {ikb}, retrying"
+								),
+							)
+							.await
 						{
 							continue;
 						}
 						return Err(e);
 					}
 				}
-				Ok(false) => {
+				Ok(CompactionApply::LostRace) => {
 					let _ = txn.cancel().await;
-					return Ok(());
+					if progress.retry_lost_race(ikb) {
+						continue;
+					}
+					return Ok(CompactionPassOutcome::LostRace);
+				}
+				Ok(CompactionApply::Empty) => {
+					let _ = txn.cancel().await;
+					return Ok(progress.nothing_to_apply());
 				}
 				Err(e) => {
 					let _ = txn.cancel().await;
-					if Self::retry_index_operation_conflict(
-						&e,
-						format!("Retryable conflict applying count compaction for {ikb}, retrying"),
-					)
-					.await
+					if progress
+						.retry(
+							&e,
+							format!(
+								"Retryable conflict applying count compaction for {ikb}, retrying"
+							),
+						)
+						.await
 					{
 						continue;
 					}
@@ -6144,8 +7386,8 @@ impl Datastore {
 				}
 			}
 			Self::ensure_not_cancelled(canceller)?;
-			if !has_more {
-				return Ok(());
+			if let Some(outcome) = progress.record_applied(has_more) {
+				return Ok(outcome);
 			}
 		}
 	}
@@ -7768,6 +9010,13 @@ mod test {
 	use std::collections::BTreeMap;
 	use std::future::pending;
 
+	use chrono::Utc;
+	use futures::FutureExt;
+	#[cfg(diskann)]
+	use surrealdb_datastore::values::diskann::{
+		DISKANN_PENDING_STATE_SHARDS, DiskAnnPendingState, DiskAnnPendingStateKind,
+	};
+	use surrealdb_kvs::consts::COUNT_BATCH_SIZE;
 	use surrealdb_strand::TableName;
 
 	use super::*;
@@ -7775,7 +9024,13 @@ mod test {
 		CatalogProvider, DatabaseProvider, NamespaceProvider, TableProvider, UserProvider,
 	};
 	use crate::iam::verify::verify_root_creds;
-	use crate::key::schema::{DocKeyPrefix, DocLookupPrefix, IndexCountKey, IndexCountPrefix};
+	use crate::idx::trees::hnsw::index::HNSW_COMPACTION_MAX_PENDING_KEYS;
+	#[cfg(diskann)]
+	use crate::key::schema::{DiskannPendingPrefix, DiskannRecordPendingShardShardPrefix};
+	use crate::key::schema::{
+		DocKeyPrefix, DocLookupPrefix, DocStatsBatchPrefix, IndexCountKey, IndexCountPrefix,
+		TaskLeaseKey, TermChangeBatchPrefix,
+	};
 	use crate::kvs::test_support::{WriteTxSizeObserver, cleanup_sizes};
 	use crate::kvs::testing::{
 		NonRetryableErrorSite, RetryableConflictSite, inject_non_retryable_error,
@@ -7797,6 +9052,194 @@ mod test {
 	/// once.
 	pub(super) fn take_after_compaction_batch(node: Uuid) -> Option<CompactionBatchHook> {
 		AFTER_COMPACTION_BATCH.lock().unwrap().remove(&node)
+	}
+
+	/// Work a test runs in a resume scan of the node, before the scan takes up
+	/// its next candidate.
+	static BEFORE_RESUME_CANDIDATE: std::sync::LazyLock<
+		std::sync::Mutex<HashMap<Uuid, CompactionBatchHook>>,
+	> = std::sync::LazyLock::new(Default::default);
+
+	/// The hook a test set for the node's next resume candidate, taken so it
+	/// runs once.
+	pub(super) fn take_before_resume_candidate(node: Uuid) -> Option<CompactionBatchHook> {
+		BEFORE_RESUME_CANDIDATE.lock().unwrap().remove(&node)
+	}
+
+	/// A resume scan that loses its lease to another node before it takes up a
+	/// candidate adopts no build: the stalled builds are the new holder's to
+	/// recover, and two nodes must never adopt at once.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn a_resume_scan_that_loses_its_lease_adopts_nothing() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE user SCHEMALESS;
+			 CREATE user:one SET email = 'one@example.com' RETURN NONE;
+			 DEFINE INDEX test ON user FIELDS email;",
+		)
+		.await?;
+		let ikb = index_key_base(&ds, "user", "test").await?;
+		// A build stranded by an owner whose lease has lapsed.
+		let expired = Utc::now() - chrono::Duration::seconds(3_600);
+		let stalled = crate::kvs::index::IndexBuildState {
+			generation: 2,
+			phase: crate::kvs::index::IndexBuildPhase::Building,
+			owner: Some(Uuid::new_v4()),
+			next_ticket: 0,
+			initial_complete: false,
+			updated_at: expired,
+			owner_heartbeat_at: Some(expired),
+			error: None,
+			report_status: None,
+			initial: Some(0),
+			updated: None,
+			pending: None,
+			initial_cursor: None,
+		};
+		{
+			let txn = ds.transaction(Write).await?;
+			catch!(txn, txn.set_key(&ikb.new_bs_key(), &stalled).await);
+			txn.commit().await?;
+		}
+		// Another node takes the resume lease once this one's scan has begun.
+		let peer = Uuid::new_v4();
+		let hook: CompactionBatchHook = {
+			let ds = Arc::clone(&ds);
+			Box::new(move || {
+				Box::pin(async move {
+					let key = TaskLeaseKey {
+						task_id: TaskLeaseType::IndexBuildResume,
+					};
+					let lease = crate::catalog::TaskLease {
+						owner: peer,
+						expiration: Utc::now() + chrono::Duration::seconds(600),
+					};
+					let txn = ds.transaction(Write).await.expect("a transaction");
+					txn.set_key(&key, &lease).await.expect("the lease is written");
+					txn.commit().await.expect("the lease commits");
+				})
+			})
+		};
+		BEFORE_RESUME_CANDIDATE.lock().unwrap().insert(ds.id(), hook);
+
+		let resumed = ds
+			.resume_stalled_index_builds(Duration::from_secs(30), CancellationToken::new())
+			.await?;
+		assert_eq!(resumed, 0, "a scan that lost its lease adopts nothing");
+		let txn = ds.transaction(Read).await?;
+		let state = catch!(txn, txn.get_key(&ikb.new_bs_key(), None).await);
+		txn.cancel().await?;
+		assert_eq!(
+			state.and_then(|state| state.owner),
+			stalled.owner,
+			"the stalled build keeps its lapsed owner for the lease holder to adopt"
+		);
+		Ok(())
+	}
+
+	/// Work a test runs in a count compaction pass of the node, between the
+	/// pass reading a plan and opening the plan's write transaction.
+	type BeforeCountApplyHook =
+		Arc<dyn Fn() -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
+
+	/// Per node, how many more times the hook runs, and the hook.
+	static BEFORE_COUNT_APPLY: std::sync::LazyLock<
+		std::sync::Mutex<HashMap<Uuid, (usize, BeforeCountApplyHook)>>,
+	> = std::sync::LazyLock::new(Default::default);
+
+	/// Runs the hook a test set for the node's count compaction applies, while
+	/// it has runs left.
+	pub(super) async fn before_count_compaction_apply(node: Uuid) {
+		let hook = match BEFORE_COUNT_APPLY.lock().unwrap().get_mut(&node) {
+			Some((runs, hook)) if *runs > 0 => {
+				*runs -= 1;
+				Some(Arc::clone(hook))
+			}
+			_ => None,
+		};
+		if let Some(hook) = hook {
+			hook().await;
+		}
+	}
+
+	/// Per node, the compaction ticket its compaction loop runs under in place
+	/// of a registration with the node's pool.
+	#[cfg(not(target_family = "wasm"))]
+	static COMPACTION_PLACES: std::sync::LazyLock<
+		std::sync::Mutex<HashMap<Uuid, crate::idx::places::Ticket>>,
+	> = std::sync::LazyLock::new(Default::default);
+
+	/// The compaction ticket a test gave the node, if any.
+	#[cfg(not(target_family = "wasm"))]
+	pub(super) fn compaction_places_for(node: Uuid) -> Option<crate::idx::places::Ticket> {
+		COMPACTION_PLACES.lock().unwrap().get(&node).cloned()
+	}
+
+	/// Runs the node's compaction under a ticket on a pool of `places` places
+	/// of its own, with no OLTP reserve, until the guard drops. A test whose
+	/// passes must run side by side holds one, so it does not depend on how
+	/// many places the node's pool has free, which varies with the host's
+	/// cores and with the tests running beside it.
+	#[cfg(not(target_family = "wasm"))]
+	fn own_compaction_places(node: Uuid, places: usize) -> OwnCompactionPlaces {
+		use crate::exec::config::ExecConfig;
+		use crate::exec::planner::placement::Policy;
+		use crate::exec::vm::morsel::places::Pool;
+
+		let ticket = crate::ctx::IndexPlaces::statement(
+			Pool::new(places).register(),
+			Policy::from_config(&ExecConfig {
+				morsel_oltp_reserve: 0,
+				..ExecConfig::default()
+			}),
+		);
+		COMPACTION_PLACES.lock().unwrap().insert(node, ticket);
+		OwnCompactionPlaces(node)
+	}
+
+	/// Restores the node's own compaction ticket when dropped.
+	#[cfg(not(target_family = "wasm"))]
+	struct OwnCompactionPlaces(Uuid);
+
+	#[cfg(not(target_family = "wasm"))]
+	impl Drop for OwnCompactionPlaces {
+		fn drop(&mut self) {
+			COMPACTION_PLACES.lock().unwrap().remove(&self.0);
+		}
+	}
+
+	/// Makes the node's next `runs` count compaction applies lose their race:
+	/// before each, another compactor advances the index's compaction
+	/// generation past the one the pass's plan read, folding nothing.
+	fn overtake_count_compaction_applies(ds: &Arc<Datastore>, ikb: &IndexKeyBase, runs: usize) {
+		let node = ds.id();
+		let (ds, ikb) = (Arc::clone(ds), ikb.clone());
+		let hook: BeforeCountApplyHook = Arc::new(move || {
+			let (ds, ikb) = (Arc::clone(&ds), ikb.clone());
+			Box::pin(async move {
+				advance_count_compaction_generation(&ds, &ikb)
+					.await
+					.expect("advancing the count compaction generation");
+			})
+		});
+		BEFORE_COUNT_APPLY.lock().unwrap().insert(node, (runs, hook));
+	}
+
+	/// Advances a count index's compaction generation in a transaction of its
+	/// own, as a compactor that applied a plan does.
+	async fn advance_count_compaction_generation(ds: &Datastore, ikb: &IndexKeyBase) -> Result<()> {
+		let key = crate::key::schema::IndexVersionKey {
+			ns: ikb.ns(),
+			db: ikb.db(),
+			tb: Cow::Borrowed(ikb.table()),
+			ix: ikb.index(),
+		};
+		let txn = ds.transaction(Write).await?;
+		let current = catch!(txn, txn.get_key(&key, None).await);
+		catch!(txn, txn.set_key(&key, &current.unwrap_or(0).saturating_add(1)).await);
+		txn.commit().await
 	}
 
 	async fn new_index_compaction_test_ds() -> Result<(Arc<Datastore>, Session)> {
@@ -8818,6 +10261,1591 @@ mod test {
 		.await
 	}
 
+	#[cfg(diskann)]
+	const DISKANN_COMPACTION_SQL: &str = "
+		DEFINE TABLE dvec SCHEMALESS;
+	DEFINE INDEX diskann_idx ON dvec FIELDS vector DISKANN DIMENSION 2 DIST EUCLIDEAN TYPE F32;
+	CREATE dvec:1 SET vector = [1, 2] RETURN NONE;
+	CREATE dvec:2 SET vector = [2, 3] RETURN NONE;
+	";
+
+	/// The `!ic` compaction requests queued for one index.
+	async fn index_compaction_queue_len(ds: &Datastore, ikb: &IndexKeyBase) -> Result<usize> {
+		let range = IndexCompactionIxPrefix {
+			ns: ikb.ns(),
+			db: ikb.db(),
+			tb: Cow::Borrowed(ikb.table()),
+			ix: ikb.index(),
+		}
+		.range()?;
+		let txn = ds.transaction(Read).await?;
+		let res = txn.keys(range, u32::MAX, 0, None).await;
+		txn.cancel().await?;
+		Ok(res?.len())
+	}
+
+	/// The `!iu` deltas a count compaction still has to fold: every entry but the
+	/// aggregate at the `None` bound.
+	async fn count_delta_len(ds: &Datastore, ikb: &IndexKeyBase) -> Result<usize> {
+		let range = IndexCountPrefix {
+			ns: ikb.ns(),
+			db: ikb.db(),
+			tb: Cow::Borrowed(ikb.table()),
+			ix: ikb.index(),
+		}
+		.range()?;
+		let txn = ds.transaction(Read).await?;
+		let res = txn.keys(range, u32::MAX, 0, None).await;
+		txn.cancel().await?;
+		let mut deltas = 0;
+		for key in res? {
+			if IndexCountKey::decode_key(&key)?.uid.is_some() {
+				deltas += 1;
+			}
+		}
+		Ok(deltas)
+	}
+
+	/// The `!tx` and `!dx` deltas a full-text compaction still has to fold.
+	async fn fulltext_delta_len(ds: &Datastore, ikb: &IndexKeyBase) -> Result<usize> {
+		let terms = TermChangeBatchPrefix {
+			ns: ikb.ns(),
+			db: ikb.db(),
+			tb: Cow::Borrowed(ikb.table()),
+			ix: ikb.index(),
+		}
+		.range()?;
+		let stats = DocStatsBatchPrefix {
+			ns: ikb.ns(),
+			db: ikb.db(),
+			tb: Cow::Borrowed(ikb.table()),
+			ix: ikb.index(),
+		}
+		.range()?;
+		let txn = ds.transaction(Read).await?;
+		let terms = txn.keys(terms, u32::MAX, 0, None).await;
+		let stats = txn.keys(stats, u32::MAX, 0, None).await;
+		txn.cancel().await?;
+		Ok(terms?.len() + stats?.len())
+	}
+
+	/// The `!dw` pendings a DiskANN compaction still has to fold, across every
+	/// shard.
+	#[cfg(diskann)]
+	async fn diskann_pending_len(ds: &Datastore, ikb: &IndexKeyBase) -> Result<usize> {
+		let txn = ds.transaction(Read).await?;
+		let mut pendings = 0;
+		for shard in 0..DISKANN_PENDING_STATE_SHARDS {
+			let range = DiskannRecordPendingShardShardPrefix {
+				ns: ikb.ns(),
+				db: ikb.db(),
+				tb: Cow::Borrowed(ikb.table()),
+				ix: ikb.index(),
+				shard,
+			}
+			.range()?;
+			pendings += catch!(txn, txn.keys(range, u32::MAX, 0, None).await).len();
+		}
+		txn.cancel().await?;
+		Ok(pendings)
+	}
+
+	/// The kind of every `!dy` guard a DiskANN index has written.
+	#[cfg(diskann)]
+	async fn diskann_guard_kinds(
+		ds: &Datastore,
+		ikb: &IndexKeyBase,
+	) -> Result<Vec<DiskAnnPendingStateKind>> {
+		let range =
+			DiskannPendingPrefix::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), ikb.index())
+				.range()?;
+		let txn = ds.transaction(Read).await?;
+		let guards: Result<Vec<(Vec<u8>, DiskAnnPendingState)>> =
+			txn.scan(range, DISKANN_PENDING_STATE_SHARDS.into(), 0, None).await;
+		txn.cancel().await?;
+		Ok(guards?.into_iter().map(|(_, state)| state.kind).collect())
+	}
+
+	/// Writes `deltas` count deltas of `+1` straight under an index, with one
+	/// compaction request for them, as that many transactions' flushes would.
+	async fn write_count_deltas(ds: &Datastore, ikb: &IndexKeyBase, deltas: usize) -> Result<()> {
+		let txn = ds.transaction(Write).await?;
+		for n in 0..deltas {
+			let key = IndexCountKey {
+				ns: ikb.ns(),
+				db: ikb.db(),
+				tb: Cow::Borrowed(ikb.table()),
+				ix: ikb.index(),
+				uid: Some((ds.id(), Uuid::from_u128(n as u128 + 1))),
+				pos: true,
+				count: 1,
+			};
+			catch!(txn, txn.set_key(&key, &()).await);
+		}
+		catch!(txn, txn.set_key(&ikb.new_ic_key(ds.id()), &()).await);
+		txn.commit().await
+	}
+
+	/// Runs the batch at the head of the queue through the passes and the
+	/// cleanup [`Datastore::index_compaction`] runs every batch through,
+	/// returning the batch's keys and the number of passes that failed.
+	async fn run_one_index_compaction_batch(ds: &Arc<Datastore>) -> Result<(Vec<Vec<u8>>, usize)> {
+		let batch = {
+			let txn = ds.transaction(Read).await?;
+			let res = txn
+				.keys(IndexCompactionPrefix {}.range()?, INDEX_COMPACTION_QUEUE_BATCH_SIZE, 0, None)
+				.await;
+			txn.cancel().await?;
+			res?
+		};
+		let lh = LeaseHandler::new(
+			ds.sequences.clone(),
+			ds.id(),
+			ds.transaction_factory.clone(),
+			TaskLeaseType::IndexCompaction,
+			Duration::from_secs(2),
+		)?;
+		let cleanup = Datastore::index_compaction_batch(
+			Arc::clone(ds),
+			&lh,
+			&batch,
+			&CompactionDrain::default(),
+			&CancellationToken::new(),
+		)
+		.await?
+		.expect("the batch must hold the lease");
+		assert!(cleanup.deleted, "the batch's cleanup must commit");
+		Ok((batch, cleanup.errors))
+	}
+
+	/// Whether every one of `keys` is still stored.
+	async fn all_keys_remain(ds: &Datastore, keys: &[Vec<u8>]) -> Result<bool> {
+		let txn = ds.transaction(Read).await?;
+		for key in keys {
+			if catch!(txn, txn.get(Key::from(key), None).await).is_none() {
+				txn.cancel().await?;
+				return Ok(false);
+			}
+		}
+		txn.cancel().await?;
+		Ok(true)
+	}
+
+	/// Whether any of `keys` is still stored.
+	async fn any_key_remains(ds: &Datastore, keys: &[Vec<u8>]) -> Result<bool> {
+		let txn = ds.transaction(Read).await?;
+		for key in keys {
+			if catch!(txn, txn.get(Key::from(key), None).await).is_some() {
+				txn.cancel().await?;
+				return Ok(true);
+			}
+		}
+		txn.cancel().await?;
+		Ok(false)
+	}
+
+	/// DiskANN counterpart of [`hnsw_index_compaction_retries_commit_conflict`].
+	/// Its apply commits its own transaction, so the conflict is raised in place
+	/// of the apply and arrives as the apply's own error.
+	#[cfg(diskann)]
+	#[tokio::test]
+	async fn diskann_index_compaction_retries_commit_conflict() -> Result<()> {
+		const INJECTED: usize = 3;
+		const _: () = assert!(INJECTED <= INDEX_COMPACTION_PASS_MAX_RETRIES);
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, DISKANN_COMPACTION_SQL).await?;
+		let ikb = index_key_base(&ds, "dvec", "diskann_idx").await?;
+		assert_eq!(diskann_pending_len(&ds, &ikb).await?, 2, "each record leaves one pending");
+		let site = RetryableConflictSite::DiskAnnCompaction;
+		let node_id = ds.id();
+		let _guard = inject_retryable_conflicts(site, node_id, INJECTED);
+
+		let (_, errors) = Datastore::index_compaction(
+			Arc::clone(&ds),
+			Duration::from_secs(1),
+			CancellationToken::new(),
+		)
+		.await?;
+
+		assert_eq!(errors, 0, "the pass must retry its way past every injected conflict");
+		assert_eq!(
+			retryable_conflict_count(site, node_id),
+			0,
+			"the pass must have met all {INJECTED} injected conflicts"
+		);
+		assert_eq!(
+			diskann_pending_len(&ds, &ikb).await?,
+			0,
+			"the retried apply folds every pending"
+		);
+		let guards = diskann_guard_kinds(&ds, &ikb).await?;
+		assert!(!guards.is_empty(), "the writes must have raised their shards' guards");
+		assert!(
+			guards.iter().all(|kind| *kind != DiskAnnPendingStateKind::NonEmpty),
+			"no shard may still report pendings to merge: {guards:?}"
+		);
+		Ok(())
+	}
+
+	/// A pass over more than one budget of HNSW pendings applies exactly one
+	/// budget of plans, requeues its index once, and leaves the rest to the next
+	/// pass, which picks up where it stopped.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn hnsw_index_compaction_pass_requeues_the_rest_of_its_budget() -> Result<()> {
+		let budget = INDEX_COMPACTION_PASS_PLAN_BUDGET * HNSW_COMPACTION_MAX_PENDING_KEYS;
+		let backlog = budget + 1;
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(
+			&ds,
+			&session,
+			&format!(
+				"DEFINE TABLE vec SCHEMALESS;
+				 DEFINE INDEX hnsw_idx ON vec FIELDS vector HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32 EFC 16 M 4;
+				 CREATE |vec:1..={backlog}| SET vector = [rand::float(), rand::float()] RETURN NONE;"
+			),
+		)
+		.await?;
+		let ikb = index_key_base(&ds, "vec", "hnsw_idx").await?;
+		assert_eq!(hnsw_pending_len(&ds, &ikb).await?, backlog, "one pending per record");
+		let queued = index_compaction_queue_len(&ds, &ikb).await?;
+
+		let outcome = ds.process_index_compaction(&ikb, CancellationToken::new()).await?;
+		assert_eq!(outcome, CompactionPassOutcome::Budget);
+		assert_eq!(
+			hnsw_pending_len(&ds, &ikb).await?,
+			backlog - budget,
+			"the pass must fold exactly one budget of pendings"
+		);
+		assert_eq!(
+			index_compaction_queue_len(&ds, &ikb).await?,
+			queued + 1,
+			"the pass must leave exactly one fresh request for its index"
+		);
+
+		let outcome = ds.process_index_compaction(&ikb, CancellationToken::new()).await?;
+		assert_eq!(outcome, CompactionPassOutcome::Short);
+		assert_eq!(hnsw_pending_len(&ds, &ikb).await?, 0, "the next pass folds the remainder");
+		assert_eq!(
+			index_compaction_queue_len(&ds, &ikb).await?,
+			queued + 1,
+			"a pass that folds its whole backlog queues nothing"
+		);
+		Ok(())
+	}
+
+	/// A plan that fills its cap reports more work behind it even when there is
+	/// none, so a pass over exactly one full plan of pendings applies it, finds
+	/// the next plan empty, and ends short of its budget: the backlog is folded
+	/// and nothing is requeued.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn hnsw_index_compaction_pass_ending_on_an_empty_plan_is_short() -> Result<()> {
+		let backlog = HNSW_COMPACTION_MAX_PENDING_KEYS;
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(
+			&ds,
+			&session,
+			&format!(
+				"DEFINE TABLE vec SCHEMALESS;
+				 DEFINE INDEX hnsw_idx ON vec FIELDS vector HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32 EFC 16 M 4;
+				 CREATE |vec:1..={backlog}| SET vector = [rand::float(), rand::float()] RETURN NONE;"
+			),
+		)
+		.await?;
+		let ikb = index_key_base(&ds, "vec", "hnsw_idx").await?;
+		assert_eq!(hnsw_pending_len(&ds, &ikb).await?, backlog);
+		let queued = index_compaction_queue_len(&ds, &ikb).await?;
+
+		let outcome = ds.process_index_compaction(&ikb, CancellationToken::new()).await?;
+		assert_eq!(outcome, CompactionPassOutcome::Short);
+		assert_eq!(hnsw_pending_len(&ds, &ikb).await?, 0);
+		assert_eq!(index_compaction_queue_len(&ds, &ikb).await?, queued, "nothing is requeued");
+		Ok(())
+	}
+
+	/// [`hnsw_index_compaction_pass_requeues_the_rest_of_its_budget`] for the
+	/// delta-log plan shape.
+	#[tokio::test]
+	async fn count_index_compaction_pass_requeues_the_rest_of_its_budget() -> Result<()> {
+		let budget = INDEX_COMPACTION_PASS_PLAN_BUDGET * COUNT_BATCH_SIZE as usize;
+		let backlog = budget + 1;
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE item SCHEMALESS;
+			 DEFINE INDEX idx_total ON item COUNT;",
+		)
+		.await?;
+		let ikb = index_key_base(&ds, "item", "idx_total").await?;
+		write_count_deltas(&ds, &ikb, backlog).await?;
+		assert_eq!(count_delta_len(&ds, &ikb).await?, backlog);
+		let queued = index_compaction_queue_len(&ds, &ikb).await?;
+
+		let outcome = ds.process_index_compaction(&ikb, CancellationToken::new()).await?;
+		assert_eq!(outcome, CompactionPassOutcome::Budget);
+		assert_eq!(
+			count_delta_len(&ds, &ikb).await?,
+			backlog - budget,
+			"the pass must fold exactly one budget of deltas"
+		);
+		assert_eq!(
+			index_compaction_queue_len(&ds, &ikb).await?,
+			queued + 1,
+			"the pass must leave exactly one fresh request for its index"
+		);
+
+		let outcome = ds.process_index_compaction(&ikb, CancellationToken::new()).await?;
+		assert_eq!(outcome, CompactionPassOutcome::Short);
+		assert_eq!(count_delta_len(&ds, &ikb).await?, 0, "the next pass folds the remainder");
+		assert_eq!(index_compaction_queue_len(&ds, &ikb).await?, queued + 1);
+		let mut res = ds.execute("SELECT count() FROM item GROUP ALL", &session, None).await?;
+		assert_eq!(
+			res.remove(0).result?,
+			PublicValue::Array(surrealdb_types::array![object! { count: backlog as i64 }]),
+			"every delta must be folded exactly once"
+		);
+		Ok(())
+	}
+
+	/// A drain whose pass stops at its budget goes on with the request that
+	/// pass queued, rather than ending as a drain of a short queue does, so one
+	/// call folds a backlog several budgets deep, on a sole writer too.
+	#[tokio::test]
+	async fn index_compaction_drains_a_budgeted_backlog_in_one_call() -> Result<()> {
+		let budget = INDEX_COMPACTION_PASS_PLAN_BUDGET * COUNT_BATCH_SIZE as usize;
+		let backlog = 2 * budget + 1;
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE item SCHEMALESS;
+			 DEFINE INDEX idx_total ON item COUNT;",
+		)
+		.await?;
+		let ikb = index_key_base(&ds, "item", "idx_total").await?;
+		write_count_deltas(&ds, &ikb, backlog).await?;
+		{
+			let txn = ds.transaction(Read).await?;
+			let sole_writer = txn.sole_writer();
+			txn.cancel().await?;
+			assert!(sole_writer, "the fixture must be a sole writer, where a short batch ends");
+		}
+
+		Datastore::index_compaction(
+			Arc::clone(&ds),
+			Duration::from_secs(60),
+			CancellationToken::new(),
+		)
+		.await?;
+		assert_eq!(count_delta_len(&ds, &ikb).await?, 0, "one call must fold the whole backlog");
+		assert_eq!(index_compaction_queue_len(&ds, &ikb).await?, 0, "and leave nothing queued");
+		Ok(())
+	}
+
+	/// One queue batch names a large index and a small one. The large index's
+	/// pass stops at its budget, so the batch ends without waiting for its whole
+	/// backlog: the small index is folded, the large one is requeued once, and
+	/// the batch's own keys are gone.
+	#[tokio::test]
+	async fn index_compaction_batch_serves_a_small_index_beside_a_budgeted_one() -> Result<()> {
+		let budget = INDEX_COMPACTION_PASS_PLAN_BUDGET * COUNT_BATCH_SIZE as usize;
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE item SCHEMALESS;
+			 DEFINE INDEX idx_total ON item COUNT;
+			 DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase;
+			 DEFINE TABLE doc SCHEMALESS;
+			 DEFINE INDEX ft_idx ON doc FIELDS text FULLTEXT ANALYZER simple BM25;
+			 CREATE doc:1 SET text = 'alpha beta' RETURN NONE;
+			 CREATE doc:2 SET text = 'beta gamma' RETURN NONE;",
+		)
+		.await?;
+		let large = index_key_base(&ds, "item", "idx_total").await?;
+		let small = index_key_base(&ds, "doc", "ft_idx").await?;
+		write_count_deltas(&ds, &large, budget + 1).await?;
+		assert!(fulltext_delta_len(&ds, &small).await? > 0, "the small index must have a backlog");
+
+		let (batch, errors) = run_one_index_compaction_batch(&ds).await?;
+		assert_eq!(errors, 0);
+		let named: HashSet<IndexKeyBase> = batch
+			.iter()
+			.map(|key| {
+				let ic = IndexCompactionKey::decode_key(key)?;
+				Ok(IndexKeyBase::new(ic.ns, ic.db, ic.tb.into_owned(), ic.ix))
+			})
+			.collect::<Result<_>>()?;
+		assert_eq!(named, HashSet::from([large.clone(), small.clone()]), "one batch names both");
+
+		assert_eq!(fulltext_delta_len(&ds, &small).await?, 0, "the small index must be folded");
+		assert_eq!(
+			index_compaction_queue_len(&ds, &large).await?,
+			1,
+			"the large index must be requeued exactly once"
+		);
+		assert_eq!(index_compaction_queue_len(&ds, &small).await?, 0);
+		assert!(!any_key_remains(&ds, &batch).await?, "the batch's own keys must be gone");
+		Ok(())
+	}
+
+	/// The lease the compaction task drains the queue under outlasts a pass
+	/// that runs longer than the lease itself, and no other node can take it
+	/// meanwhile.
+	///
+	/// The pass is parked from before the lease it started under would have
+	/// expired until after, and the test reads ownership, not time: a peer
+	/// sharing the store asks for the lease throughout and never gets it, and
+	/// the lease record still names this node when the pass resumes.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn index_compaction_keeps_its_lease_while_a_pass_runs() -> Result<()> {
+		async fn lease_record(ds: &Datastore) -> Result<crate::catalog::TaskLease> {
+			let key = TaskLeaseKey {
+				task_id: TaskLeaseType::IndexCompaction,
+			};
+			let txn = ds.transaction(Read).await?;
+			let lease = txn.get_key(&key, None).await;
+			txn.cancel().await?;
+			Ok(lease?.expect("the compaction task holds a lease"))
+		}
+
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, COUNT_COMPACTION_SQL).await?;
+		let ikb = index_key_base(&ds, "user", "count_idx").await?;
+		let interval = Duration::from_secs(1);
+		let peer = ds.fork_for_test_with_node_id(Uuid::new_v4());
+		let peer_lease = LeaseHandler::new(
+			peer.sequences.clone(),
+			peer.id(),
+			peer.transaction_factory.clone(),
+			TaskLeaseType::IndexCompaction,
+			interval * 2,
+		)?;
+
+		let park = compaction_pass_park::park(ds.id());
+		let compaction = tokio::spawn(Datastore::index_compaction(
+			Arc::clone(&ds),
+			interval,
+			CancellationToken::new(),
+		));
+		tokio::time::timeout(Duration::from_secs(30), park.parked())
+			.await
+			.expect("the batch's pass must reach the park");
+		let started_under = lease_record(&ds).await?;
+		assert_eq!(started_under.owner, ds.id());
+
+		// Past the expiry of the lease the pass started under, a lease nobody
+		// renewed would be the peer's for the asking.
+		while Utc::now() <= started_under.expiration + chrono::Duration::seconds(1) {
+			assert!(
+				!peer_lease.has_lease().await?,
+				"a peer took the compaction lease while this node's pass was running"
+			);
+			tokio::time::sleep(Duration::from_millis(250)).await;
+		}
+		let resumed_under = lease_record(&ds).await?;
+		assert_eq!(resumed_under.owner, ds.id(), "the lease must still name this node");
+		assert!(resumed_under.expiration > Utc::now(), "the lease must still be live");
+
+		park.release();
+		let (_, errors) = compaction.await??;
+		assert_eq!(errors, 0);
+		assert_eq!(count_delta_len(&ds, &ikb).await?, 0, "the resumed pass folds its backlog");
+		Ok(())
+	}
+
+	/// A pass that finds its lease lost at a plan boundary stops there, folding
+	/// nothing more, and requeues its index for whichever node holds the lease
+	/// now.
+	#[tokio::test]
+	async fn index_compaction_pass_stops_at_a_plan_boundary_once_its_lease_is_lost() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, COUNT_COMPACTION_SQL).await?;
+		let ikb = index_key_base(&ds, "user", "count_idx").await?;
+		let deltas = count_delta_len(&ds, &ikb).await?;
+		assert!(deltas > 0, "the fixture must leave deltas for a pass to fold");
+		let queued = index_compaction_queue_len(&ds, &ikb).await?;
+		let lease = CompactionLease::new(&LeaseHandler::new(
+			ds.sequences.clone(),
+			ds.id(),
+			ds.transaction_factory.clone(),
+			TaskLeaseType::IndexCompaction,
+			Duration::from_secs(2),
+		)?);
+		lease.lost.store(true, std::sync::atomic::Ordering::Release);
+
+		let report = ds
+			.run_index_compaction_pass(
+				&ikb,
+				&CancellationToken::new(),
+				Some(&lease),
+				&ds.compaction_places(),
+			)
+			.await;
+		assert_eq!(report.result?, CompactionPassOutcome::Budget);
+		assert!(!report.unqueued, "the fresh request must have committed");
+		assert_eq!(count_delta_len(&ds, &ikb).await?, deltas, "the pass must fold nothing more");
+		assert_eq!(
+			index_compaction_queue_len(&ds, &ikb).await?,
+			queued + 1,
+			"the pass must leave exactly one fresh request for its index"
+		);
+		Ok(())
+	}
+
+	/// A plan overtaken by another compactor is not the end of the backlog: the
+	/// pass reads a fresh plan and folds what is left.
+	#[tokio::test]
+	async fn index_compaction_pass_replans_after_a_lost_race() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, COUNT_COMPACTION_SQL).await?;
+		let ikb = index_key_base(&ds, "user", "count_idx").await?;
+		assert!(count_delta_len(&ds, &ikb).await? > 0, "the fixture must leave deltas to fold");
+		overtake_count_compaction_applies(&ds, &ikb, 1);
+
+		assert_eq!(
+			ds.process_index_compaction(&ikb, CancellationToken::new()).await?,
+			CompactionPassOutcome::Short
+		);
+		assert_eq!(count_delta_len(&ds, &ikb).await?, 0, "the fresh plan folds the backlog");
+		Ok(())
+	}
+
+	/// A pass that loses the race on every retry it has ends on the lost race
+	/// with its backlog unfolded, so it queues a fresh request for its index,
+	/// which the batch's cleanup leaves in place; a later pass folds the
+	/// backlog.
+	#[tokio::test]
+	async fn index_compaction_requeues_an_index_whose_pass_keeps_losing_the_race() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, COUNT_COMPACTION_SQL).await?;
+		let ikb = index_key_base(&ds, "user", "count_idx").await?;
+		let deltas = count_delta_len(&ds, &ikb).await?;
+		assert!(deltas > 0, "the fixture must leave deltas to fold");
+		assert!(index_compaction_queue_len(&ds, &ikb).await? > 0, "the fixture queues a request");
+		overtake_count_compaction_applies(&ds, &ikb, INDEX_COMPACTION_PASS_MAX_RETRIES + 1);
+
+		let (_, errors) = Datastore::index_compaction(
+			Arc::clone(&ds),
+			Duration::from_secs(60),
+			CancellationToken::new(),
+		)
+		.await?;
+		assert_eq!(errors, 0);
+		assert_eq!(count_delta_len(&ds, &ikb).await?, deltas, "every apply lost its race");
+		assert_eq!(
+			index_compaction_queue_len(&ds, &ikb).await?,
+			1,
+			"the batch must leave exactly the fresh request its pass queued"
+		);
+
+		assert_eq!(
+			ds.process_index_compaction(&ikb, CancellationToken::new()).await?,
+			CompactionPassOutcome::Short
+		);
+		assert_eq!(count_delta_len(&ds, &ikb).await?, 0);
+		Ok(())
+	}
+
+	/// A pass that stops with work left and whose fresh request fails to
+	/// commit says so, for the batch that ran it to keep the requests that led
+	/// to it.
+	#[tokio::test]
+	async fn index_compaction_pass_reports_a_request_it_could_not_queue() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, COUNT_COMPACTION_SQL).await?;
+		let ikb = index_key_base(&ds, "user", "count_idx").await?;
+		let queued = index_compaction_queue_len(&ds, &ikb).await?;
+		let lease = CompactionLease::new(&LeaseHandler::new(
+			ds.sequences.clone(),
+			ds.id(),
+			ds.transaction_factory.clone(),
+			TaskLeaseType::IndexCompaction,
+			Duration::from_secs(2),
+		)?);
+		lease.lost.store(true, std::sync::atomic::Ordering::Release);
+		let _guard =
+			inject_non_retryable_error(NonRetryableErrorSite::IndexCompactionRequeue, ds.id());
+
+		let report = ds
+			.run_index_compaction_pass(
+				&ikb,
+				&CancellationToken::new(),
+				Some(&lease),
+				&ds.compaction_places(),
+			)
+			.await;
+		assert_eq!(report.result?, CompactionPassOutcome::Budget);
+		assert!(report.unqueued, "a request that did not commit must be reported");
+		assert_eq!(index_compaction_queue_len(&ds, &ikb).await?, queued, "nothing was queued");
+		Ok(())
+	}
+
+	/// A batch that finds the lease held by another node as it starts runs no
+	/// pass, queues nothing and deletes nothing: its requests are left for the
+	/// node that holds the lease.
+	#[tokio::test]
+	async fn index_compaction_batch_leaves_its_requests_to_the_lease_holder() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, COUNT_COMPACTION_SQL).await?;
+		execute_all(&ds, &session, HNSW_COMPACTION_SQL).await?;
+		let indexes = [
+			index_key_base(&ds, "user", "count_idx").await?,
+			index_key_base(&ds, "vec", "hnsw_idx").await?,
+		];
+		let queued = || async {
+			let txn = ds.transaction(Read).await?;
+			let res = txn
+				.keys(IndexCompactionPrefix {}.range()?, INDEX_COMPACTION_QUEUE_BATCH_SIZE, 0, None)
+				.await;
+			txn.cancel().await?;
+			res
+		};
+		let keys = queued().await?;
+		for ikb in &indexes {
+			assert!(index_compaction_queue_len(&ds, ikb).await? > 0, "{ikb} must be queued");
+		}
+		let lease = |node: Uuid| {
+			LeaseHandler::new(
+				ds.sequences.clone(),
+				node,
+				ds.transaction_factory.clone(),
+				TaskLeaseType::IndexCompaction,
+				Duration::from_secs(60),
+			)
+		};
+		assert!(lease(Uuid::new_v4())?.has_lease().await?, "the peer must take the lease");
+
+		let cleanup = Datastore::index_compaction_batch(
+			Arc::clone(&ds),
+			&lease(ds.id())?,
+			&keys,
+			&CompactionDrain::default(),
+			&CancellationToken::new(),
+		)
+		.await?;
+		assert!(cleanup.is_none(), "a batch without the lease must stop before its passes");
+		for ikb in &indexes {
+			assert_eq!(compaction_pass_park::passes(ds.id(), ikb), 0, "no pass may run: {ikb}");
+		}
+		assert_eq!(queued().await?, keys, "the queue must hold exactly the batch's requests");
+		Ok(())
+	}
+
+	/// A pass the batch runs on its own task that panics fails the batch with
+	/// the panic, as one on a helper does, rather than unwinding the compactor,
+	/// and the batch's requests stay queued.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn index_compaction_batch_fails_on_a_panic_in_a_pass_it_runs_itself() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, COUNT_COMPACTION_SQL).await?;
+		let ikb = index_key_base(&ds, "user", "count_idx").await?;
+		assert!(count_delta_len(&ds, &ikb).await? > 0, "the pass must have work");
+		let node = ds.id();
+		let hook: BeforeCountApplyHook =
+			Arc::new(|| Box::pin(async { panic!("a compaction pass panics") }));
+		BEFORE_COUNT_APPLY.lock().unwrap().insert(node, (1, hook));
+		let keys = {
+			let txn = ds.transaction(Read).await?;
+			let res = txn
+				.keys(IndexCompactionPrefix {}.range()?, INDEX_COMPACTION_QUEUE_BATCH_SIZE, 0, None)
+				.await;
+			txn.cancel().await?;
+			res?
+		};
+		assert!(!keys.is_empty(), "the fixture must queue requests");
+		let lh = LeaseHandler::new(
+			ds.sequences.clone(),
+			node,
+			ds.transaction_factory.clone(),
+			TaskLeaseType::IndexCompaction,
+			Duration::from_secs(60),
+		)?;
+
+		// One index, so its pass runs on the batch's own task.
+		let res = Datastore::index_compaction_batch(
+			Arc::clone(&ds),
+			&lh,
+			&keys,
+			&CompactionDrain::default(),
+			&CancellationToken::new(),
+		)
+		.await;
+		let err = res.err().expect("the panicked pass must fail the batch");
+		assert!(
+			err.to_string().contains("a compaction pass panics"),
+			"the batch must return the panic: {err}"
+		);
+		assert!(all_keys_remain(&ds, &keys).await?, "the batch's requests must stay queued");
+		Ok(())
+	}
+
+	/// A batch whose pass panics still awaits every other pass it started
+	/// before it returns the failure, so none of them runs on past the batch's
+	/// cleanup and its lease.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn index_compaction_batch_awaits_every_pass_when_one_panics() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, COUNT_COMPACTION_SQL).await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE zz SCHEMALESS;
+			 DEFINE INDEX cz ON zz COUNT;
+			 CREATE zz:1 RETURN NONE;
+			 CREATE zz:2 RETURN NONE;",
+		)
+		.await?;
+		// The queue names `user` before `zz`, so the parked pass runs on the
+		// batch's own task and the panicking one on a helper, granted a place
+		// of the node's pool while the parked pass waits.
+		let parked = index_key_base(&ds, "user", "count_idx").await?;
+		assert!(count_delta_len(&ds, &parked).await? > 0, "the parked pass must have work");
+		let node = ds.id();
+		// The second pass runs on a helper, which needs a place to start on.
+		let _places = own_compaction_places(node, 4);
+		let panicked = Arc::new(tokio::sync::Notify::new());
+		let hook: BeforeCountApplyHook = {
+			let panicked = Arc::clone(&panicked);
+			Arc::new(move || {
+				let panicked = Arc::clone(&panicked);
+				Box::pin(async move {
+					panicked.notify_one();
+					panic!("a compaction pass panics");
+				})
+			})
+		};
+		BEFORE_COUNT_APPLY.lock().unwrap().insert(node, (1, hook));
+		let park = compaction_pass_park::park_index(node, parked.clone());
+
+		let keys = {
+			let txn = ds.transaction(Read).await?;
+			let res = txn
+				.keys(IndexCompactionPrefix {}.range()?, INDEX_COMPACTION_QUEUE_BATCH_SIZE, 0, None)
+				.await;
+			txn.cancel().await?;
+			res?
+		};
+		let lh = LeaseHandler::new(
+			ds.sequences.clone(),
+			node,
+			ds.transaction_factory.clone(),
+			TaskLeaseType::IndexCompaction,
+			Duration::from_secs(60),
+		)?;
+		let batch_ds = Arc::clone(&ds);
+		let mut batch = tokio::spawn(async move {
+			Datastore::index_compaction_batch(
+				batch_ds,
+				&lh,
+				&keys,
+				&CompactionDrain::default(),
+				&CancellationToken::new(),
+			)
+			.await
+			.map(|cleanup| cleanup.map(|cleanup| cleanup.errors))
+		});
+		tokio::time::timeout(Duration::from_secs(30), park.parked())
+			.await
+			.expect("the parked pass must reach the park");
+		tokio::time::timeout(Duration::from_secs(30), panicked.notified())
+			.await
+			.expect("the other pass must panic");
+		assert!(
+			tokio::time::timeout(Duration::from_millis(500), &mut batch).await.is_err(),
+			"the batch must not return while a pass it started is still running"
+		);
+
+		park.release();
+		let res = tokio::time::timeout(Duration::from_secs(30), batch)
+			.await
+			.expect("the batch must return once its passes have")?;
+		assert!(res.is_err(), "the panicked pass must fail the batch");
+		assert_eq!(
+			count_delta_len(&ds, &parked).await?,
+			0,
+			"the parked pass must have run to its end before the batch returned"
+		);
+		Ok(())
+	}
+
+	/// A batch whose pass panics keeps renewing its lease while it awaits the
+	/// passes still running, so a surviving pass that outlasts the lease never
+	/// runs under a lease another node has taken. The panic fails the batch
+	/// only once that pass has ended.
+	///
+	/// The surviving pass is parked from before the lease the batch started
+	/// under would have expired until after, and the test reads ownership, not
+	/// time: a peer sharing the store asks for the lease throughout and never
+	/// gets it, and the lease record still names this node when the pass
+	/// resumes.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn index_compaction_batch_keeps_its_lease_while_it_drains_after_a_panic() -> Result<()> {
+		async fn lease_record(ds: &Datastore) -> Result<crate::catalog::TaskLease> {
+			let key = TaskLeaseKey {
+				task_id: TaskLeaseType::IndexCompaction,
+			};
+			let txn = ds.transaction(Read).await?;
+			let lease = txn.get_key(&key, None).await;
+			txn.cancel().await?;
+			Ok(lease?.expect("the compaction batch holds a lease"))
+		}
+
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, COUNT_COMPACTION_SQL).await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE zz SCHEMALESS;
+			 DEFINE INDEX cz ON zz COUNT;
+			 CREATE zz:1 RETURN NONE;
+			 CREATE zz:2 RETURN NONE;",
+		)
+		.await?;
+		// The queue names `user` before `zz`, so the parked pass runs on the
+		// batch's own task and the panicking one on a helper, granted a place
+		// of the node's pool while the parked pass waits.
+		let parked = index_key_base(&ds, "user", "count_idx").await?;
+		assert!(count_delta_len(&ds, &parked).await? > 0, "the parked pass must have work");
+		let node = ds.id();
+		// The second pass runs on a helper, which needs a place to start on.
+		let _places = own_compaction_places(node, 4);
+		let panicked = Arc::new(tokio::sync::Notify::new());
+		let hook: BeforeCountApplyHook = {
+			let panicked = Arc::clone(&panicked);
+			Arc::new(move || {
+				let panicked = Arc::clone(&panicked);
+				Box::pin(async move {
+					panicked.notify_one();
+					panic!("a compaction pass panics");
+				})
+			})
+		};
+		BEFORE_COUNT_APPLY.lock().unwrap().insert(node, (1, hook));
+		let park = compaction_pass_park::park_index(node, parked.clone());
+
+		let keys = {
+			let txn = ds.transaction(Read).await?;
+			let res = txn
+				.keys(IndexCompactionPrefix {}.range()?, INDEX_COMPACTION_QUEUE_BATCH_SIZE, 0, None)
+				.await;
+			txn.cancel().await?;
+			res?
+		};
+		let lease = |node| {
+			LeaseHandler::new(
+				ds.sequences.clone(),
+				node,
+				ds.transaction_factory.clone(),
+				TaskLeaseType::IndexCompaction,
+				Duration::from_secs(2),
+			)
+		};
+		let lh = lease(node)?;
+		let peer_lease = lease(Uuid::new_v4())?;
+		let batch_ds = Arc::clone(&ds);
+		let mut batch = tokio::spawn(async move {
+			Datastore::index_compaction_batch(
+				batch_ds,
+				&lh,
+				&keys,
+				&CompactionDrain::default(),
+				&CancellationToken::new(),
+			)
+			.await
+			.map(|cleanup| cleanup.map(|cleanup| cleanup.errors))
+		});
+		tokio::time::timeout(Duration::from_secs(30), park.parked())
+			.await
+			.expect("the parked pass must reach the park");
+		tokio::time::timeout(Duration::from_secs(30), panicked.notified())
+			.await
+			.expect("the other pass must panic");
+		let started_under = lease_record(&ds).await?;
+		assert_eq!(started_under.owner, node);
+
+		// Past the expiry of the lease the batch started under, a lease nobody
+		// renewed would be the peer's for the asking.
+		while Utc::now() <= started_under.expiration + chrono::Duration::seconds(1) {
+			assert!(
+				!peer_lease.has_lease().await?,
+				"a peer took the compaction lease while a pass of the failed batch was running"
+			);
+			assert!(
+				!batch.is_finished(),
+				"the batch must not return while a pass it started is still running"
+			);
+			tokio::time::sleep(Duration::from_millis(250)).await;
+		}
+		let resumed_under = lease_record(&ds).await?;
+		assert_eq!(resumed_under.owner, node, "the lease must still name this node");
+		assert!(resumed_under.expiration > Utc::now(), "the lease must still be live");
+
+		park.release();
+		let res = tokio::time::timeout(Duration::from_secs(30), &mut batch)
+			.await
+			.expect("the batch must return once its passes have")?;
+		let err = res.expect_err("the panicked pass must fail the batch");
+		assert!(
+			err.to_string().contains("a compaction pass panics"),
+			"the batch must return the panic: {err}"
+		);
+		assert_eq!(
+			compaction_pass_park::ended(node, &parked),
+			compaction_pass_park::passes(node, &parked),
+			"the parked pass must have ended before the batch returned"
+		);
+		assert_eq!(
+			count_delta_len(&ds, &parked).await?,
+			0,
+			"the parked pass, still under the lease, must have run to its end"
+		);
+		Ok(())
+	}
+
+	/// A batch cancelled while its passes run waits for every one of them to
+	/// end before it returns the cancellation, and leaves every request of the
+	/// batch queued, as no pass it ran finished its work.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn index_compaction_batch_awaits_every_pass_on_cancellation() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, COUNT_COMPACTION_SQL).await?;
+		execute_all(&ds, &session, HNSW_COMPACTION_SQL).await?;
+		let indexes = [
+			index_key_base(&ds, "user", "count_idx").await?,
+			index_key_base(&ds, "vec", "hnsw_idx").await?,
+		];
+		let node = ds.id();
+		// The second pass runs on a helper, which needs a place to start on.
+		let _places = own_compaction_places(node, 4);
+		let keys = {
+			let txn = ds.transaction(Read).await?;
+			let res = txn
+				.keys(IndexCompactionPrefix {}.range()?, INDEX_COMPACTION_QUEUE_BATCH_SIZE, 0, None)
+				.await;
+			txn.cancel().await?;
+			res?
+		};
+		for ikb in &indexes {
+			assert!(index_compaction_queue_len(&ds, ikb).await? > 0, "{ikb} must be queued");
+		}
+		let park = compaction_pass_park::park(node);
+		let lh = LeaseHandler::new(
+			ds.sequences.clone(),
+			node,
+			ds.transaction_factory.clone(),
+			TaskLeaseType::IndexCompaction,
+			Duration::from_secs(60),
+		)?;
+		let canceller = CancellationToken::new();
+		let (batch_ds, batch_keys, batch_canceller) =
+			(Arc::clone(&ds), keys.clone(), canceller.clone());
+		let mut batch = tokio::spawn(async move {
+			Datastore::index_compaction_batch(
+				batch_ds,
+				&lh,
+				&batch_keys,
+				&CompactionDrain::default(),
+				&batch_canceller,
+			)
+			.await
+			.map(|cleanup| cleanup.map(|cleanup| cleanup.errors))
+		});
+		tokio::time::timeout(Duration::from_secs(30), async {
+			while indexes.iter().any(|ikb| compaction_pass_park::passes(node, ikb) == 0) {
+				park.parked().await;
+			}
+		})
+		.await
+		.expect("both passes must reach the park");
+
+		canceller.cancel();
+		assert!(
+			tokio::time::timeout(Duration::from_millis(500), &mut batch).await.is_err(),
+			"a cancelled batch must not return while a pass it started is still running"
+		);
+		park.release();
+		let res = tokio::time::timeout(Duration::from_secs(30), batch)
+			.await
+			.expect("the batch must return once its passes have")?;
+		let err = res.expect_err("a cancelled batch must fail");
+		assert!(
+			matches!(crate::err::engine_error(&err), Some(EngineError::QueryCancelled)),
+			"the batch must return the cancellation: {err}"
+		);
+		for ikb in &indexes {
+			assert_eq!(
+				compaction_pass_park::ended(node, ikb),
+				compaction_pass_park::passes(node, ikb),
+				"every pass over {ikb} must have ended before the batch returned"
+			);
+		}
+		assert!(all_keys_remain(&ds, &keys).await?, "the batch's requests must stay queued");
+		Ok(())
+	}
+
+	/// A pass that stops with work left, and whose fresh request meets
+	/// `conflicts` retryable conflicts as it commits. Returns whether the pass
+	/// reported the request unqueued, and the requests queued for the index
+	/// before and after it.
+	async fn requeue_meeting_conflicts(conflicts: usize) -> Result<(bool, usize, usize)> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, COUNT_COMPACTION_SQL).await?;
+		let ikb = index_key_base(&ds, "user", "count_idx").await?;
+		let queued = index_compaction_queue_len(&ds, &ikb).await?;
+		let lease = CompactionLease::new(&LeaseHandler::new(
+			ds.sequences.clone(),
+			ds.id(),
+			ds.transaction_factory.clone(),
+			TaskLeaseType::IndexCompaction,
+			Duration::from_secs(2),
+		)?);
+		lease.lost.store(true, std::sync::atomic::Ordering::Release);
+		let _guard = inject_retryable_conflicts(
+			RetryableConflictSite::IndexCompactionRequeue,
+			ds.id(),
+			conflicts,
+		);
+
+		let report = ds
+			.run_index_compaction_pass(
+				&ikb,
+				&CancellationToken::new(),
+				Some(&lease),
+				&ds.compaction_places(),
+			)
+			.await;
+		assert_eq!(report.result?, CompactionPassOutcome::Budget);
+		assert_eq!(
+			retryable_conflict_count(RetryableConflictSite::IndexCompactionRequeue, ds.id()),
+			0,
+			"the requeue must meet every injected conflict"
+		);
+		Ok((report.unqueued, queued, index_compaction_queue_len(&ds, &ikb).await?))
+	}
+
+	/// A fresh request that meets retryable conflicts as it commits is retried,
+	/// as the passes retry theirs, so a transient conflict does not leave the
+	/// index unqueued.
+	#[tokio::test]
+	async fn index_compaction_requeue_retries_a_retryable_conflict() -> Result<()> {
+		let (unqueued, before, after) =
+			requeue_meeting_conflicts(INDEX_COMPACTION_PASS_MAX_RETRIES).await?;
+		assert!(!unqueued, "a requeue whose conflicts it retried away must commit");
+		assert_eq!(after, before + 1, "the pass must queue exactly one fresh request");
+		Ok(())
+	}
+
+	/// A fresh request whose conflicts outlast the requeue's retries is
+	/// reported unqueued, and queues nothing.
+	#[tokio::test]
+	async fn index_compaction_requeue_reports_conflicts_that_outlast_its_retries() -> Result<()> {
+		let (unqueued, before, after) =
+			requeue_meeting_conflicts(INDEX_COMPACTION_PASS_MAX_RETRIES + 1).await?;
+		assert!(unqueued, "a requeue that ran out of retries must be reported");
+		assert_eq!(after, before, "nothing was queued");
+		Ok(())
+	}
+
+	/// A batch keeps the requests of an index whose pass owed it a fresh one
+	/// and could not queue it, so the index's remaining work stays queued, and
+	/// the next drain folds it.
+	#[tokio::test]
+	async fn index_compaction_batch_keeps_the_requests_of_an_index_it_could_not_requeue()
+	-> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, COUNT_COMPACTION_SQL).await?;
+		let ikb = index_key_base(&ds, "user", "count_idx").await?;
+		let node_id = ds.id();
+		let conflicts = inject_retryable_conflicts(
+			RetryableConflictSite::CountCompaction,
+			node_id,
+			INDEX_COMPACTION_PASS_MAX_RETRIES + 1,
+		);
+		let requeue =
+			inject_non_retryable_error(NonRetryableErrorSite::IndexCompactionRequeue, node_id);
+
+		let (batch, errors) = run_one_index_compaction_batch(&ds).await?;
+		assert_eq!(
+			retryable_conflict_count(RetryableConflictSite::CountCompaction, node_id),
+			0,
+			"the pass must have run out of retries"
+		);
+		assert_eq!(errors, 1);
+		assert!(!batch.is_empty());
+		assert!(all_keys_remain(&ds, &batch).await?, "the index's requests must be kept");
+		assert_eq!(
+			index_compaction_queue_len(&ds, &ikb).await?,
+			batch.len(),
+			"no fresh request committed, so the kept ones are all there is"
+		);
+		drop(conflicts);
+		drop(requeue);
+
+		let (_, errors) = Datastore::index_compaction(
+			Arc::clone(&ds),
+			Duration::from_secs(1),
+			CancellationToken::new(),
+		)
+		.await?;
+		assert_eq!(errors, 0);
+		assert_eq!(count_delta_len(&ds, &ikb).await?, 0, "the kept requests must fold the backlog");
+		assert_eq!(index_compaction_queue_len(&ds, &ikb).await?, 0);
+		Ok(())
+	}
+
+	/// The backlog one queued kind's compaction folds, as the requeue tests
+	/// below count it.
+	#[derive(Clone, Copy)]
+	enum Backlog {
+		Count,
+		FullText,
+		Hnsw,
+		#[cfg(diskann)]
+		DiskAnn,
+	}
+
+	impl Backlog {
+		async fn len(self, ds: &Datastore, ikb: &IndexKeyBase) -> Result<usize> {
+			match self {
+				Self::Count => count_delta_len(ds, ikb).await,
+				Self::FullText => fulltext_delta_len(ds, ikb).await,
+				Self::Hnsw => hnsw_pending_len(ds, ikb).await,
+				#[cfg(diskann)]
+				Self::DiskAnn => diskann_pending_len(ds, ikb).await,
+			}
+		}
+	}
+
+	/// A pass that meets more retryable conflicts than it may retry fails, but
+	/// leaves exactly one fresh request for its index once the batch's cleanup
+	/// has run, so the next drain folds the backlog without waiting for another
+	/// write.
+	async fn assert_index_compaction_requeues_after_its_retries_run_out(
+		site: RetryableConflictSite,
+		table: &str,
+		index: &str,
+		sql: &str,
+		backlog: Backlog,
+	) -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, sql).await?;
+		let ikb = index_key_base(&ds, table, index).await?;
+		assert!(backlog.len(&ds, &ikb).await? > 0, "the fixture must leave a backlog");
+		let node_id = ds.id();
+		let guard =
+			inject_retryable_conflicts(site, node_id, INDEX_COMPACTION_PASS_MAX_RETRIES + 1);
+
+		let (batch, errors) = run_one_index_compaction_batch(&ds).await?;
+		assert_eq!(
+			retryable_conflict_count(site, node_id),
+			0,
+			"the pass must have met every injected conflict"
+		);
+		assert_eq!(errors, 1, "a pass that runs out of retries fails");
+		assert!(!any_key_remains(&ds, &batch).await?, "the batch's own keys must be gone");
+		assert_eq!(
+			index_compaction_queue_len(&ds, &ikb).await?,
+			1,
+			"the failed pass must leave exactly one fresh request for its index"
+		);
+		drop(guard);
+
+		let (_, errors) = Datastore::index_compaction(
+			Arc::clone(&ds),
+			Duration::from_secs(1),
+			CancellationToken::new(),
+		)
+		.await?;
+		assert_eq!(errors, 0);
+		assert_eq!(backlog.len(&ds, &ikb).await?, 0, "the requeued request must fold the backlog");
+		assert_eq!(index_compaction_queue_len(&ds, &ikb).await?, 0);
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn count_index_compaction_requeues_after_its_retries_run_out() -> Result<()> {
+		assert_index_compaction_requeues_after_its_retries_run_out(
+			RetryableConflictSite::CountCompaction,
+			"user",
+			"count_idx",
+			COUNT_COMPACTION_SQL,
+			Backlog::Count,
+		)
+		.await
+	}
+
+	#[tokio::test]
+	async fn fulltext_index_compaction_requeues_after_its_retries_run_out() -> Result<()> {
+		assert_index_compaction_requeues_after_its_retries_run_out(
+			RetryableConflictSite::FullTextCompaction,
+			"doc",
+			"ft_idx",
+			FULLTEXT_COMPACTION_SQL,
+			Backlog::FullText,
+		)
+		.await
+	}
+
+	#[tokio::test]
+	async fn hnsw_index_compaction_requeues_after_its_retries_run_out() -> Result<()> {
+		assert_index_compaction_requeues_after_its_retries_run_out(
+			RetryableConflictSite::HnswCompaction,
+			"vec",
+			"hnsw_idx",
+			HNSW_COMPACTION_SQL,
+			Backlog::Hnsw,
+		)
+		.await
+	}
+
+	#[cfg(diskann)]
+	#[tokio::test]
+	async fn diskann_index_compaction_requeues_after_its_retries_run_out() -> Result<()> {
+		assert_index_compaction_requeues_after_its_retries_run_out(
+			RetryableConflictSite::DiskAnnCompaction,
+			"dvec",
+			"diskann_idx",
+			DISKANN_COMPACTION_SQL,
+			Backlog::DiskAnn,
+		)
+		.await
+	}
+
+	/// The definition a compaction plans and applies against.
+	async fn index_definition(
+		ds: &Datastore,
+		ikb: &IndexKeyBase,
+	) -> Result<Arc<crate::catalog::IndexDefinition>> {
+		let txn = ds.transaction(Read).await?;
+		let ix = txn.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None).await;
+		txn.cancel().await?;
+		Ok(ix?.expect("the index is defined"))
+	}
+
+	/// A context over `txn`, as the passes build one to plan and apply through.
+	fn compaction_ctx(ds: &Datastore, txn: &Arc<Transaction>) -> Result<FrozenContext> {
+		let mut ctx = ds.setup_ctx()?;
+		ctx.set_transaction(Arc::clone(txn));
+		Ok(ctx.freeze())
+	}
+
+	/// Of two count plans read from one state, the first applies and the second
+	/// reports the lost race rather than an empty plan; with the backlog folded,
+	/// a pass finds nothing.
+	#[tokio::test]
+	async fn count_index_compaction_reports_a_lost_race_apart_from_an_empty_plan() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, COUNT_COMPACTION_SQL).await?;
+		let ikb = index_key_base(&ds, "user", "count_idx").await?;
+		let (first, second) = {
+			let txn = ds.transaction(Read).await?;
+			let first = IndexOperation::prepare_count_compaction(&ikb, &txn).await;
+			let second = IndexOperation::prepare_count_compaction(&ikb, &txn).await;
+			txn.cancel().await?;
+			(first?, second?)
+		};
+
+		let txn = ds.transaction(Write).await?;
+		let applied = catch!(txn, IndexOperation::apply_count_compaction(&ikb, &txn, first).await);
+		assert_eq!(applied, CompactionApply::Applied);
+		txn.commit().await?;
+		let txn = ds.transaction(Write).await?;
+		let applied = catch!(txn, IndexOperation::apply_count_compaction(&ikb, &txn, second).await);
+		txn.cancel().await?;
+		assert_eq!(applied, CompactionApply::LostRace);
+
+		assert_eq!(
+			ds.process_index_compaction(&ikb, CancellationToken::new()).await?,
+			CompactionPassOutcome::Empty
+		);
+		Ok(())
+	}
+
+	/// [`count_index_compaction_reports_a_lost_race_apart_from_an_empty_plan`]
+	/// for a full-text index.
+	#[tokio::test]
+	async fn fulltext_index_compaction_reports_a_lost_race_apart_from_an_empty_plan() -> Result<()>
+	{
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, FULLTEXT_COMPACTION_SQL).await?;
+		let ikb = index_key_base(&ds, "doc", "ft_idx").await?;
+		let ix = index_definition(&ds, &ikb).await?;
+		let Index::FullText(p) = &ix.index else {
+			panic!("ft_idx is not a full-text index");
+		};
+		let allow_list = &ds.config.idx.file_allowlist;
+		let (first, second) = {
+			let txn = ds.transaction(Read).await?;
+			let first = IndexOperation::prepare_fulltext_compaction(
+				&ds.index_stores,
+				&ikb,
+				&txn,
+				p,
+				allow_list,
+				ix.format_version,
+			)
+			.await;
+			let second = IndexOperation::prepare_fulltext_compaction(
+				&ds.index_stores,
+				&ikb,
+				&txn,
+				p,
+				allow_list,
+				ix.format_version,
+			)
+			.await;
+			txn.cancel().await?;
+			(first?, second?)
+		};
+
+		for (plan, expected) in
+			[(first, CompactionApply::Applied), (second, CompactionApply::LostRace)]
+		{
+			let txn = ds.transaction(Write).await?;
+			let applied = catch!(
+				txn,
+				IndexOperation::apply_fulltext_compaction(
+					&ds.index_stores,
+					&ikb,
+					&txn,
+					p,
+					allow_list,
+					ix.format_version,
+					plan,
+				)
+				.await
+			);
+			assert_eq!(applied, expected);
+			if applied.applied() {
+				txn.commit().await?;
+			} else {
+				txn.cancel().await?;
+			}
+		}
+
+		assert_eq!(
+			ds.process_index_compaction(&ikb, CancellationToken::new()).await?,
+			CompactionPassOutcome::Empty
+		);
+		Ok(())
+	}
+
+	/// [`count_index_compaction_reports_a_lost_race_apart_from_an_empty_plan`]
+	/// for an HNSW index.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn hnsw_index_compaction_reports_a_lost_race_apart_from_an_empty_plan() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, HNSW_COMPACTION_SQL).await?;
+		let ikb = index_key_base(&ds, "vec", "hnsw_idx").await?;
+		let ix = index_definition(&ds, &ikb).await?;
+		let Index::Hnsw(p) = &ix.index else {
+			panic!("hnsw_idx is not an HNSW index");
+		};
+		let (first, second) = {
+			let txn = Arc::new(ds.transaction(Read).await?);
+			let ctx = compaction_ctx(&ds, &txn)?;
+			let first = IndexOperation::prepare_hnsw_compaction(&ctx, &ikb).await;
+			let second = IndexOperation::prepare_hnsw_compaction(&ctx, &ikb).await;
+			txn.cancel().await?;
+			(first?, second?)
+		};
+
+		let txn = Arc::new(ds.transaction(Write).await?);
+		let ctx = compaction_ctx(&ds, &txn)?;
+		let applied = IndexOperation::apply_hnsw_compaction(
+			&ctx,
+			&ds.index_stores,
+			&ikb,
+			p,
+			ix.format_version,
+			first,
+		)
+		.await;
+		let applied = catch!(txn, applied);
+		assert!(applied.applied(), "the first plan must apply: {applied:?}");
+		txn.commit().await?;
+		let txn = Arc::new(ds.transaction(Write).await?);
+		let ctx = compaction_ctx(&ds, &txn)?;
+		let applied = IndexOperation::apply_hnsw_compaction(
+			&ctx,
+			&ds.index_stores,
+			&ikb,
+			p,
+			ix.format_version,
+			second,
+		)
+		.await;
+		txn.cancel().await?;
+		assert_eq!(applied?, HnswCompactionOutcome::LostRace);
+
+		assert_eq!(
+			ds.process_index_compaction(&ikb, CancellationToken::new()).await?,
+			CompactionPassOutcome::Empty
+		);
+		Ok(())
+	}
+
+	/// [`count_index_compaction_reports_a_lost_race_apart_from_an_empty_plan`]
+	/// for a DiskANN index, whose apply commits its own transaction.
+	///
+	/// An apply that commits steps the guards of the shards it drained to
+	/// `Empty` in a transaction of its own, so the pass after it finds nothing.
+	#[cfg(diskann)]
+	#[tokio::test]
+	async fn diskann_index_compaction_reports_a_lost_race_apart_from_an_empty_plan() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, DISKANN_COMPACTION_SQL).await?;
+		let ikb = index_key_base(&ds, "dvec", "diskann_idx").await?;
+		let ix = index_definition(&ds, &ikb).await?;
+		let Index::DiskAnn(p) = &ix.index else {
+			panic!("diskann_idx is not a DiskANN index");
+		};
+		let (first, second) = {
+			let txn = Arc::new(ds.transaction(Read).await?);
+			let ctx = compaction_ctx(&ds, &txn)?;
+			let first = IndexOperation::prepare_diskann_compaction(&ctx, &ikb).await;
+			let second = IndexOperation::prepare_diskann_compaction(&ctx, &ikb).await;
+			txn.cancel().await?;
+			(first?, second?)
+		};
+
+		for (plan, expected) in
+			[(first, CompactionApply::Applied), (second, CompactionApply::LostRace)]
+		{
+			let txn = Arc::new(ds.transaction(Write).await?);
+			let ctx = compaction_ctx(&ds, &txn)?;
+			let applied = IndexOperation::apply_diskann_compaction(
+				&ctx,
+				&ds.index_stores,
+				&ikb,
+				p,
+				ix.format_version,
+				plan,
+			)
+			.await;
+			if !txn.closed() {
+				txn.cancel().await?;
+			}
+			assert_eq!(applied?, expected);
+		}
+		assert_eq!(diskann_pending_len(&ds, &ikb).await?, 0);
+
+		assert_eq!(
+			ds.process_index_compaction(&ikb, CancellationToken::new()).await?,
+			CompactionPassOutcome::Empty
+		);
+		Ok(())
+	}
+
+	/// Passing the compactor's write guard has to bind at commit, not just at
+	/// the check.
+	///
+	/// A retirement that commits between the guard's read and the apply's commit
+	/// has to take the apply with it; otherwise the compaction writes index data
+	/// under a prefix the catalog no longer names, and only the queued reclaim
+	/// would sweep it, if it had not already finished. The guard's reads are
+	/// registered reads, so this needs a backend that validates them.
+	#[cfg(feature = "kv-rocksdb")]
+	async fn assert_compaction_write_guard_conflicts_with_a_retirement_that_commits_after_it(
+		sql: &str,
+		table: &str,
+		index: &str,
+	) -> Result<()> {
+		let dir = temp_dir::TempDir::new()?;
+		let ds = Datastore::builder()
+			.without_maintenance_tasks()
+			.build_with_path(&format!("rocksdb://{}", dir.path().to_string_lossy()))
+			.await?;
+		let session = Session::owner().with_ns("test").with_db("test");
+		let txn = ds.transaction(Write).await?;
+		txn.ensure_ns_db(None, "test", "test").await?;
+		txn.commit().await?;
+		execute_all(&ds, &session, sql).await?;
+		let ikb = index_key_base(&ds, table, index).await?;
+
+		// The apply's transaction passes its guard while the index is live.
+		let txn = ds.transaction(Write).await?;
+		let guard = catch!(txn, compaction_write_guard(&txn, &ikb).await);
+		assert!(
+			matches!(guard, CompactionWriteGuard::Live(_)),
+			"the guard must pass while the index is live"
+		);
+
+		// The retirement commits in between, as it may on any node.
+		execute_all(&ds, &session, &format!("REMOVE INDEX {index} ON {table}")).await?;
+
+		// The apply this guard stands in for. It writes index data, not a
+		// guarded key: a write to one would conflict on the write alone and
+		// prove nothing about whether the guard's reads are tracked.
+		let mut entry = IdxRoot {
+			ns: ikb.ns(),
+			db: ikb.db(),
+			tb: Cow::Borrowed(ikb.table()),
+			ix: ikb.index(),
+		}
+		.range()?
+		.start()
+		.to_vec();
+		entry.push(0x01);
+		catch!(txn, txn.set(Key::from(entry), vec![0x01]).await);
+		let err = txn.commit().await.expect_err("the retirement must take the apply with it");
+		assert!(
+			is_retryable_transaction_conflict(&err),
+			"expected a retryable conflict, got: {err}"
+		);
+		let _ = txn.cancel().await;
+		Ok(())
+	}
+
+	#[cfg(feature = "kv-rocksdb")]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn fulltext_compaction_write_guard_conflicts_with_a_retirement_that_commits_after_it()
+	-> Result<()> {
+		assert_compaction_write_guard_conflicts_with_a_retirement_that_commits_after_it(
+			FULLTEXT_COMPACTION_SQL,
+			"doc",
+			"ft_idx",
+		)
+		.await
+	}
+
+	#[cfg(feature = "kv-rocksdb")]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn count_compaction_write_guard_conflicts_with_a_retirement_that_commits_after_it()
+	-> Result<()> {
+		assert_compaction_write_guard_conflicts_with_a_retirement_that_commits_after_it(
+			COUNT_COMPACTION_SQL,
+			"user",
+			"count_idx",
+		)
+		.await
+	}
+
+	#[cfg(feature = "kv-rocksdb")]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn hnsw_compaction_write_guard_conflicts_with_a_retirement_that_commits_after_it()
+	-> Result<()> {
+		assert_compaction_write_guard_conflicts_with_a_retirement_that_commits_after_it(
+			HNSW_COMPACTION_SQL,
+			"vec",
+			"hnsw_idx",
+		)
+		.await
+	}
+
+	#[cfg(all(feature = "kv-rocksdb", diskann))]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn diskann_compaction_write_guard_conflicts_with_a_retirement_that_commits_after_it()
+	-> Result<()> {
+		assert_compaction_write_guard_conflicts_with_a_retirement_that_commits_after_it(
+			DISKANN_COMPACTION_SQL,
+			"dvec",
+			"diskann_idx",
+		)
+		.await
+	}
+
 	/// The process-local HNSW wrapper for one index, resolved the way the query
 	/// path resolves it, so a test holds the same instance the compaction and
 	/// the executor reach for.
@@ -9121,6 +12149,69 @@ mod test {
 		Ok(())
 	}
 
+	/// Runs one queue batch whose cleanup meets `conflicts` retryable
+	/// conflicts as it commits. Returns whether the cleanup committed, and
+	/// whether every key of the batch is still queued.
+	async fn queue_cleanup_meeting_conflicts(conflicts: usize) -> Result<(bool, bool)> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, COUNT_COMPACTION_SQL).await?;
+		let keys = {
+			let txn = ds.transaction(Read).await?;
+			let res = txn
+				.keys(IndexCompactionPrefix {}.range()?, INDEX_COMPACTION_QUEUE_BATCH_SIZE, 0, None)
+				.await;
+			txn.cancel().await?;
+			res?
+		};
+		assert!(!keys.is_empty(), "the fixture must queue requests");
+		let site = RetryableConflictSite::IndexCompactionQueueCleanup;
+		let _guard = inject_retryable_conflicts(site, ds.id(), conflicts);
+		let lh = LeaseHandler::new(
+			ds.sequences.clone(),
+			ds.id(),
+			ds.transaction_factory.clone(),
+			TaskLeaseType::IndexCompaction,
+			Duration::from_secs(60),
+		)?;
+		let cleanup = Datastore::index_compaction_batch(
+			Arc::clone(&ds),
+			&lh,
+			&keys,
+			&CompactionDrain::default(),
+			&CancellationToken::new(),
+		)
+		.await?
+		.expect("the batch must hold the lease");
+		assert_eq!(
+			retryable_conflict_count(site, ds.id()),
+			0,
+			"the cleanup must meet every injected conflict"
+		);
+		Ok((cleanup.deleted, all_keys_remain(&ds, &keys).await?))
+	}
+
+	/// A cleanup retries the retryable conflicts it meets, up to the bound the
+	/// passes use.
+	#[tokio::test]
+	async fn index_compaction_queue_cleanup_retries_up_to_its_bound() -> Result<()> {
+		let (deleted, remain) =
+			queue_cleanup_meeting_conflicts(INDEX_COMPACTION_PASS_MAX_RETRIES).await?;
+		assert!(deleted, "a cleanup whose conflicts it retried away must commit");
+		assert!(!remain, "the committed cleanup must delete the batch's requests");
+		Ok(())
+	}
+
+	/// A cleanup whose conflicts outlast its retries gives up and leaves every
+	/// request of the batch queued.
+	#[tokio::test]
+	async fn index_compaction_queue_cleanup_gives_up_and_keeps_the_batch() -> Result<()> {
+		let (deleted, remain) =
+			queue_cleanup_meeting_conflicts(INDEX_COMPACTION_PASS_MAX_RETRIES + 1).await?;
+		assert!(!deleted, "a cleanup that ran out of retries must not commit");
+		assert!(remain, "a cleanup that gave up must leave every request queued");
+		Ok(())
+	}
+
 	#[tokio::test]
 	async fn index_compaction_retries_queue_cleanup_commit_conflict() -> Result<()> {
 		let (ds, session) = new_index_compaction_test_ds().await?;
@@ -9211,6 +12302,262 @@ mod test {
 		Ok(())
 	}
 
+	/// Queues `n` more compaction requests for `ikb`, each under its own key.
+	async fn queue_compaction_requests(ds: &Datastore, ikb: &IndexKeyBase, n: usize) -> Result<()> {
+		let txn = ds.transaction(Write).await?;
+		for _ in 0..n {
+			catch!(txn, txn.set_key(&ikb.new_ic_key(ds.id()), &()).await);
+		}
+		txn.commit().await
+	}
+
+	/// Writes `ikb`'s durable build state as an `Online` generation, owned by
+	/// `owner` when one is given: a build that has published and holds its
+	/// index until the statement that started it closes, or one that has
+	/// released it. Writes no compaction request.
+	async fn set_build_owner(
+		ds: &Datastore,
+		ikb: &IndexKeyBase,
+		owner: Option<Uuid>,
+	) -> Result<()> {
+		let now = Utc::now();
+		let state = crate::kvs::index::IndexBuildState {
+			generation: 1,
+			phase: crate::kvs::index::IndexBuildPhase::Online,
+			owner,
+			next_ticket: 0,
+			initial_complete: true,
+			updated_at: now,
+			owner_heartbeat_at: owner.map(|_| now),
+			error: None,
+			report_status: None,
+			initial: None,
+			updated: None,
+			pending: None,
+			initial_cursor: None,
+		};
+		let txn = ds.transaction(Write).await?;
+		catch!(txn, txn.set_key(&ikb.new_bs_key(), &state).await);
+		txn.commit().await
+	}
+
+	/// Consumes a pending compaction wake, reporting whether there was one.
+	fn take_compaction_wake(ds: &Datastore) -> bool {
+		use futures::FutureExt as _;
+		ds.triggers.index_compaction.notified().now_or_never().is_some()
+	}
+
+	/// A pass a live build owner fences off its vector index does not act on
+	/// the index's requests, so the drain keeps one of them, and only one,
+	/// however many the index had queued. The first drain after the fence
+	/// comes down folds the backlog from it, with no request written by the
+	/// release.
+	#[tokio::test]
+	async fn index_compaction_keeps_one_request_for_a_fenced_index() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, HNSW_COMPACTION_SQL).await?;
+		let ikb = index_key_base(&ds, "vec", "hnsw_idx").await?;
+		queue_compaction_requests(&ds, &ikb, 3).await?;
+		let queued = index_compaction_queue_len(&ds, &ikb).await?;
+		assert!(queued >= 3, "the fixture must queue several requests for the index");
+		let pendings = hnsw_pending_len(&ds, &ikb).await?;
+		assert!(pendings > 0, "the fixture must leave pendings to fold");
+		set_build_owner(&ds, &ikb, Some(Uuid::now_v7())).await?;
+
+		Datastore::index_compaction(
+			Arc::clone(&ds),
+			Duration::from_secs(60),
+			CancellationToken::new(),
+		)
+		.await?;
+		assert_eq!(hnsw_pending_len(&ds, &ikb).await?, pendings, "the fence leaves the pendings");
+		assert_eq!(
+			index_compaction_queue_len(&ds, &ikb).await?,
+			1,
+			"the drain must keep exactly one of the index's requests"
+		);
+
+		set_build_owner(&ds, &ikb, None).await?;
+		assert_eq!(index_compaction_queue_len(&ds, &ikb).await?, 1);
+		Datastore::index_compaction(
+			Arc::clone(&ds),
+			Duration::from_secs(60),
+			CancellationToken::new(),
+		)
+		.await?;
+		assert_eq!(hnsw_pending_len(&ds, &ikb).await?, 0, "the kept request folds the backlog");
+		assert_eq!(index_compaction_queue_len(&ds, &ikb).await?, 0);
+		Ok(())
+	}
+
+	/// Requests for an index with no definition, under a live build owner, are
+	/// the requests of an index whose defining statement has not committed: the
+	/// drain keeps one.
+	#[tokio::test]
+	async fn index_compaction_keeps_one_request_for_an_index_defined_under_a_live_owner()
+	-> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, COUNT_COMPACTION_SQL).await?;
+		let defined = index_key_base(&ds, "user", "count_idx").await?;
+		let ikb = IndexKeyBase::new(
+			defined.ns(),
+			defined.db(),
+			defined.table().clone(),
+			crate::catalog::IndexId(defined.index().0 + 100),
+		);
+		queue_compaction_requests(&ds, &ikb, 3).await?;
+		set_build_owner(&ds, &ikb, Some(Uuid::now_v7())).await?;
+
+		Datastore::index_compaction(
+			Arc::clone(&ds),
+			Duration::from_secs(60),
+			CancellationToken::new(),
+		)
+		.await?;
+		assert_eq!(index_compaction_queue_len(&ds, &ikb).await?, 1);
+		Ok(())
+	}
+
+	/// Requests for an index with no definition and no live build owner name an
+	/// index that was removed or never committed, so the drain drops them all,
+	/// whether the index left no build state or one its owner released.
+	#[tokio::test]
+	async fn index_compaction_drops_the_requests_of_an_index_with_no_definition_and_no_owner()
+	-> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, COUNT_COMPACTION_SQL).await?;
+		let defined = index_key_base(&ds, "user", "count_idx").await?;
+		let gone = |offset: u32| {
+			IndexKeyBase::new(
+				defined.ns(),
+				defined.db(),
+				defined.table().clone(),
+				crate::catalog::IndexId(defined.index().0 + offset),
+			)
+		};
+		let (no_state, released) = (gone(100), gone(101));
+		queue_compaction_requests(&ds, &no_state, 3).await?;
+		queue_compaction_requests(&ds, &released, 3).await?;
+		set_build_owner(&ds, &released, None).await?;
+
+		Datastore::index_compaction(
+			Arc::clone(&ds),
+			Duration::from_secs(60),
+			CancellationToken::new(),
+		)
+		.await?;
+		assert_eq!(index_compaction_queue_len(&ds, &no_state).await?, 0);
+		assert_eq!(index_compaction_queue_len(&ds, &released).await?, 0);
+		Ok(())
+	}
+
+	/// More requests than one queue batch holds, for a fenced index and for one
+	/// whose definition is not yet readable, fold to one request each in one
+	/// drain, with one pass per index: the batches after the one that kept an
+	/// index's request delete that index's other requests without passing it
+	/// again. The drain ends, and leaves no wake behind it.
+	async fn assert_a_multi_batch_backlog_of_kept_requests_folds_to_one(
+		shared_store: bool,
+	) -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		if shared_store {
+			ds.triggers.assume_shared_store();
+		}
+		execute_all(&ds, &session, HNSW_COMPACTION_SQL).await?;
+		execute_all(&ds, &session, COUNT_COMPACTION_SQL).await?;
+		let fenced = index_key_base(&ds, "vec", "hnsw_idx").await?;
+		let defined = index_key_base(&ds, "user", "count_idx").await?;
+		let not_visible = IndexKeyBase::new(
+			defined.ns(),
+			defined.db(),
+			defined.table().clone(),
+			crate::catalog::IndexId(defined.index().0 + 100),
+		);
+		let requests = INDEX_COMPACTION_QUEUE_BATCH_SIZE as usize + 50;
+		for ikb in [&fenced, &not_visible] {
+			let mut queued = index_compaction_queue_len(&ds, ikb).await?;
+			while queued < requests {
+				let n = (requests - queued).min(1000);
+				queue_compaction_requests(&ds, ikb, n).await?;
+				queued += n;
+			}
+			assert_eq!(index_compaction_queue_len(&ds, ikb).await?, requests);
+			set_build_owner(&ds, ikb, Some(Uuid::now_v7())).await?;
+		}
+		take_compaction_wake(&ds);
+
+		let (_, errors) = tokio::time::timeout(
+			Duration::from_secs(120),
+			Datastore::index_compaction(
+				Arc::clone(&ds),
+				Duration::from_secs(60),
+				CancellationToken::new(),
+			),
+		)
+		.await
+		.expect("a drain over kept requests must end")?;
+		assert_eq!(errors, 0);
+		for ikb in [&fenced, &not_visible] {
+			assert_eq!(
+				index_compaction_queue_len(&ds, ikb).await?,
+				1,
+				"one drain must fold the index's requests to one: {ikb}"
+			);
+			assert_eq!(
+				compaction_pass_park::passes(ds.id(), ikb),
+				1,
+				"one drain must pass the index once: {ikb}"
+			);
+		}
+		assert!(!take_compaction_wake(&ds), "keeping requests must not wake the compactor");
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn index_compaction_folds_a_multi_batch_backlog_of_kept_requests_to_one() -> Result<()> {
+		assert_a_multi_batch_backlog_of_kept_requests_folds_to_one(false).await
+	}
+
+	#[tokio::test]
+	async fn index_compaction_folds_a_multi_batch_backlog_of_kept_requests_to_one_on_a_shared_store()
+	-> Result<()> {
+		assert_a_multi_batch_backlog_of_kept_requests_folds_to_one(true).await
+	}
+
+	/// A drain over nothing but requests it keeps passes each once and returns
+	/// with them still queued, on a store other nodes write to, where a drain
+	/// otherwise runs until the queue is empty. Keeping a request writes
+	/// nothing, so the drain leaves no wake behind it, and the next drain
+	/// passes the kept request once more.
+	#[tokio::test]
+	async fn index_compaction_over_kept_requests_ends_without_a_wake() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		ds.triggers.assume_shared_store();
+		execute_all(&ds, &session, HNSW_COMPACTION_SQL).await?;
+		let ikb = index_key_base(&ds, "vec", "hnsw_idx").await?;
+		queue_compaction_requests(&ds, &ikb, 3).await?;
+		set_build_owner(&ds, &ikb, Some(Uuid::now_v7())).await?;
+		take_compaction_wake(&ds);
+
+		for drain in 1..=2 {
+			let (batches, errors) = tokio::time::timeout(
+				Duration::from_secs(30),
+				Datastore::index_compaction(
+					Arc::clone(&ds),
+					Duration::from_secs(60),
+					CancellationToken::new(),
+				),
+			)
+			.await
+			.unwrap_or_else(|_| panic!("drain {drain} over kept requests must end"))?;
+			assert_eq!(errors, 0);
+			assert_eq!(batches, 1, "drain {drain} must pass the kept request once");
+			assert_eq!(index_compaction_queue_len(&ds, &ikb).await?, 1);
+			assert!(!take_compaction_wake(&ds), "drain {drain} must not wake the compactor");
+		}
+		Ok(())
+	}
+
 	/// The compaction-queue drain must never delete more than one batch of
 	/// `/!ic` entries per write transaction: the queue grows by one entry per
 	/// indexed record write, so an unbounded cleanup transaction would carry
@@ -9250,6 +12597,14 @@ mod test {
 			"DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase;
 			 DEFINE TABLE doc SCHEMALESS;
 			 DEFINE INDEX ft_idx ON doc FIELDS text FULLTEXT ANALYZER simple BM25;",
+		)
+		.await?;
+		// The index's build queued a request of its own when it released
+		// ownership. Drain it, so the queue holds exactly the backlog below.
+		Datastore::index_compaction(
+			Arc::clone(&ds),
+			Duration::from_secs(1),
+			CancellationToken::new(),
 		)
 		.await?;
 		let ikb = index_key_base(&ds, "doc", "ft_idx").await?;
@@ -9336,6 +12691,14 @@ mod test {
 			 DEFINE INDEX ft_z ON zzz FIELDS text FULLTEXT ANALYZER simple BM25;",
 		)
 		.await?;
+		// Each index's build queued a request of its own when it released
+		// ownership. Drain them, so the queue holds exactly the backlog below.
+		Datastore::index_compaction(
+			Arc::clone(&ds),
+			Duration::from_secs(1),
+			CancellationToken::new(),
+		)
+		.await?;
 		let ikb_a = index_key_base(&ds, "aaa", "ft_a").await?;
 		let ikb_z = index_key_base(&ds, "zzz", "ft_z").await?;
 		let node_id = ds.id();
@@ -9403,6 +12766,14 @@ mod test {
 			&session,
 			"DEFINE TABLE item SCHEMALESS;
 			 DEFINE INDEX idx_total ON item COUNT;",
+		)
+		.await?;
+		// The index's build queued a request of its own when it released
+		// ownership. Drain it, so the queue holds only what the write adds.
+		Datastore::index_compaction(
+			Arc::clone(&ds),
+			Duration::from_secs(1),
+			CancellationToken::new(),
 		)
 		.await?;
 		let ikb = index_key_base(&ds, "item", "idx_total").await?;
@@ -9477,8 +12848,12 @@ mod test {
 		// Wait on the trigger the background compactor waits on. Registering
 		// before the write is what makes this deterministic rather than a race:
 		// `Notify` also stores one permit, so a notification that lands before
-		// the await still satisfies it.
+		// the await still satisfies it. For the same reason the permit the
+		// index's own build stored, when it released ownership and queued a
+		// compaction request, is taken first: left in place, it would satisfy
+		// the waiter without the write.
 		let triggers = Arc::clone(ds.commit_triggers());
+		let _ = triggers.index_compaction.notified().now_or_never();
 		let waiter = tokio::spawn(async move {
 			triggers.index_compaction.notified().await;
 		});
@@ -10786,5 +14161,449 @@ mod test {
 			.unwrap()
 			.join()
 			.unwrap();
+	}
+
+	/// Runs `pass` over `indexes` under `places` as the compaction loop does,
+	/// and counts the passes that failed. A run that failed as a whole fails.
+	#[cfg(not(target_family = "wasm"))]
+	async fn failed_compaction_passes<F, Fut>(
+		places: &crate::idx::places::Ticket,
+		indexes: impl IntoIterator<Item = IndexKeyBase>,
+		pass: F,
+	) -> Result<usize>
+	where
+		F: Fn(IndexKeyBase) -> Fut + Send + Sync + 'static,
+		Fut: Future<Output = Result<()>> + Send + 'static,
+	{
+		let run =
+			Datastore::run_compaction_passes(places, indexes, &CancellationToken::new(), pass)
+				.await;
+		if let Some(e) = run.failure {
+			return Err(e);
+		}
+		Ok(run.results.iter().filter(|(_, result)| result.is_err()).count())
+	}
+
+	/// A background run over more indexes than the pool has places holds at
+	/// most `min(P − R, C)` places at once through its one compaction ticket,
+	/// counting the places its passes' own parallel work takes, and runs at
+	/// most one pass beyond them, on its own task. With a cap of at least the
+	/// pool, that is exactly `P − R`, the pool's OLTP reserve left free; with
+	/// a cap below `P − R`, exactly the cap.
+	#[cfg(not(target_family = "wasm"))]
+	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+	async fn compaction_passes_are_bounded_by_the_places_their_ticket_holds() -> Result<()> {
+		use std::sync::atomic::{AtomicUsize, Ordering};
+
+		use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+		use crate::exec::config::ExecConfig;
+		use crate::exec::planner::placement::Policy;
+		use crate::exec::vm::morsel::places::Pool;
+
+		/// What the passes saw: the passes started, those running, and the
+		/// most passes running and places held at once.
+		#[derive(Default)]
+		struct Seen {
+			started: AtomicUsize,
+			running: AtomicUsize,
+			peak_running: AtomicUsize,
+			peak_held: AtomicUsize,
+		}
+
+		// (places P, reserve R, cap C, the places held at most)
+		for (pool_places, reserve, cap, ceiling) in [(6, 2, usize::MAX, 4), (6, 1, 2, 2)] {
+			let pool = Pool::new(pool_places);
+			let statement = pool.register();
+			let places = crate::ctx::IndexPlaces::statement(
+				statement.clone(),
+				Policy::from_config(&ExecConfig {
+					morsel_places: cap,
+					morsel_oltp_reserve: reserve,
+					..ExecConfig::default()
+				}),
+			);
+			let indexes: Vec<IndexKeyBase> = (0..pool_places as u32 + 3)
+				.map(|ix| IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "t".into(), IndexId(ix)))
+				.collect();
+			let total = indexes.len();
+			let seen = Arc::new(Seen::default());
+			// Helpers' passes wait until a pass runs on the loop's own task,
+			// which it starts once an ask for a place has been refused, or until
+			// every pass has started; so every place granted before that refusal
+			// is still held then.
+			let (open, opened) = tokio::sync::watch::channel(false);
+			let open = Arc::new(open);
+			let pass = {
+				let (seen, statement, open, opened, places) = (
+					Arc::clone(&seen),
+					statement.clone(),
+					Arc::clone(&open),
+					opened.clone(),
+					places.clone(),
+				);
+				move |_: IndexKeyBase| {
+					let (seen, statement, open, mut opened, places) = (
+						Arc::clone(&seen),
+						statement.clone(),
+						Arc::clone(&open),
+						opened.clone(),
+						places.clone(),
+					);
+					async move {
+						// A pass's own parallel work takes its places through the
+						// same ticket.
+						let _inner = places.acquire_places(2);
+						let started = seen.started.fetch_add(1, Ordering::SeqCst) + 1;
+						let running = seen.running.fetch_add(1, Ordering::SeqCst) + 1;
+						seen.peak_running.fetch_max(running, Ordering::SeqCst);
+						seen.peak_held.fetch_max(statement.held(), Ordering::SeqCst);
+						if tokio::task::try_id().is_none() || started == total {
+							open.send_replace(true);
+						} else {
+							opened
+								.wait_for(|open| *open)
+								.await
+								.expect("the sender outlives the passes");
+						}
+						tokio::task::yield_now().await;
+						seen.running.fetch_sub(1, Ordering::SeqCst);
+						Ok(())
+					}
+				}
+			};
+			let failed = failed_compaction_passes(&places, indexes, pass).await?;
+			assert_eq!(failed, 0);
+			assert_eq!(seen.started.load(Ordering::SeqCst), total, "every index was compacted");
+			assert_eq!(
+				seen.peak_held.load(Ordering::SeqCst),
+				ceiling,
+				"P = {pool_places}, R = {reserve}, C = {cap}: the places held at most"
+			);
+			assert!(
+				seen.peak_running.load(Ordering::SeqCst) <= ceiling + 1,
+				"no more passes ran at once than the places held plus the loop's own task"
+			);
+			assert_eq!(statement.held(), 0, "every place went back");
+			assert!(!statement.waiting(), "the ticket is left asking for nothing");
+			assert_eq!(pool.free(), pool_places);
+		}
+		Ok(())
+	}
+
+	/// A batch of one index runs its pass on the loop's own task and takes no
+	/// place, so the pass's own parallel work has every place the ticket can be
+	/// granted.
+	#[cfg(not(target_family = "wasm"))]
+	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+	async fn a_single_index_compaction_pass_takes_no_place() -> Result<()> {
+		use std::sync::atomic::{AtomicUsize, Ordering};
+
+		use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+		use crate::exec::config::ExecConfig;
+		use crate::exec::planner::placement::Policy;
+		use crate::exec::vm::morsel::places::Pool;
+
+		let pool = Pool::new(4);
+		let statement = pool.register();
+		let places = crate::ctx::IndexPlaces::statement(
+			statement.clone(),
+			Policy::from_config(&ExecConfig {
+				morsel_oltp_reserve: 0,
+				..ExecConfig::default()
+			}),
+		);
+		let held = Arc::new(AtomicUsize::new(usize::MAX));
+		let on_loop = Arc::new(AtomicUsize::new(0));
+		let pass = {
+			let (held, on_loop, statement) =
+				(Arc::clone(&held), Arc::clone(&on_loop), statement.clone());
+			move |_: IndexKeyBase| {
+				let (held, on_loop, statement) =
+					(Arc::clone(&held), Arc::clone(&on_loop), statement.clone());
+				async move {
+					held.store(statement.held(), Ordering::SeqCst);
+					if tokio::task::try_id().is_none() {
+						on_loop.fetch_add(1, Ordering::SeqCst);
+					}
+					Ok(())
+				}
+			}
+		};
+		let index = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "t".into(), IndexId(0));
+		let failed = failed_compaction_passes(&places, [index], pass).await?;
+		assert_eq!(failed, 0);
+		assert_eq!(held.load(Ordering::SeqCst), 0, "the one pass ran without a place");
+		assert_eq!(on_loop.load(Ordering::SeqCst), 1, "on the loop's own task");
+		assert_eq!(pool.free(), 4);
+		Ok(())
+	}
+
+	/// While the loop's own task runs a pass, a pass behind it is taken by a
+	/// helper holding a granted place: the inline pass here completes only
+	/// once both other indexes have been compacted elsewhere.
+	#[cfg(not(target_family = "wasm"))]
+	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+	async fn an_index_behind_an_inline_pass_is_taken_by_a_helper() -> Result<()> {
+		use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+		use crate::exec::config::ExecConfig;
+		use crate::exec::planner::placement::Policy;
+		use crate::exec::vm::morsel::places::Pool;
+
+		let pool = Pool::new(1);
+		let statement = pool.register();
+		let places = crate::ctx::IndexPlaces::statement(
+			statement.clone(),
+			Policy::from_config(&ExecConfig {
+				morsel_oltp_reserve: 0,
+				..ExecConfig::default()
+			}),
+		);
+		let (done, watched) = tokio::sync::watch::channel(0usize);
+		let done = Arc::new(done);
+		let pass = {
+			let (done, watched) = (Arc::clone(&done), watched.clone());
+			move |_: IndexKeyBase| {
+				let (done, mut watched) = (Arc::clone(&done), watched.clone());
+				async move {
+					if tokio::task::try_id().is_none() {
+						// The timeout only turns a pass nobody takes into a
+						// failure rather than a hang.
+						tokio::time::timeout(
+							std::time::Duration::from_secs(30),
+							watched.wait_for(|done| *done >= 2),
+						)
+						.await
+						.expect("the indexes behind the inline pass are compacted meanwhile")
+						.expect("the sender outlives the passes");
+					}
+					done.send_modify(|done| *done += 1);
+					Ok(())
+				}
+			}
+		};
+		let indexes: Vec<IndexKeyBase> = (0..3)
+			.map(|ix| IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "t".into(), IndexId(ix)))
+			.collect();
+		let failed = failed_compaction_passes(&places, indexes, pass).await?;
+		assert_eq!(failed, 0);
+		assert_eq!(*watched.borrow(), 3, "every index was compacted");
+		assert_eq!(statement.held(), 0);
+		Ok(())
+	}
+
+	/// A place freed while a helper is busy goes to the next unclaimed index
+	/// at once. Index 0 runs on the loop's own task and frees a place another
+	/// registration held; indexes 1 and 2 run until index 3 has started,
+	/// so index 3 can only start on a new helper given the freed place.
+	#[cfg(not(target_family = "wasm"))]
+	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+	async fn a_freed_place_starts_a_helper_for_the_next_unclaimed_index() -> Result<()> {
+		use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+		use crate::exec::config::ExecConfig;
+		use crate::exec::planner::placement::Policy;
+		use crate::exec::vm::morsel::places::Pool;
+
+		let policy = Policy::from_config(&ExecConfig {
+			morsel_oltp_reserve: 0,
+			..ExecConfig::default()
+		});
+		let pool = Pool::new(2);
+		let holder = pool.register();
+		let held = Arc::new(parking_lot::Mutex::new(holder.acquire(policy)));
+		assert!(held.lock().is_some());
+		let statement = pool.register();
+		let places = crate::ctx::IndexPlaces::statement(statement.clone(), policy);
+		let (started, watched) = tokio::sync::watch::channel(false);
+		let started = Arc::new(started);
+		let pass = {
+			let (held, started, watched) =
+				(Arc::clone(&held), Arc::clone(&started), watched.clone());
+			move |ikb: IndexKeyBase| {
+				let (held, started, mut watched) =
+					(Arc::clone(&held), Arc::clone(&started), watched.clone());
+				async move {
+					match ikb.index().0 {
+						0 => drop(held.lock().take()),
+						3 => {
+							started.send_replace(true);
+						}
+						_ => {
+							// The timeout only turns an index nobody starts into
+							// a failure rather than a hang.
+							tokio::time::timeout(
+								std::time::Duration::from_secs(30),
+								watched.wait_for(|started| *started),
+							)
+							.await
+							.expect("index 3 starts while indexes 1 and 2 run")
+							.expect("the sender outlives the passes");
+						}
+					}
+					Ok(())
+				}
+			}
+		};
+		let indexes: Vec<IndexKeyBase> = (0..4)
+			.map(|ix| IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "t".into(), IndexId(ix)))
+			.collect();
+		let failed = failed_compaction_passes(&places, indexes, pass).await?;
+		assert_eq!(failed, 0);
+		assert!(*watched.borrow());
+		assert_eq!(statement.held(), 0);
+		Ok(())
+	}
+
+	/// A compaction run whose helper gave its place way to a waiting
+	/// registration does not take the place back while that registration still
+	/// waits, though it registered first and would win the pool's tie: the
+	/// indexes left after the helper gave way run on the loop's own task.
+	#[cfg(not(target_family = "wasm"))]
+	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+	async fn a_compaction_run_does_not_take_back_a_place_its_helper_gave_way() -> Result<()> {
+		use std::sync::atomic::{AtomicBool, Ordering};
+
+		use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+		use crate::exec::config::ExecConfig;
+		use crate::exec::planner::placement::Policy;
+		use crate::exec::vm::morsel::places::Pool;
+
+		let policy = Policy::from_config(&ExecConfig {
+			morsel_oltp_reserve: 0,
+			..ExecConfig::default()
+		});
+		let pool = Pool::new(1);
+		let statement = pool.register();
+		let waiter = pool.register();
+		let places = crate::ctx::IndexPlaces::statement(statement.clone(), policy);
+		let (step, stepped) = tokio::sync::watch::channel(0u8);
+		let step = Arc::new(step);
+		let last_on_helper = Arc::new(AtomicBool::new(false));
+		let pass = {
+			let (statement, waiter, step, stepped, last_on_helper) = (
+				statement.clone(),
+				waiter.clone(),
+				Arc::clone(&step),
+				stepped.clone(),
+				Arc::clone(&last_on_helper),
+			);
+			move |ikb: IndexKeyBase| {
+				let (statement, waiter, step, mut stepped, last_on_helper) = (
+					statement.clone(),
+					waiter.clone(),
+					Arc::clone(&step),
+					stepped.clone(),
+					Arc::clone(&last_on_helper),
+				);
+				async move {
+					// The timeouts only turn a stall into a failure rather than a
+					// hang.
+					let guard = std::time::Duration::from_secs(30);
+					match ikb.index().0 {
+						// On the loop's own task, once the helper runs index 1:
+						// the waiter is refused, so it waits, and the helper then
+						// gives its place way at the end of index 1.
+						0 => {
+							tokio::time::timeout(guard, stepped.wait_for(|s| *s >= 1))
+								.await
+								.expect("index 1 starts on a helper")
+								.expect("the sender outlives the passes");
+							assert!(waiter.acquire(policy).is_none(), "the waiter is refused");
+							step.send_replace(2);
+							tokio::time::timeout(guard, async {
+								while statement.held() > 0 {
+									tokio::task::yield_now().await;
+								}
+							})
+							.await
+							.expect("the helper gives its place way");
+						}
+						1 => {
+							step.send_replace(1);
+							tokio::time::timeout(guard, stepped.wait_for(|s| *s >= 2))
+								.await
+								.expect("the waiter is refused")
+								.expect("the sender outlives the passes");
+						}
+						3 => {
+							last_on_helper.store(tokio::task::try_id().is_some(), Ordering::SeqCst)
+						}
+						_ => {}
+					}
+					Ok(())
+				}
+			}
+		};
+		let indexes: Vec<IndexKeyBase> = (0..4)
+			.map(|ix| IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "t".into(), IndexId(ix)))
+			.collect();
+		let failed = failed_compaction_passes(&places, indexes, pass).await?;
+		assert_eq!(failed, 0);
+		assert!(
+			!last_on_helper.load(Ordering::SeqCst),
+			"no helper took the place back for index 3 while the waiter waited"
+		);
+		assert!(waiter.waiting(), "the waiter still waits");
+		assert_eq!(pool.free(), 1, "the place is free for the waiter");
+		Ok(())
+	}
+
+	/// A place the parallel work of an inline pass gave way, through the
+	/// compaction ticket, to a waiting registration is not taken back for the
+	/// next queued index while that registration still waits: no helper is
+	/// started, and the remaining indexes run on the loop's own task.
+	#[cfg(not(target_family = "wasm"))]
+	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+	async fn a_place_an_inline_pass_gave_way_is_not_taken_back() -> Result<()> {
+		use std::sync::atomic::{AtomicUsize, Ordering};
+
+		use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+		use crate::exec::config::ExecConfig;
+		use crate::exec::planner::placement::Policy;
+		use crate::exec::vm::morsel::places::Pool;
+
+		let policy = Policy::from_config(&ExecConfig {
+			morsel_oltp_reserve: 0,
+			..ExecConfig::default()
+		});
+		let pool = Pool::new(1);
+		let holder = pool.register();
+		let held = Arc::new(parking_lot::Mutex::new(holder.acquire(policy)));
+		let statement = pool.register();
+		let waiter = pool.register();
+		let places = crate::ctx::IndexPlaces::statement(statement.clone(), policy);
+		let on_helpers = Arc::new(AtomicUsize::new(0));
+		let pass = {
+			let (held, waiter, places, on_helpers) =
+				(Arc::clone(&held), waiter.clone(), places.clone(), Arc::clone(&on_helpers));
+			move |ikb: IndexKeyBase| {
+				let (held, waiter, places, on_helpers) =
+					(Arc::clone(&held), waiter.clone(), places.clone(), Arc::clone(&on_helpers));
+				async move {
+					if tokio::task::try_id().is_some() {
+						on_helpers.fetch_add(1, Ordering::SeqCst);
+					}
+					if ikb.index().0 == 0 {
+						// The pass's own parallel work takes the place freed
+						// here, then gives it way to the waiter, as a worker of
+						// its staged batch does at a quantum boundary.
+						drop(held.lock().take());
+						let worker = places.acquire().expect("the freed place");
+						assert!(waiter.acquire(policy).is_none(), "the waiter is refused");
+						assert!(places.others_wait());
+						places.give_way(worker);
+					}
+					Ok(())
+				}
+			}
+		};
+		let indexes: Vec<IndexKeyBase> = (0..3)
+			.map(|ix| IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "t".into(), IndexId(ix)))
+			.collect();
+		let failed = failed_compaction_passes(&places, indexes, pass).await?;
+		assert_eq!(failed, 0);
+		assert_eq!(on_helpers.load(Ordering::SeqCst), 0, "no helper took the place back");
+		assert!(waiter.waiting(), "the waiter still waits");
+		assert_eq!(pool.free(), 1, "the place is free for the waiter");
+		Ok(())
 	}
 }

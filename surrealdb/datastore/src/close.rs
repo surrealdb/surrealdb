@@ -14,6 +14,7 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Weak};
+use std::time::Duration;
 
 use anyhow::Result;
 use tokio::sync::Mutex;
@@ -79,17 +80,42 @@ pub trait RollbackAction: Send + Sync + 'static {
 /// Fallible, unlike [`CommitAction`]: the failure is the statement's result,
 /// reported to the client in place of success. Discarded when the transaction
 /// is cancelled or its commit fails, as a commit action is.
+///
+/// A wait can owe the catalog something once the commit has applied — the
+/// removal of a definition whose build failed — so the owner must see the
+/// commit and every wait it queued through whatever becomes of its own
+/// caller: a caller that stops waiting stops hearing the outcome, not the work.
+///
+/// `deadline` is the sooner of what is left of the owner's transaction
+/// budget and of the query's own deadline: it bounds the wait the way it would
+/// have bounded the statement had the work run inline. The wait itself
+/// enforces it, rather than the owner dropping it, so that what it owes on a
+/// failure still runs when time runs out.
 pub trait AfterCommitWait: Send + 'static {
-	fn wait(self: Box<Self>) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
+	fn wait(
+		self: Box<Self>,
+		deadline: Option<AfterCommitDeadline>,
+	) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
 }
 
-/// The queue of [`AfterCommitWait`]s for one transaction, held by the owner
+/// The time limit an [`AfterCommitWait`] still answers to.
+#[derive(Clone, Copy, Debug)]
+pub struct AfterCommitDeadline {
+	/// The configured timeout that sets [`Self::at`], which is what a timeout
+	/// error reports.
+	pub timeout: Duration,
+	/// When the wait must have ended.
+	pub at: Instant,
+}
+
+/// The queue of [`AfterCommitWait`]s for one transaction, owned by the caller
 /// that commits it.
 ///
-/// The transaction holds the queue only weakly. What is queued may itself hold
-/// the transaction, so a transaction that owned its queue would keep itself
-/// alive whenever an owner abandoned it with work still queued. Dropping the
-/// owner's handle drops the queue and everything in it.
+/// The transaction holds the queue only weakly. What is queued may itself
+/// hold the transaction — a statement's context does — so a transaction that
+/// owned its queue would keep itself alive whenever an owner abandoned it
+/// with work still queued. Dropping the owner's handle drops the queue and
+/// everything in it.
 #[derive(Clone, Default)]
 pub struct AfterCommitWaits(Arc<AfterCommitQueue>);
 
@@ -99,9 +125,10 @@ pub(crate) type AfterCommitQueue = Mutex<Vec<Box<dyn AfterCommitWait>>>;
 impl AfterCommitWaits {
 	/// Take what is queued, in the order it was queued.
 	///
-	/// Called by the owner after a successful commit. Empty once the
+	/// Called by the owner once its statement has run. Empty once the
 	/// transaction was cancelled or its commit failed, because both discard the
-	/// queue.
+	/// queue; an owner that takes the queue before committing runs nothing it
+	/// took unless the commit succeeds.
 	pub async fn take(&self) -> Vec<Box<dyn AfterCommitWait>> {
 		std::mem::take(&mut *self.0.lock().await)
 	}

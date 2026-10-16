@@ -34,10 +34,33 @@ pub enum RetryableConflictSite {
 	/// The DiskANN counterpart, raised in place of the apply whose own commit
 	/// would have carried the conflict.
 	ConcurrentIndexDiskAnnPendingCompaction,
+	/// A conflict on the transaction that ends a stopped build's generation
+	/// in `Error`. Raised at the start of each attempt, before the build state
+	/// is read, so whatever the attempt would find, it holds a builder that
+	/// has stopped, and with it the outcome a statement waiting on the build
+	/// has yet to hear.
+	ConcurrentIndexGenerationEnd,
+	/// A conflict on the transaction that publishes a build `Online`, raised
+	/// after the build's last batch and before it commits. Held, it parks the
+	/// build task between its writes and its arrival at the release gate.
+	ConcurrentIndexOnlinePublish,
+	/// A conflict on the transaction that releases a published build's
+	/// ownership and stages the compaction request it owes, raised in place of
+	/// its commit. A release that owes no request never reaches it.
+	ConcurrentIndexOwnershipRelease,
+	/// A conflict on the read of `!bs` that opens an owned build-state
+	/// transition, raised in place of that read.
+	ConcurrentIndexBuildStateRead,
 	IndexCompactionQueueCleanup,
 	FullTextCompaction,
 	CountCompaction,
 	HnswCompaction,
+	/// A conflict on a compaction pass's DiskANN apply, raised in place of the
+	/// apply because the apply commits its own transaction.
+	DiskAnnCompaction,
+	/// A conflict on the commit that queues a compaction pass's fresh request
+	/// for its index, raised in place of that commit.
+	IndexCompactionRequeue,
 	/// A conflict on the commit that ends a queued async event — the one that
 	/// makes the event's writes durable and removes its queue entry together.
 	/// Raised in place of that commit, and leaving the transaction finished as
@@ -68,6 +91,17 @@ pub enum NonRetryableErrorSite {
 	ConcurrentIndexReservationRelease,
 	ConcurrentIndexCountTailCommitted,
 	ConcurrentIndexInitialBatchCommit,
+	/// Fails the commit that drains HNSW pendings at the end of a build, which
+	/// runs after the build has published its index `Online`. Raised where the
+	/// retryable site of the same name is, in place of that commit.
+	ConcurrentIndexHnswPendingCompaction,
+	/// The DiskANN counterpart, raised in place of the apply whose own commit
+	/// would have failed.
+	ConcurrentIndexDiskAnnPendingCompaction,
+	/// Simulates the commit that publishes a build `Online` applying but
+	/// reporting `CommitOutcomeUnknown`: raised after that commit succeeds, so
+	/// the published state is durable while the builder sees a failure.
+	ConcurrentIndexOnlineCommitAppliedUnknown,
 	/// Simulates an initial-scan batch commit interrupted by datastore
 	/// shutdown (the `Shutdown` error the storage engines surface once
 	/// graceful shutdown has begun).
@@ -76,6 +110,19 @@ pub enum NonRetryableErrorSite {
 	/// (the error `Building::is_beyond_threshold` raises under memory
 	/// pressure).
 	ConcurrentIndexInitialBatchMemoryThreshold,
+	/// Simulates the process being over its memory threshold when a context
+	/// makes the deep check of whether its query should stop: raised in place
+	/// of that check's memory measurement, with the error it reports.
+	ContextDeepCheckMemoryThreshold,
+	/// Simulates the commit that releases a published build's ownership, and
+	/// stages the compaction request it owes, failing: raised in place of that
+	/// commit, leaving the transaction finished and its writes discarded. A
+	/// release that owes no request never reaches it.
+	ConcurrentIndexOwnershipReleaseCommit,
+	/// Simulates the cancel that ends an owned build-state transition whose
+	/// outcome is already decided failing: raised in place of that cancel's
+	/// result.
+	ConcurrentIndexBuildStateCancel,
 	/// Simulates a storage layer that will not serve the version bootstrap a
 	/// transaction at all — what a distributed backend does while a view
 	/// change is in flight. Non-retryable by classification, transient in
@@ -93,6 +140,9 @@ pub enum NonRetryableErrorSite {
 	/// applied: raised in place of it, leaving the transaction finished and its
 	/// writes discarded.
 	AsyncEventCommitDiscardedUnknown,
+	/// Simulates the commit that queues a compaction pass's fresh request for
+	/// its index failing: raised in place of that commit.
+	IndexCompactionRequeue,
 }
 
 static RETRYABLE_CONFLICTS: OnceLock<Mutex<HashMap<(RetryableConflictSite, Uuid), usize>>> =
@@ -183,13 +233,15 @@ pub fn maybe_inject_non_retryable_error(site: NonRetryableErrorSite, node_id: Uu
 		}
 		// The error the builder raises when the process crosses the
 		// memory threshold.
-		NonRetryableErrorSite::ConcurrentIndexInitialBatchMemoryThreshold => {
+		NonRetryableErrorSite::ConcurrentIndexInitialBatchMemoryThreshold
+		| NonRetryableErrorSite::ContextDeepCheckMemoryThreshold => {
 			Err(crate::error::DatastoreError::QueryBeyondMemoryThreshold.into())
 		}
 		// The error a storage engine reports when it cannot tell whether a
 		// commit applied.
 		NonRetryableErrorSite::AsyncEventCommitAppliedUnknown
-		| NonRetryableErrorSite::AsyncEventCommitDiscardedUnknown => {
+		| NonRetryableErrorSite::AsyncEventCommitDiscardedUnknown
+		| NonRetryableErrorSite::ConcurrentIndexOnlineCommitAppliedUnknown => {
 			Err(surrealdb_kvs::Error::CommitOutcomeUnknown(format!("injected at {site:?}")).into())
 		}
 		_ => {

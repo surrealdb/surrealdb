@@ -17,6 +17,7 @@ use crate::IndexKeyBase;
 use crate::catalog::{HnswParams, TableId};
 use crate::env::IndexEnv;
 use crate::error::Error;
+pub use crate::trees::hnsw::HNSW_COMPACTION_MAX_PENDING_KEYS;
 use crate::trees::hnsw::cache::VectorCache;
 pub use crate::trees::hnsw::outcome::HnswCompactionOutcome;
 use crate::trees::{KnnCondFilter, KnnIteratorResult};

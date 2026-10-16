@@ -36,6 +36,16 @@ is in, and a store may hold both side by side.
   read-only or is refused, according to the entry's class.
 - Every node records the release it runs beside its heartbeat, and a raise is
   refused while a live node runs an older release.
+- A blocking `DEFINE INDEX` or `REBUILD INDEX` run as a statement of its own
+  commits before it waits for its build. Other sessions see a new index while
+  it builds, a `DEFINE INDEX` whose build fails has its definition removed
+  afterwards rather than rolled back, and the query timeout, the transaction
+  timeout and a cancellation end the wait during the build.
+- Index materialisation takes its workers from the node's place pool, the one
+  parallel queries use. Staged HNSW batches and background index compaction
+  run only as wide as that pool grants, a host with two cores or fewer runs
+  them on one task, and `SURREAL_HNSW_BUILD_PARALLELISM` is a ceiling rather
+  than a task count.
 
 ### The switch
 
@@ -311,6 +321,48 @@ for a read-only compatible entry, open otherwise. The other findings list what
 the target refuses after it has opened the store, one statement or row at a
 time. Run it before lowering the level or starting the earlier release.
 
+### A blocking `DEFINE INDEX` or `REBUILD INDEX` commits before its build
+
+A `DEFINE INDEX` or `REBUILD INDEX` without `CONCURRENTLY`, run as a statement
+of its own, commits its transaction and then waits for the build, instead of
+holding the transaction open across the build's writes. It still returns only
+once its index is ready. On RocksDB, a transaction held open across a large
+build could no longer be validated at commit, and the statement failed with
+`Transaction could not check for conflicts`.
+
+For such a statement:
+
+- A new index's definition is visible to other sessions while the build runs:
+  `INFO FOR TABLE` lists the index, and `INFO FOR INDEX` reports the build's
+  progress. Writes other sessions make to the table are queued for the build,
+  as they are for `CONCURRENTLY`. Queries use the index only once it is ready.
+- A `DEFINE INDEX` whose build fails before its index is ready, such as on a
+  `UNIQUE` violation, fails, and a second transaction then removes the
+  definition. The removal compensates for the commit rather than rolling it
+  back: if the process stops before the removal commits, the index stays
+  defined with its failed build in `Error`, which `INFO FOR INDEX` reports,
+  and `REMOVE INDEX` or `REBUILD INDEX` clears it.
+- The query timeout, the transaction timeout and a cancellation are noticed
+  while the build runs. Before the index is ready they fail the statement: a
+  `DEFINE INDEX` then has its definition removed, and a `REBUILD INDEX`
+  reports that its rebuild committed and leaves its build to finish in the
+  background. Once the index is ready they no longer fail it.
+
+Unchanged: a `DEFINE INDEX` or `REBUILD INDEX` inside `BEGIN … COMMIT` or a
+transaction a client holds open, a `DEFINE INDEX OVERWRITE` that replaces an
+existing index, a `DEFINE INDEX` nested in a block, a function or an `IF`, one
+on a table the statement creates, and one whose name, table, fields or
+`COMMENT` run anything when evaluated. Each waits for its build inside its
+transaction, and commits or rolls back with it. A `DEFINE INDEX OVERWRITE` or
+`DEFINE INDEX IF NOT EXISTS` of an index that does not exist yet defines a new
+index, and commits before its build as a plain `DEFINE INDEX` does.
+
+**What to do**: nothing, unless a deployment relies on a failed blocking
+`DEFINE INDEX` leaving no trace, or on its definition staying invisible until
+the build is done. Such a deployment can wrap the statement in
+`BEGIN … COMMIT`, which keeps it atomic but also keeps the RocksDB limit on how
+large a build its transaction can outlast.
+
 ### A `LET` inside a cancelled transaction is undone
 
 Parameters set with `LET` inside a transaction are discarded when the
@@ -319,6 +371,41 @@ transaction is cancelled or fails, as its writes are. After
 transaction bound for the first time holds nothing again. A `LET` inside a
 transaction that commits keeps its value. A client that read a parameter bound
 inside a cancelled transaction must bind it again outside the transaction.
+
+### Index materialisation shares the node's place pool
+
+The parallel work of index materialisation, the staged HNSW batch and the
+background compaction of queued indexes, runs in places from the node's place
+pool, the one parallel queries run their morsel workers in. The pool has one
+place per core beyond the one a statement's own task runs on, and the same
+settings govern both kinds of work: `SURREAL_MORSEL_PLACES` (the most places
+one statement, compaction run or build may hold; unbounded by default),
+`SURREAL_MORSEL_OLTP_RESERVE` (the places kept free for short statements;
+default `1`) and `SURREAL_MORSEL_PLACE_QUANTUM` (how much work a worker does
+before it gives its place to a statement waiting for one; default `8`).
+
+- **Narrower runs on small hosts.** With the default reserve of `1`, a host
+  with two cores or fewer has no place to grant, so staged HNSW batches and
+  background compaction run on one task there. They still complete, and the
+  graph they build is the same.
+- **`SURREAL_HNSW_BUILD_PARALLELISM` is a ceiling.** It caps how many tasks a
+  staged batch runs on, the applying task included. The width it actually runs
+  at is what the pool grants under the morsel settings above, and a worker
+  gives its place back early when a query waits for one. On a store that gives
+  no read view to a read-only transaction (in memory, SurrealKV and TiKV), a
+  staged batch runs on one task whatever the setting and the pool allow.
+  `serial` still selects the in-place path for every batch.
+- **Bounded background compaction.** Background compaction no longer starts
+  one task per index with queued work. It compacts one index on its own task
+  and starts another only on a place the pool grants, so places bound how many
+  indexes compact at once.
+
+**What to do**: nothing for most deployments. A host that relied on parallel
+index materialisation on two cores or fewer can set
+`SURREAL_MORSEL_OLTP_RESERVE=0`, at the cost of the core it keeps free for
+short statements. A deployment that tuned `SURREAL_HNSW_BUILD_PARALLELISM`
+for throughput checks the morsel settings too, since they now decide the
+width it gets.
 
 ### `ext::` in stored text is not downgrade-safe
 

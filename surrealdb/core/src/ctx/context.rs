@@ -35,7 +35,9 @@ use crate::err::{EngineError, Error};
 use crate::exec::Error as ExecError;
 use crate::exec::context::ForbiddenRow;
 use crate::exec::function::FunctionRegistry;
+use crate::exec::planner::placement::Policy;
 use crate::exec::surface::Surface;
+use crate::exec::vm::morsel::places;
 use crate::expr::Base;
 #[cfg(feature = "surrealism")]
 use crate::extension::archive::{ArchiveSource, fetch_archive};
@@ -239,6 +241,17 @@ pub struct Context {
 	/// its breakers spill to. `None` outside a datastore query, where nothing
 	/// is bounded. A child context carries its parent's.
 	memory: Option<Arc<crate::exec::memory::QueryMemory>>,
+	/// The ticket the index engines' parallel work takes its places through:
+	/// a blocking statement's own registration, the background compactor's,
+	/// or a build's. A child, isolated or snapshot context shares its parent's
+	/// cell, since its work belongs to the same statement, so whichever of
+	/// them asks first registers for all; a background or concurrent context
+	/// starts with a cell of its own. With none set, the first request for the
+	/// ticket registers with the node's pool, and every later one hands out
+	/// that registration ([`crate::idx::env::IndexEnv::places`]). Setting a
+	/// ticket replaces this context's cell alone, and what is derived from it
+	/// afterwards.
+	index_places: Arc<std::sync::OnceLock<crate::idx::places::Ticket>>,
 	/// The per-layer configuration a running query reads. Crate-internal: these
 	/// are operator knobs, not API.
 	pub(crate) config: Arc<RuntimeConfig>,
@@ -327,6 +340,7 @@ impl Context {
 			broker: parent.broker.clone(),
 			scheduler: parent.scheduler.clone(),
 			memory: parent.memory.clone(),
+			index_places: Arc::new(std::sync::OnceLock::new()),
 		}
 	}
 
@@ -398,6 +412,7 @@ impl Context {
 			broker: parent.broker.clone(),
 			scheduler: parent.scheduler.clone(),
 			memory: parent.memory.clone(),
+			index_places: Arc::clone(&parent.index_places),
 		}
 	}
 
@@ -458,6 +473,7 @@ impl Context {
 			broker: parent.broker.clone(),
 			scheduler: parent.scheduler.clone(),
 			memory: parent.memory.clone(),
+			index_places: Arc::clone(&parent.index_places),
 		}
 	}
 
@@ -541,6 +557,7 @@ impl Context {
 			broker: from.broker.clone(),
 			scheduler: from.scheduler.clone(),
 			memory: from.memory.clone(),
+			index_places: Arc::clone(&from.index_places),
 		}
 	}
 
@@ -629,6 +646,7 @@ impl Context {
 			broker: from.broker.clone(),
 			scheduler: from.scheduler.clone(),
 			memory: None,
+			index_places: Arc::new(std::sync::OnceLock::new()),
 		}
 	}
 
@@ -707,6 +725,7 @@ impl Context {
 			broker: None,
 			scheduler: None,
 			memory: None,
+			index_places: Arc::new(std::sync::OnceLock::new()),
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -779,6 +798,7 @@ impl Context {
 			broker: None,
 			scheduler: None,
 			memory: None,
+			index_places: Arc::new(std::sync::OnceLock::new()),
 		}
 	}
 
@@ -925,6 +945,18 @@ impl Context {
 		scheduler: Option<Arc<dyn crate::exec::scheduler::Scheduler>>,
 	) {
 		self.scheduler = scheduler;
+	}
+
+	/// The ticket the index engines' parallel work takes its places through,
+	/// when one is set on this context.
+	pub(crate) fn index_places(&self) -> Option<&crate::idx::places::Ticket> {
+		self.index_places.get()
+	}
+
+	/// Sets the ticket the index engines' parallel work takes its places
+	/// through; see [`IndexPlaces`].
+	pub(crate) fn set_index_places(&mut self, places: crate::idx::places::Ticket) {
+		self.index_places = Arc::new(std::sync::OnceLock::from(places));
 	}
 
 	/// The query's memory, `None` where nothing is bounded.
@@ -1265,6 +1297,11 @@ impl Context {
 			return Ok(Some(Reason::Canceled));
 		}
 		if deep_check {
+			#[cfg(test)]
+			crate::kvs::testing::maybe_inject_non_retryable_error(
+				crate::kvs::testing::NonRetryableErrorSite::ContextDeepCheckMemoryThreshold,
+				self.node_id,
+			)?;
 			if ALLOC.is_beyond_threshold() {
 				bail!(DatastoreError::QueryBeyondMemoryThreshold);
 			}
@@ -1984,6 +2021,76 @@ impl crate::idx::env::IndexEnv for Context {
 	fn config(&self) -> &crate::idx::config::IdxConfig {
 		&self.config.idx
 	}
+
+	/// The ticket set on this context, or else this context's own
+	/// registration with the node's pool under the datastore's morsel policy,
+	/// made on the first call and handed out by every later one.
+	fn places(&self) -> crate::idx::places::Ticket {
+		self.index_places
+			.get_or_init(|| IndexPlaces::node(Policy::from_config(&self.config.exec)))
+			.clone()
+	}
+}
+
+/// A registration with the morsel place pool, as the index engines take places
+/// through it ([`crate::idx::places::PlaceSource`]).
+///
+/// Places are granted, refused and owed exactly as they are to a statement's
+/// morsel workers, under the same [`Policy`]: its OLTP reserve, its place cap
+/// and its quantum. Three kinds of registration are wrapped:
+///
+/// * **foreground**: a blocking statement's own registration ([`Self::statement`]), so the workers
+///   of its index work count as the statement's places;
+/// * **background**: the compaction ticket the index compaction loop registers for its run
+///   ([`Self::node`]);
+/// * **build**: a ticket a build registers for itself ([`Self::node`]), or the registration of the
+///   blocking statement waiting on it.
+///
+/// On targets without worker threads the registration never holds a place, so
+/// the index engines' work runs on the calling task.
+#[derive(Debug)]
+pub(crate) struct IndexPlaces {
+	statement: places::Statement,
+	policy: Policy,
+}
+
+impl IndexPlaces {
+	/// A ticket over an existing registration: the places its workers take are
+	/// counted against `statement`.
+	pub(crate) fn statement(
+		statement: places::Statement,
+		policy: Policy,
+	) -> crate::idx::places::Ticket {
+		crate::idx::places::Ticket::new(Self {
+			statement,
+			policy,
+		})
+	}
+
+	/// A ticket over a new registration with the node's pool.
+	pub(crate) fn node(policy: Policy) -> crate::idx::places::Ticket {
+		Self::statement(places::register(), policy)
+	}
+}
+
+impl crate::idx::places::PlaceSource for IndexPlaces {
+	fn acquire(&self, keep_waiting: bool) -> Option<crate::idx::places::Place> {
+		self.statement
+			.acquire_keeping_waiting(self.policy, keep_waiting)
+			.map(crate::idx::places::Place::new)
+	}
+
+	fn others_wait(&self) -> bool {
+		self.statement.others_wait()
+	}
+
+	fn stop_waiting(&self) {
+		self.statement.stop_waiting()
+	}
+
+	fn quantum(&self) -> u32 {
+		self.policy.place_quantum()
+	}
 }
 
 #[cfg(test)]
@@ -2560,5 +2667,179 @@ mod tests {
 		assert_eq!(snapshot.lexical_value("q"), Some(&int(1)));
 		assert_eq!(snapshot.lexical_value("l"), None);
 		assert_eq!(snapshot.value("l"), None);
+	}
+
+	/// The index engines' places, taken from a pool of their own so the books
+	/// hold nothing but the test's registrations.
+	#[cfg(not(target_family = "wasm"))]
+	mod index_places {
+		use crate::ctx::{Context, IndexPlaces};
+		use crate::exec::config::ExecConfig;
+		use crate::exec::planner::placement::Policy;
+		use crate::exec::vm::morsel::places::Pool;
+		use crate::idx::env::IndexEnv;
+
+		/// A morsel policy with a place cap of `cap` and an OLTP reserve of
+		/// `reserve`.
+		fn policy(cap: usize, reserve: usize) -> Policy {
+			Policy::from_config(&ExecConfig {
+				morsel_places: cap,
+				morsel_oltp_reserve: reserve,
+				..ExecConfig::default()
+			})
+		}
+
+		/// An up-front grant on a pool with `F` usable places takes exactly
+		/// `min(max, F)`, at once. The books show the grant on the caller's
+		/// registration while it is held and nothing once it is dropped, and
+		/// the pool's reserve is never handed out.
+		#[test]
+		fn an_up_front_grant_takes_min_of_max_and_the_usable_places() {
+			let pool = Pool::new(6);
+			let statement = pool.register();
+			let places = IndexPlaces::statement(statement.clone(), policy(usize::MAX, 2));
+			let grant = places.acquire_places(3);
+			assert_eq!(grant.len(), 3);
+			assert_eq!(statement.held(), 3);
+			drop(grant);
+			assert_eq!(statement.held(), 0);
+			let grant = places.acquire_places(10);
+			assert_eq!(grant.len(), 4, "six places less a reserve of two");
+			assert_eq!(statement.held(), 4);
+			assert_eq!(pool.free(), 2, "the reserve stays free");
+			assert!(!statement.waiting(), "a short grant leaves no waiting mark");
+			drop(grant);
+			assert_eq!(statement.held(), 0);
+			assert_eq!(pool.free(), 6);
+			let capped = IndexPlaces::statement(pool.register(), policy(1, 0));
+			assert_eq!(capped.acquire_places(4).len(), 1, "the cap bounds a grant");
+			let none = IndexPlaces::statement(pool.register(), policy(0, 0));
+			assert!(none.acquire_places(4).is_empty(), "a grant of none is a grant");
+		}
+
+		/// Two places free, and a registration holding none asks for them
+		/// through `take`, with or without an earlier registration waiting.
+		/// Returns what it got and its registration.
+		fn trimmed(
+			waiter: bool,
+			take: impl Fn(&crate::idx::places::Ticket) -> usize,
+		) -> (usize, crate::exec::vm::morsel::places::Statement) {
+			let pool = Pool::new(4);
+			let waiting = pool.register();
+			let asker = pool.register();
+			let filler = pool.register();
+			let unreserved = policy(usize::MAX, 0);
+			let mut held: Vec<_> =
+				(0..4).map(|_| filler.acquire(unreserved).expect("free")).collect();
+			if waiter {
+				assert!(waiting.acquire(unreserved).is_none());
+				assert!(waiting.waiting());
+			}
+			held.truncate(2);
+			let got = take(&IndexPlaces::statement(asker.clone(), unreserved));
+			drop(held);
+			(got, asker)
+		}
+
+		/// With an earlier registration waiting, a grant is trimmed by the
+		/// pool's fairness exactly as a run of per-job asks is, and the grant
+		/// leaves no waiting mark that would hold a freed place back from the
+		/// waiting registration.
+		#[test]
+		fn a_grant_is_trimmed_by_fairness_as_a_per_job_ask_is() {
+			let grant = |places: &crate::idx::places::Ticket| places.acquire_places(4).len();
+			let per_job = |places: &crate::idx::places::Ticket| {
+				let held: Vec<_> = std::iter::from_fn(|| places.acquire()).collect();
+				places.stop_waiting();
+				held.len()
+			};
+			assert_eq!(trimmed(false, grant).0, 2, "with nothing waiting, both free places");
+			let (granted, asker) = trimmed(true, grant);
+			assert_eq!(granted, 1, "one free place is owed to the waiting registration");
+			assert!(!asker.waiting(), "the grant left no waiting mark behind");
+			assert_eq!(trimmed(true, per_job).0, granted, "the same trim as per-job asks");
+		}
+
+		/// A grant to one user of a ticket while another still waits leaves the
+		/// registration marked waiting under the grant's own lock, so a later
+		/// registration holding as many places is refused the next free place:
+		/// it is owed to the ticket, which registered first.
+		#[test]
+		fn a_grant_keeps_a_ticket_with_a_waiting_user_owed() {
+			let pool = Pool::new(3);
+			let unreserved = policy(usize::MAX, 0);
+			let filler = pool.register();
+			let statement = pool.register();
+			let later = pool.register();
+			let places = IndexPlaces::statement(statement.clone(), unreserved);
+			let _later_held = later.acquire(unreserved).expect("free");
+			let mut filled: Vec<_> =
+				(0..2).map(|_| filler.acquire(unreserved).expect("free")).collect();
+			let (waiting, other) = (places.asking(), places.asking());
+			assert!(waiting.acquire().is_none(), "refused while the pool is full");
+			drop(filled.pop());
+			let _granted = other.acquire().expect("the freed place");
+			assert!(statement.waiting(), "the grant left the registration waiting");
+			drop(filled.pop());
+			assert!(later.acquire(unreserved).is_none(), "the free place is owed to the ticket");
+			drop(waiting);
+			assert!(!statement.waiting(), "once no user waits, neither does the registration");
+		}
+
+		/// A ticket set on a statement's context counts the places taken
+		/// through it against the statement's own registration, and every
+		/// context deriving the statement's work hands the same ticket on; a
+		/// background or concurrent context does not.
+		#[test]
+		fn a_statement_ticket_counts_against_its_registration() {
+			let pool = Pool::new(4);
+			let statement = pool.register();
+			let lent = IndexPlaces::statement(statement.clone(), policy(usize::MAX, 0));
+			let mut ctx = Context::new_test();
+			ctx.set_index_places(lent.clone());
+			let ctx = ctx.freeze();
+			for derived in [
+				Context::new_child(&ctx).freeze(),
+				Context::new_isolated(&ctx).freeze(),
+				Context::snapshot(&ctx).freeze(),
+			] {
+				assert!(IndexEnv::places(&*derived).same(&lent));
+			}
+			assert!(Context::background(&ctx).index_places().is_none());
+			assert!(Context::new_concurrent(&ctx).index_places().is_none());
+			let child = Context::new_child(&ctx).freeze();
+			let grant = IndexEnv::places(&*child).acquire_places(3);
+			assert_eq!(grant.len(), 3);
+			assert_eq!(statement.held(), 3, "the places are the statement's");
+			assert_eq!(pool.registrations(), 1, "no other registration was made");
+		}
+	}
+
+	/// A context with no ticket set hands out one registration of its own,
+	/// however often it is asked, rather than a new one per ask. A child,
+	/// isolated or snapshot context hands out the same one, even when derived
+	/// before the first ask; a ticket set on a derived context replaces it for
+	/// that context alone.
+	#[test]
+	fn a_context_without_a_ticket_hands_out_one_registration() {
+		use crate::idx::env::IndexEnv;
+
+		let ctx = Context::new_test().freeze();
+		let derived = [
+			Context::new_child(&ctx).freeze(),
+			Context::new_isolated(&ctx).freeze(),
+			Context::snapshot(&ctx).freeze(),
+		];
+		let places = IndexEnv::places(&*ctx);
+		assert!(IndexEnv::places(&*ctx).same(&places));
+		for derived in &derived {
+			assert!(IndexEnv::places(&**derived).same(&places), "derived before the first ask");
+		}
+		let mut lent = Context::new_child(&ctx);
+		lent.set_index_places(crate::idx::places::Ticket::serial());
+		let lent = lent.freeze();
+		assert!(!IndexEnv::places(&*lent).same(&places), "the lent ticket is the child's");
+		assert!(IndexEnv::places(&*ctx).same(&places), "the parent keeps its own");
+		assert!(IndexEnv::places(&*derived[0]).same(&places), "and so do its other children");
 	}
 }

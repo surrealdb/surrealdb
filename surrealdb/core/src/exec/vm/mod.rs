@@ -123,7 +123,7 @@ mod backfill;
 mod batch;
 mod distinct_spill;
 mod join_spill;
-mod morsel;
+pub(crate) mod morsel;
 mod partial;
 mod partition;
 mod row;

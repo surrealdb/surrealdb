@@ -11,24 +11,338 @@
 //! defaults are the same values the datastore reads from configuration, and the
 //! two ANN cache sizes come from that same config, so an engine under test
 //! allocates exactly as it does in production.
+//!
+//! Places come from a [`CountingPlaces`] pool of the store's own rather than
+//! from the node's, so a test reads exactly what its run took.
 
+use std::any::{Any, TypeId};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use anyhow::{Result, bail};
 use common::EngineError;
+use parking_lot::Mutex;
 use surrealdb_cnf::ConfigMap;
 use surrealdb_datastore::sequences::Sequences;
 use surrealdb_datastore::triggers::CommitTriggers;
 use surrealdb_datastore::{Transaction, TransactionFactory};
-use surrealdb_kvs::TransactionType;
+use surrealdb_kvs::api::BoxFut;
+use surrealdb_kvs::{Metrics, Transactable, TransactionBuilder, TransactionType};
 use uuid::Uuid;
 
 use crate::catalog::providers::{BoxProviderFut, CancellationProbe};
 use crate::config::IdxConfig;
 use crate::env::{BoxEnvFut, IndexEnv};
+use crate::places::{Place, PlaceSource, Ticket};
 use crate::trees::store::IndexStores;
+
+/// The places a test store's pool has: enough that the staged batches the
+/// tests build on several tasks are granted a place per task.
+const TEST_PLACES: usize = 16;
+
+/// The quantum of a test store's pool, in jobs.
+const TEST_QUANTUM: u32 = 8;
+
+/// A pool of places with one registration, whose books a test reads.
+///
+/// Its asks are granted while a place is free and refused otherwise; a refusal
+/// marks the registration waiting, as the node's pool does. Whether another
+/// registration waits is the test's to say: from the start
+/// ([`Self::set_others_waiting`]), or from a given check on
+/// ([`Self::others_wait_from`]), which makes workers yield mid-run.
+pub(crate) struct CountingPlaces {
+	books: Mutex<CountingBooks>,
+	quantum: u32,
+	/// The checks so far that answered that another registration waits.
+	yields: tokio::sync::watch::Sender<usize>,
+}
+
+#[derive(Default)]
+struct CountingBooks {
+	free: usize,
+	held: usize,
+	peak: usize,
+	taken: usize,
+	refused: usize,
+	waiting: bool,
+	/// Checks of whether another registration waits, and how many answered
+	/// that one does.
+	checks: usize,
+	yields: usize,
+	/// The check from which another registration waits; `None` while none
+	/// does.
+	others_from: Option<usize>,
+}
+
+impl CountingPlaces {
+	/// A pool of `places` places whose workers check for a waiting
+	/// registration every `quantum` jobs.
+	pub(crate) fn new(places: usize, quantum: u32) -> Arc<Self> {
+		Arc::new(Self {
+			books: Mutex::new(CountingBooks {
+				free: places,
+				..CountingBooks::default()
+			}),
+			quantum,
+			yields: tokio::sync::watch::Sender::new(0),
+		})
+	}
+
+	/// The pool's one registration.
+	pub(crate) fn ticket(self: &Arc<Self>) -> Ticket {
+		Ticket::new(CountingTicket(Arc::clone(self)))
+	}
+
+	/// Whether another registration waits, from now on.
+	pub(crate) fn set_others_waiting(&self, waiting: bool) {
+		self.books.lock().others_from = waiting.then_some(0);
+	}
+
+	/// Another registration waits from the `check`-th check on, counting from
+	/// zero.
+	pub(crate) fn others_wait_from(&self, check: usize) {
+		self.books.lock().others_from = Some(check);
+	}
+
+	/// The places held now.
+	pub(crate) fn held(&self) -> usize {
+		self.books.lock().held
+	}
+
+	/// The most places held at once.
+	pub(crate) fn peak(&self) -> usize {
+		self.books.lock().peak
+	}
+
+	/// The places taken so far.
+	pub(crate) fn taken(&self) -> usize {
+		self.books.lock().taken
+	}
+
+	/// The asks refused so far.
+	pub(crate) fn refused(&self) -> usize {
+		self.books.lock().refused
+	}
+
+	/// Whether the registration is marked waiting.
+	pub(crate) fn waiting(&self) -> bool {
+		self.books.lock().waiting
+	}
+
+	/// The checks so far that answered that another registration waits.
+	pub(crate) fn yields(&self) -> usize {
+		self.books.lock().yields
+	}
+
+	/// Returns once `n` checks have answered that another registration waits.
+	pub(crate) async fn wait_for_yields(&self, n: usize) {
+		let mut yields = self.yields.subscribe();
+		yields.wait_for(|yields| *yields >= n).await.expect("the pool holds the sender");
+	}
+}
+
+/// A pool of places shared by several registrations, which grants, refuses
+/// and owes places by the node pool's rules (`exec/vm/morsel/places.rs` in
+/// `surrealdb-core`), with no reserve and no cap: a place is granted only
+/// when the free places outnumber the waiting registrations owed one first,
+/// those that hold fewer or hold as many and registered earlier. A test reads
+/// each registration's books.
+pub(crate) struct SharedPlaces {
+	books: Mutex<SharedBooks>,
+	quantum: u32,
+}
+
+struct SharedBooks {
+	free: usize,
+	/// By registration order: places held, places taken, and whether waiting.
+	entries: Vec<SharedEntry>,
+	/// The registration each place was granted to, in grant order.
+	granted: Vec<usize>,
+	/// Whether each grant, in grant order, left its registration marked
+	/// waiting when it released the books.
+	granted_waiting: Vec<bool>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct SharedEntry {
+	held: usize,
+	taken: usize,
+	waiting: bool,
+}
+
+impl SharedPlaces {
+	/// A pool of `places` places whose workers check for a waiting
+	/// registration every `quantum` jobs.
+	pub(crate) fn new(places: usize, quantum: u32) -> Arc<Self> {
+		Arc::new(Self {
+			books: Mutex::new(SharedBooks {
+				free: places,
+				entries: Vec::new(),
+				granted: Vec::new(),
+				granted_waiting: Vec::new(),
+			}),
+			quantum,
+		})
+	}
+
+	/// Registers with the pool, after every registration made before.
+	pub(crate) fn register(self: &Arc<Self>) -> (usize, Ticket) {
+		let mut books = self.books.lock();
+		let id = books.entries.len();
+		books.entries.push(SharedEntry::default());
+		(
+			id,
+			Ticket::new(SharedTicket {
+				pool: Arc::clone(self),
+				id,
+			}),
+		)
+	}
+
+	/// The places registration `id` holds.
+	pub(crate) fn held(&self, id: usize) -> usize {
+		self.books.lock().entries[id].held
+	}
+
+	/// The places registration `id` has taken so far.
+	pub(crate) fn taken(&self, id: usize) -> usize {
+		self.books.lock().entries[id].taken
+	}
+
+	/// Whether registration `id` is marked waiting.
+	pub(crate) fn waiting(&self, id: usize) -> bool {
+		self.books.lock().entries[id].waiting
+	}
+
+	/// The registration each place was granted to, in grant order.
+	pub(crate) fn granted(&self) -> Vec<usize> {
+		self.books.lock().granted.clone()
+	}
+
+	/// Whether each grant, in grant order, left its registration marked
+	/// waiting as it released the books.
+	pub(crate) fn granted_waiting(&self) -> Vec<bool> {
+		self.books.lock().granted_waiting.clone()
+	}
+}
+
+/// A registration of a [`SharedPlaces`] pool.
+struct SharedTicket {
+	pool: Arc<SharedPlaces>,
+	id: usize,
+}
+
+/// A place of a [`SharedPlaces`] pool, held for registration `id`.
+struct SharedPlace(Arc<SharedPlaces>, usize);
+
+impl Drop for SharedPlace {
+	fn drop(&mut self) {
+		let mut books = self.0.books.lock();
+		books.free += 1;
+		books.entries[self.1].held -= 1;
+	}
+}
+
+impl PlaceSource for SharedTicket {
+	fn acquire(&self, keep_waiting: bool) -> Option<Place> {
+		let mut books = self.pool.books.lock();
+		let me = self.id;
+		let held = books.entries[me].held;
+		let owed_before = books
+			.entries
+			.iter()
+			.enumerate()
+			.filter(|(id, entry)| {
+				*id != me
+					&& entry.waiting
+					&& (entry.held < held || (entry.held == held && *id < me))
+			})
+			.count();
+		if books.free <= owed_before {
+			books.entries[me].waiting = true;
+			return None;
+		}
+		books.free -= 1;
+		books.granted.push(me);
+		let entry = &mut books.entries[me];
+		entry.waiting = keep_waiting;
+		entry.held += 1;
+		entry.taken += 1;
+		let waiting = entry.waiting;
+		books.granted_waiting.push(waiting);
+		Some(Place::new(SharedPlace(Arc::clone(&self.pool), me)))
+	}
+
+	fn others_wait(&self) -> bool {
+		let books = self.pool.books.lock();
+		let held = books.entries[self.id].held;
+		books
+			.entries
+			.iter()
+			.enumerate()
+			.any(|(id, entry)| id != self.id && entry.waiting && entry.held <= held)
+	}
+
+	fn stop_waiting(&self) {
+		self.pool.books.lock().entries[self.id].waiting = false;
+	}
+
+	fn quantum(&self) -> u32 {
+		self.pool.quantum
+	}
+}
+
+/// The registration of a [`CountingPlaces`] pool.
+struct CountingTicket(Arc<CountingPlaces>);
+
+/// A place of a [`CountingPlaces`] pool.
+struct CountingPlace(Arc<CountingPlaces>);
+
+impl Drop for CountingPlace {
+	fn drop(&mut self) {
+		let mut books = self.0.books.lock();
+		books.free += 1;
+		books.held -= 1;
+	}
+}
+
+impl PlaceSource for CountingTicket {
+	fn acquire(&self, keep_waiting: bool) -> Option<Place> {
+		let mut books = self.0.books.lock();
+		if books.free == 0 {
+			books.refused += 1;
+			books.waiting = true;
+			return None;
+		}
+		books.free -= 1;
+		books.held += 1;
+		books.taken += 1;
+		books.peak = books.peak.max(books.held);
+		books.waiting = keep_waiting;
+		Some(Place::new(CountingPlace(Arc::clone(&self.0))))
+	}
+
+	fn others_wait(&self) -> bool {
+		let mut books = self.0.books.lock();
+		let check = books.checks;
+		books.checks += 1;
+		let waits = books.others_from.is_some_and(|from| check >= from);
+		if waits {
+			books.yields += 1;
+			self.0.yields.send_replace(books.yields);
+		}
+		waits
+	}
+
+	fn stop_waiting(&self) {
+		self.0.books.lock().waiting = false;
+	}
+
+	fn quantum(&self) -> u32 {
+		self.0.quantum
+	}
+}
 
 /// The process-local state an index operation runs against, minus the
 /// transaction: one of these stands in for a `Datastore` across a test.
@@ -39,6 +353,53 @@ pub(crate) struct TestIndexStore {
 	stores: IndexStores,
 	node_id: Uuid,
 	config: Arc<IdxConfig>,
+	/// The read-only transactions opened on the backend, by this store and every node over it.
+	reads_opened: Arc<AtomicUsize>,
+	/// The places every environment of this store takes its workers from.
+	places: Arc<CountingPlaces>,
+}
+
+/// A backend that counts the read-only transactions opened on it and otherwise answers as the
+/// backend it wraps.
+struct CountingBuilder {
+	inner: Box<dyn TransactionBuilder>,
+	reads_opened: Arc<AtomicUsize>,
+}
+
+impl TransactionBuilder for CountingBuilder {
+	fn name(&self) -> &'static str {
+		self.inner.name()
+	}
+
+	fn new_transaction(
+		&self,
+		write: TransactionType,
+	) -> BoxFut<'_, surrealdb_kvs::Result<(Box<dyn Transactable>, bool)>> {
+		if matches!(write, TransactionType::Read) {
+			self.reads_opened.fetch_add(1, Ordering::Relaxed);
+		}
+		self.inner.new_transaction(write)
+	}
+
+	fn shutdown(&self) -> BoxFut<'_, surrealdb_kvs::Result<()>> {
+		self.inner.shutdown()
+	}
+
+	fn register_metrics(&self) -> Option<Metrics> {
+		self.inner.register_metrics()
+	}
+
+	fn collect_u64_metric(&self, metric: &str) -> Option<u64> {
+		self.inner.collect_u64_metric(metric)
+	}
+
+	fn wait_until_serve_ready(&self) -> BoxFut<'_, surrealdb_kvs::Result<()>> {
+		self.inner.wait_until_serve_ready()
+	}
+
+	fn extension(&self, id: TypeId) -> Option<Arc<dyn Any + Send + Sync>> {
+		self.inner.extension(id)
+	}
 }
 
 impl TestIndexStore {
@@ -78,6 +439,11 @@ impl TestIndexStore {
 			.new_transaction_builder(path, Default::default(), ConfigMap::default())
 			.await
 			.unwrap();
+		let reads_opened = Arc::new(AtomicUsize::new(0));
+		let builder = Box::new(CountingBuilder {
+			inner: builder,
+			reads_opened: Arc::clone(&reads_opened),
+		});
 		let tf = TransactionFactory::new(
 			Arc::new(CommitTriggers::new()),
 			builder,
@@ -96,7 +462,15 @@ impl TestIndexStore {
 			stores,
 			node_id,
 			config: Arc::new(config),
+			reads_opened,
+			places: CountingPlaces::new(TEST_PLACES, TEST_QUANTUM),
 		}
+	}
+
+	/// How many read-only transactions have been opened on the backend so far, by this store and
+	/// by every node over it.
+	pub(crate) fn reads_opened(&self) -> usize {
+		self.reads_opened.load(Ordering::Relaxed)
 	}
 
 	/// Another datastore over this store's backend, as a second node of a
@@ -135,6 +509,8 @@ impl TestIndexStore {
 			stores,
 			node_id,
 			config: Arc::clone(config),
+			reads_opened: Arc::clone(&self.reads_opened),
+			places: CountingPlaces::new(TEST_PLACES, TEST_QUANTUM),
 		}
 	}
 
@@ -245,6 +621,10 @@ impl IndexEnv for TestIndexEnv {
 	fn config(&self) -> &IdxConfig {
 		&self.store.config
 	}
+
+	fn places(&self) -> Ticket {
+		self.store.places.ticket()
+	}
 }
 
 /// A [`TestIndexEnv`] whose cancellation checkpoint reports done on the `at`-th
@@ -347,5 +727,9 @@ impl IndexEnv for CancelAtCheckpoint {
 
 	fn config(&self) -> &IdxConfig {
 		self.inner.config()
+	}
+
+	fn places(&self) -> Ticket {
+		self.inner.places()
 	}
 }

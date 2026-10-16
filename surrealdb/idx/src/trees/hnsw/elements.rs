@@ -6,6 +6,8 @@ use surrealdb_datastore::Transaction;
 
 use crate::IndexKeyBase;
 use crate::catalog::{Distance, IndexId, TableId};
+use crate::key::{KVKey, KVValue};
+use crate::parallel::ReadView;
 use crate::trees::hnsw::ElementId;
 use crate::trees::hnsw::cache::VectorCache;
 use crate::trees::vector::{DistanceExt as _, SerializedVector, SharedVector, Vector};
@@ -44,6 +46,10 @@ impl ElementOverlay {
 /// staged batch is adding, straight from the batch, ahead of the cache and the
 /// store. That keeps those vectors out of the process-wide cache until the
 /// batch has committed.
+///
+/// A view given a read view by [`Self::reading_through`] reads every vector the
+/// overlay and the cache do not hold through that read view, and never through
+/// the transaction its callers pass.
 pub(super) struct HnswElements {
 	/// The table this index belongs to.
 	table_id: TableId,
@@ -61,6 +67,9 @@ pub(super) struct HnswElements {
 	dist: Distance,
 	/// The vectors of a staged batch, consulted before the cache and the store.
 	overlay: Option<Arc<ElementOverlay>>,
+	/// The read view stored vectors are read through in place of the caller's
+	/// transaction.
+	reads: Option<Arc<ReadView>>,
 }
 
 impl HnswElements {
@@ -81,12 +90,14 @@ impl HnswElements {
 			next_element_id: 0,
 			dist,
 			overlay: None,
+			reads: None,
 		}
 	}
 
 	/// A view of the same elements, for reads outside the graph. With an
 	/// `overlay` it also answers for a staged batch's own elements, ahead of the
-	/// cache and the store.
+	/// cache and the store. It reads stored vectors through the caller's
+	/// transaction.
 	pub(super) fn view(&self, overlay: Option<Arc<ElementOverlay>>) -> Self {
 		Self {
 			table_id: self.table_id,
@@ -97,7 +108,44 @@ impl HnswElements {
 			next_element_id: self.next_element_id,
 			dist: self.dist.clone(),
 			overlay,
+			reads: None,
 		}
+	}
+
+	/// This view, reading every stored vector through `reads` in place of the
+	/// transaction its callers pass, so callers on many tasks read through one
+	/// view rather than queueing on one transaction. The view must answer for
+	/// every vector the callers would otherwise read through their transaction.
+	pub(super) fn reading_through(mut self, reads: Arc<ReadView>) -> Self {
+		self.reads = Some(reads);
+		self
+	}
+
+	/// The stored vectors of `e_ids`, one per id in input order, read through
+	/// the read view when this has one, and through `tx` otherwise.
+	async fn read_stored(
+		&self,
+		tx: &Transaction,
+		e_ids: impl Iterator<Item = ElementId>,
+	) -> Result<Vec<Option<SerializedVector>>> {
+		let keys: Vec<_> = e_ids.map(|e_id| self.ikb.new_he_key(e_id)).collect();
+		let Some(reads) = &self.reads else {
+			return tx.get_many_key(keys, None).await;
+		};
+		let encoded = keys.iter().map(KVKey::encode_key).collect::<Result<Vec<_>>>()?;
+		let fetched = reads.get_many(&encoded).await?;
+		// A short answer would leave the trailing ids unread, silently.
+		ensure!(
+			fetched.len() == keys.len(),
+			"{} vectors read through the view for {} elements",
+			fetched.len(),
+			keys.len()
+		);
+		// A stored vector's decoding takes nothing from its key.
+		fetched
+			.into_iter()
+			.map(|val| val.map(|val| SerializedVector::kv_decode_value(&val, ())).transpose())
+			.collect()
 	}
 
 	/// Enters committed element vectors into the process-wide cache.
@@ -238,8 +286,12 @@ impl HnswElements {
 		{
 			return Ok(Some(v));
 		}
-		let key = self.ikb.new_he_key(*e_id);
-		match tx.get_key(&key, None).await? {
+		let stored = if self.reads.is_some() {
+			self.read_stored(tx, std::iter::once(*e_id)).await?.pop().flatten()
+		} else {
+			tx.get_key(&self.ikb.new_he_key(*e_id), None).await?
+		};
+		match stored {
 			None => Ok(None),
 			Some(vec) => {
 				let vec = Vector::from(vec);
@@ -313,8 +365,7 @@ impl HnswElements {
 		if misses.is_empty() {
 			return Ok(vectors);
 		}
-		let keys = misses.iter().map(|(e_id, _)| self.ikb.new_he_key(*e_id)).collect();
-		let fetched: Vec<Option<SerializedVector>> = tx.get_many_key(keys, None).await?;
+		let fetched = self.read_stored(tx, misses.iter().map(|(e_id, _)| *e_id)).await?;
 		// A short answer would leave the trailing misses unread, silently.
 		ensure!(
 			fetched.len() == misses.len(),

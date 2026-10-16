@@ -8,7 +8,9 @@ use crate::env::IndexEnv;
 use crate::key::schema::{IndexCountKey, IndexCountPrefix};
 use crate::key::{KVKeyDecode, Resumable, TypedRange};
 use crate::val::TableName;
-use crate::{IndexKeyBase, bump_compaction_generation, read_compaction_generation};
+use crate::{
+	CompactionApply, IndexKeyBase, bump_compaction_generation, read_compaction_generation,
+};
 
 pub struct IndexCountThingIterator {
 	range: Option<TypedRange<()>>,
@@ -197,12 +199,12 @@ impl IndexCountThingIterator {
 		ikb: &IndexKeyBase,
 		txn: &Transaction,
 		plan: IndexCountCompactionPlan,
-	) -> Result<bool> {
+	) -> Result<CompactionApply> {
 		if !plan.has_work() {
-			return Ok(false);
+			return Ok(CompactionApply::Empty);
 		}
 		if !bump_compaction_generation(txn, &ikb.new_iv_key(), plan.generation).await? {
-			return Ok(false);
+			return Ok(CompactionApply::LostRace);
 		}
 		for key in plan.keys.iter() {
 			txn.del_key(key).await?;
@@ -220,7 +222,7 @@ impl IndexCountThingIterator {
 			count,
 		};
 		txn.set_key(&compact_key, &()).await?;
-		Ok(true)
+		Ok(CompactionApply::Applied)
 	}
 
 	#[cfg(test)]
@@ -397,7 +399,10 @@ mod tests {
 
 		{
 			let tx = ds.transaction(Write).await.unwrap();
-			assert!(IndexCountThingIterator::apply_compaction(&ikb, &tx, plan).await.unwrap());
+			assert_eq!(
+				IndexCountThingIterator::apply_compaction(&ikb, &tx, plan).await.unwrap(),
+				CompactionApply::Applied
+			);
 			tx.commit().await.unwrap();
 		}
 
@@ -447,7 +452,10 @@ mod tests {
 
 		{
 			let tx = ds.transaction(Write).await.unwrap();
-			assert!(IndexCountThingIterator::apply_compaction(&ikb, &tx, plan).await.unwrap());
+			assert_eq!(
+				IndexCountThingIterator::apply_compaction(&ikb, &tx, plan).await.unwrap(),
+				CompactionApply::Applied
+			);
 			tx.commit().await.unwrap();
 		}
 
@@ -475,7 +483,10 @@ mod tests {
 
 		{
 			let tx = ds.transaction(Write).await.unwrap();
-			assert!(IndexCountThingIterator::apply_compaction(&ikb, &tx, plan).await.unwrap());
+			assert_eq!(
+				IndexCountThingIterator::apply_compaction(&ikb, &tx, plan).await.unwrap(),
+				CompactionApply::Applied
+			);
 			tx.commit().await.unwrap();
 		}
 
@@ -529,12 +540,19 @@ mod tests {
 
 		{
 			let tx = ds.transaction(Write).await.unwrap();
-			assert!(IndexCountThingIterator::apply_compaction(&ikb, &tx, plan1).await.unwrap());
+			assert_eq!(
+				IndexCountThingIterator::apply_compaction(&ikb, &tx, plan1).await.unwrap(),
+				CompactionApply::Applied
+			);
 			tx.commit().await.unwrap();
 		}
 		{
 			let tx = ds.transaction(Write).await.unwrap();
-			assert!(!IndexCountThingIterator::apply_compaction(&ikb, &tx, plan2).await.unwrap());
+			assert_eq!(
+				IndexCountThingIterator::apply_compaction(&ikb, &tx, plan2).await.unwrap(),
+				CompactionApply::LostRace,
+				"a plan read before the first apply committed must lose the race"
+			);
 			tx.cancel().await.unwrap();
 		}
 

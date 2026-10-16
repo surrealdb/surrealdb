@@ -1766,11 +1766,20 @@ pub(crate) enum StoreInstr {
 	/// When `fresh`, the index is created by this transaction, and its build
 	/// state is removed if the transaction rolls back; a rebuilt index keeps
 	/// the state of the generation it had.
+	///
+	/// A blocking rebuild is awaited after the transaction commits wherever the
+	/// transaction's owner offers that. So is a blocking fresh definition that
+	/// carries `prior` — the definition it replaces and the table's definition
+	/// as the statement found it, each NONE when absent — unless it replaces
+	/// an index or its statement creates the table: those are awaited inside
+	/// the transaction, so the replacement stays one commit and a failed build
+	/// rolls the new table back with the definition.
 	BuildIndex {
 		table: Reg,
 		index: Reg,
 		blocking: bool,
 		fresh: bool,
+		prior: Option<(Reg, Reg)>,
 	},
 	/// Evict the process's loaded state for the index defined in `index`, of
 	/// the table defined in `table`, and abort a local build of it once the

@@ -64,6 +64,15 @@ impl Ddl<'_, '_> {
 		let (ns, db, database) = self.selected_ids(StatementError::DbNotFound)?;
 		let (ns_op, db_op) = (Operand::Reg(ns), Operand::Reg(db));
 		let tb_key = self.object(&[("ns", ns_op), ("db", db_op), ("tb", tb)])?;
+		// The table as the statement finds it, NONE when the statement creates it: where the
+		// build is awaited depends on it (`BuildIndex`).
+		let prior_table = self.reg()?;
+		self.store(StoreInstr::Get {
+			route: RouteId::named("TableKey"),
+			key: tb_key,
+			ty: TypeId::named("StoredTableDefinition"),
+			dst: prior_table,
+		});
 		let table_def = self.table_creating((ns, db, database), tb, tb_key)?;
 		self.store(StoreInstr::RefuseLightweight {
 			table: table_def,
@@ -246,6 +255,7 @@ impl Ddl<'_, '_> {
 			index: definition,
 			blocking: !concurrently,
 			fresh: true,
+			prior: Some((existing, prior_table)),
 		});
 		self.answer_none()
 	}

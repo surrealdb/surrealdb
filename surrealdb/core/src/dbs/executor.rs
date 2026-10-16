@@ -8,9 +8,10 @@ use std::time::Duration;
 
 use anyhow::{Result, anyhow, bail};
 use async_channel::Sender;
+use futures::channel::oneshot;
 use futures::{Stream, StreamExt};
 use rand::Rng;
-use surrealdb_datastore::close::{AfterCommitWait, AfterCommitWaits, CommitAction};
+use surrealdb_datastore::close::{AfterCommitDeadline, AfterCommitWaits, CommitAction};
 use surrealdb_expr::parser::TopLevelExpr;
 use surrealdb_strand::Strand;
 use surrealdb_types::{Error as TypesError, QueryError, ToSql};
@@ -752,6 +753,11 @@ pub struct Executor {
 	/// Where the program of a top-level statement records the changes it makes
 	/// to this session, which [`Executor::apply_session_effects`] applies.
 	session_sink: Arc<crate::exec::context::SessionSink>,
+	/// A statement whose slow-log check waits for the work its transaction
+	/// leaves for after the commit, with the logical form that supplies its
+	/// parameters (see [`Executor::run_on_streaming_engine`]). Taken by
+	/// [`Executor::execute_plan_impl`] once that work has settled.
+	slow_log_after_commit: Option<(TopLevelStatement, LogicalOp)>,
 }
 
 /// What a request's statement needs to be compiled with the rest of the
@@ -1181,6 +1187,17 @@ impl Executor {
 		Some(prepared)
 	}
 
+	/// Commit a statement's own transaction ([`commit_statement`]), then flush the
+	/// live-query notifications it buffered. Notifications go out only once the
+	/// write is durable; a failed commit drops them undelivered.
+	async fn commit_and_flush(txn: &Transaction, receiver: Option<PreparedBroker>) -> Result<()> {
+		commit_statement(txn).await?;
+		if let Some(prepared) = receiver {
+			flush_live_query_notifications(prepared);
+		}
+		Ok(())
+	}
+
 	#[inline]
 	fn clear_broker(&mut self) {
 		let Some(ctx) = Arc::get_mut(&mut self.ctx) else {
@@ -1228,6 +1245,7 @@ impl Executor {
 			request_rejection: None,
 			let_undo: LetUndo::default(),
 			session_sink: Arc::default(),
+			slow_log_after_commit: None,
 		}
 	}
 
@@ -2153,9 +2171,17 @@ impl Executor {
 					self.execute_operator_plan(plan, Arc::clone(&txn), stream_rows).await;
 				// Statement rendering redacts credentials in every nested position;
 				// the plan supplies the parameters referenced by the statement.
+				// A statement whose transaction accepts after-commit waits is
+				// slow-logged once that work has settled, by
+				// `execute_plan_impl`: its caller waits for that work too, so
+				// the time it takes is part of the statement's.
 				if let (Some(op), Some(expr)) = (logged, logged_expr) {
 					let statement = TopLevelStatement::Ast(TopLevelExpr::Expr(expr));
-					self.check_slow_log(start, &statement, &PlanParams(&op));
+					if txn.accepts_after_commit_waits() {
+						self.slow_log_after_commit = Some((statement, op));
+					} else {
+						self.check_slow_log(start, &statement, &PlanParams(&op));
+					}
 				}
 				exec_result
 			}
@@ -2787,6 +2813,11 @@ impl Executor {
 		if let Some(memory) = self.ctx.memory() {
 			memory.transaction_ended();
 		}
+		// Whichever way the statement ended, the work it left for after its
+		// commit has settled by now.
+		if let Some((statement, op)) = self.slow_log_after_commit.take() {
+			self.check_slow_log(start, &statement, &PlanParams(&op));
+		}
 		result
 	}
 
@@ -2950,11 +2981,11 @@ impl Executor {
 			.await?
 			.with_tenant_identity(self.ctx.tenant_identity().cloned())
 			.with_write_keys_limit(kvs.transaction_max_write_keys());
-		// A blocking `REBUILD INDEX` commits its catalog change first and its
-		// build is awaited below, once the commit has applied: the build commits
-		// far more writes than a transaction can stay open across on an
-		// optimistic storage engine. Any other statement leaves nothing for after
-		// its commit, and pays nothing for the queue.
+		// A standalone blocking `DEFINE INDEX` or `REBUILD INDEX` commits its
+		// catalog change first and its build is awaited below, once the commit
+		// has applied: the build commits far more writes than a transaction can
+		// stay open across on an optimistic storage engine. Any other statement
+		// leaves nothing for after its commit, and pays nothing for the queue.
 		let after_commit = stmt.awaits_its_build_after_commit().then(AfterCommitWaits::default);
 		let txn = Arc::new(match &after_commit {
 			Some(waits) => txn.with_after_commit_waits(waits),
@@ -3019,23 +3050,91 @@ impl Executor {
 					return Err(e);
 				}
 
-				commit_statement(&txn).await?;
-
-				// Flush buffered notifications only after the write is durable. Failed commits and
-				// cancelled transactions drop the receiver without delivery.
-				if let Some(prepared) = receiver {
-					flush_live_query_notifications(prepared);
+				let Some(waits) = after_commit else {
+					Self::commit_and_flush(&txn, receiver).await?;
+					return Ok(value);
+				};
+				// Taken before the commit: a commit that definitely failed
+				// discards them unrun, as it would discard the queue. A statement that queued
+				// nothing — an `IF NOT EXISTS` that found its index — commits as any
+				// other does.
+				let waits = waits.take().await;
+				if waits.is_empty() {
+					Self::commit_and_flush(&txn, receiver).await?;
+					return Ok(value);
 				}
-
+				// Past this point the commit is followed by a wait that can only
+				// compensate for it, so a query that has already timed out or
+				// been cancelled is answered by cancelling the transaction
+				// instead: its build is then aborted by the rollback.
+				if let Err(e) = self.bail_if_done() {
+					// The timeout or cancellation is what the statement reports.
+					// The transaction never commits on this path, so a cancel
+					// that fails publishes none of its writes, and its own error
+					// would only mask that one.
+					let _ = txn.cancel().await;
+					return Err(e);
+				}
 				// The statement's result is not settled until the work it left for
 				// after the commit is: a blocking build that fails fails the
-				// statement.
-				if let Some(waits) = after_commit {
-					for wait in waits.take().await {
-						self.await_after_commit(kvs, wait, budget).await?;
+				// statement. What that work owes once the commit has applied — the
+				// removal of a failed build's definition — must not depend on this
+				// statement's caller still waiting, so the commit and everything
+				// after it run on a task of their own, and each wait enforces its
+				// own deadline (see `after_commit_bound`). A caller that stops
+				// waiting, at any point, stops hearing the outcome and nothing else.
+				let bound = self.after_commit_bound(kvs, *budget);
+				let waiting = Instant::now();
+				let (outcome, settled) = oneshot::channel();
+				// A commit whose outcome is unknown may have applied, and with it
+				// the builds the waits stand for, which go on as the definitions
+				// they build committed. Its waits still run, for what they owe a
+				// commit that applied: each settles against what is durably
+				// recorded, and takes back nothing a commit that did not apply
+				// left. The statement reports the commit's error at once, and
+				// what the waits come to is only logged.
+				common::rt::spawn_detached(async move {
+					let deadline = |bound: Option<(Duration, Duration)>| {
+						bound.map(|(after, timeout)| AfterCommitDeadline {
+							timeout,
+							at: Instant::now() + after,
+						})
+					};
+					if let Err(err) = Self::commit_and_flush(&txn, receiver).await {
+						let indeterminate = crate::kvs::is_indeterminate_commit(&err);
+						// The caller may no longer be waiting for the outcome.
+						let _ = outcome.send(Err(err));
+						if indeterminate {
+							let deadline = deadline(bound);
+							for wait in waits {
+								if let Err(err) = wait.wait(deadline).await {
+									warn!(
+										error = %err,
+										"a wait after a commit of unknown outcome ended with an error"
+									);
+								}
+							}
+						}
+						return;
 					}
+					let result: Result<()> = async {
+						let deadline = deadline(bound);
+						for wait in waits {
+							wait.wait(deadline).await?;
+						}
+						Ok(())
+					}
+					.await;
+					// The caller may no longer be waiting for the outcome.
+					let _ = outcome.send(result);
+				});
+				let result = settled.await;
+				if let Some(left) = budget.as_mut() {
+					*left = left.saturating_sub(waiting.elapsed());
 				}
-
+				result.map_err(|_| {
+					EngineError::unreachable("the commit of a statement stopped without an outcome")
+				})??;
 				Ok(value)
 			}
 			Err(ControlFlow::Continue) | Err(ControlFlow::Break) => {
@@ -3078,58 +3177,29 @@ impl Executor {
 		true
 	}
 
-	/// Await `wait`, work a statement left for after its commit, for no longer
-	/// than what remains of `budget` and of the query's deadline, and only
-	/// while the query is not cancelled. The time waited is taken from
-	/// `budget`.
+	/// How long the work a statement left for after its commit may be waited
+	/// for: no longer than what remains of `budget` and of the query's
+	/// deadline, whichever is sooner, paired with the timeout to report should
+	/// it run out — the configured transaction timeout for the request's
+	/// budget, the query's own timeout for its deadline. Settled here rather
+	/// than read back from the clock once the timer fires, which cannot tell
+	/// two bounds apart that end close together. `None` when neither applies.
 	///
-	/// The statement has committed by the time this runs, and the work carries
-	/// on in the background once nothing waits for it. Running out of time is
-	/// therefore reported as [`DatastoreError::IndexBuildOutlastedTimeout`],
-	/// naming the timeout that ran out, and cancellation as
-	/// [`DatastoreError::IndexBuildWaitCancelled`]: never as a transaction or
-	/// query that did not complete.
-	async fn await_after_commit(
+	/// The commit spends none of it: the bound starts once the commit has
+	/// applied. The query's cancellation ends the wait too, which the work
+	/// notices through the statement's context.
+	fn after_commit_bound(
 		&self,
 		kvs: &Datastore,
-		wait: Box<dyn AfterCommitWait>,
-		budget: &mut Option<Duration>,
-	) -> Result<()> {
-		// The sooner of the two bounds applies, paired with the timeout to
-		// report should it run out: the configured transaction timeout for the
-		// request's budget, the query's own timeout for its deadline. Settled
-		// here rather than read back from the clock once the timer fires, which
-		// cannot tell two bounds apart that end close together.
+		budget: Option<Duration>,
+	) -> Option<(Duration, Duration)> {
 		let query = self.ctx.timeout().zip(self.ctx.deadline_timeout());
 		let transaction = |left: Duration| (left, kvs.transaction_timeout().unwrap_or(left));
-		let bound = match (*budget, query) {
+		match (budget, query) {
 			(Some(left), Some((until, _))) if left <= until => Some(transaction(left)),
 			(_, Some(query)) => Some(query),
 			(Some(left), None) => Some(transaction(left)),
 			(None, None) => None,
-		};
-		let waiting = Instant::now();
-		let waited = async {
-			match bound {
-				Some((after, timeout)) => {
-					common::time::timeout(after, wait.wait()).await.map_err(|_| timeout)
-				}
-				None => Ok(wait.wait().await),
-			}
-		};
-		let outcome = match self.ctx.cancel_token() {
-			Some(token) => tokio::select! {
-				outcome = waited => outcome,
-				_ = token.cancelled() => bail!(DatastoreError::IndexBuildWaitCancelled),
-			},
-			None => waited.await,
-		};
-		if let Some(left) = budget.as_mut() {
-			*left = left.saturating_sub(waiting.elapsed());
-		}
-		match outcome {
-			Ok(result) => result,
-			Err(timeout) => bail!(DatastoreError::IndexBuildOutlastedTimeout(timeout.into())),
 		}
 	}
 

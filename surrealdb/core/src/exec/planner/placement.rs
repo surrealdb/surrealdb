@@ -678,6 +678,12 @@ impl Policy {
 		self.oltp_reserve
 	}
 
+	/// The quanta a worker holds a place for before it checks whether another
+	/// statement waits for one; at least one.
+	pub(crate) fn place_quantum(self) -> u32 {
+		self.place_quantum.max(1)
+	}
+
 	/// The output bytes a morsel that is not at the front holds before it parks.
 	#[cfg_attr(target_family = "wasm", allow(dead_code))]
 	pub(crate) fn window_bytes(self) -> usize {

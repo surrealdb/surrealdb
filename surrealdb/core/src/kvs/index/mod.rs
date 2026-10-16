@@ -29,6 +29,7 @@
 //! code paths, but new writes use the durable queue.
 
 mod admission;
+mod after_commit;
 mod builder;
 mod replay;
 mod state;
@@ -38,7 +39,10 @@ mod tests;
 
 use std::time::Duration;
 
-pub(crate) use builder::{AbortLocalBuild, CleanUncommittedBuild, IndexBuilder, IndexMutation};
+pub(crate) use after_commit::RemoveFailedDefinition;
+pub(crate) use builder::{
+	AbortLocalBuild, BuildCompletion, CleanUncommittedBuild, IndexBuilder, IndexMutation,
+};
 pub(crate) use state::{build_owner_is_live, build_owner_is_live_locked, filter_online_indexes};
 // Only the frozen-fixture corpus names this directly; the builder reaches a
 // primary appending through its ticket.

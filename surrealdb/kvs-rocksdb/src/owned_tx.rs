@@ -3,7 +3,8 @@
 
 use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering, fence};
+use std::sync::{Arc, Weak};
 
 use rocksdb::{
 	DBRawIteratorWithThreadMode, OptimisticTransactionDB, OptimisticTransactionOptions,
@@ -35,7 +36,7 @@ impl Db {
 		#[allow(clippy::arc_with_non_send_sync)]
 		OwnedTx(Arc::new(CommitTx {
 			tx,
-			notify: Arc::new(Notify::new()),
+			signal: Arc::new(CloseSignal::default()),
 			db: self.clone(),
 		}))
 	}
@@ -82,6 +83,22 @@ impl OwnedTxHandle {
 			_keep_alive: self.keep_alive,
 		}
 	}
+
+	/// Read `keys` from the database in one batch under `opt`, consuming the handle once the
+	/// read is done. The handle's keep-alive holds the transaction, and so the snapshot `opt`
+	/// names, for exactly as long as the read, so `opt` may carry that snapshot without the
+	/// transaction's mutex being held.
+	pub fn multi_get_opt<K, I>(
+		self,
+		keys: I,
+		opt: &ReadOptions,
+	) -> Vec<Result<Option<Vec<u8>>, rocksdb::Error>>
+	where
+		K: AsRef<[u8]>,
+		I: IntoIterator<Item = K>,
+	{
+		self.db.0.multi_get_opt(keys, opt)
+	}
 }
 
 impl Deref for Db {
@@ -99,9 +116,27 @@ pub struct CommitTx {
 	tx: Transaction<'static, OptimisticTransactionDB>,
 	/// Owned reference to the database to ensure it reains alive while the transaction is alive.
 	db: Db,
-	// Needs to be an arc as we need to drop the arc to CommitTx before using the notifier.
-	/// notification struct to be able to wait until we have sole ownership of the transaction.
-	notify: Arc<Notify>,
+	// Needs to be an arc as a borrow drops its arc to CommitTx before it reads the signal.
+	/// How [`OwnedTx::into_inner`] waits until it has sole ownership of the transaction.
+	signal: Arc<CloseSignal>,
+}
+
+/// What [`OwnedTx::into_inner`] waits on, and how a borrow tells it the transaction has been
+/// released.
+///
+/// `closing` is set once, by `into_inner`, before it first tries to take sole ownership. From
+/// then on no [`WeakTx`] hands out a new borrow, and a borrow that drops wakes the waiter. A
+/// borrow that drops before `closing` is set wakes nobody: no one waits yet, and the count it
+/// released is what `into_inner`'s first attempt reads.
+///
+/// Both sides order the store or load of `closing` against the transaction's reference count with
+/// a sequentially consistent fence: `into_inner` stores `closing`, then reads the count; a borrow
+/// releases its count, then loads `closing`. So a borrow that misses `closing` released its count
+/// before `into_inner` read it, and `into_inner` never waits for a wake-up nobody sends.
+#[derive(Default)]
+struct CloseSignal {
+	notify: Notify,
+	closing: AtomicBool,
 }
 
 impl CommitTx {
@@ -136,15 +171,56 @@ unsafe impl Sync for OwnedTxBorrow {}
 
 impl Drop for OwnedTxBorrow {
 	fn drop(&mut self) {
-		let notify = Arc::clone(&self.0.notify);
+		let signal = Arc::clone(&self.0.signal);
 		// Drop before notifying to ensure the reference count is decrement before the commit waiter
 		// is woken up.
 		// Safety: Safe as this and above are the only places this field is accessed.
 		// Afterwards it is no longer accessed.
 		unsafe { ManuallyDrop::drop(&mut self.0) };
 
-		// Notify a possibly waiting commit that it might be able to continue.
-		notify.notify_one();
+		// Wake a commit waiting for sole ownership, only once one may wait (see `CloseSignal`).
+		fence(Ordering::SeqCst);
+		if signal.closing.load(Ordering::Relaxed) {
+			signal.notify.notify_one();
+		}
+	}
+}
+
+/// A handle on a transaction that does not keep it alive, from which a reader takes a keep-alive
+/// of its own for each read without the transaction's mutex.
+///
+/// [`Self::handle`] gives a keep-alive while the transaction is alive and no commit or cancel has
+/// begun to wait for sole ownership of it ([`OwnedTx::into_inner`]), and `None` from then on. So
+/// a read through it either holds the transaction alive until the read ends, which the commit or
+/// cancel then waits for, or does not start; and readers arriving without end cannot keep a commit
+/// or cancel waiting.
+pub struct WeakTx {
+	db: Db,
+	tx: Weak<CommitTx>,
+}
+
+// Safety: as for `OwnedTxBorrow`, a `WeakTx` gives no access to the `CommitTx`; it only produces
+// borrows, which may cross threads.
+unsafe impl Send for WeakTx {}
+// Safety: nothing can be done through a shared `WeakTx` but upgrade it to a borrow.
+unsafe impl Sync for WeakTx {}
+
+impl WeakTx {
+	/// A keep-alive on the transaction, or `None` once it is finishing or gone.
+	pub fn handle(&self) -> Option<OwnedTxHandle> {
+		let strong = self.tx.upgrade()?;
+		let keep_alive = OwnedTxBorrow(ManuallyDrop::new(strong));
+		// Pairs with the fence in `into_inner`: a borrow that misses `closing` here was counted
+		// before `into_inner` read the count, which then waits for it.
+		fence(Ordering::SeqCst);
+		if keep_alive.0.signal.closing.load(Ordering::Relaxed) {
+			// Dropping the borrow wakes the waiter, which counted it.
+			return None;
+		}
+		Some(OwnedTxHandle {
+			db: self.db.clone(),
+			keep_alive,
+		})
 	}
 }
 
@@ -159,6 +235,15 @@ impl OwnedTx {
 	/// Returns the associated database
 	pub fn db(&self) -> &Db {
 		&self.0.db
+	}
+
+	/// A handle that takes keep-alives on this transaction later, without its mutex. See
+	/// [`WeakTx`].
+	pub fn weak(&self) -> WeakTx {
+		WeakTx {
+			db: self.0.db.clone(),
+			tx: Arc::downgrade(&self.0),
+		}
 	}
 
 	/// Take an owned handle that keeps this transaction alive and can build a
@@ -196,7 +281,13 @@ impl OwnedTx {
 	}
 
 	/// Wait until we can take sole ownership of the transaction and then return it.
+	///
+	/// From the first attempt on, no [`WeakTx`] hands out a new keep-alive, so only the borrows
+	/// alive then are waited for.
 	pub async fn into_inner(mut self) -> CommitTx {
+		// Pairs with the fences in `OwnedTxBorrow::drop` and `WeakTx::handle` (see `CloseSignal`).
+		self.0.signal.closing.store(true, Ordering::Relaxed);
+		fence(Ordering::SeqCst);
 		// We are dropping the transaction so we need to wait until all cursors are done.
 		loop {
 			match Arc::try_unwrap(self.0) {
@@ -205,7 +296,7 @@ impl OwnedTx {
 					self.0 = e;
 				}
 			}
-			self.0.notify.notified().await
+			self.0.signal.notify.notified().await
 		}
 	}
 

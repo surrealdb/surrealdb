@@ -11,6 +11,10 @@
 //! that supplies it. Everything the trait hands back already lives at or below
 //! this layer.
 //!
+//! The environment also says whose places the operation's parallel work takes
+//! ([`IndexEnv::places`]), so the engines draw their workers from the node's
+//! pool without naming it.
+//!
 //! Passed as `&dyn IndexEnv` rather than a generic parameter: the engines are
 //! deep async call chains and monomorphising them over the environment would
 //! duplicate every one of those state machines per implementation.
@@ -27,6 +31,7 @@ use uuid::Uuid;
 
 use crate::catalog::providers::CancellationProbe;
 use crate::config::IdxConfig;
+use crate::places::Ticket;
 use crate::trees::store::IndexStores;
 
 /// A boxed future returned by [`IndexEnv::is_done`].
@@ -77,6 +82,10 @@ pub trait IndexEnv: CancellationProbe {
 
 	/// The index engines' own configuration.
 	fn config(&self) -> &IdxConfig;
+
+	/// The ticket this operation's parallel work takes its places through:
+	/// the registration its workers are counted against in the node's pool.
+	fn places(&self) -> Ticket;
 }
 
 /// Forwards through an `Arc`, so a caller holding the environment behind one —
@@ -106,6 +115,10 @@ impl<T: IndexEnv> IndexEnv for Arc<T> {
 
 	fn config(&self) -> &IdxConfig {
 		T::config(self)
+	}
+
+	fn places(&self) -> Ticket {
+		T::places(self)
 	}
 }
 

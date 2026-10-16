@@ -81,8 +81,20 @@ impl TopLevelStatement {
 		}
 	}
 
-	/// Whether this statement is a blocking `REBUILD INDEX`, whose build the
-	/// transaction of its own awaits after committing.
+	/// Whether this statement can run inside a read-only transaction. See
+	/// [`TopLevelExpr::read_only`] for the one-sided contract
+	/// the predicate upholds; [`LogicalOp::read_only`] upholds the same one
+	/// for a plan.
+	pub(crate) fn read_only(&self) -> bool {
+		match self {
+			TopLevelStatement::Ast(stmt) => stmt.read_only(),
+			TopLevelStatement::Plan(op) => op.read_only(),
+			TopLevelStatement::Surreal(stmt) => stmt.plan.read_only(),
+		}
+	}
+
+	/// Whether this statement is a blocking `DEFINE INDEX` or `REBUILD INDEX`
+	/// whose build the transaction of its own awaits after committing.
 	///
 	/// A blocking build commits writes of its own in unbounded number, and a
 	/// transaction held open across them ages past what an optimistic storage
@@ -94,29 +106,37 @@ impl TopLevelStatement {
 	/// transaction with nothing else in it stays atomic. This is decided here,
 	/// from the statement, rather than by offering every transaction a queue:
 	/// the instruction that queues a build cannot tell whether anything follows
-	/// it. `REBUILD` always reaches the executor in this surface form. A
-	/// `REBUILD INDEX` evaluates nothing — its index and table are names — and
-	/// has no definition to take back should the build fail: the index is left
-	/// in `Error` for the next `REBUILD INDEX` to retry, as a failed
-	/// `CONCURRENTLY` build leaves it.
+	/// it. For the same reason a `DEFINE INDEX` whose name, table, fields or
+	/// comment run anything when evaluated is excluded: whatever that writes
+	/// would commit ahead of a build that may still fail. See
+	/// [`evaluates_inertly`] for why that is decided on the operand's shape.
+	/// Both statements always reach the executor in this surface form.
+	///
+	/// This only offers the statement the queue. Whether a `DEFINE INDEX`
+	/// takes it is decided where the statement runs, from what it finds there
+	/// (see `StoreInstr::BuildIndex`): one that replaces an existing index, or
+	/// that creates its table, waits inside its transaction whatever its
+	/// `OVERWRITE` or `IF NOT EXISTS`, and one that defines a new index on an
+	/// existing table waits after the commit whatever them. A statement that
+	/// queues nothing commits as any other does. The `COUNT` condition is not
+	/// an operand here: the statement stores it unevaluated, and only the
+	/// build and later writes run it.
 	pub(crate) fn awaits_its_build_after_commit(&self) -> bool {
 		match self {
+			TopLevelStatement::Ast(TopLevelExpr::Expr(expr::Expr::Define(stmt))) => match &**stmt {
+				expr::statements::DefineStatement::Index(ix) => {
+					!ix.concurrently
+						&& evaluates_inertly(&ix.name)
+						&& evaluates_inertly(&ix.what)
+						&& evaluates_inertly(&ix.comment)
+						&& ix.cols.iter().all(evaluates_inertly)
+				}
+				_ => false,
+			},
 			TopLevelStatement::Ast(TopLevelExpr::Expr(expr::Expr::Rebuild(stmt))) => {
 				matches!(&**stmt, expr::statements::RebuildStatement::Index(ix) if !ix.concurrently)
 			}
 			_ => false,
-		}
-	}
-
-	/// Whether this statement can run inside a read-only transaction. See
-	/// [`TopLevelExpr::read_only`] for the one-sided contract
-	/// the predicate upholds; [`LogicalOp::read_only`] upholds the same one
-	/// for a plan.
-	pub(crate) fn read_only(&self) -> bool {
-		match self {
-			TopLevelStatement::Ast(stmt) => stmt.read_only(),
-			TopLevelStatement::Plan(op) => op.read_only(),
-			TopLevelStatement::Surreal(stmt) => stmt.plan.read_only(),
 		}
 	}
 
@@ -151,6 +171,43 @@ impl TopLevelStatement {
 	/// transport whether the returned id names a new subscription.
 	pub(crate) fn query_type(&self) -> QueryType {
 		query_type(self.statement_type())
+	}
+}
+
+/// Whether evaluating `operand` runs nothing that could write: a scalar literal,
+/// a parameter, a constant, a table name, or a field path.
+///
+/// [`TopLevelExpr::read_only`] is not enough here. It takes a builtin call whose
+/// arguments only read for a call that only reads, but a builtin that calls a
+/// closure it is handed — `array::map([0], $f)` — runs a body the syntax
+/// cannot see. So an operand that calls anything counts as one that may
+/// write, and costs its statement only the wait inside its transaction.
+fn evaluates_inertly(operand: &expr::Expr) -> bool {
+	match operand {
+		expr::Expr::Param(_) | expr::Expr::Table(_) | expr::Expr::Constant(_) => true,
+		expr::Expr::Literal(literal) => matches!(
+			literal,
+			expr::Literal::None
+				| expr::Literal::Null
+				| expr::Literal::Bool(_)
+				| expr::Literal::Float(_)
+				| expr::Literal::Integer(_)
+				| expr::Literal::Decimal(_)
+				| expr::Literal::Duration(_)
+				| expr::Literal::String(_)
+				| expr::Literal::Datetime(_)
+				| expr::Literal::Uuid(_)
+		),
+		expr::Expr::Idiom(idiom) => idiom.0.iter().all(|part| match part {
+			expr::Part::Field(_)
+			| expr::Part::All
+			| expr::Part::Flatten
+			| expr::Part::First
+			| expr::Part::Last => true,
+			expr::Part::Start(part) | expr::Part::Value(part) => evaluates_inertly(part),
+			_ => false,
+		}),
+		_ => false,
 	}
 }
 

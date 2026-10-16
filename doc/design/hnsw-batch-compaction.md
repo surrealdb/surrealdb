@@ -232,37 +232,71 @@ the build.
 
 ## Parallelism
 
-Steps 1 and 2 run through `parallel::run_jobs`: tokio tasks spawned onto the
-current runtime, each holding a shared owned read guard on the graph, the
-batch's own elements, and the write transaction. Jobs are handed out one at a
-time, results come back in job order, a failing job fails the batch, a
-panicking one resumes its panic on the caller, and dropping the apply aborts
-the tasks. One process-wide gate bounds the jobs running at once to the
-machine's available parallelism, because background maintenance compacts
-every index with outstanding work at the same time.
+Steps 1 and 2 run through `parallel::run_jobs`: the applying task and tokio
+tasks spawned onto the current runtime, each holding a shared owned read guard
+on the graph, the batch's own elements, and the write transaction. Jobs are
+handed out one at a time, results come back in job order, a failing job fails
+the batch, a panicking one resumes its panic on the caller, and dropping the
+apply aborts the tasks.
 
-The number of tasks per batch is `hnsw_build_parallelism`
-(`SURREAL_HNSW_BUILD_PARALLELISM`): `auto` (the default) uses the machine's
-available parallelism, a number fixes the count, and `serial` selects the
-in-place path for every batch. Parallelism is a property of the machine, not
-of the index, so it is configuration rather than part of `DEFINE INDEX`.
-Without a tokio runtime to spawn onto (wasm, or an embedding that runs none),
-or with one task, the steps run inline on the applying task; the graph is the
-same.
+The spawned tasks run in places from the node's pool, the pool the query
+engine's morsel workers run in (`exec/vm/morsel/places.rs`), under the same
+OLTP reserve and the same fairness. A batch takes its places through the
+ticket its environment holds (`IndexEnv::places`): the background
+compactor's ticket, a build's, or the registration of the blocking statement
+the work belongs to, so every place is counted against that registration.
+A task is spawned only with a place already taken, and holds it across its
+jobs. After every quantum of jobs (`morsel_place_quantum`), before it claims
+another, a task checks whether another registration waits for a place; if
+one does, it gives its place back and takes no further job. The applying task
+runs jobs too, without a place, and drains whatever the tasks leave, so a
+batch whose ticket is never granted a place, or whose tasks all yield, still
+completes. No semaphore of the index engines bounds the tasks: the pool does.
+
+The most tasks per batch is `hnsw_build_parallelism`
+(`SURREAL_HNSW_BUILD_PARALLELISM`), the applying task included: `auto` (the
+default) uses the machine's available parallelism, a number fixes the most,
+and `serial` selects the in-place path for every batch. Where the datastore
+gives a read view (below), a batch runs on as many of them as it is granted
+places for; where it gives none, on one. Parallelism is a property of the
+machine, not of the index, so it is configuration rather than part of
+`DEFINE INDEX`. Without a tokio runtime to spawn onto (wasm, or an embedding
+that runs none), or with one task, the steps run inline on the applying task.
+The graph is the same whichever tasks ran its jobs, and whether places were
+granted, given back mid-batch or never granted, because each job's result is a
+function of *G₀* and the batch alone.
 
 A vector the tasks read is either an element of *G₀* — committed before the
 batch began, and immutable once committed — or one of the batch's own elements,
 served straight from the batch and never read back from the store. So a task
-never needs the batch's write transaction to read: a vector that misses the
-process-wide cache is read through a read-only snapshot the job leases from a
-pool opened alongside the batch (`parallel::SnapshotPool`), one per running
-job, reused across jobs and cancelled when the batch has been built. That
-matters because an engine that runs one transaction's operations one at a
-time — RocksDB — would otherwise queue every task's misses behind the write
-transaction, and an index larger than the vector cache misses on most reads.
-A snapshot that opens after another compactor committed can only belong to a
-batch that will fail on the `!hg` generation, so what it reads never
-publishes.
+never needs the batch's write transaction to read. Where the datastore gives a
+read view (`kvs::Snapshot`), a vector that misses the process-wide cache is
+read through one view per batch (`parallel::ReadView`): one read-only
+transaction is opened for the batch's tasks, whatever their number, its view
+is shared by all of them, and the transaction is cancelled when the batch has
+been built. The tasks read through the view's batched point reads (`get_many`),
+which run side by side: on RocksDB a point read holds the transaction's slot
+lock only to take a keep-alive, as a cursor does. That matters because an
+engine that runs one transaction's operations one at a time — RocksDB — would
+otherwise queue every task's misses behind the write transaction, and an index
+larger than the vector cache misses on most reads. The view cannot come from
+the batch's write transaction: by the time the tasks start, that transaction
+has buffered the `!hg` bump, its conditional deletes and the new elements'
+vectors, and RocksDB gives no view over buffered writes. A view taken after
+another compactor committed can only belong to a batch that will fail on the
+`!hg` generation, so what it reads never publishes.
+
+Where the datastore gives no read view to a read-only transaction — mem,
+SurrealKV, TiKV, and IndexedDB on targets without worker threads — the batch
+opens no other transaction. It still takes the staged path, never the in-place one, and its
+steps run on one task, whatever `hnsw_build_parallelism` asks for, reading
+through the batch's write transaction. That transaction reads the same vectors
+as a view would: what it has buffered for the batch is the new elements'
+vectors, which the batch's own elements answer first, and a staged batch
+rewrites no committed vector. The graph is the same, since it is a function of
+*G₀* and the batch alone. On those engines a staged batch is therefore built on
+one task until the engine gives a view; that is the cost of one read model for
+every parallel stage.
 
 The same misses fill the process-wide vector cache, which tracks per index
 which entries it holds so an index can be dropped from it at once. That

@@ -2121,6 +2121,8 @@ impl Transactable for Transaction {
 			inner: Arc::clone(&self.inner),
 			versioned: self.versioned,
 			verify_checksums: self.scan_verify_checksums,
+			inline_guard: Arc::clone(&self.inline_guard),
+			reads: Default::default(),
 		}))
 	}
 

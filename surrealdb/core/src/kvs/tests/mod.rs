@@ -15,6 +15,8 @@
 ))]
 
 #[cfg(feature = "kv-rocksdb")]
+mod blocking_index_build_test;
+#[cfg(feature = "kv-rocksdb")]
 mod blocking_rebuild_index_test;
 #[cfg(feature = "kv-mem")]
 mod caller_owned_transaction_test;

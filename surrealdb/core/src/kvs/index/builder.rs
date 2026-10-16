@@ -4,18 +4,20 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::task::{Context as TaskContext, Poll};
 use std::time::Duration;
 
 use anyhow::{Result, ensure};
 use chrono::Utc;
 use common::time::sleep;
-use futures::channel::oneshot::{Receiver, Sender, channel};
-use surrealdb_datastore::close::{AfterCommitWait, CommitAction, RollbackAction};
+use futures::channel::oneshot::{Sender, channel};
+use surrealdb_datastore::close::{CommitAction, RollbackAction};
 use tokio::sync::{Notify, OnceCell, RwLock};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 use web_time::Instant;
 
+use super::after_commit::{AwaitBuildAfterCommit, RemoveFailedDefinition};
 use super::replay::CountPrimaryProgress;
 use super::state::{
 	build_owner_expired, delete_durable_build_artifacts, delete_stale_build_queues,
@@ -28,9 +30,10 @@ use super::{
 };
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::catalog::{DatabaseId, Index, IndexDefinition, IndexId, NamespaceId, TableId};
+use crate::ctx::reason::Reason;
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
-use crate::err::Error;
+use crate::err::{EngineError, Error};
 use crate::exec::context::{NamespaceContext, RootContext};
 use crate::exec::memory::MemoryHost;
 use crate::exec::permission::{PhysicalIndexEntry, index_entry_physical};
@@ -57,6 +60,41 @@ use crate::kvs::{
 /// Matches the reservation-release pause it runs beside.
 const INDEX_BUILD_CLEANUP_RETRY_SLEEP: Duration = Duration::from_millis(100);
 
+/// How long an owned state transition waits before retrying a conflict or a
+/// missed compare-and-swap. Matches the pause of the builder's other retries.
+const BUILD_STATE_RETRY_SLEEP: Duration = Duration::from_millis(100);
+
+/// How many times a [`TransitionMode::BestEffort`] transition retries before it
+/// gives up, leaving `!bs` as it found it.
+pub(super) const BEST_EFFORT_TRANSITION_RETRIES: usize = 5;
+
+/// Writes an owned state transition stages in its transaction, after the
+/// compare-and-swap on `!bs` and before the commit, so they commit with it or
+/// not at all. A stage returns `None` when it has nothing to write, which
+/// costs no allocation.
+type StagedWrites<'t> = Option<Pin<Box<dyn Future<Output = Result<()>> + Send + 't>>>;
+
+/// The stage of a transition that writes nothing beside `!bs`.
+fn no_staged_writes(_: &Transaction) -> StagedWrites<'_> {
+	None
+}
+
+/// What an owned state transition does when it cannot apply, and how long it
+/// keeps trying.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TransitionMode {
+	/// The transition must apply. A missing `!bs` or a generation this builder
+	/// no longer owns is an error, and a conflict is retried until the
+	/// transition commits or fails otherwise.
+	Required,
+	/// The transition applies only while this builder still owns the
+	/// generation, and is otherwise a no-op that writes nothing. A conflict is
+	/// retried at most [`BEST_EFFORT_TRANSITION_RETRIES`] times, so a caller
+	/// that cannot fail — one running as a transaction's close action — is
+	/// never held for long.
+	BestEffort,
+}
+
 use crate::mem::ALLOC;
 use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
@@ -79,6 +117,31 @@ const RELEASE_GATE_OPEN: u8 = RELEASE_GATE_BUILDER | RELEASE_GATE_STATEMENT;
 /// must not be recorded as a permanent build failure.
 fn is_memory_threshold_error(err: &anyhow::Error) -> bool {
 	matches!(err.downcast_ref::<DatastoreError>(), Some(DatastoreError::QueryBeyondMemoryThreshold))
+}
+
+/// What each build a node started was lent, for the tests that check a
+/// blocking statement lends its registration to its build.
+#[cfg(test)]
+pub(super) mod lent_places {
+	use std::collections::HashMap;
+	use std::sync::{LazyLock, Mutex};
+
+	use uuid::Uuid;
+
+	/// Whether the last build of an index, by node and index name, carried
+	/// the registration of a statement waiting on it.
+	static NOTED: LazyLock<Mutex<HashMap<(Uuid, String), bool>>> = LazyLock::new(Default::default);
+
+	pub(in crate::kvs::index) fn note(node: Uuid, index: &str, lent: bool) {
+		NOTED.lock().unwrap_or_else(|e| e.into_inner()).insert((node, index.to_owned()), lent);
+	}
+
+	/// Whether the last build of `index` on `node` carried a lent
+	/// registration, or `None` when no build of it started; the note is
+	/// taken.
+	pub(in crate::kvs::index) fn take(node: Uuid, index: &str) -> Option<bool> {
+		NOTED.lock().unwrap_or_else(|e| e.into_inner()).remove(&(node, index.to_owned()))
+	}
 }
 
 /// Probe the initial-batch commit injection sites, so tests can fail the
@@ -137,6 +200,136 @@ enum BuildStart {
 	RemoteOwner(IndexBuilding),
 }
 
+/// Why the query a blocking statement waits for its build in has ended, if it
+/// has: cancelled, or past its own deadline.
+///
+/// Memory pressure is not a reason. A statement waiting for a build holds
+/// none of the memory the build uses, and the build carries on whatever the
+/// statement does: ending the wait would only report a failure, or remove a
+/// definition, over a build that is proceeding normally, whether on this node
+/// or another. So this makes the shallow check — the cancellation flags and
+/// token — and reads the query's deadline directly, which a context inherits
+/// from its parent and only ever tightens, rather than the deep check that
+/// also measures memory.
+pub(super) fn query_ended(ctx: &Context) -> Option<Reason> {
+	if ctx.cancel_token().is_some_and(|token| token.is_cancelled())
+		|| matches!(ctx.done(false), Ok(Some(Reason::Canceled)))
+	{
+		return Some(Reason::Canceled);
+	}
+	match (ctx.timeout(), ctx.deadline_timeout()) {
+		(Some(left), Some(timeout)) if left.is_zero() => Some(Reason::Timedout(timeout.into())),
+		_ => None,
+	}
+}
+
+/// A build a blocking statement started, resolving with the outcome the
+/// statement reports once the build has finished.
+///
+/// Independent of the statement's transaction: it holds nothing of it, so a
+/// statement can let its transaction commit first and await this afterwards.
+///
+/// A build that has published its generation `Online` resolves `Ok`, whatever
+/// the rest of it does. The index is complete and queryable from the publish
+/// on: what a build does after it only folds the writes queued during the build
+/// into the index, and readers see those writes until background compaction
+/// folds them, once the build has released its ownership. [`Self::is_online`]
+/// reports the publish while that work is still running, for a waiter that
+/// stops waiting before the build finishes.
+pub(crate) struct BuildCompletion {
+	building: IndexBuilding,
+	/// Whether this node runs the build, rather than waiting on a remote
+	/// owner's.
+	started_here: bool,
+	finished: Pin<Box<dyn Future<Output = Result<()>> + Send>>,
+}
+
+impl BuildCompletion {
+	fn new(
+		building: IndexBuilding,
+		started_here: bool,
+		finished: impl Future<Output = Result<()>> + Send + 'static,
+	) -> Self {
+		Self {
+			building,
+			started_here,
+			finished: Box::pin(finished),
+		}
+	}
+
+	/// Whether this node runs the build, rather than waiting on a remote
+	/// owner's.
+	pub(crate) fn started_here(&self) -> bool {
+		self.started_here
+	}
+
+	/// Whether this build's generation is known to be `Online`.
+	pub(crate) fn is_online(&self) -> bool {
+		self.building.is_online()
+	}
+
+	/// Whether `err`, which ended a statement's wait for this build, is
+	/// excused because the build's generation is known to be `Online`.
+	///
+	/// The one place the rule "once the index is online the statement has
+	/// succeeded" is applied to what this process saw of the build: the build
+	/// failing in its post-publish drain, and the statement's time running out
+	/// or its cancellation while that drain runs. An excused error is logged
+	/// here, once. A publish this process did not see is a different question,
+	/// answered from the durable build state by [`Self::published`].
+	pub(crate) fn excused_once_online(&self, err: &dyn std::fmt::Display) -> bool {
+		if !self.building.is_online() {
+			return false;
+		}
+		warn!(
+			index = %self.building.ix.name,
+			table = %self.building.ix.table_name,
+			error = %err,
+			"a blocking index build ended with an error after publishing its index, which \
+			 stays online; background compaction folds the writes queued during the build"
+		);
+		true
+	}
+
+	/// The definition this build is building.
+	pub(crate) fn index(&self) -> &IndexDefinition {
+		&self.building.ix
+	}
+
+	/// The build generation this completion waits for (see
+	/// [`Building::awaited_generation`]).
+	pub(crate) fn generation(&self) -> BuildGeneration {
+		self.building.awaited_generation()
+	}
+
+	/// Whether the generation this completion waits for is durably `Online`,
+	/// on the table the build was started on.
+	///
+	/// What this process saw of the build is not the last word on it: a publish
+	/// can land after the waiter stopped looking, from the node that owned the
+	/// build all along or from one that took it over. Only that generation's
+	/// publish counts, and only on that table. A later build of the same index
+	/// publishes a generation of its own, and the build state is keyed by the
+	/// table's name and an index id allocated per table, so once the table is
+	/// removed and defined again an unrelated index can hold the same key.
+	pub(crate) fn published(&self) -> impl Future<Output = Result<bool>> + Send + 'static {
+		let building = Arc::clone(&self.building);
+		async move { building.awaited_generation_published().await }
+	}
+}
+
+impl Future for BuildCompletion {
+	type Output = Result<()>;
+
+	fn poll(self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Self::Output> {
+		let this = self.get_mut();
+		match this.finished.as_mut().poll(cx) {
+			Poll::Ready(Err(err)) if this.excused_once_online(&err) => Poll::Ready(Ok(())),
+			finished => finished,
+		}
+	}
+}
+
 /// Document write data needed by the index builder.
 ///
 /// The mutation can either be indexed immediately or written to the durable
@@ -184,8 +377,13 @@ impl IndexBuilder {
 		ix: Arc<IndexDefinition>,
 		ix_key: SharedIndexKey,
 		sdr: Option<Sender<Result<()>>>,
+		waits_for_statement: bool,
 	) -> Result<BuildStart> {
-		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, tb, ix, ix_key)?);
+		let carried = carried_places(ctx, sdr.is_some());
+		#[cfg(test)]
+		lent_places::note(ctx.node_id(), &ix.name, carried.is_some());
+		let building =
+			Arc::new(Building::with_places(ctx, self.tf.clone(), opt, tb, ix, ix_key, carried)?);
 		building.read_key_structure_in(ctx).await?;
 		let acquired = match building.acquire_build_state().await {
 			Ok(Some(acquired)) => acquired,
@@ -193,15 +391,25 @@ impl IndexBuilder {
 			Err(err) => return Err(err),
 		};
 		building.defer_ownership_release(ctx).await;
-		self.start_acquired_building(Arc::clone(&building), acquired, sdr).await?;
+		self.start_acquired_building(Arc::clone(&building), acquired, sdr, waits_for_statement)
+			.await?;
 		Ok(BuildStart::Started(building))
 	}
 
+	/// Register `building` and spawn its task, which reports its result to
+	/// `sdr` when a statement awaits it.
+	///
+	/// When `waits_for_statement`, the task first waits for the statement that
+	/// started the build to close its transaction
+	/// ([`Building::await_statement_closed`]). Every caller asks for that
+	/// except one whose build is awaited inside that transaction, which cannot
+	/// close before the build ends.
 	async fn start_acquired_building(
 		&self,
 		building: IndexBuilding,
 		acquired: AcquiredBuild,
 		sdr: Option<Sender<Result<()>>>,
+		waits_for_statement: bool,
 	) -> Result<()> {
 		{
 			let mut indexes = self.indexes.write().await;
@@ -229,12 +437,8 @@ impl IndexBuilder {
 		// fall out of scope instead would drop it here, at the end of this
 		// function, and report every build finished before it had begun.
 		let guard = BuildingFinishGuard(Arc::clone(&building));
-		// No statement awaits a build started without a result channel, so it
-		// waits for the statement's transaction to close before it reads the
-		// catalog ([`Building::await_statement_closed`]).
-		let awaits_statement = sdr.is_none();
 		common::rt::spawn_detached(async move {
-			let r = if awaits_statement {
+			let r = if waits_for_statement {
 				match b.await_statement_closed(acquired.generation, acquired.phase).await {
 					Ok(true) => b.run_acquired(acquired).await,
 					Ok(false) => Ok(()),
@@ -292,18 +496,31 @@ impl IndexBuilder {
 	/// Wait for a remote owner to finish a blocking build.
 	///
 	/// A blocking `DEFINE INDEX` or `REBUILD INDEX` must not return simply
-	/// because another node already owns the durable generation. Once this path
-	/// has observed a remote active build, it only waits for that generation to
-	/// become `Online`/`Error` or takes over that same generation after the owner
-	/// lease expires. It must not create a fresh generation after the remote
-	/// owner finishes, because the blocking statement is waiting for that work.
+	/// because another node already owns the durable generation. This waits for
+	/// the generation the statement joined, the one a live owner elsewhere was
+	/// building when acquisition found it ([`Building::awaited_generation`]),
+	/// and for no other: it ends once that generation is `Online` or `Error`, or
+	/// takes that same generation over once its owner's lease expires. It never
+	/// creates a fresh generation, because the blocking statement is waiting
+	/// for that work.
+	///
+	/// The wait may first look long after it joined: a statement that awaits
+	/// its build after its commit polls nothing before then. A generation other
+	/// than the joined one in the durable state means the joined one has ended
+	/// — a later build replaces only a generation that is `Online` or in
+	/// `Error` ([`Building::acquire_build_state`]), and a table removed and
+	/// defined again starts the index afresh — and nothing durable records how.
+	/// So the wait succeeds if this process saw the joined generation `Online`,
+	/// and otherwise fails as superseded, leaving the index to the build that
+	/// replaced it. It never waits on, or reports, that later build.
 	async fn wait_for_remote_building(
 		&self,
 		ctx: &FrozenContext,
 		building: IndexBuilding,
 	) -> Result<()> {
+		let joined = building.awaited_generation();
 		loop {
-			if let Some(reason) = ctx.done(true)? {
+			if let Some(reason) = query_ended(ctx) {
 				return Err(Error::from(reason).into());
 			}
 			let Some(state) = building.read_durable_build_state().await? else {
@@ -312,8 +529,24 @@ impl IndexBuilder {
 				}
 				.into());
 			};
+			if state.generation != joined {
+				if building.is_online() {
+					return Ok(());
+				}
+				return Err(DatastoreError::IndexingBuildingCancelled {
+					reason: format!(
+						"Index {} build generation {joined} was superseded by generation {} \
+						 before this statement saw it finish; that build decides the index",
+						building.ix.name, state.generation
+					),
+				}
+				.into());
+			}
 			match state.phase {
-				IndexBuildPhase::Online => return Ok(()),
+				IndexBuildPhase::Online => {
+					building.online.store(true, Ordering::Release);
+					return Ok(());
+				}
 				IndexBuildPhase::Error => {
 					return Err(DatastoreError::IndexingBuildingCancelled {
 						reason: format!(
@@ -327,15 +560,40 @@ impl IndexBuilder {
 				}
 				IndexBuildPhase::Building | IndexBuildPhase::Closing => {
 					if build_owner_expired(&state, Utc::now())
-						&& let Some(acquired) = building.takeover_expired_build_state().await?
+						&& let Some(acquired) =
+							building.takeover_expired_build_state(Some(joined), false).await?
 					{
 						let (s, r) = channel();
 						building.defer_ownership_release(ctx).await;
-						self.start_acquired_building(Arc::clone(&building), acquired, Some(s))
-							.await?;
-						return r.await.map_err(|_| DatastoreError::IndexingBuildingCancelled {
-							reason: "Channel shutdown".to_string(),
-						})?;
+						// A waiter awaiting inside its statement's transaction
+						// would never see it close, and one awaiting after the
+						// commit has no open transaction left to wait for.
+						self.start_acquired_building(
+							Arc::clone(&building),
+							acquired,
+							Some(s),
+							false,
+						)
+						.await?;
+						// The build taken over is this node's now, and the wait
+						// for it answers to the query as the wait for the
+						// remote owner did: its deadline or cancellation ends
+						// the wait, and the build goes on.
+						let mut r = std::pin::pin!(r);
+						loop {
+							if let Some(reason) = query_ended(ctx) {
+								return Err(Error::from(reason).into());
+							}
+							if let Ok(outcome) =
+								common::time::timeout(BUILD_CLOSING_SLEEP, &mut r).await
+							{
+								return outcome.map_err(|_| {
+									DatastoreError::IndexingBuildingCancelled {
+										reason: "Channel shutdown".to_string(),
+									}
+								})?;
+							}
+						}
 					}
 					sleep(BUILD_CLOSING_SLEEP).await;
 				}
@@ -345,10 +603,16 @@ impl IndexBuilder {
 
 	/// Start a build task if this node can acquire durable ownership.
 	///
-	/// Non-blocking callers return immediately when another node owns a fresh
-	/// lease. Blocking callers wait for the durable generation to become
-	/// queryable or failed, taking over the same generation if the remote owner
-	/// lease expires.
+	/// Durable ownership is acquired before this returns, so every write that
+	/// commits afterwards finds the build and is admitted to it. Non-blocking
+	/// callers get `None` and nothing to wait for, including when another node
+	/// owns a fresh lease. Blocking callers get the [`BuildCompletion`] to
+	/// await: it resolves once the durable generation is queryable or failed,
+	/// taking over the same generation if a remote owner's lease expires.
+	///
+	/// A blocking build started here is awaited inside the calling statement's
+	/// transaction, so it reads from the start. A non-blocking one reads only
+	/// once that transaction has closed.
 	pub(crate) async fn build(
 		&self,
 		ctx: &FrozenContext,
@@ -356,24 +620,22 @@ impl IndexBuilder {
 		tb: TableId,
 		ix: Arc<IndexDefinition>,
 		blocking: bool,
-	) -> Result<Option<Receiver<Result<()>>>> {
-		Ok(self.build_started(ctx, opt, tb, ix, blocking).await?.0)
+	) -> Result<Option<BuildCompletion>> {
+		self.start_build(ctx, opt, tb, ix, blocking, !blocking).await
 	}
 
-	/// [`Self::build`], also handing back the build this node started, if it
-	/// started one rather than waiting for or leaving it to a remote owner.
-	///
-	/// Refuses an index whose kernel this binary left out before anything is
-	/// started, so the statement that asked for the build fails rather than
-	/// commits a definition no build can serve.
-	async fn build_started(
+	/// [`Self::build`], with `waits_for_statement` saying whether the build
+	/// waits for the calling statement's transaction to close before it reads
+	/// anything (see [`Self::start_acquired_building`]).
+	async fn start_build(
 		&self,
 		ctx: &FrozenContext,
 		opt: Options,
 		tb: TableId,
 		ix: Arc<IndexDefinition>,
 		blocking: bool,
-	) -> Result<(Option<Receiver<Result<()>>>, Option<IndexBuilding>)> {
+		waits_for_statement: bool,
+	) -> Result<Option<BuildCompletion>> {
 		crate::idx::check_index_kernel(&ix.index)?;
 		expect_not_prepare_remove(&ix)?;
 		// A build started by the calling transaction changes what its later
@@ -397,13 +659,23 @@ impl IndexBuilder {
 				}
 			);
 		}
-		match self.start_building(ctx, opt, tb, ix, key, sdr).await? {
-			BuildStart::Started(building) => Ok((rcv, Some(building))),
+		match self.start_building(ctx, opt, tb, ix, key, sdr, waits_for_statement).await? {
+			BuildStart::Started(building) => Ok(rcv.map(|rcv| {
+				BuildCompletion::new(building, true, async move {
+					rcv.await.map_err(|_| DatastoreError::IndexingBuildingCancelled {
+						reason: "Channel shutdown".to_string(),
+					})?
+				})
+			})),
 			BuildStart::RemoteOwner(building) if blocking => {
-				self.wait_for_remote_building(ctx, building).await?;
-				Ok((None, None))
+				let builder = self.clone();
+				let ctx = Arc::clone(ctx);
+				let waited = Arc::clone(&building);
+				Ok(Some(BuildCompletion::new(building, false, async move {
+					builder.wait_for_remote_building(&ctx, waited).await
+				})))
 			}
-			BuildStart::RemoteOwner(_) => Ok((None, None)),
+			BuildStart::RemoteOwner(_) => Ok(None),
 		}
 	}
 
@@ -418,29 +690,32 @@ impl IndexBuilder {
 		blocking: bool,
 	) -> Result<()> {
 		match self.build(ctx, opt, tb, ix, blocking).await? {
-			Some(rcv) => rcv.await.map_err(|_| DatastoreError::IndexingBuildingCancelled {
-				reason: "Channel shutdown".to_string(),
-			})?,
+			Some(completion) => completion.await,
 			None => Ok(()),
 		}
 	}
 
-	/// Build index `ix` of table `tb` for a blocking statement whose
-	/// transaction stages nothing the build depends on, waiting for the build
-	/// after `txn` commits when the transaction's owner awaits work queued
-	/// for then, and inline otherwise.
+	/// Build index `ix` of table `tb` for a blocking statement, and queue the
+	/// wait for the build on `txn`, for its owner to await once it has
+	/// committed. The caller has established that the owner offers that
+	/// ([`Transaction::accepts_after_commit_waits`]); one that does not is a
+	/// caller's error.
 	///
-	/// The caller is a `REBUILD INDEX`: its index is already defined, and the
-	/// build is handed the definition it builds, so it reads nothing the
-	/// statement stages; a failed build leaves the index in `Error` for the next
-	/// rebuild rather than anything to take back. Awaiting after the commit
-	/// keeps the statement's transaction short: held open across the build's
-	/// own commits, it would outlast the write history an optimistic storage
-	/// engine validates a commit against, and fail once the build had already
-	/// published.
+	/// Awaiting after the commit keeps the statement's transaction short: held
+	/// open across the build's own commits, it would outlast the write history
+	/// an optimistic storage engine validates a commit against, and fail once
+	/// the build had already published. The caller is either a `REBUILD INDEX`,
+	/// whose index is already defined and is handed the definition it builds,
+	/// so a failed build leaves the index in `Error` for the next rebuild
+	/// rather than anything to take back (`undo` is `None`); or a `DEFINE
+	/// INDEX` of a new index on an existing table, whose definition is taken
+	/// back by `undo` should its build fail before the index is online (see
+	/// [`AwaitBuildAfterCommit`]).
 	///
-	/// A build awaited after the commit is still running when `txn` closes, so
-	/// it is aborted should `txn` not commit (see [`AbortUncommittedRebuild`]).
+	/// A rebuild awaited after the commit, started on this node, is unfinished
+	/// when `txn` closes, so it is aborted should `txn` not commit (see
+	/// [`AbortUncommittedRebuild`]). A new definition's build is cleaned up by
+	/// the rollback action its statement registers.
 	pub(crate) async fn run_awaited_after_commit(
 		&self,
 		ctx: &FrozenContext,
@@ -448,17 +723,26 @@ impl IndexBuilder {
 		tb: TableId,
 		ix: Arc<IndexDefinition>,
 		txn: &Transaction,
+		undo: Option<RemoveFailedDefinition>,
 	) -> Result<()> {
-		let (Some(rcv), Some(building)) = self.build_started(ctx, opt, tb, ix, true).await? else {
+		// Awaited once `txn` has committed, so the build reads nothing until
+		// then (see [`Building::await_statement_closed`]).
+		let Some(completion) = self.start_build(ctx, opt, tb, ix, true, true).await? else {
 			return Ok(());
 		};
-		match txn.wait_after_commit(Box::new(AwaitedBuild(rcv))).await {
-			None => {
-				txn.on_rollback(Box::new(AbortUncommittedRebuild(building))).await;
-				Ok(())
-			}
-			Some(inline) => inline.wait().await,
+		let started_here = completion.started_here().then(|| Arc::clone(&completion.building));
+		let rebuild = undo.is_none();
+		let wait = Box::new(AwaitBuildAfterCommit::new(Arc::clone(ctx), completion, undo));
+		if txn.wait_after_commit(wait).await.is_some() {
+			return Err(EngineError::unreachable(
+				"a transaction accepting after-commit waits refused one",
+			)
+			.into());
 		}
+		if rebuild && let Some(building) = started_here {
+			txn.on_rollback(Box::new(AbortUncommittedRebuild(building))).await;
+		}
+		Ok(())
 	}
 
 	/// Resume an index build left unfinished by a crashed or expired owner.
@@ -478,6 +762,12 @@ impl IndexBuilder {
 	/// or already being built by a task in this process, so it is safe to call
 	/// for every index on every scan. The takeover is CAS-guarded, so racing
 	/// scans on other cluster nodes resolve to a single winner.
+	///
+	/// `tb` and `ix` come from a snapshot of the catalog the caller took
+	/// earlier, which a table removed and defined again may have outdated
+	/// under the same index id. The transaction that claims the build state
+	/// also checks that the catalog still names table `tb` and holds `ix` as it
+	/// is, and claims nothing otherwise.
 	pub(crate) async fn resume_stalled(
 		&self,
 		ctx: &FrozenContext,
@@ -508,9 +798,9 @@ impl IndexBuilder {
 		}
 		// Claim the expired generation and spawn the resume task. A no-op result
 		// (`None`) means another scanner or a concurrent statement won the race.
-		match building.takeover_expired_build_state().await? {
+		match building.takeover_expired_build_state(None, true).await? {
 			Some(acquired) => {
-				self.start_acquired_building(building, acquired, None).await?;
+				self.start_acquired_building(building, acquired, None, true).await?;
 				Ok(true)
 			}
 			None => Ok(false),
@@ -537,6 +827,10 @@ pub(super) struct Building {
 	pub(super) ix_key: SharedIndexKey,
 	/// Durable generation currently owned by this builder; zero before acquire.
 	pub(super) build_generation: AtomicU64,
+	/// The generation a live owner elsewhere was building when
+	/// [`Building::acquire_build_state`] found it, which a blocking statement
+	/// then waits for instead of building one of its own; zero otherwise.
+	remote_generation: AtomicU64,
 	/// Abort flag for the build process.
 	pub(super) aborted: AtomicBool,
 	/// Set when the spawned task exits so a later local build can start.
@@ -567,6 +861,12 @@ pub(super) struct Building {
 	/// the two must move together: a notification without the flag is a lost
 	/// wake-up for every waiter that has not registered yet.
 	finished_notify: Notify,
+	/// Set once this build's generation is known to be `Online`: published by
+	/// this builder, or seen published by the owner a blocking statement waits
+	/// on. From then on the index is complete and queryable whatever the rest
+	/// of the build does (see [`BuildCompletion`] and
+	/// [`Building::mark_durable_ended`]).
+	online: AtomicBool,
 	/// The index's columns and `COUNT` guard, compiled on first use and once
 	/// for the whole build.
 	///
@@ -580,6 +880,9 @@ pub(super) struct Building {
 	/// its `id` field names their components; read once for the whole build
 	/// ([`Self::table_key_structure`]).
 	key: OnceCell<Option<Arc<crate::catalog::KeyStructure>>>,
+	/// The ticket the build's parallel work takes its places through
+	/// ([`Self::places`]).
+	places: parking_lot::Mutex<BuildPlaces>,
 	/// The node's memory governor and temporary store, which bound each batch
 	/// of the build; `None` where the context the build was started from bounds
 	/// nothing.
@@ -593,7 +896,34 @@ pub(super) struct Building {
 	memory: Option<MemoryHost>,
 }
 
+/// The ticket of a build, through its life.
+///
+/// A build holds a registration in the node's pool only while it runs.
+/// Finished builds stay in [`IndexBuilder`]'s map, and every registration is
+/// an entry that each ask of the pool reads, the queries' asks included.
+enum BuildPlaces {
+	/// No ticket yet: one is registered when the build first needs it.
+	Unregistered,
+	/// The ticket the build's work takes places through: the registration a
+	/// waiting blocking statement lent it, or the build's own.
+	Held(crate::idx::places::Ticket),
+	/// The build has finished, and its ticket is dropped.
+	Released,
+}
+
+/// The registration a blocking statement waiting on a build lends it: the
+/// ticket set on the statement's context, when the build is `blocking` and
+/// one is set. A `CONCURRENTLY` build has no statement waiting on it, so it
+/// carries none.
+pub(super) fn carried_places(
+	ctx: &FrozenContext,
+	blocking: bool,
+) -> Option<crate::idx::places::Ticket> {
+	blocking.then(|| ctx.index_places().cloned()).flatten()
+}
+
 impl Building {
+	/// A build with a ticket of its own; see [`Self::with_places`].
 	pub(super) fn new(
 		ctx: &FrozenContext,
 		tf: TransactionFactory,
@@ -602,7 +932,28 @@ impl Building {
 		ix: Arc<IndexDefinition>,
 		ix_key: SharedIndexKey,
 	) -> Result<Self> {
+		Self::with_places(ctx, tf, opt, tb, ix, ix_key, None)
+	}
+
+	/// A build whose parallel work takes its places through `carried`, the
+	/// registration of the blocking statement waiting on it, so its workers
+	/// count as that statement's places. Without one, the build registers a
+	/// build ticket of its own with the node's place pool when it first needs
+	/// one ([`Self::places`]).
+	pub(super) fn with_places(
+		ctx: &FrozenContext,
+		tf: TransactionFactory,
+		opt: Options,
+		tb: TableId,
+		ix: Arc<IndexDefinition>,
+		ix_key: SharedIndexKey,
+		carried: Option<crate::idx::places::Ticket>,
+	) -> Result<Self> {
 		let ikb = IndexKeyBase::new(ix_key.ns, ix_key.db, ix.table_name.clone(), ix.index_id);
+		let places = match carried {
+			Some(lent) => BuildPlaces::Held(lent),
+			None => BuildPlaces::Unregistered,
+		};
 		Ok(Self {
 			ctx: Context::new_concurrent(ctx).freeze(),
 			owner: Uuid::now_v7(),
@@ -613,16 +964,79 @@ impl Building {
 			ix,
 			ix_key,
 			build_generation: AtomicU64::new(0),
+			remote_generation: AtomicU64::new(0),
 			aborted: AtomicBool::new(false),
 			finished: AtomicBool::new(false),
 			release_gate: AtomicU8::new(RELEASE_GATE_STATEMENT),
 			statement_closed: Notify::new(),
 			statement_tx: std::sync::OnceLock::new(),
 			finished_notify: Notify::new(),
+			online: AtomicBool::new(false),
 			compiled: OnceCell::new(),
 			key: OnceCell::new(),
+			places: parking_lot::Mutex::new(places),
 			memory: ctx.memory().map(|memory| memory.host().clone()),
 		})
+	}
+
+	/// Whether this build's generation is known to be `Online`.
+	///
+	/// Loads `Acquire` to pair with the `Release` store that follows the
+	/// publish, so a caller that observes `true` also observes the publish.
+	pub(super) fn is_online(&self) -> bool {
+		self.online.load(Ordering::Acquire)
+	}
+
+	/// The generation a blocking statement waiting on this build waits for:
+	/// the one this builder acquired or took over, or else the one a live
+	/// owner elsewhere was building when acquisition found it. Zero before
+	/// either.
+	pub(super) fn awaited_generation(&self) -> BuildGeneration {
+		match self.build_generation.load(Ordering::Acquire) {
+			0 => self.remote_generation.load(Ordering::Acquire),
+			owned => owned,
+		}
+	}
+
+	/// Whether [`Self::awaited_generation`] is durably `Online`, on the table
+	/// this build was started on (see [`BuildCompletion::published`]).
+	async fn awaited_generation_published(&self) -> Result<bool> {
+		let generation = self.awaited_generation();
+		let tx = self.new_read_tx().await?;
+		let table =
+			catch!(tx, tx.get_tb(self.ix_key.ns, self.ix_key.db, &self.ix_key.tb, None).await);
+		let state = catch!(tx, tx.get_key(&self.ikb.new_bs_key(), None).await);
+		tx.cancel().await?;
+		Ok(table.is_some_and(|table| table.table_id == self.tb)
+			&& state.is_some_and(|state| {
+				state.generation == generation && state.phase == IndexBuildPhase::Online
+			}))
+	}
+
+	/// The ticket the build's parallel work takes its places through, which
+	/// every batch context the build opens carries: the registration the
+	/// waiting statement lent it, or a build ticket registered with the node's
+	/// pool on the first call. Once the build has finished it holds no ticket,
+	/// and work that still asks runs on the calling task.
+	pub(super) fn places(&self) -> crate::idx::places::Ticket {
+		let mut places = self.places.lock();
+		match &*places {
+			BuildPlaces::Held(ticket) => ticket.clone(),
+			BuildPlaces::Released => crate::idx::places::Ticket::serial(),
+			BuildPlaces::Unregistered => {
+				let ticket = crate::ctx::IndexPlaces::node(
+					crate::exec::planner::placement::Policy::from_config(&self.ctx.config.exec),
+				);
+				*places = BuildPlaces::Held(ticket.clone());
+				ticket
+			}
+		}
+	}
+
+	/// Drops the build's ticket, so a finished build keeps no registration in
+	/// the node's pool.
+	pub(super) fn release_places(&self) {
+		*self.places.lock() = BuildPlaces::Released;
 	}
 
 	/// The engine's context for one batch of this build.
@@ -793,6 +1207,7 @@ impl Building {
 			{
 				if !build_owner_expired(current, Utc::now()) {
 					tx.cancel().await?;
+					self.remote_generation.store(current.generation, Ordering::Release);
 					return Ok(None);
 				}
 				let mut next = current.clone();
@@ -998,7 +1413,22 @@ impl Building {
 	/// creates a fresh generation. Blocking callers use it only after they have
 	/// observed a remote active build, so racing with a remote completion must
 	/// resolve to "wait completed" rather than "start a replacement build".
-	async fn takeover_expired_build_state(&self) -> Result<Option<AcquiredBuild>> {
+	///
+	/// With `only` set, a generation other than that one is never taken over:
+	/// the read that checks the phase and the lease checks the generation in the
+	/// same transaction, so a later build that replaces the expected generation
+	/// meanwhile is left to its own owner.
+	///
+	/// With `catalog` set, nothing is taken over unless the catalog, read in
+	/// that same transaction, still names this build's table id and holds its
+	/// definition unchanged ([`Self::catalog_holds_this_build`]). A removal or a
+	/// replacement that commits after the read conflicts with the claim's own
+	/// compare-and-swap of `!bs`, which the removal deletes or rewrites.
+	async fn takeover_expired_build_state(
+		&self,
+		only: Option<BuildGeneration>,
+		catalog: bool,
+	) -> Result<Option<AcquiredBuild>> {
 		loop {
 			let ctx = self.new_write_tx_ctx().await?;
 			let tx = ctx.tx();
@@ -1009,7 +1439,12 @@ impl Building {
 			};
 			if !matches!(current.phase, IndexBuildPhase::Building | IndexBuildPhase::Closing)
 				|| !build_owner_expired(&current, Utc::now())
+				|| only.is_some_and(|only| current.generation != only)
 			{
+				tx.cancel().await?;
+				return Ok(None);
+			}
+			if catalog && !self.catalog_holds_this_build(&tx).await? {
 				tx.cancel().await?;
 				return Ok(None);
 			}
@@ -1088,79 +1523,183 @@ impl Building {
 	where
 		F: FnMut(&mut IndexBuildState),
 	{
+		self.transition_owned_build_state(
+			generation,
+			TransitionMode::Required,
+			fence_ticket_allocation,
+			|state| {
+				update(state);
+				true
+			},
+			no_staged_writes,
+		)
+		.await?
+		.ok_or_else(|| {
+			DatastoreError::IndexingBuildingCancelled {
+				reason: format!("Index build ownership was lost for {}", self.ix.name),
+			}
+			.into()
+		})
+	}
+
+	/// The compare-and-swap loop behind every owned transition of `!bs`.
+	///
+	/// Each attempt runs in a fresh write transaction. It reads `!bs`, checks
+	/// that this builder still owns `generation`, and lets `update` edit a copy;
+	/// `update` returning `false` ends the transition without a write. It then
+	/// stamps the copy, advances the ticket counter if
+	/// `fence_ticket_allocation` is set, compare-and-swaps `!bs`, runs `stage`
+	/// for the writes that must commit with the transition, and commits.
+	///
+	/// Returns the state it committed, or `None` when it wrote nothing. A
+	/// retryable conflict, or a compare-and-swap that misses, cancels the
+	/// attempt and retries after [`BUILD_STATE_RETRY_SLEEP`], whichever step
+	/// raised it — the `!bs` read, the ticket fence, the swap, `stage` or the
+	/// commit; any other error cancels the attempt and is returned. Either way nothing of a failed
+	/// attempt commits. `mode` decides what a missing or foreign `!bs` means and
+	/// whether retries are bounded.
+	async fn transition_owned_build_state<F, S>(
+		&self,
+		generation: BuildGeneration,
+		mode: TransitionMode,
+		fence_ticket_allocation: bool,
+		mut update: F,
+		mut stage: S,
+	) -> Result<Option<IndexBuildState>>
+	where
+		F: FnMut(&mut IndexBuildState) -> bool,
+		S: for<'t> FnMut(&'t Transaction) -> StagedWrites<'t>,
+	{
+		let state_key = self.ikb.new_bs_key();
+		let mut retries = 0;
 		loop {
 			let ctx = self.new_write_tx_ctx().await?;
 			let tx = ctx.tx();
-			let state_key = self.ikb.new_bs_key();
-			let Some(current) = tx.get_key(&state_key, None).await? else {
-				tx.cancel().await?;
-				return Err(DatastoreError::CorruptedIndex(
-					"Index build state is missing during state update",
-				)
-				.into());
-			};
-			if current.generation != generation || current.owner != Some(self.owner) {
-				tx.cancel().await?;
-				return Err(DatastoreError::IndexingBuildingCancelled {
-					reason: format!("Index build ownership was lost for {}", self.ix.name),
-				}
-				.into());
-			}
-			let mut next = current.clone();
-			update(&mut next);
-			let now = Utc::now();
-			next.updated_at = now;
-			next.owner_heartbeat_at = if next.owner == Some(self.owner) {
-				Some(now)
-			} else {
-				None
-			};
-			if fence_ticket_allocation {
-				let bt = self.ikb.new_bt_key(generation);
-				// A generation predating the counter has none; its admissions
-				// still CAS `!bs`, so the state write below fences them.
-				//
-				// The counter is advanced rather than rewritten: some backends
-				// validate a transaction by value rather than by version, and
-				// there a write that stores the value it read is invisible to
-				// a concurrent allocation, making the fence a silent no-op.
-				// Burning a ticket costs nothing, since tickets are opaque
-				// ordering tokens and nothing depends on them being contiguous.
-				//
-				// The compare reads this transaction's own view, so it cannot
-				// fail; a conflict with a concurrent allocation surfaces at
-				// commit instead, which is where the retry loop handles it.
-				if let Some(ticket) = tx.get_key(&bt, None).await?
-					&& let Err(err) =
-						tx.put_compare_key(&bt, &ticket.saturating_add(1), Some(&ticket)).await
-				{
-					let _ = tx.cancel().await;
-					return Err(err);
-				}
-			}
-			let res = tx.put_compare_key(&state_key, &next, Some(&current)).await;
-			match res {
-				Ok(()) => {
-					if self
-						.commit_and_retryable_conflict(
-							&tx,
-							"transient conflict updating build state, retrying",
+			// One attempt. Every error it returns is classified below, whichever
+			// step raised it: the `!bs` read, the ticket fence, the swap, the
+			// staged writes or the commit.
+			let attempt: Result<Option<IndexBuildState>> = async {
+				#[cfg(test)]
+				maybe_inject_retryable_conflict(
+					RetryableConflictSite::ConcurrentIndexBuildStateRead,
+					self.ctx.node_id(),
+				)?;
+				let Some(current) = tx.get_key(&state_key, None).await? else {
+					self.end_decided_attempt(&tx).await;
+					return match mode {
+						TransitionMode::Required => Err(DatastoreError::CorruptedIndex(
+							"Index build state is missing during state update",
 						)
-						.await?
-					{
-						continue;
+						.into()),
+						TransitionMode::BestEffort => Ok(None),
+					};
+				};
+				if current.generation != generation || current.owner != Some(self.owner) {
+					self.end_decided_attempt(&tx).await;
+					return match mode {
+						TransitionMode::Required => {
+							Err(DatastoreError::IndexingBuildingCancelled {
+								reason: format!(
+									"Index build ownership was lost for {}",
+									self.ix.name
+								),
+							}
+							.into())
+						}
+						TransitionMode::BestEffort => Ok(None),
+					};
+				}
+				let mut next = current.clone();
+				if !update(&mut next) {
+					self.end_decided_attempt(&tx).await;
+					return Ok(None);
+				}
+				let now = Utc::now();
+				next.updated_at = now;
+				next.owner_heartbeat_at = if next.owner == Some(self.owner) {
+					Some(now)
+				} else {
+					None
+				};
+				if fence_ticket_allocation {
+					let bt = self.ikb.new_bt_key(generation);
+					// A generation predating the counter has none; its admissions
+					// still CAS `!bs`, so the state write below fences them.
+					//
+					// The counter is advanced rather than rewritten: some backends
+					// validate a transaction by value rather than by version, and
+					// there a write that stores the value it read is invisible to
+					// a concurrent allocation, making the fence a silent no-op.
+					// Burning a ticket costs nothing, since tickets are opaque
+					// ordering tokens and nothing depends on them being contiguous.
+					//
+					// The compare reads this transaction's own view, so it cannot
+					// fail; a conflict with a concurrent allocation surfaces at
+					// commit instead, which is where the retry loop handles it.
+					if let Some(ticket) = tx.get_key(&bt, None).await? {
+						tx.put_compare_key(&bt, &ticket.saturating_add(1), Some(&ticket)).await?;
 					}
-					return Ok(next);
 				}
-				Err(err) if is_condition_not_met(&err) => {
-					let _ = tx.cancel().await;
-					continue;
+				tx.put_compare_key(&state_key, &next, Some(&current)).await?;
+				if let Some(staged) = stage(&tx) {
+					staged.await?;
 				}
-				Err(err) => {
-					let _ = tx.cancel().await;
-					return Err(err);
-				}
+				tx.commit().await?;
+				Ok(Some(next))
 			}
+			.await;
+			let err = match attempt {
+				Ok(outcome) => return Ok(outcome),
+				Err(err) => err,
+			};
+			// The attempt's error decides the retry and is what is returned. The
+			// attempt did not commit, so a cancel that fails discards nothing
+			// that could apply, and its own error would only mask that one.
+			let _ = tx.cancel().await;
+			// A swap that misses is retried like a conflict: the state it was
+			// checked against has moved, and the next attempt reads it afresh.
+			if !is_condition_not_met(&err) && !is_retryable_transaction_conflict(&err) {
+				return Err(err);
+			}
+			retries += 1;
+			if mode == TransitionMode::BestEffort && retries > BEST_EFFORT_TRANSITION_RETRIES {
+				return Err(err.context(format!(
+					"gave up on the build-state transition after {BEST_EFFORT_TRANSITION_RETRIES} retries"
+				)));
+			}
+			debug!(
+				target: "surrealdb::core::kvs::index",
+				index = %self.ix.name,
+				table = %self.ix.table_name,
+				error = %err,
+				"transient conflict updating build state, retrying"
+			);
+			sleep(BUILD_STATE_RETRY_SLEEP).await;
+		}
+	}
+
+	/// Cancel an attempt of [`Self::transition_owned_build_state`] whose
+	/// outcome is already decided: no `!bs`, a generation this builder does not
+	/// own, or an update that declined to write.
+	///
+	/// The attempt wrote nothing, so a cancel that fails discards nothing that
+	/// could commit. Its error is logged rather than returned, so it can neither
+	/// replace the decided outcome nor be classified as a conflict and retried.
+	async fn end_decided_attempt(&self, tx: &Transaction) {
+		let res = tx.cancel().await;
+		#[cfg(test)]
+		let res = res.and(maybe_inject_non_retryable_error(
+			NonRetryableErrorSite::ConcurrentIndexBuildStateCancel,
+			self.ctx.node_id(),
+		));
+		if let Err(err) = res {
+			debug!(
+				target: "surrealdb::core::kvs::index",
+				index = %self.ix.name,
+				table = %self.ix.table_name,
+				error = %err,
+				"could not cancel a build-state transition that wrote nothing"
+			);
 		}
 	}
 
@@ -1367,30 +1906,86 @@ impl Building {
 	/// Publish the index as queryable once all admitted work has been replayed.
 	///
 	/// Ownership is deliberately retained past this point. The build still has
-	/// its pending drain to run, and the statement that started it has still not
-	/// committed its catalog change, so background maintenance elsewhere in the
-	/// cluster must keep seeing this index as owned. `release_build_ownership`
-	/// is what ends that window.
+	/// its pending drain to run, and the statement that started it may not have
+	/// committed its catalog change yet, so background maintenance elsewhere in
+	/// the cluster must keep seeing this index as owned.
+	/// `release_build_ownership` is what ends that window.
 	pub(super) async fn mark_durable_online(
 		&self,
 		generation: BuildGeneration,
 		initial: usize,
 		updated: usize,
 	) -> Result<()> {
-		self.update_owned_build_state(generation, |state| {
-			state.phase = IndexBuildPhase::Online;
-			state.initial_complete = true;
-			state.error = None;
-			Self::set_report(
-				state,
-				IndexBuildReportStatus::Ready,
-				Some(initial),
-				Some(0),
-				Some(updated),
-			);
-		})
+		#[cfg(test)]
+		let node_id = self.ctx.node_id();
+		self.transition_owned_build_state(
+			generation,
+			TransitionMode::Required,
+			false,
+			|state| {
+				state.phase = IndexBuildPhase::Online;
+				state.initial_complete = true;
+				state.error = None;
+				Self::set_report(
+					state,
+					IndexBuildReportStatus::Ready,
+					Some(initial),
+					Some(0),
+					Some(updated),
+				);
+				true
+			},
+			|_| {
+				// Stands in for a publish that conflicts, so a test can hold the
+				// task after its last batch and before it reaches the release gate.
+				#[cfg(test)]
+				if let Err(err) = maybe_inject_retryable_conflict(
+					RetryableConflictSite::ConcurrentIndexOnlinePublish,
+					node_id,
+				) {
+					return Some(Box::pin(std::future::ready(Err(err))));
+				}
+				None
+			},
+		)
 		.await?;
 		Ok(())
+	}
+
+	/// Whether a publish of `generation` whose commit reported `err` applied
+	/// after all, as the durable build state says: `Online`, still this
+	/// builder's generation and owner.
+	///
+	/// `false` when the state cannot be read either, which the caller treats
+	/// as a publish that did not apply.
+	async fn published_despite(&self, generation: BuildGeneration, err: &anyhow::Error) -> bool {
+		match self.read_durable_build_state().await {
+			Ok(Some(state))
+				if state.generation == generation
+					&& state.phase == IndexBuildPhase::Online
+					&& state.owner == Some(self.owner) =>
+			{
+				warn!(
+					index = %self.ix.name,
+					table = %self.ix.table_name,
+					error = %err,
+					"the commit that published an index reported an error but applied; \
+					 the build carries on"
+				);
+				true
+			}
+			Ok(_) => false,
+			Err(read_err) => {
+				warn!(
+					index = %self.ix.name,
+					table = %self.ix.table_name,
+					error = %err,
+					read_error = %read_err,
+					"could not read back whether the commit that published an index applied"
+				);
+				false
+			}
+		}
 	}
 
 	/// Hold durable ownership until the statement that started this build has
@@ -1398,30 +1993,137 @@ impl Building {
 	///
 	/// A statement stages the definition it builds against in its own
 	/// transaction, which is still open when the build starts and, for a
-	/// blocking build, until after it returns. Every other node reads the
-	/// previous definition for that whole window, so ownership — the one signal
-	/// that is durable before the definition is — has to outlast it. That holds
-	/// however the statement started the build: a `CONCURRENTLY` build owns its
-	/// generation from the moment it is spawned, and waits for this half before
-	/// it reads anything ([`Building::await_statement_closed`]). Registered on
-	/// both outcomes: a rolled-back
-	/// statement leaves the previous definition in place, which is the one
-	/// background compaction was already reading, so no fence is needed for it.
+	/// blocking build awaited inside that transaction, until after the build
+	/// completes. Every other node reads the previous definition for that whole
+	/// window, so ownership — the one signal that is durable before the
+	/// definition is — has to outlast it. That holds however the statement
+	/// started the build: a `CONCURRENTLY` build, and a blocking build awaited
+	/// after the commit, own their generation from the moment they are
+	/// spawned, and wait for this half before they read anything
+	/// ([`Building::await_statement_closed`]). Registered on both outcomes: a
+	/// rolled-back statement leaves the previous definition in place, which is
+	/// the one background compaction was already reading, so no fence is needed
+	/// for it.
 	///
-	/// A no-op for a build with no statement behind it — a maintenance resume,
-	/// whose definition was committed long before — which keeps the statement
-	/// half of [`Building::release_gate`] as it starts, already arrived.
+	/// A no-op for a build with no open statement transaction behind it — a
+	/// maintenance resume, whose definition was committed long before, or a
+	/// takeover by a blocking statement awaiting after its transaction
+	/// committed — which keeps the statement half of [`Building::release_gate`]
+	/// as it starts, already arrived.
 	///
 	/// Must be called before the build is spawned, so the release cannot be
 	/// reached before both halves of the gate are in play.
 	pub(super) async fn defer_ownership_release(self: &Arc<Self>, ctx: &FrozenContext) {
-		let Some(txn) = ctx.try_tx() else {
+		// A closed transaction has already published or discarded the
+		// definition, and will run no action registered on it now.
+		let Some(txn) = ctx.try_tx().filter(|txn| !txn.closed()) else {
 			return;
 		};
 		self.release_gate.store(0, Ordering::Release);
 		let _ = self.statement_tx.set(Arc::downgrade(txn));
 		txn.on_commit(Box::new(ReleaseBuildOwnership(Arc::clone(self)))).await;
 		txn.on_rollback(Box::new(ReleaseBuildOwnership(Arc::clone(self)))).await;
+	}
+
+	/// Whether `tx` holds this build's table under its table id, and a
+	/// definition of its index that describes the layout this build writes: the
+	/// same index id, table, columns, kind, `COUNT` guard and format, not staged
+	/// for removal. A change that leaves the layout alone, such as a comment,
+	/// does not count. Read from the keys themselves rather than through the
+	/// catalog: a build is started by work sealed off catalog reads.
+	async fn catalog_holds_this_build(&self, tx: &Transaction) -> Result<bool> {
+		use crate::catalog::FromStored as _;
+		let (ns, db, tb) = (self.ix_key.ns, self.ix_key.db, &self.ix_key.tb);
+		let table = crate::key::schema::TableKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		};
+		let Some(table) = tx.get_key(&table, None).await? else {
+			return Ok(false);
+		};
+		if crate::catalog::TableDefinition::from_stored(&table)?.table_id != self.tb {
+			return Ok(false);
+		}
+		let name = crate::key::schema::IndexNameKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+			ix: self.ix.index_id,
+		};
+		let Some(name) = tx.get_key(&name, None).await? else {
+			return Ok(false);
+		};
+		let definition = crate::key::schema::IndexDefKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+			ix: Cow::Borrowed(name.as_str()),
+		};
+		let Some(stored) = tx.get_key(&definition, None).await? else {
+			return Ok(false);
+		};
+		let current = IndexDefinition::from_stored(&stored)?;
+		let built = &self.ix;
+		Ok(!current.prepare_remove
+			&& current.index_id == built.index_id
+			&& current.table_name == built.table_name
+			&& current.cols == built.cols
+			&& current.index == built.index
+			&& current.count_cond == built.count_cond
+			&& current.format_version == built.format_version)
+	}
+
+	/// Whether this build goes on although the commit of the statement that
+	/// started it failed.
+	///
+	/// A transaction runs its rollback actions on every failed commit, and a
+	/// commit that definitely did not apply leaves the catalog without what the
+	/// statement staged, so the build is undone. One whose outcome is unknown
+	/// may have applied ([`Transaction::commit_outcome_unknown`]), and nothing
+	/// the statement writes is a record of it a later statement cannot
+	/// overwrite. So the build is decided by the layout it writes instead: it
+	/// goes on exactly while the committed catalog, read in a transaction of its
+	/// own, holds a definition that describes that layout
+	/// ([`Self::catalog_holds_this_build`]). That definition is the statement's
+	/// own if it committed: a new index's, under an id drawn only for it, or a
+	/// rebuilt one's, restamped at the current format, which a later statement
+	/// on the same table leaves as it is. If the statement did not commit, the
+	/// catalog holds no such definition and the build is undone, unless the
+	/// definition it rolled back to already describes the same layout, which the
+	/// build then writes correctly as well. A catalog that cannot be read undoes
+	/// the build.
+	pub(super) async fn goes_on_after_failed_commit(&self) -> bool {
+		let indeterminate = self
+			.statement_tx
+			.get()
+			.and_then(std::sync::Weak::upgrade)
+			.is_some_and(|statement| statement.commit_outcome_unknown());
+		if !indeterminate {
+			return false;
+		}
+		let read = async {
+			let tx = self.new_read_tx().await?;
+			let holds = self.catalog_holds_this_build(&tx).await;
+			// A read-only transaction: its cancel discards nothing, and the
+			// read's outcome is what is returned.
+			let _ = tx.cancel().await;
+			holds
+		}
+		.await;
+		match read {
+			Ok(holds) => holds,
+			Err(err) => {
+				warn!(
+					index = %self.ix.name,
+					table = %self.ix.table_name,
+					error = %err,
+					"could not read whether the catalog describes this build after its \
+					 statement's commit failed; undoing the build"
+				);
+				false
+			}
+		}
 	}
 
 	/// Record one half of [`Building::release_gate`], reporting whether this
@@ -1433,12 +2135,22 @@ impl Building {
 	/// Wait until the statement that started this build has closed its
 	/// transaction, answering whether the build goes on.
 	///
-	/// A build no statement awaits is spawned while the statement's
-	/// transaction is still open. What that transaction stages beside the
-	/// definition, such as an analyzer the index names or a `PREPARE REMOVE` of
-	/// the index, is invisible to the build's own transactions until it
-	/// commits, so the build reads the catalog only once the transaction has
-	/// closed. The statement half of [`Building::release_gate`] arrives on
+	/// A statement spawns its build while its transaction is still open. Until
+	/// that transaction commits, what it stages is invisible to every other
+	/// transaction: the definition, which no writer can see either, so a record
+	/// written meanwhile is neither indexed by its writer nor queued for the
+	/// build; and anything else it stages, such as an analyzer the index names
+	/// or a `PREPARE REMOVE` of the index. Where the statement waits for its
+	/// build decides whether the build waits here for the transaction to close:
+	///
+	/// - `CONCURRENTLY`: the statement does not wait for the build, which waits here and reads
+	///   nothing, its scan included, until the transaction has closed.
+	/// - Blocking, awaited after the commit: the same. The statement's owner awaits the build only
+	///   once the commit has applied, so the wait here cannot hold the commit back.
+	/// - Blocking, awaited inside the transaction: the build must not wait here, as that
+	///   transaction cannot close before the build ends. It reads from the start.
+	///
+	/// The statement half of [`Building::release_gate`] arrives on
 	/// commit and on rollback, so the wait ends either way, and a build with no
 	/// statement behind it starts with that half arrived. Answers `false` once
 	/// the build is aborted, as the rollback of a fresh definition aborts it,
@@ -1447,9 +2159,6 @@ impl Building {
 	/// whose node stops.
 	/// Ownership is heartbeated while the transaction stays open, so the lease
 	/// outlasts a long one.
-	///
-	/// A blocking build must not wait here: it is awaited inside the
-	/// statement's transaction, which cannot close before it.
 	async fn await_statement_closed(
 		&self,
 		generation: BuildGeneration,
@@ -1531,153 +2240,190 @@ impl Building {
 	/// Release durable ownership of a published generation.
 	///
 	/// Until it commits, an `Online` generation still names this builder as its
-	/// owner, which is what keeps every node's index compaction off an index
-	/// whose definition the publishing statement has not committed yet.
+	/// owner, which is what keeps every node's background compaction off a
+	/// vector index whose definition the publishing statement has not committed
+	/// yet. The release commits in one transaction with the compaction request
+	/// it owes ([`Self::requeue_compaction_with_release`]).
 	///
 	/// A no-op for a generation this builder no longer owns: a build that ended
 	/// before publishing had its owner cleared by the transition that ended it.
 	///
 	/// Best-effort by design: a build that reaches here has already published,
-	/// so failing to clear the owner must not fail the statement waiting on it.
-	/// A stranded owner leaves the index unattended by background compaction
-	/// until the next build rewrites `!bs`; its pendings keep accumulating for a
-	/// reader that materialises them anyway.
+	/// so failing to release must not fail the statement waiting on it. A
+	/// release that does not commit leaves the owner set and queues nothing. A
+	/// stranded owner keeps a vector index out of background compaction until
+	/// the next build rewrites `!bs`. Any other index is compacted under a live
+	/// owner, from the request a pass that could not see its definition kept,
+	/// at the next drain. Either way readers merge the backlog meanwhile.
 	pub(super) async fn release_build_ownership(&self, generation: BuildGeneration) {
-		match self.read_durable_build_state().await {
-			Ok(Some(state))
-				if state.generation == generation
-					&& state.phase == IndexBuildPhase::Online
-					&& state.owner == Some(self.owner) => {}
-			Ok(_) => return,
-			Err(err) => {
-				warn!(
-					index = %self.ix.name,
-					table = %self.ix.table_name,
-					error = %err,
-					"could not read durable build state to release build ownership"
-				);
-				return;
-			}
-		}
-		match self
-			.update_owned_build_state(generation, |state| {
-				if state.phase == IndexBuildPhase::Online {
-					state.owner = None;
-				}
-			})
-			.await
-		{
-			Ok(_) => self.requeue_compaction_after_release().await,
-			Err(err) => warn!(
-				index = %self.ix.name,
-				table = %self.ix.table_name,
-				error = %err,
-				"could not release durable build ownership; background compaction \
-				 will skip this index until its next build"
-			),
-		}
-	}
-
-	/// Queue one compaction pass for an index whose fence has just come down.
-	///
-	/// A compaction request that arrives while the fence is up is answered with
-	/// "leave it to the builder", and the queue entry that carried it is deleted
-	/// with the rest of its batch. That is only free while the builder is still
-	/// going to drain the index: the fence outlives its last drain, so a write
-	/// committing in between queues a pending whose request is consumed by a
-	/// pass that does not act on it, leaving the pending for the next write to
-	/// the index to notice. This puts one request back to cover that window.
-	///
-	/// Runs after the release rather than with it. A pass that reads the queue
-	/// in between finds nothing and does nothing, where one that read this
-	/// request while the fence was still up would consume it.
-	///
-	/// Scoped to the kinds whose builders drain their own pendings, because
-	/// those are the only ones the fence applies to.
-	async fn requeue_compaction_after_release(&self) {
-		let fenced = match &self.ix.index {
-			Index::Hnsw(_) => true,
-			#[cfg(diskann)]
-			Index::DiskAnn(_) => true,
-			_ => false,
-		};
-		if !fenced {
-			return;
-		}
-		if let Err(err) = self.enqueue_compaction_request().await {
+		if let Err(err) = self.try_release_build_ownership(generation).await {
 			warn!(
 				index = %self.ix.name,
 				table = %self.ix.table_name,
 				error = %err,
-				"could not queue index compaction after releasing build ownership; \
-				 pendings queued during the build wait for the next write to the index"
+				"could not release durable build ownership; background compaction \
+				 skips a vector index until its next build, and any other index \
+				 until its next write"
 			);
 		}
 	}
 
-	async fn enqueue_compaction_request(&self) -> Result<()> {
-		let ctx = self.new_write_tx_ctx().await?;
-		let tx = ctx.tx();
-		tx.set_key(&self.ikb.new_ic_key(self.ctx.node_id()), &()).await?;
-		tx.trigger_index_compaction();
-		tx.commit().await
+	/// The transaction behind [`Self::release_build_ownership`]: a best-effort
+	/// transition that clears the owner of an `Online` generation and stages the
+	/// compaction request beside it, so both commit or neither does.
+	async fn try_release_build_ownership(&self, generation: BuildGeneration) -> Result<()> {
+		let request = self.ix.index.queues_compaction().then(|| self.ikb.clone());
+		let node_id = self.ctx.node_id();
+		self.transition_owned_build_state(
+			generation,
+			TransitionMode::BestEffort,
+			false,
+			|state| {
+				if state.phase != IndexBuildPhase::Online {
+					return false;
+				}
+				state.owner = None;
+				true
+			},
+			// A kind that queues no compaction work stages nothing. The staged
+			// future may borrow only the attempt's transaction, so it owns its
+			// handle on the index key base: a reference count, not a copy.
+			|tx| {
+				let ikb = request.clone()?;
+				Some(Box::pin(Self::requeue_compaction_with_release(tx, ikb, node_id)))
+			},
+		)
+		.await?;
+		Ok(())
 	}
 
-	/// Publish a durable build error if this builder still owns the generation.
-	async fn mark_durable_error(&self, generation: BuildGeneration, error: String) -> Result<()> {
-		loop {
-			let ctx = self.new_write_tx_ctx().await?;
-			let tx = ctx.tx();
-			let state_key = self.ikb.new_bs_key();
-			let Some(current) = tx.get_key(&state_key, None).await? else {
-				tx.cancel().await?;
-				return Ok(());
-			};
-			if current.generation != generation || current.owner != Some(self.owner) {
-				tx.cancel().await?;
-				return Ok(());
-			}
-			let mut next = current.clone();
-			next.phase = IndexBuildPhase::Error;
-			next.owner = None;
-			next.owner_heartbeat_at = None;
-			next.error = Some(error.clone());
-			next.report_status = Some(IndexBuildReportStatus::Error);
-			next.updated_at = Utc::now();
-			let res = tx.put_compare_key(&state_key, &next, Some(&current)).await;
-			match res {
-				Ok(()) => {
-					if self
-						.commit_and_retryable_conflict(
-							&tx,
-							"transient conflict marking build error, retrying",
-						)
-						.await?
-					{
-						continue;
-					}
-					return Ok(());
-				}
-				Err(err) if is_condition_not_met(&err) => {
-					let _ = tx.cancel().await;
-					continue;
-				}
-				Err(err) => {
-					let _ = tx.cancel().await;
-					return Err(err);
-				}
+	/// Stage the compaction request a release owes the index `ikb` names, in the
+	/// transaction that commits the release. Only a kind whose writes queue
+	/// compaction work ([`Index::queues_compaction`]) is owed one.
+	///
+	/// Owed by every kind whose writes queue compaction work, because a pass
+	/// may have been turned away from the index before the release: a vector
+	/// index's by the ownership fence, which holds until the release commits,
+	/// and a full-text or count index's because the statement's definition was
+	/// invisible to other sessions. Such a pass keeps one of the index's
+	/// requests queued, so no request is lost, but keeping it writes nothing
+	/// and wakes nothing, so what the build left would wait for the next drain.
+	/// The release's request, and the commit that carries it, wake the
+	/// compactor as soon as the condition has ended. Nothing records whether a
+	/// pass was turned away, so the request is staged whenever the kind queues
+	/// compaction at all; one with nothing behind it costs a pass over an empty
+	/// plan.
+	///
+	/// Staged in the release's own transaction because a compaction pass reads
+	/// the queue before it reads `!bs`. Committed together, a pass that sees the
+	/// request also sees the release, and neither can commit without the other.
+	/// The commit wakes the compactor. B-tree kinds write final entries and are
+	/// owed nothing.
+	async fn requeue_compaction_with_release(
+		tx: &Transaction,
+		ikb: IndexKeyBase,
+		node_id: Uuid,
+	) -> Result<()> {
+		tx.set_key(&ikb.new_ic_key(node_id), &()).await?;
+		tx.trigger_index_compaction();
+		// Stand in for a release commit that conflicts, and for one that fails
+		// outright. A real failed commit leaves the transaction finished with its
+		// writes discarded, as the transition does with an error raised here.
+		#[cfg(test)]
+		maybe_inject_retryable_conflict(
+			RetryableConflictSite::ConcurrentIndexOwnershipRelease,
+			node_id,
+		)?;
+		#[cfg(test)]
+		maybe_inject_non_retryable_error(
+			NonRetryableErrorSite::ConcurrentIndexOwnershipReleaseCommit,
+			node_id,
+		)?;
+		Ok(())
+	}
+
+	/// Publish a durable build error if this builder still owns the generation
+	/// and has not published it (see [`Self::mark_durable_ended`]).
+	pub(super) async fn mark_durable_error(
+		&self,
+		generation: BuildGeneration,
+		error: String,
+	) -> Result<()> {
+		self.mark_durable_ended(generation, IndexBuildReportStatus::Error, Some(error)).await
+	}
+
+	/// Publish an aborted user-facing status if this builder still owns the
+	/// generation and has not published it (see [`Self::mark_durable_ended`]).
+	async fn mark_durable_aborted(&self, generation: BuildGeneration) -> Result<()> {
+		self.mark_durable_ended(generation, IndexBuildReportStatus::Aborted, None).await
+	}
+
+	/// End this builder's generation in `Error`, reporting `status` and
+	/// `error`, if the builder still owns the generation and has not published
+	/// it.
+	///
+	/// A generation already published `Online` is left `Online`. Its index is
+	/// complete and queryable from the publish on: what a build does after it
+	/// only folds the writes queued during the build into the index, and
+	/// readers see those writes until background compaction folds them once the
+	/// build releases its ownership. Demoting the generation would withdraw a
+	/// complete index from every reader over the failure of that follow-up
+	/// work, and a generation in `Error` is only ever rebuilt.
+	///
+	/// Runs after the build has already stopped, and its callers do not act on
+	/// the outcome, so it is a [`TransitionMode::BestEffort`] transition: a
+	/// missing `!bs` or a generation this builder no longer owns is a no-op,
+	/// and a conflict is retried at most [`BEST_EFFORT_TRANSITION_RETRIES`]
+	/// times rather than forever. A generation it gives up on keeps its owner
+	/// and phase; one still `Building` or `Closing` is adopted by the resume
+	/// scan once the owner's lease expires.
+	async fn mark_durable_ended(
+		&self,
+		generation: BuildGeneration,
+		status: IndexBuildReportStatus,
+		error: Option<String>,
+	) -> Result<()> {
+		// Hold a stopped builder before it reads the build state, for as long as
+		// a test keeps the site armed, so the outcome the statement waiting on
+		// the build hears is the one the test arranged.
+		#[cfg(test)]
+		while let Err(err) = maybe_inject_retryable_conflict(
+			RetryableConflictSite::ConcurrentIndexGenerationEnd,
+			self.ctx.node_id(),
+		) {
+			if !self
+				.retryable_conflict(
+					&err,
+					"transient conflict ending the build generation, retrying",
+				)
+				.await
+			{
+				return Err(err);
 			}
 		}
-	}
-
-	/// Publish an aborted user-facing status if this builder still owns the generation.
-	async fn mark_durable_aborted(&self, generation: BuildGeneration) -> Result<()> {
-		self.update_owned_build_state(generation, |state| {
-			state.phase = IndexBuildPhase::Error;
-			state.owner = None;
-			state.report_status = Some(IndexBuildReportStatus::Aborted);
-			state.error = None;
-		})
+		self.transition_owned_build_state(
+			generation,
+			TransitionMode::BestEffort,
+			false,
+			|state| {
+				if state.phase == IndexBuildPhase::Online {
+					warn!(
+						index = %self.ix.name,
+						table = %self.ix.table_name,
+						?status,
+						?error,
+						"index build stopped after publishing its index; the index stays online"
+					);
+					return false;
+				}
+				state.phase = IndexBuildPhase::Error;
+				state.owner = None;
+				state.error.clone_from(&error);
+				state.report_status = Some(status);
+				true
+			},
+			no_staged_writes,
+		)
 		.await?;
 		Ok(())
 	}
@@ -1781,6 +2527,7 @@ impl Building {
 			.into();
 		let mut ctx = Context::new_child(&self.ctx);
 		ctx.set_transaction(tx);
+		ctx.set_index_places(self.places());
 		ctx.set_memory(self.memory.as_ref().map(MemoryHost::query));
 		Ok(ctx.freeze())
 	}
@@ -1795,6 +2542,7 @@ impl Building {
 			.into();
 		let mut ctx = Context::new_child(&self.ctx);
 		ctx.set_transaction(tx);
+		ctx.set_index_places(self.places());
 		ctx.set_memory(self.memory.as_ref().map(MemoryHost::query));
 		Ok(ctx.freeze())
 	}
@@ -1840,9 +2588,9 @@ impl Building {
 		};
 		// Check the index still exists and has not been marked for removal.
 		// We use get_tb_index (returns Option) instead of expect_tb_index because
-		// this check runs on a separate read transaction. During a blocking DEFINE
-		// INDEX, the index definition is only committed after indexing completes,
-		// so this read transaction may not yet see it.
+		// this check runs on a separate read transaction. A DEFINE INDEX that
+		// awaits its build inside its own transaction commits the definition only
+		// after indexing completes, so this read transaction may not yet see it.
 		// A miss is throttled like a hit: the prepare_remove flag is set only by
 		// a REMOVE INDEX, in a transaction of its own, on a definition it can
 		// read, so no flag exists before the definition is visible, and one set
@@ -1880,10 +2628,11 @@ impl Building {
 	/// generation. When the catalog entry is visible, it must also still point
 	/// at the same non-retiring index definition.
 	///
-	/// Blocking `DEFINE INDEX` is the one valid case where this builder may not
-	/// see the catalog entry yet: the statement is still waiting for the build
-	/// before committing the schema definition. In that case, matching durable
-	/// `Online` state is enough to continue.
+	/// A statement that has not committed the definition yet is the one valid
+	/// case where this builder may not see the catalog entry: one awaiting the
+	/// build inside its transaction, as every other build waits for its
+	/// statement's transaction to close ([`Building::await_statement_closed`]).
+	/// In that case, matching durable `Online` state is enough to continue.
 	pub(super) async fn compaction_write_still_owns_index(
 		&self,
 		tx: &Transaction,
@@ -2501,7 +3250,31 @@ impl Building {
 		)
 		.await?;
 		self.ensure_single_ticket_allocator(generation).await?;
-		self.mark_durable_online(generation, initial_count, updates_count).await?;
+		let published = self.mark_durable_online(generation, initial_count, updates_count).await;
+		#[cfg(test)]
+		let published = published.and_then(|()| {
+			maybe_inject_non_retryable_error(
+				NonRetryableErrorSite::ConcurrentIndexOnlineCommitAppliedUnknown,
+				self.ctx.node_id(),
+			)
+		});
+		// A publish whose commit reported an error may still have applied, and
+		// the durable state says which. One that did is carried on as published:
+		// the generation stays `Online` whatever this builder reports (see
+		// `mark_durable_ended`).
+		if let Err(err) = published
+			&& !self.published_despite(generation, &err).await
+		{
+			// This builder writes nothing more. A release is a no-op for a
+			// generation that did not go `Online`, and brings the ownership
+			// down for one whose publish applied although the state could not
+			// be read back.
+			if self.arrive_at_release_gate(RELEASE_GATE_BUILDER) {
+				self.release_build_ownership(generation).await;
+			}
+			return Err(err);
+		}
+		self.online.store(true, Ordering::Release);
 		// Drain the table's durable pending doc-ID reclaim markers, best-effort:
 		// it runs directly after the `Online` commit — before the fallible
 		// compaction passes below can skip it — and an error must not fail a
@@ -2602,7 +3375,13 @@ impl Building {
 					if let Err(err) = maybe_inject_retryable_conflict(
 						RetryableConflictSite::ConcurrentIndexHnswPendingCompaction,
 						self.ctx.node_id(),
-					) {
+					)
+					.and_then(|()| {
+						maybe_inject_non_retryable_error(
+							NonRetryableErrorSite::ConcurrentIndexHnswPendingCompaction,
+							self.ctx.node_id(),
+						)
+					}) {
 						self.discard_failed_hnsw_apply(outcome).await;
 						if self
 							.cancel_and_retryable_conflict(
@@ -2722,7 +3501,13 @@ impl Building {
 			if let Err(err) = maybe_inject_retryable_conflict(
 				RetryableConflictSite::ConcurrentIndexDiskAnnPendingCompaction,
 				self.ctx.node_id(),
-			) {
+			)
+			.and_then(|()| {
+				maybe_inject_non_retryable_error(
+					NonRetryableErrorSite::ConcurrentIndexDiskAnnPendingCompaction,
+					self.ctx.node_id(),
+				)
+			}) {
 				let _ = tx.cancel().await;
 				if self
 					.retryable_conflict(
@@ -2755,8 +3540,8 @@ impl Building {
 				let _ = tx.cancel().await;
 			}
 			match res {
-				Ok(true) => {}
-				Ok(false) => return Ok(()),
+				Ok(outcome) if outcome.applied() => {}
+				Ok(_) => return Ok(()),
 				Err(err) => {
 					if self
 						.retryable_conflict(
@@ -2873,13 +3658,19 @@ impl CommitAction for ReleaseBuildOwnership {
 	}
 }
 
+/// The rollback half: the statement did not commit, so its build is aborted,
+/// unless its commit's outcome is unknown and the committed catalog describes
+/// the build (see [`Building::goes_on_after_failed_commit`]). Either way the
+/// statement's half of the release gate arrives.
 impl RollbackAction for ReleaseBuildOwnership {
 	fn run(
 		self: Box<Self>,
 		_drain_started_at: Instant,
 	) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
 		Box::pin(async move {
-			self.0.abort();
+			if !self.0.goes_on_after_failed_commit().await {
+				self.0.abort();
+			}
 			(*self).release().await;
 			Ok(())
 		})
@@ -2893,29 +3684,30 @@ impl RollbackAction for ReleaseBuildOwnership {
 /// statement stages. A statement that does not commit leaves the catalog on the
 /// definition from before it, so a build left to finish would publish a layout
 /// that definition does not describe. Aborted, the generation ends in `Error`,
-/// reported as `aborted`, for the next `REBUILD INDEX` to retry.
-struct AbortUncommittedRebuild(IndexBuilding);
+/// reported as `aborted`, for the next `REBUILD INDEX` to retry. A commit
+/// whose outcome is unknown keeps the build while the committed catalog
+/// describes it (see [`Building::goes_on_after_failed_commit`]).
+pub(super) struct AbortUncommittedRebuild(IndexBuilding);
+
+impl AbortUncommittedRebuild {
+	/// The action for `building`, as a rebuild awaited after its commit
+	/// registers it.
+	#[cfg(test)]
+	pub(super) fn boxed(building: IndexBuilding) -> Box<dyn RollbackAction> {
+		Box::new(Self(building))
+	}
+}
 
 impl RollbackAction for AbortUncommittedRebuild {
 	fn run(
 		self: Box<Self>,
 		_drain_started_at: Instant,
 	) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
-		self.0.abort();
-		Box::pin(async { Ok(()) })
-	}
-}
-
-/// The outcome of a blocking build, awaited once the statement that started it
-/// has committed (see [`IndexBuilder::run_awaited_after_commit`]).
-struct AwaitedBuild(Receiver<Result<()>>);
-
-impl AfterCommitWait for AwaitedBuild {
-	fn wait(self: Box<Self>) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
 		Box::pin(async move {
-			self.0.await.map_err(|_| DatastoreError::IndexingBuildingCancelled {
-				reason: "Channel shutdown".to_string(),
-			})?
+			if !self.0.goes_on_after_failed_commit().await {
+				self.0.abort();
+			}
+			Ok(())
 		})
 	}
 }
@@ -2924,6 +3716,7 @@ struct BuildingFinishGuard(IndexBuilding);
 
 impl Drop for BuildingFinishGuard {
 	fn drop(&mut self) {
+		self.0.release_places();
 		// `Release` pairs with the `Acquire` load in `Building::wait_finished`,
 		// so a waiter woken by the notification observes the flag as set.
 		self.0.finished.store(true, Ordering::Release);
@@ -3041,14 +3834,39 @@ impl IndexBuildCleanup {
 			.await;
 	}
 
+	/// Whether the catalog, as `tx` reads it, holds a definition of this index:
+	/// the statement that started the build committed after all.
+	async fn definition_committed(&self, tx: &Transaction) -> Result<bool> {
+		Ok(tx
+			.get_tb_index_by_id(self.ns, self.db, &self.tb, self.ix, None)
+			.await?
+			.is_some_and(|ix| ix.index_id == self.ix))
+	}
+
+	/// Whether the catalog holds a definition of this index, read in a
+	/// transaction of its own.
+	async fn definition_committed_now(&self) -> Result<bool> {
+		let tx = self.tf.transaction(TransactionType::Read, self.sequences.clone()).await?;
+		let committed = self.definition_committed(&tx).await;
+		let _ = tx.cancel().await;
+		committed
+	}
+
 	/// Delete the build's durable state, queues and index data in one
-	/// transaction. `EXPUNGE` does not reach this path: it is a policy carried
-	/// by a removal statement, and the build this cleans belongs to a statement
-	/// that never committed.
-	async fn delete_once(&self) -> Result<()> {
+	/// transaction, unless the catalog holds the index's definition, which it
+	/// reads first in that same transaction; answers whether it deleted.
+	/// `EXPUNGE` does not reach this path: it is a policy carried by a removal
+	/// statement, and the build this cleans belongs to a statement that never
+	/// committed.
+	async fn delete_once(&self) -> Result<bool> {
 		let tx = self.tf.transaction(TransactionType::Write, self.sequences.clone()).await?;
 		let ikb = IndexKeyBase::new(self.ns, self.db, self.tb.clone(), self.ix);
-		let result: Result<()> = async {
+		let result: Result<bool> = async {
+			if self.definition_committed(&tx).await? {
+				// Nothing was written: the cancel's own outcome changes nothing.
+				let _ = tx.cancel_bare().await;
+				return Ok(false);
+			}
 			delete_durable_build_artifacts(&tx, &ikb, false).await?;
 			let index_prefix = IdxRoot {
 				ns: self.ns,
@@ -3059,14 +3877,18 @@ impl IndexBuildCleanup {
 			.range()?;
 			tx.delr(index_prefix).await?;
 			tx.commit_bare().await?;
-			Ok(())
+			Ok(true)
 		}
 		.await;
-		if let Err(err) = result {
-			let _ = tx.cancel_bare().await;
-			return Err(err);
+		match result {
+			Ok(deleted) => Ok(deleted),
+			Err(err) => {
+				// The failure is what is reported, and nothing of this
+				// transaction committed, so its cancel's outcome changes nothing.
+				let _ = tx.cancel_bare().await;
+				Err(err)
+			}
 		}
-		Ok(())
 	}
 }
 
@@ -3076,6 +3898,15 @@ impl IndexBuildCleanup {
 /// so by the time that transaction is cancelled the builder may already have
 /// committed build state and index data of its own, from separate transactions.
 /// This deletes that provisional state, so a retry sees a clean slate.
+///
+/// A transaction runs its rollback actions on every failed commit, including
+/// one whose outcome is unknown and which may have applied. So this acts only
+/// on what the catalog says: while it holds the index's definition, the
+/// statement committed, and the build is left to finish and publish as any
+/// build of a committed definition does, its builder untouched. The catalog is
+/// read before the builder is stopped, and again in the transaction that would
+/// delete, so a definition that becomes readable in between is not deleted
+/// from under. A definition with no build state would read as a ready index.
 ///
 /// The deletes go through the transaction's ordinary write methods and so count
 /// against the write-cardinality guard, unlike the reservation release that runs
@@ -3108,12 +3939,15 @@ impl RollbackAction for CleanUncommittedBuild {
 	) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
 		let abort_deadline = build_abort_deadline(drain_started_at);
 		Box::pin(async move {
+			if self.cleanup.definition_committed_now().await? {
+				return Ok(());
+			}
 			// Provisional state must be deleted even when no process-local task is
 			// present to stop.
 			self.cleanup.stop_builder(abort_deadline).await;
 			loop {
 				match self.cleanup.delete_once().await {
-					Ok(()) => return Ok(()),
+					Ok(_) => return Ok(()),
 					Err(err) if is_retryable_transaction_conflict(&err) => {
 						debug!(
 							error = %err,

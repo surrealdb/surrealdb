@@ -43,7 +43,9 @@ use crate::key::schema::{
 use crate::key::{KVKey, KVKeyDecode, KVValue, Resumable};
 use crate::trees::store::IndexStores;
 use crate::val::{RecordId, Value};
-use crate::{IndexKeyBase, bump_compaction_generation, kernels, read_compaction_generation};
+use crate::{
+	CompactionApply, IndexKeyBase, bump_compaction_generation, kernels, read_compaction_generation,
+};
 /// Represents the terms in a search query and their associated document sets
 pub struct QueryTerms {
 	/// The tokenized query terms
@@ -1235,30 +1237,32 @@ impl FullTextIndex {
 	}
 
 	/// Applies a prepared full-text compaction plan in a short write
-	/// transaction. A generation mismatch leaves the plan unapplied.
+	/// transaction.
+	///
+	/// A plan whose document-statistics or term-postings generation no longer
+	/// matches reports [`CompactionApply::LostRace`], and the caller must discard
+	/// the transaction: it can already hold the other generation's advance.
 	pub(crate) async fn apply_compaction(
 		&self,
 		tx: &Transaction,
 		plan: FullTextCompactionPlan,
-	) -> Result<bool> {
+	) -> Result<CompactionApply> {
 		if !plan.has_work() {
-			return Ok(false);
+			return Ok(CompactionApply::Empty);
 		}
 		if !self.reserve_doc_length_and_count_compaction_generation(tx, &plan.doc_lengths).await? {
-			return Ok(false);
+			return Ok(CompactionApply::LostRace);
 		}
 		if !self.reserve_term_docs_compaction_generation(tx, &plan.term_docs).await? {
-			return Ok(false);
+			return Ok(CompactionApply::LostRace);
 		}
-		let has_doc_lengths = plan.doc_lengths.has_logs();
-		let has_term_docs = plan.term_docs.has_logs();
-		if has_doc_lengths {
+		if plan.doc_lengths.has_logs() {
 			self.write_doc_length_and_count_compaction(tx, plan.doc_lengths).await?;
 		}
-		if has_term_docs {
+		if plan.term_docs.has_logs() {
 			self.write_term_docs_compaction(tx, plan.term_docs).await?;
 		}
-		Ok(has_doc_lengths || has_term_docs)
+		Ok(CompactionApply::Applied)
 	}
 
 	/// Performs compaction on the full-text index
@@ -1580,7 +1584,6 @@ mod tests {
 		DocId, DocumentTerms, FullTextIndex, TermChangeBatchKey, TermChangeKey, TermDocsResidual,
 		TermDocument,
 	};
-	use crate::IndexKeyBase;
 	use crate::catalog::{AnalyzerDefinition, DatabaseId, FullTextParams, IndexId, NamespaceId};
 	use crate::expr::Tokenizer;
 	#[cfg(feature = "cjk-embed-korean")]
@@ -1591,6 +1594,7 @@ mod tests {
 	use crate::key::schema::DocStatsKey;
 	use crate::test_env::{TestIndexEnv, TestIndexStore};
 	use crate::val::{Array, RecordId, Value};
+	use crate::{CompactionApply, IndexKeyBase};
 
 	/// Stands in for the evaluator behind an analyzer's `FUNCTION` clause. The
 	/// analyzer below declares none, so the seam is never reached.
@@ -2872,7 +2876,10 @@ mod tests {
 		test.remove_insert_task(&doc2).await;
 
 		let write_tx = test.new_tx(TransactionType::Write).await;
-		assert!(test.fti.apply_compaction(&write_tx, plan).await.unwrap());
+		assert_eq!(
+			test.fti.apply_compaction(&write_tx, plan).await.unwrap(),
+			CompactionApply::Applied
+		);
 		write_tx.commit().await.unwrap();
 
 		let tx = test.new_tx(TransactionType::Read).await;

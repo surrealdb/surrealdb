@@ -51,6 +51,7 @@ use surrealdb_kvs::api::{
 use surrealdb_kvs::key::{
 	AnyRange, KVKey, KVKeyDecode, KVSubspace, RawRange, Resumable, TypedRange,
 };
+use surrealdb_kvs::snapshot::ViewCapabilities;
 use surrealdb_kvs::timestamp::{BoxTimeStamp, BoxTimeStampImpl};
 use surrealdb_kvs::value::{EncodeContext, Encoded, KVValue};
 use surrealdb_kvs::{Estimate, FeatureLevel, Key, KeyRange, Release, Snapshot, SplitTarget};
@@ -726,6 +727,10 @@ pub struct Transaction {
 	/// Set when a record's write stopped part-way because its query could not
 	/// continue. See [`Self::poison_interrupted_write`].
 	interrupted_write_poisoned: AtomicBool,
+	/// Set once this transaction's commit has failed with an outcome the
+	/// storage could not report, before its rollback actions run. See
+	/// [`Self::commit_outcome_unknown`].
+	commit_outcome_unknown: AtomicBool,
 	/// Number of write slots reserved against the write-cardinality guard.
 	/// Each write operation atomically reserves its slot *before* the
 	/// storage call, so concurrent writes on the same transaction (e.g.
@@ -1598,6 +1603,7 @@ impl Transaction {
 			write_guard_poisoned: AtomicBool::new(false),
 			save_point_poisoned: AtomicBool::new(false),
 			interrupted_write_poisoned: AtomicBool::new(false),
+			commit_outcome_unknown: AtomicBool::new(false),
 			guarded_writes: AtomicU64::new(0),
 			pending_index_build_reservations: Mutex::new(Vec::new()),
 			cached_index_build_reservations: Mutex::new(HashMap::new()),
@@ -1947,10 +1953,16 @@ impl Transaction {
 		self
 	}
 
+	/// Whether this transaction's owner awaits queued work after it commits.
+	pub fn accepts_after_commit_waits(&self) -> bool {
+		self.after_commit_waits.as_ref().is_some_and(|waits| waits.strong_count() > 0)
+	}
+
 	/// Queue work for the owner to await once this transaction has committed.
 	///
 	/// Hands the work back when the owner made no such promise, or has since
-	/// gone, so the caller does it inline.
+	/// gone (see [`Self::accepts_after_commit_waits`]), so the caller does it
+	/// inline.
 	pub async fn wait_after_commit(
 		&self,
 		wait: Box<dyn AfterCommitWait>,
@@ -2250,6 +2262,16 @@ impl Transaction {
 		self.interrupted_write_poisoned.store(true, Ordering::Relaxed);
 	}
 
+	/// Whether this transaction's commit failed with an outcome the storage
+	/// could not report (`CommitOutcomeUnknown`): its writes may or may not have
+	/// applied. Set before the commit runs its rollback actions, so an action
+	/// can tell a commit that definitely did not apply, where it undoes what it
+	/// stands for, from one that may have, where it must first ask the durable
+	/// state.
+	pub fn commit_outcome_unknown(&self) -> bool {
+		self.commit_outcome_unknown.load(Ordering::Acquire)
+	}
+
 	/// Cancel without draining the registered close-time actions. See
 	/// [`Self::commit_bare`].
 	pub async fn cancel_bare(&self) -> Result<()> {
@@ -2339,6 +2361,23 @@ impl Transaction {
 		}
 		// Commit the transaction
 		let committed = self.commit_store().await;
+		#[cfg(any(test, feature = "test-hooks"))]
+		let committed = match committed {
+			Ok(()) if !self.rollback_actions.lock().await.is_empty() => {
+				match self.triggers.take_commit_applied_unknown() {
+					Some(hook) => {
+						if let Some(hook) = hook {
+							hook().await;
+						}
+						Err(KvsError::CommitOutcomeUnknown(
+							"injected once the commit applied".to_string(),
+						))
+					}
+					None => Ok(()),
+				}
+			}
+			committed => committed,
+		};
 		#[cfg(diskann)]
 		if committed.is_ok() && guard_fences.leases_relied.is_some() {
 			Box::pin(self.recover_diskann_leases(&guard_fences)).await;
@@ -2392,6 +2431,9 @@ impl Transaction {
 			// written. All other cleanup writes it triggers are refused the
 			// same way while shutdown is in progress, so a shutting-down
 			// datastore stays consistent without special-casing here.
+			if matches!(e, KvsError::CommitOutcomeUnknown(_)) {
+				self.commit_outcome_unknown.store(true, Ordering::Release);
+			}
 			let cleanup_result = self.run_rollback_actions().await;
 			let release_result = self.release_index_build_reservations().await;
 			self.discard_commit_actions().await;
@@ -6856,10 +6898,25 @@ impl Transaction {
 		self.metrics.record_scan(rows, key_bytes, value_bytes);
 	}
 
+	/// Record a batched point read made through this transaction's read view
+	/// ([`Self::snapshot`]), whose reads are not metered, as the transaction's own batched read
+	/// records one: one get, `records` keys found, `key_bytes` the length of every key asked
+	/// for, and `value_bytes` the length of every value found.
+	pub fn record_view_get(&self, records: u64, key_bytes: u64, value_bytes: u64) {
+		self.metrics.record_get(records, key_bytes, value_bytes);
+	}
+
 	/// This transaction's owned read view, or `None` when the backend cannot give one
 	/// ([`Transactor::snapshot`]).
 	pub fn snapshot(&self) -> Option<Arc<dyn Snapshot>> {
 		self.tr.snapshot()
+	}
+
+	/// What read views the datastore can hand out, the same for every transaction opened on it
+	/// ([`Transactor::view_capabilities`]). A caller reads it to decide, before opening a
+	/// transaction, whether one would give a view.
+	pub fn view_capabilities(&self) -> ViewCapabilities {
+		self.tr.view_capabilities()
 	}
 
 	/// What a range or region holds ([`Transactor::estimate`]).
@@ -8244,6 +8301,7 @@ impl Transaction {
 			write_guard_poisoned: AtomicBool::new(false),
 			save_point_poisoned: AtomicBool::new(false),
 			interrupted_write_poisoned: AtomicBool::new(false),
+			commit_outcome_unknown: AtomicBool::new(false),
 			guarded_writes: AtomicU64::new(0),
 			pending_index_build_reservations: Mutex::new(Vec::new()),
 			cached_index_build_reservations: Mutex::new(HashMap::new()),

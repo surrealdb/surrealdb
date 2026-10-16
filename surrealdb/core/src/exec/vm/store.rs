@@ -60,7 +60,7 @@ fn session_sink_of<'a>(
 /// the implementation, or nothing where the entry serves data statements
 /// alone, so shared code reaches the schema runtime only through this hook.
 pub(crate) trait SchemaSteps {
-	/// Takes `instr`, as [`schema_step`] does.
+	/// Takes `instr`, as [`schema_step`] does, `lent` included.
 	fn step<'a, 'r>(
 		&'a self,
 		program: &'a Program,
@@ -68,6 +68,7 @@ pub(crate) trait SchemaSteps {
 		regs: &'a mut [Scalar<'r>],
 		reserved_taken: &'a mut [bool],
 		ctx: &'a ExecutionContext,
+		lent: Option<super::morsel::places::Statement>,
 	) -> BoxFut<'a, FlowResult<Option<usize>>>;
 
 	/// Takes the backfill instruction `instr`, which runs over the pipeline's state, as
@@ -96,8 +97,9 @@ impl SchemaSteps for FullSchemaSteps {
 		regs: &'a mut [Scalar<'r>],
 		reserved_taken: &'a mut [bool],
 		ctx: &'a ExecutionContext,
+		lent: Option<super::morsel::places::Statement>,
 	) -> BoxFut<'a, FlowResult<Option<usize>>> {
-		Box::pin(schema_step(program, instr, regs, reserved_taken, ctx))
+		Box::pin(schema_step(program, instr, regs, reserved_taken, ctx, lent))
 	}
 
 	fn backfill<'a, 'r>(
@@ -220,14 +222,19 @@ fn dml_inner(
 /// Takes store instruction `instr` of a schema statement, `INFO`, `LIVE`,
 /// `KILL`, `USE`, `OPTION`, `ACCESS` or `SHOW`, answering the instruction the
 /// body jumps to, or `None` to continue with the next.
+///
+/// `lent` is the running statement's registration with the node's place
+/// pool, which a blocking [`StoreInstr::BuildIndex`] lends to the build it
+/// waits on, so the build's places count as the statement's.
 async fn schema_step(
 	program: &Program,
 	instr: &StoreInstr,
 	regs: &mut [Scalar<'_>],
 	reserved_taken: &mut [bool],
 	ctx: &ExecutionContext,
+	lent: Option<super::morsel::places::Statement>,
 ) -> FlowResult<Option<usize>> {
-	let stepped = step_inner(program, instr, regs, reserved_taken, ctx).await;
+	let stepped = step_inner(program, instr, regs, reserved_taken, ctx, lent).await;
 	note_refusal(instr, ctx, stepped.is_err());
 	stepped
 }
@@ -238,6 +245,7 @@ async fn step_inner(
 	regs: &mut [Scalar<'_>],
 	reserved_taken: &mut [bool],
 	ctx: &ExecutionContext,
+	lent: Option<super::morsel::places::Statement>,
 ) -> FlowResult<Option<usize>> {
 	// A speculative run (`vm::speculate`) takes the statement's reads and
 	// writes of the catalog and nothing else: what reaches past the
@@ -1827,6 +1835,7 @@ async fn step_inner(
 			index,
 			blocking,
 			fresh,
+			prior,
 		} => {
 			use crate::catalog::FromStored as _;
 			let table: crate::catalog::StoredTableDefinition = rust(&read(regs, *table))?;
@@ -1835,7 +1844,22 @@ async fn step_inner(
 			let index: crate::catalog::StoredIndexDefinition = rust(&read(regs, *index))?;
 			let index =
 				crate::catalog::IndexDefinition::from_stored(&index).map_err(ControlFlow::Err)?;
-			let frozen = ctx.ctx();
+			let lending;
+			let frozen = match lent {
+				// The build counts its places as the waiting statement's.
+				Some(statement) if *blocking => {
+					let mut lending_ctx = crate::ctx::Context::new_child(ctx.ctx());
+					lending_ctx.set_index_places(crate::ctx::IndexPlaces::statement(
+						statement,
+						crate::exec::planner::placement::Policy::from_config(
+							&ctx.ctx().config.exec,
+						),
+					));
+					lending = lending_ctx.freeze();
+					&lending
+				}
+				_ => ctx.ctx(),
+			};
 			let builder = frozen.get_index_builder().ok_or_else(|| {
 				ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::unreachable(
 					"No Index Builder",
@@ -1858,16 +1882,50 @@ async fn step_inner(
 				ControlFlow::Err(anyhow!("an index built without the session's options"))
 			})?;
 			let index = std::sync::Arc::new(index);
-			// A fresh definition is staged in this transaction and taken back if
-			// its build fails, so its build is awaited inside the transaction. A
-			// rebuilt index is already defined: its build is awaited after the
-			// commit wherever the transaction's owner offers that.
-			if *blocking && !*fresh {
-				builder
-					.run_awaited_after_commit(frozen, options, table.table_id, index, &ctx.txn())
-					.await
-			} else {
-				builder.run(frozen, options, table.table_id, index, *blocking).await
+			let txn = ctx.txn();
+			// The one place a blocking build's wait is placed. Only a
+			// transaction whose owner awaits work after the commit offers that
+			// at all; any other waits inside the transaction. Where it is
+			// offered, a rebuilt index, already defined, is awaited after the
+			// commit. So is a new index on a table that existed, its definition
+			// removed again should its build fail before the index is online. A
+			// replacement is awaited inside the transaction, which publishes it
+			// and retires the index it replaces in one commit, so readers move
+			// from one ready index to the other; so is an index on a table the
+			// statement creates, whose build commits too little to outlast any
+			// engine's conflict window, and which a failed build rolls back with
+			// the definition.
+			let after_commit = match prior {
+				_ if !*blocking || !txn.accepts_after_commit_waits() => None,
+				None if !*fresh => Some(None),
+				Some((existing, prior_table))
+					if !read(regs, *existing).is_truthy()
+						&& read(regs, *prior_table).is_truthy() =>
+				{
+					let (ns, db) = options.ns_db().map_err(ControlFlow::Err)?;
+					Some(Some(crate::kvs::index::RemoveFailedDefinition::new(
+						std::sync::Arc::clone(frozen),
+						(ns.to_owned(), db.to_owned()),
+						&table,
+						&index,
+					)))
+				}
+				_ => None,
+			};
+			match after_commit {
+				Some(undo) => {
+					builder
+						.run_awaited_after_commit(
+							frozen,
+							options,
+							table.table_id,
+							index,
+							&txn,
+							undo,
+						)
+						.await
+				}
+				None => builder.run(frozen, options, table.table_id, index, *blocking).await,
 			}
 			.map_err(ControlFlow::Err)?;
 		}

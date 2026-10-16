@@ -412,6 +412,12 @@ pub struct CommitTriggers {
 	/// stalls there need.
 	#[cfg(any(test, feature = "test-hooks"))]
 	before_commit: Mutex<Option<BeforeCommitHook>>,
+	/// Whether the next commit through this datastore that has rollback
+	/// actions registered reports its outcome unknown once it has applied, as
+	/// the tests of a commit that applied but could not say so need, with the
+	/// work to run between the commit applying and the report.
+	#[cfg(any(test, feature = "test-hooks"))]
+	commit_applied_unknown: Mutex<Option<Option<BeforeCommitHook>>>,
 }
 
 /// Work a test runs inside a commit, between its covering of DiskANN guards and
@@ -460,6 +466,21 @@ impl CommitTriggers {
 	#[cfg(any(test, feature = "test-hooks"))]
 	pub(crate) fn take_before_commit_hook(&self) -> Option<BeforeCommitHook> {
 		self.before_commit.lock().take()
+	}
+
+	/// Have the next commit through this datastore that has rollback actions
+	/// registered, a statement's, apply, run `between` if given, and then
+	/// report `CommitOutcomeUnknown`, running its rollback actions as such a
+	/// failure does.
+	#[cfg(any(test, feature = "test-hooks"))]
+	pub fn set_next_commit_applied_unknown(&self, between: Option<BeforeCommitHook>) {
+		*self.commit_applied_unknown.lock() = Some(between);
+	}
+
+	/// What a test asked of the next such commit, taken so it applies once.
+	#[cfg(any(test, feature = "test-hooks"))]
+	pub(crate) fn take_commit_applied_unknown(&self) -> Option<Option<BeforeCommitHook>> {
+		self.commit_applied_unknown.lock().take()
 	}
 
 	/// Record a hot adjacency scope observed by a read, waking the fold task.

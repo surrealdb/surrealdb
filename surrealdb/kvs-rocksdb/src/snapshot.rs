@@ -1,12 +1,18 @@
 //! The read view of a RocksDB transaction that has buffered no put or delete, and the cursors it
 //! opens.
 //!
-//! A [`RocksSnapshot`] holds the transaction's `inner` slot and nothing else. The transaction's
-//! own snapshot is the only state the view relies on and nothing is copied for it, so
+//! A [`RocksSnapshot`] holds the transaction's `inner` slot, and, once it has read, a weak handle
+//! on the transaction with the read options its point reads share. The transaction's own snapshot
+//! is the only state the view relies on and nothing is copied for it, so
 //! [`Snapshot::held_bytes`] stays at its default of `0`. Each cursor takes its
-//! own keep-alive on the transaction when it is opened, so `commit` and `cancel` wait for the
-//! cursors that are alive and the view itself never delays them: once the slot has been emptied,
-//! [`Snapshot::open`] reports [`Error::TransactionFinished`].
+//! own keep-alive on the transaction when it is opened, and each batched point read takes one for
+//! the length of the read, so `commit` and `cancel` wait for the cursors and reads that are alive
+//! and the view itself never delays them: once a commit or cancel has begun to wait for the
+//! transaction, [`Snapshot::get_many`] reports [`Error::TransactionFinished`], and once the slot
+//! has been emptied so does [`Snapshot::open`]. A cursor takes the slot's lock only to take its
+//! keep-alive. A point read takes no lock at all after the view's first read, and runs on the
+//! calling task when the runtime has room for it, as a transaction's own point read does; so point
+//! reads through one view, from however many tasks, run side by side.
 //!
 //! A cursor reads the database directly through the transaction's snapshot, so it sees what the
 //! transaction began with and nothing committed since. Every chunk it reads runs on the affinity
@@ -23,9 +29,10 @@ use rocksdb::ReadOptions;
 use surrealdb_kvs::api::{BoxFut, GetMultiResult, ScanChunkStats, ValVisitor};
 use surrealdb_kvs::err::{Error, Result};
 use surrealdb_kvs::{Direction, Key, KeyRange, Page, RangeCursor, Resume, Snapshot};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, OnceCell};
 
-use crate::owned_tx::{OwnedRawDbIter, OwnedTx};
+use crate::inline_guard::InlineGuard;
+use crate::owned_tx::{OwnedRawDbIter, OwnedTx, OwnedTxHandle, WeakTx};
 use crate::{attach_snapshot, kvs_error};
 
 /// The read view of a transaction that has buffered no put or delete: every read-only
@@ -39,6 +46,21 @@ pub(super) struct RocksSnapshot {
 	pub(super) versioned: bool,
 	/// Whether cursors verify block checksums, as scans do.
 	pub(super) verify_checksums: bool,
+	/// Where a point read runs: on the calling task when the runtime has room, on the affinity
+	/// pool otherwise, as the transaction's own point reads do.
+	pub(super) inline_guard: Arc<InlineGuard>,
+	/// What every unversioned point read shares, taken under the slot's lock by the first one.
+	pub(super) reads: OnceCell<PointReads>,
+}
+
+/// What the point reads of one view share: a weak handle on the transaction, from which each read
+/// takes its own keep-alive without the slot's lock, and the read options naming the transaction's
+/// snapshot.
+pub(super) struct PointReads {
+	tx: WeakTx,
+	/// Name the transaction's snapshot, so they are read only under a keep-alive taken from `tx`:
+	/// the snapshot lives exactly as long as the transaction. See `attach_snapshot`.
+	ro: ReadOptions,
 }
 
 impl Snapshot for RocksSnapshot {
@@ -77,8 +99,16 @@ impl Snapshot for RocksSnapshot {
 		})
 	}
 
-	/// RocksDB's native `multi_get` through the transaction's snapshot. The lock is held for the
-	/// read, which runs on the affinity pool, so `commit` and `cancel` wait for it.
+	/// RocksDB's native `multi_get` through the transaction's snapshot.
+	///
+	/// An unversioned read takes its keep-alive from the view's weak handle and reads under the
+	/// options every such read shares, so it takes no lock and builds no options; only the
+	/// view's first read takes the slot's lock, to set them up. It runs on the calling task when
+	/// the runtime has room for it and on the affinity pool otherwise
+	/// ([`InlineGuard::try_inline_or_offload`]). A read as of a version builds its own options
+	/// under the slot's lock, as a cursor does. `commit` and `cancel` wait for the keep-alive,
+	/// and so for every read in flight; a read that starts once either has begun to wait fails
+	/// with [`Error::TransactionFinished`], whatever its keys.
 	fn get_many<'a>(
 		&'a self,
 		keys: &'a [Key<'a>],
@@ -88,47 +118,86 @@ impl Snapshot for RocksSnapshot {
 			if !self.versioned && version.is_some() {
 				return Err(Error::UnsupportedVersionedQueries);
 			}
-			let guard = self.inner.lock().await;
-			// SAFETY: the closure borrows `self`, the keys and the held `MutexGuard`, so the
-			// returned future must not be leaked while those borrows are live. It is awaited
-			// inline here and never stored, so its destructor -- which blocks until the worker has
-			// stopped touching the borrows -- always runs before they expire.
-			unsafe {
-				affinitypool::spawn_local(move || {
+			if version.is_some() {
+				// With the keep-alive taken, the options stay valid after the lock is released:
+				// `into_inner` waits for the handle before the transaction, and with it the
+				// snapshot, is destroyed. See `attach_snapshot`.
+				let (ro, handle) = {
+					let guard = self.inner.lock().await;
 					let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
-					let mut ro = ReadOptions::default();
-					attach_snapshot(&mut ro, inner);
-					ro.set_async_io(true);
-					ro.fill_cache(true);
-					ro.set_verify_checksums(self.verify_checksums);
+					let mut ro = self.point_read_options(inner);
+					ro.set_timestamp(version.unwrap_or(u64::MAX).to_le_bytes().to_vec());
+					(ro, inner.handle())
+				};
+				return self.read(handle, keys, &ro).await;
+			}
+			let reads = self
+				.reads
+				.get_or_try_init(|| async {
+					let guard = self.inner.lock().await;
+					let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
+					let mut ro = self.point_read_options(inner);
 					if self.versioned {
-						ro.set_timestamp(version.unwrap_or(u64::MAX).to_le_bytes().to_vec());
+						ro.set_timestamp(u64::MAX.to_le_bytes().to_vec());
 					}
-					let mut records = 0u64;
-					let mut value_bytes = 0u64;
-					let values = inner
-						.db()
-						.multi_get_opt(keys, &ro)
-						.into_iter()
-						.map(|res| match res {
-							Ok(Some(val)) => {
-								records += 1;
-								value_bytes += val.len() as u64;
-								Ok(Some(val))
-							}
-							Ok(None) => Ok(None),
-							Err(e) => Err(kvs_error(e)),
-						})
-						.collect::<Result<Vec<_>>>()?;
-					Ok(GetMultiResult {
-						values,
-						records,
-						value_bytes,
+					Ok::<_, Error>(PointReads {
+						tx: inner.weak(),
+						ro,
 					})
 				})
-			}
-			.await
+				.await?;
+			let handle = reads.tx.handle().ok_or(Error::TransactionFinished)?;
+			self.read(handle, keys, &reads.ro).await
 		})
+	}
+}
+
+impl RocksSnapshot {
+	/// The options of a point read through the transaction's snapshot.
+	fn point_read_options(&self, inner: &OwnedTx) -> ReadOptions {
+		let mut ro = ReadOptions::default();
+		attach_snapshot(&mut ro, inner);
+		ro.set_async_io(true);
+		ro.fill_cache(true);
+		ro.set_verify_checksums(self.verify_checksums);
+		ro
+	}
+
+	/// Read `keys` under `ro`, which names the snapshot of the transaction `handle` keeps alive.
+	/// The handle is consumed by the read, so the keep-alive is released only once nothing reads
+	/// through `ro` any more.
+	async fn read(
+		&self,
+		handle: OwnedTxHandle,
+		keys: &[Key<'_>],
+		ro: &ReadOptions,
+	) -> Result<GetMultiResult> {
+		self.inline_guard
+			.try_inline_or_offload(move || {
+				#[cfg(test)]
+				hooks::before_get_many(keys);
+				let mut records = 0u64;
+				let mut value_bytes = 0u64;
+				let values = handle
+					.multi_get_opt(keys, ro)
+					.into_iter()
+					.map(|res| match res {
+						Ok(Some(val)) => {
+							records += 1;
+							value_bytes += val.len() as u64;
+							Ok(Some(val))
+						}
+						Ok(None) => Ok(None),
+						Err(e) => Err(kvs_error(e)),
+					})
+					.collect::<Result<Vec<_>>>()?;
+				Ok(GetMultiResult {
+					values,
+					records,
+					value_bytes,
+				})
+			})
+			.await
 	}
 }
 
@@ -370,5 +439,51 @@ impl RangeCursor for RocksRangeCursor {
 			(None, Direction::Backward) => self.hi.clone(),
 		};
 		Some(Resume::new(Key::from(at)))
+	}
+}
+
+/// Hooks the tests use to hold a view's reads at a known point.
+#[cfg(test)]
+pub(crate) mod hooks {
+	use std::sync::{Arc, Mutex};
+
+	use surrealdb_kvs::Key;
+
+	type Hook = Arc<dyn Fn() + Send + Sync>;
+
+	/// The registered hooks, each with the key prefix it applies to.
+	static BEFORE_GET_MANY: Mutex<Vec<(Vec<u8>, Hook)>> = Mutex::new(Vec::new());
+
+	/// Runs `hook` inside every `get_many` whose first key starts with `prefix`, immediately before
+	/// the batched read, until the returned guard drops. The prefix keeps a test's hook off the
+	/// reads of tests running beside it in the same process.
+	pub(crate) fn before_get_many_with(prefix: &[u8], hook: Hook) -> Registered {
+		BEFORE_GET_MANY.lock().unwrap().push((prefix.to_vec(), hook));
+		Registered(prefix.to_vec())
+	}
+
+	/// Unregisters the hook for its prefix when dropped.
+	pub(crate) struct Registered(Vec<u8>);
+
+	impl Drop for Registered {
+		fn drop(&mut self) {
+			BEFORE_GET_MANY.lock().unwrap().retain(|(prefix, _)| *prefix != self.0);
+		}
+	}
+
+	/// Calls the hook registered for the prefix of `keys`' first key, if there is one.
+	pub(super) fn before_get_many(keys: &[Key<'_>]) {
+		let Some(first) = keys.first() else {
+			return;
+		};
+		let hook = BEFORE_GET_MANY
+			.lock()
+			.unwrap()
+			.iter()
+			.find(|(prefix, _)| first.as_slice().starts_with(prefix))
+			.map(|(_, hook)| Arc::clone(hook));
+		if let Some(hook) = hook {
+			hook();
+		}
 	}
 }

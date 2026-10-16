@@ -39,7 +39,7 @@ use crate::trees::diskann::index::{DiskAnnCompactionPlan, DiskAnnIndex};
 use crate::trees::hnsw::index::{HnswCompactionOutcome, HnswCompactionPlan, HnswIndex};
 use crate::trees::store::IndexStores;
 use crate::val::{Array, RecordId, TableName, Value};
-use crate::{Error as IdxError, IndexKeyBase, key};
+use crate::{CompactionApply, Error as IdxError, IndexKeyBase, key};
 
 pub struct IndexOperation<'a> {
 	env: &'a dyn IndexEnv,
@@ -379,8 +379,9 @@ impl<'a> IndexOperation<'a> {
 
 	/// Applies a prepared full-text compaction plan.
 	///
-	/// Returns `false` when there is no work or another compactor advanced the
-	/// generation first.
+	/// Reports [`CompactionApply::Empty`] when the plan has no work, and
+	/// [`CompactionApply::LostRace`] when another compactor advanced a generation
+	/// first.
 	pub async fn apply_fulltext_compaction(
 		ixs: &IndexStores,
 		ikb: &IndexKeyBase,
@@ -389,7 +390,7 @@ impl<'a> IndexOperation<'a> {
 		allow_list: &[PathBuf],
 		format_version: u16,
 		plan: FullTextCompactionPlan,
-	) -> Result<bool> {
+	) -> Result<CompactionApply> {
 		let ft = FullTextIndex::new(ixs, tx, ikb.clone(), p, allow_list, format_version).await?;
 		ft.apply_compaction(tx, plan).await
 	}
@@ -404,10 +405,11 @@ impl<'a> IndexOperation<'a> {
 
 	/// Applies a prepared HNSW pending compaction plan.
 	///
-	/// Reports [`HnswCompactionOutcome::Skipped`] when there is no work, the
-	/// table is gone, another compactor advanced the generation first, or a
-	/// captured pending key changed before the write. What the other outcomes
-	/// owe a caller whose commit then fails is on [`HnswCompactionOutcome`].
+	/// Reports [`HnswCompactionOutcome::Empty`] when there is no work or the
+	/// table is gone, and [`HnswCompactionOutcome::LostRace`] when another
+	/// compactor advanced the generation first or a captured pending key changed
+	/// before the write. What the other outcomes owe a caller whose commit then
+	/// fails is on [`HnswCompactionOutcome`].
 	pub async fn apply_hnsw_compaction(
 		env: &dyn IndexEnv,
 		ixs: &IndexStores,
@@ -421,7 +423,7 @@ impl<'a> IndexOperation<'a> {
 			let hnsw = ixs.get_index_hnsw(env, tb.table_id, ikb, p, format_version).await?;
 			return hnsw.apply_compaction(env, plan).await;
 		}
-		Ok(HnswCompactionOutcome::Skipped)
+		Ok(HnswCompactionOutcome::Empty)
 	}
 
 	#[cfg(diskann)]
@@ -434,7 +436,12 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	#[cfg(diskann)]
-	/// Applies a prepared DiskANN pending compaction plan.
+	/// Applies a prepared DiskANN pending compaction plan, committing its
+	/// transaction when it reports [`CompactionApply::Applied`].
+	///
+	/// Reports [`CompactionApply::Empty`] when the table is gone, without
+	/// finishing the transaction; every other outcome is as the index's own
+	/// `DiskAnnIndex::apply_compaction` documents it.
 	pub async fn apply_diskann_compaction(
 		env: &dyn IndexEnv,
 		ixs: &IndexStores,
@@ -442,13 +449,13 @@ impl<'a> IndexOperation<'a> {
 		p: &DiskAnnParams,
 		format_version: u16,
 		plan: DiskAnnCompactionPlan,
-	) -> Result<bool> {
+	) -> Result<CompactionApply> {
 		let tx = env.tx();
 		if let Some(tb) = tx.get_tb(ikb.ns(), ikb.db(), ikb.table(), None).await? {
 			let diskann = ixs.get_index_diskann(format_version, tb.table_id, ikb, p).await?;
 			return diskann.apply_compaction(env, plan).await;
 		}
-		Ok(false)
+		Ok(CompactionApply::Empty)
 	}
 
 	/// Creates the read-phase plan for count-index compaction.
@@ -463,13 +470,14 @@ impl<'a> IndexOperation<'a> {
 
 	/// Applies a prepared count-index compaction plan.
 	///
-	/// Returns `false` when there is no work or another compactor advanced the
+	/// Reports [`CompactionApply::Empty`] when the plan has no work, and
+	/// [`CompactionApply::LostRace`] when another compactor advanced the
 	/// generation first.
 	pub async fn apply_count_compaction(
 		ikb: &IndexKeyBase,
 		tx: &Transaction,
 		plan: IndexCountCompactionPlan,
-	) -> Result<bool> {
+	) -> Result<CompactionApply> {
 		IndexCountThingIterator::apply_compaction(ikb, tx, plan).await
 	}
 
