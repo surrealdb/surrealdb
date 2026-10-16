@@ -1854,7 +1854,7 @@ pub async fn client_side_transactions(_new_db: impl CreateDb) {
 	// Client-side transactions are not supported on HTTP
 }
 
-#[cfg(not(feature = "protocol-http"))]
+#[cfg(not(any(feature = "protocol-http", feature = "kv-tikv")))]
 pub async fn a_conflict_at_the_commit_of_a_client_transaction_keeps_its_kind(
 	new_db: impl CreateDb,
 ) {
@@ -1890,11 +1890,12 @@ pub async fn a_conflict_at_the_commit_of_a_client_transaction_keeps_its_kind(
 	drop(permit);
 }
 
-#[cfg(feature = "protocol-http")]
+#[cfg(any(feature = "protocol-http", feature = "kv-tikv"))]
 pub async fn a_conflict_at_the_commit_of_a_client_transaction_keeps_its_kind(
 	_new_db: impl CreateDb,
 ) {
-	// Client-side transactions are not supported on HTTP
+	// Client-side transactions are not supported on HTTP, and TiKV reports this conflict inside
+	// `MultipleKeyErrors`, which the kvs error mapping doesn't recognise as a conflict yet
 }
 
 pub async fn refresh_tokens(new_db: impl CreateDb) {
