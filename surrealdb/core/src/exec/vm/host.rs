@@ -2630,6 +2630,10 @@ async fn scan_range(
 	// The first read of storage of a run whose reader says how many rows it
 	// takes reads no more records than that before it hands its rows on.
 	let first = state.scan_hint.take();
+	// The links of an earlier run's last batch are not this run's.
+	if let Some(ahead) = &mut state.link_ahead {
+		ahead.clear();
+	}
 	if pipeline.in_place {
 		// A body in the storage cursor planned as morsels reads its key range in parts; a scan cut
 		// by a coarse gate reads in one cursor, which the gate stops.
@@ -2734,9 +2738,17 @@ async fn scan_range(
 		}
 		#[cfg(test)]
 		RECORDS_SCANNED.with(|scanned| scanned.set(scanned.get() + batch.len()));
-		for row in batch.into_values() {
-			if rows.row(program, pipeline, row, state, ctx, yielder, flush_at).await? {
-				return Ok(true);
+		// The links of the rows are read ahead a run of rows at a time, each run before its rows.
+		let mut pending = batch.into_values().into_iter();
+		while pending.len() > 0 {
+			let run = match rows.ahead(pipeline, pending.as_slice(), state, ctx).await {
+				Ok(run) => run.max(1),
+				Err(e) => return rows.fail(e, state, ctx, yielder, flush_at).await,
+			};
+			for row in pending.by_ref().take(run) {
+				if rows.row(program, pipeline, row, state, ctx, yielder, flush_at).await? {
+					return Ok(true);
+				}
 			}
 		}
 	}
@@ -3861,7 +3873,10 @@ async fn run_body(
 								let base = interp::read_operand(regs, reader, program, *src)
 									.map_err(ControlFlow::Err)?;
 								let eval_ctx = frame_eval(program, state, ctx, *frame);
-								let eval_ctx = row_eval(state, eval_ctx, &row);
+								let mut eval_ctx = row_eval(state, eval_ctx, &row);
+								if pipeline.deref_windows {
+									eval_ctx.link_windows = Some(&state.link_pool);
+								}
 								let value = out_of_line(|| {
 									crate::exec::vm::access::field::evaluate_field(
 										&base,
@@ -3887,7 +3902,10 @@ async fn run_body(
 								let base = interp::read_operand(regs, reader, program, *src)
 									.map_err(ControlFlow::Err)?;
 								let eval_ctx = frame_eval(program, state, ctx, *frame);
-								let eval_ctx = row_eval(state, eval_ctx, &row);
+								let mut eval_ctx = row_eval(state, eval_ctx, &row);
+								if pipeline.deref_windows {
+									eval_ctx.link_windows = Some(&state.link_pool);
+								}
 								let value = out_of_line(|| {
 									crate::exec::vm::access::array_ops::evaluate_all(
 										&base, eval_ctx,
@@ -3942,12 +3960,25 @@ async fn run_body(
 								let index = ProgramIndex {
 									program,
 								};
+								let plan = &program.fetches[*fetch as usize];
+								let links = crate::exec::operators::fetch::FetchLinks {
+									pool: plan.windows.then_some(&state.link_pool),
+									// Only the `FETCH` the plan read ahead for takes the links of
+									// the batch.
+									ahead: state.link_ahead.as_ref().filter(|_| {
+										pipeline
+											.rows_ahead
+											.as_ref()
+											.is_some_and(|spec| spec.fetch == *fetch)
+									}),
+								};
 								let fetched = out_of_line(|| {
 									crate::exec::operators::fetch::fetch_fields_with(
 										ctx,
 										value,
-										&program.fetches[*fetch as usize],
+										&plan.paths,
 										&index,
+										links,
 									)
 								})
 								.await?;
@@ -6258,6 +6289,26 @@ pub(super) fn bound_batch(program: &Program, state: &mut State, ctx: &ExecutionC
 	if let Some(memory) = ctx.ctx().memory().filter(|memory| memory.can_spill()) {
 		bind_breakers(program, state, &Arc::clone(memory), None);
 	}
+}
+
+/// Reads the links a run of the leading rows of `rows` hold, before the rows run, for the `FETCH`
+/// of `pipeline`'s body, where the physical plan states them ([`Pipeline::rows_ahead`]): `rows`
+/// are rows of one batch that the body runs the `FETCH` over, in order. Answers how many leading
+/// rows the fill covers
+/// ([`RowsWindow::fill`](crate::exec::operators::link_window::RowsWindow::fill)). The records are
+/// held in `state` until the next fill replaces them. A pipeline the plan states nothing for reads
+/// no link ahead, and its rows are covered.
+pub(super) async fn fill_rows_ahead(
+	pipeline: &Pipeline,
+	rows: &[Value],
+	state: &mut State,
+	ctx: &ExecutionContext,
+) -> FlowResult<usize> {
+	let Some(spec) = &pipeline.rows_ahead else {
+		return Ok(rows.len());
+	};
+	let ahead = state.link_ahead.get_or_insert_with(Default::default);
+	ahead.fill(ctx, rows, &spec.fields).await
 }
 
 /// [`bound_breakers`] over `memory`, a sort that keeps every row spilling

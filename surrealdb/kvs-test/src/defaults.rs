@@ -37,6 +37,83 @@ async fn getm(b: &TestBackend) {
 
 kvs_test!(getm);
 
+/// `getm` of nothing answers nothing, with no hit counted.
+async fn getm_of_no_keys(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	seed(&ds).await;
+	let tx = ds.transaction(Read).await.unwrap();
+	let res = tx.getm(&[], None).await.unwrap();
+	assert!(res.values.is_empty());
+	assert_eq!((res.records, res.value_bytes), (0, 0));
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(getm_of_no_keys);
+
+/// `getm` in a writable transaction answers its own buffered writes and deletes, as `get` does.
+async fn getm_sees_buffered_writes(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	seed(&ds).await;
+	let tx = ds.transaction(Write).await.unwrap();
+	tx.set(b"k2".into(), b"changed".to_vec()).await.unwrap();
+	tx.del(b"k4".into()).await.unwrap();
+	tx.set(b"k9".into(), b"new".to_vec()).await.unwrap();
+	let keys = [b"k9".into(), b"k4".into(), b"k2".into(), b"k1".into()];
+	let res = tx.getm(&keys, None).await.unwrap();
+	assert_eq!(res.values[0].as_deref(), Some(&b"new"[..]));
+	assert_eq!(res.values[1], None, "a deleted key reads as a miss");
+	assert_eq!(res.values[2].as_deref(), Some(&b"changed"[..]));
+	assert_eq!(res.values[3].as_deref(), Some(&b"k1"[..]));
+	assert_eq!(res.records, 3);
+	assert_eq!(res.value_bytes, 3 + 7 + 2);
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(getm_sees_buffered_writes);
+
+/// `getm` answers each key as `get` does, and a version on a store that keeps none is refused.
+async fn getm_refuses_a_version_without_versioning(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	seed(&ds).await;
+	let tx = ds.transaction(Read).await.unwrap();
+	let keys = [b"k1".into(), b"k2".into()];
+	assert!(matches!(
+		tx.getm(&keys, Some(1)).await,
+		Err(surrealdb_kvs::Error::UnsupportedVersionedQueries)
+	));
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(getm_refuses_a_version_without_versioning, only = [surrealkv]);
+
+/// On a versioned store, `getm` as of a version answers each key as `get` does as of it: as of the
+/// latest version each live key, as of a version before any write none, a deleted key at neither.
+async fn getm_at_a_version(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	seed(&ds).await;
+	let tx = ds.transaction(Write).await.unwrap();
+	tx.del(b"k2".into()).await.unwrap();
+	tx.commit().await.unwrap();
+	let tx = ds.transaction(Read).await.unwrap();
+	let keys = [b"k3".into(), b"k2".into(), b"missing".into(), b"k1".into()];
+	let latest = tx.getm(&keys, Some(u64::MAX)).await.unwrap();
+	assert_eq!(latest.values[0].as_deref(), Some(&b"k3"[..]));
+	assert_eq!(latest.values[1], None, "a deleted key is a miss as of the latest version");
+	assert_eq!(latest.values[2], None);
+	assert_eq!(latest.values[3].as_deref(), Some(&b"k1"[..]));
+	assert_eq!((latest.records, latest.value_bytes), (2, 4));
+	for (at, key) in keys.iter().enumerate() {
+		let one = tx.get(key.as_borrowed(), Some(u64::MAX)).await.unwrap();
+		assert_eq!(latest.values[at], one, "getm answers as get does for key {at}");
+	}
+	let before = tx.getm(&keys, Some(1)).await.unwrap();
+	assert!(before.values.iter().all(Option::is_none), "no key exists before the first write");
+	assert_eq!((before.records, before.value_bytes), (0, 0));
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(getm_at_a_version, only = [surrealkv_versioned]);
+
 /// `getr` returns the same key/value pairs as `scan` over the same range,
 /// and accounts key and value bytes.
 async fn getr(b: &TestBackend) {

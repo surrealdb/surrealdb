@@ -419,6 +419,7 @@ async fn notify_unit(
 			&crate::exec::vm::host::ProgramIndex {
 				program,
 			},
+			crate::exec::operators::fetch::FetchLinks::default(),
 		)
 		.await
 		.map(|value| result = value)

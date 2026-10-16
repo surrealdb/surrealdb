@@ -539,6 +539,78 @@ struct Admitted {
 	layouts: Option<Arc<TableLayouts>>,
 }
 
+impl Admitted {
+	/// A `revision` record, or a record of stamp 0: no generation, and no layouts to decode by.
+	const UNSTAMPED: Self = Self {
+		generation: None,
+		layouts: None,
+	};
+}
+
+/// The envelope of the stored record `bytes`, for a record its table's layouts must admit: the
+/// generation its stamp names (`Err(stamp)` for a stamp that names none) and whether the row is
+/// packed. `None` for a `revision` record and for stamp 0, which no layouts judge.
+fn stamped_envelope(bytes: &[u8]) -> Result<Option<(std::result::Result<Generation, u64>, bool)>> {
+	let Some(stored) = StoredRecord::parse(bytes)? else {
+		return Ok(None);
+	};
+	Ok(match stored.generation() {
+		Ok(None) => None,
+		Ok(Some(generation)) => Some((Ok(generation), stored.is_packed())),
+		Err(stamp) => Some((Err(stamp), stored.is_packed())),
+	})
+}
+
+/// Admits a record of `tb` whose envelope [`stamped_envelope`] read against `layouts`, in the one
+/// order every reader checks: the layouts are `tb`'s, the stamp names a generation, and the
+/// layouts list that generation with a descriptor this build reads. A packed row keeps the
+/// layouts it is decoded by.
+fn admit_with_layouts(
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &TableName,
+	generation: std::result::Result<Generation, u64>,
+	packed: bool,
+	layouts: Arc<TableLayouts>,
+) -> std::result::Result<Admitted, RecordLayoutError> {
+	if !layouts.belongs_to(ns, db, tb) {
+		return Err(RecordLayoutError::ForeignLayouts {
+			layouts: layouts.table().clone(),
+			table: tb.clone(),
+		});
+	}
+	let generation = generation.map_err(|stamp| layouts.stamp_refusal(stamp))?;
+	layouts.admit(generation)?;
+	Ok(Admitted {
+		generation: Some(generation),
+		layouts: packed.then_some(layouts),
+	})
+}
+
+/// What [`Transaction::getm_records_stored`] found for one record id.
+#[derive(Debug)]
+pub enum StoredSlot {
+	/// The record the transaction's cache holds, and the generation its stored bytes carry.
+	Cached(Arc<Record>, Option<Generation>),
+	/// The record's stored bytes: the entry of the multi-get's answer at this position.
+	Stored(usize),
+	/// Nothing the caller may use: the multi-get found no bytes (the record is missing, or a
+	/// lightweight edge with no stored value), or the cache holds an entry that is not a record
+	/// with data. The caller reads the id for itself.
+	Absent,
+}
+
+/// The buffers of the keys [`Transaction::getm_records_stored`] reads, kept across calls.
+#[derive(Default)]
+pub struct RecordKeys {
+	/// The encoded keys, back to back.
+	bytes: Vec<u8>,
+	/// The span of each key in [`Self::bytes`].
+	spans: Vec<(usize, usize)>,
+	/// The vector the borrowed keys of one call are built in, empty between calls.
+	keys: Vec<Key<'static>>,
+}
+
 pub struct Transaction {
 	/// Is this is a local datastore transaction?
 	local: bool,
@@ -6773,6 +6845,84 @@ impl Transaction {
 		self.getm_encoded(&keys, version).await
 	}
 
+	/// Read the records `rids` name at the current version, as the caller's multi-get window: the
+	/// cached record for an id the transaction's record cache holds, otherwise the stored bytes
+	/// one multi-get found, with no decode.
+	///
+	/// `slots` is cleared and refilled with one [`StoredSlot`] per id of `rids`, in order, and
+	/// `found` holds the multi-get's answer, which a [`StoredSlot::Stored`] names an entry of.
+	/// The call decodes nothing, resolves no lightweight edge and inserts nothing into the cache,
+	/// so a record that is not served reads for itself where the caller consumes it, and raises
+	/// what its own read raises; a caller that decodes a record's bytes holds it in the cache
+	/// itself ([`Self::cache_record`]). It records one get with the transaction's metrics, as
+	/// [`Self::getm_raw`] does, and no get when every id is cached.
+	///
+	/// A failed read is the caller's to ignore: `slots` and `found` are then unspecified.
+	pub async fn getm_records_stored(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		rids: &[&RecordId],
+		scratch: &mut RecordKeys,
+		slots: &mut Vec<StoredSlot>,
+		found: &mut surrealdb_kvs::GetMultiResult,
+	) -> Result<()> {
+		slots.clear();
+		let RecordKeys {
+			bytes,
+			spans,
+			keys,
+		} = scratch;
+		bytes.clear();
+		spans.clear();
+		for rid in rids {
+			let qey = cache::tx::Lookup::Record(ns, db, rid.table.as_str(), &rid.key);
+			match self.cache.get(&qey) {
+				Some(cache::tx::Entry::Val(record, generation)) if !record.data.is_none() => {
+					slots.push(StoredSlot::Cached(record, generation));
+					continue;
+				}
+				Some(_) => {
+					slots.push(StoredSlot::Absent);
+					continue;
+				}
+				None => {}
+			}
+			let start = bytes.len();
+			RecordKey {
+				ns,
+				db,
+				tb: Cow::Borrowed(&rid.table),
+				id: Cow::Borrowed(&rid.key),
+			}
+			.encode_buffer(bytes)?;
+			slots.push(StoredSlot::Stored(spans.len()));
+			spans.push((start, bytes.len()));
+		}
+		if spans.is_empty() {
+			*found = Default::default();
+			return Ok(());
+		}
+		let mut borrowed: Vec<Key<'_>> = std::mem::take(keys);
+		borrowed.extend(spans.iter().map(|&(start, end)| Key::from(&bytes[start..end])));
+		let answer = self.tr.getm(&borrowed, None).await;
+		// The vector is empty again before the bytes it borrowed are touched, and keeps its
+		// allocation for the next call.
+		borrowed.clear();
+		*keys = borrowed.into_iter().map(Key::into_static).collect();
+		let answer = answer?;
+		self.metrics.record_get(answer.records, bytes.len() as u64, answer.value_bytes);
+		*found = answer;
+		for slot in slots.iter_mut() {
+			if let StoredSlot::Stored(at) = slot
+				&& found.values.get(*at).is_none_or(Option::is_none)
+			{
+				*slot = StoredSlot::Absent;
+			}
+		}
+		Ok(())
+	}
+
 	// --------------------------------------------------
 	// Range functions
 	// --------------------------------------------------
@@ -6979,6 +7129,13 @@ impl Transaction {
 	/// ([`Transactor::snapshot`]).
 	pub fn snapshot(&self) -> Option<Arc<dyn Snapshot>> {
 		self.tr.snapshot()
+	}
+
+	/// Whether a plain read through this transaction joins its conflict set
+	/// ([`surrealdb_kvs::api::Transactable::plain_reads_tracked`]): a static fact of the
+	/// datastore, the same for every transaction of it.
+	pub fn plain_reads_tracked(&self) -> bool {
+		self.tr.inner.plain_reads_tracked()
 	}
 
 	/// What read views the datastore can hand out, the same for every transaction opened on it
@@ -7673,6 +7830,42 @@ impl Transaction {
 		self.restamp_defined(defined).await
 	}
 
+	/// [`Self::admit_record_bytes`] where it needs no read: the answer is `None` for a read at a
+	/// `version`, for a table whose layouts the transaction does not hold, and for a generation
+	/// those layouts do not list, which a reload of them may settle. Every other answer is the one
+	/// [`Self::admit_record_bytes`] gives: both run [`stamped_envelope`] and then
+	/// [`admit_with_layouts`].
+	fn admit_resident(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		bytes: &[u8],
+		version: Option<u64>,
+	) -> Option<Result<Admitted>> {
+		let (generation, packed) = match stamped_envelope(bytes) {
+			Ok(Some(stamped)) => stamped,
+			Ok(None) => return Some(Ok(Admitted::UNSTAMPED)),
+			Err(e) => return Some(Err(e)),
+		};
+		if version.is_some() {
+			return None;
+		}
+		let layouts = self.memoised_layouts(ns, db, tb)?;
+		match admit_with_layouts(ns, db, tb, generation, packed, layouts) {
+			Ok(admitted) => Some(Ok(admitted)),
+			Err(
+				RecordLayoutError::UnknownGeneration {
+					..
+				}
+				| RecordLayoutError::OutsideWindow {
+					..
+				},
+			) => None,
+			Err(e) => Some(Err(CatalogError::Layout(e).into())),
+		}
+	}
+
 	/// Checks that a stored record of `tb` may be read: its envelope parses, and a v1 record's
 	/// generation is listed by the table's layouts with a descriptor this build reads. Answers the
 	/// generation the record's bytes carry (`None` for a `revision` record and for stamp 0) and,
@@ -7690,41 +7883,12 @@ impl Transaction {
 		bytes: &[u8],
 		version: Option<u64>,
 	) -> Result<Admitted> {
-		let Some(stored) = StoredRecord::parse(bytes)? else {
-			return Ok(Admitted {
-				generation: None,
-				layouts: None,
-			});
+		let Some((generation, packed)) = stamped_envelope(bytes)? else {
+			return Ok(Admitted::UNSTAMPED);
 		};
-		let generation = match stored.generation() {
-			Ok(None) => {
-				return Ok(Admitted {
-					generation: None,
-					layouts: None,
-				});
-			}
-			Ok(Some(generation)) => Ok(generation),
-			Err(stamp) => Err(stamp),
-		};
-		let packed = stored.is_packed();
 		let layouts = self.table_layouts(ns, db, tb, version).await?;
-		if !layouts.belongs_to(ns, db, tb) {
-			return Err(CatalogError::Layout(RecordLayoutError::ForeignLayouts {
-				layouts: layouts.table().clone(),
-				table: tb.clone(),
-			})
-			.into());
-		}
-		// A stamp that names no generation is refused by the table's stamp refusal.
-		let generation = match generation {
-			Ok(generation) => generation,
-			Err(stamp) => return Err(CatalogError::Layout(layouts.stamp_refusal(stamp)).into()),
-		};
-		match layouts.admit(generation).map(drop) {
-			Ok(()) => Ok(Admitted {
-				generation: Some(generation),
-				layouts: packed.then_some(layouts),
-			}),
+		match admit_with_layouts(ns, db, tb, generation, packed, layouts) {
+			Ok(admitted) => Ok(admitted),
 			Err(
 				RecordLayoutError::UnknownGeneration {
 					..
@@ -7734,13 +7898,8 @@ impl Transaction {
 				},
 			) => {
 				let layouts = self.reload_table_layouts(ns, db, tb, version).await?;
-				match layouts.admit(generation).map(drop) {
-					Ok(()) => Ok(Admitted {
-						generation: Some(generation),
-						layouts: packed.then_some(layouts),
-					}),
-					Err(e) => Err(CatalogError::Layout(e).into()),
-				}
+				admit_with_layouts(ns, db, tb, generation, packed, layouts)
+					.map_err(|e| CatalogError::Layout(e).into())
 			}
 			Err(e) => Err(CatalogError::Layout(e).into()),
 		}
@@ -7781,6 +7940,28 @@ impl Transaction {
 		let admitted = self.admit_record_bytes(ns, db, tb, bytes, version).await?;
 		let record = Record::decode_admitted(bytes, admitted.layouts.as_deref(), rid)?;
 		Ok((record, admitted.generation))
+	}
+
+	/// [`Self::decode_stamped_record`] where it needs no read of the table's layouts, and `None`
+	/// where it does ([`Self::admit_resident`]). The decode runs without an await, so a caller
+	/// that reads many records pays no future for the usual one.
+	pub fn decode_stamped_resident(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		bytes: &[u8],
+		rid: RecordId,
+		version: Option<u64>,
+	) -> Option<Result<(Record, Option<Generation>)>> {
+		let admitted = match self.admit_resident(ns, db, tb, bytes, version)? {
+			Ok(admitted) => admitted,
+			Err(e) => return Some(Err(e)),
+		};
+		Some(
+			Record::decode_admitted(bytes, admitted.layouts.as_deref(), rid)
+				.map(|record| (record, admitted.generation)),
+		)
 	}
 
 	/// [`Self::decode_record`] for bytes read back as they were written: an `"id"` the encoding

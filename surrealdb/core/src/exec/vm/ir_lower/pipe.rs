@@ -126,8 +126,8 @@ use surrealdb_strand::TableName;
 use super::super::payload::Spill;
 use super::super::program::{
 	AggregateSink, DeferredVector, Enforce, GroupSpec, HostScalar, Instr, JoinSpec, KeyOrder,
-	KnnQuery, KnnRank, KnnVector, Label, LimitSpec, Operand, Pipeline, Program, ROW, Reg, SortSpec,
-	Source, SplitKind, SplitSpec, TailSpec,
+	KnnQuery, KnnRank, KnnVector, Label, LimitSpec, Operand, Pipeline, Program, ROW, Reg,
+	RowsAheadSpec, SortSpec, Source, SplitKind, SplitSpec, TailSpec,
 };
 use super::closure::wrapped_value_loop;
 use super::dispatch::{apply_needs, check_claims, lowers_where_read, phys_refusal};
@@ -158,6 +158,7 @@ use crate::exec::ir::phys::ops::{
 	SortAttrs, SortKeyReadShape,
 };
 use crate::exec::ir::phys::pipeline::streams;
+use crate::exec::ir::phys::placement_attr::PipelineIo;
 use crate::exec::operators::SplitTarget;
 use crate::exec::planner::placement::Parallel;
 use crate::exec::{AccessMode, ContextLevel};
@@ -2345,6 +2346,23 @@ fn emit_pipeline(
 			access_mode: crate::exec::AccessMode::ReadOnly,
 		},
 		current: ROW,
+		// A fused body holds the ops of every pipeline it continues, and the decision of the last
+		// is derived over all of them.
+		io: match origin {
+			Origin::Placed {
+				op,
+				..
+			}
+			| Origin::Fused {
+				op,
+				..
+			} => ir.placement(op).map(|attr| attr.io().clone()).unwrap_or_default(),
+			Origin::Cut {
+				..
+			}
+			| Origin::Reader => PipelineIo::default(),
+		},
+		rows_ahead: None,
 	};
 	body.needs = body.reads.needs.clone();
 	body.end = body.em.label()?;
@@ -2380,6 +2398,8 @@ fn emit_pipeline(
 		emitted,
 		claims,
 		needs,
+		io,
+		rows_ahead,
 		..
 	} = body;
 
@@ -2427,7 +2447,9 @@ fn emit_pipeline(
 		feeding = reads.feeders.get(input).copied().flatten();
 	}
 
-	let pipeline = finish(em, source, enforce, pipeline_limits, parallel)?;
+	let mut pipeline = finish(em, source, enforce, pipeline_limits, parallel)?;
+	pipeline.deref_windows = io.deref_windows;
+	pipeline.rows_ahead = rows_ahead;
 	let index = reads.base.pipelines + reads.pipelines.len();
 	match origin {
 		Origin::Placed {
@@ -2629,6 +2651,11 @@ struct Body<'a, 's, 'c> {
 	needs: Needs,
 	/// The register that holds the row the next step reads: [`ROW`] until a projection.
 	current: Reg,
+	/// How the physical plan decided the pipeline reads storage beyond its ops: the default, no
+	/// window, for a pipeline the plan did not place as one.
+	io: PipelineIo,
+	/// The `FETCH` whose links the pipeline reads ahead of the rows ([`PipelineIo::rows_ahead`]).
+	rows_ahead: Option<RowsAheadSpec>,
 }
 
 impl Body<'_, '_, '_> {

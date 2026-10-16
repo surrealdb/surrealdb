@@ -498,6 +498,13 @@ pub(crate) struct State {
 	/// read of a table named in the text stops at its statement's `LIMIT`.
 	/// Taken by that read.
 	pub(super) scan_hint: Option<u32>,
+	/// The windows the run's dereferences of collections of record links read through, which
+	/// its sites take for the length of a loop and give back.
+	pub(super) link_pool: crate::exec::operators::link_window::LinkPool,
+	/// The records of the links the rows of the batch being run hold, which a pipeline whose plan
+	/// states [`Pipeline::rows_ahead`](super::program::Pipeline::rows_ahead) read before the rows
+	/// ran. Replaced by the next batch's.
+	pub(super) link_ahead: Option<crate::exec::operators::link_window::RowsWindow>,
 	/// The paging clause a morsel counts its rows against, which the morsel
 	/// leaves to its merge: `None` for a state that runs no such morsel.
 	pub(super) batch_paging: Option<u16>,
@@ -1049,6 +1056,8 @@ impl State {
 			build_budget,
 			zeroed,
 			scan_hint,
+			link_pool,
+			link_ahead,
 			batch_paging,
 			reached_paging,
 			capture_distinct,
@@ -1131,6 +1140,10 @@ impl State {
 		*build_budget = usize::MAX;
 		*zeroed = false;
 		*scan_hint = None;
+		link_pool.clear();
+		if let Some(ahead) = link_ahead {
+			ahead.clear();
+		}
 		*batch_paging = None;
 		*reached_paging = false;
 		*capture_distinct = false;
@@ -1401,6 +1414,8 @@ impl State {
 			build_budget: usize::MAX,
 			zeroed: false,
 			scan_hint: None,
+			link_pool: Default::default(),
+			link_ahead: None,
 			batch_paging: None,
 			reached_paging: false,
 			capture_distinct: false,

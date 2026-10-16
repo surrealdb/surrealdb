@@ -211,6 +211,15 @@ impl TestDb {
 		Self::build(setup, false, config).await
 	}
 
+	/// As [`Self::new_with_auth`], but with `config` applied.
+	#[cfg(feature = "kv-mem")]
+	pub(crate) async fn new_with_auth_and_config(
+		setup: &str,
+		config: surrealdb_cnf::ConfigMap,
+	) -> Self {
+		Self::build(setup, true, config).await
+	}
+
 	/// As [`Self::new`], or [`Self::new_with_auth`] when `auth_enabled`, on a
 	/// datastore that runs no maintenance tasks: nothing writes to it but the
 	/// statements a test runs. A test comparing the keyspace two runs leave

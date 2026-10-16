@@ -6,10 +6,36 @@
 //! identity.
 
 use slotmap::SecondaryMap;
+use smallvec::SmallVec;
+use surrealdb_strand::Strand;
 
 use crate::exec::ir::iface::ids::OpId;
 use crate::exec::logical::pipelines::{Legality, StatementLegality};
 use crate::exec::planner::placement::{Decision, PhysicalFacts};
+
+/// How one pipeline reads storage beyond what its ops state. Every field is conservative at its
+/// default: no window.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct PipelineIo {
+	/// The pipeline's `FETCH` reads each collection of links in windows.
+	pub(crate) fetch_windows: bool,
+	/// The pipeline's `.*` and field-over-array dereferences read their links in windows.
+	pub(crate) deref_windows: bool,
+	/// The top-level link fields of the pipeline's `FETCH`, read for a batch of source rows before
+	/// the rows run.
+	pub(crate) rows_ahead: Option<RowsAhead>,
+}
+
+/// The fields of the source rows a pipeline's `FETCH` reads the links of ahead of the rows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RowsAhead {
+	pub(crate) fields: SmallVec<[Strand; 2]>,
+	/// The paging clause that stands before the `FETCH`, so the rows it skips and the rows past
+	/// the page it admits never reach the `FETCH`, as its place among the paging clauses of the
+	/// pipeline's body in the order the rows meet them; `None` where no clause pages the rows
+	/// first.
+	pub(crate) paging: Option<usize>,
+}
 
 /// What is known and decided about one pipeline.
 #[derive(Clone, Debug)]
@@ -27,6 +53,9 @@ pub(crate) struct PlacementAttr {
 	/// Whether the pipeline's body cannot fail, so a morsel that overruns an ordered exit may be
 	/// pruned. Answered from the transitive fallibility of the body.
 	prunes: bool,
+	/// How the pipeline reads storage. Placement is not part of op identity, so it changes no
+	/// digest and is never printed.
+	io: PipelineIo,
 }
 
 impl PlacementAttr {
@@ -38,6 +67,7 @@ impl PlacementAttr {
 			decision: None,
 			facts: None,
 			prunes: false,
+			io: PipelineIo::default(),
 		}
 	}
 
@@ -61,6 +91,10 @@ impl PlacementAttr {
 		self.prunes = prunes;
 	}
 
+	pub(super) fn set_io(&mut self, io: PipelineIo) {
+		self.io = io;
+	}
+
 	pub(crate) fn legality(&self) -> &Legality {
 		&self.legality
 	}
@@ -80,6 +114,10 @@ impl PlacementAttr {
 	pub(crate) fn prunes(&self) -> bool {
 		self.prunes
 	}
+
+	pub(crate) fn io(&self) -> &PipelineIo {
+		&self.io
+	}
 }
 
 /// The placement of every pipeline of one container, keyed by the id of its `phys.pipeline` op.
@@ -92,6 +130,11 @@ impl PlacementTable {
 	/// A table holding no placement.
 	pub(crate) fn new() -> Self {
 		Self(SecondaryMap::new())
+	}
+
+	/// The pipelines that hold a placement.
+	pub(super) fn pipelines(&self) -> impl Iterator<Item = OpId> + '_ {
+		self.0.keys()
 	}
 
 	/// The placement of the pipeline `op`, or `None` when it has none.
@@ -113,6 +156,13 @@ impl PlacementTable {
 			if let Some(attr) = source.0.get(from) {
 				self.0.insert(to, attr.clone());
 			}
+		}
+	}
+
+	/// States how the pipeline `op` reads storage. A pipeline with no placement is left as it is.
+	pub(super) fn set_io(&mut self, op: OpId, io: PipelineIo) {
+		if let Some(attr) = self.0.get_mut(op) {
+			attr.set_io(io);
 		}
 	}
 

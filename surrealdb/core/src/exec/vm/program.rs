@@ -5409,6 +5409,33 @@ pub(crate) enum FetchStepSpec {
 
 assert_plain!(FetchStepSpec);
 
+/// A `FETCH` the program walks: its paths and how it reads the links they reach.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FetchPlan {
+	/// The paths the `FETCH` walks, as the planner resolves them.
+	pub(crate) paths: Vec<Vec<FetchStepSpec>>,
+	/// Whether each collection of links the walk reaches is read in windows of one multi-get
+	/// each, as the physical plan decided.
+	pub(crate) windows: bool,
+}
+
+/// The top-level link fields of a pipeline's `FETCH`, whose links the host reads for a batch of
+/// source rows before the rows run, as the physical plan decided.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct RowsAheadSpec {
+	/// The `FETCH` of [`Program::fetches`] whose links are read ahead.
+	pub(crate) fetch: u16,
+	/// The fields of the source rows that hold the links.
+	pub(crate) fields: Box<[Strand]>,
+	/// The paging slot ([`Program::limits`], and the index of `State::paging`) of the clause that
+	/// stands before the `FETCH`: the rows it skips and the rows past its page are not read
+	/// ahead. `None` where no clause pages the rows first.
+	pub(crate) paging: Option<u16>,
+}
+
+assert_plain!(FetchPlan);
+assert_plain!(RowsAheadSpec);
+
 /// The value that names what a count counts.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum CountedValue {
@@ -6028,6 +6055,12 @@ pub(crate) struct Pipeline {
 	/// `[group]`, run when the block reaches it; `None` for a pipeline of the
 	/// program's own, run when the program runs.
 	pub(super) group: Option<u16>,
+	/// Whether the pipeline's `.*` and field-over-array dereferences read their links in windows,
+	/// as the physical plan decided.
+	pub(super) deref_windows: bool,
+	/// The links of the pipeline's `FETCH` read for a batch of source rows before the rows run,
+	/// as the physical plan decided.
+	pub(super) rows_ahead: Option<RowsAheadSpec>,
 }
 
 impl Pipeline {
@@ -6560,8 +6593,8 @@ pub(crate) struct Program {
 	/// For each verdict a filter keeps on the conjuncts it judges once
 	/// ([`Instr::VerdictJump`]), the group whose start forgets it.
 	pub(super) verdicts: Vec<Option<u16>>,
-	/// The paths each `FETCH` walks, as the planner resolves them.
-	pub(super) fetches: Vec<Vec<Vec<FetchStepSpec>>>,
+	/// The `FETCH`es the program walks, as the planner resolves them.
+	pub(super) fetches: Vec<FetchPlan>,
 	pub(super) aggregates: Vec<AggregateSink>,
 	/// The permission predicates the bodies evaluate: the frame each is
 	/// evaluated in.

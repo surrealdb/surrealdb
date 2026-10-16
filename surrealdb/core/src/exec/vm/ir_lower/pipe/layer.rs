@@ -537,6 +537,8 @@ fn lower_layer_stack(
 		claims: Vec::new(),
 		needs: Needs::none(),
 		current: ROW,
+		io: Default::default(),
+		rows_ahead: None,
 	};
 	body.end = body.em.label()?;
 	let mut guards = 0;

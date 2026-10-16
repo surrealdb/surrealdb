@@ -297,6 +297,49 @@ impl<'p> Rows<'p> {
 		}
 	}
 
+	/// Reads the links of a run of the leading rows of `batch`, the rows of a source batch not yet
+	/// run, before they run, for a pipeline whose plan states it
+	/// ([`Pipeline::rows_ahead`](crate::exec::vm::program::Pipeline::rows_ahead)), when the rows
+	/// run one at a time: only the rows that reach the `FETCH` are keyed, which the paging clause
+	/// before it decides from what it has left to skip and to admit. Answers how many leading rows
+	/// of `batch` to run before the next call, at least one where `batch` holds any; the caller
+	/// runs them and asks again for the rest. The rows of a morsel batch read their links as the
+	/// `FETCH` reaches them, and are answered whole.
+	pub(super) async fn ahead(
+		&mut self,
+		pipeline: &Pipeline,
+		batch: &[Value],
+		state: &mut State,
+		ctx: &ExecutionContext,
+	) -> FlowResult<usize> {
+		let (Rows::Serial, Some(spec)) = (&*self, &pipeline.rows_ahead) else {
+			return Ok(batch.len());
+		};
+		let (start, end) = match spec.paging {
+			Some(slot) => {
+				let paging = state.paging[usize::from(slot)];
+				let start = paging.skip.min(batch.len());
+				let end = paging.remaining.map_or(batch.len(), |remaining| {
+					start.saturating_add(remaining).min(batch.len())
+				});
+				(start, end)
+			}
+			None => (0, batch.len()),
+		};
+		if start == end {
+			return Ok(batch.len());
+		}
+		let covered =
+			super::host::fill_rows_ahead(pipeline, &batch[start..end], state, ctx).await?;
+		// The rows past `end` do not reach the `FETCH`, so a fill that covers every row that does
+		// covers the batch.
+		Ok(if start + covered >= end {
+			batch.len()
+		} else {
+			start + covered
+		})
+	}
+
 	/// These rows, for a reader that takes no more than `reads` of them before it may stop, where
 	/// it says: the morsels have no more than that in flight until they first hand rows on.
 	pub(super) fn reading(mut self, reads: Option<u32>) -> Self {
@@ -333,7 +376,12 @@ impl<'p> Rows<'p> {
 		flush_at: usize,
 	) -> FlowResult<bool> {
 		match self {
-			Rows::Serial => Ok(false),
+			Rows::Serial => {
+				if let Some(ahead) = &mut state.link_ahead {
+					ahead.clear();
+				}
+				Ok(false)
+			}
 			Rows::Morsels(set) => set.finish(state, ctx, yielder, flush_at).await,
 		}
 	}

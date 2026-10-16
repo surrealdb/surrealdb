@@ -21,7 +21,7 @@ use crate::exec::ir::op_kind::OpKind;
 use crate::exec::ir::phys::ops::PhysOp;
 use crate::exec::vm::dispatch::Reach;
 use crate::exec::vm::ir_lower::expr::Lowerer;
-use crate::exec::vm::program::{FetchStepSpec, Instr};
+use crate::exec::vm::program::{FetchStepSpec, Instr, RowsAheadSpec};
 
 impl Body<'_, '_, '_> {
 	/// Lowers the fetch op `step_data` over the row the body holds.
@@ -40,7 +40,22 @@ impl Body<'_, '_, '_> {
 		}
 		self.claims.extend(lowerer.take_claims());
 		self.needs = self.needs.merged(&lowerer.needs());
-		let fetch = self.em.fetch(paths)?;
+		let fetch = self.em.fetch(paths, self.io.fetch_windows)?;
+		if let Some(ahead) = &self.io.rows_ahead {
+			// The clause the plan names has been lowered by the time the rows reach the fetch, and
+			// holds the slot the run counts its paging in.
+			let paging = match ahead.paging {
+				None => None,
+				Some(place) => Some(self.pipeline_limits.get(place).copied().ok_or_else(|| {
+					invariant("the paging clause a fetch reads ahead of is not lowered")
+				})?),
+			};
+			self.rows_ahead = Some(RowsAheadSpec {
+				fetch,
+				fields: ahead.fields.iter().cloned().collect(),
+				paging,
+			});
+		}
 		let mut reach = Needs::none();
 		reach.reach = Some(Reach::Any);
 		self.needs = self.needs.merged(&reach);
@@ -234,6 +249,11 @@ mod tests {
 	use crate::exec::vm::program::{FetchStepSpec, Instr, ROW};
 	use crate::val::Value;
 
+	/// The paths of each fetch of `program`.
+	fn paths_of(program: &crate::exec::vm::program::Program) -> Vec<Vec<Vec<FetchStepSpec>>> {
+		program.fetches.iter().map(|fetch| fetch.paths.clone()).collect()
+	}
+
 	/// A path built over the row it is evaluated against.
 	type PathBuilder = Box<dyn FnOnce(&mut Builder, ValueId) -> ValueId>;
 
@@ -286,7 +306,7 @@ mod tests {
 		let lowered = lowered(&b);
 		let program = &lowered.program;
 		assert_eq!(
-			program.fetches,
+			paths_of(program),
 			vec![vec![
 				vec![
 					FetchStepSpec::Field(Strand::from("a")),
@@ -333,7 +353,7 @@ mod tests {
 		let lowered = lowered(&b);
 		let program = &lowered.program;
 		assert_eq!(
-			program.fetches,
+			paths_of(program),
 			vec![vec![vec![
 				FetchStepSpec::Field(Strand::from("a")),
 				FetchStepSpec::Index {
@@ -368,7 +388,7 @@ mod tests {
 		]);
 		let lowered = lowered(&b);
 		assert_eq!(
-			lowered.program.fetches,
+			paths_of(&lowered.program),
 			vec![vec![
 				vec![FetchStepSpec::Unsupported],
 				vec![FetchStepSpec::Field(Strand::from("a")), FetchStepSpec::Unsupported],

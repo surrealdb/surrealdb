@@ -17,8 +17,8 @@ use super::op_kind::OpKind;
 use super::{
 	PlannedRequest, PlanningInput, RequestInput, RequestStatement, UnitKind, plan_request,
 };
-use crate::dbs::Options;
 use crate::dbs::capabilities::Capabilities;
+use crate::dbs::{Options, Session};
 use crate::exec::config::ExecConfig;
 use crate::exec::operators::test_util::TestDb;
 use crate::exec::planner::Planner;
@@ -72,7 +72,28 @@ pub(crate) async fn plan_on_as(
 	principal: &crate::dbs::Session,
 	input: &RequestInput<'_>,
 ) -> Result<PlannedRequest, IrError> {
-	let ctx = db.exec_ctx_as(principal, TransactionType::Read).await;
+	plan_on_in(db, principal, input, true).await
+}
+
+/// [`plan_as`] for a planner that plans a statement of a request where `request_root`, and a unit
+/// compiled on its own otherwise.
+async fn plan_in(
+	setup: &str,
+	session: &Session,
+	input: &RequestInput<'_>,
+	request_root: bool,
+) -> Result<PlannedRequest, IrError> {
+	plan_on_in(&TestDb::new(setup).await, session, input, request_root).await
+}
+
+/// [`plan_in`] over the database `db` holds.
+async fn plan_on_in(
+	db: &TestDb,
+	session: &Session,
+	input: &RequestInput<'_>,
+	request_root: bool,
+) -> Result<PlannedRequest, IrError> {
+	let ctx = db.exec_ctx_as(session, TransactionType::Read).await;
 	let txn = ctx.try_txn().expect("a transaction");
 	let planner = Planner::with_txn(
 		ctx.ctx(),
@@ -84,6 +105,11 @@ pub(crate) async fn plan_on_as(
 	.with_auth(Arc::clone(&ctx.root().auth))
 	.trusting_index_shapes(true);
 	let session = test_session();
+	let planner = if request_root {
+		planner.at_request_root()
+	} else {
+		planner
+	};
 	let planning = PlanningInput {
 		planner: &planner,
 		capabilities: Arc::new(Capabilities::all()),
@@ -163,6 +189,47 @@ pub(crate) async fn bound_as(session: &crate::dbs::Session, setup: &str, sql: &s
 		ir,
 		catalog,
 	}
+}
+
+/// The container `sql` plans to, planned as the statements of a request, over the database
+/// `setup` builds.
+pub(crate) async fn planned_request(setup: &str, sql: &str) -> PlannedRequest {
+	planned_request_as(setup, &TestDb::owner(), sql).await
+}
+
+/// [`planned_request`] for the principal `session` names.
+pub(crate) async fn planned_request_as(
+	setup: &str,
+	session: &Session,
+	sql: &str,
+) -> PlannedRequest {
+	let parsed = crate::syn::parse(sql).expect("the request parses").expressions;
+	let statements = RequestStatement::of(&parsed);
+	let input = RequestInput::request(&statements, request_scope());
+	plan_as(setup, session, &input).await.expect("the request plans")
+}
+
+/// [`planned_request`] for a unit compiled on its own, which runs in a caller's frame.
+pub(crate) async fn planned_unit(setup: &str, sql: &str) -> PlannedRequest {
+	let parsed = crate::syn::parse(sql).expect("the request parses").expressions;
+	let statements = RequestStatement::of(&parsed);
+	let input = RequestInput::request(&statements, request_scope());
+	plan_in(setup, &TestDb::owner(), &input, false).await.expect("the unit plans")
+}
+
+/// [`planned_request`] for `sql` planned as a container of the kind `unit`, by a planner that
+/// plans a statement of a request where `request_root`.
+pub(crate) async fn planned_as_unit(
+	setup: &str,
+	sql: &str,
+	unit: super::unit::UnitKind,
+	request_root: bool,
+) -> PlannedRequest {
+	let parsed = crate::syn::parse(sql).expect("the request parses").expressions;
+	let statements = RequestStatement::of(&parsed);
+	let mut input = RequestInput::request(&statements, request_scope());
+	input.unit = unit;
+	plan_in(setup, &TestDb::owner(), &input, request_root).await.expect("the unit plans")
 }
 
 /// The text of the container `sql` plans to, planned as the statements of a request.

@@ -12,7 +12,7 @@
 //! A unit serves two reads. Run as a program it streams every record of the
 //! table the caller may select; its one pipeline's body, run over the raw
 //! record a read by id fetched, is the dereference of that record
-//! ([`Deref::fetch`]).
+//! ([`Deref::fetch_slot`]).
 //!
 //! The units are kept by the compile cache ([`super::compile_cache`]), keyed
 //! by the table, the catalog version of its definitions and the build, with
@@ -43,7 +43,8 @@ use surrealdb_strand::TableName;
 use super::host::{host_frames, out_of_line, run_cow_row_from, run_unit_inline, unit_state};
 use super::program::{Program, UnitHead, UnitSig};
 use super::{Lowered, NotCovered};
-use crate::exec::operators::fetch::{fetch_raw_deref, require_table};
+use crate::exec::operators::fetch::{fetch_raw_deref_slot, require_table};
+use crate::exec::operators::link_window::Slot;
 use crate::exec::permission::validate_record_user_access;
 use crate::exec::planner::Planner;
 use crate::exec::{ExecutionContext, FlowResult};
@@ -362,11 +363,16 @@ impl Deref {
 	/// caller is confined to its own tenant; without it the record is read
 	/// as a permission predicate reads it, its computed fields derived and
 	/// no permission applied.
-	pub(crate) async fn fetch(
+	///
+	/// The record's stored value is read from `slot` where a window holds it for `rid`, and
+	/// otherwise from the transaction. A read no unit serves leaves `slot` for the caller's own
+	/// read of the record.
+	pub(crate) async fn fetch_slot(
 		&self,
 		ctx: &ExecutionContext,
 		rid: &RecordId,
 		checked: bool,
+		slot: &mut Slot<'_>,
 	) -> Option<FlowResult<Value>> {
 		let skips = ctx.root().skip_fetch_perms;
 		let unchecked = !checked || skips;
@@ -382,12 +388,13 @@ impl Deref {
 			Ok(None) => return None,
 			Err(e) => return Some(Err(e)),
 		};
-		Some(self.fetch_served(ctx, rid, checked, served, unchecked).await)
+		let slot = std::mem::replace(slot, Slot::Unread);
+		Some(self.fetch_served(ctx, rid, checked, served, unchecked, slot).await)
 	}
 
 	/// Read `row`, a record of `table` as storage holds it, in place, by the
 	/// table's read unit, permission-checked where `checked`, as
-	/// [`Self::fetch`] reads a record it fetched: whether the record is shown.
+	/// [`Self::fetch_slot`] reads a record it fetched: whether the record is shown.
 	/// `None`, with `row` untouched, where no unit serves the read in this
 	/// frame, or where the unit's rows are enforced by the host
 	/// ([`super::program::Pipeline::enforce`]), which is the enforcement this
@@ -446,7 +453,7 @@ impl Deref {
 		skips || !self.frame.1 || ctx.root().perms_suppressed
 	}
 
-	/// [`Self::fetch`], for a read the unit `served` serves.
+	/// [`Self::fetch_slot`], for a read the unit `served` serves.
 	async fn fetch_served(
 		&self,
 		ctx: &ExecutionContext,
@@ -454,8 +461,9 @@ impl Deref {
 		checked: bool,
 		served: Served<'_>,
 		unchecked: bool,
+		slot: Slot<'_>,
 	) -> FlowResult<Value> {
-		let Some(raw) = fetch_raw_deref(ctx, rid, ctx.version_stamp()).await? else {
+		let Some(raw) = fetch_raw_deref_slot(ctx, rid, slot, ctx.version_stamp()).await? else {
 			if checked {
 				require_table(ctx, rid).await?;
 			}

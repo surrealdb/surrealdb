@@ -1,8 +1,12 @@
 //! Array operation parts -- `[*]`, `...`, `[$]`, `[~]`.
 
 use crate::exec::EvalContext;
+use crate::exec::operators::fetch::{
+	fetch_record, fetch_record_no_perms, fetch_record_no_perms_slot, fetch_record_slot,
+};
+use crate::exec::operators::link_window::{Slot, Windows};
 use crate::expr::FlowResult;
-use crate::val::Value;
+use crate::val::{RecordId, Value};
 
 // ============================================================================
 // AllPart -- [*] or .*
@@ -30,9 +34,9 @@ pub(crate) async fn evaluate_all(value: &Value, ctx: EvalContext<'_>) -> FlowRes
 		Value::RecordId(rid) => {
 			let exec_ctx = ctx.exec_ctx.dive()?;
 			if ctx.skip_fetch_perms {
-				crate::exec::operators::fetch::fetch_record_no_perms(&exec_ctx, rid).await
+				fetch_record_no_perms(&exec_ctx, rid).await
 			} else {
-				crate::exec::operators::fetch::fetch_record(&exec_ctx, rid).await
+				fetch_record(&exec_ctx, rid).await
 			}
 		}
 		// Anything else (NONE, NULL, scalars, geometries) returns NONE rather than a
@@ -41,9 +45,22 @@ pub(crate) async fn evaluate_all(value: &Value, ctx: EvalContext<'_>) -> FlowRes
 	}
 }
 
+/// The record `rid` names, fetched as `.*` reads it, from `slot` where a window holds it.
+async fn fetch_linked(rid: &RecordId, ctx: &EvalContext<'_>, slot: Slot<'_>) -> FlowResult<Value> {
+	let exec_ctx = ctx.exec_ctx.dive()?;
+	if ctx.skip_fetch_perms {
+		fetch_record_no_perms_slot(&exec_ctx, rid, slot).await
+	} else {
+		fetch_record_slot(&exec_ctx, rid, slot).await
+	}
+}
+
 /// The elements of a collection under `.*`, each record id fetched and every
 /// other element kept, in order; `None` when no element is a record id, so
 /// the collection is its own answer.
+///
+/// Where the evaluation admits windows and the collection holds two or more record ids, their
+/// records are read a window at a time.
 async fn fetch_record_elements(
 	elements: &[Value],
 	ctx: EvalContext<'_>,
@@ -51,10 +68,20 @@ async fn fetch_record_elements(
 	if !elements.iter().any(|v| matches!(v, Value::RecordId(_))) {
 		return Ok(None);
 	}
+	let mut windows = Windows::of(ctx.link_windows, elements, &|_| true);
 	let mut results = Vec::with_capacity(elements.len());
-	for item in elements {
+	for (at, item) in elements.iter().enumerate() {
 		let processed = match item {
-			Value::RecordId(_) => Box::pin(evaluate_all(item, ctx.clone())).await?,
+			Value::RecordId(rid) => {
+				let slot = match &mut windows {
+					Some(windows) => {
+						windows.prepare(ctx.exec_ctx, elements, at, &|_| true).await?;
+						windows.slot(at)
+					}
+					None => Slot::Unread,
+				};
+				Box::pin(fetch_linked(rid, &ctx, slot)).await?
+			}
 			_ => item.clone(),
 		};
 		results.push(processed);

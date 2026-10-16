@@ -368,7 +368,8 @@ async fn prepare(
 			.at_stamp(match planner.plan_time_version {
 				crate::exec::planner::PlanTimeVersion::Current => None,
 				crate::exec::planner::PlanTimeVersion::At(stamp) => Some(stamp),
-			});
+			})
+			.with_request_root(planner.is_request_root());
 	if let (Some(ns), Some(db)) = (planner.ns(), planner.db()) {
 		memo = memo.with_database_names(ns, db);
 	}

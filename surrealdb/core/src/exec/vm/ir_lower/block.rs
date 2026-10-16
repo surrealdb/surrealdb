@@ -1043,7 +1043,7 @@ impl<'a> Blocks<'a> {
 		for region in &data.regions {
 			paths.push(path_steps(&mut self.lw, self.ir, *region)?);
 		}
-		let fetch = self.lw.emitter().fetch(paths)?;
+		let fetch = self.lw.emitter().fetch(paths, false)?;
 		self.lw.reaches(Reach::Any);
 		let dst = self.reg()?;
 		self.emit(Instr::Fetch {

@@ -139,6 +139,9 @@ pub(crate) mod store;
 #[cfg(feature = "kv-mem")]
 mod tests_enforced;
 #[cfg(test)]
+#[cfg(feature = "kv-mem")]
+mod tests_link_window;
+#[cfg(test)]
 mod tests_methods;
 #[cfg(all(test, feature = "kv-mem"))]
 pub(in crate::exec) mod tests_packed_reads;

@@ -6,6 +6,7 @@ pub(crate) mod join;
 mod knn_topk;
 mod layer;
 pub(crate) mod limit;
+pub(crate) mod link_window;
 pub(crate) mod mutate;
 mod permission_filter;
 mod project;

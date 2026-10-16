@@ -707,7 +707,12 @@ async fn require_defined(
 async fn records_of(ctx: &ExecutionContext, mut values: Vec<Value>) -> FlowResult<Vec<Value>> {
 	values.retain(|v| !matches!(v, Value::None | Value::Null));
 	if !values.is_empty() {
-		crate::exec::operators::fetch::batch_fetch_in_place(ctx, &mut values).await?;
+		crate::exec::operators::fetch::batch_fetch_in_place(
+			ctx,
+			&mut values,
+			crate::exec::operators::fetch::FetchLinks::default(),
+		)
+		.await?;
 		values.retain(|v| !matches!(v, Value::None | Value::Null));
 	}
 	Ok(values)

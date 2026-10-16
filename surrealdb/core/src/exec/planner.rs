@@ -292,6 +292,11 @@ pub struct Planner<'ctx> {
 	/// have recorded ([`surrealdb_datastore::index_shapes`]): set only for the
 	/// planner of a program that cannot write ([`Self::trusting_index_shapes`]).
 	trusts_index_shapes: bool,
+	/// Whether the program this planner plans is a statement of a request, run in the frame the
+	/// request's own transaction opens: no caller's `VERSION` frame is inherited, so a read the
+	/// plan states at the current version is read at it ([`Self::at_request_root`]). A unit
+	/// compiled on its own, and every planner derived to compile one, is not.
+	request_root: bool,
 }
 
 /// How a statement reaches the catalog objects that code it runs may redefine
@@ -368,6 +373,7 @@ impl<'ctx> Planner<'ctx> {
 			within: CatalogWithin::default(),
 			stored_clause: false,
 			trusts_index_shapes: false,
+			request_root: false,
 		}
 	}
 
@@ -412,6 +418,7 @@ impl<'ctx> Planner<'ctx> {
 			within: CatalogWithin::default(),
 			stored_clause: false,
 			trusts_index_shapes: false,
+			request_root: false,
 		}
 	}
 
@@ -1035,6 +1042,7 @@ impl<'ctx> Planner<'ctx> {
 		let mut planner =
 			self.shadowing(definition.args.iter().map(|(arg, _)| arg.as_str().to_owned()));
 		planner.ctx = crate::ctx::Context::new_call_scope(&self.ctx).freeze();
+		planner.request_root = false;
 		planner.version = None;
 		planner.matches_context = None;
 		planner.knn_context = None;
@@ -1082,6 +1090,7 @@ impl<'ctx> Planner<'ctx> {
 			within: CatalogWithin::default(),
 			stored_clause: false,
 			trusts_index_shapes: false,
+			request_root: false,
 		}
 	}
 
@@ -1093,6 +1102,7 @@ impl<'ctx> Planner<'ctx> {
 	pub(crate) fn privileged(&self) -> Planner<'ctx> {
 		let mut planner = self.shadowing(std::iter::empty());
 		planner.ctx = crate::ctx::Context::new_isolated(&self.ctx).freeze();
+		planner.request_root = false;
 		planner
 	}
 
@@ -1132,6 +1142,7 @@ impl<'ctx> Planner<'ctx> {
 			within: self.within,
 			stored_clause: self.stored_clause,
 			trusts_index_shapes: self.trusts_index_shapes,
+			request_root: self.request_root,
 		}
 	}
 
@@ -1198,6 +1209,23 @@ impl<'ctx> Planner<'ctx> {
 	/// have recorded ([`Self::trusting_index_shapes`]).
 	pub(crate) fn trusts_index_shapes(&self) -> bool {
 		self.trusts_index_shapes
+	}
+
+	/// This planner, planning a statement of a request: the program it plans runs in the
+	/// request's own frame, which holds no `VERSION` the statement does not state itself.
+	/// Only the executor's planner of a top-level statement says so. A planner of a unit that
+	/// runs in a caller's frame (a function call, a table or field read, a closure, a served
+	/// statement) never does, because that frame may read at a `VERSION` the unit's plan does
+	/// not name.
+	pub(crate) fn at_request_root(mut self) -> Self {
+		self.request_root = true;
+		self
+	}
+
+	/// Whether the program this planner plans is a statement of a request
+	/// ([`Self::at_request_root`]).
+	pub(crate) fn is_request_root(&self) -> bool {
+		self.request_root
 	}
 
 	/// Whether this planner plans what follows a statement of a block that
@@ -1631,7 +1659,8 @@ pub(crate) async fn plan_request_statement(
 	let planner = compile_phase!("bind", {
 		let (ns, db) = session_ns_db(ctx);
 		let mut planner = Planner::with_txn(ctx, registry, Arc::clone(&txn), ns, db)
-			.trusting_index_shapes(op.read_only());
+			.trusting_index_shapes(op.read_only())
+			.at_request_root();
 		if let Some(auth) = auth {
 			planner = planner.with_auth(auth);
 		}

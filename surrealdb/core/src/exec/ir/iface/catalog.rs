@@ -56,6 +56,15 @@ pub(crate) struct BackendCaps {
 	pub(crate) offers_write_views: bool,
 }
 
+/// How the datastore's reads behave, a static fact of the datastore and never of one transaction.
+/// Every flag is conservative when `false`: a read that needs the capability is not widened.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct IoCaps {
+	/// A plain read never joins the transaction's conflict set, so a read issued speculatively
+	/// (a key the serial run may not reach) widens no conflict.
+	pub(crate) untracked_reads: bool,
+}
+
 /// How the field view of a table is applied to an image of one of its records, for the principal
 /// a request is planned for.
 #[derive(Clone, Debug)]
@@ -210,6 +219,19 @@ pub(crate) trait PhysicalCatalog: Send + Sync {
 	/// What the datastore offers.
 	fn backend(&self) -> BackendCaps {
 		BackendCaps::default()
+	}
+
+	/// How the datastore's reads behave.
+	fn io_caps(&self) -> IoCaps {
+		IoCaps::default()
+	}
+
+	/// Whether the container is planned as a statement of a request, which runs in the frame its
+	/// own transaction opens and inherits no `VERSION` from a caller. `false` for a unit compiled
+	/// on its own: a read it states at the current version is read at whatever version the frame
+	/// that calls it holds.
+	fn at_request_root(&self) -> bool {
+		false
 	}
 
 	/// What an access-path decision reads about the table a read of `key` names. `Absent` is never

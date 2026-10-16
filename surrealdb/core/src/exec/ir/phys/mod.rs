@@ -50,6 +50,7 @@ pub(crate) mod facts;
 mod hold_left;
 pub(crate) mod hop_key;
 mod index_answer;
+pub(crate) mod io;
 mod join_lookup;
 mod keyed_record;
 mod knn;

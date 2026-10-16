@@ -13,7 +13,7 @@ use background_flusher::BackgroundFlusher;
 use chrono::{DateTime, Utc};
 pub use cnf::SurrealKvConfig;
 use commit_coordinator::CommitCoordinator;
-use surrealdb_kvs::api::{BoxFut, KeysResult, ScanResult, Transactable};
+use surrealdb_kvs::api::{BoxFut, GetMultiResult, KeysResult, ScanResult, Transactable};
 use surrealdb_kvs::config::SyncMode;
 use surrealdb_kvs::err::{Error, Result};
 use surrealdb_kvs::timestamp::{
@@ -358,6 +358,50 @@ impl Transactable for Transaction {
 			};
 			// Return result
 			Ok(res)
+		})
+	}
+
+	/// Fetch many keys from the database under one acquisition of the
+	/// transaction.
+	///
+	/// Answers one entry per key, in order, as the trait's default does, and fails with
+	/// `TransactionFinished` once the transaction is done.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self, keys))]
+	fn getm<'a>(
+		&'a self,
+		keys: &'a [Key<'a>],
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<GetMultiResult>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			// Versioned queries require a versioned datastore
+			if !keys.is_empty() {
+				self.ensure_versioned(version)?;
+			}
+			// Load the inner transaction once for every key
+			let inner = self.inner.read().await;
+			let mut values = Vec::with_capacity(keys.len());
+			let mut records = 0u64;
+			let mut value_bytes = 0u64;
+			for key in keys {
+				let found = match version {
+					Some(ts) => inner.get_at(key.as_slice(), ts).map_err(kvs_error)?,
+					None => inner.get(key.as_slice()).map_err(kvs_error)?,
+				};
+				if let Some(value) = &found {
+					records += 1;
+					value_bytes += value.len() as u64;
+				}
+				values.push(found);
+			}
+			Ok(GetMultiResult {
+				values,
+				records,
+				value_bytes,
+			})
 		})
 	}
 

@@ -199,7 +199,11 @@ c8b994754e4db0e4 language-tests/tests/bench/recursion/computed_field_select.surq
 0342c8058f73291d language-tests/tests/bench/recursion/user_function_fib.surql
 a317aa5b6c26799a language-tests/tests/bench/recursion/user_function_per_row.surql
 9d759fa61691fa72 language-tests/tests/bench/references/fetch_array.surql
+bd880ad8d3d3311b language-tests/tests/bench/references/fetch_array_100k.surql
 9741449c269dc369 language-tests/tests/bench/references/fetch_single.surql
+75cb867d955e5a37 language-tests/tests/bench/references/fetch_single_100k.surql
+22d0a77cbc8654a6 language-tests/tests/bench/references/link_each_wide.surql
+e59d3bae6855047e language-tests/tests/bench/references/link_field_array.surql
 d7d0e24393745c72 language-tests/tests/bench/references/reverse.surql
 4c469fbfba5d53a6 language-tests/tests/bench/references/reverse_count.surql
 14517df9e7156967 language-tests/tests/bench/references/reverse_filtered.surql
@@ -381,6 +385,7 @@ fd15594d530dc8b1 language-tests/tests/bench/util/records-100000.surql
 9a68d8ac54bff060 language-tests/tests/bench/util/recursion-functions.surql
 73ba895b43c44ed6 language-tests/tests/bench/util/recursion-items-computed-1000.surql
 a916c08e08117941 language-tests/tests/bench/util/recursion-items-dynamic-1000.surql
+15311fc59b52d9c6 language-tests/tests/bench/util/references-100000.surql
 a252ebe93ee9e7a8 language-tests/tests/bench/util/references-5000.surql
 6e591620450ac8cf language-tests/tests/bench/util/schemafull-record-table.surql
 e15c7b793a0def91 language-tests/tests/bench/vector/build_diskann_768.surql
@@ -2912,7 +2917,13 @@ f5e53cfb1112bfe0 language-tests/tests/language/statements/select/fetch/basic.sur
 fb2b4ae85f37685e language-tests/tests/language/statements/select/fetch/nested.surql
 ffb1f1f5994700a0 language-tests/tests/language/statements/select/fetch/objects.surql
 9e233ff43efdbec5 language-tests/tests/language/statements/select/fetch/order_by.surql
+3e0184f07c177fac language-tests/tests/language/statements/select/fetch/rows_ahead.surql
+695ea18133a46ebd language-tests/tests/language/statements/select/fetch/rows_ahead_permissions.surql
+fc8e479f6acae962 language-tests/tests/language/statements/select/fetch/rows_ahead_permissions_import.surql
 1ecd46ff87b0bf2c language-tests/tests/language/statements/select/fetch/self_and_circular_references.surql
+9517e3062cf8988f language-tests/tests/language/statements/select/fetch/windowed.surql
+eb71b3e6cf8d157f language-tests/tests/language/statements/select/fetch/windowed_version.surql
+635b3524047b6ac2 language-tests/tests/language/statements/select/fetch/windowed_version_units.surql
 03f1ea4ad2210784 language-tests/tests/language/statements/select/for_update.surql
 4fe4386b9681c437 language-tests/tests/language/statements/select/for_update_locked_read.surql
 7a8455dfd904c914 language-tests/tests/language/statements/select/for_update_nested_target.surql

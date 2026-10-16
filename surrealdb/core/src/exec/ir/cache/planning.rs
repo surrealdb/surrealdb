@@ -59,7 +59,7 @@ use crate::exec::catalog_deps::Referencing;
 use crate::exec::ir::core::Ir;
 use crate::exec::ir::iface::IndexRef;
 use crate::exec::ir::iface::catalog::{
-	BackendCaps, FieldView, PhysicalCatalog, SemanticCatalog, SourceKey, next_lineage,
+	BackendCaps, FieldView, IoCaps, PhysicalCatalog, SemanticCatalog, SourceKey, next_lineage,
 };
 use crate::exec::ir::iface::fold::FoldConsumer;
 use crate::exec::ir::iface::ids::{FrameId, ValueId};
@@ -96,6 +96,9 @@ pub(crate) struct PlanningCatalog {
 	read_stamp: Option<u64>,
 	/// What the datastore offers, which the compile's caller states.
 	backend: BackendCaps,
+	/// Whether the container is planned as a statement of a request
+	/// ([`PhysicalCatalog::at_request_root`]).
+	request_root: bool,
 	/// Whether a read after a catalog change is planned here as one that knows nothing of its
 	/// table ([`PhysicalCatalog::plans_unknown_reads`]).
 	plans_unknown_reads: bool,
@@ -236,6 +239,7 @@ impl PlanningCatalog {
 			caller: None,
 			read_stamp: None,
 			backend: BackendCaps::default(),
+			request_root: false,
 			plans_unknown_reads: false,
 			state: Mutex::new(MemoState {
 				snapshot: None,
@@ -288,6 +292,13 @@ impl PlanningCatalog {
 	/// the records and the indexes the stamp holds ([`PhysicalCatalog::read_stamp`]).
 	pub(crate) fn at_stamp(mut self, stamp: Option<u64>) -> Self {
 		self.read_stamp = stamp;
+		self
+	}
+
+	/// Whether the container is planned as a statement of a request, answered by
+	/// [`PhysicalCatalog::at_request_root`].
+	pub(crate) fn with_request_root(mut self, request_root: bool) -> Self {
+		self.request_root = request_root;
 		self
 	}
 
@@ -1269,6 +1280,16 @@ impl PhysicalCatalog for PlanningCatalog {
 
 	fn backend(&self) -> BackendCaps {
 		PlanningCatalog::backend(self)
+	}
+
+	fn io_caps(&self) -> IoCaps {
+		IoCaps {
+			untracked_reads: !self.txn.plain_reads_tracked(),
+		}
+	}
+
+	fn at_request_root(&self) -> bool {
+		self.request_root
 	}
 
 	fn table_answers(&self, key: &SourceKey) -> CatalogAnswer<Arc<TableAnswers>> {

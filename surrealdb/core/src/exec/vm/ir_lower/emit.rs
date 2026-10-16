@@ -31,7 +31,7 @@ use std::ops::Range;
 use surrealdb_strand::Strand;
 
 use super::super::program::{
-	BlockInstr, CALL_FRAME, CallSpec, ClosureValueSpec, DeferredVector, ExternalSpec,
+	BlockInstr, CALL_FRAME, CallSpec, ClosureValueSpec, DeferredVector, ExternalSpec, FetchPlan,
 	FetchStepSpec, FunctionSpec, Instr, KnnQuery, Label, LookupSpec, MatchesSpec, MethodSpec,
 	NestedSpec, ParamSpec, PermissionSpec, Pipeline, Program, ROW, RecordIdSpec, Reg, Source,
 	SubquerySpec, reads_row,
@@ -78,8 +78,8 @@ pub(crate) struct Emitter {
 	record_ids: Vec<RecordIdSpec>,
 	closure_values: Vec<ClosureValueSpec>,
 	host_code: Vec<Pipeline>,
-	/// The paths of each fetch of the program.
-	fetches: Vec<Vec<Vec<FetchStepSpec>>>,
+	/// Each fetch of the program: its paths and whether it reads its links in windows.
+	fetches: Vec<FetchPlan>,
 	/// The frames the program's permission predicates and layer columns are evaluated in.
 	permissions: Vec<PermissionSpec>,
 	/// The group whose start forgets each verdict a filter keeps.
@@ -498,11 +498,19 @@ impl Emitter {
 		Ok(index)
 	}
 
-	/// The index of a new entry for the fetch of `paths`, each the steps one `FETCH` path walks.
-	pub(super) fn fetch(&mut self, paths: Vec<Vec<FetchStepSpec>>) -> Result<u16, IrError> {
+	/// The index of a new entry for the fetch of `paths`, each the steps one `FETCH` path walks,
+	/// which reads its links in windows where `windows`.
+	pub(super) fn fetch(
+		&mut self,
+		paths: Vec<Vec<FetchStepSpec>>,
+		windows: bool,
+	) -> Result<u16, IrError> {
 		let index =
 			u16::try_from(self.fetches.len()).map_err(|_| IrError::Capacity("vm fetches"))?;
-		self.fetches.push(paths);
+		self.fetches.push(FetchPlan {
+			paths,
+			windows,
+		});
 		Ok(index)
 	}
 
@@ -606,6 +614,8 @@ impl Emitter {
 			limits: Vec::new(),
 			parallel: Parallel::Serial,
 			group: self.group,
+			deref_windows: false,
+			rows_ahead: None,
 		})
 	}
 

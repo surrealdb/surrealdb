@@ -1,0 +1,831 @@
+//! How a pipeline reads storage beyond what its ops state: the windows its links are read in.
+//!
+//! A pipeline reads the records its `FETCH` and its dereferences reach one at a time, unless the
+//! plan says a run of them may be read at once. [`run`] states that decision for every placed
+//! pipeline as its [`PipelineIo`], held beside the pipeline's placement, from the container the
+//! physical rewrites left. It changes no op and prints nowhere, and the VM reads no capability
+//! and no version to decide a window: it copies what this states.
+//!
+//! - `deref_windows`: the pipeline's `.*` and field-over-array dereferences read their links in
+//!   windows. The datastore's plain reads are untracked, so a window reads no key the run would not
+//!   conflict on, and the pipeline reads at the current version. Between two positions of a window
+//!   only the position's own fetch runs, whose writes are refused, so no footprint is asked.
+//! - `fetch_windows`: the same for each collection of links a `FETCH` path reaches. A computed
+//!   index step of a path runs host code between positions, so the `FETCH` must write nothing.
+//!
+//! - `rows_ahead`: a `FETCH` of top-level link fields over a scan reads the links of a batch of
+//!   source rows before the rows run. Only a serial placement has it: the rows of a morsel batch
+//!   reach the `FETCH` on a worker's own schedule. Every key it reads is one the serial run reads:
+//!   the ops between the scan and the `FETCH` pass each row they take at most once and in order,
+//!   the projection is the row itself, the fields it keys are stored and unfiltered, and the
+//!   statement writes nothing, so no key is read before a write the run would have made first.
+//!
+//! Every rule is conservative: a pipeline whose shape, version or footprint a rule cannot
+//! establish has no window. A window reads at the current version, so a pipeline gets one only
+//! where the plan establishes the version it runs at: a statement of a request, in code that runs
+//! in the request's own frame, whose ops state their version themselves. A unit compiled on its
+//! own, or code a caller's frame runs, may run under a caller's `VERSION` that no op of its plan
+//! names.
+
+#![deny(clippy::wildcard_enum_match_arm)]
+
+use smallvec::SmallVec;
+use surrealdb_strand::Strand;
+
+use super::ops::{PhysOp, ProjectionShape};
+use super::pipeline::streams;
+#[cfg(test)]
+use super::placement_attr::PlacementAttr;
+use super::placement_attr::{PipelineIo, RowsAhead};
+use crate::catalog::Permission;
+use crate::exec::ir::analysis::effects;
+use crate::exec::ir::core::facts::FactCache;
+use crate::exec::ir::core::ir::Ir;
+use crate::exec::ir::core::value::ValueDef;
+use crate::exec::ir::core::walk::ops_in;
+use crate::exec::ir::error::IrError;
+use crate::exec::ir::expr::ops::ExprOp;
+use crate::exec::ir::iface::catalog::{CatalogAnswer, EffectCx, PhysCx};
+use crate::exec::ir::iface::frame::Snapshot;
+use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
+use crate::exec::ir::iface::region_kind::{ErrorScope, RegionKind};
+use crate::exec::ir::logical::ops::LoopKind;
+use crate::exec::ir::op_kind::OpKind;
+use crate::exec::planner::placement::Decision;
+#[cfg(test)]
+use crate::exec::planner::placement::{Combine, MorselInput};
+use crate::expr::logical::EffectSet;
+use crate::expr::part::Part;
+use crate::val::TableName;
+
+#[cfg(test)]
+thread_local! {
+	/// Pins the windows of dereferences and `FETCH` on (`Some(true)`, whatever the datastore
+	/// offers) or off, for tests that compare the two runs.
+	pub(crate) static FORCE_LINK_WINDOWS: std::cell::Cell<Option<bool>> =
+		const { std::cell::Cell::new(None) };
+	/// Pins the rows-ahead decision off (`Some(false)`), for tests that compare the runs. Pinned on
+	/// it is the decision the plan makes.
+	pub(crate) static FORCE_ROWS_AHEAD: std::cell::Cell<Option<bool>> =
+		const { std::cell::Cell::new(None) };
+	/// Places every pipeline as range morsels before its io is decided, for tests of the rules
+	/// that depend on the placement.
+	static FORCE_MORSEL_PLACEMENT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Places the pipeline of `attr` as range morsels that concatenate. The facts the decision is
+/// judged by record no write, as a pipeline of a statement that writes nothing states them.
+#[cfg(test)]
+fn place_as_range_morsels(attr: &mut PlacementAttr) {
+	if let Some(mut facts) = attr.facts().cloned() {
+		facts.writes = false;
+		attr.set_facts(Some(facts));
+	}
+	attr.set_decision(Some(Decision::Morsels {
+		input: MorselInput::Range,
+		combine: Combine::Concat,
+		paged: false,
+		prunes: false,
+	}));
+}
+
+/// States the [`PipelineIo`] of every pipeline of `ir`.
+pub(crate) fn run(ir: &mut Ir, facts: &mut FactCache, cx: &PhysCx<'_>) -> Result<(), IrError> {
+	let untracked = untracked_reads(cx) && cx.physical.at_request_root();
+	// The placed pipelines are the table's keys, so no walk of the container's ops is needed to
+	// find them.
+	let placed: SmallVec<[OpId; 8]> = ir.placement_table_mut().pipelines().collect();
+	let mut decided: SmallVec<[(OpId, PipelineIo); 8]> = SmallVec::new();
+	for pipeline in placed {
+		#[cfg(test)]
+		if FORCE_MORSEL_PLACEMENT.with(std::cell::Cell::get) {
+			let table = ir.placement_table_mut();
+			if let Some(mut attr) = table.get(pipeline).cloned() {
+				place_as_range_morsels(&mut attr);
+				table.insert(pipeline, attr);
+			}
+		}
+		let io = io_of(ir, facts, cx, pipeline, untracked);
+		if io != PipelineIo::default() {
+			decided.push((pipeline, io));
+		}
+	}
+	for (pipeline, io) in decided {
+		ir.placement_table_mut().set_io(pipeline, io);
+	}
+	Ok(())
+}
+
+/// Whether a plain read leaves the transaction's conflict set alone.
+fn untracked_reads(cx: &PhysCx<'_>) -> bool {
+	#[cfg(test)]
+	if let Some(forced) = FORCE_LINK_WINDOWS.with(std::cell::Cell::get) {
+		return forced;
+	}
+	cx.physical.io_caps().untracked_reads
+}
+
+/// The decision for the pipeline `pipeline`.
+fn io_of(
+	ir: &Ir,
+	facts: &mut FactCache,
+	cx: &PhysCx<'_>,
+	pipeline: OpId,
+	untracked: bool,
+) -> PipelineIo {
+	if !untracked || !runs_in_request_frame(ir, pipeline) || !reads_current(ir, pipeline) {
+		return PipelineIo::default();
+	}
+	let mut io = PipelineIo {
+		deref_windows: true,
+		..PipelineIo::default()
+	};
+	let Some(rows) = rows_of(ir, pipeline) else {
+		return io;
+	};
+	let mut fetches =
+		rows.passes.iter().copied().filter(|op| matches!(kind_of(ir, *op), Some(PhysOp::Fetch)));
+	let Some(first) = fetches.next() else {
+		return io;
+	};
+	let second = fetches.next();
+	io.fetch_windows = std::iter::once(first)
+		.chain(second)
+		.chain(fetches)
+		.all(|fetch| reads_current(ir, fetch) && only_reads(ir, facts, &cx.effects, fetch));
+	if io.fetch_windows && second.is_none() {
+		io.rows_ahead = rows_ahead(ir, cx, pipeline, &rows, first);
+	}
+	io
+}
+
+/// Whether the paths of the `FETCH` `fetch` run no code that writes or that the plan cannot see.
+///
+/// The steps of a path (fields, `.*`, first, last, and the index step itself) only name where the
+/// walk goes: the records they reach are read by the walk, whose reads of a record run in a
+/// frame that refuses a write. A computed index is the other kind of op in a path's region: host
+/// code the walk runs between two positions of a window, where a write could land between a
+/// record's read and its use. The fetch op itself states no effects, so its paths are read.
+fn only_reads(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, fetch: OpId) -> bool {
+	let Some(data) = ir.op(fetch) else {
+		return false;
+	};
+	data.regions.iter().flat_map(|region| ops_in(ir, *region)).all(|op| {
+		let is_step = matches!(
+			ir.op(op).map(|data| &data.kind),
+			Some(OpKind::Expr(
+				ExprOp::Field { .. }
+					| ExprOp::ComputedRead(..)
+					| ExprOp::Access { .. }
+					| ExprOp::Each | ExprOp::First
+					| ExprOp::Last | ExprOp::Index
+					| ExprOp::Yield
+			))
+		);
+		is_step || {
+			let set = effects::of_with(ir, facts, cx, op).set;
+			!set.mutates_state() && !set.intersects(EffectSet::OPAQUE_BODY)
+		}
+	})
+}
+
+/// Whether the pipeline `pipeline` runs in the frame of the request it is planned in, so that
+/// the version its ops state is the version it runs at.
+///
+/// Code a caller's frame runs (a function or closure body, a permission or field clause, an
+/// event, a stage of a write, a unit of the catalog, a subscriber's frame, code stored and never
+/// run here) reads at whatever `VERSION` that frame holds, which no op of the plan names. So does
+/// a container whose root is not a request region, whatever planner planned it.
+fn runs_in_request_frame(ir: &Ir, pipeline: OpId) -> bool {
+	let mut region = ir.enclosing_region(pipeline);
+	loop {
+		let Some(data) = ir.region(region) else {
+			return false;
+		};
+		let admitted = match data.kind {
+			RegionKind::Request
+			| RegionKind::Transaction(_)
+			| RegionKind::Statement(_)
+			| RegionKind::Block
+			| RegionKind::ValueBlock
+			| RegionKind::StatementIf
+			| RegionKind::ValueIf
+			| RegionKind::StatementFor
+			| RegionKind::ValueFor
+			| RegionKind::Loop
+			| RegionKind::Subquery
+			| RegionKind::Clause(_)
+			| RegionKind::LazyOperand
+			| RegionKind::ChooseArm
+			| RegionKind::Pipeline
+			| RegionKind::Deadline => true,
+			RegionKind::ErrorScope(scope) => match scope {
+				ErrorScope::ShapeToNone | ErrorScope::MethodBody => true,
+				ErrorScope::PermissionCheck => false,
+			},
+			RegionKind::FunctionBody
+			| RegionKind::ClosureBody
+			| RegionKind::PermissionFrame
+			| RegionKind::FieldFrame(_)
+			| RegionKind::EventFrame
+			| RegionKind::SubscriberFrame
+			| RegionKind::WriteStage
+			| RegionKind::CatalogUnit
+			| RegionKind::StoredClause(_) => false,
+			// A join's lookup arm runs once per left row and may not run at all, so no window
+			// rule judges the reads of a pipeline inside it.
+			RegionKind::JoinLookupArm => false,
+		};
+		if !admitted {
+			return false;
+		}
+		match ir.parent_op(region) {
+			Some(parent) => region = ir.enclosing_region(parent),
+			// Only a request's own container is rooted at a request region. A unit planned apart
+			// (a view's recalculation, a cascade) is rooted at the region of the frame it runs in,
+			// whichever planner planned it.
+			None => return matches!(data.kind, RegionKind::Request),
+		}
+	}
+}
+
+/// Whether the op `op` reads at the current version.
+fn reads_current(ir: &Ir, op: OpId) -> bool {
+	ir.op(op)
+		.is_some_and(|data| matches!(ir.snapshot(data.snapshot), Some(Snapshot::Current) | None))
+}
+
+fn kind_of(ir: &Ir, op: OpId) -> Option<&PhysOp> {
+	match &ir.op(op)?.kind {
+		OpKind::Phys(kind) => Some(kind),
+		OpKind::Expr(_) | OpKind::Logical(_) => None,
+	}
+}
+
+/// The ops a pipeline's body runs for each row the source yields, and the source.
+struct Rows {
+	/// The op the rows come from.
+	source: OpId,
+	/// The pipeline itself and every pipeline it continues: each runs some of the ops in
+	/// [`Self::passes`].
+	pipelines: SmallVec<[OpId; 2]>,
+	/// The ops between the source and the end of the pipeline's body, in the order the rows meet
+	/// them: the pipelines it continues first, then the streaming ops between them, the body of
+	/// each select loop and the ops that follow the loop.
+	passes: Ops,
+}
+
+/// The ops of a pipeline's body, held inline for the bodies of the usual size.
+type Ops = SmallVec<[OpId; 16]>;
+
+/// The rows of the pipeline `pipeline`, or `None` for a pipeline whose region is not one of the
+/// shapes lowering reads.
+fn rows_of(ir: &Ir, pipeline: OpId) -> Option<Rows> {
+	let mut passes = Ops::new();
+	let mut pipelines = SmallVec::new();
+	let source = walk(ir, pipeline, &mut passes, &mut pipelines)?;
+	Some(Rows {
+		source,
+		pipelines,
+		passes,
+	})
+}
+
+/// Appends the ops the rows of the pipeline `pipeline` pass to `out`, earliest first, and the
+/// pipelines that run them to `pipelines`, and answers the op they come from.
+fn walk(
+	ir: &Ir,
+	pipeline: OpId,
+	out: &mut Ops,
+	pipelines: &mut SmallVec<[OpId; 2]>,
+) -> Option<OpId> {
+	pipelines.push(pipeline);
+	let region = *ir.op(pipeline)?.regions.first()?;
+	let mut chain: Ops = ops_in(ir, region).collect();
+	// The region ends in the yield of the rows it delivers.
+	chain.pop().filter(|last| matches!(kind_of(ir, *last), Some(PhysOp::Yield)))?;
+	let head = *chain.first()?;
+	let source = if let Some(PhysOp::Loop {
+		kind: LoopKind::Select,
+		..
+	}) = kind_of(ir, head)
+	{
+		let data = ir.op(head)?;
+		let (input, before) = before_of(ir, *data.operands.first()?)?;
+		let source = if matches!(kind_of(ir, input), Some(PhysOp::Pipeline(_))) {
+			walk(ir, input, out, pipelines)?
+		} else {
+			input
+		};
+		out.extend(before);
+		let body = *data.regions.first()?;
+		let mut body_ops: Ops = ops_in(ir, body).collect();
+		body_ops.pop().filter(|last| matches!(kind_of(ir, *last), Some(PhysOp::Yield)))?;
+		out.extend(body_ops);
+		source
+	} else {
+		head
+	};
+	out.extend(chain.into_iter().skip(1));
+	Some(source)
+}
+
+/// The op that produces the rows `rows` and the streaming ops that stand between it and the
+/// reader, earliest first. The walk stops at the first op that does not stream.
+fn before_of(ir: &Ir, rows: ValueId) -> Option<(OpId, Ops)> {
+	let mut before = Ops::new();
+	let mut at = producer(ir, rows)?;
+	loop {
+		let data = ir.op(at)?;
+		match (&data.kind, data.operands.first()) {
+			(OpKind::Phys(kind), Some(input)) if streams(kind) => {
+				before.push(at);
+				at = producer(ir, *input)?;
+			}
+			_ => {
+				before.reverse();
+				return Some((at, before));
+			}
+		}
+	}
+}
+
+/// The op that defines `value`, when `value` is an op's result.
+fn producer(ir: &Ir, value: ValueId) -> Option<OpId> {
+	match ir.value(value)?.def {
+		ValueDef::OpResult {
+			op,
+			..
+		} => Some(op),
+		ValueDef::BlockArg {
+			..
+		} => None,
+	}
+}
+
+/// The links of `fetch`, the one `FETCH` of `pipeline`, that its rows' source can be asked for
+/// ahead of the rows, or `None` where a rule of the module does not hold.
+fn rows_ahead(
+	ir: &Ir,
+	cx: &PhysCx<'_>,
+	pipeline: OpId,
+	rows: &Rows,
+	fetch: OpId,
+) -> Option<RowsAhead> {
+	#[cfg(test)]
+	if FORCE_ROWS_AHEAD.with(std::cell::Cell::get) == Some(false) {
+		return None;
+	}
+	debug_assert_eq!(rows.pipelines.first(), Some(&pipeline));
+	// The host reads ahead the rows it runs one after another, so only a serial placement has
+	// them: the rows of a morsel batch reach the `FETCH` on a worker's own schedule. That holds of
+	// every pipeline the rows pass, the one that scans them included. The statement writes
+	// nothing and runs nothing the plan cannot see, so a key is not read before a write the
+	// serial run would have made first.
+	for pipeline in &rows.pipelines {
+		let placement = ir.placement(*pipeline)?;
+		if placement.decision()? != Decision::Serial || placement.statement().refusal.is_some() {
+			return None;
+		}
+	}
+	// The scan decodes its rows for the body, which a `FETCH` makes a host step.
+	let source = kind_of(ir, rows.source)?;
+	let table = if let PhysOp::TableScan(attrs) = source
+		&& !attrs.lightweight
+	{
+		&attrs.table
+	} else if let PhysOp::KeyRangeScan(attrs) = source {
+		&attrs.table
+	} else {
+		return None;
+	};
+	// Every op the rows pass before the fetch takes each row at most once, in order: one paging
+	// clause, and the projection that is the row itself. A paging clause after it would bound
+	// the rows that reach it, not the keys.
+	let at = rows.passes.iter().position(|op| *op == fetch)?;
+	let mut limits = 0;
+	for op in &rows.passes[..at] {
+		let op = kind_of(ir, *op)?;
+		if matches!(op, PhysOp::Limit { .. }) {
+			limits += 1;
+		} else if !matches!(op, PhysOp::Project(shape) if matches!(**shape, ProjectionShape::All)) {
+			return None;
+		}
+	}
+	if limits > 1 {
+		return None;
+	}
+	if rows.passes[at + 1..].iter().any(|op| matches!(kind_of(ir, *op), Some(PhysOp::Limit { .. })))
+	{
+		return None;
+	}
+	let fields = link_fields(ir, cx, table, fetch)?;
+	Some(RowsAhead {
+		fields,
+		// The one clause that pages before the fetch is the first the body holds, and no clause
+		// follows the fetch.
+		paging: (limits == 1).then_some(0),
+	})
+}
+
+/// The top-level fields of `table` that the paths of `fetch` read the links of, where every path
+/// is such a field or its elements, and the catalog answers that the table's definitions leave
+/// those fields as they are stored: none is `COMPUTED` and none has a field permission.
+///
+/// A field permission is refused whatever the frame, though a frame that waives permissions would
+/// read the field as stored: the plan does not hold that fact where it states this.
+fn link_fields(
+	ir: &Ir,
+	cx: &PhysCx<'_>,
+	table: &TableName,
+	fetch: OpId,
+) -> Option<SmallVec<[Strand; 2]>> {
+	let data = ir.op(fetch)?;
+	let mut fields: SmallVec<[Strand; 2]> = SmallVec::new();
+	for region in &data.regions {
+		let name = path_of(ir, *region)?;
+		if !fields.contains(&name) {
+			fields.push(name);
+		}
+	}
+	if fields.is_empty() {
+		return None;
+	}
+	let snapshot = match cx.effects.catalog.table(table) {
+		CatalogAnswer::Found(snapshot) => snapshot,
+		CatalogAnswer::Absent | CatalogAnswer::NotLoaded | CatalogAnswer::Unknown => return None,
+	};
+	for field in snapshot.fields.iter() {
+		let Some(Part::Field(first)) = field.name.0.first() else {
+			continue;
+		};
+		if fields.contains(first)
+			&& (field.computed.is_some() || !matches!(field.select_permission, Permission::Full))
+		{
+			return None;
+		}
+	}
+	Some(fields)
+}
+
+/// The field a `FETCH` path reads, for the paths `f` and `f.*` read off the row the region is
+/// evaluated against, and `None` for every other.
+fn path_of(ir: &Ir, region: RegionId) -> Option<Strand> {
+	let row = *ir.block(*ir.region(region)?.blocks.first()?)?.args.first()?;
+	let ops: Vec<OpId> = ops_in(ir, region).collect();
+	let (last, steps) = ops.split_last()?;
+	let yielded = ir.op(*last)?;
+	if !matches!(yielded.kind, OpKind::Expr(ExprOp::Yield)) {
+		return None;
+	}
+	let field_of = |op: OpId| -> Option<Strand> {
+		let data = ir.op(op)?;
+		match (&data.kind, data.operands.as_slice()) {
+			(
+				OpKind::Expr(ExprOp::Field {
+					name,
+				}),
+				[from],
+			) if *from == row => Some(name.clone()),
+			_ => None,
+		}
+	};
+	match (steps, yielded.operands.as_slice()) {
+		([field], [value]) if ir.op(*field)?.results.first() == Some(value) => field_of(*field),
+		([field, each], [value]) if ir.op(*each)?.results.first() == Some(value) => {
+			let each_data = ir.op(*each)?;
+			let reads_field = each_data.operands.as_slice() == ir.op(*field)?.results.as_slice();
+			if matches!(each_data.kind, OpKind::Expr(ExprOp::Each)) && reads_field {
+				field_of(*field)
+			} else {
+				None
+			}
+		}
+		_ => None,
+	}
+}
+
+#[cfg(all(test, feature = "kv-mem"))]
+mod tests {
+	use super::*;
+	use crate::dbs::Session;
+	use crate::exec::ir::phys::pipeline::PipelineDag;
+	use crate::exec::ir::tests_plan_request::{
+		planned_as_unit, planned_request, planned_request_as, planned_unit,
+	};
+	use crate::exec::ir::unit::UnitKind;
+	use crate::exec::operators::test_util::TestDb;
+
+	const SETUP: &str = "DEFINE TABLE person SCHEMALESS; DEFINE TABLE holder SCHEMALESS;";
+
+	/// The decision of each pipeline `sql` plans to, with the windows pinned to `forced`.
+	async fn ios(setup: &str, sql: &str, forced: Option<bool>) -> Vec<PipelineIo> {
+		FORCE_LINK_WINDOWS.with(|pinned| pinned.set(forced));
+		let planned = planned_request(setup, sql).await;
+		FORCE_LINK_WINDOWS.with(|pinned| pinned.set(None));
+		PipelineDag::of(&planned.ir)
+			.nodes
+			.iter()
+			.map(|(_, pipeline)| {
+				planned.ir.placement(*pipeline).expect("a placed pipeline").io().clone()
+			})
+			.collect()
+	}
+
+	/// The decision of each pipeline `sql` plans to as a unit compiled on its own, with the windows
+	/// pinned on.
+	async fn ios_of_unit(setup: &str, sql: &str) -> Vec<PipelineIo> {
+		FORCE_LINK_WINDOWS.with(|pinned| pinned.set(Some(true)));
+		let planned = planned_unit(setup, sql).await;
+		FORCE_LINK_WINDOWS.with(|pinned| pinned.set(None));
+		PipelineDag::of(&planned.ir)
+			.nodes
+			.iter()
+			.map(|(_, pipeline)| {
+				planned.ir.placement(*pipeline).expect("a placed pipeline").io().clone()
+			})
+			.collect()
+	}
+
+	fn windows(io: &PipelineIo) -> (bool, bool) {
+		(io.fetch_windows, io.deref_windows)
+	}
+
+	#[tokio::test]
+	async fn a_fetch_over_a_scan_reads_its_links_in_windows() {
+		let found = ios(SETUP, "SELECT * FROM holder FETCH refs", None).await;
+		assert_eq!(found.iter().map(windows).collect::<Vec<_>>(), vec![(true, true)]);
+		let found = ios(SETUP, "SELECT * FROM holder FETCH refs, friends.*", None).await;
+		assert_eq!(found.iter().map(windows).collect::<Vec<_>>(), vec![(true, true)]);
+	}
+
+	#[tokio::test]
+	async fn a_fetch_behind_a_limit_is_judged_with_the_pipeline_it_continues() {
+		let found = ios(SETUP, "SELECT * FROM holder LIMIT 5 FETCH refs", None).await;
+		assert_eq!(found.len(), 2, "the paging and the fetch are two pipelines");
+		assert_eq!(windows(&found[1]), (true, true), "{found:?}");
+	}
+
+	#[tokio::test]
+	async fn a_dereference_without_a_fetch_is_windowed_without_fetch_windows() {
+		let found = ios(SETUP, "SELECT refs.*, refs.n FROM holder", None).await;
+		assert_eq!(found.iter().map(windows).collect::<Vec<_>>(), vec![(false, true)]);
+	}
+
+	#[tokio::test]
+	async fn a_datastore_that_tracks_plain_reads_gets_no_window() {
+		let found = ios(SETUP, "SELECT * FROM holder FETCH refs", Some(false)).await;
+		assert_eq!(found, vec![PipelineIo::default()]);
+	}
+
+	#[tokio::test]
+	async fn a_unit_that_runs_in_a_callers_frame_gets_no_window() {
+		for sql in [
+			"SELECT * FROM holder FETCH refs",
+			"SELECT refs.*, refs.n FROM holder",
+			"SELECT VALUE refs.n FROM holder",
+		] {
+			let found = ios_of_unit(SETUP, sql).await;
+			assert!(!found.is_empty(), "{sql}");
+			assert!(found.iter().all(|io| *io == PipelineIo::default()), "{sql}: {found:?}");
+		}
+		// The same statements as statements of a request are windowed, where the plan says so.
+		let found = ios(SETUP, "SELECT * FROM holder FETCH refs", Some(true)).await;
+		assert_eq!(found.iter().map(windows).collect::<Vec<_>>(), vec![(true, true)]);
+	}
+
+	#[tokio::test]
+	async fn a_versioned_read_gets_no_window() {
+		let found = ios(
+			SETUP,
+			"SELECT * FROM holder FETCH refs VERSION d'2024-01-01T00:00:00Z'",
+			Some(true),
+		)
+		.await;
+		assert_eq!(found, vec![PipelineIo::default()]);
+	}
+
+	#[tokio::test]
+	async fn a_computed_index_that_writes_gets_no_fetch_window() {
+		let found = ios(
+			SETUP,
+			"SELECT * FROM holder FETCH refs[(CREATE person:1 RETURN VALUE 0)[0]]",
+			None,
+		)
+		.await;
+		assert!(found.iter().all(|io| !io.fetch_windows), "{found:?}");
+		let found = ios(SETUP, "SELECT * FROM holder FETCH refs[0], refs[$]", None).await;
+		assert_eq!(found.iter().map(|io| io.fetch_windows).collect::<Vec<_>>(), vec![true]);
+	}
+
+	/// The rows-ahead decision of each pipeline `sql` plans to.
+	async fn aheads(setup: &str, sql: &str) -> Vec<Option<(Vec<String>, bool)>> {
+		ios(setup, sql, None)
+			.await
+			.into_iter()
+			.map(|io| {
+				io.rows_ahead.map(|ahead| {
+					(
+						ahead.fields.iter().map(|field| field.to_string()).collect(),
+						ahead.paging.is_some(),
+					)
+				})
+			})
+			.collect()
+	}
+
+	const LINKS: &str = "DEFINE TABLE user SCHEMALESS; DEFINE TABLE comment SCHEMALESS;
+		DEFINE TABLE computed SCHEMALESS; DEFINE FIELD author ON computed COMPUTED id;
+		DEFINE TABLE walled SCHEMALESS;
+		DEFINE FIELD author ON walled PERMISSIONS FOR select WHERE true;
+		DEFINE TABLE derived SCHEMALESS; DEFINE FIELD upper ON derived COMPUTED string::uppercase(text);";
+
+	fn one(fields: &[&str], paged: bool) -> Vec<Option<(Vec<String>, bool)>> {
+		vec![Some((fields.iter().map(|field| (*field).to_owned()).collect(), paged))]
+	}
+
+	#[tokio::test]
+	async fn a_fetch_of_link_fields_over_a_scan_reads_the_links_of_a_batch_ahead() {
+		assert_eq!(
+			aheads(LINKS, "SELECT * FROM comment FETCH author").await,
+			one(&["author"], false)
+		);
+		assert_eq!(
+			aheads(LINKS, "SELECT * FROM comment FETCH author, friends.*").await,
+			one(&["author", "friends"], false)
+		);
+		assert_eq!(
+			aheads(LINKS, "SELECT * FROM comment FETCH author, author").await,
+			one(&["author"], false)
+		);
+	}
+
+	#[tokio::test]
+	async fn a_pipeline_placed_as_morsels_reads_no_link_ahead() {
+		let sql = "SELECT * FROM comment FETCH author";
+		assert_eq!(aheads(LINKS, sql).await, one(&["author"], false));
+		FORCE_MORSEL_PLACEMENT.with(|pinned| pinned.set(true));
+		let found = ios(LINKS, sql, None).await;
+		FORCE_MORSEL_PLACEMENT.with(|pinned| pinned.set(false));
+		assert!(found.iter().all(|io| io.fetch_windows), "{found:?}");
+		assert!(found.iter().all(|io| io.rows_ahead.is_none()), "{found:?}");
+	}
+
+	/// The decision of each pipeline `sql` plans to as a container of the kind `unit`, by a
+	/// planner of a statement of a request, with the windows pinned on.
+	async fn ios_as_unit(setup: &str, sql: &str, unit: UnitKind) -> Vec<PipelineIo> {
+		FORCE_LINK_WINDOWS.with(|pinned| pinned.set(Some(true)));
+		let planned = planned_as_unit(setup, sql, unit, true).await;
+		FORCE_LINK_WINDOWS.with(|pinned| pinned.set(None));
+		PipelineDag::of(&planned.ir)
+			.nodes
+			.iter()
+			.map(|(_, pipeline)| {
+				planned.ir.placement(*pipeline).expect("a placed pipeline").io().clone()
+			})
+			.collect()
+	}
+
+	/// A view's recalculation and a cascade are planned apart by a planner derived from the
+	/// request's own, as stored subquery units: they run in the frame of the write that runs them.
+	#[tokio::test]
+	async fn a_stored_subquery_unit_planned_by_a_request_planner_gets_no_window() {
+		for sql in [
+			"SELECT * FROM holder FETCH refs",
+			"SELECT refs.*, refs.n FROM holder",
+			"SELECT * FROM comment FETCH author",
+		] {
+			let found = ios_as_unit(
+				&format!("{SETUP} {LINKS}"),
+				sql,
+				UnitKind::Subquery {
+					stored: true,
+				},
+			)
+			.await;
+			assert!(!found.is_empty(), "{sql}");
+			assert!(found.iter().all(|io| *io == PipelineIo::default()), "{sql}: {found:?}");
+		}
+		// The same planner planning the statement as a request's windows it.
+		let found = ios_as_unit(SETUP, "SELECT * FROM holder FETCH refs", UnitKind::Request).await;
+		assert_eq!(found.iter().map(windows).collect::<Vec<_>>(), vec![(true, true)]);
+	}
+
+	#[tokio::test]
+	async fn a_paging_clause_before_the_fetch_bounds_the_rows_that_reach_it() {
+		let found = aheads(LINKS, "SELECT * FROM comment LIMIT 5 START 2 FETCH author").await;
+		assert_eq!(found.last(), one(&["author"], true).last(), "{found:?}");
+	}
+
+	#[tokio::test]
+	async fn a_row_that_may_not_reach_the_fetch_reads_no_link_ahead() {
+		for sql in [
+			"SELECT * FROM comment WHERE x = 1 FETCH author",
+			"SELECT * OMIT text FROM comment FETCH author",
+			"SELECT * FROM comment ORDER BY text FETCH author",
+			"SELECT * FROM comment GROUP BY text FETCH author",
+			"SELECT * FROM [comment:1, comment:2] FETCH author",
+			"SELECT * FROM comment SPLIT tags FETCH author",
+		] {
+			let found = aheads(LINKS, sql).await;
+			assert!(found.iter().all(Option::is_none), "{sql}: {found:?}");
+		}
+	}
+
+	#[tokio::test]
+	async fn a_link_the_table_derives_or_cuts_is_read_as_the_rows_hold_it() {
+		for sql in [
+			"SELECT * FROM computed FETCH author",
+			"SELECT * FROM walled FETCH author",
+			"SELECT * FROM derived FETCH author",
+		] {
+			let found = aheads(LINKS, sql).await;
+			assert!(found.iter().all(Option::is_none), "{sql}: {found:?}");
+		}
+	}
+
+	#[tokio::test]
+	async fn a_path_that_is_not_a_link_field_or_its_elements_reads_no_link_ahead() {
+		for sql in [
+			"SELECT * FROM comment FETCH author.company",
+			"SELECT * FROM comment FETCH author[0]",
+			"SELECT * FROM comment FETCH author, author.company",
+		] {
+			let found = aheads(LINKS, sql).await;
+			assert!(found.iter().all(Option::is_none), "{sql}: {found:?}");
+		}
+	}
+
+	#[tokio::test]
+	async fn a_statement_that_writes_reads_no_link_ahead() {
+		let found = aheads(
+			LINKS,
+			"SELECT *, (CREATE audit SET at = time::now() RETURN VALUE id) AS w FROM comment FETCH author",
+		)
+		.await;
+		assert!(found.iter().all(Option::is_none), "{found:?}");
+	}
+
+	#[tokio::test]
+	async fn no_link_is_read_ahead_where_the_windows_are_refused() {
+		let found = ios(
+			LINKS,
+			"SELECT * FROM comment FETCH author VERSION d'2024-01-01T00:00:00Z'",
+			Some(true),
+		)
+		.await;
+		assert!(found.iter().all(|io| io.rows_ahead.is_none()), "{found:?}");
+		let found = ios(LINKS, "SELECT * FROM comment FETCH author", Some(false)).await;
+		assert!(found.iter().all(|io| io.rows_ahead.is_none()), "{found:?}");
+		FORCE_ROWS_AHEAD.with(|pinned| pinned.set(Some(false)));
+		let found = ios(LINKS, "SELECT * FROM comment FETCH author", None).await;
+		FORCE_ROWS_AHEAD.with(|pinned| pinned.set(None));
+		assert!(found.iter().all(|io| io.rows_ahead.is_none()), "{found:?}");
+	}
+
+	/// What the principal `session` is told of the rows-ahead decision of `sql`.
+	async fn aheads_as(setup: &str, session: &Session, sql: &str) -> Vec<bool> {
+		let planned = planned_request_as(setup, session, sql).await;
+		PipelineDag::of(&planned.ir)
+			.nodes
+			.iter()
+			.map(|(_, pipeline)| {
+				planned
+					.ir
+					.placement(*pipeline)
+					.expect("a placed pipeline")
+					.io()
+					.rows_ahead
+					.is_some()
+			})
+			.collect()
+	}
+
+	#[tokio::test]
+	async fn a_table_whose_select_permission_is_conditional_reads_no_link_ahead() {
+		let setup = format!(
+			"{LINKS} DEFINE TABLE guarded SCHEMALESS PERMISSIONS FOR select WHERE shown = true;
+			 DEFINE TABLE open SCHEMALESS PERMISSIONS FULL;"
+		);
+		let record = Session::for_record(
+			"test",
+			"test",
+			"user",
+			crate::types::PublicValue::String("user:bob".to_owned()),
+		)
+		.with_ns("test")
+		.with_db("test");
+		let owner = TestDb::owner();
+		// The owner's rows pass no permission filter, so the same shape reads its links ahead.
+		let sql = "SELECT * FROM guarded FETCH author";
+		assert_eq!(aheads_as(&setup, &owner, sql).await, vec![true]);
+		let found = aheads_as(&setup, &record, sql).await;
+		assert!(
+			found.iter().all(|ahead| !ahead),
+			"a permission filter before the FETCH: {found:?}"
+		);
+		// A table the record user reads whole keeps the decision.
+		let found = aheads_as(&setup, &record, "SELECT * FROM open FETCH author").await;
+		assert_eq!(found, vec![true]);
+	}
+}

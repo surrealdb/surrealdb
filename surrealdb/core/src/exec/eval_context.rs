@@ -17,6 +17,7 @@ use surrealdb_strand::Strand;
 use crate::dbs::Capabilities;
 use crate::exec::ExecutionContext;
 use crate::exec::context::{RowAccess, SessionInfo};
+use crate::exec::operators::link_window::LinkPool;
 use crate::kvs::Transaction;
 use crate::val::{RecordId, Value};
 
@@ -151,6 +152,12 @@ pub struct EvalContext<'a> {
 	/// re-planned `eval` strings continue counting toward `max_computation_depth`
 	/// instead of resetting to 0. Zero for ordinary per-row evaluation.
 	pub plan_depth: u32,
+
+	/// The windows a dereference of a collection of record links reads through, where the
+	/// physical plan admitted them for the pipeline that evaluates it. `None` reads each link for
+	/// itself, as every evaluation outside such a pipeline (a function body, a closure, a stored
+	/// expression) does.
+	pub(crate) link_windows: Option<&'a LinkPool>,
 }
 
 /// The record whose computed fields are being evaluated, and what a
@@ -206,6 +213,7 @@ impl<'a> EvalContext<'a> {
 			skip_fetch_perms: exec_ctx.root().skip_fetch_perms,
 			computing_record: exec_ctx.root().computing_record.clone(),
 			plan_depth: 0,
+			link_windows: None,
 		}
 	}
 
@@ -230,6 +238,7 @@ impl<'a> EvalContext<'a> {
 			skip_fetch_perms: self.skip_fetch_perms,
 			computing_record: self.computing_record.clone(),
 			plan_depth: self.plan_depth,
+			link_windows: self.link_windows,
 		}
 	}
 
@@ -256,6 +265,7 @@ impl<'a> EvalContext<'a> {
 			skip_fetch_perms: self.skip_fetch_perms,
 			computing_record: self.computing_record.clone(),
 			plan_depth: self.plan_depth,
+			link_windows: self.link_windows,
 		}
 	}
 
@@ -296,6 +306,7 @@ impl<'a> EvalContext<'a> {
 			skip_fetch_perms: self.skip_fetch_perms,
 			computing_record: self.computing_record.clone(),
 			plan_depth: self.plan_depth,
+			link_windows: self.link_windows,
 		}
 	}
 

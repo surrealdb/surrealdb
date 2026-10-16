@@ -33,7 +33,7 @@ use super::facts::NestedReading;
 use super::ops::{KeyEqShape, KeyRangeShape, PhysOp, PhysTag, SortAttrs, SortKeyReadShape};
 use super::placement::{Placement, install, place_all_reading};
 use super::{
-	chain, conjunct, hold_left, hop_key, index_answer, join_lookup, knn_ids, nested, once,
+	chain, conjunct, hold_left, hop_key, index_answer, io, join_lookup, knn_ids, nested, once,
 	prefilter, recheck, topk_packed,
 };
 use crate::catalog::KeyStructure;
@@ -148,6 +148,7 @@ pub(crate) async fn run(
 		NestedReading::Strategy,
 	)?;
 	install(ir.placement_table_mut(), placed);
+	io::run(ir, facts, cx)?;
 	Ok(report)
 }
 
