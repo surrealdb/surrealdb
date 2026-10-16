@@ -2170,15 +2170,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dirs"
-version = "6.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3e8aa94d75141228480295a7d0e7feb620b1a5ad9f12bc40be62411e38cce4e"
-dependencies = [
- "dirs-sys",
-]
-
-[[package]]
 name = "dirs-sys"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7440,7 +7431,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
-name = "surreal"
+name = "surreal-db"
 version = "3.4.0-nightly"
 dependencies = [
  "assert_fs",
@@ -7475,6 +7466,52 @@ dependencies = [
  "ulid",
  "uuid",
  "web-time",
+]
+
+[[package]]
+name = "surreal-ext"
+version = "3.4.0-nightly"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "bytes",
+ "clap",
+ "dialoguer",
+ "hex",
+ "rand 0.9.4",
+ "reqwest",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "sigstore-merkle",
+ "sigstore-oidc",
+ "sigstore-rekor",
+ "sigstore-sign",
+ "sigstore-trust-root",
+ "surrealdb",
+ "surrealdb-common",
+ "surrealdb-core",
+ "surrealdb-expr",
+ "surrealdb-rpc",
+ "surrealdb-types",
+ "surrealism-runtime",
+ "surrealism-verify",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "wasm-encoder 0.245.1",
+ "wasm-opt",
+ "wasmparser 0.245.1",
+ "wasmtime",
+ "wasmtime-wasi",
+ "wasmtime-wizer",
+ "wat",
+ "wiremock",
+ "zstd",
 ]
 
 [[package]]
@@ -8343,19 +8380,15 @@ dependencies = [
  "axum",
  "axum-extra",
  "axum-server",
- "base64 0.22.1",
  "blake3",
  "bytes",
  "clap",
  "console-subscriber",
  "dashmap",
- "dialoguer",
- "dirs",
  "env_logger 0.11.10",
  "futures",
  "futures-util",
  "glob",
- "hex",
  "http",
  "http-body",
  "hyper",
@@ -8377,16 +8410,9 @@ dependencies = [
  "rstest",
  "rustls",
  "rustyline",
- "semver",
  "serde",
  "serde_json",
  "serial_test",
- "sha2 0.10.9",
- "sigstore-merkle",
- "sigstore-oidc",
- "sigstore-rekor",
- "sigstore-sign",
- "sigstore-trust-root",
  "surrealdb",
  "surrealdb-catalog",
  "surrealdb-cnf",
@@ -8404,10 +8430,7 @@ dependencies = [
  "surrealdb-protocol",
  "surrealdb-rpc",
  "surrealdb-types",
- "surrealism-runtime",
- "surrealism-verify",
  "surrealml-core",
- "tar",
  "tempfile",
  "test-log",
  "thiserror 2.0.20",
@@ -8425,16 +8448,9 @@ dependencies = [
  "tracing-subscriber",
  "ulid",
  "uuid",
- "wasm-encoder 0.245.1",
- "wasm-opt",
- "wasmparser 0.245.1",
- "wasmtime",
- "wasmtime-wasi",
- "wasmtime-wizer",
  "wat",
  "web-time",
  "wiremock",
- "zstd",
 ]
 
 [[package]]

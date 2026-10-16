@@ -25,42 +25,539 @@ mod cli_integration {
 	use super::common::{self, PASS, StartServerArguments, USER};
 	use crate::remove_debug_info;
 
+	/// `<semver> for <os> on <arch>`, with a newline, and nothing else.
+	fn assert_release(text: &str) -> String {
+		let text = remove_debug_info(text.to_owned());
+		let version = text.split(' ').next().unwrap_or_default().to_owned();
+		assert!(semver::Version::parse(&version).is_ok(), "{text}");
+		assert_eq!(
+			text,
+			format!("{version} for {} on {}\n", std::env::consts::OS, std::env::consts::ARCH)
+		);
+		version
+	}
+
 	#[test]
 	fn version_command() {
-		common::run("version").output().unwrap();
+		assert_release(&common::run("version").output().unwrap());
+	}
+
+	/// `-v`, `--version` and the hidden `-V` print the release alone, the same
+	/// text as `version`, with no command and nothing on stderr.
+	#[test]
+	fn version_flags_print_the_release() {
+		let version = remove_debug_info(common::run("version").output().unwrap());
+		for args in ["-v", "--version", "-V", "--log debug --version"] {
+			let mut child = common::run(args);
+			let text = child.output().unwrap();
+			assert_release(&text);
+			assert_eq!(remove_debug_info(text), version, "{args}");
+			assert_eq!(child.stderr(), "", "{args}");
+		}
+	}
+
+	/// The flags work the same through the Surreal CLI, and `--version` runs
+	/// even where an environment variable gives clap a value.
+	#[test]
+	fn version_flag_through_the_launcher() {
+		let vars = HashMap::from([
+			("SURREAL_INVOKED_AS".to_owned(), "surreal db".to_owned()),
+			("SURREAL_ONLINE_VERSION_CHECK".to_owned(), "false".to_owned()),
+		]);
+		let text = common::run_internal::<String>("--version", None, Some(vars)).output().unwrap();
+		assert_release(&text);
+	}
+
+	/// Run the CLI as the Surreal CLI launcher would, with `SURREAL_INVOKED_AS`
+	/// set to `invoked_as`, or as a standalone install when it is `None`.
+	fn run_invoked_as(args: &str, invoked_as: Option<&str>) -> common::Child {
+		let vars = invoked_as.map(|invoked_as| {
+			HashMap::from([("SURREAL_INVOKED_AS".to_owned(), invoked_as.to_owned())])
+		});
+		common::run_internal::<String>(args, None, vars)
+	}
+
+	/// Run the command to completion, asserting it fails, and return its stderr.
+	/// Its stdout must carry nothing but the debug-build banner.
+	fn failure_stderr(mut child: common::Child) -> String {
+		assert!(child.output().is_err(), "the command should fail");
+		assert_eq!(remove_debug_info(child.stdout()).trim(), "", "nothing belongs on stdout");
+		child.stderr()
+	}
+
+	/// `surreal db` alone, as the Surreal CLI runs it, shows the help: the same
+	/// help `surreal help` prints, on stdout, exiting 0, even when an
+	/// environment variable bound to an argument — `SURREAL_ONLINE_VERSION_CHECK`,
+	/// which some Surreal CLI versions set — gives clap a value, so it does not
+	/// see the command line as empty.
+	#[test]
+	fn a_bare_invocation_shows_the_help_whatever_the_environment() {
+		let vars = HashMap::from([
+			("SURREAL_INVOKED_AS".to_owned(), "surreal db".to_owned()),
+			("SURREAL_ONLINE_VERSION_CHECK".to_owned(), "false".to_owned()),
+		]);
+		let bare = common::run_internal::<String>("", None, Some(vars.clone()))
+			.output()
+			.expect("a bare invocation shows the help and exits 0");
+		let help = common::run_internal::<String>("help", None, Some(vars))
+			.output()
+			.expect("`help` exits 0");
+		let bare = remove_debug_info(bare);
+		assert!(
+			bare.starts_with("Start, query, import and export SurrealDB from the command line"),
+			"{bare}"
+		);
+		assert!(bare.contains("Usage: surreal db"), "{bare}");
+		assert_eq!(
+			bare,
+			remove_debug_info(help),
+			"a bare invocation should print what `help` does"
+		);
+	}
+
+	/// A standalone install is told how to move to the Surreal CLI, with this
+	/// platform's install command. The message's full text is pinned by the
+	/// unit tests in `upgrade.rs`.
+	#[test]
+	fn upgrade_standalone_explains_how_to_move_to_the_surreal_cli() {
+		let stderr = failure_stderr(run_invoked_as("upgrade", None));
+		assert!(stderr.starts_with("Upgrading SurrealDB has moved to the Surreal CLI"), "{stderr}");
+		let install = if cfg!(windows) {
+			"irm https://download.surrealdb.com/cli/launcher/install.ps1 | iex\n"
+		} else {
+			"curl -sSf https://download.surrealdb.com/cli/launcher/install.sh | sh\n"
+		};
+		assert!(stderr.contains(install), "{stderr}");
 	}
 
 	#[test]
-	fn version_flag_short() {
-		common::run("-V").output().unwrap();
+	fn upgrade_removal_step_names_this_executable() {
+		let stderr = failure_stderr(run_invoked_as("upgrade", None));
+		let line = stderr
+			.lines()
+			.find(|line| line.contains("1. Remove this executable:"))
+			.expect("a removal step");
+		let exe = format!("surreal{}", std::env::consts::EXE_SUFFIX);
+		assert!(line.trim_end().trim_end_matches(['"', '\'']).ends_with(&exe), "{line}");
 	}
 
 	#[test]
-	fn version_flag_long() {
-		common::run("--version").output().unwrap();
+	fn upgrade_through_the_launcher_points_at_its_upgrade() {
+		let stderr = failure_stderr(run_invoked_as("upgrade", Some("surreal db")));
+		assert_eq!(
+			stderr.trim(),
+			"Upgrading is done by the Surreal CLI; run `surreal upgrade db`."
+		);
 	}
 
-	#[cfg(feature = "surrealism")]
 	#[test]
-	fn module_version_command() {
-		let output = common::run("module version").output().unwrap();
-		assert!(output.contains(surrealism_runtime::SDK_VERSION));
+	fn upgrade_accepts_its_options() {
+		for args in [
+			"upgrade --nightly",
+			"upgrade --alpha",
+			"upgrade --beta",
+			"upgrade --version 2.3.1",
+			"upgrade --version v3.0.0 --dry-run",
+		] {
+			let stderr = failure_stderr(run_invoked_as(args, Some("surreal db")));
+			assert_eq!(
+				stderr.trim(),
+				"Upgrading is done by the Surreal CLI; run `surreal upgrade db`.",
+				"`{args}` should explain, not fail to parse"
+			);
+		}
 	}
 
-	#[cfg(feature = "surrealism")]
 	#[test]
-	fn module_version_flag_short() {
-		let output = common::run("module -V").output().unwrap();
-		assert!(output.contains("Surrealism command-line interface"));
-		assert!(output.contains(surrealism_runtime::SDK_VERSION));
+	fn online_version_check_is_accepted() {
+		common::run("--online-version-check version").output().unwrap();
+		let vars = HashMap::from([("SURREAL_ONLINE_VERSION_CHECK".to_owned(), "false".to_owned())]);
+		common::run_internal::<String>("version", None, Some(vars)).output().unwrap();
 	}
 
-	#[cfg(feature = "surrealism")]
 	#[test]
-	fn module_version_flag_long() {
-		let output = common::run("module --version").output().unwrap();
-		assert!(output.contains("Surrealism command-line interface"));
-		assert!(output.contains(surrealism_runtime::SDK_VERSION));
+	fn usage_names_the_executable() {
+		let output = run_invoked_as("start --help", None).output().unwrap();
+		assert!(output.contains("Usage: surreal start "), "{output}");
+	}
+
+	#[test]
+	fn usage_names_the_launcher_command() {
+		let output = run_invoked_as("start --help", Some("surreal db")).output().unwrap();
+		assert!(output.contains("Usage: surreal db start "), "{output}");
+		let output = run_invoked_as("--help", Some("surreal db")).output().unwrap();
+		assert!(output.contains("Usage: surreal db [OPTIONS] <COMMAND>"), "{output}");
+	}
+
+	/// The install line the standalone explanations end with.
+	fn launcher_install() -> &'static str {
+		if cfg!(windows) {
+			"irm https://download.surrealdb.com/cli/launcher/install.ps1 | iex"
+		} else {
+			"curl -sSf https://download.surrealdb.com/cli/launcher/install.sh | sh"
+		}
+	}
+
+	/// Every old spelling of the extension tooling says how to install
+	/// `surreal ext`, naming what was typed, and runs nothing.
+	#[test]
+	fn extension_standalone_says_how_to_install_surreal_ext() {
+		let install = launcher_install();
+		for spelling in ["extension", "module", "mod"] {
+			let expected = format!(
+				"`surreal {spelling}` has moved to `surreal ext` in the Surreal CLI. Install it with: {install}\nthen run `surreal ext …`.\n"
+			);
+			for rest in ["", " version", " build --debug -o demo.surli .", " install color"] {
+				let args = format!("{spelling}{rest}");
+				let stderr = failure_stderr(run_invoked_as(&args, None));
+				assert_eq!(stderr, expected, "`{args}`");
+			}
+		}
+	}
+
+	/// `surreal ext` is already the new spelling; only where it runs moved.
+	#[test]
+	fn ext_standalone_says_where_it_runs() {
+		let stderr = failure_stderr(run_invoked_as("ext info x", None));
+		assert_eq!(
+			stderr,
+			format!(
+				"`surreal ext` has moved to the Surreal CLI. Install it with: {}\nthen run `surreal ext …`.\n",
+				launcher_install()
+			)
+		);
+	}
+
+	#[test]
+	fn extension_through_the_launcher_points_at_surreal_ext() {
+		for spelling in ["extension", "ext", "module", "mod"] {
+			for rest in [" build", " --help", " -h", " run --fnc f x.surli"] {
+				let args = format!("{spelling}{rest}");
+				let stderr = failure_stderr(run_invoked_as(&args, Some("surreal db")));
+				assert_eq!(
+					stderr,
+					format!(
+						"`surreal db {spelling}` has moved to `surreal ext`. Run `surreal ext …` instead.\n"
+					),
+					"`{args}`"
+				);
+			}
+		}
+	}
+
+	/// The launcher no longer runs `surreal module` itself, but if anything
+	/// still sets `SURREAL_INVOKED_AS=surreal`, the failure still explains itself.
+	#[test]
+	fn module_explains_itself_whatever_the_launcher_command() {
+		let stderr = failure_stderr(run_invoked_as("module version", Some("surreal")));
+		assert_eq!(
+			stderr,
+			"`surreal module` has moved to `surreal ext`. Run `surreal ext …` instead.\n"
+		);
+	}
+
+	/// Run the command to completion and return its exit code.
+	fn exit_code(child: &mut common::Child) -> Option<i32> {
+		let _ = child.output();
+		child.status().unwrap().expect("the command has exited").code()
+	}
+
+	/// Run the command to completion, asserting it succeeds with one JSON
+	/// document on stdout and nothing on stderr, and return the document.
+	fn json_success(mut child: common::Child) -> serde_json::Value {
+		let output = child.output();
+		assert!(output.is_ok(), "the command should succeed: {output:?}");
+		assert_eq!(child.stderr(), "", "nothing belongs on stderr");
+		serde_json::from_str(&child.stdout()).expect("stdout is one JSON document")
+	}
+
+	/// Run the command to completion, asserting it exits `code` with nothing on
+	/// stdout and one JSON error envelope on stderr, and return the envelope.
+	fn json_failure(mut child: common::Child, code: i32) -> serde_json::Value {
+		assert_eq!(exit_code(&mut child), Some(code), "{}", child.stderr());
+		assert_eq!(child.stdout(), "", "nothing belongs on stdout");
+		let envelope: serde_json::Value =
+			serde_json::from_str(&child.stderr()).expect("stderr is one JSON document");
+		for key in [
+			"kind",
+			"message",
+			"status",
+			"code",
+			"request_id",
+			"hint",
+			"command",
+			"docs",
+			"retry_after_secs",
+			"exit_code",
+		] {
+			assert!(envelope.get(key).is_some(), "the envelope has no `{key}`: {envelope}");
+		}
+		assert_eq!(envelope["exit_code"], code);
+		envelope
+	}
+
+	/// `version`'s text is the release, the OS and the architecture, and
+	/// `--json` reports the same three values.
+	#[test]
+	fn version_text_and_json_report_the_same_values() {
+		let document = json_success(common::run("version --json"));
+		assert_eq!(document["os"], std::env::consts::OS);
+		assert_eq!(document["arch"], std::env::consts::ARCH);
+		let version = document["version"].as_str().expect("a version string");
+		assert!(semver::Version::parse(version).is_ok(), "{version}");
+		assert!(document.get("server").is_none(), "{document}");
+
+		let text = remove_debug_info(common::run("version").output().unwrap());
+		assert_eq!(
+			text,
+			format!("{version} for {} on {}\n", std::env::consts::OS, std::env::consts::ARCH)
+		);
+	}
+
+	#[test]
+	fn version_json_short_flag() {
+		let document = json_success(common::run("version -j"));
+		assert!(document["version"].is_string(), "{document}");
+	}
+
+	/// Run the command, asserting it succeeds with the version document alone
+	/// on stdout, its keys `arch`, `os` and `version` in that order, and return
+	/// the document.
+	fn version_document(args: &str) -> serde_json::Value {
+		let mut child = common::run(args);
+		assert!(child.output().is_ok(), "`{args}` should succeed");
+		assert_eq!(child.stderr(), "", "{args}");
+		let stdout = child.stdout();
+		let keys: Vec<_> = stdout
+			.lines()
+			.filter_map(|line| line.trim().strip_prefix('"'))
+			.filter_map(|line| line.split('"').next())
+			.collect();
+		assert_eq!(keys, ["arch", "os", "version"], "{args}: {stdout}");
+		serde_json::from_str(&stdout).expect("stdout is one JSON document")
+	}
+
+	/// `--version --json`, in either order and either spelling, prints the
+	/// same document as `version --json`.
+	#[test]
+	fn version_flag_json_is_the_version_document() {
+		let expected = version_document("version --json");
+		for args in ["--version --json", "--json --version", "-v -j", "-j -v", "-V --json"] {
+			assert_eq!(version_document(args), expected, "{args}");
+		}
+	}
+
+	/// The root's `--json` goes with `--version`: before a command it is a
+	/// usage error, as it was before the root took it.
+	#[test]
+	fn root_json_without_the_version_flag_is_a_usage_error() {
+		let envelope = json_failure(common::run("--json version"), 2);
+		assert_eq!(envelope["kind"], "usage");
+		assert_eq!(envelope["command"], "surreal version --help");
+	}
+
+	/// With `--endpoint`, the text is the server's version alone, and `--json`
+	/// adds it under `server`.
+	#[test(tokio::test)]
+	async fn version_json_with_an_endpoint_reports_the_server() {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let text = remove_debug_info(
+			common::run(&format!("version --endpoint http://{addr}")).output().unwrap(),
+		);
+		let document =
+			json_success(common::run(&format!("version --endpoint http://{addr} --json")));
+		assert_eq!(document["server"]["version"], text.trim(), "{document}");
+		assert!(document["version"].is_string(), "{document}");
+	}
+
+	#[test]
+	fn version_json_reports_an_unreachable_server_as_the_envelope() {
+		let envelope = json_failure(common::run("version --endpoint http://127.0.0.1:1 --json"), 1);
+		assert_eq!(envelope["kind"], "network");
+	}
+
+	#[test(tokio::test)]
+	async fn is_ready_json_reports_the_endpoint() {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let output = remove_debug_info(
+			common::run(&format!("is-ready --endpoint http://{addr}")).output().unwrap(),
+		);
+		assert_eq!(output, "OK\n");
+		for command in ["is-ready", "isready"] {
+			let endpoint = format!("http://{addr}");
+			let document =
+				json_success(common::run(&format!("{command} --endpoint {endpoint} --json")));
+			assert_eq!(document, serde_json::json!({ "ready": true, "endpoint": endpoint }));
+		}
+	}
+
+	#[test]
+	fn is_ready_json_reports_an_unreachable_server_as_the_envelope() {
+		let envelope =
+			json_failure(common::run("is-ready --endpoint http://127.0.0.1:1 --json"), 1);
+		assert_eq!(envelope["kind"], "network");
+		assert_eq!(envelope["command"], serde_json::Value::Null);
+	}
+
+	#[test]
+	fn validate_json_reports_every_file() {
+		let temp_dir = assert_fs::TempDir::new().unwrap();
+		temp_dir.child("a.surql").write_str("CREATE thing:success;").unwrap();
+		let document = json_success(common::run_in_dir("validate --json", &temp_dir));
+		assert_eq!(
+			document,
+			serde_json::json!({ "valid": true, "files": [{ "path": "a.surql", "valid": true }] })
+		);
+	}
+
+	#[test]
+	fn validate_json_reports_invalid_files_in_the_envelope() {
+		let temp_dir = assert_fs::TempDir::new().unwrap();
+		temp_dir.child("a.surql").write_str("CREATE thing:success;").unwrap();
+		temp_dir.child("b.surql").write_str("CREATE $thing WHERE value = '';").unwrap();
+		let envelope = json_failure(common::run_in_dir("validate *.surql --json", &temp_dir), 1);
+		assert_eq!(envelope["kind"], "invalid");
+		assert_eq!(envelope["message"], "Some queries failed to validate");
+		let files = envelope["files"].as_array().expect("per-file results");
+		assert_eq!(files.len(), 2, "{envelope}");
+		assert_eq!(files[0], serde_json::json!({ "path": "a.surql", "valid": true }));
+		assert_eq!(files[1]["path"], "b.surql");
+		assert_eq!(files[1]["valid"], false);
+		assert!(files[1]["error"].is_string(), "{envelope}");
+	}
+
+	#[test]
+	fn validate_json_reads_stdin() {
+		let child = common::run("validate --stdin --json").input("CREATE thing:success;");
+		let document = json_success(child);
+		assert_eq!(
+			document,
+			serde_json::json!({ "valid": true, "files": [{ "path": "<stdin>", "valid": true }] })
+		);
+		let child = common::run("validate --stdin --json").input("CREATE $thing WHERE value = '';");
+		let envelope = json_failure(child, 1);
+		assert_eq!(envelope["kind"], "invalid");
+		assert_eq!(envelope["files"][0]["valid"], false);
+	}
+
+	#[test]
+	fn validate_json_reports_no_files_as_the_envelope() {
+		let temp_dir = assert_fs::TempDir::new().unwrap();
+		let envelope = json_failure(common::run_in_dir("validate --json", &temp_dir), 1);
+		assert_eq!(envelope["kind"], "unknown");
+		assert_eq!(envelope["message"], "No files found");
+	}
+
+	/// Under `--json`, a file that cannot be read is `not_found` when it does
+	/// not exist and `unknown` for any other error, rather than `invalid`.
+	#[test]
+	fn validate_json_names_why_a_file_could_not_be_read() {
+		let temp_dir = assert_fs::TempDir::new().unwrap();
+		std::fs::create_dir(temp_dir.path().join("a.surql")).unwrap();
+		let envelope = json_failure(common::run_in_dir("validate --json", &temp_dir), 1);
+		assert_eq!(envelope["kind"], "unknown", "{envelope}");
+		assert_eq!(envelope["files"][0]["valid"], false, "{envelope}");
+		#[cfg(unix)]
+		{
+			let temp_dir = assert_fs::TempDir::new().unwrap();
+			let link = temp_dir.path().join("b.surql");
+			std::os::unix::fs::symlink(temp_dir.path().join("missing"), link).unwrap();
+			let envelope = json_failure(common::run_in_dir("validate --json", &temp_dir), 1);
+			assert_eq!(envelope["kind"], "not_found", "{envelope}");
+		}
+	}
+
+	/// A pattern that is not a glob is a usage error under `--json`, exiting 2,
+	/// and without `--json` exits 1.
+	#[test]
+	fn validate_json_reports_a_bad_pattern_as_a_usage_error() {
+		let envelope = json_failure(run_invoked_as("validate [ --json", Some("surreal db")), 2);
+		assert_eq!(envelope["kind"], "usage", "{envelope}");
+		assert_eq!(envelope["command"], "surreal db validate --help", "{envelope}");
+		assert_eq!(exit_code(&mut common::run("validate [")), Some(1));
+	}
+
+	/// Under `--json`, stdout is the document alone however verbose the logs:
+	/// every log line goes to stderr, and a failure leaves stdout empty.
+	#[test]
+	fn json_stdout_carries_no_logs() {
+		let vars = HashMap::from([("SURREAL_LOG".to_owned(), "trace".to_owned())]);
+		let temp_dir = assert_fs::TempDir::new().unwrap();
+		temp_dir.child("a.surql").write_str("CREATE thing:success;").unwrap();
+		let mut child =
+			common::run_internal("validate --json", Some(temp_dir.path()), Some(vars.clone()));
+		assert_eq!(exit_code(&mut child), Some(0), "{}", child.stderr());
+		let document: serde_json::Value =
+			serde_json::from_str(&child.stdout()).expect("stdout is one JSON document");
+		assert_eq!(document["valid"], true, "{document}");
+		assert!(child.stderr().contains("TRACE"), "the logs go to stderr: {}", child.stderr());
+
+		temp_dir.child("b.surql").write_str("CREATE $thing WHERE value = '';").unwrap();
+		for args in ["validate --json", "is-ready --endpoint http://127.0.0.1:1 --json"] {
+			let mut child = common::run_internal(args, Some(temp_dir.path()), Some(vars.clone()));
+			assert_eq!(exit_code(&mut child), Some(1), "{args}: {}", child.stderr());
+			assert_eq!(child.stdout(), "", "{args}: nothing belongs on stdout");
+		}
+	}
+
+	/// A usage error in a command that takes `--json` is the envelope, naming
+	/// that command's help as the launcher's user would type it.
+	#[test]
+	fn a_usage_error_under_json_is_the_envelope() {
+		for (args, command) in [
+			("version --bogus --json", "surreal db version --help"),
+			("is-ready -j --bogus", "surreal db is-ready --help"),
+			("isready --json --bogus", "surreal db is-ready --help"),
+			("validate --stdin --json x.surql", "surreal db validate --help"),
+			("version --endpoint nope --json", "surreal db version --help"),
+		] {
+			let envelope = json_failure(run_invoked_as(args, Some("surreal db")), 2);
+			assert_eq!(envelope["kind"], "usage", "{args}");
+			assert_eq!(envelope["hint"], "See the usage with:", "{args}");
+			assert_eq!(envelope["command"], command, "{args}");
+			let message = envelope["message"].as_str().unwrap();
+			assert!(!message.starts_with("error:"), "{args}: {message}");
+		}
+		let envelope = json_failure(run_invoked_as("version --bogus --json", None), 2);
+		assert_eq!(envelope["message"], "unexpected argument '--bogus' found");
+		assert_eq!(envelope["command"], "surreal version --help");
+	}
+
+	/// Without `--json`, or in a command that does not take it, a usage error
+	/// is clap's text.
+	#[test]
+	fn a_usage_error_without_json_is_text() {
+		for args in
+			["version --bogus", "export --json", "sql --json --bogus", "version --bogus -- --json"]
+		{
+			let mut child = common::run(args);
+			assert_eq!(exit_code(&mut child), Some(2), "{args}");
+			let stderr = child.stderr();
+			assert!(stderr.starts_with("error: "), "{args}: {stderr}");
+		}
+	}
+
+	/// Help never prints a credential an environment variable holds.
+	#[test]
+	fn help_hides_environment_values() {
+		let secret = "s3cr3t-value-in-the-environment";
+		let vars = HashMap::from(
+			[
+				"SURREAL_USER",
+				"SURREAL_PASS",
+				"SURREAL_TOKEN",
+				"SURREAL_KEY",
+				"SURREAL_NAMESPACE",
+				"SURREAL_DATABASE",
+			]
+			.map(|name| (name.to_owned(), secret.to_owned())),
+		);
+		for args in ["sql --help", "import --help", "export --help", "start --help", "--help"] {
+			let output =
+				common::run_internal::<String>(args, None, Some(vars.clone())).output().unwrap();
+			assert!(output.contains("SURREAL_PASS") || args == "--help", "{args}: {output}");
+			assert!(!output.contains(secret), "`{args}` printed a variable's value: {output}");
+		}
 	}
 
 	#[test]

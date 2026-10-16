@@ -350,9 +350,12 @@ For the **latest stable** release only — `latest` is true only for a stable
 stable version, so betas, downstream-only releases, and older/superseded versions
 never apply — `release.yml` checks out the Homebrew tap, runs its
 `release.sh` (with `SKIP_GIT=1` and the exact released version pinned as an
-argument) to regenerate the `surreal` formula from the published download
-metadata, and opens an `Upgrade to vX.Y.Z` PR. It runs after promotion so the
-release's download hash already exists.
+argument) to regenerate the `surreal-db` formula (the database alone) from the
+published download metadata, and opens an `Upgrade surreal-db to vX.Y.Z` PR. It
+runs after promotion so the per-platform download hashes
+(`vX.Y.Z/surreal-vX.Y.Z.<platform>.txt`) already exist. The `surreal` formula is
+the Surreal CLI's, and is bumped by the launcher's release in surrealdb/cli, not
+here.
 
 ### Configuration
 

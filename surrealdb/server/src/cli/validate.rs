@@ -1,7 +1,10 @@
 use anyhow::Result;
 use clap::Args;
 use glob::glob;
+use serde_json::{Map, Value, json};
 use surrealdb_core::syn;
+
+use crate::cli::json;
 
 #[derive(Args, Debug)]
 pub struct ValidateCommandArguments {
@@ -11,12 +14,38 @@ pub struct ValidateCommandArguments {
 	#[arg(long, help = "Read query from standard input")]
 	#[arg(conflicts_with = "patterns")]
 	stdin: bool,
+	#[command(flatten)]
+	json: json::JsonArg,
+}
+
+/// What `--json` reports for one file: whether it parsed, and if not, why.
+fn file_result(path: &str, error: Option<String>) -> Value {
+	match error {
+		None => json!({ "path": path, "valid": true }),
+		Some(error) => json!({ "path": path, "valid": false, "error": error }),
+	}
+}
+
+/// The `--json` failure of `kind` when some file did not validate, carrying
+/// every file's result under `files`.
+fn failed_files(kind: json::Kind, message: &str, files: Vec<Value>) -> anyhow::Error {
+	let mut extra = Map::new();
+	extra.insert("files".into(), Value::Array(files));
+	json::Failure {
+		kind,
+		message: message.to_owned(),
+		extra,
+	}
+	.into()
 }
 
 pub async fn init(args: ValidateCommandArguments) -> Result<()> {
 	let ValidateCommandArguments {
 		patterns,
 		stdin,
+		json: json::JsonArg {
+			json,
+		},
 	} = args;
 
 	if stdin {
@@ -28,7 +57,19 @@ pub async fn init(args: ValidateCommandArguments) -> Result<()> {
 		}
 
 		match syn::parse(&input) {
+			Ok(_) if json => {
+				let files = vec![file_result("<stdin>", None)];
+				return json::print(&json!({ "valid": true, "files": files }));
+			}
 			Ok(_) => println!("<stdin>: OK"),
+			Err(error) if json => {
+				let files = vec![file_result("<stdin>", Some(error.to_string()))];
+				return Err(failed_files(
+					json::Kind::Invalid,
+					"The query failed to validate",
+					files,
+				));
+			}
 			Err(error) => {
 				println!("<stdin>: FAIL");
 				println!("{error}");
@@ -45,7 +86,8 @@ pub async fn init(args: ValidateCommandArguments) -> Result<()> {
 		let pattern_entries = match glob(&pattern) {
 			Ok(entries) => entries,
 			Err(error) => {
-				return Err(anyhow::anyhow!("Error parsing glob pattern '{pattern}': {error}"));
+				let message = format!("Error parsing glob pattern '{pattern}': {error}");
+				return Err(json::Failure::new(json::Kind::Usage, message).into());
 			}
 		};
 
@@ -57,33 +99,45 @@ pub async fn init(args: ValidateCommandArguments) -> Result<()> {
 	}
 
 	let mut failed = false;
+	// Under `--json`, a file that could not be read decides the failure's kind:
+	// the first such file's, `not_found` when it does not exist and `unknown`
+	// for any other error. When every file was read, the kind is `invalid`.
+	let mut unreadable = None;
+	let mut files = vec![];
 
 	for entry in entries {
-		let file_content = match tokio::fs::read_to_string(entry.clone()).await {
-			Ok(content) => content,
+		let path = entry.display().to_string();
+		let error = match tokio::fs::read_to_string(&entry).await {
+			Ok(content) => syn::parse(&content).err().map(|error| error.to_string()),
 			Err(error) => {
-				println!("{}: FAIL", entry.display());
-				println!("Failed to read file '{}': {error}", entry.display());
-				failed = true;
-				continue;
+				unreadable.get_or_insert(match error.kind() {
+					std::io::ErrorKind::NotFound => json::Kind::NotFound,
+					_ => json::Kind::Unknown,
+				});
+				Some(format!("Failed to read file '{path}': {error}"))
 			}
 		};
-
-		match syn::parse(&file_content) {
-			Ok(_) => {
-				println!("{}: OK", entry.display());
-				println!();
-			}
-			Err(error) => {
-				println!("{}: FAIL", entry.display());
-				println!("{error}");
-				failed = true;
+		if !json {
+			match &error {
+				None => println!("{path}: OK\n"),
+				Some(error) => println!("{path}: FAIL\n{error}"),
 			}
 		}
+		failed |= error.is_some();
+		files.push(file_result(&path, error));
 	}
 
 	if failed {
-		return Err(anyhow::anyhow!("Some queries failed to validate"));
+		let message = "Some queries failed to validate";
+		return Err(if json {
+			failed_files(unreadable.unwrap_or(json::Kind::Invalid), message, files)
+		} else {
+			anyhow::anyhow!(message)
+		});
+	}
+
+	if json {
+		json::print(&json!({ "valid": true, "files": files }))?;
 	}
 
 	Ok(())

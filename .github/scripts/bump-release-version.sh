@@ -84,7 +84,7 @@ git pull origin "${RELEASE_BRANCH}"
 
 # The engine crates all inherit the workspace version, so bumping any one of them
 # via cargo set-version moves `[workspace.package] version` and every inheriting
-# crate follows. Pick them out by name (`surrealdb*`; `surreal`, the CLI, and the
+# crate follows. Pick them out by name (`surrealdb*`; `surreal-db`, the CLI, and the
 # rest inherit the same version and come along for free).
 PACKAGES=$(cargo metadata --format-version 1 --no-deps | \
 	jq -r '.packages[].name' | \

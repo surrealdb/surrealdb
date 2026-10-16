@@ -42,7 +42,7 @@ pub struct SurrealismEntry {
 /// Synchronous: `init` is sync-lifted and is lent no transaction, so it has
 /// nothing to await.
 ///
-/// `surreal extension build` runs it once and snapshots the memory it leaves, so
+/// `surreal ext build` runs it once and snapshots the memory it leaves, so
 /// every instance starts from that state. Values it derives from randomness or
 /// the clock, including the keys of a `HashMap` it builds, are therefore the
 /// same in every invocation and on every server, and it must close each WASI

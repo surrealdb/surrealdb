@@ -56,11 +56,14 @@ jobs:
           set -euo pipefail
           fail=0
           strip_comments() { grep -vE '^[[:space:]]*#' "$1"; }
+          # Not `grep -q` after a pipe: it exits at the first match, and under
+          # pipefail the SIGPIPE that then reaches strip_comments fails the
+          # pipeline, so a file that does pass --locked is reported as not.
 
           # macOS and Windows compile with a direct `cargo build ... --locked`.
           for a in build-macos build-windows; do
             f=".github/actions/${a}/action.yml"
-            if ! strip_comments "$f" | grep -qE 'cargo build\b.*--locked'; then
+            if ! strip_comments "$f" | grep -E 'cargo build\b.*--locked' >/dev/null; then
               echo "::error file=${f}::no 'cargo build ... --locked'; the shipped ${a#build-} binary must build from the committed Cargo.lock" >&2
               fail=1
             fi
@@ -68,7 +71,7 @@ jobs:
 
           # Linux compiles inside the builder image: build-linux passes --locked
           # to docker/builder-entrypoint.sh, which runs `cargo build "$@"`.
-          if ! strip_comments .github/actions/build-linux/action.yml | grep -q -- '--locked'; then
+          if ! strip_comments .github/actions/build-linux/action.yml | grep -- '--locked' >/dev/null; then
             echo "::error file=.github/actions/build-linux/action.yml::the docker build no longer passes --locked to the builder" >&2
             fail=1
           fi

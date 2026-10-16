@@ -29,6 +29,7 @@ members = [
     "surrealdb/kvs-test",
     "surrealdb/kvs-tikv",
     "surrealdb/mcp",
+    "surrealdb/ext",
     "surrealdb/mysql",
     "surrealdb/mywire",
     "surrealdb/node",
@@ -351,7 +352,10 @@ wit-bindgen = { version = "0.51", default-features = false, features = ["macros"
 zstd = { version = "0.13.3", default-features = false }
 
 [package]
-name = "surreal"
+# The database component of the Surreal CLI. The package is `surreal-db`, but the
+# executable it builds is `surreal`: installs, the download layout and the
+# Docker image all name the executable, and they do not change with the package.
+name = "surreal-db"
 publish = false
 edition.workspace = true
 version.workspace = true
@@ -362,6 +366,10 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 license-file.workspace = true
+
+[[bin]]
+name = "surreal"
+path = "src/main.rs"
 
 [features]
 # Inherit the shared default feature set from `surrealdb-server` so the two
@@ -379,8 +387,6 @@ jwks = ["surrealdb-server/jwks"]
 ml = ["surrealdb-server/ml"]
 scripting = ["surrealdb-server/scripting"]
 surrealism = ["surrealdb-server/surrealism"]
-# `surreal extension sign`; see `surrealdb-server`.
-extension-sign = ["surrealdb-server/extension-sign"]
 storage-mem = ["surrealdb-server/storage-mem"]
 storage-surrealkv = ["surrealdb-server/storage-surrealkv"]
 storage-rocksdb = ["surrealdb-server/storage-rocksdb"]
@@ -470,6 +476,9 @@ uuid = { workspace = true, features = ["v4"] }
 semver.workspace = true
 
 [package.metadata.deb]
+# The Debian package and its systemd unit keep the executable's name rather than
+# taking the Cargo package's.
+name = "surreal"
 assets = [
     [
         "target/release/surreal",
@@ -490,7 +499,7 @@ maintainer = "Tobie Morgan Hitchcock <tobie@surrealdb.com>"
 maintainer-scripts = "pkg/deb/"
 priority = "optional"
 section = "utility"
-systemd-units = { enable = true }
+systemd-units = { unit-name = "surreal", enable = true }
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [

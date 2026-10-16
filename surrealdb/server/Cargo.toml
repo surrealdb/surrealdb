@@ -16,8 +16,9 @@ categories.workspace = true
 # Public features
 allocation-tracking = ["surrealdb-core/allocation-tracking"]
 allocator = ["surrealdb-core/allocator"]
-# Shared default feature set, inherited by the `surreal` binary crate via
-# `surrealdb-server/default` so the two crates don't duplicate the list.
+# Shared default feature set, inherited by the `surreal-db` package (which
+# builds the `surreal` binary) via `surrealdb-server/default` so the two crates
+# don't duplicate the list.
 # `cli` is included here because the enterprise binary depends on this crate
 # and needs the `sql` subcommand it provides.
 default = [
@@ -31,7 +32,6 @@ default = [
     "scripting",
     "http",
     "surrealism",
-    "extension-sign",
     "graphql",
     "gql",
     "mcp",
@@ -46,36 +46,7 @@ jwks = ["surrealdb-core/jwks"]
 fips = ["rustls/fips"]
 ml = ["surrealdb/ml", "dep:surrealml-core"]
 scripting = ["surrealdb-core/scripting"]
-surrealism = [
-    "surrealdb-core/surrealism",
-    "dep:base64",
-    "dep:dialoguer",
-    "dep:hex",
-    "dep:sha2",
-    "dep:surrealism-runtime",
-    "dep:surrealism-verify",
-    "dep:tar",
-    "dep:wasm-encoder",
-    "dep:wasm-opt",
-    "dep:wasmparser",
-    "dep:wasmtime",
-    "dep:wasmtime-wasi",
-    "dep:wasmtime-wizer",
-    "dep:zstd",
-]
-# The Sigstore client: `surreal extension sign` (keyless signing with a CI
-# identity token, Fulcio, Rekor) and the installer's online checks (Sigstore's
-# public trust root over TUF, Rekor inclusion proofs). A server that only
-# verifies signatures does not need it. Without it, `extension install`
-# reports both online checks as not checked, as under `--offline`.
-extension-sign = [
-    "surrealism",
-    "dep:sigstore-merkle",
-    "dep:sigstore-oidc",
-    "dep:sigstore-rekor",
-    "dep:sigstore-sign",
-    "dep:sigstore-trust-root",
-]
+surrealism = ["surrealdb-core/surrealism"]
 storage-mem = ["surrealdb/kv-mem", "surrealdb-core/kv-mem"]
 storage-indxdb = ["surrealdb/kv-indxdb", "surrealdb-core/kv-indxdb"]
 storage-rocksdb = ["surrealdb/kv-rocksdb", "surrealdb-core/kv-rocksdb"]
@@ -194,7 +165,6 @@ tower-service = "0.3.3"
 tracing-appender = "0.2.5"
 tracing-opentelemetry = "0.32.1"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
-dirs = "6.0.0"
 
 # Other crates
 async-graphql = { workspace = true, default-features = false, optional = true }
@@ -213,12 +183,10 @@ reqwest = { workspace = true, default-features = false, features = [
     "http2",
 ] }
 rustls = { workspace = true, features = ["aws_lc_rs"] }
-semver.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-tempfile.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["macros", "signal", "tracing","process"] }
+tokio = { workspace = true, features = ["macros", "signal", "tracing"] }
 tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["io"] }
 tracing.workspace = true
@@ -226,34 +194,13 @@ uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
 web-time.workspace = true
 
 # Optional crates
-base64 = { workspace = true, optional = true }
-dialoguer = { workspace = true, optional = true }
-hex = { workspace = true, optional = true }
-sha2 = { workspace = true, optional = true }
-# The install client proves a signature's entry in the public Rekor v2 log
-# (RFC 9162 inclusion).
-sigstore-merkle = { workspace = true, optional = true }
 surrealdb-mcp = { workspace = true, optional = true }
-surrealism-runtime = { workspace = true, optional = true }
-sigstore-oidc = { workspace = true, optional = true }
-sigstore-rekor = { workspace = true, optional = true }
-sigstore-sign = { workspace = true, optional = true }
-sigstore-trust-root = { workspace = true, optional = true }
-surrealism-verify = { workspace = true, optional = true }
-tar = { workspace = true, optional = true }
-wasm-encoder = { workspace = true, optional = true }
-wasm-opt = { workspace = true, optional = true }
-wasmparser = { workspace = true, optional = true }
-wasmtime = { workspace = true, optional = true }
-wasmtime-wasi = { workspace = true, optional = true }
-wasmtime-wizer = { workspace = true, optional = true }
-zstd = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]
 nu-ansi-term = "0.50.3"
 
 [target.'cfg(unix)'.dependencies]
-nix = { workspace = true, features = ["user"] }
+nix = { workspace = true, features = ["fs", "user"] }
 
 [target.'cfg(unix)'.dev-dependencies]
 nix = { workspace = true, features = ["signal", "user"] }

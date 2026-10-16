@@ -35,11 +35,19 @@ inputs:
     description: 'Compile with release flag'
     required: false
     default: 'true'
+  binary:
+    description: 'The executable to build and package; artifacts are named after it'
+    required: false
+    default: 'surreal'
+  package:
+    description: 'The Cargo package to build (empty = the workspace root package, which builds `surreal`)'
+    required: false
+    default: ''
 
 outputs:
   artifact-name:
     description: 'Name of the uploaded artifact'
-    value: surreal-${{ inputs.name }}.windows-${{ inputs.platform }}
+    value: ${{ inputs.binary }}-${{ inputs.name }}.windows-${{ inputs.platform }}
 
 runs:
   using: 'composite'
@@ -83,6 +91,9 @@ runs:
           extra_args="${extra_args} --release"
           compile_profile="release"
         fi
+        if [[ -n "${{ inputs.package }}" ]]; then
+          extra_args="${extra_args} --package ${{ inputs.package }}"
+        fi
 
         # Download libonnxruntime's static library and tell ORT crate to use it
         tmp_dir=$(mktemp -d)
@@ -93,15 +104,15 @@ runs:
         cargo build --no-default-features ${extra_args} --locked --target ${{ inputs.arch }}
 
         # Package
-        ./target/${{ inputs.arch }}/${compile_profile}/surreal.exe version
-        cp target/${{ inputs.arch }}/${compile_profile}/surreal.exe surreal-${{ inputs.name }}.windows-${{ inputs.platform }}.exe
-        echo $(certutil -hashfile surreal-${{ inputs.name }}.windows-${{ inputs.platform }}.exe SHA256 | sed -n '2p') > surreal-${{ inputs.name }}.windows-${{ inputs.platform }}.txt
+        ./target/${{ inputs.arch }}/${compile_profile}/${{ inputs.binary }}.exe version
+        cp target/${{ inputs.arch }}/${compile_profile}/${{ inputs.binary }}.exe ${{ inputs.binary }}-${{ inputs.name }}.windows-${{ inputs.platform }}.exe
+        echo $(certutil -hashfile ${{ inputs.binary }}-${{ inputs.name }}.windows-${{ inputs.platform }}.exe SHA256 | sed -n '2p') > ${{ inputs.binary }}-${{ inputs.name }}.windows-${{ inputs.platform }}.txt
 
     - name: Upload artifacts
       if: ${{ inputs.upload == 'true' }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
-        name: surreal-${{ inputs.name }}.windows-${{ inputs.platform }}
+        name: ${{ inputs.binary }}-${{ inputs.name }}.windows-${{ inputs.platform }}
         path: |
-          surreal-${{ inputs.name }}.windows-${{ inputs.platform }}.exe
-          surreal-${{ inputs.name }}.windows-${{ inputs.platform }}.txt
+          ${{ inputs.binary }}-${{ inputs.name }}.windows-${{ inputs.platform }}.exe
+          ${{ inputs.binary }}-${{ inputs.name }}.windows-${{ inputs.platform }}.txt

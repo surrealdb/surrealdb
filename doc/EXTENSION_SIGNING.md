@@ -1,6 +1,6 @@
 # Signing extensions
 
-`surreal extension sign` writes a signature into a `.surli` archive, as the
+`surreal ext sign` writes a signature into a `.surli` archive, as the
 file `surrealism/SIGNATURE`. The signature covers `sha256(surrealism/MANIFEST)`.
 That digest is the extension's `DIGEST`. It does not cover the archive bytes.
 
@@ -8,7 +8,7 @@ That digest is the extension's `DIGEST`. It does not cover the archive bytes.
   byte-for-byte the same, so `DIGEST` does not change.
 - An archive holds at most one signature. Signing again replaces it.
 - An archive without `surrealism/MANIFEST` is refused. Rebuild it with
-  `surreal extension build`.
+  `surreal ext build`.
 - `-o FILE` writes the signed archive to `FILE` and leaves the input as it is.
   Without `-o`, the input is replaced. A failed run leaves it unchanged.
 - The archive's `package.toml` must name a `[signer]`, and the signature must
@@ -17,7 +17,7 @@ That digest is the extension's `DIGEST`. It does not cover the archive bytes.
 ## The signer
 
 `[signer]` in `package.toml` names the one identity whose signatures the
-package's archives may carry. Set it with `surreal extension config signer`
+package's archives may carry. Set it with `surreal ext config signer`
 before you build; `MANIFEST` covers `package.toml`, so the signer is part of
 `DIGEST`.
 
@@ -44,9 +44,9 @@ public_key = "ssh-ed25519 AAAA…"
 - The key blob only; a comment is dropped.
 
 ```bash
-surreal extension config signer github --repo acme/color --workflow release.yml
-surreal extension config signer gitlab --project group/project
-surreal extension config signer ssh ~/.ssh/release.pub
+surreal ext config signer github --repo acme/color --workflow release.yml
+surreal ext config signer gitlab --project group/project
+surreal ext config signer ssh ~/.ssh/release.pub
 ```
 
 `signer github` reads the two ids from `GET https://api.github.com/repos/acme/color`,
@@ -65,7 +65,7 @@ There are three ways to sign.
 ## Keyless, from CI (default)
 
 ```bash
-surreal extension sign target/acme-color-1.0.0.surli
+surreal ext sign target/acme-color-1.0.0.surli
 ```
 
 This uses Sigstore and needs no key. The command does these steps:
@@ -138,9 +138,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: surreal extension build
-      - run: surreal extension sign target/acme-color-1.0.0.surli
-      - run: surreal extension publish target/acme-color-1.0.0.surli
+      - run: surreal ext build
+      - run: surreal ext sign target/acme-color-1.0.0.surli
+      - run: surreal ext publish target/acme-color-1.0.0.surli
 ```
 
 The certificate names the workflow, for example:
@@ -158,9 +158,9 @@ release:
     SIGSTORE_ID_TOKEN:
       aud: sigstore
   script:
-    - surreal extension build
-    - surreal extension sign target/acme-color-1.0.0.surli
-    - surreal extension publish target/acme-color-1.0.0.surli
+    - surreal ext build
+    - surreal ext sign target/acme-color-1.0.0.surli
+    - surreal ext publish target/acme-color-1.0.0.surli
 ```
 
 The certificate names the pipeline, for example:
@@ -173,7 +173,7 @@ Identity     https://gitlab.com/acme/color//.gitlab-ci.yml@refs/tags/v1.0.0
 ## With an SSH key
 
 ```bash
-surreal extension sign --key ~/.ssh/id_ed25519 pkg.surli
+surreal ext sign --key ~/.ssh/id_ed25519 pkg.surli
 ```
 
 This writes an SSH signature (the `SSHSIG` format that git also uses). The
@@ -197,7 +197,7 @@ Sign the extracted `MANIFEST` as a blob, then import the bundle:
 ```bash
 tar --zstd -xf pkg.surli surrealism/MANIFEST
 cosign sign-blob --new-bundle-format --bundle bundle.json surrealism/MANIFEST
-surreal extension sign --bundle bundle.json --trusted-root trusted_root.json pkg.surli
+surreal ext sign --bundle bundle.json --trusted-root trusted_root.json pkg.surli
 ```
 
 `--trusted-root` is required: the bundle is written in the same envelope as a

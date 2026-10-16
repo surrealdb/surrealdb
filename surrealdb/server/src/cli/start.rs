@@ -15,7 +15,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::config::Config;
 use crate::cli::ConfigCheck;
-use crate::cnf::{LOGO, METRICS_ENABLED, PROCESS_METRICS_REFRESH_INTERVAL};
+use crate::cnf::{METRICS_ENABLED, PROCESS_METRICS_REFRESH_INTERVAL};
 use crate::dbs::StartCommandDbsOptions;
 use crate::ntw::RouterFactory;
 use crate::ntw::client_ip::ClientIp;
@@ -62,9 +62,11 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_PATH", index = 1)]
 	#[arg(default_value = "memory")]
 	path: String,
-	#[arg(help = "Whether to hide the startup banner")]
-	#[arg(env = "SURREAL_NO_BANNER", long)]
+	/// Accepted, silently, so that scripts and containers passing it start. The
+	/// database prints no banner, so it has no effect.
+	#[arg(env = "SURREAL_NO_BANNER", long, hide = true)]
 	#[arg(default_value_t = false)]
+	#[allow(dead_code, reason = "accepted for compatibility; the value is never used")]
 	no_banner: bool,
 	#[arg(help = "Encryption key to use for on-disk encryption")]
 	#[arg(env = "SURREAL_KEY", short = 'k', long = "key")]
@@ -311,7 +313,6 @@ pub async fn init<
 		durable_sessions,
 		durable_session_ttl,
 		durable_session_gc_interval,
-		no_banner,
 		no_identification_headers,
 		allow_origin,
 		postgres_bind,
@@ -325,10 +326,6 @@ pub async fn init<
 	// Persisted sessions must have a finite expiration
 	if durable_sessions && durable_session_ttl.is_zero() {
 		return Err(anyhow::anyhow!("The durable session TTL must be greater than zero"));
-	}
-	// Check if we should output a banner
-	if !no_banner {
-		println!("{LOGO}");
 	}
 	// Clean the path
 	let endpoint = any::__into_endpoint(path)?;

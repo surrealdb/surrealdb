@@ -1347,7 +1347,7 @@ script = """
 #!/bin/bash -ex
 # The server's default features cover every backend plus scripting / graphql /
 # opengql / surrealism, so one build serves any `_TEST_API_ENGINE`.
-cargo build --locked -p surreal
+cargo build --locked -p surreal-db
 SERVER="$(pwd)/target/debug/surreal"
 
 # Run from `language-tests` so the harness resolves its `tests/` directory the
@@ -1587,8 +1587,10 @@ args = [
     # `surrealdb-embedded/kv-mem` has to be named explicitly: it is that crate's
     # own feature, and `storage-mem` on the SDK enables `surrealdb-core/kv-mem`
     # without touching it. Everything in the embedded engine that needs a
-    # datastore is gated on it, tests included.
-    "allocator,allocation-tracking,storage-mem,storage-rocksdb,scripting,http,jwks,surrealism,gql,surrealdb-embedded/kv-mem",
+    # datastore is gated on it, tests included. `surreal-ext/sign` likewise:
+    # `--no-default-features` drops it, and without it `surreal-ext` has no
+    # `sign` command for the module trust tests to sign with.
+    "allocator,allocation-tracking,storage-mem,storage-rocksdb,scripting,http,jwks,surrealism,gql,surrealdb-embedded/kv-mem,surreal-ext/sign",
     "--workspace",
     "--exclude", "demo",
     "--exclude", "surrealdb-profiling",
@@ -1613,7 +1615,7 @@ args = [
     "--locked",
     "--no-default-features",
     "--features",
-    "allocator,allocation-tracking,storage-mem,storage-rocksdb,scripting,http,jwks,surrealism,gql,surrealdb-embedded/kv-mem",
+    "allocator,allocation-tracking,storage-mem,storage-rocksdb,scripting,http,jwks,surrealism,gql,surrealdb-embedded/kv-mem,surreal-ext/sign",
     "--workspace",
     "--exclude", "demo",
     "--exclude", "surrealdb-profiling",

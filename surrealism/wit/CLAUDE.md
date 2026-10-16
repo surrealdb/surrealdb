@@ -42,7 +42,7 @@ Required / expected from the guest:
 - **function-returns** — `(name?)` → serialized kind
 - **function-writeable** — `(name?)` → whether the function may write
 - **function-comment** — `(name?)` → optional comment
-- **init** — optional. Sync, and lent no `tx`. `surreal extension build` runs it
+- **init** — optional. Sync, and lent no `tx`. `surreal ext build` runs it
   once and removes it (see Lifecycle), so an archive the tool built exports none.
 
 Only `invoke` is async-lifted. The introspection exports never call a host
@@ -59,7 +59,7 @@ All `serialized-*` types are FlatBuffer byte buffers. Schemas live in `surrealdb
 
 ## Lifecycle
 
-0. At build time, `surreal extension build` runs **init** once under
+0. At build time, `surreal ext build` runs **init** once under
    `wasmtime-wizer`, writes the memory it leaves into the component as initial
    data, and removes the export. An error, a trap, network use or a WASI
    resource left open fails the build.
@@ -72,7 +72,7 @@ All `serialized-*` types are FlatBuffer byte buffers. Schemas live in `surrealdb
    revoked on return.
 3. Introspection (`list-functions`, `function-args`, `function-returns`,
    `function-writeable`, `function-comment`) is read once by
-   `surreal extension build`, which bakes the answers into `exports.toml`. The host
+   `surreal ext build`, which bakes the answers into `exports.toml`. The host
    reads that manifest at runtime and does not call these exports.
 
 ## ABI Stability

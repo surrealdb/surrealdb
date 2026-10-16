@@ -142,16 +142,31 @@ jobs:
       # covers its own. Packing here also keeps a failure attached to a job the
       # required-checks gate already watches, and keeps the conformance job free
       # of a Rust toolchain.
+      #
+      # It is packed with `surreal-ext`, the Surreal CLI's `ext` component and
+      # the only home of the extension tooling, so the archive the server loads is
+      # the one users' tooling produces. Reading it back with `info` checks the
+      # package as well as the build.
       - name: Pack Surrealism demo module
-        run: >-
-          target/${{ env.TARGET }}/devopt/surreal module build --debug
-          -o ${{ github.workspace }}/demo.surli surrealism/demo
+        run: |
+          cargo build --locked --profile devopt --target ${{ env.TARGET }} -p surreal-ext
+          target/${{ env.TARGET }}/devopt/surreal-ext build --debug -o ${{ github.workspace }}/demo.surli surrealism/demo
+          target/${{ env.TARGET }}/devopt/surreal-ext info ${{ github.workspace }}/demo.surli
 
       - name: Upload Surrealism demo module
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # (Actions must be pinned by commit hash) v7.0.1
         with:
           name: demo-surli-${{ env.ARTIFACT_ARCH }}
           path: demo.surli
+
+      # The upgrade lanes build their own module fixture, and do it with this
+      # binary rather than compiling `surreal-ext` again.
+      - name: Upload surreal-ext
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # (Actions must be pinned by commit hash) v7.0.1
+        with:
+          name: surreal-ext-${{ env.ARTIFACT_ARCH }}
+          path: target/${{ env.TARGET }}/devopt/surreal-ext
+          if-no-files-found: error
 
       - name: kache stats
         if: ${{ always() }}
@@ -713,6 +728,32 @@ jobs:
 
       - name: Check every lockfile satisfies its manifests
         run: ./.github/scripts/check-lockfiles.sh
+
+  # ----------------------------------------
+  # Release script checks
+  # ----------------------------------------
+
+  # The `surreal` launcher reads the layout the release promotion publishes
+  # (see .github/actions/promote-binaries). The promotion runs the layout check
+  # on every release, dry-run included; this proves the check itself still
+  # refuses a renamed archive member, a renamed pointer and the rest, so that
+  # editing it cannot quietly make it accept everything.
+  check-release-layout:
+    name: Check release layout script
+    needs: changes
+    if: ${{ needs.changes.outputs.docs_only != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Test the release layout check
+        run: ./.github/scripts/test-check-release-layout.sh
 
   # ----------------------------------------
   # PostgreSQL front end
@@ -1408,8 +1449,16 @@ jobs:
           name: surreal-${{ matrix.arch == 'arm' && 'arm64' || 'amd64' }}
           path: target/debug
 
+      # The module fixture is packed with the `build` job's `surreal-ext`, which
+      # the harness looks for beside `surreal`.
+      - name: Download surreal-ext
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: surreal-ext-${{ matrix.arch == 'arm' && 'arm64' || 'amd64' }}
+          path: target/debug
+
       - name: Set file permissions
-        run: chmod +x target/debug/surreal
+        run: chmod +x target/debug/surreal target/debug/surreal-ext
 
       # Compiled by `upgrade-harness`, which runs while `build` does.
       - name: Download harness
@@ -1763,6 +1812,7 @@ jobs:
       - unused-deps
       - check-versions
       - check-lockfiles
+      - check-release-layout
       # Integration tests
       - integration-tests
       # Workspace tests
@@ -1821,6 +1871,7 @@ jobs:
             "${{ needs.unused-deps.result }}"
             "${{ needs.check-versions.result }}"
             "${{ needs.check-lockfiles.result }}"
+            "${{ needs.check-release-layout.result }}"
             "${{ needs.integration-tests.result }}"
             "${{ needs.test-build.result }}"
             "${{ needs.test.result }}"

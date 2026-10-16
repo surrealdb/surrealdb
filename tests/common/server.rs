@@ -118,8 +118,9 @@ pub fn run_internal<P: AsRef<Path>>(
 		assert!(path.pop());
 	}
 
-	// Note: Cargo automatically builds this binary for integration tests.
-	path.push(format!("{}{}", env!("CARGO_PKG_NAME"), std::env::consts::EXE_SUFFIX));
+	// Note: Cargo automatically builds this binary for integration tests. The
+	// binary is `surreal`, which is not the package's name.
+	path.push(format!("surreal{}", std::env::consts::EXE_SUFFIX));
 
 	let mut cmd = Command::new(path);
 	if let Some(dir) = current_dir {
@@ -294,7 +295,7 @@ pub async fn start_server(
 		let addr = format!("127.0.0.1:{port}");
 
 		let start_args = format!(
-			"start --bind {addr} {path} --no-banner --log trace --user {USER} --pass {PASS} {extra_args}"
+			"start --bind {addr} {path} --log trace --user {USER} --pass {PASS} {extra_args}"
 		);
 
 		info!("starting server with args: {start_args}");

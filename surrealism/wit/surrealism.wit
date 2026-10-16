@@ -84,13 +84,13 @@ interface host {
 ///
 /// ## Lifecycle
 ///
-/// 1. `surreal extension build` calls `init` once, snapshots the memory it leaves
+/// 1. `surreal ext build` calls `init` once, snapshots the memory it leaves
 ///    as the component's initial state, and removes the `init` export. The
 ///    module may use it to set up state or warm caches from its attached files.
 /// 2. The host instantiates the WASM component afresh for every invocation, and
 ///    each instance starts in that state. The host never calls `init`: it
 ///    refuses a component that still exports it, which was not built by
-///    `surreal extension build`.
+///    `surreal ext build`.
 /// 3. For each incoming request the host reads the function's entry in the
 ///    baked `exports.toml`, lends a matching transaction, and calls `invoke`.
 ///    The handle is revoked when the call returns.
@@ -98,7 +98,7 @@ interface host {
 /// ## Introspection
 ///
 /// `list-functions`, `function-args`, and `function-returns` allow the host
-/// (and tooling such as `surreal module info`) to discover the module's API
+/// (and tooling such as `surreal ext info`) to discover the module's API
 /// surface without executing any functions.
 world extension {
     import host;
@@ -109,7 +109,7 @@ world extension {
     ///
     /// `tx` is the capability for this call, lent by the host and revoked when
     /// the call returns. It is `none` when the host has no transaction to lend —
-    /// for example `surreal module run` outside a datastore — and a function
+    /// for example `surreal ext run` outside a datastore — and a function
     /// that declared a transaction parameter then fails rather than proceeding
     /// without one. A function that declared none never touches it.
     ///
@@ -160,7 +160,7 @@ world extension {
 
     /// Optional initialization hook, run once at build time.
     ///
-    /// `surreal extension build` runs it and ships the memory it leaves as the
+    /// `surreal ext build` runs it and ships the memory it leaves as the
     /// component's initial state, without this export. There it sees the
     /// attached files but no network, and must close every WASI resource it
     /// opens, or the build fails; an error it returns fails the build too.

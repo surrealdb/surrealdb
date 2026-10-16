@@ -2060,16 +2060,20 @@ jobs:
   # Update the Homebrew tap
   # ----------------------------------------
   # After a latest stable release, open a PR on the Homebrew tap bumping the
-  # `surreal` formula to the new version (like homebrew-tap#54). The tap owns the
-  # formula generation: its release.sh regenerates the formula, run here with
-  # SKIP_GIT=1 and the exact released version pinned as an argument, so this job
-  # creates the branch and PR (opened under the App so the tap's own CI runs).
-  # Left for a human to merge.
+  # `surreal-db` formula (the database alone) to the new version (like
+  # homebrew-tap#54). The tap owns the formula generation: its release.sh
+  # regenerates the formula, run here with SKIP_GIT=1 and the exact released
+  # version pinned as an argument (a bare version is the database's), so this
+  # job creates the branch and PR (opened under the App so the tap's own CI
+  # runs). The `surreal` formula is the Surreal CLI's, bumped by the launcher's
+  # own release (surrealdb/cli), never from here.
   #
   # Only the latest stable line touches Homebrew: `latest` is true only for a
   # stable (non-prerelease) release from the highest releases/* line, so betas
   # and patches to older lines never bump the formula. Runs after promote so the
-  # darwin-universal hash release.sh reads for the pinned version already exists.
+  # per-platform hashes release.sh reads for the pinned version already exist:
+  # v<ver>/surreal-v<ver>.<platform>.txt for darwin-arm64, darwin-amd64,
+  # linux-arm64 and linux-amd64.
   # No-ops (green) without the App secrets.
   update-homebrew-tap:
     name: Update Homebrew tap
@@ -2271,7 +2275,7 @@ jobs:
             fi
           }
           [[ -n "${BUMP_PR}" ]] && add "${BUMP_MERGED}" "- [Bump release branch to its next version](${BUMP_PR})"
-          [[ -n "${HOMEBREW_PR}" ]] && add "${HOMEBREW_MERGED}" "- [Bump the Homebrew \`surreal\` formula](${HOMEBREW_PR})"
+          [[ -n "${HOMEBREW_PR}" ]] && add "${HOMEBREW_MERGED}" "- [Bump the Homebrew \`surreal-db\` formula](${HOMEBREW_PR})"
           [[ -n "${ADVANCE_PR}" ]] && add "false" "- [Advance \`main\` to the next development version](${ADVANCE_PR})"
 
           {

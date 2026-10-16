@@ -781,18 +781,21 @@ async fn ensure_module_fixture() -> Result<PathBuf> {
 		&& tokio::fs::read_to_string(&stamp).await.ok().as_deref() == Some(want.as_str());
 	if !fresh {
 		tokio::fs::create_dir_all(cache).await.context("Failed to create the module cache")?;
-		// With a prebuilt checkout binary the module is packed by that binary
-		// directly, so no second compile of the engine happens here.
-		let mut command = if std::env::var_os(binaries::PREBUILT_CURRENT_ENV).is_some() {
-			let binary = std::fs::canonicalize("../target/debug/surreal")
-				.context("Failed to locate the prebuilt checkout binary")?;
+		// The module is packed by `surreal-ext`, the extension tooling. With a
+		// prebuilt checkout binary, a `surreal-ext` beside it is used directly,
+		// so nothing is compiled here; otherwise cargo builds and runs it.
+		let prebuilt = std::env::var_os(binaries::PREBUILT_CURRENT_ENV).is_some()
+			&& Path::new("../target/debug/surreal-ext").is_file();
+		let mut command = if prebuilt {
+			let binary = std::fs::canonicalize("../target/debug/surreal-ext")
+				.context("Failed to locate the prebuilt surreal-ext binary")?;
 			tokio::process::Command::new(binary)
 		} else {
 			let mut cargo = tokio::process::Command::new("cargo");
-			cargo.args(["run", "--locked", "--quiet", "--bin", "surreal", "--"]);
+			cargo.args(["run", "--locked", "--quiet", "--package", "surreal-ext", "--"]);
 			cargo
 		};
-		command.args(["module", "build", "surrealism/demo", "--out"]);
+		command.args(["build", "surrealism/demo", "--out"]);
 		let status = command
 			.env("RUST_LOG", "warn")
 			// Built to a temp name and renamed on success: a build that writes

@@ -36,7 +36,8 @@ mod surrealism_integration {
 			.unwrap_or(false)
 	}
 
-	/// Path to the `surreal` CLI binary (built alongside integration tests).
+	/// Path to the `surreal` CLI binary (built alongside integration tests), whose
+	/// profile directory is where [`surreal_ext_bin`] looks for `surreal-ext`.
 	///
 	/// Uses `CARGO_BIN_EXE_surreal` when present (set by `cargo test` / cargo-nextest) so the path
 	/// stays valid under nextest's per-test directory layout. Falls back to deriving
@@ -53,24 +54,94 @@ mod surrealism_integration {
 		if path.ends_with("deps") {
 			assert!(path.pop());
 		}
-		path.push(format!("{}{}", env!("CARGO_PKG_NAME"), std::env::consts::EXE_SUFFIX));
+		path.push(format!("surreal{}", std::env::consts::EXE_SUFFIX));
 		path
 	}
 
-	/// Build and pack the demo module using `surreal module build`. The build
-	/// logs at `warn` whatever `SURREAL_LOG` the test inherits: at `full`,
-	/// compiling the module logs every wasmtime and cranelift pass.
+	/// Environment variable naming the `surreal-ext` executable that packs the
+	/// demo. The nextest setup script `.config/scripts/build-demo-module.sh`
+	/// sets it whenever it finds or builds one.
+	const SURREAL_EXT_ENV: &str = "SURREAL_EXT_BIN";
+
+	/// Path to `surreal-ext`, the extension tooling, which packs the demo.
+	///
+	/// It is another package's binary, so cargo gives these tests no
+	/// `CARGO_BIN_EXE_surreal-ext`. In order: [`SURREAL_EXT_ENV`]; a
+	/// `surreal-ext` beside `surreal`, where a workspace build or a nextest
+	/// archive puts it; else one built now, into the target directory and
+	/// profile `surreal` was built with.
+	fn surreal_ext_bin() -> PathBuf {
+		if let Some(p) = std::env::var_os(SURREAL_EXT_ENV).filter(|p| !p.is_empty()) {
+			return PathBuf::from(p);
+		}
+		let surreal = surreal_bin();
+		let profile_dir = surreal.parent().expect("`surreal` sits in a profile directory");
+		let beside = profile_dir.join(format!("surreal-ext{}", std::env::consts::EXE_SUFFIX));
+		if beside.is_file() {
+			return beside;
+		}
+		build_surreal_ext(profile_dir)
+	}
+
+	/// Build `surreal-ext` into the cargo profile directory `profile_dir`, and
+	/// return the executable cargo reports.
+	///
+	/// That directory is `<target-dir>/<profile>` or
+	/// `<target-dir>/<triple>/<profile>`, and cargo marks the target directory
+	/// with `CACHEDIR.TAG`. When no such marker is found, cargo's own target
+	/// directory is used.
+	fn build_surreal_ext(profile_dir: &Path) -> PathBuf {
+		let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+		let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+		let mut command = Command::new(cargo);
+		command.args([
+			"build",
+			"--locked",
+			"--package",
+			"surreal-ext",
+			"--bin",
+			"surreal-ext",
+			"--message-format=json-render-diagnostics",
+		]);
+		let profile = match profile_dir.file_name().and_then(|n| n.to_str()) {
+			Some("debug") | None => "dev",
+			Some(profile) => profile,
+		};
+		command.args(["--profile", profile]);
+		let parent = profile_dir.parent();
+		let grandparent = parent.and_then(Path::parent);
+		if let Some(target_dir) = parent.filter(|d| d.join("CACHEDIR.TAG").is_file()) {
+			command.arg("--target-dir").arg(target_dir);
+		} else if let (Some(triple), Some(target_dir)) =
+			(parent, grandparent.filter(|d| d.join("CACHEDIR.TAG").is_file()))
+		{
+			command.arg("--target-dir").arg(target_dir);
+			command.arg("--target").arg(triple.file_name().expect("a target triple"));
+		}
+		let output = command
+			.current_dir(workspace_root)
+			.stderr(std::process::Stdio::inherit())
+			.output()
+			.expect("Failed to execute cargo build -p surreal-ext");
+		assert!(output.status.success(), "cargo build -p surreal-ext failed");
+		String::from_utf8_lossy(&output.stdout)
+			.lines()
+			.filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+			.filter(|message| message["reason"] == "compiler-artifact")
+			.filter(|message| message["target"]["name"] == "surreal-ext")
+			.find_map(|message| message["executable"].as_str().map(PathBuf::from))
+			.expect("cargo build -p surreal-ext reported no executable")
+	}
+
+	/// Build and pack the demo module using `surreal-ext build`.
 	fn build_and_pack_demo(output_dir: &Path) {
 		let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"));
 		let demo_dir = workspace_root.join("surrealism/demo");
 		let output = output_dir.join("demo.surli");
 
-		let result = Command::new(surreal_bin())
+		let result = Command::new(surreal_ext_bin())
 			.args([
-				"module",
 				"build",
-				"--log",
-				"warn",
 				"--debug",
 				"-o",
 				&output.to_string_lossy(),
@@ -78,11 +149,11 @@ mod surrealism_integration {
 			])
 			.current_dir(workspace_root)
 			.output()
-			.expect("Failed to execute surreal module build");
+			.expect("Failed to execute surreal-ext build");
 
 		assert!(
 			result.status.success(),
-			"surreal module build failed.\nstdout: {}\nstderr: {}",
+			"surreal-ext build failed.\nstdout: {}\nstderr: {}",
 			String::from_utf8_lossy(&result.stdout),
 			String::from_utf8_lossy(&result.stderr),
 		);
@@ -2493,7 +2564,7 @@ mod surrealism_integration {
 
 	/// An SSH key made for one test, the demo archive repacked to name it as
 	/// `[signer.ssh]`, and that archive signed with it by
-	/// `surreal extension sign --key`. `None` when `ssh-keygen` is missing.
+	/// `surreal ext sign --key`. `None` when `ssh-keygen` is missing.
 	struct SignedDemo {
 		_keys: tempfile::TempDir,
 		/// The public key line, for `SIGNER { key: … }`.
@@ -2520,10 +2591,6 @@ mod surrealism_integration {
 	}
 
 	fn sign_demo(bucket_dir: &Path) -> Option<SignedDemo> {
-		// `surreal extension sign` exists only with `extension-sign`.
-		if cfg!(not(feature = "extension-sign")) {
-			return None;
-		}
 		let keys = tempfile::TempDir::new().expect("temp dir for keys");
 		let key = ssh_keygen(keys.path(), "release")?;
 		let other_key = ssh_keygen(keys.path(), "other")?;
@@ -2545,17 +2612,17 @@ mod surrealism_integration {
 		package.pack(bucket_dir.join(&unsigned), None).expect("pack the signable demo");
 
 		let signed = format!("signed-{}.surli", Ulid::new());
-		let result = Command::new(surreal_bin())
-			.args(["extension", "sign", "--key"])
+		let result = Command::new(surreal_ext_bin())
+			.args(["sign", "--key"])
 			.arg(keys.path().join("release"))
 			.arg("-o")
 			.arg(bucket_dir.join(&signed))
 			.arg(bucket_dir.join(&unsigned))
 			.output()
-			.expect("run surreal extension sign");
+			.expect("run surreal-ext sign");
 		assert!(
 			result.status.success(),
-			"surreal extension sign failed: {}",
+			"surreal-ext sign failed: {}",
 			String::from_utf8_lossy(&result.stderr)
 		);
 		let archive = std::fs::read(bucket_dir.join(&unsigned)).expect("read the signable demo");
@@ -2584,7 +2651,7 @@ mod surrealism_integration {
 	/// that signer.
 	async fn check_trust_at_define(bucket_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
 		let Some(demo) = sign_demo(bucket_dir) else {
-			eprintln!("skipping: needs ssh-keygen on PATH and the `extension-sign` feature");
+			eprintln!("skipping: needs ssh-keygen on PATH");
 			return Ok(());
 		};
 		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
@@ -2661,7 +2728,7 @@ mod surrealism_integration {
 	/// `REFETCH_AFTER_REFUSAL`, and the source is read again after it.
 	async fn check_trust_at_load(bucket_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
 		let Some(demo) = sign_demo(bucket_dir) else {
-			eprintln!("skipping: needs ssh-keygen on PATH and the `extension-sign` feature");
+			eprintln!("skipping: needs ssh-keygen on PATH");
 			return Ok(());
 		};
 		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
@@ -2721,7 +2788,7 @@ mod surrealism_integration {
 		bucket_dir: &Path,
 	) -> Result<(), Box<dyn std::error::Error>> {
 		let Some(demo) = sign_demo(bucket_dir) else {
-			eprintln!("skipping: needs ssh-keygen on PATH and the `extension-sign` feature");
+			eprintln!("skipping: needs ssh-keygen on PATH");
 			return Ok(());
 		};
 		let (addr, _server) = start_surrealism_server(bucket_dir).await?;

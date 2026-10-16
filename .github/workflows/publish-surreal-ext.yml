@@ -1,0 +1,404 @@
+# Publish surreal-ext
+#
+# Builds `surreal-ext`, the Surreal CLI's `ext` component, and uploads it to the
+# public download bucket under `cli/extension/`, in exactly the layout the
+# database's own release uses at the bucket root. Dispatched by hand only:
+# nothing else triggers it, and with `publish: false` (the default) it builds
+# and checks everything, uploads nothing, and prints every key a real run would
+# write.
+#
+# The layout is shared with the database rather than restated: the binaries are
+# built and packaged by the same build-{linux,macos,windows} actions, and the
+# files and pointers are written by the same .github/scripts/publish-download.sh,
+# with the executable `surreal-ext` and the prefix `cli/extension/`:
+#
+#   cli/extension/v<ver>/surreal-ext-v<ver>.<os>-<arch>.tgz   one executable, `surreal-ext`
+#   cli/extension/v<ver>/surreal-ext-v<ver>.<os>-<arch>.txt   SHA-256 of the .tgz
+#   cli/extension/v<ver>/surreal-ext-v<ver>.windows-amd64.exe the bare executable
+#   cli/extension/v<ver>/surreal-ext-v<ver>.windows-amd64.txt SHA-256 of the .exe
+#   cli/extension/latest.txt, cli/extension/v<major>.txt         stable: v<ver>
+#   cli/extension/<alpha|beta|...>.txt                        pre-release: v<ver>
+#
+# <os>-<arch> is darwin-arm64, darwin-amd64, linux-amd64, linux-arm64 or
+# windows-amd64. The version is surreal-ext's in Cargo.toml at the built commit,
+# which is the workspace's (the database's). There are no surreal-ext nightlies:
+# a `-nightly` version is refused.
+
+name: Publish surreal-ext
+
+run-name: "Publish surreal-ext from ${{ inputs.git-ref || github.ref_name }} (publish: ${{ inputs.publish }})"
+
+on:
+  workflow_dispatch:
+    inputs:
+      git-ref:
+        description: 'Commit or branch to build (empty = the dispatched branch tip)'
+        required: false
+        type: string
+      publish:
+        description: 'Upload to download.surrealdb.com. Off builds and checks everything and uploads nothing.'
+        required: true
+        type: boolean
+        default: false
+      overwrite:
+        description: 'Replace a version that is already published'
+        required: true
+        type: boolean
+        default: false
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+# One publish at a time: two runs writing the same pointers race. Never cancel
+# one part-way through its uploads.
+concurrency:
+  group: publish-surreal-ext
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Resolve the release
+    if: ${{ github.repository == vars.PRIVATE_ENGINE_REPO }}
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.vars.outputs.sha }}
+      version: ${{ steps.vars.outputs.version }}
+      name: ${{ steps.vars.outputs.name }}
+      pre-release: ${{ steps.vars.outputs.pre-release }}
+      release-name: ${{ steps.vars.outputs.release-name }}
+      latest: ${{ steps.latest.outputs.latest }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.git-ref || github.sha }}
+
+      # Named as the database names a versioned release (prepare-release-vars):
+      # `v<ver>`, pre-release when the version has a `-`, and the pre-release
+      # pointer named after its first identifier.
+      - name: Resolve the version
+        id: vars
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          version="$(cargo metadata --format-version 1 --no-deps \
+            | jq -r '.packages[] | select(.name == "surreal-ext") | .version')"
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::could not resolve the surreal-ext version at ${sha} (got '${version}')"
+            exit 1
+          fi
+          if [[ "${version}" == *-* ]]; then
+            pre_release=true
+            release_name="$(printf '%s' "${version#*-}" | cut -d. -f1)"
+          else
+            pre_release=false
+            release_name=stable
+          fi
+          if [[ "${release_name}" == "nightly" ]]; then
+            echo "::error::${sha} is at ${version}. surreal-ext has no nightly releases; dispatch against a release line."
+            exit 1
+          fi
+          {
+            echo "sha=${sha}"
+            echo "version=${version}"
+            echo "name=v${version}"
+            echo "pre-release=${pre_release}"
+            echo "release-name=${release_name}"
+          } >> "$GITHUB_OUTPUT"
+
+      # A stable release moves latest.txt only when it is the newest stable
+      # published under cli/extension/, so a patch on an older line leaves it.
+      - name: Decide whether this is the latest release
+        id: latest
+        env:
+          VERSION: ${{ steps.vars.outputs.version }}
+          PRE_RELEASE: ${{ steps.vars.outputs.pre-release }}
+        run: |
+          set -euo pipefail
+          latest=false
+          if [[ "${PRE_RELEASE}" != "true" ]]; then
+            url="https://download.surrealdb.com/cli/extension/latest.txt"
+            code="$(curl -sS -o current.txt -w '%{http_code}' "${url}" || true)"
+            case "${code}" in
+              200)
+                current="$(tr -d 'v[:space:]' < current.txt)"
+                highest="$(printf '%s\n%s\n' "${current}" "${VERSION}" | sort -V | tail -n1)"
+                [[ "${highest}" == "${VERSION}" ]] && latest=true ;;
+              403|404)
+                # Nothing published yet (the CDN answers a missing key with 403).
+                latest=true ;;
+              *)
+                echo "::error::could not read ${url} (HTTP ${code}); refusing to guess whether v${VERSION} is the latest."
+                exit 1 ;;
+            esac
+          fi
+          echo "latest=${latest}" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse to replace a published version
+        if: ${{ !inputs.overwrite }}
+        env:
+          NAME: ${{ steps.vars.outputs.name }}
+        run: |
+          set -euo pipefail
+          url="https://download.surrealdb.com/cli/extension/${NAME}/surreal-ext-${NAME}.linux-amd64.txt"
+          code="$(curl -sS -o /dev/null -w '%{http_code}' "${url}" || true)"
+          case "${code}" in
+            200)
+              echo "::error::surreal-ext ${NAME} is already published (${url}). Bump the version, or dispatch with overwrite."
+              exit 1 ;;
+            403|404) ;;
+            *)
+              echo "::error::could not tell whether surreal-ext ${NAME} is published: ${url} answered HTTP ${code}."
+              exit 1 ;;
+          esac
+
+      - name: Summarise
+        env:
+          SHA: ${{ steps.vars.outputs.sha }}
+          NAME: ${{ steps.vars.outputs.name }}
+          RELEASE_NAME: ${{ steps.vars.outputs.release-name }}
+          LATEST: ${{ steps.latest.outputs.latest }}
+        run: |
+          echo "surreal-ext ${NAME} from ${SHA}: ${RELEASE_NAME}, latest=${LATEST}, publish=${{ inputs.publish }}" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: Build ${{ matrix.arch }} binary
+    needs: [prepare]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      # A real publish must not go out with a platform missing; a rehearsal
+      # reports every broken platform at once.
+      fail-fast: ${{ inputs.publish }}
+      matrix:
+        # The database's release matrix (rolling-channel.yml).
+        include:
+          - arch: x86_64-unknown-linux-gnu
+            platform: amd64
+            os: linux
+            runner: [runner-amd-32-cores]
+          - arch: aarch64-unknown-linux-gnu
+            platform: arm64
+            os: linux
+            runner: [runner-arm-32-cores]
+          - arch: x86_64-apple-darwin
+            platform: amd64
+            os: macos
+            runner: macos-15-xlarge
+          - arch: aarch64-apple-darwin
+            platform: arm64
+            os: macos
+            runner: macos-15-xlarge
+          - arch: x86_64-pc-windows-msvc
+            platform: amd64
+            os: windows
+            runner: windows-latest-32-cores
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      # CI tooling comes from the WORKFLOW ref, as in rolling-channel.yml, so the
+      # build actions are the ones this workflow was written against even when
+      # an older commit is built.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
+      - name: Setup environment
+        uses: ./.ci/.github/actions/setup-environment
+        with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          enable-kache: ${{ matrix.os != 'linux' }}
+          targets: ${{ matrix.arch }}
+          kache-manifest-key: surreal-ext-${{ matrix.arch }}
+
+      # The database's build actions, pointed at the surreal-ext package. It has
+      # no features, so `extra-features` is empty.
+      - name: Build Linux binary
+        if: matrix.os == 'linux'
+        uses: ./.ci/.github/actions/build-linux
+        with:
+          arch: ${{ matrix.arch }}
+          platform: ${{ matrix.platform }}
+          name: ${{ needs.prepare.outputs.name }}
+          binary: surreal-ext
+          package: surreal-ext
+          extra-features: ''
+          upload: true
+          release: true
+
+      - name: Build macOS binary
+        if: matrix.os == 'macos'
+        uses: ./.ci/.github/actions/build-macos
+        with:
+          arch: ${{ matrix.arch }}
+          platform: ${{ matrix.platform }}
+          name: ${{ needs.prepare.outputs.name }}
+          binary: surreal-ext
+          package: surreal-ext
+          extra-features: ''
+          upload: true
+          release: true
+
+      - name: Build Windows binary
+        if: matrix.os == 'windows'
+        uses: ./.ci/.github/actions/build-windows
+        with:
+          arch: ${{ matrix.arch }}
+          platform: ${{ matrix.platform }}
+          name: ${{ needs.prepare.outputs.name }}
+          binary: surreal-ext
+          package: surreal-ext
+          extra-features: ''
+          upload: true
+          release: true
+
+  publish:
+    name: ${{ inputs.publish && 'Publish' || 'Rehearse publishing' }} surreal-ext ${{ needs.prepare.outputs.name }}
+    needs: [prepare, build]
+    # The release environment (and its reviewers) binds only on a real publish,
+    # named as the database's release approval is.
+    environment: ${{ inputs.publish && needs.prepare.outputs.release-name || '' }}
+    runs-on: ubuntu-latest
+    env:
+      BUCKET: download.surrealdb.com
+      PREFIX: cli/extension/
+      NAME: ${{ needs.prepare.outputs.name }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      RELEASE_NAME: ${{ needs.prepare.outputs.release-name }}
+      DRY_RUN: ${{ !inputs.publish }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout CI tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
+      - name: Download artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+          pattern: surreal-ext-${{ needs.prepare.outputs.name }}.*
+
+      # The same file set the database's rolling upload takes from its build
+      # artifacts (rolling-channel.yml, publish-s3): the archives, the Windows
+      # executable and the checksums, not the bare executables beside them.
+      - name: Collect and verify the release set
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+          mkdir publish
+          for file in artifacts/**/*.tgz artifacts/**/*.txt artifacts/**/*.exe; do
+            cp "${file}" publish/
+          done
+          cd publish
+          expected=""
+          for platform in darwin-amd64 darwin-arm64 linux-amd64 linux-arm64; do
+            expected+="surreal-ext-${NAME}.${platform}.tgz"$'\n'"surreal-ext-${NAME}.${platform}.txt"$'\n'
+          done
+          expected+="surreal-ext-${NAME}.windows-amd64.exe"$'\n'"surreal-ext-${NAME}.windows-amd64.txt"
+          actual="$(printf '%s\n' * | sort)"
+          if [[ "${actual}" != "$(printf '%s\n' "${expected}" | sort)" ]]; then
+            echo "::error::the release set is not the expected ten files:"
+            echo "${actual}"
+            exit 1
+          fi
+          for sidecar in *.txt; do
+            asset="${sidecar%.txt}.tgz"
+            [[ -f "${asset}" ]] || asset="${sidecar%.txt}.exe"
+            want="$(tr -d '[:space:]' < "${sidecar}")"
+            got="$(sha256sum "${asset}" | cut -d' ' -f1)"
+            if [[ "${got}" != "${want}" ]]; then
+              echo "::error::${asset} does not match ${sidecar}"
+              exit 1
+            fi
+          done
+          for archive in *.tgz; do
+            listing="$(tar -tvzf "${archive}")"
+            if [[ "$(tar -tzf "${archive}")" != "surreal-ext" || "${listing}" != -rwxr-xr-x* ]]; then
+              echo "::error::${archive} must hold exactly one member, surreal-ext, mode 0755: ${listing}"
+              exit 1
+            fi
+          done
+          ls -l
+
+      # Static keys for the public download bucket, as promote-binaries uses.
+      # A rehearsal passes none.
+      - name: Configure AWS
+        if: ${{ inputs.publish }}
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          aws-region: us-east-2
+          aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+
+      # The files first, then the pointers that name them.
+      - name: Publish binaries to the release name
+        run: .ci/.github/scripts/publish-download.sh binaries publish
+
+      - name: Set latest release version
+        if: ${{ needs.prepare.outputs.latest == 'true' }}
+        run: .ci/.github/scripts/publish-download.sh latest
+
+      - name: Set stable major-version pointer
+        if: ${{ needs.prepare.outputs.pre-release != 'true' }}
+        run: .ci/.github/scripts/publish-download.sh major
+
+      - name: Set latest alpha or beta version
+        if: ${{ needs.prepare.outputs.pre-release == 'true' }}
+        run: .ci/.github/scripts/publish-download.sh channel
+
+  propagate:
+    name: Propagate binaries to all regions
+    if: ${{ inputs.publish }}
+    needs: [publish]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout CI tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
+      - name: Propagate binaries
+        uses: ./.ci/.github/actions/propagate-binaries
+        with:
+          aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}

@@ -1,5 +1,5 @@
 //! A signature made by the installed `ssh-keygen` with the exact command
-//! `surreal extension sign --key` runs, checked by [`verify`].
+//! `surreal ext sign --key` runs, checked by [`verify`].
 //!
 //! The committed fixtures in `ssh.rs` were made once; this makes a fresh key
 //! and signature on every run, so a change in either `ssh-keygen` or the
@@ -62,7 +62,7 @@ fn keygen(dir: &Path, name: &str, kind: &str) -> String {
 }
 
 /// `ssh-keygen -Y sign -n surrealism -O hashalg=sha256 -f KEY` over `MANIFEST`
-/// on stdin, as `surreal extension sign --key` runs it.
+/// on stdin, as `surreal ext sign --key` runs it.
 fn sign(dir: &Path, name: &str) -> Vec<u8> {
 	let mut child = Command::new("ssh-keygen")
 		.args(["-Y", "sign", "-n", "surrealism", "-O", "hashalg=sha256", "-f"])

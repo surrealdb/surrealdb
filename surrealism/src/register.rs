@@ -69,7 +69,7 @@ pub struct FunctionMeta {
 	/// Whether the function takes a transaction. When `false` the handler is
 	/// always passed `None`.
 	pub declares_transaction: bool,
-	/// Shown by `INFO` and `surreal module info`.
+	/// Shown by `INFO` and `surreal ext info`.
 	pub comment: Option<String>,
 }
 

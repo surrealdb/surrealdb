@@ -122,7 +122,11 @@ confidence-threshold = 0.95
 # Allow specific licenses on a per-crate basis, instead of globally.
 
 [[licenses.exceptions]]
-name = "surreal"
+name = "surreal-db"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surreal-ext"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
@@ -306,7 +310,12 @@ name = "surrealdb-sqlfront-spec"
 allow = ["BUSL-1.1"]
 
 [[licenses.clarify]]
-name = "surreal"
+name = "surreal-db"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surreal-ext"
 expression = "BUSL-1.1"
 license-files = []
 

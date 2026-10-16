@@ -28,7 +28,10 @@ url = "https://raw.githubusercontent.com/zcash/rust-ecosystem/main/supply-chain/
 [policy.demo]
 audit-as-crates-io = false
 
-[policy.surreal]
+[policy.surreal-db]
+audit-as-crates-io = false
+
+[policy.surreal-ext]
 audit-as-crates-io = false
 
 [policy.surrealdb]

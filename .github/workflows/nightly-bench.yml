@@ -90,6 +90,6 @@ jobs:
 
       - name: Run reproduction test
         run: |
-          cargo test --locked -p surreal --release --no-default-features \
+          cargo test --locked -p surreal-db --release --no-default-features \
             --features 'storage-mem,http' \
             --test reproduce_issue_7318 -- --ignored --nocapture

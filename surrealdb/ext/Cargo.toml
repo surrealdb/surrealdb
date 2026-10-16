@@ -1,0 +1,85 @@
+[package]
+name = "surreal-ext"
+publish = false
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+description = "The Surreal CLI's extension component: develop, build, sign, inspect, run and install Surrealism extensions"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license-file.workspace = true
+
+[[bin]]
+name = "surreal-ext"
+path = "src/main.rs"
+
+[features]
+# `default` is also what the database's build actions pass (`--features default`).
+default = ["sign"]
+# The Sigstore client: `sign` (keyless signing with a CI identity token, Fulcio,
+# Rekor) and the installer's online checks (Sigstore's public trust root over
+# TUF, Rekor inclusion proofs). Without it, `sign` is not built and `install`
+# reports both online checks as not checked, as under `--offline`.
+sign = [
+    "dep:sigstore-merkle",
+    "dep:sigstore-oidc",
+    "dep:sigstore-rekor",
+    "dep:sigstore-sign",
+    "dep:sigstore-trust-root",
+]
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+base64.workspace = true
+bytes.workspace = true
+clap = { workspace = true, features = ["derive", "env", "wrap_help", "unicode"] }
+common.workspace = true
+dialoguer.workspace = true
+hex.workspace = true
+rand.workspace = true
+reqwest = { workspace = true, default-features = false, features = ["rustls", "http2"] }
+semver.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+sigstore-merkle = { workspace = true, optional = true }
+sigstore-oidc = { workspace = true, optional = true }
+sigstore-rekor = { workspace = true, optional = true }
+sigstore-sign = { workspace = true, optional = true }
+sigstore-trust-root = { workspace = true, optional = true }
+# The client for `install` and `upgrade`, which connect to a running server.
+surrealdb = { workspace = true, features = ["protocol-http", "protocol-ws", "rustls"] }
+# The SurrealQL value parser only, for `--arg`, the stdin answers in `run`, and
+# the installer's SurrealQL values.
+surrealdb-expr = { workspace = true, default-features = false }
+surrealdb-rpc.workspace = true
+surrealdb-types.workspace = true
+surrealism-runtime.workspace = true
+surrealism-verify.workspace = true
+tar.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process"] }
+tracing.workspace = true
+wasm-encoder.workspace = true
+wasm-opt.workspace = true
+wasmparser.workspace = true
+wasmtime.workspace = true
+wasmtime-wasi.workspace = true
+wasmtime-wizer.workspace = true
+zstd.workspace = true
+
+[dev-dependencies]
+# The installer's tests define extensions in an embedded in-memory database,
+# which verifies DIGEST and SIGNATURE as a server does only with `surrealism`.
+surrealdb = { workspace = true, features = ["kv-mem"] }
+surrealdb-core = { workspace = true, features = ["surrealism"] }
+tokio = { workspace = true, features = ["test-util"] }
+wat.workspace = true
+wiremock.workspace = true
+
+[lints]
+workspace = true

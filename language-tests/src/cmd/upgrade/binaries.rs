@@ -265,7 +265,8 @@ pub async fn retrieve_version_from_path(path: &str) -> anyhow::Result<Version> {
 
 /// Environment variable naming a `surreal` binary already built for the current
 /// checkout. When set, the checkout is used as it stands and `cargo build` is
-/// skipped; the binary must sit at `<checkout>/target/debug/surreal`.
+/// skipped; the binary must sit at `<checkout>/target/debug/surreal`. A
+/// `surreal-ext` beside it, if there is one, packs the module fixture.
 pub const PREBUILT_CURRENT_ENV: &str = "LANG_UPGRADE_PREBUILT_CURRENT";
 
 pub async fn prepare_path(path: &str) -> anyhow::Result<()> {

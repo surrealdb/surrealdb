@@ -35,11 +35,19 @@ inputs:
     description: 'Compile with release flag'
     required: false
     default: 'true'
+  binary:
+    description: 'The executable to build and package; artifacts are named after it'
+    required: false
+    default: 'surreal'
+  package:
+    description: 'The Cargo package to build (empty = the workspace root package, which builds `surreal`)'
+    required: false
+    default: ''
 
 outputs:
   artifact-name:
     description: 'Name of the uploaded artifact'
-    value: surreal-${{ inputs.name }}.darwin-${{ inputs.platform }}
+    value: ${{ inputs.binary }}-${{ inputs.name }}.darwin-${{ inputs.platform }}
 
 runs:
   using: 'composite'
@@ -99,6 +107,9 @@ runs:
           extra_args="${extra_args} --release"
           compile_profile="release"
         fi
+        if [[ -n "${{ inputs.package }}" ]]; then
+          extra_args="${extra_args} --package ${{ inputs.package }}"
+        fi
 
         # Download libonnxruntime's static library and tell ORT crate to use it
         mkdir /tmp/onnxruntime
@@ -109,17 +120,17 @@ runs:
         cargo build --no-default-features ${extra_args} --locked --target ${{ inputs.arch }}
 
         # Package
-        cp target/${{ inputs.arch }}/${compile_profile}/surreal surreal
-        ./surreal version
-        tar -zcvf surreal-${{ inputs.name }}.darwin-${{ inputs.platform }}.tgz surreal
-        echo $(shasum -a 256 surreal-${{ inputs.name }}.darwin-${{ inputs.platform }}.tgz | cut -f1 -d' ') > surreal-${{ inputs.name }}.darwin-${{ inputs.platform }}.txt
+        cp target/${{ inputs.arch }}/${compile_profile}/${{ inputs.binary }} ${{ inputs.binary }}
+        ./${{ inputs.binary }} version
+        tar -zcvf ${{ inputs.binary }}-${{ inputs.name }}.darwin-${{ inputs.platform }}.tgz ${{ inputs.binary }}
+        echo $(shasum -a 256 ${{ inputs.binary }}-${{ inputs.name }}.darwin-${{ inputs.platform }}.tgz | cut -f1 -d' ') > ${{ inputs.binary }}-${{ inputs.name }}.darwin-${{ inputs.platform }}.txt
 
     - name: Upload artifacts
       if: ${{ inputs.upload == 'true' }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
-        name: surreal-${{ inputs.name }}.darwin-${{ inputs.platform }}
+        name: ${{ inputs.binary }}-${{ inputs.name }}.darwin-${{ inputs.platform }}
         path: |
-          surreal
-          surreal-${{ inputs.name }}.darwin-${{ inputs.platform }}.tgz
-          surreal-${{ inputs.name }}.darwin-${{ inputs.platform }}.txt
+          ${{ inputs.binary }}
+          ${{ inputs.binary }}-${{ inputs.name }}.darwin-${{ inputs.platform }}.tgz
+          ${{ inputs.binary }}-${{ inputs.name }}.darwin-${{ inputs.platform }}.txt

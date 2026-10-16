@@ -7,7 +7,7 @@ package name. Two parties read from it:
   loads it (`surrealdb/core/src/surrealism/silo.rs`).
 - **Clients** (the CLI, Studio, the SDKs) resolve what a person asked for to an
   exact version, collect the details the install prompt shows, and write the
-  `DEFINE EXTENSION` statement (`surrealdb/server/src/cli/extension/silo.rs`).
+  `DEFINE EXTENSION` statement (`surrealdb/ext/src/install/silo.rs`).
 
 Every URL below is relative to the endpoint, `https://silo.surrealdb.com`. There
 is one registry: neither the server nor the CLI can be pointed at another one in
@@ -193,7 +193,7 @@ GET {endpoint}/api/v1/packages/{org}/{pkg}/{major}.{minor}.{patch}
 
 ## Later work
 
-**Publishing.** `surreal extension publish` uploads an archive with a
+**Publishing.** `surreal ext publish` uploads an archive with a
 short-lived CI identity token (OIDC), which Silo matches against the
 publishers registered for the package. Its request shape, the checks Silo runs
 on upload, and the management endpoints (yank, transfer, publisher settings)

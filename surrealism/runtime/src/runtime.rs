@@ -288,14 +288,14 @@ impl Runtime {
 			.prefix_err(|| "Failed to construct component from bytes")?;
 		tracing::debug!(elapsed = ?t0.elapsed(), "build: Component::new");
 
-		// `surreal extension build` runs `init` once and removes the export, so
+		// `surreal ext build` runs `init` once and removes the export, so
 		// the snapshot is what every instance starts from. A component that
 		// still exports it was not built that way, and running `init` here
 		// would run it on every invocation, outside the query's deadline.
 		if comp.get_export_index(None, "init").is_some() {
 			return Err(SurrealismError::Other(anyhow::anyhow!(
 				"the component still exports `init`, so it was not pre-initialised; rebuild it \
-				 with `surreal extension build`"
+				 with `surreal ext build`"
 			)));
 		}
 
@@ -319,7 +319,7 @@ impl Runtime {
 			invoke: export("invoke").ok_or_else(|| {
 				SurrealismError::Other(anyhow::anyhow!(
 					"component is missing required export 'invoke'. Ensure the module is \
-					 built with `surreal extension build`"
+					 built with `surreal ext build`"
 				))
 			})?,
 			args: export("function-args"),
@@ -565,7 +565,7 @@ mod tests {
 	}
 
 	/// A component that still exports `init` was not pre-initialised by
-	/// `surreal extension build`, and is refused before anything runs.
+	/// `surreal ext build`, and is refused before anything runs.
 	#[test]
 	fn a_component_exporting_init_is_refused() {
 		let engines = engines(EngineSettings {
@@ -582,7 +582,7 @@ mod tests {
 			)
 		};
 		let err = Runtime::build(&engine, component("init").as_bytes()).err().expect("refused");
-		assert!(err.to_string().contains("surreal extension build"), "{err}");
+		assert!(err.to_string().contains("surreal ext build"), "{err}");
 		// The same component under another export name gets past the check
 		// and fails only where it lacks what a module needs.
 		let other = Runtime::build(&engine, component("other").as_bytes());

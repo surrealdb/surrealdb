@@ -36,7 +36,8 @@ can cross-compile to WASM (on macOS, upstream LLVM — Apple's Clang cannot):
 
 ```sh
 rustup target add wasm32-wasip2
-surreal module build --debug -o /tmp/demo.surli surrealism/demo
+# Or `surreal ext build …` with the Surreal CLI installed.
+cargo run -p surreal-ext -- build --debug -o /tmp/demo.surli surrealism/demo
 SURREAL_DEMO_SURLI=/tmp/demo.surli bun test tests/surrealism.test.ts
 ```
 

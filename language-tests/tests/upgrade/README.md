@@ -48,13 +48,15 @@ checkout's binary, and the lane downloads both. Locally,
 filesystem paths, and because the CI script runs from `language-tests/`, `..` is
 the repo root. A path version is resolved by running `cargo metadata --no-deps`
 there and reading the version of the workspace package named `surrealdb` — the
-SDK crate, not the root binary package, which is named `surreal`. It is then
+SDK crate, not the root package, `surreal-db`, whose binary is `surreal`. It is then
 built with `cargo build --bin surreal`. Any other checkout works the same way:
 `--to /path/to/another/clone`.
 
 Setting `LANG_UPGRADE_PREBUILT_CURRENT` skips that build and uses the binary already
-at `<checkout>/target/debug/surreal`, which must exist; the same binary packs the
-Surrealism module fixture. CI sets it after downloading the `build` job's binary.
+at `<checkout>/target/debug/surreal`, which must exist. CI sets it after downloading
+the `build` job's binary. The Surrealism module fixture is packed by `surreal-ext`:
+the one at `<checkout>/target/debug/surreal-ext` when the prebuilt binary is used
+and it is there, otherwise one the harness builds with `cargo run -p surreal-ext`.
 
 Everything else is a tag, downloaded from
 `https://download.surrealdb.com/v{ver}/surreal-v{ver}.{platform}` and cached in

@@ -18,9 +18,9 @@ Surrealism is SurrealDB's WASM plugin system. Guest modules are compiled to WASM
 
 ## Build / Test / Deploy Workflow
 
-- **Build:** `surreal extension build` — compiles the Rust project to `wasm32-wasip2`, optimizes with wasm-opt, pre-initialises it by snapshotting `init` (see Security Model), packs into a `.surli` archive.
-- **Run:** `surreal module run <file.surli> [--fn <name>] [args...]` — loads the archive, invokes the specified function (or default).
-- **Info:** `surreal module info <file.surli>` — inspects exports without executing.
+- **Build:** `surreal ext build` — compiles the Rust project to `wasm32-wasip2`, optimizes with wasm-opt, pre-initialises it by snapshotting `init` (see Security Model), packs into a `.surli` archive.
+- **Run:** `surreal ext run <file.surli> [--fn <name>] [args...]` — loads the archive, invokes the specified function (or default).
+- **Info:** `surreal ext info <file.surli>` — inspects exports without executing.
 
 Archives are self-contained; load them via `SurrealismPackage::from_file(path)`.
 
@@ -45,7 +45,7 @@ Every definition pins `DIGEST` (`sha256(surrealism/MANIFEST)`, computed at `DEFI
 - **Non-ambient host access:** `sql` and `run` are methods on a `transaction` handle the host lends for one `invoke` call and revokes on return. An export lent no handle — `init` and the introspection exports — has no route to the datastore, and a retained handle traps. This replaces the old swap-a-context-on-the-store scheme.
 - **Runtime scoping:** When a module calls `sql()` or `run()`, the host creates a derived context whose capabilities are narrowed to the definition's `scripting`, `functions` and `net`. `sql()` also needs `queries`, and a writing export without `write` gets the read-only frame. Server deny-lists are always preserved.
 - **Read-only is enforced:** a function declares whether it needs write access, which reaches the host as the `writeable` flag in the exports manifest. When it is `false`, `Host::new` installs `NoWriteFrame::SurrealismReadOnly`, and a data-modifying statement is refused where it is reached — the same enforcement point that stops a `SELECT` `PERMISSIONS` predicate and a `COMPUTED` body from writing (`legacy/expr/expression.rs`). A definition-time check could not stand in for it: the guest composes its query as a string at runtime, so only reaching the statement settles whether it writes. How the declaration is spelled is the guest language's business — in the Rust SDK it is `Transaction` versus `Transaction<ReadWrite>`. Covered by `module_read_only_write_refused`.
-- **`init` cannot query:** `surreal extension build` runs it once and ships the memory it leaves as the module's initial state, so it runs before any datastore or request exists. It is lent no handle, and the macro rejects `async fn` on it. The build runs it against a stub WASI: the attached `fs/` is preopened, network use fails the build, a WASI resource still open when it returns fails the build (writing to stdout or stderr from `init` is one), and reads of randomness or the clock are allowed and listed in the build output. Every value `init` reads is frozen into the archive and so into every instance: a random seed, a clock reading, and the random keys of a `HashMap` built in `init` are the same in every invocation and on every server. The server refuses a component that still exports `init`.
+- **`init` cannot query:** `surreal ext build` runs it once and ships the memory it leaves as the module's initial state, so it runs before any datastore or request exists. It is lent no handle, and the macro rejects `async fn` on it. The build runs it against a stub WASI: the attached `fs/` is preopened, network use fails the build, a WASI resource still open when it returns fails the build (writing to stdout or stderr from `init` is one), and reads of randomness or the clock are allowed and listed in the build output. Every value `init` reads is frozen into the archive and so into every instance: a random seed, a clock reading, and the random keys of a `HashMap` built in `init` are the same in every invocation and on every server. The server refuses a component that still exports `init`.
 - **Deny-by-default for functions:** `functions` defaults to none. Use `true` for whatever the server allows, or patterns like `["http::*", "fn::user_exists"]`.
 - **Fresh memory per invocation:** every invocation instantiates afresh from the compiled component into a pooling-allocator slot and drops the instance on return. Statics, heap and WASI handles never survive a call, so compiled code is shared across tenants by archive digest while state is not. `SURREAL_SURREALISM_MAX_CONCURRENT_INVOCATIONS` is the slot count; a nested invocation (`tx.run` into an extension) never waits for a slot, and nesting stops at depth 8.
 - **`strict_timeout: false`:** Disables epoch-based timeout enforcement entirely. The module can run indefinitely and monopolise a thread. A definition can ask for it, but it takes effect only when the operator sets `SURREAL_SURREALISM_ALLOW_UNBOUNDED_EXECUTION=true`; otherwise every invocation runs on the guarded engine.
@@ -83,8 +83,8 @@ digest.
 The package file has a legacy name, `surrealism.toml`. Both names resolve the same way (`PackageFile::locate` in a project, `SurrealismPackage::from_reader` in an archive):
 
 - `package.toml` is read if it exists, otherwise `surrealism.toml`.
-- When both exist, `package.toml` wins and `surrealism.toml` is not parsed. `surreal extension build` prints a warning naming the ignored file.
-- `surreal extension build` always writes `surrealism/package.toml`, and `surreal extension init` scaffolds only `package.toml`.
+- When both exist, `package.toml` wins and `surrealism.toml` is not parsed. `surreal ext build` prints a warning naming the ignored file.
+- `surreal ext build` always writes `surrealism/package.toml`, and `surreal ext init` scaffolds only `package.toml`.
 
 ## ABI Versioning
 
@@ -296,7 +296,7 @@ code, and no pinning a hostname to a literal address.
 | `reqwest` 0.13 | **works** with setup | Needs the tokio flag, a `rustls`/`ring` provider, and a custom `Resolve`. See *Using reqwest*. |
 
 `--cfg tokio_unstable` is the plugin's to set, not the SDK's: a module that
-wants a tokio-based client opts in by uncommenting the line `surreal module
+wants a tokio-based client opts in by uncommenting the line `surreal ext
 init` leaves in `.cargo/config.toml`.
 
 Reading a response body to EOF (an HTTP/1.0 or `Connection: close` reply) fails
@@ -308,11 +308,11 @@ real API. This is a wasi-libc/std issue, not a host one: a
 ## Common Commands
 
 ```bash
-surreal extension build              # build from current dir
-surreal extension build -o out.surli  # custom output
-surreal module run pkg.surli      # run default export
-surreal module run pkg.surli --fn "mymod::greet" "hello"  # named export + args
-surreal module info pkg.surli     # list exports
+surreal ext build              # build from current dir
+surreal ext build -o out.surli  # custom output
+surreal ext run pkg.surli      # run default export
+surreal ext run pkg.surli --fn "mymod::greet" "hello"  # named export + args
+surreal ext info pkg.surli     # list exports
 ```
 
 ## Project Structure

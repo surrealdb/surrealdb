@@ -77,6 +77,7 @@ pub fn service_edition() -> &'static str {
 pub struct Builder {
 	format: LogFormat,
 	filter: CustomFilter,
+	stdout_logs: bool,
 	socket: Option<String>,
 	// Filter options
 	file_filter: Option<CustomFilter>,
@@ -133,6 +134,7 @@ impl Default for Builder {
 				spans: std::collections::HashMap::new(),
 			},
 			format: LogFormat::Text,
+			stdout_logs: true,
 			socket: None,
 			// Filter options
 			file_filter: None,
@@ -243,6 +245,13 @@ impl Builder {
 		self
 	}
 
+	/// Whether INFO, DEBUG and TRACE terminal logs go to stdout (the default)
+	/// or, with WARN and ERROR, to stderr
+	pub fn with_stdout_logs(mut self, enabled: bool) -> Self {
+		self.stdout_logs = enabled;
+		self
+	}
+
 	/// Set the log file output format
 	pub fn with_file_format(mut self, format: LogFormat) -> Self {
 		self.file_format = format;
@@ -306,7 +315,8 @@ impl Builder {
 			.thread_name("surrealdb-logger-stderr")
 			.finish(std::io::stderr());
 		// Create the display destination layers (separate stdout/stderr)
-		let stdio_layers = logs::output(self.filter.clone(), stdout, stderr, self.format)?;
+		let stdio_layers =
+			logs::output(self.filter.clone(), stdout, stderr, self.format, self.stdout_logs)?;
 		// Setup a registry for composing layers
 		let registry = tracing_subscriber::registry();
 		// Setup stdio destination layers

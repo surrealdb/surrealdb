@@ -101,7 +101,7 @@ impl Guest for SurrealismPlugin {
 	}
 
 	/// Runs the `#[surrealism(init)]` function, the only window in which
-	/// [`register`](crate::register) succeeds. `surreal extension build` calls
+	/// [`register`](crate::register) succeeds. `surreal ext build` calls
 	/// it once and snapshots the result; a second call is refused, since it
 	/// would register every function again.
 	fn init() -> Result<(), String> {
@@ -114,7 +114,7 @@ impl Guest for SurrealismPlugin {
 		with_registry(|r| r.begin_init())?;
 		let result = init.map_or(Ok(()), |init| (init.0)());
 		with_registry(|r| r.end_init());
-		// `surreal extension build` snapshots memory as `init` leaves it, and
+		// `surreal ext build` snapshots memory as `init` leaves it, and
 		// the handle indices wasi-libc caches for the preopened directory name
 		// resources in the build's store, not the instance that later runs the
 		// snapshot. Releasing them here leaves nothing open, and the first file

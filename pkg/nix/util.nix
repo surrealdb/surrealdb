@@ -55,7 +55,9 @@ rec {
     let toml = readFile ../../Cargo.toml;
     in fromTOML toml;
 
-  packageName = cargoToml.package.name;
+  # The executable the root package builds. It is named by its `[[bin]]`
+  # target, not by the package.
+  binaryName = (builtins.head cargoToml.bin).name;
 
   features = cargoToml.features;
 

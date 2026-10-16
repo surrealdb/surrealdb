@@ -5,7 +5,7 @@
 // CBOR/SDK mapping: guest return values arrive as JS values, and every failing
 // call arrives as a rejected promise whose message names its cause.
 //
-// Fixture: the demo archive produced by `surreal module build` from
+// Fixture: the demo archive produced by `surreal ext build` from
 // `surrealism/demo`. Building it needs a Rust `wasm32-wasip2` toolchain, which
 // this suite does not require, so the archive is supplied out of band through
 // SURREAL_DEMO_SURLI. A local run without it skips the module tests; a CI run
@@ -34,7 +34,7 @@ const SURLI = process.env.SURREAL_DEMO_SURLI;
 
 if (!SURLI) {
 	console.log(
-		"surrealism.test.ts: SURREAL_DEMO_SURLI is not set — skipping. Build the fixture with `surreal module build -o <path>/demo.surli surrealism/demo` and point SURREAL_DEMO_SURLI at it.",
+		"surrealism.test.ts: SURREAL_DEMO_SURLI is not set — skipping. Build the fixture with `surreal ext build -o <path>/demo.surli surrealism/demo` and point SURREAL_DEMO_SURLI at it.",
 	);
 }
 

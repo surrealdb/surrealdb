@@ -42,7 +42,6 @@ export async function startServer(options: ServerOptions = {}): Promise<TestServ
 				"root",
 				"--log",
 				"error",
-				"--no-banner",
 				...(options.args ?? []),
 				options.datastore ?? "memory",
 			],

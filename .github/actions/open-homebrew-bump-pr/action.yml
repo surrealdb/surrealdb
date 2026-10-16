@@ -1,9 +1,16 @@
 name: 'Open Homebrew bump PR'
 description: >-
-  Open Homebrew bump PR.
-  Extracted verbatim from release.yml. The interface is the ENV VARS set
-  on the calling step (they propagate into this composite step's process
-  environment); see the call site in release.yml for the exact set.
+  Open a PR on the Homebrew tap bumping the `surreal-db` formula, the database
+  alone, to the released version. The interface is the ENV VARS set on the
+  calling step (they propagate into this composite step's process environment);
+  see the call site in release.yml for the exact set.
+
+  `surreal` is the Surreal CLI launcher's formula, bumped by the launcher's own
+  release (surrealdb/cli); this action never touches it. It runs
+  `release.sh db <version>`, which writes only Formula/surreal-db.rb, and
+  refuses a tap that cannot: one without templates/surreal-db.rb.tmpl, whose
+  older release.sh writes the database into Formula/surreal.rb, or a run that
+  changes any other file.
 
 outputs:
   pr-url:
@@ -26,21 +33,40 @@ runs:
         # directory via TAP_DIR (a `uses:` step cannot set working-directory).
         cd "${TAP_DIR}"
 
-        # The tap owns the formula generation; regenerate without committing,
-        # pinning the exact released version rather than the "latest" pointer.
-        SKIP_GIT=1 bash release.sh "${VERSION}"
+        # The database's formula is `surreal-db`; `surreal` is the launcher's.
+        # A tap without the `surreal-db` template still has the older
+        # release.sh, which writes the database into Formula/surreal.rb and
+        # would read `db` below as a version. Stop rather than bump the wrong
+        # formula, on a dry-run too, so a rehearsal shows the problem.
+        if [[ ! -f templates/surreal-db.rb.tmpl ]]; then
+          echo "::error title=Update Homebrew tap::the tap has no surreal-db formula template (templates/surreal-db.rb.tmpl); merge the tap change that adds surreal-db before releasing, then bump it with: release.sh db ${VERSION}"
+          exit 1
+        fi
 
-        if [[ -z "$(git status --porcelain)" ]]; then
+        # The tap owns the formula generation; regenerate without committing,
+        # pinning the exact released database version rather than the "latest"
+        # pointer.
+        SKIP_GIT=1 bash release.sh db "${VERSION}"
+
+        # Only the database's formula may change: never the launcher's
+        # `surreal`, or anything else in the tap.
+        changed="$(git status --porcelain --untracked-files=all | awk '{print $NF}')"
+        if [[ -z "${changed}" ]]; then
           echo "Homebrew formula already up to date for ${VERSION}."
           exit 0
         fi
+        if [[ "${changed}" != "Formula/surreal-db.rb" ]]; then
+          echo "::error title=Update Homebrew tap::release.sh db ${VERSION} changed more than Formula/surreal-db.rb:"
+          echo "${changed}"
+          exit 1
+        fi
 
-        branch="auto/upgrade-${VERSION}"
+        branch="auto/upgrade-surreal-db-${VERSION}"
         git config user.name "surrealdb-release-bot"
         git config user.email "release-bot@surrealdb.com"
         git checkout -B "${branch}"
         git add --all
-        git commit -m "Upgrade to ${VERSION}"
+        git commit -m "Upgrade surreal-db to ${VERSION}"
 
         # Dry-run: the formula is regenerated and committed to a LOCAL branch in
         # this throwaway checkout (safe), but the branch is never pushed and no PR
@@ -50,7 +76,7 @@ runs:
           echo "::group::[dry-run] Homebrew formula change for ${VERSION}"
           git --no-pager show --stat --patch HEAD
           echo "::endgroup::"
-          echo "[dry-run] would push branch '${branch}' to the tap, open/update the \"Upgrade to ${VERSION}\" PR, and squash-merge it."
+          echo "[dry-run] would push branch '${branch}' to the tap, open/update the \"Upgrade surreal-db to ${VERSION}\" PR, and squash-merge it."
           exit 0
         fi
 
@@ -63,8 +89,8 @@ runs:
           pr_url="$(gh pr create \
             --base main \
             --head "${branch}" \
-            --title "Upgrade to ${VERSION}" \
-            --body "Auto-generated on promotion of SurrealDB ${VERSION}. Bumps the \`surreal\` formula to ${VERSION}. Merged automatically on release - nothing to review.")"
+            --title "Upgrade surreal-db to ${VERSION}" \
+            --body "Auto-generated on promotion of SurrealDB ${VERSION}. Bumps the \`surreal-db\` formula (the database alone) to ${VERSION}. Merged automatically on release - nothing to review.")"
         fi
 
         # Homebrew formula bumps are mechanical with nothing to review, so land

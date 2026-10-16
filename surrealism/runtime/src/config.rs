@@ -131,7 +131,7 @@ pub struct SurrealismConfig {
 	pub abi: AbiVersion,
 	#[serde(default)]
 	pub attach: SurrealismAttach,
-	/// Who may sign the package's archives. `surreal extension sign` refuses
+	/// Who may sign the package's archives. `surreal ext sign` refuses
 	/// to sign as anyone else.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub signer: Option<PackageSigner>,

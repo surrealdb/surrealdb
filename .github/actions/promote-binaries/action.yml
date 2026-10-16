@@ -1,6 +1,26 @@
 name: 'Promote binaries'
 description: 'Promote prebuilt rolling binaries from S3 to a release name (copy + rename), set pointers, and optionally create a GitHub release'
 
+# THE LAYOUT THIS ACTION PUBLISHES IS AN INTERFACE. The `surreal` launcher
+# (surrealdb/surrealdb-cli, the Surreal CLI) installs the database from
+# download.surrealdb.com by reading exactly what is written below, and it shares
+# no code with this repository. Every installed launcher depends on:
+#
+#   - the pointers at the bucket root: latest.txt, v<major>.txt (v1, v2, v3, ...)
+#     and one per prerelease channel (alpha, beta, nightly), each holding
+#     `v<version>`;
+#   - <name>/surreal-<name>.<platform>.tgz holding one executable member named
+#     `surreal`, with surreal-<name>.<platform>.txt (the SHA-256 in hex) beside
+#     it, and for Windows the .exe itself with its .txt;
+#   - `surreal --version` exiting 0 with SURREAL_ONLINE_VERSION_CHECK=false,
+#     touching no network or data.
+#
+# So pointers, archive formats and platforms get ADDED, never moved, renamed or
+# removed. The "Check the release layout" step refuses a promotion that breaks
+# any of it, on a dry-run too; its script (.github/scripts/check-release-layout.sh)
+# is exercised by .github/scripts/test-check-release-layout.sh in CI. Changing
+# the layout on purpose means changing the launcher first.
+
 inputs:
   name:
     description: 'Release name (e.g., nightly or v3.1.2)'
@@ -139,35 +159,6 @@ runs:
         echo "---- release-manifest.json ----"; cat release-manifest.json
         echo "---- release-body.md ----"; cat release-body.md
 
-    # Persist the release-scoped manifest to the PRIVATE CI bucket (not the
-    # public download bucket): it's an internal rebuild/audit record, not
-    # something download clients fetch, and it names the downstream branch/sha.
-    # Written here, before `Configure AWS`, so it uses the private runner's
-    # ambient IAM role (the private bucket lives in that account); the static
-    # keys configured below are for the public download bucket only. Unlike the
-    # rolling manifest, this lives under releases/<name>/ and is never pruned, so
-    # the engine + downstream commits a release shipped from stay recoverable.
-    - name: Publish release manifest (private bucket)
-      if: ${{ inputs.publish == 'true' }}
-      shell: bash
-      env:
-        ROLLING_BUCKET: ${{ inputs.rolling-bucket }}
-        NAME: ${{ inputs.name }}
-        AWS_REGION: us-east-1
-      run: |
-        set -euo pipefail
-        aws s3 cp --cache-control 'no-store' release-manifest.json "s3://${ROLLING_BUCKET}/releases/${NAME}/release.json"
-
-    # Static keys for the PUBLIC download bucket writes below. Runs after the
-    # ambient rolling download + private manifest write so it doesn't shadow
-    # those creds.
-    - name: Configure AWS
-      uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
-      with:
-        aws-region: us-east-2
-        aws-access-key-id: ${{ inputs.aws-access-key-id }}
-        aws-secret-access-key: ${{ inputs.aws-secret-access-key }}
-
     # Copy + rename surreal-<source-name>.* -> surreal-<name>.*. The binary
     # contents (including the baked version) are unchanged; only the filename
     # changes to the release name that download clients expect.
@@ -194,6 +185,76 @@ runs:
         fi
         ls -l publish
 
+    # The pointers this promotion will write, staged as files so the layout check
+    # below sees exactly what the upload steps send (and a dry-run, which uploads
+    # nothing, still checks them). The upload steps copy these files; they do not
+    # compute names or contents of their own.
+    - name: Stage pointers
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        PRE_RELEASE: ${{ inputs.pre-release }}
+        RELEASE_NAME: ${{ inputs.release-name }}
+        CREATE_RELEASE: ${{ inputs.create-release }}
+        LATEST: ${{ inputs.latest }}
+      run: |
+        set -euo pipefail
+        mkdir -p pointers
+        if [[ "${CREATE_RELEASE}" == "true" && "${LATEST}" == "true" ]]; then
+          echo "v${VERSION}" > pointers/latest.txt
+        fi
+        if [[ "${PRE_RELEASE}" == "true" ]]; then
+          echo "v${VERSION}" > "pointers/${RELEASE_NAME}.txt"
+        else
+          echo "v${VERSION}" > "pointers/v${VERSION%%.*}.txt"
+        fi
+
+    # Refuses a promotion that would break the layout the `surreal` launcher
+    # reads (see the note at the top of this file). Runs on dry-runs too: it
+    # checks what is staged, not what is published.
+    - name: Check the release layout
+      shell: bash
+      env:
+        NAME: ${{ inputs.name }}
+        VERSION: ${{ inputs.version }}
+        PRE_RELEASE: ${{ inputs.pre-release }}
+        RELEASE_NAME: ${{ inputs.release-name }}
+      run: |
+        set -euo pipefail
+        "${GITHUB_ACTION_PATH}/../../scripts/check-release-layout.sh" \
+          publish pointers "${NAME}" "${VERSION}" "${PRE_RELEASE}" "${RELEASE_NAME}"
+
+    # Persist the release-scoped manifest to the PRIVATE CI bucket (not the
+    # public download bucket): it's an internal rebuild/audit record, not
+    # something download clients fetch, and it names the downstream branch/sha.
+    # Written only once the layout check has passed, so a refused promotion
+    # leaves no record of a release that never happened, and before
+    # `Configure AWS`, so it uses the private runner's
+    # ambient IAM role (the private bucket lives in that account); the static
+    # keys configured below are for the public download bucket only. Unlike the
+    # rolling manifest, this lives under releases/<name>/ and is never pruned, so
+    # the engine + downstream commits a release shipped from stay recoverable.
+    - name: Publish release manifest (private bucket)
+      if: ${{ inputs.publish == 'true' }}
+      shell: bash
+      env:
+        ROLLING_BUCKET: ${{ inputs.rolling-bucket }}
+        NAME: ${{ inputs.name }}
+        AWS_REGION: us-east-1
+      run: |
+        set -euo pipefail
+        aws s3 cp --cache-control 'no-store' release-manifest.json "s3://${ROLLING_BUCKET}/releases/${NAME}/release.json"
+
+    # Static keys for the PUBLIC download bucket writes below. Runs after the
+    # ambient rolling download + private manifest write so it doesn't shadow
+    # those creds.
+    - name: Configure AWS
+      uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+      with:
+        aws-region: us-east-2
+        aws-access-key-id: ${{ inputs.aws-access-key-id }}
+        aws-secret-access-key: ${{ inputs.aws-secret-access-key }}
+
     - name: Create GitHub release
       uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
       if: ${{ inputs.publish == 'true' && inputs.create-release == 'true' }}
@@ -215,8 +276,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        echo "v${{ inputs.version }}" > latest.txt
-        aws s3 cp --cache-control 'no-store' latest.txt s3://download.surrealdb.com/latest.txt
+        aws s3 cp --cache-control 'no-store' pointers/latest.txt s3://download.surrealdb.com/latest.txt
 
     - name: Set stable major-version pointer (e.g. v3.txt)
       if: ${{ inputs.publish == 'true' && inputs.pre-release != 'true' }}
@@ -237,16 +297,16 @@ runs:
           echo "Keeping v${major}.txt at v${current}: released v${version} is older."
           exit 0
         fi
-        echo "v${version}" > "v${major}.txt"
-        aws s3 cp --cache-control 'no-store' "v${major}.txt" "s3://download.surrealdb.com/v${major}.txt"
+        aws s3 cp --cache-control 'no-store' "pointers/v${major}.txt" "s3://download.surrealdb.com/v${major}.txt"
 
     - name: Set latest alpha or beta version
       if: ${{ inputs.publish == 'true' && inputs.pre-release == 'true' }}
       shell: bash
+      env:
+        RELEASE_NAME: ${{ inputs.release-name }}
       run: |
         set -euo pipefail
-        echo "v${{ inputs.version }}" > ${{ inputs.release-name }}.txt
-        aws s3 cp --cache-control 'no-store' ${{ inputs.release-name }}.txt s3://download.surrealdb.com/${{ inputs.release-name }}.txt
+        aws s3 cp --cache-control 'no-store' "pointers/${RELEASE_NAME}.txt" "s3://download.surrealdb.com/${RELEASE_NAME}.txt"
 
     - name: Publish binaries to the release name
       if: ${{ inputs.publish == 'true' }}

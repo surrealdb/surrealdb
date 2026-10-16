@@ -92,7 +92,7 @@ pub(crate) fn handle_function(
 	if is_init && parts.tx.is_some() {
 		return syn::Error::new_spanned(
 			&input_fn.sig,
-			"#[surrealism(init)] cannot take a `Transaction`: `surreal extension build` runs it \
+			"#[surrealism(init)] cannot take a `Transaction`: `surreal ext build` runs it \
 			 once and ships the memory it leaves, so no datastore exists while it runs.",
 		)
 		.to_compile_error()
