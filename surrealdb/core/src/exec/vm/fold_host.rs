@@ -424,7 +424,7 @@ fn is_value_class(error: &crate::expr::Error) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::exec::vm) mod tests {
 	use std::sync::Arc;
 
 	use super::*;
@@ -435,7 +435,7 @@ mod tests {
 	use crate::exec::{AccessMode, ContextLevel};
 
 	/// A program of one pipeline over `code`, with `registers` registers.
-	fn program_with(
+	pub(in crate::exec::vm) fn program_with(
 		consts: Vec<Value>,
 		calls: Vec<CallSpec>,
 		code: Vec<Instr>,
@@ -454,6 +454,7 @@ mod tests {
 				parallel: Default::default(),
 				group: None,
 				deref_windows: false,
+				frontier_rows: None,
 				read_ahead: false,
 				rows_ahead: None,
 			}],

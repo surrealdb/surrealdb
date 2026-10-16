@@ -4910,6 +4910,11 @@ pub(crate) struct LookupSpec {
 	/// together, that the lookup answers. The last hop reads no more of an
 	/// adjacency than the page needs.
 	pub(super) page: Option<LookupPage>,
+	/// Whether the lookup reads the sources of a hop in windows: the sources of an array of
+	/// origins and of the hops after the first, as the physical plan decided. The plan states it
+	/// for a lookup whose every hop reads a whole adjacency or a whole set of references over
+	/// constant key bounds, with no `WHERE` and no page, in a pipeline that admits windows.
+	pub(super) window: bool,
 }
 
 /// `START` and `LIMIT` of a lookup's last hop, written as integers.
@@ -5433,8 +5438,26 @@ pub(crate) struct RowsAheadSpec {
 	pub(crate) paging: Option<u16>,
 }
 
+/// The lookups of a pipeline's projection that start from the source row, whose first hop the
+/// host reads for a batch of source rows before the rows run, as the physical plan decided.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FrontierRowsSpec {
+	/// The paths of lookups of [`Program::lookups`] the pipeline's code runs over the row itself:
+	/// each path is a lookup that starts from the row and the lookups that read each the answer of
+	/// the one before it, in the order the code runs them. Every hop of a path is one the plan
+	/// says a window can serve. The first hop of each is read for the batch; a lookup of several
+	/// hops ends what is read of its path, since the lookup after it starts from the answer of
+	/// its last hop.
+	pub(crate) chains: Box<[Box<[u32]>]>,
+	/// The paging slot ([`Program::limits`], and the index of `State::paging`) of the clause that
+	/// stands before the lookups: the rows it skips and the rows past its page are not keyed.
+	/// `None` where no clause pages the rows first.
+	pub(crate) paging: Option<u16>,
+}
+
 assert_plain!(FetchPlan);
 assert_plain!(RowsAheadSpec);
+assert_plain!(FrontierRowsSpec);
 
 /// The value that names what a count counts.
 #[derive(Debug, Clone, PartialEq)]
@@ -6058,6 +6081,9 @@ pub(crate) struct Pipeline {
 	/// Whether the pipeline's `.*` and field-over-array dereferences read their links in windows,
 	/// as the physical plan decided.
 	pub(super) deref_windows: bool,
+	/// The lookups of the pipeline's projection whose first hop is read for a batch of source rows
+	/// before the rows run, as the physical plan decided.
+	pub(super) frontier_rows: Option<FrontierRowsSpec>,
 	/// Whether the pipeline's scan reads its next chunk on a task of its own while the body runs
 	/// the current one, as the physical plan decided. Read only by the scans whose body runs in
 	/// the storage cursor.

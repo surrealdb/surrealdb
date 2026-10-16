@@ -94,6 +94,9 @@ pub(crate) mod request;
 mod tests_body_scope;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
+mod tests_frontier;
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_late_layers;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]

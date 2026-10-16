@@ -41,12 +41,12 @@
 use smallvec::SmallVec;
 use surrealdb_strand::Strand;
 
-use super::nested;
 use super::ops::{PhysOp, ProjectionShape};
 use super::pipeline::{enclosing_statement, streams};
 #[cfg(test)]
 use super::placement_attr::PlacementAttr;
 use super::placement_attr::{PipelineIo, RowsAhead};
+use super::{frontier, nested};
 use crate::catalog::Permission;
 use crate::exec::ir::analysis::effects;
 use crate::exec::ir::core::facts::FactCache;
@@ -201,11 +201,13 @@ fn io_of(
 	}
 	let mut io = PipelineIo {
 		deref_windows: true,
+		frontier_hops: frontier::served_hops(ir, cx, pipeline),
 		..PipelineIo::default()
 	};
 	let Some(rows) = rows_of(ir, pipeline) else {
 		return io;
 	};
+	io.frontier_rows = frontier::rows(ir, cx, pipeline, &rows);
 	let mut fetches =
 		rows.passes.iter().copied().filter(|op| matches!(kind_of(ir, *op), Some(PhysOp::Fetch)));
 	let Some(first) = fetches.next() else {
@@ -430,7 +432,7 @@ fn reads_current(ir: &Ir, op: OpId) -> bool {
 		.is_some_and(|data| matches!(ir.snapshot(data.snapshot), Some(Snapshot::Current) | None))
 }
 
-fn kind_of(ir: &Ir, op: OpId) -> Option<&PhysOp> {
+pub(super) fn kind_of(ir: &Ir, op: OpId) -> Option<&PhysOp> {
 	match &ir.op(op)?.kind {
 		OpKind::Phys(kind) => Some(kind),
 		OpKind::Expr(_) | OpKind::Logical(_) => None,
@@ -438,20 +440,20 @@ fn kind_of(ir: &Ir, op: OpId) -> Option<&PhysOp> {
 }
 
 /// The ops a pipeline's body runs for each row the source yields, and the source.
-struct Rows {
+pub(super) struct Rows {
 	/// The op the rows come from.
-	source: OpId,
+	pub(super) source: OpId,
 	/// The pipeline itself and every pipeline it continues: each runs some of the ops in
 	/// [`Self::passes`].
 	pipelines: SmallVec<[OpId; 2]>,
 	/// The ops between the source and the end of the pipeline's body, in the order the rows meet
 	/// them: the pipelines it continues first, then the streaming ops between them, the body of
 	/// each select loop and the ops that follow the loop.
-	passes: Ops,
+	pub(super) passes: Ops,
 }
 
 /// The ops of a pipeline's body, held inline for the bodies of the usual size.
-type Ops = SmallVec<[OpId; 16]>;
+pub(super) type Ops = SmallVec<[OpId; 16]>;
 
 /// The rows of the pipeline `pipeline`, or `None` for a pipeline whose region is not one of the
 /// shapes lowering reads.
@@ -685,6 +687,7 @@ mod tests {
 	use super::*;
 	use crate::dbs::Session;
 	use crate::exec::ir::phys::pipeline::PipelineDag;
+	use crate::exec::ir::phys::placement_attr::FrontierRows;
 	use crate::exec::ir::tests_plan_request::{
 		planned_as_unit, planned_request, planned_request_as, planned_unit,
 	};
@@ -833,6 +836,7 @@ mod tests {
 			let caps = IoCaps {
 				untracked_reads,
 				scan_read_ahead,
+				..IoCaps::default()
 			};
 			assert_eq!(offers_read_ahead(caps), untracked_reads && scan_read_ahead, "{caps:?}");
 		}
@@ -890,6 +894,293 @@ mod tests {
 	async fn a_datastore_that_tracks_plain_reads_gets_no_window() {
 		let found = ios(SETUP, "SELECT * FROM holder FETCH refs", Some(false)).await;
 		assert_eq!(found, vec![PipelineIo::default()]);
+	}
+
+	/// Whether each pipeline `sql` plans to reads the sources of a hop in windows, with the
+	/// datastore's offer pinned to `offered` and the untracked reads to `untracked`.
+	async fn hop_windows(
+		sql: &str,
+		offered: Option<bool>,
+		untracked: Option<bool>,
+		unit: bool,
+	) -> Vec<bool> {
+		super::frontier::FORCE_FRONTIER_HOPS.with(|pinned| pinned.set(offered));
+		FORCE_LINK_WINDOWS.with(|pinned| pinned.set(untracked));
+		let setup = "DEFINE TABLE person SCHEMALESS; DEFINE TABLE knows TYPE RELATION;";
+		let planned = match unit {
+			true => planned_unit(setup, sql).await,
+			false => planned_request(setup, sql).await,
+		};
+		super::frontier::FORCE_FRONTIER_HOPS.with(|pinned| pinned.set(None));
+		FORCE_LINK_WINDOWS.with(|pinned| pinned.set(None));
+		PipelineDag::of(&planned.ir)
+			.nodes
+			.iter()
+			.map(|(_, pipeline)| {
+				planned.ir.placement(*pipeline).expect("a placed pipeline").io().frontier_hops
+					!= Default::default()
+			})
+			.collect()
+	}
+
+	#[tokio::test]
+	async fn a_datastore_that_batches_reads_gets_the_hop_windows() {
+		for sql in
+			["SELECT ->knows->person AS f FROM person", "SELECT <-knows<-person AS f FROM person"]
+		{
+			let found = hop_windows(sql, Some(true), Some(true), false).await;
+			assert!(found.iter().any(|window| *window), "{sql}: {found:?}");
+		}
+	}
+
+	/// A hop in a branch, a short-circuit operand or an optional chain is lowered into the
+	/// pipeline's own code, so the pipeline's windows serve it.
+	#[tokio::test]
+	async fn a_hop_under_a_conditional_expression_gets_the_hop_windows() {
+		for sql in [
+			"SELECT IF active THEN ->knows->person->knows->person ELSE [] END AS f FROM person",
+			"SELECT active AND ->knows->person AS f FROM person",
+			"SELECT active ?? ->knows->person AS f FROM person",
+		] {
+			let found = hop_windows(sql, Some(true), Some(true), false).await;
+			assert!(found.iter().any(|window| *window), "{sql}: {found:?}");
+		}
+	}
+
+	#[tokio::test]
+	async fn a_datastore_that_does_not_batch_reads_gets_no_hop_window() {
+		for offered in [Some(false), None] {
+			let found =
+				hop_windows("SELECT ->knows->person FROM person", offered, Some(true), false).await;
+			assert!(found.iter().all(|window| !*window), "{offered:?}: {found:?}");
+		}
+	}
+
+	#[tokio::test]
+	async fn a_datastore_that_tracks_plain_reads_gets_no_hop_window() {
+		let found =
+			hop_windows("SELECT ->knows->person FROM person", Some(true), Some(false), false).await;
+		assert!(found.iter().all(|window| !*window), "{found:?}");
+	}
+
+	#[tokio::test]
+	async fn a_unit_that_runs_in_a_callers_frame_gets_no_hop_window() {
+		let found =
+			hop_windows("SELECT ->knows->person FROM person", Some(true), Some(true), true).await;
+		assert!(found.iter().all(|window| !*window), "{found:?}");
+	}
+
+	#[tokio::test]
+	async fn a_versioned_read_gets_no_hop_window() {
+		let found = hop_windows(
+			"SELECT ->knows->person FROM person VERSION d'2030-01-01T00:00:00Z'",
+			Some(true),
+			Some(true),
+			false,
+		)
+		.await;
+		assert!(found.iter().all(|window| !*window), "{found:?}");
+	}
+
+	/// The rows window each pipeline `sql` plans to states, with the rows window and the link
+	/// windows pinned on; `unit` plans `sql` as a unit rather than as a request.
+	async fn row_windows(sql: &str, unit: bool) -> Vec<Option<FrontierRows>> {
+		super::frontier::FORCE_FRONTIER_ROWS.with(|pinned| pinned.set(Some(true)));
+		FORCE_LINK_WINDOWS.with(|pinned| pinned.set(Some(true)));
+		let setup = "DEFINE TABLE person SCHEMALESS; DEFINE TABLE knows TYPE RELATION;
+			DEFINE TABLE lite TYPE RELATION IN person OUT person LIGHTWEIGHT;";
+		let planned = match unit {
+			true => planned_unit(setup, sql).await,
+			false => planned_request(setup, sql).await,
+		};
+		super::frontier::FORCE_FRONTIER_ROWS.with(|pinned| pinned.set(None));
+		FORCE_LINK_WINDOWS.with(|pinned| pinned.set(None));
+		PipelineDag::of(&planned.ir)
+			.nodes
+			.iter()
+			.map(|(_, pipeline)| {
+				planned
+					.ir
+					.placement(*pipeline)
+					.expect("a placed pipeline")
+					.io()
+					.frontier_rows
+					.clone()
+			})
+			.collect()
+	}
+
+	/// The paging clause of each rows window the pipelines state, in pipeline order.
+	fn named(found: &[Option<FrontierRows>]) -> Vec<Option<usize>> {
+		found.iter().flatten().map(|rows| rows.paging).collect()
+	}
+
+	#[tokio::test]
+	async fn the_lookups_of_a_projection_over_a_scan_read_a_window_of_their_rows() {
+		for sql in [
+			"SELECT ->knows->person AS f FROM person",
+			"SELECT <-knows AS e, ->knows AS g FROM person",
+			"SELECT *, ->knows->person AS f FROM person",
+			"SELECT VALUE ->knows->person FROM person:1..=60",
+			"SELECT <~knows AS e FROM person",
+		] {
+			let found = row_windows(sql, false).await;
+			assert_eq!(named(&found), vec![None], "{sql}: {found:?}");
+		}
+	}
+
+	#[tokio::test]
+	async fn a_paging_clause_before_the_lookups_bounds_the_rows_that_reach_them() {
+		for sql in [
+			"SELECT ->knows->person AS f FROM person LIMIT 7",
+			"SELECT ->knows->person AS f FROM person LIMIT 7 START 2",
+		] {
+			let found = row_windows(sql, false).await;
+			assert_eq!(named(&found), vec![Some(0)], "{sql}: {found:?}");
+		}
+	}
+
+	/// The length of each chain of lookups each projection of the statements `sql` plans to runs
+	/// over its row.
+	async fn chain_lengths(sql: &str) -> Vec<usize> {
+		let setup = "DEFINE TABLE person SCHEMALESS; DEFINE TABLE knows TYPE RELATION;";
+		let planned = planned_request(setup, sql).await;
+		let ir = &planned.ir;
+		let mut lengths = Vec::new();
+		let mut ops = vec![ir.top()];
+		while let Some(region) = ops.pop() {
+			for op in crate::exec::ir::core::walk::ops_in(ir, region) {
+				let data = ir.op(op).expect("an op");
+				ops.extend(data.regions.iter().copied());
+				lengths.extend(frontier::row_chains(ir, op).iter().map(Vec::len));
+			}
+		}
+		lengths.sort_unstable();
+		lengths
+	}
+
+	#[tokio::test]
+	async fn the_lookups_of_a_projection_chain_by_the_values_they_answer() {
+		for (sql, lengths) in [
+			("SELECT ->knows AS e FROM person", vec![1]),
+			("SELECT ->knows->person AS f FROM person", vec![2]),
+			("SELECT ->knows->person->knows->person AS f FROM person", vec![4]),
+			("SELECT ->knows AS e, <-knows AS g FROM person", vec![1, 1]),
+			("SELECT ->knows->person AS f, <-knows<-person AS g FROM person", vec![2, 2]),
+			// A filter of a path is a step of its own: the hops after it start from its answer.
+			("SELECT ->knows->person[WHERE n > 1]->knows AS f FROM person", vec![2]),
+			// A key range of arrays and a lookup that does not
+			// start from the row are not in a chain.
+			("SELECT ->knows[WHERE true]->person AS f FROM person", vec![1]),
+			("SELECT ->knows:[1]..[5] AS e FROM person", vec![]),
+			("SELECT person:3->knows->person AS f FROM person", vec![]),
+			// A lookup under a branch does not run on every row.
+			("SELECT IF n > 20 { ->knows->person } ELSE { [] } AS f FROM person", vec![]),
+		] {
+			assert_eq!(chain_lengths(sql).await, lengths, "{sql}");
+		}
+	}
+
+	#[tokio::test]
+	async fn a_copied_unit_keeps_its_windows_on_the_ops_of_its_own_container() {
+		super::frontier::FORCE_FRONTIER_HOPS.with(|pinned| pinned.set(Some(true)));
+		super::frontier::FORCE_FRONTIER_ROWS.with(|pinned| pinned.set(Some(true)));
+		FORCE_LINK_WINDOWS.with(|pinned| pinned.set(Some(true)));
+		let setup = "DEFINE TABLE person SCHEMALESS; DEFINE TABLE knows TYPE RELATION;";
+		let planned =
+			planned_request(setup, "SELECT ->knows->person->knows AS f FROM person").await;
+		super::frontier::FORCE_FRONTIER_HOPS.with(|pinned| pinned.set(None));
+		super::frontier::FORCE_FRONTIER_ROWS.with(|pinned| pinned.set(None));
+		FORCE_LINK_WINDOWS.with(|pinned| pinned.set(None));
+		let ir = &planned.ir;
+		let is_hop = |ir: &Ir, op: OpId| {
+			matches!(
+				kind_of(ir, op),
+				Some(PhysOp::Loop {
+					kind: LoopKind::GraphStep,
+					..
+				})
+			)
+		};
+		let mut copied = 0;
+		for (_, pipeline) in PipelineDag::of(ir).nodes.iter() {
+			let io = ir.placement(*pipeline).expect("a placed pipeline").io();
+			let Some(rows) = &io.frontier_rows else {
+				continue;
+			};
+			assert!(rows.chains.iter().flatten().all(|hop| is_hop(ir, *hop)));
+			// The unit is the region the pipeline stands in, or the nearest one that copies.
+			let Some(unit) = crate::exec::ir::core::walk::ancestors(ir, *pipeline)
+				.find_map(|(region, _)| ir.copy_region(region).ok())
+			else {
+				continue;
+			};
+			let at = unit.map.map_op(*pipeline).expect("the pipeline is copied");
+			let carried = unit.ir.placement(at).expect("the placement is carried").io();
+			let rows_of_copy = carried.frontier_rows.as_ref().expect("the rows window is carried");
+			let expected: Vec<Vec<OpId>> = rows
+				.chains
+				.iter()
+				.map(|chain| chain.iter().filter_map(|hop| unit.map.map_op(*hop)).collect())
+				.collect();
+			assert_eq!(rows_of_copy.chains, expected);
+			assert!(
+				rows_of_copy.chains.iter().flatten().all(|hop| is_hop(&unit.ir, *hop)),
+				"the chains name ops of the copy"
+			);
+			assert!(
+				rows_of_copy.chains.iter().flatten().all(|hop| carried.frontier_hops.serves(*hop))
+			);
+			copied += 1;
+		}
+		assert!(copied > 0, "a pipeline with a rows window was copied");
+	}
+
+	#[tokio::test]
+	async fn a_hop_over_constant_key_bounds_serves_a_window() {
+		assert_eq!(chain_lengths("SELECT ->knows:1..5 AS e FROM person").await, vec![1]);
+	}
+
+	#[tokio::test]
+	async fn rows_that_may_not_reach_a_lookup_read_no_window() {
+		for sql in [
+			"SELECT ->knows->person AS f FROM person WHERE n > 20",
+			"SELECT IF n > 20 { ->knows->person } ELSE { [] } AS f FROM person",
+			"SELECT person:3->knows->person AS f FROM person",
+			"SELECT n FROM person",
+			"SELECT ->knows->person AS f FROM person ORDER BY n DESC",
+			"SELECT ->knows->person AS f FROM person GROUP BY f",
+			"SELECT ->knows->person AS f FROM person VERSION d'2030-01-01T00:00:00Z'",
+			"SELECT ->knows->person AS f FROM lite",
+		] {
+			let found = row_windows(sql, false).await;
+			assert!(found.iter().all(Option::is_none), "{sql}: {found:?}");
+		}
+	}
+
+	#[tokio::test]
+	async fn a_statement_that_writes_or_a_unit_in_a_callers_frame_reads_no_rows_window() {
+		let found = row_windows(
+			"SELECT (UPDATE person:1 SET seen = true) AS w, ->knows->person AS f FROM person",
+			false,
+		)
+		.await;
+		assert!(found.iter().all(Option::is_none), "{found:?}");
+		let found = row_windows("SELECT ->knows->person AS f FROM person", true).await;
+		assert!(found.iter().all(Option::is_none), "{found:?}");
+	}
+
+	#[tokio::test]
+	async fn a_datastore_that_does_not_batch_reads_gets_no_rows_window() {
+		let planned = planned_request(SETUP, "SELECT ->knows->person AS f FROM person").await;
+		let found: Vec<_> = PipelineDag::of(&planned.ir)
+			.nodes
+			.iter()
+			.map(|(_, pipeline)| {
+				planned.ir.placement(*pipeline).unwrap().io().frontier_rows.clone()
+			})
+			.collect();
+		assert!(found.iter().all(Option::is_none), "{found:?}");
 	}
 
 	#[tokio::test]

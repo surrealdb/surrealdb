@@ -125,9 +125,9 @@ use surrealdb_strand::TableName;
 
 use super::super::payload::Spill;
 use super::super::program::{
-	AggregateSink, DeferredVector, Enforce, GroupSpec, HostScalar, Instr, JoinSpec, KeyOrder,
-	KnnQuery, KnnRank, KnnVector, Label, LimitSpec, Operand, Pipeline, Program, ROW, Reg,
-	RowsAheadSpec, SortSpec, Source, SplitKind, SplitSpec, TailSpec,
+	AggregateSink, DeferredVector, Enforce, FrontierRowsSpec, GroupSpec, HostScalar, Instr,
+	JoinSpec, KeyOrder, KnnQuery, KnnRank, KnnVector, Label, LimitSpec, Operand, Pipeline, Program,
+	ROW, Reg, RowsAheadSpec, SortSpec, Source, SplitKind, SplitSpec, TailSpec,
 };
 use super::closure::wrapped_value_loop;
 use super::dispatch::{apply_needs, check_claims, lowers_where_read, phys_refusal};
@@ -2365,6 +2365,7 @@ fn emit_pipeline(
 		rows_ahead: None,
 	};
 	body.needs = body.reads.needs.clone();
+	body.em.set_frontier_hops(body.io.frontier_hops.clone());
 	body.end = body.em.label()?;
 	body.halt = body.em.label()?;
 
@@ -2450,6 +2451,8 @@ fn emit_pipeline(
 
 	let mut pipeline = finish(em, source, enforce, pipeline_limits, parallel)?;
 	pipeline.deref_windows = io.deref_windows;
+	pipeline.frontier_rows = frontier_rows_of(&pipeline, &io, em)?;
+	em.end_hops();
 	// Only a scan that runs its body in the storage cursor reads through a chunk source, and a
 	// pipeline whose limits a reader spends may end before its first chunk.
 	pipeline.read_ahead = io.scan_read_ahead && pipeline.in_place && pipeline.limits.is_empty();
@@ -3322,6 +3325,58 @@ fn finish(
 	pipeline.limits = limits;
 	pipeline.parallel = parallel;
 	Ok(pipeline)
+}
+
+/// The rows window the plan states for `pipeline`, over the lookups its code runs.
+///
+/// The plan states the chains of hops the projection runs over the row, each by the graph-step
+/// ops that state them, and which paging clause stands before them; this names the lookup the
+/// emitted code holds for each hop. Hops the lowering joined into one lookup have the one lookup,
+/// which ends at the last of them and covers as many of the chain's hops as it has. A chain ends
+/// where no lookup the pipeline emitted covers exactly the next hops. It answers `None` where no
+/// chain holds a lookup.
+fn frontier_rows_of(
+	pipeline: &Pipeline,
+	io: &PipelineIo,
+	em: &Emitter,
+) -> Result<Option<FrontierRowsSpec>, IrError> {
+	let Some(rows) = &io.frontier_rows else {
+		return Ok(None);
+	};
+	let paging = match rows.paging {
+		None => None,
+		Some(place) => Some(pipeline.limits.get(place).copied().ok_or_else(|| {
+			invariant("the paging clause a lookup window reads ahead of is not lowered")
+		})?),
+	};
+	let mut chains: Vec<Box<[u32]>> = Vec::new();
+	for stated in &rows.chains {
+		let mut chain: Vec<u32> = Vec::new();
+		let mut next = 0;
+		while next < stated.len() {
+			// The lookup that ends at one of the hops from `next` on and covers all of them up to
+			// it.
+			let covering = (next..stated.len()).find_map(|at| {
+				let answer = em.hop_lookup(stated[at])?;
+				(answer.hops == at - next + 1).then_some((at, answer))
+			});
+			let Some((at, answer)) = covering else {
+				break;
+			};
+			if !em.emitted_lookup(answer.lookup) {
+				break;
+			}
+			chain.push(answer.lookup);
+			next = at + 1;
+		}
+		if !chain.is_empty() {
+			chains.push(chain.into_boxed_slice());
+		}
+	}
+	Ok((!chains.is_empty()).then(|| FrontierRowsSpec {
+		chains: chains.into_boxed_slice(),
+		paging,
+	}))
 }
 
 /// The tag of the physical op `op`.
@@ -6484,5 +6539,81 @@ pub(super) mod tests {
 		sorts.sort_unstable();
 		assert_eq!(sorts, vec![0, 1]);
 		assert_eq!(program.sorts.len(), 2);
+	}
+
+	/// The ops a plan names its hops by, made of a slot map the way a container makes its own.
+	fn hop_ops(count: usize) -> Vec<OpId> {
+		let mut ops: slotmap::SlotMap<OpId, ()> = slotmap::SlotMap::with_key();
+		(0..count).map(|_| ops.insert(())).collect()
+	}
+
+	/// Appends a lookup that ends at `hops[ends]` and covers `covered` hops, with no hop of its
+	/// own, since the translation reads none.
+	fn emitted(em: &mut Emitter, hops: &[OpId], ends: usize, covered: usize) -> u32 {
+		let lookup = em
+			.lookup(crate::exec::vm::program::LookupSpec {
+				hops: Vec::new(),
+				extract_id: false,
+				only: false,
+				only_path: false,
+				checked: true,
+				page: None,
+				window: false,
+			})
+			.expect("a lookup is appended");
+		em.note_hop_lookup(
+			hops[ends],
+			crate::exec::vm::ir_lower::emit::HopLookup {
+				lookup,
+				hops: covered,
+			},
+		);
+		lookup
+	}
+
+	/// The chains the translation names for the plan's `chains`, over the lookups `em` emitted.
+	fn translated(em: &mut Emitter, chains: Vec<Vec<OpId>>) -> Option<Vec<Vec<u32>>> {
+		let pipeline = em.finish_pipeline(Source::Once).expect("a pipeline");
+		let io = PipelineIo {
+			frontier_rows: Some(crate::exec::ir::phys::placement_attr::FrontierRows {
+				chains,
+				paging: None,
+			}),
+			..PipelineIo::default()
+		};
+		frontier_rows_of(&pipeline, &io, em)
+			.expect("the rows window is translated")
+			.map(|spec| spec.chains.iter().map(|chain| chain.to_vec()).collect())
+	}
+
+	#[test]
+	fn a_chain_of_hops_is_named_by_the_lookups_that_cover_exactly_those_hops() {
+		let hops = hop_ops(3);
+		// One lookup for each hop.
+		let mut em = Emitter::new();
+		let first = emitted(&mut em, &hops, 0, 1);
+		let second = emitted(&mut em, &hops, 1, 1);
+		let third = emitted(&mut em, &hops, 2, 1);
+		assert_eq!(translated(&mut em, vec![hops.clone()]), Some(vec![vec![first, second, third]]));
+		// The first two hops joined into one lookup, which covers both and names both.
+		let mut em = Emitter::new();
+		let joined = emitted(&mut em, &hops, 1, 2);
+		let last = emitted(&mut em, &hops, 2, 1);
+		assert_eq!(translated(&mut em, vec![hops.clone()]), Some(vec![vec![joined, last]]));
+		// A lookup that covers a hop the plan does not state for the chain ends the chain before
+		// it, and a chain with no lookup leaves no window.
+		let mut em = Emitter::new();
+		emitted(&mut em, &hops, 2, 3);
+		assert_eq!(translated(&mut em, vec![hops[..2].to_vec()]), None);
+	}
+
+	#[test]
+	fn a_lookup_another_pipeline_emitted_names_no_chain() {
+		let hops = hop_ops(1);
+		let mut em = Emitter::new();
+		let aside = em.set_aside();
+		emitted(&mut em, &hops, 0, 1);
+		em.restore(aside);
+		assert_eq!(translated(&mut em, vec![hops.clone()]), None);
 	}
 }

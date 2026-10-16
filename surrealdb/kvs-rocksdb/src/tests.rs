@@ -2103,6 +2103,136 @@ mod write_view {
 		write.cancel().await.unwrap();
 	}
 
+	/// A table-level key in the prefix extractor's domain: `/*{ns}*{db}*{tb}\0{d}{rest}`.
+	fn table_key(tb: &str, discriminator: u8, rest: &str) -> Vec<u8> {
+		let mut key = b"/*\x00\x00\x00\x01*\x00\x00\x00\x01*".to_vec();
+		key.extend_from_slice(tb.as_bytes());
+		key.push(0);
+		key.push(discriminator);
+		key.extend_from_slice(rest.as_bytes());
+		key
+	}
+
+	/// Every key of `rng` through a cursor, which is what a range read must equal.
+	async fn through_a_cursor(
+		tx: &dyn Transactable,
+		rng: KeyRange<'_>,
+		limit: u32,
+	) -> Vec<Vec<u8>> {
+		let mut cursor = tx.open_keys_cursor(rng, Direction::Forward, 0, None).await.unwrap();
+		let mut keys = Vec::new();
+		cursor
+			.for_each(limit, &mut |key: &[u8]| {
+				keys.push(key.to_vec());
+				Ok(std::ops::ControlFlow::Continue(()))
+			})
+			.await
+			.unwrap();
+		keys
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn multi_range_reads_serve_ranges_of_different_prefixes_with_one_iterator() {
+		let ds = open_ds(RocksDbConfig::default()).await;
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		for (tb, disc, id) in [
+			("person", b'~', "a1"),
+			("person", b'~', "a2"),
+			("person", b'~', "a3"),
+			("person", b'*', "r1"),
+			("knows", b'~', "b1"),
+			("knows", b'~', "b2"),
+			("post", b'&', "c1"),
+		] {
+			tx.set(table_key(tb, disc, id).into(), b"v".to_vec()).await.unwrap();
+		}
+		tx.commit().await.unwrap();
+		let ranges = [
+			range(&table_key("post", b'&', ""), &table_key("post", b'&', "\u{7f}")),
+			range(&table_key("person", b'~', ""), &table_key("person", b'~', "\u{7f}")),
+			range(&table_key("knows", b'~', "b2"), &table_key("knows", b'~', "\u{7f}")),
+			range(&table_key("person", b'*', ""), &table_key("person", b'*', "\u{7f}")),
+			range(&table_key("absent", b'~', ""), &table_key("absent", b'~', "\u{7f}")),
+		];
+		for kind in [TransactionType::Read, TransactionType::Write] {
+			let tx = ds.transaction(kind).await.unwrap();
+			assert!(tx.multi_read());
+			for limit in [1u32, 2, 100] {
+				let mut seen: Vec<Vec<Vec<u8>>> = vec![Vec::new(); ranges.len()];
+				let stats = tx
+					.visit_key_ranges(&ranges, limit, None, &mut |at: usize, key: &[u8]| {
+						seen[at].push(key.to_vec());
+						Ok(std::ops::ControlFlow::Continue(()))
+					})
+					.await
+					.unwrap();
+				let mut total = 0;
+				for (at, rng) in ranges.iter().enumerate() {
+					let wanted = through_a_cursor(&*tx, rng.clone(), limit).await;
+					total += wanted.len() as u64;
+					assert_eq!(seen[at], wanted, "range {at} at limit {limit}");
+				}
+				assert_eq!(stats.rows, total);
+			}
+			tx.cancel().await.unwrap();
+		}
+	}
+
+	/// Ranges that share one extracted prefix are read with the prefix optimisations on, and an
+	/// empty range, which may name another prefix, is skipped and does not widen the bounds.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn multi_range_reads_of_one_prefix_and_empty_ranges_answer_as_a_cursor() {
+		let ds = open_ds(RocksDbConfig::default()).await;
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		for id in ["a1", "a2", "a3", "b1", "b2", "c1"] {
+			tx.set(table_key("person", b'~', id).into(), b"v".to_vec()).await.unwrap();
+		}
+		tx.set(table_key("zeta", b'~', "z1").into(), b"v".to_vec()).await.unwrap();
+		tx.commit().await.unwrap();
+		let ranges = [
+			range(&table_key("person", b'~', "b"), &table_key("person", b'~', "c")),
+			range(&table_key("zeta", b'~', ""), &table_key("zeta", b'~', "")),
+			range(&table_key("person", b'~', "a"), &table_key("person", b'~', "b")),
+			range(&table_key("person", b'~', "d"), &table_key("person", b'~', "c")),
+			range(&table_key("person", b'~', "c"), &table_key("person", b'~', "d")),
+		];
+		for kind in [TransactionType::Read, TransactionType::Write] {
+			let tx = ds.transaction(kind).await.unwrap();
+			for limit in [1u32, 2, 100] {
+				let mut seen: Vec<Vec<Vec<u8>>> = vec![Vec::new(); ranges.len()];
+				let stats = tx
+					.visit_key_ranges(&ranges, limit, None, &mut |at: usize, key: &[u8]| {
+						seen[at].push(key.to_vec());
+						Ok(std::ops::ControlFlow::Continue(()))
+					})
+					.await
+					.unwrap();
+				let mut total = 0;
+				for (at, rng) in ranges.iter().enumerate() {
+					let wanted = if rng.start < rng.end {
+						through_a_cursor(&*tx, rng.clone(), limit).await
+					} else {
+						Vec::new()
+					};
+					total += wanted.len() as u64;
+					assert_eq!(seen[at], wanted, "range {at} at limit {limit}");
+				}
+				assert_eq!(stats.rows, total);
+			}
+			tx.cancel().await.unwrap();
+		}
+		let empty = [range(&table_key("person", b'~', "b"), &table_key("person", b'~', "a"))];
+		let tx = ds.transaction(TransactionType::Read).await.unwrap();
+		let stats = tx
+			.visit_key_ranges(&empty, 10, None, &mut |_: usize, _: &[u8]| {
+				Ok(std::ops::ControlFlow::Continue(()))
+			})
+			.await
+			.unwrap();
+		assert_eq!(stats.rows, 0);
+		tx.cancel().await.unwrap();
+	}
+
 	#[tokio::test(flavor = "multi_thread")]
 	async fn wv13_view_reads_are_untracked() {
 		let ds = open_ds(RocksDbConfig::default()).await;

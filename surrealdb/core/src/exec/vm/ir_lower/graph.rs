@@ -60,6 +60,7 @@ use super::super::program::{
 	CompareOp, EdgeSpec, HopRead, HostScalar, Instr, KeyCheck, KeyCond, KeyShape as RecordKey,
 	LookupHop, LookupPage, LookupSpec, NavOp, Operand, ReferenceSubject,
 };
+use super::emit::HopLookup;
 use super::expr::{Lowerer, exactly, invariant, region_at};
 use crate::exec::ContextLevel;
 use crate::exec::ir::core::ir::Ir;
@@ -512,6 +513,8 @@ impl Lowerer<'_> {
 		for hop in &chain {
 			hops.push(self.lookup_hop(*hop)?);
 		}
+		// The lookup reads in windows when the physical plan reads the sources of each of its hops
+		// in windows.
 		let spec = LookupSpec {
 			hops,
 			extract_id: last.attrs.cond && last.attrs.fields.is_none(),
@@ -519,9 +522,17 @@ impl Lowerer<'_> {
 			only_path: last.attrs.only_path,
 			checked: true,
 			page,
+			window: chain.iter().all(|hop| self.em.serves_hop(hop.op)),
 		};
 		let src = self.value(source)?;
 		let lookup = self.em.lookup(spec)?;
+		self.em.note_hop_lookup(
+			last.op,
+			HopLookup {
+				lookup,
+				hops: chain.len(),
+			},
+		);
 		let dst = self.em.reg()?;
 		self.emit(Instr::Lookup {
 			lookup,

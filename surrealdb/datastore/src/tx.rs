@@ -45,8 +45,8 @@ use surrealdb_catalog::{
 use surrealdb_expr::val::stored::schema::Unrevisioned;
 use surrealdb_expr::val::{RecordId, RecordIdKey, RecordIdentity, TableName, Value};
 use surrealdb_kvs::api::{
-	Batch, KeyVisitor, KeysBatch, ScanChunkStats, ScanCursorKeys, ScanCursorVals, ValVisitor,
-	ValsBatch,
+	Batch, KeyVisitor, KeysBatch, RangeKeyVisitor, ScanChunkStats, ScanCursorKeys, ScanCursorVals,
+	ValVisitor, ValsBatch,
 };
 use surrealdb_kvs::key::{
 	AnyRange, KVKey, KVKeyDecode, KVSubspace, RawRange, Resumable, TypedRange,
@@ -7217,6 +7217,29 @@ impl Transaction {
 			inner,
 			metrics: &self.metrics,
 		})
+	}
+
+	/// Visit the keys of several regions in one read: the keys of each of `ranges`, in range order
+	/// and key order within a range, at most `limit` from each, handed to `f` with the index of
+	/// the range. `f`'s `Break` ends the whole read. The keys come back as bytes, as
+	/// [`Self::open_keys_cursor_raw`]'s do.
+	///
+	/// It records one scan with the transaction's metrics for the keys it visited, as one cursor
+	/// chunk does.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
+	pub async fn visit_key_ranges(
+		&self,
+		ranges: &[KeyRange<'_>],
+		limit: u32,
+		version: Option<u64>,
+		f: &mut dyn RangeKeyVisitor,
+	) -> Result<ScanChunkStats> {
+		let stats = self.tr.visit_key_ranges(ranges, limit, version, f).await?;
+		self.metrics.record_scan(stats.rows, stats.key_bytes, 0);
+		Ok(stats)
 	}
 
 	/// Open a stateful key+value scan cursor over a typed range. See

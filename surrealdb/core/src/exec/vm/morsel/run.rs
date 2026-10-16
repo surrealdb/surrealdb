@@ -247,6 +247,10 @@ pub(super) async fn run_batch(
 		super::super::host::bound_batch(program, &mut state, ctx);
 	}
 	let pipeline = &program.pipelines[at];
+	// A batch that pages its rows keys none: which of them reach the lookups is the merge's to say.
+	if paged.is_none() {
+		super::super::host::fill_frontier_rows(program, pipeline, &rows, &mut state, ctx).await;
+	}
 	let count = rows.len();
 	let mut ends = Vec::new();
 	let distinct = distinct_rows(pipeline);

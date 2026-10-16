@@ -3,7 +3,8 @@ use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 
 use surrealdb_kvs::api::{
-	Batch, GetMultiResult, KeysResult, ScanCursorKeys, ScanCursorVals, ScanResult, Transactable,
+	Batch, GetMultiResult, KeysResult, RangeKeyVisitor, ScanChunkStats, ScanCursorKeys,
+	ScanCursorVals, ScanResult, Transactable,
 };
 use surrealdb_kvs::snapshot::ViewCapabilities;
 use surrealdb_kvs::timestamp::{BoxTimeStamp, BoxTimeStampImpl};
@@ -187,6 +188,15 @@ impl Transactor {
 	/// See [`surrealdb_kvs::api::Transactable::scan_read_ahead`].
 	pub fn scan_read_ahead(&self) -> bool {
 		!self.speculating() && self.inner.scan_read_ahead()
+	}
+
+	/// Whether reading many keys or ranges at once costs less than reading them one by one. A
+	/// speculating transaction reads through its overlay, one range at a time, so it answers
+	/// `false`.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::multi_read`].
+	pub fn multi_read(&self) -> bool {
+		!self.speculating() && self.inner.multi_read()
 	}
 
 	/// Whether the backend bounds the memory its write buffer takes. A
@@ -782,6 +792,47 @@ impl Transactor {
 			return Ok(Box::new(HeldCursor::new(ordered(pairs, dir, skip))));
 		}
 		self.inner.open_keys_cursor(rng, dir, skip, version).await
+	}
+
+	/// Visit the keys of several ranges, in range order, at most `limit` keys from each. See
+	/// [`surrealdb_kvs::api::Transactable::visit_key_ranges`]. A speculating transaction reads
+	/// each range through its overlay's cursor.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub async fn visit_key_ranges<'a>(
+		&'a self,
+		ranges: &'a [KeyRange<'a>],
+		limit: u32,
+		version: Option<u64>,
+		f: &'a mut dyn RangeKeyVisitor,
+	) -> Result<ScanChunkStats> {
+		if !self.speculating() {
+			return self.inner.visit_key_ranges(ranges, limit, version, f).await;
+		}
+		let mut total = ScanChunkStats::default();
+		if limit == 0 {
+			return Ok(total);
+		}
+		for (at, rng) in ranges.iter().enumerate() {
+			let mut cursor =
+				self.open_keys_cursor(rng.clone(), Direction::Forward, 0, version).await?;
+			let mut stopped = false;
+			let chunk = cursor
+				.for_each(limit, &mut |key: &[u8]| {
+					let flow = f(at, key)?;
+					stopped = flow.is_break();
+					Ok(flow)
+				})
+				.await?;
+			total.rows += chunk.rows;
+			total.key_bytes += chunk.key_bytes;
+			if stopped {
+				break;
+			}
+		}
+		Ok(total)
 	}
 
 	/// Open a stateful key+value scan cursor over a range. See

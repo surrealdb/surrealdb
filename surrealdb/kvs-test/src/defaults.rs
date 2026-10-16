@@ -3,8 +3,8 @@
 //! `replace`, `clr`, `clrc`). Backends may override any of these, so the contract is
 //! asserted against every backend regardless.
 
-use surrealdb_kvs::KeyRange;
 use surrealdb_kvs::TransactionType::*;
+use surrealdb_kvs::{KeyRange, Transactable};
 
 use crate::{TestBackend, TestDs, kvs_test};
 
@@ -369,3 +369,105 @@ async fn clrc(b: &TestBackend) {
 }
 
 kvs_test!(clrc);
+
+/// The keys `visit_key_ranges` hands out for `ranges`, as `(range index, key)`.
+async fn visited(
+	tx: &dyn Transactable,
+	ranges: &[KeyRange<'_>],
+	limit: u32,
+	stop_at: Option<&'static [u8]>,
+) -> (Vec<(usize, Vec<u8>)>, u64) {
+	let mut seen = Vec::new();
+	let stats = tx
+		.visit_key_ranges(ranges, limit, None, &mut |at: usize, key: &[u8]| {
+			seen.push((at, key.to_vec()));
+			Ok(match stop_at {
+				Some(stop) if stop == key => std::ops::ControlFlow::Break(()),
+				_ => std::ops::ControlFlow::Continue(()),
+			})
+		})
+		.await
+		.unwrap();
+	assert_eq!(stats.rows as usize, seen.len(), "the stats count the keys the visitor was handed");
+	(seen, stats.key_bytes)
+}
+
+fn span<'a>(start: &'a [u8], end: &'a [u8]) -> KeyRange<'a> {
+	KeyRange {
+		start: start.into(),
+		end: end.into(),
+	}
+}
+
+/// `visit_key_ranges` visits each range's keys in key order, ranges in the order given, with the
+/// index of the range; an empty range visits nothing and a range holds its start and not its end.
+async fn visit_key_ranges_in_range_order(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	seed(&ds).await;
+	let tx = ds.transaction(Read).await.unwrap();
+	// The ranges are out of key order, two of them are empty, one is empty because nothing lives
+	// there, and one ends at a key it must not hold.
+	let ranges = [span(b"k4", b"k6"), span(b"k0", b"k0"), span(b"k1", b"k3"), span(b"x", b"y")];
+	let (seen, key_bytes) = visited(&*tx, &ranges, 100, None).await;
+	let keys: Vec<_> = seen.iter().map(|(at, key)| (*at, key.as_slice())).collect();
+	assert_eq!(keys, vec![(0, &b"k4"[..]), (0, b"k5"), (2, b"k1"), (2, b"k2")]);
+	assert_eq!(key_bytes, 8);
+	let (seen, _) = visited(&*tx, &[], 100, None).await;
+	assert!(seen.is_empty());
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(visit_key_ranges_in_range_order);
+
+/// `limit` bounds the keys read from one range, not from the call; `Break` ends the whole read
+/// after the key it was returned for.
+async fn visit_key_ranges_limit_and_break(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	seed(&ds).await;
+	let tx = ds.transaction(Read).await.unwrap();
+	let ranges = [span(b"k1", b"k6"), span(b"k3", b"k6")];
+	let (seen, _) = visited(&*tx, &ranges, 2, None).await;
+	let keys: Vec<_> = seen.iter().map(|(at, key)| (*at, key.as_slice())).collect();
+	assert_eq!(keys, vec![(0, &b"k1"[..]), (0, b"k2"), (1, b"k3"), (1, b"k4")]);
+	let (seen, _) = visited(&*tx, &ranges, 100, Some(b"k2")).await;
+	let keys: Vec<_> = seen.iter().map(|(at, key)| (*at, key.as_slice())).collect();
+	assert_eq!(keys, vec![(0, &b"k1"[..]), (0, b"k2")], "a break reads no later range");
+	let (seen, _) = visited(&*tx, &ranges, 0, None).await;
+	assert!(seen.is_empty(), "a limit of zero visits nothing");
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(visit_key_ranges_limit_and_break);
+
+/// A writable transaction's ranges hold its own buffered writes and deletes.
+async fn visit_key_ranges_sees_buffered_writes(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	seed(&ds).await;
+	let tx = ds.transaction(Write).await.unwrap();
+	tx.set(b"k25".into(), b"new".to_vec()).await.unwrap();
+	tx.del(b"k3".into()).await.unwrap();
+	let ranges = [span(b"k2", b"k5"), span(b"k0", b"k2")];
+	let (seen, _) = visited(&*tx, &ranges, 100, None).await;
+	let keys: Vec<_> = seen.iter().map(|(at, key)| (*at, key.as_slice())).collect();
+	assert_eq!(keys, vec![(0, &b"k2"[..]), (0, b"k25"), (0, b"k4"), (1, b"k1")]);
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(visit_key_ranges_sees_buffered_writes);
+
+/// A finished transaction reads nothing.
+async fn visit_key_ranges_after_the_transaction_finished(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	seed(&ds).await;
+	let tx = ds.transaction(Read).await.unwrap();
+	tx.cancel().await.unwrap();
+	let ranges = [span(b"k1", b"k3")];
+	let outcome = tx
+		.visit_key_ranges(&ranges, 10, None, &mut |_: usize, _: &[u8]| {
+			Ok(std::ops::ControlFlow::Continue(()))
+		})
+		.await;
+	assert!(matches!(outcome, Err(surrealdb_kvs::Error::TransactionFinished)));
+}
+
+kvs_test!(visit_key_ranges_after_the_transaction_finished);

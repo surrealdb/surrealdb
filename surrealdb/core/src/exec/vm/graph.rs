@@ -35,15 +35,28 @@
 //! page: a read that falls short of the page over what it took is repeated
 //! over twice as many entries.
 //!
+//! Where the pipeline's plan says so, a read of an adjacency or of references
+//! is served from a frontier window ([`frontier`]) when one holds what the read
+//! would take from storage: the inline cache of a source and the adjacency keys
+//! of a never-folded range, read for a set of sources with one multi-get and one
+//! multi-range read. The origins of an array, the sources of a hop and the rows
+//! of a batch each fill one. A read the window does not hold reads storage for
+//! itself, so a window changes where bytes come from and nothing a read does
+//! with them.
+//!
 //! The permissions and field views are the ones lowering found for the caller
 //! it lowered for. A lookup taken where the caller's reads are judged
 //! otherwise — inside a permission predicate, whose reads are unchecked —
 //! reads its records as the scans' own record resolution reads them.
 
+pub(in crate::exec::vm) mod frontier;
+
 use std::borrow::Cow;
 use std::ops::Bound;
 
-use surrealdb_datastore::values::inline_cache::{CacheValue, EdgeCacheEntry};
+pub(super) use frontier::Frontier;
+use frontier::{SOURCES_PER_FILL, Windows};
+use surrealdb_datastore::values::inline_cache::{CacheValue, EdgeCacheEntry, RefCacheEntry};
 
 use super::descriptor::TableMemo;
 use super::interp::State;
@@ -56,15 +69,15 @@ use crate::catalog::{DatabaseId, NamespaceId};
 use crate::exec::operators::scan::common::{
 	extract_record_ids_into, resolve_record_batch, resolve_version_stamp,
 };
-use crate::exec::operators::scan::graph_keys::{graph_ranges, observe_fold_candidate};
+use crate::exec::operators::scan::graph_keys::{GraphRange, graph_ranges, observe_fold_candidate};
 use crate::exec::{ControlFlowExt, Error as ExecError, ExecutionContext};
 use crate::expr::{ControlFlow, Dir, FlowResult};
 use crate::iam::Action;
 use crate::idx::adjacency::{
 	MergedAdjacencyCursor, VertexAdjacency, VisitFlow, vertex_adjacency_of,
 };
-use crate::key::KVKeyDecode;
 use crate::key::schema::{DecodedGraph, EdgeCacheKey, RefCacheKey, ReferenceKey};
+use crate::key::{KVKeyDecode, Resumable};
 use crate::kvs::{CachePolicy, Direction, Transaction};
 use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
@@ -90,6 +103,9 @@ pub(super) async fn lookup(
 		}
 		_ => None,
 	};
+	// A window that stands when the lookup starts is an enclosing lookup's to drop.
+	#[cfg(test)]
+	let entered_empty = state.frontier_hop.is_empty() && state.frontier_origins.is_empty();
 	let mut run = Run {
 		program,
 		spec,
@@ -99,7 +115,14 @@ pub(super) async fn lookup(
 		doc,
 	};
 	let room = spec.page.and_then(|page| page.needs());
-	let answer = run.answer(&origin, room).await.map_err(ControlFlow::Err)?;
+	let answer = run.answer(&origin, room).await.map_err(ControlFlow::Err);
+	#[cfg(test)]
+	if entered_empty
+		&& !(run.state.frontier_hop.is_empty() && run.state.frontier_origins.is_empty())
+	{
+		frontier::counters::left_behind();
+	}
+	let answer = answer?;
 	let answer = match (spec.page, answer) {
 		(Some(page), Value::Array(items)) => Value::Array(page.of(items.0).into()),
 		(_, answer) => answer,
@@ -130,27 +153,145 @@ struct Run<'r> {
 }
 
 impl Run<'_> {
-	/// The lookup's value from `origin`, which holds at least its first
-	/// `room` records where the answer is that long.
+	/// The lookup's value from `origin`, which holds at least its first `room` records where the
+	/// answer is that long.
 	async fn answer(&mut self, origin: &Value, room: Option<usize>) -> anyhow::Result<Value> {
 		match origin {
 			Value::RecordId(_) | Value::Object(_) => self.one(origin, room).await,
 			Value::Array(items) => {
 				let mut results = Vec::new();
-				for item in items.iter() {
-					let left = room.map(|room| room.saturating_sub(results.len()));
-					if left == Some(0) {
-						break;
-					}
-					match Box::pin(self.answer(item, left)).await? {
-						Value::Array(inner) => results.extend(inner),
-						other => results.push(other),
-					}
-				}
+				self.answer_array(items, room, &mut results).await?;
 				Ok(Value::Array(results.into()))
 			}
 			_ => Ok(Value::None),
 		}
+	}
+
+	/// Append the lookup's value from `origin`, flattened, to `out`, which holds the records
+	/// answered so far; `room` is measured against the whole of `out`.
+	async fn answer_into(
+		&mut self,
+		origin: &Value,
+		room: Option<usize>,
+		out: &mut Vec<Value>,
+	) -> anyhow::Result<()> {
+		match origin {
+			Value::RecordId(_) | Value::Object(_) => {
+				let left = room.map(|room| room.saturating_sub(out.len()));
+				match self.one(origin, left).await? {
+					Value::Array(inner) => out.extend(inner),
+					other => out.push(other),
+				}
+			}
+			Value::Array(items) => self.answer_array(items, room, out).await?,
+			_ => out.push(Value::None),
+		}
+		Ok(())
+	}
+
+	/// Append the lookup's value from each of `items`, the origins of one array, to `out`. The
+	/// origins window holds one group at a time, filled before the group is answered and dropped
+	/// after it.
+	async fn answer_array(
+		&mut self,
+		items: &[Value],
+		room: Option<usize>,
+		out: &mut Vec<Value>,
+	) -> anyhow::Result<()> {
+		for group in items.chunks(SOURCES_PER_FILL) {
+			if room.is_some_and(|room| out.len() >= room) {
+				break;
+			}
+			let owned = self.window_for(group).await;
+			let answered = self.answer_each(group, room, out).await;
+			if owned {
+				self.state.frontier_origins.clear();
+			}
+			answered?;
+		}
+		Ok(())
+	}
+
+	/// Append the lookup's value from each of `items` in turn, flattened, to `out`, stopping
+	/// once `out` holds `room` records.
+	async fn answer_each(
+		&mut self,
+		items: &[Value],
+		room: Option<usize>,
+		out: &mut Vec<Value>,
+	) -> anyhow::Result<()> {
+		for item in items {
+			if room.is_some_and(|room| out.len() >= room) {
+				break;
+			}
+			Box::pin(self.answer_into(item, room, out)).await?;
+		}
+		Ok(())
+	}
+
+	/// Fill the origins window for the first hop's reads of `items`, a group of the origins of one
+	/// array, where the lookup reads in windows ([`LookupSpec::window`]): one multi-get of their
+	/// inline caches and one multi-range read of their adjacency keys, which each origin's own
+	/// read then consumes. The window is the caller's to drop when the origins are answered:
+	/// `true` where this call filled it, `false` where it filled nothing, among them where an
+	/// enclosing array's window stands, which this lookup reads and never fills or drops.
+	///
+	/// Nothing is filled for fewer than two origins. A failure to read fills what it can, and is
+	/// not raised: each origin reads what the window does not hold for itself, and raises what
+	/// its own read raises.
+	async fn window_for(&mut self, items: &[Value]) -> bool {
+		if !self.spec.window || items.len() < 2 || !self.state.frontier_origins.is_empty() {
+			return false;
+		}
+		let Some(hop) = self.spec.hops.first() else {
+			return false;
+		};
+		if items.iter().filter_map(origin_id).nth(1).is_none() {
+			return false;
+		}
+		let Ok(at) = at_of(self.ctx).await else {
+			return false;
+		};
+		let budget = frontier::budget(self.ctx);
+		let fill = frontier::Fill {
+			at: &at,
+			ctx: self.ctx,
+			budget,
+			rows: Some(&self.state.frontier_rows),
+		};
+		// A failed fill is not raised: a source the window does not answer reads for itself and
+		// raises what its own read raises.
+		let _ = match &*hop.read {
+			HopRead::Graph {
+				fixed: Some(ranges),
+				..
+			} => {
+				frontier::fill_graph(
+					&mut self.state.frontier_origins,
+					&hop.read,
+					ranges,
+					items,
+					fill,
+					&mut self.state.tables,
+				)
+				.await
+			}
+			HopRead::References(subjects) => {
+				frontier::fill_references(
+					&mut self.state.frontier_origins,
+					subjects,
+					items,
+					fill,
+					&mut self.state.tables,
+				)
+				.await
+			}
+			HopRead::Graph {
+				fixed: None,
+				..
+			} => return false,
+		};
+		true
 	}
 
 	/// The lookup's value from one record id or object, which holds at least
@@ -160,13 +301,7 @@ impl Run<'_> {
 		let db_ctx = ctx.database()?;
 		crate::exec::permission::validate_record_user_access(db_ctx)?;
 		let checked = ctx.should_check_perms(Action::View)?;
-		let version = resolve_version_stamp(ctx, None).await.map_err(signal_error)?;
-		let at = At {
-			txn: ctx.txn(),
-			ns: db_ctx.ns_ctx.ns.namespace_id,
-			db: db_ctx.db.database_id,
-			version,
-		};
+		let at = at_of(ctx).await?;
 		let mut values = vec![origin.clone()];
 		let last = self.spec.hops.len().saturating_sub(1);
 		for (at_hop, hop) in self.spec.hops.iter().enumerate() {
@@ -269,18 +404,7 @@ impl Run<'_> {
 					}),
 				};
 				let entries = match &hop.key_cond {
-					None => {
-						adjacencies(
-							&hop.read,
-							&ranges,
-							sources,
-							at,
-							self.ctx,
-							&mut self.state.tables,
-							cap,
-						)
-						.await?
-					}
+					None => self.adjacencies_of(&hop.read, &ranges, sources, at, cap).await?,
 					Some(cond) => {
 						let mut entries = Vec::new();
 						for source in sources {
@@ -296,6 +420,7 @@ impl Run<'_> {
 								cond.payload.is_some(),
 								usize::MAX,
 								&mut read,
+								Windows::NONE,
 							)
 							.await?;
 							// Boxed: the filter's batch reads are state the hop does not
@@ -308,30 +433,187 @@ impl Run<'_> {
 				entries.into_iter().map(|entry| entry.id).collect()
 			}
 			HopRead::References(subjects) => {
-				let mut reached = Vec::new();
-				for subject in subjects {
-					let start = Box::pin(self.key_bound(&subject.start)).await?;
-					let end = Box::pin(self.key_bound(&subject.end)).await?;
-					for source in sources {
-						if reached.len() >= cap {
-							break;
-						}
-						references(
-							subject,
-							(&start, &end),
-							source,
-							at,
-							self.ctx,
-							&mut self.state.tables,
-							cap,
-							&mut reached,
-						)
-						.await?;
-					}
+				let windowed = self.reads_in_windows(sources);
+				let reached = self.references_of(subjects, sources, at, cap, windowed).await;
+				// The window this call filled is dropped whether the reads answered or failed.
+				if windowed {
+					self.state.frontier_hop.clear();
 				}
-				reached
+				reached?
 			}
 		})
+	}
+
+	/// Whether the hop over `sources` fills a window of its own: it has several sources, the plan
+	/// serves its lookup, and no hop window stands. A hop window is filled and dropped by the hop
+	/// that fills it, and no code but the hop's own reads runs while it stands, so a window found
+	/// standing is an enclosing lookup's, which this hop reads and never fills or drops.
+	fn reads_in_windows(&self, sources: &[RecordId]) -> bool {
+		self.spec.window && sources.len() >= 2 && self.state.frontier_hop.is_empty()
+	}
+
+	/// The records of the reference `subjects` that reference each of `sources`, at most `cap`,
+	/// in the order the hop reads them: each subject over all the sources in turn. Where
+	/// `windowed`, the sources are taken [`SOURCES_PER_FILL`] at a time, and the inline caches and
+	/// reference keys of a group are first read with one multi-get and one multi-range read, then
+	/// read from the hop window, which holds the one group being read, for the one subject being
+	/// read, and which the caller drops.
+	async fn references_of(
+		&mut self,
+		subjects: &[ReferenceSubject],
+		sources: &[RecordId],
+		at: &At,
+		cap: usize,
+		windowed: bool,
+	) -> FlowResult<Vec<RecordId>> {
+		let budget = frontier::budget(self.ctx);
+		let mut reached = Vec::new();
+		for subject in subjects {
+			let start = Box::pin(self.key_bound(&subject.start)).await?;
+			let end = Box::pin(self.key_bound(&subject.end)).await?;
+			for group in sources.chunks(SOURCES_PER_FILL) {
+				if reached.len() >= cap {
+					break;
+				}
+				if windowed {
+					self.state.frontier_hop.clear();
+					let fill = frontier::Fill {
+						at,
+						ctx: self.ctx,
+						budget,
+						rows: Some(&self.state.frontier_rows),
+					};
+					// A failed fill is not raised: a source the window does not answer reads for
+					// itself and raises what its own read raises.
+					let _ = frontier::fill_references(
+						&mut self.state.frontier_hop,
+						std::slice::from_ref(subject),
+						group,
+						fill,
+						&mut self.state.tables,
+					)
+					.await;
+				}
+				for source in group {
+					if reached.len() >= cap {
+						break;
+					}
+					let windows = Windows {
+						hop: Some(&self.state.frontier_hop),
+						origins: Some(&self.state.frontier_origins),
+						rows: Some(&self.state.frontier_rows),
+					};
+					references(
+						subject,
+						(&start, &end),
+						source,
+						at,
+						self.ctx,
+						&mut self.state.tables,
+						cap,
+						&mut reached,
+						windows,
+					)
+					.await?;
+				}
+			}
+		}
+		Ok(reached)
+	}
+
+	/// [`adjacencies`] over `sources`, in windows where the hop reads them so: the sources are
+	/// taken [`SOURCES_PER_FILL`] at a time, the hop window is filled for the group with one
+	/// multi-get of their inline caches and one multi-range read of their adjacency keys, and the
+	/// group is read from it. A window is filled only where the hop reads its whole adjacency and
+	/// has more than one source ([`Run::reads_in_windows`]); the origins window and the window of
+	/// the rows that the lookup and the pipeline filled before serve every read.
+	///
+	/// A failed fill is not raised: the window holds what it read before the failure, and each
+	/// source reads what it does not hold for itself, raising what its own read raises. The hop
+	/// window this call filled is dropped whether the reads answered or failed.
+	async fn adjacencies_of(
+		&mut self,
+		read: &std::sync::Arc<HopRead>,
+		ranges: &std::sync::Arc<KeyRanges>,
+		sources: &[RecordId],
+		at: &At,
+		cap: usize,
+	) -> FlowResult<Vec<Entry>> {
+		let windowed = self.reads_in_windows(sources);
+		let entries = self.read_groups((read, ranges), sources, at, cap, windowed).await;
+		if windowed {
+			self.state.frontier_hop.clear();
+		}
+		entries
+	}
+
+	/// [`adjacencies_of`] without the drop of the hop window: `sources` a group at a time, each
+	/// group's window filled first where `windowed`. The hop window holds the group being read
+	/// alone: the one before it has been read, and a source of a later group is never answered
+	/// by it.
+	async fn read_groups(
+		&mut self,
+		(read, ranges): (&std::sync::Arc<HopRead>, &std::sync::Arc<KeyRanges>),
+		sources: &[RecordId],
+		at: &At,
+		cap: usize,
+		windowed: bool,
+	) -> FlowResult<Vec<Entry>> {
+		let budget = frontier::budget(self.ctx);
+		let mut entries = Vec::new();
+		for group in sources.chunks(SOURCES_PER_FILL) {
+			// A group reads only the entries the groups before it left wanted, so no source is read
+			// past the first `cap` entries of the whole hop.
+			if entries.len() >= cap {
+				break;
+			}
+			let wanted = if cap == usize::MAX {
+				cap
+			} else {
+				cap - entries.len()
+			};
+			if windowed {
+				self.state.frontier_hop.clear();
+				let fill = frontier::Fill {
+					at,
+					ctx: self.ctx,
+					budget,
+					rows: Some(&self.state.frontier_rows),
+				};
+				// A failed fill is not raised: a source the window does not answer reads for itself
+				// and raises what its own read raises.
+				let _ = frontier::fill_graph(
+					&mut self.state.frontier_hop,
+					read,
+					ranges,
+					group,
+					fill,
+					&mut self.state.tables,
+				)
+				.await;
+			}
+			let windows = Windows {
+				hop: Some(&self.state.frontier_hop),
+				origins: Some(&self.state.frontier_origins),
+				rows: Some(&self.state.frontier_rows),
+			};
+			let read = adjacencies(
+				(read, ranges),
+				group,
+				at,
+				self.ctx,
+				&mut self.state.tables,
+				wanted,
+				windows,
+			)
+			.await?;
+			if entries.is_empty() {
+				entries = read;
+			} else {
+				entries.extend(read);
+			}
+		}
+		Ok(entries)
 	}
 
 	/// `specs` with their bounds evaluated, with no row.
@@ -558,6 +840,176 @@ impl Run<'_> {
 	}
 }
 
+/// Fill the rows window for the first hop of the lookups of `chains` of `program`, over the rows
+/// `rows` of one batch of a pipeline, before the rows run: the origins are the records the rows
+/// name, and what a hop reads for them is what its own reads of the rows will read. A chain is a
+/// lookup that starts from the row and the lookups that read each the answer of the one before:
+/// the sources of the next lookup are the records the window's keys say the one before reaches, so
+/// the window holds a level of the path at a time, across every row of the batch. The plan states
+/// the chains, and each lookup of one serves a window.
+///
+/// The window is replaced. A chain ends where the window holds the bytes it may, and where the
+/// window's keys say no record is reached. A failure to read is not raised: each row reads what the
+/// window does not hold for itself.
+pub(super) async fn fill_rows(
+	program: &Program,
+	chains: &[Box<[u32]>],
+	rows: &[Value],
+	state: &mut State,
+	ctx: &ExecutionContext,
+) {
+	state.frontier_rows.clear();
+	if rows.iter().filter_map(origin_id).nth(1).is_none() {
+		return;
+	}
+	let Ok(at) = at_of(ctx).await else {
+		return;
+	};
+	let budget = frontier::budget(ctx);
+	let State {
+		frontier_rows,
+		frontier_levels: levels,
+		tables,
+		..
+	} = state;
+	for chain in chains {
+		levels.clear();
+		for (level, &lookup) in chain.iter().enumerate() {
+			let Some(hop) = program.lookups[lookup as usize].hops.first() else {
+				break;
+			};
+			let fill = frontier::Fill {
+				at: &at,
+				ctx,
+				budget,
+				rows: None,
+			};
+			// The sources of the level being filled: the rows' own records for the first, after
+			// that the records the level before reaches.
+			let filled = if level == 0 {
+				fill_level(frontier_rows, hop, rows, fill, tables).await
+			} else {
+				fill_level(frontier_rows, hop, &levels.current, fill, tables).await
+			};
+			let Some(filled) = filled else {
+				break;
+			};
+			#[cfg(test)]
+			if filled.is_ok() {
+				frontier::counters::level();
+			}
+			// The sources of the next lookup are what the last hop of this one reaches, and only
+			// the first hop is read here: a lookup of several hops ends its chain.
+			if filled.is_err()
+				|| level + 1 == chain.len()
+				|| program.lookups[lookup as usize].hops.len() > 1
+				|| frontier_rows.is_full(budget)
+			{
+				break;
+			}
+			let HopRead::Graph {
+				fixed: Some(ranges),
+				..
+			} = &*hop.read
+			else {
+				break;
+			};
+			let fill = frontier::Fill {
+				at: &at,
+				ctx,
+				budget,
+				rows: None,
+			};
+			let frontier::Levels {
+				current,
+				next,
+				seen,
+			} = &mut *levels;
+			let reached = if level == 0 {
+				frontier::reached_graph(
+					frontier_rows,
+					&hop.read,
+					ranges,
+					rows,
+					fill,
+					tables,
+					(next, seen),
+				)
+				.await
+			} else {
+				frontier::reached_graph(
+					frontier_rows,
+					&hop.read,
+					ranges,
+					current,
+					fill,
+					tables,
+					(next, seen),
+				)
+				.await
+			};
+			match reached {
+				Ok(true) => levels.advance(),
+				_ => break,
+			}
+		}
+	}
+	levels.clear();
+	#[cfg(test)]
+	if !frontier_rows.is_empty() {
+		frontier::counters::rows_fill();
+	}
+}
+
+/// Fill `window` for the first hop of `hop` over `sources`, answering `None` where the hop is one a
+/// window is not filled for.
+async fn fill_level<S: frontier::Source>(
+	window: &mut Frontier,
+	hop: &LookupHop,
+	sources: &[S],
+	fill: frontier::Fill<'_>,
+	tables: &mut TableMemo,
+) -> Option<FlowResult<()>> {
+	Some(match &*hop.read {
+		HopRead::Graph {
+			fixed: Some(ranges),
+			..
+		} => frontier::fill_graph(window, &hop.read, ranges, sources, fill, tables).await,
+		HopRead::References(subjects) => {
+			frontier::fill_references(window, subjects, sources, fill, tables).await
+		}
+		HopRead::Graph {
+			fixed: None,
+			..
+		} => return None,
+	})
+}
+
+/// The record id a lookup reads from `origin` as one origin: a record id, or the `id` an object
+/// holds.
+fn origin_id(origin: &Value) -> Option<&RecordId> {
+	match origin {
+		Value::RecordId(id) => Some(id),
+		Value::Object(object) => match object.get("id") {
+			Some(Value::RecordId(id)) => Some(id),
+			_ => None,
+		},
+		_ => None,
+	}
+}
+
+/// Where the lookup reads in `ctx`: its transaction, database and version.
+async fn at_of(ctx: &ExecutionContext) -> anyhow::Result<At> {
+	let db_ctx = ctx.database()?;
+	let version = resolve_version_stamp(ctx, None).await.map_err(signal_error)?;
+	Ok(At {
+		txn: ctx.txn(),
+		ns: db_ctx.ns_ctx.ns.namespace_id,
+		db: db_ctx.db.database_id,
+		version,
+	})
+}
+
 /// Where the lookup reads: its transaction, database and version.
 #[derive(Clone)]
 struct At {
@@ -685,8 +1137,8 @@ async fn facts(
 	Ok((vertex_adjacency_of(tb), crate::idx::inline_cache::effective_edges_cap(tb)))
 }
 
-/// How many sources' adjacencies are read side by side, and the width of the
-/// windows a hop's sources are read in.
+/// How many sources' adjacencies are read side by side: the width of a batch
+/// of a hop's sources.
 #[cfg(not(target_family = "wasm"))]
 const FANOUT: usize = 16;
 
@@ -700,25 +1152,38 @@ const KEY_FILTER_BATCH: usize = 1024;
 const SPAWN_PER_SOURCE_NANOS: u128 = 5_000;
 
 /// The entries graph read `read` reaches from each of `sources`, in source
-/// order: the first window read in turn, timing it, and the rest read side
-/// by side a window at a time when a source's read took long enough to pay
-/// for its task. An error is the first source's, in source order, that
-/// raised one.
+/// order. The sources are taken [`FANOUT`] at a time, in batches: while the
+/// cost of a read is unmeasured a batch is read in turn and timed, and once a
+/// source's read took long enough to pay for its task the sources of each
+/// batch are read side by side. A source the `windows` hold any part of is read
+/// in turn, taking what they hold and reading the rest after it; one they answer
+/// whole is never timed. Only the sources they hold nothing of are read side by
+/// side. An error is the first source's, in source order, that raised one.
 ///
 /// No more than `cap` entries are read: the sources are then read in turn,
 /// each only as far as the entries still wanted.
 async fn adjacencies(
-	read: &std::sync::Arc<HopRead>,
-	ranges: &std::sync::Arc<KeyRanges>,
+	(read, ranges): (&std::sync::Arc<HopRead>, &std::sync::Arc<KeyRanges>),
 	sources: &[RecordId],
 	at: &At,
 	ctx: &ExecutionContext,
 	tables: &mut TableMemo,
 	cap: usize,
+	windows: Windows<'_>,
 ) -> FlowResult<Vec<Entry>> {
 	let mut entries = Vec::new();
-	#[cfg(not(target_family = "wasm"))]
+	#[cfg(all(not(target_family = "wasm"), not(test)))]
 	let mut engaged: Option<bool> = None;
+	#[cfg(all(not(target_family = "wasm"), test))]
+	let mut engaged: Option<bool> = frontier::counters::ENGAGED.with(std::cell::Cell::get);
+	#[cfg(not(target_family = "wasm"))]
+	let directions: &[Dir] = match &**read {
+		HopRead::Graph {
+			directions,
+			..
+		} => directions,
+		HopRead::References(_) => &[],
+	};
 	let mut start = 0;
 	while start < sources.len() {
 		#[cfg(not(target_family = "wasm"))]
@@ -729,10 +1194,35 @@ async fn adjacencies(
 		for source in &sources[start..end] {
 			known.push(facts(&source.table, ctx, tables).await?);
 		}
+		// The sources whose reads the windows answer whole read in turn, from the windows: a task
+		// would only pay for its own spawn. Only the others are timed. A source the windows hold
+		// part of (a cut range, one direction of two) also reads in turn, so that what they hold
+		// is taken from them and not read again; only the sources they hold nothing of are read
+		// side by side.
 		#[cfg(not(target_family = "wasm"))]
-		if engaged == Some(true) && end - start > 1 && cap == usize::MAX {
+		let mut served = [false; FANOUT];
+		#[cfg(not(target_family = "wasm"))]
+		let mut held = [false; FANOUT];
+		#[cfg(not(target_family = "wasm"))]
+		for ((served, held), (source, facts)) in
+			served.iter_mut().zip(held.iter_mut()).zip(sources[start..end].iter().zip(known.iter()))
+		{
+			*served = windows.serves_adjacency(at, source, *facts, (directions, ranges));
+			*held = *served || windows.holds_adjacency(at, source, *facts, (directions, ranges));
+		}
+		#[cfg(not(target_family = "wasm"))]
+		let unserved = held[..end - start].iter().filter(|held| !**held).count();
+		#[cfg(not(target_family = "wasm"))]
+		if engaged == Some(true) && unserved > 1 && cap == usize::MAX {
 			let mut set = tokio::task::JoinSet::new();
-			for (offset, (source, facts)) in sources[start..end].iter().zip(known).enumerate() {
+			for (offset, (source, facts)) in
+				sources[start..end].iter().zip(known.iter().copied()).enumerate()
+			{
+				if held[offset] {
+					continue;
+				}
+				#[cfg(test)]
+				frontier::counters::spawn();
 				let read = std::sync::Arc::clone(read);
 				let ranges = std::sync::Arc::clone(ranges);
 				let source = source.clone();
@@ -749,37 +1239,66 @@ async fn adjacencies(
 						false,
 						usize::MAX,
 						&mut out,
+						Windows::NONE,
 					)
 					.await;
 					(offset, read.map(|()| out))
 				}));
 			}
-			let mut read: Vec<Option<FlowResult<Vec<Entry>>>> =
+			let mut answers: Vec<Option<FlowResult<Vec<Entry>>>> =
 				(start..end).map(|_| None).collect();
 			while let Some(joined) = set.join_next().await {
 				let (offset, out) = joined.map_err(|e| {
 					ControlFlow::Err(anyhow::anyhow!("graph fan-out task failed: {e}"))
 				})?;
-				read[offset] = Some(out);
+				answers[offset] = Some(out);
 			}
-			for out in read {
-				entries.extend(out.expect("every task answered")?);
+			for (answer, (source, facts)) in
+				answers.into_iter().zip(sources[start..end].iter().zip(known.iter().copied()))
+			{
+				match answer {
+					Some(out) => entries.extend(out?),
+					None => {
+						adjacency(
+							(read, ranges),
+							source,
+							at,
+							ctx,
+							facts,
+							false,
+							usize::MAX,
+							&mut entries,
+							windows,
+						)
+						.await?
+					}
+				}
 			}
 			start = end;
 			continue;
 		}
 		#[cfg(not(target_family = "wasm"))]
-		let timer = engaged.is_none().then(web_time::Instant::now);
-		for (source, facts) in sources[start..end].iter().zip(known) {
+		let measuring = engaged.is_none();
+		#[cfg(not(target_family = "wasm"))]
+		let mut timed = (std::time::Duration::ZERO, 0u32);
+		for (offset, (source, facts)) in sources[start..end].iter().zip(known).enumerate() {
 			if entries.len() >= cap {
 				return Ok(entries);
 			}
-			adjacency((read, ranges), source, at, ctx, facts, false, cap, &mut entries).await?;
+			#[cfg(not(target_family = "wasm"))]
+			let timer = (measuring && !served[offset]).then(web_time::Instant::now);
+			adjacency((read, ranges), source, at, ctx, facts, false, cap, &mut entries, windows)
+				.await?;
+			#[cfg(not(target_family = "wasm"))]
+			if let Some(timer) = timer {
+				timed = (timed.0 + timer.elapsed(), timed.1 + 1);
+			}
+			#[cfg(target_family = "wasm")]
+			let _ = offset;
 		}
 		#[cfg(not(target_family = "wasm"))]
-		if let Some(timer) = timer {
-			engaged =
-				Some(timer.elapsed().as_nanos() / (end - start) as u128 >= SPAWN_PER_SOURCE_NANOS);
+		if measuring && timed.1 > 0 {
+			engaged = Some(timed.0.as_nanos() / timed.1 as u128 >= SPAWN_PER_SOURCE_NANOS);
 		}
 		start = end;
 	}
@@ -807,6 +1326,7 @@ async fn adjacency(
 	values: bool,
 	cap: usize,
 	out: &mut Vec<Entry>,
+	windows: Windows<'_>,
 ) -> FlowResult<()> {
 	let HopRead::Graph {
 		directions,
@@ -842,21 +1362,30 @@ async fn adjacency(
 		}
 		// The sidecar cache holds the direction's whole current adjacency.
 		if edges_cap.is_some() && at.version.is_none() && !values && ranges.whole {
-			let key = EdgeCacheKey {
-				ns: at.ns,
-				db: at.db,
-				tb: Cow::Borrowed(&source.table),
-				id: Cow::Borrowed(&source.key),
-				dir,
+			// A window that probed the cache answers for the read.
+			let probed = windows.edge_probe(at, source, dir);
+			let fetched;
+			let cached: Option<&CacheValue<EdgeCacheEntry>> = match probed {
+				Some(value) => value,
+				None => {
+					let key = EdgeCacheKey {
+						ns: at.ns,
+						db: at.db,
+						tb: Cow::Borrowed(&source.table),
+						id: Cow::Borrowed(&source.key),
+						dir,
+					};
+					fetched = txn
+						.get_many_key(vec![key], None)
+						.await
+						.context("Failed to read the inline adjacency caches")?
+						.pop()
+						.flatten();
+					fetched.as_ref()
+				}
 			};
-			let cached = txn
-				.get_many_key(vec![key], None)
-				.await
-				.context("Failed to read the inline adjacency caches")?
-				.pop()
-				.flatten();
 			if let Some(metrics) = metrics {
-				match &cached {
+				match cached {
 					Some(CacheValue::Live(_)) => metrics.add_cache_hits(1),
 					_ => metrics.add_cache_misses(1),
 				}
@@ -886,103 +1415,160 @@ async fn adjacency(
 				continue;
 			}
 		}
-		let scopes = graph_ranges(at.ns, at.db, source, dir, &ranges.specs)?;
+		// The ranges of the direction are built where a read needs one: a window that holds a
+		// range for the read answers without it.
+		let mut scopes: Option<Vec<GraphRange>> = None;
 		let reached_before = out.len();
 		let mut delta_hits = 0;
-		for scope in scopes {
+		for place in 0..ranges.specs.len().max(1) {
 			if out.len() >= cap {
 				break;
 			}
 			let mut untargeted = Vec::new();
 			{
-				let range = scope.as_adjacency_scope(at.ns, at.db, source, dir);
-				let mut cursor = match kind {
-					VertexAdjacency::Lightweight => {
-						MergedAdjacencyCursor::open_lightweight(txn, &range)
-							.context("Failed to open graph cursor")?
+				// The keys a window read for a never-folded adjacency are visited as the cursor
+				// would visit its first chunk; a range the window cut goes on from a cursor
+				// opened after the last key it holds. A window holds the current version's keys,
+				// so a read at a version never consults one.
+				let served = match (kind, values) {
+					(
+						VertexAdjacency::Normal {
+							folded: false,
+						},
+						false,
+					) if at.version.is_none() => {
+						match windows.owned_range(
+							at,
+							source,
+							dir,
+							(frontier::hop_id(ranges), place as u16),
+						) {
+							Some(served) => Some(served),
+							None => {
+								let (range_start, range_end) =
+									scopes_of(&mut scopes, at, source, dir, ranges)?[place]
+										.range
+										.bounds();
+								windows.range(range_start, range_end)
+							}
+						}
 					}
-					VertexAdjacency::Normal {
-						folded,
-					} if values => MergedAdjacencyCursor::open_with_values(
-						txn,
-						range,
-						folded,
-						at.version,
-						Some(ctx.root().ctx.get_index_stores().adjacency_resolve()),
-					)
-					.await
-					.context("Failed to open graph cursor")?,
-					VertexAdjacency::Normal {
-						folded,
-					} => MergedAdjacencyCursor::open(
-						txn,
-						range,
-						folded,
-						at.version,
-						Some(ctx.root().ctx.get_index_stores().adjacency_resolve()),
-					)
-					.await
-					.context("Failed to open graph cursor")?,
+					_ => None,
 				};
+				let mut remainder = None;
+				let mut finished = false;
 				let mut held = out.len();
-				loop {
-					// The entries the last read pushed, and the read itself.
+				if let Some(served) = served {
+					super::fuel::tick(ctx, 1).await?;
+					let mut visited = 0u64;
+					let mut stopped = false;
+					for key in served.keys() {
+						visited += 1;
+						let flow =
+							take_key(key, targets.as_deref(), dir, cap, out, &mut untargeted)
+								.context("Failed to scan graph edge")?;
+						if matches!(flow, VisitFlow::Stop) {
+							stopped = true;
+							break;
+						}
+					}
+					delta_hits += visited;
 					super::fuel::tick(ctx, super::fuel::units(out.len() - held).saturating_add(1))
 						.await?;
 					held = out.len();
-					if out.len() >= cap {
-						break;
+					finished = stopped || !served.cut() || out.len() >= cap;
+					if !finished && let Some(last) = served.last() {
+						let scope = &scopes_of(&mut scopes, at, source, dir, ranges)?[place];
+						let mut from = last.to_vec();
+						from.push(0);
+						remainder = Some(scope.range.part(&from, scope.range.bounds().1));
 					}
-					// Each read asks storage for no more than the entries still
-					// wanted, nor more than the fuel left.
-					let most = super::fuel::batch(crate::kvs::NORMAL_BATCH_SIZE) as usize;
-					let fill = (cap - out.len()).clamp(1, most) as u32;
-					// A never-folded adjacency is visited in the cursor's own
-					// buffer, and only another shape materializes its batch.
-					let visited = cursor
-						.visit_unfolded_batch(fill, |key| {
-							let decoded = DecodedGraph::decode(key)?;
-							untargeted.extend(reach(
-								targets.as_deref(),
-								dir,
-								decoded.edge,
-								decoded.target,
-								None,
-								out,
-							));
-							Ok(if out.len() >= cap {
-								VisitFlow::Stop
-							} else {
-								VisitFlow::Continue
-							})
-						})
+				}
+				if !finished {
+					let scope = &scopes_of(&mut scopes, at, source, dir, ranges)?[place];
+					let mut range = scope.as_adjacency_scope(at.ns, at.db, source, dir);
+					if let Some(remainder) = remainder {
+						range.delta_range = remainder;
+					}
+					let mut cursor = match kind {
+						VertexAdjacency::Lightweight => {
+							MergedAdjacencyCursor::open_lightweight(txn, &range)
+								.context("Failed to open graph cursor")?
+						}
+						VertexAdjacency::Normal {
+							folded,
+						} if values => MergedAdjacencyCursor::open_with_values(
+							txn,
+							range,
+							folded,
+							at.version,
+							Some(ctx.root().ctx.get_index_stores().adjacency_resolve()),
+						)
 						.await
-						.context("Failed to scan graph edge")?;
-					match visited {
-						Some(0) => break,
-						Some(_) => continue,
-						None => {}
-					}
-					let batch =
-						cursor.next_batch_scan(fill).await.context("Failed to scan graph edge")?;
-					if batch.is_empty() {
-						break;
-					}
-					for item in batch {
+						.context("Failed to open graph cursor")?,
+						VertexAdjacency::Normal {
+							folded,
+						} => MergedAdjacencyCursor::open(
+							txn,
+							range,
+							folded,
+							at.version,
+							Some(ctx.root().ctx.get_index_stores().adjacency_resolve()),
+						)
+						.await
+						.context("Failed to open graph cursor")?,
+					};
+					loop {
+						// The entries the last read pushed, and the read itself.
+						super::fuel::tick(
+							ctx,
+							super::fuel::units(out.len() - held).saturating_add(1),
+						)
+						.await?;
+						held = out.len();
 						if out.len() >= cap {
 							break;
 						}
-						untargeted.extend(reach(
-							targets.as_deref(),
-							dir,
-							item.edge,
-							item.target,
-							item.props,
-							out,
-						));
+						// Each read asks storage for no more than the entries still
+						// wanted, nor more than the fuel left.
+						let most = super::fuel::batch(crate::kvs::NORMAL_BATCH_SIZE) as usize;
+						let fill = (cap - out.len()).clamp(1, most) as u32;
+						// A never-folded adjacency is visited in the cursor's own
+						// buffer, and only another shape materializes its batch.
+						let visited = cursor
+							.visit_unfolded_batch(fill, |key| {
+								take_key(key, targets.as_deref(), dir, cap, out, &mut untargeted)
+							})
+							.await
+							.context("Failed to scan graph edge")?;
+						match visited {
+							Some(0) => break,
+							Some(_) => continue,
+							None => {}
+						}
+						let batch = cursor
+							.next_batch_scan(fill)
+							.await
+							.context("Failed to scan graph edge")?;
+						if batch.is_empty() {
+							break;
+						}
+						for item in batch {
+							if out.len() >= cap {
+								break;
+							}
+							untargeted.extend(reach(
+								targets.as_deref(),
+								dir,
+								item.edge,
+								item.target,
+								item.props,
+								out,
+							));
+						}
 					}
+					delta_hits += cursor.stats().delta_hits;
 				}
-				delta_hits += cursor.stats().delta_hits;
 			}
 			// The vertex beyond an edge whose key names none is the far end of
 			// the edge's own adjacency, which is never folded.
@@ -1026,10 +1612,51 @@ async fn adjacency(
 	Ok(())
 }
 
+/// The ranges of `source` along `dir` over `ranges`, built into `built` the first time they are
+/// asked for.
+fn scopes_of<'s>(
+	built: &'s mut Option<Vec<GraphRange>>,
+	at: &At,
+	source: &RecordId,
+	dir: Dir,
+	ranges: &KeyRanges,
+) -> Result<&'s [GraphRange], ControlFlow> {
+	match built {
+		Some(built) => Ok(built),
+		slot @ None => {
+			#[cfg(test)]
+			frontier::counters::build();
+			let built = slot.insert(graph_ranges(at.ns, at.db, source, dir, &ranges.specs)?);
+			debug_assert_eq!(built.len(), ranges.specs.len().max(1));
+			Ok(built.as_slice())
+		}
+	}
+}
+
 /// The metrics the plan being analysed reports for the program running in
 /// `ctx`, when it is analysed.
 fn analysed(ctx: &ExecutionContext) -> Option<&crate::exec::metrics::OperatorMetrics> {
 	ctx.vm_metrics().map(|metrics| &**metrics).filter(|metrics| metrics.is_enabled())
+}
+
+/// Reach what the adjacency key `key` names, read along `dir`, as [`reach`] does, collecting onto
+/// `untargeted` the edges whose key names no vertex, and say whether the read goes on: it stops
+/// once `out` holds `cap` entries.
+fn take_key(
+	key: &[u8],
+	targets: Option<&[TableName]>,
+	dir: Dir,
+	cap: usize,
+	out: &mut Vec<Entry>,
+	untargeted: &mut Vec<RecordId>,
+) -> anyhow::Result<VisitFlow> {
+	let decoded = DecodedGraph::decode(key)?;
+	untargeted.extend(reach(targets, dir, decoded.edge, decoded.target, None, out));
+	Ok(if out.len() >= cap {
+		VisitFlow::Stop
+	} else {
+		VisitFlow::Continue
+	})
 }
 
 /// Push onto `out` what a hop reaches through adjacency entry `edge`, read
@@ -1084,6 +1711,7 @@ async fn references(
 	memo: &mut TableMemo,
 	cap: usize,
 	out: &mut Vec<RecordId>,
+	windows: Windows<'_>,
 ) -> FlowResult<()> {
 	super::fuel::tick(ctx, 1).await?;
 	if out.len() >= cap {
@@ -1099,29 +1727,42 @@ async fn references(
 			.await
 			.context("Failed to resolve the referenced record's table")?;
 		if crate::idx::inline_cache::effective_refs_cap(tb.definition.as_deref()).is_some() {
-			let key = RefCacheKey {
-				ns: at.ns,
-				db: at.db,
-				tb: Cow::Borrowed(&target.table),
-				id: Cow::Borrowed(&target.key),
+			// A window that probed the cache answers for the read.
+			let probed = windows.ref_probe(at, target);
+			let fetched;
+			let cached: Option<&CacheValue<RefCacheEntry>> = match probed {
+				Some(value) => value,
+				None => {
+					let key = RefCacheKey {
+						ns: at.ns,
+						db: at.db,
+						tb: Cow::Borrowed(&target.table),
+						id: Cow::Borrowed(&target.key),
+					};
+					fetched = txn
+						.get_many_key(vec![key], None)
+						.await
+						.context("Failed to read the inline reference caches")?
+						.pop()
+						.flatten();
+					fetched.as_ref()
+				}
 			};
-			let cached = txn
-				.get_many_key(vec![key], None)
-				.await
-				.context("Failed to read the inline reference caches")?
-				.pop()
-				.flatten();
 			if let Some(metrics) = analysed(ctx) {
-				match &cached {
+				match cached {
 					Some(CacheValue::Live(_)) => metrics.add_cache_hits(1),
 					_ => metrics.add_cache_misses(1),
 				}
 			}
 			if let Some(CacheValue::Live(entries)) = cached {
-				for entry in &entries {
+				// A unit per entry the cache answers, as the adjacency's cache charges, whether a
+				// window or this read probed it: the walk is this read's own.
+				let mut walked = 0usize;
+				for entry in entries {
 					if out.len() >= cap {
 						break;
 					}
+					walked += 1;
 					if let Some(prefix) = &subject.prefix
 						&& !entry.reference.starts_with(prefix)
 					{
@@ -1142,19 +1783,72 @@ async fn references(
 						key,
 					});
 				}
+				super::fuel::tick(ctx, super::fuel::units(walked)).await?;
 				return Ok(());
 			}
 		}
 	}
-	let range = crate::exec::operators::scan::ref_key_range(
-		at.ns,
-		at.db,
-		target,
-		subject.table.as_ref(),
-		subject.field.as_deref(),
-		start.clone(),
-		end.clone(),
-	)?;
+	let built = || {
+		#[cfg(test)]
+		frontier::counters::build();
+		crate::exec::operators::scan::ref_key_range(
+			at.ns,
+			at.db,
+			target,
+			subject.table.as_ref(),
+			subject.field.as_deref(),
+			start.clone(),
+			end.clone(),
+		)
+	};
+	// The keys a window read for the range are visited as the cursor would visit its first
+	// chunk; a range the window cut goes on from a cursor opened after the last key it holds. A
+	// window holds the current version's keys, so a read at a version never consults one. A
+	// window that holds the range for this read answers without it being built.
+	let mut range = None;
+	let served = match at.version {
+		None => {
+			match whole.then(|| windows.owned_references(at, target, frontier::hop_id(subject))) {
+				Some(Some(served)) => Some(served),
+				_ => {
+					let held = range.insert(built()?);
+					windows.range(held.start().as_slice(), held.end().as_slice())
+				}
+			}
+		}
+		Some(_) => None,
+	};
+	if let Some(served) = served {
+		let mut visited = 0usize;
+		for key in served.keys() {
+			visited += 1;
+			if take_reference(key, cap, out).context("Failed to decode ref key")? {
+				break;
+			}
+		}
+		// A unit per reference read, and one for the read itself.
+		super::fuel::tick(ctx, super::fuel::units(visited).saturating_add(1)).await?;
+		if visited == 0 || out.len() >= cap {
+			return Ok(());
+		}
+		if !served.cut() {
+			super::fuel::tick(ctx, 1).await?;
+			return Ok(());
+		}
+		if let Some(last) = served.last() {
+			range = Some(
+				match range.take() {
+					Some(range) => range,
+					None => built()?,
+				}
+				.resume_after(last, Direction::Forward),
+			);
+		}
+	}
+	let range = match range {
+		Some(range) => range,
+		None => built()?,
+	};
 	let mut cursor = txn
 		.open_keys_cursor(range, Direction::Forward, 0, at.version)
 		.await
@@ -1163,18 +1857,12 @@ async fn references(
 		let mut failed: Option<anyhow::Error> = None;
 		let stats = cursor
 			.for_each(super::fuel::batch(crate::kvs::NORMAL_BATCH_SIZE), &mut |key| {
-				match ReferenceKey::decode_key(key) {
-					Ok(decoded) => {
-						out.push(RecordId {
-							table: decoded.foreign_table.into_owned(),
-							key: decoded.foreign_key.into_owned(),
-						});
-						Ok(if out.len() >= cap {
-							std::ops::ControlFlow::Break(())
-						} else {
-							std::ops::ControlFlow::Continue(())
-						})
-					}
+				match take_reference(key, cap, out) {
+					Ok(stop) => Ok(if stop {
+						std::ops::ControlFlow::Break(())
+					} else {
+						std::ops::ControlFlow::Continue(())
+					}),
 					Err(e) => {
 						failed = Some(e);
 						Ok(std::ops::ControlFlow::Break(()))
@@ -1192,6 +1880,24 @@ async fn references(
 			return Ok(());
 		}
 	}
+}
+
+/// Push onto `out` the record the reference key `key` names, and say whether the read stops: it
+/// does once `out` holds `cap` records.
+fn take_reference(key: &[u8], cap: usize, out: &mut Vec<RecordId>) -> anyhow::Result<bool> {
+	let decoded = ReferenceKey::decode_key(key)?;
+	out.push(RecordId {
+		table: decoded.foreign_table.into_owned(),
+		key: decoded.foreign_key.into_owned(),
+	});
+	Ok(out.len() >= cap)
+}
+
+/// The edge a cached adjacency entry names.
+fn decode_cache_edge(entry: &EdgeCacheEntry) -> anyhow::Result<RecordId> {
+	let (table, key): (TableName, RecordIdKey) = storekey::decode_borrow(&entry.edge)
+		.map_err(|e| anyhow::anyhow!("Failed to decode a cached edge identity: {e}"))?;
+	Ok(RecordId::new(table, key))
 }
 
 /// The edge and the vertex beyond it a cached adjacency entry names.

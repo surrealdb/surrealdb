@@ -503,8 +503,27 @@ pub(crate) struct State {
 	pub(super) link_pool: crate::exec::operators::link_window::LinkPool,
 	/// The records of the links the rows of the batch being run hold, which a pipeline whose plan
 	/// states [`Pipeline::rows_ahead`](super::program::Pipeline::rows_ahead) read before the rows
-	/// ran. Replaced by the next batch's.
+	/// ran. Replaced by the next batch's, and emptied when the scan that filled it ends, however
+	/// it ends: a `Fetch` of any pipeline of the state reads it by key, so it holds bytes only
+	/// while the scan that filled it runs.
 	pub(super) link_ahead: Option<crate::exec::operators::link_window::RowsWindow>,
+	/// What the inline caches and adjacency keys of the sources of the hop a lookup is reading
+	/// held when it filled its window, which the hop's reads consume. Emptied when the hop has
+	/// read its sources.
+	pub(super) frontier_hop: super::graph::Frontier,
+	/// What the inline caches and adjacency keys of the origins of one group of an array a lookup
+	/// answers held when it filled its window, which each origin's first hop consumes. Emptied
+	/// when the group has been answered.
+	pub(super) frontier_origins: super::graph::Frontier,
+	/// What the inline caches and adjacency keys of the sources of the batch of rows being run
+	/// held when the batch's window was filled, which every lookup of the batch consumes.
+	/// Replaced by the next batch's, and emptied when the scan that filled it ends, however it
+	/// ends: a lookup of any pipeline of the state reads it by key, so it holds bytes only while
+	/// the scan that filled it runs.
+	pub(super) frontier_rows: super::graph::Frontier,
+	/// The records each level of a path reached while the batch's window was filled: the sources
+	/// of the next level. Empty between fills; it holds the buffers of the levels.
+	pub(super) frontier_levels: super::graph::frontier::Levels,
 	/// The paging clause a morsel counts its rows against, which the morsel
 	/// leaves to its merge: `None` for a state that runs no such morsel.
 	pub(super) batch_paging: Option<u16>,
@@ -1058,6 +1077,10 @@ impl State {
 			scan_hint,
 			link_pool,
 			link_ahead,
+			frontier_hop,
+			frontier_origins,
+			frontier_rows,
+			frontier_levels,
 			batch_paging,
 			reached_paging,
 			capture_distinct,
@@ -1144,6 +1167,10 @@ impl State {
 		if let Some(ahead) = link_ahead {
 			ahead.clear();
 		}
+		frontier_hop.clear();
+		frontier_origins.clear();
+		frontier_rows.clear();
+		frontier_levels.clear();
 		*batch_paging = None;
 		*reached_paging = false;
 		*capture_distinct = false;
@@ -1416,6 +1443,10 @@ impl State {
 			scan_hint: None,
 			link_pool: Default::default(),
 			link_ahead: None,
+			frontier_hop: Default::default(),
+			frontier_origins: Default::default(),
+			frontier_rows: Default::default(),
+			frontier_levels: Default::default(),
 			batch_paging: None,
 			reached_paging: false,
 			capture_distinct: false,

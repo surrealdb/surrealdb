@@ -47,6 +47,7 @@ mod edit;
 mod existence;
 mod extreme;
 pub(crate) mod facts;
+pub(crate) mod frontier;
 mod hold_left;
 pub(crate) mod hop_key;
 mod index_answer;

@@ -2612,8 +2612,44 @@ async fn scan_key_ranges(
 /// and any other is decoded and brought through the steps it has not passed
 /// before the body or a judge of its bytes sees it. With `coarse`, the scan
 /// stops before the first record past its cut.
+///
+/// The windows of the source rows' links and lookups ([`State::link_ahead`],
+/// [`State::frontier_rows`]) are emptied however the scan ends: a spent
+/// limit, a failing row and a failing source included.
 #[allow(clippy::too_many_arguments)]
 async fn scan_range(
+	program: &Arc<Program>,
+	pipeline: &Pipeline,
+	range: crate::key::RawRange,
+	gate: RowGate,
+	replay: Option<Replay>,
+	direction: crate::kvs::Direction,
+	version: Option<u64>,
+	state: &mut State,
+	ctx: &ExecutionContext,
+	yielder: &mut Out<'_, '_>,
+	flush_at: usize,
+	coarse: Option<&mut CoarseGate>,
+) -> FlowResult<bool> {
+	let ended = scan_rows(
+		program, pipeline, range, gate, replay, direction, version, state, ctx, yielder, flush_at,
+		coarse,
+	)
+	.await;
+	#[cfg(test)]
+	if !state.frontier_rows.is_empty() {
+		super::graph::frontier::counters::end_held();
+	}
+	if let Some(ahead) = &mut state.link_ahead {
+		ahead.clear();
+	}
+	state.frontier_rows.clear();
+	ended
+}
+
+/// [`scan_range`] without the emptying of the windows the scan filled.
+#[allow(clippy::too_many_arguments)]
+async fn scan_rows(
 	program: &Arc<Program>,
 	pipeline: &Pipeline,
 	range: crate::key::RawRange,
@@ -2630,10 +2666,6 @@ async fn scan_range(
 	// The first read of storage of a run whose reader says how many rows it
 	// takes reads no more records than that before it hands its rows on.
 	let first = state.scan_hint.take();
-	// The links of an earlier run's last batch are not this run's.
-	if let Some(ahead) = &mut state.link_ahead {
-		ahead.clear();
-	}
 	if pipeline.in_place {
 		// A body in the storage cursor planned as morsels reads its key range in parts; a scan cut
 		// by a coarse gate reads in one cursor, which the gate stops.
@@ -2741,7 +2773,7 @@ async fn scan_range(
 		// The links of the rows are read ahead a run of rows at a time, each run before its rows.
 		let mut pending = batch.into_values().into_iter();
 		while pending.len() > 0 {
-			let run = match rows.ahead(pipeline, pending.as_slice(), state, ctx).await {
+			let run = match rows.ahead(program, pipeline, pending.as_slice(), state, ctx).await {
 				Ok(run) => run.max(1),
 				Err(e) => return rows.fail(e, state, ctx, yielder, flush_at).await,
 			};
@@ -6319,6 +6351,24 @@ pub(super) async fn fill_rows_ahead(
 	};
 	let ahead = state.link_ahead.get_or_insert_with(Default::default);
 	ahead.fill(ctx, rows, &spec.fields).await
+}
+
+/// Reads what the first hop of the lookups of `pipeline`'s projection holds for the rows of one
+/// batch, before the rows run, where the physical plan states it
+/// ([`Pipeline::frontier_rows`]): `rows` are the rows of the batch that reach the projection, in
+/// order. The window is held in `state` until the next batch replaces it. A pipeline the plan
+/// states nothing for reads nothing ahead.
+pub(super) async fn fill_frontier_rows(
+	program: &Program,
+	pipeline: &Pipeline,
+	rows: &[Value],
+	state: &mut State,
+	ctx: &ExecutionContext,
+) {
+	let Some(spec) = &pipeline.frontier_rows else {
+		return;
+	};
+	super::graph::fill_rows(program, &spec.chains, rows, state, ctx).await;
 }
 
 /// [`bound_breakers`] over `memory`, a sort that keeps every row spilling

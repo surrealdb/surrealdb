@@ -39,7 +39,8 @@ use super::super::program::{
 use super::super::row::FieldName;
 use crate::exec::field_path::FieldPath;
 use crate::exec::ir::error::IrError;
-use crate::exec::ir::iface::ids::ValueId;
+use crate::exec::ir::iface::ids::{OpId, ValueId};
+use crate::exec::ir::phys::placement_attr::FrontierHops;
 use crate::exec::planner::placement::Parallel;
 use crate::exec::{AccessMode, ContextLevel};
 use crate::expr::Kind;
@@ -116,6 +117,22 @@ pub(crate) struct Emitter {
 	/// The values a block binds in a slot of the running state, which every lowerer of the program
 	/// reads them from: the pipelines of a block's statements run over the same state.
 	bound: HashMap<ValueId, BoundSlot>,
+	/// The hops of the pipeline being lowered whose sources the physical plan has read in
+	/// windows. A pipeline built beside the one in flight has none.
+	frontier_hops: FrontierHops,
+	/// The lookup that ends at each hop, by the graph-step op that states the hop.
+	hop_lookups: HashMap<OpId, HopLookup>,
+	/// The lookups the pipeline in flight has emitted.
+	pipeline_lookups: Vec<u32>,
+}
+
+/// The lookup whose last hop a graph-step op states.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct HopLookup {
+	/// The index of the lookup in the program's lookups.
+	pub(super) lookup: u32,
+	/// How many hops the lookup has: it covers that many graph steps, ending at this one.
+	pub(super) hops: usize,
 }
 
 /// What [`Emitter::open_group`] set aside, which [`Emitter::close_group`] restores.
@@ -135,6 +152,8 @@ pub(super) struct Aside {
 	code: Vec<Instr>,
 	registers: u16,
 	targets: Vec<Option<Label>>,
+	frontier_hops: FrontierHops,
+	pipeline_lookups: Vec<u32>,
 }
 
 #[allow(dead_code)] // Called by the lowering of chunks 4 to 8.
@@ -173,6 +192,9 @@ impl Emitter {
 			permission_floor: 0,
 			probe_owner: None,
 			bound: HashMap::new(),
+			frontier_hops: FrontierHops::default(),
+			hop_lookups: HashMap::new(),
+			pipeline_lookups: Vec::new(),
 		}
 	}
 
@@ -482,9 +504,45 @@ impl Emitter {
 		Ok(frame)
 	}
 
-	/// The index of the graph lookup `spec`, appended to the program's lookups.
+	/// States the hops of the pipeline about to be lowered whose sources the physical plan reads
+	/// in windows. [`Emitter::end_hops`] ends the statement.
+	pub(super) fn set_frontier_hops(&mut self, hops: FrontierHops) {
+		self.frontier_hops = hops;
+	}
+
+	/// Whether the plan reads the sources of the hop the graph-step op `hop` states in windows.
+	pub(super) fn serves_hop(&self, hop: OpId) -> bool {
+		self.frontier_hops.serves(hop)
+	}
+
+	/// Ends what [`Emitter::set_frontier_hops`] stated and forgets the lookups the pipeline in
+	/// flight emitted.
+	pub(super) fn end_hops(&mut self) {
+		self.frontier_hops = FrontierHops::default();
+		self.pipeline_lookups.clear();
+	}
+
+	/// Records that the lookup `answer.lookup` ends at the hop the graph-step op `hop` states.
+	pub(super) fn note_hop_lookup(&mut self, hop: OpId, answer: HopLookup) {
+		self.hop_lookups.insert(hop, answer);
+	}
+
+	/// The lookup that ends at the hop the graph-step op `hop` states, when one does.
+	pub(super) fn hop_lookup(&self, hop: OpId) -> Option<HopLookup> {
+		self.hop_lookups.get(&hop).copied()
+	}
+
+	/// Whether the pipeline in flight emitted the lookup `lookup`.
+	pub(super) fn emitted_lookup(&self, lookup: u32) -> bool {
+		self.pipeline_lookups.contains(&lookup)
+	}
+
+	/// The index of the graph lookup `spec`, appended to the program's lookups. The pipeline in
+	/// flight runs it.
 	pub(super) fn lookup(&mut self, spec: LookupSpec) -> Result<u32, IrError> {
-		push(&mut self.lookups, spec, "vm lookups")
+		let index = push(&mut self.lookups, spec, "vm lookups")?;
+		self.pipeline_lookups.push(index);
+		Ok(index)
 	}
 
 	/// The index of `pipeline` in the host pipelines of the program: code the host runs over a
@@ -561,6 +619,8 @@ impl Emitter {
 			code: std::mem::take(&mut self.code),
 			registers: std::mem::replace(&mut self.registers, ROW + 1),
 			targets: std::mem::take(&mut self.targets),
+			frontier_hops: std::mem::take(&mut self.frontier_hops),
+			pipeline_lookups: std::mem::take(&mut self.pipeline_lookups),
 		}
 	}
 
@@ -569,6 +629,8 @@ impl Emitter {
 		self.code = aside.code;
 		self.registers = aside.registers;
 		self.targets = aside.targets;
+		self.frontier_hops = aside.frontier_hops;
+		self.pipeline_lookups = aside.pipeline_lookups;
 	}
 
 	/// Ends the pipeline whose code was emitted since the last one, reading rows from `source`.
@@ -615,6 +677,7 @@ impl Emitter {
 			parallel: Parallel::Serial,
 			group: self.group,
 			deref_windows: false,
+			frontier_rows: None,
 			read_ahead: false,
 			rows_ahead: None,
 		})

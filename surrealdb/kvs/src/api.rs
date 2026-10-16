@@ -353,6 +353,12 @@ impl<T: FnMut(&[u8], &[u8]) -> Result<std::ops::ControlFlow<()>> + Send> ValVisi
 pub trait KeyVisitor: FnMut(&[u8]) -> Result<std::ops::ControlFlow<()>> + Send {}
 impl<T: FnMut(&[u8]) -> Result<std::ops::ControlFlow<()>> + Send> KeyVisitor for T {}
 
+/// Per-key visitor for [`Transactable::visit_key_ranges`]: invoked with the index of the range
+/// the key belongs to and the key itself, borrowed from the engine. See [`KeyVisitor`] for the
+/// contract; `Break` ends the whole read, every later range included.
+pub trait RangeKeyVisitor: FnMut(usize, &[u8]) -> Result<std::ops::ControlFlow<()>> + Send {}
+impl<T: FnMut(usize, &[u8]) -> Result<std::ops::ControlFlow<()>> + Send> RangeKeyVisitor for T {}
+
 /// A stateful keys-only scan cursor. Returned by [`Transactable::open_keys_cursor`].
 ///
 /// A cursor represents one logical scan operation (e.g. an outer table walk,
@@ -743,6 +749,56 @@ pub trait Transactable: Send + Sync {
 		})
 	}
 
+	/// Visit the keys of each of `ranges`, in range order and key order within a range, at most
+	/// `limit` keys from each, handing the visitor the index of the range and the key. The
+	/// visitor's `Break` ends the whole read after that key, the remaining ranges unread. The
+	/// returned stats count the keys the visitor was handed.
+	///
+	/// A range holds the keys at or after its start and before its end, as [`Self::keys`] reads
+	/// it. A range that yields `limit` keys may hold more. The reads see the transaction as a
+	/// cursor over each range would, at `version`.
+	///
+	/// The default opens one keys cursor per range and drives it through one chunk, so it costs
+	/// what reading the ranges one by one costs. A backend that can serve the ranges with less
+	/// work than that (one iterator for all of them) overrides it and answers
+	/// [`Self::multi_read`] with `true`.
+	fn visit_key_ranges<'a>(
+		&'a self,
+		ranges: &'a [KeyRange<'a>],
+		limit: u32,
+		version: Option<u64>,
+		f: &'a mut dyn RangeKeyVisitor,
+	) -> BoxFut<'a, Result<ScanChunkStats>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			let mut total = ScanChunkStats::default();
+			if limit == 0 {
+				return Ok(total);
+			}
+			for (at, rng) in ranges.iter().enumerate() {
+				let mut cursor =
+					self.open_keys_cursor(rng.clone(), Direction::Forward, 0, version).await?;
+				let mut stopped = false;
+				let chunk = cursor
+					.for_each(limit, &mut |key: &[u8]| {
+						let flow = f(at, key)?;
+						stopped = flow.is_break();
+						Ok(flow)
+					})
+					.await?;
+				total.rows += chunk.rows;
+				total.key_bytes += chunk.key_bytes;
+				if stopped {
+					break;
+				}
+			}
+			Ok(total)
+		})
+	}
+
 	/// Open a stateful key+value scan cursor over `rng`. See
 	/// [`Self::open_keys_cursor`] for the semantics.
 	fn open_vals_cursor<'a>(
@@ -1025,6 +1081,16 @@ pub trait Transactable: Send + Sync {
 	/// for every transaction of a datastore, so it is a static fact a planner may read once.
 	/// `false` is always correct, and is the default.
 	fn scan_read_ahead(&self) -> bool {
+		false
+	}
+
+	/// Whether reading many keys or many ranges at once costs less than reading them one by one:
+	/// [`Self::getm`] and [`Self::visit_key_ranges`] serve a batch with one acquisition of the
+	/// transaction and one hop to the thread that reads, where the same reads one by one pay each.
+	///
+	/// It is the same answer for every transaction of a datastore, so it is a static fact a
+	/// planner may read once. `false` is always correct, and is the default.
+	fn multi_read(&self) -> bool {
 		false
 	}
 

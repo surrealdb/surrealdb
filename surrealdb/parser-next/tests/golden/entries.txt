@@ -1693,6 +1693,12 @@ a36672d90be4bfca language-tests/tests/language/graph/edge_range_syntax.surql
 a411d8d08d92ad7a language-tests/tests/language/graph/filter_combined.surql
 c1c17a6976259d37 language-tests/tests/language/graph/filter_edge_properties.surql
 d701955b176ea0eb language-tests/tests/language/graph/filter_target_nodes.surql
+82447d4c628a1c45 language-tests/tests/language/graph/frontier_windows.surql
+ad31f0b2525db4ca language-tests/tests/language/graph/frontier_windows_hub.surql
+3703f502df4f3614 language-tests/tests/language/graph/frontier_windows_inline.surql
+d6b55ce7a4abe7a6 language-tests/tests/language/graph/frontier_windows_permissions.surql
+181d1f4b866770f6 language-tests/tests/language/graph/frontier_windows_permissions_import.surql
+3b3df01f7d687941 language-tests/tests/language/graph/frontier_windows_version.surql
 9c56341c01e07161 language-tests/tests/language/graph/inline_cache.surql
 bdfec1327d64469b language-tests/tests/language/graph/inline_cache_permissions.surql
 6d4c6db1749f61f0 language-tests/tests/language/graph/inline_cache_permissions_import.surql

@@ -297,47 +297,63 @@ impl<'p> Rows<'p> {
 		}
 	}
 
-	/// Reads the links of a run of the leading rows of `batch`, the rows of a source batch not yet
-	/// run, before they run, for a pipeline whose plan states it
-	/// ([`Pipeline::rows_ahead`](crate::exec::vm::program::Pipeline::rows_ahead)), when the rows
-	/// run one at a time: only the rows that reach the `FETCH` are keyed, which the paging clause
-	/// before it decides from what it has left to skip and to admit. Answers how many leading rows
-	/// of `batch` to run before the next call, at least one where `batch` holds any; the caller
-	/// runs them and asks again for the rest. The rows of a morsel batch read their links as the
-	/// `FETCH` reaches them, and are answered whole.
+	/// Reads what the rows of a run of the leading rows of `batch`, the rows of a source batch not
+	/// yet run, reach, before they run, when the rows run one at a time: the links of a `FETCH`
+	/// where the plan states them
+	/// ([`Pipeline::rows_ahead`](crate::exec::vm::program::Pipeline::rows_ahead)), and the first
+	/// hops of the graph lookups it states
+	/// ([`Pipeline::frontier_rows`](crate::exec::vm::program::Pipeline::frontier_rows)). Only the
+	/// rows that reach the reader are keyed, which the paging clause before it decides from what it
+	/// has left to skip and to admit. Answers how many leading rows of `batch` to run before the
+	/// next call, at least one where `batch` holds any: the rows the links' window covers, and the
+	/// whole batch where no link is read ahead; the frontier window is filled for those rows. The
+	/// caller runs them and asks again for the rest. The rows of a morsel batch read what they
+	/// reach as they run, and are answered whole.
 	pub(super) async fn ahead(
 		&mut self,
+		program: &Program,
 		pipeline: &Pipeline,
 		batch: &[Value],
 		state: &mut State,
 		ctx: &ExecutionContext,
 	) -> FlowResult<usize> {
-		let (Rows::Serial, Some(spec)) = (&*self, &pipeline.rows_ahead) else {
+		if !matches!(&*self, Rows::Serial) {
 			return Ok(batch.len());
-		};
-		let (start, end) = match spec.paging {
+		}
+		// The rows a paging clause before the reader lets through are the ones that reach it.
+		let reaching = |paging: Option<u16>, state: &State| match paging {
 			Some(slot) => {
 				let paging = state.paging[usize::from(slot)];
 				let start = paging.skip.min(batch.len());
 				let end = paging.remaining.map_or(batch.len(), |remaining| {
 					start.saturating_add(remaining).min(batch.len())
 				});
-				(start, end)
+				start..end
 			}
-			None => (0, batch.len()),
+			None => 0..batch.len(),
 		};
-		if start == end {
-			return Ok(batch.len());
+		let mut run = batch.len();
+		if let Some(spec) = &pipeline.rows_ahead {
+			let reaching = reaching(spec.paging, state);
+			if !reaching.is_empty() {
+				let covered =
+					super::host::fill_rows_ahead(pipeline, &batch[reaching.clone()], state, ctx)
+						.await?;
+				// The rows past the reaching ones do not reach the `FETCH`, so a fill that covers
+				// every row that does covers the batch.
+				if reaching.start + covered < reaching.end {
+					run = reaching.start + covered;
+				}
+			}
 		}
-		let covered =
-			super::host::fill_rows_ahead(pipeline, &batch[start..end], state, ctx).await?;
-		// The rows past `end` do not reach the `FETCH`, so a fill that covers every row that does
-		// covers the batch.
-		Ok(if start + covered >= end {
-			batch.len()
-		} else {
-			start + covered
-		})
+		if let Some(spec) = &pipeline.frontier_rows {
+			let reaching = reaching(spec.paging, state);
+			let end = reaching.end.min(run);
+			let start = reaching.start.min(end);
+			super::host::fill_frontier_rows(program, pipeline, &batch[start..end], state, ctx)
+				.await;
+		}
+		Ok(run)
 	}
 
 	/// These rows, for a reader that takes no more than `reads` of them before it may stop, where
@@ -380,6 +396,7 @@ impl<'p> Rows<'p> {
 				if let Some(ahead) = &mut state.link_ahead {
 					ahead.clear();
 				}
+				state.frontier_rows.clear();
 				Ok(false)
 			}
 			Rows::Morsels(set) => set.finish(state, ctx, yielder, flush_at).await,

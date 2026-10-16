@@ -66,6 +66,9 @@ pub(crate) struct IoCaps {
 	/// The next chunk of a scan is worth reading on another task while the caller works on the
 	/// current one, and the transaction may be read from that task.
 	pub(crate) scan_read_ahead: bool,
+	/// A multi-get and a multi-range read cost less than the same reads one by one, so a plan may
+	/// batch the random key reads of a row stream into windows.
+	pub(crate) multi_read: bool,
 }
 
 /// How the field view of a table is applied to an image of one of its records, for the principal

@@ -45,8 +45,9 @@ use scan_cursor::{
 };
 use snapshot::RocksSnapshot;
 use surrealdb_kvs::api::{
-	BoxFut, GetMultiResult, KeySpan, KeyValSpan, KeyVisitor, KeysBatch, KeysResult, ScanChunkStats,
-	ScanCursorKeys, ScanCursorVals, ScanResult, Transactable, ValVisitor, ValsBatch,
+	BoxFut, GetMultiResult, KeySpan, KeyValSpan, KeyVisitor, KeysBatch, KeysResult,
+	RangeKeyVisitor, ScanChunkStats, ScanCursorKeys, ScanCursorVals, ScanResult, Transactable,
+	ValVisitor, ValsBatch,
 };
 use surrealdb_kvs::config::SyncMode;
 use surrealdb_kvs::consts::{ESTIMATED_BYTES_PER_KEY, ESTIMATED_BYTES_PER_KV};
@@ -1295,6 +1296,35 @@ impl Transaction {
 		}
 	}
 
+	/// Synchronous implementation of `visit_key_ranges` taking an already-acquired lock guard.
+	///
+	/// One iterator, bounded by `bounds` (the span of every range), is seeked to the start of each
+	/// range in turn. Writeable transactions iterate on the inner transaction under the lock, so
+	/// pending writes are visible, as in [`Self::keys_blocking`]; read-only transactions release
+	/// the lock once the iterator holds its own borrow of the snapshot.
+	fn visit_ranges_blocking(
+		&self,
+		ranges: &[KeyRange<'_>],
+		bounds: Range<Vec<u8>>,
+		limit: u32,
+		version: Option<u64>,
+		f: &mut dyn RangeKeyVisitor,
+		guard: MutexGuard<'_, Option<OwnedTx>>,
+	) -> Result<ScanChunkStats> {
+		let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
+		// The bounds span every range, so the prefix optimisations apply where all of them share
+		// one extracted prefix, as one range's do, and total-order seeks serve them otherwise.
+		let ro = self.scan_read_options(&bounds, version, inner);
+		if self.write {
+			let mut iter = inner.raw_iterator_opt(ro);
+			visit_ranges_inner(&mut iter, ranges, limit, f)
+		} else {
+			let mut iter = inner.handle().raw_iter(ro);
+			drop(guard);
+			visit_ranges_inner(&mut iter, ranges, limit, f)
+		}
+	}
+
 	/// Synchronous implementation of `scan` and `scanr` taking an already-acquired
 	/// lock guard.
 	///
@@ -1944,6 +1974,44 @@ pub(crate) async fn cursor_for_each_vals(
 		.await
 }
 
+/// Visit the keys of each range through one iterator, seeking to each range's start. A key at or
+/// after the range's end ends that range, because the iterator's own bound spans every range.
+fn visit_ranges_inner<D: rocksdb::DBAccess>(
+	iter: &mut rocksdb::DBRawIteratorWithThreadMode<'_, D>,
+	ranges: &[KeyRange<'_>],
+	limit: u32,
+	f: &mut dyn RangeKeyVisitor,
+) -> Result<ScanChunkStats> {
+	let mut stats = ScanChunkStats::default();
+	for (at, range) in ranges.iter().enumerate() {
+		if range.start >= range.end {
+			continue;
+		}
+		iter.seek(&*range.start);
+		let mut taken = 0u32;
+		while taken < limit {
+			let Some(k) = iter.key() else {
+				break;
+			};
+			if k >= &*range.end {
+				break;
+			}
+			// Count only after the visitor accepts the key (see `visit_vals_inner`).
+			let flow = f(at, k)?;
+			stats.rows += 1;
+			stats.key_bytes += k.len() as u64;
+			taken += 1;
+			iter.next();
+			if let std::ops::ControlFlow::Break(()) = flow {
+				iter.status().map_err(kvs_error)?;
+				return Ok(stats);
+			}
+		}
+	}
+	iter.status().map_err(kvs_error)?;
+	Ok(stats)
+}
+
 /// Keys-only zero-copy visitor over the iterator. See [`visit_vals_inner`].
 fn visit_keys_inner<D: rocksdb::DBAccess>(
 	iter: &mut rocksdb::DBRawIteratorWithThreadMode<'_, D>,
@@ -2143,6 +2211,12 @@ impl Transactable for Transaction {
 	/// A chunk read walks the iterator and its blocks, which another task may do while the caller
 	/// runs its rows; a writable scan holds the transaction's lock for one chunk at a time.
 	fn scan_read_ahead(&self) -> bool {
+		true
+	}
+
+	/// One iterator serves every range of [`Self::visit_key_ranges`] under one acquisition of the
+	/// transaction and one hop to the thread that reads, and a multi-get is one engine call.
+	fn multi_read(&self) -> bool {
 		true
 	}
 
@@ -2929,6 +3003,54 @@ impl Transactable for Transaction {
 					key_spans: Vec::new(),
 				},
 			}) as Box<dyn ScanCursorKeys + 'a>)
+		})
+	}
+
+	/// Visit the keys of several ranges with one iterator. See
+	/// [`Transactable::visit_key_ranges`]. Dispatched as [`Self::keys`] is: a writeable
+	/// transaction always offloads, because its iterator holds the inner lock for the walk.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip_all)]
+	fn visit_key_ranges<'a>(
+		&'a self,
+		ranges: &'a [KeyRange<'a>],
+		limit: u32,
+		version: Option<u64>,
+		f: &'a mut dyn RangeKeyVisitor,
+	) -> BoxFut<'a, Result<ScanChunkStats>> {
+		Box::pin(async move {
+			// Versioned queries require a versioned datastore
+			self.ensure_versioned(version)?;
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			// An empty range holds no key, so it neither widens the bounds nor takes a seek.
+			let held = || ranges.iter().filter(|range| range.start < range.end);
+			let (Some(low), Some(high)) =
+				(held().map(|range| &*range.start).min(), held().map(|range| &*range.end).max())
+			else {
+				return Ok(ScanChunkStats::default());
+			};
+			if limit == 0 || low >= high {
+				return Ok(ScanChunkStats::default());
+			}
+			let bounds = low.to_vec()..high.to_vec();
+			if self.write {
+				let guard = self.inner.lock().await;
+				// SAFETY: as in `keys`: the closure borrows `self`, the ranges and the visitor and
+				// holds the inner `MutexGuard`, and the future is awaited inline and never stored,
+				// so its destructor blocks until the worker stops touching the borrows.
+				return unsafe {
+					affinitypool::spawn_local(move || {
+						self.visit_ranges_blocking(ranges, bounds, limit, version, f, guard)
+					})
+				}
+				.await;
+			}
+			self.run_blocking(move |guard| {
+				self.visit_ranges_blocking(ranges, bounds, limit, version, f, guard)
+			})
+			.await
 		})
 	}
 
