@@ -2272,6 +2272,21 @@ impl Executor {
 		Err(ControlFlow::Err(anyhow::Error::new(ExecError::InvalidStatement(message.to_string()))))
 	}
 
+	/// Apply the `OPTION` statement `stmt` to the options every later statement
+	/// of the request runs under, as a block does, answering `NONE`. A principal
+	/// that may not edit options is refused, and nothing changes.
+	fn run_option(&mut self, stmt: &TopLevelStatement) -> FlowResult<Value> {
+		// The answer is a scalar, whatever the statement before it answered.
+		self.result_shape = OutputShape::Scalar;
+		let Dispatch::Option(option) = stmt.dispatch() else {
+			return Err(ControlFlow::Err(anyhow::Error::new(EngineError::unreachable(
+				"a statement placed as OPTION did not dispatch as OPTION",
+			))));
+		};
+		self.execute_option_statement(&option).map_err(ControlFlow::Err)?;
+		Ok(Value::None)
+	}
+
 	/// `OPTION` changes the options every later statement in the batch runs
 	/// under, so a driver applies it and never hands it to an engine.
 	fn option_reached_an_engine() -> FlowResult<Value> {
@@ -3879,6 +3894,11 @@ impl Executor {
 	/// Shared body: run every statement against the transaction already on the
 	/// context, accumulating results on `self` and streaming them when this
 	/// executor streams.
+	///
+	/// The caller commits the transaction whatever the statements answered. An
+	/// `OPTION` applies to the statements after it, as in a block, and a
+	/// statement that fails after writing part of its change refuses that
+	/// commit ([`crate::kvs::Transaction::poison_failed_statement`]).
 	async fn run_with_transaction(
 		&mut self,
 		kvs: &Datastore,
@@ -3932,8 +3952,34 @@ impl Executor {
 			// down when the session ends or its principal changes.
 			let query_type = stmt.query_type();
 			let counters = self.install_statement_state();
-			let result = self.execute_plan_in_transaction(Arc::clone(&tx), &start, stmt).await;
+			let written = tx.bytes_written();
+			let result = match place.role {
+				StatementRole::Option => self.run_option(&stmt),
+				role @ (StatementRole::Run
+				| StatementRole::Misplaced(_)
+				| StatementRole::Begin
+				| StatementRole::Commit
+				| StatementRole::Cancel) => {
+					// A session grouper marks every transaction-control statement
+					// misplaced, and it reaches the engine with its mark.
+					debug_assert!(!matches!(
+						role,
+						StatementRole::Begin | StatementRole::Commit | StatementRole::Cancel
+					));
+					self.execute_plan_in_transaction(Arc::clone(&tx), &start, stmt).await
+				}
+			};
 			self.misplaced_control = None;
+			// The caller commits whatever the statement answered, so a statement that failed
+			// after it wrote would leave that part of its change durable without the rest. Its
+			// commit is refused instead. One that failed before writing leaves nothing behind.
+			if matches!(
+				result,
+				Err(ControlFlow::Err(_) | ControlFlow::Continue | ControlFlow::Break)
+			) && tx.bytes_written() > written
+			{
+				tx.poison_failed_statement();
+			}
 
 			let time = start.elapsed();
 			let query_result = match result {

@@ -1,6 +1,8 @@
 -- Failing schema statements in transactions the caller owns, where each failure is an index refusal:
--- a migration of an indexed field, a removal of one, and a UNIQUE index over values the rows collide
--- on. The caller commits what the statements before each failure wrote. The refused statements leave
+-- a migration of an indexed field, a removal of one, an index defined beside a migration, and a UNIQUE
+-- index over values the rows collide on. A refusal that comes before its statement writes leaves the
+-- caller to commit what the other statements wrote. A UNIQUE build refuses the duplicates after it
+-- wrote, which refuses the commit of its transaction. The refused statements leave
 -- the field, its index and the migration names as they were. A remove, migrate and define sequence
 -- in one transaction takes effect as a whole, and the indexes answer as a scan of the rows does.
 DEFINE TABLE ix SCHEMAFULL;
@@ -49,8 +51,8 @@ SELECT VALUE id FROM ix WHERE i = 2;
 (INFO FOR TABLE ix).migrations;
 -- @check
 -- A UNIQUE index refused for duplicates is not left behind: the duplicate it refused is still
--- writable in the transaction that refused it, and a later write of the same value is refused only
--- by a definition that committed.
+-- writable in the transaction that refused it, and the refusal fails that transaction's commit, so
+-- neither the definition nor the write stays.
 -- @client
 DEFINE INDEX by_u ON ix FIELDS u UNIQUE;
 CREATE ix:8 SET i = 8, u = 'a', n = 80 RETURN NONE;

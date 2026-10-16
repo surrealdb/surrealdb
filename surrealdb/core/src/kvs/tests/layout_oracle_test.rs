@@ -12,7 +12,8 @@
 //! - `-- @check`: the differential check (below) runs here.
 //! - `-- @client`: every statement from here to the next marker runs in one transaction its caller
 //!   owns, as an SDK's `begin` … `commit` does, and the caller commits it whatever the statements
-//!   answered: a statement that fails there keeps whatever it wrote before it failed.
+//!   answered. A statement that fails before it writes leaves the others to commit; one that fails
+//!   after it wrote refuses the commit, so the unit leaves nothing.
 //! - `-- @end`: ends the statements a `@client` runs, and is nothing else.
 //!
 //! Each scenario runs in six modes: three origins — a store this build created, with its database
@@ -120,10 +121,6 @@ const UNDECLARED_KEPT: &str = "a table made SCHEMAFULL at level 4 keeps the fiel
                                that it does not declare, which its check for undeclared keys \
                                reports, an export carries and an import refuses";
 
-const FAILED_BUILD_KEPT: &str = "a UNIQUE `DEFINE INDEX` whose build fails in a transaction its \
-                                 caller commits keeps its definition, which enforces nothing, and \
-                                 an export carries it over the rows that violate it";
-
 const VIEW_EXPORT_ORDER: &str = "an export writes a view before a table its subquery reads, and an \
                                  import refuses the view";
 
@@ -161,18 +158,6 @@ const KNOWN: &[Known] = &[
 		scenario: "vw_view_convert",
 		detail: "but no such field exists",
 		reason: UNDECLARED_KEPT,
-	},
-	Known {
-		kind: "import-failed",
-		scenario: "cl_index_refusals",
-		detail: "Database index `by_u` already contains",
-		reason: FAILED_BUILD_KEPT,
-	},
-	Known {
-		kind: "import-failed",
-		scenario: "cl_unique_after_migration",
-		detail: "Database index `uk` already contains",
-		reason: FAILED_BUILD_KEPT,
 	},
 	Known {
 		kind: "import-failed",

@@ -611,6 +611,11 @@ pub struct Transaction {
 	/// commit, as for the other poisons ([`Self::poisoned`]); a save point rollback does not clear
 	/// it.
 	catalog_write_poisoned: AtomicBool,
+	/// Set when a statement failed after writing part of its change, in a transaction its caller
+	/// commits whatever the statement answered ([`Self::poison_failed_statement`]). A transaction
+	/// with it set refuses to commit, as for the other poisons ([`Self::poisoned`]); a save point
+	/// rollback does not clear it.
+	failed_statement_poisoned: AtomicBool,
 	/// What each open save point recorded when it opened, innermost last, so that a rollback
 	/// undoes exactly what the scope did to the transaction's bookkeeping ([`SavePointMark`]).
 	save_point_marks: Mutex<Vec<SavePointMark>>,
@@ -1554,6 +1559,7 @@ impl Transaction {
 			stored_format_admitted: AtomicBool::new(false),
 			stored_format_absent: AtomicBool::new(false),
 			catalog_write_poisoned: AtomicBool::new(false),
+			failed_statement_poisoned: AtomicBool::new(false),
 			save_point_marks: Mutex::new(Vec::new()),
 			catalog_stamps: AtomicU64::new(0),
 			object_stamps: AtomicU64::new(0),
@@ -2114,7 +2120,7 @@ impl Transaction {
 
 	/// The reason this transaction may not commit, if there is one.
 	///
-	/// Four conditions poison a transaction, and all mean its writes are a state no
+	/// Five conditions poison a transaction, and all mean its writes are a state no
 	/// caller asked for:
 	///
 	/// - A tripped write-cardinality guard leaves the writes buffered before the failing
@@ -2126,6 +2132,8 @@ impl Transaction {
 	///   See [`Self::poison_interrupted_write`].
 	/// - A schema statement that failed after writing part of its change leaves a catalog change
 	///   the statement did not finish. See [`Self::catalog_write_poisoned`].
+	/// - Any statement that failed after writing part of its change, in a transaction its caller
+	///   owns, leaves that part. See [`Self::poison_failed_statement`].
 	///
 	/// Each is reachable at an explicit COMMIT: a client-owned (RPC/SDK)
 	/// transaction survives the statement error that set the flag. An explicit
@@ -2162,7 +2170,37 @@ impl Transaction {
 			}
 			.into());
 		}
+		if self.failed_statement_poisoned.load(Ordering::Relaxed) {
+			return Err(crate::error::DatastoreError::QueryNotExecuted {
+				message: "A statement failed after writing part of its change, so the transaction \
+				          cannot commit"
+					.to_string(),
+			}
+			.into());
+		}
 		Ok(())
+	}
+
+	/// Refuses this transaction's COMMIT, because a statement run in it failed
+	/// after it had written part of its change.
+	///
+	/// A statement's writes reach the transaction as it runs, and nothing takes
+	/// them back when it fails: a `DEFINE INDEX` has written its definition when
+	/// its build is refused, a `CREATE` has written its record when a `UNIQUE`
+	/// index refuses the value, and a multi-row `INSERT` has written the rows
+	/// before the one refused. A transaction the statement ran alone in is
+	/// cancelled, and a `BEGIN` block is cancelled whole; but a transaction its
+	/// caller owns (RPC/SDK) survives the error and can still issue COMMIT, which
+	/// would make the part durable without the rest. The flag makes the refusal
+	/// the transaction's own, whatever the caller does with the error, and the
+	/// refused commit cancels the transaction, so what the statement left
+	/// outside it is cleaned up as for any cancel.
+	///
+	/// A statement that fails before it writes anything leaves the transaction
+	/// as it was, and its caller may still commit what the other statements
+	/// wrote.
+	pub fn poison_failed_statement(&self) {
+		self.failed_statement_poisoned.store(true, Ordering::Relaxed);
 	}
 
 	/// Refuses this transaction's COMMIT, because a record's write stopped
@@ -7981,6 +8019,7 @@ impl Transaction {
 			stored_format_admitted: AtomicBool::new(false),
 			stored_format_absent: AtomicBool::new(false),
 			catalog_write_poisoned: AtomicBool::new(false),
+			failed_statement_poisoned: AtomicBool::new(false),
 			save_point_marks: Mutex::new(Vec::new()),
 			catalog_stamps: AtomicU64::new(self.catalog_stamps()),
 			object_stamps: AtomicU64::new(self.catalog_object_stamps()),

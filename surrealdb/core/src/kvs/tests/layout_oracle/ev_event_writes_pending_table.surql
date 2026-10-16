@@ -1,7 +1,8 @@
 -- An event writes into a second table whose field has a migration pending. An event write the
 -- field's type refuses fails the statement that fired it, so that statement's own writes and
--- those of the events it fired are undone together. Inside a caller's transaction a failed
--- statement keeps what it wrote before it failed.
+-- those of the events it fired are undone together. Inside a caller's transaction the later
+-- statements read what the failed statement wrote before it failed, and that write refuses the
+-- transaction's commit, so the transaction leaves nothing.
 DEFINE TABLE src SCHEMAFULL;
 DEFINE FIELD label ON src TYPE string;
 DEFINE FIELD amt ON src TYPE string;

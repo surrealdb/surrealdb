@@ -2,8 +2,9 @@
 -- leaves every row as the steps left it when it is a statement of its own. A row whose
 -- migrated value breaks an ASSERT added after the migration stays readable, and a write
 -- that touches the record is refused while the value still breaks it. Inside a
--- client-owned transaction the failed statement keeps the writes it made before the
--- failing row, and the later statements of that transaction still run.
+-- client-owned transaction the later statements still run, and the writes the failed
+-- statement made before the failing row refuse the transaction's commit, so it leaves
+-- every row as it was.
 DEFINE TABLE a SCHEMAFULL;
 DEFINE FIELD n ON a TYPE string;
 DEFINE FIELD tag ON a TYPE option<string>;

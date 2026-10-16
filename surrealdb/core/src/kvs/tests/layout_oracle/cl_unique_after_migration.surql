@@ -1,8 +1,10 @@
--- A UNIQUE index refused for duplicates that a migration in the same transaction creates. The refusal
--- leaves no index behind, so a value the index would have refused is writable in the transaction that
--- was refused, and the migration the transaction committed stays. After the job has drained, the same
--- index is refused again, a non-unique index over the field is defined, and the index answers as a scan
--- of the migrated rows does.
+-- A migration that makes two rows' values collide, and the indexes over its field. An index defined in
+-- the transaction that runs the migration is refused before it writes, so that transaction commits the
+-- migration and the writes beside it, a value a UNIQUE index would refuse among them. After the job has
+-- drained, a UNIQUE index over the migrated values is refused for the duplicates after its build wrote,
+-- which refuses the commit of its transaction, so the write beside it is not kept either. A non-unique
+-- index over the field is then removed and redefined with a failing write after them, which commits,
+-- and the index answers as a scan of the migrated rows does.
 DEFINE TABLE uq2 SCHEMAFULL;
 DEFINE FIELD k ON uq2 TYPE string;
 CREATE uq2:1 SET k = '1' RETURN NONE;
@@ -26,10 +28,19 @@ SELECT * FROM uq2 ORDER BY id;
 SELECT VALUE id FROM uq2 WHERE k = 1 ORDER BY id;
 (INFO FOR TABLE uq2).migrations;
 -- @check
--- After the job, the UNIQUE index is refused again, and the replacement is a non-unique index whose
--- removal and redefinition commit with a failing write after them.
+-- After the job, the UNIQUE index is refused for the duplicates the migration made, and its
+-- transaction keeps nothing.
 -- @client
 DEFINE INDEX uk ON uq2 FIELDS k UNIQUE;
+CREATE uq2:6 SET k = 6 RETURN NONE;
+-- @end
+SELECT VALUE id FROM uq2 ORDER BY id;
+(INFO FOR TABLE uq2).indexes;
+-- @check
+-- The replacement is a non-unique index, whose removal and redefinition commit with a failing write
+-- after them.
+DEFINE INDEX uk2 ON uq2 FIELDS k;
+-- @client
 REMOVE INDEX uk2 ON uq2;
 DEFINE INDEX uk3 ON uq2 FIELDS k;
 CREATE uq2:6 SET k = 'six' RETURN NONE;

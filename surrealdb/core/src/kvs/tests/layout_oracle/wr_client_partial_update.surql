@@ -1,5 +1,6 @@
 -- A multi-row UPDATE that fails on its third row inside a client-owned transaction,
--- with no migration anywhere: the first two rows keep the write.
+-- with no migration anywhere: its writes to the first two rows refuse the transaction's
+-- commit, so no row keeps the write.
 DEFINE TABLE p SCHEMAFULL;
 DEFINE FIELD n ON p TYPE int ASSERT $value < 30;
 CREATE p:1 SET n = 1;
