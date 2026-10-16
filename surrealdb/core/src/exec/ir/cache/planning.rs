@@ -1285,6 +1285,7 @@ impl PhysicalCatalog for PlanningCatalog {
 	fn io_caps(&self) -> IoCaps {
 		IoCaps {
 			untracked_reads: !self.txn.plain_reads_tracked(),
+			scan_read_ahead: self.txn.scan_read_ahead(),
 		}
 	}
 

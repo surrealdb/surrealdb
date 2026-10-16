@@ -286,6 +286,12 @@ impl Transactable for Transaction {
 		false
 	}
 
+	/// A chunk read re-seeks the range and copies each entry out, which another task may do while
+	/// the caller runs its rows; each chunk takes the transaction's lock for its own length only.
+	fn scan_read_ahead(&self) -> bool {
+		true
+	}
+
 	/// Cancels the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
 	fn cancel(&self) -> BoxFut<'_, Result<()>> {

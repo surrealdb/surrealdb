@@ -6058,6 +6058,10 @@ pub(crate) struct Pipeline {
 	/// Whether the pipeline's `.*` and field-over-array dereferences read their links in windows,
 	/// as the physical plan decided.
 	pub(super) deref_windows: bool,
+	/// Whether the pipeline's scan reads its next chunk on a task of its own while the body runs
+	/// the current one, as the physical plan decided. Read only by the scans whose body runs in
+	/// the storage cursor.
+	pub(super) read_ahead: bool,
 	/// The links of the pipeline's `FETCH` read for a batch of source rows before the rows run,
 	/// as the physical plan decided.
 	pub(super) rows_ahead: Option<RowsAheadSpec>,

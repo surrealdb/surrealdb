@@ -103,6 +103,9 @@ mod tests_once;
 mod tests_principal;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
+mod tests_read_ahead;
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_running_compiles;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
@@ -126,6 +129,7 @@ mod join_spill;
 pub(crate) mod morsel;
 mod partial;
 mod partition;
+mod read_ahead;
 mod row;
 pub(in crate::exec) mod row_packed;
 mod scalar;

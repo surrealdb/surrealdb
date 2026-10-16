@@ -1017,6 +1017,17 @@ pub trait Transactable: Send + Sync {
 		true
 	}
 
+	/// Whether the next chunk of a scan is worth reading on another task while the caller works on
+	/// the current one.
+	///
+	/// `true` says a chunk read does storage work beyond copying held bytes, and that the
+	/// transaction may be read from another task while its owner reads it. It is the same answer
+	/// for every transaction of a datastore, so it is a static fact a planner may read once.
+	/// `false` is always correct, and is the default.
+	fn scan_read_ahead(&self) -> bool {
+		false
+	}
+
 	/// What `rng` holds, as of `version`.
 	///
 	/// Exact when the range holds fewer than [`ESTIMATE_BUDGET`] keys, otherwise extrapolated from

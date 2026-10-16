@@ -2140,6 +2140,12 @@ impl Transactable for Transaction {
 		false
 	}
 
+	/// A chunk read walks the iterator and its blocks, which another task may do while the caller
+	/// runs its rows; a writable scan holds the transaction's lock for one chunk at a time.
+	fn scan_read_ahead(&self) -> bool {
+		true
+	}
+
 	/// Check if writeable
 	fn writeable(&self) -> bool {
 		self.write

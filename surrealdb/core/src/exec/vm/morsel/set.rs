@@ -1072,10 +1072,20 @@ impl<'p> RangeSet<'p> {
 		let layouts = self.layouts.clone();
 		let backward = self.dir == Direction::Backward;
 		let txn = ctx.txn();
-		let mut cursor = txn
-			.open_vals_cursor_raw(span.clone(), self.dir, 0, self.version)
-			.await
-			.context("Failed to open scan cursor")?;
+		let reader: Arc<dyn super::super::read_ahead::Reader> = Arc::clone(&txn) as _;
+		let budget = pipeline.read_ahead.then(|| ctx.root().ctx.config.exec.scan_batch_bytes);
+		let mut source = super::super::read_ahead::ChunkSource::open(
+			&reader,
+			span.clone(),
+			self.dir,
+			self.version,
+			budget,
+		)
+		.await
+		.context("Failed to open scan cursor")?;
+		// The front run's chunk is no larger than the split threshold, so its producer starts after
+		// one such chunk.
+		source.starting_after(self.policy.chunk(&Signals::default(), self.policy.scan_chunk()));
 		// What this part has read, and where it ends: once the range is cut, the first entry at or
 		// past the cut (before it, scanning backward) belongs to the next morsel.
 		let mut progress = Progress::default();
@@ -1086,203 +1096,213 @@ impl<'p> RangeSet<'p> {
 		let mut own = span.clone();
 		let shared = Arc::clone(&self.shared);
 		let running = Registered::new(&shared);
-		loop {
-			let signals = self.signals(&progress, *hint, state);
-			let most = match (first, *hint) {
-				(true, Some(reads)) => reads.clamp(1, self.policy.scan_chunk()),
-				_ => self.policy.scan_chunk(),
-			};
-			first = false;
-			let chunk = super::super::fuel::batch(self.policy.chunk(&signals, most));
-			let budget = super::super::fuel::left();
-			let mut unspent = budget;
-			let (mut failed, mut stopped, mut ended, mut spent) = (None, false, false, false);
-			// The threshold is read once a chunk: a stale one only rejects less.
-			let threshold = probe.as_ref().and_then(|probe| probe.snapshot());
-			let mut rejected = 0usize;
-			let stats = cursor
-				.for_each(chunk, &mut |key, value| {
-					unspent = unspent.saturating_sub(1);
-					let next = if unspent == 0 {
-						spent = true;
-						std::ops::ControlFlow::Break(())
-					} else {
-						std::ops::ControlFlow::Continue(())
-					};
-					if let Some(cut) = &cut
-						&& (if backward {
-							key < cut.as_slice()
+		// The source ends its producer on every exit path, so the loop runs in a block whose
+		// result is returned once the source has finished.
+		let outcome: FlowResult<bool> = async {
+			loop {
+				let signals = self.signals(&progress, *hint, state);
+				let most = match (first, *hint) {
+					(true, Some(reads)) => reads.clamp(1, self.policy.scan_chunk()),
+					_ => self.policy.scan_chunk(),
+				};
+				first = false;
+				let chunk = super::super::fuel::batch(self.policy.chunk(&signals, most));
+				let budget = super::super::fuel::left();
+				let mut unspent = budget;
+				let (mut failed, mut stopped, mut ended, mut spent) = (None, false, false, false);
+				// The threshold is read once a chunk: a stale one only rejects less.
+				let threshold = probe.as_ref().and_then(|probe| probe.snapshot());
+				let mut rejected = 0usize;
+				let stats = source
+					.for_each(chunk, &mut |key, value| {
+						unspent = unspent.saturating_sub(1);
+						let next = if unspent == 0 {
+							spent = true;
+							std::ops::ControlFlow::Break(())
 						} else {
-							key >= cut.as_slice()
-						}) {
-						ended = true;
-						return Ok(std::ops::ControlFlow::Break(()));
-					}
-					last.clear();
-					last.extend_from_slice(key);
-					if progress.first.is_empty() {
-						progress.first.extend_from_slice(key);
-					}
-					let admitted = admit_row(
-						pipeline,
-						probe.as_ref().zip(threshold.as_deref()),
-						key,
-						value,
-						layouts.as_deref(),
-					);
-					if let (Some(probe), Some(threshold)) = (probe.as_ref(), threshold.as_deref())
-						&& probe.rejects(threshold, &admitted)
-					{
-						rejected += 1;
-						return Ok(next);
-					}
-					match in_place_row_admitted(
-						&program,
-						pipeline,
-						key,
-						value,
-						&admitted,
-						layouts.as_deref(),
-						state,
-					) {
-						Ok(false) => Ok(next),
-						Ok(true) => {
-							stopped = true;
-							Ok(std::ops::ControlFlow::Break(()))
+							std::ops::ControlFlow::Continue(())
+						};
+						if let Some(cut) = &cut
+							&& (if backward {
+								key < cut.as_slice()
+							} else {
+								key >= cut.as_slice()
+							}) {
+							ended = true;
+							return Ok(std::ops::ControlFlow::Break(()));
 						}
-						Err(e) => {
-							failed = Some(e);
-							Ok(std::ops::ControlFlow::Break(()))
+						last.clear();
+						last.extend_from_slice(key);
+						if progress.first.is_empty() {
+							progress.first.extend_from_slice(key);
+						}
+						let admitted = admit_row(
+							pipeline,
+							probe.as_ref().zip(threshold.as_deref()),
+							key,
+							value,
+							layouts.as_deref(),
+						);
+						if let (Some(probe), Some(threshold)) =
+							(probe.as_ref(), threshold.as_deref())
+							&& probe.rejects(threshold, &admitted)
+						{
+							rejected += 1;
+							return Ok(next);
+						}
+						match in_place_row_admitted(
+							&program,
+							pipeline,
+							key,
+							value,
+							&admitted,
+							layouts.as_deref(),
+							state,
+						) {
+							Ok(false) => Ok(next),
+							Ok(true) => {
+								stopped = true;
+								Ok(std::ops::ControlFlow::Break(()))
+							}
+							Err(e) => {
+								failed = Some(e);
+								Ok(std::ops::ControlFlow::Break(()))
+							}
+						}
+					})
+					.await
+					.context("Failed to scan record")?;
+				super::super::fuel::charge(budget - unspent);
+				if let Some(e) = failed {
+					return Err(ControlFlow::Err(e));
+				}
+				#[cfg(test)]
+				super::test_hooks::note_pruned(ctx, rejected);
+				#[cfg(not(test))]
+				let _ = rejected;
+				let read = stats.rows as usize;
+				let bytes = stats.key_bytes + stats.value_bytes;
+				progress.visited += stats.rows;
+				progress.bytes += bytes;
+				progress.since_cut += stats.rows;
+				stat.rows += stats.rows;
+				stat.bytes += bytes;
+				stat.chunks += 1;
+				#[cfg(test)]
+				{
+					super::super::host::RECORDS_SCANNED
+						.with(|scanned| scanned.set(scanned.get() + read));
+					super::test_hooks::note_scanned(ctx, read);
+				}
+				// The rows the chunk emitted are held until `flush` hands them on, so a process
+				// past its memory threshold fails here rather than scanning on.
+				crate::exec::operators::scan::common::ensure_below_memory_threshold()?;
+				if state.output_len() >= flush_at {
+					*hint = None;
+				}
+				flush(state, yielder, flush_at, ctx).await?;
+				if stopped || ended || (!spent && read < chunk as usize) {
+					return Ok(stopped);
+				}
+				if super::super::fuel::spent() {
+					super::super::fuel::yield_point(ctx).await?;
+				}
+				// Morsels waiting while places are free are handed to workers without waiting for
+				// the front morsel to end, so a place owed to this statement is taken.
+				if shared.queued_len() > 0 {
+					self.top_up(state, ctx).await?;
+				}
+				let signals = self.signals(&progress, *hint, state);
+				let gate = Gate {
+					shared: &shared,
+					slot: running.slot(),
+					policy: self.policy,
+				};
+				// Where the range is cut next, and why: the policy's first split, or once that is
+				// done a morsel's donation.
+				let (target, origin, requested) = if !asked {
+					match self.policy.split(&signals) {
+						Split::Split {
+							target,
+						} => {
+							asked = true;
+							self.publish(&running, &own, &last, &progress);
+							(target, Origin::Split, false)
+						}
+						Split::Whole => {
+							self.publish(&running, &own, &last, &progress);
+							continue;
 						}
 					}
-				})
-				.await
-				.context("Failed to scan record")?;
-			super::super::fuel::charge(budget - unspent);
-			if let Some(e) = failed {
-				return Err(ControlFlow::Err(e));
-			}
-			#[cfg(test)]
-			super::test_hooks::note_pruned(ctx, rejected);
-			#[cfg(not(test))]
-			let _ = rejected;
-			let read = stats.rows as usize;
-			let bytes = stats.key_bytes + stats.value_bytes;
-			progress.visited += stats.rows;
-			progress.bytes += bytes;
-			progress.since_cut += stats.rows;
-			stat.rows += stats.rows;
-			stat.bytes += bytes;
-			stat.chunks += 1;
-			#[cfg(test)]
-			{
-				super::super::host::RECORDS_SCANNED
-					.with(|scanned| scanned.set(scanned.get() + read));
-				super::test_hooks::note_scanned(ctx, read);
-			}
-			// The rows the chunk emitted are held until `flush` hands them on, so a process past
-			// its memory threshold fails here rather than scanning on.
-			crate::exec::operators::scan::common::ensure_below_memory_threshold()?;
-			if state.output_len() >= flush_at {
-				*hint = None;
-			}
-			flush(state, yielder, flush_at, ctx).await?;
-			if stopped || ended || (!spent && read < chunk as usize) {
-				return Ok(stopped);
-			}
-			if super::super::fuel::spent() {
-				super::super::fuel::yield_point(ctx).await?;
-			}
-			// Morsels waiting while places are free are handed to workers without waiting for the
-			// front morsel to end, so a place owed to this statement is taken.
-			if shared.queued_len() > 0 {
+				} else {
+					let left = self.publish(&running, &own, &last, &progress);
+					let signals = Signals {
+						remaining_estimate: Some(left),
+						queued: shared.queued_len(),
+						..signals
+					};
+					match gate.target(&signals) {
+						Some(cut) => cut,
+						None => continue,
+					}
+				};
+				let rest = match self.dir {
+					Direction::Forward => {
+						let mut start = last.clone();
+						start.push(0);
+						own.part(&start, own.bounds().1)
+					}
+					Direction::Backward => own.part(own.bounds().0, &last),
+				};
+				let (lo, hi) = rest.bounds();
+				if lo >= hi {
+					gate.found_none(requested);
+					continue;
+				}
+				// A split that fails finds no boundary: the range is read whole, which is the
+				// answer a range with no boundary gets.
+				let split =
+					txn.split(rest.clone(), target, self.version).await.map_err(|e| e.to_string());
+				#[cfg(test)]
+				let split = if super::test_hooks::split_fails(ctx) {
+					Err("a split the test fails".to_owned())
+				} else {
+					split
+				};
+				let bounds = split.unwrap_or_else(|failure| {
+					tracing::debug!(%failure, "a scan could not be split; its range is read whole");
+					Vec::new()
+				});
+				if bounds.is_empty() {
+					gate.found_none(requested);
+					continue;
+				}
+				let parts = steal::cut(&rest, self.dir, bounds);
+				match self.dir {
+					Direction::Forward => {
+						source.cut(&parts.edge);
+						cut = Some(parts.edge.clone());
+						own = own.part(own.bounds().0, &parts.edge);
+					}
+					Direction::Backward => {
+						source.cut(&parts.edge);
+						cut = Some(parts.edge.clone());
+						own = own.part(&parts.edge, own.bounds().1);
+					}
+				}
+				#[cfg(test)]
+				if origin == Origin::Split {
+					super::test_hooks::note_split(ctx, parts.donated.len());
+				}
+				gate.gave(parts.donated, self.dir, origin, requested);
+				progress.since_cut = 0;
+				progress.cuts += 1;
 				self.top_up(state, ctx).await?;
 			}
-			let signals = self.signals(&progress, *hint, state);
-			let gate = Gate {
-				shared: &shared,
-				slot: running.slot(),
-				policy: self.policy,
-			};
-			// Where the range is cut next, and why: the policy's first split, or once that is
-			// done a morsel's donation.
-			let (target, origin, requested) = if !asked {
-				match self.policy.split(&signals) {
-					Split::Split {
-						target,
-					} => {
-						asked = true;
-						self.publish(&running, &own, &last, &progress);
-						(target, Origin::Split, false)
-					}
-					Split::Whole => {
-						self.publish(&running, &own, &last, &progress);
-						continue;
-					}
-				}
-			} else {
-				let left = self.publish(&running, &own, &last, &progress);
-				let signals = Signals {
-					remaining_estimate: Some(left),
-					queued: shared.queued_len(),
-					..signals
-				};
-				match gate.target(&signals) {
-					Some(cut) => cut,
-					None => continue,
-				}
-			};
-			let rest = match self.dir {
-				Direction::Forward => {
-					let mut start = last.clone();
-					start.push(0);
-					own.part(&start, own.bounds().1)
-				}
-				Direction::Backward => own.part(own.bounds().0, &last),
-			};
-			let (lo, hi) = rest.bounds();
-			if lo >= hi {
-				gate.found_none(requested);
-				continue;
-			}
-			// A split that fails finds no boundary: the range is read whole, which is the answer a
-			// range with no boundary gets.
-			let split =
-				txn.split(rest.clone(), target, self.version).await.map_err(|e| e.to_string());
-			#[cfg(test)]
-			let split = if super::test_hooks::split_fails(ctx) {
-				Err("a split the test fails".to_owned())
-			} else {
-				split
-			};
-			let bounds = split.unwrap_or_else(|failure| {
-				tracing::debug!(%failure, "a scan could not be split; its range is read whole");
-				Vec::new()
-			});
-			if bounds.is_empty() {
-				gate.found_none(requested);
-				continue;
-			}
-			let parts = steal::cut(&rest, self.dir, bounds);
-			match self.dir {
-				Direction::Forward => {
-					cut = Some(parts.edge.clone());
-					own = own.part(own.bounds().0, &parts.edge);
-				}
-				Direction::Backward => {
-					cut = Some(parts.edge.clone());
-					own = own.part(&parts.edge, own.bounds().1);
-				}
-			}
-			#[cfg(test)]
-			if origin == Origin::Split {
-				super::test_hooks::note_split(ctx, parts.donated.len());
-			}
-			gate.gave(parts.donated, self.dir, origin, requested);
-			progress.since_cut = 0;
-			progress.cuts += 1;
-			self.top_up(state, ctx).await?;
 		}
+		.await;
+		source.finish().await;
+		outcome
 	}
 
 	/// Publish what the coordinator's morsel has left, for an idle worker choosing whom to ask, and

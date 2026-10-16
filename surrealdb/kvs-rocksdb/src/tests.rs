@@ -2093,6 +2093,17 @@ mod write_view {
 	}
 
 	#[tokio::test(flavor = "multi_thread")]
+	async fn scan_read_ahead_is_the_same_answer_for_every_transaction() {
+		let ds = open_ds(RocksDbConfig::default()).await;
+		let read = ds.transaction(TransactionType::Read).await.unwrap();
+		let write = ds.transaction(TransactionType::Write).await.unwrap();
+		assert!(read.scan_read_ahead());
+		assert!(write.scan_read_ahead());
+		read.cancel().await.unwrap();
+		write.cancel().await.unwrap();
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
 	async fn wv13_view_reads_are_untracked() {
 		let ds = open_ds(RocksDbConfig::default()).await;
 		seed(&ds, 10).await;

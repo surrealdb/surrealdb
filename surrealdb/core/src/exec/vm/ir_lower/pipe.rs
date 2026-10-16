@@ -2443,12 +2443,16 @@ fn emit_pipeline(
 	while let Some(input) = feeding {
 		if let Some(fed) = reads.pipelines.get_mut(input) {
 			fed.limits.extend(pipeline_limits.iter().copied());
+			fed.read_ahead &= fed.limits.is_empty();
 		}
 		feeding = reads.feeders.get(input).copied().flatten();
 	}
 
 	let mut pipeline = finish(em, source, enforce, pipeline_limits, parallel)?;
 	pipeline.deref_windows = io.deref_windows;
+	// Only a scan that runs its body in the storage cursor reads through a chunk source, and a
+	// pipeline whose limits a reader spends may end before its first chunk.
+	pipeline.read_ahead = io.scan_read_ahead && pipeline.in_place && pipeline.limits.is_empty();
 	pipeline.rows_ahead = rows_ahead;
 	let index = reads.base.pipelines + reads.pipelines.len();
 	match origin {

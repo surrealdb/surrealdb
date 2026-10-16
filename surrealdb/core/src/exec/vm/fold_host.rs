@@ -454,6 +454,7 @@ mod tests {
 				parallel: Default::default(),
 				group: None,
 				deref_windows: false,
+				read_ahead: false,
 				rows_ahead: None,
 			}],
 			consts: ValueData::new(consts, "the constant pool").expect("the pool holds no closure"),

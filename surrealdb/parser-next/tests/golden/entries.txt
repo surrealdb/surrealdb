@@ -215,6 +215,10 @@ cd4af3c285991bdb language-tests/tests/bench/scans/count_value_correlated.surql
 d79e49023db28e4a language-tests/tests/bench/scans/count_value_uncorrelated.surql
 8c1e6525e934c596 language-tests/tests/bench/scans/exists_correlated.surql
 ff59ba571585d1c8 language-tests/tests/bench/scans/exists_uncorrelated.surql
+06ff307079bc3236 language-tests/tests/bench/scans/filter_scan_100k.surql
+b1dba2d0f5637c16 language-tests/tests/bench/scans/filter_selective_100k.surql
+fff2e05e86664499 language-tests/tests/bench/scans/full_scan_100k.surql
+0c9ee1c8e63c7cec language-tests/tests/bench/scans/group_by_100k.surql
 c4b279ddeaa862e9 language-tests/tests/bench/scans/id_range_desc.surql
 3f97f1fe7a717d4c language-tests/tests/bench/scans/id_range_page_literal.surql
 356f07aa882f8839 language-tests/tests/bench/scans/id_range_page_param.surql
@@ -3099,6 +3103,7 @@ b6b4bfafac13df2e language-tests/tests/language/statements/select/predicate_pre_d
 6544539cf15cadd2 language-tests/tests/language/statements/select/predicate_pre_decode_filter_tagonly.surql
 ac8296dad09a0301 language-tests/tests/language/statements/select/random_ordering_samples_uniform.surql
 0ddf522f96b1a03f language-tests/tests/language/statements/select/record_read_through_missing_table.surql
+d8ceab0f856ae882 language-tests/tests/language/statements/select/scan_read_ahead.surql
 9f5d905e11fb5bf2 language-tests/tests/language/statements/select/select_start_limit.surql
 9fbe7292c7e5f4f2 language-tests/tests/language/statements/select/select_start_limit_new_executor.surql
 ae6cb5b04bfeca2b language-tests/tests/language/statements/select/select_start_where.surql

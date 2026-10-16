@@ -14,7 +14,7 @@ use crate::exec::logical::pipelines::{Legality, StatementLegality};
 use crate::exec::planner::placement::{Decision, PhysicalFacts};
 
 /// How one pipeline reads storage beyond what its ops state. Every field is conservative at its
-/// default: no window.
+/// default: no window, no read-ahead.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct PipelineIo {
 	/// The pipeline's `FETCH` reads each collection of links in windows.
@@ -24,6 +24,9 @@ pub(crate) struct PipelineIo {
 	/// The top-level link fields of the pipeline's `FETCH`, read for a batch of source rows before
 	/// the rows run.
 	pub(crate) rows_ahead: Option<RowsAhead>,
+	/// The pipeline's scan reads its next chunk on a task of its own while the body runs the
+	/// current one, where the body runs in the storage cursor.
+	pub(crate) scan_read_ahead: bool,
 }
 
 /// The fields of the source rows a pipeline's `FETCH` reads the links of ahead of the rows.

@@ -615,6 +615,7 @@ impl Emitter {
 			parallel: Parallel::Serial,
 			group: self.group,
 			deref_windows: false,
+			read_ahead: false,
 			rows_ahead: None,
 		})
 	}

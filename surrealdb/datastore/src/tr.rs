@@ -180,6 +180,15 @@ impl Transactor {
 		!self.speculating() && self.inner.parallel_count()
 	}
 
+	/// Whether the next chunk of a scan is worth reading on another task while the caller works
+	/// on the current one. A speculating transaction reads through its overlay, which no other
+	/// task should read ahead through, so it answers `false`.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::scan_read_ahead`].
+	pub fn scan_read_ahead(&self) -> bool {
+		!self.speculating() && self.inner.scan_read_ahead()
+	}
+
 	/// Whether the backend bounds the memory its write buffer takes. A
 	/// speculating transaction holds its writes in memory itself, so it
 	/// answers `false`.

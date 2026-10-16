@@ -2975,144 +2975,154 @@ async fn scan_in_place(
 	let topk_probe = armed_probe(pipeline, state);
 	let topk_threshold = topk_probe.as_ref().and_then(|p| p.snapshot());
 	let txn = ctx.txn();
-	let mut cursor = txn
-		.open_vals_cursor_raw(range, direction, 0, version)
-		.await
-		.context("Failed to open scan cursor")?;
-	loop {
-		let mut failed = None;
-		let mut stopped = false;
-		let mut held: Option<(Vec<u8>, Vec<u8>)> = None;
-		// The record the chunk stopped on because it is stamped below the
-		// table's newest migration step: its stored bytes are not what a read
-		// of it sees, so it is decoded, brought through the steps and run as a
-		// value once the chunk ends.
-		let mut stale: Option<(Vec<u8>, Vec<u8>)> = None;
-		let chunk =
-			super::fuel::batch(first.take().map_or(crate::kvs::NORMAL_BATCH_SIZE, |first| {
-				first.clamp(1, crate::kvs::NORMAL_BATCH_SIZE)
-			}));
-		// The chunk is admitted and run against one view of the table's layouts:
-		// the visitor runs no statement that could move the transaction's layout
-		// epoch between this refresh and the end of the chunk.
-		gate.refresh(&txn).await.map_err(ControlFlow::Err)?;
-		let layouts: &TableLayouts = gate.layouts();
-		// The body cannot yield inside the cursor, so the chunk counts the
-		// rows it reads against the fuel left and ends once that is spent: a
-		// unit per record read, run or refused. The body holds no backward
-		// jump (`lower`'s in-place rule), so the interpreter answers no
-		// `Step::Yield` here.
-		let budget = super::fuel::left();
-		let mut unspent = budget;
-		if let Some(coarse) = coarse.as_deref_mut() {
-			coarse.refresh();
-		}
-		let mut cut = false;
-		let stats = cursor
-			.for_each(chunk, &mut |key, value| {
-				if coarse.as_deref_mut().is_some_and(|coarse| coarse.passes_stored(key)) {
-					cut = true;
-					return Ok(std::ops::ControlFlow::Break(()));
-				}
-				unspent = unspent.saturating_sub(1);
-				let next = if unspent == 0 {
-					std::ops::ControlFlow::Break(())
-				} else {
-					std::ops::ControlFlow::Continue(())
-				};
-				match gate.admit(value) {
-					Admission::Admit => {}
-					Admission::Reload => {
-						held = Some((key.to_vec(), value.to_vec()));
-						return Ok(std::ops::ControlFlow::Break(()));
-					}
-					Admission::Refuse(e) => {
-						failed = Some(e);
-						return Ok(std::ops::ControlFlow::Break(()));
-					}
-				}
-				if replay.is_some_and(|replay| !replay.current(value)) {
-					stale = Some((key.to_vec(), value.to_vec()));
-					return Ok(std::ops::ControlFlow::Break(()));
-				}
-				match scan_row(
-					program,
-					pipeline,
-					topk_probe.as_ref(),
-					topk_threshold.as_deref(),
-					key,
-					value,
-					Some(layouts),
-					state,
-				) {
-					Ok(false) => Ok(next),
-					Ok(true) => {
-						stopped = true;
-						Ok(std::ops::ControlFlow::Break(()))
-					}
-					Err(e) => {
-						failed = Some(e);
-						Ok(std::ops::ControlFlow::Break(()))
-					}
-				}
-			})
+	let reader: Arc<dyn super::read_ahead::Reader> = Arc::clone(&txn) as _;
+	let budget = pipeline.read_ahead.then(|| ctx.root().ctx.config.exec.scan_batch_bytes);
+	let mut source =
+		super::read_ahead::ChunkSource::open(&reader, range, direction, version, budget)
 			.await
-			.context("Failed to scan record")?;
-		super::fuel::charge(budget - unspent);
-		if let Some(e) = failed {
-			return Err(ControlFlow::Err(e));
-		}
-		if let Some((key, value)) = held {
-			gate.reload(&txn).await.map_err(ControlFlow::Err)?;
-			match gate.admit(&value) {
-				Admission::Admit => {}
-				Admission::Refuse(e) => return Err(ControlFlow::Err(e)),
-				Admission::Reload => {
-					return Err(ControlFlow::Err(anyhow::anyhow!(
-						"a record's generation was unlisted again after the layouts reloaded"
-					)));
+			.context("Failed to open scan cursor")?;
+	// The source ends its producer on every exit path, so the loop runs in a block whose result
+	// is returned once the source has finished.
+	let outcome: FlowResult<bool> = async {
+		loop {
+			let mut failed = None;
+			let mut stopped = false;
+			let mut held: Option<(Vec<u8>, Vec<u8>)> = None;
+			// The record the chunk stopped on because it is stamped below the
+			// table's newest migration step: its stored bytes are not what a read
+			// of it sees, so it is decoded, brought through the steps and run as a
+			// value once the chunk ends.
+			let mut stale: Option<(Vec<u8>, Vec<u8>)> = None;
+			let chunk =
+				super::fuel::batch(first.take().map_or(crate::kvs::NORMAL_BATCH_SIZE, |first| {
+					first.clamp(1, crate::kvs::NORMAL_BATCH_SIZE)
+				}));
+			// The chunk is admitted and run against one view of the table's layouts:
+			// the visitor runs no statement that could move the transaction's layout
+			// epoch between this refresh and the end of the chunk.
+			gate.refresh(&txn).await.map_err(ControlFlow::Err)?;
+			let layouts: &TableLayouts = gate.layouts();
+			// The body cannot yield inside the cursor, so the chunk counts the
+			// rows it reads against the fuel left and ends once that is spent: a
+			// unit per record read, run or refused. The body holds no backward
+			// jump (`lower`'s in-place rule), so the interpreter answers no
+			// `Step::Yield` here.
+			let budget = super::fuel::left();
+			let mut unspent = budget;
+			if let Some(coarse) = coarse.as_deref_mut() {
+				coarse.refresh();
+			}
+			let mut cut = false;
+			let stats = source
+				.for_each(chunk, &mut |key, value| {
+					if coarse.as_deref_mut().is_some_and(|coarse| coarse.passes_stored(key)) {
+						cut = true;
+						return Ok(std::ops::ControlFlow::Break(()));
+					}
+					unspent = unspent.saturating_sub(1);
+					let next = if unspent == 0 {
+						std::ops::ControlFlow::Break(())
+					} else {
+						std::ops::ControlFlow::Continue(())
+					};
+					match gate.admit(value) {
+						Admission::Admit => {}
+						Admission::Reload => {
+							held = Some((key.to_vec(), value.to_vec()));
+							return Ok(std::ops::ControlFlow::Break(()));
+						}
+						Admission::Refuse(e) => {
+							failed = Some(e);
+							return Ok(std::ops::ControlFlow::Break(()));
+						}
+					}
+					if replay.is_some_and(|replay| !replay.current(value)) {
+						stale = Some((key.to_vec(), value.to_vec()));
+						return Ok(std::ops::ControlFlow::Break(()));
+					}
+					match scan_row(
+						program,
+						pipeline,
+						topk_probe.as_ref(),
+						topk_threshold.as_deref(),
+						key,
+						value,
+						Some(layouts),
+						state,
+					) {
+						Ok(false) => Ok(next),
+						Ok(true) => {
+							stopped = true;
+							Ok(std::ops::ControlFlow::Break(()))
+						}
+						Err(e) => {
+							failed = Some(e);
+							Ok(std::ops::ControlFlow::Break(()))
+						}
+					}
+				})
+				.await
+				.context("Failed to scan record")?;
+			super::fuel::charge(budget - unspent);
+			if let Some(e) = failed {
+				return Err(ControlFlow::Err(e));
+			}
+			if let Some((key, value)) = held {
+				gate.reload(&txn).await.map_err(ControlFlow::Err)?;
+				match gate.admit(&value) {
+					Admission::Admit => {}
+					Admission::Refuse(e) => return Err(ControlFlow::Err(e)),
+					Admission::Reload => {
+						return Err(ControlFlow::Err(anyhow::anyhow!(
+							"a record's generation was unlisted again after the layouts reloaded"
+						)));
+					}
+				}
+				stopped = if replay.is_some_and(|replay| !replay.current(&value)) {
+					stale = Some((key, value));
+					false
+				} else {
+					scan_row(
+						program,
+						pipeline,
+						topk_probe.as_ref(),
+						topk_threshold.as_deref(),
+						&key,
+						&value,
+						Some(&**gate.layouts()),
+						state,
+					)
+					.map_err(ControlFlow::Err)?
+				};
+			}
+			if let (Some((key, value)), Some(replay)) = (stale.take(), replay) {
+				let mut record = decode_record_value(&key, &value, Some(&**gate.layouts()))
+					.map_err(ControlFlow::Err)?;
+				replay.apply(ctx, &mut record, stamp_of(&value)).await?;
+				stopped =
+					finish_in_place(run_in_place(program, pipeline, &ValueRow(&record), state))
+						.map_err(ControlFlow::Err)?;
+				if state.pending.is_some() {
+					state.settle(program, record);
 				}
 			}
-			stopped = if replay.is_some_and(|replay| !replay.current(&value)) {
-				stale = Some((key, value));
-				false
-			} else {
-				scan_row(
-					program,
-					pipeline,
-					topk_probe.as_ref(),
-					topk_threshold.as_deref(),
-					&key,
-					&value,
-					Some(&**gate.layouts()),
-					state,
-				)
-				.map_err(ControlFlow::Err)?
-			};
-		}
-		if let (Some((key, value)), Some(replay)) = (stale.take(), replay) {
-			let mut record = decode_record_value(&key, &value, Some(&**gate.layouts()))
-				.map_err(ControlFlow::Err)?;
-			replay.apply(ctx, &mut record, stamp_of(&value)).await?;
-			stopped = finish_in_place(run_in_place(program, pipeline, &ValueRow(&record), state))
-				.map_err(ControlFlow::Err)?;
-			if state.pending.is_some() {
-				state.settle(program, record);
+			#[cfg(test)]
+			RECORDS_SCANNED.with(|scanned| scanned.set(scanned.get() + stats.rows as usize));
+			// The rows the chunk emitted are held until `flush` hands them on, so a
+			// process past its memory threshold fails here rather than scanning on.
+			ensure_below_memory_threshold()?;
+			flush(state, yielder, flush_at, ctx).await?;
+			if stopped || cut || stats.rows == 0 {
+				return Ok(stopped);
 			}
-		}
-		#[cfg(test)]
-		RECORDS_SCANNED.with(|scanned| scanned.set(scanned.get() + stats.rows as usize));
-		// The rows the chunk emitted are held until `flush` hands them on, so a
-		// process past its memory threshold fails here rather than scanning on.
-		ensure_below_memory_threshold()?;
-		flush(state, yielder, flush_at, ctx).await?;
-		if stopped || cut || stats.rows == 0 {
-			return Ok(stopped);
-		}
-		if super::fuel::spent() {
-			out_of_line(|| super::fuel::yield_point(ctx)).await?;
+			if super::fuel::spent() {
+				out_of_line(|| super::fuel::yield_point(ctx)).await?;
+			}
 		}
 	}
+	.await;
+	source.finish().await;
+	outcome
 }
 
 /// Run an admitted record of an in-place scan: refused unread when the top-k

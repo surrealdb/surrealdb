@@ -20,6 +20,15 @@
 //!   the projection is the row itself, the fields it keys are stored and unfiltered, and the
 //!   statement writes nothing, so no key is read before a write the run would have made first.
 //!
+//! - `scan_read_ahead`: the scan of a pipeline whose body runs inside the storage cursor reads its
+//!   next chunk on a task of its own while the body runs the current one. The datastore says a
+//!   chunk read is worth overlapping and that its plain reads are untracked, so the keys the task
+//!   reads beyond the ones the run reaches widen no conflict. The pipeline reads its whole range
+//!   (no paging, no `ONLY`, no ordered exit, no top-k cut), so on a run that ends without an error
+//!   the task reads the keys the serial run reads. The statement writes nothing, so no key is read
+//!   ahead of a write the serial run would have made first, and the scan runs once per statement,
+//!   never once per row of an enclosing loop or subquery.
+//!
 //! Every rule is conservative: a pipeline whose shape, version or footprint a rule cannot
 //! establish has no window. A window reads at the current version, so a pipeline gets one only
 //! where the plan establishes the version it runs at: a statement of a request, in code that runs
@@ -32,20 +41,21 @@
 use smallvec::SmallVec;
 use surrealdb_strand::Strand;
 
+use super::nested;
 use super::ops::{PhysOp, ProjectionShape};
-use super::pipeline::streams;
+use super::pipeline::{enclosing_statement, streams};
 #[cfg(test)]
 use super::placement_attr::PlacementAttr;
 use super::placement_attr::{PipelineIo, RowsAhead};
 use crate::catalog::Permission;
 use crate::exec::ir::analysis::effects;
 use crate::exec::ir::core::facts::FactCache;
-use crate::exec::ir::core::ir::Ir;
+use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::value::ValueDef;
 use crate::exec::ir::core::walk::ops_in;
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::ExprOp;
-use crate::exec::ir::iface::catalog::{CatalogAnswer, EffectCx, PhysCx};
+use crate::exec::ir::iface::catalog::{CatalogAnswer, EffectCx, IoCaps, PhysCx};
 use crate::exec::ir::iface::frame::Snapshot;
 use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
 use crate::exec::ir::iface::region_kind::{ErrorScope, RegionKind};
@@ -53,7 +63,7 @@ use crate::exec::ir::logical::ops::LoopKind;
 use crate::exec::ir::op_kind::OpKind;
 use crate::exec::planner::placement::Decision;
 #[cfg(test)]
-use crate::exec::planner::placement::{Combine, MorselInput};
+use crate::exec::planner::placement::{Combine, MorselInput, SinkKind};
 use crate::expr::logical::EffectSet;
 use crate::expr::part::Part;
 use crate::val::TableName;
@@ -68,6 +78,15 @@ thread_local! {
 	/// it is the decision the plan makes.
 	pub(crate) static FORCE_ROWS_AHEAD: std::cell::Cell<Option<bool>> =
 		const { std::cell::Cell::new(None) };
+	/// Pins the scan read-ahead on (`Some(true)`, whatever the datastore offers) or off, for tests
+	/// that compare the two runs.
+	pub(crate) static FORCE_SCAN_READ_AHEAD: std::cell::Cell<Option<bool>> =
+		const { std::cell::Cell::new(None) };
+	/// Places every pipeline that scans its whole range as range morsels that concatenate,
+	/// whether or not it reads ahead, and whose rows end in the statement's output, so that a test
+	/// of the coordinator's front run reaches it whatever the policy places.
+	pub(crate) static FORCE_RANGE_MORSELS: std::cell::Cell<bool> =
+		const { std::cell::Cell::new(false) };
 	/// Places every pipeline as range morsels before its io is decided, for tests of the rules
 	/// that depend on the placement.
 	static FORCE_MORSEL_PLACEMENT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -92,10 +111,14 @@ fn place_as_range_morsels(attr: &mut PlacementAttr) {
 /// States the [`PipelineIo`] of every pipeline of `ir`.
 pub(crate) fn run(ir: &mut Ir, facts: &mut FactCache, cx: &PhysCx<'_>) -> Result<(), IrError> {
 	let untracked = untracked_reads(cx) && cx.physical.at_request_root();
+	let scans = scan_read_ahead_offered(cx) && cx.physical.at_request_root();
 	// The placed pipelines are the table's keys, so no walk of the container's ops is needed to
 	// find them.
 	let placed: SmallVec<[OpId; 8]> = ir.placement_table_mut().pipelines().collect();
 	let mut decided: SmallVec<[(OpId, PipelineIo); 8]> = SmallVec::new();
+	let mut judged: SmallVec<[(OpId, bool); 4]> = SmallVec::new();
+	#[cfg(test)]
+	let mut morsels: SmallVec<[OpId; 4]> = SmallVec::new();
 	for pipeline in placed {
 		#[cfg(test)]
 		if FORCE_MORSEL_PLACEMENT.with(std::cell::Cell::get) {
@@ -105,7 +128,22 @@ pub(crate) fn run(ir: &mut Ir, facts: &mut FactCache, cx: &PhysCx<'_>) -> Result
 				table.insert(pipeline, attr);
 			}
 		}
-		let io = io_of(ir, facts, cx, pipeline, untracked);
+		let mut io = io_of(ir, facts, cx, pipeline, untracked);
+		#[cfg(test)]
+		let whole_range = FORCE_RANGE_MORSELS.with(std::cell::Cell::get);
+		#[cfg(not(test))]
+		let whole_range = false;
+		let reads_whole =
+			(scans || whole_range) && reads_ahead(ir, facts, cx, pipeline, &mut judged);
+		io.scan_read_ahead = scans && reads_whole;
+		#[cfg(test)]
+		if whole_range
+			&& reads_whole
+			&& ir.placement(pipeline).and_then(|attr| attr.facts()).is_some_and(|facts| {
+				facts.sink == SinkKind::Output && facts.limits == 0 && !facts.enforce
+			}) {
+			morsels.push(pipeline);
+		}
 		if io != PipelineIo::default() {
 			decided.push((pipeline, io));
 		}
@@ -113,7 +151,32 @@ pub(crate) fn run(ir: &mut Ir, facts: &mut FactCache, cx: &PhysCx<'_>) -> Result
 	for (pipeline, io) in decided {
 		ir.placement_table_mut().set_io(pipeline, io);
 	}
+	#[cfg(test)]
+	for pipeline in morsels {
+		let table = ir.placement_table_mut();
+		if let Some(mut attr) = table.get(pipeline).cloned() {
+			// `reads_ahead` established that the statement writes nothing.
+			place_as_range_morsels(&mut attr);
+			table.insert(pipeline, attr);
+		}
+	}
 	Ok(())
+}
+
+/// Whether the datastore offers the read-ahead of a scan, and leaves the conflict set alone for
+/// the keys a producer reads beyond the ones the run reaches.
+fn scan_read_ahead_offered(cx: &PhysCx<'_>) -> bool {
+	#[cfg(test)]
+	if let Some(forced) = FORCE_SCAN_READ_AHEAD.with(std::cell::Cell::get) {
+		return forced;
+	}
+	offers_read_ahead(cx.physical.io_caps())
+}
+
+/// Whether `caps` offer the read-ahead of a scan with no conflict from the keys it reads beyond
+/// the ones the run reaches.
+fn offers_read_ahead(caps: IoCaps) -> bool {
+	caps.untracked_reads && caps.scan_read_ahead
 }
 
 /// Whether a plain read leaves the transaction's conflict set alone.
@@ -157,6 +220,118 @@ fn io_of(
 		io.rows_ahead = rows_ahead(ir, cx, pipeline, &rows, first);
 	}
 	io
+}
+
+/// Whether the scan of the pipeline `pipeline` may read its next chunk on a task of its own.
+///
+/// The rules of the module hold: the scan is a table scan that stores records (not a lightweight
+/// relation) or a record range, with no top-k key to cut it; every op the rows pass takes each
+/// row and none pages, ends the pipeline or ends an iteration early; no `ONLY` consumes the rows;
+/// the scan reads at the current version; the pipeline stands directly in its statement, which
+/// writes nothing, as [`nested::statement_writes`] states it.
+fn reads_ahead(
+	ir: &Ir,
+	facts: &mut FactCache,
+	cx: &PhysCx<'_>,
+	pipeline: OpId,
+	judged: &mut SmallVec<[(OpId, bool); 4]>,
+) -> bool {
+	let Some(rows) = rows_of(ir, pipeline) else {
+		return false;
+	};
+	let whole = match kind_of(ir, rows.source) {
+		Some(PhysOp::TableScan(attrs)) => !attrs.lightweight && attrs.topk.is_none(),
+		Some(PhysOp::KeyRangeScan(attrs)) => attrs.topk.is_none(),
+		_ => false,
+	};
+	if !whole || !reads_current(ir, pipeline) || !reads_current(ir, rows.source) {
+		return false;
+	}
+	let ends_early = |op: OpId| {
+		matches!(
+			kind_of(ir, op),
+			Some(
+				PhysOp::Limit { .. } | PhysOp::Only | PhysOp::Break | PhysOp::Next | PhysOp::Return
+			)
+		)
+	};
+	if rows.passes.iter().any(|op| ends_early(*op) || holds(ir, *op, &ends_early)) {
+		return false;
+	}
+	let Some(statement) = enclosing_statement(ir, pipeline) else {
+		return false;
+	};
+	if !stands_in_statement(ir, pipeline, &ends_early) {
+		return false;
+	}
+	// A statement is asked once, however many of its pipelines read ahead.
+	if let Some((_, writes)) = judged.iter().find(|(op, _)| *op == statement) {
+		return !writes;
+	}
+	let writes = nested::statement_writes(ir, facts, &cx.effects, statement);
+	judged.push((statement, writes));
+	!writes
+}
+
+/// Whether an op in a region of `op` satisfies `wanted`.
+fn holds(ir: &Ir, op: OpId, wanted: &impl Fn(OpId) -> bool) -> bool {
+	let Some(data) = ir.op(op) else {
+		return false;
+	};
+	let mut found = false;
+	for region in &data.regions {
+		ir.walk(*region, WalkOrder::PreOrder, &mut |inner| {
+			if wanted(inner) {
+				found = true;
+				Walk::Stop
+			} else {
+				Walk::Continue
+			}
+		});
+		if found {
+			break;
+		}
+	}
+	found
+}
+
+/// Whether the pipeline `pipeline` runs once for its statement and reads its rows to the end:
+/// every op around it, up to the statement of the request that holds it, is that statement, a
+/// statement of a block, a block, a pipeline or the statement's timeout, and no op of its own
+/// statement's regions ends the rows early (`ends_early`). A loop, a subquery, a clause or a
+/// branch stands around a scan that runs once for each of its rows or as often as it is chosen.
+///
+/// The ops of the statement's own regions are those up to the first statement or block around
+/// the pipeline: the `ONLY` that takes the pipeline's rows stands beside it, or beside the timeout
+/// that holds it. The other statements of a block run before or after the scan, never while it
+/// reads.
+fn stands_in_statement(ir: &Ir, pipeline: OpId, ends_early: &impl Fn(OpId) -> bool) -> bool {
+	let mut region = ir.enclosing_region(pipeline);
+	let mut own = true;
+	while let Some(parent) = ir.parent_op(region) {
+		if own && ops_in(ir, region).any(ends_early) {
+			return false;
+		}
+		match kind_of(ir, parent) {
+			Some(PhysOp::Stmt {
+				..
+			}) => return true,
+			Some(
+				PhysOp::Statement {
+					..
+				}
+				| PhysOp::Block,
+			) => {
+				own = false;
+				region = ir.enclosing_region(parent);
+			}
+			Some(PhysOp::Pipeline(..) | PhysOp::Timeout) => {
+				region = ir.enclosing_region(parent);
+			}
+			_ => return false,
+		}
+	}
+	false
 }
 
 /// Whether the paths of the `FETCH` `fetch` run no code that writes or that the plan cannot see.
@@ -545,6 +720,145 @@ mod tests {
 				planned.ir.placement(*pipeline).expect("a placed pipeline").io().clone()
 			})
 			.collect()
+	}
+
+	/// Whether each pipeline `sql` plans to reads its scan ahead, with the read-ahead pinned to
+	/// `forced`.
+	async fn read_aheads(setup: &str, sql: &str, forced: Option<bool>) -> Vec<bool> {
+		FORCE_SCAN_READ_AHEAD.with(|pinned| pinned.set(forced));
+		let planned = planned_request(setup, sql).await;
+		FORCE_SCAN_READ_AHEAD.with(|pinned| pinned.set(None));
+		PipelineDag::of(&planned.ir)
+			.nodes
+			.iter()
+			.map(|(_, pipeline)| {
+				planned.ir.placement(*pipeline).expect("a placed pipeline").io().scan_read_ahead
+			})
+			.collect()
+	}
+
+	#[tokio::test]
+	async fn a_scan_of_a_whole_range_reads_its_chunks_ahead() {
+		for sql in [
+			"SELECT * FROM holder",
+			"SELECT * FROM holder WHERE n = 1",
+			"SELECT * FROM holder ORDER BY id DESC",
+			"SELECT * FROM holder ORDER BY n",
+			"SELECT n FROM holder GROUP BY n",
+			"SELECT * FROM holder WHERE id > holder:10",
+			"BEGIN; SELECT * FROM holder; COMMIT;",
+			"RETURN (SELECT * FROM holder)",
+			"LET $a = (SELECT * FROM holder); RETURN $a",
+		] {
+			let found = read_aheads(SETUP, sql, Some(true)).await;
+			assert!(found.contains(&true), "{sql}: {found:?}");
+		}
+	}
+
+	#[tokio::test]
+	async fn a_scan_that_may_stop_early_or_run_more_than_once_reads_nothing_ahead() {
+		for sql in [
+			"SELECT * FROM holder LIMIT 3",
+			"SELECT * FROM holder START 2",
+			"SELECT * FROM holder LIMIT 3 START 2",
+			"SELECT * FROM ONLY holder",
+			"SELECT * FROM holder ORDER BY n LIMIT 3",
+			"UPDATE holder SET x = 1",
+			"DELETE holder",
+			"SELECT *, (CREATE person SET x = 1 RETURN VALUE id) AS w FROM holder",
+			"FOR $i IN [1, 2] { SELECT * FROM holder; };",
+			"SELECT *, (SELECT * FROM person) AS inner FROM holder",
+			"SELECT * FROM holder VERSION d'2024-01-01T00:00:00Z'",
+		] {
+			let found = read_aheads(SETUP, sql, Some(true)).await;
+			assert!(found.iter().all(|ahead| !ahead) || sql.contains("inner"), "{sql}: {found:?}");
+		}
+	}
+
+	#[tokio::test]
+	async fn a_scan_under_a_timeout_reads_its_chunks_ahead() {
+		let found = read_aheads(SETUP, "SELECT * FROM holder TIMEOUT 5s", Some(true)).await;
+		assert_eq!(found, vec![true]);
+		for sql in
+			["SELECT * FROM ONLY holder TIMEOUT 5s", "SELECT * FROM holder LIMIT 3 TIMEOUT 5s"]
+		{
+			let found = read_aheads(SETUP, sql, Some(true)).await;
+			assert!(found.iter().all(|ahead| !ahead), "{sql}: {found:?}");
+		}
+	}
+
+	/// A pipeline that stops early behind a breaker or a split stops the scan that feeds it.
+	#[tokio::test]
+	async fn a_scan_whose_rows_a_later_pipeline_stops_reads_nothing_ahead() {
+		for sql in [
+			"SELECT * FROM holder SPLIT refs LIMIT 3",
+			"SELECT *, n + 1 AS k FROM holder ORDER BY k LIMIT 3",
+			"SELECT *, n + 1 AS k FROM holder ORDER BY k LIMIT 0",
+			"SELECT * FROM holder ORDER BY rand() LIMIT 3",
+			"SELECT * FROM (SELECT * FROM holder) LIMIT 3",
+			"SELECT * FROM (SELECT * FROM holder ORDER BY n) LIMIT 3",
+		] {
+			let found = read_aheads(SETUP, sql, Some(true)).await;
+			assert!(found.iter().all(|ahead| !ahead), "{sql}: {found:?}");
+		}
+	}
+
+	/// The statements of a block run one after another: a write before or after a scan's statement
+	/// runs while no chunk of the scan is read.
+	#[tokio::test]
+	async fn a_scan_beside_a_write_of_its_block_reads_its_chunks_ahead() {
+		for sql in [
+			"{ CREATE holder:1 SET n = 1; SELECT * FROM holder; }",
+			"{ SELECT * FROM holder; CREATE holder:1 SET n = 1; }",
+		] {
+			let found = read_aheads(SETUP, sql, Some(true)).await;
+			assert_eq!(found.iter().filter(|ahead| **ahead).count(), 1, "{sql}: {found:?}");
+		}
+	}
+
+	#[tokio::test]
+	async fn a_scan_nested_in_a_subquery_reads_nothing_ahead_though_its_outer_scan_does() {
+		let found =
+			read_aheads(SETUP, "SELECT *, (SELECT * FROM person) AS inner FROM holder", Some(true))
+				.await;
+		assert_eq!(found.len(), 2, "{found:?}");
+		assert_eq!(found.iter().filter(|ahead| **ahead).count(), 1, "{found:?}");
+	}
+
+	#[test]
+	fn the_read_ahead_needs_both_the_chunk_overlap_and_untracked_reads() {
+		for (untracked_reads, scan_read_ahead) in
+			[(false, false), (false, true), (true, false), (true, true)]
+		{
+			let caps = IoCaps {
+				untracked_reads,
+				scan_read_ahead,
+			};
+			assert_eq!(offers_read_ahead(caps), untracked_reads && scan_read_ahead, "{caps:?}");
+		}
+	}
+
+	#[tokio::test]
+	async fn a_datastore_that_does_not_offer_the_read_ahead_gets_none() {
+		for forced in [Some(false), None] {
+			let found = read_aheads(SETUP, "SELECT * FROM holder", forced).await;
+			assert_eq!(found, vec![false], "{forced:?}");
+		}
+	}
+
+	#[tokio::test]
+	async fn a_unit_that_runs_in_a_callers_frame_reads_nothing_ahead() {
+		FORCE_SCAN_READ_AHEAD.with(|pinned| pinned.set(Some(true)));
+		let planned = planned_unit(SETUP, "SELECT * FROM holder").await;
+		FORCE_SCAN_READ_AHEAD.with(|pinned| pinned.set(None));
+		let found: Vec<bool> = PipelineDag::of(&planned.ir)
+			.nodes
+			.iter()
+			.map(|(_, pipeline)| {
+				planned.ir.placement(*pipeline).expect("a placed pipeline").io().scan_read_ahead
+			})
+			.collect();
+		assert!(!found.is_empty() && found.iter().all(|ahead| !ahead), "{found:?}");
 	}
 
 	fn windows(io: &PipelineIo) -> (bool, bool) {

@@ -63,6 +63,9 @@ pub(crate) struct IoCaps {
 	/// A plain read never joins the transaction's conflict set, so a read issued speculatively
 	/// (a key the serial run may not reach) widens no conflict.
 	pub(crate) untracked_reads: bool,
+	/// The next chunk of a scan is worth reading on another task while the caller works on the
+	/// current one, and the transaction may be read from that task.
+	pub(crate) scan_read_ahead: bool,
 }
 
 /// How the field view of a table is applied to an image of one of its records, for the principal
