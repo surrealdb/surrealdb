@@ -49,7 +49,10 @@ rm -rf "$out"
 mkdir -p "$out" || { warn "cannot create $out"; exit 0; }
 out="$(cd "$out" && pwd -P)"
 
-if ! (cd "$root" && "$bin" module build --debug -o "$out/demo.surli" "$root/surrealism/demo") >&2; then
+# `--log warn` overrides an inherited `SURREAL_LOG`: cargo-make sets it to
+# `full`, at which compiling the module logs every wasmtime and cranelift pass,
+# hundreds of megabytes that also slow the build itself.
+if ! (cd "$root" && "$bin" module build --log warn --debug -o "$out/demo.surli" "$root/surrealism/demo") >&2; then
 	warn "demo module build failed; tests will build the demo module themselves"
 	exit 0
 fi

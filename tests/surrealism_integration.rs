@@ -57,7 +57,9 @@ mod surrealism_integration {
 		path
 	}
 
-	/// Build and pack the demo module using `surreal module build`.
+	/// Build and pack the demo module using `surreal module build`. The build
+	/// logs at `warn` whatever `SURREAL_LOG` the test inherits: at `full`,
+	/// compiling the module logs every wasmtime and cranelift pass.
 	fn build_and_pack_demo(output_dir: &Path) {
 		let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"));
 		let demo_dir = workspace_root.join("surrealism/demo");
@@ -67,6 +69,8 @@ mod surrealism_integration {
 			.args([
 				"module",
 				"build",
+				"--log",
+				"warn",
 				"--debug",
 				"-o",
 				&output.to_string_lossy(),
