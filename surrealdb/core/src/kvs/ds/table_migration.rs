@@ -2,22 +2,29 @@
 //! verifies whether the stored values of fields queued for verification conform to their
 //! definitions.
 //!
-//! A table with work has one entry in the queue at `/!tm` ([`TableMigrationState`]), written in
-//! the transaction that queued the work. The job holds one lease
-//! ([`TaskLeaseType::TableMigration`]) for every table, and works through each table in laps of
-//! pages:
+//! A statement that gives a table work writes a request at `/!tq`
+//! ([`crate::key::table_migration::TableMigrationRequest`]) under an id of its own, in the
+//! transaction that makes the change. The job keeps its progress through each table at `/!tm`
+//! ([`TableMigrationState`]), a key no statement writes, so a statement and a page of the job never
+//! write the same queue key and neither can fail the other's commit through it. The job holds one
+//! lease ([`TaskLeaseType::TableMigration`]) for every table, visits each table with requests and
+//! then each whose progress asks for work, and works through each table in laps of pages:
 //!
-//! - Each page runs in one write transaction. It reads the table's generations and steps from its
-//!   own snapshot, then up to a page of records after the entry's cursor. A record stamped before
-//!   the table's newest step is brought through the steps it has not passed, and, when the entry
-//!   asks for a rewrite, stored again in the layout of the table's head generation, stamped with
-//!   it. The page then advances the entry by compare-and-set on the state it read, so a page whose
-//!   entry was replaced (a new migration, a new verification, an import) or deleted (`REMOVE
-//!   TABLE`) meanwhile commits nothing.
+//! - A page that finds requests folds them into the progress, in the order made, deletes them, and
+//!   commits nothing else. A request committed after the page's snapshot is not deleted, so a later
+//!   page folds it.
+//! - Every other page runs in one write transaction. It reads the table's generations and steps
+//!   from its own snapshot, then up to a page of records after the progress's cursor. A record
+//!   stamped before the table's newest step is brought through the steps it has not passed, and,
+//!   when the progress asks for a rewrite, stored again in the layout of the table's head
+//!   generation, stamped with it. The page then advances the progress by compare-and-set on the
+//!   state it read, so a page whose progress was replaced (by a node that took the lease over) or
+//!   deleted (`REMOVE TABLE`) meanwhile commits nothing.
 //! - At the end of a lap the rewrite is done if the table's newest step is the one the lap began
-//!   under. Otherwise another lap starts. The steps stay in their generations' descriptors: a row
-//!   stamped before one, such as one a transaction that began earlier committed after the lap
-//!   passed it, is replayed whenever it is read.
+//!   under. Otherwise another lap starts. A step minted after the last page's snapshot comes with a
+//!   request that page did not delete, so the next page starts a lap for it. The steps stay in
+//!   their generations' descriptors: a row stamped before one, such as one a transaction that began
+//!   earlier committed after the lap passed it, is replayed whenever it is read.
 //! - A verification judges each record's value, brought through any pending step, without writing
 //!   it, against the test a migration step of the field would apply: its type with the definitions
 //!   beneath it folded in, so a key no definition declares beneath an object of a `SCHEMAFULL`
@@ -26,9 +33,10 @@
 //!   the field's whole definition, the table's claims can state it
 //!   ([`surrealdb_catalog::birth_claims_of`]), the rewrite is done, and the lap began after every
 //!   transaction that could still commit an unjudged row had ended: on a store this datastore
-//!   writes alone, the job waits for the transactions older than the change before the lap's first
-//!   page; on any other store a pass reports its counts and never makes a claim. A field that did
-//!   not conform withdraws the table's claims if one is on the definition the lap judged.
+//!   writes alone, the job waits for the transactions older than the fold of the request before the
+//!   lap's first page; on any other store a pass reports its counts and never makes a claim. A
+//!   field that did not conform withdraws the table's claims if one is on the definition the lap
+//!   judged.
 //! - The check for undeclared keys judges each record, brought through any pending step, by its
 //!   top-level keys: one other than `id`, `in` and `out` that no definition's path begins with is a
 //!   key a write of the row refuses ([`crate::exec::migrate::holds_undeclared_key`]). The check
@@ -41,6 +49,7 @@
 //! changefeed writes: a rewrite changes what a row costs to read, never what it reads as.
 
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -56,8 +65,11 @@ use crate::catalog::{
 use crate::exec::ExecutionContext;
 use crate::exec::migrate::{Replay, into_error};
 use crate::iam::{Auth, Role};
-use crate::key::schema::{RecordKey, RecordPrefix, TableMigrationKey, TableMigrationPrefix};
-use crate::key::table_migration::TableMigrationState;
+use crate::key::schema::{
+	RecordKey, RecordPrefix, TableMigrationKey, TableMigrationPrefix, TableMigrationRequestKey,
+	TableMigrationRequestPrefix,
+};
+use crate::key::table_migration::{TableMigrationRequest, TableMigrationState};
 use crate::key::{KVKeyDecode, Key, Resumable};
 use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 use crate::kvs::{DatastoreError, Direction, Transaction, TransactionType};
@@ -66,8 +78,9 @@ use crate::val::{RecordId, TableName, Value};
 /// The most records a page reads.
 const PAGE_ROWS: u32 = 256;
 
-/// The most queue entries read at once. A pass pages through the whole queue in batches of this
-/// size, so an entry that asks for nothing never keeps a later one from being visited.
+/// The most queue entries read at once. A pass pages through each queue in batches of this size,
+/// so an entry that asks for nothing never keeps a later one from being visited, and a page folds
+/// at most this many of a table's requests.
 const QUEUE_BATCH: u32 = 1024;
 
 /// How long a pass waits between checks for the transactions older than a verification to end.
@@ -103,7 +116,8 @@ impl Target {
 impl Datastore {
 	/// Work through every table queued for the table migration job, under the job's lease:
 	/// rewrite the rows its steps have not reached, and verify the fields queued for
-	/// verification.
+	/// verification. The tables with requests are visited first, then the tables whose progress
+	/// asks for work that this pass has not visited.
 	pub async fn table_migration(
 		dbs: Arc<Datastore>,
 		interval: Duration,
@@ -120,6 +134,46 @@ impl Datastore {
 		if !lh.has_lease().await? {
 			return Ok(());
 		}
+		let mut visited = HashSet::new();
+		// The tables with requests, each once: a table's requests sort together.
+		let mut range = TableMigrationRequestPrefix {}.range()?;
+		loop {
+			let keys = {
+				let txn = dbs.transaction(TransactionType::Read).await?;
+				let res = txn.keys(range.clone(), QUEUE_BATCH, 0, None).await;
+				let _ = txn.cancel().await;
+				res?
+			};
+			let Some(last) = keys.last() else {
+				break;
+			};
+			let last = last.clone();
+			let full = keys.len() >= QUEUE_BATCH as usize;
+			for key in keys {
+				Self::ensure_not_cancelled(&canceller)?;
+				let key = match TableMigrationRequestKey::decode_key(&key) {
+					Ok(key) => key,
+					Err(e) => {
+						warn!("Skipping undecodable table migration request: {e}");
+						continue;
+					}
+				};
+				let table = (key.ns, key.db, key.tb.into_owned());
+				if visited.contains(&table) {
+					continue;
+				}
+				visited.insert(table.clone());
+				let (ns, db, tb) = table;
+				if !Self::visit_table(&dbs, &lh, &canceller, ns, db, tb, interval).await? {
+					return Ok(());
+				}
+			}
+			if !full {
+				break;
+			}
+			range = range.resume_after(&last, Direction::Forward);
+		}
+		// The tables whose progress asks for work, as a pass that stopped left them.
 		let mut range = TableMigrationPrefix {}.range()?;
 		loop {
 			let entries = {
@@ -145,23 +199,13 @@ impl Datastore {
 						continue;
 					}
 				};
-				let Some(target) =
-					Self::migration_target(&dbs, key.ns, key.db, key.tb.into_owned()).await?
-				else {
+				let table = (key.ns, key.db, key.tb.into_owned());
+				if visited.contains(&table) {
 					continue;
-				};
-				match Self::migrate_table(&dbs, &lh, &canceller, &target, interval).await {
-					Ok(TableOutcome::Done) => {}
-					Ok(TableOutcome::LeaseLost) => return Ok(()),
-					Err(e) => {
-						if canceller.is_cancelled() {
-							return Err(e);
-						}
-						warn!(
-							"Table migration of `{}` in {}/{} failed: {e}",
-							target.tb, target.ns_name, target.db_name
-						);
-					}
+				}
+				let (ns, db, tb) = table;
+				if !Self::visit_table(&dbs, &lh, &canceller, ns, db, tb, interval).await? {
+					return Ok(());
 				}
 			}
 			if !full {
@@ -171,8 +215,40 @@ impl Datastore {
 		}
 	}
 
+	/// Work through table `tb` of database `db` of namespace `ns`, as [`Self::migrate_table`]
+	/// does. Answers whether the pass goes on: `false` once another node holds the job's lease. A
+	/// table whose pass fails is logged and left for the next pass.
+	#[allow(clippy::too_many_arguments)]
+	async fn visit_table(
+		dbs: &Arc<Datastore>,
+		lh: &LeaseHandler,
+		canceller: &CancellationToken,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: TableName,
+		interval: Duration,
+	) -> Result<bool> {
+		let Some(target) = Self::migration_target(dbs, ns, db, tb).await? else {
+			return Ok(true);
+		};
+		match Self::migrate_table(dbs, lh, canceller, &target, interval).await {
+			Ok(TableOutcome::Done) => Ok(true),
+			Ok(TableOutcome::LeaseLost) => Ok(false),
+			Err(e) => {
+				if canceller.is_cancelled() {
+					return Err(e);
+				}
+				warn!(
+					"Table migration of `{}` in {}/{} failed: {e}",
+					target.tb, target.ns_name, target.db_name
+				);
+				Ok(true)
+			}
+		}
+	}
+
 	/// The table a queue entry names, with its namespace and database names; `None` when the
-	/// namespace or database is gone, in which case the entry is deleted.
+	/// namespace or database is gone, in which case the table's progress and requests are deleted.
 	async fn migration_target(
 		dbs: &Datastore,
 		ns: NamespaceId,
@@ -213,14 +289,18 @@ impl Datastore {
 					tb: Cow::Borrowed(&tb),
 				};
 				txn.del_key(&key).await?;
+				for (request, _) in txn.tb_migration_requests(ns, db, &tb, u32::MAX).await? {
+					txn.del(Key::from(request)).await?;
+				}
 				txn.commit().await?;
 				Ok(None)
 			}
 		}
 	}
 
-	/// Work through `target` in pages until its entry asks for nothing more, the lease is lost, or
-	/// a verification must wait for older transactions longer than one interval.
+	/// Work through `target` in pages until its progress asks for nothing more and it has no
+	/// request left, the lease is lost, or a verification must wait for older transactions longer
+	/// than one interval.
 	async fn migrate_table(
 		dbs: &Arc<Datastore>,
 		lh: &LeaseHandler,
@@ -235,23 +315,49 @@ impl Datastore {
 				return Ok(TableOutcome::LeaseLost);
 			}
 			let txn = Arc::new(dbs.transaction(TransactionType::Write).await?);
-			let Some(state) = txn.get_key(&target.key(), None).await? else {
-				let _ = txn.cancel().await;
-				return Ok(TableOutcome::Done);
-			};
-			if !state.has_work() {
+			let progress = txn.get_key(&target.key(), None).await?;
+			let requests =
+				txn.tb_migration_requests(target.ns, target.db, &target.tb, QUEUE_BATCH).await?;
+			if requests.is_empty() && !progress.as_ref().is_some_and(TableMigrationState::has_work)
+			{
 				let _ = txn.cancel().await;
 				return Ok(TableOutcome::Done);
 			}
 			if txn.get_tb(target.ns, target.db, &target.tb, None).await?.is_none() {
 				// The table is gone: nothing is left to rewrite or verify.
-				txn.del_compare_key(&target.key(), Some(&state)).await?;
+				for (request, _) in &requests {
+					txn.del(Key::from(request.as_slice())).await?;
+				}
+				if let Some(progress) = &progress {
+					txn.del_compare_key(&target.key(), Some(progress)).await?;
+				}
 				Self::commit_page(&txn).await?;
 				return Ok(TableOutcome::Done);
 			}
+			if !requests.is_empty() {
+				// The requests are folded in a page of their own, so a verification a request
+				// asks for is in the progress before the lap waits for the transactions older
+				// than it.
+				match Self::fold_requests(&txn, target, progress.as_ref(), &requests).await {
+					Ok(()) => Self::commit_page(&txn).await?,
+					// Another node's job replaced the progress; the next page reads it again.
+					Err(e) if crate::kvs::is_conditional_write_conflict(&e) => {
+						let _ = txn.cancel().await;
+					}
+					Err(e) => {
+						let _ = txn.cancel().await;
+						return Err(e);
+					}
+				}
+				continue;
+			}
+			let Some(state) = progress else {
+				let _ = txn.cancel().await;
+				return Ok(TableOutcome::Done);
+			};
 			if state.verifying() && !state.settled && txn.sole_writer() {
 				// The lap judges rows only once no transaction that began before the
-				// verification was queued can still commit one behind its cursor. Every row
+				// verification was folded can still commit one behind its cursor. Every row
 				// committed afterwards was written by a transaction that saw the new
 				// definition, and coerced to it.
 				let _ = txn.cancel().await;
@@ -261,6 +367,8 @@ impl Datastore {
 				if !Self::older_transactions_ended(dbs, interval).await {
 					return Ok(TableOutcome::Done);
 				}
+				// A request committed during the wait is left for the next page, which folds it
+				// into the settled progress: a verification it asks for is unsettled again.
 				let txn = dbs.transaction(TransactionType::Write).await?;
 				let settled = TableMigrationState {
 					settled: true,
@@ -268,7 +376,7 @@ impl Datastore {
 				};
 				match txn.put_compare_key(&target.key(), &settled, Some(&state)).await {
 					Ok(()) => Self::commit_page(&txn).await?,
-					// The entry moved meanwhile; the next page reads it again.
+					// The progress moved meanwhile; the next page reads it again.
 					Err(e) if crate::kvs::is_conditional_write_conflict(&e) => {
 						let _ = txn.cancel().await;
 					}
@@ -289,15 +397,15 @@ impl Datastore {
 						page = (page * 2).min(PAGE_ROWS);
 					}
 					Err(e) if surrealdb_datastore::is_retryable_transaction_conflict(&e) => {
-						// A user write or a newer definition beat the page; take a fresh
+						// A user write of a row the page rewrote beat the page; take a fresh
 						// snapshot with a smaller page.
 						page = (page / 2).max(1);
 						common::time::sleep(SETTLE_POLL).await;
 					}
 					Err(e) => return Err(e),
 				},
-				// The entry moved under the page: a new migration, a new verification or an
-				// import replaced it. The next page reads it again.
+				// The progress moved under the page: a node that took the lease over replaced it,
+				// or `REMOVE TABLE` deleted it. The next page reads it again.
 				Err(e) if crate::kvs::is_conditional_write_conflict(&e) => {
 					let _ = txn.cancel().await;
 				}
@@ -310,8 +418,29 @@ impl Datastore {
 		}
 	}
 
-	/// Commit a page; a page whose entry moved under it commits nothing and is not an error,
-	/// since the next page reads the entry again.
+	/// Fold `requests`, the first of `target`'s in the order made, into `progress`, the progress
+	/// `txn` read, and delete them, leaving the writes for the caller to commit. The progress is
+	/// written by compare-and-set on `progress`, and deleted when the fold leaves none.
+	async fn fold_requests(
+		txn: &Transaction,
+		target: &Target,
+		progress: Option<&TableMigrationState>,
+		requests: &[(Vec<u8>, TableMigrationRequest)],
+	) -> Result<()> {
+		let folded =
+			requests.iter().fold(progress.cloned(), |state, (_, request)| request.apply(state));
+		for (request, _) in requests {
+			txn.del(Key::from(request.as_slice())).await?;
+		}
+		match (&folded, progress) {
+			(Some(folded), _) => txn.put_compare_key(&target.key(), folded, progress).await,
+			(None, Some(progress)) => txn.del_compare_key(&target.key(), Some(progress)).await,
+			(None, None) => Ok(()),
+		}
+	}
+
+	/// Commit a page; a page whose progress moved under it commits nothing and is not an error,
+	/// since the next page reads the progress again.
 	async fn commit_page(txn: &Transaction) -> Result<()> {
 		match txn.commit().await {
 			Ok(()) => Ok(()),
@@ -381,7 +510,8 @@ impl Datastore {
 	}
 
 	/// Run one page of `target`'s lap in `txn`, which `state` was read in, leaving the advanced
-	/// entry written for the caller to commit. Answers whether the entry still asks for work.
+	/// progress written for the caller to commit. Answers whether the progress still asks for
+	/// work.
 	async fn migration_page(
 		dbs: &Datastore,
 		txn: &Arc<Transaction>,
@@ -421,7 +551,7 @@ impl Datastore {
 			next.target = newest_step(&layouts);
 		}
 		// The definitions of the fields under verification, by the position of each in the
-		// entry; a field whose definition changed since the pass started is dropped from it, as
+		// progress; a field whose definition changed since the pass started is dropped from it, as
 		// the definition is no longer the one the pass judges.
 		next.verify.retain(|verified| {
 			verified.finished
@@ -534,12 +664,16 @@ impl Datastore {
 	/// End `target`'s lap in `txn`: stop rewriting when the lap's target is still the newest
 	/// step, or start another lap; make the claim of each verified field that conformed
 	/// throughout, where the lap could judge every row against the field's whole definition
-	/// (`whole`, by the position of each in the entry) and the rewrite is done, and drop a field
-	/// that conformed even where the table's claims cannot state it; withdraw the table's claims
-	/// when a field that did not conform holds one on the definition the lap judged; drop the
-	/// check for undeclared keys when the lap judged every row and counted none, and finish it
-	/// with its count otherwise; and delete the entry once it asks for nothing and reports
+	/// (`whole`, by the position of each in the progress) and the rewrite is done, and drop a
+	/// field that conformed even where the table's claims cannot state it; withdraw the table's
+	/// claims when a field that did not conform holds one on the definition the lap judged; drop
+	/// the check for undeclared keys when the lap judged every row and counted none, and finish it
+	/// with its count otherwise; and delete the progress once it asks for nothing and reports
 	/// nothing.
+	///
+	/// The rewrite is judged done from the generations `txn` read. A step minted by a transaction
+	/// that commits after that read comes with a request this page does not delete, so the next
+	/// page starts another lap for it.
 	#[allow(clippy::too_many_arguments)]
 	async fn end_lap(
 		txn: &Arc<Transaction>,
@@ -655,7 +789,7 @@ impl Datastore {
 }
 
 /// The newest generation of the table's ring that carries a migration step, as the number the
-/// queue entry records; `0` when none does.
+/// progress records; `0` when none does.
 fn newest_step(layouts: &TableLayouts) -> u16 {
 	layouts.newest_migration().map_or(0, Generation::get)
 }

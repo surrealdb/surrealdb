@@ -626,13 +626,19 @@ async fn a_definition_beneath_a_field_restarts_a_pass_under_way() {
 		db,
 		tb: std::borrow::Cow::Borrowed(&table),
 	};
+	let requests = crate::key::schema::TableMigrationRequestTbPrefix {
+		ns,
+		db,
+		tb: std::borrow::Cow::Borrowed(&table),
+	};
 	for change in ["DEFINE FIELD o.k ON t TYPE int;", "REMOVE FIELD o.k ON t;"] {
-		// The pass has passed a row and counted it.
+		// The pass has folded the requests, passed a row and counted it.
 		let txn = ds.transaction(Write).await.unwrap();
 		let mut state = txn.get_tb_migration_job(ns, db, &table).await.unwrap().unwrap();
 		let lap = state.lap;
 		state.cursor = Some(b"passed".to_vec());
 		state.verify[0].failures = 3;
+		txn.delr(requests.range().unwrap()).await.unwrap();
 		txn.set_key(&key, &state).await.unwrap();
 		txn.commit().await.unwrap();
 		run(&ds, change).await;
@@ -726,7 +732,13 @@ async fn a_step_minted_mid_lap_reaches_the_rows_the_lap_had_passed() {
 		db,
 		tb: std::borrow::Cow::Borrowed(&table),
 	};
-	// The verification's lap began with no step standing and has passed `t:1`.
+	let requests = crate::key::schema::TableMigrationRequestTbPrefix {
+		ns,
+		db,
+		tb: std::borrow::Cow::Borrowed(&table),
+	};
+	// The verification's lap has folded the requests, began with no step standing and has
+	// passed `t:1`.
 	let passed = crate::key::schema::RecordKey {
 		ns,
 		db,
@@ -738,6 +750,7 @@ async fn a_step_minted_mid_lap_reaches_the_rows_the_lap_had_passed() {
 		let mut state = txn.get_tb_migration_job(ns, db, &table).await.unwrap().unwrap();
 		state.target = 0;
 		state.cursor = Some(crate::key::KVKey::encode_key(&passed).unwrap().into_vec());
+		txn.delr(requests.range().unwrap()).await.unwrap();
 		txn.set_key(&key, &state).await.unwrap();
 		txn.commit().await.unwrap();
 	}
@@ -984,7 +997,13 @@ async fn a_lap_judged_under_other_names_starts_over() {
 		db,
 		tb: std::borrow::Cow::Borrowed(&table),
 	};
-	// The lap has passed every row under names that declared `z`, and counted none.
+	let requests = crate::key::schema::TableMigrationRequestTbPrefix {
+		ns,
+		db,
+		tb: std::borrow::Cow::Borrowed(&table),
+	};
+	// The lap has folded the requests, passed every row under names that declared `z`, and
+	// counted none.
 	{
 		let txn = ds.transaction(Write).await.unwrap();
 		let records = crate::key::schema::RecordPrefix {
@@ -1000,6 +1019,7 @@ async fn a_lap_judged_under_other_names_starts_over() {
 		let check = state.undeclared.as_mut().unwrap();
 		check.declared = vec!["a".to_owned(), "z".to_owned()];
 		check.failures = 0;
+		txn.delr(requests.range().unwrap()).await.unwrap();
 		txn.set_key(&key, &state).await.unwrap();
 		txn.commit().await.unwrap();
 	}
@@ -1027,12 +1047,19 @@ async fn an_unchecked_write_restarts_a_check_under_way() {
 		db,
 		tb: std::borrow::Cow::Borrowed(&table),
 	};
+	let requests = crate::key::schema::TableMigrationRequestTbPrefix {
+		ns,
+		db,
+		tb: std::borrow::Cow::Borrowed(&table),
+	};
+	// The lap has folded the requests, passed a row and counted it.
 	let lap = {
 		let txn = ds.transaction(Write).await.unwrap();
 		let mut state = txn.get_tb_migration_job(ns, db, &table).await.unwrap().unwrap();
 		state.verify.clear();
 		state.cursor = Some(b"passed".to_vec());
 		state.undeclared.as_mut().unwrap().failures = 3;
+		txn.delr(requests.range().unwrap()).await.unwrap();
 		txn.set_key(&key, &state).await.unwrap();
 		txn.commit().await.unwrap();
 		state.lap

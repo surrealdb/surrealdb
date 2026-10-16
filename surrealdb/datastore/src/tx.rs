@@ -87,14 +87,15 @@ use crate::key::schema::{
 	ReclaimTbPrefix, RecordKey, RecordPrefix, RootAccessMethodKey, RootAccessMethodPrefix,
 	RootAccessRoot, RootConfigKey, RootGrantKey, RootGrantPrefix, RootUserKey, RootUserPrefix,
 	SequenceKey, SequencePrefix, StoreDefaultsKey, SubscriptionPrefix, TableConformanceKey,
-	TableKey, TableMigrationKey, TableMigrationsKey, TablePrefix, TermChangeBatchKey, VersionKey,
+	TableKey, TableMigrationKey, TableMigrationRequestKey, TableMigrationRequestTbPrefix,
+	TableMigrationsKey, TablePrefix, TermChangeBatchKey, VersionKey,
 };
 #[cfg(diskann)]
 use crate::key::schema::{
 	DiskannPendingKey, DiskannPendingPrefix, DiskannRecordPendingShardShardPrefix,
 	DiskannWriterLeaseKey, DiskannWriterLeaseShardPrefix,
 };
-use crate::key::table_migration::{TableMigrationState, UndeclaredKeys, VerifiedField};
+use crate::key::table_migration::{TableMigrationRequest, TableMigrationState, VerifiedField};
 use crate::layouts::LayoutSet;
 use crate::obs::Instrument;
 use crate::sequences::{Sequence, Sequences};
@@ -4524,38 +4525,52 @@ impl Transaction {
 		Ok(self.table_layouts(ns, db, tb, None).await?.newest_migration())
 	}
 
-	/// The table migration job's entry for table `tb`, if it has one.
+	/// What the table migration job will do for table `tb`, as this transaction sees it: the job's
+	/// progress with every request not yet folded into it applied in the order made
+	/// ([`TableMigrationRequest::apply`]). `None` when the table has neither.
+	///
+	/// A plain read: no write of the job, nor of another statement, conflicts with this
+	/// transaction because of it.
 	pub async fn get_tb_migration_job(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &TableName,
 	) -> Result<Option<TableMigrationState>> {
-		self.get_key(&Self::migration_job_key(ns, db, tb), None).await
+		let progress = self.get_key(&Self::migration_job_key(ns, db, tb), None).await?;
+		let requests = self.getr(Self::migration_requests(ns, db, tb).range()?, None).await?;
+		Ok(requests.iter().fold(progress, |state, (_, request)| request.apply(state)))
 	}
 
-	/// Queue table `tb` for the rewrite job, in the transaction that mints a migration of it: the
-	/// entry is written whether or not one exists, so a page of a lap already under way conflicts
-	/// with this transaction and the job reads the new migration before it ends the lap.
+	/// Up to `limit` of the requests made of the table migration job for table `tb` that it has
+	/// not yet folded into its progress, with their keys, in the order made.
+	pub async fn tb_migration_requests(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		limit: u32,
+	) -> Result<Vec<(Vec<u8>, TableMigrationRequest)>> {
+		self.scan(Self::migration_requests(ns, db, tb).range()?, limit, 0, None).await
+	}
+
+	/// Queue table `tb` for the rewrite job, in the transaction that mints a migration of it.
+	///
+	/// The request is a key no other transaction writes ([`Self::request_tb_migration`]). A page
+	/// of the job whose snapshot predates the commit leaves it in place, so the job reads the new
+	/// migration on a later page and starts another lap, whichever of the two commits first.
 	pub async fn queue_tb_rewrite(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &TableName,
 	) -> Result<()> {
-		let key = Self::migration_job_key(ns, db, tb);
-		let mut state = self.get_key(&key, None).await?.unwrap_or_else(|| TableMigrationState {
-			lap: 1,
-			..Default::default()
-		});
-		state.rewrite = true;
-		self.set_key(&key, &state).await?;
-		self.trigger_table_migration();
-		Ok(())
+		self.request_tb_migration(ns, db, tb, TableMigrationRequest::Rewrite).await
 	}
 
-	/// Queue `field` of table `tb` for verification, restarting the lap so it reads every row from
-	/// the start, after every transaction older than this one has ended.
+	/// Queue `field` of table `tb` for verification. The job restarts the lap when it folds the
+	/// request, and reads every row from the start after every transaction older than its fold has
+	/// ended.
 	pub async fn queue_tb_verification(
 		&self,
 		ns: NamespaceId,
@@ -4563,20 +4578,13 @@ impl Transaction {
 		tb: &TableName,
 		field: VerifiedField,
 	) -> Result<()> {
-		let key = Self::migration_job_key(ns, db, tb);
-		let mut state = self.get_key(&key, None).await?.unwrap_or_default();
-		state.verify.retain(|f| f.name != field.name);
-		state.verify.push(field);
-		state.settled = false;
-		state.restart();
-		self.set_key(&key, &state).await?;
-		self.trigger_table_migration();
-		Ok(())
+		self.request_tb_migration(ns, db, tb, TableMigrationRequest::Verify(field)).await
 	}
 
 	/// Queue table `tb` for the check for rows holding a top-level key none of the names in
-	/// `declared` (sorted) names, replacing any check queued before, and restart the lap so it
-	/// reads every row from the start, after every transaction older than this one has ended.
+	/// `declared` (sorted) names, in place of any check queued before. The job restarts the lap
+	/// when it folds the request, and reads every row from the start after every transaction older
+	/// than its fold has ended.
 	pub async fn queue_tb_undeclared(
 		&self,
 		ns: NamespaceId,
@@ -4584,23 +4592,15 @@ impl Transaction {
 		tb: &TableName,
 		declared: Vec<String>,
 	) -> Result<()> {
-		let key = Self::migration_job_key(ns, db, tb);
-		let mut state = self.get_key(&key, None).await?.unwrap_or_default();
-		state.undeclared = Some(UndeclaredKeys {
-			declared,
-			failures: 0,
-			finished: false,
-		});
-		state.settled = false;
-		state.restart();
-		self.set_key(&key, &state).await?;
-		self.trigger_table_migration();
-		Ok(())
+		self.request_tb_migration(ns, db, tb, TableMigrationRequest::Undeclared(declared)).await
 	}
 
 	/// Run the check for undeclared keys queued on table `tb`, finished or not, again: when
 	/// `declared` (sorted) is not the set of names it judges rows against, or when `rows_changed`,
 	/// since a step clears keys from the rows it judged. A table with no check queues none.
+	///
+	/// The check is read as the job will hold it ([`Self::get_tb_migration_job`]), without a
+	/// lock, so it conflicts with no page of the job.
 	pub async fn recheck_tb_undeclared(
 		&self,
 		ns: NamespaceId,
@@ -4609,8 +4609,7 @@ impl Transaction {
 		declared: Vec<String>,
 		rows_changed: bool,
 	) -> Result<()> {
-		let key = Self::migration_job_key(ns, db, tb);
-		let Some(state) = self.get_key(&key, None).await? else {
+		let Some(state) = self.get_tb_migration_job(ns, db, tb).await? else {
 			return Ok(());
 		};
 		match &state.undeclared {
@@ -4621,58 +4620,92 @@ impl Transaction {
 		}
 	}
 
-	/// Drop the check for undeclared keys queued on table `tb`, if any, deleting the entry when
-	/// nothing else is left in it: a `SCHEMALESS` table refuses no key, so the check reports
-	/// nothing a write refuses.
+	/// Drop the check for undeclared keys queued on table `tb`, if this transaction sees one: a
+	/// `SCHEMALESS` table refuses no key, so the check reports nothing a write refuses. The job
+	/// deletes the progress when nothing else is left in it.
 	pub async fn drop_tb_undeclared(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &TableName,
 	) -> Result<()> {
-		let key = Self::migration_job_key(ns, db, tb);
-		let Some(mut state) = self.get_key(&key, None).await? else {
-			return Ok(());
-		};
-		if state.undeclared.take().is_none() {
+		let queued = self
+			.get_tb_migration_job(ns, db, tb)
+			.await?
+			.is_some_and(|state| state.undeclared.is_some());
+		if !queued {
 			return Ok(());
 		}
-		if state.is_spent() {
-			self.del_key(&key).await
-		} else {
-			self.set_key(&key, &state).await
-		}
+		self.request_tb_migration(ns, db, tb, TableMigrationRequest::DropUndeclared).await
 	}
 
-	/// Restart the verification under way on table `tb`, if any, for a write that stores a record
-	/// without checking it (`OPTION IMPORT`).
+	/// Restart the verification under way on table `tb`, if this transaction sees one, for a
+	/// write that stores a record without checking it (`OPTION IMPORT`) or a change of the
+	/// definitions a pass judges a field against.
 	///
-	/// The entry is read with a locked read, so on a backend whose locked reads are shared this
-	/// transaction conflicts with a page or promotion of the job that commits first, and the
-	/// job's compare-and-set fails if this transaction commits first: no pass promotes a field
-	/// over a row it could not judge.
+	/// The request is read and written without a lock, so it conflicts with no page of the job. A
+	/// pass whose last page did not see it ends with the counts it judged, as it would had the
+	/// write committed after it. A pass that makes a claim instead conflicts with the forfeit of
+	/// the table's claims that every caller makes in the same transaction
+	/// ([`Self::forfeit_conformance`]), so no claim is made over a row the pass could not judge.
+	/// A transaction that sees no verification under way began before the request for it
+	/// committed, so before the job folded it, and the job's lap waits for every transaction
+	/// older than the fold to end before it reads a row.
 	pub async fn restart_tb_verification(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &TableName,
 	) -> Result<()> {
-		let key = Self::migration_job_key(ns, db, tb);
-		let Some(mut state) = self.getu_key(&key).await? else {
+		let Some(state) = self.get_tb_migration_job(ns, db, tb).await? else {
 			return Ok(());
 		};
 		if !state.verifying() {
 			return Ok(());
 		}
-		state.settled = false;
-		state.restart();
-		self.set_key(&key, &state).await?;
+		self.request_tb_migration(ns, db, tb, TableMigrationRequest::Restart).await
+	}
+
+	/// Write `request` of the table migration job for table `tb` under a fresh version-7 id, and
+	/// wake the job when this transaction commits.
+	///
+	/// No other transaction writes the key: the job deletes it only once it has read it, and
+	/// therefore only once this transaction has committed. The ids one process mints sort in the
+	/// order they were minted, so the job folds one node's requests in the order they were made.
+	/// The key is inserted rather than upserted, so an id that did collide is refused instead of
+	/// replacing another request.
+	async fn request_tb_migration(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		request: TableMigrationRequest,
+	) -> Result<()> {
+		let key = TableMigrationRequestKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+			uid: Uuid::now_v7(),
+		};
+		self.put_key(&key, &request).await?;
 		self.trigger_table_migration();
 		Ok(())
 	}
 
 	fn migration_job_key(ns: NamespaceId, db: DatabaseId, tb: &TableName) -> TableMigrationKey<'_> {
 		TableMigrationKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		}
+	}
+
+	fn migration_requests(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> TableMigrationRequestTbPrefix<'_> {
+		TableMigrationRequestTbPrefix {
 			ns,
 			db,
 			tb: Cow::Borrowed(tb),

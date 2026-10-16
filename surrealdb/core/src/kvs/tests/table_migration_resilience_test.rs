@@ -29,7 +29,7 @@ use crate::catalog::{DatabaseId, Generation, NamespaceId, RecordFormat, TaskLeas
 use crate::dbs::Session;
 use crate::exec::scheduler::{Scheduler, YieldFuture};
 use crate::key::Key;
-use crate::key::schema::{RecordPrefix, TaskLeaseKey};
+use crate::key::schema::{RecordPrefix, TableMigrationKey, TaskLeaseKey};
 use crate::key::table_migration::{TableMigrationState, VerifiedField};
 use crate::kvs::tasklease::TaskLeaseType;
 use crate::kvs::{Datastore, QueryRequest, Transaction};
@@ -487,31 +487,44 @@ async fn a_pass_stopped_mid_lap_resumes_from_its_stored_cursor() {
 	assert_eq!(steps_run(&ds, "tb").await, 1);
 }
 
-/// The pass pages through the whole queue: a table whose entry sorts after more entries than one
-/// batch holds, all of them asking for nothing (a finished verification kept for `INFO`), is
-/// still worked.
+/// The pass pages through the whole queue: a table whose progress sorts after more progress
+/// entries than one batch holds, all of them asking for nothing (a finished verification kept
+/// for `INFO`), is still worked.
 #[tokio::test]
 async fn a_pass_reaches_a_table_that_sorts_after_a_full_batch_of_idle_entries() {
 	// More than one batch of the queue.
 	const IDLE: u32 = 1100;
 	let ds = datastore(4).await;
 	doubling_table(&ds, 3).await;
+	// A pass folds the table's requests and stops at a row it cannot read, so only the table's
+	// progress asks for its lap.
+	let (bad_key, bad_bytes) = corrupt(&ds, "tb", 1).await;
+	drain(&ds).await;
+	assert!(entry(&ds, "tb").await.is_some_and(|job| job.has_work()));
+	overwrite(&ds, &bad_key, bad_bytes).await;
+	// Idle progress sorts before it: verifications that ended, as a pass leaves them.
 	let (ns, db) = ids(&ds).await;
 	let txn = ds.transaction(Write).await.unwrap();
 	for ix in 0..IDLE {
-		let finished = VerifiedField {
-			name: "f".into(),
-			definition: 0,
-			failures: 1,
-			finished: true,
+		let table = TableName::new(format!("a{ix:04}"));
+		let key = TableMigrationKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(&table),
 		};
-		txn.queue_tb_verification(ns, db, &TableName::new(format!("a{ix:04}")), finished)
-			.await
-			.unwrap();
+		let idle = TableMigrationState {
+			lap: 1,
+			verify: vec![VerifiedField {
+				name: "f".into(),
+				definition: 0,
+				failures: 1,
+				finished: true,
+			}],
+			..Default::default()
+		};
+		txn.set_key(&key, &idle).await.unwrap();
 	}
 	txn.commit().await.unwrap();
-	// The job waits for every transaction older than its verification, a committed one included,
-	// to be dropped.
 	drop(txn);
 	assert!(!entry(&ds, "a0000").await.expect("an idle entry").has_work());
 
@@ -679,11 +692,12 @@ async fn a_paused_owner_cannot_undo_what_a_finished_lap_and_a_user_wrote() {
 	assert_eq!(steps_run(&base, "tb").await, 1);
 }
 
-/// A verification waits for the transactions older than its definition. An
-/// owner waiting there holds the entry it read before the wait; a migration
-/// committed meanwhile replaces the entry, and the owner's write of the
-/// settled flag, made from the entry it read, is refused instead of
-/// replacing the migration's.
+/// A verification waits for the transactions older than the job's fold of
+/// its request. An owner waiting there settles the progress it read before
+/// the wait; a migration committed meanwhile leaves requests that progress
+/// does not hold, and the next page folds them, which unsettles the
+/// verification the migration asks for: the rewrite is carried out, and the
+/// new definition is verified only after the transactions older than it.
 #[tokio::test]
 async fn an_owner_waiting_for_older_transactions_cannot_overwrite_a_migration_queued_meanwhile() {
 	let ds = datastore(4).await;
@@ -714,8 +728,8 @@ async fn an_owner_waiting_for_older_transactions_cannot_overwrite_a_migration_qu
 	let queued_by_migration = entry(&ds, "tb").await.unwrap();
 	assert!(queued_by_migration.rewrite, "the migration queued a rewrite");
 
-	// The older transaction ends; the owner wakes, its write is refused, and
-	// it reads the entry again.
+	// The older transaction ends; the owner wakes, settles what it read, and
+	// folds the migration's requests on its next page.
 	older.cancel().await.unwrap();
 	drop(older);
 	finish(pass).await;
@@ -733,6 +747,167 @@ async fn an_owner_waiting_for_older_transactions_cannot_overwrite_a_migration_qu
 		);
 	}
 	assert_eq!(conformance(&ds, "tb").await, "a:G");
+}
+
+// ---------------------------------------------------------------------------
+// A statement beside the job.
+// ---------------------------------------------------------------------------
+
+/// Run `sql` in `txn`, a transaction the caller owns and commits, failing on
+/// the first error.
+async fn run_in(ds: &Datastore, txn: &Arc<Transaction>, sql: &str) {
+	for response in
+		ds.run(QueryRequest::new(sql, &session()).with_transaction(Arc::clone(txn))).await.unwrap()
+	{
+		response.result.unwrap();
+	}
+}
+
+/// `doubling_table` with an untyped `f` beside a typed `g`: the migration of
+/// `f` queues a rewrite and no verification, so the job's lap waits for no
+/// older transaction.
+async fn untyped_doubling_table(ds: &Datastore, rows: i64) {
+	let mut sql = String::from(
+		"DEFINE TABLE tb SCHEMAFULL; DEFINE FIELD f ON tb; DEFINE FIELD g ON tb TYPE int;",
+	);
+	for i in 0..rows {
+		sql.push_str(&format!("CREATE tb:{i} SET f = {}, g = {i} RETURN NONE;", i + 1));
+	}
+	sql.push_str("ALTER FIELD f ON tb MIGRATE EXISTING ROWS AS dbl USING $value * 2 FALLBACK 0;");
+	run(ds, &sql).await;
+}
+
+/// A migration's transaction is open while the job passes every page of a lap
+/// over the same table, the one that ends the lap included. The migration's
+/// request is a key of its own, which no page writes, so the migration commits;
+/// and the lap the job ended without seeing its step leaves the request in
+/// place, so the next pass rewrites every row through it.
+#[tokio::test]
+async fn a_migration_commits_beside_the_pages_the_job_commits_for_its_table() {
+	const ROWS: i64 = 300;
+	let ds = datastore(4).await;
+	untyped_doubling_table(&ds, ROWS).await;
+
+	let txn = Arc::new(ds.transaction(Write).await.unwrap());
+	run_in(
+		&ds,
+		&txn,
+		"ALTER FIELD f ON tb MIGRATE EXISTING ROWS AS inc USING $value + 1 FALLBACK 0;",
+	)
+	.await;
+	// The job passes the first migration's lap, in more than one page.
+	drain(&ds).await;
+	assert!(entry(&ds, "tb").await.is_none(), "the lap ended without the open step");
+	assert_row(&ds, ROWS - 1, 2 * ROWS, 1).await;
+
+	txn.commit().await.expect("a page of the job must not fail the migration's commit");
+	drop(txn);
+	assert!(entry(&ds, "tb").await.is_some_and(|job| job.rewrite), "the migration queued a lap");
+	drain(&ds).await;
+	assert!(entry(&ds, "tb").await.is_none());
+	for id in 0..ROWS {
+		assert_row(&ds, id, 2 * (id + 1) + 1, 2).await;
+	}
+}
+
+/// Raising a database to compatibility level 4 queues a verification of every
+/// `SCHEMAFULL` table with rows. Its transaction is open while the job
+/// rewrites one of those tables, and commits: the verification is a request
+/// of its own, which the job carries out once the rewrite is done.
+#[tokio::test]
+async fn raising_the_compatibility_level_commits_beside_the_pages_the_job_commits() {
+	const ROWS: i64 = 300;
+	let ds = datastore(3).await;
+	untyped_doubling_table(&ds, ROWS).await;
+
+	let txn = Arc::new(ds.transaction(Write).await.unwrap());
+	run_in(&ds, &txn, "ALTER DATABASE COMPATIBILITY 4;").await;
+	drain(&ds).await;
+	assert!(entry(&ds, "tb").await.is_none(), "the rewrite ended");
+
+	txn.commit().await.expect("a page of the job must not fail the raise's commit");
+	drop(txn);
+	let queued = entry(&ds, "tb").await.expect("the raise queued a verification");
+	assert!(queued.verify.iter().any(|field| field.name == "g" && !field.finished));
+	drain(&ds).await;
+	assert!(entry(&ds, "tb").await.is_none());
+	assert!(conformance(&ds, "tb").await.contains("g:G"));
+}
+
+/// An `OPTION IMPORT` write into a table the job is rewriting forfeits the
+/// table's claims and reads whether a verification is under way, which it
+/// must start over. The read takes no lock, so the job's pages over the table
+/// do not fail the writer's commit. The writer's calls are made by hand: a
+/// transaction its caller owns runs no `OPTION` statement.
+#[tokio::test]
+async fn an_import_write_commits_beside_the_pages_the_job_commits_for_its_table() {
+	const ROWS: i64 = 300;
+	let ds = datastore(4).await;
+	untyped_doubling_table(&ds, ROWS).await;
+	let (ns, db) = ids(&ds).await;
+	let table = TableName::from("tb");
+
+	let txn = ds.transaction(Write).await.unwrap();
+	txn.forfeit_conformance(ns, db, &table).await.unwrap();
+	txn.restart_tb_verification(ns, db, &table).await.unwrap();
+	drain(&ds).await;
+	assert!(entry(&ds, "tb").await.is_none(), "the rewrite ended");
+
+	txn.commit().await.expect("a page of the job must not fail the import's commit");
+	drop(txn);
+	assert!(entry(&ds, "tb").await.is_none(), "no verification was under way to restart");
+	assert_row(&ds, ROWS - 1, 2 * ROWS, 1).await;
+}
+
+/// A field change forfeits the table's conformance claims, a write of the
+/// claims record, and the page that ends a verifying lap writes the same
+/// record when it makes a claim. A field change whose transaction is open
+/// across that page therefore still fails to commit.
+#[tokio::test]
+#[ignore = "BUG: a field change loses a write conflict on the claims record to the job's promotion"]
+async fn a_field_change_commits_beside_the_promotion_the_job_commits_for_its_table() {
+	const ROWS: i64 = 300;
+	let (base, gated, gate) = gated_nodes().await;
+	doubling_table(&base, ROWS).await;
+
+	// The owner has waited for the transactions older than the verification,
+	// and is held inside its first page of rows.
+	gate.arm();
+	let owner = spawn_pass(&gated);
+	gate.paused().await;
+	let txn = Arc::new(base.transaction(Write).await.unwrap());
+	run_in(&base, &txn, "DEFINE FIELD h ON tb TYPE option<int>;").await;
+	gate.release();
+	finish(owner).await;
+	assert_eq!(conformance(&base, "tb").await, "f:G");
+
+	txn.commit().await.expect("the job's promotion must not fail the field change's commit");
+}
+
+/// A migration that commits while a page of the job is under way does not
+/// fail the page, which commits the rows it rewrote; the page after it folds
+/// the migration's request, and the lap the page belonged to ends into
+/// another, which brings every row through the new step.
+#[tokio::test]
+async fn a_migration_committed_while_a_page_is_under_way_is_carried_out_by_the_next_lap() {
+	const ROWS: i64 = 300;
+	let (base, gated, gate) = gated_nodes().await;
+	doubling_table(&base, ROWS).await;
+
+	// The owner folds the first migration's request, then is held inside its
+	// first page of rows.
+	gate.arm();
+	let owner = spawn_pass(&gated);
+	gate.paused().await;
+	run(&base, "ALTER FIELD f ON tb MIGRATE EXISTING ROWS AS inc USING $value + 1 FALLBACK 0;")
+		.await;
+	gate.release();
+	finish(owner).await;
+
+	assert!(entry(&base, "tb").await.is_none());
+	for id in 0..ROWS {
+		assert_row(&base, id, 2 * (id + 1) + 1, 2).await;
+	}
 }
 
 // ---------------------------------------------------------------------------

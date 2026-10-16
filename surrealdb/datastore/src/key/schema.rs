@@ -186,16 +186,28 @@ keyspace! {
 		graph_fold = ["!gf", @, ns: NamespaceId, db: DatabaseId, tb: Table,
 					  @, id: Id, dir: Dir, @, nid: Uuid, uid: Uuid] => ();
 
-		/// A table's work for the table migration job: rows to rewrite
-		/// through its migration steps, or fields to verify. One entry per
-		/// table, written in the transaction that queues the work. The
-		/// namespace, database and table are spelled out as fields, as in the
-		/// queues above, so an entry survives the deletion of the subtree it
-		/// refers to and the job can still delete it. The namespace and the
-		/// database each have a prefix of their own, which removing either
-		/// clears its entries by.
+		/// The table migration job's progress through a table: the lap under
+		/// way, its cursor and counts, and the fields under verification. One
+		/// entry per table, written only by the job, which folds the table's
+		/// requests (`!tq`) into it. The namespace, database and table are
+		/// spelled out as fields, as in the queues above, so an entry survives
+		/// the deletion of the subtree it refers to and the job can still
+		/// delete it. The namespace and the database each have a prefix of
+		/// their own, which removing either clears its entries by.
 		table_migration = ["!tm", @, ns: NamespaceId, @, db: DatabaseId, @, tb: Table]
 			=> crate::key::table_migration::TableMigrationState;
+
+		/// A request a statement makes of the table migration job: rows to
+		/// rewrite through a migration step it minted, a field to verify, or a
+		/// verification to start over. Written in the transaction that makes
+		/// the change, under a fresh version-7 id, so no two transactions
+		/// write one key and the ids of one process sort in the order the
+		/// requests were made. The job folds a table's requests into its
+		/// progress (`!tm`) and deletes them. Prefixed by namespace, database
+		/// and table, so removing any of them clears its requests.
+		table_migration_request = ["!tq", @, ns: NamespaceId, @, db: DatabaseId, @, tb: Table,
+								   @, uid: Uuid]
+			=> crate::key::table_migration::TableMigrationRequest;
 
 		/// Resources awaiting reclamation after a drop.
 		reclaim = ["!rc", @, kind: ReclaimKind, ns: NamespaceId, db: DatabaseId,

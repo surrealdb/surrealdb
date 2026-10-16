@@ -193,12 +193,17 @@ cannot migrate fails the read of that row.
 - **On write.** A write stamps the row with the table's head generation, so only rows stored before
   the newest step ever need replay.
 - **In the background.** One lease (`TaskLeaseType::TableMigration`) covers the job for every
-  table. A table with work has one queue entry at `!tm` (`TableMigrationState`) holding a cursor
-  and the counts of the lap. The job reads a page of records from its own snapshot, brings each
-  through the steps it has not passed and stores it in the layout of the head generation, then
-  advances the entry by compare-and-set on the state it read. A page whose entry was replaced or
-  deleted meanwhile commits nothing. A lap ends when the table's newest step is the one the lap
-  began under; otherwise another lap begins. Any node resumes from the stored cursor.
+  table. A statement that gives a table work writes a request at `!tq`
+  (`TableMigrationRequest`) under a fresh id, in its own transaction; the job keeps its progress
+  through the table, a cursor and the counts of the lap, at `!tm` (`TableMigrationState`), which
+  no statement writes. A statement and the job therefore never write the same queue key, and
+  neither fails the other's commit through it. The job folds a table's requests into its
+  progress in a page of their own and deletes them. It then reads a page of records from its own
+  snapshot, brings each through the steps it has not passed and stores it in the layout of the
+  head generation, and advances the progress by compare-and-set on the state it read. A lap ends
+  when the table's newest step is the one the lap began under; otherwise another lap begins. A
+  step minted after the last page's snapshot comes with a request that page did not delete, so
+  the next page starts a lap for it. Any node resumes from the stored cursor.
 - **No retirement.** The job does not move the ring's floor. Moving it retires descriptors and
   erases the `VERSION` history of the generations it passes, so it is an operator decision rather
   than a side effect of a backfill. The steps stay in the ring, and a straggler row, one a

@@ -539,9 +539,10 @@ impl Ddl<'_, '_> {
 		self.retire_table_indexes(ns, db, table, tb, expunge)?;
 		self.with_service(Service::Broker, |l| l.kill_table_subscriptions(ns, db, tb))?;
 		self.delete("TableKey", key, expunge);
-		// The table migration job's entry, at the root, which the table's own range does not
-		// cover: its rewrite and verification end here.
+		// The table migration job's progress and requests, at the root, which the table's own
+		// range does not cover: its rewrite and verification end here.
 		self.delete("TableMigrationKey", key, false);
+		self.delete_range("TableMigrationRequestTbPrefix", key, false);
 		self.stamp(ns, db, name)?;
 		self.delete_range("TblRoot", key, expunge);
 		self.each(sources, |l, source| {

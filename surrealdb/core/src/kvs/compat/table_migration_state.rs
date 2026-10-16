@@ -1,9 +1,9 @@
-//! Backwards-compatibility coverage for the table migration job's queue entry at `!tm`
+//! Backwards-compatibility coverage for the table migration job's progress at `!tm`
 //! ([`TableMigrationState`]), which gained the check for undeclared keys (`undeclared`) at
 //! revision 2.
 //!
-//! An entry is written by the statement that queues work and read by whichever node holds the
-//! job's lease, so an entry of revision 1 must still decode, with no check queued. No released
+//! The progress is written by the node that holds the job's lease and read by whichever node
+//! holds it next, so an entry of revision 1 must still decode, with no check queued. No released
 //! snapshot holds an entry, so this lives outside the `fixtures.rs`/`vX_Y_Z.rs` machinery. The
 //! bytes below are frozen: a failure means the current code can no longer read what an earlier
 //! build wrote. Never edit them by hand and never regenerate them to make a failing test pass.
