@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "While a row of an enforced table is behind a migration step, the table's TYPE cannot change and it cannot be redefined as a view, whatever the statement that asks: the table, its rows and its steps are left as they were, and every other change of the table is accepted. A table that is not enforced accepts both, and what its reads return afterwards is the new table's: a relation's rows are read as they were, a view holds only the rows its source gives it, with nothing of the old rows or steps."
+reason = "While a row of an enforced table is behind a migration step, the table's TYPE cannot change and it cannot be redefined as a view, whatever the statement that asks: the table, its rows and its steps are left as they were, and every other change of the table is accepted. A TYPE that a record of the table does not admit is refused for that record before the step is judged, since waiting for the rewrite job would not let it through. A table that is not enforced accepts both, and what its reads return afterwards is the new table's: a relation's edges are read as they were, a view holds only the rows its source gives it, with nothing of the old rows or steps."
 
 [[test.results]]
 value = "NONE"
@@ -36,10 +36,10 @@ error = "Cannot migrate table `tb`: rows are behind a migration step: the table'
 error = "Cannot migrate table `tb`: rows are behind a migration step: the table's TYPE cannot change, nor can it become a view, until the rewrite job has finished"
 
 [[test.results]]
-error = "Cannot migrate table `tb`: rows are behind a migration step: the table's TYPE cannot change, nor can it become a view, until the rewrite job has finished"
+error = "Cannot make `tb` TYPE RELATION: it holds ``tb`:1`, which is not an edge. Delete the record first, or define the table TYPE ANY"
 
 [[test.results]]
-error = "Cannot migrate table `tb`: rows are behind a migration step: the table's TYPE cannot change, nor can it become a view, until the rewrite job has finished"
+error = "Cannot make `tb` TYPE RELATION: it holds ``tb`:1`, which is not an edge. Delete the record first, or define the table TYPE ANY"
 
 [[test.results]]
 value = "[{ a: 5, id: tb:1 }, { a: -1, id: tb:2 }]"
@@ -90,6 +90,42 @@ value = "NONE"
 value = "[]"
 
 [[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+error = "Cannot migrate table `ed`: rows are behind a migration step: the table's TYPE cannot change, nor can it become a view, until the rewrite job has finished"
+
+[[test.results]]
+error = "Cannot migrate table `ed`: rows are behind a migration step: the table's TYPE cannot change, nor can it become a view, until the rewrite job has finished"
+
+[[test.results]]
+error = "Cannot make `ed` TYPE NORMAL: it holds the edge `ed:1`. Delete the edge first, or define the table TYPE ANY"
+
+[[test.results]]
+error = "Cannot make `ed` TYPE NORMAL: it holds the edge `ed:1`. Delete the edge first, or define the table TYPE ANY"
+
+[[test.results]]
+value = "[{ a: 5, id: ed:1, in: pt:1, out: pt:2 }, { a: -1, id: ed:2, in: pt:1, out: pt:2 }]"
+
+[[test.results]]
+value = "'DEFINE TABLE ed TYPE ANY SCHEMAFULL PERMISSIONS NONE'"
+
+[[test.results]]
+value = "[{ field: 'a', generation: 3, name: 'a_int' }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
 value = "NONE"
 
 [[test.results]]
@@ -120,7 +156,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ a: 5, id: lo:1 }, { a: -1, id: lo:2 }]"
+value = "[{ a: 5, id: lo:1, in: pt:1, out: pt:2 }, { a: -1, id: lo:2, in: pt:1, out: pt:2 }]"
 
 [[test.results]]
 value = "[{ field: 'a', generation: 2, name: 'a_int' }]"
@@ -205,12 +241,14 @@ DEFINE FIELD a ON tb TYPE string;
 CREATE tb:1 SET a = '5' RETURN NONE;
 CREATE tb:2 SET a = 'junk' RETURN NONE;
 ALTER FIELD a ON tb TYPE int MIGRATE EXISTING ROWS AS a_int USING <int>$value FALLBACK -1;
--- Enforced, rows behind a step: refused, however it is asked.
-ALTER TABLE tb TYPE RELATION;
+-- Enforced, rows behind a step: a TYPE the rows admit, or a view, is refused, however it is asked.
 ALTER TABLE tb TYPE ANY;
-DEFINE TABLE OVERWRITE tb TYPE RELATION SCHEMAFULL;
 DEFINE TABLE OVERWRITE tb TYPE ANY SCHEMAFULL;
 DEFINE TABLE OVERWRITE tb AS SELECT a FROM src;
+-- A TYPE a row does not admit is refused for that row before the step is judged: waiting for the
+-- job would not let it through.
+ALTER TABLE tb TYPE RELATION;
+DEFINE TABLE OVERWRITE tb TYPE RELATION SCHEMAFULL;
 SELECT * FROM tb ORDER BY id;
 (INFO FOR DB).tables.tb;
 (INFO FOR TABLE tb).migrations;
@@ -226,6 +264,20 @@ DEFINE TABLE em SCHEMAFULL;
 DEFINE FIELD a ON em TYPE string;
 ALTER FIELD a ON em TYPE int MIGRATE EXISTING ROWS AS a_int USING <int>$value FALLBACK -1;
 ALTER TABLE em TYPE ANY;
+-- Enforced, edges behind a step: the edges admit TYPE RELATION, so the step refuses it, however it
+-- is asked; they do not admit TYPE NORMAL, which is refused for the edge.
+DEFINE TABLE ed TYPE ANY SCHEMAFULL;
+DEFINE FIELD a ON ed TYPE string;
+RELATE pt:1->ed:1->pt:2 SET a = '5' RETURN NONE;
+RELATE pt:1->ed:2->pt:2 SET a = 'junk' RETURN NONE;
+ALTER FIELD a ON ed TYPE int MIGRATE EXISTING ROWS AS a_int USING <int>$value FALLBACK -1;
+ALTER TABLE ed TYPE RELATION;
+DEFINE TABLE OVERWRITE ed TYPE RELATION SCHEMAFULL;
+ALTER TABLE ed TYPE NORMAL;
+DEFINE TABLE OVERWRITE ed TYPE NORMAL SCHEMAFULL;
+SELECT * FROM ed ORDER BY id;
+(INFO FOR DB).tables.ed;
+(INFO FOR TABLE ed).migrations.migrations;
 -- With no step behind it a table takes both.
 DEFINE TABLE nostep SCHEMAFULL;
 DEFINE FIELD a ON nostep TYPE string;
@@ -234,11 +286,11 @@ ALTER TABLE nostep TYPE ANY;
 (INFO FOR DB).tables.nostep;
 DEFINE TABLE OVERWRITE nostep AS SELECT a FROM src;
 SELECT * FROM nostep;
--- Not enforced (SCHEMALESS): a relation whose rows keep reading as they did.
-DEFINE TABLE lo SCHEMALESS;
+-- Not enforced (SCHEMALESS): a relation whose edges keep reading as they did.
+DEFINE TABLE lo TYPE ANY SCHEMALESS;
 DEFINE FIELD a ON lo TYPE string;
-CREATE lo:1 SET a = '5' RETURN NONE;
-CREATE lo:2 SET a = 'junk' RETURN NONE;
+RELATE pt:1->lo:1->pt:2 SET a = '5' RETURN NONE;
+RELATE pt:1->lo:2->pt:2 SET a = 'junk' RETURN NONE;
 ALTER FIELD a ON lo TYPE int MIGRATE EXISTING ROWS AS a_int USING <int>$value FALLBACK -1;
 ALTER TABLE lo TYPE RELATION;
 SELECT * FROM lo ORDER BY id;

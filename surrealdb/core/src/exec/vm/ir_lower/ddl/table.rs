@@ -141,6 +141,9 @@ impl Ddl<'_, '_> {
 				refusal: refusal.clone(),
 			});
 		}
+		// The table's records judge a new TYPE before a migration step does: a step's refusal lifts
+		// once the rewrite job has finished, a record's kind does not, so a change both refuse is
+		// refused for the record.
 		if let Some(redefined) = redefined {
 			self.store(StoreInstr::RefuseRedefiningTable {
 				ns,
@@ -622,7 +625,8 @@ impl Ddl<'_, '_> {
 		self.replace_fields(table, template)?;
 		let changefeed_set = matches!(alter.changefeed, AlterKind::Set(_));
 		// The body validates the table as altered against the table as it was, then forms the
-		// relation's `in` and `out` fields.
+		// relation's `in` and `out` fields. As `DEFINE TABLE` does, it judges a new TYPE against
+		// the table's records before a migration step refuses the change.
 		self.store(StoreInstr::CheckTableAlter {
 			previous,
 			updated: table,

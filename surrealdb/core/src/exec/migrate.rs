@@ -2690,6 +2690,13 @@ pub(crate) async fn remove_field(
 /// migrations ([`enforces_migrations`]) is behind a migration step, the
 /// table's `TYPE` cannot change and it cannot become a view.
 ///
+/// That refusal lifts by itself once the rewrite job has finished, so both
+/// statement routes call this only after the table's records have judged the
+/// new `TYPE` ([`validate_records_survive_type_change`]): a `TYPE` a record
+/// does not admit is refused for that record, which waiting for the job would
+/// not change, and a caller is told to wait only for a change its records
+/// admit.
+///
 /// A change that makes the table enforce migrations (a `SCHEMALESS` table
 /// made `SCHEMAFULL` in a database at level 4) queues a verification of its
 /// rows ([`verify_table`]); an import, which restores definitions as they
@@ -2699,6 +2706,8 @@ pub(crate) async fn remove_field(
 /// ([`verification_test`]). A change that ends enforcement is accepted as it
 /// is; one that makes the table `SCHEMALESS` drops its check for undeclared
 /// keys, since such a table refuses none.
+///
+/// [`validate_records_survive_type_change`]: crate::ddl::define::table::validate_records_survive_type_change
 pub(crate) async fn check_table_change(
 	ctx: &ExecutionContext,
 	ns: NamespaceId,

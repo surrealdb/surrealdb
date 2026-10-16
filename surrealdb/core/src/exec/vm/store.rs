@@ -422,6 +422,7 @@ async fn step_inner(
 			)
 			.await
 			.map_err(ControlFlow::Err)?;
+			// After the records have judged the type: see `check_table_change`.
 			crate::exec::vm::descriptor::schema(crate::exec::migrate::check_table_change(
 				ctx,
 				ns,
@@ -2417,6 +2418,7 @@ async fn step_inner(
 			super::schema_host::check_table_altered(ctx, &txn, &previous, &mut altered)
 				.await
 				.map_err(ControlFlow::Err)?;
+			// After the records have judged the type: see `check_table_change`.
 			crate::exec::vm::descriptor::schema(crate::exec::migrate::check_table_change(
 				ctx,
 				previous.namespace_id,
