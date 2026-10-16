@@ -3653,6 +3653,7 @@ b9c6f4e7253c14b9 language-tests/tests/reproductions/a_table_select_permission_re
 f640d3aaa84fa5ad language-tests/tests/reproductions/a_timeout_clause_is_read_before_the_work.surql
 6659eb90887aa8ba language-tests/tests/reproductions/a_union_field_is_checked_only_where_every_input_proves_it.surql
 028c8ef9ade462ec language-tests/tests/reproductions/a_union_kind_admits_the_element_definitions_it_implies.surql
+35607651bb7202d3 language-tests/tests/reproductions/a_union_with_an_object_or_literal_member_implies_no_element_definition.surql
 bd6f790db942148a language-tests/tests/reproductions/a_union_with_int_refuses_a_fractional_decimal.surql
 25edf07db3251662 language-tests/tests/reproductions/a_unique_duplicate_recovery_query_lists_what_the_index_refuses.surql
 fec3bd6488d38a0e language-tests/tests/reproductions/a_value_source_is_not_an_object.surql
@@ -4305,6 +4306,9 @@ dfc652fada62b6d0 language-tests/tests/upgrade/define/3.00.00_field_reference.sur
 a1f9dc4ca34ea027 language-tests/tests/upgrade/define/3.00.00_field_reference_import.surql
 7b027c4e913d9893 language-tests/tests/upgrade/define/3.00.00_field_simple_clauses.surql
 ed2566ea3ceca970 language-tests/tests/upgrade/define/3.00.00_field_simple_clauses_import.surql
+6f35c1db87be7a8d language-tests/tests/upgrade/define/3.00.00_field_union_element_definition.surql
+30430fb3d46afe97 language-tests/tests/upgrade/define/3.00.00_field_union_element_definition_import.surql
+5c5d0d04d5f03008 language-tests/tests/upgrade/define/3.00.00_field_union_element_definition_repair.surql
 8f9b326868f370c5 language-tests/tests/upgrade/define/3.00.00_function.surql
 a6c9b78dd4b0d7be language-tests/tests/upgrade/define/3.00.00_function_import.surql
 d68ebf8397df9085 language-tests/tests/upgrade/define/3.00.00_function_overwrite.surql

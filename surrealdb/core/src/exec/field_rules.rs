@@ -229,18 +229,75 @@ impl Step {
 	}
 }
 
-/// The kind `kind` implies for the elements of the arrays and sets it
-/// admits, if it implies one: none for `any` elements.
+/// The kind `kind` implies for the elements its values hold, if it implies
+/// one: the union of the element kinds of its `array<..>` and `set<..>`
+/// members, when those are the only elements a value of `kind` can hold. A
+/// member that holds no elements, as `string` and `NONE` do, says nothing of
+/// them, and `array` alone implies nothing: its elements are already `any`.
+///
+/// `*` also reaches the values of an object and the elements of a literal
+/// array or object, and the write path applies a definition at `*` to every
+/// element it reaches (`Value::each`). So a kind with an `object`, a literal
+/// array or object, or an `any` member implies nothing: a definition of the
+/// elements of its arrays and sets would judge the others by a kind they need
+/// not have.
 fn implied_element_kind(kind: &Kind) -> Option<Kind> {
-	kind.inner_kind().filter(|kind| !matches!(kind, Kind::Any))
+	if holds_elements_no_collection_describes(kind) {
+		return None;
+	}
+	kind.inner_kind().filter(|element| !matches!(element, Kind::Any))
+}
+
+/// Whether a value of `kind` can hold elements at `*` that no `array<..>` or
+/// `set<..>` member of `kind` describes: an object's values, a literal array's
+/// or object's elements, or, for `any`, whatever its value holds. Every kind
+/// is classified by name, so a new one must declare whether `*` reaches into
+/// its values.
+fn holds_elements_no_collection_describes(kind: &Kind) -> bool {
+	match kind {
+		Kind::Any | Kind::Object => true,
+		Kind::Either(members) => members.iter().any(holds_elements_no_collection_describes),
+		Kind::Literal(literal) => match literal {
+			KindLiteral::Array(_) | KindLiteral::Object(_) => true,
+			KindLiteral::String(_)
+			| KindLiteral::Integer(_)
+			| KindLiteral::Float(_)
+			| KindLiteral::Decimal(_)
+			| KindLiteral::Duration(_)
+			| KindLiteral::Bool(_) => false,
+		},
+		Kind::Array(..)
+		| Kind::Set(..)
+		| Kind::None
+		| Kind::Null
+		| Kind::Bool
+		| Kind::Bytes
+		| Kind::Datetime
+		| Kind::Decimal
+		| Kind::Duration
+		| Kind::Float
+		| Kind::Int
+		| Kind::Number
+		| Kind::String
+		| Kind::Uuid
+		| Kind::Regex
+		| Kind::Table(_)
+		| Kind::Record(_)
+		| Kind::Geometry(_)
+		| Kind::Function(..)
+		| Kind::Range
+		| Kind::File(_) => false,
+	}
 }
 
 /// The definitions `kind`, the kind of field `name`, implies for the elements
-/// of the arrays and sets it admits, outermost first: `name.*` with the kind
-/// of its elements, `name.*.*` with the kind of theirs, and so on until an
-/// element kind is `any` or admits no array or set. A union implies the union
-/// of what its members imply, so `array<float | array<bool>>` implies
-/// `name.*` of `float | array<bool>` and `name.*.*` of `bool`.
+/// its values hold, outermost first: `name.*` with the kind of its elements,
+/// `name.*.*` with the kind of theirs, and so on until an element kind implies
+/// none ([`implied_element_kind`]). A union of arrays and sets implies the
+/// union of their element kinds, so `array<float | array<bool>>` implies
+/// `name.*` of `float | array<bool>` and `name.*.*` of `bool`, while
+/// `array<object | array<int>>` implies `name.*` of `object | array<int>` and
+/// nothing beneath it.
 pub(crate) fn implied_definitions(name: &Idiom, kind: Option<&Kind>) -> Vec<(Idiom, Kind)> {
 	let mut out = Vec::new();
 	let mut path = name.clone();
@@ -257,48 +314,28 @@ pub(crate) fn implied_definitions(name: &Idiom, kind: Option<&Kind>) -> Vec<(Idi
 /// `holder`, has a kind `holder` admits there.
 ///
 /// Each `*` that leads `path` is the place of the definition `holder` implies
-/// for the elements of its arrays and sets ([`implied_definitions`]), and is
-/// judged as that definition's kind when each member of `holder` is an array,
-/// a set, or a kind that holds no elements, as `string` and `NONE` do: a member
-/// with no elements says nothing of `*`, and the elements of the others are the
-/// union of their element kinds. So a definition a kind implies is admitted as
-/// INFO lists it and an export writes it, and a field nested in one is judged
-/// against its kind. An object, a literal array or object, and `any` hold
-/// elements the implied definition does not describe, so a `*` over a kind with
-/// such a member is judged, with the rest of `path`, by
-/// [`Kind::allows_nested_kind`], which holds each member of a union but `NONE`
-/// to the nested kind.
+/// for its elements ([`implied_definitions`]), where it implies one, and is
+/// judged as that definition's kind, which is the kind of every element a value
+/// of `holder` holds: a member with no elements, as `string` and `NONE` are,
+/// says nothing of `*`, and the elements of the others are the union of their
+/// element kinds. So a definition a kind implies is admitted as INFO lists it
+/// and an export writes it, and a field nested in one is judged against its
+/// kind. A `*` over a kind that implies nothing there, such as one with an
+/// object, a literal array or object, or an `any` member, is judged with the
+/// rest of `path` by [`Kind::allows_nested_kind`], which holds each member of a
+/// union but `NONE` to the nested kind.
 pub(crate) fn admits_nested_kind(holder: &Kind, path: &[Part], kind: &Kind) -> bool {
 	// A union implied for elements can hold another union, and a union of one
 	// judges as the kind it holds.
 	let mut holder = Kind::either(holder.clone().flatten());
 	let mut rest = path;
 	while let Some((Part::All, tail)) = rest.split_first()
-		&& implied_element_kind_describes_every_element(&holder)
 		&& let Some(element) = implied_element_kind(&holder)
 	{
 		holder = Kind::either(element.flatten());
 		rest = tail;
 	}
 	holder.allows_nested_kind(rest, &Kind::either(kind.clone().flatten()))
-}
-
-/// Whether [`implied_element_kind`] of `kind`, a kind no member of which is a
-/// union, is the kind of every element a value of `kind` holds: whether each
-/// member of `kind` is an array, a set, or a kind that holds no elements.
-fn implied_element_kind_describes_every_element(kind: &Kind) -> bool {
-	let members = match kind {
-		Kind::Either(kinds) => kinds.as_slice(),
-		kind => std::slice::from_ref(kind),
-	};
-	members.iter().all(|member| {
-		!matches!(
-			member,
-			Kind::Any
-				| Kind::Object
-				| Kind::Literal(KindLiteral::Array(_) | KindLiteral::Object(_))
-		)
-	})
 }
 
 fn kind_text(def: &catalog::FieldDefinition) -> String {
@@ -314,8 +351,8 @@ fn kind_text(def: &catalog::FieldDefinition) -> String {
 /// holds an index, so a union holds the step only if each of its members but
 /// `NONE` does. `TYPE any` and a field with no `TYPE` hold nothing. A kind
 /// also holds the definitions it implies for its elements
-/// ([`implied_definitions`]), which describe the elements of the members that
-/// have them, and those are not judged against it.
+/// ([`implied_definitions`]), which describe every element its values hold,
+/// and those are not judged against it.
 ///
 /// `fields` are the table's definitions as the statement leaves them, `def`
 /// among them, and `previous` the definition `def` replaces, if any. A new

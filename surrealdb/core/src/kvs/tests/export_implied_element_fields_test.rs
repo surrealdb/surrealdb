@@ -9,7 +9,9 @@
 //! `v.*` again, then the dumped `v.*` over it, which is admitted because it is
 //! what `v`'s kind implies there. The tables here hold kinds whose implied
 //! definitions no single member of the union states: a member with no elements,
-//! members whose elements differ, and elements whose own kind is a union.
+//! members whose elements differ, and elements whose own kind is a union. Beside
+//! them are kinds that imply nothing, because a member holds elements no array
+//! or set member describes: an object, and a literal array.
 
 #![allow(clippy::unwrap_used)]
 
@@ -31,9 +33,17 @@ const DEFINITIONS: &str = "DEFINE NAMESPACE test;
 	CREATE collection_arms:strings SET v = ['a'];
 	DEFINE TABLE union_elements SCHEMAFULL;
 	DEFINE FIELD v ON union_elements TYPE array<float | array<bool>>;
-	CREATE union_elements:1 SET v = [1.5, [true]];";
+	CREATE union_elements:1 SET v = [1.5, [true]];
+	DEFINE TABLE object_arm SCHEMALESS;
+	DEFINE FIELD v ON object_arm TYPE object | array<int>;
+	CREATE object_arm:object SET v = { x: 1 };
+	CREATE object_arm:ints SET v = [1, 2];
+	DEFINE TABLE literal_arm SCHEMAFULL;
+	DEFINE FIELD v ON literal_arm TYPE [int, string] | array<bool>;
+	CREATE literal_arm:bools SET v = [true];";
 
-const TABLES: [&str; 3] = ["scalar_arm", "collection_arms", "union_elements"];
+const TABLES: [&str; 5] =
+	["scalar_arm", "collection_arms", "union_elements", "object_arm", "literal_arm"];
 
 async fn ds() -> Arc<Datastore> {
 	Datastore::builder().without_maintenance_tasks().build_with_path("memory").await.unwrap()
@@ -97,6 +107,28 @@ async fn the_dump_defines_each_field_before_the_definitions_its_kind_implies() {
 	}
 }
 
+/// A kind with a member holding elements no array or set member describes
+/// implies nothing, so the dump defines the field alone.
+#[tokio::test]
+async fn the_dump_defines_no_element_definition_for_a_kind_that_implies_none() {
+	let (ds, ses) = seeded().await;
+	let dump = export_text(&ds, &ses).await;
+
+	for (field, element) in [
+		(
+			"DEFINE FIELD OVERWRITE v ON object_arm TYPE object | array<int> ",
+			"DEFINE FIELD OVERWRITE v.* ON object_arm ",
+		),
+		(
+			"DEFINE FIELD OVERWRITE v ON literal_arm TYPE [int, string] | array<bool> ",
+			"DEFINE FIELD OVERWRITE v.* ON literal_arm ",
+		),
+	] {
+		assert!(dump.contains(field), "no `{field}`:\n{dump}");
+		assert!(!dump.contains(element), "`{element}` is not implied:\n{dump}");
+	}
+}
+
 /// The dump replays whole, and the tables it rebuilds hold the same
 /// definitions and records, and refuse what the originals refuse.
 #[tokio::test]
@@ -129,10 +161,14 @@ async fn the_dump_replays_into_the_same_tables() {
 	}
 
 	// The element definition the dump carried still judges the elements, and
-	// says nothing of a value of the member that has none.
+	// says nothing of a value of the member that has none. Where the kind
+	// implies none, each member's values are judged by the kind alone.
 	for (sql, refused) in [
 		("CREATE scalar_arm:negative SET v = [-1]", true),
 		("CREATE scalar_arm:other SET v = 'other'", false),
+		("CREATE object_arm:text SET v = { x: 'text' }", false),
+		("CREATE object_arm:mixed SET v = [1, 'text']", true),
+		("CREATE literal_arm:pair SET v = [1, 'a']", false),
 	] {
 		for ds in [&ds, &restored] {
 			let result = ds.execute(sql, &ses, None).await.unwrap().remove(0).result;

@@ -1,6 +1,10 @@
 /**
 [test]
-reason = "Field-wide FLEXIBLE relaxes nested objects inside literal types, arrays, and options"
+reason = """
+Field-wide FLEXIBLE relaxes nested objects inside literal types, arrays, and options. Without it,
+the kind implies no definition for its elements, because its literal member's values are not the
+elements of its `array<object>` member, so the literal's interior is judged by coercion alone, as
+a literal kind's is, and the same value is admitted."""
 
 [[test.results]]
 value = "NONE"
@@ -18,7 +22,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-error = "Found field 'various.data.objects', but no such field exists for table 'not_flexible'"
+match = '''$result[0].various == { data: { objects: [{ random: 'data' }] }, more_data: { maybe_object: { more: 'data' } } }'''
 
 */
 
