@@ -1053,6 +1053,14 @@ fn jump_if(em: &mut Emitter, fact: StorageFact, when: bool, target: Label) {
 	}));
 }
 
+/// Whether the run's write discards a record of a `DROP` table: it stores through
+/// `StoreRecordData`, which writes nothing for one. Every other write changes storage whatever the
+/// table's `DROP` clause says, as a delete's purge removes the stored record, so a structure kept
+/// per stored record follows the record there.
+fn discards_dropped_records(run: &StageRun) -> bool {
+	run.stages.contains(&WriteStageKind::StoreRecordData)
+}
+
 /// A permission-gate instruction, as a write instruction.
 fn gate(instr: GateInstr) -> Instr {
 	Instr::Write(WriteInstr::Permissions(instr))
@@ -1586,7 +1594,8 @@ pub(super) fn emit_stage(
 			}
 		},
 		// The reference keys the table's `REFERENCE` fields declare are kept in step with the
-		// record on a write and released on a delete.
+		// record storage holds: synced on a write and released on a delete. A write that discards
+		// a record of a `DROP` table leaves the keys as storage leaves the record.
 		WriteStageKind::ProcessTableReferences | WriteStageKind::CleanupTableReferences => {
 			match run.stored.references {
 				Stored::Declared => {
@@ -1595,10 +1604,18 @@ pub(super) fn emit_stage(
 							what: "ir_lower::stage: a table that declares references states no field",
 						});
 					}
-					em.emit(storage(StorageInstr::SyncReferences {
+					let sync = storage(StorageInstr::SyncReferences {
 						fields: run.stored.reference_fields.iter().cloned().collect(),
 						release: stage == WriteStageKind::CleanupTableReferences,
-					}));
+					});
+					if discards_dropped_records(run) {
+						let synced = em.label()?;
+						jump_if(em, StorageFact::TableDropped, true, synced);
+						em.emit(sync);
+						em.bind(synced)?;
+					} else {
+						em.emit(sync);
+					}
 				}
 				Stored::Nothing | Stored::Dynamic | Stored::LateBound => {
 					no_clauses(run.stored.references, "the reference fields of the written table")?;
@@ -6563,26 +6580,74 @@ mod tests {
 
 	#[test]
 	fn the_reference_fields_of_a_table_are_synced_on_a_write_and_released_on_a_delete() {
+		use crate::exec::ir::logical::stages::stage_run;
+		use crate::exec::operators::write::plan::{WriteFacts, WriteForm as PlanForm};
 		let fields: Box<[Idiom]> = Box::new([idiom("owner"), idiom("team.lead")]);
-		let run = stored_run(WriteStored {
-			reference_fields: fields.clone(),
-			..storing(Stored::Declared)
-		});
-		for (stage, release) in [
-			(WriteStageKind::ProcessTableReferences, false),
-			(WriteStageKind::CleanupTableReferences, true),
+		let sync = |release| {
+			storage(StorageInstr::SyncReferences {
+				fields: fields.iter().cloned().collect(),
+				release,
+			})
+		};
+		// Over each form's own run, a writing form syncs the keys of every `REFERENCE` field and a
+		// delete releases them. A create or an update stores nothing for a record of a `DROP`
+		// table, so it syncs no key for the image it discards. A delete's purge removes the stored
+		// record whatever the clause says, so it releases the record's keys. A view row's
+		// maintenance keeps no reference key.
+		for (form, expected) in [
+			(PlanForm::Create, Some(false)),
+			(PlanForm::Update, Some(false)),
+			(PlanForm::Upsert, Some(false)),
+			(PlanForm::Insert, Some(false)),
+			(PlanForm::Relate, Some(false)),
+			(PlanForm::Delete, Some(true)),
+			(PlanForm::View, None),
 		] {
-			assert_eq!(
-				emitted(&run, stage).expect("it lowers"),
-				[
-					storage(StorageInstr::SyncReferences {
-						fields: fields.iter().cloned().collect(),
-						release,
-					}),
-					Instr::EndRow,
-				],
-				"{stage:?}"
+			let stages = stage_run(
+				form,
+				WriteFacts {
+					form,
+					has_data: true,
+					on_duplicate_key_update: false,
+					ignore: false,
+					repeatable: false,
+				},
 			);
+			let held: Vec<_> = stages
+				.iter()
+				.filter(|stage| {
+					matches!(
+						stage,
+						WriteStageKind::ProcessTableReferences
+							| WriteStageKind::CleanupTableReferences
+					)
+				})
+				.copied()
+				.collect();
+			let run = StageRun {
+				stages,
+				..stored_run(WriteStored {
+					reference_fields: fields.clone(),
+					..storing(Stored::Declared)
+				})
+			};
+			let Some(release) = expected else {
+				assert!(held.is_empty(), "{form:?} holds {held:?}");
+				continue;
+			};
+			let [stage] = held[..] else {
+				panic!("{form:?} holds {held:?}");
+			};
+			let code = emitted(&run, stage).expect("it lowers");
+			if release {
+				assert_eq!(code, [sync(true), Instr::EndRow], "{form:?}");
+			} else {
+				assert_eq!(
+					code,
+					[jump_if_fact(StorageFact::TableDropped, 2), sync(false), Instr::EndRow],
+					"{form:?}"
+				);
+			}
 		}
 	}
 
