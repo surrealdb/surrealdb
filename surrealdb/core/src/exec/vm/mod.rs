@@ -97,6 +97,9 @@ mod tests_body_scope;
 mod tests_late_layers;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
+mod tests_once;
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_principal;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]

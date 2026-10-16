@@ -39,19 +39,20 @@
 //!
 //! # Strategies
 //!
-//! `Apply` runs the unit for every evaluation. `Once` answers the same rows, order and errors
-//! (the strategies change how often the statement's reads happen), so it lowers as `Apply`: the
-//! region it runs holds the statement as written. Whether the statement is read as a membership set
-//! ([`is_membership_set`](crate::exec::ir::expr::membership::is_membership_set)), which lets a
-//! `Once` statement keep its rows as a membership index, changes no answer, so this lowering does
-//! not do it.
+//! `Apply` runs the unit for every evaluation. Every other strategy answers the rows, order and
+//! errors `Apply` does; it changes how often the statement's reads happen.
 //!
-//! `Hash` and `Lookup` run the statement in place, as a group of the program that holds the
-//! expression ([`BlockInstr::Nested`] over a [`NestedSpec`] of the program's pool), as a
-//! statement in scalar position: a `Hash` statement reads through a probe whose kept rows outlive
-//! one evaluation, which no unit run afresh holds. The probes the group reads through are owned by
-//! the group open where the expression is lowered (`None` for the program's own code), whose start
-//! empties their kept rows. The hashed plan of a `Lookup` is a second group, under the same owner,
+//! `Once`, `Hash` and `Lookup` run the statement in place, as a group of the program that holds
+//! the expression ([`BlockInstr::Nested`] over a [`NestedSpec`] of the program's pool), as a
+//! statement in scalar position: a `Once` statement keeps its value from the first evaluation that
+//! reaches it ([`NestedSpec::once`]), and a `Hash` statement reads through a probe whose kept rows
+//! outlive one evaluation, neither of which a unit run afresh holds. The kept value and the probes
+//! the group reads through are owned by the group open where the expression is lowered (`None` for
+//! the program's own code), whose start forgets the value and empties the probes' kept rows.
+//! Whether a `Once` statement is read as a membership set
+//! ([`is_membership_set`](crate::exec::ir::expr::membership::is_membership_set)), which would let
+//! it keep its rows as a membership index, changes no answer, so this lowering keeps the value
+//! the statement holds. The hashed plan of a `Lookup` is a second group, under the same owner,
 //! which the run reads through in place of the lookup past [`LOOKUP_EVALUATIONS`] evaluations of
 //! one run of that owner, and for a key the index may not list every equal record under; the
 //! spec holds it with the path into `$parent` of the key the lookup reads.
@@ -60,12 +61,16 @@
 //! group's code reads that row, wherever the statement reads it from outside its regions, as
 //! `$parent` ([`Emitter::read_as_parent`]). A statement runs in place only where that holds: the
 //! code being lowered runs over the program's running state (the list of a statement program, or
-//! the body of a pipeline of a read statement), sets no document aside for the statement, and
-//! every value the statement reads from outside its regions is the row of the pipeline being
-//! lowered or a statement timestamp only clock reads take. Elsewhere a `Lookup` runs its own region
-//! as a unit, as `Apply` does, which reads through the index for every evaluation, and so does a
-//! `Hash`, whose probe no evaluation owns there: the unit reads the rows beneath the predicate for
-//! every evaluation, as a statement run as a program of its own does.
+//! the body of a pipeline of a read statement) in the authority frame the program's own code runs
+//! in, not a permission predicate's or a field clause's, sets no document aside for the statement,
+//! and every value the statement reads from outside its regions is the row of the pipeline being
+//! lowered or a statement timestamp only clock reads take. A `Once` statement also runs in place
+//! only in the body of a pipeline of a read statement: the list of a statement program may run
+//! again, in a loop, over the state that keeps the value. Elsewhere a `Lookup` runs its own region
+//! as a unit, as `Apply` does, which reads through the index for every evaluation, and so do a
+//! `Once`, whose value no evaluation keeps there, and a `Hash`, whose probe no evaluation owns
+//! there: the unit reads the rows beneath the predicate for every evaluation, as a statement run
+//! as a program of its own does.
 //!
 //! [`LOOKUP_EVALUATIONS`]: super::super::plan::LOOKUP_EVALUATIONS
 //! [`Emitter::read_as_parent`]: super::emit::Emitter::read_as_parent
@@ -148,14 +153,26 @@ impl Lowerer<'_> {
 		self.require_frame(data)?;
 		exactly::<0>(data)?;
 		match strategy {
-			NestedStrategy::Apply | NestedStrategy::Once => {
-				self.subquery_region(region_at(data, 0, 1)?)
+			NestedStrategy::Apply => self.subquery_region(region_at(data, 0, 1)?),
+			NestedStrategy::Once => {
+				let region = region_at(data, 0, 1)?;
+				// A value kept by the list of a statement program would outlive an iteration of
+				// a loop around it, which may change what the statement reads.
+				let kept = match self.lowers_a_read_pipeline() {
+					true => self.statement_in_place(region, None, true)?,
+					false => None,
+				};
+				match kept {
+					Some(value) => Ok(value),
+					// Run as a unit, the statement keeps no value past one evaluation.
+					None => self.subquery_region(region),
+				}
 			}
 			NestedStrategy::Hash {
 				..
 			} => {
 				let region = region_at(data, 0, 1)?;
-				match self.statement_in_place(region, None)? {
+				match self.statement_in_place(region, None, false)? {
 					Some(value) => Ok(value),
 					// Run as a unit, the probe no evaluation owns reads the rows beneath the
 					// predicate for every evaluation.
@@ -172,7 +189,7 @@ impl Lowerer<'_> {
 					true => Some(region_at(data, 1, count)?),
 					false => None,
 				};
-				match self.statement_in_place(region, hashed)? {
+				match self.statement_in_place(region, hashed, false)? {
 					Some(value) => Ok(value),
 					// The lookup's own region reads through no probe, and reads through the
 					// index for every evaluation.
@@ -184,14 +201,19 @@ impl Lowerer<'_> {
 
 	/// The value the statement region `region` holds, run in place as a group of the program
 	/// ([`BlockInstr::Nested`]), with `hashed`, for a `Lookup` that keeps one, the region of its
-	/// hashed plan as a second group. `None`, with nothing emitted, where the code being lowered
-	/// does not run the statement in place (see the module).
+	/// hashed plan as a second group, and with `once` its value kept from the first evaluation
+	/// until the group it is evaluated in starts again. `None`, with nothing emitted, where the
+	/// code being lowered does not run the statement in place (see the module).
 	fn statement_in_place(
 		&mut self,
 		region: RegionId,
 		hashed: Option<RegionId>,
+		once: bool,
 	) -> Result<Option<Operand>, IrError> {
-		if self.next_group()?.is_none() || self.sets_statement_document() {
+		if self.next_group()?.is_none()
+			|| self.sets_statement_document()
+			|| self.in_frame_of_its_own()
+		{
 			return Ok(None);
 		}
 		if holds_let(self.ir, region)? {
@@ -243,7 +265,7 @@ impl Lowerer<'_> {
 		let nested = self.em.nested(NestedSpec {
 			group,
 			inherits_row,
-			once: false,
+			once,
 			owner: self.em.group(),
 			hoist: None,
 			read_only: access_mode == AccessMode::ReadOnly,
@@ -800,6 +822,7 @@ mod tests {
 	use crate::exec::vm::ir_lower::emit::Emitter;
 	use crate::exec::vm::ir_lower::expr::{Needs, ReturnScope};
 	use crate::exec::vm::ir_lower::pipe::tests::{placed, region_row, scan, select_loop};
+	use crate::exec::vm::ir_lower::pipe::{PoolBase, Reads};
 	use crate::exec::vm::ir_lower::read::tests::{named, resolver};
 	use crate::exec::vm::ir_lower::tests::Builder;
 	use crate::exec::vm::ir_lower::units::{LowerCx, Needed};
@@ -914,12 +937,15 @@ mod tests {
 		assert_eq!(needed.len(), 2);
 	}
 
+	/// Where the code being lowered holds no group of the program, a `Once` statement runs as a
+	/// unit, which keeps no value past one evaluation.
 	#[test]
-	fn a_statement_that_runs_once_is_run_as_it_is_written() {
+	fn with_no_group_held_a_statement_that_runs_once_runs_as_a_unit() {
 		let mut b = Builder::new();
 		let value = one(&mut b, NestedStrategy::Once);
 		let (program, _, needed) =
 			lower_in(&mut LowerCx::detached(), &b.ir, value, None).expect("the subquery lowers");
+		assert!(program.nested.is_empty());
 		assert_eq!(program.subqueries.len(), 1);
 		assert_eq!(needed.len(), 1);
 	}
@@ -1034,6 +1060,55 @@ mod tests {
 				_ => None,
 			})
 			.expect("the nested statement is emitted")
+	}
+
+	/// Lowers `value` into the body of a pipeline of a read statement for the context `cx`, and
+	/// answers the program.
+	fn lower_reading(cx: &mut LowerCx<'_>, ir: &Ir, value: ValueId) -> Result<Program, IrError> {
+		let mut em = Emitter::new();
+		let mut reads = Reads::empty(PoolBase::default());
+		let mut lowerer = Lowerer::in_context(&mut em, ir, cx).with_reads(&mut reads);
+		lowerer.value(value)?;
+		let needs = lowerer.needs();
+		em.emit(Instr::EndRow);
+		let pipeline = em.finish_pipeline(Source::Once)?;
+		em.finish_program(vec![pipeline], needs.access_mode)
+	}
+
+	/// In the body of a pipeline of a read statement, a `Once` statement is a group of the program
+	/// run in place, whose value is kept from its first evaluation until the group that evaluates
+	/// it, here the program's own code, starts again.
+	#[test]
+	fn a_statement_that_runs_once_in_a_read_runs_in_place_and_keeps_its_value() {
+		let (b, value) = read_statement(NestedStrategy::Once, vec![scan]);
+		let program =
+			lower_reading(&mut LowerCx::detached(), &b.ir, value).expect("the statement lowers");
+		assert!(program.subqueries.is_empty(), "no unit runs the statement");
+		assert_eq!(
+			program.nested,
+			vec![NestedSpec {
+				group: 0,
+				inherits_row: false,
+				once: true,
+				owner: None,
+				hoist: None,
+				read_only: true,
+				probed: false,
+				members: false,
+				hashed: None,
+			}]
+		);
+	}
+
+	/// In the list of a statement program, which a loop may run again over the same state, a
+	/// `Once` statement runs as a unit.
+	#[test]
+	fn a_statement_that_runs_once_in_a_statement_list_runs_as_a_unit() {
+		let (b, value) = read_statement(NestedStrategy::Once, vec![scan]);
+		let (program, _) =
+			lower_held(&mut LowerCx::detached(), &b.ir, value, None).expect("the statement lowers");
+		assert!(program.nested.is_empty());
+		assert_eq!(program.subqueries.len(), 1);
 	}
 
 	/// A `Hash` statement is a group of the program run in place: its pipelines are the program's,

@@ -737,3 +737,52 @@ async fn a_write_states_the_layers_of_the_field_view_the_planner_binds() {
 	assert_eq!(attrs.stored.image_layers, ImageLayers::Unstated);
 	assert!(kinds.is_empty());
 }
+
+/// The strategies of the statements in value position `sql` plans to over a database `setup`
+/// builds, outermost first.
+async fn strategies(setup: &str, sql: &str) -> Vec<super::expr::ops::NestedStrategy> {
+	let parsed = crate::syn::parse(sql).expect("the statement parses").expressions;
+	let statements = RequestStatement::of(&parsed);
+	let planned = plan(setup, &RequestInput::request(&statements, request_scope()))
+		.await
+		.expect("the statement plans");
+	let mut strategies = Vec::new();
+	planned.ir.walk(planned.ir.top(), WalkOrder::PreOrder, &mut |op| {
+		if let Some(OpKind::Expr(ExprOp::Subquery(strategy))) =
+			planned.ir.op(op).map(|data| &data.kind)
+		{
+			strategies.push(strategy.clone());
+		}
+		Walk::Continue
+	});
+	strategies
+}
+
+/// A statement in value position that reads nothing of the row it is evaluated for, over an
+/// indexed table, runs once whatever reads its value and whatever the enclosing statement orders,
+/// limits or filters by, an order at random included: its one evaluation answers every row.
+#[tokio::test]
+async fn an_uncorrelated_statement_in_value_position_runs_once() {
+	use super::expr::ops::NestedStrategy;
+
+	const RECORDS: &str = "
+		DEFINE TABLE record SCHEMALESS;
+		DEFINE FIELD number ON record TYPE int;
+		DEFINE INDEX record_number ON record FIELDS number;
+	";
+	for sql in [
+		"SELECT id, (SELECT VALUE math::max(number) FROM record GROUP ALL)[0] AS m FROM record LIMIT 100",
+		"SELECT id, (SELECT VALUE math::max(number) FROM record GROUP ALL) AS m FROM record LIMIT 100",
+		"SELECT id, (SELECT VALUE number FROM record LIMIT 1)[0] AS m FROM record LIMIT 100",
+		"SELECT id, (SELECT count() FROM record GROUP ALL) AS m FROM record LIMIT 100",
+		"SELECT id, (SELECT VALUE math::sum(number) FROM record GROUP ALL)[0] AS m FROM record LIMIT 100",
+		"SELECT id, (SELECT VALUE math::max(number) FROM record GROUP ALL)[0] AS m FROM record",
+		"SELECT id, (SELECT VALUE math::max(number) FROM record GROUP ALL)[0] AS m FROM record ORDER BY id LIMIT 100",
+		"SELECT id FROM record WHERE number = (SELECT VALUE math::max(number) FROM record GROUP ALL)[0]",
+	] {
+		assert_eq!(strategies(RECORDS, sql).await, vec![NestedStrategy::Once], "{sql}");
+	}
+	let sql =
+		"SELECT id, (SELECT VALUE number FROM record ORDER BY RAND() LIMIT 1)[0] AS m FROM record";
+	assert_eq!(strategies(RECORDS, sql).await, vec![NestedStrategy::Once], "{sql}");
+}

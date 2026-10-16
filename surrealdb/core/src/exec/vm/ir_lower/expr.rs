@@ -1093,11 +1093,24 @@ impl<'a> Lowerer<'a> {
 		lowered
 	}
 
+	/// Whether the code being lowered is the body of a pipeline of a read statement, which runs
+	/// once per run of the group it stands in, rather than the list of a statement program, which
+	/// a loop of the program may run again in the state it ran in before.
+	pub(super) fn lowers_a_read_pipeline(&self) -> bool {
+		self.reads.is_some()
+	}
+
 	/// Whether the code being lowered is a definer's code run in a privileged frame, which holds
 	/// none of the caller's bindings: the permission, gate, layer and field-clause frames, and
 	/// every call made from one.
 	pub(super) fn is_privileged(&self) -> bool {
 		self.frame.privileged || is_permission_frame(self.frame.program)
+	}
+
+	/// Whether the code being lowered runs in an authority frame of its own (a permission
+	/// predicate's, a field clause's) rather than in the frame its container's code starts in.
+	pub(super) fn in_frame_of_its_own(&self) -> bool {
+		self.frame.program.is_some() || self.frame.privileged
 	}
 
 	/// Whether the code being lowered reads with its permissions unchecked: a predicate a guard,

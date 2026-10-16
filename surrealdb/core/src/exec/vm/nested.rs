@@ -61,6 +61,31 @@ thread_local! {
 	pub(super) static PROBES_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+/// How many times the process has run a statement in scalar position rather
+/// than answering it from a kept value, by the database of the session the run
+/// serves. A test reads the count of a database only it uses, whichever thread
+/// a run took and whatever other tests run beside it.
+#[cfg(test)]
+pub(super) static STATEMENTS_RUN: std::sync::LazyLock<std::sync::Mutex<HashMap<String, usize>>> =
+	std::sync::LazyLock::new(Default::default);
+
+/// Counts a run of a statement in scalar position against the database of the
+/// session `ctx` serves ([`STATEMENTS_RUN`]).
+#[cfg(test)]
+fn note_statement_run(ctx: &ExecutionContext) {
+	let Some(db) = ctx
+		.ctx()
+		.value("session")
+		.and_then(|session| session.as_object())
+		.and_then(|session| session.get("db"))
+		.map(Value::to_raw_string)
+	else {
+		return;
+	};
+	let mut runs = STATEMENTS_RUN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+	*runs.entry(db).or_insert(0) += 1;
+}
+
 /// Run `pipeline` over the rows of `source`, a value or a statement in
 /// `FROM`. `spent` is whether a limit of the pipeline admits no row. Answers
 /// whether the pipeline stopped.
@@ -821,6 +846,8 @@ pub(super) async fn statement(
 	{
 		return Ok(value.clone());
 	}
+	#[cfg(test)]
+	note_statement_run(ctx);
 	let mut rows = run_statement(program, *nested, *frame, row, state, ctx).await?;
 	let value = if program.groups[spec.group as usize].scalar {
 		rows.pop().unwrap_or(Value::None)
