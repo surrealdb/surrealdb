@@ -27,7 +27,8 @@ use super::choose::sort_keys_total;
 use super::join_lookup::{build_key_field, right_table};
 use super::nested::yielded;
 use super::ops::{
-	Batch, JoinAttrs, KeyBoundShape, KeyRangeShape, LookupKeyShape, PhysOp, PhysTag, PrefetchKeys,
+	Batch, IdBoundsShape, JoinAttrs, KeyBoundShape, KeyRangeShape, LookupKeyShape, PhysOp, PhysTag,
+	PrefetchKeys,
 };
 use super::pipeline::PipelineDag;
 use super::schedule;
@@ -105,8 +106,8 @@ fn own_rules(ir: &Ir, op: OpId, data: &OpData, kind: &PhysOp) -> Result<(), Veri
 		PhysOp::Events(attrs) => check_events(op, attrs),
 		PhysOp::KeyRangeScan(attrs) => check_key_range(op, &attrs.access, data.operands.len()),
 		PhysOp::Join(attrs) => check_join(ir, op, data, attrs),
-		PhysOp::TableScan(_)
-		| PhysOp::IndexScan(_)
+		PhysOp::TableScan(attrs) => check_id_bounds(op, attrs.bounds.as_ref(), data.operands.len()),
+		PhysOp::IndexScan(_)
 		| PhysOp::IndexUnion(_)
 		| PhysOp::Bitmap(_)
 		| PhysOp::IndexLookup(_)
@@ -379,6 +380,39 @@ fn check_prefetch(op: OpId, keys: &PrefetchKeys, operands: usize) -> Result<(), 
 				),
 			));
 		}
+	}
+	Ok(())
+}
+
+/// Checks a table scan's record-id bounds: one operand for each operand bound, numbered in slot
+/// order, and no operand where the scan has no bounds.
+fn check_id_bounds(
+	op: OpId,
+	bounds: Option<&IdBoundsShape>,
+	operands: usize,
+) -> Result<(), VerifyError> {
+	let fail = |detail: String| Err(fault(op, VerifyRule::PerOp, detail));
+	let holes = bounds.map_or(0, IdBoundsShape::holes);
+	if operands != holes {
+		return fail(format!(
+			"phys.table_scan has {holes} operand bounds, and the op has {operands} operands"
+		));
+	}
+	let Some(bounds) = bounds else {
+		return Ok(());
+	};
+	if bounds.low.is_none() && bounds.high.is_none() {
+		return fail("phys.table_scan has bounds that bound neither side".to_owned());
+	}
+	let slots = bounds.bounds().filter_map(|bound| match bound {
+		KeyBoundShape::Operand(slot) => Some(*slot),
+		KeyBoundShape::Literal(_) => None,
+	});
+	if let Some((expected, slot)) = slots.enumerate().find(|(at, slot)| usize::from(*slot) != *at) {
+		return fail(format!(
+			"phys.table_scan numbers its operand bounds in order, and the bound at operand \
+			 {expected} holds slot {slot}"
+		));
 	}
 	Ok(())
 }
@@ -896,6 +930,7 @@ mod tests {
 
 	fn scan(name: &str) -> PhysOp {
 		PhysOp::TableScan(Box::new(TableScanAttrs {
+			bounds: None,
 			prefilter: None,
 			table: table(name),
 			direction: Direction::Forward,
@@ -1345,6 +1380,50 @@ mod tests {
 		let (ir, op) = lone(PhysOp::KeyRangeScan(Box::new(attrs.clone())), 2);
 		assert_eq!(broken(&ir, op), None);
 		let (ir, op) = lone(PhysOp::KeyRangeScan(Box::new(attrs)), 1);
+		assert_eq!(broken(&ir, op), Some(VerifyRule::PerOp));
+	}
+
+	#[test]
+	fn a_table_scan_takes_one_operand_for_each_operand_bound() {
+		use crate::exec::ir::phys::ops::KeyRangeBoundShape;
+		let side = |bound| {
+			Some(KeyRangeBoundShape {
+				bound,
+				inclusive: false,
+			})
+		};
+		let bounds = IdBoundsShape {
+			low: side(KeyBoundShape::Operand(0)),
+			high: side(KeyBoundShape::Literal(crate::val::Value::from(9i64))),
+		};
+		let scan_with = |bounds: Option<IdBoundsShape>| {
+			let PhysOp::TableScan(mut attrs) = scan("t") else {
+				panic!("a table scan");
+			};
+			attrs.bounds = bounds;
+			PhysOp::TableScan(attrs)
+		};
+		let (ir, op) = lone(scan_with(Some(bounds.clone())), 1);
+		assert_eq!(broken(&ir, op), None);
+		let (ir, op) = lone(scan_with(Some(bounds)), 0);
+		assert_eq!(broken(&ir, op), Some(VerifyRule::PerOp));
+		let (ir, op) = lone(scan_with(None), 1);
+		assert_eq!(broken(&ir, op), Some(VerifyRule::PerOp));
+		let (ir, op) = lone(scan_with(None), 0);
+		assert_eq!(broken(&ir, op), None);
+		let (ir, op) = lone(
+			scan_with(Some(IdBoundsShape {
+				low: None,
+				high: None,
+			})),
+			0,
+		);
+		assert_eq!(broken(&ir, op), Some(VerifyRule::PerOp));
+		let renumbered = IdBoundsShape {
+			low: side(KeyBoundShape::Operand(1)),
+			high: None,
+		};
+		let (ir, op) = lone(scan_with(Some(renumbered)), 1);
 		assert_eq!(broken(&ir, op), Some(VerifyRule::PerOp));
 	}
 

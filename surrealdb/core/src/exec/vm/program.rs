@@ -5732,16 +5732,25 @@ pub(super) struct KnnPrefilterSpec {
 	pub(super) uncovered_matches: bool,
 }
 
-/// The key ranges a scan reads over a table whose record ids name their
-/// components: the shape of the ranges, and the host scalars that give the
-/// values of its bound slots, each evaluated when the scan opens.
+/// The shape of the key ranges a scan reads.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum ScanSpec {
+	/// The components of a record id that names them: an equality run and a range after it.
+	Components(crate::exec::operators::scan::key_range::ScanKeyRange),
+	/// The record ids of a table between two bounds.
+	RecordKey(crate::exec::operators::scan::id_range::ScanIdRange),
+}
+
+/// The key ranges a scan reads over a table: the shape of the ranges, and the
+/// host scalars that give the values of its bound slots, each evaluated when
+/// the scan opens.
 ///
 /// A bound that raises when it is evaluated reads as `NONE`, a value no
-/// component holds, so the side or the equality run it bounds widens: the
-/// predicate above the scan judges every row it yields.
+/// component or record id is, so the side or the equality run it bounds
+/// widens: the predicate above the scan judges every row it yields.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct ScanRange {
-	pub(super) spec: crate::exec::operators::scan::key_range::ScanKeyRange,
+	pub(super) spec: ScanSpec,
 	/// The value of bound slot `i` of `spec`.
 	pub(super) bounds: Box<[HostScalar]>,
 }

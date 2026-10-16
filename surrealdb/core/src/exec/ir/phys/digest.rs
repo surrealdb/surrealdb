@@ -26,7 +26,7 @@
 //!   `phys.live`, `phys.show`, `phys.info`, `phys.match`, `phys.match_step`, `phys.let`,
 //!   `phys.ddl_guard`, `phys.write`, `phys.write_stage`, `phys.assign`, `phys.unset`,
 //!   `phys.content`), and, inside an otherwise encodable op, a pre-decoded sort key or predicate
-//!   (`phys.table_scan` with a top-k key or a prefilter) or a computed-field read
+//!   (`phys.table_scan` with a top-k key, a prefilter or record-id bounds) or a computed-field read
 //!   (`phys.permission_filter` with computed reads).
 //! - **Meaning in regions.** The value of the op is decided by the regions it owns (a predicate, a
 //!   key, a body or an arm), which the digest does not cover, so equal attributes do not make equal
@@ -162,7 +162,7 @@ impl PhysOp {
 	fn encode(&self, encoder: &mut Encoder) -> bool {
 		match self {
 			PhysOp::TableScan(attrs) => {
-				if attrs.topk.is_some() || attrs.prefilter.is_some() {
+				if attrs.topk.is_some() || attrs.prefilter.is_some() || attrs.bounds.is_some() {
 					return false;
 				}
 				encoder.str(attrs.table.as_str());
@@ -357,6 +357,7 @@ mod tests {
 
 	fn scan(text: &str, direction: Direction) -> PhysOp {
 		PhysOp::TableScan(Box::new(TableScanAttrs {
+			bounds: None,
 			prefilter: None,
 			table: table(text),
 			direction,
@@ -474,6 +475,22 @@ mod tests {
 		};
 		assert_ne!(PhysOp::TableScan(attrs.clone()).attr_digest(), AttrDigest::OPAQUE);
 		attrs.prefilter = Some(PreDecodeShape::And(Vec::new()));
+		assert_eq!(PhysOp::TableScan(attrs).attr_digest(), AttrDigest::OPAQUE);
+	}
+
+	#[test]
+	fn a_scan_with_id_bounds_is_never_the_same_value_as_another() {
+		use crate::exec::ir::phys::ops::{IdBoundsShape, KeyBoundShape, KeyRangeBoundShape};
+		let PhysOp::TableScan(mut attrs) = scan("t", Direction::Forward) else {
+			panic!("a table scan");
+		};
+		attrs.bounds = Some(IdBoundsShape {
+			low: Some(KeyRangeBoundShape {
+				bound: KeyBoundShape::Operand(0),
+				inclusive: false,
+			}),
+			high: None,
+		});
 		assert_eq!(PhysOp::TableScan(attrs).attr_digest(), AttrDigest::OPAQUE);
 	}
 }

@@ -1986,7 +1986,7 @@ fn bind_per_row(cx: &mut BindCx<'_>, node: &LogicalOp, row: ValueId) -> Result<V
 			..
 		}) => {
 			let op = cx.emit(OpKind::Logical(LogOp::Filter), &[row], &[TypeKnowledge::Unknown])?;
-			row_clause(cx, op, RegionKind::Clause(ClauseRole::Where), predicate)?;
+			row_clause(cx, op, WHERE_CLAUSE, predicate)?;
 			first_result(cx, op)
 		}
 		LogicalOp::PermissionFilter(LogicalPermissionFilter {
@@ -2171,7 +2171,7 @@ pub(crate) fn receives_row(kind: RegionKind) -> bool {
 /// The arguments of the block of a region that is given the row it is evaluated against: the
 /// statement timestamp when the region is isolated from above, the row, and one argument for each
 /// further value the region's row names bind.
-fn row_region_args(kind: RegionKind) -> Vec<TypeKnowledge> {
+pub(crate) fn row_region_args(kind: RegionKind) -> Vec<TypeKnowledge> {
 	named_region_args(kind, region_row_names(kind))
 }
 
@@ -2580,21 +2580,14 @@ pub(super) fn bind_projection(
 		true => Vec::new(),
 		false => cx.take_sort_keys(),
 	};
-	let attrs = ProjectAttrs {
-		fields: fields_shape(fields),
-		layer,
-		omit,
-		names: unaliased_names(fields),
-		computed,
-		sort_keys,
-	};
+	let attrs = project_attrs(fields, omit, layer, computed, sort_keys);
 	let op = cx.emit(
 		OpKind::Logical(LogOp::Project(Box::new(attrs))),
 		&[input],
 		&[TypeKnowledge::Unknown],
 	)?;
 	let columns = columns_of(fields);
-	let projection = RegionKind::Clause(ClauseRole::Projection);
+	let projection = PROJECTION_CLAUSE;
 	for column in &columns {
 		if layer {
 			let name = column
@@ -2617,6 +2610,35 @@ pub(super) fn bind_projection(
 		}
 	}
 	first_result(cx, op)
+}
+
+/// The region of one column or `OMIT` path of a projection, which receives the row it projects
+/// ([`row_region_args`]).
+pub(crate) const PROJECTION_CLAUSE: RegionKind = RegionKind::Clause(ClauseRole::Projection);
+
+/// The region of the predicate of a filter, which receives the row it judges
+/// ([`row_region_args`]).
+pub(crate) const WHERE_CLAUSE: RegionKind = RegionKind::Clause(ClauseRole::Where);
+
+/// The attributes of a projection of `fields` that omits `omit` paths. `computed` is the layer's
+/// declared computed fields ([`ProjectAttrs::computed`]), empty for a projection that is not a
+/// layer, and `sort_keys` the fields that are keys of the sort beneath
+/// ([`ProjectAttrs::sort_keys`]).
+pub(crate) fn project_attrs(
+	fields: &LogicalFields,
+	omit: u16,
+	layer: bool,
+	computed: Vec<Strand>,
+	sort_keys: Vec<(u16, u16)>,
+) -> ProjectAttrs {
+	ProjectAttrs {
+		fields: fields_shape(fields),
+		layer,
+		omit,
+		names: unaliased_names(fields),
+		computed,
+		sort_keys,
+	}
 }
 
 /// The block arguments of a layer column's frame region: the row, then the value the column
@@ -2796,7 +2818,6 @@ pub(super) fn sort_over(
 	tempfiles: bool,
 	order_fields: Option<&LogicalFields>,
 ) -> Result<ValueId, IrError> {
-	use crate::exec::planner::util::field_path_from_expr;
 	let keys = match ordering {
 		LogicalOrdering::Random => &[][..],
 		LogicalOrdering::Order(keys) => keys.as_slice(),
@@ -2809,24 +2830,7 @@ pub(super) fn sort_over(
 			})
 		})
 		.collect();
-	let ordering = match ordering {
-		LogicalOrdering::Random => SortShape::Random,
-		LogicalOrdering::Order(_) => SortShape::Keys(
-			keys.iter()
-				.zip(&resolved)
-				.map(|(key, resolved)| SortKeyShape {
-					collate: key.collate,
-					numeric: key.numeric,
-					ascending: key.direction,
-					path: resolved.is_none() && field_path_from_expr(&key.value).is_ok(),
-				})
-				.collect(),
-		),
-	};
-	let attrs = SortAttrs {
-		ordering,
-		tempfiles,
-	};
+	let attrs = sort_attrs(ordering, |at| resolved[at].is_some(), tempfiles);
 	let op =
 		cx.emit(OpKind::Logical(LogOp::Sort(Box::new(attrs))), &[rows], &[TypeKnowledge::Unknown])?;
 	let mut shared = Vec::new();
@@ -2838,12 +2842,44 @@ pub(super) fn sort_over(
 			shared.push((field, at));
 		}
 		let value = resolved.as_ref().map_or(&key.value, |(_, (expr, _))| expr);
-		row_clause(cx, op, RegionKind::Clause(ClauseRole::OrderKey), value)?;
+		row_clause(cx, op, ORDER_KEY, value)?;
 	}
 	if order_fields.is_some() {
 		cx.set_sort_keys(shared);
 	}
 	first_result(cx, op)
+}
+
+/// The region of one key of a sort, which receives the row it orders ([`row_region_args`]).
+pub(crate) const ORDER_KEY: RegionKind = RegionKind::Clause(ClauseRole::OrderKey);
+
+/// The attributes of the sort by `ordering`. `aliased` states, by the position of a key, whether
+/// the key is bound as the expression of a field of the projection above the sort; any other key
+/// written as a path is read from the row as it stands ([`SortKeyShape::path`]).
+pub(crate) fn sort_attrs(
+	ordering: &LogicalOrdering,
+	aliased: impl Fn(usize) -> bool,
+	tempfiles: bool,
+) -> SortAttrs {
+	use crate::exec::planner::util::field_path_from_expr;
+	let ordering = match ordering {
+		LogicalOrdering::Random => SortShape::Random,
+		LogicalOrdering::Order(keys) => SortShape::Keys(
+			keys.iter()
+				.enumerate()
+				.map(|(at, key)| SortKeyShape {
+					collate: key.collate,
+					numeric: key.numeric,
+					ascending: key.direction,
+					path: !aliased(at) && field_path_from_expr(&key.value).is_ok(),
+				})
+				.collect(),
+		),
+	};
+	SortAttrs {
+		ordering,
+		tempfiles,
+	}
 }
 
 /// The position among `fields` of the field whose alias is `name` and whose expression is `expr`,
@@ -2906,18 +2942,30 @@ pub(super) fn limit_over(
 	limit_value: Option<ValueId>,
 	start_value: Option<ValueId>,
 ) -> Result<ValueId, IrError> {
-	let mut operands = vec![rows];
+	let (kind, operands) = limit_layout(rows, limit_value, start_value);
+	cx.emit_value(OpKind::Logical(kind), &operands, TypeKnowledge::Unknown)
+}
+
+/// The op that bounds the rows `rows` by the values `limit` and `start`, each present only when
+/// written, and the operands it takes: the rows, then the limit, then the start. The op names the
+/// operand slot of each value it holds.
+pub(crate) fn limit_layout(
+	rows: ValueId,
+	limit_value: Option<ValueId>,
+	start_value: Option<ValueId>,
+) -> (LogOp, SmallVec<[ValueId; 3]>) {
+	let mut operands = SmallVec::new();
+	operands.push(rows);
 	operands.extend(limit_value);
 	operands.extend(start_value);
 	let limit_slot = limit_value.map(|_| 1);
 	let start_slot = start_value.map(|_| 1 + u16::from(limit_value.is_some()));
-	cx.emit_value(
-		OpKind::Logical(LogOp::Limit {
+	(
+		LogOp::Limit {
 			limit: limit_slot,
 			start: start_slot,
-		}),
-		&operands,
-		TypeKnowledge::Unknown,
+		},
+		operands,
 	)
 }
 

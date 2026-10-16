@@ -138,7 +138,8 @@ define_op_tags! {
 /// identity is the structural digest of the attributes.
 #[derive(Clone, Debug)]
 pub(crate) enum PhysOp {
-	/// Every record of a table in key order. Operands: none.
+	/// Every record of a table in key order, or those within the bounds of its record ids.
+	/// Operands: the values of the [`KeyBoundShape::Operand`] bounds of `bounds`, in slot order.
 	TableScan(Box<TableScanAttrs>),
 	/// The records a B-tree index lists under an access, in the index's key order. Operands: the
 	/// values the access is built from, none when `access` is fully literal.
@@ -621,6 +622,10 @@ pub(crate) struct TableScanAttrs {
 	/// to read the rows; a record the shape refuses is never decoded, and one it cannot judge is
 	/// judged by the predicate itself.
 	pub(crate) prefilter: Option<PreDecodeShape>,
+	/// The interval of record ids the scan reads, when the predicate above it bounds `id`. The
+	/// bounds only narrow the keys read: every row inside them is a row the unbounded scan
+	/// reaches, in the same order, and the predicate stays above the scan.
+	pub(crate) bounds: Option<IdBoundsShape>,
 }
 
 /// The attributes of a read of one record by id.
@@ -779,8 +784,8 @@ pub(crate) enum KeyBoundShape {
 	/// A value known when the plan is made, already one the component can hold.
 	Literal(Value),
 	/// A value the scan reads when it opens: the operand at this position of the op's operands.
-	/// Slots are assigned in the order [`KeyRangeShape::bounds`] lists the bounds, so the n-th
-	/// operand bound holds slot n.
+	/// Slots are assigned in the order [`KeyRangeShape::bounds`] or [`IdBoundsShape::bounds`]
+	/// lists the bounds, so the n-th operand bound holds slot n.
 	Operand(OperandSlot),
 }
 
@@ -841,6 +846,29 @@ impl KeyRangeShape {
 	}
 
 	/// The number of bounds that are operands: the number of operands the op takes.
+	pub(crate) fn holes(&self) -> usize {
+		self.bounds().filter(|bound| matches!(bound, KeyBoundShape::Operand(_))).count()
+	}
+}
+
+/// The interval of record ids a table scan reads: a side that is open reads to the end of the
+/// table.
+///
+/// A bound is a record id of the scanned table whose key is a number, a string or a uuid, the
+/// keys whose storage order is the order the record ids compare in.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct IdBoundsShape {
+	pub(crate) low: Option<KeyRangeBoundShape>,
+	pub(crate) high: Option<KeyRangeBoundShape>,
+}
+
+impl IdBoundsShape {
+	/// The bounds in operand-slot order: the low bound, then the high.
+	pub(crate) fn bounds(&self) -> impl Iterator<Item = &KeyBoundShape> {
+		[self.low.as_ref(), self.high.as_ref()].into_iter().flatten().map(|side| &side.bound)
+	}
+
+	/// The number of bounds that are operands: the number of operands the scan takes.
 	pub(crate) fn holes(&self) -> usize {
 		self.bounds().filter(|bound| matches!(bound, KeyBoundShape::Operand(_))).count()
 	}

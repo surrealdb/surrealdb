@@ -1503,6 +1503,7 @@ pub(super) async fn run_storage_source(
 							program,
 							pipeline,
 							&descriptor,
+							table,
 							key_range,
 							range,
 							*direction,
@@ -2526,6 +2527,7 @@ async fn scan_key_ranges(
 	program: &Arc<Program>,
 	pipeline: &Pipeline,
 	descriptor: &super::descriptor::TableDescriptor,
+	name: &crate::val::TableName,
 	key_range: &super::program::ScanRange,
 	table: crate::key::RawRange,
 	direction: crate::kvs::Direction,
@@ -2546,12 +2548,24 @@ async fn scan_key_ranges(
 		};
 		bounds.push(value);
 	}
-	let ranges = crate::exec::operators::scan::key_range::record_key_ranges(
-		&table,
-		&key_range.spec,
-		&bounds,
-		direction,
-	);
+	let ranges = match &key_range.spec {
+		super::program::ScanSpec::Components(spec) => {
+			crate::exec::operators::scan::key_range::record_key_ranges(
+				&table, spec, &bounds, direction,
+			)
+		}
+		super::program::ScanSpec::RecordKey(spec) => {
+			let db_ctx = ctx.database().context("the VM requires a database context")?;
+			crate::exec::operators::scan::id_range::record_id_ranges(
+				db_ctx.ns_ctx.ns.namespace_id,
+				db_ctx.db.database_id,
+				name,
+				&table,
+				*spec,
+				&bounds,
+			)
+		}
+	};
 	let mut coarse = CoarseGate::of(program, pipeline, state, direction);
 	for (at, range) in ranges.into_iter().enumerate() {
 		if at > 0 && limits_spent(pipeline, state) {

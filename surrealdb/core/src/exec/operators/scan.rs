@@ -10,6 +10,7 @@ pub(crate) mod fetch;
 mod fulltext;
 mod graph;
 pub(crate) mod graph_keys;
+pub(crate) mod id_range;
 pub(crate) mod index_count;
 pub(crate) mod key_matcher;
 pub(crate) mod key_range;

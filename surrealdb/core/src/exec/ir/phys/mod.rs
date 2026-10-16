@@ -43,6 +43,9 @@ pub(crate) mod cost;
 mod count;
 pub(crate) mod digest;
 mod duplicate;
+mod edit;
+mod existence;
+mod extreme;
 pub(crate) mod facts;
 mod hold_left;
 pub(crate) mod hop_key;
@@ -623,8 +626,7 @@ impl PhysOp {
 			results,
 		};
 		match self {
-			PhysOp::TableScan(..)
-			| PhysOp::IndexUnion(..)
+			PhysOp::IndexUnion(..)
 			| PhysOp::Bitmap(..)
 			| PhysOp::FullTextScan(..)
 			| PhysOp::Vacant {
@@ -656,6 +658,9 @@ impl PhysOp {
 			// operand.
 			PhysOp::KnnScan(attrs) => exactly(u16::from(attrs.vector.is_empty()), 1),
 			PhysOp::KeyRangeScan(attrs) => exactly(attrs.access.holes() as u16, 1),
+			PhysOp::TableScan(attrs) => {
+				exactly(attrs.bounds.as_ref().map_or(0, |bounds| bounds.holes()) as u16, 1)
+			}
 			PhysOp::IndexLookup(..)
 			| PhysOp::RecordScan(..)
 			| PhysOp::Enforced {
@@ -1058,8 +1063,10 @@ pub(crate) struct PhysicalOutcome {
 /// Plans `ir` physically: converts it to the physical dialect, builds its pipelines, derives its
 /// pipeline graph and decides every pipeline's placement.
 ///
-/// In order: the count fast path of the statements it answers ([`count::offer`]), which reads the
-/// logical shapes the conversion consumes; the conversion with the registered patterns, folds
+/// In order: the count fast path of the statements it answers ([`count::offer`]), the limit of a
+/// statement read only for existence ([`existence::offer`]) and the index seek of an extreme
+/// ([`extreme::offer`]), which read the logical shapes the conversion consumes; the conversion with
+/// the registered patterns, folds
 /// awaited through `folder`, which creates no pipeline; the dependences of the decisions that
 /// consumed a folded value, read from `facts` once the conversion is done; the definitions of the
 /// user-defined functions the container calls, stated on each call ([`callee::read_callees`]); the
@@ -1074,6 +1081,11 @@ pub(crate) struct PhysicalOutcome {
 /// ([`facts::NestedReading::Hedged`]). [`rewrite::run`] places the container again once those
 /// strategies are decided, so the placement reflects them.
 ///
+/// The container holds no effect token: the caller has stripped them
+/// ([`tokens::strip`](crate::exec::ir::analysis::tokens::strip)), the physical dialect holds none,
+/// and the logical ops the edits before the conversion make take none. The existence and extreme
+/// edits refuse a container that does.
+///
 /// The caller fills every table the container reads before planning. A source whose answers
 /// are not loaded is an invariant break: the conversion, and the stored query vector of a
 /// brute-force search, report [`IrError::NotLoaded`] for it.
@@ -1086,6 +1098,8 @@ pub(crate) async fn plan_physical(
 	placement: &placement::Placement,
 ) -> Result<PhysicalOutcome, IrError> {
 	count::offer(ir, facts, cx)?;
+	existence::offer(ir, facts, cx)?;
+	extreme::offer(ir, facts, cx)?;
 	matches::run(ir, cx.effects.registry);
 	knn::hoist_vectors(ir, facts)?;
 	let report = convert(ir, facts, &registry::build().conversion, cx, folder, &PHYSICAL_PHASE)

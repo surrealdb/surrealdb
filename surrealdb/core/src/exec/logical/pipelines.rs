@@ -953,7 +953,7 @@ impl<'a> Walker<'_, 'a> {
 /// a field some table computes. A parameter is not: a statement's own parameters are literals by
 /// the time the plan is bound, and one that remains is read from a variable of the program or
 /// from the row, which a body may fail to find.
-fn answers_every_row(expr: &LogicalExpr, summaries: &CatalogSummaries) -> bool {
+pub(crate) fn answers_every_row(expr: &LogicalExpr, summaries: &CatalogSummaries) -> bool {
 	if let LogicalExpr::Literal(_) = expr {
 		return true;
 	}

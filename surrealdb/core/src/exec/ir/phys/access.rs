@@ -51,9 +51,9 @@ use super::access_regions::{
 };
 use super::offer::{Offer, offer_across, offer_of};
 use super::ops::{
-	BitmapAttrs, BranchReadShape, FullTextScanAttrs, IndexBranchShape, IndexScanAttrs,
-	IndexUnionAttrs, KeyRangeScanAttrs, KnnFilterShape, KnnPermissionShape, KnnScanAttrs, PhysOp,
-	ReadClauses, RecordScanAttrs, TableScanAttrs,
+	BitmapAttrs, BranchReadShape, FullTextScanAttrs, IdBoundsShape, IndexBranchShape,
+	IndexScanAttrs, IndexUnionAttrs, KeyRangeScanAttrs, KnnFilterShape, KnnPermissionShape,
+	KnnScanAttrs, PhysOp, ReadClauses, RecordScanAttrs, TableScanAttrs,
 };
 use super::{keyed_record, knn};
 use crate::catalog::{FieldDefinition, Index, IndexDefinition, KeyStructure};
@@ -64,7 +64,10 @@ use crate::exec::index::access_path::{
 	decide_access, with_array_columns_as_elements,
 };
 use crate::exec::index::analysis::KnnQueryVectors;
-use crate::exec::ir::build::phys::{bitmap_shape, index_ref, key_range_shape, knn_filter_shape};
+use crate::exec::index::id_range::plan_id_range;
+use crate::exec::ir::build::phys::{
+	bitmap_shape, id_bounds_shape, index_ref, key_range_shape, knn_filter_shape,
+};
 use crate::exec::ir::core::convert::{ConversionPattern, Converted};
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::core::op::OpData;
@@ -94,7 +97,8 @@ use crate::exec::operators::scan::MergeMode;
 use crate::exec::operators::scan::pipeline::determine_scan_direction;
 use crate::exec::planner::util::{
 	expr_contains_matches, extract_record_id_point_lookup, field_path_from_expr, has_knn_operator,
-	index_covers_ordering, strip_knn_and_matches_from_condition, strip_knn_from_condition,
+	idiom_is_id, index_covers_ordering, strip_knn_and_matches_from_condition,
+	strip_knn_from_condition,
 };
 use crate::exec::planner::{RestrictedPrefixes, decide_union_merge};
 use crate::exec::vm::payload::{CountSelect, KnnFilter, KnnPrefilter, Refusal, ValuesRead};
@@ -367,6 +371,10 @@ pub(crate) struct DecisionCx<'a> {
 	/// The query vectors of the `KNN` operators whose right operand is a parameter that holds an
 	/// array of numbers at plan time.
 	pub(crate) knn_vectors: &'a KnnQueryVectors,
+	/// Whether a table scan the decision chooses may be narrowed to the record ids the predicate
+	/// bounds: the read is not the subject of a write, whose stages judge each stored record
+	/// themselves.
+	pub(crate) id_bounds: bool,
 }
 
 /// The decision before it is mapped to ops.
@@ -507,6 +515,9 @@ pub(crate) fn select_access(
 		other => (other, false),
 	};
 	let read = read_clauses(table, source.with.as_ref());
+	// A read that meets a catalog change when it runs enforces definitions the answers do not
+	// hold, and a read of a table the catalog does not define may find one defined.
+	let id_bounds = cx.id_bounds && table.defined && !source.may_meet_change;
 	match decide(table, source.with.as_ref(), cond.as_ref(), ordering, limited, cx)? {
 		Some((path, direction)) => map_decision(
 			Decision {
@@ -519,9 +530,73 @@ pub(crate) fn select_access(
 			predicate,
 			cond.as_ref(),
 			offered,
+			id_bounds.then_some(cx.registry),
 		),
 		None => Ok(finished(table_scan(table, determine_scan_direction(ordering), read))),
 	}
+}
+
+/// The record-id bounds a table scan of `table` takes from `predicate`, with the expressions of
+/// its deferred bounds in operand-slot order, or `None` when it takes none.
+///
+/// A table that declares a key structure reads its predicate as key ranges, a lightweight relation
+/// stores no record range, a read at a `VERSION` keeps every key the stamp may have written, and a
+/// table that enforces something at run time (a permission, a field permission or a computed
+/// field, [`TableAnswers::enforces`]) would judge rows the bounds skip, so a predicate that reads a
+/// computed field is never planned against the bounds.
+fn id_bounds_of(
+	table: &TableAnswers,
+	predicate: &Reconstructed,
+	registry: &FunctionRegistry,
+) -> Result<Option<(IdBoundsShape, Vec<LogicalExpr>)>, IrError> {
+	if table.key.is_some()
+		|| table.lightweight
+		|| table.version != ReadVersion::Current
+		|| table.permissioned
+		|| table.enforces
+	{
+		return Ok(None);
+	}
+	let conjuncts: Vec<std::borrow::Cow<'_, LogicalExpr>> =
+		predicate.conjuncts.iter().map(|(_, conjunct)| id_projected(conjunct, registry)).collect();
+	let refs: Vec<&LogicalExpr> = conjuncts.iter().map(|conjunct| conjunct.as_ref()).collect();
+	let Some(access) = plan_id_range(
+		&table.table,
+		&refs,
+		!predicate.withheld.is_empty(),
+		table.permissioned,
+		registry,
+	) else {
+		return Ok(None);
+	};
+	let (shape, operands) = id_bounds_shape(&access)?;
+	Ok(Some((shape, operands.into_iter().cloned().collect())))
+}
+
+/// `conjunct` with a side that reads `id` as `type::field('id')` ([`projected_field`]) written as
+/// `id`, as the access path reads it.
+fn id_projected<'a>(
+	conjunct: &'a LogicalExpr,
+	registry: &FunctionRegistry,
+) -> std::borrow::Cow<'a, LogicalExpr> {
+	let LogicalExpr::Binary {
+		left,
+		op,
+		right,
+	} = conjunct
+	else {
+		return std::borrow::Cow::Borrowed(conjunct);
+	};
+	let read = |side: &LogicalExpr| projected_field(side, registry).filter(idiom_is_id);
+	let (read_left, read_right) = (read(left), read(right));
+	if read_left.is_none() && read_right.is_none() {
+		return std::borrow::Cow::Borrowed(conjunct);
+	}
+	std::borrow::Cow::Owned(LogicalExpr::Binary {
+		left: Box::new(read_left.unwrap_or_else(|| (**left).clone())),
+		op: op.clone(),
+		right: Box::new(read_right.unwrap_or_else(|| (**right).clone())),
+	})
 }
 
 /// The record id the conjunct `conjunct` reads `table` by, when it is `id = <record id>`
@@ -613,6 +688,7 @@ fn read_clauses(table: &TableAnswers, with: Option<&With>) -> ReadClauses {
 /// The table scan of `table` along `direction`.
 fn table_scan(table: &TableAnswers, direction: Direction, read: ReadClauses) -> PhysOp {
 	PhysOp::TableScan(Box::new(TableScanAttrs {
+		bounds: None,
 		prefilter: None,
 		table: table.table.clone(),
 		direction,
@@ -795,6 +871,7 @@ fn map_decision(
 	predicate: &Reconstructed,
 	cond: Option<&LogicalExpr>,
 	offered: Option<&LogicalOrdering>,
+	id_bounds: Option<&FunctionRegistry>,
 ) -> Result<AccessChoice, IrError> {
 	let Decision {
 		path,
@@ -819,7 +896,18 @@ fn map_decision(
 		offered
 	};
 	match path {
-		AccessPath::TableScan => {}
+		// A table scan under a predicate that bounds `id` reads the stretch of keys between the
+		// bounds; the whole predicate stays above the scan.
+		AccessPath::TableScan => {
+			if let Some(registry) = id_bounds
+				&& read.with.is_none()
+				&& let Some((shape, operands)) = id_bounds_of(table, predicate, registry)?
+				&& let PhysOp::TableScan(scan) = &mut choice.access
+			{
+				scan.bounds = Some(shape);
+				choice.key_operands = operands;
+			}
+		}
 		AccessPath::EmptyScan if empties_unobserved(predicate) => choice.access = PhysOp::Union,
 		AccessPath::EmptyScan => {}
 		// The whole predicate stays above the range, as the planner keeps it: the range lists a
@@ -1487,6 +1575,7 @@ fn plan_source(ir: &Ir, op: OpId, cx: &PhysCx<'_>) -> Result<Option<Planned>, Ir
 		let decision = DecisionCx {
 			registry: cx.effects.registry,
 			knn_vectors: &knn_vectors,
+			id_bounds: !offer.write_subjects && !offer.in_write,
 		};
 		let choice = select_access(attrs, &answers, predicate, offer.sort.as_ref(), &decision)?;
 		Ok((offer, choice))
@@ -2043,6 +2132,11 @@ fn apply_source(rw: &mut Rewriter<'_>, op: OpId, planned: Planned) -> Result<Con
 					operands.push(value_copy(rw, region, value, op)?);
 				}
 			}
+			(PhysOp::TableScan(attrs), _) if attrs.bounds.is_some() => {
+				for (region, value) in key_operands {
+					operands.push(value_copy(rw, region, value, op)?);
+				}
+			}
 			// A query vector known only when the statement runs is copied out of the stage that
 			// holds it. One computed by ops the conversion has yet to convert is copied once every
 			// op of the statement is ([`knn::attach_scan_vectors`]): until then the scan reads the
@@ -2514,6 +2608,7 @@ impl DecisionCx<'static> {
 		Self {
 			registry: &REGISTRY,
 			knn_vectors: &NO_VECTORS,
+			id_bounds: true,
 		}
 	}
 }
@@ -2993,7 +3088,7 @@ mod tests {
 			read: ReadClauses::default(),
 			order_withheld: false,
 		};
-		map_decision(decision, table, &predicate, Some(&cond), None)
+		map_decision(decision, table, &predicate, Some(&cond), None, None)
 	}
 
 	#[test]

@@ -58,7 +58,7 @@ use super::super::payload::{BranchRead, IndexBranch};
 use super::super::plain::ValueData;
 use super::super::program::{
 	CountSource, CountVia, CountedValue, DeferredVector, HostScalar, KnnGate, KnnPrefilterSpec,
-	ScanRange, Source, TopKScan, UnitId,
+	ScanRange, ScanSpec, Source, TopKScan, UnitId,
 };
 use super::dispatch::phys_refusal;
 use super::emit::Emitter;
@@ -78,9 +78,11 @@ use crate::exec::ir::logical::ops::SourceRefShape;
 use crate::exec::ir::logical::seam::invariant;
 use crate::exec::ir::op_kind::OpKind;
 use crate::exec::ir::phys::ops::{
-	BitmapShape, BranchReadShape, CountAttrs, CountShape, IndexBranchShape, KeyBoundShape,
-	KeyEqShape, KeyRangeShape, KnnFilterShape, KnnPermissionShape, LookupKeyShape, PhysOp, PhysTag,
+	BitmapShape, BranchReadShape, CountAttrs, CountShape, IdBoundsShape, IndexBranchShape,
+	KeyBoundShape, KeyEqShape, KeyRangeBoundShape, KeyRangeShape, KnnFilterShape,
+	KnnPermissionShape, LookupKeyShape, PhysOp, PhysTag,
 };
+use crate::exec::operators::scan::id_range::ScanIdRange;
 use crate::exec::operators::scan::key_range::{ScanEq, ScanKeyRange, ScanRangeOn, ScanSide};
 use crate::expr::logical::Schema;
 use crate::val::{Array, Object, RecordId, RecordIdKey, Set, Value};
@@ -158,6 +160,15 @@ pub(super) fn lower_source_under(
 	};
 	match kind {
 		PhysOp::TableScan(attrs) => {
+			let range = match &attrs.bounds {
+				Some(bounds) if !attrs.lightweight => {
+					Some(std::sync::Arc::new(id_range(em, cx, ir, data, bounds, needs)?))
+				}
+				Some(_) => {
+					return Err(invariant("record-id bounds on a scan of a lightweight relation"));
+				}
+				None => None,
+			};
 			let source = if attrs.lightweight {
 				Source::LightweightEdges {
 					table: attrs.table.clone(),
@@ -177,7 +188,7 @@ pub(super) fn lower_source_under(
 						.as_ref()
 						.map(|shape| plain(shape.clone(), "a scan's prefilter"))
 						.transpose()?,
-					range: None,
+					range,
 				}
 			};
 			Ok(Leaf {
@@ -557,6 +568,92 @@ pub(super) fn host_scalar_of(
 	Ok(scalar)
 }
 
+/// Appends the host scalar of `bound` to `bounds`, the values of a scan's bounds in slot order,
+/// and answers its slot.
+///
+/// A literal is a constant. An operand is the host scalar of the value the op holds at that
+/// position, or `NONE` when the host code cannot evaluate it: two answers are not swallowed, a
+/// bound whose plan depends on a catalog change, which late-binds the statement
+/// ([`IrError::LateBind`]), and a refusal of the language ([`IrError::Rejected`]).
+fn bound_slot(
+	em: &mut Emitter,
+	cx: &mut LowerCx<'_>,
+	ir: &Ir,
+	data: &crate::exec::ir::core::op::OpData,
+	needs: &mut Needs,
+	bounds: &mut Vec<HostScalar>,
+	bound: &KeyBoundShape,
+) -> Result<u16, IrError> {
+	let at = u16::try_from(bounds.len()).map_err(|_| IrError::Capacity("key bounds"))?;
+	let scalar = match bound {
+		KeyBoundShape::Literal(value) => {
+			HostScalar::Const(ValueData::new(value.clone(), "a key bound").map_err(|_| {
+				IrError::Invariant {
+					what: "ir_lower::read: a key bound holding a closure",
+				}
+			})?)
+		}
+		KeyBoundShape::Operand(operand) => {
+			let value = *data
+				.operands
+				.get(usize::from(*operand))
+				.ok_or_else(|| invariant("a key bound past the operands of its scan"))?;
+			match host_scalar_of(em, cx, ir, value, needs) {
+				Ok(scalar) => scalar,
+				Err(
+					error @ (IrError::LateBind {
+						..
+					}
+					| IrError::Rejected(_)),
+				) => return Err(error),
+				Err(_) => HostScalar::Const(
+					ValueData::new(Value::None, "a key bound")
+						.map_err(|_| IrError::Stale("ir_lower::read: a key bound"))?,
+				),
+			}
+		}
+	};
+	bounds.push(scalar);
+	Ok(at)
+}
+
+/// The record-id bounds of the table scan `data`, as the scan builds its key range when it
+/// opens: the shape, and a host scalar per bound.
+///
+/// Bounds are numbered in the order [`IdBoundsShape::bounds`] lists them, which is the order of
+/// the scan's operand slots, and are read as [`key_range`] reads its bounds.
+fn id_range(
+	em: &mut Emitter,
+	cx: &mut LowerCx<'_>,
+	ir: &Ir,
+	data: &crate::exec::ir::core::op::OpData,
+	access: &IdBoundsShape,
+	needs: &mut Needs,
+) -> Result<ScanRange, IrError> {
+	if data.operands.len() != access.holes() {
+		return Err(invariant("a table scan whose operands are not the holes of its bounds"));
+	}
+	let mut bounds = Vec::new();
+	let mut side = |side: &Option<KeyRangeBoundShape>| -> Result<Option<ScanSide>, IrError> {
+		side.as_ref()
+			.map(|side| {
+				Ok(ScanSide {
+					bound: bound_slot(em, cx, ir, data, needs, &mut bounds, &side.bound)?,
+					inclusive: side.inclusive,
+				})
+			})
+			.transpose()
+	};
+	let spec = ScanIdRange {
+		low: side(&access.low)?,
+		high: side(&access.high)?,
+	};
+	Ok(ScanRange {
+		spec: ScanSpec::RecordKey(spec),
+		bounds: bounds.into_boxed_slice(),
+	})
+}
+
 /// The key ranges of the access `access` of the key-range scan `data`, as the scan builds them when
 /// it opens: the shape, and a host scalar per bound.
 ///
@@ -580,37 +677,7 @@ fn key_range(
 	}
 	let mut bounds = Vec::new();
 	let mut slot = |bound: &KeyBoundShape| -> Result<u16, IrError> {
-		let at = u16::try_from(bounds.len()).map_err(|_| IrError::Capacity("key bounds"))?;
-		let scalar = match bound {
-			KeyBoundShape::Literal(value) => {
-				HostScalar::Const(ValueData::new(value.clone(), "a key bound").map_err(|_| {
-					IrError::Invariant {
-						what: "ir_lower::read: a key bound holding a closure",
-					}
-				})?)
-			}
-			KeyBoundShape::Operand(operand) => {
-				let value = *data
-					.operands
-					.get(usize::from(*operand))
-					.ok_or_else(|| invariant("a key bound past the operands of its scan"))?;
-				match host_scalar_of(em, cx, ir, value, needs) {
-					Ok(scalar) => scalar,
-					Err(
-						error @ (IrError::LateBind {
-							..
-						}
-						| IrError::Rejected(_)),
-					) => return Err(error),
-					Err(_) => HostScalar::Const(
-						ValueData::new(Value::None, "a key bound")
-							.map_err(|_| IrError::Stale("ir_lower::read: a key bound"))?,
-					),
-				}
-			}
-		};
-		bounds.push(scalar);
-		Ok(at)
+		bound_slot(em, cx, ir, data, needs, &mut bounds, bound)
 	};
 	let mut eq = Vec::with_capacity(access.eq.len());
 	for pinned in &access.eq {
@@ -641,11 +708,11 @@ fn key_range(
 		None => None,
 	};
 	Ok(ScanRange {
-		spec: ScanKeyRange {
+		spec: ScanSpec::Components(ScanKeyRange {
 			kinds: access.key.components.iter().map(|component| component.kind.clone()).collect(),
 			eq: eq.into_boxed_slice(),
 			range,
-		},
+		}),
 		bounds: bounds.into_boxed_slice(),
 	})
 }
@@ -1081,19 +1148,25 @@ pub(super) mod tests {
 		map
 	}
 
+	fn plain_scan() -> PhysOp {
+		PhysOp::TableScan(Box::new(TableScanAttrs {
+			bounds: None,
+			prefilter: None,
+			table: TableName::from("t"),
+			direction: Direction::Forward,
+			topk: None,
+			lightweight: false,
+			id_order: false,
+			read: Default::default(),
+		}))
+	}
+
 	fn scan(b: &mut Builder, lightweight: bool) -> OpId {
-		rows(
-			b,
-			PhysOp::TableScan(Box::new(TableScanAttrs {
-				prefilter: None,
-				table: TableName::from("t"),
-				direction: Direction::Forward,
-				topk: None,
-				lightweight,
-				id_order: false,
-				read: Default::default(),
-			})),
-		)
+		let PhysOp::TableScan(mut attrs) = plain_scan() else {
+			panic!("a table scan");
+		};
+		attrs.lightweight = lightweight;
+		rows(b, PhysOp::TableScan(attrs))
 	}
 
 	#[test]
@@ -1129,6 +1202,7 @@ pub(super) mod tests {
 		let table_scan = rows(
 			&mut b,
 			PhysOp::TableScan(Box::new(TableScanAttrs {
+				bounds: None,
 				prefilter: Some(shape.clone()),
 				table: TableName::from("t"),
 				direction: Direction::Forward,
@@ -1555,10 +1629,13 @@ pub(super) mod tests {
 			panic!("a scan over key ranges");
 		};
 		assert_eq!(direction, Direction::Backward);
-		assert_eq!(range.spec.kinds.len(), 2);
-		assert_eq!(range.spec.eq.len(), 1);
-		assert!(matches!(range.spec.eq[0], ScanEq::One(0)));
-		let on = range.spec.range.expect("a range after the pinned run");
+		let ScanSpec::Components(spec) = &range.spec else {
+			panic!("a scan over the components of a record id");
+		};
+		assert_eq!(spec.kinds.len(), 2);
+		assert_eq!(spec.eq.len(), 1);
+		assert!(matches!(spec.eq[0], ScanEq::One(0)));
+		let on = spec.range.expect("a range after the pinned run");
 		assert_eq!(on.low.map(|side| (side.bound, side.inclusive)), Some((1, true)));
 		assert_eq!(on.high.map(|side| (side.bound, side.inclusive)), Some((2, false)));
 		assert_eq!(range.bounds.len(), 3);
@@ -1570,6 +1647,88 @@ pub(super) mod tests {
 			matches!(&range.bounds[2], HostScalar::Const(value) if **value == Value::from(9_i64))
 		);
 		assert_eq!(em.code().len(), 0, "the bound's code is a host pipeline of its own");
+	}
+
+	/// A table scan of `t` bounded below by the operand at slot 0, exclusively, and above by the
+	/// literal record id `t:9`, inclusively.
+	fn bounded_table_scan(b: &mut Builder, operands: &[ValueId]) -> OpId {
+		use crate::exec::ir::phys::ops::{IdBoundsShape, KeyRangeBoundShape};
+		let PhysOp::TableScan(mut attrs) = plain_scan() else {
+			panic!("a table scan");
+		};
+		attrs.bounds = Some(IdBoundsShape {
+			low: Some(KeyRangeBoundShape {
+				bound: KeyBoundShape::Operand(0),
+				inclusive: false,
+			}),
+			high: Some(KeyRangeBoundShape {
+				bound: KeyBoundShape::Literal(Value::RecordId(RecordId {
+					table: TableName::from("t"),
+					key: RecordIdKey::Number(9),
+				})),
+				inclusive: true,
+			}),
+		});
+		rows_over(b, PhysOp::TableScan(attrs), operands)
+	}
+
+	#[test]
+	fn a_bounded_table_scan_numbers_its_bounds_and_holds_a_scalar_for_each() {
+		let mut b = Builder::new();
+		let low = param(&mut b, "low");
+		let op = bounded_table_scan(&mut b, &[low]);
+		let mut em = Emitter::new();
+		let leaf = lower_source_under(
+			&mut em,
+			&mut LowerCx::detached(),
+			&b.ir,
+			op,
+			None,
+			&mut Needs::none(),
+		)
+		.expect("a bounded table scan lowers");
+		let Source::Scan {
+			range: Some(range),
+			..
+		} = leaf.source
+		else {
+			panic!("a scan over record ids");
+		};
+		let ScanSpec::RecordKey(spec) = &range.spec else {
+			panic!("a scan over record-id bounds");
+		};
+		assert_eq!(spec.low.map(|side| (side.bound, side.inclusive)), Some((0, false)));
+		assert_eq!(spec.high.map(|side| (side.bound, side.inclusive)), Some((1, true)));
+		assert_eq!(range.bounds.len(), 2);
+		assert!(matches!(range.bounds[0], HostScalar::Code(0)));
+		assert!(matches!(&range.bounds[1], HostScalar::Const(_)));
+	}
+
+	#[test]
+	fn an_unbounded_table_scan_reads_no_range() {
+		let mut b = Builder::new();
+		let op = rows_over(&mut b, plain_scan(), &[]);
+		let leaf = lower_source(&mut LowerCx::detached(), &b.ir, op).expect("a table scan lowers");
+		assert!(matches!(
+			leaf.source,
+			Source::Scan {
+				range: None,
+				..
+			}
+		));
+	}
+
+	#[test]
+	fn a_bounded_table_scan_takes_one_operand_for_each_hole() {
+		let mut b = Builder::new();
+		let op = bounded_table_scan(&mut b, &[]);
+		assert!(matches!(
+			lower_source(&mut LowerCx::detached(), &b.ir, op),
+			Err(IrError::Verify(VerifyError {
+				rule: VerifyRule::PerOp,
+				..
+			}))
+		));
 	}
 
 	#[test]

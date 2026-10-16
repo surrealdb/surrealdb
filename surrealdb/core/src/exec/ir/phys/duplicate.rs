@@ -214,7 +214,7 @@ fn copy_op(
 	}
 	copy.ops.insert(old, new);
 	for held in &data.regions {
-		rw.derived(&[old], |rw| copy_region(rw, *held, new, copy))?;
+		copy_region(rw, *held, new, copy)?;
 	}
 	Ok(())
 }

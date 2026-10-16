@@ -680,21 +680,27 @@ impl Classifier<'_> {
 	}
 
 	/// Whether `expr` may be evaluated once when the scan opens in place of
-	/// once per row: it reads no row, holds no nested statement, closure or
-	/// index operator, is effect free (no clock, entropy, write or external
-	/// read), and reads no stored record, which the statement may write
-	/// between one row and the next.
+	/// once per row: see [`deferrable`].
 	fn deferrable(&self, expr: &LogicalExpr) -> bool {
-		if !is_plan_time_computable(expr) {
-			return false;
-		}
-		let effects = effects_of_expr(expr, self.registry);
-		!effects.reads_row
-			&& !effects.reads_row_opaquely
-			&& !effects.index_operator
-			&& effects.effect_free()
-			&& !effects.set.intersects(EffectSet::READS_DATA)
+		deferrable(expr, self.registry)
 	}
+}
+
+/// Whether `expr` may be evaluated once when a scan opens in place of once
+/// per row: it reads no row, holds no nested statement, closure or index
+/// operator, is effect free (no clock, entropy, write or external read), and
+/// reads no stored record, which the statement may write between one row and
+/// the next.
+pub(crate) fn deferrable(expr: &LogicalExpr, registry: &FunctionRegistry) -> bool {
+	if !is_plan_time_computable(expr) {
+		return false;
+	}
+	let effects = effects_of_expr(expr, registry);
+	!effects.reads_row
+		&& !effects.reads_row_opaquely
+		&& !effects.index_operator
+		&& effects.effect_free()
+		&& !effects.set.intersects(EffectSet::READS_DATA)
 }
 
 /// A literal `value` as a bound on a component of kind `kind` used as `using`,

@@ -1024,6 +1024,8 @@ pub(super) fn index_for(cx: &PhysCx<'_>, table: &TableName, field: &Strand) -> O
 	let decision_cx = DecisionCx {
 		registry: cx.effects.registry,
 		knn_vectors: &no_vectors,
+		// The lookup reads its key's rows for a statement that writes none of them.
+		id_bounds: true,
 	};
 	let decision =
 		access::decide(&answers, None, Some(&probe), None, false, &decision_cx).ok()??;

@@ -58,14 +58,14 @@ use surrealdb_types::ToSql;
 
 use super::ops::{
 	AggregateAttrs, Batch, BitmapAttrs, BitmapShape, BranchReadShape, ComputedReadsShape,
-	CountAttrs, CountShape, FullTextScanAttrs, IndexBranchShape, IndexLookupAttrs, IndexScanAttrs,
-	IndexUnionAttrs, JoinAttrs, KeyBoundShape, KeyEqShape, KeyRangeBoundShape, KeyRangeOnShape,
-	KeyRangeScanAttrs, KeyRangeShape, KnnFilterShape, KnnPermissionShape, KnnPrefilterShape,
-	KnnScanAttrs, KnnTargetShape, KnnTopKAttrs, LayerAttrs, LookupKeyShape, MatchStepAttrs,
-	MaterializeImage, OmissionShape, PermissionFilterAttrs, PhysOp, PhysTag, PhysWriteAttrs,
-	PipelineAttrs, PipelineEdge, PipelineId, PrefetchKeys, ProjectedFieldShape, ProjectionShape,
-	ReadClauses, RecordScanAttrs, SortAttrs as PhysSortAttrs, SortKeyReadShape, SortKeySpecShape,
-	TableScanAttrs, WalkActionShape, WalkStepShape, WriteSubjectsShape,
+	CountAttrs, CountShape, FullTextScanAttrs, IdBoundsShape, IndexBranchShape, IndexLookupAttrs,
+	IndexScanAttrs, IndexUnionAttrs, JoinAttrs, KeyBoundShape, KeyEqShape, KeyRangeBoundShape,
+	KeyRangeOnShape, KeyRangeScanAttrs, KeyRangeShape, KnnFilterShape, KnnPermissionShape,
+	KnnPrefilterShape, KnnScanAttrs, KnnTargetShape, KnnTopKAttrs, LayerAttrs, LookupKeyShape,
+	MatchStepAttrs, MaterializeImage, OmissionShape, PermissionFilterAttrs, PhysOp, PhysTag,
+	PhysWriteAttrs, PipelineAttrs, PipelineEdge, PipelineId, PrefetchKeys, ProjectedFieldShape,
+	ProjectionShape, ReadClauses, RecordScanAttrs, SortAttrs as PhysSortAttrs, SortKeyReadShape,
+	SortKeySpecShape, TableScanAttrs, WalkActionShape, WalkStepShape, WriteSubjectsShape,
 };
 use crate::catalog::{Distance, IndexId, KeyOrigin, KeyStructure};
 use crate::doc::Action as DocAction;
@@ -2619,7 +2619,12 @@ text_struct!(TableScanAttrs {
 	topk: Option<TopKKey>,
 	lightweight: bool,
 	id_order: bool,
-	prefilter: Option<PreDecodeShape>
+	prefilter: Option<PreDecodeShape>,
+	bounds: Option<IdBoundsShape>
+});
+text_struct!(IdBoundsShape {
+	low: Option<KeyRangeBoundShape>,
+	high: Option<KeyRangeBoundShape>
 });
 text_struct!(RecordScanAttrs {
 	table: TableName,
@@ -3375,6 +3380,16 @@ mod tests {
 	fn fixture(tag: PhysTag) -> PhysOp {
 		match tag {
 			PhysTag::TableScan => PhysOp::TableScan(Box::new(TableScanAttrs {
+				bounds: Some(IdBoundsShape {
+					low: Some(KeyRangeBoundShape {
+						bound: KeyBoundShape::Operand(0),
+						inclusive: false,
+					}),
+					high: Some(KeyRangeBoundShape {
+						bound: KeyBoundShape::Literal(Value::from("a \"quoted\" key")),
+						inclusive: true,
+					}),
+				}),
 				table: table("a \"quoted\" table"),
 				direction: Direction::Backward,
 				topk: Some(TopKKey {

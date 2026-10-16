@@ -15,6 +15,7 @@
 pub(crate) mod certainty;
 pub(crate) mod cx;
 pub(crate) mod effects;
+pub(crate) mod existence;
 pub(crate) mod fallibility;
 pub(crate) mod footprint;
 pub(crate) mod frames;

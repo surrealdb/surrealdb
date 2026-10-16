@@ -11,14 +11,16 @@ use std::sync::Arc;
 
 use crate::exec::config::DEFAULT_SCAN_BATCH_BYTES;
 use crate::exec::index::access_path::{self, BitmapPlan};
+use crate::exec::index::id_range::{IdBound, IdRangeAccess};
 use crate::exec::index::key_range::{KeyBound, KeyEq, KeyRangeAccess, KeyRangeBound};
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::iface::IndexRef;
 use crate::exec::ir::iface::statements::OperandSlot;
 use crate::exec::ir::phys::ops::{
-	Batch, BitmapShape, BranchReadShape, ComputedReadsShape, DerivedReads, IndexBranchShape,
-	KeyBoundShape, KeyEqShape, KeyRangeBoundShape, KeyRangeOnShape, KeyRangeShape, KnnFilterShape,
-	KnnPermissionShape, KnnPrefilterShape, ProjectedFieldShape, ReadClauses,
+	Batch, BitmapShape, BranchReadShape, ComputedReadsShape, DerivedReads, IdBoundsShape,
+	IndexBranchShape, KeyBoundShape, KeyEqShape, KeyRangeBoundShape, KeyRangeOnShape,
+	KeyRangeShape, KnnFilterShape, KnnPermissionShape, KnnPrefilterShape, ProjectedFieldShape,
+	ReadClauses,
 };
 use crate::exec::vm::payload::{BranchRead, ComputedReads, IndexBranch, KnnFilter, ProjectedField};
 use crate::expr::logical::LogicalExpr;
@@ -54,6 +56,22 @@ fn plan_read(schema: &Option<std::sync::Arc<crate::expr::logical::Schema>>) -> R
 	}
 }
 
+/// The shape of one bound of a key range; a deferred bound takes the next slot of `operands`.
+fn key_bound_shape<'a>(
+	bound: &'a KeyBound,
+	operands: &mut Vec<&'a LogicalExpr>,
+) -> Result<KeyBoundShape, IrError> {
+	match bound {
+		KeyBound::Literal(value) => Ok(KeyBoundShape::Literal(value.clone())),
+		KeyBound::Deferred(expr) => {
+			let slot = OperandSlot::try_from(operands.len())
+				.map_err(|_| IrError::Capacity("key-range operand bounds"))?;
+			operands.push(expr);
+			Ok(KeyBoundShape::Operand(slot))
+		}
+	}
+}
+
 /// The shape of a key-range access, and the expressions of its deferred bounds in operand-slot
 /// order: the equality run by position, each `IN` element in written order, then the low and the
 /// high bound of the range. The n-th deferred bound holds slot n, so the expressions are the
@@ -63,21 +81,6 @@ fn plan_read(schema: &Option<std::sync::Arc<crate::expr::logical::Schema>>) -> R
 pub(crate) fn key_range_shape(
 	access: &KeyRangeAccess,
 ) -> Result<(KeyRangeShape, Vec<&LogicalExpr>), IrError> {
-	/// The shape of one bound; a deferred bound takes the next slot.
-	fn bound<'a>(
-		bound: &'a KeyBound,
-		operands: &mut Vec<&'a LogicalExpr>,
-	) -> Result<KeyBoundShape, IrError> {
-		match bound {
-			KeyBound::Literal(value) => Ok(KeyBoundShape::Literal(value.clone())),
-			KeyBound::Deferred(expr) => {
-				let slot = OperandSlot::try_from(operands.len())
-					.map_err(|_| IrError::Capacity("key-range operand bounds"))?;
-				operands.push(expr);
-				Ok(KeyBoundShape::Operand(slot))
-			}
-		}
-	}
 	/// The shape of one side of a range.
 	fn side<'a>(
 		side: &'a Option<KeyRangeBound>,
@@ -86,7 +89,7 @@ pub(crate) fn key_range_shape(
 		side.as_ref()
 			.map(|side| {
 				Ok(KeyRangeBoundShape {
-					bound: bound(&side.bound, operands)?,
+					bound: key_bound_shape(&side.bound, operands)?,
 					inclusive: side.inclusive,
 				})
 			})
@@ -96,11 +99,11 @@ pub(crate) fn key_range_shape(
 	let mut eq = Vec::with_capacity(access.eq.len());
 	for position in &access.eq {
 		eq.push(match position {
-			KeyEq::One(one) => KeyEqShape::One(bound(one, &mut operands)?),
+			KeyEq::One(one) => KeyEqShape::One(key_bound_shape(one, &mut operands)?),
 			KeyEq::In(many) => {
 				let mut held = Vec::with_capacity(many.len());
 				for one in many {
-					held.push(bound(one, &mut operands)?);
+					held.push(key_bound_shape(one, &mut operands)?);
 				}
 				KeyEqShape::In(held)
 			}
@@ -127,6 +130,40 @@ pub(crate) fn key_range_shape(
 		ordered_by: access.ordered_by.clone(),
 	};
 	Ok((shape, operands))
+}
+
+/// The shape of the record-id bounds of a table scan, and the expressions of its deferred bounds
+/// in operand-slot order: the low bound, then the high. The n-th deferred bound holds slot n, so
+/// the expressions are the operands of the `phys.table_scan` the shape belongs to.
+///
+/// `Err(IrError::Capacity)`: the bounds hold more deferred bounds than a `u16` counts.
+pub(crate) fn id_bounds_shape(
+	access: &IdRangeAccess,
+) -> Result<(IdBoundsShape, Vec<&LogicalExpr>), IrError> {
+	/// The shape of one side of the bounds.
+	fn side<'a>(
+		side: &'a Option<IdBound>,
+		operands: &mut Vec<&'a LogicalExpr>,
+	) -> Result<Option<KeyRangeBoundShape>, IrError> {
+		side.as_ref()
+			.map(|side| {
+				Ok(KeyRangeBoundShape {
+					bound: key_bound_shape(&side.bound, operands)?,
+					inclusive: side.inclusive,
+				})
+			})
+			.transpose()
+	}
+	let mut operands = Vec::new();
+	let low = side(&access.low, &mut operands)?;
+	let high = side(&access.high, &mut operands)?;
+	Ok((
+		IdBoundsShape {
+			low,
+			high,
+		},
+		operands,
+	))
 }
 
 /// The shape of a fused bitmap plan, the tree of its leaves and set operations.

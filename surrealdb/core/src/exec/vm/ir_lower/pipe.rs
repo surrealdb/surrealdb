@@ -3587,6 +3587,7 @@ pub(super) mod tests {
 	pub(in crate::exec::vm::ir_lower) fn scan(b: &mut Builder) -> ValueId {
 		let op = b.create_kind(
 			OpKind::Phys(PhysOp::TableScan(Box::new(TableScanAttrs {
+				bounds: None,
 				prefilter: None,
 				table: TableName::from("t"),
 				direction: Direction::Forward,
@@ -4260,6 +4261,7 @@ pub(super) mod tests {
 		}]);
 		let op = b.create_kind(
 			OpKind::Phys(PhysOp::TableScan(Box::new(TableScanAttrs {
+				bounds: None,
 				prefilter: None,
 				table: TableName::from("t"),
 				direction: Direction::Forward,

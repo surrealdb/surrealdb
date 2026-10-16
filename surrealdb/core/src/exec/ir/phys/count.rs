@@ -136,7 +136,7 @@ pub(super) fn offer(ir: &mut Ir, facts: &mut FactCache, cx: &PhysCx<'_>) -> Resu
 }
 
 /// Whether `op` stands in code a statement stores and never runs.
-fn in_stored_clause(ir: &Ir, op: OpId) -> bool {
+pub(super) fn in_stored_clause(ir: &Ir, op: OpId) -> bool {
 	ancestors(ir, op).any(|(region, _)| {
 		ir.region(region).is_some_and(|held| matches!(held.kind, RegionKind::StoredClause(_)))
 	})
