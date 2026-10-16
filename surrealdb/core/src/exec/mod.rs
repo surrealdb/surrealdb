@@ -84,6 +84,7 @@ pub(crate) mod migrate;
 pub(crate) mod object_extract;
 pub(crate) mod operators;
 pub(crate) mod ordering;
+pub(crate) mod packed_view;
 pub(crate) mod parts;
 pub(crate) mod permission;
 pub(crate) mod planner;

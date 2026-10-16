@@ -327,7 +327,7 @@ use std::sync::atomic::AtomicBool;
 
 use surrealdb_kvs::Snapshot;
 
-use super::super::host::in_place_row;
+use super::super::host::{admit_row, in_place_row_admitted};
 use super::metrics::{MorselMetrics, MorselStat};
 #[cfg(not(target_family = "wasm"))]
 use super::run::Paged;
@@ -1123,13 +1123,28 @@ impl<'p> RangeSet<'p> {
 					if progress.first.is_empty() {
 						progress.first.extend_from_slice(key);
 					}
+					let admitted = admit_row(
+						pipeline,
+						probe.as_ref().zip(threshold.as_deref()),
+						key,
+						value,
+						layouts.as_deref(),
+					);
 					if let (Some(probe), Some(threshold)) = (probe.as_ref(), threshold.as_deref())
-						&& probe.rejects(threshold, value)
+						&& probe.rejects(threshold, &admitted)
 					{
 						rejected += 1;
 						return Ok(next);
 					}
-					match in_place_row(&program, pipeline, key, value, layouts.as_deref(), state) {
+					match in_place_row_admitted(
+						&program,
+						pipeline,
+						key,
+						value,
+						&admitted,
+						layouts.as_deref(),
+						state,
+					) {
 						Ok(false) => Ok(next),
 						Ok(true) => {
 							stopped = true;

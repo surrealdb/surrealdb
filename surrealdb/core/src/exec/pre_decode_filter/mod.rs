@@ -44,6 +44,10 @@
 //! values. This module does not participate in that path.
 
 mod compile;
+mod packed;
+pub(crate) use packed::extract_from_packed;
+#[cfg(all(test, feature = "kv-mem"))]
+mod packed_tests;
 mod streaming;
 mod wire_cmp;
 pub(crate) mod wire_literal;
@@ -62,6 +66,7 @@ use crate::exec::object_extract::{
 	descend_to_value_walker_parts, extract_field_from_record_bytes, record_data_bytes,
 	scan_record_object_at_path_with_slots, stored_record_object,
 };
+use crate::exec::packed_view::AdmittedRow;
 use crate::expr::operator::BinaryOperator;
 use crate::fnc::operate;
 use crate::val::Value;
@@ -286,29 +291,64 @@ pub(crate) struct PreDecodeFilter {
 	/// [`crate::exec::object_extract`]'s walker descent. Paths longer than
 	/// the limit fall back to full-record decode + post-decode evaluation.
 	pub(crate) depth_limit: u32,
+	/// Whether a scan checks each packed row it reads for this filter to judge it from its
+	/// columns. Where it does not, a packed row is read as bytes, which the filter does not judge,
+	/// unless another reader of the scan has checked it.
+	judges_packed: bool,
 }
 
 impl PreDecodeFilter {
+	/// A filter of `root` that judges packed rows.
 	pub(crate) fn new(root: PredNode, depth_limit: u32) -> Self {
 		Self {
 			root,
 			depth_limit,
+			judges_packed: true,
 		}
 	}
 
-	/// Judges the stored record `record_bytes`, the value of the record `key`
-	/// names, from its bytes alone.
+	/// This filter, judging packed rows or leaving them unjudged as `judges` says.
+	pub(crate) fn judging_packed_rows(mut self, judges: bool) -> Self {
+		self.judges_packed = judges;
+		self
+	}
+
+	/// Whether a scan checks each packed row it reads for this filter to judge it from its
+	/// columns.
+	#[inline]
+	pub(crate) fn judges_packed_rows(&self) -> bool {
+		self.judges_packed
+	}
+
+	/// Judges the stored record `row` from its bytes alone.
 	///
 	/// The caller has admitted the record's generation against its table's
 	/// layouts ([`crate::kvs::RowGate`]) before this reads any field of it: a
 	/// row of a generation the table does not list is refused, never judged
-	/// here. A row this reads in neither encoding, a packed row included, is
-	/// judged unknown, which keeps it.
-	pub(crate) fn apply(&self, record_bytes: &[u8]) -> PreDecodeFilterOutcome {
-		let ev = match stored_record_object(record_bytes) {
-			Some(Some(data)) => self.eval_stored(data, &[], &self.root),
-			Some(None) => Evidence::Unknown,
-			None => self.eval_node(record_bytes, &[], &self.root),
+	/// here. A record this reads in neither encoding is judged unknown, which
+	/// keeps it: a packed row among the bytes, which has not been checked, and
+	/// one the check refused, whose whole decode raises the error. A checked
+	/// packed row is judged from its columns, and is rejected only where the
+	/// predicate is false of the record its whole decode holds.
+	pub(crate) fn apply(&self, row: &AdmittedRow<'_>) -> PreDecodeFilterOutcome {
+		let ev = match row {
+			AdmittedRow::Bytes(record_bytes) => match stored_record_object(record_bytes) {
+				Some(Some(data)) => self.eval_stored(data, &[], &self.root),
+				Some(None) => Evidence::Unknown,
+				None => self.eval_node(record_bytes, &[], &self.root),
+			},
+			AdmittedRow::Packed {
+				row,
+				..
+			} => {
+				let evidence = self.eval_packed(*row, &[], &self.root);
+				#[cfg(test)]
+				if evidence == Evidence::ProvablyFalse {
+					crate::exec::vm::row_packed::observed::note_filtered();
+				}
+				evidence
+			}
+			AdmittedRow::Refused => Evidence::Unknown,
 		};
 		match ev {
 			Evidence::ProvablyFalse => PreDecodeFilterOutcome::Reject,
@@ -939,7 +979,7 @@ mod tests {
 	};
 	use super::wire_literal::{LiteralSet, LiteralWire};
 	use super::{
-		FusedFlatClause, FusedFlatClauses, LeafFallback, PathSegment, PreDecodeFilter,
+		AdmittedRow, FusedFlatClause, FusedFlatClauses, LeafFallback, PathSegment, PreDecodeFilter,
 		PreDecodeFilterOutcome, PreDecodeShape, PredNode, apply_binary,
 	};
 	use crate::catalog::Record;
@@ -947,14 +987,15 @@ mod tests {
 	use crate::val::{Number, Object, RecordId, Value};
 
 	/// The format the generation-0 samples are written in.
-	const DOCUMENT: crate::catalog::RecordFormat = crate::catalog::RecordFormat::Document {
-		generation: None,
-	};
+	pub(super) const DOCUMENT: crate::catalog::RecordFormat =
+		crate::catalog::RecordFormat::Document {
+			generation: None,
+		};
 
 	/// Depth limit used in test fixtures. Matches the default
 	/// `ctx.config.exec.idiom_recursion_limit` (256) so test behaviour reflects
 	/// the production planner's wiring.
-	const TEST_DEPTH_LIMIT: u32 = 256;
+	pub(super) const TEST_DEPTH_LIMIT: u32 = 256;
 
 	/// Plans a test builds when its verdict must not depend on the hasher's
 	/// seed. Each plan draws fresh `RandomState` seeds for its sets and maps. A
@@ -970,7 +1011,7 @@ mod tests {
 	// real one. Lets the tests stay readable (no `LiteralWire::from_value`
 	// noise per construction site).
 
-	fn leaf(
+	pub(super) fn leaf(
 		path: Vec<PathSegment>,
 		op: BinaryOperator,
 		literal: Value,
@@ -986,7 +1027,7 @@ mod tests {
 		}
 	}
 
-	fn set_membership(
+	pub(super) fn set_membership(
 		path: Vec<PathSegment>,
 		op: BinaryOperator,
 		set: Arc<HashSet<Value>>,
@@ -1002,7 +1043,7 @@ mod tests {
 		}
 	}
 
-	fn fused_clause(
+	pub(super) fn fused_clause(
 		key_utf8: Vec<u8>,
 		op: BinaryOperator,
 		literal: Value,
@@ -1030,7 +1071,7 @@ mod tests {
 	fn empty_and_never_rejects() {
 		let pf = PreDecodeFilter::new(PredNode::And(Vec::new()), TEST_DEPTH_LIMIT);
 		let rec = wire_record_plain_object(Object::default());
-		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::NeedFullDecode);
+		assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), PreDecodeFilterOutcome::NeedFullDecode);
 	}
 
 	#[test]
@@ -1041,7 +1082,7 @@ mod tests {
 		let obj =
 			Object::from(BTreeMap::from([(Strand::from("a"), Value::Number(Number::Int(2)))]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), PreDecodeFilterOutcome::Reject);
 	}
 
 	/// `==` is `Value`'s derived `PartialEq`, under which a regex equals only a
@@ -1061,6 +1102,7 @@ mod tests {
 				PreDecodeShape::And(parts) => parts.iter().all(|part| holds(part, row)),
 				PreDecodeShape::Or(parts) => parts.iter().any(|part| holds(part, row)),
 				PreDecodeShape::Not(inner) => !holds(inner, row),
+				PreDecodeShape::Selective(inner) => holds(inner, row),
 				PreDecodeShape::Leaf {
 					path,
 					op,
@@ -1141,7 +1183,9 @@ mod tests {
 						}
 						let row = Object::from(fields);
 						let rec = wire_record_plain_object(row.clone());
-						if pf.apply(&rec) == PreDecodeFilterOutcome::Reject && holds(shape, &row) {
+						if pf.apply(&AdmittedRow::Bytes(&rec)) == PreDecodeFilterOutcome::Reject
+							&& holds(shape, &row)
+						{
 							wrong.push(format!("{shape:?} on v = {v:?}"));
 						}
 					}
@@ -1159,7 +1203,7 @@ mod tests {
 		let obj =
 			Object::from(BTreeMap::from([(Strand::from("a"), Value::Number(Number::Int(1)))]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::NeedFullDecode);
+		assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), PreDecodeFilterOutcome::NeedFullDecode);
 	}
 
 	#[test]
@@ -1170,7 +1214,7 @@ mod tests {
 		let obj =
 			Object::from(BTreeMap::from([(Strand::from("a"), Value::Number(Number::Int(99)))]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), PreDecodeFilterOutcome::Reject);
 	}
 
 	/// `0.1f` and `0.1dec` compare equal but hash apart, so the decoded probe
@@ -1199,7 +1243,7 @@ mod tests {
 			let obj = Object::from(BTreeMap::from([(Strand::from("a"), field.clone())]));
 			let rec = wire_record_plain_object(obj);
 			assert_eq!(
-				pf.apply(&rec),
+				pf.apply(&AdmittedRow::Bytes(&rec)),
 				PreDecodeFilterOutcome::NeedFullDecode,
 				"stored {stored:?} field {field:?}"
 			);
@@ -1222,7 +1266,7 @@ mod tests {
 			nested(Value::Number(Number::Float(0.1))),
 		)]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::NeedFullDecode);
+		assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), PreDecodeFilterOutcome::NeedFullDecode);
 	}
 
 	/// A number-free value keeps its rejection even against a set full of
@@ -1246,7 +1290,7 @@ mod tests {
 			)]))),
 		)]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), PreDecodeFilterOutcome::Reject);
 	}
 
 	/// A decimal's stored bytes carry its scale and the sign of a zero, so one
@@ -1328,7 +1372,8 @@ mod tests {
 				]);
 				for (form, shape) in [("alone", leaf), ("with b = 1", fused)] {
 					let rejects = |shape: PreDecodeShape| {
-						shape.filter(TEST_DEPTH_LIMIT).apply(&rec) == PreDecodeFilterOutcome::Reject
+						shape.filter(TEST_DEPTH_LIMIT).apply(&AdmittedRow::Bytes(&rec))
+							== PreDecodeFilterOutcome::Reject
 					};
 					let negated = PreDecodeShape::Not(Box::new(shape.clone()));
 					let (rejected, negation_rejected) = (rejects(shape), rejects(negated));
@@ -1357,7 +1402,7 @@ mod tests {
 		let obj =
 			Object::from(BTreeMap::from([(Strand::from("a"), Value::Number(Number::Int(1)))]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), PreDecodeFilterOutcome::Reject);
 	}
 
 	#[test]
@@ -1368,7 +1413,7 @@ mod tests {
 		let obj =
 			Object::from(BTreeMap::from([(Strand::from("a"), Value::Number(Number::Int(2)))]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), PreDecodeFilterOutcome::Reject);
 	}
 
 	#[test]
@@ -1379,7 +1424,7 @@ mod tests {
 		let obj =
 			Object::from(BTreeMap::from([(Strand::from("a"), Value::Number(Number::Int(5)))]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), PreDecodeFilterOutcome::Reject);
 	}
 
 	#[test]
@@ -1394,7 +1439,7 @@ mod tests {
 		let obj =
 			Object::from(BTreeMap::from([(Strand::from("msg"), Value::String("hello".into()))]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), PreDecodeFilterOutcome::Reject);
 	}
 
 	#[test]
@@ -1411,7 +1456,7 @@ mod tests {
 			Value::from(vec![Value::String("a".into()), Value::String("b".into())]),
 		)]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), PreDecodeFilterOutcome::Reject);
 	}
 
 	#[test]
@@ -1423,7 +1468,7 @@ mod tests {
 		let obj =
 			Object::from(BTreeMap::from([(Strand::from("a"), Value::Number(Number::Int(1)))]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), PreDecodeFilterOutcome::Reject);
 	}
 
 	#[test]
@@ -1440,7 +1485,7 @@ mod tests {
 			Value::from(vec![Value::Number(Number::Int(3))]),
 		)]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), PreDecodeFilterOutcome::Reject);
 	}
 
 	/// Navigate through a missing intermediate field: descendant leaf reads as `Value::None`,
@@ -1461,7 +1506,7 @@ mod tests {
 		let obj =
 			Object::from(BTreeMap::from([(Strand::from("other"), Value::Number(Number::Int(2)))]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), PreDecodeFilterOutcome::Reject);
 	}
 
 	/// `FusedFlatClauses::try_new` rejects out-of-order keys.
@@ -1530,7 +1575,7 @@ mod tests {
 		let obj =
 			Object::from(BTreeMap::from([(Strand::from("msg"), Value::String("hello".into()))]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), PreDecodeFilterOutcome::Reject);
 	}
 
 	#[test]
@@ -1553,7 +1598,7 @@ mod tests {
 		let obj =
 			Object::from(BTreeMap::from([(Strand::from("n"), Value::Number(Number::Int(1)))]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::NeedFullDecode);
+		assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), PreDecodeFilterOutcome::NeedFullDecode);
 	}
 
 	#[test]
@@ -1580,7 +1625,7 @@ mod tests {
 			Value::from(vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(2))]),
 		)]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), PreDecodeFilterOutcome::Reject);
 	}
 
 	#[test]
@@ -1610,7 +1655,7 @@ mod tests {
 			Value::from(vec![Value::String("a".into()), Value::String("b".into())]),
 		)]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), PreDecodeFilterOutcome::Reject);
 	}
 
 	#[test]
@@ -1641,7 +1686,7 @@ mod tests {
 			Value::from(vec![Value::Number(Number::Int(1))]),
 		)]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), PreDecodeFilterOutcome::Reject);
 	}
 
 	/// A bit index identifies a literal value, not a spelling of one. A set that
@@ -1697,7 +1742,7 @@ mod tests {
 			)]));
 			let rec = wire_record_plain_object(obj);
 			assert_eq!(
-				pf.apply(&rec),
+				pf.apply(&AdmittedRow::Bytes(&rec)),
 				PreDecodeFilterOutcome::NeedFullDecode,
 				"element {element:?} satisfies the whole set"
 			);
@@ -1739,7 +1784,7 @@ mod tests {
 			Value::from(vec![Value::Number(Number::Decimal("0.1".parse().unwrap()))]),
 		)]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), PreDecodeFilterOutcome::Reject);
 	}
 
 	/// A compound element holding a number, judged against a set holding one,
@@ -1785,7 +1830,11 @@ mod tests {
 					},
 				};
 				let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
-				assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::NeedFullDecode, "{mode:?}");
+				assert_eq!(
+					pf.apply(&AdmittedRow::Bytes(&rec)),
+					PreDecodeFilterOutcome::NeedFullDecode,
+					"{mode:?}"
+				);
 			}
 		}
 	}
@@ -1838,7 +1887,11 @@ mod tests {
 					},
 				};
 				let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
-				assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::NeedFullDecode, "{element:?}");
+				assert_eq!(
+					pf.apply(&AdmittedRow::Bytes(&rec)),
+					PreDecodeFilterOutcome::NeedFullDecode,
+					"{element:?}"
+				);
 			}
 		}
 	}
@@ -1873,7 +1926,11 @@ mod tests {
 		for _ in 0..SEED_DRAWS {
 			for (shape, rec) in &cases {
 				let pf = shape.filter(TEST_DEPTH_LIMIT);
-				assert_eq!(pf.apply(rec), PreDecodeFilterOutcome::NeedFullDecode, "{shape:?}");
+				assert_eq!(
+					pf.apply(&AdmittedRow::Bytes(rec)),
+					PreDecodeFilterOutcome::NeedFullDecode,
+					"{shape:?}"
+				);
 			}
 		}
 	}
@@ -1905,7 +1962,7 @@ mod tests {
 			Value::from(vec![Value::String("a".into()), Value::String("z".into())]),
 		)]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), PreDecodeFilterOutcome::Reject);
 	}
 
 	#[test]
@@ -1928,14 +1985,14 @@ mod tests {
 		let obj =
 			Object::from(BTreeMap::from([(Strand::from("a"), Value::Number(Number::Int(2)))]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), PreDecodeFilterOutcome::Reject);
 	}
 
 	/// The records [`stored_value_records_are_judged_as_revision_records_are`]
 	/// judges: scalars of each comparable kind, nested objects, arrays, a
 	/// field that is not an object where a path descends through it, numbers
 	/// of differing variants, an empty record and one wide enough to index.
-	fn differential_records() -> Vec<Object> {
+	pub(super) fn differential_records() -> Vec<Object> {
 		let object = |entries: Vec<(&str, Value)>| {
 			Object::from(
 				entries.into_iter().map(|(k, v)| (Strand::from(k), v)).collect::<BTreeMap<_, _>>(),
@@ -1977,7 +2034,7 @@ mod tests {
 	/// The predicates [`stored_value_records_are_judged_as_revision_records_are`]
 	/// judges: every node kind the compiler emits, over present, absent, nested
 	/// and mistyped fields.
-	fn differential_predicates() -> Vec<PredNode> {
+	pub(super) fn differential_predicates() -> Vec<PredNode> {
 		use BinaryOperator::*;
 
 		let int = |i: i64| Value::Number(Number::Int(i));
@@ -2112,7 +2169,7 @@ mod tests {
 	/// What the predicate is over the decoded record, where its leaves can say:
 	/// `None` when a path descends through a field that is not an object, or
 	/// an operator gives no boolean.
-	fn truth(node: &PredNode, data: &Value, prefix: &[&str]) -> Option<bool> {
+	pub(super) fn truth(node: &PredNode, data: &Value, prefix: &[&str]) -> Option<bool> {
 		let pick = |p: &[PathSegment]| -> Option<Value> {
 			let mut v = data;
 			for segment in prefix.iter().copied().chain(p.iter().map(PathSegment::as_str)) {
@@ -2226,10 +2283,10 @@ mod tests {
 					.expect("encodes");
 			for predicate in differential_predicates() {
 				let pf = PreDecodeFilter::new(predicate.clone(), TEST_DEPTH_LIMIT);
-				let expected = pf.apply(&revision);
+				let expected = pf.apply(&AdmittedRow::Bytes(&revision));
 				let truth = truth(&predicate, &data, &[]);
 				for (encoding, bytes) in [("keyed", &keyed), ("bare", &bare)] {
-					let outcome = pf.apply(bytes);
+					let outcome = pf.apply(&AdmittedRow::Bytes(bytes));
 					if outcome == PreDecodeFilterOutcome::Reject {
 						rejected += 1;
 						assert_eq!(
@@ -2335,7 +2392,9 @@ mod tests {
 		for (op, field, literal) in cases {
 			assert!(operator_holds(&op, &field, &literal), "{field:?} {op:?} {literal:?}");
 			let pf = v_shape(op.clone(), literal.clone()).filter(TEST_DEPTH_LIMIT);
-			if pf.apply(&record_with_v(field.clone())) == PreDecodeFilterOutcome::Reject {
+			if pf.apply(&AdmittedRow::Bytes(&record_with_v(field.clone())))
+				== PreDecodeFilterOutcome::Reject
+			{
 				rejected.push(format!("{field:?} {op:?} {literal:?}"));
 			}
 		}
@@ -2355,7 +2414,10 @@ mod tests {
 		]);
 		let pf = shape.filter(TEST_DEPTH_LIMIT);
 		assert!(matches!(pf.root, PredNode::LeafSetMembership { .. }), "{:?}", pf.root);
-		assert_eq!(pf.apply(&record_with_v(field)), PreDecodeFilterOutcome::NeedFullDecode);
+		assert_eq!(
+			pf.apply(&AdmittedRow::Bytes(&record_with_v(field))),
+			PreDecodeFilterOutcome::NeedFullDecode
+		);
 	}
 
 	/// `NOT IN` and `CONTAINSNONE` read the same miss as proof that a stored
@@ -2373,7 +2435,9 @@ mod tests {
 			assert!(!operator_holds(&op, &field, &literal), "{field:?} {op:?}");
 			let shape = PreDecodeShape::Not(Box::new(v_shape(op.clone(), literal.clone())));
 			let pf = shape.filter(TEST_DEPTH_LIMIT);
-			if pf.apply(&record_with_v(field.clone())) == PreDecodeFilterOutcome::Reject {
+			if pf.apply(&AdmittedRow::Bytes(&record_with_v(field.clone())))
+				== PreDecodeFilterOutcome::Reject
+			{
 				rejected.push(format!("NOT ({field:?} {op:?})"));
 			}
 		}
@@ -2397,7 +2461,9 @@ mod tests {
 		let mut rejected = Vec::new();
 		for (name, root, stored) in [("IN", inside, field), ("CONTAINSANY", any, array)] {
 			let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
-			if pf.apply(&record_with_v(stored)) == PreDecodeFilterOutcome::Reject {
+			if pf.apply(&AdmittedRow::Bytes(&record_with_v(stored)))
+				== PreDecodeFilterOutcome::Reject
+			{
 				rejected.push(name);
 			}
 		}
@@ -2431,7 +2497,7 @@ mod tests {
 			);
 			let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
 			assert_eq!(
-				pf.apply(&record_with_v(field.clone())),
+				pf.apply(&AdmittedRow::Bytes(&record_with_v(field.clone()))),
 				PreDecodeFilterOutcome::Reject,
 				"NOT IN {field:?}"
 			);
@@ -2446,7 +2512,7 @@ mod tests {
 				TEST_DEPTH_LIMIT,
 			);
 			assert_eq!(
-				pf.apply(&record_with_v(array)),
+				pf.apply(&AdmittedRow::Bytes(&record_with_v(array))),
 				PreDecodeFilterOutcome::Reject,
 				"CONTAINSNONE {field:?}"
 			);

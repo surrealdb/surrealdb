@@ -1,16 +1,14 @@
-//! Tests of the packed-row writer and its two readers.
+//! Tests of the packed-row writer and its readers.
 //!
 //! * A seeded generator of descriptors and records covers every physical kind and presence, nested
 //!   object nodes, open nodes and their remainders, the datetime and duration escapes, and every
 //!   end-offset width. Each record [`pack`] writes decodes whole to itself, packs again to the same
-//!   bytes, and reads field by field, through [`PackedRow::field`] and through a [`FieldPlan`], to
-//!   what the whole decode holds.
+//!   bytes, and, checked, reads column by column to what the whole decode holds.
 //! * Mutations of every generated row hold the readers to one contract: a row that decodes whole
-//!   reads field by field to the same values, passes [`check_packed`], and is the one packed form
-//!   of what it decodes to. No field read refuses what the whole decode accepts, or answers
-//!   differently.
-//! * Targeted corruptions are refused by the whole decode and by every read of a field whose bytes
-//!   they corrupt.
+//!   passes the check and reads column by column to the same values, passes [`check_packed`], and
+//!   is the one packed form of what it decodes to.
+//! * Targeted corruptions are refused by the whole decode, and by the check with the decode's
+//!   error.
 //! * [`fixtures`] freezes the bytes of a handful of rows and of their descriptors.
 //!
 //! A [`FieldRef::Stored`] or [`FieldRef::RecordId`] carries bytes that the reader that walks them
@@ -25,8 +23,8 @@ use surrealdb_types::Decimal;
 
 use super::kind::widen_f32;
 use super::{
-	DATETIME_ABOVE, DATETIME_BELOW, DURATION_ESCAPE, FieldPlan, FieldRef, PackedError, PackedRow,
-	Packing, check_packed, pack,
+	DATETIME_ABOVE, DATETIME_BELOW, DURATION_ESCAPE, FieldRef, PackedError, PackedRow, Packing,
+	check_packed, pack,
 };
 use crate::Generation;
 use crate::layout::{
@@ -480,7 +478,7 @@ pub(super) fn agrees(read: &Read, expected: Option<&Value>) -> bool {
 	}
 }
 
-/// Reads every column of `row` both ways, and checks each read against the whole decode.
+/// Checks `row`, and reads every column of the checked row against the whole decode.
 pub(super) fn check_fields(
 	layout: &Arc<LayoutDescriptor>,
 	row: &PackedRow<'_>,
@@ -499,26 +497,22 @@ fn check_fields_but(
 	skip: &[usize],
 ) {
 	let packed = packed_of(layout);
+	let checked = row.checked().unwrap_or_else(|error| {
+		panic!("a row that decodes is refused by the check: {error:?}\nrow {}", hex(bytes))
+	});
 	for (index, column) in packed.columns.iter().enumerate() {
 		if skip.contains(&index) {
 			continue;
 		}
 		let want = expected(packed, decoded, index);
-		let plan = FieldPlan::new(layout, index).expect("a plan of a packed descriptor");
-		assert_eq!(plan.column(), index);
-		for (how, got) in [
-			("field", read(column, row.field(index))),
-			("field_with", read(column, row.field_with(&plan))),
-		] {
-			match got {
-				Ok(got) if agrees(&got, want.as_ref()) => {}
-				got => panic!(
-					"{how}({index}) of {:?} disagrees with the whole decode\nread     {got:?}\n\
-					 expected {want:?}\nrow      {}\ndecoded  {decoded:?}",
-					column.path,
-					hex(bytes)
-				),
-			}
+		match read(column, checked.read_column(index)) {
+			Ok(got) if agrees(&got, want.as_ref()) => {}
+			got => panic!(
+				"read_column({index}) of {:?} disagrees with the whole decode\nread     {got:?}\n\
+				 expected {want:?}\nrow      {}\ndecoded  {decoded:?}",
+				column.path,
+				hex(bytes)
+			),
 		}
 	}
 }
@@ -1081,10 +1075,10 @@ fn generated_rows_round_trip_and_read_field_by_field() {
 				if record.has_escapes() {
 					coverage.escapes += 1;
 				}
-				let row = PackedRow::new(&record, packed).expect("a row");
+				let row = record.checked_packed(packed).expect("a row that decodes checks");
 				for (index, column) in packed.columns.iter().enumerate() {
 					let present =
-						!matches!(row.field(index), Ok(FieldRef::Absent | FieldRef::Null));
+						!matches!(row.read_column(index), Ok(FieldRef::Absent | FieldRef::Null));
 					if present && column.role == ColumnRole::Remainder {
 						coverage.remainders += 1;
 					}
@@ -1152,7 +1146,6 @@ const D: usize = 4;
 const E: usize = 5;
 const NODE: usize = 6;
 const NODE_X: usize = 8;
-const NODE_Y: usize = 9;
 const S: usize = 10;
 const V: usize = 11;
 const ROOT_REMAINDER: usize = 0;
@@ -1204,26 +1197,16 @@ fn find(haystack: &[u8], needle: &[u8]) -> usize {
 	found[0]
 }
 
-/// Asserts that `bytes` decode whole to a refusal, and that a read of each of `columns` refuses.
-/// Answers the whole decode's refusal.
-fn refused(layout: &Arc<LayoutDescriptor>, bytes: &[u8], columns: &[usize]) -> PackedError {
+/// Asserts that `bytes` decode whole to a refusal, and that the check refuses them with the same
+/// error. Answers the whole decode's refusal.
+fn refused(layout: &Arc<LayoutDescriptor>, bytes: &[u8]) -> PackedError {
 	let packed = packed_of(layout);
 	let record = StoredRecord::parse(bytes).expect("parses").expect("v1");
 	let row = PackedRow::new(&record, packed).expect("the row has its shape");
 	let whole = row.decode(None).expect_err("the whole decode accepts a corrupt row");
 	assert!(record.decode_packed(packed, None).is_err());
-	for &column in columns {
-		let plan = FieldPlan::new(layout, column).expect("a plan");
-		let c = &packed.columns[column];
-		let direct = read(c, row.field(column));
-		let planned = read(c, row.field_with(&plan));
-		assert!(
-			direct.is_err(),
-			"a read of column {column} accepts it: {direct:?}\nrow {}",
-			hex(bytes)
-		);
-		assert!(planned.is_err(), "a planned read of column {column} accepts it: {planned:?}");
-	}
+	let checked = row.checked().map(|_| ()).expect_err("the check accepts a corrupt row");
+	assert_eq!(checked, whole, "the check's error is not the decode's\nrow {}", hex(bytes));
 	whole
 }
 
@@ -1242,7 +1225,7 @@ fn a_stray_byte_in_an_unused_fixed_slot_is_refused() {
 	bytes[slot_at(&layout, A) + 2] = 1;
 	let column = A as u32;
 	assert_eq!(
-		refused(&layout, &bytes, &[A]),
+		refused(&layout, &bytes),
 		PackedError::Unused {
 			column
 		}
@@ -1263,7 +1246,7 @@ fn a_stray_bool_bit_is_refused() {
 	bytes[bools + bit as usize / 8] |= 1 << (bit % 8);
 	let column = B as u32;
 	assert_eq!(
-		refused(&layout, &bytes, &[B]),
+		refused(&layout, &bytes),
 		PackedError::Unused {
 			column
 		}
@@ -1281,7 +1264,7 @@ fn a_stray_variable_slice_is_refused() {
 		let mut bytes = packed_row(&layout, &data);
 		flip_presence(&mut bytes, presence_bit(&layout, column));
 		assert_eq!(
-			refused(&layout, &bytes, &[column]),
+			refused(&layout, &bytes),
 			PackedError::Unused {
 				column: column as u32
 			}
@@ -1296,7 +1279,7 @@ fn a_remainder_with_its_bit_clear_and_a_slice_is_refused() {
 	flip_presence(&mut bytes, presence_bit(&layout, ROOT_REMAINDER));
 	// A read of the remainder, and the lookup of an absent column through it.
 	assert_eq!(
-		refused(&layout, &bytes, &[ROOT_REMAINDER, A]),
+		refused(&layout, &bytes),
 		PackedError::Unused {
 			column: ROOT_REMAINDER as u32
 		}
@@ -1321,7 +1304,7 @@ fn a_node_between_an_absent_ancestor_and_the_column_is_checked() {
 			.position(|c| c.path.iter().map(String::as_str).eq(path.iter().copied()))
 			.expect("a column at the path")
 	};
-	let (outer, middle, leaf_column) = (at(&["o"]), at(&["o", "m"]), at(&["o", "m", "z"]));
+	let (outer, middle) = (at(&["o"]), at(&["o", "m"]));
 	// `o` and `m` are present and `z` is absent: clearing `o`'s bit leaves `m` set under it.
 	let mut bytes = packed_row(
 		&layout,
@@ -1329,7 +1312,7 @@ fn a_node_between_an_absent_ancestor_and_the_column_is_checked() {
 	);
 	flip_presence(&mut bytes, presence_bit(&layout, outer));
 	assert_eq!(
-		refused(&layout, &bytes, &[leaf_column]),
+		refused(&layout, &bytes),
 		PackedError::UnderAbsent {
 			column: middle as u32
 		}
@@ -1344,7 +1327,7 @@ fn a_column_under_an_absent_node_is_refused() {
 		packed_row(&layout, &object(vec![("node", Value::Object(object(vec![("x", int(5))])))]));
 	flip_presence(&mut bytes, presence_bit(&layout, NODE));
 	assert_eq!(
-		refused(&layout, &bytes, &[NODE_X]),
+		refused(&layout, &bytes),
 		PackedError::UnderAbsent {
 			column: NODE_X as u32
 		}
@@ -1352,7 +1335,7 @@ fn a_column_under_an_absent_node_is_refused() {
 	// `x`'s bit clear, but its slot still holds the value.
 	flip_presence(&mut bytes, presence_bit(&layout, NODE_X));
 	assert_eq!(
-		refused(&layout, &bytes, &[NODE_X]),
+		refused(&layout, &bytes),
 		PackedError::Unused {
 			column: NODE_X as u32
 		}
@@ -1363,7 +1346,7 @@ fn a_column_under_an_absent_node_is_refused() {
 		&object(vec![("node", Value::Object(object(vec![("y", string("in"))])))]),
 	);
 	flip_presence(&mut bytes, presence_bit(&layout, NODE));
-	refused(&layout, &bytes, &[NODE_Y]);
+	refused(&layout, &bytes);
 }
 
 #[test]
@@ -1373,7 +1356,7 @@ fn both_presence_bits_set_is_refused() {
 	let mut bytes = packed_row(&layout, &object(vec![("a", int(1))]));
 	flip_presence(&mut bytes, 1);
 	assert_eq!(
-		refused(&layout, &bytes, &[0]),
+		refused(&layout, &bytes),
 		PackedError::Presence {
 			column: 0
 		}
@@ -1410,7 +1393,7 @@ fn an_escape_value_with_no_trailer_entry_is_refused() {
 	let at_c = slot_at(&layout, C);
 	bytes[at_c..at_c + 8].copy_from_slice(&DATETIME_BELOW.to_le_bytes());
 	assert_eq!(
-		refused(&layout, &bytes, &[C]),
+		refused(&layout, &bytes),
 		PackedError::Escape {
 			column: C as u32
 		}
@@ -1420,7 +1403,7 @@ fn an_escape_value_with_no_trailer_entry_is_refused() {
 	let at_e = slot_at(&layout, E);
 	bytes[at_e..at_e + 8].copy_from_slice(&DURATION_ESCAPE.to_le_bytes());
 	assert_eq!(
-		refused(&layout, &bytes, &[E]),
+		refused(&layout, &bytes),
 		PackedError::Escape {
 			column: E as u32
 		}
@@ -1441,7 +1424,7 @@ fn an_escape_payload_that_is_not_the_slots_is_refused() {
 		let mut bytes = row[..trailer].to_vec();
 		bytes.extend(entry(C, seconds, nanoseconds));
 		assert_eq!(
-			refused(&layout, &bytes, &[C]),
+			refused(&layout, &bytes),
 			PackedError::Escape {
 				column
 			},
@@ -1453,7 +1436,7 @@ fn an_escape_payload_that_is_not_the_slots_is_refused() {
 	let at_c = slot_at(&layout, C);
 	bytes[at_c..at_c + 8].copy_from_slice(&DATETIME_ABOVE.to_le_bytes());
 	assert_eq!(
-		refused(&layout, &bytes, &[C]),
+		refused(&layout, &bytes),
 		PackedError::Escape {
 			column
 		}
@@ -1464,7 +1447,7 @@ fn an_escape_payload_that_is_not_the_slots_is_refused() {
 	let mut bytes = row[..trailer].to_vec();
 	bytes.extend(entry(E, 1, 0));
 	assert_eq!(
-		refused(&layout, &bytes, &[E]),
+		refused(&layout, &bytes),
 		PackedError::Escape {
 			column: E as u32
 		}
@@ -1483,34 +1466,24 @@ fn a_trailer_that_escapes_disagrees_with_is_refused() {
 	let d = entry(D, FAR_FUTURE, 2);
 	assert_eq!(row[trailer..], [c.clone(), d.clone()].concat());
 	let head = &row[..trailer];
-	// Every read of an escaped slot, and of an empty column whose kind escapes, checks the whole
-	// trailer, as the whole decode consumes all of it.
-	let readers = [C, D, E];
+	// The check consumes the whole trailer, as the whole decode does.
 	// Out of order.
 	let bytes = [head, &d, &c].concat();
-	refused(&layout, &bytes, &readers);
+	refused(&layout, &bytes);
 	// Repeated, right after its first entry and after another.
 	let bytes = [head, &c, &c, &d].concat();
-	assert_eq!(refused(&layout, &bytes, &readers), PackedError::Trailer);
+	assert_eq!(refused(&layout, &bytes), PackedError::Trailer);
 	let bytes = [head, &c, &d, &c].concat();
-	assert_eq!(refused(&layout, &bytes, &readers), PackedError::Trailer);
+	assert_eq!(refused(&layout, &bytes), PackedError::Trailer);
 	// Truncated.
 	let bytes = &row[..row.len() - 1];
-	refused(&layout, bytes, &readers);
+	refused(&layout, bytes);
 	// An entry for a column whose kind does not escape, before `c`.
 	let bytes = [head, &entry(A, 0, 0), &c, &d].concat();
-	assert_eq!(refused(&layout, &bytes, &readers), PackedError::Trailer);
+	assert_eq!(refused(&layout, &bytes), PackedError::Trailer);
 	// An entry for a column past the descriptor.
 	let bytes = [head, &c, &d, &entry(99, 0, 0)].concat();
-	assert_eq!(refused(&layout, &bytes, &readers), PackedError::Trailer);
-	// A read of a column whose kind cannot escape does not read the trailer.
-	assert!(matches!(
-		read(&packed_of(&layout).columns[A], {
-			let record = StoredRecord::parse(&bytes).expect("parses").expect("v1");
-			PackedRow::new(&record, packed_of(&layout)).expect("a row").field(A)
-		}),
-		Ok(Read::Absent)
-	));
+	assert_eq!(refused(&layout, &bytes), PackedError::Trailer);
 }
 
 #[test]
@@ -1521,14 +1494,14 @@ fn a_trailer_entry_for_an_absent_column_is_refused() {
 	let trailer = trailer_start(&layout, &row);
 	let bytes = [&row[..trailer], &entry(C, FAR_PAST, 1), &row[trailer..]].concat();
 	// The decode, the read of `c`, and the read of `d`, which walks past the entry, refuse it.
-	assert_eq!(refused(&layout, &bytes, &[C, D, E]), PackedError::Trailer);
+	assert_eq!(refused(&layout, &bytes), PackedError::Trailer);
 	assert!(check_packed(&bytes, bytes[1], Generation::FIRST, packed_of(&layout)).is_err());
 	// The entry with `c`'s slot at the escape value is a stray byte in an unused slot.
 	let mut bytes = bytes;
 	let at_c = slot_at(&layout, C);
 	bytes[at_c..at_c + 8].copy_from_slice(&DATETIME_BELOW.to_le_bytes());
 	assert_eq!(
-		refused(&layout, &bytes, &[C]),
+		refused(&layout, &bytes),
 		PackedError::Unused {
 			column: C as u32
 		}
@@ -1614,23 +1587,23 @@ fn object_keys_out_of_order_are_refused() {
 		let mut bytes = packed_row(&layout, &object(vec![("v", value)]));
 		let at = find(&bytes, b"ka");
 		swap_within(&mut bytes, at, 5, b'a', b'b');
-		refused(&layout, &bytes, &[V]);
+		refused(&layout, &bytes);
 	}
 	// In the root remainder: its read, and the lookup of an absent column through it.
 	let mut bytes = packed_row(&layout, &object(vec![("extra", pair())]));
 	let at = find(&bytes, b"ka");
 	swap_within(&mut bytes, at, 5, b'a', b'b');
-	refused(&layout, &bytes, &[ROOT_REMAINDER]);
+	refused(&layout, &bytes);
 	let mut bytes = packed_row(&layout, &object(vec![("wa", int(1)), ("wb", int(2))]));
 	let at = find(&bytes, b"wa");
 	swap_within(&mut bytes, at, 5, b'a', b'b');
-	refused(&layout, &bytes, &[ROOT_REMAINDER, A, NODE, NODE_X, S]);
+	refused(&layout, &bytes);
 	// In a nested remainder, through the lookup of the node's absent column.
 	let node = Value::Object(object(vec![("qa", int(1)), ("qb", int(2))]));
 	let mut bytes = packed_row(&layout, &object(vec![("node", node)]));
 	let at = find(&bytes, b"qa");
 	swap_within(&mut bytes, at, 5, b'a', b'b');
-	refused(&layout, &bytes, &[NODE + 1, NODE_X, NODE_Y]);
+	refused(&layout, &bytes);
 }
 
 #[test]
@@ -1641,7 +1614,7 @@ fn a_key_in_a_present_column_and_the_remainder_is_refused() {
 	let at = find(&bytes, b"t\x81");
 	bytes[at] = b's';
 	assert_eq!(
-		refused(&layout, &bytes, &[]),
+		refused(&layout, &bytes),
 		PackedError::KeyInColumnAndRemainder {
 			column: ROOT_REMAINDER as u32
 		}
@@ -1669,13 +1642,15 @@ fn an_empty_column_reads_its_key_from_the_remainder() {
 		// The root remainder reads as it is held, with the key its column could hold, and the
 		// absent node's own remainder reads absent.
 		check_fields_but(&layout, &row, &decoded, &bytes, &[ROOT_REMAINDER, NODE + 1]);
-		let got = read(&packed.columns[NODE + 1], row.field(NODE + 1)).expect("reads");
+		let row = row.checked().expect("a row that decodes checks");
+		let got = read(&packed.columns[NODE + 1], row.read_column(NODE + 1)).expect("reads");
 		assert!(matches!(got, Read::Absent), "{got:?}");
-		let got = read(&packed.columns[ROOT_REMAINDER], row.field(ROOT_REMAINDER)).expect("reads");
+		let got =
+			read(&packed.columns[ROOT_REMAINDER], row.read_column(ROOT_REMAINDER)).expect("reads");
 		assert!(agrees(&got, Some(&Value::Object(held))), "{got:?}");
-		let got = read(&packed.columns[NODE_X], row.field(NODE_X)).expect("reads");
+		let got = read(&packed.columns[NODE_X], row.read_column(NODE_X)).expect("reads");
 		assert!(agrees(&got, x.as_ref()), "{got:?}");
-		let got = read(&packed.columns[NODE], row.field(NODE)).expect("reads");
+		let got = read(&packed.columns[NODE], row.read_column(NODE)).expect("reads");
 		assert!(agrees(&got, Some(&value)), "{got:?}");
 	}
 	// The same for a leaf: `t` has no column; renamed `s`, it is the absent `s`'s value.
@@ -1688,7 +1663,9 @@ fn an_empty_column_reads_its_key_from_the_remainder() {
 	let held = object(vec![("s", int(1))]);
 	assert!(same(&decoded, &held));
 	check_fields_but(&layout, &row, &decoded, &bytes, &[ROOT_REMAINDER]);
-	let got = read(&packed.columns[ROOT_REMAINDER], row.field(ROOT_REMAINDER)).expect("reads");
+	let row = row.checked().expect("a row that decodes checks");
+	let got =
+		read(&packed.columns[ROOT_REMAINDER], row.read_column(ROOT_REMAINDER)).expect("reads");
 	assert!(agrees(&got, Some(&Value::Object(held))), "{got:?}");
 }
 
@@ -1786,7 +1763,7 @@ fn a_remainder_is_a_non_empty_object_of_values_without_a_root_id() {
 	] {
 		let bytes = with_slice(&layout, &row, 0, &value);
 		// The remainder's own read, and the lookups of absent columns through it.
-		let whole = refused(&layout, &bytes, &[ROOT_REMAINDER, A, NODE, NODE_X, S]);
+		let whole = refused(&layout, &bytes);
 		assert!(
 			matches!(
 				whole,
@@ -1811,23 +1788,14 @@ fn a_remainder_is_a_non_empty_object_of_values_without_a_root_id() {
 }
 
 #[test]
-fn a_plan_reads_only_rows_of_its_own_descriptor() {
+fn a_read_of_a_column_past_the_descriptor_is_refused() {
 	let layout = corrupt_layout();
 	let bytes = packed_row(&layout, &object(vec![("a", int(1))]));
 	let record = StoredRecord::parse(&bytes).expect("parses").expect("v1");
-	let row = PackedRow::new(&record, packed_of(&layout)).expect("a row");
-	// An equal descriptor in another allocation.
-	let other = Arc::new((*layout).clone());
-	let plan = FieldPlan::new(&other, A).expect("a plan");
-	assert_eq!(plan.descriptor(), &other);
-	assert!(matches!(row.field_with(&plan), Err(PackedError::ForeignPlan)));
-	let plan = FieldPlan::new(&layout, A).expect("a plan");
-	assert!(matches!(row.field_with(&plan), Ok(FieldRef::Int(1))));
+	let row = record.checked_packed(packed_of(&layout)).expect("a row");
+	assert!(matches!(row.read_column(A), Ok(FieldRef::Int(1))));
 	let count = packed_of(&layout).columns.len();
-	assert!(matches!(FieldPlan::new(&layout, count), Err(PackedError::NoColumn { .. })));
-	assert!(matches!(row.field(count), Err(PackedError::NoColumn { .. })));
-	let document = Arc::new(LayoutDescriptor::document(TableName::new("t")));
-	assert!(matches!(FieldPlan::new(&document, 0), Err(PackedError::NotPackedDescriptor)));
+	assert!(matches!(row.read_column(count), Err(PackedError::NoColumn { .. })));
 }
 
 #[test]
@@ -1864,7 +1832,7 @@ fn kinds_read_the_bytes_no_writer_writes() {
 		let mut bytes = row.clone();
 		bytes[at + byte] = value;
 		assert!(matches!(
-			refused(&l, &bytes, &[0]),
+			refused(&l, &bytes),
 			PackedError::Slot {
 				column: 0,
 				..
@@ -1878,7 +1846,7 @@ fn kinds_read_the_bytes_no_writer_writes() {
 	let at = slot_at(&l, 0);
 	bytes[at] = 2;
 	assert_eq!(
-		refused(&l, &bytes, &[0]),
+		refused(&l, &bytes),
 		PackedError::Code {
 			column: 0
 		}
@@ -1902,7 +1870,7 @@ fn kinds_read_the_bytes_no_writer_writes() {
 	let mut bytes = row;
 	bytes[at] = 2;
 	assert_eq!(
-		refused(&l, &bytes, &[0]),
+		refused(&l, &bytes),
 		PackedError::Code {
 			column: 0
 		}
@@ -1912,7 +1880,7 @@ fn kinds_read_the_bytes_no_writer_writes() {
 	let mut bytes = packed_row(&l, &object(vec![("l", string("ab"))]));
 	let len = bytes.len();
 	bytes[len - 1] = 0xFF;
-	refused(&l, &bytes, &[0]);
+	refused(&l, &bytes);
 	// A `NONE` in a value column, and a `NULL` its presence bits could have said.
 	let l =
 		layout(descriptor(false, &named(vec![("l", leaf(PhysicalKind::Value, Pres::Nullable))])));
@@ -1921,7 +1889,7 @@ fn kinds_read_the_bytes_no_writer_writes() {
 	for tag in [stored::tag::NONE, stored::tag::NULL] {
 		bytes[len - 1] = tag;
 		assert!(matches!(
-			refused(&l, &bytes, &[0]),
+			refused(&l, &bytes),
 			PackedError::Slot {
 				column: 0,
 				..

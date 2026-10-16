@@ -624,14 +624,21 @@ pub(super) async fn run_range(
 					});
 				}
 				let Some(paged) = paged else {
+					let admitted = super::super::host::admit_row(
+						pipeline,
+						probe.zip(threshold.as_deref()),
+						key,
+						value,
+						layouts,
+					);
 					if let (Some(probe), Some(threshold)) = (probe, threshold.as_deref())
-						&& probe.rejects(threshold, value)
+						&& probe.rejects(threshold, &admitted)
 					{
 						rejected += 1;
 						return Ok(next);
 					}
-					return match super::super::host::in_place_row(
-						program, pipeline, key, value, layouts, &mut state,
+					return match super::super::host::in_place_row_admitted(
+						program, pipeline, key, value, &admitted, layouts, &mut state,
 					) {
 						Ok(false) => Ok(next),
 						Ok(true) => {

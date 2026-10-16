@@ -76,7 +76,10 @@ impl NumberSubVariant {
 ///
 /// - **No element is `==` to `value`.** The miss proves this as soon as one side of the probe is
 ///   number-free. See [`Value::hash_agrees_with_eq`] for why a number on both sides makes the miss
-///   meaningless, and [`LiteralSet::hash_agrees_with_eq`] for the set side.
+///   meaningless, and [`LiteralSet::hash_agrees_with_eq`] for the set side. An `Int` against a set
+///   whose numbers are all `Int` is the exception: two integers are `==` exactly when they are the
+///   same integer, which hash alike, so the miss proves it whatever else the set holds
+///   ([`LiteralSet::numbers_are_ints`]).
 /// - **No element is `Value::equal` to `value` without being `==` to it.** The two differ only
 ///   between a top-level string and a top-level regex, which `Value::equal` matches by running the
 ///   regex over the string. A regex's miss is therefore decisive only against a set holding no
@@ -89,7 +92,9 @@ impl NumberSubVariant {
 /// meets that entry depends on the hasher's seed.
 #[inline]
 pub(crate) fn hash_miss_is_decisive(value: &Value, set: &LiteralSet) -> bool {
-	let miss_rules_out_eq = set.hash_agrees_with_eq() || value.hash_agrees_with_eq();
+	let integer_probe = matches!(value, Value::Number(Number::Int(_))) && set.numbers_are_ints();
+	let miss_rules_out_eq =
+		integer_probe || set.hash_agrees_with_eq() || value.hash_agrees_with_eq();
 	let eq_decides_equal = match value {
 		Value::String(_) => !set.has_strand_asymmetric_match(),
 		Value::Regex(_) => set.has_no_strings(),
@@ -402,6 +407,16 @@ impl LiteralSet {
 		self.number_sub_variants
 	}
 
+	/// True iff the set holds no `Float` and no `Decimal` as an element: its numbers are all `Int`,
+	/// or it holds none. An `Int` is `Value::equal` to nothing but an `Int` of its own value, so
+	/// against such a set a `HashSet<Value>` miss decides membership.
+	#[inline]
+	pub(crate) fn numbers_are_ints(&self) -> bool {
+		let others =
+			(1u8 << NumberSubVariant::Float as u8) | (1u8 << NumberSubVariant::Decimal as u8);
+		self.number_sub_variants & others == 0
+	}
+
 	/// True iff [`Self::numbers`] holds both a `Float` and a `Decimal`.
 	///
 	/// `Number`'s equality between those two sub-variants is approximate and not
@@ -508,6 +523,33 @@ mod tests {
 		assert!(!numeric.hash_agrees_with_eq());
 	}
 
+	/// A miss of an integer against a set of integers is decisive, and one against a set that holds
+	/// another kind of number is not, since the other kind may be equal to the integer.
+	#[test]
+	fn an_integer_miss_is_decisive_against_integers_only() {
+		let int = |v| Value::Number(Number::Int(v));
+		let ints = LiteralSet::from_set(&HashSet::from([int(1), int(2), Value::from("a")]));
+		assert!(ints.numbers_are_ints());
+		assert!(hash_miss_is_decisive(&int(3), &ints));
+		let nested = LiteralSet::from_set(&HashSet::from([
+			int(1),
+			Value::from(vec![Value::Number(Number::Float(0.5))]),
+		]));
+		assert!(nested.numbers_are_ints());
+		assert!(hash_miss_is_decisive(&int(3), &nested));
+		let floats =
+			LiteralSet::from_set(&HashSet::from([int(1), Value::Number(Number::Float(3.0))]));
+		assert!(!floats.numbers_are_ints());
+		assert!(!hash_miss_is_decisive(&int(3), &floats));
+		let decimals = LiteralSet::from_set(&HashSet::from([Value::Number(Number::Decimal(
+			Decimal::from(3),
+		))]));
+		assert!(!decimals.numbers_are_ints());
+		assert!(!hash_miss_is_decisive(&int(3), &decimals));
+		// A float against integers is still not decisive.
+		assert!(!hash_miss_is_decisive(&Value::Number(Number::Float(3.0)), &ints));
+	}
+
 	/// A miss [`hash_miss_is_decisive`] trusts proves that no element of the set
 	/// is `Value::equal` to the value. Checked over every pairing of a corpus
 	/// that covers the ways a hash probe parts from `Value::equal`: numbers that
@@ -523,10 +565,14 @@ mod tests {
 			Value::from("xyz"),
 			regex.clone(),
 			Value::Number(Number::Int(1)),
+			Value::Number(Number::Int(2)),
 			Value::Number(Number::Float(0.1)),
+			Value::Number(Number::Float(2.0)),
 			Value::Number(Number::Decimal(Decimal::from_str_normalized("0.1").unwrap())),
+			Value::Number(Number::Decimal(Decimal::from(2))),
 			Value::Bool(true),
 			Value::from(vec![Value::from("abc")]),
+			Value::from(vec![Value::Number(Number::Float(1.0))]),
 			Value::from(vec![regex]),
 		];
 		let mut sets = vec![HashSet::new()];

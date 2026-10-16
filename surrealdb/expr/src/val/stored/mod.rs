@@ -119,7 +119,8 @@ pub mod varint;
 
 pub use decode::{
 	decimal_payload, decode, decode_datetime_payload, decode_duration_payload, decode_key,
-	decode_key_nested, decode_nested, validate, validate_nested,
+	decode_key_nested, decode_nested, validate, validate_entries_nested, validate_key_nested,
+	validate_nested,
 };
 pub use encode::{Encoder, Open, encode, put_decimal_payload, with_encoder};
 pub use map::{Item, ListRef, MapRef};

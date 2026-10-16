@@ -25,6 +25,11 @@
 //!   carry an `Allow` SELECT permission when permission checks apply — the exact conditions
 //!   enforced by [`field_state_blocks_raw_read`], shared with the pre-decode WHERE filter.
 //!   (Write-time `VALUE` clauses are materialised into the stored bytes and stay eligible.)
+//! * A packed row is rejected only from its checked columns, read as the whole decode holds them
+//!   ([`crate::exec::pre_decode_filter::extract_from_packed`]), and only where the scan states that
+//!   every op between it and the sort is infallible, deterministic and a function of the row
+//!   ([`crate::exec::vm::payload::TopKKey::packed_rows`]): the ops above the scan read a packed row
+//!   whole, so a row skipped unread must hide no error and no effect of theirs.
 //! * Wire-level ordered comparison only covers `Int` numbers (`pre_decode_filter::wire_cmp`), so
 //!   the probe decodes just the leaf [`Value`] (cheap — e.g. two varints for a datetime) and
 //!   compares with [`compare_values`], the same function the sort operator uses, including
@@ -62,6 +67,8 @@ use crate::exec::OperatorMetrics;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
 use crate::exec::object_extract::{Extracted, PathSegment, extract_field_from_record_bytes};
 use crate::exec::operators::{SortDirection, compare_values};
+use crate::exec::packed_view::AdmittedRow;
+use crate::exec::pre_decode_filter::extract_from_packed;
 use crate::val::Value;
 
 /// Monotonically-tightening threshold shared, for one execution, between the
@@ -120,6 +127,10 @@ pub(crate) struct TopKThresholdProbe {
 	/// against the threshold also rejects (the heap admits only on strict
 	/// `Less`). With multiple keys, `Equal` must fall through to full decode.
 	single_key: bool,
+	/// Whether a packed row may be rejected from its checked columns
+	/// ([`crate::exec::vm::payload::TopKKey::packed_rows`]). A packed row of a scan that does not
+	/// state it is never rejected.
+	packed_rows: bool,
 	/// The pushdown whose sort publishes the threshold this probe reads.
 	pushdown: u64,
 	/// The threshold of the execution this probe is armed for. `None` in the
@@ -148,12 +159,14 @@ impl TopKThresholdProbe {
 		direction: SortDirection,
 		single_key: bool,
 		depth_limit: u32,
+		packed_rows: bool,
 		cell: Arc<TopKThresholdCell>,
 	) -> Arc<Self> {
 		Arc::new(Self {
 			path,
 			direction,
 			single_key,
+			packed_rows,
 			pushdown: 0,
 			cell: Some(cell),
 			depth_limit,
@@ -176,28 +189,61 @@ impl TopKThresholdProbe {
 		self.metrics.as_ref()
 	}
 
-	/// Decide from raw record bytes whether this row can be skipped without
-	/// decode. `true` only when the row's first ORDER BY key provably cannot
-	/// beat `threshold`; any uncertainty (wire bail, decode error) returns
-	/// `false` so the row takes the ordinary full-decode path.
+	/// Whether this probe may reject a packed row from its checked columns: the scan states that
+	/// no op between it and the sort can hide an error or an effect of a row it skips.
+	pub(crate) fn reads_packed_rows(&self) -> bool {
+		self.packed_rows
+	}
+
+	/// Decide from a record admitted for reading its bytes whether this row can be skipped
+	/// without decode. `true` only when the row's first ORDER BY key provably cannot beat
+	/// `threshold`; any uncertainty (wire bail, decode error) returns `false` so the row takes the
+	/// ordinary full-decode path.
 	///
 	/// The caller has admitted the record's generation against its table's
 	/// layouts ([`crate::kvs::RowGate`]) before this reads any field of it, so
 	/// a row of an unlisted generation is refused rather than rejected here. A
-	/// packed row's fields are not readable from its bytes alone, so it bails
-	/// and takes the full decode.
-	pub(crate) fn rejects(&self, threshold: &Value, record_bytes: &[u8]) -> bool {
-		let candidate =
-			match extract_field_from_record_bytes(record_bytes, &self.path, self.depth_limit) {
-				Extracted::Found(v) => v,
-				// Absent field reads as None, exactly like FieldPath::extract
-				// in compare_records_by_keys.
-				Extracted::Missing => Value::None,
-				Extracted::Bail => return false,
-			};
+	/// checked packed row is rejected from its columns only where the scan
+	/// states that no op above it can hide an error or an effect of a row it
+	/// skips ([`Self::reads_packed_rows`]); a packed row not checked, or one
+	/// the check refused, is never rejected.
+	pub(crate) fn rejects(&self, threshold: &Value, row: &AdmittedRow<'_>) -> bool {
+		let extracted = match row {
+			AdmittedRow::Bytes(record_bytes) => {
+				extract_field_from_record_bytes(record_bytes, &self.path, self.depth_limit)
+			}
+			AdmittedRow::Packed {
+				row,
+				..
+			} if self.packed_rows => extract_from_packed(*row, &self.path, self.depth_limit),
+			AdmittedRow::Packed {
+				..
+			}
+			| AdmittedRow::Refused => return false,
+		};
+		let candidate = match extracted {
+			Extracted::Found(v) => v,
+			// Absent field reads as None, exactly like FieldPath::extract
+			// in compare_records_by_keys.
+			Extracted::Missing => Value::None,
+			Extracted::Bail => return false,
+		};
+		let rejected = self.rejects_candidate(threshold, &candidate);
+		#[cfg(test)]
+		if rejected {
+			crate::exec::vm::row_packed::observed::note_probed(matches!(
+				row,
+				AdmittedRow::Packed { .. }
+			));
+		}
+		rejected
+	}
+
+	/// Whether a row whose first ORDER BY key is `candidate` cannot beat `threshold`.
+	fn rejects_candidate(&self, threshold: &Value, candidate: &Value) -> bool {
 		// Same comparison the sort heap uses (collate/numeric keys are
 		// ineligible for pushdown, so plain Value ordering applies).
-		let ord = compare_values(&candidate, threshold, false, false);
+		let ord = compare_values(candidate, threshold, false, false);
 		let ord = match self.direction {
 			SortDirection::Asc => ord,
 			SortDirection::Desc => ord.reverse(),
@@ -219,6 +265,7 @@ impl PartialEq for TopKThresholdProbe {
 		self.pushdown == other.pushdown
 			&& self.direction == other.direction
 			&& self.single_key == other.single_key
+			&& self.packed_rows == other.packed_rows
 			&& self.path == other.path
 	}
 }
@@ -265,6 +312,8 @@ pub(crate) fn reads_key_component(
 	})
 }
 
+#[cfg(all(test, feature = "kv-mem"))]
+mod packed_tests;
 #[cfg(test)]
 mod tests {
 	use std::collections::BTreeMap;
@@ -321,6 +370,7 @@ mod tests {
 			direction,
 			single_key,
 			TEST_DEPTH_LIMIT,
+			false,
 			Arc::new(TopKThresholdCell::default()),
 		)
 	}
@@ -384,19 +434,26 @@ mod tests {
 				direction,
 				true,
 				256,
+				false,
 				Arc::new(TopKThresholdCell::default()),
 			);
 			let kept = single.ties_kept();
 			// The row's key equals the threshold.
-			assert!(single.rejects(&t(5), &rec), "{direction:?}: a single key rejects a tie");
-			assert!(!kept.rejects(&t(5), &rec), "{direction:?}: a tie is kept");
+			assert!(
+				single.rejects(&t(5), &AdmittedRow::Bytes(&rec)),
+				"{direction:?}: a single key rejects a tie"
+			);
+			assert!(
+				!kept.rejects(&t(5), &AdmittedRow::Bytes(&rec)),
+				"{direction:?}: a tie is kept"
+			);
 			// Strictly worse than the threshold is rejected, strictly better is not.
 			let (worse, better) = match direction {
 				SortDirection::Asc => (4, 6),
 				SortDirection::Desc => (6, 4),
 			};
-			assert!(kept.rejects(&t(worse), &rec), "{direction:?}");
-			assert!(!kept.rejects(&t(better), &rec), "{direction:?}");
+			assert!(kept.rejects(&t(worse), &AdmittedRow::Bytes(&rec)), "{direction:?}");
+			assert!(!kept.rejects(&t(better), &AdmittedRow::Bytes(&rec)), "{direction:?}");
 		}
 	}
 
@@ -431,7 +488,7 @@ mod tests {
 			for (direction, threshold, single_key, expect) in cases {
 				let p = probe(direction, single_key, &["a"]);
 				assert_eq!(
-					p.rejects(&t(threshold), &rec),
+					p.rejects(&t(threshold), &AdmittedRow::Bytes(&rec)),
 					expect,
 					"direction={direction:?} threshold={threshold} single_key={single_key}",
 				);
@@ -446,11 +503,23 @@ mod tests {
 	fn missing_field_reads_as_none() {
 		for rec in records_with_int("other", 1) {
 			let threshold = Value::Number(Number::Int(5));
-			assert!(probe(SortDirection::Desc, true, &["a"]).rejects(&threshold, &rec));
-			assert!(!probe(SortDirection::Asc, true, &["a"]).rejects(&threshold, &rec));
+			assert!(
+				probe(SortDirection::Desc, true, &["a"])
+					.rejects(&threshold, &AdmittedRow::Bytes(&rec))
+			);
+			assert!(
+				!probe(SortDirection::Asc, true, &["a"])
+					.rejects(&threshold, &AdmittedRow::Bytes(&rec))
+			);
 			// None == None tie: single-key rejects, multi-key passes.
-			assert!(probe(SortDirection::Desc, true, &["a"]).rejects(&Value::None, &rec));
-			assert!(!probe(SortDirection::Desc, false, &["a"]).rejects(&Value::None, &rec));
+			assert!(
+				probe(SortDirection::Desc, true, &["a"])
+					.rejects(&Value::None, &AdmittedRow::Bytes(&rec))
+			);
+			assert!(
+				!probe(SortDirection::Desc, false, &["a"])
+					.rejects(&Value::None, &AdmittedRow::Bytes(&rec))
+			);
 		}
 	}
 
@@ -460,12 +529,12 @@ mod tests {
 	fn bail_passes_through() {
 		let threshold = Value::Number(Number::Int(5));
 		let p = probe(SortDirection::Desc, true, &["a"]);
-		assert!(!p.rejects(&threshold, b"\xff\xff\xff\xff"));
+		assert!(!p.rejects(&threshold, &AdmittedRow::Bytes(b"\xff\xff\xff\xff")));
 		// Descending through a non-object intermediate (`a.b` where `a` is an
 		// int) bails rather than treating the leaf as missing.
 		for rec in records_with_int("a", 5) {
 			let nested = probe(SortDirection::Desc, true, &["a", "b"]);
-			assert!(!nested.rejects(&threshold, &rec));
+			assert!(!nested.rejects(&threshold, &AdmittedRow::Bytes(&rec)));
 		}
 	}
 
@@ -481,15 +550,15 @@ mod tests {
 		)])));
 		let p = probe(SortDirection::Desc, true, &["created_at"]);
 		// Row is older than the heap's worst → cannot enter the top-K.
-		assert!(p.rejects(&Value::Datetime(newer), &rec));
+		assert!(p.rejects(&Value::Datetime(newer), &AdmittedRow::Bytes(&rec)));
 		// Row ties with the heap's worst → single-key reject.
-		assert!(p.rejects(&Value::Datetime(older), &rec));
+		assert!(p.rejects(&Value::Datetime(older), &AdmittedRow::Bytes(&rec)));
 		// Threshold older than the row → row wins → pass.
 		let rec_newer = wire_record(Object::from(BTreeMap::from([(
 			Strand::from("created_at"),
 			Value::Datetime(newer),
 		)])));
-		assert!(!p.rejects(&Value::Datetime(older), &rec_newer));
+		assert!(!p.rejects(&Value::Datetime(older), &AdmittedRow::Bytes(&rec_newer)));
 	}
 
 	/// Nested Field chains descend; the leaf compares like a root field.
@@ -500,8 +569,8 @@ mod tests {
 		let object = Object::from(BTreeMap::from([(Strand::from("stats"), Value::Object(inner))]));
 		for rec in [wire_record(object.clone()), stored_record(object)] {
 			let p = probe(SortDirection::Desc, true, &["stats", "score"]);
-			assert!(p.rejects(&Value::Number(Number::Int(9)), &rec));
-			assert!(!p.rejects(&Value::Number(Number::Int(1)), &rec));
+			assert!(p.rejects(&Value::Number(Number::Int(9)), &AdmittedRow::Bytes(&rec)));
+			assert!(!p.rejects(&Value::Number(Number::Int(1)), &AdmittedRow::Bytes(&rec)));
 		}
 	}
 

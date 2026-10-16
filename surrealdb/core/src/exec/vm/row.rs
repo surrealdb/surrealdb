@@ -94,10 +94,19 @@ pub(super) trait RowReader {
 /// compares the name alone, and a copy of the name rebuilt from its text (as
 /// after any encoding and decoding of a program) starts at `NO_SLOT`. Nothing
 /// may read the slot as a fact about the name.
+///
+/// `column` is the same kind of hint for a packed row: the index the name's
+/// column held in the descriptor of the last packed row it was found in,
+/// `NO_SLOT` before it is found. A packed row verifies it against its own
+/// descriptor on every read ([`CheckedPackedRow::root_column`]), so a hint
+/// another generation's descriptor left is only a slower lookup.
+///
+/// [`CheckedPackedRow::root_column`]: crate::catalog::packed::CheckedPackedRow::root_column
 #[derive(Debug)]
 pub(super) struct FieldName {
 	segment: PathSegment,
 	slot: std::sync::atomic::AtomicU32,
+	column: std::sync::atomic::AtomicU32,
 }
 
 impl PartialEq for FieldName {
@@ -118,6 +127,9 @@ impl Clone for FieldName {
 			slot: std::sync::atomic::AtomicU32::new(
 				self.slot.load(std::sync::atomic::Ordering::Relaxed),
 			),
+			column: std::sync::atomic::AtomicU32::new(
+				self.column.load(std::sync::atomic::Ordering::Relaxed),
+			),
 		}
 	}
 }
@@ -127,11 +139,17 @@ impl FieldName {
 		Self {
 			segment: PathSegment::new(Strand::from(name)),
 			slot: std::sync::atomic::AtomicU32::new(NO_SLOT),
+			column: std::sync::atomic::AtomicU32::new(NO_SLOT),
 		}
 	}
 
 	pub(super) fn as_str(&self) -> &str {
 		self.segment.as_str()
+	}
+
+	/// The packed-column hint of the name.
+	pub(super) fn column_hint(&self) -> &std::sync::atomic::AtomicU32 {
+		&self.column
 	}
 }
 
@@ -144,10 +162,13 @@ impl FieldName {
 /// not read parses as no layout, is decoded whole, and is refused there with
 /// the typed envelope error.
 ///
-/// A row never holds a packed record: the host decodes a packed record through
-/// its table's layouts before a row is built, and runs it as a value row. One
-/// that reaches a `StoredRow` has no layouts to be read through, is decoded
-/// whole, and is refused there as a record read without its table's layouts.
+/// A `StoredRow` never holds a packed record: the host reads a packed record
+/// through its table's layouts, in place as a [`PackedRowReader`] or decoded
+/// whole and run as a value row, before a `StoredRow` is built. One that reaches
+/// a `StoredRow` has no layouts to be read through, is decoded whole, and is
+/// refused there as a record read without its table's layouts.
+///
+/// [`PackedRowReader`]: super::row_packed::PackedRowReader
 pub(super) struct StoredRow<'a> {
 	key: &'a [u8],
 	value: &'a [u8],

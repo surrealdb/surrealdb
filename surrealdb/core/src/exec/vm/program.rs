@@ -5781,6 +5781,9 @@ pub(super) struct TopKScan {
 	pub(super) sort: u16,
 	/// The bound on how deep the walk over the stored bytes descends.
 	pub(super) depth_limit: u32,
+	/// Whether a packed row may be rejected from its checked columns
+	/// ([`super::payload::TopKKey::packed_rows`]).
+	pub(super) packed_rows: bool,
 	/// The cut a key-range scan makes by the second of a datetime component.
 	pub(super) coarse: Option<super::payload::CoarseCutoff>,
 }
@@ -5794,6 +5797,7 @@ impl TopKScan {
 			single_key: key.single_key,
 			sort,
 			depth_limit: key.depth_limit,
+			packed_rows: key.packed_rows,
 			coarse: key.coarse_cutoff,
 		}
 	}
@@ -5809,6 +5813,7 @@ impl TopKScan {
 			self.direction,
 			self.single_key,
 			self.depth_limit,
+			self.packed_rows,
 			Arc::clone(cell),
 		)
 	}
@@ -5998,6 +6003,12 @@ pub(crate) struct Pipeline {
 	/// reads rows a sort hands on, so a sorted record held as its stored bytes
 	/// runs on those bytes, as [`Self::in_place`] does inside a cursor.
 	pub(super) stored_rows: bool,
+	/// Whether the body reads fields of its row and holds no instruction that takes the row whole
+	/// ([`reads_row`]). It matters to a body that runs in place ([`Self::in_place`]): such a body
+	/// runs on a packed record read in place, which is decoded whole only if the body leaves the
+	/// row pending. Any other body runs on the packed record decoded whole, as on a row held in
+	/// memory.
+	pub(super) reads_row: bool,
 	/// What each row the source yields is put through before the body runs,
 	/// where the body holds none of it. Such a pipeline runs on values, never
 	/// on stored bytes, and never as morsels.
@@ -6049,6 +6060,395 @@ impl Pipeline {
 				]
 			)
 	}
+}
+
+/// How an instruction uses the row its body runs over.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RowUse {
+	/// It reads no field of the row and does not take it whole.
+	Neither,
+	/// It reads fields of the row, through [`Operand::Field`] or an instruction that names a field.
+	Fields,
+	/// It takes the row whole, reads it through the [`ROW`] register, or is an instruction a body
+	/// that runs in place never holds: the body runs over a record decoded whole.
+	Whole,
+}
+
+impl RowUse {
+	/// The use of an instruction that uses the row as `self` and `other` say together.
+	fn and(self, other: Self) -> Self {
+		match (self, other) {
+			(Self::Whole, _) | (_, Self::Whole) => Self::Whole,
+			(Self::Fields, _) | (_, Self::Fields) => Self::Fields,
+			(Self::Neither, Self::Neither) => Self::Neither,
+		}
+	}
+
+	/// The use of the row an operand makes.
+	fn of(operand: Operand) -> Self {
+		match operand {
+			Operand::Field(_) => Self::Fields,
+			Operand::Reg(ROW) => Self::Whole,
+			Operand::Reg(_) | Operand::Const(_) => Self::Neither,
+		}
+	}
+}
+
+/// How `instr` uses the row. The match is exhaustive, so an instruction added to [`Instr`] is
+/// classified here before it compiles: `Whole` is always correct, and costs only the in-place read.
+fn row_use(instr: &Instr) -> RowUse {
+	match instr {
+		Instr::Load {
+			src,
+			..
+		}
+		| Instr::Unary {
+			src,
+			..
+		} => RowUse::of(*src),
+		Instr::Compare {
+			left,
+			right,
+			..
+		}
+		| Instr::Arith {
+			left,
+			right,
+			..
+		}
+		| Instr::JumpIfCompare {
+			left,
+			right,
+			..
+		}
+		| Instr::FilterCompare {
+			left,
+			right,
+			..
+		} => RowUse::of(*left).and(RowUse::of(*right)),
+		Instr::CompareFieldInt {
+			..
+		}
+		| Instr::JumpIfFieldInt {
+			..
+		}
+		| Instr::FilterFieldInt {
+			..
+		}
+		// The root field a path starts at is read through the row; the rest of the path is
+		// taken from the value read.
+		| Instr::LoadPath {
+			..
+		} => RowUse::Fields,
+		Instr::Filter {
+			cond,
+			..
+		}
+		| Instr::JumpIf {
+			cond,
+			..
+		}
+		| Instr::JumpIfNullish {
+			cond,
+			..
+		}
+		| Instr::JumpIfNone {
+			cond,
+			..
+		} => RowUse::of(*cond),
+		Instr::ArrayPush {
+			value,
+			..
+		}
+		| Instr::CollectPush {
+			value,
+			..
+		} => RowUse::of(*value),
+		Instr::BuildObject {
+			fields,
+			..
+		} => {
+			fields.iter().fold(RowUse::Neither, |used, (_, operand)| used.and(RowUse::of(*operand)))
+		}
+		// The row an emit hands on is left pending, and settled by the host.
+		Instr::Emit {
+			..
+		}
+		| Instr::EmitEnd {
+			src: Operand::Reg(ROW),
+		}
+		| Instr::Jump {
+			..
+		}
+		| Instr::NewArray {
+			..
+		}
+		| Instr::NewSet {
+			..
+		}
+		| Instr::NewObject {
+			..
+		}
+		| Instr::EndRow
+		| Instr::StopPipeline => RowUse::Neither,
+		Instr::EmitEnd {
+			src,
+		} => RowUse::of(*src),
+		// The rest hand back to the host, take the row whole, or read it through a register that
+		// is not a field: none runs in place on a packed record.
+		Instr::CoerceField {
+			..
+		}
+		| Instr::BeginComputing {
+			..
+		}
+		| Instr::LandRow {
+			..
+		}
+		| Instr::BindRow {
+			..
+		}
+		| Instr::JumpIfPermissionsBypassed {
+			..
+		}
+		| Instr::LoadParam {
+			..
+		}
+		| Instr::LoadSlot {
+			..
+		}
+		| Instr::SortKey {
+			..
+		}
+		| Instr::Fetch {
+			..
+		}
+		| Instr::Access {
+			..
+		}
+		| Instr::Each {
+			..
+		}
+		| Instr::Throw {
+			..
+		}
+		| Instr::FilterBegin {
+			..
+		}
+		| Instr::MapBegin {
+			..
+		}
+		| Instr::Nav {
+			..
+		}
+		| Instr::CallAllowed {
+			..
+		}
+		| Instr::Call {
+			..
+		}
+		| Instr::FunctionEnter {
+			..
+		}
+		| Instr::FunctionBind {
+			..
+		}
+		| Instr::FunctionReturn {
+			..
+		}
+		| Instr::FunctionCall {
+			..
+		}
+		| Instr::ArrayArg {
+			..
+		}
+		| Instr::ElemNext {
+			..
+		}
+		| Instr::ClosureBind {
+			..
+		}
+		| Instr::ClosureReturn {
+			..
+		}
+		| Instr::Dive {
+			..
+		}
+		| Instr::Subquery {
+			..
+		}
+		| Instr::MakeClosure {
+			..
+		}
+		| Instr::ClosureField {
+			..
+		}
+		| Instr::RequireClosure {
+			..
+		}
+		| Instr::Invoke {
+			..
+		}
+		| Instr::Lookup {
+			..
+		}
+		| Instr::Signal {
+			..
+		}
+		| Instr::Extract {
+			..
+		}
+		| Instr::KnnRank {
+			..
+		}
+		| Instr::Mock {
+			..
+		}
+		| Instr::Recurse {
+			..
+		}
+		| Instr::Destructure {
+			..
+		}
+		| Instr::RecordId {
+			..
+		}
+		| Instr::MethodResolve {
+			..
+		}
+		| Instr::Method {
+			..
+		}
+		| Instr::MethodClosure {
+			..
+		}
+		| Instr::Skip {
+			..
+		}
+		| Instr::Take {
+			..
+		}
+		| Instr::JumpIfLimitReached {
+			..
+		}
+		| Instr::SeedObject {
+			..
+		}
+		| Instr::LoadRow {
+			..
+		}
+		| Instr::FetchRow {
+			..
+		}
+		| Instr::RemoveField {
+			..
+		}
+		| Instr::RemovePath {
+			..
+		}
+		| Instr::Omit {
+			..
+		}
+		| Instr::SetField {
+			..
+		}
+		| Instr::WriteProjection {
+			..
+		}
+		| Instr::BuildObjectEmit {
+			..
+		}
+		| Instr::SplitPush {
+			..
+		}
+		| Instr::SortPush {
+			..
+		}
+		| Instr::Distinct {
+			..
+		}
+		| Instr::JoinProbe {
+			..
+		}
+		| Instr::VerdictJump {
+			..
+		}
+		| Instr::VerdictSet {
+			..
+		}
+		| Instr::JoinPair {
+			..
+		}
+		| Instr::GroupKey {
+			..
+		}
+		| Instr::GroupSelect {
+			..
+		}
+		| Instr::AccUpdate {
+			..
+		}
+		| Instr::Next {
+			..
+		}
+		| Instr::Write(..)
+		| Instr::Store(..)
+		| Instr::Block(..)
+		| Instr::TryNone {
+			..
+		}
+		| Instr::TryEnd
+		| Instr::MethodRegion {
+			..
+		}
+		| Instr::PermissionRegion {
+			..
+		}
+		| Instr::GroupFirstNeeded {
+			..
+		}
+		| Instr::GroupFirstSet {
+			..
+		}
+		| Instr::CallIndexFn {
+			..
+		}
+		| Instr::Matches {
+			..
+		}
+		| Instr::ExternalEnter {
+			..
+		}
+		| Instr::ExternalCall {
+			..
+		}
+		| Instr::Degree {
+			..
+		}
+		| Instr::RepeatRecurse {
+			..
+		}
+		| Instr::JumpIfNotObject {
+			..
+		}
+		| Instr::InvalidControlFlow
+		| Instr::JumpIfNotRecordId {
+			..
+		}
+		| Instr::DocumentRoot {
+			..
+		}
+		| Instr::JudgeCopy {
+			..
+		}
+		| Instr::Ir(..) => RowUse::Whole,
+	}
+}
+
+/// Whether a body reads fields of its row and holds no instruction that takes the row whole, which
+/// is a function of the emitted code alone: the instructions are classified by [`row_use`].
+pub(super) fn reads_row(code: &[Instr]) -> bool {
+	code.iter().fold(RowUse::Neither, |used, instr| used.and(row_use(instr))) == RowUse::Fields
 }
 
 impl Program {

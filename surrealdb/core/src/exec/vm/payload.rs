@@ -21,6 +21,12 @@ pub(crate) struct TopKKey {
 	pub(crate) single_key: bool,
 	/// The bound on how deep the walk over the stored bytes descends.
 	pub(crate) depth_limit: u32,
+	/// Whether the scan may reject a packed row from its checked columns. A packed row is
+	/// read whole by the ops above the scan, so a row rejected unread skips each of them: the
+	/// flag holds only where every op the rows cross between the scan and the sort is
+	/// infallible, deterministic and writes nothing, and a skipped row then hides no error and
+	/// no effect. Rows stored as documents are rejected whatever the flag says.
+	pub(crate) packed_rows: bool,
 	/// Where the first key is a datetime component of the record id that a
 	/// key-range scan delivers in the order of its whole second
 	/// (`phys.key_range_scan`): the scan reads no stored bytes for the key,

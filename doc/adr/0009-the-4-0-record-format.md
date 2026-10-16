@@ -112,8 +112,8 @@ change for it.
   sure no row, and no transaction that could still write one, carries a number before it, because
   a number reused after the ring wraps would otherwise read a row through the wrong descriptor.
 - A descriptor or row is read in one canonical form, so bytes outside it are a refusal and never a
-  different value. A packed row is read only whole, by `PackedRow::decode`; its per-column reader is
-  held to that decode by tests and is not a query read path (ADR 0010). The writer writes one form
+  different value. A packed row reaches an in-place reader only checked by its decode run in check
+  mode (ADR 0010). The writer writes one form
   per record. The frozen fixtures pin the bytes: the envelope and documents in
   `surrealdb/core/src/kvs/compat/stored_record.rs`, packed rows and the descriptors they are read
   against in `surrealdb/catalog/src/packed/tests/fixtures.rs`. The fuzz targets

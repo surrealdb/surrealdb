@@ -34,7 +34,7 @@ use super::ops::{KeyEqShape, KeyRangeShape, PhysOp, PhysTag, SortAttrs, SortKeyR
 use super::placement::{Placement, install, place_all_reading};
 use super::{
 	chain, conjunct, hold_left, hop_key, index_answer, join_lookup, knn_ids, nested, once,
-	prefilter, recheck,
+	prefilter, recheck, topk_packed,
 };
 use crate::catalog::KeyStructure;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
@@ -97,7 +97,8 @@ pub(crate) fn patterns() -> Vec<Box<dyn Pattern<PhysDialect>>> {
 /// scan whether its rows need only their ids ([`knn_ids::run`]). Each index scan
 /// states whether that filter only rechecks its access ([`recheck::run`]). Both use the predicate
 /// the rules left. Each graph hop states the key condition its `WHERE` is judged by
-/// ([`hop_key::run`]).
+/// ([`hop_key::run`]). Last, each scan that holds a top-k key states whether it may reject a packed
+/// row unread, from the ops between it and its sort ([`topk_packed::run`]).
 ///
 /// Then every pipeline is placed again through `placement`, using the facts of the container the
 /// rules left and the strategies ([`NestedReading::Strategy`]). The new placements replace the
@@ -137,6 +138,7 @@ pub(crate) async fn run(
 	knn_ids::run(ir, facts, cx)?;
 	recheck::run(ir, facts)?;
 	hop_key::run(ir, facts, cx);
+	topk_packed::run(ir, facts, &cx.effects)?;
 	let placed = place_all_reading(
 		ir,
 		facts,
@@ -224,7 +226,7 @@ pub(super) fn keeps_order(kind: &PhysOp) -> bool {
 }
 
 /// The ops a top-k key may be installed beneath: a predicate alone.
-fn keeps_scan(kind: &PhysOp) -> bool {
+pub(super) fn keeps_scan(kind: &PhysOp) -> bool {
 	matches!(kind, PhysOp::Filter)
 }
 
@@ -667,6 +669,7 @@ fn topk_key(ir: &Ir, op: OpId, sort: &SortAttrs) -> Option<TopKKey> {
 		},
 		single_key: sort.keys.len() == 1,
 		depth_limit: TOPK_DEPTH_LIMIT,
+		packed_rows: false,
 		coarse_cutoff: None,
 	})
 }
@@ -868,6 +871,7 @@ impl Pattern<PhysDialect> for CoarseCutoffSort {
 			},
 			single_key: attrs.keys.len() == 1,
 			depth_limit: 0,
+			packed_rows: false,
 			coarse_cutoff: Some(CoarseCutoff {
 				position,
 				keep,

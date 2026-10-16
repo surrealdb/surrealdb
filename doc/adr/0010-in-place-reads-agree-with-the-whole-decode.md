@@ -2,7 +2,8 @@
 
 **Status:** Accepted · **Scope:** `surrealdb/expr/src/val/stored/`, `surrealdb/catalog/src/`
 (`record.rs`, `packed/`), `surrealdb/core/src/exec/vm/row.rs`,
-`surrealdb/core/src/exec/object_extract/`, `surrealdb/core/src/exec/pre_decode_filter/`
+`surrealdb/core/src/exec/vm/row_packed.rs`, `surrealdb/core/src/exec/object_extract/`,
+`surrealdb/core/src/exec/pre_decode_filter/`
 
 **Relates to:** ADR 0009 (the 4.0 record format, whose byte grammars this ADR relies on), ADR 0007
 (the VM reads rows through `RowReader`).
@@ -46,11 +47,20 @@ whole decode, so the error a caller sees is the decode's error.
 - A `ValueRef` carries its depth, so a nested decode started from it applies the grammar's depth
   limit at the depth the value sits.
 
-**A packed row is read only whole.** A packed row (ADR 0009) is decoded by `PackedRow::decode`,
-which checks every column and what spans columns. `PackedRow::new` checks the envelope and the
-row's shape once. `PackedRow::field` and `PackedRow::field_with` read one column at a time and
-check only what that column uses; they exist to hold the whole decode to itself in tests and are
-not a read path for query results.
+**Packed rows reach in-place readers only checked.** A packed row (ADR 0009) reaches an in-place
+reader only as a `CheckedPackedRow` from `StoredRecord::checked_packed`. Its constructor runs the
+same code as `PackedRow::decode`, instantiated in a mode that builds nothing (`Check`; the decode
+is `Build`): `node`, `decode_slot`, `decode_remainder` and every per-kind decode function are
+generic over the mode, each kind's check is its decode function instantiated twice, the rules over
+a remainder read it through one view, and a key held both by a column and by its node's remainder
+is found by one ordered cursor and refused where the node ends, as the decode refuses it. So the
+check accepts exactly the rows the decode accepts and refuses the others with the decode's own
+error. A field read is offered only on `CheckedPackedRow`, so it follows offsets the check proved.
+The column-at-a-time reader of an unchecked `PackedRow` (`PackedRow::field`, `FieldPlan`) exists
+only in test builds, to hold the shared read to the whole decode.
+
+**A refused packed row is decoded whole.** The reader that meets a refused row calls the whole
+decode on the same bytes, so the error a caller sees is the decode's.
 
 **Revision-encoded records are the one exception.** Their in-place reads are described below.
 
@@ -85,8 +95,10 @@ touches (ADR 0009, Consequences). A document or a packed row is never read this 
 - Every in-place read of a document pays one O(bytes) walk of the document per row, and the check
   allocates nothing for the common kinds. Sets, regexes and geometries build their value to check
   it, since their encodings have rules a bare walk does not enforce.
-- A `SCHEMAFULL` table whose rows are packed decodes whole on every read. A query over such a table
-  pays the whole decode, not a field read.
+- Every in-place read of a packed row pays one O(columns) check walk; the check allocates nothing
+  for the kinds whose check builds nothing. A scan that reads fields of the row and settles the
+  rows it keeps pays that walk and then the decode of each row it settles, which is what a
+  document pays (its validation and its decode).
 - The walk is the cost of not knowing that the stored bytes conform. The intended way to retire it
   is a verification pass over a table generation: once every row of a generation has been checked
   and the generation is marked verified, admission of a row of that generation can hand readers a

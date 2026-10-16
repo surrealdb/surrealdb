@@ -121,6 +121,35 @@ impl LexDecimal {
 		Ok(Decimal::from_str_radix(&self.to_string(), 10)?)
 	}
 
+	/// Converts to the `i64` that the [`Display`] form of this value parses as, computed from the
+	/// coefficient and exponent and never from text.
+	///
+	/// Only a finite value that [`Display`] writes as plain digits converts: an exponent of 0 to
+	/// 15 writes the coefficient and that many zeros, and any other exponent is written with a
+	/// decimal point or an exponent mark, which is no integer. The value must fit an `i64`, whose
+	/// least value has the magnitude 2^63.
+	pub fn to_i64_positional(&self) -> Result<i64> {
+		let refused = || anyhow::Error::new(Error::Serialization(format!("{self} is not an i64")));
+		let LexDecimal::Finite {
+			negative,
+			coefficient,
+			exponent,
+		} = *self
+		else {
+			return Err(refused());
+		};
+		let zeros =
+			u32::try_from(exponent).ok().filter(|zeros| *zeros <= 15).ok_or_else(refused)?;
+		let magnitude = coefficient.checked_mul(10u128.pow(zeros)).ok_or_else(refused)?;
+		let magnitude = i128::try_from(magnitude).map_err(|_| refused())?;
+		i64::try_from(if negative {
+			-magnitude
+		} else {
+			magnitude
+		})
+		.map_err(|_| refused())
+	}
+
 	/// Converts to the `rust_decimal::Decimal` of exactly this value.
 	///
 	/// The inverse of [`LexDecimal::from_decimal`]: every Decimal converts back
@@ -1157,6 +1186,67 @@ mod tests {
 			}
 		}
 		assert!(positional > 50_000, "only {positional} positional values were generated");
+	}
+
+	/// The integer a value converts to is the integer its [`Display`] form parses as, and a value
+	/// whose form is no `i64` has none: the conversion reads the coefficient and exponent where the
+	/// text would be written and parsed.
+	#[test]
+	fn to_i64_positional_agrees_with_parsing_the_text() {
+		use rand::{Rng, SeedableRng};
+
+		let check = |value: LexDecimal| {
+			let parsed = value.to_string().parse::<i64>().ok();
+			assert_eq!(value.to_i64_positional().ok(), parsed, "{value}");
+		};
+		let coefficients = [
+			0,
+			1,
+			9,
+			10,
+			99,
+			i64::MAX as u128 / 10,
+			i64::MAX as u128 - 1,
+			i64::MAX as u128,
+			i64::MAX as u128 + 1,
+			i64::MAX as u128 + 2,
+			u64::MAX as u128,
+			1 << 96,
+			u128::MAX / 10,
+			u128::MAX,
+		];
+		for negative in [false, true] {
+			for coefficient in coefficients {
+				for exponent in -45..=45 {
+					check(LexDecimal::Finite {
+						negative,
+						coefficient,
+						exponent,
+					});
+				}
+			}
+			check(LexDecimal::Infinite {
+				negative,
+			});
+		}
+		check(LexDecimal::NaN);
+		let mut rng = rand::rngs::StdRng::seed_from_u64(0x1664);
+		let mut converted = 0u32;
+		for _ in 0..200_000 {
+			let digits = rng.random_range(1..=39u32);
+			let coefficient = match 10u128.checked_pow(digits) {
+				Some(limit) => rng.random::<u128>() % limit,
+				None => rng.random::<u128>(),
+			};
+			let value = LexDecimal::Finite {
+				negative: rng.random(),
+				coefficient,
+				exponent: rng.random_range(-4..=20i32),
+			};
+			converted += u32::from(value.to_i64_positional().is_ok());
+			check(value);
+		}
+		assert!(converted > 10_000, "only {converted} values were integers");
 	}
 
 	#[test]

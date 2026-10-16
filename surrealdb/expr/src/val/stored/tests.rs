@@ -1556,6 +1556,75 @@ fn walk_loosely(v: ValueRef<'_>, depth: usize) -> Result<(), Error> {
 	Ok(())
 }
 
+/// `validate_key_nested` and `decode_key_nested` accept the same bytes and refuse them with the
+/// same error, at the top level and at the depth limit, over the encodings of keys of every kind,
+/// every single-byte flip and truncation of them, and bytes that are no key.
+#[test]
+fn validate_key_agrees_with_decode_key() {
+	fn assert_agrees(b: &[u8]) {
+		for depth in [0, 1, DEPTH_LIMIT, DEPTH_LIMIT + 1] {
+			assert_eq!(
+				validate_key_nested(b, depth),
+				decode_key_nested(b, depth).map(|_| ()),
+				"at depth {depth}, validate_key_nested and decode_key_nested disagree on {b:02x?}"
+			);
+		}
+	}
+	let keys = vec![
+		RecordIdKey::Number(-5),
+		RecordIdKey::Number(1),
+		RecordIdKey::Number(i64::MAX),
+		RecordIdKey::String(Strand::new("名前")),
+		RecordIdKey::Uuid(Uuid(uuid::Uuid::from_u128(7))),
+		RecordIdKey::Array(Array(vec![int(1), string("x"), float(2.5)])),
+		RecordIdKey::Array(Array(vec![float(1.5), float(2.5)])),
+		RecordIdKey::Array(Array(vec![])),
+		RecordIdKey::Object(Object::from(BTreeMap::from([("a", int(1)), ("b", string("y"))]))),
+		RecordIdKey::Range(Box::new(RecordIdKeyRange {
+			start: Bound::Included(RecordIdKey::Number(1)),
+			end: Bound::Excluded(RecordIdKey::Range(Box::new(RecordIdKeyRange {
+				start: Bound::Unbounded,
+				end: Bound::Included(RecordIdKey::String(Strand::new("z"))),
+			}))),
+		})),
+	];
+	for k in keys {
+		let mut enc = Encoder::default();
+		enc.value(&rid("t", k)).unwrap();
+		let bytes = enc.as_bytes()[3..].to_vec();
+		assert_agrees(&bytes);
+		let mut mutant = bytes.clone();
+		for at in 0..bytes.len() {
+			for bit in 0..8 {
+				mutant[at] ^= 1 << bit;
+				assert_agrees(&mutant);
+				mutant[at] ^= 1 << bit;
+			}
+		}
+		for length in 0..bytes.len() {
+			assert_agrees(&bytes[..length]);
+		}
+	}
+	for malformed in [
+		vec![],
+		vec![NONE],
+		vec![NULL],
+		vec![TRUE],
+		vec![INT, 1, 2],
+		vec![STRING, 0xFF],
+		vec![UUID, 0, 0],
+		vec![0x7F],
+		vec![0x80, 0x00],
+		vec![RANGE, 0x03, 0x00],
+		vec![ARRAY, 0x03, 0x00],
+		vec![OBJECT, 0x01, 0x00, 0x05, b'a', 0x81],
+		vec![FLOAT, 0, 0, 0, 0, 0, 0, 0, 0],
+		vec![RECORD_ID, 0x01, b't', 0x81],
+	] {
+		assert_agrees(&malformed);
+	}
+}
+
 /// `validate` and `decode` accept the same bytes, and where both refuse they refuse with the same
 /// error, at the top level and at the depth limit. Checked on malformed byte strings, on valid
 /// encodings, and on every single-byte flip and truncation of those encodings.

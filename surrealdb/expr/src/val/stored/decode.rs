@@ -128,6 +128,25 @@ pub fn validate_nested(bytes: &[u8], depth: usize) -> Result<(), Error> {
 	value::<Check>(bytes, depth)
 }
 
+/// [`validate_nested`], answering what an object's entries hold from the walk that validates them:
+/// when the value is an object, `entry` is called with the key and the value's tag of each entry,
+/// in key order, once that entry has been validated. Answers whether the value is an object.
+/// Refuses what [`validate_nested`] refuses, with the same error, so `entry` may have seen some of
+/// the entries of a value that is refused.
+pub fn validate_entries_nested(
+	bytes: &[u8],
+	depth: usize,
+	entry: impl FnMut(&str, u8),
+) -> Result<bool, Error> {
+	let (&t, p) = bytes.split_first().ok_or(Error::Truncated)?;
+	if depth > DEPTH_LIMIT || !matches!(t, 0x1A..=0x1C) {
+		parts::<Check>(t, p, depth)?;
+		return Ok(false);
+	}
+	object_with::<Check>(p, width(t, OBJECT), depth, entry)?;
+	Ok(true)
+}
+
 /// Decodes the record id key whose stored encoding is exactly `bytes`.
 pub fn decode_key(bytes: &[u8]) -> Result<RecordIdKey, Error> {
 	decode_key_nested(bytes, 0)
@@ -137,6 +156,13 @@ pub fn decode_key(bytes: &[u8]) -> Result<RecordIdKey, Error> {
 /// deep.
 pub fn decode_key_nested(bytes: &[u8], depth: usize) -> Result<RecordIdKey, Error> {
 	key::<Build>(bytes, depth)
+}
+
+/// Whether `bytes` are exactly one record id key of the stored grammar, nested `depth` containers
+/// deep. Refuses what [`decode_key_nested`] refuses, with the same error. It builds no key except
+/// where a check needs one: a set, a regex or a geometry inside a key is constructed to be checked.
+pub fn validate_key_nested(bytes: &[u8], depth: usize) -> Result<(), Error> {
+	key::<Check>(bytes, depth)
 }
 
 /// Reads a DECIMAL payload (the head byte and the magnitude, without the tag) that is exactly
@@ -562,6 +588,17 @@ fn set_value(p: &[u8], w: usize, depth: usize) -> Result<Set, Error> {
 
 /// Walks the object whose container payload is `p`.
 pub(super) fn object<M: Mode>(p: &[u8], w: usize, depth: usize) -> Result<M::Out<Object>, Error> {
+	object_with::<M>(p, w, depth, |_, _| {})
+}
+
+/// [`object`], calling `entry` with the key and the value's tag of each entry once it is walked.
+#[inline(always)]
+fn object_with<M: Mode>(
+	p: &[u8],
+	w: usize,
+	depth: usize,
+	mut entry: impl FnMut(&str, u8),
+) -> Result<M::Out<Object>, Error> {
 	let c = Container::split(p, w)?;
 	let mut entries = M::seq::<(Strand, Value)>(c.n);
 	let mut prev: Option<&[u8]> = None;
@@ -574,6 +611,9 @@ pub(super) fn object<M: Mode>(p: &[u8], w: usize, depth: usize) -> Result<M::Out
 		let ks = utf8(k)?;
 		let name = M::make(|| Strand::new(ks));
 		let val = value::<M>(v, depth + 1)?;
+		if let Some(&tag) = v.first() {
+			entry(ks, tag);
+		}
 		M::push::<(Strand, Value)>(&mut entries, M::zip::<Strand, Value>(name, val));
 	}
 	Ok(M::map(M::finish::<(Strand, Value)>(entries), |entries: Vec<(Strand, Value)>| {

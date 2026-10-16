@@ -448,6 +448,7 @@ mod tests {
 				registers,
 				in_place: false,
 				stored_rows: false,
+				reads_row: false,
 				enforce: None,
 				limits: Vec::new(),
 				parallel: Default::default(),

@@ -24,6 +24,7 @@ use super::ir_host::IrResume;
 use super::morsel::Rows;
 use super::program::{Enforce, Instr, Pipeline, Program, STACK_REGISTERS, Source, StoreInstr};
 use super::row::{RowReader, StoredRow, ValueRow};
+use super::row_packed::PackedRowReader;
 use super::scalar::Scalar;
 use super::services::{EngineServices, Services};
 use super::write;
@@ -42,6 +43,7 @@ use crate::exec::operators::scan::pipeline::{decode_record_value, kv_scan_stream
 use crate::exec::operators::scan::{
 	FULL_TEXT_BATCH_SIZE, FusedCandidates, MergeMode, RESOLVE_BATCH_SIZE, record_key_range,
 };
+use crate::exec::packed_view::AdmittedRow;
 use crate::exec::permission::validate_record_user_access;
 use crate::exec::planner::placement::MorselInput;
 use crate::exec::vm::degree::DegreeCounter;
@@ -965,6 +967,8 @@ pub(super) async fn run_pipelines(
 	for (index, pipeline) in
 		program.pipelines.iter().enumerate().filter(|(_, pipeline)| pipeline.group == group)
 	{
+		#[cfg(test)]
+		super::row_packed::observed::note_pipeline(pipeline);
 		// The right input of a join that holds its left row is read only once
 		// the left input handed it one, as a build side is read only once a
 		// probe row arrives.
@@ -2839,24 +2843,27 @@ async fn scan_decoded_cut(
 					(Some(replay), Some(stamp)) => !replay.behind(stamp),
 					_ => true,
 				};
+				// A packed row the filter checked is decoded from the checked row when kept.
+				let admitted = match prefilter.as_deref() {
+					Some(filter) if judged => {
+						AdmittedRow::for_filter(filter, key, value, Some(layouts))
+					}
+					_ => AdmittedRow::Bytes(value),
+				};
 				if judged
 					&& let Some(filter) = prefilter.as_deref()
-					&& filter.apply(value) == PreDecodeFilterOutcome::Reject
+					&& filter.apply(&admitted) == PreDecodeFilterOutcome::Reject
 				{
 					return Ok(std::ops::ControlFlow::Continue(()));
 				}
-				match crate::exec::operators::scan::pipeline::decode_record(
-					key,
-					value,
-					Some(layouts),
-				) {
+				match admitted.decode(key, value, Some(layouts)) {
 					Ok(row) => {
 						decoded.push(row);
 						stamps.extend(stamp);
 						Ok(std::ops::ControlFlow::Continue(()))
 					}
 					Err(e) => {
-						failed = Some(e);
+						failed = Some(ControlFlow::Err(e));
 						Ok(std::ops::ControlFlow::Break(()))
 					}
 				}
@@ -2883,16 +2890,17 @@ async fn scan_decoded_cut(
 				(Some(replay), Some(stamp)) => !replay.behind(stamp),
 				_ => true,
 			};
+			let layouts = Some(&**gate.layouts());
+			let admitted = match prefilter.as_deref() {
+				Some(filter) if judged => AdmittedRow::for_filter(filter, &key, &value, layouts),
+				_ => AdmittedRow::Bytes(&value),
+			};
 			let refused = judged
-				&& prefilter
-					.as_deref()
-					.is_some_and(|filter| filter.apply(&value) == PreDecodeFilterOutcome::Reject);
+				&& prefilter.as_deref().is_some_and(|filter| {
+					filter.apply(&admitted) == PreDecodeFilterOutcome::Reject
+				});
 			if !refused {
-				decoded.push(crate::exec::operators::scan::pipeline::decode_record(
-					&key,
-					&value,
-					Some(&**gate.layouts()),
-				)?);
+				decoded.push(admitted.decode(&key, &value, layouts).map_err(ControlFlow::Err)?);
 				stamps.extend(stamp);
 			}
 		}
@@ -3097,13 +3105,14 @@ async fn scan_in_place(
 
 /// Run an admitted record of an in-place scan: refused unread when the top-k
 /// probe shows its ORDER BY key cannot beat the sort's worst kept row,
-/// otherwise run through the body ([`in_place_row`]). Answers whether the
-/// pipeline takes no more rows.
+/// otherwise run through the body ([`in_place_row_admitted`]). Answers whether
+/// the pipeline takes no more rows.
 ///
 /// The caller has admitted the record's generation ([`RowGate::admit`]), so
 /// neither the probe nor the body reads a field of a record the table's
 /// layouts do not cover, and passes the layouts that admitted it, which a
-/// packed record is decoded with.
+/// packed record is checked and decoded with. A packed record is checked once
+/// ([`admit_row`]), for the probe and the body together.
 #[inline]
 #[allow(clippy::too_many_arguments)]
 fn scan_row(
@@ -3116,12 +3125,37 @@ fn scan_row(
 	layouts: Option<&TableLayouts>,
 	state: &mut State,
 ) -> anyhow::Result<bool> {
+	let admitted = admit_row(pipeline, probe.zip(threshold), key, value, layouts);
 	if let (Some(probe), Some(threshold)) = (probe, threshold)
-		&& probe.rejects(threshold, value)
+		&& probe.rejects(threshold, &admitted)
 	{
 		return Ok(false);
 	}
-	in_place_row(program, pipeline, key, value, layouts, state)
+	in_place_row_admitted(program, pipeline, key, value, &admitted, layouts, state)
+}
+
+/// The record `value` of `key`, checked when a packed row is read where its columns lie: by the
+/// probe `probing` armed, where it may reject a packed row, or by a body that reads fields of the
+/// row ([`Pipeline::reads_row`]). Any other record is its bytes, which a packed row takes as one
+/// to decode whole.
+///
+/// The check is made only where something reads its result, so a scan that neither probes nor
+/// reads columns pays none for its packed rows.
+pub(super) fn admit_row<
+	'a,
+	P: std::borrow::Borrow<crate::exec::topk_pushdown::TopKThresholdProbe>,
+>(
+	pipeline: &Pipeline,
+	probing: Option<(&P, &Value)>,
+	key: &'a [u8],
+	value: &'a [u8],
+	layouts: Option<&'a TableLayouts>,
+) -> AdmittedRow<'a> {
+	if pipeline.reads_row || probing.is_some_and(|(probe, _)| probe.borrow().reads_packed_rows()) {
+		AdmittedRow::of(key, value, layouts)
+	} else {
+		AdmittedRow::Bytes(value)
+	}
 }
 
 /// Run `pipeline`'s body over the stored record `key` names, whose encoded
@@ -3130,12 +3164,11 @@ fn scan_row(
 /// leaves pending is settled from the stored bytes. Answers whether the
 /// pipeline takes no more rows.
 ///
-/// A record in a packed layout has no fields to read in place: it is decoded
-/// whole, through its generation's descriptor in `layouts` (the layouts that
-/// admitted it, refused as `NoLayouts` when `None`), run as a value row, and
-/// settled as a value. So a packed record never becomes a sort's stored bytes
-/// or a frame's late transcode, and neither needs layouts when it is read
-/// again.
+/// A record in a packed layout is read through its generation's descriptor in
+/// `layouts` (the layouts that admitted it, refused as `NoLayouts` when
+/// `None`).
+///
+/// [`in_place_row_admitted`] over a record not yet checked.
 pub(super) fn in_place_row(
 	program: &Program,
 	pipeline: &Pipeline,
@@ -3144,11 +3177,54 @@ pub(super) fn in_place_row(
 	layouts: Option<&TableLayouts>,
 	state: &mut State,
 ) -> anyhow::Result<bool> {
+	in_place_row_admitted(program, pipeline, key, value, &AdmittedRow::Bytes(value), layouts, state)
+}
+
+/// Run `pipeline`'s body over the stored record `key` names, whose encoded
+/// value is `value` and which `admitted` shows checked where it is a packed
+/// row ([`admit_row`]), in place. Answers whether the pipeline takes no more
+/// rows.
+///
+/// A body that reads fields of a packed row ([`Pipeline::reads_row`]) reads
+/// them where they lie, from the checked row: a row the check refused is
+/// refused before the body runs, with the error its whole decode raises, and
+/// one not yet checked is checked here ([`PackedRowReader`]). Any other body
+/// runs on the record decoded whole, as a value row. Either way the row the
+/// body leaves pending is settled as the value the whole decode answers, so a
+/// packed record never becomes a sort's stored bytes or a frame's late
+/// transcode, and neither needs layouts when it is read again.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn in_place_row_admitted(
+	program: &Program,
+	pipeline: &Pipeline,
+	key: &[u8],
+	value: &[u8],
+	admitted: &AdmittedRow<'_>,
+	layouts: Option<&TableLayouts>,
+	state: &mut State,
+) -> anyhow::Result<bool> {
 	if StoredRecord::is_packed_bytes(value) {
-		let row = decode_record_value(key, value, layouts)?;
-		let stop = finish_in_place(run_in_place(program, pipeline, &ValueRow(&row), state))?;
+		if !pipeline.reads_row {
+			#[cfg(test)]
+			super::row_packed::observed::note_whole();
+			let row = admitted.decode(key, value, layouts)?;
+			let stop = finish_in_place(run_in_place(program, pipeline, &ValueRow(&row), state))?;
+			if state.pending.is_some() {
+				state.settle(program, row);
+			}
+			return Ok(stop);
+		}
+		let row = match admitted {
+			AdmittedRow::Packed {
+				row,
+				key,
+			} => PackedRowReader::of(key, *row),
+			AdmittedRow::Refused => return Err(super::row_packed::refusal(key, value, layouts)),
+			AdmittedRow::Bytes(_) => PackedRowReader::new(key, value, layouts)?,
+		};
+		let stop = finish_in_place(run_in_place(program, pipeline, &row, state))?;
 		if state.pending.is_some() {
-			state.settle(program, row);
+			state.settle(program, row.into_value()?);
 		}
 		return Ok(stop);
 	}

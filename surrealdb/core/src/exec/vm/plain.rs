@@ -249,7 +249,7 @@ impl Values for crate::exec::pre_decode_filter::PreDecodeShape {
 			PreDecodeShape::And(parts) | PreDecodeShape::Or(parts) => {
 				parts.iter().for_each(|part| part.values(walk));
 			}
-			PreDecodeShape::Not(inner) => inner.values(walk),
+			PreDecodeShape::Not(inner) | PreDecodeShape::Selective(inner) => inner.values(walk),
 			PreDecodeShape::Leaf {
 				literal,
 				..

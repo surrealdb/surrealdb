@@ -504,7 +504,7 @@ impl Number {
 		match kind {
 			NumberKind::Int => {
 				ensure!(dec.is_finite(), format!("Invalid integer value: {dec}"));
-				Ok(Number::Int(dec.to_string().parse::<i64>()?))
+				Ok(Number::Int(dec.to_i64_positional()?))
 			}
 			NumberKind::Float => Ok(Number::Float(dec.to_f64())),
 			NumberKind::Decimal => {

@@ -34,7 +34,7 @@ use super::super::program::{
 	BlockInstr, CALL_FRAME, CallSpec, ClosureValueSpec, DeferredVector, ExternalSpec,
 	FetchStepSpec, FunctionSpec, Instr, KnnQuery, Label, LookupSpec, MatchesSpec, MethodSpec,
 	NestedSpec, ParamSpec, PermissionSpec, Pipeline, Program, ROW, RecordIdSpec, Reg, Source,
-	SubquerySpec,
+	SubquerySpec, reads_row,
 };
 use super::super::row::FieldName;
 use crate::exec::field_path::FieldPath;
@@ -594,12 +594,14 @@ impl Emitter {
 		let host_free = !jumps_back(&code) && code.iter().all(runs_on_the_row);
 		let in_place = source.reads_storage() && host_free;
 		let stored_rows = matches!(source, Source::Sorted { .. }) && host_free;
+		let reads_row = in_place && reads_row(&code);
 		Ok(Pipeline {
 			source,
 			code,
 			registers: registers as usize,
 			in_place,
 			stored_rows,
+			reads_row,
 			enforce: None,
 			limits: Vec::new(),
 			parallel: Parallel::Serial,
@@ -904,6 +906,101 @@ mod tests {
 			target: top,
 		});
 		assert!(!em.finish_pipeline(scan()).unwrap().in_place);
+	}
+
+	/// `reads_row` is a function of the emitted code: a body that reads fields of its row and takes
+	/// it whole nowhere reads it in place, and any other body is run over the decoded record.
+	#[test]
+	fn reads_row_follows_the_emitted_code() {
+		let reads = |code: Vec<Instr>| {
+			let mut em = Emitter::new();
+			for instr in code {
+				em.emit(instr);
+			}
+			let pipeline = em.finish_pipeline(scan()).unwrap();
+			(pipeline.in_place, pipeline.reads_row)
+		};
+		let field = Operand::Field(0);
+		// A filter over a field, then the row emitted pending: the field is read, the row is not
+		// taken whole.
+		assert_eq!(
+			reads(vec![
+				Instr::FilterFieldInt {
+					field: 0,
+					op: crate::exec::vm::program::IntCmp::Eq,
+					lit: 1,
+					reversed: false,
+					fallback: crate::exec::vm::program::CompareOp::Equal,
+					reject: true,
+				},
+				Instr::Emit {
+					src: ROW,
+				},
+				Instr::EndRow,
+			]),
+			(true, true)
+		);
+		assert_eq!(
+			reads(vec![
+				Instr::Compare {
+					op: crate::exec::vm::program::CompareOp::Equal,
+					left: field,
+					right: Operand::Const(0),
+					dst: 1,
+				},
+				Instr::EmitEnd {
+					src: Operand::Reg(1),
+				},
+			]),
+			(true, true)
+		);
+		// The row emitted and nothing read of it.
+		assert_eq!(
+			reads(vec![
+				Instr::Emit {
+					src: ROW,
+				},
+				Instr::EndRow,
+			]),
+			(true, false)
+		);
+		// A read of the row through its register is a read of it whole.
+		assert_eq!(
+			reads(vec![
+				Instr::Compare {
+					op: crate::exec::vm::program::CompareOp::Equal,
+					left: field,
+					right: Operand::Reg(ROW),
+					dst: 1,
+				},
+				Instr::EndRow,
+			]),
+			(true, false)
+		);
+		// An instruction that hands back to the host is not in place, and reads no row in place.
+		assert_eq!(
+			reads(vec![
+				Instr::LoadRow {
+					dst: 1,
+				},
+				Instr::Compare {
+					op: crate::exec::vm::program::CompareOp::Equal,
+					left: field,
+					right: Operand::Const(0),
+					dst: 2,
+				},
+				Instr::EndRow,
+			]),
+			(false, false)
+		);
+		// A source that is not storage is not in place.
+		let mut em = Emitter::new();
+		em.emit(Instr::Load {
+			dst: 1,
+			src: field,
+		});
+		em.emit(Instr::EndRow);
+		assert!(!em.finish_pipeline(Source::Once).unwrap().reads_row);
 	}
 
 	#[test]

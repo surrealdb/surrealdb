@@ -97,7 +97,7 @@ use surrealdb_strand::Strand;
 use crate::Generation;
 use crate::catalog::aggregation::AggregationStat;
 use crate::layout::{PackedDescriptor, RecordLayoutError, TableLayouts};
-use crate::packed::{PackedError, PackedRow, Packing, pack};
+use crate::packed::{CheckedPackedRow, PackedError, PackedRow, Packing, pack};
 use crate::val::stored::varint::{self, VarintError};
 use crate::val::{Object, RecordId, TableName, Value, check_value_depth, same_record_id, stored};
 #[cfg(debug_assertions)]
@@ -1166,6 +1166,20 @@ impl<'a> StoredRecord<'a> {
 			metadata: self.metadata(),
 			data: Value::Object(data),
 		})
+	}
+
+	/// The record of a packed row, checked: its body is a row of `descriptor` and the whole decode
+	/// of it, run to build nothing, accepts it, with `id` at its place in key order. The check is
+	/// the decode's own walk ([`PackedRow::decode`]), so it refuses exactly the rows
+	/// [`decode_packed`](Self::decode_packed) refuses, with the same error, whichever fields a
+	/// reader then takes from the [`CheckedPackedRow`].
+	///
+	/// A reader takes a packed row in place only as the row this returns.
+	pub fn checked_packed(
+		&self,
+		descriptor: &'a PackedDescriptor,
+	) -> Result<CheckedPackedRow<'a>, PackedError> {
+		PackedRow::new(self, descriptor)?.checked()
 	}
 }
 

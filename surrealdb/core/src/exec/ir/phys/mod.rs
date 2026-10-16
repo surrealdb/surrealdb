@@ -72,6 +72,7 @@ pub(crate) mod schedule;
 pub(crate) mod seed_host;
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests_write_prune;
+mod topk_packed;
 pub(crate) mod verify;
 mod write_prune;
 

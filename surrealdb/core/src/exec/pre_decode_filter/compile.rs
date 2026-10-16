@@ -174,6 +174,14 @@ pub(crate) enum PreDecodeShape {
 	And(Vec<PreDecodeShape>),
 	Or(Vec<PreDecodeShape>),
 	Not(Box<PreDecodeShape>),
+	/// The shape inside, stated by the physical layer as one that refuses enough of the rows it
+	/// judges for a packed row to be worth checking for it.
+	///
+	/// A packed row is judged from its columns only once it has been checked whole, which costs a
+	/// walk of the row. A scan whose shape is not `Selective` checks no packed row for its filter,
+	/// so it decodes each one, unless another reader of the scan has checked it; it pays no check
+	/// for a predicate that keeps most rows, where a row kept would be walked twice.
+	Selective(Box<PreDecodeShape>),
 	/// `path <op> literal`, or `literal <op> path` when `reversed`.
 	Leaf {
 		path: Arc<[PathSegment]>,
@@ -195,7 +203,7 @@ impl PreDecodeShape {
 			Self::And(parts) | Self::Or(parts) => {
 				parts.iter().any(|part| part.reads_key_component(key))
 			}
-			Self::Not(inner) => inner.reads_key_component(key),
+			Self::Not(inner) | Self::Selective(inner) => inner.reads_key_component(key),
 			Self::Leaf {
 				path,
 				..
@@ -203,10 +211,17 @@ impl PreDecodeShape {
 		}
 	}
 
+	/// Whether a scan checks each packed row it reads for the filter of this shape to judge it
+	/// from its columns: the shape is [`Self::Selective`].
+	pub(crate) fn judges_packed_rows(&self) -> bool {
+		matches!(self, Self::Selective(_))
+	}
+
 	/// The filter that judges stored bytes by this shape, descending no deeper
 	/// than `depth_limit` path segments.
 	pub(crate) fn filter(&self, depth_limit: u32) -> Arc<PreDecodeFilter> {
-		Arc::new(PreDecodeFilter::new(fuse_tree(self.node()), depth_limit))
+		let filter = PreDecodeFilter::new(fuse_tree(self.node()), depth_limit);
+		Arc::new(filter.judging_packed_rows(self.judges_packed_rows()))
 	}
 
 	fn node(&self) -> PredNode {
@@ -214,6 +229,7 @@ impl PreDecodeShape {
 			Self::And(parts) => PredNode::And(parts.iter().map(Self::node).collect()),
 			Self::Or(parts) => PredNode::Or(parts.iter().map(Self::node).collect()),
 			Self::Not(inner) => PredNode::Not(Box::new(inner.node())),
+			Self::Selective(inner) => inner.node(),
 			Self::Leaf {
 				path,
 				op,

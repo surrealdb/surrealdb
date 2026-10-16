@@ -1,8 +1,11 @@
 //! Packed rows: the rows of a table generation whose descriptor
 //! ([`PackedDescriptor`](crate::layout::PackedDescriptor)) lists columns, written by [`pack`], and
-//! decoded whole by [`PackedRow::decode`]. Production reads a packed row only through that whole
-//! decode, which checks every column. The field-at-a-time reader exists only in test builds, to
-//! hold it to the whole decode.
+//! decoded whole by [`PackedRow::decode`]. A reader that takes a packed row in place takes it only
+//! as a [`CheckedPackedRow`], which
+//! [`StoredRecord::checked_packed`](crate::record::StoredRecord::checked_packed) makes by walking
+//! the row through the same code as the whole decode, instantiated to build nothing. So an
+//! in-place read refuses every row the whole decode refuses, with the same error, whichever
+//! fields it asks for.
 //!
 //! # The row
 //!
@@ -116,6 +119,10 @@
 //!   nothing, that no key is both in a column holding a value or `NULL` and in a remainder, and
 //!   that every trailer entry is consumed in column order.
 //!
+//! The check of a [`CheckedPackedRow`] is [`PackedRow::decode`] run in a mode that constructs no
+//! value: one walk, one body for every rule, so the two accept the same rows and refuse them in
+//! the same order. A refusal is the decode's own error.
+//!
 //! Every failure is a [`PackedError`]; none panics, and none reads outside the row's bytes.
 //!
 //! # Totality
@@ -127,19 +134,21 @@
 //! # Physical kinds
 //!
 //! One table gives every [`PhysicalKind`](crate::layout::PhysicalKind) its width, how a value is
-//! written, how a present slot decodes whole, and whether it escapes. The row grammar above is the
+//! written, how a present slot decodes whole, how it is checked and read in place, and whether it
+//! escapes. The row grammar above is the
 //! same for every kind.
 
+#[cfg(test)]
+mod check_tests;
 mod encode;
 mod kind;
+mod mode;
 mod row;
 #[cfg(test)]
 mod tests;
 
 pub use encode::{Packing, check_packed, pack};
-pub use row::PackedRow;
-#[cfg(test)]
-pub use row::{FieldPlan, FieldRef};
+pub use row::{CheckedPackedRow, FieldRef, PackedRow, PathRead};
 
 /// The 8-byte datetime slot value of a datetime before the slot's nanosecond range, or at exactly
 /// `i64::MIN` nanoseconds: its value is in the trailer, and it orders below every datetime the slot
@@ -171,9 +180,6 @@ pub enum PackedError {
 	NoColumn {
 		column: u32,
 	},
-	#[cfg(test)]
-	#[error("a field plan built for another descriptor was used on a packed row")]
-	ForeignPlan,
 	#[error("a packed row is shorter than its fixed region and end-offset table")]
 	Short,
 	#[error("a packed row does not end where its variable region or trailer does")]

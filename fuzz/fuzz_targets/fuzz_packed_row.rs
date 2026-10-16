@@ -3,9 +3,10 @@
 //! An input's first byte chooses how the rest is used.
 //!
 //! * `0`: the rest drives a generator of a descriptor, and the bytes it leaves are a row of that
-//!   descriptor, after the envelope. Reading the row, whole or a field at a time, must not panic. A
-//!   row that decodes whole reads field by field to what the decode holds, passes `check_packed`,
-//!   and is the one packed form of what it decodes to.
+//!   descriptor, after the envelope. Reading the row, whole or checked, must not panic. The check
+//!   accepts exactly the rows the whole decode accepts and refuses the others with its error. A
+//!   row that decodes whole reads field by field, as a checked row, to what the decode holds,
+//!   passes `check_packed`, and packs again to a row that decodes to the same data.
 //! * `1`: the rest drives a generator of a descriptor and of a record for it. A record that packs
 //!   is checked as a row that decodes is, and decodes to itself.
 //! * `2`: the rest is a descriptor's stored bytes, then a row after a 2-byte length. A descriptor
@@ -18,7 +19,7 @@ use std::sync::Arc;
 
 use libfuzzer_sys::arbitrary::Unstructured;
 use libfuzzer_sys::fuzz_target;
-use surrealdb_catalog::packed::{FieldPlan, FieldRef, PackedRow, Packing, check_packed, pack};
+use surrealdb_catalog::packed::{CheckedPackedRow, FieldRef, Packing, check_packed, pack};
 use surrealdb_catalog::stored::{canonical, decode_entry};
 use surrealdb_catalog::{
 	Column, ColumnRole, Generation, LayoutDescriptor, Location, PackedDescriptor, PhysicalKind,
@@ -474,23 +475,6 @@ fn expected(packed: &PackedDescriptor, decoded: &Object, index: usize) -> Option
 	(!rest.is_empty()).then_some(Value::Object(rest))
 }
 
-/// Whether a remainder holds the key of a column of its node. A reader that finds the column
-/// empty looks there, so the whole decode merges the key into the node, and the remainder's own
-/// read is the remainder as it is held.
-fn remainder_holds_a_column_key(packed: &PackedDescriptor, index: usize, read: &Read) -> bool {
-	let column = &packed.columns[index];
-	let Read::Value(Value::Object(held)) = read else {
-		return false;
-	};
-	column.role == ColumnRole::Remainder
-		&& packed.columns.iter().any(|c| {
-			c.role == ColumnRole::Field
-				&& c.path.len() == column.path.len() + 1
-				&& c.path.starts_with(&column.path)
-				&& c.path.last().is_some_and(|name| held.get(name.as_str()).is_some())
-		})
-}
-
 fn agrees(read: &Read, expected: Option<&Value>) -> bool {
 	match (read, expected) {
 		(Read::Absent, None) => true,
@@ -501,79 +485,64 @@ fn agrees(read: &Read, expected: Option<&Value>) -> bool {
 	}
 }
 
-/// Reads `bytes` as a row of `layout`, whole and a field at a time. A row that decodes whole
-/// reads field by field to the same values, passes `check_packed`, and is the one packed form of
-/// what it decodes to. Answers what it decodes to.
+/// Reads `bytes` as a row of `layout`, whole and checked. The check accepts exactly the rows the
+/// whole decode accepts and refuses the others with its error. A row that decodes whole reads
+/// field by field, as a checked row, to the same values, passes `check_packed`, and packs again to
+/// a row that decodes to the same data. Answers what it decodes to.
 fn read_row(layout: &Arc<LayoutDescriptor>, bytes: &[u8]) -> Option<Object> {
 	let packed = packed_of(layout);
 	let Ok(Some(record)) = StoredRecord::parse(bytes) else {
 		return None;
 	};
-	let row = match PackedRow::new(&record, packed) {
-		Ok(row) => row,
-		Err(_) => {
-			assert!(record.decode_packed(packed, None).is_err(), "a row is refused and decoded");
+	let decoded = record.decode_packed(packed, None);
+	let checked = record.checked_packed(packed);
+	assert_eq!(
+		checked.is_ok(),
+		decoded.is_ok(),
+		"the check and the whole decode disagree on {}",
+		hex(bytes)
+	);
+	let (decoded, checked) = match (decoded, checked) {
+		(Ok(decoded), Ok(checked)) => (decoded, checked),
+		(Err(decode), Err(check)) => {
+			assert_eq!(check, decode, "the check's error is not the decode's");
 			return None;
 		}
+		_ => return None,
 	};
-	let reads: Vec<Result<Read, String>> = (0..packed.columns.len())
-		.map(|index| {
-			let column = &packed.columns[index];
-			let direct = row.field(index).map_err(|e| format!("{e:?}"));
-			let direct = direct.and_then(|f| owned(column, f).map_err(|e| format!("{e:?}")));
-			let plan = FieldPlan::new(layout, index).expect("a plan of a packed descriptor");
-			let planned = row.field_with(&plan).map_err(|e| format!("{e:?}"));
-			let planned = planned.and_then(|f| owned(column, f).map_err(|e| format!("{e:?}")));
-			assert_eq!(
-				format!("{direct:?}"),
-				format!("{planned:?}"),
-				"a field reads two ways through a plan and without one"
-			);
-			direct
-		})
-		.collect();
-	let decoded = row.decode(None).ok()?;
-	for (index, read) in reads.iter().enumerate() {
-		match read {
-			Ok(read) if remainder_holds_a_column_key(packed, index, read) => {}
-			Ok(read) if agrees(read, expected(packed, &decoded, index).as_ref()) => {}
-			read => panic!(
-				"column {index} reads {read:?}, and the whole decode holds {:?}\nrow     {}\n\
-				 decoded {decoded:?}",
-				expected(packed, &decoded, index),
-				hex(bytes)
-			),
-		}
-	}
+	let Value::Object(data) = decoded.data else {
+		panic!("a packed row decodes to an object");
+	};
+	check_reads(packed, &data, &checked, bytes);
 	let generation = match record.generation() {
 		Ok(Some(generation)) => generation,
 		// A stamp that names no generation has no descriptor to check the row against.
-		Ok(None) | Err(_) => return Some(decoded),
+		Ok(None) | Err(_) => return Some(data),
 	};
 	check_packed(bytes, bytes[1], generation, packed)
 		.expect("a row that decodes passes its check");
-	match pack(packed, generation, RowFlags::edge(record.is_edge()), &decoded) {
+	match pack(packed, generation, RowFlags::edge(record.is_edge()), &data) {
 		Ok(Packing::Packed(again)) => {
-			// A key held in a remainder although it has a column reads like the column; the
-			// writer puts it in the column.
-			let tolerated = (0..packed.columns.len()).any(|index| {
-				reads[index]
-					.as_ref()
-					.is_ok_and(|read| remainder_holds_a_column_key(packed, index, read))
-			});
-			assert!(
-				tolerated || again == bytes,
-				"a row that decodes is not the packed form of what it decodes to\nrow   {}\nagain {}",
-				hex(bytes),
-				hex(&again)
-			);
+			// A key a remainder holds although its column is absent is merged into the node as
+			// the column's, and the writer puts it in the column: the bytes differ, the data
+			// does not.
+			if again != bytes {
+				let record = StoredRecord::parse(&again).ok().flatten().expect("a written row");
+				let repacked = record.decode_packed(packed, None).expect("a written row decodes");
+				assert!(
+					identical(&repacked.data, &Value::Object(data.clone())),
+					"a row that decodes packs again to other data\nrow   {}\nagain {}",
+					hex(bytes),
+					hex(&again)
+				);
+			}
 		}
 		Ok(Packing::Misfit) => {
 			// A `U64` slot above `i64::MAX` reads as a decimal, which the writer does not narrow.
 			let wide = packed.columns.iter().enumerate().any(|(index, column)| {
 				column.kind == PhysicalKind::U64
 					&& matches!(
-						expected(packed, &decoded, index),
+						expected(packed, &data, index),
 						Some(Value::Number(Number::Decimal(_)))
 					)
 			});
@@ -581,5 +550,43 @@ fn read_row(layout: &Arc<LayoutDescriptor>, bytes: &[u8]) -> Option<Object> {
 		}
 		Err(error) => panic!("a decoded row does not pack: {error}"),
 	}
-	Some(decoded)
+	Some(data)
+}
+
+/// Every field of a checked row reads to what the whole decode holds, by its path, and by its name
+/// for a field of the root.
+fn check_reads(
+	packed: &PackedDescriptor,
+	data: &Object,
+	checked: &CheckedPackedRow<'_>,
+	bytes: &[u8],
+) {
+	for (index, column) in packed.columns.iter().enumerate() {
+		if column.role != ColumnRole::Field {
+			continue;
+		}
+		let want = expected(packed, data, index);
+		let read = checked
+			.read_path(column.path.iter().map(String::as_str))
+			.expect("a read of a checked row");
+		let got = owned(column, read).expect("the bytes of a checked field read");
+		assert!(
+			agrees(&got, want.as_ref()),
+			"column {index} reads {got:?}, and the whole decode holds {want:?}\nrow     {}\n\
+			 decoded {data:?}",
+			hex(bytes)
+		);
+		if column.kind == PhysicalKind::Object && matches!(read, FieldRef::Object) {
+			let node = checked.decode_node(index).expect("a present node decodes alone");
+			assert!(
+				matches!(&want, Some(held) if identical(&Value::Object(node), held)),
+				"object node {index} decodes alone to another value than the whole decode holds"
+			);
+		}
+		if let [name] = column.path.as_slice() {
+			let rooted = checked.read_root(name).expect("a read of a checked row");
+			let got = owned(column, rooted).expect("the bytes of a checked field read");
+			assert!(agrees(&got, want.as_ref()), "read_root({name:?}) disagrees with read_path");
+		}
+	}
 }

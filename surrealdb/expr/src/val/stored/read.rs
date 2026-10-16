@@ -408,6 +408,24 @@ impl<'a> ObjectRef<'a> {
 		})
 	}
 
+	/// This object as one whose keys strictly ascend, without reading them: for an object inside
+	/// bytes that [`validate`](super::validate) or a decode has accepted, which refuse keys out of
+	/// order in every object they hold. A lookup in an object whose keys do not ascend may miss a
+	/// key it holds, and never reads outside the object.
+	#[inline(always)]
+	pub fn validated(self) -> OrderedObjectRef<'a> {
+		OrderedObjectRef {
+			obj: self,
+		}
+	}
+
+	/// The key bytes of entry `i`, for `i < len()`, without its value: the bytes of a key in
+	/// UTF-8 where the object has been validated.
+	#[inline]
+	pub fn key_bytes(&self, i: usize) -> Result<&'a [u8], Error> {
+		Ok(self.c.split_entry(i)?.0)
+	}
+
 	/// The entries in key order.
 	#[inline]
 	pub fn iter(&self) -> ObjectIter<'a> {

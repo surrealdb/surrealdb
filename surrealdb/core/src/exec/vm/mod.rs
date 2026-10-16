@@ -127,6 +127,7 @@ pub(crate) mod morsel;
 mod partial;
 mod partition;
 mod row;
+pub(in crate::exec) mod row_packed;
 mod scalar;
 mod schema_host;
 mod services;
@@ -139,6 +140,8 @@ pub(crate) mod store;
 mod tests_enforced;
 #[cfg(test)]
 mod tests_methods;
+#[cfg(all(test, feature = "kv-mem"))]
+pub(in crate::exec) mod tests_packed_reads;
 #[cfg(test)]
 mod tests_plain;
 #[cfg(all(test, feature = "kv-mem"))]

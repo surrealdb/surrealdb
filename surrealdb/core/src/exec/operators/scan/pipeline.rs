@@ -25,6 +25,7 @@ use smallvec::SmallVec;
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{Generation, Permission, TableLayouts};
 use crate::exec::migrate::{Replay, stamp_of};
+use crate::exec::packed_view::AdmittedRow;
 use crate::exec::permission::{
 	Derivation, GuardKind, PhysicalPermission, check_permission_for_value, judge_before_derivation,
 	plan_table_derivations, read_permission_to_physical,
@@ -452,9 +453,22 @@ impl ScanRow<'_> {
 			(Some(replay), Some(stamp)) => !replay.behind(stamp),
 			_ => true,
 		};
+		// A packed row is checked once, for the filter and the probe together, and only where one
+		// of them may read it and the row is judged at all.
+		let admitted = if judged
+			&& (self.pdf.is_some_and(|pdf| pdf.judges_packed_rows())
+				|| self
+					.probe
+					.zip(self.threshold)
+					.is_some_and(|(probe, _)| probe.reads_packed_rows()))
+		{
+			AdmittedRow::of(key, val, self.layouts)
+		} else {
+			AdmittedRow::Bytes(val)
+		};
 		if judged
 			&& let Some(pdf) = self.pdf
-			&& pdf.apply(val) == PreDecodeFilterOutcome::Reject
+			&& pdf.apply(&admitted) == PreDecodeFilterOutcome::Reject
 		{
 			// A rejected row still counts as scanned: the cursor read it.
 			return Ok(());
@@ -464,12 +478,13 @@ impl ScanRow<'_> {
 		// heap's worst entry.
 		if judged
 			&& let (Some(probe), Some(threshold)) = (self.probe, self.threshold)
-			&& probe.rejects(threshold, val)
+			&& probe.rejects(threshold, &admitted)
 		{
 			*topk_skipped += 1;
 			return Ok(());
 		}
-		decoded.push(decode_record(key, val, self.layouts)?);
+		// A packed row the filter or the probe checked is decoded from the checked row.
+		decoded.push(admitted.decode(key, val, self.layouts).map_err(ControlFlow::Err)?);
 		if let Some(stamp) = stamp {
 			stamps.push(stamp);
 		}

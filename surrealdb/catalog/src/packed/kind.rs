@@ -2,23 +2,22 @@
 //!
 //! [`ops`] holds the codec's one `match` on a physical kind, exhaustive and with no wildcard, so a
 //! kind added to the enum fails to compile until it has a row here. A row is plain data: the kind's
-//! escape, how a value is written into its slot, and how a present slot decodes whole. A test build
-//! also carries an in-place read per kind, which the tests hold to the whole decode. Kinds that
-//! differ only in width share their functions and read the width from the slot they are given. The
-//! row grammar itself, in `row.rs` and `encode.rs`, matches only on a column's location, presence
-//! and role.
+//! escape, how a value is written into its slot, how a present slot decodes whole, how it is
+//! checked, and how a checked slot is read in place. The check of a kind is its decode instantiated
+//! to build nothing, so the two refuse the same slots with the same error. Kinds that differ only
+//! in width share their functions and read the width from the slot they are given. The row
+//! grammar itself, in `row.rs` and `encode.rs`, matches only on a column's location, presence and
+//! role.
 
 use chrono::{DateTime, Utc};
 use surrealdb_types::Decimal;
 
-#[cfg(test)]
+use super::mode::{Build, Check, Mode};
 use super::row::FieldRef;
 use super::{DATETIME_ABOVE, DATETIME_BELOW, DURATION_ESCAPE, PackedError, is_datetime_escape};
 use crate::layout::{Column, PhysicalKind, Presence};
-#[cfg(test)]
-use crate::val::stored::ValueRef;
-use crate::val::stored::{self, Encoder};
-use crate::val::{self, Number, TableName, Value};
+use crate::val::stored::{self, Encoder, ValueRef};
+use crate::val::{self, Number, RecordIdKey, TableName, Value};
 
 /// The width of the trailer payload of every kind that escapes: the 12-byte DATETIME or DURATION
 /// payload of the stored grammar.
@@ -85,12 +84,15 @@ pub(crate) type WriteFn = fn(&Column, &Value, Dest<'_>) -> Result<Written, store
 
 /// Reads a present slot in place. `index` is the column's index in its descriptor, for errors. A
 /// `NULL` value slice answers [`FieldRef::Null`].
-#[cfg(test)]
 pub(crate) type ReadFn = for<'a> fn(&'a Column, u32, Slot<'a>) -> Result<FieldRef<'a>, PackedError>;
 
 /// Decodes a present slot whole. The last argument is the depth a grammar value of the column is
 /// decoded at: the length of the column's path.
 pub(crate) type DecodeFn = fn(&Column, u32, Slot<'_>, usize) -> Result<Value, PackedError>;
+
+/// Checks a present slot: [`DecodeFn`] run in [`Check`](super::mode::Check) mode, which refuses
+/// what the decode refuses with the same error and builds nothing.
+pub(crate) type CheckFn = fn(&Column, u32, Slot<'_>, usize) -> Result<(), PackedError>;
 
 /// What the codec does with the values of one physical kind: one row of the kind table.
 #[derive(Clone, Copy, Debug)]
@@ -100,152 +102,155 @@ pub(crate) struct KindOps {
 	/// Writes a present value. A `NONE` is never written, and an absent or `NULL` column is
 	/// written empty by the row grammar without calling this.
 	pub(crate) write: WriteFn,
-	#[cfg(test)]
+	/// Reads a present slot in place, for a row that has been checked.
 	pub(crate) read: ReadFn,
+	/// Decodes a present slot whole.
 	pub(crate) decode: DecodeFn,
+	/// Checks a present slot: the same function as `decode`, instantiated to build nothing.
+	pub(crate) check: CheckFn,
 }
 
 /// The kind table.
-pub(crate) fn ops(kind: PhysicalKind) -> KindOps {
+pub(crate) fn ops(kind: PhysicalKind) -> &'static KindOps {
 	match kind {
-		PhysicalKind::Bool => KindOps {
+		PhysicalKind::Bool => &KindOps {
 			escape: None,
 			write: write_bool,
-			#[cfg(test)]
 			read: read_bool,
-			decode: decode_bool,
+			decode: decode_bool::<Build>,
+			check: decode_bool::<Check>,
 		},
-		PhysicalKind::I8 | PhysicalKind::I16 | PhysicalKind::I32 | PhysicalKind::I64 => KindOps {
+		PhysicalKind::I8 | PhysicalKind::I16 | PhysicalKind::I32 | PhysicalKind::I64 => &KindOps {
 			escape: None,
 			write: write_signed,
-			#[cfg(test)]
 			read: read_signed,
-			decode: decode_signed,
+			decode: decode_signed::<Build>,
+			check: decode_signed::<Check>,
 		},
-		PhysicalKind::U8 | PhysicalKind::U16 | PhysicalKind::U32 | PhysicalKind::U64 => KindOps {
+		PhysicalKind::U8 | PhysicalKind::U16 | PhysicalKind::U32 | PhysicalKind::U64 => &KindOps {
 			escape: None,
 			write: write_unsigned,
-			#[cfg(test)]
 			read: read_unsigned,
-			decode: decode_unsigned,
+			decode: decode_unsigned::<Build>,
+			check: decode_unsigned::<Check>,
 		},
-		PhysicalKind::F32 => KindOps {
+		PhysicalKind::F32 => &KindOps {
 			escape: None,
 			write: write_f32,
-			#[cfg(test)]
 			read: read_f32,
-			decode: decode_f32,
+			decode: decode_f32::<Build>,
+			check: decode_f32::<Check>,
 		},
-		PhysicalKind::F64 => KindOps {
+		PhysicalKind::F64 => &KindOps {
 			escape: None,
 			write: write_f64,
-			#[cfg(test)]
 			read: read_f64,
-			decode: decode_f64,
+			decode: decode_f64::<Build>,
+			check: decode_f64::<Check>,
 		},
-		PhysicalKind::Decimal16 => KindOps {
+		PhysicalKind::Decimal16 => &KindOps {
 			escape: None,
 			write: write_decimal16,
-			#[cfg(test)]
 			read: read_decimal16,
-			decode: decode_decimal16,
+			decode: decode_decimal16::<Build>,
+			check: decode_decimal16::<Check>,
 		},
-		PhysicalKind::Fixed(_) => KindOps {
+		PhysicalKind::Fixed(_) => &KindOps {
 			escape: None,
 			write: write_fixed_bytes,
-			#[cfg(test)]
 			read: read_fixed_bytes,
-			decode: decode_fixed_bytes,
+			decode: decode_fixed_bytes::<Build>,
+			check: decode_fixed_bytes::<Check>,
 		},
-		PhysicalKind::Uuid => KindOps {
+		PhysicalKind::Uuid => &KindOps {
 			escape: None,
 			write: write_uuid,
-			#[cfg(test)]
 			read: read_uuid,
-			decode: decode_uuid,
+			decode: decode_uuid::<Build>,
+			check: decode_uuid::<Check>,
 		},
-		PhysicalKind::Datetime => KindOps {
+		PhysicalKind::Datetime => &KindOps {
 			escape: Some(Escape {
 				width: ESCAPE_WIDTH,
 				at_escape: datetime_at_escape,
 			}),
 			write: write_datetime,
-			#[cfg(test)]
 			read: read_datetime,
-			decode: decode_datetime,
+			decode: decode_datetime::<Build>,
+			check: decode_datetime::<Check>,
 		},
-		PhysicalKind::DatetimeWide => KindOps {
+		PhysicalKind::DatetimeWide => &KindOps {
 			escape: None,
 			write: write_datetime_wide,
-			#[cfg(test)]
 			read: read_datetime_wide,
-			decode: decode_datetime_wide,
+			decode: decode_datetime_wide::<Build>,
+			check: decode_datetime_wide::<Check>,
 		},
-		PhysicalKind::Duration => KindOps {
+		PhysicalKind::Duration => &KindOps {
 			escape: Some(Escape {
 				width: ESCAPE_WIDTH,
 				at_escape: duration_at_escape,
 			}),
 			write: write_duration,
-			#[cfg(test)]
 			read: read_duration,
-			decode: decode_duration,
+			decode: decode_duration::<Build>,
+			check: decode_duration::<Check>,
 		},
-		PhysicalKind::Point => KindOps {
+		PhysicalKind::Point => &KindOps {
 			escape: None,
 			write: write_point,
-			#[cfg(test)]
 			read: read_point,
-			decode: decode_point,
+			decode: decode_point::<Build>,
+			check: decode_point::<Check>,
 		},
-		PhysicalKind::LiteralCode(_) => KindOps {
+		PhysicalKind::LiteralCode(_) => &KindOps {
 			escape: None,
 			write: write_literal,
-			#[cfg(test)]
 			read: read_literal,
-			decode: decode_literal,
+			decode: decode_literal::<Build>,
+			check: decode_literal::<Check>,
 		},
-		PhysicalKind::String => KindOps {
+		PhysicalKind::String => &KindOps {
 			escape: None,
 			write: write_string,
-			#[cfg(test)]
 			read: read_string,
-			decode: decode_string,
+			decode: decode_string::<Build>,
+			check: decode_string::<Check>,
 		},
-		PhysicalKind::Bytes => KindOps {
+		PhysicalKind::Bytes => &KindOps {
 			escape: None,
 			write: write_var_bytes,
-			#[cfg(test)]
 			read: read_var_bytes,
-			decode: decode_var_bytes,
+			decode: decode_var_bytes::<Build>,
+			check: decode_var_bytes::<Check>,
 		},
-		PhysicalKind::RecordKey => KindOps {
+		PhysicalKind::RecordKey => &KindOps {
 			escape: None,
 			write: write_record_key,
-			#[cfg(test)]
 			read: read_record_key,
-			decode: decode_record_key,
+			decode: decode_record_key::<Build>,
+			check: decode_record_key::<Check>,
 		},
-		PhysicalKind::DecimalVar => KindOps {
+		PhysicalKind::DecimalVar => &KindOps {
 			escape: None,
 			write: write_decimal_var,
-			#[cfg(test)]
 			read: read_decimal_var,
-			decode: decode_decimal_var,
+			decode: decode_decimal_var::<Build>,
+			check: decode_decimal_var::<Check>,
 		},
-		PhysicalKind::Value => KindOps {
+		PhysicalKind::Value => &KindOps {
 			escape: None,
 			write: write_value,
-			#[cfg(test)]
 			read: read_value,
-			decode: decode_value,
+			decode: decode_value::<Build>,
+			check: decode_value::<Check>,
 		},
-		PhysicalKind::Object => KindOps {
+		PhysicalKind::Object => &KindOps {
 			escape: None,
 			write: write_no_slot,
-			#[cfg(test)]
 			read: read_no_slot,
-			decode: decode_no_slot,
+			decode: decode_no_slot::<Build>,
+			check: decode_no_slot::<Check>,
 		},
 	}
 }
@@ -375,7 +380,6 @@ fn var(index: u32, slot: Slot<'_>) -> Result<&[u8], PackedError> {
 
 // Bool
 
-#[cfg(test)]
 fn read_bool<'a>(
 	_column: &'a Column,
 	index: u32,
@@ -387,14 +391,14 @@ fn read_bool<'a>(
 	}
 }
 
-fn decode_bool(
+fn decode_bool<M: Mode>(
 	_column: &Column,
 	index: u32,
 	slot: Slot<'_>,
 	_depth: usize,
-) -> Result<Value, PackedError> {
+) -> Result<M::Out<Value>, PackedError> {
 	match slot {
-		Slot::Bit(bit) => Ok(Value::Bool(bit)),
+		Slot::Bit(bit) => Ok(M::make(|| Value::Bool(bit))),
 		_ => Err(wrong_shape(index)),
 	}
 }
@@ -423,7 +427,6 @@ fn le_unsigned(bytes: &[u8]) -> Option<u64> {
 	})
 }
 
-#[cfg(test)]
 fn read_signed<'a>(
 	_column: &'a Column,
 	index: u32,
@@ -432,20 +435,18 @@ fn read_signed<'a>(
 	le_signed(fixed(index, slot)?).map(FieldRef::Int).ok_or_else(|| wrong_shape(index))
 }
 
-fn decode_signed(
+fn decode_signed<M: Mode>(
 	_column: &Column,
 	index: u32,
 	slot: Slot<'_>,
 	_depth: usize,
-) -> Result<Value, PackedError> {
-	le_signed(fixed(index, slot)?)
-		.map(|v| Value::Number(Number::Int(v)))
-		.ok_or_else(|| wrong_shape(index))
+) -> Result<M::Out<Value>, PackedError> {
+	let v = le_signed(fixed(index, slot)?).ok_or_else(|| wrong_shape(index))?;
+	Ok(M::make(|| Value::Number(Number::Int(v))))
 }
 
 /// Reads `U8` to `U64`. A value above `i64::MAX`, which only a `U64` slot can hold, is the exactly
 /// equal decimal.
-#[cfg(test)]
 fn read_unsigned<'a>(
 	_column: &'a Column,
 	index: u32,
@@ -458,16 +459,18 @@ fn read_unsigned<'a>(
 	})
 }
 
-fn decode_unsigned(
+fn decode_unsigned<M: Mode>(
 	_column: &Column,
 	index: u32,
 	slot: Slot<'_>,
 	_depth: usize,
-) -> Result<Value, PackedError> {
+) -> Result<M::Out<Value>, PackedError> {
 	let v = le_unsigned(fixed(index, slot)?).ok_or_else(|| wrong_shape(index))?;
-	Ok(Value::Number(match i64::try_from(v) {
-		Ok(int) => Number::Int(int),
-		Err(_) => Number::Decimal(Decimal::from(v)),
+	Ok(M::make(|| {
+		Value::Number(match i64::try_from(v) {
+			Ok(int) => Number::Int(int),
+			Err(_) => Number::Decimal(Decimal::from(v)),
+		})
 	}))
 }
 
@@ -483,7 +486,6 @@ fn f64_of(index: u32, slot: Slot<'_>) -> Result<f64, PackedError> {
 	Ok(f64::from_bits(bits))
 }
 
-#[cfg(test)]
 fn read_f32<'a>(
 	_column: &'a Column,
 	index: u32,
@@ -492,16 +494,16 @@ fn read_f32<'a>(
 	f32_of(index, slot).map(FieldRef::Float)
 }
 
-fn decode_f32(
+fn decode_f32<M: Mode>(
 	_column: &Column,
 	index: u32,
 	slot: Slot<'_>,
 	_depth: usize,
-) -> Result<Value, PackedError> {
-	f32_of(index, slot).map(|v| Value::Number(Number::Float(v)))
+) -> Result<M::Out<Value>, PackedError> {
+	let v = f32_of(index, slot)?;
+	Ok(M::make(|| Value::Number(Number::Float(v))))
 }
 
-#[cfg(test)]
 fn read_f64<'a>(
 	_column: &'a Column,
 	index: u32,
@@ -510,13 +512,14 @@ fn read_f64<'a>(
 	f64_of(index, slot).map(FieldRef::Float)
 }
 
-fn decode_f64(
+fn decode_f64<M: Mode>(
 	_column: &Column,
 	index: u32,
 	slot: Slot<'_>,
 	_depth: usize,
-) -> Result<Value, PackedError> {
-	f64_of(index, slot).map(|v| Value::Number(Number::Float(v)))
+) -> Result<M::Out<Value>, PackedError> {
+	let v = f64_of(index, slot)?;
+	Ok(M::make(|| Value::Number(Number::Float(v))))
 }
 
 // Decimals
@@ -541,7 +544,6 @@ fn decimal16_of(index: u32, slot: Slot<'_>) -> Result<Decimal, PackedError> {
 	Ok(Decimal::deserialize(raw))
 }
 
-#[cfg(test)]
 fn read_decimal16<'a>(
 	_column: &'a Column,
 	index: u32,
@@ -550,16 +552,16 @@ fn read_decimal16<'a>(
 	decimal16_of(index, slot).map(FieldRef::Decimal)
 }
 
-fn decode_decimal16(
+fn decode_decimal16<M: Mode>(
 	_column: &Column,
 	index: u32,
 	slot: Slot<'_>,
 	_depth: usize,
-) -> Result<Value, PackedError> {
-	decimal16_of(index, slot).map(|v| Value::Number(Number::Decimal(v)))
+) -> Result<M::Out<Value>, PackedError> {
+	let v = decimal16_of(index, slot)?;
+	Ok(M::make(|| Value::Number(Number::Decimal(v))))
 }
 
-#[cfg(test)]
 fn read_decimal_var<'a>(
 	_column: &'a Column,
 	index: u32,
@@ -568,20 +570,18 @@ fn read_decimal_var<'a>(
 	stored::decimal_payload(var(index, slot)?).map(FieldRef::Decimal).map_err(stored_error(index))
 }
 
-fn decode_decimal_var(
+fn decode_decimal_var<M: Mode>(
 	_column: &Column,
 	index: u32,
 	slot: Slot<'_>,
 	_depth: usize,
-) -> Result<Value, PackedError> {
-	stored::decimal_payload(var(index, slot)?)
-		.map(|v| Value::Number(Number::Decimal(v)))
-		.map_err(stored_error(index))
+) -> Result<M::Out<Value>, PackedError> {
+	let v = stored::decimal_payload(var(index, slot)?).map_err(stored_error(index))?;
+	Ok(M::make(|| Value::Number(Number::Decimal(v))))
 }
 
 // Bytes, uuids and points
 
-#[cfg(test)]
 fn read_fixed_bytes<'a>(
 	_column: &'a Column,
 	index: u32,
@@ -590,16 +590,16 @@ fn read_fixed_bytes<'a>(
 	fixed(index, slot).map(FieldRef::Bytes)
 }
 
-fn decode_fixed_bytes(
+fn decode_fixed_bytes<M: Mode>(
 	_column: &Column,
 	index: u32,
 	slot: Slot<'_>,
 	_depth: usize,
-) -> Result<Value, PackedError> {
-	fixed(index, slot).map(|bytes| Value::Bytes(val::Bytes::from(bytes.to_vec())))
+) -> Result<M::Out<Value>, PackedError> {
+	let bytes = fixed(index, slot)?;
+	Ok(M::make(|| Value::Bytes(val::Bytes::from(bytes.to_vec()))))
 }
 
-#[cfg(test)]
 fn read_var_bytes<'a>(
 	_column: &'a Column,
 	index: u32,
@@ -608,20 +608,20 @@ fn read_var_bytes<'a>(
 	var(index, slot).map(FieldRef::Bytes)
 }
 
-fn decode_var_bytes(
+fn decode_var_bytes<M: Mode>(
 	_column: &Column,
 	index: u32,
 	slot: Slot<'_>,
 	_depth: usize,
-) -> Result<Value, PackedError> {
-	var(index, slot).map(|bytes| Value::Bytes(val::Bytes::from(bytes.to_vec())))
+) -> Result<M::Out<Value>, PackedError> {
+	let bytes = var(index, slot)?;
+	Ok(M::make(|| Value::Bytes(val::Bytes::from(bytes.to_vec()))))
 }
 
 fn uuid_of(index: u32, slot: Slot<'_>) -> Result<uuid::Uuid, PackedError> {
 	array(fixed(index, slot)?).map(uuid::Uuid::from_bytes).ok_or_else(|| wrong_shape(index))
 }
 
-#[cfg(test)]
 fn read_uuid<'a>(
 	_column: &'a Column,
 	index: u32,
@@ -630,13 +630,14 @@ fn read_uuid<'a>(
 	uuid_of(index, slot).map(FieldRef::Uuid)
 }
 
-fn decode_uuid(
+fn decode_uuid<M: Mode>(
 	_column: &Column,
 	index: u32,
 	slot: Slot<'_>,
 	_depth: usize,
-) -> Result<Value, PackedError> {
-	uuid_of(index, slot).map(|v| Value::Uuid(val::Uuid(v)))
+) -> Result<M::Out<Value>, PackedError> {
+	let v = uuid_of(index, slot)?;
+	Ok(M::make(|| Value::Uuid(val::Uuid(v))))
 }
 
 /// The coordinates of a 16-byte point slot: `x`, then `y`, as `f64` bits.
@@ -648,7 +649,6 @@ fn point_of(index: u32, slot: Slot<'_>) -> Result<(f64, f64), PackedError> {
 	Ok((f64::from_bits(x), f64::from_bits(y)))
 }
 
-#[cfg(test)]
 fn read_point<'a>(
 	_column: &'a Column,
 	index: u32,
@@ -657,13 +657,14 @@ fn read_point<'a>(
 	point_of(index, slot).map(|(x, y)| FieldRef::Point(x, y))
 }
 
-fn decode_point(
+fn decode_point<M: Mode>(
 	_column: &Column,
 	index: u32,
 	slot: Slot<'_>,
 	_depth: usize,
-) -> Result<Value, PackedError> {
-	point_of(index, slot).map(|(x, y)| Value::Geometry(val::Geometry::Point((x, y).into())))
+) -> Result<M::Out<Value>, PackedError> {
+	let (x, y) = point_of(index, slot)?;
+	Ok(M::make(|| Value::Geometry(val::Geometry::Point((x, y).into()))))
 }
 
 // Datetimes and durations
@@ -707,7 +708,6 @@ fn datetime_of(index: u32, slot: Slot<'_>) -> Result<DateTime<Utc>, PackedError>
 	}
 }
 
-#[cfg(test)]
 fn read_datetime<'a>(
 	_column: &'a Column,
 	index: u32,
@@ -716,13 +716,14 @@ fn read_datetime<'a>(
 	datetime_of(index, slot).map(FieldRef::Datetime)
 }
 
-fn decode_datetime(
+fn decode_datetime<M: Mode>(
 	_column: &Column,
 	index: u32,
 	slot: Slot<'_>,
 	_depth: usize,
-) -> Result<Value, PackedError> {
-	datetime_of(index, slot).map(|v| Value::Datetime(val::Datetime(v)))
+) -> Result<M::Out<Value>, PackedError> {
+	let v = datetime_of(index, slot)?;
+	Ok(M::make(|| Value::Datetime(val::Datetime(v))))
 }
 
 /// The datetime of a 12-byte `DatetimeWide` slot: `i64` seconds, then `u32` nanoseconds.
@@ -730,7 +731,6 @@ fn datetime_wide_of(index: u32, slot: Slot<'_>) -> Result<DateTime<Utc>, PackedE
 	stored::decode_datetime_payload(fixed(index, slot)?).map_err(stored_error(index))
 }
 
-#[cfg(test)]
 fn read_datetime_wide<'a>(
 	_column: &'a Column,
 	index: u32,
@@ -739,13 +739,14 @@ fn read_datetime_wide<'a>(
 	datetime_wide_of(index, slot).map(FieldRef::Datetime)
 }
 
-fn decode_datetime_wide(
+fn decode_datetime_wide<M: Mode>(
 	_column: &Column,
 	index: u32,
 	slot: Slot<'_>,
 	_depth: usize,
-) -> Result<Value, PackedError> {
-	datetime_wide_of(index, slot).map(|v| Value::Datetime(val::Datetime(v)))
+) -> Result<M::Out<Value>, PackedError> {
+	let v = datetime_wide_of(index, slot)?;
+	Ok(M::make(|| Value::Datetime(val::Datetime(v))))
 }
 
 /// The duration of a `Duration` slot, or of its slot and trailer payload when the slot holds the
@@ -779,7 +780,6 @@ fn duration_of(index: u32, slot: Slot<'_>) -> Result<std::time::Duration, Packed
 	}
 }
 
-#[cfg(test)]
 fn read_duration<'a>(
 	_column: &'a Column,
 	index: u32,
@@ -788,13 +788,14 @@ fn read_duration<'a>(
 	duration_of(index, slot).map(FieldRef::Duration)
 }
 
-fn decode_duration(
+fn decode_duration<M: Mode>(
 	_column: &Column,
 	index: u32,
 	slot: Slot<'_>,
 	_depth: usize,
-) -> Result<Value, PackedError> {
-	duration_of(index, slot).map(|v| Value::Duration(val::Duration(v)))
+) -> Result<M::Out<Value>, PackedError> {
+	let v = duration_of(index, slot)?;
+	Ok(M::make(|| Value::Duration(val::Duration(v))))
 }
 
 // Literal unions
@@ -816,7 +817,6 @@ fn literal_of<'a>(
 	})
 }
 
-#[cfg(test)]
 fn read_literal<'a>(
 	column: &'a Column,
 	index: u32,
@@ -825,13 +825,14 @@ fn read_literal<'a>(
 	literal_of(column, index, slot).map(FieldRef::Literal)
 }
 
-fn decode_literal(
+fn decode_literal<M: Mode>(
 	column: &Column,
 	index: u32,
 	slot: Slot<'_>,
 	_depth: usize,
-) -> Result<Value, PackedError> {
-	literal_of(column, index, slot).cloned()
+) -> Result<M::Out<Value>, PackedError> {
+	let literal = literal_of(column, index, slot)?;
+	Ok(M::make(|| literal.clone()))
 }
 
 // Strings
@@ -843,7 +844,6 @@ fn str_of(index: u32, slot: Slot<'_>) -> Result<&str, PackedError> {
 	})
 }
 
-#[cfg(test)]
 fn read_string<'a>(
 	_column: &'a Column,
 	index: u32,
@@ -852,13 +852,14 @@ fn read_string<'a>(
 	str_of(index, slot).map(FieldRef::String)
 }
 
-fn decode_string(
+fn decode_string<M: Mode>(
 	_column: &Column,
 	index: u32,
 	slot: Slot<'_>,
 	_depth: usize,
-) -> Result<Value, PackedError> {
-	str_of(index, slot).map(|s| Value::String(val::Strand::new(s)))
+) -> Result<M::Out<Value>, PackedError> {
+	let s = str_of(index, slot)?;
+	Ok(M::make(|| Value::String(val::Strand::new(s))))
 }
 
 // Record keys
@@ -892,7 +893,6 @@ fn record_key_of<'a>(
 	Ok((table, key))
 }
 
-#[cfg(test)]
 fn read_record_key<'a>(
 	column: &'a Column,
 	index: u32,
@@ -902,18 +902,19 @@ fn read_record_key<'a>(
 }
 
 /// Decodes the key at one level below the record id, which sits at `depth`.
-fn decode_record_key(
+fn decode_record_key<M: Mode>(
 	column: &Column,
 	index: u32,
 	slot: Slot<'_>,
 	depth: usize,
-) -> Result<Value, PackedError> {
+) -> Result<M::Out<Value>, PackedError> {
 	let (table, key) = record_key_of(column, index, slot)?;
-	let key =
-		stored::decode_key_nested(key, depth.saturating_add(1)).map_err(stored_error(index))?;
-	Ok(Value::RecordId(val::RecordId {
-		table: table.clone(),
-		key,
+	let key = M::key(key, depth.saturating_add(1)).map_err(stored_error(index))?;
+	Ok(M::map::<RecordIdKey, Value>(key, |key| {
+		Value::RecordId(val::RecordId {
+			table: table.clone(),
+			key,
+		})
 	}))
 }
 
@@ -927,7 +928,6 @@ const fn holds_null(presence: Presence) -> bool {
 /// Reads a grammar value of the column in place, refusing what [`decode_value`] refuses of its
 /// tag: a `NONE`, a `NULL` in a column whose presence bits hold it, and (through
 /// [`ValueRef::new`]) a `NULL` with a payload.
-#[cfg(test)]
 fn read_value<'a>(
 	column: &'a Column,
 	index: u32,
@@ -950,22 +950,24 @@ fn read_value<'a>(
 
 /// Decodes a grammar value of the column, at `depth`. A `NONE` is refused, and so is a `NULL` in a
 /// column whose presence bits hold it.
-fn decode_value(
+fn decode_value<M: Mode>(
 	column: &Column,
 	index: u32,
 	slot: Slot<'_>,
 	depth: usize,
-) -> Result<Value, PackedError> {
-	match stored::decode_nested(var(index, slot)?, depth).map_err(stored_error(index))? {
-		Value::None => Err(PackedError::Slot {
+) -> Result<M::Out<Value>, PackedError> {
+	let bytes = var(index, slot)?;
+	let value = M::value(bytes, depth).map_err(stored_error(index))?;
+	match ValueRef::new(bytes).map_err(stored_error(index))?.tag() {
+		stored::tag::NONE => Err(PackedError::Slot {
 			column: index,
 			reason: "NONE in a value column",
 		}),
-		Value::Null if holds_null(column.presence) => Err(PackedError::Slot {
+		stored::tag::NULL if holds_null(column.presence) => Err(PackedError::Slot {
 			column: index,
 			reason: "NULL in a value column whose presence bits hold it",
 		}),
-		value => Ok(value),
+		_ => Ok(value),
 	}
 }
 
@@ -973,7 +975,6 @@ fn decode_value(
 
 /// An object node has no slot: a row reads it from its presence alone, so these are never called
 /// for a descriptor that agrees with its rows.
-#[cfg(test)]
 fn read_no_slot<'a>(
 	_column: &'a Column,
 	index: u32,
@@ -985,12 +986,12 @@ fn read_no_slot<'a>(
 	})
 }
 
-fn decode_no_slot(
+fn decode_no_slot<M: Mode>(
 	_column: &Column,
 	index: u32,
 	_slot: Slot<'_>,
 	_depth: usize,
-) -> Result<Value, PackedError> {
+) -> Result<M::Out<Value>, PackedError> {
 	Err(PackedError::Slot {
 		column: index,
 		reason: "an object node has no slot",

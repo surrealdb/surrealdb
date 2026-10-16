@@ -2941,6 +2941,7 @@ impl Text for TopKKey {
 		w.field("direction", &self.direction);
 		w.field("single_key", &self.single_key);
 		w.field("depth_limit", &self.depth_limit);
+		w.field("packed_rows", &self.packed_rows);
 		w.field("coarse_cutoff", &self.coarse_cutoff);
 		out.push_str(" }");
 	}
@@ -2952,6 +2953,7 @@ impl Text for TopKKey {
 		let direction = c.field("direction", first)?;
 		let single_key = c.field("single_key", first)?;
 		let depth_limit = c.field("depth_limit", first)?;
+		let packed_rows = c.field("packed_rows", first)?;
 		let coarse_cutoff = c.field("coarse_cutoff", first)?;
 		c.expect('}')?;
 		let path: Arc<[PathSegment]> = names.into_iter().map(PathSegment::from).collect();
@@ -2960,6 +2962,7 @@ impl Text for TopKKey {
 			direction,
 			single_key,
 			depth_limit,
+			packed_rows,
 			coarse_cutoff,
 		})
 	}
@@ -3076,6 +3079,7 @@ text_enum!(PreDecodeShape {
 		And(parts: Vec<PreDecodeShape>),
 		Or(parts: Vec<PreDecodeShape>),
 		Not(inner: Box<PreDecodeShape>),
+		Selective(inner: Box<PreDecodeShape>),
 	]
 	named [Leaf { path: Arc<[PathSegment]>, op: BinaryOperator, literal: Value, reversed: bool }]
 });
@@ -3358,8 +3362,8 @@ mod tests {
 
 	/// An op of `tag` with attributes that exercise the tag's text form: optional parts present,
 	/// sequences non-empty, strings that need escapes.
-	/// A shape that holds every form: a conjunction of a comparison, a reversed comparison with a
-	/// string literal, and the negation of a disjunction.
+	/// A shape that holds every form: a selective conjunction of a comparison, a reversed
+	/// comparison with a string literal, and the negation of a disjunction.
 	fn prefilter_shape() -> PreDecodeShape {
 		let leaf = |path: &[&str], op, literal: Value, reversed| PreDecodeShape::Leaf {
 			path: path.iter().map(|name| PathSegment::from(*name)).collect(),
@@ -3367,14 +3371,14 @@ mod tests {
 			literal,
 			reversed,
 		};
-		PreDecodeShape::And(vec![
+		PreDecodeShape::Selective(Box::new(PreDecodeShape::And(vec![
 			leaf(&["age"], BinaryOperator::MoreThanEqual, Value::from(18i64), false),
 			leaf(&["name", "first"], BinaryOperator::Equal, Value::from("a \"b\""), true),
 			PreDecodeShape::Not(Box::new(PreDecodeShape::Or(vec![
 				leaf(&["tags"], BinaryOperator::Contain, Value::from("x"), false),
 				leaf(&["n"], BinaryOperator::NotEqual, Value::from(0i64), false),
 			]))),
-		])
+		])))
 	}
 
 	fn fixture(tag: PhysTag) -> PhysOp {
@@ -3397,6 +3401,7 @@ mod tests {
 					direction: SortDirection::Desc,
 					single_key: true,
 					depth_limit: 4,
+					packed_rows: true,
 					coarse_cutoff: None,
 				}),
 				lightweight: true,
@@ -3495,6 +3500,7 @@ mod tests {
 					direction: SortDirection::Asc,
 					single_key: true,
 					depth_limit: 4,
+					packed_rows: false,
 					coarse_cutoff: Some(CoarseCutoff {
 						position: 1,
 						keep: 3,

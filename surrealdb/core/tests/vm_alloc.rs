@@ -294,8 +294,12 @@ const SMALL: usize = 10_000;
 const LARGE: usize = 20_000;
 
 /// The schema and data a datastore of `n` rows holds: a table `t` of `n`
-/// records, two `knows` edges out of each, an empty indexed table `ix`, an
-/// empty table `c`, and a function `fn::tag`.
+/// records, two `knows` edges out of each, a `SCHEMAFULL` table `p` of `n`
+/// packed records with the values of `t`'s, tables of `n` records whose ids are
+/// strings (`ps`, `ts`), strings that hold a byte the key encoding escapes (`pe`, `te`), arrays of
+/// integers and strings (`pa`, `ta`), arrays of integers, floats, decimals, strings and uuids
+/// (`pn`, `tn`), uuids (`pu`, `tu`) and objects of such values (`po`, `to`), packed and as
+/// documents, an empty indexed table `ix`, an empty table `c`, and a function `fn::tag`.
 fn setup(n: usize) -> String {
 	format!(
 		"
@@ -307,6 +311,56 @@ fn setup(n: usize) -> String {
 		FOR $i IN 0..{n} {{
 			RELATE (type::record('t', $i))->knows->(type::record('t', ($i + 1) % {n}));
 			RELATE (type::record('t', $i))->knows->(type::record('t', ($i * 7 + 3) % {n}));
+		}};
+		DEFINE TABLE p SCHEMAFULL;
+		DEFINE FIELD a ON p TYPE int;
+		DEFINE FIELD b ON p TYPE int;
+		DEFINE FIELD s ON p TYPE string;
+		DEFINE FIELD lo ON p TYPE int;
+		FOR $i IN 0..{n} {{
+			CREATE type::record('p', $i) SET a = $i, b = $i % 7, s = 'row', lo = $i % 10;
+		}};
+		DEFINE TABLE ps SCHEMAFULL;
+		DEFINE FIELD b ON ps TYPE int;
+		DEFINE TABLE ts SCHEMALESS;
+		FOR $i IN 0..{n} {{
+			CREATE type::record('ps', 'a_string_key_longer_than_23_bytes_' + <string> $i) SET b = $i % 7;
+			CREATE type::record('ts', 'a_string_key_longer_than_23_bytes_' + <string> $i) SET b = $i % 7;
+		}};
+		DEFINE TABLE pa SCHEMAFULL;
+		DEFINE FIELD b ON pa TYPE int;
+		DEFINE TABLE ta SCHEMALESS;
+		FOR $i IN 0..{n} {{
+			CREATE type::record('pa', [$i, 'an_element_longer_than_23_bytes']) SET b = $i % 7;
+			CREATE type::record('ta', [$i, 'an_element_longer_than_23_bytes']) SET b = $i % 7;
+		}};
+		DEFINE TABLE pe SCHEMAFULL;
+		DEFINE FIELD b ON pe TYPE int;
+		DEFINE TABLE te SCHEMALESS;
+		FOR $i IN 0..{n} {{
+			CREATE type::record('pe', 'a_key_with_a_nul_byte_\\u{{0}}_longer_than_23_bytes_' + <string> $i) SET b = $i % 7;
+			CREATE type::record('te', 'a_key_with_a_nul_byte_\\u{{0}}_longer_than_23_bytes_' + <string> $i) SET b = $i % 7;
+		}};
+		DEFINE TABLE pn SCHEMAFULL;
+		DEFINE FIELD b ON pn TYPE int;
+		DEFINE TABLE tn SCHEMALESS;
+		FOR $i IN 0..{n} {{
+			CREATE type::record('pn', [$i, 1.5f + $i, 2.5dec + $i, 'an_element_longer_than_23_bytes', rand::uuid::v4()]) SET b = $i % 7;
+			CREATE type::record('tn', [$i, 1.5f + $i, 2.5dec + $i, 'an_element_longer_than_23_bytes', rand::uuid::v4()]) SET b = $i % 7;
+		}};
+		DEFINE TABLE pu SCHEMAFULL;
+		DEFINE FIELD b ON pu TYPE int;
+		DEFINE TABLE tu SCHEMALESS;
+		FOR $i IN 0..{n} {{
+			CREATE type::record('pu', rand::uuid::v4()) SET b = $i % 7;
+			CREATE type::record('tu', rand::uuid::v4()) SET b = $i % 7;
+		}};
+		DEFINE TABLE po SCHEMAFULL;
+		DEFINE FIELD b ON po TYPE int;
+		DEFINE TABLE to SCHEMALESS;
+		FOR $i IN 0..{n} {{
+			CREATE type::record('po', {{ n: $i, f: 1.5f + $i, d: 2.5dec + $i, s: 'an_entry_longer_than_23_bytes', u: rand::uuid::v4() }}) SET b = $i % 7;
+			CREATE type::record('to', {{ n: $i, f: 1.5f + $i, d: 2.5dec + $i, s: 'an_entry_longer_than_23_bytes', u: rand::uuid::v4() }}) SET b = $i % 7;
 		}};
 		DEFINE TABLE ix SCHEMALESS;
 		DEFINE INDEX ix_k ON ix FIELDS k;
@@ -434,6 +488,232 @@ const SHAPES: &[Shape] = &[
 	},
 ];
 
+/// A shape over the `SCHEMAFULL` table `p` and its twin over the `SCHEMALESS` table `t`, which
+/// holds the same values as documents.
+struct Pair {
+	packed: Shape,
+	twin: Shape,
+}
+
+/// The shapes of a packed table, kept apart from [`SHAPES`]: the response budget set holds none of
+/// them.
+///
+/// A scan reads a packed row where it lies when the body that runs on it holds only filters over
+/// fields and emits the row or a field of it (`packed_filter`, `packed_in_place_reject`,
+/// the `*_keys` shapes, `packed_in_place_value`). The aggregates and the sort
+/// (`packed_filter_reject`, `packed_group_lo`, the `packed_*order*` shapes) read the row decoded,
+/// as the twin's documents are, after the pre-decode filter and the top-k probe have judged it from
+/// its columns where they can. `packed_order_limit10` reads its rows best last, so every row
+/// enters the sort and none is refused. Which shapes read in place is proved from their compiled
+/// programs by `the_allocation_shapes_compile_to_the_path_they_measure` in
+/// `exec::vm::tests_packed_reads`.
+const PACKED_SHAPES: &[Pair] = &[
+	Pair {
+		packed: Shape {
+			name: "packed_filter_reject",
+			query: |_| "SELECT count() FROM p WHERE b = 99 GROUP ALL".into(),
+			rows: all,
+			takes_rows: false,
+		},
+		twin: Shape {
+			name: "filter_reject",
+			query: |_| "SELECT count() FROM t WHERE b = 99 GROUP ALL".into(),
+			rows: all,
+			takes_rows: false,
+		},
+	},
+	Pair {
+		packed: Shape {
+			name: "packed_filter",
+			query: |_| "SELECT * FROM p WHERE b = 3".into(),
+			rows: all,
+			takes_rows: false,
+		},
+		twin: Shape {
+			name: "filter",
+			query: |_| "SELECT * FROM t WHERE b = 3".into(),
+			rows: all,
+			takes_rows: false,
+		},
+	},
+	Pair {
+		packed: Shape {
+			name: "packed_group_lo",
+			query: |_| "SELECT lo, count() AS c FROM p GROUP BY lo".into(),
+			rows: all,
+			takes_rows: false,
+		},
+		twin: Shape {
+			name: "group_lo",
+			query: |_| "SELECT lo, count() AS c FROM t GROUP BY lo".into(),
+			rows: all,
+			takes_rows: false,
+		},
+	},
+	Pair {
+		packed: Shape {
+			name: "packed_order_limit10",
+			query: |_| "SELECT * FROM p ORDER BY a DESC LIMIT 10".into(),
+			rows: all,
+			takes_rows: false,
+		},
+		twin: Shape {
+			name: "order_limit10",
+			query: |_| "SELECT * FROM t ORDER BY a DESC LIMIT 10".into(),
+			rows: all,
+			takes_rows: false,
+		},
+	},
+	// The rows arrive best first, so once the sort holds its ten the probe refuses every row it
+	// reads: the first from the columns of the packed row, the second above a filter the
+	// prefilter states whole.
+	Pair {
+		packed: Shape {
+			name: "packed_order_asc_limit10",
+			query: |_| "SELECT * FROM p ORDER BY a ASC LIMIT 10".into(),
+			rows: all,
+			takes_rows: false,
+		},
+		twin: Shape {
+			name: "order_asc_limit10",
+			query: |_| "SELECT * FROM t ORDER BY a ASC LIMIT 10".into(),
+			rows: all,
+			takes_rows: false,
+		},
+	},
+	Pair {
+		packed: Shape {
+			name: "packed_filter_order_asc_limit10",
+			query: |_| "SELECT * FROM p WHERE b < 7 ORDER BY a ASC LIMIT 10".into(),
+			rows: all,
+			takes_rows: false,
+		},
+		twin: Shape {
+			name: "filter_order_asc_limit10",
+			query: |_| "SELECT * FROM t WHERE b < 7 ORDER BY a ASC LIMIT 10".into(),
+			rows: all,
+			takes_rows: false,
+		},
+	},
+	Pair {
+		packed: Shape {
+			name: "packed_in_place_reject",
+			query: |_| "SELECT * FROM p WHERE b = 99".into(),
+			rows: all,
+			takes_rows: false,
+		},
+		twin: Shape {
+			name: "in_place_reject",
+			query: |_| "SELECT * FROM t WHERE b = 99".into(),
+			rows: all,
+			takes_rows: false,
+		},
+	},
+	// Keys of every shape whose validation on open builds nothing (`ZERO_ON_OPEN`): strings longer
+	// than a strand holds inline, with and without a byte the key encoding escapes, and arrays and
+	// objects of numbers, strings and uuids, and uuids. A packed row's key is validated whole when
+	// the row is opened and its id is built only when it is read, so no id is built for a row the
+	// body rejects.
+	Pair {
+		packed: Shape {
+			name: "packed_string_keys",
+			query: |_| "SELECT * FROM ps WHERE b = 99".into(),
+			rows: all,
+			takes_rows: false,
+		},
+		twin: Shape {
+			name: "string_keys",
+			query: |_| "SELECT * FROM ts WHERE b = 99".into(),
+			rows: all,
+			takes_rows: false,
+		},
+	},
+	Pair {
+		packed: Shape {
+			name: "packed_composite_keys",
+			query: |_| "SELECT * FROM pa WHERE b = 99".into(),
+			rows: all,
+			takes_rows: false,
+		},
+		twin: Shape {
+			name: "composite_keys",
+			query: |_| "SELECT * FROM ta WHERE b = 99".into(),
+			rows: all,
+			takes_rows: false,
+		},
+	},
+	Pair {
+		packed: Shape {
+			name: "packed_escaped_string_keys",
+			query: |_| "SELECT * FROM pe WHERE b = 99".into(),
+			rows: all,
+			takes_rows: false,
+		},
+		twin: Shape {
+			name: "escaped_string_keys",
+			query: |_| "SELECT * FROM te WHERE b = 99".into(),
+			rows: all,
+			takes_rows: false,
+		},
+	},
+	Pair {
+		packed: Shape {
+			name: "packed_number_keys",
+			query: |_| "SELECT * FROM pn WHERE b = 99".into(),
+			rows: all,
+			takes_rows: false,
+		},
+		twin: Shape {
+			name: "number_keys",
+			query: |_| "SELECT * FROM tn WHERE b = 99".into(),
+			rows: all,
+			takes_rows: false,
+		},
+	},
+	Pair {
+		packed: Shape {
+			name: "packed_uuid_keys",
+			query: |_| "SELECT * FROM pu WHERE b = 99".into(),
+			rows: all,
+			takes_rows: false,
+		},
+		twin: Shape {
+			name: "uuid_keys",
+			query: |_| "SELECT * FROM tu WHERE b = 99".into(),
+			rows: all,
+			takes_rows: false,
+		},
+	},
+	Pair {
+		packed: Shape {
+			name: "packed_object_keys",
+			query: |_| "SELECT * FROM po WHERE b = 99".into(),
+			rows: all,
+			takes_rows: false,
+		},
+		twin: Shape {
+			name: "object_keys",
+			query: |_| "SELECT * FROM to WHERE b = 99".into(),
+			rows: all,
+			takes_rows: false,
+		},
+	},
+	Pair {
+		packed: Shape {
+			name: "packed_in_place_value",
+			query: |_| "SELECT VALUE s FROM p WHERE b = 3".into(),
+			rows: all,
+			takes_rows: false,
+		},
+		twin: Shape {
+			name: "in_place_value",
+			query: |_| "SELECT VALUE s FROM t WHERE b = 3".into(),
+			rows: all,
+			takes_rows: false,
+		},
+	},
+];
+
 /// `$rows`: `n` objects for `INSERT INTO ix`.
 fn insert_rows(n: usize) -> Variables {
 	let rows: Vec<Value> = (0..n)
@@ -500,6 +780,20 @@ fn selected() -> Vec<&'static Shape> {
 	SHAPES.iter().filter(|s| only.as_ref().is_none_or(|o| o.contains(&s.name))).collect()
 }
 
+/// The shapes of [`PACKED_SHAPES`] and their twins that `ALLOC_SHAPES` selects, packed shapes
+/// first of each pair; all of them when it is not set.
+fn packed_selected() -> Vec<&'static Shape> {
+	let only = std::env::var("ALLOC_SHAPES").ok();
+	let wanted = |shape: &Shape| {
+		only.as_deref().is_none_or(|only| only.split(',').any(|name| name == shape.name))
+	};
+	PACKED_SHAPES
+		.iter()
+		.filter(|pair| wanted(&pair.packed) || wanted(&pair.twin))
+		.flat_map(|pair| [&pair.packed, &pair.twin])
+		.collect()
+}
+
 #[tokio::test]
 #[ignore = "a measurement, not a check"]
 async fn per_row_allocations() {
@@ -510,7 +804,7 @@ async fn per_row_allocations() {
 	let (large, _) = datastore(LARGE).await;
 	println!("{:<14} {:>12} {:>12} {:>14}", "shape", "allocs/row", "bytes/row", "fixed allocs");
 	let mut attributions = Vec::new();
-	for shape in shapes {
+	for shape in shapes.into_iter().chain(packed_selected()) {
 		let (rows_small, rows_large) = ((shape.rows)(SMALL), (shape.rows)(LARGE));
 		let vars = |rows| shape.takes_rows.then(|| insert_rows(rows));
 		let (a, sa) =
@@ -897,6 +1191,87 @@ async fn response_allocations_stay_within_budget() {
 		}
 	}
 	assert!(over.is_empty(), "over budget:\n{}", over.join("\n"));
+}
+
+/// Allocations per row of `shape` between datastores of `small_n` and `large_n` rows.
+async fn per_row(
+	(small, small_n): (&Datastore, usize),
+	(large, large_n): (&Datastore, usize),
+	session: &Session,
+	shape: &Shape,
+) -> f64 {
+	let (a, _) = measure(small, session, &(shape.query)(small_n), None, 0).await;
+	let (b, _) = measure(large, session, &(shape.query)(large_n), None, 0).await;
+	let rows = ((shape.rows)(large_n) - (shape.rows)(small_n)) as f64;
+	(b.allocs as f64 - a.allocs as f64) / rows
+}
+
+/// The shapes of [`PACKED_SHAPES`] that refuse every row without decoding it, each from the
+/// columns of the packed row: the filter of a count judges it before the decode
+/// (`packed_filter_reject`), the body refuses it in place (`packed_in_place_reject` and the
+/// shapes over ids of every kind), or the top-k probe refuses it (`packed_order_asc_limit10`, and
+/// the same above a filter). Each allocates nothing for a row beyond [`BATCH_FLOOR`], whatever its
+/// twin costs. The ids of the key shapes are those whose components the open of a packed row reads
+/// without building anything: numbers of every kind, strings of any length, uuids, and arrays and
+/// objects of those.
+///
+/// An id that holds a set, geometry, bytes, file, table name, regex, closure, range or record id is
+/// not in the set: reading such a component builds it, so opening a row whose id holds one
+/// allocates.
+const ZERO_PER_ROW: &[&str] = &[
+	"packed_filter_reject",
+	"packed_order_asc_limit10",
+	"packed_filter_order_asc_limit10",
+	"packed_in_place_reject",
+	"packed_string_keys",
+	"packed_escaped_string_keys",
+	"packed_composite_keys",
+	"packed_number_keys",
+	"packed_uuid_keys",
+	"packed_object_keys",
+];
+
+/// The per-row allowance for allocations that do not depend on the id's shape, which every twin
+/// here makes as well.
+const BATCH_FLOOR: f64 = 0.02;
+
+/// A packed row costs no more allocations than the same row as a document, in every shape of
+/// [`PACKED_SHAPES`]: the read of a packed row in place, the judgement of the filter and the
+/// probe from its columns, and the check that makes them safe (the whole row's decode run to build
+/// nothing), allocate nothing beyond what the twin's read allocates, and a shape that decodes the
+/// row decodes it as the twin's document is decoded. A shape of [`ZERO_PER_ROW`] allocates nothing
+/// per row beyond [`BATCH_FLOOR`]. Every shape is printed beside its twin. That each shape takes
+/// the path it measures is proved from its compiled program by
+/// `the_allocation_shapes_compile_to_the_path_they_measure` in `exec::vm::tests_packed_reads`.
+#[tokio::test]
+async fn packed_rows_read_in_place_allocate_no_more_than_documents() {
+	let _measuring = MEASURING.lock().await;
+	const CHECK_SMALL: usize = 2_000;
+	const CHECK_LARGE: usize = 4_000;
+	let (small, session) = datastore(CHECK_SMALL).await;
+	let (large, _) = datastore(CHECK_LARGE).await;
+	let mut over = Vec::new();
+	println!("{:<32} {:>12} {:>12}", "shape", "packed/row", "twin/row");
+	for pair in PACKED_SHAPES {
+		let sizes = ((&*small, CHECK_SMALL), (&*large, CHECK_LARGE));
+		let packed = per_row(sizes.0, sizes.1, &session, &pair.packed).await;
+		let twin = per_row(sizes.0, sizes.1, &session, &pair.twin).await;
+		println!("{:<32} {packed:>12.3} {twin:>12.3}", pair.packed.name);
+		if packed > twin + 0.01 {
+			over.push(format!(
+				"{}: {packed:.2} allocs/row > the twin's {twin:.2} (+0.01)",
+				pair.packed.name
+			));
+		}
+		if ZERO_PER_ROW.contains(&pair.packed.name) && packed > BATCH_FLOOR {
+			over.push(format!("{}: {packed:.3} allocs/row > {BATCH_FLOOR}", pair.packed.name));
+		}
+	}
+	assert!(
+		over.is_empty(),
+		"packed rows cost more allocations than the documents:\n{}",
+		over.join("\n")
+	);
 }
 
 // --------------------------------------------------
