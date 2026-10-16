@@ -128,7 +128,7 @@ pub(crate) async fn define_field_statement_compute(
 	crate::legacy::define_field_statement_validate_reference_options(this, &definition)?;
 
 	// Disallow mismatched types
-	crate::legacy::define_field_statement_disallow_mismatched_types(this, ctx, ns, db, &definition)
+	crate::legacy::define_field_statement_disallow_mismatched_types(&ctx.tx(), ns, db, &definition)
 		.await?;
 
 	// Validate id field restrictions
@@ -341,16 +341,28 @@ pub(crate) async fn define_field_statement_compute(
 	Ok(Value::None)
 }
 
+/// Refuse `definition` when a field of its table it is nested in declares, at
+/// the place `definition` names, a kind other than `definition`'s
+/// (`Kind::allows_nested_kind`), reading the table's fields from the catalog of
+/// namespace `ns` and database `db` through `txn`. A definition with no `TYPE`
+/// passes.
+///
+/// `DEFINE FIELD` makes this check of every definition, and `ALTER FIELD` of
+/// every definition whose `TYPE` it sets, an import included.
+///
+/// # Errors
+///
+/// [`ExecError::MismatchedFieldTypes`] naming the first such field; the error
+/// of a catalog read that fails.
 pub(crate) async fn define_field_statement_disallow_mismatched_types(
-	this: &DefineFieldStatement,
-	ctx: &FrozenContext,
+	txn: &Transaction,
 	ns: NamespaceId,
 	db: DatabaseId,
 	definition: &catalog::FieldDefinition,
 ) -> Result<()> {
-	let fds = ctx.tx().all_tb_fields(ns, db, &definition.table, None).await?;
+	let fds = txn.all_tb_fields(ns, db, &definition.table, None).await?;
 
-	if let Some(self_kind) = &this.field_kind {
+	if let Some(self_kind) = &definition.field_kind {
 		for fd in fds.iter() {
 			if definition.name.starts_with(&fd.name)
 				&& definition.name != fd.name

@@ -142,6 +142,14 @@ pub(crate) async fn alter_field_statement_compute(
 	// ALTER FIELD silently bypassed the restrictions DEFINE FIELD enforces.
 	crate::legacy::expr::statements::define::field::validate_id_field_restrictions(&df)?;
 
+	// A `TYPE` the statement sets is judged against every field the field is nested in, as
+	// `DEFINE FIELD` judges a new one, and refused with the same error. An import is judged as
+	// `DEFINE FIELD` judges one: an export writes each field as `DEFINE FIELD OVERWRITE`, never as
+	// `ALTER FIELD`, so no export replays through this check.
+	if matches!(this.kind, AlterKind::Set(_)) {
+		crate::legacy::define_field_statement_disallow_mismatched_types(&txn, ns, db, &df).await?;
+	}
+
 	// INLINE embeds the field's value into the edge's adjacency payloads;
 	// the same restrictions as DEFINE FIELD, validated against the fully
 	// resolved definition.
