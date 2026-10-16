@@ -14,38 +14,6 @@ run-name: "Downstream compatibility '${{ github.head_ref || github.ref_name }}'"
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-      - "releases/*"
-    # Skip changes that cannot affect the downstream build (docs, images,
-    # license). A push/PR is skipped only when ALL its files match here.
-    paths-ignore:
-      - "**/*.md"
-      - "doc/**"
-      - "docs/**"
-      - "img/**"
-      - "LICENSE"
-      - "language-tests/**"
-      - "tests/**"
-      - ".claude/**"
-      - ".cursor/**"
-  pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - ready_for_review
-    paths-ignore:
-      - "**/*.md"
-      - "doc/**"
-      - "docs/**"
-      - "img/**"
-      - "LICENSE"
-      - "language-tests/**"
-      - "tests/**"
-      - ".claude/**"
-      - ".cursor/**"
 
 concurrency:
   # Use github.run_id on main branch

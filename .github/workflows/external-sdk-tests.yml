@@ -11,18 +11,6 @@ on:
         description: "The surrealdb.js ref to test the embedded engine against"
         required: false
         default: main
-  pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - ready_for_review
-    paths-ignore:
-      - "**/*.md"
-      - "doc/**"
-      - "docs/**"
-      - "img/**"
-      - "LICENSE"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}

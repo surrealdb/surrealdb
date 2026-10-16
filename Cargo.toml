@@ -717,6 +717,10 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.base64ct]
 opt-level = 3
+[profile.dev.package.generic-array]
+opt-level = 3
+[profile.dev.package.typenum]
+opt-level = 3
 
 # Signature verification (extension signatures, JWTs) spends its time in
 # elliptic-curve field arithmetic, which at `opt-level = 0` runs one to two

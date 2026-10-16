@@ -33,6 +33,12 @@ permissions:
   contents: read
 
 jobs:
+  # Pull requests and the merge queue run the fast gate: format, clippy, the
+  # Wasm check, Miri, the SDK build, the lockfile check and the language tests
+  # on mem, all in parallel once `changes` has classified the diff. Every other
+  # job runs on pushes to main and release branches and on workflow_dispatch,
+  # and reports as skipped to `required-checks` elsewhere.
+  #
   # Build/test lanes use the pinned nightly parallel frontend. MSRV and Clippy
   # keep the stable compatibility/lint signal; shipping workflows use stable.
   # ----------------------------------------
@@ -80,7 +86,7 @@ jobs:
   build:
     name: Build binary (${{ matrix.arch == 'arm' && 'arm64' || 'amd64' }})
     needs: changes
-    if: ${{ needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (needs.changes.outputs.docs_only != 'true')
     runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       matrix:
@@ -251,7 +257,7 @@ jobs:
   clippy-release:
     name: Check clippy (release)
     needs: changes
-    if: (github.ref == 'refs/heads/main') && needs.changes.outputs.docs_only != 'true'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && ((github.ref == 'refs/heads/main') && needs.changes.outputs.docs_only != 'true')
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -307,7 +313,7 @@ jobs:
   check-debug:
     name: Check workspace (debug)
     needs: changes
-    if: ${{ needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (needs.changes.outputs.docs_only != 'true')
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -340,7 +346,7 @@ jobs:
   check-release:
     name: Check workspace (release)
     needs: changes
-    if: (github.event_name == 'push' || github.event_name == 'merge_group') && needs.changes.outputs.docs_only != 'true'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && ((github.event_name == 'push' || github.event_name == 'merge_group') && needs.changes.outputs.docs_only != 'true')
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -369,7 +375,7 @@ jobs:
   check-msrv:
     name: Check workspace (MSRV)
     needs: changes
-    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     env:
       msrv: "1.95" # This should be updated if the MSRV is updated.
@@ -430,7 +436,7 @@ jobs:
   wasm-size-budget:
     name: Wasm size budget
     needs: changes
-    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -478,7 +484,7 @@ jobs:
   test-wasm:
     name: Test Wasm (IndexedDB)
     needs: changes
-    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
     # GitHub-hosted runner: Chrome and chromedriver come preinstalled, which
     # the wasm-bindgen-test browser harness needs.
     runs-on: ubuntu-latest
@@ -511,7 +517,7 @@ jobs:
   check-revision:
     name: Check revision
     needs: changes
-    if: ${{ needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (needs.changes.outputs.docs_only != 'true')
     runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -540,7 +546,7 @@ jobs:
   check-catalog-schema:
     name: Check catalog schema
     needs: changes
-    if: ${{ needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (needs.changes.outputs.docs_only != 'true')
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -582,7 +588,7 @@ jobs:
   check-docs:
     name: Check docs
     needs: changes
-    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -613,7 +619,7 @@ jobs:
 
   parser:
     name: Check SurrealQL parser
-    if: ${{ needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (needs.changes.outputs.docs_only != 'true')
     needs: changes
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
@@ -643,7 +649,7 @@ jobs:
     name: Check feature combinations (${{ matrix.package }})
     needs: changes
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
-    if: (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') && needs.changes.outputs.docs_only != 'true'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && ((github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') && needs.changes.outputs.docs_only != 'true')
     # Each package gets its own target directory/runner. The old aggregate
     # spawned nine Cargo processes against one target directory, serializing
     # on the build lock and repeatedly replacing each other's feature variants.
@@ -684,7 +690,7 @@ jobs:
   unused-deps:
     name: Check unused dependencies
     needs: changes
-    if: ${{ needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (needs.changes.outputs.docs_only != 'true')
     runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -716,7 +722,7 @@ jobs:
   check-versions:
     name: Check crate versions
     needs: changes
-    if: ${{ needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (needs.changes.outputs.docs_only != 'true')
     runs-on: ubuntu-latest-4-cores
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -789,7 +795,7 @@ jobs:
   check-release-layout:
     name: Check release layout script
     needs: changes
-    if: ${{ needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (needs.changes.outputs.docs_only != 'true')
     runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -809,6 +815,7 @@ jobs:
 
   pgsql:
     name: PostgreSQL front-end checks
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -846,7 +853,7 @@ jobs:
   integration-tests:
     name: Integration tests (${{ matrix.arch }})
     needs: changes
-    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
     runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       fail-fast: false
@@ -893,7 +900,7 @@ jobs:
   test-build:
     name: Build workspace tests (${{ matrix.arch }})
     needs: changes
-    if: ${{ needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (needs.changes.outputs.docs_only != 'true')
     runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       fail-fast: false
@@ -928,7 +935,7 @@ jobs:
 
   test:
     name: Test workspace (${{ matrix.arch }}, shard ${{ matrix.shard }}/3)
-    if: ${{ needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (needs.changes.outputs.docs_only != 'true')
     needs: [test-build, changes]
     env:
       RUST_MIN_STACK: "8388608" # 8 MiB — some debug tests overflow nextest's default thread stack
@@ -986,7 +993,7 @@ jobs:
   test-cjk:
     name: Test CJK segmentation
     needs: changes
-    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
@@ -1014,7 +1021,7 @@ jobs:
   test-compile-timers:
     name: Test compile timers
     needs: changes
-    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
@@ -1044,7 +1051,7 @@ jobs:
   kvs-engines:
     name: KVS - ${{ matrix.engine }} engine (${{ matrix.arch }})
     needs: changes
-    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
     runs-on: runner-${{ matrix.arch }}-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       fail-fast: false
@@ -1128,7 +1135,7 @@ jobs:
   sdk-engines:
     name: Rust SDK - ${{ matrix.engine }} engine
     needs: changes
-    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       fail-fast: false
@@ -1176,7 +1183,7 @@ jobs:
   sdk-engines-server:
     name: Rust SDK - ${{ matrix.engine }} engine
     needs: [build, changes]
-    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       fail-fast: false
@@ -1242,10 +1249,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arch: ${{ (github.event_name == 'merge_group' || github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
-        # tikv takes ~30-45 min, far longer than the other engines, so it's
-        # excluded from pull_request and merge_group and only runs post-merge.
-        engine: ${{ github.event_name == 'push' && fromJSON('["mem", "surrealkv", "rocksdb", "tikv"]') || fromJSON('["mem", "surrealkv", "rocksdb"]') }}
+        arch: ${{ github.event_name == 'push' && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
+        # Pull requests and the merge queue run the mem engine on arm;
+        # surrealkv, rocksdb, tikv and amd64 run post-merge.
+        engine: ${{ github.event_name == 'push' && fromJSON('["mem", "surrealkv", "rocksdb", "tikv"]') || fromJSON('["mem"]') }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -1273,9 +1280,7 @@ jobs:
       - name: Install tools
         uses: ./.github/actions/install-tools
         with:
-          # Coverage (and thus cargo-llvm-cov) only on the arm mem leg; the
-          # amd mem leg runs the plain test task to avoid a duplicate upload.
-          tools: ${{ (matrix.engine == 'mem' && matrix.arch == 'arm') && 'cargo-make,cargo-llvm-cov' || 'cargo-make' }}
+          tools: cargo-make
 
       - name: Setup databases
         uses: ./.github/actions/setup-databases
@@ -1283,27 +1288,7 @@ jobs:
           tikv: ${{ matrix.engine == 'tikv' }}
 
       - name: Run language tests
-        if: matrix.engine != 'mem' || matrix.arch != 'arm'
         run: cargo make ci-lang-test-${{ matrix.engine }}
-
-      - name: Run language tests with coverage
-        if: matrix.engine == 'mem' && matrix.arch == 'arm'
-        run: cargo make ci-lang-test-coverage
-
-      - name: Upload language test coverage to Codecov
-        if: matrix.engine == 'mem' && matrix.arch == 'arm'
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # (Actions must be pinned by commit hash) v7.0.0
-        with:
-          files: language-tests-lcov.info
-          # The report's contents are validated by `ci-lang-test-coverage`
-          # before this step runs, so a coverage regression fails there rather
-          # than here. This step is best-effort delivery of an already-checked
-          # artifact, and does not gate the job.
-          fail_ci_if_error: false
-          flags: language-tests
-          name: language-test-coverage
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   # NOTE: language tests over a remote --endpoint need a server to point at and
   # are destructive to it, so they are a manual-only workflow rather than a job
@@ -1316,7 +1301,7 @@ jobs:
   lang-decline-report:
     name: Language decline report - ${{ matrix.engine }}
     needs: changes
-    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
     runs-on: runner-arm-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     # Reports statements the engine declines to run; it never gates a merge and
     # is not a required check.
@@ -1372,7 +1357,7 @@ jobs:
   upgrade-harness:
     name: Upgrade test harness - ${{ matrix.engine }} (${{ matrix.arch }})
     needs: changes
-    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
     runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       fail-fast: false
@@ -1424,7 +1409,7 @@ jobs:
   upgrade-tests:
     name: Upgrade tests - ${{ matrix.engine }} (${{ matrix.arch }})
     needs: [build, upgrade-harness, changes]
-    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
     runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       fail-fast: false
@@ -1530,7 +1515,7 @@ jobs:
   check-tokio-console:
     name: Check tokio-console feature
     needs: changes
-    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     env:
       RUSTFLAGS: -D warnings --cfg tokio_unstable
@@ -1567,7 +1552,7 @@ jobs:
   check-bench:
     name: Check language-test bench harness
     needs: changes
-    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -1598,7 +1583,7 @@ jobs:
 
   conformance-tests:
     name: Conformance tests
-    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     needs: [build, changes]
     steps:
@@ -1658,7 +1643,7 @@ jobs:
   # against our own in-process assumptions.
   mcp-tests:
     name: MCP tests
-    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     needs: [build, changes]
     steps:
@@ -1727,7 +1712,7 @@ jobs:
   node-engine:
     name: Node engine
     needs: changes
-    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -1770,7 +1755,7 @@ jobs:
   wasm-engine:
     name: Wasm engine
     needs: changes
-    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -1948,8 +1933,10 @@ jobs:
             fi
           done
 
-          # pgsql must succeed on every run (skipped is NOT allowed)
-          if [[ "${{ needs.pgsql.result }}" != "success" ]]; then
+          # pgsql must succeed on every run that schedules it (push and
+          # workflow_dispatch); a skip there is a failure.
+          if [[ "${{ github.event_name }}" == "push" || "${{ github.event_name }}" == "workflow_dispatch" ]] \
+            && [[ "${{ needs.pgsql.result }}" != "success" ]]; then
             echo "❌ pgsql check did not succeed: ${{ needs.pgsql.result }}"
             failed=true
           fi

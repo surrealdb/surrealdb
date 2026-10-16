@@ -182,6 +182,10 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.base64ct]
 opt-level = 3
+[profile.dev.package.generic-array]
+opt-level = 3
+[profile.dev.package.typenum]
+opt-level = 3
 
 # `dev` with optimised code, for the CI language-test lanes, which run thousands
 # of queries through an in-process engine. This mirrors `devopt` in the root
