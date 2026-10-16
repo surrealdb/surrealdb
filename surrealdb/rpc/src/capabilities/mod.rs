@@ -179,24 +179,68 @@ impl std::str::FromStr for ExperimentalTarget {
 	}
 }
 
+/// A network target: a rule in `allow_net` / `deny_net`, or the endpoint a
+/// request is addressed to.
+///
+/// A rule matches a request target when the request falls inside it, and one
+/// rule matches another when the first covers every endpoint the second does —
+/// see [`Target::matches`]. A request is always a [`NetTarget::Host`] or a
+/// [`NetTarget::IPNet`]; a [`NetTarget::Wildcard`] only ever appears as a rule.
 #[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub enum NetTarget {
+	/// One host, on one port or on any port.
 	Host(url::Host<String>, Option<u16>),
+	/// An IP address or CIDR block, on any port.
 	IPNet(IpNet),
+	/// Every host strictly below `suffix`, written `*.<suffix>[:<port>]`.
+	///
+	/// `suffix` is lowercase ASCII (IDNA labels in punycode), has at least two
+	/// labels and no trailing dot. `*.example.com` matches `api.example.com`
+	/// and `a.b.example.com`, and not `example.com` itself or
+	/// `notexample.com`. With a port, only that port; without one, any port.
+	/// IP addresses are never matched.
+	Wildcard {
+		suffix: String,
+		port: Option<u16>,
+	},
 }
 
-// impl display
+impl NetTarget {
+	/// Whether a rule with port `rule` covers a target with port `target`: a
+	/// port-less rule covers every port, a port-bearing one only its own.
+	fn port_covers(rule: Option<u16>, target: Option<u16>) -> bool {
+		match rule {
+			None => true,
+			Some(port) => target == Some(port),
+		}
+	}
+}
+
 impl fmt::Display for NetTarget {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::Host(host, Some(port)) => write!(f, "{host}:{port}"),
 			Self::Host(host, None) => write!(f, "{host}"),
 			Self::IPNet(ipnet) => write!(f, "{ipnet}"),
+			Self::Wildcard {
+				suffix,
+				port: Some(port),
+			} => write!(f, "*.{suffix}:{port}"),
+			Self::Wildcard {
+				suffix,
+				port: None,
+			} => write!(f, "*.{suffix}"),
 		}
 	}
 }
 
 impl Target for NetTarget {
+	/// Whether `self`, read as a rule, covers every endpoint `tgt` names.
+	///
+	/// For a request target that is plain membership. For a rule target it is
+	/// a subset check: a `Host` rule never covers a `Wildcard`, and a
+	/// `Wildcard` covers another only when the other's suffix lies at or below
+	/// its own and the ports are compatible.
 	fn matches(&self, tgt: &Self) -> bool {
 		match self {
 			// If self contains a host and port, the elem must match both the host and port
@@ -218,25 +262,92 @@ impl Target for NetTarget {
 					url::Host::Ipv6(ip) => ipnet.contains(&IpAddr::from(ip.to_owned())),
 					_ => false,
 				},
+				Self::Wildcard {
+					..
+				} => false,
+			},
+			// A wildcard matches domain names below its suffix, and narrower
+			// wildcards, never an IP address
+			Self::Wildcard {
+				suffix,
+				port,
+			} => match tgt {
+				Self::Host(url::Host::Domain(tgt_host), tgt_port) => {
+					Self::port_covers(*port, *tgt_port)
+						&& common::net::host_is_under(tgt_host, suffix)
+				}
+				Self::Wildcard {
+					suffix: tgt_suffix,
+					port: tgt_port,
+				} => {
+					Self::port_covers(*port, *tgt_port)
+						&& common::net::suffix_covers(suffix, tgt_suffix)
+				}
+				_ => false,
 			},
 		}
 	}
 }
 
+/// Why a string is not a valid [`NetTarget`].
 #[derive(Debug)]
-pub struct ParseNetTargetError;
+pub struct ParseNetTargetError {
+	wildcard: Option<common::net::WildcardHostError>,
+}
 
 impl std::error::Error for ParseNetTargetError {}
 impl fmt::Display for ParseNetTargetError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "The provided network target is not a valid host name, IP address or CIDR block")
+		match &self.wildcard {
+			Some(reason) => {
+				write!(f, "The provided network target is not a valid wildcard host: {reason}")
+			}
+			None => write!(
+				f,
+				"The provided network target is not a valid host name, wildcard host, IP address or CIDR block"
+			),
+		}
+	}
+}
+
+impl From<common::net::WildcardHostError> for ParseNetTargetError {
+	fn from(reason: common::net::WildcardHostError) -> Self {
+		Self {
+			wildcard: Some(reason),
+		}
 	}
 }
 
 impl std::str::FromStr for NetTarget {
 	type Err = ParseNetTargetError;
 
+	/// Parses `<host>[:<port>]`, `*.<domain>[:<port>]`, an IP address or a
+	/// CIDR block.
+	///
+	/// Any input containing `*` is either a well-formed wildcard or an error;
+	/// it is never read as an exact host that would match nothing.
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		use common::net::{
+			WildcardHostError, check_wildcard_suffix, split_wildcard_host, trim_root_dot,
+		};
+
+		if let Some((domain, port)) = split_wildcard_host(s)? {
+			let suffix = match url::Host::parse(domain) {
+				Ok(url::Host::Domain(domain)) => domain.to_ascii_lowercase(),
+				Ok(url::Host::Ipv4(_) | url::Host::Ipv6(_)) => {
+					return Err(WildcardHostError::IpAddress.into());
+				}
+				Err(_) => {
+					return Err(WildcardHostError::NotAHostPattern.into());
+				}
+			};
+			let suffix = check_wildcard_suffix(trim_root_dot(&suffix))?.to_owned();
+			return Ok(NetTarget::Wildcard {
+				suffix,
+				port,
+			});
+		}
+
 		// If it's a valid IPNet, return it
 		if let Ok(ipnet) = s.parse::<IpNet>() {
 			return Ok(NetTarget::IPNet(ipnet));
@@ -261,7 +372,9 @@ impl std::str::FromStr for NetTarget {
 			}
 		}
 
-		Err(ParseNetTargetError)
+		Err(ParseNetTargetError {
+			wildcard: None,
+		})
 	}
 }
 
@@ -1227,6 +1340,192 @@ mod tests {
 		assert!(NetTarget::from_str("11111.3.4.5").is_err());
 		assert!(NetTarget::from_str("2001:db8::1/129").is_err());
 		assert!(NetTarget::from_str("[2001:db8::1").is_err());
+	}
+
+	fn net(s: &str) -> NetTarget {
+		NetTarget::from_str(s).unwrap()
+	}
+
+	#[test]
+	fn test_wildcard_net_target_matches_subdomains_only() {
+		let rule = net("*.google.com");
+		assert_eq!(
+			rule,
+			NetTarget::Wildcard {
+				suffix: "google.com".to_string(),
+				port: None
+			}
+		);
+		for host in ["www.google.com", "a.b.google.com", "www.google.com:443", "api.google.com:80"]
+		{
+			assert!(rule.matches(&net(host)), "{host}");
+		}
+		for host in [
+			"google.com",
+			"google.com:443",
+			"evilgoogle.com",
+			"www.evilgoogle.com",
+			"google.com.evil.com",
+			"www.google.co",
+			"127.0.0.1",
+			"[::1]:443",
+		] {
+			assert!(!rule.matches(&net(host)), "{host}");
+		}
+		// An IP or CIDR request target is never below a domain
+		assert!(!rule.matches(&net("10.0.0.0/8")));
+	}
+
+	#[test]
+	fn test_wildcard_net_target_normalises_case_trailing_dot_and_idna() {
+		// The rule is stored lowercase without the root dot, and prints as such
+		for spelling in ["*.Google.COM", "*.google.com."] {
+			let rule = net(spelling);
+			assert_eq!(rule.to_string(), "*.google.com", "{spelling}");
+			assert!(rule.matches(&net("WWW.GOOGLE.COM")), "{spelling}");
+			assert!(rule.matches(&net("www.google.com.")), "{spelling}");
+		}
+		// A request host built straight from its parts is matched without regard to case
+		let mixed = NetTarget::Host(url::Host::Domain("Www.Google.Com".to_string()), None);
+		assert!(net("*.google.com").matches(&mixed));
+		// Unicode labels are compared in their punycode form
+		let rule = net("*.bücher.example");
+		assert_eq!(rule.to_string(), "*.xn--bcher-kva.example");
+		assert!(rule.matches(&net("shop.bücher.example")));
+		assert!(rule.matches(&net("shop.xn--bcher-kva.example")));
+	}
+
+	#[test]
+	fn test_wildcard_net_target_ports() {
+		let any_port = net("*.example.com");
+		let one_port = net("*.example.com:443");
+		assert_eq!(one_port.to_string(), "*.example.com:443");
+		assert_eq!(net(&one_port.to_string()), one_port);
+		assert_eq!(net(&any_port.to_string()), any_port);
+
+		assert!(any_port.matches(&net("api.example.com")));
+		assert!(any_port.matches(&net("api.example.com:8080")));
+		assert!(one_port.matches(&net("api.example.com:443")));
+		assert!(!one_port.matches(&net("api.example.com:80")));
+		// A port-bearing rule does not match a target that names no port, as for a Host rule
+		assert!(!one_port.matches(&net("api.example.com")));
+		// The default port is the one written, not dropped
+		assert!(net("*.example.com:80").matches(&net("api.example.com:80")));
+	}
+
+	#[test]
+	fn test_wildcard_net_target_subset() {
+		let wide = net("*.example.com");
+		// A wildcard covers itself and every narrower wildcard
+		assert!(wide.matches(&wide));
+		assert!(wide.matches(&net("*.api.example.com")));
+		assert!(wide.matches(&net("*.api.example.com:443")));
+		assert!(!wide.matches(&net("*.notexample.com")));
+		assert!(!net("*.api.example.com").matches(&wide));
+		// Ports: a port-less wildcard covers a port-bearing one, not the other way round
+		assert!(!net("*.example.com:443").matches(&wide));
+		assert!(net("*.example.com:443").matches(&net("*.api.example.com:443")));
+		assert!(!net("*.example.com:443").matches(&net("*.api.example.com:80")));
+		// An exact host or an address range never covers a wildcard
+		assert!(!net("api.example.com").matches(&wide));
+		assert!(!net("example.com").matches(&wide));
+		assert!(!net("0.0.0.0/0").matches(&wide));
+		// Targets<NetTarget> applies the same subset check member by member
+		let allow = Targets::Some([net("*.example.com"), net("other.org")].into());
+		assert!(allow.matches(&net("*.eu.example.com")));
+		assert!(!allow.matches(&net("*.other.org")));
+		assert!(Targets::<NetTarget>::All.matches(&wide));
+	}
+
+	#[test]
+	fn test_wildcard_net_target_parse_rejections() {
+		for entry in [
+			"*",
+			"*.",
+			"*.com",
+			"*.com.",
+			"*.:443",
+			"a.*.com",
+			"*foo.com",
+			"foo.*.com",
+			"foo.com.*",
+			"**.foo.com",
+			"*.*.foo.com",
+			"*.foo..com",
+			"*.1.2.3.4",
+			"*.1.2.3",
+			"*.[2001:db8::1]",
+			"*.10.0.0.0/8",
+			"10.*.0.0/16",
+			"*.0.0.0/0",
+			"2001:db8::*",
+			"*.foo.com/path",
+			"*.user@foo.com",
+			"*.foo.com:http",
+			"*.foo.com:70000",
+			"*.foo.com:80:80",
+		] {
+			let err = NetTarget::from_str(entry).unwrap_err();
+			assert!(err.to_string().contains("wildcard"), "{entry}: {err}");
+		}
+		assert_eq!(
+			NetTarget::from_str("*.com").unwrap_err().to_string(),
+			"The provided network target is not a valid wildcard host: a wildcard must be followed by a domain of at least two labels, as in '*.example.com'"
+		);
+		assert_eq!(
+			NetTarget::from_str("a.*.com").unwrap_err().to_string(),
+			"The provided network target is not a valid wildcard host: a wildcard is only allowed as the whole leftmost label, as in '*.example.com'"
+		);
+		assert_eq!(
+			NetTarget::from_str("*.1.2.3.4").unwrap_err().to_string(),
+			"The provided network target is not a valid wildcard host: a wildcard cannot be applied to an IP address; use a CIDR block such as '10.0.0.0/8'"
+		);
+	}
+
+	#[test]
+	fn test_wildcard_net_capabilities_deny_wins() {
+		// A wildcard deny under a global allow refuses every subdomain, and only those
+		let caps = Capabilities::default()
+			.with_network_targets(Targets::All)
+			.without_network_targets(Targets::Some([net("*.google.com")].into()));
+		assert!(!caps.allows_network_target(&net("www.google.com")));
+		assert!(!caps.allows_network_target(&net("a.b.google.com:443")));
+		assert!(caps.allows_network_target(&net("google.com")));
+		assert!(caps.allows_network_target(&net("evilgoogle.com")));
+		// A wildcard deny overrides an exact allow below it
+		let caps = Capabilities::default()
+			.with_network_targets(Targets::Some([net("api.example.com")].into()))
+			.without_network_targets(Targets::Some([net("*.example.com")].into()));
+		assert!(!caps.allows_network_target(&net("api.example.com")));
+		// The same wildcard on both sides: deny wins
+		let caps = Capabilities::default()
+			.with_network_targets(Targets::Some([net("*.example.com")].into()))
+			.without_network_targets(Targets::Some([net("*.example.com")].into()));
+		assert!(!caps.allows_network_target(&net("api.example.com")));
+		assert!(!caps.allows_network_target(&net("*.example.com")));
+		// An exact deny below a wildcard allow carves that host out
+		let caps = Capabilities::default()
+			.with_network_targets(Targets::Some([net("*.example.com")].into()))
+			.without_network_targets(Targets::Some([net("secret.example.com")].into()));
+		assert!(caps.allows_network_target(&net("api.example.com")));
+		assert!(!caps.allows_network_target(&net("secret.example.com")));
+		assert!(!caps.allows_network_target(&net("secret.example.com:443")));
+		// A wider wildcard deny refuses a narrower wildcard request
+		let caps = Capabilities::default()
+			.with_network_targets(Targets::All)
+			.without_network_targets(Targets::Some([net("*.example.com")].into()));
+		assert!(!caps.allows_network_target(&net("*.api.example.com")));
+		// A port-bearing wildcard deny refuses that port only
+		let caps = Capabilities::default()
+			.with_network_targets(Targets::Some([net("*.example.com")].into()))
+			.without_network_targets(Targets::Some([net("*.example.com:80")].into()));
+		assert!(caps.allows_network_target(&net("api.example.com:443")));
+		assert!(!caps.allows_network_target(&net("api.example.com:80")));
+		// A wildcard allow does not widen to the apex or to IP addresses
+		let caps = Capabilities::default()
+			.with_network_targets(Targets::Some([net("*.example.com")].into()));
+		assert!(!caps.allows_network_target(&net("example.com")));
+		assert!(!caps.allows_network_target(&net("93.184.216.34")));
 	}
 
 	#[test]

@@ -24,7 +24,6 @@
 use std::error::Error;
 #[cfg(feature = "http")]
 use std::net::IpAddr;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use ipnet::IpNet;
@@ -63,9 +62,14 @@ impl Resolve for FilteringResolver {
 		let filter = Arc::clone(&self.filter);
 		let name_str = name.as_str().to_string();
 		Box::pin(async move {
-			// Check the domain name (if any) matches the allowlist
-			let name_target = NetTarget::from_str(&name_str)
-				.map_err(|x| Box::new(x) as Box<dyn Error + Send + Sync>)?;
+			// Check the domain name (if any) matches the allowlist. The name is
+			// read as a host, never through the rule parser, so a name spelled
+			// like a wildcard rule is matched as the one host it is.
+			let name_target = NetTarget::Host(
+				url::Host::parse(&name_str)
+					.map_err(|x| Box::new(x) as Box<dyn Error + Send + Sync>)?,
+				None,
+			);
 			let name_is_allowed =
 				filter.allow.matches(&name_target) && !filter.deny.matches(&name_target);
 			// If the domain name itself is not allowed, return an error
@@ -168,6 +172,11 @@ pub(crate) async fn resolve_net_target(
 			Ok(out)
 		}
 		NetTarget::IPNet(_) => Ok(vec![]),
+		// A wildcard is only ever a rule; a request target is built from one
+		// URL host, so there is nothing to resolve.
+		NetTarget::Wildcard {
+			..
+		} => Ok(vec![]),
 	}
 }
 

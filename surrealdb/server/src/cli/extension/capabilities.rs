@@ -141,6 +141,10 @@ fn net_risk(target: &str) -> Option<HighRisk> {
 			return Some(HighRisk::WideNetwork(target.into()));
 		}
 		NetTarget::IPNet(net) => covers_internal(net.network(), net.prefix_len()),
+		// Unreachable past the `*` check above, and judged the same way.
+		NetTarget::Wildcard {
+			..
+		} => return Some(HighRisk::WideNetwork(target.into())),
 		NetTarget::Host(host, _) => {
 			let name = host.to_string();
 			match name.trim_start_matches('[').trim_end_matches(']').parse::<std::net::IpAddr>() {

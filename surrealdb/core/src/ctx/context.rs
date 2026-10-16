@@ -2045,6 +2045,49 @@ mod tests {
 		);
 	}
 
+	/// A wildcard rule is decided on the request host before any DNS lookup.
+	#[cfg(feature = "http")]
+	#[tokio::test]
+	async fn test_context_check_allowed_net_wildcard() {
+		let check = |cap: Capabilities, url: &'static str| async move {
+			let mut ctx = Context::new_test();
+			ctx.capabilities = cap.into();
+			let ctx = ctx.freeze();
+			ctx.check_allowed_net(&Url::parse(url).unwrap()).await
+		};
+		let not_allowed =
+			|target: &str| format!("Access to network target '{target}' is not allowed");
+
+		// A wildcard deny under a global allow refuses a subdomain
+		let deny = Capabilities::all().without_network_targets(Targets::Some(
+			[NetTarget::from_str("*.example.com").unwrap()].into(),
+		));
+		let r = check(deny, "http://api.example.com/").await;
+		assert_eq!(r.unwrap_err().to_string(), not_allowed("api.example.com:80"));
+
+		// A wildcard allow does not cover its apex or a lookalike domain
+		let allow = Capabilities::default().with_network_targets(Targets::Some(
+			[NetTarget::from_str("*.example.com").unwrap()].into(),
+		));
+		let r = check(allow.clone(), "https://example.com/").await;
+		assert_eq!(r.unwrap_err().to_string(), not_allowed("example.com:443"));
+		let r = check(allow, "https://evilexample.com/").await;
+		assert_eq!(r.unwrap_err().to_string(), not_allowed("evilexample.com:443"));
+
+		// A wildcard allow admits a subdomain past the capability check. The
+		// `.invalid` name (RFC 6761) never resolves, so whatever is reported
+		// next comes from DNS, not from the capabilities.
+		let allow = Capabilities::default().with_network_targets(Targets::Some(
+			[NetTarget::from_str("*.test.invalid").unwrap()].into(),
+		));
+		if let Err(e) = check(allow, "https://api.test.invalid/").await {
+			assert!(
+				!e.to_string().contains("Access to network target"),
+				"the wildcard allow should have passed the capability check: {e}"
+			);
+		}
+	}
+
 	#[tokio::test]
 	async fn test_context_cancellation_priority() {
 		// Test that cancellation is detected even when a deadline is set and exceeded

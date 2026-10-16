@@ -3959,6 +3959,72 @@ pub async fn function_http_redirect_to_denied_port_blocked() -> Result<()> {
 	Ok(())
 }
 
+/// Verifies that a wildcard `deny_net` rule refuses `http::get` to any
+/// subdomain, on the request and on a redirect, before any DNS lookup, and
+/// that a wildcard allow does not cover its apex.
+#[cfg(feature = "http")]
+#[tokio::test]
+pub async fn function_http_wildcard_net_targets() -> Result<()> {
+	use std::str::FromStr;
+
+	use surrealdb_core::kvs::Datastore;
+	use surrealdb_rpc::capabilities::{Capabilities, NetTarget, Targets};
+	use wiremock::matchers::{method, path};
+	use wiremock::{Mock, MockServer, ResponseTemplate};
+
+	async fn run(caps: Capabilities, query: &str) -> Result<String> {
+		let ds = Datastore::builder().with_capabilities(caps).build_with_path("memory").await?;
+		let session = surrealdb_core::dbs::Session::owner().with_ns("test").with_db("test");
+		ds.execute("DEFINE NS test; DEFINE DB test", &surrealdb_core::dbs::Session::owner(), None)
+			.await?;
+		let mut res = ds.execute(query, &session, None).await?;
+		Ok(res.remove(0).result.expect_err(query).to_string())
+	}
+	let targets =
+		|t: &[&str]| Targets::Some(t.iter().map(|t| NetTarget::from_str(t).unwrap()).collect());
+
+	// A wildcard deny under a global allow refuses every subdomain
+	let deny = Capabilities::all().without_network_targets(targets(&["*.example.com"]));
+	for (url, target) in [
+		("http://api.example.com/", "api.example.com:80"),
+		("https://a.b.example.com:8443/", "a.b.example.com:8443"),
+		("https://API.Example.COM/", "api.example.com:443"),
+	] {
+		let err = run(deny.clone(), &format!("RETURN http::get('{url}')")).await?;
+		assert_eq!(err, format!("Access to network target '{target}' is not allowed"), "{url}");
+	}
+
+	// A wildcard allow does not cover its apex or a lookalike domain
+	let allow = Capabilities::default().with_network_targets(targets(&["*.example.com"]));
+	for (url, target) in [
+		("http://example.com/", "example.com:80"),
+		("http://evilexample.com/", "evilexample.com:80"),
+		("https://example.com.evil.com/", "example.com.evil.com:443"),
+	] {
+		let err = run(allow.clone(), &format!("RETURN http::get('{url}')")).await?;
+		assert_eq!(err, format!("Access to network target '{target}' is not allowed"), "{url}");
+	}
+
+	// A redirect into a wildcard-denied domain is refused at the hop
+	let redirect_server = MockServer::start().await;
+	Mock::given(method("GET"))
+		.and(path("/start"))
+		.respond_with(
+			ResponseTemplate::new(302).insert_header("location", "http://internal.example.com/"),
+		)
+		.expect(1)
+		.mount(&redirect_server)
+		.await;
+	let port = redirect_server.address().port();
+	let err = run(deny, &format!("RETURN http::get('http://127.0.0.1:{port}/start')")).await?;
+	// Refused by the redirect policy, which reqwest reports as a redirect
+	// error. A hop the policy let through would fail later, at DNS or connect,
+	// and be reported as a send error instead.
+	assert!(err.contains("error following redirect"), "{err}");
+	redirect_server.verify().await;
+	Ok(())
+}
+
 #[cfg(not(feature = "http"))]
 #[tokio::test]
 pub async fn function_http_disabled() -> Result<()> {

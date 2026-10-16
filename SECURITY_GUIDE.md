@@ -1326,6 +1326,15 @@ Flag when changes touch:
   initial URL and all DNS-resolved IP addresses must be validated. The DNS filtering
   resolver must validate every resolution result.
 - Redirect targets must be validated against capabilities.
+- A wildcard network rule, `*.<domain>[:<port>]`, matches host names strictly below
+  `<domain>` at a label boundary and never an IP address, so it cannot widen what an
+  IP or CIDR rule decides. Its spelling and matching live in `common::net`
+  (`split_wildcard_host`, `host_is_under`), shared by `NetTarget` and the Surrealism
+  `NetPolicy`, so a guest socket and a SurrealQL call answer alike. Any rule text
+  containing `*` must parse as a wildcard or be refused — never as an exact host that
+  matches nothing, which for a deny rule would deny nothing. A request target is built
+  from the parsed URL host (`NetTarget::Host`), never by passing request text through
+  the rule parser.
 - **WASM target exception (Cloudflare Worker / Durable Object):** on `wasm32`
   there is no synchronous DNS resolver (`ToSocketAddrs` is unsupported) and the
   `fetch` runtime follows redirects transparently with no policy hook, so the

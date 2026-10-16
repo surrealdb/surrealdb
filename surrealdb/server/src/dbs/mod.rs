@@ -176,10 +176,13 @@ Denied for everyone by default (even under --allow-all); must be explicitly enab
 		help = "Allow all outbound network connections except for network targets that are specifically denied. Alternatively, you can provide a comma-separated list of network targets to allow",
 		long_help = r#"Allow all outbound network connections except for network targets that are specifically denied. Alternatively, you can provide a comma-separated list of network targets to allow
 Specifically denied network targets prevail over any other allowed outbound network connections.
-Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For example:
+Targets must be in the form of <host>[:<port>], *.<domain>[:<port>], <ipv4|ipv6>[/<mask>]. For example:
  - 'surrealdb.com', '127.0.0.1' or 'fd00::1' -> Match outbound connections to these hosts on any port
  - 'surrealdb.com:80', '127.0.0.1:80' or 'fd00::1:80' -> Match outbound connections to these hosts on port 80
+ - '*.surrealdb.com' -> Match outbound connections to any subdomain of surrealdb.com (such as 'api.surrealdb.com' or 'a.b.surrealdb.com', but not 'surrealdb.com' itself) on any port
+ - '*.surrealdb.com:443' -> Match outbound connections to any subdomain of surrealdb.com on port 443
  - '10.0.0.0/8' or 'fd00::/8' -> Match outbound connections to any host in these networks
+A wildcard is only allowed as the whole leftmost label and must be followed by a domain of at least two labels; it never matches an IP address.
 "#
 	)]
 	#[arg(env = "SURREAL_CAPS_ALLOW_NET", long)]
@@ -282,10 +285,13 @@ User groups must be one of "guest", "record" or "system".
 		help = "Deny all outbound network connections except for network targets that are specifically allowed. Alternatively, you can provide a comma-separated list of network targets to deny",
 		long_help = r#"Deny all outbound network connections except for network targets that are specifically allowed. Alternatively, you can provide a comma-separated list of network targets to deny.
 Specifically allowed network targets prevail over a general denial of outbound network connections.
-Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For example:
+Targets must be in the form of <host>[:<port>], *.<domain>[:<port>], <ipv4|ipv6>[/<mask>]. For example:
  - 'surrealdb.com', '127.0.0.1' or 'fd00::1' -> Match outbound connections to these hosts on any port
  - 'surrealdb.com:80', '127.0.0.1:80' or 'fd00::1:80' -> Match outbound connections to these hosts on port 80
+ - '*.surrealdb.com' -> Match outbound connections to any subdomain of surrealdb.com (such as 'api.surrealdb.com' or 'a.b.surrealdb.com', but not 'surrealdb.com' itself) on any port
+ - '*.surrealdb.com:443' -> Match outbound connections to any subdomain of surrealdb.com on port 443
  - '10.0.0.0/8' or 'fd00::/8' -> Match outbound connections to any host in these networks
+A wildcard is only allowed as the whole leftmost label and must be followed by a domain of at least two labels; it never matches an IP address.
 "#
 	)]
 	#[arg(env = "SURREAL_CAPS_DENY_NET", long)]

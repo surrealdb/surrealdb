@@ -265,7 +265,8 @@ through a bespoke host binding. Two checks gate it, both driven by the `net` tar
 - **By name.** `surrealism_runtime::dns` shadows `wasi:sockets/ip-name-lookup`
   and matches each name against the granted rules before resolving. Names are
   matched exactly and case-insensitively; `api.example.com` does not cover
-  `sub.api.example.com`.
+  `sub.api.example.com`. A wildcard `*.example.com` covers every name strictly
+  below `example.com`, not `example.com` itself.
 - **By address.** WASI's `socket_addr_check` gates every connect.
 
 Hostnames are **not** resolved at module load. A stale pre-resolved address

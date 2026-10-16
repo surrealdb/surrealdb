@@ -193,6 +193,39 @@ mod tests {
 		assert!(!eff.allows_function_name("http::post"));
 	}
 
+	/// A wildcard survives where the server's allow list covers all of it: a
+	/// server wildcard covers its subdomains and narrower wildcards, an exact
+	/// host never covers a wildcard, and a server wildcard deny drops every
+	/// target within it.
+	#[test]
+	fn a_wildcard_target_is_narrowed_to_the_server() {
+		let granted = |server: &Capabilities, entry: &str| {
+			let definition = ExtensionCapabilities {
+				net: CapabilityTargets::Some(vec![entry.into()]),
+				..Default::default()
+			};
+			effective_capabilities(&definition, server).unwrap().allow_net
+				== Targets::Some([net(entry)].into_iter().collect())
+		};
+		let server = Capabilities::none()
+			.with_network_targets(Targets::Some([net("*.color.io")].into_iter().collect()));
+		for within in ["api.color.io", "*.api.color.io", "*.color.io:443"] {
+			assert!(granted(&server, within), "{within}");
+		}
+		for outside in ["color.io", "*.io.color", "other.org"] {
+			assert!(!granted(&server, outside), "{outside}");
+		}
+		let server = Capabilities::none()
+			.with_network_targets(Targets::Some([net("api.color.io")].into_iter().collect()));
+		assert!(!granted(&server, "*.color.io"));
+		let server = Capabilities::all()
+			.without_network_targets(Targets::Some([net("*.color.io")].into_iter().collect()));
+		for denied in ["api.color.io", "*.api.color.io"] {
+			assert!(!granted(&server, denied), "{denied}");
+		}
+		assert!(granted(&server, "color.io"));
+	}
+
 	#[test]
 	fn an_invalid_target_is_an_error() {
 		let definition = ExtensionCapabilities {

@@ -34,6 +34,11 @@
 //! connect; a port-bearing one names a port rather than a host, so it refuses
 //! the connect on that port — at every address the name it names resolved to.
 //! A module cannot widen what the server forbids by declaring it.
+//!
+//! A wildcard entry `*.example.com[:port]` is a hostname rule like any other: it
+//! covers the names strictly below its suffix when the guest resolves them, and
+//! the addresses those names resolved to when it connects. It never covers an
+//! address on its own. Allow and deny wildcards are read the same way.
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -79,10 +84,59 @@ pub enum NetRule {
 		host: String,
 		port: Option<u16>,
 	},
+	/// Every hostname strictly below `suffix`, written `*.<suffix>[:<port>]`,
+	/// optionally pinned to a port.
+	///
+	/// `suffix` is lowercase ASCII with at least two labels and no trailing
+	/// dot. `*.example.com` covers `api.example.com` and `a.b.example.com`, and
+	/// not `example.com` or `notexample.com`; see [`common::net::host_is_under`],
+	/// which the server's own `NetTarget` matching calls too. It covers names
+	/// only, so an address reaches it only by having been resolved for a name it
+	/// covers.
+	HostSuffix {
+		suffix: String,
+		port: Option<u16>,
+	},
 	/// Any hostname, and any address that is not special-use, on any port.
 	/// Spelled `*`. A special-use address is still reached only through an
 	/// explicit IP rule.
 	Any,
+}
+
+impl NetRule {
+	/// Whether this hostname rule covers `lowered`, a name already in the form
+	/// [`normalise_name`] produces. An address rule covers no name.
+	fn names_host(&self, lowered: &str) -> bool {
+		match self {
+			Self::Host {
+				host,
+				..
+			} => host == lowered,
+			Self::HostSuffix {
+				suffix,
+				..
+			} => common::net::host_is_under(lowered, suffix),
+			Self::Any => true,
+			Self::Net(_) | Self::IpPort(..) => false,
+		}
+	}
+
+	/// The port a hostname rule pins (`Some(None)` for any port), or `None` for
+	/// an address rule. [`NetRule::Any`] names every host on every port.
+	fn host_port(&self) -> Option<Option<u16>> {
+		match self {
+			Self::Host {
+				port,
+				..
+			}
+			| Self::HostSuffix {
+				port,
+				..
+			} => Some(*port),
+			Self::Any => Some(None),
+			Self::Net(_) | Self::IpPort(..) => None,
+		}
+	}
 }
 
 /// A queried name in the form the rules are stored in.
@@ -161,9 +215,7 @@ impl NetDeny {
 					return rules.iter().any(|r| rule_covers_ip(r, &dst));
 				}
 				let name = normalise_name(name);
-				rules
-					.iter()
-					.any(|r| matches!(r, NetRule::Host { host, port: None } if *host == name))
+				rules.iter().any(|r| r.host_port() == Some(None) && r.names_host(&name))
 			}
 		}
 	}
@@ -182,11 +234,8 @@ impl NetDeny {
 			Self::Nothing | Self::Everything => Vec::new(),
 			Self::Rules(rules) => rules
 				.iter()
-				.filter_map(|r| match r {
-					NetRule::Host {
-						host,
-						port: Some(port),
-					} if host == lowered => Some(*port),
+				.filter_map(|r| match r.host_port() {
+					Some(Some(port)) if r.names_host(lowered) => Some(port),
 					_ => None,
 				})
 				.collect(),
@@ -202,9 +251,13 @@ impl NetDeny {
 				let dst = destination(ip);
 				rules.iter().any(|r| match r {
 					NetRule::Net(net) => net.contains(&dst),
-					// Pinned to one port, so it does not deny the address itself.
+					// Pinned to one port, or naming hosts rather than addresses, so
+					// it does not deny the address itself.
 					NetRule::IpPort(..)
 					| NetRule::Host {
+						..
+					}
+					| NetRule::HostSuffix {
 						..
 					} => false,
 					// `parse` turns `*` into `Everything`.
@@ -229,6 +282,9 @@ impl NetDeny {
 					// rule refused the name outright, and a port-bearing one is
 					// recorded against those addresses when they are vended.
 					NetRule::Host {
+						..
+					}
+					| NetRule::HostSuffix {
 						..
 					} => false,
 					NetRule::Any => true,
@@ -296,7 +352,8 @@ enum DeniedAddrs {
 	/// Empty when nothing needed resolving.
 	Resolved(Arc<[(IpAddr, Option<u16>)]>),
 	/// A denied hostname did not resolve, or not within
-	/// [`DENY_RESOLVE_TIMEOUT`]. Its addresses are unknown, so a connect is
+	/// [`DENY_RESOLVE_TIMEOUT`], or a deny rule is a wildcard, whose hosts
+	/// cannot be enumerated. Its addresses are unknown, so a connect is
 	/// allowed only to an address the DNS shim vended for a name it checked.
 	Unknown,
 }
@@ -346,8 +403,9 @@ impl NetPolicy {
 	/// refused as one that resolved the name would be. The resolution is the
 	/// system resolver's, made once per invocation and bounded by
 	/// [`DENY_RESOLVE_TIMEOUT`]. If a denied name fails to resolve in that
-	/// time, its addresses are unknown and the copy fails closed: the guest
-	/// may connect only to addresses the DNS shim vended for names it checked.
+	/// time, or a deny rule is a wildcard, its addresses are unknown and the
+	/// copy fails closed: the guest may connect only to addresses the DNS shim
+	/// vended for names it checked.
 	/// Without an address allow rule an address is reachable only through such
 	/// a name, so nothing is resolved.
 	pub async fn for_invocation(self: &Arc<Self>) -> Arc<Self> {
@@ -501,6 +559,10 @@ impl NetPolicy {
 			NetRule::Host {
 				port,
 				..
+			}
+			| NetRule::HostSuffix {
+				port,
+				..
 			} => {
 				port.is_none_or(|p| p == addr.port())
 					&& vended.as_ref().is_some_and(|(by, _)| by.contains(&index))
@@ -513,14 +575,10 @@ impl NetPolicy {
 
 	/// The indices of the hostname rules matching an already-lowercased name.
 	fn host_rule_indices<'a>(&'a self, lowered: &'a str) -> impl Iterator<Item = usize> + 'a {
-		self.rules.iter().enumerate().filter_map(move |(index, r)| match r {
-			NetRule::Host {
-				host,
-				..
-			} if host == lowered => Some(index),
-			NetRule::Any => Some(index),
-			_ => None,
-		})
+		self.rules
+			.iter()
+			.enumerate()
+			.filter_map(move |(index, r)| r.names_host(lowered).then_some(index))
 	}
 
 	/// Whether an explicit address rule names the destination a connect to `ip`
@@ -550,6 +608,9 @@ fn rule_covers_ip(rule: &NetRule, ip: &IpAddr) -> bool {
 		NetRule::Host {
 			..
 		}
+		| NetRule::HostSuffix {
+			..
+		}
 		| NetRule::Any => false,
 	}
 }
@@ -569,11 +630,17 @@ fn prune(table: &mut VendedTable, now: Instant) {
 
 /// What the hostname rules in `deny` resolve to now, each address with the
 /// port its rule pins; [`DeniedAddrs::Unknown`] if any of them fails to
-/// resolve within [`DENY_RESOLVE_TIMEOUT`].
+/// resolve within [`DENY_RESOLVE_TIMEOUT`], or if any deny rule is a wildcard.
 async fn resolve_denied_hosts(deny: &NetDeny) -> DeniedAddrs {
 	let NetDeny::Rules(rules) = deny else {
 		return DeniedAddrs::none();
 	};
+	// A wildcard names hosts that cannot be enumerated, so what it denies by
+	// address is unknown: fail closed exactly as for a name that did not
+	// resolve.
+	if rules.iter().any(|r| matches!(r, NetRule::HostSuffix { .. })) {
+		return DeniedAddrs::Unknown;
+	}
 	let hosts: Vec<(String, Option<u16>)> = rules
 		.iter()
 		.filter_map(|r| match r {
@@ -622,6 +689,31 @@ async fn resolve_denied_hosts(deny: &NetDeny) -> DeniedAddrs {
 fn parse_one(entry: &str) -> anyhow::Result<NetRule> {
 	if entry == "*" {
 		return Ok(NetRule::Any);
+	}
+	// Any other entry containing `*` is a wildcard or an error, never an exact
+	// host that would match nothing. The spellings accepted, and the
+	// normalisation, are the server's `NetTarget` parser's, so a server
+	// `deny_net` wildcard re-parses here to the same rule.
+	let wildcard = common::net::split_wildcard_host(entry)
+		.map_err(|e| anyhow::anyhow!("invalid network entry '{entry}': {e}"))?;
+	if let Some((domain, port)) = wildcard {
+		let invalid = |e: common::net::WildcardHostError| {
+			anyhow::anyhow!("invalid network entry '{entry}': {e}")
+		};
+		let suffix = match url::Host::parse(domain) {
+			Ok(url::Host::Domain(domain)) => domain.to_ascii_lowercase(),
+			Ok(url::Host::Ipv4(_) | url::Host::Ipv6(_)) => {
+				return Err(invalid(common::net::WildcardHostError::IpAddress));
+			}
+			Err(_) => return Err(invalid(common::net::WildcardHostError::NotAHostPattern)),
+		};
+		let suffix = common::net::check_wildcard_suffix(common::net::trim_root_dot(&suffix))
+			.map_err(invalid)?
+			.to_owned();
+		return Ok(NetRule::HostSuffix {
+			suffix,
+			port,
+		});
 	}
 	if let Ok(net) = entry.parse::<IpNet>() {
 		return Ok(NetRule::Net(net));
@@ -761,6 +853,24 @@ mod tests {
 			.for_invocation()
 			.await;
 		assert!(matches!(&policy.denied_addrs, DeniedAddrs::Resolved(a) if a.is_empty()));
+	}
+
+	/// A wildcard deny names hosts that cannot be enumerated, so under an
+	/// address allow the invocation fails closed as for an unresolvable deny:
+	/// an IP literal is refused, and a name the shim checked still connects
+	/// unless the wildcard covers it.
+	#[tokio::test(flavor = "current_thread")]
+	async fn a_wildcard_deny_fails_closed_under_an_address_allow() {
+		use std::net::SocketAddr;
+
+		let deny = NetDeny::parse(&["*.internal.example".to_string()]).unwrap();
+		let policy = NetPolicy::parse(&["*".to_string()], deny).unwrap().for_invocation().await;
+		assert!(matches!(&policy.denied_addrs, DeniedAddrs::Unknown));
+		assert!(!policy.allows_socket_addr(&"1.1.1.1:443".parse().unwrap()));
+		assert!(!policy.allows_name("db.internal.example"));
+		let public: IpAddr = "1.1.1.1".parse().unwrap();
+		assert_eq!(policy.accept_resolved("one.example", vec![public]), vec![public]);
+		assert!(policy.allows_socket_addr(&SocketAddr::new(public, 443)));
 	}
 
 	fn policy(entries: &[&str]) -> Arc<NetPolicy> {
@@ -1090,5 +1200,131 @@ mod tests {
 		assert_eq!(p.accept_resolved("localhost", vec![loopback]), vec![loopback]);
 		assert!(!p.allows_socket_addr(&SocketAddr::new(loopback, 8080)), "the denied port");
 		assert!(p.allows_socket_addr(&SocketAddr::new(loopback, 9000)), "every other port");
+	}
+
+	#[test]
+	fn parses_a_wildcard_host() {
+		assert_eq!(
+			parse_one("*.Example.COM").unwrap(),
+			NetRule::HostSuffix {
+				suffix: "example.com".to_string(),
+				port: None,
+			}
+		);
+		assert_eq!(
+			parse_one("*.example.com.:443").unwrap(),
+			NetRule::HostSuffix {
+				suffix: "example.com".to_string(),
+				port: Some(443),
+			}
+		);
+		assert_eq!(
+			parse_one("*.bücher.example").unwrap(),
+			NetRule::HostSuffix {
+				suffix: "xn--bcher-kva.example".to_string(),
+				port: None,
+			}
+		);
+	}
+
+	#[test]
+	fn a_malformed_wildcard_is_refused() {
+		// A bare `*` is not a wildcard host: it is `Any`.
+		assert_eq!(parse_one("*").unwrap(), NetRule::Any);
+		for entry in [
+			"*.",
+			"*.com",
+			"a.*.com",
+			"*foo.com",
+			"*.*.foo.com",
+			"*.foo..com",
+			"*.1.2.3.4",
+			"*.10.0.0.0/8",
+			"10.*.0.0/16",
+			"*.foo.com/path",
+			"*.foo.com:http",
+		] {
+			let err = parse_one(entry).unwrap_err().to_string();
+			assert!(err.contains("wildcard"), "{entry}: {err}");
+			assert!(NetDeny::parse(&[entry.to_string()]).is_err(), "{entry}");
+		}
+	}
+
+	#[test]
+	fn a_wildcard_matches_names_strictly_below_it() {
+		let p = policy(&["*.google.com"]);
+		for name in ["www.google.com", "a.b.google.com", "WWW.Google.COM", "www.google.com."] {
+			assert!(p.allows_name(name), "{name}");
+		}
+		for name in ["google.com", "evilgoogle.com", "google.com.evil.com", "1.2.3.4"] {
+			assert!(!p.allows_name(name), "{name}");
+		}
+	}
+
+	#[test]
+	fn a_wildcard_vends_the_addresses_its_names_resolved_to() {
+		let p = policy(&["*.example.com"]);
+		let ip = IpAddr::from([93, 184, 216, 34]);
+		let addr = SocketAddr::new(ip, 443);
+		assert!(!p.allows_socket_addr(&addr), "not vended yet");
+		assert_eq!(p.accept_resolved("api.example.com", vec![ip]), vec![ip]);
+		assert!(p.allows_socket_addr(&addr), "vended under the wildcard");
+		assert!(p.allows_socket_addr(&SocketAddr::new(ip, 8080)), "a port-less wildcard");
+	}
+
+	#[test]
+	fn a_wildcard_does_not_vend_for_the_apex() {
+		let p = policy(&["*.example.com"]);
+		let ip = IpAddr::from([93, 184, 216, 34]);
+		p.accept_resolved("example.com", vec![ip]);
+		assert!(!p.allows_socket_addr(&SocketAddr::new(ip, 443)));
+	}
+
+	#[test]
+	fn a_wildcard_port_pins_the_connect_port() {
+		let p = policy(&["*.example.com:443"]);
+		let ip = IpAddr::from([93, 184, 216, 34]);
+		p.accept_resolved("api.example.com", vec![ip]);
+		assert!(p.allows_socket_addr(&SocketAddr::new(ip, 443)));
+		assert!(!p.allows_socket_addr(&SocketAddr::new(ip, 22)));
+	}
+
+	#[test]
+	fn a_wildcard_alone_cannot_reach_loopback() {
+		let p = policy(&["*.example.com"]);
+		assert!(
+			p.accept_resolved("internal.example.com", vec![IpAddr::from([127, 0, 0, 1])])
+				.is_empty()
+		);
+		assert!(!p.allows_socket_addr(&"127.0.0.1:80".parse().unwrap()));
+	}
+
+	#[test]
+	fn a_wildcard_deny_wins_over_an_allow() {
+		// An exact allow below a wildcard deny
+		let p = policy_denying(&["api.example.com"], &["*.example.com"]);
+		assert!(!p.allows_name("api.example.com"));
+		// The same wildcard on both sides
+		let p = policy_denying(&["*.example.com"], &["*.example.com"]);
+		assert!(!p.allows_name("api.example.com"));
+		// An exact deny carves one host out of a wildcard allow
+		let p = policy_denying(&["*.example.com"], &["secret.example.com"]);
+		assert!(p.allows_name("api.example.com"));
+		assert!(!p.allows_name("secret.example.com"));
+		// A wildcard deny does not reach the apex or a sibling domain
+		let p = policy_denying(&["example.com", "evilexample.com"], &["*.example.com"]);
+		assert!(p.allows_name("example.com"));
+		assert!(p.allows_name("evilexample.com"));
+	}
+
+	#[test]
+	fn a_port_bearing_wildcard_deny_travels_with_the_vended_address() {
+		let p = policy_denying(&["*.example.com"], &["*.example.com:80"]);
+		let ip = IpAddr::from([93, 184, 216, 34]);
+		// The name stays resolvable; the denied port is refused at the connect.
+		assert!(p.allows_name("api.example.com"));
+		p.accept_resolved("api.example.com", vec![ip]);
+		assert!(p.allows_socket_addr(&SocketAddr::new(ip, 443)));
+		assert!(!p.allows_socket_addr(&SocketAddr::new(ip, 80)));
 	}
 }

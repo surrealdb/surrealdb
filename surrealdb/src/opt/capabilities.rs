@@ -390,6 +390,9 @@ impl Capabilities {
 	///
 	/// Adding a net target to the allow list overwrites previously set
 	/// allow-all or allow-none filters.
+	///
+	/// A target is `host[:port]`, `*.domain[:port]` (every subdomain of
+	/// `domain`, not `domain` itself), an IP address or a CIDR block.
 	pub fn allow_net_target<S: AsRef<str>>(
 		&mut self,
 		func: S,
@@ -401,6 +404,9 @@ impl Capabilities {
 	///
 	/// Adding a net target to the allow list overwrites previously set
 	/// allow-all or allow-none filters.
+	///
+	/// A target is `host[:port]`, `*.domain[:port]` (every subdomain of
+	/// `domain`, not `domain` itself), an IP address or a CIDR block.
 	pub fn with_net_target_allowed<S: AsRef<str>>(
 		mut self,
 		func: S,
@@ -428,6 +434,9 @@ impl Capabilities {
 	///
 	/// Adding a net target to the deny list overwrites previously set deny-all
 	/// or deny-none filters.
+	///
+	/// A target is `host[:port]`, `*.domain[:port]` (every subdomain of
+	/// `domain`, not `domain` itself), an IP address or a CIDR block.
 	pub fn deny_net_target<S: AsRef<str>>(
 		&mut self,
 		func: S,
@@ -439,6 +448,9 @@ impl Capabilities {
 	///
 	/// Adding a net target to the deny list overwrites previously set deny-all
 	/// or deny-none filters.
+	///
+	/// A target is `host[:port]`, `*.domain[:port]` (every subdomain of
+	/// `domain`, not `domain` itself), an IP address or a CIDR block.
 	pub fn with_net_target_denied<S: AsRef<str>>(
 		mut self,
 		func: S,

@@ -468,9 +468,35 @@ fn parse_semver(version: &str) -> Result<(u32, u32, u32)> {
 
 #[cfg(test)]
 mod tests {
+	use std::str::FromStr;
+
+	use surrealism_runtime::{NetDeny, NetRule};
+
+	use super::surrealism_deny_net;
 	use crate::dbs::Capabilities;
+	use crate::dbs::capabilities::{NetTarget, Targets};
 	use crate::expr::{Expr, ExtensionCapabilities};
 	use crate::extension::capabilities::effective_capabilities;
+
+	/// A server wildcard deny crosses into the runtime as the same rule. Were it
+	/// to fail to re-parse, the extension would lose all network access instead,
+	/// which is safe but would hide the mismatch.
+	#[test]
+	fn a_wildcard_deny_reaches_the_runtime_as_a_wildcard() {
+		let server = Capabilities::all().without_network_targets(Targets::Some(
+			[NetTarget::from_str("*.example.com:443").unwrap()].into(),
+		));
+		let NetDeny::Rules(rules) = surrealism_deny_net(&server) else {
+			panic!("expected the deny rules to cross as rules");
+		};
+		assert_eq!(
+			&*rules,
+			[NetRule::HostSuffix {
+				suffix: "example.com".to_string(),
+				port: Some(443),
+			}]
+		);
+	}
 
 	/// `strict_timeout: false` in a definition reaches the runner only on a
 	/// server that allows unbounded execution; by default the invocation stays

@@ -74,8 +74,9 @@ definitions of one archive may grant different ones.
   grant also allows by address (`*`, a CIDR or an IP), `for_invocation`
   resolves each denied hostname once for the invocation and refuses those
   addresses too, so a guest cannot reach a denied host by its IP literal. If a
-  denied name does not resolve within `DENY_RESOLVE_TIMEOUT`, the invocation
-  may connect only to addresses the DNS shim vended.
+  denied name does not resolve within `DENY_RESOLVE_TIMEOUT`, or a deny rule is
+  a wildcard (`*.example.com`, whose hosts cannot be enumerated), the
+  invocation may connect only to addresses the DNS shim vended.
 
 ## Epoch-Based Timeouts (Two-Engine Model)
 

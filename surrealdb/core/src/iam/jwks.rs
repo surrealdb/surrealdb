@@ -1,4 +1,3 @@
-use std::str::FromStr;
 use std::sync::{Arc, LazyLock};
 
 use anyhow::{Result, bail};
@@ -264,22 +263,12 @@ fn check_capabilities_url(kvs: &Datastore, url: &str) -> Result<()> {
 	// when the URL relies on the scheme's default. A `deny-net HOST:PORT` rule
 	// is stored as `NetTarget::Host(host, Some(port))` and only matches a target
 	// that carries the same port, so dropping an implicit `:80` / `:443` would
-	// leave such a rule unenforced.
-	let addr = match url_parsed.host_str() {
-		Some(host) => {
-			if let Some(port) = url_parsed.port_or_known_default() {
-				format!("{host}:{port}")
-			} else {
-				host.to_string()
-			}
-		}
+	// leave such a rule unenforced. The target is built from the parsed host
+	// rather than re-parsed as a rule, so a host spelled like a wildcard rule is
+	// checked as the one host it is.
+	let target = match url_parsed.host() {
+		Some(host) => NetTarget::Host(host.to_owned(), url_parsed.port_or_known_default()),
 		None => {
-			bail!(Error::InvalidUrl(url.to_string()));
-		}
-	};
-	let target = match NetTarget::from_str(&addr) {
-		Ok(host) => host,
-		Err(_) => {
 			bail!(Error::InvalidUrl(url.to_string()));
 		}
 	};
@@ -340,13 +329,12 @@ fn build_jwks_client(kvs: &Datastore) -> Result<Client> {
 		// `port_or_known_default` for the same reason as the initial check: an
 		// implicit default port must still be matched against port-specific
 		// deny rules.
-		let addr = match (attempt.url().host_str(), attempt.url().port_or_known_default()) {
-			(Some(host), Some(port)) => Some(format!("{host}:{port}")),
-			(Some(host), None) => Some(host.to_string()),
-			(None, _) => None,
-		};
-		match addr.as_deref().map(NetTarget::from_str) {
-			Some(Ok(target)) if capabilities.allows_network_target(&target) => attempt.follow(),
+		let target = attempt
+			.url()
+			.host()
+			.map(|host| NetTarget::Host(host.to_owned(), attempt.url().port_or_known_default()));
+		match target {
+			Some(target) if capabilities.allows_network_target(&target) => attempt.follow(),
 			_ => {
 				warn!(
 					"Capabilities denied JWKS redirect to disallowed network target: '{url_str}'"
@@ -435,6 +423,8 @@ fn cache_key_from_url(url: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+	use std::str::FromStr;
+
 	use rand::distr::{Alphanumeric, SampleString};
 	use wiremock::matchers::{header, method, path};
 	use wiremock::{Mock, MockServer, ResponseTemplate};
