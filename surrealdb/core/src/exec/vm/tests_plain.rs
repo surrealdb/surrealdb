@@ -315,6 +315,12 @@ const PLAN_TIME_FUNCTIONS: &[(&str, &str, &str)] = &[
 		 on their endpoints, purged by the code that body purges it with",
 	),
 	(
+		"schema_host.rs",
+		"validate_reference_options",
+		"declared schema service: what DEFINE FIELD and ALTER FIELD refuse of a field's \
+		 REFERENCE clause, judged as their bodies judge it",
+	),
+	(
 		"live.rs",
 		"compile",
 		"the compile of a subscription's unit, as its LIVE statement arrives or in a fault on a \

@@ -1594,7 +1594,7 @@ async fn step_inner(
 					.map_err(ControlFlow::Err)?,
 				FieldCheck::Reference {
 					field: reg,
-				} => crate::ddl::define_field_statement_validate_reference_options(&field(*reg)?)
+				} => super::schema_host::validate_reference_options(&field(*reg)?)
 					.map_err(ControlFlow::Err)?,
 				FieldCheck::Inline {
 					field: reg,

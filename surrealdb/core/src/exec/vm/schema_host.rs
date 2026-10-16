@@ -271,6 +271,14 @@ pub(super) async fn purge_edge_pointers(
 	.await
 }
 
+/// What `DEFINE FIELD` and `ALTER FIELD` refuse of the `REFERENCE` clause of the
+/// field `field`, judged as their bodies judge it.
+pub(super) fn validate_reference_options(
+	field: &crate::catalog::FieldDefinition,
+) -> anyhow::Result<()> {
+	crate::ddl::define_field_statement_validate_reference_options(field)
+}
+
 /// What refuses removing table `name` from the database `ns`, `db`. A non-empty
 /// LIGHTWEIGHT relation that uses `name` as an endpoint is reported first, then
 /// a non-empty LIGHTWEIGHT `name` itself. Edges are read through `txn`.
