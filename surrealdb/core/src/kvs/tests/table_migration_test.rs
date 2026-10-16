@@ -759,3 +759,310 @@ async fn a_step_minted_mid_lap_reaches_the_rows_the_lap_had_passed() {
 		run(&ds, "RETURN [{ a: '1', id: t:1 }, { a: '2', id: t:2 }, { a: '3', id: t:3 }];").await
 	);
 }
+
+/// The table migration job's entry for `tb`, if it has one.
+async fn entry(
+	ds: &Datastore,
+	tb: &str,
+) -> Option<crate::key::table_migration::TableMigrationState> {
+	let (ns, db) = ids(ds).await;
+	let txn = ds.transaction(Read).await.unwrap();
+	let state = txn.get_tb_migration_job(ns, db, &TableName::from(tb)).await.unwrap();
+	txn.cancel().await.unwrap();
+	state
+}
+
+/// What `INFO FOR TABLE` reports of `tb`'s check for undeclared keys.
+async fn undeclared(ds: &Datastore, tb: &str) -> Value {
+	run(ds, &format!("(INFO FOR TABLE {tb}).migrations.undeclared;")).await.remove(0)
+}
+
+/// The report of a check for undeclared keys, as `INFO FOR TABLE` shows it.
+async fn report(ds: &Datastore, failures: i64, finished: bool) -> Value {
+	run(ds, &format!("RETURN {{ failures: {failures}, finished: {finished} }};")).await.remove(0)
+}
+
+/// A level-4 table made `SCHEMAFULL` over rows holding top-level keys no definition declares
+/// counts each such row once, however many such keys it holds: a write of any of them is refused.
+/// The check states no claim, and does not keep a declared field from being claimed.
+#[tokio::test]
+async fn a_table_made_schemafull_reports_the_rows_holding_undeclared_keys() {
+	let ds = ds().await;
+	run(
+		&ds,
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE FIELD a ON t TYPE int;
+		 CREATE t:1 SET a = 1;
+		 CREATE t:2 SET a = 2, z = 1;
+		 CREATE t:3 SET a = 3, y = 'x', z = 2;
+		 CREATE t:4 SET a = 4, o = { k: 1 };
+		 ALTER TABLE t SCHEMAFULL;",
+	)
+	.await;
+	assert_eq!(undeclared(&ds, "t").await, report(&ds, 0, false).await, "the change queues it");
+	drain(&ds).await;
+	assert_eq!(undeclared(&ds, "t").await, report(&ds, 3, true).await);
+	assert!(claimed(&ds, "t", "a").await);
+	let writes = attempt(
+		&ds,
+		"UPDATE t:1 SET a = 5 RETURN NONE;
+		 UPDATE t:2 SET a = 5 RETURN NONE;
+		 UPDATE t:4 SET a = 5 RETURN NONE;",
+	)
+	.await;
+	assert!(writes[0].is_ok(), "{writes:?}");
+	assert_eq!(
+		writes[1],
+		Err("Found field 'z', but no such field exists for table 't'".to_owned())
+	);
+	assert_eq!(
+		writes[2],
+		Err("Found field 'o', but no such field exists for table 't'".to_owned())
+	);
+	// A finished check is not judged by the lap a verification of a field starts, and keeps its
+	// count.
+	run(&ds, "ALTER FIELD a ON t ASSERT $value > 0;").await;
+	assert_eq!(undeclared(&ds, "t").await, report(&ds, 3, true).await);
+	drain(&ds).await;
+	assert_eq!(undeclared(&ds, "t").await, report(&ds, 3, true).await);
+}
+
+/// `id`, `in` and `out` are the record's own: a write of an edge never refuses them, declared or
+/// not, so the check counts only the edge holding a key no definition declares. A table of any
+/// type declares no `in` or `out` of its own.
+#[tokio::test]
+async fn the_check_for_undeclared_keys_passes_the_keys_of_an_edge() {
+	let ds = ds().await;
+	run(
+		&ds,
+		"DEFINE TABLE e TYPE ANY SCHEMALESS;
+		 RELATE p:1->e:1->p:2 SET w = 1;
+		 RELATE p:1->e:2->p:3 SET w = 2, z = 1;
+		 DEFINE FIELD w ON e TYPE int;
+		 ALTER TABLE e SCHEMAFULL;",
+	)
+	.await;
+	let declared = entry(&ds, "e").await.and_then(|state| state.undeclared).map(|c| c.declared);
+	assert_eq!(declared, Some(vec!["w".to_owned()]));
+	drain(&ds).await;
+	assert_eq!(undeclared(&ds, "e").await, report(&ds, 1, true).await);
+	let writes =
+		attempt(&ds, "UPDATE e:1 SET w = 3 RETURN NONE; UPDATE e:2 SET w = 3 RETURN NONE;").await;
+	assert!(writes[0].is_ok(), "{writes:?}");
+	assert_eq!(
+		writes[1],
+		Err("Found field 'z', but no such field exists for table 'e'".to_owned())
+	);
+}
+
+/// A lap that judged every row and counted none leaves nothing to report, and the entry goes once
+/// nothing else is left in it.
+#[tokio::test]
+async fn a_table_whose_rows_hold_only_declared_keys_reports_nothing() {
+	let ds = ds().await;
+	run(
+		&ds,
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE FIELD a ON t TYPE int;
+		 DEFINE FIELD b ON t TYPE option<string>;
+		 CREATE t:1 SET a = 1;
+		 CREATE t:2 SET a = 2, b = 'x';
+		 ALTER TABLE t SCHEMAFULL;",
+	)
+	.await;
+	assert!(entry(&ds, "t").await.is_some_and(|state| state.undeclared.is_some()));
+	drain(&ds).await;
+	assert_eq!(undeclared(&ds, "t").await, Value::None);
+	assert_eq!(entry(&ds, "t").await, None);
+}
+
+/// Raising a database to level 4 checks each of its `SCHEMAFULL` tables, whose rows were written
+/// under level 3, for undeclared keys.
+#[tokio::test]
+async fn raising_the_database_to_level_4_reports_the_rows_holding_undeclared_keys() {
+	let ds = ds().await;
+	run(
+		&ds,
+		"ALTER DATABASE test COMPATIBILITY 3;
+		 DEFINE TABLE t SCHEMALESS;
+		 CREATE t:1 SET a = 1, z = 1;
+		 CREATE t:2 SET a = 2;
+		 DEFINE FIELD a ON t TYPE int;
+		 ALTER TABLE t SCHEMAFULL;",
+	)
+	.await;
+	drain(&ds).await;
+	assert_eq!(undeclared(&ds, "t").await, Value::None, "level 3 queues no check");
+	run(&ds, "ALTER DATABASE test COMPATIBILITY 4;").await;
+	drain(&ds).await;
+	assert_eq!(undeclared(&ds, "t").await, report(&ds, 1, true).await);
+}
+
+/// `REMOVE UNDECLARED FIELDS` clears the keys the check counted, so the check runs again, finds
+/// none, and every row is writable.
+#[tokio::test]
+async fn removing_undeclared_fields_runs_the_check_again() {
+	let ds = ds().await;
+	run(
+		&ds,
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE FIELD a ON t TYPE int;
+		 CREATE t:1 SET a = 1, z = 1;
+		 CREATE t:2 SET a = 2;
+		 ALTER TABLE t SCHEMAFULL;",
+	)
+	.await;
+	drain(&ds).await;
+	assert_eq!(undeclared(&ds, "t").await, report(&ds, 1, true).await);
+	run(&ds, "ALTER TABLE t MIGRATE EXISTING ROWS AS tidy REMOVE UNDECLARED FIELDS;").await;
+	assert_eq!(undeclared(&ds, "t").await, report(&ds, 0, false).await);
+	drain(&ds).await;
+	assert_eq!(undeclared(&ds, "t").await, Value::None);
+	assert_eq!(entry(&ds, "t").await, None);
+	let write = attempt(&ds, "UPDATE t:1 SET a = 5 RETURN NONE;").await.remove(0);
+	assert!(write.is_ok(), "{write:?}");
+}
+
+/// A definition that declares a counted key, or a removal that leaves a key undeclared, changes the
+/// names the check judges rows against, so the check runs again over every row.
+#[tokio::test]
+async fn a_change_of_the_declared_names_runs_the_check_again() {
+	let ds = ds().await;
+	run(
+		&ds,
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE FIELD a ON t TYPE int;
+		 CREATE t:1 SET a = 1, z = 1;
+		 CREATE t:2 SET a = 2, y = 1, z = 2;
+		 CREATE t:3 SET a = 3, z = 3;
+		 ALTER TABLE t SCHEMAFULL;",
+	)
+	.await;
+	drain(&ds).await;
+	assert_eq!(undeclared(&ds, "t").await, report(&ds, 3, true).await);
+	run(&ds, "DEFINE FIELD z ON t TYPE option<int>;").await;
+	assert_eq!(undeclared(&ds, "t").await, report(&ds, 0, false).await);
+	drain(&ds).await;
+	assert_eq!(undeclared(&ds, "t").await, report(&ds, 1, true).await);
+	// A definition that declares no new name leaves the finished check as it is.
+	run(&ds, "DEFINE FIELD OVERWRITE z ON t TYPE option<int> COMMENT 'kept';").await;
+	assert_eq!(undeclared(&ds, "t").await, report(&ds, 1, true).await);
+	// At level 3 a removed field keeps its values, which the table no longer declares. `INFO`
+	// shows no check there until it counts a row, so the queue entry is read.
+	run(&ds, "ALTER DATABASE test COMPATIBILITY 3; REMOVE FIELD z ON t;").await;
+	let check = entry(&ds, "t").await.and_then(|state| state.undeclared);
+	assert_eq!(
+		check,
+		Some(crate::key::table_migration::UndeclaredKeys {
+			declared: vec!["a".to_owned()],
+			failures: 0,
+			finished: false,
+		})
+	);
+	drain(&ds).await;
+	assert_eq!(undeclared(&ds, "t").await, report(&ds, 3, true).await);
+}
+
+/// A lap that has passed rows under names the table no longer declares starts over, whatever
+/// changed the names: the rows it passed were judged against names that no longer stand.
+#[tokio::test]
+async fn a_lap_judged_under_other_names_starts_over() {
+	let ds = ds().await;
+	run(
+		&ds,
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE FIELD a ON t TYPE int;
+		 CREATE t:1 SET a = 1, z = 1;
+		 CREATE t:2 SET a = 2;
+		 ALTER TABLE t SCHEMAFULL;",
+	)
+	.await;
+	let (ns, db) = ids(&ds).await;
+	let table = TableName::from("t");
+	let key = crate::key::schema::TableMigrationKey {
+		ns,
+		db,
+		tb: std::borrow::Cow::Borrowed(&table),
+	};
+	// The lap has passed every row under names that declared `z`, and counted none.
+	{
+		let txn = ds.transaction(Write).await.unwrap();
+		let records = crate::key::schema::RecordPrefix {
+			ns,
+			db,
+			tb: std::borrow::Cow::Borrowed(&table),
+		}
+		.range()
+		.unwrap();
+		let rows = txn.scan_raw(records, 16, 0, None).await.unwrap();
+		let mut state = txn.get_tb_migration_job(ns, db, &table).await.unwrap().unwrap();
+		state.cursor = rows.last().map(|(key, _)| key.clone());
+		let check = state.undeclared.as_mut().unwrap();
+		check.declared = vec!["a".to_owned(), "z".to_owned()];
+		check.failures = 0;
+		txn.set_key(&key, &state).await.unwrap();
+		txn.commit().await.unwrap();
+	}
+	drain(&ds).await;
+	assert_eq!(undeclared(&ds, "t").await, report(&ds, 1, true).await);
+}
+
+/// A write that stores a row without checking it (`OPTION IMPORT`) starts a check under way over,
+/// as it starts the verification of a field over.
+#[tokio::test]
+async fn an_unchecked_write_restarts_a_check_under_way() {
+	let ds = ds().await;
+	run(
+		&ds,
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE FIELD a ON t TYPE int;
+		 CREATE t:1 SET a = 1;
+		 ALTER TABLE t SCHEMAFULL;",
+	)
+	.await;
+	let (ns, db) = ids(&ds).await;
+	let table = TableName::from("t");
+	let key = crate::key::schema::TableMigrationKey {
+		ns,
+		db,
+		tb: std::borrow::Cow::Borrowed(&table),
+	};
+	let lap = {
+		let txn = ds.transaction(Write).await.unwrap();
+		let mut state = txn.get_tb_migration_job(ns, db, &table).await.unwrap().unwrap();
+		state.verify.clear();
+		state.cursor = Some(b"passed".to_vec());
+		state.undeclared.as_mut().unwrap().failures = 3;
+		txn.set_key(&key, &state).await.unwrap();
+		txn.commit().await.unwrap();
+		state.lap
+	};
+	run(&ds, "OPTION IMPORT; CREATE t:2 SET a = 2;").await;
+	let state = entry(&ds, "t").await.unwrap();
+	assert_eq!(state.cursor, None);
+	assert_eq!(state.lap, lap + 1);
+	assert_eq!(state.undeclared.unwrap().failures, 0);
+	drain(&ds).await;
+	assert_eq!(entry(&ds, "t").await, None, "the lap judged every row and counted none");
+}
+
+/// A `SCHEMALESS` table refuses no key, so a table made `SCHEMALESS` drops its check, and the
+/// entry goes once nothing else is left in it.
+#[tokio::test]
+async fn a_table_made_schemaless_drops_its_check() {
+	let ds = ds().await;
+	run(
+		&ds,
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE FIELD a ON t TYPE int;
+		 CREATE t:1 SET a = 1, z = 1;
+		 ALTER TABLE t SCHEMAFULL;",
+	)
+	.await;
+	drain(&ds).await;
+	assert_eq!(undeclared(&ds, "t").await, report(&ds, 1, true).await);
+	run(&ds, "ALTER TABLE t SCHEMALESS;").await;
+	assert_eq!(entry(&ds, "t").await, None);
+	run(&ds, "ALTER TABLE t SCHEMAFULL;").await;
+	assert_eq!(undeclared(&ds, "t").await, report(&ds, 0, false).await, "queued again");
+}

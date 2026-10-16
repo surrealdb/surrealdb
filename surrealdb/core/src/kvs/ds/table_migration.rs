@@ -29,6 +29,12 @@
 //!   writes alone, the job waits for the transactions older than the change before the lap's first
 //!   page; on any other store a pass reports its counts and never makes a claim. A field that did
 //!   not conform withdraws the table's claims if one is on the definition the lap judged.
+//! - The check for undeclared keys judges each record, brought through any pending step, by its
+//!   top-level keys: one other than `id`, `in` and `out` that no definition's path begins with is a
+//!   key a write of the row refuses ([`crate::exec::migrate::holds_undeclared_key`]). The check
+//!   states no claim. It reports the rows it counted, unless the lap judged every row and counted
+//!   none, which leaves nothing to report. A lap that has passed rows under names the table no
+//!   longer declares starts over.
 //!
 //! The job writes only record keys, never through `put_record` or `set_record`, which would store
 //! the record through the transaction's record cache. It runs no events, live queries or
@@ -243,8 +249,7 @@ impl Datastore {
 				Self::commit_page(&txn).await?;
 				return Ok(TableOutcome::Done);
 			}
-			let verifying = state.verify.iter().any(|f| !f.finished);
-			if verifying && !state.settled && txn.sole_writer() {
+			if state.verifying() && !state.settled && txn.sole_writer() {
 				// The lap judges rows only once no transaction that began before the
 				// verification was queued can still commit one behind its cursor. Every row
 				// committed afterwards was written by a transaction that saw the new
@@ -387,7 +392,24 @@ impl Datastore {
 		let exec = Self::migration_context(dbs, txn, target).await?;
 		let layouts = txn.table_layouts(target.ns, target.db, &target.tb, None).await?;
 		let replay = Replay::of(&layouts, target.ns, target.db);
+		let fields = txn.all_tb_fields(target.ns, target.db, &target.tb, None).await?;
 		let mut next = state.clone();
+		// The check for undeclared keys judges rows against the names the table declares at the
+		// top level now. Rows a lap passed under other names were judged against names that no
+		// longer stand, so the lap starts over.
+		let declared = crate::exec::migrate::declared_roots(fields.iter());
+		if next
+			.undeclared
+			.as_ref()
+			.is_some_and(|check| !check.finished && check.declared != declared)
+		{
+			if next.cursor.is_some() {
+				next.restart();
+			}
+			if let Some(check) = next.undeclared.as_mut() {
+				check.declared = declared;
+			}
+		}
 		if next.lap == 0 {
 			next.lap = 1;
 		}
@@ -401,7 +423,6 @@ impl Datastore {
 		// The definitions of the fields under verification, by the position of each in the
 		// entry; a field whose definition changed since the pass started is dropped from it, as
 		// the definition is no longer the one the pass judges.
-		let fields = txn.all_tb_fields(target.ns, target.db, &target.tb, None).await?;
 		next.verify.retain(|verified| {
 			verified.finished
 				|| fields.iter().any(|fd| {
@@ -480,6 +501,10 @@ impl Datastore {
 					next.fallbacks += fallbacks;
 				}
 			}
+			// A row that is not an object has no fields to judge.
+			let Value::Object(object) = &record.data else {
+				continue;
+			};
 			for (verified, test) in next.verify.iter_mut().zip(&tests) {
 				if verified.finished {
 					continue;
@@ -487,17 +512,18 @@ impl Datastore {
 				let Some((key, (test, _))) = test else {
 					continue;
 				};
-				// A row that is not an object has no fields to judge. An object that holds no
-				// value at the field is judged as `NONE`: the report lists the rows a later
-				// write would refuse, and a field whose type refuses `NONE` states no claim
-				// over one.
-				let Value::Object(object) = &record.data else {
-					continue;
-				};
+				// An object that holds no value at the field is judged as `NONE`: the report
+				// lists the rows a later write would refuse, and a field whose type refuses `NONE`
+				// states no claim over one.
 				let value = object.get(key.as_str()).unwrap_or(&Value::None);
 				if !test.conforms(&frame, value).await.map_err(into_error)? {
 					verified.failures += 1;
 				}
+			}
+			if let Some(check) = next.undeclared.as_mut().filter(|check| !check.finished)
+				&& crate::exec::migrate::holds_undeclared_key(object, &check.declared)
+			{
+				check.failures += 1;
 			}
 		}
 		next.cursor = rows.last().map(|(key, _)| key.clone());
@@ -510,8 +536,10 @@ impl Datastore {
 	/// throughout, where the lap could judge every row against the field's whole definition
 	/// (`whole`, by the position of each in the entry) and the rewrite is done, and drop a field
 	/// that conformed even where the table's claims cannot state it; withdraw the table's claims
-	/// when a field that did not conform holds one on the definition the lap judged; and delete
-	/// the entry once it asks for nothing and reports nothing.
+	/// when a field that did not conform holds one on the definition the lap judged; drop the
+	/// check for undeclared keys when the lap judged every row and counted none, and finish it
+	/// with its count otherwise; and delete the entry once it asks for nothing and reports
+	/// nothing.
 	#[allow(clippy::too_many_arguments)]
 	async fn end_lap(
 		txn: &Arc<Transaction>,
@@ -530,10 +558,13 @@ impl Datastore {
 				again = true;
 			}
 		}
+		// The lap judged every row the table can hold: it began after every transaction that
+		// could still commit one behind its cursor had ended, and no newer step is left to bring
+		// the rows through.
+		let judged_all = next.settled && txn.sole_writer() && !again;
 		// A claim is stored in the stored grammar, which a store still at the legacy feature level
 		// does not write.
-		let promotable =
-			next.settled && txn.sole_writer() && !again && !txn.write_level().is_legacy();
+		let promotable = judged_all && !txn.write_level().is_legacy();
 		let claimable = if promotable && next.verify.iter().any(|f| !f.finished && f.failures == 0)
 		{
 			claimable_fields(fields)
@@ -598,10 +629,18 @@ impl Datastore {
 			kept.push(verified);
 		}
 		next.verify = kept;
+		// The check for undeclared keys states no claim: a lap that judged every row and counted
+		// none leaves nothing to report.
+		if !again && let Some(check) = next.undeclared.as_mut().filter(|check| !check.finished) {
+			check.finished = true;
+			if judged_all && check.failures == 0 {
+				next.undeclared = None;
+			}
+		}
 		if again {
 			next.restart();
 		}
-		if !next.has_work() && next.verify.is_empty() {
+		if next.is_spent() {
 			txn.del_compare_key(&target.key(), Some(state)).await?;
 			return Ok(false);
 		}

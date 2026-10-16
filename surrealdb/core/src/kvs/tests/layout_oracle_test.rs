@@ -117,8 +117,8 @@ struct Known {
 }
 
 const UNDECLARED_KEPT: &str = "a table made SCHEMAFULL at level 4 keeps the fields its rows hold \
-                               that it does not declare, which an export carries and an import \
-                               refuses (`making_a_table_schemafull_reports_rows_holding_undeclared_fields`)";
+                               that it does not declare, which its check for undeclared keys \
+                               reports, an export carries and an import refuses";
 
 const FAILED_BUILD_KEPT: &str = "a UNIQUE `DEFINE INDEX` whose build fails in a transaction its \
                                  caller commits keeps its definition, which enforces nothing, and \
@@ -150,6 +150,12 @@ const KNOWN: &[Known] = &[
 	Known {
 		kind: "import-failed",
 		scenario: "lt/interaction_table_type_and_view",
+		detail: "but no such field exists",
+		reason: UNDECLARED_KEPT,
+	},
+	Known {
+		kind: "import-failed",
+		scenario: "lt/interaction_undeclared_keys",
 		detail: "but no such field exists",
 		reason: UNDECLARED_KEPT,
 	},

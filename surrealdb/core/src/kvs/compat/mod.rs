@@ -45,6 +45,7 @@ pub(crate) mod fixtures;
 mod generator;
 mod module_definition;
 mod stored_record;
+mod table_migration_state;
 mod tests;
 
 #[rustfmt::skip]

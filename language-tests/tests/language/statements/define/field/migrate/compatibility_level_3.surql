@@ -45,7 +45,7 @@ value = "4"
 value = "[{ a: '1', b: 2, id: p:1 }]"
 
 [[test.results]]
-value = "{ events: {  }, fields: { a: 'DEFINE FIELD a ON p TYPE int PERMISSIONS FULL', c: 'DEFINE FIELD c ON p TYPE int PERMISSIONS FULL' }, indexes: {  }, lives: {  }, migrations: { generation: 6, guaranteed: [], migrations: [], verification: [{ failures: 0, field: 'a', finished: false }, { failures: 0, field: 'c', finished: false }] }, tables: {  } }"
+value = "{ events: {  }, fields: { a: 'DEFINE FIELD a ON p TYPE int PERMISSIONS FULL', c: 'DEFINE FIELD c ON p TYPE int PERMISSIONS FULL' }, indexes: {  }, lives: {  }, migrations: { generation: 6, guaranteed: [], migrations: [], undeclared: { failures: 0, finished: false }, verification: [{ failures: 0, field: 'a', finished: false }, { failures: 0, field: 'c', finished: false }] }, tables: {  } }"
 
 [[test.results]]
 error = "Cannot change field `a` of table `p`: the table is SCHEMAFULL in a database at compatibility level 4 and has rows, and the new definition does not accept every value the old one did: add MIGRATE EXISTING ROWS"

@@ -94,7 +94,7 @@ use crate::key::schema::{
 	DiskannPendingKey, DiskannPendingPrefix, DiskannRecordPendingShardShardPrefix,
 	DiskannWriterLeaseKey, DiskannWriterLeaseShardPrefix,
 };
-use crate::key::table_migration::{TableMigrationState, VerifiedField};
+use crate::key::table_migration::{TableMigrationState, UndeclaredKeys, VerifiedField};
 use crate::layouts::LayoutSet;
 use crate::obs::Instrument;
 use crate::sequences::{Sequence, Sequences};
@@ -4574,6 +4574,76 @@ impl Transaction {
 		Ok(())
 	}
 
+	/// Queue table `tb` for the check for rows holding a top-level key none of the names in
+	/// `declared` (sorted) names, replacing any check queued before, and restart the lap so it
+	/// reads every row from the start, after every transaction older than this one has ended.
+	pub async fn queue_tb_undeclared(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		declared: Vec<String>,
+	) -> Result<()> {
+		let key = Self::migration_job_key(ns, db, tb);
+		let mut state = self.get_key(&key, None).await?.unwrap_or_default();
+		state.undeclared = Some(UndeclaredKeys {
+			declared,
+			failures: 0,
+			finished: false,
+		});
+		state.settled = false;
+		state.restart();
+		self.set_key(&key, &state).await?;
+		self.trigger_table_migration();
+		Ok(())
+	}
+
+	/// Run the check for undeclared keys queued on table `tb`, finished or not, again: when
+	/// `declared` (sorted) is not the set of names it judges rows against, or when `rows_changed`,
+	/// since a step clears keys from the rows it judged. A table with no check queues none.
+	pub async fn recheck_tb_undeclared(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		declared: Vec<String>,
+		rows_changed: bool,
+	) -> Result<()> {
+		let key = Self::migration_job_key(ns, db, tb);
+		let Some(state) = self.get_key(&key, None).await? else {
+			return Ok(());
+		};
+		match &state.undeclared {
+			Some(check) if rows_changed || check.declared != declared => {
+				self.queue_tb_undeclared(ns, db, tb, declared).await
+			}
+			_ => Ok(()),
+		}
+	}
+
+	/// Drop the check for undeclared keys queued on table `tb`, if any, deleting the entry when
+	/// nothing else is left in it: a `SCHEMALESS` table refuses no key, so the check reports
+	/// nothing a write refuses.
+	pub async fn drop_tb_undeclared(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<()> {
+		let key = Self::migration_job_key(ns, db, tb);
+		let Some(mut state) = self.get_key(&key, None).await? else {
+			return Ok(());
+		};
+		if state.undeclared.take().is_none() {
+			return Ok(());
+		}
+		if state.is_spent() {
+			self.del_key(&key).await
+		} else {
+			self.set_key(&key, &state).await
+		}
+	}
+
 	/// Restart the verification under way on table `tb`, if any, for a write that stores a record
 	/// without checking it (`OPTION IMPORT`).
 	///
@@ -4591,7 +4661,7 @@ impl Transaction {
 		let Some(mut state) = self.getu_key(&key).await? else {
 			return Ok(());
 		};
-		if !state.verify.iter().any(|f| !f.finished) {
+		if !state.verifying() {
 			return Ok(());
 		}
 		state.settled = false;

@@ -321,7 +321,13 @@ fn describe(section: &Value) -> String {
 		Some(progress) => format!(" progress {}", progress.to_sql()),
 		None => String::new(),
 	};
-	format!("steps [{steps}] guaranteed [{guaranteed}] verify [{verify}]{progress}")
+	let undeclared = match object.get("undeclared") {
+		Some(check) => {
+			format!(" undeclared {}:{}", member(check, "failures"), member(check, "finished"))
+		}
+		None => String::new(),
+	};
+	format!("steps [{steps}] guaranteed [{guaranteed}] verify [{verify}]{progress}{undeclared}")
 }
 
 // ---------------------------------------------------------------------------
@@ -2097,7 +2103,7 @@ const CASES: &[Case] = &[
 			},
 			Level {
 				empty: r#"accepted | before: none | a:U | change: steps [] guaranteed [] verify [] | a:U | none | job: steps [] guaranteed [] verify [] | a:U"#,
-				populated: r#"accepted | before: none | a:U | change: steps [] guaranteed [] verify [a:0:false] | a:U | rewrite=false verify=[a:0:false] | job: steps [] guaranteed [a] verify [] | a:G"#,
+				populated: r#"accepted | before: none | a:U | change: steps [] guaranteed [] verify [a:0:false] undeclared 0:false | a:U | rewrite=false verify=[a:0:false] | job: steps [] guaranteed [a] verify [] | a:G"#,
 				read_after: r#"[{ a: 1, id: tb:1 }, { a: 2, id: tb:2 }]"#,
 			},
 		],
@@ -2119,7 +2125,7 @@ const CASES: &[Case] = &[
 			},
 			Level {
 				empty: r#"accepted | before: none | a:U | change: steps [] guaranteed [] verify [] | a:U | none | job: steps [] guaranteed [] verify [] | a:U"#,
-				populated: r#"accepted | before: steps [] guaranteed [] verify [a:1:true] | a:U | change: steps [] guaranteed [] verify [a:0:false] | a:U | rewrite=false verify=[a:0:false] | job: steps [] guaranteed [] verify [a:1:true] | a:U"#,
+				populated: r#"accepted | before: steps [] guaranteed [] verify [a:1:true] | a:U | change: steps [] guaranteed [] verify [a:0:false] undeclared 0:false | a:U | rewrite=false verify=[a:0:false] | job: steps [] guaranteed [] verify [a:1:true] | a:U"#,
 				read_after: r#"[{ a: 1, id: tb:1 }, { a: 'x', id: tb:2 }]"#,
 			},
 		],
@@ -2339,7 +2345,6 @@ async fn an_assert_added_to_an_enforced_table_with_rows_counts_its_violations() 
 /// Change 25: making a table SCHEMAFULL in a level 4 database verifies the
 /// absence of undeclared fields, and reports the rows that hold one.
 #[tokio::test]
-#[ignore = "BUG: ALTER TABLE ... SCHEMAFULL verifies each field but not the absence of undeclared fields, so a row holding one is never reported"]
 async fn making_a_table_schemafull_reports_rows_holding_undeclared_fields() {
 	let ds = datastore(4).await;
 	run(
@@ -2351,7 +2356,10 @@ async fn making_a_table_schemafull_reports_rows_holding_undeclared_fields() {
 	run(&ds, "ALTER TABLE tb SCHEMAFULL;").await;
 	drain(&ds).await;
 	let section = section(&ds, "tb").await;
-	assert!(section.contains(":1:true"), "tb:1 holds `z`, which no field declares: {section}");
+	assert!(
+		section.ends_with(" undeclared 1:true"),
+		"tb:1 holds `z`, which no field declares: {section}"
+	);
 }
 
 /// Change 6: a row that holds a key beneath an object field is refused when

@@ -235,6 +235,19 @@ stage does not judge (`OPTION IMPORT`) forfeits the table's claims and restarts 
 The failures found are shown in `INFO FOR TABLE`, with the migrations the table has run, the fields
 it guarantees and the progress of a lap under way.
 
+A table that comes to enforce migrations over rows (a `SCHEMALESS` table made `SCHEMAFULL` at level
+4, or a database raised to level 4) is also checked for rows holding a top-level key no definition
+declares. Level 4 keeps such a key until `REMOVE UNDECLARED FIELDS` clears it, but a `SCHEMAFULL`
+table refuses every write of the row, so the check reports the rows a later write refuses. It
+judges each record, brought through any pending step, by its top-level keys: one other than `id`,
+`in` and `out` that no definition's path begins with (the names `REMOVE UNDECLARED FIELDS` keeps)
+counts the row once. It states no claim. A lap that judged every row and counted none leaves
+nothing to report; otherwise `INFO FOR TABLE` shows `undeclared: { failures, finished }`. The check
+runs again, finished or not, when the names the table declares at the top level change or `REMOVE
+UNDECLARED FIELDS` clears keys from the rows, and a lap that has passed rows under names that no
+longer stand starts over. A table made `SCHEMALESS` drops the check, since nothing refuses such a
+key there.
+
 A claim lets a migration leave out `FALLBACK` only where its transform is `$value` itself, or a
 cast of it to a number kind, and the previous definition's test, folded as the claim vouches for
 it, widens to the step's test.

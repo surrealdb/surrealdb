@@ -1669,10 +1669,11 @@ fn fold_children(
 /// `name`, so the statement does nothing.
 ///
 /// The declared names are the roots of the table's field definitions as they
-/// stand when the step is minted; the record's own keys ([`is_record_key`])
-/// are always kept. An index reading a
-/// name the step clears is refused, a `COUNT` index reading it in its `WHERE`
-/// guard as much as one with the name as a column.
+/// stand when the step is minted ([`declared_roots`]); the record's own keys
+/// ([`is_record_key`]) are always kept. An index reading a name the step
+/// clears is refused, a `COUNT` index reading it in its `WHERE` guard as much
+/// as one with the name as a column. A check for undeclared keys queued on the
+/// table runs again over the cleared rows.
 pub(crate) async fn remove_undeclared(
 	ctx: &ExecutionContext,
 	ns: NamespaceId,
@@ -1712,15 +1713,7 @@ pub(crate) async fn remove_undeclared(
 		return Err(refuse(format!("the view `{}` selects from the table", view.name)));
 	}
 	let fields = txn.all_tb_fields(ns, db, table, None).await.map_err(ControlFlow::Err)?;
-	let mut declared: Vec<String> = fields
-		.iter()
-		.filter_map(|fd| match fd.name.0.first() {
-			Some(Part::Field(root)) => Some(root.as_str().to_owned()),
-			_ => None,
-		})
-		.collect();
-	declared.sort();
-	declared.dedup();
+	let declared = declared_roots(fields.iter());
 	let indexes = txn.all_tb_indexes(ns, db, table, None).await.map_err(ControlFlow::Err)?;
 	let cleared = |root: &str| {
 		!is_record_key(root) && declared.binary_search_by(|d| d.as_str().cmp(root)).is_err()
@@ -1744,14 +1737,65 @@ pub(crate) async fn remove_undeclared(
 		Migration {
 			name: name.to_owned(),
 			step: MigrationStep::RemoveUndeclared {
-				declared,
+				declared: declared.clone(),
 			},
 		},
 	)
 	.await
 	.map_err(ControlFlow::Err)?;
 	txn.queue_tb_rewrite(ns, db, table).await.map_err(ControlFlow::Err)?;
+	txn.recheck_tb_undeclared(ns, db, table, declared, true).await.map_err(ControlFlow::Err)?;
 	Ok(true)
+}
+
+/// The names the definitions `fields` declare at the top level, sorted and
+/// without repeats: the first part of each definition's path. A step that
+/// removes the undeclared fields keeps these ([`remove_undeclared`]), and the
+/// check for undeclared keys judges a row against them
+/// ([`holds_undeclared_key`]).
+pub(crate) fn declared_roots<'a>(fields: impl Iterator<Item = &'a FieldDefinition>) -> Vec<String> {
+	let mut declared: Vec<String> = fields
+		.filter_map(|fd| match fd.name.0.first() {
+			Some(Part::Field(root)) => Some(root.as_str().to_owned()),
+			_ => None,
+		})
+		.collect();
+	declared.sort();
+	declared.dedup();
+	declared
+}
+
+/// Whether `row` holds a top-level key that a write of it on a `SCHEMAFULL`
+/// table refuses: one `declared`, sorted, does not name, other than the
+/// record's own keys ([`is_record_key`]).
+pub(crate) fn holds_undeclared_key(row: &crate::val::Object, declared: &[String]) -> bool {
+	row.keys().any(|key| {
+		!is_record_key(key.as_str())
+			&& declared.binary_search_by(|name| name.as_str().cmp(key.as_str())).is_err()
+	})
+}
+
+/// Run the check for undeclared keys queued on `table` again when the names
+/// the table's definitions declare at the top level once the statement's
+/// change stands — `declared`, given the definitions stored now — are not the
+/// ones it judges rows against: the rows it counted were judged against names
+/// that no longer stand. A table with no check queued reads no definitions.
+async fn recheck_undeclared(
+	ctx: &ExecutionContext,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table: &TableName,
+	declared: impl FnOnce(&[FieldDefinition]) -> Vec<String>,
+) -> FlowResult<()> {
+	let txn = ctx.txn();
+	let job = txn.get_tb_migration_job(ns, db, table).await.map_err(ControlFlow::Err)?;
+	if job.is_none_or(|job| job.undeclared.is_none()) {
+		return Ok(());
+	}
+	let fields = txn.all_tb_fields(ns, db, table, None).await.map_err(ControlFlow::Err)?;
+	txn.recheck_tb_undeclared(ns, db, table, declared(&fields), false)
+		.await
+		.map_err(ControlFlow::Err)
 }
 
 /// Refuse an index on `table` over `columns` while a step that clears the
@@ -1991,7 +2035,9 @@ async fn claimed(
 /// store at the Legacy feature level, queues nothing.
 ///
 /// A definition beneath another field starts a pass under way on the table
-/// over instead ([`restart_beneath`]).
+/// over instead ([`restart_beneath`]). A definition that declares a name at
+/// the top level no definition declared runs the table's check for undeclared
+/// keys again ([`recheck_undeclared`]).
 pub(crate) async fn queue_verification(
 	ctx: &ExecutionContext,
 	ns: NamespaceId,
@@ -2001,6 +2047,11 @@ pub(crate) async fn queue_verification(
 	previous: Option<&FieldDefinition>,
 ) -> FlowResult<()> {
 	restart_beneath(ctx, ns, db, table, field).await?;
+	// A migration queues the verification before the statement stores `field`.
+	recheck_undeclared(ctx, ns, db, table, |fields| {
+		declared_roots(fields.iter().chain(std::iter::once(field)))
+	})
+	.await?;
 	if !verifiable(field) {
 		return Ok(());
 	}
@@ -2069,11 +2120,13 @@ async fn restart_beneath(
 /// current generation, each migration it has run with the generation it
 /// minted and the field it rewrote, each field whose claim states that every
 /// stamped row follows its definition, the progress of a rewrite lap under way
-/// (`{lap, scanned, rewritten, fallbacks}`) and each field under or after
-/// verification with the rows that did not conform. `None` for a table that
-/// has run no migration, does not enforce migrations
-/// ([`enforces_migrations`]) and has no verification that found a
-/// non-conforming row, whose answer keeps its shape.
+/// (`{lap, scanned, rewritten, fallbacks}`), each field under or after
+/// verification with the rows that did not conform, and the check for rows
+/// holding a top-level key no definition declares (`undeclared`, as
+/// `{failures, finished}`). `None` for a table that has run no migration,
+/// does not enforce migrations ([`enforces_migrations`]) and has no
+/// verification that found a non-conforming row, whose answer keeps its
+/// shape.
 pub(crate) async fn info_section(
 	ctx: &ExecutionContext,
 	ns: NamespaceId,
@@ -2087,7 +2140,10 @@ pub(crate) async fn info_section(
 	// default table's answer keeps its shape until a migration runs or a
 	// verification finds a row that does not conform.
 	let required = table_enforces(ctx, ns, db, table).await?;
-	let failing = job.as_ref().is_some_and(|job| job.verify.iter().any(|field| field.failures > 0));
+	let failing = job.as_ref().is_some_and(|job| {
+		job.verify.iter().any(|field| field.failures > 0)
+			|| job.undeclared.as_ref().is_some_and(|check| check.failures > 0)
+	});
 	if runs.is_empty() && !required && !failing {
 		return Ok(None);
 	}
@@ -2136,6 +2192,12 @@ pub(crate) async fn info_section(
 			.collect();
 		if !verifying.is_empty() {
 			section.insert("verification", Value::Array(verifying.into()));
+		}
+		if let Some(check) = &job.undeclared {
+			let mut entry = crate::val::Object::default();
+			entry.insert("failures", Value::from(check.failures as i64));
+			entry.insert("finished", Value::Bool(check.finished));
+			section.insert("undeclared", Value::Object(entry));
 		}
 	}
 	section.insert("generation", Value::from(i64::from(generation)));
@@ -2597,7 +2659,9 @@ pub(crate) async fn check_field_change(
 /// stored, but its path can still hold the values rows were written with
 /// before it was computed, which its removal clears too. The removal of a
 /// definition beneath another field starts a verification pass under way on
-/// the table over ([`restart_beneath`]).
+/// the table over ([`restart_beneath`]), and one that leaves a name at the top
+/// level undeclared runs the table's check for undeclared keys again
+/// ([`recheck_undeclared`]).
 pub(crate) async fn remove_field(
 	ctx: &ExecutionContext,
 	ns: NamespaceId,
@@ -2606,6 +2670,11 @@ pub(crate) async fn remove_field(
 	field: &FieldDefinition,
 ) -> FlowResult<()> {
 	restart_beneath(ctx, ns, db, table, field).await?;
+	// The statement removes the definition, and every one beneath it, after this.
+	recheck_undeclared(ctx, ns, db, table, |fields| {
+		declared_roots(fields.iter().filter(|fd| !fd.name.0.starts_with(&field.name.0)))
+	})
+	.await?;
 	if matches!(field.name.0.as_slice(), [Part::Field(name)] if matches!(name.as_str(), "id" | "in" | "out"))
 	{
 		return Ok(());
@@ -2628,7 +2697,8 @@ pub(crate) async fn remove_field(
 /// starts a verification pass under way over, since a pass judges the keys
 /// beneath an object by whether the table is `SCHEMAFULL`
 /// ([`verification_test`]). A change that ends enforcement is accepted as it
-/// is.
+/// is; one that makes the table `SCHEMALESS` drops its check for undeclared
+/// keys, since such a table refuses none.
 pub(crate) async fn check_table_change(
 	ctx: &ExecutionContext,
 	ns: NamespaceId,
@@ -2657,6 +2727,9 @@ pub(crate) async fn check_table_change(
 					.to_owned(),
 			})));
 		}
+	}
+	if previous.schemafull && !updated.schemafull {
+		txn.drop_tb_undeclared(ns, db, table).await.map_err(ControlFlow::Err)?;
 	}
 	let import = ctx.options().is_some_and(|options| options.import);
 	if !was_enforced && enforced && !import {
@@ -2697,10 +2770,13 @@ pub(crate) async fn verify_database(
 }
 
 /// Queue a verification pass of every field of `table` a pass can promote,
-/// when the table has just come to enforce migrations over rows stored
-/// without them. A table with no rows queues nothing, for the reason
-/// [`queue_verification`] gives. No rewrite is queued: a verification
-/// reports the rows that do not conform and changes none.
+/// and the check for rows holding a top-level key no definition declares,
+/// which a write of the row refuses, when the table has just come to enforce
+/// migrations over rows stored without them. A table with no rows queues
+/// nothing, for the reason [`queue_verification`] gives. No rewrite is
+/// queued: a verification reports the rows that do not conform and changes
+/// none, and keys no definition declares stay until `REMOVE UNDECLARED
+/// FIELDS` clears them ([`remove_undeclared`]).
 async fn verify_table(
 	ctx: &ExecutionContext,
 	ns: NamespaceId,
@@ -2728,7 +2804,9 @@ async fn verify_table(
 		.await
 		.map_err(ControlFlow::Err)?;
 	}
-	Ok(())
+	txn.queue_tb_undeclared(ns, db, table, declared_roots(fields.iter()))
+		.await
+		.map_err(ControlFlow::Err)
 }
 
 /// Whether `table`, of the database `db`, enforces migrations: the database

@@ -2473,6 +2473,7 @@ d3abfb51f319506c language-tests/tests/language/statements/define/field/migrate/i
 6c929c12fc4e0e44 language-tests/tests/language/statements/define/field/migrate/interaction_remove_table_redefine.surql
 f22451ab53544011 language-tests/tests/language/statements/define/field/migrate/interaction_schema_mode.surql
 376fb5b4afdeacdb language-tests/tests/language/statements/define/field/migrate/interaction_table_type_and_view.surql
+097199320f87d362 language-tests/tests/language/statements/define/field/migrate/interaction_undeclared_keys.surql
 e8e4c2f4be491a43 language-tests/tests/language/statements/define/field/migrate/interaction_views.surql
 e00dd126116fc53f language-tests/tests/language/statements/define/field/migrate/interaction_views_removal.surql
 9e0be328f40a2d88 language-tests/tests/language/statements/define/field/migrate/keeps_its_test.surql
