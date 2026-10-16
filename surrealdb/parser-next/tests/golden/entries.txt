@@ -4391,7 +4391,8 @@ ac44a8eba26b2877 language-tests/tests/upgrade/define/3.00.00_module_definition_c
 385a57cc7322d5f6 language-tests/tests/upgrade/define/3.00.00_module_definition_clauses_import.surql
 ac44a8eba26b2877 language-tests/tests/upgrade/define/3.00.00_module_definition_clauses_rev1.surql
 99baa5f526af7ef3 language-tests/tests/upgrade/define/3.00.00_module_definition_clauses_rev1_import.surql
-839ed77fc6be7ede language-tests/tests/upgrade/define/3.00.00_module_silo_rekey.surql
+f17c9dcd1191abde language-tests/tests/upgrade/define/3.00.00_module_silo_rekey.surql
+841cc5a233182feb language-tests/tests/upgrade/define/3.00.00_module_silo_rekey_current.surql
 c0feef7ac3155a26 language-tests/tests/upgrade/define/3.00.00_module_silo_rekey_import.surql
 0a71d54948f99f67 language-tests/tests/upgrade/define/3.00.00_module_wasm.surql
 79e01af04713e38f language-tests/tests/upgrade/define/3.00.00_module_wasm_import.surql

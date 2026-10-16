@@ -13,9 +13,11 @@ upgrade = true
 # carries the migration — an unanchored ">=3.3.0" would also admit
 # 3.3.0-beta.3, which already writes the new spelling without yet re-keying old
 # rows. These gates also keep the ordinary runner away, since it matches both
-# against its own version.
+# against its own version. The upper bound stops at the 3.3 line: the current
+# checkout renders these definitions as `DEFINE EXTENSION`, which
+# 3.00.00_module_silo_rekey_current.surql asserts.
 importing-version = "<3.3.0-0"
-version = ">=3.3.0-beta.4"
+version = ">=3.3.0-beta.4, <3.4.0-a"
 reason = """
 A module definition's name is not stored in its value. `INFO`, `REMOVE`,
 `ALTER`, `DEFINE ... OVERWRITE` and a call into one of a module's exports each
@@ -58,8 +60,8 @@ package fetch in the middle of a storage assertion."""
 [[test.results]]
 value = '''
 {
-	"ext::modkey_plain": "DEFINE EXTENSION ext::modkey_plain FROM silo::acme::modkey_helpers<0.9.1> UNSIGNED PERMISSIONS FULL",
-	"silo::acme::modkey_widgets<1.2.3>": "DEFINE EXTENSION silo::acme::modkey_widgets<1.2.3> UNSIGNED COMMENT 'legacy silo row' PERMISSIONS FULL"
+	"mod::modkey_plain": "DEFINE MODULE mod::modkey_plain FROM silo::acme::modkey_helpers::<0.9.1> UNSIGNED PERMISSIONS FULL",
+	"silo::acme::modkey_widgets::<1.2.3>": "DEFINE MODULE silo::acme::modkey_widgets::<1.2.3> UNSIGNED COMMENT 'legacy silo row' PERMISSIONS FULL"
 }
 '''
 
@@ -69,19 +71,17 @@ value = "NONE"
 [[test.results]]
 value = '''
 {
-	"ext::modkey_plain": "DEFINE EXTENSION ext::modkey_plain FROM silo::acme::modkey_helpers<0.9.1> UNSIGNED PERMISSIONS FULL"
+	"mod::modkey_plain": "DEFINE MODULE mod::modkey_plain FROM silo::acme::modkey_helpers::<0.9.1> UNSIGNED PERMISSIONS FULL"
 }
 '''
 
 */
--- 0: both definitions the old binary wrote decode and render, in the
--- EXTENSION spelling this build writes. The silo row comes back under the name
--- this build derives, carrying the old binary's COMMENT verbatim, and the
--- control row is beside it unchanged. The catalog loads an unnamed silo
--- definition, which no ordinary statement of this build creates. `UNSIGNED` on
+-- 0: both definitions the old binary wrote decode and render. The silo row
+-- comes back under the name this build derives, carrying the old binary's
+-- COMMENT verbatim, and the control row is beside it unchanged. `UNSIGNED` on
 -- both is supplied by the field's own default: the stored value predates
 -- signing, and a definition written before signing existed loads unsigned.
-(INFO FOR DB).extensions;
+(INFO FOR DB).modules;
 -- 1: the assertion the rest of the test exists for. `REMOVE` re-derives the
 -- name and deletes the one key that name spells, so it returns NONE only when
 -- the row is genuinely reachable there. A row still filed under the name its
@@ -91,4 +91,4 @@ REMOVE MODULE silo::acme::modkey_widgets::<1.2.3>;
 -- 2: and the band holds nothing but the control. Two rows for one module render
 -- as a single object key while both are present, so a copy of the silo
 -- definition left behind is only visible once the addressable one is gone.
-(INFO FOR DB).extensions;
+(INFO FOR DB).modules;
