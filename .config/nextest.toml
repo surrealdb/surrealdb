@@ -14,7 +14,7 @@ slow-timeout = { period = "10m", terminate-after = 3 }
 retries = 2
 fail-fast = false
 slow-timeout = "15s"
-global-timeout = "30m"
+global-timeout = "40m"
 
 # Tests against the shared TiKV playground. The idx ones wipe its whole
 # keyspace on entry, and their `#[serial_test::serial]` only serialises within
@@ -38,6 +38,23 @@ threads-required = 2
 filter = 'test(trees::diskann::index::tests::diskann_recall_)'
 threads-required = 2
 slow-timeout = "120s"
+
+# Each slice of the e-graph corpus tests runs a share of every language-test file through the
+# planner twice, which takes minutes in a debug build. Expected to be slow rather than stuck. The
+# slices start ahead of the short tests so none of them is still running when the shard's other
+# tests are done.
+[[profile.default.overrides]]
+filter = 'test(/egraph::tests::kv::(seed_equals_skip_path|forced_on_answers_equal)_[0-9]+$/)'
+slow-timeout = "300s"
+priority = 50
+
+# The layout oracle is the longest test of the serial `kvs::tests::` group, which runs one test at
+# a time, so the group takes as long as the oracle plus every test queued behind it. It starts
+# first so the group's length is its own work and not a wait for a free slot.
+[[profile.default.overrides]]
+filter = 'test(=kvs::tests::layout_oracle_test::layout_oracle)'
+slow-timeout = "300s"
+priority = 100
 
 [[profile.default.overrides]]
 filter = 'test(syn::test::test_excessive_size)'

@@ -4364,6 +4364,37 @@ mod kv {
 			.collect()
 	}
 
+	/// The slices of any list are disjoint and together hold every item.
+	#[test]
+	fn slices_partition_a_list() {
+		for len in [0, 1, SLICES - 1, SLICES, 5 * SLICES + 3] {
+			let items: Vec<usize> = (0..len).collect();
+			let mut seen: Vec<usize> = (0..SLICES).flat_map(|k| slice(items.clone(), k)).collect();
+			seen.sort_unstable();
+			assert_eq!(seen, items, "{len} items");
+		}
+	}
+
+	/// The slices of each corpus hold every file once, so the sliced corpus tests together walk
+	/// the corpus the unsliced test walked, and no slice is empty.
+	#[test]
+	fn slices_cover_each_corpus() {
+		for (name, files) in
+			[("corpus", corpus()), ("deterministic corpus", deterministic_corpus())]
+		{
+			let mut paths: Vec<String> = files.iter().map(|(path, _)| path.clone()).collect();
+			let mut seen = Vec::new();
+			for k in 0..SLICES {
+				let part = slice(paths.clone(), k);
+				assert!(!part.is_empty(), "slice {k} of the {name} is empty");
+				seen.extend(part);
+			}
+			seen.sort();
+			paths.sort();
+			assert_eq!(seen, paths, "the slices of the {name}");
+		}
+	}
+
 	/// The printed physical IR a request plans to, or why it does not plan.
 	async fn planned(text: &str) -> Option<Result<String, String>> {
 		let parsed = crate::syn::parse(text).ok()?.expressions;
@@ -4380,15 +4411,79 @@ mod kv {
 		})
 	}
 
+	/// The number of disjoint slices each corpus test splits the corpus into. Every slice is its
+	/// own test, so the runner executes them in parallel and no one test spans the corpus.
+	const SLICES: usize = 12;
+
+	/// The items whose index is congruent to `k` modulo [`SLICES`]. For `k` in `0..SLICES` the
+	/// slices of one list are disjoint and together hold every item, in the list's order.
+	fn slice<T>(items: Vec<T>, k: usize) -> Vec<T> {
+		items
+			.into_iter()
+			.enumerate()
+			.filter_map(|(index, item)| (index % SLICES == k).then_some(item))
+			.collect()
+	}
+
+	/// Whether `listed` is `0..SLICES` in order: the slices a macro below names are all of them.
+	const fn lists_every_slice(listed: &[usize]) -> bool {
+		let mut at = 0;
+		while at < SLICES {
+			if at >= listed.len() || listed[at] != at {
+				return false;
+			}
+			at += 1;
+		}
+		listed.len() == SLICES
+	}
+
+	/// Defines one `#[test]` per slice, each calling `$run` with its slice number, and fails to
+	/// compile unless the slices named are exactly `0..SLICES`.
+	macro_rules! corpus_slice_tests {
+		($run:ident, $listed:ident; $($name:ident => $k:literal),+ $(,)?) => {
+			const $listed: &[usize] = &[$($k),+];
+			const _: () = assert!(lists_every_slice($listed), "name each slice 0..SLICES once");
+			$(
+				#[test]
+				fn $name() {
+					$run($k)
+				}
+			)+
+		};
+	}
+
 	/// With no rule, the seeded run plans what the skip path plans, and the logical-only run
 	/// leaves the container unchanged. Each forced run reaches the planner, and the seeded run
 	/// reaches all-physical extraction: a request path with no physical layer behind it skips
-	/// seeded mode and fails here.
-	#[tokio::test]
-	async fn seed_equals_skip_path() {
+	/// seeded mode and fails here. Runs the slice `k` of the corpus.
+	fn seed_equals_skip_path(k: usize) {
+		tokio::runtime::Builder::new_current_thread()
+			.enable_all()
+			.build()
+			.expect("a runtime")
+			.block_on(seed_equals_skip_path_body(k));
+	}
+
+	corpus_slice_tests! {
+		seed_equals_skip_path, SEED_SLICES;
+		seed_equals_skip_path_00 => 0,
+		seed_equals_skip_path_01 => 1,
+		seed_equals_skip_path_02 => 2,
+		seed_equals_skip_path_03 => 3,
+		seed_equals_skip_path_04 => 4,
+		seed_equals_skip_path_05 => 5,
+		seed_equals_skip_path_06 => 6,
+		seed_equals_skip_path_07 => 7,
+		seed_equals_skip_path_08 => 8,
+		seed_equals_skip_path_09 => 9,
+		seed_equals_skip_path_10 => 10,
+		seed_equals_skip_path_11 => 11,
+	}
+
+	async fn seed_equals_skip_path_body(k: usize) {
 		let none = rule_set(&[]);
 		let (mut planned_seeded, mut planned_logical, mut extracted) = (0usize, 0usize, 0usize);
-		for (path, text) in corpus() {
+		for (path, text) in slice(corpus(), k) {
 			let off = {
 				let _forced = ForcedPlanning::new(EgraphMode::ForceOff, Some(none));
 				planned(&text).await
@@ -4479,18 +4574,33 @@ mod kv {
 			.unwrap_or_else(|panic| std::panic::resume_unwind(panic));
 	}
 
-	/// With the registered rules, the logical-only run answers every statement of the corpus as
-	/// the forced-off run does, and it rewrites and adopts the statements those rules match. A
-	/// value the engine generates for a run is not part of the answer ([`without_generated_ids`]).
-	#[test]
-	fn forced_on_answers_equal() {
-		on_the_runner_stack(forced_on_answers_equal_body);
+	/// With the registered rules, the logical-only run answers every statement of the slice `k` of
+	/// the deterministic corpus as the forced-off run does. A value the engine generates for a run
+	/// is not part of the answer ([`without_generated_ids`]).
+	fn forced_on_answers_equal(k: usize) {
+		on_the_runner_stack(move || forced_on_answers_equal_body(k));
 	}
 
-	async fn forced_on_answers_equal_body() {
+	corpus_slice_tests! {
+		forced_on_answers_equal, FORCED_SLICES;
+		forced_on_answers_equal_00 => 0,
+		forced_on_answers_equal_01 => 1,
+		forced_on_answers_equal_02 => 2,
+		forced_on_answers_equal_03 => 3,
+		forced_on_answers_equal_04 => 4,
+		forced_on_answers_equal_05 => 5,
+		forced_on_answers_equal_06 => 6,
+		forced_on_answers_equal_07 => 7,
+		forced_on_answers_equal_08 => 8,
+		forced_on_answers_equal_09 => 9,
+		forced_on_answers_equal_10 => 10,
+		forced_on_answers_equal_11 => 11,
+	}
+
+	async fn forced_on_answers_equal_body(k: usize) {
 		let rules = registered();
 		let mut forced_calls = 0usize;
-		for (path, text) in deterministic_corpus() {
+		for (path, text) in slice(deterministic_corpus(), k) {
 			let off = {
 				let _forced = ForcedPlanning::new(EgraphMode::ForceOff, Some(rules));
 				run(&text).await
@@ -4504,7 +4614,17 @@ mod kv {
 			assert_eq!(without_generated_ids(&on), without_generated_ids(&off), "{path}");
 		}
 		assert!(forced_calls > 0, "no request reached the e-graph planner");
+	}
 
+	/// With the registered rules, the logical-only run answers each statement they match as the
+	/// forced-off run does, and it rewrites and adopts that statement.
+	#[test]
+	fn forced_on_rewrites_matching_statements() {
+		on_the_runner_stack(forced_on_rewrites_matching_statements_body);
+	}
+
+	async fn forced_on_rewrites_matching_statements_body() {
+		let rules = registered();
 		for query in MATCHING {
 			let off = {
 				let _forced = ForcedPlanning::new(EgraphMode::ForceOff, Some(rules));
