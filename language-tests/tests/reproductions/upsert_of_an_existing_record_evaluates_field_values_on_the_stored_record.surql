@@ -6,15 +6,13 @@ auth = { level = "owner" }
 
 [test]
 reason = """
-	Characterises a defect, not the intended behaviour. `UPSERT` attempts the
-	create order first, which derives every `VALUE` clause of the table over the
-	record the statement would create. A clause that reads a field the `SET` or
-	`MERGE` does not write sees `NONE` there and fails, and the failure is not
-	one of the schema failures the update retry recovers, so the statement fails
-	although the record exists and the same write as an `UPDATE` succeeds. A
-	`CONTENT` clause supplies the whole record and is unaffected. If this test
-	starts failing, the create attempt has changed: confirm the new behaviour
-	deliberately.
+	An `UPSERT` that names a stored record derives the table's `VALUE` clauses
+	over the stored record, as an `UPDATE` does: a clause that reads a field the
+	`SET` or `MERGE` does not write reads the stored field rather than `NONE`.
+	The record is read before an order is chosen, so a stored record never
+	takes the create order, which would derive the clauses over the record the
+	statement would create. A `CONTENT` clause supplies the whole record and
+	derives over what it supplies.
 """
 
 [[test.results]]
@@ -36,10 +34,10 @@ value = "[{ id: h:1, n: 1, twice: 2, up: 5 }]"
 value = "[{ id: h:1, n: 1, twice: 2, up: 1 }]"
 
 [[test.results]]
-error = "Cannot perform multiplication with 'none' and 'int'"
+value = "[{ id: h:1, n: 1, twice: 2, up: 2 }]"
 
 [[test.results]]
-error = "Cannot perform multiplication with 'none' and 'int'"
+value = "[{ id: h:1, n: 1, twice: 2, up: 3 }]"
 
 [[test.results]]
 value = "[{ id: h:1, n: 4, twice: 8, up: 3 }]"

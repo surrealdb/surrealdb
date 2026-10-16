@@ -602,10 +602,11 @@ async fn no_caller_binding_reaches_a_definition_guard() {
 }
 
 /// A record user's `UPSERT` of a target is admitted by the target's `update`
-/// clause, as the document pipeline admits it, whichever branch would write
-/// the record: a `NONE` `update` writes nothing, not even a record its create
-/// attempt would make, and a `NONE` `create` refuses the create attempt
-/// ahead of the update a found record would fall through to.
+/// clause, whichever order would write the record: a `NONE` `update` writes
+/// nothing, not even a record its create order would make. The record a
+/// subject names is read before an order is chosen, so a stored record is
+/// updated under the `update` clause alone, as an `UPDATE` of it is, and a
+/// `NONE` `create` refuses only a record that is not stored.
 #[tokio::test]
 async fn an_upsert_is_admitted_by_its_update_clause() {
 	let db = TestDb::new_with_auth(
@@ -629,9 +630,10 @@ async fn an_upsert_is_admitted_by_its_update_clause() {
 		 UPSERT updates:old SET v = 1 RETURN VALUE v;",
 	)
 	.await;
-	for (at, answer) in alice.iter().enumerate() {
+	for (at, answer) in alice.iter().take(3).enumerate() {
 		assert_eq!(answer, &parse("[]"), "upsert {at} wrote through a NONE clause");
 	}
+	assert_eq!(alice[3], parse("[1]"), "a stored record is updated under its update clause");
 	let owner = values(
 		&db,
 		&TestDb::owner(),
@@ -639,7 +641,7 @@ async fn an_upsert_is_admitted_by_its_update_clause() {
 	)
 	.await;
 	assert_eq!(owner[0], parse("[0]"));
-	assert_eq!(owner[1], parse("[0]"));
+	assert_eq!(owner[1], parse("[1]"));
 }
 
 /// A statement held in definer code — a permission predicate's, a field

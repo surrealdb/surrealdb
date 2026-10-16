@@ -199,7 +199,9 @@ The stage list is data, because there is no single order to hardcode. Six statem
 **nine** per-record orders: `UPSERT`, `RELATE` and `INSERT` each have a distinct creating and
 updating branch, selected per record by whether the record already exists. `RELATE` selects on the
 loaded record before running any branch-specific stage, though `check_record_user_access` precedes
-the selection on all three; `UPSERT` and `INSERT` attempt the creating branch and fall
+the selection on all three. `UPSERT` reads a record id it names and selects on it the same way, so a
+stored record takes the updating branch and its data clause reads the stored record. A subject
+`UPSERT` did not find stored, and every `INSERT` row, attempts the creating branch and falls
 through to the updating branch on a record-exists or unique-index conflict, rolling back to a
 savepoint first, which is where R3's single-write-in-flight constraint originates.
 
@@ -215,7 +217,8 @@ order as data also makes each stage separately implementable, separately unit-te
   check_table_type_*            ← UPSERT, INSERT here
   check_permissions_quick_create
   check_table_not_view
-  compute_input_data
+  compute_input_data            ← not INSERT: its one clause, ON DUPLICATE KEY UPDATE, is the
+                                  updating branch's, evaluated only against a stored record
   process_record_data           ← INSERT: process_merge_data, placed after check_data_fields instead
   generate_record_id            ← INSERT: hoisted out, before the create/update split
   check_table_type_*            ← CREATE, RELATE here

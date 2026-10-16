@@ -10,8 +10,10 @@
 //!
 //! The retry machinery is **not** a stage. `UPSERT` and `INSERT` attempt the
 //! creating order behind a savepoint and reclassify a failure as an update;
-//! `RELATE` decides up front from the loaded record and pushes no savepoint;
-//! `CREATE`, `UPDATE` and `DELETE` have no selection at all. That is this
+//! `UPSERT` reads a record id it names first, so only a subject its source did
+//! not find stored makes that attempt, and a stored one takes the updating
+//! order directly. `RELATE` decides up front from the loaded record and pushes
+//! no savepoint; `CREATE`, `UPDATE` and `DELETE` have no selection at all. That is this
 //! module's [`Branching`], and it is why at most one record may be in flight
 //! per transaction: savepoints are a stack with no handle, so a second record
 //! entering before the first has left rolls back the wrong work.
@@ -352,7 +354,10 @@ pub(crate) fn classify_create_failure(
 	}
 	// A schema failure is retried against the record the attempt was building,
 	// because the stored record the update reads may satisfy the clause the
-	// attempt's partial record did not.
+	// attempt's partial record did not. A record id an `UPSERT` names was read
+	// before the attempt, so the record this finds stored is one whose id the
+	// attempt derived itself: from a table target's data clause, or from the
+	// `id` field's `DEFAULT`.
 	if policy.carry_schema_failure
 		&& err.downcast_ref::<DocError>().is_some_and(DocError::is_schema_related)
 		&& let Some(id) = row.id.clone()
@@ -636,9 +641,12 @@ fn relate_update_order(facts: WriteFacts) -> Vec<StageId> {
 
 /// The `INSERT` create order. Its id derivation runs on the dispatch, ahead of
 /// the savepoint, not inside `insert_create`. It is the only creating order
-/// that applies its data by merging the row's own value. It also validates the
-/// special fields before applying the data, as the four updating orders do.
-/// The other creating orders skip that validation.
+/// that applies its data by merging the row's own value, and the only one that
+/// evaluates no data clause: an `INSERT`'s one clause is `ON DUPLICATE KEY
+/// UPDATE`, which belongs to the updating order and reads the stored record a
+/// collision names, so a row that collides with nothing never evaluates it. It
+/// also validates the special fields before applying the data, as the four
+/// updating orders do. The other creating orders skip that validation.
 fn insert_create_order() -> Vec<StageId> {
 	vec![
 		StageId::CheckRecordUserAccess,
@@ -646,7 +654,6 @@ fn insert_create_order() -> Vec<StageId> {
 		StageId::CheckTableType(TableTypeFor::Insert),
 		StageId::CheckPermissionsQuickCreate,
 		StageId::CheckTableNotView,
-		StageId::ComputeInputData,
 		StageId::CheckDataFields,
 		StageId::ProcessMergeData,
 		StageId::DefaultRecordData,

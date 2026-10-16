@@ -672,7 +672,8 @@ pub(crate) fn write_body(
 		}
 	};
 	// `Statement::is_deferable`: a table names a record to create for `CREATE`, and for `UPSERT`
-	// with no condition. Every other form reads the records stored at the table.
+	// with no condition. Every other form reads the records stored at the table. A record id is
+	// read by every form but `CREATE` (`target_subjects`).
 	let deferable = matches!(form, PlanForm::Create) || (matches!(form, PlanForm::Upsert) && !cond);
 	Ok(WriteBody {
 		branching,

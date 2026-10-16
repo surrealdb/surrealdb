@@ -845,10 +845,10 @@ relate), Key API, field evaluation, events, views, cascades
   data clause reads (`SET city = city + 'x'` echoes the result), which is no more than any
   failing expression in the same clause discloses (`SET v = <int> city`). In an `UPDATE`
   they are raised after `CheckUpdatePermissions` and `CheckWhereCondition`, and in every
-  create order after `CheckPermissionsQuickCreate`. An `UPSERT` that names a record its
-  update permission refuses evaluates its data clause on the record reduced by the select
-  permission and can raise either error before the refusal; the error then carries only
-  what the caller wrote, since the reduced record holds none of the hidden fields. What a
+  create order after `CheckPermissionsQuickCreate`. An `UPSERT` reads the record id it
+  names before choosing an order, so a stored record takes the updating order and is
+  refused by its update permission before its data clause is evaluated, as an `UPDATE`
+  is; only a record that is not stored reaches the create order. What a
   mismatch tells a caller is that the value they wrote is not the record's: for
   `IdMismatch`, of the record they named; for `IdComponentMismatch`, of a record their
   update permission and `WHERE` admitted, whose components the same `WHERE` already reads

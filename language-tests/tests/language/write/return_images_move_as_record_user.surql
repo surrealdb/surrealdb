@@ -50,22 +50,22 @@ value = "[{ id: plain:5, n: 15, secret: 's5' }]"
 value = '[{ "$after.n": 16, "$before.n": 6, id: plain:6 }]'
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[{ id: plain:1, n: 21, secret: 's1' }]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[{ id: plain:2, n: 22, secret: 's2' }]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[{ id: plain:3, n: 13, secret: 's3' }]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[[{ op: 'replace', path: '/n', value: 24 }]]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[{ id: plain:5, n: 25, secret: 's5' }]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = '[{ "$after.n": 26, "$before.n": 16, id: plain:6 }]'
 
 [[test.results]]
 value = "[{ id: plain:11, n: 11, secret: 's11' }]"
@@ -104,22 +104,22 @@ value = "[{ id: plain:25, n: 25, secret: 's25' }]"
 value = '[{ "$after.n": 26, "$before.n": NONE, id: plain:26 }]'
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[{ id: plain:21, n: 121, secret: 's21' }]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[{ id: plain:22, n: 122, secret: 's22' }]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[{ id: plain:23, n: 23, secret: 's23' }]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[[{ op: 'replace', path: '/n', value: 124 }]]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[{ id: plain:25, n: 125, secret: 's25' }]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = '[{ "$after.n": 126, "$before.n": 26, id: plain:26 }]'
 
 [[test.results]]
 value = "[]"
@@ -164,7 +164,7 @@ value = "[]"
 value = "[NONE]"
 
 [[test.results]]
-value = "[{ id: plain:3, n: 13, secret: 's3' }]"
+value = "[{ id: plain:3, n: 23, secret: 's3' }]"
 
 [[test.results]]
 value = "[[{ op: 'replace', path: '', value: NONE }]]"
@@ -173,7 +173,7 @@ value = "[[{ op: 'replace', path: '', value: NONE }]]"
 value = "[NONE]"
 
 [[test.results]]
-value = '[{ "$after.n": NONE, "$before.n": 16, id: NONE }]'
+value = '[{ "$after.n": NONE, "$before.n": 26, id: NONE }]'
 
 [[test.results]]
 value = "[]"
@@ -194,7 +194,7 @@ value = "[]"
 value = "[]"
 
 [[test.results]]
-value = "[{ id: plain:11, n: 11, secret: 's11' }, { id: plain:12, n: 12, secret: 's12' }, { id: plain:13, n: 13, secret: 's13' }, { id: plain:14, n: 14, secret: 's14' }, { id: plain:15, n: 15, secret: 's15' }, { id: plain:16, n: 16, secret: 's16' }, { id: plain:21, n: 21, secret: 's21' }, { id: plain:22, n: 22, secret: 's22' }, { id: plain:23, n: 23, secret: 's23' }, { id: plain:24, n: 24, secret: 's24' }, { id: plain:25, n: 25, secret: 's25' }, { id: plain:26, n: 26, secret: 's26' }]"
+value = "[{ id: plain:11, n: 11, secret: 's11' }, { id: plain:12, n: 12, secret: 's12' }, { id: plain:13, n: 13, secret: 's13' }, { id: plain:14, n: 14, secret: 's14' }, { id: plain:15, n: 15, secret: 's15' }, { id: plain:16, n: 16, secret: 's16' }, { id: plain:21, n: 121, secret: 's21' }, { id: plain:22, n: 122, secret: 's22' }, { id: plain:23, n: 123, secret: 's23' }, { id: plain:24, n: 124, secret: 's24' }, { id: plain:25, n: 125, secret: 's25' }, { id: plain:26, n: 126, secret: 's26' }]"
 
 [[test.results]]
 value = "[]"
@@ -236,22 +236,22 @@ value = "[{ double: 30, id: comp:5, n: 15, secret: 's5' }]"
 value = '[{ "$after.n": 16, "$before.n": 6, id: comp:6 }]'
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[{ double: 42, id: comp:1, n: 21, secret: 's1' }]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[{ double: 44, id: comp:2, n: 22, secret: 's2' }]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[{ double: 26, id: comp:3, n: 13, secret: 's3' }]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[[{ op: 'replace', path: '/double', value: 48 }, { op: 'replace', path: '/n', value: 24 }]]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[{ double: 50, id: comp:5, n: 25, secret: 's5' }]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = '[{ "$after.n": 26, "$before.n": 16, id: comp:6 }]'
 
 [[test.results]]
 value = "[{ double: 22, id: comp:11, n: 11, secret: 's11' }]"
@@ -290,22 +290,22 @@ value = "[{ double: 50, id: comp:25, n: 25, secret: 's25' }]"
 value = '[{ "$after.n": 26, "$before.n": NONE, id: comp:26 }]'
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[{ double: 242, id: comp:21, n: 121, secret: 's21' }]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[{ double: 244, id: comp:22, n: 122, secret: 's22' }]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[{ double: 46, id: comp:23, n: 23, secret: 's23' }]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[[{ op: 'replace', path: '/double', value: 248 }, { op: 'replace', path: '/n', value: 124 }]]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[{ double: 250, id: comp:25, n: 125, secret: 's25' }]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = '[{ "$after.n": 126, "$before.n": 26, id: comp:26 }]'
 
 [[test.results]]
 value = "[]"
@@ -350,7 +350,7 @@ value = "[]"
 value = "[NONE]"
 
 [[test.results]]
-value = "[{ double: 26, id: comp:3, n: 13, secret: 's3' }]"
+value = "[{ double: 46, id: comp:3, n: 23, secret: 's3' }]"
 
 [[test.results]]
 value = "[[{ op: 'replace', path: '', value: NONE }]]"
@@ -359,7 +359,7 @@ value = "[[{ op: 'replace', path: '', value: NONE }]]"
 value = "[NONE]"
 
 [[test.results]]
-value = '[{ "$after.n": NONE, "$before.n": 16, id: NONE }]'
+value = '[{ "$after.n": NONE, "$before.n": 26, id: NONE }]'
 
 [[test.results]]
 value = "[]"
@@ -380,7 +380,7 @@ value = "[]"
 value = "[]"
 
 [[test.results]]
-value = "[{ double: 22, id: comp:11, n: 11, secret: 's11' }, { double: 24, id: comp:12, n: 12, secret: 's12' }, { double: 26, id: comp:13, n: 13, secret: 's13' }, { double: 28, id: comp:14, n: 14, secret: 's14' }, { double: 30, id: comp:15, n: 15, secret: 's15' }, { double: 32, id: comp:16, n: 16, secret: 's16' }, { double: 42, id: comp:21, n: 21, secret: 's21' }, { double: 44, id: comp:22, n: 22, secret: 's22' }, { double: 46, id: comp:23, n: 23, secret: 's23' }, { double: 48, id: comp:24, n: 24, secret: 's24' }, { double: 50, id: comp:25, n: 25, secret: 's25' }, { double: 52, id: comp:26, n: 26, secret: 's26' }]"
+value = "[{ double: 22, id: comp:11, n: 11, secret: 's11' }, { double: 24, id: comp:12, n: 12, secret: 's12' }, { double: 26, id: comp:13, n: 13, secret: 's13' }, { double: 28, id: comp:14, n: 14, secret: 's14' }, { double: 30, id: comp:15, n: 15, secret: 's15' }, { double: 32, id: comp:16, n: 16, secret: 's16' }, { double: 242, id: comp:21, n: 121, secret: 's21' }, { double: 244, id: comp:22, n: 122, secret: 's22' }, { double: 246, id: comp:23, n: 123, secret: 's23' }, { double: 248, id: comp:24, n: 124, secret: 's24' }, { double: 250, id: comp:25, n: 125, secret: 's25' }, { double: 252, id: comp:26, n: 126, secret: 's26' }]"
 
 [[test.results]]
 value = "[]"
@@ -422,22 +422,22 @@ value = "[{ id: cut:5, n: 15 }]"
 value = '[{ "$after.n": 16, "$before.n": 6, id: cut:6 }]'
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[{ id: cut:1, n: 21 }]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[{ id: cut:2, n: 22 }]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[{ id: cut:3, n: 13 }]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[[{ op: 'replace', path: '/n', value: 24 }]]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[{ id: cut:5, n: 25 }]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = '[{ "$after.n": 26, "$before.n": 16, id: cut:6 }]'
 
 [[test.results]]
 value = "[{ id: cut:11, n: 11 }]"
@@ -476,22 +476,22 @@ value = "[{ id: cut:25, n: 25 }]"
 value = '[{ "$after.n": 26, "$before.n": NONE, id: cut:26 }]'
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[{ id: cut:21, n: 121 }]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[{ id: cut:22, n: 122 }]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[{ id: cut:23, n: 23 }]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[[{ op: 'replace', path: '/n', value: 124 }]]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = "[{ id: cut:25, n: 125 }]"
 
 [[test.results]]
-error = "Cannot perform addition with 'none' and 'int'"
+value = '[{ "$after.n": 126, "$before.n": 26, id: cut:26 }]'
 
 [[test.results]]
 value = "[]"
@@ -536,7 +536,7 @@ value = "[]"
 value = "[NONE]"
 
 [[test.results]]
-value = "[{ id: cut:3, n: 13 }]"
+value = "[{ id: cut:3, n: 23 }]"
 
 [[test.results]]
 value = "[[{ op: 'replace', path: '', value: NONE }]]"
@@ -545,7 +545,7 @@ value = "[[{ op: 'replace', path: '', value: NONE }]]"
 value = "[NONE]"
 
 [[test.results]]
-value = '[{ "$after.n": NONE, "$before.n": 16, id: NONE }]'
+value = '[{ "$after.n": NONE, "$before.n": 26, id: NONE }]'
 
 [[test.results]]
 value = "[]"
@@ -566,7 +566,7 @@ value = "[]"
 value = "[]"
 
 [[test.results]]
-value = "[{ id: cut:11, n: 11 }, { id: cut:12, n: 12 }, { id: cut:13, n: 13 }, { id: cut:14, n: 14 }, { id: cut:15, n: 15 }, { id: cut:16, n: 16 }, { id: cut:21, n: 21 }, { id: cut:22, n: 22 }, { id: cut:23, n: 23 }, { id: cut:24, n: 24 }, { id: cut:25, n: 25 }, { id: cut:26, n: 26 }]"
+value = "[{ id: cut:11, n: 11 }, { id: cut:12, n: 12 }, { id: cut:13, n: 13 }, { id: cut:14, n: 14 }, { id: cut:15, n: 15 }, { id: cut:16, n: 16 }, { id: cut:21, n: 121 }, { id: cut:22, n: 122 }, { id: cut:23, n: 123 }, { id: cut:24, n: 124 }, { id: cut:25, n: 125 }, { id: cut:26, n: 126 }]"
 
 [[test.results]]
 value = "[]"

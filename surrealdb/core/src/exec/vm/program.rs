@@ -5615,8 +5615,9 @@ pub(super) enum Source {
 	},
 	/// The subjects each of a write's `targets` names, evaluated one target
 	/// at a time and each run as the record in flight. `deferable` says
-	/// whether a table or record id names a record to create rather than
-	/// records to read. `guarantees` says whether a table names only the
+	/// whether a table names a record to create rather than records to read;
+	/// a record id is created unread only by `CREATE`, and read by every
+	/// other form. `guarantees` says whether a table names only the
 	/// record an `UPSERT` guarantees, its records being read by another
 	/// pipeline of the write.
 	WriteTargets {

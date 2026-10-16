@@ -145,11 +145,17 @@ pub(crate) enum Subject {
 /// The subjects one evaluated target names, appended to `out` in the order the
 /// statement writes them.
 ///
-/// `deferable` says whether a target names a record to invent rather than
-/// records to find — `CREATE`, and an `UPSERT` with no condition. A form that
-/// is not deferable scans a table target instead and reads the record a
-/// record-id target names: an updating form's before-image is the stored record, never the value
-/// the target expression happened to be written as.
+/// `deferable` says whether a table target names a record to invent rather
+/// than records to find — `CREATE`, and an `UPSERT` with no condition. A form
+/// that is not deferable scans a table target instead.
+///
+/// A record-id target names a record to create without reading it only for
+/// `CREATE`. Every other form reads the record it names: an updating form's
+/// before-image is the stored record, never the value the target expression
+/// happened to be written as. `UPSERT` reads it with or without a condition, so
+/// a stored record takes the updating order and its data clause is evaluated
+/// against the stored record, never against the empty record a creating
+/// attempt starts from.
 ///
 /// A record-id range is the mirror image: every updating form resolves it by
 /// scanning, and `CREATE` refuses it, because a range names records to find
@@ -227,7 +233,7 @@ pub(crate) fn target_subjects(
 			};
 			out.push(Subject::Scan(table, Some(range)));
 		}
-		Value::RecordId(id) if deferable => {
+		Value::RecordId(id) if deferable && matches!(form, plan::WriteForm::Create) => {
 			out.push(Subject::Row(Box::new(WriteRow::for_target(Value::RecordId(id))?)))
 		}
 		Value::RecordId(id) => out.push(Subject::Read(id)),

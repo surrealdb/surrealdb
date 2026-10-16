@@ -1551,8 +1551,9 @@ pub(crate) struct WriteBody {
 	pub(crate) first: Box<[u16]>,
 	/// The stages of the updating order of a form with two; empty for a form with one.
 	pub(crate) second: Box<[u16]>,
-	/// Whether a table or record id among the subjects names a record to create rather than the
-	/// records stored there to change.
+	/// Whether a table among the subjects names a record to create rather than the records stored
+	/// there to change. A record id names a record to create without reading it only for `CREATE`;
+	/// every other form reads the record it names.
 	pub(crate) deferable: bool,
 }
 
