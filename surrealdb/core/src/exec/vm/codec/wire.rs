@@ -3,16 +3,35 @@
 
 use anyhow::{Result, bail};
 
+use super::types::Codec;
+
 /// Reads a value's bytes front to back.
 pub(super) struct Reader<'b> {
 	bytes: &'b [u8],
+	/// The codec that resolves the types the value names, when it names any.
+	codec: Option<&'static Codec>,
 }
 
 impl<'b> Reader<'b> {
+	/// A reader of a value that names no type but the ones it holds.
 	pub(super) fn new(bytes: &'b [u8]) -> Self {
 		Self {
 			bytes,
+			codec: None,
 		}
+	}
+
+	/// A reader of a value whose named types `codec` resolves.
+	pub(super) fn in_codec(bytes: &'b [u8], codec: &'static Codec) -> Self {
+		Self {
+			bytes,
+			codec: Some(codec),
+		}
+	}
+
+	/// The codec that resolves the types the value names.
+	pub(super) fn codec(&self) -> Result<&'static Codec> {
+		self.codec.ok_or_else(|| anyhow::anyhow!("a value names a type and no codec resolves it"))
 	}
 
 	pub(super) fn is_empty(&self) -> bool {
@@ -87,7 +106,10 @@ impl<'b> Reader<'b> {
 	/// that many bytes.
 	pub(super) fn varlen(&mut self) -> Result<Reader<'b>> {
 		let len = u32::from_le_bytes(self.array()?) as usize;
-		Ok(Reader::new(self.take(len)?))
+		Ok(Reader {
+			bytes: self.take(len)?,
+			codec: self.codec,
+		})
 	}
 }
 
@@ -95,6 +117,8 @@ impl<'b> Reader<'b> {
 #[derive(Default)]
 pub(super) struct Writer {
 	bytes: Vec<u8>,
+	/// The codec that resolves the types the value names, when it names any.
+	codec: Option<&'static Codec>,
 }
 
 /// The most capacity a thread's scratch buffer keeps between encodings.
@@ -118,7 +142,19 @@ impl Writer {
 		let bytes = SCRATCH.try_with(|s| std::mem::take(&mut *s.borrow_mut())).unwrap_or_default();
 		Self {
 			bytes,
+			codec: None,
 		}
+	}
+
+	/// This writer, writing a value whose named types `codec` resolves.
+	pub(super) fn in_codec(mut self, codec: &'static Codec) -> Self {
+		self.codec = Some(codec);
+		self
+	}
+
+	/// The codec that resolves the types the value names.
+	pub(super) fn codec(&self) -> Result<&'static Codec> {
+		self.codec.ok_or_else(|| anyhow::anyhow!("a value names a type and no codec resolves it"))
 	}
 
 	/// What a [`Self::scratch`] writer wrote, copied out; the buffer goes back

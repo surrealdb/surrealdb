@@ -240,6 +240,13 @@ impl revision::SkipRevisioned for Closure {
 	fn skip_revisioned<R: std::io::Read>(_reader: &mut R) -> Result<(), revision::Error> {
 		Err(revision::Error::Conversion("Closures cannot be skipped on the wire".to_string()))
 	}
+
+	#[inline]
+	fn skip_revisioned_slice(
+		_reader: &mut revision::SliceReader<'_>,
+	) -> Result<(), revision::Error> {
+		Err(revision::Error::Conversion("Closures cannot be skipped on the wire".to_string()))
+	}
 }
 
 impl revision::WalkRevisioned for Closure {

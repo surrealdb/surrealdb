@@ -14,6 +14,7 @@
 use smallvec::{SmallVec, smallvec};
 use surrealdb_strand::{Strand, TableName};
 
+#[cfg(test)]
 use super::cx::default_cx;
 use super::{effects, multiplicity, types};
 use crate::exec::ir::core::facts::FactCache;
@@ -40,6 +41,7 @@ const MAX_ANCESTOR_HOPS: usize = 1024;
 /// A footprint is keyed by the element of the loop stream where the key is a function of the
 /// element, so two iterations that write different elements do not overlap. An op nothing is
 /// known about reads and writes [`IrResource::Unknown`].
+#[cfg(test)]
 pub(crate) fn of(ir: &Ir, facts: &mut FactCache, op: OpId) -> IrFootprint {
 	of_with(ir, facts, &default_cx(ir), op)
 }

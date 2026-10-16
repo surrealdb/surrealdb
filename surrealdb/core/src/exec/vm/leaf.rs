@@ -650,7 +650,7 @@ pub(crate) fn builtin(name: &str, registry: &FunctionRegistry) -> Class {
 	let Some(func) = registry.get(name) else {
 		return Class::Kernel(&[]);
 	};
-	function(func.as_ref())
+	function(func)
 }
 
 /// The class of builtin `func`, as [`builtin`] states it.
@@ -692,9 +692,9 @@ fn method(name: &str, registry: &FunctionRegistry) -> Class {
 	descriptor
 		.type_impls
 		.iter()
-		.map(|(_, func)| func)
-		.chain(descriptor.fallback.iter())
-		.map(|func| function(func.as_ref()))
+		.map(|(_, func)| *func)
+		.chain(descriptor.fallback)
+		.map(function)
 		.fold(Class::Leaf, worse)
 }
 

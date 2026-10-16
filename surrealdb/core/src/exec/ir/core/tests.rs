@@ -22,7 +22,7 @@ use super::ir::{Ir, IrScope, Walk, WalkOrder};
 use super::location::{LocOrigin, Location, Span};
 use super::parse::{ParseError, parse, parse_unverified};
 use super::pattern::{GREEDY_DEFAULT, GreedyLimits, Limit, Pattern, PatternSet, apply_greedy};
-use super::print::{AttrSyntax, PrintOpts, print_with};
+use super::print::{AttrSyntax, AttrSyntaxes, PrintOpts, print_with};
 use super::rewriter::{InsertPoint, OpSpec, Provenance, Rewriter};
 use super::text::{ALL_REGION_KINDS, region_kind_from_name, region_kind_name};
 use super::value::{Use, ValueDef};
@@ -69,7 +69,6 @@ use crate::exec::ir::phys::ops::{
 	WriteSubjectsShape,
 };
 use crate::exec::ir::phys::placement::place_for_test;
-use crate::exec::ir::registry::Registry;
 use crate::exec::logical::footprint::CatalogKind;
 use crate::exec::logical::pipelines::{
 	ChainLegality, ErrorOrder, Legality, Paging, SinkCombine, SourceSplit,
@@ -640,7 +639,9 @@ fn facts_are_recomputed_after_an_edit() {
 	});
 	let mut facts = FactCache::new();
 	assert!(facts.get(stmt, ir.generation(stmt), &default_key(&ir)).is_none());
-	Rewriter::new(&mut ir, &mut facts).facts(stmt);
+	Rewriter::new(&mut ir, &mut facts)
+		.with_registry(crate::exec::ir::analysis::cx::builtin_registry())
+		.facts(stmt);
 	assert!(facts.get(stmt, ir.generation(stmt), &default_key(&ir)).is_some());
 	{
 		let mut rw = Rewriter::new(&mut ir, &mut facts);
@@ -650,7 +651,9 @@ fn facts_are_recomputed_after_an_edit() {
 		facts.get(stmt, ir.generation(stmt), &default_key(&ir)).is_none(),
 		"the edit made the entry stale"
 	);
-	Rewriter::new(&mut ir, &mut facts).facts(stmt);
+	Rewriter::new(&mut ir, &mut facts)
+		.with_registry(crate::exec::ir::analysis::cx::builtin_registry())
+		.facts(stmt);
 	assert!(facts.get(stmt, ir.generation(stmt), &default_key(&ir)).is_some());
 }
 
@@ -661,7 +664,8 @@ fn a_dangling_op_answers_the_top_facts_and_an_erased_op_keeps_its_last_facts() {
 	let op = edit(&mut ir, |rw| add(rw, InsertPoint::End(top), literal(1), &[], 1).0);
 	let mut facts = FactCache::new();
 	{
-		let mut rw = Rewriter::new(&mut ir, &mut facts);
+		let mut rw = Rewriter::new(&mut ir, &mut facts)
+			.with_registry(crate::exec::ir::analysis::cx::builtin_registry());
 		rw.facts(op);
 		rw.erase(op, EliminationReason::DeadPure).expect("the op is erased");
 		rw.facts(op);
@@ -2791,9 +2795,16 @@ async fn greedy_reaches_a_fixed_point() {
 	set.add(Box::new(CountUp {
 		limit: 3,
 	}));
-	let report = apply_greedy(&mut ir, &mut facts, &set, &NotYetFolder, GREEDY_DEFAULT)
-		.await
-		.expect("the driver answers");
+	let report = apply_greedy(
+		&mut ir,
+		&mut facts,
+		&set,
+		&NotYetFolder,
+		crate::exec::ir::analysis::cx::builtin_registry(),
+		GREEDY_DEFAULT,
+	)
+	.await
+	.expect("the driver answers");
 	assert_eq!((report.passes, report.rewrites, report.stopped_by), (4, 3, None));
 	assert_eq!(literal_int(&ir, ops[0]), Some(3));
 	assert_valid(&ir);
@@ -2811,17 +2822,31 @@ async fn greedy_stops_at_the_limits_and_reports_them() {
 		max_passes: 3,
 		max_rewrites: GREEDY_DEFAULT.max_rewrites,
 	};
-	let report = apply_greedy(&mut ir, &mut facts, &set, &NotYetFolder, limits)
-		.await
-		.expect("a limit is not an error");
+	let report = apply_greedy(
+		&mut ir,
+		&mut facts,
+		&set,
+		&NotYetFolder,
+		crate::exec::ir::analysis::cx::builtin_registry(),
+		limits,
+	)
+	.await
+	.expect("a limit is not an error");
 	assert_eq!((report.passes, report.rewrites, report.stopped_by), (3, 3, Some(Limit::Passes)));
 	let limits = GreedyLimits {
 		max_passes: u8::MAX,
 		max_rewrites: 5,
 	};
-	let report = apply_greedy(&mut ir, &mut facts, &set, &NotYetFolder, limits)
-		.await
-		.expect("a limit is not an error");
+	let report = apply_greedy(
+		&mut ir,
+		&mut facts,
+		&set,
+		&NotYetFolder,
+		crate::exec::ir::analysis::cx::builtin_registry(),
+		limits,
+	)
+	.await
+	.expect("a limit is not an error");
 	assert_eq!((report.passes, report.rewrites, report.stopped_by), (5, 5, Some(Limit::Rewrites)));
 	assert_valid(&ir);
 }
@@ -2872,9 +2897,16 @@ async fn greedy_skips_an_op_erased_earlier_in_the_pass() {
 	set.add(Box::new(EraseNext {
 		offered: std::sync::Arc::clone(&offered),
 	}));
-	let report = apply_greedy(&mut ir, &mut facts, &set, &NotYetFolder, GREEDY_DEFAULT)
-		.await
-		.expect("the driver answers");
+	let report = apply_greedy(
+		&mut ir,
+		&mut facts,
+		&set,
+		&NotYetFolder,
+		crate::exec::ir::analysis::cx::builtin_registry(),
+		GREEDY_DEFAULT,
+	)
+	.await
+	.expect("the driver answers");
 	assert_eq!((report.rewrites, report.stopped_by), (1, None));
 	assert!(ir.op(ops[1]).is_none(), "the second literal is erased");
 	let offered = offered.lock().expect("the log is not poisoned").clone();
@@ -2921,9 +2953,16 @@ async fn greedy_never_offers_an_op_inside_a_stored_clause() {
 		applies: false,
 		log: std::sync::Arc::clone(&log),
 	}));
-	apply_greedy(&mut ir, &mut FactCache::new(), &set, &NotYetFolder, GREEDY_DEFAULT)
-		.await
-		.expect("the driver answers");
+	apply_greedy(
+		&mut ir,
+		&mut FactCache::new(),
+		&set,
+		&NotYetFolder,
+		crate::exec::ir::analysis::cx::builtin_registry(),
+		GREEDY_DEFAULT,
+	)
+	.await
+	.expect("the driver answers");
 	assert_eq!(log.lock().expect("the log is not poisoned").len(), 1);
 }
 
@@ -2948,9 +2987,16 @@ async fn greedy_tries_patterns_by_benefit() {
 			max_passes: 1,
 			max_rewrites: 1,
 		};
-		let report = apply_greedy(&mut ir, &mut FactCache::new(), &set, &NotYetFolder, limits)
-			.await
-			.expect("the driver answers");
+		let report = apply_greedy(
+			&mut ir,
+			&mut FactCache::new(),
+			&set,
+			&NotYetFolder,
+			crate::exec::ir::analysis::cx::builtin_registry(),
+			limits,
+		)
+		.await
+		.expect("the driver answers");
 		assert_eq!(report.rewrites, rewrites);
 		assert_eq!(*log.lock().expect("the log is not poisoned"), expected);
 	}
@@ -3027,9 +3073,16 @@ async fn greedy_awaits_folds_between_passes() {
 	let folder = ConstantFolder {
 		calls: AtomicUsize::new(0),
 	};
-	let report = apply_greedy(&mut ir, &mut facts, &set, &folder, GREEDY_DEFAULT)
-		.await
-		.expect("the driver answers");
+	let report = apply_greedy(
+		&mut ir,
+		&mut facts,
+		&set,
+		&folder,
+		crate::exec::ir::analysis::cx::builtin_registry(),
+		GREEDY_DEFAULT,
+	)
+	.await
+	.expect("the driver answers");
 	assert_eq!((report.passes, report.rewrites, report.stopped_by), (3, 1, None));
 	assert_eq!(folder.calls.load(Ordering::SeqCst), 1);
 	assert_eq!(literal_int(&ir, ops[0]), Some(42));
@@ -3112,7 +3165,15 @@ async fn a_logical_pattern_creating_a_phys_op_is_rejected() {
 		kind: phys(),
 	}));
 	assert_legality(
-		apply_greedy(&mut ir, &mut FactCache::new(), &set, &NotYetFolder, limits).await,
+		apply_greedy(
+			&mut ir,
+			&mut FactCache::new(),
+			&set,
+			&NotYetFolder,
+			crate::exec::ir::analysis::cx::builtin_registry(),
+			limits,
+		)
+		.await,
 	);
 
 	let mut ir = one_op(phys());
@@ -3121,7 +3182,15 @@ async fn a_logical_pattern_creating_a_phys_op_is_rejected() {
 		kind: stmt_kind(),
 	}));
 	assert_legality(
-		apply_greedy(&mut ir, &mut FactCache::new(), &set, &NotYetFolder, limits).await,
+		apply_greedy(
+			&mut ir,
+			&mut FactCache::new(),
+			&set,
+			&NotYetFolder,
+			crate::exec::ir::analysis::cx::builtin_registry(),
+			limits,
+		)
+		.await,
 	);
 
 	// Expression ops are creatable by every dialect's patterns.
@@ -3130,9 +3199,16 @@ async fn a_logical_pattern_creating_a_phys_op_is_rejected() {
 	set.add(Box::new(Creates {
 		kind: literal(1),
 	}));
-	let report = apply_greedy(&mut ir, &mut FactCache::new(), &set, &NotYetFolder, limits)
-		.await
-		.expect("a logical pattern may create an expression op");
+	let report = apply_greedy(
+		&mut ir,
+		&mut FactCache::new(),
+		&set,
+		&NotYetFolder,
+		crate::exec::ir::analysis::cx::builtin_registry(),
+		limits,
+	)
+	.await
+	.expect("a logical pattern may create an expression op");
 	assert_eq!(report.stopped_by, Some(Limit::Rewrites));
 }
 
@@ -3566,20 +3642,20 @@ impl AttrSyntax for TextSyntax {
 	}
 }
 
-/// A registry that knows the expression syntax of the text tests only.
-fn text_registry() -> Registry {
-	let mut registry = Registry::empty();
-	registry.attr_syntax[0] = Some(&TEXT_SYNTAX);
+/// A table that knows the expression syntax of the text tests only.
+fn text_registry() -> AttrSyntaxes {
+	let mut registry = AttrSyntaxes::NONE;
+	registry.0[0] = Some(&TEXT_SYNTAX);
 	registry
 }
 
-fn text_of(ir: &Ir, registry: &Registry) -> String {
+fn text_of(ir: &Ir, registry: &AttrSyntaxes) -> String {
 	print_with(ir, ir.top(), PrintOpts::default(), registry)
 }
 
 /// The container `text` describes, read without the verification [`parse`] runs, so a fixture
 /// that keeps no phase's rules still reads back.
-fn reparse(text: &str, registry: &Registry) -> Result<Ir, ParseError> {
+fn reparse(text: &str, registry: &AttrSyntaxes) -> Result<Ir, ParseError> {
 	parse_unverified(
 		text,
 		IrScope::Request {
@@ -3752,7 +3828,7 @@ fn types_with_commas_and_quotes_round_trip() {
 			.expect("the op is created");
 	});
 	let mut with_array_syntax = text_registry();
-	with_array_syntax.attr_syntax[0] = Some(&ARRAY_SYNTAX);
+	with_array_syntax.0[0] = Some(&ARRAY_SYNTAX);
 	let text = text_of(&ir, &with_array_syntax);
 	assert!(text.contains("fact(array<int, 3>,strict_row_migrated(\"we,ird\\\"x\"))"), "{text}");
 	let parsed =
@@ -3855,7 +3931,7 @@ fn a_parsed_container_keeps_its_phase_and_is_verified() {
 	let top = top_block(&ir);
 	edit(&mut ir, |rw| add(rw, InsertPoint::End(top), stmt_kind(), &[], 0));
 	edit(&mut ir, |rw| rw.advance_phase(Phase::Physical)).expect("the phase advances");
-	let registry = crate::exec::ir::registry::build();
+	let registry = crate::exec::ir::registry::attr_syntaxes();
 	let text = text_of(&ir, registry);
 	let failure = parse(&text, scope(), registry).expect_err("the container does not verify");
 	assert!(failure.detail.contains("does not verify"), "{failure}");
@@ -3865,7 +3941,7 @@ fn a_parsed_container_keeps_its_phase_and_is_verified() {
 
 #[test]
 fn an_op_id_in_the_attributes_prints_as_provenance_names_it() {
-	let registry = crate::exec::ir::registry::build();
+	let registry = crate::exec::ir::registry::attr_syntaxes();
 	let pipeline = |logical: OpId| {
 		OpKind::Phys(PhysOp::Pipeline(Box::new(PipelineAttrs {
 			id: PipelineId(0),
@@ -4017,10 +4093,10 @@ fn parse_rejects_unknown_mnemonic_with_line() {
 		assert_eq!(failure.line, 1, "{text:?}");
 	}
 
-	let failure = reparse(&text, &Registry::empty()).expect_err("no syntax reads the attributes");
+	let failure = reparse(&text, &AttrSyntaxes::NONE).expect_err("no syntax reads the attributes");
 	assert_eq!(failure.line, 4);
 	assert_eq!(failure.detail, "no attribute syntax for expr");
-	let unread = print_with(&ir, ir.top(), PrintOpts::default(), &Registry::empty());
+	let unread = print_with(&ir, ir.top(), PrintOpts::default(), &AttrSyntaxes::NONE);
 	assert!(unread.contains("attrs(\"?\")"), "{unread}");
 }
 
@@ -4419,7 +4495,8 @@ fn the_rewriters_adoption_drops_the_cached_facts_of_the_replaced_code() {
 	let value = f.ir.op(f.kept).expect("the op exists").results[0];
 	let mut facts = FactCache::new();
 	{
-		let mut rw = Rewriter::new(&mut f.ir, &mut facts);
+		let mut rw = Rewriter::new(&mut f.ir, &mut facts)
+			.with_registry(crate::exec::ir::analysis::cx::builtin_registry());
 		rw.request_fold(FoldRequest {
 			value,
 			consumer: FoldConsumer::AlgebraicRule,

@@ -141,6 +141,17 @@ pub enum DatastoreError {
 		migrations: String,
 	},
 
+	/// An edge build refused to attach a store that needs a full build's startup first.
+	#[error(
+		"An edge build cannot attach this datastore (Stored: {stored}, Running: {running}): {reason}. \
+		 Open it once with a full build of {running}, which runs the startup checks and migrations, then attach it again"
+	)]
+	NotAttachable {
+		stored: String,
+		running: String,
+		reason: String,
+	},
+
 	/// Another node held the migration lease for too long
 	#[error(
 		"Timed out waiting for another node to apply pending data migrations ({migrations}). \
@@ -313,6 +324,9 @@ impl LeafError for DatastoreError {
 				..
 			}
 			| DatastoreError::MigrationTimedOut {
+				..
+			}
+			| DatastoreError::NotAttachable {
 				..
 			} => internal_todo(message),
 			DatastoreError::FeatureNotEnabled {

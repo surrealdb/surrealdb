@@ -3,7 +3,7 @@
 use anyhow::Result;
 
 use crate::exec::EvalContext;
-use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
+use crate::exec::function::{ScalarFunction, Signature};
 use crate::exec::ir::iface::Fallibility;
 use crate::expr::Kind;
 use crate::expr::logical::EffectSet;
@@ -60,6 +60,5 @@ impl ScalarFunction for SchemaTableExists {
 	}
 }
 
-pub fn register(registry: &mut FunctionRegistry) {
-	registry.register(SchemaTableExists);
-}
+/// The `schema::*` scalar builtins.
+pub(super) const SCALARS: &[&dyn ScalarFunction] = &[&SchemaTableExists];

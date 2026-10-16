@@ -99,7 +99,7 @@ use crate::val::Value;
 type Part = (&'static str, &'static str, Definitions);
 
 /// What lowering a `phys.info` produced.
-pub(super) struct InfoLowered {
+pub(crate) struct InfoLowered {
 	/// The one pipeline of the statement, over no source.
 	pub(super) pipeline: Pipeline,
 	/// What the program needs of its run: the context level the subject and its operands require,
@@ -1829,6 +1829,22 @@ mod tests {
 			}
 		)));
 	}
+	/// Takes the store instruction `instr` as the host does: a data statement's by its own step,
+	/// every other through the full surface's runtime.
+	async fn take(
+		program: &Program,
+		instr: &StoreInstr,
+		regs: &mut [crate::exec::vm::scalar::Scalar<'_>],
+		reserved_taken: &mut [bool],
+		ctx: &crate::exec::ExecutionContext,
+	) -> crate::exec::FlowResult<Option<usize>> {
+		use crate::exec::vm::store::{FULL_SCHEMA_STEPS, SchemaSteps, step_dml};
+		match instr.is_dml() {
+			true => step_dml(program, instr, regs, reserved_taken, ctx).await,
+			false => FULL_SCHEMA_STEPS.step(program, instr, regs, reserved_taken, ctx).await,
+		}
+	}
+
 	/// Runs the one store instruction of `program` in `ctx` over `regs`.
 	async fn step_one(
 		program: &Program,
@@ -1838,7 +1854,7 @@ mod tests {
 		let [instr] = stores(program)[..] else {
 			panic!("one store instruction, got {:?}", stores(program));
 		};
-		crate::exec::vm::store::step(program, instr, regs, &mut [], ctx).await.map(|_| ())
+		take(program, instr, regs, &mut [], ctx).await.map(|_| ())
 	}
 
 	#[tokio::test]
@@ -1914,8 +1930,7 @@ mod tests {
 					Some(held)
 				})
 				.expect("the name is checked");
-			let refused =
-				crate::exec::vm::store::step(&program, instr, &mut [], &mut [], &ctx).await;
+			let refused = take(&program, instr, &mut [], &mut [], &ctx).await;
 			assert!(refused.is_err(), "{protected}");
 		}
 		let program = checks("x");
@@ -1935,9 +1950,7 @@ mod tests {
 		};
 		let mut regs: Vec<Scalar<'_>> = (0..=*value).map(|_| Scalar::None).collect();
 		regs[*value as usize] = Scalar::Value(std::borrow::Cow::Owned(Value::from(5_i64)));
-		crate::exec::vm::store::step(&program, record, &mut regs, &mut [], &ctx)
-			.await
-			.expect("the value is recorded");
+		take(&program, record, &mut regs, &mut [], &ctx).await.expect("the value is recorded");
 		assert_eq!(
 			sink.take(),
 			vec![SessionEffect::Let {
@@ -2018,11 +2031,9 @@ mod tests {
 		let mut regs: Vec<Scalar<'_>> = (0..=*value).map(|_| Scalar::None).collect();
 		regs[*value as usize] = Scalar::Value(std::borrow::Cow::Owned(Value::from(1_i64)));
 		let ctx = root_ctx_with_options();
-		let refused = crate::exec::vm::store::step(&program, instr, &mut regs, &mut [], &ctx).await;
+		let refused = take(&program, instr, &mut regs, &mut [], &ctx).await;
 		assert!(refused.is_err());
 		regs[*value as usize] = Scalar::Value(std::borrow::Cow::Owned(Value::String("a".into())));
-		crate::exec::vm::store::step(&program, instr, &mut regs, &mut [], &ctx)
-			.await
-			.expect("a string names a namespace");
+		take(&program, instr, &mut regs, &mut [], &ctx).await.expect("a string names a namespace");
 	}
 }

@@ -5,12 +5,12 @@
 
 use anyhow::Result;
 
+use crate::define_async_function;
 use crate::exec::EvalContext;
-use crate::exec::function::FunctionRegistry;
+use crate::exec::function::ScalarFunction;
 #[cfg(feature = "http")]
 use crate::val::Object;
 use crate::val::Value;
-use crate::{define_async_function, register_functions};
 
 // =========================================================================
 // Helper functions
@@ -311,6 +311,6 @@ define_async_function!(HttpDelete, "http::delete", effects: EffectSet::READS_EXT
 // declare `WRITES_EXTERNAL`. Rewrite rules must not duplicate or drop a request,
 // and a grouped query must not change how many times a request is sent.
 // `head` and `get` only read.
-pub fn register(registry: &mut FunctionRegistry) {
-	register_functions!(registry, HttpHead, HttpGet, HttpPut, HttpPost, HttpPatch, HttpDelete,);
-}
+/// The `http::*` scalar builtins.
+pub(super) const SCALARS: &[&dyn ScalarFunction] =
+	&[&HttpHead, &HttpGet, &HttpPut, &HttpPost, &HttpPatch, &HttpDelete];

@@ -19,6 +19,54 @@ macro_rules! declare_fallibility {
 	}};
 }
 
+/// The `invoke` (and, for a metered function, `metered`) items of a
+/// [`define_pure_function!`] expansion, written inside the `ScalarFunction`
+/// impl.
+///
+/// Without a walk, `invoke` decodes the arguments and calls the implementation.
+/// With one, `invoke` runs the walk to its end through
+/// [`run_walk`](crate::exec::function::run_walk) and `metered` hands the
+/// executor the same walk; both go through `metered_walk`, which
+/// `__pure_walk!` defines.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __pure_invoke {
+	($func_name:literal, $impl_path:path, []) => {
+		fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
+			let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
+			$impl_path(args)
+		}
+	};
+	($func_name:literal, $impl_path:path, [$metered:path]) => {
+		fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
+			$crate::exec::function::run_walk(::std::pin::pin!(Self::metered_walk(args)))
+		}
+
+		fn metered(&self) -> Option<$crate::exec::function::MeteredFn> {
+			Some(|args| Box::pin(Self::metered_walk(args)))
+		}
+	};
+}
+
+/// The `metered_walk` of a metered [`define_pure_function!`] expansion, written
+/// after the `ScalarFunction` impl; nothing for a function without a walk.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __pure_walk {
+	($struct_name:ident, $func_name:literal, []) => {};
+	($struct_name:ident, $func_name:literal, [$metered:path]) => {
+		impl $struct_name {
+			/// The builtin's walk over its arguments, as `metered` and `invoke` run it.
+			async fn metered_walk(
+				args: Vec<$crate::val::Value>,
+			) -> anyhow::Result<$crate::val::Value> {
+				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
+				$metered(args).await
+			}
+		}
+	};
+}
+
 /// Define a pure scalar function that wraps an existing `fnc::*` implementation.
 ///
 /// # Usage
@@ -75,6 +123,9 @@ macro_rules! declare_fallibility {
 /// an `async fn` over the same arguments that charges the fuel meter a
 /// stretch at a time
 /// ([`ScalarFunction::metered`](crate::exec::function::ScalarFunction::metered)).
+/// For such a function `invoke` runs the walk to its end
+/// ([`run_walk`](crate::exec::function::run_walk)), and the implementation path
+/// names the synchronous reference that `fnc::synchronous` dispatches to.
 #[macro_export]
 macro_rules! define_pure_function {
 	// No arguments: () -> ReturnType
@@ -117,20 +168,10 @@ macro_rules! define_pure_function {
 					}))?
 			}
 
-			fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
-				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
-				$impl_path(args)
-			}
-
-			$(fn metered(&self) -> Option<$crate::exec::function::MeteredFn> {
-				Some(|args| {
-					Box::pin(async move {
-						let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
-						$metered(args).await
-					})
-				})
-			})?
+			$crate::__pure_invoke!($func_name, $impl_path, [$($metered)?]);
 		}
+
+		$crate::__pure_walk!($struct_name, $func_name, [$($metered)?]);
 	};
 
 	// Single required argument: (name: Type) -> ReturnType
@@ -175,20 +216,10 @@ macro_rules! define_pure_function {
 					}))?
 			}
 
-			fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
-				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
-				$impl_path(args)
-			}
-
-			$(fn metered(&self) -> Option<$crate::exec::function::MeteredFn> {
-				Some(|args| {
-					Box::pin(async move {
-						let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
-						$metered(args).await
-					})
-				})
-			})?
+			$crate::__pure_invoke!($func_name, $impl_path, [$($metered)?]);
 		}
+
+		$crate::__pure_walk!($struct_name, $func_name, [$($metered)?]);
 	};
 
 	// Two required arguments: (a: Type1, b: Type2) -> ReturnType
@@ -234,20 +265,10 @@ macro_rules! define_pure_function {
 					}))?
 			}
 
-			fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
-				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
-				$impl_path(args)
-			}
-
-			$(fn metered(&self) -> Option<$crate::exec::function::MeteredFn> {
-				Some(|args| {
-					Box::pin(async move {
-						let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
-						$metered(args).await
-					})
-				})
-			})?
+			$crate::__pure_invoke!($func_name, $impl_path, [$($metered)?]);
 		}
+
+		$crate::__pure_walk!($struct_name, $func_name, [$($metered)?]);
 	};
 
 	// Three required arguments
@@ -294,20 +315,10 @@ macro_rules! define_pure_function {
 					}))?
 			}
 
-			fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
-				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
-				$impl_path(args)
-			}
-
-			$(fn metered(&self) -> Option<$crate::exec::function::MeteredFn> {
-				Some(|args| {
-					Box::pin(async move {
-						let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
-						$metered(args).await
-					})
-				})
-			})?
+			$crate::__pure_invoke!($func_name, $impl_path, [$($metered)?]);
 		}
+
+		$crate::__pure_walk!($struct_name, $func_name, [$($metered)?]);
 	};
 
 	// Variadic: (...name: Type) -> ReturnType
@@ -352,20 +363,10 @@ macro_rules! define_pure_function {
 					}))?
 			}
 
-			fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
-				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
-				$impl_path(args)
-			}
-
-			$(fn metered(&self) -> Option<$crate::exec::function::MeteredFn> {
-				Some(|args| {
-					Box::pin(async move {
-						let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
-						$metered(args).await
-					})
-				})
-			})?
+			$crate::__pure_invoke!($func_name, $impl_path, [$($metered)?]);
 		}
+
+		$crate::__pure_walk!($struct_name, $func_name, [$($metered)?]);
 	};
 
 	// One required + variadic: (first: Type1, ...rest: Type2) -> ReturnType
@@ -411,20 +412,10 @@ macro_rules! define_pure_function {
 					}))?
 			}
 
-			fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
-				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
-				$impl_path(args)
-			}
-
-			$(fn metered(&self) -> Option<$crate::exec::function::MeteredFn> {
-				Some(|args| {
-					Box::pin(async move {
-						let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
-						$metered(args).await
-					})
-				})
-			})?
+			$crate::__pure_invoke!($func_name, $impl_path, [$($metered)?]);
 		}
+
+		$crate::__pure_walk!($struct_name, $func_name, [$($metered)?]);
 	};
 
 	// Single optional argument: (?name: Type) -> ReturnType
@@ -469,20 +460,10 @@ macro_rules! define_pure_function {
 					}))?
 			}
 
-			fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
-				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
-				$impl_path(args)
-			}
-
-			$(fn metered(&self) -> Option<$crate::exec::function::MeteredFn> {
-				Some(|args| {
-					Box::pin(async move {
-						let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
-						$metered(args).await
-					})
-				})
-			})?
+			$crate::__pure_invoke!($func_name, $impl_path, [$($metered)?]);
 		}
+
+		$crate::__pure_walk!($struct_name, $func_name, [$($metered)?]);
 	};
 
 	// One required + one optional: (req: Type1, ?opt: Type2) -> ReturnType
@@ -528,20 +509,10 @@ macro_rules! define_pure_function {
 					}))?
 			}
 
-			fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
-				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
-				$impl_path(args)
-			}
-
-			$(fn metered(&self) -> Option<$crate::exec::function::MeteredFn> {
-				Some(|args| {
-					Box::pin(async move {
-						let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
-						$metered(args).await
-					})
-				})
-			})?
+			$crate::__pure_invoke!($func_name, $impl_path, [$($metered)?]);
 		}
+
+		$crate::__pure_walk!($struct_name, $func_name, [$($metered)?]);
 	};
 
 	// Two required + one optional: (a: T1, b: T2, ?c: T3) -> ReturnType
@@ -588,20 +559,10 @@ macro_rules! define_pure_function {
 					}))?
 			}
 
-			fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
-				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
-				$impl_path(args)
-			}
-
-			$(fn metered(&self) -> Option<$crate::exec::function::MeteredFn> {
-				Some(|args| {
-					Box::pin(async move {
-						let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
-						$metered(args).await
-					})
-				})
-			})?
+			$crate::__pure_invoke!($func_name, $impl_path, [$($metered)?]);
 		}
+
+		$crate::__pure_walk!($struct_name, $func_name, [$($metered)?]);
 	};
 
 	// One required + two optional: (a: T1, ?b: T2, ?c: T3) -> ReturnType
@@ -648,20 +609,10 @@ macro_rules! define_pure_function {
 					}))?
 			}
 
-			fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
-				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
-				$impl_path(args)
-			}
-
-			$(fn metered(&self) -> Option<$crate::exec::function::MeteredFn> {
-				Some(|args| {
-					Box::pin(async move {
-						let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
-						$metered(args).await
-					})
-				})
-			})?
+			$crate::__pure_invoke!($func_name, $impl_path, [$($metered)?]);
 		}
+
+		$crate::__pure_walk!($struct_name, $func_name, [$($metered)?]);
 	};
 
 	// Two required + two optional: (a: T1, b: T2, ?c: T3, ?d: T4) -> ReturnType
@@ -709,20 +660,10 @@ macro_rules! define_pure_function {
 					}))?
 			}
 
-			fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
-				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
-				$impl_path(args)
-			}
-
-			$(fn metered(&self) -> Option<$crate::exec::function::MeteredFn> {
-				Some(|args| {
-					Box::pin(async move {
-						let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
-						$metered(args).await
-					})
-				})
-			})?
+			$crate::__pure_invoke!($func_name, $impl_path, [$($metered)?]);
 		}
+
+		$crate::__pure_walk!($struct_name, $func_name, [$($metered)?]);
 	};
 
 	// Two optional arguments: (?a: T1, ?b: T2) -> ReturnType
@@ -768,41 +709,10 @@ macro_rules! define_pure_function {
 					}))?
 			}
 
-			fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
-				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
-				$impl_path(args)
-			}
-
-			$(fn metered(&self) -> Option<$crate::exec::function::MeteredFn> {
-				Some(|args| {
-					Box::pin(async move {
-						let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
-						$metered(args).await
-					})
-				})
-			})?
+			$crate::__pure_invoke!($func_name, $impl_path, [$($metered)?]);
 		}
-	};
-}
 
-/// Helper macro to register multiple functions at once.
-///
-/// # Usage
-///
-/// ```ignore
-/// register_functions!(registry,
-///     MathAbs,
-///     MathCeil,
-///     MathFloor,
-///     // ...
-/// );
-/// ```
-#[macro_export]
-macro_rules! register_functions {
-	($registry:expr, $($func:ty),* $(,)?) => {
-		$(
-			$registry.register(<$func>::default());
-		)*
+		$crate::__pure_walk!($struct_name, $func_name, [$($metered)?]);
 	};
 }
 
@@ -877,10 +787,11 @@ macro_rules! define_context_function {
 				ctx: &'a $crate::exec::EvalContext<'_>,
 				args: Vec<$crate::val::Value>,
 			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
-				Box::pin(async move {
-					$crate::exec::function::check_arity($func_name, &args, 0, Some(0))?;
-					$impl_fn(ctx)
-				})
+				let result = match $crate::exec::function::check_arity($func_name, &args, 0, Some(0)) {
+					Ok(()) => $impl_fn(ctx),
+					Err(e) => Err(e),
+				};
+				$crate::exec::function::ready_boxed(result)
 			}
 		}
 	};
@@ -1248,4 +1159,4 @@ macro_rules! define_async_function {
 }
 
 // Note: The macros are exported from the crate root via #[macro_export]
-// so they can be used as crate::define_pure_function and crate::register_functions
+// so they can be used as crate::define_pure_function and crate::define_async_function

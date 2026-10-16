@@ -14,13 +14,15 @@ use super::facts::FactCache;
 use super::ir::{Ir, IrScope};
 use super::location::{LocOrigin, Location};
 use super::op::OpData;
+use super::print::AttrSyntaxes;
 use super::rewriter::{InsertPoint, OpSpec, Provenance, Rewriter};
 use super::text::{
 	Cursor, DIALECT_NAMES, OpRef, attr_placeholder_index, dialect_index, parse_frame, parse_loc,
 	parse_type, phase_from_name, reading_attr_ids, region_kind_from_name, tag_from_mnemonic,
 };
 use super::verify::{VerifyAt, verify};
-use crate::exec::ir::analysis::cx::default_cx;
+use crate::exec::function::FunctionRegistry;
+use crate::exec::ir::analysis::cx::structural_cx;
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::ExprOp;
 use crate::exec::ir::iface::conversion::{LOGICAL_PHASE, PHYSICAL_PHASE, Phase};
@@ -29,7 +31,6 @@ use crate::exec::ir::iface::ids::{BlockId, FrameId, OpId, SnapshotId, ValueId};
 use crate::exec::ir::iface::region_kind::RegionKind;
 use crate::exec::ir::iface::types::TypeKnowledge;
 use crate::exec::ir::op_kind::{OpKind, OpTag};
-use crate::exec::ir::registry::Registry;
 
 /// The deepest region nesting the parser reads, which bounds its recursion.
 const MAX_DEPTH: usize = 256;
@@ -55,16 +56,18 @@ fn ir_error(line: u32, failure: &IrError) -> ParseError {
 }
 
 /// Parses `text` into a container of `scope`, reading each dialect's attributes through the
-/// syntax `reg` holds.
+/// syntax `syntaxes` holds.
 ///
 /// The text starts with the `ir` header and the frame table, `#f0` the default frame. A value
 /// is named by the number the printer gave it and is defined before it is read. A provenance
 /// clause names an earlier op that stands for itself, or an id that names no op. The header names
 /// the container's phase when it is past `bound`, and the container is verified at the boundary of
 /// that phase, against the dialects the phase admits. A parser that cannot parse a text, or whose
-/// container does not verify, answers an error and never an empty or partial container.
-pub(crate) fn parse(text: &str, scope: IrScope, reg: &Registry) -> Result<Ir, ParseError> {
-	let ir = parse_unverified(text, scope, reg)?;
+/// container does not verify, answers an error and never an empty or partial container. The
+/// container is verified under the full builtin function registry and no catalog definitions.
+pub(crate) fn parse(text: &str, scope: IrScope, syntaxes: &AttrSyntaxes) -> Result<Ir, ParseError> {
+	let ir = parse_unverified(text, scope, syntaxes)?;
+	let registry = FunctionRegistry::with_builtins();
 	let target = if ir.phase() >= Phase::Physical {
 		&PHYSICAL_PHASE
 	} else {
@@ -75,7 +78,7 @@ pub(crate) fn parse(text: &str, scope: IrScope, reg: &Registry) -> Result<Ir, Pa
 		&mut FactCache::new(),
 		VerifyAt::PhaseBoundary(ir.phase()),
 		target,
-		&default_cx(&ir),
+		&structural_cx(&registry, &ir),
 	)
 	.map_err(|failure| error(0, format!("the container does not verify: {failure}")))?;
 	Ok(ir)
@@ -86,11 +89,11 @@ pub(crate) fn parse(text: &str, scope: IrScope, reg: &Registry) -> Result<Ir, Pa
 pub(crate) fn parse_unverified(
 	text: &str,
 	scope: IrScope,
-	reg: &Registry,
+	syntaxes: &AttrSyntaxes,
 ) -> Result<Ir, ParseError> {
 	let mut parser = Parser {
 		c: Cursor::new(text),
-		reg,
+		syntaxes,
 		frames: 1,
 		snapshots: 1,
 		unresolved: 0,
@@ -134,7 +137,7 @@ struct Document {
 
 struct Parser<'a, 'r> {
 	c: Cursor<'a>,
-	reg: &'r Registry,
+	syntaxes: &'r AttrSyntaxes,
 	/// Bounds on the ids an op may name. `frames` counts the frames the header declares.
 	/// `snapshots` counts the current state and the declared versions.
 	frames: u32,
@@ -430,7 +433,7 @@ impl Parser<'_, '_> {
 		line: u32,
 	) -> Result<(OpKind, Vec<OpRef>), ParseError> {
 		let at = dialect_index(tag);
-		let Some(syntax) = self.reg.attr_syntax.get(at).copied().flatten() else {
+		let Some(syntax) = self.syntaxes.0.get(at).copied().flatten() else {
 			let dialect = DIALECT_NAMES.get(at).copied().unwrap_or("?");
 			return Err(error(line, format!("no attribute syntax for {dialect}")));
 		};

@@ -3,7 +3,7 @@
 # wasm-size-budget.sh — build the engine as an edge worker bundles it and fail
 # when a bundle grows past its budget.
 #
-#   scripts/wasm-size-budget.sh [--toolchain stable|nightly] [--variant lean|full|all]
+#   scripts/wasm-size-budget.sh [--toolchain stable|nightly] [--variant lean|full|edge|all]
 #   scripts/wasm-size-budget.sh [--toolchain stable|nightly] --features <list>
 #
 # Each variant is `surrealdb-edge-size-probe` built for wasm32-unknown-unknown
@@ -19,6 +19,11 @@
 #          families.
 #   full   every optional engine feature that builds for wasm32 (the probe's
 #          `full` feature).
+#   edge   the lean feature set, entered through `Datastore::execute_edge` on a
+#          datastore built by `Builder::for_edge` (the probe's `edge-entry`
+#          feature): data statements and the edge builtins alone, with no
+#          schema, `INFO`, live-query or sequence runtime, no index build and
+#          no `http`, `eval`, `sleep` or password-hash functions.
 #
 # `--features` measures the lean bundle with the listed `surrealdb-core`
 # features added (comma-separated), to price one feature against the lean
@@ -46,6 +51,17 @@
 #                                   field values; `none` would also blank them
 #                                   and is not used.
 #
+# `wasm-opt -Oz` runs with two more flags on both toolchains:
+#
+#   --low-memory-unused             rustc lays the shadow stack out first, so no
+#                                   static or heap address lies below 1 KiB; the
+#                                   flag lets wasm-opt fold small positive
+#                                   constants into load/store offsets. It can only
+#                                   turn an access that would wrap past 2^32 into
+#                                   a trap.
+#   --converge                      repeat the passes until the module stops
+#                                   shrinking
+#
 # Both toolchains add `simd128` (Workers' V8 runs wasm SIMD) to what rustc
 # already enables for wasm32-unknown-unknown — bulk-memory, sign-ext,
 # nontrapping-fptoint, mutable-globals, multivalue and reference-types — and
@@ -53,8 +69,10 @@
 #
 # Budgets, in bytes, override with the environment:
 #
-#   WASM_BUDGET_STABLE_LEAN, WASM_BUDGET_STABLE_FULL,
-#   WASM_BUDGET_NIGHTLY_LEAN, WASM_BUDGET_NIGHTLY_FULL
+#   WASM_BUDGET_STABLE_LEAN, WASM_BUDGET_STABLE_FULL, WASM_BUDGET_STABLE_EDGE,
+#   WASM_BUDGET_NIGHTLY_LEAN, WASM_BUDGET_NIGHTLY_FULL, WASM_BUDGET_NIGHTLY_EDGE
+#
+# A budget of 0 reports the size and checks nothing.
 #
 # Other environment: WASM_OPT (the `wasm-opt` binary, version 116 or later),
 # WASM_BINDGEN (the `wasm-bindgen` CLI, the version `Cargo.lock` pins),
@@ -83,9 +101,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$variant" in
-lean | full | custom) variants=("$variant") ;;
-all) variants=(lean full) ;;
-*) echo "--variant must be lean, full or all" >&2; exit 2 ;;
+lean | full | edge | custom) variants=("$variant") ;;
+all) variants=(lean full edge) ;;
+*) echo "--variant must be lean, full, edge or all" >&2; exit 2 ;;
 esac
 
 repo_root=$(git rev-parse --show-toplevel)
@@ -96,6 +114,8 @@ budget_stable_lean=${WASM_BUDGET_STABLE_LEAN:-10627000}
 budget_stable_full=${WASM_BUDGET_STABLE_FULL:-14489000}
 budget_nightly_lean=${WASM_BUDGET_NIGHTLY_LEAN:-9661000}
 budget_nightly_full=${WASM_BUDGET_NIGHTLY_FULL:-13228000}
+budget_stable_edge=${WASM_BUDGET_STABLE_EDGE:-0}
+budget_nightly_edge=${WASM_BUDGET_NIGHTLY_EDGE:-8350000}
 
 wasm_opt=${WASM_OPT:-wasm-opt}
 if ! command -v "$wasm_opt" >/dev/null; then
@@ -135,6 +155,7 @@ printf '%-8s %-6s %12s %12s %12s\n' toolchain bundle size budget gzip
 for v in "${variants[@]}"; do
 	features=()
 	[[ "$v" == full ]] && features=(--features full)
+	[[ "$v" == edge ]] && features=(--features edge-entry)
 	[[ "$v" == custom ]] && features=(--features "$(sed -E 's/([^,]+)/surrealdb-core\/\1/g' <<<"$custom_features")")
 	RUSTFLAGS="$rustflags" CARGO_TARGET_DIR="$target_dir" \
 		"${cargo[@]}" "${cargo_args[@]}" ${features[@]+"${features[@]}"} >&2
@@ -143,7 +164,7 @@ for v in "${variants[@]}"; do
 	rm -rf "$target_dir/bindgen"
 	"$wasm_bindgen" --target web --out-dir "$target_dir/bindgen" "$raw"
 	bindgen_out=$(find "$target_dir/bindgen" -name '*.wasm' ! -name '*.d.ts' | head -n 1)
-	"$wasm_opt" -Oz \
+	"$wasm_opt" -Oz --low-memory-unused --converge \
 		--enable-bulk-memory --enable-sign-ext --enable-nontrapping-float-to-int \
 		--enable-mutable-globals --enable-multivalue --enable-reference-types --enable-simd \
 		--strip-debug --strip-producers "$bindgen_out" -o "$out"
@@ -155,6 +176,11 @@ for v in "${variants[@]}"; do
 	fi
 	budget_var="budget_${toolchain}_${v}"
 	budget=${!budget_var}
+	if ((budget == 0)); then
+		printf '%-8s %-6s %12d %12s %12d\n' "$toolchain" "$v" "$size" - "$gz"
+		echo "note: no $v budget set" >&2
+		continue
+	fi
 	printf '%-8s %-6s %12d %12d %12d\n' "$toolchain" "$v" "$size" "$budget" "$gz"
 	if ((size > budget)); then
 		echo "::error::the $toolchain $v wasm bundle is $size bytes, over its budget of $budget" >&2

@@ -199,8 +199,12 @@ async fn algebraic_rows_not_in_l6() {
 		[
 			"false_and_lazy",
 			"true_or_lazy",
+			"true_and_lazy",
+			"false_or_lazy",
 			"and_true",
 			"or_false",
+			"and_false",
+			"or_true",
 			"inside_empty",
 			"not_inside_empty"
 		]
@@ -237,6 +241,42 @@ async fn x_and_true_needs_a_boolean_consumer() {
 	assert_eq!(binaries(&ir, &BinaryOperator::LessThan), 1);
 }
 
+/// A neutral literal is dropped wherever it is written: on the left of a gate, on the right of one
+/// over a plain row read, and among the conjuncts of a filter. The conjunct it leaves is evaluated
+/// once, as it was.
+#[tokio::test]
+async fn a_written_neutral_literal_is_dropped() {
+	let mut ir = bind("RETURN [true AND $p, false OR $p]").await;
+	assert_eq!(ops_of_tag(&ir, SHORT_CIRCUIT).len(), 2);
+	fold(&mut ir, &ScriptedFolder::new(), &mut RecordingObserver::default()).await;
+	assert_eq!(ops_of_tag(&ir, SHORT_CIRCUIT).len(), 0);
+
+	let mut ir = bind("SELECT * FROM t WHERE a = 'x' OR false").await;
+	fold(&mut ir, &ScriptedFolder::new(), &mut RecordingObserver::default()).await;
+	assert_eq!(ops_of_tag(&ir, SHORT_CIRCUIT).len(), 0);
+
+	let mut ir = bind("SELECT * FROM t WHERE true AND a = 1 AND true AND b = 2").await;
+	assert_eq!(ops_of_tag(&ir, SHORT_CIRCUIT).len(), 3);
+	fold(&mut ir, &ScriptedFolder::new(), &mut RecordingObserver::default()).await;
+	assert_eq!(ops_of_tag(&ir, SHORT_CIRCUIT).len(), 1);
+	assert_eq!(binaries(&ir, &BinaryOperator::Equal), 2);
+}
+
+/// `x AND false` is the literal `false` where `x` is read for its truthiness and can neither raise
+/// nor differ between two evaluations, and the literal carries no text of the expression it
+/// replaced.
+#[tokio::test]
+async fn a_decided_literal_carries_no_text() {
+	let mut ir = bind("SELECT * FROM t WHERE 1 = 1 AND false").await;
+	fold(&mut ir, &ScriptedFolder::new(), &mut RecordingObserver::default()).await;
+	assert_eq!(ops_of_tag(&ir, SHORT_CIRCUIT).len(), 0);
+	let literal = ops_of_tag(&ir, OpTag::Expr(ExprTag::Literal))
+		.into_iter()
+		.find(|op| format!("{:?}", kind_of(&ir, *op)).contains("false"))
+		.expect("the decided literal stands");
+	assert_eq!(ir.op(literal).and_then(|data| data.loc.text()), None);
+}
+
 /// A cast of a value already of the cast's kind is the value, and so is the truthiness of a
 /// boolean.
 #[tokio::test]
@@ -271,9 +311,16 @@ async fn fact_rules_erase_convert_and_truthy() {
 	for rule in FactRules::patterns() {
 		set.add(rule);
 	}
-	let report = apply_greedy(&mut ir, &mut facts, &set, &NotYetFolder, GREEDY_DEFAULT)
-		.await
-		.expect("the rules apply");
+	let report = apply_greedy(
+		&mut ir,
+		&mut facts,
+		&set,
+		&NotYetFolder,
+		crate::exec::ir::analysis::cx::builtin_registry(),
+		GREEDY_DEFAULT,
+	)
+	.await
+	.expect("the rules apply");
 	assert_eq!(report.rewrites, 1);
 	assert!(ops_of_tag(&ir, OpTag::Expr(ExprTag::Truthy)).is_empty());
 	assert_eq!(ir.op(user).expect("the user stays").operands.as_slice(), [held[0], held[0]]);
@@ -332,4 +379,142 @@ async fn a_clock_read_in_a_where_container_stays_a_call() {
 		.expect("the subtraction");
 	let value = ir.op(subtract).expect("the op exists").results[0];
 	assert_eq!(eligible(&ir, &mut FactCache::new(), &cx, value), Err(NotFoldable::Clock));
+}
+
+/// A statement `IF` is replaced by what the binder emits for the statement it selects: an `eval` of
+/// `NONE` when no arm is left and there is no `ELSE`, and the selected arm as a block of its own.
+#[tokio::test]
+async fn a_statement_if_collapses_to_the_statement_it_selects() {
+	let mut ir = bind("IF false { 'yes' };").await;
+	assert_eq!(ifs(&ir), 1);
+	fold(&mut ir, &ScriptedFolder::new(), &mut RecordingObserver::default()).await;
+	assert_eq!(ifs(&ir), 0);
+	assert_eq!(ops_of_tag(&ir, OpTag::Logical(LogTag::Eval)).len(), 1);
+	assert!(ops_of_tag(&ir, OpTag::Logical(LogTag::Block)).is_empty());
+	assert!(has_literal(&ir, "None"));
+	assert!(!has_literal(&ir, "yes"));
+	let env = Env::new();
+	verify_logical(&ir, &mut FactCache::new(), &env).expect("the container verifies");
+
+	let mut ir = bind("IF true { 'yes' };").await;
+	fold(&mut ir, &ScriptedFolder::new(), &mut RecordingObserver::default()).await;
+	assert_eq!(ifs(&ir), 0);
+	assert_eq!(ops_of_tag(&ir, OpTag::Logical(LogTag::Block)).len(), 1);
+	assert!(has_literal(&ir, "yes"));
+	verify_logical(&ir, &mut FactCache::new(), &env).expect("the container verifies");
+
+	let mut ir = bind("IF false { 'arm-a' } ELSE { 'arm-b' };").await;
+	fold(&mut ir, &ScriptedFolder::new(), &mut RecordingObserver::default()).await;
+	assert_eq!(ops_of_tag(&ir, OpTag::Logical(LogTag::Block)).len(), 1);
+	assert!(has_literal(&ir, "arm-b") && !has_literal(&ir, "arm-a"));
+}
+
+/// A filter whose conjuncts are all the literal `true` admits every row and is erased; one that
+/// yields `false` stays, and so does one whose `true` a fold decided.
+#[tokio::test]
+async fn a_filter_that_admits_every_row_is_erased() {
+	let filters = |ir: &Ir| ops_of_tag(ir, OpTag::Logical(LogTag::Filter)).len();
+	let env = Env::new();
+
+	let mut ir = bind("SELECT * FROM t WHERE true").await;
+	assert_eq!(filters(&ir), 1);
+	fold(&mut ir, &ScriptedFolder::new(), &mut RecordingObserver::default()).await;
+	assert_eq!(filters(&ir), 0);
+	verify_logical(&ir, &mut FactCache::new(), &env).expect("the container verifies");
+
+	let mut ir = bind("SELECT * FROM t WHERE true OR a = 1").await;
+	fold(&mut ir, &ScriptedFolder::new(), &mut RecordingObserver::default()).await;
+	assert_eq!(filters(&ir), 0);
+
+	let mut ir = bind("SELECT * FROM t WHERE false").await;
+	fold(&mut ir, &ScriptedFolder::new(), &mut RecordingObserver::default()).await;
+	assert_eq!(filters(&ir), 1);
+
+	let mut ir = bind("SELECT * FROM t WHERE 1 < 2").await;
+	let folder = ScriptedFolder::new().on("LessThan", constant(Value::Bool(true)));
+	fold(&mut ir, &folder, &mut RecordingObserver::default()).await;
+	assert_eq!(filters(&ir), 1);
+	assert!(has_literal(&ir, "true"));
+}
+
+/// A broadcast over a value that is no collection is its body, with the value as the element. A
+/// broadcast over a value the type facts say nothing of stays a loop.
+#[tokio::test]
+async fn a_broadcast_over_a_value_that_is_no_collection_is_its_body() {
+	let loops = |ir: &Ir| ops_of_tag(ir, OpTag::Logical(LogTag::Loop)).len();
+	let env = Env::new();
+
+	let mut ir = bind("RETURN user:alice.principals[1]").await;
+	assert_eq!(loops(&ir), 1);
+	fold(&mut ir, &ScriptedFolder::new(), &mut RecordingObserver::default()).await;
+	assert_eq!(loops(&ir), 0);
+	assert_eq!(ops_of_tag(&ir, OpTag::Expr(ExprTag::Index)).len(), 1);
+	verify_logical(&ir, &mut FactCache::new(), &env).expect("the container verifies");
+
+	let mut ir = bind("RETURN { a: 1 }.a").await;
+	let before = loops(&ir);
+	fold(&mut ir, &ScriptedFolder::new(), &mut RecordingObserver::default()).await;
+	assert!(loops(&ir) <= before);
+	verify_logical(&ir, &mut FactCache::new(), &env).expect("the container verifies");
+
+	let mut ir = bind("RETURN $p.principals[1]").await;
+	let before = loops(&ir);
+	fold(&mut ir, &ScriptedFolder::new(), &mut RecordingObserver::default()).await;
+	assert_eq!(loops(&ir), before, "a free parameter may hold an array");
+}
+
+/// A comparison operand that folds to a constant becomes a literal an access path reads, and one
+/// that builds a range does not: the access path reads the bounds it was written with.
+#[tokio::test]
+async fn a_folded_comparison_operand_becomes_a_literal() {
+	let mut ir = bind("SELECT * FROM t WHERE a = 1 + 1").await;
+	assert_eq!(binaries(&ir, &BinaryOperator::Add), 1);
+	let folder = ScriptedFolder::new().on("Add", constant(Value::from(2_i64)));
+	let mut observer = RecordingObserver::default();
+	fold(&mut ir, &folder, &mut observer).await;
+	assert_eq!(binaries(&ir, &BinaryOperator::Add), 0);
+	assert!(has_literal(&ir, "2"));
+	assert_eq!(binaries(&ir, &BinaryOperator::Equal), 1);
+	assert!(observer.seen.iter().all(|(_, consumer)| *consumer == FoldConsumer::IndexChoice));
+	let env = Env::new();
+	verify_logical(&ir, &mut FactCache::new(), &env).expect("the container verifies");
+
+	let mut ir = bind("SELECT * FROM t WHERE a INSIDE 1..=2").await;
+	let folder = ScriptedFolder::new().on("RangeInclusive", constant(Value::from(2_i64)));
+	fold(&mut ir, &folder, &mut RecordingObserver::default()).await;
+	assert_eq!(binaries(&ir, &BinaryOperator::RangeInclusive), 1);
+
+	// A fold that raises is not applied.
+	let mut ir = bind("SELECT * FROM t WHERE a = 1 + 1").await;
+	let raises = FoldOutcome::Raises {
+		error: FoldedError {
+			text: "boom".to_owned(),
+		},
+		premises: PremiseSet::new(),
+		depth: 0,
+	};
+	fold(&mut ir, &ScriptedFolder::new().on("Add", raises), &mut RecordingObserver::default())
+		.await;
+	assert_eq!(binaries(&ir, &BinaryOperator::Add), 1);
+}
+
+/// `x AND false` is `false` and `x OR true` is `true` where `x` is a boolean that evaluating
+/// discards unobserved; a `x` that may be any value, in a position that reads it, stays.
+#[tokio::test]
+async fn the_literal_on_the_right_decides_a_boolean_left() {
+	let mut ir = bind("SELECT * FROM t WHERE 1 = 1 AND false").await;
+	assert_eq!(ops_of_tag(&ir, SHORT_CIRCUIT).len(), 1);
+	fold(&mut ir, &ScriptedFolder::new(), &mut RecordingObserver::default()).await;
+	assert_eq!(ops_of_tag(&ir, SHORT_CIRCUIT).len(), 0);
+	assert_eq!(ops_of_tag(&ir, OpTag::Logical(LogTag::Filter)).len(), 1, "a `false` filter stays");
+	assert!(has_literal(&ir, "false"));
+
+	let mut ir = bind("SELECT * FROM t WHERE 1 = 2 OR true").await;
+	fold(&mut ir, &ScriptedFolder::new(), &mut RecordingObserver::default()).await;
+	assert_eq!(ops_of_tag(&ir, SHORT_CIRCUIT).len(), 0);
+	assert!(ops_of_tag(&ir, OpTag::Logical(LogTag::Filter)).is_empty());
+
+	let mut ir = bind("RETURN [$p AND false]").await;
+	fold(&mut ir, &ScriptedFolder::new(), &mut RecordingObserver::default()).await;
+	assert_eq!(ops_of_tag(&ir, SHORT_CIRCUIT).len(), 1, "a value is not read for its truthiness");
 }

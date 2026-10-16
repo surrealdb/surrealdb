@@ -690,9 +690,19 @@ fn vm_into_set(set: &FieldSet) -> TokenStream {
 		let v = bind(i);
 		let name = &f.name;
 		let ty = &f.ty;
-		quote!((#name, <#ty as #s::StoredField>::into_vm_value(#v)?))
+		quote!(__o.push(#name, <#ty as #s::StoredField>::into_vm_value(#v)?);)
 	});
-	quote!(#s::vm::object([#(#entries),*]))
+	let count = set.fields.len();
+	if count == 0 {
+		return quote!(#s::vm::ObjectBuilder::new(0).finish());
+	}
+	quote! {
+		{
+			let mut __o = #s::vm::ObjectBuilder::new(#count);
+			#(#entries)*
+			__o.finish()
+		}
+	}
 }
 
 /// A block building the value from the VM object `value`; `build` receives each field's value.

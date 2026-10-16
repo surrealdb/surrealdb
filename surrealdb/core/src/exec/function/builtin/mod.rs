@@ -50,107 +50,104 @@ mod r#type;
 mod value;
 mod vector;
 
-use super::FunctionRegistry;
+use super::{FunctionRegistry, ScalarFunction};
 
-/// Register all built-in functions with the registry.
-pub fn register_all(registry: &mut FunctionRegistry) {
-	// Scalar functions
-	#[cfg(feature = "api")]
-	api::register(registry);
-	#[cfg(not(feature = "api"))]
-	disabled::register(
-		registry,
-		"api",
-		&[
-			"api::invoke",
-			"api::req::body",
-			"api::req::max_body",
-			"api::res::body",
-			"api::res::status",
-			"api::res::header",
-			"api::res::headers",
-			"api::timeout",
-		],
-	);
-	array::register(registry);
-	bytes::register(registry);
-	count::register(registry);
-	crypto::register(registry);
-	crypto_async::register(registry);
-	duration::register(registry);
+/// The scalar builtins of [`register_edge`], family by family.
+static EDGE_SCALARS: &[&[&dyn ScalarFunction]] = &[
+	array::SCALARS,
+	bytes::SCALARS,
+	count::SCALARS,
+	crypto::SCALARS,
+	duration::SCALARS,
 	#[cfg(feature = "encoding")]
-	encoding::register(registry);
+	encoding::SCALARS,
+	geo::SCALARS,
+	math::SCALARS,
+	meta::SCALARS,
+	not::SCALARS,
+	object::SCALARS,
+	parse::SCALARS,
+	rand::SCALARS,
+	record::SCALARS,
+	schema::SCALARS,
+	session::SCALARS,
+	set::SCALARS,
+	string::SCALARS,
+	time::SCALARS,
+	r#type::SCALARS,
+	value::SCALARS,
+	vector::SCALARS,
+];
+
+/// The scalar builtins of the families [`register_edge`] leaves out, which [`register_all`]
+/// adds, with the stand-ins for the families a build lacks.
+static REST_SCALARS: &[&[&dyn ScalarFunction]] = &[
+	#[cfg(feature = "api")]
+	api::SCALARS,
+	#[cfg(not(feature = "api"))]
+	disabled::API,
+	crypto_async::SCALARS,
 	#[cfg(not(feature = "encoding"))]
-	disabled::register(
-		registry,
-		"encoding",
-		&[
-			"encoding::base64::decode",
-			"encoding::base64::encode",
-			"encoding::cbor::decode",
-			"encoding::cbor::encode",
-			"encoding::json::decode",
-			"encoding::json::encode",
-		],
-	);
-	eval::register(registry);
+	disabled::ENCODING,
+	eval::SCALARS,
 	#[cfg(feature = "files")]
-	file::register(registry);
+	file::SCALARS,
 	#[cfg(not(feature = "files"))]
-	disabled::register(
-		registry,
-		"files",
-		&[
-			"file::put",
-			"file::put_if_not_exists",
-			"file::get",
-			"file::head",
-			"file::delete",
-			"file::copy",
-			"file::copy_if_not_exists",
-			"file::rename",
-			"file::rename_if_not_exists",
-			"file::exists",
-			"file::list",
-			"file::bucket",
-			"file::key",
-		],
-	);
-	geo::register(registry);
-	http::register(registry);
-	math::register(registry);
-	meta::register(registry);
-	not::register(registry);
-	object::register(registry);
-	parse::register(registry);
-	rand::register(registry);
-	record::register(registry);
-	schema::register(registry);
+	disabled::FILES,
+	http::SCALARS,
+	#[cfg(feature = "search")]
+	search::SCALARS,
+	#[cfg(not(feature = "search"))]
+	disabled::SEARCH,
+	sequence::SCALARS,
+	sleep::SCALARS,
+];
+
+/// Register the built-in functions an entry that serves only data statements resolves.
+///
+/// Left out are the families that reach beyond the datastore's key-value view or re-enter the
+/// executor:
+///
+/// | family | reason |
+/// |--|--|
+/// | `eval::*` | re-enters the front end with arbitrary text |
+/// | `http::*` | network |
+/// | `sequence::*` | sequences |
+/// | `sleep` | a sleep holds the statement |
+/// | `crypto_async` | password hashing |
+/// | `api`, `file`, `search` and the `disabled` stubs | each needs a host feature the entry does not carry |
+///
+/// A name outside the set is unknown to the binder.
+pub fn register_edge(registry: &mut FunctionRegistry) {
+	registry.register_scalars(EDGE_SCALARS);
+	aggregates::register(registry);
+	r#type::register(registry);
+	vector::register(registry);
+}
+
+/// Register all built-in functions with the registry: the edge set ([`register_edge`]) and every
+/// family it leaves out.
+pub fn register_all(registry: &mut FunctionRegistry) {
+	register_edge(registry);
+	registry.register_scalars(REST_SCALARS);
 	#[cfg(feature = "search")]
 	search::register(registry);
-	#[cfg(not(feature = "search"))]
-	disabled::register(
-		registry,
-		"search",
-		&[
-			"search::analyze",
-			"search::rrf",
-			"search::linear",
-			"search::highlight",
-			"search::score",
-			"search::offsets",
-		],
-	);
-	sequence::register(registry);
-	session::register(registry);
-	set::register(registry);
-	sleep::register(registry);
-	string::register(registry);
-	time::register(registry);
-	r#type::register(registry);
-	value::register(registry);
-	vector::register(registry);
+}
 
-	// Aggregate functions
-	aggregates::register(registry);
+/// The scalar tables of one registration: one slice of functions per family.
+#[cfg(test)]
+pub(super) type ScalarTables = &'static [&'static [&'static dyn ScalarFunction]];
+
+/// The scalar tables of [`register_edge`] and of [`register_all`] beyond it, for the registry
+/// tests.
+#[cfg(test)]
+pub(super) fn scalar_tables() -> (ScalarTables, ScalarTables) {
+	(EDGE_SCALARS, REST_SCALARS)
+}
+
+/// The tables of the families [`register_edge`] leaves out and that every build carries, for the
+/// registry tests.
+#[cfg(test)]
+pub(super) fn edge_excluded_tables() -> [&'static [&'static dyn ScalarFunction]; 5] {
+	[eval::SCALARS, http::SCALARS, sequence::SCALARS, sleep::SCALARS, crypto_async::SCALARS]
 }

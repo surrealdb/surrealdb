@@ -5,7 +5,7 @@ use uuid::Uuid;
 use super::lookup::Lookup;
 use crate::values::catalog_version::CatalogObjectKind;
 
-#[derive(Clone, Hash, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum Key {
 	/// A cache key for nodes
 	Nds,
@@ -131,6 +131,84 @@ pub enum Key {
 	Ix(NamespaceId, DatabaseId, String, String),
 	/// A cache key for a record
 	Record(NamespaceId, DatabaseId, String, RecordIdKey),
+}
+
+impl Key {
+	/// Borrows this key as the `Lookup` that addresses it. Does not allocate.
+	#[rustfmt::skip]
+	pub(crate) fn as_lookup(&self) -> Lookup<'_> {
+		match self {
+			Key::Nds => Lookup::Nds,
+			Key::Rus => Lookup::Rus,
+			Key::Ras => Lookup::Ras,
+			Key::Rgs(a) => Lookup::Rgs(a),
+			Key::Nss => Lookup::Nss,
+			Key::Nus(a) => Lookup::Nus(*a),
+			Key::Nas(a) => Lookup::Nas(*a),
+			Key::Ngs(a, b) => Lookup::Ngs(*a, b),
+			Key::Dbs(a) => Lookup::Dbs(*a),
+			Key::Dus(a, b) => Lookup::Dus(*a, *b),
+			Key::Das(a, b) => Lookup::Das(*a, *b),
+			Key::Dgs(a, b, c) => Lookup::Dgs(*a, *b, c),
+			Key::Aps(a, b) => Lookup::Aps(*a, *b),
+			Key::Azs(a, b) => Lookup::Azs(*a, *b),
+			Key::Bus(a, b) => Lookup::Bus(*a, *b),
+			Key::Fcs(a, b) => Lookup::Fcs(*a, *b),
+			Key::Mds(a, b) => Lookup::Mds(*a, *b),
+			Key::Mls(a, b) => Lookup::Mls(*a, *b),
+			Key::Cgs(a, b) => Lookup::Cgs(*a, *b),
+			Key::Pas(a, b) => Lookup::Pas(*a, *b),
+			Key::Sqs(a, b) => Lookup::Sqs(*a, *b),
+			Key::Tbs(a, b) => Lookup::Tbs(*a, *b),
+			Key::DbReferenceTargets(a, b) => Lookup::DbReferenceTargets(*a, *b),
+			Key::DbCatalog(a, b) => Lookup::DbCatalog(*a, *b),
+			Key::DbReferenceFields(a, b) => Lookup::DbReferenceFields(*a, *b),
+			Key::Cv(a, b, c) => Lookup::Cv(*a, *b, c),
+			Key::Ov(a, b, c, d, e) => Lookup::Ov(*a, *b, *c, d, e),
+			Key::Evs(a, b, c) => Lookup::Evs(*a, *b, c),
+			Key::Fds(a, b, c) => Lookup::Fds(*a, *b, c),
+			Key::Fts(a, b, c) => Lookup::Fts(*a, *b, c),
+			Key::Ixs(a, b, c) => Lookup::Ixs(*a, *b, c),
+			Key::Lvs(a, b, c) => Lookup::Lvs(*a, *b, c),
+			Key::Ish(a, b, c, d) => Lookup::Ish(*a, *b, c, *d),
+			Key::Nd(a) => Lookup::Nd(*a),
+			Key::Rcg(a) => Lookup::Rcg(a),
+			Key::Ru(a) => Lookup::Ru(a),
+			Key::Ra(a) => Lookup::Ra(a),
+			Key::Rg(a, b) => Lookup::Rg(a, b),
+			Key::NsByName(a) => Lookup::NsByName(a),
+			Key::Nu(a, b) => Lookup::Nu(*a, b),
+			Key::Na(a, b) => Lookup::Na(*a, b),
+			Key::Ng(a, b, c) => Lookup::Ng(*a, b, c),
+			Key::DbByName(a, b) => Lookup::DbByName(a, b),
+			Key::Du(a, b, c) => Lookup::Du(*a, *b, c),
+			Key::Da(a, b, c) => Lookup::Da(*a, *b, c),
+			Key::Dg(a, b, c, d) => Lookup::Dg(*a, *b, c, d),
+			Key::Ap(a, b, c) => Lookup::Ap(*a, *b, c),
+			Key::Az(a, b, c) => Lookup::Az(*a, *b, c),
+			Key::Bu(a, b, c) => Lookup::Bu(*a, *b, c),
+			Key::Fc(a, b, c) => Lookup::Fc(*a, *b, c),
+			Key::Md(a, b, c) => Lookup::Md(*a, *b, c),
+			Key::Ml(a, b, c, d) => Lookup::Ml(*a, *b, c, d),
+			Key::Cg(a, b, c) => Lookup::Cg(*a, *b, c),
+			Key::Pa(a, b, c) => Lookup::Pa(*a, *b, c),
+			Key::Sq(a, b, c) => Lookup::Sq(*a, *b, c),
+			Key::Tb(a, b, c) => Lookup::Tb(*a, *b, c),
+			Key::TbByName(a, b, c) => Lookup::TbByName(a, b, c),
+			Key::Ev(a, b, c, d) => Lookup::Ev(*a, *b, c, d),
+			Key::Fd(a, b, c, d) => Lookup::Fd(*a, *b, c, d),
+			Key::Ix(a, b, c, d) => Lookup::Ix(*a, *b, c, d),
+			Key::Record(a, b, c, d) => Lookup::Record(*a, *b, c, d),
+		}
+	}
+}
+
+/// Hashes as the `Lookup` it borrows, so an equivalent `Lookup` and `Key` hash
+/// alike by construction and the cache hashes every key through one body.
+impl std::hash::Hash for Key {
+	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+		self.as_lookup().hash(state)
+	}
 }
 
 impl<'a> From<Lookup<'a>> for Key {

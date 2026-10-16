@@ -13,6 +13,10 @@ description = "The engine linked as an edge worker links it, for the wasm size b
 [features]
 # The lean bundle: the in-memory store and none of the optional kernels.
 default = []
+# The edge entry: the lean bundle's feature set, run through
+# `Datastore::execute_edge` on a datastore built with `Builder::for_edge`, which
+# serves data statements and the edge builtins alone.
+edge-entry = []
 # The full bundle: every optional engine feature that builds for wasm32.
 full = [
     "surrealdb-core/api",

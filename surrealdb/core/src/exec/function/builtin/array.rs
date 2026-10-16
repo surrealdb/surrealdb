@@ -5,15 +5,15 @@
 
 use anyhow::Result;
 
+use crate::define_pure_function;
 use crate::exec::EvalContext;
-use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
+use crate::exec::function::{ScalarFunction, Signature};
 use crate::exec::ir::iface::Fallibility;
 use crate::exec::vm::calls::StreamingClosureEvaluator;
 use crate::expr::Kind;
 use crate::expr::logical::EffectSet;
 use crate::fnc::args::FromArgs;
 use crate::val::{ClosureEvaluator, Value};
-use crate::{define_pure_function, register_functions};
 
 // Single array argument functions
 define_pure_function!(ArrayDistinct, "array::distinct", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, rule: ReturnRule::SameAsArg(0), metered: crate::fnc::array::distinct_walk, (array: Any) -> Any, crate::fnc::array::distinct);
@@ -242,72 +242,68 @@ define_array_closure_function!(ArrayReduce, "array::reduce", crate::fnc::array::
 // array::some - Alias for array::any
 define_array_closure_function!(ArraySome, "array::some", crate::fnc::array::any, array: Any, ?|check: Any| => Any, fallibility: Fallibility::VALUE);
 
-pub fn register(registry: &mut FunctionRegistry) {
-	register_functions!(
-		registry,
-		ArrayAdd,
-		ArrayAppend,
-		ArrayAt,
-		ArrayBooleanAnd,
-		ArrayBooleanNot,
-		ArrayBooleanOr,
-		ArrayBooleanXor,
-		ArrayClump,
-		ArrayCombine,
-		ArrayComplement,
-		ArrayConcat,
-		ArrayDifference,
-		ArrayDistinct,
-		ArrayFill,
-		ArrayFirst,
-		ArrayFlatten,
-		ArrayGroup,
-		ArrayInsert,
-		ArrayIntersect,
-		ArrayIsEmpty,
-		ArrayJoin,
-		ArrayLast,
-		ArrayLen,
-		ArrayLogicalAnd,
-		ArrayLogicalOr,
-		ArrayLogicalXor,
-		ArrayMatches,
-		ArrayMax,
-		ArrayMin,
-		ArrayPop,
-		ArrayPrepend,
-		ArrayPush,
-		ArrayRange,
-		ArrayRemove,
-		ArrayRepeat,
-		ArrayReverse,
-		ArraySequence,
-		ArrayShuffle,
-		ArraySlice,
-		ArraySort,
-		ArraySortAsc,
-		ArraySortDesc,
-		ArraySortNatural,
-		ArraySortLexical,
-		ArraySortNaturalLexical,
-		ArraySwap,
-		ArrayTranspose,
-		ArrayUnion,
-		ArrayWindows,
-	);
-
-	// Register closure-based functions
-	registry.register(ArrayAll);
-	registry.register(ArrayAny);
-	registry.register(ArrayEvery);
-	registry.register(ArrayFilter);
-	registry.register(ArrayFilterIndex);
-	registry.register(ArrayFind);
-	registry.register(ArrayFindIndex);
-	registry.register(ArrayFold);
-	registry.register(ArrayIncludes);
-	registry.register(ArrayIndexOf);
-	registry.register(ArrayMap);
-	registry.register(ArrayReduce);
-	registry.register(ArraySome);
-}
+/// The `array::*` scalar builtins.
+pub(super) const SCALARS: &[&dyn ScalarFunction] = &[
+	&ArrayAdd,
+	&ArrayAppend,
+	&ArrayAt,
+	&ArrayBooleanAnd,
+	&ArrayBooleanNot,
+	&ArrayBooleanOr,
+	&ArrayBooleanXor,
+	&ArrayClump,
+	&ArrayCombine,
+	&ArrayComplement,
+	&ArrayConcat,
+	&ArrayDifference,
+	&ArrayDistinct,
+	&ArrayFill,
+	&ArrayFirst,
+	&ArrayFlatten,
+	&ArrayGroup,
+	&ArrayInsert,
+	&ArrayIntersect,
+	&ArrayIsEmpty,
+	&ArrayJoin,
+	&ArrayLast,
+	&ArrayLen,
+	&ArrayLogicalAnd,
+	&ArrayLogicalOr,
+	&ArrayLogicalXor,
+	&ArrayMatches,
+	&ArrayMax,
+	&ArrayMin,
+	&ArrayPop,
+	&ArrayPrepend,
+	&ArrayPush,
+	&ArrayRange,
+	&ArrayRemove,
+	&ArrayRepeat,
+	&ArrayReverse,
+	&ArraySequence,
+	&ArrayShuffle,
+	&ArraySlice,
+	&ArraySort,
+	&ArraySortAsc,
+	&ArraySortDesc,
+	&ArraySortNatural,
+	&ArraySortLexical,
+	&ArraySortNaturalLexical,
+	&ArraySwap,
+	&ArrayTranspose,
+	&ArrayUnion,
+	&ArrayWindows,
+	&ArrayAll,
+	&ArrayAny,
+	&ArrayEvery,
+	&ArrayFilter,
+	&ArrayFilterIndex,
+	&ArrayFind,
+	&ArrayFindIndex,
+	&ArrayFold,
+	&ArrayIncludes,
+	&ArrayIndexOf,
+	&ArrayMap,
+	&ArrayReduce,
+	&ArraySome,
+];

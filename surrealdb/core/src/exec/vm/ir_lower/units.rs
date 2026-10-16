@@ -32,19 +32,26 @@ use super::super::program::{
 	ClosureDigest, HostScalar, ISA_VERSION, Program, RowBits, UnitFrame, UnitHead, UnitId, UnitSig,
 };
 use super::super::units::CompiledUnits;
-use super::ddl::{self, Reservations};
+use super::ddl::Reservations;
 use super::emit::Emitter;
+#[cfg(test)]
+use super::explain_hook::FULL_EXPLAIN_LOWERING;
+use super::explain_hook::{ExplainLowering, Explained, Purpose, explained_served};
 use super::expr::{LowerLimits, Needs};
 use super::info::InfoLowered;
 use super::pipe::{self, PoolBase, ReadScope};
 use super::place::Lowered;
 use super::read::{self, IndexResolver, NoIndexes};
+#[cfg(test)]
+use super::schema::FULL_SCHEMA_LOWERING;
+use super::schema::{SchemaLowering, served};
 use super::stage::StatementNesting;
 use super::subscription::{self, LoweredLive};
 use super::write_stmt::{self, LoweredWrite};
-use super::{dispatch, events, explain, info};
+use super::{dispatch, events};
 use crate::doc::Action;
 use crate::exec::function::FunctionRegistry;
+#[cfg(test)]
 use crate::exec::ir::analysis::cx::builtin_registry;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::Ir;
@@ -351,6 +358,15 @@ pub(crate) struct LowerCx<'a> {
 	unit_inputs: u16,
 	/// The container being lowered, which relative requests are keyed by.
 	container: ContainerId,
+	/// The lowering of the statements that are not data statements, or `None` where the entry
+	/// serves data statements alone. Every unit lowered under this context (a function body, a
+	/// closure, a subquery, an event) is lowered with the same hook, so stored code is refused
+	/// a statement the entry does not serve.
+	schema: Option<&'static (dyn SchemaLowering + Sync)>,
+	/// The lowering of `EXPLAIN`, or `None` where the entry does not serve it. Every unit lowered
+	/// under this context is lowered with the same hook, so stored code is refused an `EXPLAIN`
+	/// the entry does not serve.
+	explain: Option<&'static (dyn ExplainLowering + Sync)>,
 	/// The key of each slot of the unit table, in slot order.
 	slots: Vec<Key>,
 	/// For each slot, in slot order, the measure of the stored code being lowered when the slot
@@ -392,6 +408,8 @@ impl<'a> LowerCx<'a> {
 			actor_suppressed: None,
 			unit_inputs: 0,
 			container: ContainerId(0),
+			schema: None,
+			explain: None,
 			slots: Vec::new(),
 			slot_sites: Vec::new(),
 			slot_nesting: Vec::new(),
@@ -401,8 +419,9 @@ impl<'a> LowerCx<'a> {
 		}
 	}
 
-	/// A context over the builtin registry and the default capabilities, lowering for a frame
-	/// that assumes permissions apply and serves any principal.
+	/// A context over the full builtin registry and the default capabilities, lowering for a frame
+	/// that assumes permissions apply and serves any principal, and every statement family.
+	#[cfg(test)]
 	pub(crate) fn detached() -> LowerCx<'static> {
 		LowerCx::new(
 			builtin_registry(),
@@ -416,6 +435,37 @@ impl<'a> LowerCx<'a> {
 			},
 			0,
 		)
+		.with_schema(Some(&FULL_SCHEMA_LOWERING))
+		.with_explain(Some(&FULL_EXPLAIN_LOWERING))
+	}
+
+	/// This context lowering the statements that are not data statements through `schema`.
+	/// Without it, each of them is refused.
+	pub(crate) fn with_schema(
+		mut self,
+		schema: Option<&'static (dyn SchemaLowering + Sync)>,
+	) -> Self {
+		self.schema = schema;
+		self
+	}
+
+	/// The lowering of the statements that are not data statements, if this context serves them.
+	pub(crate) fn schema(&self) -> Option<&'static (dyn SchemaLowering + Sync)> {
+		self.schema
+	}
+
+	/// This context lowering `EXPLAIN` through `explain`. Without it, each `EXPLAIN` is refused.
+	pub(crate) fn with_explain(
+		mut self,
+		explain: Option<&'static (dyn ExplainLowering + Sync)>,
+	) -> Self {
+		self.explain = explain;
+		self
+	}
+
+	/// The lowering of `EXPLAIN`, if this context serves it.
+	pub(crate) fn explain(&self) -> Option<&'static (dyn ExplainLowering + Sync)> {
+		self.explain
 	}
 
 	/// Whether the container being lowered is a unit (a function or closure body, a subquery, a
@@ -795,7 +845,7 @@ pub(super) trait UnitSink {
 
 	/// Lowers the `EXPLAIN` the statement `region` holds, whose op is `explain`, into `em` as the
 	/// group of a block's statement, an analysed one's tree built for `purpose`
-	/// ([`explain::lower_explained`]).
+	/// ([`ExplainLowering::lower_explained`]).
 	fn lower_explained(
 		&mut self,
 		em: &mut Emitter,
@@ -803,20 +853,26 @@ pub(super) trait UnitSink {
 		region: RegionId,
 		explain: OpId,
 		base: PoolBase,
-		purpose: explain::Purpose,
-	) -> Result<explain::Explained, IrError>;
+		purpose: Purpose,
+	) -> Result<Explained, IrError>;
 
 	/// What `EXPLAIN ANALYZE` of the statement the `phys.explain` `explain` explains renders, its
-	/// tree built for `purpose` ([`explain::analysis_in`]).
+	/// tree built for `purpose` ([`ExplainLowering::analysis`]).
 	fn explain_analysis(
 		&mut self,
 		ir: &Ir,
 		explain: OpId,
-		purpose: explain::Purpose,
+		purpose: Purpose,
 	) -> Result<crate::exec::vm::program::Analysis, IrError>;
 
+	/// The name of the operator at the top of the plan `EXPLAIN` renders for the statement
+	/// `region` holds, where this context serves `EXPLAIN`
+	/// ([`ExplainLowering::region_root_name`]). `None` where it does not: the name is only part
+	/// of the text of an error.
+	fn region_root_name(&self, ir: &Ir, region: RegionId) -> Option<String>;
+
 	/// Lowers the schema statement whose op is `op` into `em` as one pipeline's code, with the
-	/// operands it evaluates lowered in this context ([`ddl::lower_ddl`]).
+	/// operands it evaluates lowered in this context ([`SchemaLowering::ddl`]).
 	fn lower_schema(
 		&mut self,
 		em: &mut Emitter,
@@ -827,7 +883,7 @@ pub(super) trait UnitSink {
 	) -> Result<Needs, IrError>;
 
 	/// Lowers the `INFO` statement whose op is `op` into `em` as one pipeline's code, with the
-	/// operands it evaluates lowered in this context ([`info::lower_info`]).
+	/// operands it evaluates lowered in this context ([`SchemaLowering::info`]).
 	fn lower_info(&mut self, em: &mut Emitter, ir: &Ir, op: OpId) -> Result<InfoLowered, IrError>;
 }
 
@@ -914,18 +970,22 @@ impl UnitSink for LowerCx<'_> {
 		region: RegionId,
 		explain: OpId,
 		base: PoolBase,
-		purpose: explain::Purpose,
-	) -> Result<explain::Explained, IrError> {
-		explain::lower_explained(self, em, ir, region, explain, base, purpose)
+		purpose: Purpose,
+	) -> Result<Explained, IrError> {
+		explained_served(self)?.lower_explained(self, em, ir, region, explain, base, purpose)
 	}
 
 	fn explain_analysis(
 		&mut self,
 		ir: &Ir,
 		explain: OpId,
-		purpose: explain::Purpose,
+		purpose: Purpose,
 	) -> Result<crate::exec::vm::program::Analysis, IrError> {
-		explain::analysis_in(self, ir, explain, purpose)
+		explained_served(self)?.analysis(self, ir, explain, purpose)
+	}
+
+	fn region_root_name(&self, ir: &Ir, region: RegionId) -> Option<String> {
+		self.explain?.region_root_name(ir, region)
 	}
 
 	fn lower_schema(
@@ -936,11 +996,13 @@ impl UnitSink for LowerCx<'_> {
 		op: OpId,
 		reservations: &mut Reservations,
 	) -> Result<Needs, IrError> {
-		ddl::lower_ddl(em, ir, facts, self, op, reservations)
+		let schema = served(self)?;
+		schema.ddl(em, ir, facts, self, op, reservations)
 	}
 
 	fn lower_info(&mut self, em: &mut Emitter, ir: &Ir, op: OpId) -> Result<InfoLowered, IrError> {
-		info::lower_info(em, self, ir, op)
+		let schema = served(self)?;
+		schema.info(em, self, ir, op)
 	}
 }
 

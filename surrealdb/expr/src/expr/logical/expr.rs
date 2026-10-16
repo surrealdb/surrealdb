@@ -1335,8 +1335,17 @@ impl LogicalExpr {
 		&mut self,
 		f: &mut impl FnMut(&mut LogicalExpr) -> Result<(), E>,
 	) -> Result<(), E> {
+		self.visit_mut_dyn(f)
+	}
+
+	/// [`Self::visit_mut`] recursing behind `dyn`: one body per error type rather than one per
+	/// closure.
+	fn visit_mut_dyn<E>(
+		&mut self,
+		f: &mut dyn FnMut(&mut LogicalExpr) -> Result<(), E>,
+	) -> Result<(), E> {
 		for child in self.children_mut() {
-			child.visit_mut(f)?;
+			child.visit_mut_dyn(&mut *f)?;
 		}
 		f(self)
 	}

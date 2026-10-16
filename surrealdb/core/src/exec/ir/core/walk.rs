@@ -4,7 +4,7 @@ use std::iter::successors;
 
 use super::location::LocOrigin;
 use crate::exec::ir::core::ir::Ir;
-use crate::exec::ir::iface::ids::{OpId, RegionId};
+use crate::exec::ir::iface::ids::{BlockId, OpId, RegionId};
 use crate::exec::ir::iface::region_kind::{LoopRule, RegionKind, RegionProperties, ReturnRule};
 use crate::exec::ir::logical::ops::LogTag;
 use crate::exec::ir::op_kind::OpTag;
@@ -12,12 +12,35 @@ use crate::exec::ir::phys::ops::PhysTag;
 
 /// The ops that stand directly in `region`, in block order then op order. Ops in the regions
 /// those ops own are not visited. A region that does not exist holds no ops.
-pub(crate) fn ops_in(ir: &Ir, region: RegionId) -> impl Iterator<Item = OpId> {
-	ir.region(region)
-		.into_iter()
-		.flat_map(|region| region.blocks.iter())
-		.filter_map(|block| ir.block(*block))
-		.flat_map(|block| block.ops.iter().copied())
+pub(crate) fn ops_in(ir: &Ir, region: RegionId) -> OpsIn<'_> {
+	OpsIn {
+		ir,
+		blocks: ir.region(region).map(|region| region.blocks.as_slice()).unwrap_or(&[]),
+		ops: &[],
+	}
+}
+
+/// The ops that stand directly in a region; see [`ops_in`].
+pub(crate) struct OpsIn<'a> {
+	ir: &'a Ir,
+	blocks: &'a [BlockId],
+	ops: &'a [OpId],
+}
+
+impl Iterator for OpsIn<'_> {
+	type Item = OpId;
+
+	fn next(&mut self) -> Option<OpId> {
+		loop {
+			if let Some((first, rest)) = self.ops.split_first() {
+				self.ops = rest;
+				return Some(*first);
+			}
+			let (block, rest) = self.blocks.split_first()?;
+			self.blocks = rest;
+			self.ops = self.ir.block(*block).map(|data| data.ops.as_slice()).unwrap_or(&[]);
+		}
+	}
 }
 
 /// The regions that enclose `op`, innermost first, each paired with the op that owns it. The top

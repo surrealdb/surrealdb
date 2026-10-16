@@ -11,7 +11,7 @@ use super::dispatch::check_claims;
 use super::emit::Emitter;
 use super::expr::Lowerer;
 use crate::exec::AccessMode;
-use crate::exec::ir::analysis::cx::builtin_registry;
+use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::iface::ids::ValueId;
@@ -26,11 +26,15 @@ use crate::exec::ir::iface::ids::ValueId;
 /// `IrError::Invariant` naming it.
 ///
 /// The pipeline reads no source and the program is read-only. The body raises no host step but
-/// `CallAllowed` and `Call`, and the builtins and methods it calls are resolved against the
-/// builtin registry.
-pub(crate) fn lower_expr_parts(ir: &Ir, root: ValueId) -> Result<(Program, u16), IrError> {
+/// `CallAllowed` and `Call`, and the builtins and methods it calls are resolved against
+/// `registry`.
+pub(crate) fn lower_expr_parts(
+	ir: &Ir,
+	registry: &FunctionRegistry,
+	root: ValueId,
+) -> Result<(Program, u16), IrError> {
 	let mut em = Emitter::new();
-	let mut lowerer = Lowerer::for_fold(&mut em, ir);
+	let mut lowerer = Lowerer::for_fold(&mut em, ir, registry);
 	let value = lowerer.value(root)?;
 	let needs = lowerer.needs();
 	let claims = lowerer.take_claims();
@@ -51,7 +55,7 @@ pub(crate) fn lower_expr_parts(ir: &Ir, root: ValueId) -> Result<(Program, u16),
 	program.required_context = needs.context;
 	program.keeps_row_order = needs.keeps_row_order;
 	if let Some(pipeline) = program.pipelines.first() {
-		check_claims(ir, &claims, &pipeline.code, &program, builtin_registry())?;
+		check_claims(ir, &claims, &pipeline.code, &program, registry)?;
 	}
 	Ok((program, result))
 }
@@ -63,8 +67,13 @@ pub(crate) struct IrExprLowering;
 impl ExprLowering for IrExprLowering {
 	/// The program of [`lower_expr_parts`], for the register that holds the value. A value the
 	/// lowering does not cover answers its error, which the host reports as not foldable.
-	fn lower(&self, ir: &Ir, root: ValueId) -> Result<FoldProgram, IrError> {
-		let (program, result) = lower_expr_parts(ir, root)?;
+	fn lower(
+		&self,
+		ir: &Ir,
+		registry: &FunctionRegistry,
+		root: ValueId,
+	) -> Result<FoldProgram, IrError> {
+		let (program, result) = lower_expr_parts(ir, registry, root)?;
 		Ok(FoldProgram {
 			program,
 			result,
@@ -88,7 +97,7 @@ mod tests {
 	use crate::val::{RecordId, RecordIdKey, Value};
 
 	fn lowered(b: &Builder, root: ValueId) -> (Program, u16) {
-		match lower_expr_parts(&b.ir, root) {
+		match lower_expr_parts(&b.ir, crate::exec::ir::analysis::cx::builtin_registry(), root) {
 			Ok(lowered) => lowered,
 			Err(error) => panic!("the expression lowers: {error}"),
 		}
@@ -96,7 +105,7 @@ mod tests {
 
 	/// What `root` is refused for.
 	fn refused(b: &Builder, root: ValueId) -> &'static str {
-		match lower_expr_parts(&b.ir, root) {
+		match lower_expr_parts(&b.ir, crate::exec::ir::analysis::cx::builtin_registry(), root) {
 			Err(IrError::Invariant {
 				what,
 			}) => what,

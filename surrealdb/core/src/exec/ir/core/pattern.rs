@@ -7,15 +7,15 @@
 //! an error.
 
 use std::cmp::Reverse;
-use std::sync::OnceLock;
 
 use super::facts::FactCache;
 use super::ir::{Ir, Walk, WalkOrder};
 use super::rewriter::Rewriter;
 use super::verify::{VerifyError, VerifyRule};
 use crate::exec::function::FunctionRegistry;
+use crate::exec::ir::analysis::cx::structural_cx;
 use crate::exec::ir::error::IrError;
-use crate::exec::ir::iface::catalog::{EffectCx, SemanticCatalog};
+use crate::exec::ir::iface::catalog::EffectCx;
 use crate::exec::ir::iface::conversion::{Dialect, DialectSet};
 use crate::exec::ir::iface::fold::{FoldRequest, PlanTimeFolder};
 use crate::exec::ir::iface::ids::OpId;
@@ -123,7 +123,8 @@ pub(crate) struct GreedyReport {
 /// driver awaits every fold the patterns requested through `folder` and stores the outcomes, so a
 /// pattern reads them on the next pass; those passes count toward `limits.max_passes`. After each
 /// pass every op the patterns created must belong to the dialects the set's dialect may create,
-/// otherwise the run answers a `Legality` verification error.
+/// otherwise the run answers a `Legality` verification error. The awaited folds are judged under
+/// `registry`, the function registry of the datastore the container is planned for.
 ///
 /// The driver never changes the container's phase and never verifies it; the caller verifies at
 /// the phase boundary. A pattern's error is returned as it is.
@@ -132,6 +133,7 @@ pub(crate) async fn apply_greedy<D: Dialect>(
 	facts: &mut FactCache,
 	set: &PatternSet<D>,
 	folder: &dyn PlanTimeFolder,
+	registry: &FunctionRegistry,
 	limits: GreedyLimits,
 ) -> Result<GreedyReport, IrError> {
 	let mut report = GreedyReport {
@@ -145,7 +147,13 @@ pub(crate) async fn apply_greedy<D: Dialect>(
 	}
 	loop {
 		report.passes += 1;
-		let pass = run_pass(ir, facts, set, limits.max_rewrites.saturating_sub(report.rewrites))?;
+		let pass = run_pass(
+			ir,
+			facts,
+			set,
+			registry,
+			limits.max_rewrites.saturating_sub(report.rewrites),
+		)?;
 		report.rewrites += pass.rewrites;
 		if pass.limit_reached {
 			report.stopped_by = Some(Limit::Rewrites);
@@ -159,7 +167,7 @@ pub(crate) async fn apply_greedy<D: Dialect>(
 			report.stopped_by = Some(Limit::Passes);
 			return Ok(report);
 		}
-		await_folds(ir, facts, folder, &structural_cx(ir), pending).await;
+		await_folds(ir, facts, folder, &structural_cx(registry, ir), pending).await;
 	}
 }
 
@@ -179,6 +187,7 @@ fn run_pass<D: Dialect>(
 	ir: &mut Ir,
 	facts: &mut FactCache,
 	set: &PatternSet<D>,
+	registry: &FunctionRegistry,
 	budget: u32,
 ) -> Result<PassOutcome, IrError> {
 	let mut ids = Vec::new();
@@ -187,7 +196,7 @@ fn run_pass<D: Dialect>(
 		Walk::Continue
 	});
 	let ordered = set.by_benefit();
-	let mut rw = Rewriter::new(ir, facts);
+	let mut rw = Rewriter::new(ir, facts).with_registry(registry);
 	let mut outcome = PassOutcome {
 		rewrites: 0,
 		limit_reached: false,
@@ -250,29 +259,6 @@ fn check_created<D: Dialect>(rw: &mut Rewriter<'_>) -> Result<(), IrError> {
 		}
 	}
 	Ok(())
-}
-
-/// The catalog used when a fold has none. It is empty, so definitions come from the planning memo.
-struct NoDefinitions;
-
-impl SemanticCatalog for NoDefinitions {}
-
-static NO_DEFINITIONS: NoDefinitions = NoDefinitions;
-
-/// The process registry of builtin functions.
-fn builtin_registry() -> &'static FunctionRegistry {
-	static REGISTRY: OnceLock<FunctionRegistry> = OnceLock::new();
-	REGISTRY.get_or_init(FunctionRegistry::with_builtins)
-}
-
-/// The context a fold is awaited in when the caller supplies none: the builtin registry, no
-/// definitions and the container's frames.
-fn structural_cx(ir: &Ir) -> EffectCx<'_> {
-	EffectCx {
-		registry: builtin_registry(),
-		catalog: &NO_DEFINITIONS,
-		frames: ir.frames(),
-	}
 }
 
 /// Awaits each request of `pending` through `folder`, in order, and stores its outcome.

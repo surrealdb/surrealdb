@@ -50,7 +50,7 @@ pub mod lock;
 mod macros;
 pub mod vtable;
 
-pub use embedded::EmbeddedEntry;
+pub use embedded::{EmbeddedEntry, EmbeddedRevision};
 pub use entry::{
 	CATALOG_MARKER, canonical, decode_entry, decode_entry_or_revision, encode_entry, encode_stored,
 	parse_header, write_error,
@@ -60,7 +60,7 @@ pub(crate) use macros::impl_stored_id;
 pub use surrealdb_expr::val::stored::schema::{
 	Floor, SchemaError, Stored, StoredField, StoredType, TypeSchema,
 };
-pub use vtable::{CATALOG_TYPES, CatalogVTable};
+pub use vtable::{CATALOG_TYPES, CatalogVTable, EDGE_CATALOG_TYPES};
 
 /// What the macros of this module name, so that the crates that use them need no further
 /// dependency.

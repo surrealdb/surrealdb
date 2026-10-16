@@ -99,7 +99,7 @@ use super::super::program::{
 use super::ddl::{Reservations, lower_guard, schema_op};
 use super::dispatch::{Coverage, check_write_region, coverage_of, timed_write_in, write_of};
 use super::emit::Emitter;
-use super::explain::{Explained, Purpose, explain_of};
+use super::explain_hook::{Explained, Purpose, explain_of};
 use super::expr::{Claim, LoopPads, Lowerer, Needs, ReturnScope, invariant};
 use super::info::InfoLowered;
 use super::pipe::{PoolBase, Pools, ReadScope, Reads, is_for_pipeline, path_steps};
@@ -2790,8 +2790,14 @@ mod tests {
 	fn lowered_placed(mut b: Builder) -> Program {
 		b.physical();
 		let mut facts = FactCache::new();
-		let decided = place_all(&b.ir, &mut facts, &Placement::default(), NO_BACKEND_CAPS)
-			.expect("the container is a DAG");
+		let decided = place_all(
+			&b.ir,
+			&mut facts,
+			crate::exec::ir::analysis::cx::builtin_registry(),
+			&Placement::default(),
+			NO_BACKEND_CAPS,
+		)
+		.expect("the container is a DAG");
 		install(b.ir.placement_table_mut(), decided);
 		match lower(&b.ir, &FactCache::new()) {
 			Ok(lowered) => lowered.program,
@@ -3048,8 +3054,14 @@ mod tests {
 			let mut b = block_of_statements(|b| explain_statement(b, 0, true));
 			b.physical();
 			let mut facts = FactCache::new();
-			let decided = place_all(&b.ir, &mut facts, &Placement::default(), NO_BACKEND_CAPS)
-				.expect("the container is a DAG");
+			let decided = place_all(
+				&b.ir,
+				&mut facts,
+				crate::exec::ir::analysis::cx::builtin_registry(),
+				&Placement::default(),
+				NO_BACKEND_CAPS,
+			)
+			.expect("the container is a DAG");
 			install(b.ir.placement_table_mut(), decided);
 			let mut cx =
 				crate::exec::vm::ir_lower::LowerCx::detached().with_redact_volatile(redact);
@@ -3187,8 +3199,14 @@ mod tests {
 	fn serving_placed(mut b: Builder) -> (Program, Vec<UnitRequest>) {
 		b.physical();
 		let mut facts = FactCache::new();
-		let decided = place_all(&b.ir, &mut facts, &Placement::default(), NO_BACKEND_CAPS)
-			.expect("the container is a DAG");
+		let decided = place_all(
+			&b.ir,
+			&mut facts,
+			crate::exec::ir::analysis::cx::builtin_registry(),
+			&Placement::default(),
+			NO_BACKEND_CAPS,
+		)
+		.expect("the container is a DAG");
 		install(b.ir.placement_table_mut(), decided);
 		let mut cx = crate::exec::vm::ir_lower::LowerCx::detached();
 		match crate::exec::vm::ir_lower::lower_serving(&mut cx, &b.ir, &FactCache::new()) {
@@ -3205,8 +3223,14 @@ mod tests {
 		let mut b = block_of_statements(|b| late_read_statement(b, 0));
 		b.physical();
 		let mut facts = FactCache::new();
-		let decided = place_all(&b.ir, &mut facts, &Placement::default(), NO_BACKEND_CAPS)
-			.expect("the container is a DAG");
+		let decided = place_all(
+			&b.ir,
+			&mut facts,
+			crate::exec::ir::analysis::cx::builtin_registry(),
+			&Placement::default(),
+			NO_BACKEND_CAPS,
+		)
+		.expect("the container is a DAG");
 		install(b.ir.placement_table_mut(), decided);
 		assert!(lower(&b.ir, &FactCache::new()).is_err());
 	}

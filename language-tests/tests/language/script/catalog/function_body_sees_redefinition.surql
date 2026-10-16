@@ -12,7 +12,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[1, 1]"
+value = "[1, 2]"
 
 [[test.results]]
 value = "NONE"

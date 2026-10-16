@@ -12,7 +12,7 @@
 //! The closure is a value, invoked by later statements each in a transaction
 //! of its own, so nothing of the creating statement's catalog or principal may
 //! be resolved into it: its sources keep no schema, its parameters stay
-//! parameters, its calls stay calls, and no rule rewrites it. The physical
+//! parameters, its calls stay calls, and nothing rewrites it. The physical
 //! planner compiles it without a transaction, and it resolves tables,
 //! permissions, indexes, functions and parameters where it runs.
 //!
@@ -27,15 +27,10 @@
 //!    layers above it. Everything after this pass can see what the catalog declares.
 //! 2. [`params`]: statement-scoped `$param`s become literals, so every later pass sees a literal
 //!    where it needs one.
-//! 3. [`fold`]: row-independent subexpressions become literals, which needs the parameters in place
-//!    first and the resolved schema to know which field reads may be discarded.
-//! 4. [`optimise`]: the rewrite rules of [`rules`], applied at every node to a fixpoint — filters
-//!    merge and move through projections, beneath layers and around joins; a projection that does
-//!    nothing and a layer column nothing reads go; a filter that admits every row goes; an `IN` /
-//!    `CONTAINS` subquery becomes a semi or anti join; a call to a `DEFINE FUNCTION` whose body is
-//!    one expression becomes that expression; a cast to a kind an expression already has goes. The
-//!    functions the last of those may inline are gathered first ([`functions`]), through the node's
-//!    function cache, so that the rules themselves consult nothing but the plan.
+//!
+//! Binding rewrites nothing else. The rewrites a statement is owed (folding, filter movement,
+//! pruning, function inlining, the decorrelation of a membership subquery) run on the IR the
+//! binder builds from the bound plan, where each is stated once.
 //!
 //! # Catalog access
 //!
@@ -80,31 +75,21 @@
 //! the cycle never forms.
 
 // Adding a `LogicalOp` variant must break every pass that has not stated its
-// position on it, which a wildcard arm would silently absorb. The rewrite
-// rules are the exception, and say so at each site: a rule reaches only the
-// kinds it declares and declines by leaving the node as it is, so a variant
-// none of them names is left alone rather than mishandled.
+// position on it, which a wildcard arm would silently absorb.
 #![warn(clippy::wildcard_enum_match_arm)]
 
 pub(crate) mod constants;
 pub(crate) mod effects;
-mod fold;
 pub(crate) mod footprint;
-mod functions;
-mod optimise;
 mod params;
 pub(crate) mod pipelines;
-pub(crate) mod properties;
 pub(crate) mod reads;
 mod resolve;
-mod rules;
 pub(crate) mod summaries;
 use std::convert::Infallible;
 use std::sync::Arc;
 
 pub(crate) use effects::{effects_of_body, effects_of_expr, may_read_clock};
-pub(crate) use rules::conjuncts;
-pub(crate) use rules::kind::is_identity_cast;
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::FrozenContext;
@@ -113,7 +98,7 @@ use crate::exec::function::FunctionRegistry;
 use crate::expr::With;
 use crate::expr::logical::{
 	LogicalDdl, LogicalDdlStatement, LogicalEval, LogicalExpr, LogicalOp, LogicalSource,
-	LogicalValues, RelationAlias, Schema, SourceRef, is_value_literal,
+	LogicalValues, Schema, SourceRef, is_value_literal,
 };
 use crate::iam::Auth;
 use crate::kvs::Transaction;
@@ -149,13 +134,7 @@ pub(crate) struct BindContext<'a> {
 	pub row_scoped: &'a [&'a str],
 	/// Decides which calls fold and which name a projection function.
 	pub registry: &'a FunctionRegistry,
-	/// Whether the plan is read under a `VERSION` its own statements do not
-	/// carry: the body of a function a versioned statement calls. A user-defined
-	/// function it calls is the definition stored at that stamp, which the
-	/// current one this pass would inline is not.
-	pub versioned: bool,
-	/// Whether a catalog definition may be inlined into the plan: a call of a
-	/// user-defined function replaced by its body, a `DEFINE PARAM` read
+	/// Whether a catalog definition may be inlined into the plan: a `DEFINE PARAM` read
 	/// replaced by its value. A statement that reads each definition as the
 	/// catalog stands when it is reached inlines none
 	/// ([`CatalogWithin::calls_current`](crate::exec::planner::CatalogWithin)).
@@ -170,36 +149,6 @@ pub(crate) struct BindContext<'a> {
 /// Bind `op` for one transaction and one principal, every closure body in it
 /// excepted. See the module documentation for the pass order.
 pub(crate) async fn bind(op: LogicalOp, bx: &BindContext<'_>) -> Result<LogicalOp, Error> {
-	bind_with(op, bx, Rules::Run).await
-}
-
-/// Whether [`bind_with`] runs the rewrite rules after binding.
-///
-/// A plan bound either way answers every query identically: the rules rewrite
-/// what a statement does, never what it means. That equality is the property the
-/// differential tests assert, and holding the two plans apart is the only way to
-/// assert it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Rules {
-	/// Bind and rewrite: what a query runs.
-	Run,
-	/// Bind only, leaving the plan unrewritten: the reference to compare against.
-	///
-	/// Only the differential property tests ask for this, so nothing
-	/// constructs it outside a test build.
-	#[cfg_attr(
-		not(test),
-		expect(dead_code, reason = "only the differential property tests bind without the rules")
-	)]
-	Skip,
-}
-
-/// [`bind`], with the rewrite rules under the caller's control.
-pub(crate) async fn bind_with(
-	op: LogicalOp,
-	bx: &BindContext<'_>,
-	rules: Rules,
-) -> Result<LogicalOp, Error> {
 	// Statements left as written are taken out of the plan while it is bound,
 	// and put back in its bound form where their places are left.
 	let mut nested = Vec::new();
@@ -207,7 +156,7 @@ pub(crate) async fn bind_with(
 		true => op,
 		false => take_nested(op, &mut nested),
 	};
-	let bound = bind_taken(op, bx, rules).await?;
+	let bound = bind_taken(op, bx).await?;
 	Ok(match nested.is_empty() {
 		true => bound,
 		false => put_nested(bound, &nested),
@@ -316,30 +265,12 @@ fn element_field_paths(op: LogicalOp) -> LogicalOp {
 	})
 }
 
-/// [`bind_with`] over a plan whose nested statements are bound with it or
-/// taken out.
-async fn bind_taken(op: LogicalOp, bx: &BindContext<'_>, rules: Rules) -> Result<LogicalOp, Error> {
+/// [`bind`] over a plan whose nested statements are bound with it or taken out.
+async fn bind_taken(op: LogicalOp, bx: &BindContext<'_>) -> Result<LogicalOp, Error> {
 	let caller = Caller::new(bx);
 	let op = resolve::resolve(op, bx, caller.as_ref()).await?;
 	let op = params::resolve_params(op, bx).await;
-	let capabilities = bx.ctx.get_capabilities();
-	let checks = caller.as_ref().is_none_or(Caller::checks_permissions);
-	let op = fold::fold_constants(op, bx.registry, &capabilities, checks);
-	let op = element_field_paths(op);
-	let functions = functions::Functions::gather(&op, bx, caller.as_ref()).await;
-	let permission_checked_params = params::permission_checked_names(&op, bx).await;
-	let mut cx = rules::RuleContext {
-		row_scoped: bx.row_scoped,
-		registry: bx.registry,
-		functions: &functions,
-		permission_checked_params: &permission_checked_params,
-		next_alias: 0,
-		capabilities: &capabilities,
-	};
-	match rules {
-		Rules::Run => Ok(optimise::optimise(op, &mut cx)),
-		Rules::Skip => Ok(op),
-	}
+	Ok(element_field_paths(op))
 }
 
 /// The principal a statement runs as, and what the runtime's permission gates
@@ -446,7 +377,10 @@ fn session_ns_db(ctx: &FrozenContext) -> (Option<String>, Option<String>) {
 /// plan nested in a scalar subquery at any depth. `f` sees each node after its
 /// inputs and after the scalars it owns have had their subqueries rewritten.
 /// A plan inside a closure body is not reached ([`visit_binding_mut`]).
-fn rewrite_deep<F: FnMut(LogicalOp) -> LogicalOp>(op: LogicalOp, f: &mut F) -> LogicalOp {
+pub(crate) fn rewrite_deep<F: FnMut(LogicalOp) -> LogicalOp>(
+	op: LogicalOp,
+	f: &mut F,
+) -> LogicalOp {
 	let Ok(op) = op.transform_up(&mut |mut node| {
 		let Ok(()) = node.visit_scalars_mut(&mut |scalar| {
 			visit_binding_mut(scalar, &mut |expr| {
@@ -508,12 +442,19 @@ pub(super) fn visit_binding_mut<E>(
 	expr: &mut LogicalExpr,
 	f: &mut impl FnMut(&mut LogicalExpr) -> Result<(), E>,
 ) -> Result<(), E> {
-	if !matches!(expr, LogicalExpr::Closure(_)) {
-		for child in expr.children_mut() {
-			visit_binding_mut(child, f)?;
+	// Over `dyn FnMut` for the reason [`visit_binding`] gives.
+	fn walk<E>(
+		expr: &mut LogicalExpr,
+		f: &mut dyn FnMut(&mut LogicalExpr) -> Result<(), E>,
+	) -> Result<(), E> {
+		if !matches!(expr, LogicalExpr::Closure(_)) {
+			for child in expr.children_mut() {
+				walk(child, &mut *f)?;
+			}
 		}
+		f(expr)
 	}
-	f(expr)
+	walk(expr, f)
 }
 
 /// Whether a pruning walk enters the expressions nested in the one it has
@@ -553,54 +494,16 @@ pub(super) fn visit_binding_pruning_mut(
 	expr: &mut LogicalExpr,
 	f: &mut impl FnMut(&mut LogicalExpr) -> Descend,
 ) {
-	if f(expr) == Descend::Over || matches!(expr, LogicalExpr::Closure(_)) {
-		return;
-	}
-	for child in expr.children_mut() {
-		visit_binding_pruning_mut(child, f);
-	}
-}
-
-/// One index past the highest index any name of the minted form carries in
-/// `op` — the alias of a join, and any field a scalar reads or names — so a
-/// pass adding joins continues the plan's numbering and mints no alias the
-/// plan already names.
-///
-/// A join names the matched right row on the joined row, and its residual is
-/// judged over that row, so an alias equal to a field the plan reads would be
-/// read there as the right row rather than as the field. A field named
-/// `_join0` reached through `$parent` is exactly that: the decorrelation rule
-/// rewrites `$parent._join0` to the field `_join0` of the left row.
-fn next_alias_index(op: &LogicalOp) -> usize {
-	let mut next = 0;
-	let mut reserve = |index: Option<usize>| {
-		if let Some(index) = index {
-			next = next.max(index + 1);
+	// Over `dyn FnMut` for the reason [`visit_binding`] gives.
+	fn walk(expr: &mut LogicalExpr, f: &mut dyn FnMut(&mut LogicalExpr) -> Descend) {
+		if f(expr) == Descend::Over || matches!(expr, LogicalExpr::Closure(_)) {
+			return;
 		}
-	};
-	visit_deep(op, &mut |node| {
-		if let LogicalOp::Join(join) = node {
-			reserve(join.alias.index());
+		for child in expr.children_mut() {
+			walk(child, &mut *f);
 		}
-		// Every scalar, closure bodies included: a name the plan reads
-		// anywhere is a name the joined row must not shadow.
-		let Ok(()) = node.visit_scalars(&mut |scalar| {
-			let _ = scalar.visit(&mut |expr| {
-				if let LogicalExpr::Field(name) = expr {
-					reserve(RelationAlias::index_of(name.as_str()));
-				} else if let LogicalExpr::Access {
-					field,
-					..
-				} = expr
-				{
-					reserve(RelationAlias::index_of(field.as_str()));
-				}
-				std::ops::ControlFlow::<()>::Continue(())
-			});
-			Ok::<_, Infallible>(())
-		});
-	});
-	next
+	}
+	walk(expr, f)
 }
 
 /// The first write in `op` that cannot run, named by the clause the planner
@@ -657,54 +560,6 @@ pub(crate) fn unplannable_write_in_expr(expr: &LogicalExpr) -> Option<String> {
 	let mut found = None;
 	write_walk::in_expr(expr, &mut found, &mut write_walk::cannot_run);
 	found
-}
-
-/// Whether `expr` holds a `LET` of a protected name or of a name the system binds in a statement
-/// it nests,
-/// wherever it stands in it: a statement planning refuses, whether or not it
-/// runs.
-pub(crate) fn holds_protected_let(expr: &LogicalExpr) -> bool {
-	use std::ops::ControlFlow;
-	expr.visit_deep(&mut |node| {
-		let LogicalExpr::Subquery(plan) = node else {
-			return ControlFlow::Continue(());
-		};
-		match plan
-			.visit_ops_deep(&mut |op| {
-				if let LogicalOp::Let(stmt) = op
-					&& stmt.is_refused()
-				{
-					ControlFlow::Break(())
-				} else {
-					ControlFlow::Continue(())
-				}
-			})
-			.is_break()
-		{
-			true => ControlFlow::Break(()),
-			false => ControlFlow::Continue(()),
-		}
-	})
-	.is_break()
-}
-
-/// Whether `expr` holds a `LET` written as an expression — a `LET` in a
-/// statement's clause, an array, an operand or an `IF` arm's value, rather
-/// than a statement of a block or the value of a `RETURN` or another `LET`
-/// — wherever it stands in it: a statement planning refuses
-/// (the planner's `LET_IN_AN_EXPRESSION` refusal) whether or not it runs.
-pub(crate) fn holds_let_expression(expr: &LogicalExpr) -> bool {
-	use std::ops::ControlFlow;
-	expr.visit_deep(&mut |node| {
-		if let LogicalExpr::Subquery(op) = node
-			&& matches!(**op, LogicalOp::Let(_))
-		{
-			ControlFlow::Break(())
-		} else {
-			ControlFlow::Continue(())
-		}
-	})
-	.is_break()
 }
 
 /// Whether a schema statement changes what the session's namespace and
@@ -1031,13 +886,6 @@ pub(super) mod test_fixture {
 			fixture
 		}
 
-		/// Runs `sql` as `session`, expecting every statement to succeed.
-		pub(in crate::exec::logical) async fn execute_as(&self, session: &Session, sql: &str) {
-			for response in self.ds.execute(sql, session, None).await.expect("statement executes") {
-				response.result.expect("statement succeeds");
-			}
-		}
-
 		/// The borrowed halves of a [`BindContext`] for `session`, over a
 		/// fresh read transaction, with `values` added to the context.
 		pub(in crate::exec::logical) async fn bound_as(
@@ -1078,7 +926,6 @@ pub(super) mod test_fixture {
 				perms_suppressed: false,
 				row_scoped: SELECT_ITERATION_PARAMS,
 				registry: &self.registry,
-				versioned: false,
 				inlines_definitions: true,
 				binds_nested: true,
 			}
@@ -1121,7 +968,7 @@ pub(super) mod test_fixture {
 
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests {
-	use super::test_fixture::{Fixture, owner, record_user};
+	use super::test_fixture::{Fixture, record_user};
 	use super::*;
 
 	/// A write is found wherever it sits, including a scalar position that
@@ -1176,47 +1023,10 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn each_pass_feeds_the_next() {
-		// The parameter resolves to `true`, the short circuit folds it away,
-		// and the arithmetic beside it folds too.
-		let fixture = Fixture::new("DEFINE TABLE t SCHEMALESS;").await;
-		let bound = fixture.bound_as(&owner(), vec![("p", Value::Bool(true))]).await;
-		let bx = fixture.bind_context(&bound);
-		let plan = bind(lower_test("SELECT * FROM t WHERE $p AND a > 1 + 1"), &bx)
-			.await
-			.expect("binds")
-			.to_string();
-		assert!(plan.contains("Filter[a > 2]"), "{plan}");
-	}
-
-	#[tokio::test]
-	async fn a_predicate_that_folds_to_true_loses_its_filter() {
-		let fixture = Fixture::new("DEFINE TABLE t SCHEMALESS;").await;
-		let bound = fixture.bound_as(&owner(), vec![("p", Value::Bool(true))]).await;
-		let bx = fixture.bind_context(&bound);
-		let plan =
-			bind(lower_test("SELECT * FROM t WHERE $p"), &bx).await.expect("binds").to_string();
-		assert!(!plan.contains("Filter"), "{plan}");
-		assert!(plan.contains("Source[t]"), "{plan}");
-	}
-
-	#[tokio::test]
-	async fn a_subquery_predicate_merges_into_the_inner_plan() {
-		let fixture = Fixture::new("DEFINE TABLE t SCHEMALESS;").await;
-		let bound = fixture.bound_as(&owner(), vec![("p", Value::from(2i64))]).await;
-		let bx = fixture.bind_context(&bound);
-		let plan = bind(lower_test("SELECT * FROM (SELECT * FROM t WHERE a) WHERE b = $p"), &bx)
-			.await
-			.expect("binds")
-			.to_string();
-		assert!(plan.contains("Filter[a AND b = 2]"), "{plan}");
-	}
-
-	#[tokio::test]
 	async fn the_resolved_schema_and_permissions_flow_through_every_pass() {
 		// The table permission is resolved first, the parameter in the user's
-		// predicate is substituted, the constant folds, and the user's filter
-		// stays above the permission filter throughout.
+		// predicate is substituted, and the user's filter stays above the
+		// permission filter throughout.
 		let fixture = Fixture::new(
 			"DEFINE TABLE t SCHEMAFULL PERMISSIONS FOR select WHERE published = true;
 			 DEFINE FIELD a ON t TYPE int;
@@ -1229,7 +1039,7 @@ mod tests {
 			.await
 			.expect("binds")
 			.to_string();
-		let filter = plan.find("Filter[a > 2]").expect(&plan);
+		let filter = plan.find("Filter[a > 1 + 1]").expect(&plan);
 		let permission = plan.find("PermissionFilter[published = true]").expect(&plan);
 		assert!(filter < permission, "the user's filter must stay above the barrier:\n{plan}");
 	}

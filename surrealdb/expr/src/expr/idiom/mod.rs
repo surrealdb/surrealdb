@@ -334,6 +334,13 @@ impl revision::SkipRevisioned for Idiom {
 	fn skip_revisioned<R: std::io::Read>(reader: &mut R) -> Result<(), revision::Error> {
 		<String as revision::SkipRevisioned>::skip_revisioned(reader)
 	}
+
+	#[inline]
+	fn skip_revisioned_slice(
+		reader: &mut revision::SliceReader<'_>,
+	) -> Result<(), revision::Error> {
+		<String as revision::SkipRevisioned>::skip_revisioned_slice(reader)
+	}
 }
 
 impl revision::WalkRevisioned for Idiom {

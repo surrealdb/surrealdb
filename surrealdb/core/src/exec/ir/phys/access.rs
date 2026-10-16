@@ -37,7 +37,7 @@
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use smallvec::SmallVec;
 use surrealdb_datastore::index_shapes::TableIndexShapes;
@@ -281,12 +281,14 @@ impl TableAnswers {
 	/// decision carries it: the definition with its array columns read as elements, which columns
 	/// hold no array, and which are coarse components of the record id. Empty when the columns
 	/// could not be read, the case where the decision declines its plan-time path.
-	pub(crate) fn index_refs(&self) -> Vec<crate::exec::index::access_path::IndexRef> {
+	pub(crate) fn index_refs(
+		&self,
+		registry: &FunctionRegistry,
+	) -> Vec<crate::exec::index::access_path::IndexRef> {
 		match &self.columns {
-			Some(columns) => columns
-				.analyzer(None, DecisionCx::builtin().registry)
-				.with_key(self.key.clone())
-				.index_refs(),
+			Some(columns) => {
+				columns.analyzer(None, registry).with_key(self.key.clone()).index_refs()
+			}
 			None => Vec::new(),
 		}
 	}
@@ -365,20 +367,6 @@ pub(crate) struct DecisionCx<'a> {
 	/// The query vectors of the `KNN` operators whose right operand is a parameter that holds an
 	/// array of numbers at plan time.
 	pub(crate) knn_vectors: &'a KnnQueryVectors,
-}
-
-impl DecisionCx<'static> {
-	/// The context of a decision made without a statement's own parameters: the builtin function
-	/// registry and no query vector.
-	pub(crate) fn builtin() -> Self {
-		static REGISTRY: LazyLock<FunctionRegistry> =
-			LazyLock::new(FunctionRegistry::with_builtins);
-		static NO_VECTORS: LazyLock<KnnQueryVectors> = LazyLock::new(KnnQueryVectors::new);
-		Self {
-			registry: &REGISTRY,
-			knn_vectors: &NO_VECTORS,
-		}
-	}
 }
 
 /// The decision before it is mapped to ops.
@@ -2512,6 +2500,22 @@ pub(super) fn refuse_statement(
 		)?;
 		Ok(Converted::Eliminated(EliminationReason::Unreachable))
 	})
+}
+
+#[cfg(test)]
+impl DecisionCx<'static> {
+	/// The context of a decision made without a statement's own parameters: the full builtin
+	/// function registry and no query vector. For tests.
+	pub(crate) fn builtin() -> Self {
+		static REGISTRY: std::sync::LazyLock<FunctionRegistry> =
+			std::sync::LazyLock::new(FunctionRegistry::with_builtins);
+		static NO_VECTORS: std::sync::LazyLock<KnnQueryVectors> =
+			std::sync::LazyLock::new(KnnQueryVectors::new);
+		Self {
+			registry: &REGISTRY,
+			knn_vectors: &NO_VECTORS,
+		}
+	}
 }
 
 #[cfg(test)]

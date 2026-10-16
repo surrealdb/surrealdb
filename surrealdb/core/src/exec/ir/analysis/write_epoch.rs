@@ -5,6 +5,7 @@
 
 use smallvec::{SmallVec, smallvec};
 
+#[cfg(test)]
 use super::cx::default_cx;
 use super::{effects, footprint};
 use crate::exec::ir::core::facts::FactCache;
@@ -25,6 +26,7 @@ const MAX_ANCESTOR_HOPS: usize = 1024;
 /// A read whose footprint intersects any write of its statement (a triggered write included,
 /// wherever it stands in program order, in any loop) answers [`WriteEpoch::Unique`] of itself,
 /// which equals no other epoch. A read no write can reach shares [`WriteEpoch::Stable`].
+#[cfg(test)]
 pub(crate) fn assign(ir: &Ir, op: OpId) -> WriteEpoch {
 	assign_with(ir, &mut FactCache::new(), &default_cx(ir), op)
 }
@@ -49,7 +51,7 @@ pub(crate) fn assign_with(
 /// the container's state, so it must be dropped before the container is rewritten.
 #[derive(Default)]
 pub(crate) struct StatementWrites {
-	by_statement: Vec<(RegionId, SmallVec<[IrResource; 4]>)>,
+	by_statement: Vec<(RegionId, SmallVec<[IrResource; 2]>)>,
 }
 
 /// [`assign_with`], reading the writes of the op's statement from `scratch` and adding them when
@@ -112,7 +114,7 @@ pub(crate) fn statement_writes(
 	facts: &mut FactCache,
 	cx: &EffectCx<'_>,
 	op: OpId,
-) -> SmallVec<[IrResource; 4]> {
+) -> SmallVec<[IrResource; 2]> {
 	writes_of_region(ir, facts, cx, enclosing_statement(ir, op))
 }
 
@@ -121,8 +123,8 @@ fn writes_of_region(
 	facts: &mut FactCache,
 	cx: &EffectCx<'_>,
 	region: RegionId,
-) -> SmallVec<[IrResource; 4]> {
-	let mut out: SmallVec<[IrResource; 4]> = SmallVec::new();
+) -> SmallVec<[IrResource; 2]> {
+	let mut out: SmallVec<[IrResource; 2]> = SmallVec::new();
 	for child in ops_in(ir, region) {
 		for write in effects::of_with(ir, facts, cx, child).footprint.writes {
 			if write == IrResource::Unknown {

@@ -33,6 +33,19 @@ fn no_migration_is_declared_ahead_of_this_build() {
 	}
 }
 
+/// `LEDGER` stands in for `MIGRATIONS` wherever the ledger is read without running a migration, so
+/// it must list the same rows in the same order.
+#[test]
+fn ledger_lists_the_rows_of_migrations() {
+	assert_eq!(LEDGER.len(), MIGRATIONS.len());
+	for (row, migration) in LEDGER.iter().zip(MIGRATIONS) {
+		assert_eq!(
+			(row.id, row.name, row.version, row.on_demand),
+			(migration.id, migration.name, migration.version, migration.on_demand),
+		);
+	}
+}
+
 #[cfg(feature = "kv-mem")]
 mod datastore {
 	use std::sync::Arc;
@@ -782,4 +795,13 @@ mod datastore {
 		txn.set_key(&VersionKey {}, &MajorVersion::latest()).await.unwrap();
 		txn.commit().await.unwrap();
 	}
+}
+
+/// `attach` writes no recheck history, so it is sound only while no build owes a recheck.
+#[test]
+fn edge_attach_assumes_no_recheck_is_owed() {
+	assert!(
+		RECHECKS.is_empty(),
+		"a recheck exists: `attach` must refuse a store that still owes one before this passes"
+	);
 }

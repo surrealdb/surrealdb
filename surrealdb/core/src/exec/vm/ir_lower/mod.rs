@@ -84,6 +84,7 @@ mod dispatch;
 mod emit;
 mod events;
 mod explain;
+mod explain_hook;
 mod expr;
 mod fold;
 mod graph;
@@ -97,6 +98,7 @@ mod pipe;
 mod place;
 mod read;
 pub(crate) mod reg;
+mod schema;
 mod select;
 mod stage;
 mod subscription;
@@ -112,7 +114,10 @@ mod write_stmt;
 #[allow(unused_imports)]
 pub(crate) use control::{Slot, UseOperand, UseOperands, request_slots, request_steps};
 #[allow(unused_imports)]
-pub(crate) use dispatch::{Coverage, coverage_report, lower, lower_indexed};
+pub(crate) use dispatch::{Coverage, coverage_report};
+#[cfg(test)]
+pub(crate) use dispatch::{lower, lower_indexed};
+pub(crate) use explain_hook::{ExplainLowering, FULL_EXPLAIN_LOWERING};
 #[allow(unused_imports)]
 pub(crate) use expr::LowerLimits;
 #[allow(unused_imports)]
@@ -121,6 +126,7 @@ pub(crate) use fold::{IrExprLowering, lower_expr_parts};
 pub(crate) use place::{Lowered, Provenance};
 #[allow(unused_imports)]
 pub(crate) use read::{IndexResolver, NoIndexes};
+pub(crate) use schema::{FULL_SCHEMA_LOWERING, NOT_SERVED, SchemaLowering};
 #[allow(unused_imports)]
 pub(crate) use subscription::LoweredLive;
 #[cfg(test)]

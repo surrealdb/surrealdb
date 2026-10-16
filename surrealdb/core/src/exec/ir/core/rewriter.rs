@@ -25,6 +25,8 @@ use super::location::Location;
 use super::op::OpData;
 use super::region::RegionData;
 use super::value::{TOKEN_SLOT_BASE, Use, ValueData, ValueDef};
+use crate::exec::function::FunctionRegistry;
+use crate::exec::ir::analysis::cx::structural_cx;
 use crate::exec::ir::analysis::effects;
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::ExprOp;
@@ -88,10 +90,19 @@ pub(crate) enum Provenance {
 	From(SmallVec<[OpId; 2]>),
 }
 
+/// The provenance scope and re-made set a [`Rewriter::derived`] replaces while its body runs.
+struct DerivedScope {
+	provenance: Option<SmallVec<[OpId; 2]>>,
+	remade: SmallVec<[OpId; 2]>,
+}
+
 /// A mutable view of one container and its fact cache.
 pub(crate) struct Rewriter<'a> {
 	ir: &'a mut Ir,
 	facts: &'a mut FactCache,
+	/// The function registry the facts a pattern reads are judged under, when the driver of the
+	/// rewriter supplies one ([`Rewriter::with_registry`]).
+	registry: Option<&'a FunctionRegistry>,
 	/// The provenance every op created now records, while [`Rewriter::derived`] runs.
 	provenance_scope: Option<SmallVec<[OpId; 2]>>,
 	/// The ops the ops created now are derived from, while [`Rewriter::derived`] runs.
@@ -108,6 +119,7 @@ impl<'a> Rewriter<'a> {
 		Self {
 			ir,
 			facts,
+			registry: None,
 			provenance_scope: None,
 			remade_from: SmallVec::new(),
 			created: Vec::new(),
@@ -115,23 +127,39 @@ impl<'a> Rewriter<'a> {
 		}
 	}
 
+	/// This rewriter judging the facts a pattern reads under `registry`. Without one, those facts
+	/// are the top of every lattice.
+	pub(crate) fn with_registry(mut self, registry: &'a FunctionRegistry) -> Self {
+		self.registry = Some(registry);
+		self
+	}
+
+	/// The function registry the facts a pattern reads are judged under, if one was supplied.
+	pub(crate) fn registry(&self) -> Option<&'a FunctionRegistry> {
+		self.registry
+	}
+
 	/// The container, read-only.
 	pub(crate) fn ir(&self) -> &Ir {
 		self.ir
 	}
 
-	/// The facts of `op` under the default context, its regions and the closure bodies it invokes
-	/// included. Patterns read facts only through this method.
+	/// The facts of `op` under the rewriter's registry and no definitions, its regions and the
+	/// closure bodies it invokes included. Patterns read facts only through this method.
 	///
 	/// The answer is assembled from the per-op memo, which files each op's regional answer under
 	/// the context it was computed in, so an answer computed under a request's own context never
-	/// stands in for this one. A dangling op answers the top of every lattice.
+	/// stands in for this one. A dangling op, and any op of a rewriter that holds no registry,
+	/// answers the top of every lattice.
 	pub(crate) fn facts(&mut self, op: OpId) -> OpFacts {
+		let Some(registry) = self.registry else {
+			return self.facts.top().clone();
+		};
 		if self.ir.op(op).is_none() {
 			return self.facts.top().clone();
 		}
 		OpFacts {
-			effects: effects::of(self.ir, self.facts, op),
+			effects: effects::of_with(self.ir, self.facts, &structural_cx(registry, self.ir), op),
 		}
 	}
 
@@ -667,6 +695,64 @@ impl<'a> Rewriter<'a> {
 		Ok(())
 	}
 
+	/// Erases `region` with the ops it holds, and records `reason` for each logical id they stood
+	/// for that no remaining op holds. The owner keeps its other regions, and holds fewer than its
+	/// kind names where the region is not one the kind makes optional; the caller says the owner
+	/// may. The call fails before changing anything when `region` is the top region, or when the
+	/// result of an op in it is read outside it. A region isolated from above reads no value
+	/// defined outside it that its erasure leaves dangling: the uses its ops hold are dropped.
+	pub(crate) fn erase_region(
+		&mut self,
+		region: RegionId,
+		reason: EliminationReason,
+	) -> Result<(), IrError> {
+		let data = self.ir.regions.get(region).ok_or(IrError::Stale("region"))?;
+		let owner = data.parent.ok_or(IrError::Refused("erase_region top"))?;
+		let blocks = data.blocks.clone();
+		let mut members: SmallVec<[OpId; 8]> = SmallVec::new();
+		for block in &blocks {
+			for child in self.ir.blocks.get(*block).map_or(&[][..], |block| &block.ops) {
+				self.collect_post_order(*child, &mut members);
+			}
+		}
+		if let Some(pinned) = self.version_read_outside(&members, None) {
+			return Err(IrError::HasUses(pinned));
+		}
+		let held: HashSet<OpId> = members.iter().copied().collect();
+		for member in &members {
+			let used_outside = self.ir.ops.get(*member).is_some_and(|data| {
+				data.results.iter().any(|result| {
+					self.ir.uses(*result).iter().any(|use_| !held.contains(&use_.user))
+				})
+			});
+			if used_outside {
+				return Err(IrError::HasUses(*member));
+			}
+		}
+		for member in &members {
+			self.drop_operand_uses(*member);
+		}
+		for member in &members {
+			self.free_op(*member, reason, false);
+		}
+		for block in &blocks {
+			let Some(block) = self.ir.blocks.remove(*block) else {
+				continue;
+			};
+			for arg in block.args.iter().chain(&block.token_args) {
+				self.ir.values.remove(*arg);
+				self.facts.invalidate_value(*arg);
+			}
+		}
+		self.ir.sealed_regions.remove(region);
+		self.ir.regions.remove(region);
+		if let Some(data) = self.ir.ops.get_mut(owner) {
+			data.regions.retain(|held| *held != region);
+		}
+		self.ir.bump_with_ancestors(owner);
+		Ok(())
+	}
+
 	/// Moves the ops of `region` to `at`, binding its block arguments to `args`, and answers the
 	/// values its terminator yielded.
 	///
@@ -949,10 +1035,22 @@ impl<'a> Rewriter<'a> {
 	/// takes the decisions the physical plan made for the first such op that holds any (a `MATCHES`
 	/// operator's registration, a `KNN` operator's search scope, an index function call's scope),
 	/// which are keyed by op and not part of identity.
+	///
+	/// Only the call of `f` is generic: the scope is entered and left by two non-generic
+	/// functions, so every closure shares one copy of the bookkeeping.
 	pub(crate) fn derived<R>(&mut self, from: &[OpId], f: impl FnOnce(&mut Self) -> R) -> R {
-		let outer_remade = std::mem::replace(&mut self.remade_from, from.iter().copied().collect());
-		let outer = self.provenance_scope.take();
-		let mut set: SmallVec<[OpId; 2]> = outer.clone().unwrap_or_default();
+		let outer = self.enter_derived(from);
+		let result = f(self);
+		self.leave_derived(outer);
+		result
+	}
+
+	/// Opens the scope of a [`Rewriter::derived`] over `from` and answers the scope it replaces.
+	#[inline(never)]
+	fn enter_derived(&mut self, from: &[OpId]) -> DerivedScope {
+		let remade = std::mem::replace(&mut self.remade_from, from.iter().copied().collect());
+		let provenance = self.provenance_scope.take();
+		let mut set: SmallVec<[OpId; 2]> = provenance.clone().unwrap_or_default();
 		for id in from {
 			match self.ir.ops.get(*id) {
 				Some(data) => set.extend(held_ids(&data.provenance, *id)),
@@ -962,10 +1060,17 @@ impl<'a> Rewriter<'a> {
 		set.sort_unstable();
 		set.dedup();
 		self.provenance_scope = Some(set);
-		let result = f(self);
-		self.provenance_scope = outer;
-		self.remade_from = outer_remade;
-		result
+		DerivedScope {
+			provenance,
+			remade,
+		}
+	}
+
+	/// Closes the scope [`Rewriter::enter_derived`] opened, restoring `outer`.
+	#[inline(never)]
+	fn leave_derived(&mut self, outer: DerivedScope) {
+		self.provenance_scope = outer.provenance;
+		self.remade_from = outer.remade;
 	}
 
 	/// Moves the container forward to `to`. The only operation that changes a container's
@@ -1042,9 +1147,9 @@ impl<'a> Rewriter<'a> {
 	/// Answers [`IrError::HasUses`] for the first op whose result is read by an op outside the
 	/// subtree. `replaced` says the uses of `op`'s own results are moved elsewhere first, so
 	/// they do not count.
-	fn erasable_subtree(&self, op: OpId, replaced: bool) -> Result<SmallVec<[OpId; 4]>, IrError> {
+	fn erasable_subtree(&self, op: OpId, replaced: bool) -> Result<SmallVec<[OpId; 8]>, IrError> {
 		let data = self.ir.ops.get(op).ok_or(IrError::Stale("op"))?;
-		let mut subtree: SmallVec<[OpId; 4]> = SmallVec::new();
+		let mut subtree: SmallVec<[OpId; 8]> = SmallVec::new();
 		if data.regions.is_empty() {
 			subtree.push(op);
 			let used = data.results.iter().any(|result| !self.ir.uses(*result).is_empty());
@@ -1144,7 +1249,7 @@ impl<'a> Rewriter<'a> {
 	}
 
 	/// Appends `op` and every op of its regions to `out`, each op after the ops of its regions.
-	fn collect_post_order(&self, op: OpId, out: &mut SmallVec<[OpId; 4]>) {
+	fn collect_post_order(&self, op: OpId, out: &mut SmallVec<[OpId; 8]>) {
 		let Some(data) = self.ir.ops.get(op) else {
 			return;
 		};

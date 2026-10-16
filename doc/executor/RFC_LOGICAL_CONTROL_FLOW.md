@@ -240,9 +240,9 @@ projection, a data clause, an `IF` condition, a `FOR` range — are held as a ha
   one node, evaluated once where its first occurrence dominates the rest (see *Errors keep their
   order*). Hash-consing gives this without a pass.
 - **Dead-code elimination.** A node no root of the statement reaches is not lowered.
-- **Local rewrite rules to a fixed point.** The expression rules of `exec/logical/rules` (constant
-  folding, `IF` collapse, cast elision) apply node by node until a pass changes nothing, the same
-  driver `optimise.rs` runs over operators.
+- **Local rewrite rules to a fixed point.** The expression rules of the fold pass
+  (`exec/ir/passes/fold.rs`: constant folding, `IF` collapse, cast elision) apply node by node until a
+  round changes nothing.
 - **Forward type inference.** Each node's kind is computed from its inputs'. The logical plan
   infers only proofs: kinds that follow from a literal, or from a value the query itself computes
   (a constructor, a cast, a comparison, a function whose return kind is fixed). A proof may fold a

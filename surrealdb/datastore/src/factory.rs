@@ -6,6 +6,7 @@
 //! datastore, which is how the maintenance paths open their own.
 
 use std::any::{Any, TypeId};
+use std::future::Future;
 use std::sync::{Arc, OnceLock};
 
 use anyhow::Result;
@@ -15,6 +16,7 @@ use surrealdb_observe::{ExecutionObserver, NoopObserver};
 use crate::config::TransactionConfig;
 use crate::error::DatastoreError;
 use crate::feature::FeatureLevelCell;
+use crate::out_of_line::OutOfLine;
 use crate::sequences::Sequences;
 use crate::tr::Transactor;
 use crate::triggers::CommitTriggers;
@@ -101,7 +103,16 @@ impl TransactionFactory {
 	///
 	/// A write transaction is refused with [`DatastoreError::StoreReadOnly`] while the store is
 	/// read-only; a read transaction is never refused.
-	pub async fn transaction(
+	#[inline(never)]
+	pub fn transaction(
+		&self,
+		write: TransactionType,
+		sequences: Sequences,
+	) -> OutOfLine<impl Future<Output = Result<Transaction>>> {
+		OutOfLine::new(self.transaction_body(write, sequences))
+	}
+
+	async fn transaction_body(
 		&self,
 		write: TransactionType,
 		sequences: Sequences,

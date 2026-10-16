@@ -178,6 +178,13 @@ impl SkipRevisioned for StorageVersion {
 	fn skip_revisioned<R: std::io::Read>(r: &mut R) -> Result<(), revision::Error> {
 		<String as SkipRevisioned>::skip_revisioned(r)
 	}
+
+	#[inline]
+	fn skip_revisioned_slice(
+		reader: &mut revision::SliceReader<'_>,
+	) -> Result<(), revision::Error> {
+		<String as SkipRevisioned>::skip_revisioned_slice(reader)
+	}
 }
 
 impl WalkRevisioned for StorageVersion {

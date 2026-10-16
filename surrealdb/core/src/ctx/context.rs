@@ -35,6 +35,7 @@ use crate::err::{EngineError, Error};
 use crate::exec::Error as ExecError;
 use crate::exec::context::ForbiddenRow;
 use crate::exec::function::FunctionRegistry;
+use crate::exec::surface::Surface;
 use crate::expr::Base;
 #[cfg(feature = "surrealism")]
 use crate::extension::archive::{ArchiveSource, fetch_archive};
@@ -184,6 +185,10 @@ pub struct Context {
 	/// statement's clauses are compiled wherever the statement is reached,
 	/// which includes the evaluator that owns the catalog writes.
 	function_registry: Arc<FunctionRegistry>,
+	/// The statement families the entry that started the query serves. Set on
+	/// the root context and copied by every derivation, so stored code run
+	/// under a descendant is lowered and run under the same surface.
+	surface: &'static Surface,
 	/// The live-subscription units this node has compiled for the VM
 	/// (`crate::exec::vm::live`), carried as the function registry is.
 	live_units: Option<Arc<crate::exec::vm::live::LiveUnits>>,
@@ -305,6 +310,7 @@ impl Context {
 			#[cfg(feature = "http")]
 			http_client: Arc::clone(&parent.http_client),
 			function_registry: Arc::clone(&parent.function_registry),
+			surface: parent.surface,
 			live_units: parent.live_units.clone(),
 			compiled_units: parent.compiled_units.clone(),
 			vm_units: parent.vm_units.clone(),
@@ -375,6 +381,7 @@ impl Context {
 			#[cfg(feature = "http")]
 			http_client,
 			function_registry: Arc::clone(&parent.function_registry),
+			surface: parent.surface,
 			live_units: parent.live_units.clone(),
 			compiled_units: parent.compiled_units.clone(),
 			vm_units: parent.vm_units.clone(),
@@ -434,6 +441,7 @@ impl Context {
 			#[cfg(feature = "http")]
 			http_client: Arc::clone(&parent.http_client),
 			function_registry: Arc::clone(&parent.function_registry),
+			surface: parent.surface,
 			live_units: parent.live_units.clone(),
 			compiled_units: parent.compiled_units.clone(),
 			vm_units: parent.vm_units.clone(),
@@ -516,6 +524,7 @@ impl Context {
 			#[cfg(feature = "http")]
 			http_client: Arc::clone(&from.http_client),
 			function_registry: Arc::clone(&from.function_registry),
+			surface: from.surface,
 			live_units: from.live_units.clone(),
 			compiled_units: from.compiled_units.clone(),
 			vm_units: from.vm_units.clone(),
@@ -603,6 +612,7 @@ impl Context {
 			#[cfg(feature = "http")]
 			http_client: Arc::clone(&from.http_client),
 			function_registry: Arc::clone(&from.function_registry),
+			surface: from.surface,
 			live_units: from.live_units.clone(),
 			compiled_units: from.compiled_units.clone(),
 			vm_units: from.vm_units.clone(),
@@ -637,6 +647,7 @@ impl Context {
 		cache: Arc<DatastoreCache>,
 		#[cfg(feature = "http")] http_client: Arc<HttpClient>,
 		function_registry: Arc<FunctionRegistry>,
+		surface: &'static Surface,
 		live_units: Arc<crate::exec::vm::live::LiveUnits>,
 		compiled_units: Arc<crate::exec::vm::units::CompiledUnits>,
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
@@ -679,6 +690,7 @@ impl Context {
 			#[cfg(feature = "http")]
 			http_client,
 			function_registry,
+			surface,
 			live_units: Some(live_units),
 			compiled_units: Some(compiled_units),
 			vm_units: None,
@@ -750,6 +762,7 @@ impl Context {
 				.expect("http client to be created"),
 			),
 			function_registry: Arc::new(FunctionRegistry::with_builtins()),
+			surface: &crate::exec::surface::FULL,
 			live_units: None,
 			compiled_units: None,
 			vm_units: None,
@@ -779,6 +792,12 @@ impl Context {
 	/// expression that may name a function.
 	pub(crate) fn function_registry(&self) -> &Arc<FunctionRegistry> {
 		&self.function_registry
+	}
+
+	/// The statement families the entry that started the query serves.
+	#[inline]
+	pub(crate) fn surface(&self) -> &'static Surface {
+		self.surface
 	}
 
 	/// The live-subscription units this node has compiled for the VM, or

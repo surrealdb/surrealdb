@@ -49,8 +49,8 @@ value = '''
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *]
-    Filter [ctx: Db] [predicate: type::field('id') = (item:1)]
-        RecordIdScan [ctx: Db] [record_id: item:1]
+    Filter [ctx: Db] [predicate: type::field('id') = type::record('item:1')]
+        RecordIdScan [ctx: Db] [record_id: type::record('item:1')]
 "'''
 
 [[test.results]]

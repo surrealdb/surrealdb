@@ -58,7 +58,7 @@ value = "[1, 2]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *]
-    IndexCountScan [ctx: Db] [source: t, condition: id[0] = 'x']
+    IndexCountScan [ctx: Db] [source: t, condition: a = 'x']
 "'''
 
 [[test.results]]

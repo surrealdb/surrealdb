@@ -205,7 +205,7 @@ impl ContextDeps {
 	) -> Option<Self> {
 		use crate::catalog::providers::{DatabaseProvider, TableProvider};
 		use crate::expr::visit::Visit as _;
-		let mut names = Names(also);
+		let mut names = crate::exec::ir::cache::names::Collector::params(also);
 		let mut tables: Vec<(NamespaceId, DatabaseId, crate::val::TableName)> =
 			reads.tables.iter().cloned().collect();
 		for (ns, db, tb) in &reads.named_tables {
@@ -252,7 +252,7 @@ impl ContextDeps {
 		}
 		Some(Self {
 			values: names
-				.0
+				.into_params()
 				.into_iter()
 				.map(|name| {
 					let value = ctx.lexical_value(&name).map(|value| value.as_ref().clone());
@@ -278,19 +278,6 @@ impl ContextDeps {
 			(None, None) => true,
 			_ => false,
 		})
-	}
-}
-
-/// The parameter names an expression refers to, at any depth.
-#[derive(Default)]
-struct Names(std::collections::BTreeSet<String>);
-
-impl crate::expr::visit::Visitor for Names {
-	type Error = std::convert::Infallible;
-
-	fn visit_param(&mut self, param: &crate::expr::Param) -> Result<(), Self::Error> {
-		self.0.insert(param.as_str().to_owned());
-		Ok(())
 	}
 }
 

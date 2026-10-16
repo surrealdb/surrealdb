@@ -21,6 +21,7 @@ use crate::exec::ir::iface::statements::{
 	JwtVerifyShape, OnDeleteShape, OperandSlot, Place, PlacePart, RecordAccessShape,
 	ReferenceShape, TemplateHole, UnaddressedPart, UserDurationShape, UserSecrets, ViewShape,
 };
+use crate::exec::vm::codec::Codec;
 use crate::expr::access_type::{AccessType, BearerAccess, JwtAccess, JwtAccessVerify};
 use crate::expr::index_kind::Index;
 use crate::expr::reference::ReferenceDeleteStrategy;
@@ -173,7 +174,11 @@ pub(crate) fn template_holes(form: DdlForm) -> Option<&'static [TemplateHole]> {
 }
 
 /// Plans a `DEFINE`. `checks` is what the statement checks against the catalog.
-pub(super) fn plan_define(define: &DefineStatement, checks: DdlChecks) -> Planned<DdlPlan<'_>> {
+pub(super) fn plan_define<'e>(
+	define: &'e DefineStatement,
+	checks: DdlChecks,
+	codec: &'static Codec,
+) -> Planned<DdlPlan<'e>> {
 	let mut s = Slots::new();
 	let mut planning_refusal = None;
 	let (form, allow, object, tmpl, mode, refusal) = match define {
@@ -195,7 +200,7 @@ pub(super) fn plan_define(define: &DefineStatement, checks: DdlChecks) -> Planne
 				},
 				template(
 					"NamespaceDefinition",
-					stored_value(&definition, "NamespaceDefinition")?,
+					stored_value(codec, &definition, "NamespaceDefinition")?,
 					NAMESPACE_HOLES,
 				),
 				stmt.kind.clone(),
@@ -227,7 +232,7 @@ pub(super) fn plan_define(define: &DefineStatement, checks: DdlChecks) -> Planne
 				},
 				template(
 					"DatabaseDefinition",
-					stored_value(&definition, "DatabaseDefinition")?,
+					stored_value(codec, &definition, "DatabaseDefinition")?,
 					DATABASE_HOLES,
 				),
 				stmt.kind.clone(),
@@ -273,7 +278,7 @@ pub(super) fn plan_define(define: &DefineStatement, checks: DdlChecks) -> Planne
 				})),
 				template(
 					"StoredFunctionDefinition",
-					stored_value(&definition.to_stored(), "StoredFunctionDefinition")?,
+					stored_value(codec, &definition.to_stored(), "StoredFunctionDefinition")?,
 					FUNCTION_HOLES,
 				),
 				stmt.kind.clone(),
@@ -302,7 +307,7 @@ pub(super) fn plan_define(define: &DefineStatement, checks: DdlChecks) -> Planne
 				},
 				template(
 					"AnalyzerDefinition",
-					stored_value(&definition, "AnalyzerDefinition")?,
+					stored_value(codec, &definition, "AnalyzerDefinition")?,
 					ANALYZER_HOLES,
 				),
 				stmt.kind.clone(),
@@ -331,7 +336,7 @@ pub(super) fn plan_define(define: &DefineStatement, checks: DdlChecks) -> Planne
 				},
 				template(
 					"StoredParamDefinition",
-					stored_value(&definition.to_stored(), "StoredParamDefinition")?,
+					stored_value(codec, &definition.to_stored(), "StoredParamDefinition")?,
 					PARAM_HOLES,
 				),
 				stmt.kind.clone(),
@@ -415,7 +420,7 @@ pub(super) fn plan_define(define: &DefineStatement, checks: DdlChecks) -> Planne
 				})),
 				template(
 					"StoredTableDefinition",
-					stored_value(&definition.to_stored(), "StoredTableDefinition")?,
+					stored_value(codec, &definition.to_stored(), "StoredTableDefinition")?,
 					TABLE_HOLES,
 				),
 				stmt.kind.clone(),
@@ -453,7 +458,7 @@ pub(super) fn plan_define(define: &DefineStatement, checks: DdlChecks) -> Planne
 				},
 				template(
 					"StoredEventDefinition",
-					stored_value(&definition.to_stored(), "StoredEventDefinition")?,
+					stored_value(codec, &definition.to_stored(), "StoredEventDefinition")?,
 					EVENT_HOLES,
 				),
 				stmt.kind.clone(),
@@ -515,7 +520,7 @@ pub(super) fn plan_define(define: &DefineStatement, checks: DdlChecks) -> Planne
 				})),
 				template(
 					"StoredFieldDefinition",
-					stored_value(&definition.to_stored(), "StoredFieldDefinition")?,
+					stored_value(codec, &definition.to_stored(), "StoredFieldDefinition")?,
 					FIELD_HOLES,
 				),
 				stmt.kind.clone(),
@@ -571,7 +576,7 @@ pub(super) fn plan_define(define: &DefineStatement, checks: DdlChecks) -> Planne
 				},
 				template(
 					"StoredIndexDefinition",
-					stored_value(&definition.to_stored(), "StoredIndexDefinition")?,
+					stored_value(codec, &definition.to_stored(), "StoredIndexDefinition")?,
 					INDEX_HOLES,
 				),
 				stmt.kind.clone(),
@@ -619,7 +624,7 @@ pub(super) fn plan_define(define: &DefineStatement, checks: DdlChecks) -> Planne
 				})),
 				template(
 					"UserDefinition",
-					stored_value(&definition, "UserDefinition")?,
+					stored_value(codec, &definition, "UserDefinition")?,
 					USER_HOLES,
 				),
 				stmt.kind.clone(),
@@ -649,7 +654,7 @@ pub(super) fn plan_define(define: &DefineStatement, checks: DdlChecks) -> Planne
 				},
 				template(
 					"StoredMlModelDefinition",
-					stored_value(&definition.to_stored(), "StoredMlModelDefinition")?,
+					stored_value(codec, &definition.to_stored(), "StoredMlModelDefinition")?,
 					MODEL_HOLES,
 				),
 				stmt.kind.clone(),
@@ -683,7 +688,7 @@ pub(super) fn plan_define(define: &DefineStatement, checks: DdlChecks) -> Planne
 				},
 				template(
 					"StoredModuleDefinition",
-					stored_value(&definition.to_stored(), "StoredModuleDefinition")?,
+					stored_value(codec, &definition.to_stored(), "StoredModuleDefinition")?,
 					MODULE_HOLES,
 				),
 				stmt.kind.clone(),
@@ -746,7 +751,7 @@ pub(super) fn plan_define(define: &DefineStatement, checks: DdlChecks) -> Planne
 				})),
 				template(
 					"StoredAccessDefinition",
-					stored_value(&definition.to_stored(), "StoredAccessDefinition")?,
+					stored_value(codec, &definition.to_stored(), "StoredAccessDefinition")?,
 					ACCESS_HOLES,
 				),
 				stmt.kind.clone(),
@@ -784,7 +789,7 @@ pub(super) fn plan_define(define: &DefineStatement, checks: DdlChecks) -> Planne
 				DefineObject::Config(Box::new(shape)),
 				template(
 					"StoredConfigDefinition",
-					stored_value(&definition.to_stored(), "StoredConfigDefinition")?,
+					stored_value(codec, &definition.to_stored(), "StoredConfigDefinition")?,
 					CONFIG_HOLES,
 				),
 				stmt.kind.clone(),
@@ -841,7 +846,7 @@ pub(super) fn plan_define(define: &DefineStatement, checks: DdlChecks) -> Planne
 				})),
 				template(
 					"StoredApiDefinition",
-					stored_value(&definition.to_stored(), "StoredApiDefinition")?,
+					stored_value(codec, &definition.to_stored(), "StoredApiDefinition")?,
 					API_HOLES,
 				),
 				stmt.kind.clone(),
@@ -879,7 +884,7 @@ pub(super) fn plan_define(define: &DefineStatement, checks: DdlChecks) -> Planne
 				},
 				template(
 					"StoredBucketDefinition",
-					stored_value(&definition.to_stored(), "StoredBucketDefinition")?,
+					stored_value(codec, &definition.to_stored(), "StoredBucketDefinition")?,
 					BUCKET_HOLES,
 				),
 				stmt.kind.clone(),
@@ -914,7 +919,7 @@ pub(super) fn plan_define(define: &DefineStatement, checks: DdlChecks) -> Planne
 				},
 				template(
 					"SequenceDefinition",
-					stored_value(&definition, "SequenceDefinition")?,
+					stored_value(codec, &definition, "SequenceDefinition")?,
 					SEQUENCE_HOLES,
 				),
 				stmt.kind.clone(),

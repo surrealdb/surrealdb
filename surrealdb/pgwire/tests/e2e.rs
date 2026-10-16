@@ -1,3 +1,7 @@
+// Awaiting a datastore constructor lays out the sealed async bodies it reaches, which nest deeper
+// than the default recursion limit.
+#![recursion_limit = "256"]
+
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;

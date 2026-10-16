@@ -1,34 +1,28 @@
-//! Bitmap candidate scan operators (roaring bitmap index fusion).
+//! Bitmap candidate evaluation (roaring bitmap index fusion).
 //!
-//! These operators make [`roaring::RoaringTreemap`]s over a table's shared
-//! doc-ID space the planner's candidate currency for AND/OR/AND-NOT
-//! composition of index-backed predicates:
+//! A [`BitmapPlan`] is a tree of set algebra over [`roaring::RoaringTreemap`]s in a table's shared
+//! doc-ID space, the candidate currency for AND/OR/AND-NOT composition of index-backed
+//! predicates. Leaves drain a b-tree index range (reading the doc-ID appended to each entry value),
+//! expose a full-text query's merged posting bitmap or read a graph anchor's adjacency; inner nodes
+//! apply set algebra (intersection smallest-first, union, difference).
 //!
-//! - [`BitmapNode`] — one node of the bitmap expression tree. Leaves drain a b-tree index range
-//!   (reading the doc-ID appended to each entry value) or expose a full-text query's merged posting
-//!   bitmap; inner nodes apply set algebra (intersection smallest-first, union, difference).
-//! - [`BitmapResolve`] — the physical operator that owns the tree: it evaluates the root bitmap,
-//!   batch-resolves surviving doc-IDs to record IDs through [`TableDocIds::get_record_ids_batch`],
-//!   and feeds the standard fetch pipeline (table permissions per record, computed fields,
-//!   field-level permissions). Rows are emitted in doc-ID order, which is unspecified relative to
-//!   any field — the planner only chooses this plan when no index-covered ORDER BY is available, so
-//!   any ORDER BY is enforced by a downstream Sort. An OR fusion plan also carries a streaming
-//!   union as an overflow fallback: when any union branch exceeds its drained-entry budget, the
-//!   bitmap is abandoned and the fallback's stream is emitted instead (`union_tier: fallback` under
-//!   EXPLAIN ANALYZE).
+//! The entry points ([`evaluate_fusion`], [`evaluate_fusion_plan`], [`knn_allow_list`],
+//! [`exact_bitmap_cardinality`]) evaluate a plan against the query's [`Transaction`]. The VM's
+//! bitmap scan batch-resolves the surviving doc-IDs to record IDs through
+//! [`TableDocIds::get_record_ids_batch`] and feeds the standard fetch pipeline (table permissions
+//! per record, computed fields, field-level permissions). Rows are emitted in doc-ID order, which
+//! is unspecified relative to any field, so any ORDER BY is enforced by a downstream sort. An OR
+//! fusion plan also carries a streaming union as an overflow fallback: when any union branch
+//! exceeds its drained-entry budget, the bitmap is abandoned and the fallback's stream is emitted
+//! instead (`union_tier: fallback` under EXPLAIN ANALYZE).
 //!
-//! [`BitmapNode`]s implement [`ExecOperator`] so EXPLAIN renders the bitmap
-//! expression as a plan subtree (`BitmapAnd` / `BitmapOr` / `BitmapAndNot` /
-//! `BitmapIndexScan` / `BitmapFullTextScan`), but they are not directly
-//! executable: only the owning [`BitmapResolve`] evaluates them, inside its
-//! own execution, via [`BitmapNode::build_bitmap`].
+//! An optional [`BitmapTally`] records the cardinality each node produced, for EXPLAIN ANALYZE;
+//! EXPLAIN renders the plan from the lowering and the tally only supplies counters.
 //!
 //! Snapshot consistency is inherited from the query's [`Transaction`]: every
 //! branch drains index entries through it, so all branches observe one
 //! snapshot. Row-level permissions are never bitmap-evaluated — they apply
 //! per record at the resolve/fetch stage, exactly as for other index scans.
-
-use std::sync::Arc;
 
 use roaring::RoaringTreemap;
 
@@ -40,10 +34,7 @@ use crate::exec::index::iterator::btree::{
 	INDEX_BATCH_SIZE, bitmap_scan_range, decode_entry_doc_ids,
 };
 use crate::exec::permission::{should_check_perms, tables_have_full_select_permission};
-use crate::exec::{
-	AccessMode, BoxFut, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
-	ValueBatchStream,
-};
+use crate::exec::{BoxFut, ExecutionContext, FlowResult, OperatorMetrics};
 use crate::expr::operator::MatchesOperator;
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::iam::Action;
@@ -80,77 +71,18 @@ fn reject_versioned_execution(ctx: &ExecutionContext) -> std::result::Result<(),
 	Ok(())
 }
 
-/// One node of a bitmap candidate expression tree.
-///
-/// Constructed by the planner (see `AccessPath::BitmapFusion`) and evaluated
-/// by the owning [`BitmapResolve`]. Implements [`ExecOperator`] purely so the
-/// tree appears in EXPLAIN output — `execute()` is unreachable in a
-/// well-formed plan and returns an error.
-#[derive(Debug)]
-pub(crate) struct BitmapNode {
-	kind: BitmapNodeKind,
-	/// The plan the node was built from, which [`build_bitmap_plan`]
-	/// evaluates; the node adds its EXPLAIN rendering and metrics to it.
-	plan: BitmapPlan,
-	/// The same child node Arcs coerced to `dyn ExecOperator`, so
-	/// [`ExecOperator::children`] can hand out references for EXPLAIN.
-	children_dyn: Vec<Arc<dyn ExecOperator>>,
-	/// Node cardinality (bitmap length) recorded during evaluation for
-	/// EXPLAIN ANALYZE.
-	metrics: Arc<OperatorMetrics>,
-}
-
-#[derive(Debug)]
-pub(crate) enum BitmapNodeKind {
-	/// Drain a b-tree index range, collecting the doc-ID appended to each
-	/// entry value (see [`crate::idx::entry::IndexEntryValue`]).
-	BTree {
-		index_ref: IndexRef,
-		access: BTreeAccess,
-	},
-	/// A full-text query's merged posting bitmap (no scoring — BM25 runs
-	/// later, over surviving documents only, via `search::score()`).
-	FullText {
-		index_ref: IndexRef,
-		query: String,
-	},
-	/// A single-hop graph reachability semi-join: scanned-table
-	/// rows adjacent to `source` through `edge_tables` in `direction`, read
-	/// entirely from adjacency pointer keys. See
-	/// [`crate::exec::index::access_path::BitmapPlan::Graph`] for the
-	/// contract; the build arm documents the budget and legacy-key rules.
-	Graph {
-		source: crate::val::RecordId,
-		direction: crate::expr::Dir,
-		edge_tables: Vec<TableName>,
-	},
-	/// Intersection of all children (applied smallest-first).
-	And {
-		children: Vec<Arc<BitmapNode>>,
-	},
-	/// Union of all children.
-	Or {
-		children: Vec<Arc<BitmapNode>>,
-	},
-	/// `base AND NOT subtract` — the only supported form of negation.
-	AndNot {
-		base: Arc<BitmapNode>,
-		subtract: Arc<BitmapNode>,
-	},
-}
-
 /// Result of evaluating one branch.
 ///
 /// `Overflow` means the branch abandoned its drain because it exceeded the
 /// per-branch entry budget ([`surrealdb_cnf::BITMAP_BRANCH_BUDGET`]). An AND
 /// simply drops such a branch — the full WHERE clause is kept as a residual
-/// filter above [`BitmapResolve`], so dropping a conjunct only widens the
+/// filter above the bitmap scan, so dropping a conjunct only widens the
 /// candidate set. A branch that cannot be dropped (a union member or an
 /// AND-NOT base) propagates its overflow to the whole evaluation instead;
 /// under an anchored plan root that propagation cannot occur, because an
 /// anchored node — one whose bitmap is required for the plan to produce rows
 /// at all — is evaluated without a budget and never overflows. A root is
-/// anchored only when the owning [`BitmapResolve`] has no overflow fallback;
+/// anchored only when the owning bitmap scan has no overflow fallback;
 /// with one attached, every branch is budgeted and a root overflow switches
 /// execution to the fallback's streaming plan.
 enum BranchBitmap {
@@ -158,276 +90,47 @@ enum BranchBitmap {
 	Overflow,
 }
 
-impl BitmapNode {
-	pub(crate) fn btree(index_ref: IndexRef, access: BTreeAccess) -> Arc<Self> {
-		Arc::new(Self {
-			plan: BitmapPlan::BTree {
-				index_ref: index_ref.clone(),
-				access: access.clone(),
-			},
-			kind: BitmapNodeKind::BTree {
-				index_ref,
-				access,
-			},
-			children_dyn: Vec::new(),
-			metrics: Arc::new(OperatorMetrics::new()),
-		})
-	}
-
-	pub(crate) fn fulltext(
-		index_ref: IndexRef,
-		query: String,
-		operator: MatchesOperator,
-	) -> Arc<Self> {
-		Arc::new(Self {
-			plan: BitmapPlan::FullText {
-				index_ref: index_ref.clone(),
-				query: query.clone(),
-				operator,
-			},
-			kind: BitmapNodeKind::FullText {
-				index_ref,
-				query,
-			},
-			children_dyn: Vec::new(),
-			metrics: Arc::new(OperatorMetrics::new()),
-		})
-	}
-
-	pub(crate) fn graph(
-		source: crate::val::RecordId,
-		direction: crate::expr::Dir,
-		edge_tables: Vec<TableName>,
-	) -> Arc<Self> {
-		Arc::new(Self {
-			plan: BitmapPlan::Graph {
-				source: source.clone(),
-				direction,
-				edge_tables: edge_tables.clone(),
-			},
-			kind: BitmapNodeKind::Graph {
-				source,
-				direction,
-				edge_tables,
-			},
-			children_dyn: Vec::new(),
-			metrics: Arc::new(OperatorMetrics::new()),
-		})
-	}
-
-	pub(crate) fn and(children: Vec<Arc<BitmapNode>>) -> Arc<Self> {
-		let children_dyn =
-			children.iter().map(|c| Arc::clone(c) as Arc<dyn ExecOperator>).collect();
-		Arc::new(Self {
-			plan: BitmapPlan::And(children.iter().map(|c| c.plan.clone()).collect()),
-			kind: BitmapNodeKind::And {
-				children,
-			},
-			children_dyn,
-			metrics: Arc::new(OperatorMetrics::new()),
-		})
-	}
-
-	pub(crate) fn or(children: Vec<Arc<BitmapNode>>) -> Arc<Self> {
-		let children_dyn =
-			children.iter().map(|c| Arc::clone(c) as Arc<dyn ExecOperator>).collect();
-		Arc::new(Self {
-			plan: BitmapPlan::Or(children.iter().map(|c| c.plan.clone()).collect()),
-			kind: BitmapNodeKind::Or {
-				children,
-			},
-			children_dyn,
-			metrics: Arc::new(OperatorMetrics::new()),
-		})
-	}
-
-	pub(crate) fn and_not(base: Arc<BitmapNode>, subtract: Arc<BitmapNode>) -> Arc<Self> {
-		let children_dyn = vec![
-			Arc::clone(&base) as Arc<dyn ExecOperator>,
-			Arc::clone(&subtract) as Arc<dyn ExecOperator>,
-		];
-		Arc::new(Self {
-			plan: BitmapPlan::AndNot {
-				base: Box::new(base.plan.clone()),
-				subtract: Box::new(subtract.plan.clone()),
-			},
-			kind: BitmapNodeKind::AndNot {
-				base,
-				subtract,
-			},
-			children_dyn,
-			metrics: Arc::new(OperatorMetrics::new()),
-		})
-	}
-
-	/// Evaluate this node into a candidate bitmap, recording each node's
-	/// metrics as it goes.
-	///
-	/// `anchored` marks a node whose bitmap is required for the plan to
-	/// produce rows at all: the budget is disabled for it (and for every
-	/// descendant that is itself non-droppable), so an anchored node never
-	/// returns [`BranchBitmap::Overflow`].
-	fn build_bitmap<'a>(
-		&'a self,
-		bctx: &'a BitmapBuildContext<'a>,
-		anchored: bool,
-	) -> BoxFut<'a, std::result::Result<BranchBitmap, ControlFlow>> {
-		build_bitmap_plan(&self.plan, bctx, anchored, Some(self))
-	}
-
-	/// The node of this node's `at`th operand: a child of an intersection or
-	/// union, the base (`0`) or the subtrahend (`1`) of a difference.
-	fn operand(&self, at: usize) -> Option<&BitmapNode> {
-		match &self.kind {
-			BitmapNodeKind::And {
-				children,
-			}
-			| BitmapNodeKind::Or {
-				children,
-			} => children.get(at).map(|c| &**c),
-			BitmapNodeKind::AndNot {
-				base,
-				subtract,
-			} => match at {
-				0 => Some(&**base),
-				_ => Some(&**subtract),
-			},
-			_ => None,
-		}
-	}
-
-	/// Evaluate the tree into a KNN allow-list bitmap (pre-filtered vector
-	/// search).
-	///
-	/// Strict and budget-bounded: each branch is one covered WHERE conjunct
-	/// already dropped from the scan's in-traversal residual, so no branch may
-	/// be dropped (a widened bitmap would admit candidates that fail the
-	/// covered conjuncts, letting them consume top-K slots). No branch is
-	/// anchored either — the allow-list is an optimization, never required for
-	/// the plan to produce rows, so nothing may drain unbounded. Any branch
-	/// exceeding `budget` therefore disables the whole prefilter — `Ok(None)`
-	/// — and the caller falls back to full in-traversal filtering (past the
-	/// budget the filter is non-selective enough for that path to be
-	/// acceptable).
-	pub(crate) async fn build_allowlist(
-		&self,
-		ctx: &ExecutionContext,
-		table: &TableName,
-		budget: usize,
-	) -> std::result::Result<Option<RoaringTreemap>, ControlFlow> {
-		// The planner never attaches a prefilter to a versioned KNN query;
-		// this is the defense-in-depth backstop.
-		reject_versioned_execution(ctx)?;
-		let db_ctx = ctx.database().context("KNN prefilter requires database context")?;
-		let ns = db_ctx.ns_ctx.ns.namespace_id;
-		let db = db_ctx.db.database_id;
-		let txn = ctx.txn();
-		let doc_ids = TableDocIds::new(ns, db, table.clone());
-		let bctx = BitmapBuildContext {
-			ctx,
-			txn: txn.as_ref(),
-			ns,
-			db,
-			table,
-			doc_ids: &doc_ids,
-			budget,
-			strict: true,
-		};
-		match self.build_bitmap(&bctx, false).await? {
-			BranchBitmap::Ready(bitmap) => Ok(Some(bitmap)),
-			BranchBitmap::Overflow => Ok(None),
-		}
-	}
+/// What each node of a bitmap plan produced in one evaluation, shaped as the plan: the operands
+/// of an intersection or union are its children in order, of a difference its base then its
+/// subtrahend.
+#[derive(Debug)]
+pub(crate) struct BitmapTally {
+	/// The cardinality the node produced, or that its branch was dropped.
+	pub(crate) metrics: OperatorMetrics,
+	operands: Vec<BitmapTally>,
 }
 
-impl ExecOperator for BitmapNode {
-	fn name(&self) -> &'static str {
-		match &self.kind {
-			BitmapNodeKind::BTree {
+impl BitmapTally {
+	/// A tally for each node of `plan`, nothing yet recorded.
+	pub(crate) fn of(plan: &BitmapPlan) -> Self {
+		let operands = match plan {
+			BitmapPlan::BTree {
 				..
-			} => "BitmapIndexScan",
-			BitmapNodeKind::FullText {
+			}
+			| BitmapPlan::FullText {
 				..
-			} => "BitmapFullTextScan",
-			BitmapNodeKind::Graph {
+			}
+			| BitmapPlan::Graph {
 				..
-			} => "BitmapGraphScan",
-			BitmapNodeKind::And {
-				..
-			} => "BitmapAnd",
-			BitmapNodeKind::Or {
-				..
-			} => "BitmapOr",
-			BitmapNodeKind::AndNot {
-				..
-			} => "BitmapAndNot",
+			} => Vec::new(),
+			BitmapPlan::And(children) | BitmapPlan::Or(children) => {
+				children.iter().map(Self::of).collect()
+			}
+			BitmapPlan::AndNot {
+				base,
+				subtract,
+			} => vec![Self::of(base), Self::of(subtract)],
+		};
+		Self {
+			metrics: OperatorMetrics::new(),
+			operands,
 		}
 	}
 
-	fn attrs(&self) -> Vec<(String, String)> {
-		match &self.kind {
-			BitmapNodeKind::BTree {
-				index_ref,
-				access,
-			} => vec![
-				("index".to_string(), index_ref.name.to_string()),
-				("access".to_string(), access.describe()),
-			],
-			BitmapNodeKind::FullText {
-				index_ref,
-				query,
-				..
-			} => vec![
-				("index".to_string(), index_ref.name.to_string()),
-				("query".to_string(), query.clone()),
-			],
-			BitmapNodeKind::Graph {
-				source,
-				direction,
-				edge_tables,
-			} => vec![
-				("source".to_string(), surrealdb_types::ToSql::to_sql(source)),
-				(
-					"direction".to_string(),
-					match direction {
-						crate::expr::Dir::In => "<-",
-						crate::expr::Dir::Out => "->",
-						crate::expr::Dir::Both => "<->",
-					}
-					.to_string(),
-				),
-				(
-					"edges".to_string(),
-					edge_tables.iter().map(|t| t.to_string()).collect::<Vec<_>>().join(", "),
-				),
-			],
-			_ => vec![],
-		}
-	}
-
-	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
-		self.children_dyn.iter().collect()
-	}
-
-	fn required_context(&self) -> ContextLevel {
-		ContextLevel::Database
-	}
-
-	fn access_mode(&self) -> AccessMode {
-		AccessMode::ReadOnly
-	}
-
-	fn metrics(&self) -> Option<&OperatorMetrics> {
-		Some(&self.metrics)
-	}
-
-	fn execute(&self, _ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		// Bitmap nodes are evaluated by their owning `BitmapResolve` via
-		// `build_bitmap`; they appear as plan children for EXPLAIN only.
-		Err(ControlFlow::Err(anyhow::anyhow!(
-			"{} is not directly executable; it is evaluated by its BitmapResolve parent",
-			self.name()
-		)))
+	/// The tally of the `at`th operand: a child of an intersection or union, the base (`0`) or
+	/// the subtrahend (`1`) of a difference.
+	pub(crate) fn operand(&self, at: usize) -> Option<&Self> {
+		self.operands.get(at)
 	}
 }
 
@@ -436,14 +139,14 @@ impl ExecOperator for BitmapNode {
 /// `anchored` marks a node whose bitmap is required for the plan to produce
 /// rows at all: the budget is disabled for it (and for every descendant that
 /// is itself non-droppable), so an anchored node never returns
-/// [`BranchBitmap::Overflow`]. `node` is the [`BitmapNode`] rendering of
+/// [`BranchBitmap::Overflow`]. `node` is the [`BitmapTally`] shaped as
 /// `plan`, when there is one: each of its nodes records its cardinality as
 /// its plan node is evaluated. The evaluation reads and writes nothing else.
 fn build_bitmap_plan<'a>(
 	plan: &'a BitmapPlan,
 	bctx: &'a BitmapBuildContext<'a>,
 	anchored: bool,
-	node: Option<&'a BitmapNode>,
+	node: Option<&'a BitmapTally>,
 ) -> BoxFut<'a, std::result::Result<BranchBitmap, ControlFlow>> {
 	Box::pin(async move {
 		let result = match plan {
@@ -481,7 +184,7 @@ fn build_bitmap_plan<'a>(
 					// cut off there instead of at the full branch budget.
 					// Never tightened in strict mode (an overflow there
 					// invalidates the whole tree, see
-					// [`Self::build_allowlist`]) or in exact/unbudgeted
+					// [`knn_allow_list`]) or in exact/unbudgeted
 					// mode (`budget == 0`).
 					let child_budget = match &acc {
 						Some(acc) if !bctx.strict && bctx.budget > 0 => bctx.budget.min(
@@ -861,16 +564,17 @@ pub(crate) enum FusedCandidates {
 }
 
 /// Evaluate a fused plan's root over `table`'s shared doc-ID space, as
-/// [`BitmapResolve`] evaluates it: `anchored` exactly when the plan has no
+/// the VM's bitmap scan evaluates it: `anchored` exactly when the plan has no
 /// overflow fallback, so an anchored root drops overflowing conjuncts and
-/// never overflows. The root's nodes record their metrics.
+/// never overflows. Each node of `tally` records its metrics.
 pub(crate) async fn evaluate_fusion(
 	ctx: &ExecutionContext,
 	table: &TableName,
-	root: &BitmapNode,
+	plan: &BitmapPlan,
+	tally: &BitmapTally,
 	anchored: bool,
 ) -> FlowResult<FusedCandidates> {
-	evaluate_plan(ctx, table, &root.plan, Some(root), anchored).await
+	evaluate_plan(ctx, table, plan, Some(tally), anchored).await
 }
 
 /// The cardinality of the exact fused bitmap `plan` over `table`, for an
@@ -914,11 +618,13 @@ pub(crate) async fn exact_bitmap_cardinality(
 /// All-or-nothing: each branch is a conjunct the search does not judge itself, so
 /// none may be dropped, and the allow-list is never required for the search
 /// to answer, so none is anchored. A versioned context is rejected:
-/// doc-ID mappings are current-state only.
+/// doc-ID mappings are current-state only. Each node of `tally`, when given,
+/// records its metrics.
 pub(crate) async fn knn_allow_list(
 	ctx: &ExecutionContext,
 	table: &TableName,
 	plan: &BitmapPlan,
+	tally: Option<&BitmapTally>,
 ) -> std::result::Result<Option<RoaringTreemap>, ControlFlow> {
 	reject_versioned_execution(ctx)?;
 	let db_ctx = ctx.database().context("KNN prefilter requires database context")?;
@@ -936,13 +642,13 @@ pub(crate) async fn knn_allow_list(
 		budget: *surrealdb_cnf::BITMAP_BRANCH_BUDGET,
 		strict: true,
 	};
-	match build_bitmap_plan(plan, &bctx, false, None).await? {
+	match build_bitmap_plan(plan, &bctx, false, tally).await? {
 		BranchBitmap::Ready(bitmap) => Ok(Some(bitmap)),
 		BranchBitmap::Overflow => Ok(None),
 	}
 }
 
-/// [`evaluate_fusion`] over a bitmap plan alone, which records no metrics. A
+/// [`evaluate_fusion`] with no tally, which records no metrics. A
 /// versioned context is rejected: doc-ID mappings are current-state only.
 pub(crate) async fn evaluate_fusion_plan(
 	ctx: &ExecutionContext,
@@ -957,7 +663,7 @@ async fn evaluate_plan(
 	ctx: &ExecutionContext,
 	table: &TableName,
 	plan: &BitmapPlan,
-	node: Option<&BitmapNode>,
+	node: Option<&BitmapTally>,
 	anchored: bool,
 ) -> FlowResult<FusedCandidates> {
 	reject_versioned_execution(ctx)?;
@@ -1023,12 +729,12 @@ mod tests {
 		}
 	}
 
-	/// Evaluating a bitmap plan answers what evaluating the [`BitmapNode`]
-	/// built from it answers, for every combinator, the graph leaf, an
+	/// Evaluating a bitmap plan with a tally answers what evaluating it
+	/// without one answers, for every combinator, the graph leaf, an
 	/// anchored root and one whose branches overflow a tiny budget, strict or
-	/// not; the plan alone is evaluated with no node to record metrics on.
+	/// not.
 	#[tokio::test]
-	async fn a_bitmap_plan_evaluates_as_the_node_built_from_it() {
+	async fn evaluating_with_a_tally_answers_what_evaluating_without_one_answers() {
 		let db = TestDb::new(FUSION).await;
 		let ctx = db.exec_ctx_as(&TestDb::owner(), TransactionType::Read).await;
 		let n_idx = index_ref(&ctx, "t", "n_idx").await;
@@ -1075,7 +781,6 @@ mod tests {
 		let mut overflowed = 0;
 		let mut evaluated = 0;
 		for plan in &plans {
-			let node = crate::exec::planner::bitmap_plan_to_node(plan.clone());
 			for (budget, strict, anchored) in [
 				(0, false, true),
 				(0, false, false),
@@ -1096,7 +801,8 @@ mod tests {
 					budget,
 					strict,
 				};
-				let by_node = read(node.build_bitmap(&bctx, anchored).await);
+				let tally = BitmapTally::of(plan);
+				let by_node = read(build_bitmap_plan(plan, &bctx, anchored, Some(&tally)).await);
 				let by_plan = read(build_bitmap_plan(plan, &bctx, anchored, None).await);
 				assert_eq!(
 					by_plan, by_node,
@@ -1111,29 +817,29 @@ mod tests {
 		assert!(overflowed > 0 && overflowed < evaluated, "{overflowed} of {evaluated} overflowed");
 	}
 
-	/// The node's metrics record the cardinality of each node of a plan the
-	/// node evaluates, which the plan alone does not.
+	/// The tally records the cardinality of each node of a plan it evaluates,
+	/// which evaluating the plan alone does not.
 	#[tokio::test]
-	async fn the_node_records_the_cardinality_of_each_branch() {
+	async fn the_tally_records_the_cardinality_of_each_branch() {
 		let db = TestDb::new(FUSION).await;
 		let ctx = db.exec_ctx_as(&TestDb::owner(), TransactionType::Read).await;
 		let n_idx = index_ref(&ctx, "t", "n_idx").await;
 		let m_idx = index_ref(&ctx, "t", "m_idx").await;
 		let plan = BitmapPlan::Or(vec![eq(&n_idx, 1), eq(&m_idx, 2)]);
-		let root = crate::exec::planner::bitmap_plan_to_node(plan);
+		let tally = BitmapTally::of(&plan);
 		let table: TableName = "t".into();
 		let FusedCandidates::Bitmap(bitmap) =
-			evaluate_fusion(&ctx, &table, &root, true).await.expect("evaluates")
+			evaluate_fusion(&ctx, &table, &plan, &tally, true).await.expect("evaluates")
 		else {
 			panic!("an anchored root overflowed");
 		};
-		assert_eq!(root.metrics.output_rows(), bitmap.len());
-		let first = root.operand(0).expect("the first operand").metrics.output_rows();
+		assert_eq!(tally.metrics.output_rows(), bitmap.len());
+		let first = tally.operand(0).expect("the first operand").metrics.output_rows();
 		assert_eq!(first, 12);
 	}
 
 	/// A plan reads the current state only: a versioned context is refused,
-	/// by the plan and the node alike.
+	/// with a tally or without one.
 	#[tokio::test]
 	async fn a_bitmap_plan_refuses_a_versioned_context() {
 		let db = TestDb::new(FUSION).await;
@@ -1143,8 +849,11 @@ mod tests {
 		let table: TableName = "t".into();
 		let versioned = ctx.clone().with_version_stamp(Some(1));
 		assert!(evaluate_fusion_plan(&versioned, &table, &plan, true).await.is_err());
-		let root = crate::exec::planner::bitmap_plan_to_node(plan.clone());
-		assert!(evaluate_fusion(&versioned, &table, &root, true).await.is_err());
+		assert!(
+			evaluate_fusion(&versioned, &table, &plan, &BitmapTally::of(&plan), true)
+				.await
+				.is_err()
+		);
 		assert!(matches!(
 			evaluate_fusion_plan(&ctx, &table, &plan, true).await,
 			Ok(FusedCandidates::Bitmap(_))

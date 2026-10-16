@@ -546,7 +546,8 @@ impl Lowerer<'_> {
 		if hop.data.regions.len() != regions {
 			return Err(IrError::Stale("ir_lower::graph: a hop's regions"));
 		}
-		let mut operands = hop.data.operands.iter().copied().skip(1);
+		let mut operands = hop.data.operands.iter().copied();
+		operands.next();
 		let read = match &attrs.kind {
 			LookupKind::Graph(direction) => {
 				let mut specs = Vec::with_capacity(attrs.subjects.len());
@@ -639,7 +640,7 @@ impl Lowerer<'_> {
 	fn subject_bounds(
 		&mut self,
 		range: Option<&crate::exec::ir::expr::ops::KeyRange>,
-		operands: &mut impl Iterator<Item = ValueId>,
+		operands: &mut std::iter::Copied<std::slice::Iter<'_, ValueId>>,
 	) -> Result<(Bound<HostScalar>, Bound<HostScalar>), IrError> {
 		let Some(range) = range else {
 			return Ok((Bound::Unbounded, Bound::Unbounded));
@@ -655,7 +656,7 @@ impl Lowerer<'_> {
 	fn bound_scalar(
 		&mut self,
 		bound: &Bound<KeyBound>,
-		operands: &mut impl Iterator<Item = ValueId>,
+		operands: &mut std::iter::Copied<std::slice::Iter<'_, ValueId>>,
 	) -> Result<Bound<HostScalar>, IrError> {
 		let (key, wrap): (_, fn(HostScalar) -> Bound<HostScalar>) = match bound {
 			Bound::Unbounded => return Ok(Bound::Unbounded),
@@ -699,7 +700,7 @@ impl Lowerer<'_> {
 	fn collection_bound(
 		&mut self,
 		shape: &crate::exec::ir::expr::ops::KeyShape,
-		operands: &mut impl Iterator<Item = ValueId>,
+		operands: &mut std::iter::Copied<std::slice::Iter<'_, ValueId>>,
 	) -> Result<u16, IrError> {
 		let aside = self.em.set_aside();
 		let beside = self.beside();
@@ -757,7 +758,8 @@ mod tests {
 	/// Lowers `value` of `ir` into one scalar pipeline that ends the row.
 	fn lower_value(ir: &Ir, value: ValueId) -> Result<(Operand, Program), IrError> {
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, ir, crate::exec::ir::analysis::cx::builtin_registry());
 		let operand = lowerer.value(value)?;
 		em.emit(Instr::EndRow);
 		let pipeline = em.finish_pipeline(Source::Once)?;
@@ -1019,7 +1021,8 @@ mod tests {
 		let mut b = Builder::new();
 		let result = broadcast_of(&mut b, |_, element| element);
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::for_fold(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::for_fold(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		assert!(matches!(
 			lowerer.value(result),
 			Err(IrError::Invariant {
@@ -1140,7 +1143,8 @@ mod step_tests {
 
 	fn lower_value(ir: &Ir, value: ValueId) -> Result<(Program, Needs), IrError> {
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, ir, crate::exec::ir::analysis::cx::builtin_registry());
 		lowerer.value(value)?;
 		let needs = lowerer.needs();
 		em.emit(Instr::EndRow);
@@ -1563,7 +1567,8 @@ mod step_tests {
 		let a = source(&mut b);
 		let result = hop(&mut b, out("knows"), &[a]);
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::for_fold(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::for_fold(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		assert!(matches!(
 			lowerer.value(result),
 			Err(IrError::Invariant {

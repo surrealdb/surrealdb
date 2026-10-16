@@ -50,7 +50,7 @@ use crate::exec::ir::iface::effects::{ElemPath, Multiplicity};
 use crate::exec::ir::iface::fold::FoldConsumer;
 use crate::exec::ir::iface::ids::{FrameId, OpId, RegionId, SnapshotId, ValueId};
 use crate::exec::ir::iface::policy::LoopFacts;
-use crate::exec::ir::iface::region_kind::{ClauseRole, ErrorScope, RegionKind};
+use crate::exec::ir::iface::region_kind::{ClauseRole, ErrorScope, RegionKind, RegionKinds};
 use crate::exec::ir::iface::statements::WriteForm;
 use crate::exec::ir::iface::types::TypeKnowledge;
 use crate::exec::ir::iface::{ApplyCut, ChooseSpec, Exit, LoopMode, LoopRefusal, SourceDelivery};
@@ -409,7 +409,7 @@ fn declared_regions_hold(ir: &Ir, data: &OpData, kind: &PhysOp) -> Result<(), Ir
 	} else {
 		return Ok(());
 	};
-	let held: SmallVec<[RegionKind; 2]> =
+	let held: RegionKinds =
 		data.regions.iter().filter_map(|region| ir.region(*region).map(|data| data.kind)).collect();
 	if held == kind.region_kinds() {
 		Ok(())

@@ -15,6 +15,8 @@
 
 // TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
 #![allow(clippy::absolute_paths)]
+// Sealed async bodies nest `OutOfLine` futures, which deepens layout queries past the default.
+#![recursion_limit = "256"]
 
 pub use surrealdb_catalog as catalog;
 pub use surrealdb_expr::{expr, val};
@@ -59,6 +61,7 @@ pub mod index_state;
 pub mod into;
 pub mod key;
 pub mod layouts;
+pub mod out_of_line;
 pub mod sequences;
 pub mod speculation;
 pub mod tasklease;

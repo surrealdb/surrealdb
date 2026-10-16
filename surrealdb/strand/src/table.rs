@@ -162,6 +162,13 @@ impl SkipRevisioned for TableName {
 	fn skip_revisioned<R: Read>(r: &mut R) -> Result<(), revision::Error> {
 		<Strand as SkipRevisioned>::skip_revisioned(r)
 	}
+
+	#[inline]
+	fn skip_revisioned_slice(
+		reader: &mut revision::SliceReader<'_>,
+	) -> Result<(), revision::Error> {
+		<Strand as SkipRevisioned>::skip_revisioned_slice(reader)
+	}
 }
 
 impl revision::WalkRevisioned for TableName {
@@ -196,9 +203,20 @@ impl<F> Decode<F> for TableName {
 
 #[cfg(test)]
 mod tests {
-	use revision::{SerializeRevisioned, WalkRevisioned};
+	use revision::{SerializeRevisioned, SkipRevisioned, WalkRevisioned};
 
 	use super::TableName;
+
+	#[test]
+	fn slice_skip_agrees_with_reader_skip() {
+		let name = TableName::from("users");
+		let mut bytes = Vec::new();
+		name.serialize_revisioned(&mut bytes).unwrap();
+		assert_eq!(revision::skip_slice::<TableName>(&bytes).unwrap(), bytes.len());
+		let cut = &bytes[..bytes.len() - 1];
+		assert!(revision::skip_slice::<TableName>(cut).is_err());
+		assert!(TableName::skip_revisioned(&mut &cut[..]).is_err());
+	}
 
 	#[test]
 	fn table_name_with_bytes_matches_serialize() {

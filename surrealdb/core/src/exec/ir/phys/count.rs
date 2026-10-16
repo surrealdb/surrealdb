@@ -40,6 +40,7 @@ use super::access::{ReadVersion, TableAnswers, source_key};
 use super::access_expr::{Reconstructed, predicate_of_region};
 use super::ops::{CountAttrs, CountShape, PhysOp};
 use crate::catalog::{Index, IndexId};
+use crate::exec::function::FunctionRegistry;
 use crate::exec::index::access_path::{
 	BTreeAccess, IndexRef as AccessIndexRef, access_fans_out, range_matches_comparison,
 };
@@ -339,7 +340,7 @@ fn is_bare_count(ir: &Ir, column: RegionId) -> bool {
 	let no_argument = match agg_data.regions.as_slice() {
 		[] => true,
 		[arguments] => {
-			let held: SmallVec<[OpId; 1]> = ops_in(ir, *arguments).collect();
+			let held: SmallVec<[OpId; 2]> = ops_in(ir, *arguments).collect();
 			matches!(held.as_slice(), [only] if ir.op(*only).is_some_and(|data| {
 				data.kind.terminator() == Some(Terminator::Yield) && data.operands.is_empty()
 			}))
@@ -377,7 +378,7 @@ fn decide(ir: &Ir, m: &Matched, cx: &PhysCx<'_>) -> Result<Option<Decision>, IrE
 	let SourceRefShape::Table(table) = &m.source_ref else {
 		return Ok(None);
 	};
-	indexed(ir, m, filter, table, &answers)
+	indexed(ir, m, filter, table, &answers, cx.effects.registry)
 }
 
 /// The count of a whole key range, which any source but a lightweight relation takes.
@@ -426,6 +427,7 @@ fn indexed(
 	filter: OpId,
 	table: &surrealdb_strand::TableName,
 	answers: &TableAnswers,
+	registry: &FunctionRegistry,
 ) -> Result<Option<Decision>, IrError> {
 	if answers.version != ReadVersion::Current || matches!(m.with, Some(With::NoIndex)) {
 		return Ok(None);
@@ -456,10 +458,10 @@ fn indexed(
 		.map(|index| index.index_id);
 	let btree = match deltas {
 		Some(_) => None,
-		None => btree_walk(answers, &cond, m.with.as_ref()),
+		None => btree_walk(answers, &cond, m.with.as_ref(), registry),
 	};
 	let bitmap = match (deltas, &btree) {
-		(None, None) => bitmap_fusion(answers, &cond, m.with.as_ref()),
+		(None, None) => bitmap_fusion(answers, &cond, m.with.as_ref(), registry),
 		_ => None,
 	};
 	if deltas.is_none() && btree.is_none() && bitmap.is_none() {
@@ -489,6 +491,7 @@ fn btree_walk(
 	answers: &TableAnswers,
 	cond: &LogicalExpr,
 	with: Option<&With>,
+	registry: &FunctionRegistry,
 ) -> Option<(AccessIndexRef, BTreeAccess)> {
 	if answers.indexes.is_empty() {
 		return None;
@@ -497,7 +500,7 @@ fn btree_walk(
 	let one_key_per_record =
 		|index: &AccessIndexRef| (0..index.cols.len()).all(|at| index.one_entry_per_record(at));
 	let analyzer = columns
-		.analyzer(with, super::access::DecisionCx::builtin().registry)
+		.analyzer(with, registry)
 		.with_key(answers.key.clone())
 		.with_clock(answers.allows_clock);
 	for candidate in analyzer.analyze(Some(cond), None) {
@@ -530,13 +533,14 @@ fn bitmap_fusion(
 	answers: &TableAnswers,
 	cond: &LogicalExpr,
 	with: Option<&With>,
+	registry: &FunctionRegistry,
 ) -> Option<crate::exec::index::access_path::BitmapPlan> {
 	if answers.indexes.len() < 2 {
 		return None;
 	}
 	let columns = answers.columns.as_ref()?;
 	columns
-		.analyzer(with, super::access::DecisionCx::builtin().registry)
+		.analyzer(with, registry)
 		.with_key(answers.key.clone())
 		.with_clock(answers.allows_clock)
 		.try_bitmap_count_fusion(cond, &|index, col| index.one_entry_per_record(col))

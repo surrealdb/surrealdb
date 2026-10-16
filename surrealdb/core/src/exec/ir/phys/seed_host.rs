@@ -128,7 +128,7 @@ impl SeedHost for PhysSeedHost<'_> {
 	}
 
 	fn order_change_admissible(&self, ir: &Ir, facts: &mut FactCache, source: OpId) -> bool {
-		order::order_change_admissible(ir, facts, source)
+		order::order_change_admissible(ir, facts, self.cx.effects.registry, source)
 	}
 
 	fn cost(&self) -> &dyn CostHook {

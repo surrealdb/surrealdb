@@ -89,7 +89,7 @@ fn error(detail: impl std::fmt::Display) -> ParseError {
 /// `&'static str` owned by its registered function, so parsing resolves the text there.
 fn aggregates() -> &'static FunctionRegistry {
 	static REGISTRY: OnceLock<FunctionRegistry> = OnceLock::new();
-	REGISTRY.get_or_init(FunctionRegistry::with_builtins)
+	REGISTRY.get_or_init(FunctionRegistry::with_aggregates)
 }
 
 // ---------------------------------------------------------------------------------------------

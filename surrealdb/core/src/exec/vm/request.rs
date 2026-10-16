@@ -69,30 +69,12 @@ struct RequestStatement {
 }
 
 impl ExecOperator for RequestStatement {
-	fn name(&self) -> &'static str {
-		super::host::VmOperator::NAME
-	}
-
-	fn attrs(&self) -> Vec<(String, String)> {
-		vec![
-			(
-				"table".to_owned(),
-				self.statement.table.as_ref().map_or_else(|| "NONE".to_owned(), |t| t.to_string()),
-			),
-			("pipelines".to_owned(), self.statement.pipelines.len().to_string()),
-		]
-	}
-
 	fn required_context(&self) -> ContextLevel {
 		self.statement.required_context
 	}
 
 	fn access_mode(&self) -> AccessMode {
 		self.statement.access_mode
-	}
-
-	fn metrics(&self) -> Option<&OperatorMetrics> {
-		Some(&self.metrics)
 	}
 
 	fn output_shape(&self) -> crate::exec::OutputShape {

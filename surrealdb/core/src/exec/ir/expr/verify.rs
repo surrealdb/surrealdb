@@ -26,7 +26,6 @@
 
 use std::ops::Bound;
 
-use crate::exec::ir::analysis::cx::builtin_registry;
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::core::op::OpData;
 use crate::exec::ir::core::value::ValueDef;
@@ -35,6 +34,7 @@ use crate::exec::ir::expr::ops::{
 	CallAttrs, ClosureAttrs, DestructureEntry, DispatchTarget, ExprOp, NestedStrategy,
 	passes_row_names,
 };
+use crate::exec::ir::iface::catalog::EffectCx;
 use crate::exec::ir::iface::conversion::Phase;
 use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
 use crate::exec::ir::iface::region_kind::{RegionKind, RegionProperties};
@@ -49,8 +49,9 @@ use crate::val::{RecordIdKey, Value};
 /// The outcome of one rule: the `detail` of the error it raises.
 type Rule = Result<(), String>;
 
-/// Checks the rules of the expression op `op` that the generic rules do not cover.
-pub(crate) fn verify_op(ir: &Ir, op: OpId) -> Result<(), VerifyError> {
+/// Checks the rules of the expression op `op` that the generic rules do not cover. The callee of
+/// a call is judged against the registry of `cx`.
+pub(crate) fn verify_op(ir: &Ir, op: OpId, cx: &EffectCx<'_>) -> Result<(), VerifyError> {
 	let Some(data) = ir.op(op) else {
 		return Ok(());
 	};
@@ -84,7 +85,7 @@ pub(crate) fn verify_op(ir: &Ir, op: OpId) -> Result<(), VerifyError> {
 		ExprOp::TupleRow {
 			places,
 		} => tuple_row_is_a_row(ir, data, places),
-		ExprOp::Call(call) => call_row_names_and_callee(ir, data, call),
+		ExprOp::Call(call) => call_row_names_and_callee(ir, data, call, cx),
 		ExprOp::Array
 		| ExprOp::Set
 		| ExprOp::Object {
@@ -507,8 +508,8 @@ fn subquery_strategy_in_physical_phase(ir: &Ir, strategy: &NestedStrategy) -> Ru
 /// V-E12: a call passes no more row names than it has operands, and only a function that reads the
 /// row may receive them. A callee's facts belong to a user-defined function and are
 /// read only in the physical phase.
-fn call_row_names_and_callee(ir: &Ir, data: &OpData, call: &CallAttrs) -> Rule {
-	let takes_row = passes_row_names(&call.function, builtin_registry());
+fn call_row_names_and_callee(ir: &Ir, data: &OpData, call: &CallAttrs, cx: &EffectCx<'_>) -> Rule {
+	let takes_row = passes_row_names(&call.function, cx.registry);
 	if call.row_names > 0 && !takes_row {
 		return Err("V-E12: a call passes row names to a function whose body reads no row".into());
 	}
@@ -786,12 +787,17 @@ mod tests {
 
 		/// Asserts that `op` passes every rule.
 		fn passes(&self, op: OpId) {
-			assert_eq!(verify_op(&self.ir, op), Ok(()));
+			assert_eq!(
+				verify_op(&self.ir, op, &crate::exec::ir::analysis::cx::default_cx(&self.ir)),
+				Ok(())
+			);
 		}
 
 		/// Asserts that `op` fails the rule `id`.
 		fn fails(&self, op: OpId, id: &str) {
-			let error: VerifyError = verify_op(&self.ir, op).expect_err("the op breaks a rule");
+			let error: VerifyError =
+				verify_op(&self.ir, op, &crate::exec::ir::analysis::cx::default_cx(&self.ir))
+					.expect_err("the op breaks a rule");
 			assert_eq!(error.rule, VerifyRule::PerOp);
 			assert_eq!(error.op, Some(op));
 			assert!(error.detail.starts_with(id), "{} does not start with {id}", error.detail);

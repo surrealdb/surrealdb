@@ -88,10 +88,10 @@ pub struct MethodDescriptor {
 	/// The method name (for error messages).
 	pub name: &'static str,
 	/// Per-type implementations. Checked in order; first matching kind wins.
-	pub type_impls: Vec<(ValueKind, Arc<dyn ScalarFunction>)>,
+	pub type_impls: Vec<(ValueKind, &'static dyn ScalarFunction)>,
 	/// Fallback function used when no type-specific impl matches.
 	/// This is the typical path for generic methods (to_string, type_of, etc.).
-	pub fallback: Option<Arc<dyn ScalarFunction>>,
+	pub fallback: Option<&'static dyn ScalarFunction>,
 }
 
 impl MethodDescriptor {
@@ -120,20 +120,20 @@ impl MethodDescriptor {
 		self.type_impls.iter().fold(0, |mask, (kind, _)| mask | kind.bit())
 	}
 
-	pub fn resolve(&self, value: &Value) -> Option<&Arc<dyn ScalarFunction>> {
+	pub fn resolve(&self, value: &Value) -> Option<&'static dyn ScalarFunction> {
 		let kind = ValueKind::of(value);
 
 		// Check type-specific implementations first
 		if let Some(kind) = kind {
 			for (k, func) in &self.type_impls {
 				if *k == kind {
-					return Some(func);
+					return Some(*func);
 				}
 			}
 		}
 
 		// Fall back to generic implementation
-		self.fallback.as_ref()
+		self.fallback
 	}
 }
 
@@ -173,7 +173,7 @@ impl MethodRegistry {
 	///
 	/// If a descriptor already exists for this method (e.g. from a prior
 	/// `register_typed` call), the fallback is set on the existing descriptor.
-	fn register_generic(&mut self, method: &'static str, func: Arc<dyn ScalarFunction>) {
+	fn register_generic(&mut self, method: &'static str, func: &'static dyn ScalarFunction) {
 		let entry = self.methods.entry(method).or_insert_with(|| {
 			Arc::new(MethodDescriptor {
 				name: method,
@@ -193,7 +193,7 @@ impl MethodRegistry {
 		&mut self,
 		method: &'static str,
 		value_kind: ValueKind,
-		func: Arc<dyn ScalarFunction>,
+		func: &'static dyn ScalarFunction,
 	) {
 		let entry = self.methods.entry(method).or_insert_with(|| {
 			Arc::new(MethodDescriptor {
@@ -226,12 +226,10 @@ impl MethodRegistry {
 
 /// Helper to look up a function from the registry, panicking if not found.
 /// Since these are all builtins, a missing function indicates a registration bug.
-fn get(funcs: &FunctionRegistry, name: &str) -> Arc<dyn ScalarFunction> {
-	Arc::clone(
-		funcs
-			.get(name)
-			.unwrap_or_else(|| panic!("Expected builtin function '{}' to be registered", name)),
-	)
+fn get(funcs: &FunctionRegistry, name: &str) -> &'static dyn ScalarFunction {
+	funcs
+		.get(name)
+		.unwrap_or_else(|| panic!("Expected builtin function '{}' to be registered", name))
 }
 
 /// Build the method registry from the function registry.
@@ -698,23 +696,34 @@ pub fn build_method_registry(funcs: &FunctionRegistry) -> MethodRegistry {
 	// =====================================================================
 	// File methods
 	// =====================================================================
-	m.register_typed("bucket", ValueKind::File, get(funcs, "file::bucket"));
-	m.register_typed("key", ValueKind::File, get(funcs, "file::key"));
-	m.register_typed("put", ValueKind::File, get(funcs, "file::put"));
-	m.register_typed("put_if_not_exists", ValueKind::File, get(funcs, "file::put_if_not_exists"));
-	m.register_typed("get", ValueKind::File, get(funcs, "file::get"));
-	m.register_typed("head", ValueKind::File, get(funcs, "file::head"));
-	m.register_typed("delete", ValueKind::File, get(funcs, "file::delete"));
-	m.register_typed("copy", ValueKind::File, get(funcs, "file::copy"));
-	m.register_typed("copy_if_not_exists", ValueKind::File, get(funcs, "file::copy_if_not_exists"));
-	m.register_typed("rename", ValueKind::File, get(funcs, "file::rename"));
-	m.register_typed(
-		"rename_if_not_exists",
-		ValueKind::File,
-		get(funcs, "file::rename_if_not_exists"),
-	);
-	m.register_typed("exists", ValueKind::File, get(funcs, "file::exists"));
-	m.register_typed("list", ValueKind::File, get(funcs, "file::list"));
+	// A registry without the file family (the edge builtins) has no file methods.
+	if funcs.get("file::bucket").is_some() {
+		m.register_typed("bucket", ValueKind::File, get(funcs, "file::bucket"));
+		m.register_typed("key", ValueKind::File, get(funcs, "file::key"));
+		m.register_typed("put", ValueKind::File, get(funcs, "file::put"));
+		m.register_typed(
+			"put_if_not_exists",
+			ValueKind::File,
+			get(funcs, "file::put_if_not_exists"),
+		);
+		m.register_typed("get", ValueKind::File, get(funcs, "file::get"));
+		m.register_typed("head", ValueKind::File, get(funcs, "file::head"));
+		m.register_typed("delete", ValueKind::File, get(funcs, "file::delete"));
+		m.register_typed("copy", ValueKind::File, get(funcs, "file::copy"));
+		m.register_typed(
+			"copy_if_not_exists",
+			ValueKind::File,
+			get(funcs, "file::copy_if_not_exists"),
+		);
+		m.register_typed("rename", ValueKind::File, get(funcs, "file::rename"));
+		m.register_typed(
+			"rename_if_not_exists",
+			ValueKind::File,
+			get(funcs, "file::rename_if_not_exists"),
+		);
+		m.register_typed("exists", ValueKind::File, get(funcs, "file::exists"));
+		m.register_typed("list", ValueKind::File, get(funcs, "file::list"));
+	}
 
 	// =====================================================================
 	// Aliases

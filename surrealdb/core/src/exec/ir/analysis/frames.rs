@@ -19,6 +19,7 @@ use std::collections::HashSet;
 use smallvec::SmallVec;
 use surrealdb_strand::TableName;
 
+#[cfg(test)]
 use super::cx::default_cx;
 use super::liveness::{demand_over, field_read_name};
 use super::{effects, fallibility, footprint, multiplicity, write_epoch};
@@ -149,6 +150,7 @@ pub(crate) struct MergeOk {
 
 /// Whether no write of the statement reaches what the permission predicate of `permission_filter`
 /// reads, under the default context.
+#[cfg(test)]
 pub(crate) fn merge_ok(ir: &Ir, facts: &mut FactCache, permission_filter: OpId) -> MergeOk {
 	merge_ok_with(ir, facts, &default_cx(ir), permission_filter)
 }
@@ -341,6 +343,7 @@ pub(crate) fn row_view(ir: &Ir, _facts: &mut FactCache, conjunct: OpId, layer: O
 
 /// Whether the work the layer `layer` does per row can be skipped for a row without anyone
 /// noticing, under the default context.
+#[cfg(test)]
 pub(crate) fn layer_work_unobservable(ir: &Ir, facts: &mut FactCache, layer: OpId) -> bool {
 	layer_work_unobservable_with(ir, facts, &default_cx(ir), layer)
 }

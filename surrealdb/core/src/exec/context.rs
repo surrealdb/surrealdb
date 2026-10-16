@@ -1946,6 +1946,136 @@ impl ExecutionContext {
 	}
 }
 
+/// Turns the values a plan produced into the statement's result value.
+///
+/// The plan declares the shape and the number of values that arrived does not
+/// get a vote: a consumer that forwards values as they are produced knows the
+/// shape long before it knows the count, so the count cannot be what decides.
+/// An operator that declares [`OutputShape::Scalar`] and then emits anything
+/// but one value has a bug; reporting it is what keeps that bug from reaching
+/// the caller as a silently rearranged result.
+pub(crate) fn shape_statement_value(
+	shape: crate::exec::OutputShape,
+	mut values: Vec<Value>,
+) -> anyhow::Result<Value> {
+	use crate::exec::OutputShape;
+	match shape {
+		OutputShape::Scalar if values.len() == 1 => {
+			Ok(values.pop().expect("values verified non-empty"))
+		}
+		OutputShape::Scalar => Err(anyhow::anyhow!(crate::err::EngineError::unreachable(format!(
+			"A scalar plan produced {} values instead of one",
+			values.len()
+		)))),
+		OutputShape::Rows => Ok(Value::Array(crate::val::Array::from(values))),
+	}
+}
+
+/// The context a top-level statement runs in: a fresh snapshot of the request's context `ctx`
+/// with `txn`, cancelled through `cancellation`, at the highest level the session's namespace and
+/// database support. Fails where either is missing at or below `required_level`, the level the
+/// plan requires. `sink` receives the session effects the statement's program records, and is
+/// installed only for a statement of the request.
+///
+/// `session` is the information of the session `ctx` carries, and `opt` its options.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn statement_context(
+	ctx: &FrozenContext,
+	opt: &Options,
+	session: Option<Arc<SessionInfo>>,
+	txn: &Arc<Transaction>,
+	cancellation: &CancellationToken,
+	writes: bool,
+	required_level: ContextLevel,
+	sink: Option<Arc<SessionSink>>,
+) -> crate::expr::FlowResult<ExecutionContext> {
+	use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
+	// Build the root context using cached session info. The context
+	// snapshot must be fresh per-query because it contains the
+	// transaction reference which changes between statements.
+	let root_ctx = RootContext {
+		ctx: Context::snapshot(ctx).freeze(),
+		options: Some(opt.clone()),
+		datastore: None,
+		cancellation: Arc::new(cancellation.clone()),
+		auth: Arc::clone(&opt.auth),
+		session,
+		current_value: None,
+		current_row: None,
+		forbidden_row: None,
+		inherited_knn: None,
+		skip_fetch_perms: false,
+		perms_suppressed: false,
+		caller_perms_suppressed: false,
+		computing_record: None,
+		no_write: None,
+		version_stamp: None,
+		guard_verdicts: Arc::new(crate::exec::guard_verdicts::GuardVerdicts::for_statement(writes)),
+		writing: false,
+		session_effects: None,
+	};
+
+	// The plan's declared context level is the minimum it needs (see
+	// `ContextLevel`), not a construction target: materialize the highest
+	// level the session's ns/db selection supports. A closure that
+	// arrives as a runtime value (`LET $f = || (SELECT ...); $f()`)
+	// hides its body from the planner, so a database-touching body must
+	// find the database context already in place even though the plan
+	// only declared root. Above the declared minimum the upgrade is
+	// opportunistic — a session pointing at a missing ns/db falls back
+	// to the declared level rather than failing a statement that never
+	// needed more. At or below the minimum, resolution failures surface
+	// exactly as before.
+	//
+	// SECURITY: `USE` never implicitly creates a namespace for a session that lacks
+	// `DEFINE NAMESPACE`-equivalent authorization, so this must not paper over a
+	// missing target by writing a fresh namespace into the catalog on the read path
+	// (which would also fail on a read-only transaction). `expect_ns_by_name` /
+	// `expect_db_by_name` surface a clean `NsNotFound` / `DbNotFound` instead.
+
+	let ns_def = if required_level >= ContextLevel::Namespace {
+		Some(txn.expect_ns_by_name(opt.ns()?).await?)
+	} else if let Ok(ns_name) = opt.ns() {
+		txn.expect_ns_by_name(ns_name).await.ok()
+	} else {
+		None
+	};
+
+	let db_def = match &ns_def {
+		Some(_) if required_level >= ContextLevel::Database => {
+			Some(txn.expect_db_by_name(opt.ns()?, opt.db()?).await?)
+		}
+		Some(_) => match (opt.ns(), opt.db()) {
+			(Ok(ns_name), Ok(db_name)) => txn.expect_db_by_name(ns_name, db_name).await.ok(),
+			_ => None,
+		},
+		None => None,
+	};
+
+	let exec_ctx = match (ns_def, db_def) {
+		(Some(ns_def), Some(db_def)) => ExecutionContext::Database(DatabaseContext {
+			ns_ctx: NamespaceContext {
+				root: root_ctx,
+				ns: ns_def,
+			},
+			db: db_def,
+			field_state_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+			table_def_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+			index_def_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+			select_permission_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+		}),
+		(Some(ns_def), None) => ExecutionContext::Namespace(NamespaceContext {
+			root: root_ctx,
+			ns: ns_def,
+		}),
+		(None, _) => ExecutionContext::Root(root_ctx),
+	};
+	Ok(match sink {
+		Some(sink) => exec_ctx.with_session_sink(sink),
+		None => exec_ctx,
+	})
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;

@@ -12,18 +12,17 @@ can raise does not: `l:2` has no match, so the semi join drops it and the
 `THROW` is never reached — until the term is moved beneath the join, where it
 raises on a row the statement never returns.
 
-Three places moved one without asking: the filter split around a join and the
-join's residual split (`rules::join`), and the conjuncts decorrelation leaves
-behind when it lifts a sibling into a join (`rules::decorrelate`). All three
-now keep a term that can raise where the join has already filtered. The
-`rules::join` splits judge a right-side term rerooted, as it will stand on the
-input, so an ordinary field comparison still moves.
+A term that can raise is never moved beneath a join, whether the planner splits
+a filter around the join, splits the join's residual, or leaves behind the
+conjuncts around a membership it turns into a join. It stays where the join has
+already filtered, and a term that only reads moves onto an input as an ordinary
+field comparison does.
 
 `AND` short-circuits left to right, so which side of the join a term belongs
-on is a question of where it was written. Decorrelation knows: a conjunct
-written before the one it lifts is already judged for every row that reaches
-it, so it moves beneath the join and raises exactly where the per-row form
-does. Only a conjunct written after the lifted one waits above.
+on is a question of where it was written. A conjunct written before a lifted
+membership is already judged for every row that reaches it, so it moves beneath
+the join and raises exactly where the per-row form does. Only a conjunct written
+after the lifted one waits above.
 
 Two lifted conjuncts make it a place rather than a side: a term written
 between them is judged for the rows the first membership kept and before the

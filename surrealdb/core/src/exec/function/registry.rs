@@ -22,7 +22,7 @@ use crate::expr::logical::EffectSet;
 #[derive(Debug)]
 pub struct FunctionRegistry {
 	/// Scalar functions (e.g., math::abs, string::len)
-	functions: HashMap<&'static str, Arc<dyn ScalarFunction>>,
+	functions: HashMap<&'static str, &'static dyn ScalarFunction>,
 	/// Aggregate functions (e.g., count, math::sum, math::mean)
 	aggregates: HashMap<&'static str, Arc<dyn AggregateFunction>>,
 	/// Projection functions (e.g., type::field, type::fields)
@@ -68,16 +68,29 @@ impl FunctionRegistry {
 	// Scalar function methods
 	// =========================================================================
 
-	/// Register a scalar function in the registry.
-	pub fn register(&mut self, func: impl ScalarFunction + 'static) {
-		let name = func.name();
-		self.functions.insert(name, Arc::new(func));
+	/// Register one scalar function in the registry. The builtin families register through
+	/// [`Self::register_scalars`].
+	#[allow(unused)]
+	pub fn register(&mut self, func: &'static dyn ScalarFunction) {
+		self.functions.insert(func.name(), func);
+		self.id = fresh_id();
+	}
+
+	/// Register the scalar functions of every family in `families`, in slice order. Renews
+	/// [`Self::id`] once, however many functions it registers.
+	pub(crate) fn register_scalars(&mut self, families: &[&[&'static dyn ScalarFunction]]) {
+		self.functions.reserve(families.iter().map(|family| family.len()).sum());
+		for family in families {
+			for &func in *family {
+				self.functions.insert(func.name(), func);
+			}
+		}
 		self.id = fresh_id();
 	}
 
 	/// Look up a scalar function by name.
-	pub fn get(&self, name: &str) -> Option<&Arc<dyn ScalarFunction>> {
-		self.functions.get(name)
+	pub fn get(&self, name: &str) -> Option<&'static dyn ScalarFunction> {
+		self.functions.get(name).copied()
 	}
 
 	/// Check if a scalar function exists.
@@ -88,8 +101,10 @@ impl FunctionRegistry {
 
 	/// Iterate all registered scalar functions.
 	#[cfg(test)]
-	pub(crate) fn scalar_functions(&self) -> impl Iterator<Item = &Arc<dyn ScalarFunction>> {
-		self.functions.values()
+	pub(crate) fn scalar_functions(
+		&self,
+	) -> impl Iterator<Item = &'static dyn ScalarFunction> + '_ {
+		self.functions.values().copied()
 	}
 
 	/// Iterate all registered projection functions.
@@ -309,6 +324,24 @@ impl FunctionRegistry {
 		let mut registry = Self::new();
 		builtin::register_all(&mut registry);
 		// Build method registry from the registered scalar functions
+		registry.methods = method::build_method_registry(&registry);
+		registry.id = fresh_id();
+		registry
+	}
+
+	/// Create a registry that holds the aggregate functions alone, which name the aggregates the
+	/// text form of an IR container may hold.
+	pub(crate) fn with_aggregates() -> Self {
+		let mut registry = Self::new();
+		builtin::aggregates::register(&mut registry);
+		registry
+	}
+
+	/// Create a registry with the builtins an entry that serves only data statements resolves.
+	/// A name outside the set is unknown.
+	pub fn with_edge_builtins() -> Self {
+		let mut registry = Self::new();
+		builtin::register_edge(&mut registry);
 		registry.methods = method::build_method_registry(&registry);
 		registry.id = fresh_id();
 		registry
@@ -1201,9 +1234,9 @@ mod tests {
 	/// runs a body the call site cannot see must report itself
 	/// non-deterministic. Two decisions rest on the answer: the planner's
 	/// literal folder would otherwise evaluate the call once and freeze one
-	/// answer into the whole statement, and the logical rules would treat an
-	/// expression containing it as pure and so substitutable for every
-	/// occurrence of a name — duplicating the call, or dropping it.
+	/// answer into the whole statement, and the membership recogniser would
+	/// treat an expression containing it as pure and so build the subquery that
+	/// holds it once for every outer row, where each owes a fresh answer.
 	///
 	/// The answer is derived from the [`EffectSet`] each definition declares,
 	/// so this pins what those declarations add up to.
@@ -1614,5 +1647,101 @@ mod tests {
 				);
 			}
 		}
+	}
+
+	/// The synchronous `invoke` of a metered builtin drives the builtin's walk to
+	/// its end, as the synchronous reference in `fnc` does: the same answer, the
+	/// same fuel charged, and the same error for a call that does not decode.
+	#[test]
+	fn invoke_of_a_metered_builtin_is_its_synchronous_reference() {
+		use surrealdb_runtime::fuel;
+
+		use crate::fnc::args::{FromArgs, Optional};
+		use crate::val::{Array, Number, Object, Set, Value};
+
+		type Reference = fn(Vec<Value>) -> anyhow::Result<Value>;
+
+		let ints = |range: std::ops::Range<i64>| -> Vec<Value> { range.map(Value::from).collect() };
+		let reversed = Value::Array(Array(ints(0..10_000).into_iter().rev().collect()));
+		let repeated = Value::Array(Array((0..10_000).map(|n| Value::from(n % 97)).collect()));
+		let numbers = Value::Array(Array(ints(0..10_000)));
+		let object = Value::Object(
+			(0..5_000).map(|n| (format!("k{n}"), Value::from(n))).collect::<Object>(),
+		);
+		let set_of =
+			|range: std::ops::Range<i64>| Value::Set(range.map(Value::from).collect::<Set>());
+		let words: Vec<Value> = (0..2_000).map(|n| Value::from(format!("word-{n}"))).collect();
+
+		let cases: Vec<(&str, Vec<Value>, Reference)> = vec![
+			("array::sort", vec![reversed], |args| {
+				crate::fnc::array::sort(<(Array, Optional<Value>)>::from_args("array::sort", args)?)
+			}),
+			("array::distinct", vec![repeated], |args| {
+				crate::fnc::array::distinct(<(Array,)>::from_args("array::distinct", args)?)
+			}),
+			("math::sum", vec![numbers], |args| {
+				crate::fnc::math::sum(<(Vec<Number>,)>::from_args("math::sum", args)?)
+			}),
+			("object::keys", vec![object], |args| {
+				crate::fnc::object::keys(<(Object,)>::from_args("object::keys", args)?)
+			}),
+			("string::concat", words, |args| {
+				crate::fnc::string::concat(FromArgs::from_args("string::concat", args)?)
+			}),
+			("set::union", vec![set_of(0..6_000), set_of(3_000..9_000)], |args| {
+				crate::fnc::set::union(<(Set, Set)>::from_args("set::union", args)?)
+			}),
+		];
+
+		let registry = FunctionRegistry::with_builtins();
+		let outcome = |result: anyhow::Result<Value>| result.map_err(|e| e.to_string());
+		for (name, args, reference) in &cases {
+			let function = registry.get(name).expect("a registered builtin");
+			assert!(function.metered().is_some(), "{name}: a metered builtin");
+			for quantum in [64, 1_000_000] {
+				fuel::refill(quantum);
+				let got = outcome(function.invoke(args.clone()));
+				let got_left = fuel::left();
+				fuel::refill(quantum);
+				let want = outcome(reference(args.clone()));
+				let want_left = fuel::left();
+				assert!(got.is_ok(), "{name}: {got:?}");
+				assert_eq!(got, want, "{name}: the answer, at a quantum of {quantum}");
+				assert_eq!(got_left, want_left, "{name}: the fuel left, at a quantum of {quantum}");
+			}
+		}
+
+		// A call that does not decode raises what decoding raises.
+		let sort = registry.get("array::sort").expect("a registered builtin");
+		let sort_reference = &cases[0].2;
+		for args in [vec![Value::from(1)], vec![]] {
+			let got = outcome(sort.invoke(args.clone()));
+			let want = outcome(sort_reference(args.clone()));
+			assert!(got.is_err(), "{args:?}: a call that does not decode");
+			assert_eq!(got, want, "{args:?}");
+		}
+	}
+
+	/// The edge registry holds the edge tables alone, and the full registry holds
+	/// every table's entries once: a name in two tables would register once and
+	/// leave the sum of the table lengths above the registry's length.
+	#[test]
+	fn the_edge_registry_holds_the_edge_tables_alone() {
+		let (edge, rest) = builtin::scalar_tables();
+		let total =
+			|tables: &[&[&dyn ScalarFunction]]| tables.iter().map(|t| t.len()).sum::<usize>();
+
+		let edge_registry = FunctionRegistry::with_edge_builtins();
+		for table in builtin::edge_excluded_tables() {
+			for function in table {
+				assert!(
+					edge_registry.get(function.name()).is_none(),
+					"{}: a builtin the edge registry leaves out",
+					function.name()
+				);
+			}
+		}
+		assert_eq!(edge_registry.len(), total(edge));
+		assert_eq!(FunctionRegistry::with_builtins().len(), total(edge) + total(rest));
 	}
 }

@@ -22,10 +22,13 @@
 #![deny(clippy::wildcard_enum_match_arm)]
 
 use std::ops::Bound;
+use std::sync::Arc;
 
 use smallvec::{SmallVec, smallvec};
 use surrealdb_strand::Strand;
+use surrealdb_types::ToSql;
 
+use crate::catalog::FunctionDefinition;
 use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::core::value::ValueDef;
@@ -47,6 +50,7 @@ use crate::exec::vm::payload::Refusal;
 use crate::expr::logical::{
 	LogicalCall, LogicalClosure, LogicalDestructureField, LogicalExpr, LogicalLiteral,
 	LogicalLookup, LogicalOp, LogicalRecordIdKey, LogicalRecordIdKeyRange, LogicalRecurse,
+	coercion_is_identity,
 };
 use crate::expr::{BinaryOperator, Function, PrefixOperator};
 use crate::val::Value;
@@ -208,6 +212,37 @@ pub(crate) trait ExprHost {
 	fn bind_loop_site(&mut self, site: LoopSite<'_>) -> Result<Built, IrError>;
 	/// Binds a closure literal: `expr.closure_create` with its captures and `ClosureBody`.
 	fn bind_closure(&mut self, closure: &LogicalClosure) -> Result<ValueId, IrError>;
+	/// The definition of the user-defined function `name` when a call written here may run in the
+	/// caller in place of its body: the caller may call it, no caller is refused by its
+	/// `PERMISSIONS`, its `AUTH LIMIT` leaves the caller's authority as it is, and the catalog the
+	/// bind read is the one the call meets when it runs, which a call in a closure body, run where
+	/// the closure is invoked, does not. A host that inlines nothing answers `None`.
+	fn inlinable_definition(&mut self, name: &str) -> Option<Arc<FunctionDefinition>> {
+		let _ = name;
+		None
+	}
+	/// Binds `body`, the expression of the function `definition`, in a `FunctionBody` region owned
+	/// by `owner`, whose arguments after the statement timestamp are the function's parameters,
+	/// typed by `types`. The body reads nothing but them.
+	///
+	/// `text` is the expression the call stands for, with the arguments written for the
+	/// parameters, which the op that computes the body's value states as its text; `None` where
+	/// the host records no text.
+	fn bind_function_body(
+		&mut self,
+		owner: OpId,
+		definition: &FunctionDefinition,
+		types: &[TypeKnowledge],
+		body: &LogicalExpr,
+		text: Option<Arc<String>>,
+	) -> Result<(), IrError> {
+		let _ = (owner, definition, types, body, text);
+		Err(invariant("a host that inlines no function binds no function body"))
+	}
+	/// Notes that a call of `function` was bound, which a later call is bound after.
+	fn note_call(&mut self, function: &Function) {
+		let _ = function;
+	}
 	fn bind_control(&mut self, control: Control) -> Result<Built, IrError>;
 	/// Whether a `.@` marker bound now stands in the body of a recursion: the nearest loop around
 	/// the point being bound, with no region isolated from above between them, is a `Recurse`
@@ -348,7 +383,7 @@ fn bind_node(host: &mut dyn ExprHost, expr: &LogicalExpr) -> Result<Built, IrErr
 			let op = ExprOp::Access {
 				field: field.clone(),
 			};
-			bind_step(host, [&**base], op)
+			bind_step(host, &[&**base], op)
 		}
 		LogicalExpr::Index {
 			base,
@@ -362,9 +397,9 @@ fn bind_node(host: &mut dyn ExprHost, expr: &LogicalExpr) -> Result<Built, IrErr
 			};
 			value(emit(host, ExprOp::Index, smallvec![subject, at]))
 		}
-		LogicalExpr::First(base) => bind_step(host, [&**base], ExprOp::First),
-		LogicalExpr::Last(base) => bind_step(host, [&**base], ExprOp::Last),
-		LogicalExpr::Each(base) => bind_step(host, [&**base], ExprOp::Each),
+		LogicalExpr::First(base) => bind_step(host, &[&**base], ExprOp::First),
+		LogicalExpr::Last(base) => bind_step(host, &[&**base], ExprOp::Last),
+		LogicalExpr::Each(base) => bind_step(host, &[&**base], ExprOp::Each),
 		LogicalExpr::Flatten {
 			base,
 			explicit,
@@ -372,7 +407,7 @@ fn bind_node(host: &mut dyn ExprHost, expr: &LogicalExpr) -> Result<Built, IrErr
 			let op = ExprOp::Flatten {
 				explicit: *explicit,
 			};
-			bind_step(host, [&**base], op)
+			bind_step(host, &[&**base], op)
 		}
 		// A marker that stands in no recursion's body raises when it is reached, after its base
 		// is evaluated, so every marker the IR holds stands in the body of a `Recurse` loop.
@@ -399,7 +434,7 @@ fn bind_node(host: &mut dyn ExprHost, expr: &LogicalExpr) -> Result<Built, IrErr
 			let op = ExprOp::SetField {
 				field: field.clone(),
 			};
-			bind_step(host, [&**base, &**new_value], op)
+			bind_step(host, &[&**base, &**new_value], op)
 		}
 		LogicalExpr::Filter {
 			base,
@@ -526,7 +561,7 @@ fn bind_node(host: &mut dyn ExprHost, expr: &LogicalExpr) -> Result<Built, IrErr
 			| PrefixOperator::Negate
 			| PrefixOperator::Range
 			| PrefixOperator::RangeInclusive => {
-				bind_step(host, [&**operand], ExprOp::Prefix(Box::new(op.clone())))
+				bind_step(host, &[&**operand], ExprOp::Prefix(Box::new(op.clone())))
 			}
 		},
 		LogicalExpr::Postfix {
@@ -536,7 +571,7 @@ fn bind_node(host: &mut dyn ExprHost, expr: &LogicalExpr) -> Result<Built, IrErr
 			let op = ExprOp::Postfix {
 				op: op.clone(),
 			};
-			bind_step(host, [&**operand], op)
+			bind_step(host, &[&**operand], op)
 		}
 		LogicalExpr::Binary {
 			left,
@@ -547,7 +582,7 @@ fn bind_node(host: &mut dyn ExprHost, expr: &LogicalExpr) -> Result<Built, IrErr
 			None => {
 				let built = bind_step(
 					host,
-					[&**left, &**right],
+					&[&**left, &**right],
 					ExprOp::Binary {
 						op: op.clone(),
 					},
@@ -697,12 +732,12 @@ fn holds_statement(expr: &LogicalExpr) -> bool {
 }
 
 /// A path step: `op` over the values of `operands`, bound in order.
-fn bind_step<const N: usize>(
+fn bind_step(
 	host: &mut dyn ExprHost,
-	operands: [&LogicalExpr; N],
+	operands: &[&LogicalExpr],
 	op: ExprOp,
 ) -> Result<Built, IrError> {
-	match bind_all(host, operands)? {
+	match bind_all(host, operands.iter().copied())? {
 		Some(values) => value(emit(host, op, values)),
 		None => Ok(Built::Diverged),
 	}
@@ -1085,8 +1120,97 @@ fn bind_call(host: &mut dyn ExprHost, call: &LogicalCall) -> Result<Built, IrErr
 			.map_err(|_| IrError::Capacity("row names of a call"))?,
 		callee: None,
 	};
+	let inlining = match &call.receiver {
+		Function::Custom(name) => inline_site(host, name, &operands),
+		Function::Normal(_)
+		| Function::Script(_)
+		| Function::Model(_)
+		| Function::Module(..)
+		| Function::Silo {
+			..
+		} => None,
+	};
 	operands.extend(row_names);
-	value(emit(host, ExprOp::Call(Box::new(attrs)), operands))
+	let op = emit_op(host, ExprOp::Call(Box::new(attrs)), operands)?;
+	match inlining {
+		Some(site) => {
+			let definition = site.definition;
+			let Some(body) =
+				crate::exec::ir::build::inline::inlinable_body(&definition, host.registry())
+			else {
+				return value(result_of(host, op));
+			};
+			let text = host.writing().then(|| substituted_text(&definition, body, &call.args));
+			host.bind_function_body(op, &definition, &site.types, body, text)?;
+		}
+		None => host.note_call(&call.receiver),
+	}
+	value(result_of(host, op))
+}
+
+/// The text of `body`, the expression of `definition`, with the arguments `args` written for its
+/// parameters, and `NONE` for a parameter the call leaves out.
+fn substituted_text(
+	definition: &FunctionDefinition,
+	body: &LogicalExpr,
+	args: &[LogicalExpr],
+) -> Arc<String> {
+	let mut substituted = body.clone();
+	let Ok(()) = substituted.visit_mut(&mut |node| {
+		if let LogicalExpr::Param(param) = node
+			&& let Some(at) = definition.args.iter().position(|(name, _)| name == param.as_str())
+		{
+			*node = args.get(at).cloned().unwrap_or(LogicalExpr::Literal(LogicalLiteral::None));
+		}
+		Ok::<(), std::convert::Infallible>(())
+	});
+	Arc::new(substituted.to_sql())
+}
+
+/// A call of a user-defined function whose body is bound beneath it.
+struct InlineSite {
+	definition: Arc<FunctionDefinition>,
+	/// What the body is told of each parameter: the kind of its argument when the declared kind
+	/// coerces it by identity, and nothing otherwise.
+	types: Vec<TypeKnowledge>,
+}
+
+/// The definition of `name` and the types of its parameters, when the call of it with `args` may
+/// have its body bound beneath it: the host admits the function, its body is one that may stand in
+/// the caller, and the call names no more arguments than the function declares.
+fn inline_site(host: &mut dyn ExprHost, name: &str, args: &[ValueId]) -> Option<InlineSite> {
+	let definition = host.inlinable_definition(name)?;
+	crate::exec::ir::build::inline::inlinable_body(&definition, host.registry())?;
+	if args.len() > definition.args.len() {
+		return None;
+	}
+	let ir = host.ir();
+	let types = definition
+		.args
+		.iter()
+		.enumerate()
+		.map(|(at, (_, declared))| match args.get(at).and_then(|arg| ir.value(*arg)) {
+			Some(value) => match &value.ty {
+				TypeKnowledge::Fact {
+					kind,
+					..
+				} if coercion_is_identity(declared, kind) => value.ty.clone(),
+				TypeKnowledge::Fact {
+					..
+				}
+				| TypeKnowledge::Hint {
+					..
+				}
+				| TypeKnowledge::Token(_)
+				| TypeKnowledge::Unknown => TypeKnowledge::Unknown,
+			},
+			None => TypeKnowledge::Unknown,
+		})
+		.collect();
+	Some(InlineSite {
+		definition,
+		types,
+	})
 }
 
 /// Whether a call of `name` with `args` is `array::distinct` over an aggregate call written as its

@@ -4,10 +4,10 @@
 
 use anyhow::Result;
 
+use crate::define_async_function;
 use crate::exec::EvalContext;
-use crate::exec::function::FunctionRegistry;
+use crate::exec::function::ScalarFunction;
 use crate::val::Value;
-use crate::{define_async_function, register_functions};
 
 // =========================================================================
 // Implementation function
@@ -52,6 +52,5 @@ define_async_function!(Sleep, "sleep", effects: EffectSet::BLOCKING, fallibility
 // The delay is the effect of this call, not the NONE it returns.
 // `EffectSet::BLOCKING` declares that, so a rewrite rule may neither drop
 // the call nor repeat it.
-pub fn register(registry: &mut FunctionRegistry) {
-	register_functions!(registry, Sleep,);
-}
+/// The `sleep` scalar builtin.
+pub(super) const SCALARS: &[&dyn ScalarFunction] = &[&Sleep];

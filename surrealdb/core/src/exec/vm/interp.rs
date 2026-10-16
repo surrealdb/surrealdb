@@ -300,7 +300,7 @@ pub(super) enum Kept {
 	Members(Box<super::membership::Members>),
 }
 
-pub(super) struct State {
+pub(crate) struct State {
 	pub(super) paging: Vec<Paging>,
 	pub(super) sorts: Vec<Vec<(Vec<Value>, SortRow)>>,
 	/// For each sort that keeps a bounded number of rows, how it keeps them:

@@ -19,8 +19,12 @@ use crate::expr::statements::alter::AlterKind;
 fn view_of(template: &Value) -> Result<crate::catalog::ViewDefinition, IrError> {
 	use crate::catalog::FromStored as _;
 	use crate::key::KVValue as _;
-	let bytes = crate::exec::vm::codec::encode("StoredTableDefinition", template)
-		.map_err(|_| IrError::Stale("ir_lower::ddl: a table template that does not encode"))?;
+	let bytes = crate::exec::vm::codec::encode(
+		&crate::exec::vm::codec::FULL_CODEC,
+		"StoredTableDefinition",
+		template,
+	)
+	.map_err(|_| IrError::Stale("ir_lower::ddl: a table template that does not encode"))?;
 	let stored = crate::catalog::StoredTableDefinition::kv_decode_value(&bytes, ())
 		.map_err(|_| IrError::Stale("ir_lower::ddl: a table template that does not decode"))?;
 	let view = stored

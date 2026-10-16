@@ -29,13 +29,13 @@ value = "NONE"
 
 [[test.results]]
 value = '''
-'Return [ctx: Rt]
+"Return [ctx: Rt]
     Sequence [ctx: Rt] [statements: 2]
         Let [ctx: Rt] [name: $tb]
-            ExprPlan [ctx: Rt] [expr: company]
+            ExprPlan [ctx: Rt] [expr: type::table('company')]
         ProjectValue [ctx: Db] [expr: kind]
             Values [ctx: Rt] [expr: $tb]
-''''
+"'''
 
 [[test.results]]
 value = "NONE"
@@ -70,7 +70,7 @@ value = '''
 "Return [ctx: Rt]
     Sequence [ctx: Rt] [statements: 2]
         Foreach [ctx: Db] [param: $loop]
-            ExprPlan [ctx: Rt] [expr: [company]]
+            ExprPlan [ctx: Rt] [expr: [type::table('company')]]
             Sequence [ctx: Rt] [statements: 1]
                 Return [ctx: Rt]
                     ProjectValue [ctx: Db] [expr: kind]

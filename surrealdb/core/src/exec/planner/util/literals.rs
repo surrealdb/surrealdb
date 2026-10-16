@@ -17,8 +17,8 @@ use crate::dbs::capabilities::Capabilities;
 use crate::exec::function::FunctionRegistry;
 use crate::exec::index::access_path::{BoundOperand, ClockBound, ClockSign};
 use crate::expr::logical::{
-	LogicalExpr, LogicalLiteral, LogicalOp, LogicalPostfixOperator, LogicalRecordIdKey,
-	LogicalRecordIdKeyRange, LogicalRecordIdLit, LogicalSource, LogicalValues, Schema, SourceRef,
+	LogicalExpr, LogicalLiteral, LogicalPostfixOperator, LogicalRecordIdKey,
+	LogicalRecordIdKeyRange, LogicalRecordIdLit, Schema,
 };
 use crate::expr::{BinaryOperator, Function, Kind, PrefixOperator};
 use crate::val::{Number, Range, RecordId, RecordIdKey, RecordIdKeyRange, Value};
@@ -488,138 +488,6 @@ fn is_aggregate_call(expr: &LogicalExpr, registry: &FunctionRegistry) -> bool {
 		return false;
 	};
 	registry.is_aggregate(name)
-}
-
-/// `true` when a bare field read off any row these `FROM` sources produce
-/// evaluates to a plain value without fetching anything.
-///
-/// A table's rows are records, and therefore objects, so a field read is a key
-/// lookup. A scalar source yields that scalar, and a field read off a scalar is
-/// `NONE`. Any other source can yield a record id — directly, or inside an
-/// array the read maps over — where the same read dereferences it and runs
-/// computed fields and permissions on the target.
-///
-/// Every source must qualify: the same condition is handed to each one, so a
-/// single dereferencing source makes the whole condition unsafe to discard.
-/// Unrecognised sources are excluded, which costs an optimisation rather than
-/// an enforcement — a nested plan is one of them: its rows can carry record
-/// ids just as a table's do, so a field read off one may still dereference.
-///
-/// `sources` are the leaves a `FROM` clause lowered to: the inputs of a
-/// `UnionAll`, or the single source beneath the pipeline.
-pub(crate) fn source_field_reads_are_inert(sources: &[LogicalOp]) -> bool {
-	sources.iter().all(|source| match source {
-		LogicalOp::Source(LogicalSource {
-			source,
-			..
-		}) => match source {
-			SourceRef::Table(_) => true,
-			SourceRef::Dynamic(expr) => expr_source_field_reads_are_inert(expr),
-			SourceRef::RecordId(_) | SourceRef::Mock(_) | SourceRef::Param(_) => false,
-		},
-		LogicalOp::Values(LogicalValues {
-			expr,
-			..
-		}) => expr_source_field_reads_are_inert(expr),
-		// Not a leaf source. A relational input reads whatever its own
-		// sources read; a statement's rows are unknown here.
-		_ => false,
-	})
-}
-
-/// [`source_field_reads_are_inert`] for one source in expression form.
-fn expr_source_field_reads_are_inert(e: &LogicalExpr) -> bool {
-	match e {
-		LogicalExpr::Table(_) => true,
-		// Every `Constant` yields a float, datetime or duration, so its row is
-		// a scalar like any other.
-		LogicalExpr::Constant(_) => true,
-		// An object row's bare field read is a key lookup like a record's; the
-		// expressions building the object are evaluated by the source either
-		// way, fold or no fold.
-		LogicalExpr::Object(_) => true,
-		LogicalExpr::Literal(lit) => matches!(
-			lit,
-			LogicalLiteral::None
-				| LogicalLiteral::Null
-				| LogicalLiteral::Bool(_)
-				| LogicalLiteral::Float(_)
-				| LogicalLiteral::Integer(_)
-				| LogicalLiteral::Decimal(_)
-				| LogicalLiteral::String(_)
-				| LogicalLiteral::Bytes(_)
-				| LogicalLiteral::Regex(_)
-				| LogicalLiteral::Duration(_)
-				| LogicalLiteral::Datetime(_)
-				| LogicalLiteral::Uuid(_)
-				| LogicalLiteral::Geometry(_)
-				| LogicalLiteral::File(_)
-		),
-		// An array can hold record ids the read maps over; a record id names
-		// stored rows; everything else is resolved at evaluation.
-		LogicalExpr::Array(_)
-		| LogicalExpr::Set(_)
-		| LogicalExpr::RecordId(_)
-		| LogicalExpr::Mock(_)
-		| LogicalExpr::Param(_)
-		| LogicalExpr::Field(_)
-		| LogicalExpr::Doc
-		| LogicalExpr::Current
-		| LogicalExpr::Access {
-			..
-		}
-		| LogicalExpr::Index {
-			..
-		}
-		| LogicalExpr::First(_)
-		| LogicalExpr::Last(_)
-		| LogicalExpr::Each(_)
-		| LogicalExpr::Flatten {
-			..
-		}
-		| LogicalExpr::Filter {
-			..
-		}
-		| LogicalExpr::Method {
-			..
-		}
-		| LogicalExpr::Destructure {
-			..
-		}
-		| LogicalExpr::Optional {
-			..
-		}
-		| LogicalExpr::Lookup {
-			..
-		}
-		| LogicalExpr::Recurse(_)
-		| LogicalExpr::RepeatRecurse(_)
-		| LogicalExpr::Broadcast {
-			..
-		}
-		| LogicalExpr::SetField {
-			..
-		}
-		| LogicalExpr::Prefix {
-			..
-		}
-		| LogicalExpr::Postfix {
-			..
-		}
-		| LogicalExpr::Invoke {
-			..
-		}
-		| LogicalExpr::Binary {
-			..
-		}
-		| LogicalExpr::Call(_)
-		| LogicalExpr::Closure(_)
-		| LogicalExpr::If(_)
-		| LogicalExpr::Throw(_)
-		| LogicalExpr::Break
-		| LogicalExpr::Continue
-		| LogicalExpr::Subquery(_) => false,
-	}
 }
 
 /// `true` when evaluating `expr` cannot dispatch anything a capability gates,
@@ -1325,5 +1193,19 @@ mod tests {
 		let before = e.clone();
 		fold_condition_expressions(&mut e, &registry, &capabilities, None);
 		assert_eq!(e, before);
+	}
+
+	#[test]
+	fn a_large_array_sort_folds_to_the_sorted_literal() {
+		let registry = FunctionRegistry::with_builtins();
+		let capabilities = Capabilities::all();
+		let list = |numbers: &mut dyn Iterator<Item = i64>| {
+			numbers.map(|n| n.to_string()).collect::<Vec<_>>().join(", ")
+		};
+		let descending = list(&mut (0..5_000).rev());
+		let ascending = list(&mut (0..5_000));
+		let mut e = expr(&format!("array::sort([{descending}])"));
+		fold_condition_expressions(&mut e, &registry, &capabilities, None);
+		assert_eq!(e.to_sql(), format!("[{ascending}]"));
 	}
 }

@@ -33,6 +33,7 @@ use super::decl::{BinderId, ClassRef, ENodeSnapshot, LeafId, NodeShape, PayloadI
 use super::extract::{Candidate, PhysChoice, Term};
 use super::guards::{deterministic, infallible};
 use super::lang::{ENode, region_kind_key, snapshot_of};
+use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::analysis::tokens;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
@@ -80,8 +81,15 @@ pub(crate) trait StatementSurgery: Send + Sync {
 		map: &StmtMap,
 	) -> Result<(), IrError>;
 
-	/// Recomputes the legality snapshot of `stmt` over its current ops.
-	fn retake_legality(&self, ir: &Ir, facts: &mut FactCache, stmt: OpId) -> Result<(), IrError>;
+	/// Recomputes the legality snapshot of `stmt` over its current ops, judging calls against
+	/// `registry`.
+	fn retake_legality(
+		&self,
+		ir: &Ir,
+		facts: &mut FactCache,
+		registry: &FunctionRegistry,
+		stmt: OpId,
+	) -> Result<(), IrError>;
 }
 
 /// The surgery of a container that offers none: every call answers [`IrError::Invariant`].
@@ -112,6 +120,7 @@ impl StatementSurgery for NoSurgery {
 		&self,
 		_ir: &Ir,
 		_facts: &mut FactCache,
+		_registry: &FunctionRegistry,
 		_stmt: OpId,
 	) -> Result<(), IrError> {
 		Err(IrError::Invariant {
@@ -1333,7 +1342,7 @@ pub(crate) fn write_logical(
 	surgery.adopt_statement(ir, facts, stmt, target, &target_map).map_err(aborted)?;
 	let sound = tokens::rethread_statement(ir, facts, cx, stmt).is_ok()
 		&& verify(ir, facts, VerifyAt::PhaseBoundary(Phase::Logical), &LOGICAL_PHASE, cx).is_ok()
-		&& surgery.retake_legality(ir, facts, stmt).is_ok();
+		&& surgery.retake_legality(ir, facts, cx.registry, stmt).is_ok();
 	if sound {
 		super::note_adopted();
 		return Ok(());

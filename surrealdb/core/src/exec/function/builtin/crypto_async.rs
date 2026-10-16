@@ -5,11 +5,11 @@
 
 use anyhow::Result;
 
+use crate::define_async_function;
 use crate::exec::EvalContext;
-use crate::exec::function::FunctionRegistry;
+use crate::exec::function::ScalarFunction;
 use crate::fnc::crypto::{argon2, bcrypt, pbkdf2, scrypt};
 use crate::val::Value;
-use crate::{define_async_function, register_functions};
 
 // =========================================================================
 // Helper to run CPU-intensive work
@@ -283,16 +283,14 @@ define_async_function!(CryptoScryptGenerate, "crypto::scrypt::generate", effects
 // several places or fold it into a constant.
 // Each `compare` reads the salt from the hash it is given, so it is pure and
 // declares `EffectSet::PURE`.
-pub fn register(registry: &mut FunctionRegistry) {
-	register_functions!(
-		registry,
-		CryptoArgon2Compare,
-		CryptoArgon2Generate,
-		CryptoBcryptCompare,
-		CryptoBcryptGenerate,
-		CryptoPbkdf2Compare,
-		CryptoPbkdf2Generate,
-		CryptoScryptCompare,
-		CryptoScryptGenerate,
-	);
-}
+/// The asynchronous `crypto::*` scalar builtins: password hashing and verification.
+pub(super) const SCALARS: &[&dyn ScalarFunction] = &[
+	&CryptoArgon2Compare,
+	&CryptoArgon2Generate,
+	&CryptoBcryptCompare,
+	&CryptoBcryptGenerate,
+	&CryptoPbkdf2Compare,
+	&CryptoPbkdf2Generate,
+	&CryptoScryptCompare,
+	&CryptoScryptGenerate,
+];

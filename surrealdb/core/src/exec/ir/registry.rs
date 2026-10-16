@@ -8,7 +8,7 @@ use std::sync::OnceLock;
 
 use super::core::convert::ConversionSet;
 use super::core::pattern::PatternSet;
-use super::core::print::AttrSyntax;
+use super::core::print::AttrSyntaxes;
 use super::iface::conversion::{ExprDialect, LogicalDialect, Phase, PhysDialect};
 use super::iface::egraph::EgraphRuleSet;
 
@@ -33,8 +33,6 @@ pub(crate) struct Registry {
 	pub(crate) logical_patterns: PatternSet<LogicalDialect>,
 	pub(crate) phys_patterns: PatternSet<PhysDialect>,
 	pub(crate) conversion: ConversionSet,
-	/// The attribute syntax of each dialect, indexed expression, logical, physical.
-	pub(crate) attr_syntax: [Option<&'static dyn AttrSyntax>; 3],
 	pub(crate) egraph_rules: EgraphRuleSet,
 	pub(crate) analyses: AnalysisTable,
 	pub(crate) passes: PassList,
@@ -48,7 +46,6 @@ impl Registry {
 			logical_patterns: PatternSet::new(),
 			phys_patterns: PatternSet::new(),
 			conversion: ConversionSet::new(),
-			attr_syntax: [None; 3],
 			egraph_rules: EgraphRuleSet::new(),
 			analyses: AnalysisTable::default(),
 			passes: PassList::default(),
@@ -60,15 +57,13 @@ impl Registry {
 /// request.
 ///
 /// The modules register in a fixed order, so a rule or pass registered by a later module follows
-/// the ones registered before it: expression, logical and physical rules, the physical
-/// implementation rules, the analyses, the e-graph's logical rules, the passes, the loop passes,
-/// the lowering and the caches.
+/// the ones registered before it: the physical dialect's conversion and rewrite patterns, the
+/// physical implementation rules, the analyses, the e-graph's logical rules, the passes, the loop
+/// passes, the lowering and the caches.
 pub(crate) fn build() -> &'static Registry {
 	static REGISTRY: OnceLock<Registry> = OnceLock::new();
 	REGISTRY.get_or_init(|| {
 		let mut r = Registry::empty();
-		super::expr::reg::register(&mut r);
-		super::logical::reg::register(&mut r);
 		super::phys::reg::register(&mut r);
 		super::egraph::rules_phys::register(&mut r);
 		super::analysis::reg::register(&mut r);
@@ -79,6 +74,19 @@ pub(crate) fn build() -> &'static Registry {
 		super::cache::reg::register(&mut r);
 		r
 	})
+}
+
+/// The attribute syntaxes of the expression, logical and physical dialects.
+///
+/// Only the IR's text form reads them, through [`super::core::print::print`] and
+/// [`super::core::parse::parse`]; planning never does, so the registry does not hold them.
+pub(crate) fn attr_syntaxes() -> &'static AttrSyntaxes {
+	static SYNTAXES: AttrSyntaxes = AttrSyntaxes([
+		Some(&super::expr::print::ExprSyntax),
+		Some(&super::logical::print::LogicalSyntax),
+		Some(&super::phys::print::PhysSyntax),
+	]);
+	&SYNTAXES
 }
 
 // The registry is built once and shared by every request, so it is `Send` and `Sync`.
@@ -97,13 +105,26 @@ mod tests {
 	}
 
 	#[test]
+	fn attr_syntaxes_hold_each_dialect_at_its_index() {
+		use crate::exec::ir::expr::ops::{ExprOp, ExprTag};
+		use crate::exec::ir::op_kind::OpKind;
+
+		let syntaxes = attr_syntaxes();
+		assert!(syntaxes.0.iter().all(Option::is_some));
+		let mut text = String::new();
+		syntaxes.0[0]
+			.expect("the expression syntax")
+			.print_attrs(&OpKind::Expr(ExprOp::Doc), &mut text);
+		assert_eq!(text, ExprTag::Doc.mnemonic());
+	}
+
+	#[test]
 	fn an_empty_registry_holds_nothing() {
 		let registry = Registry::empty();
 		assert!(registry.expr_patterns.is_empty());
 		assert!(registry.logical_patterns.is_empty());
 		assert!(registry.phys_patterns.is_empty());
 		assert!(registry.conversion.is_empty());
-		assert!(registry.attr_syntax.iter().all(Option::is_none));
 		assert_eq!(registry.egraph_rules.iter().count(), 0);
 		assert!(registry.analyses.0.is_empty());
 		assert!(registry.passes.0.is_empty());

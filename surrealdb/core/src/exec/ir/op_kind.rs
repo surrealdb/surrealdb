@@ -7,8 +7,7 @@
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use smallvec::SmallVec;
-
+use super::analysis::cx::structural_cx;
 use super::analysis::{fallibility, phys_effects};
 use super::core::facts::FactCache;
 use super::core::ir::Ir;
@@ -18,7 +17,7 @@ use super::iface::effects::OpEffects;
 use super::iface::fallibility::Fallibility;
 use super::iface::identity::AttrDigest;
 use super::iface::ids::{OpId, RegionId};
-use super::iface::region_kind::{RegionKind, RegionProperties};
+use super::iface::region_kind::{RegionKind, RegionKinds, RegionProperties};
 use super::logical::ops::{LogOp, LogTag};
 use super::phys::ops::{PhysOp, PhysTag};
 pub(crate) use crate::exec::vm::LeafClass;
@@ -117,7 +116,7 @@ impl OpKind {
 	}
 
 	/// The kind of each of the op's regions, in position order.
-	pub(crate) fn region_kinds(&self) -> SmallVec<[RegionKind; 2]> {
+	pub(crate) fn region_kinds(&self) -> RegionKinds {
 		match self {
 			OpKind::Expr(op) => op.region_kinds(),
 			OpKind::Logical(op) => op.region_kinds(),
@@ -134,10 +133,12 @@ impl OpKind {
 	}
 
 	/// The kinds the op may own after the regions [`OpKind::region_kinds`] names: the clause
-	/// regions a write stage, an assignment or a live query hosts. The op's own verifier checks
-	/// their order.
+	/// regions a write stage, an assignment or a live query hosts, and the body of a user-defined
+	/// function a call holds until the inlining pass runs the body in the caller or drops it. The
+	/// op's own verifier checks their order.
 	pub(crate) fn tail_region_kinds(&self) -> &'static [RegionKind] {
 		match self {
+			OpKind::Expr(ExprOp::Call(_)) => &[RegionKind::FunctionBody],
 			OpKind::Expr(_) => &[],
 			OpKind::Logical(op) => crate::exec::ir::logical::verify::tail_kinds(op),
 			OpKind::Phys(op) => op.tail_region_kinds(),
@@ -163,10 +164,15 @@ impl OpKind {
 		}
 	}
 
-	/// How the op reaches the interpreter on the target `isa` describes.
-	pub(crate) fn lowers_natively(&self, isa: IsaCaps) -> NativeLowering {
+	/// How the op reaches the interpreter on the target `isa` describes, with the callees of a
+	/// call resolved against `registry`.
+	pub(crate) fn lowers_natively(
+		&self,
+		isa: IsaCaps,
+		registry: &crate::exec::function::FunctionRegistry,
+	) -> NativeLowering {
 		match self {
-			OpKind::Expr(op) => op.lowers_natively(isa),
+			OpKind::Expr(op) => op.lowers_natively(isa, registry),
 			OpKind::Logical(op) => op.lowers_natively(isa),
 			OpKind::Phys(op) => op.lowers_natively(isa),
 		}
@@ -181,9 +187,15 @@ impl OpKind {
 	/// Whether `op`, an op of `ir`, may raise.
 	///
 	/// The answer is the transitive one, over the ops of the op's regions as well: never the local
-	/// declaration, which on a region-owning op omits them.
-	pub(crate) fn may_raise(&self, op: OpId, ir: &Ir, facts: &mut FactCache) -> bool {
-		!fallibility::of(ir, facts, op).is_infallible()
+	/// declaration, which on a region-owning op omits them. Calls are judged against `registry`.
+	pub(crate) fn may_raise(
+		&self,
+		op: OpId,
+		ir: &Ir,
+		facts: &mut FactCache,
+		registry: &crate::exec::function::FunctionRegistry,
+	) -> bool {
+		!fallibility::of_with(ir, facts, &structural_cx(registry, ir), op).is_infallible()
 	}
 }
 

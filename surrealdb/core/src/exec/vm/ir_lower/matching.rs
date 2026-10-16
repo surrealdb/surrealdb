@@ -29,6 +29,7 @@ use super::pipe::{self, Reads};
 use super::place::Lowered;
 use super::read::is_source;
 use super::units::LowerCx;
+use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::core::walk::ops_in;
@@ -63,7 +64,7 @@ pub(super) fn lower_match(
 	let [region] = <[_; 1]>::try_from(data.regions.as_slice()).map_err(|_| IrError::Invariant {
 		what: "a MATCH with other than one region",
 	})?;
-	check_region(ir, region)?;
+	check_region(ir, cx.registry(), region)?;
 	let mut em = Emitter::new();
 	let mut facts = FactCache::new();
 	let reads = pipe::lower_pipelines(&mut em, cx, ir, &mut facts, region)?;
@@ -100,7 +101,7 @@ fn check_top(ir: &Ir, matched: OpId) -> Result<(), IrError> {
 /// region of a read statement: pipelines, the streaming ops that follow a pipeline or a breaker,
 /// breakers, the sources and steps a pipeline reads, the values a source or a paging evaluates when
 /// the statement starts, literals and the region's `phys.yield`.
-fn check_region(ir: &Ir, region: RegionId) -> Result<(), IrError> {
+fn check_region(ir: &Ir, registry: &FunctionRegistry, region: RegionId) -> Result<(), IrError> {
 	let mut trailing = pipe::bodies_outside_regions(ir, region)?;
 	for op in ops_in(ir, region).filter(|op| pipe::is_breaker(ir, *op)) {
 		trailing.extend(pipe::trail_of(ir, region, op)?);
@@ -130,7 +131,8 @@ fn check_region(ir: &Ir, region: RegionId) -> Result<(), IrError> {
 			// parameter the paging and a per-row clause share) is lowered by each reader only when
 			// a second evaluation answers what the first did, as in any read.
 			OpKind::Expr(_) => {
-				if !pipe::feeds_host_scalar(ir, held) && !lowers_where_read(ir, op, held) {
+				if !pipe::feeds_host_scalar(ir, held) && !lowers_where_read(ir, registry, op, held)
+				{
 					return Err(IrError::NotYet {
 						what: "ir_lower::matching: an expression outside every pipeline",
 					});

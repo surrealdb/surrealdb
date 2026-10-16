@@ -145,6 +145,8 @@ pub(crate) enum EliminationReason {
 	InvisibleToPrincipal,
 	/// A computed field no read of the statement refers to.
 	Unreferenced,
+	/// A column of a projection layer that no op reads, or a layer left with no column.
+	DeadLayerColumn,
 	/// It follows a terminator in its block and never runs.
 	Unreachable,
 }

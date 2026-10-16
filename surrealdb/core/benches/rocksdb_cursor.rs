@@ -11,6 +11,9 @@
 //! * **Bulk scan** — one cursor over the entire range. Measures per-batch advance overhead
 //!   amortised across many items.
 
+// Awaiting a datastore constructor lays out the sealed async bodies it reaches, which nest deeper
+// than the default recursion limit.
+#![recursion_limit = "256"]
 #![allow(clippy::unwrap_used)]
 // TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
 #![allow(clippy::absolute_paths)]

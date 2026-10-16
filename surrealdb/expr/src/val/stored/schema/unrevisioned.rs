@@ -61,6 +61,13 @@ impl<T> SkipRevisioned for Unrevisioned<T> {
 	fn skip_revisioned<R: Read>(_reader: &mut R) -> Result<(), Error> {
 		Ok(())
 	}
+
+	#[inline]
+	fn skip_revisioned_slice(
+		_reader: &mut revision::SliceReader<'_>,
+	) -> Result<(), revision::Error> {
+		Ok(())
+	}
 }
 
 impl<T> WalkRevisioned for Unrevisioned<T> {

@@ -97,7 +97,7 @@ value = "NONE"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id, title, category, cryptoVulnerabilityType, summary, location, classicSeverity, classicWeaknessType, annotation, quantumSeverity, quantumWeaknessType, ruleId, scan, confidence, advisories, links, potentialSideEffects, replacementConfidence, replacementCode, guidance, replacementCodeLanguage, remediations, remediationJobs] {rows: 2}
-    Filter [ctx: Db] [predicate: type::field('scan') INSIDE ['scan:01kg1bsd1hbtsnq1b57zz3zm55', scan:01kg1bsd1hbtsnq1b57zz3zm55]] {rows: 2}
+    Filter [ctx: Db] [predicate: type::field('scan') INSIDE ['scan:01kg1bsd1hbtsnq1b57zz3zm55', type::record('scan:01kg1bsd1hbtsnq1b57zz3zm55')]] {rows: 2}
         UnionIndexScan [ctx: Db] [table: finding, branches: 2] {rows: 2}
             IndexScan [ctx: Db] [table: finding, index: idx_scan, access: = 'scan:01kg1bsd1hbtsnq1b57zz3zm55', direction: Forward] {rows: 2}
             IndexScan [ctx: Db] [table: finding, index: idx_scan, access: = scan:01kg1bsd1hbtsnq1b57zz3zm55, direction: Forward] {rows: 2}

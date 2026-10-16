@@ -18,6 +18,8 @@ use super::ops::{Batch, PhysOp};
 use super::pipeline::PipelineDag;
 use super::placement_attr::{PlacementAttr, PlacementTable};
 use crate::exec::config::ExecConfig;
+use crate::exec::function::FunctionRegistry;
+use crate::exec::ir::analysis::cx::structural_cx;
 use crate::exec::ir::analysis::{fallibility, loop_legality};
 use crate::exec::ir::build::phys::UNBATCHED;
 use crate::exec::ir::core::Provenance;
@@ -230,10 +232,15 @@ fn loop_in(ir: &Ir, pipeline_op: OpId) -> Option<(OpId, LoopKind)> {
 pub(crate) fn legality_inputs(
 	ir: &Ir,
 	facts: &mut FactCache,
+	registry: &FunctionRegistry,
 	pipeline_op: OpId,
 ) -> (Legality, StatementLegality, LoopFacts) {
 	let loop_facts = loop_in(ir, pipeline_op)
-		.and_then(|(loop_op, _)| loop_legality::of(ir, facts, loop_op).ok())
+		.and_then(|(loop_op, _)| {
+			loop_legality::of_with(ir, facts, &structural_cx(registry, ir), loop_op)
+				.map(|legality| legality.facts())
+				.ok()
+		})
 		.unwrap_or_else(serial_loop_facts);
 	let stated = facts.logical_legalities();
 	let legality = logical_pipeline_of(ir, pipeline_op)
@@ -345,10 +352,11 @@ struct Judged {
 pub(crate) fn place_all(
 	ir: &Ir,
 	facts: &mut FactCache,
+	registry: &FunctionRegistry,
 	placement: &Placement,
 	caps: BackendCaps,
 ) -> Result<Vec<(OpId, PlacementAttr)>, IrError> {
-	place_all_reading(ir, facts, placement, caps, NestedReading::Hedged)
+	place_all_reading(ir, facts, registry, placement, caps, NestedReading::Hedged)
 }
 
 /// [`place_all`] with the statements in value position read as `reading` states.
@@ -358,6 +366,7 @@ pub(crate) fn place_all(
 pub(crate) fn place_all_reading(
 	ir: &Ir,
 	facts: &mut FactCache,
+	registry: &FunctionRegistry,
 	placement: &Placement,
 	caps: BackendCaps,
 	reading: NestedReading,
@@ -366,13 +375,14 @@ pub(crate) fn place_all_reading(
 	let order = dag.topological_order().map_err(IrError::Verify)?;
 	let mut judged: HashMap<OpId, Judged> = HashMap::with_capacity(order.len());
 	for (_, op) in &order {
-		let (legality, statement, loop_facts) = legality_inputs(ir, facts, *op);
-		let physical = facts_reading(ir, facts, *op, reading)?;
+		let (legality, statement, loop_facts) = legality_inputs(ir, facts, registry, *op);
+		let physical = facts_reading(ir, facts, registry, *op, reading)?;
 		let picked = placement.pick(&legality, statement, &loop_facts, &physical);
 		let decision = never_stronger(&legality, picked)
 			.map_err(|stronger| stronger_than_legality(*op, stronger))?;
 		let decision = apply_backend(decision, loop_in(ir, *op).map(|(_, kind)| kind), caps);
-		let prunes = fallibility::of(ir, facts, *op).is_infallible();
+		let prunes =
+			fallibility::of_with(ir, facts, &structural_cx(registry, ir), *op).is_infallible();
 		judged.insert(
 			*op,
 			Judged {

@@ -19,18 +19,21 @@ use super::super::leaf::{self, Class};
 use super::super::program::{
 	ClosureHead, Instr, Operand, Pipeline, Program, Source, TailSpec, UnitHead,
 };
-use super::access::{lower_access, lower_show};
-use super::ddl::{Reservations, lower_ddl, schema_op};
+use super::ddl::{Reservations, schema_op};
 use super::emit::Emitter;
+use super::explain_hook::{explain_in, explained_served};
 use super::expr::{Claim, Lowerer, Needs, invariant};
-use super::info::{lower_info, lower_kill, lower_let, lower_live, lower_option, lower_use};
+use super::info::lower_let;
 use super::place::{Lowered, Provenance};
-use super::read::{self, IndexResolver, NoIndexes};
+#[cfg(test)]
+use super::read::{IndexResolver, NoIndexes};
+use super::schema::served;
 use super::units::{ClosureTemplate, LowerCx, UnitSink};
 use super::write_stmt::WritePipelines;
-use super::{block, explain, matching, pipe, write_stmt};
+use super::{block, matching, pipe, read, write_stmt};
 use crate::exec::AccessMode;
 use crate::exec::function::FunctionRegistry;
+use crate::exec::ir::analysis::cx::structural_cx;
 use crate::exec::ir::analysis::effects;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
@@ -291,10 +294,12 @@ pub(crate) fn coverage_report(ir: &Ir) -> Vec<(OpId, &'static str, Coverage)> {
 	report
 }
 
-/// Lowers the physical container `ir` to a program, reading no index.
+/// Lowers the physical container `ir` to a program, reading no index, under the full builtin
+/// registry. For tests.
 ///
 /// A container that reads an index is refused: [`lower_indexed`] takes the resolver that names the
 /// index each source opens.
+#[cfg(test)]
 pub(crate) fn lower(ir: &Ir, facts: &FactCache) -> Result<Lowered, IrError> {
 	lower_indexed(ir, facts, &NoIndexes)
 }
@@ -325,9 +330,11 @@ pub(crate) fn lower(ir: &Ir, facts: &FactCache) -> Result<Lowered, IrError> {
 /// - a `phys.loop` of kind element filter, broadcast, closure, recursion or graph step whose result
 ///   an operation reads, which lowers where it is read. A loop of any other kind, and one that
 ///   defines no value, answers `NotYet`.
-/// - `phys.info`, which becomes the program's one pipeline in the same way ([`lower_info`]), and so
-///   do `phys.access` ([`lower_access`]) and `phys.show` ([`lower_show`]), whose value is the rows
-///   of the change feed rather than one row.
+/// - `phys.info`, which becomes the program's one pipeline in the same way
+///   ([`super::schema::SchemaLowering::info`]), and so do `phys.access`
+///   ([`super::schema::SchemaLowering::access`]) and `phys.show`
+///   ([`super::schema::SchemaLowering::show`]), whose value is the rows of the change feed rather
+///   than one row.
 /// - `phys.let` of a session parameter, whose program is the value it binds, lowered as an eval of
 ///   it. The kind the value is coerced to is the request step's, not the program's.
 /// - the control flow of a statement, when the top region holds any: a block, an `IF`, a `FOR`
@@ -347,6 +354,7 @@ pub(crate) fn lower(ir: &Ir, facts: &FactCache) -> Result<Lowered, IrError> {
 /// The instructions each operation emitted for itself, leaving out those of its operands and of
 /// its regions, are checked against what the operation claims by [`check_native_claim`]: one that
 /// lies outside its claim is an internal error.
+#[cfg(test)]
 pub(crate) fn lower_indexed(
 	ir: &Ir,
 	facts: &FactCache,
@@ -366,14 +374,14 @@ pub(crate) fn lower_with(
 	// A plain `EXPLAIN` answers the rendering of its plan, which nothing of the explained statement
 	// runs to produce.
 	if ir.phase() >= Phase::Physical
-		&& let Some((explain, false)) = explain::explain_in(ir)
+		&& let Some((explain, false)) = explain_in(ir)
 	{
-		return explain::lower_plain(cx, ir, explain);
+		return explained_served(cx)?.lower_plain(cx, ir, explain);
 	}
 	// `EXPLAIN ANALYZE` answers the rendering of what the run of the explained statement measured,
 	// which the statement runs as the one group of a statement program to produce.
 	if ir.phase() >= Phase::Physical
-		&& let Some((explain, true)) = explain::explain_in(ir)
+		&& let Some((explain, true)) = explain_in(ir)
 	{
 		let mut em = Emitter::new();
 		let program = block::lower_analysed_program(&mut em, cx, ir, explain)?;
@@ -495,7 +503,7 @@ pub(crate) fn lower_with(
 						what: "ir_lower::lower: more than one statement",
 					});
 				}
-				let info = lower_info(&mut em, cx, ir, op)?;
+				let info = served(cx)?.info(&mut em, cx, ir, op)?;
 				eval = Some((info.pipeline, info.needs, info.claims));
 				other_statement = true;
 			}
@@ -505,7 +513,7 @@ pub(crate) fn lower_with(
 						what: "ir_lower::lower: more than one statement",
 					});
 				}
-				eval = Some((lower_show(&mut em, ir, op)?, Needs::none(), Vec::new()));
+				eval = Some((served(cx)?.show(&mut em, ir, op)?, Needs::none(), Vec::new()));
 				other_statement = true;
 				rows = true;
 			}
@@ -515,7 +523,7 @@ pub(crate) fn lower_with(
 						what: "ir_lower::lower: more than one statement",
 					});
 				}
-				eval = Some(lower_access(cx, &mut em, ir, op)?);
+				eval = Some(served(cx)?.access(cx, &mut em, ir, op)?);
 				other_statement = true;
 			}
 			OpKind::Phys(PhysOp::Kill) => {
@@ -524,7 +532,7 @@ pub(crate) fn lower_with(
 						what: "ir_lower::lower: more than one statement",
 					});
 				}
-				let kill = lower_kill(&mut em, cx, ir, op)?;
+				let kill = served(cx)?.kill(&mut em, cx, ir, op)?;
 				eval = Some((kill.pipeline, kill.needs, kill.claims));
 				other_statement = true;
 			}
@@ -534,7 +542,7 @@ pub(crate) fn lower_with(
 						what: "ir_lower::lower: more than one statement",
 					});
 				}
-				let live = lower_live(&mut em, cx, ir, op)?;
+				let live = served(cx)?.live(&mut em, cx, ir, op)?;
 				eval = Some((live.pipeline, live.needs, live.claims));
 				other_statement = true;
 			}
@@ -546,7 +554,7 @@ pub(crate) fn lower_with(
 						what: "ir_lower::lower: more than one statement",
 					});
 				}
-				let option = lower_option(&mut em, cx, ir, op)?;
+				let option = served(cx)?.option(&mut em, cx, ir, op)?;
 				eval = Some((option.pipeline, option.needs, option.claims));
 				other_statement = true;
 			}
@@ -558,7 +566,7 @@ pub(crate) fn lower_with(
 						what: "ir_lower::lower: more than one statement",
 					});
 				}
-				let used = lower_use(&mut em, cx, ir, op)?;
+				let used = served(cx)?.use_(&mut em, cx, ir, op)?;
 				eval = Some((used.pipeline, used.needs, used.claims));
 				other_statement = true;
 			}
@@ -784,7 +792,7 @@ pub(crate) fn lower_subquery_unit(
 	// a write's subjects in. Both go to `lower_with`, which lowers a plain `EXPLAIN` and a write
 	// before it looks for a read; the rows of a read statement are never the value of an
 	// `EXPLAIN ANALYZE`.
-	let statement = explain::explain_in(ir).is_some()
+	let statement = explain_in(ir).is_some()
 		|| write_in(ir).is_some()
 		|| timed_write_in(ir, ir.top())?.is_some();
 	if !statement && ops_in(ir, ir.top()).any(|op| makes_rows(ir, op)) {
@@ -994,7 +1002,7 @@ pub(crate) fn lower_closure_unit(
 			rows: template.rows(),
 			slots,
 			frameless: false,
-			effects: region_effects(ir, top),
+			effects: region_effects(ir, cx.registry(), top),
 			stamps: template.stamps,
 			reads: None,
 			version: template.version,
@@ -1009,10 +1017,11 @@ pub(crate) fn lower_closure_unit(
 
 /// What running the ops of `region` may do beyond computing values: the union of their effects,
 /// the regions they hold included.
-fn region_effects(ir: &Ir, region: RegionId) -> EffectSet {
+fn region_effects(ir: &Ir, registry: &FunctionRegistry, region: RegionId) -> EffectSet {
 	let mut facts = FactCache::new();
+	let under = structural_cx(registry, ir);
 	ops_in(ir, region)
-		.map(|op| effects::of(ir, &mut facts, op).set)
+		.map(|op| effects::of_with(ir, &mut facts, &under, op).set)
 		.fold(EffectSet::PURE, EffectSet::union)
 }
 
@@ -1076,7 +1085,7 @@ fn lower_write_statement(cx: &mut LowerCx<'_>, ir: &Ir, write: OpId) -> Result<L
 			(em.finish_program(vec![pipeline], lowered.needs.access_mode)?, Provenance::default())
 		}
 		WritePipelines::Over(reads) => {
-			pipe::program_of(em, ir, reads, None, lowered.needs.access_mode)?
+			pipe::program_of(em, ir, cx.registry(), reads, None, lowered.needs.access_mode)?
 		}
 	};
 	program.write = Some(lowered.spec);
@@ -1146,7 +1155,7 @@ fn lower_timed_write_statement(
 			(program, Provenance::default())
 		}
 		WritePipelines::Over(reads) => {
-			pipe::program_of(em, ir, reads, tail, lowered.needs.access_mode)?
+			pipe::program_of(em, ir, cx.registry(), reads, tail, lowered.needs.access_mode)?
 		}
 	};
 	program.write = Some(lowered.spec);
@@ -1248,7 +1257,7 @@ fn schema_program(
 ) -> Result<Lowered, IrError> {
 	let mut em = Emitter::new();
 	let mut reservations = Reservations::default();
-	let needs = lower_ddl(&mut em, ir, facts, cx, op, &mut reservations)?;
+	let needs = served(cx)?.ddl(&mut em, ir, facts, cx, op, &mut reservations)?;
 	let pipeline = em.finish_pipeline(Source::Once)?;
 	let mut program = em.finish_program(vec![pipeline], AccessMode::ReadWrite)?;
 	program.scalar = true;
@@ -1357,9 +1366,16 @@ fn reads_where_its_owner_stands(ir: &Ir, user: OpId) -> bool {
 /// answers what the first did and leaves nothing behind ([`EffectSet::is_deterministic`]), so a
 /// clause of a pipeline that evaluates it once per row reads the value the statement's other
 /// readers do. One nothing reads would never run.
-pub(super) fn lowers_where_read(ir: &Ir, op: OpId, data: &OpData) -> bool {
+pub(super) fn lowers_where_read(
+	ir: &Ir,
+	registry: &FunctionRegistry,
+	op: OpId,
+	data: &OpData,
+) -> bool {
 	let read = data.results.iter().any(|result| !ir.uses(*result).is_empty());
-	read && effects::of(ir, &mut FactCache::new(), op).set.is_deterministic()
+	read && effects::of_with(ir, &mut FactCache::new(), &structural_cx(registry, ir), op)
+		.set
+		.is_deterministic()
 }
 
 /// Whether `user` is the dispatch that checks the callee of the invocation in the body of a
@@ -1444,7 +1460,7 @@ pub(super) fn check_native_claim(
 	program: &Program,
 	registry: &FunctionRegistry,
 ) -> Result<(), IrError> {
-	let claimed = match op.lowers_natively(IsaCaps::default()) {
+	let claimed = match op.lowers_natively(IsaCaps::default(), registry) {
 		NativeLowering::UnitCall => return Ok(()),
 		NativeLowering::Native {
 			leaf_class,

@@ -21,6 +21,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -49,6 +50,7 @@ use crate::key::schema::{
 	IndexIdStateKey, NsIdBatchKey, NsIdBatchPrefix, NsIdStateKey, SeqBatchKey, SeqBatchPrefix,
 	SeqStateKey, SeqStatePrefix, SequenceKey, TbIdBatchKey, TbIdBatchPrefix, TbIdStateKey,
 };
+use crate::out_of_line::OutOfLine;
 use crate::tx::ProvisionalSequence;
 use crate::values::ids::DocId;
 use crate::{Transaction, TransactionType};
@@ -875,7 +877,19 @@ impl Sequences {
 	///
 	/// # Returns
 	/// The next sequential value
-	async fn next_val(
+	#[inline(never)]
+	fn next_val(
+		&self,
+		ctx: Option<&dyn CancellationProbe>,
+		seq: Arc<SequenceDomain>,
+		start: i64,
+		batch: u32,
+		timeout: Option<Duration>,
+	) -> OutOfLine<impl Future<Output = Result<i64>>> {
+		OutOfLine::new(self.next_val_body(ctx, seq, start, batch, timeout))
+	}
+
+	async fn next_val_body(
 		&self,
 		ctx: Option<&dyn CancellationProbe>,
 		seq: Arc<SequenceDomain>,
@@ -934,7 +948,19 @@ impl Sequences {
 	/// An allocator that reports a reset is removed again before returning, so
 	/// that a caller retrying builds a fresh one rather than finding this one
 	/// in the map.
-	async fn build_and_next(
+	#[inline(never)]
+	fn build_and_next(
+		&self,
+		ctx: Option<&dyn CancellationProbe>,
+		seq: &Arc<SequenceDomain>,
+		start: i64,
+		batch: u32,
+		timeout: Option<Duration>,
+	) -> OutOfLine<impl Future<Output = SequenceResult<i64>>> {
+		OutOfLine::new(self.build_and_next_body(ctx, seq, start, batch, timeout))
+	}
+
+	async fn build_and_next_body(
 		&self,
 		ctx: Option<&dyn CancellationProbe>,
 		seq: &Arc<SequenceDomain>,
@@ -1477,7 +1503,20 @@ impl Sequence {
 	/// * `caller` - The transaction a provisional allocator draws through
 	/// * `evicted` - For an allocator held in a node's map, whether it has left it. See
 	///   [`CachedSequence`].
-	async fn next(
+	#[inline(never)]
+	fn next(
+		&mut self,
+		sqs: &Sequences,
+		ctx: Option<&dyn CancellationProbe>,
+		seq: &SequenceDomain,
+		batch: u32,
+		caller: Option<&Transaction>,
+		evicted: Option<&AtomicBool>,
+	) -> OutOfLine<impl Future<Output = SequenceResult<i64>>> {
+		OutOfLine::new(self.next_body(sqs, ctx, seq, batch, caller, evicted))
+	}
+
+	async fn next_body(
 		&mut self,
 		sqs: &Sequences,
 		ctx: Option<&dyn CancellationProbe>,
@@ -1662,7 +1701,20 @@ impl Sequence {
 	///
 	/// # Returns
 	/// The window claimed. See [`BatchAllocation`].
-	async fn find_batch_allocation(
+	#[inline(never)]
+	fn find_batch_allocation(
+		sqs: &Sequences,
+		ctx: Option<&dyn CancellationProbe>,
+		seq: &SequenceDomain,
+		next: i64,
+		batch: u32,
+		to: Option<Duration>,
+		guard: ClaimGuard<'_>,
+	) -> OutOfLine<impl Future<Output = SequenceResult<BatchAllocation>>> {
+		OutOfLine::new(Self::find_batch_allocation_body(sqs, ctx, seq, next, batch, to, guard))
+	}
+
+	async fn find_batch_allocation_body(
 		sqs: &Sequences,
 		ctx: Option<&dyn CancellationProbe>,
 		seq: &SequenceDomain,

@@ -195,6 +195,7 @@ impl FoldRunner for Fixed {
 	fn run<'a>(
 		&'a self,
 		_ir: &'a Ir,
+		_registry: &'a FunctionRegistry,
 		_value: ValueId,
 		_capabilities: &'a CapabilityPolicy,
 	) -> Pin<Box<dyn Future<Output = FoldRun> + Send + 'a>> {

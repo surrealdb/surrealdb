@@ -25,6 +25,7 @@ use crate::dbs::{
 };
 use crate::err;
 use crate::err::{EngineError, Error};
+use crate::exec::context::shape_statement_value;
 use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::cache::deps::BindingOrigin;
 use crate::exec::ir::iface::premise::{OpenRegionShape, RegionContext, TxnContext};
@@ -48,7 +49,7 @@ use crate::observe::{
 	StatementEventSafe, StatementType,
 };
 use crate::rpc::types_error_from_anyhow;
-use crate::val::{Array, Value, convert_result_rows_to_public, convert_value_to_public_value};
+use crate::val::{Value, convert_result_rows_to_public, convert_value_to_public_value};
 
 const TARGET: &str = "surrealdb::core::dbs";
 
@@ -108,27 +109,6 @@ pub fn classify_anyhow_error(err: &anyhow::Error) -> &'static str {
 		return classify_types_error(types_err);
 	}
 	INTERNAL
-}
-
-/// Turns the values a plan produced into the statement's result value.
-///
-/// The plan declares the shape and the number of values that arrived does not
-/// get a vote: a consumer that forwards values as they are produced knows the
-/// shape long before it knows the count, so the count cannot be what decides.
-/// An operator that declares [`OutputShape::Scalar`] and then emits anything
-/// but one value has a bug; reporting it is what keeps that bug from reaching
-/// the caller as a silently rearranged result.
-fn shape_statement_value(shape: OutputShape, mut values: Vec<Value>) -> Result<Value> {
-	match shape {
-		OutputShape::Scalar if values.len() == 1 => {
-			Ok(values.pop().expect("values verified non-empty"))
-		}
-		OutputShape::Scalar => Err(anyhow!(EngineError::unreachable(format!(
-			"A scalar plan produced {} values instead of one",
-			values.len()
-		)))),
-		OutputShape::Rows => Ok(Value::Array(Array::from(values))),
-	}
 }
 
 /// A batch of rows encoded in `format`.
@@ -478,7 +458,7 @@ impl StreamSink {
 	}
 }
 
-struct PreparedBroker {
+pub(crate) struct PreparedBroker {
 	receiver: async_channel::Receiver<RoutedNotification>,
 	delivery: Arc<dyn MessageBroker>,
 }
@@ -494,7 +474,7 @@ struct FlushOnCommit(PreparedBroker);
 impl CommitAction for FlushOnCommit {
 	fn run(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
 		crate::exec::vm::out_of_line(|| async move {
-			Executor::flush_live_query_notifications(self.0);
+			flush_live_query_notifications(self.0);
 		})
 	}
 }
@@ -525,7 +505,12 @@ impl CarryBound {
 	/// A rebinding replaces the entry of its name, so it counts once. The
 	/// estimate of a value is walked only when `bytes` is set. A refused
 	/// binding leaves `carried` unchanged.
-	fn admit(&self, carried: &mut Carried, name: &str, value: &Value) -> Result<(), ExecError> {
+	pub(crate) fn admit(
+		&self,
+		carried: &mut Carried,
+		name: &str,
+		value: &Value,
+	) -> Result<(), ExecError> {
 		if self.names.is_none() && self.bytes.is_none() {
 			return Ok(());
 		}
@@ -619,7 +604,7 @@ impl LetUndo {
 /// tracks them: each name with the bytes estimated for its current value, and
 /// the sum of those estimates.
 #[derive(Default)]
-struct Carried {
+pub(crate) struct Carried {
 	held: HashMap<String, usize>,
 	bytes: usize,
 }
@@ -913,12 +898,268 @@ thread_local! {
 /// The context is shared as an `Arc` while a statement runs, so it can only be
 /// unfrozen between statements; a live reference here means a statement held
 /// on to one past its own execution.
-fn context_mut(ctx: &mut Arc<Context>) -> Result<&mut Context, anyhow::Error> {
+pub(crate) fn context_mut(ctx: &mut Arc<Context>) -> Result<&mut Context, anyhow::Error> {
 	Arc::get_mut(ctx)
 		.ok_or_else(|| {
 			EngineError::unreachable("Tried to unfreeze a Context with multiple references")
 		})
 		.map_err(anyhow::Error::new)
+}
+
+/// Install a notification broker on `ctx`, which buffers the notifications of the statement that
+/// runs next for `delivery`, and answer the handle that delivers them once its transaction has
+/// committed. Answers `None` where a higher layer already provided a broker, or where `ctx` is
+/// shared and cannot be changed.
+pub(crate) fn install_broker(
+	ctx: &mut FrozenContext,
+	delivery: Arc<dyn MessageBroker>,
+) -> Option<PreparedBroker> {
+	// If a broker is already provided by a higher layer, don't override it here.
+	if ctx.broker().is_some() {
+		return None;
+	}
+	let (send, recv) = async_channel::unbounded();
+	let Some(ctx) = Arc::get_mut(ctx) else {
+		debug_assert!(false, "prepare_broker: ctx Arc was contended at statement boundary");
+		static WARNED: AtomicBool = AtomicBool::new(false);
+		if !WARNED.swap(true, Ordering::Relaxed) {
+			tracing::warn!(
+				target: TARGET,
+				"prepare_broker: ctx Arc contended at statement boundary; \
+				 LIVE notifications for this batch will be skipped. This is a bug — \
+				 future occurrences will not log."
+			);
+		}
+		return None;
+	};
+	ctx.set_broker(Some(DefaultBroker::new(send, Arc::clone(&delivery))));
+	Some(PreparedBroker {
+		receiver: recv,
+		delivery,
+	})
+}
+
+/// Hand the notifications `prepared` buffered to the broker that delivers them. Called only once
+/// the transaction that produced them has committed.
+pub(crate) fn flush_live_query_notifications(prepared: PreparedBroker) {
+	let PreparedBroker {
+		receiver,
+		delivery,
+	} = prepared;
+	// Every sender is gone and nothing is buffered, so no item can arrive.
+	if receiver.is_empty() && receiver.is_closed() {
+		return;
+	}
+	common::rt::spawn_detached(async move {
+		while let Ok(item) = receiver.recv().await {
+			delivery.send(item).await;
+		}
+	});
+}
+
+/// Install a fresh [`StatementCounters`] and the statement clock on `ctx` for the next top-level
+/// statement, and return a clone of the counters handle so the caller can read the counts after the
+/// statement returns. The iterator (deep in the execution path) inherits the same handle through
+/// the child contexts it derives from `ctx`.
+///
+/// The clock is read here, once per top-level statement, so every CLOCK read the statement makes
+/// answers the instant it started, however long it runs. A nested query and an event body run in
+/// contexts derived from `ctx` and read that instant. The statements of a block, of the body of a
+/// `FOR` or an `IF`, and of a function body each take an instant of their own when they start, in a
+/// context derived from this one, and the statements they hold read that.
+///
+/// Between statements the caller holds the only strong reference to `ctx`, so `Arc::get_mut`
+/// succeeds. If it ever fails, because some child kept a strong reference past statement
+/// completion, the iterator would record into the previous statement's counters (or `None`) while
+/// `count_result_rows` reads zero from the new one, silently underreporting the affected rows of
+/// DML statements that use `RETURN NONE`, which is what `StatementCounters` exists to count. That
+/// is a programmer error: in debug builds it panics so tests fail loud, and in release builds it
+/// logs a `warn` (deduped per process). A stale instant, never the wall clock, is the failure mode.
+pub(crate) fn install_statement_state(ctx: &mut FrozenContext) -> Arc<StatementCounters> {
+	let counters = StatementCounters::new();
+	if let Some(ctx) = Arc::get_mut(ctx) {
+		ctx.set_statement_counters(Some(Arc::clone(&counters)));
+		ctx.set_statement_clock(crate::val::Datetime::now());
+	} else {
+		debug_assert!(
+			false,
+			"install_statement_state: ctx Arc was contended at statement boundary"
+		);
+		static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+		if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+			tracing::warn!(
+				target: "surrealdb::core::dbs",
+				"install_statement_state: ctx Arc contended at statement boundary; \
+				 result_rows on RETURN NONE DML may underreport. This is a bug — \
+				 future occurrences will not log."
+			);
+		}
+	}
+	counters
+}
+
+/// Guard that stops the timeout task when dropped, so it does not
+/// outlive the execution it was bounding.
+///
+/// The task has to be spawned rather than raced inside the query
+/// future: the point is for it to fire while the executor is inside an
+/// operator that is not otherwise yielding to check the deadline.
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+pub(crate) struct TimeoutGuard(common::rt::JoinHandle<()>);
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+impl Drop for TimeoutGuard {
+	fn drop(&mut self) {
+		self.0.abort();
+	}
+}
+
+/// The browser executor returns no handle to abort, so there the task
+/// is stopped by a token it waits on alongside the timer.
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
+pub(crate) struct TimeoutGuard(tokio_util::sync::CancellationToken);
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
+impl Drop for TimeoutGuard {
+	fn drop(&mut self) {
+		self.0.cancel();
+	}
+}
+
+/// Cancels `token` once `timeout` elapses, unless the returned guard is
+/// dropped first.
+pub(crate) fn spawn_timeout(
+	timeout: Duration,
+	token: tokio_util::sync::CancellationToken,
+) -> TimeoutGuard {
+	#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+	{
+		TimeoutGuard(common::rt::spawn(async move {
+			common::time::sleep(timeout).await;
+			token.cancel();
+		}))
+	}
+	#[cfg(all(target_family = "wasm", target_os = "unknown"))]
+	{
+		let finished = tokio_util::sync::CancellationToken::new();
+		let stop = finished.clone();
+		common::rt::spawn_detached(async move {
+			tokio::select! {
+				_ = common::time::sleep(timeout) => token.cancel(),
+				_ = stop.cancelled() => {}
+			}
+		});
+		TimeoutGuard(finished)
+	}
+}
+
+/// Commit the transaction of a statement that ran in a transaction of its own.
+///
+/// A transaction conflict propagates unwrapped so its structured kind (`TransactionConflict`, wire
+/// -32009) survives the conversion to a result row and SDK `.retry()` can recognise it. Wrapping it
+/// in `QueryNotExecuted` (as non-conflict commit failures are) would erase that signal. A commit
+/// whose outcome is unknown propagates unwrapped for the same reason: `QueryNotExecuted` asserts
+/// the work did not happen, and here it may have. Callers that read that as "safe to replay" would
+/// double-apply a non-idempotent statement.
+pub(crate) async fn commit_statement(txn: &Transaction) -> Result<()> {
+	if let Err(e) = txn.commit().await {
+		if crate::kvs::is_retryable_transaction_conflict(&e) {
+			return Err(e);
+		}
+		if crate::kvs::is_indeterminate_commit(&e) {
+			return Err(e);
+		}
+		bail!(DatastoreError::QueryNotExecuted {
+			message: e.to_string(),
+		});
+	}
+	Ok(())
+}
+
+/// Why a top-level `LET` binding was refused.
+pub(crate) enum SessionLetRefusal {
+	/// The name is protected or bound by the system.
+	Name(ExecError),
+	/// The binding crosses the stream's carry bound, which ends the stream.
+	Carry(ExecError),
+}
+
+impl SessionLetRefusal {
+	/// The error the refused statement fails with.
+	pub(crate) fn into_error(self) -> ExecError {
+		match self {
+			SessionLetRefusal::Name(error) | SessionLetRefusal::Carry(error) => error,
+		}
+	}
+}
+
+/// Admit the binding of the top-level `LET` `name` to `value`, or refuse it.
+///
+/// SECURITY: a protected name (`$auth`, `$token`, `$session`, `$access`) or a name the system
+/// binds (`$this`, `$value`, ...) is never bound by a `LET`, whichever path delivers the binding.
+/// A binding the carry bound refuses is recorded nowhere. Every driver of top-level statements
+/// admits a binding here before it writes it to the request context.
+pub(crate) fn admit_session_let(
+	carry: &CarryBound,
+	carried: &mut Carried,
+	name: &str,
+	value: &Value,
+) -> std::result::Result<(), SessionLetRefusal> {
+	if surrealdb_cnf::is_refused_let_name(name) {
+		return Err(SessionLetRefusal::Name(ExecError::InvalidParam {
+			name: name.to_owned(),
+		}));
+	}
+	carry.admit(carried, name, value).map_err(SessionLetRefusal::Carry)
+}
+
+/// Converts a finished statement's internal result value to a public value, honouring the `shape`
+/// of the plan that produced it. A `Rows` result is an array-of-rows envelope, so each row is
+/// converted as its own root at depth 1 - the same anchor the storage write guard and the
+/// streaming read path use - rather than charging the envelope a nesting level. A `Scalar` result
+/// is the single value and is converted whole.
+pub(crate) fn statement_result(shape: OutputShape, value: Value) -> Result<surrealdb_types::Value> {
+	match shape {
+		OutputShape::Rows => convert_result_rows_to_public(value),
+		OutputShape::Scalar => convert_value_to_public_value(value),
+	}
+}
+
+/// The error a statement the engine did not plan fails with. A decline met in a session whose
+/// namespace or database does not exist is that namespace or database not found, as the context
+/// check of a statement that reaches it raises it; any other failure is its own.
+pub(crate) async fn planning_failed(
+	opt: &Options,
+	txn: &Transaction,
+	error: Error,
+) -> anyhow::Error {
+	if matches!(error, Error::Exec(ExecError::PlannerUnsupported { .. }))
+		&& let (Ok(ns), Ok(db)) = (opt.ns(), opt.db())
+	{
+		if let Err(missing) = txn.expect_ns_by_name(ns).await {
+			return missing;
+		}
+		if let Err(missing) = txn.expect_db_by_name(ns, db).await {
+			return missing;
+		}
+	}
+	anyhow::Error::new(error)
+}
+
+/// Lower a bare expression to its logical plan.
+///
+/// No expression-layer value is built on this path. A shape with no logical form is reported as
+/// `PlannerUnsupported`, the same error the planner raises. A `SELECT` is checked against the
+/// `FOR UPDATE` rules before lowering, on the runtime syntax the parser produced. The expression
+/// is consumed.
+pub(crate) fn lower_statement(expr: Expr) -> Result<LogicalOp, Error> {
+	if let Expr::Select(select) = &expr {
+		crate::dbs::validate_for_update(select)?;
+	}
+	lower(expr).map_err(|reason| {
+		ExecError::PlannerUnsupported {
+			reason: reason.to_string(),
+		}
+		.into()
+	})
 }
 
 impl Executor {
@@ -935,46 +1176,9 @@ impl Executor {
 			return None;
 		}
 		let delivery = delivery?;
-		// If a broker is already provided by a higher layer, don't override it here.
-		if self.ctx.broker().is_some() {
-			return None;
-		}
-		let (send, recv) = async_channel::unbounded();
-		let Some(ctx) = Arc::get_mut(&mut self.ctx) else {
-			debug_assert!(false, "prepare_broker: ctx Arc was contended at statement boundary");
-			static WARNED: AtomicBool = AtomicBool::new(false);
-			if !WARNED.swap(true, Ordering::Relaxed) {
-				tracing::warn!(
-					target: TARGET,
-					"prepare_broker: ctx Arc contended at statement boundary; \
-					 LIVE notifications for this batch will be skipped. This is a bug — \
-					 future occurrences will not log."
-				);
-			}
-			return None;
-		};
-		ctx.set_broker(Some(DefaultBroker::new(send, Arc::clone(&delivery))));
+		let prepared = install_broker(&mut self.ctx, delivery)?;
 		self.broker_owned_by_executor = true;
-		Some(PreparedBroker {
-			receiver: recv,
-			delivery,
-		})
-	}
-
-	fn flush_live_query_notifications(prepared: PreparedBroker) {
-		let PreparedBroker {
-			receiver,
-			delivery,
-		} = prepared;
-		// Every sender is gone and nothing is buffered, so no item can arrive.
-		if receiver.is_empty() && receiver.is_closed() {
-			return;
-		}
-		common::rt::spawn_detached(async move {
-			while let Ok(item) = receiver.recv().await {
-				delivery.send(item).await;
-			}
-		});
+		Some(prepared)
 	}
 
 	#[inline]
@@ -1229,10 +1433,7 @@ impl Executor {
 	/// streaming read path use - rather than charging the envelope a nesting
 	/// level. A `Scalar` result is the single value and is converted whole.
 	fn convert_statement_result(&self, value: Value) -> Result<surrealdb_types::Value> {
-		match self.result_shape {
-			OutputShape::Rows => convert_result_rows_to_public(value),
-			OutputShape::Scalar => convert_value_to_public_value(value),
-		}
+		statement_result(self.result_shape, value)
 	}
 
 	/// Send the results that have become final, in order.
@@ -1285,57 +1486,10 @@ impl Executor {
 		}
 	}
 
-	/// Install a fresh [`StatementCounters`] and the statement clock on the
-	/// executor's context for the next top-level statement, and return a
-	/// clone of the counters handle so the caller can read the counts after
-	/// the statement returns. The iterator (deep in the execution path)
-	/// inherits the same handle through the child contexts it derives from
-	/// `self.ctx`.
-	///
-	/// The clock is read here, once per top-level statement, so every CLOCK
-	/// read the statement makes answers the instant it started, however long
-	/// it runs. A nested query and an event body run in contexts derived from
-	/// `self.ctx` and read that instant. The statements of a block, of the
-	/// body of a `FOR` or an `IF`, and of a function body each take an instant
-	/// of their own when they start, in a context derived from this one, and
-	/// the statements they hold read that. Under the contention described
-	/// below the previous statement's clock stays installed, so a stale
-	/// instant, never the wall clock, is the failure mode.
-	///
-	/// Between statements the executor holds the only strong reference to
-	/// `self.ctx`, so `Arc::get_mut` succeeds. If it ever fails — i.e.
-	/// some child kept a strong reference past statement completion —
-	/// the iterator would record into the previous statement's
-	/// counters (or `None`) while `count_result_rows` reads zero from
-	/// the new one, silently underreporting the affected rows of DML statements
-	/// that use `RETURN NONE`, which is what `StatementCounters` exists to count.
-	///
-	/// We treat that as a programmer error: in debug builds it
-	/// panics so tests fail loud; in release builds it logs a `warn`
-	/// (deduped per process) so production telemetry surfaces the bug
-	/// without turning a row-count discrepancy into an outage.
+	/// [`install_statement_state`] on the executor's context, for the next top-level statement.
+	#[inline]
 	fn install_statement_state(&mut self) -> Arc<StatementCounters> {
-		let counters = StatementCounters::new();
-		if let Some(ctx) = Arc::get_mut(&mut self.ctx) {
-			ctx.set_statement_counters(Some(Arc::clone(&counters)));
-			ctx.set_statement_clock(crate::val::Datetime::now());
-		} else {
-			debug_assert!(
-				false,
-				"install_statement_state: ctx Arc was contended at statement boundary"
-			);
-			static WARNED: std::sync::atomic::AtomicBool =
-				std::sync::atomic::AtomicBool::new(false);
-			if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
-				tracing::warn!(
-					target: "surrealdb::core::dbs",
-					"install_statement_state: ctx Arc contended at statement boundary; \
-					 result_rows on RETURN NONE DML may underreport. This is a bug — \
-					 future occurrences will not log."
-				);
-			}
-		}
-		counters
+		install_statement_state(&mut self.ctx)
 	}
 
 	fn execute_option_statement(&mut self, stmt: &OptionStatement) -> Result<()> {
@@ -1710,56 +1864,6 @@ impl Executor {
 
 		use crate::exec::context::ContextLevel;
 
-		/// Guard that stops the timeout task when dropped, so it does not
-		/// outlive the execution it was bounding.
-		///
-		/// The task has to be spawned rather than raced inside the query
-		/// future: the point is for it to fire while the executor is inside an
-		/// operator that is not otherwise yielding to check the deadline.
-		#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-		struct TimeoutGuard(common::rt::JoinHandle<()>);
-		#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-		impl Drop for TimeoutGuard {
-			fn drop(&mut self) {
-				self.0.abort();
-			}
-		}
-
-		/// The browser executor returns no handle to abort, so there the task
-		/// is stopped by a token it waits on alongside the timer.
-		#[cfg(all(target_family = "wasm", target_os = "unknown"))]
-		struct TimeoutGuard(CancellationToken);
-		#[cfg(all(target_family = "wasm", target_os = "unknown"))]
-		impl Drop for TimeoutGuard {
-			fn drop(&mut self) {
-				self.0.cancel();
-			}
-		}
-
-		/// Cancels `token` once `timeout` elapses, unless the returned guard is
-		/// dropped first.
-		fn spawn_timeout(timeout: Duration, token: CancellationToken) -> TimeoutGuard {
-			#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-			{
-				TimeoutGuard(common::rt::spawn(async move {
-					common::time::sleep(timeout).await;
-					token.cancel();
-				}))
-			}
-			#[cfg(all(target_family = "wasm", target_os = "unknown"))]
-			{
-				let finished = CancellationToken::new();
-				let stop = finished.clone();
-				common::rt::spawn_detached(async move {
-					tokio::select! {
-						_ = common::time::sleep(timeout) => token.cancel(),
-						_ = stop.cancelled() => {}
-					}
-				});
-				TimeoutGuard(finished)
-			}
-		}
-
 		// Derive the engine cancellation token from the
 		// context's awaitable cancel handle when one is installed (the WS
 		// RPC layer installs it; embedded callers do not). `child_token()`
@@ -1982,11 +2086,8 @@ impl Executor {
 		shape_statement_value(plan.output_shape(), results).map_err(ControlFlow::Err)
 	}
 
-	/// The context a statement runs in: a fresh snapshot of the session's
-	/// context with `txn`, cancelled through `cancellation`, at the highest
-	/// level the session's namespace and database support — failing where
-	/// either is missing at or below `required_level`, the level the plan
-	/// requires.
+	/// The context a statement runs in; see [`crate::exec::context::statement_context`]. The
+	/// session sink is attached by the caller that runs the statement.
 	async fn statement_context(
 		&mut self,
 		txn: &Arc<Transaction>,
@@ -1994,101 +2095,18 @@ impl Executor {
 		writes: bool,
 		required_level: crate::exec::context::ContextLevel,
 	) -> FlowResult<crate::exec::context::ExecutionContext> {
-		use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
-		use crate::exec::context::{
-			ContextLevel, DatabaseContext, ExecutionContext, NamespaceContext, RootContext,
-		};
-		// Build the root context using cached session info. The context
-		// snapshot must be fresh per-query because it contains the
-		// transaction reference which changes between statements.
-		let root_ctx = RootContext {
-			ctx: Context::snapshot(&self.ctx).freeze(),
-			options: Some(self.opt.clone()),
-			datastore: None,
-			cancellation: Arc::new(cancellation.clone()),
-			auth: Arc::clone(&self.opt.auth),
-			session: self.get_session_info(),
-			current_value: None,
-			current_row: None,
-			forbidden_row: None,
-			inherited_knn: None,
-			skip_fetch_perms: false,
-			perms_suppressed: false,
-			caller_perms_suppressed: false,
-			computing_record: None,
-			no_write: None,
-			version_stamp: None,
-			guard_verdicts: Arc::new(crate::exec::guard_verdicts::GuardVerdicts::for_statement(
-				writes,
-			)),
-			writing: false,
-			session_effects: None,
-		};
-
-		// The plan's declared context level is the minimum it needs (see
-		// `ContextLevel`), not a construction target: materialize the highest
-		// level the session's ns/db selection supports. A closure that
-		// arrives as a runtime value (`LET $f = || (SELECT ...); $f()`)
-		// hides its body from the planner, so a database-touching body must
-		// find the database context already in place even though the plan
-		// only declared root. Above the declared minimum the upgrade is
-		// opportunistic — a session pointing at a missing ns/db falls back
-		// to the declared level rather than failing a statement that never
-		// needed more. At or below the minimum, resolution failures surface
-		// exactly as before.
-		//
-		// SECURITY: `USE` never implicitly creates a namespace for a session that lacks
-		// `DEFINE NAMESPACE`-equivalent authorization, so this must not paper over a
-		// missing target by writing a fresh namespace into the catalog on the read path
-		// (which would also fail on a read-only transaction). `expect_ns_by_name` /
-		// `expect_db_by_name` surface a clean `NsNotFound` / `DbNotFound` instead.
-
-		let ns_def = if required_level >= ContextLevel::Namespace {
-			Some(txn.expect_ns_by_name(self.opt.ns()?).await?)
-		} else if let Ok(ns_name) = self.opt.ns() {
-			txn.expect_ns_by_name(ns_name).await.ok()
-		} else {
-			None
-		};
-
-		let db_def = match &ns_def {
-			Some(_) if required_level >= ContextLevel::Database => {
-				Some(txn.expect_db_by_name(self.opt.ns()?, self.opt.db()?).await?)
-			}
-			Some(_) => match (self.opt.ns(), self.opt.db()) {
-				(Ok(ns_name), Ok(db_name)) => txn.expect_db_by_name(ns_name, db_name).await.ok(),
-				_ => None,
-			},
-			None => None,
-		};
-
-		let exec_ctx = match (ns_def, db_def) {
-			(Some(ns_def), Some(db_def)) => ExecutionContext::Database(DatabaseContext {
-				ns_ctx: NamespaceContext {
-					root: root_ctx,
-					ns: ns_def,
-				},
-				db: db_def,
-				field_state_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
-					std::collections::HashMap::new(),
-				)),
-				table_def_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
-					std::collections::HashMap::new(),
-				)),
-				index_def_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
-					std::collections::HashMap::new(),
-				)),
-				select_permission_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
-					std::collections::HashMap::new(),
-				)),
-			}),
-			(Some(ns_def), None) => ExecutionContext::Namespace(NamespaceContext {
-				root: root_ctx,
-				ns: ns_def,
-			}),
-			(None, _) => ExecutionContext::Root(root_ctx),
-		};
-		Ok(exec_ctx)
+		let session = self.get_session_info();
+		crate::exec::context::statement_context(
+			&self.ctx,
+			&self.opt,
+			session,
+			txn,
+			cancellation,
+			writes,
+			required_level,
+			None,
+		)
+		.await
 	}
 
 	/// Run a bare expression on the engine.
@@ -2102,22 +2120,27 @@ impl Executor {
 		txn: Arc<Transaction>,
 		start: &Instant,
 	) -> FlowResult<Value> {
-		let (planned, logged) = match self.compiled_statement(&txn).await {
-			Some(compiled) => (compiled.plan, compiled.logged),
+		// Planning consumes the plan, and the slow log reads the statement's
+		// parameters from it after the query has run; keep a copy of the plan
+		// and of the statement only when a slow log is configured.
+		let keep_for_log = self.ctx.slow_log().is_some();
+		let (planned, logged, logged_expr) = match self.compiled_statement(&txn).await {
+			Some(compiled) => {
+				let logged_expr = compiled.logged.is_some().then_some(expr);
+				(compiled.plan, compiled.logged, logged_expr)
+			}
 			None => {
-				let lowered = self.lower_bare_expression(&expr);
-				// Planning consumes the plan, and the slow log reads the
-				// statement's parameters from it after the query has run; keep a
-				// copy only when a slow log is configured.
+				let logged_expr = keep_for_log.then(|| expr.clone());
+				let lowered = self.lower_bare_expression(expr);
 				let logged = match &lowered {
-					Ok(op) if self.ctx.slow_log().is_some() => Some(op.clone()),
+					Ok(op) if keep_for_log => Some(op.clone()),
 					_ => None,
 				};
 				let planned = match lowered {
 					Ok(op) => self.plan_bare_expression(op, Arc::clone(&txn)).await,
 					Err(e) => Err(e),
 				};
-				(planned.map(StatementPlan::Ready), logged)
+				(planned.map(StatementPlan::Ready), logged, logged_expr)
 			}
 		};
 		match planned {
@@ -2130,7 +2153,7 @@ impl Executor {
 					self.execute_operator_plan(plan, Arc::clone(&txn), stream_rows).await;
 				// Statement rendering redacts credentials in every nested position;
 				// the plan supplies the parameters referenced by the statement.
-				if let Some(op) = logged {
+				if let (Some(op), Some(expr)) = (logged, logged_expr) {
 					let statement = TopLevelStatement::Ast(TopLevelExpr::Expr(expr));
 					self.check_slow_log(start, &statement, &PlanParams(&op));
 				}
@@ -2140,22 +2163,9 @@ impl Executor {
 		}
 	}
 
-	/// The error a statement the engine did not plan fails with. A decline met
-	/// in a session whose namespace or database does not exist is that
-	/// namespace or database not found, as the context check of a statement
-	/// that reaches it raises it; any other failure is its own.
+	/// The error a statement the engine did not plan fails with; see [`planning_failed`].
 	async fn planning_failed(&self, txn: &Transaction, error: Error) -> anyhow::Error {
-		if matches!(error, Error::Exec(ExecError::PlannerUnsupported { .. }))
-			&& let (Ok(ns), Ok(db)) = (self.opt.ns(), self.opt.db())
-		{
-			if let Err(missing) = txn.expect_ns_by_name(ns).await {
-				return missing;
-			}
-			if let Err(missing) = txn.expect_db_by_name(ns, db).await {
-				return missing;
-			}
-		}
-		anyhow::Error::new(error)
+		planning_failed(&self.opt, txn, error).await
 	}
 
 	/// Lower a bare expression to its logical plan.
@@ -2167,17 +2177,9 @@ impl Executor {
 	/// [`crate::exec::logical::unplannable_write`] inside `plan_statement_inner`.
 	///
 	/// A `SELECT` is checked against the `FOR UPDATE` rules before lowering,
-	/// on the runtime syntax the parser produced.
-	fn lower_bare_expression(&self, expr: &Expr) -> Result<LogicalOp, Error> {
-		if let Expr::Select(select) = expr {
-			crate::dbs::validate_for_update(select)?;
-		}
-		lower(expr.clone()).map_err(|reason| {
-			ExecError::PlannerUnsupported {
-				reason: reason.to_string(),
-			}
-			.into()
-		})
+	/// on the runtime syntax the parser produced. The expression is consumed.
+	fn lower_bare_expression(&self, expr: Expr) -> Result<LogicalOp, Error> {
+		lower_statement(expr)
 	}
 
 	/// Bind a lowered bare expression for `txn` and plan it as the operator
@@ -2621,14 +2623,15 @@ impl Executor {
 		// SECURITY: a protected name (`$auth`, `$token`, `$session`, `$access`) or a name the
 		// system binds (`$this`, `$value`, ...) is never bound by a `LET`, whichever path delivers
 		// the binding.
-		if surrealdb_cnf::is_refused_let_name(name) {
-			return Err(ControlFlow::from(anyhow::Error::new(ExecError::InvalidParam {
-				name: name.to_owned(),
-			})));
-		}
-		if let Err(refused) = self.carry.admit(&mut self.carried, name, &value) {
-			self.carry_crossed = true;
-			return Err(ControlFlow::from(anyhow::Error::new(refused)));
+		match admit_session_let(&self.carry, &mut self.carried, name, &value) {
+			Ok(()) => {}
+			Err(refusal @ SessionLetRefusal::Name(_)) => {
+				return Err(ControlFlow::from(anyhow::Error::new(refusal.into_error())));
+			}
+			Err(refusal @ SessionLetRefusal::Carry(_)) => {
+				self.carry_crossed = true;
+				return Err(ControlFlow::from(anyhow::Error::new(refusal.into_error())));
+			}
 		}
 		if self.let_undo.is_open() {
 			let prev = self.ctx.own_value(name).cloned();
@@ -3016,33 +3019,12 @@ impl Executor {
 					return Err(e);
 				}
 
-				if let Err(e) = txn.commit().await {
-					// Propagate a transaction conflict unwrapped so its
-					// structured kind (`TransactionConflict`, wire -32009)
-					// survives the conversion to a result row and SDK
-					// `.retry()` can recognise it. Wrapping it in
-					// `QueryNotExecuted` (as non-conflict commit failures are)
-					// would erase that signal.
-					if crate::kvs::is_retryable_transaction_conflict(&e) {
-						return Err(e);
-					}
-					// A commit whose outcome is unknown propagates unwrapped for
-					// the same reason: `QueryNotExecuted` asserts the work did
-					// not happen, and here it may have. Callers that read that
-					// as "safe to replay" would double-apply a non-idempotent
-					// statement.
-					if crate::kvs::is_indeterminate_commit(&e) {
-						return Err(e);
-					}
-					bail!(DatastoreError::QueryNotExecuted {
-						message: e.to_string(),
-					});
-				}
+				commit_statement(&txn).await?;
 
 				// Flush buffered notifications only after the write is durable. Failed commits and
 				// cancelled transactions drop the receiver without delivery.
 				if let Some(prepared) = receiver {
-					Self::flush_live_query_notifications(prepared);
+					flush_live_query_notifications(prepared);
 				}
 
 				// The statement's result is not settled until the work it left for
@@ -3575,7 +3557,7 @@ impl Executor {
 						// Flush buffered notifications only after COMMIT succeeds. Rollback and
 						// failed COMMIT paths drop the receiver without delivery.
 						if let Some(prepared) = receiver {
-							Self::flush_live_query_notifications(prepared);
+							flush_live_query_notifications(prepared);
 						}
 
 						// COMMIT returns NONE
@@ -4529,7 +4511,7 @@ impl Executor {
 					})),
 				},
 				TopLevelExpr::Expr(expr) => RequestEntry::Run {
-					op: Some(self.lower_bare_expression(expr)),
+					op: Some(self.lower_bare_expression(expr.clone())),
 					read_only,
 				},
 			},

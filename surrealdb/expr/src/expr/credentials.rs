@@ -6,7 +6,6 @@ use rand::distr::{Alphanumeric, SampleString};
 use super::statements::DefineUserStatement;
 use super::statements::alter::AlterUserStatement;
 use super::visit::{MutVisitor, Visit, VisitMut, Visitor};
-use crate::iam::ScramCredential;
 
 pub(crate) struct PrepareCredentials {
 	changed: bool,
@@ -17,7 +16,7 @@ impl MutVisitor for PrepareCredentials {
 		if let Some(password) = user.pending_password.take() {
 			self.changed = true;
 			if user.scram.is_none() {
-				user.scram = Some(ScramCredential::generate(&password.0));
+				user.scram = crate::scram::derive(&password.0);
 			}
 			user.hash = crate::iam::hash_password(&password.0);
 		}
@@ -31,7 +30,9 @@ impl MutVisitor for PrepareCredentials {
 		if let Some(password) = user.pending_password.take() {
 			self.changed = true;
 			if user.scram.is_none() {
-				user.scram = Some(Some(ScramCredential::generate(&password.0)));
+				// A new password always replaces the verifier: without one, the old
+				// verifier is cleared so the old password stops authenticating over SCRAM.
+				user.scram = Some(crate::scram::derive(&password.0));
 			}
 			user.hash = Some(crate::iam::hash_password(&password.0));
 		}
@@ -129,5 +130,49 @@ impl super::Idiom {
 	/// Render durable path text with derived credentials in computed parts.
 	pub fn to_stored_sql(&self) -> String {
 		for_storage(self).to_raw_string()
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::expr::user::PendingPassword;
+
+	fn defined() -> DefineUserStatement {
+		let mut user = DefineUserStatement {
+			pending_password: Some(PendingPassword("secret".to_owned())),
+			..DefineUserStatement::default()
+		};
+		let Ok(()) = PrepareCredentials {
+			changed: false,
+		}
+		.visit_mut_define_user(&mut user);
+		user
+	}
+
+	fn altered() -> AlterUserStatement {
+		let mut user = AlterUserStatement {
+			pending_password: Some(PendingPassword("secret".to_owned())),
+			..AlterUserStatement::default()
+		};
+		let Ok(()) = PrepareCredentials {
+			changed: false,
+		}
+		.visit_mut_alter_user(&mut user);
+		user
+	}
+
+	#[cfg(feature = "scram")]
+	#[test]
+	fn a_password_stores_a_scram_verifier() {
+		assert!(defined().scram.is_some());
+		assert!(matches!(altered().scram, Some(Some(_))));
+	}
+
+	#[cfg(not(feature = "scram"))]
+	#[test]
+	fn without_scram_a_password_stores_no_verifier_and_clears_the_old_one() {
+		assert!(defined().scram.is_none());
+		assert!(matches!(altered().scram, Some(None)), "a new password clears the old verifier");
 	}
 }

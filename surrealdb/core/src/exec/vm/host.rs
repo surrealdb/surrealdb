@@ -65,7 +65,6 @@ pub(crate) struct VmOperator {
 	/// The program's late-bound statements, as written, which its blocks
 	/// serve when they reach them.
 	served: Option<super::ServedStatements>,
-	analysis: Option<super::explain::VmAnalysis>,
 }
 
 impl VmOperator {
@@ -78,7 +77,6 @@ impl VmOperator {
 			metrics: Arc::new(OperatorMetrics::new()),
 			held: None,
 			served: None,
-			analysis: None,
 		}
 	}
 
@@ -117,24 +115,6 @@ impl futures::Stream for Holding {
 }
 
 impl ExecOperator for VmOperator {
-	fn name(&self) -> &'static str {
-		if self.analysis.is_some() {
-			"ExplainAnalyze"
-		} else {
-			Self::NAME
-		}
-	}
-
-	fn attrs(&self) -> Vec<(String, String)> {
-		vec![
-			(
-				"table".to_owned(),
-				self.program.table.as_ref().map_or_else(|| "NONE".to_owned(), |t| t.to_string()),
-			),
-			("pipelines".to_owned(), self.program.pipelines.len().to_string()),
-		]
-	}
-
 	fn required_context(&self) -> ContextLevel {
 		self.program.required_context
 	}
@@ -143,18 +123,10 @@ impl ExecOperator for VmOperator {
 		self.program.access_mode
 	}
 
-	fn metrics(&self) -> Option<&OperatorMetrics> {
-		Some(&self.metrics)
-	}
-
 	/// A write's `ONLY` makes its value the one row it returned, which the
 	/// write body judges itself.
 	fn output_shape(&self) -> crate::exec::OutputShape {
-		if self.analysis.is_some() {
-			crate::exec::OutputShape::Scalar
-		} else {
-			output_shape(&self.program)
-		}
+		output_shape(&self.program)
 	}
 
 	fn execute_encoded(
@@ -186,22 +158,7 @@ impl VmOperator {
 			}
 			None => ctx,
 		};
-		let analyzing = self.analysis.as_ref().map(|analysis| analysis.frame(ctx));
-		let ctx = analyzing.as_ref().unwrap_or(ctx);
-		let stream = execute_program_in(
-			&self.program,
-			ctx,
-			None,
-			if self.analysis.is_some() {
-				None
-			} else {
-				format
-			},
-		)?;
-		let stream = match &self.analysis {
-			Some(analysis) => analysis.run(stream, ctx),
-			None => stream,
-		};
+		let stream = execute_program_in(&self.program, ctx, None, format)?;
 		let stream: ValueBatchStream = match &self.held {
 			Some(held) => Box::pin(Holding {
 				stream,
@@ -4852,20 +4809,9 @@ async fn run_body(
 								};
 								// Boxed: a store step's future is large, and this one
 								// is part of every row's.
-								let target = if matches!(
-									instr,
-									StoreInstr::EvaluateOver { .. }
-										| StoreInstr::BackfillRow { .. }
-										| StoreInstr::BackfillGroup { .. }
-										| StoreInstr::BackfillGroupRow { .. }
-								) {
+								let target = if instr.is_dml() {
 									out_of_line(|| {
-										super::backfill::step(program, instr, regs, state, ctx)
-									})
-									.await?
-								} else {
-									out_of_line(|| {
-										super::store::step(
+										super::store::step_dml(
 											program,
 											instr,
 											regs,
@@ -4874,6 +4820,37 @@ async fn run_body(
 										)
 									})
 									.await?
+								} else {
+									// The runtime of every other store instruction is the
+									// surface's: an entry that serves data statements alone
+									// holds none.
+									let Some(schema) = ctx.ctx().surface().schema_steps else {
+										return Err(ControlFlow::Err(anyhow::Error::new(
+											crate::exec::Error::PlannerUnsupported {
+												reason: super::ir_lower::NOT_SERVED.into(),
+											},
+										)));
+									};
+									if matches!(
+										instr,
+										StoreInstr::EvaluateOver { .. }
+											| StoreInstr::BackfillRow { .. }
+											| StoreInstr::BackfillGroup { .. }
+											| StoreInstr::BackfillGroupRow { .. }
+									) {
+										// The surface's steps answer a boxed future already.
+										schema.backfill(program, instr, regs, state, ctx).await?
+									} else {
+										schema
+											.step(
+												program,
+												instr,
+												regs,
+												&mut state.reserved_taken,
+												ctx,
+											)
+											.await?
+									}
 								};
 								pc = match target {
 									Some(target) => target,
@@ -6666,7 +6643,7 @@ async fn call_builtin(
 	refuse_mutating_builtin(func.name(), func.effects(), ctx.exec_ctx)?;
 	let mut ctx = ctx;
 	ctx.plan_depth = ctx.plan_depth.max(call.plan_depth);
-	invoke_builtin(func.as_ref(), args, &ctx).await?.map_err(ControlFlow::Err)
+	invoke_builtin(func, args, &ctx).await?.map_err(ControlFlow::Err)
 }
 
 /// Invoke builtin `func` on `args`, its work drawing on the thread's fuel.
@@ -7445,7 +7422,6 @@ async fn call_method(
 	let Some(func) = descriptor.resolve(&recv) else {
 		return Err(unknown(&recv));
 	};
-	let func = Arc::clone(func);
 	let mut func_args = Vec::with_capacity(1 + args.len());
 	func_args.push(recv);
 	func_args.extend(args);
@@ -7459,7 +7435,7 @@ async fn call_method(
 		})));
 	}
 	refuse_mutating_builtin(func.name(), func.effects(), ctx.exec_ctx)?;
-	let result = invoke_builtin(func.as_ref(), func_args, &ctx).await?;
+	let result = invoke_builtin(func, func_args, &ctx).await?;
 	let writing = method.writing || ctx.exec_ctx.root().writing;
 	let resolved = func.name();
 	result.map_err(|e| match e.downcast_ref::<crate::expr::Error>() {

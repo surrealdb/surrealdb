@@ -29,7 +29,7 @@ use std::io::ErrorKind;
 
 use revision::{DeserializeRevisioned, SerializeRevisioned, SkipRevisioned};
 use surrealdb_expr::val::stored::schema::{Floor, SchemaError, StoredType};
-use surrealdb_expr::val::stored::{Item, varint, with_encoder};
+use surrealdb_expr::val::stored::{Encoder, Item, varint, with_encoder};
 use surrealdb_kvs::{EncodeContext, Encoded, FeatureLevel, Release};
 
 use super::error::EntryError;
@@ -131,8 +131,25 @@ fn write_stored<T: StoredType>(
 	prior: Option<&[u8]>,
 	level: Release,
 ) -> Result<Encoded, EntryError> {
-	let ty = T::SCHEMA.name;
 	let floor = release_of(value, prior)?;
+	write_framed(T::SCHEMA.name, floor, prior, level, &|enc, prior_body| {
+		value.encode_item(enc, prior_body)
+	})
+}
+
+/// Writes a value's body, given the body of the entry it replaces.
+type EncodeBody<'a> = dyn Fn(&mut Encoder, Option<Item<'_>>) -> Result<(), SchemaError> + 'a;
+
+/// Frames the body `encode` writes as a stored-grammar entry of type `ty` with `floor`, after
+/// checking `floor` against `level`. Shared by every type so the framing exists once.
+#[inline(never)]
+fn write_framed(
+	ty: &'static str,
+	floor: Release,
+	prior: Option<&[u8]>,
+	level: Release,
+	encode: &EncodeBody<'_>,
+) -> Result<Encoded, EntryError> {
 	if floor > level {
 		return Err(EntryError::AboveLevel {
 			ty,
@@ -143,7 +160,7 @@ fn write_stored<T: StoredType>(
 	let prior_body =
 		prior.and_then(|bytes| parse_header(ty, bytes).ok()).map(|(_, body)| Item::new(body));
 	let bytes = with_encoder(|enc| {
-		value.encode_item(enc, prior_body)?;
+		encode(enc, prior_body)?;
 		enc.put_varint_u64(u64::from(floor.to_u32()));
 		// The header: every bit is reserved and zero.
 		enc.put_u8(0);
@@ -185,34 +202,52 @@ pub fn encode_entry<T: StoredType + SerializeRevisioned>(
 	value: &T,
 	ctx: &EncodeContext<'_>,
 ) -> Result<Encoded, EntryError> {
-	let ty = T::SCHEMA.name;
 	match ctx.level {
-		FeatureLevel::Legacy => {
-			if let Some(needed) = value.unrevisioned_floor() {
-				return Err(EntryError::AboveLevel {
-					ty,
-					needed,
-					level: ctx.level,
-				});
-			}
-			let needed = release_of(value, ctx.prior)?;
-			if !ctx.level.admits(needed) {
-				return Err(EntryError::AboveLevel {
-					ty,
-					needed,
-					level: ctx.level,
-				});
-			}
-			let bytes = revision::to_vec(value).map_err(|_| EntryError::RevisionWrite {
-				ty,
-			})?;
-			Ok(Encoded {
-				bytes,
-				floor: None,
-			})
-		}
+		FeatureLevel::Legacy => write_legacy(
+			T::SCHEMA.name,
+			ctx.level,
+			value.unrevisioned_floor(),
+			&mut || release_of(value, ctx.prior),
+			&mut || revision::to_vec(value),
+		),
 		FeatureLevel::At(level) => write_stored(value, ctx.prior, level),
 	}
+}
+
+/// The `revision` bytes of a value of type `ty` at the Legacy `level`. `unrevisioned` is the
+/// floor of its non-default `Unrevisioned` field, if any, `release` computes its floor, and
+/// `write` its `revision` bytes. The checks run in that order, so the first to fail is the error
+/// returned.
+#[inline(never)]
+fn write_legacy(
+	ty: &'static str,
+	level: FeatureLevel,
+	unrevisioned: Option<Release>,
+	release: &mut dyn FnMut() -> Result<Release, EntryError>,
+	write: &mut dyn FnMut() -> Result<Vec<u8>, revision::Error>,
+) -> Result<Encoded, EntryError> {
+	if let Some(needed) = unrevisioned {
+		return Err(EntryError::AboveLevel {
+			ty,
+			needed,
+			level,
+		});
+	}
+	let needed = release()?;
+	if !level.admits(needed) {
+		return Err(EntryError::AboveLevel {
+			ty,
+			needed,
+			level,
+		});
+	}
+	let bytes = write().map_err(|_| EntryError::RevisionWrite {
+		ty,
+	})?;
+	Ok(Encoded {
+		bytes,
+		floor: None,
+	})
 }
 
 /// `value`'s bytes at `ctx`, for a type with no `revision` form: the stored grammar only, refused

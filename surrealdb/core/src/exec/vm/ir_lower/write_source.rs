@@ -469,7 +469,8 @@ mod tests {
 		);
 		let rows = b.add(ExprOp::Array, &[row]);
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		let spec = insert_rows(&mut lowerer, rows).expect("the rows lower");
 		assert_eq!(
 			spec,
@@ -496,7 +497,8 @@ mod tests {
 		let second = tuple_row(&mut b, vec![place(vec![field("a")])], &[two]);
 		let rows = b.add(ExprOp::Array, &[first, second]);
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		let InsertRowsSpec::Tuples(tuples) =
 			insert_rows(&mut lowerer, rows).expect("the rows lower")
 		else {
@@ -524,7 +526,8 @@ mod tests {
 		);
 		let rows = b.add(ExprOp::Array, &[row]);
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		let InsertRowsSpec::Tuples(tuples) =
 			insert_rows(&mut lowerer, rows).expect("the rows lower")
 		else {
@@ -576,7 +579,8 @@ mod tests {
 		);
 		let rows = b.add(ExprOp::Array, &[row]);
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		insert_rows(&mut lowerer, rows).expect("a place the refusal waits in lowers");
 		let program = em
 			.finish_program(Vec::new(), crate::exec::AccessMode::ReadWrite)
@@ -616,7 +620,8 @@ mod tests {
 		let row = b.result_of(owner);
 		let rows = b.add(ExprOp::Array, &[row]);
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		let InsertRowsSpec::Tuples(tuples) =
 			insert_rows(&mut lowerer, rows).expect("the rows lower")
 		else {
@@ -636,7 +641,8 @@ mod tests {
 		let mut b = Builder::new();
 		let rows = b.literal(Value::from(1_i64));
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		assert_eq!(
 			insert_rows(&mut lowerer, rows).expect("the rows lower"),
 			InsertRowsSpec::Value(constant(Value::from(1_i64)))
@@ -653,7 +659,8 @@ mod tests {
 		);
 		let rows = b.add(ExprOp::Array, &[row, plain]);
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		assert!(matches!(insert_rows(&mut lowerer, rows), Err(IrError::Invariant { .. })));
 	}
 
@@ -669,7 +676,8 @@ mod tests {
 			&[],
 		);
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		let Source::WriteInserts {
 			into: Some(into),
 			relation,
@@ -689,7 +697,8 @@ mod tests {
 		let mut b = Builder::new();
 		let literal = b.literal(Value::Array(Array(vec![Value::from(1_i64), Value::from(2_i64)])));
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		let Source::WriteTargets {
 			targets,
 			deferable,
@@ -714,7 +723,8 @@ mod tests {
 			b.add(ExprOp::Mock(Box::new(Mock::Count(TableName::new(Strand::new("t")), 3))), &[]);
 		let array = b.add(ExprOp::Array, &[one, mock]);
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		let Source::WriteTargets {
 			targets,
 			..
@@ -739,7 +749,8 @@ mod tests {
 		let through = b.literal(Value::from(2_i64));
 		let two = b.add(ExprOp::Array, &[from, through]);
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		assert!(matches!(edges_source(&mut lowerer, two), Err(IrError::Invariant { .. })));
 		let mut b = Builder::new();
 		let from = b.literal(Value::from(1_i64));
@@ -747,7 +758,8 @@ mod tests {
 		let to_value = b.binary(BinaryOperator::Add, from, from);
 		let all = b.add(ExprOp::Array, &[from, through, to_value]);
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		let Source::WriteEdges {
 			from,
 			through,

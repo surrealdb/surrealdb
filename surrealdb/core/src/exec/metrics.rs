@@ -144,7 +144,7 @@ impl OperatorMetrics {
 
 	/// Enable metrics collection on this instance.
 	///
-	/// Called by `VmAnalysis` to activate recording before the program runs.
+	/// Called by `analysed_run` to activate recording before the statement runs.
 	/// After this call, [`monitor_stream`] will wrap streams with the
 	/// full timing/counting/tracing instrumentation.
 	pub(crate) fn enable(&self) {

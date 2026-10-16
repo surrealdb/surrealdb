@@ -28,11 +28,13 @@ use crate::exec::ir::iface::ids::ValueId;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct PassConfig {
 	pub(crate) specialise_guards: bool,
+	pub(crate) inline_calls: bool,
 	pub(crate) fold: bool,
 	pub(crate) dce: bool,
 	/// Removal of the predecessors of a raise that is certain.
 	pub(crate) dce_certain_error: bool,
 	pub(crate) cse: bool,
+	pub(crate) push_into_subquery: bool,
 	pub(crate) push_below_layer: bool,
 	pub(crate) push_below_permission: bool,
 	pub(crate) unroll: bool,
@@ -44,15 +46,18 @@ pub(crate) struct PassConfig {
 }
 
 impl PassConfig {
-	/// What the planner runs. Passes that reorder a raise's neighbours, copy loops or need a
-	/// catalog the planning session does not hold are off.
+	/// What the planner runs. The passes that move a conjunct across a permission filter, copy
+	/// loops, remove what precedes a certain raise or need a catalog the planning session does
+	/// not hold are off.
 	pub(crate) const RELEASE: Self = Self {
 		specialise_guards: true,
+		inline_calls: true,
 		fold: true,
 		dce: true,
 		dce_certain_error: false,
 		cse: true,
-		push_below_layer: false,
+		push_into_subquery: true,
+		push_below_layer: true,
 		push_below_permission: false,
 		unroll: false,
 		unswitch: false,
@@ -68,10 +73,12 @@ impl PassConfig {
 	/// Every pass on.
 	pub(crate) const ALL_ON: Self = Self {
 		specialise_guards: true,
+		inline_calls: true,
 		fold: true,
 		dce: true,
 		dce_certain_error: true,
 		cse: true,
+		push_into_subquery: true,
 		push_below_layer: true,
 		push_below_permission: true,
 		unroll: true,
@@ -84,10 +91,12 @@ impl PassConfig {
 	/// Every pass off: a run leaves the container as it found it.
 	pub(crate) const ALL_OFF: Self = Self {
 		specialise_guards: false,
+		inline_calls: false,
 		fold: false,
 		dce: false,
 		dce_certain_error: false,
 		cse: false,
+		push_into_subquery: false,
 		push_below_layer: false,
 		push_below_permission: false,
 		unroll: false,

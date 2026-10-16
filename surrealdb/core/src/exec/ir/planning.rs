@@ -68,7 +68,6 @@ use crate::exec::ir::cache::deps::ValueDeps;
 use crate::exec::ir::cache::planning::PlanningCatalog;
 use crate::exec::ir::logical::constraints::RegionRejection;
 use crate::exec::ir::logical::seam::{BindNotes, node_identity};
-use crate::exec::logical::is_identity_cast;
 use crate::exec::logical::pipelines::{Legality, LegalityIndex, statement_legality_with};
 use crate::exec::logical::summaries::CatalogSummaries;
 use crate::exec::planner::Planner;
@@ -78,7 +77,8 @@ use crate::exec::vm::ir_catalog::{
 	PlannerLoader, fill, fill_field_checks, fill_record_folds, top_up,
 };
 use crate::exec::vm::payload::Refusal;
-use crate::expr::logical::{LogicalExpr, LogicalOp, lower, lower_expr};
+use crate::expr::logical::{LogicalExpr, LogicalOp, Schema, lower, lower_expr};
+use crate::expr::{Kind, PrefixOperator};
 
 /// What planning reads of the request's environment besides its statements.
 pub(crate) struct PlanningInput<'a> {
@@ -224,6 +224,49 @@ fn charge_prefix_chains(
 	Ok(())
 }
 
+/// Whether `expr` is a cast that yields its operand unchanged whatever row it is evaluated
+/// against: a cast to a kind that names one representation, of an operand checked to have that
+/// kind with no field known. The binder removes such a cast, so it is no step of evaluation.
+fn is_identity_cast(expr: &LogicalExpr) -> bool {
+	let LogicalExpr::Prefix {
+		op: PrefixOperator::Cast(kind),
+		expr: inner,
+	} = expr
+	else {
+		return false;
+	};
+	checks_only(kind) && inner.checked_kind(&Schema::open()).as_ref() == Some(kind)
+}
+
+/// Whether a cast to `kind` of a value already of that kind yields the value: the kind names one
+/// representation, so the cast has nothing to convert.
+fn checks_only(kind: &Kind) -> bool {
+	match kind {
+		Kind::Any | Kind::Either(_) | Kind::Literal(_) => false,
+		Kind::Array(inner, _) | Kind::Set(inner, _) => checks_only(inner),
+		Kind::None
+		| Kind::Null
+		| Kind::Bool
+		| Kind::Bytes
+		| Kind::Datetime
+		| Kind::Decimal
+		| Kind::Duration
+		| Kind::Float
+		| Kind::Int
+		| Kind::Number
+		| Kind::Object
+		| Kind::String
+		| Kind::Uuid
+		| Kind::Regex
+		| Kind::Table(_)
+		| Kind::Record(_)
+		| Kind::Geometry(_)
+		| Kind::Function(..)
+		| Kind::Range
+		| Kind::File(_) => true,
+	}
+}
+
 /// The region-constraint rejection of `input`, bound as [`plan_request`] binds it and planned no
 /// further; `None` when every region admits what it holds, and for a unit the check does not
 /// judge ([`UnitKind::checked`](super::UnitKind::checked)).
@@ -321,6 +364,7 @@ async fn prepare(
 					|| matches!(input.unit, UnitKind::StageBundle { .. }),
 			)
 			.with_calls_current(planner.calls_current())
+			.with_caller(planner.auth.clone())
 			.at_stamp(match planner.plan_time_version {
 				crate::exec::planner::PlanTimeVersion::Current => None,
 				crate::exec::planner::PlanTimeVersion::At(stamp) => Some(stamp),
@@ -458,7 +502,7 @@ pub(crate) async fn plan_subscription(
 					catalog: &memo,
 					frames: &frames,
 				};
-				match bind_subscription(&input, &effects) {
+				match bind_subscription(&input, &effects, Some(planner.frozen().surface())) {
 					Ok(ir) => Some(ir),
 					Err(IrError::NotLoaded {
 						..
@@ -563,7 +607,7 @@ async fn plan_bound(
 	let mut legality = LegalitySnapshotSlot::new();
 	compile_phase!(
 		"logical",
-		loop_legality::snapshot_into(&ir, &mut facts, ir.top(), &mut legality)?
+		loop_legality::snapshot_into(&ir, &mut facts, registry, ir.top(), &mut legality)?
 	);
 	facts.set_legality_snapshot(legality);
 	frames = ir.frames().clone();
@@ -679,7 +723,7 @@ async fn bind_loaded(
 				catalog: memo,
 				frames,
 			};
-			bind_request_noted(input, &effects).await?
+			bind_request_noted(input, &effects, Some(planner.frozen().surface())).await?
 		};
 		let views = memo.take_pending_field_views();
 		let loaded = memo.load_pending().await.map_err(|_| unreadable())?;

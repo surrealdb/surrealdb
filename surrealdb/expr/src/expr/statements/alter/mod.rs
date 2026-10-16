@@ -98,7 +98,7 @@ impl<T: Revisioned + DeserializeRevisioned> DeserializeRevisioned for AlterKind<
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Debug, Eq, PartialEq, Hash)]
 /// Execution‑time representation of all `ALTER` statements.
 ///
 /// Variants map to specific resources and delegate execution to their
@@ -121,6 +121,32 @@ pub enum AlterStatement {
 	User(AlterUserStatement),
 	Access(AlterAccessStatement),
 	Module(AlterModuleStatement),
+}
+
+/// Written out and kept out of line so one copy serves every crate that clones an `AlterStatement`.
+impl Clone for AlterStatement {
+	#[inline(never)]
+	fn clone(&self) -> Self {
+		match self {
+			Self::System(v) => Self::System(v.clone()),
+			Self::Namespace(v) => Self::Namespace(v.clone()),
+			Self::Database(v) => Self::Database(v.clone()),
+			Self::Table(v) => Self::Table(v.clone()),
+			Self::Api(v) => Self::Api(v.clone()),
+			Self::Event(v) => Self::Event(v.clone()),
+			Self::Index(v) => Self::Index(v.clone()),
+			Self::Sequence(v) => Self::Sequence(v.clone()),
+			Self::Field(v) => Self::Field(v.clone()),
+			Self::Param(v) => Self::Param(v.clone()),
+			Self::Bucket(v) => Self::Bucket(v.clone()),
+			Self::Config(v) => Self::Config(v.clone()),
+			Self::Analyzer(v) => Self::Analyzer(v.clone()),
+			Self::Function(v) => Self::Function(v.clone()),
+			Self::User(v) => Self::User(v.clone()),
+			Self::Access(v) => Self::Access(v.clone()),
+			Self::Module(v) => Self::Module(v.clone()),
+		}
+	}
 }
 
 impl ToSql for AlterStatement {

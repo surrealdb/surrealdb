@@ -111,6 +111,17 @@ impl StoredEventDefinition {
 
 impl_kv_value_catalog!(StoredEventDefinition);
 
+impl crate::stored::EmbeddedRevision for StoredEventDefinition {
+	fn deserialize_body<R: std::io::Read>(
+		reader: &mut R,
+		revision: u16,
+	) -> Result<Self, revision::Error> {
+		// The derive's body reader, so it stays identical to `deserialize_revisioned` after the
+		// header.
+		Self::__deserialize_after_header(reader, revision)
+	}
+}
+
 impl StoredEventDefinition {
 	pub fn retry(&self) -> u16 {
 		match self.kind {

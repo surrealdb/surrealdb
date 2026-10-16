@@ -31,6 +31,7 @@
 
 use smallvec::SmallVec;
 
+use crate::exec::ir::analysis::cx::structural_cx;
 use crate::exec::ir::analysis::effects;
 use crate::exec::ir::build::membership::is_membership_key;
 use crate::exec::ir::core::facts::FactCache;
@@ -822,8 +823,12 @@ impl Walk<'_, '_> {
 			OpKind::Expr(call) if is_call(call) => {
 				if let Some(cx) = self.cx {
 					if self.judges_call_writes()
-						&& known_write(&effects::of(self.ir, &mut self.facts, op))
-					{
+						&& known_write(&effects::of_with(
+							self.ir,
+							&mut self.facts,
+							&structural_cx(cx.registry, self.ir),
+							op,
+						)) {
 						out.push(Construct::Write);
 					}
 					if self.is_active(Section4bRow::IndexColumn)

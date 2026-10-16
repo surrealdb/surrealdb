@@ -20,7 +20,9 @@ use std::sync::Arc;
 
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{FieldDefinition, Permission};
+use crate::exec::function::FunctionRegistry;
 use crate::exec::index::access_path::{ElementColumns, admissible_indexes};
+use crate::exec::ir::analysis::cx::structural_cx;
 use crate::exec::ir::analysis::effects;
 use crate::exec::ir::cache::planning::PlanningCatalog;
 use crate::exec::ir::core::facts::FactCache;
@@ -701,6 +703,7 @@ fn field_statement(ir: &Ir, op: OpId, kind: &LogOp) -> Result<Option<FieldStatem
 fn checkable_field_statements(
 	ir: &Ir,
 	facts: &mut FactCache,
+	registry: &FunctionRegistry,
 ) -> Result<Vec<(OpId, FieldStatement)>, IrError> {
 	let mut found = Vec::new();
 	let mut changed = false;
@@ -738,7 +741,10 @@ fn checkable_field_statements(
 			changed = true;
 			return Walk::SkipRegions;
 		}
-		if may_change_checked_catalog(effects::of(ir, facts, op).set, &data.kind) {
+		if may_change_checked_catalog(
+			effects::of_with(ir, facts, &structural_cx(registry, ir), op).set,
+			&data.kind,
+		) {
 			changed = true;
 		}
 		Walk::SkipRegions
@@ -864,7 +870,7 @@ pub(crate) async fn fill_field_checks(
 	if planner.is_late_bound() {
 		return Ok(());
 	}
-	let statements = checkable_field_statements(ir, facts)?;
+	let statements = checkable_field_statements(ir, facts, planner.function_registry())?;
 	let mut made = Vec::with_capacity(statements.len());
 	for (op, statement) in &statements {
 		if let Some(checks) = field_checks(planner, statement).await {

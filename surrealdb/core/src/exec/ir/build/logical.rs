@@ -122,6 +122,7 @@ use crate::exec::planner::analyse_aggregation;
 use crate::exec::planner::fold::{changes_the_catalog, computed_reads, permission_subject};
 use crate::exec::planner::util::check_forbidden_group_by_params;
 use crate::exec::planner::write::write_facts;
+use crate::exec::surface::{FULL, Surface};
 use crate::exec::vm::payload::Refusal;
 use crate::expr::logical::{
 	EvalFrame, EvalMode, GuardKind, LogicalAggregate, LogicalAssignment, LogicalCall,
@@ -135,11 +136,11 @@ use crate::expr::logical::{
 	LogicalWriteStatement, OutputPath, RequestStatementKind, Schema, SourceRef, lower, lower_expr,
 	lower_fields, lower_request,
 };
-use crate::expr::{Function, Idiom, Kind, Output, Part};
+use crate::expr::{BinaryOperator, Function, Idiom, Kind, Output, Part};
 
 /// What binding a statement left in the block it was bound in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Flow {
+pub(crate) enum Flow {
 	/// The statement's value.
 	Value(ValueId),
 	/// The statement has the value `NONE` and built no op for it.
@@ -214,11 +215,13 @@ pub(crate) async fn bind_request(
 /// The check runs only on a container whose unit is one the request wrote ([`UnitKind::checked`]):
 /// a function body, a table's read unit and the stored code of a write are never judged, so a
 /// definition stored before a constraint existed keeps working.
+///
+/// The request is bound for the entry that serves every statement family ([`FULL`]).
 pub(crate) async fn bind_request_checked(
 	input: &RequestInput<'_>,
 	cx: &EffectCx<'_>,
 ) -> Result<(Ir, Option<RegionRejection>), IrError> {
-	bind_request_noted(input, cx).await.map(|(ir, rejection, _)| (ir, rejection))
+	bind_request_noted(input, cx, Some(&FULL)).await.map(|(ir, rejection, _)| (ir, rejection))
 }
 
 /// [`bind_request_checked`], also answering what the binder noted of the logical plans it bound
@@ -226,8 +229,9 @@ pub(crate) async fn bind_request_checked(
 pub(crate) async fn bind_request_noted(
 	input: &RequestInput<'_>,
 	cx: &EffectCx<'_>,
+	surface: Option<&'static Surface>,
 ) -> Result<(Ir, Option<RegionRejection>, BindNotes), IrError> {
-	let (mut ir, notes) = bind_statements(input, cx)?;
+	let (mut ir, notes) = bind_statements(input, cx, surface)?;
 	let rejection = if input.unit.checked() {
 		ir.judge_constraints();
 		rejection_of(&ir, cx)?
@@ -242,15 +246,15 @@ pub(crate) async fn bind_request_noted(
 fn bind_statements(
 	input: &RequestInput<'_>,
 	effects: &EffectCx<'_>,
+	surface: Option<&'static Surface>,
 ) -> Result<(Ir, BindNotes), IrError> {
 	match input.unit.form() {
-		UnitForm::Request => bind_requested(input, effects),
+		UnitForm::Request => bind_requested(input, effects, surface),
 		UnitForm::Statement | UnitForm::List | UnitForm::Value => {
-			bind_unit(input, effects).map(|ir| (ir, BindNotes::default()))
+			bind_unit(input, effects, surface).map(|ir| (ir, BindNotes::default()))
 		}
-		UnitForm::Catalog => {
-			stage_bundle::bind_catalog_unit(input, effects).map(|ir| (ir, BindNotes::default()))
-		}
+		UnitForm::Catalog => stage_bundle::bind_catalog_unit(input, effects, surface)
+			.map(|ir| (ir, BindNotes::default())),
 		UnitForm::Extracted => Err(invariant(
 			"a loop body is extracted from a planned container and never bound from a statement",
 		)),
@@ -265,6 +269,7 @@ fn bind_statements(
 fn bind_requested(
 	input: &RequestInput<'_>,
 	effects: &EffectCx<'_>,
+	surface: Option<&'static Surface>,
 ) -> Result<(Ir, BindNotes), IrError> {
 	let IrScope::Request {
 		fragment,
@@ -287,6 +292,7 @@ fn bind_requested(
 		let mut cx = BindCx::new(&mut ir, &mut facts, *effects)?;
 		cx.set_serves_late(input.serves_late);
 		cx.set_late_bound(input.late_bound);
+		cx.set_surface(surface);
 		for region in &regions {
 			bind_region(&mut cx, input.statements, base, region)?;
 		}
@@ -305,11 +311,15 @@ fn bind_requested(
 /// with the value of the last; a value unit binds the statement as the value of its region. Where
 /// the planner's binding step refused the whole statement, or a refusal stands among statements
 /// that follow a terminator, the unit holds the `expr.raise` of the refusal alone.
-fn bind_unit(input: &RequestInput<'_>, effects: &EffectCx<'_>) -> Result<Ir, IrError> {
+fn bind_unit(
+	input: &RequestInput<'_>,
+	effects: &EffectCx<'_>,
+	surface: Option<&'static Surface>,
+) -> Result<Ir, IrError> {
 	let [statement] = input.statements else {
 		return Err(invariant("a unit that is not a request holds exactly one statement"));
 	};
-	let op = logical_of(*statement)?;
+	let op = logical_of(*statement, effects.registry)?;
 	let mut ir =
 		Ir::with_top_args(input.scope.clone(), input.unit.top_region(), &input.unit.top_args());
 	let mut facts = FactCache::new();
@@ -317,6 +327,7 @@ fn bind_unit(input: &RequestInput<'_>, effects: &EffectCx<'_>) -> Result<Ir, IrE
 		let mut cx = BindCx::new(&mut ir, &mut facts, *effects)?;
 		cx.set_statement(input.unit.position())?;
 		cx.set_late_bound(input.late_bound);
+		cx.set_surface(surface);
 		cx.begin_statement();
 		cx.note_catalog_change_of(&op);
 		if let UnitKind::StageBundle {
@@ -377,11 +388,14 @@ fn raise_if_refused(cx: &mut BindCx<'_>, refusal: Option<Refusal>) -> Result<(),
 	Ok(())
 }
 
-/// The logical form of `statement`, which a unit other than a request holds as its body, with the
-/// memberships the logical rules lifted into joins put back ([`memberships_of`]).
-fn logical_of(statement: RequestStatement<'_>) -> Result<LogicalOp, IrError> {
+/// The logical form of `statement`, which a unit other than a request holds as its body, with its
+/// memberships written as the predicates the binder binds ([`memberships_of`]).
+fn logical_of(
+	statement: RequestStatement<'_>,
+	registry: &FunctionRegistry,
+) -> Result<LogicalOp, IrError> {
 	match statement {
-		RequestStatement::Logical(op) => Ok(memberships_of(op)?.into_owned()),
+		RequestStatement::Logical(op) => Ok(memberships_of(op, registry, &|_| false)?.into_owned()),
 		RequestStatement::Ast(TopLevelExpr::Expr(expr)) => lower(expr.clone())
 			.map_err(|error| invariant(&format!("a statement without a logical form: {error}"))),
 		RequestStatement::Ast(_) => {
@@ -497,13 +511,15 @@ fn bind_slot(
 ///
 /// A refusal that the planner raises for the whole statement, before any of it runs (see
 /// [`bind_let`]), replaces everything the statement bound with the `expr.raise` of the refusal.
-/// A logical statement binds with the memberships the logical rules lifted into joins put back
+/// A logical statement binds with its memberships written as the predicates the binder binds
 /// ([`memberships_of`]), so the rows it reads through them are kept by the predicates they were.
 fn bind_statement(cx: &mut BindCx<'_>, statement: RequestStatement<'_>) -> Result<(), IrError> {
 	cx.begin_statement();
 	let statement = match statement {
 		RequestStatement::Logical(op) => {
-			let op = memberships_of(op)?;
+			let op = memberships_of(op, cx.registry(), &|name| {
+				matches!(cx.lookup(name), NameRef::Value(_))
+			})?;
 			return bind_logical_statement(cx, &op);
 		}
 		RequestStatement::Ast(statement) => statement,
@@ -818,7 +834,10 @@ fn bind_op(cx: &mut BindCx<'_>, op: &LogicalOp, pos: Pos) -> Result<Flow, IrErro
 		| LogicalOp::Explain(_) => bind_relational(cx, op),
 		LogicalOp::Write(write) => bind_write(cx, write),
 		LogicalOp::Match(statement) => stmt::bind_match(cx, statement),
-		LogicalOp::Ddl(statement) => stmt::bind_ddl(cx, statement),
+		LogicalOp::Ddl(statement) => {
+			cx.note_catalog_touch();
+			stmt::bind_ddl(cx, statement)
+		}
 		LogicalOp::Info(info) => stmt::bind_info(cx, info),
 	}
 }
@@ -2363,11 +2382,14 @@ pub(super) fn columns_of(fields: &LogicalFields) -> Vec<Column<'_>> {
 				LogicalField::Single {
 					expr,
 					frame,
+					alias,
 					..
 				} => Some(Column {
 					expr,
 					frame: Some(frame),
-					path: field.output_path(),
+					path: Some(
+						alias.clone().unwrap_or_else(|| named_after_gates(expr).output_path()),
+					),
 				}),
 			})
 			.collect(),
@@ -2429,10 +2451,58 @@ pub(super) fn aggregate_names(fields: &LogicalFields) -> Vec<OutputPath> {
 				expr,
 				alias,
 				..
-			} => Some(alias.clone().unwrap_or_else(|| expr.output_path())),
+			} => Some(alias.clone().unwrap_or_else(|| named_after_gates(expr).output_path())),
 			LogicalField::All => None,
 		})
 		.collect()
+}
+
+/// Whether `expr` is an `AND` or `OR` whose left operand is a boolean literal.
+fn is_literal_gate(expr: &LogicalExpr) -> bool {
+	matches!(
+		expr,
+		LogicalExpr::Binary {
+			left,
+			op: BinaryOperator::And | BinaryOperator::Or,
+			..
+		} if matches!(left.as_ref(), LogicalExpr::Literal(LogicalLiteral::Bool(_)))
+	)
+}
+
+/// The expression an unaliased field is named after: the expression with each `AND` or `OR` whose
+/// left operand is a boolean literal replaced by what it evaluates to. `false AND x` and
+/// `true OR x` are their left literal, and `true AND x` and `false OR x` are `x`, so the name
+/// is the one the folded expression gets, whichever of these the fold pass applies to the value.
+/// An expression with no such gate is its own name.
+fn named_after_gates(expr: &LogicalExpr) -> Cow<'_, LogicalExpr> {
+	if !expr.any(is_literal_gate) {
+		return Cow::Borrowed(expr);
+	}
+	let folded = expr.clone().transform::<std::convert::Infallible>(&mut |node| {
+		let LogicalExpr::Binary {
+			left,
+			op,
+			right,
+		} = node
+		else {
+			return Ok(node);
+		};
+		Ok(match (*left, op) {
+			(LogicalExpr::Literal(LogicalLiteral::Bool(true)), BinaryOperator::And)
+			| (LogicalExpr::Literal(LogicalLiteral::Bool(false)), BinaryOperator::Or) => *right,
+			(literal @ LogicalExpr::Literal(LogicalLiteral::Bool(false)), BinaryOperator::And)
+			| (literal @ LogicalExpr::Literal(LogicalLiteral::Bool(true)), BinaryOperator::Or) => literal,
+			(left, op) => LogicalExpr::Binary {
+				left: Box::new(left),
+				op,
+				right,
+			},
+		})
+	});
+	match folded {
+		Ok(folded) => Cow::Owned(folded),
+		Err(never) => match never {},
+	}
 }
 
 /// The name each unaliased field of `fields` lands under, in order: an expression that is a path
@@ -2447,11 +2517,14 @@ pub(super) fn unaliased_names(fields: &LogicalFields) -> Vec<OutputPath> {
 				expr,
 				alias: None,
 				..
-			} => Some(if expr.is_path() {
-				expr.output_path()
-			} else {
-				OutputPath::field(expr.output_path().name())
-			}),
+			} => {
+				let named = named_after_gates(expr);
+				Some(if named.is_path() {
+					named.output_path()
+				} else {
+					OutputPath::field(named.output_path().name())
+				})
+			}
 			LogicalField::Single {
 				..
 			}
@@ -2995,6 +3068,7 @@ fn bind_join(cx: &mut BindCx<'_>, join: &LogicalJoin) -> Result<Flow, IrError> {
 /// of the write.
 fn bind_write(cx: &mut BindCx<'_>, write: &LogicalWrite) -> Result<Flow, IrError> {
 	let bundle = cx.take_bundle_table();
+	let named = cx.take_named_table().or_else(|| written_table(write));
 	let mut facts = write_facts(write);
 	// The write of a view row runs the view table's order for the action its view's maintenance
 	// settled, whatever statement stands for it.
@@ -3013,13 +3087,13 @@ fn bind_write(cx: &mut BindCx<'_>, write: &LogicalWrite) -> Result<Flow, IrError
 	let table = match bundle {
 		Some(bundle) => Some(bundle.table),
 		None if may_meet_change => None,
-		None => written_table(write),
+		None => named.clone(),
 	};
 	// Such a write may meet definitions that change between its runs as well, so it checks the
 	// write contexts it keeps against the catalog before taking them again.
 	let catalog_fixed =
 		catalog_fixed_of(write, cx.registry()) && !(table.is_none() && may_meet_change);
-	cx.note_write(write);
+	cx.note_write(write, named.as_ref());
 	let gates = gates_of(cx.catalog(), table.as_ref());
 	let mut attrs = write_attrs_of(write, facts, &run)?;
 	attrs.statement = table.is_none().then(|| Arc::new(write.clone()));

@@ -41,15 +41,14 @@ pub struct CatalogVTable {
 	pub encode_embedded: fn(&Value, &mut Vec<u8>) -> anyhow::Result<()>,
 	/// Adds the schema of this type and of every derived type it holds.
 	pub schemas: fn(&mut Vec<&'static TypeSchema>),
-	/// Whether the bytes are exactly one value in the `revision` encoding, checked by skipping it
-	/// rather than decoding it. Always false for a type with no `revision` form.
-	pub is_revision: fn(&[u8]) -> bool,
 }
 
 /// Builds the [`CatalogVTable`] of a type.
 ///
 /// `catalog_vtable!(T)` is for a type written in both grammars; `catalog_vtable!(stored T)` is for
-/// a type that has no `revision` form, whose container copies are refused.
+/// a type that has no `revision` form, whose container copies are refused;
+/// `catalog_vtable!(unserved T)` is the row of a type a table leaves out, which names the type and
+/// refuses every read and write of it with [`unserved`].
 #[macro_export]
 macro_rules! catalog_vtable {
 	($t:ty) => {
@@ -60,7 +59,16 @@ macro_rules! catalog_vtable {
 			decode_embedded: $crate::stored::vtable::decode_embedded::<$t>,
 			encode_embedded: $crate::stored::vtable::encode_embedded::<$t>,
 			schemas: $crate::stored::vtable::schemas::<$t>,
-			is_revision: $crate::stored::vtable::is_revision::<$t>,
+		}
+	};
+	(unserved $t:ty) => {
+		$crate::stored::CatalogVTable {
+			name: <$t as $crate::stored::StoredType>::SCHEMA.name,
+			decode: $crate::stored::vtable::unserved_decode::<$t>,
+			encode_at: $crate::stored::vtable::unserved_encode_at::<$t>,
+			decode_embedded: $crate::stored::vtable::unserved_decode_embedded::<$t>,
+			encode_embedded: $crate::stored::vtable::unserved_encode_embedded::<$t>,
+			schemas: $crate::stored::vtable::unserved_schemas::<$t>,
 		}
 	};
 	(stored $t:ty) => {
@@ -71,9 +79,37 @@ macro_rules! catalog_vtable {
 			decode_embedded: $crate::stored::vtable::no_embedded_decode::<$t>,
 			encode_embedded: $crate::stored::vtable::no_embedded_encode::<$t>,
 			schemas: $crate::stored::vtable::schemas::<$t>,
-			is_revision: $crate::stored::vtable::no_revision,
 		}
 	};
+}
+
+/// The rows of the catalog types, each built once: [`CATALOG_TYPES`] and [`EDGE_CATALOG_TYPES`]
+/// both list these constants, so a type's functions are the same in either table.
+mod rows {
+	use super::*;
+
+	pub(super) const NAMESPACE: CatalogVTable = catalog_vtable!(NamespaceDefinition);
+	pub(super) const DATABASE: CatalogVTable = catalog_vtable!(DatabaseDefinition);
+	pub(super) const TABLE: CatalogVTable = catalog_vtable!(StoredTableDefinition);
+	pub(super) const FIELD: CatalogVTable = catalog_vtable!(StoredFieldDefinition);
+	pub(super) const INDEX: CatalogVTable = catalog_vtable!(StoredIndexDefinition);
+	pub(super) const EVENT: CatalogVTable = catalog_vtable!(StoredEventDefinition);
+	pub(super) const FUNCTION: CatalogVTable = catalog_vtable!(StoredFunctionDefinition);
+	pub(super) const PARAM: CatalogVTable = catalog_vtable!(StoredParamDefinition);
+	pub(super) const ACCESS: CatalogVTable = catalog_vtable!(StoredAccessDefinition);
+	pub(super) const USER: CatalogVTable = catalog_vtable!(UserDefinition);
+	pub(super) const ANALYZER: CatalogVTable = catalog_vtable!(AnalyzerDefinition);
+	pub(super) const SEQUENCE: CatalogVTable = catalog_vtable!(SequenceDefinition);
+	pub(super) const MODULE: CatalogVTable = catalog_vtable!(StoredModuleDefinition);
+	pub(super) const ML_MODEL: CatalogVTable = catalog_vtable!(StoredMlModelDefinition);
+	pub(super) const BUCKET: CatalogVTable = catalog_vtable!(StoredBucketDefinition);
+	pub(super) const API: CatalogVTable = catalog_vtable!(StoredApiDefinition);
+	pub(super) const CONFIG: CatalogVTable = catalog_vtable!(StoredConfigDefinition);
+	pub(super) const SUBSCRIPTION: CatalogVTable = catalog_vtable!(StoredSubscriptionDefinition);
+	pub(super) const NODE: CatalogVTable = catalog_vtable!(Node);
+	pub(super) const TASK_LEASE: CatalogVTable = catalog_vtable!(TaskLease);
+	pub(super) const NODE_LIVE_QUERY: CatalogVTable = catalog_vtable!(NodeLiveQuery);
+	pub(super) const ACCESS_GRANT: CatalogVTable = catalog_vtable!(AccessGrant);
 }
 
 /// The catalog types a VM program reads or writes through a key route, by Rust type name.
@@ -83,28 +119,59 @@ macro_rules! catalog_vtable {
 /// are not listed: no VM program reaches them, and the schema lock reads their schemas from the
 /// types themselves ([`super::lock::all_schemas`]).
 pub static CATALOG_TYPES: &[CatalogVTable] = &[
-	catalog_vtable!(NamespaceDefinition),
-	catalog_vtable!(DatabaseDefinition),
-	catalog_vtable!(StoredTableDefinition),
-	catalog_vtable!(StoredFieldDefinition),
-	catalog_vtable!(StoredIndexDefinition),
-	catalog_vtable!(StoredEventDefinition),
-	catalog_vtable!(StoredFunctionDefinition),
-	catalog_vtable!(StoredParamDefinition),
-	catalog_vtable!(StoredAccessDefinition),
-	catalog_vtable!(UserDefinition),
-	catalog_vtable!(AnalyzerDefinition),
-	catalog_vtable!(SequenceDefinition),
-	catalog_vtable!(StoredModuleDefinition),
-	catalog_vtable!(StoredMlModelDefinition),
-	catalog_vtable!(StoredBucketDefinition),
-	catalog_vtable!(StoredApiDefinition),
-	catalog_vtable!(StoredConfigDefinition),
-	catalog_vtable!(StoredSubscriptionDefinition),
-	catalog_vtable!(Node),
-	catalog_vtable!(TaskLease),
-	catalog_vtable!(NodeLiveQuery),
-	catalog_vtable!(AccessGrant),
+	rows::NAMESPACE,
+	rows::DATABASE,
+	rows::TABLE,
+	rows::FIELD,
+	rows::INDEX,
+	rows::EVENT,
+	rows::FUNCTION,
+	rows::PARAM,
+	rows::ACCESS,
+	rows::USER,
+	rows::ANALYZER,
+	rows::SEQUENCE,
+	rows::MODULE,
+	rows::ML_MODEL,
+	rows::BUCKET,
+	rows::API,
+	rows::CONFIG,
+	rows::SUBSCRIPTION,
+	rows::NODE,
+	rows::TASK_LEASE,
+	rows::NODE_LIVE_QUERY,
+	rows::ACCESS_GRANT,
+];
+
+/// The catalog types an edge entry reads or writes through a key route: [`CATALOG_TYPES`] with
+/// the rows of the kinds the entry never meets (access methods and their grants, users, nodes, the
+/// live queries of a node, buckets) replaced by [`catalog_vtable!`]`(unserved T)`. A row stays at
+/// its position and keeps its name, so a type is the same index in both tables, and a key of a
+/// kind that is left out is refused with [`unserved`] rather than skipped. The rows of the kinds
+/// the table serves are the constants of `rows`, so their bytes are those of [`CATALOG_TYPES`].
+pub static EDGE_CATALOG_TYPES: &[CatalogVTable] = &[
+	rows::NAMESPACE,
+	rows::DATABASE,
+	rows::TABLE,
+	rows::FIELD,
+	rows::INDEX,
+	rows::EVENT,
+	rows::FUNCTION,
+	rows::PARAM,
+	catalog_vtable!(unserved StoredAccessDefinition),
+	catalog_vtable!(unserved UserDefinition),
+	rows::ANALYZER,
+	rows::SEQUENCE,
+	rows::MODULE,
+	rows::ML_MODEL,
+	catalog_vtable!(unserved StoredBucketDefinition),
+	rows::API,
+	rows::CONFIG,
+	rows::SUBSCRIPTION,
+	catalog_vtable!(unserved Node),
+	rows::TASK_LEASE,
+	catalog_vtable!(unserved NodeLiveQuery),
+	catalog_vtable!(unserved AccessGrant),
 ];
 
 /// A value that the type's schema cannot convert, refused as [`write_error`] refuses it.
@@ -179,18 +246,6 @@ where
 	}
 }
 
-/// [`CatalogVTable::is_revision`] of a type with a `revision` form. Trailing bytes after the value
-/// make it not one, as they make a read of it fail.
-pub fn is_revision<T: SkipRevisioned>(bytes: &[u8]) -> bool {
-	let mut rest = bytes;
-	T::skip_revisioned(&mut rest).is_ok() && rest.is_empty()
-}
-
-/// [`CatalogVTable::is_revision`] of a type with no `revision` form.
-pub fn no_revision(_: &[u8]) -> bool {
-	false
-}
-
 /// [`CatalogVTable::decode_embedded`] of a type with no `revision` form: refused.
 pub fn no_embedded_decode<T: StoredType>(_cursor: &mut &[u8]) -> anyhow::Result<Value> {
 	Err(Error::Entry(EntryError::Unlevelled {
@@ -211,3 +266,38 @@ pub fn no_embedded_encode<T: StoredType>(_value: &Value, _out: &mut Vec<u8>) -> 
 pub fn schemas<T: StoredType>(out: &mut Vec<&'static TypeSchema>) {
 	T::collect_schemas(out);
 }
+
+/// The refusal of a read or write of the catalog type `T`, whose row a table leaves out.
+pub fn unserved<T: StoredType>() -> anyhow::Error {
+	anyhow::anyhow!("catalog kind {} is not served by this entry", T::SCHEMA.name)
+}
+
+/// [`CatalogVTable::decode`] of a type a table leaves out: refused.
+pub fn unserved_decode<T: StoredType>(_bytes: &[u8]) -> anyhow::Result<Value> {
+	Err(unserved::<T>())
+}
+
+/// [`CatalogVTable::encode_at`] of a type a table leaves out: refused.
+pub fn unserved_encode_at<T: StoredType>(
+	_value: &Value,
+	_ctx: &EncodeContext<'_>,
+) -> anyhow::Result<Encoded> {
+	Err(unserved::<T>())
+}
+
+/// [`CatalogVTable::decode_embedded`] of a type a table leaves out: refused.
+pub fn unserved_decode_embedded<T: StoredType>(_cursor: &mut &[u8]) -> anyhow::Result<Value> {
+	Err(unserved::<T>())
+}
+
+/// [`CatalogVTable::encode_embedded`] of a type a table leaves out: refused.
+pub fn unserved_encode_embedded<T: StoredType>(
+	_value: &Value,
+	_out: &mut Vec<u8>,
+) -> anyhow::Result<()> {
+	Err(unserved::<T>())
+}
+
+/// [`CatalogVTable::schemas`] of a type a table leaves out: adds nothing, as the table serves no
+/// value of the type.
+pub fn unserved_schemas<T: StoredType>(_out: &mut Vec<&'static TypeSchema>) {}

@@ -104,6 +104,18 @@ where
 		}
 		Ok(())
 	}
+
+	#[inline]
+	fn skip_revisioned_slice(
+		reader: &mut revision::SliceReader<'_>,
+	) -> Result<(), revision::Error> {
+		let len = usize::deserialize_revisioned(reader)?;
+		for _ in 0..len {
+			K::skip_revisioned_slice(reader)?;
+			V::skip_revisioned_slice(reader)?;
+		}
+		Ok(())
+	}
 }
 
 impl<T> revision::SkipRevisioned for VecSet<T>
@@ -114,6 +126,17 @@ where
 		let len = usize::deserialize_revisioned(reader)?;
 		for _ in 0..len {
 			T::skip_revisioned(reader)?;
+		}
+		Ok(())
+	}
+
+	#[inline]
+	fn skip_revisioned_slice(
+		reader: &mut revision::SliceReader<'_>,
+	) -> Result<(), revision::Error> {
+		let len = usize::deserialize_revisioned(reader)?;
+		for _ in 0..len {
+			T::skip_revisioned_slice(reader)?;
 		}
 		Ok(())
 	}
@@ -345,6 +368,25 @@ mod tests {
 		let mut w = Vec::new();
 		value.serialize_revisioned(&mut w).expect("serialize_revisioned");
 		w
+	}
+
+	/// The slice skip and the reader skip agree: both consume a value whole, and both refuse it
+	/// with its last byte missing.
+	fn assert_skip_agrees<T: SerializeRevisioned + revision::SkipRevisioned>(value: &T) {
+		let bytes = revision_bytes(value);
+		assert_eq!(revision::skip_slice::<T>(&bytes).unwrap(), bytes.len());
+		let cut = &bytes[..bytes.len() - 1];
+		assert!(revision::skip_slice::<T>(cut).is_err());
+		assert!(T::skip_revisioned(&mut &cut[..]).is_err());
+	}
+
+	#[test]
+	fn slice_skip_agrees_with_reader_skip() {
+		let map: VecMap<String, u32> =
+			[("a".into(), 1u32), ("b".into(), 2), ("c".into(), 3)].into_iter().collect();
+		assert_skip_agrees(&map);
+		let set: VecSet<u32> = [1u32, 2, 3].into_iter().collect();
+		assert_skip_agrees(&set);
 	}
 
 	// ---- VecMap byte-equality with BTreeMap ----

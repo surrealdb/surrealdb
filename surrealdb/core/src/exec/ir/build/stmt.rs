@@ -83,7 +83,7 @@ fn bind_all<'a>(
 /// regions of its stored clauses.
 pub(super) fn bind_ddl(cx: &mut BindCx<'_>, ddl: &LogicalDdl) -> Result<Flow, IrError> {
 	let checks = ddl::checks_of(cx.catalog(), &ddl.statement);
-	let plan = ddl::plan(&ddl.statement, checks)?;
+	let plan = ddl::plan(&ddl.statement, checks, cx.codec()?)?;
 	if let Some(refusal) = &plan.planning_refusal {
 		return raise_refused(cx, refusal.clone());
 	}
@@ -357,7 +357,7 @@ pub(super) fn bind_kill(cx: &mut BindCx<'_>, statement: &KillStatement) -> Resul
 /// `LIVE`: the target, then the op and the stored clauses its subscription holds: the
 /// projection, the filter and the fetch paths, in that order.
 pub(super) fn bind_live(cx: &mut BindCx<'_>, statement: &LiveStatement) -> Result<Flow, IrError> {
-	let plan = live::plan_live(statement)?;
+	let plan = live::plan_live(statement, cx.codec()?)?;
 	let Built::Value(target) = bind_expr(cx, &lowered(plan.target)?)? else {
 		return Ok(Flow::Diverged);
 	};
@@ -460,6 +460,14 @@ pub(super) fn bind_use(cx: &mut BindCx<'_>, statement: &UseStatement) -> Result<
 
 /// `MATCH`: one op with one `Subquery` region holding the fold of the plan's binding table
 /// ([`match_fold`]).
+///
+/// The fold is reached through the hook `cx` holds ([`match_fold::MatchBinding`]); where the entry
+/// serves no `MATCH`, the statement is refused with [`match_fold::NOT_SERVED_MATCH`].
 pub(super) fn bind_match(cx: &mut BindCx<'_>, statement: &LogicalMatch) -> Result<Flow, IrError> {
-	match_fold::bind_fold(cx, statement)
+	match cx.match_binding() {
+		Some(binding) => binding.bind(cx, statement),
+		None => Err(IrError::NotYet {
+			what: match_fold::NOT_SERVED_MATCH,
+		}),
+	}
 }

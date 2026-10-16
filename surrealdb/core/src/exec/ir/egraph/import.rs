@@ -32,6 +32,8 @@ use super::decl::{
 };
 use super::guards::{UnionWhy, guarded_union};
 use super::lang::{ENode, region_kind_key};
+use crate::exec::function::FunctionRegistry;
+use crate::exec::ir::analysis::cx::structural_cx;
 use crate::exec::ir::analysis::{effects, fallibility, footprint, identity, types, write_epoch};
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::Ir;
@@ -348,7 +350,7 @@ pub(crate) fn literal_exceeds(value: &Value) -> bool {
 }
 
 /// The role `op` plays on its own, before the regions it owns are considered.
-fn own_role(ir: &Ir, facts: &mut FactCache, op: OpId) -> OpRole {
+fn own_role(ir: &Ir, facts: &mut FactCache, registry: &FunctionRegistry, op: OpId) -> OpRole {
 	let Some(data) = ir.op(op) else {
 		return OpRole::Skeleton;
 	};
@@ -365,7 +367,7 @@ fn own_role(ir: &Ir, facts: &mut FactCache, op: OpId) -> OpRole {
 		}
 		OpKind::Phys(_) => return OpRole::Skeleton,
 	};
-	let effects = effects::of(ir, facts, op);
+	let effects = effects::of_with(ir, facts, &structural_cx(registry, ir), op);
 	if data.results.len() > 1 || is_unknown(effects.set) {
 		return OpRole::Leaf;
 	}
@@ -377,7 +379,7 @@ fn own_role(ir: &Ir, facts: &mut FactCache, op: OpId) -> OpRole {
 	{
 		return OpRole::Leaf;
 	}
-	if identity::key(ir, facts, op).opaque.is_some() {
+	if identity::key_with(ir, facts, &structural_cx(registry, ir), op).opaque.is_some() {
 		return OpRole::Leaf;
 	}
 	OpRole::Node
@@ -419,7 +421,12 @@ fn reaches_yield(ir: &Ir, body: &[OpId], yield_op: OpId) -> bool {
 /// The roles of the ops of `region`, when it is encoded as a region node: its kind is importable,
 /// it holds one block whose ops are all encodable, each of them feeds the yield, and the block
 /// ends in a yield. The yield is the last entry. `None` makes the region an opaque leaf.
-fn region_roles(ir: &Ir, facts: &mut FactCache, region: RegionId) -> Option<Vec<(OpId, OpRole)>> {
+fn region_roles(
+	ir: &Ir,
+	facts: &mut FactCache,
+	registry: &FunctionRegistry,
+	region: RegionId,
+) -> Option<Vec<(OpId, OpRole)>> {
 	let data = ir.region(region)?;
 	if !importable(data.kind) || data.blocks.len() != 1 {
 		return None;
@@ -437,7 +444,7 @@ fn region_roles(ir: &Ir, facts: &mut FactCache, region: RegionId) -> Option<Vec<
 	}
 	let mut roles = Vec::with_capacity(body.len() + 1);
 	for op in body {
-		match own_role(ir, facts, *op) {
+		match own_role(ir, facts, registry, *op) {
 			OpRole::Node => roles.push((*op, OpRole::Node)),
 			OpRole::Leaf => roles.push((*op, OpRole::Leaf)),
 			OpRole::Yield | OpRole::Skeleton => return None,
@@ -451,16 +458,23 @@ fn region_roles(ir: &Ir, facts: &mut FactCache, region: RegionId) -> Option<Vec<
 }
 
 /// Records `role` for `op`, and the roles of the regions an op node owns.
-fn visit(ir: &Ir, facts: &mut FactCache, op: OpId, role: OpRole, out: &mut Islands) {
+fn visit(
+	ir: &Ir,
+	facts: &mut FactCache,
+	registry: &FunctionRegistry,
+	op: OpId,
+	role: OpRole,
+	out: &mut Islands,
+) {
 	if role == OpRole::Node
 		&& let Some(data) = ir.op(op)
 	{
 		for region in &data.regions {
-			match region_roles(ir, facts, *region) {
+			match region_roles(ir, facts, registry, *region) {
 				Some(roles) => {
 					out.regions.insert(*region, RegionRole::Node);
 					for (inner, inner_role) in roles {
-						visit(ir, facts, inner, inner_role, out);
+						visit(ir, facts, registry, inner, inner_role, out);
 					}
 				}
 				None => {
@@ -480,15 +494,20 @@ fn visit(ir: &Ir, facts: &mut FactCache, op: OpId, role: OpRole, out: &mut Islan
 /// The classification starts at the direct ops of the statement's own regions. A skeleton op's
 /// regions are not entered: only the values it reads can be island roots. An op node's regions
 /// are entered when they are encodable as region nodes, and stay opaque otherwise.
-pub(crate) fn islands(ir: &Ir, facts: &mut FactCache, stmt: OpId) -> Islands {
+pub(crate) fn islands(
+	ir: &Ir,
+	facts: &mut FactCache,
+	registry: &FunctionRegistry,
+	stmt: OpId,
+) -> Islands {
 	let mut out = Islands::default();
 	let Some(data) = ir.op(stmt) else {
 		return out;
 	};
 	for region in &data.regions {
 		for op in ops_in(ir, *region) {
-			let role = own_role(ir, facts, op);
-			visit(ir, facts, op, role, &mut out);
+			let role = own_role(ir, facts, registry, op);
+			visit(ir, facts, registry, op, role, &mut out);
 		}
 	}
 	out
@@ -521,7 +540,7 @@ pub(crate) fn identity(
 	cx: &EffectCx<'_>,
 ) -> Result<NodeIdentity, ImportStop> {
 	let data = ir.op(op).ok_or(ImportStop::Dangling)?;
-	let key = identity::key(ir, facts, op);
+	let key = identity::key_with(ir, facts, &structural_cx(cx.registry, ir), op);
 	if key.opaque.is_some() {
 		let leaf = an.add_leaf(OpaqueLeaf {
 			op: Some(op),
@@ -532,8 +551,16 @@ pub(crate) fn identity(
 	}
 	let epoch = match key.epoch {
 		Some(epoch) => rn.epoch(Some(epoch)),
-		None if effects::of(ir, facts, op).set.intersects(EffectSet::READS_DATA) => {
-			rn.epoch(Some(write_epoch::assign(ir, op)))
+		None if effects::of_with(ir, facts, &structural_cx(cx.registry, ir), op)
+			.set
+			.intersects(EffectSet::READS_DATA) =>
+		{
+			rn.epoch(Some(write_epoch::assign_with(
+				ir,
+				&mut FactCache::new(),
+				&structural_cx(cx.registry, ir),
+				op,
+			)))
 		}
 		None => EpochKey::None,
 	};
@@ -599,19 +626,21 @@ fn op_facts(
 	ir: &Ir,
 	facts: &mut FactCache,
 	an: &IrAnalysis,
+	registry: &FunctionRegistry,
 	op: OpId,
 	ordinal: u32,
 	ty: TypeKnowledge,
 ) -> ClassFacts {
 	let (frame, snapshot) = frame_of(ir, op);
-	let effects = effects::of(ir, facts, op);
+	let under = structural_cx(registry, ir);
+	let effects = effects::of_with(ir, facts, &under, op);
 	let mut out = inert_facts(an, frame, snapshot, ordinal, ty);
 	out.reads_written = reads_written(&effects.footprint, None, &an.stmt_writes)
 		|| (effects.set.intersects(EffectSet::READS_ROW)
 			&& reads_written(&row_read(), None, &an.stmt_writes));
 	out.effects = effects.set;
 	out.determinism = effects.determinism;
-	out.fallibility = fallibility::of(ir, facts, op);
+	out.fallibility = fallibility::of_with(ir, facts, &under, op);
 	out.provenance = smallvec![op];
 	out
 }
@@ -623,20 +652,22 @@ fn region_facts(
 	ir: &Ir,
 	facts: &mut FactCache,
 	an: &IrAnalysis,
+	registry: &FunctionRegistry,
 	region: RegionId,
 	(frame, snapshot): (FrameId, SnapshotId),
 	ordinal: u32,
 ) -> (ClassFacts, Vec<ValueId>) {
 	let mut out = inert_facts(an, frame, snapshot, ordinal, TypeKnowledge::Unknown);
 	let mut reads: Vec<ValueId> = Vec::new();
+	let under = structural_cx(registry, ir);
 	for inner in ops_in(ir, region) {
-		let held = effects::of(ir, facts, inner);
+		let held = effects::of_with(ir, facts, &under, inner);
 		out.reads_written |= reads_written(&held.footprint, None, &an.stmt_writes)
 			|| (held.set.intersects(EffectSet::READS_ROW)
 				&& reads_written(&row_read(), None, &an.stmt_writes));
 		out.effects = out.effects.union(held.set);
 		out.determinism = weaker_determinism(out.determinism, held.determinism);
-		out.fallibility = out.fallibility.union(fallibility::of(ir, facts, inner));
+		out.fallibility = out.fallibility.union(fallibility::of_with(ir, facts, &under, inner));
 		collect_reads(ir, inner, &mut reads);
 	}
 	(out, reads)
@@ -644,9 +675,16 @@ fn region_facts(
 
 /// The type knowledge of `value`: the meet of what the container holds and what the analysis
 /// derives, both of which hold of the value.
-fn type_of(ir: &Ir, facts: &mut FactCache, value: ValueId) -> TypeKnowledge {
+fn type_of(
+	ir: &Ir,
+	facts: &mut FactCache,
+	registry: &FunctionRegistry,
+	value: ValueId,
+) -> TypeKnowledge {
 	match ir.value(value) {
-		Some(data) => data.ty.meet(&types::classify(ir, facts, value)),
+		Some(data) => {
+			data.ty.meet(&types::classify_with(ir, facts, &structural_cx(registry, ir), value))
+		}
 		None => TypeKnowledge::Unknown,
 	}
 }
@@ -773,7 +811,7 @@ impl Builder<'_> {
 			.map_or((FrameId::new(0), SnapshotId::new(0)), |owner| frame_of(self.ir, owner));
 		let index = u8::try_from(index).map_err(|_| ImportStop::Dangling)?;
 		let ordinal = self.tick();
-		let ty = type_of(self.ir, self.facts, value);
+		let ty = type_of(self.ir, self.facts, self.cx.registry, value);
 		let mut facts = inert_facts(&self.eg.analysis, frame, snapshot, ordinal, ty);
 		facts.free_binders.push(binder);
 		let node = ENode {
@@ -815,7 +853,7 @@ impl Builder<'_> {
 			value,
 		});
 		let ordinal = self.tick();
-		let ty = type_of(ir, self.facts, value);
+		let ty = type_of(ir, self.facts, self.cx.registry, value);
 		let facts = inert_facts(&self.eg.analysis, frame, snapshot, ordinal, ty);
 		let node = ENode {
 			id: opaque_identity(leaf, frame, snapshot),
@@ -890,8 +928,15 @@ impl Builder<'_> {
 			value: ValueId::default(),
 		});
 		let ordinal = self.tick();
-		let (mut facts, reads) =
-			region_facts(ir, self.facts, &self.eg.analysis, region, (frame, snapshot), ordinal);
+		let (mut facts, reads) = region_facts(
+			ir,
+			self.facts,
+			&self.eg.analysis,
+			self.cx.registry,
+			region,
+			(frame, snapshot),
+			ordinal,
+		);
 		facts.free_binders = self.binders_read(&reads)?;
 		let node = ENode {
 			id: opaque_identity(leaf, frame, snapshot),
@@ -916,10 +961,11 @@ impl Builder<'_> {
 			identity(ir, self.facts, op, &mut self.eg.analysis, &mut self.renumber, &self.cx)?;
 		let ordinal = self.tick();
 		let ty = match data.results.first() {
-			Some(result) => type_of(ir, self.facts, *result),
+			Some(result) => type_of(ir, self.facts, self.cx.registry, *result),
 			None => TypeKnowledge::Unknown,
 		};
-		let mut facts = op_facts(ir, self.facts, &self.eg.analysis, op, ordinal, ty);
+		let mut facts =
+			op_facts(ir, self.facts, &self.eg.analysis, self.cx.registry, op, ordinal, ty);
 		if matches!(ident.epoch, EpochKey::Unique(_)) {
 			facts.reads_written = true;
 		}
@@ -956,8 +1002,9 @@ impl Builder<'_> {
 				value: *result,
 			});
 			let ordinal = self.tick();
-			let ty = type_of(ir, self.facts, *result);
-			let mut facts = op_facts(ir, self.facts, &self.eg.analysis, op, ordinal, ty);
+			let ty = type_of(ir, self.facts, self.cx.registry, *result);
+			let mut facts =
+				op_facts(ir, self.facts, &self.eg.analysis, self.cx.registry, op, ordinal, ty);
 			facts.free_binders.clone_from(&free);
 			let class = self.add(
 				ENode {
@@ -1021,7 +1068,7 @@ pub(crate) fn import(
 	cx: &EffectCx<'_>,
 	limits: EgraphLimits,
 ) -> Result<Imported, ImportStop> {
-	let classified = islands(ir, facts, stmt);
+	let classified = islands(ir, facts, cx.registry, stmt);
 	let mut an = IrAnalysis::new();
 	an.frames = ir
 		.frames()
@@ -1031,7 +1078,7 @@ pub(crate) fn import(
 		.collect();
 	an.stmt_writes = IrFootprint {
 		reads: SmallVec::new(),
-		writes: footprint::of(ir, facts, stmt).writes,
+		writes: footprint::of_with(ir, facts, &structural_cx(cx.registry, ir), stmt).writes,
 	};
 	let mut builder = Builder {
 		ir,
@@ -1225,7 +1272,7 @@ impl SeedImport<'_> {
 			.parent_op(region)
 			.map_or((FrameId::new(0), SnapshotId::new(0)), |owner| frame_of(copy.ir, owner));
 		let ordinal = self.tick();
-		let ty = type_of(copy.ir, self.facts, value);
+		let ty = type_of(copy.ir, self.facts, self.cx.registry, value);
 		let mut facts = inert_facts(&self.imp.eg.analysis, frame, snapshot, ordinal, ty);
 		facts.free_binders.push(binder);
 		let class = add_with_facts(
@@ -1271,9 +1318,17 @@ impl SeedImport<'_> {
 			value: original.unwrap_or(value),
 		});
 		let ordinal = self.tick();
-		let ty = type_of(copy.ir, self.facts, value);
+		let ty = type_of(copy.ir, self.facts, self.cx.registry, value);
 		let facts = match def {
-			Some(op) => op_facts(copy.ir, self.facts, &self.imp.eg.analysis, op, ordinal, ty),
+			Some(op) => op_facts(
+				copy.ir,
+				self.facts,
+				&self.imp.eg.analysis,
+				self.cx.registry,
+				op,
+				ordinal,
+				ty,
+			),
 			None => inert_facts(&self.imp.eg.analysis, frame, snapshot, ordinal, ty),
 		};
 		let class = add_with_facts(
@@ -1387,6 +1442,7 @@ impl SeedImport<'_> {
 				copy.ir,
 				self.facts,
 				&self.imp.eg.analysis,
+				self.cx.registry,
 				*region,
 				(frame, snapshot),
 				ordinal,

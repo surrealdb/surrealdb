@@ -27,7 +27,11 @@ pub enum ExplainFormat {
 	Json,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Eq, Hash)]
+#[expect(
+	clippy::derived_hash_with_manual_eq,
+	reason = "PartialEq compares the same fields in the same order as Hash hashes them"
+)]
 pub enum Expr {
 	Literal(Literal),
 	Param(Param),
@@ -82,6 +86,140 @@ pub enum Expr {
 		analyze: bool,
 		statement: Box<Expr>,
 	},
+}
+
+/// Written out and kept out of line so one copy serves every crate that clones an `Expr`.
+impl Clone for Expr {
+	#[inline(never)]
+	fn clone(&self) -> Self {
+		match self {
+			Self::Literal(v) => Self::Literal(v.clone()),
+			Self::Param(v) => Self::Param(v.clone()),
+			Self::Idiom(v) => Self::Idiom(v.clone()),
+			Self::Table(v) => Self::Table(v.clone()),
+			Self::Mock(v) => Self::Mock(v.clone()),
+			Self::Block(v) => Self::Block(v.clone()),
+			Self::Constant(v) => Self::Constant(v.clone()),
+			Self::FunctionCall(v) => Self::FunctionCall(v.clone()),
+			Self::Closure(v) => Self::Closure(v.clone()),
+			Self::Return(v) => Self::Return(v.clone()),
+			Self::Throw(v) => Self::Throw(v.clone()),
+			Self::IfElse(v) => Self::IfElse(v.clone()),
+			Self::Select(v) => Self::Select(v.clone()),
+			Self::Create(v) => Self::Create(v.clone()),
+			Self::Update(v) => Self::Update(v.clone()),
+			Self::Upsert(v) => Self::Upsert(v.clone()),
+			Self::Delete(v) => Self::Delete(v.clone()),
+			Self::Relate(v) => Self::Relate(v.clone()),
+			Self::Insert(v) => Self::Insert(v.clone()),
+			Self::Define(v) => Self::Define(v.clone()),
+			Self::Remove(v) => Self::Remove(v.clone()),
+			Self::Rebuild(v) => Self::Rebuild(v.clone()),
+			Self::Alter(v) => Self::Alter(v.clone()),
+			Self::Info(v) => Self::Info(v.clone()),
+			Self::Foreach(v) => Self::Foreach(v.clone()),
+			Self::Let(v) => Self::Let(v.clone()),
+			Self::Sleep(v) => Self::Sleep(v.clone()),
+			Self::Break => Self::Break,
+			Self::Continue => Self::Continue,
+			Self::Prefix {
+				op,
+				expr,
+			} => Self::Prefix {
+				op: op.clone(),
+				expr: expr.clone(),
+			},
+			Self::Postfix {
+				expr,
+				op,
+			} => Self::Postfix {
+				expr: expr.clone(),
+				op: op.clone(),
+			},
+			Self::Binary {
+				left,
+				op,
+				right,
+			} => Self::Binary {
+				left: left.clone(),
+				op: op.clone(),
+				right: right.clone(),
+			},
+			Self::Explain {
+				format,
+				analyze,
+				statement,
+			} => Self::Explain {
+				format: *format,
+				analyze: *analyze,
+				statement: statement.clone(),
+			},
+		}
+	}
+}
+
+/// Written out and kept out of line so one copy serves every crate that compares an `Expr`.
+impl PartialEq for Expr {
+	#[inline(never)]
+	fn eq(&self, other: &Self) -> bool {
+		match self {
+			Self::Literal(a) => matches!(other, Self::Literal(b) if a == b),
+			Self::Param(a) => matches!(other, Self::Param(b) if a == b),
+			Self::Idiom(a) => matches!(other, Self::Idiom(b) if a == b),
+			Self::Table(a) => matches!(other, Self::Table(b) if a == b),
+			Self::Mock(a) => matches!(other, Self::Mock(b) if a == b),
+			Self::Block(a) => matches!(other, Self::Block(b) if a == b),
+			Self::Constant(a) => matches!(other, Self::Constant(b) if a == b),
+			Self::FunctionCall(a) => matches!(other, Self::FunctionCall(b) if a == b),
+			Self::Closure(a) => matches!(other, Self::Closure(b) if a == b),
+			Self::Return(a) => matches!(other, Self::Return(b) if a == b),
+			Self::Throw(a) => matches!(other, Self::Throw(b) if a == b),
+			Self::IfElse(a) => matches!(other, Self::IfElse(b) if a == b),
+			Self::Select(a) => matches!(other, Self::Select(b) if a == b),
+			Self::Create(a) => matches!(other, Self::Create(b) if a == b),
+			Self::Update(a) => matches!(other, Self::Update(b) if a == b),
+			Self::Upsert(a) => matches!(other, Self::Upsert(b) if a == b),
+			Self::Delete(a) => matches!(other, Self::Delete(b) if a == b),
+			Self::Relate(a) => matches!(other, Self::Relate(b) if a == b),
+			Self::Insert(a) => matches!(other, Self::Insert(b) if a == b),
+			Self::Define(a) => matches!(other, Self::Define(b) if a == b),
+			Self::Remove(a) => matches!(other, Self::Remove(b) if a == b),
+			Self::Rebuild(a) => matches!(other, Self::Rebuild(b) if a == b),
+			Self::Alter(a) => matches!(other, Self::Alter(b) if a == b),
+			Self::Info(a) => matches!(other, Self::Info(b) if a == b),
+			Self::Foreach(a) => matches!(other, Self::Foreach(b) if a == b),
+			Self::Let(a) => matches!(other, Self::Let(b) if a == b),
+			Self::Sleep(a) => matches!(other, Self::Sleep(b) if a == b),
+			Self::Break => matches!(other, Self::Break),
+			Self::Continue => matches!(other, Self::Continue),
+			Self::Prefix {
+				op,
+				expr,
+			} => {
+				matches!(other, Self::Prefix { op: op2, expr: expr2 } if op == op2 && expr == expr2)
+			}
+			Self::Postfix {
+				expr,
+				op,
+			} => {
+				matches!(other, Self::Postfix { expr: expr2, op: op2 } if expr == expr2 && op == op2)
+			}
+			Self::Binary {
+				left,
+				op,
+				right,
+			} => {
+				matches!(other, Self::Binary { left: left2, op: op2, right: right2 } if left == left2 && op == op2 && right == right2)
+			}
+			Self::Explain {
+				format,
+				analyze,
+				statement,
+			} => {
+				matches!(other, Self::Explain { format: format2, analyze: analyze2, statement: statement2 } if format == format2 && analyze == analyze2 && statement == statement2)
+			}
+		}
+	}
 }
 
 impl Expr {
@@ -738,6 +876,13 @@ impl revision::SkipRevisioned for Expr {
 		// Wire format is the SurrealQL source string. Skip its bytes without
 		// re-parsing into an `Expr`.
 		<String as revision::SkipRevisioned>::skip_revisioned(reader)
+	}
+
+	#[inline]
+	fn skip_revisioned_slice(
+		reader: &mut revision::SliceReader<'_>,
+	) -> Result<(), revision::Error> {
+		<String as revision::SkipRevisioned>::skip_revisioned_slice(reader)
 	}
 }
 

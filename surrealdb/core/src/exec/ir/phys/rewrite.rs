@@ -120,8 +120,15 @@ pub(crate) async fn run(
 			stopped_by: None,
 		});
 	}
-	let mut report =
-		apply_greedy(ir, facts, &registry::build().phys_patterns, folder, GREEDY_DEFAULT).await?;
+	let mut report = apply_greedy(
+		ir,
+		facts,
+		&registry::build().phys_patterns,
+		folder,
+		cx.effects.registry,
+		GREEDY_DEFAULT,
+	)
+	.await?;
 	report.rewrites += join_lookup::run(ir, facts, cx)?;
 	report.rewrites += hold_left::run(ir, facts, cx)?;
 	report.rewrites += nested::run(ir, facts, cx)?;
@@ -130,8 +137,14 @@ pub(crate) async fn run(
 	knn_ids::run(ir, facts, cx)?;
 	recheck::run(ir, facts)?;
 	hop_key::run(ir, facts, cx);
-	let placed =
-		place_all_reading(ir, facts, placement, cx.physical.backend(), NestedReading::Strategy)?;
+	let placed = place_all_reading(
+		ir,
+		facts,
+		cx.effects.registry,
+		placement,
+		cx.physical.backend(),
+		NestedReading::Strategy,
+	)?;
 	install(ir.placement_table_mut(), placed);
 	Ok(report)
 }
@@ -161,7 +174,7 @@ fn producer(ir: &Ir, value: ValueId) -> Option<OpId> {
 /// identity, nearest first, and the op that produces the rows they pass on.
 pub(super) struct Beneath {
 	/// The ops crossed, nearest `from` first.
-	pub(super) crossed: SmallVec<[OpId; 4]>,
+	pub(super) crossed: SmallVec<[OpId; 8]>,
 	/// The op that produces the rows the crossed ops pass on.
 	pub(super) source: OpId,
 }
@@ -290,7 +303,7 @@ fn key_path(ir: &Ir, op: OpId, sort: &SortAttrs, at: usize) -> Option<FieldPath>
 /// The plain path of stored field names the region `region` yields as field reads of its row
 /// alone. `None` for a region that computes anything else.
 pub(super) fn region_path(ir: &Ir, region: RegionId) -> Option<FieldPath> {
-	let last = ops_in_region(ir, region).last()?;
+	let last = ops_in_region(ir, region).last().copied()?;
 	let closing = ir.op(last)?;
 	let (OpKind::Expr(ExprOp::Yield), [value]) = (&closing.kind, closing.operands.as_slice())
 	else {
@@ -425,7 +438,7 @@ fn layer_column_component(
 /// The field names the single value `region` yields reads from the row the region binds, when it
 /// is nothing but plain field reads ([`row_path`]).
 fn region_row_path(ir: &Ir, region: RegionId) -> Option<Vec<&str>> {
-	let last = ops_in_region(ir, region).last()?;
+	let last = ops_in_region(ir, region).last().copied()?;
 	let closing = ir.op(last)?;
 	let (OpKind::Expr(ExprOp::Yield), [yielded]) = (&closing.kind, closing.operands.as_slice())
 	else {
@@ -448,18 +461,17 @@ fn layer_key_part(ir: &Ir, layer: OpId, nth: usize, key: &KeyStructure) -> Optio
 				.is_some_and(|data| data.kind == RegionKind::FieldFrame(FieldRole::Computed))
 		})
 		.nth(nth)?;
-	let first = ops_in_region(ir, region).next()?;
+	let first = ops_in_region(ir, region).first().copied()?;
 	let in_key_part = ir.frame(ir.op(first)?.frame)?.eval.key_part;
 	in_key_part.then(|| component_read(ir, region, key, true)).flatten()
 }
 
 /// The ops of the first block of `region`, in order.
-fn ops_in_region(ir: &Ir, region: RegionId) -> impl Iterator<Item = OpId> + '_ {
+fn ops_in_region(ir: &Ir, region: RegionId) -> &[OpId] {
 	ir.region(region)
 		.and_then(|data| data.blocks.first().copied())
 		.and_then(|block| ir.block(block))
-		.into_iter()
-		.flat_map(|block| block.ops.iter().copied())
+		.map_or(&[], |block| block.ops.as_slice())
 }
 
 /// The component position the single value `region` yields reads: `id[i]` for an `i` within the
@@ -470,7 +482,7 @@ fn ops_in_region(ir: &Ir, region: RegionId) -> impl Iterator<Item = OpId> + '_ {
 /// A path beneath a component, a path with a step that is not a plain field read, and a path no
 /// alias names read no component.
 fn component_read(ir: &Ir, region: RegionId, key: &KeyStructure, allow_first: bool) -> Option<u32> {
-	let last = ops_in_region(ir, region).last()?;
+	let last = ops_in_region(ir, region).last().copied()?;
 	let closing = ir.op(last)?;
 	let (OpKind::Expr(ExprOp::Yield), [yielded]) = (&closing.kind, closing.operands.as_slice())
 	else {

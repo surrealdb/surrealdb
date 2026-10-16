@@ -1,6 +1,7 @@
 //! The row handling the VM's GQL mutation steps share: `SET`/`REMOVE`
-//! ([`update_row`]) and `DELETE` ([`delete_row`]) over a binding table, generic
-//! over how a row-scoped expression is evaluated ([`RowEval`]).
+//! ([`update_row`]) and `DELETE` ([`delete_row`]) over a binding table, and
+//! `INSERT` ([`insert_row`]), generic over how a row-scoped expression is
+//! evaluated ([`RowEval`]) and how a write is run ([`RunWrite`]).
 //!
 //! The steps are **pipeline breakers**: they fully drain their input binding
 //! rows before applying any write, which is what makes them Halloween-safe — a
@@ -12,22 +13,27 @@
 //!
 //! The write itself is the statement a hand-written mutation would be: a
 //! synthetic `UpdateStatement` / `DeleteStatement` / `CreateStatement` /
-//! `RelateStatement` targeting the resolved record, planned and run in the
-//! step's execution context ([`run_write`]), so table/field permissions, field
-//! validation, events, indexes, references, and live-query notifications apply
-//! exactly as for that statement. The row-scoped values a step writes are
-//! evaluated against the current binding row, and the resulting value is
-//! embedded as a literal in the synthetic statement.
+//! `RelateStatement` ([`update_write`], [`delete_write`], [`create_write`],
+//! [`relate_write`]) targeting the resolved record. The statement is bound with
+//! the `MATCH` that holds the step and lowered into a group of the step's
+//! program, so table/field permissions, field validation, events, indexes,
+//! references, and live-query notifications apply exactly as for that
+//! statement. A step runs its group once per row ([`RunWrite`]), in the
+//! step's execution context, with the row's record and values bound to the
+//! parameters the statement reads ([`MutationParam`]). The row-scoped values a
+//! step writes are evaluated against the current binding row before the group
+//! runs.
 
 use std::borrow::Cow;
-use std::sync::Arc;
 
 use surrealdb_types::ToSql;
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::FrozenContext;
-use crate::exec::{Clause, ExecutionContext, FlowResult};
+use crate::exec::ExecutionContext;
+use crate::exec::ir::iface::statements::MatchData;
 use crate::expr::data::Assignment;
+use crate::expr::logical::LogicalOp;
 use crate::expr::match_plan::DetachMode;
 use crate::expr::statements::{CreateStatement, DeleteStatement, RelateStatement, UpdateStatement};
 use crate::expr::{AssignOperator, ControlFlow, Data, Expr, Idiom, Literal, Output};
@@ -41,7 +47,7 @@ use crate::val::{RecordId, TableName, Value};
 /// field name on the target record; each value `V` is a row-scoped expression
 /// evaluated against the binding row before the write.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum UpdateOp<V = Clause> {
+pub(crate) enum UpdateOp<V> {
 	/// `SET a.p = v`, one `(property, value)` per assignment.
 	Set(Vec<(String, V)>),
 	/// `REMOVE a.p`, one property per removal.
@@ -54,31 +60,14 @@ pub(crate) enum UpdateOp<V = Clause> {
 // Shared helpers
 // ============================================================================
 
-#[cfg(test)]
-thread_local! {
-	/// How many synthetic writes this thread's mutation steps took.
-	pub(crate) static WRITES_PLANNED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-/// The plans of the synthetic statements one mutation step applies to the
-/// records of its rows, by the statement as written.
-///
-/// A step's statement differs between rows only in its values — the record
-/// it writes and the data it writes there — which are parameters of the
-/// statement ([`Param`]), so its plan serves every row: the step takes it from
-/// the compile cache when its first row reaches it, compiled on the cache's
-/// miss once per node and frame, and every row runs it with its own values
-/// bound. The plan is an [`ExecOperator`](crate::exec::ExecOperator), which a
-/// program, plain data, cannot hold; so the statement is planned by the cache
-/// rather than with the program that holds the step.
-#[derive(Default)]
-pub(crate) struct WritePlans {
-	plans: Vec<(Expr, Arc<dyn crate::exec::ExecOperator>)>,
-}
+/// The prefix of every parameter name a mutation's write reads its per-row
+/// values from. The names are internal: the parsers reject them in user text,
+/// and the planning catalog reads them at run time, never folding them.
+pub(crate) const MUTATION_PARAM_PREFIX: &str = "__mutation_";
 
 /// The names a mutation's synthetic statement reads its per-row values from.
 #[derive(Clone, Copy)]
-enum Param {
+pub(crate) enum MutationParam {
 	Record,
 	From,
 	To,
@@ -86,64 +75,108 @@ enum Param {
 	Value(usize),
 }
 
-impl Param {
-	fn name(self) -> String {
+impl MutationParam {
+	pub(crate) fn name(self) -> String {
 		match self {
-			Param::Record => "__mutation_record".to_owned(),
-			Param::From => "__mutation_from".to_owned(),
-			Param::To => "__mutation_to".to_owned(),
-			Param::Data => "__mutation_data".to_owned(),
-			Param::Value(i) => format!("__mutation_value_{i}"),
+			MutationParam::Record => format!("{MUTATION_PARAM_PREFIX}record"),
+			MutationParam::From => format!("{MUTATION_PARAM_PREFIX}from"),
+			MutationParam::To => format!("{MUTATION_PARAM_PREFIX}to"),
+			MutationParam::Data => format!("{MUTATION_PARAM_PREFIX}data"),
+			MutationParam::Value(i) => format!("{MUTATION_PARAM_PREFIX}value_{i}"),
 		}
 	}
 
-	fn expr(self) -> Expr {
+	pub(crate) fn expr(self) -> Expr {
 		Expr::Param(self.name().into())
 	}
 }
 
-/// Run `write`, the synthetic statement a mutation applies to one record, in
-/// `ctx`, with `values` bound to the parameters it reads: planned once per
-/// statement through `plans`, as that statement written by hand would be,
-/// and its value collected as that statement's.
-async fn run_write(
-	write: Expr,
-	values: Vec<(Param, Value)>,
-	plans: &mut WritePlans,
-	ctx: &ExecutionContext,
-) -> FlowResult<Value> {
-	let plan = match plans.plans.iter().find(|(held, _)| *held == write) {
-		Some((_, plan)) => Arc::clone(plan),
-		None => {
-			let op = crate::expr::logical::lower(write.clone()).map_err(|e| {
-				ControlFlow::Err(anyhow::anyhow!(crate::exec::Error::InvalidStatement(format!(
-					"a mutation's write did not lower: {e}"
-				))))
-			})?;
-			// Every per-row value is read when the plan runs.
-			let shadowed: Vec<String> = values.iter().map(|(param, _)| param.name()).collect();
-			// Served from the compile cache by the statement as written, the
-			// per-row values its parameters: compiled once per node and frame,
-			// and taken by every step that applies it
-			// ([`crate::exec::vm::serve`]).
-			let plan = crate::exec::vm::serve::statement(
-				ctx,
-				op,
-				Some(Arc::clone(&ctx.root().auth)),
-				0,
-				shadowed,
-			)
-			.await
-			.map_err(ControlFlow::Err)?;
-			#[cfg(test)]
-			WRITES_PLANNED.with(|planned| planned.set(planned.get() + 1));
-			plans.plans.push((write, Arc::clone(&plan)));
-			plan
+/// Lowers `write`, a statement a mutation applies to one record, to the plan
+/// the binder binds.
+fn lowered(write: Expr) -> Result<LogicalOp, crate::exec::Error> {
+	crate::expr::logical::lower(write).map_err(|e| {
+		crate::exec::Error::InvalidStatement(format!("a mutation's write did not lower: {e}"))
+	})
+}
+
+/// The `UPDATE` of the record in [`MutationParam::Record`] a `SET`, `REMOVE` or
+/// `SET a = {…}` step applies, answering the record's `AFTER` image. A `SET`
+/// assignment `i` reads its value from [`MutationParam::Value`]`(i)`, and a
+/// content update reads its object from [`MutationParam::Data`].
+pub(crate) fn update_write(data: &MatchData) -> Result<LogicalOp, crate::exec::Error> {
+	let data = match data {
+		MatchData::Set(names) => Data::SetExpression(
+			names
+				.iter()
+				.enumerate()
+				.map(|(i, name)| Assignment {
+					place: Idiom::field(name.clone()),
+					operator: AssignOperator::Assign,
+					value: MutationParam::Value(i).expr(),
+				})
+				.collect(),
+		),
+		MatchData::Unset(names) => {
+			Data::UnsetExpression(names.iter().map(|name| Idiom::field(name.clone())).collect())
 		}
+		MatchData::Content => Data::ContentExpression(MutationParam::Data.expr()),
 	};
-	let ctx = ctx.with_params(values.into_iter().map(|(param, value)| (param.name(), value)));
-	let shape = plan.output_shape();
-	crate::exec::operators::collect_shaped_value(plan.execute(&ctx)?, shape).await
+	let stmt = UpdateStatement {
+		what: vec![MutationParam::Record.expr()],
+		data: Some(data),
+		output: Some(Output::After),
+		..Default::default()
+	};
+	lowered(Expr::Update(Box::new(stmt)))
+}
+
+/// The `DELETE` of the record in [`MutationParam::Record`].
+pub(crate) fn delete_write() -> Result<LogicalOp, crate::exec::Error> {
+	let stmt = DeleteStatement {
+		what: vec![MutationParam::Record.expr()],
+		..Default::default()
+	};
+	lowered(Expr::Delete(Box::new(stmt)))
+}
+
+/// The `CREATE` of a record of `table` with the content of
+/// [`MutationParam::Data`], answering its `AFTER` image.
+pub(crate) fn create_write(table: &TableName) -> Result<LogicalOp, crate::exec::Error> {
+	let stmt = CreateStatement {
+		what: vec![Expr::Table(table.clone())],
+		data: Some(Data::ContentExpression(MutationParam::Data.expr())),
+		output: Some(Output::After),
+		..Default::default()
+	};
+	lowered(Expr::Create(Box::new(stmt)))
+}
+
+/// The `RELATE` of the record in [`MutationParam::From`] to the one in
+/// [`MutationParam::To`] through `table`, with the content of
+/// [`MutationParam::Data`], answering the edge's `AFTER` image.
+pub(crate) fn relate_write(table: &TableName) -> Result<LogicalOp, crate::exec::Error> {
+	let stmt = RelateStatement {
+		only: false,
+		or_update: false,
+		through: Expr::Table(table.clone()),
+		from: MutationParam::From.expr(),
+		to: MutationParam::To.expr(),
+		data: Some(Data::ContentExpression(MutationParam::Data.expr())),
+		output: Some(Output::After),
+		timeout: Expr::Literal(Literal::None),
+	};
+	lowered(Expr::Relate(Box::new(stmt)))
+}
+
+/// Runs the writes a mutation step applies.
+pub(crate) trait RunWrite {
+	/// Runs write group `write` of the running program with `values` bound to the
+	/// parameters it reads, and answers its rows.
+	fn run<'a>(
+		&'a mut self,
+		write: u16,
+		values: Vec<(MutationParam, Value)>,
+	) -> futures::future::BoxFuture<'a, Result<Vec<Value>, ControlFlow>>;
 }
 
 /// Recover the record id of the node/edge bound at `name` via the shared
@@ -194,27 +227,28 @@ pub(crate) trait RowEval<V> {
 	) -> futures::future::BoxFuture<'a, Result<Value, ControlFlow>>;
 }
 
-/// Apply `op` to the record bound at `target` in `row`, rebinding `row[target]`
-/// to the record's AFTER image. A null / unresolvable target binding is passed
-/// through untouched.
+/// Apply `op` to the record bound at `target` in `row` by running write group
+/// `write`, rebinding `row[target]` to the record's AFTER image. A null /
+/// unresolvable target binding is passed through untouched.
 pub(crate) async fn update_row<V>(
 	op: &UpdateOp<V>,
+	write: u16,
 	target: &str,
 	row: &mut Value,
 	eval: &mut impl RowEval<V>,
-	plans: &mut WritePlans,
-	ctx: &ExecutionContext,
+	writes: &mut impl RunWrite,
 ) -> Result<(), ControlFlow> {
 	if let Some(rid) = target_record_id(row, target) {
-		let after = apply_update(op, &rid, row, eval, plans, ctx).await?;
+		let after = apply_update(op, write, &rid, row, eval, writes).await?;
 		set_binding(row, target, after);
 	}
 	Ok(())
 }
 
-/// Delete the record bound at `target` in `row`, once per distinct record in
-/// `deleted`, and rebind it to `NULL`, as every edge of the row incident to it.
-/// `(ns, db)` are the ids of the database the connected-edge probe reads.
+/// Delete the record bound at `target` in `row` by running write group `write`,
+/// once per distinct record in `deleted`, and rebind it to `NULL`, as every edge
+/// of the row incident to it. `(ns, db)` are the ids of the database the
+/// connected-edge probe reads.
 #[expect(
 	clippy::too_many_arguments,
 	reason = "the row, its binding and the step's mode, and the state the step keeps across rows"
@@ -226,12 +260,13 @@ pub(crate) async fn delete_row(
 	is_edge: bool,
 	(ns, db): (NamespaceId, DatabaseId),
 	deleted: &mut std::collections::HashSet<RecordId>,
-	plans: &mut WritePlans,
+	write: u16,
+	writes: &mut impl RunWrite,
 	ctx: &ExecutionContext,
 ) -> Result<(), ControlFlow> {
 	if let Some(rid) = target_record_id(row, target) {
 		if deleted.insert(rid.clone()) {
-			apply_delete(&rid, detach, is_edge, ns, db, plans, ctx).await?;
+			apply_delete(&rid, detach, is_edge, ns, db, write, writes, ctx).await?;
 		}
 		// The record is gone; surface NULL for it, and for any other binding in
 		// this row that is an edge incident to it (a `DETACH` delete cascades
@@ -242,60 +277,48 @@ pub(crate) async fn delete_row(
 	Ok(())
 }
 
-/// Build the synthetic `UpdateStatement` for one resolved record, run it through
-/// the native pipeline, and return its AFTER image (or `Value::Null`).
+/// Evaluate the values of the update of one resolved record, run write group
+/// `write` with them, and return the record's AFTER image (or `Value::Null`).
 async fn apply_update<V>(
 	op: &UpdateOp<V>,
+	write: u16,
 	rid: &RecordId,
 	row: &Value,
 	eval: &mut impl RowEval<V>,
-	plans: &mut WritePlans,
-	ctx: &ExecutionContext,
+	writes: &mut impl RunWrite,
 ) -> Result<Value, ControlFlow> {
-	let mut values = vec![(Param::Record, Value::RecordId(rid.clone()))];
-	let update_data = match op {
+	let mut values = vec![(MutationParam::Record, Value::RecordId(rid.clone()))];
+	match op {
 		UpdateOp::Set(assignments) => {
 			// Every assignment in one `SET` evaluates against the same pre-write
 			// row image.
-			let mut assigns = Vec::with_capacity(assignments.len());
-			for (i, (property, value)) in assignments.iter().enumerate() {
-				values.push((Param::Value(i), eval.eval(value, row).await?));
-				assigns.push(Assignment {
-					place: Idiom::field(property.clone()),
-					operator: AssignOperator::Assign,
-					value: Param::Value(i).expr(),
-				});
+			for (i, (_, value)) in assignments.iter().enumerate() {
+				values.push((MutationParam::Value(i), eval.eval(value, row).await?));
 			}
-			Data::SetExpression(assigns)
 		}
-		UpdateOp::Unset(properties) => Data::UnsetExpression(
-			properties.iter().map(|property| Idiom::field(property.clone())).collect(),
-		),
+		UpdateOp::Unset(_) => {}
 		UpdateOp::Content(object) => {
-			values.push((Param::Data, eval.eval(object, row).await?));
-			Data::ContentExpression(Param::Data.expr())
+			values.push((MutationParam::Data, eval.eval(object, row).await?));
 		}
-	};
-	let stmt = UpdateStatement {
-		what: vec![Param::Record.expr()],
-		data: Some(update_data),
-		output: Some(Output::After),
-		..Default::default()
-	};
-	let result = run_write(Expr::Update(Box::new(stmt)), values, plans, ctx).await?;
-	Ok(single_record(result))
+	}
+	Ok(first_row(writes.run(write, values).await?))
 }
 
-/// Run the synthetic `DeleteStatement` for one resolved record. `NoDetach` (the
-/// ISO default) first errors if the node still has connected edges; `Detach`
+/// Run write group `write` for one resolved record. `NoDetach` (the ISO
+/// default) first errors if the node still has connected edges; `Detach`
 /// cascades them (native `DELETE` always purges connected edges).
+#[expect(
+	clippy::too_many_arguments,
+	reason = "the record and the step's mode, the ids of its database, and the write to run"
+)]
 async fn apply_delete(
 	rid: &RecordId,
 	detach: DetachMode,
 	is_edge: bool,
 	ns: NamespaceId,
 	db: DatabaseId,
-	plans: &mut WritePlans,
+	write: u16,
+	writes: &mut impl RunWrite,
 	ctx: &ExecutionContext,
 ) -> Result<(), ControlFlow> {
 	// `DETACH`/`NODETACH` govern deleting a NODE that still has relationships.
@@ -314,12 +337,7 @@ async fn apply_delete(
 			)
 		))));
 	}
-	let stmt = DeleteStatement {
-		what: vec![Param::Record.expr()],
-		..Default::default()
-	};
-	let values = vec![(Param::Record, Value::RecordId(rid.clone()))];
-	run_write(Expr::Delete(Box::new(stmt)), values, plans, ctx).await?;
+	writes.run(write, vec![(MutationParam::Record, Value::RecordId(rid.clone()))]).await?;
 	Ok(())
 }
 
@@ -381,13 +399,10 @@ async fn has_connected_edges(
 	Ok(!batch.is_empty())
 }
 
-/// Extract the single record from a mutation result (native CREATE/UPDATE return
-/// an array of affected records); `Value::Null` when empty.
-fn single_record(value: Value) -> Value {
-	match value {
-		Value::Array(mut arr) => arr.0.drain(..).next().unwrap_or(Value::Null),
-		other => other,
-	}
+/// The record a mutation's write answers: the first row of its group, or
+/// `Value::Null` when the write answered none.
+fn first_row(rows: Vec<Value>) -> Value {
+	rows.into_iter().next().unwrap_or(Value::Null)
 }
 
 // ============================================================================
@@ -396,25 +411,29 @@ fn single_record(value: Value) -> Value {
 
 /// A new node an [`InsertGraph`] creates.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct InsertNodeOp<V = Clause> {
+pub(crate) struct InsertNodeOp<V> {
 	/// The binding name the created record is bound under.
 	pub(crate) name: String,
 	/// The target table (= label).
 	pub(crate) table: TableName,
 	/// The row-scoped property object, evaluated per row.
 	pub(crate) props: V,
+	/// The write group that creates the node.
+	pub(crate) write: u16,
 }
 
 /// A new edge an [`InsertGraph`] relates between two endpoints (each a node
 /// created by this stage or a read-bound reference), addressed by binding name.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct InsertEdgeOp<V = Clause> {
+pub(crate) struct InsertEdgeOp<V> {
 	pub(crate) name: String,
 	pub(crate) table: TableName,
 	pub(crate) from: String,
 	pub(crate) to: String,
 	/// The row-scoped property object, evaluated per row.
 	pub(crate) props: V,
+	/// The write group that relates the edge.
+	pub(crate) write: u16,
 }
 
 /// Create the new nodes (binding each into the row so later nodes/edges can
@@ -424,42 +443,24 @@ pub(crate) async fn insert_row<V>(
 	edges: &[InsertEdgeOp<V>],
 	row: &mut Value,
 	eval: &mut impl RowEval<V>,
-	plans: &mut WritePlans,
-	ctx: &ExecutionContext,
+	writes: &mut impl RunWrite,
 ) -> Result<(), ControlFlow> {
 	for node in nodes {
 		let props = eval.eval(&node.props, row).await?;
-		let stmt = CreateStatement {
-			what: vec![Expr::Table(node.table.clone())],
-			data: Some(Data::ContentExpression(Param::Data.expr())),
-			output: Some(Output::After),
-			..Default::default()
-		};
-		let values = vec![(Param::Data, props)];
-		let result = run_write(Expr::Create(Box::new(stmt)), values, plans, ctx).await?;
-		set_binding(row, &node.name, single_record(result));
+		let rows = writes.run(node.write, vec![(MutationParam::Data, props)]).await?;
+		set_binding(row, &node.name, first_row(rows));
 	}
 	for edge in edges {
 		let from = target_record_id(row, &edge.from).ok_or_else(|| endpoint_error(&edge.from))?;
 		let to = target_record_id(row, &edge.to).ok_or_else(|| endpoint_error(&edge.to))?;
 		let props = eval.eval(&edge.props, row).await?;
-		let stmt = RelateStatement {
-			only: false,
-			or_update: false,
-			through: Expr::Table(edge.table.clone()),
-			from: Param::From.expr(),
-			to: Param::To.expr(),
-			data: Some(Data::ContentExpression(Param::Data.expr())),
-			output: Some(Output::After),
-			timeout: Expr::Literal(Literal::None),
-		};
 		let values = vec![
-			(Param::From, Value::RecordId(from)),
-			(Param::To, Value::RecordId(to)),
-			(Param::Data, props),
+			(MutationParam::From, Value::RecordId(from)),
+			(MutationParam::To, Value::RecordId(to)),
+			(MutationParam::Data, props),
 		];
-		let result = run_write(Expr::Relate(Box::new(stmt)), values, plans, ctx).await?;
-		set_binding(row, &edge.name, single_record(result));
+		let rows = writes.run(edge.write, values).await?;
+		set_binding(row, &edge.name, first_row(rows));
 	}
 	Ok(())
 }

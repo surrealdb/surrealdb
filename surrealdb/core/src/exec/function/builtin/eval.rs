@@ -39,7 +39,7 @@ use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 use crate::ctx::Context;
 use crate::dbs::Variables;
 use crate::exe::FlowResultExt as _;
-use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
+use crate::exec::function::{ScalarFunction, Signature};
 use crate::exec::ir::iface::Fallibility;
 use crate::exec::operators::collect_shaped_value;
 use crate::exec::{Error as ExecError, EvalContext, ExecOperator, ExecutionContext};
@@ -279,10 +279,8 @@ impl ScalarFunction for EvalGql {
 // Both run the statement they are handed, so the planner must not duplicate,
 // drop or fold a call to either. `is_writer_builtin` keeps them out of every
 // purity decision, and the effects each function declares say the same.
-pub fn register(registry: &mut FunctionRegistry) {
-	registry.register(EvalSurql);
-	registry.register(EvalGql);
-}
+/// The `eval::*` scalar builtins.
+pub(super) const SCALARS: &[&dyn ScalarFunction] = &[&EvalSurql, &EvalGql];
 
 #[cfg(test)]
 mod tests {

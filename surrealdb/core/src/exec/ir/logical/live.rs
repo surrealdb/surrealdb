@@ -17,6 +17,7 @@ use std::collections::BTreeMap;
 use super::ddl::{Planned, stored_value, template};
 use super::ops::LiveAttrs;
 use crate::exec::ir::iface::statements::{LiveShape, TemplateHole};
+use crate::exec::vm::codec::Codec;
 use crate::expr::statements::live::{LiveFields, LiveStatement};
 use crate::expr::{Expr, Fields};
 
@@ -42,7 +43,10 @@ pub(crate) struct LivePlan<'e> {
 }
 
 /// The attributes, target and stored clauses of `statement`.
-pub(crate) fn plan_live(statement: &LiveStatement) -> Planned<LivePlan<'_>> {
+pub(crate) fn plan_live<'e>(
+	statement: &'e LiveStatement,
+	codec: &'static Codec,
+) -> Planned<LivePlan<'e>> {
 	let (shape, fields, query_fields) = match &statement.fields {
 		LiveFields::Diff => (LiveShape::Diff, None, crate::catalog::SubscriptionFields::Diff),
 		LiveFields::Select(fields) => (
@@ -67,7 +71,7 @@ pub(crate) fn plan_live(statement: &LiveStatement) -> Planned<LivePlan<'_>> {
 				.map(|fetch| fetch.iter().map(|f| f.0.clone()).collect()),
 		}),
 	};
-	let value = stored_value(&definition.to_stored(), "StoredSubscriptionDefinition")?;
+	let value = stored_value(codec, &definition.to_stored(), "StoredSubscriptionDefinition")?;
 	Ok(LivePlan {
 		attrs: LiveAttrs {
 			id: crate::val::Uuid(statement.id),

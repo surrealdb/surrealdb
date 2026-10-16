@@ -743,12 +743,12 @@ async fn read_triggers(catalog: &Catalog, table: &TableName) -> (Definition, Rea
 
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests {
+	use super::super::bind;
 	use super::super::pipelines::{
 		ChainLegality, ChainRefusal, chain_legality_with, pipelines_of_with,
 		statement_legality_with,
 	};
 	use super::super::test_fixture::{Fixture, owner, record_user};
-	use super::super::{Rules, bind_with};
 	use super::*;
 	use crate::dbs::Session;
 
@@ -807,7 +807,7 @@ mod tests {
 		let op = crate::expr::logical::lower(statement).expect("lowers");
 		let bound = fixture.bound_as(session, Vec::new()).await;
 		let bx = fixture.bind_context(&bound);
-		let op = bind_with(op, &bx, Rules::Run).await.expect("binds");
+		let op = bind(op, &bx).await.expect("binds");
 		let registry = FunctionRegistry::with_builtins();
 		let planner = Planner::with_txn(
 			&bound.ctx,

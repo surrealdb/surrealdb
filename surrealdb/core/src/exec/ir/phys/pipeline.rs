@@ -23,6 +23,8 @@ use smallvec::{SmallVec, smallvec};
 
 use super::ops::{MatchStepAttrs, PhysOp, PipelineAttrs, PipelineEdge, PipelineId, PrefetchKeys};
 use super::schedule;
+use crate::exec::function::FunctionRegistry;
+use crate::exec::ir::analysis::cx::structural_cx;
 use crate::exec::ir::analysis::footprint;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
@@ -242,7 +244,7 @@ pub(crate) fn fans_out(kind: LoopKind) -> bool {
 /// so a second call builds none. Wrapping reads nothing physical, so no context is taken.
 pub(crate) fn build(ir: &mut Ir, facts: &mut FactCache, root: RegionId) -> Result<usize, IrError> {
 	let mut ids = PipelineIds::following(&PipelineDag::of(ir))?;
-	let mut loops: Vec<(SmallVec<[OpId; 4]>, Option<OpId>)> = Vec::new();
+	let mut loops: Vec<(SmallVec<[OpId; 8]>, Option<OpId>)> = Vec::new();
 	ir.walk(root, WalkOrder::PreOrder, &mut |op| {
 		if let Some(data) = ir.op(op)
 			&& let OpKind::Phys(PhysOp::Loop {
@@ -256,7 +258,7 @@ pub(crate) fn build(ir: &mut Ir, facts: &mut FactCache, root: RegionId) -> Resul
 				Provenance::From(ids) => ids.first().copied(),
 				Provenance::Bound => None,
 			};
-			let mut chain: SmallVec<[OpId; 4]> = smallvec![op];
+			let mut chain: SmallVec<[OpId; 8]> = smallvec![op];
 			if *kind == LoopKind::Select {
 				chain.extend(trailing_of(ir, op));
 			}
@@ -277,7 +279,7 @@ pub(crate) fn build(ir: &mut Ir, facts: &mut FactCache, root: RegionId) -> Resul
 ///
 /// The run stops at the first op that is a breaker or that another op also reads, so every op it
 /// names may move into the pipeline of the loop without changing another consumer.
-fn trailing_of(ir: &Ir, loop_op: OpId) -> SmallVec<[OpId; 4]> {
+fn trailing_of(ir: &Ir, loop_op: OpId) -> SmallVec<[OpId; 8]> {
 	let mut trail = SmallVec::new();
 	let Some(block) = ir.op(loop_op).map(|data| data.parent) else {
 		return trail;
@@ -474,7 +476,7 @@ pub(crate) fn wrap(
 		edges,
 		logical,
 	};
-	let mut from: SmallVec<[OpId; 4]> = ops.iter().copied().collect();
+	let mut from: SmallVec<[OpId; 8]> = ops.iter().copied().collect();
 	from.extend(logical);
 
 	let (pipeline, clones) = rw.derived(&from, |rw| -> Result<(OpId, Vec<OpId>), IrError> {
@@ -648,6 +650,7 @@ struct Candidate {
 pub(crate) fn loop_prefetch_reads(
 	ir: &Ir,
 	facts: &mut FactCache,
+	registry: &FunctionRegistry,
 	loop_op: OpId,
 ) -> Vec<PrefetchRead> {
 	let Some(OpKind::Phys(PhysOp::Loop {
@@ -664,11 +667,12 @@ pub(crate) fn loop_prefetch_reads(
 	}
 	let mut found = Vec::new();
 	collect_reads(ir, loop_op, &mut found);
-	let writes = footprint::of(ir, facts, statement).writes;
+	let under = structural_cx(registry, ir);
+	let writes = footprint::of_with(ir, facts, &under, statement).writes;
 	let candidates = found
 		.into_iter()
 		.map(|read| Candidate {
-			reads: footprint::of(ir, facts, read.op).reads.into_iter().collect(),
+			reads: footprint::of_with(ir, facts, &under, read.op).reads.into_iter().collect(),
 			read,
 		})
 		.collect();
@@ -681,8 +685,13 @@ pub(crate) fn loop_prefetch_reads(
 ///
 /// It decides and inserts nothing: a `phys.prefetch` is inserted only once
 /// [`schedule::PREFETCH_EXECUTABLE`] holds.
-pub(crate) fn loop_prefetch(ir: &Ir, facts: &mut FactCache, loop_op: OpId) -> Option<PrefetchKeys> {
-	prefetch_keys(&loop_prefetch_reads(ir, facts, loop_op))
+pub(crate) fn loop_prefetch(
+	ir: &Ir,
+	facts: &mut FactCache,
+	registry: &FunctionRegistry,
+	loop_op: OpId,
+) -> Option<PrefetchKeys> {
+	prefetch_keys(&loop_prefetch_reads(ir, facts, registry, loop_op))
 }
 
 /// The reads of the candidates none of whose resources a write overlaps.

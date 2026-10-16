@@ -55,6 +55,13 @@ impl SkipRevisioned for TableId {
 	fn skip_revisioned<R: std::io::Read>(reader: &mut R) -> Result<(), revision::Error> {
 		<u32 as SkipRevisioned>::skip_revisioned(reader)
 	}
+
+	#[inline]
+	fn skip_revisioned_slice(
+		reader: &mut revision::SliceReader<'_>,
+	) -> Result<(), revision::Error> {
+		<u32 as SkipRevisioned>::skip_revisioned_slice(reader)
+	}
 }
 
 impl revision::WalkRevisioned for TableId {
@@ -208,6 +215,17 @@ pub struct StoredTableDefinition {
 }
 
 impl_kv_value_catalog!(StoredTableDefinition);
+
+impl crate::stored::EmbeddedRevision for StoredTableDefinition {
+	fn deserialize_body<R: std::io::Read>(
+		reader: &mut R,
+		revision: u16,
+	) -> Result<Self, revision::Error> {
+		// The derive's body reader, so it stays identical to `deserialize_revisioned` after the
+		// header.
+		Self::__deserialize_after_header(reader, revision)
+	}
+}
 
 impl StoredTableDefinition {
 	pub fn new(
@@ -475,6 +493,17 @@ mod tests {
 	use super::*;
 	use crate::catalog::{ExprText, LogicalPermissionBody};
 	use crate::expr::Expr;
+
+	#[test]
+	fn slice_skip_agrees_with_reader_skip() {
+		let id = TableId(3);
+		let mut bytes = Vec::new();
+		id.serialize_revisioned(&mut bytes).unwrap();
+		assert_eq!(revision::skip_slice::<TableId>(&bytes).unwrap(), bytes.len());
+		let cut = &bytes[..bytes.len() - 1];
+		assert!(revision::skip_slice::<TableId>(cut).is_err());
+		assert!(TableId::skip_revisioned(&mut &cut[..]).is_err());
+	}
 
 	fn definition(select: Permission) -> TableDefinition {
 		permissioned(Permissions {

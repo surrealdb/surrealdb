@@ -110,7 +110,7 @@ async fn plan_serving(
 	let planned = plan_request(&input, &planning).await?;
 	compile_phase!("lower", {
 		for answers in &planned.outcome.answers {
-			indexes.learn(answers)?;
+			indexes.learn(answers, planner.function_registry())?;
 		}
 	});
 	Ok((Planned::new(planned.ir, planned.facts), planned.outcome.served))
@@ -347,6 +347,7 @@ async fn compile_planned(
 		compiled: None,
 		session: session.clone(),
 		redact_volatile: frozen.redact_volatile_explain_attrs(),
+		surface: frozen.surface(),
 	};
 	let mut compiler = Compiler::over(
 		&env,
@@ -387,7 +388,7 @@ pub(super) async fn compile_subscription(
 	};
 	let planned = plan_subscription(request, &planning).await?;
 	for answers in &planned.outcome.answers {
-		indexes.learn(answers)?;
+		indexes.learn(answers, planner.function_registry())?;
 	}
 	let env = CompileEnv {
 		registry: planner.function_registry(),
@@ -400,6 +401,7 @@ pub(super) async fn compile_subscription(
 		compiled: None,
 		session: session.clone(),
 		redact_volatile: frozen.redact_volatile_explain_attrs(),
+		surface: frozen.surface(),
 	};
 	let mut compiler = Compiler::over(&env, StatementPlanner::new(planner, session, &indexes));
 	let root = Planned::new(planned.ir, planned.facts);
@@ -731,7 +733,7 @@ impl StatementPlanner<'_> {
 		};
 		let planned = plan_request(&input, &planning).await?;
 		for answers in &planned.outcome.answers {
-			self.indexes.learn(answers)?;
+			self.indexes.learn(answers, self.planner.function_registry())?;
 		}
 		Ok(Resolved::Unit {
 			planned: Box::new(Planned::new(planned.ir, planned.facts)),
@@ -789,7 +791,7 @@ impl StatementPlanner<'_> {
 		};
 		let planned = plan_request(&input, &planning).await?;
 		for answers in &planned.outcome.answers {
-			self.indexes.learn(answers)?;
+			self.indexes.learn(answers, self.planner.function_registry())?;
 		}
 		Ok(Resolved::Unit {
 			planned: Box::new(Planned::new(planned.ir, planned.facts)),

@@ -17,7 +17,10 @@
 //! - A step of the binding table (a bind, an endpoint, a single hop, a quantified expansion, the
 //!   check that no edge repeats, a join, a write to the bound records) is one `logical.bind_step`
 //!   over the rows it extends, with the clause regions its shape lists. A join takes the build rows
-//!   first and the probe rows second.
+//!   first and the probe rows second. A write step holds, after its clause regions, one `Subquery`
+//!   region for each write it applies to a record: the statement a hand-written mutation of that
+//!   record would be, bound like any write and reading the record and the values of the row from
+//!   the parameters the VM binds when the step runs it.
 //! - A predicate over the binding rows, a projection, a grouping, a sort, a limit and a `DISTINCT`
 //!   are the ordinary nodes of a relational plan, bound as the binder binds them: a predicate and a
 //!   projection per row inside a loop, the rest over every row.
@@ -51,6 +54,7 @@ use crate::exec::ir::iface::types::TypeKnowledge;
 use crate::exec::ir::logical::ops::LogOp;
 use crate::exec::ir::logical::seam::{BindCx, Built, ExprHost, bind_expr, invariant};
 use crate::exec::ir::op_kind::OpKind;
+use crate::exec::operators::mutate::{create_write, delete_write, relate_write, update_write};
 use crate::exec::planner::match_backend::{
 	BindingBackend, EndpointSpec, ExpandSpec, JoinSpec, PathSpec, Planning,
 };
@@ -58,10 +62,38 @@ use crate::exec::planner::match_plan::MatchFold;
 use crate::exec::vm::NotCovered;
 use crate::expr::Function;
 use crate::expr::logical::{
-	LogicalExpr, LogicalField, LogicalFields, LogicalMatch, LogicalOrder, LogicalOrdering,
-	LogicalSource, OutputPath, SourceRef,
+	LogicalExpr, LogicalField, LogicalFields, LogicalMatch, LogicalOp, LogicalOrder,
+	LogicalOrdering, LogicalSource, OutputPath, SourceRef,
 };
-use crate::expr::match_plan::{BindingKind, MatchOutput, MatchPlan, MutationStage, UpdateData};
+use crate::expr::match_plan::{
+	BindingId, BindingKind, MatchOutput, MatchPlan, MatchStage, MutationStage, UpdateData,
+};
+
+/// The refusal of a `MATCH` the entry's surface leaves out.
+pub(crate) const NOT_SERVED_MATCH: &str = "ir build: a MATCH statement is not served by this entry";
+
+/// Binds a `MATCH` statement.
+///
+/// The binder reaches the fold only through this hook, held by the binding context as an
+/// `Option`. The context of an entry that serves `MATCH` holds [`FULL_MATCH_BINDING`]; one that
+/// does not holds nothing, names none of the fold, and refuses a `MATCH` with
+/// [`NOT_SERVED_MATCH`].
+pub(crate) trait MatchBinding {
+	/// Binds `statement` into the region `cx` is binding ([`bind_fold`]).
+	fn bind(&self, cx: &mut BindCx<'_>, statement: &LogicalMatch) -> Result<Flow, IrError>;
+}
+
+/// The binding of every `MATCH`: [`bind_fold`].
+pub(crate) struct FullMatchBinding;
+
+/// The one [`FullMatchBinding`], named only by the surface that serves `MATCH`.
+pub(crate) static FULL_MATCH_BINDING: FullMatchBinding = FullMatchBinding;
+
+impl MatchBinding for FullMatchBinding {
+	fn bind(&self, cx: &mut BindCx<'_>, statement: &LogicalMatch) -> Result<Flow, IrError> {
+		bind_fold(cx, statement)
+	}
+}
 
 /// A node of the folded binding table, as the fold built it and before it is bound.
 ///
@@ -80,11 +112,13 @@ pub(crate) enum FoldNode {
 		predicate: LogicalExpr,
 	},
 	/// A step of the binding table over `inputs` (a join's build rows, then its probe rows), with
-	/// one expression per clause region of the shape, in the order the shape lists them.
+	/// one expression per clause region of the shape, in the order the shape lists them, and then
+	/// one write per `Subquery` region.
 	Step {
 		inputs: Vec<Arc<FoldNode>>,
 		shape: BindStepShape,
 		clauses: Vec<(ClauseRole, LogicalExpr)>,
+		writes: Vec<FoldWrite>,
 	},
 	/// The columns folded by the grouping keys.
 	Aggregate {
@@ -112,18 +146,78 @@ pub(crate) enum FoldNode {
 	},
 }
 
+/// A write a mutation step applies to each record of its rows.
+pub(crate) struct FoldWrite {
+	/// The statement, which reads its record and values from the parameters of the run.
+	op: LogicalOp,
+	/// The one table every record the statement writes belongs to, which the statement itself
+	/// names only through a value.
+	table: Option<TableName>,
+}
+
 type Node = Arc<FoldNode>;
 
 fn step(
 	inputs: Vec<Node>,
 	shape: BindStepShape,
 	clauses: Vec<(ClauseRole, LogicalExpr)>,
+	writes: Vec<FoldWrite>,
 ) -> Result<Node, Planning> {
 	Ok(Arc::new(FoldNode::Step {
 		inputs,
 		shape,
 		clauses,
+		writes,
 	}))
+}
+
+/// The one table every record the binding `id` holds belongs to, when the plan guarantees it: the
+/// binding is a node or an edge, and every occurrence of it in the plan (in a pattern of a
+/// `MATCH`, mandatory or optional, or created by an `INSERT`) carries the same label. The
+/// occurrence that introduces the binding carries a label, so every record it binds is of that
+/// table; an unlabeled or differently labeled occurrence anywhere answers `None`. A write bound
+/// to the answered table runs that table's gates and stages without re-checking the record's table,
+/// so the answer must hold for every record the binding can hold.
+fn static_table(plan: &MatchPlan, id: BindingId) -> Option<TableName> {
+	if !matches!(plan.binding(id).kind, BindingKind::Node | BindingKind::Edge) {
+		return None;
+	}
+	let mut labels: Vec<Option<&TableName>> = Vec::new();
+	for stage in &plan.stages {
+		match stage {
+			MatchStage::Read(clause) => {
+				for pattern in &clause.patterns {
+					if pattern.start.binding == id {
+						labels.push(pattern.start.label.as_ref());
+					}
+					for (edge, node) in &pattern.steps {
+						if edge.binding == id {
+							labels.push(edge.label.as_ref());
+						}
+						if node.binding == id {
+							labels.push(node.label.as_ref());
+						}
+					}
+				}
+			}
+			MatchStage::Mutate(MutationStage::Insert(insert)) => {
+				labels.extend(
+					insert.nodes.iter().filter(|node| node.binding == id).map(|n| Some(&n.label)),
+				);
+				labels.extend(
+					insert.edges.iter().filter(|edge| edge.binding == id).map(|e| Some(&e.label)),
+				);
+			}
+			MatchStage::Mutate(MutationStage::Update {
+				..
+			})
+			| MatchStage::Mutate(MutationStage::Delete {
+				..
+			}) => {}
+		}
+	}
+	let first = labels.first().copied().flatten()?;
+	labels.iter().all(|label| *label == Some(first)).then(|| first.clone())
 }
 
 /// The columns of `output` as a projection list, each column projected under its output name.
@@ -169,6 +263,7 @@ impl BindingBackend for LogicalBackend {
 				name,
 			},
 			Vec::new(),
+			Vec::new(),
 		)
 	}
 
@@ -181,6 +276,7 @@ impl BindingBackend for LogicalBackend {
 				name: spec.name,
 				label: spec.label,
 			},
+			Vec::new(),
 			Vec::new(),
 		)
 	}
@@ -212,6 +308,7 @@ impl BindingBackend for LogicalBackend {
 				optional: spec.optional,
 			})),
 			clauses,
+			Vec::new(),
 		)
 	}
 
@@ -233,6 +330,7 @@ impl BindingBackend for LogicalBackend {
 				reversed: spec.reversed,
 			})),
 			Vec::new(),
+			Vec::new(),
 		)
 	}
 
@@ -242,6 +340,7 @@ impl BindingBackend for LogicalBackend {
 			BindStepShape::DistinctEdges {
 				edges: edges.into_boxed_slice(),
 			},
+			Vec::new(),
 			Vec::new(),
 		)
 	}
@@ -257,6 +356,7 @@ impl BindingBackend for LogicalBackend {
 				residual: !clauses.is_empty(),
 			})),
 			clauses,
+			Vec::new(),
 		)
 	}
 
@@ -267,6 +367,7 @@ impl BindingBackend for LogicalBackend {
 		stage: &MutationStage,
 	) -> Result<Node, Planning> {
 		let name = |id| plan.binding(id).name.clone();
+		let fail = |error: crate::exec::Error| Planning::Fail(error.into());
 		match stage {
 			MutationStage::Update {
 				target,
@@ -287,6 +388,10 @@ impl BindingBackend for LogicalBackend {
 						(MatchData::Content, vec![(ClauseRole::Content, object.clone())])
 					}
 				};
+				let writes = vec![FoldWrite {
+					op: update_write(&data).map_err(fail)?,
+					table: static_table(plan, *target),
+				}];
 				step(
 					vec![input],
 					BindStepShape::Update {
@@ -294,23 +399,31 @@ impl BindingBackend for LogicalBackend {
 						data,
 					},
 					clauses,
+					writes,
 				)
 			}
 			MutationStage::Delete {
 				target,
 				detach,
-			} => step(
-				vec![input],
-				BindStepShape::Delete {
-					target: name(*target),
-					detach: *detach,
-					is_edge: matches!(
-						plan.binding(*target).kind,
-						BindingKind::Edge | BindingKind::EdgeGroup
-					),
-				},
-				Vec::new(),
-			),
+			} => {
+				let writes = vec![FoldWrite {
+					op: delete_write().map_err(fail)?,
+					table: static_table(plan, *target),
+				}];
+				step(
+					vec![input],
+					BindStepShape::Delete {
+						target: name(*target),
+						detach: *detach,
+						is_edge: matches!(
+							plan.binding(*target).kind,
+							BindingKind::Edge | BindingKind::EdgeGroup
+						),
+					},
+					Vec::new(),
+					writes,
+				)
+			}
 			MutationStage::Insert(insert) => {
 				let nodes = insert
 					.nodes
@@ -338,6 +451,20 @@ impl BindingBackend for LogicalBackend {
 						insert.edges.iter().map(|edge| (ClauseRole::Content, edge.props.clone())),
 					)
 					.collect();
+				// A `CREATE` and a `RELATE` name their table as a literal.
+				let mut writes = Vec::with_capacity(insert.nodes.len() + insert.edges.len());
+				for node in &insert.nodes {
+					writes.push(FoldWrite {
+						op: create_write(&node.label).map_err(fail)?,
+						table: None,
+					});
+				}
+				for edge in &insert.edges {
+					writes.push(FoldWrite {
+						op: relate_write(&edge.label).map_err(fail)?,
+						table: None,
+					});
+				}
 				step(
 					vec![input],
 					BindStepShape::Insert {
@@ -345,13 +472,14 @@ impl BindingBackend for LogicalBackend {
 						edges,
 					},
 					clauses,
+					writes,
 				)
 			}
 		}
 	}
 
 	fn drain(&self, input: Node) -> Result<Node, Planning> {
-		step(vec![input], BindStepShape::Drain, Vec::new())
+		step(vec![input], BindStepShape::Drain, Vec::new(), Vec::new())
 	}
 
 	async fn aggregate(
@@ -547,6 +675,7 @@ fn bind_node(cx: &mut BindCx<'_>, node: &FoldNode) -> Result<Option<Rows>, IrErr
 			inputs,
 			shape,
 			clauses,
+			writes,
 		} => {
 			let Some(operands) = all_inputs(cx, inputs)? else {
 				return Ok(None);
@@ -558,6 +687,19 @@ fn bind_node(cx: &mut BindCx<'_>, node: &FoldNode) -> Result<Option<Rows>, IrErr
 			)?;
 			for (role, expr) in clauses {
 				row_clause(cx, op, RegionKind::Clause(*role), expr)?;
+			}
+			for write in writes {
+				cx.within(op, RegionKind::Subquery, &[], |cx, _| {
+					if let Some(table) = &write.table {
+						cx.name_next_write(table.clone());
+					}
+					let bound = super::logical::bind_value(cx, &write.op);
+					cx.take_named_table();
+					if let Some(value) = bound? {
+						cx.yield_logical(&[value])?;
+					}
+					Ok(())
+				})?;
 			}
 			piped(first_result(cx, op)?)
 		}
@@ -754,6 +896,57 @@ mod tests {
 		ir
 	}
 
+	/// A `MATCH` bound for an entry whose surface holds no `MATCH` hook is refused with
+	/// [`NOT_SERVED_MATCH`] and builds no op, and the same statement binds under the surface that
+	/// holds it.
+	#[test]
+	fn a_match_is_refused_where_the_surface_holds_no_match_hook() {
+		use crate::exec::surface::{DML, FULL};
+		let plan = crate::gql::parse_with_capabilities(
+			"MATCH (n:person) RETURN n.name AS name",
+			&Capabilities::all().with_experimental(Targets::All),
+			&ParserConfig::default(),
+		)
+		.expect("the query parses")
+		.0;
+		let LogicalOp::Match(statement) = &plan else {
+			panic!("the query is not a MATCH plan");
+		};
+		let registry = FunctionRegistry::with_builtins();
+		let frames = FrameTable::default();
+		let effects = EffectCx {
+			registry: &registry,
+			catalog: &NoCatalog,
+			frames: &frames,
+		};
+		let bind = |surface: Option<&'static crate::exec::surface::Surface>| {
+			let mut ir = Ir::new(
+				IrScope::Request {
+					fragment: None,
+				},
+				RegionKind::Request,
+			);
+			let mut facts = FactCache::new();
+			let outcome = {
+				let mut cx = BindCx::new(&mut ir, &mut facts, effects).expect("the context builds");
+				cx.set_surface(surface);
+				super::super::stmt::bind_match(&mut cx, statement).map(|_| ())
+			};
+			(ir, outcome)
+		};
+		for surface in [None, Some(&DML)] {
+			let (ir, outcome) = bind(surface);
+			assert!(
+				matches!(outcome, Err(IrError::NotYet { what }) if what == NOT_SERVED_MATCH),
+				"{outcome:?}"
+			);
+			assert!(ops_of(&ir, LogTag::Match).is_empty(), "the refusal left an op behind");
+		}
+		let (ir, outcome) = bind(Some(&FULL));
+		outcome.expect("the plan binds");
+		assert_eq!(ops_of(&ir, LogTag::Match).len(), 1);
+	}
+
 	fn all_ops(ir: &Ir) -> Vec<OpId> {
 		let mut out = Vec::new();
 		ir.walk(ir.top(), WalkOrder::PreOrder, &mut |op| {
@@ -908,17 +1101,133 @@ mod tests {
 		assert_eq!(ops_of(&ir, LogTag::Sort).len(), 1);
 	}
 
-	/// A write to the matched records is a step of the binding table that writes.
+	/// A write to the matched records is a step of the binding table that writes: a clause region
+	/// per assignment, then the `Subquery` region of the write it applies to each record.
 	#[test]
-	fn a_set_on_a_binding_is_an_update_step_with_a_region_per_assignment() {
+	fn a_set_on_a_binding_is_an_update_step_with_a_region_per_assignment_and_one_per_write() {
 		let ir = bound("MATCH (n:person) SET n.age = 1, n.seen = true");
 		let steps = steps_of(&ir);
 		let update = steps
 			.iter()
 			.find(|step| matches!(step, BindStepShape::Update { .. }))
 			.expect("an update step");
-		assert_eq!(update.region_kinds().len(), 2);
+		assert_eq!(
+			update.region_kinds().as_slice(),
+			&[
+				RegionKind::Clause(ClauseRole::SetValue),
+				RegionKind::Clause(ClauseRole::SetValue),
+				RegionKind::Subquery,
+			]
+		);
+		assert_eq!(update.write_regions(), 1);
 		assert!(update.writes());
+		let step = ops_of(&ir, LogTag::BindStep)
+			.into_iter()
+			.find(|op| {
+				matches!(
+					&ir.op(*op).expect("the op exists").kind,
+					OpKind::Logical(LogOp::BindStep(shape)) if shape.writes()
+				)
+			})
+			.expect("a write step");
+		let held: Vec<RegionKind> = ir
+			.op(step)
+			.expect("the op exists")
+			.regions
+			.iter()
+			.map(|region| ir.region(*region).expect("the region exists").kind)
+			.collect();
+		assert_eq!(held.as_slice(), update.region_kinds().as_slice());
+	}
+
+	/// An insert holds one write per node, then one per edge.
+	#[test]
+	fn an_insert_holds_a_write_region_per_node_and_edge() {
+		let ir = bound("INSERT (a:person {name: 'x'})-[e:knows]->(b:person {name: 'y'})");
+		let steps = steps_of(&ir);
+		let insert = steps
+			.iter()
+			.find(|step| matches!(step, BindStepShape::Insert { .. }))
+			.expect("an insert step");
+		assert_eq!(insert.write_regions(), 3);
+		assert_eq!(insert.region_kinds().len(), 6);
+	}
+
+	/// The tables the writes of `query` name: whether each write is bound to no one table.
+	fn writes_naming_no_table(query: &str) -> Vec<bool> {
+		let ir = bound(query);
+		ops_of(&ir, LogTag::Write)
+			.into_iter()
+			.filter_map(|op| match &ir.op(op).expect("the op exists").kind {
+				OpKind::Logical(LogOp::Write(attrs)) => Some(attrs.statement.is_some()),
+				_ => None,
+			})
+			.collect()
+	}
+
+	/// A write to a target every occurrence of which carries one label is bound to that table;
+	/// one whose target is unlabeled names none.
+	#[test]
+	fn a_write_of_a_labeled_target_is_bound_to_its_table_and_an_unlabeled_one_to_none() {
+		assert_eq!(writes_naming_no_table("MATCH (n:person) SET n.age = 1"), [false]);
+		assert_eq!(writes_naming_no_table("MATCH (n:person) DELETE n"), [false]);
+		assert_eq!(
+			writes_naming_no_table("MATCH (a:person)-[:knows]->(b) SET b.seen = true"),
+			[true]
+		);
+		assert_eq!(
+			writes_naming_no_table("MATCH (a:person)-[:knows]->(b:person) SET b.seen = true"),
+			[false]
+		);
+		assert_eq!(writes_naming_no_table("INSERT (n:person {name: 'x'})"), [false]);
+	}
+
+	/// The plan of the `MATCH` query `query`.
+	fn plan_of(query: &str) -> MatchPlan {
+		let plan = crate::gql::parse_with_capabilities(
+			query,
+			&Capabilities::all().with_experimental(Targets::All),
+			&ParserConfig::default(),
+		)
+		.unwrap_or_else(|e| panic!("`{query}` does not parse: {e:?}"))
+		.0;
+		let LogicalOp::Match(statement) = plan else {
+			panic!("`{query}` is not a MATCH plan");
+		};
+		statement.plan.as_ref().clone()
+	}
+
+	/// The static table of the binding `name` of `query`.
+	fn static_table_of(query: &str, name: &str) -> Option<TableName> {
+		let plan = plan_of(query);
+		let id = plan.bindings.iter().position(|binding| binding.name == name).expect("a binding");
+		static_table(&plan, id as BindingId)
+	}
+
+	/// The static table is the label every occurrence of a node or edge binding carries: an
+	/// unlabeled occurrence, a conflicting one, or a binding that is no node or edge has none.
+	#[test]
+	fn a_static_table_is_a_label_every_occurrence_of_the_binding_carries() {
+		let person = Some(TableName::from("person"));
+		assert_eq!(static_table_of("MATCH (n:person) SET n.age = 1", "n"), person);
+		assert_eq!(
+			static_table_of("MATCH (a:person)-[e:knows]->(b:person) SET e.w = 1", "e"),
+			Some(TableName::from("knows"))
+		);
+		assert_eq!(static_table_of("MATCH (a:person)-[:knows]->(b) SET b.seen = true", "b"), None);
+		assert_eq!(
+			static_table_of(
+				"MATCH (a:person) MATCH (a)-[:knows]->(b:person) SET a.seen = true",
+				"a"
+			),
+			None
+		);
+		assert_eq!(static_table_of("MATCH (a:person) MATCH (a:city) SET a.seen = true", "a"), None);
+		assert_eq!(static_table_of("INSERT (n:person {name: 'x'}) SET n.age = 1", "n"), person);
+		assert_eq!(
+			static_table_of("MATCH p = (a:person)-[:knows]->(b:person) SET a.seen = true", "p"),
+			None
+		);
 	}
 
 	/// A plan that does not end in a projection ends in a projection of `*`; one that does is not

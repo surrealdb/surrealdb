@@ -40,11 +40,11 @@ use super::util::field_path_from_expr;
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{IndexDefinition, KeyStructure, table_key};
 use crate::exec::index::access_path::{
-	AccessPath, BTreeAccess, BitmapPlan, BoundOperand, prefixes_are_disjoint,
+	AccessPath, BTreeAccess, BoundOperand, prefixes_are_disjoint,
 };
 use crate::exec::logical::reads::{declared_read_prefix, paths_overlap, reads_at_or_beneath};
+use crate::exec::operators::SortDirection;
 use crate::exec::operators::scan::MergeMode;
-use crate::exec::operators::{BitmapNode, SortDirection};
 use crate::expr::Idiom;
 use crate::expr::logical::{LogicalExpr, LogicalOrdering};
 use crate::kvs::{Direction, Transaction};
@@ -392,37 +392,6 @@ impl<'ctx> Planner<'ctx> {
 		let fields = txn.all_tb_fields(ns_id, db_id, table_name, None).await.ok()?;
 		let definition = txn.get_tb(ns_id, db_id, table_name, None).await.ok()??;
 		table_key(&definition, &fields)
-	}
-}
-
-/// Convert a plan-level [`BitmapPlan`] tree into the executable
-/// [`BitmapNode`] tree.
-pub(crate) fn bitmap_plan_to_node(plan: BitmapPlan) -> Arc<BitmapNode> {
-	match plan {
-		BitmapPlan::BTree {
-			index_ref,
-			access,
-		} => BitmapNode::btree(index_ref, access),
-		BitmapPlan::FullText {
-			index_ref,
-			query,
-			operator,
-		} => BitmapNode::fulltext(index_ref, query, operator),
-		BitmapPlan::Graph {
-			source,
-			direction,
-			edge_tables,
-		} => BitmapNode::graph(source, direction, edge_tables),
-		BitmapPlan::And(children) => {
-			BitmapNode::and(children.into_iter().map(bitmap_plan_to_node).collect())
-		}
-		BitmapPlan::Or(children) => {
-			BitmapNode::or(children.into_iter().map(bitmap_plan_to_node).collect())
-		}
-		BitmapPlan::AndNot {
-			base,
-			subtract,
-		} => BitmapNode::and_not(bitmap_plan_to_node(*base), bitmap_plan_to_node(*subtract)),
 	}
 }
 

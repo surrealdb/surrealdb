@@ -1,5 +1,6 @@
 //! Transitive fallibility of an op.
 
+#[cfg(test)]
 use super::cx::default_cx;
 use super::effects;
 use crate::exec::ir::core::facts::FactCache;
@@ -14,6 +15,7 @@ use crate::expr::logical::EffectSet;
 /// The answer covers what the op's effects imply: a read of stored data may fail on data, an
 /// opaque body on context or data, an external call on context or data. An op nothing is known
 /// about answers [`Fallibility::TOP`].
+#[cfg(test)]
 pub(crate) fn of(ir: &Ir, facts: &mut FactCache, op: OpId) -> Fallibility {
 	of_with(ir, facts, &default_cx(ir), op)
 }

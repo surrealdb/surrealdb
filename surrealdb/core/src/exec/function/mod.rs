@@ -89,6 +89,25 @@ pub(crate) fn check_arity(
 /// See [`ScalarFunction::metered`] for when a function provides one.
 pub type MeteredFn = fn(Vec<Value>) -> BoxFut<'static, Result<Value>>;
 
+/// A future that is ready with `result`: the `invoke_async` of a builtin whose
+/// work is synchronous. The work runs before the future is made; polling only
+/// hands over the result.
+#[inline(never)]
+pub(crate) fn ready_boxed(result: Result<Value>) -> BoxFut<'static, Result<Value>> {
+	Box::pin(std::future::ready(result))
+}
+
+/// Run a metered builtin's walk to its end on this thread without yielding
+/// ([`surrealdb_runtime::fuel::now`]): the units it charges stand, so the
+/// executor yields at its next yield point. The synchronous `invoke` of every
+/// metered builtin, among them plan-time folding.
+#[inline(never)]
+pub(crate) fn run_walk(
+	walk: std::pin::Pin<&mut (dyn std::future::Future<Output = Result<Value>> + Send + '_)>,
+) -> Result<Value> {
+	surrealdb_runtime::fuel::now(walk)
+}
+
 /// Scalar functions operate on individual values and return a single value.
 /// They may be:
 /// - Pure: operate only on their arguments with no side effects
@@ -194,9 +213,9 @@ pub trait ScalarFunction: Send + Sync + Debug {
 	/// plan holds no instant, and `time::now()` reads the statement's clock
 	/// when it runs, as an operand of an index bound
 	/// (`BoundOperand::StatementClock`) or from the context everywhere else. The
-	/// logical rules ask the same question of every call inside an expression
-	/// before treating that expression as pure, which is what lets a rule
-	/// substitute it for each occurrence of a name.
+	/// membership recogniser asks the same question of every call inside an
+	/// expression before treating that expression as pure, which is what lets
+	/// it build a subquery once for every outer row.
 	fn is_deterministic(&self) -> bool {
 		self.effects().is_deterministic()
 	}
@@ -240,13 +259,14 @@ pub trait ScalarFunction: Send + Sync + Debug {
 	/// Async invocation with context access.
 	///
 	/// This is used for context-aware or async functions.
-	/// The default implementation delegates to `invoke()`.
+	/// The default implementation runs `invoke()` when `invoke_async` is
+	/// called, and the future it returns is already ready.
 	#[allow(unused_variables)]
 	fn invoke_async<'a>(
 		&'a self,
 		ctx: &'a EvalContext<'_>,
 		args: Vec<Value>,
 	) -> BoxFut<'a, Result<Value>> {
-		Box::pin(async move { self.invoke(args) })
+		ready_boxed(self.invoke(args))
 	}
 }

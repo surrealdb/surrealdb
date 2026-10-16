@@ -427,6 +427,54 @@ jobs:
       - name: Check wasm
         run: cargo make ci-check-wasm
 
+  wasm-size-budget:
+    name: Wasm size budget
+    needs: changes
+    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
+    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          toolchain: build-nightly
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          components: rust-src
+          targets: wasm32-unknown-unknown
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+
+      # wasm-bindgen-cli must match the wasm-bindgen crate in the lockfile; both
+      # installs are skipped when the cached ~/.cargo/bin already holds the version.
+      - name: Install wasm-bindgen-cli + wasm-opt
+        run: |
+          set -euo pipefail
+          installed() { cargo install --list | grep -q "^$1 v$2:"; }
+          version=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | grep '^version' | cut -d'"' -f2)
+          if ! installed wasm-bindgen-cli "$version"; then
+            cargo install --locked -f wasm-bindgen-cli --version "$version"
+          fi
+          if ! installed wasm-opt 0.116.1; then
+            cargo install --locked -f wasm-opt --version 0.116.1
+          fi
+
+      - name: Check the lean bundle against its budget
+        run: cargo make ci-wasm-size-budget -- --toolchain nightly --variant lean
+
+      - name: Check the edge bundle against its budget
+        run: cargo make ci-wasm-size-budget -- --toolchain nightly --variant edge
+
   test-wasm:
     name: Test Wasm (IndexedDB)
     needs: changes
@@ -1801,6 +1849,7 @@ jobs:
       - check-release
       - check-msrv
       - check-wasm
+      - wasm-size-budget
       - test-wasm
       - check-revision
       - check-catalog-schema
@@ -1860,6 +1909,7 @@ jobs:
             "${{ needs.check-release.result }}"
             "${{ needs.check-msrv.result }}"
             "${{ needs.check-wasm.result }}"
+            "${{ needs.wasm-size-budget.result }}"
             "${{ needs.test-wasm.result }}"
             "${{ needs.check-revision.result }}"
             "${{ needs.check-catalog-schema.result }}"

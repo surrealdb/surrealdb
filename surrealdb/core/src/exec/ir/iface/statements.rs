@@ -28,7 +28,7 @@ use std::time::Duration;
 use smallvec::SmallVec;
 use surrealdb_strand::{Strand, TableName};
 
-use super::region_kind::{ClauseRole, RegionKind};
+use super::region_kind::{ClauseRole, RegionKind, RegionKinds};
 use crate::exec::operators::{
 	EdgeBinding, EndpointField, ExpandDir, JoinType, PathMode, ShortestSelector,
 };
@@ -1188,8 +1188,47 @@ impl BindStepShape {
 		}
 	}
 
+	/// How many `Subquery` regions the step holds after its clause regions, one per write the step
+	/// applies to a record: an update and a delete one, an insert one per node, then one per edge.
+	pub(crate) fn write_regions(&self) -> usize {
+		match self {
+			BindStepShape::Update {
+				..
+			}
+			| BindStepShape::Delete {
+				..
+			} => 1,
+			BindStepShape::Insert {
+				nodes,
+				edges,
+			} => nodes.len() + edges.len(),
+			BindStepShape::Bind {
+				..
+			}
+			| BindStepShape::Endpoint {
+				..
+			}
+			| BindStepShape::Expand(_)
+			| BindStepShape::Path(_)
+			| BindStepShape::DistinctEdges {
+				..
+			}
+			| BindStepShape::Join(_)
+			| BindStepShape::Distinct
+			| BindStepShape::Drain => 0,
+		}
+	}
+
+	/// The kinds of the regions the step holds, in order: its clause regions, then the
+	/// `Subquery` region of each write it applies ([`Self::write_regions`]).
+	pub(crate) fn region_kinds(&self) -> RegionKinds {
+		let mut kinds = self.clause_kinds();
+		kinds.extend(std::iter::repeat_n(RegionKind::Subquery, self.write_regions()));
+		kinds
+	}
+
 	/// The kinds of the clause regions the step holds, in order.
-	pub(crate) fn region_kinds(&self) -> SmallVec<[RegionKind; 2]> {
+	fn clause_kinds(&self) -> RegionKinds {
 		let clause = RegionKind::Clause;
 		match self {
 			BindStepShape::Expand(expand) => {

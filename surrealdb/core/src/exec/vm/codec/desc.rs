@@ -3,8 +3,8 @@
 use anyhow::{Context, Result, bail};
 use rust_decimal::Decimal;
 
+use super::value;
 use super::wire::{Reader, Writer};
-use super::{types, value};
 use crate::catalog::stored::CatalogVTable;
 use crate::val::{Number, Object, Value};
 
@@ -392,7 +392,7 @@ fn decode_ty(ty: &Ty, r: &mut Reader<'_>) -> Result<Value> {
 			}
 			Value::Array(out.into())
 		}
-		Ty::Named(name) => decode_named(types::lookup(name)?, r)?,
+		Ty::Named(name) => decode_named(r.codec()?.lookup(name)?, r)?,
 		Ty::Native(native) => match native {
 			Native::Value => value::decode(r)?,
 			Native::Number => Value::Number(value::decode_number(r)?),
@@ -611,7 +611,7 @@ fn encode_ty(ty: &Ty, value: &Value, w: &mut Writer) -> Result<()> {
 				encode_ty(ty, item, w)?;
 			}
 		}
-		Ty::Named(name) => encode_named(types::lookup(name)?, value, w)?,
+		Ty::Named(name) => encode_named(w.codec()?.lookup(name)?, value, w)?,
 		Ty::Native(native) => match (native, value) {
 			(Native::Value, value) => value::encode(value, w)?,
 			(Native::Number, Value::Number(n)) => value::encode_number(n, w),

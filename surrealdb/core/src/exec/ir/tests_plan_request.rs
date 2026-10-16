@@ -357,9 +357,14 @@ async fn the_placement_reads_the_strategy_of_a_nested_statement() {
 				})
 			})
 			.expect("the statement stands in a pipeline");
-		let physical =
-			facts_reading(&planned.ir, &mut planned.facts, pipeline, NestedReading::Strategy)
-				.expect("the pipeline has facts");
+		let physical = facts_reading(
+			&planned.ir,
+			&mut planned.facts,
+			crate::exec::ir::analysis::cx::builtin_registry(),
+			pipeline,
+			NestedReading::Strategy,
+		)
+		.expect("the pipeline has facts");
 		assert_eq!(physical.nested, expected, "{sql}");
 	}
 }

@@ -15,6 +15,8 @@ use smallvec::SmallVec;
 use surrealdb_strand::{Strand, TableName};
 
 use super::ops::PhysOp;
+use crate::exec::function::FunctionRegistry;
+use crate::exec::ir::analysis::cx::structural_cx;
 use crate::exec::ir::analysis::footprint;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::Ir;
@@ -170,7 +172,7 @@ pub(crate) struct ReadBatch {
 	/// The transaction the statements stand in.
 	pub(crate) transaction: OpId,
 	/// The statements, in request order. The batch is issued where the first one stands.
-	pub(crate) statements: SmallVec<[OpId; 4]>,
+	pub(crate) statements: SmallVec<[OpId; 8]>,
 }
 
 /// The reads the request issues ahead of the statements that need them.
@@ -187,11 +189,11 @@ pub(crate) struct RequestSchedule {
 /// begins a batch of its own, issued at its own position. A statement that binds a name ends its
 /// batch after itself, because the keys of a later statement may be read from the binding. A batch
 /// of one statement is not a batch.
-pub(crate) fn batch_statements(statements: &[StatementSummary]) -> Vec<SmallVec<[OpId; 4]>> {
+pub(crate) fn batch_statements(statements: &[StatementSummary]) -> Vec<SmallVec<[OpId; 8]>> {
 	fn close(
-		members: &mut SmallVec<[OpId; 4]>,
+		members: &mut SmallVec<[OpId; 8]>,
 		hazards: &mut Vec<IrResource>,
-		out: &mut Vec<SmallVec<[OpId; 4]>>,
+		out: &mut Vec<SmallVec<[OpId; 8]>>,
 	) {
 		if members.len() >= 2 {
 			out.push(std::mem::take(members));
@@ -202,7 +204,7 @@ pub(crate) fn batch_statements(statements: &[StatementSummary]) -> Vec<SmallVec<
 	}
 
 	let mut out = Vec::new();
-	let mut members: SmallVec<[OpId; 4]> = SmallVec::new();
+	let mut members: SmallVec<[OpId; 8]> = SmallVec::new();
 	// What the statements since the batch began write.
 	let mut hazards: Vec<IrResource> = Vec::new();
 	for statement in statements {
@@ -235,7 +237,11 @@ pub(crate) fn batch_statements(statements: &[StatementSummary]) -> Vec<SmallVec<
 /// is a transaction of its own. A read joins a batch only if no write of an earlier statement of
 /// the transaction reaches it, and writes are never merged across statements. The schedule decides
 /// and inserts nothing while [`PREFETCH_EXECUTABLE`] is `false`.
-pub(crate) fn request_schedule(ir: &Ir, facts: &mut FactCache) -> RequestSchedule {
+pub(crate) fn request_schedule(
+	ir: &Ir,
+	facts: &mut FactCache,
+	registry: &FunctionRegistry,
+) -> RequestSchedule {
 	let mut schedule = RequestSchedule::default();
 	for op in transactions(ir) {
 		let Some(region) = ir.op(op).and_then(|data| data.regions.first().copied()) else {
@@ -250,7 +256,7 @@ pub(crate) fn request_schedule(ir: &Ir, facts: &mut FactCache) -> RequestSchedul
 			})
 			.map(|stmt| StatementSummary {
 				op: stmt,
-				footprint: footprint::of(ir, facts, stmt),
+				footprint: footprint::of_with(ir, facts, &structural_cx(registry, ir), stmt),
 				binds: statement_binds(ir, stmt),
 			})
 			.collect();
@@ -336,7 +342,7 @@ mod tests {
 
 	fn positions(
 		summaries: &[StatementSummary],
-		batches: &[SmallVec<[OpId; 4]>],
+		batches: &[SmallVec<[OpId; 8]>],
 	) -> Vec<Vec<usize>> {
 		batches
 			.iter()

@@ -3,6 +3,7 @@
 //! One capability function per target answers it for every op, so lowering asserts rather than
 //! decides. This module only folds the per-op answer over an op and the ops of its regions.
 
+use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::iface::ids::OpId;
 use crate::exec::ir::op_kind::{IsaCaps, NativeLowering};
@@ -12,19 +13,20 @@ use crate::exec::vm::LeafClass;
 ///
 /// A unit call when any op of the subtree is one, else native with the strongest leaf class met,
 /// ordered `Leaf < Kernel < ByOperand < NonLeaf`. Among equal classes the first met is kept, in
-/// pre-order from `op`. A dangling id answers a unit call.
-pub(crate) fn of(ir: &Ir, op: OpId, isa: IsaCaps) -> NativeLowering {
+/// pre-order from `op`. A dangling id answers a unit call. The calls of the subtree resolve
+/// against `registry`.
+pub(crate) fn of(ir: &Ir, op: OpId, isa: IsaCaps, registry: &FunctionRegistry) -> NativeLowering {
 	let Some(data) = ir.op(op) else {
 		return NativeLowering::UnitCall;
 	};
-	let mut out = data.kind.lowers_natively(isa);
+	let mut out = data.kind.lowers_natively(isa, registry);
 	for region in data.regions.iter().copied() {
 		if out == NativeLowering::UnitCall {
 			break;
 		}
 		ir.walk(region, WalkOrder::PreOrder, &mut |inner| {
 			if let Some(inner_data) = ir.op(inner) {
-				out = strongest(out, inner_data.kind.lowers_natively(isa));
+				out = strongest(out, inner_data.kind.lowers_natively(isa, registry));
 			}
 			if out == NativeLowering::UnitCall {
 				Walk::Stop
@@ -98,6 +100,14 @@ mod tests {
 			},
 			RegionKind::Request,
 		);
-		assert_eq!(of(&ir, OpId::default(), IsaCaps::default()), NativeLowering::UnitCall);
+		assert_eq!(
+			of(
+				&ir,
+				OpId::default(),
+				IsaCaps::default(),
+				crate::exec::ir::analysis::cx::builtin_registry()
+			),
+			NativeLowering::UnitCall
+		);
 	}
 }

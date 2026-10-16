@@ -13,6 +13,7 @@ use std::any::Any;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+use std::future::Future;
 use std::num::NonZeroU64;
 use std::ops::{ControlFlow, Deref};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -98,6 +99,7 @@ use crate::key::schema::{
 use crate::key::table_migration::{TableMigrationRequest, TableMigrationState, VerifiedField};
 use crate::layouts::LayoutSet;
 use crate::obs::Instrument;
+use crate::out_of_line::OutOfLine;
 use crate::sequences::{Sequence, Sequences};
 #[cfg(any(test, feature = "test-hooks"))]
 use crate::testing::{
@@ -324,6 +326,21 @@ type ProvisionalSnapshot = Vec<((NamespaceId, DatabaseId, String), Option<Sequen
 /// takes: `None` when the write read nothing.
 fn held(prior: &Option<Option<Val>>) -> Option<Option<&[u8]>> {
 	prior.as_ref().map(Option::as_deref)
+}
+
+/// The store operation an unconditional encoded write performs.
+#[derive(Clone, Copy)]
+enum WriteOp {
+	Set,
+	Put,
+	Replace,
+}
+
+/// The answer to admitting the floor an encoding carries: the bytes stand, or
+/// they are encoded again at the level the store has been found to hold.
+enum Admission {
+	Accept,
+	RetryAt(FeatureLevel),
 }
 
 /// Whether a failure to decode a catalog entry is a refusal because a newer
@@ -2052,6 +2069,15 @@ impl Transaction {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
 	)]
 	pub async fn cancel(&self) -> Result<()> {
+		self.cancel_sealed().await
+	}
+
+	#[inline(never)]
+	fn cancel_sealed(&self) -> OutOfLine<impl Future<Output = Result<()>>> {
+		OutOfLine::new(self.cancel_body())
+	}
+
+	async fn cancel_body(&self) -> Result<()> {
 		// Clear any buffered changefeed entries
 		if let Some(changefeed) = self.changefeed.get() {
 			changefeed.clear();
@@ -2238,6 +2264,15 @@ impl Transaction {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
 	)]
 	pub async fn commit(&self) -> Result<()> {
+		self.commit_sealed().await
+	}
+
+	#[inline(never)]
+	fn commit_sealed(&self) -> OutOfLine<impl Future<Output = Result<()>>> {
+		OutOfLine::new(self.commit_body())
+	}
+
+	async fn commit_body(&self) -> Result<()> {
 		// Refuse a commit the transaction is no longer allowed to make, and roll
 		// back instead. See [`Self::poisoned`].
 		if let Err(e) = self.poisoned() {
@@ -2435,11 +2470,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		let key = key.encode_key()?;
-		let key_bytes = key.len() as u64;
-		let found = self.tr.exists(key, version).await?;
-		self.metrics.record_get(u64::from(found), key_bytes, 0);
-		Ok(found)
+		self.exists_encoded(key.encode_key()?, version).await
 	}
 
 	/// Fetch a key from the datastore.
@@ -2455,14 +2486,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		let encoded = key.encode_key()?;
-		let key_bytes = encoded.len() as u64;
-		let val = self.tr.get(encoded, version).await?;
-		let (keys_found, value_bytes) = match &val {
-			Some(v) => (1, v.len() as u64),
-			None => (0, 0),
-		};
-		self.metrics.record_get(keys_found, key_bytes, value_bytes);
+		let val = self.get_encoded(key.encode_key()?, version).await?;
 		// Build the decode context only on a hit. For `RecordKey` this
 		// avoids a `RecordId` clone (table + key) on every miss.
 		val.map(|v| <K as KVKey>::Value::kv_decode_value(&v, key.value_context())).transpose()
@@ -2474,14 +2498,7 @@ impl Transaction {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
 	)]
 	pub async fn get(&self, key: Key<'_>, version: Option<u64>) -> Result<Option<Vec<u8>>> {
-		let key_bytes = key.len() as u64;
-		let val = self.tr.get(key, version).await?;
-		let (keys_found, value_bytes) = match &val {
-			Some(v) => (1, v.len() as u64),
-			None => (0, 0),
-		};
-		self.metrics.record_get(keys_found, key_bytes, value_bytes);
-		Ok(val)
+		self.get_encoded(key, version).await
 	}
 
 	/// [`Self::getu_key`] over an encoded key, without decoding the value: for
@@ -2491,17 +2508,7 @@ impl Transaction {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
 	)]
 	pub async fn getu_raw(&self, key: Key<'_>) -> Result<Option<Val>> {
-		if !self.tr.writeable() {
-			anyhow::bail!(KvsError::TransactionReadonly);
-		}
-		let key_bytes = key.len() as u64;
-		let val = self.tr.getu(key).await?;
-		let (keys_found, value_bytes) = match &val {
-			Some(v) => (1, v.len() as u64),
-			None => (0, 0),
-		};
-		self.metrics.record_get(keys_found, key_bytes, value_bytes);
-		Ok(val)
+		self.getu_encoded(key).await
 	}
 
 	/// Fetch a key from the datastore, registering the key for
@@ -2520,14 +2527,7 @@ impl Transaction {
 		if !self.tr.writeable() {
 			anyhow::bail!(KvsError::TransactionReadonly);
 		}
-		let encoded = key.encode_key()?;
-		let key_bytes = encoded.len() as u64;
-		let val = self.tr.getu(encoded).await?;
-		let (keys_found, value_bytes) = match &val {
-			Some(v) => (1, v.len() as u64),
-			None => (0, 0),
-		};
-		self.metrics.record_get(keys_found, key_bytes, value_bytes);
+		let val = self.getu_encoded(key.encode_key()?).await?;
 		// Build the decode context only on a hit. For `RecordKey` this
 		// avoids a `RecordId` clone (table + key) on every miss.
 		val.map(|v| <K as KVKey>::Value::kv_decode_value(&v, key.value_context())).transpose()
@@ -2904,10 +2904,8 @@ impl Transaction {
 		K: KVKey + Debug,
 	{
 		let encoded_keys: Vec<_> = keys.iter().map(|k| k.encode_key()).collect::<Result<_>>()?;
-		let key_bytes: u64 = encoded_keys.iter().map(|k| k.len() as u64).sum();
-		let res = self.tr.getm(&encoded_keys, version).await?;
-		self.metrics.record_get(res.records, key_bytes, res.value_bytes);
-		res.values
+		let values = self.getm_encoded(&encoded_keys, version).await?;
+		values
 			.into_iter()
 			.zip(keys)
 			.map(|(v, k)| match v {
@@ -2953,13 +2951,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		let _changed = self.reserve_write_slot()?;
+		let changed = self.reserve_write_slot()?;
 		let key = key.encode_key()?;
-		let key_bytes = key.len() as u64;
-		let defined = self.changed_definition(&key, None, None).await?;
-		self.tr.del(key).await?;
-		self.metrics.record_del(1, key_bytes);
-		self.restamp_defined(defined).await
+		self.delete_encoded(changed, key, false).await
 	}
 
 	/// Delete a key of a prefix that holds no live definition, such as one whose catalog parent
@@ -2992,12 +2986,8 @@ impl Transaction {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
 	)]
 	pub async fn del(&self, key: Key<'_>) -> Result<()> {
-		let _changed = self.reserve_write_slot()?;
-		let key_bytes = key.len() as u64;
-		let defined = self.changed_definition(&key, None, None).await?;
-		self.tr.del(key).await?;
-		self.metrics.record_del(1, key_bytes);
-		self.restamp_defined(defined).await
+		let changed = self.reserve_write_slot()?;
+		self.delete_encoded(changed, key, false).await
 	}
 
 	/// The stored bytes to retry a failed comparison against, or `None` if the
@@ -3143,12 +3133,8 @@ impl Transaction {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
 	)]
 	pub async fn clr(&self, key: Key<'_>) -> Result<()> {
-		let _changed = self.reserve_write_slot()?;
-		let key_bytes = key.len() as u64;
-		let defined = self.changed_definition(&key, None, None).await?;
-		self.tr.clr(key).await?;
-		self.metrics.record_del(1, key_bytes);
-		self.restamp_defined(defined).await
+		let changed = self.reserve_write_slot()?;
+		self.delete_encoded(changed, key, true).await
 	}
 
 	/// Delete all versions of a key from the datastore.
@@ -3160,13 +3146,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		let _changed = self.reserve_write_slot()?;
+		let changed = self.reserve_write_slot()?;
 		let key = key.encode_key()?;
-		let key_bytes = key.len() as u64;
-		let defined = self.changed_definition(&key, None, None).await?;
-		self.tr.clr(key).await?;
-		self.metrics.record_del(1, key_bytes);
-		self.restamp_defined(defined).await
+		self.delete_encoded(changed, key, true).await
 	}
 
 	/// Delete all versions of a key from the datastore if the current value
@@ -3943,7 +3925,18 @@ impl Transaction {
 	/// fails poisons the transaction, which then commits nothing: they run after the statement's
 	/// own catalog writes, which a client-owned transaction would otherwise commit beside the
 	/// failed statement.
-	pub async fn stamp_catalog_version(
+	#[inline(never)]
+	pub fn stamp_catalog_version(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		version: Option<Uuid>,
+	) -> OutOfLine<impl Future<Output = Result<Uuid>>> {
+		OutOfLine::new(self.stamp_catalog_version_body(ns, db, tb, version))
+	}
+
+	async fn stamp_catalog_version_body(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -4858,6 +4851,25 @@ impl Transaction {
 		db: DatabaseId,
 		tb: &TableName,
 	) -> Result<()> {
+		self.forfeit_conformance_sealed(ns, db, tb).await
+	}
+
+	#[inline(never)]
+	fn forfeit_conformance_sealed(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> OutOfLine<impl Future<Output = Result<()>>> {
+		OutOfLine::new(self.forfeit_conformance_body(ns, db, tb))
+	}
+
+	async fn forfeit_conformance_body(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<()> {
 		if matches!(self.memoised_conformance(ns, db, tb), Some(HeldConformance::Forfeited)) {
 			return Ok(());
 		}
@@ -5055,7 +5067,18 @@ impl Transaction {
 	/// Makes `claims` the whole of `tb`'s conformance record: no claim removes the record
 	/// ([`Self::forfeit_conformance`]), claims equal to the ones this transaction holds write
 	/// nothing, and any others replace the record.
-	async fn replace_conformance(
+	#[inline(never)]
+	fn replace_conformance(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		claims: Vec<FieldClaim>,
+	) -> OutOfLine<impl Future<Output = Result<()>>> {
+		OutOfLine::new(self.replace_conformance_body(ns, db, tb, claims))
+	}
+
+	async fn replace_conformance_body(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -5153,7 +5176,17 @@ impl Transaction {
 	/// transaction. A definition is compiled once for as long as its stored bytes stand
 	/// ([`Births::compiled`]): a read compiles only the definitions whose bytes changed since the
 	/// last one. A storage error fails the read.
-	async fn compiled_fields(
+	#[inline(never)]
+	fn compiled_fields(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> OutOfLine<impl Future<Output = Result<Option<Arc<CompiledFields>>>>> {
+		OutOfLine::new(self.compiled_fields_body(ns, db, tb))
+	}
+
+	async fn compiled_fields_body(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -5387,7 +5420,17 @@ impl Transaction {
 	/// `None` for a caller that has read nothing, which leaves this to read the
 	/// key when it must. A levelled write reads the key to encode against it, so
 	/// it passes what it read and the key is read once.
-	async fn changed_definition(
+	#[inline(never)]
+	fn changed_definition(
+		&self,
+		key: &Key<'_>,
+		val: Option<&[u8]>,
+		prior: Option<Option<&[u8]>>,
+	) -> OutOfLine<impl Future<Output = Result<Option<Defined>>>> {
+		OutOfLine::new(self.changed_definition_body(key, val, prior))
+	}
+
+	async fn changed_definition_body(
 		&self,
 		key: &Key<'_>,
 		val: Option<&[u8]>,
@@ -5487,7 +5530,15 @@ impl Transaction {
 	/// one of a table's field definitions is noted too
 	/// ([`Self::note_field_change`]). A noting that fails poisons the
 	/// transaction, because the definition is already written.
-	async fn restamp_defined(&self, defined: Option<Defined>) -> Result<()> {
+	#[inline(never)]
+	fn restamp_defined(
+		&self,
+		defined: Option<Defined>,
+	) -> OutOfLine<impl Future<Output = Result<()>>> {
+		OutOfLine::new(self.restamp_defined_body(defined))
+	}
+
+	async fn restamp_defined_body(&self, defined: Option<Defined>) -> Result<()> {
 		match defined {
 			Some(Defined::Object(defined)) => {
 				self.stamp_object_version(
@@ -5643,7 +5694,16 @@ impl Transaction {
 	}
 
 	/// [`Self::database_catalog_state`], with no read noted.
-	async fn catalog_state_unnoted(
+	#[inline(never)]
+	fn catalog_state_unnoted(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> OutOfLine<impl Future<Output = Result<Arc<DatabaseCatalogState>>>> {
+		OutOfLine::new(self.catalog_state_unnoted_body(ns, db))
+	}
+
+	async fn catalog_state_unnoted_body(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -5720,7 +5780,17 @@ impl Transaction {
 	/// two scans that identify the catalog of every table, which are held for
 	/// the transaction while it stamps no catalog version. The answer is held
 	/// for the transaction under the catalog state it was read in.
-	pub async fn reference_fields(
+	#[inline(never)]
+	pub fn reference_fields(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		previous: Option<&Arc<ReferenceFields>>,
+	) -> OutOfLine<impl Future<Output = Result<Arc<ReferenceFields>>>> {
+		OutOfLine::new(self.reference_fields_body(ns, db, previous))
+	}
+
+	async fn reference_fields_body(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -6257,15 +6327,10 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		let _changed = self.reserve_write_slot()?;
+		let changed = self.reserve_write_slot()?;
 		let key = key.encode_key()?;
 		let (val, prior) = self.encode_levelled(&key, val).await?;
-		let key_bytes = key.len() as u64;
-		let value_bytes = val.len() as u64;
-		let defined = self.changed_definition(&key, Some(&val), held(&prior)).await?;
-		self.tr.set(key, val).await?;
-		self.metrics.record_set(key_bytes, value_bytes);
-		self.restamp_defined(defined).await
+		self.write_encoded(changed, WriteOp::Set, key, val, held(&prior)).await
 	}
 
 	/// Insert or update a key whose write slot was already reserved.
@@ -6289,15 +6354,10 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		let _changed = self.state_change();
+		let changed = self.state_change();
 		let key = key.encode_key()?;
 		let (val, prior) = self.encode_levelled(&key, val).await?;
-		let key_bytes = key.len() as u64;
-		let value_bytes = val.len() as u64;
-		let defined = self.changed_definition(&key, Some(&val), held(&prior)).await?;
-		self.tr.set(key, val).await?;
-		self.metrics.record_set(key_bytes, value_bytes);
-		self.restamp_defined(defined).await
+		self.write_encoded(changed, WriteOp::Set, key, val, held(&prior)).await
 	}
 
 	/// Insert or update a key in the datastore.
@@ -6309,14 +6369,9 @@ impl Transaction {
 	where
 		V: IntoBytes + Debug,
 	{
-		let _changed = self.reserve_write_slot()?;
-		let key_bytes = key.len() as u64;
-		let val = val.into_bytes();
-		let value_bytes = val.len() as u64;
-		let defined = self.changed_definition(&key, Some(&val), None).await?;
-		self.tr.set(key, val).await?;
-		self.metrics.record_set(key_bytes, value_bytes);
-		self.restamp_defined(defined).await
+		let changed = self.reserve_write_slot()?;
+		let val = val.into_vec();
+		self.write_encoded(changed, WriteOp::Set, key, val, None).await
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
@@ -6328,15 +6383,10 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		let _changed = self.reserve_write_slot()?;
+		let changed = self.reserve_write_slot()?;
 		let key = key.encode_key()?;
 		let (val, prior) = self.encode_levelled(&key, val).await?;
-		let key_bytes = key.len() as u64;
-		let value_bytes = val.len() as u64;
-		let defined = self.changed_definition(&key, Some(&val), held(&prior)).await?;
-		self.tr.put(key, val).await?;
-		self.metrics.record_put(key_bytes, value_bytes);
-		self.restamp_defined(defined).await
+		self.write_encoded(changed, WriteOp::Put, key, val, held(&prior)).await
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
@@ -6348,14 +6398,9 @@ impl Transaction {
 	where
 		V: IntoBytes + Debug,
 	{
-		let _changed = self.reserve_write_slot()?;
-		let key_bytes = key.len() as u64;
-		let val = val.into_bytes();
-		let value_bytes = val.len() as u64;
-		let defined = self.changed_definition(&key, Some(&val), None).await?;
-		self.tr.put(key, val).await?;
-		self.metrics.record_put(key_bytes, value_bytes);
-		self.restamp_defined(defined).await
+		let changed = self.reserve_write_slot()?;
+		let val = val.into_vec();
+		self.write_encoded(changed, WriteOp::Put, key, val, None).await
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
@@ -6436,15 +6481,10 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		let _changed = self.reserve_write_slot()?;
+		let changed = self.reserve_write_slot()?;
 		let key = key.encode_key()?;
 		let (val, prior) = self.encode_levelled(&key, val).await?;
-		let key_bytes = key.len() as u64;
-		let value_bytes = val.len() as u64;
-		let defined = self.changed_definition(&key, Some(&val), held(&prior)).await?;
-		self.tr.replace(key, val).await?;
-		self.metrics.record_put(key_bytes, value_bytes);
-		self.restamp_defined(defined).await
+		self.write_encoded(changed, WriteOp::Replace, key, val, held(&prior)).await
 	}
 
 	/// [`Self::replace_key`] over an encoded key and value: for a program that
@@ -6454,12 +6494,134 @@ impl Transaction {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
 	)]
 	pub async fn replace_raw(&self, key: Key<'_>, val: Val) -> Result<()> {
-		let _changed = self.reserve_write_slot()?;
+		let changed = self.reserve_write_slot()?;
+		self.write_encoded(changed, WriteOp::Replace, key, val, None).await
+	}
+
+	// --------------------------------------------------
+	// Encoded-key cores
+	// --------------------------------------------------
+
+	/// Fetch an encoded key, recording the read.
+	async fn get_encoded(&self, key: Key<'_>, version: Option<u64>) -> Result<Option<Val>> {
+		let key_bytes = key.len() as u64;
+		let val = self.tr.get(key, version).await?;
+		let (keys_found, value_bytes) = match &val {
+			Some(v) => (1, v.len() as u64),
+			None => (0, 0),
+		};
+		self.metrics.record_get(keys_found, key_bytes, value_bytes);
+		Ok(val)
+	}
+
+	/// Fetch an encoded key with a lock that registers it for commit-time conflict
+	/// detection, recording the read. A read-only transaction cannot hold the lock
+	/// and is refused.
+	async fn getu_encoded(&self, key: Key<'_>) -> Result<Option<Val>> {
+		if !self.tr.writeable() {
+			anyhow::bail!(KvsError::TransactionReadonly);
+		}
+		let key_bytes = key.len() as u64;
+		let val = self.tr.getu(key).await?;
+		let (keys_found, value_bytes) = match &val {
+			Some(v) => (1, v.len() as u64),
+			None => (0, 0),
+		};
+		self.metrics.record_get(keys_found, key_bytes, value_bytes);
+		Ok(val)
+	}
+
+	/// Whether an encoded key exists, recording the read.
+	async fn exists_encoded(&self, key: Key<'_>, version: Option<u64>) -> Result<bool> {
+		let key_bytes = key.len() as u64;
+		let found = self.tr.exists(key, version).await?;
+		self.metrics.record_get(u64::from(found), key_bytes, 0);
+		Ok(found)
+	}
+
+	/// Fetch encoded keys in one call, recording the read. The values answer in
+	/// the order of `keys`.
+	async fn getm_encoded(
+		&self,
+		keys: &[Key<'static>],
+		version: Option<u64>,
+	) -> Result<Vec<Option<Val>>> {
+		let key_bytes: u64 = keys.iter().map(|k| k.len() as u64).sum();
+		let res = self.tr.getm(keys, version).await?;
+		self.metrics.record_get(res.records, key_bytes, res.value_bytes);
+		Ok(res.values)
+	}
+
+	/// Write an encoded key and value with `op`, then restamp any catalog
+	/// definition the key names. `prior` is what the caller already read at `key`.
+	/// `changed` is held until the write has taken effect or failed.
+	#[inline(never)]
+	fn write_encoded(
+		&self,
+		changed: StateChange<'_>,
+		op: WriteOp,
+		key: Key<'_>,
+		val: Val,
+		prior: Option<Option<&[u8]>>,
+	) -> OutOfLine<impl Future<Output = Result<()>>> {
+		OutOfLine::new(self.write_encoded_body(changed, op, key, val, prior))
+	}
+
+	async fn write_encoded_body(
+		&self,
+		_changed: StateChange<'_>,
+		op: WriteOp,
+		key: Key<'_>,
+		val: Val,
+		prior: Option<Option<&[u8]>>,
+	) -> Result<()> {
 		let key_bytes = key.len() as u64;
 		let value_bytes = val.len() as u64;
-		let defined = self.changed_definition(&key, Some(&val), None).await?;
-		self.tr.replace(key, val).await?;
-		self.metrics.record_put(key_bytes, value_bytes);
+		let defined = self.changed_definition(&key, Some(&val), prior).await?;
+		match op {
+			WriteOp::Set => {
+				self.tr.set(key, val).await?;
+				self.metrics.record_set(key_bytes, value_bytes);
+			}
+			WriteOp::Put => {
+				self.tr.put(key, val).await?;
+				self.metrics.record_put(key_bytes, value_bytes);
+			}
+			WriteOp::Replace => {
+				self.tr.replace(key, val).await?;
+				self.metrics.record_put(key_bytes, value_bytes);
+			}
+		}
+		self.restamp_defined(defined).await
+	}
+
+	/// Delete an encoded key, or every version of it when `all_versions`, then
+	/// restamp any catalog definition the key names. `changed` is held until the
+	/// delete has taken effect or failed.
+	#[inline(never)]
+	fn delete_encoded(
+		&self,
+		changed: StateChange<'_>,
+		key: Key<'_>,
+		all_versions: bool,
+	) -> OutOfLine<impl Future<Output = Result<()>>> {
+		OutOfLine::new(self.delete_encoded_body(changed, key, all_versions))
+	}
+
+	async fn delete_encoded_body(
+		&self,
+		_changed: StateChange<'_>,
+		key: Key<'_>,
+		all_versions: bool,
+	) -> Result<()> {
+		let key_bytes = key.len() as u64;
+		let defined = self.changed_definition(&key, None, None).await?;
+		if all_versions {
+			self.tr.clr(key).await?;
+		} else {
+			self.tr.del(key).await?;
+		}
+		self.metrics.record_del(1, key_bytes);
 		self.restamp_defined(defined).await
 	}
 
@@ -6482,15 +6644,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		let key = key.encode_key()?;
-		let key_bytes = key.len() as u64;
-		let val = self.tr.get(key, version).await?;
-		let (keys_found, value_bytes) = match &val {
-			Some(v) => (1, v.len() as u64),
-			None => (0, 0),
-		};
-		self.metrics.record_get(keys_found, key_bytes, value_bytes);
-		Ok(val)
+		self.get_encoded(key.encode_key()?, version).await
 	}
 
 	/// Retrieve a batch set of keys from the datastore, without decoding.
@@ -6505,10 +6659,7 @@ impl Transaction {
 		// Consume each typed key as it is encoded so owned fields do not remain
 		// resident alongside the complete encoded request during the await.
 		let keys = keys.into_iter().map(|k| k.encode_key()).collect::<Result<Vec<_>>>()?;
-		let key_bytes: u64 = keys.iter().map(|k| k.len() as u64).sum();
-		let res = self.tr.getm(&keys, version).await?;
-		self.metrics.record_get(res.records, key_bytes, res.value_bytes);
-		Ok(res.values)
+		self.getm_encoded(&keys, version).await
 	}
 
 	// --------------------------------------------------
@@ -7065,7 +7216,18 @@ impl Transaction {
 	/// The layouts of `tb` read from storage, bypassing what this transaction holds.
 	///
 	/// A current read replaces what the transaction holds of the table's layouts.
-	pub async fn reload_table_layouts(
+	#[inline(never)]
+	pub fn reload_table_layouts(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		version: Option<u64>,
+	) -> OutOfLine<impl Future<Output = Result<Arc<TableLayouts>>>> {
+		OutOfLine::new(self.reload_table_layouts_body(ns, db, tb, version))
+	}
+
+	async fn reload_table_layouts_body(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -7317,7 +7479,12 @@ impl Transaction {
 	/// this transaction commits. A save point rollback of a scope that wrote or observed the
 	/// entry discards both this transaction's observation and the queued action, so the next
 	/// stored write checks again, and the cell never claims an entry that did not commit.
-	pub async fn admit_stored_format(&self) -> Result<()> {
+	#[inline(never)]
+	pub fn admit_stored_format(&self) -> OutOfLine<impl Future<Output = Result<()>>> {
+		OutOfLine::new(self.admit_stored_format_body())
+	}
+
+	async fn admit_stored_format_body(&self) -> Result<()> {
 		if self.feature.stored_format_recorded()
 			|| self.stored_format_admitted.load(Ordering::Acquire)
 		{
@@ -7361,7 +7528,16 @@ impl Transaction {
 	///
 	/// The write is still a state change and a counted write, and a key that is a versioned
 	/// object's definition is restamped as for any write.
-	async fn set_uncharged(&self, key: Key<'_>, val: Vec<u8>) -> Result<()> {
+	#[inline(never)]
+	fn set_uncharged(
+		&self,
+		key: Key<'_>,
+		val: Vec<u8>,
+	) -> OutOfLine<impl Future<Output = Result<()>>> {
+		OutOfLine::new(self.set_uncharged_body(key, val))
+	}
+
+	async fn set_uncharged_body(&self, key: Key<'_>, val: Vec<u8>) -> Result<()> {
 		let _changed = self.state_change();
 		let key_bytes = key.len() as u64;
 		let value_bytes = val.len() as u64;
@@ -7802,23 +7978,51 @@ impl Transaction {
 			let Some(floor) = floor else {
 				return Ok(bytes);
 			};
-			match self.admit_floor(floor).await {
-				Ok(()) => {
-					// A floor means the bytes are in the stored grammar, which a release that
-					// does not know the ledger entry cannot read.
-					self.admit_stored_format().await?;
-					return Ok(bytes);
-				}
-				Err(e) if !retried && refused_by_level(&e) => {
-					let refreshed = self.write_level();
-					if refreshed == level {
-						return Err(e);
-					}
+			match self.admit_encoding(floor, level, retried).await? {
+				Admission::Accept => return Ok(bytes),
+				Admission::RetryAt(refreshed) => {
 					level = refreshed;
 					retried = true;
 				}
-				Err(e) => return Err(e),
 			}
+		}
+	}
+
+	/// Admit the floor an encoding at `level` carries. A refusal because the
+	/// store's level is below the floor, on a first attempt, answers the level the
+	/// cell has been brought down to when that differs from `level`; any other
+	/// refusal is the error.
+	#[inline(never)]
+	fn admit_encoding(
+		&self,
+		floor: Release,
+		level: FeatureLevel,
+		retried: bool,
+	) -> OutOfLine<impl Future<Output = Result<Admission>>> {
+		OutOfLine::new(self.admit_encoding_body(floor, level, retried))
+	}
+
+	async fn admit_encoding_body(
+		&self,
+		floor: Release,
+		level: FeatureLevel,
+		retried: bool,
+	) -> Result<Admission> {
+		match self.admit_floor(floor).await {
+			Ok(()) => {
+				// A floor means the bytes are in the stored grammar, which a release that
+				// does not know the ledger entry cannot read.
+				self.admit_stored_format().await?;
+				Ok(Admission::Accept)
+			}
+			Err(e) if !retried && refused_by_level(&e) => {
+				let refreshed = self.write_level();
+				if refreshed == level {
+					return Err(e);
+				}
+				Ok(Admission::RetryAt(refreshed))
+			}
+			Err(e) => Err(e),
 		}
 	}
 
@@ -9665,7 +9869,12 @@ impl Transaction {
 	/// or a non-retryable storage error), the function falls back to the
 	/// per-reservation release path so each failure can drive its own
 	/// `mark_build_error_if_uncommitted` reasoning.
-	async fn release_index_build_reservations(&self) -> Result<()> {
+	#[inline(never)]
+	fn release_index_build_reservations(&self) -> OutOfLine<impl Future<Output = Result<()>>> {
+		OutOfLine::new(self.release_index_build_reservations_body())
+	}
+
+	async fn release_index_build_reservations_body(&self) -> Result<()> {
 		// Take the queued reservations under the lock so concurrent registrations
 		// see an empty queue while releases are in flight.
 		let reservations = {
@@ -9793,7 +10002,17 @@ impl Transaction {
 	/// `ALTER TABLE` while the table's version still named the newer state, so
 	/// the node-wide snapshot and a read through the transaction would
 	/// disagree on the table's permissions.
-	pub async fn bump_table_lives_cache(
+	#[inline(never)]
+	pub fn bump_table_lives_cache(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> OutOfLine<impl Future<Output = Result<()>>> {
+		OutOfLine::new(self.bump_table_lives_cache_body(ns, db, tb))
+	}
+
+	async fn bump_table_lives_cache_body(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -10058,24 +10277,20 @@ impl NamespaceProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let range = NamespacePrefix {}.range()?;
-					let val = self.tr.getr(range.into_key_range(), version).await?;
-					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
-				}
 				let qey = cache::tx::Lookup::Nss;
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_nss(),
-					None => {
-						let range = NamespacePrefix {}.range()?;
-						let val = self.tr.getr(range.into_key_range(), None).await?;
-						let val =
-							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-						let entry = cache::tx::Entry::Nss(Arc::clone(&val));
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_nss();
 				}
+				let range = NamespacePrefix {}.range()?;
+				let val = self.tr.getr(range.into_key_range(), version).await?;
+				let val = util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+				if version.is_none() {
+					let entry = cache::tx::Entry::Nss(Arc::clone(&val));
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_ns")),
 		)
@@ -10087,32 +10302,25 @@ impl NamespaceProvider for Transaction {
 		version: Option<u64>,
 	) -> BoxProviderFut<'a, Result<Option<Arc<NamespaceDefinition>>>> {
 		Box::pin(async move {
-			if version.is_some() {
-				let key = NamespaceKey {
-					ns: Cow::Borrowed(ns),
-				};
-				let Some(ns) = self.get_key(&key, version).await? else {
-					return Ok(None);
-				};
-				return Ok(Some(Arc::new(ns)));
-			}
 			let qey = cache::tx::Lookup::NsByName(ns);
-			match self.cache.get(&qey) {
-				Some(val) => val.try_into_type().map(Some),
-				None => {
-					let key = NamespaceKey {
-						ns: Cow::Borrowed(ns),
-					};
-					let Some(ns) = self.get_key(&key, None).await? else {
-						return Ok(None);
-					};
-
-					let ns = Arc::new(ns);
-					let entr = cache::tx::Entry::Any(ns.clone());
-					self.cache.insert(qey, entr);
-					Ok(Some(ns))
-				}
+			if version.is_none()
+				&& let Some(val) = self.cache.get(&qey)
+			{
+				return val.try_into_type().map(Some);
 			}
+			let key = NamespaceKey {
+				ns: Cow::Borrowed(ns),
+			};
+			let Some(ns) = self.get_key(&key, version).await? else {
+				return Ok(None);
+			};
+
+			let ns = Arc::new(ns);
+			if version.is_none() {
+				let entr = cache::tx::Entry::Any(ns.clone());
+				self.cache.insert(qey, entr);
+			}
+			Ok(Some(ns))
 		})
 	}
 
@@ -10177,30 +10385,23 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let range = DatabasePrefix {
-						ns,
-					}
-					.range()?;
-					let val = self.tr.getr(range.into_key_range(), version).await?;
-					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
-				}
 				let qey = cache::tx::Lookup::Dbs(ns);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_dbs(),
-					None => {
-						let range = DatabasePrefix {
-							ns,
-						}
-						.range()?;
-						let val = self.tr.getr(range.into_key_range(), None).await?;
-						let val =
-							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-						let entry = cache::tx::Entry::Dbs(Arc::clone(&val));
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_dbs();
 				}
+				let range = DatabasePrefix {
+					ns,
+				}
+				.range()?;
+				let val = self.tr.getr(range.into_key_range(), version).await?;
+				let val = util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+				if version.is_none() {
+					let entry = cache::tx::Entry::Dbs(Arc::clone(&val));
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_db")),
 		)
@@ -10216,41 +10417,30 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Database(ns, db));
-				if version.is_some() {
-					let Some(ns) = self.get_ns_by_name(ns, version).await? else {
-						return Ok(None);
-					};
-					let key = DatabaseKey {
-						ns: ns.namespace_id,
-						db: Cow::Borrowed(db),
-					};
-					let Some(db_def) = self.get_key(&key, version).await? else {
-						return Ok(None);
-					};
-					return Ok(Some(Arc::new(db_def)));
-				}
 				let qey = cache::tx::Lookup::DbByName(ns, db);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_type().map(Some),
-					None => {
-						let Some(ns) = self.get_ns_by_name(ns, None).await? else {
-							return Ok(None);
-						};
-
-						let key = DatabaseKey {
-							ns: ns.namespace_id,
-							db: Cow::Borrowed(db),
-						};
-						let Some(db_def) = self.get_key(&key, None).await? else {
-							return Ok(None);
-						};
-
-						let val = Arc::new(db_def);
-						let entry = cache::tx::Entry::Any(val.clone());
-						self.cache.insert(qey, entry);
-						Ok(Some(val))
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_type().map(Some);
 				}
+				let Some(ns) = self.get_ns_by_name(ns, version).await? else {
+					return Ok(None);
+				};
+
+				let key = DatabaseKey {
+					ns: ns.namespace_id,
+					db: Cow::Borrowed(db),
+				};
+				let Some(db_def) = self.get_key(&key, version).await? else {
+					return Ok(None);
+				};
+
+				let val = Arc::new(db_def);
+				if version.is_none() {
+					let entry = cache::tx::Entry::Any(val.clone());
+					self.cache.insert(qey, entry);
+				}
+				Ok(Some(val))
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_db_by_name")),
 		)
@@ -10362,32 +10552,24 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let range = AnalyzerPrefix {
-						ns,
-						db,
-					}
-					.range()?;
-					let val = self.tr.getr(range.into_key_range(), version).await?;
-					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
-				}
 				let qey = cache::tx::Lookup::Azs(ns, db);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_azs(),
-					None => {
-						let range = AnalyzerPrefix {
-							ns,
-							db,
-						}
-						.range()?;
-						let val = self.tr.getr(range.into_key_range(), None).await?;
-						let val =
-							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-						let entry = cache::tx::Entry::Azs(Arc::clone(&val));
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_azs();
 				}
+				let range = AnalyzerPrefix {
+					ns,
+					db,
+				}
+				.range()?;
+				let val = self.tr.getr(range.into_key_range(), version).await?;
+				let val = util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+				if version.is_none() {
+					let entry = cache::tx::Entry::Azs(Arc::clone(&val));
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_db_analyzers")),
 		)
@@ -10403,32 +10585,24 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let range = SequencePrefix {
-						ns,
-						db,
-					}
-					.range()?;
-					let val = self.tr.getr(range.into_key_range(), version).await?;
-					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
-				}
 				let qey = cache::tx::Lookup::Sqs(ns, db);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_sqs(),
-					None => {
-						let range = SequencePrefix {
-							ns,
-							db,
-						}
-						.range()?;
-						let val = self.tr.getr(range.into_key_range(), None).await?;
-						let val =
-							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-						let entry = cache::tx::Entry::Sqs(Arc::clone(&val));
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_sqs();
 				}
+				let range = SequencePrefix {
+					ns,
+					db,
+				}
+				.range()?;
+				let val = self.tr.getr(range.into_key_range(), version).await?;
+				let val = util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+				if version.is_none() {
+					let entry = cache::tx::Entry::Sqs(Arc::clone(&val));
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_db_sequences")),
 		)
@@ -10444,35 +10618,26 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let range = FunctionPrefix {
-						ns,
-						db,
-					}
-					.range()?;
-					let val = self.tr.getr(range.into_key_range(), version).await?;
-					let stored: Arc<[catalog::StoredFunctionDefinition]> =
-						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-					return catalog::from_stored_all(&stored);
-				}
 				let qey = cache::tx::Lookup::Fcs(ns, db);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_fcs(),
-					None => {
-						let range = FunctionPrefix {
-							ns,
-							db,
-						}
-						.range()?;
-						let val = self.tr.getr(range.into_key_range(), None).await?;
-						let stored: Arc<[catalog::StoredFunctionDefinition]> =
-							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-						let val = catalog::from_stored_all(&stored)?;
-						let entry = cache::tx::Entry::Fcs(Arc::clone(&val));
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_fcs();
 				}
+				let range = FunctionPrefix {
+					ns,
+					db,
+				}
+				.range()?;
+				let val = self.tr.getr(range.into_key_range(), version).await?;
+				let stored: Arc<[catalog::StoredFunctionDefinition]> =
+					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+				let val = catalog::from_stored_all(&stored)?;
+				if version.is_none() {
+					let entry = cache::tx::Entry::Fcs(Arc::clone(&val));
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_db_functions")),
 		)
@@ -10488,35 +10653,26 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let range = ModulePrefix {
-						ns,
-						db,
-					}
-					.range()?;
-					let val = self.tr.getr(range.into_key_range(), version).await?;
-					let stored: Arc<[catalog::StoredModuleDefinition]> =
-						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-					return catalog::from_stored_all(&stored);
-				}
 				let qey = cache::tx::Lookup::Mds(ns, db);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_mds(),
-					None => {
-						let range = ModulePrefix {
-							ns,
-							db,
-						}
-						.range()?;
-						let val = self.tr.getr(range.into_key_range(), None).await?;
-						let stored: Arc<[catalog::StoredModuleDefinition]> =
-							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-						let val = catalog::from_stored_all(&stored)?;
-						let entry = cache::tx::Entry::Mds(Arc::clone(&val));
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_mds();
 				}
+				let range = ModulePrefix {
+					ns,
+					db,
+				}
+				.range()?;
+				let val = self.tr.getr(range.into_key_range(), version).await?;
+				let stored: Arc<[catalog::StoredModuleDefinition]> =
+					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+				let val = catalog::from_stored_all(&stored)?;
+				if version.is_none() {
+					let entry = cache::tx::Entry::Mds(Arc::clone(&val));
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_db_modules")),
 		)
@@ -10532,35 +10688,26 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let range = ParamPrefix {
-						ns,
-						db,
-					}
-					.range()?;
-					let val = self.tr.getr(range.into_key_range(), version).await?;
-					let stored: Arc<[catalog::StoredParamDefinition]> =
-						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-					return catalog::from_stored_all(&stored);
-				}
 				let qey = cache::tx::Lookup::Pas(ns, db);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_pas(),
-					None => {
-						let range = ParamPrefix {
-							ns,
-							db,
-						}
-						.range()?;
-						let val = self.tr.getr(range.into_key_range(), None).await?;
-						let stored: Arc<[catalog::StoredParamDefinition]> =
-							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-						let val = catalog::from_stored_all(&stored)?;
-						let entry = cache::tx::Entry::Pas(Arc::clone(&val));
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_pas();
 				}
+				let range = ParamPrefix {
+					ns,
+					db,
+				}
+				.range()?;
+				let val = self.tr.getr(range.into_key_range(), version).await?;
+				let stored: Arc<[catalog::StoredParamDefinition]> =
+					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+				let val = catalog::from_stored_all(&stored)?;
+				if version.is_none() {
+					let entry = cache::tx::Entry::Pas(Arc::clone(&val));
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_db_params")),
 		)
@@ -10576,35 +10723,26 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let range = MlModelPrefix {
-						ns,
-						db,
-					}
-					.range()?;
-					let val = self.tr.getr(range.into_key_range(), version).await?;
-					let stored: Arc<[catalog::StoredMlModelDefinition]> =
-						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-					return catalog::from_stored_all(&stored);
-				}
 				let qey = cache::tx::Lookup::Mls(ns, db);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_mls(),
-					None => {
-						let range = MlModelPrefix {
-							ns,
-							db,
-						}
-						.range()?;
-						let val = self.tr.getr(range.into_key_range(), None).await?;
-						let stored: Arc<[catalog::StoredMlModelDefinition]> =
-							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-						let val = catalog::from_stored_all(&stored)?;
-						let entry = cache::tx::Entry::Mls(Arc::clone(&val));
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_mls();
 				}
+				let range = MlModelPrefix {
+					ns,
+					db,
+				}
+				.range()?;
+				let val = self.tr.getr(range.into_key_range(), version).await?;
+				let stored: Arc<[catalog::StoredMlModelDefinition]> =
+					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+				let val = catalog::from_stored_all(&stored)?;
+				if version.is_none() {
+					let entry = cache::tx::Entry::Mls(Arc::clone(&val));
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_db_models")),
 		)
@@ -10620,35 +10758,26 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let range = DbConfigPrefix {
-						ns,
-						db,
-					}
-					.range()?;
-					let val = self.tr.getr(range.into_key_range(), version).await?;
-					let stored: Arc<[StoredConfigDefinition]> =
-						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-					return catalog::from_stored_all(&stored);
-				}
 				let qey = cache::tx::Lookup::Cgs(ns, db);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_cgs(),
-					None => {
-						let range = DbConfigPrefix {
-							ns,
-							db,
-						}
-						.range()?;
-						let val = self.tr.getr(range.into_key_range(), None).await?;
-						let stored: Arc<[StoredConfigDefinition]> =
-							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-						let val = catalog::from_stored_all(&stored)?;
-						let entry = cache::tx::Entry::Cgs(Arc::clone(&val));
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_cgs();
 				}
+				let range = DbConfigPrefix {
+					ns,
+					db,
+				}
+				.range()?;
+				let val = self.tr.getr(range.into_key_range(), version).await?;
+				let stored: Arc<[StoredConfigDefinition]> =
+					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+				let val = catalog::from_stored_all(&stored)?;
+				if version.is_none() {
+					let entry = cache::tx::Entry::Cgs(Arc::clone(&val));
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_db_configs")),
 		)
@@ -10666,37 +10795,27 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let key = MlModelKey {
-						ns,
-						db,
-						ml: Cow::Borrowed(ml),
-						vn: Cow::Borrowed(vn),
-					};
-					let Some(val) = self.get_key(&key, version).await? else {
-						return Ok(None);
-					};
-					return Ok(Some(Arc::new(catalog::MlModelDefinition::from_stored(&val)?)));
-				}
 				let qey = cache::tx::Lookup::Ml(ns, db, ml, vn);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_type().map(Some),
-					None => {
-						let key = MlModelKey {
-							ns,
-							db,
-							ml: Cow::Borrowed(ml),
-							vn: Cow::Borrowed(vn),
-						};
-						let Some(val) = self.get_key(&key, None).await? else {
-							return Ok(None);
-						};
-						let val = Arc::new(catalog::MlModelDefinition::from_stored(&val)?);
-						let entry = cache::tx::Entry::Any(val.clone());
-						self.cache.insert(qey, entry);
-						Ok(Some(val))
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_type().map(Some);
 				}
+				let key = MlModelKey {
+					ns,
+					db,
+					ml: Cow::Borrowed(ml),
+					vn: Cow::Borrowed(vn),
+				};
+				let Some(val) = self.get_key(&key, version).await? else {
+					return Ok(None);
+				};
+				let val = Arc::new(catalog::MlModelDefinition::from_stored(&val)?);
+				if version.is_none() {
+					let entry = cache::tx::Entry::Any(val.clone());
+					self.cache.insert(qey, entry);
+				}
+				Ok(Some(val))
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_db_model")),
 		)
@@ -10713,39 +10832,27 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let key = AnalyzerKey {
-						ns,
-						db,
-						az: Cow::Borrowed(az),
-					};
-					let val = self.get_key(&key, version).await?.ok_or_else(|| {
-						CatalogError::AzNotFound {
-							name: az.to_owned(),
-						}
-					})?;
-					return Ok(Arc::new(val));
-				}
 				let qey = cache::tx::Lookup::Az(ns, db, az);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_type(),
-					None => {
-						let key = AnalyzerKey {
-							ns,
-							db,
-							az: Cow::Borrowed(az),
-						};
-						let val = self.get_key(&key, None).await?.ok_or_else(|| {
-							CatalogError::AzNotFound {
-								name: az.to_owned(),
-							}
-						})?;
-						let val = Arc::new(val);
-						let entry = cache::tx::Entry::Any(val.clone());
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_type();
 				}
+				let key = AnalyzerKey {
+					ns,
+					db,
+					az: Cow::Borrowed(az),
+				};
+				let val =
+					self.get_key(&key, version).await?.ok_or_else(|| CatalogError::AzNotFound {
+						name: az.to_owned(),
+					})?;
+				let val = Arc::new(val);
+				if version.is_none() {
+					let entry = cache::tx::Entry::Any(val.clone());
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_db_analyzer")),
 		)
@@ -10762,39 +10869,28 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let key = SequenceKey {
-						ns,
-						db,
-						sq: Cow::Borrowed(sq),
-					};
-					let val = self.get_key(&key, version).await?.ok_or_else(|| {
-						CatalogError::SeqNotFound {
-							name: sq.to_owned(),
-						}
-					})?;
-					return Ok(Arc::new(val));
-				}
 				let qey = cache::tx::Lookup::Sq(ns, db, sq);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_type(),
-					None => {
-						let key = SequenceKey {
-							ns,
-							db,
-							sq: Cow::Borrowed(sq),
-						};
-						let val = self.get_key(&key, None).await?.ok_or_else(|| {
-							CatalogError::SeqNotFound {
-								name: sq.to_owned(),
-							}
-						})?;
-						let val = Arc::new(val);
-						let entry = cache::tx::Entry::Any(val.clone());
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_type();
 				}
+				let key = SequenceKey {
+					ns,
+					db,
+					sq: Cow::Borrowed(sq),
+				};
+				let val = self.get_key(&key, version).await?.ok_or_else(|| {
+					CatalogError::SeqNotFound {
+						name: sq.to_owned(),
+					}
+				})?;
+				let val = Arc::new(val);
+				if version.is_none() {
+					let entry = cache::tx::Entry::Any(val.clone());
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_db_sequence")),
 		)
@@ -10811,39 +10907,27 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Function(ns, db, fc));
-				if version.is_some() {
-					let key = FunctionKey {
-						ns,
-						db,
-						fc: Cow::Borrowed(fc),
-					};
-					let val = self.get_key(&key, version).await?.ok_or_else(|| {
-						CatalogError::FcNotFound {
-							name: format!("fn::{fc}"),
-						}
-					})?;
-					return Ok(Arc::new(catalog::FunctionDefinition::from_stored(&val)?));
-				}
 				let qey = cache::tx::Lookup::Fc(ns, db, fc);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_type(),
-					None => {
-						let key = FunctionKey {
-							ns,
-							db,
-							fc: Cow::Borrowed(fc),
-						};
-						let val = self.get_key(&key, None).await?.ok_or_else(|| {
-							CatalogError::FcNotFound {
-								name: format!("fn::{fc}"),
-							}
-						})?;
-						let val = Arc::new(catalog::FunctionDefinition::from_stored(&val)?);
-						let entry = cache::tx::Entry::Any(val.clone());
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_type();
 				}
+				let key = FunctionKey {
+					ns,
+					db,
+					fc: Cow::Borrowed(fc),
+				};
+				let val =
+					self.get_key(&key, version).await?.ok_or_else(|| CatalogError::FcNotFound {
+						name: format!("fn::{fc}"),
+					})?;
+				let val = Arc::new(catalog::FunctionDefinition::from_stored(&val)?);
+				if version.is_none() {
+					let entry = cache::tx::Entry::Any(val.clone());
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_db_function")),
 		)
@@ -10860,39 +10944,27 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let key = ModuleKey {
-						ns,
-						db,
-						md: Cow::Borrowed(md),
-					};
-					let val = self.get_key(&key, version).await?.ok_or_else(|| {
-						CatalogError::MdNotFound {
-							name: md.to_owned(),
-						}
-					})?;
-					return Ok(Arc::new(catalog::ModuleDefinition::from_stored(&val)?));
-				}
 				let qey = cache::tx::Lookup::Md(ns, db, md);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_type(),
-					None => {
-						let key = ModuleKey {
-							ns,
-							db,
-							md: Cow::Borrowed(md),
-						};
-						let val = self.get_key(&key, None).await?.ok_or_else(|| {
-							CatalogError::MdNotFound {
-								name: md.to_owned(),
-							}
-						})?;
-						let val = Arc::new(catalog::ModuleDefinition::from_stored(&val)?);
-						let entry = cache::tx::Entry::Any(val.clone());
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_type();
 				}
+				let key = ModuleKey {
+					ns,
+					db,
+					md: Cow::Borrowed(md),
+				};
+				let val =
+					self.get_key(&key, version).await?.ok_or_else(|| CatalogError::MdNotFound {
+						name: md.to_owned(),
+					})?;
+				let val = Arc::new(catalog::ModuleDefinition::from_stored(&val)?);
+				if version.is_none() {
+					let entry = cache::tx::Entry::Any(val.clone());
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_db_module")),
 		)
@@ -10909,39 +10981,27 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Param(ns, db, pa));
-				if version.is_some() {
-					let key = ParamKey {
-						ns,
-						db,
-						pa: Cow::Borrowed(pa),
-					};
-					let val = self.get_key(&key, version).await?.ok_or_else(|| {
-						CatalogError::PaNotFound {
-							name: pa.to_owned(),
-						}
-					})?;
-					return Ok(Arc::new(catalog::ParamDefinition::from_stored(&val)?));
-				}
 				let qey = cache::tx::Lookup::Pa(ns, db, pa);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_type(),
-					None => {
-						let key = ParamKey {
-							ns,
-							db,
-							pa: Cow::Borrowed(pa),
-						};
-						let val = self.get_key(&key, None).await?.ok_or_else(|| {
-							CatalogError::PaNotFound {
-								name: pa.to_owned(),
-							}
-						})?;
-						let val = Arc::new(catalog::ParamDefinition::from_stored(&val)?);
-						let entry = cache::tx::Entry::Any(val.clone());
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_type();
 				}
+				let key = ParamKey {
+					ns,
+					db,
+					pa: Cow::Borrowed(pa),
+				};
+				let val =
+					self.get_key(&key, version).await?.ok_or_else(|| CatalogError::PaNotFound {
+						name: pa.to_owned(),
+					})?;
+				let val = Arc::new(catalog::ParamDefinition::from_stored(&val)?);
+				if version.is_none() {
+					let entry = cache::tx::Entry::Any(val.clone());
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_db_param")),
 		)
@@ -11189,39 +11249,28 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Table(ns, db, tb));
-				if version.is_some() {
-					let range = ForeignTablePrefix {
-						ns,
-						db,
-						tb: Cow::Borrowed(tb),
-					}
-					.range()?;
-					let val = self.tr.getr(range.into_key_range(), version).await?;
-					let stored: Arc<[StoredTableDefinition]> =
-						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-					let val = catalog::from_stored_all(&stored)?;
-					return self.views_reading(ns, db, tb, val, version).await;
-				}
 				let qey = cache::tx::Lookup::Fts(ns, db, tb.as_str());
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_fts(),
-					None => {
-						let range = ForeignTablePrefix {
-							ns,
-							db,
-							tb: Cow::Borrowed(tb),
-						}
-						.range()?;
-						let val = self.tr.getr(range.into_key_range(), None).await?;
-						let stored: Arc<[StoredTableDefinition]> =
-							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-						let val = catalog::from_stored_all(&stored)?;
-						let val = self.views_reading(ns, db, tb, val, None).await?;
-						let entry = cache::tx::Entry::Fts(Arc::clone(&val));
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_fts();
 				}
+				let range = ForeignTablePrefix {
+					ns,
+					db,
+					tb: Cow::Borrowed(tb),
+				}
+				.range()?;
+				let val = self.tr.getr(range.into_key_range(), version).await?;
+				let stored: Arc<[StoredTableDefinition]> =
+					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+				let val = catalog::from_stored_all(&stored)?;
+				let val = self.views_reading(ns, db, tb, val, version).await?;
+				if version.is_none() {
+					let entry = cache::tx::Entry::Fts(Arc::clone(&val));
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_tb_views")),
 		)
@@ -11316,43 +11365,31 @@ impl TableProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Option<Arc<TableDefinition>>>> {
 		Box::pin(async move {
 			self.catalog_reads.note(crate::catalog_reads::CatalogRead::TableByName(ns, db, tb));
-			if version.is_some() {
-				let Some(db) = self.get_db_by_name(ns, db, version).await? else {
-					return Ok(None);
-				};
-				let key = TableKey {
-					ns: db.namespace_id,
-					db: db.database_id,
-					tb: Cow::Borrowed(tb),
-				};
-				let Some(tb) = self.get_key(&key, version).await? else {
-					return Ok(None);
-				};
-				return Ok(Some(Arc::new(TableDefinition::from_stored(&tb)?)));
-			}
 			let qey = cache::tx::Lookup::TbByName(ns, db, tb.as_str());
-			match self.cache.get(&qey) {
-				Some(val) => val.try_into_type().map(Some),
-				None => {
-					let Some(db) = self.get_db_by_name(ns, db, None).await? else {
-						return Ok(None);
-					};
-
-					let key = TableKey {
-						ns: db.namespace_id,
-						db: db.database_id,
-						tb: Cow::Borrowed(tb),
-					};
-					let Some(tb) = self.get_key(&key, None).await? else {
-						return Ok(None);
-					};
-
-					let tb = Arc::new(TableDefinition::from_stored(&tb)?);
-					let entr = cache::tx::Entry::Any(tb.clone());
-					self.cache.insert(qey, entr);
-					Ok(Some(tb))
-				}
+			if version.is_none()
+				&& let Some(val) = self.cache.get(&qey)
+			{
+				return val.try_into_type().map(Some);
 			}
+			let Some(db) = self.get_db_by_name(ns, db, version).await? else {
+				return Ok(None);
+			};
+
+			let key = TableKey {
+				ns: db.namespace_id,
+				db: db.database_id,
+				tb: Cow::Borrowed(tb),
+			};
+			let Some(tb) = self.get_key(&key, version).await? else {
+				return Ok(None);
+			};
+
+			let tb = Arc::new(TableDefinition::from_stored(&tb)?);
+			if version.is_none() {
+				let entr = cache::tx::Entry::Any(tb.clone());
+				self.cache.insert(qey, entr);
+			}
+			Ok(Some(tb))
 		})
 	}
 
@@ -11490,37 +11527,27 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Table(ns, db, tb));
-				if version.is_some() {
-					let range = EventPrefix {
-						ns,
-						db,
-						tb: Cow::Borrowed(tb),
-					}
-					.range()?;
-					let val = self.tr.getr(range.into_key_range(), version).await?;
-					let stored: Arc<[catalog::StoredEventDefinition]> =
-						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-					return catalog::from_stored_all(&stored);
-				}
 				let qey = cache::tx::Lookup::Evs(ns, db, tb.as_str());
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_evs(),
-					None => {
-						let range = EventPrefix {
-							ns,
-							db,
-							tb: Cow::Borrowed(tb),
-						}
-						.range()?;
-						let val = self.tr.getr(range.into_key_range(), None).await?;
-						let stored: Arc<[catalog::StoredEventDefinition]> =
-							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-						let val = catalog::from_stored_all(&stored)?;
-						let entry = cache::tx::Entry::Evs(Arc::clone(&val));
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_evs();
 				}
+				let range = EventPrefix {
+					ns,
+					db,
+					tb: Cow::Borrowed(tb),
+				}
+				.range()?;
+				let val = self.tr.getr(range.into_key_range(), version).await?;
+				let stored: Arc<[catalog::StoredEventDefinition]> =
+					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+				let val = catalog::from_stored_all(&stored)?;
+				if version.is_none() {
+					let entry = cache::tx::Entry::Evs(Arc::clone(&val));
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_tb_events")),
 		)
@@ -11571,37 +11598,27 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Table(ns, db, tb));
-				if version.is_some() {
-					let range = IndexDefPrefix {
-						ns,
-						db,
-						tb: Cow::Borrowed(tb),
-					}
-					.range()?;
-					let val = self.tr.getr(range.into_key_range(), version).await?;
-					let stored: Arc<[catalog::StoredIndexDefinition]> =
-						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-					return catalog::from_stored_all(&stored);
-				}
 				let qey = cache::tx::Lookup::Ixs(ns, db, tb.as_str());
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_ixs(),
-					None => {
-						let range = IndexDefPrefix {
-							ns,
-							db,
-							tb: Cow::Borrowed(tb),
-						}
-						.range()?;
-						let val = self.tr.getr(range.into_key_range(), None).await?;
-						let stored: Arc<[catalog::StoredIndexDefinition]> =
-							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-						let val = catalog::from_stored_all(&stored)?;
-						let entry = cache::tx::Entry::Ixs(Arc::clone(&val));
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_ixs();
 				}
+				let range = IndexDefPrefix {
+					ns,
+					db,
+					tb: Cow::Borrowed(tb),
+				}
+				.range()?;
+				let val = self.tr.getr(range.into_key_range(), version).await?;
+				let stored: Arc<[catalog::StoredIndexDefinition]> =
+					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+				let val = catalog::from_stored_all(&stored)?;
+				if version.is_none() {
+					let entry = cache::tx::Entry::Ixs(Arc::clone(&val));
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_tb_indexes")),
 		)
@@ -11618,37 +11635,27 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Table(ns, db, tb));
-				if version.is_some() {
-					let range = SubscriptionPrefix {
-						ns,
-						db,
-						tb: Cow::Borrowed(tb),
-					}
-					.range()?;
-					let val = self.tr.getr(range.into_key_range(), version).await?;
-					let stored: Arc<[catalog::StoredSubscriptionDefinition]> =
-						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-					return Ok(compile_subscriptions(tb, &stored));
-				}
 				let qey = cache::tx::Lookup::Lvs(ns, db, tb.as_str());
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_lvs(),
-					None => {
-						let range = SubscriptionPrefix {
-							ns,
-							db,
-							tb: Cow::Borrowed(tb),
-						}
-						.range()?;
-						let val = self.tr.getr(range.into_key_range(), None).await?;
-						let stored: Arc<[catalog::StoredSubscriptionDefinition]> =
-							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-						let val = compile_subscriptions(tb, &stored);
-						let entry = cache::tx::Entry::Lvs(Arc::clone(&val));
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_lvs();
 				}
+				let range = SubscriptionPrefix {
+					ns,
+					db,
+					tb: Cow::Borrowed(tb),
+				}
+				.range()?;
+				let val = self.tr.getr(range.into_key_range(), version).await?;
+				let stored: Arc<[catalog::StoredSubscriptionDefinition]> =
+					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+				let val = compile_subscriptions(tb, &stored);
+				if version.is_none() {
+					let entry = cache::tx::Entry::Lvs(Arc::clone(&val));
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_tb_lives")),
 		)
@@ -11665,35 +11672,26 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Table(ns, db, tb));
-				if version.is_some() {
-					let key = TableKey {
-						ns,
-						db,
-						tb: Cow::Borrowed(tb),
-					};
-					let Some(val) = self.get_key(&key, version).await? else {
-						return Ok(None);
-					};
-					return Ok(Some(Arc::new(TableDefinition::from_stored(&val)?)));
-				}
 				let qey = cache::tx::Lookup::Tb(ns, db, tb.as_str());
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_type().map(Some),
-					None => {
-						let key = TableKey {
-							ns,
-							db,
-							tb: Cow::Borrowed(tb),
-						};
-						let Some(val) = self.get_key(&key, None).await? else {
-							return Ok(None);
-						};
-						let val = Arc::new(TableDefinition::from_stored(&val)?);
-						let entry = cache::tx::Entry::Any(val.clone());
-						self.cache.insert(qey, entry);
-						Ok(Some(val))
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_type().map(Some);
 				}
+				let key = TableKey {
+					ns,
+					db,
+					tb: Cow::Borrowed(tb),
+				};
+				let Some(val) = self.get_key(&key, version).await? else {
+					return Ok(None);
+				};
+				let val = Arc::new(TableDefinition::from_stored(&val)?);
+				if version.is_none() {
+					let entry = cache::tx::Entry::Any(val.clone());
+					self.cache.insert(qey, entry);
+				}
+				Ok(Some(val))
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_tb")),
 		)
@@ -11711,41 +11709,28 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Table(ns, db, tb));
-				if version.is_some() {
-					let key = EventKey {
-						ns,
-						db,
-						tb: Cow::Borrowed(tb),
-						ev: Cow::Borrowed(ev),
-					};
-					let val = self.get_key(&key, version).await?.ok_or_else(|| {
-						CatalogError::EvNotFound {
-							name: ev.to_owned(),
-						}
-					})?;
-					return Ok(Arc::new(catalog::EventDefinition::from_stored(&val)?));
-				}
 				let qey = cache::tx::Lookup::Ev(ns, db, tb.as_str(), ev);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_type(),
-					None => {
-						let key = EventKey {
-							ns,
-							db,
-							tb: Cow::Borrowed(tb),
-							ev: Cow::Borrowed(ev),
-						};
-						let val = self.get_key(&key, None).await?.ok_or_else(|| {
-							CatalogError::EvNotFound {
-								name: ev.to_owned(),
-							}
-						})?;
-						let val = Arc::new(catalog::EventDefinition::from_stored(&val)?);
-						let entry = cache::tx::Entry::Any(val.clone());
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_type();
 				}
+				let key = EventKey {
+					ns,
+					db,
+					tb: Cow::Borrowed(tb),
+					ev: Cow::Borrowed(ev),
+				};
+				let val =
+					self.get_key(&key, version).await?.ok_or_else(|| CatalogError::EvNotFound {
+						name: ev.to_owned(),
+					})?;
+				let val = Arc::new(catalog::EventDefinition::from_stored(&val)?);
+				if version.is_none() {
+					let entry = cache::tx::Entry::Any(val.clone());
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_tb_event")),
 		)
@@ -11763,37 +11748,27 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Table(ns, db, tb));
-				if version.is_some() {
-					let key = FieldKey {
-						ns,
-						db,
-						tb: Cow::Borrowed(tb),
-						fd: Cow::Borrowed(fd),
-					};
-					let Some(val) = self.get_key(&key, version).await? else {
-						return Ok(None);
-					};
-					return Ok(Some(Arc::new(catalog::FieldDefinition::from_stored(&val)?)));
-				}
 				let qey = cache::tx::Lookup::Fd(ns, db, tb.as_str(), fd);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_type().map(Some),
-					None => {
-						let key = FieldKey {
-							ns,
-							db,
-							tb: Cow::Borrowed(tb),
-							fd: Cow::Borrowed(fd),
-						};
-						let Some(val) = self.get_key(&key, None).await? else {
-							return Ok(None);
-						};
-						let val = Arc::new(catalog::FieldDefinition::from_stored(&val)?);
-						let entry = cache::tx::Entry::Any(val.clone());
-						self.cache.insert(qey, entry);
-						Ok(Some(val))
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_type().map(Some);
 				}
+				let key = FieldKey {
+					ns,
+					db,
+					tb: Cow::Borrowed(tb),
+					fd: Cow::Borrowed(fd),
+				};
+				let Some(val) = self.get_key(&key, version).await? else {
+					return Ok(None);
+				};
+				let val = Arc::new(catalog::FieldDefinition::from_stored(&val)?);
+				if version.is_none() {
+					let entry = cache::tx::Entry::Any(val.clone());
+					self.cache.insert(qey, entry);
+				}
+				Ok(Some(val))
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_tb_field")),
 		)
@@ -11887,37 +11862,27 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Table(ns, db, tb));
-				if version.is_some() {
-					let key = IndexDefKey {
-						ns,
-						db,
-						tb: Cow::Borrowed(tb),
-						ix: Cow::Borrowed(ix),
-					};
-					let Some(val) = self.get_key(&key, version).await? else {
-						return Ok(None);
-					};
-					return Ok(Some(Arc::new(catalog::IndexDefinition::from_stored(&val)?)));
-				}
 				let qey = cache::tx::Lookup::Ix(ns, db, tb.as_str(), ix);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_type().map(Some),
-					None => {
-						let key = IndexDefKey {
-							ns,
-							db,
-							tb: Cow::Borrowed(tb),
-							ix: Cow::Borrowed(ix),
-						};
-						let Some(val) = self.get_key(&key, None).await? else {
-							return Ok(None);
-						};
-						let val = Arc::new(catalog::IndexDefinition::from_stored(&val)?);
-						let entry = cache::tx::Entry::Any(val.clone());
-						self.cache.insert(qey, entry);
-						Ok(Some(val))
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_type().map(Some);
 				}
+				let key = IndexDefKey {
+					ns,
+					db,
+					tb: Cow::Borrowed(tb),
+					ix: Cow::Borrowed(ix),
+				};
+				let Some(val) = self.get_key(&key, version).await? else {
+					return Ok(None);
+				};
+				let val = Arc::new(catalog::IndexDefinition::from_stored(&val)?);
+				if version.is_none() {
+					let entry = cache::tx::Entry::Any(val.clone());
+					self.cache.insert(qey, entry);
+				}
+				Ok(Some(val))
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_tb_index")),
 		)
@@ -12377,24 +12342,20 @@ impl UserProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let range = RootUserPrefix {}.range()?;
-					let val = self.tr.getr(range.into_key_range(), version).await?;
-					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
-				}
 				let qey = cache::tx::Lookup::Rus;
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_rus(),
-					None => {
-						let range = RootUserPrefix {}.range()?;
-						let val = self.tr.getr(range.into_key_range(), None).await?;
-						let val =
-							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-						let entry = cache::tx::Entry::Rus(Arc::clone(&val));
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_rus();
 				}
+				let range = RootUserPrefix {}.range()?;
+				let val = self.tr.getr(range.into_key_range(), version).await?;
+				let val = util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+				if version.is_none() {
+					let entry = cache::tx::Entry::Rus(Arc::clone(&val));
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_root_users")),
 		)
@@ -12409,30 +12370,23 @@ impl UserProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let range = NsUserPrefix {
-						ns,
-					}
-					.range()?;
-					let val = self.tr.getr(range.into_key_range(), version).await?;
-					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
-				}
 				let qey = cache::tx::Lookup::Nus(ns);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_nus(),
-					None => {
-						let range = NsUserPrefix {
-							ns,
-						}
-						.range()?;
-						let val = self.tr.getr(range.into_key_range(), None).await?;
-						let val =
-							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-						let entry = cache::tx::Entry::Nus(Arc::clone(&val));
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_nus();
 				}
+				let range = NsUserPrefix {
+					ns,
+				}
+				.range()?;
+				let val = self.tr.getr(range.into_key_range(), version).await?;
+				let val = util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+				if version.is_none() {
+					let entry = cache::tx::Entry::Nus(Arc::clone(&val));
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_ns_users")),
 		)
@@ -12448,32 +12402,24 @@ impl UserProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let range = DbUserPrefix {
-						ns,
-						db,
-					}
-					.range()?;
-					let val = self.tr.getr(range.into_key_range(), version).await?;
-					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
-				}
 				let qey = cache::tx::Lookup::Dus(ns, db);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_dus(),
-					None => {
-						let range = DbUserPrefix {
-							ns,
-							db,
-						}
-						.range()?;
-						let val = self.tr.getr(range.into_key_range(), None).await?;
-						let val =
-							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-						let entry = cache::tx::Entry::Dus(Arc::clone(&val));
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_dus();
 				}
+				let range = DbUserPrefix {
+					ns,
+					db,
+				}
+				.range()?;
+				let val = self.tr.getr(range.into_key_range(), version).await?;
+				let val = util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+				if version.is_none() {
+					let entry = cache::tx::Entry::Dus(Arc::clone(&val));
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_db_users")),
 		)
@@ -12488,31 +12434,24 @@ impl UserProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let key = RootUserKey {
-						user: Cow::Borrowed(us),
-					};
-					let Some(val) = self.get_key(&key, version).await? else {
-						return Ok(None);
-					};
-					return Ok(Some(Arc::new(val)));
-				}
 				let qey = cache::tx::Lookup::Ru(us);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_type().map(Some),
-					None => {
-						let key = RootUserKey {
-							user: Cow::Borrowed(us),
-						};
-						let Some(val) = self.get_key(&key, None).await? else {
-							return Ok(None);
-						};
-						let val = Arc::new(val);
-						let entry = cache::tx::Entry::Any(val.clone());
-						self.cache.insert(qey, entry);
-						Ok(Some(val))
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_type().map(Some);
 				}
+				let key = RootUserKey {
+					user: Cow::Borrowed(us),
+				};
+				let Some(val) = self.get_key(&key, version).await? else {
+					return Ok(None);
+				};
+				let val = Arc::new(val);
+				if version.is_none() {
+					let entry = cache::tx::Entry::Any(val.clone());
+					self.cache.insert(qey, entry);
+				}
+				Ok(Some(val))
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_root_user")),
 		)
@@ -12528,34 +12467,26 @@ impl UserProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let key = NsUserKey {
-						ns,
-						user: Cow::Borrowed(us),
-					};
-					let Some(val) = self.get_key(&key, version).await? else {
-						return Ok(None);
-					};
-					return Ok(Some(Arc::new(val)));
-				}
 				let qey = cache::tx::Lookup::Nu(ns, us);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_type().map(Some),
-					None => {
-						let key = NsUserKey {
-							ns,
-							user: Cow::Borrowed(us),
-						};
-						let Some(val) = self.get_key(&key, None).await? else {
-							return Ok(None);
-						};
-
-						let val = Arc::new(val);
-						let entry = cache::tx::Entry::Any(val.clone());
-						self.cache.insert(qey, entry);
-						Ok(Some(val))
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_type().map(Some);
 				}
+				let key = NsUserKey {
+					ns,
+					user: Cow::Borrowed(us),
+				};
+				let Some(val) = self.get_key(&key, version).await? else {
+					return Ok(None);
+				};
+
+				let val = Arc::new(val);
+				if version.is_none() {
+					let entry = cache::tx::Entry::Any(val.clone());
+					self.cache.insert(qey, entry);
+				}
+				Ok(Some(val))
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_ns_user")),
 		)
@@ -12572,36 +12503,27 @@ impl UserProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let key = DbUserKey {
-						ns,
-						db,
-						user: Cow::Borrowed(us),
-					};
-					let Some(val) = self.get_key(&key, version).await? else {
-						return Ok(None);
-					};
-					return Ok(Some(Arc::new(val)));
-				}
 				let qey = cache::tx::Lookup::Du(ns, db, us);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_type().map(Some),
-					None => {
-						let key = DbUserKey {
-							ns,
-							db,
-							user: Cow::Borrowed(us),
-						};
-						let Some(val) = self.get_key(&key, None).await? else {
-							return Ok(None);
-						};
-
-						let val = Arc::new(val);
-						let entry = cache::tx::Entry::Any(val.clone());
-						self.cache.insert(qey, entry);
-						Ok(Some(val))
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_type().map(Some);
 				}
+				let key = DbUserKey {
+					ns,
+					db,
+					user: Cow::Borrowed(us),
+				};
+				let Some(val) = self.get_key(&key, version).await? else {
+					return Ok(None);
+				};
+
+				let val = Arc::new(val);
+				if version.is_none() {
+					let entry = cache::tx::Entry::Any(val.clone());
+					self.cache.insert(qey, entry);
+				}
+				Ok(Some(val))
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_db_user")),
 		)
@@ -12696,27 +12618,22 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let range = RootAccessMethodPrefix {}.range()?;
-					let val = self.tr.getr(range.into_key_range(), version).await?;
-					let stored: Arc<[catalog::StoredAccessDefinition]> =
-						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-					return catalog::from_stored_all(&stored);
-				}
 				let qey = cache::tx::Lookup::Ras;
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_ras(),
-					None => {
-						let range = RootAccessMethodPrefix {}.range()?;
-						let val = self.tr.getr(range.into_key_range(), None).await?;
-						let stored: Arc<[catalog::StoredAccessDefinition]> =
-							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-						let val = catalog::from_stored_all(&stored)?;
-						let entry = cache::tx::Entry::Ras(Arc::clone(&val));
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_ras();
 				}
+				let range = RootAccessMethodPrefix {}.range()?;
+				let val = self.tr.getr(range.into_key_range(), version).await?;
+				let stored: Arc<[catalog::StoredAccessDefinition]> =
+					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+				let val = catalog::from_stored_all(&stored)?;
+				if version.is_none() {
+					let entry = cache::tx::Entry::Ras(Arc::clone(&val));
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_root_accesses")),
 		)
@@ -12730,30 +12647,23 @@ impl AuthorisationProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Arc<[catalog::AccessGrant]>>> {
 		Box::pin(
 			async move {
-				if version.is_some() {
-					let range = RootGrantPrefix {
-						ac: Cow::Borrowed(ra),
-					}
-					.range()?;
-					let val = self.tr.getr(range.into_key_range(), version).await?;
-					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
-				}
 				let qey = cache::tx::Lookup::Rgs(ra);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_rag(),
-					None => {
-						let range = RootGrantPrefix {
-							ac: Cow::Borrowed(ra),
-						}
-						.range()?;
-						let val = self.tr.getr(range.into_key_range(), None).await?;
-						let val =
-							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-						let entry = cache::tx::Entry::Rag(Arc::clone(&val));
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_rag();
 				}
+				let range = RootGrantPrefix {
+					ac: Cow::Borrowed(ra),
+				}
+				.range()?;
+				let val = self.tr.getr(range.into_key_range(), version).await?;
+				let val = util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+				if version.is_none() {
+					let entry = cache::tx::Entry::Rag(Arc::clone(&val));
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_root_access_grants")),
 		)
@@ -12768,33 +12678,25 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let range = NsAccessMethodPrefix {
-						ns,
-					}
-					.range()?;
-					let val = self.tr.getr(range.into_key_range(), version).await?;
-					let stored: Arc<[catalog::StoredAccessDefinition]> =
-						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-					return catalog::from_stored_all(&stored);
-				}
 				let qey = cache::tx::Lookup::Nas(ns);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_nas(),
-					None => {
-						let range = NsAccessMethodPrefix {
-							ns,
-						}
-						.range()?;
-						let val = self.tr.getr(range.into_key_range(), None).await?;
-						let stored: Arc<[catalog::StoredAccessDefinition]> =
-							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-						let val = catalog::from_stored_all(&stored)?;
-						let entry = cache::tx::Entry::Nas(Arc::clone(&val));
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_nas();
 				}
+				let range = NsAccessMethodPrefix {
+					ns,
+				}
+				.range()?;
+				let val = self.tr.getr(range.into_key_range(), version).await?;
+				let stored: Arc<[catalog::StoredAccessDefinition]> =
+					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+				let val = catalog::from_stored_all(&stored)?;
+				if version.is_none() {
+					let entry = cache::tx::Entry::Nas(Arc::clone(&val));
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_ns_accesses")),
 		)
@@ -12809,32 +12711,24 @@ impl AuthorisationProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Arc<[catalog::AccessGrant]>>> {
 		Box::pin(
 			async move {
-				if version.is_some() {
-					let range = NsGrantPrefix {
-						ns,
-						ac: Cow::Borrowed(na),
-					}
-					.range()?;
-					let val = self.tr.getr(range.into_key_range(), version).await?;
-					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
-				}
 				let qey = cache::tx::Lookup::Ngs(ns, na);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_nag(),
-					None => {
-						let range = NsGrantPrefix {
-							ns,
-							ac: Cow::Borrowed(na),
-						}
-						.range()?;
-						let val = self.tr.getr(range.into_key_range(), None).await?;
-						let val =
-							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-						let entry = cache::tx::Entry::Nag(Arc::clone(&val));
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_nag();
 				}
+				let range = NsGrantPrefix {
+					ns,
+					ac: Cow::Borrowed(na),
+				}
+				.range()?;
+				let val = self.tr.getr(range.into_key_range(), version).await?;
+				let val = util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+				if version.is_none() {
+					let entry = cache::tx::Entry::Nag(Arc::clone(&val));
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_ns_access_grants")),
 		)
@@ -12850,35 +12744,26 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let range = DbAccessMethodPrefix {
-						ns,
-						db,
-					}
-					.range()?;
-					let val = self.tr.getr(range.into_key_range(), version).await?;
-					let stored: Arc<[catalog::StoredAccessDefinition]> =
-						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-					return catalog::from_stored_all(&stored);
-				}
 				let qey = cache::tx::Lookup::Das(ns, db);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_das(),
-					None => {
-						let range = DbAccessMethodPrefix {
-							ns,
-							db,
-						}
-						.range()?;
-						let val = self.tr.getr(range.into_key_range(), None).await?;
-						let stored: Arc<[catalog::StoredAccessDefinition]> =
-							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-						let val = catalog::from_stored_all(&stored)?;
-						let entry = cache::tx::Entry::Das(Arc::clone(&val));
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_das();
 				}
+				let range = DbAccessMethodPrefix {
+					ns,
+					db,
+				}
+				.range()?;
+				let val = self.tr.getr(range.into_key_range(), version).await?;
+				let stored: Arc<[catalog::StoredAccessDefinition]> =
+					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+				let val = catalog::from_stored_all(&stored)?;
+				if version.is_none() {
+					let entry = cache::tx::Entry::Das(Arc::clone(&val));
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_db_accesses")),
 		)
@@ -12894,34 +12779,25 @@ impl AuthorisationProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Arc<[catalog::AccessGrant]>>> {
 		Box::pin(
 			async move {
-				if version.is_some() {
-					let range = DbGrantPrefix {
-						ns,
-						db,
-						ac: Cow::Borrowed(da),
-					}
-					.range()?;
-					let val = self.tr.getr(range.into_key_range(), version).await?;
-					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
-				}
 				let qey = cache::tx::Lookup::Dgs(ns, db, da);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_dag(),
-					None => {
-						let range = DbGrantPrefix {
-							ns,
-							db,
-							ac: Cow::Borrowed(da),
-						}
-						.range()?;
-						let val = self.tr.getr(range.into_key_range(), None).await?;
-						let val =
-							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-						let entry = cache::tx::Entry::Dag(Arc::clone(&val));
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_dag();
 				}
+				let range = DbGrantPrefix {
+					ns,
+					db,
+					ac: Cow::Borrowed(da),
+				}
+				.range()?;
+				let val = self.tr.getr(range.into_key_range(), version).await?;
+				let val = util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+				if version.is_none() {
+					let entry = cache::tx::Entry::Dag(Arc::clone(&val));
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_db_access_grants")),
 		)
@@ -12936,31 +12812,24 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let key = RootAccessMethodKey {
-						ac: Cow::Borrowed(ra),
-					};
-					let Some(val) = self.get_key(&key, version).await? else {
-						return Ok(None);
-					};
-					return Ok(Some(Arc::new(catalog::AccessDefinition::from_stored(&val)?)));
-				}
 				let qey = cache::tx::Lookup::Ra(ra);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_type().map(Some),
-					None => {
-						let key = RootAccessMethodKey {
-							ac: Cow::Borrowed(ra),
-						};
-						let Some(val) = self.get_key(&key, None).await? else {
-							return Ok(None);
-						};
-						let val = Arc::new(catalog::AccessDefinition::from_stored(&val)?);
-						let entry = cache::tx::Entry::Any(val.clone());
-						self.cache.insert(qey, entry);
-						Ok(Some(val))
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_type().map(Some);
 				}
+				let key = RootAccessMethodKey {
+					ac: Cow::Borrowed(ra),
+				};
+				let Some(val) = self.get_key(&key, version).await? else {
+					return Ok(None);
+				};
+				let val = Arc::new(catalog::AccessDefinition::from_stored(&val)?);
+				if version.is_none() {
+					let entry = cache::tx::Entry::Any(val.clone());
+					self.cache.insert(qey, entry);
+				}
+				Ok(Some(val))
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_root_access")),
 		)
@@ -12975,33 +12844,25 @@ impl AuthorisationProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::AccessGrant>>>> {
 		Box::pin(
 			async move {
-				if version.is_some() {
-					let key = RootGrantKey {
-						ac: Cow::Borrowed(ac),
-						gr: Cow::Borrowed(gr),
-					};
-					let Some(val) = self.get_key(&key, version).await? else {
-						return Ok(None);
-					};
-					return Ok(Some(Arc::new(val)));
-				}
 				let qey = cache::tx::Lookup::Rg(ac, gr);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_type().map(Some),
-					None => {
-						let key = RootGrantKey {
-							ac: Cow::Borrowed(ac),
-							gr: Cow::Borrowed(gr),
-						};
-						let Some(val) = self.get_key(&key, None).await? else {
-							return Ok(None);
-						};
-						let val = Arc::new(val);
-						let entry = cache::tx::Entry::Any(val.clone());
-						self.cache.insert(qey, entry);
-						Ok(Some(val))
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_type().map(Some);
 				}
+				let key = RootGrantKey {
+					ac: Cow::Borrowed(ac),
+					gr: Cow::Borrowed(gr),
+				};
+				let Some(val) = self.get_key(&key, version).await? else {
+					return Ok(None);
+				};
+				let val = Arc::new(val);
+				if version.is_none() {
+					let entry = cache::tx::Entry::Any(val.clone());
+					self.cache.insert(qey, entry);
+				}
+				Ok(Some(val))
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_root_access_grant")),
 		)
@@ -13017,33 +12878,25 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let key = NsAccessMethodKey {
-						ns,
-						ac: Cow::Borrowed(na),
-					};
-					let Some(val) = self.get_key(&key, version).await? else {
-						return Ok(None);
-					};
-					return Ok(Some(Arc::new(catalog::AccessDefinition::from_stored(&val)?)));
-				}
 				let qey = cache::tx::Lookup::Na(ns, na);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_type().map(Some),
-					None => {
-						let key = NsAccessMethodKey {
-							ns,
-							ac: Cow::Borrowed(na),
-						};
-						let Some(val) = self.get_key(&key, None).await? else {
-							return Ok(None);
-						};
-						let val = Arc::new(catalog::AccessDefinition::from_stored(&val)?);
-						let entry = cache::tx::Entry::Any(val.clone());
-						self.cache.insert(qey, entry);
-						Ok(Some(val))
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_type().map(Some);
 				}
+				let key = NsAccessMethodKey {
+					ns,
+					ac: Cow::Borrowed(na),
+				};
+				let Some(val) = self.get_key(&key, version).await? else {
+					return Ok(None);
+				};
+				let val = Arc::new(catalog::AccessDefinition::from_stored(&val)?);
+				if version.is_none() {
+					let entry = cache::tx::Entry::Any(val.clone());
+					self.cache.insert(qey, entry);
+				}
+				Ok(Some(val))
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_ns_access")),
 		)
@@ -13059,35 +12912,26 @@ impl AuthorisationProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::AccessGrant>>>> {
 		Box::pin(
 			async move {
-				if version.is_some() {
-					let key = NsGrantKey {
-						ns,
-						ac: Cow::Borrowed(ac),
-						gr: Cow::Borrowed(gr),
-					};
-					let Some(val) = self.get_key(&key, version).await? else {
-						return Ok(None);
-					};
-					return Ok(Some(Arc::new(val)));
-				}
 				let qey = cache::tx::Lookup::Ng(ns, ac, gr);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_type().map(Some),
-					None => {
-						let key = NsGrantKey {
-							ns,
-							ac: Cow::Borrowed(ac),
-							gr: Cow::Borrowed(gr),
-						};
-						let Some(val) = self.get_key(&key, None).await? else {
-							return Ok(None);
-						};
-						let val = Arc::new(val);
-						let entry = cache::tx::Entry::Any(val.clone());
-						self.cache.insert(qey, entry);
-						Ok(Some(val))
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_type().map(Some);
 				}
+				let key = NsGrantKey {
+					ns,
+					ac: Cow::Borrowed(ac),
+					gr: Cow::Borrowed(gr),
+				};
+				let Some(val) = self.get_key(&key, version).await? else {
+					return Ok(None);
+				};
+				let val = Arc::new(val);
+				if version.is_none() {
+					let entry = cache::tx::Entry::Any(val.clone());
+					self.cache.insert(qey, entry);
+				}
+				Ok(Some(val))
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_ns_access_grant")),
 		)
@@ -13104,35 +12948,26 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let key = DbAccessMethodKey {
-						ns,
-						db,
-						ac: Cow::Borrowed(da),
-					};
-					let Some(val) = self.get_key(&key, version).await? else {
-						return Ok(None);
-					};
-					return Ok(Some(Arc::new(catalog::AccessDefinition::from_stored(&val)?)));
-				}
 				let qey = cache::tx::Lookup::Da(ns, db, da);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_type().map(Some),
-					None => {
-						let key = DbAccessMethodKey {
-							ns,
-							db,
-							ac: Cow::Borrowed(da),
-						};
-						let Some(val) = self.get_key(&key, None).await? else {
-							return Ok(None);
-						};
-						let val = Arc::new(catalog::AccessDefinition::from_stored(&val)?);
-						let entry = cache::tx::Entry::Any(val.clone());
-						self.cache.insert(qey, entry);
-						Ok(Some(val))
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_type().map(Some);
 				}
+				let key = DbAccessMethodKey {
+					ns,
+					db,
+					ac: Cow::Borrowed(da),
+				};
+				let Some(val) = self.get_key(&key, version).await? else {
+					return Ok(None);
+				};
+				let val = Arc::new(catalog::AccessDefinition::from_stored(&val)?);
+				if version.is_none() {
+					let entry = cache::tx::Entry::Any(val.clone());
+					self.cache.insert(qey, entry);
+				}
+				Ok(Some(val))
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_db_access")),
 		)
@@ -13149,37 +12984,27 @@ impl AuthorisationProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::AccessGrant>>>> {
 		Box::pin(
 			async move {
-				if version.is_some() {
-					let key = DbGrantKey {
-						ns,
-						db,
-						ac: Cow::Borrowed(ac),
-						gr: Cow::Borrowed(gr),
-					};
-					let Some(val) = self.get_key(&key, version).await? else {
-						return Ok(None);
-					};
-					return Ok(Some(Arc::new(val)));
-				}
 				let qey = cache::tx::Lookup::Dg(ns, db, ac, gr);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_type().map(Some),
-					None => {
-						let key = DbGrantKey {
-							ns,
-							db,
-							ac: Cow::Borrowed(ac),
-							gr: Cow::Borrowed(gr),
-						};
-						let Some(val) = self.get_key(&key, None).await? else {
-							return Ok(None);
-						};
-						let val = Arc::new(val);
-						let entry = cache::tx::Entry::Any(val.clone());
-						self.cache.insert(qey, entry);
-						Ok(Some(val))
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_type().map(Some);
 				}
+				let key = DbGrantKey {
+					ns,
+					db,
+					ac: Cow::Borrowed(ac),
+					gr: Cow::Borrowed(gr),
+				};
+				let Some(val) = self.get_key(&key, version).await? else {
+					return Ok(None);
+				};
+				let val = Arc::new(val);
+				if version.is_none() {
+					let entry = cache::tx::Entry::Any(val.clone());
+					self.cache.insert(qey, entry);
+				}
+				Ok(Some(val))
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_db_access_grant")),
 		)
@@ -13338,35 +13163,26 @@ impl ApiProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let key = ApiKey {
-						ns,
-						db,
-						ap: Cow::Borrowed(ap),
-					};
-					let Some(val) = self.get_key(&key, version).await? else {
-						return Ok(None);
-					};
-					return Ok(Some(Arc::new(catalog::ApiDefinition::from_stored(&val)?)));
-				}
 				let qey = cache::tx::Lookup::Ap(ns, db, ap);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_type().map(Some),
-					None => {
-						let key = ApiKey {
-							ns,
-							db,
-							ap: Cow::Borrowed(ap),
-						};
-						let Some(val) = self.get_key(&key, None).await? else {
-							return Ok(None);
-						};
-						let val = Arc::new(catalog::ApiDefinition::from_stored(&val)?);
-						let entry = cache::tx::Entry::Any(val.clone());
-						self.cache.insert(qey, entry);
-						Ok(Some(val))
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_type().map(Some);
 				}
+				let key = ApiKey {
+					ns,
+					db,
+					ap: Cow::Borrowed(ap),
+				};
+				let Some(val) = self.get_key(&key, version).await? else {
+					return Ok(None);
+				};
+				let val = Arc::new(catalog::ApiDefinition::from_stored(&val)?);
+				if version.is_none() {
+					let entry = cache::tx::Entry::Any(val.clone());
+					self.cache.insert(qey, entry);
+				}
+				Ok(Some(val))
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_db_api")),
 		)
@@ -13417,35 +13233,26 @@ impl BucketProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let range = BucketPrefix {
-						ns,
-						db,
-					}
-					.range()?;
-					let val = self.tr.getr(range.into_key_range(), version).await?;
-					let stored: Arc<[catalog::StoredBucketDefinition]> =
-						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-					return catalog::from_stored_all(&stored);
-				}
 				let qey = cache::tx::Lookup::Bus(ns, db);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_bus(),
-					None => {
-						let range = BucketPrefix {
-							ns,
-							db,
-						}
-						.range()?;
-						let val = self.tr.getr(range.into_key_range(), None).await?;
-						let stored: Arc<[catalog::StoredBucketDefinition]> =
-							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-						let val = catalog::from_stored_all(&stored)?;
-						let entry = cache::tx::Entry::Bus(Arc::clone(&val));
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_bus();
 				}
+				let range = BucketPrefix {
+					ns,
+					db,
+				}
+				.range()?;
+				let val = self.tr.getr(range.into_key_range(), version).await?;
+				let stored: Arc<[catalog::StoredBucketDefinition]> =
+					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+				let val = catalog::from_stored_all(&stored)?;
+				if version.is_none() {
+					let entry = cache::tx::Entry::Bus(Arc::clone(&val));
+					self.cache.insert(qey, entry);
+				}
+				Ok(val)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_db_buckets")),
 		)
@@ -13462,35 +13269,26 @@ impl BucketProvider for Transaction {
 		Box::pin(
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
-				if version.is_some() {
-					let key = BucketKey {
-						ns,
-						db,
-						bu: Cow::Borrowed(bu),
-					};
-					let Some(val) = self.get_key(&key, version).await? else {
-						return Ok(None);
-					};
-					return Ok(Some(Arc::new(catalog::BucketDefinition::from_stored(&val)?)));
-				}
 				let qey = cache::tx::Lookup::Bu(ns, db, bu);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_type().map(Some),
-					None => {
-						let key = BucketKey {
-							ns,
-							db,
-							bu: Cow::Borrowed(bu),
-						};
-						let Some(val) = self.get_key(&key, None).await? else {
-							return Ok(None);
-						};
-						let bucket_def = Arc::new(catalog::BucketDefinition::from_stored(&val)?);
-						let entr = cache::tx::Entry::Any(bucket_def.clone());
-						self.cache.insert(qey, entr);
-						Ok(Some(bucket_def))
-					}
+				if version.is_none()
+					&& let Some(val) = self.cache.get(&qey)
+				{
+					return val.try_into_type().map(Some);
 				}
+				let key = BucketKey {
+					ns,
+					db,
+					bu: Cow::Borrowed(bu),
+				};
+				let Some(val) = self.get_key(&key, version).await? else {
+					return Ok(None);
+				};
+				let bucket_def = Arc::new(catalog::BucketDefinition::from_stored(&val)?);
+				if version.is_none() {
+					let entr = cache::tx::Entry::Any(bucket_def.clone());
+					self.cache.insert(qey, entr);
+				}
+				Ok(Some(bucket_def))
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_db_bucket")),
 		)

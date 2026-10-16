@@ -62,6 +62,14 @@ impl SkipRevisioned for Regex {
 		u16::skip_revisioned(r)?;
 		String::skip_revisioned(r)
 	}
+
+	#[inline]
+	fn skip_revisioned_slice(
+		reader: &mut revision::SliceReader<'_>,
+	) -> Result<(), revision::Error> {
+		u16::skip_revisioned_slice(reader)?;
+		String::skip_revisioned_slice(reader)
+	}
 }
 
 impl WalkRevisioned for Regex {
@@ -248,7 +256,21 @@ impl<'de, F> BorrowDecode<'de, F> for Regex {
 
 #[cfg(test)]
 mod tests {
-	use super::regex_new;
+	use revision::{SerializeRevisioned, SkipRevisioned};
+
+	use super::{Regex, regex_new};
+
+	#[test]
+	fn slice_skip_agrees_with_reader_skip() {
+		let regex = Regex(regex_new("^a+b$").unwrap());
+		let mut bytes = Vec::new();
+		regex.serialize_revisioned(&mut bytes).unwrap();
+		assert_eq!(revision::skip_slice::<Regex>(&bytes).unwrap(), bytes.len());
+		let cut = &bytes[..bytes.len() - 1];
+		assert!(revision::skip_slice::<Regex>(cut).is_err());
+		assert!(Regex::skip_revisioned(&mut &cut[..]).is_err());
+	}
+
 	#[test]
 	fn regex_compile_limit() {
 		match regex_new("^(a|b|c){1000000}") {

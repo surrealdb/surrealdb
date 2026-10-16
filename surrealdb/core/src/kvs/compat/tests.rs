@@ -138,6 +138,43 @@ fn version_writes_current_format(version_name: &str, type_name: &str, fixture: &
 ///   reads and writes it; the `StoredApiDefinition` fixtures with actions check it there.
 const VM_UNDESCRIBED: &[&str] = &["MajorVersion", "StoredApiActionDefinition"];
 
+/// The catalog kinds the edge codec leaves out, which it refuses to read or write.
+const EDGE_UNSERVED: &[&str] = &[
+	"StoredAccessDefinition",
+	"UserDefinition",
+	"Node",
+	"NodeLiveQuery",
+	"AccessGrant",
+	"StoredBucketDefinition",
+];
+
+/// The edge codec reads the fixture of a kind it serves as the full codec does and writes back
+/// the bytes `expected`, and refuses the fixture of a kind it leaves out by naming the kind.
+fn assert_edge_codec_agrees(
+	type_name: &str,
+	fixture: &[u8],
+	expected: &[u8],
+	ctx: &impl crate::exec::vm::codec::KeyContext,
+) {
+	use crate::exec::vm::codec::{EDGE_CODEC, FULL_CODEC, decode, encode};
+	match decode(&EDGE_CODEC, type_name, fixture) {
+		Ok(value) => {
+			assert!(!EDGE_UNSERVED.contains(&type_name), "the edge codec read a {type_name}");
+			assert_eq!(Some(&value), decode(&FULL_CODEC, type_name, fixture).ok().as_ref());
+			let value = ctx.read(value);
+			let written = encode(&EDGE_CODEC, type_name, &value).unwrap();
+			assert_eq!(written, expected, "the edge codec wrote a {type_name} differently");
+		}
+		Err(error) => {
+			assert!(EDGE_UNSERVED.contains(&type_name), "the edge codec refused a {type_name}");
+			assert_eq!(
+				error.to_string(),
+				format!("catalog kind {type_name} is not served by this entry")
+			);
+		}
+	}
+}
+
 /// The bytes the Rust codec writes for `value` in the form the VM's codec holds it in, where
 /// that form differs from the value the Rust codec decodes; `None` where it does not.
 ///
@@ -248,13 +285,13 @@ macro_rules! compat_test {
 					// value in the form the VM holds it in (`vm_form`).
 					let type_name = stringify!($type);
 					assert!(
-						VM_UNDESCRIBED.contains(&type_name) || crate::exec::vm::codec::describes(type_name),
+						VM_UNDESCRIBED.contains(&type_name) || crate::exec::vm::codec::describes(&crate::exec::vm::codec::FULL_CODEC, type_name),
 						"the VM codec has no descriptor for {type_name}"
 					);
-					if crate::exec::vm::codec::describes(type_name) {
-						let vm = crate::exec::vm::codec::decode(type_name, fixture_bytes)
+					if crate::exec::vm::codec::describes(&crate::exec::vm::codec::FULL_CODEC, type_name) {
+						let vm = crate::exec::vm::codec::decode(&crate::exec::vm::codec::FULL_CODEC, type_name, fixture_bytes)
 							.map(|value| crate::exec::vm::codec::KeyContext::read(&$ctx, value))
-							.and_then(|value| crate::exec::vm::codec::encode(type_name, &value));
+							.and_then(|value| crate::exec::vm::codec::encode(&crate::exec::vm::codec::FULL_CODEC, type_name, &value));
 						let vm = vm.unwrap_or_else(|e| {
 							panic!(
 								concat!("the VM codec failed on ", stringify!([<$version _ $base_name>]), ": {:#}"),
@@ -267,6 +304,8 @@ macro_rules! compat_test {
 							expected_vm,
 							concat!("the VM codec re-encoded ", stringify!([<$version _ $base_name>]), " differently")
 						);
+
+						assert_edge_codec_agrees(type_name, fixture_bytes, &expected_vm, &$ctx);
 					}
 
 					if version_writes_current_format(stringify!($version), stringify!($type), stringify!($base_name)) {

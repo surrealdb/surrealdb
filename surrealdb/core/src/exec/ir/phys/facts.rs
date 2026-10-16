@@ -23,7 +23,8 @@ use super::access::{ReadVersion, RestrictedSelect, TableAnswers, admissible_acce
 use super::ops::{MatchStepAttrs, PhysOp, ProjectionShape};
 use super::pipeline::{chain_of, enclosing_region_of, streams};
 use super::{chain, nested};
-use crate::exec::ir::analysis::cx::default_cx;
+use crate::exec::function::FunctionRegistry;
+use crate::exec::ir::analysis::cx::structural_cx;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::value::ValueDef;
@@ -70,9 +71,10 @@ pub(crate) enum NestedReading {
 pub(crate) fn facts_of(
 	ir: &Ir,
 	facts: &mut FactCache,
+	registry: &FunctionRegistry,
 	pipeline_op: OpId,
 ) -> Result<PhysicalFacts, IrError> {
-	facts_reading(ir, facts, pipeline_op, NestedReading::Hedged)
+	facts_reading(ir, facts, registry, pipeline_op, NestedReading::Hedged)
 }
 
 /// Derives the facts of the pipeline `pipeline_op` from the physical ops it holds, the op that
@@ -89,6 +91,7 @@ pub(crate) fn facts_of(
 pub(crate) fn facts_reading(
 	ir: &Ir,
 	facts: &mut FactCache,
+	registry: &FunctionRegistry,
 	pipeline_op: OpId,
 	reading: NestedReading,
 ) -> Result<PhysicalFacts, IrError> {
@@ -114,8 +117,8 @@ pub(crate) fn facts_reading(
 		scanned.extend(cut.consumer);
 	}
 	let nesting = scan_expressions(ir, &scanned);
-	let nested = nested_use(ir, facts, &nesting, reading);
-	let writes = cut.sink == SinkKind::Write || enclosing_writes(ir, facts, pipeline_op);
+	let nested = nested_use(ir, facts, registry, &nesting, reading);
+	let writes = cut.sink == SinkKind::Write || enclosing_writes(ir, facts, registry, pipeline_op);
 	Ok(assemble(source_kind, cut.sink, writes, &chain, nested, nesting.host_blocks))
 }
 
@@ -821,6 +824,7 @@ fn scan_expressions(ir: &Ir, ops: &[OpId]) -> Nesting {
 fn nested_use(
 	ir: &Ir,
 	facts: &mut FactCache,
+	registry: &FunctionRegistry,
 	nesting: &Nesting,
 	reading: NestedReading,
 ) -> NestedUse {
@@ -830,7 +834,7 @@ fn nested_use(
 		NestedUse::None
 	};
 	for subquery in &nesting.subqueries {
-		let contribution = if writes_within(ir, facts, *subquery)
+		let contribution = if writes_within(ir, facts, registry, *subquery)
 			|| (reading == NestedReading::Strategy
 				&& matches!(strategy_of(ir, *subquery), Some(NestedStrategy::Once))
 				&& nested::held_as_members(ir, *subquery))
@@ -918,12 +922,17 @@ fn is_block_construct(op: &PhysOp) -> bool {
 
 /// Whether a statement that encloses the pipeline `pipeline_op` writes, in the scope the planner
 /// places the pipeline in: the statements that contain it, the nearest first.
-fn enclosing_writes(ir: &Ir, facts: &mut FactCache, pipeline_op: OpId) -> bool {
+fn enclosing_writes(
+	ir: &Ir,
+	facts: &mut FactCache,
+	registry: &FunctionRegistry,
+	pipeline_op: OpId,
+) -> bool {
 	let mut at = pipeline_op;
 	while let Some((owner, _)) =
 		enclosing_region_of(ir, at, |kind| matches!(kind, RegionKind::Statement(_)))
 	{
-		if writes_within(ir, facts, owner) {
+		if writes_within(ir, facts, registry, owner) {
 			return true;
 		}
 		at = owner;
@@ -936,10 +945,11 @@ fn enclosing_writes(ir: &Ir, facts: &mut FactCache, pipeline_op: OpId) -> bool {
 /// The answer is read from the ops themselves. A physical op's effects are those of the logical
 /// ops it stands for, which the physical container does not keep, so its effects are not
 /// consulted: an op writes when [`nested::statement_writes`] finds a write by shape or an
-/// expression that may write, or when a physical op changes the session, a grant, a
-/// subscription or a binding, or stands in a write's body ([`changes_state_by_shape`]).
-fn writes_within(ir: &Ir, facts: &mut FactCache, op: OpId) -> bool {
-	if nested::statement_writes(ir, facts, &default_cx(ir), op) {
+/// expression that may write, judged under `registry`, or when a physical op changes the
+/// session, a grant, a subscription or a binding, or stands in a write's body
+/// ([`changes_state_by_shape`]).
+fn writes_within(ir: &Ir, facts: &mut FactCache, registry: &FunctionRegistry, op: OpId) -> bool {
+	if nested::statement_writes(ir, facts, &structural_cx(registry, ir), op) {
 		return true;
 	}
 	let found = std::cell::Cell::new(false);
@@ -1362,12 +1372,24 @@ mod tests {
 				host_blocks: false,
 			};
 			assert_eq!(
-				nested_use(&ir, &mut facts, &nesting, NestedReading::Hedged),
+				nested_use(
+					&ir,
+					&mut facts,
+					crate::exec::ir::analysis::cx::builtin_registry(),
+					&nesting,
+					NestedReading::Hedged
+				),
 				NestedUse::OnceOrProbed,
 				"hedged {strategy:?}"
 			);
 			assert_eq!(
-				nested_use(&ir, &mut facts, &nesting, NestedReading::Strategy),
+				nested_use(
+					&ir,
+					&mut facts,
+					crate::exec::ir::analysis::cx::builtin_registry(),
+					&nesting,
+					NestedReading::Strategy
+				),
 				read,
 				"{strategy:?}"
 			);
@@ -1386,7 +1408,7 @@ mod tests {
 		let dangling = ids.insert(());
 		let mut facts = FactCache::new();
 		assert!(matches!(
-			facts_of(&ir, &mut facts, dangling),
+			facts_of(&ir, &mut facts, crate::exec::ir::analysis::cx::builtin_registry(), dangling),
 			Err(IrError::Stale("not a pipeline"))
 		));
 	}

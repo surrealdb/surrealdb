@@ -67,6 +67,13 @@ impl SkipRevisioned for DatabaseId {
 	fn skip_revisioned<R: std::io::Read>(reader: &mut R) -> Result<(), revision::Error> {
 		<u32 as SkipRevisioned>::skip_revisioned(reader)
 	}
+
+	#[inline]
+	fn skip_revisioned_slice(
+		reader: &mut revision::SliceReader<'_>,
+	) -> Result<(), revision::Error> {
+		<u32 as SkipRevisioned>::skip_revisioned_slice(reader)
+	}
 }
 
 impl revision::WalkRevisioned for DatabaseId {

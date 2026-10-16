@@ -229,8 +229,8 @@ pub enum AccessPath {
 	/// every branch is bitmap-capable when every participating
 	/// index carries doc-IDs, no index covers the ORDER BY, and no
 	/// early-termination (LIMIT without ORDER BY) or VERSION constraints
-	/// apply. Surfaces as a `BitmapResolve` operator over a `BitmapNode`
-	/// tree; the whole WHERE clause stays as the residual filter.
+	/// apply. Lowered to the VM's bitmap scan, which evaluates the plan
+	/// as a [`BitmapPlan`]; the whole WHERE clause stays as the residual filter.
 	///
 	/// `fallback` carries the [`AccessPath::Union`] the OR fusion
 	/// replaced. An OR may not drop an overflowing branch (the residual
@@ -332,7 +332,7 @@ pub struct KnnPrefilterPlan {
 /// Plan-level bitmap candidate expression tree.
 ///
 /// Built by [`crate::exec::index::analysis::IndexAnalyzer::try_bitmap_fusion`]
-/// and converted into `BitmapNode` operators by the SELECT planner. Leaves
+/// and lowered to the VM's bitmap scan, which evaluates it. Leaves
 /// produce a candidate bitmap over the table's shared doc-ID space; inner
 /// nodes compose them with set algebra. `NOT` appears only as the subtract
 /// side of [`BitmapPlan::AndNot`] — never standalone (a standalone NOT would
@@ -2103,7 +2103,7 @@ pub(crate) fn decide_access(
 		{
 			// A conjunct that reads a field the caller may not read is left to the reduced row, as
 			// it is for an index.
-			let conjuncts: Vec<&LogicalExpr> = crate::exec::logical::conjuncts(cond)
+			let conjuncts: Vec<&LogicalExpr> = conjuncts(cond)
 				.into_iter()
 				.filter(|c| !restricted_select.cond_touches(c))
 				.collect();
@@ -2329,17 +2329,37 @@ fn knn_prefilter_plan(
 		analyzer.try_knn_prefilter(&stripped, &|index, col| index.one_entry_per_record(col))?;
 	// The plan indexes the chain of `stripped`, which has no KNN conjunct; its indexes are
 	// restated in the chain of `cond`.
-	let kept: Vec<usize> = crate::exec::logical::conjuncts(cond)
+	let kept: Vec<usize> = conjuncts(cond)
 		.into_iter()
 		.enumerate()
 		.filter(|(_, conjunct)| strip_knn_from_condition(conjunct).is_some())
 		.map(|(at, _)| at)
 		.collect();
-	if kept.len() != crate::exec::logical::conjuncts(&stripped).len() {
+	if kept.len() != conjuncts(&stripped).len() {
 		return None;
 	}
 	plan.covered = plan.covered.iter().map(|at| kept[*at]).collect();
 	Some(plan)
+}
+
+/// The terms of `expr`'s top-level `AND` chain, in evaluation order.
+fn conjuncts(expr: &LogicalExpr) -> Vec<&LogicalExpr> {
+	fn collect<'a>(expr: &'a LogicalExpr, out: &mut Vec<&'a LogicalExpr>) {
+		if let LogicalExpr::Binary {
+			left,
+			op: BinaryOperator::And,
+			right,
+		} = expr
+		{
+			collect(left, out);
+			collect(right, out);
+		} else {
+			out.push(expr);
+		}
+	}
+	let mut out = Vec::new();
+	collect(expr, &mut out);
+	out
 }
 
 #[cfg(test)]

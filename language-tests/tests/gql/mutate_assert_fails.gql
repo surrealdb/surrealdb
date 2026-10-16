@@ -1,0 +1,14 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["gql/_schema.surql", "gql/_mutate_write_paths_import.surql"]
+
+[test]
+reason = "A SET runs the field's ASSERT as the hand-written UPDATE does: a value that fails it errors the statement."
+
+[[test.results]]
+error = "Found -1 for field `age`, with record `person:1`, but field must conform to: $value = NONE OR $value > 0"
+*/
+
+MATCH (n:person WHERE n.name = 'A') SET n.age = -1 RETURN n.age AS age

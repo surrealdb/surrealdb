@@ -1,0 +1,16 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["gql/_schema.surql"]
+
+[test]
+reason = "An INSERT per row creates nodes of a table the database does not define: three rows create three `tag` nodes."
+
+[[test.results]]
+value = "[{ name: 'A' }, { name: 'B' }, { name: 'C' }]"
+*/
+
+MATCH (p:person)
+INSERT (t:tag {name: p.name})
+RETURN t.name AS name ORDER BY name

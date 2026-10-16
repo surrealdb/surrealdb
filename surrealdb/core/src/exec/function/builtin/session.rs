@@ -4,10 +4,10 @@
 
 use anyhow::Result;
 
+use crate::define_context_function;
 use crate::exec::EvalContext;
-use crate::exec::function::FunctionRegistry;
+use crate::exec::function::ScalarFunction;
 use crate::val::Value;
-use crate::{define_context_function, register_functions};
 
 // =========================================================================
 // Implementation functions
@@ -86,16 +86,14 @@ define_context_function!(SessionToken, "session::token", effects: EffectSet::REA
 // Registration
 // =========================================================================
 
-pub fn register(registry: &mut FunctionRegistry) {
-	register_functions!(
-		registry,
-		SessionAc,
-		SessionDb,
-		SessionId,
-		SessionIp,
-		SessionNs,
-		SessionOrigin,
-		SessionRd,
-		SessionToken,
-	);
-}
+/// The `session::*` scalar builtins.
+pub(super) const SCALARS: &[&dyn ScalarFunction] = &[
+	&SessionAc,
+	&SessionDb,
+	&SessionId,
+	&SessionIp,
+	&SessionNs,
+	&SessionOrigin,
+	&SessionRd,
+	&SessionToken,
+];

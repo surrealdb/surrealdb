@@ -57,7 +57,8 @@
 //!
 //! Every migration a 4.x build adds at startup takes the compatible class.
 //! [`judge_ledger`] is the one place that reads the classes. An id this build has a registry row
-//! for is never judged by its class.
+//! for is never judged by its class. [`LEDGER`] lists the same rows as the registry without the
+//! work, so a caller that reads the ledger and runs nothing can pass it in place of [`MIGRATIONS`].
 //!
 //! # Version history
 //!
@@ -220,6 +221,146 @@ pub(crate) static MIGRATIONS: &[Migration] = &[
 	},
 ];
 
+/// The ledger facts of one migration, readable without the work.
+pub(crate) trait LedgerFacts {
+	/// Stable ledger id.
+	fn id(&self) -> u32;
+	/// Human-readable name, recorded in the ledger and in logs.
+	fn name(&self) -> &'static str;
+	/// The first release containing the migration, as `(major, minor, patch)`.
+	fn version(&self) -> (u64, u64, u64);
+	/// Whether the entry is written on demand and never selected, run or baselined by startup.
+	fn on_demand(&self) -> bool;
+}
+
+impl LedgerFacts for Migration {
+	fn id(&self) -> u32 {
+		self.id
+	}
+
+	fn name(&self) -> &'static str {
+		self.name
+	}
+
+	fn version(&self) -> (u64, u64, u64) {
+		self.version
+	}
+
+	fn on_demand(&self) -> bool {
+		self.on_demand
+	}
+}
+
+/// One entry of [`LEDGER`]: the ledger facts of a [`Migration`] without its `run`.
+pub(crate) struct LedgerRow {
+	/// Stable ledger id. Never reused, never renumbered.
+	pub id: u32,
+	/// Human-readable name, recorded in the ledger and in logs.
+	pub name: &'static str,
+	/// The first release containing the migration, as `(major, minor, patch)`.
+	pub version: (u64, u64, u64),
+	/// Whether the entry is written on demand and never selected, run or baselined by startup.
+	pub on_demand: bool,
+}
+
+impl LedgerFacts for LedgerRow {
+	fn id(&self) -> u32 {
+		self.id
+	}
+
+	fn name(&self) -> &'static str {
+		self.name
+	}
+
+	fn version(&self) -> (u64, u64, u64) {
+		self.version
+	}
+
+	fn on_demand(&self) -> bool {
+		self.on_demand
+	}
+}
+
+/// The ledger facts of every entry of [`MIGRATIONS`], without the work. Code that reads or writes
+/// the ledger without running a migration names this table, so it links no migration body. It
+/// lists the same rows as `MIGRATIONS` in the same order.
+pub(crate) static LEDGER: &[LedgerRow] = &[
+	LedgerRow {
+		id: 1,
+		name: "copy sequence definitions out of the table band",
+		version: (3, 3, 0),
+		on_demand: false,
+	},
+	LedgerRow {
+		id: 2,
+		name: "re-key module definitions to their derived name",
+		version: (3, 3, 0),
+		on_demand: false,
+	},
+	LedgerRow {
+		id: 3,
+		name: "rebuild forward doc-ID mappings under an injective key",
+		version: (3, 3, 0),
+		on_demand: false,
+	},
+	LedgerRow {
+		id: 4,
+		name: "re-save field and function kinds stored as an AST as text",
+		version: (3, 4, 0),
+		on_demand: false,
+	},
+	LedgerRow {
+		id: 6,
+		name: "mark the store as opened by a build that reads the v1 record envelope",
+		version: (3, 4, 0),
+		on_demand: false,
+	},
+	LedgerRow {
+		id: RECORD_FORMAT_V1.raw(),
+		name: RECORD_FORMAT_V1_NAME,
+		version: RECORD_FORMAT_V1_VERSION,
+		on_demand: true,
+	},
+	LedgerRow {
+		id: STORE_DEFAULTS.raw(),
+		name: "record the database defaults of the release that created the datastore",
+		version: (3, 4, 0),
+		on_demand: false,
+	},
+];
+
+/// Checks that a store an edge build attaches needs nothing that [`Datastore::check_version`]
+/// does: no migration to run, no stamp to advance, no feature level to raise.
+///
+/// A store this start created is baselined and stamped as [`run`] does for a new store. Any other
+/// store must already be at this release with every migration applied, or the attach fails with
+/// [`DatastoreError::NotAttachable`]. Names [`LEDGER`] only, so it links no migration body.
+pub(crate) async fn attach(ds: &Datastore, is_new: bool) -> Result<()> {
+	let current = StorageVersion::current();
+	let stored = ds.storage_version().await?;
+	if is_new && stored.is_none() {
+		record_baseline(ds, LEDGER).await?;
+		return advance_stamp(ds, None, &current).await;
+	}
+
+	let pending = unapplied(ds, &candidate_ids(LEDGER, &current)).await?;
+	if !pending.is_empty() {
+		bail!(DatastoreError::NotAttachable {
+			stored: stored.as_ref().map(|s| s.to_string()).unwrap_or_else(|| "unknown".to_owned()),
+			running: current.to_string(),
+			reason: format!("data migrations have not run: {}", describe(LEDGER, &pending)),
+		});
+	}
+	match &stored {
+		Some(s) if s.triple() == current.triple() => Ok(()),
+		_ => bail!(DatastoreError::NotAttachable {
+			stored: stored.as_ref().map(|s| s.to_string()).unwrap_or_else(|| "unknown".to_owned()),
+			running: current.to_string(),
+			reason: "the store's version stamp is not this release".into(),
+		}),
+	}
+}
+
 /// The entry that records the database defaults of a datastore an earlier release created. It
 /// is compatible: a release that does not know it ignores the defaults it records.
 pub(crate) const STORE_DEFAULTS: LedgerId = LedgerId::new(LedgerClass::Compatible, 8);
@@ -303,8 +444,8 @@ async fn run_with(
 /// migration exists to repair, so the ledger starts full rather than empty. An
 /// on-demand entry describes bytes the store does not hold yet, so it is not
 /// recorded.
-async fn record_baseline(ds: &Datastore, registry: &[Migration]) -> Result<()> {
-	for migration in registry.iter().filter(|m| !m.on_demand) {
+async fn record_baseline<M: LedgerFacts>(ds: &Datastore, registry: &[M]) -> Result<()> {
+	for migration in registry.iter().filter(|m| !m.on_demand()) {
 		record_applied(ds, migration).await?;
 	}
 	Ok(())
@@ -332,9 +473,9 @@ pub(crate) enum LedgerVerdict {
 /// decode still yields its id: a record written in a revision this build cannot read is the
 /// strongest possible evidence that the datastore has moved past it, so it must not turn into a
 /// decode error.
-pub(crate) async fn ledger_verdict(
+pub(crate) async fn ledger_verdict<M: LedgerFacts>(
 	ds: &Datastore,
-	registry: &[Migration],
+	registry: &[M],
 ) -> Result<LedgerVerdict> {
 	let entries = ds.applied_migration_ids().await?.into_iter().map(|(id, described)| {
 		let text = match described {
@@ -359,15 +500,15 @@ pub(crate) async fn ledger_verdict(
 /// An incompatible or reserved-class entry makes the verdict [`LedgerVerdict::Refused`], whatever
 /// else the ledger holds; failing that, a read-only compatible entry makes it
 /// [`LedgerVerdict::ReadOnly`]. Entries that are compatible are logged and otherwise ignored.
-pub(crate) fn judge_ledger(
+pub(crate) fn judge_ledger<M: LedgerFacts>(
 	entries: impl IntoIterator<Item = (u32, String)>,
-	registry: &[Migration],
+	registry: &[M],
 ) -> LedgerVerdict {
 	let mut refused = Vec::new();
 	let mut read_only = Vec::new();
 	let mut ignored = Vec::new();
 	for (id, text) in entries {
-		if registry.iter().any(|m| m.id == id) {
+		if registry.iter().any(|m| m.id() == id) {
 			continue;
 		}
 		match LedgerId::from_raw(id).class() {
@@ -457,11 +598,11 @@ async fn check_downgrade(
 /// carries that branch's version, so a store already stamped past it would skip
 /// it forever. What keeps a migration from running twice, and what keeps a
 /// newly created datastore off the historical ones, is the ledger.
-fn candidate_ids(registry: &[Migration], current: &StorageVersion) -> Vec<u32> {
+fn candidate_ids<M: LedgerFacts>(registry: &[M], current: &StorageVersion) -> Vec<u32> {
 	registry
 		.iter()
-		.filter(|m| !m.on_demand && m.version <= current.triple())
-		.map(|m| m.id)
+		.filter(|m| !m.on_demand() && m.version() <= current.triple())
+		.map(|m| m.id())
 		.collect()
 }
 
@@ -657,11 +798,15 @@ async fn clear_lease_of_finished_holder(ds: &Datastore) -> Result<()> {
 ///
 /// A lost race here is benign: another node applied the same migration and
 /// recorded it, which is the state this call was trying to reach.
-async fn record_applied(ds: &Datastore, migration: &Migration) -> Result<()> {
-	let record =
-		MigrationRecord::applied(migration.name, migration.version, ds.id(), ds.clock_now().value);
+async fn record_applied<M: LedgerFacts>(ds: &Datastore, migration: &M) -> Result<()> {
+	let record = MigrationRecord::applied(
+		migration.name(),
+		migration.version(),
+		ds.id(),
+		ds.clock_now().value,
+	);
 	let txn = ds.transaction(TransactionType::Write).await?;
-	let key = MigrationKey::new(migration.id);
+	let key = MigrationKey::new(migration.id());
 	match run!(txn, txn.set_key(&key, &record).await) {
 		Err(e) if lost_the_race(&e) => Ok(()),
 		other => other,
@@ -867,10 +1012,10 @@ pub(crate) fn release_of(version: (u64, u64, u64)) -> Release {
 }
 
 /// Names the given migrations for an operator-facing message.
-fn describe(registry: &[Migration], ids: &[u32]) -> String {
+fn describe<M: LedgerFacts>(registry: &[M], ids: &[u32]) -> String {
 	ids.iter()
-		.map(|id| match registry.iter().find(|m| m.id == *id) {
-			Some(m) => format!("{} ({})", m.name, id),
+		.map(|id| match registry.iter().find(|m| m.id() == *id) {
+			Some(m) => format!("{} ({})", m.name(), id),
 			None => id.to_string(),
 		})
 		.collect::<Vec<_>>()

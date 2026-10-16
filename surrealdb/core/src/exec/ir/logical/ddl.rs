@@ -42,6 +42,7 @@ use crate::exec::ir::iface::statements::{
 	PermissionShape, PermissionsShape, RegionSlot, TemplateHole,
 };
 use crate::exec::ir::op_kind::OpKind;
+use crate::exec::vm::codec::Codec;
 use crate::exec::vm::payload::Refusal;
 use crate::expr::logical::LogicalDdlStatement;
 use crate::expr::permission::{Permission, Permissions};
@@ -517,12 +518,16 @@ pub(crate) struct DdlPlan<'e> {
 }
 
 /// Plans `statement`. `checks` is what the statement checks against the catalog (see
-/// [`checks_of`]).
-pub(crate) fn plan(statement: &LogicalDdlStatement, checks: DdlChecks) -> Planned<DdlPlan<'_>> {
+/// [`checks_of`]), and `codec` reads the definitions the statement templates.
+pub(crate) fn plan<'e>(
+	statement: &'e LogicalDdlStatement,
+	checks: DdlChecks,
+	codec: &'static Codec,
+) -> Planned<DdlPlan<'e>> {
 	match statement {
-		LogicalDdlStatement::Define(define) => plan_define(define, checks),
+		LogicalDdlStatement::Define(define) => plan_define(define, checks, codec),
 		LogicalDdlStatement::Remove(remove) => plan_remove(remove, checks),
-		LogicalDdlStatement::Alter(alter) => plan_alter(alter, checks),
+		LogicalDdlStatement::Alter(alter) => plan_alter(alter, checks, codec),
 		LogicalDdlStatement::Rebuild(rebuild) => plan_rebuild(rebuild),
 	}
 }
@@ -811,11 +816,24 @@ pub(super) fn literal_value(expr: &Expr) -> Option<Value> {
 }
 
 /// A stored definition as the VM's codec reads it.
-pub(super) fn stored_value<T: crate::key::KVValue>(value: &T, ty: &'static str) -> Planned<Value> {
-	let bytes = value
-		.kv_encode_value()
-		.map_err(|_| PlanError::Invariant(format!("a {ty} did not encode")))?;
-	crate::exec::vm::codec::decode(ty, &bytes)
+///
+/// `codec` is the one of the entry the statement is bound for: a kind it leaves out is not read.
+pub(super) fn stored_value<T: crate::key::KVValue>(
+	codec: &'static Codec,
+	value: &T,
+	ty: &'static str,
+) -> Planned<Value> {
+	decode_stored(codec, value.kv_encode_value(), ty)
+}
+
+/// [`stored_value`] over the bytes the definition encoded to.
+fn decode_stored(
+	codec: &'static Codec,
+	bytes: anyhow::Result<Vec<u8>>,
+	ty: &'static str,
+) -> Planned<Value> {
+	let bytes = bytes.map_err(|_| PlanError::Invariant(format!("a {ty} did not encode")))?;
+	crate::exec::vm::codec::decode(codec, ty, &bytes)
 		.map_err(|_| PlanError::Invariant(format!("a {ty} the codec does not read")))
 }
 
@@ -978,8 +996,14 @@ pub(crate) fn field_definition_of(
 ) -> Result<crate::catalog::FieldDefinition, IrError> {
 	use crate::catalog::FromStored as _;
 	use crate::key::KVValue as _;
-	let bytes = crate::exec::vm::codec::encode("StoredFieldDefinition", value)
-		.map_err(|_| IrError::Stale("ir::logical::ddl: a field template that does not encode"))?;
+	// A field definition is a kind every entry serves, so it is written through its own row's
+	// function and names no catalog table.
+	let bytes = crate::catalog::stored::vtable::encode_at::<crate::catalog::StoredFieldDefinition>(
+		value,
+		&surrealdb_kvs::EncodeContext::LEGACY,
+	)
+	.map(|encoded| encoded.bytes)
+	.map_err(|_| IrError::Stale("ir::logical::ddl: a field template that does not encode"))?;
 	let stored = crate::catalog::StoredFieldDefinition::kv_decode_value(&bytes, ())
 		.map_err(|_| IrError::Stale("ir::logical::ddl: a field template that does not decode"))?;
 	crate::catalog::FieldDefinition::from_stored(&stored)

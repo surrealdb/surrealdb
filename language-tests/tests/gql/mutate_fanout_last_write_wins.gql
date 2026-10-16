@@ -1,0 +1,15 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["gql/_schema.surql"]
+
+[test]
+reason = "Two rows bind the same record with different SET values: the writes apply in row order, so the last wins, and each row carries the image of its own write. person:1 is reached from B and from C."
+
+[[test.results]]
+value = "[{ a: 'A', b: 'B', seen_from: 'A' }, { a: 'B', b: 'A', seen_from: 'B' }, { a: 'B', b: 'C', seen_from: 'B' }, { a: 'C', b: 'A', seen_from: 'C' }]"
+*/
+
+MATCH (a:person)-[:knows]->(b:person) SET b.seen_from = a.name
+RETURN a.name AS a, b.name AS b, b.seen_from AS seen_from ORDER BY a, b

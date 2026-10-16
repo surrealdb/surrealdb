@@ -29,6 +29,7 @@
 
 use smallvec::{SmallVec, smallvec};
 
+#[cfg(test)]
 use super::cx::default_cx;
 use super::{phys_effects, types};
 use crate::exec::ir::core::facts::{FactCache, OpFacts};
@@ -56,6 +57,7 @@ const MAX_CLOSURE_HOPS: usize = 64;
 /// context.
 ///
 /// An op nothing is known about answers [`OpEffects::top`].
+#[cfg(test)]
 pub(crate) fn of(ir: &Ir, facts: &mut FactCache, op: OpId) -> OpEffects {
 	of_with(ir, facts, &default_cx(ir), op)
 }

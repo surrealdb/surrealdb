@@ -117,6 +117,7 @@ use crate::dbs::{Capabilities, Force, Options};
 use crate::exec::config::ExecConfig;
 use crate::exec::function::FunctionRegistry;
 use crate::exec::index::access_path;
+use crate::exec::ir::analysis::cx::structural_cx;
 use crate::exec::ir::analysis::effects;
 use crate::exec::ir::build::phys::index_ref;
 use crate::exec::ir::core::facts::FactCache;
@@ -134,6 +135,7 @@ use crate::exec::ir::logical::verify::loop_body_args;
 use crate::exec::ir::op_kind::OpKind;
 use crate::exec::ir::phys::access::TableAnswers;
 use crate::exec::ir::phys::ops::PhysOp;
+use crate::exec::surface::Surface;
 use crate::exec::{AccessMode, BoxFut};
 use crate::expr::logical::{EffectSet, LogicalOp};
 use crate::expr::paths::{DB, NS};
@@ -363,13 +365,15 @@ const CHANGES_FOR_LATER: EffectSet = EffectSet::WRITES_DATA
 /// Whether the ops of the statement region `region` may change the catalog the statements after
 /// it are planned against ([`CHANGES_FOR_LATER`]). A `LIVE` or `ACCESS` statement of any form
 /// counts as storing whatever its effects are.
-fn may_change_catalog(ir: &Ir, region: RegionId) -> bool {
+fn may_change_catalog(ir: &Ir, registry: &FunctionRegistry, region: RegionId) -> bool {
 	let mut facts = FactCache::new();
 	ops_in(ir, region).any(|op| {
 		matches!(
 			ir.op(op).map(|data| &data.kind),
 			Some(OpKind::Phys(PhysOp::Live(_) | PhysOp::Access(_)))
-		) || effects::of(ir, &mut facts, op).set.intersects(CHANGES_FOR_LATER)
+		) || effects::of_with(ir, &mut facts, &structural_cx(registry, ir), op)
+			.set
+			.intersects(CHANGES_FOR_LATER)
 	})
 }
 
@@ -478,12 +482,16 @@ impl SharedIndexes {
 	///
 	/// An index already recorded under the same reference is left as it is. A key recorded for
 	/// another definition is a late bind.
-	pub(crate) fn learn(&self, answers: &TableAnswers) -> Result<(), NotCovered> {
+	pub(crate) fn learn(
+		&self,
+		answers: &TableAnswers,
+		registry: &FunctionRegistry,
+	) -> Result<(), NotCovered> {
 		let mut known = self
 			.known
 			.write()
 			.map_err(|_| NotCovered::internal("the index references of a compile are poisoned"))?;
-		for reference in answers.index_refs() {
+		for reference in answers.index_refs(registry) {
 			let key = index_ref(&reference);
 			match known.get(&key) {
 				Some(held) if *held == reference => {}
@@ -525,6 +533,10 @@ pub(crate) struct CompileEnv<'a> {
 	/// Whether an `EXPLAIN ANALYZE` the units render leaves out elapsed time and batch counts
 	/// ([`LowerCx::redact_volatile`]).
 	pub(crate) redact_volatile: bool,
+	/// The statement families the request's entry serves: the units are lowered under the same
+	/// surface as the request's own statements, so stored code is refused a statement the entry
+	/// does not serve ([`LowerCx::schema`]).
+	pub(crate) surface: &'static Surface,
 }
 
 impl<'a> CompileEnv<'a> {
@@ -540,7 +552,9 @@ impl<'a> CompileEnv<'a> {
 		.with_reads_checked(self.reads_checked)
 		.with_indexes(self.indexes)
 		.with_limits(LowerLimits::of(self.config))
-		.with_redact_volatile(self.redact_volatile);
+		.with_redact_volatile(self.redact_volatile)
+		.with_schema(self.surface.schema_lowering)
+		.with_explain(self.surface.explain_lowering);
 		match self.compiled {
 			Some(compiled) => cx.with_compiled(compiled),
 			None => cx,
@@ -997,7 +1011,8 @@ impl<'c, P: UnitPlanner, L: Lower> Compiler<'c, P, L> {
 						false => None,
 					};
 					session.after(slot, constant);
-					changed |= planning && may_change_catalog(request, *statement);
+					changed |=
+						planning && may_change_catalog(request, self.cx.registry(), *statement);
 				}
 				Slot::Run {
 					statement,
@@ -1011,7 +1026,8 @@ impl<'c, P: UnitPlanner, L: Lower> Compiler<'c, P, L> {
 						&mut statements,
 					)
 					.await?;
-					changed |= planning && may_change_catalog(request, *statement);
+					changed |=
+						planning && may_change_catalog(request, self.cx.registry(), *statement);
 				}
 			}
 		}
@@ -2709,9 +2725,13 @@ mod tests {
 		let indexes = SharedIndexes::new();
 		assert!(indexes.resolve(&reference_of("t", "by_a", 0)).is_none());
 		let answers = indexed("t", "by_a", &["a"]);
-		indexes.learn(&answers).expect("the index is learned");
+		indexes
+			.learn(&answers, crate::exec::ir::analysis::cx::builtin_registry())
+			.expect("the index is learned");
 		// The same container planned twice agrees with itself.
-		indexes.learn(&answers).expect("the same reference is learned again");
+		indexes
+			.learn(&answers, crate::exec::ir::analysis::cx::builtin_registry())
+			.expect("the same reference is learned again");
 		let resolved = indexes.resolve(&reference_of("t", "by_a", 0)).expect("the index resolves");
 		assert_eq!(resolved.definition().name.as_str(), "by_a");
 		assert!(indexes.resolve(&reference_of("t", "by_b", 0)).is_none());
@@ -2722,9 +2742,11 @@ mod tests {
 	#[test]
 	fn two_containers_that_resolve_an_index_differently_are_a_late_bind() {
 		let indexes = SharedIndexes::new();
-		indexes.learn(&indexed("t", "by_a", &["a"])).expect("the index is learned");
+		indexes
+			.learn(&indexed("t", "by_a", &["a"]), crate::exec::ir::analysis::cx::builtin_registry())
+			.expect("the index is learned");
 		let conflict = indexes
-			.learn(&indexed("t", "by_a", &["b"]))
+			.learn(&indexed("t", "by_a", &["b"]), crate::exec::ir::analysis::cx::builtin_registry())
 			.expect_err("another definition under the same reference cannot share the resolver");
 		assert_eq!(conflict.kind, NotCoveredKind::LateBind);
 		// What was learned first still resolves.
@@ -2748,8 +2770,12 @@ mod tests {
 		}
 		.with_indexes(definitions());
 		let indexes = SharedIndexes::new();
-		indexes.learn(&current).expect("the current read is learned");
-		indexes.learn(&versioned).expect("the versioned read is learned beside it");
+		indexes
+			.learn(&current, crate::exec::ir::analysis::cx::builtin_registry())
+			.expect("the current read is learned");
+		indexes
+			.learn(&versioned, crate::exec::ir::analysis::cx::builtin_registry())
+			.expect("the versioned read is learned beside it");
 		let now = indexes.resolve(&reference_of("t", "search", 1)).expect("the current read");
 		let then = indexes.resolve(&reference_of("t", "search", 0)).expect("the versioned read");
 		assert_eq!((now.idx, then.idx), (1, 0));
@@ -2761,7 +2787,9 @@ mod tests {
 	#[test]
 	fn a_compile_over_an_environment_lowers_with_its_indexes_and_limits() {
 		let indexes = SharedIndexes::new();
-		indexes.learn(&indexed("t", "by_a", &["a"])).expect("the index is learned");
+		indexes
+			.learn(&indexed("t", "by_a", &["a"]), crate::exec::ir::analysis::cx::builtin_registry())
+			.expect("the index is learned");
 		let config = ExecConfig {
 			generation_allocation_limit: 7,
 			..ExecConfig::default()
@@ -2777,6 +2805,7 @@ mod tests {
 			compiled: None,
 			session: session(),
 			redact_volatile: false,
+			surface: &crate::exec::surface::FULL,
 		};
 		let cx = env.context();
 		assert_eq!(cx.limits(), LowerLimits::of(&config));

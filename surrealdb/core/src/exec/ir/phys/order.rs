@@ -19,7 +19,9 @@
 use smallvec::SmallVec;
 
 use super::ops::PhysOp;
+use crate::exec::function::FunctionRegistry;
 use crate::exec::index::key_range::DeliveredKeyOrder;
+use crate::exec::ir::analysis::cx::structural_cx;
 use crate::exec::ir::analysis::{effects, fallibility};
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::Ir;
@@ -240,20 +242,26 @@ pub(crate) fn total_order_for(ir: &Ir, source: OpId) -> bool {
 /// order like a crossed op; the last key reads the record id and fails on nothing. Deterministic
 /// is judged with reads of written data counted, so the answer holds whatever the statement
 /// writes.
-pub(crate) fn order_change_admissible(ir: &Ir, facts: &mut FactCache, source: OpId) -> bool {
+pub(crate) fn order_change_admissible(
+	ir: &Ir,
+	facts: &mut FactCache,
+	registry: &FunctionRegistry,
+	source: OpId,
+) -> bool {
 	let Some(crossed) = licence(ir, source) else {
 		return false;
 	};
+	let under = structural_cx(registry, ir);
 	crossed.into_iter().all(|op| {
-		guards::infallible(fallibility::of(ir, facts, op))
-			&& guards::deterministic(effects::of(ir, facts, op).determinism, true)
+		guards::infallible(fallibility::of_with(ir, facts, &under, op))
+			&& guards::deterministic(effects::of_with(ir, facts, &under, op).determinism, true)
 	})
 }
 
 /// The ops that run per row in delivery order before a sort with a total key, or `None` when
 /// `source` is not a table read or no such sort is the first order-sensitive consumer: the ops
 /// the rows of `source` cross, then the top-level ops of the sort's key regions before the last.
-fn licence(ir: &Ir, source: OpId) -> Option<SmallVec<[OpId; 4]>> {
+fn licence(ir: &Ir, source: OpId) -> Option<SmallVec<[OpId; 8]>> {
 	let data = ir.op(source)?;
 	let OpKind::Logical(LogOp::Source(attrs)) = &data.kind else {
 		return None;
@@ -261,7 +269,7 @@ fn licence(ir: &Ir, source: OpId) -> Option<SmallVec<[OpId; 4]>> {
 	if !matches!(attrs.source_ref, SourceRefShape::Table(_)) {
 		return None;
 	}
-	let mut crossed: SmallVec<[OpId; 4]> = SmallVec::new();
+	let mut crossed: SmallVec<[OpId; 8]> = SmallVec::new();
 	let mut rows = *data.results.first()?;
 	loop {
 		let [only] = ir.uses(rows) else {
@@ -756,7 +764,12 @@ mod tests {
 	fn a_table_ordered_by_its_id_is_total() {
 		let (ir, source) = sorted(table_source(), &[(KeyBody::Field("id"), plain())]);
 		assert!(total_order_for(&ir, source));
-		assert!(order_change_admissible(&ir, &mut FactCache::new(), source));
+		assert!(order_change_admissible(
+			&ir,
+			&mut FactCache::new(),
+			crate::exec::ir::analysis::cx::builtin_registry(),
+			source
+		));
 	}
 
 	#[test]
@@ -788,7 +801,12 @@ mod tests {
 			},
 			&[(KeyBody::Field("id"), plain())],
 		);
-		assert!(!order_change_admissible(&ir, &mut FactCache::new(), source));
+		assert!(!order_change_admissible(
+			&ir,
+			&mut FactCache::new(),
+			crate::exec::ir::analysis::cx::builtin_registry(),
+			source
+		));
 	}
 
 	#[test]
@@ -822,7 +840,12 @@ mod tests {
 			&[(KeyBody::Field("name"), plain()), (KeyBody::Field("id"), plain())],
 		);
 		assert!(total_order_for(&ir, source));
-		assert!(!order_change_admissible(&ir, &mut FactCache::new(), source));
+		assert!(!order_change_admissible(
+			&ir,
+			&mut FactCache::new(),
+			crate::exec::ir::analysis::cx::builtin_registry(),
+			source
+		));
 	}
 
 	#[test]
@@ -830,7 +853,12 @@ mod tests {
 		let (ir, source) =
 			sorted(table_source(), &[(KeyBody::Literal, plain()), (KeyBody::Field("id"), plain())]);
 		assert!(total_order_for(&ir, source));
-		assert!(order_change_admissible(&ir, &mut FactCache::new(), source));
+		assert!(order_change_admissible(
+			&ir,
+			&mut FactCache::new(),
+			crate::exec::ir::analysis::cx::builtin_registry(),
+			source
+		));
 	}
 
 	#[test]
@@ -1004,6 +1032,11 @@ mod bound_tests {
 		let source = source(&ir);
 		assert!(total_order_for(&ir, source));
 		let mut facts = FactCache::new();
-		assert!(!order_change_admissible(&ir, &mut facts, source));
+		assert!(!order_change_admissible(
+			&ir,
+			&mut facts,
+			crate::exec::ir::analysis::cx::builtin_registry(),
+			source
+		));
 	}
 }

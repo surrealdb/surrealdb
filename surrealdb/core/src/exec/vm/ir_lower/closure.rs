@@ -446,7 +446,8 @@ mod tests {
 	/// and what the lowering needs.
 	fn lower_value(ir: &Ir, value: ValueId) -> Result<(Operand, Program, Needs), IrError> {
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, ir, crate::exec::ir::analysis::cx::builtin_registry());
 		let operand = lowerer.value(value)?;
 		let needs = lowerer.needs();
 		em.emit(Instr::EndRow);
@@ -614,7 +615,8 @@ mod tests {
 		let mut b = Builder::new();
 		let (_, result) = element_filter_of_a_field(&mut b);
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::for_fold(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::for_fold(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		assert!(matches!(
 			lowerer.value(result),
 			Err(IrError::Invariant {
@@ -824,7 +826,8 @@ mod tests {
 		let callee = b.literal(crate::val::Value::None);
 		let call = invoke_of(&mut b, callee, &[]);
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::for_fold(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::for_fold(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		assert!(matches!(
 			lowerer.value(call),
 			Err(IrError::Invariant {
@@ -960,7 +963,8 @@ mod tests {
 		assert!(matches!(lower_value(&b.ir, made), Err(IrError::Invariant { .. })));
 		// The plan-time folder runs no closure.
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::for_fold(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::for_fold(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		assert!(matches!(
 			lowerer.value(made),
 			Err(IrError::Invariant {
@@ -1296,7 +1300,8 @@ mod tests {
 		let mut b = Builder::new();
 		let call = script(&mut b, "return 1;", &[]);
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::for_fold(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::for_fold(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		assert!(matches!(
 			lowerer.value(call),
 			Err(IrError::Invariant {

@@ -5,9 +5,7 @@ use smallvec::SmallVec;
 use surrealdb_strand::Strand;
 
 use super::driver::{LoCx, LoPass, NoObserver, PassConfig, PassReport};
-use super::perm_where::{
-	PushBelowLayer, PushBelowPermission, SpecialiseGuards, guarded_names, reads_row_by_field,
-};
+use super::perm_where::{PushBelowLayer, PushBelowPermission, SpecialiseGuards};
 use super::tests_support::{Env, create, empty_ir, literal, ops_of_tag};
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::Ir;
@@ -275,50 +273,12 @@ async fn push_below_permission_refused_for_a_fallible_conjunct() {
 	assert_eq!(report.rewrites, 0);
 }
 
-/// A layer whose per-row work may fail keeps the filter above it: rows the conjunct rejects would
-/// no longer raise.
-#[tokio::test]
-async fn push_below_layer_refused_when_a_guard_may_raise() {
-	let mut ir = empty_ir();
-	let mut facts = FactCache::new();
-	let at = InsertPoint::End(top_block(&ir));
-	let mut rw = Rewriter::new(&mut ir, &mut facts);
-	let (_, row) = create(&mut rw, at, literal(1), &[], 1);
-	let attrs = ProjectAttrs {
-		fields: FieldsShape::Value {
-			alias: None,
-		},
-		layer: true,
-		omit: 0,
-		names: Vec::new(),
-		computed: Vec::new(),
-		sort_keys: Vec::new(),
-	};
-	let (layer, delivered) =
-		create(&mut rw, at, OpKind::Logical(LogOp::Project(Box::new(attrs))), &[row[0]], 1);
-	let (_, guard) = rw
-		.create_region(layer, RegionKind::PermissionFrame, &ISOLATED_ARGS)
-		.expect("the guard region is created");
-	let verdict = fallible(&mut rw, InsertPoint::End(guard));
-	create(&mut rw, InsertPoint::End(guard), yield_op(), &[verdict], 0);
-	where_filter(&mut rw, at, delivered[0], &pure_conjunct);
-
-	let report = run(&PushBelowLayer, &mut ir, &PassConfig::ALL_ON).await;
-	assert_eq!(report.rewrites, 0);
-	assert_eq!(ops_of_tag(&ir, FILTER).len(), 1);
-	assert_eq!(
-		ir.op(layer).expect("the layer stays").operands.as_slice(),
-		[row[0]],
-		"the layer still reads the row"
-	);
-}
-
 /// Each pass is switched by its own flag of the configuration.
 #[tokio::test]
 async fn the_passes_follow_their_switches() {
 	let cfg = PassConfig::RELEASE;
 	assert!(SpecialiseGuards.enabled(&cfg));
-	assert!(!PushBelowLayer.enabled(&cfg));
+	assert!(PushBelowLayer.enabled(&cfg));
 	assert!(!PushBelowPermission.enabled(&cfg));
 	assert!(PushBelowLayer.enabled(&PassConfig::ALL_ON));
 	assert!(PushBelowPermission.enabled(&PassConfig::ALL_ON));
@@ -446,46 +406,4 @@ async fn specialise_guards_matches_nothing_without_guards() {
 		ops_of_tag(&ir, PERMISSION).len(),
 	]);
 	assert_eq!(before, after);
-}
-
-/// A layer that guards and computes a column names it, and a filter's read of that column does not
-/// move below the layer; a read of any other field does.
-#[test]
-fn a_guarded_column_is_not_read_below_its_layer() {
-	let mut ir = empty_ir();
-	let mut facts = FactCache::new();
-	let (filter, yielded, _) = guarded_layer(&mut ir, &mut facts, true);
-	let layer = definer(&ir, ir.op(filter).expect("the filter exists").operands[0]);
-	let guarded = guarded_names(&ir, layer).expect("the layer's columns are named");
-	assert_eq!(guarded, ["a"]);
-
-	let clause = ir.op(filter).expect("the filter exists").regions[0];
-	let block = ir.region(clause).expect("the region exists").blocks[0];
-	let row = arg(&ir, block, 0);
-	let read = definer(&ir, ir.op(yielded).expect("the yield exists").operands[0]);
-	assert!(!reads_row_by_field(&ir, row, &[read], &guarded));
-	assert!(reads_row_by_field(&ir, row, &[read], &["b".to_owned()]));
-}
-
-/// A layer without a guard or a field frame guards no column.
-#[test]
-fn a_layer_without_guards_names_no_guarded_column() {
-	let mut ir = empty_ir();
-	let mut facts = FactCache::new();
-	let at = InsertPoint::End(top_block(&ir));
-	let mut rw = Rewriter::new(&mut ir, &mut facts);
-	let (_, row) = create(&mut rw, at, literal(1), &[], 1);
-	let attrs = ProjectAttrs {
-		fields: FieldsShape::Value {
-			alias: None,
-		},
-		layer: true,
-		omit: 0,
-		names: Vec::new(),
-		computed: Vec::new(),
-		sort_keys: Vec::new(),
-	};
-	let (layer, _) =
-		create(&mut rw, at, OpKind::Logical(LogOp::Project(Box::new(attrs))), &[row[0]], 1);
-	assert_eq!(guarded_names(&ir, layer), Some(Vec::new()));
 }

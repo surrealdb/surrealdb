@@ -27,7 +27,7 @@ value = '''
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    Filter [ctx: Db] [predicate: false]
+    Filter [ctx: Db] [once: math::floor(1.5f) INSIDE []]
         Union [ctx: Db]
 ''''
 */

@@ -4,13 +4,14 @@ use std::time::Duration;
 
 #[cfg(feature = "http")]
 use anyhow::Context as _;
-use anyhow::Result;
+use anyhow::{Result, bail};
 use arc_swap::ArcSwap;
 use async_channel::Sender;
 use surrealdb_cnf::ConfigMap;
 use surrealdb_cnf::dynamic::DynamicConfiguration;
 use surrealdb_datastore::FeatureLevelCell;
 use surrealdb_kvs::Release;
+use surrealdb_kvs::api::BoxFut;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -26,7 +27,7 @@ use crate::http::HttpClient;
 use crate::idx::trees::store::IndexStores;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::index::IndexBuilder;
-use crate::kvs::migration::{self, LedgerVerdict, MIGRATIONS};
+use crate::kvs::migration::{self, LEDGER, LedgerVerdict};
 use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
 use crate::kvs::{
@@ -99,6 +100,14 @@ pub struct Builder {
 	#[cfg(feature = "surrealism")]
 	lazy_extensions: bool,
 	observer: Arc<dyn ExecutionObserver>,
+	/// Builds the datastore's function registry: the set of builtins the
+	/// datastore resolves a name against. A constructor names the set it
+	/// serves, so a datastore built for a narrower set never names the rest.
+	functions: fn() -> FunctionRegistry,
+	/// Checks a store before the datastore is handed out, in place of the startup that
+	/// `check_version` and the maintenance tasks do. A constructor names the check it serves.
+	/// `None` leaves that startup to them.
+	attach: Option<AttachFn>,
 }
 
 impl Default for Builder {
@@ -107,8 +116,33 @@ impl Default for Builder {
 	}
 }
 
+/// A check of a store, run before the datastore is handed out.
+type AttachFn = for<'a> fn(&'a Datastore, LedgerVerdict) -> BoxFut<'a, Result<()>>;
+
+/// The attach check of [`Builder::for_edge`]: a function the edge constructor alone names, so a
+/// build that never constructs an edge datastore links none of it.
+fn attach_edge(ds: &Datastore, verdict: LedgerVerdict) -> BoxFut<'_, Result<()>> {
+	Box::pin(ds.attach_edge(verdict))
+}
+
 impl Builder {
 	pub fn new() -> Self {
+		Self::with_functions(FunctionRegistry::with_builtins)
+	}
+
+	/// A builder for a datastore served through [`Datastore::execute_edge`]:
+	/// its function registry holds the edge builtins alone, it starts no
+	/// maintenance tasks, and it attaches only a store that is new or already
+	/// at this release with its migrations applied (see [`Datastore::attach_edge`]);
+	/// it never runs migrations or raises the feature level.
+	pub fn for_edge() -> Self {
+		let mut builder =
+			Self::with_functions(FunctionRegistry::with_edge_builtins).without_maintenance_tasks();
+		builder.attach = Some(attach_edge);
+		builder
+	}
+
+	fn with_functions(functions: fn() -> FunctionRegistry) -> Self {
 		Builder {
 			capabilities: Default::default(),
 			shutdown: CancellationToken::new(),
@@ -138,6 +172,8 @@ impl Builder {
 			#[cfg(feature = "surrealism")]
 			lazy_extensions: false,
 			observer: Arc::new(NoopObserver),
+			functions,
+			attach: None,
 		}
 	}
 
@@ -485,6 +521,12 @@ impl Builder {
 		// Read before `self` is partially moved below.
 		let maintenance = self.maintenance;
 		let startup_transactions = self.startup_transactions;
+		let attach = self.attach;
+		if attach.is_some() && !startup_transactions {
+			bail!(
+				"an edge datastore attaches its store while it is built, so it cannot defer its startup transactions"
+			);
+		}
 		let options = self.engine_options;
 		let shutdown = self.shutdown.clone();
 		let observer = self.observer;
@@ -514,7 +556,7 @@ impl Builder {
 		let id = self.id.unwrap_or_else(Uuid::new_v4);
 		// One registry per datastore, shared by the executor and by the index
 		// builder, so a build resolves the same names a query does.
-		let function_registry = Arc::new(FunctionRegistry::with_builtins());
+		let function_registry = Arc::new((self.functions)());
 		let capabilities = self.capabilities;
 		let dynamic_configuration = DynamicConfiguration::default();
 		dynamic_configuration.set_query_timeout(self.query_timeout);
@@ -566,6 +608,9 @@ impl Builder {
 			function_registry,
 			live_units: Arc::default(),
 			compiled_units: Arc::new(crate::exec::vm::units::CompiledUnits::for_config(
+				&config.exec,
+			)),
+			edge_compiled_units: Arc::new(crate::exec::vm::units::CompiledUnits::for_config(
 				&config.exec,
 			)),
 			buckets,
@@ -627,9 +672,13 @@ impl Builder {
 		// maintain still reads. The read waits out a backend that is still
 		// forming, as the other startup steps do.
 		let verdict = Datastore::retry_bootstrap("Read ledger", || {
-			migration::ledger_verdict(&datastore, MIGRATIONS)
+			migration::ledger_verdict(&datastore, LEDGER)
 		})
 		.await?;
+		if let Some(attach) = attach {
+			attach(&datastore, verdict).await?;
+			return Ok(datastore);
+		}
 		match verdict {
 			LedgerVerdict::Open => {}
 			LedgerVerdict::ReadOnly {

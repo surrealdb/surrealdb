@@ -164,8 +164,14 @@ mod tests {
 	fn a_placed_pipeline_is_read_from_the_table() {
 		let (mut b, op) = one_pipeline();
 		let mut facts = FactCache::new();
-		let placed = place_all(&b.ir, &mut facts, &Placement::default(), NO_BACKEND_CAPS)
-			.expect("the container is a DAG");
+		let placed = place_all(
+			&b.ir,
+			&mut facts,
+			crate::exec::ir::analysis::cx::builtin_registry(),
+			&Placement::default(),
+			NO_BACKEND_CAPS,
+		)
+		.expect("the container is a DAG");
 		install(b.ir.placement_table_mut(), placed);
 		let attr = b.ir.placement(op).expect("the pipeline is placed");
 		let expected = attr.decision().and_then(|decision| decision.to_parallel(None));
@@ -197,8 +203,14 @@ mod tests {
 		});
 		let inner = inner.expect("the inner pipeline is built");
 		let mut facts = FactCache::new();
-		let placed = place_all(&b.ir, &mut facts, &Placement::default(), NO_BACKEND_CAPS)
-			.expect("the container is a DAG");
+		let placed = place_all(
+			&b.ir,
+			&mut facts,
+			crate::exec::ir::analysis::cx::builtin_registry(),
+			&Placement::default(),
+			NO_BACKEND_CAPS,
+		)
+		.expect("the container is a DAG");
 		install(b.ir.placement_table_mut(), placed);
 		for op in [outer, inner] {
 			assert!(parallel_of(&b.ir, op, None).is_ok(), "{op:?} is placed");

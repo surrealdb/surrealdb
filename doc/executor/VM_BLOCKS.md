@@ -50,8 +50,8 @@ Every statement is a group of the program. A statement the VM does not bind, map
 group fails the whole block. A statement after the block's first schema statement that the planner
 refuses raises the refusal when the block reaches it. A statement that reads the clock is bound like any other: no binding folds a clock read across statements, and every read answers the instant its own statement started at. Each statement of a block, of the body of a `FOR` or an `IF`, and of a function body takes an instant of its own (`BlockInstr::Clock`) when it starts, before the group or the expression it runs, so the clock advances from one statement to the next and one statement's reads agree. The binder gives an expression of a list that may read the clock a `logical.statement` of its own, so no pass merges two statements' reads. `EXPLAIN ANALYZE` of a statement maps the statement it explains,
 and the text it renders of that statement's plan is fixed when the query arrives
-(`Program::analyses`). A semi or anti join the logical rules lifted out of a filter is mapped as the
-membership predicate it was lifted from (`map::memberships_of`), whose subquery is a statement
+(`Program::analyses`). A semi or anti join a front-end hands over is mapped as the
+membership predicate it stands for (`map::memberships_of`), whose subquery is a statement
 nested in the filter.
 
 The program's table dispatch (`vm::dispatch`) reads each table as the catalog held it when the

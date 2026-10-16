@@ -5,16 +5,16 @@
 
 use anyhow::Result;
 
-use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
+use crate::exec::function::{ScalarFunction, Signature};
 use crate::exec::ir::iface::Fallibility;
 use crate::expr::Kind;
 use crate::expr::logical::EffectSet;
 use crate::val::Value;
 
 #[derive(Debug, Clone, Copy)]
-struct Disabled {
-	name: &'static str,
-	feature: &'static str,
+pub(super) struct Disabled {
+	pub(super) name: &'static str,
+	pub(super) feature: &'static str,
 }
 
 impl ScalarFunction for Disabled {
@@ -49,16 +49,154 @@ impl ScalarFunction for Disabled {
 	}
 }
 
-/// Registers a stand-in for each of `names`, all left out with `feature`.
-pub(super) fn register(
-	registry: &mut FunctionRegistry,
-	feature: &'static str,
-	names: &[&'static str],
-) {
-	for &name in names {
-		registry.register(Disabled {
-			name,
-			feature,
-		});
-	}
-}
+/// The stand-ins for the `api` builtins, in a build without the `api` feature.
+#[cfg(not(feature = "api"))]
+pub(super) const API: &[&dyn ScalarFunction] = &[
+	&Disabled {
+		name: "api::invoke",
+		feature: "api",
+	},
+	&Disabled {
+		name: "api::req::body",
+		feature: "api",
+	},
+	&Disabled {
+		name: "api::req::max_body",
+		feature: "api",
+	},
+	&Disabled {
+		name: "api::res::body",
+		feature: "api",
+	},
+	&Disabled {
+		name: "api::res::status",
+		feature: "api",
+	},
+	&Disabled {
+		name: "api::res::header",
+		feature: "api",
+	},
+	&Disabled {
+		name: "api::res::headers",
+		feature: "api",
+	},
+	&Disabled {
+		name: "api::timeout",
+		feature: "api",
+	},
+];
+
+/// The stand-ins for the `encoding` builtins, in a build without the `encoding` feature.
+#[cfg(not(feature = "encoding"))]
+pub(super) const ENCODING: &[&dyn ScalarFunction] = &[
+	&Disabled {
+		name: "encoding::base64::decode",
+		feature: "encoding",
+	},
+	&Disabled {
+		name: "encoding::base64::encode",
+		feature: "encoding",
+	},
+	&Disabled {
+		name: "encoding::cbor::decode",
+		feature: "encoding",
+	},
+	&Disabled {
+		name: "encoding::cbor::encode",
+		feature: "encoding",
+	},
+	&Disabled {
+		name: "encoding::json::decode",
+		feature: "encoding",
+	},
+	&Disabled {
+		name: "encoding::json::encode",
+		feature: "encoding",
+	},
+];
+
+/// The stand-ins for the `files` builtins, in a build without the `files` feature.
+#[cfg(not(feature = "files"))]
+pub(super) const FILES: &[&dyn ScalarFunction] = &[
+	&Disabled {
+		name: "file::put",
+		feature: "files",
+	},
+	&Disabled {
+		name: "file::put_if_not_exists",
+		feature: "files",
+	},
+	&Disabled {
+		name: "file::get",
+		feature: "files",
+	},
+	&Disabled {
+		name: "file::head",
+		feature: "files",
+	},
+	&Disabled {
+		name: "file::delete",
+		feature: "files",
+	},
+	&Disabled {
+		name: "file::copy",
+		feature: "files",
+	},
+	&Disabled {
+		name: "file::copy_if_not_exists",
+		feature: "files",
+	},
+	&Disabled {
+		name: "file::rename",
+		feature: "files",
+	},
+	&Disabled {
+		name: "file::rename_if_not_exists",
+		feature: "files",
+	},
+	&Disabled {
+		name: "file::exists",
+		feature: "files",
+	},
+	&Disabled {
+		name: "file::list",
+		feature: "files",
+	},
+	&Disabled {
+		name: "file::bucket",
+		feature: "files",
+	},
+	&Disabled {
+		name: "file::key",
+		feature: "files",
+	},
+];
+
+/// The stand-ins for the `search` builtins, in a build without the `search` feature.
+#[cfg(not(feature = "search"))]
+pub(super) const SEARCH: &[&dyn ScalarFunction] = &[
+	&Disabled {
+		name: "search::analyze",
+		feature: "search",
+	},
+	&Disabled {
+		name: "search::rrf",
+		feature: "search",
+	},
+	&Disabled {
+		name: "search::linear",
+		feature: "search",
+	},
+	&Disabled {
+		name: "search::highlight",
+		feature: "search",
+	},
+	&Disabled {
+		name: "search::score",
+		feature: "search",
+	},
+	&Disabled {
+		name: "search::offsets",
+		feature: "search",
+	},
+];

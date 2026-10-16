@@ -50,11 +50,12 @@ pub(crate) enum FoldRun {
 
 /// Lowers and runs one eligible value in the restricted host.
 pub(crate) trait FoldRunner: Send + Sync {
-	/// Evaluates `value` of `ir`, admitting only the builtins `capabilities` allows. The value
-	/// has passed [`eligible`].
+	/// Evaluates `value` of `ir`, admitting only the builtins of `registry` that `capabilities`
+	/// allows. The value has passed [`eligible`].
 	fn run<'a>(
 		&'a self,
 		ir: &'a Ir,
+		registry: &'a FunctionRegistry,
 		value: ValueId,
 		capabilities: &'a CapabilityPolicy,
 	) -> Pin<Box<dyn Future<Output = FoldRun> + Send + 'a>>;
@@ -67,6 +68,7 @@ impl FoldRunner for NoRunner {
 	fn run<'a>(
 		&'a self,
 		_ir: &'a Ir,
+		_registry: &'a FunctionRegistry,
 		_value: ValueId,
 		_capabilities: &'a CapabilityPolicy,
 	) -> Pin<Box<dyn Future<Output = FoldRun> + Send + 'a>> {
@@ -147,7 +149,7 @@ impl PlanTimeFolder for VmFolder {
 		}
 		drop(facts);
 		Box::pin(async move {
-			match self.runner.run(ir, req.value, &self.capabilities).await {
+			match self.runner.run(ir, cx.registry, req.value, &self.capabilities).await {
 				FoldRun::Value(value, depth) => {
 					if value_bytes(&value) > FOLD_MAX_BYTES {
 						FoldOutcome::NotFoldable(NotFoldable::TooLarge)
@@ -304,7 +306,7 @@ fn builtins_of<'r>(
 ) -> Option<Vec<&'r dyn ScalarFunction>> {
 	match kind {
 		OpKind::Expr(ExprOp::Call(function)) => match &function.function {
-			Function::Normal(name) => registry.get(name).map(|found| vec![found.as_ref()]),
+			Function::Normal(name) => registry.get(name).map(|found| vec![found]),
 			Function::Custom(_)
 			| Function::Script(_)
 			| Function::Model(_)
@@ -319,8 +321,8 @@ fn builtins_of<'r>(
 			descriptor
 				.type_impls
 				.iter()
-				.map(|(_, function)| function.as_ref())
-				.chain(descriptor.fallback.iter().map(|function| function.as_ref()))
+				.map(|(_, function)| *function)
+				.chain(descriptor.fallback)
 				.collect()
 		}),
 		OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => None,
@@ -340,6 +342,46 @@ fn is_foldable_builtin(function: &dyn ScalarFunction) -> bool {
 		&& function.is_deterministic()
 		&& !function.is_async()
 		&& function.closure_args().is_empty()
+}
+
+/// Whether the op `op` reads a field off a literal that is no record id and holds no array: an
+/// object, a geometry or a scalar. Such a read answers from the literal alone.
+fn reads_a_field_of_a_plain_literal(ir: &Ir, op: OpId) -> bool {
+	let Some(data) = ir.op(op) else {
+		return false;
+	};
+	if !matches!(data.kind, OpKind::Expr(ExprOp::Access { .. })) {
+		return false;
+	}
+	let Some(base) = data.operands.first().and_then(|operand| ir.value(*operand)) else {
+		return false;
+	};
+	let ValueDef::OpResult {
+		op: defining,
+		..
+	} = base.def
+	else {
+		return false;
+	};
+	matches!(
+		ir.op(defining).map(|held| &held.kind),
+		Some(OpKind::Expr(ExprOp::Literal(held)))
+			if matches!(
+				&**held,
+				Value::Object(_)
+					| Value::Geometry(_)
+					| Value::None
+					| Value::Null
+					| Value::Bool(_)
+					| Value::Number(_)
+					| Value::String(_)
+					| Value::Bytes(_)
+					| Value::Duration(_)
+					| Value::Datetime(_)
+					| Value::Uuid(_)
+					| Value::Regex(_)
+			)
+	)
 }
 
 /// Whether `value` may be folded, decided from the container and the builtin table only.
@@ -390,6 +432,12 @@ pub(crate) fn eligible_under(
 	let mut joined = effects::bottom();
 	let mut failures = Fallibility::INFALLIBLE;
 	for (op, _) in &kinds {
+		// A field read off an object, geometry or scalar literal reads no record: only a record
+		// id, or an array that may hold one, is fetched.
+		if reads_a_field_of_a_plain_literal(ir, *op) {
+			failures = failures.union(Fallibility::VALUE);
+			continue;
+		}
 		joined = effects::join(&joined, &effects::of_with(ir, facts, cx, *op));
 		failures = failures.union(fallibility::of_with(ir, facts, cx, *op));
 	}

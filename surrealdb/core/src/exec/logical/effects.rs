@@ -3,18 +3,15 @@
 //! `effects_of` (`crate::expr::logical`) derives what an expression does from
 //! the declared effects of the builtins it calls. Those declarations live on
 //! the registry, so this is where the fold and the registry meet; every
-//! predicate the rules and the physical planner ask of an expression is a
+//! predicate the membership recogniser and the physical planner ask of an expression is a
 //! field of the fold's answer, read through one of the two oracles here.
-
-use std::collections::HashSet;
 
 use super::summaries::CatalogSummaries;
 use crate::exec::function::FunctionRegistry;
 use crate::expr::logical::{EffectOracle, EffectSet, LogicalExpr, LogicalOp, effects_of};
 
 /// The registry's declarations. Every parameter read is taken to be in hand,
-/// so `Effects::may_raise` is not the question to ask through this one; see
-/// [`ParamsOnly`].
+/// so `Effects::may_raise` is not the question to ask through this one.
 pub(crate) struct Oracle<'a> {
 	registry: &'a FunctionRegistry,
 }
@@ -127,35 +124,6 @@ impl EffectOracle for SummaryOracle<'_> {
 			true => own.union(EffectSet::OPAQUE_BODY),
 			false => own,
 		})
-	}
-}
-
-/// The bind pass's classification of which parameter reads fetch a `DEFINE
-/// PARAM` judged per read, and nothing of the registry: what `may_raise` is
-/// asked with, by callers that hold no registry. `Effects::may_raise`
-/// consults nothing else of the oracle; the other fields of an `Effects`
-/// computed through this are not answers and are not read.
-pub(super) struct ParamsOnly<'a>(pub(super) &'a HashSet<String>);
-
-impl EffectOracle for ParamsOnly<'_> {
-	fn builtin(&self, _name: &str) -> Option<EffectSet> {
-		None
-	}
-
-	fn closure_args(&self, _name: &str) -> Option<&'static [usize]> {
-		None
-	}
-
-	fn method_always_dispatches(&self, _name: &str) -> bool {
-		false
-	}
-
-	fn evaluates_against_row(&self, _name: &str) -> bool {
-		false
-	}
-
-	fn permission_checked_param(&self, name: &str) -> bool {
-		self.0.contains(name)
 	}
 }
 

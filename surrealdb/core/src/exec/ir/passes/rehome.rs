@@ -140,6 +140,90 @@ pub(crate) fn rehome_tree_bound(
 	Ok(rw.ir().op(*new_root).ok_or(IrError::Stale("op"))?.results.clone())
 }
 
+/// Re-creates a copy of the op tree rooted at `root` at `at` and answers the copy's first result;
+/// the original stays where it is and keeps reading `from`.
+///
+/// The tree is the one [`rehome_tree`] moves. Each `(from, to)` of `bound` makes every read of
+/// `from` by the copy, the reads inside its regions included, read `to`. Each region of a copied op
+/// is rebuilt op by op, so a region may read a bound value, which a cloned region cannot.
+/// Refusals are those of [`can_rehome`], checked before any mutation.
+pub(crate) fn copy_tree_bound(
+	rw: &mut Rewriter<'_>,
+	root: OpId,
+	at: InsertPoint,
+	bound: &[(ValueId, ValueId)],
+) -> Result<ValueId, IrError> {
+	let tree = collect_tree(rw.ir(), root)?;
+	let members: HashSet<OpId> = tree.iter().copied().collect();
+	let (block, index) = resolve(rw.ir(), at)?;
+	check_placement(rw.ir(), &tree, &members, block, index, bound)?;
+	let point = anchored(rw.ir(), at)?;
+	let mut renamed: HashMap<ValueId, ValueId> = bound.iter().copied().collect();
+	let mut copy_of_root = None;
+	for old in &tree {
+		let new = copy_op(rw, *old, point, &mut renamed)?;
+		if *old == root {
+			copy_of_root = Some(new);
+		}
+	}
+	let new_root = copy_of_root.ok_or(IrError::Stale("op"))?;
+	rw.ir()
+		.op(new_root)
+		.and_then(|data| data.results.first().copied())
+		.ok_or(IrError::Stale("value"))
+}
+
+/// Creates a copy of `old` at `point` reading the renamed values, records each copied result in
+/// `renamed`, rebuilds the regions of `old` inside the copy, and answers the copy.
+fn copy_op(
+	rw: &mut Rewriter<'_>,
+	old: OpId,
+	point: InsertPoint,
+	renamed: &mut HashMap<ValueId, ValueId>,
+) -> Result<OpId, IrError> {
+	let data = rw.ir().op(old).ok_or(IrError::Stale("op"))?.clone();
+	let spec = respec(rw.ir(), &data, renamed)?;
+	let new = rw.derived(&[old], |rw| rw.create(point, spec))?;
+	let results = rw.ir().op(new).ok_or(IrError::Stale("op"))?.results.clone();
+	for (before, after) in data.results.iter().zip(&results) {
+		renamed.insert(*before, *after);
+	}
+	for region in &data.regions {
+		copy_region(rw, *region, new, renamed)?;
+	}
+	Ok(new)
+}
+
+/// Rebuilds the one-block region `region` as a region of `owner`: the block arguments are new,
+/// and every op of the block is copied in order.
+fn copy_region(
+	rw: &mut Rewriter<'_>,
+	region: RegionId,
+	owner: OpId,
+	renamed: &mut HashMap<ValueId, ValueId>,
+) -> Result<(), IrError> {
+	let held = rw.ir().region(region).ok_or(IrError::Stale("region"))?;
+	let kind = held.kind;
+	let [block] = held.blocks.as_slice() else {
+		return Err(IrError::Refused("rehome copy"));
+	};
+	let block = rw.ir().block(*block).ok_or(IrError::Stale("block"))?;
+	let (args, ops) = (block.args.clone(), block.ops.clone());
+	let mut types: SmallVec<[TypeKnowledge; 2]> = SmallVec::new();
+	for arg in &args {
+		types.push(rw.ir().value(*arg).ok_or(IrError::Stale("value"))?.ty.clone());
+	}
+	let (_, copied) = rw.create_region(owner, kind, &types)?;
+	let fresh = rw.ir().block(copied).ok_or(IrError::Stale("block"))?.args.clone();
+	for (before, after) in args.iter().zip(&fresh) {
+		renamed.insert(*before, *after);
+	}
+	for op in ops {
+		copy_op(rw, op, InsertPoint::End(copied), renamed)?;
+	}
+	Ok(())
+}
+
 /// Whether [`rehome_tree_bound`] over `root`, `at` and `bound` passes every check it makes before
 /// it mutates anything. Reads nothing but the container.
 pub(crate) fn can_rehome(

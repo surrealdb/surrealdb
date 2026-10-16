@@ -128,7 +128,7 @@ Invalid query: The KNN query vector must be a non-empty array of finite numbers:
 error = "Invalid query: The KNN query vector must be a non-empty array of finite numbers: [<float> 'NaN', 0f]"
 
 [[test.results]]
-error = "Invalid query: The KNN query vector must be a non-empty array of finite numbers: [<float> 'NaN', 0f]"
+error = "Invalid query: The KNN query vector must be a non-empty array of finite numbers: fn::nan()"
 
 [[test.results]]
 error = """
@@ -148,7 +148,7 @@ error = "Invalid query: The KNN query vector must be a non-empty array of finite
 error = "Invalid query: The KNN query vector must be a non-empty array of finite numbers: [<float> 'NaN', 0f]"
 
 [[test.results]]
-error = "Invalid query: The KNN query vector must be a non-empty array of finite numbers: [<float> 'NaN', 0f]"
+error = "Invalid query: The KNN query vector must be a non-empty array of finite numbers: fn::nan()"
 
 [[test.results]]
 error = """

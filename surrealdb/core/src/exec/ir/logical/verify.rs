@@ -22,8 +22,6 @@
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use smallvec::SmallVec;
-
 use super::ops::{
 	LogOp, LoopKind, LoopSink, TxnRegionEnd, TxnRegionMode, TxnStart, WriteStageKind,
 };
@@ -32,7 +30,7 @@ use crate::exec::ir::core::op::OpData;
 use crate::exec::ir::core::verify::{VerifyError, VerifyRule};
 use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
 use crate::exec::ir::iface::region_kind::{
-	ClauseRole, FieldRole, RegionKind, RegionProperties, StoredRole,
+	ClauseRole, FieldRole, RegionKind, RegionKinds, RegionProperties, StoredRole,
 };
 use crate::exec::ir::iface::statements::{AccessOp, WriteForm};
 use crate::exec::ir::iface::types::{FactSource, TypeKnowledge};
@@ -639,7 +637,7 @@ pub(crate) fn is_timestamp(ir: &Ir, value: ValueId) -> bool {
 }
 
 /// The kind of every region of the op, in position order; `None` when one does not exist.
-fn actual_kinds(ir: &Ir, data: &OpData) -> Option<SmallVec<[RegionKind; 4]>> {
+fn actual_kinds(ir: &Ir, data: &OpData) -> Option<RegionKinds> {
 	data.regions.iter().map(|region| ir.region(*region).map(|region| region.kind)).collect()
 }
 

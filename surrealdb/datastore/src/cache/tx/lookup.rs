@@ -288,6 +288,24 @@ mod tests {
 		Key::DbCatalog(NamespaceId(1), DatabaseId(1)),
 		true
 	)]
+	#[case(
+		Lookup::Mds(NamespaceId(1), DatabaseId(1)),
+		Key::Mds(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
+	#[case(
+		Lookup::Sqs(NamespaceId(1), DatabaseId(1)),
+		Key::Sqs(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
+	#[case(
+		Lookup::DbReferenceFields(NamespaceId(1), DatabaseId(1)),
+		Key::DbReferenceFields(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
+	#[case(Lookup::Ish(NamespaceId(1), DatabaseId(1), "test", IndexId(1)), Key::Ish(NamespaceId(1), DatabaseId(1), "test".to_string(), IndexId(1)), true)]
+	#[case(Lookup::Rcg("test"), Key::Rcg("test".to_string()), true)]
+	#[case(Lookup::Md(NamespaceId(1), DatabaseId(1), "test"), Key::Md(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
 	#[case(Lookup::Evs(NamespaceId(1), DatabaseId(1), "test"), Key::Evs(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
 	#[case(Lookup::Fds(NamespaceId(1), DatabaseId(1), "test"), Key::Fds(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
 	#[case(Lookup::Fts(NamespaceId(1), DatabaseId(1), "test"), Key::Fts(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
@@ -328,11 +346,10 @@ mod tests {
 	#[case(Lookup::Ov(NamespaceId(1), DatabaseId(1), CatalogObjectKind::Model, "m", "1"), Key::Ov(NamespaceId(1), DatabaseId(1), CatalogObjectKind::Model, "m".to_string(), "2".to_string()), false)]
 	fn test_equivalent(#[case] l: Lookup<'_>, #[case] k: Key, #[case] expected: bool) {
 		assert_eq!(l.equivalent(&k), expected);
-		// The cache hashes the lookup and compares it against the stored key,
-		// so an equivalent pair must also hash alike. The derived `Hash`
-		// includes the variant's position, which is why `Lookup` and `Key`
-		// declare their variants in the same order.
+		// `Key` hashes as the `Lookup` it borrows, so an equivalent pair hashes
+		// alike by construction.
 		if expected {
+			assert!(k.as_lookup().equivalent(&k), "a key borrows as the lookup that addresses it");
 			assert_eq!(hash(&l), hash(&k), "an equivalent lookup and key hash alike");
 		}
 	}

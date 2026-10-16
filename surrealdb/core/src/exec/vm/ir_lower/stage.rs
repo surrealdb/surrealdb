@@ -109,7 +109,7 @@ use super::super::write::{
 	ViewRows,
 };
 use super::emit::Emitter;
-use super::expr::{LowerLimits, Lowerer, Needs, ReturnScope};
+use super::expr::{LowerLimits, Lowerer, Needs, ReturnScope, invariant};
 use super::pipe::{
 	first_arg, lower_layers, lower_stored_guards, project_image, region_frame, yielded_value,
 };
@@ -118,6 +118,7 @@ use super::units::{CascadeKind, LowerCx, UnitRequest};
 use super::write_place::raises_before_storing;
 use super::write_stmt::StageSink;
 use crate::exec::field_path::FieldPath;
+use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::op::OpData;
 use crate::exec::ir::core::walk::ops_in;
@@ -706,9 +707,13 @@ pub(super) struct Stages<'a, 'c> {
 	pub(super) ir: &'a Ir,
 	/// The limits the host pipelines of the clauses are lowered under.
 	pub(super) limits: LowerLimits,
+	/// The function registry the host pipelines of the clauses resolve calls against where no
+	/// context is installed.
+	registry: &'a FunctionRegistry,
 	/// The context the host pipelines of the clauses are lowered in: the function registry they
 	/// resolve calls against, and the unit table the code they hold asks its units of. Without
-	/// one, a host pipeline is lowered over the builtin registry and asks for no unit.
+	/// one, a host pipeline is lowered over `registry` and asks for no unit, and the field view
+	/// of the written table is not lowered.
 	pub(super) cx: Option<&'a mut LowerCx<'c>>,
 	/// What the host pipelines of the stages emitted so far need of the program, which the program
 	/// holds beside the needs of the body.
@@ -724,11 +729,17 @@ pub(super) struct Stages<'a, 'c> {
 }
 
 impl<'a, 'c> Stages<'a, 'c> {
-	pub(super) fn new(run: &'a StageRun, ir: &'a Ir, limits: LowerLimits) -> Self {
+	pub(super) fn new(
+		run: &'a StageRun,
+		ir: &'a Ir,
+		limits: LowerLimits,
+		registry: &'a FunctionRegistry,
+	) -> Self {
 		Self {
 			run,
 			ir,
 			limits,
+			registry,
 			cx: None,
 			needs: None,
 			views: None,
@@ -754,7 +765,7 @@ impl<'a, 'c> Stages<'a, 'c> {
 	) -> Result<u16, IrError> {
 		let mut lowerer = match self.cx.as_deref_mut() {
 			Some(cx) => Lowerer::in_context(em, self.ir, cx),
-			None => Lowerer::new(em, self.ir).with_limits(self.limits),
+			None => Lowerer::new(em, self.ir, self.registry).with_limits(self.limits),
 		};
 		let aside = lowerer.em.set_aside();
 		let beside = lowerer.beside();
@@ -912,7 +923,7 @@ impl Stages<'_, '_> {
 		let aside = em.set_aside();
 		let built = match self.cx.as_deref_mut() {
 			Some(cx) => lower(em, cx, ir, &held),
-			None => lower(em, &mut LowerCx::detached(), ir, &held),
+			None => Err(invariant("a field view lowered with no lowering context")),
 		};
 		em.restore(aside);
 		let Some((pipeline, needs)) = built? else {
@@ -3502,6 +3513,33 @@ mod tests {
 		emitted_program(ir, run, stage).map(|(code, program)| (code, program.host_code))
 	}
 
+	/// [`emitted_in`] under a lowering context, which the host pipelines of a view need.
+	fn emitted_in_context(
+		ir: &Ir,
+		run: &StageRun,
+		stage: WriteStageKind,
+	) -> Result<(Vec<Instr>, Vec<Pipeline>), IrError> {
+		let mut em = Emitter::new();
+		let skip = em.label()?;
+		let mut units = LowerCx::detached();
+		{
+			let mut cx = Stages::new(
+				run,
+				ir,
+				LowerLimits::default(),
+				crate::exec::ir::analysis::cx::builtin_registry(),
+			)
+			.in_context(&mut units);
+			emit_stage(&mut em, &mut cx, stage, skip)?;
+		}
+		em.bind(skip)?;
+		em.emit(Instr::EndRow);
+		let pipeline = em.finish_pipeline(Source::Once)?;
+		let code = pipeline.code.clone();
+		let program = em.finish_program(vec![pipeline], crate::exec::AccessMode::ReadOnly)?;
+		Ok((code, program.host_code))
+	}
+
 	/// [`emitted_in`], with the whole program the stage's code and host pipelines are held by.
 	fn emitted_program(
 		ir: &Ir,
@@ -3510,7 +3548,12 @@ mod tests {
 	) -> Result<(Vec<Instr>, crate::exec::vm::program::Program), IrError> {
 		let mut em = Emitter::new();
 		let skip = em.label()?;
-		let mut cx = Stages::new(run, ir, LowerLimits::default());
+		let mut cx = Stages::new(
+			run,
+			ir,
+			LowerLimits::default(),
+			crate::exec::ir::analysis::cx::builtin_registry(),
+		);
 		emit_stage(&mut em, &mut cx, stage, skip)?;
 		em.bind(skip)?;
 		em.emit(Instr::EndRow);
@@ -3536,7 +3579,13 @@ mod tests {
 		let skip = em.label()?;
 		let mut units = LowerCx::detached();
 		{
-			let mut cx = Stages::new(run, &ir, LowerLimits::default()).in_context(&mut units);
+			let mut cx = Stages::new(
+				run,
+				&ir,
+				LowerLimits::default(),
+				crate::exec::ir::analysis::cx::builtin_registry(),
+			)
+			.in_context(&mut units);
 			emit_stage(&mut em, &mut cx, stage, skip)?;
 		}
 		em.bind(skip)?;
@@ -4551,12 +4600,19 @@ mod tests {
 			..layered(ImageView::Derived, ImageLayers::Stack(vec![computed_layer()]), true)
 		};
 		let (code, hosts) =
-			emitted_in(&b.ir, &run, WriteStageKind::OutputWrite).expect("the view lowers");
+			emitted_in_context(&b.ir, &run, WriteStageKind::OutputWrite).expect("the view lowers");
 		assert_eq!(code[2], shown_through(RecordImage::Current, 0, true));
 		assert_eq!(hosts.len(), 1);
 
 		let mut em = Emitter::new();
-		let mut cx = Stages::new(&run, &b.ir, LowerLimits::default());
+		let mut units = LowerCx::detached();
+		let mut cx = Stages::new(
+			&run,
+			&b.ir,
+			LowerLimits::default(),
+			crate::exec::ir::analysis::cx::builtin_registry(),
+		)
+		.in_context(&mut units);
 		let first = cx.shown_view(&mut em).expect("the view lowers");
 		assert_eq!(first, (Some(0), true));
 		assert_eq!(
@@ -4642,7 +4698,14 @@ mod tests {
 			)
 		};
 		let mut em = Emitter::new();
-		let mut cx = Stages::new(&run, &b.ir, LowerLimits::default());
+		let mut units = LowerCx::detached();
+		let mut cx = Stages::new(
+			&run,
+			&b.ir,
+			LowerLimits::default(),
+			crate::exec::ir::analysis::cx::builtin_registry(),
+		)
+		.in_context(&mut units);
 		let snapshot = cx.snapshot(&mut em).expect("the snapshot lowers");
 		assert_eq!(
 			snapshot,
@@ -4663,7 +4726,14 @@ mod tests {
 			..run.clone()
 		};
 		let mut em = Emitter::new();
-		let mut cx = Stages::new(&unchecked, &b.ir, LowerLimits::default());
+		let mut units = LowerCx::detached();
+		let mut cx = Stages::new(
+			&unchecked,
+			&b.ir,
+			LowerLimits::default(),
+			crate::exec::ir::analysis::cx::builtin_registry(),
+		)
+		.in_context(&mut units);
 		assert!(matches!(
 			cx.snapshot(&mut em).expect("the snapshot lowers"),
 			DataInstr::Snapshot {
@@ -5319,7 +5389,7 @@ mod tests {
 			};
 			assert!(
 				matches!(
-					emitted_in(&b.ir, &run, WriteStageKind::CheckWhereCondition),
+					emitted_in_context(&b.ir, &run, WriteStageKind::CheckWhereCondition),
 					Err(IrError::Invariant { .. })
 				),
 				"{view:?} of a checked caller has no snapshot"
@@ -5331,8 +5401,8 @@ mod tests {
 			checked: false,
 			..viewed(ImageView::Cut)
 		};
-		let (code, _) =
-			emitted_in(&b.ir, &run, WriteStageKind::CheckWhereCondition).expect("it lowers");
+		let (code, _) = emitted_in_context(&b.ir, &run, WriteStageKind::CheckWhereCondition)
+			.expect("it lowers");
 		assert_eq!(
 			code[0],
 			data(DataInstr::Snapshot {
@@ -5349,8 +5419,8 @@ mod tests {
 			layers: vec![regions],
 			..layered(ImageView::Derived, ImageLayers::Stack(vec![computed_layer()]), true)
 		};
-		let (code, hosts) =
-			emitted_in(&b.ir, &run, WriteStageKind::CheckWhereCondition).expect("it lowers");
+		let (code, hosts) = emitted_in_context(&b.ir, &run, WriteStageKind::CheckWhereCondition)
+			.expect("it lowers");
 		assert_eq!(
 			code[0],
 			data(DataInstr::Snapshot {
@@ -5516,7 +5586,13 @@ mod tests {
 		let skip = em.label().expect("a label");
 		let mut units = LowerCx::detached();
 		{
-			let mut cx = Stages::new(&run, &ir, LowerLimits::default()).in_context(&mut units);
+			let mut cx = Stages::new(
+				&run,
+				&ir,
+				LowerLimits::default(),
+				crate::exec::ir::analysis::cx::builtin_registry(),
+			)
+			.in_context(&mut units);
 			for action in [Action::Create, Action::Update, Action::Create] {
 				emit_stage(&mut em, &mut cx, WriteStageKind::ProcessTableEvents(action), skip)
 					.expect("it lowers");
@@ -7020,7 +7096,13 @@ mod tests {
 		let skip = em.label()?;
 		let mut units = LowerCx::detached();
 		{
-			let mut cx = Stages::new(run, ir, LowerLimits::default()).in_context(&mut units);
+			let mut cx = Stages::new(
+				run,
+				ir,
+				LowerLimits::default(),
+				crate::exec::ir::analysis::cx::builtin_registry(),
+			)
+			.in_context(&mut units);
 			for stage in stages {
 				emit_stage(&mut em, &mut cx, *stage, skip)?;
 			}
@@ -7421,7 +7503,13 @@ mod tests {
 		let reads_checked = frame.checked;
 		units.rescope(frame, reads_checked, 0);
 		{
-			let mut cx = Stages::new(run, ir, LowerLimits::default()).in_context(&mut units);
+			let mut cx = Stages::new(
+				run,
+				ir,
+				LowerLimits::default(),
+				crate::exec::ir::analysis::cx::builtin_registry(),
+			)
+			.in_context(&mut units);
 			emit_stage(&mut em, &mut cx, WriteStageKind::PurgeRecordData, skip)?;
 		}
 		em.bind(skip)?;

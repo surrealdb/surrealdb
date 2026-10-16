@@ -1,7 +1,7 @@
 //! Dead-code elimination: an op whose results nothing reads and whose removal no run can observe
 //! is erased, and every erase records why.
 //!
-//! Four reasons remove an op:
+//! Five reasons remove an op:
 //!
 //! - `DeadPure`: the op is transitively infallible and its effects are reads of the snapshot, the
 //!   catalog, the row, the session or the clock. An `expr.computed_read` is removed only when an
@@ -12,6 +12,11 @@
 //!   guard is the literal `false`. Its readers see `NONE`. Guards and field frames are paired by
 //!   position and only when the projection holds one guard per field frame, so a projection without
 //!   guard regions matches nothing.
+//! - `DeadLayerColumn`: a column of a projection layer that no op reads, and a layer left with no
+//!   column. The reads of the layer's rows come from its readers: a field read adds the field to
+//!   what is demanded, and any other use of the row, or a `*`, demands every field. A column that
+//!   another column of the same layer reads stays, and the readers of an erased layer read its
+//!   input.
 //! - `Unreachable`: an op that follows a terminator in its block.
 //! - `DeadBeforeCertainError`, behind `PassConfig::dce_certain_error`: an op standing before a
 //!   raise that is certain, inside the region the raise cancels. The raise stands in a statement
@@ -40,7 +45,9 @@ use std::pin::Pin;
 use smallvec::{SmallVec, smallvec};
 
 use super::driver::{LoCx, LoPass, PassConfig, PassReport};
+use super::perm_where::reads_row_opaquely;
 use crate::exec::ir::analysis::{effects, fallibility};
+use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::{Ir, IrScope, Walk, WalkOrder};
 use crate::exec::ir::core::pattern::{GREEDY_DEFAULT, Limit};
 use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
@@ -50,11 +57,14 @@ use crate::exec::ir::egraph::guards;
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::{ComputedReadAttrs, ExprOp, RaiseKind};
 use crate::exec::ir::expr::types::result_type;
+use crate::exec::ir::iface::catalog::EffectCx;
 use crate::exec::ir::iface::conversion::EliminationReason;
 use crate::exec::ir::iface::effects::Rollback;
-use crate::exec::ir::iface::ids::{OpId, RegionId};
-use crate::exec::ir::iface::region_kind::{FieldRole, RegionKind, StatementCommit, TxnKind};
-use crate::exec::ir::logical::ops::LogOp;
+use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
+use crate::exec::ir::iface::region_kind::{
+	ClauseRole, FieldRole, RegionKind, RegionProperties, StatementCommit, TxnKind,
+};
+use crate::exec::ir::logical::ops::{FieldShape, FieldsShape, LogOp, LoopKind, ProjectAttrs};
 use crate::exec::ir::op_kind::OpKind;
 use crate::expr::logical::EffectSet;
 use crate::val::Value;
@@ -101,6 +111,7 @@ fn run_dce(cx: &mut LoCx<'_>) -> Result<PassReport, IrError> {
 	for round in 0..MAX_ROUNDS {
 		let mut erased = erase_unreachable(cx)?;
 		erased += erase_invisible(cx)?;
+		erased += erase_dead_layer_columns(cx)?;
 		if cx.cfg.dce_certain_error {
 			erased += erase_before_certain_error(cx)?;
 		}
@@ -431,6 +442,370 @@ fn hide_read(cx: &mut LoCx<'_>, read: OpId) -> Result<bool, IrError> {
 		Err(IrError::HasUses(_)) => Ok(false),
 		Err(error) => Err(error),
 	}
+}
+
+/// What the readers of some rows read of them.
+enum Demand {
+	/// Every field: a use of the row that is not a read of a named field, and a `*`.
+	Whole,
+	/// These fields and no other.
+	Fields(HashSet<String>),
+}
+
+impl Demand {
+	fn none() -> Self {
+		Self::Fields(HashSet::new())
+	}
+
+	fn join(&mut self, other: Demand) {
+		match (&mut *self, other) {
+			(Demand::Fields(held), Demand::Fields(more)) => held.extend(more),
+			(Demand::Whole, _) => {}
+			(Demand::Fields(_), Demand::Whole) => *self = Demand::Whole,
+		}
+	}
+}
+
+/// How deep the demand follows the rows through the operators that pass them on.
+const DEMAND_DEPTH: usize = 32;
+
+/// The fields of the rows `value` carries that the ops after it read.
+///
+/// The row passes through the operators that keep it, which read it through the regions they own,
+/// and through a layer, which sets its own columns on it. A projection or an aggregate ends the
+/// row. Any other reader takes the whole row.
+fn demand_of_rows(
+	ir: &Ir,
+	facts: &mut FactCache,
+	cx: &EffectCx<'_>,
+	value: ValueId,
+	depth: usize,
+) -> Demand {
+	if depth > DEMAND_DEPTH {
+		return Demand::Whole;
+	}
+	let mut demand = Demand::none();
+	for held in ir.uses(value) {
+		let Some(user) = ir.op(held.user) else {
+			return Demand::Whole;
+		};
+		if held.operand != 0 {
+			return Demand::Whole;
+		}
+		match &user.kind {
+			OpKind::Logical(
+				LogOp::Filter
+				| LogOp::PermissionFilter {
+					..
+				}
+				| LogOp::Sort(_)
+				| LogOp::Split {
+					..
+				}
+				| LogOp::Limit {
+					..
+				}
+				| LogOp::Only,
+			) => {
+				demand.join(demand_of_regions(ir, facts, cx, &user.regions));
+				match user.results.first() {
+					Some(result) => demand.join(demand_of_rows(ir, facts, cx, *result, depth + 1)),
+					None => return Demand::Whole,
+				}
+			}
+			OpKind::Logical(LogOp::Project(attrs)) if attrs.layer => {
+				let Some(result) = user.results.first() else {
+					return Demand::Whole;
+				};
+				let columns = layer_column_names(attrs);
+				let passed = match demand_of_rows(ir, facts, cx, *result, depth + 1) {
+					Demand::Fields(fields) => Demand::Fields(
+						fields.into_iter().filter(|name| !columns.contains(name)).collect(),
+					),
+					Demand::Whole => Demand::Whole,
+				};
+				demand.join(passed);
+				demand.join(demand_of_regions(ir, facts, cx, &user.regions));
+			}
+			OpKind::Logical(LogOp::Project(attrs)) => {
+				if attrs.omit > 0 || !attrs.sort_keys.is_empty() || shape_has_all(&attrs.fields) {
+					return Demand::Whole;
+				}
+				demand.join(demand_of_regions(ir, facts, cx, &user.regions));
+			}
+			OpKind::Logical(LogOp::Aggregate(shape)) => {
+				if shape_has_all(&shape.fields) {
+					return Demand::Whole;
+				}
+				demand.join(demand_of_regions(ir, facts, cx, &user.regions));
+			}
+			// The rows leave a `SELECT` loop as the rows its output holds.
+			OpKind::Logical(LogOp::Yield) => {
+				let Some(owner) = ir
+					.block(user.parent)
+					.and_then(|block| ir.parent_op(block.parent))
+					.and_then(|owner| ir.op(owner))
+				else {
+					return Demand::Whole;
+				};
+				let (
+					OpKind::Logical(LogOp::Loop {
+						kind: LoopKind::Select,
+						..
+					}),
+					Some(output),
+				) = (&owner.kind, owner.results.first())
+				else {
+					return Demand::Whole;
+				};
+				demand.join(demand_of_rows(ir, facts, cx, *output, depth + 1));
+			}
+			OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => return Demand::Whole,
+		}
+		if matches!(demand, Demand::Whole) {
+			return demand;
+		}
+	}
+	demand
+}
+
+/// Whether the projection shape holds a `*`.
+fn shape_has_all(fields: &FieldsShape) -> bool {
+	match fields {
+		FieldsShape::Value {
+			..
+		} => false,
+		FieldsShape::Select(shape) => shape.iter().any(|field| matches!(field, FieldShape::All)),
+	}
+}
+
+/// The names the columns of a layer land under.
+pub(super) fn layer_column_names(attrs: &ProjectAttrs) -> Vec<String> {
+	let FieldsShape::Select(shape) = &attrs.fields else {
+		return Vec::new();
+	};
+	shape
+		.iter()
+		.filter_map(|field| match field {
+			FieldShape::Single {
+				alias,
+				..
+			} => alias.as_ref().and_then(|path| path.as_field()).map(str::to_owned),
+			FieldShape::All => None,
+		})
+		.collect()
+}
+
+/// The fields the regions read off their row argument.
+fn demand_of_regions(
+	ir: &Ir,
+	facts: &mut FactCache,
+	cx: &EffectCx<'_>,
+	regions: &[RegionId],
+) -> Demand {
+	let mut demand = Demand::none();
+	for region in regions {
+		let Some(held) = ir.region(*region) else {
+			return Demand::Whole;
+		};
+		// Code the region holds that reads the row without naming a field needs the whole row.
+		let mut opaque = false;
+		ir.walk(*region, WalkOrder::PreOrder, &mut |op| {
+			if reads_row_opaquely(ir, facts, cx, op) {
+				opaque = true;
+				return Walk::Stop;
+			}
+			Walk::Continue
+		});
+		if opaque {
+			return Demand::Whole;
+		}
+		let skipped = usize::from(held.kind.isolated_from_above());
+		for block in held.blocks.iter().copied() {
+			let Some(block) = ir.block(block) else {
+				return Demand::Whole;
+			};
+			let Some(row) = block.args.get(skipped) else {
+				continue;
+			};
+			demand.join(reads_of_row(ir, *row));
+			if matches!(demand, Demand::Whole) {
+				return demand;
+			}
+		}
+	}
+	demand
+}
+
+/// The fields the readers of the row `row` read: every use must be a read of a named field.
+fn reads_of_row(ir: &Ir, row: ValueId) -> Demand {
+	let mut fields = HashSet::new();
+	for held in ir.uses(row) {
+		let name = ir.op(held.user).and_then(|user| match &user.kind {
+			OpKind::Expr(ExprOp::Field {
+				name,
+			}) if held.operand == 0 => Some(name.as_str().to_owned()),
+			OpKind::Expr(ExprOp::Access {
+				field,
+			}) if held.operand == 0 => Some(field.as_str().to_owned()),
+			OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => None,
+		});
+		match name {
+			Some(name) => {
+				fields.insert(name);
+			}
+			None => return Demand::Whole,
+		}
+	}
+	Demand::Fields(fields)
+}
+
+/// Erases the columns of the layers that no op reads, and the layers left with none, and answers
+/// how many ops went.
+///
+/// A layer is judged from the layers above it first, so a column only an erased column read goes
+/// in the next sweep.
+fn erase_dead_layer_columns(cx: &mut LoCx<'_>) -> Result<u32, IrError> {
+	let mut erased = 0;
+	for layer in live_ops(cx.ir).into_iter().rev() {
+		if cx.ir.op(layer).is_some() {
+			erased += prune_layer(cx, layer)?;
+		}
+	}
+	Ok(erased)
+}
+
+/// Erases the columns of `layer` that nothing reads, and answers `1` when it changed the layer.
+fn prune_layer(cx: &mut LoCx<'_>, layer: OpId) -> Result<u32, IrError> {
+	let Some(data) = cx.ir.op(layer) else {
+		return Ok(0);
+	};
+	let (OpKind::Logical(LogOp::Project(attrs)), [input], [result]) =
+		(&data.kind, data.operands.as_slice(), data.results.as_slice())
+	else {
+		return Ok(0);
+	};
+	let FieldsShape::Select(shape) = &attrs.fields else {
+		return Ok(0);
+	};
+	if !attrs.layer {
+		return Ok(0);
+	}
+	let (input, result) = (*input, *result);
+	let names = layer_column_names(attrs);
+	let singles = shape.iter().filter(|field| matches!(field, FieldShape::Single { .. })).count();
+	if singles != names.len() || names.is_empty() {
+		return Ok(0);
+	}
+	// The regions pair with the columns: one stored read each, then the `OMIT` paths, then one
+	// field frame each.
+	let omit = usize::from(attrs.omit);
+	let kind_of = |region: RegionId| cx.ir.region(region).map(|held| held.kind);
+	let reads: Vec<RegionId> = data
+		.regions
+		.iter()
+		.copied()
+		.filter(|region| kind_of(*region) == Some(RegionKind::Clause(ClauseRole::Projection)))
+		.collect();
+	let frames: Vec<RegionId> = data
+		.regions
+		.iter()
+		.copied()
+		.filter(|region| kind_of(*region) == Some(RegionKind::FieldFrame(FieldRole::Computed)))
+		.collect();
+	if reads.len() != names.len() + omit
+		|| frames.len() != names.len()
+		|| data.regions.len() != reads.len() + frames.len()
+	{
+		return Ok(0);
+	}
+	let Demand::Fields(needed) = demand_of_rows(cx.ir, cx.facts, cx.effects, result, 0) else {
+		return Ok(0);
+	};
+	let mut kept: Vec<bool> = names.iter().map(|name| needed.contains(name)).collect();
+	// A column another kept column of the layer reads stays: the frame of that column reads the
+	// row with the layer's columns set.
+	loop {
+		let mut grew = false;
+		for (at, frame) in frames.iter().enumerate() {
+			if !kept[at] {
+				continue;
+			}
+			match demand_of_regions(cx.ir, cx.facts, cx.effects, std::slice::from_ref(frame)) {
+				Demand::Whole => return Ok(0),
+				Demand::Fields(read) => {
+					for (other, name) in names.iter().enumerate() {
+						if read.contains(name) && !kept[other] {
+							kept[other] = true;
+							grew = true;
+						}
+					}
+				}
+			}
+		}
+		if !grew {
+			break;
+		}
+	}
+	if kept.iter().all(|held| *held) {
+		return Ok(0);
+	}
+	let mut keep_columns = kept.iter();
+	let new_shape: Vec<FieldShape> = shape
+		.iter()
+		.filter(|field| match field {
+			FieldShape::All => true,
+			FieldShape::Single {
+				..
+			} => keep_columns.next().copied().unwrap_or(true),
+		})
+		.cloned()
+		.collect();
+	let kept_reads: Vec<RegionId> = reads
+		.iter()
+		.take(names.len())
+		.zip(&kept)
+		.filter_map(|(region, held)| held.then_some(*region))
+		.chain(reads.iter().skip(names.len()).copied())
+		.collect();
+	let kept_frames: Vec<RegionId> =
+		frames.iter().zip(&kept).filter_map(|(region, held)| held.then_some(*region)).collect();
+	let (frame, snapshot, loc) = (data.frame, data.snapshot, data.loc.clone());
+	let new_attrs = ProjectAttrs {
+		fields: FieldsShape::Select(new_shape.into_boxed_slice()),
+		layer: true,
+		omit: attrs.omit,
+		names: attrs.names.clone(),
+		computed: attrs.computed.clone(),
+		sort_keys: attrs.sort_keys.clone(),
+	};
+	let ty = cx.ir.value(result).map(|value| value.ty.clone()).ok_or(IrError::Stale("value"))?;
+	let mut rw = Rewriter::new(&mut *cx.ir, &mut *cx.facts);
+	if kept.iter().all(|held| !*held) && omit == 0 {
+		rw.replace_all_uses(result, input)?;
+		rw.erase(layer, EliminationReason::DeadLayerColumn)?;
+		return Ok(1);
+	}
+	let spec = OpSpec {
+		kind: OpKind::Logical(LogOp::Project(Box::new(new_attrs))),
+		operands: smallvec![input],
+		results: smallvec![ty],
+		frame,
+		snapshot,
+		loc,
+	};
+	let replacement = rw.derived(&[layer], |rw| rw.create(InsertPoint::Before(layer), spec))?;
+	for region in kept_reads.into_iter().chain(kept_frames) {
+		rw.move_region(region, replacement)?;
+	}
+	let moved = rw
+		.ir()
+		.op(replacement)
+		.and_then(|data| data.results.first().copied())
+		.ok_or(IrError::Stale("op"))?;
+	rw.replace_all_uses(result, moved)?;
+	rw.erase(layer, EliminationReason::DeadLayerColumn)?;
+	Ok(1)
 }
 
 /// Erases the ops whose results are unread, whose effects are reads and whose failures are none,

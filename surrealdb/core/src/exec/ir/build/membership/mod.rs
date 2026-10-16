@@ -1,20 +1,23 @@
-//! Memberships the logical rules lifted into joins, put back as the predicates they were lifted
-//! from before a statement is bound.
+//! The memberships of a statement, in the form the binder binds them: `x IN (SELECT VALUE k FROM t
+//! WHERE c)`, its `NOT IN` form and the `CONTAINS` forms read as one, as a predicate over a
+//! statement nested in a filter, which the VM evaluates.
 //!
-//! The planner's logical rules decorrelate `x IN (SELECT VALUE k FROM t WHERE c)`, its `NOT IN`
-//! form and the `CONTAINS` forms the rules read as one, into semi and anti joins of the statement's
-//! rows with the subquery's. The VM evaluates a membership as a predicate over a statement nested
-//! in a filter, so the binder's input holds none of those joins: [`memberships_of`] rewrites each
-//! one into the filter it came from, at any depth of the statement, before the statement binds.
-//! The rows a membership keeps are the join's, because the lift never changes them.
+//! [`memberships_of`] first recognises the memberships a filter holds that run once as a join
+//! ([`lift`]), and then writes every semi and anti join of the statement, a front-end's own
+//! included, as the membership filter it stands for, at any depth of the statement, before the
+//! statement binds. The rows a membership keeps are the join's, because the lift never changes
+//! them.
 //!
 //! The rewrite runs on the binder's input, so everything the binder derives from a predicate (the
 //! computed fields a permission reads, the access a filter offers) is derived from the predicate
 //! as the VM evaluates it.
 
+mod lift;
+
 use std::borrow::Cow;
 use std::ops::ControlFlow;
 
+use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::logical::seam::invariant;
 use crate::expr::logical::{
@@ -33,18 +36,39 @@ pub(crate) fn is_membership_key(name: &str) -> bool {
 	name.starts_with(MEMBERSHIP_KEY)
 }
 
-/// Statement `op` with every semi and anti join the logical rules lifted out of a filter put back
-/// as the membership predicate it was lifted from, at any depth of the statement, the statements
-/// nested in its expressions included; `op` itself where it holds none.
+/// Statement `op` with every membership of a filter written as the predicate the binder binds: the
+/// memberships that run once as a join are recognised ([`lift`]), and every semi and anti join,
+/// those included, is written as the membership predicate it stands for, at any depth of the
+/// statement, the statements nested in its expressions included; `op` itself where it holds none.
+///
+/// `is_bound` says whether the statement binds a name around the point being bound, `registry`
+/// decides which calls are deterministic.
 ///
 /// A join lifted out of a table's permission is put back as a permission filter over its left
-/// input, under the frame and `AUTH LIMIT` it carries. The terms the rules moved beneath the join
-/// are judged before the membership, and the terms they held above it after it: the one
-/// conjunction, read left to right, as the predicate was written.
+/// input, under the frame and `AUTH LIMIT` it carries. The terms held beneath the join are judged
+/// before the membership, and the terms held above it after it: the one conjunction, read left to
+/// right.
 ///
 /// Answers an invariant error for a semi or anti join in a frame that holds no predicate, one with
 /// no key, and one whose further keys read a probe row that is not an object inside a permission.
-pub(crate) fn memberships_of(op: &LogicalOp) -> Result<Cow<'_, LogicalOp>, IrError> {
+pub(crate) fn memberships_of<'a>(
+	op: &'a LogicalOp,
+	registry: &FunctionRegistry,
+	is_bound: &dyn Fn(&str) -> bool,
+) -> Result<Cow<'a, LogicalOp>, IrError> {
+	let consults = lift::Consults {
+		is_bound,
+		registry,
+	};
+	match lift::lifted(op, consults) {
+		Some(lifted) => unlifted(&lifted).map(|unlifted| Cow::Owned(unlifted.into_owned())),
+		None => unlifted(op),
+	}
+}
+
+/// `op` with every semi and anti join written as the membership filter it stands for, at any depth
+/// of the statement; `op` itself where it holds none.
+fn unlifted(op: &LogicalOp) -> Result<Cow<'_, LogicalOp>, IrError> {
 	if !lifts_a_membership(op) {
 		return Ok(Cow::Borrowed(op));
 	}
@@ -56,7 +80,7 @@ pub(crate) fn memberships_of(op: &LogicalOp) -> Result<Cow<'_, LogicalOp>, IrErr
 						// The one conjunction the moved terms and the membership make is the
 						// predicate an access path is chosen from.
 						LogicalOp::Filter(membership) => match *membership.input {
-							LogicalOp::Filter(left) => LogicalOp::Filter(LogicalFilter {
+							LogicalOp::Filter(left) => merged_filters(LogicalFilter {
 								input: left.input,
 								predicate: LogicalExpr::Binary {
 									left: Box::new(left.predicate),
@@ -101,7 +125,7 @@ pub(crate) fn memberships_of(op: &LogicalOp) -> Result<Cow<'_, LogicalOp>, IrErr
 								expr: LogicalExpr::Break,
 							}),
 						);
-						**plan = memberships_of(&taken)?.into_owned();
+						**plan = unlifted(&taken)?.into_owned();
 					}
 					Ok::<(), IrError>(())
 				})
@@ -109,6 +133,22 @@ pub(crate) fn memberships_of(op: &LogicalOp) -> Result<Cow<'_, LogicalOp>, IrErr
 			Ok(node)
 		})
 		.map(Cow::Owned)
+}
+
+/// `filter` as one filter: the filters it stands directly over are merged into it, the predicate
+/// of the filter beneath first, so the conjuncts keep their written order.
+fn merged_filters(mut filter: LogicalFilter) -> LogicalOp {
+	while let LogicalOp::Filter(beneath) = *filter.input {
+		filter = LogicalFilter {
+			input: beneath.input,
+			predicate: LogicalExpr::Binary {
+				left: Box::new(beneath.predicate),
+				op: BinaryOperator::And,
+				right: Box::new(filter.predicate),
+			},
+		};
+	}
+	LogicalOp::Filter(filter)
 }
 
 /// Whether a conjunct of `predicate` is a membership [`membership_filter`] put back.
@@ -343,7 +383,7 @@ mod tests {
 	#[test]
 	fn a_semi_join_is_the_membership_it_was_lifted_from() {
 		let op = semi(JoinKind::Semi, vec![(field("x"), aliased("k"))], table("a"));
-		let LogicalOp::Filter(filter) = memberships_of(&op).expect("un-lifts").into_owned() else {
+		let LogicalOp::Filter(filter) = unlifted(&op).expect("un-lifts").into_owned() else {
 			panic!("a filter");
 		};
 		assert!(matches!(*filter.input, LogicalOp::Source(_)));
@@ -375,7 +415,7 @@ mod tests {
 	#[test]
 	fn an_anti_join_is_the_negated_membership() {
 		let op = semi(JoinKind::Anti, vec![(field("x"), aliased("k"))], table("a"));
-		let LogicalOp::Filter(filter) = memberships_of(&op).expect("un-lifts").into_owned() else {
+		let LogicalOp::Filter(filter) = unlifted(&op).expect("un-lifts").into_owned() else {
 			panic!("a filter");
 		};
 		assert!(matches!(
@@ -397,7 +437,7 @@ mod tests {
 			vec![(field("x"), aliased("k")), (field("y"), aliased("j"))],
 			values,
 		);
-		let LogicalOp::Filter(filter) = memberships_of(&op).expect("un-lifts").into_owned() else {
+		let LogicalOp::Filter(filter) = unlifted(&op).expect("un-lifts").into_owned() else {
 			panic!("a filter");
 		};
 		let LogicalExpr::Binary {
@@ -421,7 +461,7 @@ mod tests {
 	#[test]
 	fn a_statement_with_no_membership_is_borrowed() {
 		let op = table("a");
-		assert!(matches!(memberships_of(&op), Ok(Cow::Borrowed(_))));
+		assert!(matches!(unlifted(&op), Ok(Cow::Borrowed(_))));
 	}
 
 	/// A join lifted out of a permission is that permission's predicate again.
@@ -436,8 +476,7 @@ mod tests {
 			RelationAlias::new(0),
 			EvalFrame::permission(None),
 		));
-		let LogicalOp::PermissionFilter(filter) =
-			memberships_of(&op).expect("un-lifts").into_owned()
+		let LogicalOp::PermissionFilter(filter) = unlifted(&op).expect("un-lifts").into_owned()
 		else {
 			panic!("a permission filter");
 		};

@@ -349,10 +349,10 @@ pub(crate) fn strip_knn_and_matches_from_condition(cond: &LogicalExpr) -> Option
 /// Whether a MATCHES operator appears in `expr`, looking through operator
 /// applications and call arguments. Other shapes (a field's own parts, an
 /// `IF`, a subquery) are not searched: a MATCHES inside them has no index
-/// context of the enclosing scan to resolve against. The logical rules'
-/// `mentions_index_operator` answers a different question — whether a
-/// conjunct names an index of its statement anywhere inside it, so that no
-/// rule moves it out of that statement — and so searches every shape.
+/// context of the enclosing scan to resolve against. `mentions_index_operator`
+/// (`ir/build/inline.rs`) answers a different question — whether an expression
+/// names an index of its statement anywhere inside it, so that it never leaves
+/// that statement — and so searches every shape.
 pub(crate) fn expr_contains_matches(expr: &LogicalExpr) -> bool {
 	match expr {
 		LogicalExpr::Binary {

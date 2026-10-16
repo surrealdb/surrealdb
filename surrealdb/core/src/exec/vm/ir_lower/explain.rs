@@ -1,11 +1,13 @@
 //! The tree `EXPLAIN` prints for the physical plan of a statement.
 //!
 //! [`explained_tree`] reads the plan the operand of a `phys.explain` stands for and builds the
-//! display nodes ([`ExplainNode`]) the runtime renders: one node per physical op, with the
-//! attributes the op's own attributes, operands and regions state. Nothing here plans or decides:
-//! where the plan prints a clause as written, the text is the one the binder recorded on the op
-//! that computes it ([`Location::text`](crate::exec::ir::core::location::Location::text)), so the
-//! tree prints what the statement said and not what the IR computes.
+//! tree ([`PlanTree`]) `EXPLAIN` renders: one node per physical op, with the attributes the op's
+//! own attributes, operands and regions state. The tree is plain data that
+//! [`render`](crate::exec::vm::explain::render) turns into the value `EXPLAIN` answers. Nothing
+//! here plans or decides: where the plan prints a clause as written, the text is the one the binder
+//! recorded on the op that computes it
+//! ([`Location::text`](crate::exec::ir::core::location::Location::text)), so the tree prints what
+//! the statement said and not what the IR computes.
 //!
 //! # What a node reads
 //!
@@ -23,18 +25,17 @@
 //!   `rechecked`) is the scan's own too, and prints nothing.
 //! - A caller whose reads are permission checked is shown `<permission>` where a definer's
 //!   permission predicate would print, `<computed>` where a computed body would, and no metrics
-//!   beneath a node that enforces a definer's declaration ([`ExplainNode::hides_metrics`]).
-
-use std::sync::Arc;
+//!   beneath a node that enforces a definer's declaration ([`PlanNode::hides_metrics`]).
 
 use surrealdb_strand::TableName;
 use surrealdb_types::ToSql;
 
 use super::super::plain::ValueData;
-use super::super::program::{Analysis, BlockInstr, Instr, Operand, Pipeline, Program, Source};
+use super::super::program::{Analysis, BlockInstr, Instr, Operand, Program, Source};
 use super::emit::Emitter;
-use super::expr::{Claim, Lowerer, Needs};
-use super::pipe::{PoolBase, ReadScope, lower_scope};
+use super::explain_hook::{Explained, Purpose};
+use super::expr::Lowerer;
+use super::pipe::{PoolBase, lower_scope};
 use super::place::{Lowered, Provenance};
 use super::read::{IndexResolver, bitmap_plan, producer_of};
 use super::units::LowerCx;
@@ -58,12 +59,8 @@ use crate::exec::ir::phys::ops::{
 	KeyRangeShape, KnnTargetShape, MatchStepAttrs, OmissionShape, PhysOp, PhysTag, ProjectionShape,
 	SortKeyReadShape, WriteSubjectsShape,
 };
-use crate::exec::metrics::OperatorMetrics;
-use crate::exec::operators::scan::{BitmapNode, MergeMode};
-use crate::exec::planner::bitmap_plan_to_node;
-use crate::exec::vm::explain::{
-	AnalysedPlan, ExplainChild, ExplainNode, MeasureKind, MeasureSpec, Measured,
-};
+use crate::exec::operators::scan::MergeMode;
+use crate::exec::vm::explain::{MeasureKind, MeasureSpec, PlanNode, PlanTree};
 use crate::exec::vm::payload::{JoinBuild, JoinMatch, LOOKUP_EVALUATIONS, ValuesRead};
 use crate::expr::BinaryOperator;
 use crate::expr::logical::{EvalMode, OutputPath};
@@ -81,20 +78,6 @@ pub(crate) struct ExplainScope<'a> {
 	pub(crate) indexes: &'a dyn IndexResolver,
 }
 
-/// What the tree is for.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Purpose {
-	/// `EXPLAIN`: the plan alone.
-	Plan,
-	/// `EXPLAIN ANALYZE` of a statement: every node reports the one set of metrics the run
-	/// records, and a bitmap tree the run decided by is measured by evaluating it again after the
-	/// run.
-	Measured,
-	/// `EXPLAIN ANALYZE` of a statement a block holds among others: every node reports the one
-	/// set of metrics that run records, and a bitmap tree is described by its nodes alone.
-	Described,
-}
-
 /// The tree of the plan the op `explain`, a `phys.explain`, explains.
 ///
 /// Answers an internal error for an op that is not a `phys.explain` and for a plan whose ops or
@@ -104,7 +87,7 @@ pub(crate) fn explained_tree(
 	explain: OpId,
 	scope: &ExplainScope<'_>,
 	purpose: Purpose,
-) -> Result<Arc<ExplainNode>, IrError> {
+) -> Result<PlanTree, IrError> {
 	let data = ir.op(explain).ok_or(IrError::Stale("ir_lower::explain: op"))?;
 	let OpKind::Phys(PhysOp::Explain {
 		..
@@ -117,30 +100,29 @@ pub(crate) fn explained_tree(
 	if let Some(refusal) = refused_statement(ir, input) {
 		return Err(IrError::Rejected(Box::new(refusal)));
 	}
-	let metrics = (purpose != Purpose::Plan).then(|| Arc::new(OperatorMetrics::new()));
 	let mut walk = TreeWalk {
 		ir,
 		scope,
-		metrics: metrics.as_ref(),
+		analysed: purpose != Purpose::Plan,
 		measure: purpose == Purpose::Measured,
 		versioned: false,
-		measured: Vec::new(),
+		measures: Vec::new(),
 		paging: None,
 		prefilter: None,
 		topk: false,
 		depth: 0,
 	};
-	let mut root = walk.explained(input)?;
-	if purpose == Purpose::Measured {
-		root.measured = std::mem::take(&mut walk.measured);
-	}
-	Ok(Arc::new(root))
+	let root = walk.explained(input)?;
+	Ok(PlanTree {
+		root,
+		measures: walk.measures,
+	})
 }
 
 /// The name of the operator at the top of the plan `EXPLAIN` renders for the statement the region
 /// `region` holds, as an expression holding that statement names it. `None` where the plan cannot
 /// be rendered without the indexes planning resolved.
-pub(super) fn region_root_name(ir: &Ir, region: RegionId) -> Option<&'static str> {
+pub(super) fn region_root_name(ir: &Ir, region: RegionId) -> Option<String> {
 	let scope = ExplainScope {
 		checked: false,
 		indexes: &super::read::NoIndexes,
@@ -148,10 +130,10 @@ pub(super) fn region_root_name(ir: &Ir, region: RegionId) -> Option<&'static str
 	let mut walk = TreeWalk {
 		ir,
 		scope: &scope,
-		metrics: None,
+		analysed: false,
 		measure: false,
 		versioned: false,
-		measured: Vec::new(),
+		measures: Vec::new(),
 		paging: None,
 		prefilter: None,
 		topk: false,
@@ -200,6 +182,74 @@ fn refused_statement(ir: &Ir, value: ValueId) -> Option<crate::exec::vm::payload
 	found
 }
 
+/// The tree that displays the bitmap plan `plan`: one node per node of the plan, none of which
+/// redacts or hides anything.
+fn bitmap_tree(plan: &access_path::BitmapPlan) -> PlanNode {
+	use access_path::BitmapPlan;
+	let node = |name: &str, attrs: Vec<(String, String)>, children: Vec<PlanNode>| {
+		PlanNode::new(name, ContextLevel::Database, attrs, children)
+	};
+	match plan {
+		BitmapPlan::BTree {
+			index_ref,
+			access,
+		} => node(
+			"BitmapIndexScan",
+			vec![
+				("index".to_string(), index_ref.name.to_string()),
+				("access".to_string(), access.describe()),
+			],
+			vec![],
+		),
+		BitmapPlan::FullText {
+			index_ref,
+			query,
+			..
+		} => node(
+			"BitmapFullTextScan",
+			vec![
+				("index".to_string(), index_ref.name.to_string()),
+				("query".to_string(), query.clone()),
+			],
+			vec![],
+		),
+		BitmapPlan::Graph {
+			source,
+			direction,
+			edge_tables,
+		} => node(
+			"BitmapGraphScan",
+			vec![
+				("source".to_string(), source.to_sql()),
+				(
+					"direction".to_string(),
+					match direction {
+						crate::expr::Dir::In => "<-",
+						crate::expr::Dir::Out => "->",
+						crate::expr::Dir::Both => "<->",
+					}
+					.to_string(),
+				),
+				(
+					"edges".to_string(),
+					edge_tables.iter().map(|t| t.to_string()).collect::<Vec<_>>().join(", "),
+				),
+			],
+			vec![],
+		),
+		BitmapPlan::And(children) => {
+			node("BitmapAnd", vec![], children.iter().map(bitmap_tree).collect())
+		}
+		BitmapPlan::Or(children) => {
+			node("BitmapOr", vec![], children.iter().map(bitmap_tree).collect())
+		}
+		BitmapPlan::AndNot {
+			base,
+			subtract,
+		} => node("BitmapAndNot", vec![], vec![bitmap_tree(base), bitmap_tree(subtract)]),
+	}
+}
+
 /// The nodes of rows that no projection has shaped: the sources, and the ops that keep the rows
 /// they are given.
 const UNPROJECTED_ROWS: &[&str] = &[
@@ -224,20 +274,22 @@ const UNPROJECTED_ROWS: &[&str] = &[
 type Projected = (&'static str, Vec<(String, String)>);
 
 /// The statements nested in the membership conjuncts of a filter, which print beneath it.
-type Memberships = Vec<ExplainChild>;
+type Memberships = Vec<PlanNode>;
 
 /// How a plan is turned into nodes.
 struct TreeWalk<'a> {
 	ir: &'a Ir,
 	scope: &'a ExplainScope<'a>,
-	/// The metrics every node reports under `EXPLAIN ANALYZE`.
-	metrics: Option<&'a Arc<OperatorMetrics>>,
+	/// Whether the tree is for `EXPLAIN ANALYZE`, whose nodes report the one set of metrics the
+	/// run records.
+	analysed: bool,
 	/// Whether the bitmap trees of the plan are measured by evaluating them after the statement
 	/// runs, rather than described with the metrics the nodes share.
 	measure: bool,
 	/// Whether the plan being walked reads at a `VERSION`.
 	versioned: bool,
-	measured: Vec<Arc<Measured>>,
+	/// The bitmap trees the plan is measured by.
+	measures: Vec<MeasureSpec>,
 	/// The paging a scan below takes, for the scan to show as its own: set where a `Limit` stands
 	/// directly over the scan, taken by the scan.
 	paging: Option<Vec<(String, String)>>,
@@ -256,9 +308,9 @@ impl<'a> TreeWalk<'a> {
 		name: &'static str,
 		context: ContextLevel,
 		attrs: Vec<(String, String)>,
-		children: Vec<ExplainChild>,
-	) -> ExplainNode {
-		ExplainNode::new(name, context, attrs, children, self.metrics)
+		children: Vec<PlanNode>,
+	) -> PlanNode {
+		PlanNode::new(name, context, attrs, children)
 	}
 
 	// -----------------------------------------------------------------------------------------
@@ -266,7 +318,7 @@ impl<'a> TreeWalk<'a> {
 	// -----------------------------------------------------------------------------------------
 
 	/// The node of the plan that delivers `value`.
-	fn plan_of(&mut self, value: ValueId) -> Result<ExplainNode, IrError> {
+	fn plan_of(&mut self, value: ValueId) -> Result<PlanNode, IrError> {
 		if self.depth >= MAX_DEPTH {
 			return Err(IrError::Capacity("explained plan depth"));
 		}
@@ -276,7 +328,7 @@ impl<'a> TreeWalk<'a> {
 		node
 	}
 
-	fn plan_of_value(&mut self, value: ValueId) -> Result<ExplainNode, IrError> {
+	fn plan_of_value(&mut self, value: ValueId) -> Result<PlanNode, IrError> {
 		let ValueDef::OpResult {
 			op,
 			..
@@ -302,7 +354,7 @@ impl<'a> TreeWalk<'a> {
 	}
 
 	/// The node of the plan `kind`, the op `op`, delivers.
-	fn plan_of_op(&mut self, op: OpId, kind: &PhysOp) -> Result<ExplainNode, IrError> {
+	fn plan_of_op(&mut self, op: OpId, kind: &PhysOp) -> Result<PlanNode, IrError> {
 		let data = self.ir.op(op).ok_or(IrError::Stale("ir_lower::explain: op"))?;
 		let operands = data.operands.as_slice();
 		let regions = data.regions.as_slice();
@@ -348,7 +400,7 @@ impl<'a> TreeWalk<'a> {
 				Ok(self.expression(result))
 			}
 			PhysOp::Only => {
-				let child = self.plan_of(self.operand(operands, 0)?)?.shared();
+				let child = self.plan_of(self.operand(operands, 0)?)?;
 				Ok(self.node("UnwrapExactlyOne", ContextLevel::Root, vec![], vec![child]))
 			}
 			PhysOp::VersionScope => {
@@ -360,7 +412,7 @@ impl<'a> TreeWalk<'a> {
 					"VersionScope",
 					ContextLevel::Database,
 					vec![("version".to_string(), version)],
-					vec![child?.shared()],
+					vec![child?],
 				))
 			}
 			PhysOp::Timeout => {
@@ -368,7 +420,7 @@ impl<'a> TreeWalk<'a> {
 				let region =
 					*regions.first().ok_or_else(|| invariant("a timeout has no region"))?;
 				let yielded = self.yielded(region)?;
-				let child = self.plan_of(yielded)?.shared();
+				let child = self.plan_of(yielded)?;
 				Ok(self.node(
 					"Timeout",
 					ContextLevel::Root,
@@ -379,7 +431,7 @@ impl<'a> TreeWalk<'a> {
 			PhysOp::Subquery => {
 				let region =
 					*regions.first().ok_or_else(|| invariant("a subquery has no region"))?;
-				let child = self.nested(region)?.shared();
+				let child = self.nested(region)?;
 				Ok(self.node("Subquery", ContextLevel::Root, vec![], vec![child]))
 			}
 			PhysOp::TableScan(_)
@@ -437,7 +489,7 @@ impl<'a> TreeWalk<'a> {
 					"Fetch",
 					ContextLevel::Database,
 					vec![("fetches".to_string(), fetches.join(", "))],
-					vec![node.shared()],
+					vec![node],
 				))
 			}
 			PhysOp::Write(attrs) => {
@@ -451,7 +503,7 @@ impl<'a> TreeWalk<'a> {
 				};
 				let children = match attrs.subjects {
 					WriteSubjectsShape::Rows | WriteSubjectsShape::Guaranteed => {
-						vec![self.write_rows(self.operand(operands, 0)?)?.shared()]
+						vec![self.write_rows(self.operand(operands, 0)?)?]
 					}
 					WriteSubjectsShape::Targets
 					| WriteSubjectsShape::Inserts
@@ -482,7 +534,7 @@ impl<'a> TreeWalk<'a> {
 				self.sequence(region)
 			}
 			PhysOp::Let(attrs) => {
-				let child = self.plan_of(self.operand(operands, 0)?)?.shared();
+				let child = self.plan_of(self.operand(operands, 0)?)?;
 				Ok(self.node(
 					"Let",
 					ContextLevel::Root,
@@ -500,7 +552,7 @@ impl<'a> TreeWalk<'a> {
 				))
 			}
 			PhysOp::Return => {
-				let child = self.plan_of(self.operand(operands, 0)?)?.shared();
+				let child = self.plan_of(self.operand(operands, 0)?)?;
 				Ok(self.node("Return", ContextLevel::Root, vec![], vec![child]))
 			}
 			PhysOp::If {
@@ -609,20 +661,20 @@ impl<'a> TreeWalk<'a> {
 	/// The plan of the statement whose rows `value` holds. A statement delivers projected rows:
 	/// rows its plan does not project, a grouped statement's among them, print beneath
 	/// `SelectProject` with every field, above whatever sorts and pages them.
-	fn statement_plan(&mut self, value: ValueId) -> Result<ExplainNode, IrError> {
+	fn statement_plan(&mut self, value: ValueId) -> Result<PlanNode, IrError> {
 		let node = self.plan_of(value)?;
-		if self.aggregated(value) || UNPROJECTED_ROWS.contains(&node.name) {
+		if self.aggregated(value) || UNPROJECTED_ROWS.contains(&node.name.as_str()) {
 			return Ok(self.projected_whole_always(node));
 		}
 		Ok(node)
 	}
 
-	fn projected_whole_always(&self, node: ExplainNode) -> ExplainNode {
+	fn projected_whole_always(&self, node: PlanNode) -> PlanNode {
 		self.node(
 			"SelectProject",
 			ContextLevel::Database,
 			vec![("projections".to_string(), "*".to_string())],
-			vec![node.shared()],
+			vec![node],
 		)
 	}
 
@@ -632,7 +684,7 @@ impl<'a> TreeWalk<'a> {
 	/// lists: the one statement it holds, a `Sequence` of the statements of more, or, for a
 	/// statement that leaves no op in the plan, the text the subquery carries. A `LET` standing
 	/// alone is answered in the context of the plan of its value.
-	fn explained(&mut self, value: ValueId) -> Result<ExplainNode, IrError> {
+	fn explained(&mut self, value: ValueId) -> Result<PlanNode, IrError> {
 		let region = producer_of(self.ir, value).ok().and_then(|op| {
 			let data = self.ir.op(op)?;
 			match (&data.kind, data.regions.as_slice()) {
@@ -654,7 +706,7 @@ impl<'a> TreeWalk<'a> {
 			1 => {
 				let mut item = items.remove(0);
 				if item.name == "Let"
-					&& let Some(context) = item.first_child_context()
+					&& let Some(context) = item.children.first().map(|child| child.context)
 				{
 					item.context = context;
 				}
@@ -664,7 +716,7 @@ impl<'a> TreeWalk<'a> {
 				"Sequence",
 				ContextLevel::Root,
 				vec![("statements".to_string(), count.to_string())],
-				items.into_iter().map(ExplainNode::shared).collect(),
+				items,
 			)),
 		}
 	}
@@ -697,7 +749,7 @@ impl<'a> TreeWalk<'a> {
 
 	/// The plan a nested statement's region holds. The `VERSION` in force beneath a statement's
 	/// plan belongs to that statement alone.
-	fn nested(&mut self, region: RegionId) -> Result<ExplainNode, IrError> {
+	fn nested(&mut self, region: RegionId) -> Result<PlanNode, IrError> {
 		let outer = std::mem::replace(&mut self.versioned, false);
 		let node = self.region_plan(region);
 		self.versioned = outer;
@@ -705,7 +757,7 @@ impl<'a> TreeWalk<'a> {
 	}
 
 	/// The plan a region holds: the plan of the one value it yields, or of its one statement.
-	fn region_plan(&mut self, region: RegionId) -> Result<ExplainNode, IrError> {
+	fn region_plan(&mut self, region: RegionId) -> Result<PlanNode, IrError> {
 		let last = self
 			.ir
 			.region(region)
@@ -725,7 +777,7 @@ impl<'a> TreeWalk<'a> {
 						"Sequence",
 						ContextLevel::Root,
 						vec![("statements".to_string(), count.to_string())],
-						items.into_iter().map(ExplainNode::shared).collect(),
+						items,
 					)),
 				}
 			}
@@ -733,7 +785,7 @@ impl<'a> TreeWalk<'a> {
 	}
 
 	/// The plans of the statements a list holds, in order: see [`Self::statement_ops`].
-	fn statements(&mut self, region: RegionId) -> Result<Vec<ExplainNode>, IrError> {
+	fn statements(&mut self, region: RegionId) -> Result<Vec<PlanNode>, IrError> {
 		let mut items = Vec::new();
 		for op in self.statement_ops(region)? {
 			let data = self.ir.op(op).ok_or(IrError::Stale("ir_lower::explain: op"))?;
@@ -778,7 +830,7 @@ impl<'a> TreeWalk<'a> {
 	/// The plans of the statements of the list `region` holds: its statements, then the value it
 	/// yields where no statement computes that value and the value is one the statement wrote.
 	/// The `NONE` a list that ends in a `LET` yields is no statement.
-	fn list(&mut self, region: RegionId) -> Result<Vec<ExplainNode>, IrError> {
+	fn list(&mut self, region: RegionId) -> Result<Vec<PlanNode>, IrError> {
 		let mut items = self.statements(region)?;
 		if let Ok(yielded) = self.yielded(region)
 			&& let Ok(producer) = producer_of(self.ir, yielded)
@@ -792,17 +844,17 @@ impl<'a> TreeWalk<'a> {
 	}
 
 	/// The `Sequence` of the statements of the list `region` holds.
-	fn sequence(&mut self, region: RegionId) -> Result<ExplainNode, IrError> {
+	fn sequence(&mut self, region: RegionId) -> Result<PlanNode, IrError> {
 		let items = self.list(region)?;
 		Ok(self.sequence_of(items))
 	}
 
-	fn sequence_of(&self, items: Vec<ExplainNode>) -> ExplainNode {
+	fn sequence_of(&self, items: Vec<PlanNode>) -> PlanNode {
 		self.node(
 			"Sequence",
 			ContextLevel::Root,
 			vec![("statements".to_string(), items.len().to_string())],
-			items.into_iter().map(ExplainNode::shared).collect(),
+			items,
 		)
 	}
 
@@ -815,13 +867,13 @@ impl<'a> TreeWalk<'a> {
 	}
 
 	/// The conditions and bodies of the `IF` `op` and of the `IF`s that follow it, then the `ELSE`.
-	fn branches(&mut self, op: OpId, out: &mut Vec<ExplainChild>) -> Result<(), IrError> {
+	fn branches(&mut self, op: OpId, out: &mut Vec<PlanNode>) -> Result<(), IrError> {
 		let data = self.ir.op(op).ok_or(IrError::Stale("ir_lower::explain: op"))?;
 		let condition = self.operand(data.operands.as_slice(), 0)?;
 		let [then, otherwise] = <[RegionId; 2]>::try_from(data.regions.as_slice())
 			.map_err(|_| invariant("an if holds a region per arm"))?;
-		out.push(self.plan_of(condition)?.shared());
-		out.push(self.sequence(then)?.shared());
+		out.push(self.plan_of(condition)?);
+		out.push(self.sequence(then)?);
 		// An `ELSE` that holds one `IF` and nothing else is an `ELSE IF`.
 		let statements = self.statement_ops(otherwise)?;
 		if let [chained] = statements.as_slice()
@@ -833,15 +885,15 @@ impl<'a> TreeWalk<'a> {
 		}
 		let items = self.list(otherwise)?;
 		if !items.is_empty() {
-			out.push(self.sequence_of(items).shared());
+			out.push(self.sequence_of(items));
 		}
 		Ok(())
 	}
 
 	/// A `FOR`: its range and its body.
-	fn foreach(&mut self, op: OpId) -> Result<ExplainNode, IrError> {
+	fn foreach(&mut self, op: OpId) -> Result<PlanNode, IrError> {
 		let data = self.ir.op(op).ok_or(IrError::Stale("ir_lower::explain: op"))?;
-		let range = self.plan_of(self.operand(data.operands.as_slice(), 0)?)?.shared();
+		let range = self.plan_of(self.operand(data.operands.as_slice(), 0)?)?;
 		let region = *data.regions.first().ok_or_else(|| invariant("a FOR has no body"))?;
 		// The parameter the loop states; a loop built with none prints the name the binder gave
 		// its element, if any.
@@ -863,7 +915,7 @@ impl<'a> TreeWalk<'a> {
 			})
 			.map(|name| format!("${name}"))
 			.unwrap_or_default();
-		let body = self.sequence(region)?.shared();
+		let body = self.sequence(region)?;
 		Ok(self.node(
 			"Foreach",
 			ContextLevel::Database,
@@ -873,7 +925,7 @@ impl<'a> TreeWalk<'a> {
 	}
 
 	/// The rows of the loop that delivers a write's subjects, as the write's input.
-	fn write_rows(&mut self, subjects: ValueId) -> Result<ExplainNode, IrError> {
+	fn write_rows(&mut self, subjects: ValueId) -> Result<PlanNode, IrError> {
 		let producer = producer_of(self.ir, subjects)?;
 		let data = self.ir.op(producer).ok_or(IrError::Stale("ir_lower::explain: op"))?;
 		match &data.kind {
@@ -886,7 +938,7 @@ impl<'a> TreeWalk<'a> {
 	}
 
 	/// The rows a write reads its subjects from: the plan of `source`, each row projected whole.
-	fn write_source(&mut self, source: ValueId) -> Result<ExplainNode, IrError> {
+	fn write_source(&mut self, source: ValueId) -> Result<PlanNode, IrError> {
 		let node = self.plan_of(source)?;
 		Ok(self.projected_whole(node))
 	}
@@ -921,9 +973,7 @@ impl<'a> TreeWalk<'a> {
 		}) = &data.kind
 		{
 			return match explained_tree(self.ir, op, self.scope, Purpose::Plan) {
-				Ok(tree) => {
-					crate::exec::operators::ExplainPlan::render(tree.as_ref(), *format).to_sql()
-				}
+				Ok(tree) => crate::exec::vm::explain::render(&tree, *format, None).to_sql(),
 				Err(_) => PhysTag::Explain.mnemonic().to_string(),
 			};
 		}
@@ -967,7 +1017,7 @@ impl<'a> TreeWalk<'a> {
 	}
 
 	/// The node of a value that no plan stands for: the statement is the expression.
-	fn expression(&self, value: ValueId) -> ExplainNode {
+	fn expression(&self, value: ValueId) -> PlanNode {
 		self.node(
 			"ExprPlan",
 			ContextLevel::Root,
@@ -1086,15 +1136,12 @@ impl<'a> TreeWalk<'a> {
 						.first()
 						.ok_or_else(|| invariant("a subquery expression has no region"))?;
 					let plan = self.nested(nested)?;
-					children.push(
-						self.node(
-							"Subquery",
-							ContextLevel::Database,
-							vec![("strategy".to_string(), strategy.to_string())],
-							vec![plan.shared()],
-						)
-						.shared(),
-					);
+					children.push(self.node(
+						"Subquery",
+						ContextLevel::Database,
+						vec![("strategy".to_string(), strategy.to_string())],
+						vec![plan],
+					));
 				}
 				None => {
 					let text = self.text_of(*conjunct);
@@ -1151,30 +1198,21 @@ impl<'a> TreeWalk<'a> {
 		index: &IndexRef,
 		access: &BTreeAccess,
 		direction: Direction,
-	) -> Result<ExplainNode, IrError> {
+	) -> Result<PlanNode, IrError> {
 		let mut attrs = index_scan_attrs(table, index.index.as_str(), access, direction);
 		attrs.extend(self.paging.take().unwrap_or_default());
 		let scan = self.node("IndexScan", ContextLevel::Database, attrs, vec![]);
 		Ok(if access_repeats_records(&self.resolve(index)?, access) {
-			self.node("DistinctRecords", ContextLevel::Database, vec![], vec![scan.shared()])
+			self.node("DistinctRecords", ContextLevel::Database, vec![], vec![scan])
 		} else {
 			scan
 		})
 	}
 
-	/// The children that display a bitmap tree: its nodes, or its nodes under the metrics of this
-	/// walk.
-	fn bitmap_nodes(&self, bitmap: Arc<BitmapNode>) -> Vec<ExplainChild> {
-		let bitmap = ExplainChild::bitmap(bitmap);
-		if self.metrics.is_some() {
-			vec![bitmap.described(self.metrics).shared()]
-		} else {
-			vec![bitmap]
-		}
-	}
-
-	fn bitmap_of(&self, shape: &BitmapShape) -> Result<Arc<BitmapNode>, IrError> {
-		Ok(bitmap_plan_to_node(self.bitmap_plan_of(shape)?))
+	/// The children that display the bitmap tree `plan`. Under `EXPLAIN ANALYZE` its nodes report
+	/// the metrics the nodes of this walk share.
+	fn bitmap_nodes(&self, plan: &access_path::BitmapPlan) -> Vec<PlanNode> {
+		vec![bitmap_tree(plan)]
 	}
 
 	fn bitmap_plan_of(&self, shape: &BitmapShape) -> Result<access_path::BitmapPlan, IrError> {
@@ -1186,29 +1224,27 @@ impl<'a> TreeWalk<'a> {
 	/// it decided.
 	fn measured_beneath(
 		&mut self,
-		node: &mut ExplainNode,
+		node: &mut PlanNode,
 		table: &TableName,
 		plan: access_path::BitmapPlan,
 		kind: MeasureKind,
 	) -> Result<(), IrError> {
+		let tree = bitmap_tree(&plan);
 		let root = ValueData::new(plan, "a measured bitmap plan")
 			.map_err(|_| invariant("a measured bitmap plan holds a closure value"))?;
-		let measured = Measured::of(MeasureSpec {
+		let at = u16::try_from(self.measures.len())
+			.map_err(|_| IrError::Capacity("measured bitmap trees"))?;
+		node.children = vec![tree];
+		node.measure = Some(at);
+		self.measures.push(MeasureSpec {
 			table: table.clone(),
 			root,
 			kind,
 		});
-		let at = u16::try_from(self.measured.len())
-			.map_err(|_| IrError::Capacity("measured bitmap trees"))?;
-		node.children = vec![ExplainChild::bitmap(Arc::clone(&measured.bitmap)).into_operator()];
-		node.tier.clone_from(&measured.tier);
-		node.fallback.clone_from(&measured.fallback);
-		node.measure = Some(at);
-		self.measured.push(Arc::new(measured));
 		Ok(())
 	}
 
-	fn source(&mut self, op: OpId, kind: &PhysOp) -> Result<ExplainNode, IrError> {
+	fn source(&mut self, op: OpId, kind: &PhysOp) -> Result<PlanNode, IrError> {
 		let data = self.ir.op(op).ok_or(IrError::Stale("ir_lower::explain: op"))?;
 		let operands = data.operands.as_slice();
 		let regions = data.regions.as_slice();
@@ -1280,7 +1316,7 @@ impl<'a> TreeWalk<'a> {
 			PhysOp::IndexUnion(attrs) => {
 				let mut children = Vec::with_capacity(attrs.branches.len());
 				for branch in &attrs.branches {
-					children.push(self.branch(&attrs.table, branch)?.shared());
+					children.push(self.branch(&attrs.table, branch)?);
 				}
 				let mut union = vec![
 					("table".to_string(), attrs.table.to_string()),
@@ -1324,7 +1360,7 @@ impl<'a> TreeWalk<'a> {
 					self.measured_beneath(&mut node, &attrs.table, plan, kind)?;
 					return Ok(node);
 				}
-				let children = self.bitmap_nodes(bitmap_plan_to_node(plan));
+				let children = self.bitmap_nodes(&plan);
 				Ok(self.node("BitmapScan", ContextLevel::Database, table, children))
 			}
 			PhysOp::FullTextScan(attrs) => Ok(self.node(
@@ -1360,7 +1396,7 @@ impl<'a> TreeWalk<'a> {
 			PhysOp::Union => {
 				let mut children = Vec::with_capacity(operands.len());
 				for value in operands {
-					children.push(self.plan_of(*value)?.shared());
+					children.push(self.plan_of(*value)?);
 				}
 				Ok(self.node("Union", ContextLevel::Database, vec![], children))
 			}
@@ -1373,7 +1409,7 @@ impl<'a> TreeWalk<'a> {
 		&mut self,
 		table: &TableName,
 		branch: &IndexBranchShape,
-	) -> Result<ExplainNode, IrError> {
+	) -> Result<PlanNode, IrError> {
 		match &branch.read {
 			BranchReadShape::BTree(access) => {
 				self.btree_scan(table, &branch.index, access, branch.direction)
@@ -1497,7 +1533,7 @@ impl<'a> TreeWalk<'a> {
 		attrs: &crate::exec::ir::phys::ops::CountAttrs,
 		operands: &[ValueId],
 		regions: &[RegionId],
-	) -> Result<ExplainNode, IrError> {
+	) -> Result<PlanNode, IrError> {
 		match &attrs.shape {
 			CountShape::All {
 				source,
@@ -1530,8 +1566,8 @@ impl<'a> TreeWalk<'a> {
 				)?;
 				let children = match bitmap {
 					Some(shape) => {
-						let node = self.bitmap_of(shape)?;
-						self.bitmap_nodes(node)
+						let plan = self.bitmap_plan_of(shape)?;
+						self.bitmap_nodes(&plan)
 					}
 					None => vec![],
 				};
@@ -1553,7 +1589,7 @@ impl<'a> TreeWalk<'a> {
 		attrs: &crate::exec::ir::phys::ops::KnnScanAttrs,
 		operands: &[ValueId],
 		regions: &[RegionId],
-	) -> Result<ExplainNode, IrError> {
+	) -> Result<PlanNode, IrError> {
 		let index = self.resolve(&attrs.index)?;
 		// A query vector known only when the statement runs is evaluated as the scan opens: the
 		// plan holds no dimension for it. A parameter of the request is known when the statement
@@ -1584,7 +1620,7 @@ impl<'a> TreeWalk<'a> {
 		];
 		// A run that built its rows from the ids the search returned, and whose search judged no
 		// candidate on its record, read no record.
-		if attrs.ids_only && attrs.filter.is_none() && self.metrics.is_some() {
+		if attrs.ids_only && attrs.filter.is_none() && self.analysed {
 			scan.push(("records".to_string(), "not read".to_string()));
 		}
 		// The conjunct the search judges on each candidate: what the allow-list does not cover
@@ -1630,7 +1666,7 @@ impl<'a> TreeWalk<'a> {
 				Ok(node)
 			}
 			Some(plan) => {
-				let children = self.bitmap_nodes(bitmap_plan_to_node(plan));
+				let children = self.bitmap_nodes(&plan);
 				Ok(self.node("KnnScan", ContextLevel::Database, scan, children))
 			}
 			None => Ok(self.node("KnnScan", ContextLevel::Database, scan, vec![])),
@@ -1643,7 +1679,7 @@ impl<'a> TreeWalk<'a> {
 
 	/// A select loop: the rows of its source, with the ops of its body wrapped around them in
 	/// order.
-	fn select_loop(&mut self, op: OpId) -> Result<ExplainNode, IrError> {
+	fn select_loop(&mut self, op: OpId) -> Result<PlanNode, IrError> {
 		let data = self.ir.op(op).ok_or(IrError::Stale("ir_lower::explain: op"))?;
 		let source = self.operand(data.operands.as_slice(), 0)?;
 		let [body] = <[RegionId; 1]>::try_from(data.regions.as_slice())
@@ -1656,8 +1692,8 @@ impl<'a> TreeWalk<'a> {
 
 	/// `node`, rows a statement selects, under a `SelectProject` of every field where it is no
 	/// projection of its own.
-	fn projected_whole(&self, node: ExplainNode) -> ExplainNode {
-		if matches!(node.name, "SelectProject" | "ProjectValue" | "Aggregate") {
+	fn projected_whole(&self, node: PlanNode) -> PlanNode {
+		if matches!(node.name.as_str(), "SelectProject" | "ProjectValue" | "Aggregate") {
 			return node;
 		}
 		self.projected_whole_always(node)
@@ -1670,7 +1706,7 @@ impl<'a> TreeWalk<'a> {
 		source: ValueId,
 		ops: &[OpId],
 		count: usize,
-	) -> Result<ExplainNode, IrError> {
+	) -> Result<PlanNode, IrError> {
 		let Some(at) = count.checked_sub(1) else {
 			return self.plan_of(source);
 		};
@@ -1696,7 +1732,7 @@ impl<'a> TreeWalk<'a> {
 					self.paging = None;
 					return node;
 				}
-				let child = self.row_chain(source, ops, at)?.shared();
+				let child = self.row_chain(source, ops, at)?;
 				Ok(self.node("Limit", ContextLevel::Database, paging, vec![child]))
 			}
 			PhysOp::Filter if at == 0 && self.prefiltered_scan(source) => {
@@ -1817,7 +1853,7 @@ impl<'a> TreeWalk<'a> {
 	}
 
 	/// A relational op in a chain: the node of the op over the plan of its input operand.
-	fn relational(&mut self, op: OpId, kind: &PhysOp) -> Result<ExplainNode, IrError> {
+	fn relational(&mut self, op: OpId, kind: &PhysOp) -> Result<PlanNode, IrError> {
 		let data = self.ir.op(op).ok_or(IrError::Stale("ir_lower::explain: op"))?;
 		let operands = data.operands.as_slice();
 		match kind {
@@ -1837,14 +1873,14 @@ impl<'a> TreeWalk<'a> {
 					self.paging = None;
 					return node;
 				}
-				let child = self.plan_of(input)?.shared();
+				let child = self.plan_of(input)?;
 				Ok(self.node("Limit", ContextLevel::Database, paging, vec![child]))
 			}
 			PhysOp::Join(attrs) => self.join(op, attrs),
 			PhysOp::Probe {
 				field,
 			} => {
-				let child = self.plan_of(self.operand(operands, 0)?)?.shared();
+				let child = self.plan_of(self.operand(operands, 0)?)?;
 				Ok(self.node(
 					"Probe",
 					ContextLevel::Database,
@@ -1927,8 +1963,8 @@ impl<'a> TreeWalk<'a> {
 	fn filter_into_scan(
 		&mut self,
 		filter: OpId,
-		scan: impl FnOnce(&mut Self) -> Result<ExplainNode, IrError>,
-	) -> Result<ExplainNode, IrError> {
+		scan: impl FnOnce(&mut Self) -> Result<PlanNode, IrError>,
+	) -> Result<PlanNode, IrError> {
 		let data = self.ir.op(filter).ok_or(IrError::Stale("ir_lower::explain: op"))?;
 		let [predicate] = data.regions.as_slice() else {
 			return Err(invariant("a prefiltered scan's filter holds other than one region"));
@@ -1944,8 +1980,8 @@ impl<'a> TreeWalk<'a> {
 		&mut self,
 		op: OpId,
 		kind: &PhysOp,
-		child: ExplainNode,
-	) -> Result<ExplainNode, IrError> {
+		child: PlanNode,
+	) -> Result<PlanNode, IrError> {
 		let data = self.ir.op(op).ok_or(IrError::Stale("ir_lower::explain: op"))?;
 		let regions = data.regions.as_slice();
 		match kind {
@@ -1964,12 +2000,12 @@ impl<'a> TreeWalk<'a> {
 						("distance".to_string(), format!("{:?}", attrs.distance)),
 						("dimension".to_string(), dimension),
 					],
-					vec![child.shared()],
+					vec![child],
 				))
 			}
 			PhysOp::Distinct {
 				..
-			} => Ok(self.node("Distinct", ContextLevel::Database, vec![], vec![child.shared()])),
+			} => Ok(self.node("Distinct", ContextLevel::Database, vec![], vec![child])),
 			PhysOp::PermissionFilter(attrs) => {
 				let [predicate, once @ ..] = regions else {
 					return Err(invariant("a permission filter has no predicate region"));
@@ -1993,24 +2029,16 @@ impl<'a> TreeWalk<'a> {
 				if self.ir.frame(data.frame).is_some_and(|frame| frame.eval.auth.is_some()) {
 					shown_attrs.push(("auth".to_string(), "limited".to_string()));
 				}
-				let mut node = self.node(
-					"PermissionFilter",
-					ContextLevel::Database,
-					shown_attrs,
-					vec![child.shared()],
-				);
+				let mut node =
+					self.node("PermissionFilter", ContextLevel::Database, shown_attrs, vec![child]);
 				node.redacts_access_paths = attrs.hides_access_paths;
 				node.hides_metrics = self.scope.checked;
 				Ok(node)
 			}
 			PhysOp::Layer(attrs) => {
 				let columns = self.layer_attrs(&attrs.fields, &attrs.names, regions)?;
-				let mut node = self.node(
-					"ProjectLayer",
-					ContextLevel::Database,
-					columns,
-					vec![child.shared()],
-				);
+				let mut node =
+					self.node("ProjectLayer", ContextLevel::Database, columns, vec![child]);
 				node.hides_metrics = self.scope.checked;
 				Ok(node)
 			}
@@ -2018,7 +2046,7 @@ impl<'a> TreeWalk<'a> {
 				let [predicate, once @ ..] = regions else {
 					return Err(invariant("a filter has no predicate region"));
 				};
-				let mut children = vec![child.shared()];
+				let mut children = vec![child];
 				let (text, memberships) = self.predicate(*predicate)?;
 				children.extend(memberships);
 				let mut filter = Vec::new();
@@ -2040,7 +2068,7 @@ impl<'a> TreeWalk<'a> {
 					"Fetch",
 					ContextLevel::Database,
 					vec![("fetches".to_string(), fetches.join(", "))],
-					vec![child.shared()],
+					vec![child],
 				))
 			}
 			PhysOp::Split {
@@ -2056,7 +2084,7 @@ impl<'a> TreeWalk<'a> {
 					"Split",
 					ContextLevel::Database,
 					vec![("targets".to_string(), targets.join(", "))],
-					vec![child.shared()],
+					vec![child],
 				))
 			}
 			PhysOp::Sort(attrs) => {
@@ -2099,7 +2127,7 @@ impl<'a> TreeWalk<'a> {
 				} else if attrs.tempfiles && !attrs.random {
 					sort.push(("tempfiles".to_string(), "true".to_string()));
 				}
-				Ok(self.node("Sort", ContextLevel::Database, sort, vec![child.shared()]))
+				Ok(self.node("Sort", ContextLevel::Database, sort, vec![child]))
 			}
 			PhysOp::Aggregate(attrs) => {
 				let groups = usize::from(attrs.groups);
@@ -2113,11 +2141,11 @@ impl<'a> TreeWalk<'a> {
 						.collect::<Result<Vec<_>, _>>()?;
 					vec![("by".to_string(), keys.join(", "))]
 				};
-				Ok(self.node("Aggregate", ContextLevel::Database, aggregate, vec![child.shared()]))
+				Ok(self.node("Aggregate", ContextLevel::Database, aggregate, vec![child]))
 			}
 			PhysOp::Project(shape) => {
 				let (name, project) = self.projection(shape, regions)?;
-				Ok(self.node(name, ContextLevel::Database, project, vec![child.shared()]))
+				Ok(self.node(name, ContextLevel::Database, project, vec![child]))
 			}
 			_ => Err(invariant("an op that is no relational op over one input")),
 		}
@@ -2125,7 +2153,7 @@ impl<'a> TreeWalk<'a> {
 
 	/// A step of the binding table of a `MATCH`, over the plans of its operands: the build rows of
 	/// a join first, then the rows the step extends.
-	fn bind_step(&mut self, op: OpId, shape: &BindStepShape) -> Result<ExplainNode, IrError> {
+	fn bind_step(&mut self, op: OpId, shape: &BindStepShape) -> Result<PlanNode, IrError> {
 		use crate::exec::operators::{EdgeBinding, ExpandDir};
 		let data = self.ir.op(op).ok_or(IrError::Stale("ir_lower::explain: op"))?;
 		let operands = data.operands.as_slice();
@@ -2290,7 +2318,7 @@ impl<'a> TreeWalk<'a> {
 		};
 		let mut children = Vec::with_capacity(usize::from(shape.operands()));
 		for value in operands {
-			children.push(self.plan_of(*value)?.shared());
+			children.push(self.plan_of(*value)?);
 		}
 		Ok(self.node(name, ContextLevel::Database, attrs, children))
 	}
@@ -2300,7 +2328,7 @@ impl<'a> TreeWalk<'a> {
 		&mut self,
 		op: OpId,
 		attrs: &crate::exec::ir::phys::ops::JoinAttrs,
-	) -> Result<ExplainNode, IrError> {
+	) -> Result<PlanNode, IrError> {
 		let data = self.ir.op(op).ok_or(IrError::Stale("ir_lower::explain: op"))?;
 		let operands = data.operands.as_slice();
 		let regions = data.regions.as_slice();
@@ -2328,12 +2356,12 @@ impl<'a> TreeWalk<'a> {
 					.get(key_regions + usize::from(attrs.residual))
 					.ok_or_else(|| invariant("a join lacks its lookup region"))?;
 				let yielded = self.yielded(region)?;
-				Some(self.plan_of(yielded)?.shared())
+				Some(self.plan_of(yielded)?)
 			}
 			None => None,
 		};
-		let build = self.plan_of(self.operand(operands, 1)?)?.shared();
-		let probe = self.plan_of(self.operand(operands, 0)?)?.shared();
+		let build = self.plan_of(self.operand(operands, 1)?)?;
+		let probe = self.plan_of(self.operand(operands, 0)?)?;
 		let mut join = vec![
 			(
 				"join_type".to_string(),
@@ -2641,35 +2669,6 @@ fn index_scan_attrs(
 	attrs
 }
 
-/// The `phys.explain` that heads the container `ir`, when it holds one in its top region.
-pub(super) fn explain_in(ir: &Ir) -> Option<(OpId, bool)> {
-	explain_of(ir, ir.top())
-}
-
-/// The `phys.explain` that `region` holds, with whether it is `ANALYZE`: the outermost one, which
-/// no other `phys.explain` of the region explains, where an `EXPLAIN` explains another.
-pub(super) fn explain_of(ir: &Ir, region: RegionId) -> Option<(OpId, bool)> {
-	ops_in(ir, region).find_map(|op| {
-		let data = ir.op(op)?;
-		let OpKind::Phys(PhysOp::Explain {
-			analyze,
-			..
-		}) = &data.kind
-		else {
-			return None;
-		};
-		let explained = data.results.iter().any(|result| {
-			ir.uses(*result).iter().any(|read| {
-				matches!(
-					ir.op(read.user).map(|user| &user.kind),
-					Some(OpKind::Phys(PhysOp::Explain { .. }))
-				)
-			})
-		});
-		(!explained).then_some((op, *analyze))
-	})
-}
-
 /// The scope the context `cx` lowers for: whether its frame reads under permissions enforced on
 /// the caller, and the indexes its compile resolved.
 fn scope_of<'a>(cx: &LowerCx<'a>) -> ExplainScope<'a> {
@@ -2692,7 +2691,7 @@ fn render_plain(cx: &LowerCx<'_>, ir: &Ir, explain: OpId) -> Result<crate::val::
 		return Err(invariant("a plain EXPLAIN that is not a phys.explain of no ANALYZE"));
 	};
 	let tree = explained_tree(ir, explain, &scope_of(cx), Purpose::Plan)?;
-	Ok(crate::exec::operators::ExplainPlan::render(tree.as_ref(), *format))
+	Ok(crate::exec::vm::explain::render(&tree, *format, None))
 }
 
 /// Lowers the container `ir`, whose `phys.explain` `explain` is a plain `EXPLAIN`, to a program
@@ -2727,29 +2726,6 @@ fn emit_constant_row(em: &mut Emitter, value: crate::val::Value) -> Result<(), I
 	});
 	em.emit(Instr::EndRow);
 	Ok(())
-}
-
-/// What an `EXPLAIN` that a block's statement holds lowers to.
-pub(super) enum Explained {
-	/// A plain `EXPLAIN`: the one pipeline that answers the rendering of the plan, as a constant.
-	/// Nothing of the explained statement runs.
-	Plain(Pipeline),
-	/// `EXPLAIN ANALYZE`: the explained statement as a read group, and what its run renders.
-	Analysed {
-		scope: ReadScope,
-		analysis: Analysis,
-	},
-	/// `EXPLAIN ANALYZE` of a statement that reads no rows (an expression, a control-flow
-	/// statement, a plain `EXPLAIN`): one pipeline over [`Source::Once`] that evaluates the
-	/// explained value and emits it as its one row, with the instructions each op emitted for
-	/// itself, what it needs of the program and what its run renders. A `RETURN`, `BREAK` or
-	/// `CONTINUE` the statement signals ends the run with no row.
-	AnalysedValue {
-		pipeline: Pipeline,
-		claims: Vec<Claim>,
-		needs: Needs,
-		analysis: Analysis,
-	},
 }
 
 /// Lowers the `EXPLAIN` the statement `region` holds, whose op is `explain`, into `em` for the
@@ -2903,11 +2879,8 @@ pub(crate) fn analysis_of(
 	else {
 		return Err(invariant("an analysis of an op that is not a phys.explain"));
 	};
-	let tree = explained_tree(ir, explain, scope, purpose)?;
-	let plan = AnalysedPlan::of(tree.as_ref())
-		.ok_or_else(|| invariant("EXPLAIN ANALYZE of a plan with a node the walk did not build"))?;
 	Ok(Analysis {
-		plan,
+		plan: explained_tree(ir, explain, scope, purpose)?,
 		format: *format,
 		redact,
 	})

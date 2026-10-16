@@ -25,11 +25,13 @@ use crate::expr::BinaryOperator;
 
 /// The order the loop optimiser runs its passes in. The registered passes must appear in this
 /// list as a subsequence, in the same order. The test checks this as passes are added.
-const LO_ORDER: [&str; 11] = [
+const LO_ORDER: [&str; 13] = [
 	"specialise_guards",
+	"inline_calls",
 	"fold",
 	"dce",
 	"cse",
+	"push_into_subquery",
 	"push_below_layer",
 	"push_below_permission",
 	"loop_unroll",
@@ -115,8 +117,8 @@ fn the_registered_passes_follow_the_lo_order() {
 fn pass_config_release_matches_the_cut_line() {
 	let release = PassConfig::RELEASE;
 	assert!(release.specialise_guards && release.fold && release.dce && release.cse);
-	assert!(release.hoist_leading && release.licm);
-	assert!(!release.dce_certain_error && !release.push_below_layer);
+	assert!(release.hoist_leading && release.licm && release.push_into_subquery);
+	assert!(!release.dce_certain_error && release.push_below_layer);
 	assert!(!release.push_below_permission && !release.unswitch);
 	assert!(!release.unroll && !release.fold_phase_b);
 	assert_ne!(PassConfig::ALL_ON, PassConfig::ALL_OFF);

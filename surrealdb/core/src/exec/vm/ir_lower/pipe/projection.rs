@@ -17,7 +17,7 @@ use std::sync::Arc;
 use super::{first_arg, producer_of, yielded_value};
 use crate::exec::ContextLevel;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
-use crate::exec::ir::analysis::cx::builtin_registry;
+use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::{DestructureEntry, ExprOp};
@@ -45,6 +45,9 @@ pub(super) const PROJECTED: ReturnScope = ReturnScope {
 pub(super) trait ProjectionSite {
 	/// The emitter the projection's instructions go to.
 	fn emitter(&mut self) -> &mut Emitter;
+
+	/// The function registry the projection's calls are resolved against.
+	fn registry(&self) -> &FunctionRegistry;
 
 	/// Whether the rows are records, whose fields the projection reads itself.
 	fn objects(&self) -> bool;
@@ -88,6 +91,10 @@ struct ImageSite<'l, 'a> {
 impl ProjectionSite for ImageSite<'_, '_> {
 	fn emitter(&mut self) -> &mut Emitter {
 		self.lowerer.em
+	}
+
+	fn registry(&self) -> &FunctionRegistry {
+		self.lowerer.registry()
 	}
 
 	fn objects(&self) -> bool {
@@ -162,7 +169,7 @@ pub(in crate::exec::vm::ir_lower) fn project_image(
 /// Lowers the projection `shape`, whose regions are `regions`, over the row in [`ROW`], and answers
 /// the register that holds the projected row.
 pub(super) fn project(
-	site: &mut impl ProjectionSite,
+	site: &mut dyn ProjectionSite,
 	ir: &Ir,
 	shape: &ProjectionShape,
 	regions: &[RegionId],
@@ -237,7 +244,7 @@ pub(super) fn project(
 /// or an output path of more than one part) makes an object of the fields alone. Each arm lowers
 /// the fields in a scope of its own, since only one of them runs for a row.
 fn star_over_any_row(
-	site: &mut impl ProjectionSite,
+	site: &mut dyn ProjectionSite,
 	ir: &Ir,
 	object: Reg,
 	fields: &[ProjectedFieldShape],
@@ -247,10 +254,9 @@ fn star_over_any_row(
 	let field_regions = regions
 		.get(..fields.len())
 		.ok_or_else(|| invariant("a projection with fewer regions than fields"))?;
-	let builds = fields
-		.iter()
-		.zip(field_regions)
-		.any(|(field, region)| projection_call(ir, *region).is_some() || field.output.0.len() > 1);
+	let builds = fields.iter().zip(field_regions).any(|(field, region)| {
+		projection_call(ir, site.registry(), *region).is_some() || field.output.0.len() > 1
+	});
 	let computes = fields
 		.iter()
 		.zip(field_regions)
@@ -316,7 +322,7 @@ fn in_register(em: &mut Emitter, value: Operand) -> Result<Reg, IrError> {
 /// The regions of the projection are one per field in order, then the omissions'. A field that
 /// calls a projection function is written by the call, which names its own output.
 fn write_fields(
-	site: &mut impl ProjectionSite,
+	site: &mut dyn ProjectionSite,
 	ir: &Ir,
 	object: Reg,
 	fields: &[ProjectedFieldShape],
@@ -337,7 +343,7 @@ fn write_fields(
 			});
 			continue;
 		}
-		if let Some((name, args)) = projection_call(ir, *region) {
+		if let Some((name, args)) = projection_call(ir, site.registry(), *region) {
 			write_projection(site, *region, &name, &args, object, path, field.aliased)?;
 			continue;
 		}
@@ -355,7 +361,7 @@ fn write_fields(
 /// yields: its arguments are read from the row, and the function names the fields it writes unless
 /// the field is aliased.
 fn write_projection(
-	site: &mut impl ProjectionSite,
+	site: &mut dyn ProjectionSite,
 	region: RegionId,
 	name: &str,
 	args: &[ValueId],
@@ -363,7 +369,8 @@ fn write_projection(
 	path: u32,
 	aliased: bool,
 ) -> Result<(), IrError> {
-	let context = builtin_registry()
+	let context = site
+		.registry()
 		.get_projection(name)
 		.map_or(ContextLevel::Database, |projection| projection.required_context());
 	site.needs_call(context);
@@ -393,7 +400,7 @@ fn write_projection(
 /// pipelines over the value the walk applies them to; an aliased entry names no location, so the
 /// host never evaluates its body.
 fn omit_all(
-	site: &mut impl ProjectionSite,
+	site: &mut dyn ProjectionSite,
 	object: Reg,
 	omit: &[OmissionShape],
 	regions: &[RegionId],
@@ -473,7 +480,7 @@ fn next_region(regions: &mut impl Iterator<Item = RegionId>) -> Result<RegionId,
 /// Lowers the walk `steps` and `action`. Each expression the walk evaluates takes the host pipeline
 /// of the next region, in order.
 fn walk_of(
-	site: &mut impl ProjectionSite,
+	site: &mut dyn ProjectionSite,
 	steps: &[WalkStepShape],
 	action: &WalkActionShape,
 	regions: &mut impl Iterator<Item = RegionId>,
@@ -551,13 +558,17 @@ fn destructure_fields(
 }
 
 /// The projection function the region `region` yields a call of, with the arguments of the call.
-fn projection_call(ir: &Ir, region: RegionId) -> Option<(String, Vec<ValueId>)> {
+fn projection_call(
+	ir: &Ir,
+	registry: &FunctionRegistry,
+	region: RegionId,
+) -> Option<(String, Vec<ValueId>)> {
 	let yielded = yielded_value(ir, region).ok()?;
 	let op = producer_of(ir, yielded).ok()?;
 	let data = ir.op(op)?;
 	match &data.kind {
 		OpKind::Expr(ExprOp::Call(function)) => match &function.function {
-			Function::Normal(name) if builtin_registry().is_projection(name) => {
+			Function::Normal(name) if registry.is_projection(name) => {
 				let arguments = call_args(data, function).ok()?;
 				Some((name.clone(), arguments.to_vec()))
 			}

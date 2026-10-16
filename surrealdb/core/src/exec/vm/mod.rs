@@ -130,7 +130,7 @@ mod services;
 mod sort;
 pub(crate) mod speculate;
 mod spill;
-mod store;
+pub(crate) mod store;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod tests_enforced;

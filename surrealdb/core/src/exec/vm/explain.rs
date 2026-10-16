@@ -1,208 +1,451 @@
-//! The `EXPLAIN` display tree of the VM.
+//! The `EXPLAIN` tree of the VM, and its one renderer.
 //!
-//! The lowering of `phys.explain` renders a statement's container into inert
-//! display nodes ([`ExplainNode`]); no display node executes an expression or
-//! a statement. A run under `EXPLAIN ANALYZE` reports its counters through
-//! them ([`VmAnalysis`]).
+//! The lowering of `phys.explain` derives a statement's tree from its physical plan when the
+//! query arrives ([`PlanTree`]): plain data, holding every node's name, context, attributes,
+//! children and redaction flags, and the bitmap trees an `EXPLAIN ANALYZE` measures
+//! ([`MeasureSpec`]). [`render`] turns a tree into the value `EXPLAIN` answers. Plain `EXPLAIN`
+//! renders it once, at lowering, with no run. `EXPLAIN ANALYZE` renders the same tree after the
+//! statement has run ([`analysed_run`]), overlaying what the run counted ([`RunCounters`]); the VM
+//! derives nothing and compiles nothing while it does.
+use std::fmt::Write;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 
-use futures::StreamExt;
 use surrealdb_strand::TableName;
 
 use super::plain::ValueData;
+use crate::exec::FlowResult;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::index::access_path::{BitmapPlan, IndexRef};
 use crate::exec::metrics::OperatorMetrics;
-use crate::exec::operators::scan::bitmap::evaluate_fusion;
-use crate::exec::operators::scan::{BitmapNode, FusedCandidates, PrefilterTier};
-use crate::exec::planner::bitmap_plan_to_node;
-use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
+use crate::exec::operators::scan::bitmap::{evaluate_fusion, knn_allow_list};
+use crate::exec::operators::scan::{BitmapTally, FusedCandidates, PrefilterTier};
+use crate::expr::ExplainFormat;
+use crate::val::{Array, Object, Value};
 
-/// A node of the `EXPLAIN` display tree, representing a step of a planned
-/// statement.
-#[derive(Debug)]
-pub(crate) struct ExplainNode {
-	pub(crate) name: &'static str,
-	pub(crate) context: ContextLevel,
-	pub(crate) attrs: Vec<(String, String)>,
-	pub(crate) children: Vec<Arc<dyn ExecOperator>>,
-	pub(crate) metrics: Option<Arc<OperatorMetrics>>,
-	/// For a KNN scan under `EXPLAIN ANALYZE`: what its prefilter's allow-list
-	/// chose, once [`Self::measured`] has been evaluated.
-	pub(in crate::exec::vm) tier: Option<Arc<PrefilterChoice>>,
-	/// For a bitmap scan under `EXPLAIN ANALYZE`: whether an overflowing
-	/// branch made it answer with its fallback.
-	pub(in crate::exec::vm) fallback: Option<Arc<AtomicBool>>,
-	/// For the root of an analysed plan: the bitmap trees it evaluates after
-	/// the statement has run.
-	pub(in crate::exec::vm) measured: Vec<Arc<Measured>>,
-	/// For a node whose one child is a measured bitmap tree: that tree, as an
-	/// index of the root's [`Self::measured`].
-	pub(in crate::exec::vm) measure: Option<u16>,
-	/// Whether every access path beneath renders as `<permission>`; see
-	/// [`ExecOperator::redacts_access_paths_beneath`].
-	pub(in crate::exec::vm) redacts_access_paths: bool,
-	/// Whether `EXPLAIN ANALYZE` withholds the metrics beneath; see
-	/// [`ExecOperator::hides_metrics_beneath`].
-	pub(in crate::exec::vm) hides_metrics: bool,
+/// Number of spaces used per indentation level in text plan output.
+const INDENT_WIDTH: usize = 4;
+
+/// The tree `EXPLAIN` renders for a statement, derived from its physical plan when the query
+/// arrives.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PlanTree {
+	pub(crate) root: PlanNode,
+	/// The bitmap trees `EXPLAIN ANALYZE` evaluates again after the run, indexed by
+	/// [`PlanNode::measure`].
+	pub(crate) measures: Vec<MeasureSpec>,
 }
 
-impl ExplainNode {
-	pub(in crate::exec::vm) fn new(
-		name: &'static str,
+assert_plain!(PlanTree);
+
+/// A node of a [`PlanTree`], representing a step of a planned statement.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PlanNode {
+	pub(crate) name: String,
+	pub(crate) context: ContextLevel,
+	pub(crate) attrs: Vec<(String, String)>,
+	pub(crate) children: Vec<PlanNode>,
+	/// Whether every access path beneath renders as `<permission>`. Applies to descendants only.
+	pub(crate) redacts_access_paths: bool,
+	/// Whether `EXPLAIN ANALYZE` withholds the metrics beneath. Applies to descendants only.
+	pub(crate) hides_metrics: bool,
+	/// The measured bitmap tree that is this node's one child, as an index of
+	/// [`PlanTree::measures`].
+	pub(crate) measure: Option<u16>,
+}
+
+impl PlanNode {
+	pub(crate) fn new(
+		name: &str,
 		context: ContextLevel,
 		attrs: Vec<(String, String)>,
-		children: Vec<ExplainChild>,
-		metrics: Option<&Arc<OperatorMetrics>>,
+		children: Vec<PlanNode>,
 	) -> Self {
 		Self {
-			name,
+			name: name.to_owned(),
 			context,
 			attrs,
-			children: children.into_iter().map(|child| child.0).collect(),
-			metrics: metrics.cloned(),
-			tier: None,
-			fallback: None,
-			measured: Vec::new(),
-			measure: None,
+			children,
 			redacts_access_paths: false,
 			hides_metrics: false,
+			measure: None,
+		}
+	}
+}
+
+/// What one run of an analysed statement measured, which [`render`] overlays on the tree.
+pub(in crate::exec::vm) struct RunCounters<'a> {
+	/// The one set of metrics every node reports.
+	pub(in crate::exec::vm) metrics: &'a OperatorMetrics,
+	/// The outcome of each measured bitmap tree, parallel to [`PlanTree::measures`].
+	pub(in crate::exec::vm) measured: &'a [Measured],
+	/// Whether volatile counters are left out.
+	pub(in crate::exec::vm) redact: bool,
+	pub(in crate::exec::vm) total_rows: u64,
+}
+
+/// The outcome of evaluating one [`MeasureSpec`] again after the run.
+pub(in crate::exec::vm) struct Measured {
+	/// The cardinality of each node, shaped as the spec's plan.
+	tally: BitmapTally,
+	/// For an allow-list: the [`PrefilterTier`] code it chose, and the width of the walk the
+	/// allow-list gates (`0` = no walk).
+	prefilter: Option<(u8, u32)>,
+	/// For a fused plan: whether an overflowing branch made it answer with its fallback.
+	fallback: bool,
+}
+
+/// What the rendering withholds of the operators beneath a node that
+/// enforces a definer's declaration on the caller the plan was compiled for;
+/// see [`PlanNode::hides_metrics`] and
+/// [`PlanNode::redacts_access_paths`]. Accumulated top-down: once
+/// a node withholds something, every operator beneath it — children and the
+/// plans embedded in its expressions alike — renders without it.
+#[derive(Clone, Copy, Default)]
+struct Redaction {
+	/// No operator renders its metrics.
+	metrics: bool,
+	/// Every attribute naming an access path renders as `<permission>`.
+	access_paths: bool,
+}
+
+/// The attributes that print what an access path reads at or a scan applies:
+/// the index and the bound an index scan reads, a record id looked up, a
+/// full-text query, the predicate a scan applies per row, and the pinned
+/// components, range and range count of a key-range scan. Beneath a
+/// permission node whose predicate drove the access path these are the
+/// definer's, so a checked caller sees `<permission>` in their place.
+const ACCESS_PATH_ATTRS: &[&str] =
+	&["index", "access", "record_id", "query", "predicate", "key", "range", "ranges"];
+
+impl Redaction {
+	/// The redaction in force beneath `node`.
+	fn beneath(self, node: &PlanNode) -> Self {
+		Self {
+			metrics: self.metrics || node.hides_metrics,
+			access_paths: self.access_paths || node.redacts_access_paths,
 		}
 	}
 
-	/// The context the first child of this node requires, if it has one.
-	pub(in crate::exec::vm) fn first_child_context(&self) -> Option<ContextLevel> {
-		self.children.first().map(|child| child.required_context())
-	}
-
-	pub(in crate::exec::vm) fn shared(self) -> ExplainChild {
-		ExplainChild(Arc::new(self))
-	}
-}
-
-/// A child of a display node: a node of the tree, or a bitmap tree a scan reads, which displays
-/// itself.
-#[derive(Clone, Debug)]
-pub(crate) struct ExplainChild(Arc<dyn ExecOperator>);
-
-impl ExplainChild {
-	/// The bitmap tree `bitmap`, displayed by its own nodes.
-	pub(in crate::exec::vm) fn bitmap(bitmap: Arc<BitmapNode>) -> Self {
-		Self(bitmap)
-	}
-
-	/// The operator that displays this child.
-	pub(in crate::exec::vm) fn into_operator(self) -> Arc<dyn ExecOperator> {
-		self.0
-	}
-
-	/// This child, and every node beneath it, as display nodes that report `metrics`.
-	pub(in crate::exec::vm) fn described(
-		&self,
-		metrics: Option<&Arc<OperatorMetrics>>,
-	) -> ExplainNode {
-		described(self.0.as_ref(), metrics)
+	/// `attrs` as this redaction renders them.
+	fn attrs(self, attrs: Vec<(String, String)>) -> Vec<(String, String)> {
+		if !self.access_paths {
+			return attrs;
+		}
+		attrs
+			.into_iter()
+			.map(|(key, value)| {
+				if ACCESS_PATH_ATTRS.contains(&key.as_str()) {
+					(key, "<permission>".to_string())
+				} else {
+					(key, value)
+				}
+			})
+			.collect()
 	}
 }
 
-/// `operator`, and every operator beneath it, as display nodes that report `metrics`.
-fn described(operator: &dyn ExecOperator, metrics: Option<&Arc<OperatorMetrics>>) -> ExplainNode {
-	let children = operator
-		.explain_children()
-		.into_iter()
-		.map(|child| described(child.as_ref(), metrics).shared())
-		.collect();
-	ExplainNode::new(
-		operator.name(),
-		operator.required_context(),
-		operator.attrs(),
-		children,
-		metrics,
-	)
-}
+// =========================================================================
+// Rendering
+// =========================================================================
 
-impl ExecOperator for ExplainNode {
-	fn name(&self) -> &'static str {
-		self.name
-	}
-
-	fn attrs(&self) -> Vec<(String, String)> {
-		let mut attrs = self.attrs.clone();
-		if let Some(choice) = self.tier.as_ref()
-			&& let Some(label) = PrefilterTier::label(choice.tier.load(Ordering::Relaxed))
+/// The attributes of `node` as rendered: its own, then what the run measured for it.
+fn shown_attrs(
+	node: &PlanNode,
+	redaction: Redaction,
+	run: Option<&RunCounters<'_>>,
+) -> Vec<(String, String)> {
+	let mut attrs = node.attrs.clone();
+	if let Some(run) = run
+		&& let Some(at) = node.measure
+		&& let Some(measured) = run.measured.get(usize::from(at))
+	{
+		if let Some((code, ef)) = measured.prefilter
+			&& let Some(label) = PrefilterTier::label(code)
 		{
 			attrs.push(("prefilter_tier".to_string(), label.to_string()));
-			// The width of a walk the allow-list gates, where the triage chose
-			// one.
-			let ef = choice.walk_ef.load(Ordering::Relaxed);
+			// The width of a walk the allow-list gates, where the triage chose one.
 			if ef > 0 {
 				attrs.push(("prefilter_ef".to_string(), ef.to_string()));
 			}
 		}
-		if self.fallback.as_ref().is_some_and(|taken| taken.load(Ordering::Relaxed)) {
+		if measured.fallback {
 			attrs.push(("union_tier".to_string(), "fallback".to_string()));
 		}
-		attrs
 	}
+	redaction.attrs(attrs)
+}
 
-	fn required_context(&self) -> ContextLevel {
-		self.context
-	}
-
-	fn redacts_access_paths_beneath(&self) -> bool {
-		self.redacts_access_paths
-	}
-
-	fn hides_metrics_beneath(&self) -> bool {
-		self.hides_metrics
-	}
-
-	fn access_mode(&self) -> AccessMode {
-		AccessMode::ReadOnly
-	}
-
-	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
-		self.children.iter().collect()
-	}
-
-	fn explain_children(&self) -> Vec<&Arc<dyn ExecOperator>> {
-		self.children.iter().collect()
-	}
-
-	fn metrics(&self) -> Option<&OperatorMetrics> {
-		self.metrics.as_deref()
-	}
-
-	fn execute(&self, _ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		Ok(Box::pin(futures::stream::empty()))
+/// The tally of the `at`th child of `node`: the root of the measured bitmap tree when `node`
+/// stands over one, else the matching operand of `tally`.
+fn child_tally<'a>(
+	node: &PlanNode,
+	tally: Option<&'a BitmapTally>,
+	at: usize,
+	run: Option<&'a RunCounters<'_>>,
+) -> Option<&'a BitmapTally> {
+	match (run, node.measure) {
+		(Some(run), Some(measure)) => run.measured.get(usize::from(measure)).map(|m| &m.tally),
+		_ => tally.and_then(|t| t.operand(at)),
 	}
 }
 
-/// What a KNN scan's prefilter chose under `EXPLAIN ANALYZE`: the tier as a
-/// [`PrefilterTier`] code (`0` = not measured), and the width of the walk the
-/// allow-list gates (`0` = no walk).
-#[derive(Debug, Default)]
-pub(in crate::exec::vm) struct PrefilterChoice {
-	tier: AtomicU8,
-	walk_ef: AtomicU32,
+/// The metrics `node` reports under `run`: its tally's, where it has one, else the run's.
+fn reported<'a>(tally: Option<&'a BitmapTally>, run: &'a RunCounters<'_>) -> &'a OperatorMetrics {
+	tally.map_or(run.metrics, |t| &t.metrics)
 }
 
-/// A bitmap tree of the plan, evaluated again for the analysed plan: its nodes
-/// record the cardinality they produce, and the outcome of the evaluation
-/// tells which strategy the run took.
+/// Writes `node`, and every node beneath it, as a text tree.
+fn text(
+	node: &PlanNode,
+	tally: Option<&BitmapTally>,
+	out: &mut String,
+	prefix: &str,
+	redaction: Redaction,
+	run: Option<&RunCounters<'_>>,
+) {
+	let _ = write!(out, "{} [ctx: {}]", node.name, node.context.short_name());
+	let attrs = shown_attrs(node, redaction, run);
+	if !attrs.is_empty() {
+		let _ = write!(out, " [");
+		for (i, (key, value)) in attrs.iter().enumerate() {
+			if i > 0 {
+				let _ = write!(out, ", ");
+			}
+			let _ = write!(out, "{key}: {value}");
+		}
+		let _ = write!(out, "]");
+	}
+	if let Some(run) = run
+		&& !redaction.metrics
+	{
+		let _ = write!(out, " {{{}}}", format_metrics_text(reported(tally, run), run.redact));
+	}
+	let _ = writeln!(out);
+	let beneath = redaction.beneath(node);
+	if !node.children.is_empty() {
+		let child_prefix = format!("{}{:width$}", prefix, "", width = INDENT_WIDTH);
+		for (at, child) in node.children.iter().enumerate() {
+			let _ = write!(out, "{}", child_prefix);
+			text(child, child_tally(node, tally, at, run), out, &child_prefix, beneath, run);
+		}
+	}
+}
+
+/// `node`, and every node beneath it, as a JSON object.
+fn json(
+	node: &PlanNode,
+	tally: Option<&BitmapTally>,
+	redaction: Redaction,
+	run: Option<&RunCounters<'_>>,
+) -> Object {
+	let mut obj = Object::default();
+	obj.insert("operator", Value::String(node.name.as_str().into()));
+	obj.insert("context", Value::String(node.context.short_name().into()));
+	let attrs = shown_attrs(node, redaction, run);
+	if !attrs.is_empty() {
+		let mut attrs_obj = Object::default();
+		for (key, value) in attrs {
+			attrs_obj.insert(key, Value::String(value.into()));
+		}
+		obj.insert("attributes", Value::Object(attrs_obj));
+	}
+	if let Some(run) = run
+		&& !redaction.metrics
+	{
+		obj.insert("metrics", Value::Object(metrics_json(reported(tally, run), run.redact)));
+	}
+	if !node.children.is_empty() {
+		let beneath = redaction.beneath(node);
+		let children: Vec<Value> = node
+			.children
+			.iter()
+			.enumerate()
+			.map(|(at, child)| {
+				Value::Object(json(child, child_tally(node, tally, at, run), beneath, run))
+			})
+			.collect();
+		obj.insert("children", Value::Array(Array::from(children)));
+	}
+	obj
+}
+
+/// The value `EXPLAIN` answers for `tree` in `format`.
 ///
-/// A bitmap depends only on the transaction the statement ran in, so this
-/// evaluation matches what the run saw. The spec is plain data a program
-/// holds; the cells are where one evaluation writes its outcome.
-#[derive(Debug)]
-pub(in crate::exec::vm) struct Measured {
-	pub(in crate::exec::vm) spec: MeasureSpec,
-	pub(in crate::exec::vm) bitmap: Arc<BitmapNode>,
-	/// For an allow-list: what it chose.
-	pub(in crate::exec::vm) tier: Option<Arc<PrefilterChoice>>,
-	/// For a fused plan: whether it answered with its fallback.
-	pub(in crate::exec::vm) fallback: Option<Arc<AtomicBool>>,
+/// Without a `run` it is a function of the tree alone. With one, every node reports the run's
+/// metrics, a measured bitmap tree its tally, and the rendering ends with the rows the statement
+/// yielded and what its morsels did.
+pub(in crate::exec::vm) fn render(
+	tree: &PlanTree,
+	format: ExplainFormat,
+	run: Option<&RunCounters<'_>>,
+) -> Value {
+	// Every operator of a VM program reports one set of metrics, so what its morsels did is
+	// written once, beneath the plan.
+	let morsels = run.filter(|run| !run.redact).and_then(|run| run.metrics.morsels());
+	match format {
+		ExplainFormat::Text => {
+			let mut out = String::new();
+			text(&tree.root, None, &mut out, "", Redaction::default(), run);
+			if let Some(run) = run {
+				let _ = writeln!(out);
+				let _ = write!(out, "Total rows: {}", run.total_rows);
+				if let Some(morsels) = morsels {
+					let _ = write!(out, "\n{}", morsels.render_text());
+				}
+			}
+			Value::String(out.into())
+		}
+		ExplainFormat::Json => {
+			let mut obj = json(&tree.root, None, Redaction::default(), run);
+			if let Some(run) = run {
+				obj.insert("total_rows", Value::from(run.total_rows as i64));
+				if let Some(morsels) = morsels {
+					obj.insert("morsels", Value::Object(morsels.render_object()));
+				}
+			}
+			Value::Object(obj)
+		}
+	}
+}
+
+/// The `metrics` object `EXPLAIN ANALYZE` renders in JSON for `metrics`.
+fn metrics_json(metrics: &OperatorMetrics, redact_volatile_explain_attrs: bool) -> Object {
+	let mut metrics_obj = Object::default();
+	metrics_obj.insert("output_rows", Value::from(metrics.output_rows() as i64));
+	// Emitted only when a bitmap branch declined, so its `output_rows: 0`
+	// is distinguishable from a genuinely empty candidate set.
+	// Deterministic for a given dataset and configuration, so never
+	// redacted.
+	if metrics.branch_dropped() {
+		metrics_obj.insert("dropped", Value::Bool(true));
+	}
+	if !redact_volatile_explain_attrs {
+		metrics_obj.insert("output_batches", Value::from(metrics.output_batches() as i64));
+		metrics_obj.insert("elapsed_ns", Value::from(metrics.elapsed_ns() as i64));
+		// Volatile (progress/publish-timing dependent); rendered only when
+		// non-zero. `edges_scanned` is the graph-traversal selectivity
+		// denominator (matched = output_rows).
+		let scanned = metrics.edges_scanned();
+		if scanned > 0 {
+			metrics_obj.insert("edges_scanned", Value::from(scanned as i64));
+		}
+		let block_hits = metrics.block_hits();
+		if block_hits > 0 {
+			metrics_obj.insert("block_hits", Value::from(block_hits as i64));
+		}
+		let delta_hits = metrics.delta_hits();
+		if delta_hits > 0 {
+			metrics_obj.insert("delta_hits", Value::from(delta_hits as i64));
+		}
+		let cache_hits = metrics.cache_hits();
+		if cache_hits > 0 {
+			metrics_obj.insert("cache_hits", Value::from(cache_hits as i64));
+		}
+		let cache_misses = metrics.cache_misses();
+		if cache_misses > 0 {
+			metrics_obj.insert("cache_misses", Value::from(cache_misses as i64));
+		}
+		let props_evals = metrics.props_evals();
+		if props_evals > 0 {
+			metrics_obj.insert("props_evals", Value::from(props_evals as i64));
+		}
+		let props_fallbacks = metrics.props_fallbacks();
+		if props_fallbacks > 0 {
+			metrics_obj.insert("props_fallbacks", Value::from(props_fallbacks as i64));
+		}
+		let skipped = metrics.skipped_rows();
+		if skipped > 0 {
+			metrics_obj.insert("skipped_rows", Value::from(skipped as i64));
+		}
+		// Deliberately rendered even at zero — unlike the counters above,
+		// `records_fetched: 0` is itself the claim worth asserting: an ANN
+		// search whose predicate was fully served by the allow-list bitmap
+		// performed no in-traversal record fetches.
+		metrics_obj.insert("records_fetched", Value::from(metrics.records_fetched() as i64));
+	}
+	metrics_obj
+}
+
+/// Format metrics as a human-readable string fragment.
+///
+/// When `redact_volatile_explain_attrs` is true, elapsed time and batch counts are
+/// omitted so the output is deterministic for test assertions.
+fn format_metrics_text(metrics: &OperatorMetrics, redact_volatile_explain_attrs: bool) -> String {
+	let rows = metrics.output_rows();
+
+	// A bitmap branch that declined (budget overflow or a gate) is flagged so
+	// its `rows: 0` is distinguishable from a genuinely empty candidate set.
+	// Deterministic for a given dataset and configuration, so never redacted.
+	let dropped = if metrics.branch_dropped() {
+		", dropped: true"
+	} else {
+		""
+	};
+
+	if redact_volatile_explain_attrs {
+		return format!("rows: {}{}", rows, dropped);
+	}
+
+	let batches = metrics.output_batches();
+	let elapsed = metrics.elapsed_ns();
+
+	// Format elapsed time in the most readable unit
+	let elapsed_str = if elapsed >= 1_000_000_000 {
+		format!("{:.2}s", elapsed as f64 / 1_000_000_000.0)
+	} else if elapsed >= 1_000_000 {
+		format!("{:.2}ms", elapsed as f64 / 1_000_000.0)
+	} else if elapsed >= 1_000 {
+		format!("{:.2}µs", elapsed as f64 / 1_000.0)
+	} else {
+		format!("{}ns", elapsed)
+	};
+
+	// Scan-side counters that depend on how far the scan progressed (volatile
+	// like batches/elapsed), rendered only when non-zero. `scanned` is the
+	// denominator for graph-traversal filter selectivity (matched = rows);
+	// `skipped` is the TopK threshold-pushdown reject count; `fetched` is the
+	// count of candidate records evaluated inside an ANN search (zero for
+	// predicates the index fully covers).
+	let mut extra = String::new();
+	let scanned = metrics.edges_scanned();
+	if scanned > 0 {
+		extra.push_str(&format!(", scanned: {}", scanned));
+	}
+	// The storage-tier split of `scanned`: entries served from packed
+	// adjacency blocks vs per-edge pointer keys.
+	let block_hits = metrics.block_hits();
+	if block_hits > 0 {
+		extra.push_str(&format!(", block_hits: {}", block_hits));
+	}
+	let delta_hits = metrics.delta_hits();
+	if delta_hits > 0 {
+		extra.push_str(&format!(", delta_hits: {}", delta_hits));
+	}
+	let cache_hits = metrics.cache_hits();
+	if cache_hits > 0 {
+		extra.push_str(&format!(", cache_hits: {}", cache_hits));
+	}
+	let cache_misses = metrics.cache_misses();
+	if cache_misses > 0 {
+		extra.push_str(&format!(", cache_misses: {}", cache_misses));
+	}
+	let props_evals = metrics.props_evals();
+	if props_evals > 0 {
+		extra.push_str(&format!(", props_evals: {}", props_evals));
+	}
+	let props_fallbacks = metrics.props_fallbacks();
+	if props_fallbacks > 0 {
+		extra.push_str(&format!(", props_fallbacks: {}", props_fallbacks));
+	}
+	let skipped = metrics.skipped_rows();
+	if skipped > 0 {
+		extra.push_str(&format!(", skipped: {}", skipped));
+	}
+	let fetched = metrics.records_fetched();
+	if fetched > 0 {
+		extra.push_str(&format!(", fetched: {}", fetched));
+	}
+	format!("rows: {}, batches: {}, elapsed: {}{}{}", rows, batches, elapsed_str, extra, dropped)
 }
 
 /// What a [`Measured`] bitmap tree is, as a program holds it.
@@ -243,28 +486,15 @@ pub(crate) enum MeasureKind {
 assert_plain!(MeasureSpec);
 
 impl Measured {
-	/// The tree `spec` states, with fresh cells for its outcome.
-	pub(in crate::exec::vm) fn of(spec: MeasureSpec) -> Self {
-		let bitmap = bitmap_plan_to_node((*spec.root).clone());
-		let (tier, fallback) = match &spec.kind {
-			MeasureKind::Prefilter {
-				..
-			} => (Some(Arc::new(PrefilterChoice::default())), None),
-			MeasureKind::Fusion {
-				..
-			} => (None, Some(Arc::new(AtomicBool::new(false)))),
-		};
-		Self {
-			spec,
-			bitmap,
-			tier,
-			fallback,
-		}
-	}
-
-	async fn measure(&self, ctx: &ExecutionContext) -> FlowResult<()> {
-		let table = &self.spec.table;
-		match &self.spec.kind {
+	/// Evaluates `spec` again in `ctx`: the bitmap depends only on the transaction the statement
+	/// ran in, so this matches what the run saw.
+	pub(in crate::exec::vm) async fn run(
+		spec: &MeasureSpec,
+		ctx: &ExecutionContext,
+	) -> FlowResult<Self> {
+		let table = &spec.table;
+		let tally = BitmapTally::of(&spec.root);
+		let (prefilter, fallback) = match &spec.kind {
 			MeasureKind::Prefilter {
 				versioned,
 				index,
@@ -275,11 +505,7 @@ impl Measured {
 				let (chosen, walk_ef) = if *versioned {
 					(PrefilterTier::Fallback, None)
 				} else {
-					match self
-						.bitmap
-						.build_allowlist(ctx, table, *surrealdb_cnf::BITMAP_BRANCH_BUDGET)
-						.await?
-					{
+					match knn_allow_list(ctx, table, &spec.root, Some(&tally)).await? {
 						Some(allowed) => {
 							let per_row = *judges_condition
 								|| (*judges_permission && !ctx.root().skip_fetch_perms);
@@ -297,153 +523,24 @@ impl Measured {
 						None => (PrefilterTier::Fallback, None),
 					}
 				};
-				if let Some(tier) = &self.tier {
-					tier.tier.store(chosen as u8, Ordering::Relaxed);
-					tier.walk_ef.store(walk_ef.unwrap_or(0), Ordering::Relaxed);
-				}
+				(Some((chosen as u8, walk_ef.unwrap_or(0))), false)
 			}
 			MeasureKind::Fusion {
 				anchored,
 			} => {
-				if matches!(
-					evaluate_fusion(ctx, table, &self.bitmap, *anchored).await?,
+				let overflowed = matches!(
+					evaluate_fusion(ctx, table, &spec.root, &tally, *anchored).await?,
 					FusedCandidates::Overflow
-				) && let Some(fallback) = &self.fallback
-				{
-					fallback.store(true, Ordering::Relaxed);
-				}
+				);
+				(None, overflowed)
 			}
-		}
-		Ok(())
-	}
-}
-
-/// The display tree `EXPLAIN ANALYZE` renders, as a program holds it: the
-/// nodes of the plan, and the bitmap trees measured after the statement
-/// runs. A run builds its display nodes from it ([`Self::instantiate`]),
-/// every node but a measured bitmap's reporting the one set of metrics the
-/// run records.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct AnalysedPlan {
-	root: AnalysedNode,
-	measures: Vec<MeasureSpec>,
-}
-
-/// A node of an [`AnalysedPlan`].
-#[derive(Debug, Clone, PartialEq)]
-struct AnalysedNode {
-	name: String,
-	context: ContextLevel,
-	attrs: Vec<(String, String)>,
-	children: Vec<AnalysedNode>,
-	/// Whether the node reports the run's metrics.
-	reports: bool,
-	redacts_access_paths: bool,
-	hides_metrics: bool,
-	/// The measured bitmap tree that is this node's one child, as an index
-	/// of [`AnalysedPlan::measures`].
-	measure: Option<u16>,
-}
-
-assert_plain!(AnalysedPlan);
-
-impl AnalysedPlan {
-	/// The plan the display tree `root` shows, whose nodes report its one set
-	/// of metrics and whose measured bitmap trees are `root.measured`.
-	///
-	/// `None` for a node that is not a display node of the walk, beneath a
-	/// node no measured tree stands for.
-	pub(crate) fn of(root: &ExplainNode) -> Option<Self> {
-		Some(Self {
-			root: analysed_node(root)?,
-			measures: root.measured.iter().map(|measured| measured.spec.clone()).collect(),
+		};
+		Ok(Self {
+			tally,
+			prefilter,
+			fallback,
 		})
 	}
-
-	/// The display nodes of this plan, all reporting one fresh set of
-	/// metrics, the root holding the measured bitmap trees.
-	pub(in crate::exec::vm) fn instantiate(&self) -> Arc<ExplainNode> {
-		let metrics = Arc::new(OperatorMetrics::new());
-		let measured: Vec<Arc<Measured>> =
-			self.measures.iter().cloned().map(|spec| Arc::new(Measured::of(spec))).collect();
-		let mut root = displayed(&self.root, &metrics, &measured);
-		root.measured = measured;
-		Arc::new(root)
-	}
-}
-
-/// The node of an [`AnalysedPlan`] `operator` shows.
-fn analysed_node(operator: &dyn ExecOperator) -> Option<AnalysedNode> {
-	let node = (operator as &dyn std::any::Any).downcast_ref::<ExplainNode>();
-	let measure = node.and_then(|node| node.measure);
-	let children = match measure {
-		Some(_) => Vec::new(),
-		None => operator
-			.explain_children()
-			.into_iter()
-			.map(|child| analysed_node(child.as_ref()))
-			.collect::<Option<_>>()?,
-	};
-	Some(AnalysedNode {
-		name: operator.name().to_owned(),
-		context: operator.required_context(),
-		attrs: node.map_or_else(|| operator.attrs(), |node| node.attrs.clone()),
-		children,
-		reports: operator.metrics().is_some(),
-		redacts_access_paths: operator.redacts_access_paths_beneath(),
-		hides_metrics: operator.hides_metrics_beneath(),
-		measure,
-	})
-}
-
-/// The display node of `node`, reporting `metrics` where it reports any, over
-/// the bitmap trees of `measured` it stands for.
-fn displayed(
-	node: &AnalysedNode,
-	metrics: &Arc<OperatorMetrics>,
-	measured: &[Arc<Measured>],
-) -> ExplainNode {
-	let mut children: Vec<ExplainChild> =
-		node.children.iter().map(|child| displayed(child, metrics, measured).shared()).collect();
-	let taken = node.measure.and_then(|at| measured.get(usize::from(at)));
-	if let Some(taken) = taken {
-		children.push(ExplainChild::bitmap(Arc::clone(&taken.bitmap)));
-	}
-	let mut shown = ExplainNode::new(
-		operator_name(&node.name),
-		node.context,
-		node.attrs.clone(),
-		children,
-		node.reports.then_some(metrics),
-	);
-	shown.redacts_access_paths = node.redacts_access_paths;
-	shown.hides_metrics = node.hides_metrics;
-	shown.measure = node.measure;
-	if let Some(taken) = taken {
-		shown.tier.clone_from(&taken.tier);
-		shown.fallback.clone_from(&taken.fallback);
-	}
-	shown
-}
-
-/// The name `name` as the display node that shows it holds it.
-///
-/// A display node's name is an operator's, from the closed set of names the plan walk gives its
-/// nodes, so each distinct name is kept once for the life of the process.
-fn operator_name(name: &str) -> &'static str {
-	static NAMES: std::sync::LazyLock<std::sync::RwLock<std::collections::HashSet<&'static str>>> =
-		std::sync::LazyLock::new(Default::default);
-	use std::sync::PoisonError;
-	if let Some(kept) = NAMES.read().unwrap_or_else(PoisonError::into_inner).get(name) {
-		return kept;
-	}
-	let mut names = NAMES.write().unwrap_or_else(PoisonError::into_inner);
-	if let Some(kept) = names.get(name) {
-		return kept;
-	}
-	let kept: &'static str = Box::leak(name.to_owned().into_boxed_str());
-	names.insert(kept);
-	kept
 }
 
 /// Runs `run`, the statement `analysis` explains, in `ctx` and answers the
@@ -461,9 +558,7 @@ where
 	F: FnOnce(ExecutionContext) -> Fut,
 	Fut: std::future::Future<Output = (u64, FlowResult<()>)>,
 {
-	let plan = analysis.plan.instantiate();
-	let metrics =
-		plan.metrics.as_ref().map_or_else(|| Arc::new(OperatorMetrics::new()), Arc::clone);
+	let metrics = Arc::new(OperatorMetrics::new());
 	metrics.enable();
 	let frame = ctx.with_vm_metrics(Arc::clone(&metrics));
 	let started = web_time::Instant::now();
@@ -482,62 +577,18 @@ where
 		0 => metrics.record_elapsed(elapsed),
 		rows => metrics.record_batch(rows, elapsed),
 	}
-	for measured in &plan.measured {
-		measured.measure(&frame).await?;
+	let mut measured = Vec::with_capacity(analysis.plan.measures.len());
+	for spec in &analysis.plan.measures {
+		measured.push(Measured::run(spec, &frame).await?);
 	}
-	Ok(crate::exec::operators::ExplainPlan::render_analyzed(
-		plan.as_ref(),
+	Ok(render(
+		&analysis.plan,
 		analysis.format,
-		analysis.redact,
-		total,
+		Some(&RunCounters {
+			metrics: &metrics,
+			measured: &measured,
+			redact: analysis.redact,
+			total_rows: total,
+		}),
 	))
-}
-
-/// A VM run's display and counters. Display nodes never execute a statement.
-#[derive(Debug)]
-pub(super) struct VmAnalysis {
-	pub(super) plan: Arc<ExplainNode>,
-	pub(super) format: crate::expr::ExplainFormat,
-	pub(super) redact: bool,
-}
-impl VmAnalysis {
-	pub(super) fn frame(&self, ctx: &ExecutionContext) -> ExecutionContext {
-		let metrics = self.plan.metrics.as_ref().expect("analyzed plans hold counters");
-		metrics.enable();
-		ctx.with_vm_metrics(Arc::clone(metrics))
-	}
-	pub(super) fn run(&self, input: ValueBatchStream, ctx: &ExecutionContext) -> ValueBatchStream {
-		let mut input = crate::exec::monitor_stream(
-			input,
-			self.plan.name,
-			self.plan.metrics.as_ref().expect("analyzed plans hold counters"),
-		);
-		let plan = Arc::clone(&self.plan);
-		let format = self.format;
-		let redact = self.redact;
-		let ctx = ctx.clone();
-		Box::pin(futures::stream::once(async move {
-			let mut total_rows = 0;
-			while let Some(batch) = input.next().await {
-				match batch {
-					Ok(batch) => total_rows += batch.len() as u64,
-					Err(crate::expr::ControlFlow::Break | crate::expr::ControlFlow::Return(_)) => {
-						break;
-					}
-					Err(crate::expr::ControlFlow::Continue) => continue,
-					Err(error @ crate::expr::ControlFlow::Err(_)) => return Err(error),
-				}
-			}
-			for measured in &plan.measured {
-				measured.measure(&ctx).await?;
-			}
-			let value = crate::exec::operators::ExplainPlan::render_analyzed(
-				plan.as_ref(),
-				format,
-				redact,
-				total_rows,
-			);
-			Ok(ValueBatch::new(vec![value]))
-		}))
-	}
 }

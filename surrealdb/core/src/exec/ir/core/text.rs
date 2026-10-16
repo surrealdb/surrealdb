@@ -30,10 +30,11 @@ use crate::exec::vm::program::UnitFrame;
 use crate::expr::logical::{EvalFrame, EvalMode};
 use crate::iam::{AuthLimit, Level, Role};
 
-/// The dialect names, indexed like `Registry::attr_syntax`.
+/// The dialect names, indexed like [`AttrSyntaxes`](super::print::AttrSyntaxes).
 pub(super) const DIALECT_NAMES: [&str; 3] = ["expr", "logical", "phys"];
 
-/// The position of `tag`'s dialect in `Registry::attr_syntax` and [`DIALECT_NAMES`].
+/// The position of `tag`'s dialect in [`AttrSyntaxes`](super::print::AttrSyntaxes) and
+/// [`DIALECT_NAMES`].
 pub(super) fn dialect_index(tag: OpTag) -> usize {
 	match tag {
 		OpTag::Expr(_) => 0,

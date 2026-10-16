@@ -24,7 +24,7 @@ value = '''
 value = '''
 'SelectProject [ctx: Db] [projections: id]
     Filter [ctx: Db] [predicate: bad INSIDE []]
-        ProjectLayer [ctx: Db] [columns: bad = 2 @computed]
+        ProjectLayer [ctx: Db] [columns: bad = 1 + 1 @computed]
             TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 

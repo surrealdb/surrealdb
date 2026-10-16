@@ -1,7 +1,7 @@
 //! Geo functions
 
-use crate::exec::function::FunctionRegistry;
-use crate::{define_pure_function, register_functions};
+use crate::define_pure_function;
+use crate::exec::function::ScalarFunction;
 
 define_pure_function!(GeoArea, "geo::area", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (geometry: Any) -> Float, crate::fnc::geo::area);
 define_pure_function!(GeoBearing, "geo::bearing", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (a: Any, b: Any) -> Float, crate::fnc::geo::bearing);
@@ -15,15 +15,13 @@ define_pure_function!(GeoHashEncode, "geo::hash::encode", effects: EffectSet::PU
 // Geo validation
 define_pure_function!(GeoIsValid, "geo::is_valid", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (geometry: Any) -> Bool, crate::fnc::geo::is::valid);
 
-pub fn register(registry: &mut FunctionRegistry) {
-	register_functions!(
-		registry,
-		GeoArea,
-		GeoBearing,
-		GeoCentroid,
-		GeoDistance,
-		GeoHashDecode,
-		GeoHashEncode,
-		GeoIsValid,
-	);
-}
+/// The `geo::*` scalar builtins.
+pub(super) const SCALARS: &[&dyn ScalarFunction] = &[
+	&GeoArea,
+	&GeoBearing,
+	&GeoCentroid,
+	&GeoDistance,
+	&GeoHashDecode,
+	&GeoHashEncode,
+	&GeoIsValid,
+];

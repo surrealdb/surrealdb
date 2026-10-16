@@ -2,10 +2,16 @@
 //! a transcription of the type's `#[revisioned]` history, and the table that holds them beside the
 //! catalog types' generated codecs.
 //!
-//! A catalog type is not described here: its entry in `catalog::stored::CATALOG_TYPES`
-//! reads and writes its bytes through the schema its derive generates, so its codec cannot drift
-//! from its Rust type. The descriptors below are of the types no schema covers: the ids, a
-//! record and its metadata, the datastore's values.
+//! A catalog type is not described here: its row in a catalog table
+//! (`catalog::stored::CATALOG_TYPES` or `EDGE_CATALOG_TYPES`) reads and writes its bytes through
+//! the schema its derive generates, so its codec cannot drift from its Rust type. The descriptors
+//! below are of the types no schema covers: the ids, a record and its metadata, the datastore's
+//! values.
+//!
+//! A [`Codec`] pairs the hand-written descriptors with one catalog table. The entry that starts a
+//! query chooses its codec through its surface, so an entry that serves fewer catalog kinds names
+//! none of the code of the kinds it leaves out. Both tables list the kinds in the same order, so
+//! a [`TypeId`] is the same index in every codec.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -13,7 +19,7 @@ use std::sync::OnceLock;
 use anyhow::{Result, anyhow};
 
 use super::desc::{Field, Missing, Ty, TypeDesc};
-use crate::catalog::stored::CATALOG_TYPES;
+use crate::catalog::stored::{CATALOG_TYPES, CatalogVTable, EDGE_CATALOG_TYPES};
 use crate::val::{Number, Object, Value};
 
 pub(super) fn opt(ty: Ty) -> Ty {
@@ -27,11 +33,6 @@ pub(super) fn named(name: &'static str) -> Ty {
 /// Every descriptor written by hand.
 pub(super) fn kept() -> Vec<TypeDesc> {
 	ids().into_iter().chain(record_types()).chain(native_types()).chain(datastore_types()).collect()
-}
-
-/// The descriptors of the catalog types, each delegating to the codec its derive generates.
-fn catalog_types() -> impl Iterator<Item = TypeDesc> {
-	CATALOG_TYPES.iter().map(TypeDesc::catalog)
 }
 
 fn ids() -> Vec<TypeDesc> {
@@ -261,9 +262,60 @@ pub(super) fn variant(name: &str, body: Value) -> Value {
 	object(vec![(name, body)])
 }
 
+/// The descriptors of the types the VM reads and writes: those written by hand, then one for each
+/// row of a catalog table, each delegating to the codec its derive generates.
+pub(crate) struct Codec {
+	/// The catalog table the descriptors of the catalog types come from.
+	catalog: &'static [CatalogVTable],
+	table: OnceLock<Table>,
+}
+
+/// The codec of an entry that serves every catalog kind.
+pub(crate) static FULL_CODEC: Codec = Codec::over(CATALOG_TYPES);
+
+/// The codec of an entry that serves the catalog kinds of [`EDGE_CATALOG_TYPES`] alone.
+pub(crate) static EDGE_CODEC: Codec = Codec::over(EDGE_CATALOG_TYPES);
+
+type Table = (Vec<TypeDesc>, HashMap<&'static str, u16>);
+
+impl Codec {
+	const fn over(catalog: &'static [CatalogVTable]) -> Self {
+		Self {
+			catalog,
+			table: OnceLock::new(),
+		}
+	}
+
+	fn table(&self) -> &Table {
+		self.table.get_or_init(|| {
+			let catalog = self.catalog.iter().map(TypeDesc::catalog);
+			let descs: Vec<TypeDesc> = kept().into_iter().chain(catalog).collect();
+			let ids = descs
+				.iter()
+				.enumerate()
+				.map(|(index, desc)| {
+					let id = u16::try_from(index).expect("fewer than 65535 descriptors");
+					(desc.name, id)
+				})
+				.collect();
+			(descs, ids)
+		})
+	}
+
+	/// The descriptor of type `name`.
+	pub(super) fn lookup(&self, name: &str) -> Result<&TypeDesc> {
+		let table = self.table();
+		let id = table.1.get(name).ok_or_else(|| anyhow!("no codec descriptor for `{name}`"))?;
+		Ok(&table.0[*id as usize])
+	}
+}
+
 /// A revisioned type, as its index into the descriptor table: plain data a
 /// program stores in place of the type's name. [`TypeId::UTF8`] names the
 /// unframed string type, which has no descriptor.
+///
+/// The index is the same in every [`Codec`], so a program lowered for one entry names the same
+/// type to another.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct TypeId(pub(crate) u16);
 
@@ -273,50 +325,29 @@ impl TypeId {
 
 	/// The id of type `name`. The name is a literal the lowering writes; one
 	/// the VM holds no descriptor for is a bug in the lowering, not a runtime
-	/// condition.
+	/// condition. Reads the index from [`FULL_CODEC`], so only the lowering of
+	/// the statements that name catalog types, which an entry that serves them
+	/// alone lowers, reaches the full catalog table through it.
 	pub(crate) fn named(name: &str) -> Self {
 		if name == super::UTF8 {
 			return Self::UTF8;
 		}
-		match table().1.get(name) {
+		match FULL_CODEC.table().1.get(name) {
 			Some(id) => Self(*id),
 			None => panic!("no codec descriptor for `{name}`"),
 		}
 	}
 
-	/// The descriptor this id names; `None` for [`TypeId::UTF8`].
-	pub(super) fn desc(self) -> Result<Option<&'static TypeDesc>> {
+	/// The descriptor this id names in `codec`; `None` for [`TypeId::UTF8`].
+	pub(super) fn desc(self, codec: &Codec) -> Result<Option<&TypeDesc>> {
 		if self == Self::UTF8 {
 			return Ok(None);
 		}
-		table()
+		codec
+			.table()
 			.0
 			.get(self.0 as usize)
 			.map(Some)
 			.ok_or_else(|| anyhow!("no codec descriptor at index {}", self.0))
 	}
-}
-
-type Table = (Vec<TypeDesc>, HashMap<&'static str, u16>);
-
-fn table() -> &'static Table {
-	static TABLE: OnceLock<Table> = OnceLock::new();
-	TABLE.get_or_init(|| {
-		let descs: Vec<TypeDesc> = kept().into_iter().chain(catalog_types()).collect();
-		let ids = descs
-			.iter()
-			.enumerate()
-			.map(|(index, desc)| {
-				let id = u16::try_from(index).expect("fewer than 65535 descriptors");
-				(desc.name, id)
-			})
-			.collect();
-		(descs, ids)
-	})
-}
-
-pub(super) fn lookup(name: &str) -> Result<&'static TypeDesc> {
-	let table = table();
-	let id = table.1.get(name).ok_or_else(|| anyhow!("no codec descriptor for `{name}`"))?;
-	Ok(&table.0[*id as usize])
 }

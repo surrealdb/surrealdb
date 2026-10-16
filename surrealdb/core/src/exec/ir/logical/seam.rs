@@ -21,6 +21,7 @@ use surrealdb_types::ToSql;
 use super::ops::{LogOp, LoopKind};
 use super::scope::{self, LoopExit};
 use super::verify::timestamp_arg;
+use crate::catalog::{FunctionDefinition, Permission};
 use crate::exec::function::FunctionRegistry;
 pub(crate) use crate::exec::ir::build::expr::{
 	Built, Control, ExprHost, FieldRead, LoopSite, NameRef, bind_body, bind_expr,
@@ -28,6 +29,7 @@ pub(crate) use crate::exec::ir::build::expr::{
 use crate::exec::ir::build::logical::{
 	bind_closure, bind_loop_site, bind_value_statement, receives_row,
 };
+use crate::exec::ir::build::match_fold::MatchBinding;
 use crate::exec::ir::cache::deps::ValueDeps;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::Ir;
@@ -37,18 +39,24 @@ use crate::exec::ir::core::value::ValueDef;
 use crate::exec::ir::core::verify::{VerifyError, VerifyRule};
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::{ConvertSite, ExprOp, RaiseKind};
-use crate::exec::ir::iface::catalog::{EffectCx, SemanticCatalog};
+use crate::exec::ir::iface::catalog::{CatalogAnswer, EffectCx, SemanticCatalog};
 use crate::exec::ir::iface::conversion::EliminationReason;
 use crate::exec::ir::iface::frame::{AuthorityFrame, Snapshot};
 use crate::exec::ir::iface::ids::{BlockId, FrameId, OpId, RegionId, SnapshotId, ValueId};
+use crate::exec::ir::iface::premise::CatalogObjectKey;
 use crate::exec::ir::iface::region_kind::{RegionKind, RegionProperties, Visibility};
 use crate::exec::ir::iface::types::{FactSource, TypeKnowledge};
 use crate::exec::ir::op_kind::OpKind;
+use crate::exec::logical::footprint::CatalogKind;
+use crate::exec::surface::Surface;
+use crate::exec::vm::codec::Codec;
+use crate::exec::vm::compile_cache::ObjectVersion;
 use crate::exec::vm::payload::Refusal;
-use crate::expr::Kind;
 use crate::expr::logical::{
 	EvalFrame, LogicalClosure, LogicalExpr, LogicalFields, LogicalOp, ROW_PARAMS,
 };
+use crate::expr::{Function, Kind};
+use crate::kvs::cache::ds::FunctionSnapshot;
 use crate::val::Value;
 
 /// The error of an invariant the binder relies on and that no request can break: a request that
@@ -184,12 +192,23 @@ pub(crate) struct BindCx<'a> {
 	/// Whether the container runs after a change to the catalog its planning cannot know
 	/// ([`RequestInput::late_bound`](crate::exec::ir::RequestInput)).
 	late_bound: bool,
+	/// The statement families and the catalog codec of the entry the container is bound for, or
+	/// `None` where the binder is given none: a `MATCH` or a schema statement is then refused.
+	surface: Option<&'static Surface>,
 	/// Whether the top-level statement being bound writes records, which defines a table the
 	/// catalog does not hold.
 	statement_writes: bool,
 	/// Whether a write of the top-level statement bound so far may run code the catalog stores
 	/// ([`Self::note_write`]).
 	after_stored_code: bool,
+	/// Where the code being bound was written, where it is not the request text: the definition a
+	/// body is bound from.
+	origin: Option<LocOrigin>,
+	/// Whether something bound so far in the top-level statement may have changed the catalog: a
+	/// schema statement, or a call of code the plan does not show (a script, a function whose body
+	/// is not bound in place, a builtin that runs statements). A call of a function bound after
+	/// it meets the definition that change leaves, not the one the bind read.
+	catalog_touched: bool,
 	/// The first refusal of the top-level statement being bound that is raised before any of the
 	/// statement runs.
 	hoisted: Option<Refusal>,
@@ -210,6 +229,8 @@ pub(crate) struct BindCx<'a> {
 	/// of the view table whose order is being bound
 	/// ([`UnitKind::ViewRows`](crate::exec::ir::unit::UnitKind)), which writes a view row.
 	bundle_table: Option<BundleTable>,
+	/// The table the next write bound writes to, which its statement names only through a value.
+	named_table: Option<surrealdb_strand::TableName>,
 }
 
 /// The table a stage bundle or a view table's order is bound for.
@@ -271,15 +292,30 @@ impl<'a> BindCx<'a> {
 			catalog_may_change: false,
 			nested_may_change: false,
 			late_bound: false,
+			surface: None,
 			statement_writes: false,
 			after_stored_code: false,
+			origin: None,
+			catalog_touched: false,
 			hoisted: None,
 			defers_let: false,
 			writing: false,
 			deps: ValueDeps::new(),
 			notes: BindNotes::default(),
 			bundle_table: None,
+			named_table: None,
 		})
+	}
+
+	/// Names `table` as the table the next write bound writes to, which its statement names only
+	/// through a value.
+	pub(crate) fn name_next_write(&mut self, table: surrealdb_strand::TableName) {
+		self.named_table = Some(table);
+	}
+
+	/// Takes the table [`Self::name_next_write`] named, if the write bound has not taken it.
+	pub(crate) fn take_named_table(&mut self) -> Option<surrealdb_strand::TableName> {
+		self.named_table.take()
 	}
 
 	/// Binds the next write as one to `table`, the table of the stage bundle being bound.
@@ -444,7 +480,39 @@ impl<'a> BindCx<'a> {
 		self.nested_may_change = false;
 		self.statement_writes = false;
 		self.after_stored_code = false;
+		self.catalog_touched = false;
 		self.hoisted = None;
+	}
+
+	/// States `text` as the expression the op that computes `value` stands for, whatever the op's
+	/// origin, when the op is one of the current block's.
+	pub(crate) fn state_text_of(
+		&mut self,
+		value: ValueId,
+		text: Arc<String>,
+	) -> Result<(), IrError> {
+		let block = self.block()?;
+		let ir = self.rw.ir();
+		let Some(&ValueDef::OpResult {
+			op,
+			..
+		}) = ir.value(value).map(|data| &data.def)
+		else {
+			return Ok(());
+		};
+		let Some(data) = ir.op(op).filter(|data| data.parent == block) else {
+			return Ok(());
+		};
+		let loc = Location {
+			origin: LocOrigin::Written(text),
+			..data.loc.clone()
+		};
+		self.rw.set_location(op, loc)
+	}
+
+	/// Notes that what is bound next follows something that may have changed the catalog.
+	pub(crate) fn note_catalog_touch(&mut self) {
+		self.catalog_touched = true;
 	}
 
 	/// Notes whether running `op`, the top-level statement being bound, may change the catalog
@@ -496,17 +564,19 @@ impl<'a> BindCx<'a> {
 	/// Notes `write`, bound now, when it may run code the catalog stores, which may change the
 	/// catalog for the writes bound after it in the statement: a delete, whose reference actions
 	/// write other tables, or a write to a table with events.
-	pub(crate) fn note_write(&mut self, write: &crate::expr::logical::LogicalWrite) {
+	pub(crate) fn note_write(
+		&mut self,
+		write: &crate::expr::logical::LogicalWrite,
+		table: Option<&surrealdb_strand::TableName>,
+	) {
 		use crate::exec::ir::cache::answer::CatalogAnswer;
 		use crate::expr::logical::LogicalWriteStatement;
 		self.after_stored_code |= matches!(write.statement, LogicalWriteStatement::Delete(_))
-			|| crate::exec::ir::logical::stages::written_table(write).is_none_or(
-				|table| match self.effects.catalog.events(&table) {
-					CatalogAnswer::Found(events) => !events.is_empty(),
-					CatalogAnswer::Unknown => true,
-					CatalogAnswer::NotLoaded | CatalogAnswer::Absent => false,
-				},
-			);
+			|| table.is_none_or(|table| match self.effects.catalog.events(table) {
+				CatalogAnswer::Found(events) => !events.is_empty(),
+				CatalogAnswer::Unknown => true,
+				CatalogAnswer::NotLoaded | CatalogAnswer::Absent => false,
+			});
 	}
 
 	/// Whether a write of the statement bound before this point may run code the catalog stores
@@ -553,6 +623,24 @@ impl<'a> BindCx<'a> {
 	/// the program plans when it reaches it.
 	pub(crate) fn set_serves_late(&mut self, serves_late: bool) {
 		self.serves_late = serves_late;
+	}
+
+	/// Sets the surface of the entry the container is bound for. Without it, a `MATCH` and a
+	/// schema statement are refused.
+	pub(crate) fn set_surface(&mut self, surface: Option<&'static Surface>) {
+		self.surface = surface;
+	}
+
+	/// The binding of a `MATCH` statement, if the entry serves one.
+	pub(crate) fn match_binding(&self) -> Option<&'static (dyn MatchBinding + Sync)> {
+		self.surface.and_then(|surface| surface.match_binding)
+	}
+
+	/// The codec that reads the definitions of the schema statements bound for this entry.
+	pub(crate) fn codec(&self) -> Result<&'static Codec, IrError> {
+		self.surface.map(|surface| surface.codec).ok_or_else(|| {
+			invariant("a schema statement bound for no entry, so no catalog codec reads it")
+		})
 	}
 
 	/// Whether the statement bound now is one the program plans when it reaches it: one that is
@@ -892,19 +980,26 @@ impl<'a> BindCx<'a> {
 	///
 	/// The region's block arguments are the statement timestamp, one value per declared parameter
 	/// and one per row name the call passes, in that order; the parameters are bound under their
-	/// names and the row names under theirs. A name the caller binds, whether by `LET`, `FOR` or
-	/// an argument of its own, does not resolve in the body: it reads as a free name. The body
-	/// reads no row of its caller.
-	#[allow(dead_code)]
+	/// names and the row names under theirs. `types` states what is known of each parameter, in
+	/// order; a parameter it does not reach is unknown. A name the caller binds, whether by
+	/// `LET`, `FOR` or an argument of its own, does not resolve in the body: it reads as a free
+	/// name. The body reads no row of its caller.
 	pub(crate) fn within_function_body<R>(
 		&mut self,
 		owner: OpId,
 		params: &[Strand],
+		types: &[TypeKnowledge],
 		row_names: &[Strand],
 		body: impl FnOnce(&mut Self) -> Result<R, IrError>,
 	) -> Result<R, IrError> {
 		let mut args = vec![timestamp_arg()];
-		args.extend(params.iter().chain(row_names).map(|_| TypeKnowledge::Unknown));
+		args.extend(
+			params
+				.iter()
+				.enumerate()
+				.map(|(at, _)| types.get(at).cloned().unwrap_or(TypeKnowledge::Unknown)),
+		);
+		args.extend(row_names.iter().map(|_| TypeKnowledge::Unknown));
 		self.within(owner, RegionKind::FunctionBody, &args, |cx, entry| {
 			let values = entry.get(1..).unwrap_or(&[]);
 			let (declared, rows) = values.split_at(params.len().min(values.len()));
@@ -1071,7 +1166,7 @@ impl<'a> BindCx<'a> {
 		Location {
 			stmt: self.stmt,
 			span: None,
-			origin: LocOrigin::Query,
+			origin: self.origin.clone().unwrap_or(LocOrigin::Query),
 		}
 	}
 }
@@ -1230,6 +1325,94 @@ impl ExprHost for BindCx<'_> {
 
 	fn bind_closure(&mut self, closure: &LogicalClosure) -> Result<ValueId, IrError> {
 		bind_closure(self, closure)
+	}
+
+	fn inlinable_definition(&mut self, name: &str) -> Option<Arc<FunctionDefinition>> {
+		if self.in_stored_code()
+			|| self.kinds.iter().any(|kind| matches!(kind, RegionKind::ClosureBody))
+			|| self.late_bound
+			|| !self.eager
+			|| self.after_stored_code
+			|| self.catalog_touched
+			|| self.effects.catalog.calls_current()
+			|| self.effects.catalog.plans_at_stamp()
+		{
+			return None;
+		}
+		let ir = self.rw.ir();
+		if !matches!(ir.snapshot(self.snapshot), Some(Snapshot::Current))
+			|| !ir.frame(self.frame).is_some_and(|frame| frame.eval.is_caller())
+		{
+			return None;
+		}
+		let CatalogAnswer::Found(definition) = self.effects.catalog.function(name) else {
+			return None;
+		};
+		(matches!(definition.permissions, Permission::Full)
+			&& self.effects.catalog.function_limit_is_inert(&definition))
+		.then_some(definition)
+	}
+
+	fn bind_function_body(
+		&mut self,
+		owner: OpId,
+		definition: &FunctionDefinition,
+		types: &[TypeKnowledge],
+		body: &LogicalExpr,
+		text: Option<Arc<String>>,
+	) -> Result<(), IrError> {
+		let params: Vec<Strand> =
+			definition.args.iter().map(|(name, _)| Strand::new(name.as_str())).collect();
+		let origin = LocOrigin::Catalog(Box::new((
+			CatalogObjectKey {
+				kind: CatalogKind::Function,
+				ns: None,
+				db: None,
+				table: None,
+				name: Some(definition.name.clone()),
+			},
+			ObjectVersion::Content(FunctionSnapshot::hash_of(definition)),
+		)));
+		let outer = self.origin.replace(origin);
+		let bound = self.with_current_state(|cx| {
+			cx.within_function_body(owner, &params, types, &[], |cx| match bind_expr(cx, body)? {
+				Built::Value(value) => {
+					if let Some(text) = text {
+						cx.state_text_of(value, text)?;
+					}
+					cx.create(
+						OpKind::Expr(ExprOp::Yield),
+						smallvec::smallvec![value],
+						SmallVec::new(),
+					)
+					.map(|_| ())
+				}
+				Built::Diverged => Ok(()),
+			})
+		});
+		self.origin = outer;
+		bound
+	}
+
+	fn note_call(&mut self, function: &Function) {
+		use crate::expr::logical::{EffectOracle, EffectSet};
+		let touches = match function {
+			Function::Normal(name) => {
+				crate::exec::logical::effects::Oracle::new(self.effects.registry)
+					.builtin(name)
+					.is_none_or(|set| {
+						set.intersects(EffectSet::CHANGES_CATALOG | EffectSet::OPAQUE_BODY)
+					})
+			}
+			Function::Custom(_)
+			| Function::Script(_)
+			| Function::Model(_)
+			| Function::Module(..)
+			| Function::Silo {
+				..
+			} => true,
+		};
+		self.catalog_touched |= touches;
 	}
 
 	fn writing(&self) -> bool {

@@ -638,9 +638,10 @@ script = '''
 '''
 
 [tasks.ci-wasm-size-budget]
-# Builds the edge worker bundles (`surrealdb-edge-size-probe`, lean and full)
-# for wasm32 with the `edge` profile, runs `wasm-opt -Oz`, and fails when a
-# bundle is over its budget. Needs binaryen's `wasm-opt` and a clang that
+# Builds the edge worker bundles (`surrealdb-edge-size-probe`: lean, full and
+# the edge entry) for wasm32 with the `edge` profile, runs `wasm-opt -Oz`, and
+# fails when a bundle is over its budget. A bundle whose budget is 0 is
+# reported and not checked. Needs binaryen's `wasm-opt` and a clang that
 # targets wasm32 (see `ci-check-wasm`). `cargo make ci-wasm-size-budget --
 # --toolchain nightly` checks the Cloudflare build with the pinned nightly;
 # the budgets and flags are documented in the script.

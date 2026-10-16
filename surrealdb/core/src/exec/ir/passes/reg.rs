@@ -4,9 +4,11 @@ use super::cse::Cse;
 use super::dce::Dce;
 use super::driver::LoPass;
 use super::fold::FoldPass;
+use super::inline::InlineCalls;
 use super::licm::{HoistLeadingConjuncts, Licm};
 use super::loop_unroll::LoopUnroll;
 use super::perm_where::{PushBelowLayer, PushBelowPermission, SpecialiseGuards};
+use super::push_subquery::PushIntoSubquery;
 use super::unswitch::Unswitch;
 use crate::exec::ir::iface::conversion::Phase;
 use crate::exec::ir::registry::{IrPass, Registry};
@@ -17,9 +19,11 @@ use crate::exec::ir::registry::{IrPass, Registry};
 pub(crate) fn lo_passes() -> Vec<Box<dyn LoPass>> {
 	vec![
 		Box::new(SpecialiseGuards),
+		Box::new(InlineCalls),
 		Box::new(FoldPass),
 		Box::new(Dce),
 		Box::new(Cse),
+		Box::new(PushIntoSubquery),
 		Box::new(PushBelowLayer),
 		Box::new(PushBelowPermission),
 		Box::new(LoopUnroll),

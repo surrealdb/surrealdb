@@ -48,7 +48,8 @@ use crate::exec::operators::join::hash_join::{
 	BuildTable, emit, join_key, merge_rows, null_filled,
 };
 use crate::exec::operators::mutate::{
-	InsertEdgeOp, InsertNodeOp, RowEval, UpdateOp, WritePlans, delete_row, insert_row, update_row,
+	InsertEdgeOp, InsertNodeOp, MutationParam, RowEval, RunWrite, UpdateOp, delete_row, insert_row,
+	update_row,
 };
 use crate::exec::operators::scan::fetch::FetchFieldStateCache;
 use crate::exec::operators::{EdgeBinding, EndpointField, ExpandDir, JoinType};
@@ -117,6 +118,8 @@ pub(crate) enum MutationStep<P> {
 	Update {
 		target: String,
 		op: UpdateOp<P>,
+		/// The group of the program that writes one record.
+		write: u16,
 	},
 	/// `[DETACH|NODETACH] DELETE` of the record bound at `target`.
 	Delete {
@@ -124,8 +127,11 @@ pub(crate) enum MutationStep<P> {
 		detach: DetachMode,
 		/// Whether the target is an edge, which has no connected edges to refuse.
 		is_edge: bool,
+		/// The group of the program that deletes one record.
+		write: u16,
 	},
-	/// `INSERT` of new nodes and edges.
+	/// `INSERT` of new nodes and edges, each created by a group of the program of
+	/// its own.
 	Insert {
 		nodes: Vec<InsertNodeOp<P>>,
 		edges: Vec<InsertEdgeOp<P>>,
@@ -505,6 +511,30 @@ async fn step_chunks(
 	}
 }
 
+/// Runs the write groups of a write stage's program, each in the step's own
+/// execution context with the row's values bound as parameters.
+struct GroupWrites<'s> {
+	program: std::sync::Arc<super::program::Program>,
+	state: &'s mut State,
+	ctx: &'s ExecutionContext,
+}
+
+impl RunWrite for GroupWrites<'_> {
+	fn run<'a>(
+		&'a mut self,
+		write: u16,
+		values: Vec<(MutationParam, Value)>,
+	) -> futures::future::BoxFuture<'a, Result<Vec<Value>, ControlFlow>> {
+		Box::pin(async move {
+			let frame = self.ctx.with_params(values.into_iter().map(|(p, v)| (p.name(), v)));
+			let (rows, ran) =
+				super::host::run_group(&self.program, write, self.state, &frame).await;
+			ran?;
+			Ok(rows)
+		})
+	}
+}
+
 /// Evaluates the row-scoped values of a write stage as host scalars, over a
 /// state kept for the run of the step.
 struct HostEval<'a> {
@@ -621,16 +651,23 @@ pub(super) async fn finish_step(
 		ctx,
 		state: &mut eval,
 	};
-	// Each synthetic write the step applies is planned once, for its first row.
-	let mut plans = WritePlans::default();
+	// Each write the step applies is a group of its program, compiled with it.
+	let mut writes = GroupWrites {
+		program: state.program.clone().ok_or_else(|| {
+			ControlFlow::Err(anyhow::anyhow!("a mutation step run with no program"))
+		})?,
+		state,
+		ctx,
+	};
 	match mutation {
 		MutationStep::Update {
 			target,
 			op,
+			write,
 		} => {
 			for mut row in rows {
 				super::fuel::tick(ctx, 1).await?;
-				update_row(op, target, &mut row, &mut host, &mut plans, ctx).await?;
+				update_row(op, *write, target, &mut row, &mut host, &mut writes).await?;
 				out.push(row);
 			}
 		}
@@ -638,6 +675,7 @@ pub(super) async fn finish_step(
 			target,
 			detach,
 			is_edge,
+			write,
 		} => {
 			let ids = {
 				let db_ctx = ctx.database().map_err(|e| ControlFlow::Err(anyhow::anyhow!(e)))?;
@@ -646,8 +684,18 @@ pub(super) async fn finish_step(
 			let mut deleted: std::collections::HashSet<RecordId> = std::collections::HashSet::new();
 			for mut row in rows {
 				super::fuel::tick(ctx, 1).await?;
-				delete_row(&mut row, target, *detach, *is_edge, ids, &mut deleted, &mut plans, ctx)
-					.await?;
+				delete_row(
+					&mut row,
+					target,
+					*detach,
+					*is_edge,
+					ids,
+					&mut deleted,
+					*write,
+					&mut writes,
+					ctx,
+				)
+				.await?;
 				out.push(row);
 			}
 		}
@@ -657,7 +705,7 @@ pub(super) async fn finish_step(
 		} => {
 			for mut row in rows {
 				super::fuel::tick(ctx, 1).await?;
-				insert_row(nodes, edges, &mut row, &mut host, &mut plans, ctx).await?;
+				insert_row(nodes, edges, &mut row, &mut host, &mut writes).await?;
 				out.push(row);
 			}
 		}

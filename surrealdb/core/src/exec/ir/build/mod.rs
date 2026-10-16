@@ -6,6 +6,7 @@
 pub(crate) mod expr;
 pub(crate) mod field_paths;
 pub(crate) mod field_view;
+pub(crate) mod inline;
 pub(crate) mod logical;
 pub(crate) mod lookup;
 pub(crate) mod match_fold;

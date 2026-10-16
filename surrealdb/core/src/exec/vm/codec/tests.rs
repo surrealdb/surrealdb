@@ -242,8 +242,8 @@ fn reclaim_state_matches_its_revisioned_encoding() {
 	];
 	for state in cases {
 		let rust = revision::to_vec(&state).unwrap();
-		let value = super::decode("ReclaimState", &rust).unwrap();
-		assert_eq!(super::encode("ReclaimState", &value).unwrap(), rust, "{state:?}");
+		let value = super::decode(&FULL_CODEC, "ReclaimState", &rust).unwrap();
+		assert_eq!(super::encode(&FULL_CODEC, "ReclaimState", &value).unwrap(), rust, "{state:?}");
 	}
 }
 
@@ -322,9 +322,9 @@ fn a_view_rows_stats_read_in_either_encoding_and_write_the_stored_one() {
 		};
 		let legacy = revision::to_vec(&record).unwrap();
 		let stored = record.kv_encode_value().unwrap();
-		let value = super::decode("Record", &legacy).unwrap();
-		assert_eq!(super::decode("Record", &stored).unwrap(), value, "{record:?}");
-		assert_eq!(super::encode("Record", &value).unwrap(), stored, "{record:?}");
+		let value = super::decode(&FULL_CODEC, "Record", &legacy).unwrap();
+		assert_eq!(super::decode(&FULL_CODEC, "Record", &stored).unwrap(), value, "{record:?}");
+		assert_eq!(super::encode(&FULL_CODEC, "Record", &value).unwrap(), stored, "{record:?}");
 	}
 }
 
@@ -335,17 +335,17 @@ fn ids_name_the_routes_and_types_their_names_do() {
 	for route in surrealdb_datastore::key::schema::KEY_ROUTES {
 		assert_eq!(key::RouteId::named(route.name).name(), route.name);
 	}
-	let utf8 = encode_id(TypeId::UTF8, &Value::String("a".into())).unwrap();
+	let utf8 = encode_id(&FULL_CODEC, TypeId::UTF8, &Value::String("a".into())).unwrap();
 	assert_eq!(utf8, b"a");
-	assert_eq!(decode_id(TypeId::UTF8, &utf8).unwrap(), Value::String("a".into()));
+	assert_eq!(decode_id(&FULL_CODEC, TypeId::UTF8, &utf8).unwrap(), Value::String("a".into()));
 	let record = crate::catalog::Record::new(Value::None);
 	let legacy = revision::to_vec(&record).unwrap();
 	let stored = surrealdb_kvs::value::KVValue::kv_encode_value(&record).unwrap();
-	let value = decode("Record", &legacy).unwrap();
+	let value = decode(&FULL_CODEC, "Record", &legacy).unwrap();
 	let id = TypeId::named("Record");
-	assert_eq!(decode_id(id, &legacy).unwrap(), value);
-	assert_eq!(decode_id(id, &stored).unwrap(), value);
-	assert_eq!(encode_id(id, &value).unwrap(), stored);
+	assert_eq!(decode_id(&FULL_CODEC, id, &legacy).unwrap(), value);
+	assert_eq!(decode_id(&FULL_CODEC, id, &stored).unwrap(), value);
+	assert_eq!(encode_id(&FULL_CODEC, id, &value).unwrap(), stored);
 }
 
 /// A function definition as 3.2.4 wrote it, at revision 3 with its argument
@@ -367,7 +367,7 @@ fn a_function_with_kinds_stored_as_an_ast_reads_as_kind_text() {
 		.unwrap()
 		.kv_encode_value()
 		.unwrap();
-	let value = decode("StoredFunctionDefinition", WRITTEN_BY_3_2_4).unwrap();
+	let value = decode(&FULL_CODEC, "StoredFunctionDefinition", WRITTEN_BY_3_2_4).unwrap();
 	let Value::Object(fields) = &value else {
 		panic!("a function decodes to an object: {value:?}");
 	};
@@ -379,7 +379,7 @@ fn a_function_with_kinds_stored_as_an_ast_reads_as_kind_text() {
 		Some(&Value::Array(vec![arg("a", "number"), arg("b", "array<int>")].into()))
 	);
 	assert_eq!(fields.get("returns"), Some(&Value::None));
-	assert_eq!(encode("StoredFunctionDefinition", &value).unwrap(), rust);
+	assert_eq!(encode(&FULL_CODEC, "StoredFunctionDefinition", &value).unwrap(), rust);
 }
 
 /// A table whose view is the `Aggregated` form, which predates a view's
@@ -419,17 +419,72 @@ fn an_aggregated_view_reads_as_its_revisioned_encoding_and_is_written_as_clauses
 	);
 	table.view = Some(view.clone());
 	let rust = revision::to_vec(&table).unwrap();
-	let value = decode("StoredTableDefinition", &rust).unwrap();
+	let value = decode(&FULL_CODEC, "StoredTableDefinition", &rust).unwrap();
 	assert_eq!(
 		value,
 		crate::catalog::stored::StoredField::to_vm_value(&table).unwrap(),
 		"{view:?}"
 	);
-	let written = encode("StoredTableDefinition", &value).unwrap();
+	let written = encode(&FULL_CODEC, "StoredTableDefinition", &value).unwrap();
 	let read = <crate::catalog::StoredTableDefinition as crate::key::KVValue>::kv_decode_value(
 		&written,
 		(),
 	)
 	.unwrap();
 	assert_eq!(read.view, Some(view.current()), "{view:?}");
+}
+
+/// The kinds the edge codec leaves out refuse every read and write with the name of the kind, and
+/// the kinds of the api, config, ml and module families stay in it.
+#[test]
+fn the_edge_codec_refuses_the_kinds_it_leaves_out_by_name() {
+	let unserved = [
+		"StoredAccessDefinition",
+		"UserDefinition",
+		"Node",
+		"NodeLiveQuery",
+		"AccessGrant",
+		"StoredBucketDefinition",
+	];
+	for name in unserved {
+		let message = format!("catalog kind {name} is not served by this entry");
+		let error = decode(&EDGE_CODEC, name, &[]).unwrap_err();
+		assert_eq!(error.to_string(), message);
+		let error = encode(&EDGE_CODEC, name, &Value::None).unwrap_err();
+		assert_eq!(error.to_string(), message);
+		// The kind is still a name the full codec reads, at the index the edge codec holds it.
+		assert!(describes(&FULL_CODEC, name), "{name}");
+		let id = TypeId::named(name);
+		assert_eq!(decode_id(&EDGE_CODEC, id, &[]).unwrap_err().to_string(), message);
+	}
+	for name in [
+		"StoredApiDefinition",
+		"StoredConfigDefinition",
+		"StoredMlModelDefinition",
+		"StoredModuleDefinition",
+		"StoredTableDefinition",
+		"StoredFieldDefinition",
+		"StoredSubscriptionDefinition",
+	] {
+		let id = TypeId::named(name);
+		let error = decode_id(&EDGE_CODEC, id, &[]).unwrap_err();
+		assert!(!error.to_string().contains("is not served"), "{name}: {error}");
+	}
+}
+
+/// Both codecs list the catalog kinds in the same order, so a program names a type by one index
+/// for either.
+#[test]
+fn the_edge_and_full_codecs_index_every_type_alike() {
+	use crate::catalog::stored::{CATALOG_TYPES, EDGE_CATALOG_TYPES};
+	assert_eq!(CATALOG_TYPES.len(), EDGE_CATALOG_TYPES.len());
+	for (full, edge) in CATALOG_TYPES.iter().zip(EDGE_CATALOG_TYPES) {
+		assert_eq!(full.name, edge.name);
+	}
+	for desc in CATALOG_TYPES {
+		let id = TypeId::named(desc.name);
+		let full = id.desc(&FULL_CODEC).unwrap().unwrap().name;
+		let edge = id.desc(&EDGE_CODEC).unwrap().unwrap().name;
+		assert_eq!(full, edge);
+	}
 }

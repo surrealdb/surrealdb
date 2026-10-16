@@ -4,6 +4,8 @@ use surrealdb_kvs::TransactionType::*;
 use uuid::Uuid;
 
 use crate::CommunityComposer;
+#[cfg(feature = "kv-mem")]
+use crate::key::KVKey;
 use crate::key::RawRange;
 use crate::kvs::{Datastore, Direction};
 
@@ -134,4 +136,105 @@ pub async fn cursor_for_each_metrics_match_next_batch(ds: Arc<Datastore>) {
 	assert_eq!(m2.keys_read, m1.keys_read, "for_each keys_read != next_batch");
 	assert_eq!(m2.key_bytes_read, m1.key_bytes_read, "for_each key_bytes_read != next_batch");
 	assert_eq!(m2.value_bytes_read, m1.value_bytes_read, "for_each value_bytes_read != next_batch");
+}
+
+/// A key that names no catalog definition, so a write to it is only a write.
+#[cfg(feature = "kv-mem")]
+#[derive(Debug)]
+struct ProbeKey(&'static [u8]);
+
+#[cfg(feature = "kv-mem")]
+impl KVKey for ProbeKey {
+	type Value = Vec<u8>;
+
+	fn encode_buffer(&self, buffer: &mut Vec<u8>) -> anyhow::Result<()> {
+		buffer.extend_from_slice(self.0);
+		Ok(())
+	}
+
+	fn value_context(&self) {}
+}
+
+/// A typed call and the raw call over the same encoded key and value must
+/// record the same metrics, step by step, so that the typed path routes through
+/// the same accounting as the raw one.
+#[cfg(feature = "kv-mem")]
+#[tokio::test]
+async fn typed_and_raw_paths_record_identical_metrics() {
+	use surrealdb_observe::TransactionMetricsSnapshot as Snap;
+
+	let ds =
+		Datastore::builder().without_maintenance_tasks().build_with_path("memory").await.unwrap();
+	let a = ProbeKey(b"/!metrics-probe-a");
+	let b = ProbeKey(b"/!metrics-probe-b");
+	let missing = ProbeKey(b"/!metrics-probe-c");
+	let value = b"probe-value".to_vec();
+
+	// Each call's increments over the counters before it.
+	let delta = |after: &Snap, before: &Snap| {
+		(
+			after.ops_get - before.ops_get,
+			after.keys_read - before.keys_read,
+			after.key_bytes_read - before.key_bytes_read,
+			after.value_bytes_read - before.value_bytes_read,
+			after.ops_set - before.ops_set,
+			after.keys_written - before.keys_written,
+			after.key_bytes_written - before.key_bytes_written,
+			after.value_bytes_written - before.value_bytes_written,
+			after.ops_del - before.ops_del,
+		)
+	};
+
+	let tx = ds.transaction(Write).await.unwrap();
+
+	let m0 = tx.metrics_snapshot_for_test();
+	tx.set_key(&a, &value).await.unwrap();
+	let m1 = tx.metrics_snapshot_for_test();
+	tx.set(b.encode_key().unwrap(), value.clone()).await.unwrap();
+	let m2 = tx.metrics_snapshot_for_test();
+	let typed_set = delta(&m1, &m0);
+	assert_eq!(typed_set, delta(&m2, &m1), "set_key and set differ");
+	assert_eq!(typed_set.4, 1, "a set is counted once");
+
+	let got = tx.get_key(&a, None).await.unwrap();
+	let m3 = tx.metrics_snapshot_for_test();
+	let raw = tx.get(b.encode_key().unwrap(), None).await.unwrap();
+	let m4 = tx.metrics_snapshot_for_test();
+	assert_eq!(got.as_deref(), Some(value.as_slice()));
+	assert_eq!(raw.as_deref(), Some(value.as_slice()));
+	let typed_hit = delta(&m3, &m2);
+	assert_eq!(typed_hit, delta(&m4, &m3), "get_key and get differ on a hit");
+	assert_eq!(typed_hit.1, 1, "a hit finds one key");
+	assert_eq!(typed_hit.3, value.len() as u64, "a hit reads the value");
+
+	assert!(tx.get_key(&missing, None).await.unwrap().is_none());
+	let m5 = tx.metrics_snapshot_for_test();
+	assert!(tx.get(missing.encode_key().unwrap(), None).await.unwrap().is_none());
+	let m6 = tx.metrics_snapshot_for_test();
+	let typed_miss = delta(&m5, &m4);
+	assert_eq!(typed_miss, delta(&m6, &m5), "get_key and get differ on a miss");
+	assert_eq!(typed_miss.1, 0, "a miss finds no key");
+	assert_eq!(typed_miss.3, 0, "a miss reads no value");
+
+	tx.del_key(&a).await.unwrap();
+	let m7 = tx.metrics_snapshot_for_test();
+	tx.del(b.encode_key().unwrap()).await.unwrap();
+	let m8 = tx.metrics_snapshot_for_test();
+	let typed_del = delta(&m7, &m6);
+	assert_eq!(typed_del, delta(&m8, &m7), "del_key and del differ");
+	assert_eq!(typed_del.8, 1, "a delete is counted once");
+	tx.cancel().await.unwrap();
+
+	// A locked read registers the key for commit-time conflict detection, which a
+	// read-only transaction never reaches, so it is refused.
+	let tx = ds.transaction(Read).await.unwrap();
+	let err = tx.getu_key(&a).await.unwrap_err();
+	assert!(
+		matches!(
+			err.downcast_ref::<surrealdb_kvs::Error>(),
+			Some(surrealdb_kvs::Error::TransactionReadonly)
+		),
+		"getu_key on a read-only transaction answered {err:?}"
+	);
+	tx.cancel().await.unwrap();
 }

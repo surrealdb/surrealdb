@@ -3,7 +3,7 @@
 use anyhow::Result;
 
 use crate::exec::EvalContext;
-use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
+use crate::exec::function::{ScalarFunction, Signature};
 use crate::exec::ir::iface::Fallibility;
 use crate::exec::vm::calls::StreamingClosureEvaluator;
 use crate::expr::Kind;
@@ -223,9 +223,6 @@ impl ScalarFunction for ValueExpect {
 	}
 }
 
-pub fn register(registry: &mut FunctionRegistry) {
-	registry.register(ValueDiff);
-	registry.register(ValuePatch);
-	registry.register(ValueChain);
-	registry.register(ValueExpect);
-}
+/// The `value::*` scalar builtins.
+pub(super) const SCALARS: &[&dyn ScalarFunction] =
+	&[&ValueDiff, &ValuePatch, &ValueChain, &ValueExpect];

@@ -495,7 +495,7 @@ fn parsed_container() -> (Ir, OpId, ValueId) {
 		IrScope::Request {
 			fragment: None,
 		},
-		registry::build(),
+		registry::attr_syntaxes(),
 	)
 	.unwrap_or_else(|failure| panic!("{failure}\n{text}"));
 	let ops: Vec<OpId> = ops_in(&ir, ir.top()).collect();
@@ -852,7 +852,7 @@ fn substitution_sites_listed() {
 		("exec/planner/select/mod.rs", 1),
 		("exec/planner.rs", 1),
 		("exec/logical/resolve.rs", 1),
-		("exec/logical/params.rs", 2),
+		("exec/logical/params.rs", 1),
 	];
 
 	/// The number of calls of `name` on `line`: an occurrence at a word boundary followed by an
@@ -890,7 +890,7 @@ fn substitution_sites_listed() {
 		"a call of a parameter substitution function was added or removed; add the site to the \
 		 substitution table of the parameter design (D5 section 5.4) and to `LISTED` here."
 	);
-	assert_eq!(listed.values().sum::<usize>(), 10);
+	assert_eq!(listed.values().sum::<usize>(), 9);
 }
 
 // ---------------------------------------------------------------------------------------------

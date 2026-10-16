@@ -444,7 +444,7 @@ pub(super) fn lower_stage_bundle(cx: &mut LowerCx<'_>, ir: &Ir) -> Result<Lowere
 	};
 	let mut em = Emitter::new();
 	let (pipelines, stage_needs) = {
-		let mut stages = Stages::new(&run, ir, cx.limits()).in_context(cx);
+		let mut stages = Stages::new(&run, ir, cx.limits(), cx.registry()).in_context(cx);
 		let pipelines = site_pipelines(&mut em, &sites, &mut stages)?;
 		(pipelines, stages.needs.take())
 	};
@@ -585,7 +585,7 @@ pub(super) fn lower_write(
 			(pipeline, None)
 		}
 		None => {
-			let mut stages = Stages::new(&run, ir, cx.limits()).in_context(cx);
+			let mut stages = Stages::new(&run, ir, cx.limits(), cx.registry()).in_context(cx);
 			let pipeline =
 				write_pipeline(em, &attrs.write.body, &run.stages, entry, &mut stages, source)?;
 			(pipeline, stages.needs.take())
@@ -728,7 +728,7 @@ fn lower_write_over_rows(
 				(pipeline, None)
 			}
 			None => {
-				let mut stages = Stages::new(&run, ir, cx.limits()).in_context(cx);
+				let mut stages = Stages::new(&run, ir, cx.limits(), cx.registry()).in_context(cx);
 				let pipeline =
 					write_pipeline(em, &attrs.write.body, &run.stages, entry, &mut stages, source)?;
 				(pipeline, stages.needs.take())

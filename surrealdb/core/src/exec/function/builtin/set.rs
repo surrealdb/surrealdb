@@ -2,15 +2,15 @@
 
 use anyhow::Result;
 
+use crate::define_pure_function;
 use crate::exec::EvalContext;
-use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
+use crate::exec::function::{ScalarFunction, Signature};
 use crate::exec::ir::iface::Fallibility;
 use crate::exec::vm::calls::StreamingClosureEvaluator;
 use crate::expr::Kind;
 use crate::expr::logical::EffectSet;
 use crate::fnc::args::FromArgs;
 use crate::val::{ClosureEvaluator, Value};
-use crate::{define_pure_function, register_functions};
 
 // Single set argument functions
 define_pure_function!(SetFirst, "set::first", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, rule: ReturnRule::ArrayElement(0), (set: Any) -> Any, crate::fnc::set::first);
@@ -184,34 +184,30 @@ define_set_closure_function!(SetMap, "set::map", crate::fnc::set::map, set: Any,
 // set::reduce - Reduce set with closure
 define_set_closure_function!(SetReduce, "set::reduce", crate::fnc::set::reduce, set: Any, |mapper: Any| => Any, fallibility: Fallibility::VALUE);
 
-pub fn register(registry: &mut FunctionRegistry) {
-	register_functions!(
-		registry,
-		SetAdd,
-		SetAt,
-		SetComplement,
-		SetContains,
-		SetDifference,
-		SetFirst,
-		SetFlatten,
-		SetIntersect,
-		SetIsEmpty,
-		SetJoin,
-		SetLast,
-		SetLen,
-		SetMax,
-		SetMin,
-		SetRemove,
-		SetSlice,
-		SetUnion,
-	);
-
-	// Register closure-based functions
-	registry.register(SetAll);
-	registry.register(SetAny);
-	registry.register(SetFilter);
-	registry.register(SetFind);
-	registry.register(SetFold);
-	registry.register(SetMap);
-	registry.register(SetReduce);
-}
+/// The `set::*` scalar builtins.
+pub(super) const SCALARS: &[&dyn ScalarFunction] = &[
+	&SetAdd,
+	&SetAt,
+	&SetComplement,
+	&SetContains,
+	&SetDifference,
+	&SetFirst,
+	&SetFlatten,
+	&SetIntersect,
+	&SetIsEmpty,
+	&SetJoin,
+	&SetLast,
+	&SetLen,
+	&SetMax,
+	&SetMin,
+	&SetRemove,
+	&SetSlice,
+	&SetUnion,
+	&SetAll,
+	&SetAny,
+	&SetFilter,
+	&SetFind,
+	&SetFold,
+	&SetMap,
+	&SetReduce,
+];

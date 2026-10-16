@@ -91,7 +91,8 @@ use super::iface::conversion::PHYSICAL_PHASE;
 use super::iface::fold::PlanTimeFolder;
 use super::iface::ids::RegionId;
 use super::iface::region_kind::{
-	ClauseRole, ErrorScope, FieldRole, RegionKind, StatementCommit, StoredRole, TxnKind,
+	ClauseRole, ErrorScope, FieldRole, RegionKind, RegionKinds, StatementCommit, StoredRole,
+	TxnKind,
 };
 use super::iface::statements::{AccessOp, AccessSubjectShape, InfoSubject, LiveShape, MatchData};
 use super::logical::effects::lookup_clause_kinds;
@@ -293,7 +294,7 @@ impl PhysOp {
 	}
 
 	/// The kind of each of the op's regions, in position order.
-	pub(crate) fn region_kinds(&self) -> SmallVec<[RegionKind; 2]> {
+	pub(crate) fn region_kinds(&self) -> RegionKinds {
 		match self {
 			PhysOp::KnnScan(attrs) => {
 				let mut kinds = SmallVec::new();
@@ -325,7 +326,7 @@ impl PhysOp {
 				}
 			}
 			PhysOp::Count(attrs) => {
-				let mut kinds: SmallVec<[RegionKind; 2]> = match &attrs.shape {
+				let mut kinds: RegionKinds = match &attrs.shape {
 					CountShape::Indexed {
 						..
 					} => smallvec![RegionKind::Clause(ClauseRole::Where)],
@@ -342,7 +343,7 @@ impl PhysOp {
 			}
 			PhysOp::Subquery => smallvec![RegionKind::Subquery],
 			PhysOp::Join(attrs) => {
-				let mut kinds: SmallVec<[RegionKind; 2]> = std::iter::repeat_n(
+				let mut kinds: RegionKinds = std::iter::repeat_n(
 					RegionKind::Clause(ClauseRole::Where),
 					usize::from(attrs.keys) * 2 + usize::from(attrs.residual),
 				)
@@ -353,7 +354,7 @@ impl PhysOp {
 				kinds
 			}
 			PhysOp::PermissionFilter(attrs) => {
-				let mut kinds: SmallVec<[RegionKind; 2]> = smallvec![RegionKind::PermissionFrame];
+				let mut kinds: RegionKinds = smallvec![RegionKind::PermissionFrame];
 				kinds.extend(std::iter::repeat_n(
 					RegionKind::FieldFrame(FieldRole::Computed),
 					attrs.computed.as_ref().map_or(0, ComputedReadsShape::derived_regions),
@@ -362,7 +363,7 @@ impl PhysOp {
 			}
 			PhysOp::Layer(attrs) => {
 				let count = field_regions(&attrs.fields);
-				let mut kinds: SmallVec<[RegionKind; 2]> =
+				let mut kinds: RegionKinds =
 					std::iter::repeat_n(RegionKind::Clause(ClauseRole::Projection), count)
 						.collect();
 				kinds.extend(std::iter::repeat_n(
@@ -389,7 +390,7 @@ impl PhysOp {
 			)
 			.collect(),
 			PhysOp::Aggregate(attrs) => {
-				let mut kinds: SmallVec<[RegionKind; 2]> = std::iter::repeat_n(
+				let mut kinds: RegionKinds = std::iter::repeat_n(
 					RegionKind::ErrorScope(ErrorScope::ShapeToNone),
 					usize::from(attrs.groups),
 				)
@@ -456,7 +457,7 @@ impl PhysOp {
 				.collect(),
 				MatchStepAttrs::Bind(shape) => shape.region_kinds(),
 				MatchStepAttrs::Output(shape) => {
-					let mut kinds: SmallVec<[RegionKind; 2]> = std::iter::repeat_n(
+					let mut kinds: RegionKinds = std::iter::repeat_n(
 						RegionKind::Clause(ClauseRole::Projection),
 						shape.columns.len(),
 					)
@@ -525,7 +526,7 @@ impl PhysOp {
 					| LoopKind::Recurse
 					| LoopKind::Broadcast => RegionKind::Loop,
 				};
-				let mut kinds: SmallVec<[RegionKind; 2]> = smallvec![body];
+				let mut kinds: RegionKinds = smallvec![body];
 				if *first {
 					kinds.push(body);
 				}
@@ -1111,7 +1112,8 @@ pub(crate) async fn plan_physical(
 	let top = ir.top();
 	pipeline::build(ir, facts, top)?;
 	pipeline::assign(ir, facts)?;
-	let placed = placement::place_all(ir, facts, placement, cx.physical.backend())?;
+	let placed =
+		placement::place_all(ir, facts, cx.effects.registry, placement, cx.physical.backend())?;
 	placement::install(ir.placement_table_mut(), placed);
 	Ok(PhysicalOutcome {
 		report,

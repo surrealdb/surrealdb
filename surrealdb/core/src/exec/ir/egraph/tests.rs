@@ -946,7 +946,8 @@ fn opaque_regions_never_entered() {
 
 	// An owner the import holds as a leaf never has its region reached; an owner that is a node
 	// holds the region as a leaf.
-	let classified = islands(&fx.ir, &mut fx.facts, fx.stmt);
+	let classified =
+		islands(&fx.ir, &mut fx.facts, crate::exec::ir::analysis::cx::builtin_registry(), fx.stmt);
 	for (owner, region, inner) in &owned {
 		let expected = match classified.ops.get(owner) {
 			Some(OpRole::Node) => Some(&RegionRole::Leaf),
@@ -2688,6 +2689,7 @@ impl StatementSurgery for CloneSurgery {
 		&self,
 		_ir: &Ir,
 		_facts: &mut FactCache,
+		_registry: &FunctionRegistry,
 		_stmt: OpId,
 	) -> Result<(), IrError> {
 		Ok(())
@@ -3032,7 +3034,7 @@ fn rewrite_round_trip() {
 		IrScope::Request {
 			fragment: None,
 		},
-		registry::build(),
+		registry::attr_syntaxes(),
 	)
 	.unwrap_or_else(|failure| panic!("{failure}\n{text}"));
 	assert_eq!(print(&parsed, parsed.top(), PrintOpts::default()), text);
@@ -3256,7 +3258,8 @@ fn container_adopt_drops_the_facts_of_the_replaced_code() {
 		.expect("the statement holds an op with a result");
 	let value = fx.ir.op(replaced).expect("the op exists").results[0];
 	{
-		let mut rw = Rewriter::new(&mut fx.ir, &mut fx.facts);
+		let mut rw = Rewriter::new(&mut fx.ir, &mut fx.facts)
+			.with_registry(crate::exec::ir::analysis::cx::builtin_registry());
 		rw.request_fold(FoldRequest {
 			value,
 			consumer: FoldConsumer::AlgebraicRule,
@@ -3282,7 +3285,12 @@ fn retake_leaves_an_absent_snapshot_absent() {
 	element_filter(&mut fx);
 	assert!(fx.facts.legality_snapshot().is_none());
 	CONTAINER_SURGERY
-		.retake_legality(&fx.ir, &mut fx.facts, fx.stmt)
+		.retake_legality(
+			&fx.ir,
+			&mut fx.facts,
+			crate::exec::ir::analysis::cx::builtin_registry(),
+			fx.stmt,
+		)
 		.expect("an absent snapshot needs no retake");
 	assert!(fx.facts.legality_snapshot().is_none());
 }
@@ -3331,7 +3339,12 @@ fn retake_rekeys_the_statement_loops() {
 		.expect("the copy is adopted");
 	assert!(fx.ir.op(looped).is_none(), "adoption gave the loop a fresh id");
 	CONTAINER_SURGERY
-		.retake_legality(&fx.ir, &mut fx.facts, fx.stmt)
+		.retake_legality(
+			&fx.ir,
+			&mut fx.facts,
+			crate::exec::ir::analysis::cx::builtin_registry(),
+			fx.stmt,
+		)
 		.expect("the legality is retaken");
 
 	let adopted = ops_of(&fx.ir)

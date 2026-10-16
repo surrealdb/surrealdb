@@ -1020,9 +1020,13 @@ pub(super) fn index_for(cx: &PhysCx<'_>, table: &TableName, field: &Strand) -> O
 		op: BinaryOperator::Equal,
 		right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(0))),
 	};
+	let no_vectors = crate::exec::index::analysis::KnnQueryVectors::new();
+	let decision_cx = DecisionCx {
+		registry: cx.effects.registry,
+		knn_vectors: &no_vectors,
+	};
 	let decision =
-		access::decide(&answers, None, Some(&probe), None, false, &DecisionCx::builtin())
-			.ok()??;
+		access::decide(&answers, None, Some(&probe), None, false, &decision_cx).ok()??;
 	let AccessPath::BTreeScan {
 		index_ref: chosen,
 		access: BTreeAccess::Equality(_),

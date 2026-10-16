@@ -125,6 +125,10 @@ if (isDebug) {
 	await run("Optimizing the module", [
 		"wasm-opt",
 		"-Oz",
+		// Rust lays the stack out first, so no live data sits below 1 KiB; the flag only lets
+		// wasm-opt fold small constant offsets into load and store immediates.
+		"--low-memory-unused",
+		"--converge",
 		"--enable-bulk-memory",
 		"--enable-nontrapping-float-to-int",
 		"dist/index_bg.wasm",

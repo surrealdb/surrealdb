@@ -22,7 +22,6 @@
 #![deny(clippy::wildcard_enum_match_arm)]
 
 use std::ops::Bound;
-use std::sync::OnceLock;
 
 use smallvec::{SmallVec, smallvec};
 use surrealdb_strand::Strand;
@@ -34,7 +33,7 @@ use crate::exec::ir::iface::effects::{
 	Determinism, FieldSet, IrFootprint, IrResource, KeyOf, OpEffects, Rollback,
 };
 use crate::exec::ir::iface::fallibility::{ContextDep, Fallibility};
-use crate::exec::ir::iface::region_kind::{ClauseRole, ErrorScope, RegionKind};
+use crate::exec::ir::iface::region_kind::{ClauseRole, ErrorScope, RegionKind, RegionKinds};
 use crate::exec::ir::iface::statements::{Place, PlacePart};
 use crate::exec::ir::op_kind::{
 	Arity, IsaCaps, LeafClass, NativeLowering, OperandRule, Terminator,
@@ -582,7 +581,7 @@ impl ExprOp {
 	}
 
 	/// The kind of each of the op's regions, in position order.
-	pub(crate) fn region_kinds(&self) -> SmallVec<[RegionKind; 2]> {
+	pub(crate) fn region_kinds(&self) -> RegionKinds {
 		match self {
 			ExprOp::Destructure {
 				shape,
@@ -771,8 +770,13 @@ impl ExprOp {
 	///
 	/// A class that names a host interface (`Kernel`) or a bar (`NonLeaf`) is built from types the
 	/// VM keeps private, so an op of that class answers [`NativeLowering::UnitCall`]; the doc line
-	/// of each such arm names the class it takes.
-	pub(crate) fn lowers_natively(&self, _isa: IsaCaps) -> NativeLowering {
+	/// of each such arm names the class it takes. `registry` names the index functions a call of
+	/// [`Function::Normal`] may hold.
+	pub(crate) fn lowers_natively(
+		&self,
+		_isa: IsaCaps,
+		registry: &FunctionRegistry,
+	) -> NativeLowering {
 		let leaf = NativeLowering::Native {
 			leaf_class: LeafClass::Leaf,
 		};
@@ -871,7 +875,7 @@ impl ExprOp {
 			// a module and a silo function, `NonLeaf(Bar::Model)` for a model, and
 			// `Kernel(&[Storage])` for an index function, which `Instr::CallIndexFn` lowers.
 			ExprOp::Call(function) => match &function.function {
-				Function::Normal(name) if !builtin_registry().is_index_function(name) => {
+				Function::Normal(name) if !registry.is_index_function(name) => {
 					NativeLowering::Native {
 						leaf_class: LeafClass::ByOperand,
 					}
@@ -938,13 +942,6 @@ impl ExprOp {
 			} => NativeLowering::UnitCall,
 		}
 	}
-}
-
-/// The registry of the builtins the VM lowering knows, which names the index functions a `call`
-/// of [`Function::Normal`] may hold.
-fn builtin_registry() -> &'static FunctionRegistry {
-	static REGISTRY: OnceLock<FunctionRegistry> = OnceLock::new();
-	REGISTRY.get_or_init(FunctionRegistry::with_builtins)
 }
 
 /// The subscript operands the places hold: one per [`PlacePart::Dynamic`] and [`PlacePart::Index`].
@@ -1724,7 +1721,7 @@ mod tests {
 	#[test]
 	fn a_lying_builtin_is_not_floored() {
 		let mut registry = FunctionRegistry::with_builtins();
-		registry.register(Liar);
+		registry.register(&Liar);
 		let env = Env::with(registry);
 		let cx = env.cx();
 		let op = call("test::liar");
@@ -2295,6 +2292,7 @@ mod tests {
 			leaf_class: LeafClass::ByOperand,
 		};
 		let isa = IsaCaps::default();
+		let registry = &FunctionRegistry::with_builtins();
 		for tag in [
 			ExprTag::Literal,
 			ExprTag::Array,
@@ -2325,15 +2323,19 @@ mod tests {
 			ExprTag::Dispatch,
 			ExprTag::Agg,
 		] {
-			assert_eq!(fixture(tag).lowers_natively(isa), leaf, "{tag:?}");
+			assert_eq!(fixture(tag).lowers_natively(isa, registry), leaf, "{tag:?}");
 		}
 		for tag in [ExprTag::Call, ExprTag::Method, ExprTag::Now] {
-			assert_eq!(fixture(tag).lowers_natively(isa), by_operand, "{tag:?}");
+			assert_eq!(fixture(tag).lowers_natively(isa, registry), by_operand, "{tag:?}");
 		}
 		// A callee kind that fixes the class answers the unit call: an index function, and every
 		// callee that is not a builtin.
 		for name in ["search::score", "search::highlight", "search::offsets"] {
-			assert_eq!(call(name).lowers_natively(isa), NativeLowering::UnitCall, "{name}");
+			assert_eq!(
+				call(name).lowers_natively(isa, registry),
+				NativeLowering::UnitCall,
+				"{name}"
+			);
 		}
 		for function in [
 			Function::Custom("f".to_owned()),
@@ -2341,7 +2343,7 @@ mod tests {
 		] {
 			let what = format!("{function:?}");
 			let op = ExprOp::call(function);
-			assert_eq!(op.lowers_natively(isa), NativeLowering::UnitCall, "{what}");
+			assert_eq!(op.lowers_natively(isa, registry), NativeLowering::UnitCall, "{what}");
 		}
 		for tag in [
 			ExprTag::FreeParam,
@@ -2359,7 +2361,11 @@ mod tests {
 			ExprTag::Subquery,
 			ExprTag::TupleRow,
 		] {
-			assert_eq!(fixture(tag).lowers_natively(isa), NativeLowering::UnitCall, "{tag:?}");
+			assert_eq!(
+				fixture(tag).lowers_natively(isa, registry),
+				NativeLowering::UnitCall,
+				"{tag:?}"
+			);
 		}
 		for op in binary_operators() {
 			let expected = if matches!(
@@ -2370,17 +2376,20 @@ mod tests {
 			} else {
 				leaf
 			};
-			assert_eq!(binary(op.clone()).lowers_natively(isa), expected, "{op:?}");
+			assert_eq!(binary(op.clone()).lowers_natively(isa, registry), expected, "{op:?}");
 		}
 		for shape in key_shapes() {
-			assert_eq!(record_id(shape.clone()).lowers_natively(isa), leaf, "{shape:?}");
+			assert_eq!(record_id(shape.clone()).lowers_natively(isa, registry), leaf, "{shape:?}");
 		}
 		for kind in raise_kinds() {
-			assert_eq!(raise(kind.clone()).lowers_natively(isa), leaf, "{kind:?}");
+			assert_eq!(raise(kind.clone()).lowers_natively(isa, registry), leaf, "{kind:?}");
 		}
 		// The answer does not depend on the target.
 		for op in dialect_ops() {
-			assert_eq!(op.lowers_natively(isa), op.lowers_natively(IsaCaps(u32::MAX)));
+			assert_eq!(
+				op.lowers_natively(isa, registry),
+				op.lowers_natively(IsaCaps(u32::MAX), registry)
+			);
 		}
 	}
 }

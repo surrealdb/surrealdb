@@ -39,7 +39,7 @@ value = "[]"
 
 # A conjunct is the only read of `city`: no layer is left.
 [[test.results]]
-match = '''!string::contains($result, "ProjectLayer") AND !string::contains($result, "@key") AND string::contains($result, "id[0] = 'London'")'''
+match = '''!string::contains($result, "ProjectLayer") AND !string::contains($result, "@key") AND string::contains($result, "city = 'London'")'''
 error = false
 
 [[test.results]]
@@ -47,7 +47,7 @@ value = "[{ temp: 4 }, { temp: 5 }]"
 
 # The same for a `VALUE` projection.
 [[test.results]]
-match = '''!string::contains($result, "ProjectLayer") AND !string::contains($result, "@key") AND string::contains($result, "id[0] = 'London'")'''
+match = '''!string::contains($result, "ProjectLayer") AND !string::contains($result, "@key") AND string::contains($result, "city = 'London'")'''
 error = false
 
 [[test.results]]
@@ -55,7 +55,7 @@ value = "[4, 5]"
 
 # `*` reads the whole row: both components are derived, and labelled.
 [[test.results]]
-match = '''string::contains($result, "city = id[0] : string @key") AND string::contains($result, "time = id[1] : datetime @key") AND string::contains($result, "id[0] = 'London'")'''
+match = '''string::contains($result, "city = id[0] : string @key") AND string::contains($result, "time = id[1] : datetime @key") AND string::contains($result, "city = 'London'")'''
 error = false
 
 [[test.results]]
@@ -99,7 +99,7 @@ value = "[{ temp: 6 }, { temp: 7 }]"
 
 # A computed field that reads a component keeps the column it reads.
 [[test.results]]
-match = '''string::contains($result, "city = id[0] : string @key") AND string::contains($result, "label = ") AND string::contains($result, "id[0] = 'London'")'''
+match = '''string::contains($result, "city = id[0] : string @key") AND string::contains($result, "label = ") AND string::contains($result, "city = 'London'")'''
 error = false
 
 [[test.results]]

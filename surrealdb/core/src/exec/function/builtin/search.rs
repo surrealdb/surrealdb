@@ -803,12 +803,10 @@ fn extract_record_id(ctx: &EvalContext<'_>) -> Result<crate::val::RecordId> {
 // Registration
 // =========================================================================
 
-pub fn register(registry: &mut FunctionRegistry) {
-	// Scalar functions
-	registry.register(SearchAnalyze);
-	registry.register(SearchRrf);
-	registry.register(SearchLinear);
+/// The `search::*` scalar builtins.
+pub(super) const SCALARS: &[&dyn ScalarFunction] = &[&SearchAnalyze, &SearchRrf, &SearchLinear];
 
+pub fn register(registry: &mut FunctionRegistry) {
 	// Index functions (bound to WHERE clause MATCHES predicates)
 	registry.register_index_function(SearchHighlight);
 	registry.register_index_function(SearchScore);

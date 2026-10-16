@@ -9,6 +9,11 @@
 //! region keeps the kind of the logical region it replaces; a new physical region is a
 //! [`RegionKind::Pipeline`], a [`RegionKind::ChooseArm`] or a [`RegionKind::JoinLookupArm`].
 
+use smallvec::SmallVec;
+
+/// The kinds of an op's regions, in region order.
+pub(crate) type RegionKinds = SmallVec<[RegionKind; 4]>;
+
 /// The kind of a region.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum RegionKind {

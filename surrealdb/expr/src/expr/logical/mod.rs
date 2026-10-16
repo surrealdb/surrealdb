@@ -1924,7 +1924,15 @@ impl LogicalOp {
 		self,
 		f: &mut impl FnMut(LogicalOp) -> Result<LogicalOp, E>,
 	) -> Result<Self, E> {
-		let node = self.map_children(|child| child.transform_up(f))?;
+		self.transform_up_dyn(f)
+	}
+
+	/// Bottom-up rewrite behind `dyn`: children before parents, stopping at the first `Err`.
+	fn transform_up_dyn<E>(
+		self,
+		f: &mut dyn FnMut(LogicalOp) -> Result<LogicalOp, E>,
+	) -> Result<Self, E> {
+		let node = self.map_children(|child| child.transform_up_dyn(&mut *f))?;
 		f(node)
 	}
 
@@ -1934,7 +1942,15 @@ impl LogicalOp {
 		self,
 		f: &mut impl FnMut(LogicalOp) -> Result<LogicalOp, E>,
 	) -> Result<Self, E> {
-		f(self)?.map_children(|child| child.transform_down(f))
+		self.transform_down_dyn(f)
+	}
+
+	/// Top-down rewrite behind `dyn`: a node before its inputs, stopping at the first `Err`.
+	fn transform_down_dyn<E>(
+		self,
+		f: &mut dyn FnMut(LogicalOp) -> Result<LogicalOp, E>,
+	) -> Result<Self, E> {
+		f(self)?.map_children(|child| child.transform_down_dyn(&mut *f))
 	}
 
 	/// Walks the tree in pre-order, stopping at the first `Break`.
@@ -1942,9 +1958,18 @@ impl LogicalOp {
 		&'a self,
 		f: &mut impl FnMut(&'a LogicalOp) -> ControlFlow<B>,
 	) -> ControlFlow<B> {
+		self.visit_dyn(f)
+	}
+
+	/// [`Self::visit`] recursing behind `dyn`: one body per break type rather than one per
+	/// closure. The visitor sees each node for the tree's lifetime.
+	fn visit_dyn<'a, B>(
+		&'a self,
+		f: &mut dyn FnMut(&'a LogicalOp) -> ControlFlow<B>,
+	) -> ControlFlow<B> {
 		f(self)?;
 		for child in self.children() {
-			child.visit(f)?;
+			child.visit_dyn(&mut *f)?;
 		}
 		ControlFlow::Continue(())
 	}
@@ -2327,8 +2352,17 @@ impl LogicalOp {
 		&self,
 		f: &mut impl FnMut(&LogicalExpr) -> Result<(), E>,
 	) -> Result<(), E> {
-		self.visit_scalars(f)?;
-		self.children().iter().try_for_each(|child| child.visit_scalars_deep(f))
+		self.visit_scalars_deep_dyn(f)
+	}
+
+	/// [`Self::visit_scalars_deep`] recursing behind `dyn`: one body per error type rather than
+	/// one per closure.
+	fn visit_scalars_deep_dyn<E>(
+		&self,
+		mut f: &mut dyn FnMut(&LogicalExpr) -> Result<(), E>,
+	) -> Result<(), E> {
+		self.visit_scalars(&mut f)?;
+		self.children().iter().try_for_each(|child| child.visit_scalars_deep_dyn(&mut *f))
 	}
 
 	/// [`Self::visit_scalars_deep`] over the same scalars, rewritten in place.
@@ -2336,8 +2370,19 @@ impl LogicalOp {
 		&mut self,
 		f: &mut impl FnMut(&mut LogicalExpr) -> Result<(), E>,
 	) -> Result<(), E> {
-		self.visit_scalars_mut(f)?;
-		self.children_mut().iter_mut().try_for_each(|child| child.visit_scalars_deep_mut(f))
+		self.visit_scalars_deep_mut_dyn(f)
+	}
+
+	/// [`Self::visit_scalars_deep_mut`] recursing behind `dyn`: one body per error type rather
+	/// than one per closure.
+	fn visit_scalars_deep_mut_dyn<E>(
+		&mut self,
+		mut f: &mut dyn FnMut(&mut LogicalExpr) -> Result<(), E>,
+	) -> Result<(), E> {
+		self.visit_scalars_mut(&mut f)?;
+		self.children_mut()
+			.iter_mut()
+			.try_for_each(|child| child.visit_scalars_deep_mut_dyn(&mut *f))
 	}
 
 	/// Visits every operator of the statement in pre-order, stopping at the

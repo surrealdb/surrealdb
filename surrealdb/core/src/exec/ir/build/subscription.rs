@@ -71,6 +71,7 @@ use crate::exec::ir::logical::seam::{BindCx, invariant};
 use crate::exec::ir::logical::stages::{Derivation, derivations_of, view_of};
 use crate::exec::ir::op_kind::OpKind;
 use crate::exec::ir::unit::{SUBSCRIBER_NAMES, UnitKind};
+use crate::exec::surface::Surface;
 use crate::expr::computed_deps::extract_computed_deps;
 use crate::expr::logical::{
 	EvalFrame, LogicalExpr, LogicalFields, LogicalPermission, OutputPath, Schema, lower_expr,
@@ -105,6 +106,7 @@ pub(crate) struct SubscriptionInput<'a> {
 pub(crate) fn bind_subscription(
 	input: &SubscriptionInput<'_>,
 	effects: &EffectCx<'_>,
+	surface: Option<&'static Surface>,
 ) -> Result<Ir, IrError> {
 	let unit = UnitKind::Subscription {
 		table: input.table.clone(),
@@ -113,6 +115,7 @@ pub(crate) fn bind_subscription(
 	let mut facts = FactCache::new();
 	{
 		let mut cx = BindCx::new(&mut ir, &mut facts, *effects)?;
+		cx.set_surface(surface);
 		bind_body_of(&mut cx, input)?;
 	}
 	Ok(ir)
@@ -440,6 +443,7 @@ mod tests {
 				checked: true,
 			},
 			&effects,
+			Some(&crate::exec::surface::FULL),
 		)
 	}
 

@@ -53,7 +53,7 @@ use std::sync::Arc;
 pub(crate) use aggregate::analyse_aggregation;
 pub(crate) use cycle_guard::{CycleGuard, UnitKey};
 pub(crate) use select::{
-	RestrictedPrefixes, adjust_direction_for_order, bitmap_plan_to_node, decide_union_merge,
+	RestrictedPrefixes, adjust_direction_for_order, decide_union_merge,
 	detect_order_for_composite_union, drop_restricted_indexes, output_field_path,
 };
 
@@ -686,8 +686,6 @@ impl<'ctx> Planner<'ctx> {
 			perms_suppressed: self.perms_suppressed,
 			row_scoped,
 			registry: self.function_registry,
-			versioned: self.version.is_some()
-				|| !matches!(self.plan_time_version, PlanTimeVersion::Current),
 			inlines_definitions: !self.within.calls_current,
 			binds_nested: !self.within.nested_late,
 		};

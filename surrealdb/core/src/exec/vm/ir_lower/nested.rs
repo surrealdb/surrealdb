@@ -1208,7 +1208,8 @@ mod tests {
 				.expect("the field read");
 		let mut em = Emitter::new();
 		let outer = em.read_as_parent(vec![row]);
-		let mut lowerer = Lowerer::new(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		lowerer.value(field).expect("the field read lowers");
 		em.restore_parent_rows(outer);
 		assert!(!em.is_parent_row(row));
@@ -1616,7 +1617,8 @@ mod tests {
 		let mut b = Builder::new();
 		let value = one(&mut b, NestedStrategy::Apply);
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::for_fold(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::for_fold(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		assert!(matches!(lowerer.value(value), Err(IrError::Invariant { .. })));
 	}
 
@@ -1931,7 +1933,8 @@ mod tests {
 		let mut b = Builder::new();
 		let value = user_call(&mut b, Some(CalleeFacts::Absent));
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		assert!(matches!(
 			lowerer.value(value),
 			Err(IrError::Invariant {
@@ -1945,7 +1948,8 @@ mod tests {
 		let mut b = Builder::new();
 		let value = user_call(&mut b, Some(defined(CalleePermission::Full)));
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::for_fold(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::for_fold(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		assert!(matches!(lowerer.value(value), Err(IrError::Invariant { .. })));
 	}
 

@@ -45,13 +45,15 @@ pub(crate) use location::{LocOrigin, Location, Span};
 #[allow(unused_imports)]
 pub(crate) use op::{OpData, OpKind, OpTag};
 #[allow(unused_imports)]
-pub(crate) use parse::{ParseError, parse};
+pub(crate) use parse::ParseError;
+#[cfg(test)]
+pub(crate) use parse::parse;
 #[allow(unused_imports)]
 pub(crate) use pattern::{
 	GREEDY_DEFAULT, GreedyLimits, GreedyReport, Limit, Pattern, PatternSet, apply_greedy,
 };
 #[allow(unused_imports)]
-pub(crate) use print::{AttrSyntax, PrintOpts, print, print_with};
+pub(crate) use print::{AttrSyntax, AttrSyntaxes, PrintOpts, print, print_with};
 #[allow(unused_imports)]
 pub(crate) use region::RegionData;
 #[allow(unused_imports)]

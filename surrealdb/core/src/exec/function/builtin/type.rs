@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 
-use crate::exec::function::{FunctionRegistry, ProjectionFunction, Signature};
+use crate::exec::function::{FunctionRegistry, ProjectionFunction, ScalarFunction, Signature};
 use crate::exec::ir::iface::Fallibility;
 use crate::exec::vm::access::array_ops::evaluate_all;
 use crate::exec::vm::access::field::evaluate_field;
@@ -12,7 +12,7 @@ use crate::expr::idiom::Idiom;
 use crate::expr::part::Part;
 use crate::fnc::args::FromArgs;
 use crate::val::Value;
-use crate::{define_pure_function, register_functions, syn};
+use crate::{define_pure_function, syn};
 
 // Type conversion functions
 define_pure_function!(TypeArray, "type::array", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> Any, crate::fnc::r#type::array);
@@ -206,55 +206,56 @@ impl ProjectionFunction for TypeFields {
 	}
 }
 
+/// The `type::*` scalar builtins.
+pub(super) const SCALARS: &[&dyn ScalarFunction] = &[
+	&TypeArray,
+	&TypeBool,
+	&TypeBytes,
+	&TypeDatetime,
+	&TypeDecimal,
+	&TypeDuration,
+	&TypeFile,
+	&TypeFloat,
+	&TypeGeometry,
+	&TypeInt,
+	&TypeIsArray,
+	&TypeIsBool,
+	&TypeIsBytes,
+	&TypeIsCollection,
+	&TypeIsDatetime,
+	&TypeIsDecimal,
+	&TypeIsDuration,
+	&TypeIsFloat,
+	&TypeIsGeometry,
+	&TypeIsInt,
+	&TypeIsLine,
+	&TypeIsMultiline,
+	&TypeIsMultipoint,
+	&TypeIsMultipolygon,
+	&TypeIsNone,
+	&TypeIsNull,
+	&TypeIsNumber,
+	&TypeIsObject,
+	&TypeIsPoint,
+	&TypeIsPolygon,
+	&TypeIsRange,
+	&TypeIsRecord,
+	&TypeIsSet,
+	&TypeIsString,
+	&TypeIsUuid,
+	&TypeNumber,
+	&TypeOf,
+	&TypePoint,
+	&TypeRange,
+	&TypeRecord,
+	&TypeSet,
+	&TypeString,
+	&TypeStringLossy,
+	&TypeTable,
+	&TypeUuid,
+];
+
 pub fn register(registry: &mut FunctionRegistry) {
-	register_functions!(
-		registry,
-		TypeArray,
-		TypeBool,
-		TypeBytes,
-		TypeDatetime,
-		TypeDecimal,
-		TypeDuration,
-		TypeFile,
-		TypeFloat,
-		TypeGeometry,
-		TypeInt,
-		TypeIsArray,
-		TypeIsBool,
-		TypeIsBytes,
-		TypeIsCollection,
-		TypeIsDatetime,
-		TypeIsDecimal,
-		TypeIsDuration,
-		TypeIsFloat,
-		TypeIsGeometry,
-		TypeIsInt,
-		TypeIsLine,
-		TypeIsMultiline,
-		TypeIsMultipoint,
-		TypeIsMultipolygon,
-		TypeIsNone,
-		TypeIsNull,
-		TypeIsNumber,
-		TypeIsObject,
-		TypeIsPoint,
-		TypeIsPolygon,
-		TypeIsRange,
-		TypeIsRecord,
-		TypeIsSet,
-		TypeIsString,
-		TypeIsUuid,
-		TypeNumber,
-		TypeOf,
-		TypePoint,
-		TypeRange,
-		TypeRecord,
-		TypeSet,
-		TypeString,
-		TypeStringLossy,
-		TypeTable,
-		TypeUuid,
-	);
 	// Register projection functions (these produce field bindings, not single values)
 	registry.register_projection(TypeField);
 	registry.register_projection(TypeFields);

@@ -21,9 +21,12 @@ use std::collections::{HashSet, VecDeque};
 
 use smallvec::SmallVec;
 
+#[cfg(test)]
 use super::cx::default_cx;
+use super::cx::structural_cx;
 use super::slice::{self, OnFailure, Slice};
 use super::{effects, fallibility, footprint, multiplicity, types};
+use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::core::facts::{FactCache, LegalitySnapshotSlot};
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::rewriter::Provenance;
@@ -268,6 +271,7 @@ impl LoopLegality {
 pub(crate) fn snapshot_into(
 	ir: &Ir,
 	facts: &mut FactCache,
+	registry: &FunctionRegistry,
 	region: RegionId,
 	slot: &mut LegalitySnapshotSlot,
 ) -> Result<(), IrError> {
@@ -278,8 +282,9 @@ pub(crate) fn snapshot_into(
 		}
 		Walk::Continue
 	});
+	let under = structural_cx(registry, ir);
 	for op in loops {
-		let loop_facts = of(ir, facts, op)?;
+		let loop_facts = of_with(ir, facts, &under, op).map(|legality| legality.facts())?;
 		match ir.op(op).map(|data| &data.provenance) {
 			Some(Provenance::From(ids)) => {
 				for id in ids {
@@ -300,6 +305,7 @@ pub(crate) fn snapshot_into(
 ///
 /// Answers under the default effect context. An id that names no live logical loop is
 /// [`IrError::Stale`].
+#[cfg(test)]
 pub(crate) fn of(ir: &Ir, facts: &mut FactCache, loop_op: OpId) -> Result<LoopFacts, IrError> {
 	of_with(ir, facts, &default_cx(ir), loop_op).map(|legality| legality.facts())
 }

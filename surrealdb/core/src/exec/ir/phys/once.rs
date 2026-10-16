@@ -5,7 +5,8 @@
 //!
 //! - It reads nothing outside the ops that compute it but literals: no row, no block argument of a
 //!   region around it and no other value an op outside it defines. It is more than a literal
-//!   written as one: a literal a fold made of an expression is judged as that expression.
+//!   written as one: a literal a fold made of an expression is judged as that expression, while the
+//!   literal an algebraic rule decided stays as written.
 //! - Every op that computes it is an expression op of a form that reads no record and no row: no
 //!   field read, document, computed read, nested statement, closure, invocation, aggregate,
 //!   recursion or raise, a call only of a builtin that is not an index function, and no literal

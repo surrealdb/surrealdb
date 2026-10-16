@@ -33,7 +33,8 @@ use crate::exec::ir::iface::effects::{Determinism, IrFootprint, IrResource, OpEf
 use crate::exec::ir::iface::fallibility::{ContextDep, Fallibility};
 use crate::exec::ir::iface::ids::RegionId;
 use crate::exec::ir::iface::region_kind::{
-	ClauseRole, ErrorScope, FieldRole, RegionKind, StatementCommit, StoredRole, TxnKind,
+	ClauseRole, ErrorScope, FieldRole, RegionKind, RegionKinds, StatementCommit, StoredRole,
+	TxnKind,
 };
 use crate::exec::ir::iface::statements::{
 	AccessOp, AccessSubjectShape, AccessTypeShape, AlterApiClauseShape, AlterDefaultShape,
@@ -589,7 +590,7 @@ impl LogOp {
 	}
 
 	/// The kind of each of the op's regions, in position order.
-	pub(crate) fn region_kinds(&self) -> SmallVec<[RegionKind; 2]> {
+	pub(crate) fn region_kinds(&self) -> RegionKinds {
 		match self {
 			LogOp::Request {
 				..
@@ -626,7 +627,7 @@ impl LogOp {
 				| LoopKind::GraphStep
 				| LoopKind::Recurse
 				| LoopKind::Broadcast => {
-					let mut kinds: SmallVec<[RegionKind; 2]> = smallvec![RegionKind::Loop];
+					let mut kinds: RegionKinds = smallvec![RegionKind::Loop];
 					if let Some(StepAttrs::Lookup(lookup)) = step.as_deref() {
 						lookup_clause_kinds(lookup, &mut kinds);
 					}
@@ -640,7 +641,7 @@ impl LogOp {
 				computed,
 				..
 			} => {
-				let mut kinds: SmallVec<[RegionKind; 2]> = smallvec![RegionKind::PermissionFrame];
+				let mut kinds: RegionKinds = smallvec![RegionKind::PermissionFrame];
 				kinds.extend(std::iter::repeat_n(
 					RegionKind::FieldFrame(FieldRole::Computed),
 					computed.as_deref().map_or(0, ComputedReadsShape::derived_regions),
@@ -655,7 +656,7 @@ impl LogOp {
 				..
 			} => smallvec![RegionKind::Clause(ClauseRole::Where)],
 			LogOp::Aggregate(shape) => {
-				let mut kinds: SmallVec<[RegionKind; 2]> = std::iter::repeat_n(
+				let mut kinds: RegionKinds = std::iter::repeat_n(
 					RegionKind::ErrorScope(ErrorScope::ShapeToNone),
 					usize::from(shape.groups),
 				)
@@ -668,7 +669,7 @@ impl LogOp {
 			}
 			LogOp::Project(attrs) => {
 				let fields = field_regions(&attrs.fields);
-				let mut kinds: SmallVec<[RegionKind; 2]> = SmallVec::new();
+				let mut kinds: RegionKinds = SmallVec::new();
 				kinds.extend(std::iter::repeat_n(
 					RegionKind::Clause(ClauseRole::Projection),
 					fields + usize::from(attrs.omit),
@@ -712,7 +713,7 @@ impl LogOp {
 			)
 			.collect(),
 			LogOp::MatchOutput(shape) => {
-				let mut kinds: SmallVec<[RegionKind; 2]> = std::iter::repeat_n(
+				let mut kinds: RegionKinds = std::iter::repeat_n(
 					RegionKind::Clause(ClauseRole::Projection),
 					shape.columns.len(),
 				)
@@ -1287,7 +1288,7 @@ fn alter_extras(object: &AlterObject) -> EffectSet {
 // `*`.
 /// Appends the kinds of the clause regions of a lookup, which follow its body: the predicate, the
 /// splits, the group keys, the order keys and the columns of its projection.
-pub(crate) fn lookup_clause_kinds(lookup: &LookupAttrs, kinds: &mut SmallVec<[RegionKind; 2]>) {
+pub(crate) fn lookup_clause_kinds(lookup: &LookupAttrs, kinds: &mut RegionKinds) {
 	if lookup.cond {
 		kinds.push(RegionKind::Clause(ClauseRole::Where));
 	}
@@ -1328,7 +1329,7 @@ fn field_regions(fields: &FieldsShape) -> usize {
 }
 
 /// The kinds of a region list from the (slot, kind) pairs the attributes name, in slot order.
-fn kinds_by_slot(mut slots: Slots) -> SmallVec<[RegionKind; 2]> {
+fn kinds_by_slot(mut slots: Slots) -> RegionKinds {
 	slots.sort_by_key(|(slot, _)| *slot);
 	slots.into_iter().map(|(_, kind)| kind).collect()
 }

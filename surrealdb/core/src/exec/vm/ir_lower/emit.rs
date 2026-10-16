@@ -59,7 +59,7 @@ pub(super) struct BoundSlot {
 /// Registers and labels are allocated from the emitter and a pool index is the length of its pool
 /// at the entry's first appearance. An allocation that would pass the range of its index type
 /// answers [`IrError::Capacity`] and leaves the emitter as it was.
-pub(super) struct Emitter {
+pub(crate) struct Emitter {
 	code: Vec<Instr>,
 	/// The next register to hand out. [`ROW`] is never handed out.
 	registers: u16,

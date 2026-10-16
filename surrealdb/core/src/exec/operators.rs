@@ -1,6 +1,5 @@
 mod aggregate;
 pub(crate) mod distinct;
-mod explain;
 pub(crate) mod fetch;
 pub(crate) mod graph;
 pub(crate) mod join;
@@ -24,7 +23,6 @@ pub(crate) use aggregate::{
 	aggregate_field_key, first_value_needed, group_key_field_key, set_nested_value,
 };
 pub(crate) use distinct::SeenSet;
-pub use explain::ExplainPlan;
 use futures::StreamExt;
 pub use graph::{EdgeBinding, EndpointField, ExpandDir, PathMode, ShortestSelector};
 pub use join::JoinType;
@@ -35,7 +33,6 @@ pub(crate) use knn_topk::{KnnTopKHeap, extract_vector};
 pub(crate) use layer::record_of;
 pub(crate) use permission_filter::permission_frame;
 pub(crate) use project::projection_writes;
-pub(crate) use scan::BitmapNode;
 // Scan operators (storage I/O)
 pub use scan::CountOutput;
 pub(crate) use sort::{SortDirection, compare_values};

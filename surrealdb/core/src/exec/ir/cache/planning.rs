@@ -65,7 +65,9 @@ use crate::exec::ir::iface::fold::FoldConsumer;
 use crate::exec::ir::iface::ids::{FrameId, ValueId};
 use crate::exec::ir::phys::access::{ReadVersion, TableAnswers};
 use crate::exec::ir::timers::ReadCount;
+use crate::exec::operators::mutate::MUTATION_PARAM_PREFIX;
 use crate::expr::logical::{ITERATION_PARAMS, LogicalExpr};
+use crate::iam::{Auth, AuthLimit};
 use crate::kvs::Transaction;
 use crate::kvs::cache::ds::{CatalogSnapshot, TableSnapshot};
 use crate::val::{Datetime, TableName, Value};
@@ -85,6 +87,9 @@ pub(crate) struct PlanningCatalog {
 	/// Whether each call of a user-defined function runs the definition read when it is made
 	/// ([`SemanticCatalog::calls_current`]).
 	calls_current: bool,
+	/// The principal the request is planned for, where it is known
+	/// ([`SemanticCatalog::function_limit_is_inert`]).
+	caller: Option<Arc<Auth>>,
 	/// The `VERSION` stamp the compile's planner reads the catalog at, or `None` for the
 	/// transaction's current state: the stamp function definitions are read at, and the stamp of
 	/// every read under no `VERSION` of its own ([`PhysicalCatalog::read_stamp`]).
@@ -228,6 +233,7 @@ impl PlanningCatalog {
 			session,
 			shadowed: BTreeSet::new(),
 			calls_current: false,
+			caller: None,
 			read_stamp: None,
 			backend: BackendCaps::default(),
 			plans_unknown_reads: false,
@@ -266,6 +272,12 @@ impl PlanningCatalog {
 	/// answered by [`SemanticCatalog::calls_current`].
 	pub(crate) fn with_calls_current(mut self, calls_current: bool) -> Self {
 		self.calls_current = calls_current;
+		self
+	}
+
+	/// States the principal the request is planned for.
+	pub(crate) fn with_caller(mut self, caller: Option<Arc<Auth>>) -> Self {
+		self.caller = caller;
 		self
 	}
 
@@ -325,12 +337,11 @@ impl PlanningCatalog {
 		}
 		self.load_database().await?;
 		let slots = self.slots(index).unwrap_or_default();
-		let mut names = names::collect_with(stmt, &slots);
-		names.params.retain(|name| self.may_read_param(name));
 		// A delete repairs the references to what it purges, which the stage that purges states
 		// from the references of the table. They are read with the statement's other names, so a
 		// parsed statement binds once.
-		let deleted = names::deleted_tables(stmt);
+		let (mut names, deleted) = names::collect_with(stmt, &slots);
+		names.params.retain(|name| self.may_read_param(name));
 		if !deleted.is_empty() {
 			self.load_referencing(&deleted).await?;
 		}
@@ -788,8 +799,9 @@ impl PlanningCatalog {
 	///
 	/// 1. An `Isolated` compile, no current statement, a frame other than the statement's own text,
 	///    or a statement that changed the catalog: `RunTime`.
-	/// 2. An iteration name (`$this`, `$self`, `$parent`) or a name the unit is told is shadowed:
-	///    `RunTime`. The other row names are read as any free name is.
+	/// 2. An iteration name (`$this`, `$self`, `$parent`), a name the unit is told is shadowed, or
+	///    a name the VM binds for a MATCH write (`__mutation_*`): `RunTime`. The other row names
+	///    are read as any free name is.
 	/// 3. A principal name: `Principal`.
 	/// 4. A name the context binds, or the statement's bindings name: the value of the statement's
 	///    binding, or the context's when the binding holds none, ahead of any stored parameter. A
@@ -817,7 +829,7 @@ impl PlanningCatalog {
 				_ => (false, None),
 			}
 		};
-		if !in_top || ITERATION_PARAMS.contains(&name) || self.shadowed.contains(name) {
+		if !in_top || self.runtime_name(name) {
 			return Resolved::RunTime;
 		}
 		if PRINCIPAL_NAMES.contains(&name) {
@@ -1087,9 +1099,16 @@ impl PlanningCatalog {
 	/// and it is not a name read at run time.
 	fn may_read_param(&self, name: &str) -> bool {
 		self.session != SessionValues::Isolated
-			&& !ITERATION_PARAMS.contains(&name)
-			&& !self.shadowed.contains(name)
+			&& !self.runtime_name(name)
 			&& self.ctx.value(name).is_none()
+	}
+
+	/// Whether the free name `name` is one the run binds: an iteration name, a name the unit is
+	/// told is shadowed, or a name the VM binds for a MATCH write.
+	fn runtime_name(&self, name: &str) -> bool {
+		ITERATION_PARAMS.contains(&name)
+			|| self.shadowed.contains(name)
+			|| name.starts_with(MUTATION_PARAM_PREFIX)
 	}
 
 	/// Whether the request's capabilities allow a call of the custom function `name`, without the
@@ -1162,6 +1181,20 @@ impl SemanticCatalog for PlanningCatalog {
 
 	fn calls_current(&self) -> bool {
 		self.calls_current
+	}
+
+	fn plans_at_stamp(&self) -> bool {
+		self.read_stamp.is_some()
+	}
+
+	fn function_limit_is_inert(&self, definition: &FunctionDefinition) -> bool {
+		let Ok(limit) = AuthLimit::try_from(&definition.auth_limit) else {
+			return false;
+		};
+		match &self.caller {
+			Some(auth) => auth.new_limited(&limit) == **auth,
+			None => definition.auth_limit == crate::catalog::auth::AuthLimit::new_no_limit(),
+		}
 	}
 
 	fn table(&self, name: &TableName) -> CatalogAnswer<Arc<TableSnapshot>> {

@@ -18,6 +18,7 @@ use super::text::{
 	OP_ID_MARK, dialect_index, phase_name, push_frame, push_loc, push_quoted, push_type,
 	region_kind_name, writing_attr_ids,
 };
+#[cfg(test)]
 use crate::exec::ir::analysis::effects;
 use crate::exec::ir::iface::conversion::Phase;
 use crate::exec::ir::iface::frame::Snapshot;
@@ -25,13 +26,14 @@ use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
 use crate::exec::ir::iface::region_kind::RegionKind;
 use crate::exec::ir::iface::types::TypeKnowledge;
 use crate::exec::ir::op_kind::{OpKind, OpTag};
-use crate::exec::ir::registry::{self, Registry};
+use crate::exec::ir::registry;
 
 /// What a print shows beyond the ops and their attributes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct PrintOpts {
 	pub(crate) locations: bool,
 	pub(crate) provenance: bool,
+	/// Whether each op prints its effects. Only a test build prints them.
 	pub(crate) facts: bool,
 }
 
@@ -45,14 +47,26 @@ pub(crate) trait AttrSyntax: Send + Sync {
 	fn parse_attrs(&self, tag: OpTag, text: &str) -> Result<OpKind, ParseError>;
 }
 
-/// The text form of the ops beneath `root`, with the attribute syntaxes of the process registry.
+/// The attribute syntax of each dialect, indexed expression, logical, physical as
+/// [`dialect_index`] numbers them.
+///
+/// The table is passed to the printer and the parser rather than held by the registry, so the
+/// syntaxes are linked only into a build that prints or parses IR.
+pub(crate) struct AttrSyntaxes(pub(crate) [Option<&'static dyn AttrSyntax>; 3]);
+
+impl AttrSyntaxes {
+	/// A table holding no syntax: every dialect prints `attrs("?")` and parses nothing.
+	pub(crate) const NONE: Self = Self([None; 3]);
+}
+
+/// The text form of the ops beneath `root`, with the attribute syntaxes of the built-in dialects.
 ///
 /// See [`print_with`].
 pub(crate) fn print(ir: &Ir, root: RegionId, opts: PrintOpts) -> String {
-	print_with(ir, root, opts, registry::build())
+	print_with(ir, root, opts, registry::attr_syntaxes())
 }
 
-/// The text form of the ops beneath `root`, with the attribute syntaxes `reg` holds.
+/// The text form of the ops beneath `root`, with the attribute syntaxes `syntaxes` holds.
 ///
 /// The top region prints the `ir` header, with the container's phase past [`Phase::Bound`], the
 /// frame and snapshot tables and its ops. Any other region prints as one braced region at depth
@@ -60,13 +74,18 @@ pub(crate) fn print(ir: &Ir, root: RegionId, opts: PrintOpts) -> String {
 /// A value or op the printed text does not hold prints as `%?<k>` or `@?<k>`, numbered in order
 /// of first appearance. Locations, provenance and facts print only when `opts` asks. A dialect
 /// without an attribute syntax prints `attrs("?")`. The text always ends in a newline.
-pub(crate) fn print_with(ir: &Ir, root: RegionId, opts: PrintOpts, reg: &Registry) -> String {
+pub(crate) fn print_with(
+	ir: &Ir,
+	root: RegionId,
+	opts: PrintOpts,
+	syntaxes: &AttrSyntaxes,
+) -> String {
 	let Some(region) = ir.region(root) else {
 		return "; no such region\n".to_owned();
 	};
 	let mut printer = Printer {
 		ir,
-		reg,
+		syntaxes,
 		opts,
 		out: String::new(),
 		scratch: String::new(),
@@ -92,7 +111,7 @@ pub(crate) fn print_with(ir: &Ir, root: RegionId, opts: PrintOpts, reg: &Registr
 
 struct Printer<'a> {
 	ir: &'a Ir,
-	reg: &'a Registry,
+	syntaxes: &'a AttrSyntaxes,
 	opts: PrintOpts,
 	out: String,
 	/// Holds the attribute text of one op while it is escaped.
@@ -343,6 +362,8 @@ impl Printer<'_> {
 		if self.opts.provenance {
 			self.provenance(&op.provenance);
 		}
+		// The effects print under the full builtin registry, which only a test prints them under.
+		#[cfg(test)]
 		if self.opts.facts {
 			let facts = effects::of(ir, &mut self.facts, id);
 			let _ = write!(self.out, " ; facts(effects: {facts:?})");
@@ -353,7 +374,7 @@ impl Printer<'_> {
 	/// Appends ` attrs("<text>")` for the text the dialect's syntax appends, and nothing when it
 	/// appends none. An op id the attributes hold is named as provenance names it.
 	fn attrs(&mut self, kind: &OpKind, tag: OpTag) {
-		let syntax = self.reg.attr_syntax.get(dialect_index(tag)).copied().flatten();
+		let syntax = self.syntaxes.0.get(dialect_index(tag)).copied().flatten();
 		self.scratch.clear();
 		let mut ids = Vec::new();
 		match syntax {

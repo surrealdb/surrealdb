@@ -415,7 +415,7 @@ fn copy_region(
 	};
 	let held = rw.ir().block(*block).ok_or(IrError::Stale("block"))?;
 	let (ops, args) = (held.ops.clone(), held.args.clone());
-	let mut types: SmallVec<[TypeKnowledge; 4]> = SmallVec::new();
+	let mut types: SmallVec<[TypeKnowledge; 2]> = SmallVec::new();
 	for arg in &args {
 		types.push(rw.ir().value(*arg).ok_or(IrError::Stale("value"))?.ty.clone());
 	}

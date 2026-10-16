@@ -35,7 +35,6 @@
 
 use std::fmt::Debug;
 use std::pin::Pin;
-use std::sync::Arc;
 
 use futures::Stream;
 
@@ -69,6 +68,7 @@ pub(crate) mod kill;
 pub(crate) mod live;
 pub(crate) mod scalar_unit;
 pub(crate) mod session;
+pub(crate) mod surface;
 pub(crate) use crate::val::field_path;
 pub(crate) mod field_path_convert;
 pub(crate) mod field_rules;
@@ -84,7 +84,6 @@ pub(crate) mod migrate;
 pub(crate) mod object_extract;
 pub(crate) mod operators;
 pub(crate) mod ordering;
-pub(crate) mod partitioning;
 pub(crate) mod parts;
 pub(crate) mod permission;
 pub(crate) mod planner;
@@ -113,8 +112,6 @@ pub(crate) use error::Error;
 pub(crate) use eval_context::EvalContext;
 // Re-export metrics types
 pub(crate) use metrics::{OperatorMetrics, monitor_stream};
-// Re-export the output-partitioning property
-pub(crate) use partitioning::Partitioning;
 
 /// The shape an operator's output takes when it is a statement's result.
 ///
@@ -147,16 +144,9 @@ pub(crate) type ValueBatchStream = Pin<Box<dyn Stream<Item = FlowResult<ValueBat
 
 /// A trait for execution plans that can be executed and produce a stream of value batches.
 ///
-/// Execution plans form a tree structure where each node declares its minimum required
-/// context level via `required_context()`. The executor validates that the current session
-/// meets these requirements before execution begins.
-pub(crate) trait ExecOperator: Debug + Send + Sync + std::any::Any {
-	fn name(&self) -> &'static str;
-
-	fn attrs(&self) -> Vec<(String, String)> {
-		vec![]
-	}
-
+/// Each plan declares its minimum required context level via `required_context()`. The executor
+/// validates that the current session meets that requirement before execution begins.
+pub(crate) trait ExecOperator: Debug + Send + Sync {
 	/// The minimum context level required to execute this plan.
 	///
 	/// Used for pre-flight validation: the executor checks that the current session
@@ -193,47 +183,7 @@ pub(crate) trait ExecOperator: Debug + Send + Sync + std::any::Any {
 		self.execute(ctx)
 	}
 
-	/// Returns references to child execution plans for tree traversal.
-	///
-	/// Used for:
-	/// - Pre-flight validation (recursive context requirement checking)
-	/// - Query optimization
-	/// - EXPLAIN output, through [`Self::explain_children`]
-	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
-		vec![]
-	}
-
-	/// The children `EXPLAIN` renders beneath this operator: every child,
-	/// unless the operator hides one from the caller. A join lifted out of a
-	/// permission predicate hides its right side from a caller the permission
-	/// is enforced on, as `PermissionFilter` hides its predicate. Every other
-	/// traversal — validation, metrics, instrumentation — uses
-	/// [`Self::children`].
-	fn explain_children(&self) -> Vec<&Arc<dyn ExecOperator>> {
-		self.children()
-	}
-
-	/// Whether `EXPLAIN ANALYZE` withholds the metrics of every operator
-	/// beneath this one. `true` for a node enforcing a definer's declaration
-	/// on a caller it is enforced on — a table permission, a field-guard
-	/// layer, a join lifted from a permission predicate — since the row
-	/// counts beneath it are counts over records that caller may not see.
-	/// The node's own metrics are still rendered: its output is what the
-	/// caller receives.
-	fn hides_metrics_beneath(&self) -> bool {
-		false
-	}
-
-	/// Whether `EXPLAIN` renders the access path of every operator beneath
-	/// this one as `<permission>`. `true` for a permission node whose
-	/// predicate was offered to the access path of the scan beneath it, in a
-	/// plan compiled for a caller the predicate is enforced on: the bound an
-	/// index scan or a record-id lookup would print is the definer's.
-	fn redacts_access_paths_beneath(&self) -> bool {
-		false
-	}
-
-	/// Returns the access mode for this plan (and all its children).
+	/// Returns the access mode for this plan.
 	///
 	/// This determines whether the plan performs mutations:
 	/// - `AccessMode::ReadOnly`: Only reads data, can run in parallel with other reads
@@ -244,33 +194,11 @@ pub(crate) trait ExecOperator: Debug + Send + Sync + std::any::Any {
 	/// must return `ReadWrite` even though it's syntactically a SELECT.
 	fn access_mode(&self) -> AccessMode;
 
-	/// How this operator's output is divided across parallel streams.
-	///
-	/// The default is [`Partitioning::Single`]: one stream carrying every row,
-	/// which is what every operator produces. An operator that passes rows
-	/// through unchanged should delegate to its input; an operator that must see
-	/// every row together must declare `Single` and merge its input rather than
-	/// let a partial view reach anything downstream.
-	///
-	/// Only a `ReadOnly` subtree may ever be partitioned; see
-	/// [`Partitioning`] for why a write cannot be.
-	fn output_partitioning(&self) -> Partitioning {
-		Partitioning::Single
-	}
-
 	/// The shape this operator's output takes when it is a statement's result.
 	///
 	/// See [`OutputShape`]. The default is [`OutputShape::Rows`]: an operator
 	/// that emits rows.
 	fn output_shape(&self) -> OutputShape {
 		OutputShape::Rows
-	}
-
-	/// Returns the operator-level metrics for this node, if available.
-	///
-	/// Used by `EXPLAIN ANALYZE` to collect runtime statistics after
-	/// the plan has been fully consumed.
-	fn metrics(&self) -> Option<&OperatorMetrics> {
-		None
 	}
 }

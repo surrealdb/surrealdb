@@ -192,13 +192,13 @@ SurrealDB's security model rests on four pillars:
   the read happens: the fetch judges the definition's `PERMISSIONS` clause
   against the caller and is denied where the clause denies. A rewrite that
   drops such a read unevaluated therefore drops the denial with it, and answers
-  where the statement as written is refused. The bind pass names the parameters
-  whose read is a fetch (`exec/logical/params.rs::permission_checked_names`,
-  classified by the same `bind_param` the resolution uses, so a
-  `PERMISSIONS FULL` definition the plan already folded to its value is not one
-  of them) and `exec/logical/rules/mod.rs::may_raise` reports a read of one as
-  able to raise, which is what keeps every rule gated on inertness from
-  dropping it — `SELECT * FROM [$secret] WHERE false` must be refused, not
+  where the statement as written is refused. The IR types a read the plan did
+  not resolve as a `free_param` or `catalog_param` op whose declared
+  fallibility is `CONTEXT | DATA` with a `ParamPermission` dependency
+  (`exec/ir/expr/effects.rs`), which is what keeps every pass gated on
+  infallibility from dropping it, and the membership recogniser takes every
+  parameter read that is not row-scoped to be a fetch
+  (`exec/ir/build/membership/lift.rs::may_raise`) — `SELECT * FROM [$secret] WHERE false` must be refused, not
   answered `[]`.
 - A record user's `$auth` is the record id of the signed-in record, and a path
   read from it (`$auth.email`, `$auth.id`) dereferences that record. Where the
@@ -464,9 +464,9 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   `<permission>` in place of its index, bound and record id (a key range's `key`,
   `range` and `ranges` included), and `EXPLAIN ANALYZE` reports no metrics for
   any operator beneath a permission filter, a layer or a permission join
-  (`ExecOperator::hides_metrics_beneath` and `redacts_access_paths_beneath`,
-  applied in `exec/operators/explain.rs`; the VM sets them on the nodes it
-  renders in `exec/vm/explain.rs`).
+  (`PlanNode::hides_metrics` and `PlanNode::redacts_access_paths`, set by
+  `exec/vm/ir_lower/explain.rs` on permission filters and layers and applied
+  top-down by the renderer's `Redaction` in `exec/vm/explain.rs`).
   Two scan paths deliberately sit outside the document pipeline and carry
   `// SECURITY:` comments saying so — `exec/operators/scan/graph.rs` (graph edge
   results) and `exec/operators/scan/reference.rs` (reference scans). A change to
@@ -521,10 +521,10 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   clauses (`field_predicate_pipeline` in `exec/vm/ir_lower/stage.rs`, judged by `SchemaInstr::Permit` in `exec/vm/write_schema.rs`). Every compiled
   table `SELECT` guard the host's streaming helpers evaluate — a record link
   the program follows — is a `ComputedFieldGuard`
-  (`table_select_permission_physical`). The decorrelation rule does not lift a
+  (`table_select_permission_physical`). The membership recogniser does not lift a
   permission conjunct that reads a computed field off the outer row into a
   join, which would read it off the row as stored (`reads_outer_any_of` in
-  `exec/logical/rules/decorrelate.rs`). Deriving in the caller's frame instead
+  `exec/ir/build/membership/lift.rs`). Deriving in the caller's frame instead
   is the defect this rules out twice over: a body following a record the
   caller may not select derives from `NONE`, satisfying a clause written to
   deny, and a body reading its own table re-enters that table's `SELECT`
@@ -552,7 +552,7 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   is derived for it: `extract_computed_deps` marks such a call opaque, as
   `call_evaluates_against_row` does for a bound plan.
   Verified by: `a_permission_membership_reading_a_computed_field_is_not_lifted`
-  (`exec/logical/rules/decorrelate.rs`),
+  (`exec/ir/build/membership/lift.rs`),
   `live_select_permission_reads_computed_fields` (`tests/it/live.rs`),
   `a_call_running_its_own_body_marks_incomplete` (`expr/computed_deps.rs`),
   `a_quoted_computed_field_is_keyed_and_ordered_by_its_unescaped_name`,
@@ -688,7 +688,7 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
     record range, and an empty or inverted range is dropped, so a bound the
     caller supplies cannot take the scan out of the table (section 14).
   - For a checked caller beneath a permission, `key`, `range` and `ranges` print
-    `<permission>` (`ACCESS_PATH_ATTRS` in `exec/operators/explain.rs`), as the
+    `<permission>` (`ACCESS_PATH_ATTRS` in `exec/vm/explain.rs`), as the
     index, access and record id of any access path do, and the column of a
     component prints `<computed>` where its expression stands (`layer_attrs`
     in `exec/vm/ir_lower/explain.rs`, which renders a column evaluated in a
@@ -734,8 +734,9 @@ Flag for detailed review when changes touch:
 - `resolve_with_field_state`, `check_permission_for_value`, `action_is_checked`, or
   `should_check_perms` (streaming runtime read path), or any new scan operator that fetches record contents
 - `exec/logical/resolve.rs` (what the analyzer writes above a source, guard
-  pruning, the whole-row read classification), `exec/logical/rules/` (any rule
-  that moves an expression across a `PermissionFilter`, a layer or a join),
+  pruning, the whole-row read classification), `exec/ir/passes/` and
+  `exec/ir/build/membership/` (any pass that moves an expression across a `PermissionFilter`, a
+  layer or a join),
   `chain_offer` in `exec/planner/fold.rs`, `exec/operators/layer.rs`,
   `exec/operators/permission_filter.rs`, or `compiles_for_checked_caller` and
   the `EXPLAIN` redaction it drives

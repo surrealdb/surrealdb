@@ -30,7 +30,7 @@ use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ValueTable {
 	statement: Option<OpId>,
-	values: HashMap<ValueKey, SmallVec<[ValueId; 1]>>,
+	values: HashMap<ValueKey, SmallVec<[ValueId; 2]>>,
 	/// The regions entered within the statement, outermost first, each with the keys and values
 	/// inserted while it was the innermost.
 	scopes: Vec<(RegionId, Vec<(ValueKey, ValueId)>)>,

@@ -31,7 +31,7 @@ use crate::exec::ir::op_kind::OpKind;
 use crate::exec::ir::phys::ops::PhysOp;
 use crate::exec::planner::placement::Parallel;
 use crate::exec::vm::ir_lower::emit::Emitter;
-use crate::exec::vm::ir_lower::explain::explain_of;
+use crate::exec::vm::ir_lower::explain_hook::explain_of;
 use crate::exec::vm::ir_lower::expr::Needs;
 use crate::exec::vm::ir_lower::read::{lower_source_under, producer_of};
 use crate::exec::vm::ir_lower::units::LowerCx;
@@ -106,6 +106,25 @@ pub(super) fn nested_group(
 	};
 	// The group's pipelines stand for no pipeline op of the region that reads the statement, so
 	// each counts once there, including a reader that counted itself in the statement's region.
+	reads.unowned = unowned + (reads.pipelines.len() - held);
+	Ok(group)
+}
+
+/// Lowers the write the `Subquery` region `region` of a binding step holds as a group of the
+/// program, and answers the group's index. The group's pipelines stand for no pipeline op of the
+/// region being lowered.
+pub(super) fn write_region_group(
+	em: &mut Emitter,
+	cx: &mut LowerCx<'_>,
+	ir: &Ir,
+	facts: &mut FactCache,
+	reads: &mut Reads,
+	region: RegionId,
+) -> Result<u16, IrError> {
+	let (held, unowned) = (reads.pipelines.len(), reads.unowned);
+	let write = write_of(ir, region)?
+		.ok_or_else(|| invariant("a binding step's write region holds no write"))?;
+	let group = write_group(em, cx, facts, reads, ir, write)?;
 	reads.unowned = unowned + (reads.pipelines.len() - held);
 	Ok(group)
 }

@@ -13,6 +13,7 @@ use surrealdb_datastore::LevelledMode;
 use super::codec;
 use super::codec::TypeId;
 use super::codec::key::RouteId;
+use super::interp::State;
 use super::program::{
 	AccessCheck, ClauseConversion, ClauseObject, ColumnSource, FieldCheck, GrantSubject,
 	IdSequence, PathSource, Program, Service, StatementError, StoreInstr,
@@ -21,7 +22,7 @@ use super::scalar::Scalar;
 use crate::catalog::stored::StoredField;
 use crate::ddl::grant;
 use crate::exe::FlowResultExt as _;
-use crate::exec::{ExecutionContext, FlowResult};
+use crate::exec::{BoxFut, ExecutionContext, FlowResult};
 use crate::expr::ControlFlow;
 use crate::iam::Action;
 use crate::kvs::sequences::CatalogSequence;
@@ -54,20 +55,71 @@ fn session_sink_of<'a>(
 	Ok((sink, options))
 }
 
-/// Take store instruction `instr`, answering the instruction the body jumps
-/// to, or `None` to continue with the next.
-pub(super) async fn step(
-	program: &Program,
-	instr: &StoreInstr,
-	regs: &mut [Scalar<'_>],
-	reserved_taken: &mut [bool],
-	ctx: &ExecutionContext,
-) -> FlowResult<Option<usize>> {
-	let stepped = step_inner(program, instr, regs, reserved_taken, ctx).await;
+/// Takes the store instructions of the statements that are not data
+/// statements. The context's [`Surface`](crate::exec::surface::Surface) holds
+/// the implementation, or nothing where the entry serves data statements
+/// alone, so shared code reaches the schema runtime only through this hook.
+pub(crate) trait SchemaSteps {
+	/// Takes `instr`, as [`schema_step`] does.
+	fn step<'a, 'r>(
+		&'a self,
+		program: &'a Program,
+		instr: &'a StoreInstr,
+		regs: &'a mut [Scalar<'r>],
+		reserved_taken: &'a mut [bool],
+		ctx: &'a ExecutionContext,
+	) -> BoxFut<'a, FlowResult<Option<usize>>>;
+
+	/// Takes the backfill instruction `instr`, which runs over the pipeline's state, as
+	/// [`backfill::step`] does.
+	fn backfill<'a, 'r>(
+		&'a self,
+		program: &'a Program,
+		instr: &'a StoreInstr,
+		regs: &'a mut [Scalar<'r>],
+		state: &'a mut State,
+		ctx: &'a ExecutionContext,
+	) -> BoxFut<'a, FlowResult<Option<usize>>>;
+}
+
+/// The runtime of every statement family.
+pub(crate) struct FullSchemaSteps;
+
+/// The one [`FullSchemaSteps`], named only by the surface that serves every statement family.
+pub(crate) static FULL_SCHEMA_STEPS: FullSchemaSteps = FullSchemaSteps;
+
+impl SchemaSteps for FullSchemaSteps {
+	fn step<'a, 'r>(
+		&'a self,
+		program: &'a Program,
+		instr: &'a StoreInstr,
+		regs: &'a mut [Scalar<'r>],
+		reserved_taken: &'a mut [bool],
+		ctx: &'a ExecutionContext,
+	) -> BoxFut<'a, FlowResult<Option<usize>>> {
+		Box::pin(schema_step(program, instr, regs, reserved_taken, ctx))
+	}
+
+	fn backfill<'a, 'r>(
+		&'a self,
+		program: &'a Program,
+		instr: &'a StoreInstr,
+		regs: &'a mut [Scalar<'r>],
+		state: &'a mut State,
+		ctx: &'a ExecutionContext,
+	) -> BoxFut<'a, FlowResult<Option<usize>>> {
+		Box::pin(super::backfill::step(program, instr, regs, state, ctx))
+	}
+}
+
+/// Notes that instruction `instr` raised a refusal its statement declares, when
+/// `failed` and the run is speculative. Matches on the variant alone, so a
+/// data statement's step and a schema statement's step share it.
+fn note_refusal(instr: &StoreInstr, ctx: &ExecutionContext, failed: bool) {
 	// A refusal the statement declares — a definition that exists or is
 	// missing, a capability the caller lacks — is noted, so a speculative run
 	// knows its real run raises it too.
-	if stepped.is_err()
+	if failed
 		&& matches!(
 			instr,
 			StoreInstr::Raise { .. }
@@ -85,6 +137,98 @@ pub(super) async fn step(
 	{
 		txn.note_speculative_refusal();
 	}
+}
+
+/// Takes the store instruction `instr` of a data statement, which
+/// [`StoreInstr::is_dml`] names, answering the instruction the body jumps to,
+/// or `None` to continue with the next.
+pub(super) async fn step_dml(
+	program: &Program,
+	instr: &StoreInstr,
+	regs: &mut [Scalar<'_>],
+	_reserved_taken: &mut [bool],
+	ctx: &ExecutionContext,
+) -> FlowResult<Option<usize>> {
+	let stepped = dml_inner(program, instr, regs, ctx);
+	note_refusal(instr, ctx, stepped.is_err());
+	stepped
+}
+
+fn dml_inner(
+	program: &Program,
+	instr: &StoreInstr,
+	regs: &mut [Scalar<'_>],
+	ctx: &ExecutionContext,
+) -> FlowResult<Option<usize>> {
+	match instr {
+		StoreInstr::RefuseNoWrite => {
+			if let Some(frame) = ctx.root().no_write {
+				return Err(ControlFlow::Err(anyhow!(
+					frame.side_effect_error(crate::exec::clause_effects::SCHEMA_STATEMENT_TEXT)
+				)));
+			}
+		}
+		StoreInstr::Refuse {
+			refusal,
+		} => return Err(ControlFlow::Err(refusal.error().into())),
+		StoreInstr::SessionLetChecks {
+			name,
+		} => {
+			// SECURITY: a protected name, and a name the system binds, is refused before the value
+			// is evaluated, so a refused `LET` has no side effects.
+			if surrealdb_cnf::is_refused_let_name(name.as_str()) {
+				return Err(ControlFlow::Err(anyhow::Error::new(
+					crate::exec::Error::InvalidParam {
+						name: name.as_str().to_owned(),
+					},
+				)));
+			}
+		}
+		StoreInstr::SessionLet {
+			name,
+			kind,
+			value,
+		} => {
+			let (sink, _) = session_sink_of(ctx, "LET")?;
+			let mut bound = read(regs, *value);
+			if let Some(kind) = kind {
+				bound = bound.coerce_to_kind(&program.kinds[*kind as usize]).map_err(|error| {
+					ControlFlow::Err(anyhow::Error::new(crate::exec::Error::SetCoerce {
+						name: name.as_str().to_owned(),
+						error: Box::new(error),
+					}))
+				})?;
+			}
+			// A top-level `LET` binds into the request-scoped context, which is not reset
+			// between statements, so a chain of them would grow the value's nesting without
+			// bound: the bound is checked here, as a storage guard checks a written value.
+			crate::val::check_value_depth(&bound).map_err(ControlFlow::Err)?;
+			sink.record(crate::exec::context::SessionEffect::Let {
+				name: name.clone(),
+				value: std::sync::Arc::new(bound),
+			});
+		}
+		_ => {
+			return Err(ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(
+				"a store instruction of a schema statement taken as a data statement's".to_owned(),
+			))));
+		}
+	}
+	Ok(None)
+}
+
+/// Takes store instruction `instr` of a schema statement, `INFO`, `LIVE`,
+/// `KILL`, `USE`, `OPTION`, `ACCESS` or `SHOW`, answering the instruction the
+/// body jumps to, or `None` to continue with the next.
+async fn schema_step(
+	program: &Program,
+	instr: &StoreInstr,
+	regs: &mut [Scalar<'_>],
+	reserved_taken: &mut [bool],
+	ctx: &ExecutionContext,
+) -> FlowResult<Option<usize>> {
+	let stepped = step_inner(program, instr, regs, reserved_taken, ctx).await;
+	note_refusal(instr, ctx, stepped.is_err());
 	stepped
 }
 
@@ -163,13 +307,6 @@ async fn step_inner(
 					.map_err(ControlFlow::Err)?;
 			write(regs, *dst, purged);
 		}
-		StoreInstr::RefuseNoWrite => {
-			if let Some(frame) = ctx.root().no_write {
-				return Err(ControlFlow::Err(anyhow!(
-					frame.side_effect_error(crate::exec::clause_effects::SCHEMA_STATEMENT_TEXT)
-				)));
-			}
-		}
 		StoreInstr::Allow {
 			action,
 			resource,
@@ -183,7 +320,8 @@ async fn step_inner(
 		} => {
 			let key = codec::key::encode_id(*route, &read(regs, *key)).map_err(ControlFlow::Err)?;
 			let value = match ctx.txn().get(key.into(), None).await.map_err(ControlFlow::Err)? {
-				Some(bytes) => codec::decode_id(*ty, &bytes).map_err(ControlFlow::Err)?,
+				Some(bytes) => codec::decode_id(ctx.ctx().surface().codec, *ty, &bytes)
+					.map_err(ControlFlow::Err)?,
 				None => Value::None,
 			};
 			write(regs, *dst, value);
@@ -396,9 +534,6 @@ async fn step_inner(
 				return Ok(Some(*target as usize));
 			}
 		}
-		StoreInstr::Refuse {
-			refusal,
-		} => return Err(ControlFlow::Err(refusal.error().into())),
 		StoreInstr::RefuseRedefiningTable {
 			ns,
 			db,
@@ -1415,43 +1550,6 @@ async fn step_inner(
 			selected.map_err(ControlFlow::Err)?;
 			write(regs, *dst, crate::exec::session::use_answer(ns.as_deref(), db.as_deref()));
 		}
-		StoreInstr::SessionLetChecks {
-			name,
-		} => {
-			// SECURITY: a protected name, and a name the system binds, is refused before the value
-			// is evaluated, so a refused `LET` has no side effects.
-			if surrealdb_cnf::is_refused_let_name(name.as_str()) {
-				return Err(ControlFlow::Err(anyhow::Error::new(
-					crate::exec::Error::InvalidParam {
-						name: name.as_str().to_owned(),
-					},
-				)));
-			}
-		}
-		StoreInstr::SessionLet {
-			name,
-			kind,
-			value,
-		} => {
-			let (sink, _) = session_sink_of(ctx, "LET")?;
-			let mut bound = read(regs, *value);
-			if let Some(kind) = kind {
-				bound = bound.coerce_to_kind(&program.kinds[*kind as usize]).map_err(|error| {
-					ControlFlow::Err(anyhow::Error::new(crate::exec::Error::SetCoerce {
-						name: name.as_str().to_owned(),
-						error: Box::new(error),
-					}))
-				})?;
-			}
-			// A top-level `LET` binds into the request-scoped context, which is not reset
-			// between statements, so a chain of them would grow the value's nesting without
-			// bound: the bound is checked here, as a storage guard checks a written value.
-			crate::val::check_value_depth(&bound).map_err(ControlFlow::Err)?;
-			sink.record(crate::exec::context::SessionEffect::Let {
-				name: name.clone(),
-				value: std::sync::Arc::new(bound),
-			});
-		}
 		StoreInstr::KillOnCommit {
 			subscription,
 		} => {
@@ -2044,6 +2142,20 @@ async fn step_inner(
 				return Ok(Some(*target as usize));
 			}
 		}
+		StoreInstr::Refuse {
+			..
+		}
+		| StoreInstr::RefuseNoWrite
+		| StoreInstr::SessionLetChecks {
+			..
+		}
+		| StoreInstr::SessionLet {
+			..
+		} => {
+			return Err(ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(
+				"a store instruction of a data statement taken as a schema statement's".to_owned(),
+			))));
+		}
 		StoreInstr::EvaluateOver {
 			..
 		}
@@ -2488,7 +2600,8 @@ async fn scan_at(
 	ctx: &ExecutionContext,
 ) -> anyhow::Result<Vec<Value>> {
 	let entries = ctx.txn().getr_raw(range(route, fields)?, version).await?;
-	entries.iter().map(|(_, bytes)| codec::decode_id(ty, bytes)).collect()
+	let codec = ctx.ctx().surface().codec;
+	entries.iter().map(|(_, bytes)| codec::decode_id(codec, ty, bytes)).collect()
 }
 
 /// The field path the source names, resolved from the registers holding what
@@ -2600,13 +2713,16 @@ async fn put_value(
 	mode: LevelledMode,
 ) -> FlowResult<()> {
 	let txn = ctx.txn();
-	if codec::is_catalog(ty) {
+	let codec = ctx.ctx().surface().codec;
+	if codec::is_catalog(codec, ty) {
 		return txn
-			.put_levelled_raw(key.into(), mode, |level| codec::encode_id_at(ty, value, level))
+			.put_levelled_raw(key.into(), mode, |level| {
+				codec::encode_id_at(codec, ty, value, level)
+			})
 			.await
 			.map_err(ControlFlow::Err);
 	}
-	let bytes = codec::encode_id(ty, value).map_err(ControlFlow::Err)?;
+	let bytes = codec::encode_id(codec, ty, value).map_err(ControlFlow::Err)?;
 	match mode {
 		LevelledMode::Set => txn.set(key.into(), bytes).await,
 		LevelledMode::Replace => txn.replace_raw(key.into(), bytes).await,

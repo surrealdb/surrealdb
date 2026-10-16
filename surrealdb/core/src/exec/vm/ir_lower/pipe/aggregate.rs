@@ -449,7 +449,7 @@ fn literal_position(ir: &Ir, value: ValueId) -> Option<i64> {
 ///
 /// A statement in value position and an aggregate call are neither entered: the first plans on its
 /// own, and the arguments of the second are read from each row, not from the group.
-fn visit_ops(ir: &Ir, region: RegionId, visit: &mut impl FnMut(OpId, &OpData)) {
+fn visit_ops(ir: &Ir, region: RegionId, visit: &mut dyn FnMut(OpId, &OpData)) {
 	for op in ops_in(ir, region) {
 		let Some(data) = ir.op(op) else {
 			continue;

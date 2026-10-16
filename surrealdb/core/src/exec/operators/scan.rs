@@ -22,7 +22,7 @@ pub(crate) mod resolved;
 mod union_index;
 
 pub(crate) use bitmap::{
-	BitmapNode, FusedCandidates, RESOLVE_BATCH_SIZE, evaluate_fusion_plan,
+	BitmapTally, FusedCandidates, RESOLVE_BATCH_SIZE, evaluate_fusion_plan,
 	exact_bitmap_cardinality, knn_allow_list,
 };
 pub use count::CountOutput;

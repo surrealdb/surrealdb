@@ -60,6 +60,7 @@ use super::emit::Emitter;
 use super::expr::{Lowerer, Needs};
 use super::units::LowerCx;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
+use crate::exec::ir::analysis::cx::structural_cx;
 use crate::exec::ir::analysis::effects;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::Ir;
@@ -92,7 +93,7 @@ use crate::val::Value;
 /// catalog version are all reserved draws, is noted in `implicit_tables` for the program's writes
 /// to share.
 #[derive(Debug, Default)]
-pub(super) struct Reservations {
+pub(crate) struct Reservations {
 	pub(super) reserving: Vec<(u16, u128)>,
 	pub(super) taken: Vec<u128>,
 	/// The tables the statements lowered so far define implicitly with reserved draws, in the
@@ -730,7 +731,12 @@ impl Ddl<'_, '_> {
 		};
 		let effects = match self.facts.last(op) {
 			Some(facts) => facts.effects.clone(),
-			None => effects::of(self.ir, &mut FactCache::new(), op),
+			None => effects::of_with(
+				self.ir,
+				&mut FactCache::new(),
+				&structural_cx(self.cx.registry(), self.ir),
+				op,
+			),
 		};
 		Ok(!super::super::speculate::admits(effects.set) || self.holds_opaque_node(op))
 	}
@@ -3871,10 +3877,14 @@ impl Ddl<'_, '_> {
 
 /// A stored definition as the VM's codec reads it.
 fn stored<T: crate::key::KVValue>(value: &T, ty: &'static str) -> Result<Value, IrError> {
-	let bytes = value
-		.kv_encode_value()
+	decode_stored(value.kv_encode_value(), ty)
+}
+
+/// [`stored`] over the bytes the definition encoded to.
+fn decode_stored(bytes: anyhow::Result<Vec<u8>>, ty: &'static str) -> Result<Value, IrError> {
+	let bytes = bytes
 		.map_err(|_| IrError::Stale("ir_lower::ddl: a stored definition that does not encode"))?;
-	crate::exec::vm::codec::decode(ty, &bytes)
+	crate::exec::vm::codec::decode(&crate::exec::vm::codec::FULL_CODEC, ty, &bytes)
 		.map_err(|_| IrError::Stale("ir_lower::ddl: a stored definition the codec does not read"))
 }
 

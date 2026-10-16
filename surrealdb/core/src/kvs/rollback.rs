@@ -266,7 +266,7 @@ impl Datastore {
 		let mut findings = Vec::new();
 		for (id, record) in self.applied_migration_ids().await? {
 			let class = LedgerId::from_raw(id).class();
-			match migration::MIGRATIONS.iter().find(|m| m.id == id) {
+			match migration::LEDGER.iter().find(|m| m.id == id) {
 				Some(known) => {
 					let since = release_of(known.version);
 					if since > target {

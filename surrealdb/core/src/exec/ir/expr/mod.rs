@@ -21,7 +21,6 @@ pub(crate) mod effects;
 pub(crate) mod membership;
 pub(crate) mod ops;
 pub(crate) mod print;
-pub(crate) mod reg;
 pub(crate) mod types;
 pub(crate) mod verify;
 

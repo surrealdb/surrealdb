@@ -5,6 +5,7 @@
 //! separates are two values. A clock read is constant within a statement, so equal clock reads are
 //! one value.
 
+#[cfg(test)]
 use super::cx::default_cx;
 use super::{effects, write_epoch};
 use crate::exec::ir::core::facts::FactCache;
@@ -27,6 +28,7 @@ const MAX_ANCESTOR_HOPS: usize = 1024;
 /// Frame and snapshot are part of every key, and keys are compared only within one statement. An
 /// op that `key_with` marks opaque answers `opaque: Some(op)`, which equals no key but itself. An
 /// id that names no op answers an opaque key of the first tag, in the default frame and snapshot.
+#[cfg(test)]
 pub(crate) fn key(ir: &Ir, facts: &mut FactCache, op: OpId) -> ValueKey {
 	key_with(ir, facts, &default_cx(ir), op)
 }

@@ -72,9 +72,9 @@ use super::super::program::{
 };
 use super::block::Groups;
 use super::closure::wrapped_value_loop;
-use super::ddl::{Reservations, lower_ddl, schema_op};
+use super::ddl::{Reservations, schema_op};
 use super::emit::{BoundSlot, Emitter};
-use super::explain::Explained;
+use super::explain_hook::Explained;
 use super::info::InfoLowered;
 use super::pipe::{PoolBase, ReadScope, Reads};
 use super::stage::StatementNesting;
@@ -83,6 +83,7 @@ use super::write_stmt::LoweredWrite;
 use crate::exec::config::ExecConfig;
 use crate::exec::field_path::FieldPath;
 use crate::exec::function::FunctionRegistry;
+#[cfg(test)]
 use crate::exec::ir::analysis::cx::builtin_registry;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::Ir;
@@ -147,7 +148,7 @@ impl Default for LowerLimits {
 
 /// What the program a [`Lowerer`] emitted into needs of its run, beyond its instructions.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct Needs {
+pub(crate) struct Needs {
 	/// The most demanding context level of any builtin called.
 	pub(super) context: ContextLevel,
 	/// Whether something lowered keeps the rows of a statement running one after another: any
@@ -369,8 +370,13 @@ fn lowered_use(ir: &Ir, used: &crate::exec::ir::core::value::Use) -> bool {
 }
 
 /// Where the value `v` of `ir` is read from once the instructions emitted into `em` have run.
-pub(super) fn operand(em: &mut Emitter, ir: &Ir, v: ValueId) -> Result<Operand, IrError> {
-	Lowerer::new(em, ir).value(v)
+pub(super) fn operand(
+	em: &mut Emitter,
+	ir: &Ir,
+	registry: &FunctionRegistry,
+	v: ValueId,
+) -> Result<Operand, IrError> {
+	Lowerer::new(em, ir, registry).value(v)
 }
 
 /// The arguments of the call `data`: its operands without the row names the binder passes after
@@ -636,7 +642,7 @@ impl<'a> Lowerer<'a> {
 		explain: OpId,
 		base: PoolBase,
 		group: u16,
-		purpose: super::explain::Purpose,
+		purpose: super::explain_hook::Purpose,
 	) -> Result<(Explained, std::ops::Range<u16>), IrError> {
 		let ir = self.ir;
 		let Some(units) = self.units.as_deref_mut() else {
@@ -676,7 +682,7 @@ impl<'a> Lowerer<'a> {
 	pub(super) fn explain_analysis(
 		&mut self,
 		explain: OpId,
-		purpose: super::explain::Purpose,
+		purpose: super::explain_hook::Purpose,
 	) -> Result<crate::exec::vm::program::Analysis, IrError> {
 		let ir = self.ir;
 		let Some(units) = self.units.as_deref_mut() else {
@@ -750,12 +756,10 @@ impl<'a> Lowerer<'a> {
 		reservations: &mut Reservations,
 	) -> Result<(Pipeline, Needs), IrError> {
 		let facts = FactCache::new();
-		let needs = match self.units.as_deref_mut() {
-			Some(units) => units.lower_schema(self.em, self.ir, &facts, op, reservations)?,
-			None => {
-				lower_ddl(self.em, self.ir, &facts, &mut LowerCx::detached(), op, reservations)?
-			}
+		let Some(units) = self.units.as_deref_mut() else {
+			return Err(invariant("a schema statement lowered with no lowering context"));
 		};
+		let needs = units.lower_schema(self.em, self.ir, &facts, op, reservations)?;
 		Ok((self.em.finish_pipeline(Source::Once)?, needs))
 	}
 
@@ -779,14 +783,13 @@ impl<'a> Lowerer<'a> {
 }
 
 impl<'a> Lowerer<'a> {
-	/// A lowerer of the operand subset into `em`, resolving builtins against the builtin
-	/// registry.
-	pub(super) fn new(em: &'a mut Emitter, ir: &'a Ir) -> Self {
+	/// A lowerer of the operand subset into `em`, resolving builtins against `registry`.
+	pub(super) fn new(em: &'a mut Emitter, ir: &'a Ir, registry: &'a FunctionRegistry) -> Self {
 		let slots = em.bound_slots().clone();
 		Self {
 			em,
 			ir,
-			registry: builtin_registry(),
+			registry,
 			subset: Subset::Operand,
 			limits: LowerLimits::default(),
 			frame: Frame::OWN,
@@ -898,6 +901,7 @@ impl<'a> Lowerer<'a> {
 	/// frame the instruction that runs it names, so its instructions name no permission frame of
 	/// their own.
 	pub(super) fn in_context(em: &'a mut Emitter, ir: &'a Ir, cx: &'a mut LowerCx<'_>) -> Self {
+		let registry = cx.registry();
 		let top = ops_in(ir, ir.top()).next().and_then(|op| ir.op(op)).map(|data| data.frame);
 		Self {
 			frame: Frame {
@@ -909,7 +913,7 @@ impl<'a> Lowerer<'a> {
 			unit_frame: Some(cx.frame().clone()),
 			depth: cx.depth(),
 			units: Some(cx),
-			..Self::new(em, ir)
+			..Self::new(em, ir, registry)
 		}
 	}
 
@@ -1010,11 +1014,20 @@ impl<'a> Lowerer<'a> {
 	}
 
 	/// A lowerer of the subset the plan-time folder runs.
-	pub(super) fn for_fold(em: &'a mut Emitter, ir: &'a Ir) -> Self {
+	pub(super) fn for_fold(
+		em: &'a mut Emitter,
+		ir: &'a Ir,
+		registry: &'a FunctionRegistry,
+	) -> Self {
 		Self {
 			subset: Subset::Fold,
-			..Self::new(em, ir)
+			..Self::new(em, ir, registry)
 		}
+	}
+
+	/// The registry the lowerer resolves builtins against.
+	pub(super) fn registry(&self) -> &'a FunctionRegistry {
+		self.registry
 	}
 
 	/// The emitter the lowerer emits into, for a caller that emits instructions of its own between
@@ -2389,7 +2402,7 @@ impl<'a> Lowerer<'a> {
 	pub(super) fn record_key(
 		&mut self,
 		shape: &KeyShape,
-		operands: &mut impl Iterator<Item = ValueId>,
+		operands: &mut std::iter::Copied<std::slice::Iter<'_, ValueId>>,
 	) -> Result<RecordKey, IrError> {
 		use RecordKey as Key;
 		let fixed = |key: RecordIdKey| {
@@ -2454,7 +2467,7 @@ impl<'a> Lowerer<'a> {
 	fn key_bound(
 		&mut self,
 		bound: &Bound<KeyBound>,
-		operands: &mut impl Iterator<Item = ValueId>,
+		operands: &mut std::iter::Copied<std::slice::Iter<'_, ValueId>>,
 	) -> Result<Bound<RecordKey>, IrError> {
 		let (key, wrap): (_, fn(RecordKey) -> Bound<RecordKey>) = match bound {
 			Bound::Unbounded => return Ok(Bound::Unbounded),
@@ -2562,7 +2575,7 @@ impl<'a> Lowerer<'a> {
 			(_, QueryOperand::Other) => (None, shown_expr(ir, right), false),
 		};
 		let left_shown = left_expr.or_else(|| shown_expr(ir, left));
-		let sql = match (left_shown, right_expr, subquery_root(ir, right)) {
+		let sql = match (left_shown, right_expr, subquery_root(self.units.as_deref(), ir, right)) {
 			// A statement operand is named by the operator at the top of the plan `EXPLAIN`
 			// renders for it, as an expression holding the statement shows it.
 			(Some(left), _, Some(root)) => format!(
@@ -3359,8 +3372,8 @@ fn shown_expr(ir: &Ir, value: ValueId) -> Option<LogicalExpr> {
 }
 
 /// The name of the operator at the top of the plan `EXPLAIN` renders for `value`, when a statement
-/// in value position computes it.
-fn subquery_root(ir: &Ir, value: ValueId) -> Option<&'static str> {
+/// in value position computes it and `units` serves `EXPLAIN`.
+fn subquery_root(units: Option<&dyn UnitSink>, ir: &Ir, value: ValueId) -> Option<String> {
 	let ValueDef::OpResult {
 		op,
 		..
@@ -3372,7 +3385,7 @@ fn subquery_root(ir: &Ir, value: ValueId) -> Option<&'static str> {
 	let OpKind::Expr(ExprOp::Subquery(_)) = &data.kind else {
 		return None;
 	};
-	super::explain::region_root_name(ir, *data.regions.first()?)
+	units?.region_root_name(ir, *data.regions.first()?)
 }
 
 /// Whether the plan resolves `value`, the query of a `MATCHES`: it reads neither `row`, a session
@@ -3476,7 +3489,7 @@ mod tests {
 	/// Lowers `v` of `b` into a program of one pipeline that ends the row.
 	fn lower_one(b: &Builder, v: ValueId) -> Result<(Operand, Program), IrError> {
 		let mut em = Emitter::new();
-		let operand = operand(&mut em, &b.ir, v)?;
+		let operand = operand(&mut em, &b.ir, builtin_registry(), v)?;
 		em.emit(Instr::EndRow);
 		let pipeline = em.finish_pipeline(Source::Once)?;
 		let program = em.finish_program(vec![pipeline], AccessMode::ReadOnly)?;
@@ -3700,7 +3713,8 @@ mod tests {
 	/// What lowering `v` of `b` needs of its program.
 	fn needs_of(b: &Builder, v: ValueId) -> Needs {
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		lowerer.value(v).expect("the value lowers");
 		lowerer.needs()
 	}
@@ -3767,10 +3781,12 @@ mod tests {
 		let mut b = Builder::new();
 		let mock = b.add(ExprOp::Mock(Box::new(crate::expr::Mock::Count("t".into(), 3))), &[]);
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, &b.ir).with_limits(LowerLimits {
-			generation_allocation_limit: 7,
-			..LowerLimits::default()
-		});
+		let mut lowerer =
+			Lowerer::new(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry())
+				.with_limits(LowerLimits {
+					generation_allocation_limit: 7,
+					..LowerLimits::default()
+				});
 		let operand = lowerer.value(mock).expect("the mock lowers");
 		em.emit(Instr::EndRow);
 		let pipeline = em.finish_pipeline(Source::Once).expect("the pipeline ends");
@@ -4076,7 +4092,8 @@ mod tests {
 		let (_, owner, outer) = if_reading_outer(&mut b);
 		let arm = b.ir.op(owner).expect("the IF").regions[0];
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		lowerer.region_value(arm).expect("the arm lowers");
 		assert!(!lowerer.is_lowered(outer), "the arm's scope ends with the arm");
 		em.emit(Instr::EndRow);
@@ -4171,7 +4188,8 @@ mod tests {
 		b.region(owner, RegionKind::Subquery, |b| b.literal(Value::from(1_i64)));
 		let region = b.ir.op(owner).expect("the subquery").regions[0];
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		assert!(matches!(
 			lowerer.lower_group(region, PoolBase::default(), 0),
 			Err(IrError::Invariant { .. })
@@ -4182,7 +4200,7 @@ mod tests {
 				owner,
 				PoolBase::default(),
 				0,
-				super::super::explain::Purpose::Described
+				super::super::explain_hook::Purpose::Described
 			),
 			Err(IrError::Invariant { .. })
 		));
@@ -4208,7 +4226,8 @@ mod tests {
 			b.create_kind(OpKind::Expr(ExprOp::Literal(Box::new(Value::from(1_i64)))), &[], 2);
 		let second = b.ir.op(two).expect("the literal").results[1];
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		assert!(matches!(lowerer.value(second), Err(IrError::Invariant { .. })));
 		// A result of a yield: its arity states none.
 		let mut b = Builder::new();
@@ -4216,7 +4235,8 @@ mod tests {
 		let yielded = b.create_kind(OpKind::Expr(ExprOp::Yield), &[one], 1);
 		let result = b.ir.op(yielded).expect("the yield").results[0];
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		assert!(matches!(lowerer.value(result), Err(IrError::Invariant { .. })));
 	}
 
@@ -4232,7 +4252,8 @@ mod tests {
 		let one = b.literal(Value::from(1_i64));
 		let yielded = b.terminate(ExprOp::Yield, &[one]);
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		lowerer.raise_terminator(raise).expect("the refusal lowers");
 		assert!(lowerer.take_claims().is_empty());
 		assert!(matches!(
@@ -4266,7 +4287,8 @@ mod tests {
 		let thrown = b.literal(Value::from("boom"));
 		let throw = b.terminate(ExprOp::Throw, &[thrown]);
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		lowerer.raise_terminator(throw).expect("the throw lowers");
 		let claims = lowerer.take_claims();
 		assert_eq!(claims.len(), 1, "the raise is the one instruction the throw emitted");
@@ -4344,7 +4366,11 @@ mod tests {
 			let mut b = Builder::new();
 			let value = b.add(op, &[]);
 			let mut em = Emitter::new();
-			let mut lowerer = Lowerer::for_fold(&mut em, &b.ir);
+			let mut lowerer = Lowerer::for_fold(
+				&mut em,
+				&b.ir,
+				crate::exec::ir::analysis::cx::builtin_registry(),
+			);
 			assert!(matches!(lowerer.value(value), Err(IrError::Invariant { .. })));
 		}
 		// A generated key draws entropy, whole or at a bound of a range.
@@ -4359,7 +4385,11 @@ mod tests {
 			let mut b = Builder::new();
 			let id = record_id(&mut b, shape, &[]);
 			let mut em = Emitter::new();
-			let mut lowerer = Lowerer::for_fold(&mut em, &b.ir);
+			let mut lowerer = Lowerer::for_fold(
+				&mut em,
+				&b.ir,
+				crate::exec::ir::analysis::cx::builtin_registry(),
+			);
 			assert!(matches!(lowerer.value(id), Err(IrError::Invariant { .. })));
 		}
 	}
@@ -4377,7 +4407,8 @@ mod tests {
 			&[one, two],
 		);
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::for_fold(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::for_fold(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		let Operand::Reg(dst) = lowerer.value(id).expect("a computed key folds") else {
 			panic!("a computed key is built in a register");
 		};
@@ -4397,7 +4428,8 @@ mod tests {
 			&[],
 		);
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		lowerer.bind_slot_value(bound, 3, Some("a".into()));
 		match lowerer.host_scalar(bound).expect("a named value is a scalar") {
 			HostScalar::Code(index) => assert_eq!(index, 0),
@@ -4432,7 +4464,8 @@ mod tests {
 			&[],
 		);
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		lowerer.bind_slot_value(element, 0, None);
 		assert!(matches!(
 			lowerer.host_scalar(element),
@@ -4453,7 +4486,8 @@ mod tests {
 			&[],
 		);
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		// The pipeline in flight holds code of its own, which the host pipeline leaves alone.
 		let held = lowerer.em.reg().expect("a register");
 		lowerer.emit(Instr::Load {
@@ -4621,7 +4655,8 @@ mod tests {
 		assert!(needs.keeps_row_order);
 		// The plan-time folder's eligibility check refuses the call's opaque body first.
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::for_fold(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::for_fold(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		assert!(matches!(lowerer.value(method), Err(IrError::Invariant { .. })));
 	}
 }

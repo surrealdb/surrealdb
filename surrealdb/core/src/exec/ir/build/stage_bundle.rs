@@ -35,6 +35,7 @@ use crate::exec::ir::logical::seam::{BindCx, invariant};
 use crate::exec::ir::logical::stages::{TableEvents, events_over};
 use crate::exec::ir::op_kind::OpKind;
 use crate::exec::ir::unit::UnitKind;
+use crate::exec::surface::Surface;
 
 /// Binds the container of the unit `input` names, which holds no statement.
 ///
@@ -42,6 +43,7 @@ use crate::exec::ir::unit::UnitKind;
 pub(super) fn bind_catalog_unit(
 	input: &RequestInput<'_>,
 	effects: &EffectCx<'_>,
+	surface: Option<&'static Surface>,
 ) -> Result<Ir, IrError> {
 	let UnitKind::Events {
 		table,
@@ -64,7 +66,7 @@ pub(super) fn bind_catalog_unit(
 			});
 		}
 	};
-	bind_events(input, effects, &events, *action)
+	bind_events(input, effects, &events, *action, surface)
 }
 
 /// The container of the events `events` of a table for `action`.
@@ -73,6 +75,7 @@ fn bind_events(
 	effects: &EffectCx<'_>,
 	events: &Arc<[EventDefinition]>,
 	action: Action,
+	surface: Option<&'static Surface>,
 ) -> Result<Ir, IrError> {
 	let TableEvents {
 		attrs,
@@ -83,6 +86,7 @@ fn bind_events(
 	let mut facts = FactCache::new();
 	{
 		let mut cx = BindCx::new(&mut ir, &mut facts, *effects)?;
+		cx.set_surface(surface);
 		cx.set_statement(input.unit.position())?;
 		cx.begin_statement();
 		let op = cx.emit(OpKind::Logical(LogOp::Events(Box::new(attrs))), &[], &[])?;
@@ -158,7 +162,7 @@ mod tests {
 			serves_late: false,
 			late_bound: false,
 		};
-		bind_catalog_unit(&input, &effects)
+		bind_catalog_unit(&input, &effects, Some(&crate::exec::surface::FULL))
 	}
 
 	fn found(events: Vec<EventDefinition>) -> CatalogAnswer<Arc<[EventDefinition]>> {

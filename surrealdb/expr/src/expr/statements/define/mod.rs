@@ -43,7 +43,7 @@ pub enum DefineKind {
 	IfNotExists,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Debug, Eq, PartialEq, Hash)]
 pub enum DefineStatement {
 	Namespace(DefineNamespaceStatement),
 	Database(DefineDatabaseStatement),
@@ -64,6 +64,32 @@ pub enum DefineStatement {
 	Bucket(DefineBucketStatement),
 	Sequence(DefineSequenceStatement),
 	Module(DefineModuleStatement),
+}
+
+/// Written out and kept out of line so one copy serves every crate that clones a `DefineStatement`.
+impl Clone for DefineStatement {
+	#[inline(never)]
+	fn clone(&self) -> Self {
+		match self {
+			Self::Namespace(v) => Self::Namespace(v.clone()),
+			Self::Database(v) => Self::Database(v.clone()),
+			Self::Function(v) => Self::Function(v.clone()),
+			Self::Analyzer(v) => Self::Analyzer(v.clone()),
+			Self::Param(v) => Self::Param(v.clone()),
+			Self::Table(v) => Self::Table(v.clone()),
+			Self::Event(v) => Self::Event(v.clone()),
+			Self::Field(v) => Self::Field(v.clone()),
+			Self::Index(v) => Self::Index(v.clone()),
+			Self::User(v) => Self::User(v.clone()),
+			Self::Model(v) => Self::Model(v.clone()),
+			Self::Access(v) => Self::Access(v.clone()),
+			Self::Config(v) => Self::Config(v.clone()),
+			Self::Api(v) => Self::Api(v.clone()),
+			Self::Bucket(v) => Self::Bucket(v.clone()),
+			Self::Sequence(v) => Self::Sequence(v.clone()),
+			Self::Module(v) => Self::Module(v.clone()),
+		}
+	}
 }
 
 impl ToSql for DefineStatement {

@@ -103,11 +103,19 @@ impl NameSet {
 /// The names `stmt` reaches directly: tables in sources and targets (`Expr::Table`, record-id
 /// tables, graph lookup subjects), `fn::` calls, and the free `$` names of its text.
 pub(crate) fn collect(stmt: &TopLevelExpr) -> NameSet {
-	collect_with(stmt, &SlotTable::of(stmt))
+	collect_with(stmt, &SlotTable::of(stmt)).0
 }
 
-/// [`collect`], reading the free names from `slots`, the slot table of `stmt`.
-pub(crate) fn collect_with(stmt: &TopLevelExpr, slots: &SlotTable) -> NameSet {
+/// [`collect`], reading the free names from `slots`, the slot table of `stmt`, together with the
+/// tables the `DELETE` statements of `stmt` name directly: the tables whose records a delete
+/// purges, and so the tables whose references the delete repairs.
+///
+/// Like the names, the deleted tables need not be complete: a table missed is asked for, and
+/// loaded, through the memo's pending set. Deletes are recorded only for a `TopLevelExpr::Expr`.
+pub(crate) fn collect_with(
+	stmt: &TopLevelExpr,
+	slots: &SlotTable,
+) -> (NameSet, BTreeSet<TableName>) {
 	let mut collector = Collector::default();
 	let _ = match stmt {
 		TopLevelExpr::Begin | TopLevelExpr::Cancel | TopLevelExpr::Commit => Ok(()),
@@ -117,8 +125,12 @@ pub(crate) fn collect_with(stmt: &TopLevelExpr, slots: &SlotTable) -> NameSet {
 		TopLevelExpr::Option(option) => collector.visit_option(option),
 		TopLevelExpr::Use(use_) => collector.visit_use(use_),
 		TopLevelExpr::Show(show) => collector.visit_show(show),
-		TopLevelExpr::Expr(expr) => collector.visit_expr(expr),
+		TopLevelExpr::Expr(expr) => {
+			collector.deleted = Some(BTreeSet::new());
+			collector.visit_expr(expr)
+		}
 	};
+	let deleted = collector.deleted.unwrap_or_default();
 	let mut names = collector.names;
 	for occurrence in slots.occurrences() {
 		let name = occurrence.name.as_str();
@@ -128,52 +140,53 @@ pub(crate) fn collect_with(stmt: &TopLevelExpr, slots: &SlotTable) -> NameSet {
 			names.params.insert(name.to_owned());
 		}
 	}
-	names
+	(names, deleted)
 }
 
-/// The tables the `DELETE` statements of `stmt` name directly: the tables whose records a delete
-/// purges, and so the tables whose references the delete repairs.
-///
-/// Like [`collect`] it need not be complete: a table it misses is asked for, and loaded, through
-/// the memo's pending set.
-pub(crate) fn deleted_tables(stmt: &TopLevelExpr) -> BTreeSet<TableName> {
-	let mut collector = DeleteCollector::default();
-	if let TopLevelExpr::Expr(expr) = stmt {
-		let _ = collector.visit_expr(expr);
-	}
-	collector.tables
-}
-
-/// The visitor behind [`deleted_tables`].
+/// The visitor behind [`collect_with`], the definition walks and the parameter names of a
+/// definition.
 #[derive(Default)]
-struct DeleteCollector {
-	tables: BTreeSet<TableName>,
+pub(crate) struct Collector {
+	names: NameSet,
+	/// The tables the `DELETE` statements visited name directly. `None` records nothing.
+	deleted: Option<BTreeSet<TableName>>,
+	/// Every `$` name visited, at any depth. `None` records nothing.
+	params: Option<BTreeSet<String>>,
 }
 
-impl Visitor for DeleteCollector {
+impl Collector {
+	/// A collector of the `$` names that occur, added to `also`.
+	pub(crate) fn params(also: BTreeSet<String>) -> Self {
+		Self {
+			params: Some(also),
+			..Self::default()
+		}
+	}
+
+	/// The `$` names gathered by a collector made with [`Collector::params`].
+	pub(crate) fn into_params(self) -> BTreeSet<String> {
+		self.params.unwrap_or_default()
+	}
+}
+
+impl Visitor for Collector {
 	type Error = Infallible;
 
 	fn visit_delete(
 		&mut self,
 		delete: &crate::expr::statements::DeleteStatement,
 	) -> Result<(), Self::Error> {
-		let mut named = Collector::default();
-		for what in &delete.what {
-			let _ = named.visit_expr(what);
+		if self.deleted.is_some() {
+			let mut named = Collector::default();
+			for what in &delete.what {
+				let _ = named.visit_expr(what);
+			}
+			if let Some(deleted) = &mut self.deleted {
+				deleted.extend(named.names.tables);
+			}
 		}
-		self.tables.extend(named.names.tables);
 		delete.visit(self)
 	}
-}
-
-/// The visitor behind [`collect`] and the definition walks.
-#[derive(Default)]
-struct Collector {
-	names: NameSet,
-}
-
-impl Visitor for Collector {
-	type Error = Infallible;
 
 	fn visit_expr(&mut self, expr: &Expr) -> Result<(), Self::Error> {
 		if let Expr::Table(table) = expr {
@@ -208,5 +221,12 @@ impl Visitor for Collector {
 			self.names.functions.insert(name.strip_prefix("fn::").unwrap_or(name).to_owned());
 		}
 		function.visit(self)
+	}
+
+	fn visit_param(&mut self, param: &crate::expr::Param) -> Result<(), Self::Error> {
+		if let Some(params) = &mut self.params {
+			params.insert(param.as_str().to_owned());
+		}
+		Ok(())
 	}
 }

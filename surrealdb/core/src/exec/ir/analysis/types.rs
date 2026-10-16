@@ -17,6 +17,7 @@
 use smallvec::SmallVec;
 use surrealdb_strand::{Strand, TableName};
 
+#[cfg(test)]
 use super::cx::default_cx;
 use super::multiplicity::{self, MAX_DEPTH};
 use crate::exec::ir::core::facts::FactCache;
@@ -45,6 +46,7 @@ pub(crate) struct GenerationKinds {
 }
 
 /// What is known about the type of `value`, under the default context.
+#[cfg(test)]
 pub(crate) fn classify(ir: &Ir, facts: &mut FactCache, value: ValueId) -> TypeKnowledge {
 	classify_with(ir, facts, &default_cx(ir), value)
 }
@@ -270,7 +272,7 @@ pub(crate) fn subject_loop(ir: &Ir, write_op: OpId) -> Option<OpId> {
 /// The values a write loop writes to: the operands of the array that gathers its targets, or the
 /// source value itself when it is not gathered. A source op that reads the record ids or key
 /// ranges its operand holds (`SourceRefShape::RecordId`) stands for that operand.
-pub(crate) fn loop_targets(ir: &Ir, write_loop: OpId) -> SmallVec<[ValueId; 1]> {
+pub(crate) fn loop_targets(ir: &Ir, write_loop: OpId) -> SmallVec<[ValueId; 2]> {
 	let mut out = SmallVec::new();
 	let Some(mut source) = ir.op(write_loop).and_then(|data| data.operands.first().copied()) else {
 		return out;

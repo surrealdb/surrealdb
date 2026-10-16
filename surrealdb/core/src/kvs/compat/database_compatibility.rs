@@ -32,9 +32,12 @@ const DATABASE_REVISION: &[u8] = &[1, 1, 1, 4, 116, 101, 115, 116, 0, 0, 0];
 
 /// The level the bytecode VM's codec reads from `bytes`.
 fn vm_level(bytes: &[u8]) -> Value {
-	let Value::Object(fields) =
-		crate::exec::vm::codec::decode("DatabaseDefinition", bytes).unwrap()
-	else {
+	let Value::Object(fields) = crate::exec::vm::codec::decode(
+		&crate::exec::vm::codec::FULL_CODEC,
+		"DatabaseDefinition",
+		bytes,
+	)
+	.unwrap() else {
 		panic!("a database decodes to an object");
 	};
 	fields.get("compatibility").cloned().unwrap_or(Value::None)

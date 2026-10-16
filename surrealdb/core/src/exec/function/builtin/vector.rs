@@ -2,13 +2,13 @@
 
 use anyhow::Result;
 
+use crate::define_pure_function;
 use crate::exec::function::index::{IndexContext, IndexContextKind, IndexFunction};
-use crate::exec::function::{FunctionRegistry, Signature};
+use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
 use crate::exec::ir::iface::Fallibility;
 use crate::exec::{ContextLevel, EvalContext};
 use crate::expr::Kind;
 use crate::val::Value;
-use crate::{define_pure_function, register_functions};
 
 // Single vector argument functions
 define_pure_function!(VectorMagnitude, "vector::magnitude", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (vector: Any) -> Float, crate::fnc::vector::magnitude);
@@ -138,33 +138,33 @@ fn extract_record_id(ctx: &EvalContext<'_>) -> Result<crate::val::RecordId> {
 	}
 }
 
-pub fn register(registry: &mut FunctionRegistry) {
-	register_functions!(
-		registry,
-		VectorAdd,
-		VectorAngle,
-		VectorCross,
-		VectorDistanceChebyshev,
-		VectorDistanceEuclidean,
-		VectorDistanceHamming,
-		VectorDistanceMahalanobis,
-		VectorDistanceManhattan,
-		VectorDistanceMinkowski,
-		VectorDivide,
-		VectorDot,
-		VectorMagnitude,
-		VectorMultiply,
-		VectorNormalize,
-		VectorProject,
-		VectorScale,
-		VectorSimilarityCosine,
-		VectorSimilarityJaccard,
-		VectorSimilarityPearson,
-		VectorSimilaritySpearman,
-		VectorSubtract,
-		VectorSum,
-	);
+/// The `vector::*` scalar builtins.
+pub(super) const SCALARS: &[&dyn ScalarFunction] = &[
+	&VectorAdd,
+	&VectorAngle,
+	&VectorCross,
+	&VectorDistanceChebyshev,
+	&VectorDistanceEuclidean,
+	&VectorDistanceHamming,
+	&VectorDistanceMahalanobis,
+	&VectorDistanceManhattan,
+	&VectorDistanceMinkowski,
+	&VectorDivide,
+	&VectorDot,
+	&VectorMagnitude,
+	&VectorMultiply,
+	&VectorNormalize,
+	&VectorProject,
+	&VectorScale,
+	&VectorSimilarityCosine,
+	&VectorSimilarityJaccard,
+	&VectorSimilarityPearson,
+	&VectorSimilaritySpearman,
+	&VectorSubtract,
+	&VectorSum,
+];
 
+pub fn register(registry: &mut FunctionRegistry) {
 	// Index function (reads distance from KNN context)
 	registry.register_index_function(VectorDistanceKnn);
 }

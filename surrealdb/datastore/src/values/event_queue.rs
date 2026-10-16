@@ -57,3 +57,72 @@ pub struct AsyncEventRecord {
 }
 
 impl_kv_value_embedding!(AsyncEventRecord);
+
+#[cfg(test)]
+mod tests {
+	use surrealdb_catalog::auth::AuthLimit;
+	use surrealdb_catalog::{EventKind, ExprText};
+	use surrealdb_iam::Role;
+
+	use super::*;
+
+	fn record() -> AsyncEventRecord {
+		AsyncEventRecord {
+			attempt: 2,
+			event_depth: 1,
+			rid: Some(Arc::new(RecordId::new("t".into(), 7i64))),
+			cursor_record: Arc::new(Record {
+				metadata: None,
+				data: Value::Bool(true),
+			}),
+			fields_computed: true,
+			ns: Arc::from("ns"),
+			db: Arc::from("db"),
+			perms: true,
+			auth_enabled: false,
+			values: HashMap::from([(Strand::new("k"), Arc::new(Value::Bool(false)))]),
+			auth_with_limit: Arc::new(Auth::for_root(Role::Viewer)),
+			event_definition: EmbeddedEntry::from(StoredEventDefinition {
+				name: Strand::new("ev"),
+				target_table: Strand::new("t"),
+				when: ExprText::from_raw("$event != NONE"),
+				then: vec![ExprText::from_raw("$value.a")],
+				comment: None,
+				auth_limit: AuthLimit::new_no_limit(),
+				kind: EventKind::Async {
+					retry: 3,
+					max_depth: 4,
+				},
+			}),
+		}
+	}
+
+	fn hex(bytes: &[u8]) -> String {
+		bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+	}
+
+	/// The payload's bytes are part of the keyspace: a queued record written by one build is
+	/// drained by another.
+	#[test]
+	fn async_event_record_bytes_are_frozen() {
+		const FROZEN: &str = "0102010101017401000e020c00000008000000090000000002220101026e73026462010001016b0222000101010b73797374656d5f61757468051401010101000302657601740e246576656e7420213d204e4f4e4501082476616c75652e610001010101054f776e657201010304";
+		let rec = record();
+		let bytes = revision::to_vec(&rec).unwrap();
+		assert_eq!(hex(&bytes), FROZEN);
+
+		let back: AsyncEventRecord = revision::from_slice(&bytes).unwrap();
+		assert_eq!(back.attempt, rec.attempt);
+		assert_eq!(back.event_depth, rec.event_depth);
+		assert_eq!(back.rid, rec.rid);
+		assert_eq!(back.cursor_record, rec.cursor_record);
+		assert_eq!(back.fields_computed, rec.fields_computed);
+		assert_eq!(back.ns, rec.ns);
+		assert_eq!(back.db, rec.db);
+		assert_eq!(back.perms, rec.perms);
+		assert_eq!(back.auth_enabled, rec.auth_enabled);
+		assert_eq!(back.values, rec.values);
+		assert_eq!(back.auth_with_limit, rec.auth_with_limit);
+		assert_eq!(back.event_definition, rec.event_definition);
+		assert_eq!(revision::to_vec(&back).unwrap(), bytes);
+	}
+}

@@ -130,6 +130,17 @@ where
 	}
 }
 
+/// A catalog type held in a `revision` container through [`EmbeddedEntry`]: reads the type's
+/// `revision` body once its `u16` revision header has been read.
+///
+/// The body is read from the caller's own reader, so only the header is ever read through an
+/// adapter.
+pub trait EmbeddedRevision: StoredType + DeserializeRevisioned + Sized {
+	/// Reads the body that follows the `u16` header `revision`, exactly as
+	/// [`DeserializeRevisioned::deserialize_revisioned`] does after the header.
+	fn deserialize_body<R: Read>(reader: &mut R, revision: u16) -> Result<Self, RevisionError>;
+}
+
 impl<T: Revisioned> Revisioned for EmbeddedEntry<T> {
 	fn revision() -> u16 {
 		T::revision()
@@ -145,7 +156,7 @@ impl<T: StoredType + SerializeRevisioned> SerializeRevisioned for EmbeddedEntry<
 	}
 }
 
-impl<T: StoredType + DeserializeRevisioned> DeserializeRevisioned for EmbeddedEntry<T> {
+impl<T: EmbeddedRevision> DeserializeRevisioned for EmbeddedEntry<T> {
 	fn deserialize_revisioned<R: Read>(reader: &mut R) -> Result<Self, RevisionError> {
 		let mut first = [0u8; 1];
 		reader.read_exact(&mut first).map_err(RevisionError::Io)?;
@@ -156,8 +167,8 @@ impl<T: StoredType + DeserializeRevisioned> DeserializeRevisioned for EmbeddedEn
 				decode_entry::<T>(&entry).map_err(|error| RevisionError::Io(error.into_io()))?;
 			Ok(Self(Box::new(value)))
 		} else {
-			let mut chained = first.as_slice().chain(reader);
-			T::deserialize_revisioned(&mut chained).map(|value| Self(Box::new(value)))
+			let revision = u16::deserialize_revisioned(&mut first.as_slice().chain(&mut *reader))?;
+			T::deserialize_body(reader, revision).map(|value| Self(Box::new(value)))
 		}
 	}
 }
@@ -185,7 +196,7 @@ impl<T: StoredType + SkipRevisioned> SkipRevisioned for EmbeddedEntry<T> {
 	}
 }
 
-impl<T: StoredType + DeserializeRevisioned> SkipCheckRevisioned for EmbeddedEntry<T> {
+impl<T: EmbeddedRevision> SkipCheckRevisioned for EmbeddedEntry<T> {
 	fn skip_check_revisioned<R: Read>(reader: &mut R) -> Result<(), RevisionError> {
 		Self::deserialize_revisioned(reader).map(drop)
 	}
@@ -199,5 +210,114 @@ impl<T: Revisioned> WalkRevisioned for EmbeddedEntry<T> {
 		reader: &'r mut R,
 	) -> Result<Self::Walker<'r, R>, RevisionError> {
 		Ok(LeafWalker::new(reader))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::io::Cursor;
+
+	use revision::{DeserializeRevisioned, SerializeRevisioned};
+
+	use super::*;
+	use crate::catalog::auth::AuthLimit;
+	use crate::catalog::{
+		DatabaseId, EventKind, ExprText, NamespaceId, StoredEventDefinition, StoredTableDefinition,
+		TableId,
+	};
+
+	const TAIL: [u8; 2] = [0xAA, 0xBB];
+
+	fn table() -> StoredTableDefinition {
+		StoredTableDefinition::new(NamespaceId(1), DatabaseId(2), TableId(3), "t".into())
+	}
+
+	fn event() -> StoredEventDefinition {
+		StoredEventDefinition {
+			name: "ev".into(),
+			target_table: "t".into(),
+			when: ExprText::from_raw("$event != NONE"),
+			then: vec![ExprText::from_raw("$value.a"), ExprText::from_raw("$value.b")],
+			comment: Some("c".into()),
+			auth_limit: AuthLimit::new_no_limit(),
+			kind: EventKind::Sync,
+		}
+	}
+
+	fn revision_form<T>(value: &T) -> Vec<u8>
+	where
+		T: StoredType + SerializeRevisioned + Clone,
+	{
+		let mut bytes = Vec::new();
+		EmbeddedEntry::from(value.clone()).serialize_revisioned(&mut bytes).unwrap();
+		bytes
+	}
+
+	fn framed_form<T: StoredType>(value: &T) -> Vec<u8> {
+		let entry = encode_stored(value, &EncodeContext::CURRENT).unwrap();
+		let mut bytes = vec![CATALOG_MARKER];
+		entry.bytes.len().serialize_revisioned(&mut bytes).unwrap();
+		bytes.extend_from_slice(&entry.bytes);
+		bytes
+	}
+
+	/// The decode leaves a slice reader and a cursor exactly after the value.
+	fn assert_leaves_reader_after_value<T>(value: &T, mut bytes: Vec<u8>)
+	where
+		T: StoredType + DeserializeRevisioned + PartialEq + std::fmt::Debug,
+		EmbeddedEntry<T>: DeserializeRevisioned,
+	{
+		let value_len = bytes.len();
+		bytes.extend_from_slice(&TAIL);
+
+		let mut slice: &[u8] = &bytes;
+		let decoded =
+			<EmbeddedEntry<T> as DeserializeRevisioned>::deserialize_revisioned(&mut slice)
+				.unwrap();
+		assert_eq!(&*decoded, value);
+		assert_eq!(slice, TAIL);
+
+		let mut cursor = Cursor::new(bytes.as_slice());
+		let decoded =
+			<EmbeddedEntry<T> as DeserializeRevisioned>::deserialize_revisioned(&mut cursor)
+				.unwrap();
+		assert_eq!(&*decoded, value);
+		assert_eq!(cursor.position() as usize, value_len);
+	}
+
+	#[test]
+	fn revision_form_leaves_reader_after_value() {
+		let def = table();
+		assert_leaves_reader_after_value(&def, revision_form(&def));
+		let def = event();
+		assert_leaves_reader_after_value(&def, revision_form(&def));
+	}
+
+	#[test]
+	fn framed_form_leaves_reader_after_value() {
+		let def = table();
+		assert_leaves_reader_after_value(&def, framed_form(&def));
+		let def = event();
+		assert_leaves_reader_after_value(&def, framed_form(&def));
+	}
+
+	#[test]
+	fn truncated_revision_form_is_refused() {
+		let mut bytes = revision_form(&table());
+		bytes.pop();
+		assert!(
+			<EmbeddedEntry<StoredTableDefinition> as DeserializeRevisioned>::deserialize_revisioned(
+				&mut bytes.as_slice()
+			)
+			.is_err()
+		);
+		let mut bytes = revision_form(&event());
+		bytes.pop();
+		assert!(
+			<EmbeddedEntry<StoredEventDefinition> as DeserializeRevisioned>::deserialize_revisioned(
+				&mut bytes.as_slice()
+			)
+			.is_err()
+		);
 	}
 }

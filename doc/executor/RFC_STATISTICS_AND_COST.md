@@ -19,9 +19,9 @@ Code paths are relative to `surrealdb/core/src/` unless another crate is named.
 
 ## 1. What the planner decides today
 
-The logical optimiser makes no choice with a cost: every rule is a strict
+The logical optimiser makes no choice with a cost: every rewrite is a strict
 improvement, and which access path, join order or join algorithm to use is
-left to the physical planner (`exec/logical/rules/mod.rs`, `exec/logical/optimise.rs`).
+left to the physical planner (`exec/ir/passes`).
 The physical planner makes those choices from the plan's shape and the
 catalog alone:
 

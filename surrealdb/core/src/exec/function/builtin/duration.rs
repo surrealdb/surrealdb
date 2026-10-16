@@ -1,7 +1,7 @@
 //! Duration functions
 
-use crate::exec::function::FunctionRegistry;
-use crate::{define_pure_function, register_functions};
+use crate::define_pure_function;
+use crate::exec::function::ScalarFunction;
 
 // Duration component extractors
 define_pure_function!(DurationDays, "duration::days", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Duration) -> Int, crate::fnc::duration::days);
@@ -24,25 +24,23 @@ define_pure_function!(DurationFromNanos, "duration::from_nanos", effects: Effect
 define_pure_function!(DurationFromSecs, "duration::from_secs", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Int) -> Duration, crate::fnc::duration::from::secs);
 define_pure_function!(DurationFromWeeks, "duration::from_weeks", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Int) -> Duration, crate::fnc::duration::from::weeks);
 
-pub fn register(registry: &mut FunctionRegistry) {
-	register_functions!(
-		registry,
-		DurationDays,
-		DurationFromDays,
-		DurationFromHours,
-		DurationFromMicros,
-		DurationFromMillis,
-		DurationFromMins,
-		DurationFromNanos,
-		DurationFromSecs,
-		DurationFromWeeks,
-		DurationHours,
-		DurationMicros,
-		DurationMillis,
-		DurationMins,
-		DurationNanos,
-		DurationSecs,
-		DurationWeeks,
-		DurationYears,
-	);
-}
+/// The `duration::*` scalar builtins.
+pub(super) const SCALARS: &[&dyn ScalarFunction] = &[
+	&DurationDays,
+	&DurationFromDays,
+	&DurationFromHours,
+	&DurationFromMicros,
+	&DurationFromMillis,
+	&DurationFromMins,
+	&DurationFromNanos,
+	&DurationFromSecs,
+	&DurationFromWeeks,
+	&DurationHours,
+	&DurationMicros,
+	&DurationMillis,
+	&DurationMins,
+	&DurationNanos,
+	&DurationSecs,
+	&DurationWeeks,
+	&DurationYears,
+];

@@ -10,7 +10,7 @@
 //!   `fnc::synchronous` / `fnc::asynchronous` must be resolvable in the registry (as a scalar,
 //!   aggregate, projection or index function).
 
-use std::sync::{Arc, LazyLock};
+use std::sync::LazyLock;
 
 use regex::Regex;
 
@@ -64,7 +64,7 @@ static ARITY_MESSAGE: LazyLock<Regex> = LazyLock::new(|| {
 	.expect("arity-message regex is valid")
 });
 
-type RegistryEntries<'a> = Vec<(&'static str, Signature, Option<&'a Arc<dyn ScalarFunction>>)>;
+type RegistryEntries = Vec<(&'static str, Signature, Option<&'static dyn ScalarFunction>)>;
 
 fn classify(res: anyhow::Result<Value>) -> Probe {
 	let err = match res {
@@ -165,7 +165,7 @@ async fn check_function(
 	opt: &Options,
 	name: &str,
 	sig: &Signature,
-	pure: Option<&Arc<dyn ScalarFunction>>,
+	pure: Option<&'static dyn ScalarFunction>,
 	problems: &mut Vec<String>,
 ) {
 	let (lower, upper) = sig.arity();

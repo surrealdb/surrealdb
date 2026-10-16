@@ -291,6 +291,13 @@ impl<T> SkipRevisioned for SurqlText<T> {
 	fn skip_revisioned<R: std::io::Read>(reader: &mut R) -> Result<(), revision::Error> {
 		<String as SkipRevisioned>::skip_revisioned(reader)
 	}
+
+	#[inline]
+	fn skip_revisioned_slice(
+		reader: &mut revision::SliceReader<'_>,
+	) -> Result<(), revision::Error> {
+		<String as SkipRevisioned>::skip_revisioned_slice(reader)
+	}
 }
 
 impl<T> WalkRevisioned for SurqlText<T> {

@@ -31,7 +31,7 @@ value = '''
         Sequence [ctx: Rt] [statements: 2]
             Let [ctx: Rt] [name: $x]
                 ExprPlan [ctx: Rt] [expr: 1]
-            ExprPlan [ctx: Rt] [expr: 2]
+            ExprPlan [ctx: Rt] [expr: 1 + 1]
 ''''
 
 [[test.results]]
@@ -41,7 +41,7 @@ value = '''
         Sequence [ctx: Rt] [statements: 2]
             Let [ctx: Rt] [name: $x]
                 ExprPlan [ctx: Rt] [expr: 1]
-            ExprPlan [ctx: Rt] [expr: 2]
+            ExprPlan [ctx: Rt] [expr: 1 + 1]
         ExprPlan [ctx: Rt] [expr: $x]
 ''''
 

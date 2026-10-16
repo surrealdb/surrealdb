@@ -8,7 +8,7 @@
 //! holding it.
 //!
 //! A catalog type is coded by its derive. Its [`TypeDesc`] names the type's
-//! `CatalogVTable` (`catalog::stored::CATALOG_TYPES`), whose functions read an
+//! `CatalogVTable` (a row of the [`Codec`]'s catalog table), whose functions read an
 //! entry in either grammar and write one at the feature level of the store
 //! being written ([`encode_id_at`]), so the bytes the VM writes are the bytes
 //! the Rust type writes, and depend on that level. A catalog value held inside
@@ -45,7 +45,7 @@ mod wire;
 use anyhow::{Result, bail};
 use desc::{Body, TypeDesc};
 use surrealdb_kvs::{EncodeContext, Encoded};
-pub(crate) use types::TypeId;
+pub(crate) use types::{Codec, EDGE_CODEC, FULL_CODEC, TypeId};
 
 use crate::catalog::{Metadata, Record, RecordFormat, RecordLayoutError, StoredRecord};
 use crate::val::{Object, Value};
@@ -58,40 +58,40 @@ pub(crate) const UTF8: &str = "Utf8";
 /// metadata needs it.
 const RECORD: &str = "Record";
 
-/// Decode `bytes`, a whole encoded value of type `name`.
-pub(crate) fn decode(name: &str, bytes: &[u8]) -> Result<Value> {
+/// Decode `bytes`, a whole encoded value of type `name`, through `codec`.
+pub(crate) fn decode(codec: &'static Codec, name: &str, bytes: &[u8]) -> Result<Value> {
 	if name == UTF8 {
 		return Ok(Value::String(std::str::from_utf8(bytes)?.into()));
 	}
 	if name == RECORD
 		&& let Some(stored) = StoredRecord::parse(bytes)?
 	{
-		return envelope_value(&stored);
+		return envelope_value(codec, &stored);
 	}
-	decode_desc(types::lookup(name)?, bytes)
+	decode_desc(codec, codec.lookup(name)?, bytes)
 }
 
 /// [`decode`] for the type `ty` names.
-pub(crate) fn decode_id(ty: TypeId, bytes: &[u8]) -> Result<Value> {
-	let Some(desc) = ty.desc()? else {
+pub(crate) fn decode_id(codec: &'static Codec, ty: TypeId, bytes: &[u8]) -> Result<Value> {
+	let Some(desc) = ty.desc(codec)? else {
 		return Ok(Value::String(std::str::from_utf8(bytes)?.into()));
 	};
 	if desc.name == RECORD
 		&& let Some(stored) = StoredRecord::parse(bytes)?
 	{
-		return envelope_value(&stored);
+		return envelope_value(codec, &stored);
 	}
-	decode_desc(desc, bytes)
+	decode_desc(codec, desc, bytes)
 }
 
 /// Decode `bytes`, a whole encoded value of the type `desc` describes. A
 /// catalog entry is read in either grammar, as the value its derive converts
 /// it to; any other value must be consumed whole.
-fn decode_desc(desc: &TypeDesc, bytes: &[u8]) -> Result<Value> {
+fn decode_desc(codec: &'static Codec, desc: &TypeDesc, bytes: &[u8]) -> Result<Value> {
 	if let Body::Catalog(vtable) = &desc.body {
 		return (vtable.decode)(bytes);
 	}
-	let mut r = wire::Reader::new(bytes);
+	let mut r = wire::Reader::in_codec(bytes, codec);
 	let value = desc::decode_named(desc, &mut r)?;
 	if !r.is_empty() {
 		bail!("{} trailing bytes after a {}", r.remaining(), desc.name);
@@ -102,9 +102,9 @@ fn decode_desc(desc: &TypeDesc, bytes: &[u8]) -> Result<Value> {
 /// Whether `ty` names a catalog type, whose bytes depend on the feature level
 /// they are written at: a program writes one through
 /// `Transaction::put_levelled_raw` with [`encode_id_at`] as its encoder.
-pub(crate) fn is_catalog(ty: TypeId) -> bool {
+pub(crate) fn is_catalog(codec: &Codec, ty: TypeId) -> bool {
 	matches!(
-		ty.desc(),
+		ty.desc(codec),
 		Ok(Some(TypeDesc {
 			body: Body::Catalog(_),
 			..
@@ -116,8 +116,13 @@ pub(crate) fn is_catalog(ty: TypeId) -> bool {
 /// `ctx` gives. Only a catalog type's bytes depend on the context; the floor
 /// is the release its bytes need to be read, which is `None` for a type with
 /// no release floor.
-pub(crate) fn encode_id_at(ty: TypeId, value: &Value, ctx: &EncodeContext<'_>) -> Result<Encoded> {
-	let Some(desc) = ty.desc()? else {
+pub(crate) fn encode_id_at(
+	codec: &'static Codec,
+	ty: TypeId,
+	value: &Value,
+	ctx: &EncodeContext<'_>,
+) -> Result<Encoded> {
+	let Some(desc) = ty.desc(codec)? else {
 		let Value::String(s) = value else {
 			bail!("a {UTF8} value that is not a string: {value:?}");
 		};
@@ -126,39 +131,45 @@ pub(crate) fn encode_id_at(ty: TypeId, value: &Value, ctx: &EncodeContext<'_>) -
 			floor: None,
 		});
 	};
-	encode_desc(desc, value, ctx)
+	encode_desc(codec, desc, value, ctx)
 }
 
 /// [`encode_id_at`] for a store at the legacy feature level: the bytes of a
 /// type whose encoding does not depend on the level.
-pub(crate) fn encode_id(ty: TypeId, value: &Value) -> Result<Vec<u8>> {
-	encode_id_at(ty, value, &EncodeContext::LEGACY).map(|encoded| encoded.bytes)
+pub(crate) fn encode_id(codec: &'static Codec, ty: TypeId, value: &Value) -> Result<Vec<u8>> {
+	encode_id_at(codec, ty, value, &EncodeContext::LEGACY).map(|encoded| encoded.bytes)
 }
 
 /// Encode `value` as type `name`, at its current revision. A catalog type is
 /// written for a store at the legacy feature level, in `revision`.
-pub(crate) fn encode(name: &str, value: &Value) -> Result<Vec<u8>> {
+pub(crate) fn encode(codec: &'static Codec, name: &str, value: &Value) -> Result<Vec<u8>> {
 	if name == UTF8 {
 		let Value::String(s) = value else {
 			bail!("a {UTF8} value that is not a string: {value:?}");
 		};
 		return Ok(s.as_bytes().to_vec());
 	}
-	encode_desc(types::lookup(name)?, value, &EncodeContext::LEGACY).map(|encoded| encoded.bytes)
+	encode_desc(codec, codec.lookup(name)?, value, &EncodeContext::LEGACY)
+		.map(|encoded| encoded.bytes)
 }
 
 /// Encode `value` as the type `desc` describes.
-fn encode_desc(desc: &TypeDesc, value: &Value, ctx: &EncodeContext<'_>) -> Result<Encoded> {
+fn encode_desc(
+	codec: &'static Codec,
+	desc: &TypeDesc,
+	value: &Value,
+	ctx: &EncodeContext<'_>,
+) -> Result<Encoded> {
 	if desc.name == RECORD {
 		return Ok(Encoded {
-			bytes: encode_record_value(value)?,
+			bytes: encode_record_value(codec, value)?,
 			floor: None,
 		});
 	}
 	if let Body::Catalog(vtable) = &desc.body {
 		return (vtable.encode_at)(value, ctx);
 	}
-	let mut w = wire::Writer::scratch();
+	let mut w = wire::Writer::scratch().in_codec(codec);
 	desc::encode_named(desc, value, &mut w)?;
 	Ok(Encoded {
 		bytes: w.finish(),
@@ -170,7 +181,7 @@ fn encode_desc(desc: &TypeDesc, value: &Value, ctx: &EncodeContext<'_>) -> Resul
 /// layouts, so a record of a generation other than
 /// [`StoredRecord::NO_GENERATION`] is refused: it is read only against its table's layouts. A
 /// packed row always names a nonzero generation, so it is refused here before its body is read.
-fn envelope_value(stored: &StoredRecord<'_>) -> Result<Value> {
+fn envelope_value(codec: &'static Codec, stored: &StoredRecord<'_>) -> Result<Value> {
 	let generation = stored.stamp();
 	if generation != StoredRecord::NO_GENERATION {
 		return Err(anyhow::Error::new(crate::catalog::Error::Layout(
@@ -179,15 +190,15 @@ fn envelope_value(stored: &StoredRecord<'_>) -> Result<Value> {
 			},
 		)));
 	}
-	record_value(stored.decode_document()?)
+	record_value(codec, stored.decode_document()?)
 }
 
 /// A record as the codec holds a `Record` it decodes from `revision`: an
 /// object of its metadata, as the descriptors hold an `Option<Metadata>`, and
 /// its data.
-fn record_value(record: Record) -> Result<Value> {
+fn record_value(codec: &'static Codec, record: Record) -> Result<Value> {
 	let metadata = match &record.metadata {
-		Some(metadata) => decode("Metadata", &revision::to_vec(metadata)?)?,
+		Some(metadata) => decode(codec, "Metadata", &revision::to_vec(metadata)?)?,
 		None => Value::None,
 	};
 	Ok(Value::Object(Object::from_iter([
@@ -199,13 +210,15 @@ fn record_value(record: Record) -> Result<Value> {
 /// The `revision` encoding `catalog::encode_record` gives the record `value`
 /// holds as [`record_value`] gives it, its `"id"` kept: the value names no key
 /// to leave it out for.
-fn encode_record_value(value: &Value) -> Result<Vec<u8>> {
+fn encode_record_value(codec: &'static Codec, value: &Value) -> Result<Vec<u8>> {
 	let Value::Object(fields) = value else {
 		bail!("a {RECORD} value that is not an object: {value:?}");
 	};
 	let metadata = match fields.get("metadata") {
 		None | Some(Value::None) => None,
-		Some(metadata) => Some(revision::from_slice::<Metadata>(&encode("Metadata", metadata)?)?),
+		Some(metadata) => {
+			Some(revision::from_slice::<Metadata>(&encode(codec, "Metadata", metadata)?)?)
+		}
 	};
 	let data = fields.get("data").unwrap_or(&Value::None);
 	crate::catalog::encode_record(RecordFormat::Revision, metadata.as_ref(), data, None)
@@ -246,8 +259,8 @@ impl KeyContext for crate::catalog::RecordContext {
 
 /// Whether the VM holds a descriptor for type `name`.
 #[cfg(test)]
-pub(crate) fn describes(name: &str) -> bool {
-	types::lookup(name).is_ok()
+pub(crate) fn describes(codec: &Codec, name: &str) -> bool {
+	codec.lookup(name).is_ok()
 }
 
 #[cfg(test)]

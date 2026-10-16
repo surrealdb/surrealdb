@@ -1,7 +1,7 @@
 //! Parse functions
 
-use crate::exec::function::FunctionRegistry;
-use crate::{define_pure_function, register_functions};
+use crate::define_pure_function;
+use crate::exec::function::ScalarFunction;
 
 // Email parsing
 define_pure_function!(ParseEmailHost, "parse::email::host", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (email: String) -> String, crate::fnc::parse::email::host);
@@ -23,31 +23,57 @@ define_pure_function!(ParseUrlQuery, "parse::url::query", effects: EffectSet::PU
 #[cfg(feature = "url")]
 define_pure_function!(ParseUrlScheme, "parse::url::scheme", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (url: String) -> String, crate::fnc::parse::url::scheme);
 
-pub fn register(registry: &mut FunctionRegistry) {
-	register_functions!(registry, ParseEmailHost, ParseEmailUser);
+/// The `parse::*` scalar builtins.
+pub(super) const SCALARS: &[&dyn ScalarFunction] = &[
+	&ParseEmailHost,
+	&ParseEmailUser,
 	#[cfg(not(feature = "url"))]
-	super::disabled::register(
-		registry,
-		"url",
-		&[
-			"parse::url::domain",
-			"parse::url::fragment",
-			"parse::url::host",
-			"parse::url::path",
-			"parse::url::port",
-			"parse::url::query",
-			"parse::url::scheme",
-		],
-	);
+	&super::disabled::Disabled {
+		name: "parse::url::domain",
+		feature: "url",
+	},
+	#[cfg(not(feature = "url"))]
+	&super::disabled::Disabled {
+		name: "parse::url::fragment",
+		feature: "url",
+	},
+	#[cfg(not(feature = "url"))]
+	&super::disabled::Disabled {
+		name: "parse::url::host",
+		feature: "url",
+	},
+	#[cfg(not(feature = "url"))]
+	&super::disabled::Disabled {
+		name: "parse::url::path",
+		feature: "url",
+	},
+	#[cfg(not(feature = "url"))]
+	&super::disabled::Disabled {
+		name: "parse::url::port",
+		feature: "url",
+	},
+	#[cfg(not(feature = "url"))]
+	&super::disabled::Disabled {
+		name: "parse::url::query",
+		feature: "url",
+	},
+	#[cfg(not(feature = "url"))]
+	&super::disabled::Disabled {
+		name: "parse::url::scheme",
+		feature: "url",
+	},
 	#[cfg(feature = "url")]
-	register_functions!(
-		registry,
-		ParseUrlDomain,
-		ParseUrlFragment,
-		ParseUrlHost,
-		ParseUrlPath,
-		ParseUrlPort,
-		ParseUrlQuery,
-		ParseUrlScheme,
-	);
-}
+	&ParseUrlDomain,
+	#[cfg(feature = "url")]
+	&ParseUrlFragment,
+	#[cfg(feature = "url")]
+	&ParseUrlHost,
+	#[cfg(feature = "url")]
+	&ParseUrlPath,
+	#[cfg(feature = "url")]
+	&ParseUrlPort,
+	#[cfg(feature = "url")]
+	&ParseUrlQuery,
+	#[cfg(feature = "url")]
+	&ParseUrlScheme,
+];

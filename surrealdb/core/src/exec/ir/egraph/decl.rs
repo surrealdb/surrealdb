@@ -221,7 +221,7 @@ impl PhysTableFacts {
 #[derive(Clone, Debug)]
 pub(crate) struct IndexCandidate {
 	pub(crate) index: IndexRef,
-	pub(crate) columns: SmallVec<[Strand; 2]>,
+	pub(crate) columns: SmallVec<[Strand; 4]>,
 	pub(crate) unique: bool,
 	pub(crate) kind: IndexKindClass,
 }

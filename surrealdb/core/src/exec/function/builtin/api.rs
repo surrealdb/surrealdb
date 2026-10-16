@@ -6,7 +6,7 @@ use crate::api::middleware::common::BodyStrategy;
 use crate::api::request::ApiRequest;
 use crate::err::EngineError;
 use crate::exec::EvalContext;
-use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
+use crate::exec::function::{ScalarFunction, Signature};
 use crate::exec::ir::iface::Fallibility;
 use crate::expr::Kind;
 use crate::expr::logical::EffectSet;
@@ -322,13 +322,14 @@ define_api_middleware_function!(
 // `EffectSet::OPAQUE_BODY`. `api::invoke` runs a whole endpoint that may write,
 // so it also declares `WRITES_DATA`. `is_writer_builtin` lists the same
 // functions, and the registry's guard test checks that the two agree.
-pub fn register(registry: &mut FunctionRegistry) {
-	registry.register(ApiInvoke);
-	registry.register(ApiReqBody);
-	registry.register(ApiReqMaxBody);
-	registry.register(ApiResBody);
-	registry.register(ApiResStatus);
-	registry.register(ApiResHeader);
-	registry.register(ApiResHeaders);
-	registry.register(ApiTimeout);
-}
+/// The `api::*` scalar builtins.
+pub(super) const SCALARS: &[&dyn ScalarFunction] = &[
+	&ApiInvoke,
+	&ApiReqBody,
+	&ApiReqMaxBody,
+	&ApiResBody,
+	&ApiResStatus,
+	&ApiResHeader,
+	&ApiResHeaders,
+	&ApiTimeout,
+];

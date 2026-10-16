@@ -1,7 +1,7 @@
 //! Random functions
 
-use crate::exec::function::FunctionRegistry;
-use crate::{define_pure_function, register_functions};
+use crate::define_pure_function;
+use crate::exec::function::ScalarFunction;
 
 // Every function here takes no execution context. Each is defined with
 // `define_pure_function!` and called synchronously. Their results are not
@@ -30,21 +30,19 @@ define_pure_function!(RandTime, "rand::time", effects: EffectSet::ENTROPY, falli
 // Variadic function
 define_pure_function!(RandEnum, "rand::enum", effects: EffectSet::ENTROPY, fallibility: Fallibility::VALUE, (...values: Any) -> Any, crate::fnc::rand::r#enum);
 
-pub fn register(registry: &mut FunctionRegistry) {
-	register_functions!(
-		registry,
-		Rand,
-		RandBool,
-		RandDuration,
-		RandEnum,
-		RandFloat,
-		RandId,
-		RandInt,
-		RandString,
-		RandTime,
-		RandUlid,
-		RandUuid,
-		RandUuidV4,
-		RandUuidV7,
-	);
-}
+/// The `rand::*` scalar builtins.
+pub(super) const SCALARS: &[&dyn ScalarFunction] = &[
+	&Rand,
+	&RandBool,
+	&RandDuration,
+	&RandEnum,
+	&RandFloat,
+	&RandId,
+	&RandInt,
+	&RandString,
+	&RandTime,
+	&RandUlid,
+	&RandUuid,
+	&RandUuidV4,
+	&RandUuidV7,
+];

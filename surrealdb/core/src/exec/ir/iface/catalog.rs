@@ -118,6 +118,19 @@ pub(crate) trait SemanticCatalog: Send + Sync {
 		CatalogAnswer::Unknown
 	}
 
+	/// Whether the request is planned at a `VERSION` stamp, so that a definition read here is the
+	/// one the stamp holds rather than the one the transaction holds now.
+	fn plans_at_stamp(&self) -> bool {
+		false
+	}
+
+	/// Whether running the function `definition` under its `AUTH LIMIT` leaves the authority of the
+	/// principal the request is planned for as it is. Without a principal only a function defined
+	/// with no limit qualifies, since a limit would narrow some caller.
+	fn function_limit_is_inert(&self, definition: &FunctionDefinition) -> bool {
+		definition.auth_limit == crate::catalog::auth::AuthLimit::new_no_limit()
+	}
+
 	/// Whether each call of a user-defined function the request makes runs the definition the
 	/// transaction reads when the call is made: the statement may change the catalog as it runs,
 	/// so no body planned with it is run

@@ -58,6 +58,32 @@ pub fn object<const N: usize>(entries: [(&'static str, Value); N]) -> Value {
 	Value::Object(entries.into_iter().collect::<Object>())
 }
 
+/// Builds the object of a struct's fields, one field at a time, in the order they are pushed.
+///
+/// [`finish`](ObjectBuilder::finish) gives what [`object`] gives for the same entries. The methods
+/// are out of line so that every generated conversion shares one copy of them.
+pub struct ObjectBuilder(Vec<(&'static str, Value)>);
+
+impl ObjectBuilder {
+	/// A builder for an object of `capacity` fields.
+	#[inline(never)]
+	pub fn new(capacity: usize) -> Self {
+		Self(Vec::with_capacity(capacity))
+	}
+
+	/// Adds field `name`.
+	#[inline(never)]
+	pub fn push(&mut self, name: &'static str, value: Value) {
+		self.0.push((name, value));
+	}
+
+	/// The object of the fields pushed.
+	#[inline(never)]
+	pub fn finish(self) -> Value {
+		Value::Object(self.0.into_iter().collect::<Object>())
+	}
+}
+
 /// An enum variant: `{name: body}`.
 pub fn variant(name: &'static str, body: Value) -> Value {
 	object([(name, body)])

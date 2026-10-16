@@ -3522,12 +3522,10 @@ mod tests {
 		.await;
 		let plan = fixture.bind_as(&owner(), "SELECT id FROM t WHERE a IN []").await;
 		assert!(layers(&plan).is_empty(), "{plan}");
-		assert!(plan.contains("Filter[false]"), "{plan}");
+		assert!(plan.contains("Filter[a INSIDE []]"), "{plan}");
 		// Read, the computed field is derived and its read is not discarded.
 		let plan = fixture.bind_as(&owner(), "SELECT id FROM t WHERE c IN []").await;
-		// The body is a constant, so the layer sets the value rather than
-		// evaluating the addition once per row.
-		assert_eq!(layers(&plan), ["Project[*, 2 AS c @computed]"], "{plan}");
+		assert_eq!(layers(&plan), ["Project[*, 1 + 1 AS c @computed]"], "{plan}");
 		assert!(plan.contains("Filter[c INSIDE []]"), "{plan}");
 		// A `GROUP ALL` count reads no field, so the count path keeps its
 		// bare source.
@@ -3569,11 +3567,11 @@ mod tests {
 		assert_eq!(
 			layers(&plan),
 			[
-				// `PERMISSIONS FOR select WHERE false` denies the field outright, so the
-				// guard `rules::control_flow` collapses to the value it always takes. The
-				// column keeps its `@permission` classification; what goes is a conditional
-				// that would otherwise be evaluated per row for a field no caller can read.
-				"Project[*, NONE AS secret @permission]",
+				// `PERMISSIONS FOR select WHERE false` denies the field outright. The
+				// column keeps its `@permission` classification and its guard as written;
+				// `SpecialiseGuards` specialises a guard that yields a literal, so no
+				// conditional is evaluated per row for a field no caller can read.
+				"Project[*, (IF false THEN secret ELSE NONE END) AS secret @permission]",
 				"Project[*, a + 1 AS c : int @computed]",
 			],
 			"{plan}"

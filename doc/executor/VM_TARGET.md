@@ -70,7 +70,7 @@ record fetches) are host services and not a second executor.
    subroutines; a loop is a jump; a `LET` is a register or a frame slot;
    signals are jumps.
    A nested statement is part of the same program. Whether it stays nested is
-   the logical rules' decision (decorrelation into semi-, anti- and
+   the logical planner's decision (decorrelation into semi-, anti- and
    group-joins; hoisting what reads nothing of the outer row; merging a
    subquery in `FROM` into its parent). How what stays nested runs is the
    physical rules', from statistics and effects: **once**, as a pipeline run

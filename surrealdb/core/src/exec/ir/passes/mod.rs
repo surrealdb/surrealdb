@@ -15,6 +15,7 @@ pub(crate) mod loop_reg;
 pub(crate) mod loop_unroll;
 pub(crate) mod perm_where;
 pub(crate) mod phys_cse;
+pub(crate) mod push_subquery;
 pub(crate) mod reg;
 pub(crate) mod rehome;
 pub(crate) mod unswitch;
@@ -28,9 +29,13 @@ mod tests_driver;
 #[cfg(test)]
 mod tests_fold;
 #[cfg(test)]
+mod tests_layers;
+#[cfg(test)]
 mod tests_licm;
 #[cfg(test)]
 mod tests_perm_where;
+#[cfg(test)]
+mod tests_push_subquery;
 #[cfg(test)]
 mod tests_support;
 #[cfg(test)]

@@ -53,7 +53,7 @@ value = "[t:['a', 2], t:['b', 3], t:['c', 2]]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    Filter [ctx: Db] [predicate: id[1] = 2f]
+    Filter [ctx: Db] [predicate: n = 2f]
         IndexScan [ctx: Db] [table: t, index: by_n, access: = 2f, direction: Forward]
 ''''
 

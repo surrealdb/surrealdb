@@ -1,0 +1,15 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["gql/_schema.surql"]
+
+[test]
+reason = "A SET whose target `b` has no label writes records of two tables (person and city), so the write names no one table."
+
+[[test.results]]
+value = "[{ name: 'A', seen: true }, { name: 'A', seen: true }, { name: 'B', seen: true }, { name: 'C', seen: true }, { name: 'London', seen: true }]"
+*/
+
+MATCH (a:person)-[:knows]->(b) SET b.seen = true
+RETURN b.name AS name, b.seen AS seen ORDER BY name

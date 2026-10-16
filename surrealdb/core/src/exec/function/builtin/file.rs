@@ -13,13 +13,13 @@ use crate::catalog::providers::BucketProvider;
 use crate::catalog::{BucketDefinition, LogicalPermissionBody};
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::EngineError;
-use crate::exec::function::FunctionRegistry;
+use crate::exec::function::ScalarFunction;
 use crate::exec::{Error as ExecError, EvalContext, ExecutionContext};
 use crate::expr::Error as ExprError;
 use crate::expr::logical::LogicalPermission;
 use crate::fnc::args::FromArgs;
 use crate::val::{Bytes, File, Object, Value};
-use crate::{define_async_function, define_pure_function, register_functions};
+use crate::{define_async_function, define_pure_function};
 
 // =========================================================================
 // Helper types and functions
@@ -571,21 +571,19 @@ define_pure_function!(FileKey, "file::key", effects: EffectSet::PURE, fallibilit
 // on how a query grouped its rows. A read can answer differently on either side of a
 // write. `file::bucket` and `file::key` only read two fields of the file value they are
 // given, so they are pure.
-pub fn register(registry: &mut FunctionRegistry) {
-	register_functions!(
-		registry,
-		FilePut,
-		FilePutIfNotExists,
-		FileGet,
-		FileHead,
-		FileDelete,
-		FileCopy,
-		FileCopyIfNotExists,
-		FileRename,
-		FileRenameIfNotExists,
-		FileExists,
-		FileList,
-		FileBucket,
-		FileKey,
-	);
-}
+/// The `file::*` scalar builtins.
+pub(super) const SCALARS: &[&dyn ScalarFunction] = &[
+	&FilePut,
+	&FilePutIfNotExists,
+	&FileGet,
+	&FileHead,
+	&FileDelete,
+	&FileCopy,
+	&FileCopyIfNotExists,
+	&FileRename,
+	&FileRenameIfNotExists,
+	&FileExists,
+	&FileList,
+	&FileBucket,
+	&FileKey,
+];

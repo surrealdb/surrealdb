@@ -2274,11 +2274,11 @@ fn logical_attrs_reject_unreadable_text() {
 	assert!(parse(LogTag::Alter, &text.replace("fields = [", "fields = (")).is_err());
 }
 
-/// The registry holds the logical syntax in the slot of the logical dialect.
+/// The built-in syntax table holds the logical syntax in the slot of the logical dialect.
 #[test]
-fn registry_holds_the_logical_syntax() {
-	let syntax = crate::exec::ir::registry::build().attr_syntax[1]
-		.expect("the logical dialect registers its attribute syntax");
+fn attr_syntaxes_hold_the_logical_syntax() {
+	let syntax = crate::exec::ir::registry::attr_syntaxes().0[1]
+		.expect("the table holds the logical attribute syntax");
 	let kind = OpKind::Logical(fixture(LogTag::Option));
 	let mut text = String::new();
 	syntax.print_attrs(&kind, &mut text);
@@ -6008,7 +6008,7 @@ mod binding {
 				&[TypeKnowledge::Unknown],
 			)
 			.expect("the owner binds");
-		cx.within_function_body(owner, &[strand("p")], &[strand("this")], |cx| {
+		cx.within_function_body(owner, &[strand("p")], &[], &[strand("this")], |cx| {
 			assert_eq!(cx.lookup("x"), NameRef::Free);
 			assert!(matches!(cx.lookup("p"), NameRef::Value(_)));
 			assert!(matches!(cx.lookup("this"), NameRef::Value(_)));
@@ -6066,7 +6066,7 @@ mod binding {
 					&[TypeKnowledge::Unknown],
 				)
 				.expect("the owner binds");
-			cx.within_function_body(owner, &[strand("p")], &[], |cx| {
+			cx.within_function_body(owner, &[strand("p")], &[], &[], |cx| {
 				let NameRef::Value(argument) = cx.lookup("p") else {
 					return Err(IrError::Stale("the argument"));
 				};
@@ -6501,9 +6501,13 @@ mod binding {
 		let statements = RequestStatement::of(&parsed);
 		let mut input = RequestInput::request(&statements, request_scope());
 		input.serves_late = true;
-		let (ir, _, notes) = crate::exec::ir::build::logical::bind_request_noted(&input, &env.cx())
-			.await
-			.expect("the request binds");
+		let (ir, _, notes) = crate::exec::ir::build::logical::bind_request_noted(
+			&input,
+			&env.cx(),
+			Some(&crate::exec::surface::FULL),
+		)
+		.await
+		.expect("the request binds");
 		let served: Vec<Option<u32>> = ops_of(&ir, LogTag::Statement)
 			.into_iter()
 			.filter_map(|op| match kind_of(&ir, op) {

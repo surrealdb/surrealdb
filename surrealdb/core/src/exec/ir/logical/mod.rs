@@ -15,7 +15,6 @@ pub(crate) mod live;
 pub(crate) mod r#match;
 pub(crate) mod ops;
 pub(crate) mod print;
-pub(crate) mod reg;
 pub(crate) mod scope;
 pub(crate) mod seam;
 pub(crate) mod stages;

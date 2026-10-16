@@ -137,7 +137,7 @@ What the write node must preserve:
   changefeeds are buffered until commit. All are suppressed under import and when the post-image
   equals the pre-image.
 
-`WHERE` on a write is not pushed into the source (`exec/logical/rules/filter.rs:563`). Pushing it
+`WHERE` on a write is not pushed into the source: it is a clause of the write stage (`exec/ir/logical/stages.rs`), which no pass moves. Pushing it
 into an index scan is a physical rule gated on permissions being statically absent for the form,
 and on the side-effect count still equalling the match count.
 
@@ -169,8 +169,7 @@ rule that moves an expression between slots moves it between frames and must not
 
 Each slot carries its effect summary: `pure`, `read_only`, `may_raise`, `may_signal`, and whether
 it materialises records (a dereference or traversal runs computed fields and permissions).
-Projection may run column-major only when at most one column has effects and the others are total
-(`exec/logical/rules/mod.rs:797-897`).
+Projection may run column-major only when at most one column has effects and the others are total.
 
 ---
 
@@ -287,7 +286,7 @@ version or content hash. What has no version today, and what the key needs from 
 
 ### 6.3 Rules the catalog enables
 
-These are the rules `LOGICAL_RULES.md` classifies as physical, now expressible: sargability,
+These are the rewrites the logical planner leaves to the physical one, now expressible: sargability,
 function inversion, pattern-to-range and `IN` → range (each gated on a declared `field_kind`),
 data-clause subquery hoisting and footprint-checked hoisting generally (gated on the write
 footprint of §8.3), `SET a = a` (gated on the field's select permission), gate subsumption, event
@@ -515,7 +514,7 @@ Not pinned, and needed before a rule depends on them:
 
 | behaviour | why the plan cares |
 |---|---|
-| an effectful projected column under `ORDER BY … LIMIT` | whether a projected `sequence::nextval()` is counted for every row sorted or only for the rows kept is not pinned, and `LOGICAL_RULES.md`'s limit-pushdown gate assumes it does not matter |
+| an effectful projected column under `ORDER BY … LIMIT` | whether a projected `sequence::nextval()` is counted for every row sorted or only for the rows kept is not pinned, and the limit-pushdown gate assumes it does not matter |
 | a dereference inside a permission predicate on a missing table | `fetch_record_no_perms` answers `NONE`; `fetch_record` raises |
 | written subject order of `UPDATE t:2, t:1` | write sources must preserve order |
 | a unique-value swap inside one statement | eager unique checks make subject order decide it |

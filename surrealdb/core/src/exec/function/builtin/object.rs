@@ -1,7 +1,7 @@
 //! Object functions
 
-use crate::exec::function::FunctionRegistry;
-use crate::{define_pure_function, register_functions};
+use crate::define_pure_function;
+use crate::exec::function::ScalarFunction;
 
 define_pure_function!(ObjectEntries, "object::entries", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, metered: crate::fnc::object::entries_walk, (object: Any) -> Any, crate::fnc::object::entries);
 define_pure_function!(ObjectFromEntries, "object::from_entries", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, metered: crate::fnc::object::from_entries_walk, (entries: Any) -> Any, crate::fnc::object::from_entries);
@@ -14,16 +14,14 @@ define_pure_function!(ObjectValues, "object::values", effects: EffectSet::PURE, 
 define_pure_function!(ObjectExtend, "object::extend", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, metered: crate::fnc::object::extend_walk, (base: Any, extension: Any) -> Any, crate::fnc::object::extend);
 define_pure_function!(ObjectRemove, "object::remove", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, metered: crate::fnc::object::remove_walk, (object: Any, keys: Any) -> Any, crate::fnc::object::remove);
 
-pub fn register(registry: &mut FunctionRegistry) {
-	register_functions!(
-		registry,
-		ObjectEntries,
-		ObjectExtend,
-		ObjectFromEntries,
-		ObjectIsEmpty,
-		ObjectKeys,
-		ObjectLen,
-		ObjectRemove,
-		ObjectValues,
-	);
-}
+/// The `object::*` scalar builtins.
+pub(super) const SCALARS: &[&dyn ScalarFunction] = &[
+	&ObjectEntries,
+	&ObjectExtend,
+	&ObjectFromEntries,
+	&ObjectIsEmpty,
+	&ObjectKeys,
+	&ObjectLen,
+	&ObjectRemove,
+	&ObjectValues,
+];

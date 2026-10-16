@@ -116,8 +116,16 @@ the lookups, then rewrites:
 |---|---|
 | `resolve` | Each table source gets its schema. The table's `PERMISSIONS FOR select` becomes a `PermissionFilter` above it, and the `COMPUTED` fields and field `PERMISSIONS FOR select` a stack of projection layers above that — `Project[*, body AS c : kind @computed]`, `Project[*, IF p THEN f ELSE NONE END AS f @permission]` — in the order the scan pipeline applies them ([The row is a document](#the-row-is-a-document-and-a-projection-shadows)). Every user expression above the stack reads plain field names; nothing is rewritten. |
 | `params` | Statement-scoped `$param`s become literals. |
-| `fold` | Row-independent subexpressions become literals, under the caller's function capabilities. |
-| `optimise` | The rule set (`exec/logical/rules`), each rule a local rewrite of one node given what its inputs expose, applied bottom-up at every node of every nested plan and repeated to a fixpoint. The rules, in the order tried at a node: `filter` — predicates merge, and move through a user projection by alias substitution, never through a layer column, never below a `PermissionFilter`, and never through a projection any of whose fields is not inert, since beneath it the projection evaluates for the surviving rows alone; `layers` — beneath a chain of layers the conjuncts that read no layer column, by name or opaquely, move to a filter directly above the source or above the chain's topmost permission node, beneath which nothing moves; `join` — a conjunct over a caller-frame join that reads the left row alone moves beneath it on the left, one that reads the alias alone moves into an inner join's right side, and a `Semi` / `Anti` right side takes every conjunct that reads it alone; `prune` — an identity projection over plain rows goes, and a layer column nothing above reads goes, with the reads of the columns kept; `identity` — `Filter[true]`, an empty `Limit`, a `Sort` over at most one row whose keys are inert, an `Only` over an `Only` and a nested `Sequence` go (a key that reads a layer column the chain beneath sets with an expression that writes or may raise is not inert, even where the key itself is a plain path: the sort is the only demand for that column, and once it goes `prune` takes the column and its evaluation with it), `Filter[false]` over rows an inert literal produces becomes no rows (a literal that writes or throws keeps its filter, which reads nothing); `decorrelate` — an `IN` / `NOT IN` / `CONTAINS` / `CONTAINSNOT` subquery in a `Filter` or `PermissionFilter` predicate becomes a `Semi` or `Anti` `Join` in the predicate's frame, where every scalar of the subquery's right side is pure, no correlated conjunct may raise, and the probe side — the predicate whole and the pipeline beneath it — is read-only: the join builds that side once for every outer row where the per-row form builds it afresh for each, so a write on the probe side would leave the two reading different relations, and evaluates a key for every left row where the per-row form over an empty right side evaluates none ([A relation reached from a row is a join](#a-relation-reached-from-a-row-is-a-join)); `inline` — a call to a `DEFINE FUNCTION` whose body is `{ RETURN <expr> }`, with `PERMISSIONS FULL`, an `AUTH LIMIT` that does not narrow the caller, pure arguments already of the declared kinds and a result already of the return kind, becomes the body over its arguments; `kind` — a cast to a kind its operand is *checked* to have goes (a stored field's declared kind is not checked), and a `Broadcast` over a base of definite non-array kind becomes its body. What `inline` reads is gathered before the rules run from the node-level function cache (`cache/ds/function.rs`), content-addressed on the stored definition. Every rule is a strict improvement; cost is the physical planner's, and there is no hash-consing or e-graph. A rule that splits a predicate keeps its rows and not the written order of its conjuncts: a conjunct that can raise (`may_raise` in `exec/logical/rules/mod.rs` names them — casts, arithmetic, calls, indexing, subqueries, and a parameter whose read fetches a `DEFINE PARAM`, since the fetch judges that definition's `PERMISSIONS` clause where it happens) may be judged on rows an earlier conjunct would have refused, and an error it raises is then raised where judging the predicate whole per document would have returned rows. The inline rule refuses an argument that may raise at all, since the substituted body may evaluate it later than the call did, or on fewer paths, or not at all; the filter rule refuses a projection holding a field that may raise, since beneath it the field reaches fewer rows; the other splits are not gated on it. |
+
+Nothing else rewrites the plan before the binder reads it. The rewrites a
+statement is owed run on the IR the binder builds from it: the binder writes
+each membership of a filter that runs once as a join in its canonical form
+(`exec/ir/build/membership/lift.rs`), binds the body of a user-defined
+function beneath its call (`exec/ir/build/inline.rs`), and the loop
+optimiser's passes (`exec/ir/passes`) fold row-independent subexpressions,
+decide `IF`s and filters, move a filter into the subquery it reads and beneath
+a layer chain, drop the layer columns nothing reads, run a function body in
+the caller, and share and hoist what is evaluated more than once.
 
 Every node has a `Schema { fields, openness }`: `Source` from the catalog,
 every other node derived from its inputs. A `SCHEMAFULL` table is closed, a
@@ -261,7 +269,7 @@ resolves its table when it runs (a `DEFINE PARAM` permission, a function's
 `PERMISSIONS` guard); a dynamic source resolved per row builds a
 transaction-less `Planner` of its own.
 
-A call to a `DEFINE FUNCTION` the rules did not inline is compiled with its
+A call to a `DEFINE FUNCTION` the inlining pass did not inline is compiled with its
 body: for each call site, `Planner::plan_function_body` reads the function's
 snapshot from the node-level cache, binds the body for the caller's principal
 capped by the function's `AUTH LIMIT` with the arguments as per-call names,
@@ -283,7 +291,9 @@ paths, an `ACCESS` subject, a bucket's `PERMISSIONS` clause, a record access's
 the same way whichever caller reaches it. A GQL `MATCH` plan holds no
 `expr::Expr`: its scalars are `LogicalExpr`, described through
 `Planner::scalar_metadata` like every other scalar, and `operators/mutate.rs`
-builds its synthetic write statement from the values it has already evaluated.
+builds the synthetic write statements the binder binds with the plan; a mutation
+step runs each as a group of its program, with the values it has already
+evaluated bound as parameters.
 
 ## The target algebra
 
@@ -441,7 +451,7 @@ schema with `alias` as a field whose kind is the right side's record, `null |
 record` for a `Left` join, and `Any` when the right side reads no single
 table.
 
-The decorrelation rule (`exec/logical/rules/decorrelate.rs`) lifts a conjunct of a
+The membership recogniser (`exec/ir/build/membership/lift.rs`) lifts a conjunct of a
 `Filter` or `PermissionFilter` predicate of the form `x IN (SELECT VALUE k
 FROM t WHERE c)` — and its `NOT IN`, `CONTAINS` and `CONTAINSNOT` spellings —
 into a `Semi` or `Anti` join on `x = k`, when the subquery's correlation is a
@@ -520,7 +530,7 @@ candidate implementation of a lookup join over an edge table.
 
 ## What a rewrite may do to an evaluation
 
-The rules move, merge, drop and lift nodes, and every one of them is judged
+The rewrites move, merge, drop and lift nodes, and every one of them is judged
 against a single boundary: **a rewrite may not remove an evaluation, and may
 reorder one.**
 
@@ -539,14 +549,15 @@ answers `[]` where the statement owes a refusal has not optimised the
 statement, it has changed it. So a rule that would make an evaluation happen
 *fewer* times — not at all, or only for the rows that survive, or only for
 the pairs that match — must first establish that the expression is inert.
-Three predicates in `exec/logical/rules/mod.rs` say what inert means, in
-widening order:
+Three predicates say what inert means, in widening order. The recogniser asks them
+of the logical expression (`exec/ir/build/membership/lift.rs`), and the passes ask the
+effect and fallibility analyses (`exec/ir/analysis`) of the ops:
 
-| Predicate | What it says of an expression | Rules that consult it |
+| Predicate | What it says of an expression | Who consults it |
 |---|---|---|
-| `LogicalExpr::read_only` | nothing in it writes | decorrelation's probe side; the sort and filter gates, alongside `may_raise` |
-| `may_raise` | it holds a cast, arithmetic, an index, a subquery, a call, or a parameter whose read fetches a `DEFINE PARAM` — so evaluating it can raise | the `Values` collapse, filter pushdown through a projection, inline arguments, decorrelation's correlated conjuncts, the sort gate |
-| `is_pure` | read-only, no index operator, every builtin deterministic, and no record id whose key is generated (`t:rand()`, `t:ulid()`, `t:uuid()` name a fresh record each time the id is built) | decorrelation's right side, which the join reads once for every outer row |
+| `LogicalExpr::read_only` | nothing in it writes | the recogniser's probe side |
+| `may_raise` | it holds a cast, arithmetic, an index, a subquery, a call, or a parameter that is not row-scoped, whose read may fetch a `DEFINE PARAM` — so evaluating it can raise | the recogniser's correlated conjuncts and held terms; the passes ask the fallibility analysis |
+| `is_pure` | read-only, no index operator, every builtin deterministic, and no record id whose key is generated (`t:rand()`, `t:ulid()`, `t:uuid()` name a fresh record each time the id is built) | the recogniser's right side, which the join reads once for every outer row |
 
 Which builtins count as deterministic is the registry's answer, not the
 signature's: `ScalarFunction::is_deterministic` reports whether a second call
@@ -623,18 +634,16 @@ the plan is.
    not lift. `FETCH` stays its own operator, and the record-link dereference
    and the graph lookup stay expression forms: each is lifted only once a
    rule can show the rows identical on every language test.
-4. **The rule set.** `optimise` is a driver over local rules driven to a
-   fixpoint — filter pushdown through projections and joins, the filter
-   split beneath a layer chain, projection pruning, identity elimination,
-   decorrelation, user-defined function inlining, kind-directed
-   simplification — each in its own file under `exec/logical/rules` with
-   golden plan tests for where it applies and where it does not, and
-   `plan_source` receives its offer from the shape the rules leave: the
-   filter the `layers` rule places inside a chain is the chain's scan
-   predicate. A `DEFINE FUNCTION` body is compiled once into a node-level,
+4. **The rewrites.** The IR's passes and the binder's membership recogniser —
+   filter pushdown into subqueries and beneath a layer chain, layer-column
+   pruning, identity elimination, decorrelation, user-defined function
+   inlining, kind-directed simplification — each with golden plan tests for
+   where it applies and where it does not, and `plan_source` receives its
+   offer from the shape they leave: the filter the layer push places inside a
+   chain is the chain's scan predicate. A `DEFINE FUNCTION` body is compiled once into a node-level,
    content-addressed function cache beside the catalog cache and planned
    once per call site of the statement's plan, which is what inlining reads
-   and what a call the rules did not inline evaluates. Nothing moves beneath a
+   and what a call the inlining pass did not inline evaluates. Nothing moves beneath a
    `PermissionFilter`, so an access path declined beneath one still judges
    the predicate in full above the scan; the join forms step 3 left per row
    — `FETCH`, the record-link dereference, the graph lookup, a scalar

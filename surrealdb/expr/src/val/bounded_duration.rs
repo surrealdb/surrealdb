@@ -72,6 +72,16 @@ impl SkipRevisioned for BoundedDuration {
 	fn skip_revisioned<R: Read>(reader: &mut R) -> Result<(), Error> {
 		Self::deserialize_revisioned(reader).map(drop)
 	}
+
+	#[inline]
+	fn skip_revisioned_slice(
+		reader: &mut revision::SliceReader<'_>,
+	) -> Result<(), revision::Error> {
+		let mut rest = reader.remaining();
+		let before = rest.len();
+		Self::deserialize_revisioned(&mut rest)?;
+		reader.consume(before - rest.len())
+	}
 }
 
 impl WalkRevisioned for BoundedDuration {
@@ -82,5 +92,21 @@ impl WalkRevisioned for BoundedDuration {
 		reader: &'r mut R,
 	) -> Result<Self::Walker<'r, R>, Error> {
 		Ok(LeafWalker::new(reader))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn slice_skip_agrees_with_reader_skip() {
+		let value = BoundedDuration(time::Duration::new(90_000, 123_456_789));
+		let mut bytes = Vec::new();
+		value.serialize_revisioned(&mut bytes).unwrap();
+		assert_eq!(revision::skip_slice::<BoundedDuration>(&bytes).unwrap(), bytes.len());
+		let cut = &bytes[..bytes.len() - 1];
+		assert!(revision::skip_slice::<BoundedDuration>(cut).is_err());
+		assert!(BoundedDuration::skip_revisioned(&mut &cut[..]).is_err());
 	}
 }

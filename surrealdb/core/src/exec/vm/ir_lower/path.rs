@@ -549,7 +549,8 @@ mod tests {
 		seed: impl FnOnce(&mut Lowerer<'_>),
 	) -> Result<(Operand, Program, Needs), IrError> {
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, ir, crate::exec::ir::analysis::cx::builtin_registry());
 		seed(&mut lowerer);
 		let operand = lowerer.value(value)?;
 		let needs = lowerer.needs();
@@ -951,7 +952,8 @@ mod tests {
 		}
 		let value = b.result_of(owner);
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::new(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::new(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		let operand = lowerer.value(value).expect("the destructure lowers");
 		let needs = lowerer.needs();
 		em.emit(Instr::EndRow);
@@ -1487,7 +1489,8 @@ mod tests {
 			|b, args| friend(b, args[0]),
 		);
 		let mut em = Emitter::new();
-		let mut lowerer = Lowerer::for_fold(&mut em, &b.ir);
+		let mut lowerer =
+			Lowerer::for_fold(&mut em, &b.ir, crate::exec::ir::analysis::cx::builtin_registry());
 		assert!(matches!(
 			lowerer.value(result),
 			Err(IrError::Invariant {

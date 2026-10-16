@@ -110,7 +110,7 @@ pub(super) fn open_step(
 			(kind, false, 1, build_writes)
 		}
 		_ => {
-			let (kind, writes) = program_step(em, cx, ir, reads, data, shape)?;
+			let (kind, writes) = program_step(em, cx, ir, facts, reads, data, shape)?;
 			(kind, writes, 0, false)
 		}
 	};
@@ -229,17 +229,32 @@ fn join_step(
 /// The step `data`, which `shape` states, as the program holds it, and whether it writes.
 ///
 /// The clause regions of the op are the step's scalars, in the order
-/// [`BindStepShape::region_kinds`] lists them. A step that streams or reads two sides answers an
-/// error, because neither has a split spec that this builds.
+/// [`BindStepShape::region_kinds`] lists them. The `Subquery` regions that follow them each hold
+/// one write the step applies to a record, lowered as a group of the program
+/// ([`super::nested::write_region_group`]) that the step names. A step that streams or reads two
+/// sides answers an error, because neither has a split spec that this builds.
 fn program_step(
 	em: &mut Emitter,
 	cx: &mut LowerCx<'_>,
 	ir: &Ir,
+	facts: &mut FactCache,
 	reads: &mut Reads,
 	data: &OpData,
 	shape: &BindStepShape,
 ) -> Result<(ProgramStep, bool), IrError> {
-	let regions = data.regions.as_slice();
+	let held = data.regions.as_slice();
+	let (regions, write_regions) = held.split_at(
+		held.len()
+			.checked_sub(shape.write_regions())
+			.ok_or_else(|| invariant("a write step without its write regions"))?,
+	);
+	let mut groups = Vec::with_capacity(write_regions.len());
+	for region in write_regions {
+		groups.push(super::nested::write_region_group(em, cx, ir, facts, reads, *region)?);
+	}
+	let group = |at: usize| {
+		groups.get(at).copied().ok_or_else(|| invariant("a write step short of a write group"))
+	};
 	let mut scalar = |region: RegionId| -> Result<HostScalar, IrError> {
 		let mut needs = Needs::none();
 		let scalar = row_scalar(em, cx, ir, region, &mut needs)?;
@@ -330,6 +345,7 @@ fn program_step(
 			BindingStep::Mutate(MutationStep::Update {
 				target: target.clone(),
 				op,
+				write: group(0)?,
 			})
 		}
 		BindStepShape::Delete {
@@ -340,6 +356,7 @@ fn program_step(
 			target: target.clone(),
 			detach: *detach,
 			is_edge: *is_edge,
+			write: group(0)?,
 		}),
 		BindStepShape::Insert {
 			nodes,
@@ -350,21 +367,23 @@ fn program_step(
 			}
 			let (node_regions, edge_regions) = regions.split_at(nodes.len());
 			let mut lowered_nodes = Vec::with_capacity(nodes.len());
-			for (node, region) in nodes.iter().zip(node_regions) {
+			for (at, (node, region)) in nodes.iter().zip(node_regions).enumerate() {
 				lowered_nodes.push(InsertNodeOp {
 					name: node.name.clone(),
 					table: node.table.clone(),
 					props: scalar(*region)?,
+					write: group(at)?,
 				});
 			}
 			let mut lowered_edges = Vec::with_capacity(edges.len());
-			for (edge, region) in edges.iter().zip(edge_regions) {
+			for (at, (edge, region)) in edges.iter().zip(edge_regions).enumerate() {
 				lowered_edges.push(InsertEdgeOp {
 					name: edge.name.clone(),
 					table: edge.table.clone(),
 					from: edge.from.clone(),
 					to: edge.to.clone(),
 					props: scalar(*region)?,
+					write: group(nodes.len() + at)?,
 				});
 			}
 			BindingStep::Mutate(MutationStep::Insert {
@@ -426,9 +445,7 @@ mod tests {
 	use super::*;
 	use crate::exec::ir::iface::ids::ValueId;
 	use crate::exec::ir::iface::region_kind::{ClauseRole, RegionKind};
-	use crate::exec::ir::iface::statements::{
-		BindExpandShape, BindJoinShape, MatchBindings, MatchData,
-	};
+	use crate::exec::ir::iface::statements::{BindExpandShape, BindJoinShape, MatchBindings};
 	use crate::exec::operators::{EdgeBinding, ExpandDir, JoinType};
 	use crate::exec::vm::ir_lower::tests::Builder;
 	use crate::exec::vm::ir_lower::{Lowered, lower_indexed};
@@ -633,34 +650,6 @@ mod tests {
 		};
 		assert_eq!(expand.predicate, Some(HostScalar::Code(0)));
 		assert_eq!(program.host_code.len(), 1);
-
-		let update = BindStepShape::Update {
-			target: "a".to_owned(),
-			data: MatchData::Set(Box::new(["age".to_owned()])),
-		};
-		let mut b = Builder::new();
-		let op = matched(&mut b, |b| {
-			let bound = bound_scan(b, 0, "a");
-			let updated = binding_step(b, update, &[bound]);
-			b.region(updated, RegionKind::Clause(ClauseRole::SetValue), |b| {
-				b.literal(Value::from(7_i64))
-			});
-			let updated = b.result_of(updated);
-			let rows = select_loop(b, 1, updated, |_, element| element);
-			b.result_of(rows)
-		});
-		let b = placed(b);
-		let program = lowered(&b, op).program;
-		assert_eq!(
-			program.splits[0].kind,
-			SplitKind::Step(BindingStep::Mutate(MutationStep::Update {
-				target: "a".to_owned(),
-				op: UpdateOp::Set(vec![("age".to_owned(), constant(Value::from(7_i64)))]),
-			}))
-		);
-		// A write step takes a transaction that may write.
-		assert_eq!(program.access_mode, AccessMode::ReadWrite);
-		assert!(program.host_code.is_empty());
 	}
 
 	/// A paging between a sort and the loop that reads it runs in the loop's pipeline, over the

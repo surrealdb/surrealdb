@@ -14,11 +14,11 @@
 use anyhow::Result;
 use chrono::{Local, TimeZone};
 
+use crate::define_pure_function;
 use crate::exec::EvalContext;
-use crate::exec::function::FunctionRegistry;
+use crate::exec::function::ScalarFunction;
 use crate::fnc::args::Optional;
 use crate::val::{Datetime, Value};
-use crate::{define_pure_function, register_functions};
 
 /// The timestamp every CLOCK builtin reads as the current time: that of the
 /// statement `ctx` runs in, taken when it started, so every read in one
@@ -97,10 +97,12 @@ macro_rules! define_clock_function {
 				ctx: &'a $crate::exec::EvalContext<'_>,
 				args: Vec<$crate::val::Value>,
 			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
-				Box::pin(async move {
-					$crate::exec::function::check_arity($func_name, &args, 0, Some(0))?;
-					$impl_path(statement_clock(ctx))
-				})
+				let result =
+					match $crate::exec::function::check_arity($func_name, &args, 0, Some(0)) {
+						Ok(()) => $impl_path(statement_clock(ctx)),
+						Err(e) => Err(e),
+					};
+				$crate::exec::function::ready_boxed(result)
 			}
 		}
 	};
@@ -150,12 +152,16 @@ macro_rules! define_clock_function {
 				ctx: &'a $crate::exec::EvalContext<'_>,
 				args: Vec<$crate::val::Value>,
 			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
-				Box::pin(async move {
-					let (Optional(value),): (Optional<Datetime>,) =
-						$crate::fnc::args::FromArgs::from_args($func_name, args)?;
-					let value = value.unwrap_or_else(|| statement_clock(ctx));
-					$impl_path((Optional(Some(value)),))
-				})
+				let decoded: anyhow::Result<(Optional<Datetime>,)> =
+					$crate::fnc::args::FromArgs::from_args($func_name, args);
+				let result = match decoded {
+					Ok((Optional(value),)) => {
+						let value = value.unwrap_or_else(|| statement_clock(ctx));
+						$impl_path((Optional(Some(value)),))
+					}
+					Err(e) => Err(e),
+				};
+				$crate::exec::function::ready_boxed(result)
 			}
 		}
 	};
@@ -219,48 +225,46 @@ define_pure_function!(TimeFromUuid, "time::from_uuid", effects: EffectSet::PURE,
 // Time is:: functions
 define_clock_function!(TimeIsLeapYear, "time::is_leap_year", fallibility: Fallibility::INFALLIBLE, (?value: Datetime) -> Bool, crate::fnc::time::is::leap_year);
 
-pub fn register(registry: &mut FunctionRegistry) {
-	register_functions!(
-		registry,
-		TimeCeil,
-		TimeDay,
-		TimeFloor,
-		TimeFormat,
-		TimeFromMicros,
-		TimeFromMillis,
-		TimeFromNanos,
-		TimeFromSecs,
-		TimeFromUlid,
-		TimeFromUnix,
-		TimeFromUuid,
-		TimeGroup,
-		TimeHour,
-		TimeIsLeapYear,
-		TimeMax,
-		TimeMicros,
-		TimeMillis,
-		TimeMin,
-		TimeMinute,
-		TimeMonth,
-		TimeNano,
-		TimeNow,
-		TimeRound,
-		TimeSecond,
-		TimeTimezone,
-		TimeUnix,
-		TimeWday,
-		TimeWeek,
-		TimeYday,
-		TimeYear,
-		TimeSetYear,
-		TimeSetMonth,
-		TimeSetDay,
-		TimeSetHour,
-		TimeSetMinute,
-		TimeSetSecond,
-		TimeSetNanosecond
-	);
-}
+/// The `time::*` scalar builtins.
+pub(super) const SCALARS: &[&dyn ScalarFunction] = &[
+	&TimeCeil,
+	&TimeDay,
+	&TimeFloor,
+	&TimeFormat,
+	&TimeFromMicros,
+	&TimeFromMillis,
+	&TimeFromNanos,
+	&TimeFromSecs,
+	&TimeFromUlid,
+	&TimeFromUnix,
+	&TimeFromUuid,
+	&TimeGroup,
+	&TimeHour,
+	&TimeIsLeapYear,
+	&TimeMax,
+	&TimeMicros,
+	&TimeMillis,
+	&TimeMin,
+	&TimeMinute,
+	&TimeMonth,
+	&TimeNano,
+	&TimeNow,
+	&TimeRound,
+	&TimeSecond,
+	&TimeTimezone,
+	&TimeUnix,
+	&TimeWday,
+	&TimeWeek,
+	&TimeYday,
+	&TimeYear,
+	&TimeSetYear,
+	&TimeSetMonth,
+	&TimeSetDay,
+	&TimeSetHour,
+	&TimeSetMinute,
+	&TimeSetSecond,
+	&TimeSetNanosecond,
+];
 
 #[cfg(test)]
 mod tests {
@@ -288,7 +292,7 @@ mod tests {
 
 		let registry = FunctionRegistry::with_builtins();
 		let call = |name: &'static str, args: Vec<Value>| {
-			let function = std::sync::Arc::clone(registry.get(name).expect("a registered builtin"));
+			let function = registry.get(name).expect("a registered builtin");
 			let eval = &eval;
 			async move { function.invoke_async(eval, args).await.expect("the call answers") }
 		};

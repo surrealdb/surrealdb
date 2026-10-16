@@ -23,6 +23,7 @@ use super::location::LocOrigin;
 use super::op::OpData;
 use super::value::{TOKEN_SLOT_BASE, Use, ValueDef};
 use super::walk::{ControlTarget, control_target};
+use crate::exec::ir::analysis::cx::structural_cx;
 use crate::exec::ir::analysis::{effects, fallibility, tokens};
 use crate::exec::ir::iface::catalog::EffectCx;
 use crate::exec::ir::iface::choose::{
@@ -32,7 +33,9 @@ use crate::exec::ir::iface::conversion::{DialectSet, LegalityTarget, Phase};
 use crate::exec::ir::iface::fallibility::Fallibility;
 use crate::exec::ir::iface::frame::Snapshot;
 use crate::exec::ir::iface::ids::{BlockId, FrameId, OpId, RegionId, ValueId};
-use crate::exec::ir::iface::region_kind::{FrameRule, RegionKind, RegionProperties, ReturnRule};
+use crate::exec::ir::iface::region_kind::{
+	FrameRule, RegionKind, RegionKinds, RegionProperties, ReturnRule,
+};
 use crate::exec::ir::logical::ops::LogOp;
 use crate::exec::ir::op_kind::{OpKind, OperandRule, Terminator};
 use crate::exec::ir::phys::ops::PhysOp;
@@ -762,7 +765,7 @@ impl<'a> Walk<'a> {
 		self.semantics(id, data);
 
 		let result = match data.kind {
-			OpKind::Expr(_) => expr::verify::verify_op(ir, id),
+			OpKind::Expr(_) => expr::verify::verify_op(ir, id, self.cx),
 			OpKind::Logical(_) => logical::verify::verify_op(ir, id),
 			OpKind::Phys(_) => phys::verify::verify_op(ir, id),
 		};
@@ -808,8 +811,9 @@ impl<'a> Walk<'a> {
 	fn semantics(&mut self, id: OpId, data: &OpData) {
 		let ir = self.ir;
 
-		let set = effects::of(ir, self.facts, id).set;
-		let failures = fallibility::of(ir, self.facts, id);
+		let under = structural_cx(self.cx.registry, ir);
+		let set = effects::of_with(ir, self.facts, &under, id).set;
+		let failures = fallibility::of_with(ir, self.facts, &under, id);
 		if let Some(gap) = fallibility_gap(set, failures) {
 			self.fail(VerifyRule::FallibilityConsistency, Some(id), || {
 				format!("{gap}: the effects are {set:?} and the fallibility {failures:?}")
@@ -902,7 +906,7 @@ impl<'a> Walk<'a> {
 		let Some(actual) = regions
 			.iter()
 			.map(|region| ir.region(*region).map(|held| held.kind))
-			.collect::<Option<SmallVec<[RegionKind; 4]>>>()
+			.collect::<Option<RegionKinds>>()
 		else {
 			return;
 		};
@@ -1210,9 +1214,8 @@ pub(super) fn violation_of(
 /// reported and never passed, and so is one that holds a live op no block lists.
 ///
 /// `cx` is the effect context the caller analyses with. The agreement of the tokens of a threaded
-/// container with its effects is judged under it. The fallibility and effects the other rules read
-/// come from `effects::of` and `fallibility::of`, which answer from the builtin function registry
-/// whatever `cx` carries.
+/// container with its effects is judged under it. The effects and fallibility the other rules read
+/// are judged under the registry of `cx` and no definitions, as are the callees of calls.
 pub(crate) fn verify(
 	ir: &Ir,
 	facts: &mut FactCache,

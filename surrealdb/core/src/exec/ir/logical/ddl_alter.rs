@@ -20,6 +20,7 @@ use crate::exec::ir::iface::statements::{
 	AlterObject, AlterTable, AlterUser, ApiActionShape, ConfigShape, DdlChecks, DefaultConfigShape,
 	OnDeleteShape, ReferenceShape,
 };
+use crate::exec::vm::codec::Codec;
 use crate::expr::reference::ReferenceDeleteStrategy;
 use crate::expr::statements::AlterStatement;
 use crate::expr::statements::alter::AlterKind;
@@ -95,6 +96,7 @@ fn set_comment(
 
 /// The stored form of an API definition holding `actions`, `config` and `fallback`, as an object.
 fn stored_api(
+	codec: &'static Codec,
 	actions: Vec<crate::catalog::ApiAction>,
 	config: crate::catalog::ApiConfig,
 	fallback: Option<Expr>,
@@ -109,7 +111,7 @@ fn stored_api(
 		auth_limit: crate::catalog::auth::AuthLimit::default(),
 		comment: None,
 	};
-	if let Value::Object(api) = stored_value(&api.to_stored(), "StoredApiDefinition")? {
+	if let Value::Object(api) = stored_value(codec, &api.to_stored(), "StoredApiDefinition")? {
 		Ok(api)
 	} else {
 		Err(PlanError::Invariant("a stored API that is not an object".into()))
@@ -119,7 +121,7 @@ fn stored_api(
 /// The values the clauses of an `ALTER API` set, one object per clause in order: a `FOR ANY`
 /// holds the stored `config` and `fallback` it sets, a `FOR` clause the stored `methods` and
 /// `action`, and a `DROP` the `methods` it removes.
-fn api_clause_values(clauses: &[AlterApiClause]) -> Planned<Value> {
+fn api_clause_values(codec: &'static Codec, clauses: &[AlterApiClause]) -> Planned<Value> {
 	let field =
 		|object: &crate::val::Object, name: &str| object.get(name).cloned().unwrap_or(Value::None);
 	let first_action = |api: &crate::val::Object| {
@@ -140,12 +142,13 @@ fn api_clause_values(clauses: &[AlterApiClause]) -> Planned<Value> {
 				fallback,
 			} => {
 				if let Some(config) = config {
-					let api = stored_api(Vec::new(), catalog_api_config(config), None)?;
+					let api = stored_api(codec, Vec::new(), catalog_api_config(config), None)?;
 					set.insert("config".to_owned(), field(&api, "config"));
 				}
 				let fallback = match fallback {
 					AlterKind::Set(expr) => {
 						let api = stored_api(
+							codec,
 							Vec::new(),
 							catalog_api_config(&Default::default()),
 							Some(expr.clone()),
@@ -161,6 +164,7 @@ fn api_clause_values(clauses: &[AlterApiClause]) -> Planned<Value> {
 			}
 			AlterApiClause::SetAction(action) => {
 				let api = stored_api(
+					codec,
 					vec![crate::catalog::ApiAction {
 						methods: action.methods.iter().map(|m| (*m).into()).collect(),
 						action: action.action.clone(),
@@ -179,6 +183,7 @@ fn api_clause_values(clauses: &[AlterApiClause]) -> Planned<Value> {
 				methods,
 			} => {
 				let api = stored_api(
+					codec,
 					vec![crate::catalog::ApiAction {
 						methods: methods.iter().map(|m| (*m).into()).collect(),
 						action: Expr::Literal(crate::expr::Literal::None),
@@ -199,7 +204,11 @@ fn api_clause_values(clauses: &[AlterApiClause]) -> Planned<Value> {
 }
 
 /// Plans an `ALTER`.
-pub(super) fn plan_alter(alter: &AlterStatement, checks: DdlChecks) -> Planned<DdlPlan<'_>> {
+pub(super) fn plan_alter<'e>(
+	alter: &'e AlterStatement,
+	checks: DdlChecks,
+	codec: &'static Codec,
+) -> Planned<DdlPlan<'e>> {
 	let mut s = Slots::new();
 	let mut template = None;
 	let (form, allow, object, if_exists) = match alter {
@@ -315,7 +324,7 @@ pub(super) fn plan_alter(alter: &AlterStatement, checks: DdlChecks) -> Planned<D
 			}
 			template = Some(alter_template(
 				"StoredTableDefinition",
-				stored_value(&altered.to_stored(), "StoredTableDefinition")?,
+				stored_value(codec, &altered.to_stored(), "StoredTableDefinition")?,
 				&fields,
 			));
 			(
@@ -369,8 +378,11 @@ pub(super) fn plan_alter(alter: &AlterStatement, checks: DdlChecks) -> Planned<D
 					},
 				});
 			}
-			template =
-				Some(alter_template("StoredApiDefinition", api_clause_values(&stmt.clauses)?, &[]));
+			template = Some(alter_template(
+				"StoredApiDefinition",
+				api_clause_values(codec, &stmt.clauses)?,
+				&[],
+			));
 			(
 				DdlForm::AlterApi,
 				(EDIT, ResourceKind::Api, Base::Db),
@@ -438,7 +450,7 @@ pub(super) fn plan_alter(alter: &AlterStatement, checks: DdlChecks) -> Planned<D
 			);
 			template = Some(alter_template(
 				"StoredEventDefinition",
-				stored_value(&altered.to_stored(), "StoredEventDefinition")?,
+				stored_value(codec, &altered.to_stored(), "StoredEventDefinition")?,
 				&fields,
 			));
 			(
@@ -594,7 +606,7 @@ pub(super) fn plan_alter(alter: &AlterStatement, checks: DdlChecks) -> Planned<D
 			}
 			template = Some(alter_template(
 				"StoredFieldDefinition",
-				stored_value(&altered.to_stored(), "StoredFieldDefinition")?,
+				stored_value(codec, &altered.to_stored(), "StoredFieldDefinition")?,
 				&fields,
 			));
 			(
@@ -641,7 +653,7 @@ pub(super) fn plan_alter(alter: &AlterStatement, checks: DdlChecks) -> Planned<D
 			}
 			template = Some(alter_template(
 				"StoredParamDefinition",
-				stored_value(&altered.to_stored(), "StoredParamDefinition")?,
+				stored_value(codec, &altered.to_stored(), "StoredParamDefinition")?,
 				&fields,
 			));
 			(
@@ -691,7 +703,7 @@ pub(super) fn plan_alter(alter: &AlterStatement, checks: DdlChecks) -> Planned<D
 			set_comment(&stmt.comment, &mut altered.comment, &mut fields);
 			template = Some(alter_template(
 				"StoredBucketDefinition",
-				stored_value(&altered.to_stored(), "StoredBucketDefinition")?,
+				stored_value(codec, &altered.to_stored(), "StoredBucketDefinition")?,
 				&fields,
 			));
 			(
@@ -733,7 +745,7 @@ pub(super) fn plan_alter(alter: &AlterStatement, checks: DdlChecks) -> Planned<D
 			};
 			template = Some(alter_template(
 				"StoredConfigDefinition",
-				stored_value(&definition.to_stored(), "StoredConfigDefinition")?,
+				stored_value(codec, &definition.to_stored(), "StoredConfigDefinition")?,
 				&[],
 			));
 			(
@@ -783,7 +795,7 @@ pub(super) fn plan_alter(alter: &AlterStatement, checks: DdlChecks) -> Planned<D
 			set_comment(&stmt.comment, &mut altered.comment, &mut fields);
 			template = Some(alter_template(
 				"AnalyzerDefinition",
-				stored_value(&altered, "AnalyzerDefinition")?,
+				stored_value(codec, &altered, "AnalyzerDefinition")?,
 				&fields,
 			));
 			(
@@ -866,7 +878,7 @@ pub(super) fn plan_alter(alter: &AlterStatement, checks: DdlChecks) -> Planned<D
 			}
 			template = Some(alter_template(
 				"StoredFunctionDefinition",
-				stored_value(&altered.to_stored(), "StoredFunctionDefinition")?,
+				stored_value(codec, &altered.to_stored(), "StoredFunctionDefinition")?,
 				&fields,
 			));
 			(
@@ -957,7 +969,7 @@ pub(super) fn plan_alter(alter: &AlterStatement, checks: DdlChecks) -> Planned<D
 			set_comment(&stmt.comment, &mut altered.comment, &mut fields);
 			template = Some(alter_template(
 				"StoredAccessDefinition",
-				stored_value(&altered.to_stored(), "StoredAccessDefinition")?,
+				stored_value(codec, &altered.to_stored(), "StoredAccessDefinition")?,
 				&fields,
 			));
 			(
@@ -1008,7 +1020,7 @@ pub(super) fn plan_alter(alter: &AlterStatement, checks: DdlChecks) -> Planned<D
 			};
 			template = Some(alter_template(
 				"StoredModuleDefinition",
-				stored_value(&altered.to_stored(), "StoredModuleDefinition")?,
+				stored_value(codec, &altered.to_stored(), "StoredModuleDefinition")?,
 				&fields,
 			));
 			(

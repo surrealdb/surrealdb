@@ -32,8 +32,8 @@ pub(crate) use conditions::{
 };
 pub(crate) use fields::{check_forbidden_group_by_params, field_path_from_expr, idiom_is_id};
 pub(crate) use literals::{
-	RestrictedFields, fold_expressions, source_field_reads_are_inert, substitution_is_lossy,
-	try_bound_operand, try_literal_to_value, try_value_to_logical_expr, value_to_logical_expr,
+	fold_expressions, substitution_is_lossy, try_bound_operand, try_literal_to_value,
+	try_value_to_logical_expr, value_to_logical_expr,
 };
 pub(crate) use optimization::{index_covers_ordering, order_is_scan_compatible};
 pub(crate) use params::{

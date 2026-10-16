@@ -2,14 +2,14 @@
 
 use anyhow::Result;
 
+use crate::define_pure_function;
 use crate::exec::EvalContext;
-use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
+use crate::exec::function::{ScalarFunction, Signature};
 use crate::exec::ir::iface::Fallibility;
 use crate::expr::Kind;
 use crate::expr::logical::EffectSet;
 use crate::fnc::args::FromArgs;
 use crate::val::Value;
-use crate::{define_pure_function, register_functions};
 
 define_pure_function!(RecordId, "record::id", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (record: Any) -> Any, crate::fnc::record::id);
 define_pure_function!(RecordTb, "record::tb", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (record: Any) -> String, crate::fnc::record::tb);
@@ -149,8 +149,6 @@ impl ScalarFunction for RecordIsEdge {
 	}
 }
 
-pub fn register(registry: &mut FunctionRegistry) {
-	register_functions!(registry, RecordId, RecordTb, RecordTable);
-	registry.register(RecordExists);
-	registry.register(RecordIsEdge);
-}
+/// The `record::*` scalar builtins.
+pub(super) const SCALARS: &[&dyn ScalarFunction] =
+	&[&RecordId, &RecordTb, &RecordTable, &RecordExists, &RecordIsEdge];

@@ -1110,7 +1110,7 @@ pub(crate) struct ServedSpec {
 /// volatile metrics are left out.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Analysis {
-	pub(super) plan: super::explain::AnalysedPlan,
+	pub(super) plan: super::explain::PlanTree,
 	pub(super) format: crate::expr::ExplainFormat,
 	/// Whether elapsed time and batch counts are left out.
 	pub(super) redact: bool,
@@ -1140,7 +1140,7 @@ pub(super) enum Collect {
 /// The refusals of a definition over a LIGHTWEIGHT relation, as plain data a
 /// program carries in place of the message the refusal raises.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum StoreRefusal {
+pub(crate) enum StoreRefusal {
 	/// A field definition over the relation.
 	Field,
 	/// An index definition over the relation.
@@ -1169,7 +1169,7 @@ impl StoreRefusal {
 /// The clause a schema statement reads a name from, as plain data a program
 /// carries in place of the label its coercion refusal names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum NameClause {
+pub(crate) enum NameClause {
 	Namespace,
 	Database,
 	Table,
@@ -1226,7 +1226,7 @@ pub(crate) struct MigrateSpec {
 /// The definition a [`StoreInstr::RefuseClauseEffects`] judges, by the
 /// stored type its register holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ClauseObject {
+pub(crate) enum ClauseObject {
 	/// A `StoredTableDefinition`: its `PERMISSIONS` clauses.
 	Table,
 	/// A `StoredFieldDefinition`: its `COMPUTED`, `VALUE`, `DEFAULT`, `ASSERT`
@@ -1245,7 +1245,7 @@ pub(super) enum ClauseObject {
 /// register holding its fields; a value is named by its codec type, and is
 /// decoded into or encoded from a register.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) enum StoreInstr {
+pub(crate) enum StoreInstr {
 	/// Refuse to run in a frame that refuses writes.
 	RefuseNoWrite,
 	/// The permission check: raise unless the session may take `action` on
@@ -2149,9 +2149,25 @@ pub(super) enum StoreInstr {
 	},
 }
 
+impl StoreInstr {
+	/// Whether this is one of the four store instructions a data statement lowers to: `Refuse`,
+	/// `RefuseNoWrite`, `SessionLet` and `SessionLetChecks`. Every other store instruction is
+	/// emitted only by the lowering of a schema statement, `INFO`, `LIVE`, `KILL`, `USE`,
+	/// `OPTION`, `ACCESS` or `SHOW`.
+	pub(super) fn is_dml(&self) -> bool {
+		matches!(
+			self,
+			StoreInstr::Refuse { .. }
+				| StoreInstr::RefuseNoWrite
+				| StoreInstr::SessionLet { .. }
+				| StoreInstr::SessionLetChecks { .. }
+		)
+	}
+}
+
 /// Who a [`StoreInstr::IssueGrant`] issues its grant to.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) enum GrantSubject {
+pub(crate) enum GrantSubject {
 	/// The system user of this name, at the grant's base.
 	User(String),
 	/// The record the value in this register names.
@@ -2160,7 +2176,7 @@ pub(super) enum GrantSubject {
 
 /// A field path a schema statement names, before it is resolved.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) enum PathSource {
+pub(crate) enum PathSource {
 	/// A path headed by a field. `holes` holds the register of each subscript
 	/// that is not a literal, in the order the path holds them, each read as
 	/// the integer or the key it stands for.
@@ -2175,7 +2191,7 @@ pub(super) enum PathSource {
 
 /// An entry of a written list of index columns, before it is resolved.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) enum ColumnSource {
+pub(crate) enum ColumnSource {
 	/// A path.
 	Path(PathSource),
 	/// `type::fields(x)`, `x` in the register: the paths of its strings.
@@ -2190,7 +2206,7 @@ pub(super) enum ColumnSource {
 /// What the backfill of an aggregated view computes per group: the view's
 /// aggregations, and the values its select answers them from.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct Backfill {
+pub(crate) struct Backfill {
 	pub(super) aggregations: Vec<crate::catalog::aggregation::Aggregation>,
 	pub(super) values: Vec<crate::catalog::aggregation::BackfillValue>,
 	/// How many keys the view groups by.
@@ -2202,7 +2218,7 @@ assert_plain!(StoreInstr);
 
 /// A kind of catalog definition, as `INFO` renders it.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) enum Definitions {
+pub(crate) enum Definitions {
 	Access,
 	Api,
 	Analyzer,
@@ -2229,7 +2245,7 @@ pub(super) enum Definitions {
 
 /// What the process reports of itself to `INFO FOR ROOT`.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) enum ProcessPart {
+pub(crate) enum ProcessPart {
 	/// Its resource usage.
 	System,
 	/// Its dynamic configuration.
@@ -2238,7 +2254,7 @@ pub(super) enum ProcessPart {
 
 /// A process service a datastore may run without.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) enum Service {
+pub(crate) enum Service {
 	/// The notification broker.
 	Broker,
 	/// The sequence service.
@@ -2247,7 +2263,7 @@ pub(super) enum Service {
 
 /// A catalog id the sequence service allocates.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) enum IdSequence {
+pub(crate) enum IdSequence {
 	Namespace,
 	Database,
 	Table,
@@ -2810,7 +2826,7 @@ impl FieldRefusal {
 /// one the statement reads, or `DEFINE FIELD` forms from its clauses, before
 /// writing it; or of the table whose `id` `REMOVE FIELD` removes.
 #[derive(Clone, Debug, PartialEq)]
-pub(super) enum FieldCheck {
+pub(crate) enum FieldCheck {
 	/// The definition in `field` uses none of the clauses the `id` field
 	/// refuses (`field_rules::id_field_restrictions`).
 	IdField {
@@ -2871,7 +2887,7 @@ pub(super) enum FieldCheck {
 /// The conversion a schema statement's body applies to the value of a
 /// clause it evaluates.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) enum ClauseConversion {
+pub(crate) enum ClauseConversion {
 	/// A `DURATION FOR …`: cast to an optional duration.
 	Duration,
 	/// A verification `KEY`, or an `AUDIENCE` entry: coerced to a string.
@@ -2888,7 +2904,7 @@ pub(super) enum ClauseConversion {
 
 /// A check `DEFINE ACCESS` makes between the clauses it evaluates.
 #[derive(Clone, Debug, PartialEq)]
-pub(super) enum AccessCheck {
+pub(crate) enum AccessCheck {
 	/// A record access method's token duration in `token` is set.
 	RecordToken {
 		token: Reg,
@@ -2922,7 +2938,7 @@ pub(super) enum AccessCheck {
 
 /// An error a schema statement raises, as the statement's body raises it.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) enum StatementError {
+pub(crate) enum StatementError {
 	NsAlreadyExists,
 	DbAlreadyExists,
 	TbAlreadyExists,

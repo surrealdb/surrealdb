@@ -8,6 +8,7 @@
 
 use super::decl::StmtMap;
 use super::elaborate::StatementSurgery;
+use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::analysis::loop_legality;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::Ir;
@@ -63,13 +64,19 @@ impl StatementSurgery for ContainerSurgery {
 	/// own id when it stands for itself. Every other entry is kept, among them the entries of other
 	/// statements and of loops the statement no longer holds. The new snapshot is computed in full
 	/// before it is stored, so a failed analysis leaves `facts` as it was.
-	fn retake_legality(&self, ir: &Ir, facts: &mut FactCache, stmt: OpId) -> Result<(), IrError> {
+	fn retake_legality(
+		&self,
+		ir: &Ir,
+		facts: &mut FactCache,
+		registry: &FunctionRegistry,
+		stmt: OpId,
+	) -> Result<(), IrError> {
 		let Some(held) = facts.legality_snapshot() else {
 			return Ok(());
 		};
 		let mut slot = held.clone();
 		let region = statement_region(ir, stmt)?;
-		loop_legality::snapshot_into(ir, facts, region, &mut slot)?;
+		loop_legality::snapshot_into(ir, facts, registry, region, &mut slot)?;
 		facts.set_legality_snapshot(slot);
 		Ok(())
 	}

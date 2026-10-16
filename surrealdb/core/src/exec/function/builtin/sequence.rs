@@ -4,7 +4,7 @@ use anyhow::Result;
 
 use crate::err::EngineError;
 use crate::exec::EvalContext;
-use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
+use crate::exec::function::{ScalarFunction, Signature};
 use crate::exec::ir::iface::Fallibility;
 use crate::expr::Kind;
 use crate::expr::logical::EffectSet;
@@ -72,6 +72,5 @@ impl ScalarFunction for SequenceNextval {
 // as `EffectSet::ADVANCES_STATE` declares. Callers must not duplicate or drop
 // a call: a duplicate consumes an extra value, and a dropped call leaves the
 // sequence where it stood.
-pub fn register(registry: &mut FunctionRegistry) {
-	registry.register(SequenceNextval);
-}
+/// The `sequence::*` scalar builtins.
+pub(super) const SCALARS: &[&dyn ScalarFunction] = &[&SequenceNextval];

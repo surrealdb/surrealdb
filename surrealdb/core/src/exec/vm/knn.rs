@@ -83,7 +83,7 @@ pub(super) async fn search(
 	let mut in_search = gate.residual;
 	if let Some(prefilter) = gate.prefilter.as_ref().filter(|_| index_def.uses_shared_doc_ids())
 		&& version.is_none()
-		&& let Some(list) = knn_allow_list(ctx, table, &prefilter.root).await?
+		&& let Some(list) = knn_allow_list(ctx, table, &prefilter.root, None).await?
 	{
 		in_search = prefilter.residual;
 		allow = Some(list);

@@ -24,7 +24,7 @@ use super::program::{Instr, Pipeline, Program};
 use super::row::{FieldName, RowReader};
 use super::scalar::Scalar;
 use crate::err::EngineError;
-use crate::exec::ir::analysis::cx::builtin_registry;
+use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::FoldedError;
@@ -44,9 +44,15 @@ pub(crate) struct FoldProgram {
 
 /// Lowers one expression value of a container into a fold program.
 pub(crate) trait ExprLowering: Send + Sync {
-	/// The program that computes `root`, or the reason it cannot be lowered. Every error means
-	/// the value is not folded; [`IrError::NotYet`] means no lowering is available for it.
-	fn lower(&self, ir: &Ir, root: ValueId) -> Result<FoldProgram, IrError>;
+	/// The program that computes `root`, with the callees resolved against `registry`, or the
+	/// reason it cannot be lowered. Every error means the value is not folded;
+	/// [`IrError::NotYet`] means no lowering is available for it.
+	fn lower(
+		&self,
+		ir: &Ir,
+		registry: &FunctionRegistry,
+		root: ValueId,
+	) -> Result<FoldProgram, IrError>;
 }
 
 /// A row with no fields: every field is `NONE` and the record is `NONE`.
@@ -80,17 +86,19 @@ pub(crate) static HOST_RUNNER: FoldHost = FoldHost {
 
 impl FoldHost {
 	/// Runs `program` for one empty row under a fuel budget of [`FOLD_FUEL`], serving only the
-	/// steps a pure builtin needs, and answers the value, a value-class raise or the refusal.
+	/// steps a pure builtin of `registry` needs, and answers the value, a value-class raise or the
+	/// refusal.
 	///
 	/// The thread's fuel meter and quantum are the same after the run as before it, whatever the
 	/// answer. The run reads no data: it holds no transaction, no datastore and no session.
 	pub(crate) fn run_program(
 		&self,
 		program: &FoldProgram,
+		registry: &FunctionRegistry,
 		capabilities: &CapabilityPolicy,
 	) -> FoldRun {
 		let _meter = Meter::enter(u32::try_from(FOLD_FUEL).unwrap_or(u32::MAX));
-		run_body(program, capabilities)
+		run_body(program, registry, capabilities)
 	}
 }
 
@@ -98,12 +106,13 @@ impl FoldRunner for FoldHost {
 	fn run<'a>(
 		&'a self,
 		ir: &'a Ir,
+		registry: &'a FunctionRegistry,
 		value: ValueId,
 		capabilities: &'a CapabilityPolicy,
 	) -> Pin<Box<dyn Future<Output = FoldRun> + Send + 'a>> {
 		Box::pin(async move {
-			match self.lowering.lower(ir, value) {
-				Ok(program) => self.run_program(&program, capabilities),
+			match self.lowering.lower(ir, registry, value) {
+				Ok(program) => self.run_program(&program, registry, capabilities),
 				Err(IrError::NotYet {
 					..
 				}) => FoldRun::Refused(NotFoldable::NotYet),
@@ -160,7 +169,11 @@ impl Drop for Meter {
 }
 
 /// Runs the one pipeline of `fold` for an empty row, serving calls, until the row ends.
-fn run_body(fold: &FoldProgram, capabilities: &CapabilityPolicy) -> FoldRun {
+fn run_body(
+	fold: &FoldProgram,
+	registry: &FunctionRegistry,
+	capabilities: &CapabilityPolicy,
+) -> FoldRun {
 	let program = &fold.program;
 	let [pipeline] = program.pipelines.as_slice() else {
 		return refused("lowering");
@@ -195,7 +208,7 @@ fn run_body(fold: &FoldProgram, capabilities: &CapabilityPolicy) -> FoldRun {
 			}
 			Step::Call {
 				at,
-			} => match serve_call(program, pipeline, &row, &mut regs, capabilities, at) {
+			} => match serve_call(program, pipeline, &row, &mut regs, registry, capabilities, at) {
 				Ok(resume) => pc = resume,
 				Err(run) => return run,
 			},
@@ -302,6 +315,7 @@ fn serve_call<'r>(
 	pipeline: &'r Pipeline,
 	row: &dyn RowReader,
 	regs: &mut [Scalar<'r>],
+	registry: &FunctionRegistry,
 	capabilities: &CapabilityPolicy,
 	at: usize,
 ) -> Result<usize, FoldRun> {
@@ -320,7 +334,7 @@ fn serve_call<'r>(
 	if !capabilities.allows_call(&spec.name) {
 		return Err(FoldRun::Refused(NotFoldable::CapabilityDenied));
 	}
-	let Some(function) = builtin_registry().get(&spec.name) else {
+	let Some(function) = registry.get(&spec.name) else {
 		return Err(refused("impure builtin"));
 	};
 	if !function.is_pure()
@@ -547,7 +561,11 @@ mod tests {
 			),
 			result: 1,
 		};
-		match HOST_RUNNER.run_program(&constant, &CapabilityPolicy::AllowAll) {
+		match HOST_RUNNER.run_program(
+			&constant,
+			crate::exec::ir::analysis::cx::builtin_registry(),
+			&CapabilityPolicy::AllowAll,
+		) {
 			FoldRun::Value(value, depth) => {
 				assert_eq!(value, Value::from(3i64));
 				assert_eq!(depth, 0);
@@ -559,7 +577,11 @@ mod tests {
 		assert_eq!((fuel::left(), surrealdb_runtime::fuel::quantum()), before);
 
 		let called = call_program("math::abs", vec![Value::from(-4i64)]);
-		match HOST_RUNNER.run_program(&called, &CapabilityPolicy::AllowAll) {
+		match HOST_RUNNER.run_program(
+			&called,
+			crate::exec::ir::analysis::cx::builtin_registry(),
+			&CapabilityPolicy::AllowAll,
+		) {
 			FoldRun::Value(value, _) => assert_eq!(value, Value::from(4i64)),
 			other @ (FoldRun::Raised(_) | FoldRun::Refused(_)) => {
 				panic!("a pure call does not answer its value: {other:?}")
@@ -579,7 +601,11 @@ mod tests {
 			result: 1,
 		};
 		assert!(matches!(
-			HOST_RUNNER.run_program(&spinning, &CapabilityPolicy::AllowAll),
+			HOST_RUNNER.run_program(
+				&spinning,
+				crate::exec::ir::analysis::cx::builtin_registry(),
+				&CapabilityPolicy::AllowAll,
+			),
 			FoldRun::Refused(NotFoldable::FuelExhausted)
 		));
 		assert_eq!((fuel::left(), surrealdb_runtime::fuel::quantum()), before);
@@ -589,7 +615,12 @@ mod tests {
 	struct NoLowering;
 
 	impl ExprLowering for NoLowering {
-		fn lower(&self, _ir: &Ir, _root: ValueId) -> Result<FoldProgram, IrError> {
+		fn lower(
+			&self,
+			_ir: &Ir,
+			_registry: &FunctionRegistry,
+			_root: ValueId,
+		) -> Result<FoldProgram, IrError> {
 			Err(IrError::NotYet {
 				what: "fold_host::ExprLowering::lower",
 			})
@@ -608,7 +639,14 @@ mod tests {
 			lowering: &NoLowering,
 			catalog: None,
 		};
-		let run = host.run(&ir, ValueId::default(), &CapabilityPolicy::AllowAll).await;
+		let run = host
+			.run(
+				&ir,
+				crate::exec::ir::analysis::cx::builtin_registry(),
+				ValueId::default(),
+				&CapabilityPolicy::AllowAll,
+			)
+			.await;
 		assert!(matches!(run, FoldRun::Refused(NotFoldable::NotYet)), "{run:?}");
 	}
 
@@ -616,7 +654,11 @@ mod tests {
 	fn host_raises_value_errors_with_main_text() {
 		let program =
 			call_program("array::repeat", vec![Value::from(0i64), Value::from(100_000_000i64)]);
-		match HOST_RUNNER.run_program(&program, &CapabilityPolicy::AllowAll) {
+		match HOST_RUNNER.run_program(
+			&program,
+			crate::exec::ir::analysis::cx::builtin_registry(),
+			&CapabilityPolicy::AllowAll,
+		) {
 			FoldRun::Raised(error) => {
 				assert!(error.text.contains("Output must not exceed"), "{}", error.text)
 			}
@@ -630,12 +672,20 @@ mod tests {
 	fn host_refuses_what_a_pure_builtin_does_not_need() {
 		let draw = call_program("rand::float", Vec::new());
 		assert!(matches!(
-			HOST_RUNNER.run_program(&draw, &CapabilityPolicy::AllowAll),
+			HOST_RUNNER.run_program(
+				&draw,
+				crate::exec::ir::analysis::cx::builtin_registry(),
+				&CapabilityPolicy::AllowAll,
+			),
 			FoldRun::Refused(NotFoldable::HostRefused("impure builtin"))
 		));
 		let unknown = call_program("no::such::function", Vec::new());
 		assert!(matches!(
-			HOST_RUNNER.run_program(&unknown, &CapabilityPolicy::AllowAll),
+			HOST_RUNNER.run_program(
+				&unknown,
+				crate::exec::ir::analysis::cx::builtin_registry(),
+				&CapabilityPolicy::AllowAll,
+			),
 			FoldRun::Refused(NotFoldable::HostRefused("impure builtin"))
 		));
 		let reads_a_row = FoldProgram {
@@ -652,7 +702,11 @@ mod tests {
 			result: 1,
 		};
 		assert!(matches!(
-			HOST_RUNNER.run_program(&reads_a_row, &CapabilityPolicy::AllowAll),
+			HOST_RUNNER.run_program(
+				&reads_a_row,
+				crate::exec::ir::analysis::cx::builtin_registry(),
+				&CapabilityPolicy::AllowAll,
+			),
 			FoldRun::Refused(NotFoldable::HostRefused("host step"))
 		));
 	}

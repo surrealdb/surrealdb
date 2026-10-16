@@ -27,6 +27,7 @@ use rand::Rng;
 use rand::distr::{Alphanumeric, SampleString};
 use surrealdb_cnf::ConfigMap;
 use surrealdb_cnf::dynamic::DynamicConfiguration;
+use surrealdb_datastore::out_of_line::OutOfLine;
 use surrealdb_datastore::triggers::CommitTriggers;
 use surrealdb_datastore::values::graph::GraphFoldScope;
 use surrealdb_datastore::{FeatureLevelCell, FeatureLevelState};
@@ -70,6 +71,7 @@ use crate::exec::Error as ExecError;
 use crate::exec::config::ExecConfig;
 use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::timers::compile_phase;
+use crate::exec::surface::{FULL, Surface};
 use crate::expr::logical::LogicalOp;
 use crate::expr::model::get_model_path;
 use crate::expr::statements::DefineUserStatement;
@@ -126,6 +128,9 @@ use crate::{CommunityComposer, syn};
 
 mod builder;
 pub(crate) mod config;
+mod edge;
+#[cfg(all(test, feature = "kv-mem"))]
+mod edge_tests;
 mod table_migration;
 
 pub use builder::Builder;
@@ -447,6 +452,10 @@ pub struct Datastore {
 	live_units: Arc<crate::exec::vm::live::LiveUnits>,
 	/// The function-body units this node has compiled for the VM.
 	compiled_units: Arc<crate::exec::vm::units::CompiledUnits>,
+	/// The function-body units compiled for the edge entry. A unit compiled
+	/// under one surface is never served to a context of another, so the edge
+	/// entry has a cache of its own.
+	edge_compiled_units: Arc<crate::exec::vm::units::CompiledUnits>,
 	// The index asynchronous builder
 	index_builder: IndexBuilder,
 	#[cfg(storage)]
@@ -856,6 +865,9 @@ impl Datastore {
 			compiled_units: Arc::new(crate::exec::vm::units::CompiledUnits::for_config(
 				&self.config.exec,
 			)),
+			edge_compiled_units: Arc::new(crate::exec::vm::units::CompiledUnits::for_config(
+				&self.config.exec,
+			)),
 			buckets: self.buckets,
 			sequences: Sequences::new(self.transaction_factory.clone(), self.id),
 			transaction_factory: self.transaction_factory,
@@ -930,6 +942,9 @@ impl Datastore {
 			function_registry,
 			live_units: Arc::default(),
 			compiled_units: Arc::new(crate::exec::vm::units::CompiledUnits::for_config(
+				&self.config.exec,
+			)),
+			edge_compiled_units: Arc::new(crate::exec::vm::units::CompiledUnits::for_config(
 				&self.config.exec,
 			)),
 			buckets: self.buckets.clone(),
@@ -1325,6 +1340,59 @@ impl Datastore {
 		}
 		// Everything ok
 		Ok((version, is_new))
+	}
+
+	/// Attaches a store to an edge build, in place of [`Self::check_version`], which runs
+	/// migrations and raises feature levels and which the edge build never calls.
+	///
+	/// Refuses the store with an error when any of these holds:
+	///
+	/// * `verdict` is [`migration::LedgerVerdict::Refused`], because the ledger records bytes this
+	///   build cannot read;
+	/// * the major version (`!v`) is not one this build supports;
+	/// * a migration this build ships has not been applied;
+	/// * the version stamp is missing on a store this call did not create, or is not exactly this
+	///   build's release.
+	///
+	/// A store that is new on this start is written what [`migration::run`] writes for a new store:
+	/// the major version marker, the baseline ledger rows, and the stamp with its history entry. An
+	/// existing store is written nothing. A `verdict` of [`migration::LedgerVerdict::ReadOnly`]
+	/// opens the store read-only and checks nothing further.
+	///
+	/// Never runs a migration, pins or raises the feature level, or starts a maintenance task, and
+	/// leaves the router baseline to the builder.
+	pub(crate) async fn attach_edge(&self, verdict: migration::LedgerVerdict) -> Result<()> {
+		if let migration::LedgerVerdict::Refused {
+			migrations,
+		} = verdict
+		{
+			bail!(DatastoreError::MigratedBeyondStorageVersion {
+				stored: self
+					.storage_version()
+					.await?
+					.map(|s| s.to_string())
+					.unwrap_or_else(|| "unknown".into()),
+				running: StorageVersion::current().to_string(),
+				migrations,
+			});
+		}
+		let (version, is_new) = self.settle_storage_version().await?;
+		if !version.is_supported() {
+			bail!(DatastoreError::OutdatedStorageVersion {
+				expected: MajorVersion::latest().into(),
+				actual: version.into(),
+			});
+		}
+		let is_new =
+			self.created_here.fetch_or(is_new, std::sync::atomic::Ordering::SeqCst) || is_new;
+		if let migration::LedgerVerdict::ReadOnly {
+			features,
+		} = verdict
+		{
+			self.open_read_only(features);
+			return Ok(());
+		}
+		migration::attach(self, is_new).await
 	}
 
 	/// Settles the datastore's major storage version, stamping it if it carries
@@ -6327,6 +6395,21 @@ impl Datastore {
 		&self,
 		req: QueryRequest<'_>,
 	) -> std::result::Result<Vec<QueryResult>, TypesError> {
+		self.run_sealed(req).await
+	}
+
+	#[inline(never)]
+	fn run_sealed(
+		&self,
+		req: QueryRequest<'_>,
+	) -> OutOfLine<impl Future<Output = std::result::Result<Vec<QueryResult>, TypesError>>> {
+		OutOfLine::new(self.run_body(req))
+	}
+
+	async fn run_body(
+		&self,
+		req: QueryRequest<'_>,
+	) -> std::result::Result<Vec<QueryResult>, TypesError> {
 		let QueryRequest {
 			source,
 			session,
@@ -6480,28 +6563,7 @@ impl Datastore {
 			QuerySource::Text {
 				text,
 				dialect: Dialect::SurrealQl,
-			} => {
-				let settings = syn::settings_from_capabilities_config(
-					&self.capabilities.load(),
-					&self.parser_config,
-				);
-				let statements = compile_phase!(
-					"parse",
-					surrealdb_expr::parser::execution_query_with_settings(text, settings)
-				)
-				.map_err(|e| TypesError::validation(e.to_string(), None))?;
-				return Ok(statements
-					.into_iter()
-					.map(|statement| match statement {
-						surrealdb_expr::parser::ExecutionStatement::Surface(stmt) => {
-							TopLevelStatement::Ast(stmt)
-						}
-						surrealdb_expr::parser::ExecutionStatement::Logical(stmt) => {
-							TopLevelStatement::Surreal(stmt)
-						}
-					})
-					.collect());
-			}
+			} => return self.parse_surrealql(text),
 			QuerySource::Text {
 				text,
 				dialect: Dialect::Gql,
@@ -6518,6 +6580,32 @@ impl Datastore {
 			QuerySource::Plan(plans) => return Ok(planned(plans)),
 		};
 		Ok(ast.expressions.into_iter().map(TopLevelStatement::Ast).collect())
+	}
+
+	/// Parse SurrealQL query text into the statements the executor runs, under the parser settings
+	/// the datastore's capabilities and configuration derive. Reaches no other dialect's parser.
+	pub(crate) fn parse_surrealql(
+		&self,
+		text: &str,
+	) -> std::result::Result<Vec<TopLevelStatement>, TypesError> {
+		let settings =
+			syn::settings_from_capabilities_config(&self.capabilities.load(), &self.parser_config);
+		let statements = compile_phase!(
+			"parse",
+			surrealdb_expr::parser::execution_query_with_settings(text, settings)
+		)
+		.map_err(|e| TypesError::validation(e.to_string(), None))?;
+		Ok(statements
+			.into_iter()
+			.map(|statement| match statement {
+				surrealdb_expr::parser::ExecutionStatement::Surface(stmt) => {
+					TopLevelStatement::Ast(stmt)
+				}
+				surrealdb_expr::parser::ExecutionStatement::Logical(stmt) => {
+					TopLevelStatement::Surreal(stmt)
+				}
+			})
+			.collect())
 	}
 
 	/// Parse and lower GQL query text to the plans the executor runs.
@@ -6595,6 +6683,20 @@ impl Datastore {
 		tx: Option<&Arc<Transaction>>,
 		cancel: Option<CancelHandle>,
 	) -> std::result::Result<(Options, FrozenContext), TypesError> {
+		self.setup_query_with(&FULL, &self.compiled_units, sess, vars, tx, cancel)
+	}
+
+	/// [`Self::setup_query`] for an entry serving `surface`, whose function-body
+	/// units are compiled into and served from `compiled_units`.
+	fn setup_query_with(
+		&self,
+		surface: &'static Surface,
+		compiled_units: &Arc<crate::exec::vm::units::CompiledUnits>,
+		sess: &Session,
+		vars: Option<PublicVariables>,
+		tx: Option<&Arc<Transaction>>,
+		cancel: Option<CancelHandle>,
+	) -> std::result::Result<(Options, FrozenContext), TypesError> {
 		// Check if the session has expired
 		if sess.expired() {
 			return Err(TypesError::not_allowed(
@@ -6626,7 +6728,9 @@ impl Datastore {
 		// (`ExecError::DbEmpty` from `Options::ns_db()`, say) misses and
 		// reaches the client as `internal` rather than as a validation
 		// failure. The helper walks the whole registry.
-		let mut ctx = self.setup_ctx().map_err(crate::err::anyhow_to_types_error)?;
+		let mut ctx = self
+			.setup_ctx_with(surface, compiled_units)
+			.map_err(crate::err::anyhow_to_types_error)?;
 
 		// Install the external cancellation handle if one was supplied. The
 		// executor checks `Context::done` between statements and in iterator
@@ -7082,6 +7186,16 @@ impl Datastore {
 	}
 
 	pub fn setup_ctx(&self) -> Result<Context> {
+		self.setup_ctx_with(&FULL, &self.compiled_units)
+	}
+
+	/// The root context of a query served under `surface`, whose function-body
+	/// units are compiled into and served from `compiled_units`.
+	pub(crate) fn setup_ctx_with(
+		&self,
+		surface: &'static Surface,
+		compiled_units: &Arc<crate::exec::vm::units::CompiledUnits>,
+	) -> Result<Context> {
 		let mut ctx = Context::from_ds(
 			self.id,
 			self.auth_enabled,
@@ -7096,8 +7210,9 @@ impl Datastore {
 			#[cfg(feature = "http")]
 			self.http_client.load_full(),
 			Arc::clone(&self.function_registry),
+			surface,
 			Arc::clone(&self.live_units),
-			Arc::clone(&self.compiled_units),
+			Arc::clone(compiled_units),
 			#[cfg(storage)]
 			self.temporary_directory.clone(),
 			self.buckets.clone(),
@@ -8536,6 +8651,86 @@ mod test {
 		)
 		.await?;
 		assert_eq!(val, PublicValue::Array(surrealdb_types::array![object! { m: "X" }]));
+		Ok(())
+	}
+
+	/// The writes of a MATCH mutation are compiled with the request that holds
+	/// it: running one compiles nothing, and serves no table's stage bundle at
+	/// run time, for a write whose target table the plan names.
+	#[cfg(feature = "gql")]
+	#[tokio::test]
+	async fn gql_mutation_writes_compile_at_arrival() -> Result<()> {
+		let (ds, ses) = gql_test_ds().await?;
+		let mut setup = String::from(
+			"DEFINE TABLE person SCHEMALESS; \
+			DEFINE FIELD age ON person TYPE option<int> ASSERT $value = NONE OR $value > 0; \
+			DEFINE INDEX person_name ON person FIELDS name UNIQUE; \
+			DEFINE EVENT person_updated ON person WHEN $event = 'UPDATE' \
+			THEN (CREATE audit SET who = $after.name);",
+		);
+		for i in 1..=50 {
+			setup.push_str(&format!("CREATE person:{i} SET name = 'p{i}', age = {i};"));
+		}
+		execute_all(&ds, &ses, &setup).await?;
+		for query in [
+			"MATCH (n:person) SET n.age = 1",
+			"MATCH (n:person WHERE n.name = 'p1') DETACH DELETE n",
+			"INSERT (m:pet {name: 'x'})",
+		] {
+			let after = crate::exec::compiles::after_arrival();
+			let faults = crate::exec::compiles::faults();
+			run_gql(&ds, &ses, query).await?;
+			assert_eq!(
+				crate::exec::compiles::after_arrival() - after,
+				0,
+				"{query:?} compiled after it arrived"
+			);
+			assert_eq!(
+				crate::exec::compiles::faults() - faults,
+				0,
+				"{query:?} served a compile at run time"
+			);
+		}
+		Ok(())
+	}
+
+	/// The parameters a mutation's write reads its record and values from are
+	/// the step's own: a request variable of the same name redirects nothing.
+	#[cfg(feature = "gql")]
+	#[tokio::test]
+	async fn gql_mutation_params_are_not_client_settable() -> Result<()> {
+		let (ds, ses) = gql_test_ds().await?;
+		execute_all(
+			&ds,
+			&ses,
+			"CREATE person:1 SET name = 'A', age = 1; CREATE person:2 SET name = 'B', age = 2;",
+		)
+		.await?;
+		let vars = PublicVariables::from(BTreeMap::from_iter([(
+			"__mutation_record".to_owned(),
+			PublicValue::RecordId(surrealdb_types::RecordId::new("person", 2)),
+		)]));
+		let request = QueryRequest::new(
+			QuerySource::gql("MATCH (n:person WHERE n.name = 'A') SET n.age = 7"),
+			&ses,
+		)
+		.with_variables(Some(vars));
+		for result in ds.run(request).await? {
+			result.result?;
+		}
+		let val = run_gql(
+			&ds,
+			&ses,
+			"MATCH (n:person) RETURN n.name AS name, n.age AS age ORDER BY name",
+		)
+		.await?;
+		assert_eq!(
+			val,
+			PublicValue::Array(surrealdb_types::array![
+				object! { name: "A", age: 7 },
+				object! { name: "B", age: 2 }
+			])
+		);
 		Ok(())
 	}
 

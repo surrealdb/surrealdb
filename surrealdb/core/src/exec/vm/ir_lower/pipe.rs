@@ -139,7 +139,7 @@ use super::stage::{StageRun, Stages};
 use super::units::LowerCx;
 use super::write_stmt::{SiteSink, WriteEntry, write_body};
 use crate::exec::field_path::{FieldPath, FieldPathPart};
-use crate::exec::ir::analysis::cx::builtin_registry;
+use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::core::op::OpData;
@@ -170,7 +170,7 @@ use crate::val::Value;
 /// lowered as a group of its own. Every index the region's code names is the base plus its
 /// position in [`Reads`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) struct PoolBase {
+pub(crate) struct PoolBase {
 	pub(super) pipelines: usize,
 	pub(super) limits: u16,
 	pub(super) distincts: u16,
@@ -428,7 +428,8 @@ pub(super) fn lower_reads(cx: &mut LowerCx<'_>, ir: &Ir, yields: bool) -> Result
 		reads,
 		tail,
 	} = lower_scope(&mut em, cx, ir, &mut facts, ir.top(), PoolBase::default(), yields)?;
-	let (program, provenance) = program_of(em, ir, reads, tail, AccessMode::ReadOnly)?;
+	let (program, provenance) =
+		program_of(em, ir, cx.registry(), reads, tail, AccessMode::ReadOnly)?;
 	Ok(Lowered {
 		program,
 		provenance,
@@ -442,6 +443,7 @@ pub(super) fn lower_reads(cx: &mut LowerCx<'_>, ir: &Ir, yields: bool) -> Result
 pub(super) fn program_of(
 	em: Emitter,
 	ir: &Ir,
+	registry: &FunctionRegistry,
 	reads: Reads,
 	tail: Option<TailSpec>,
 	access_mode: AccessMode,
@@ -481,7 +483,7 @@ pub(super) fn program_of(
 	program.groups = groups;
 	program.tail = tail;
 	for (pipeline, claimed) in program.pipelines.iter().zip(&claims) {
-		check_claims(ir, claimed, &pipeline.code, &program, builtin_registry())?;
+		check_claims(ir, claimed, &pipeline.code, &program, registry)?;
 	}
 	Ok((program, provenance))
 }
@@ -489,7 +491,7 @@ pub(super) fn program_of(
 /// What lowering the region of a read statement leaves: its pipelines and the clauses that wrap
 /// its rows.
 #[derive(Debug)]
-pub(super) struct ReadScope {
+pub(crate) struct ReadScope {
 	/// The pipelines, with the pools they number from.
 	pub(super) reads: Reads,
 	/// The wrappers of the statement's rows, `None` for a statement with none.
@@ -531,7 +533,7 @@ pub(super) fn lower_scope(
 	yields: bool,
 ) -> Result<ReadScope, IrError> {
 	let mut wrappers = Wrappers::default();
-	let holder = scan_region(ir, region, yields, &mut wrappers)?.unwrap_or(region);
+	let holder = scan_region(ir, cx.registry(), region, yields, &mut wrappers)?.unwrap_or(region);
 	let mut reads = lower_pipelines_at(em, cx, ir, facts, holder, base)?;
 	if reads.pipelines.is_empty() {
 		return Err(invariant(NO_ROWS));
@@ -555,7 +557,7 @@ pub(super) fn lower_statement_into(
 	reads: &mut Reads,
 ) -> Result<Option<TailSpec>, IrError> {
 	let mut wrappers = Wrappers::default();
-	let holder = scan_region(ir, region, true, &mut wrappers)?.unwrap_or(region);
+	let holder = scan_region(ir, cx.registry(), region, true, &mut wrappers)?.unwrap_or(region);
 	let held = reads.pipelines.len();
 	lower_region_into(em, cx, ir, facts, holder, reads)?;
 	if reads.pipelines.len() == held {
@@ -616,6 +618,7 @@ fn tail_of(
 /// region of a `phys.timeout`.
 fn scan_region(
 	ir: &Ir,
+	registry: &FunctionRegistry,
 	region: RegionId,
 	yields: bool,
 	wrappers: &mut Wrappers,
@@ -683,7 +686,8 @@ fn scan_region(
 				if wrappers.timeout.replace(duration).is_some() {
 					return Err(invariant("more than one timeout over a statement's rows"));
 				}
-				let inner = scan_region(ir, deadline, true, wrappers)?.unwrap_or(deadline);
+				let inner =
+					scan_region(ir, registry, deadline, true, wrappers)?.unwrap_or(deadline);
 				// Every timed body is a timeout's, and a second timeout is refused above.
 				if holder.replace(inner).is_some() {
 					return Err(invariant("more than one timed body"));
@@ -710,7 +714,7 @@ fn scan_region(
 					| LoopKind::GraphStep,
 				..
 			}) => {
-				if !feeds_host_scalar(ir, data) && !lowers_where_read(ir, op, data) {
+				if !feeds_host_scalar(ir, data) && !lowers_where_read(ir, registry, op, data) {
 					return Err(IrError::NotYet {
 						what: "ir_lower::pipe: an expression outside every pipeline",
 					});
@@ -1584,13 +1588,14 @@ fn explained_group(
 	let at = reads.groups.len();
 	let group = nested::lower_group(em, cx, facts, reads, |em, cx, _facts, reads| {
 		let base = PoolBase::default();
-		let plain = super::explain::Purpose::Plan;
-		match super::explain::lower_explained(cx, em, ir, region, explain, base, plain)? {
-			super::explain::Explained::Plain(pipeline) => reads.append(pipeline),
-			super::explain::Explained::Analysed {
+		let plain = super::explain_hook::Purpose::Plan;
+		let hook = super::explain_hook::explained_served(cx)?;
+		match hook.lower_explained(cx, em, ir, region, explain, base, plain)? {
+			super::explain_hook::Explained::Plain(pipeline) => reads.append(pipeline),
+			super::explain_hook::Explained::Analysed {
 				..
 			}
-			| super::explain::Explained::AnalysedValue {
+			| super::explain_hook::Explained::AnalysedValue {
 				..
 			} => return Err(invariant("an analysed EXPLAIN lowered as a plain one")),
 		}
@@ -2295,6 +2300,7 @@ fn emit_pipeline(
 	origin: Origin,
 ) -> Result<bool, IrError> {
 	reads.table = reads.table.take().or(opened.table);
+	let registry = cx.registry();
 	let feeder = opened.feeder;
 	let source = opened.source;
 	let schema = opened.schema;
@@ -2386,7 +2392,7 @@ fn emit_pipeline(
 			op,
 			..
 		} => {
-			let physical = facts_of(ir, facts, op)?;
+			let physical = facts_of(ir, facts, registry, op)?;
 			match parallel_of(ir, op, limit_slot)? {
 				// What the plan assumed of the body must be no more than the body holds: a
 				// disagreement in the direction that would run a body as morsels that must not
@@ -2997,7 +3003,8 @@ impl Body<'_, '_, '_> {
 			// dispatches by the table a record is written to.
 			write_body(self.em, &attrs.write.body, &run.stages, entry, &mut SiteSink::default())?;
 		} else {
-			let mut stages = Stages::new(&run, ir, self.cx.limits()).in_context(&mut *self.cx);
+			let mut stages = Stages::new(&run, ir, self.cx.limits(), self.cx.registry())
+				.in_context(&mut *self.cx);
 			write_body(self.em, &attrs.write.body, &run.stages, entry, &mut stages)?;
 			if let Some(held) = stages.needs.take() {
 				self.needs = self.needs.merged(&held);
@@ -3193,6 +3200,10 @@ fn non_step(tag: PhysTag) -> &'static str {
 impl projection::ProjectionSite for Body<'_, '_, '_> {
 	fn emitter(&mut self) -> &mut Emitter {
 		self.em
+	}
+
+	fn registry(&self) -> &FunctionRegistry {
+		self.cx.registry()
 	}
 
 	fn objects(&self) -> bool {
@@ -3629,8 +3640,14 @@ pub(super) mod tests {
 	pub(in crate::exec::vm::ir_lower) fn placed(mut b: Builder) -> Builder {
 		b.physical();
 		let mut facts = FactCache::new();
-		let decided = place_all(&b.ir, &mut facts, &Placement::default(), NO_BACKEND_CAPS)
-			.expect("the container is a DAG");
+		let decided = place_all(
+			&b.ir,
+			&mut facts,
+			crate::exec::ir::analysis::cx::builtin_registry(),
+			&Placement::default(),
+			NO_BACKEND_CAPS,
+		)
+		.expect("the container is a DAG");
 		install(b.ir.placement_table_mut(), decided);
 		b
 	}
@@ -5257,6 +5274,41 @@ pub(super) mod tests {
 	#[test]
 	fn an_analysed_explain_in_from_is_refused_as_main_refuses_it() {
 		assert_eq!(broken(&explained_in_from(true)), "a block or schema statement in FROM");
+	}
+
+	/// A context that holds no `EXPLAIN` hook refuses every form of `EXPLAIN` with
+	/// [`NOT_SERVED_EXPLAIN`]: a plain one in `FROM`, and a plain and an analysed one in value
+	/// position.
+	#[test]
+	fn an_explain_is_refused_where_the_context_holds_no_explain_hook() {
+		let without_hook = || LowerCx::detached().with_explain(None);
+		let refusal = |result: Result<Lowered, IrError>| match result {
+			Err(IrError::NotYet {
+				what,
+			}) => what,
+			Err(error) => panic!("an unexpected error: {error}"),
+			Ok(_) => panic!("the container lowers"),
+		};
+		let from = explained_in_from(false);
+		assert_eq!(
+			refusal(lower_reads(&mut without_hook(), &from.ir, false)),
+			super::super::explain_hook::NOT_SERVED_EXPLAIN
+		);
+		for analyze in [false, true] {
+			let mut b = Builder::new();
+			let explained = explained_scan(&mut b, analyze);
+			b.create_kind(OpKind::Phys(PhysOp::Yield), &[explained], 0);
+			let b = placed(b);
+			assert_eq!(
+				refusal(super::super::dispatch::lower_subquery_unit(
+					&mut without_hook(),
+					&b.ir,
+					&FactCache::new(),
+				)),
+				super::super::explain_hook::NOT_SERVED_EXPLAIN,
+				"analyze: {analyze}"
+			);
+		}
 	}
 
 	/// A region scanned as a read that holds a plain `EXPLAIN` is a shape no entry hands the

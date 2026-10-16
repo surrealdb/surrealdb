@@ -1,0 +1,14 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["gql/_schema.surql", "gql/_mutate_write_paths_import.surql"]
+
+[test]
+reason = "An INSERT maintains the table's unique index as the hand-written CREATE does: a node whose name another record holds errors the statement."
+
+[[test.results]]
+error = "Database index `person_name` already contains 'A', with record `person:1`"
+*/
+
+INSERT (p:person {name: 'A'}) RETURN p.name AS name
