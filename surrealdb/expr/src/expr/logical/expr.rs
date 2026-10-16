@@ -193,7 +193,7 @@ impl ToSql for LogicalLiteral {
 /// idiom it was lowered from ([`ToSql`]), names its output through
 /// [`Self::output_path`], and declares the position it reads through
 /// [`Self::field_path`](super::schema).
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub enum LogicalExpr {
 	Literal(LogicalLiteral),
 	/// `[a, b]`. Flattened out of the literal because its elements are
@@ -373,6 +373,153 @@ pub enum LogicalExpr {
 	Continue,
 	/// Any statement in scalar position.
 	Subquery(Box<LogicalOp>),
+}
+
+/// One body for every clone of an expression, whichever crate clones it: a
+/// derived `clone` is `#[inline]`, so each crate that clones an expression, or
+/// a `Box` of one, would carry its own copy of the whole match.
+impl Clone for LogicalExpr {
+	#[inline]
+	fn clone(&self) -> Self {
+		clone_expr(self)
+	}
+}
+
+#[inline(never)]
+fn clone_expr(expr: &LogicalExpr) -> LogicalExpr {
+	use LogicalExpr as E;
+	match expr {
+		E::Literal(v) => E::Literal(v.clone()),
+		E::Array(v) => E::Array(v.clone()),
+		E::Set(v) => E::Set(v.clone()),
+		E::Object(v) => E::Object(v.clone()),
+		E::RecordId(v) => E::RecordId(v.clone()),
+		E::Param(v) => E::Param(v.clone()),
+		E::Table(v) => E::Table(v.clone()),
+		E::Mock(v) => E::Mock(v.clone()),
+		E::Constant(v) => E::Constant(v.clone()),
+		E::Field(v) => E::Field(v.clone()),
+		E::Doc => E::Doc,
+		E::Current => E::Current,
+		E::Access {
+			base,
+			field,
+		} => E::Access {
+			base: base.clone(),
+			field: field.clone(),
+		},
+		E::Index {
+			base,
+			index,
+		} => E::Index {
+			base: base.clone(),
+			index: index.clone(),
+		},
+		E::First(v) => E::First(v.clone()),
+		E::Last(v) => E::Last(v.clone()),
+		E::Each(v) => E::Each(v.clone()),
+		E::Flatten {
+			base,
+			explicit,
+		} => E::Flatten {
+			base: base.clone(),
+			explicit: *explicit,
+		},
+		E::Filter {
+			base,
+			predicate,
+		} => E::Filter {
+			base: base.clone(),
+			predicate: predicate.clone(),
+		},
+		E::Method {
+			base,
+			name,
+			args,
+		} => E::Method {
+			base: base.clone(),
+			name: name.clone(),
+			args: args.clone(),
+		},
+		E::Destructure {
+			base,
+			fields,
+		} => E::Destructure {
+			base: base.clone(),
+			fields: fields.clone(),
+		},
+		E::Optional {
+			base,
+			then,
+		} => E::Optional {
+			base: base.clone(),
+			then: then.clone(),
+		},
+		E::Lookup {
+			base,
+			lookup,
+		} => E::Lookup {
+			base: base.clone(),
+			lookup: lookup.clone(),
+		},
+		E::Recurse(v) => E::Recurse(v.clone()),
+		E::RepeatRecurse(v) => E::RepeatRecurse(v.clone()),
+		E::Broadcast {
+			base,
+			body,
+			flatten,
+		} => E::Broadcast {
+			base: base.clone(),
+			body: body.clone(),
+			flatten: *flatten,
+		},
+		E::SetField {
+			base,
+			field,
+			value,
+		} => E::SetField {
+			base: base.clone(),
+			field: field.clone(),
+			value: value.clone(),
+		},
+		E::Prefix {
+			op,
+			expr,
+		} => E::Prefix {
+			op: op.clone(),
+			expr: expr.clone(),
+		},
+		E::Postfix {
+			expr,
+			op,
+		} => E::Postfix {
+			expr: expr.clone(),
+			op: op.clone(),
+		},
+		E::Invoke {
+			target,
+			args,
+		} => E::Invoke {
+			target: target.clone(),
+			args: args.clone(),
+		},
+		E::Binary {
+			left,
+			op,
+			right,
+		} => E::Binary {
+			left: left.clone(),
+			op: op.clone(),
+			right: right.clone(),
+		},
+		E::Call(v) => E::Call(v.clone()),
+		E::Closure(v) => E::Closure(v.clone()),
+		E::If(v) => E::If(v.clone()),
+		E::Throw(v) => E::Throw(v.clone()),
+		E::Break => E::Break,
+		E::Continue => E::Continue,
+		E::Subquery(v) => E::Subquery(v.clone()),
+	}
 }
 
 /// A record-id literal. The key may hold expressions.

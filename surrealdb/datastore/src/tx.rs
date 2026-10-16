@@ -525,6 +525,10 @@ struct SavePointMark {
 	stored_format_admitted: bool,
 }
 
+/// A record as a read answers it, with the generation its stored bytes carry: `None` for a
+/// `revision` record, stamp 0, a lightweight edge and an id that names no record.
+pub type StampedRecord = (Arc<Record>, Option<Generation>);
+
 /// What admitting a stored record found ([`Transaction::admit_record_bytes`]).
 struct Admitted {
 	/// The generation the record's bytes carry: `None` for a `revision` record and for stamp 0.
@@ -2586,18 +2590,35 @@ impl Transaction {
 	/// - `None` for a record that does not exist.
 	///
 	/// A cached record carries the generation it was cached with.
-	#[cfg_attr(
-		feature = "observability",
-		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
-	)]
-	pub async fn get_stamped_record(
+	#[inline(never)]
+	pub fn get_stamped_record(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &TableName,
 		id: &RecordIdKey,
 		version: Option<u64>,
-	) -> Result<(Arc<Record>, Option<Generation>)> {
+	) -> OutOfLine<impl Future<Output = Result<StampedRecord>>> {
+		OutOfLine::new(self.get_stamped_record_body(ns, db, tb, id, version))
+	}
+
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(
+			name = "get_stamped_record",
+			level = "trace",
+			target = "surrealdb::core::kvs::tx",
+			skip_all
+		)
+	)]
+	async fn get_stamped_record_body(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		id: &RecordIdKey,
+		version: Option<u64>,
+	) -> Result<StampedRecord> {
 		// Cache is not versioned
 		if version.is_some() {
 			return match self.read_stamped_record(ns, db, tb, id, version).await? {
@@ -2668,17 +2689,33 @@ impl Transaction {
 
 	/// [`Self::get_record_for_update`] with the generation the record's bytes carry: `None` for a
 	/// `revision` record, stamp 0 and a record that does not exist.
-	#[cfg_attr(
-		feature = "observability",
-		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
-	)]
-	pub async fn get_stamped_record_for_update(
+	#[inline(never)]
+	pub fn get_stamped_record_for_update(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &TableName,
 		id: &RecordIdKey,
-	) -> Result<(Arc<Record>, Option<Generation>)> {
+	) -> OutOfLine<impl Future<Output = Result<StampedRecord>>> {
+		OutOfLine::new(self.get_stamped_record_for_update_body(ns, db, tb, id))
+	}
+
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(
+			name = "get_stamped_record_for_update",
+			level = "trace",
+			target = "surrealdb::core::kvs::tx",
+			skip_all
+		)
+	)]
+	async fn get_stamped_record_for_update_body(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		id: &RecordIdKey,
+	) -> Result<StampedRecord> {
 		let key = RecordKey {
 			ns,
 			db,
@@ -2710,18 +2747,35 @@ impl Transaction {
 	///
 	/// A cached record carries the generation it was cached with. The batch fails at the first
 	/// record whose generation is refused.
-	#[cfg_attr(
-		feature = "observability",
-		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
-	)]
-	pub async fn get_stamped_records(
+	#[inline(never)]
+	pub fn get_stamped_records(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
 		rids: &[RecordId],
 		version: Option<u64>,
 		cache_policy: CachePolicy,
-	) -> Result<Vec<(Arc<Record>, Option<Generation>)>> {
+	) -> OutOfLine<impl Future<Output = Result<Vec<StampedRecord>>>> {
+		OutOfLine::new(self.get_stamped_records_body(ns, db, rids, version, cache_policy))
+	}
+
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(
+			name = "get_stamped_records",
+			level = "trace",
+			target = "surrealdb::core::kvs::tx",
+			skip_all
+		)
+	)]
+	async fn get_stamped_records_body(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		rids: &[RecordId],
+		version: Option<u64>,
+		cache_policy: CachePolicy,
+	) -> Result<Vec<StampedRecord>> {
 		if rids.is_empty() {
 			return Ok(Vec::new());
 		}
@@ -4153,7 +4207,22 @@ impl Transaction {
 	/// memo is updated with the minted generation and the layout epoch is advanced, so a writer
 	/// that resolved the table's format earlier resolves it again. The answer is the generation
 	/// minted.
-	async fn mint_with(
+	///
+	/// Every mint runs one body, polled through the [`OutOfLine`] this returns.
+	#[inline(never)]
+	fn mint_with(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		stored: Option<&StoredTableDefinition>,
+		layouts: &TableLayouts,
+		descriptor: LayoutDescriptor,
+	) -> OutOfLine<impl Future<Output = Result<Generation>>> {
+		OutOfLine::new(self.mint_with_body(ns, db, tb, stored, layouts, descriptor))
+	}
+
+	async fn mint_with_body(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -12100,146 +12169,8 @@ impl TableProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Vec<Arc<Record>>>> {
 		Box::pin(
 			async move {
-				// Nothing to fetch
-				if rids.is_empty() {
-					return Ok(Vec::new());
-				}
-				// Cache is not versioned
-				if version.is_some() {
-					let keys: Vec<RecordKey<'_>> = rids
-						.iter()
-						.map(|rid| RecordKey {
-							ns,
-							db,
-							tb: Cow::Borrowed(&rid.table),
-							id: Cow::Borrowed(&rid.key),
-						})
-						.collect();
-					let values = self.getm_raw(keys, version).await?;
-					let mut out: Vec<Option<Arc<Record>>> = self
-						.decode_records(ns, db, rids.iter(), values, version)
-						.await?
-						.into_iter()
-						.map(|slot| slot.map(|(record, _)| record))
-						.collect();
-					// A miss can be a lightweight edge; resolve every miss in
-					// one batched adjacency read.
-					let misses: Vec<(usize, &RecordId)> = out
-						.iter()
-						.enumerate()
-						.filter(|(_, o)| o.is_none())
-						.map(|(i, _)| (i, &rids[i]))
-						.collect();
-					if !misses.is_empty() {
-						let miss_rids: Vec<&RecordId> =
-							misses.iter().map(|(_, rid)| *rid).collect();
-						let records = self.lightweight_records(ns, db, &miss_rids, version).await?;
-						for ((i, _), record) in misses.into_iter().zip(records) {
-							out[i] = Some(match record {
-								Some(record) => record.into_read_only(),
-								None => Arc::new(Default::default()),
-							});
-						}
-					}
-					return out
-						.into_iter()
-						.map(|o| {
-							o.ok_or_else(|| {
-								EngineError::Internal("missing record in multi-get batch".into())
-									.into()
-							})
-						})
-						.collect();
-				}
-				// Phase 1: check cache, collect hits and indices of misses
-				let mut out: Vec<Option<Arc<Record>>> = vec![None; rids.len()];
-				let mut uncached_rids: Vec<(usize, &RecordId)> = Vec::new();
-				for (i, rid) in rids.iter().enumerate() {
-					let qey = cache::tx::Lookup::Record(ns, db, rid.table.as_str(), &rid.key);
-					match self.cache.get(&qey) {
-						// The entry is in the cache
-						Some(entry) => out[i] = Some(entry.try_into_record()?),
-						// The entry is not in the cache
-						None => uncached_rids.push((i, rid)),
-					}
-				}
-				// Phase 2: batch fetch the uncached keys from the datastore
-				if !uncached_rids.is_empty() {
-					let keys: Vec<RecordKey<'_>> = uncached_rids
-						.iter()
-						.map(|(_, rid)| RecordKey {
-							ns,
-							db,
-							tb: Cow::Borrowed(&rid.table),
-							id: Cow::Borrowed(&rid.key),
-						})
-						.collect();
-					let values = self.getm_raw(keys, None).await?;
-					let values = self
-						.decode_records(
-							ns,
-							db,
-							uncached_rids.iter().map(|(_, rid)| *rid),
-							values,
-							None,
-						)
-						.await?;
-					// Phase 3: populate cache + merge into output.
-					//
-					// Only populate the cache when the caller requests
-					// ReadWrite; ReadOnly avoids eviction churn during
-					// large sequential scans. Default (missing) records
-					// are never cached, matching `get_record`.
-					//
-					// `generation` is the one the record's bytes carry: `None` for
-					// a lightweight edge, which has no stored bytes.
-					let place = |out: &mut Vec<Option<Arc<Record>>>,
-					             i: usize,
-					             rid: &RecordId,
-					             record: Arc<Record>,
-					             generation: Option<Generation>| {
-						if (record.metadata.is_some() || !record.data.is_none())
-							&& matches!(cache_policy, CachePolicy::ReadWrite)
-						{
-							let qey =
-								cache::tx::Lookup::Record(ns, db, rid.table.as_str(), &rid.key);
-							let entry = cache::tx::Entry::Val(Arc::clone(&record), generation);
-							self.cache.insert(qey, entry);
-						}
-						out[i] = Some(record);
-					};
-					// A miss can be a lightweight edge; collect every miss and
-					// resolve them in one batched adjacency read.
-					let mut misses: Vec<(usize, &RecordId)> = Vec::new();
-					for ((i, rid), opt) in uncached_rids.into_iter().zip(values) {
-						match opt {
-							Some((record, generation)) => {
-								place(&mut out, i, rid, record, generation)
-							}
-							None => misses.push((i, rid)),
-						}
-					}
-					if !misses.is_empty() {
-						let miss_rids: Vec<&RecordId> =
-							misses.iter().map(|(_, rid)| *rid).collect();
-						let records = self.lightweight_records(ns, db, &miss_rids, None).await?;
-						for ((i, rid), record) in misses.into_iter().zip(records) {
-							let record = match record {
-								Some(record) => record.into_read_only(),
-								None => Arc::new(Default::default()),
-							};
-							place(&mut out, i, rid, record, None);
-						}
-					}
-				}
-				// Every slot is populated by this point.
-				out.into_iter()
-					.map(|o| {
-						o.ok_or_else(|| {
-							EngineError::Internal("missing record in multi-get batch".into()).into()
-						})
-					})
-					.collect()
+				let stamped = self.get_stamped_records(ns, db, rids, version, cache_policy).await?;
+				Ok(stamped.into_iter().map(|(record, _)| record).collect())
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_records")),
 		)

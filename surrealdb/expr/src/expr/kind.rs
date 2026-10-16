@@ -92,7 +92,7 @@ impl From<crate::types::PublicGeometryKind> for GeometryKind {
 
 /// The kind, or data type, of a value or field.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Debug, Default, Eq, PartialEq, Hash)]
 pub enum Kind {
 	/// The most generic type, can be anything.
 	#[default]
@@ -157,6 +157,47 @@ pub enum Kind {
 	/// If the kind was specified without a bucket the vec will be empty.
 	/// So `<file>` is just `Kind::File(Vec::new())`
 	File(Vec<String>),
+}
+
+/// One body for every clone of a kind, whichever crate clones it: a derived
+/// `clone` is `#[inline]`, so each crate that clones a kind, or a `Box` of
+/// one, would carry its own copy of the whole match.
+impl Clone for Kind {
+	#[inline]
+	fn clone(&self) -> Self {
+		clone_kind(self)
+	}
+}
+
+#[inline(never)]
+fn clone_kind(kind: &Kind) -> Kind {
+	match kind {
+		Kind::Any => Kind::Any,
+		Kind::None => Kind::None,
+		Kind::Null => Kind::Null,
+		Kind::Bool => Kind::Bool,
+		Kind::Bytes => Kind::Bytes,
+		Kind::Datetime => Kind::Datetime,
+		Kind::Decimal => Kind::Decimal,
+		Kind::Duration => Kind::Duration,
+		Kind::Float => Kind::Float,
+		Kind::Int => Kind::Int,
+		Kind::Number => Kind::Number,
+		Kind::Object => Kind::Object,
+		Kind::String => Kind::String,
+		Kind::Uuid => Kind::Uuid,
+		Kind::Regex => Kind::Regex,
+		Kind::Table(tables) => Kind::Table(tables.clone()),
+		Kind::Record(tables) => Kind::Record(tables.clone()),
+		Kind::Geometry(kinds) => Kind::Geometry(kinds.clone()),
+		Kind::Either(kinds) => Kind::Either(kinds.clone()),
+		Kind::Set(kind, max) => Kind::Set(kind.clone(), *max),
+		Kind::Array(kind, max) => Kind::Array(kind.clone(), *max),
+		Kind::Function(args, ret) => Kind::Function(args.clone(), ret.clone()),
+		Kind::Range => Kind::Range,
+		Kind::Literal(literal) => Kind::Literal(literal.clone()),
+		Kind::File(buckets) => Kind::File(buckets.clone()),
+	}
 }
 
 /// The value variants a kind's coercion accepts, as a bit set: what two kinds

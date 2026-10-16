@@ -511,7 +511,7 @@ impl ToSql for LogicalInfo {
 /// carrying that operator's fields, so a pass that handles one operator takes
 /// and returns the struct by name — its signature says which operator it works
 /// on — and adding a field to an operator touches only the code that reads it.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub enum LogicalOp {
 	/// Rows read from storage; see [`LogicalSource`].
 	Source(LogicalSource),
@@ -579,6 +579,54 @@ pub enum LogicalOp {
 	Info(Box<LogicalInfo>),
 	/// `SLEEP`; see [`LogicalSleep`].
 	Sleep(LogicalSleep),
+}
+
+/// One body for every clone of a plan node, whichever crate clones it: a
+/// derived `clone` is `#[inline]`, so each crate that clones a node, or a
+/// `Box` of one, would carry its own copy of the whole match.
+impl Clone for LogicalOp {
+	#[inline]
+	fn clone(&self) -> Self {
+		clone_op(self)
+	}
+}
+
+#[inline(never)]
+fn clone_op(op: &LogicalOp) -> LogicalOp {
+	match op {
+		LogicalOp::Source(op) => LogicalOp::Source(op.clone()),
+		LogicalOp::Values(op) => LogicalOp::Values(op.clone()),
+		LogicalOp::Match(op) => LogicalOp::Match(op.clone()),
+		LogicalOp::Subquery(op) => LogicalOp::Subquery(op.clone()),
+		LogicalOp::Write(op) => LogicalOp::Write(op.clone()),
+		LogicalOp::Ddl(op) => LogicalOp::Ddl(op.clone()),
+		LogicalOp::UnionAll(op) => LogicalOp::UnionAll(op.clone()),
+		LogicalOp::Join(op) => LogicalOp::Join(op.clone()),
+		LogicalOp::Filter(op) => LogicalOp::Filter(op.clone()),
+		LogicalOp::PermissionFilter(op) => LogicalOp::PermissionFilter(op.clone()),
+		LogicalOp::Split(op) => LogicalOp::Split(op.clone()),
+		LogicalOp::Aggregate(op) => LogicalOp::Aggregate(op.clone()),
+		LogicalOp::Distinct(op) => LogicalOp::Distinct(op.clone()),
+		LogicalOp::Sort(op) => LogicalOp::Sort(op.clone()),
+		LogicalOp::Limit(op) => LogicalOp::Limit(op.clone()),
+		LogicalOp::Project(op) => LogicalOp::Project(op.clone()),
+		LogicalOp::Fetch(op) => LogicalOp::Fetch(op.clone()),
+		LogicalOp::Timeout(op) => LogicalOp::Timeout(op.clone()),
+		LogicalOp::VersionScope(op) => LogicalOp::VersionScope(op.clone()),
+		LogicalOp::Only(op) => LogicalOp::Only(op.clone()),
+		LogicalOp::Explain(op) => LogicalOp::Explain(op.clone()),
+		LogicalOp::Eval(op) => LogicalOp::Eval(op.clone()),
+		LogicalOp::Sequence(op) => LogicalOp::Sequence(op.clone()),
+		LogicalOp::Let(op) => LogicalOp::Let(op.clone()),
+		LogicalOp::Return(op) => LogicalOp::Return(op.clone()),
+		LogicalOp::Foreach(op) => LogicalOp::Foreach(op.clone()),
+		LogicalOp::If(op) => LogicalOp::If(op.clone()),
+		LogicalOp::Throw(op) => LogicalOp::Throw(op.clone()),
+		LogicalOp::Break(op) => LogicalOp::Break(*op),
+		LogicalOp::Continue(op) => LogicalOp::Continue(*op),
+		LogicalOp::Info(op) => LogicalOp::Info(op.clone()),
+		LogicalOp::Sleep(op) => LogicalOp::Sleep(op.clone()),
+	}
 }
 
 /// Rows read from storage: a table, a record id or range, a mock set, or
