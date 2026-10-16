@@ -594,3 +594,47 @@ pub(crate) fn implied_definitions_dropped(
 	}
 	dropped
 }
+
+pub(crate) fn define_field_statement_validate_reference_options(
+	definition: &catalog::FieldDefinition,
+) -> Result<()> {
+	// If a reference is defined, the field must be a record
+	if definition.reference.is_some() {
+		ensure!(
+			definition.name.len() == 1,
+			ExecError::ReferenceNestedField(definition.name.to_sql())
+		);
+
+		fn valid(kind: &Kind, outer: bool) -> bool {
+			match kind {
+				Kind::None | Kind::Record(_) => true,
+				Kind::Array(kind, _) | Kind::Set(kind, _) => outer && valid(kind, false),
+				Kind::Literal(KindLiteral::Array(kinds)) => {
+					outer && kinds.iter().all(|k| valid(k, false))
+				}
+				_ => false,
+			}
+		}
+
+		let is_record_id = match definition.field_kind.as_ref() {
+			Some(Kind::Either(kinds)) => kinds.iter().all(|k| valid(k, true)),
+			Some(Kind::Array(kind, _)) | Some(Kind::Set(kind, _)) => match kind.as_ref() {
+				Kind::Either(kinds) => kinds.iter().all(|k| valid(k, true)),
+				Kind::Record(_) => true,
+				_ => false,
+			},
+			Some(Kind::Literal(KindLiteral::Array(kinds))) => kinds.iter().all(|k| valid(k, true)),
+			Some(Kind::Record(_)) => true,
+			_ => false,
+		};
+
+		ensure!(
+			is_record_id,
+			ExecError::ReferenceTypeConflict(
+				definition.field_kind.as_ref().unwrap_or(&Kind::Any).to_sql()
+			)
+		);
+	}
+
+	Ok(())
+}

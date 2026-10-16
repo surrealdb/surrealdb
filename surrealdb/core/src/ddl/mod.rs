@@ -40,7 +40,6 @@ pub(crate) use self::define::field::{
 	define_field_statement_validate_computed_options,
 	define_field_statement_validate_flexible_restrictions,
 	define_field_statement_validate_key_components,
-	define_field_statement_validate_reference_options,
 };
 pub(crate) use self::define::user::{
 	define_user_statement_compute, define_user_statement_to_definition,

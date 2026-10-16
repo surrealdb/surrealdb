@@ -529,9 +529,10 @@ pub fn filter_from_value(v: &str) -> std::result::Result<EnvFilter, ParseError> 
 			.add_directive("surrealdb=trace".parse()?)
 			.add_directive("surrealdb::core::kvs::tx=debug".parse()?)
 			.add_directive("surrealdb::core::kvs::tr=debug".parse()?)),
-		// Check if we should show all surreal logs
+		// Trace the surreal crates, including the kvs transaction layers. Other
+		// crates stay at warn, as in `trace`, so dependency internals stay quiet.
 		"full" => Ok(EnvFilter::default()
-			.add_directive(Level::DEBUG.into())
+			.add_directive(Level::WARN.into())
 			.add_directive("surreal=trace".parse()?)
 			.add_directive("surrealdb=trace".parse()?)
 			.add_directive("surrealdb::core::kvs::tx=trace".parse()?)

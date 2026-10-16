@@ -276,7 +276,7 @@ pub(super) async fn purge_edge_pointers(
 pub(super) fn validate_reference_options(
 	field: &crate::catalog::FieldDefinition,
 ) -> anyhow::Result<()> {
-	crate::ddl::define_field_statement_validate_reference_options(field)
+	crate::exec::field_rules::define_field_statement_validate_reference_options(field)
 }
 
 /// What refuses removing table `name` from the database `ns`, `db`. A non-empty

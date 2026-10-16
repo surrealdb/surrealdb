@@ -314,7 +314,7 @@ async fn alter_field_write(
 	// field whose kind holds only records. Import skips this check, so exported definitions load
 	// as they were written.
 	if (kind_changed || reference_altered) && !opt.import {
-		crate::ddl::define_field_statement_validate_reference_options(&df)?;
+		crate::exec::field_rules::define_field_statement_validate_reference_options(&df)?;
 	}
 
 	// The record id components that the merged definition names are checked as

@@ -2834,7 +2834,7 @@ pub(crate) enum FieldCheck {
 	},
 	/// When the definition in `field` has a `REFERENCE`, it is a top-level
 	/// field whose kind holds only records
-	/// (`ddl::define_field_statement_validate_reference_options`).
+	/// (`exec::field_rules::define_field_statement_validate_reference_options`).
 	Reference {
 		field: Reg,
 	},
