@@ -46,7 +46,7 @@ A definition with no source entry for its `DIGEST`, or whose prepared entry was 
 
 ### Silo resolution (`silo.rs`)
 
-A `silo::` executable names an organisation, a package and an exact version, which map onto one immutable object at `{surrealism_silo_endpoint}/{org}/{pkg}/{major}.{minor}.{patch}.surli` (default endpoint `https://silo.surrealdb.com`). Point the endpoint at a mirror to serve packages from elsewhere; no `DEFINE MODULE` statement changes.
+A `silo::` executable names an organisation, a package and an exact version, which map onto one immutable object at `https://silo.surrealdb.com/{org}/{pkg}/{major}.{minor}.{patch}.surli` (`config::SILO_ENDPOINT`). There is one registry, so a release build cannot change the endpoint; an archive served from elsewhere is defined from a bucket. A build with debug assertions reads `SURREAL_SURREALISM_SILO_ENDPOINT`, so the integration tests can serve packages from a local registry.
 
 Both names come straight from the parser, where a backtick-quoted identifier can hold `/` or `..`, so `package_url` restricts them to ASCII alphanumerics, `-` and `_` before they reach a URL path segment.
 
@@ -83,5 +83,5 @@ A definition stored before revision 3 decodes with all three fields `None`. It i
 | `runner.rs` | `ExtensionRunner`, `PreparedExtension`, `Invocation`, `RunnerCapabilities`, `SurrealismRunner` |
 | `cache.rs` | `SurrealismCache`: prepared by digest, sources by tenant, grants by `CAPABILITIES` |
 | `silo.rs` | Package URL construction and the `.surli` download |
-| `config.rs` | Server-side ceilings and the silo endpoint |
+| `config.rs` | Server-side ceilings, and the silo endpoint a debug build may override |
 | `mod.rs` | Module declarations |

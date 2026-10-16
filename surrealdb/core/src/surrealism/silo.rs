@@ -7,10 +7,11 @@
 //! {endpoint}/{organisation}/{package}/{major}.{minor}.{patch}.surli
 //! ```
 //!
-//! The endpoint is `surrealism_silo_endpoint`, so an operator can point the
-//! whole resolution at a mirror without touching any `DEFINE EXTENSION`
-//! statement. Packages are public and immutable per version, so the fetch
-//! carries no credentials and the result is cached under
+//! The endpoint is [`SILO_ENDPOINT`](super::config::SILO_ENDPOINT): there is
+//! one registry, and a release build cannot point `silo::` anywhere else. An
+//! archive served from elsewhere is defined from a bucket instead
+//! (`FROM f"bucket:/path.surli"`). Packages are public and immutable per
+//! version, so the fetch carries no credentials and the result is cached under
 //! [`SurrealismCacheLookup::Silo`](crate::surrealism::cache::SurrealismCacheLookup).
 
 use anyhow::{Context as _, Result, bail};

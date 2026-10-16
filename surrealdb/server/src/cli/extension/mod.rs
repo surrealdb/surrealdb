@@ -142,9 +142,6 @@ pub struct CommonArgs {
 	/// confirm (✗) without asking.
 	#[arg(long)]
 	allow_log_failure: bool,
-	/// The Silo registry address.
-	#[arg(long, env = "SURREAL_SURREALISM_SILO_ENDPOINT", default_value = silo::DEFAULT_ENDPOINT)]
-	silo_endpoint: String,
 	/// Install without verifying the archive's signature, even when it has
 	/// one, and record the extension as UNSIGNED. DIGEST still pins the
 	/// code, and the capabilities are still shown and confirmed. The only way
@@ -178,7 +175,6 @@ impl std::fmt::Debug for CommonArgs {
 			.field("allow_custom_root", &self.allow_custom_root)
 			.field("allow_unchecked_root", &self.allow_unchecked_root)
 			.field("allow_log_failure", &self.allow_log_failure)
-			.field("silo_endpoint", &self.silo_endpoint)
 			.field("unsigned", &self.unsigned)
 			.field("dry_run", &self.dry_run)
 			.field("sel", &self.sel)
@@ -226,7 +222,7 @@ pub struct UpgradeArgs {
 
 fn options(common: &CommonArgs) -> Options {
 	Options {
-		silo_endpoint: common.silo_endpoint.clone(),
+		silo_endpoint: silo::endpoint(),
 		trust_root: common.trust_root.clone(),
 		public_root: if common.offline {
 			online::PublicRoot::Off

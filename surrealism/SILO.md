@@ -9,9 +9,12 @@ package name. Two parties read from it:
   exact version, collect the details the install prompt shows, and write the
   `DEFINE EXTENSION` statement (`surrealdb/server/src/cli/extension/silo.rs`).
 
-Every URL below is relative to the endpoint. The server and the CLI both read it
-from `surrealism_silo_endpoint` (environment: `SURREAL_SURREALISM_SILO_ENDPOINT`),
-default `https://silo.surrealdb.com`. A trailing `/` on the endpoint is ignored.
+Every URL below is relative to the endpoint, `https://silo.surrealdb.com`. There
+is one registry: neither the server nor the CLI can be pointed at another one in
+a release build. An archive served from anywhere else is defined from a bucket
+(`FROM f"bucket:/path.surli"`), not as a `silo::` package. Builds with debug
+assertions read `SURREAL_SURREALISM_SILO_ENDPOINT`, so the integration tests can
+serve packages from a local registry.
 
 ## Names
 

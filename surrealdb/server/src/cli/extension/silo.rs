@@ -28,11 +28,22 @@ use tracing::instrument;
 
 use super::archive::{ArchiveFacts, preview_archive};
 
-/// The endpoint used when `surrealism_silo_endpoint` is not set. The server
-/// has the same default, and the CLI reads the same
-/// `SURREAL_SURREALISM_SILO_ENDPOINT`, so that the client and the server it
-/// installs into agree on the host.
-pub(crate) const DEFAULT_ENDPOINT: &str = "https://silo.surrealdb.com";
+/// The Silo registry, the one the server resolves `silo::` against.
+pub(crate) const ENDPOINT: &str = "https://silo.surrealdb.com";
+
+/// The registry the installer asks: [`ENDPOINT`]. A build with debug assertions
+/// reads `SURREAL_SURREALISM_SILO_ENDPOINT`, as the server does, so the
+/// integration tests can install from a local registry; a release build has no
+/// way to change it.
+pub(crate) fn endpoint() -> String {
+	#[cfg(debug_assertions)]
+	if let Some(endpoint) =
+		std::env::var("SURREAL_SURREALISM_SILO_ENDPOINT").ok().filter(|e| !e.is_empty())
+	{
+		return endpoint;
+	}
+	ENDPOINT.to_string()
+}
 
 /// The largest archive accepted, equal to the server's own limit: an archive
 /// the server would refuse is not worth inspecting.

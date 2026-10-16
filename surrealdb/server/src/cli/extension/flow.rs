@@ -28,7 +28,8 @@ use super::verify::{
 /// Settings shared by `install` and `upgrade`.
 #[derive(Clone, Debug, Default)]
 pub struct Options {
-	/// Silo's address; [`super::silo::DEFAULT_ENDPOINT`] unless overridden.
+	/// Silo's address: [`super::silo::endpoint`], which tests replace with a
+	/// local registry.
 	pub silo_endpoint: String,
 	/// `--trust-root`: a `trusted_root.json` to verify a Sigstore signature
 	/// against, instead of the root its envelope embeds.

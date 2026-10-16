@@ -56,13 +56,15 @@ pub(crate) struct SurrealismConfig {
 	/// "debug"). A module's standard error is always recorded at `warn`,
 	/// independently of this.
 	pub surrealism_log_level: String,
-	/// Base URL that a `silo::` module executable is resolved against. A
-	/// package is fetched from
-	/// `{endpoint}/{organisation}/{package}/{major}.{minor}.{patch}.surli`, so a trailing slash
-	/// here is redundant and is stripped before the path is appended. Point this at a mirror to
-	/// serve packages from elsewhere.
+	/// Base URL that a `silo::` executable is resolved against: [`SILO_ENDPOINT`]. There is one
+	/// registry, so a release build cannot change it. A build with debug assertions reads
+	/// `SURREAL_SURREALISM_SILO_ENDPOINT`, so the integration tests can serve packages from a
+	/// local registry; a trailing slash is stripped before the path is appended.
 	pub surrealism_silo_endpoint: String,
 }
+
+/// The Silo package host, the one registry `silo::` executables resolve against.
+pub(crate) const SILO_ENDPOINT: &str = "https://silo.surrealdb.com";
 
 impl Default for SurrealismConfig {
 	fn default() -> Self {
@@ -74,7 +76,7 @@ impl Default for SurrealismConfig {
 			surrealism_max_concurrent_invocations: 64,
 			surrealism_allow_unbounded_execution: false,
 			surrealism_log_level: "debug".to_string(),
-			surrealism_silo_endpoint: "https://silo.surrealdb.com".to_string(),
+			surrealism_silo_endpoint: SILO_ENDPOINT.to_string(),
 		}
 	}
 }
@@ -98,9 +100,10 @@ impl cnf::Config for SurrealismConfig {
 			)
 			.parse_key_with("surrealism_log_level", &mut self.surrealism_log_level, |s| {
 				Some(s.to_string())
-			})
-			.parse_key_with("surrealism_silo_endpoint", &mut self.surrealism_silo_endpoint, |s| {
-				Some(s.trim_end_matches('/').to_string())
 			});
+		#[cfg(debug_assertions)]
+		map.parse_key_with("surrealism_silo_endpoint", &mut self.surrealism_silo_endpoint, |s| {
+			Some(s.trim_end_matches('/').to_string())
+		});
 	}
 }
