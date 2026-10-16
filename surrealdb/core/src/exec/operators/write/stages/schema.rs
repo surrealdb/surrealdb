@@ -31,8 +31,8 @@ use crate::exec::logical::effects::effects_of_expr;
 use crate::exec::operators::write::ctx::WriteCtx;
 use crate::exec::operators::write::row::WriteRow;
 use crate::expr::ControlFlow;
-use crate::expr::idiom::{IdiomTrie, IdiomTrieContains};
-use crate::expr::kind::Kind;
+use crate::expr::idiom::{Idiom, IdiomTrie, IdiomTrieContains};
+use crate::expr::kind::{Kind, KindLiteral};
 use crate::expr::logical::{EffectSet, LogicalExpr};
 use crate::expr::part::Part;
 use crate::expr::statements::define::kind_contains_object;
@@ -135,6 +135,14 @@ fn rebuild_sets_holding(value: &mut Value, path: &[Part]) {
 /// The table is `SCHEMAFULL`, so an undefined field is refused rather than
 /// dropped: a record that silently lost a field would be stored as something
 /// other than what the caller wrote.
+///
+/// A definition reaches the places its path names, and a kind that holds a
+/// literal object or array also reaches the places beneath its value that the
+/// literal describes ([`describe`]). Each place admits an undefined interior
+/// as the kind that describes it does: `any` admits one, an object admits one
+/// only when the field is `FLEXIBLE`, and a literal admits only the places it
+/// names. A member of a union is held to this alone, so a literal member opens
+/// nothing a value of another member holds.
 pub(crate) fn refuse_undefined_fields(
 	current: &Value,
 	fields: &[FieldDefinition],
@@ -147,27 +155,42 @@ pub(crate) fn refuse_undefined_fields(
 	// schemaless interior of an ancestor, however permissive that ancestor is.
 	let explicit: HashSet<&[Part]> = fields.iter().map(|fd| fd.name.0.as_slice()).collect();
 
+	// Every place a definition's path names, with whether it admits an
+	// undefined interior. The places a literal describes are entered while
+	// these are gathered, and these are entered after them, so a definition
+	// of a place overrides what a kind holding the place says of it,
+	// whichever of the two is defined first.
+	let mut named: Vec<(Idiom, bool)> = Vec::with_capacity(fields.len());
 	for fd in fields.iter() {
 		let field_kind = fd.field_kind.as_ref();
-		// `TYPE any` and a literal type admit anything beneath them — a
-		// literal's interior is caught by coercion instead — and an object
-		// type does so only when the field is `FLEXIBLE`.
-		let allows_nested = field_kind.is_some_and(Kind::is_any)
-			|| field_kind.is_some_and(Kind::contains_literal)
-			|| (field_kind.is_some_and(kind_contains_object) && fd.flexible);
-
 		for k in current.each(&fd.name) {
-			defined.insert(&k, allows_nested);
-			// The ancestors of an expanded path are reachable too. One no
-			// definition reaches is a schemaless object on the way to a defined
-			// field, so its interior is admitted. One a definition does reach —
-			// an element `a[0]` of a defined `a.*` among them — keeps what that
-			// definition admits, whichever of the two is expanded first.
-			for i in 1..k.len() {
-				let reached = matches!(defined.contains(&k[..i]), IdiomTrieContains::Exact(_));
-				if !explicit.contains(&&k[..i]) && !reached {
-					defined.insert(&k[..i], true);
+			let admits = match field_kind {
+				Some(kind) if describes_places(kind) => {
+					let mut admits = false;
+					let mut place = k.0.clone();
+					current.walk_ref(&k, &mut |value| {
+						admits = describe(kind, value, fd.flexible, &mut place, &mut defined);
+					});
+					admits
 				}
+				kind => admits_interior(kind, fd.flexible),
+			};
+			named.push((k, admits));
+		}
+	}
+
+	for (k, admits) in named.iter() {
+		defined.insert(k, *admits);
+		// The ancestors of an expanded path are reachable too. One no
+		// definition reaches is a schemaless object on the way to a defined
+		// field, so its interior is admitted. One a definition does reach —
+		// an element `a[0]` of a defined `a.*`, or a key a literal names,
+		// among them — keeps what that definition admits, whichever of the
+		// two is expanded first.
+		for i in 1..k.len() {
+			let reached = matches!(defined.contains(&k[..i]), IdiomTrieContains::Exact(_));
+			if !explicit.contains(&&k[..i]) && !reached {
+				defined.insert(&k[..i], true);
 			}
 		}
 	}
@@ -199,6 +222,110 @@ pub(crate) fn refuse_undefined_fields(
 		}
 	}
 	Ok(())
+}
+
+/// Whether a field of kind `kind`, `FLEXIBLE` when `flexible`, admits paths
+/// beneath its value that no definition reaches: `TYPE any` does, a kind
+/// holding an object does when the field is `FLEXIBLE`, and no other kind, a
+/// field with no `TYPE` among them, does.
+fn admits_interior(kind: Option<&Kind>, flexible: bool) -> bool {
+	kind.is_some_and(|kind| kind.is_any() || (flexible && kind_contains_object(kind)))
+}
+
+/// Whether `kind` holds a literal object or array, as a member of a union or
+/// the element kind of an array or set: a kind whose shape describes places
+/// beneath a value of it that no definition names.
+fn describes_places(kind: &Kind) -> bool {
+	match kind {
+		Kind::Literal(KindLiteral::Object(_) | KindLiteral::Array(_)) => true,
+		Kind::Either(members) => members.iter().any(describes_places),
+		Kind::Array(element, _) | Kind::Set(element, _) => describes_places(element),
+		_ => false,
+	}
+}
+
+/// Enter into `defined` the places beneath `value`, the value of kind `kind`
+/// at `place`, that `kind` describes, each with whether it admits an
+/// undefined interior, and answer whether `place` itself admits one, for a
+/// field that is `FLEXIBLE` when `flexible`.
+///
+/// A literal object describes the keys of the value it names, a literal array
+/// the elements its length covers, and an array or set kind the elements of an
+/// array, each judged by its own kind in turn. A kind that holds no literal
+/// object or array describes nothing beneath it and is judged as a field of
+/// that kind would be ([`admits_interior`]). A union judges the value by each
+/// member the value conforms to, so a member the value is not an instance of
+/// says nothing of it. A value no member conforms to, which an import replays
+/// without coercing, is judged by every member. `place` is left as it was
+/// found.
+fn describe(
+	kind: &Kind,
+	value: &Value,
+	flexible: bool,
+	place: &mut Vec<Part>,
+	defined: &mut IdiomTrie<bool>,
+) -> bool {
+	if !describes_places(kind) {
+		return admits_interior(Some(kind), flexible);
+	}
+	match (kind, value) {
+		(Kind::Either(members), value) => {
+			let mut admits = false;
+			let mut conformed = false;
+			for member in members.iter().filter(|member| value.can_coerce_to_kind(member)) {
+				conformed = true;
+				admits |= describe(member, value, flexible, place, defined);
+			}
+			if !conformed {
+				for member in members.iter() {
+					admits |= describe(member, value, flexible, place, defined);
+				}
+			}
+			admits
+		}
+		(Kind::Literal(KindLiteral::Object(shape)), Value::Object(object)) => {
+			for (key, kind) in shape.iter() {
+				if let Some(value) = object.get(key.as_str()) {
+					describe_held(Part::Field(key.clone()), kind, value, flexible, place, defined);
+				}
+			}
+			false
+		}
+		(Kind::Literal(KindLiteral::Array(kinds)), Value::Array(array)) => {
+			for (i, (kind, value)) in kinds.iter().zip(array.iter()).enumerate() {
+				describe_held(Part::index_int(i as i64), kind, value, flexible, place, defined);
+			}
+			false
+		}
+		(Kind::Array(element, _) | Kind::Set(element, _), Value::Array(array)) => {
+			for (i, value) in array.iter().enumerate() {
+				describe_held(Part::index_int(i as i64), element, value, flexible, place, defined);
+			}
+			false
+		}
+		// A value of another shape than the kind holds nothing the kind
+		// describes; `Value::every` lists nothing within a set.
+		_ => false,
+	}
+}
+
+/// Enter the place `part` names beneath `place`, holding `value` of kind
+/// `kind`, into `defined` with what [`describe`] says of it. A place more than
+/// one kind describes admits an undefined interior when any of them admits
+/// one.
+fn describe_held(
+	part: Part,
+	kind: &Kind,
+	value: &Value,
+	flexible: bool,
+	place: &mut Vec<Part>,
+	defined: &mut IdiomTrie<bool>,
+) {
+	place.push(part);
+	let admits = describe(kind, value, flexible, place, defined)
+		|| matches!(defined.contains(place), IdiomTrieContains::Exact(true));
+	defined.insert(place, admits);
+	place.pop();
 }
 
 /// Remove `NONE` recursively from objects, leaving array elements alone.
