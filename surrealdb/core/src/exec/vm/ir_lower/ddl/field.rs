@@ -645,9 +645,9 @@ impl Ddl<'_, '_> {
 		else {
 			return self.alter_field_resolved(attrs, field, template);
 		};
-		// An altered kind is altered by the host, which judges the fields nested in the field
-		// against it and writes and deletes the element definitions it implies, as `DEFINE FIELD`
-		// does.
+		// An altered kind is altered by the host, which judges it against the fields the field is
+		// nested in and the fields nested in the field against it, and writes and deletes the
+		// element definitions it implies, as `DEFINE FIELD` does.
 		if !matches!(field.kind, AlterKind::None) {
 			return self.alter_field_resolved(attrs, field, template);
 		}

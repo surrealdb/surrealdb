@@ -331,6 +331,14 @@ async fn alter_field_write(
 		.await?;
 	}
 
+	// A `TYPE` the statement sets is judged against every field the field is nested in, as
+	// `DEFINE FIELD` judges a new one, and refused with the same error. An import is judged as
+	// `DEFINE FIELD` judges one: an export writes each field as `DEFINE FIELD OVERWRITE`, never as
+	// `ALTER FIELD`, so no export replays through this check.
+	if kind_changed {
+		crate::ddl::define_field_statement_disallow_mismatched_types(&txn, ns, db, &df).await?;
+	}
+
 	// INLINE embeds the field's value into the edge's adjacency payloads;
 	// the same restrictions as DEFINE FIELD, validated against the fully
 	// resolved definition.
@@ -387,13 +395,13 @@ async fn alter_field_write(
 	}
 
 	// A `TYPE` the statement alters follows the rules `DEFINE FIELD` applies to a new one.
-	// The fields nested in the field are checked against it, the fields it is nested in must
-	// admit it, and the definitions it implies for the elements of an array or set are written
-	// with it. Import skips this check, so exported definitions load as they were written.
+	// The fields nested in the field are checked against it, and the definitions it implies
+	// for the elements of an array or set are written with it. Import skips this check, so
+	// exported definitions load as they were written. The fields it is nested in are judged
+	// above, an import included.
 	if kind_changed && !opt.import {
 		let fields = txn.all_tb_fields(ns, db, what, None).await?;
 		crate::exec::field_rules::define_field_nesting_restrictions(&fields, &df)?;
-		crate::ddl::define_field_statement_disallow_mismatched_types(&txn, ns, db, &df).await?;
 	}
 
 	// A record id that names its components must admit every record the table

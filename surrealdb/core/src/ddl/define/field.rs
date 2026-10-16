@@ -349,9 +349,19 @@ pub(crate) async fn define_field_definition_apply(
 
 /// Refuse `definition` when its kind is not one each field it is nested in
 /// admits at its place
-/// ([`parent_kind_restrictions`](crate::exec::field_rules::parent_kind_restrictions)).
-/// The check runs under an import too, so it admits every definition an
-/// export writes, the ones a kind implies for its elements among them.
+/// ([`parent_kind_restrictions`](crate::exec::field_rules::parent_kind_restrictions)),
+/// reading the table's fields from the catalog of namespace `ns` and database
+/// `db` through `txn`.
+///
+/// `DEFINE FIELD` makes this check of every definition, and `ALTER FIELD` of
+/// every definition whose `TYPE` it sets. It runs under an import too, so it
+/// admits every definition an export writes, the ones a kind implies for its
+/// elements among them.
+///
+/// # Errors
+///
+/// The refusal of `parent_kind_restrictions`; the error of a catalog read that
+/// fails.
 pub(crate) async fn define_field_statement_disallow_mismatched_types(
 	txn: &Transaction,
 	ns: NamespaceId,

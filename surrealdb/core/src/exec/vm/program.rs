@@ -2098,9 +2098,10 @@ pub(super) enum StoreInstr {
 	/// alters it once both are named, by the clauses the definition in `altered` holds for each of
 	/// `fields`: the stored definition the statement's clauses form, with the stored type's
 	/// default where a clause is not set. `kind_changed` is whether the statement sets or drops
-	/// the type, which decides whether the record id components it names are judged again. The
-	/// rules of a table that enforces migrations, and `migrate`, are judged once every other check
-	/// has passed, with `kept` the clauses a changed type leaves as they were.
+	/// the type, which decides whether the type is judged against the fields the field is nested
+	/// in and those nested in it, and whether the record id components it names are judged again.
+	/// The rules of a table that enforces migrations, and `migrate`, are judged once every other
+	/// check has passed, with `kept` the clauses a changed type leaves as they were.
 	AlterFieldClauses {
 		name: Reg,
 		table: Reg,
