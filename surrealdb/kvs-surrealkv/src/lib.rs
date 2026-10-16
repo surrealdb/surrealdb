@@ -665,12 +665,8 @@ impl Transactable for Transaction {
 				//
 				match version {
 					Some(ts) => {
-						// Include tombstones so we can detect deleted keys
-						let opts = HistoryOptions::new().with_tombstones(true);
-						// Create the iterator with tombstone visibility
-						let mut iter = inner
-							.history_with_options(beg.as_slice(), end.as_slice(), &opts)
-							.map_err(kvs_error)?;
+						// Create the iterator, with tombstones visible to detect deleted keys
+						let mut iter = history_iter(&inner, beg.as_slice(), end.as_slice())?;
 						// Seek to the first key
 						iter.seek_first().map_err(kvs_error)?;
 						// History entries are sorted (key ASC, timestamp DESC),
@@ -756,8 +752,7 @@ impl Transactable for Transaction {
 			let res = match version {
 				Some(ts) => {
 					// Create the iterator
-					let mut iter =
-						inner.history(beg.as_slice(), end.as_slice()).map_err(kvs_error)?;
+					let mut iter = history_iter(&inner, beg.as_slice(), end.as_slice())?;
 					// Seek to the first key
 					iter.seek_first().map_err(kvs_error)?;
 					// Consume the iterator
@@ -817,10 +812,7 @@ impl Transactable for Transaction {
 					// As `count` does: tombstones visible, so a key deleted as
 					// of `ts` is examined, charged to the budget, and not
 					// counted.
-					let opts = HistoryOptions::new().with_tombstones(true);
-					let mut iter = inner
-						.history_with_options(beg.as_slice(), end.as_slice(), &opts)
-						.map_err(kvs_error)?;
+					let mut iter = history_iter(&inner, beg.as_slice(), end.as_slice())?;
 					iter.seek_first().map_err(kvs_error)?;
 					let mut examined = 0;
 					while iter.valid() && examined < budget {
@@ -887,8 +879,7 @@ impl Transactable for Transaction {
 			let res = match version {
 				Some(ts) => {
 					// Create the iterator
-					let mut iter =
-						inner.history(beg.as_slice(), end.as_slice()).map_err(kvs_error)?;
+					let mut iter = history_iter(&inner, beg.as_slice(), end.as_slice())?;
 					// Seek to the last key
 					iter.seek_last().map_err(kvs_error)?;
 					// Consume the iterator
@@ -943,8 +934,7 @@ impl Transactable for Transaction {
 			let res = match version {
 				Some(ts) => {
 					// Create the iterator
-					let mut iter =
-						inner.history(beg.as_slice(), end.as_slice()).map_err(kvs_error)?;
+					let mut iter = history_iter(&inner, beg.as_slice(), end.as_slice())?;
 					// Seek to the first key
 					iter.seek_first().map_err(kvs_error)?;
 					// Consume the iterator
@@ -999,8 +989,7 @@ impl Transactable for Transaction {
 			let res = match version {
 				Some(ts) => {
 					// Create the iterator
-					let mut iter =
-						inner.history(beg.as_slice(), end.as_slice()).map_err(kvs_error)?;
+					let mut iter = history_iter(&inner, beg.as_slice(), end.as_slice())?;
 					// Seek to the last key
 					iter.seek_last().map_err(kvs_error)?;
 					// Consume the iterator
@@ -1125,6 +1114,14 @@ impl TimeStampImpl for SurrealKvTimeStampImpl {
 	}
 }
 
+/// Open an iterator over every version of the keys in `beg..end`, tombstones included. Every
+/// versioned read (`keys`, `keysr`, `scan`, `scanr`, `count`, `count_bounded`) needs the
+/// tombstones to tell a key deleted as of a version from one which was merely written before it.
+fn history_iter<'a>(tx: &'a Tx, beg: &'a [u8], end: &'a [u8]) -> Result<impl LSMIterator + 'a> {
+	let opts = HistoryOptions::new().with_tombstones(true);
+	tx.history_with_options(beg, end, &opts).map_err(kvs_error)
+}
+
 // A cursor advances through entries and returns the next key or key-value pair.
 // The cursor abstraction allows consume_keys and consume_vals to work with
 // both range iterators and history iterators with timestamp filtering.
@@ -1168,131 +1165,94 @@ impl Cursor for RangeCursor<'_> {
 	}
 }
 
-// A cursor wrapping a history iterator with timestamp filtering
+// A cursor wrapping a history iterator with timestamp filtering.
+//
+// The iterator is opened by `history_iter`, with tombstones visible, so that the newest version
+// of a key at or before `ts` is always the state of that key as of `ts`: a value, or a tombstone,
+// in which case the key was deleted as of `ts` and is not yielded. A key whose versions all come
+// after `ts` is not yielded either. History entries are sorted (key ASC, timestamp DESC), so
+// forward iteration meets the newest version of each key first, and backward iteration the oldest.
 struct HistoryCursor<'a> {
 	inner: Box<dyn LSMIterator + 'a>,
 	dir: Direction,
 	ts: u64,
 }
 
-impl Cursor for HistoryCursor<'_> {
-	fn next_key(&mut self) -> Result<Option<Vec<u8>>> {
-		// History entries are sorted (key ASC, timestamp DESC), so
-		// forward iteration yields newest versions first per key,
-		// and backward iteration yields oldest versions first per key.
+impl HistoryCursor<'_> {
+	/// Advance to the next key which holds a value as of `self.ts`, and return it. The value is
+	/// read only when `with_value` is set, and is empty otherwise.
+	fn advance(&mut self, with_value: bool) -> Result<Option<(Vec<u8>, Val)>> {
 		match self.dir {
 			Direction::Forward => {
-				// Newest version first: the first entry with ts <= self.ts
-				// is the latest version. Then skip older versions of same key.
 				while self.inner.valid() {
 					let key_ref = self.inner.key();
-					if key_ref.timestamp() <= self.ts {
-						// Store the current user key
-						let user_key = key_ref.user_key().to_vec();
-						// Skip remaining older versions of this key
-						loop {
-							// Continue to the next version
-							self.inner.next().map_err(kvs_error)?;
-							// Check if we have proceeded to a new key
-							if !self.inner.valid() || self.inner.key().user_key() != user_key {
-								break;
-							}
-						}
-						// Return the key
-						return Ok(Some(user_key));
+					// A version newer than `ts` is not the state of this key as of `ts`
+					if key_ref.timestamp() > self.ts {
+						self.inner.next().map_err(kvs_error)?;
+						continue;
 					}
-					// Continue to the next version
-					self.inner.next().map_err(kvs_error)?;
+					// The newest version at or before `ts` is the state of this key as of `ts`
+					let user_key = key_ref.user_key().to_vec();
+					let live = !key_ref.is_tombstone();
+					let value = if live && with_value {
+						self.inner.value().map_err(kvs_error)?
+					} else {
+						Val::new()
+					};
+					// Skip the remaining older versions of this key
+					loop {
+						self.inner.next().map_err(kvs_error)?;
+						if !self.inner.valid() || self.inner.key().user_key() != user_key {
+							break;
+						}
+					}
+					// Pass over a key which was deleted as of `ts`
+					if live {
+						return Ok(Some((user_key, value)));
+					}
 				}
-				// Return None if no key was matched
 				Ok(None)
 			}
 			Direction::Backward => {
-				// Oldest version first: scan all versions of the current
-				// key and keep the latest one with ts <= self.ts.
 				while self.inner.valid() {
-					// Track if matched
-					let mut matched = false;
+					// Extract the user key once (owned for comparison across iterations)
 					let user_key = self.inner.key().user_key().to_vec();
-					// Scan all versions of the current key
+					// Whether the newest version seen at or before `ts` holds a value, and
+					// that value. Each newer version replaces the one before it.
+					let mut state: Option<(bool, Val)> = None;
+					// Scan all versions of the current key, oldest first
 					while self.inner.valid() && self.inner.key().user_key() == user_key {
-						// Check the first version at or before the timestamp
-						if self.inner.key().timestamp() <= self.ts {
-							matched = true;
+						let key_ref = self.inner.key();
+						if key_ref.timestamp() <= self.ts {
+							let live = !key_ref.is_tombstone();
+							let value = if live && with_value {
+								self.inner.value().map_err(kvs_error)?
+							} else {
+								Val::new()
+							};
+							state = Some((live, value));
 						}
-						// Continue to the previous version
+						// Continue to the next newer version
 						self.inner.prev().map_err(kvs_error)?;
 					}
-					// Return the key if matched
-					if matched {
-						return Ok(Some(user_key));
+					// Pass over a key which was deleted as of `ts`, or created after it
+					if let Some((true, value)) = state {
+						return Ok(Some((user_key, value)));
 					}
 				}
-				// Return None if no key was matched
 				Ok(None)
 			}
 		}
 	}
+}
+
+impl Cursor for HistoryCursor<'_> {
+	fn next_key(&mut self) -> Result<Option<Vec<u8>>> {
+		Ok(self.advance(false)?.map(|(key, _)| key))
+	}
 
 	fn next_entry(&mut self) -> Result<Option<(Vec<u8>, Val)>> {
-		// History entries are sorted (key ASC, timestamp DESC), so
-		// forward iteration yields newest versions first per key,
-		// and backward iteration yields oldest versions first per key.
-		match self.dir {
-			Direction::Forward => {
-				// Newest version first: the first entry with ts <= self.ts
-				// is the latest version. Then skip older versions of same key.
-				while self.inner.valid() {
-					let key_ref = self.inner.key();
-					if key_ref.timestamp() <= self.ts {
-						// Store the current user key
-						let user_key = key_ref.user_key().to_vec();
-						// Store the current value
-						let value = self.inner.value().map_err(kvs_error)?;
-						// Skip remaining older versions of this key
-						loop {
-							// Continue to the next version
-							self.inner.next().map_err(kvs_error)?;
-							// Check if we have proceeded to a new key
-							if !self.inner.valid() || self.inner.key().user_key() != user_key {
-								break;
-							}
-						}
-						return Ok(Some((user_key, value)));
-					}
-					// Continue to the next version
-					self.inner.next().map_err(kvs_error)?;
-				}
-				// Return None if no entry was matched
-				Ok(None)
-			}
-			Direction::Backward => {
-				// Oldest version first: scan all versions of the current
-				// key and keep the latest one with ts <= self.ts.
-				while self.inner.valid() {
-					// Extract user key once (owned for comparison across iterations)
-					let user_key = self.inner.key().user_key().to_vec();
-					// Store the current value
-					let mut value: Option<Val> = None;
-					// Scan all versions of the current key
-					while self.inner.valid() && self.inner.key().user_key() == user_key {
-						// Check the first version at or before the timestamp
-						if self.inner.key().timestamp() <= self.ts {
-							// Store the current value
-							value = Some(self.inner.value().map_err(kvs_error)?);
-						}
-						// Continue to the previous version
-						self.inner.prev().map_err(kvs_error)?;
-					}
-					// Return the entry if matched
-					if let Some(value) = value {
-						return Ok(Some((user_key, value)));
-					}
-				}
-				// Return None if no entry was matched
-				Ok(None)
-			}
-		}
+		self.advance(true)
 	}
 }
 
