@@ -1854,6 +1854,50 @@ pub async fn client_side_transactions(_new_db: impl CreateDb) {
 	// Client-side transactions are not supported on HTTP
 }
 
+#[cfg(not(any(feature = "protocol-http", feature = "kv-tikv")))]
+pub async fn a_conflict_at_the_commit_of_a_client_transaction_keeps_its_kind(
+	new_db: impl CreateDb,
+) {
+	use surrealdb::types::QueryError;
+
+	let config = Config::new();
+
+	let (permit, db) = new_db.create_db(config).await;
+
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+
+	db.query("CREATE item:1 SET value = 0").await.unwrap().check().unwrap();
+
+	let first = db.clone().begin().await.unwrap();
+
+	let second = db.clone().begin().await.unwrap();
+
+	first.query("UPDATE item:1 SET value = 1").await.unwrap().check().unwrap();
+
+	second.query("UPDATE item:1 SET value = 2").await.unwrap().check().unwrap();
+
+	first.commit().await.unwrap();
+
+	let Err(error) = second.commit().await else {
+		panic!("the second commit conflicts with the first");
+	};
+
+	// Retry helpers recognise a conflict by its kind rather than its message (#7472)
+	assert_eq!(error.query_details(), Some(&QueryError::TransactionConflict), "{error:?}");
+
+	assert!(error.message().starts_with("Transaction conflict: "), "{error:?}");
+
+	drop(permit);
+}
+
+#[cfg(any(feature = "protocol-http", feature = "kv-tikv"))]
+pub async fn a_conflict_at_the_commit_of_a_client_transaction_keeps_its_kind(
+	_new_db: impl CreateDb,
+) {
+	// Client-side transactions are not supported on HTTP, and TiKV reports this conflict inside
+	// `MultipleKeyErrors`, which the kvs error mapping doesn't recognise as a conflict yet
+}
+
 pub async fn refresh_tokens(new_db: impl CreateDb) {
 	let config = Config::new();
 	let (permit, db) = new_db.create_db(config).await;
@@ -2026,6 +2070,8 @@ define_include_tests!(basic => {
 	field_and_index_methods,
 	#[test_log::test(tokio::test)]
 	client_side_transactions,
+	#[test_log::test(tokio::test)]
+	a_conflict_at_the_commit_of_a_client_transaction_keeps_its_kind,
 	#[test_log::test(tokio::test)]
 	refresh_tokens,
 });

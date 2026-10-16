@@ -743,9 +743,8 @@ async fn router(
 					state.transactions.insert(id, Arc::new(txn));
 					query_result.finish_with_result(Ok(Value::Uuid(id.into())))
 				}
-				Err(error) => {
-					query_result.finish_with_result(Err(TypesError::internal(error.to_string())))
-				}
+				Err(error) => query_result
+					.finish_with_result(Err(surrealdb_core::err::anyhow_to_types_error(error))),
 			};
 			Ok(vec![result])
 		}
@@ -767,7 +766,7 @@ async fn router(
 		} => {
 			if let Some(tx) = state.transactions.get(&txn) {
 				state.transactions.remove(&txn);
-				tx.cancel().await.map_err(crate::std_error_to_types_error)?;
+				tx.cancel().await.map_err(surrealdb_core::err::anyhow_to_types_error)?;
 			}
 			Ok(vec![QueryResultBuilder::instant_none()])
 		}
@@ -776,7 +775,7 @@ async fn router(
 		} => {
 			if let Some(tx) = state.transactions.get(&txn) {
 				state.transactions.remove(&txn);
-				tx.commit().await.map_err(crate::std_error_to_types_error)?;
+				tx.commit().await.map_err(surrealdb_core::err::anyhow_to_types_error)?;
 			}
 			Ok(vec![QueryResultBuilder::instant_none()])
 		}

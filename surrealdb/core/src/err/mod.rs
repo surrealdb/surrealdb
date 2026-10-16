@@ -33,11 +33,16 @@ pub(crate) use to_types::into_types_error;
 /// Convert an [`anyhow::Error`] into a structured [`surrealdb_types::Error`].
 ///
 /// If the inner error is a core database error, it is downcast and converted using the full
-/// typed mapping. Otherwise the anyhow chain is preserved as an internal error chain.
+/// typed mapping. A bare key-value store error, as `Transaction::commit` returns it, gets the kind
+/// that [`Error::Kvs`] maps it to, but keeps the message that the anyhow error displays. Otherwise
+/// the anyhow chain is preserved as an internal error chain.
 pub fn anyhow_to_types_error(error: anyhow::Error) -> surrealdb_types::Error {
 	match error.downcast::<Error>() {
 		Ok(e) => into_types_error(e),
-		Err(e) => surrealdb_types::Error::from_anyhow_with_chain(e),
+		Err(e) => match e.downcast_ref::<KvsError>() {
+			Some(kvs_error) => to_types::kvs_to_types_error(kvs_error, e.to_string()),
+			None => surrealdb_types::Error::from_anyhow_with_chain(e),
+		},
 	}
 }
 
@@ -1464,5 +1469,59 @@ mod tests {
 			types_error.kind_str(),
 			types_error.message()
 		);
+	}
+
+	#[test]
+	fn test_anyhow_to_types_error_bare_kvs_transaction_conflict() {
+		// `Transaction::commit` bails with the kvs error itself, not wrapped in `Error::Kvs`
+		let kvs_error =
+			KvsError::TransactionConflict("Write conflict, retry the transaction".to_string());
+
+		let message = kvs_error.to_string();
+
+		let types_error = anyhow_to_types_error(anyhow::Error::new(kvs_error));
+
+		assert_eq!(
+			types_error.query_details(),
+			Some(&surrealdb_types::QueryError::TransactionConflict),
+			"{types_error:?}"
+		);
+
+		assert_eq!(types_error.message(), message);
+
+		assert!(types_error.cause().is_none(), "{types_error:?}");
+	}
+
+	#[test]
+	fn test_anyhow_to_types_error_bare_kvs_error_keeps_context_message() {
+		let error = anyhow::Error::new(KvsError::TransactionConflict(
+			"Write conflict, retry the transaction".to_string(),
+		))
+		.context("Couldn't commit the transaction");
+
+		let types_error = anyhow_to_types_error(error);
+
+		assert_eq!(
+			types_error.query_details(),
+			Some(&surrealdb_types::QueryError::TransactionConflict),
+			"{types_error:?}"
+		);
+
+		assert_eq!(types_error.message(), "Couldn't commit the transaction");
+	}
+
+	#[test]
+	fn test_anyhow_to_types_error_bare_kvs_transaction_finished() {
+		let kvs_error = KvsError::TransactionFinished;
+
+		let message = kvs_error.to_string();
+
+		let types_error = anyhow_to_types_error(anyhow::Error::new(kvs_error));
+
+		assert!(types_error.is_query(), "{types_error:?}");
+
+		assert_eq!(types_error.query_details(), None, "{types_error:?}");
+
+		assert_eq!(types_error.message(), message);
 	}
 }
