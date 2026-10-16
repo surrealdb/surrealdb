@@ -124,9 +124,6 @@ const FAILED_BUILD_KEPT: &str = "a UNIQUE `DEFINE INDEX` whose build fails in a 
                                  caller commits keeps its definition, which enforces nothing, and \
                                  an export carries it over the rows that violate it";
 
-const ALTER_REFERENCE: &str = "`ALTER FIELD` stores a `REFERENCE` that `DEFINE FIELD` refuses, \
-                               which an export carries and an import refuses";
-
 const VIEW_EXPORT_ORDER: &str = "an export writes a view before a table its subquery reads, and an \
                                  import refuses the view";
 
@@ -176,12 +173,6 @@ const KNOWN: &[Known] = &[
 		scenario: "cl_unique_after_migration",
 		detail: "Database index `uk` already contains",
 		reason: FAILED_BUILD_KEPT,
-	},
-	Known {
-		kind: "import-failed",
-		scenario: "fc_client_clauses_fail",
-		detail: "Cannot use the `REFERENCE` keyword",
-		reason: ALTER_REFERENCE,
 	},
 	Known {
 		kind: "import-failed",

@@ -1479,6 +1479,10 @@ async fn step_inner(
 					field: reg,
 				} => crate::exec::field_rules::id_field_restrictions(&field(*reg)?)
 					.map_err(ControlFlow::Err)?,
+				FieldCheck::Reference {
+					field: reg,
+				} => crate::ddl::define_field_statement_validate_reference_options(&field(*reg)?)
+					.map_err(ControlFlow::Err)?,
 				FieldCheck::Inline {
 					field: reg,
 					table,

@@ -189,6 +189,7 @@ pub(crate) async fn alter_field_statement_apply(
 	}
 
 	let kind_changed = !matches!(this.kind, AlterKind::None);
+	let reference_altered = !matches!(this.reference, AlterKind::None);
 	let migration = crate::exec::migrate::FieldMigration {
 		request: this.migrate.as_ref().map(crate::exec::migrate::request_of).transpose()?,
 		kept: crate::exec::migrate::KeptClauses {
@@ -196,8 +197,15 @@ pub(crate) async fn alter_field_statement_apply(
 			assert: kind_changed && matches!(this.assert, AlterKind::None),
 		},
 	};
-	alter_field_write(df, old_definition, (kind_changed, migration), (&scope, &what), ctx, opt)
-		.await
+	alter_field_write(
+		df,
+		old_definition,
+		(kind_changed, reference_altered, migration),
+		(&scope, &what),
+		ctx,
+		opt,
+	)
+	.await
 }
 
 /// Applies the clauses of a statement that holds them as one definition to the field `idiom`
@@ -255,17 +263,32 @@ pub(crate) async fn alter_field_definition_apply(
 			),
 		}
 	}
-	alter_field_write(df, old_definition, (kind_changed, migration), (&scope, &what), ctx, opt)
-		.await
+	let reference_altered = fields.iter().any(|field| field == "reference");
+	alter_field_write(
+		df,
+		old_definition,
+		(kind_changed, reference_altered, migration),
+		(&scope, &what),
+		ctx,
+		opt,
+	)
+	.await
 }
 
 /// Validates the definition `df` that an `ALTER FIELD` produces from `old_definition`, judges it
 /// against the rules of a table that enforces migrations and commits the statement's migration,
 /// then writes it, updates the definitions it implies, and clears the table cache.
+///
+/// `kind_changed` is true when the statement sets or drops the type, and `reference_altered`
+/// when it sets or drops `REFERENCE`.
 async fn alter_field_write(
 	mut df: catalog::FieldDefinition,
 	old_definition: catalog::FieldDefinition,
-	(kind_changed, migration): (bool, crate::exec::migrate::FieldMigration<'_>),
+	(kind_changed, reference_altered, migration): (
+		bool,
+		bool,
+		crate::exec::migrate::FieldMigration<'_>,
+	),
 	(scope, what): (&Scope<'_>, &TableName),
 	ctx: &FrozenContext,
 	opt: &Options,
@@ -285,6 +308,14 @@ async fn alter_field_write(
 	// DEFAULT ALWAYS, READONLY, FLEXIBLE and non-key TYPEs. The check runs on the merged
 	// definition, so any ALTER that sets one of these is refused.
 	crate::exec::field_rules::id_field_restrictions(&df)?;
+
+	// A statement that sets `REFERENCE`, or changes the type of a field whose `REFERENCE` it
+	// keeps, has the merged definition judged as `DEFINE FIELD` judges a reference: a top-level
+	// field whose kind holds only records. Import skips this check, so exported definitions load
+	// as they were written.
+	if (kind_changed || reference_altered) && !opt.import {
+		crate::ddl::define_field_statement_validate_reference_options(&df)?;
+	}
 
 	// The record id components that the merged definition names are checked as
 	// `DEFINE FIELD OVERWRITE` checks them. Only a statement that sets or drops the type of

@@ -623,9 +623,9 @@ impl Ddl<'_, '_> {
 	/// made, is lowered against the table and field as they were planned: the stored field, read
 	/// when the statement runs, has each altered clause replaced, and the definition that forms
 	/// is checked as the body checks it (the `id` field's restrictions, the record id components it
-	/// names, `INLINE`'s, then `FLEXIBLE`'s, and the stored records against the record id the type
-	/// names) before it is written. Any other statement resolves its names when it runs and is
-	/// altered by the host.
+	/// names, the `REFERENCE` it sets or keeps over a changed type, `INLINE`'s, then `FLEXIBLE`'s,
+	/// and the stored records against the record id the type names) before it is written. Any
+	/// other statement resolves its names when it runs and is altered by the host.
 	pub(super) fn alter_field(
 		&mut self,
 		attrs: &AlterAttrs,
@@ -726,6 +726,24 @@ impl Ddl<'_, '_> {
 					},
 				});
 			}
+		}
+		// A statement that sets `REFERENCE`, or changes the type of a field whose `REFERENCE` it
+		// keeps, has its definition judged as `DEFINE FIELD` judges a reference: a top-level
+		// field whose kind holds only records. An import loads definitions as they were written.
+		if matches!(field.reference, AlterKind::Set(_))
+			|| (!matches!(field.kind, AlterKind::None)
+				&& !matches!(field.reference, AlterKind::Drop))
+		{
+			let import = self.label()?;
+			self.store(StoreInstr::JumpIfImport {
+				target: import,
+			});
+			self.store(StoreInstr::FieldCheck {
+				check: FieldCheck::Reference {
+					field: stored,
+				},
+			});
+			self.bind(import)?;
 		}
 		let tb_key = self.object(&[("ns", ns_op), ("db", db_op), ("tb", tb)])?;
 		let tb_name = self.load(tb)?;

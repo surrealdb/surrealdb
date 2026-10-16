@@ -2801,6 +2801,12 @@ pub(super) enum FieldCheck {
 	IdField {
 		field: Reg,
 	},
+	/// When the definition in `field` has a `REFERENCE`, it is a top-level
+	/// field whose kind holds only records
+	/// (`ddl::define_field_statement_validate_reference_options`).
+	Reference {
+		field: Reg,
+	},
 	/// When the definition in `field` is `INLINE`, it can be embedded into
 	/// the adjacency payloads of the table defined in `table`, read with its
 	/// fields when the check runs (`field_rules::inline_restrictions`).
