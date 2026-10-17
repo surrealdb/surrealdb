@@ -28,6 +28,7 @@ use crate::dbs::{Capabilities, Options};
 use crate::err::Error;
 use crate::exec::Error as ExecError;
 use crate::exec::function::FunctionRegistry;
+use crate::exec::topk_pushdown::{TopKThresholdCell, TopKThresholds};
 use crate::expr::Base;
 use crate::iam::{Action, Auth, ResourceKind};
 use crate::kvs::index::filter_online_indexes;
@@ -169,6 +170,10 @@ pub struct RootContext {
 	/// that record dereferences and FETCH resolution honour the same version
 	/// as the source scan.
 	pub(crate) version_stamp: Option<u64>,
+	/// The top-k thresholds of the sorts executing around this context: a scan
+	/// whose probe names one of their pushdowns reads that execution's
+	/// threshold (see [`crate::exec::topk_pushdown`]).
+	pub(crate) topk_thresholds: Option<Arc<TopKThresholds>>,
 }
 
 impl std::fmt::Debug for RootContext {
@@ -574,6 +579,7 @@ impl ExecutionContext {
 				skip_fetch_perms: r.skip_fetch_perms,
 				computing_field: r.computing_field,
 				version_stamp: r.version_stamp,
+				topk_thresholds: r.topk_thresholds.clone(),
 			}),
 			Self::Namespace(n) => Self::Namespace(NamespaceContext {
 				root: RootContext {
@@ -588,6 +594,7 @@ impl ExecutionContext {
 					skip_fetch_perms: n.root.skip_fetch_perms,
 					computing_field: n.root.computing_field,
 					version_stamp: n.root.version_stamp,
+					topk_thresholds: n.root.topk_thresholds.clone(),
 				},
 				ns: Arc::clone(&n.ns),
 			}),
@@ -605,6 +612,7 @@ impl ExecutionContext {
 						skip_fetch_perms: d.ns_ctx.root.skip_fetch_perms,
 						computing_field: d.ns_ctx.root.computing_field,
 						version_stamp: d.ns_ctx.root.version_stamp,
+						topk_thresholds: d.ns_ctx.root.topk_thresholds.clone(),
 					},
 					ns: Arc::clone(&d.ns_ctx.ns),
 				},
@@ -694,6 +702,27 @@ impl ExecutionContext {
 		};
 		root.version_stamp = version;
 		new
+	}
+
+	/// Derive a context holding `cell` as the threshold of top-k pushdown
+	/// `pushdown`, for one execution of the sort that publishes it; see
+	/// [`crate::exec::topk_pushdown`].
+	pub(crate) fn with_topk_threshold(&self, pushdown: u64, cell: Arc<TopKThresholdCell>) -> Self {
+		let mut new = self.clone();
+		let root = match &mut new {
+			Self::Root(r) => r,
+			Self::Namespace(n) => &mut n.root,
+			Self::Database(d) => &mut d.ns_ctx.root,
+		};
+		root.topk_thresholds =
+			Some(TopKThresholds::push(root.topk_thresholds.take(), pushdown, cell));
+		new
+	}
+
+	/// The threshold of top-k pushdown `pushdown` for the execution this
+	/// context belongs to, when that pushdown's sort is executing around it.
+	pub(crate) fn topk_threshold(&self, pushdown: u64) -> Option<Arc<TopKThresholdCell>> {
+		self.root().topk_thresholds.as_deref()?.find(pushdown).cloned()
 	}
 
 	/// Get the evaluated VERSION timestamp (if set).

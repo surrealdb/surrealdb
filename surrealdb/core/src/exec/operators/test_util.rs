@@ -108,6 +108,7 @@ pub(crate) fn root_ctx() -> ExecutionContext {
 		skip_fetch_perms: false,
 		computing_field: false,
 		version_stamp: None,
+		topk_thresholds: None,
 	})
 }
 
@@ -336,6 +337,7 @@ impl TestDb {
 			skip_fetch_perms: false,
 			computing_field: false,
 			version_stamp: None,
+			topk_thresholds: None,
 		};
 
 		ExecutionContext::Database(DatabaseContext {

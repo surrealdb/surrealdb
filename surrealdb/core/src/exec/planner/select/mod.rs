@@ -2361,8 +2361,8 @@ impl<'ctx> Planner<'ctx> {
 		topk_request: &TopKPushdownRequest,
 	) -> Result<PlannedSource, Error> {
 		use crate::exec::topk_pushdown::{
-			TopKPushdownHandle, TopKPushdownReason, TopKPushdownStatus, TopKThresholdCell,
-			TopKThresholdProbe, field_path_wire_segments, topk_pushdown_status_at_plan_time,
+			TopKPushdownHandle, TopKPushdownReason, TopKPushdownStatus, TopKThresholdProbe,
+			field_path_wire_segments, topk_pushdown_status_at_plan_time,
 		};
 
 		// A lightweight relation has no record range to scan.
@@ -2395,13 +2395,15 @@ impl<'ctx> Planner<'ctx> {
 			scan_predicate.as_ref(),
 			needed_fields.as_ref(),
 		);
-		// TopK threshold pushdown: build the shared cell and the scan-side
-		// probe for an eligible request. The field eligibility check runs
+		// TopK threshold pushdown: build the scan-side probe for an eligible
+		// request, under a fresh pushdown id that the sort shares. The plan
+		// holds no threshold: each execution of the sort makes its own (see
+		// `crate::exec::topk_pushdown`). The field eligibility check runs
 		// against the FULL plan-time field state (not the projection-filtered
 		// view) so a computed ORDER BY field can't slip through when the
 		// projection drops its definition. The handle travels to
-		// `plan_sort_consolidated`, which installs the publish side only if
-		// the sort plan it builds matches `expected_first_key`.
+		// `plan_sort_consolidated`, which installs the pushdown only if the
+		// sort plan it builds matches `expected_first_key`.
 		let (topk_status, topk_handle) = match topk_request {
 			TopKPushdownRequest::NotApplicable => (TopKPushdownStatus::NotApplicable, None),
 			TopKPushdownRequest::Ineligible(reason) => {
@@ -2415,12 +2417,12 @@ impl<'ctx> Planner<'ctx> {
 						(TopKPushdownStatus::Ineligible(TopKPushdownReason::UnsupportedOrder), None)
 					}
 					Some(segments) => {
-						let cell = Arc::new(TopKThresholdCell::default());
+						let pushdown = crate::exec::topk_pushdown::next_id();
 						let probe = Arc::new(TopKThresholdProbe::new(
 							segments,
 							spec.first_key.direction,
 							spec.key_count == 1,
-							Arc::clone(&cell),
+							pushdown,
 							self.ctx.config.exec.idiom_recursion_limit,
 						));
 						let status = topk_pushdown_status_at_plan_time(
@@ -2432,7 +2434,7 @@ impl<'ctx> Planner<'ctx> {
 							TopKPushdownStatus::Active(_) | TopKPushdownStatus::Deferred(_)
 						)
 						.then(|| TopKPushdownHandle {
-							cell,
+							pushdown,
 							expected_first_key: spec.first_key.clone(),
 							expected_key_count: spec.key_count,
 						});

@@ -850,6 +850,7 @@ impl Executor {
 			skip_fetch_perms: false,
 			computing_field: false,
 			version_stamp: None,
+			topk_thresholds: None,
 		};
 
 		// The plan's declared context level is the minimum it needs (see

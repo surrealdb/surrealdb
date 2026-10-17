@@ -654,18 +654,19 @@ impl<'ctx> Planner<'ctx> {
 						<= self.ctx.config.exec.max_order_limit_priority_queue_size as usize
 				{
 					let mut topk = SortTopKByKey::new(computed, sort_keys, effective_limit);
-					// Install the TopK threshold publish side only when the
-					// sort keys actually built here match what the scan-side
-					// probe was compiled against (path, direction, modifiers,
-					// key count). Any divergence — alias resolution or
-					// registry compute differing from the request-time
-					// analysis — leaves the cell unpublished, keeping the
-					// scan probe dormant rather than wrong.
+					// Install the TopK threshold pushdown only when the sort
+					// keys actually built here match what the scan-side probe
+					// was compiled against (path, direction, modifiers, key
+					// count). Any divergence — alias resolution or registry
+					// compute differing from the request-time analysis —
+					// leaves the pushdown without a publisher: the scan finds
+					// no threshold and reads every row rather than the wrong
+					// ones.
 					if let Some(handle) = topk_pushdown
 						&& topk.sort_keys.first() == Some(&handle.expected_first_key)
 						&& topk.sort_keys.len() == handle.expected_key_count
 					{
-						topk = topk.with_threshold_cell(handle.cell);
+						topk = topk.with_topk_pushdown(handle.pushdown);
 					}
 					return Ok((Arc::new(topk) as Arc<dyn ExecOperator>, sort_only_fields));
 				}

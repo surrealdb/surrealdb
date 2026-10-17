@@ -438,15 +438,19 @@ pub struct SortTopKByKey {
 	pub(crate) sort_keys: Vec<SortKey>,
 	/// The effective limit (start + limit from query)
 	pub(crate) limit: usize,
-	/// TopK threshold pushdown publish side (see [`crate::exec::topk_pushdown`]).
+	/// The TopK threshold pushdown this sort publishes (see
+	/// [`crate::exec::topk_pushdown`]).
 	///
-	/// When installed by the planner, the heap publishes its worst entry's
-	/// **first** sort key whenever the heap is full — on the fill transition
-	/// and after every admission — so the upstream KV scan can reject rows
-	/// that cannot beat it without decoding them. Publishing only ever
-	/// tightens the threshold: admissions replace the worst entry with a
-	/// strictly better one, so the new worst is at least as good as the old.
-	pub(crate) threshold_cell: Option<Arc<TopKThresholdCell>>,
+	/// When installed by the planner, each execution creates a fresh threshold
+	/// cell and runs the input in a context holding it under this id, so the
+	/// KV scan beneath reads this execution's threshold and no other's. The
+	/// heap publishes its worst entry's **first** sort key whenever the heap
+	/// is full — on the fill transition and after every admission — so the
+	/// scan can reject rows that cannot beat it without decoding them.
+	/// Publishing only ever tightens the threshold: admissions replace the
+	/// worst entry with a strictly better one, so the new worst is at least as
+	/// good as the old.
+	pub(crate) topk_pushdown: Option<u64>,
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
@@ -457,16 +461,16 @@ impl SortTopKByKey {
 			input,
 			sort_keys,
 			limit,
-			threshold_cell: None,
+			topk_pushdown: None,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
 
-	/// Install the TopK threshold pushdown publish side. Only the planner's
+	/// Install the TopK threshold pushdown `pushdown`. Only the planner's
 	/// `plan_sort_consolidated` calls this, after verifying the built
 	/// `sort_keys` match the probe the scan was compiled against.
-	pub(crate) fn with_threshold_cell(mut self, cell: Arc<TopKThresholdCell>) -> Self {
-		self.threshold_cell = Some(cell);
+	pub(crate) fn with_topk_pushdown(mut self, pushdown: u64) -> Self {
+		self.topk_pushdown = Some(pushdown);
 		self
 	}
 }
@@ -530,8 +534,18 @@ impl ExecOperator for SortTopKByKey {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
+		// The threshold is this execution's own: a fresh cell, which the scan
+		// beneath reaches through the context the input runs in.
+		let threshold =
+			self.topk_pushdown.map(|pushdown| (pushdown, Arc::new(TopKThresholdCell::default())));
+		let input = match &threshold {
+			Some((pushdown, cell)) => {
+				self.input.execute(&ctx.with_topk_threshold(*pushdown, Arc::clone(cell)))?
+			}
+			None => self.input.execute(ctx)?,
+		};
 		let mut input_stream = buffer_stream(
-			self.input.execute(ctx)?,
+			input,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
 			ctx.root().ctx.config.exec.operator_buffer_size,
@@ -539,7 +553,7 @@ impl ExecOperator for SortTopKByKey {
 		let sort_keys = Arc::new(self.sort_keys.clone());
 		let limit = self.limit;
 		let cancellation = ctx.cancellation().clone();
-		let threshold_cell = self.threshold_cell.clone();
+		let threshold_cell = threshold.map(|(_, cell)| cell);
 
 		let sorted_stream = futures::stream::once(async move {
 			let mut acc = TopKByKeyAccumulator::new(sort_keys, limit, threshold_cell);

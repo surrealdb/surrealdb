@@ -305,6 +305,7 @@ impl ExecOperator for TableScan {
 					&field_state,
 					check_perms,
 					&metrics,
+					&ctx,
 				);
 				let mut source = kv_scan_stream(
 					Arc::clone(&txn),
