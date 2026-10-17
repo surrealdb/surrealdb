@@ -500,8 +500,16 @@ criteria = "safe-to-deploy"
 version = "0.8.7"
 criteria = "safe-to-deploy"
 
+[[exemptions.crossbeam-deque]]
+version = "0.8.8"
+criteria = "safe-to-deploy"
+
 [[exemptions.crossbeam-queue]]
 version = "0.3.13"
+criteria = "safe-to-deploy"
+
+[[exemptions.crossbeam-queue]]
+version = "0.3.14"
 criteria = "safe-to-deploy"
 
 [[exemptions.crossbeam-skiplist]]
@@ -1991,6 +1999,10 @@ criteria = "safe-to-run"
 [[exemptions.test-log-macros]]
 version = "0.2.20"
 criteria = "safe-to-run"
+
+[[exemptions.thin-vec]]
+version = "0.2.21"
+criteria = "safe-to-deploy"
 
 [[exemptions.tikv-jemalloc-sys]]
 version = "0.6.1+5.3.0-1-ge13ca993e8ccb9ba9847cc330696e02839f328f7"

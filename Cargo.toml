@@ -157,7 +157,7 @@ revision = { version = "0.30.0", features = [
 
 storekey = { version = "0.11.0", features = ["bytes", "uuid"] }
 surrealkv = "1.0.0"
-surrealmx = "0.27.0"
+surrealmx = "1.0.0"
 web-time = "1.1.0"
 ## Maintained by @Delskayn
 js = { version = "0.11.0", package = "rquickjs", features = ["rust-alloc"] }

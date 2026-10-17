@@ -276,7 +276,7 @@ impl Transactable for Transaction {
 			// Get the key
 			let res = inner.get(key.into_inner()).map_err(kvs_error)?;
 			// Return result
-			Ok(res.map(Val::from))
+			Ok(res.map(|v| v.to_vec()))
 		})
 	}
 
@@ -304,7 +304,7 @@ impl Transactable for Transaction {
 			// Get the key, arming commit-time conflict detection
 			let res = inner.get_for_update(key.into_inner()).map_err(kvs_error)?;
 			// Return result
-			Ok(res.map(Val::from))
+			Ok(res.map(|v| v.to_vec()))
 		})
 	}
 
@@ -351,7 +351,7 @@ impl Transactable for Transaction {
 					opt.map(|v| {
 						records += 1;
 						value_bytes += v.len() as u64;
-						Val::from(v)
+						v.to_vec()
 					})
 				})
 				.collect();
