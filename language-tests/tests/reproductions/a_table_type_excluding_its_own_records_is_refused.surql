@@ -22,13 +22,13 @@ value = "NONE"
 value = "[]"
 
 [[test.results]]
-error = "Cannot make `t` TYPE RELATION: it holds `t:1`, which is not an edge. Delete the record first, or define the table TYPE ANY"
+error = "Cannot make `t` TYPE RELATION: it holds t:1, which is not an edge. Delete the record first, or define the table TYPE ANY"
 
 [[test.results]]
-error = "Cannot make `t` TYPE RELATION: it holds `t:1`, which is not an edge. Delete the record first, or define the table TYPE ANY"
+error = "Cannot make `t` TYPE RELATION: it holds t:1, which is not an edge. Delete the record first, or define the table TYPE ANY"
 
 [[test.results]]
-error = "Cannot make `t` TYPE RELATION: it holds `t:1`, which is not an edge. Delete the record first, or define the table TYPE ANY"
+error = "Cannot make `t` TYPE RELATION: it holds t:1, which is not an edge. Delete the record first, or define the table TYPE ANY"
 
 [[test.results]]
 value = "'DEFINE TABLE t TYPE ANY SCHEMALESS PERMISSIONS NONE'"
@@ -43,10 +43,10 @@ value = "NONE"
 value = "[]"
 
 [[test.results]]
-error = "Cannot make `e` TYPE NORMAL: it holds the edge `e:1`. Delete the edge first, or define the table TYPE ANY"
+error = "Cannot make `e` TYPE NORMAL: it holds the edge e:1. Delete the edge first, or define the table TYPE ANY"
 
 [[test.results]]
-error = "Cannot make `e` TYPE NORMAL: it holds the edge `e:1`. Delete the edge first, or define the table TYPE ANY"
+error = "Cannot make `e` TYPE NORMAL: it holds the edge e:1. Delete the edge first, or define the table TYPE ANY"
 
 [[test.results]]
 value = "'DEFINE TABLE e TYPE RELATION SCHEMALESS PERMISSIONS NONE'"
@@ -64,10 +64,10 @@ value = "[]"
 value = "[]"
 
 [[test.results]]
-error = "Cannot make `m` TYPE RELATION: it holds `m:1`, which is not an edge. Delete the record first, or define the table TYPE ANY"
+error = "Cannot make `m` TYPE RELATION: it holds m:1, which is not an edge. Delete the record first, or define the table TYPE ANY"
 
 [[test.results]]
-error = "Cannot make `m` TYPE NORMAL: it holds the edge `m:2`. Delete the edge first, or define the table TYPE ANY"
+error = "Cannot make `m` TYPE NORMAL: it holds the edge m:2. Delete the edge first, or define the table TYPE ANY"
 
 [[test.results]]
 value = "NONE"
@@ -106,7 +106,7 @@ value = "[]"
 value = "[]"
 
 [[test.results]]
-error = "Cannot make `ln` TYPE RELATION: it holds `ln:2`, which is not an edge. Delete the record first, or define the table TYPE ANY"
+error = "Cannot make `ln` TYPE RELATION: it holds ln:2, which is not an edge. Delete the record first, or define the table TYPE ANY"
 
 [[test.results]]
 value = "[{ id: ln:2, in: hub:1, out: person:2 }]"
@@ -133,7 +133,7 @@ value = "NONE"
 error = "The query was not executed due to a failed transaction"
 
 [[test.results]]
-error = "Cannot make `q` TYPE RELATION: it holds `q:1`, which is not an edge. Delete the record first, or define the table TYPE ANY"
+error = "Cannot make `q` TYPE RELATION: it holds q:1, which is not an edge. Delete the record first, or define the table TYPE ANY"
 
 [[test.results]]
 error = "Cannot COMMIT: the transaction was aborted due to a prior error"

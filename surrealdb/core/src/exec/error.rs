@@ -480,7 +480,7 @@ pub(crate) enum Error {
 	/// edge: no write could have stored it there, and an export of the table
 	/// would write it back as a record the restored table refuses.
 	#[error(
-		"Cannot make `{table}` TYPE RELATION: it holds `{record}`, which is not an edge. Delete the record first, or define the table TYPE ANY"
+		"Cannot make `{table}` TYPE RELATION: it holds {record}, which is not an edge. Delete the record first, or define the table TYPE ANY"
 	)]
 	TableTypeRelationOverRecord {
 		table: String,
@@ -491,7 +491,7 @@ pub(crate) enum Error {
 	/// could have stored it there, and an export of the table would write it
 	/// back as an edge the restored table refuses.
 	#[error(
-		"Cannot make `{table}` TYPE NORMAL: it holds the edge `{record}`. Delete the edge first, or define the table TYPE ANY"
+		"Cannot make `{table}` TYPE NORMAL: it holds the edge {record}. Delete the edge first, or define the table TYPE ANY"
 	)]
 	TableTypeNormalOverEdge {
 		table: String,

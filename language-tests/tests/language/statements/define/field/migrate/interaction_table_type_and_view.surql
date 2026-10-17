@@ -36,10 +36,10 @@ error = "Cannot migrate table `tb`: rows are behind a migration step: the table'
 error = "Cannot migrate table `tb`: rows are behind a migration step: the table's TYPE cannot change, nor can it become a view, until the rewrite job has finished"
 
 [[test.results]]
-error = "Cannot make `tb` TYPE RELATION: it holds ``tb`:1`, which is not an edge. Delete the record first, or define the table TYPE ANY"
+error = "Cannot make `tb` TYPE RELATION: it holds `tb`:1, which is not an edge. Delete the record first, or define the table TYPE ANY"
 
 [[test.results]]
-error = "Cannot make `tb` TYPE RELATION: it holds ``tb`:1`, which is not an edge. Delete the record first, or define the table TYPE ANY"
+error = "Cannot make `tb` TYPE RELATION: it holds `tb`:1, which is not an edge. Delete the record first, or define the table TYPE ANY"
 
 [[test.results]]
 value = "[{ a: 5, id: tb:1 }, { a: -1, id: tb:2 }]"
@@ -102,10 +102,10 @@ error = "Cannot migrate table `ed`: rows are behind a migration step: the table'
 error = "Cannot migrate table `ed`: rows are behind a migration step: the table's TYPE cannot change, nor can it become a view, until the rewrite job has finished"
 
 [[test.results]]
-error = "Cannot make `ed` TYPE NORMAL: it holds the edge `ed:1`. Delete the edge first, or define the table TYPE ANY"
+error = "Cannot make `ed` TYPE NORMAL: it holds the edge ed:1. Delete the edge first, or define the table TYPE ANY"
 
 [[test.results]]
-error = "Cannot make `ed` TYPE NORMAL: it holds the edge `ed:1`. Delete the edge first, or define the table TYPE ANY"
+error = "Cannot make `ed` TYPE NORMAL: it holds the edge ed:1. Delete the edge first, or define the table TYPE ANY"
 
 [[test.results]]
 value = "[{ a: 5, id: ed:1, in: pt:1, out: pt:2 }, { a: -1, id: ed:2, in: pt:1, out: pt:2 }]"
