@@ -6,8 +6,11 @@ use surrealdb_types::ToSql;
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId, Record, StoredRecord, TableDefinition, TableType};
 use crate::exec::ExecutionContext;
-use crate::key::schema::{RecordKey, RecordPrefix};
-use crate::key::{KVKeyDecode, KVSubspace};
+use crate::key::schema::{
+	ForeignTablePrefix, LayoutPrefix, RecordKey, RecordPrefix, TableConformanceKey,
+	TableMigrationsKey, TblRoot,
+};
+use crate::key::{KVKey, KVKeyDecode, KVSubspace, RawRange};
 use crate::kvs::{NORMAL_BATCH_SIZE, Transaction};
 use crate::val::{RecordId, TableName};
 
@@ -110,6 +113,127 @@ pub(crate) async fn validate_records_survive_type_change(
 				crate::expr::ControlFlow::Err(error) => error,
 				other => anyhow::anyhow!("the scan of the records was interrupted by {other}"),
 			})?;
+	}
+	Ok(())
+}
+
+/// Deletes every key beneath the root of the table `table` of the database
+/// `ns`, `db` except the registrations of the views that read it and, under
+/// `keep_records`, its records and the layout state they are decoded through
+/// (its layout descriptors, generation ring and conformance record). The
+/// definitions of the table's fields, indexes, events and subscriptions go,
+/// with its index entries and the references and edges stored under its
+/// records.
+///
+/// A registration (`ForeignTableKey`) is written by the view that reads the
+/// table, and stays for as long as that view's definition reads it. `DEFINE
+/// TABLE ... AS SELECT` clears the table twice: keeping the records, which it
+/// then retires through the view table's order so the views reading it take
+/// their removal, and then, with no record left, keeping the registrations
+/// alone.
+pub(crate) async fn clear_view_table(
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table: &TableName,
+	keep_records: bool,
+) -> Result<()> {
+	let tb = Cow::Borrowed(table);
+	let root = TblRoot {
+		ns,
+		db,
+		tb: tb.clone(),
+	}
+	.range_subtree()?;
+	// Each region kept, as the bounds `[start, end)` of its keys.
+	let bounds = |range: RawRange| {
+		let (lo, hi) = range.bounds();
+		(lo.to_vec(), hi.to_vec())
+	};
+	let mut kept = vec![bounds(
+		ForeignTablePrefix {
+			ns,
+			db,
+			tb: tb.clone(),
+		}
+		.range_subtree()?
+		.into(),
+	)];
+	if keep_records {
+		kept.push(bounds(
+			RecordPrefix {
+				ns,
+				db,
+				tb: tb.clone(),
+			}
+			.range_subtree()?,
+		));
+		kept.push(bounds(
+			LayoutPrefix {
+				ns,
+				db,
+				tb: tb.clone(),
+			}
+			.range_subtree()?
+			.into(),
+		));
+		let ring = TableMigrationsKey {
+			ns,
+			db,
+			tb: tb.clone(),
+		}
+		.encode_key()?;
+		let conformance = TableConformanceKey {
+			ns,
+			db,
+			tb,
+		}
+		.encode_key()?;
+		// A single key is kept as itself up to its immediate successor.
+		for key in [ring, conformance] {
+			let start = key.as_slice().to_vec();
+			kept.push((start, key.next().into_vec()));
+		}
+	}
+	kept.sort();
+	let (start, end) = root.bounds();
+	let mut from = start.to_vec();
+	for (lo, hi) in &kept {
+		txn.delr(root.part(&from, lo)).await?;
+		from.clone_from(hi);
+	}
+	txn.delr(root.part(&from, end)).await
+}
+
+/// Refuses the view `view` of the database `ns`, `db` reading `sources` where
+/// one of them is `view` itself, or reads `view` directly or through other
+/// views, as the registrations of the views stand in `txn`. Each row such a
+/// view wrote would reach the view again through its own maintenance.
+pub(crate) async fn refuse_view_cycle(
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	view: &TableName,
+	sources: &[TableName],
+) -> Result<()> {
+	let mut readers = std::collections::HashSet::new();
+	let mut pending = vec![view.clone()];
+	while let Some(table) = pending.pop() {
+		for reader in txn.all_tb_views(ns, db, &table, None).await?.iter() {
+			if readers.insert(reader.name.clone()) {
+				pending.push(reader.name.clone());
+			}
+		}
+	}
+	if let Some(source) = sources.iter().find(|source| *source == view || readers.contains(*source))
+	{
+		let through = match source == view {
+			true => "itself".to_owned(),
+			false => format!("`{source}`, a view that reads `{view}`"),
+		};
+		anyhow::bail!(crate::exec::Error::Query {
+			message: format!("Cannot define the view `{view}` over {through}"),
+		});
 	}
 	Ok(())
 }

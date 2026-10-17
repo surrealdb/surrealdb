@@ -22,8 +22,12 @@
 //! name order the exporter would otherwise follow.
 
 use anyhow::{Result, bail};
+use surrealdb_catalog::providers::{DatabaseProvider as _, TableProvider as _};
+use surrealdb_catalog::{TableDefinition, ViewDefinition};
 use surrealdb_expr::val::MAX_VALUE_DEPTH;
+use surrealdb_kvs::TransactionType;
 use surrealdb_rpc::QueryResult;
+use surrealdb_strand::TableName;
 use surrealdb_types::{ToSql, Value};
 
 use super::RoundTrip;
@@ -59,23 +63,54 @@ fn data_sections(export: &str) -> Vec<&str> {
 
 /// A database holding a definition cycle: two views that select from each other.
 ///
-/// The catalog stores such a pair, and no order of a single-pass replay can
-/// satisfy it — whichever view is defined first names one that does not exist
-/// yet. It is the one fixture that makes a real export unreplayable without
-/// hand-writing the dump, which is what makes it the fixture for the two
-/// contracts above. The stored tables carry the rest of the database, so what
-/// survives the failure is visible rather than inferred.
+/// A catalog an earlier release wrote can hold such a pair, and no order of a
+/// single-pass replay can satisfy it — whichever view is defined first names
+/// one that does not exist yet. It is the one fixture that makes a real export
+/// unreplayable without hand-writing the dump, which is what makes it the
+/// fixture for the two contracts above. The stored tables carry the rest of the
+/// database, so what survives the failure is visible rather than inferred.
 ///
-/// The cycle is formed while `base` is empty and the records live on a table no
-/// view reads, because a view cascade over a cycle with rows in it does not
-/// terminate.
-const CYCLE: &str = "DEFINE TABLE base SCHEMALESS;
-	 DEFINE TABLE v_a AS SELECT count() AS c FROM base GROUP ALL;
-	 DEFINE TABLE v_b AS SELECT count() AS c FROM v_a GROUP ALL;
-	 DEFINE TABLE OVERWRITE v_a AS SELECT count() AS c FROM v_b GROUP ALL;
-	 DEFINE TABLE other SCHEMALESS;
-	 CREATE other:1 SET n = 1;
-	 CREATE other:2 SET n = 2;";
+/// `DEFINE TABLE` refuses a view that reads itself through another, so the seed
+/// defines `v_a` over `base` and the fixture then stores `v_a`'s definition
+/// reading `v_b` directly. The records live on a table no view reads, because a
+/// view cascade over a cycle with rows in it does not terminate.
+async fn cycle() -> Result<(RoundTrip, Vec<QueryResult>)> {
+	let source = RoundTrip::seeded(
+		"DEFINE TABLE base SCHEMALESS;
+		 DEFINE TABLE v_a AS SELECT count() AS c FROM base GROUP ALL;
+		 DEFINE TABLE v_b AS SELECT count() AS c FROM v_a GROUP ALL;
+		 DEFINE TABLE other SCHEMALESS;
+		 CREATE other:1 SET n = 1;
+		 CREATE other:2 SET n = 2;",
+	)
+	.await?;
+	let txn = source.transaction(TransactionType::Write).await?;
+	let db = txn.expect_db_by_name("test", "test").await?;
+	let v_a = txn.expect_tb(db.namespace_id, db.database_id, &TableName::from("v_a")).await?;
+	let Some(ViewDefinition::Aggregated {
+		analysis,
+		condition,
+		groups,
+		fields,
+		..
+	}) = v_a.view.clone()
+	else {
+		bail!("`v_a` must be stored as an aggregated view: {:?}", v_a.view);
+	};
+	let cyclic = TableDefinition {
+		view: Some(ViewDefinition::Aggregated {
+			analysis,
+			condition,
+			tables: vec![TableName::from("v_b")],
+			groups,
+			fields,
+		}),
+		..(*v_a).clone()
+	};
+	txn.replace_tb("test", "test", &cyclic).await?;
+	txn.commit().await?;
+	RoundTrip::replay_allowing_import_errors(source).await
+}
 
 /// An export that cannot be fully replayed reports every statement it dropped.
 ///
@@ -87,7 +122,7 @@ const CYCLE: &str = "DEFINE TABLE base SCHEMALESS;
 /// there and say which definition failed.
 #[tokio::test]
 async fn an_unreplayable_export_reports_every_statement_it_dropped() -> Result<()> {
-	let (round_trip, results) = RoundTrip::run_allowing_import_errors(CYCLE).await?;
+	let (round_trip, results) = cycle().await?;
 
 	let failures = failures(&results);
 	assert_eq!(
@@ -138,7 +173,7 @@ async fn an_unreplayable_export_reports_every_statement_it_dropped() -> Result<(
 /// restore that reported it.
 #[tokio::test]
 async fn a_dropped_statement_leaves_the_rest_of_the_dump_applied() -> Result<()> {
-	let (round_trip, results) = RoundTrip::run_allowing_import_errors(CYCLE).await?;
+	let (round_trip, results) = cycle().await?;
 	assert!(!failures(&results).is_empty(), "the fixture must produce a failing import");
 
 	// The stored tables are replayed before the views, so both definitions and

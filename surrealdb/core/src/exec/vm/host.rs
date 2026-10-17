@@ -5000,6 +5000,7 @@ async fn run_body(
 											| StoreInstr::BackfillRow { .. }
 											| StoreInstr::BackfillGroup { .. }
 											| StoreInstr::BackfillGroupRow { .. }
+											| StoreInstr::RetireViewRows { .. }
 									) {
 										// The surface's steps answer a boxed future already.
 										schema.backfill(program, instr, regs, state, ctx).await?

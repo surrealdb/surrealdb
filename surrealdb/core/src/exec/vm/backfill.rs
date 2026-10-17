@@ -10,10 +10,14 @@
 //! incremental path runs the order for a created row. A materialized row whose
 //! key the backfill already wrote, because two source tables hold a record
 //! with the same id, replaces that row as the incremental path does, and runs
-//! the order for an updated row. The statement that defines the view changes
-//! the catalog the order is read from, so the order is the one of the view
-//! table's catalog version when the backfill meets the table, served from the
-//! compile cache ([`super::fault::view_rows`]).
+//! the order for an updated row. The rows the view table held before are
+//! retired first, each deleted and run through the order for a deleted row, so
+//! a view reading the view table takes the old rows' removal and the new rows'
+//! arrival as it takes any other write; where that order writes nothing for the
+//! table, they are deleted as one range. The statement that defines the view
+//! changes the catalog the order is read from, so the order is the one of the
+//! view table's catalog version when the statement's retirement or fill meets
+//! the table, served from the compile cache ([`super::fault::view_rows`]).
 
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -26,7 +30,7 @@ use super::interp::State;
 use super::program::{Backfill, Program, StoreInstr};
 use super::scalar::Scalar;
 use super::store::{read, table_name_of, write};
-use super::write::{WriteState, view_row_exec};
+use super::write::{WriteState, action_pipeline, view_row_exec};
 use crate::catalog::aggregation::{self, backfill_stats};
 use crate::catalog::providers::TableProvider as _;
 use crate::catalog::{Metadata, Record, RecordType, encode_whole_record_with};
@@ -34,9 +38,12 @@ use crate::doc::Action;
 use crate::exec::operators::write::ctx::{RecordFormatSlot, ResolvedFormat, TableExistence};
 use crate::exec::operators::write::row::WriteRow;
 use crate::exec::operators::write::scope::{WritePurpose, WriteScope};
+use crate::exec::operators::write::stages::observe::view_row_reaches_nothing;
 use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::ControlFlow;
-use crate::key::schema::RecordKey;
+use crate::key::schema::{RecordKey, RecordPrefix};
+use crate::key::{KVKeyDecode as _, KVSubspace as _};
+use crate::kvs::NORMAL_BATCH_SIZE;
 use crate::val::{Array, RecordId, RecordIdKey, TableName, Value};
 
 fn internal(why: impl Into<String>) -> ControlFlow {
@@ -136,7 +143,11 @@ pub(super) async fn step(
 			let key = key.encode_key().map_err(ControlFlow::Err)?;
 			txn.set(key, bytes).await.map_err(ControlFlow::Err)?;
 			txn.forget_record(ns, db, &table, &id.key);
-			maintain(state, ctx, &table, id.key, before.as_ref(), &record).await?;
+			let action = match before {
+				Some(_) => Action::Update,
+				None => Action::Create,
+			};
+			maintain(state, ctx, &table, id.key, action, before.as_ref(), Some(&record)).await?;
 		}
 		StoreInstr::BackfillGroup {
 			backfill,
@@ -179,7 +190,13 @@ pub(super) async fn step(
 				.put_record(ns, db, &table, &key, Arc::clone(&record))
 				.await
 				.map_err(ControlFlow::Err)?;
-			maintain(state, ctx, &table, key, None, &record).await?;
+			maintain(state, ctx, &table, key, Action::Create, None, Some(&record)).await?;
+		}
+		StoreInstr::RetireViewRows {
+			table,
+		} => {
+			let table = table_name_of(&read(regs, *table))?;
+			retire(state, ctx, &table).await?;
 		}
 		_ => return Err(internal("a store instruction taken as a backfill instruction")),
 	}
@@ -222,21 +239,91 @@ fn stats(
 	backfill_stats(&backfill.aggregations, &backfill.values, computed).map_err(ControlFlow::Err)
 }
 
-/// Run the order of view table `table` over `record`, the row just stored
-/// under `key`: a write of its own over a write state stacked on the
-/// statement's scope, in the view table's view-maintenance context, with the
-/// row's table the one view in flight beneath it ([`view_row_exec`]). The row
-/// is created, or updated from `before` when it replaced a row the backfill
-/// wrote under the same key. The order is the one of the table's catalog
-/// version, taken the first time the backfill meets the table
-/// ([`super::fault::view_rows`]) and held for the rest of it.
+/// Delete each record of view table `table` and run it through the table's
+/// order for a deleted row ([`maintain`]), a page of records at a time: the
+/// page is read before any of its records is deleted, so no cursor is open
+/// across the writes the order makes. A record is deleted before the order runs
+/// over it, as a removed view row is, so a view reading the table that
+/// recalculates an extreme over the rows left does not count it. The pages are
+/// sized to the fuel left, a unit charged per record.
+///
+/// A table whose view rows that order writes nothing for
+/// ([`view_row_reaches_nothing`]) has its records deleted as one range. A
+/// speculative run deletes the records and runs no order: the views reading
+/// the table are maintained by the statement's real run.
+async fn retire(state: &mut State, ctx: &ExecutionContext, table: &TableName) -> FlowResult<()> {
+	let (ns, db) = ids(ctx).await?;
+	let txn = ctx.txn();
+	let records = RecordPrefix {
+		ns,
+		db,
+		tb: Cow::Borrowed(table),
+	};
+	if txn.speculating() {
+		txn.note_speculative_skip();
+		let range = records.range().map_err(ControlFlow::Err)?;
+		return txn.delr(range).await.map_err(ControlFlow::Err);
+	}
+	let write_ctx = scope(state, ctx).write_ctx_for(table, WritePurpose::ViewMaintenance).await?;
+	if view_row_reaches_nothing(&write_ctx).await? {
+		let range = records.range().map_err(ControlFlow::Err)?;
+		return txn.delr(range).await.map_err(ControlFlow::Err);
+	}
+	let mut next = Some(records.range().map_err(ControlFlow::Err)?);
+	while let Some(range) = next {
+		let size = super::fuel::batch(NORMAL_BATCH_SIZE);
+		let page = txn.batch_keys_vals_raw(range, size, None).await.map_err(ControlFlow::Err)?;
+		next = page.next.map(|range| records.raw(range));
+		if page.result.is_empty() {
+			break;
+		}
+		for (key, bytes) in &page.result {
+			let id = RecordKey::decode_key(key).map_err(ControlFlow::Err)?.id.into_owned();
+			let rid = RecordId {
+				table: table.clone(),
+				key: id.clone(),
+			};
+			let record = txn
+				.decode_record_as_written(ns, db, table, bytes, rid, None)
+				.await
+				.map_err(ControlFlow::Err)?;
+			txn.del(key.clone().into()).await.map_err(ControlFlow::Err)?;
+			txn.forget_record(ns, db, table, &id);
+			maintain(state, ctx, table, id, Action::Delete, Some(&record), None).await?;
+		}
+		super::fuel::tick(ctx, super::fuel::units(page.result.len())).await?;
+	}
+	Ok(())
+}
+
+/// The write scope the statement's fill and retirement of view rows share,
+/// stacked on the statement's scope the first time either meets a row.
+fn scope(state: &mut State, ctx: &ExecutionContext) -> Arc<WriteScope> {
+	Arc::clone(
+		state
+			.backfill
+			.get_or_insert_with(|| WriteScope::new(ctx.clone(), TableExistence::DefinedOnDemand)),
+	)
+}
+
+/// Run the order of view table `table` for `action` over the row under `key`,
+/// whose image before the write is `initial` and after it `current`: a write of
+/// its own over a write state stacked on the statement's scope, in the view
+/// table's view-maintenance context, with the row's table the one view in
+/// flight beneath it ([`view_row_exec`]). The fill runs a row it creates for a
+/// created row, and one that replaced a row it wrote under the same key for an
+/// updated row from that row. The order is the one of the table's catalog
+/// version, taken the first time the statement's fill or retirement of the
+/// view's rows meets the table ([`super::fault::view_rows`]) and held for the
+/// rest of it.
 async fn maintain(
 	state: &mut State,
 	ctx: &ExecutionContext,
 	table: &TableName,
 	key: RecordIdKey,
-	before: Option<&Record>,
-	record: &Record,
+	action: Action,
+	initial: Option<&Record>,
+	current: Option<&Record>,
 ) -> FlowResult<()> {
 	let rows = match &state.backfill_order {
 		Some((held, rows)) if held == table => Arc::clone(rows),
@@ -246,25 +333,17 @@ async fn maintain(
 			rows
 		}
 	};
-	let scope = Arc::clone(
-		state
-			.backfill
-			.get_or_insert_with(|| WriteScope::new(ctx.clone(), TableExistence::DefinedOnDemand)),
-	);
+	let scope = scope(state, ctx);
 	let id = RecordId {
 		table: table.clone(),
 		key,
 	};
 	let write_ctx = scope.write_ctx_for(&id.table, WritePurpose::ViewMaintenance).await?;
 	let exec = view_row_exec(write_ctx.exec().clone(), 1)?;
-	let action = match before {
-		Some(_) => Action::Update,
-		None => Action::Create,
-	};
-	let row = WriteRow::for_view_row(id, before, Some(record));
+	let row = WriteRow::for_view_row(id, initial, current);
 	let pipeline = rows
 		.pipelines
-		.get(super::write::action_pipeline(action))
+		.get(action_pipeline(action))
 		.ok_or_else(|| internal("a view table's order the program does not hold"))?;
 	let mut nested = State::new(&rows, Vec::new(), exec.function_registry())?;
 	nested.frames = rows.permissions.iter().map(|spec| spec.context(&exec)).collect();

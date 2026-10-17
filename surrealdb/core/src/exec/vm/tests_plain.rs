@@ -321,6 +321,18 @@ const PLAN_TIME_FUNCTIONS: &[(&str, &str, &str)] = &[
 		 REFERENCE clause, judged as their bodies judge it",
 	),
 	(
+		"schema_host.rs",
+		"clear_view_table",
+		"declared schema service: the keys beneath a view table DEFINE TABLE ... AS SELECT clears \
+		 before it fills the view, cleared by the code that body clears them with",
+	),
+	(
+		"schema_host.rs",
+		"refuse_view_cycle",
+		"declared schema service: what DEFINE TABLE refuses of a view that would read itself, \
+		 judged as its body judges it",
+	),
+	(
 		"live.rs",
 		"compile",
 		"the compile of a subscription's unit, as its LIVE statement arrives or in a fault on a \

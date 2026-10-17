@@ -471,6 +471,10 @@ fn update_order() -> Vec<StageId> {
 /// clauses from a record the statement already wrote; there is no caller
 /// subject to confine, no user-supplied content to validate, and re-running
 /// the field pipeline would evaluate every view expression a second time.
+///
+/// `view_row_reaches_nothing` (`stages/observe.rs`) answers whether these stages
+/// write anything for a table, and the retirement of a view's rows deletes them
+/// as one range on its answer, so a stage added here is added to its answer too.
 fn view_maintenance_order(action: Action) -> Vec<StageId> {
 	vec![
 		StageId::StoreIndexData,
@@ -703,4 +707,29 @@ fn insert_update_order() -> Vec<StageId> {
 		StageId::CheckSelectPermissions(RecordImage::Current),
 		StageId::OutputWrite,
 	]
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// The stages of a view row's order are those `view_row_reaches_nothing`
+	/// (`stages/observe.rs`) answers for, which a view's retirement relies on to
+	/// delete the rows of a table they write nothing for as one range.
+	#[test]
+	fn a_view_rows_order_is_the_stages_view_row_reaches_nothing_answers_for() {
+		for action in [Action::Create, Action::Update, Action::Delete] {
+			assert_eq!(
+				view_maintenance_order(action),
+				[
+					StageId::StoreIndexData,
+					StageId::ProcessTableViews(action),
+					StageId::ProcessTableEvents(action),
+					StageId::ProcessTableLives(action),
+					StageId::ProcessChangefeeds,
+				],
+				"a stage added to a view row's order is added to `view_row_reaches_nothing`"
+			);
+		}
+	}
 }

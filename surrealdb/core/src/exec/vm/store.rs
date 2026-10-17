@@ -131,6 +131,7 @@ fn note_refusal(instr: &StoreInstr, ctx: &ExecutionContext, failed: bool) {
 				| StoreInstr::RefuseClauseEffects { .. }
 				| StoreInstr::RefuseRedefiningTable { .. }
 				| StoreInstr::RefuseNamedIdConversion { .. }
+				| StoreInstr::RefuseViewCycle { .. }
 				| StoreInstr::CheckTableChange { .. }
 				| StoreInstr::FieldCheck { .. }
 				| StoreInstr::Allow { .. }
@@ -720,6 +721,32 @@ async fn step_inner(
 			let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
 			let tb = table_named(&read(regs, *tb))?;
 			super::schema_host::purge_edge_pointers(ctx, ns, db, &tb, *expunge)
+				.await
+				.map_err(ControlFlow::Err)?;
+		}
+		StoreInstr::ClearViewTable {
+			ns,
+			db,
+			tb,
+			keep_records,
+		} => {
+			let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
+			let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
+			let tb = table_named(&read(regs, *tb))?;
+			super::schema_host::clear_view_table(&ctx.txn(), ns, db, &tb, *keep_records)
+				.await
+				.map_err(ControlFlow::Err)?;
+		}
+		StoreInstr::RefuseViewCycle {
+			ns,
+			db,
+			tb,
+			sources,
+		} => {
+			let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
+			let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
+			let tb = table_named(&read(regs, *tb))?;
+			super::schema_host::refuse_view_cycle(&ctx.txn(), ns, db, &tb, sources)
 				.await
 				.map_err(ControlFlow::Err)?;
 		}
@@ -2233,6 +2260,9 @@ async fn step_inner(
 			..
 		}
 		| StoreInstr::BackfillGroupRow {
+			..
+		}
+		| StoreInstr::RetireViewRows {
 			..
 		} => {
 			return Err(ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(

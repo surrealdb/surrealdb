@@ -151,6 +151,38 @@ async fn table_names(ds: &Datastore, ses: &Session) -> Vec<String> {
 	tables.keys().cloned().collect()
 }
 
+/// Stores `table` as a view with the clauses of the plain view `like`, reading
+/// `source`: the definition alone, with no rows recomputed and no registration
+/// written, as a catalog an earlier release wrote can hold it.
+async fn store_view(ds: &Datastore, table: &str, like: &str, source: &str) {
+	let txn = Arc::new(ds.transaction(Write).await.unwrap());
+	let db = txn.get_db_by_name("test", "test", None).await.unwrap().unwrap();
+	let (ns, db) = (db.namespace_id, db.database_id);
+	let get =
+		async |name: &str| txn.get_tb(ns, db, &TableName::from(name), None).await.unwrap().unwrap();
+	let (template, before) = (get(like).await, get(table).await);
+	let view = match template.view.clone().unwrap() {
+		ViewDefinition::Materialized {
+			fields,
+			condition,
+			condition_body,
+			..
+		} => ViewDefinition::Materialized {
+			fields,
+			tables: vec![TableName::from(source)],
+			condition,
+			condition_body,
+		},
+		other => panic!("the template view must be a plain one: {other:?}"),
+	};
+	let rewritten = TableDefinition {
+		view: Some(view),
+		..(*before).clone()
+	};
+	txn.replace_tb("test", "test", &rewritten).await.unwrap();
+	txn.commit().await.unwrap();
+}
+
 /// Seeds a source table and a maintained aggregate over it, then rewrites the
 /// view's stored clauses to a shape the analysis rejects — a `VALUE` selector
 /// under a `GROUP`, which `view_to_definition` refuses outright.
@@ -529,11 +561,12 @@ async fn a_view_reading_an_unreplayable_view_still_restores() {
 
 /// Views that define a cycle restore with their tables and their rows.
 ///
-/// The catalog stores a cycle — `DEFINE TABLE OVERWRITE` can point a view's own
-/// source back at it — and no emission order satisfies one: whichever member
-/// comes first reads a name the dump has not defined yet. Every member is
-/// therefore treated as unreplayable, which is what keeps the failure to one
-/// definition instead of taking both tables and both sets of rows with it.
+/// A catalog an earlier release wrote can hold a cycle, which `DEFINE TABLE`
+/// refuses to create, so the fixture stores the second member's definition
+/// directly. No emission order satisfies a cycle: whichever member comes first
+/// reads a name the dump has not defined yet. Every member is therefore treated
+/// as unreplayable, which is what keeps the failure to one definition instead
+/// of taking both tables and both sets of rows with it.
 #[tokio::test]
 async fn a_view_cycle_restores_with_its_tables_and_rows() {
 	let ds = ds().await;
@@ -544,8 +577,7 @@ async fn a_view_cycle_restores_with_its_tables_and_rows() {
 			 DEFINE DATABASE test;
 			 DEFINE TABLE b SCHEMALESS;
 			 CREATE b:1 SET n = 1;
-			 DEFINE TABLE a AS SELECT n FROM b;
-			 DEFINE TABLE OVERWRITE b AS SELECT n FROM a;",
+			 DEFINE TABLE a AS SELECT n FROM b;",
 			&ses,
 			None,
 		)
@@ -554,6 +586,7 @@ async fn a_view_cycle_restores_with_its_tables_and_rows() {
 	{
 		result.result.unwrap();
 	}
+	store_view(&ds, "b", "a", "a").await;
 
 	let dump = export_text(&ds, &ses).await;
 	for table in ["a", "b"] {

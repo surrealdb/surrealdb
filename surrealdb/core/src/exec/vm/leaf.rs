@@ -329,6 +329,9 @@ fn store(instr: &StoreInstr) -> Class {
 		}
 		| StoreInstr::BackfillGroupRow {
 			..
+		}
+		| StoreInstr::RetireViewRows {
+			..
 		} => Class::NonLeaf(Bar::Write),
 		StoreInstr::RefuseNoWrite
 		| StoreInstr::Allow {
@@ -344,6 +347,12 @@ fn store(instr: &StoreInstr) -> Class {
 			..
 		}
 		| StoreInstr::PurgeEdgePointers {
+			..
+		}
+		| StoreInstr::ClearViewTable {
+			..
+		}
+		| StoreInstr::RefuseViewCycle {
 			..
 		}
 		| StoreInstr::RefuseClauseEffects {

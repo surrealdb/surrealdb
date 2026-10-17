@@ -1510,6 +1510,30 @@ pub(crate) enum StoreInstr {
 		tb: Reg,
 		expunge: bool,
 	},
+	/// Delete every key beneath the root of the table `tb` of the database
+	/// `ns`, `db` except the registrations of the views that read it
+	/// (`ForeignTableKey`) and, under `keep_records`, its records and the layout
+	/// state they are decoded through: its field, index, event and subscription
+	/// definitions, its index entries, and the references and edges stored
+	/// under its records. The registrations belong to the views that wrote
+	/// them; kept records are left for [`StoreInstr::RetireViewRows`].
+	ClearViewTable {
+		ns: Reg,
+		db: Reg,
+		tb: Reg,
+		keep_records: bool,
+	},
+	/// Raise what refuses the view `tb` of the database `ns`, `db` reading
+	/// `sources`: a source that is the view itself, or that reads it directly
+	/// or through other views, as the registrations stand when the instruction
+	/// runs. Maintaining such a view would feed each row it writes back into
+	/// itself.
+	RefuseViewCycle {
+		ns: Reg,
+		db: Reg,
+		tb: Reg,
+		sources: Box<[crate::val::TableName]>,
+	},
 	/// Raise [`crate::exec::Error::SchemaClauseEffect`] when a schema clause of
 	/// the definition in `definition`, stored as `object` names, has an effect
 	/// a schema clause must not have, judged against the catalog of the
@@ -1987,6 +2011,17 @@ pub(crate) enum StoreInstr {
 		table: Reg,
 		row: Reg,
 		fields: Vec<(crate::expr::Idiom, Reg)>,
+	},
+	/// Delete each record of the view table named in `table`, then run it
+	/// through the view table's own order for a deleted row, as the incremental
+	/// path runs the order for a removed row: every view reading the table
+	/// takes the removal as it takes any other. The order is the one of the
+	/// view table's catalog version when the instruction meets the table
+	/// ([`super::fault::view_rows`]). A table that order writes nothing for, and
+	/// a speculative run, have the records deleted as one range and run no
+	/// order.
+	RetireViewRows {
+		table: Reg,
 	},
 	/// Jump to `target` when the base the session selects is `base`: the
 	/// root with no namespace, the namespace with a namespace and no

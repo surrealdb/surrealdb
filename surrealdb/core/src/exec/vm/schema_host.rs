@@ -279,6 +279,43 @@ pub(super) fn validate_reference_options(
 	crate::exec::field_rules::define_field_statement_validate_reference_options(field)
 }
 
+/// Deletes every key beneath the root of the table `table` of the database
+/// `ns`, `db` but the registrations of the views that read it and, under
+/// `keep_records`, its records and the layout state they are decoded through,
+/// before `DEFINE TABLE ... AS SELECT` fills the view.
+pub(super) async fn clear_view_table(
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table: &TableName,
+	keep_records: bool,
+) -> anyhow::Result<()> {
+	crate::exec::vm::descriptor::schema(crate::ddl::define::table::clear_view_table(
+		txn,
+		ns,
+		db,
+		table,
+		keep_records,
+	))
+	.await
+}
+
+/// What refuses the view `table` of the database `ns`, `db` reading `sources`:
+/// a source that is the view, or that reads it through the views registered on
+/// it.
+pub(super) async fn refuse_view_cycle(
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table: &TableName,
+	sources: &[TableName],
+) -> anyhow::Result<()> {
+	crate::exec::vm::descriptor::schema(crate::ddl::define::table::refuse_view_cycle(
+		txn, ns, db, table, sources,
+	))
+	.await
+}
+
 /// What refuses removing table `name` from the database `ns`, `db`. A non-empty
 /// LIGHTWEIGHT relation that uses `name` as an endpoint is reported first, then
 /// a non-empty LIGHTWEIGHT `name` itself. Edges are read through `txn`.

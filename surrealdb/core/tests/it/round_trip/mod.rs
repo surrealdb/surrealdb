@@ -118,8 +118,16 @@ impl RoundTrip {
 	/// Still panics on a failing seed: a fixture that cannot be built says
 	/// nothing about the restore.
 	pub async fn run_allowing_import_errors(seed: &str) -> Result<(RoundTrip, Vec<QueryResult>)> {
-		let session = Session::owner().with_ns(NS).with_db(DB);
+		Self::replay_allowing_import_errors(Self::seeded(seed).await?).await
+	}
 
+	/// A fresh source datastore seeded with `seed`, for a fixture that writes
+	/// what no statement can before [`RoundTrip::replay_allowing_import_errors`]
+	/// replays it.
+	///
+	/// Panics on a failing seed, as [`RoundTrip::run`] does.
+	pub async fn seeded(seed: &str) -> Result<Arc<Datastore>> {
+		let session = Session::owner().with_ns(NS).with_db(DB);
 		let source = fresh_datastore().await?;
 		let results = source.execute(seed, &session, None).await?;
 		let errors = error_messages(&results);
@@ -129,6 +137,15 @@ impl RoundTrip {
 			errors.join("\n"),
 			quote(seed),
 		);
+		Ok(source)
+	}
+
+	/// As [`RoundTrip::run_allowing_import_errors`], over a `source` the
+	/// fixture has already seeded.
+	pub async fn replay_allowing_import_errors(
+		source: Arc<Datastore>,
+	) -> Result<(RoundTrip, Vec<QueryResult>)> {
+		let session = Session::owner().with_ns(NS).with_db(DB);
 		let export_a = export_text(&source, &session).await?;
 
 		let target = fresh_datastore().await?;

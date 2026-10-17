@@ -264,6 +264,24 @@ pub(crate) async fn record_change(row: &mut WriteRow, ctx: &WriteCtx) -> Result<
 	Ok(())
 }
 
+/// Whether the order a view row of this table gets writes nothing: the table has
+/// no index, no view reading it, no event, no live-query subscription and no
+/// change feed on it or on its database, and the router engine captures no
+/// change of it. Those are what the stages of that order maintain
+/// (`view_maintenance_order` in `write/plan.rs`), so a view row deleted from
+/// such a table removes its record and nothing else.
+pub(crate) async fn view_row_reaches_nothing(ctx: &WriteCtx) -> Result<bool, ControlFlow> {
+	if !ctx.indexes.is_empty()
+		|| !ctx.views.is_empty()
+		|| !ctx.events.is_empty()
+		|| !ctx.lives.is_empty()
+		|| changefeed_definition(ctx).is_some()
+	{
+		return Ok(false);
+	}
+	Ok(!captures_live_events(ctx, &ctx.txn()).await?)
+}
+
 /// Whether this write captures its record change into the live-query keyspace
 /// ([`crate::lq`]), for the router engine to replay off the write path.
 ///

@@ -214,6 +214,14 @@ impl Ddl<'_, '_> {
 			previous: None,
 			object: ClauseObject::Table,
 		});
+		if let Some(view) = &table.view {
+			self.store(StoreInstr::RefuseViewCycle {
+				ns,
+				db,
+				tb: name_reg,
+				sources: view.what.clone(),
+			});
+		}
 		if let Some(redefined) = redefined {
 			self.store(StoreInstr::CheckTableChange {
 				ns,
@@ -334,11 +342,14 @@ impl Ddl<'_, '_> {
 	}
 
 	/// The view part of `DEFINE TABLE`, after the view table's definition `definition` is
-	/// written: the view table is emptied of what it held, the adjacency its edges left on their
-	/// endpoints with it, and every subscription on it killed;
-	/// each table it reads records the view as a foreign table and refreshes its views' stamp;
-	/// then the view is filled from them ([`Ddl::backfill_view`]). `name` is the view table's name
-	/// as an operand and in a register.
+	/// written and the registrations of the definition it replaced are removed: every
+	/// subscription on the view table is killed, the adjacency its edges left on their endpoints
+	/// goes, and the table is emptied of what it held but the registrations of the views that read
+	/// it. Its rows go after its other definitions, each through the table's order for a deleted
+	/// row, so the views reading it take their removal. Each table the view reads records it as a
+	/// foreign table and refreshes its views' stamp; then the view is filled from them
+	/// ([`Ddl::backfill_view`]), each row through the order for a created row. `name` is the view
+	/// table's name as an operand and in a register.
 	fn define_view(
 		&mut self,
 		view: &ViewShape,
@@ -357,11 +368,29 @@ impl Ddl<'_, '_> {
 			tb: name_reg,
 			expunge: false,
 		});
-		let root = self.object(&[("ns", ns_op), ("db", db_op), ("tb", name_op)])?;
-		self.store(StoreInstr::DeleteRange {
-			route: RouteId::named("TblRoot"),
-			key: root,
+		// The records stay, with the layout state they are decoded through, until they are retired
+		// through the order compiled from the definitions left.
+		self.store(StoreInstr::ClearViewTable {
+			ns,
+			db,
+			tb: name_reg,
+			keep_records: true,
 		});
+		self.store(StoreInstr::ClearCache);
+		self.store(StoreInstr::RetireViewRows {
+			table: name_reg,
+		});
+		self.store(StoreInstr::ClearViewTable {
+			ns,
+			db,
+			tb: name_reg,
+			keep_records: false,
+		});
+		// The stamp follows the clear of the table's layout state, so no read of that state is
+		// served under the catalog version it leaves, and gives the table the generation the view's
+		// rows are written in.
+		self.stamp(ns, db, name_op)?;
+		self.store(StoreInstr::ClearCache);
 		for source in view.what.iter() {
 			let ft = self.constant(Value::String(source.as_str().into()))?;
 			let foreign =
