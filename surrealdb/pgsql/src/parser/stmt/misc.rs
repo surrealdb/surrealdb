@@ -18,20 +18,34 @@ impl<'a> Parser<'a> {
 	pub fn parse_set_stmt(&mut self) -> ParseResult<SetStmt> {
 		let set_tok = self.expect(&TokenKind::Keyword(Keyword::Set), "'SET'")?;
 
-		// Reject SET LOCAL
-		if self.eat(&TokenKind::Keyword(Keyword::Local))? {
-			return Err(crate::error::ParseError::new(
-				set_tok.span,
-				crate::error::ErrorKind::InvalidStatement("SET LOCAL is not supported"),
-			));
+		let is_local = self.eat(&TokenKind::Keyword(Keyword::Local))?;
+		if !is_local {
+			self.eat(&TokenKind::Keyword(Keyword::Session))?;
 		}
-		// Optional SESSION
-		self.eat(&TokenKind::Keyword(Keyword::Session))?;
 
-		let (name, _name_span) = self.parse_ident()?;
+		let (name, _name_span) = if self.peek().kind == TokenKind::Keyword(Keyword::Time) {
+			let tok = self.bump()?;
+			if self.peek().kind == TokenKind::Keyword(Keyword::Zone) {
+				let zone_tok = self.bump()?;
+				("timezone".to_string(), tok.span.merge(zone_tok.span))
+			} else {
+				("time".to_string(), tok.span)
+			}
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::Names) {
+			let tok = self.bump()?;
+			("client_encoding".to_string(), tok.span)
+		} else {
+			self.parse_ident()?
+		};
 
-		// TO or =
-		if !self.eat(&TokenKind::Keyword(Keyword::To))? {
+		// TO or = (unless TIME ZONE, client_encoding, or role which can be followed directly by
+		// value)
+		if self.eat(&TokenKind::Keyword(Keyword::To))? || self.eat(&TokenKind::Operator("="))? {
+			// eaten
+		} else if !name.eq_ignore_ascii_case("timezone")
+			&& !name.eq_ignore_ascii_case("client_encoding")
+			&& !name.eq_ignore_ascii_case("role")
+		{
 			self.expect(&TokenKind::Operator("="), "'TO' or '='")?;
 		}
 
@@ -76,6 +90,7 @@ impl<'a> Parser<'a> {
 		Ok(SetStmt {
 			name,
 			value,
+			is_local,
 			span,
 		})
 	}
@@ -85,7 +100,19 @@ impl<'a> Parser<'a> {
 	/// gram.y: VariableShowStmt
 	pub fn parse_show_stmt(&mut self) -> ParseResult<ShowStmt> {
 		let show_tok = self.expect(&TokenKind::Keyword(Keyword::Show), "'SHOW'")?;
-		let (name, name_span) = self.parse_ident()?;
+		let (name, name_span) = if self.eat(&TokenKind::Keyword(Keyword::All))? {
+			("ALL".to_string(), show_tok.span)
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::Time) {
+			let tok = self.bump()?;
+			if self.peek().kind == TokenKind::Keyword(Keyword::Zone) {
+				let zone_tok = self.bump()?;
+				("timezone".to_string(), tok.span.merge(zone_tok.span))
+			} else {
+				("time".to_string(), tok.span)
+			}
+		} else {
+			self.parse_ident()?
+		};
 		let span = show_tok.span.merge(name_span);
 
 		Ok(ShowStmt {
@@ -102,6 +129,14 @@ impl<'a> Parser<'a> {
 
 		let (name, name_span) = if self.eat(&TokenKind::Keyword(Keyword::All))? {
 			("ALL".to_string(), reset_tok.span)
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::Time) {
+			let tok = self.bump()?;
+			if self.peek().kind == TokenKind::Keyword(Keyword::Zone) {
+				let zone_tok = self.bump()?;
+				("timezone".to_string(), tok.span.merge(zone_tok.span))
+			} else {
+				("time".to_string(), tok.span)
+			}
 		} else {
 			self.parse_ident()?
 		};

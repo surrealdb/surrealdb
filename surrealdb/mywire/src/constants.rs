@@ -48,6 +48,8 @@ pub const CHARSET_UTF8MB4_0900_AI_CI: u16 = 255;
 pub const SERVER_STATUS_IN_TRANS: u16 = 0x0001;
 pub const SERVER_STATUS_AUTOCOMMIT: u16 = 0x0002;
 pub const SERVER_MORE_RESULTS_EXISTS: u16 = 0x0008;
+pub const SERVER_STATUS_LAST_ROW_SENT: u16 = 0x0080;
+pub const SERVER_STATUS_CURSOR_EXISTS: u16 = 0x0040;
 
 // Command bytes
 pub const COM_SLEEP: u8 = 0x00;
@@ -56,7 +58,19 @@ pub const COM_INIT_DB: u8 = 0x02;
 pub const COM_QUERY: u8 = 0x03;
 pub const COM_FIELD_LIST: u8 = 0x04;
 pub const COM_PING: u8 = 0x0e;
+pub const COM_STMT_PREPARE: u8 = 0x16;
+pub const COM_STMT_EXECUTE: u8 = 0x17;
+pub const COM_STMT_SEND_LONG_DATA: u8 = 0x18;
+pub const COM_STMT_CLOSE: u8 = 0x19;
+pub const COM_STMT_RESET: u8 = 0x1a;
+pub const COM_STMT_FETCH: u8 = 0x1c;
 pub const COM_RESET_CONNECTION: u8 = 0x1f;
+
+// Cursor flags for COM_STMT_EXECUTE
+pub const CURSOR_TYPE_NO_CURSOR: u8 = 0x00;
+pub const CURSOR_TYPE_READ_ONLY: u8 = 0x01;
+pub const CURSOR_TYPE_FOR_UPDATE: u8 = 0x02;
+pub const CURSOR_TYPE_SCROLLABLE: u8 = 0x04;
 
 // MySQL Column / Field Types
 pub const MYSQL_TYPE_DECIMAL: u8 = 0x00;
@@ -103,6 +117,9 @@ pub const SET_FLAG: u16 = 0x0800;
 
 // Header identifiers
 pub const OK_HEADER: u8 = 0x00;
+pub const AUTH_MORE_DATA_HEADER: u8 = 0x01;
+pub const FAST_AUTH_SUCCESS: u8 = 0x03;
+pub const PERFORM_FULL_AUTHENTICATION: u8 = 0x04;
 pub const EOF_HEADER: u8 = 0xfe;
 pub const ERR_HEADER: u8 = 0xff;
 pub const NULL_VALUE: u8 = 0xfb;

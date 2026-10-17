@@ -7,6 +7,7 @@ use crate::dialect::{DialectPolicy, SqlDialect};
 use crate::error::PlanError;
 use crate::ir::{
 	BoundBinaryOp, BoundExpr, BoundLiteral, BoundSelect, BoundTableSource, BoundUnaryOp,
+	BoundWindowFrameBound,
 };
 
 /// Fold all constant expressions in a `BoundSelect` statement according to the dialect policy.
@@ -54,6 +55,36 @@ pub fn fold_select(select: &mut BoundSelect, policy: &DialectPolicy) -> Result<(
 		fold_select(&mut set_op.right, policy)?;
 	}
 
+	// 9. Fold CTE queries recursively if present
+	if let Some(with) = &mut select.with {
+		for cte in &mut with.ctes {
+			fold_select(&mut cte.query, policy)?;
+		}
+	}
+
+	// 10. Fold named WINDOW definitions
+	for win in &mut select.windows {
+		for p in &mut win.spec.partition_by {
+			*p = fold_expr(p, policy)?;
+		}
+		for o in &mut win.spec.order_by {
+			o.expr = fold_expr(&o.expr, policy)?;
+		}
+		if let Some(frame) = &mut win.spec.frame {
+			match &mut frame.start {
+				BoundWindowFrameBound::Preceding(e) | BoundWindowFrameBound::Following(e) => {
+					**e = fold_expr(e, policy)?;
+				}
+				_ => {}
+			}
+			if let Some(BoundWindowFrameBound::Preceding(e) | BoundWindowFrameBound::Following(e)) =
+				&mut frame.end
+			{
+				**e = fold_expr(e, policy)?;
+			}
+		}
+	}
+
 	Ok(())
 }
 
@@ -89,6 +120,10 @@ pub fn fold_expr(expr: &BoundExpr, policy: &DialectPolicy) -> Result<BoundExpr, 
 		BoundExpr::Literal(_)
 		| BoundExpr::Column(_)
 		| BoundExpr::Param {
+			..
+		}
+		| BoundExpr::UserVar(_)
+		| BoundExpr::SystemVar {
 			..
 		} => Ok(expr.clone()),
 
@@ -281,6 +316,96 @@ pub fn fold_expr(expr: &BoundExpr, policy: &DialectPolicy) -> Result<BoundExpr, 
 					target_type: target_type.clone(),
 				})
 			}
+		}
+		BoundExpr::ScalarSubquery(sub) => {
+			let mut sub = sub.clone();
+			fold_select(&mut sub, policy)?;
+			Ok(BoundExpr::ScalarSubquery(sub))
+		}
+		BoundExpr::Exists(sub) => {
+			let mut sub = sub.clone();
+			fold_select(&mut sub, policy)?;
+			Ok(BoundExpr::Exists(sub))
+		}
+		BoundExpr::InSubquery {
+			expr: inner,
+			subquery,
+			negated,
+		} => {
+			let folded_inner = fold_expr(inner, policy)?;
+			let mut sub = subquery.clone();
+			fold_select(&mut sub, policy)?;
+			Ok(BoundExpr::InSubquery {
+				expr: Box::new(folded_inner),
+				subquery: sub,
+				negated: *negated,
+			})
+		}
+		BoundExpr::ArraySubquery(sub) => {
+			let mut sub = sub.clone();
+			fold_select(&mut sub, policy)?;
+			Ok(BoundExpr::ArraySubquery(sub))
+		}
+		BoundExpr::WindowFunction {
+			name,
+			args,
+			distinct,
+			spec,
+		} => {
+			let folded_args =
+				args.iter().map(|a| fold_expr(a, policy)).collect::<Result<Vec<_>, _>>()?;
+			let folded_partition = spec
+				.partition_by
+				.iter()
+				.map(|p| fold_expr(p, policy))
+				.collect::<Result<Vec<_>, _>>()?;
+			let mut folded_order = Vec::with_capacity(spec.order_by.len());
+			for o in &spec.order_by {
+				folded_order.push(crate::ir::BoundOrder {
+					expr: fold_expr(&o.expr, policy)?,
+					direction: o.direction,
+					nulls_first: o.nulls_first,
+				});
+			}
+			let folded_frame = if let Some(frame) = &spec.frame {
+				let start = match &frame.start {
+					BoundWindowFrameBound::Preceding(e) => {
+						BoundWindowFrameBound::Preceding(Box::new(fold_expr(e, policy)?))
+					}
+					BoundWindowFrameBound::Following(e) => {
+						BoundWindowFrameBound::Following(Box::new(fold_expr(e, policy)?))
+					}
+					other => other.clone(),
+				};
+				let end = match &frame.end {
+					Some(BoundWindowFrameBound::Preceding(e)) => {
+						Some(BoundWindowFrameBound::Preceding(Box::new(fold_expr(e, policy)?)))
+					}
+					Some(BoundWindowFrameBound::Following(e)) => {
+						Some(BoundWindowFrameBound::Following(Box::new(fold_expr(e, policy)?)))
+					}
+					other => other.clone(),
+				};
+				Some(crate::ir::BoundWindowFrame {
+					units: frame.units,
+					start,
+					end,
+					exclusion: frame.exclusion,
+				})
+			} else {
+				None
+			};
+			Ok(BoundExpr::WindowFunction {
+				name: name.clone(),
+				args: folded_args,
+				distinct: *distinct,
+				spec: crate::ir::BoundWindowSpec {
+					window_name: spec.window_name.clone(),
+					partition_by: folded_partition,
+					order_by: folded_order,
+					frame: folded_frame,
+				},
+			})
 		}
 	}
 }

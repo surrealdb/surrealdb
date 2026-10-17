@@ -30,6 +30,7 @@ pub enum TokenKind {
 
 	// Identifiers
 	Ident(String),
+	CharsetIntro(String),
 
 	// Literals
 	IntLiteral(i64),
@@ -60,6 +61,7 @@ pub enum TokenKind {
 	RBrace,
 	Colon,
 	ColonEqual,
+	At,
 
 	// Arithmetic & Bitwise Operators
 	Plus,
@@ -95,6 +97,7 @@ impl std::fmt::Display for TokenKind {
 		match self {
 			Self::Keyword(kw) => write!(f, "{}", kw.as_str()),
 			Self::Ident(id) => write!(f, "{id}"),
+			Self::CharsetIntro(cs) => write!(f, "_{cs}"),
 			Self::IntLiteral(n) => write!(f, "{n}"),
 			Self::FloatLiteral(fl) => write!(f, "{fl}"),
 			Self::StringLiteral(s) => write!(f, "'{s}'"),
@@ -123,6 +126,7 @@ impl std::fmt::Display for TokenKind {
 			Self::RBrace => write!(f, "}}"),
 			Self::Colon => write!(f, ":"),
 			Self::ColonEqual => write!(f, ":="),
+			Self::At => write!(f, "@"),
 			Self::Plus => write!(f, "+"),
 			Self::Minus => write!(f, "-"),
 			Self::Star => write!(f, "*"),

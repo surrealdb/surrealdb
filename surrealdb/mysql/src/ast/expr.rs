@@ -55,6 +55,7 @@ pub enum Expr {
 		name: String,
 		distinct: bool,
 		args: Vec<Expr>,
+		over: Option<Box<WindowSpec>>,
 		span: Span,
 	},
 	Cast {
@@ -77,6 +78,13 @@ pub enum Expr {
 	InSubquery {
 		expr: Box<Expr>,
 		negated: bool,
+		subquery: Box<SelectStmt>,
+		span: Span,
+	},
+	Quantified {
+		expr: Box<Expr>,
+		op: BinaryOperator,
+		quantifier: Quantifier,
 		subquery: Box<SelectStmt>,
 		span: Span,
 	},
@@ -118,6 +126,24 @@ pub enum Expr {
 	},
 }
 
+/// Quantifier for subquery comparison (`ANY`, `SOME`, `ALL`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Quantifier {
+	Any,
+	Some,
+	All,
+}
+
+impl Quantifier {
+	pub fn as_str(&self) -> &'static str {
+		match self {
+			Self::Any => "ANY",
+			Self::Some => "SOME",
+			Self::All => "ALL",
+		}
+	}
+}
+
 impl Expr {
 	/// Return source span covering this expression.
 	pub fn span(&self) -> Span {
@@ -155,6 +181,10 @@ impl Expr {
 				..
 			} => *span,
 			Self::InSubquery {
+				span,
+				..
+			} => *span,
+			Self::Quantified {
 				span,
 				..
 			} => *span,
@@ -221,12 +251,16 @@ impl Expr {
 			}
 			Self::FunctionCall {
 				args,
+				over,
 				span,
 				..
 			} => {
 				*span = zero;
 				for a in args {
 					a.normalize_spans();
+				}
+				if let Some(w) = over {
+					w.normalize_spans();
 				}
 			}
 			Self::Cast {
@@ -269,6 +303,16 @@ impl Expr {
 				}
 			}
 			Self::InSubquery {
+				expr,
+				subquery,
+				span,
+				..
+			} => {
+				*span = zero;
+				expr.normalize_spans();
+				subquery.normalize_spans();
+			}
+			Self::Quantified {
 				expr,
 				subquery,
 				span,
@@ -335,6 +379,95 @@ impl Expr {
 			} => {
 				*span = zero;
 				expr.normalize_spans();
+			}
+		}
+	}
+}
+
+/// An ORDER BY item.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OrderByExpr {
+	pub expr: Expr,
+	pub asc: bool,
+	pub span: Span,
+}
+
+impl OrderByExpr {
+	pub fn normalize_spans(&mut self) {
+		self.span = Span::empty(0);
+		self.expr.normalize_spans();
+	}
+}
+
+/// Units for a window frame specification (`ROWS`, `RANGE`, `GROUPS`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowFrameUnits {
+	Rows,
+	Range,
+	Groups,
+}
+
+/// A bound in a window frame specification.
+#[derive(Debug, Clone, PartialEq)]
+pub enum WindowFrameBound {
+	CurrentRow,
+	UnboundedPreceding,
+	UnboundedFollowing,
+	Preceding(Box<Expr>),
+	Following(Box<Expr>),
+}
+
+/// Exclusion clause in a window frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowFrameExclusion {
+	CurrentRow,
+	Group,
+	Ties,
+	NoOthers,
+}
+
+/// Specification of a window frame (`ROWS BETWEEN ... AND ...`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct WindowFrame {
+	pub units: WindowFrameUnits,
+	pub start: WindowFrameBound,
+	pub end: Option<WindowFrameBound>,
+	pub exclusion: Option<WindowFrameExclusion>,
+	pub span: Span,
+}
+
+/// Specification of a window in an `OVER` clause or `WINDOW` definition.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WindowSpec {
+	pub window_name: Option<String>,
+	pub partition_by: Vec<Expr>,
+	pub order_by: Vec<OrderByExpr>,
+	pub frame: Option<WindowFrame>,
+	pub span: Span,
+}
+
+impl WindowSpec {
+	pub fn normalize_spans(&mut self) {
+		let zero = Span::empty(0);
+		self.span = zero;
+		for expr in &mut self.partition_by {
+			expr.normalize_spans();
+		}
+		for item in &mut self.order_by {
+			item.normalize_spans();
+		}
+		if let Some(frame) = &mut self.frame {
+			frame.span = zero;
+			match &mut frame.start {
+				WindowFrameBound::Preceding(e) | WindowFrameBound::Following(e) => {
+					e.normalize_spans();
+				}
+				_ => {}
+			}
+			if let Some(WindowFrameBound::Preceding(e) | WindowFrameBound::Following(e)) =
+				&mut frame.end
+			{
+				e.normalize_spans();
 			}
 		}
 	}

@@ -11,6 +11,13 @@ impl<'a> Parser<'a> {
 	pub fn parse_show_stmt(&mut self) -> ParseResult<ShowStmt> {
 		let start = self.expect_keyword(Keyword::Show, "SHOW")?.span;
 
+		let full = if self.peek_keyword() == Some(Keyword::Full) {
+			self.bump();
+			true
+		} else {
+			false
+		};
+
 		// SHOW [GLOBAL | SESSION] VARIABLES / STATUS
 		let is_global = if self.peek_keyword() == Some(Keyword::Global) {
 			self.bump();
@@ -57,6 +64,7 @@ impl<'a> Parser<'a> {
 			let like = self.parse_optional_like()?;
 			let end = self.peek().span;
 			return Ok(ShowStmt::Tables {
+				full,
 				database,
 				like,
 				span: start.merge(end),
@@ -82,6 +90,7 @@ impl<'a> Parser<'a> {
 			let like = self.parse_optional_like()?;
 			let end = self.peek().span;
 			return Ok(ShowStmt::Columns {
+				full,
 				table,
 				like,
 				span: start.merge(end),
@@ -105,7 +114,7 @@ impl<'a> Parser<'a> {
 			self.bump();
 			let end = self.peek().span;
 			return Ok(ShowStmt::Processlist {
-				full: false,
+				full,
 				span: start.merge(end),
 			});
 		}
@@ -126,10 +135,64 @@ impl<'a> Parser<'a> {
 			});
 		}
 
+		if self.peek_keyword() == Some(Keyword::Index) || self.peek_keyword() == Some(Keyword::Key)
+		{
+			self.bump();
+			if self.peek_keyword() == Some(Keyword::From)
+				|| self.peek_keyword() == Some(Keyword::In)
+			{
+				self.bump();
+			}
+			let table = self.parse_qualified_name()?;
+			let end = self.peek().span;
+			return Ok(ShowStmt::Index {
+				table,
+				span: start.merge(end),
+			});
+		}
+
+		if self.peek_keyword() == Some(Keyword::Engines)
+			|| self.peek_keyword() == Some(Keyword::Engine)
+		{
+			self.bump();
+			let end = self.peek().span;
+			return Ok(ShowStmt::Engines {
+				span: start.merge(end),
+			});
+		}
+
+		if self.peek_keyword() == Some(Keyword::Collation) {
+			self.bump();
+			let like = self.parse_optional_like()?;
+			let end = self.peek().span;
+			return Ok(ShowStmt::Collation {
+				like,
+				span: start.merge(end),
+			});
+		}
+
+		if self.peek_keyword() == Some(Keyword::Charset)
+			|| (self.peek_keyword() == Some(Keyword::Character)
+				&& self.peek_nth_keyword(1) == Some(Keyword::Set))
+		{
+			if self.peek_keyword() == Some(Keyword::Character) {
+				self.bump();
+				self.bump();
+			} else {
+				self.bump();
+			}
+			let like = self.parse_optional_like()?;
+			let end = self.peek().span;
+			return Ok(ShowStmt::Charset {
+				like,
+				span: start.merge(end),
+			});
+		}
+
 		Err(ParseError::new(
 			self.peek().span,
 			ErrorKind::UnexpectedToken {
-				expected: "TABLES, DATABASES, COLUMNS, VARIABLES, STATUS, etc. after SHOW",
+				expected: "TABLES, DATABASES, COLUMNS, VARIABLES, STATUS, INDEX, ENGINES, COLLATION, CHARSET, etc. after SHOW",
 				found: self.peek().kind.to_string(),
 			},
 		))

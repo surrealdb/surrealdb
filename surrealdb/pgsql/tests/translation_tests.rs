@@ -63,7 +63,7 @@ fn test_translate_introspection() {
 	let surrealql = translate_sql(sql).expect("translate");
 	assert_eq!(
 		surrealql,
-		"RETURN [{ \"?column?_1\": db(), \"?column?_2\": 'public', \"?column?_3\": 'SurrealDB (PostgreSQL Frontend)' }];"
+		"RETURN [{ \"?column?_1\": db(), \"?column?_2\": 'public', \"?column?_3\": 'PostgreSQL 16.0 (SurrealDB)' }];"
 	);
 }
 

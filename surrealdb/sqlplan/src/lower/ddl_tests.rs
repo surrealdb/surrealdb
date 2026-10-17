@@ -719,3 +719,124 @@ fn test_lower_mysql_drop_multiple_tables() {
 		}
 	}
 }
+
+#[test]
+fn test_lower_mysql_database_ddl() {
+	let create_stmt =
+		surrealdb_mysql::parse_statement("CREATE DATABASE IF NOT EXISTS my_db;").expect("parse");
+	let exprs = lower_mysql_ddl(&create_stmt).expect("lower create db");
+	assert_eq!(exprs.len(), 1);
+	match &exprs[0] {
+		Expr::Define(d) => match &**d {
+			DefineStatement::Database(db) => {
+				assert_eq!(db.name.to_sql(), "my_db");
+				assert_eq!(db.kind, DefineKind::IfNotExists);
+			}
+			_ => panic!("Expected DefineDatabase"),
+		},
+		_ => panic!("Expected Expr::Define"),
+	}
+
+	let drop_stmt =
+		surrealdb_mysql::parse_statement("DROP DATABASE IF EXISTS my_db;").expect("parse");
+	let exprs = lower_mysql_ddl(&drop_stmt).expect("lower drop db");
+	assert_eq!(exprs.len(), 1);
+	match &exprs[0] {
+		Expr::Remove(r) => match &**r {
+			RemoveStatement::Database(db) => {
+				assert_eq!(db.name.to_sql(), "my_db");
+				assert!(db.if_exists);
+			}
+			_ => panic!("Expected RemoveDatabase"),
+		},
+		_ => panic!("Expected Expr::Remove"),
+	}
+}
+
+#[test]
+fn test_lower_mysql_index_ddl() {
+	let create_idx =
+		surrealdb_mysql::parse_statement("CREATE UNIQUE INDEX idx_email ON users (email);")
+			.expect("parse");
+	let exprs = lower_mysql_ddl(&create_idx).expect("lower create index");
+	assert_eq!(exprs.len(), 1);
+	match &exprs[0] {
+		Expr::Define(d) => match &**d {
+			DefineStatement::Index(idx) => {
+				assert_eq!(idx.name.to_sql(), "idx_email");
+				assert_eq!(idx.what.to_sql(), "users");
+				assert_eq!(idx.cols.len(), 1);
+			}
+			_ => panic!("Expected DefineIndex"),
+		},
+		_ => panic!("Expected Expr::Define"),
+	}
+
+	let drop_idx =
+		surrealdb_mysql::parse_statement("DROP INDEX idx_email ON users;").expect("parse");
+	let exprs = lower_mysql_ddl(&drop_idx).expect("lower drop index");
+	assert_eq!(exprs.len(), 1);
+	match &exprs[0] {
+		Expr::Remove(r) => match &**r {
+			RemoveStatement::Index(idx) => {
+				assert_eq!(idx.name.to_sql(), "idx_email");
+				assert_eq!(idx.what.to_sql(), "users");
+			}
+			_ => panic!("Expected RemoveIndex"),
+		},
+		_ => panic!("Expected Expr::Remove"),
+	}
+}
+
+#[test]
+fn test_lower_mysql_view_ddl() {
+	let create_view = surrealdb_mysql::parse_statement(
+		"CREATE OR REPLACE VIEW active_users AS SELECT id, name FROM users WHERE active = 1;",
+	)
+	.expect("parse");
+	let exprs = lower_mysql_ddl(&create_view).expect("lower create view");
+	assert_eq!(exprs.len(), 1);
+	match &exprs[0] {
+		Expr::Define(d) => match &**d {
+			DefineStatement::Table(tbl) => {
+				assert_eq!(tbl.name.to_sql(), "active_users");
+				assert_eq!(tbl.kind, DefineKind::Overwrite);
+				assert!(tbl.view.is_some());
+			}
+			_ => panic!("Expected DefineTable for view"),
+		},
+		_ => panic!("Expected Expr::Define"),
+	}
+
+	let drop_view =
+		surrealdb_mysql::parse_statement("DROP VIEW IF EXISTS active_users, old_users;")
+			.expect("parse");
+	let exprs = lower_mysql_ddl(&drop_view).expect("lower drop view");
+	assert_eq!(exprs.len(), 2);
+	match &exprs[0] {
+		Expr::Remove(r) => match &**r {
+			RemoveStatement::Table(tbl) => {
+				assert_eq!(tbl.name.to_sql(), "active_users");
+				assert!(tbl.if_exists);
+			}
+			_ => panic!("Expected RemoveTable"),
+		},
+		_ => panic!("Expected Expr::Remove"),
+	}
+}
+
+#[test]
+fn test_lower_mysql_alter_table() {
+	let alter = surrealdb_mysql::parse_statement(
+		"ALTER TABLE users ADD COLUMN age INT, DROP COLUMN legacy, RENAME TO customers;",
+	)
+	.expect("parse");
+	let exprs = lower_mysql_ddl(&alter).expect("lower alter table");
+	assert_eq!(exprs.len(), 3);
+	// 1: DefineField (ADD age)
+	assert!(matches!(&exprs[0], Expr::Define(d) if matches!(&**d, DefineStatement::Field(_))));
+	// 2: RemoveField (DROP legacy)
+	assert!(matches!(&exprs[1], Expr::Remove(r) if matches!(&**r, RemoveStatement::Field(_))));
+	// 3: DefineTable (RENAME customers)
+	assert!(matches!(&exprs[2], Expr::Define(d) if matches!(&**d, DefineStatement::Table(_))));
+}

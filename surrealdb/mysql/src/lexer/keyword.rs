@@ -152,6 +152,49 @@ pub enum Keyword {
 	Exists,
 	Ignore,
 	Force,
+
+	// Quantifiers
+	Any,
+	Some,
+
+	// Rollup
+	Rollup,
+
+	// Prepared Statements
+	Prepare,
+	Execute,
+	Deallocate,
+
+	// Auth & Permissions
+	User,
+	Grant,
+	Revoke,
+	Identified,
+
+	// Schema & Engine
+	Engine,
+	Engines,
+	Charset,
+	Collation,
+	Character,
+	Full,
+
+	// Window Functions
+	Window,
+	Over,
+	Partition,
+	Rows,
+	Range,
+	Groups,
+	Preceding,
+	Following,
+	Unbounded,
+	Current,
+	Row,
+	Exclude,
+	Ties,
+	Others,
+	No,
 }
 
 impl Keyword {
@@ -299,6 +342,38 @@ impl Keyword {
 			Self::Exists => "EXISTS",
 			Self::Ignore => "IGNORE",
 			Self::Force => "FORCE",
+
+			Self::Window => "WINDOW",
+			Self::Over => "OVER",
+			Self::Partition => "PARTITION",
+			Self::Rows => "ROWS",
+			Self::Range => "RANGE",
+			Self::Groups => "GROUPS",
+			Self::Preceding => "PRECEDING",
+			Self::Following => "FOLLOWING",
+			Self::Unbounded => "UNBOUNDED",
+			Self::Current => "CURRENT",
+			Self::Row => "ROW",
+			Self::Exclude => "EXCLUDE",
+			Self::Ties => "TIES",
+			Self::Others => "OTHERS",
+			Self::No => "NO",
+			Self::Any => "ANY",
+			Self::Some => "SOME",
+			Self::Rollup => "ROLLUP",
+			Self::Prepare => "PREPARE",
+			Self::Execute => "EXECUTE",
+			Self::Deallocate => "DEALLOCATE",
+			Self::User => "USER",
+			Self::Grant => "GRANT",
+			Self::Revoke => "REVOKE",
+			Self::Identified => "IDENTIFIED",
+			Self::Engine => "ENGINE",
+			Self::Engines => "ENGINES",
+			Self::Charset => "CHARSET",
+			Self::Collation => "COLLATION",
+			Self::Character => "CHARACTER",
+			Self::Full => "FULL",
 		}
 	}
 
@@ -314,6 +389,7 @@ impl Keyword {
 				b"in" | b"IN" | b"In" | b"iN" => Some(Self::In),
 				b"or" | b"OR" | b"Or" | b"oR" => Some(Self::Or),
 				b"if" | b"IF" | b"If" | b"iF" => Some(Self::If),
+				b"no" | b"NO" | b"No" | b"nO" => Some(Self::No),
 				_ => None,
 			},
 			3 => {
@@ -321,6 +397,8 @@ impl Keyword {
 					Some(Self::All)
 				} else if s.eq_ignore_ascii_case("and") {
 					Some(Self::And)
+				} else if s.eq_ignore_ascii_case("any") {
+					Some(Self::Any)
 				} else if s.eq_ignore_ascii_case("add") {
 					Some(Self::Add)
 				} else if s.eq_ignore_ascii_case("asc") {
@@ -337,6 +415,8 @@ impl Keyword {
 					Some(Self::Mod)
 				} else if s.eq_ignore_ascii_case("not") {
 					Some(Self::Not)
+				} else if s.eq_ignore_ascii_case("row") {
+					Some(Self::Row)
 				} else if s.eq_ignore_ascii_case("set") {
 					Some(Self::Set)
 				} else if s.eq_ignore_ascii_case("use") {
@@ -360,6 +440,8 @@ impl Keyword {
 					Some(Self::Else)
 				} else if s.eq_ignore_ascii_case("from") {
 					Some(Self::From)
+				} else if s.eq_ignore_ascii_case("full") {
+					Some(Self::Full)
 				} else if s.eq_ignore_ascii_case("into") {
 					Some(Self::Into)
 				} else if s.eq_ignore_ascii_case("join") {
@@ -374,16 +456,26 @@ impl Keyword {
 					Some(Self::Mode)
 				} else if s.eq_ignore_ascii_case("null") {
 					Some(Self::Null)
+				} else if s.eq_ignore_ascii_case("over") {
+					Some(Self::Over)
 				} else if s.eq_ignore_ascii_case("read") {
 					Some(Self::Read)
+				} else if s.eq_ignore_ascii_case("rows") {
+					Some(Self::Rows)
 				} else if s.eq_ignore_ascii_case("show") {
 					Some(Self::Show)
 				} else if s.eq_ignore_ascii_case("skip") {
 					Some(Self::Skip)
+				} else if s.eq_ignore_ascii_case("some") {
+					Some(Self::Some)
 				} else if s.eq_ignore_ascii_case("then") {
 					Some(Self::Then)
+				} else if s.eq_ignore_ascii_case("ties") {
+					Some(Self::Ties)
 				} else if s.eq_ignore_ascii_case("true") {
 					Some(Self::True)
+				} else if s.eq_ignore_ascii_case("user") {
+					Some(Self::User)
 				} else if s.eq_ignore_ascii_case("view") {
 					Some(Self::View)
 				} else if s.eq_ignore_ascii_case("when") {
@@ -409,6 +501,8 @@ impl Keyword {
 					Some(Self::False)
 				} else if s.eq_ignore_ascii_case("force") {
 					Some(Self::Force)
+				} else if s.eq_ignore_ascii_case("grant") {
+					Some(Self::Grant)
 				} else if s.eq_ignore_ascii_case("group") {
 					Some(Self::Group)
 				} else if s.eq_ignore_ascii_case("index") {
@@ -423,6 +517,8 @@ impl Keyword {
 					Some(Self::Order)
 				} else if s.eq_ignore_ascii_case("outer") {
 					Some(Self::Outer)
+				} else if s.eq_ignore_ascii_case("range") {
+					Some(Self::Range)
 				} else if s.eq_ignore_ascii_case("right") {
 					Some(Self::Right)
 				} else if s.eq_ignore_ascii_case("rlike") {
@@ -460,6 +556,8 @@ impl Keyword {
 					Some(Self::Create)
 				} else if s.eq_ignore_ascii_case("delete") {
 					Some(Self::Delete)
+				} else if s.eq_ignore_ascii_case("engine") {
+					Some(Self::Engine)
 				} else if s.eq_ignore_ascii_case("errors") {
 					Some(Self::Errors)
 				} else if s.eq_ignore_ascii_case("except") {
@@ -468,6 +566,8 @@ impl Keyword {
 					Some(Self::Exists)
 				} else if s.eq_ignore_ascii_case("global") {
 					Some(Self::Global)
+				} else if s.eq_ignore_ascii_case("groups") {
+					Some(Self::Groups)
 				} else if s.eq_ignore_ascii_case("having") {
 					Some(Self::Having)
 				} else if s.eq_ignore_ascii_case("ifnull") {
@@ -486,10 +586,16 @@ impl Keyword {
 					Some(Self::Nullif)
 				} else if s.eq_ignore_ascii_case("offset") {
 					Some(Self::Offset)
+				} else if s.eq_ignore_ascii_case("others") {
+					Some(Self::Others)
 				} else if s.eq_ignore_ascii_case("regexp") {
 					Some(Self::Regexp)
 				} else if s.eq_ignore_ascii_case("rename") {
 					Some(Self::Rename)
+				} else if s.eq_ignore_ascii_case("revoke") {
+					Some(Self::Revoke)
+				} else if s.eq_ignore_ascii_case("rollup") {
+					Some(Self::Rollup)
 				} else if s.eq_ignore_ascii_case("schema") {
 					Some(Self::Schema)
 				} else if s.eq_ignore_ascii_case("select") {
@@ -506,6 +612,8 @@ impl Keyword {
 					Some(Self::Update)
 				} else if s.eq_ignore_ascii_case("values") {
 					Some(Self::Values)
+				} else if s.eq_ignore_ascii_case("window") {
+					Some(Self::Window)
 				} else {
 					None
 				}
@@ -515,20 +623,32 @@ impl Keyword {
 					Some(Self::Between)
 				} else if s.eq_ignore_ascii_case("cascade") {
 					Some(Self::Cascade)
+				} else if s.eq_ignore_ascii_case("charset") {
+					Some(Self::Charset)
 				} else if s.eq_ignore_ascii_case("collate") {
 					Some(Self::Collate)
 				} else if s.eq_ignore_ascii_case("columns") {
 					Some(Self::Columns)
 				} else if s.eq_ignore_ascii_case("convert") {
 					Some(Self::Convert)
+				} else if s.eq_ignore_ascii_case("current") {
+					Some(Self::Current)
 				} else if s.eq_ignore_ascii_case("default") {
 					Some(Self::Default)
+				} else if s.eq_ignore_ascii_case("engines") {
+					Some(Self::Engines)
+				} else if s.eq_ignore_ascii_case("exclude") {
+					Some(Self::Exclude)
+				} else if s.eq_ignore_ascii_case("execute") {
+					Some(Self::Execute)
 				} else if s.eq_ignore_ascii_case("explain") {
 					Some(Self::Explain)
 				} else if s.eq_ignore_ascii_case("foreign") {
 					Some(Self::Foreign)
 				} else if s.eq_ignore_ascii_case("persist") {
 					Some(Self::Persist)
+				} else if s.eq_ignore_ascii_case("prepare") {
+					Some(Self::Prepare)
 				} else if s.eq_ignore_ascii_case("primary") {
 					Some(Self::Primary)
 				} else if s.eq_ignore_ascii_case("release") {
@@ -569,18 +689,30 @@ impl Keyword {
 				}
 			}
 			9 => {
-				if s.eq_ignore_ascii_case("databases") {
+				if s.eq_ignore_ascii_case("character") {
+					Some(Self::Character)
+				} else if s.eq_ignore_ascii_case("collation") {
+					Some(Self::Collation)
+				} else if s.eq_ignore_ascii_case("databases") {
 					Some(Self::Databases)
 				} else if s.eq_ignore_ascii_case("duplicate") {
 					Some(Self::Duplicate)
+				} else if s.eq_ignore_ascii_case("following") {
+					Some(Self::Following)
 				} else if s.eq_ignore_ascii_case("intersect") {
 					Some(Self::Intersect)
+				} else if s.eq_ignore_ascii_case("partition") {
+					Some(Self::Partition)
+				} else if s.eq_ignore_ascii_case("preceding") {
+					Some(Self::Preceding)
 				} else if s.eq_ignore_ascii_case("recursive") {
 					Some(Self::Recursive)
 				} else if s.eq_ignore_ascii_case("savepoint") {
 					Some(Self::Savepoint)
 				} else if s.eq_ignore_ascii_case("temporary") {
 					Some(Self::Temporary)
+				} else if s.eq_ignore_ascii_case("unbounded") {
+					Some(Self::Unbounded)
 				} else if s.eq_ignore_ascii_case("variables") {
 					Some(Self::Variables)
 				} else {
@@ -590,6 +722,10 @@ impl Keyword {
 			10 => {
 				if s.eq_ignore_ascii_case("constraint") {
 					Some(Self::Constraint)
+				} else if s.eq_ignore_ascii_case("deallocate") {
+					Some(Self::Deallocate)
+				} else if s.eq_ignore_ascii_case("identified") {
+					Some(Self::Identified)
 				} else if s.eq_ignore_ascii_case("references") {
 					Some(Self::References)
 				} else {

@@ -57,6 +57,9 @@ pub enum BinaryOperator {
 	Or,
 	Xor,
 
+	// String
+	Concat,
+
 	// Assignment
 	Assign, // :=
 }
@@ -88,6 +91,7 @@ impl BinaryOperator {
 			Self::And => "AND",
 			Self::Or => "OR",
 			Self::Xor => "XOR",
+			Self::Concat => "||",
 			Self::Assign => ":=",
 		}
 	}

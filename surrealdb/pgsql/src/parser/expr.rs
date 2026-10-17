@@ -1,8 +1,8 @@
 //! Expression parser implementing PostgreSQL `a_expr`, `b_expr`, and `c_expr`.
 
 use crate::ast::expr::{
-	ColumnRef, Expr, NullsOrder, OrderByItem, OrderDirection, QualifiedName, TypeName, WhenClause,
-	WindowFrame, WindowFrameBound, WindowFrameExclusion, WindowFrameUnits, WindowSpec,
+	ColumnRef, Expr, NullsOrder, OrderByItem, OrderDirection, QualifiedName, Quantifier, TypeName,
+	WhenClause, WindowFrame, WindowFrameBound, WindowFrameExclusion, WindowFrameUnits, WindowSpec,
 };
 use crate::ast::literal::Literal;
 use crate::ast::op::{BinaryOperator, UnaryOperator};
@@ -28,6 +28,11 @@ impl<'a> Parser<'a> {
 		let res = self.parse_expr_bp_inner(min_bp, &mut loop_depth);
 		self.leave_recursion_by(1 + loop_depth);
 		res
+	}
+
+	#[inline(never)]
+	fn parse_subquery_box(&mut self) -> ParseResult<Box<crate::ast::stmt::SelectStmt>> {
+		self.parse_select_stmt().map(Box::new)
 	}
 
 	fn parse_expr_bp_inner(&mut self, min_bp: u8, loop_depth: &mut u32) -> ParseResult<Expr> {
@@ -268,10 +273,25 @@ impl<'a> Parser<'a> {
 				continue;
 			}
 
-			// 7. IN (list...)
+			// 7. IN (list...) or IN (SELECT ...)
 			if op_tok.kind == TokenKind::Keyword(Keyword::In) {
 				self.bump()?; // consume 'IN'
 				self.expect(&TokenKind::LParen, "'('")?;
+				if matches!(
+					self.peek().kind,
+					TokenKind::Keyword(Keyword::Select | Keyword::With | Keyword::Values)
+				) {
+					let sub = self.parse_subquery_box()?;
+					let r_paren = self.expect(&TokenKind::RParen, "')'")?;
+					let span = left.span().merge(r_paren.span);
+					left = Expr::InSubquery {
+						expr: Box::new(left),
+						subquery: sub,
+						negated,
+						span,
+					};
+					continue;
+				}
 				let mut list = Vec::new();
 				while self.peek().kind != TokenKind::RParen {
 					list.push(self.parse_expr()?);
@@ -305,6 +325,27 @@ impl<'a> Parser<'a> {
 				}
 				_ => token_to_binary_op(&op_tok.kind)?,
 			};
+			let quantifier = match self.peek().kind {
+				TokenKind::Keyword(Keyword::Any) => Some(Quantifier::Any),
+				TokenKind::Keyword(Keyword::Some) => Some(Quantifier::Some),
+				TokenKind::Keyword(Keyword::All) => Some(Quantifier::All),
+				_ => None,
+			};
+			if let Some(quantifier) = quantifier {
+				self.bump()?; // consume ANY / SOME / ALL
+				self.expect(&TokenKind::LParen, "'(' after quantifier")?;
+				let sub = self.parse_subquery_box()?;
+				let r_paren = self.expect(&TokenKind::RParen, "')' closing quantified subquery")?;
+				let span = left.span().merge(r_paren.span);
+				left = Expr::Quantified {
+					expr: Box::new(left),
+					op: binary_op,
+					quantifier,
+					subquery: sub,
+					span,
+				};
+				continue;
+			}
 			let right = self.parse_expr_bp(r_bp)?;
 			let span = left.span().merge(right.span());
 			left = Expr::BinaryOp {
@@ -440,9 +481,21 @@ impl<'a> Parser<'a> {
 				})
 			}
 
-			// Parenthesized expression `(expr)` or Row `(a, b, c)`
+			// Parenthesized expression `(expr)` or Row `(a, b, c)` or Subquery `(SELECT ...)`
 			TokenKind::LParen => {
 				let l_paren = self.bump()?;
+				if matches!(
+					self.peek().kind,
+					TokenKind::Keyword(Keyword::Select | Keyword::With | Keyword::Values)
+				) {
+					let sub = self.parse_subquery_box()?;
+					let r_paren = self.expect(&TokenKind::RParen, "')'")?;
+					let span = l_paren.span.merge(r_paren.span);
+					return Ok(Expr::Subquery {
+						subquery: sub,
+						span,
+					});
+				}
 				let first = self.parse_expr()?;
 
 				if self.eat(&TokenKind::Comma)? {
@@ -470,9 +523,18 @@ impl<'a> Parser<'a> {
 				}
 			}
 
-			// Explicit Array constructor `ARRAY[...]`
+			// Explicit Array constructor `ARRAY[...]` or `ARRAY(SELECT ...)`
 			TokenKind::Keyword(Keyword::Array) => {
 				let arr_tok = self.bump()?;
+				if self.eat(&TokenKind::LParen)? {
+					let sub = self.parse_subquery_box()?;
+					let r_paren = self.expect(&TokenKind::RParen, "')' closing ARRAY subquery")?;
+					let span = arr_tok.span.merge(r_paren.span);
+					return Ok(Expr::ArraySubquery {
+						subquery: sub,
+						span,
+					});
+				}
 				self.expect(&TokenKind::LBracket, "'['")?;
 				let mut elements = Vec::new();
 				while self.peek().kind != TokenKind::RBracket {
@@ -485,6 +547,19 @@ impl<'a> Parser<'a> {
 				let span = arr_tok.span.merge(r_bracket.span);
 				Ok(Expr::ArrayConstructor {
 					elements,
+					span,
+				})
+			}
+
+			// EXISTS (SELECT ...)
+			TokenKind::Keyword(Keyword::Exists) => {
+				let exists_tok = self.bump()?;
+				self.expect(&TokenKind::LParen, "'(' after EXISTS")?;
+				let sub = self.parse_subquery_box()?;
+				let r_paren = self.expect(&TokenKind::RParen, "')' closing EXISTS subquery")?;
+				let span = exists_tok.span.merge(r_paren.span);
+				Ok(Expr::Exists {
+					subquery: sub,
 					span,
 				})
 			}

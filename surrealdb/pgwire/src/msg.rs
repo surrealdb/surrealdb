@@ -70,6 +70,10 @@ pub(super) enum Frontend {
 	},
 	Sync,
 	Flush,
+	CopyData(Vec<u8>),
+	CopyDone,
+	CopyFail(String),
+	FunctionCall,
 	Terminate,
 	Unknown(u8),
 }
@@ -236,6 +240,10 @@ pub(super) fn parse_frontend(tag: u8, mut payload: &[u8]) -> Result<Frontend, Pg
 				name: read_cstr(payload)?,
 			})
 		}
+		b'd' => Ok(Frontend::CopyData(payload.to_vec())),
+		b'c' => Ok(Frontend::CopyDone),
+		b'f' => Ok(Frontend::CopyFail(read_cstr(payload)?)),
+		b'F' => Ok(Frontend::FunctionCall),
 		other => Ok(Frontend::Unknown(other)),
 	}
 }
@@ -446,6 +454,62 @@ pub(super) fn write_error_response(buf: &mut BytesMut, err: &PgError) {
 		put_cstr(buf, err.code);
 		buf.put_u8(b'M');
 		put_cstr(buf, &err.message);
+		if let Some(detail) = err.detail() {
+			buf.put_u8(b'D');
+			put_cstr(buf, detail);
+		}
+		if let Some(hint) = err.hint() {
+			buf.put_u8(b'H');
+			put_cstr(buf, hint);
+		}
+		if let Some(pos) = err.position() {
+			buf.put_u8(b'P');
+			put_cstr(buf, &pos.to_string());
+		}
+		if let Some(pos) = err.internal_position() {
+			buf.put_u8(b'p');
+			put_cstr(buf, &pos.to_string());
+		}
+		if let Some(q) = err.internal_query() {
+			buf.put_u8(b'q');
+			put_cstr(buf, q);
+		}
+		if let Some(w) = err.where_ctx() {
+			buf.put_u8(b'W');
+			put_cstr(buf, w);
+		}
+		if let Some(s) = err.schema_name() {
+			buf.put_u8(b's');
+			put_cstr(buf, s);
+		}
+		if let Some(t) = err.table_name() {
+			buf.put_u8(b't');
+			put_cstr(buf, t);
+		}
+		if let Some(c) = err.column_name() {
+			buf.put_u8(b'c');
+			put_cstr(buf, c);
+		}
+		if let Some(d) = err.data_type_name() {
+			buf.put_u8(b'd');
+			put_cstr(buf, d);
+		}
+		if let Some(n) = err.constraint_name() {
+			buf.put_u8(b'n');
+			put_cstr(buf, n);
+		}
+		if let Some(f) = err.file() {
+			buf.put_u8(b'F');
+			put_cstr(buf, f);
+		}
+		if let Some(l) = err.line() {
+			buf.put_u8(b'L');
+			put_cstr(buf, &l.to_string());
+		}
+		if let Some(r) = err.routine() {
+			buf.put_u8(b'R');
+			put_cstr(buf, r);
+		}
 		buf.put_u8(0);
 	});
 }
@@ -453,6 +517,16 @@ pub(super) fn write_error_response(buf: &mut BytesMut, err: &PgError) {
 /// NoticeResponse: a non-fatal warning (e.g. `BEGIN` inside a transaction).
 /// Same field layout as ErrorResponse but does not interrupt the command.
 pub(super) fn write_notice(buf: &mut BytesMut, code: &str, message: &str) {
+	write_notice_with_fields(buf, code, message, None, None);
+}
+
+pub(super) fn write_notice_with_fields(
+	buf: &mut BytesMut,
+	code: &str,
+	message: &str,
+	detail: Option<&str>,
+	hint: Option<&str>,
+) {
 	frame(buf, b'N', |buf| {
 		buf.put_u8(b'S');
 		put_cstr(buf, "WARNING");
@@ -462,6 +536,14 @@ pub(super) fn write_notice(buf: &mut BytesMut, code: &str, message: &str) {
 		put_cstr(buf, code);
 		buf.put_u8(b'M');
 		put_cstr(buf, message);
+		if let Some(d) = detail {
+			buf.put_u8(b'D');
+			put_cstr(buf, d);
+		}
+		if let Some(h) = hint {
+			buf.put_u8(b'H');
+			put_cstr(buf, h);
+		}
 		buf.put_u8(0);
 	});
 }
@@ -477,6 +559,36 @@ pub(super) fn write_negotiate_protocol_version(buf: &mut BytesMut, unsupported: 
 			put_cstr(buf, option);
 		}
 	});
+}
+
+pub(super) fn write_copy_in_response(buf: &mut BytesMut, format: u8, num_columns: i16) {
+	frame(buf, b'G', |buf| {
+		buf.put_u8(format);
+		buf.put_i16(num_columns);
+		for _ in 0..num_columns {
+			buf.put_i16(0);
+		}
+	});
+}
+
+pub(super) fn write_copy_out_response(buf: &mut BytesMut, format: u8, num_columns: i16) {
+	frame(buf, b'H', |buf| {
+		buf.put_u8(format);
+		buf.put_i16(num_columns);
+		for _ in 0..num_columns {
+			buf.put_i16(0);
+		}
+	});
+}
+
+pub(super) fn write_copy_data(buf: &mut BytesMut, data: &[u8]) {
+	frame(buf, b'd', |buf| {
+		buf.extend_from_slice(data);
+	});
+}
+
+pub(super) fn write_copy_done(buf: &mut BytesMut) {
+	frame(buf, b'c', |_| {});
 }
 
 #[cfg(test)]
@@ -605,6 +717,56 @@ mod tests {
 		let body = &bytes[5..];
 		assert!(body.windows(6).any(|w| w == b"C42601"));
 		assert!(body.windows(5).any(|w| w == b"Mboom"));
+	}
+
+	#[test]
+	fn error_response_structured_fields() {
+		let mut buf = BytesMut::new();
+		let err = PgError::check_violation("check violation")
+			.with_detail("key already exists")
+			.with_hint("try a different key")
+			.with_position(10)
+			.with_schema("public")
+			.with_table("users")
+			.with_column("id")
+			.with_data_type("int4")
+			.with_constraint("chk_id");
+
+		write_error_response(&mut buf, &err);
+		let bytes = &buf[..];
+		assert_eq!(bytes[0], b'E');
+		let body = &bytes[5..];
+		assert!(body.windows(6).any(|w| w == b"C23514"));
+		assert!(body.windows(16).any(|w| w == b"Mcheck violation"));
+		assert!(body.windows(19).any(|w| w == b"Dkey already exists"));
+		assert!(body.windows(20).any(|w| w == b"Htry a different key"));
+		assert!(body.windows(3).any(|w| w == b"P10"));
+		assert!(body.windows(7).any(|w| w == b"spublic"));
+		assert!(body.windows(6).any(|w| w == b"tusers"));
+		assert!(body.windows(3).any(|w| w == b"cid"));
+		assert!(body.windows(5).any(|w| w == b"dint4"));
+		assert!(body.windows(7).any(|w| w == b"nchk_id"));
+		assert_eq!(*bytes.last().unwrap(), 0);
+	}
+
+	#[test]
+	fn notice_response_fields() {
+		let mut buf = BytesMut::new();
+		write_notice_with_fields(
+			&mut buf,
+			"01000",
+			"parameter is ignored",
+			Some("ignored detail"),
+			Some("use another param"),
+		);
+		let bytes = &buf[..];
+		assert_eq!(bytes[0], b'N');
+		let body = &bytes[5..];
+		assert!(body.windows(6).any(|w| w == b"C01000"));
+		assert!(body.windows(21).any(|w| w == b"Mparameter is ignored"));
+		assert!(body.windows(15).any(|w| w == b"Dignored detail"));
+		assert!(body.windows(18).any(|w| w == b"Huse another param"));
+		assert_eq!(*bytes.last().unwrap(), 0);
 	}
 
 	#[test]

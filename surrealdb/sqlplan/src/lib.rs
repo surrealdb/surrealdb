@@ -7,6 +7,7 @@ pub mod catalog;
 pub mod descriptor;
 pub mod dialect;
 pub mod error;
+pub mod functions;
 pub mod ir;
 pub mod lower;
 pub mod namespace;
@@ -20,6 +21,7 @@ pub use descriptor::{
 };
 pub use dialect::{DialectPolicy, NamePolicy, NullOrderPolicy, SqlDialect};
 pub use error::PlanError;
+pub use functions::{FunctionRegistry, ReturnTypeStrategy, SqlFunctionDef, SqlFunctionKind};
 pub use ir::{
 	BoundBinaryOp, BoundColumnRef, BoundDistinct, BoundExpr, BoundJoinCondition, BoundJoinType,
 	BoundLiteral, BoundOrder, BoundOrderDirection, BoundSelect, BoundTableSource, BoundTarget,
@@ -30,12 +32,12 @@ pub use lower::ddl::{
 	lower_pgsql_alter_table, lower_pgsql_create_index, lower_pgsql_create_table,
 	lower_pgsql_create_view, lower_pgsql_ddl, lower_pgsql_drop, map_mysql_type, map_pgsql_type,
 };
-pub use lower::lower_bound_select;
 pub use lower::write::{
 	lower_mysql_delete, lower_mysql_expr, lower_mysql_insert, lower_mysql_replace,
 	lower_mysql_truncate, lower_mysql_update, lower_pgsql_delete, lower_pgsql_expr,
 	lower_pgsql_insert, lower_pgsql_truncate, lower_pgsql_update,
 };
+pub use lower::{lower_bound_select, lower_bound_subquery};
 pub use namespace::{resolve_mysql_table_name, resolve_pgsql_table_name};
 pub use observability::{
 	SqlPlanMetrics, SqlPlanMetricsSnapshot, global_metrics, redact_sql_credentials,

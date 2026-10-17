@@ -472,6 +472,64 @@ pub enum Expr {
 		/// Source span.
 		span: Span,
 	},
+
+	/// A scalar subquery `(SELECT ...)`.
+	Subquery {
+		/// Subquery statement.
+		subquery: Box<crate::ast::stmt::SelectStmt>,
+		/// Source span.
+		span: Span,
+	},
+
+	/// `EXISTS (SELECT ...)` predicate.
+	Exists {
+		/// Subquery statement.
+		subquery: Box<crate::ast::stmt::SelectStmt>,
+		/// Source span.
+		span: Span,
+	},
+
+	/// `expr [NOT] IN (SELECT ...)` predicate.
+	InSubquery {
+		/// Left-hand expression being tested.
+		expr: Box<Expr>,
+		/// Subquery statement.
+		subquery: Box<crate::ast::stmt::SelectStmt>,
+		/// Whether `NOT` preceded `IN`.
+		negated: bool,
+		/// Source span.
+		span: Span,
+	},
+
+	/// `ARRAY(SELECT ...)` array constructor from subquery.
+	ArraySubquery {
+		/// Subquery statement.
+		subquery: Box<crate::ast::stmt::SelectStmt>,
+		/// Source span.
+		span: Span,
+	},
+
+	/// `expr op {ANY|SOME|ALL} (SELECT ...)` quantified subquery.
+	Quantified {
+		/// Left-hand expression.
+		expr: Box<Expr>,
+		/// Comparison operator.
+		op: BinaryOperator,
+		/// Quantifier modifier: `ANY`, `SOME`, or `ALL`.
+		quantifier: Quantifier,
+		/// Subquery statement.
+		subquery: Box<crate::ast::stmt::SelectStmt>,
+		/// Source span.
+		span: Span,
+	},
+}
+
+/// Quantifier for quantified comparisons: `ANY`, `SOME`, `ALL`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Quantifier {
+	Any,
+	Some,
+	All,
 }
 
 impl Expr {
@@ -580,6 +638,26 @@ impl Expr {
 				..
 			} => *span,
 			Self::JsonQuery {
+				span,
+				..
+			} => *span,
+			Self::Subquery {
+				span,
+				..
+			}
+			| Self::Exists {
+				span,
+				..
+			}
+			| Self::InSubquery {
+				span,
+				..
+			}
+			| Self::ArraySubquery {
+				span,
+				..
+			}
+			| Self::Quantified {
 				span,
 				..
 			} => *span,
@@ -835,6 +913,41 @@ impl Expr {
 			} => {
 				*span = zero;
 				context.normalize_spans();
+			}
+			Self::Subquery {
+				subquery,
+				span,
+			}
+			| Self::Exists {
+				subquery,
+				span,
+			}
+			| Self::ArraySubquery {
+				subquery,
+				span,
+			} => {
+				*span = zero;
+				subquery.normalize_spans();
+			}
+			Self::InSubquery {
+				expr,
+				subquery,
+				span,
+				..
+			} => {
+				*span = zero;
+				expr.normalize_spans();
+				subquery.normalize_spans();
+			}
+			Self::Quantified {
+				expr,
+				subquery,
+				span,
+				..
+			} => {
+				*span = zero;
+				expr.normalize_spans();
+				subquery.normalize_spans();
 			}
 		}
 	}

@@ -30,8 +30,10 @@ use tokio_util::sync::CancellationToken;
 extern crate tracing;
 
 pub mod conn;
+mod copy;
 pub mod encode;
 pub mod error;
+pub(crate) mod guc;
 pub mod msg;
 pub mod sasl;
 pub mod typing;

@@ -1,8 +1,9 @@
 //! SELECT statement parsing for MySQL.
 
 use crate::ast::stmt::{
-	JoinCondition, JoinType, LimitClause, LockClause, LockType, OrderByExpr, SelectItem,
-	SelectStmt, SetOpKind, SetOperation, TableRef,
+	CommonTableExpr, IndexHint, IndexHintType, JoinCondition, JoinType, LimitClause, LockClause,
+	LockType, OrderByExpr, SelectItem, SelectStmt, SetOpKind, SetOperation, TableRef, WindowDef,
+	WithClause,
 };
 use crate::lexer::keyword::Keyword;
 use crate::lexer::token::TokenKind;
@@ -14,7 +15,15 @@ impl<'a> Parser<'a> {
 	pub fn parse_select_stmt(&mut self) -> ParseResult<SelectStmt> {
 		self.check_recursion_limit()?;
 		self.recursion_depth += 1;
+		let with = if self.peek_keyword() == Some(Keyword::With) {
+			Some(self.parse_with_clause()?)
+		} else {
+			None
+		};
 		let mut root = self.parse_select_stmt_inner()?;
+		if with.is_some() {
+			root.with = with;
+		}
 
 		let mut current = &mut root;
 		loop {
@@ -187,7 +196,7 @@ impl<'a> Parser<'a> {
 		};
 
 		// GROUP BY clause
-		let group_by = if self.peek_keyword() == Some(Keyword::Group) {
+		let (group_by, with_rollup) = if self.peek_keyword() == Some(Keyword::Group) {
 			self.bump(); // GROUP
 			self.expect_keyword(Keyword::By, "BY after GROUP")?;
 			let mut items = Vec::new();
@@ -199,9 +208,18 @@ impl<'a> Parser<'a> {
 					break;
 				}
 			}
-			items
+			let rollup = if self.peek_keyword() == Some(Keyword::With)
+				&& self.peek_nth_keyword(1) == Some(Keyword::Rollup)
+			{
+				self.bump();
+				self.bump();
+				true
+			} else {
+				false
+			};
+			(items, rollup)
 		} else {
-			Vec::new()
+			(Vec::new(), false)
 		};
 
 		// HAVING clause
@@ -210,6 +228,29 @@ impl<'a> Parser<'a> {
 			Some(self.parse_expr()?)
 		} else {
 			None
+		};
+
+		// WINDOW clause
+		let window = if self.eat_keyword(Keyword::Window) {
+			let mut windows = Vec::new();
+			loop {
+				let start_span = self.peek().span;
+				let (name, _) = self.parse_ident()?;
+				self.expect_keyword(Keyword::As, "'AS' after window name in WINDOW clause")?;
+				let spec = self.parse_window_spec()?;
+				let span = start_span.merge(spec.span);
+				windows.push(WindowDef {
+					name,
+					spec,
+					span,
+				});
+				if !self.eat(&TokenKind::Comma) {
+					break;
+				}
+			}
+			windows
+		} else {
+			Vec::new()
 		};
 
 		// ORDER BY clause
@@ -262,16 +303,78 @@ impl<'a> Parser<'a> {
 		let span = start.merge(end);
 
 		Ok(SelectStmt {
+			with: None,
 			distinct,
 			projection,
 			from,
 			where_clause,
 			group_by,
+			with_rollup,
 			having,
+			window,
 			order_by,
 			limit,
 			lock,
 			set_op: None,
+			span,
+		})
+	}
+
+	/// Parse a `WITH [RECURSIVE] cte_name [(cols...)] AS (query) [, ...]` clause.
+	pub fn parse_with_clause(&mut self) -> ParseResult<WithClause> {
+		let with_tok = self.expect_keyword(Keyword::With, "WITH")?;
+		let recursive = if self.peek_keyword() == Some(Keyword::Recursive) {
+			self.bump();
+			true
+		} else {
+			false
+		};
+
+		let mut ctes = Vec::new();
+		loop {
+			let (name, name_span) = self.parse_ident()?;
+			let mut columns = Vec::new();
+
+			if self.peek().kind == TokenKind::LParen {
+				self.bump();
+				loop {
+					let (col, _) = self.parse_ident()?;
+					columns.push(col);
+					if self.peek().kind == TokenKind::Comma {
+						self.bump();
+					} else {
+						break;
+					}
+				}
+				self.expect(&TokenKind::RParen, ")")?;
+			}
+
+			self.expect_keyword(Keyword::As, "AS")?;
+			self.expect(&TokenKind::LParen, "(")?;
+			let query = self.parse_select_stmt()?;
+			let rparen = self.expect(&TokenKind::RParen, ")")?;
+
+			let span = name_span.merge(rparen.span);
+			ctes.push(CommonTableExpr {
+				name,
+				columns,
+				query: Box::new(query),
+				span,
+			});
+
+			if self.peek().kind == TokenKind::Comma {
+				self.bump();
+			} else {
+				break;
+			}
+		}
+
+		let end_span = ctes.last().map(|c| c.span).unwrap_or(with_tok.span);
+		let span = with_tok.span.merge(end_span);
+
+		Ok(WithClause {
+			recursive,
+			ctes,
 			span,
 		})
 	}
@@ -437,10 +540,60 @@ impl<'a> Parser<'a> {
 			} else {
 				None
 			};
-			let span = name.span;
+
+			let mut index_hints = Vec::new();
+			while let Some(hint_type) = match self.peek_keyword() {
+				Some(Keyword::Use) => Some(IndexHintType::Use),
+				Some(Keyword::Force) => Some(IndexHintType::Force),
+				Some(Keyword::Ignore) => Some(IndexHintType::Ignore),
+				_ => None,
+			} {
+				let hint_start = self.bump().span;
+				if self.peek_keyword() == Some(Keyword::Index)
+					|| self.peek_keyword() == Some(Keyword::Key)
+				{
+					self.bump();
+				}
+				if self.peek_keyword() == Some(Keyword::For) {
+					self.bump();
+					if self.peek_keyword() == Some(Keyword::Join) {
+						self.bump();
+					} else if matches!(self.peek_keyword(), Some(Keyword::Order | Keyword::Group)) {
+						self.bump();
+						if self.peek_keyword() == Some(Keyword::By) {
+							self.bump();
+						}
+					}
+				}
+				self.expect(&TokenKind::LParen, "'(' after index hint")?;
+				let mut indexes = Vec::new();
+				loop {
+					if self.peek().kind == TokenKind::RParen {
+						break;
+					}
+					indexes.push(self.parse_ident()?.0);
+					if self.peek().kind == TokenKind::Comma {
+						self.bump();
+					} else {
+						break;
+					}
+				}
+				let rparen = self.expect(&TokenKind::RParen, "')' after index hint list")?;
+				index_hints.push(IndexHint {
+					hint_type,
+					indexes,
+					span: hint_start.merge(rparen.span),
+				});
+			}
+
+			let mut span = name.span;
+			if let Some(last_hint) = index_hints.last() {
+				span = span.merge(last_hint.span);
+			}
 			Ok(TableRef::Table {
 				name,
 				alias,
+				index_hints,
 				span,
 			})
 		}

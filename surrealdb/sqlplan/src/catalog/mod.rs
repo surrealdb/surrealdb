@@ -71,6 +71,8 @@ impl TableSchema {
 	}
 }
 
+pub mod system;
+
 /// Narrow catalog trait required by the binder to resolve table and column names.
 pub trait BinderCatalog: Send + Sync {
 	/// Look up a table schema by optional namespace and table name.
@@ -85,6 +87,11 @@ pub trait BinderCatalog: Send + Sync {
 	fn current_database(&self) -> Option<&str> {
 		None
 	}
+
+	/// Return all user-defined table schemas in the catalog.
+	fn all_tables(&self) -> Vec<TableSchema> {
+		Vec::new()
+	}
 }
 
 /// An empty or schemaless catalog.
@@ -92,12 +99,13 @@ pub trait BinderCatalog: Send + Sync {
 /// In SurrealDB, tables can be schemaless, where columns are not predefined.
 /// Returning `None` signals to the binder that column resolution should proceed
 /// flexibly without failing early on non-predefined column names.
+/// System catalog tables are still recognized.
 #[derive(Debug, Default, Clone)]
 pub struct EmptyCatalog;
 
 impl BinderCatalog for EmptyCatalog {
-	fn get_table(&self, _schema: Option<&str>, _name: &str) -> Option<TableSchema> {
-		None
+	fn get_table(&self, schema: Option<&str>, name: &str) -> Option<TableSchema> {
+		system::get_system_table_schema(schema, name)
 	}
 }
 
@@ -155,7 +163,14 @@ impl BinderCatalog for MemoryCatalog {
 		self.current_db.as_deref()
 	}
 
+	fn all_tables(&self) -> Vec<TableSchema> {
+		self.tables.values().cloned().collect()
+	}
+
 	fn get_table(&self, schema: Option<&str>, name: &str) -> Option<TableSchema> {
+		if let Some(sys_tbl) = system::get_system_table_schema(schema, name) {
+			return Some(sys_tbl);
+		}
 		let key = (schema.map(|s| s.to_string()), name.to_string());
 		if let Some(tbl) = self.tables.get(&key) {
 			return Some(tbl.clone());

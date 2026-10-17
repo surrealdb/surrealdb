@@ -1,6 +1,9 @@
 //! Expression parser for MySQL SQL syntax using Pratt parsing.
 
-use crate::ast::expr::{ColumnRef, Expr, TruthValue, WhenClause};
+use crate::ast::expr::{
+	ColumnRef, Expr, Quantifier, TruthValue, WhenClause, WindowFrame, WindowFrameBound,
+	WindowFrameExclusion, WindowFrameUnits, WindowSpec,
+};
 use crate::ast::literal::Literal;
 use crate::ast::operator::{BinaryOperator, UnaryOperator};
 use crate::lexer::keyword::Keyword;
@@ -56,6 +59,44 @@ impl<'a> Parser<'a> {
 				self.recursion_depth += 1;
 				*loop_depth += 1;
 				self.bump(); // consume operator
+
+				// Check for quantified comparison: op {ANY|SOME|ALL} (SELECT ...)
+				if matches!(
+					op,
+					BinaryOperator::Equal
+						| BinaryOperator::NotEqual
+						| BinaryOperator::Less
+						| BinaryOperator::LessEqual
+						| BinaryOperator::Greater
+						| BinaryOperator::GreaterEqual
+				) && matches!(
+					self.peek_keyword(),
+					Some(Keyword::Any | Keyword::Some | Keyword::All)
+				) {
+					let quantifier = match self.peek_keyword() {
+						Some(Keyword::All) => Quantifier::All,
+						Some(Keyword::Some) => Quantifier::Some,
+						_ => Quantifier::Any,
+					};
+					self.bump(); // consume quantifier
+					self.expect(
+						&TokenKind::LParen,
+						"'(' before subquery in quantified comparison",
+					)?;
+					let subquery = Box::new(self.parse_select_stmt()?);
+					let rparen =
+						self.expect(&TokenKind::RParen, "')' closing quantified subquery")?;
+					let span = lhs.span().merge(rparen.span);
+					lhs = Expr::Quantified {
+						expr: Box::new(lhs),
+						op,
+						quantifier,
+						subquery,
+						span,
+					};
+					continue;
+				}
+
 				let rhs = self.parse_expr_bp(bp + 1)?;
 				let span = lhs.span().merge(rhs.span());
 				lhs = Expr::BinaryOp {
@@ -364,6 +405,39 @@ impl<'a> Parser<'a> {
 				self.bump();
 				Ok(Expr::Literal(Literal::String(s), tok.span))
 			}
+			TokenKind::CharsetIntro(charset) => {
+				self.bump();
+				let lit_tok = self.peek().clone();
+				match lit_tok.kind {
+					TokenKind::StringLiteral(s) => {
+						self.bump();
+						Ok(Expr::Literal(
+							Literal::IntroducedString {
+								charset,
+								value: s,
+							},
+							tok.span.merge(lit_tok.span),
+						))
+					}
+					TokenKind::HexLiteral(bytes) => {
+						self.bump();
+						Ok(Expr::Literal(
+							Literal::IntroducedHexString {
+								charset,
+								value: bytes,
+							},
+							tok.span.merge(lit_tok.span),
+						))
+					}
+					_ => Err(ParseError::new(
+						lit_tok.span,
+						ErrorKind::UnexpectedToken {
+							expected: "string or hex literal after character set introducer",
+							found: lit_tok.kind.to_string(),
+						},
+					)),
+				}
+			}
 			TokenKind::HexLiteral(bytes) => {
 				self.bump();
 				Ok(Expr::Literal(Literal::HexString(bytes), tok.span))
@@ -456,12 +530,17 @@ impl<'a> Parser<'a> {
 			}
 
 			// Identifiers, Functions, or Column References
-			TokenKind::Ident(_)
-			| TokenKind::Keyword(Keyword::If)
-			| TokenKind::Keyword(Keyword::Ifnull)
-			| TokenKind::Keyword(Keyword::Nullif)
-			| TokenKind::Keyword(Keyword::Coalesce)
-			| TokenKind::Keyword(Keyword::Values) => {
+			tok if matches!(
+				tok,
+				TokenKind::Ident(_)
+					| TokenKind::Keyword(
+						Keyword::If
+							| Keyword::Ifnull | Keyword::Nullif
+							| Keyword::Coalesce | Keyword::Values
+					)
+			) || (matches!(tok, TokenKind::Keyword(_))
+				&& self.peek_nth(1).kind == TokenKind::LParen) =>
+			{
 				let (name, name_span) = self.parse_ident()?;
 
 				// Check for function call: name(...)
@@ -494,11 +573,19 @@ impl<'a> Parser<'a> {
 					}
 					let end =
 						self.expect(&TokenKind::RParen, "')' closing function arguments")?.span;
+					let (over, span) = if self.eat_keyword(Keyword::Over) {
+						let spec = self.parse_window_spec()?;
+						let span = name_span.merge(spec.span);
+						(Some(Box::new(spec)), span)
+					} else {
+						(None, name_span.merge(end))
+					};
 					return Ok(Expr::FunctionCall {
 						name,
 						distinct,
 						args,
-						span: name_span.merge(end),
+						over,
+						span,
 					});
 				}
 
@@ -619,7 +706,13 @@ impl<'a> Parser<'a> {
 	fn peek_binary_op(&self) -> Option<BinaryOperator> {
 		match &self.peek().kind {
 			TokenKind::ColonEqual => Some(BinaryOperator::Assign),
-			TokenKind::DoublePipe => Some(BinaryOperator::Or),
+			TokenKind::DoublePipe => {
+				if self.settings.sql_mode.pipes_as_concat {
+					Some(BinaryOperator::Concat)
+				} else {
+					Some(BinaryOperator::Or)
+				}
+			}
 			TokenKind::DoubleAmpersand => Some(BinaryOperator::And),
 			TokenKind::Equal => Some(BinaryOperator::Equal),
 			TokenKind::NullSafeEqual => Some(BinaryOperator::NullSafeEqual),
@@ -649,6 +742,163 @@ impl<'a> Parser<'a> {
 			_ => None,
 		}
 	}
+
+	/// Parse a window specification in an `OVER` clause or `WINDOW` definition.
+	pub fn parse_window_spec(&mut self) -> ParseResult<WindowSpec> {
+		if self.eat(&TokenKind::LParen) {
+			let start_span = self.peek().span;
+			let mut window_name = None;
+			let mut partition_by = Vec::new();
+			let mut order_by = Vec::new();
+			let mut frame = None;
+
+			// Optional existing window name
+			if matches!(self.peek().kind, TokenKind::Ident(_))
+				&& !matches!(
+					self.peek().kind,
+					TokenKind::Keyword(
+						Keyword::Partition
+							| Keyword::Order | Keyword::Rows
+							| Keyword::Range | Keyword::Groups
+					)
+				) {
+				let (ident, _) = self.parse_ident()?;
+				window_name = Some(ident);
+			}
+
+			// Optional PARTITION BY
+			if self.eat_keyword(Keyword::Partition) {
+				self.expect_keyword(Keyword::By, "'BY' after PARTITION")?;
+				loop {
+					partition_by.push(self.parse_expr()?);
+					if !self.eat(&TokenKind::Comma) {
+						break;
+					}
+				}
+			}
+
+			// Optional ORDER BY
+			if self.eat_keyword(Keyword::Order) {
+				self.expect_keyword(Keyword::By, "'BY' after ORDER")?;
+				order_by = self.parse_order_by_list()?;
+			}
+
+			// Optional frame specification: ROWS | RANGE | GROUPS
+			let frame_units = if self.eat_keyword(Keyword::Rows) {
+				Some(WindowFrameUnits::Rows)
+			} else if self.eat_keyword(Keyword::Range) {
+				Some(WindowFrameUnits::Range)
+			} else if self.eat_keyword(Keyword::Groups) {
+				Some(WindowFrameUnits::Groups)
+			} else {
+				None
+			};
+
+			if let Some(units) = frame_units {
+				let frame_start_span = self.peek().span;
+				let (start, end) = if self.eat_keyword(Keyword::Between) {
+					let start = self.parse_window_frame_bound()?;
+					self.expect_keyword(Keyword::And, "'AND' in window frame BETWEEN")?;
+					let end = self.parse_window_frame_bound()?;
+					(start, Some(end))
+				} else {
+					let start = self.parse_window_frame_bound()?;
+					(start, None)
+				};
+
+				let exclusion = if self.eat_keyword(Keyword::Exclude) {
+					if self.eat_keyword(Keyword::Current) {
+						self.expect_keyword(Keyword::Row, "'ROW' after EXCLUDE CURRENT")?;
+						Some(WindowFrameExclusion::CurrentRow)
+					} else if self.eat_keyword(Keyword::Group) {
+						Some(WindowFrameExclusion::Group)
+					} else if self.eat_keyword(Keyword::Ties) {
+						Some(WindowFrameExclusion::Ties)
+					} else if self.eat_keyword(Keyword::No) {
+						self.expect_keyword(Keyword::Others, "'OTHERS' after EXCLUDE NO")?;
+						Some(WindowFrameExclusion::NoOthers)
+					} else {
+						return Err(ParseError::new(
+							self.peek().span,
+							ErrorKind::UnexpectedToken {
+								expected: "CURRENT ROW, GROUP, TIES, or NO OTHERS after EXCLUDE",
+								found: self.peek().kind.to_string(),
+							},
+						));
+					}
+				} else {
+					None
+				};
+
+				let frame_span = frame_start_span.merge(self.peek().span);
+				frame = Some(WindowFrame {
+					units,
+					start,
+					end,
+					exclusion,
+					span: frame_span,
+				});
+			}
+
+			let rparen = self.expect(&TokenKind::RParen, "')' closing window specification")?;
+			let span = start_span.merge(rparen.span);
+
+			Ok(WindowSpec {
+				window_name,
+				partition_by,
+				order_by,
+				frame,
+				span,
+			})
+		} else {
+			// Single window name: OVER win_name
+			let tok = self.peek().clone();
+			let (name, _) = self.parse_ident()?;
+			Ok(WindowSpec {
+				window_name: Some(name),
+				partition_by: Vec::new(),
+				order_by: Vec::new(),
+				frame: None,
+				span: tok.span,
+			})
+		}
+	}
+
+	fn parse_window_frame_bound(&mut self) -> ParseResult<WindowFrameBound> {
+		if self.eat_keyword(Keyword::Current) {
+			self.expect_keyword(Keyword::Row, "'ROW' after CURRENT")?;
+			Ok(WindowFrameBound::CurrentRow)
+		} else if self.eat_keyword(Keyword::Unbounded) {
+			if self.eat_keyword(Keyword::Preceding) {
+				Ok(WindowFrameBound::UnboundedPreceding)
+			} else if self.eat_keyword(Keyword::Following) {
+				Ok(WindowFrameBound::UnboundedFollowing)
+			} else {
+				Err(ParseError::new(
+					self.peek().span,
+					ErrorKind::UnexpectedToken {
+						expected: "PRECEDING or FOLLOWING after UNBOUNDED",
+						found: self.peek().kind.to_string(),
+					},
+				))
+			}
+		} else {
+			let expr = self.parse_expr()?;
+			if self.eat_keyword(Keyword::Preceding) {
+				Ok(WindowFrameBound::Preceding(Box::new(expr)))
+			} else if self.eat_keyword(Keyword::Following) {
+				Ok(WindowFrameBound::Following(Box::new(expr)))
+			} else {
+				Err(ParseError::new(
+					self.peek().span,
+					ErrorKind::UnexpectedToken {
+						expected: "PRECEDING or FOLLOWING after frame offset",
+						found: self.peek().kind.to_string(),
+					},
+				))
+			}
+		}
+	}
 }
 
 fn binary_op_precedence(op: BinaryOperator) -> u8 {
@@ -670,7 +920,7 @@ fn binary_op_precedence(op: BinaryOperator) -> u8 {
 		BinaryOperator::BitOr => PREC_BIT_OR,
 		BinaryOperator::BitAnd => PREC_BIT_AND,
 		BinaryOperator::ShiftLeft | BinaryOperator::ShiftRight => PREC_SHIFT,
-		BinaryOperator::Add | BinaryOperator::Sub => PREC_ADD_SUB,
+		BinaryOperator::Add | BinaryOperator::Sub | BinaryOperator::Concat => PREC_ADD_SUB,
 		BinaryOperator::Mul
 		| BinaryOperator::Div
 		| BinaryOperator::IntDiv

@@ -9,7 +9,8 @@ use crate::ast::stmt::{QualifiedName, Statement};
 use crate::lexer::keyword::Keyword;
 use crate::lexer::span::Span;
 use crate::lexer::token::{Token, TokenKind};
-use crate::lexer::tokenize;
+use crate::lexer::tokenize_with_settings;
+use crate::mode::SqlMode;
 use crate::parser::error::{ErrorKind, ParseError, ParseResult};
 
 pub const MAX_RECURSION_DEPTH: usize = 128;
@@ -22,6 +23,8 @@ pub struct ParserSettings {
 	pub max_recursion_depth: usize,
 	pub max_input_bytes: usize,
 	pub max_work_count: usize,
+	pub sql_mode: SqlMode,
+	pub server_version: u32,
 }
 
 impl Default for ParserSettings {
@@ -30,7 +33,21 @@ impl Default for ParserSettings {
 			max_recursion_depth: MAX_RECURSION_DEPTH,
 			max_input_bytes: DEFAULT_MAX_INPUT_BYTES,
 			max_work_count: DEFAULT_MAX_WORK_COUNT,
+			sql_mode: SqlMode::default_mysql_8(),
+			server_version: 80400,
 		}
+	}
+}
+
+impl ParserSettings {
+	pub fn with_sql_mode(mut self, mode: SqlMode) -> Self {
+		self.sql_mode = mode;
+		self
+	}
+
+	pub fn with_server_version(mut self, version: u32) -> Self {
+		self.server_version = version;
+		self
 	}
 }
 
@@ -53,7 +70,7 @@ pub fn parse_statement_with_settings(
 			},
 		));
 	}
-	let tokens = tokenize(src)
+	let tokens = tokenize_with_settings(src, settings)
 		.map_err(|e| ParseError::new(Span::empty(0), ErrorKind::Lexer(e.to_string())))?;
 	let mut parser = Parser::with_settings(&tokens, settings);
 	let stmt = parser.parse_statement()?;
@@ -91,7 +108,7 @@ pub fn parse_statements_with_settings(
 			},
 		));
 	}
-	let tokens = tokenize(src)
+	let tokens = tokenize_with_settings(src, settings)
 		.map_err(|e| ParseError::new(Span::empty(0), ErrorKind::Lexer(e.to_string())))?;
 	let mut parser = Parser::with_settings(&tokens, settings);
 	let mut stmts = Vec::new();
@@ -138,7 +155,7 @@ pub fn parse_expr_with_settings(src: &str, settings: ParserSettings) -> ParseRes
 			},
 		));
 	}
-	let tokens = tokenize(src)
+	let tokens = tokenize_with_settings(src, settings)
 		.map_err(|e| ParseError::new(Span::empty(0), ErrorKind::Lexer(e.to_string())))?;
 	let mut parser = Parser::with_settings(&tokens, settings);
 	let expr = parser.parse_expr()?;
@@ -277,6 +294,26 @@ impl<'a> Parser<'a> {
 					found: tok.kind.to_string(),
 				},
 			))
+		}
+	}
+
+	#[inline]
+	pub fn eat(&mut self, expected: &TokenKind) -> bool {
+		if &self.peek().kind == expected {
+			self.bump();
+			true
+		} else {
+			false
+		}
+	}
+
+	#[inline]
+	pub fn eat_keyword(&mut self, expected: Keyword) -> bool {
+		if self.peek_keyword() == Some(expected) {
+			self.bump();
+			true
+		} else {
+			false
 		}
 	}
 

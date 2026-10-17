@@ -289,3 +289,61 @@ fn test_parse_unary_not() {
 		other => panic!("expected binary and with unary not, got {:?}", other),
 	}
 }
+
+#[test]
+fn test_parse_subqueries() {
+	// Scalar subquery
+	let expr = parse_expr("(SELECT 1)").unwrap();
+	assert!(matches!(expr, Expr::Subquery { .. }));
+
+	// EXISTS
+	let expr = parse_expr("EXISTS (SELECT 1 FROM users)").unwrap();
+	assert!(matches!(expr, Expr::Exists { .. }));
+
+	// IN subquery
+	let expr = parse_expr("id IN (SELECT user_id FROM orders)").unwrap();
+	match expr {
+		Expr::InSubquery {
+			negated,
+			..
+		} => assert!(!negated),
+		other => panic!("expected InSubquery, got {other:?}"),
+	}
+
+	// NOT IN subquery
+	let expr = parse_expr("id NOT IN (SELECT user_id FROM orders)").unwrap();
+	match expr {
+		Expr::InSubquery {
+			negated,
+			..
+		} => assert!(negated),
+		other => panic!("expected InSubquery negated, got {other:?}"),
+	}
+
+	// ARRAY subquery
+	let expr = parse_expr("ARRAY(SELECT id FROM users)").unwrap();
+	assert!(matches!(expr, Expr::ArraySubquery { .. }));
+
+	// Quantified ANY / ALL
+	let expr = parse_expr("price > ALL (SELECT price FROM items)").unwrap();
+	match expr {
+		Expr::Quantified {
+			quantifier,
+			..
+		} => {
+			assert_eq!(quantifier, surrealdb_pgsql::Quantifier::All);
+		}
+		other => panic!("expected Quantified ALL, got {other:?}"),
+	}
+
+	let expr = parse_expr("score = ANY (SELECT score FROM benchmarks)").unwrap();
+	match expr {
+		Expr::Quantified {
+			quantifier,
+			..
+		} => {
+			assert_eq!(quantifier, surrealdb_pgsql::Quantifier::Any);
+		}
+		other => panic!("expected Quantified ANY, got {other:?}"),
+	}
+}

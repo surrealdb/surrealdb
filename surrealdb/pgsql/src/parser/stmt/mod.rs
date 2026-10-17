@@ -1,5 +1,6 @@
 //! Top-level PostgreSQL statement parser dispatching to specific statement kinds.
 
+pub mod copy;
 pub mod ddl;
 pub mod delete;
 pub mod graph;
@@ -134,6 +135,10 @@ impl<'a> Parser<'a> {
 			TokenKind::Keyword(Keyword::Explain) => {
 				let s = self.parse_explain_stmt()?;
 				Ok(Statement::Explain(Box::new(s)))
+			}
+			TokenKind::Keyword(Keyword::Copy) => {
+				let s = self.parse_copy_stmt()?;
+				Ok(Statement::Copy(Box::new(s)))
 			}
 			_ => Err(ParseError::new(
 				self.peek().span,

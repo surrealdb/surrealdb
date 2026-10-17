@@ -256,7 +256,7 @@ mod pg_integration {
 		// Nanoseconds truncate to Postgres microsecond precision.
 		assert_eq!(row.get("dt"), Some("2024-01-15 12:34:56.123456+00"));
 		assert_eq!(row.get("du"), Some("1 day 02:00:00"));
-		assert_eq!(row.get("arr"), Some("[1,2]"));
+		assert_eq!(row.get("arr"), Some("{1,2}"));
 		assert_eq!(row.get("obj"), Some("{\"a\":1}"));
 		Ok(())
 	}
@@ -733,6 +733,43 @@ mod pg_integration {
 	}
 
 	#[test(tokio::test)]
+	async fn interactive_transaction_let_after_a_rolled_back_savepoint_is_discarded()
+	-> Result<(), Box<dyn Error>> {
+		let (port, _server) = start_pg_server(true).await?;
+		let client = connect_root(port).await?;
+		client.simple_query("BEGIN").await?;
+		client.simple_query("LET $kept = 1").await?;
+		client.simple_query("SAVEPOINT sp").await?;
+		client.simple_query("LET $dropped = 2").await?;
+		client.simple_query("ROLLBACK TO SAVEPOINT sp").await?;
+		client.simple_query("COMMIT").await?;
+		let kept = rows(client.simple_query("RETURN $kept ?? 'unset'").await?);
+		assert_eq!(kept[0].get(0), Some("1"), "a LET before the savepoint persists");
+		let dropped = rows(client.simple_query("RETURN $dropped ?? 'unset'").await?);
+		assert_eq!(
+			dropped[0].get(0),
+			Some("unset"),
+			"a LET after a rolled-back savepoint must not persist"
+		);
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn interactive_transaction_let_inside_a_released_savepoint_persists()
+	-> Result<(), Box<dyn Error>> {
+		let (port, _server) = start_pg_server(true).await?;
+		let client = connect_root(port).await?;
+		client.simple_query("BEGIN").await?;
+		client.simple_query("SAVEPOINT sp").await?;
+		client.simple_query("LET $inside = 3").await?;
+		client.simple_query("RELEASE SAVEPOINT sp").await?;
+		client.simple_query("COMMIT").await?;
+		let inside = rows(client.simple_query("RETURN $inside ?? 'unset'").await?);
+		assert_eq!(inside[0].get(0), Some("3"), "a LET inside a released savepoint persists");
+		Ok(())
+	}
+
+	#[test(tokio::test)]
 	async fn transaction_preamble_is_recognized() -> Result<(), Box<dyn Error>> {
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
@@ -902,7 +939,7 @@ mod pg_integration {
 		client.simple_query("SET dialect = 'gql'").await?;
 		// `person` is not defined in this database.
 		let err = client.simple_query("MATCH (p:person) RETURN p").await.expect_err("matched");
-		assert_eq!(err.code(), Some(&SqlState::UNDEFINED_OBJECT));
+		assert_eq!(err.code(), Some(&SqlState::UNDEFINED_TABLE));
 		client.simple_query("SET dialect = 'surrealql'").await?;
 		let back = rows(client.simple_query("RETURN 1").await?);
 		assert_eq!(back[0].get(0), Some("1"));

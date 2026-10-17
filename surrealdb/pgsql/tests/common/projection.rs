@@ -82,6 +82,11 @@ impl ToPgQueryJson for Statement {
 					"PropertyGraphStmt": {}
 				})
 			}
+			Self::Copy(_) => {
+				json!({
+					"CopyStmt": {}
+				})
+			}
 			Self::Empty => Value::Null,
 		};
 
@@ -648,6 +653,81 @@ impl ToPgQueryJson for Expr {
 			| Self::JsonQuery {
 				..
 			} => pg_node("JsonExpr", Value::Object(serde_json::Map::new())),
+			Self::Subquery {
+				subquery,
+				..
+			} => pg_node(
+				"SubLink",
+				json!({
+					"subLinkType": 4,
+					"subselect": subquery.to_pg_query_json(),
+				}),
+			),
+			Self::Exists {
+				subquery,
+				..
+			} => pg_node(
+				"SubLink",
+				json!({
+					"subLinkType": 0,
+					"subselect": subquery.to_pg_query_json(),
+				}),
+			),
+			Self::InSubquery {
+				expr,
+				subquery,
+				negated,
+				..
+			} => {
+				let sublink = pg_node(
+					"SubLink",
+					json!({
+						"subLinkType": 2,
+						"testexpr": expr.to_pg_query_json(),
+						"subselect": subquery.to_pg_query_json(),
+					}),
+				);
+				if *negated {
+					pg_node(
+						"BoolExpr",
+						json!({
+							"boolop": 2,
+							"args": [sublink],
+						}),
+					)
+				} else {
+					sublink
+				}
+			}
+			Self::ArraySubquery {
+				subquery,
+				..
+			} => pg_node(
+				"SubLink",
+				json!({
+					"subLinkType": 6,
+					"subselect": subquery.to_pg_query_json(),
+				}),
+			),
+			Self::Quantified {
+				expr,
+				quantifier,
+				subquery,
+				..
+			} => {
+				let sub_link_type = match quantifier {
+					surrealdb_pgsql::Quantifier::All => 1,
+					surrealdb_pgsql::Quantifier::Any | surrealdb_pgsql::Quantifier::Some => 2,
+				};
+				pg_node(
+					"SubLink",
+					json!({
+						"subLinkType": sub_link_type,
+						"testexpr": expr.to_pg_query_json(),
+						"subselect": subquery.to_pg_query_json(),
+					}),
+				)
+			}
 		}
 	}
 }

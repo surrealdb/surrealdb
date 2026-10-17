@@ -11,7 +11,9 @@ use surrealdb_expr::expr::{
 };
 use surrealdb_strand::{Strand, TableName};
 
+use crate::dialect::SqlDialect;
 use crate::error::PlanError;
+use crate::functions::FunctionRegistry;
 
 // ============================================================================
 // PostgreSQL Expression Lowering
@@ -133,13 +135,21 @@ pub fn lower_pgsql_expr(expr: &surrealdb_pgsql::ast::expr::Expr) -> Result<Expr,
 			args,
 			..
 		} => {
-			let fn_name = name.parts.last().cloned().unwrap_or_default();
+			let fn_name =
+				if name.parts.len() == 2 && name.parts[0].eq_ignore_ascii_case("pg_catalog") {
+					name.parts[1].to_ascii_lowercase()
+				} else {
+					name.parts.last().map(|s| s.to_ascii_lowercase()).unwrap_or_default()
+				};
+			let func_def = FunctionRegistry::lookup(&fn_name, SqlDialect::Postgres)
+				.ok_or_else(|| PlanError::UndefinedFunction(fn_name.clone()))?;
+			let mapped = func_def.internal_name.unwrap_or(func_def.name);
 			let mut lowered_args = Vec::with_capacity(args.len());
 			for a in args {
 				lowered_args.push(lower_pgsql_expr(a)?);
 			}
 			Ok(Expr::FunctionCall(Box::new(FunctionCall {
-				receiver: Function::Normal(fn_name),
+				receiver: Function::Normal(mapped.to_string()),
 				arguments: lowered_args,
 			})))
 		}
@@ -494,7 +504,10 @@ pub fn lower_pgsql_delete(
 		None => None,
 	};
 
-	let output = delete.returning.as_deref().map(lower_pgsql_returning).transpose()?;
+	let output = match delete.returning.as_deref().map(lower_pgsql_returning).transpose()? {
+		Some(out) => Some(out),
+		None => Some(Output::Before),
+	};
 
 	Ok(Expr::Delete(Box::new(DeleteStatement {
 		what,
@@ -534,11 +547,19 @@ pub fn lower_mysql_expr(expr: &surrealdb_mysql::ast::expr::Expr) -> Result<Expr,
 			surrealdb_mysql::ast::literal::Literal::String(s) => {
 				Ok(Expr::Literal(Literal::String(Strand::from(s.as_str()))))
 			}
+			surrealdb_mysql::ast::literal::Literal::IntroducedString {
+				value,
+				..
+			} => Ok(Expr::Literal(Literal::String(Strand::from(value.as_str())))),
 			surrealdb_mysql::ast::literal::Literal::Boolean(b) => {
 				Ok(Expr::Literal(Literal::Bool(*b)))
 			}
 			surrealdb_mysql::ast::literal::Literal::Null => Ok(Expr::Literal(Literal::Null)),
 			surrealdb_mysql::ast::literal::Literal::HexString(bytes)
+			| surrealdb_mysql::ast::literal::Literal::IntroducedHexString {
+				value: bytes,
+				..
+			}
 			| surrealdb_mysql::ast::literal::Literal::BitString(bytes) => Ok(Expr::Literal(
 				Literal::String(Strand::from(String::from_utf8_lossy(bytes).as_ref())),
 			)),
@@ -553,9 +574,9 @@ pub fn lower_mysql_expr(expr: &surrealdb_mysql::ast::expr::Expr) -> Result<Expr,
 			Ok(Expr::Idiom(Idiom(parts)))
 		}
 
-		surrealdb_mysql::ast::expr::Expr::Param(_idx, _) => Err(PlanError::unsupported(
-			"parameter placeholder '?' is not supported in simple queries without prepared statements".to_string(),
-		)),
+		surrealdb_mysql::ast::expr::Expr::Param(idx, _) => {
+			Ok(Expr::Param(Param::from(surrealdb_types::positional_param_name(*idx))))
+		}
 
 		surrealdb_mysql::ast::expr::Expr::UserVar(name, _) => {
 			Ok(Expr::Param(Param::from(name.clone())))
@@ -639,12 +660,16 @@ pub fn lower_mysql_expr(expr: &surrealdb_mysql::ast::expr::Expr) -> Result<Expr,
 				])));
 			}
 
+			let fn_name = name.to_ascii_lowercase();
+			let func_def = FunctionRegistry::lookup(&fn_name, SqlDialect::MySql)
+				.ok_or_else(|| PlanError::UndefinedFunction(fn_name.clone()))?;
+			let mapped = func_def.internal_name.unwrap_or(func_def.name);
 			let mut lowered_args = Vec::with_capacity(args.len());
 			for a in args {
 				lowered_args.push(lower_mysql_expr(a)?);
 			}
 			Ok(Expr::FunctionCall(Box::new(FunctionCall {
-				receiver: Function::Normal(name.clone()),
+				receiver: Function::Normal(mapped.to_string()),
 				arguments: lowered_args,
 			})))
 		}
@@ -902,7 +927,7 @@ pub fn lower_mysql_insert(
 		data,
 		ignore: insert.ignore,
 		update,
-		output: None,
+		output: Some(Output::After),
 		timeout: Expr::Literal(Literal::None),
 		relation: false,
 	})))
@@ -960,7 +985,7 @@ pub fn lower_mysql_replace(
 		data,
 		ignore: false,
 		update,
-		output: None,
+		output: Some(Output::After),
 		timeout: Expr::Literal(Literal::None),
 		relation: false,
 	})))
@@ -992,7 +1017,7 @@ pub fn lower_mysql_update(
 		what,
 		data: Some(Data::SetExpression(assignments)),
 		cond,
-		output: None,
+		output: Some(Output::After),
 		..Default::default()
 	})))
 }
@@ -1012,7 +1037,7 @@ pub fn lower_mysql_delete(
 	Ok(Expr::Delete(Box::new(DeleteStatement {
 		what,
 		cond,
-		output: None,
+		output: Some(Output::Before),
 		..Default::default()
 	})))
 }
@@ -1025,7 +1050,7 @@ pub fn lower_mysql_truncate(
 	Ok(Expr::Delete(Box::new(DeleteStatement {
 		what: vec![Expr::Table(TableName::from(table_name))],
 		cond: None,
-		output: None,
+		output: Some(Output::Before),
 		..Default::default()
 	})))
 }

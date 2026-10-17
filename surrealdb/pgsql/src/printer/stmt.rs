@@ -10,13 +10,14 @@ use crate::ast::graph::{
 };
 use crate::ast::json::{JsonTable, JsonTableColumn};
 use crate::ast::stmt::{
-	AlterTableAction, AlterTableStmt, ColumnConstraint, ColumnDef, CommonTableExpr,
-	CreateIndexStmt, CreateSchemaStmt, CreateTableStmt, CreateViewStmt, DeallocateStmt, DeleteStmt,
-	DistinctClause, DropObjectType, DropStmt, ExecuteStmt, ExplainStmt, IndexElem, InsertStmt,
-	JoinCondition, JoinType, LockingClause, LockingStrength, LockingWaitPolicy, OnConflictAction,
-	OnConflictClause, PrepareStmt, ResTarget, ResetStmt, SelectStmt, SetClause, SetOpKind,
-	SetOperation, SetStmt, ShowStmt, Statement, TableAlias, TableConstraint, TableRef,
-	TransactionStmt, TruncateStmt, UpdateStmt, WindowDef, WithClause,
+	AlterTableAction, AlterTableStmt, ColumnConstraint, ColumnDef, CommonTableExpr, CopyDirection,
+	CopyFormat, CopyStmt, CopyTarget, CreateIndexStmt, CreateSchemaStmt, CreateTableStmt,
+	CreateViewStmt, DeallocateStmt, DeleteStmt, DistinctClause, DropObjectType, DropStmt,
+	ExecuteStmt, ExplainStmt, IndexElem, InsertStmt, JoinCondition, JoinType, LockingClause,
+	LockingStrength, LockingWaitPolicy, OnConflictAction, OnConflictClause, PrepareStmt, ResTarget,
+	ResetStmt, SelectStmt, SetClause, SetOpKind, SetOperation, SetStmt, ShowStmt, Statement,
+	TableAlias, TableConstraint, TableRef, TransactionStmt, TruncateStmt, UpdateStmt, WindowDef,
+	WithClause,
 };
 use crate::printer::ToPgSql;
 use crate::printer::expr::print_ident;
@@ -741,8 +742,15 @@ impl ToPgSql for TransactionStmt {
 	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::Begin {
+				read_only,
 				..
-			} => f.write_str("BEGIN"),
+			} => {
+				if *read_only {
+					f.write_str("BEGIN READ ONLY")
+				} else {
+					f.write_str("BEGIN")
+				}
+			}
 			Self::Commit {
 				..
 			} => f.write_str("COMMIT"),
@@ -776,7 +784,11 @@ impl ToPgSql for TransactionStmt {
 
 impl ToPgSql for SetStmt {
 	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.write_str("SET ")?;
+		if self.is_local {
+			f.write_str("SET LOCAL ")?;
+		} else {
+			f.write_str("SET ")?;
+		}
 		print_ident(f, &self.name)?;
 		f.write_str(" TO ")?;
 		f.write_str(&self.value)
@@ -786,7 +798,11 @@ impl ToPgSql for SetStmt {
 impl ToPgSql for ShowStmt {
 	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		f.write_str("SHOW ")?;
-		print_ident(f, &self.name)
+		if self.name.eq_ignore_ascii_case("ALL") {
+			f.write_str("ALL")
+		} else {
+			print_ident(f, &self.name)
+		}
 	}
 }
 
@@ -1111,8 +1127,68 @@ impl ToPgSql for Statement {
 			Self::Deallocate(s) => s.to_pgsql(f),
 			Self::CreatePropertyGraph(s) => s.to_pgsql(f),
 			Self::DropPropertyGraph(s) => s.to_pgsql(f),
+			Self::Copy(s) => s.to_pgsql(f),
 			Self::Empty => Ok(()),
 		}
+	}
+}
+
+impl ToPgSql for CopyStmt {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str("COPY ")?;
+		match &self.target {
+			CopyTarget::Table {
+				table,
+				columns,
+			} => {
+				table.to_pgsql(f)?;
+				if !columns.is_empty() {
+					f.write_str(" (")?;
+					for (i, col) in columns.iter().enumerate() {
+						if i > 0 {
+							f.write_str(", ")?;
+						}
+						print_ident(f, col)?;
+					}
+					f.write_str(")")?;
+				}
+			}
+			CopyTarget::Query(q) => {
+				f.write_str("(")?;
+				q.to_pgsql(f)?;
+				f.write_str(")")?;
+			}
+		}
+		match self.direction {
+			CopyDirection::FromStdin => f.write_str(" FROM STDIN")?,
+			CopyDirection::ToStdout => f.write_str(" TO STDOUT")?,
+		}
+		let mut opts = Vec::new();
+		match self.options.format {
+			CopyFormat::Text => {}
+			CopyFormat::Csv => opts.push("FORMAT CSV".to_string()),
+			CopyFormat::Binary => opts.push("FORMAT BINARY".to_string()),
+		}
+		if let Some(h) = self.options.header {
+			opts.push(format!("HEADER {h}"));
+		}
+		if let Some(d) = self.options.delimiter {
+			opts.push(format!("DELIMITER '{}'", d as char));
+		}
+		if let Some(ref n) = self.options.null {
+			opts.push(format!("NULL '{n}'"));
+		}
+		if !opts.is_empty() {
+			f.write_str(" WITH (")?;
+			for (i, opt) in opts.iter().enumerate() {
+				if i > 0 {
+					f.write_str(", ")?;
+				}
+				f.write_str(opt)?;
+			}
+			f.write_str(")")?;
+		}
+		Ok(())
 	}
 }
 

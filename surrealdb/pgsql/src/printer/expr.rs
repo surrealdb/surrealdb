@@ -3,8 +3,8 @@
 use core::fmt;
 
 use crate::ast::expr::{
-	ColumnRef, Expr, QualifiedName, TypeName, WhenClause, WindowFrame, WindowFrameBound,
-	WindowFrameExclusion, WindowFrameUnits, WindowSpec,
+	ColumnRef, Expr, QualifiedName, Quantifier, TypeName, WhenClause, WindowFrame,
+	WindowFrameBound, WindowFrameExclusion, WindowFrameUnits, WindowSpec,
 };
 use crate::ast::literal::Literal;
 use crate::ast::op::{BinaryOperator, UnaryOperator};
@@ -201,6 +201,12 @@ pub fn expr_precedence(expr: &Expr) -> u8 {
 		}
 		| Expr::InList {
 			..
+		}
+		| Expr::InSubquery {
+			..
+		}
+		| Expr::Quantified {
+			..
 		} => 40,
 		Expr::Collate {
 			..
@@ -249,6 +255,15 @@ pub fn expr_precedence(expr: &Expr) -> u8 {
 			..
 		}
 		| Expr::JsonQuery {
+			..
+		}
+		| Expr::Subquery {
+			..
+		}
+		| Expr::Exists {
+			..
+		}
+		| Expr::ArraySubquery {
 			..
 		} => 255,
 	}
@@ -664,6 +679,70 @@ impl ToPgSql for Expr {
 				f.write_str(", '")?;
 				f.write_str(path)?;
 				f.write_str("')")
+			}
+
+			Self::Subquery {
+				subquery,
+				..
+			} => {
+				f.write_str("(")?;
+				subquery.to_pgsql(f)?;
+				f.write_str(")")
+			}
+
+			Self::Exists {
+				subquery,
+				..
+			} => {
+				f.write_str("EXISTS (")?;
+				subquery.to_pgsql(f)?;
+				f.write_str(")")
+			}
+
+			Self::InSubquery {
+				expr,
+				subquery,
+				negated,
+				..
+			} => {
+				let parent_prec = expr_precedence(self);
+				print_sub_expr(f, expr, parent_prec, false, false)?;
+				if *negated {
+					f.write_str(" NOT IN (")?;
+				} else {
+					f.write_str(" IN (")?;
+				}
+				subquery.to_pgsql(f)?;
+				f.write_str(")")
+			}
+
+			Self::ArraySubquery {
+				subquery,
+				..
+			} => {
+				f.write_str("ARRAY(")?;
+				subquery.to_pgsql(f)?;
+				f.write_str(")")
+			}
+
+			Self::Quantified {
+				expr,
+				op,
+				quantifier,
+				subquery,
+				..
+			} => {
+				let parent_prec = expr_precedence(self);
+				print_sub_expr(f, expr, parent_prec, false, false)?;
+				f.write_str(" ")?;
+				op.to_pgsql(f)?;
+				match quantifier {
+					Quantifier::Any => f.write_str(" ANY (")?,
+					Quantifier::Some => f.write_str(" SOME (")?,
+					Quantifier::All => f.write_str(" ALL (")?,
+				}
+				subquery.to_pgsql(f)?;
+				f.write_str(")")
 			}
 		}
 	}

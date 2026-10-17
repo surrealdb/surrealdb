@@ -34,6 +34,19 @@ pub enum PlanError {
 	#[error("window functions are not allowed in {0}")]
 	WindowNotAllowed(String),
 
+	#[error("function \"{0}\" does not exist")]
+	UndefinedFunction(String),
+
+	#[error("function \"{name}\" requires {expected} arguments, but {got} were provided")]
+	FunctionArgumentCountMismatch {
+		name: String,
+		expected: String,
+		got: usize,
+	},
+
+	#[error("function \"{0}\" must be called with an OVER clause")]
+	WindowFunctionWithoutOver(String),
+
 	#[error("subquery in FROM must have an alias")]
 	SubqueryMustHaveAlias,
 
@@ -51,6 +64,21 @@ pub enum PlanError {
 
 	#[error("unsupported expression: {0}")]
 	UnsupportedExpression(String),
+
+	#[error("there is no transaction in progress")]
+	NoActiveTransaction,
+
+	#[error("current transaction is aborted, commands ignored until end of transaction block")]
+	InFailedTransaction,
+
+	#[error("savepoint \"{0}\" does not exist")]
+	SavepointDoesNotExist(String),
+
+	#[error("there is already a transaction in progress")]
+	ActiveTransactionAlreadyInProgress,
+
+	#[error("unrecognized configuration parameter \"{0}\"")]
+	UndefinedObject(String),
 
 	#[error("planning error: {0}")]
 	Custom(String),
@@ -71,11 +99,21 @@ impl PlanError {
 			Self::InvalidGroupByPosition(_) | Self::InvalidOrderByPosition(_) => "42P10", /* invalid_column_reference */
 			Self::ColumnNotInGroupBy(_) => "42803", // grouping_error
 			Self::AggregateNotAllowed(_) | Self::WindowNotAllowed(_) => "42803", // grouping_error
+			Self::UndefinedFunction(_)
+			| Self::FunctionArgumentCountMismatch {
+				..
+			} => "42883", /* undefined_function */
+			Self::WindowFunctionWithoutOver(_) => "42809", // wrong_object_type
 			Self::SubqueryMustHaveAlias => "42601", // syntax_error
 			Self::ParameterOutOfRange(_) => "22023", // invalid_parameter_value
 			Self::DivisionByZero => "22012",        // division_by_zero
 			Self::InvalidTextRepresentation(_) => "22P02", // invalid_text_representation
 			Self::UnsupportedStatement(_) | Self::UnsupportedExpression(_) => "0A000", /* feature_not_supported */
+			Self::NoActiveTransaction => "25P01", // no_active_sql_transaction
+			Self::InFailedTransaction => "25P02", // in_failed_sql_transaction
+			Self::SavepointDoesNotExist(_) => "3B001", // invalid_savepoint_specification
+			Self::ActiveTransactionAlreadyInProgress => "25001", // active_sql_transaction
+			Self::UndefinedObject(_) => "42704",  // undefined_object
 			Self::Custom(_) => "42000",
 		}
 	}
@@ -90,11 +128,21 @@ impl PlanError {
 			Self::InvalidGroupByPosition(_) | Self::InvalidOrderByPosition(_) => 1054,
 			Self::ColumnNotInGroupBy(_) => 1055, // ER_WRONG_FIELD_WITH_GROUP
 			Self::AggregateNotAllowed(_) | Self::WindowNotAllowed(_) => 1111, /* ER_INVALID_GROUP_FUNC_USE */
+			Self::UndefinedFunction(_) => 1305,  // ER_SP_DOES_NOT_EXIST
+			Self::FunctionArgumentCountMismatch {
+				..
+			} => 1582, /* ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT */
+			Self::WindowFunctionWithoutOver(_) => 3593, // ER_WINDOW_FUNCTION_WITHOUT_OVER
 			Self::SubqueryMustHaveAlias => 1248, // ER_DERIVED_MUST_HAVE_ALIAS
 			Self::ParameterOutOfRange(_) => 1210, // ER_WRONG_ARGUMENTS
 			Self::DivisionByZero => 1365,        // ER_DIVISION_BY_ZERO
 			Self::InvalidTextRepresentation(_) => 1264, // ER_DATA_OUT_OF_RANGE
 			Self::UnsupportedStatement(_) | Self::UnsupportedExpression(_) => 1235, /* ER_NOT_SUPPORTED_YET */
+			Self::NoActiveTransaction => 1105,                                      /* ER_UNKNOWN_ERROR */
+			Self::InFailedTransaction => 1105,                                      /* ER_UNKNOWN_ERROR */
+			Self::SavepointDoesNotExist(_) => 1305, // ER_SP_DOES_NOT_EXIST
+			Self::ActiveTransactionAlreadyInProgress => 1105, // ER_UNKNOWN_ERROR
+			Self::UndefinedObject(_) => 1193,       // ER_UNKNOWN_SYSTEM_VARIABLE
 			Self::Custom(_) => 1064,
 		}
 	}

@@ -52,14 +52,7 @@ pub fn lower_stmt(stmt: &Statement) -> Result<LogicalOp, NoLogicalForm<'_>> {
 pub fn lower_select(select: &SelectStmt) -> Result<LogicalOp, LowerError> {
 	let policy = surrealdb_sqlplan::DialectPolicy::mysql();
 	let catalog = surrealdb_sqlplan::EmptyCatalog;
-	let mut bound = surrealdb_sqlplan::binder::mysql::bind_select(select, &catalog, &policy, None)?;
-	if bound.has_params() {
-		return Err(LowerError::UnsupportedExpr(
-			"parameter placeholder '?' is not supported in simple queries without prepared statements".to_string(),
-		));
-	}
-	surrealdb_sqlplan::semantics::fold_select(&mut bound, &policy)?;
-	let op = surrealdb_sqlplan::lower::lower_bound_select(&bound, &policy)?;
+	let op = surrealdb_sqlplan::bind_and_lower_mysql(select, &catalog, &policy)?;
 	Ok(op)
 }
 

@@ -1,11 +1,18 @@
 //! Pretty-printer formatting MySQL AST nodes back into standard MySQL SQL.
 
-use crate::ast::expr::{ColumnRef, Expr, TruthValue};
+use crate::ast::expr::{
+	ColumnRef, Expr, TruthValue, WindowFrame, WindowFrameBound, WindowFrameExclusion,
+	WindowFrameUnits, WindowSpec,
+};
 use crate::ast::stmt::{
-	ColumnDef, CreateTableStmt, DeleteStmt, DescribeStmt, DropTableStmt, ExplainStmt, InsertStmt,
-	JoinCondition, JoinType, LockType, QualifiedName, ReplaceStmt, SelectItem, SelectStmt,
-	SetOpKind, SetOperation, SetStmt, ShowStmt, Statement, TableConstraint, TableRef,
-	TransactionStmt, TruncateStmt, UpdateStmt, UseStmt, VariableTarget,
+	AlterTableAction, AlterTableStmt, ColumnDef, CommonTableExpr, CreateDatabaseStmt,
+	CreateIndexStmt, CreateTableStmt, CreateUserStmt, CreateViewStmt, DeallocateStmt, DeleteStmt,
+	DescribeStmt, DropDatabaseStmt, DropIndexStmt, DropTableStmt, DropUserStmt, DropViewStmt,
+	ExecuteStmt, ExplainStmt, GrantStmt, IndexHint, IndexHintType, InsertStmt, JoinCondition,
+	JoinType, LockTablesStmt, LockType, PrepareStmt, QualifiedName, ReplaceStmt, RevokeStmt,
+	SelectItem, SelectStmt, SetOpKind, SetOperation, SetStmt, ShowStmt, Statement, TableConstraint,
+	TableLockType, TableRef, TransactionStmt, TruncateStmt, UnlockTablesStmt, UpdateStmt, UseStmt,
+	VariableTarget, WindowDef, WithClause,
 };
 
 /// Trait for AST nodes that can be formatted as MySQL SQL syntax.
@@ -103,6 +110,7 @@ impl ToMySql for Expr {
 				name,
 				distinct,
 				args,
+				over,
 				..
 			} => {
 				write!(f, "{name}(")?;
@@ -115,7 +123,12 @@ impl ToMySql for Expr {
 					}
 					arg.fmt_mysql(f)?;
 				}
-				write!(f, ")")
+				write!(f, ")")?;
+				if let Some(spec) = over {
+					write!(f, " OVER ")?;
+					spec.fmt_mysql(f)?;
+				}
+				Ok(())
 			}
 			Self::Cast {
 				expr,
@@ -264,6 +277,18 @@ impl ToMySql for Expr {
 				expr.fmt_mysql(f)?;
 				write!(f, " {unit}")
 			}
+			Self::Quantified {
+				expr,
+				op,
+				quantifier,
+				subquery,
+				..
+			} => {
+				expr.fmt_mysql(f)?;
+				write!(f, " {} {} (", op.as_str(), quantifier.as_str())?;
+				subquery.fmt_mysql(f)?;
+				write!(f, ")")
+			}
 		}
 	}
 }
@@ -288,17 +313,40 @@ impl ToMySql for SelectItem {
 	}
 }
 
+impl ToMySql for IndexHint {
+	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		let ht = match self.hint_type {
+			IndexHintType::Use => "USE INDEX",
+			IndexHintType::Force => "FORCE INDEX",
+			IndexHintType::Ignore => "IGNORE INDEX",
+		};
+		write!(f, "{ht} (")?;
+		for (i, idx) in self.indexes.iter().enumerate() {
+			if i > 0 {
+				write!(f, ", ")?;
+			}
+			write!(f, "{}", escape_mysql_ident(idx))?;
+		}
+		write!(f, ")")
+	}
+}
+
 impl ToMySql for TableRef {
 	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
 			Self::Table {
 				name,
 				alias,
+				index_hints,
 				..
 			} => {
 				name.fmt_mysql(f)?;
 				if let Some(a) = alias {
 					write!(f, " AS {}", escape_mysql_ident(a))?;
+				}
+				for hint in index_hints {
+					write!(f, " ")?;
+					hint.fmt_mysql(f)?;
 				}
 				Ok(())
 			}
@@ -366,8 +414,48 @@ impl ToMySql for SetOperation {
 	}
 }
 
+impl ToMySql for WithClause {
+	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		if self.recursive {
+			write!(f, "WITH RECURSIVE ")?;
+		} else {
+			write!(f, "WITH ")?;
+		}
+		for (i, cte) in self.ctes.iter().enumerate() {
+			if i > 0 {
+				write!(f, ", ")?;
+			}
+			cte.fmt_mysql(f)?;
+		}
+		Ok(())
+	}
+}
+
+impl ToMySql for CommonTableExpr {
+	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{}", self.name)?;
+		if !self.columns.is_empty() {
+			write!(f, " (")?;
+			for (i, c) in self.columns.iter().enumerate() {
+				if i > 0 {
+					write!(f, ", ")?;
+				}
+				write!(f, "{c}")?;
+			}
+			write!(f, ")")?;
+		}
+		write!(f, " AS (")?;
+		self.query.fmt_mysql(f)?;
+		write!(f, ")")
+	}
+}
+
 impl ToMySql for SelectStmt {
 	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		if let Some(with) = &self.with {
+			with.fmt_mysql(f)?;
+			write!(f, " ")?;
+		}
 		write!(f, "SELECT ")?;
 		if self.distinct {
 			write!(f, "DISTINCT ")?;
@@ -394,10 +482,22 @@ impl ToMySql for SelectStmt {
 				}
 				g.fmt_mysql(f)?;
 			}
+			if self.with_rollup {
+				write!(f, " WITH ROLLUP")?;
+			}
 		}
 		if let Some(h) = &self.having {
 			write!(f, " HAVING ")?;
 			h.fmt_mysql(f)?;
+		}
+		if !self.window.is_empty() {
+			write!(f, " WINDOW ")?;
+			for (i, w) in self.window.iter().enumerate() {
+				if i > 0 {
+					write!(f, ", ")?;
+				}
+				w.fmt_mysql(f)?;
+			}
 		}
 		if let Some(set_op) = &self.set_op {
 			set_op.fmt_mysql(f)?;
@@ -768,11 +868,16 @@ impl ToMySql for ShowStmt {
 	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
 			Self::Tables {
+				full,
 				database,
 				like,
 				..
 			} => {
-				write!(f, "SHOW TABLES")?;
+				if *full {
+					write!(f, "SHOW FULL TABLES")?;
+				} else {
+					write!(f, "SHOW TABLES")?;
+				}
 				if let Some(db) = database {
 					write!(f, " FROM {}", escape_mysql_ident(db))?;
 				}
@@ -792,12 +897,47 @@ impl ToMySql for ShowStmt {
 				Ok(())
 			}
 			Self::Columns {
+				full,
 				table,
 				like,
 				..
 			} => {
-				write!(f, "SHOW COLUMNS FROM ")?;
+				if *full {
+					write!(f, "SHOW FULL COLUMNS FROM ")?;
+				} else {
+					write!(f, "SHOW COLUMNS FROM ")?;
+				}
 				table.fmt_mysql(f)?;
+				if let Some(l) = like {
+					write!(f, " LIKE '{l}'")?;
+				}
+				Ok(())
+			}
+			Self::Index {
+				table,
+				..
+			} => {
+				write!(f, "SHOW INDEX FROM ")?;
+				table.fmt_mysql(f)
+			}
+			Self::Engines {
+				..
+			} => write!(f, "SHOW ENGINES"),
+			Self::Collation {
+				like,
+				..
+			} => {
+				write!(f, "SHOW COLLATION")?;
+				if let Some(l) = like {
+					write!(f, " LIKE '{l}'")?;
+				}
+				Ok(())
+			}
+			Self::Charset {
+				like,
+				..
+			} => {
+				write!(f, "SHOW CHARACTER SET")?;
 				if let Some(l) = like {
 					write!(f, " LIKE '{l}'")?;
 				}
@@ -894,6 +1034,18 @@ impl ToMySql for TransactionStmt {
 			}
 			Self::Commit(_) => write!(f, "COMMIT"),
 			Self::Rollback(_) => write!(f, "ROLLBACK"),
+			Self::Savepoint {
+				name,
+				..
+			} => write!(f, "SAVEPOINT `{name}`"),
+			Self::ReleaseSavepoint {
+				name,
+				..
+			} => write!(f, "RELEASE SAVEPOINT `{name}`"),
+			Self::RollbackToSavepoint {
+				name,
+				..
+			} => write!(f, "ROLLBACK TO SAVEPOINT `{name}`"),
 		}
 	}
 }
@@ -909,12 +1061,464 @@ impl ToMySql for Statement {
 			Self::Truncate(s) => s.fmt_mysql(f),
 			Self::CreateTable(s) => s.fmt_mysql(f),
 			Self::DropTable(s) => s.fmt_mysql(f),
+			Self::CreateDatabase(s) => s.fmt_mysql(f),
+			Self::DropDatabase(s) => s.fmt_mysql(f),
+			Self::CreateIndex(s) => s.fmt_mysql(f),
+			Self::DropIndex(s) => s.fmt_mysql(f),
+			Self::CreateView(s) => s.fmt_mysql(f),
+			Self::DropView(s) => s.fmt_mysql(f),
+			Self::AlterTable(s) => s.fmt_mysql(f),
+			Self::CreateUser(s) => s.fmt_mysql(f),
+			Self::DropUser(s) => s.fmt_mysql(f),
+			Self::Grant(s) => s.fmt_mysql(f),
+			Self::Revoke(s) => s.fmt_mysql(f),
+			Self::LockTables(s) => s.fmt_mysql(f),
+			Self::UnlockTables(s) => s.fmt_mysql(f),
+			Self::Prepare(s) => s.fmt_mysql(f),
+			Self::Execute(s) => s.fmt_mysql(f),
+			Self::Deallocate(s) => s.fmt_mysql(f),
 			Self::Use(s) => s.fmt_mysql(f),
 			Self::Set(s) => s.fmt_mysql(f),
 			Self::Show(s) => s.fmt_mysql(f),
 			Self::Describe(s) => s.fmt_mysql(f),
 			Self::Explain(s) => s.fmt_mysql(f),
 			Self::Transaction(s) => s.fmt_mysql(f),
+		}
+	}
+}
+
+impl ToMySql for CreateDatabaseStmt {
+	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "CREATE DATABASE ")?;
+		if self.if_not_exists {
+			write!(f, "IF NOT EXISTS ")?;
+		}
+		write!(f, "{}", escape_mysql_ident(&self.name))
+	}
+}
+
+impl ToMySql for DropDatabaseStmt {
+	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "DROP DATABASE ")?;
+		if self.if_exists {
+			write!(f, "IF EXISTS ")?;
+		}
+		write!(f, "{}", escape_mysql_ident(&self.name))
+	}
+}
+
+impl ToMySql for CreateIndexStmt {
+	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "CREATE ")?;
+		if self.unique {
+			write!(f, "UNIQUE ")?;
+		}
+		write!(f, "INDEX {} ON ", escape_mysql_ident(&self.name))?;
+		self.table.fmt_mysql(f)?;
+		write!(f, " (")?;
+		for (i, c) in self.columns.iter().enumerate() {
+			if i > 0 {
+				write!(f, ", ")?;
+			}
+			write!(f, "{}", escape_mysql_ident(c))?;
+		}
+		write!(f, ")")
+	}
+}
+
+impl ToMySql for DropIndexStmt {
+	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "DROP INDEX {} ON ", escape_mysql_ident(&self.name))?;
+		self.table.fmt_mysql(f)
+	}
+}
+
+impl ToMySql for CreateViewStmt {
+	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		if self.or_replace {
+			write!(f, "CREATE OR REPLACE VIEW ")?;
+		} else {
+			write!(f, "CREATE VIEW ")?;
+		}
+		self.name.fmt_mysql(f)?;
+		if !self.columns.is_empty() {
+			write!(f, " (")?;
+			for (i, c) in self.columns.iter().enumerate() {
+				if i > 0 {
+					write!(f, ", ")?;
+				}
+				write!(f, "{}", escape_mysql_ident(c))?;
+			}
+			write!(f, ")")?;
+		}
+		write!(f, " AS ")?;
+		self.query.fmt_mysql(f)
+	}
+}
+
+impl ToMySql for DropViewStmt {
+	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "DROP VIEW ")?;
+		if self.if_exists {
+			write!(f, "IF EXISTS ")?;
+		}
+		for (i, n) in self.names.iter().enumerate() {
+			if i > 0 {
+				write!(f, ", ")?;
+			}
+			n.fmt_mysql(f)?;
+		}
+		Ok(())
+	}
+}
+
+impl ToMySql for AlterTableStmt {
+	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "ALTER TABLE ")?;
+		self.table.fmt_mysql(f)?;
+		for (i, action) in self.actions.iter().enumerate() {
+			if i > 0 {
+				write!(f, ",")?;
+			}
+			write!(f, " ")?;
+			match action {
+				AlterTableAction::AddColumn(col) => {
+					write!(f, "ADD COLUMN ")?;
+					col.fmt_mysql(f)?;
+				}
+				AlterTableAction::DropColumn {
+					name,
+				} => {
+					write!(f, "DROP COLUMN {}", escape_mysql_ident(name))?;
+				}
+				AlterTableAction::ModifyColumn(col) => {
+					write!(f, "MODIFY COLUMN ")?;
+					col.fmt_mysql(f)?;
+				}
+				AlterTableAction::ChangeColumn {
+					old_name,
+					new_def,
+				} => {
+					write!(f, "CHANGE COLUMN {} ", escape_mysql_ident(old_name))?;
+					new_def.fmt_mysql(f)?;
+				}
+				AlterTableAction::AddConstraint(c) => {
+					write!(f, "ADD ")?;
+					match c {
+						TableConstraint::PrimaryKey {
+							columns,
+							..
+						} => {
+							write!(f, "PRIMARY KEY (")?;
+							for (j, col) in columns.iter().enumerate() {
+								if j > 0 {
+									write!(f, ", ")?;
+								}
+								write!(f, "{}", escape_mysql_ident(col))?;
+							}
+							write!(f, ")")?;
+						}
+						TableConstraint::Unique {
+							name,
+							columns,
+							..
+						} => {
+							write!(f, "UNIQUE ")?;
+							if let Some(n) = name {
+								write!(f, "{} ", escape_mysql_ident(n))?;
+							}
+							write!(f, "(")?;
+							for (j, col) in columns.iter().enumerate() {
+								if j > 0 {
+									write!(f, ", ")?;
+								}
+								write!(f, "{}", escape_mysql_ident(col))?;
+							}
+							write!(f, ")")?;
+						}
+						TableConstraint::ForeignKey {
+							name,
+							columns,
+							ref_table,
+							ref_columns,
+							..
+						} => {
+							if let Some(n) = name {
+								write!(f, "CONSTRAINT {} ", escape_mysql_ident(n))?;
+							}
+							write!(f, "FOREIGN KEY (")?;
+							for (j, col) in columns.iter().enumerate() {
+								if j > 0 {
+									write!(f, ", ")?;
+								}
+								write!(f, "{}", escape_mysql_ident(col))?;
+							}
+							write!(f, ") REFERENCES ")?;
+							ref_table.fmt_mysql(f)?;
+							write!(f, " (")?;
+							for (j, col) in ref_columns.iter().enumerate() {
+								if j > 0 {
+									write!(f, ", ")?;
+								}
+								write!(f, "{}", escape_mysql_ident(col))?;
+							}
+							write!(f, ")")?;
+						}
+					}
+				}
+				AlterTableAction::DropPrimaryKey => {
+					write!(f, "DROP PRIMARY KEY")?;
+				}
+				AlterTableAction::DropIndex {
+					name,
+				} => {
+					write!(f, "DROP INDEX {}", escape_mysql_ident(name))?;
+				}
+				AlterTableAction::RenameTable {
+					new_name,
+				} => {
+					write!(f, "RENAME TO ")?;
+					new_name.fmt_mysql(f)?;
+				}
+			}
+		}
+		Ok(())
+	}
+}
+
+impl ToMySql for CreateUserStmt {
+	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "CREATE USER ")?;
+		if self.if_not_exists {
+			write!(f, "IF NOT EXISTS ")?;
+		}
+		write!(f, "'{}'", self.user)?;
+		if let Some(ref h) = self.host {
+			write!(f, "@'{h}'")?;
+		}
+		if let Some(ref p) = self.identified_by {
+			write!(f, " IDENTIFIED BY '{p}'")?;
+		}
+		Ok(())
+	}
+}
+
+impl ToMySql for DropUserStmt {
+	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "DROP USER ")?;
+		if self.if_exists {
+			write!(f, "IF EXISTS ")?;
+		}
+		for (i, (user, host)) in self.users.iter().enumerate() {
+			if i > 0 {
+				write!(f, ", ")?;
+			}
+			write!(f, "'{user}'")?;
+			if let Some(h) = host {
+				write!(f, "@'{h}'")?;
+			}
+		}
+		Ok(())
+	}
+}
+
+impl ToMySql for GrantStmt {
+	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "GRANT ")?;
+		for (i, p) in self.privileges.iter().enumerate() {
+			if i > 0 {
+				write!(f, ", ")?;
+			}
+			write!(f, "{p}")?;
+		}
+		if let Some(ref obj) = self.object {
+			write!(f, " ON {obj}")?;
+		}
+		write!(f, " TO '{}'", self.user)?;
+		if let Some(ref h) = self.host {
+			write!(f, "@'{h}'")?;
+		}
+		Ok(())
+	}
+}
+
+impl ToMySql for RevokeStmt {
+	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "REVOKE ")?;
+		for (i, p) in self.privileges.iter().enumerate() {
+			if i > 0 {
+				write!(f, ", ")?;
+			}
+			write!(f, "{p}")?;
+		}
+		if let Some(ref obj) = self.object {
+			write!(f, " ON {obj}")?;
+		}
+		write!(f, " FROM '{}'", self.user)?;
+		if let Some(ref h) = self.host {
+			write!(f, "@'{h}'")?;
+		}
+		Ok(())
+	}
+}
+
+impl ToMySql for LockTablesStmt {
+	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "LOCK TABLES ")?;
+		for (i, lock) in self.locks.iter().enumerate() {
+			if i > 0 {
+				write!(f, ", ")?;
+			}
+			lock.table.fmt_mysql(f)?;
+			match lock.lock_type {
+				TableLockType::Read => write!(f, " READ")?,
+				TableLockType::Write => write!(f, " WRITE")?,
+			}
+		}
+		Ok(())
+	}
+}
+
+impl ToMySql for UnlockTablesStmt {
+	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "UNLOCK TABLES")
+	}
+}
+
+impl ToMySql for PrepareStmt {
+	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "PREPARE {} FROM '{}'", escape_mysql_ident(&self.name), self.query)
+	}
+}
+
+impl ToMySql for ExecuteStmt {
+	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "EXECUTE {}", escape_mysql_ident(&self.name))?;
+		if !self.using.is_empty() {
+			write!(f, " USING ")?;
+			for (i, u) in self.using.iter().enumerate() {
+				if i > 0 {
+					write!(f, ", ")?;
+				}
+				u.fmt_mysql(f)?;
+			}
+		}
+		Ok(())
+	}
+}
+
+impl ToMySql for DeallocateStmt {
+	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "DEALLOCATE PREPARE {}", escape_mysql_ident(&self.name))
+	}
+}
+
+impl ToMySql for WindowDef {
+	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{} AS ", self.name)?;
+		self.spec.fmt_mysql(f)
+	}
+}
+
+impl ToMySql for WindowSpec {
+	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "(")?;
+		let mut has_prev = false;
+
+		if let Some(ref name) = self.window_name {
+			write!(f, "{name}")?;
+			has_prev = true;
+		}
+
+		if !self.partition_by.is_empty() {
+			if has_prev {
+				write!(f, " ")?;
+			}
+			write!(f, "PARTITION BY ")?;
+			for (i, expr) in self.partition_by.iter().enumerate() {
+				if i > 0 {
+					write!(f, ", ")?;
+				}
+				expr.fmt_mysql(f)?;
+			}
+			has_prev = true;
+		}
+
+		if !self.order_by.is_empty() {
+			if has_prev {
+				write!(f, " ")?;
+			}
+			write!(f, "ORDER BY ")?;
+			for (i, item) in self.order_by.iter().enumerate() {
+				if i > 0 {
+					write!(f, ", ")?;
+				}
+				item.expr.fmt_mysql(f)?;
+				if item.asc {
+					write!(f, " ASC")?;
+				} else {
+					write!(f, " DESC")?;
+				}
+			}
+			has_prev = true;
+		}
+
+		if let Some(ref frame) = self.frame {
+			if has_prev {
+				write!(f, " ")?;
+			}
+			frame.fmt_mysql(f)?;
+		}
+
+		write!(f, ")")
+	}
+}
+
+impl ToMySql for WindowFrame {
+	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self.units {
+			WindowFrameUnits::Rows => write!(f, "ROWS ")?,
+			WindowFrameUnits::Range => write!(f, "RANGE ")?,
+			WindowFrameUnits::Groups => write!(f, "GROUPS ")?,
+		}
+
+		if let Some(ref end) = self.end {
+			write!(f, "BETWEEN ")?;
+			self.start.fmt_mysql(f)?;
+			write!(f, " AND ")?;
+			end.fmt_mysql(f)?;
+		} else {
+			self.start.fmt_mysql(f)?;
+		}
+
+		if let Some(ref excl) = self.exclusion {
+			write!(f, " ")?;
+			match excl {
+				WindowFrameExclusion::CurrentRow => write!(f, "EXCLUDE CURRENT ROW")?,
+				WindowFrameExclusion::Group => write!(f, "EXCLUDE GROUP")?,
+				WindowFrameExclusion::Ties => write!(f, "EXCLUDE TIES")?,
+				WindowFrameExclusion::NoOthers => write!(f, "EXCLUDE NO OTHERS")?,
+			}
+		}
+
+		Ok(())
+	}
+}
+
+impl ToMySql for WindowFrameBound {
+	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			Self::UnboundedPreceding => write!(f, "UNBOUNDED PRECEDING"),
+			Self::UnboundedFollowing => write!(f, "UNBOUNDED FOLLOWING"),
+			Self::CurrentRow => write!(f, "CURRENT ROW"),
+			Self::Preceding(expr) => {
+				expr.fmt_mysql(f)?;
+				write!(f, " PRECEDING")
+			}
+			Self::Following(expr) => {
+				expr.fmt_mysql(f)?;
+				write!(f, " FOLLOWING")
+			}
 		}
 	}
 }

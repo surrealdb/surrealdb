@@ -8,17 +8,22 @@ use surrealdb_expr::expr::index_kind::Index;
 use surrealdb_expr::expr::operator::BinaryOperator;
 use surrealdb_expr::expr::reference::{Reference, ReferenceDeleteStrategy};
 use surrealdb_expr::expr::statements::define::{
-	DefineDefault, DefineFieldStatement, DefineIndexStatement, DefineKind, DefineStatement,
-	DefineTableStatement,
+	DefineDatabaseStatement, DefineDefault, DefineFieldStatement, DefineIndexStatement, DefineKind,
+	DefineStatement, DefineTableStatement,
 };
 use surrealdb_expr::expr::statements::remove::{
-	RemoveFieldStatement, RemoveIndexStatement, RemoveStatement, RemoveTableStatement,
+	RemoveDatabaseStatement, RemoveFieldStatement, RemoveIndexStatement, RemoveStatement,
+	RemoveTableStatement,
 };
 use surrealdb_expr::expr::table_type::TableType;
 use surrealdb_expr::expr::{Cond, Expr, Field, Fields, Idiom, Kind, Literal, Param, Part, View};
 use surrealdb_mysql::ast::stmt::{
-	CreateTableStmt as MyCreateTableStmt, DropTableStmt as MyDropTableStmt,
-	Statement as MyStatement, TableConstraint as MyTableConstraint,
+	AlterTableAction as MyAlterTableAction, AlterTableStmt as MyAlterTableStmt,
+	CreateDatabaseStmt as MyCreateDatabaseStmt, CreateIndexStmt as MyCreateIndexStmt,
+	CreateTableStmt as MyCreateTableStmt, CreateViewStmt as MyCreateViewStmt,
+	DropDatabaseStmt as MyDropDatabaseStmt, DropIndexStmt as MyDropIndexStmt,
+	DropTableStmt as MyDropTableStmt, DropViewStmt as MyDropViewStmt, Statement as MyStatement,
+	TableConstraint as MyTableConstraint, TableRef as MyTableRef,
 };
 use surrealdb_pgsql::ast::stmt::{
 	AlterTableAction, AlterTableStmt, ColumnConstraint, CreateIndexStmt,
@@ -809,11 +814,350 @@ pub fn lower_mysql_use(
 	))))
 }
 
+/// Lower a MySQL `CREATE DATABASE` statement into SurrealDB expressions.
+pub fn lower_mysql_create_database(create: &MyCreateDatabaseStmt) -> Result<Vec<Expr>, PlanError> {
+	let def = DefineDatabaseStatement {
+		name: Expr::Idiom(Idiom::field(create.name.as_str())),
+		kind: if create.if_not_exists {
+			DefineKind::IfNotExists
+		} else {
+			DefineKind::Default
+		},
+		..Default::default()
+	};
+	Ok(vec![Expr::Define(Box::new(DefineStatement::Database(def)))])
+}
+
+/// Lower a MySQL `DROP DATABASE` statement into SurrealDB expressions.
+pub fn lower_mysql_drop_database(drop: &MyDropDatabaseStmt) -> Result<Vec<Expr>, PlanError> {
+	let rem = RemoveDatabaseStatement {
+		name: Expr::Idiom(Idiom::field(drop.name.as_str())),
+		if_exists: drop.if_exists,
+		..Default::default()
+	};
+	Ok(vec![Expr::Remove(Box::new(RemoveStatement::Database(rem)))])
+}
+
+/// Lower a MySQL `CREATE INDEX` statement into SurrealDB expressions.
+pub fn lower_mysql_create_index(idx: &MyCreateIndexStmt) -> Result<Vec<Expr>, PlanError> {
+	let (_, tbl_str) = crate::namespace::resolve_mysql_table_name(&idx.table.parts, None)?;
+	let tbl = tbl_str.as_str();
+
+	let mut cols = Vec::new();
+	for col in &idx.columns {
+		cols.push(Expr::Idiom(Idiom(vec![Part::Field(Strand::from(col.as_str()))])));
+	}
+
+	let def = DefineIndexStatement {
+		name: Expr::Idiom(Idiom::field(idx.name.as_str())),
+		what: Expr::Table(TableName::from(tbl)),
+		cols,
+		index: if idx.unique {
+			Index::Uniq
+		} else {
+			Index::Idx
+		},
+		kind: DefineKind::Default,
+		..Default::default()
+	};
+	Ok(vec![Expr::Define(Box::new(DefineStatement::Index(def)))])
+}
+
+/// Lower a MySQL `DROP INDEX` statement into SurrealDB expressions.
+pub fn lower_mysql_drop_index(drop: &MyDropIndexStmt) -> Result<Vec<Expr>, PlanError> {
+	let (_, tbl_str) = crate::namespace::resolve_mysql_table_name(&drop.table.parts, None)?;
+	let tbl = tbl_str.as_str();
+
+	let rem = RemoveIndexStatement {
+		name: Expr::Idiom(Idiom::field(drop.name.as_str())),
+		what: Expr::Table(TableName::from(tbl)),
+		if_exists: false,
+	};
+	Ok(vec![Expr::Remove(Box::new(RemoveStatement::Index(rem)))])
+}
+
+/// Lower a MySQL `CREATE VIEW` statement into SurrealDB expressions.
+pub fn lower_mysql_create_view(view: &MyCreateViewStmt) -> Result<Vec<Expr>, PlanError> {
+	let (_, view_name_str) = crate::namespace::resolve_mysql_table_name(&view.name.parts, None)?;
+	let view_name = view_name_str.as_str();
+
+	let mut from_tables = Vec::new();
+	if let Some(MyTableRef::Table {
+		name,
+		..
+	}) = &view.query.from
+		&& let Ok((_, t)) = crate::namespace::resolve_mysql_table_name(&name.parts, None)
+	{
+		from_tables.push(TableName::from(t));
+	}
+
+	let fields = if view.query.projection.is_empty()
+		|| (view.query.projection.len() == 1
+			&& matches!(
+				&view.query.projection[0],
+				surrealdb_mysql::ast::stmt::SelectItem::Wildcard(_)
+			)) {
+		Fields::all()
+	} else {
+		let mut selectors = Vec::new();
+		for item in &view.query.projection {
+			match item {
+				surrealdb_mysql::ast::stmt::SelectItem::Wildcard(_) => {
+					selectors.push(Field::All);
+				}
+				surrealdb_mysql::ast::stmt::SelectItem::Expr {
+					expr,
+					alias,
+					..
+				} => {
+					let lowered = lower_mysql_expr(expr)?;
+					let a = alias.as_ref().map(|s| Idiom::field(s.as_str()));
+					selectors.push(Field::Single(Selector {
+						expr: lowered,
+						alias: a,
+					}));
+				}
+				surrealdb_mysql::ast::stmt::SelectItem::QualifiedWildcard(tbl, _) => {
+					selectors.push(Field::Single(Selector {
+						expr: Expr::Idiom(Idiom(vec![
+							Part::Field(Strand::from(tbl.as_str())),
+							Part::All,
+						])),
+						alias: None,
+					}));
+				}
+			}
+		}
+		Fields::Select(selectors)
+	};
+
+	let cond = if let Some(wh) = &view.query.where_clause {
+		Some(Cond(lower_mysql_expr(wh)?))
+	} else {
+		None
+	};
+
+	let table_def = DefineTableStatement {
+		name: Expr::Table(TableName::from(view_name)),
+		kind: if view.or_replace {
+			DefineKind::Overwrite
+		} else {
+			DefineKind::Default
+		},
+		view: Some(View {
+			expr: fields,
+			what: from_tables,
+			cond,
+			group: None,
+		}),
+		..Default::default()
+	};
+
+	Ok(vec![Expr::Define(Box::new(DefineStatement::Table(table_def)))])
+}
+
+/// Lower a MySQL `DROP VIEW` statement into SurrealDB expressions.
+pub fn lower_mysql_drop_view(drop: &MyDropViewStmt) -> Result<Vec<Expr>, PlanError> {
+	let mut exprs = Vec::new();
+	for name in &drop.names {
+		let (_, vname_str) = crate::namespace::resolve_mysql_table_name(&name.parts, None)?;
+		let rem = RemoveTableStatement {
+			name: Expr::Table(TableName::from(vname_str.as_str())),
+			if_exists: drop.if_exists,
+			expunge: false,
+		};
+		exprs.push(Expr::Remove(Box::new(RemoveStatement::Table(rem))));
+	}
+	Ok(exprs)
+}
+
+/// Lower a MySQL `ALTER TABLE` statement into SurrealDB expressions.
+pub fn lower_mysql_alter_table(alter: &MyAlterTableStmt) -> Result<Vec<Expr>, PlanError> {
+	let (_, tbl_name_str) = crate::namespace::resolve_mysql_table_name(&alter.table.parts, None)?;
+	let tbl_name = tbl_name_str.as_str();
+
+	let mut exprs = Vec::new();
+
+	for action in &alter.actions {
+		match action {
+			MyAlterTableAction::AddColumn(col) => {
+				let base_kind = map_mysql_type(&col.data_type);
+				let is_not_null = col.name == "id" || col.not_null || col.primary_key;
+				let field_kind = if is_not_null || matches!(base_kind, Kind::Any) {
+					base_kind
+				} else {
+					Kind::either(vec![Kind::None, Kind::Null, base_kind])
+				};
+
+				let mut field_def = DefineFieldStatement {
+					name: Expr::Idiom(Idiom::field(col.name.as_str())),
+					what: Expr::Table(TableName::from(tbl_name)),
+					field_kind: Some(field_kind),
+					kind: DefineKind::Default,
+					..Default::default()
+				};
+				if let Some(def) = &col.default {
+					field_def.default = DefineDefault::Set(lower_mysql_expr(def)?);
+				}
+				exprs.push(Expr::Define(Box::new(DefineStatement::Field(Box::new(field_def)))));
+			}
+			MyAlterTableAction::DropColumn {
+				name,
+			} => {
+				let rem = RemoveFieldStatement {
+					name: Expr::Idiom(Idiom::field(name.as_str())),
+					table_name: Expr::Table(TableName::from(tbl_name)),
+					if_exists: false,
+				};
+				exprs.push(Expr::Remove(Box::new(RemoveStatement::Field(rem))));
+			}
+			MyAlterTableAction::ModifyColumn(col) => {
+				let base_kind = map_mysql_type(&col.data_type);
+				let is_not_null = col.name == "id" || col.not_null || col.primary_key;
+				let field_kind = if is_not_null || matches!(base_kind, Kind::Any) {
+					base_kind
+				} else {
+					Kind::either(vec![Kind::None, Kind::Null, base_kind])
+				};
+
+				let mut field_def = DefineFieldStatement {
+					name: Expr::Idiom(Idiom::field(col.name.as_str())),
+					what: Expr::Table(TableName::from(tbl_name)),
+					field_kind: Some(field_kind),
+					kind: DefineKind::Overwrite,
+					..Default::default()
+				};
+				if let Some(def) = &col.default {
+					field_def.default = DefineDefault::Set(lower_mysql_expr(def)?);
+				}
+				exprs.push(Expr::Define(Box::new(DefineStatement::Field(Box::new(field_def)))));
+			}
+			MyAlterTableAction::ChangeColumn {
+				old_name,
+				new_def,
+			} => {
+				let rem = RemoveFieldStatement {
+					name: Expr::Idiom(Idiom::field(old_name.as_str())),
+					table_name: Expr::Table(TableName::from(tbl_name)),
+					if_exists: true,
+				};
+				exprs.push(Expr::Remove(Box::new(RemoveStatement::Field(rem))));
+
+				let base_kind = map_mysql_type(&new_def.data_type);
+				let is_not_null = new_def.name == "id" || new_def.not_null || new_def.primary_key;
+				let field_kind = if is_not_null || matches!(base_kind, Kind::Any) {
+					base_kind
+				} else {
+					Kind::either(vec![Kind::None, Kind::Null, base_kind])
+				};
+
+				let mut field_def = DefineFieldStatement {
+					name: Expr::Idiom(Idiom::field(new_def.name.as_str())),
+					what: Expr::Table(TableName::from(tbl_name)),
+					field_kind: Some(field_kind),
+					kind: DefineKind::Default,
+					..Default::default()
+				};
+				if let Some(def) = &new_def.default {
+					field_def.default = DefineDefault::Set(lower_mysql_expr(def)?);
+				}
+				exprs.push(Expr::Define(Box::new(DefineStatement::Field(Box::new(field_def)))));
+			}
+			MyAlterTableAction::AddConstraint(c) => match c {
+				MyTableConstraint::PrimaryKey {
+					columns,
+					..
+				} => {
+					let idx = DefineIndexStatement {
+						name: Expr::Idiom(Idiom::field(format!("{tbl_name}_pk"))),
+						what: Expr::Table(TableName::from(tbl_name)),
+						cols: columns
+							.iter()
+							.map(|col| {
+								Expr::Idiom(Idiom(vec![Part::Field(Strand::from(col.as_str()))]))
+							})
+							.collect(),
+						index: Index::Uniq,
+						kind: DefineKind::Default,
+						..Default::default()
+					};
+					exprs.push(Expr::Define(Box::new(DefineStatement::Index(idx))));
+				}
+				MyTableConstraint::Unique {
+					name,
+					columns,
+					..
+				} => {
+					let idx_name = name.clone().unwrap_or_else(|| format!("{tbl_name}_uniq"));
+					let idx = DefineIndexStatement {
+						name: Expr::Idiom(Idiom::field(idx_name)),
+						what: Expr::Table(TableName::from(tbl_name)),
+						cols: columns
+							.iter()
+							.map(|col| {
+								Expr::Idiom(Idiom(vec![Part::Field(Strand::from(col.as_str()))]))
+							})
+							.collect(),
+						index: Index::Uniq,
+						kind: DefineKind::Default,
+						..Default::default()
+					};
+					exprs.push(Expr::Define(Box::new(DefineStatement::Index(idx))));
+				}
+				MyTableConstraint::ForeignKey {
+					..
+				} => {}
+			},
+			MyAlterTableAction::DropPrimaryKey => {
+				let rem = RemoveIndexStatement {
+					name: Expr::Idiom(Idiom::field(format!("{tbl_name}_pk"))),
+					what: Expr::Table(TableName::from(tbl_name)),
+					if_exists: true,
+				};
+				exprs.push(Expr::Remove(Box::new(RemoveStatement::Index(rem))));
+			}
+			MyAlterTableAction::DropIndex {
+				name,
+			} => {
+				let rem = RemoveIndexStatement {
+					name: Expr::Idiom(Idiom::field(name.as_str())),
+					what: Expr::Table(TableName::from(tbl_name)),
+					if_exists: true,
+				};
+				exprs.push(Expr::Remove(Box::new(RemoveStatement::Index(rem))));
+			}
+			MyAlterTableAction::RenameTable {
+				new_name,
+			} => {
+				let (_, new_tbl_str) =
+					crate::namespace::resolve_mysql_table_name(&new_name.parts, None)?;
+				let table_def = DefineTableStatement {
+					name: Expr::Table(TableName::from(new_tbl_str.as_str())),
+					kind: DefineKind::Default,
+					full: true,
+					table_type: TableType::Normal,
+					..Default::default()
+				};
+				exprs.push(Expr::Define(Box::new(DefineStatement::Table(table_def))));
+			}
+		}
+	}
+
+	Ok(exprs)
+}
+
 /// Lower a MySQL DDL statement.
 pub fn lower_mysql_ddl(stmt: &MyStatement) -> Result<Vec<Expr>, PlanError> {
 	match stmt {
 		MyStatement::CreateTable(s) => lower_mysql_create_table(s),
 		MyStatement::DropTable(s) => lower_mysql_drop_table(s),
+		MyStatement::CreateIndex(s) => lower_mysql_create_index(s),
+		MyStatement::DropIndex(s) => lower_mysql_drop_index(s),
+		MyStatement::CreateView(s) => lower_mysql_create_view(s),
+		MyStatement::DropView(s) => lower_mysql_drop_view(s),
+		MyStatement::AlterTable(s) => lower_mysql_alter_table(s),
+		MyStatement::CreateDatabase(s) => lower_mysql_create_database(s),
+		MyStatement::DropDatabase(s) => lower_mysql_drop_database(s),
 		_ => {
 			Err(PlanError::unsupported(format!("MySQL statement not recognized as DDL: {stmt:?}")))
 		}

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::catalog::BinderCatalog;
 use crate::dialect::DialectPolicy;
 use crate::error::PlanError;
-use crate::ir::{BoundColumnRef, BoundExpr, BoundTarget};
+use crate::ir::{BoundColumnRef, BoundCte, BoundExpr, BoundTarget, BoundWindowSpec};
 
 /// A single relation registered in the current query scope (from a FROM clause or JOIN).
 #[derive(Debug, Clone)]
@@ -35,6 +35,10 @@ pub struct QueryScope {
 	/// Target projection expressions in this query, for resolving positional and alias GROUP BY /
 	/// ORDER BY.
 	pub targets: Vec<BoundTarget>,
+	/// Common Table Expressions (CTEs) available in this query scope.
+	pub ctes: HashMap<String, BoundCte>,
+	/// Named window specifications defined in WINDOW clause.
+	pub windows: HashMap<String, BoundWindowSpec>,
 }
 
 impl Default for QueryScope {
@@ -51,6 +55,8 @@ impl QueryScope {
 			relations: Vec::new(),
 			name_to_relation: HashMap::new(),
 			targets: Vec::new(),
+			ctes: HashMap::new(),
+			windows: HashMap::new(),
 		}
 	}
 
@@ -61,6 +67,26 @@ impl QueryScope {
 			relations: Vec::new(),
 			name_to_relation: HashMap::new(),
 			targets: Vec::new(),
+			ctes: HashMap::new(),
+			windows: HashMap::new(),
+		}
+	}
+
+	/// Register a named window specification.
+	pub fn register_window(&mut self, name: &str, spec: BoundWindowSpec, policy: &DialectPolicy) {
+		let key = policy.fold_identifier(name).into_owned();
+		self.windows.insert(key, spec);
+	}
+
+	/// Resolve a named window specification, traversing parent scopes if necessary.
+	pub fn resolve_window(&self, name: &str, policy: &DialectPolicy) -> Option<&BoundWindowSpec> {
+		let key = policy.fold_identifier(name).into_owned();
+		if let Some(spec) = self.windows.get(&key) {
+			Some(spec)
+		} else if let Some(parent) = &self.parent {
+			parent.resolve_window(name, policy)
+		} else {
+			None
 		}
 	}
 
@@ -125,6 +151,46 @@ impl QueryScope {
 		relation_index
 	}
 
+	/// Register a subquery relation with optional known columns.
+	pub fn register_subquery_with_columns(
+		&mut self,
+		alias: &str,
+		columns: Option<Vec<String>>,
+		policy: &DialectPolicy,
+	) -> usize {
+		let relation_index = self.relations.len();
+		let entry = RelationEntry {
+			relation_index,
+			table_name: alias.to_string(),
+			schema: None,
+			exposed_name: alias.to_string(),
+			known_columns: columns,
+		};
+
+		self.relations.push(entry);
+		let key = policy.fold_identifier(alias).into_owned();
+		self.name_to_relation.insert(key, relation_index);
+		relation_index
+	}
+
+	/// Register a Common Table Expression in this scope.
+	pub fn register_cte(&mut self, cte: BoundCte, policy: &DialectPolicy) {
+		let key = policy.fold_identifier(&cte.name).into_owned();
+		self.ctes.insert(key, cte);
+	}
+
+	/// Lookup a Common Table Expression by name, searching local scope and parent scopes.
+	pub fn get_cte(&self, name: &str, policy: &DialectPolicy) -> Option<&BoundCte> {
+		let key = policy.fold_identifier(name).into_owned();
+		if let Some(cte) = self.ctes.get(&key) {
+			return Some(cte);
+		}
+		if let Some(parent) = &self.parent {
+			return parent.get_cte(name, policy);
+		}
+		None
+	}
+
 	/// Resolve a column reference given identifier parts (e.g. `["col"]` or `["tbl", "col"]` or
 	/// `["schema", "tbl", "col"]`).
 	pub fn resolve_column(
@@ -169,6 +235,11 @@ impl QueryScope {
 		policy: &DialectPolicy,
 	) -> Result<BoundColumnRef, PlanError> {
 		if self.relations.is_empty() {
+			if let Some(parent) = &self.parent {
+				let mut col = parent.resolve_unqualified_column(col_name, policy)?;
+				col.correlation_depth += 1;
+				return Ok(col);
+			}
 			// In a query without FROM clause, unqualified columns do not exist
 			return Err(PlanError::UndefinedColumn(col_name.to_string()));
 		}
@@ -181,6 +252,7 @@ impl QueryScope {
 				relation_index: rel.relation_index,
 				relation_name: rel.exposed_name.clone(),
 				column: folded_col,
+				correlation_depth: 0,
 			});
 		}
 
@@ -203,9 +275,19 @@ impl QueryScope {
 				relation_index: rel.relation_index,
 				relation_name: rel.exposed_name.clone(),
 				column: folded_col,
+				correlation_depth: 0,
 			});
 		} else if matching_relations.len() > 1 {
 			return Err(PlanError::AmbiguousColumn(col_name.to_string()));
+		}
+
+		// If relations have known columns and col was not found, check parent before fallback
+		if self.relations.iter().any(|r| r.known_columns.is_some())
+			&& let Some(parent) = &self.parent
+			&& let Ok(mut col) = parent.resolve_unqualified_column(col_name, policy)
+		{
+			col.correlation_depth += 1;
+			return Ok(col);
 		}
 
 		// Fallback when schema is not strictly known (schemaless tables): default to relation 0
@@ -215,6 +297,7 @@ impl QueryScope {
 			relation_index: rel.relation_index,
 			relation_name: rel.exposed_name.clone(),
 			column: folded_col,
+			correlation_depth: 0,
 		})
 	}
 
@@ -232,13 +315,15 @@ impl QueryScope {
 				relation_index: rel.relation_index,
 				relation_name: rel.exposed_name.clone(),
 				column: folded_col,
+				correlation_depth: 0,
 			});
 		}
 
 		// Check parent scope for correlated subqueries
-		if let Some(Ok(col)) =
-			self.parent.as_ref().map(|p| p.resolve_qualified_column(prefix, col_name, policy))
+		if let Some(parent) = &self.parent
+			&& let Ok(mut col) = parent.resolve_qualified_column(prefix, col_name, policy)
 		{
+			col.correlation_depth += 1;
 			return Ok(col);
 		}
 
@@ -264,6 +349,7 @@ impl QueryScope {
 				relation_index: 0,
 				relation_name: String::new(),
 				column: alias.clone(),
+				correlation_depth: 0,
 			}))
 		} else {
 			match &target.expr {
@@ -274,6 +360,7 @@ impl QueryScope {
 					relation_index: 0,
 					relation_name: String::new(),
 					column: name.clone(),
+					correlation_depth: 0,
 				})),
 				_ => Ok(target.expr.clone()),
 			}
@@ -290,6 +377,7 @@ impl QueryScope {
 					relation_index: 0,
 					relation_name: String::new(),
 					column: a.clone(),
+					correlation_depth: 0,
 				}));
 			}
 		}
@@ -310,6 +398,7 @@ impl QueryScope {
 							relation_index: rel.relation_index,
 							relation_name: rel.exposed_name.clone(),
 							column: col.clone(),
+							correlation_depth: 0,
 						}),
 						alias: Some(col.clone()),
 						is_wildcard: true,
@@ -328,6 +417,7 @@ impl QueryScope {
 					relation_index: 0,
 					relation_name: String::new(),
 					column: "*".to_string(),
+					correlation_depth: 0,
 				}),
 				alias: None,
 				is_wildcard: true,
@@ -358,6 +448,7 @@ impl QueryScope {
 						relation_index: rel.relation_index,
 						relation_name: rel.exposed_name.clone(),
 						column: col.clone(),
+						correlation_depth: 0,
 					}),
 					alias: Some(col.clone()),
 					is_wildcard: false,
@@ -372,6 +463,7 @@ impl QueryScope {
 					relation_index: rel.relation_index,
 					relation_name: rel.exposed_name.clone(),
 					column: "*".to_string(),
+					correlation_depth: 0,
 				}),
 				alias: None,
 				is_wildcard: false,

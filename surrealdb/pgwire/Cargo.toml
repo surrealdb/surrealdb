@@ -11,6 +11,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+surrealdb-catalog = { workspace = true }
 surrealdb-core = { workspace = true, features = ["postgres"] }
 surrealdb-datastore = { workspace = true }
 surrealdb-iam = { workspace = true }
@@ -38,6 +39,7 @@ axum-server = { version = "0.8.0", features = ["tls-rustls-no-provider"] }
 
 [dev-dependencies]
 surrealdb-core = { workspace = true, features = ["kv-mem"] }
+jsonwebtoken = { workspace = true }
 
 [lints]
 workspace = true

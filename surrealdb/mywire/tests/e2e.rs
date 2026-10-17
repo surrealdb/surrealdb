@@ -2,13 +2,16 @@
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::time::Duration;
 
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_mywire::auth::compute_mysql_native_password_scramble;
+use surrealdb_mywire::codec::{MAX_ALLOWED_PACKET, MAX_PACKET_SIZE};
 use surrealdb_mywire::constants::*;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
 async fn start_test_mysql_server() -> (std::net::SocketAddr, CancellationToken) {
@@ -1301,6 +1304,296 @@ async fn test_mywire_set_operations_and_joins() {
 		}
 		other => panic!("Expected ResultSet, got {other:?}"),
 	}
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_mysql_interactive_transactions_and_savepoints() {
+	let (addr, shutdown) = start_test_mysql_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	let res = query_mysql(&mut stream, "CREATE TABLE sp_demo (val text);").await;
+	assert!(matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }));
+
+	// Start transaction
+	let res = query_mysql(&mut stream, "START TRANSACTION;").await;
+	assert!(matches!(res, QueryResult::Ok));
+
+	let res = query_mysql(&mut stream, "INSERT INTO sp_demo (val) VALUES ('first');").await;
+	assert!(matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }));
+
+	// Savepoint 1
+	let res = query_mysql(&mut stream, "SAVEPOINT sp1;").await;
+	assert!(matches!(res, QueryResult::Ok));
+
+	let res = query_mysql(&mut stream, "INSERT INTO sp_demo (val) VALUES ('second');").await;
+	assert!(matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }));
+
+	// Savepoint 2
+	let res = query_mysql(&mut stream, "SAVEPOINT sp2;").await;
+	assert!(matches!(res, QueryResult::Ok));
+
+	let res = query_mysql(&mut stream, "INSERT INTO sp_demo (val) VALUES ('third');").await;
+	assert!(matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }));
+
+	// Rollback to savepoint 2 (undo 'third')
+	let res = query_mysql(&mut stream, "ROLLBACK TO SAVEPOINT sp2;").await;
+	assert!(matches!(res, QueryResult::Ok));
+
+	// Release savepoint 1
+	let res = query_mysql(&mut stream, "RELEASE SAVEPOINT sp1;").await;
+	assert!(matches!(res, QueryResult::Ok));
+
+	// Commit outer transaction
+	let res = query_mysql(&mut stream, "COMMIT;").await;
+	assert!(matches!(res, QueryResult::Ok));
+
+	// Verify 'first' and 'second' are present, 'third' was rolled back
+	let res = query_mysql(&mut stream, "SELECT val FROM sp_demo ORDER BY val ASC;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			assert_eq!(rows.len(), 2);
+			let r0 = decode_mysql_text_row(&rows[0]);
+			assert_eq!(r0[0].as_deref(), Some("first"));
+			let r1 = decode_mysql_text_row(&rows[1]);
+			assert_eq!(r1[0].as_deref(), Some("second"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_mysql_autocommit_toggle_and_ddl_implicit_commit() {
+	let (addr, shutdown) = start_test_mysql_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	let res = query_mysql(&mut stream, "CREATE TABLE auto_demo (val text);").await;
+	assert!(matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }));
+
+	// Disable autocommit
+	let res = query_mysql(&mut stream, "SET autocommit = 0;").await;
+	assert!(matches!(res, QueryResult::Ok));
+
+	// Insert in interactive transaction block
+	let res =
+		query_mysql(&mut stream, "INSERT INTO auto_demo (val) VALUES ('persisted_by_ddl');").await;
+	assert!(matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }));
+
+	// DDL statement implicitly commits active transaction in MySQL!
+	let res = query_mysql(&mut stream, "CREATE TABLE extra_tbl (id int);").await;
+	assert!(matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }));
+
+	// Rollback should NOT roll back the previous insert because CREATE TABLE implicitly committed
+	// it
+	let res = query_mysql(&mut stream, "ROLLBACK;").await;
+	assert!(matches!(res, QueryResult::Ok));
+
+	// Verify row was persisted
+	let res = query_mysql(&mut stream, "SELECT val FROM auto_demo;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			assert_eq!(rows.len(), 1);
+			let r0 = decode_mysql_text_row(&rows[0]);
+			assert_eq!(r0[0].as_deref(), Some("persisted_by_ddl"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_mywire_oversized_packet_is_refused_with_er_net_packet_too_large() {
+	let (addr, shutdown) = start_test_mysql_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	// Continuation packets that together exceed `max_allowed_packet`. The last header is sent
+	// without its body: the server refuses on the declared size.
+	let chunks = MAX_ALLOWED_PACKET / MAX_PACKET_SIZE + 1;
+	let body = vec![0u8; MAX_PACKET_SIZE];
+	for seq in 0..chunks - 1 {
+		write_packet(&mut stream, seq as u8, &body).await;
+	}
+	stream
+		.write_all(&[0xff, 0xff, 0xff, (chunks - 1) as u8])
+		.await
+		.expect("Failed to write the final packet header");
+
+	let (seq, payload) = timeout(Duration::from_secs(60), read_packet(&mut stream))
+		.await
+		.expect("the server must answer an oversized packet");
+	assert_eq!(seq as usize, chunks, "the error follows the last packet the client sent");
+	assert_eq!(payload[0], 0xff, "Expected an ERR packet");
+	assert_eq!(u16::from_le_bytes([payload[1], payload[2]]), 1153);
+	assert_eq!(&payload[3..9], b"#08S01");
+
+	// The connection is closed after the error.
+	let mut rest = Vec::new();
+	let closed = timeout(Duration::from_secs(60), stream.read_to_end(&mut rest))
+		.await
+		.expect("the server must close the connection");
+	if closed.is_ok() {
+		assert!(rest.is_empty());
+	}
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_mywire_advertised_max_allowed_packet_is_the_enforced_limit() {
+	let (addr, shutdown) = start_test_mysql_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	let res = query_mysql(&mut stream, "SELECT @@max_allowed_packet;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			let row = decode_mysql_text_row(&rows[0]);
+			assert_eq!(row[0].as_deref(), Some(MAX_ALLOWED_PACKET.to_string().as_str()));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	shutdown.cancel();
+}
+
+/// Two sessions on one server. Session `a` holds an interactive transaction that wrote a row;
+/// session `b` has since rewritten that row and committed, so `a`'s commit conflicts. With
+/// `autocommit_off`, `a` gets its transaction from `SET autocommit = 0` instead of
+/// `START TRANSACTION`.
+async fn conflicting_sessions(
+	addr: std::net::SocketAddr,
+	autocommit_off: bool,
+) -> (TcpStream, TcpStream) {
+	let mut a = connect_and_handshake(addr).await;
+	let mut b = connect_and_handshake(addr).await;
+
+	let res = query_mysql(&mut a, "CREATE TABLE conflict_t (id int, v int);").await;
+	assert!(matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }));
+	let res = query_mysql(&mut a, "INSERT INTO conflict_t (id, v) VALUES (1, 0);").await;
+	assert!(matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }));
+
+	let begin = if autocommit_off {
+		"SET autocommit = 0;"
+	} else {
+		"START TRANSACTION;"
+	};
+	let res = query_mysql(&mut a, begin).await;
+	assert!(matches!(res, QueryResult::Ok));
+	let res = query_mysql(&mut a, "UPDATE conflict_t SET v = 1 WHERE v = 0;").await;
+	assert!(matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }));
+	let res = query_mysql(&mut b, "UPDATE conflict_t SET v = 2 WHERE v = 0;").await;
+	assert!(matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }));
+	(a, b)
+}
+
+fn assert_commit_failed(res: QueryResult) {
+	match res {
+		QueryResult::Error {
+			code,
+			..
+		} => assert_eq!(code, 1180),
+		other => panic!("Expected the failed commit to be reported, got {other:?}"),
+	}
+}
+
+/// The winning write is intact and the connection still answers.
+async fn assert_usable_and_winner_kept(stream: &mut TcpStream) {
+	let res = query_mysql(stream, "SELECT v FROM conflict_t;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			let row = decode_mysql_text_row(&rows[0]);
+			assert_eq!(row[0].as_deref(), Some("2"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+}
+
+#[tokio::test]
+async fn test_mysql_failed_implicit_commit_before_ddl_is_reported_and_the_ddl_is_skipped() {
+	let (addr, shutdown) = start_test_mysql_server().await;
+	let (mut a, mut b) = conflicting_sessions(addr, false).await;
+
+	// The DDL commits `a`'s transaction first. That commit fails, so it is reported and the
+	// DDL does not run.
+	assert_commit_failed(query_mysql(&mut a, "CREATE TABLE after_conflict (id int);").await);
+	let res = query_mysql(&mut b, "SELECT * FROM after_conflict;").await;
+	assert!(matches!(res, QueryResult::Error { .. }), "the DDL must not have run, got {res:?}");
+	assert_usable_and_winner_kept(&mut a).await;
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_mysql_failed_implicit_commit_before_prepared_ddl_is_reported_and_the_ddl_is_skipped()
+{
+	let (addr, shutdown) = start_test_mysql_server().await;
+	let (mut a, mut b) = conflicting_sessions(addr, false).await;
+
+	let mut prepare = vec![COM_STMT_PREPARE];
+	prepare.extend_from_slice(b"CREATE TABLE after_conflict_ps (id int)");
+	write_packet(&mut a, 0, &prepare).await;
+	let (_, resp) = read_packet(&mut a).await;
+	assert_eq!(resp[0], 0x00, "Expected a prepare OK, got {resp:?}");
+	let stmt_id = [resp[1], resp[2], resp[3], resp[4]];
+	assert_eq!(&resp[5..9], &[0, 0, 0, 0], "a DDL statement has no columns or parameters");
+
+	let mut execute = vec![COM_STMT_EXECUTE];
+	execute.extend_from_slice(&stmt_id);
+	execute.push(CURSOR_TYPE_NO_CURSOR);
+	execute.extend_from_slice(&1u32.to_le_bytes());
+	write_packet(&mut a, 0, &execute).await;
+	assert_commit_failed(read_query_response(&mut a).await);
+
+	let res = query_mysql(&mut b, "SELECT * FROM after_conflict_ps;").await;
+	assert!(matches!(res, QueryResult::Error { .. }), "the DDL must not have run, got {res:?}");
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_mysql_failed_implicit_commit_before_start_transaction_is_reported() {
+	let (addr, shutdown) = start_test_mysql_server().await;
+	let (mut a, _b) = conflicting_sessions(addr, false).await;
+
+	assert_commit_failed(query_mysql(&mut a, "START TRANSACTION;").await);
+	assert_usable_and_winner_kept(&mut a).await;
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_mysql_failed_implicit_commit_on_autocommit_on_is_reported() {
+	let (addr, shutdown) = start_test_mysql_server().await;
+	let (mut a, _b) = conflicting_sessions(addr, true).await;
+
+	assert_commit_failed(query_mysql(&mut a, "SET autocommit = 1;").await);
+	assert_usable_and_winner_kept(&mut a).await;
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_mysql_failed_commit_is_reported_and_keeps_the_connection() {
+	let (addr, shutdown) = start_test_mysql_server().await;
+	let (mut a, _b) = conflicting_sessions(addr, false).await;
+
+	assert_commit_failed(query_mysql(&mut a, "COMMIT;").await);
+	assert_usable_and_winner_kept(&mut a).await;
 
 	shutdown.cancel();
 }

@@ -9,10 +9,12 @@ use surrealdb_strand::Strand;
 
 use crate::dialect::{DialectPolicy, SqlDialect};
 use crate::error::PlanError;
+use crate::functions::FunctionRegistry;
 use crate::ir::{
 	BoundBinaryOp, BoundExpr, BoundLiteral, BoundOrder, BoundOrderDirection, BoundTarget,
 	BoundUnaryOp,
 };
+use crate::lower::plan::lower_bound_subquery;
 use crate::semantics::sql_like_to_regex;
 
 /// Lower a `BoundExpr` to a SurrealDB `LogicalExpr`.
@@ -31,7 +33,19 @@ pub fn lower_bound_expr(
 			BoundLiteral::Null => Ok(LogicalExpr::Literal(LogicalLiteral::Null)),
 		},
 		BoundExpr::Column(col) => {
-			if col.column == "*" {
+			if col.correlation_depth > 0 {
+				let mut expr = LogicalExpr::Param(Param::from("parent".to_string()));
+				for _ in 1..col.correlation_depth {
+					expr = LogicalExpr::Access {
+						base: Box::new(expr),
+						field: Strand::from("parent"),
+					};
+				}
+				Ok(LogicalExpr::Access {
+					base: Box::new(expr),
+					field: Strand::from(col.column.as_str()),
+				})
+			} else if col.column == "*" {
 				Ok(LogicalExpr::Field(Strand::from("*")))
 			} else if col.relation_index == 0 {
 				// Base table in join or single-table query: field is directly on the row
@@ -56,6 +70,11 @@ pub fn lower_bound_expr(
 			name,
 			..
 		} => Ok(LogicalExpr::Param(Param::from(name.clone()))),
+		BoundExpr::UserVar(name) => Ok(LogicalExpr::Param(Param::from(format!("user_var_{name}")))),
+		BoundExpr::SystemVar {
+			name,
+			is_global,
+		} => lower_system_var(name, *is_global, policy),
 		BoundExpr::Binary {
 			left,
 			op,
@@ -156,18 +175,295 @@ pub fn lower_bound_expr(
 				}
 			}
 
-			let mapped_fn = match name.as_str() {
-				"count" => "count",
-				"sum" => "math::sum",
-				"avg" => "math::mean",
-				"min" => "math::min",
-				"max" => "math::max",
-				"abs" => "math::abs",
-				"lower" => "string::lowercase",
-				"upper" => "string::uppercase",
-				"length" => "string::len",
-				other => other,
-			};
+			let func_def = FunctionRegistry::lookup(name, policy.dialect)
+				.ok_or_else(|| PlanError::UndefinedFunction(name.clone()))?;
+
+			// Special built-in lowering logic
+			match name.as_str() {
+				"coalesce" | "ifnull" => {
+					let mut iter = args.iter().rev();
+					let Some(last) = iter.next() else {
+						return Ok(LogicalExpr::Literal(LogicalLiteral::Null));
+					};
+					let mut current = lower_bound_expr(last, policy)?;
+					for prev in iter {
+						let prev_l = lower_bound_expr(prev, policy)?;
+						current = LogicalExpr::Binary {
+							left: Box::new(prev_l),
+							op: BinaryOperator::NullCoalescing,
+							right: Box::new(current),
+						};
+					}
+					return Ok(current);
+				}
+				"nullif" if args.len() == 2 => {
+					let l_a = lower_bound_expr(&args[0], policy)?;
+					let l_b = lower_bound_expr(&args[1], policy)?;
+					return Ok(LogicalExpr::If(Box::new(LogicalIf {
+						branches: vec![(
+							LogicalExpr::Binary {
+								left: Box::new(l_a.clone()),
+								op: BinaryOperator::Equal,
+								right: Box::new(l_b),
+							},
+							LogicalExpr::Literal(LogicalLiteral::Null),
+						)],
+						otherwise: Some(l_a),
+					})));
+				}
+				"if" if args.len() == 3 => {
+					let cond = lower_bound_expr(&args[0], policy)?;
+					let then_val = lower_bound_expr(&args[1], policy)?;
+					let else_val = lower_bound_expr(&args[2], policy)?;
+					return Ok(LogicalExpr::If(Box::new(LogicalIf {
+						branches: vec![(cond, then_val)],
+						otherwise: Some(else_val),
+					})));
+				}
+				"greatest" if !args.is_empty() => {
+					let lowered_args = args
+						.iter()
+						.map(|a| lower_bound_expr(a, policy))
+						.collect::<Result<Vec<_>, _>>()?;
+					return Ok(LogicalExpr::Call(Box::new(LogicalCall {
+						receiver: Function::Normal("math::max".to_string()),
+						args: vec![LogicalExpr::Array(lowered_args)],
+					})));
+				}
+				"least" if !args.is_empty() => {
+					let lowered_args = args
+						.iter()
+						.map(|a| lower_bound_expr(a, policy))
+						.collect::<Result<Vec<_>, _>>()?;
+					return Ok(LogicalExpr::Call(Box::new(LogicalCall {
+						receiver: Function::Normal("math::min".to_string()),
+						args: vec![LogicalExpr::Array(lowered_args)],
+					})));
+				}
+				"version" => {
+					let ver = match policy.dialect {
+						SqlDialect::MySql => "8.0.36-SurrealDB",
+						SqlDialect::Postgres => "PostgreSQL 16.0 (SurrealDB)",
+					};
+					return Ok(LogicalExpr::Literal(LogicalLiteral::String(Strand::from(ver))));
+				}
+				"connection_id" => {
+					return Ok(LogicalExpr::Literal(LogicalLiteral::Integer(1)));
+				}
+				"last_insert_id" => {
+					return Ok(LogicalExpr::Literal(LogicalLiteral::Integer(0)));
+				}
+				"row_count" | "found_rows" => {
+					return Ok(LogicalExpr::Literal(LogicalLiteral::Integer(0)));
+				}
+				"curdate" | "curtime" | "utc_timestamp" => {
+					return Ok(LogicalExpr::Call(Box::new(LogicalCall {
+						receiver: Function::Normal("time::now".to_string()),
+						args: vec![],
+					})));
+				}
+				"unix_timestamp" => {
+					if args.is_empty() {
+						let now_call = LogicalExpr::Call(Box::new(LogicalCall {
+							receiver: Function::Normal("time::now".to_string()),
+							args: vec![],
+						}));
+						return Ok(LogicalExpr::Call(Box::new(LogicalCall {
+							receiver: Function::Normal("time::unix".to_string()),
+							args: vec![now_call],
+						})));
+					} else {
+						let arg = lower_bound_expr(&args[0], policy)?;
+						return Ok(LogicalExpr::Call(Box::new(LogicalCall {
+							receiver: Function::Normal("time::unix".to_string()),
+							args: vec![arg],
+						})));
+					}
+				}
+				"from_unixtime" if !args.is_empty() => {
+					let arg = lower_bound_expr(&args[0], policy)?;
+					return Ok(LogicalExpr::Call(Box::new(LogicalCall {
+						receiver: Function::Normal("time::from::unix".to_string()),
+						args: vec![arg],
+					})));
+				}
+				"regexp" | "regexp_like" if args.len() >= 2 => {
+					let l = lower_bound_expr(&args[0], policy)?;
+					let r = lower_bound_expr(&args[1], policy)?;
+					let null_check = is_null_expr(l.clone()).or(is_null_expr(r.clone()));
+					let match_call = LogicalExpr::Call(Box::new(LogicalCall {
+						receiver: Function::Normal("string::matches".to_string()),
+						args: vec![l, r],
+					}));
+					return Ok(LogicalExpr::If(Box::new(LogicalIf {
+						branches: vec![(null_check, LogicalExpr::Literal(LogicalLiteral::Null))],
+						otherwise: Some(match_call),
+					})));
+				}
+				"current_database" | "database" | "schema" => {
+					let db = policy.default_schema.unwrap_or("test");
+					return Ok(LogicalExpr::Literal(LogicalLiteral::String(Strand::from(db))));
+				}
+				"current_schema" => {
+					return Ok(LogicalExpr::Literal(LogicalLiteral::String(Strand::from(
+						"public",
+					))));
+				}
+				"current_schemas" => {
+					let include_implicit = match args.first() {
+						Some(BoundExpr::Literal(BoundLiteral::Boolean(b))) => *b,
+						_ => true,
+					};
+					let schemas = if include_implicit {
+						vec![
+							LogicalExpr::Literal(LogicalLiteral::String(Strand::from(
+								"pg_catalog",
+							))),
+							LogicalExpr::Literal(LogicalLiteral::String(Strand::from("public"))),
+						]
+					} else {
+						vec![LogicalExpr::Literal(LogicalLiteral::String(Strand::from("public")))]
+					};
+					return Ok(LogicalExpr::Array(schemas));
+				}
+				"current_user" | "session_user" | "user" => {
+					return Ok(LogicalExpr::Literal(LogicalLiteral::String(Strand::from("root"))));
+				}
+				"pg_backend_pid" => {
+					return Ok(LogicalExpr::Literal(LogicalLiteral::Integer(
+						std::process::id() as i64
+					)));
+				}
+				"pg_is_in_recovery" => {
+					return Ok(LogicalExpr::Literal(LogicalLiteral::Bool(false)));
+				}
+				"pg_get_userbyid" => {
+					return Ok(LogicalExpr::Literal(LogicalLiteral::String(Strand::from("root"))));
+				}
+				"format_type" => {
+					let type_name = match args.first() {
+						Some(BoundExpr::Literal(BoundLiteral::Integer(oid))) => match *oid {
+							16 => "boolean",
+							17 => "bytea",
+							18 => "char",
+							19 => "name",
+							20 => "bigint",
+							21 => "smallint",
+							23 => "integer",
+							25 => "text",
+							26 => "oid",
+							114 => "json",
+							700 => "real",
+							701 => "double precision",
+							1042 => "character",
+							1043 => "character varying",
+							1082 => "date",
+							1083 => "time without time zone",
+							1114 => "timestamp without time zone",
+							1184 => "timestamp with time zone",
+							1186 => "interval",
+							1700 => "numeric",
+							2950 => "uuid",
+							3802 => "jsonb",
+							1000 => "boolean[]",
+							1005 => "smallint[]",
+							1007 => "integer[]",
+							1016 => "bigint[]",
+							1009 => "text[]",
+							1015 => "character varying[]",
+							1021 => "real[]",
+							1022 => "double precision[]",
+							2951 => "uuid[]",
+							3807 => "jsonb[]",
+							_ => "text",
+						},
+						_ => "text",
+					};
+					return Ok(LogicalExpr::Literal(LogicalLiteral::String(Strand::from(
+						type_name,
+					))));
+				}
+				"pg_table_is_visible"
+				| "pg_type_is_visible"
+				| "pg_function_is_visible"
+				| "has_schema_privilege"
+				| "has_table_privilege"
+				| "has_database_privilege"
+				| "has_column_privilege" => {
+					return Ok(LogicalExpr::Literal(LogicalLiteral::Bool(true)));
+				}
+				"obj_description" | "col_description" | "shobj_description" | "pg_get_expr" => {
+					return Ok(LogicalExpr::Literal(LogicalLiteral::Null));
+				}
+				"pg_relation_size" | "pg_total_relation_size" => {
+					return Ok(LogicalExpr::Literal(LogicalLiteral::Integer(0)));
+				}
+				"current_setting" => {
+					let name_str = match &args[0] {
+						BoundExpr::Literal(BoundLiteral::String(s)) => s.as_str(),
+						_ => {
+							return Err(PlanError::UnsupportedExpression(
+								"current_setting requires a string literal argument".into(),
+							));
+						}
+					};
+					let val = match name_str.to_ascii_lowercase().as_str() {
+						"timezone" | "time zone" => "UTC",
+						"server_version" => "16.0-surrealdb",
+						"server_encoding" => "UTF8",
+						"client_encoding" => "UTF8",
+						"datestyle" => "ISO, MDY",
+						"integer_datetimes" => "on",
+						"standard_conforming_strings" => "on",
+						"application_name" => "",
+						"search_path" => "\"$user\", public",
+						"extra_float_digits" => "1",
+						"bytea_output" => "hex",
+						"intervalstyle" => "postgres",
+						"is_superuser" => "on",
+						"session_authorization" => "root",
+						_ => {
+							if args.len() > 1 {
+								return Ok(LogicalExpr::Literal(LogicalLiteral::Null));
+							} else {
+								return Err(PlanError::UndefinedObject(format!(
+									"unrecognized configuration parameter \"{name_str}\""
+								)));
+							}
+						}
+					};
+					return Ok(LogicalExpr::Literal(LogicalLiteral::String(Strand::from(val))));
+				}
+				"jsonb_build_object" | "json_build_object" | "json_object" => {
+					let mut obj = Vec::new();
+					for chunk in args.chunks(2) {
+						let key = match &chunk[0] {
+							BoundExpr::Literal(BoundLiteral::String(s)) => s.clone(),
+							other => {
+								let k_low = lower_bound_expr(other, policy)?;
+								format!("{k_low}")
+							}
+						};
+						let val = if chunk.len() > 1 {
+							lower_bound_expr(&chunk[1], policy)?
+						} else {
+							LogicalExpr::Literal(LogicalLiteral::Null)
+						};
+						obj.push((key, val));
+					}
+					return Ok(LogicalExpr::Object(obj));
+				}
+				"json_array" => {
+					let items = args
+						.iter()
+						.map(|a| lower_bound_expr(a, policy))
+						.collect::<Result<Vec<_>, _>>()?;
+					return Ok(LogicalExpr::Array(items));
+				}
+				_ => {}
+			}
+
+			let mapped_fn = func_def.internal_name.unwrap_or(func_def.name);
 			let lower_args = if mapped_fn == "count"
 				&& (args.is_empty()
 					|| (args.len() == 1
@@ -313,6 +609,56 @@ pub fn lower_bound_expr(
 					expr: Box::new(lowered),
 				})
 			}
+		}
+		BoundExpr::ScalarSubquery(subquery) => {
+			let sub_op = lower_bound_subquery(subquery, policy)?;
+			Ok(LogicalExpr::First(Box::new(LogicalExpr::Subquery(Box::new(sub_op)))))
+		}
+		BoundExpr::Exists(subquery) => {
+			let mut sub = *subquery.clone();
+			if sub.limit.is_none() {
+				sub.limit = Some(BoundExpr::Literal(BoundLiteral::Integer(1)));
+			}
+			let sub_op = lower_bound_subquery(&sub, policy)?;
+			let len_call = LogicalExpr::Call(Box::new(LogicalCall {
+				receiver: Function::Normal("array::len".to_string()),
+				args: vec![LogicalExpr::Subquery(Box::new(sub_op))],
+			}));
+			Ok(LogicalExpr::Binary {
+				left: Box::new(len_call),
+				op: BinaryOperator::MoreThan,
+				right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(0))),
+			})
+		}
+		BoundExpr::InSubquery {
+			expr,
+			subquery,
+			negated,
+		} => {
+			let val = lower_bound_expr(expr, policy)?;
+			let sub_op = lower_bound_subquery(subquery, policy)?;
+			let op = if *negated {
+				BinaryOperator::NotInside
+			} else {
+				BinaryOperator::Inside
+			};
+			Ok(LogicalExpr::Binary {
+				left: Box::new(val),
+				op,
+				right: Box::new(LogicalExpr::Subquery(Box::new(sub_op))),
+			})
+		}
+		BoundExpr::ArraySubquery(subquery) => {
+			let sub_op = lower_bound_subquery(subquery, policy)?;
+			Ok(LogicalExpr::Subquery(Box::new(sub_op)))
+		}
+		BoundExpr::WindowFunction {
+			..
+		} => {
+			crate::observability::global_metrics().record_unsupported_feature("WINDOW");
+			Err(PlanError::UnsupportedExpression(
+				"window functions are not supported in streaming execution engine".into(),
+			))
 		}
 	}
 }
@@ -489,7 +835,24 @@ fn lower_binary_op(
 				otherwise: Some(match_call),
 			})))
 		}
-		BoundBinaryOp::Divide | BoundBinaryOp::IntDiv => {
+		BoundBinaryOp::IntDiv => {
+			let null_or_zero =
+				is_zero_expr(r.clone()).or(is_null_expr(l.clone())).or(is_null_expr(r.clone()));
+			let div_expr = LogicalExpr::Binary {
+				left: Box::new(l),
+				op: BinaryOperator::Divide,
+				right: Box::new(r),
+			};
+			let floor_expr = LogicalExpr::Call(Box::new(LogicalCall {
+				receiver: Function::Normal("math::floor".to_string()),
+				args: vec![div_expr],
+			}));
+			Ok(LogicalExpr::If(Box::new(LogicalIf {
+				branches: vec![(null_or_zero, LogicalExpr::Literal(LogicalLiteral::Null))],
+				otherwise: Some(floor_expr),
+			})))
+		}
+		BoundBinaryOp::Divide => {
 			if policy.dialect == SqlDialect::Postgres {
 				// In PostgreSQL: division by zero throws an error; NULL propagates
 				let zero_check = is_zero_expr(r.clone());
@@ -523,6 +886,55 @@ fn lower_binary_op(
 					}),
 				})))
 			}
+		}
+		BoundBinaryOp::JsonExtract => {
+			let null_check = is_null_expr(l.clone()).or(is_null_expr(r.clone()));
+			let extract_expr = match right {
+				BoundExpr::Literal(BoundLiteral::String(field)) => LogicalExpr::Access {
+					base: Box::new(l),
+					field: Strand::from(field.as_str()),
+				},
+				_ => LogicalExpr::Index {
+					base: Box::new(l),
+					index: Box::new(r),
+				},
+			};
+			Ok(LogicalExpr::If(Box::new(LogicalIf {
+				branches: vec![(null_check, LogicalExpr::Literal(LogicalLiteral::Null))],
+				otherwise: Some(extract_expr),
+			})))
+		}
+		BoundBinaryOp::JsonExtractText | BoundBinaryOp::JsonPathExtractText => {
+			let null_check = is_null_expr(l.clone()).or(is_null_expr(r.clone()));
+			let extract_expr = match right {
+				BoundExpr::Literal(BoundLiteral::String(field)) => LogicalExpr::Access {
+					base: Box::new(l),
+					field: Strand::from(field.as_str()),
+				},
+				_ => LogicalExpr::Index {
+					base: Box::new(l),
+					index: Box::new(r),
+				},
+			};
+			let text_expr = LogicalExpr::Call(Box::new(LogicalCall {
+				receiver: Function::Normal("type::string".to_string()),
+				args: vec![extract_expr],
+			}));
+			Ok(LogicalExpr::If(Box::new(LogicalIf {
+				branches: vec![(null_check, LogicalExpr::Literal(LogicalLiteral::Null))],
+				otherwise: Some(text_expr),
+			})))
+		}
+		BoundBinaryOp::JsonContains => {
+			let null_check = is_null_expr(l.clone()).or(is_null_expr(r.clone()));
+			Ok(LogicalExpr::If(Box::new(LogicalIf {
+				branches: vec![(null_check, LogicalExpr::Literal(LogicalLiteral::Null))],
+				otherwise: Some(LogicalExpr::Binary {
+					left: Box::new(l),
+					op: BinaryOperator::Contain,
+					right: Box::new(r),
+				}),
+			})))
 		}
 		_ => {
 			let bin_op = match op {
@@ -653,6 +1065,18 @@ pub fn lower_bound_target(
 				name,
 				..
 			} => Some(OutputPath::field(name.clone())),
+			BoundExpr::UserVar(name) => Some(OutputPath::field(format!("@{name}"))),
+			BoundExpr::SystemVar {
+				name,
+				is_global,
+			} => {
+				let prefix = if *is_global {
+					"@@global."
+				} else {
+					"@@"
+				};
+				Some(OutputPath::field(format!("{prefix}{name}")))
+			}
 			_ => None,
 		},
 	};
@@ -772,10 +1196,87 @@ pub fn bound_expr_contains_aggregate(expr: &BoundExpr) -> bool {
 					bound_expr_contains_aggregate(c) || bound_expr_contains_aggregate(v)
 				}) || else_expr.as_ref().is_some_and(|el| bound_expr_contains_aggregate(el))
 		}
+		BoundExpr::WindowFunction {
+			args,
+			..
+		} => args.iter().any(bound_expr_contains_aggregate),
 		BoundExpr::Literal(_)
 		| BoundExpr::Column(_)
 		| BoundExpr::Param {
 			..
-		} => false,
+		}
+		| BoundExpr::UserVar(_)
+		| BoundExpr::SystemVar {
+			..
+		}
+		| BoundExpr::ScalarSubquery(_)
+		| BoundExpr::Exists(_)
+		| BoundExpr::InSubquery {
+			..
+		}
+		| BoundExpr::ArraySubquery(_) => false,
 	}
+}
+
+fn lower_system_var(
+	name: &str,
+	_is_global: bool,
+	_policy: &DialectPolicy,
+) -> Result<LogicalExpr, PlanError> {
+	let clean_name = name.to_ascii_lowercase();
+	let val = match clean_name.as_str() {
+		"version" => LogicalExpr::Literal(LogicalLiteral::String(Strand::from("8.0.36-SurrealDB"))),
+		"version_comment" => {
+			LogicalExpr::Literal(LogicalLiteral::String(Strand::from("SurrealDB")))
+		}
+		"version_compile_os" => {
+			LogicalExpr::Literal(LogicalLiteral::String(Strand::from(std::env::consts::OS)))
+		}
+		"version_compile_machine" => {
+			LogicalExpr::Literal(LogicalLiteral::String(Strand::from(std::env::consts::ARCH)))
+		}
+		"sql_mode" => LogicalExpr::Literal(LogicalLiteral::String(Strand::from(
+			"ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION",
+		))),
+		"autocommit" => LogicalExpr::Literal(LogicalLiteral::Integer(1)),
+		"character_set_client"
+		| "character_set_connection"
+		| "character_set_results"
+		| "character_set_server"
+		| "character_set_database" => {
+			LogicalExpr::Literal(LogicalLiteral::String(Strand::from("utf8mb4")))
+		}
+		"collation_connection" | "collation_server" | "collation_database" => {
+			LogicalExpr::Literal(LogicalLiteral::String(Strand::from("utf8mb4_0900_ai_ci")))
+		}
+		"time_zone" => LogicalExpr::Literal(LogicalLiteral::String(Strand::from("SYSTEM"))),
+		"system_time_zone" => LogicalExpr::Literal(LogicalLiteral::String(Strand::from("UTC"))),
+		"max_allowed_packet" => LogicalExpr::Literal(LogicalLiteral::Integer(67108864)),
+		"interactive_timeout" | "wait_timeout" => {
+			LogicalExpr::Literal(LogicalLiteral::Integer(28800))
+		}
+		"net_write_timeout" => LogicalExpr::Literal(LogicalLiteral::Integer(60)),
+		"net_read_timeout" => LogicalExpr::Literal(LogicalLiteral::Integer(30)),
+		"lower_case_table_names" => LogicalExpr::Literal(LogicalLiteral::Integer(0)),
+		"auto_increment_increment" | "auto_increment_offset" => {
+			LogicalExpr::Literal(LogicalLiteral::Integer(1))
+		}
+		"tx_isolation" | "transaction_isolation" => {
+			LogicalExpr::Literal(LogicalLiteral::String(Strand::from("REPEATABLE-READ")))
+		}
+		"tx_read_only" | "transaction_read_only" => {
+			LogicalExpr::Literal(LogicalLiteral::Integer(0))
+		}
+		"init_connect" => LogicalExpr::Literal(LogicalLiteral::String(Strand::from(""))),
+		"query_cache_size" | "query_cache_type" | "performance_schema" => {
+			LogicalExpr::Literal(LogicalLiteral::Integer(0))
+		}
+		"session_track_schema" => LogicalExpr::Literal(LogicalLiteral::Integer(1)),
+		"session_track_system_variables" => {
+			LogicalExpr::Literal(LogicalLiteral::String(Strand::from("")))
+		}
+		"session_track_state_change" => LogicalExpr::Literal(LogicalLiteral::Integer(0)),
+		_ => LogicalExpr::Literal(LogicalLiteral::Null),
+	};
+	Ok(val)
 }

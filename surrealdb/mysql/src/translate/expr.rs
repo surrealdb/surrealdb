@@ -2,7 +2,7 @@
 
 use std::fmt::Write;
 
-use crate::ast::expr::{Expr, TruthValue};
+use crate::ast::expr::{Expr, Quantifier, TruthValue};
 use crate::ast::literal::Literal;
 use crate::ast::operator::{BinaryOperator, UnaryOperator};
 use crate::translate::context::TranslationContext;
@@ -42,9 +42,10 @@ pub fn translate_expr(
 			write!(out, "$__{name}")?;
 			Ok(())
 		}
-		Expr::Param(idx, _) => Err(TranslationError::Unsupported(format!(
-			"parameter placeholder '?{idx}' is not supported in simple queries without prepared statements"
-		))),
+		Expr::Param(idx, _) => {
+			write!(out, "$_{idx}")?;
+			Ok(())
+		}
 		Expr::UnaryOp {
 			op,
 			expr,
@@ -106,6 +107,7 @@ pub fn translate_expr(
 				BinaryOperator::And => out.push_str("AND"),
 				BinaryOperator::Or => out.push_str("OR"),
 				BinaryOperator::Xor => out.push_str("&&"),
+				BinaryOperator::Concat => out.push('+'),
 				BinaryOperator::Assign => out.push('='),
 			}
 			out.push(' ');
@@ -117,8 +119,16 @@ pub fn translate_expr(
 			name,
 			distinct,
 			args,
+			over,
 			..
-		} => translate_function_call(name, *distinct, args, ctx, out),
+		} => {
+			if over.is_some() {
+				return Err(TranslationError::Unsupported(
+					"OVER clause must be lowered via surrealdb_sqlplan typed plan lowering".into(),
+				));
+			}
+			translate_function_call(name, *distinct, args, ctx, out)
+		}
 		Expr::Cast {
 			expr,
 			target_type,
@@ -303,6 +313,35 @@ pub fn translate_expr(
 			write!(out, "{unit}")?;
 			Ok(())
 		}
+		Expr::Quantified {
+			expr,
+			op,
+			quantifier,
+			subquery,
+			..
+		} => {
+			if *op == BinaryOperator::Equal
+				&& matches!(quantifier, Quantifier::Any | Quantifier::Some)
+			{
+				translate_expr(expr, ctx, out)?;
+				out.push_str(" IN (");
+				translate_select(subquery, ctx, out)?;
+				out.push(')');
+				Ok(())
+			} else if *op == BinaryOperator::NotEqual && matches!(quantifier, Quantifier::All) {
+				translate_expr(expr, ctx, out)?;
+				out.push_str(" NOT IN (");
+				translate_select(subquery, ctx, out)?;
+				out.push(')');
+				Ok(())
+			} else {
+				Err(TranslationError::Unsupported(format!(
+					"Quantified comparison with operator {} and quantifier {}",
+					op.as_str(),
+					quantifier.as_str()
+				)))
+			}
+		}
 	}
 }
 
@@ -321,9 +360,32 @@ fn translate_literal(lit: &Literal, out: &mut String) -> Result<(), TranslationE
 			}
 			out.push('\'');
 		}
+		Literal::IntroducedString {
+			value,
+			..
+		} => {
+			out.push('\'');
+			for ch in value.chars() {
+				match ch {
+					'\'' => out.push_str("\\'"),
+					'\\' => out.push_str("\\\\"),
+					_ => out.push(ch),
+				}
+			}
+			out.push('\'');
+		}
 		Literal::HexString(bytes) => {
 			out.push_str("0x");
 			for b in bytes {
+				write!(out, "{:02X}", b)?;
+			}
+		}
+		Literal::IntroducedHexString {
+			value,
+			..
+		} => {
+			out.push_str("0x");
+			for b in value {
 				write!(out, "{:02X}", b)?;
 			}
 		}

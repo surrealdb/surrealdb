@@ -421,6 +421,21 @@ pub fn translate_expr(
 			}
 			Ok(())
 		}
+		Expr::Subquery {
+			..
+		}
+		| Expr::Exists {
+			..
+		}
+		| Expr::InSubquery {
+			..
+		}
+		| Expr::ArraySubquery {
+			..
+		}
+		| Expr::Quantified {
+			..
+		} => Err(TranslationError::Unsupported("Subquery expressions".to_string())),
 	}
 }
 
@@ -507,10 +522,16 @@ fn translate_func_call(
 		}
 	};
 
+	if fn_name.contains("::") {
+		return Err(TranslationError::Unsupported(format!(
+			"Function '{fn_name}' contains illegal namespace separator"
+		)));
+	}
+
 	if ctx.map_pg_catalog {
 		match fn_name.as_str() {
 			"version" => {
-				out.push_str("'SurrealDB (PostgreSQL Frontend)'");
+				out.push_str("'PostgreSQL 16.0 (SurrealDB)'");
 				return Ok(());
 			}
 			"current_database" => {
@@ -520,6 +541,77 @@ fn translate_func_call(
 			"current_schema" => {
 				out.push_str("'public'");
 				return Ok(());
+			}
+			"current_schemas" => {
+				out.push_str("['pg_catalog', 'public']");
+				return Ok(());
+			}
+			"current_user" | "session_user" | "user" => {
+				out.push_str("'root'");
+				return Ok(());
+			}
+			"pg_backend_pid" => {
+				write!(out, "{}", std::process::id())?;
+				return Ok(());
+			}
+			"pg_is_in_recovery" => {
+				out.push_str("false");
+				return Ok(());
+			}
+			"pg_get_userbyid" => {
+				out.push_str("'root'");
+				return Ok(());
+			}
+			"pg_table_is_visible"
+			| "pg_type_is_visible"
+			| "pg_function_is_visible"
+			| "has_schema_privilege"
+			| "has_table_privilege"
+			| "has_database_privilege"
+			| "has_column_privilege" => {
+				out.push_str("true");
+				return Ok(());
+			}
+			"current_setting" => {
+				if args.is_empty() || args.len() > 2 {
+					return Err(TranslationError::Invalid(
+						"current_setting requires 1 or 2 arguments".to_string(),
+					));
+				}
+				if let Some(Expr::Literal {
+					lit: crate::ast::Literal::String(s),
+					..
+				}) = args.first()
+				{
+					let val = match s.to_ascii_lowercase().as_str() {
+						"timezone" | "time zone" => "UTC",
+						"server_version" => "16.0-surrealdb",
+						"server_encoding" => "UTF8",
+						"client_encoding" => "UTF8",
+						"datestyle" => "ISO, MDY",
+						"integer_datetimes" => "on",
+						"standard_conforming_strings" => "on",
+						"application_name" => "",
+						"search_path" => "\"$user\", public",
+						"extra_float_digits" => "1",
+						"bytea_output" => "hex",
+						"intervalstyle" => "postgres",
+						"is_superuser" => "on",
+						"session_authorization" => "root",
+						other => {
+							if args.len() == 2 {
+								out.push_str("NONE");
+								return Ok(());
+							} else {
+								return Err(TranslationError::Invalid(format!(
+									"unrecognized configuration parameter \"{other}\""
+								)));
+							}
+						}
+					};
+					write!(out, "'{val}'")?;
+					return Ok(());
+				}
 			}
 			_ => {}
 		}

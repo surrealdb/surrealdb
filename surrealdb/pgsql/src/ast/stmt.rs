@@ -438,8 +438,9 @@ pub struct DropStmt {
 /// A PostgreSQL transaction management statement.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransactionStmt {
-	/// `BEGIN [TRANSACTION]`.
+	/// `BEGIN [TRANSACTION] [READ ONLY | READ WRITE]`.
 	Begin {
+		read_only: bool,
 		span: Span,
 	},
 	/// `COMMIT [TRANSACTION]`.
@@ -467,13 +468,15 @@ pub enum TransactionStmt {
 	},
 }
 
-/// A PostgreSQL `SET <name> = <value>` or `SET <name> TO <value>` statement.
+/// A PostgreSQL `SET [SESSION | LOCAL] <name> = <value>` or `SET <name> TO <value>` statement.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SetStmt {
 	/// Parameter name.
 	pub name: String,
 	/// Parameter value.
 	pub value: String,
+	/// Whether this is a transaction-local setting (`SET LOCAL`).
+	pub is_local: bool,
 	/// Statement span.
 	pub span: Span,
 }
@@ -683,9 +686,62 @@ pub struct TruncateStmt {
 	pub span: Span,
 }
 
+/// A PostgreSQL `COPY` statement (`COPY table [(cols)] FROM STDIN ...` or `COPY { table | (query) }
+/// TO STDOUT ...`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CopyStmt {
+	/// Target table or query.
+	pub target: CopyTarget,
+	/// Direction (FROM STDIN or TO STDOUT).
+	pub direction: CopyDirection,
+	/// COPY options (FORMAT, DELIMITER, NULL, HEADER, QUOTE, ESCAPE).
+	pub options: CopyOptions,
+	/// Source span.
+	pub span: Span,
+}
+
+/// Target of a COPY operation: either a table with optional column list, or a subquery.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CopyTarget {
+	Table {
+		table: QualifiedName,
+		columns: Vec<String>,
+	},
+	Query(Box<SelectStmt>),
+}
+
+/// Direction of the COPY stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CopyDirection {
+	FromStdin,
+	ToStdout,
+}
+
+/// Format of the COPY data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CopyFormat {
+	#[default]
+	Text,
+	Csv,
+	Binary,
+}
+
+/// Options configuring the COPY operation.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CopyOptions {
+	pub format: CopyFormat,
+	pub delimiter: Option<u8>,
+	pub null: Option<String>,
+	pub header: Option<bool>,
+	pub quote: Option<u8>,
+	pub escape: Option<u8>,
+}
+
 /// Top-level PostgreSQL statement AST node.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
+	/// `COPY` data streaming statement.
+	Copy(Box<CopyStmt>),
 	/// `SELECT` query.
 	Select(Box<SelectStmt>),
 	/// `INSERT` query.
@@ -810,6 +866,7 @@ impl Statement {
 			Self::Transaction(tx) => match tx {
 				TransactionStmt::Begin {
 					span,
+					..
 				}
 				| TransactionStmt::Commit {
 					span,
@@ -839,6 +896,7 @@ impl Statement {
 			Self::Deallocate(s) => s.span,
 			Self::CreatePropertyGraph(s) => s.span,
 			Self::DropPropertyGraph(s) => s.span,
+			Self::Copy(s) => s.span,
 			Self::Empty => Span::empty(0),
 		}
 	}
@@ -1028,6 +1086,7 @@ impl Statement {
 			Self::Transaction(tx) => match tx {
 				TransactionStmt::Begin {
 					span,
+					..
 				}
 				| TransactionStmt::Commit {
 					span,
@@ -1071,6 +1130,20 @@ impl Statement {
 			Self::Deallocate(s) => s.span = zero,
 			Self::CreatePropertyGraph(s) => s.normalize_spans(),
 			Self::DropPropertyGraph(s) => s.normalize_spans(),
+			Self::Copy(s) => {
+				s.span = zero;
+				match &mut s.target {
+					CopyTarget::Table {
+						table,
+						..
+					} => {
+						table.span = zero;
+					}
+					CopyTarget::Query(q) => {
+						q.normalize_spans();
+					}
+				}
+			}
 			Self::Empty => {}
 		}
 	}

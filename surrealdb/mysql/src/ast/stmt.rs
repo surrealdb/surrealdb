@@ -1,6 +1,5 @@
-//! Statement AST nodes for MySQL.
-
 use crate::ast::expr::Expr;
+pub use crate::ast::expr::{OrderByExpr, WindowSpec};
 use crate::lexer::span::Span;
 
 /// A qualified identifier name (e.g. `col`, `tbl.col`, `db.tbl`).
@@ -70,18 +69,18 @@ impl SelectItem {
 	}
 }
 
-/// An ORDER BY item.
+/// Named window definition in a `SELECT` statement (`WINDOW name AS (spec)`).
 #[derive(Debug, Clone, PartialEq)]
-pub struct OrderByExpr {
-	pub expr: Expr,
-	pub asc: bool,
+pub struct WindowDef {
+	pub name: String,
+	pub spec: WindowSpec,
 	pub span: Span,
 }
 
-impl OrderByExpr {
+impl WindowDef {
 	pub fn normalize_spans(&mut self) {
 		self.span = Span::empty(0);
-		self.expr.normalize_spans();
+		self.spec.normalize_spans();
 	}
 }
 
@@ -136,12 +135,29 @@ pub enum JoinCondition {
 	Using(Vec<String>),
 }
 
+/// An index hint type in MySQL (`USE`, `FORCE`, `IGNORE`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndexHintType {
+	Use,
+	Force,
+	Ignore,
+}
+
+/// An index hint on a table factor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexHint {
+	pub hint_type: IndexHintType,
+	pub indexes: Vec<String>,
+	pub span: Span,
+}
+
 /// Table reference in a FROM clause.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TableRef {
 	Table {
 		name: QualifiedName,
 		alias: Option<String>,
+		index_hints: Vec<IndexHint>,
 		span: Span,
 	},
 	Subquery {
@@ -164,11 +180,15 @@ impl TableRef {
 		match self {
 			Self::Table {
 				name,
+				index_hints,
 				span,
 				..
 			} => {
 				*span = zero;
 				name.span = zero;
+				for h in index_hints {
+					h.span = zero;
+				}
 			}
 			Self::Subquery {
 				subquery,
@@ -218,15 +238,53 @@ impl SetOperation {
 	}
 }
 
+/// A `WITH` clause (Common Table Expression list) in MySQL.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WithClause {
+	pub recursive: bool,
+	pub ctes: Vec<CommonTableExpr>,
+	pub span: Span,
+}
+
+impl WithClause {
+	pub fn normalize_spans(&mut self) {
+		let zero = Span::empty(0);
+		self.span = zero;
+		for cte in &mut self.ctes {
+			cte.normalize_spans();
+		}
+	}
+}
+
+/// A single Common Table Expression (CTE) in MySQL.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommonTableExpr {
+	pub name: String,
+	pub columns: Vec<String>,
+	pub query: Box<SelectStmt>,
+	pub span: Span,
+}
+
+impl CommonTableExpr {
+	pub fn normalize_spans(&mut self) {
+		let zero = Span::empty(0);
+		self.span = zero;
+		self.query.normalize_spans();
+	}
+}
+
 /// A MySQL `SELECT` statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SelectStmt {
+	pub with: Option<WithClause>,
 	pub distinct: bool,
 	pub projection: Vec<SelectItem>,
 	pub from: Option<TableRef>,
 	pub where_clause: Option<Expr>,
 	pub group_by: Vec<Expr>,
+	pub with_rollup: bool,
 	pub having: Option<Expr>,
+	pub window: Vec<WindowDef>,
 	pub order_by: Vec<OrderByExpr>,
 	pub limit: Option<LimitClause>,
 	pub lock: Option<LockClause>,
@@ -238,6 +296,9 @@ impl SelectStmt {
 	pub fn normalize_spans(&mut self) {
 		let zero = Span::empty(0);
 		self.span = zero;
+		if let Some(w) = &mut self.with {
+			w.normalize_spans();
+		}
 		for p in &mut self.projection {
 			p.normalize_spans();
 		}
@@ -252,6 +313,9 @@ impl SelectStmt {
 		}
 		if let Some(h) = &mut self.having {
 			h.normalize_spans();
+		}
+		for w in &mut self.window {
+			w.normalize_spans();
 		}
 		for o in &mut self.order_by {
 			o.normalize_spans();
@@ -403,6 +467,7 @@ pub struct SetStmt {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShowStmt {
 	Tables {
+		full: bool,
 		database: Option<String>,
 		like: Option<String>,
 		span: Span,
@@ -412,6 +477,7 @@ pub enum ShowStmt {
 		span: Span,
 	},
 	Columns {
+		full: bool,
 		table: QualifiedName,
 		like: Option<String>,
 		span: Span,
@@ -438,6 +504,21 @@ pub enum ShowStmt {
 		span: Span,
 	},
 	Errors {
+		span: Span,
+	},
+	Index {
+		table: QualifiedName,
+		span: Span,
+	},
+	Engines {
+		span: Span,
+	},
+	Collation {
+		like: Option<String>,
+		span: Span,
+	},
+	Charset {
+		like: Option<String>,
 		span: Span,
 	},
 }
@@ -467,6 +548,188 @@ pub enum TransactionStmt {
 	},
 	Commit(Span),
 	Rollback(Span),
+	Savepoint {
+		name: String,
+		span: Span,
+	},
+	ReleaseSavepoint {
+		name: String,
+		span: Span,
+	},
+	RollbackToSavepoint {
+		name: String,
+		span: Span,
+	},
+}
+
+/// A MySQL `CREATE DATABASE` statement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreateDatabaseStmt {
+	pub if_not_exists: bool,
+	pub name: String,
+	pub span: Span,
+}
+
+/// A MySQL `DROP DATABASE` statement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DropDatabaseStmt {
+	pub if_exists: bool,
+	pub name: String,
+	pub span: Span,
+}
+
+/// A MySQL `CREATE INDEX` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateIndexStmt {
+	pub unique: bool,
+	pub name: String,
+	pub table: QualifiedName,
+	pub columns: Vec<String>,
+	pub span: Span,
+}
+
+/// A MySQL `DROP INDEX` statement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DropIndexStmt {
+	pub name: String,
+	pub table: QualifiedName,
+	pub span: Span,
+}
+
+/// A MySQL `CREATE VIEW` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateViewStmt {
+	pub or_replace: bool,
+	pub name: QualifiedName,
+	pub columns: Vec<String>,
+	pub query: Box<SelectStmt>,
+	pub span: Span,
+}
+
+/// A MySQL `DROP VIEW` statement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DropViewStmt {
+	pub if_exists: bool,
+	pub names: Vec<QualifiedName>,
+	pub span: Span,
+}
+
+/// Action in an `ALTER TABLE` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AlterTableAction {
+	AddColumn(ColumnDef),
+	DropColumn {
+		name: String,
+	},
+	ModifyColumn(ColumnDef),
+	ChangeColumn {
+		old_name: String,
+		new_def: ColumnDef,
+	},
+	AddConstraint(TableConstraint),
+	DropPrimaryKey,
+	DropIndex {
+		name: String,
+	},
+	RenameTable {
+		new_name: QualifiedName,
+	},
+}
+
+/// A MySQL `ALTER TABLE` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AlterTableStmt {
+	pub table: QualifiedName,
+	pub actions: Vec<AlterTableAction>,
+	pub span: Span,
+}
+
+/// A MySQL `CREATE USER` statement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreateUserStmt {
+	pub if_not_exists: bool,
+	pub user: String,
+	pub host: Option<String>,
+	pub identified_by: Option<String>,
+	pub span: Span,
+}
+
+/// A MySQL `DROP USER` statement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DropUserStmt {
+	pub if_exists: bool,
+	pub users: Vec<(String, Option<String>)>,
+	pub span: Span,
+}
+
+/// A MySQL `GRANT` statement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GrantStmt {
+	pub privileges: Vec<String>,
+	pub object: Option<String>,
+	pub user: String,
+	pub host: Option<String>,
+	pub span: Span,
+}
+
+/// A MySQL `REVOKE` statement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevokeStmt {
+	pub privileges: Vec<String>,
+	pub object: Option<String>,
+	pub user: String,
+	pub host: Option<String>,
+	pub span: Span,
+}
+
+/// Lock type for `LOCK TABLES`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TableLockType {
+	Read,
+	Write,
+}
+
+/// Table lock entry in `LOCK TABLES`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TableLock {
+	pub table: QualifiedName,
+	pub lock_type: TableLockType,
+}
+
+/// A MySQL `LOCK TABLES` statement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LockTablesStmt {
+	pub locks: Vec<TableLock>,
+	pub span: Span,
+}
+
+/// A MySQL `UNLOCK TABLES` statement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnlockTablesStmt {
+	pub span: Span,
+}
+
+/// A MySQL `PREPARE` statement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrepareStmt {
+	pub name: String,
+	pub query: String,
+	pub span: Span,
+}
+
+/// A MySQL `EXECUTE` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExecuteStmt {
+	pub name: String,
+	pub using: Vec<Expr>,
+	pub span: Span,
+}
+
+/// A MySQL `DEALLOCATE PREPARE` statement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeallocateStmt {
+	pub name: String,
+	pub span: Span,
 }
 
 /// Top-level MySQL statement.
@@ -480,6 +743,22 @@ pub enum Statement {
 	Truncate(Box<TruncateStmt>),
 	CreateTable(Box<CreateTableStmt>),
 	DropTable(Box<DropTableStmt>),
+	CreateDatabase(CreateDatabaseStmt),
+	DropDatabase(DropDatabaseStmt),
+	CreateIndex(Box<CreateIndexStmt>),
+	DropIndex(DropIndexStmt),
+	CreateView(Box<CreateViewStmt>),
+	DropView(DropViewStmt),
+	AlterTable(Box<AlterTableStmt>),
+	CreateUser(CreateUserStmt),
+	DropUser(DropUserStmt),
+	Grant(GrantStmt),
+	Revoke(RevokeStmt),
+	LockTables(LockTablesStmt),
+	UnlockTables(UnlockTablesStmt),
+	Prepare(PrepareStmt),
+	Execute(ExecuteStmt),
+	Deallocate(DeallocateStmt),
 	Use(UseStmt),
 	Set(SetStmt),
 	Show(ShowStmt),
@@ -500,6 +779,22 @@ impl Statement {
 			Self::Truncate(s) => s.span,
 			Self::CreateTable(s) => s.span,
 			Self::DropTable(s) => s.span,
+			Self::CreateDatabase(s) => s.span,
+			Self::DropDatabase(s) => s.span,
+			Self::CreateIndex(s) => s.span,
+			Self::DropIndex(s) => s.span,
+			Self::CreateView(s) => s.span,
+			Self::DropView(s) => s.span,
+			Self::AlterTable(s) => s.span,
+			Self::CreateUser(s) => s.span,
+			Self::DropUser(s) => s.span,
+			Self::Grant(s) => s.span,
+			Self::Revoke(s) => s.span,
+			Self::LockTables(s) => s.span,
+			Self::UnlockTables(s) => s.span,
+			Self::Prepare(s) => s.span,
+			Self::Execute(s) => s.span,
+			Self::Deallocate(s) => s.span,
 			Self::Use(s) => s.span,
 			Self::Set(s) => s.span,
 			Self::Show(s) => match s {
@@ -536,6 +831,21 @@ impl Statement {
 				}
 				| ShowStmt::Errors {
 					span,
+				}
+				| ShowStmt::Index {
+					span,
+					..
+				}
+				| ShowStmt::Engines {
+					span,
+				}
+				| ShowStmt::Collation {
+					span,
+					..
+				}
+				| ShowStmt::Charset {
+					span,
+					..
 				} => *span,
 			},
 			Self::Describe(s) => s.span,
@@ -547,7 +857,19 @@ impl Statement {
 					..
 				}
 				| TransactionStmt::Commit(span)
-				| TransactionStmt::Rollback(span) => *span,
+				| TransactionStmt::Rollback(span)
+				| TransactionStmt::Savepoint {
+					span,
+					..
+				}
+				| TransactionStmt::ReleaseSavepoint {
+					span,
+					..
+				}
+				| TransactionStmt::RollbackToSavepoint {
+					span,
+					..
+				} => *span,
 			},
 		}
 	}
@@ -653,6 +975,99 @@ impl Statement {
 					n.span = zero;
 				}
 			}
+			Self::CreateDatabase(s) => s.span = zero,
+			Self::DropDatabase(s) => s.span = zero,
+			Self::CreateIndex(s) => {
+				s.span = zero;
+				s.table.span = zero;
+			}
+			Self::DropIndex(s) => {
+				s.span = zero;
+				s.table.span = zero;
+			}
+			Self::CreateView(s) => {
+				s.span = zero;
+				s.name.span = zero;
+				s.query.normalize_spans();
+			}
+			Self::DropView(s) => {
+				s.span = zero;
+				for n in &mut s.names {
+					n.span = zero;
+				}
+			}
+			Self::AlterTable(s) => {
+				s.span = zero;
+				s.table.span = zero;
+				for action in &mut s.actions {
+					match action {
+						AlterTableAction::AddColumn(c) | AlterTableAction::ModifyColumn(c) => {
+							c.span = zero;
+							if let Some(d) = &mut c.default {
+								d.normalize_spans();
+							}
+						}
+						AlterTableAction::ChangeColumn {
+							new_def,
+							..
+						} => {
+							new_def.span = zero;
+							if let Some(d) = &mut new_def.default {
+								d.normalize_spans();
+							}
+						}
+						AlterTableAction::AddConstraint(c) => match c {
+							TableConstraint::PrimaryKey {
+								span,
+								..
+							}
+							| TableConstraint::Unique {
+								span,
+								..
+							} => *span = zero,
+							TableConstraint::ForeignKey {
+								ref_table,
+								span,
+								..
+							} => {
+								*span = zero;
+								ref_table.span = zero;
+							}
+						},
+						AlterTableAction::RenameTable {
+							new_name,
+						} => {
+							new_name.span = zero;
+						}
+						AlterTableAction::DropColumn {
+							..
+						}
+						| AlterTableAction::DropPrimaryKey
+						| AlterTableAction::DropIndex {
+							..
+						} => {}
+					}
+				}
+			}
+			Self::CreateUser(s) => s.span = zero,
+			Self::DropUser(s) => s.span = zero,
+			Self::Grant(s) => s.span = zero,
+			Self::Revoke(s) => s.span = zero,
+			Self::LockTables(s) => {
+				s.span = zero;
+				for lock in &mut s.locks {
+					lock.table.span = zero;
+				}
+			}
+			Self::UnlockTables(s) => s.span = zero,
+			Self::Prepare(s) => s.span = zero,
+			Self::Execute(s) => {
+				s.span = zero;
+				for e in &mut s.using {
+					e.normalize_spans();
+				}
+			}
+			Self::Deallocate(s) => s.span = zero,
 			Self::Use(s) => s.span = zero,
 			Self::Set(s) => {
 				s.span = zero;
@@ -661,19 +1076,35 @@ impl Statement {
 				}
 			}
 			Self::Show(s) => match s {
+				ShowStmt::Columns {
+					table,
+					span,
+					..
+				} => {
+					*span = zero;
+					table.span = zero;
+				}
+				ShowStmt::CreateTable {
+					table,
+					span,
+					..
+				} => {
+					*span = zero;
+					table.span = zero;
+				}
+				ShowStmt::Index {
+					table,
+					span,
+					..
+				} => {
+					*span = zero;
+					table.span = zero;
+				}
 				ShowStmt::Tables {
 					span,
 					..
 				}
 				| ShowStmt::Databases {
-					span,
-					..
-				}
-				| ShowStmt::Columns {
-					span,
-					..
-				}
-				| ShowStmt::CreateTable {
 					span,
 					..
 				}
@@ -694,6 +1125,17 @@ impl Statement {
 				}
 				| ShowStmt::Errors {
 					span,
+				}
+				| ShowStmt::Engines {
+					span,
+				}
+				| ShowStmt::Collation {
+					span,
+					..
+				}
+				| ShowStmt::Charset {
+					span,
+					..
 				} => *span = zero,
 			},
 			Self::Describe(s) => {
@@ -711,7 +1153,19 @@ impl Statement {
 					..
 				}
 				| TransactionStmt::Commit(span)
-				| TransactionStmt::Rollback(span) => *span = zero,
+				| TransactionStmt::Rollback(span)
+				| TransactionStmt::Savepoint {
+					span,
+					..
+				}
+				| TransactionStmt::ReleaseSavepoint {
+					span,
+					..
+				}
+				| TransactionStmt::RollbackToSavepoint {
+					span,
+					..
+				} => *span = zero,
 			},
 		}
 	}

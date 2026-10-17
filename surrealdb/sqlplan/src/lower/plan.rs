@@ -24,6 +24,30 @@ pub fn lower_bound_select(
 	select: &BoundSelect,
 	policy: &DialectPolicy,
 ) -> Result<LogicalOp, PlanError> {
+	lower_bound_select_internal(select, false, policy)
+}
+
+/// Lower a subquery `BoundSelect` where single-column rows should be emitted as bare values.
+pub fn lower_bound_subquery(
+	select: &BoundSelect,
+	policy: &DialectPolicy,
+) -> Result<LogicalOp, PlanError> {
+	lower_bound_select_internal(select, true, policy)
+}
+
+fn lower_bound_select_internal(
+	select: &BoundSelect,
+	as_value: bool,
+	policy: &DialectPolicy,
+) -> Result<LogicalOp, PlanError> {
+	if !select.windows.is_empty() {
+		crate::observability::global_metrics().record_unsupported_feature("WINDOW");
+		return Err(PlanError::UnsupportedExpression(
+			"window functions and WINDOW clauses are not supported in streaming execution engine"
+				.into(),
+		));
+	}
+
 	// 1. FROM clause
 	let mut op = match &select.from {
 		None | Some(BoundTableSource::Values) => LogicalOp::Values(LogicalValues {
@@ -33,7 +57,13 @@ pub fn lower_bound_select(
 		}),
 		Some(source) => {
 			let mut join_counter = 0;
-			lower_table_source(source, select.for_update, &mut join_counter, policy)?
+			lower_table_source(
+				source,
+				select.for_update,
+				&mut join_counter,
+				policy,
+				&select.user_tables,
+			)?
 		}
 	};
 
@@ -98,12 +128,21 @@ pub fn lower_bound_select(
 		}
 	}
 
-	let fields = LogicalFields::Select(
-		aggregate_targets
-			.iter()
-			.map(|t| lower_bound_target(t, policy))
-			.collect::<Result<Vec<_>, _>>()?,
-	);
+	let fields = if as_value && select.targets.len() == 1 && !select.targets[0].is_wildcard {
+		let expr = lower_bound_expr(&select.targets[0].expr, policy)?;
+		let alias = select.targets[0].alias.as_ref().map(|a| OutputPath::field(a.clone()));
+		LogicalFields::Value {
+			expr,
+			alias,
+		}
+	} else {
+		LogicalFields::Select(
+			aggregate_targets
+				.iter()
+				.map(|t| lower_bound_target(t, policy))
+				.collect::<Result<Vec<_>, _>>()?,
+		)
+	};
 
 	let rewritten_having =
 		select.having.as_ref().map(|h| rewrite_aggregates_to_columns(h, &agg_mapping));
@@ -170,7 +209,7 @@ pub fn lower_bound_select(
 	}
 
 	// 8. Projection
-	if !is_aggregate {
+	if matches!(fields, LogicalFields::Value { .. }) || !is_aggregate {
 		op = LogicalOp::Project(LogicalProject {
 			input: Box::new(op),
 			fields,
@@ -406,6 +445,7 @@ fn rewrite_aggregates_to_columns(expr: &BoundExpr, mapping: &[(BoundExpr, String
 				relation_index: 0,
 				relation_name: String::new(),
 				column: col_name.clone(),
+				correlation_depth: 0,
 			});
 		}
 	}
@@ -497,6 +537,7 @@ fn lower_table_source(
 	for_update: bool,
 	join_counter: &mut usize,
 	policy: &DialectPolicy,
+	user_tables: &[crate::catalog::TableSchema],
 ) -> Result<LogicalOp, PlanError> {
 	match source {
 		BoundTableSource::Values => Ok(LogicalOp::Values(LogicalValues {
@@ -506,13 +547,25 @@ fn lower_table_source(
 		})),
 		BoundTableSource::Table {
 			name,
+			schema,
 			..
-		} => Ok(LogicalOp::Source(LogicalSource {
-			source: SourceRef::Table(TableName::from(name.as_str())),
-			schema: None,
-			with: None,
-			for_update,
-		})),
+		} => {
+			if let Some(rows) =
+				crate::catalog::system::get_system_table_rows(schema.as_deref(), name, user_tables)
+			{
+				return Ok(LogicalOp::Values(LogicalValues {
+					expr: LogicalExpr::Array(rows),
+					for_update,
+					written: false,
+				}));
+			}
+			Ok(LogicalOp::Source(LogicalSource {
+				source: SourceRef::Table(TableName::from(name.as_str())),
+				schema: None,
+				with: None,
+				for_update,
+			}))
+		}
 		BoundTableSource::Subquery {
 			query,
 			..
@@ -528,8 +581,9 @@ fn lower_table_source(
 			right,
 			condition,
 		} => {
-			let left_op = lower_table_source(left, for_update, join_counter, policy)?;
-			let right_op = lower_table_source(right, for_update, join_counter, policy)?;
+			let left_op = lower_table_source(left, for_update, join_counter, policy, user_tables)?;
+			let right_op =
+				lower_table_source(right, for_update, join_counter, policy, user_tables)?;
 
 			let kind = match join_type {
 				BoundJoinType::Inner | BoundJoinType::Cross => JoinKind::Inner,

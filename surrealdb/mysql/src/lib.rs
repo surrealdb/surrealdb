@@ -7,10 +7,13 @@
 
 pub mod ast;
 pub mod lexer;
+pub mod mode;
 pub mod parser;
 pub mod printer;
 pub mod translate;
 
+pub use lexer::{Token, TokenKind, tokenize, tokenize_with_settings};
+pub use mode::SqlMode;
 pub use parser::error::{ErrorKind, ParseError, ParseResult};
 pub use parser::{
 	ParserSettings, parse_expr, parse_expr_with_settings, parse_statement,

@@ -64,6 +64,11 @@ pub fn translate_statement(
 				"SQL PREPARE/EXECUTE/DEALLOCATE statements are not supported; use extended query protocol".into(),
 			))
 		}
+		Statement::Copy(_) => {
+			Err(TranslationError::Unsupported(
+				"COPY is a streaming wire protocol command and cannot be translated to SurrealQL directly".into(),
+			))
+		}
 	}
 }
 
@@ -331,19 +336,24 @@ fn translate_transaction(tx: &TransactionStmt, out: &mut String) -> Result<(), T
 		TransactionStmt::Savepoint {
 			name,
 			..
-		} => Err(TranslationError::Unsupported(format!("SAVEPOINT {name} is not supported"))),
+		} => {
+			write!(out, "-- SAVEPOINT {name};")?;
+			Ok(())
+		}
 		TransactionStmt::ReleaseSavepoint {
 			name,
 			..
 		} => {
-			Err(TranslationError::Unsupported(format!("RELEASE SAVEPOINT {name} is not supported")))
+			write!(out, "-- RELEASE SAVEPOINT {name};")?;
+			Ok(())
 		}
 		TransactionStmt::RollbackToSavepoint {
 			name,
 			..
-		} => Err(TranslationError::Unsupported(format!(
-			"ROLLBACK TO SAVEPOINT {name} is not supported"
-		))),
+		} => {
+			write!(out, "-- ROLLBACK TO SAVEPOINT {name};")?;
+			Ok(())
+		}
 	}
 }
 

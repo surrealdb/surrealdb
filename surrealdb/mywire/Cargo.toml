@@ -12,6 +12,9 @@ categories.workspace = true
 
 [dependencies]
 surrealdb-core = { workspace = true, features = ["mysql"] }
+surrealdb-datastore = { workspace = true }
+surrealdb-iam = { workspace = true }
+surrealdb-kvs = { workspace = true }
 surrealdb-mysql = { workspace = true }
 surrealdb-sqlplan = { workspace = true }
 surrealdb-rpc = { workspace = true }
@@ -21,6 +24,7 @@ anyhow = { workspace = true }
 axum-server = { version = "0.8.0", features = ["tls-rustls-no-provider"] }
 rand = { workspace = true }
 sha1 = { workspace = true }
+sha2 = { workspace = true }
 tokio = { workspace = true, features = ["net", "sync", "time", "io-util"] }
 tokio-rustls = { version = "0.26.4", default-features = false }
 tokio-util = { workspace = true }
@@ -28,7 +32,13 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
+bytes = { workspace = true }
+rcgen = "0.14.7"
 surrealdb-core = { workspace = true, features = ["kv-mem"] }
+surrealdb-pgwire = { workspace = true }
+tempfile = { workspace = true }
+# The TLS tests install the same process-wide provider the server does.
+tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws_lc_rs"] }
 
 [lints]
 workspace = true

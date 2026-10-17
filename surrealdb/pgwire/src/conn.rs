@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use bytes::BytesMut;
+use surrealdb_catalog::providers::DatabaseProvider;
 use surrealdb_core::ctx::CancelHandle;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::verify::{self, ScramAuth, basic};
@@ -14,8 +15,12 @@ use surrealdb_core::pgsql::lower::lower_stmt;
 use surrealdb_core::syn;
 use surrealdb_core::syn::{Query as Ast, TopLevelExpr};
 use surrealdb_datastore::Transaction;
+use surrealdb_iam::{Actor, Auth, Level, Role};
 use surrealdb_kvs::TransactionType;
-use surrealdb_pgsql::ast::stmt::Statement as PgStatement;
+use surrealdb_pgsql::ast::stmt::{
+	CopyDirection, CopyFormat, CopyStmt, CopyTarget, Statement as PgStatement,
+};
+use surrealdb_pgsql::printer::{print_ident, print_string_literal};
 use surrealdb_rpc::capabilities::RouteTarget;
 use surrealdb_sqlplan::binder::pgsql::bind_select;
 use surrealdb_sqlplan::catalog::MemoryCatalog;
@@ -25,7 +30,7 @@ use surrealdb_sqlplan::{
 	LogicalOp, SqlDialect, lower_pgsql_ddl, lower_pgsql_delete, lower_pgsql_insert,
 	lower_pgsql_truncate, lower_pgsql_update,
 };
-use surrealdb_types::{Value, Variables};
+use surrealdb_types::{RecordIdKey, SurrealValue, ToSql, Value, Variables};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::OwnedSemaphorePermit;
@@ -35,13 +40,16 @@ use tokio_rustls::server::TlsStream;
 use tokio_util::either::Either;
 use tokio_util::sync::CancellationToken;
 
+use super::copy::{
+	BATCH_BYTES, BATCH_ROWS, Format, Ingest, MAX_RECORD_BYTES, Row, SLICE_BYTES, Scan, row_cost,
+};
 use super::error::PgError;
+use super::guc::{GucStore, ShowResult, normalize_name};
 use super::msg::{self, DescribeTarget, Frontend, StartupMessage};
 use super::typing::{
 	PgColumn, PgType, ResultShape, shape_result, shape_result_jsonb, shape_result_with_descriptor,
 };
 use super::{CancelRegistry, LOG, encode, sasl};
-use crate::PKG_VERSION;
 
 /// A client connection stream: plaintext, or upgraded to TLS after an accepted
 /// SSLRequest. `Either` forwards `AsyncRead`/`AsyncWrite` to whichever it is,
@@ -81,6 +89,40 @@ enum CachedPlan {
 	PgAst(Ast),
 }
 
+/// Syntactic category of a prepared statement for command tag generation and row expectations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StatementKind {
+	Select,
+	Insert,
+	Update,
+	Delete,
+	CreateTable,
+	DropTable,
+	AlterTable,
+	CreateIndex,
+	CreateView,
+	Truncate,
+	Other,
+}
+
+impl StatementKind {
+	fn command_tag(self, count: usize) -> String {
+		match self {
+			Self::Select => format!("SELECT {count}"),
+			Self::Insert => format!("INSERT 0 {count}"),
+			Self::Update => format!("UPDATE {count}"),
+			Self::Delete => format!("DELETE {count}"),
+			Self::CreateTable => "CREATE TABLE".to_string(),
+			Self::DropTable => "DROP TABLE".to_string(),
+			Self::AlterTable => "ALTER TABLE".to_string(),
+			Self::CreateIndex => "CREATE INDEX".to_string(),
+			Self::CreateView => "CREATE VIEW".to_string(),
+			Self::Truncate => "TRUNCATE TABLE".to_string(),
+			Self::Other => format!("SELECT {count}"),
+		}
+	}
+}
+
 /// A parsed, not-yet-bound prepared statement.
 struct PreparedStatement {
 	/// The (positional-rewritten) query text; used for GQL, and as the source
@@ -107,6 +149,10 @@ struct PreparedStatement {
 	control: Option<Control>,
 	/// Static result descriptor from the query planner if available.
 	descriptor: Option<surrealdb_sqlplan::ResultDescriptor>,
+	/// Syntactic kind of statement (Select, Insert, Update, CreateTable, etc.)
+	kind: StatementKind,
+	/// Whether this statement produces result rows (e.g. SELECT, or INSERT/UPDATE with RETURNING).
+	returns_rows: bool,
 }
 
 impl PreparedStatement {
@@ -131,10 +177,12 @@ impl PreparedStatement {
 /// `SET`; classifying them at Parse lets the extended protocol do the same, so
 /// drivers using server-side prepared statements get interactive transactions
 /// and dialect switching too.
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Control {
 	Transaction(TxnOp),
 	Set(SetStatement),
+	Show(String),
+	Reset(String),
 }
 
 impl Control {
@@ -142,10 +190,17 @@ impl Control {
 	/// CommandComplete.
 	fn command_tag(&self) -> &'static str {
 		match self {
-			Control::Transaction(TxnOp::Begin) => "BEGIN",
+			Control::Transaction(TxnOp::Begin {
+				..
+			}) => "BEGIN",
 			Control::Transaction(TxnOp::Commit) => "COMMIT",
 			Control::Transaction(TxnOp::Rollback) => "ROLLBACK",
+			Control::Transaction(TxnOp::Savepoint(_)) => "SAVEPOINT",
+			Control::Transaction(TxnOp::ReleaseSavepoint(_)) => "RELEASE",
+			Control::Transaction(TxnOp::RollbackSavepoint(_)) => "ROLLBACK",
 			Control::Set(_) => "SET",
+			Control::Show(_) => "SHOW",
+			Control::Reset(_) => "RESET",
 		}
 	}
 }
@@ -241,12 +296,18 @@ pub(super) async fn handle(
 		ready,
 		shutdown,
 		session: Session::default(),
+		base_session: None,
+		txn_session_snapshot: None,
+		txn_has_local_session_override: false,
 		statements: HashMap::new(),
 		portals: HashMap::new(),
 		prepared_bytes: 0,
 		portal_bytes: 0,
 		dialect: Dialect::SurrealQl,
+		gucs: GucStore::new(),
 		transaction: None,
+		savepoints: Vec::new(),
+		savepoint_sessions: Vec::new(),
 		txn_failed: false,
 		txn_lets: Vec::new(),
 		cancel,
@@ -384,6 +445,12 @@ struct Connection {
 	ready: Arc<AtomicBool>,
 	shutdown: CancellationToken,
 	session: Session,
+	/// The baseline session identity established at connection / authentication time.
+	base_session: Option<Session>,
+	/// Session snapshot taken at transaction begin.
+	txn_session_snapshot: Option<Session>,
+	/// Whether a transaction-local session identity override is active.
+	txn_has_local_session_override: bool,
 	statements: HashMap<String, PreparedStatement>,
 	portals: HashMap<String, Portal>,
 	prepared_bytes: usize,
@@ -393,8 +460,15 @@ struct Connection {
 	/// Only ever assigned through [`Connection::select_dialect`], which applies
 	/// the per-dialect capability gate.
 	dialect: Dialect,
+	/// grand unified configuration (GUC) parameter store for this session.
+	gucs: GucStore,
 	/// The active interactive transaction opened by a standalone `BEGIN`.
 	transaction: Option<Arc<Transaction>>,
+	/// Active savepoint stack for the current transaction.
+	savepoints: Vec<String>,
+	/// Savepoint snapshots of the session: stack of `(savepoint_name,
+	/// session_snapshot, number of captured LETs)`.
+	savepoint_sessions: Vec<(String, Session, usize)>,
 	/// Set when a statement fails inside an interactive transaction; further
 	/// queries are refused (SQLSTATE 25P02) until `COMMIT`/`ROLLBACK`.
 	txn_failed: bool,
@@ -526,9 +600,18 @@ impl Connection {
 				"user" => user = Some(value),
 				"database" => database = Some(value),
 				"options" => options = Some(value),
+				"replication" => {
+					self.report(
+						&PgError::feature_not_supported("replication is not supported").fatal(),
+					)
+					.await?;
+					return Ok(false);
+				}
+
 				_ => {}
 			}
 		}
+
 		let Some(user) = user else {
 			self.report(&PgError::protocol("no user specified in startup packet").fatal()).await?;
 			return Ok(false);
@@ -548,6 +631,10 @@ impl Connection {
 		self.session = Session::default();
 		self.session.ip = Some(self.peer.ip().to_string());
 		self.session.id = Some(uuid::Uuid::new_v4());
+		if !self.ds.is_auth_enabled() {
+			self.session.au =
+				Arc::new(Auth::new(Actor::new(user.clone(), vec![Role::Owner], Level::Root)));
+		}
 		if self.ds.is_auth_enabled() {
 			// Prefer SASL/SCRAM-SHA-256 when the target user has SCRAM verifier
 			// material; fall back to cleartext-password (over TLS) for users
@@ -566,7 +653,7 @@ impl Connection {
 			let authenticated = match scram {
 				Some(scram) => self.authenticate_scram(&user, &scram).await?,
 				None => {
-					if self.is_tls() {
+					if self.is_tls() || self.peer.ip().is_loopback() {
 						self.authenticate_cleartext(&user, ns.as_deref(), db.as_deref()).await?
 					} else {
 						self.authenticate_scram_mock(&user).await?
@@ -591,26 +678,50 @@ impl Connection {
 			.await?;
 			return Ok(false);
 		}
+		let target_ns = ns.clone().or_else(|| self.session.ns.clone());
+		let target_db = db.clone().or_else(|| self.session.db.clone());
+		if let (Some(ns_name), Some(db_name)) = (target_ns.as_deref(), target_db.as_deref()) {
+			let tx = self
+				.ds
+				.transaction(TransactionType::Read)
+				.await
+				.map_err(|err| PgError::internal(err.to_string()))?;
+			let exists = tx
+				.get_db_by_name(ns_name, db_name, None)
+				.await
+				.map_err(|err| PgError::internal(err.to_string()))?
+				.is_some();
+			let can_materialize = self
+				.ds
+				.should_materialize_db_on_use(&tx, &self.session.au, ns_name, db_name)
+				.await
+				.unwrap_or(false);
+			let _ = tx.cancel().await;
+			if !exists && !can_materialize {
+				self.report(
+					&PgError::invalid_catalog_name(format!(
+						"database \"{db_name}\" does not exist"
+					))
+					.fatal(),
+				)
+				.await?;
+				return Ok(false);
+			}
+		}
 		if ns.is_some() || db.is_some() {
 			// Select (and, when authorized, materialize) the namespace and
 			// database exactly as a `USE` statement would.
-			if let Err(err) = self.ds.process_use(None, &mut self.session, ns, db).await {
+			if let Err(err) =
+				self.ds.process_use(None, &mut self.session, ns.clone(), db.clone()).await
+			{
 				self.report(&PgError::from(&err).fatal()).await?;
 				return Ok(false);
 			}
 		}
+		self.base_session = Some(self.session.clone());
 		let mut buf = BytesMut::new();
 		msg::write_authentication_ok(&mut buf);
-		let server_version = format!("16.0-surrealdb.{}", PKG_VERSION);
-		for (key, value) in [
-			("server_version", server_version.as_str()),
-			("server_encoding", "UTF8"),
-			("client_encoding", "UTF8"),
-			("DateStyle", "ISO, MDY"),
-			("integer_datetimes", "on"),
-			("standard_conforming_strings", "on"),
-			("TimeZone", "UTC"),
-		] {
+		for (key, value) in self.gucs.startup_status_params() {
 			msg::write_parameter_status(&mut buf, key, value);
 		}
 		msg::write_backend_key_data(&mut buf, self.pid, self.secret);
@@ -633,23 +744,40 @@ impl Connection {
 		ns: Option<&str>,
 		db: Option<&str>,
 	) -> bool {
-		if let (Some(ns), Some(db)) = (ns, db)
-			&& basic(&self.ds, &mut self.session, user, pass, Some(ns), Some(db)).await.is_ok()
-		{
-			return true;
-		}
-		if let Some(ns) = ns
-			&& basic(&self.ds, &mut self.session, user, pass, Some(ns), None).await.is_ok()
-		{
-			return true;
-		}
-		match basic(&self.ds, &mut self.session, user, pass, None, None).await {
-			Ok(()) => true,
-			Err(err) => {
-				debug!(target: LOG, "postgres authentication failed for user '{user}': {err}");
-				false
+		let clean_session = self.session.clone();
+		if let (Some(ns), Some(db)) = (ns, db) {
+			let mut sess = clean_session.clone();
+			if basic(&self.ds, &mut sess, user, pass, Some(ns), Some(db)).await.is_ok() {
+				self.session = sess;
+				return true;
 			}
 		}
+		if let Some(ns) = ns {
+			let mut sess = clean_session.clone();
+			if basic(&self.ds, &mut sess, user, pass, Some(ns), None).await.is_ok() {
+				self.session = sess;
+				return true;
+			}
+		}
+		let mut sess = clean_session.clone();
+		if basic(&self.ds, &mut sess, user, pass, None, None).await.is_ok() {
+			self.session = sess;
+			return true;
+		}
+		// Password-as-JWT through verify::token so record-access sessions can exist on the wire
+		// (P-02 / D6)
+		let mut sess = clean_session.clone();
+		if verify::token(&self.ds, &mut sess, pass).await.is_ok() {
+			self.session = sess;
+			return true;
+		}
+		let mut sess = clean_session.clone();
+		if verify::token(&self.ds, &mut sess, user).await.is_ok() {
+			self.session = sess;
+			return true;
+		}
+		debug!(target: LOG, "postgres authentication failed for user '{user}'");
+		false
 	}
 
 	/// Cleartext-password authentication: request a password, then verify it
@@ -661,9 +789,10 @@ impl Connection {
 		ns: Option<&str>,
 		db: Option<&str>,
 	) -> Result<bool> {
-		// Never ask for a cleartext password over an unencrypted connection.
-		// Report the standard generic authentication failure to avoid user enumeration.
-		if !self.is_tls() {
+		// Never ask for a cleartext password over an unencrypted connection (except loopback for
+		// local dev/testing). Report the standard generic authentication failure to avoid user
+		// enumeration.
+		if !self.is_tls() && !self.peer.ip().is_loopback() {
 			self.report(&auth_failed(user)).await?;
 			return Ok(false);
 		}
@@ -946,9 +1075,13 @@ impl Connection {
 				}
 				Frontend::Sync => {
 					skip_until_sync = false;
-					// End of the implicit transaction: portals do not survive it.
-					self.portals.clear();
-					self.portal_bytes = 0;
+					// Portals survive Sync inside an active transaction.
+					// At the end of an implicit transaction (no active transaction),
+					// portals are cleared.
+					if self.transaction.is_none() {
+						self.portals.clear();
+						self.portal_bytes = 0;
+					}
 					let status = self.ready_status();
 					msg::write_ready_for_query(&mut out, status);
 					self.flush(&mut out).await?;
@@ -957,6 +1090,24 @@ impl Connection {
 				Frontend::Terminate => return Ok(()),
 				Frontend::Password(_) => {
 					self.report(&PgError::protocol("unexpected password message").fatal()).await?;
+					return Ok(());
+				}
+				Frontend::FunctionCall => {
+					if skip_until_sync {
+						continue;
+					}
+					msg::write_error_response(
+						&mut out,
+						&PgError::feature_not_supported("FunctionCall is not supported"),
+					);
+					skip_until_sync = true;
+				}
+
+				Frontend::CopyData(_) | Frontend::CopyDone | Frontend::CopyFail(_) => {
+					self.report(
+						&PgError::protocol("unexpected copy message outside of copy mode").fatal(),
+					)
+					.await?;
 					return Ok(());
 				}
 				Frontend::Unknown(tag) => {
@@ -1054,9 +1205,8 @@ impl Connection {
 		// ordinary executor statement. Transaction control is dialect-independent;
 		// `SET` interception is gated by `should_intercept_set` so that in the GQL
 		// dialect a `SET` mutation clause still reaches the GQL executor.
-		if let Some(control) = transaction_control(query).map(Control::Transaction).or_else(|| {
-			parse_set(query).filter(|set| self.should_intercept_set(set)).map(Control::Set)
-		}) {
+		if let Some(control) = self.classify_control(query) {
+			let returns_rows = matches!(control, Control::Show(_));
 			self.insert_statement(
 				name,
 				PreparedStatement {
@@ -1068,112 +1218,247 @@ impl Connection {
 					described: false,
 					control: Some(control),
 					descriptor: None,
+					kind: StatementKind::Other,
+					returns_rows,
 				},
 			)?;
 			msg::write_parse_complete(out);
 			return Ok(());
 		}
-		let (query, cached_plan, param_count, empty, descriptor) = match self.dialect {
-			Dialect::SurrealQl => {
-				// Parse once so syntax errors surface at Parse (as Postgres does)
-				// and the AST can be cached for repeated Execute without re-parsing.
-				let (rewritten, positional) = rewrite_positional_params(query);
-				let config = self.ds.parser_config();
-				let ast =
-					syn::parse_with_capabilities(&rewritten, &self.ds.get_capabilities(), &config)
-						.map_err(|err| PgError::syntax(err.to_string()))?;
-				let empty = ast.num_statements() == 0;
-				let param_count = param_types.len().max(positional);
-				let cached_plan = if empty {
-					None
-				} else {
-					Some(CachedPlan::SurrealQl(ast))
-				};
-				(rewritten, cached_plan, param_count, empty, None)
-			}
-			Dialect::PgSql => {
-				global_metrics().record_query(SqlDialect::Postgres);
-				let stmts = surrealdb_pgsql::parse_statements(query)
+		let (query, cached_plan, param_count, param_types, empty, descriptor, kind, returns_rows) =
+			match self.dialect {
+				Dialect::SurrealQl => {
+					// Parse once so syntax errors surface at Parse (as Postgres does)
+					// and the AST can be cached for repeated Execute without re-parsing.
+					let (rewritten, positional) = rewrite_positional_params(query);
+					let config = self.ds.parser_config();
+					let ast = syn::parse_with_capabilities(
+						&rewritten,
+						&self.ds.get_capabilities(),
+						&config,
+					)
 					.map_err(|err| PgError::syntax(err.to_string()))?;
-				let empty = stmts.is_empty();
-				let (_, positional) = rewrite_positional_params(query);
-				let mut param_count = param_types.len().max(positional);
-				let mut descriptor = None;
-				let mut cached_plan = None;
-				if !empty {
-					match &stmts[0] {
-						PgStatement::Select(select) => {
-							let mut catalog = MemoryCatalog::new();
-							if let Some(db) = &self.session.db {
-								catalog.set_database(Some(db.clone()));
-							}
-							let policy = DialectPolicy::postgres();
-							if let Ok(bound) = bind_select(select, &catalog, &policy, None) {
-								let desc = bound.describe(&catalog, &policy);
-								let param_desc = bound.describe_parameters(&catalog);
-								param_count = param_count.max(param_desc.param_types.len());
-								descriptor = Some(desc);
-							}
-							if let Ok(op) = lower_stmt(&stmts[0]) {
-								cached_plan = Some(CachedPlan::PgSelect {
-									plan: Box::new(op),
-								});
-							}
-						}
-						PgStatement::Insert(insert) => {
-							if let Ok(expr) = lower_pgsql_insert(insert) {
-								cached_plan = Some(CachedPlan::PgAst(Ast {
-									expressions: vec![TopLevelExpr::Expr(expr)],
-								}));
-							}
-						}
-						PgStatement::Update(update) => {
-							if let Ok(expr) = lower_pgsql_update(update) {
-								cached_plan = Some(CachedPlan::PgAst(Ast {
-									expressions: vec![TopLevelExpr::Expr(expr)],
-								}));
-							}
-						}
-						PgStatement::Delete(delete) => {
-							if let Ok(expr) = lower_pgsql_delete(delete) {
-								cached_plan = Some(CachedPlan::PgAst(Ast {
-									expressions: vec![TopLevelExpr::Expr(expr)],
-								}));
-							}
-						}
-						PgStatement::Truncate(truncate) => {
-							if let Ok(expr) = lower_pgsql_truncate(truncate) {
-								cached_plan = Some(CachedPlan::PgAst(Ast {
-									expressions: vec![TopLevelExpr::Expr(expr)],
-								}));
-							}
-						}
-						PgStatement::CreateTable(_)
-						| PgStatement::CreateIndex(_)
-						| PgStatement::CreateView(_)
-						| PgStatement::AlterTable(_)
-						| PgStatement::Drop(_) => {
-							if let Ok(exprs) = lower_pgsql_ddl(&stmts[0]) {
-								cached_plan = Some(CachedPlan::PgAst(Ast {
-									expressions: exprs
-										.into_iter()
-										.map(TopLevelExpr::Expr)
-										.collect(),
-								}));
-							}
-						}
-						_ => {}
+					if ast.num_statements() > 1 {
+						return Err(PgError::syntax(
+							"cannot insert multiple commands into a prepared statement",
+						));
 					}
+					let empty = ast.num_statements() == 0;
+					let param_count = param_types.len().max(positional);
+					let cached_plan = if empty {
+						None
+					} else {
+						Some(CachedPlan::SurrealQl(ast))
+					};
+					let trimmed = query.trim_start();
+					let (kind, returns_rows) = if trimmed.starts_with("DEFINE TABLE") {
+						(StatementKind::CreateTable, false)
+					} else if trimmed.starts_with("REMOVE TABLE") {
+						(StatementKind::DropTable, false)
+					} else if trimmed.starts_with("DEFINE INDEX") {
+						(StatementKind::CreateIndex, false)
+					} else if trimmed.starts_with("INSERT") {
+						(StatementKind::Insert, true)
+					} else if trimmed.starts_with("UPDATE") {
+						(StatementKind::Update, true)
+					} else if trimmed.starts_with("DELETE") {
+						(StatementKind::Delete, true)
+					} else {
+						(StatementKind::Select, !empty)
+					};
+					(
+						rewritten,
+						cached_plan,
+						param_count,
+						param_types,
+						empty,
+						None,
+						kind,
+						returns_rows,
+					)
 				}
-				(query.to_string(), cached_plan, param_count, empty, descriptor)
-			}
-			Dialect::Gql | Dialect::MySql => {
-				let (_, positional) = rewrite_positional_params(query);
-				let param_count = param_types.len().max(positional);
-				let empty = query.trim().is_empty();
-				(query.to_string(), None, param_count, empty, None)
-			}
-		};
+				Dialect::PgSql => {
+					global_metrics().record_query(SqlDialect::Postgres);
+					let stmts = surrealdb_pgsql::parse_statements(query).map_err(|err| {
+						PgError::syntax(err.to_string()).with_position(err.span.start + 1)
+					})?;
+					if stmts.len() > 1 {
+						return Err(PgError::syntax(
+							"cannot insert multiple commands into a prepared statement",
+						));
+					}
+
+					let empty = stmts.is_empty();
+					let (_, positional) = rewrite_positional_params(query);
+					let mut param_types = param_types;
+					let mut param_count = param_types.len().max(positional);
+					let mut descriptor = None;
+					let mut cached_plan = None;
+					let mut kind = StatementKind::Other;
+					let mut returns_rows = false;
+					if !empty {
+						match &stmts[0] {
+							PgStatement::Select(select) => {
+								kind = StatementKind::Select;
+								returns_rows = true;
+								let mut catalog = MemoryCatalog::new();
+								if let Some(db) = &self.session.db {
+									catalog.set_database(Some(db.clone()));
+								}
+								let policy = DialectPolicy::postgres();
+								if let Ok(bound) = bind_select(select, &catalog, &policy, None) {
+									let desc = bound.describe(&catalog, &policy);
+									let param_desc = bound.describe_parameters(&catalog);
+									param_count = param_count.max(param_desc.param_types.len());
+									descriptor = Some(desc);
+									for (idx, sql_ty) in param_desc.param_types.iter().enumerate() {
+										if *sql_ty != surrealdb_sqlplan::SqlType::Unknown {
+											let oid = PgType::from_sql_type(*sql_ty).oid();
+											if idx < param_types.len() {
+												if param_types[idx] == 0 {
+													param_types[idx] = oid;
+												}
+											} else {
+												param_types.push(oid);
+											}
+										}
+									}
+								}
+								if let Ok(op) = lower_stmt(&stmts[0]) {
+									cached_plan = Some(CachedPlan::PgSelect {
+										plan: Box::new(op),
+									});
+								}
+							}
+							PgStatement::Insert(insert) => {
+								kind = StatementKind::Insert;
+								returns_rows = insert.returning.is_some();
+								if let Ok(expr) = lower_pgsql_insert(insert) {
+									cached_plan = Some(CachedPlan::PgAst(Ast {
+										expressions: vec![TopLevelExpr::Expr(expr)],
+									}));
+								}
+							}
+							PgStatement::Update(update) => {
+								kind = StatementKind::Update;
+								returns_rows = update.returning.is_some();
+								if let Ok(expr) = lower_pgsql_update(update) {
+									cached_plan = Some(CachedPlan::PgAst(Ast {
+										expressions: vec![TopLevelExpr::Expr(expr)],
+									}));
+								}
+							}
+							PgStatement::Delete(delete) => {
+								kind = StatementKind::Delete;
+								returns_rows = delete.returning.is_some();
+								if let Ok(expr) = lower_pgsql_delete(delete) {
+									cached_plan = Some(CachedPlan::PgAst(Ast {
+										expressions: vec![TopLevelExpr::Expr(expr)],
+									}));
+								}
+							}
+							PgStatement::Truncate(truncate) => {
+								kind = StatementKind::Truncate;
+								returns_rows = false;
+								if let Ok(expr) = lower_pgsql_truncate(truncate) {
+									cached_plan = Some(CachedPlan::PgAst(Ast {
+										expressions: vec![TopLevelExpr::Expr(expr)],
+									}));
+								}
+							}
+							PgStatement::CreateTable(_) => {
+								kind = StatementKind::CreateTable;
+								returns_rows = false;
+								if let Ok(exprs) = lower_pgsql_ddl(&stmts[0]) {
+									cached_plan = Some(CachedPlan::PgAst(Ast {
+										expressions: exprs
+											.into_iter()
+											.map(TopLevelExpr::Expr)
+											.collect(),
+									}));
+								}
+							}
+							PgStatement::CreateIndex(_) => {
+								kind = StatementKind::CreateIndex;
+								returns_rows = false;
+								if let Ok(exprs) = lower_pgsql_ddl(&stmts[0]) {
+									cached_plan = Some(CachedPlan::PgAst(Ast {
+										expressions: exprs
+											.into_iter()
+											.map(TopLevelExpr::Expr)
+											.collect(),
+									}));
+								}
+							}
+							PgStatement::CreateView(_) => {
+								kind = StatementKind::CreateView;
+								returns_rows = false;
+								if let Ok(exprs) = lower_pgsql_ddl(&stmts[0]) {
+									cached_plan = Some(CachedPlan::PgAst(Ast {
+										expressions: exprs
+											.into_iter()
+											.map(TopLevelExpr::Expr)
+											.collect(),
+									}));
+								}
+							}
+							PgStatement::AlterTable(_) => {
+								kind = StatementKind::AlterTable;
+								returns_rows = false;
+								if let Ok(exprs) = lower_pgsql_ddl(&stmts[0]) {
+									cached_plan = Some(CachedPlan::PgAst(Ast {
+										expressions: exprs
+											.into_iter()
+											.map(TopLevelExpr::Expr)
+											.collect(),
+									}));
+								}
+							}
+							PgStatement::Drop(_) => {
+								kind = StatementKind::DropTable;
+								returns_rows = false;
+								if let Ok(exprs) = lower_pgsql_ddl(&stmts[0]) {
+									cached_plan = Some(CachedPlan::PgAst(Ast {
+										expressions: exprs
+											.into_iter()
+											.map(TopLevelExpr::Expr)
+											.collect(),
+									}));
+								}
+							}
+							_ => {
+								kind = StatementKind::Other;
+								returns_rows = false;
+							}
+						}
+					}
+					(
+						query.to_string(),
+						cached_plan,
+						param_count,
+						param_types,
+						empty,
+						descriptor,
+						kind,
+						returns_rows,
+					)
+				}
+				Dialect::Gql | Dialect::MySql => {
+					let (_, positional) = rewrite_positional_params(query);
+					let param_count = param_types.len().max(positional);
+					let empty = query.trim().is_empty();
+					(
+						query.to_string(),
+						None,
+						param_count,
+						param_types,
+						empty,
+						None,
+						StatementKind::Other,
+						!empty,
+					)
+				}
+			};
 		// Reject an absurd parameter count before it reaches the
 		// ParameterDescription allocation or the i16 wire count.
 		if param_count > MAX_PARAMS {
@@ -1192,8 +1477,11 @@ impl Connection {
 				described: false,
 				control: None,
 				descriptor,
+				kind,
+				returns_rows,
 			},
 		)?;
+
 		msg::write_parse_complete(out);
 		Ok(())
 	}
@@ -1258,27 +1546,31 @@ impl Connection {
 	) -> Result<(), PgError> {
 		match target {
 			DescribeTarget::Statement => {
+				let control = self.statements.get(name).map(|s| s.control.clone());
+				if let Some(Some(control)) = control {
+					msg::write_parameter_description(out, &[]);
+					if let Control::Show(param) = control {
+						self.describe_show(&param, out)?;
+					} else {
+						msg::write_no_data(out);
+					}
+					return Ok(());
+				}
 				let Some(stmt) = self.statements.get_mut(name) else {
 					return Err(PgError::invalid_statement(name));
 				};
-				// A control statement (transaction op / SET) takes no parameters
-				// and produces no result rows.
-				if stmt.control.is_some() {
-					msg::write_parameter_description(out, &[]);
-					msg::write_no_data(out);
-					return Ok(());
-				}
 				// If a static descriptor is available, report true columns and types;
 				// otherwise pin this statement to the single-`jsonb`-column shape.
 				stmt.described = true;
 				let empty = stmt.empty;
+				let returns_rows = stmt.returns_rows;
 				// Report one OID per referenced parameter, using the declared
 				// type where given and unspecified (0) otherwise.
 				let oids: Vec<i32> = (0..stmt.param_count)
 					.map(|i| stmt.param_types.get(i).copied().unwrap_or(0))
 					.collect();
 				msg::write_parameter_description(out, &oids);
-				if empty {
+				if empty || !returns_rows {
 					msg::write_no_data(out);
 				} else if let Some(desc) = &stmt.descriptor {
 					let columns: Vec<PgColumn> = desc
@@ -1301,20 +1593,53 @@ impl Connection {
 				}
 			}
 			DescribeTarget::Portal => {
-				// A control statement produces no result rows.
-				if self.portal_is_control(name) {
-					msg::write_no_data(out);
+				// Control statements produce no result rows, except SHOW.
+				if let Some(control) = self.portal_control(name) {
+					if let Control::Show(param) = control {
+						self.describe_show(&param, out)?;
+					} else {
+						msg::write_no_data(out);
+					}
 					return Ok(());
 				}
 				if self.portal_is_empty(name)? {
 					msg::write_no_data(out);
 					return Ok(());
 				}
-				self.ensure_executed(name).await?;
-				let portal = self.portals.get(name).expect("ensured above");
+				let portal = self.portals.get(name).ok_or_else(|| PgError::invalid_cursor(name))?;
+				let stmt = self
+					.statements
+					.get(&portal.statement)
+					.ok_or_else(|| PgError::invalid_statement(&portal.statement))?;
+				if !stmt.returns_rows {
+					msg::write_no_data(out);
+					return Ok(());
+				}
 				let formats = portal.result_formats.clone();
-				let columns = &portal.executed.as_ref().expect("ensured above").columns;
-				msg::write_row_description(out, columns, |i| format_at(&formats, i));
+				if let Some(executed) = &portal.executed {
+					msg::write_row_description(out, &executed.columns, |i| format_at(&formats, i));
+				} else if let Some(desc) = &stmt.descriptor {
+					let columns: Vec<PgColumn> = desc
+						.columns
+						.iter()
+						.map(|c| PgColumn {
+							name: c.name.clone(),
+							ty: PgType::from_sql_type(c.ty),
+						})
+						.collect();
+					msg::write_row_description(out, &columns, |i| format_at(&formats, i));
+				} else if stmt.described {
+					let columns = [PgColumn {
+						name: "result".to_string(),
+						ty: PgType::Jsonb,
+					}];
+					msg::write_row_description(out, &columns, |i| format_at(&formats, i));
+				} else {
+					self.ensure_executed(name).await?;
+					let portal = self.portals.get(name).expect("ensured above");
+					let columns = &portal.executed.as_ref().expect("ensured above").columns;
+					msg::write_row_description(out, columns, |i| format_at(&formats, i));
+				}
 			}
 		}
 		Ok(())
@@ -1351,6 +1676,8 @@ impl Connection {
 			let result = match control {
 				Control::Transaction(op) => self.handle_transaction_control(op, out).await,
 				Control::Set(set) => self.handle_set(set, out),
+				Control::Show(param) => self.handle_show(&param, out),
+				Control::Reset(param) => self.handle_reset(&param, out),
 			};
 			return Ok(result);
 		}
@@ -1364,6 +1691,26 @@ impl Connection {
 		}
 		if let Err(err) = self.ensure_executed(portal_name).await {
 			return Ok(Err(err));
+		}
+		let (returns_rows, stmt_kind) = {
+			let portal = self.portals.get(portal_name).expect("ensured above");
+			if let Some(stmt) = self.statements.get(&portal.statement) {
+				(stmt.returns_rows, stmt.kind)
+			} else {
+				(true, StatementKind::Select)
+			}
+		};
+		if !returns_rows {
+			let count = {
+				let portal = self.portals.get_mut(portal_name).expect("ensured above");
+				let count = portal.executed.as_ref().map(|e| e.rows.len()).unwrap_or(0);
+				if let Some(executed) = portal.executed.as_mut() {
+					executed.rows.clear();
+				}
+				count
+			};
+			msg::write_command_complete(out, &stmt_kind.command_tag(count));
+			return Ok(Ok(()));
 		}
 		// Snapshot the (small) column + format metadata so the per-row loop can
 		// hold the portal borrow only briefly, freeing `self.stream` for flushes.
@@ -1405,8 +1752,9 @@ impl Connection {
 			// More rows remain for a subsequent Execute on this portal.
 			msg::write_portal_suspended(out);
 		} else {
-			msg::write_command_complete(out, &format!("SELECT {sent}"));
+			msg::write_command_complete(out, &stmt_kind.command_tag(sent));
 		}
+
 		Ok(Ok(()))
 	}
 
@@ -1437,11 +1785,6 @@ impl Connection {
 	/// after releasing the `&self` borrow (e.g. [`Self::handle_execute`]).
 	fn portal_control(&self, portal_name: &str) -> Option<Control> {
 		self.portal_control_ref(portal_name).cloned()
-	}
-
-	/// Whether a portal's statement is an intercepted control statement.
-	fn portal_is_control(&self, portal_name: &str) -> bool {
-		self.portal_control_ref(portal_name).is_some()
 	}
 
 	/// Whether a prepared statement is a standalone transaction-control op.
@@ -1643,13 +1986,21 @@ impl Connection {
 		let mut out = BytesMut::new();
 		let mut remaining = sql;
 
-		// Intercept leading `SET` statements (e.g. `SET client_encoding = 'UTF8'; <rest>`).
+		// Intercept leading control statements (e.g. `SET client_encoding = 'UTF8'; <rest>`).
+		// A `BEGIN` ahead of further statements is not intercepted when the active dialect
+		// is run by the executor as one batch: the block is SurrealQL and its closing
+		// `COMMIT`/`CANCEL` must reach the executor together with it.
 		while !remaining.trim().is_empty() {
 			let (first, rest) = split_first_statement(remaining);
 			let trimmed_first = first.trim();
-			if let Some(set) = parse_set(trimmed_first).filter(|set| self.should_intercept_set(set))
-			{
-				if let Err(err) = self.handle_set(set, &mut out) {
+			if let Some(control) = self.classify_control(trimmed_first) {
+				if matches!(control, Control::Transaction(TxnOp::Begin { .. }))
+					&& matches!(self.dialect, Dialect::SurrealQl | Dialect::Gql)
+					&& !rest.trim().is_empty()
+				{
+					break;
+				}
+				if let Err(err) = self.execute_control(control, &mut out).await {
 					self.note_simple_error(&err, &mut out);
 					return self.finish_query(out).await;
 				}
@@ -1667,10 +2018,10 @@ impl Connection {
 			return self.finish_query(out).await;
 		}
 
-		// Transaction-control statements are intercepted (they manage the
-		// connection's interactive transaction rather than run in the executor).
-		if let Some(op) = transaction_control(trimmed) {
-			if let Err(err) = self.handle_transaction_control(op, &mut out).await {
+		// Control statements are intercepted (they manage the connection's
+		// interactive transaction or session configuration rather than run in the executor).
+		if let Some(control) = self.classify_control(trimmed) {
+			if let Err(err) = self.execute_control(control, &mut out).await {
 				msg::write_error_response(&mut out, &err);
 			}
 			return self.finish_query(out).await;
@@ -1694,6 +2045,13 @@ impl Connection {
 
 		match self.dialect {
 			Dialect::SurrealQl => {
+				if trimmed.to_ascii_uppercase().starts_with("COPY ") {
+					let res = self.run_pgsql(trimmed, &mut out).await;
+					if res.is_err() || self.txn_failed {
+						return self.finish_query(out).await;
+					}
+					return self.finish_query(out).await;
+				}
 				if self.transaction.is_some() {
 					let _ = self.run_in_transaction(trimmed, &mut out).await;
 				} else {
@@ -1706,8 +2064,8 @@ impl Connection {
 					if trimmed_stmt.is_empty() {
 						continue;
 					}
-					if let Some(op) = transaction_control(trimmed_stmt) {
-						if let Err(err) = self.handle_transaction_control(op, &mut out).await {
+					if let Some(control) = self.classify_control(trimmed_stmt) {
+						if let Err(err) = self.execute_control(control, &mut out).await {
 							msg::write_error_response(&mut out, &err);
 							break;
 						}
@@ -1734,8 +2092,8 @@ impl Connection {
 					if trimmed_stmt.is_empty() {
 						continue;
 					}
-					if let Some(op) = transaction_control(trimmed_stmt) {
-						if let Err(err) = self.handle_transaction_control(op, &mut out).await {
+					if let Some(control) = self.classify_control(trimmed_stmt) {
+						if let Err(err) = self.execute_control(control, &mut out).await {
 							msg::write_error_response(&mut out, &err);
 							break;
 						}
@@ -1776,6 +2134,9 @@ impl Connection {
 		global_metrics().record_query(SqlDialect::Postgres);
 		let mut descriptor = None;
 		if let Ok(stmts) = surrealdb_pgsql::parse_statements(sql) {
+			if let Some(PgStatement::Copy(copy)) = stmts.first() {
+				return self.run_copy(copy, out).await;
+			}
 			let mut catalog = MemoryCatalog::new();
 			if let Some(db) = &self.session.db {
 				catalog.set_database(Some(db.clone()));
@@ -1889,6 +2250,460 @@ impl Connection {
 			}
 			Err(err) => self.note_simple_error(&PgError::from(&err), out),
 		}
+		Ok(())
+	}
+
+	async fn run_copy(&mut self, copy: &CopyStmt, out: &mut BytesMut) -> Result<()> {
+		match copy.direction {
+			CopyDirection::FromStdin => self.run_copy_in(copy, out).await,
+			CopyDirection::ToStdout => self.run_copy_out(copy, out).await,
+		}
+	}
+
+	/// Runs `COPY ... FROM STDIN`. The data is cut into records as it arrives and
+	/// inserted a batch at a time, each batch its own statement, so what is held
+	/// in memory does not grow with the amount sent. Inside an explicit
+	/// transaction the batches belong to it and roll back with it; otherwise each
+	/// batch commits as it is inserted, so a COPY that fails or is aborted after
+	/// the first batch leaves the earlier batches in place.
+	async fn run_copy_in(&mut self, copy: &CopyStmt, out: &mut BytesMut) -> Result<()> {
+		let (table_name, columns) = match &copy.target {
+			CopyTarget::Table {
+				table,
+				columns,
+			} => {
+				let name = table.parts.last().cloned().unwrap_or_default();
+				(name, columns.clone())
+			}
+			CopyTarget::Query(_) => {
+				self.note_simple_error(
+					&PgError::syntax("cannot COPY FROM STDIN into a query"),
+					out,
+				);
+				return Ok(());
+			}
+		};
+
+		let is_csv = matches!(copy.options.format, CopyFormat::Csv);
+		let format = Format {
+			csv: is_csv,
+			delimiter: copy.options.delimiter.unwrap_or(if is_csv {
+				b','
+			} else {
+				b'\t'
+			}),
+			quote: copy.options.quote.unwrap_or(b'"'),
+			escape: copy.options.escape.unwrap_or(if is_csv {
+				b'"'
+			} else {
+				b'\\'
+			}),
+			null: copy.options.null.clone().unwrap_or_else(|| {
+				if is_csv {
+					String::new()
+				} else {
+					"\\N".to_string()
+				}
+			}),
+		};
+		let has_header = copy.options.header.unwrap_or(false);
+
+		if let Some(err) = copy_options_error(&format) {
+			self.note_simple_error(&err, out);
+			return Ok(());
+		}
+
+		// Send CopyInResponse to client
+		msg::write_copy_in_response(out, 0, columns.len() as i16);
+		self.flush(out).await?;
+
+		let table = surrealdb_types::EscapeSqonIdent(&table_name).to_sql();
+		let mut ingest = Ingest::new(format, table_name, table, columns, has_header);
+
+		// The data is cut into records as it arrives and inserted in batches, so
+		// what is held in memory does not grow with the amount sent. Once the COPY
+		// has failed the rest of the stream is still read, and discarded, up to
+		// CopyDone or CopyFail so the connection stays in step.
+		let mut pending: Vec<u8> = Vec::new();
+		let mut failed = false;
+		loop {
+			let Some((tag, payload)) = self.read_message(msg::MAX_MESSAGE_SIZE).await? else {
+				return Ok(());
+			};
+			match msg::parse_frontend(tag, &payload)? {
+				Frontend::CopyData(data) => {
+					if failed || ingest.ended {
+						continue;
+					}
+					pending.extend_from_slice(&data);
+					if let Some(err) = self.copy_consume(&mut ingest, &mut pending, false).await {
+						failed = true;
+						pending = Vec::new();
+						self.note_simple_error(&err, out);
+						self.flush(out).await?;
+					}
+				}
+				Frontend::CopyDone => {
+					if !failed {
+						let mut err = self.copy_consume(&mut ingest, &mut pending, true).await;
+						if err.is_none() {
+							err = self.copy_flush_batch(&mut ingest).await;
+						}
+						match err {
+							Some(err) => self.note_simple_error(&err, out),
+							None => {
+								msg::write_command_complete(out, &format!("COPY {}", ingest.total))
+							}
+						}
+					}
+					return Ok(());
+				}
+				Frontend::CopyFail(err_msg) => {
+					if !failed {
+						self.note_simple_error(
+							&PgError::new("57014", format!("COPY aborted by client: {err_msg}")),
+							out,
+						);
+					}
+					return Ok(());
+				}
+				Frontend::Sync => {}
+				Frontend::Terminate => return Ok(()),
+				other => {
+					if !failed {
+						self.note_simple_error(
+							&PgError::protocol(format!("unexpected message {other:?} during COPY")),
+							out,
+						);
+					}
+					return Ok(());
+				}
+			}
+		}
+	}
+
+	/// Parses and inserts the complete records in `pending`, dropping them from
+	/// it. Unless `finish` is set, input stops being consumed once fewer than
+	/// [`SLICE_BYTES`] of complete records remain, so records are handled in
+	/// slices; `finish` takes everything, including a final record that has no
+	/// newline. Returns the error that ends the COPY, if any.
+	async fn copy_consume(
+		&mut self,
+		ingest: &mut Ingest,
+		pending: &mut Vec<u8>,
+		finish: bool,
+	) -> Option<PgError> {
+		let min = if finish {
+			usize::MAX
+		} else {
+			SLICE_BYTES
+		};
+		let mut consumed = 0;
+		let outcome = loop {
+			if ingest.ended {
+				consumed = pending.len();
+				break None;
+			}
+			let rest = &pending[consumed..];
+			if rest.is_empty() {
+				break None;
+			}
+			let end = match ingest.format.scan(rest, min, &mut ingest.scan) {
+				Scan::Boundary(end) => end,
+				Scan::NeedMore if finish => rest.len(),
+				Scan::NeedMore => break None,
+				Scan::TooLong {
+					complete,
+				} => {
+					// The records ahead of the overlong one are whole: take them first, since one
+					// may be the end marker, which makes whatever follows it irrelevant.
+					if complete > 0 {
+						match ingest.format.parse_records(&rest[..complete], &mut ingest.ended) {
+							Ok(rows) => {
+								consumed += complete;
+								if let Some(err) = self.copy_add_rows(ingest, rows).await {
+									break Some(err);
+								}
+							}
+							Err(err) => break Some(err.into_pg()),
+						}
+						if ingest.ended {
+							continue;
+						}
+					}
+					break Some(PgError::new(
+						"54000",
+						format!("COPY record exceeds the limit of {MAX_RECORD_BYTES} bytes"),
+					));
+				}
+			};
+			let rows = match ingest.format.parse_records(&rest[..end], &mut ingest.ended) {
+				Ok(rows) => rows,
+				Err(err) => break Some(err.into_pg()),
+			};
+			consumed += end;
+			if let Some(err) = self.copy_add_rows(ingest, rows).await {
+				break Some(err);
+			}
+		};
+		pending.drain(..consumed);
+		// A large message leaves its room behind; give it back once it is not needed.
+		if pending.capacity() > 4 * (SLICE_BYTES + MAX_RECORD_BYTES) {
+			pending.shrink_to(SLICE_BYTES + MAX_RECORD_BYTES);
+		}
+		outcome
+	}
+
+	/// Adds parsed rows to the batch, inserting a batch each time one fills up.
+	async fn copy_add_rows(&mut self, ingest: &mut Ingest, rows: Vec<Row>) -> Option<PgError> {
+		for row in rows {
+			if ingest.header_pending {
+				ingest.header_pending = false;
+				if ingest.columns.is_empty() {
+					ingest.columns = row.into_iter().map(|c| c.unwrap_or_default()).collect();
+				}
+				continue;
+			}
+			if !ingest.columns_settled {
+				ingest.columns_settled = true;
+				if ingest.columns.is_empty()
+					&& let Some(err) = self.copy_discover_columns(ingest).await
+				{
+					return Some(err);
+				}
+				while ingest.columns.len() < row.len() {
+					ingest.columns.push(format!("col_{}", ingest.columns.len() + 1));
+				}
+				ingest.key_lens =
+					ingest.columns.iter().map(|c| surql_object_key(c).len()).collect();
+			}
+			ingest.batch_bytes += row_cost(&row, &ingest.key_lens);
+			ingest.batch.push(row);
+			if (ingest.batch.len() >= BATCH_ROWS || ingest.batch_bytes >= BATCH_BYTES)
+				&& let Some(err) = self.copy_flush_batch(ingest).await
+			{
+				return Some(err);
+			}
+		}
+		None
+	}
+
+	/// Looks up the target table's column names, for a COPY that names none. A
+	/// table with no columns on record leaves the names to be generated.
+	async fn copy_discover_columns(&mut self, ingest: &mut Ingest) -> Option<PgError> {
+		let col_query = copy_column_lookup_query(&ingest.table_name);
+		let req = QueryRequest::new(QuerySource::pgsql(&col_query), &self.session)
+			.with_optional_transaction(self.transaction.clone());
+		let mut results = match self.ds.run(req).await {
+			Ok(results) => results,
+			Err(err) => return Some(PgError::from(&err)),
+		};
+		match results.pop().map(|r| r.result) {
+			Some(Ok(Value::Array(arr))) => {
+				for item in arr {
+					if let Value::Object(obj) = item
+						&& let Some(Value::String(c)) = obj.get("column_name")
+					{
+						ingest.columns.push(c.clone());
+					}
+				}
+				None
+			}
+			Some(Err(err)) => Some(PgError::from(&err)),
+			_ => None,
+		}
+	}
+
+	/// Inserts the batched rows, as one statement, and empties the batch.
+	async fn copy_flush_batch(&mut self, ingest: &mut Ingest) -> Option<PgError> {
+		if ingest.batch.is_empty() {
+			return None;
+		}
+		let rows = std::mem::take(&mut ingest.batch);
+		ingest.batch_bytes = 0;
+		let mut q = format!("INSERT INTO {} [", ingest.table);
+		for (i, row) in rows.iter().enumerate() {
+			if i > 0 {
+				q.push_str(", ");
+			}
+			q.push('{');
+			for (j, val) in row.iter().enumerate() {
+				if j > 0 {
+					q.push_str(", ");
+				}
+				let col = ingest.columns.get(j).map(|s| s.as_str()).unwrap_or("col");
+				q.push_str(&format!("{}: {}", surql_object_key(col), value_to_surrealql(val)));
+			}
+			q.push('}');
+		}
+		q.push_str("];");
+		let cancel = self.arm_cancel();
+		let req = QueryRequest::new(QuerySource::text(&q), &self.session)
+			.with_optional_transaction(self.transaction.clone())
+			.with_cancel(cancel);
+		match self.ds.run(req).await {
+			Ok(results) => {
+				for res in results {
+					if let Err(err) = res.result {
+						return Some(PgError::from(&err));
+					}
+				}
+			}
+			Err(err) => return Some(PgError::from(&err)),
+		}
+		ingest.total += rows.len();
+		None
+	}
+
+	async fn run_copy_out(&mut self, copy: &CopyStmt, out: &mut BytesMut) -> Result<()> {
+		let (sql, select_stmt) = match &copy.target {
+			CopyTarget::Query(query) => (format!("{query};"), Some(query.clone())),
+			CopyTarget::Table {
+				table,
+				columns,
+			} => {
+				let tbl_name = pg_ident(table.parts.last().map(String::as_str).unwrap_or_default());
+				let sql = if columns.is_empty() {
+					format!("SELECT * FROM {tbl_name};")
+				} else {
+					let cols = columns.iter().map(|c| pg_ident(c)).collect::<Vec<_>>().join(", ");
+					format!("SELECT {cols} FROM {tbl_name};")
+				};
+				let stmt = if let Ok(stmts) = surrealdb_pgsql::parse_statements(&sql) {
+					if let Some(PgStatement::Select(s)) = stmts.into_iter().next() {
+						Some(s)
+					} else {
+						None
+					}
+				} else {
+					None
+				};
+				(sql, stmt)
+			}
+		};
+
+		let is_csv = matches!(copy.options.format, CopyFormat::Csv);
+		let delimiter = copy.options.delimiter.unwrap_or(if is_csv {
+			b','
+		} else {
+			b'\t'
+		});
+		let quote = copy.options.quote.unwrap_or(b'"');
+		let escape = copy.options.escape.unwrap_or(if is_csv {
+			b'"'
+		} else {
+			b'\\'
+		});
+		let null_str = copy.options.null.as_deref().unwrap_or(if is_csv {
+			""
+		} else {
+			"\\N"
+		});
+		let has_header = copy.options.header.unwrap_or(false);
+
+		let cancel = self.arm_cancel();
+		let req = QueryRequest::new(QuerySource::pgsql(&sql), &self.session)
+			.with_optional_transaction(self.transaction.clone())
+			.with_cancel(cancel);
+
+		let results = match self.ds.run(req).await {
+			Ok(r) => r,
+			Err(err) => {
+				self.note_simple_error(&PgError::from(&err), out);
+				return Ok(());
+			}
+		};
+
+		let Some(first_res) = results.into_iter().next() else {
+			msg::write_copy_out_response(out, 0, 0);
+			msg::write_copy_done(out);
+			msg::write_command_complete(out, "COPY 0");
+			return Ok(());
+		};
+
+		let value = match first_res.result {
+			Ok(v) => v,
+			Err(err) => {
+				self.note_simple_error(&PgError::from(&err), out);
+				return Ok(());
+			}
+		};
+
+		let mut descriptor = None;
+		if let Some(s) = &select_stmt {
+			let mut catalog = MemoryCatalog::new();
+			if let Some(db) = &self.session.db {
+				catalog.set_database(Some(db.clone()));
+			}
+			let policy = DialectPolicy::postgres();
+			if let Ok(bound) = bind_select(s, &catalog, &policy, None) {
+				descriptor = Some(bound.describe(&catalog, &policy));
+			}
+		}
+
+		let shape = if let Some(desc) = &descriptor {
+			shape_result_with_descriptor(desc, value)
+		} else {
+			shape_result(value)
+		};
+
+		let num_cols = shape.columns.len() as i16;
+		msg::write_copy_out_response(out, 0, num_cols);
+
+		// Header row
+		if is_csv && has_header {
+			let header_line = shape
+				.columns
+				.iter()
+				.map(|col| format_csv_cell(&col.name, delimiter, quote, escape, null_str))
+				.collect::<Vec<_>>()
+				.join(&(delimiter as char).to_string())
+				+ "\n";
+			msg::write_copy_data(out, header_line.as_bytes());
+		}
+
+		// Data rows
+		let row_count = shape.rows.len();
+		for row in shape.rows {
+			let line = if is_csv {
+				let mut cells = Vec::with_capacity(row.len());
+				for (i, cell) in row.into_iter().enumerate() {
+					let ty = shape.columns.get(i).map(|c| &c.ty).unwrap_or(&PgType::Text);
+					match cell {
+						None => cells.push(null_str.to_string()),
+						Some(v) => {
+							let raw = crate::encode::encode_text(v, ty)
+								.map(|b| String::from_utf8_lossy(&b).into_owned())
+								.unwrap_or_default();
+							cells.push(format_csv_cell(&raw, delimiter, quote, escape, null_str));
+						}
+					}
+				}
+				cells.join(&(delimiter as char).to_string()) + "\n"
+			} else {
+				let mut cells = Vec::with_capacity(row.len());
+				for (i, cell) in row.into_iter().enumerate() {
+					let ty = shape.columns.get(i).map(|c| &c.ty).unwrap_or(&PgType::Text);
+					match cell {
+						None => cells.push(null_str.to_string()),
+						Some(v) => {
+							let raw = crate::encode::encode_text(v, ty)
+								.map(|b| String::from_utf8_lossy(&b).into_owned())
+								.unwrap_or_default();
+							cells.push(format_text_cell(&raw, delimiter));
+						}
+					}
+				}
+				cells.join(&(delimiter as char).to_string()) + "\n"
+			};
+			msg::write_copy_data(out, line.as_bytes());
+			if out.len() >= FLUSH_THRESHOLD {
+				self.flush(out).await?;
+			}
+		}
+
+		msg::write_copy_done(out);
+		msg::write_command_complete(out, &format!("COPY {row_count}"));
 		Ok(())
 	}
 
@@ -2141,55 +2956,193 @@ impl Connection {
 		out: &mut BytesMut,
 	) -> Result<(), PgError> {
 		match op {
-			TxnOp::Begin => {
+			TxnOp::Begin {
+				read_only,
+			} => {
 				if self.transaction.is_some() {
 					msg::write_notice(out, "25001", "there is already a transaction in progress");
 				} else {
+					let txn_type = if read_only {
+						TransactionType::Read
+					} else {
+						TransactionType::Write
+					};
 					let tx = self
 						.ds
-						.transaction(TransactionType::Write)
+						.transaction(txn_type)
 						.await
 						.map_err(|err| PgError::internal(err.to_string()))?;
 					self.transaction = Some(Arc::new(tx));
 					self.txn_failed = false;
+					self.txn_session_snapshot = Some(self.session.clone());
+					self.txn_has_local_session_override = false;
 					self.txn_lets.clear();
+					self.savepoints.clear();
+					self.savepoint_sessions.clear();
+					self.gucs.begin_transaction();
 				}
 				msg::write_command_complete(out, "BEGIN");
 			}
-			TxnOp::Commit => match self.transaction.take() {
-				// Committing an aborted transaction rolls it back; report so.
-				Some(tx) if self.txn_failed => {
-					self.txn_failed = false;
-					self.txn_lets.clear();
-					let _ = tx.cancel().await;
-					msg::write_command_complete(out, "ROLLBACK");
-				}
-				Some(tx) => {
-					// The transaction was already taken, so on failure
-					// ready_status() reports 'I' and the caller emits only the
-					// error (no trailing CommandComplete), keeping the sequence valid.
-					let lets = std::mem::take(&mut self.txn_lets);
-					tx.commit().await.map_err(|err| PgError::internal(err.to_string()))?;
-					// Captured LETs become session variables only once the
-					// transaction that bound them is durable.
-					for (name, value) in lets {
-						self.session.variables.insert(name, value);
+			TxnOp::Commit => {
+				self.savepoints.clear();
+				self.savepoint_sessions.clear();
+				self.portals.clear();
+				self.portal_bytes = 0;
+				match self.transaction.take() {
+					// Committing an aborted transaction rolls it back; report so.
+					Some(tx) if self.txn_failed => {
+						self.txn_failed = false;
+						self.txn_lets.clear();
+						if let Some(snap) = self.txn_session_snapshot.take() {
+							self.session = snap;
+						}
+						self.txn_has_local_session_override = false;
+						let _ = tx.cancel().await;
+						let changed = self.gucs.rollback_transaction();
+						for (canon, val) in changed {
+							msg::write_parameter_status(out, canon, &val);
+						}
+						msg::write_command_complete(out, "ROLLBACK");
 					}
-					msg::write_command_complete(out, "COMMIT");
+					Some(tx) => {
+						// The transaction was already taken, so on failure
+						// ready_status() reports 'I' and the caller emits only the
+						// error (no trailing CommandComplete), keeping the sequence valid.
+						if self.txn_has_local_session_override {
+							if let Some(snap) = self.txn_session_snapshot.take() {
+								self.session = snap;
+							}
+						} else {
+							self.txn_session_snapshot = None;
+						}
+						self.txn_has_local_session_override = false;
+						let lets = std::mem::take(&mut self.txn_lets);
+						self.gucs.commit_transaction();
+						tx.commit().await.map_err(|err| PgError::internal(err.to_string()))?;
+						// Captured LETs become session variables only once the
+						// transaction that bound them is durable.
+						for (name, value) in lets {
+							self.session.variables.insert(name, value);
+						}
+						msg::write_command_complete(out, "COMMIT");
+					}
+					None => {
+						msg::write_notice(out, "25P01", "there is no transaction in progress");
+						msg::write_command_complete(out, "COMMIT");
+					}
 				}
-				None => {
-					msg::write_notice(out, "25P01", "there is no transaction in progress");
-					msg::write_command_complete(out, "COMMIT");
-				}
-			},
+			}
 			TxnOp::Rollback => {
+				self.savepoints.clear();
+				self.savepoint_sessions.clear();
+				self.portals.clear();
+				self.portal_bytes = 0;
+				if let Some(snap) = self.txn_session_snapshot.take() {
+					self.session = snap;
+				}
+				self.txn_has_local_session_override = false;
 				self.txn_lets.clear();
 				match self.transaction.take() {
 					Some(tx) => {
 						let _ = tx.cancel().await;
+						let changed = self.gucs.rollback_transaction();
+						for (canon, val) in changed {
+							msg::write_parameter_status(out, canon, &val);
+						}
 					}
 					None => {
 						msg::write_notice(out, "25P01", "there is no transaction in progress");
+					}
+				}
+				self.txn_failed = false;
+				msg::write_command_complete(out, "ROLLBACK");
+			}
+
+			TxnOp::Savepoint(name) => {
+				let Some(tx) = self.transaction.as_ref() else {
+					return Err(PgError::no_active_transaction(
+						"SAVEPOINT can only be used in transaction blocks",
+					));
+				};
+				if self.txn_failed {
+					return Err(PgError::in_failed_transaction(
+						"current transaction is aborted, commands ignored until end of transaction block",
+					));
+				}
+				tx.new_save_point().await.map_err(|err| PgError::internal(err.to_string()))?;
+				self.gucs.savepoint(&name);
+				self.savepoints.push(name.clone());
+				self.savepoint_sessions.push((name, self.session.clone(), self.txn_lets.len()));
+				msg::write_command_complete(out, "SAVEPOINT");
+			}
+			TxnOp::ReleaseSavepoint(name) => {
+				let Some(tx) = self.transaction.as_ref() else {
+					return Err(PgError::no_active_transaction(
+						"RELEASE SAVEPOINT can only be used in transaction blocks",
+					));
+				};
+				if self.txn_failed {
+					return Err(PgError::in_failed_transaction(
+						"current transaction is aborted, commands ignored until end of transaction block",
+					));
+				}
+				let pos = self.savepoints.iter().rposition(|s| s.eq_ignore_ascii_case(&name));
+				let Some(idx) = pos else {
+					return Err(PgError::invalid_savepoint(format!(
+						"savepoint \"{name}\" does not exist"
+					)));
+				};
+				while self.savepoints.len() > idx {
+					tx.release_last_save_point()
+						.await
+						.map_err(|err| PgError::internal(err.to_string()))?;
+					self.savepoints.pop();
+				}
+				if let Some(s_idx) = self
+					.savepoint_sessions
+					.iter()
+					.rposition(|(s, _, _)| s.eq_ignore_ascii_case(&name))
+				{
+					self.savepoint_sessions.truncate(s_idx);
+				}
+				let _ = self.gucs.release_savepoint(&name);
+				msg::write_command_complete(out, "RELEASE");
+			}
+			TxnOp::RollbackSavepoint(name) => {
+				let Some(tx) = self.transaction.as_ref() else {
+					return Err(PgError::no_active_transaction(
+						"ROLLBACK TO SAVEPOINT can only be used in transaction blocks",
+					));
+				};
+				let pos = self.savepoints.iter().rposition(|s| s.eq_ignore_ascii_case(&name));
+				let Some(idx) = pos else {
+					return Err(PgError::invalid_savepoint(format!(
+						"savepoint \"{name}\" does not exist"
+					)));
+				};
+				while self.savepoints.len() > idx + 1 {
+					tx.rollback_to_save_point()
+						.await
+						.map_err(|err| PgError::internal(err.to_string()))?;
+					self.savepoints.pop();
+				}
+				tx.rollback_to_save_point()
+					.await
+					.map_err(|err| PgError::internal(err.to_string()))?;
+				tx.new_save_point().await.map_err(|err| PgError::internal(err.to_string()))?;
+				if let Some(s_idx) = self
+					.savepoint_sessions
+					.iter()
+					.rposition(|(s, _, _)| s.eq_ignore_ascii_case(&name))
+				{
+					self.session = self.savepoint_sessions[s_idx].1.clone();
+					// The LETs made after the savepoint are undone along with its writes.
+					self.txn_lets.truncate(self.savepoint_sessions[s_idx].2);
+					self.savepoint_sessions.truncate(s_idx + 1);
+				}
+				if let Ok(changed) = self.gucs.rollback_to_savepoint(&name) {
+					for (canon, val) in changed {
+						msg::write_parameter_status(out, canon, &val);
 					}
 				}
 				self.txn_failed = false;
@@ -2260,15 +3213,52 @@ impl Connection {
 			|| self.dialect == Dialect::MySql
 			|| set.name.is_empty()
 			|| set.name.eq_ignore_ascii_case("dialect")
+			|| set.name.eq_ignore_ascii_case("role")
+			|| set.name.eq_ignore_ascii_case("request.jwt.claims")
+			|| set.name.to_ascii_lowercase().starts_with("request.jwt.claim.")
 			|| is_no_op_guc(&set.name)
 	}
 
-	/// Handle an intercepted `SET`: switch dialect, accept a known no-op GUC,
-	/// or reject an unknown one.
+	/// Execute any control statement.
+	async fn execute_control(
+		&mut self,
+		control: Control,
+		out: &mut BytesMut,
+	) -> Result<(), PgError> {
+		match control {
+			Control::Transaction(op) => self.handle_transaction_control(op, out).await,
+			Control::Set(set) => self.handle_set(set, out),
+			Control::Show(param) => self.handle_show(&param, out),
+			Control::Reset(param) => self.handle_reset(&param, out),
+		}
+	}
+
+	/// Classify a query into a control statement if applicable.
+	fn classify_control(&self, query: &str) -> Option<Control> {
+		if let Some(op) = transaction_control(query) {
+			return Some(Control::Transaction(op));
+		}
+		if let Some(show_param) = parse_show(query) {
+			return Some(Control::Show(show_param));
+		}
+		if let Some(reset_param) = parse_reset(query) {
+			return Some(Control::Reset(reset_param));
+		}
+		if let Some(set) = parse_set(query)
+			&& self.should_intercept_set(&set)
+		{
+			return Some(Control::Set(set));
+		}
+		None
+	}
+
+	/// Handle an intercepted `SET`: switch dialect, update GucStore, and emit ParameterStatus if
+	/// needed.
 	fn handle_set(&mut self, set: SetStatement, out: &mut BytesMut) -> Result<(), PgError> {
 		let SetStatement {
 			name,
 			value,
+			is_local,
 		} = set;
 		if name.is_empty() {
 			let msg = if !value.is_empty() {
@@ -2285,14 +3275,330 @@ impl Connection {
 			msg::write_command_complete(out, "SET");
 			return Ok(());
 		}
-		if is_no_op_guc(&name) {
+
+		if name.eq_ignore_ascii_case("role") {
+			self.apply_role_setting(&value, is_local)?;
 			msg::write_command_complete(out, "SET");
-			Ok(())
-		} else {
-			Err(PgError::undefined_object(format!(
-				"unrecognized configuration parameter \"{name}\""
-			)))
+			return Ok(());
 		}
+
+		if name.eq_ignore_ascii_case("request.jwt.claims")
+			|| name.to_ascii_lowercase().starts_with("request.jwt.claim.")
+		{
+			self.apply_claims_setting(&name, &value, is_local)?;
+			msg::write_command_complete(out, "SET");
+			return Ok(());
+		}
+
+		let in_txn = self.transaction.is_some();
+		if is_local && !in_txn {
+			msg::write_notice(out, "01000", "SET LOCAL will only have effect in transactions");
+		}
+		if self.gucs.is_ignored(&name) {
+			msg::write_notice(out, "01000", &format!("parameter \"{name}\" is ignored"));
+		}
+		let changed_status = self.gucs.set(&name, &value, is_local, in_txn)?;
+		if let Some((canon, new_val)) = changed_status {
+			msg::write_parameter_status(out, canon, &new_val);
+		}
+		msg::write_command_complete(out, "SET");
+		Ok(())
+	}
+
+	/// Handle `SHOW <param>` and `SHOW ALL`.
+	fn handle_show(&mut self, param: &str, out: &mut BytesMut) -> Result<(), PgError> {
+		let result = self.gucs.show(param)?;
+		match result {
+			ShowResult::Single {
+				name: _,
+				value,
+			} => {
+				self.describe_show(param, out)?;
+				msg::write_data_row(out, &[Some(value.into_bytes())]);
+				msg::write_command_complete(out, "SHOW");
+			}
+			ShowResult::All(entries) => {
+				self.describe_show(param, out)?;
+				for entry in entries {
+					msg::write_data_row(
+						out,
+						&[
+							Some(entry.name.into_bytes()),
+							Some(entry.current_value.into_bytes()),
+							Some(entry.description.into_bytes()),
+						],
+					);
+				}
+				msg::write_command_complete(out, "SHOW");
+			}
+		}
+		Ok(())
+	}
+
+	/// Describe the row format of a `SHOW` statement.
+	fn describe_show(&self, param: &str, out: &mut BytesMut) -> Result<(), PgError> {
+		if param.eq_ignore_ascii_case("ALL") {
+			let columns = vec![
+				PgColumn {
+					name: "name".to_string(),
+					ty: PgType::Text,
+				},
+				PgColumn {
+					name: "setting".to_string(),
+					ty: PgType::Text,
+				},
+				PgColumn {
+					name: "description".to_string(),
+					ty: PgType::Text,
+				},
+			];
+			msg::write_row_description(out, &columns, |_| FORMAT_TEXT);
+		} else {
+			let norm = normalize_name(param);
+			let columns = vec![PgColumn {
+				name: norm,
+				ty: PgType::Text,
+			}];
+			msg::write_row_description(out, &columns, |_| FORMAT_TEXT);
+		}
+		Ok(())
+	}
+
+	/// Handle `RESET <param>` and `RESET ALL`.
+	fn handle_reset(&mut self, param: &str, out: &mut BytesMut) -> Result<(), PgError> {
+		if param.eq_ignore_ascii_case("role") {
+			self.apply_role_setting("none", false)?;
+		} else if (param.eq_ignore_ascii_case("request.jwt.claims")
+			|| param.to_ascii_lowercase().starts_with("request.jwt.claim."))
+			&& let Some(base) = &self.base_session
+		{
+			self.session.tk = base.tk.clone();
+			self.session.rd = base.rd.clone();
+			self.session.au = Arc::clone(&base.au);
+		}
+		let changed_status = self.gucs.reset(param)?;
+		for (canon, new_val) in changed_status {
+			msg::write_parameter_status(out, canon, &new_val);
+		}
+		msg::write_command_complete(out, "RESET");
+		Ok(())
+	}
+
+	fn apply_role_setting(&mut self, role_val: &str, is_local: bool) -> Result<(), PgError> {
+		let clean = role_val.trim().trim_matches('\'').trim_matches('"').trim();
+		let in_txn = self.transaction.is_some();
+		if is_local {
+			self.txn_has_local_session_override = true;
+		}
+
+		let base_au = self
+			.base_session
+			.as_ref()
+			.map(|b| Arc::clone(&b.au))
+			.unwrap_or_else(|| Arc::clone(&self.session.au));
+
+		if clean.eq_ignore_ascii_case("NONE")
+			|| clean.eq_ignore_ascii_case("DEFAULT")
+			|| clean.eq_ignore_ascii_case("RESET")
+			|| clean.is_empty()
+		{
+			self.session.au = base_au;
+			let _ = self.gucs.set("role", "none", is_local, in_txn)?;
+			return Ok(());
+		}
+
+		if clean.eq_ignore_ascii_case("anon") || clean.eq_ignore_ascii_case("anonymous") {
+			self.session.au =
+				Arc::new(Auth::new(Actor::new("anon".to_string(), vec![], Level::No)));
+			let _ = self.gucs.set("role", "anon", is_local, in_txn)?;
+			return Ok(());
+		}
+
+		if clean.eq_ignore_ascii_case("authenticated") {
+			if matches!(self.session.au.level(), Level::No) || matches!(base_au.level(), Level::No)
+			{
+				return Err(PgError::insufficient_privilege(
+					"permission denied to set role \"authenticated\": cannot elevate unauthenticated session",
+				));
+			}
+			self.session.au = base_au;
+			let _ = self.gucs.set("role", "authenticated", is_local, in_txn)?;
+			return Ok(());
+		}
+
+		if let Ok(target_role) = clean.parse::<Role>() {
+			if matches!(self.session.au.level(), Level::No)
+				|| matches!(base_au.level(), Level::No | Level::Record(..))
+			{
+				return Err(PgError::insufficient_privilege(format!(
+					"permission denied to set role \"{clean}\": privilege elevation not permitted",
+				)));
+			}
+			let max_base_role = if matches!(base_au.level(), Level::Root) {
+				Some(Role::Owner)
+			} else {
+				base_au.max_role()
+			};
+
+			if let Some(max_role) = max_base_role
+				&& target_role <= max_role
+			{
+				let actor_id = self.session.au.id().to_string();
+				self.session.au = Arc::new(Auth::new(Actor::new(
+					actor_id,
+					vec![target_role],
+					self.session.au.level().clone(),
+				)));
+				let _ = self.gucs.set("role", clean, is_local, in_txn)?;
+				return Ok(());
+			}
+			return Err(PgError::insufficient_privilege(format!(
+				"permission denied to set role \"{clean}\": privilege elevation not permitted",
+			)));
+		}
+
+		Err(PgError::insufficient_privilege(format!("permission denied to set role \"{clean}\"",)))
+	}
+
+	fn apply_claims_setting(
+		&mut self,
+		name: &str,
+		val: &str,
+		is_local: bool,
+	) -> Result<(), PgError> {
+		let clean = val.trim().trim_matches('\'').trim_matches('"').trim();
+		// GUC names are case-insensitive; the claim checks below match lower-case names.
+		let name = name.to_ascii_lowercase();
+		let name = name.as_str();
+		let in_txn = self.transaction.is_some();
+		if is_local {
+			self.txn_has_local_session_override = true;
+		}
+		let base_au = self
+			.base_session
+			.as_ref()
+			.map(|b| Arc::clone(&b.au))
+			.unwrap_or_else(|| Arc::clone(&self.session.au));
+		let base_rd = self
+			.base_session
+			.as_ref()
+			.and_then(|b| b.rd.clone())
+			.or_else(|| self.session.rd.clone());
+
+		if name.eq_ignore_ascii_case("request.jwt.claims") {
+			let parsed_val: serde_json::Value = serde_json::from_str(clean).map_err(|err| {
+				PgError::invalid_parameter_value(format!(
+					"invalid JSON in request.jwt.claims: {err}"
+				))
+			})?;
+
+			let serde_json::Value::Object(claims_obj) = &parsed_val else {
+				return Err(PgError::invalid_parameter_value(
+					"request.jwt.claims must be a JSON object",
+				));
+			};
+
+			// Role claim check
+			if let Some(serde_json::Value::String(role)) = claims_obj.get("role") {
+				if role.eq_ignore_ascii_case("anon") || role.eq_ignore_ascii_case("anonymous") {
+					self.session.au =
+						Arc::new(Auth::new(Actor::new("anon".to_string(), vec![], Level::No)));
+				} else if matches!(self.session.au.level(), Level::No)
+					|| matches!(base_au.level(), Level::No)
+				{
+					return Err(PgError::insufficient_privilege(
+						"permission denied: unauthenticated session cannot elevate via request.jwt.claims",
+					));
+				}
+			}
+
+			// Sub claim check
+			let sub_val = claims_obj.get("sub").or_else(|| claims_obj.get("id"));
+			if let Some(sub_val) = sub_val {
+				let sub_str = match sub_val {
+					serde_json::Value::String(s) => s.clone(),
+					other => other.to_string(),
+				};
+				if matches!(self.session.au.level(), Level::No)
+					|| matches!(base_au.level(), Level::No)
+				{
+					return Err(PgError::insufficient_privilege(
+						"permission denied: unauthenticated session cannot set identity via request.jwt.claims",
+					));
+				}
+				if let Some(current_rd) = &base_rd {
+					if !subject_names_record(current_rd, &sub_str) {
+						return Err(PgError::insufficient_privilege(
+							"permission denied: cannot impersonate a different user via request.jwt.claims",
+						));
+					}
+				} else if matches!(base_au.level(), Level::Root | Level::Database(..)) {
+					let ns = self.session.ns.clone().unwrap_or_else(|| "test".to_string());
+					let db = self.session.db.clone().unwrap_or_else(|| "test".to_string());
+					let ac = self.session.ac.clone().unwrap_or_else(|| "jwt".to_string());
+					let rid = match syn::record_id(&sub_str) {
+						Ok(rid) => rid,
+						Err(_) => surrealdb_types::RecordId::new("user", sub_str.clone()),
+					};
+					self.session.rd = Some(Value::RecordId(rid.clone()));
+					self.session.au = Arc::new(Auth::for_record(rid.to_sql(), &ns, &db, &ac));
+				}
+			}
+
+			self.session.tk = Some(parsed_val.into_value());
+			let _ = self.gucs.set(name, clean, is_local, in_txn)?;
+			return Ok(());
+		}
+
+		if let Some(claim_key) = name.strip_prefix("request.jwt.claim.") {
+			if claim_key.eq_ignore_ascii_case("role") {
+				if clean.eq_ignore_ascii_case("anon") || clean.eq_ignore_ascii_case("anonymous") {
+					self.session.au =
+						Arc::new(Auth::new(Actor::new("anon".to_string(), vec![], Level::No)));
+				} else if matches!(self.session.au.level(), Level::No)
+					|| matches!(base_au.level(), Level::No)
+				{
+					return Err(PgError::insufficient_privilege(
+						"permission denied: unauthenticated session cannot elevate via request.jwt.claim.role",
+					));
+				}
+			} else if claim_key.eq_ignore_ascii_case("sub") {
+				if matches!(base_au.level(), Level::No) {
+					return Err(PgError::insufficient_privilege(
+						"permission denied: unauthenticated session cannot set identity via request.jwt.claim.sub",
+					));
+				}
+				if let Some(current_rd) = &base_rd {
+					if !subject_names_record(current_rd, clean) {
+						return Err(PgError::insufficient_privilege(
+							"permission denied: cannot impersonate a different user via request.jwt.claim.sub",
+						));
+					}
+				} else if matches!(base_au.level(), Level::Root | Level::Database(..)) {
+					let ns = self.session.ns.clone().unwrap_or_else(|| "test".to_string());
+					let db = self.session.db.clone().unwrap_or_else(|| "test".to_string());
+					let ac = self.session.ac.clone().unwrap_or_else(|| "jwt".to_string());
+					let rid = match syn::record_id(clean) {
+						Ok(rid) => rid,
+						Err(_) => surrealdb_types::RecordId::new("user", clean.to_string()),
+					};
+					self.session.rd = Some(Value::RecordId(rid.clone()));
+					self.session.au = Arc::new(Auth::for_record(rid.to_sql(), &ns, &db, &ac));
+				}
+			}
+
+			let mut obj = match self.session.tk.take() {
+				Some(Value::Object(map)) => map,
+				_ => surrealdb_types::Object::default(),
+			};
+			obj.insert(claim_key.to_string(), Value::String(clean.to_string()));
+			self.session.tk = Some(Value::Object(obj));
+			let _ = self.gucs.set(name, clean, is_local, in_txn)?;
+			return Ok(());
+		}
+
+		let _ = self.gucs.set(name, clean, is_local, in_txn)?;
+		Ok(())
 	}
 
 	/// Install a fresh cancellation handle for the next query and register it
@@ -2520,6 +3826,171 @@ impl Connection {
 	}
 }
 
+fn format_csv_cell(s: &str, delimiter: u8, quote: u8, escape: u8, null_str: &str) -> String {
+	let delim = delimiter as char;
+	let q = quote as char;
+	let esc = escape as char;
+	let needs_quotes = s.is_empty()
+		|| s == null_str
+		|| s.contains(delim)
+		|| s.contains(q)
+		|| s.contains('\n')
+		|| s.contains('\r');
+
+	if needs_quotes {
+		let mut res = String::with_capacity(s.len() + 2);
+		res.push(q);
+		for c in s.chars() {
+			if c == q {
+				if esc == q {
+					res.push(q);
+					res.push(q);
+				} else {
+					res.push(esc);
+					res.push(q);
+				}
+			} else {
+				res.push(c);
+			}
+		}
+		res.push(q);
+		res
+	} else {
+		s.to_string()
+	}
+}
+
+fn format_text_cell(s: &str, delimiter: u8) -> String {
+	let delim = delimiter as char;
+	let mut res = String::with_capacity(s.len());
+	for c in s.chars() {
+		match c {
+			'\\' => res.push_str("\\\\"),
+			'\n' => res.push_str("\\n"),
+			'\r' => res.push_str("\\r"),
+			'\t' if delim != '\t' => res.push_str("\\t"),
+			c if c == delim => {
+				res.push('\\');
+				res.push(c);
+			}
+			c => res.push(c),
+		}
+	}
+	res
+}
+
+/// Whether a claimed subject names exactly the record `rd`: its full record id
+/// (`user:alice`) or its key alone (`alice`, `42`, a UUID). The whole claim must
+/// be that spelling, so a subject that is only the tail of the record id
+/// (`alice` against `user:malice`) or that merely starts with it
+/// (`user:malice garbage`) never matches.
+fn subject_names_record(rd: &Value, claimed: &str) -> bool {
+	if claimed == rd.to_sql() {
+		return true;
+	}
+	let Value::RecordId(rid) = rd else {
+		return false;
+	};
+	match &rid.key {
+		RecordIdKey::String(key) => claimed == key,
+		RecordIdKey::Number(key) => claimed == key.to_string(),
+		RecordIdKey::Uuid(key) => claimed == key.to_string(),
+		_ => false,
+	}
+}
+
+/// The error for a COPY option that the record scanner cannot honour: the
+/// delimiter, and for CSV the quote and escape, must each be one ASCII byte, and
+/// the delimiter cannot be a line end.
+fn copy_options_error(format: &Format) -> Option<PgError> {
+	if !format.delimiter.is_ascii()
+		|| (format.csv && !(format.quote.is_ascii() && format.escape.is_ascii()))
+	{
+		return Some(PgError::feature_not_supported(
+			"COPY delimiter, quote and escape must be single one-byte characters",
+		));
+	}
+	if format.delimiter == b'\n' || format.delimiter == b'\r' {
+		return Some(PgError::invalid_parameter_value(
+			"COPY delimiter cannot be newline or carriage return",
+		));
+	}
+	None
+}
+
+/// Renders `name` as a PostgreSQL identifier, quoting it unless it is a plain
+/// one. A name of `*` is quoted: it names a column, not a wildcard.
+fn pg_ident(name: &str) -> String {
+	if name == "*" {
+		return "\"*\"".to_string();
+	}
+	struct Ident<'a>(&'a str);
+	impl std::fmt::Display for Ident<'_> {
+		fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+			print_ident(f, self.0)
+		}
+	}
+	Ident(name).to_string()
+}
+
+/// The query that lists a table's column names in order.
+fn copy_column_lookup_query(table: &str) -> String {
+	format!(
+		"SELECT column_name FROM information_schema.columns WHERE table_name = {} ORDER BY ordinal_position;",
+		pg_string_literal(table)
+	)
+}
+
+/// Renders `value` as a PostgreSQL string literal.
+fn pg_string_literal(value: &str) -> String {
+	struct Literal<'a>(&'a str);
+	impl std::fmt::Display for Literal<'_> {
+		fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+			print_string_literal(f, self.0)
+		}
+	}
+	Literal(value).to_string()
+}
+
+/// Renders `key` as a SurrealQL object key: bare when it is a plain identifier,
+/// otherwise as a double-quoted string.
+fn surql_object_key(key: &str) -> String {
+	let plain = key.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+		&& key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+	if plain {
+		key.to_string()
+	} else {
+		format!("\"{}\"", key.replace('\\', "\\\\").replace('"', "\\\""))
+	}
+}
+
+fn value_to_surrealql(val: &Option<String>) -> String {
+	match val {
+		None => "NULL".to_string(),
+		Some(s) => {
+			if s.eq_ignore_ascii_case("t") || s.eq_ignore_ascii_case("true") {
+				return "true".to_string();
+			}
+			if s.eq_ignore_ascii_case("f") || s.eq_ignore_ascii_case("false") {
+				return "false".to_string();
+			}
+			if s.len() > 1 && s.starts_with('0') && !s.contains('.') {
+				return format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'"));
+			}
+			if let Ok(i) = s.parse::<i64>() {
+				return i.to_string();
+			}
+			if let Ok(f) = s.parse::<f64>()
+				&& f.is_finite()
+				&& (s.contains('.') || s.contains('e') || s.contains('E'))
+			{
+				return f.to_string();
+			}
+			format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'"))
+		}
+	}
+}
+
 /// Rewrite Postgres positional parameters (`$1`, `$2`, …) into SurrealQL
 /// parameters (`$_1`, `$_2`, …), skipping string literals and comments, and
 /// return the rewritten query plus the highest positional index seen.
@@ -2686,7 +4157,7 @@ fn wire_row_fits(cell_lengths: impl Iterator<Item = usize>) -> bool {
 }
 
 /// Encode one cell in the requested wire format.
-fn encode_cell(value: Value, ty: PgType, format: i16) -> Result<Vec<u8>, PgError> {
+fn encode_cell(value: Value, ty: &PgType, format: i16) -> Result<Vec<u8>, PgError> {
 	if format == FORMAT_BINARY {
 		encode::encode_binary(value, ty)
 	} else {
@@ -2707,7 +4178,7 @@ fn encode_row(
 	let mut cells = Vec::with_capacity(row.len());
 	for (i, (cell, column)) in row.into_iter().zip(columns).enumerate() {
 		match cell {
-			Some(value) => cells.push(Some(encode_cell(value, column.ty, format_at(formats, i))?)),
+			Some(value) => cells.push(Some(encode_cell(value, &column.ty, format_at(formats, i))?)),
 			None => cells.push(None),
 		}
 	}
@@ -2752,11 +4223,16 @@ fn auth_failed(user: &str) -> PgError {
 }
 
 /// An intercepted transaction-control statement.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 enum TxnOp {
-	Begin,
+	Begin {
+		read_only: bool,
+	},
 	Commit,
 	Rollback,
+	Savepoint(String),
+	ReleaseSavepoint(String),
+	RollbackSavepoint(String),
 }
 
 /// Recognise a standalone transaction-control statement, tolerating the
@@ -2771,19 +4247,59 @@ fn transaction_control(trimmed: &str) -> Option<TxnOp> {
 	if stripped.contains(';') {
 		return None;
 	}
-	let mut tokens = stripped.split_whitespace().map(str::to_ascii_uppercase);
-	let (op, start) = match tokens.next()?.as_str() {
-		"BEGIN" => (TxnOp::Begin, false),
-		"START" => (TxnOp::Begin, true), // START must be followed by TRANSACTION
-		"COMMIT" | "END" => (TxnOp::Commit, false),
-		"ROLLBACK" | "ABORT" => (TxnOp::Rollback, false),
-		_ => return None,
-	};
-	if start && tokens.next().as_deref() != Some("TRANSACTION") {
+	let mut tokens_raw = stripped.split_whitespace();
+	let first = tokens_raw.next()?;
+	let first_upper = first.to_ascii_uppercase();
+
+	if first_upper == "SAVEPOINT" {
+		let name = tokens_raw.next()?;
+		if tokens_raw.next().is_none() {
+			let clean = name.trim_matches('"').trim_matches('`').to_string();
+			if !clean.is_empty() {
+				return Some(TxnOp::Savepoint(clean));
+			}
+		}
 		return None;
 	}
-	// Every remaining token must be a recognised transaction modifier; anything
-	// else means this is a real query that merely starts with the keyword.
+
+	if first_upper == "RELEASE" {
+		let mut next = tokens_raw.next()?;
+		if next.eq_ignore_ascii_case("SAVEPOINT") {
+			next = tokens_raw.next()?;
+		}
+		if tokens_raw.next().is_none() {
+			let clean = next.trim_matches('"').trim_matches('`').to_string();
+			if !clean.is_empty() {
+				return Some(TxnOp::ReleaseSavepoint(clean));
+			}
+		}
+		return None;
+	}
+
+	if first_upper == "ROLLBACK" || first_upper == "ABORT" {
+		let mut next_opt = tokens_raw.next();
+		if let Some(t) = next_opt
+			&& (t.eq_ignore_ascii_case("WORK") || t.eq_ignore_ascii_case("TRANSACTION"))
+		{
+			next_opt = tokens_raw.next();
+		}
+		if let Some(t) = next_opt
+			&& t.eq_ignore_ascii_case("TO")
+		{
+			let mut name_opt = tokens_raw.next()?;
+			if name_opt.eq_ignore_ascii_case("SAVEPOINT") {
+				name_opt = tokens_raw.next()?;
+			}
+			if tokens_raw.next().is_none() {
+				let clean = name_opt.trim_matches('"').trim_matches('`').to_string();
+				if !clean.is_empty() {
+					return Some(TxnOp::RollbackSavepoint(clean));
+				}
+			}
+			return None;
+		}
+	}
+
 	const MODIFIERS: &[&str] = &[
 		"TRANSACTION",
 		"WORK",
@@ -2802,10 +4318,52 @@ fn transaction_control(trimmed: &str) -> Option<TxnOp> {
 		"NO",
 		"CHAIN",
 	];
-	if tokens.all(|t| MODIFIERS.contains(&t.as_str())) {
-		Some(op)
-	} else {
-		None
+
+	let mut tokens = stripped.split_whitespace().map(str::to_ascii_uppercase);
+	let first = tokens.next()?;
+	match first.as_str() {
+		"BEGIN" => {
+			let remaining: Vec<String> = tokens.collect();
+			if remaining.iter().all(|t| MODIFIERS.contains(&t.as_str())) {
+				let read_only = remaining.windows(2).any(|w| w[0] == "READ" && w[1] == "ONLY");
+				Some(TxnOp::Begin {
+					read_only,
+				})
+			} else {
+				None
+			}
+		}
+		"START" => {
+			if tokens.next().as_deref() != Some("TRANSACTION") {
+				return None;
+			}
+			let remaining: Vec<String> = tokens.collect();
+			if remaining.iter().all(|t| MODIFIERS.contains(&t.as_str())) {
+				let read_only = remaining.windows(2).any(|w| w[0] == "READ" && w[1] == "ONLY");
+				Some(TxnOp::Begin {
+					read_only,
+				})
+			} else {
+				None
+			}
+		}
+		"COMMIT" | "END" => {
+			let remaining: Vec<String> = tokens.collect();
+			if remaining.iter().all(|t| MODIFIERS.contains(&t.as_str())) {
+				Some(TxnOp::Commit)
+			} else {
+				None
+			}
+		}
+		"ROLLBACK" | "ABORT" => {
+			let remaining: Vec<String> = tokens.collect();
+			if remaining.iter().all(|t| MODIFIERS.contains(&t.as_str())) {
+				Some(TxnOp::Rollback)
+			} else {
+				None
+			}
+		}
+		_ => None,
 	}
 }
 
@@ -2846,12 +4404,12 @@ fn strip_sql_comments(sql: &str) -> String {
 	out
 }
 
-/// An intercepted `SET` statement. An empty `name` marks a `SET` whose syntax
-/// we do not model (e.g. `SET TIME ZONE ...`), accepted as a no-op.
-#[derive(Clone)]
+/// An intercepted `SET` statement.
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct SetStatement {
 	name: String,
 	value: String,
+	is_local: bool,
 }
 
 /// GUCs that drivers set on connect; accepted as silent no-ops (their effect is
@@ -2876,7 +4434,15 @@ fn is_no_op_guc(name: &str) -> bool {
 	NO_OP_GUCS.iter().any(|g| name.eq_ignore_ascii_case(g))
 }
 
-/// Recognise a `SET name = value` / `SET name TO value` statement.
+fn strip_prefix_case<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
+	if s.len() >= prefix.len() && s[..prefix.len()].eq_ignore_ascii_case(prefix) {
+		Some(&s[prefix.len()..])
+	} else {
+		None
+	}
+}
+
+/// Recognise a `SET [LOCAL|SESSION] name = value` / `SET name TO value` statement.
 fn parse_set(trimmed: &str) -> Option<SetStatement> {
 	let stripped = strip_sql_comments(trimmed);
 	let rest = stripped.trim().trim_end_matches(';').trim();
@@ -2887,18 +4453,66 @@ fn parse_set(trimmed: &str) -> Option<SetStatement> {
 	if !words.next()?.eq_ignore_ascii_case("SET") {
 		return None;
 	}
-	let assignment = words.next().unwrap_or("").trim();
+	let mut assignment = words.next().unwrap_or("").trim();
+	let mut is_local = false;
+
+	if let Some(after) = strip_prefix_case(assignment, "LOCAL ") {
+		is_local = true;
+		assignment = after.trim();
+	} else if let Some(after) = strip_prefix_case(assignment, "SESSION ") {
+		assignment = after.trim();
+	}
+
+	// SET [LOCAL] TIME ZONE ...
+	if let Some(after) = strip_prefix_case(assignment, "TIME ZONE") {
+		let val = after.trim();
+		let val = val.strip_prefix('=').unwrap_or(val).trim();
+		let val = if let Some(after_to) = strip_prefix_case(val, "TO ") {
+			after_to.trim()
+		} else {
+			val
+		};
+		return Some(SetStatement {
+			name: "timezone".to_string(),
+			value: val.to_string(),
+			is_local,
+		});
+	}
+
+	// SET NAMES ...
+	if let Some(after) = strip_prefix_case(assignment, "NAMES ") {
+		let val = after.trim();
+		return Some(SetStatement {
+			name: "client_encoding".to_string(),
+			value: val.to_string(),
+			is_local,
+		});
+	}
+
 	let first_word = assignment.split_whitespace().next().unwrap_or("");
-	if first_word.eq_ignore_ascii_case("ROLE")
-		|| first_word.eq_ignore_ascii_case("SESSION")
-		|| first_word.eq_ignore_ascii_case("TRANSACTION")
-		|| first_word.eq_ignore_ascii_case("LOCAL")
-	{
+	if first_word.eq_ignore_ascii_case("ROLE") {
+		let after = assignment[first_word.len()..].trim();
+		let val = if let Some(after_to) = strip_prefix_case(after, "TO ") {
+			after_to.trim()
+		} else if let Some(after_eq) = after.strip_prefix('=') {
+			after_eq.trim()
+		} else {
+			after
+		};
+		return Some(SetStatement {
+			name: "role".to_string(),
+			value: val.to_string(),
+			is_local,
+		});
+	}
+	if first_word.eq_ignore_ascii_case("TRANSACTION") {
 		return Some(SetStatement {
 			name: String::new(),
 			value: assignment.to_string(),
+			is_local,
 		});
 	}
+
 	// Split on the first `=` or a ` TO ` keyword.
 	let split = assignment.find('=').map(|i| (assignment[..i].trim(), assignment[i + 1..].trim()));
 	let split = split.or_else(|| {
@@ -2908,15 +4522,72 @@ fn parse_set(trimmed: &str) -> Option<SetStatement> {
 			.map(|i| (assignment[..i].trim(), assignment[i + 4..].trim()))
 	});
 	Some(match split {
-		Some((name, value)) => SetStatement {
-			name: name.to_string(),
-			value: value.to_string(),
-		},
+		Some((name, value)) => {
+			let clean_name = name.trim_matches('"').trim_matches('`').to_string();
+			SetStatement {
+				name: clean_name,
+				value: value.to_string(),
+				is_local,
+			}
+		}
 		None => SetStatement {
 			name: String::new(),
 			value: assignment.to_string(),
+			is_local,
 		},
 	})
+}
+
+/// Recognise a `SHOW <param>` or `SHOW ALL` statement.
+fn parse_show(trimmed: &str) -> Option<String> {
+	let stripped = strip_sql_comments(trimmed);
+	let rest = stripped.trim().trim_end_matches(';').trim();
+	if rest.contains(';') {
+		return None;
+	}
+	let mut words = rest.split_whitespace();
+	if !words.next()?.eq_ignore_ascii_case("SHOW") {
+		return None;
+	}
+	let first = words.next()?;
+	if first.eq_ignore_ascii_case("TIME") {
+		if let Some(second) = words.next()
+			&& second.eq_ignore_ascii_case("ZONE")
+		{
+			return Some("timezone".to_string());
+		}
+		return Some("time".to_string());
+	}
+	if first.eq_ignore_ascii_case("ALL") {
+		return Some("ALL".to_string());
+	}
+	Some(first.trim_matches('"').trim_matches('`').to_string())
+}
+
+/// Recognise a `RESET <param>` or `RESET ALL` statement.
+fn parse_reset(trimmed: &str) -> Option<String> {
+	let stripped = strip_sql_comments(trimmed);
+	let rest = stripped.trim().trim_end_matches(';').trim();
+	if rest.contains(';') {
+		return None;
+	}
+	let mut words = rest.split_whitespace();
+	if !words.next()?.eq_ignore_ascii_case("RESET") {
+		return None;
+	}
+	let first = words.next()?;
+	if first.eq_ignore_ascii_case("TIME") {
+		if let Some(second) = words.next()
+			&& second.eq_ignore_ascii_case("ZONE")
+		{
+			return Some("timezone".to_string());
+		}
+		return Some("time".to_string());
+	}
+	if first.eq_ignore_ascii_case("ALL") {
+		return Some("ALL".to_string());
+	}
+	Some(first.trim_matches('"').trim_matches('`').to_string())
 }
 
 /// Split the first statement before the first unquoted semicolon, returning
@@ -3153,10 +4824,13 @@ fn dialect_name(dialect: Dialect) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_types::{RecordId, RecordIdKey, Value};
+
 	use super::{
-		Dialect, TxnOp, dialect_from_options, dialect_name, parse_database_param, parse_dialect,
-		parse_set, rewrite_positional_params, row_within_wire_limit, split_statements,
-		transaction_control, wire_row_fits,
+		Dialect, TxnOp, copy_column_lookup_query, dialect_from_options, dialect_name,
+		parse_database_param, parse_dialect, parse_set, pg_ident, pg_string_literal,
+		rewrite_positional_params, row_within_wire_limit, split_statements, subject_names_record,
+		surql_object_key, transaction_control, wire_row_fits,
 	};
 
 	fn rewrite(query: &str) -> String {
@@ -3165,13 +4839,49 @@ mod tests {
 
 	#[test]
 	fn recognises_transaction_control() {
-		assert_eq!(transaction_control("BEGIN"), Some(TxnOp::Begin));
-		assert_eq!(transaction_control("begin;"), Some(TxnOp::Begin));
-		assert_eq!(transaction_control("START TRANSACTION"), Some(TxnOp::Begin));
+		assert_eq!(
+			transaction_control("BEGIN"),
+			Some(TxnOp::Begin {
+				read_only: false
+			})
+		);
+		assert_eq!(
+			transaction_control("begin;"),
+			Some(TxnOp::Begin {
+				read_only: false
+			})
+		);
+		assert_eq!(
+			transaction_control("START TRANSACTION"),
+			Some(TxnOp::Begin {
+				read_only: false
+			})
+		);
 		assert_eq!(transaction_control("COMMIT"), Some(TxnOp::Commit));
 		assert_eq!(transaction_control("End Transaction ;"), Some(TxnOp::Commit));
 		assert_eq!(transaction_control("ROLLBACK"), Some(TxnOp::Rollback));
 		assert_eq!(transaction_control("ABORT"), Some(TxnOp::Rollback));
+		assert_eq!(transaction_control("SAVEPOINT sp1"), Some(TxnOp::Savepoint("sp1".to_string())));
+		assert_eq!(
+			transaction_control("savepoint \"sp1\";"),
+			Some(TxnOp::Savepoint("sp1".to_string()))
+		);
+		assert_eq!(
+			transaction_control("RELEASE SAVEPOINT sp1"),
+			Some(TxnOp::ReleaseSavepoint("sp1".to_string()))
+		);
+		assert_eq!(
+			transaction_control("RELEASE sp1;"),
+			Some(TxnOp::ReleaseSavepoint("sp1".to_string()))
+		);
+		assert_eq!(
+			transaction_control("ROLLBACK TO SAVEPOINT sp1"),
+			Some(TxnOp::RollbackSavepoint("sp1".to_string()))
+		);
+		assert_eq!(
+			transaction_control("ROLLBACK WORK TO sp1;"),
+			Some(TxnOp::RollbackSavepoint("sp1".to_string()))
+		);
 		// A multi-statement script is not intercepted.
 		assert_eq!(transaction_control("BEGIN; RETURN 1; COMMIT"), None);
 		assert_eq!(transaction_control("RETURN 1"), None);
@@ -3180,11 +4890,32 @@ mod tests {
 	#[test]
 	fn recognises_transaction_preambles() {
 		// Comment stripping still allows clean transaction control.
-		assert_eq!(transaction_control("BEGIN /* jdbc */"), Some(TxnOp::Begin));
+		assert_eq!(
+			transaction_control("BEGIN /* jdbc */"),
+			Some(TxnOp::Begin {
+				read_only: false
+			})
+		);
 		assert_eq!(transaction_control("COMMIT -- done"), Some(TxnOp::Commit));
 		// Modifiers like isolation levels, read only, chain are recognised.
-		assert_eq!(transaction_control("BEGIN ISOLATION LEVEL SERIALIZABLE"), Some(TxnOp::Begin));
-		assert_eq!(transaction_control("START TRANSACTION READ WRITE"), Some(TxnOp::Begin));
+		assert_eq!(
+			transaction_control("BEGIN ISOLATION LEVEL SERIALIZABLE"),
+			Some(TxnOp::Begin {
+				read_only: false
+			})
+		);
+		assert_eq!(
+			transaction_control("START TRANSACTION READ WRITE"),
+			Some(TxnOp::Begin {
+				read_only: false
+			})
+		);
+		assert_eq!(
+			transaction_control("BEGIN READ ONLY"),
+			Some(TxnOp::Begin {
+				read_only: true
+			})
+		);
 		assert_eq!(transaction_control("ROLLBACK AND NO CHAIN"), Some(TxnOp::Rollback));
 		// `START` without `TRANSACTION` is not a transaction statement.
 		assert_eq!(transaction_control("START"), None);
@@ -3228,16 +4959,27 @@ mod tests {
 		let set = parse_set("SET dialect = 'gql'").unwrap();
 		assert_eq!(set.name, "dialect");
 		assert_eq!(set.value, "'gql'");
+		assert!(!set.is_local);
 		let set = parse_set("SET extra_float_digits TO 3").unwrap();
 		assert_eq!(set.name, "extra_float_digits");
 		assert_eq!(set.value, "3");
-		// Unmodelled SET syntax parses with an empty name (rejected by handle_set).
+		assert!(!set.is_local);
+		// SET TIME ZONE models the timezone GUC.
 		let set = parse_set("SET TIME ZONE 'UTC'").unwrap();
-		assert_eq!(set.name, "");
-		assert_eq!(set.value, "TIME ZONE 'UTC'");
+		assert_eq!(set.name, "timezone");
+		assert_eq!(set.value, "'UTC'");
+		assert!(!set.is_local);
+		let set = parse_set("SET LOCAL timezone = 'Asia/Tokyo'").unwrap();
+		assert_eq!(set.name, "timezone");
+		assert_eq!(set.value, "'Asia/Tokyo'");
+		// SET ROLE models the role GUC (P-02).
 		let set = parse_set("SET ROLE admin").unwrap();
+		assert_eq!(set.name, "role");
+		assert_eq!(set.value, "admin");
+		// Unmodelled SET syntax parses with an empty name (rejected by handle_set).
+		let set = parse_set("SET TRANSACTION SNAPSHOT '00000003-0000001B-1'").unwrap();
 		assert_eq!(set.name, "");
-		assert_eq!(set.value, "ROLE admin");
+		assert_eq!(set.value, "TRANSACTION SNAPSHOT '00000003-0000001B-1'");
 		// Multi-statement SET is not a standalone SET statement.
 		assert!(parse_set("SET a = 1; SELECT 1").is_none());
 		// Not a SET statement.
@@ -3339,5 +5081,78 @@ mod tests {
 			translated_insert,
 			Err(surrealdb_pgsql::TranslationError::Unsupported(_))
 		));
+	}
+
+	#[test]
+	fn subject_names_record_matches_whole_identities_only() {
+		let malice = Value::RecordId(RecordId::new("user", "malice"));
+		for claimed in ["user:malice", "malice"] {
+			assert!(subject_names_record(&malice, claimed), "{claimed}");
+		}
+		for claimed in [
+			"alice",
+			"user:alice",
+			"ser:malice",
+			"post:malice",
+			"user:malice garbage",
+			"user:malice:x",
+			"user:malice;x",
+			"user:malice/*x*/",
+			" malice",
+			"MALICE",
+			"",
+		] {
+			assert!(!subject_names_record(&malice, claimed), "{claimed:?}");
+		}
+
+		let eleven = Value::RecordId(RecordId::new("user", RecordIdKey::Number(11)));
+		for claimed in ["user:11", "11"] {
+			assert!(subject_names_record(&eleven, claimed), "{claimed}");
+		}
+		for claimed in ["1", "user:1", "111", "user:11 "] {
+			assert!(!subject_names_record(&eleven, claimed), "{claimed:?}");
+		}
+
+		// Only a record id has a key to name.
+		assert!(!subject_names_record(&Value::String("alice".into()), "alice"));
+	}
+
+	#[test]
+	fn pg_ident_quotes_names_that_are_not_plain() {
+		assert_eq!(pg_ident("users"), "users");
+		assert_eq!(pg_ident("a b"), "\"a b\"");
+		assert_eq!(pg_ident("a\"b"), "\"a\"\"b\"");
+		assert_eq!(pg_ident("x; DROP TABLE y"), "\"x; DROP TABLE y\"");
+		assert_eq!(pg_ident("*"), "\"*\"");
+	}
+
+	#[test]
+	fn pg_string_literal_doubles_embedded_quotes() {
+		assert_eq!(pg_string_literal("o'brien"), "'o''brien'");
+		assert_eq!(pg_string_literal("x' OR 'a'='a"), "'x'' OR ''a''=''a'");
+		assert_eq!(pg_string_literal("a\\b"), "'a\\b'");
+	}
+
+	#[test]
+	fn copy_column_lookup_query_keeps_the_table_name_inside_its_literal() {
+		assert_eq!(
+			copy_column_lookup_query("people"),
+			"SELECT column_name FROM information_schema.columns WHERE table_name = 'people' ORDER BY ordinal_position;"
+		);
+		assert_eq!(
+			copy_column_lookup_query("x' OR 'a'='a"),
+			"SELECT column_name FROM information_schema.columns WHERE table_name = 'x'' OR ''a''=''a' ORDER BY ordinal_position;"
+		);
+	}
+
+	#[test]
+	fn surql_object_key_quotes_names_that_are_not_plain() {
+		assert_eq!(surql_object_key("col_1"), "col_1");
+		assert_eq!(surql_object_key("_x"), "_x");
+		assert_eq!(surql_object_key("a b"), "\"a b\"");
+		assert_eq!(surql_object_key("1abc"), "\"1abc\"");
+		assert_eq!(surql_object_key(""), "\"\"");
+		assert_eq!(surql_object_key("a\"b\\c"), "\"a\\\"b\\\\c\"");
+		assert_eq!(surql_object_key("x: 1}]; DELETE v; {y"), "\"x: 1}]; DELETE v; {y\"");
 	}
 }

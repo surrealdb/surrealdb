@@ -20,9 +20,30 @@ impl<'a> Parser<'a> {
 				let start_tok = self.bump()?;
 				self.eat(&TokenKind::Keyword(Keyword::Work))?;
 				self.eat(&TokenKind::Keyword(Keyword::Transaction))?;
+				let mut read_only = false;
+				while self.peek().kind != TokenKind::Semi && !self.peek().is_eof() {
+					if self.eat(&TokenKind::Keyword(Keyword::Isolation))? {
+						return Err(crate::error::ParseError::new(
+							self.peek().span,
+							crate::error::ErrorKind::InvalidStatement(
+								"unsupported transaction isolation level",
+							),
+						));
+					} else if self.eat(&TokenKind::Keyword(Keyword::Read))? {
+						if self.eat(&TokenKind::Keyword(Keyword::Only))? {
+							read_only = true;
+						} else if self.eat(&TokenKind::Keyword(Keyword::Write))? {
+							read_only = false;
+						}
+					} else if self.eat(&TokenKind::Comma)? {
+					} else {
+						break;
+					}
+				}
 				self.expect_tx_stmt_end()?;
 				let span = start_tok.span.merge(self.peek().span);
 				Ok(TransactionStmt::Begin {
+					read_only,
 					span,
 				})
 			}
@@ -31,6 +52,18 @@ impl<'a> Parser<'a> {
 				let start_tok = self.bump()?;
 				self.eat(&TokenKind::Keyword(Keyword::Work))?;
 				self.eat(&TokenKind::Keyword(Keyword::Transaction))?;
+				if self.eat(&TokenKind::Keyword(Keyword::And))? {
+					if self.eat(&TokenKind::Keyword(Keyword::No))? {
+						self.eat(&TokenKind::Keyword(Keyword::Chain))?;
+					} else if self.eat(&TokenKind::Keyword(Keyword::Chain))? {
+						return Err(crate::error::ParseError::new(
+							self.peek().span,
+							crate::error::ErrorKind::InvalidStatement(
+								"chained transactions are not supported",
+							),
+						));
+					}
+				}
 				self.expect_tx_stmt_end()?;
 				let span = start_tok.span.merge(self.peek().span);
 				Ok(TransactionStmt::Commit {
@@ -55,6 +88,18 @@ impl<'a> Parser<'a> {
 					});
 				}
 
+				if self.eat(&TokenKind::Keyword(Keyword::And))? {
+					if self.eat(&TokenKind::Keyword(Keyword::No))? {
+						self.eat(&TokenKind::Keyword(Keyword::Chain))?;
+					} else if self.eat(&TokenKind::Keyword(Keyword::Chain))? {
+						return Err(crate::error::ParseError::new(
+							self.peek().span,
+							crate::error::ErrorKind::InvalidStatement(
+								"chained transactions are not supported",
+							),
+						));
+					}
+				}
 				self.expect_tx_stmt_end()?;
 				let span = start_tok.span.merge(self.peek().span);
 				Ok(TransactionStmt::Rollback {

@@ -1,5 +1,6 @@
 //! Tests for parser recursion depth limits, stack overflow protection, and input hardening.
 
+use surrealdb_pgsql::ast::stmt::Statement;
 use surrealdb_pgsql::error::ErrorKind;
 use surrealdb_pgsql::{
 	ParserSettings, parse_expr, parse_expr_with_settings, parse_statement,
@@ -202,23 +203,31 @@ fn test_statement_separator_required() {
 
 #[test]
 fn test_transaction_modes_rejected() {
-	assert!(parse_statement("BEGIN READ ONLY;").is_err());
 	assert!(parse_statement("BEGIN ISOLATION LEVEL SERIALIZABLE;").is_err());
 	assert!(parse_statement("COMMIT AND CHAIN;").is_err());
-	assert!(parse_statement("ROLLBACK AND NO CHAIN;").is_err());
+	assert!(parse_statement("ROLLBACK AND CHAIN;").is_err());
 
 	// Clean transactions succeed
 	assert!(parse_statement("BEGIN;").is_ok());
+	assert!(parse_statement("BEGIN READ ONLY;").is_ok());
+	assert!(parse_statement("BEGIN READ WRITE;").is_ok());
 	assert!(parse_statement("START TRANSACTION;").is_ok());
 	assert!(parse_statement("COMMIT;").is_ok());
 	assert!(parse_statement("ROLLBACK;").is_ok());
+	assert!(parse_statement("ROLLBACK AND NO CHAIN;").is_ok());
 }
 
 #[test]
-fn test_set_local_rejected() {
-	let err =
-		parse_statement("SET LOCAL timezone = 'UTC';").expect_err("SET LOCAL must be rejected");
-	assert!(matches!(err.kind, ErrorKind::InvalidStatement(_)));
+fn test_set_local_and_session() {
+	let stmt = parse_statement("SET LOCAL timezone = 'UTC';").expect("SET LOCAL must succeed");
+	match stmt {
+		Statement::Set(s) => {
+			assert!(s.is_local);
+			assert_eq!(s.name, "timezone");
+			assert_eq!(s.value, "'UTC'");
+		}
+		_ => panic!("expected Set statement"),
+	}
 
 	// Normal SET succeeds
 	assert!(parse_statement("SET timezone = 'UTC';").is_ok());

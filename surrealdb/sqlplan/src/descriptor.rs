@@ -4,7 +4,10 @@ use std::collections::HashMap;
 
 use crate::catalog::BinderCatalog;
 use crate::dialect::{DialectPolicy, SqlDialect};
-use crate::ir::{BoundBinaryOp, BoundExpr, BoundLiteral, BoundSelect, BoundUnaryOp};
+use crate::functions::FunctionRegistry;
+use crate::ir::{
+	BoundBinaryOp, BoundExpr, BoundLiteral, BoundSelect, BoundUnaryOp, BoundWindowFrameBound,
+};
 
 /// Abstract strongly-typed SQL data type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -25,7 +28,19 @@ pub enum SqlType {
 	TimestampTz,
 	Interval,
 	Json,
+	Array,
 	Uuid,
+	Char,
+	Name,
+	Varchar,
+	Bpchar,
+	Timetz,
+	Inet,
+	Cidr,
+	MacAddr,
+	Oid,
+	Regclass,
+	Record,
 }
 
 impl SqlType {
@@ -35,60 +50,86 @@ impl SqlType {
 			Self::Unknown => 0, // 0 = unspecified
 			Self::Bool => 16,
 			Self::Bytea => 17,
+			Self::Char => 18,
+			Self::Name => 19,
 			Self::Int8 => 20,
 			Self::Int2 => 21,
 			Self::Int4 => 23,
 			Self::Text => 25,
+			Self::Oid => 26,
+			Self::Json => 114,
+			Self::Cidr => 650,
 			Self::Float4 => 700,
 			Self::Float8 => 701,
+			Self::MacAddr => 829,
+			Self::Inet => 869,
+			Self::Bpchar => 1042,
+			Self::Varchar => 1043,
 			Self::Date => 1082,
 			Self::Time => 1083,
 			Self::Timestamp => 1114,
 			Self::TimestampTz => 1184,
 			Self::Interval => 1186,
+			Self::Timetz => 1266,
 			Self::Numeric => 1700,
+			Self::Regclass => 2205,
+			Self::Record => 2249,
+			Self::Array => 2277,
 			Self::Uuid => 2950,
-			Self::Json => 3802, // JSONB
 		}
 	}
 
 	/// PostgreSQL type length in bytes (-1 for variable length).
 	pub fn pg_typlen(&self) -> i16 {
 		match self {
-			Self::Bool => 1,
+			Self::Bool | Self::Char => 1,
 			Self::Int2 => 2,
-			Self::Int4 | Self::Float4 => 4,
-			Self::Int8 | Self::Float8 | Self::Timestamp | Self::TimestampTz => 8,
+			Self::Int4 | Self::Float4 | Self::Date | Self::Oid | Self::Regclass => 4,
+			Self::MacAddr => 6,
+			Self::Int8 | Self::Float8 | Self::Timestamp | Self::TimestampTz | Self::Time => 8,
+			Self::Timetz => 12,
 			Self::Interval | Self::Uuid => 16,
+			Self::Name => 64,
 			Self::Unknown
 			| Self::Numeric
 			| Self::Text
+			| Self::Varchar
+			| Self::Bpchar
 			| Self::Bytea
 			| Self::Json
-			| Self::Date
-			| Self::Time => -1,
+			| Self::Array
+			| Self::Inet
+			| Self::Cidr
+			| Self::Record => -1,
 		}
 	}
 
 	/// MySQL wire field type.
 	pub fn to_mysql_type(&self) -> u8 {
 		match self {
-			Self::Unknown => 0xfd,                       // MYSQL_TYPE_VAR_STRING
-			Self::Bool => 0x01,                          // MYSQL_TYPE_TINY
-			Self::Int2 => 0x02,                          // MYSQL_TYPE_SHORT
-			Self::Int4 => 0x03,                          // MYSQL_TYPE_LONG
-			Self::Int8 => 0x08,                          // MYSQL_TYPE_LONGLONG
-			Self::Float4 => 0x04,                        // MYSQL_TYPE_FLOAT
-			Self::Float8 => 0x05,                        // MYSQL_TYPE_DOUBLE
-			Self::Numeric => 0xf6,                       // MYSQL_TYPE_NEWDECIMAL
-			Self::Text => 0xfd,                          // MYSQL_TYPE_VAR_STRING
-			Self::Bytea => 0xfc,                         // MYSQL_TYPE_BLOB
-			Self::Date => 0x0a,                          // MYSQL_TYPE_DATE
-			Self::Time => 0x0b,                          // MYSQL_TYPE_TIME
-			Self::Timestamp | Self::TimestampTz => 0x07, // MYSQL_TYPE_TIMESTAMP
-			Self::Interval => 0xfd,                      // MYSQL_TYPE_VAR_STRING
-			Self::Uuid => 0xfd,                          // MYSQL_TYPE_VAR_STRING
-			Self::Json => 0xf5,                          // MYSQL_TYPE_JSON
+			Self::Unknown => 0xfd,                           // MYSQL_TYPE_VAR_STRING
+			Self::Bool => 0x01,                              // MYSQL_TYPE_TINY
+			Self::Int2 => 0x02,                              // MYSQL_TYPE_SHORT
+			Self::Int4 | Self::Oid | Self::Regclass => 0x03, // MYSQL_TYPE_LONG
+			Self::Int8 => 0x08,                              // MYSQL_TYPE_LONGLONG
+			Self::Float4 => 0x04,                            // MYSQL_TYPE_FLOAT
+			Self::Float8 => 0x05,                            // MYSQL_TYPE_DOUBLE
+			Self::Numeric => 0xf6,                           // MYSQL_TYPE_NEWDECIMAL
+			Self::Text
+			| Self::Name
+			| Self::Varchar
+			| Self::Bpchar
+			| Self::Char
+			| Self::Inet
+			| Self::Cidr
+			| Self::MacAddr => 0xfd, // MYSQL_TYPE_VAR_STRING
+			Self::Bytea => 0xfc,                             // MYSQL_TYPE_BLOB
+			Self::Date => 0x0a,                              // MYSQL_TYPE_DATE
+			Self::Time | Self::Timetz => 0x0b,               // MYSQL_TYPE_TIME
+			Self::Timestamp | Self::TimestampTz => 0x07,     // MYSQL_TYPE_TIMESTAMP
+			Self::Interval => 0xfd,                          // MYSQL_TYPE_VAR_STRING
+			Self::Uuid => 0xfd,                              // MYSQL_TYPE_VAR_STRING
+			Self::Json | Self::Array | Self::Record => 0xf5, // MYSQL_TYPE_JSON
 		}
 	}
 
@@ -103,15 +144,27 @@ impl SqlType {
 			"float4" | "real" => Self::Float4,
 			"float8" | "double" | "double precision" | "float" => Self::Float8,
 			"numeric" | "decimal" => Self::Numeric,
-			"text" | "varchar" | "char" | "bpchar" | "string" => Self::Text,
+			"text" | "string" => Self::Text,
+			"name" => Self::Name,
+			"varchar" | "character varying" => Self::Varchar,
+			"bpchar" | "char" | "character" => Self::Bpchar,
+			"\"char\"" => Self::Char,
 			"bytea" | "blob" | "bytes" => Self::Bytea,
 			"date" => Self::Date,
-			"time" => Self::Time,
-			"timestamp" => Self::Timestamp,
+			"time" | "time without time zone" => Self::Time,
+			"timetz" | "time with time zone" => Self::Timetz,
+			"timestamp" | "timestamp without time zone" => Self::Timestamp,
 			"timestamptz" | "timestamp with time zone" => Self::TimestampTz,
 			"interval" => Self::Interval,
 			"uuid" => Self::Uuid,
 			"json" | "jsonb" => Self::Json,
+			"array" => Self::Array,
+			"inet" => Self::Inet,
+			"cidr" => Self::Cidr,
+			"macaddr" => Self::MacAddr,
+			"oid" => Self::Oid,
+			"regclass" => Self::Regclass,
+			"record" => Self::Record,
 			_ => Self::Unknown,
 		}
 	}
@@ -184,7 +237,24 @@ impl BoundSelect {
 					BoundExpr::FunctionCall {
 						name,
 						..
+					}
+					| BoundExpr::WindowFunction {
+						name,
+						..
 					} => (name.clone(), None, None),
+					BoundExpr::UserVar(name) => (format!("@{name}"), None, None),
+					BoundExpr::SystemVar {
+						name,
+						is_global,
+					} => (
+						if *is_global {
+							format!("@@global.{name}")
+						} else {
+							format!("@@{name}")
+						},
+						None,
+						None,
+					),
 					_ => {
 						if dialect.dialect == SqlDialect::Postgres {
 							("?column?".to_string(), None, None)
@@ -252,6 +322,11 @@ impl BoundSelect {
 				| BoundBinaryOp::Regexp => SqlType::Bool,
 				BoundBinaryOp::Concat => SqlType::Text,
 				BoundBinaryOp::IntDiv => SqlType::Int8,
+				BoundBinaryOp::JsonExtract => SqlType::Json,
+				BoundBinaryOp::JsonExtractText | BoundBinaryOp::JsonPathExtractText => {
+					SqlType::Text
+				}
+				BoundBinaryOp::JsonContains => SqlType::Bool,
 				BoundBinaryOp::Add
 				| BoundBinaryOp::Subtract
 				| BoundBinaryOp::Multiply
@@ -300,21 +375,20 @@ impl BoundSelect {
 				name,
 				args,
 				..
-			} => match name.to_ascii_lowercase().as_str() {
-				"count" => SqlType::Int8,
-				"now" | "current_timestamp" => SqlType::TimestampTz,
-				"current_date" => SqlType::Date,
-				"current_time" => SqlType::Time,
-				"lower" | "upper" | "concat" | "trim" | "substring" => SqlType::Text,
-				"sum" | "avg" | "min" | "max" => {
-					if let Some(arg) = args.first() {
-						self.infer_expr_type(arg, catalog)
-					} else {
-						SqlType::Unknown
-					}
-				}
-				_ => SqlType::Unknown,
-			},
+			} => {
+				let arg_types: Vec<_> =
+					args.iter().map(|a| self.infer_expr_type(a, catalog)).collect();
+				FunctionRegistry::infer_return_type_any(name, &arg_types)
+			}
+			BoundExpr::WindowFunction {
+				name,
+				args,
+				..
+			} => {
+				let arg_types: Vec<_> =
+					args.iter().map(|a| self.infer_expr_type(a, catalog)).collect();
+				FunctionRegistry::infer_return_type_any(name, &arg_types)
+			}
 			BoundExpr::Param {
 				..
 			} => SqlType::Unknown,
@@ -334,6 +408,38 @@ impl BoundSelect {
 					SqlType::Unknown
 				}
 			}
+			BoundExpr::ScalarSubquery(sub) => {
+				if let Some(target) = sub.targets.first() {
+					self.infer_expr_type(&target.expr, catalog)
+				} else {
+					SqlType::Unknown
+				}
+			}
+			BoundExpr::Exists(_) => SqlType::Bool,
+			BoundExpr::InSubquery {
+				..
+			} => SqlType::Bool,
+			BoundExpr::ArraySubquery(_) => SqlType::Unknown,
+			BoundExpr::UserVar(_) => SqlType::Unknown,
+			BoundExpr::SystemVar {
+				name,
+				..
+			} => match name.to_ascii_lowercase().as_str() {
+				"autocommit"
+				| "max_allowed_packet"
+				| "interactive_timeout"
+				| "wait_timeout"
+				| "net_write_timeout"
+				| "net_read_timeout"
+				| "lower_case_table_names"
+				| "auto_increment_increment"
+				| "auto_increment_offset"
+				| "query_cache_size"
+				| "query_cache_type"
+				| "tx_read_only"
+				| "transaction_read_only" => SqlType::Int8,
+				_ => SqlType::Text,
+			},
 		}
 	}
 
@@ -347,6 +453,26 @@ impl BoundSelect {
 
 		for target in &self.targets {
 			self.collect_param_types_from_expr(&target.expr, catalog, &mut param_map);
+		}
+
+		if let Some(with) = &self.with {
+			for cte in &with.ctes {
+				if let Some(where_clause) = &cte.query.where_clause {
+					cte.query.collect_param_types_from_expr(where_clause, catalog, &mut param_map);
+				}
+				for target in &cte.query.targets {
+					cte.query.collect_param_types_from_expr(&target.expr, catalog, &mut param_map);
+				}
+			}
+		}
+
+		for win in &self.windows {
+			for p in &win.spec.partition_by {
+				self.collect_param_types_from_expr(p, catalog, &mut param_map);
+			}
+			for o in &win.spec.order_by {
+				self.collect_param_types_from_expr(&o.expr, catalog, &mut param_map);
+			}
 		}
 
 		let max_idx = param_map.keys().copied().max().unwrap_or(0);
@@ -465,6 +591,42 @@ impl BoundSelect {
 				self.collect_param_types_from_expr(expr, catalog, params);
 				for item in list {
 					self.collect_param_types_from_expr(item, catalog, params);
+				}
+			}
+			BoundExpr::InSubquery {
+				expr,
+				..
+			} => {
+				self.collect_param_types_from_expr(expr, catalog, params);
+			}
+			BoundExpr::WindowFunction {
+				args,
+				spec,
+				..
+			} => {
+				for arg in args {
+					self.collect_param_types_from_expr(arg, catalog, params);
+				}
+				for p in &spec.partition_by {
+					self.collect_param_types_from_expr(p, catalog, params);
+				}
+				for o in &spec.order_by {
+					self.collect_param_types_from_expr(&o.expr, catalog, params);
+				}
+				if let Some(frame) = &spec.frame {
+					match &frame.start {
+						BoundWindowFrameBound::Preceding(e)
+						| BoundWindowFrameBound::Following(e) => {
+							self.collect_param_types_from_expr(e, catalog, params);
+						}
+						_ => {}
+					}
+					if let Some(
+						BoundWindowFrameBound::Preceding(e) | BoundWindowFrameBound::Following(e),
+					) = &frame.end
+					{
+						self.collect_param_types_from_expr(e, catalog, params);
+					}
 				}
 			}
 			BoundExpr::Param {

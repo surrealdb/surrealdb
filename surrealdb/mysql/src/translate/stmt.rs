@@ -25,8 +25,27 @@ pub fn translate_statement(
 		| Statement::Truncate(_) => Err(TranslationError::Unsupported(
 			"DML statements must be lowered via surrealdb_sqlplan typed write lowering".into(),
 		)),
-		Statement::CreateTable(_) | Statement::DropTable(_) => Err(TranslationError::Unsupported(
+		Statement::CreateTable(_)
+		| Statement::DropTable(_)
+		| Statement::CreateDatabase(_)
+		| Statement::DropDatabase(_)
+		| Statement::CreateIndex(_)
+		| Statement::DropIndex(_)
+		| Statement::CreateView(_)
+		| Statement::DropView(_)
+		| Statement::AlterTable(_) => Err(TranslationError::Unsupported(
 			"DDL statements must be lowered via surrealdb_sqlplan typed DDL lowering".into(),
+		)),
+		Statement::CreateUser(_)
+		| Statement::DropUser(_)
+		| Statement::Grant(_)
+		| Statement::Revoke(_)
+		| Statement::LockTables(_)
+		| Statement::UnlockTables(_)
+		| Statement::Prepare(_)
+		| Statement::Execute(_)
+		| Statement::Deallocate(_) => Err(TranslationError::Unsupported(
+			"Administrative statements are not supported in string translation".into(),
 		)),
 		Statement::Use(s) => translate_use(s, out),
 		Statement::Set(s) => translate_set(s, ctx, out),
@@ -42,6 +61,18 @@ pub fn translate_select(
 	ctx: &TranslationContext,
 	out: &mut String,
 ) -> Result<(), TranslationError> {
+	if sel.with.is_some() {
+		return Err(TranslationError::Unsupported(
+			"WITH clause must be lowered via surrealdb_sqlplan typed plan lowering".into(),
+		));
+	}
+
+	if !sel.window.is_empty() {
+		return Err(TranslationError::Unsupported(
+			"WINDOW clause must be lowered via surrealdb_sqlplan typed plan lowering".into(),
+		));
+	}
+
 	if sel.from.is_none() {
 		out.push_str("RETURN [{ ");
 		for (i, p) in sel.projection.iter().enumerate() {
@@ -318,6 +349,23 @@ pub fn translate_show(show: &ShowStmt, out: &mut String) -> Result<(), Translati
 		ShowStmt::Errors {
 			..
 		} => out.push_str("SELECT 'Error' AS Level, 0 AS Code, 'None' AS Message WHERE false;"),
+		ShowStmt::Index {
+			table,
+			..
+		} => {
+			out.push_str("INFO FOR TABLE ");
+			translate_qualified_name(table, out)?;
+			out.push(';');
+		}
+		ShowStmt::Engines {
+			..
+		} => out.push_str("SELECT 'InnoDB' AS Engine, 'DEFAULT' AS Support;"),
+		ShowStmt::Collation {
+			..
+		} => out.push_str("SELECT 'utf8mb4_0900_ai_ci' AS Collation, 'utf8mb4' AS Charset, 255 AS Id, 'Yes' AS Compiled, 'Yes' AS Sortlen;"),
+		ShowStmt::Charset {
+			..
+		} => out.push_str("SELECT 'utf8mb4' AS Charset, 'UTF-8 Unicode' AS Description, 'utf8mb4_0900_ai_ci' AS Default_collation, 4 AS Maxlen;"),
 	}
 	Ok(())
 }
@@ -359,6 +407,24 @@ pub fn translate_transaction(
 		}
 		TransactionStmt::Rollback(_) => {
 			out.push_str("CANCEL TRANSACTION;");
+		}
+		TransactionStmt::Savepoint {
+			name,
+			..
+		} => {
+			write!(out, "-- SAVEPOINT {name};")?;
+		}
+		TransactionStmt::ReleaseSavepoint {
+			name,
+			..
+		} => {
+			write!(out, "-- RELEASE SAVEPOINT {name};")?;
+		}
+		TransactionStmt::RollbackToSavepoint {
+			name,
+			..
+		} => {
+			write!(out, "-- ROLLBACK TO SAVEPOINT {name};")?;
 		}
 	}
 	Ok(())

@@ -51,13 +51,41 @@ impl<'a> Parser<'a> {
 			if self.peek_keyword() == Some(Keyword::Work) {
 				self.bump();
 			}
+			if self.peek_keyword() == Some(Keyword::To) {
+				self.bump();
+				if self.peek_keyword() == Some(Keyword::Savepoint) {
+					self.bump();
+				}
+				let (name, name_span) = self.parse_ident()?;
+				return Ok(TransactionStmt::RollbackToSavepoint {
+					name,
+					span: start.merge(name_span),
+				});
+			}
 			let end = self.peek().span;
 			Ok(TransactionStmt::Rollback(start.merge(end)))
+		} else if self.peek_keyword() == Some(Keyword::Savepoint) {
+			let start = self.bump().span;
+			let (name, name_span) = self.parse_ident()?;
+			Ok(TransactionStmt::Savepoint {
+				name,
+				span: start.merge(name_span),
+			})
+		} else if self.peek_keyword() == Some(Keyword::Release) {
+			let start = self.bump().span;
+			if self.peek_keyword() == Some(Keyword::Savepoint) {
+				self.bump();
+			}
+			let (name, name_span) = self.parse_ident()?;
+			Ok(TransactionStmt::ReleaseSavepoint {
+				name,
+				span: start.merge(name_span),
+			})
 		} else {
 			Err(crate::parser::error::ParseError::new(
 				self.peek().span,
 				crate::parser::error::ErrorKind::UnexpectedToken {
-					expected: "START TRANSACTION, BEGIN, COMMIT, or ROLLBACK",
+					expected: "START TRANSACTION, BEGIN, COMMIT, ROLLBACK, SAVEPOINT, or RELEASE",
 					found: self.peek().kind.to_string(),
 				},
 			))

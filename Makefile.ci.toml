@@ -744,6 +744,9 @@ script = '''
     echo "Running MySQL wire protocol e2e tests..."
     cargo test --locked -p surrealdb-mywire --test e2e
 
+    echo "Running cross-dialect wire protocol integration tests..."
+    cargo test --locked -p surrealdb-mywire --test cross_dialect
+
     echo "✅ Wire protocol integration tests passed successfully!"
 '''
 

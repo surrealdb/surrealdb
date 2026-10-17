@@ -3,8 +3,8 @@
 use anyhow::{Result, ensure};
 
 use crate::codec::{
-	read_lenenc_bytes, read_null_terminated_bytes, read_null_terminated_str, write_lenenc_int,
-	write_lenenc_str, write_null_terminated_str,
+	read_lenenc_bytes, read_lenenc_str, read_null_terminated_bytes, read_null_terminated_str,
+	write_lenenc_int, write_lenenc_str, write_null_terminated_str,
 };
 use crate::constants::*;
 
@@ -162,6 +162,23 @@ pub struct SslRequest {
 }
 
 impl SslRequest {
+	pub fn new(capabilities: u32, max_packet_size: u32, character_set: u8) -> Self {
+		Self {
+			capabilities: capabilities | CLIENT_SSL,
+			max_packet_size,
+			character_set,
+		}
+	}
+
+	pub fn serialize(&self) -> Vec<u8> {
+		let mut buf = Vec::with_capacity(32);
+		buf.extend_from_slice(&(self.capabilities | CLIENT_SSL).to_le_bytes());
+		buf.extend_from_slice(&self.max_packet_size.to_le_bytes());
+		buf.push(self.character_set);
+		buf.extend_from_slice(&[0u8; 23]);
+		buf
+	}
+
 	pub fn is_ssl_request(payload: &[u8]) -> bool {
 		if payload.len() < 32 {
 			return false;
@@ -199,11 +216,60 @@ impl AuthSwitchRequest {
 		}
 	}
 
+	pub fn caching_sha2_password(salt: &[u8]) -> Self {
+		let mut data = Vec::with_capacity(21);
+		let len = salt.len().min(20);
+		data.extend_from_slice(&salt[..len]);
+		data.push(0x00);
+		Self {
+			plugin_name: "caching_sha2_password".to_string(),
+			auth_plugin_data: data,
+		}
+	}
+
+	pub fn mysql_native_password(salt: &[u8]) -> Self {
+		let mut data = Vec::with_capacity(21);
+		let len = salt.len().min(20);
+		data.extend_from_slice(&salt[..len]);
+		data.push(0x00);
+		Self {
+			plugin_name: "mysql_native_password".to_string(),
+			auth_plugin_data: data,
+		}
+	}
+
 	pub fn serialize(&self) -> Vec<u8> {
 		let mut buf = Vec::with_capacity(32 + self.auth_plugin_data.len());
 		buf.push(0xfe); // AuthSwitchRequest header
 		write_null_terminated_str(&mut buf, &self.plugin_name);
 		buf.extend_from_slice(&self.auth_plugin_data);
+		buf
+	}
+}
+
+/// Protocol::AuthMoreData packet sent during authentication exchanges.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthMoreData {
+	pub data: Vec<u8>,
+}
+
+impl AuthMoreData {
+	pub fn fast_auth_success() -> Self {
+		Self {
+			data: vec![FAST_AUTH_SUCCESS],
+		}
+	}
+
+	pub fn perform_full_authentication() -> Self {
+		Self {
+			data: vec![PERFORM_FULL_AUTHENTICATION],
+		}
+	}
+
+	pub fn serialize(&self) -> Vec<u8> {
+		let mut buf = Vec::with_capacity(1 + self.data.len());
+		buf.push(AUTH_MORE_DATA_HEADER);
+		buf.extend_from_slice(&self.data);
 		buf
 	}
 }
@@ -229,9 +295,32 @@ impl OkPacket {
 		}
 	}
 
+	pub fn with_status_flags(mut self, status_flags: u16) -> Self {
+		self.status_flags = status_flags;
+		self
+	}
+
+	pub fn with_warnings(mut self, warnings: u16) -> Self {
+		self.warnings = warnings;
+		self
+	}
+
+	pub fn with_info(mut self, info: impl Into<String>) -> Self {
+		self.info = info.into();
+		self
+	}
+
 	pub fn serialize(&self) -> Vec<u8> {
+		self.serialize_with_header(OK_HEADER)
+	}
+
+	pub fn serialize_eof_ok(&self) -> Vec<u8> {
+		self.serialize_with_header(EOF_HEADER)
+	}
+
+	pub fn serialize_with_header(&self, header: u8) -> Vec<u8> {
 		let mut buf = Vec::with_capacity(32);
-		buf.push(OK_HEADER);
+		buf.push(header);
 		write_lenenc_int(&mut buf, self.affected_rows);
 		write_lenenc_int(&mut buf, self.last_insert_id);
 		buf.extend_from_slice(&self.status_flags.to_le_bytes());
@@ -312,6 +401,16 @@ impl Default for EofPacket {
 }
 
 impl EofPacket {
+	pub fn with_status_flags(mut self, status_flags: u16) -> Self {
+		self.status_flags = status_flags;
+		self
+	}
+
+	pub fn with_warnings(mut self, warnings: u16) -> Self {
+		self.warnings = warnings;
+		self
+	}
+
 	pub fn serialize(&self) -> Vec<u8> {
 		let mut buf = Vec::with_capacity(5);
 		buf.push(EOF_HEADER);
@@ -354,6 +453,22 @@ impl ColumnDefinition41 {
 		}
 	}
 
+	pub fn param(name: &str) -> Self {
+		Self {
+			catalog: "def".to_string(),
+			schema: String::new(),
+			table: String::new(),
+			org_table: String::new(),
+			name: name.to_string(),
+			org_name: name.to_string(),
+			character_set: CHARSET_UTF8MB4_GENERAL_CI,
+			column_length: 0,
+			column_type: MYSQL_TYPE_VAR_STRING,
+			flags: 0,
+			decimals: 0,
+		}
+	}
+
 	pub fn serialize(&self) -> Vec<u8> {
 		let mut buf = Vec::with_capacity(128);
 		write_lenenc_str(&mut buf, &self.catalog);
@@ -379,5 +494,85 @@ impl ColumnDefinition41 {
 		buf.extend_from_slice(&[0u8, 0u8]);
 
 		buf
+	}
+
+	pub fn deserialize(payload: &[u8]) -> Option<Self> {
+		let mut cursor = payload;
+		let catalog = read_lenenc_str(&mut cursor)?.to_string();
+		let schema = read_lenenc_str(&mut cursor)?.to_string();
+		let table = read_lenenc_str(&mut cursor)?.to_string();
+		let org_table = read_lenenc_str(&mut cursor)?.to_string();
+		let name = read_lenenc_str(&mut cursor)?.to_string();
+		let org_name = read_lenenc_str(&mut cursor)?.to_string();
+
+		if cursor.len() < 13 {
+			return None;
+		}
+		let _ = cursor[0];
+		let character_set = u16::from_le_bytes([cursor[1], cursor[2]]);
+		let column_length = u32::from_le_bytes([cursor[3], cursor[4], cursor[5], cursor[6]]);
+		let column_type = cursor[7];
+		let flags = u16::from_le_bytes([cursor[8], cursor[9]]);
+		let decimals = cursor[10];
+
+		Some(Self {
+			catalog,
+			schema,
+			table,
+			org_table,
+			name,
+			org_name,
+			character_set,
+			column_length,
+			column_type,
+			flags,
+			decimals,
+		})
+	}
+}
+
+/// Protocol::COM_STMT_PREPARE_OK response packet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StmtPrepareOk {
+	pub statement_id: u32,
+	pub num_columns: u16,
+	pub num_params: u16,
+	pub warning_count: u16,
+}
+
+impl StmtPrepareOk {
+	pub fn new(statement_id: u32, num_columns: u16, num_params: u16) -> Self {
+		Self {
+			statement_id,
+			num_columns,
+			num_params,
+			warning_count: 0,
+		}
+	}
+
+	pub fn serialize(&self) -> Vec<u8> {
+		let mut buf = Vec::with_capacity(12);
+		buf.push(0x00);
+		buf.extend_from_slice(&self.statement_id.to_le_bytes());
+		buf.extend_from_slice(&self.num_columns.to_le_bytes());
+		buf.extend_from_slice(&self.num_params.to_le_bytes());
+		buf.push(0x00);
+		buf.extend_from_slice(&self.warning_count.to_le_bytes());
+		buf
+	}
+
+	pub fn deserialize(payload: &[u8]) -> Result<Self> {
+		ensure!(payload.len() >= 12, "COM_STMT_PREPARE_OK payload too short");
+		ensure!(payload[0] == 0x00, "invalid status for COM_STMT_PREPARE_OK");
+		let statement_id = u32::from_le_bytes([payload[1], payload[2], payload[3], payload[4]]);
+		let num_columns = u16::from_le_bytes([payload[5], payload[6]]);
+		let num_params = u16::from_le_bytes([payload[7], payload[8]]);
+		let warning_count = u16::from_le_bytes([payload[10], payload[11]]);
+		Ok(Self {
+			statement_id,
+			num_columns,
+			num_params,
+			warning_count,
+		})
 	}
 }

@@ -1700,6 +1700,12 @@ impl Datastore {
 		&self.index_stores
 	}
 
+	/// Set whether authentication is enabled for this Datastore.
+	pub fn with_auth_enabled(mut self, auth_enabled: bool) -> Self {
+		self.auth_enabled = auth_enabled;
+		self
+	}
+
 	/// Is authentication enabled for this Datastore?
 	pub fn is_auth_enabled(&self) -> bool {
 		self.auth_enabled
@@ -8519,7 +8525,7 @@ impl Datastore {
 	/// namespace-level Editor on a stale token (the namespace was
 	/// dropped after the token was issued) could recreate the parent
 	/// namespace as a side effect of `USE NS dropped DB anything`.
-	pub(crate) async fn should_materialize_db_on_use(
+	pub async fn should_materialize_db_on_use(
 		&self,
 		tx: &Transaction,
 		auth: &Auth,
