@@ -653,14 +653,22 @@ pub(crate) async fn fetch_record_no_perms_slot(
 	{
 		return fetched;
 	}
-	let Some(mut val) = fetch_raw_deref_slot(ctx, rid, slot, ctx.version_stamp()).await? else {
+	let Some(val) = fetch_raw_deref_slot(ctx, rid, slot, ctx.version_stamp()).await? else {
 		return Ok(Value::None);
 	};
-	let field_state =
-		super::scan::pipeline::build_field_state(ctx, &rid.table, false, None).await?;
-	let field_state = reading_own_record(ctx, rid, field_state);
-	super::scan::pipeline::compute_fields_for_value(ctx, &field_state, &mut val, true).await?;
-	Ok(val)
+	// Deriving the computed fields may dereference a link and so reach this read again: it runs
+	// as a nested evaluation of the statement's driver, as a read unit's body does
+	// ([`crate::exec::vm::Deref::fetch_slot`]).
+	let (ctx, rid) = (ctx.clone(), rid.clone());
+	crate::exec::trampoline::nest(async move {
+		let mut val = val;
+		let field_state =
+			super::scan::pipeline::build_field_state(&ctx, &rid.table, false, None).await?;
+		let field_state = reading_own_record(&ctx, &rid, field_state);
+		super::scan::pipeline::compute_fields_for_value(&ctx, &field_state, &mut val, true).await?;
+		Ok(val)
+	})
+	.await
 }
 
 /// `state`, the field state of the table `rid` is a record of, as it applies
@@ -711,14 +719,22 @@ pub(crate) async fn fetch_record_slot(
 	{
 		return fetched.map_err(computed_coercion);
 	}
-	let Some(mut val) = fetch_raw_deref_slot(ctx, rid, slot, ctx.version_stamp()).await? else {
+	let Some(val) = fetch_raw_deref_slot(ctx, rid, slot, ctx.version_stamp()).await? else {
 		require_table(ctx, rid).await?;
 		return Ok(Value::None);
 	};
-	if !process_fetched_record(ctx, rid, &mut val).await? {
-		return Ok(Value::None);
-	}
-	Ok(val)
+	// Deriving the computed fields may dereference a link and so reach this read again: it runs
+	// as a nested evaluation of the statement's driver, as a read unit's body does
+	// ([`crate::exec::vm::Deref::fetch_slot`]).
+	let (ctx, rid) = (ctx.clone(), rid.clone());
+	crate::exec::trampoline::nest(async move {
+		let mut val = val;
+		Ok(match process_fetched_record(&ctx, &rid, &mut val).await? {
+			true => val,
+			false => Value::None,
+		})
+	})
+	.await
 }
 
 /// `failure` raised dereferencing a record, a computed field's failed

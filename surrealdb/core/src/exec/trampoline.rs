@@ -85,8 +85,16 @@ fn under_driver() -> bool {
 pub(crate) fn nest<T: Send + 'static>(
 	evaluation: impl Future<Output = T> + Send + 'static,
 ) -> Nested<T> {
+	nest_boxed(Box::pin(evaluation))
+}
+
+/// [`nest`] for an evaluation already boxed, as a recursion that reaches its
+/// own nesting point boxes it to name its type.
+pub(crate) fn nest_boxed<T: Send + 'static>(
+	evaluation: Pin<Box<dyn Future<Output = T> + Send>>,
+) -> Nested<T> {
 	Nested {
-		state: NestState::Unstarted(Box::pin(evaluation)),
+		state: NestState::Unstarted(evaluation),
 	}
 }
 

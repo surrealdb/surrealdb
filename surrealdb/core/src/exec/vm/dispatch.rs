@@ -40,7 +40,7 @@ use std::sync::Arc;
 
 use surrealdb_strand::TableName;
 
-use super::host::{host_frames, out_of_line, run_cow_row_from, run_unit_inline, unit_state};
+use super::host::{host_frames, run_cow_row_from, run_unit_inline, unit_state};
 use super::program::{Program, UnitHead, UnitSig};
 use super::{Lowered, NotCovered};
 use crate::exec::operators::fetch::{fetch_raw_deref_slot, require_table};
@@ -553,12 +553,43 @@ impl Deref {
 		#[cfg(test)]
 		HOSTED_READS.with(|hosted| hosted.set(hosted.get() + 1));
 		host_frames(program, &mut state, ctx);
-		out_of_line(|| {
-			run_cow_row_from(program, pipeline, Cow::Owned(raw), &mut state, ctx, start)
-		})
-		.await?;
+		// The body derives the record's computed fields, which may dereference a link and so reach
+		// this read again. It runs as a nested evaluation of the statement's driver
+		// ([`crate::exec::trampoline::nest`]), so a cycle of links holds the native stack of one
+		// level whatever its depth, and only the computation-depth budget bounds it.
+		let program = Arc::clone(served.program());
+		let (ran, mut state) = crate::exec::trampoline::nest_boxed(hosted_read(
+			program,
+			raw,
+			state,
+			ctx.clone(),
+			start,
+		))
+		.await;
+		ran?;
 		Ok(state.output.pop().unwrap_or(Value::None))
 	}
+}
+
+/// The body of `program`'s read pipeline run by the host over `raw` from
+/// instruction `start`, on `state`, which it hands back. Boxed with its type
+/// named, since the body may reach [`Deref::read_with`] again.
+fn hosted_read(
+	program: Arc<Program>,
+	raw: Value,
+	mut state: super::interp::PooledState,
+	ctx: ExecutionContext,
+	start: usize,
+) -> crate::exec::BoxFut<'static, (FlowResult<super::host::Ended>, super::interp::PooledState)> {
+	Box::pin(async move {
+		let ran = match read_pipeline(&program) {
+			Ok(pipeline) => {
+				run_cow_row_from(&program, pipeline, Cow::Owned(raw), &mut state, &ctx, start).await
+			}
+			Err(e) => Err(e),
+		};
+		(ran, state)
+	})
 }
 
 fn internal(why: String) -> ControlFlow {
