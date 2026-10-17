@@ -2,7 +2,7 @@
 
 use futures::{StreamExt, TryStreamExt, stream};
 
-use crate::exec::{BoxFut, FlowResult};
+use crate::exec::{BoxFut, FlowResult, trampoline};
 use crate::val::Value;
 
 /// Maximum number of concurrent path evaluations per depth level.
@@ -76,13 +76,14 @@ pub(crate) fn is_recursion_target(value: &Value) -> bool {
 /// When fewer than 2 futures are provided, runs them sequentially to avoid
 /// stream combinator overhead. Otherwise, uses `buffered(RECURSION_CONCURRENCY)`
 /// to poll up to N futures concurrently -- when one blocks on I/O, others
-/// make progress.
+/// make progress. Polled under a statement's driver the futures run one at a
+/// time, as [`crate::exec::fan_out::evaluate_each`] runs its rows there.
 ///
 /// Short-circuits on the first error via `try_collect`.
 pub(crate) async fn eval_buffered<'a, T: 'a>(
 	futures: Vec<BoxFut<'a, FlowResult<T>>>,
 ) -> FlowResult<Vec<T>> {
-	if futures.len() < 2 {
+	if futures.len() < 2 || trampoline::under_driver() {
 		let mut results = Vec::with_capacity(futures.len());
 		for fut in futures {
 			results.push(fut.await?);
@@ -100,7 +101,7 @@ pub(crate) async fn eval_buffered<'a, T: 'a>(
 pub(crate) async fn eval_buffered_all<'a>(
 	futures: Vec<BoxFut<'a, FlowResult<Value>>>,
 ) -> Vec<FlowResult<Value>> {
-	if futures.len() < 2 {
+	if futures.len() < 2 || trampoline::under_driver() {
 		let mut results = Vec::with_capacity(futures.len());
 		for fut in futures {
 			results.push(fut.await);

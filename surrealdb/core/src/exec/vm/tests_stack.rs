@@ -115,3 +115,61 @@ fn a_cycle_of_links_through_computed_fields_ends_in_the_depth_error_on_a_small_s
 		);
 	}
 }
+
+/// A cycle of links through a COMPUTED field that selects from an array of
+/// links, which a fan-out evaluates, ends in the computation-depth error on a
+/// small stack and in time: under the statement's driver the fan-out runs its
+/// rows one at a time, so each level of the cycle is one nested evaluation and
+/// the first row to fail ends the rows beside it.
+#[test]
+fn a_cycle_of_links_through_an_overlapped_fan_out_ends_in_the_depth_error_on_a_small_stack() {
+	use crate::exec::operators::link_window::tests::{eaches, reset_fills};
+
+	let ds = std::thread::spawn(|| {
+		tokio::runtime::Builder::new_current_thread()
+			.enable_all()
+			.build()
+			.expect("a runtime")
+			.block_on(async {
+				std::sync::Arc::clone(
+					TestDb::new(
+						"DEFINE FIELD friends ON crowd TYPE array<record<crowd>> DEFAULT [];
+						DEFINE FIELD docs ON crowd COMPUTED { LET $f = friends; RETURN (SELECT * FROM $f); };
+						CREATE crowd:1 SET friends = [crowd:2, crowd:2, crowd:2, crowd:2, crowd:2] RETURN NONE;
+						CREATE crowd:2 SET friends = [crowd:1, crowd:1, crowd:1, crowd:1, crowd:1] RETURN NONE;",
+					)
+					.await
+					.datastore(),
+				)
+			})
+	})
+	.join()
+	.expect("set up");
+	// Bounded, so a cycle whose rows run every sibling at every level fails the
+	// test rather than spinning it.
+	let (done_tx, done_rx) = std::sync::mpsc::channel();
+	std::thread::Builder::new()
+		.stack_size(STACK)
+		.spawn(move || {
+			let answered = tokio::runtime::Builder::new_current_thread()
+				.enable_all()
+				.build()
+				.expect("a runtime")
+				.block_on(async {
+					reset_fills();
+					let mut responses = ds
+						.execute("SELECT id, docs FROM crowd:1", &TestDb::owner(), None)
+						.await
+						.expect("runs");
+					(responses.remove(0).result.map(|_| ()).map_err(|e| e.to_string()), eaches())
+				});
+			done_tx.send(answered).ok();
+		})
+		.expect("a thread");
+	let (answer, overlapped) = done_rx
+		.recv_timeout(std::time::Duration::from_secs(60))
+		.expect("the statement ends within the stack and the time");
+	assert!(overlapped > 0, "the cycle never reached the overlapping fan-out");
+	let error = answer.expect_err("a cycle of links ends in an error");
+	assert!(error.contains("excessive computation depth"), "another error: {error}");
+}

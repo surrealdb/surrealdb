@@ -76,7 +76,7 @@ impl Drop for PollScope {
 	}
 }
 
-fn under_driver() -> bool {
+pub(crate) fn under_driver() -> bool {
 	POLLING.with(|polling| !polling.borrow().is_empty())
 }
 

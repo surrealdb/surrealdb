@@ -13,7 +13,7 @@
 
 use std::future::Future;
 
-use crate::exec::{AccessMode, ExecutionContext};
+use crate::exec::{AccessMode, ExecutionContext, trampoline};
 use crate::expr::FlowResult;
 use crate::val::Value;
 
@@ -54,6 +54,18 @@ pub(crate) const RECORD_DEREFERENCE: AccessMode = AccessMode::ReadOnly;
 /// A read-only evaluation is overlapped only once the batch reaches
 /// [`ExecConfig::fan_out_row_threshold`](crate::exec::config::ExecConfig::fan_out_row_threshold),
 /// which a deployment can raise above any batch size to turn overlapping off.
+///
+/// Rows polled under a statement's driver ([`trampoline`]) also run one at a
+/// time. A row's nested evaluations run as frames of that driver, which polls
+/// only its topmost frame, so overlapped rows would share it in two ways that
+/// fail:
+///
+/// - A row waiting in a frame beneath is not polled, and keeps what it holds across that wait: a
+///   storage call waiting for a thread off the runtime holds the transaction's lock, and a row
+///   nested above that reads the same transaction waits for it without end.
+/// - A row that fails does not stop the rows nested above it, which run before the batch is polled
+///   again, so a failure deep in a recursion through the rows reaches the batch only after every
+///   sibling at every level has run.
 pub(crate) async fn evaluate_each<'a, T, Fut>(
 	ctx: &ExecutionContext,
 	mode: AccessMode,
@@ -78,7 +90,7 @@ async fn evaluate_each_above<'a, T, Fut>(
 where
 	Fut: Future<Output = FlowResult<Value>>,
 {
-	if mode.is_read_write() || items.len() < threshold {
+	if mode.is_read_write() || items.len() < threshold || trampoline::under_driver() {
 		let mut results = Vec::with_capacity(items.len());
 		for item in items {
 			results.push(eval_one(item).await?);
@@ -240,6 +252,119 @@ mod tests {
 				.await
 				.expect_err("the signal should reach the caller");
 			assert!(matches!(signal, ControlFlow::Break), "{mode:?} swallowed the signal");
+		}
+	}
+
+	/// The rows of a batch polled under a statement's driver run one at a time. A row that
+	/// holds a lock across an await is polled on to its release before a later row nests an
+	/// evaluation that waits for the lock.
+	#[tokio::test]
+	async fn under_a_driver_a_row_holding_a_lock_ends_before_a_later_row_nests_a_wait_for_it() {
+		use std::sync::Arc;
+
+		use futures::StreamExt;
+
+		use crate::exec::trampoline::{Trampolined, nest};
+
+		let lock = Arc::new(tokio::sync::Mutex::new(()));
+		let rows = [1, 2, 3, 4, 5];
+		let run = Trampolined::root(Box::pin(futures::stream::once(evaluate_each_above(
+			THRESHOLD,
+			AccessMode::ReadOnly,
+			&rows,
+			|item| {
+				let lock = Arc::clone(&lock);
+				async move {
+					match *item {
+						1 => {
+							let held = lock.lock().await;
+							tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+							drop(held);
+						}
+						5 => nest(async move { drop(lock.lock().await) }).await,
+						_ => {}
+					}
+					Ok(Value::from(*item))
+				}
+			},
+		))));
+		let answered =
+			tokio::time::timeout(std::time::Duration::from_secs(5), run.collect::<Vec<_>>())
+				.await
+				.expect("every row ends");
+		let values = answered.into_iter().next().expect("one answer").expect("the rows succeed");
+		assert_eq!(values, rows.map(Value::from));
+	}
+
+	/// Under a statement's driver a row whose nested evaluation fails ends the batch before any
+	/// later row runs.
+	#[tokio::test]
+	async fn under_a_driver_a_failing_row_ends_the_batch_before_a_later_row_runs() {
+		use std::sync::Arc;
+		use std::sync::atomic::{AtomicUsize, Ordering};
+
+		use futures::StreamExt;
+
+		use crate::exec::trampoline::{Trampolined, nest};
+
+		let later = Arc::new(AtomicUsize::new(0));
+		let rows = [1, 2, 3, 4, 5];
+		let mut run = Trampolined::root(Box::pin(futures::stream::once(evaluate_each_above(
+			THRESHOLD,
+			AccessMode::ReadOnly,
+			&rows,
+			|item| {
+				let later = Arc::clone(&later);
+				let item = *item;
+				async move {
+					nest(async move {
+						if item == 1 {
+							return Err(ControlFlow::from(anyhow!("row {item} failed")));
+						}
+						later.fetch_add(1, Ordering::Relaxed);
+						Ok(Value::from(item))
+					})
+					.await
+				}
+			},
+		))));
+		let err = run.next().await.expect("one answer").expect_err("the first row fails");
+		assert!(err.to_string().contains("row 1 failed"), "got {err}");
+		assert_eq!(later.load(Ordering::Relaxed), 0, "a row after the failure ran");
+	}
+
+	/// Records read through a fan-out of record ids on RocksDB with no inline storage calls, so
+	/// that each read holds the transaction while it waits for the thread that reads. Each read
+	/// derives its record as a nested evaluation; every statement ends.
+	#[cfg(feature = "kv-rocksdb")]
+	#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+	async fn records_read_through_a_fan_out_on_offloaded_rocksdb_reads_end() {
+		use surrealdb_cnf::ConfigMap;
+
+		use crate::exec::operators::test_util::TestDb;
+
+		for round in 0..10 {
+			let dir = temp_dir::TempDir::new().expect("a directory");
+			let db = TestDb::new_on_rocksdb(
+				"CREATE item:1, item:2, item:3, item:4, item:5;",
+				dir.path(),
+				ConfigMap::empty().with_key_value("runtime_worker_threads", "1"),
+			)
+			.await;
+			let ds = std::sync::Arc::clone(db.datastore());
+			let answers = tokio::time::timeout(
+				std::time::Duration::from_secs(10),
+				ds.execute(
+					"LET $ids = SELECT VALUE id FROM item; (SELECT VALUE id FROM $ids).len();",
+					&TestDb::owner(),
+					None,
+				),
+			)
+			.await
+			.unwrap_or_else(|_| panic!("round {round}: the statement did not end"))
+			.expect("the request runs");
+			let last = answers.into_iter().last().expect("two answers").result.expect("succeeds");
+			assert_eq!(format!("{last:?}"), "Number(Int(5))", "round {round}");
 		}
 	}
 }
