@@ -156,6 +156,8 @@ pub(in crate::exec) mod tests_packed_reads;
 mod tests_plain;
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests_record_format;
+#[cfg(all(test, feature = "kv-mem"))]
+mod tests_view_reentry;
 pub(crate) mod units;
 mod write;
 

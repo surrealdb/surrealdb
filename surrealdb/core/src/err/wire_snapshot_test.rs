@@ -1461,6 +1461,13 @@ fn every_exec_variant() -> Vec<(&'static str, ExecError)> {
 				view: "everything".to_string(),
 			},
 		),
+		(
+			"ViewReadsItself",
+			ExecError::ViewReadsItself {
+				view: "totals".to_string(),
+				through: vec!["daily".to_string(), "hourly".to_string()],
+			},
+		),
 	]
 }
 

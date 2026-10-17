@@ -498,6 +498,7 @@ async fn answer(
 async fn events(program: &Program, unit: UnitId, depth: u32, state: &mut State) -> FlowResult<()> {
 	let write =
 		state.write.as_deref_mut().ok_or_else(|| internal("a write body with no write state"))?;
+	let levels = write.maintaining.len();
 	let (row, ctx) = write.in_flight()?;
 	if !is_observed(row, &ctx) || ctx.events.is_empty() {
 		return Ok(());
@@ -509,6 +510,9 @@ async fn events(program: &Program, unit: UnitId, depth: u32, state: &mut State) 
 		false => ctx.exec().entering_stored_code(depth, false),
 	};
 	let exec = exec.dive_by(STATEMENT_DEPTH).map_err(ControlFlow::Err)?;
+	// A view row's write is nested `levels` deep within the statement's, a
+	// depth its write context does not carry.
+	let exec = super::view::view_row_exec(exec, levels)?;
 	let (held, units) = super::write_unit(program, unit, state, &exec)?;
 	let lowered =
 		held.events.as_ref().ok_or_else(|| internal("an events unit that holds no events"))?;

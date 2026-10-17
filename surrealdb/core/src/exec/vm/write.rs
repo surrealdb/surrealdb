@@ -61,7 +61,9 @@ pub(super) use observe::{
 };
 pub(super) use schema::{FieldPermission, FieldPlan, FieldWrite, SchemaInstr, SchemaPlan};
 pub(super) use storage::{IndexPlan, LoweredIndexes, NativeIndexKind, StorageFact, StorageInstr};
-pub(super) use view::{LoweredView, LoweredViews, Recalc, ViewClause, ViewRows, action_pipeline};
+pub(super) use view::{
+	LoweredView, LoweredViews, Recalc, ViewClause, ViewRows, action_pipeline, view_row_exec,
+};
 
 /// A write statement's state across its records.
 pub(super) struct WriteState {
@@ -135,6 +137,15 @@ pub(super) struct WriteState {
 	/// The block statement compiled into the program whose write this is, or
 	/// `None` for the program's own.
 	pub(super) group: Option<u16>,
+	/// The view tables whose rows are in flight through their tables' orders
+	/// beneath this write, outermost first, each read by the next: empty for a
+	/// statement's write, and ending with its own table for the write of a
+	/// view row. A view of the record's table found among them reads itself,
+	/// and maintaining it fails the write ([`view::refuse_reentry`]); each of
+	/// them spends of the computation-depth budget ([`view::view_row_exec`]).
+	/// Shared, so the maintenance of each record's views holds it without
+	/// copying it.
+	maintaining: Arc<[surrealdb_strand::TableName]>,
 }
 
 /// The bundle of a table's stages a run holds ([`WriteState::bundle_for`]),
@@ -177,6 +188,7 @@ impl WriteState {
 			events_held: None,
 			cascades: Vec::new(),
 			group: None,
+			maintaining: Arc::default(),
 		})
 	}
 
@@ -184,8 +196,15 @@ impl WriteState {
 	/// in flight from the start in `ctx`, the view table's view-maintenance
 	/// context: taken through the view table's order by a program of its own,
 	/// over `scope`, the writing statement's. Nothing gates it, and a failure
-	/// leaves its program for the maintenance that ran it.
-	pub(super) fn view_row(scope: Arc<WriteScope>, row: WriteRow, ctx: Arc<WriteCtx>) -> Self {
+	/// leaves its program for the maintenance that ran it. `maintaining` is the
+	/// view tables whose rows are in flight beneath it, ending with the row's
+	/// own.
+	pub(super) fn view_row(
+		scope: Arc<WriteScope>,
+		row: WriteRow,
+		ctx: Arc<WriteCtx>,
+		maintaining: Arc<[surrealdb_strand::TableName]>,
+	) -> Self {
 		Self {
 			scope,
 			gate: WriteGate::unchecked(WriteForm::View),
@@ -211,6 +230,7 @@ impl WriteState {
 			events_held: None,
 			cascades: Vec::new(),
 			group: None,
+			maintaining,
 		}
 	}
 

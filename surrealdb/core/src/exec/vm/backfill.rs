@@ -26,7 +26,7 @@ use super::interp::State;
 use super::program::{Backfill, Program, StoreInstr};
 use super::scalar::Scalar;
 use super::store::{read, table_name_of, write};
-use super::write::WriteState;
+use super::write::{WriteState, view_row_exec};
 use crate::catalog::aggregation::{self, backfill_stats};
 use crate::catalog::providers::TableProvider as _;
 use crate::catalog::{Metadata, Record, RecordType, encode_whole_record_with};
@@ -224,10 +224,11 @@ fn stats(
 
 /// Run the order of view table `table` over `record`, the row just stored
 /// under `key`: a write of its own over a write state stacked on the
-/// statement's scope, in the view table's view-maintenance context. The row is
-/// created, or updated from `before` when it replaced a row the backfill wrote
-/// under the same key. The order is the one of the table's catalog version,
-/// taken the first time the backfill meets the table
+/// statement's scope, in the view table's view-maintenance context, with the
+/// row's table the one view in flight beneath it ([`view_row_exec`]). The row
+/// is created, or updated from `before` when it replaced a row the backfill
+/// wrote under the same key. The order is the one of the table's catalog
+/// version, taken the first time the backfill meets the table
 /// ([`super::fault::view_rows`]) and held for the rest of it.
 async fn maintain(
 	state: &mut State,
@@ -255,7 +256,7 @@ async fn maintain(
 		key,
 	};
 	let write_ctx = scope.write_ctx_for(&id.table, WritePurpose::ViewMaintenance).await?;
-	let exec = write_ctx.exec().clone();
+	let exec = view_row_exec(write_ctx.exec().clone(), 1)?;
 	let action = match before {
 		Some(_) => Action::Update,
 		None => Action::Create,
@@ -269,7 +270,8 @@ async fn maintain(
 	nested.frames = rows.permissions.iter().map(|spec| spec.context(&exec)).collect();
 	nested.permissions_bypassed = state.permissions_bypassed;
 	nested.rowless = true;
-	nested.write = Some(Box::new(WriteState::view_row(scope, row, write_ctx)));
+	nested.write =
+		Some(Box::new(WriteState::view_row(scope, row, write_ctx, Arc::from([table.clone()]))));
 	match Box::pin(run_value_row(&rows, pipeline, Value::None, &mut nested, &exec)).await {
 		Ok(_) => Ok(()),
 		Err(ControlFlow::Err(error)) => Err(ControlFlow::Err(error)),

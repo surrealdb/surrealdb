@@ -22,6 +22,13 @@
 //! rows by the aggregated view's recalculation unit ([`Recalc`]), lowered with
 //! the program, which reads the group's key values from the frame it runs in.
 //!
+//! Each view row's write carries the view tables whose rows are in flight
+//! beneath it. A view among them reads itself, and the write that reaches it
+//! again fails ([`refuse_reentry`]); every level spends of the computation-depth
+//! budget what a nested write does, so a chain of views deeper than the budget
+//! fails too ([`view_row_exec`]). Either is refused where it is reached, since
+//! every level holds its frames on the stack while the levels within it run.
+//!
 //! A table whose views changed since the program was lowered fails the record:
 //! the program's clauses are not the new views'.
 //!
@@ -50,6 +57,7 @@ use crate::exec::operators::write::stages::view::{
 	changed_no_row, group_values, left_no_row, new_group, no_record_count, read_view_row, stats_of,
 };
 use crate::exec::permission::view_frame;
+use crate::exec::vm::depth::STATEMENT_DEPTH;
 use crate::exec::vm::host::{admitted_unit, gather_program, unit_table};
 use crate::exec::vm::program::{PlaceStepSpec, Program, UnitId};
 use crate::exec::{Error as ExecError, ExecutionContext, FlowResult};
@@ -150,12 +158,14 @@ pub(in crate::exec::vm) fn action_pipeline(action: Action) -> usize {
 
 /// What every view of one record's maintenance reads: the program whose host
 /// pipelines the clauses are, the writing statement's scope, the source
-/// table's write context and the view frame.
+/// table's write context, the view frame, and the view tables whose rows are
+/// in flight beneath the record's write ([`WriteState::view_row`]).
 struct Maintain<'a> {
 	program: &'a Program,
 	scope: Arc<WriteScope>,
 	ctx: Arc<WriteCtx>,
 	frame: ExecutionContext,
+	maintaining: Arc<[TableName]>,
 }
 
 /// Maintain every view the record in flight's table feeds, for `action`.
@@ -176,6 +186,7 @@ pub(super) async fn views(
 	if !write.views_hold(&ctx.views, lowered) {
 		return Err(internal("the views of the table changed after the write was lowered"));
 	}
+	let maintaining = Arc::clone(&write.maintaining);
 	let (row, ctx) = write.in_flight()?;
 	let Some(id) = row.id.clone() else {
 		return Ok(());
@@ -187,6 +198,7 @@ pub(super) async fn views(
 		scope: ctx.scope()?,
 		frame: view_frame(ctx.exec()),
 		ctx,
+		maintaining,
 	};
 	// Every clause runs in the view frame, which the state holds while the
 	// views are maintained.
@@ -197,7 +209,9 @@ pub(super) async fn views(
 }
 
 /// Maintain each of `lowered`'s views for the record `id` whose images are
-/// `initial` and `current`.
+/// `initial` and `current`. A view whose row is already in flight beneath the
+/// record's write fails it before anything of it is evaluated
+/// ([`refuse_reentry`]).
 async fn maintain(
 	m: &Maintain<'_>,
 	lowered: &LoweredViews,
@@ -208,6 +222,9 @@ async fn maintain(
 	action: Action,
 ) -> FlowResult<()> {
 	for (definition, view) in lowered.definitions.iter().zip(&lowered.views) {
+		if !matches!(view, LoweredView::Unmaintained) {
+			refuse_reentry(&m.maintaining, &definition.name)?;
+		}
 		match view {
 			LoweredView::Unmaintained => {}
 			LoweredView::Materialized {
@@ -622,11 +639,63 @@ async fn clause(
 	}
 }
 
+/// Fail with [`ExecError::ViewReadsItself`] where `view` is among
+/// `maintaining`, the view tables whose rows are in flight beneath the write
+/// that would maintain it, each read by the next and the last the write's own
+/// table: every row maintaining `view` writes would reach it again, without
+/// end.
+///
+/// Each view row is written within the write that fed it, holding its frames
+/// on the stack while the views over it are maintained, so the re-entry is
+/// refused where it is reached rather than left to exhaust the stack. The
+/// refusal is exact: views reached twice down different paths, as two views
+/// over one source and a third over both, are not in flight at once.
+pub(super) fn refuse_reentry(maintaining: &[TableName], view: &TableName) -> FlowResult<()> {
+	let Some(at) = maintaining.iter().position(|table| table == view) else {
+		return Ok(());
+	};
+	// `maintaining[at + 1..]` each read the one before: `view` reads the last of
+	// them, which reads the one before it, back to the one that reads `view`.
+	let through = maintaining[at + 1..].iter().rev().map(|table| table.as_str().to_owned());
+	Err(ControlFlow::Err(anyhow::Error::new(ExecError::ViewReadsItself {
+		view: view.as_str().to_owned(),
+		through: through.collect(),
+	})))
+}
+
+/// `exec`, the context a view row's order runs in, with the computation-depth
+/// budget spent for `levels` view rows in flight one within another, the row
+/// itself the innermost: each is a write within the write that fed it, as an
+/// event's write is within its record's, and spends what a write statement does
+/// ([`STATEMENT_DEPTH`]). A chain of views deeper than the budget covers fails
+/// with [`ExecError::ComputationDepthExceeded`] rather than exhausting the
+/// stack, which every level holds frames of while the levels within it run.
+///
+/// Events fired by the innermost row's write start from what is left, so a
+/// chain of writes that passes through views and events alike spends one
+/// budget.
+pub(in crate::exec::vm) fn view_row_exec(
+	mut exec: ExecutionContext,
+	levels: usize,
+) -> FlowResult<ExecutionContext> {
+	// A dive spends at most `u8::MAX` of a budget that can hold more; spending
+	// the levels' cost in as few dives fails exactly where one per level would.
+	let mut cost = levels.saturating_mul(usize::from(STATEMENT_DEPTH));
+	while cost > 0 {
+		let step = u8::try_from(cost).unwrap_or(u8::MAX);
+		exec = exec.dive_by(step).map_err(ControlFlow::Err)?;
+		cost -= usize::from(step);
+	}
+	Ok(exec)
+}
+
 /// Run a row the maintenance wrote or removed on its view table through the
 /// view table's order for `action`: a write of its own, over a write state
-/// stacked on the writer's, in the view table's view-maintenance context. The
-/// row is not one of the statement's records, so nothing it does is counted
-/// towards what the statement affected.
+/// stacked on the writer's, in the view table's view-maintenance context, with
+/// the row's table added to the view tables in flight beneath it and the
+/// budget spent for each of them ([`view_row_exec`]). The row is not one of the
+/// statement's records, so nothing it does is counted towards what the
+/// statement affected.
 async fn run_view_row(
 	m: &Maintain<'_>,
 	state: &mut State,
@@ -637,7 +706,9 @@ async fn run_view_row(
 	current: Option<&Record>,
 ) -> FlowResult<()> {
 	let ctx = m.scope.write_ctx_for(&id.table, WritePurpose::ViewMaintenance).await?;
-	let exec = ctx.exec().clone();
+	let maintaining: Arc<[TableName]> =
+		m.maintaining.iter().cloned().chain(std::iter::once(id.table.clone())).collect();
+	let exec = view_row_exec(ctx.exec().clone(), maintaining.len())?;
 	let row = WriteRow::for_view_row(id, initial, current);
 	let units = unit_table(m.program, state, &exec)?;
 	let program = Arc::clone(admitted_unit(&units, rows.unit, &exec)?);
@@ -652,7 +723,8 @@ async fn run_view_row(
 	nested.rowless = true;
 	// The ids the order names are the statement's.
 	nested.units = Some(Arc::clone(&units));
-	nested.write = Some(Box::new(WriteState::view_row(Arc::clone(&m.scope), row, ctx)));
+	nested.write =
+		Some(Box::new(WriteState::view_row(Arc::clone(&m.scope), row, ctx, maintaining)));
 	Box::pin(super::super::host::run_value_row(program, pipeline, Value::None, &mut nested, &exec))
 		.await?;
 	Ok(())

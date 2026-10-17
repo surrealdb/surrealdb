@@ -627,6 +627,33 @@ pub(crate) enum Error {
 		table: String,
 		view: String,
 	},
+
+	/// A write's maintenance reached the view `view` while a row of `view` was
+	/// already in flight beneath it: the view reads itself, directly or through
+	/// the views of `through`, each of which reads the next and the last of
+	/// which reads `view`. Each row maintaining it writes would reach it again,
+	/// so the write fails rather than recursing.
+	#[error("Cannot maintain the view `{view}`: it reads itself{}", reads_through(.through))]
+	ViewReadsItself {
+		view: String,
+		through: Vec<String>,
+	},
+}
+
+/// The tail of [`Error::ViewReadsItself`]'s message: nothing for a view that
+/// reads itself directly, and otherwise the views it reads itself through, in
+/// the order each reads the next.
+fn reads_through(through: &[String]) -> String {
+	let mut out = String::new();
+	for (n, view) in through.iter().enumerate() {
+		out.push_str(match n {
+			0 => " through `",
+			_ => ", which reads `",
+		});
+		out.push_str(view);
+		out.push('`');
+	}
+	out
 }
 
 impl LeafError for Error {
@@ -737,6 +764,11 @@ impl LeafError for Error {
 				..
 			}
 			| Error::IdComponentsUnderWildcardView {
+				..
+			} => TypesError::validation(message, ValidationError::InvalidRequest),
+			// A view that reads itself is a definition no write can maintain,
+			// which its author can remove or define again.
+			Error::ViewReadsItself {
 				..
 			} => TypesError::validation(message, ValidationError::InvalidRequest),
 
