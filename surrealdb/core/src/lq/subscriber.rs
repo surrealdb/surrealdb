@@ -143,11 +143,15 @@ mod tests {
 	use crate::types::{PublicNotification, PublicValue};
 
 	/// Build a datastore with the given live-query engine and a notification
-	/// channel.
+	/// channel, and without maintenance tasks. These tests drive every router
+	/// pass themselves: the router task a default build starts runs passes of
+	/// its own on a timer, and one that lands between a test's writes and its
+	/// draining of the channel delivers notifications the drain then discards.
 	async fn new_ds(engine: &str) -> (Receiver<PublicNotification>, Arc<Datastore>) {
 		let (send, recv) = crate::channel::bounded(1000);
 		let config = ConfigMap::empty().with_key_value("live_query_engine", engine);
 		let ds = Datastore::builder()
+			.without_maintenance_tasks()
 			.with_capabilities(Capabilities::all())
 			.with_auth(false)
 			.with_notify(send)
