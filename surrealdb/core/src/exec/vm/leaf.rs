@@ -355,6 +355,9 @@ fn store(instr: &StoreInstr) -> Class {
 		| StoreInstr::RefuseNamedIdConversion {
 			..
 		}
+		| StoreInstr::CheckTableChange {
+			..
+		}
 		| StoreInstr::ValidateRecordKeys {
 			..
 		}

@@ -2691,11 +2691,14 @@ pub(crate) async fn remove_field(
 /// table's `TYPE` cannot change and it cannot become a view.
 ///
 /// That refusal lifts by itself once the rewrite job has finished, so both
-/// statement routes call this only after the table's records have judged the
-/// new `TYPE` ([`validate_records_survive_type_change`]): a `TYPE` a record
-/// does not admit is refused for that record, which waiting for the job would
-/// not change, and a caller is told to wait only for a change its records
-/// admit.
+/// statement routes call this after every other refusal of the change: a
+/// `TYPE` a record does not admit ([`validate_records_survive_type_change`]),
+/// a record id that names its components ([`refuse_named_id_conversion`]), a
+/// clause with an effect ([`crate::exec::clause_effects`]) and the rest are
+/// refused for what they are, which waiting for the job would not change. A
+/// caller is told to wait only for a change nothing else refuses, and what the
+/// change does to the table's migrations, below, is done only once nothing
+/// has refused it.
 ///
 /// A change that makes the table enforce migrations (a `SCHEMALESS` table
 /// made `SCHEMAFULL` in a database at level 4) queues a verification of its
@@ -2708,6 +2711,7 @@ pub(crate) async fn remove_field(
 /// keys, since such a table refuses none.
 ///
 /// [`validate_records_survive_type_change`]: crate::ddl::define::table::validate_records_survive_type_change
+/// [`refuse_named_id_conversion`]: crate::ddl::define::table::refuse_named_id_conversion
 pub(crate) async fn check_table_change(
 	ctx: &ExecutionContext,
 	ns: NamespaceId,

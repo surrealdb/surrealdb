@@ -155,9 +155,6 @@ impl Ddl<'_, '_> {
 				refusal: refusal.clone(),
 			});
 		}
-		// The table's records judge a new TYPE before a migration step does: a step's refusal lifts
-		// once the rewrite job has finished, a record's kind does not, so a change both refuse is
-		// refused for the record.
 		if let Some(redefined) = redefined {
 			self.store(StoreInstr::RefuseRedefiningTable {
 				ns,
@@ -203,6 +200,26 @@ impl Ddl<'_, '_> {
 			("graph_inline_gen", Operand::Reg(inline_gen)),
 		] {
 			self.set_field(definition, field, value)?;
+		}
+		// The definition's remaining refusals are raised here, before the relation's fields, the
+		// changefeed and the definition are written: a statement that fails after it wrote refuses
+		// the commit of a transaction its caller owns. A migration step judges the change last, as
+		// `ALTER TABLE` judges it: the step's refusal lifts once the rewrite job has finished and
+		// the others do not, so a caller told to wait for the job is refused for nothing else once
+		// it has.
+		self.store(StoreInstr::RefuseClauseEffects {
+			ns,
+			db,
+			definition,
+			previous: None,
+			object: ClauseObject::Table,
+		});
+		if let Some(redefined) = redefined {
+			self.store(StoreInstr::CheckTableChange {
+				ns,
+				db,
+				definition: std::sync::Arc::clone(redefined),
+			});
 		}
 
 		// A relation's `in` and `out` are field definitions of their own.
@@ -256,13 +273,6 @@ impl Ddl<'_, '_> {
 			});
 		}
 
-		self.store(StoreInstr::RefuseClauseEffects {
-			ns,
-			db,
-			definition,
-			previous: None,
-			object: ClauseObject::Table,
-		});
 		// The table key is locked before the write, so the write is serialised against a concurrent
 		// graph fold that flips the table's marker. The write is followed by its stamp.
 		self.store(StoreInstr::Lock {
@@ -659,8 +669,8 @@ impl Ddl<'_, '_> {
 		self.replace_fields(table, template)?;
 		let changefeed_set = matches!(alter.changefeed, AlterKind::Set(_));
 		// The body validates the table as altered against the table as it was, then forms the
-		// relation's `in` and `out` fields. As `DEFINE TABLE` does, it judges a new TYPE against
-		// the table's records before a migration step refuses the change.
+		// relation's `in` and `out` fields. As `DEFINE TABLE` does, it judges a migration step
+		// after every other refusal of the change.
 		self.store(StoreInstr::CheckTableAlter {
 			previous,
 			updated: table,

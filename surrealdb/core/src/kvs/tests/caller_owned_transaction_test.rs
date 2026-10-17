@@ -296,3 +296,55 @@ async fn statements_refused_before_writing_leave_the_transaction_committable() {
 		answer(&ds, "RETURN [{ id: p:1, a: 1 }, { id: p:3, a: 3 }];").await,
 	);
 }
+
+/// A table definition refused for a clause with an effect, or for a migration
+/// step its rows are behind, is refused before it writes a relation's `in` and
+/// `out`, its changefeed or itself, so the caller commits what the other
+/// statements wrote and the table is left as it was.
+#[tokio::test]
+async fn a_table_definition_refused_for_its_clauses_or_a_step_writes_nothing() {
+	let ds = ds().await;
+	run(
+		&ds,
+		"DEFINE TABLE log SCHEMALESS;
+		 DEFINE FUNCTION fn::writes() { CREATE log; RETURN true; };
+		 DEFINE TABLE p SCHEMAFULL;
+		 DEFINE TABLE ed TYPE ANY SCHEMAFULL;
+		 DEFINE FIELD a ON ed TYPE string;
+		 RELATE pt:1->ed:1->pt:2 SET a = '5' RETURN NONE;
+		 ALTER FIELD a ON ed TYPE int MIGRATE EXISTING ROWS AS a_int USING <int>$value FALLBACK -1;",
+	)
+	.await;
+	let table = "[(INFO FOR DB).tables.ed, (INFO FOR TABLE ed).fields];";
+	let before = answer(&ds, table).await;
+	for (at, (sql, refusal)) in [
+		(
+			"DEFINE TABLE OVERWRITE ed TYPE RELATION SCHEMAFULL CHANGEFEED 1h \
+			 PERMISSIONS FOR select WHERE fn::writes();",
+			"The PERMISSIONS clause must not have effects",
+		),
+		(
+			"DEFINE TABLE OVERWRITE ed TYPE RELATION SCHEMAFULL CHANGEFEED 1h;",
+			"rows are behind a migration step",
+		),
+	]
+	.into_iter()
+	.enumerate()
+	{
+		let client = client_answers(
+			&ds,
+			&owner(),
+			&format!("CREATE p:{at} RETURN NONE; {sql} CREATE p:{} RETURN NONE;", at + 10),
+		)
+		.await;
+		assert_ok(&client[0]);
+		assert_err(&client[1], refusal);
+		assert_ok(&client[2]);
+		assert_eq!(client[3], Ok(PublicValue::None), "the caller's commit after {sql:?}");
+		assert_eq!(answer(&ds, table).await, before, "{sql:?} left the table as it was");
+	}
+	assert_eq!(
+		answer(&ds, "SELECT VALUE id FROM p ORDER BY id;").await,
+		answer(&ds, "RETURN [p:0, p:1, p:10, p:11];").await,
+	);
+}

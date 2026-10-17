@@ -131,6 +131,7 @@ fn note_refusal(instr: &StoreInstr, ctx: &ExecutionContext, failed: bool) {
 				| StoreInstr::RefuseClauseEffects { .. }
 				| StoreInstr::RefuseRedefiningTable { .. }
 				| StoreInstr::RefuseNamedIdConversion { .. }
+				| StoreInstr::CheckTableChange { .. }
 				| StoreInstr::FieldCheck { .. }
 				| StoreInstr::Allow { .. }
 				| StoreInstr::RefuseNoWrite
@@ -555,6 +556,15 @@ async fn step_inner(
 			))
 			.await
 			.map_err(ControlFlow::Err)?;
+		}
+		StoreInstr::CheckTableChange {
+			ns,
+			db,
+			definition,
+		} => {
+			let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
+			let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
+			let txn = ctx.txn();
 			let existing = crate::exec::vm::descriptor::schema(
 				crate::catalog::providers::TableProvider::get_tb(
 					&*txn,
@@ -566,7 +576,6 @@ async fn step_inner(
 			)
 			.await
 			.map_err(ControlFlow::Err)?;
-			// After the records have judged the type: see `check_table_change`.
 			crate::exec::vm::descriptor::schema(crate::exec::migrate::check_table_change(
 				ctx,
 				ns,
@@ -2602,7 +2611,7 @@ async fn step_inner(
 			super::schema_host::check_table_altered(ctx, &txn, &previous, &mut altered)
 				.await
 				.map_err(ControlFlow::Err)?;
-			// After the records have judged the type: see `check_table_change`.
+			// After every other refusal of the change: see `check_table_change`.
 			crate::exec::vm::descriptor::schema(crate::exec::migrate::check_table_change(
 				ctx,
 				previous.namespace_id,

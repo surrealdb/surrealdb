@@ -1442,10 +1442,22 @@ pub(crate) enum StoreInstr {
 	/// `ns`, `db`, as the table it redefines and that table's contents stand
 	/// when the instruction runs: a LIGHTWEIGHT relation's edges, the fields,
 	/// events, indexes and records of a table becoming one, the INLINE fields
-	/// of a relation changing its type, a record the new type does not admit,
-	/// and then a change of type, or into a view, while rows are behind a
-	/// migration step ([`crate::exec::migrate::check_table_change`]).
+	/// of a relation changing its type, and a record the new type does not
+	/// admit.
 	RefuseRedefiningTable {
+		ns: Reg,
+		db: Reg,
+		definition: Arc<crate::catalog::TableDefinition>,
+	},
+	/// Raise what refuses `definition`, a table definition, in the database
+	/// `ns`, `db`, as a change of the table it redefines while that table's
+	/// rows are behind a migration step: a change of type, or into a view.
+	/// Otherwise take what the change does to the table's migrations
+	/// ([`crate::exec::migrate::check_table_change`]). The table is read when
+	/// the instruction runs; a definition that redefines no table passes. This
+	/// refusal lifts once the rewrite job has finished, so it is the last a
+	/// definition is judged by.
+	CheckTableChange {
 		ns: Reg,
 		db: Reg,
 		definition: Arc<crate::catalog::TableDefinition>,
@@ -2146,12 +2158,14 @@ pub(crate) enum StoreInstr {
 		schemafull: Reg,
 	},
 	/// Raise what `ALTER TABLE` raises when the table definition in `updated`,
-	/// formed from the one in `previous` by its clauses, is not a valid
-	/// lightweight relation, leaves INLINE fields on a table that is no
-	/// longer a relation, or has a type a record of the table does not admit;
-	/// and then when it changes the type while rows are behind a migration
-	/// step ([`crate::exec::migrate::check_table_change`]). The definition in
-	/// `updated` is replaced by the normalised one.
+	/// formed from the one in `previous` by its clauses, changes a
+	/// `PERMISSIONS` clause to one with an effect (except in an import), is
+	/// not a valid lightweight relation, leaves INLINE fields on a table that
+	/// is no longer a relation, makes a relation of a table whose record id
+	/// names its components, or has a type a record of the table does not
+	/// admit; and last, as [`StoreInstr::CheckTableChange`] does, when it
+	/// changes the type while rows are behind a migration step. The
+	/// definition in `updated` is replaced by the normalised one.
 	CheckTableAlter {
 		previous: Reg,
 		updated: Reg,
