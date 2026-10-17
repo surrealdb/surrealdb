@@ -143,11 +143,6 @@ impl Datastore {
 		info!(target: TARGET, "Versioning enabled: {} with retention period: {}ns", config.versioned, retention_ns);
 		let builder = builder.with_versioning(config.versioned, retention_ns);
 
-		// Configure optional bplustree index for versioned queries
-		let versioned_index = config.versioned && config.versioned_index;
-		info!(target: TARGET, "Versioning with versioned_index: {}", versioned_index);
-		let builder = builder.with_versioned_index(versioned_index);
-
 		// Configure the maximum memtable size
 		info!(target: TARGET, "Setting max memtable size: {}", config.max_memtable_size);
 		let builder = builder.with_max_memtable_size(config.max_memtable_size);

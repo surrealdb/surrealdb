@@ -3,6 +3,7 @@ use std::time::Duration;
 use common::sys::TOTAL_SYSTEM_MEMORY;
 use surrealdb_cnf::{Config, parse_duration};
 use surrealdb_kvs::config::SyncMode;
+use tracing::warn;
 
 /// Configuration for the SurrealKV storage engine, parsed from query parameters.
 #[derive(Debug, Clone)]
@@ -15,8 +16,6 @@ pub struct SurrealKvConfig {
 	pub sync_mode: SyncMode,
 	/// Whether to enable value log separation (default: true)
 	pub enable_vlog: bool,
-	/// Whether to enable versioned index (default: false, only applies when versioning is enabled)
-	pub versioned_index: bool,
 	/// The block size in bytes (default: 64 KiB)
 	pub block_size: usize,
 	/// The maximum value log file size in bytes (default: dynamic from 64 MiB to 512 MiB)
@@ -92,7 +91,6 @@ impl Default for SurrealKvConfig {
 			retention: Duration::ZERO,
 			sync_mode: SyncMode::Every,
 			enable_vlog: true,
-			versioned_index: false,
 			block_size: (64 * KIB) as usize,
 			vlog_max_file_size: default_log_file_size(),
 			vlog_threshold: (4 * KIB) as usize,
@@ -110,7 +108,6 @@ impl Config for SurrealKvConfig {
 		map.parse_key("datastore_versioned", &mut self.versioned)
 			.parse_key_with("datastore_retention", &mut self.retention, |x| parse_duration(x).ok())
 			.parse_key("surrealkv_enable_vlog", &mut self.enable_vlog)
-			.parse_key("surrealkv_versioned_index", &mut self.versioned_index)
 			.parse_key("surrealkv_block_size", &mut self.block_size)
 			.parse_key("surrealkv_vlog_max_file_size", &mut self.vlog_max_file_size)
 			.parse_key("surrealkv_vlog_threshold", &mut self.vlog_threshold)
@@ -130,6 +127,16 @@ impl Config for SurrealKvConfig {
 			map.parse_key("datastore_sync", &mut self.sync_mode);
 		} else {
 			map.parse_key("datastore_sync_data", &mut self.sync_mode);
+		}
+
+		// The engine has no separate index of versions, so the setting has no effect. It is
+		// ignored, as any other key which nothing reads is, and an operator who still sets it
+		// is told.
+		if map.has_key("surrealkv_versioned_index") {
+			warn!(
+				target: "surrealdb::core::kvs::surrealkv",
+				"The surrealkv_versioned_index setting has no effect and is ignored"
+			);
 		}
 	}
 }
@@ -160,6 +167,16 @@ mod test {
 		let config = map.load::<SurrealKvConfig>();
 		assert!(config.versioned);
 		assert_eq!(config.retention, Duration::from_secs(30 * 24 * 60 * 60));
+		assert_eq!(config.sync_mode, SyncMode::Every);
+	}
+
+	#[test]
+	fn test_surrealkv_config_ignores_versioned_index() {
+		let map = ConfigMap::empty()
+			.with_key_value("surrealkv_versioned_index", "true")
+			.with_key_value("datastore_versioned", "true");
+		let config = map.load::<SurrealKvConfig>();
+		assert!(config.versioned);
 		assert_eq!(config.sync_mode, SyncMode::Every);
 	}
 

@@ -79,6 +79,12 @@ user-id = 267 # Tony Arcieri (tarcieri)
 start = "2021-01-29"
 end = "2026-05-06"
 
+[[trusted.artmap]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2026-09-25"
+end = "2027-10-15"
+
 [[trusted.assert_fs]]
 criteria = "safe-to-deploy"
 user-id = 6743 # Ed Page (epage)
@@ -204,6 +210,12 @@ criteria = "safe-to-deploy"
 user-id = 6741 # Alice Ryhl (Darksonn)
 start = "2021-01-11"
 end = "2027-05-01"
+
+[[trusted.byteslice]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2026-09-24"
+end = "2027-10-15"
 
 [[trusted.bzip2-sys]]
 criteria = "safe-to-deploy"
@@ -1218,6 +1230,24 @@ criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2024-02-08"
 end = "2027-05-01"
+
+[[trusted.surrealkv-compat-indxdb]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2026-10-13"
+end = "2027-10-15"
+
+[[trusted.surrealkv-compat-rocksdb]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2026-10-13"
+end = "2027-10-15"
+
+[[trusted.surrealkv-compat-v1]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2026-10-13"
+end = "2027-10-15"
 
 [[trusted.surrealml-core]]
 criteria = "safe-to-deploy"
