@@ -14,6 +14,7 @@
 //!   required.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use surrealdb_datastore::index_shapes::{ShapeRecorder, ValueShape};
@@ -23,8 +24,8 @@ use uuid::Uuid;
 
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{
-	CondText, DatabaseId, DiskAnnParams, FullTextParams, HnswParams, Index, IndexDefinition,
-	NamespaceId, TableId,
+	AnalyzerDefinition, CondText, DatabaseId, DiskAnnParams, FullTextParams, HnswParams, Index,
+	IndexDefinition, NamespaceId, TableId,
 };
 use crate::count::{IndexCountCompactionPlan, IndexCountThingIterator};
 use crate::docids::{DocId, TableDocIds};
@@ -109,27 +110,33 @@ impl<'a> IndexOperation<'a> {
 		self
 	}
 
+	/// The full-text index `ix` defines, or `None` for an index of any other
+	/// kind.
+	///
+	/// It analyses with `analyzer` when the caller hands one over, and
+	/// otherwise with the analyzer `ix` names as `env`'s transaction reads it.
 	pub async fn create_fulltext_index(
 		env: &dyn IndexEnv,
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
+		analyzer: Option<Arc<AnalyzerDefinition>>,
 	) -> Result<Option<FullTextIndex>> {
 		let Index::FullText(p) = &ix.index else {
 			return Ok(None);
 		};
 		let ikb = IndexKeyBase::new(ns, db, ix.table_name.clone(), ix.index_id);
-		Ok(Some(
-			FullTextIndex::new(
-				env.index_stores(),
-				&env.tx(),
-				ikb,
-				p,
-				&env.config().file_allowlist,
-				ix.format_version,
-			)
-			.await?,
-		))
+		let ixs = env.index_stores();
+		let allow_list = &env.config().file_allowlist;
+		let index = match analyzer {
+			Some(az) => {
+				FullTextIndex::with_analyzer(ixs, az, ikb, p, allow_list, ix.format_version).await?
+			}
+			None => {
+				FullTextIndex::new(ixs, &env.tx(), ikb, p, allow_list, ix.format_version).await?
+			}
+		};
+		Ok(Some(index))
 	}
 
 	pub async fn compute(

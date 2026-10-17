@@ -623,9 +623,7 @@ impl Building {
 		// Each record's key, decoded once for the scan and the older markers.
 		let keys =
 			values.iter().map(|(k, _)| RecordKey::decode_key(k)).collect::<Result<Vec<_>>>()?;
-		let fulltext_index =
-			IndexOperation::create_fulltext_index(ctx, self.ix_key.ns, self.ix_key.db, &self.ix)
-				.await?;
+		let fulltext_index = self.fulltext_index(ctx).await?;
 		let lookup_tx = self.new_read_tx().await?;
 		// The index's columns and `COUNT` guard, as the engine
 		// evaluates them: compiled once for the build, and the same
@@ -1942,9 +1940,7 @@ impl Building {
 		count: &mut usize,
 	) -> Result<()> {
 		let mut rc = false;
-		let fulltext_index =
-			IndexOperation::create_fulltext_index(ctx, self.ix_key.ns, self.ix_key.db, &self.ix)
-				.await?;
+		let fulltext_index = self.fulltext_index(ctx).await?;
 		let exec = self.exec_ctx(ctx).await?;
 		let az_fn = StreamingAnalyzerFunction::new(&exec);
 		for k in keys {
@@ -1983,9 +1979,7 @@ impl Building {
 		count: &mut usize,
 	) -> Result<()> {
 		let mut rc = false;
-		let fulltext_index =
-			IndexOperation::create_fulltext_index(ctx, self.ix_key.ns, self.ix_key.db, &self.ix)
-				.await?;
+		let fulltext_index = self.fulltext_index(ctx).await?;
 		let exec = self.exec_ctx(ctx).await?;
 		let az_fn = StreamingAnalyzerFunction::new(&exec);
 		for k in keys {

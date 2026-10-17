@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::Result;
 use roaring::RoaringTreemap;
@@ -17,7 +18,7 @@ use surrealdb_kvs::consts::COUNT_BATCH_SIZE;
 use uuid::Uuid;
 
 use crate::catalog::providers::DatabaseProvider;
-use crate::catalog::{FullTextParams, Scoring};
+use crate::catalog::{AnalyzerDefinition, FullTextParams, Scoring};
 use crate::docids::{DocId, LegacyFullTextDocIds, TableDocIds};
 use crate::env::IndexEnv;
 /// This module implements a concurrent full-text search index.
@@ -424,6 +425,19 @@ impl FullTextIndex {
 		format_version: u16,
 	) -> Result<Self> {
 		let az = tx.get_db_analyzer(ikb.0.ns, ikb.0.db, &p.analyzer, None).await?;
+		Self::with_analyzer(ixs, az, ikb, p, allow_list, format_version).await
+	}
+
+	/// Creates a new full-text index that analyses with `az`, the analyzer `p`
+	/// names as the caller resolved it, rather than as the database holds it.
+	pub async fn with_analyzer(
+		ixs: &IndexStores,
+		az: Arc<AnalyzerDefinition>,
+		ikb: IndexKeyBase,
+		p: &FullTextParams,
+		allow_list: &[PathBuf],
+		format_version: u16,
+	) -> Result<Self> {
 		ixs.mappers().check(&az, allow_list).await?;
 		let analyzer = Analyzer::new(ixs, az).await?;
 		let mut bm25 = None;

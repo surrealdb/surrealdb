@@ -66,6 +66,16 @@ const BUILD_RESERVATION_TTL_SECS: i64 = 30;
 /// CAS on `(generation, owner)`, so a stale owner cannot publish progress after
 /// takeover.
 const BUILD_OWNER_LEASE_SECS: i64 = 60;
+/// How often a `CONCURRENTLY` build that is waiting for the transaction of the
+/// statement that started it renews its owner lease. That transaction can stay
+/// open for longer than [`BUILD_OWNER_LEASE_SECS`], and a lapsed lease would
+/// let another builder take the generation over and build it from the
+/// definition committed before the statement, which a `REBUILD` replaces.
+#[cfg(not(test))]
+const BUILD_WAITING_HEARTBEAT: Duration = Duration::from_secs(BUILD_OWNER_LEASE_SECS as u64 / 4);
+/// Short enough for a test to watch a waiting build renew its lease.
+#[cfg(test)]
+const BUILD_WAITING_HEARTBEAT: Duration = Duration::from_millis(100);
 /// Poll cadence while writer admission waits for `Closing` to become `Online`
 /// or `Error`. The caller's context deadline is the only timeout budget.
 const BUILD_CLOSING_SLEEP: Duration = Duration::from_millis(100);

@@ -25,11 +25,14 @@ use super::state::{
 	report_status_from_phase,
 };
 use super::{
-	AcquiredBuild, BUILD_CLOSING_SLEEP, BUILD_OWNER_LEASE_SECS, BuildGeneration, IndexBuildPhase,
+	AcquiredBuild, BUILD_CLOSING_SLEEP, BUILD_WAITING_HEARTBEAT, BuildGeneration, IndexBuildPhase,
 	IndexBuildReportStatus, IndexBuildState, IndexBuilding, build_abort_deadline,
 };
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
-use crate::catalog::{DatabaseId, Index, IndexDefinition, IndexId, NamespaceId, TableId};
+use crate::catalog::{
+	AnalyzerDefinition, DatabaseId, Error as CatalogError, Index, IndexDefinition, IndexId,
+	NamespaceId, TableId,
+};
 use crate::ctx::reason::Reason;
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
@@ -41,6 +44,7 @@ use crate::exec::planner::Planner;
 use crate::exec::vm::closure::ClosureUnits;
 use crate::exec::{DatabaseContext, ExecutionContext};
 use crate::idx::IndexKeyBase;
+use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
 use crate::idx::trees::hnsw::index::HnswCompactionOutcome;
 use crate::key::schema::{IdxRoot, RecordKey, RecordPrefix};
@@ -382,8 +386,13 @@ impl IndexBuilder {
 		let carried = carried_places(ctx, sdr.is_some());
 		#[cfg(test)]
 		lent_places::note(ctx.node_id(), &ix.name, carried.is_some());
-		let building =
-			Arc::new(Building::with_places(ctx, self.tf.clone(), opt, tb, ix, ix_key, carried)?);
+		let mut building =
+			Building::with_places(ctx, self.tf.clone(), opt, tb, ix, ix_key, carried)?;
+		// A sender is what a blocking statement waits on.
+		if sdr.is_some() {
+			building.analyzer = building.statement_analyzer(ctx).await?;
+		}
+		let building = Arc::new(building);
 		building.read_key_structure_in(ctx).await?;
 		let acquired = match building.acquire_build_state().await {
 			Ok(Some(acquired)) => acquired,
@@ -876,6 +885,11 @@ pub(super) struct Building {
 	/// holds no transaction: its sources resolve when the expression runs, so
 	/// nothing from the compiling batch is baked in.
 	compiled: OnceCell<Arc<PhysicalIndexEntry>>,
+	/// The analyzer a blocking full-text build analyses with, as the statement
+	/// that started it resolved it ([`Building::statement_analyzer`]). `None`
+	/// for every other build, which reads the analyzer its index names in each
+	/// transaction it opens.
+	analyzer: Option<Arc<AnalyzerDefinition>>,
 	/// The structure of the record ids of the table this index is over, where
 	/// its `id` field names their components; read once for the whole build
 	/// ([`Self::table_key_structure`]).
@@ -973,10 +987,77 @@ impl Building {
 			finished_notify: Notify::new(),
 			online: AtomicBool::new(false),
 			compiled: OnceCell::new(),
+			analyzer: None,
 			key: OnceCell::new(),
 			places: parking_lot::Mutex::new(places),
 			memory: ctx.memory().map(|memory| memory.host().clone()),
 		})
+	}
+
+	/// The analyzer a blocking full-text build analyses with: the one its index
+	/// names, as the transaction of the statement that started the build reads
+	/// it.
+	///
+	/// The build starts while that transaction is open, and nothing the
+	/// transaction staged — an analyzer defined beside the index included — is
+	/// visible to the transactions the build reads in. A build no statement
+	/// awaits reads nothing until the transaction has closed
+	/// ([`Building::await_statement_closed`]), but a blocking build that its
+	/// statement awaits inside the transaction — one in `BEGIN … COMMIT`, nested
+	/// in a block, or replacing an index — cannot wait for it: the transaction
+	/// stays open for the whole build. The statement already hands the build
+	/// the definition it builds; this hands over the analyzer that definition
+	/// names in the same way. The two commit together or not at all, and a
+	/// statement that rolls back discards what the build wrote with them
+	/// ([`CleanUncommittedBuild`]). A statement that awaits its build after
+	/// committing ([`IndexBuilder::run_awaited_after_commit`]) is alone in its
+	/// transaction, so the analyzer it hands over is the one that commits.
+	///
+	/// `None` for an index that is not full-text, for a context with no
+	/// transaction, and for an analyzer the statement cannot see either: the
+	/// build then reads its own and fails as it would without this.
+	async fn statement_analyzer(
+		&self,
+		ctx: &FrozenContext,
+	) -> Result<Option<Arc<AnalyzerDefinition>>> {
+		let Index::FullText(p) = &self.ix.index else {
+			return Ok(None);
+		};
+		let Some(tx) = ctx.try_tx() else {
+			return Ok(None);
+		};
+		// Made while the statement's program runs, which is sealed off the
+		// catalog: this is the builder's load, not the program's.
+		let read = tx.get_db_analyzer(self.ix_key.ns, self.ix_key.db, &p.analyzer, None);
+		match crate::kvs::catalog_reads::sealed(false, read).await {
+			Ok(az) => Ok(Some(az)),
+			Err(err)
+				if matches!(
+					err.downcast_ref::<CatalogError>(),
+					Some(CatalogError::AzNotFound { .. })
+				) =>
+			{
+				Ok(None)
+			}
+			Err(err) => Err(err),
+		}
+	}
+
+	/// The full-text index this build writes, or `None` for an index of any
+	/// other kind. It analyses with the analyzer the statement handed over
+	/// ([`Building::statement_analyzer`]), if any.
+	pub(super) async fn fulltext_index(
+		&self,
+		ctx: &FrozenContext,
+	) -> Result<Option<FullTextIndex>> {
+		IndexOperation::create_fulltext_index(
+			ctx,
+			self.ix_key.ns,
+			self.ix_key.db,
+			&self.ix,
+			self.analyzer.clone(),
+		)
+		.await
 	}
 
 	/// Whether this build's generation is known to be `Online`.
@@ -2164,7 +2245,6 @@ impl Building {
 		generation: BuildGeneration,
 		phase: IndexBuildPhase,
 	) -> Result<bool> {
-		let heartbeat_every = Duration::from_secs((BUILD_OWNER_LEASE_SECS / 4) as u64);
 		let mut heartbeat_at = Instant::now();
 		// Register for the wake-up before checking the gate or `aborted`, as
 		// `notify_waiters` only wakes waiters that are already registered.
@@ -2189,7 +2269,7 @@ impl Building {
 			if dropped {
 				return Ok(false);
 			}
-			if heartbeat_at.elapsed() >= heartbeat_every {
+			if heartbeat_at.elapsed() >= BUILD_WAITING_HEARTBEAT {
 				self.heartbeat_ownership(generation, phase).await?;
 				heartbeat_at = Instant::now();
 			}
@@ -2586,16 +2666,26 @@ impl Building {
 		if last_prepare_remove_check.elapsed() < Duration::from_secs(5) {
 			return Ok(());
 		};
-		// Check the index still exists and has not been marked for removal.
-		// We use get_tb_index (returns Option) instead of expect_tb_index because
-		// this check runs on a separate read transaction. A DEFINE INDEX that
-		// awaits its build inside its own transaction commits the definition only
-		// after indexing completes, so this read transaction may not yet see it.
-		// A miss is throttled like a hit: the prepare_remove flag is set only by
-		// a REMOVE INDEX, in a transaction of its own, on a definition it can
-		// read, so no flag exists before the definition is visible, and one set
-		// after is seen by the first check after it, at most one throttle
-		// interval later.
+		// Check the index has not been marked for removal.
+		//
+		// `ALTER INDEX … PREPARE REMOVE` sets the flag, in any transaction that
+		// can read the definition, the one that defines it included. `tx` is one
+		// of the build's own, so it sees only what has committed:
+		//
+		// - A `CONCURRENTLY` build, and a blocking one its statement awaits after committing, read
+		//   nothing before the transaction that started them has closed
+		//   (`Building::await_statement_closed`), so the first check sees a flag committed with the
+		//   definition.
+		// - A blocking `DEFINE INDEX` that awaits its build inside its transaction commits its
+		//   definition only after the build returns, so every check misses. No flag can be set in
+		//   the meantime: no other transaction can read the definition, and its own is waiting on
+		//   the build.
+		// - Any other miss is a definition that is gone, or was never committed: a removal fences
+		//   the build by deleting `!bs`, and a rollback aborts it.
+		//
+		// A miss therefore tells the build nothing it must act on sooner, and is
+		// throttled like a hit. A flag committed after a check is seen at most one
+		// throttle interval later.
 		if let Some(ix) = tx
 			.get_tb_index(
 				self.ix_key.ns,

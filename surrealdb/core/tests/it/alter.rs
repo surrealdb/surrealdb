@@ -24,12 +24,16 @@ async fn alter_statement_index_prepare_remove(def_index: &str, skip_def: usize) 
 		.await?;
 	skip_ok(&mut r, 1)?;
 
-	// Create the index concurrently and decommission it in the same
-	// transaction, so the build never sees the index undecommissioned.
-	let query = format!("BEGIN;\n{def_index}\nALTER INDEX test ON user PREPARE REMOVE;\nCOMMIT;");
+	// Define the index concurrently and decommission it in one transaction,
+	// held open after the build has started. The build reads nothing before
+	// that transaction closes, so it sees the definition, its analyzer and the
+	// decommission together, and stops on the decommission.
+	let query = format!(
+		"BEGIN;\n{def_index}\nALTER INDEX test ON user PREPARE REMOVE;\nSLEEP 500ms;\nCOMMIT;"
+	);
 	let mut r = ds.execute(&query, &session, None).await?;
-	assert_eq!(r.len(), skip_def + 3);
-	skip_ok(&mut r, skip_def + 3)?;
+	assert_eq!(r.len(), skip_def + 4);
+	skip_ok(&mut r, skip_def + 4)?;
 
 	// Loop until the index built is in error
 	let now = SystemTime::now();

@@ -8149,6 +8149,114 @@ async fn a_concurrent_build_whose_statement_rolls_back_aborts_without_building()
 	Ok(())
 }
 
+/// A `CONCURRENTLY` build waiting for its statement's transaction keeps its
+/// owner lease, however long that transaction stays open: a lapsed lease would
+/// let another builder take the generation over and build it from the
+/// definition committed before the statement.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_concurrent_build_renews_its_lease_while_its_statement_stays_open() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;
+		 CREATE t:1 SET vec = [1.0, 0.0];",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "hx").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	let txn = build_index_inside_an_open_statement_transaction(
+		&ds,
+		&session,
+		ns,
+		db,
+		&table,
+		Arc::clone(&ix),
+		false,
+	)
+	.await?;
+	let building = local_builder_for_key(&ds, ns, db, &table, ix.index_id)
+		.await?
+		.expect("the build registers a local builder");
+	// As if the transaction had been open for longer than the lease.
+	let mut state = durable_build_state(&ds, &ikb).await?;
+	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+	state.updated_at = expired;
+	state.owner_heartbeat_at = Some(expired);
+	set_durable_build_state(&ds, &ikb, state).await?;
+
+	timeout(Duration::from_secs(10), async {
+		while build_owner_expired(&durable_build_state(&ds, &ikb).await?, Utc::now()) {
+			sleep(BUILD_WAITING_HEARTBEAT).await;
+		}
+		anyhow::Ok(())
+	})
+	.await
+	.map_err(|_| anyhow::anyhow!("the waiting build never renewed its lease"))??;
+	assert!(!building.is_finished(), "the build must still be waiting for its statement");
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.phase, IndexBuildPhase::Building);
+	assert!(state.owner.is_some(), "the renewal keeps the build's ownership");
+
+	txn.commit().await?;
+
+	wait_for_finished_builder(&building).await?;
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.phase, IndexBuildPhase::Online);
+	assert_eq!(state.owner, None, "the commit and the finished build must release the fence");
+	Ok(())
+}
+
+/// A `CONCURRENTLY` build started inside a save point scope still waits for its
+/// statement's transaction when that scope rolls back. The rollback undoes the
+/// scope's writes; the transaction the build waits for is still open.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_concurrent_build_started_in_a_rolled_back_save_point_waits_for_the_commit() -> Result<()>
+{
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;
+		 CREATE t:1 SET vec = [1.0, 0.0];",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "hx").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	let txn = Arc::new(ds.transaction(TransactionType::Write).await?);
+	{
+		let table_def =
+			catch!(txn, txn.get_tb(ns, db, &table, None).await).expect("table should exist");
+		let mut ctx = ds.setup_ctx()?;
+		ctx.set_transaction(Arc::clone(&txn));
+		let ctx = ctx.freeze();
+		let builder = ctx.get_index_builder().expect("index builder should exist").clone();
+		txn.new_save_point().await?;
+		builder
+			.build(&ctx, ds.setup_options(&session), table_def.table_id, Arc::clone(&ix), false)
+			.await?;
+		txn.rollback_to_save_point().await?;
+	}
+	let building = local_builder_for_key(&ds, ns, db, &table, ix.index_id)
+		.await?
+		.expect("the build registers a local builder");
+	// Ample time for a build of one record that does not wait to finish.
+	sleep(Duration::from_millis(200)).await;
+	assert!(!building.is_finished(), "the build must wait for its statement's transaction");
+
+	txn.commit().await?;
+
+	wait_for_finished_builder(&building).await?;
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.phase, IndexBuildPhase::Online);
+	assert_eq!(state.owner, None, "the commit and the finished build must release the fence");
+	Ok(())
+}
+
 /// A blocking build publishes `Online` and drains its pendings while the
 /// statement that started it still holds the definition it built against in an
 /// uncommitted transaction. Every other node reads the previous definition for
@@ -14597,6 +14705,303 @@ async fn a_write_queued_during_a_build_is_counted_by_a_guard_over_a_component() 
 		.await?,
 		2
 	);
+	Ok(())
+}
+
+// What a build started by a statement sees of that statement's transaction.
+//
+// `DEFINE INDEX` starts its build while its transaction is still open, and the
+// build reads in transactions of its own. A blocking statement holds its
+// transaction open by waiting on the build; the `CONCURRENTLY` tests hold it
+// open with `SLEEP`, so a build that reads before the commit always does.
+
+/// Run `sql` and fail with every statement's error, not only the first: inside
+/// `BEGIN … COMMIT` the first is the "not executed" stand-in a failed statement
+/// leaves on the statements before it.
+async fn execute_all_reporting(ds: &Datastore, session: &Session, sql: &str) -> Result<()> {
+	let errors: Vec<String> = ds
+		.execute(sql, session, None)
+		.await?
+		.into_iter()
+		.filter_map(|result| result.result.err().map(|err| err.to_string()))
+		.collect();
+	anyhow::ensure!(errors.is_empty(), "statements failed: {errors:#?}");
+	Ok(())
+}
+
+/// A table of a thousand records, enough for the build to read it in several
+/// batches, beside one record a full-text query can name.
+async fn seed_defining_transaction_users(ds: &Datastore, session: &Session) -> Result<()> {
+	execute_all(
+		ds,
+		session,
+		"
+		DEFINE TABLE user SCHEMALESS;
+		CREATE |user:1000| SET email = string::concat('user', rand::string(8), '@example.com') RETURN NONE;
+		CREATE user:needle SET email = 'needle@example.com' RETURN NONE;
+		",
+	)
+	.await
+}
+
+/// How many records index `test` on `user` answers for each address the
+/// staged-write tests write, keyed by the address's local part.
+async fn indexed_email_rows(
+	ds: &Datastore,
+	session: &Session,
+) -> Result<Vec<(&'static str, usize)>> {
+	let mut rows = Vec::new();
+	for email in ["kept", "added", "after", "moved", "before", "gone", "dup"] {
+		let sql =
+			format!("SELECT id FROM user WITH INDEX test WHERE email = '{email}@example.com'");
+		rows.push((email, query_array_len(ds, session, &sql).await?));
+	}
+	Ok(rows)
+}
+
+/// Wait until the build of `index` on `table` stops, answering its report.
+async fn wait_for_index_build_end(
+	ds: &Datastore,
+	session: &Session,
+	table: &str,
+	index: &str,
+) -> Result<serde_json::Value> {
+	timeout(Duration::from_secs(10), async {
+		loop {
+			let building = index_building_json(ds, session, table, index).await?;
+			match building.get("status").and_then(|status| status.as_str()) {
+				Some("ready" | "error" | "aborted") => return Ok(building),
+				_ => sleep(Duration::from_millis(20)).await,
+			}
+		}
+	})
+	.await
+	.map_err(|_| anyhow::anyhow!("timed out waiting for the index build to stop"))?
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_blocking_full_text_build_uses_the_analyzer_its_transaction_defines() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	seed_defining_transaction_users(&ds, &session).await?;
+	execute_all_reporting(
+		&ds,
+		&session,
+		"
+		BEGIN;
+		DEFINE ANALYZER simple TOKENIZERS blank,class;
+		DEFINE INDEX test ON user FIELDS email FULLTEXT ANALYZER simple BM25 HIGHLIGHTS;
+		COMMIT;
+		",
+	)
+	.await?;
+	let building = index_building_json(&ds, &session, "user", "test").await?;
+	assert_eq!(building["status"], "ready", "{building}");
+	assert_eq!(building["initial"], 1001, "{building}");
+	expect_indexed_query_len(&ds, &session, "SELECT id FROM user WHERE email @@ 'needle'", 1)
+		.await?;
+	Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_concurrently_build_reads_the_analyzer_its_transaction_defines() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	seed_defining_transaction_users(&ds, &session).await?;
+	execute_all_reporting(
+		&ds,
+		&session,
+		"
+		BEGIN;
+		DEFINE ANALYZER simple TOKENIZERS blank,class;
+		DEFINE INDEX test ON user FIELDS email FULLTEXT ANALYZER simple BM25 HIGHLIGHTS CONCURRENTLY;
+		SLEEP 500ms;
+		COMMIT;
+		",
+	)
+	.await?;
+	let building = wait_for_index_build_end(&ds, &session, "user", "test").await?;
+	assert_eq!(building["status"], "ready", "{building}");
+	assert_eq!(building["initial"], 1001, "{building}");
+	expect_indexed_query_len(&ds, &session, "SELECT id FROM user WHERE email @@ 'needle'", 1)
+		.await?;
+	Ok(())
+}
+
+/// A decommission committed with the definition is visible to the build's
+/// first check, so the build stops instead of publishing an index that is
+/// already being removed.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_concurrently_build_stops_on_a_prepare_remove_committed_with_it() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	seed_defining_transaction_users(&ds, &session).await?;
+	execute_all_reporting(
+		&ds,
+		&session,
+		"
+		BEGIN;
+		DEFINE INDEX test ON user FIELDS email CONCURRENTLY;
+		SLEEP 500ms;
+		ALTER INDEX test ON user PREPARE REMOVE;
+		COMMIT;
+		",
+	)
+	.await?;
+	let building = wait_for_index_build_end(&ds, &session, "user", "test").await?;
+	assert_eq!(building["status"], "error", "{building}");
+	assert_eq!(
+		building["error"], "Index building has been cancelled: Prepare remove.",
+		"{building}"
+	);
+	Ok(())
+}
+
+/// Records the defining transaction writes before `DEFINE INDEX` are never
+/// queued for the build: no index existed when they were written. The build's
+/// scan has to read them, which it can only do once they are committed.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_concurrently_build_indexes_what_its_transaction_wrote_before_it() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+		DEFINE TABLE user SCHEMALESS;
+		CREATE user:kept SET email = 'kept@example.com' RETURN NONE;
+		CREATE user:changed SET email = 'before@example.com' RETURN NONE;
+		CREATE user:gone SET email = 'gone@example.com' RETURN NONE;
+		CREATE user:moved SET email = 'dup@example.com' RETURN NONE;
+		",
+	)
+	.await?;
+	execute_all_reporting(
+		&ds,
+		&session,
+		"
+		BEGIN;
+		CREATE user:added SET email = 'added@example.com' RETURN NONE;
+		UPDATE user:changed SET email = 'after@example.com' RETURN NONE;
+		DELETE user:gone;
+		UPDATE user:moved SET email = 'moved@example.com' RETURN NONE;
+		DEFINE INDEX test ON user FIELDS email UNIQUE CONCURRENTLY;
+		SLEEP 500ms;
+		COMMIT;
+		",
+	)
+	.await?;
+	wait_for_index_ready(&ds, &session, "user", "test").await?;
+	assert_eq!(
+		indexed_email_rows(&ds, &session).await?,
+		[
+			("kept", 1),
+			("added", 1),
+			("after", 1),
+			("moved", 1),
+			("before", 0),
+			("gone", 0),
+			("dup", 0)
+		]
+	);
+	// The value `user:moved` gave up is free: a stale entry would refuse it.
+	execute_all_reporting(
+		&ds,
+		&session,
+		"CREATE user:taker SET email = 'dup@example.com' RETURN NONE;",
+	)
+	.await?;
+	Ok(())
+}
+
+/// A blocking build misses what its defining transaction wrote before it.
+///
+/// The build reads in transactions of its own while the statement waits on it,
+/// so it indexes the table as last committed: entries for the records the
+/// transaction changed or deleted, none for the ones it created or changed. The
+/// writes themselves maintained no index, as none was defined yet. This pins
+/// that behaviour; the `CONCURRENTLY` counterpart above shows the outcome a
+/// build that sees the transaction's writes reaches.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_blocking_build_misses_what_its_transaction_wrote_before_it() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+		DEFINE TABLE user SCHEMALESS;
+		CREATE user:kept SET email = 'kept@example.com' RETURN NONE;
+		CREATE user:changed SET email = 'before@example.com' RETURN NONE;
+		CREATE user:gone SET email = 'gone@example.com' RETURN NONE;
+		CREATE user:moved SET email = 'dup@example.com' RETURN NONE;
+		",
+	)
+	.await?;
+	execute_all_reporting(
+		&ds,
+		&session,
+		"
+		BEGIN;
+		CREATE user:added SET email = 'added@example.com' RETURN NONE;
+		UPDATE user:changed SET email = 'after@example.com' RETURN NONE;
+		DELETE user:gone;
+		UPDATE user:moved SET email = 'moved@example.com' RETURN NONE;
+		DEFINE INDEX test ON user FIELDS email UNIQUE;
+		COMMIT;
+		",
+	)
+	.await?;
+	wait_for_index_ready(&ds, &session, "user", "test").await?;
+	// The column has never held an array, so a lookup trusts the index rather
+	// than re-checking the condition on each record it fetches: a stale entry
+	// answers the record that gave its value up (`before`, `dup`), unless the
+	// transaction deleted that record (`gone`). The missing entries answer
+	// nothing.
+	assert_eq!(
+		indexed_email_rows(&ds, &session).await?,
+		[
+			("kept", 1),
+			("added", 0),
+			("after", 0),
+			("moved", 0),
+			("before", 1),
+			("gone", 0),
+			("dup", 1)
+		]
+	);
+	// The uniqueness check does not re-read: the stale entry for the value
+	// `user:moved` gave up still holds it.
+	let err = execute_all_reporting(
+		&ds,
+		&session,
+		"CREATE user:taker SET email = 'dup@example.com' RETURN NONE;",
+	)
+	.await
+	.expect_err("a stale entry holds the value");
+	assert!(err.to_string().contains("user:moved"), "{err:#}");
+	Ok(())
+}
+
+/// A rolled-back definition stops its build promptly, whatever the build was
+/// doing: the rollback waits for the build to stop before deleting what it
+/// wrote, for at most `BUILD_ABORT_STOP_BUDGET`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rolled_back_definition_stops_its_concurrently_build_promptly() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	seed_defining_transaction_users(&ds, &session).await?;
+	let started = Instant::now();
+	execute_cancelled_transaction(
+		&ds,
+		&session,
+		"BEGIN; DEFINE INDEX test ON user FIELDS email CONCURRENTLY; SLEEP 200ms; CANCEL;",
+	)
+	.await?;
+	assert!(
+		started.elapsed() < BUILD_ABORT_STOP_BUDGET / 3,
+		"the rollback waited {:?} for the build to stop",
+		started.elapsed()
+	);
+	execute_all(&ds, &session, "DEFINE INDEX test ON user FIELDS email CONCURRENTLY").await?;
+	wait_for_index_ready(&ds, &session, "user", "test").await?;
+	let (ns, db, table, current_ix) = get_table_index(&ds, "user", "test").await?;
+	assert_no_index_build_artifacts(&ds, ns, db, &table, previous_index_id(current_ix.index_id))
+		.await?;
 	Ok(())
 }
 
