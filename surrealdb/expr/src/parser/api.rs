@@ -43,6 +43,8 @@ impl LeafError for ParseError {
 	}
 }
 
+use surrealdb_parser_next::kw::Kw;
+use surrealdb_parser_next::lex::{Lexer, T};
 use surrealdb_strand::TableName;
 use surrealdb_types::{
 	Datetime as PublicDatetime, Duration as PublicDuration, Error as TypesError,
@@ -304,12 +306,62 @@ pub fn record_id(input: &str) -> Result<PublicRecordId, ParseError> {
 /// under [`ParserSettings::STORED_TEXT`] — the storage wire contract's parser
 /// profile — unlike [`kind`], which parses fresh input. The whole of `input`
 /// must be consumed, for the reason [`expr_for_definition`] documents.
+///
+/// A union with an `any` member, which the kind grammar refuses, reads as
+/// `any` ([`union_with_an_any_member`]).
 #[instrument(level = "trace", target = "surrealdb::core::syn", skip(input), fields(length = input.len()))]
 pub fn kind_for_definition(input: &str) -> Result<Kind, ParseError> {
-	kind_with_settings(input, ParserSettings::STORED_TEXT, true).map(|mut value| {
-		crate::expr::credentials::prepare(&mut value);
-		value
-	})
+	let mut kind = match kind_with_settings(input, ParserSettings::STORED_TEXT, true) {
+		Ok(kind) => kind,
+		Err(err @ ParseError::InvalidQuery(_)) => union_with_an_any_member(input).ok_or(err)?,
+		Err(err) => return Err(err),
+	};
+	crate::expr::credentials::prepare(&mut kind);
+	Ok(kind)
+}
+
+/// `any`, if `input` is a union of kinds one of whose members is `any`: such a
+/// union admits anything, as `any` does. `None` for any other text.
+///
+/// The kind grammar refuses `any` as a member of a union, yet a catalog can
+/// hold one as the kind of the definition a field implies for its elements:
+/// releases up to 3.3 derive `any | int` for a field of kind
+/// `array | array<int>`, and store it as this text, or, before 3.3, as a
+/// structured kind that is rendered to this text when read. Reading it as
+/// `any` keeps the definitions of the field's table readable. Only a member
+/// of the outermost union is considered, which is the only place such a
+/// derivation puts `any`; every other member must read as a kind.
+fn union_with_an_any_member(input: &str) -> Option<Kind> {
+	let mut members = Vec::new();
+	let mut lexer = Lexer::new(input.as_bytes());
+	let mut depth = 0u32;
+	let mut start = 0;
+	loop {
+		let token = lexer.next_token();
+		match token.kind {
+			T::Eof => break,
+			T::Invalid => return None,
+			T::Lt | T::LParen | T::LBracket | T::LBrace => depth += 1,
+			T::Gt | T::RParen | T::RBracket | T::RBrace => depth = depth.checked_sub(1)?,
+			T::Pipe if depth == 0 => {
+				members.push(&input[start..token.start as usize]);
+				start = token.end as usize;
+			}
+			_ => {}
+		}
+	}
+	members.push(&input[start..]);
+	let is_any = |member: &str| {
+		let mut lexer = Lexer::new(member.as_bytes());
+		lexer.next_token().is_kw(Kw::Any) && lexer.next_token().kind == T::Eof
+	};
+	if members.len() < 2 || !members.iter().any(|member| is_any(member)) {
+		return None;
+	}
+	for member in members.into_iter().filter(|member| !is_any(member)) {
+		kind_with_settings(member, ParserSettings::STORED_TEXT, true).ok()?;
+	}
+	Some(Kind::Any)
 }
 
 /// Re-parses the text a catalog definition stores for the `TYPE` of a field named

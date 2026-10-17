@@ -3858,6 +3858,7 @@ cce8992cbe0ca3fb language-tests/tests/reproductions/an_indexed_count_counts_each
 f092cff5d6214181 language-tests/tests/reproductions/an_object_row_with_a_record_id_is_a_record.surql
 12160274356f6f2c language-tests/tests/reproductions/an_order_key_a_rename_reuses.surql
 4a904daf46a57463 language-tests/tests/reproductions/an_unbound_parent_in_a_write_is_none.surql
+93d3f63c90e36792 language-tests/tests/reproductions/an_untyped_collection_member_makes_the_element_kind_any.surql
 c7af5bb14f4d69ad language-tests/tests/reproductions/an_update_or_delete_on_a_missing_table_raises_whatever_its_where.surql
 f4f39d25ca2f44bd language-tests/tests/reproductions/an_upsert_of_several_tables_reads_each_and_guarantees_one_record.surql
 98c38de68e58d76b language-tests/tests/reproductions/an_upsert_only_that_matches_nothing_returns_the_record_it_writes.surql
@@ -4400,6 +4401,8 @@ b703e8648b99a3d6 language-tests/tests/upgrade/define/3.00.00_field_alter_remove.
 c71e4a5894007db6 language-tests/tests/upgrade/define/3.00.00_field_computed_import.surql
 1ce194103404df3b language-tests/tests/upgrade/define/3.00.00_field_default_always.surql
 3c28fce3fd549d3f language-tests/tests/upgrade/define/3.00.00_field_default_always_import.surql
+f7499ea89aeb2f4f language-tests/tests/upgrade/define/3.00.00_field_element_union_with_any.surql
+1112adcf0fef24c4 language-tests/tests/upgrade/define/3.00.00_field_element_union_with_any_import.surql
 22982f96094b6ea8 language-tests/tests/upgrade/define/3.00.00_field_flexible.surql
 c5b44dd60d4ce480 language-tests/tests/upgrade/define/3.00.00_field_flexible_import.surql
 7b027c4e913d9893 language-tests/tests/upgrade/define/3.00.00_field_idiom.surql

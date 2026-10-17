@@ -811,6 +811,37 @@ mod tests {
 		}
 	}
 
+	/// A union one of whose outermost members is `any`, which the kind grammar
+	/// refuses, compiles to the `any` it admits, so a catalog holding one, as
+	/// the kind of a definition implied for the elements of
+	/// `array | array<int>`, stays readable. Text that is not such a union is
+	/// refused as the grammar refuses it.
+	#[test]
+	fn kind_text_of_a_union_with_an_any_member_compiles_to_any() {
+		for text in [
+			"any | int",
+			"int | any",
+			"any | any",
+			"int | any | string",
+			"array<int | string> | any",
+			"{ a: int | string } | any | 'x|y'",
+			"record<a | b> | any",
+		] {
+			assert_eq!(KindText::from_raw(text).compile().unwrap(), Kind::Any, "{text}");
+		}
+		for text in [
+			"any | ",
+			"any | bogus<",
+			"any | int bogus",
+			"array<any | int>",
+			"{ a: any | int }",
+			"any int",
+			"anything | int",
+		] {
+			assert!(KindText::from_raw(text).compile().is_err(), "{text}");
+		}
+	}
+
 	/// Beyond the stored-text ceiling, compiling fails rather than overflowing.
 	///
 	/// The ceiling exists because "it already survived this lowering when it

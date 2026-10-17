@@ -9,9 +9,10 @@
 //! `v.*` again, then the dumped `v.*` over it, which is admitted because it is
 //! what `v`'s kind implies there. The tables here hold kinds whose implied
 //! definitions no single member of the union states: a member with no elements,
-//! members whose elements differ, and elements whose own kind is a union. Beside
-//! them are kinds that imply nothing, because a member holds elements no array
-//! or set member describes: an object, and a literal array.
+//! members whose elements differ, elements whose own kind is a union, and a
+//! member with no element kind, which makes the elements `any`. Beside them are
+//! kinds that imply nothing, because a member holds elements no array or set
+//! member describes: an object, and a literal array.
 
 #![allow(clippy::unwrap_used)]
 
@@ -34,6 +35,10 @@ const DEFINITIONS: &str = "DEFINE NAMESPACE test;
 	DEFINE TABLE union_elements SCHEMAFULL;
 	DEFINE FIELD v ON union_elements TYPE array<float | array<bool>>;
 	CREATE union_elements:1 SET v = [1.5, [true]];
+	DEFINE TABLE untyped_arm SCHEMAFULL;
+	DEFINE FIELD v ON untyped_arm TYPE array | array<int>;
+	CREATE untyped_arm:mixed SET v = ['a', 1];
+	CREATE untyped_arm:nested SET v = [{ x: 1 }];
 	DEFINE TABLE object_arm SCHEMALESS;
 	DEFINE FIELD v ON object_arm TYPE object | array<int>;
 	CREATE object_arm:object SET v = { x: 1 };
@@ -42,8 +47,8 @@ const DEFINITIONS: &str = "DEFINE NAMESPACE test;
 	DEFINE FIELD v ON literal_arm TYPE [int, string] | array<bool>;
 	CREATE literal_arm:bools SET v = [true];";
 
-const TABLES: [&str; 5] =
-	["scalar_arm", "collection_arms", "union_elements", "object_arm", "literal_arm"];
+const TABLES: [&str; 6] =
+	["scalar_arm", "collection_arms", "union_elements", "untyped_arm", "object_arm", "literal_arm"];
 
 async fn ds() -> Arc<Datastore> {
 	Datastore::builder().without_maintenance_tasks().build_with_path("memory").await.unwrap()
@@ -99,6 +104,10 @@ async fn the_dump_defines_each_field_before_the_definitions_its_kind_implies() {
 		(
 			"DEFINE FIELD OVERWRITE v ON union_elements TYPE array<float | array<bool>> ",
 			"DEFINE FIELD OVERWRITE v.*.* ON union_elements TYPE bool ",
+		),
+		(
+			"DEFINE FIELD OVERWRITE v ON untyped_arm TYPE array | array<int> ",
+			"DEFINE FIELD OVERWRITE v.* ON untyped_arm TYPE any ",
 		),
 	] {
 		let field = dump.find(field).unwrap_or_else(|| panic!("no `{field}`:\n{dump}"));
@@ -166,6 +175,7 @@ async fn the_dump_replays_into_the_same_tables() {
 	for (sql, refused) in [
 		("CREATE scalar_arm:negative SET v = [-1]", true),
 		("CREATE scalar_arm:other SET v = 'other'", false),
+		("CREATE untyped_arm:text SET v = 'text'", true),
 		("CREATE object_arm:text SET v = { x: 'text' }", false),
 		("CREATE object_arm:mixed SET v = [1, 'text']", true),
 		("CREATE literal_arm:pair SET v = [1, 'a']", false),

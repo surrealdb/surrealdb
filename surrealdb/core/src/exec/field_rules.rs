@@ -235,6 +235,13 @@ impl Step {
 /// member that holds no elements, as `string` and `NONE` do, says nothing of
 /// them, and `array` alone implies nothing: its elements are already `any`.
 ///
+/// A union whose array or set member has no element kind, as `array` in
+/// `option<array>` or `array | array<int>` has none, implies `any`: that
+/// member describes its elements as anything, so the union of the element
+/// kinds admits anything too. The definition is stored as SurrealQL text and
+/// read back through the kind grammar, which refuses `any` as a member of a
+/// union, so the union is written as the `any` it admits.
+///
 /// `*` also reaches the values of an object and the elements of a literal
 /// array or object, and the write path applies a definition at `*` to every
 /// element it reaches (`Value::each`). So a kind with an `object`, a literal
@@ -245,7 +252,21 @@ fn implied_element_kind(kind: &Kind) -> Option<Kind> {
 	if holds_elements_no_collection_describes(kind) {
 		return None;
 	}
-	kind.inner_kind().filter(|element| !matches!(element, Kind::Any))
+	match kind.inner_kind()? {
+		Kind::Any => None,
+		element if admits_anything(&element) => Some(Kind::Any),
+		element => Some(element),
+	}
+}
+
+/// Whether `kind` is `any` or a union with an `any` member, nested unions
+/// included.
+fn admits_anything(kind: &Kind) -> bool {
+	match kind {
+		Kind::Any => true,
+		Kind::Either(members) => members.iter().any(admits_anything),
+		_ => false,
+	}
 }
 
 /// Whether a value of `kind` can hold elements at `*` that no `array<..>` or
@@ -295,9 +316,10 @@ fn holds_elements_no_collection_describes(kind: &Kind) -> bool {
 /// `name.*.*` with the kind of theirs, and so on until an element kind implies
 /// none ([`implied_element_kind`]). A union of arrays and sets implies the
 /// union of their element kinds, so `array<float | array<bool>>` implies
-/// `name.*` of `float | array<bool>` and `name.*.*` of `bool`, while
+/// `name.*` of `float | array<bool>` and `name.*.*` of `bool`,
 /// `array<object | array<int>>` implies `name.*` of `object | array<int>` and
-/// nothing beneath it.
+/// nothing beneath it, and `array<array | array<int>>` implies `name.*` of
+/// `array | array<int>` and `name.*.*` of `any`.
 pub(crate) fn implied_definitions(name: &Idiom, kind: Option<&Kind>) -> Vec<(Idiom, Kind)> {
 	let mut out = Vec::new();
 	let mut path = name.clone();
