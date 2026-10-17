@@ -651,6 +651,18 @@ impl FieldDefinition {
 			|| !matches!(self.default, DefineDefault::None)
 	}
 
+	/// The name a definition of field `name` is stored under: the `fd`
+	/// segment of its key, by which every write, point read and removal of the
+	/// definition addresses it.
+	///
+	/// It is derived from the path alone, so every spelling of one path names
+	/// one key: the raw rendering ([`Idiom::to_raw_string`]), which quotes a
+	/// part only where it would not lex as an identifier and leaves a reserved
+	/// keyword bare — `select.*` for `` `select`.* ``.
+	pub fn storage_name(name: &Idiom) -> String {
+		name.to_raw_string()
+	}
+
 	/// The stored form of this definition. A definition whose `id` names its
 	/// components stores the names in the text of its type
 	/// ([`KindText::new_keyed`]); no other runtime state is stored.

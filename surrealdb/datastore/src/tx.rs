@@ -12124,7 +12124,7 @@ impl TableProvider for Transaction {
 				.into());
 			}
 			let stored = fd.to_stored();
-			let name = fd.name.to_raw_string();
+			let name = catalog::FieldDefinition::storage_name(&fd.name);
 			let key = FieldKey {
 				ns,
 				db,

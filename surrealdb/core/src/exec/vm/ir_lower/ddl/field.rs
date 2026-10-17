@@ -157,7 +157,7 @@ impl Ddl<'_, '_> {
 		else {
 			return self.define_field_resolved(attrs, field);
 		};
-		let fd = name.to_raw_string();
+		let fd = catalog::FieldDefinition::storage_name(&name);
 		let template_value = written_field_template(&attrs.template.value, &fd, table.as_str());
 		let definition = field_definition_of(&template_value)?;
 		// A definition the nesting rules refuse, or one that leaves element definitions an
@@ -241,7 +241,7 @@ impl Ddl<'_, '_> {
 			}
 		}
 		// The sub-field definitions an array or set kind implies, derived from the fields already
-		// defined.
+		// defined, each keyed by its storage name as `put_tb_field` keys an explicit one.
 		let mut nested = Vec::new();
 		if retarget.is_none() {
 			let implied =
@@ -251,7 +251,7 @@ impl Ddl<'_, '_> {
 				let sub =
 					crate::exec::field_rules::implied_definition(&definition, existing, path, kind);
 				nested.push((
-					surrealdb_types::ToSql::to_sql(&sub.name),
+					catalog::FieldDefinition::storage_name(&sub.name),
 					super::stored(&sub.to_stored(), "StoredFieldDefinition")?,
 				));
 			}
@@ -498,12 +498,12 @@ impl Ddl<'_, '_> {
 		else {
 			return self.remove_field_resolved((name, table), if_exists);
 		};
-		// A field with fields nested in it is removed by the host, which removes them with it
-		// under every key each is stored under, and the reference keys each wrote.
+		// A field with fields nested in it is removed by the host, which removes them with it,
+		// each under its storage name, and the reference keys each wrote.
 		if fields.iter().any(|fd| fd.name.len() > path.len() && fd.name.starts_with(&path)) {
 			return self.remove_field_resolved((name, table), if_exists);
 		}
-		let fd = path.to_raw_string();
+		let fd = catalog::FieldDefinition::storage_name(&path);
 		let written_name = self.constant(Value::String(fd.as_str().into()))?;
 		self.read_as(name, written_name)?;
 		let written_table = self.constant(Value::String(table_name.as_str().into()))?;
@@ -651,7 +651,7 @@ impl Ddl<'_, '_> {
 		if !matches!(field.kind, AlterKind::None) {
 			return self.alter_field_resolved(attrs, field, template);
 		}
-		let fd = path.to_raw_string();
+		let fd = catalog::FieldDefinition::storage_name(&path);
 		let written_name = self.constant(Value::String(fd.as_str().into()))?;
 		self.read_as(field.name, written_name)?;
 		let written_table = self.constant(Value::String(table_name.as_str().into()))?;

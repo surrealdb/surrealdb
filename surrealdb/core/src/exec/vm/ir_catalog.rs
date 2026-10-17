@@ -782,8 +782,10 @@ async fn field_checks(planner: &Planner<'_>, statement: &FieldStatement) -> Opti
 			kind,
 		} => {
 			let existing_table = txn.get_tb(ns, db, table, None).await.ok()?;
-			let existing_field =
-				txn.get_tb_field(ns, db, table, &name.to_raw_string(), None).await.ok()?;
+			let existing_field = txn
+				.get_tb_field(ns, db, table, &FieldDefinition::storage_name(name), None)
+				.await
+				.ok()?;
 			let fields = txn.all_tb_fields(ns, db, table, None).await.ok();
 			// One check while the definition is formed, the rest once the database is resolved.
 			let indexed = refusal_of(
@@ -839,7 +841,7 @@ async fn field_checks(planner: &Planner<'_>, statement: &FieldStatement) -> Opti
 			Some(DdlChecks::Field {
 				existing_table: txn.get_tb(ns, db, table, None).await.ok()?,
 				existing_field: txn
-					.get_tb_field(ns, db, table, &name.to_raw_string(), None)
+					.get_tb_field(ns, db, table, &FieldDefinition::storage_name(name), None)
 					.await
 					.ok()?,
 				fields: txn.all_tb_fields(ns, db, table, None).await.ok()?,

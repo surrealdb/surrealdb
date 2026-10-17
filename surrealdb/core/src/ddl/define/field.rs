@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
@@ -17,7 +16,6 @@ use crate::exec::field_rules::{
 use crate::expr::statements::define::DefineKind;
 use crate::expr::{Base, Idiom, Kind};
 use crate::iam::{Action, ResourceKind};
-use crate::key::schema::FieldKey;
 use crate::kvs::Transaction;
 use crate::val::{TableName, Value};
 
@@ -171,7 +169,7 @@ pub(crate) async fn define_field_definition_apply(
 	// indices substituted) so duplicate detection matches what `put_tb_field`
 	// will store; otherwise a second DEFINE FIELD with the same resolved
 	// path silently overwrites the first.
-	let fd = definition.name.to_raw_string();
+	let fd = catalog::FieldDefinition::storage_name(&definition.name);
 	// Check if the definition exists
 	let existing = txn.get_tb_field(ns, db, &tb_name, &fd, None).await?;
 	if let Some(existing) = &existing {
@@ -372,23 +370,9 @@ pub(crate) async fn define_field_statement_disallow_mismatched_types(
 	crate::exec::field_rules::parent_kind_restrictions(&fds, definition)
 }
 
-/// The keys a definition of field `name` can be stored under: the raw name
-/// [`TableProvider::put_tb_field`] writes, then, where it differs, the escaped
-/// one [`define_field_statement_process_recursive_definitions`] writes an
-/// implied definition under.
-pub(crate) fn field_key_spellings(name: &Idiom) -> Vec<String> {
-	let raw = name.to_raw_string();
-	let escaped = name.to_sql();
-	if escaped == raw {
-		vec![raw]
-	} else {
-		vec![raw, escaped]
-	}
-}
-
 /// Delete the definitions of the fields of table `tb` that `dropped` holds,
-/// each under every key it can be stored under ([`field_key_spellings`]), and
-/// with `purge_references` the reference keys they wrote.
+/// each under its storage name ([`catalog::FieldDefinition::storage_name`]),
+/// and with `purge_references` the reference keys they wrote.
 pub(crate) async fn del_tb_field_definitions(
 	txn: &Transaction,
 	(ns, db): (NamespaceId, DatabaseId),
@@ -397,9 +381,7 @@ pub(crate) async fn del_tb_field_definitions(
 	purge_references: bool,
 ) -> Result<()> {
 	for fd in dropped {
-		for key in field_key_spellings(&fd.name) {
-			txn.del_tb_field(ns, db, tb, &key).await?;
-		}
+		txn.del_tb_field(ns, db, tb, &catalog::FieldDefinition::storage_name(&fd.name)).await?;
 		if purge_references {
 			crate::exec::reference_purge::purge_dropped_reference_keys(txn, ns, db, tb, fd, None)
 				.await?;
@@ -428,6 +410,13 @@ pub(crate) async fn define_field_statement_validate_flexible_restrictions(
 /// ([`implied_definitions_dropped`]): with `purge_references`, the reference
 /// keys a deleted one wrote go too. A kind of `array` with no element kind
 /// implies nothing: its elements are already `any`.
+///
+/// Each implied definition is written as an explicit one is, through
+/// [`TableProvider::put_tb_field`]: under its storage name, so a later
+/// `DEFINE`, `ALTER` or `REMOVE` of the path finds it, with the table's
+/// catalog version stamped, and with the transaction's cached list of the
+/// table's fields dropped, so a read of them later in the transaction holds
+/// it.
 pub(crate) async fn define_field_statement_process_recursive_definitions(
 	ns: NamespaceId,
 	db: DatabaseId,
@@ -438,17 +427,9 @@ pub(crate) async fn define_field_statement_process_recursive_definitions(
 ) -> Result<()> {
 	let fields = txn.all_tb_fields(ns, db, &definition.table, None).await?;
 	for (name, kind) in implied_definitions(&definition.name, definition.field_kind.as_ref()) {
-		// An implied definition is stored under its escaped name.
-		let fd = name.to_sql();
-		let key = FieldKey {
-			ns,
-			db,
-			tb: Cow::Borrowed(&definition.table),
-			fd: Cow::Borrowed(&fd),
-		};
 		let existing = fields.iter().find(|fd| fd.name == name);
-		let val = implied_definition(definition, existing, name, kind);
-		txn.set_key(&key, &val.to_stored()).await?;
+		let implied = implied_definition(definition, existing, name, kind);
+		txn.put_tb_field(ns, db, &definition.table, &implied).await?;
 	}
 	let dropped = implied_definitions_dropped(&fields, previous, definition);
 	let dropped: Vec<catalog::FieldDefinition> =
@@ -798,4 +779,56 @@ pub(crate) async fn define_field_definition_validate_clauses(
 	define_field_statement_disallow_mismatched_types(txn, ns, db, definition).await?;
 	crate::exec::field_rules::id_field_restrictions(definition)?;
 	Ok(())
+}
+
+#[cfg(all(test, feature = "kv-mem"))]
+mod tests {
+	use std::str::FromStr;
+
+	use super::*;
+	use crate::catalog::providers::DatabaseProvider as _;
+	use crate::dbs::Session;
+	use crate::expr::Idiom;
+	use crate::kvs::{Datastore, TransactionType};
+
+	/// The definitions a kind implies are in the table's field list for the
+	/// rest of the transaction that writes them, with no clearing of the
+	/// transaction cache: a statement that fails after writing them, in a
+	/// transaction that goes on, leaves the next statement a list that holds
+	/// them.
+	#[tokio::test]
+	async fn implied_definitions_are_listed_in_the_transaction_that_writes_them() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let session = Session::owner().with_ns("test").with_db("test");
+		let sql = "DEFINE NAMESPACE test; USE NS test; DEFINE DATABASE test; USE DB test; \
+		           DEFINE TABLE t SCHEMAFULL;";
+		for response in ds.execute(sql, &session, None).await.unwrap() {
+			response.result.unwrap();
+		}
+		let txn = Arc::new(ds.transaction(TransactionType::Write).await.unwrap());
+		let database = txn.expect_db_by_name("test", "test").await.unwrap();
+		let (ns, db) = (database.namespace_id, database.database_id);
+		let definition = catalog::FieldDefinition {
+			name: Idiom::from_str("`select`").unwrap(),
+			table: TableName::from("t"),
+			field_kind: Some(Kind::Array(Box::new(Kind::String), None)),
+			..Default::default()
+		};
+
+		define_field_statement_process_recursive_definitions(
+			ns,
+			db,
+			Arc::clone(&txn),
+			None,
+			&definition,
+			true,
+		)
+		.await
+		.unwrap();
+
+		let listed = txn.all_tb_fields(ns, db, &definition.table, None).await.unwrap();
+		let names: Vec<String> = listed.iter().map(|fd| fd.name.to_raw_string()).collect();
+		txn.cancel().await.unwrap();
+		assert_eq!(names, vec!["select.*"]);
+	}
 }

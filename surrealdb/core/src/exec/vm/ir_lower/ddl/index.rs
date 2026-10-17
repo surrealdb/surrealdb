@@ -113,16 +113,18 @@ impl Ddl<'_, '_> {
 			}
 		};
 		for idiom in written.iter().flatten() {
-			let fd = idiom.to_raw_string();
+			let fd = crate::catalog::FieldDefinition::storage_name(idiom);
 			let mut next = Vec::new();
 			let checked =
 				self.index_column_field((ns_op, db_op, tb), &fd, &fd, name.operand, false)?;
 			next.push(checked);
 			if let Some(Part::Field(first)) = idiom.0.first() {
+				let parent =
+					crate::catalog::FieldDefinition::storage_name(&Idiom::field(first.clone()));
 				let admitted = self.index_column_field(
 					(ns_op, db_op, tb),
-					first.as_str(),
-					first.as_str(),
+					&parent,
+					&parent,
 					name.operand,
 					true,
 				)?;
@@ -464,7 +466,8 @@ impl Ddl<'_, '_> {
 		}
 	}
 
-	/// Checks that the field `fd` of the table, when it exists, is not computed: the emitted code
+	/// Checks that the field whose definition is stored under `fd`
+	/// (`FieldDefinition::storage_name`), when it exists, is not computed: the emitted code
 	/// jumps to the label it answers when the field exists and is not computed, and falls through
 	/// when no field answers the check. With `parent`, a field that does not admit sub-fields
 	/// settles nothing either.

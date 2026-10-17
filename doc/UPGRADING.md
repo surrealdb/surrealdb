@@ -87,8 +87,9 @@ follows the store's record.
 a store that records no level at Legacy. Nothing raises it: neither the
 single-writer raise nor a pin. The store gets no records in the new format, no
 layout descriptors and no ledger entry for the format, so a 3.3.x build that
-carries the readers for ledger ids 4 and 6 can still open it. Stock 3.3 is
-refused by those two ids, which every 4.0 startup records, whatever the hold.
+carries the readers for ledger ids 4 and 6, and knows entries 8 and 9, can
+still open it. Stock 3.3 is refused by those four ids, which every 4.0 startup
+records, whatever the hold.
 
 The hold applies only to a store at Legacy when it is opened. A store the build
 creates is created at this build's release, and a store that already records a
@@ -264,7 +265,7 @@ they become, and removing a field removes its stored values.
   Incompatible entry 7, which 3.3 does not know, so 3.3 refuses to start with
   `MigratedBeyondStorageVersion` naming the entry, before it reads any record.
   Stock 3.3 also refuses every 4.0 store, whatever its level, because the 4.0
-  startup migrations record ids 4 and 6.
+  startup migrations record ids 4, 6, 8 and 9.
 - **3.0 through 3.2** have no ledger and check only the storage version stamp
   (`!v`). A store carries stamp 4 from the moment it is created above Legacy,
   and from the transaction that raises its level or commits its first
@@ -421,7 +422,7 @@ it is written with, so analyzers stay readable by 3.x.
 **Impact**: before going back to a 3.x release, rewrite `ext::` calls in stored
 definitions as `mod::`.
 
-## v3.4.0 — export/import contract changes, vector indexes that lost records sharing a vector, a doc-ID → elements mapping on vector indexes, JACCARD/PEARSON as distances, named record-id components, pre-filtered KNN choosing its strategy by cost, and chronological Datetime order in new and rebuilt indexes
+## v3.4.0 — export/import contract changes, vector indexes that lost records sharing a vector, a doc-ID → elements mapping on vector indexes, JACCARD/PEARSON as distances, named record-id components, pre-filtered KNN choosing its strategy by cost, chronological Datetime order in new and rebuilt indexes, and field definitions re-keyed at startup
 
 **Impact**:
 
@@ -515,6 +516,11 @@ definitions as `mod::`.
   `SURREAL_KNN_PREFILTER_EXACT_THRESHOLD` (2000) matches. Latency drops for
   most filters and recall holds or rises; see below to keep the previous
   behaviour.
+- A field named by a reserved keyword whose kind is an array or set, such as
+  `` DEFINE FIELD `select` ON t TYPE array<string> ``, stored the definition its
+  kind implies for the elements (`select.*`) under a key no statement
+  addressed. Startup migration 9 moves it. Upgrade every node of a cluster
+  before defining such a field: a v3.3 node still writes the old key.
 - On a store several nodes share (TiKV, and the enterprise engines), a write to
   a DiskANN index no longer fails with a retryable `TransactionConflict` when
   background compaction of the index runs at the same time. The upgrade is not
@@ -1319,6 +1325,65 @@ recording them, so an index rebuilt while such a node is still writing can
 plan a column that holds an array as one that never has, and order or bound it
 by element. For a KNN query with a selective range condition on an index not
 yet rebuilt, a larger `ef` recovers recall at some cost.
+
+### Why an element definition of a keyword-named field could not be reached
+
+A field definition is stored at `/*{ns}*{db}*{tb}!fd{name}`, where `{name}` is
+derived from the field's path. `DEFINE FIELD … OVERWRITE`, `ALTER FIELD` and
+`REMOVE FIELD` derive it and address the one key it spells; `INFO FOR TABLE` and
+the checks a write makes scan the table's definitions and read each path from
+its value.
+
+Every release up to and including v3.3 keyed the definition a field's kind
+implies for its elements — `select.*` for `TYPE array<string>` — by the escaped
+rendering of the path, `` `select`.* ``, where an explicit definition of the
+same path is keyed by `select.*`. The two differ only when the field is named by
+a reserved keyword (`select`, `value`, `table`, `function`, …). For such a
+field:
+
+- `` DEFINE FIELD OVERWRITE `select`.* ON t … `` wrote a second definition
+  beside the implied one, and every later write to the table was checked
+  against both. `INFO FOR TABLE t STRUCTURE` listed the path twice, and
+  `INFO FOR TABLE t` once, because both rows map to the same key of its object.
+- Redefining `select` rewrote only the implied row, so the explicit one could
+  refuse a write the new kind allows.
+- `` REMOVE FIELD `select`.* ON t `` answered that the field does not exist.
+
+### Migration 9 moves the definition
+
+Migration 9 walks the field definitions of every table and moves each one whose
+key disagrees with the name its own path derives. Values are moved unchanged,
+so every clause carries across. Its ledger entry is in the Compatible class
+(`/!mg` id `0x40000009`).
+
+Where both rows already exist — a table on which `DEFINE FIELD … OVERWRITE` was
+run for the element path — the row every statement addressed is kept and the
+unreachable one is dropped, with a warning naming the field. Every write to the
+table was checked against both, so the records it holds satisfy the one kept.
+If the field itself was redefined after that `OVERWRITE`, the kept definition
+may still carry the element kind the field's earlier definition implied; run
+`DEFINE FIELD … OVERWRITE` for the field again to derive it from the current
+kind.
+
+What still works during a mixed-version rollout:
+
+- Every field, on nodes of either version. A v3.3 node addresses an explicit
+  definition by the key the migration moves rows to and lists definitions by
+  scanning, so it reads a moved row like any other.
+- Every other statement.
+
+What doesn't:
+
+- **An element definition a v3.3 node writes after the migration has run is
+  under the old key again.** It is listed, and writes are checked against it,
+  but `DEFINE FIELD`, `ALTER FIELD` and `REMOVE FIELD` cannot reach it. Upgrade
+  every node before defining a keyword-named array or set field.
+- Going back to a v3.3 build that does not know migration 9, held at Legacy or
+  not: it refuses the store, as it refuses any migration it does not know (see
+  the v3.3.0 downgrade note below).
+
+The migration reads every field definition in the datastore once and moves only
+the element definitions of keyword-named array and set fields.
 
 ## v3.3.0 — datastore version stamp, startup data migrations, the sequence keyspace move, module re-keying, rollbacks reported as `cancelled`, and ANN pending entries at a new revision
 

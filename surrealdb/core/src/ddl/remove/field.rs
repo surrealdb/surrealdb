@@ -38,7 +38,7 @@ pub(crate) async fn remove_field_statement_apply(
 	// remove, and the `id` itself stays while a definition reads a component.
 	crate::ddl::key_scan::refuse_removing_field(&txn, ns, db, &table_name, &name).await?;
 	// Get the field name
-	let name = name.to_raw_string();
+	let name = catalog::FieldDefinition::storage_name(&name);
 	// Get the definition
 	let fd = match txn.get_tb_field(ns, db, &table_name, &name, None).await? {
 		Some(x) => x,
@@ -94,8 +94,8 @@ pub(crate) async fn remove_field_statement_apply(
 		None,
 	)
 	.await?;
-	// The nested ones go under each key a definition is stored under, an
-	// implied one's among them, and their reference keys with them.
+	// The nested ones go too, the definitions its kind implied among them,
+	// and their reference keys with them.
 	crate::ddl::define::field::del_tb_field_definitions(&txn, (ns, db), &table_name, &nested, true)
 		.await?;
 	// Refresh the table cache for fields

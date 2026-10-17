@@ -35,7 +35,7 @@ pub(crate) async fn define_index_check_column(
 		}
 		None => {}
 	}
-	let fd = idiom.to_raw_string();
+	let fd = crate::catalog::FieldDefinition::storage_name(idiom);
 	// Check if the exact field path (e.g. `document.visible`) is defined
 	if let Some(f) = txn.get_tb_field(ns, db, table, &fd, None).await? {
 		// Computed fields cannot be indexed
@@ -47,22 +47,25 @@ pub(crate) async fn define_index_check_column(
 		}
 		return Ok(());
 	}
-	// For sub-field paths, extract the top-level parent field name
-	if let Some(Part::Field(first)) = idiom.0.first() &&
-				// Allow the index when the parent field exists and its type
-				// permits sub-field access. If no type is set (field_kind is
-				// None), the field is unconstrained and sub-fields are allowed.
-				let Some(f) = txn.get_tb_field(ns, db, table, first, None).await?
-				&& f.field_kind.as_ref().is_none_or(|k| k.allows_sub_fields())
-	{
-		// Sub-fields of computed fields cannot be indexed
-		if f.computed.is_some() {
-			bail!(ExecError::ComputedFieldCannotBeIndexed {
-				field: first.as_str().to_owned(),
-				index: index.to_owned()
-			});
+	// For sub-field paths, look up the top-level parent field by the name its
+	// definition is stored under
+	if let Some(Part::Field(first)) = idiom.0.first() {
+		let parent = crate::catalog::FieldDefinition::storage_name(&Idiom::field(first.clone()));
+		// Allow the index when the parent field exists and its type
+		// permits sub-field access. If no type is set (field_kind is
+		// None), the field is unconstrained and sub-fields are allowed.
+		if let Some(f) = txn.get_tb_field(ns, db, table, &parent, None).await?
+			&& f.field_kind.as_ref().is_none_or(|k| k.allows_sub_fields())
+		{
+			// Sub-fields of computed fields cannot be indexed
+			if f.computed.is_some() {
+				bail!(ExecError::ComputedFieldCannotBeIndexed {
+					field: parent,
+					index: index.to_owned()
+				});
+			}
+			return Ok(());
 		}
-		return Ok(());
 	}
 	if schemafull {
 		bail!(CatalogError::FdNotFound {

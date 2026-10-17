@@ -47,7 +47,7 @@ async fn alter_field_read<'a>(
 	};
 	// Fetch the transaction
 	let txn = ctx.tx();
-	let name = idiom.to_raw_string();
+	let name = catalog::FieldDefinition::storage_name(idiom);
 	// A component of a named record id is a derived field: it has no definition
 	// to alter.
 	crate::ddl::key_scan::refuse_component_name(&txn, ns, db, what, idiom).await?;

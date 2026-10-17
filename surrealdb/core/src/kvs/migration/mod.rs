@@ -87,6 +87,7 @@
 //! already stamped past it would skip it forever if the stamp gated selection.
 
 mod doc_lookup_identity;
+mod field_keys;
 mod kinds_as_text;
 mod module_keys;
 mod sequence_defs;
@@ -217,6 +218,13 @@ pub(crate) static MIGRATIONS: &[Migration] = &[
 		name: "record the database defaults of the release that created the datastore",
 		version: (3, 4, 0),
 		run: |ds| Box::pin(store_defaults::record_the_defaults_of_an_earlier_release(ds)),
+		on_demand: false,
+	},
+	Migration {
+		id: field_keys::LEDGER_ID.raw(),
+		name: "re-key field definitions to their storage name",
+		version: (3, 4, 0),
+		run: |ds| Box::pin(field_keys::rekey_definitions_to_their_storage_name(ds)),
 		on_demand: false,
 	},
 ];

@@ -560,7 +560,8 @@ pub trait TableProvider: Sync {
 		version: Option<u64>,
 	) -> BoxProviderFut<'a, Result<Arc<catalog::EventDefinition>>>;
 
-	/// Retrieve a field for a table.
+	/// Retrieve the definition of a field of a table, by the storage name of
+	/// the field's path ([`catalog::FieldDefinition::storage_name`]).
 	///
 	/// Only a stored definition is found: the virtual definition of a named record
 	/// id component exists in the list [`Self::all_tb_fields`] returns and nowhere
@@ -575,7 +576,8 @@ pub trait TableProvider: Sync {
 		version: Option<u64>,
 	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::FieldDefinition>>>>;
 
-	/// Put a field definition into a table.
+	/// Put a field definition into a table, under the storage name of its path
+	/// ([`catalog::FieldDefinition::storage_name`]).
 	fn put_tb_field<'a>(
 		&'a self,
 		ns: NamespaceId,
@@ -584,7 +586,8 @@ pub trait TableProvider: Sync {
 		fd: &'a catalog::FieldDefinition,
 	) -> BoxProviderFut<'a, Result<()>>;
 
-	/// Delete a field definition from a table, by the field's declared path.
+	/// Delete a field definition from a table, by the storage name of the
+	/// field's path ([`catalog::FieldDefinition::storage_name`]).
 	///
 	/// Deleting a field that does not exist is not an error. Callers that
 	/// need the definition first read it with [`Self::get_tb_field`].

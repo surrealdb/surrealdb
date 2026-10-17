@@ -4045,6 +4045,7 @@ b73ae4836fdad216 language-tests/tests/reproductions/index_expressions_agree_acro
 75fab6f6f5ba410f language-tests/tests/reproductions/index_function_under_split_reads_the_where_clause.surql
 00777b7c13cee013 language-tests/tests/reproductions/index_value_shapes_per_column_and_per_definition.surql
 5d3ab2cd21ce3659 language-tests/tests/reproductions/indexed_count_multi_conjunct_and.surql
+4621a9117ae1d3a3 language-tests/tests/reproductions/indexing_a_sub_field_of_a_quoted_field.surql
 e7c71925557e843b language-tests/tests/reproductions/infinite_recursion_bug.surql
 edb168166ee1fa97 language-tests/tests/reproductions/info_for_root_after_removing_the_session_namespace.surql
 bba6edab678235f0 language-tests/tests/reproductions/inline_call_in_from.surql
@@ -4161,6 +4162,7 @@ bb1925d088941dca language-tests/tests/reproductions/order_by_field_select_perm_l
 20080d3835bfbeab language-tests/tests/reproductions/order_by_nested_index_direction.surql
 fa5367b9953199e0 language-tests/tests/reproductions/order_by_restricted_field_limit.surql
 97a53c630a06363c language-tests/tests/reproductions/order_by_restricted_field_limit_import.surql
+0ee67904bbc21fc7 language-tests/tests/reproductions/overwriting_a_keyword_named_element_definition_replaces_it.surql
 6b09b90ca691080f language-tests/tests/reproductions/paging_does_not_skip_the_predicate.surql
 96a117349c428863 language-tests/tests/reproductions/param_permissions_none_root.surql
 58ce8002137da135 language-tests/tests/reproductions/parent_key_is_read_once_per_probe.surql
@@ -4411,8 +4413,8 @@ f7fbbff874f125dc language-tests/tests/upgrade/define/3.00.00_field_element_union
 844a9304a1568346 language-tests/tests/upgrade/define/3.00.00_field_flexible_import.surql
 7b027c4e913d9893 language-tests/tests/upgrade/define/3.00.00_field_idiom.surql
 8970f79730c7edee language-tests/tests/upgrade/define/3.00.00_field_idiom_import.surql
-e4e0f44570c00d45 language-tests/tests/upgrade/define/3.00.00_field_keyword_name.surql
-f7cbd468d9dbf0ba language-tests/tests/upgrade/define/3.00.00_field_keyword_name_import.surql
+ea37081af9630155 language-tests/tests/upgrade/define/3.00.00_field_keyword_name.surql
+4d9d2c446dbba36b language-tests/tests/upgrade/define/3.00.00_field_keyword_name_import.surql
 8f45a215e6a3f80c language-tests/tests/upgrade/define/3.00.00_field_migration.surql
 1cf2de32e77b7bf4 language-tests/tests/upgrade/define/3.00.00_field_migration_import.surql
 31ef26974e80faaa language-tests/tests/upgrade/define/3.00.00_field_migration_shapes.surql
