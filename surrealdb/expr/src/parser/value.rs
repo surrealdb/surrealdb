@@ -1115,13 +1115,11 @@ fn legacy_strand(s: String) -> Value {
 	if let Ok(r) = record_id(&s, &settings) {
 		return Value::RecordId(r);
 	}
-	if let Ok(Literal::Datetime(d)) = lit::datetime(&s) {
-		return Value::Datetime(d.into());
+	match lit::legacy_scalar(&s) {
+		Some(Literal::Datetime(d)) => Value::Datetime(d.into()),
+		Some(Literal::Uuid(u)) => Value::Uuid(u.into()),
+		_ => Value::String(s),
 	}
-	if let Ok(Literal::Uuid(u)) = lit::uuid(&s) {
-		return Value::Uuid(u.into());
-	}
-	Value::String(s)
 }
 
 fn int(text: &str) -> R<i64> {

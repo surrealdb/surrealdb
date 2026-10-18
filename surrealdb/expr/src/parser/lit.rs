@@ -239,6 +239,12 @@ fn days_in_month(y: i64, m: i64) -> i64 {
 /// A datetime string body, as earlier releases read it. Error spans
 /// are byte offsets into `s`.
 pub fn datetime(s: &str) -> R<Literal> {
+	datetime_prefix(s).map(|(literal, _)| literal)
+}
+
+/// A datetime read from the start of `s`, with the number of bytes it
+/// occupies. Bytes after a timezone are not part of the datetime.
+fn datetime_prefix(s: &str) -> R<(Literal, usize)> {
 	let b = s.as_bytes();
 	let mut at = 0;
 	let neg = b.first() == Some(&b'-');
@@ -368,7 +374,7 @@ pub fn datetime(s: &str) -> R<Literal> {
 		0,
 		at,
 	))?;
-	Ok(Literal::Datetime(dt.into()))
+	Ok((Literal::Datetime(dt.into()), at))
 }
 
 /// A uuid string body: 8-4-4-4-12 hexadecimal digits, anything after them
@@ -690,13 +696,29 @@ fn find_suggestion(got: &str) -> Option<&'static str> {
 	best
 }
 
+/// The uuid or datetime that the whole of `s` reads as. The uuid and datetime
+/// readers stop at the end of their grammar and leave the rest of the text
+/// unread, so a string that merely begins with one is not one: reading it as
+/// one would drop everything after it.
+pub(super) fn legacy_scalar(s: &str) -> Option<Literal> {
+	if s.len() == UUID_LEN
+		&& let Ok(l) = uuid(s)
+	{
+		return Some(l);
+	}
+	match datetime_prefix(s) {
+		Ok((l, read)) if read == s.len() => Some(l),
+		_ => None,
+	}
+}
+
+/// The length in bytes of a uuid's hyphenated hexadecimal text.
+const UUID_LEN: usize = 36;
+
 /// A plain string under `legacy_strands`: a uuid, datetime or record id
 /// when the whole of its contents reads as one, otherwise the string.
 pub fn legacy_strand(s: String) -> Literal {
-	if let Ok(l) = uuid(&s) {
-		return l;
-	}
-	if let Ok(l) = datetime(&s) {
+	if let Some(l) = legacy_scalar(&s) {
 		return l;
 	}
 	let mut ast = Ast::new();
