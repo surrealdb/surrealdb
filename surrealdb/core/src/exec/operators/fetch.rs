@@ -737,6 +737,53 @@ pub(crate) async fn fetch_record_slot(
 	.await
 }
 
+/// Whether `rid` names a record the caller can see, for `record::exists` and
+/// `.exists()`.
+///
+/// Answered as a read of the record by id is, under the same table permission,
+/// without materialising the record's fields (only computed fields that a
+/// conditional table `SELECT` permission itself reads are derived by its
+/// [`ComputedFieldGuard`](crate::exec::permission::ComputedFieldGuard)):
+/// existence depends on the record and its table permission, and a computed
+/// field that is expensive or fails must not change the answer. `check_perms`
+/// false reads the record without permissions, as a dereference made while a
+/// permission is judged does. A table that is not defined raises `TbNotFound`,
+/// as a read does.
+pub(crate) async fn record_exists(
+	ctx: &ExecutionContext,
+	rid: &RecordId,
+	check_perms: bool,
+) -> crate::expr::FlowResult<bool> {
+	if ctx.refuses_dereference() {
+		return Err(anyhow::Error::new(crate::exec::migrate::MigrationError::Dereference).into());
+	}
+	let Some(val) = fetch_raw_deref(ctx, rid, ctx.version_stamp()).await? else {
+		return Ok(false);
+	};
+	if !check_perms {
+		return Ok(true);
+	}
+	let db_ctx = ctx.database().context("record_exists requires database context")?;
+	validate_record_user_access(db_ctx)?;
+	if !should_check_perms(db_ctx, Action::View).context("Failed to check permissions")? {
+		return Ok(true);
+	}
+	let (ctx, rid) = (ctx.clone(), rid.clone());
+	crate::exec::trampoline::nest(async move {
+		let select_perm = table_select_permission(&ctx, &rid.table).await?;
+		match &select_perm {
+			PhysicalPermission::Deny => Ok(false),
+			PhysicalPermission::Allow => Ok(true),
+			PhysicalPermission::Conditional(_) => {
+				check_permission_for_value(&select_perm, &val, None, &ctx)
+					.await
+					.context("Permission check failed")
+			}
+		}
+	})
+	.await
+}
+
 /// `failure` raised dereferencing a record, a computed field's failed
 /// coercion named as the dereference names it.
 fn computed_coercion(failure: crate::expr::ControlFlow) -> crate::expr::ControlFlow {

@@ -4,7 +4,6 @@
 
 // Re-export recursion utilities from the canonical definitions in `expr::idiom::recursion`.
 // These are shared with the idiom recursion in `expr`.
-pub(crate) use crate::exec::vm::access::field;
 pub(crate) use crate::expr::idiom::recursion::{clean_iteration, get_final, is_final};
 pub(crate) mod lookup;
 pub(crate) mod recurse;

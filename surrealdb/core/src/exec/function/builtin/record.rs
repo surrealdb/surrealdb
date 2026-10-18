@@ -66,18 +66,27 @@ impl ScalarFunction for RecordExists {
 			if ctx.exec_ctx.options().is_none() {
 				return Ok(Value::None);
 			}
-			// A record exists for the caller when reading its `id` finds one:
-			// the read a path step makes, under the caller's permissions, so
-			// a record the caller may not select does not exist for it.
-			let id = crate::exec::vm::access::field::evaluate_field(
-				&Value::RecordId(rid),
-				"id",
-				ctx.clone(),
+			// A record exists for the caller when a read of it by id finds
+			// one under the caller's permissions, so a record the caller may
+			// not select does not exist for it. No computed field is derived.
+			// A key that is an object with an `id` component answers from the
+			// key, as a path read of `id` does, without reading the record.
+			if let crate::val::RecordIdKey::Object(key) = &rid.key
+				&& let Some(id) = key.get("id")
+			{
+				return Ok(Value::Bool(!id.is_none()));
+			}
+			let exec_ctx = ctx.exec_ctx.dive()?;
+			let found = crate::exec::operators::fetch::record_exists(
+				&exec_ctx,
+				&rid,
+				!ctx.skip_fetch_perms,
 			)
 			.await
+			.map(Value::Bool)
 			.catch_return();
-			match id {
-				Ok(id) => Ok(Value::Bool(!id.is_none())),
+			match found {
+				Ok(found) => Ok(found),
 				// An undefined table means the record cannot exist.
 				Err(e)
 					if matches!(
