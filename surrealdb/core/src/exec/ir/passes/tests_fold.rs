@@ -11,6 +11,7 @@ use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::core::pattern::{GREEDY_DEFAULT, PatternSet, apply_greedy};
 use crate::exec::ir::core::rewriter::{InsertPoint, Rewriter};
+#[cfg(feature = "egraph")]
 use crate::exec::ir::egraph::rules_logical::CATALOGUE;
 use crate::exec::ir::expr::ops::{ExprOp, ExprTag, FoldedError};
 use crate::exec::ir::iface::conversion::ExprDialect;
@@ -209,6 +210,7 @@ async fn algebraic_rows_not_in_l6() {
 			"not_inside_empty"
 		]
 	);
+	#[cfg(feature = "egraph")]
 	for held in CATALOGUE {
 		assert!(!names.contains(&held.name), "{} is held by the catalogue", held.name);
 	}

@@ -45,6 +45,9 @@ thread_local! {
 	static SERVING: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 	/// The faults this thread has served.
 	static FAULTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+	/// The top-level statements this thread has served while a request ran,
+	/// outside its compilation ([`note_statement_served`]).
+	static STATEMENTS_AFTER_ARRIVAL: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 	/// The program streams this thread has started ([`while_running`]).
 	static PROGRAMS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 	/// How many requests this thread is executing, nested ([`request`]).
@@ -197,6 +200,24 @@ pub(crate) fn compiling_request<'a, F: std::future::Future + Send + 'a>(
 #[cfg(test)]
 pub(crate) fn faults() -> usize {
 	FAULTS.with(std::cell::Cell::get)
+}
+
+/// Note that a top-level statement of a request is being served for its
+/// run; one served while the request runs, outside its compilation
+/// ([`compiling_request`]), is counted by [`statements_after_arrival`].
+#[inline]
+pub(crate) fn note_statement_served() {
+	#[cfg(test)]
+	if REQUEST.with(std::cell::Cell::get) > 0 && COMPILING.with(std::cell::Cell::get) == 0 {
+		STATEMENTS_AFTER_ARRIVAL.with(|count| count.set(count.get() + 1));
+	}
+}
+
+/// How many top-level statements this thread has served while a request
+/// ran, outside the request's compilation.
+#[cfg(test)]
+pub(crate) fn statements_after_arrival() -> usize {
+	STATEMENTS_AFTER_ARRIVAL.with(std::cell::Cell::get)
 }
 
 /// `future`, the host serving one fault: counted once by [`faults`] when it

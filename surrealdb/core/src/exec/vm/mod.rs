@@ -94,6 +94,9 @@ pub(crate) mod request;
 mod tests_body_scope;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
+mod tests_epoch_catalog;
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_frontier;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
@@ -113,6 +116,9 @@ mod tests_running_compiles;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod tests_stack;
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
+mod tests_statement_cache;
 // The golden is recorded from a build that runs no script and no model.
 
 /// The units of a root program or a function bundle, which the ids of the

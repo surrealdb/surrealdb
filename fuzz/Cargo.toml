@@ -13,7 +13,7 @@ tokio = "1.52.1"
 
 [dependencies.surrealdb-core]
 path = "../surrealdb/core"
-features = ["kv-mem", "regex-unicode", "collate", "geo", "scram", "text-diff", "url", "maintenance-tasks", "api", "files", "search", "encoding", "arbitrary", "gql", "crypto-digest", "crypto-password", "html-sanitize", "cjk-tokenizer", "observability", "vector-index", "fulltext"]
+features = ["kv-mem", "regex-unicode", "collate", "geo", "scram", "text-diff", "url", "maintenance-tasks", "api", "files", "search", "encoding", "arbitrary", "gql", "crypto-digest", "crypto-password", "html-sanitize", "cjk-tokenizer", "observability", "vector-index", "fulltext", "egraph"]
 default-features = false
 
 [dependencies.surrealdb-gql]

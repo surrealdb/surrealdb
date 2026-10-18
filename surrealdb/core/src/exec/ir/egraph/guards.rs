@@ -8,16 +8,26 @@
 //! a rule uses. [`holds`] evaluates a rule's [`SideCondition`] over the facts of its match, and
 //! [`guarded_union`] is the only way a rule or a seed joins two classes.
 
+#[cfg(feature = "egraph")]
 use egg::{EGraph, Id};
+#[cfg(feature = "egraph")]
 use surrealdb_strand::TableName;
 
+#[cfg(feature = "egraph")]
 use super::analysis::{IrAnalysis, reads_written};
+#[cfg(feature = "egraph")]
 use super::decl::{ClassFacts, EgraphView, Match, NodeShape};
+#[cfg(feature = "egraph")]
 use super::lang::ENode;
-use crate::exec::ir::iface::effects::{Determinism, FieldSet, IrFootprint};
+use crate::exec::ir::iface::effects::Determinism;
+#[cfg(feature = "egraph")]
+use crate::exec::ir::iface::effects::{FieldSet, IrFootprint};
+#[cfg(feature = "egraph")]
 use crate::exec::ir::iface::egraph::{KindClass, SideCondition};
 use crate::exec::ir::iface::fallibility::Fallibility;
+#[cfg(feature = "egraph")]
 use crate::exec::ir::iface::types::TypeKnowledge;
+#[cfg(feature = "egraph")]
 use crate::expr::Kind;
 use crate::expr::logical::EffectSet;
 
@@ -45,6 +55,7 @@ pub(crate) fn deterministic(d: Determinism, reads_written: bool) -> bool {
 
 /// Whether neither `fp`, nor the fields `row_fields` names of the row source it reads, meets a
 /// write of `writes`.
+#[cfg(feature = "egraph")]
 pub(crate) fn footprint_disjoint(
 	fp: &IrFootprint,
 	row_fields: Option<(&TableName, &FieldSet)>,
@@ -54,6 +65,7 @@ pub(crate) fn footprint_disjoint(
 }
 
 /// The facts of the class the match binds `var` to, or `None` for a variable it does not bind.
+#[cfg(feature = "egraph")]
 fn facts_of<'v>(m: &Match, view: &'v dyn EgraphView, var: &str) -> Option<&'v ClassFacts> {
 	m.vars.iter().find(|(name, _)| *name == var).map(|(_, class)| view.facts(*class))
 }
@@ -62,6 +74,7 @@ fn facts_of<'v>(m: &Match, view: &'v dyn EgraphView, var: &str) -> Option<&'v Cl
 ///
 /// A variable the match does not bind makes its condition false, and so does a fact the view
 /// cannot answer: a guard that cannot decide refuses.
+#[cfg(feature = "egraph")]
 pub(crate) fn holds(cond: &SideCondition, m: &Match, view: &dyn EgraphView) -> bool {
 	let facts = |var: &str| facts_of(m, view, var);
 	match *cond {
@@ -99,6 +112,7 @@ pub(crate) fn holds(cond: &SideCondition, m: &Match, view: &dyn EgraphView) -> b
 
 /// Whether a value of `kind` is in `class`. `Any` admits no kind: a `TypeFact(?x, Any)` proves
 /// nothing a rule could use.
+#[cfg(feature = "egraph")]
 pub(crate) fn kind_admits(class: KindClass, kind: &Kind) -> bool {
 	match kind {
 		Kind::Bool => class == KindClass::Bool,
@@ -128,6 +142,7 @@ pub(crate) fn kind_admits(class: KindClass, kind: &Kind) -> bool {
 }
 
 /// Why two classes are being joined, and what the guard that checks the join needs to know.
+#[cfg(feature = "egraph")]
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum UnionWhy {
 	/// A rule joins the class of its right side to the root of its match.
@@ -144,6 +159,7 @@ pub(crate) enum UnionWhy {
 }
 
 /// The guard that refuses the join of the distinct canonical classes `a` and `b`, if one does.
+#[cfg(feature = "egraph")]
 fn refusal(eg: &EGraph<ENode, IrAnalysis>, a: Id, b: Id, why: UnionWhy) -> Option<&'static str> {
 	// U1: one frame and one snapshot, both known.
 	let (fa, fb) = (&eg[a].data, &eg[b].data);
@@ -214,6 +230,7 @@ fn refusal(eg: &EGraph<ENode, IrAnalysis>, a: Id, b: Id, why: UnionWhy) -> Optio
 /// A pair already in one class answers `false` and is not a refusal. A refusal counts into
 /// [`IrAnalysis::union_refused`] and answers `false`; the rule that asked keeps its match
 /// unapplied. A refused seed is a defect of the seeding, so it also fails a debug assertion.
+#[cfg(feature = "egraph")]
 pub(crate) fn guarded_union(
 	eg: &mut EGraph<ENode, IrAnalysis>,
 	a: Id,

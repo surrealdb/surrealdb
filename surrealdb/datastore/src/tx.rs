@@ -722,6 +722,11 @@ pub struct Transaction {
 	/// object other than a table ([`Self::catalog_object_version`]), with the
 	/// same contract as [`Self::catalog_stamps`] for those objects.
 	object_stamps: AtomicU64,
+	/// Whether this transaction wrote a definition that moves the catalog
+	/// epoch without stamping a catalog version: a namespace, a database, a
+	/// user, or a table's definition rewritten in place
+	/// ([`Self::touches_catalog`]).
+	catalog_touched: AtomicBool,
 	/// The version each table this transaction stamped was last stamped
 	/// with, so a later write of the table's definition in the transaction
 	/// prints the version again from what it wrote
@@ -1666,6 +1671,7 @@ impl Transaction {
 			failed_statement_poisoned: AtomicBool::new(false),
 			save_point_marks: Mutex::new(Vec::new()),
 			catalog_stamps: AtomicU64::new(0),
+			catalog_touched: AtomicBool::new(false),
 			object_stamps: AtomicU64::new(0),
 			stamped_tables: Default::default(),
 			shaped_indexes: Default::default(),
@@ -3301,6 +3307,9 @@ impl Transaction {
 	pub async fn delr(&self, rng: impl AnyRange) -> Result<()> {
 		let _changed = self.reserve_write_slot()?;
 		let rng = rng.into_key_range();
+		if range_may_hold_definitions(&rng.start) {
+			self.touches_catalog();
+		}
 		// Whether or not the delete completes, it may have removed layouts the transaction holds.
 		let spans_layouts = self.begin_range_delete(&rng);
 		let deleted = self.tr.delr(rng).await;
@@ -3406,6 +3415,9 @@ impl Transaction {
 	pub async fn clrr(&self, rng: impl AnyRange) -> Result<()> {
 		let _changed = self.reserve_write_slot()?;
 		let rng = rng.into_key_range();
+		if range_may_hold_definitions(&rng.start) {
+			self.touches_catalog();
+		}
 		let spans_layouts = self.begin_range_delete(&rng);
 		let cleared = self.tr.clrr(rng).await;
 		if spans_layouts {
@@ -3692,6 +3704,13 @@ impl Transaction {
 		if let Some(entry) = self.cache.get(&qey) {
 			return Ok(*entry.try_into_type::<Option<Uuid>>()?);
 		}
+		if let Some((epoch, shared)) = self.epoch_catalog()
+			&& let Some(version) =
+				shared.get::<Option<Uuid>>(&crate::cache::epoch::Lookup::Version(epoch, ns, db, tb))
+		{
+			self.cache.insert(qey, cache::tx::Entry::Any(version.clone()));
+			return Ok(*version);
+		}
 		let key = CatalogVersionKey {
 			ns,
 			db,
@@ -3701,7 +3720,9 @@ impl Transaction {
 			Some(stamped) => stamped.proven(self.table_stored(ns, db, tb).await?.as_deref()),
 			None => None,
 		};
-		self.cache.insert(qey, cache::tx::Entry::Any(Arc::new(version)));
+		let held = Arc::new(version);
+		self.cache.insert(qey, cache::tx::Entry::Any(held.clone()));
+		self.keep_for_epoch(|epoch| crate::cache::epoch::Lookup::Version(epoch, ns, db, tb), &held);
 		Ok(version)
 	}
 
@@ -5645,6 +5666,9 @@ impl Transaction {
 		val: Option<&[u8]>,
 		prior: Option<Option<&[u8]>>,
 	) -> OutOfLine<impl Future<Output = Result<Option<Defined>>>> {
+		if root_definition_at(key) {
+			self.touches_catalog();
+		}
 		OutOfLine::new(self.changed_definition_body(key, val, prior))
 	}
 
@@ -5671,6 +5695,9 @@ impl Transaction {
 			if !stamped && matches!(change, TableDefinitionChange::Unchanged) {
 				return Ok(None);
 			}
+			// A table's definition may be rewritten without a new catalog
+			// version, as a live query's registration rewrites it.
+			self.touches_catalog();
 			return Ok(Some(Defined::Table(TableChange {
 				table,
 				stamped,
@@ -6250,6 +6277,48 @@ impl Transaction {
 	/// Two reads of the same count bracket a stretch of the transaction in
 	/// which no table's catalog version changed, so what was read of the
 	/// versions at the first still holds at the second.
+	/// Whether this transaction changed the catalog: it stamped a table's
+	/// catalog version, or wrote a definition that moves the catalog epoch
+	/// without one ([`Self::catalog_touched`]). Its commit is counted among the
+	/// datastore's catalog commits, and it names no catalog epoch.
+	fn changed_catalog(&self) -> bool {
+		self.catalog_stamps() > 0 || self.catalog_touched.load(Ordering::Acquire)
+	}
+
+	/// Note a write of a definition that moves the catalog epoch without
+	/// stamping a catalog version. A speculation's writes are not counted, as
+	/// its stamps are not.
+	fn touches_catalog(&self) {
+		if !self.tr.speculating() {
+			self.catalog_touched.store(true, Ordering::Release);
+		}
+	}
+
+	/// The definitions shared by the transactions of this transaction's
+	/// catalog epoch, with the epoch; `None` where the transaction names no
+	/// epoch ([`Self::catalog_epoch`]). Only a read-only transaction is served
+	/// from them, so a write's own reads of the catalog stay reads of the
+	/// store.
+	fn epoch_catalog(&self) -> Option<(u64, &crate::cache::epoch::EpochCatalog)> {
+		if self.writeable() {
+			return None;
+		}
+		self.catalog_epoch().map(|epoch| (epoch, &self.triggers.epoch_catalog))
+	}
+
+	/// Keep `value`, read for `lookup`, among the definitions of this
+	/// transaction's catalog epoch. The epoch is asked after the read, which it
+	/// then covers.
+	fn keep_for_epoch<'k, T: Send + Sync + 'static>(
+		&self,
+		lookup: impl FnOnce(u64) -> crate::cache::epoch::Lookup<'k>,
+		value: &Arc<T>,
+	) {
+		if let Some(epoch) = self.catalog_epoch() {
+			self.triggers.epoch_catalog.insert(lookup(epoch), Arc::clone(value));
+		}
+	}
+
 	pub fn catalog_stamps(&self) -> u64 {
 		self.catalog_stamps.load(std::sync::atomic::Ordering::Acquire)
 	}
@@ -6281,9 +6350,7 @@ impl Transaction {
 	/// to this call, so the snapshot holds exactly the catalog commits
 	/// finished before the opening.
 	pub fn catalog_epoch(&self) -> Option<u64> {
-		if self.catalog_epoch == NO_CATALOG_EPOCH
-			|| self.catalog_stamps() > 0
-			|| self.tr.speculating()
+		if self.catalog_epoch == NO_CATALOG_EPOCH || self.changed_catalog() || self.tr.speculating()
 		{
 			return None;
 		}
@@ -6295,8 +6362,7 @@ impl Transaction {
 	/// catalog commits ([`crate::triggers::CatalogEpoch`]) from before it
 	/// starts until it has returned, where it stamped a catalog version.
 	async fn commit_store(&self) -> std::result::Result<(), KvsError> {
-		let _counted =
-			(self.catalog_stamps() > 0).then(|| self.triggers.catalog_epoch.committing());
+		let _counted = self.changed_catalog().then(|| self.triggers.catalog_epoch.committing());
 		self.tr.commit().await
 	}
 
@@ -8591,6 +8657,7 @@ impl Transaction {
 			failed_statement_poisoned: AtomicBool::new(false),
 			save_point_marks: Mutex::new(Vec::new()),
 			catalog_stamps: AtomicU64::new(self.catalog_stamps()),
+			catalog_touched: AtomicBool::new(self.catalog_touched.load(Ordering::Acquire)),
 			object_stamps: AtomicU64::new(self.catalog_object_stamps()),
 			stamped_tables: Default::default(),
 			shaped_indexes: Default::default(),
@@ -10670,11 +10737,19 @@ impl NamespaceProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Option<Arc<NamespaceDefinition>>>> {
 		Box::pin(async move {
 			let qey = cache::tx::Lookup::NsByName(ns);
-			if version.is_none()
-				&& let Some(val) = self.cache.get(&qey)
-			{
-				return val.try_into_type().map(Some);
+			if version.is_none() {
+				if let Some(val) = self.cache.get(&qey) {
+					return val.try_into_type().map(Some);
+				}
+				if let Some((epoch, shared)) = self.epoch_catalog()
+					&& let Some(def) = shared.get::<NamespaceDefinition>(
+						&crate::cache::epoch::Lookup::Namespace(epoch, ns),
+					) {
+					self.cache.insert(qey, cache::tx::Entry::Any(def.clone()));
+					return Ok(Some(def));
+				}
 			}
+			let name = ns;
 			let key = NamespaceKey {
 				ns: Cow::Borrowed(ns),
 			};
@@ -10686,6 +10761,10 @@ impl NamespaceProvider for Transaction {
 			if version.is_none() {
 				let entr = cache::tx::Entry::Any(ns.clone());
 				self.cache.insert(qey, entr);
+				self.keep_for_epoch(
+					|epoch| crate::cache::epoch::Lookup::Namespace(epoch, name),
+					&ns,
+				);
 			}
 			Ok(Some(ns))
 		})
@@ -10785,11 +10864,19 @@ impl DatabaseProvider for Transaction {
 			async move {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Database(ns, db));
 				let qey = cache::tx::Lookup::DbByName(ns, db);
-				if version.is_none()
-					&& let Some(val) = self.cache.get(&qey)
-				{
-					return val.try_into_type().map(Some);
+				if version.is_none() {
+					if let Some(val) = self.cache.get(&qey) {
+						return val.try_into_type().map(Some);
+					}
+					if let Some((epoch, shared)) = self.epoch_catalog()
+						&& let Some(def) = shared.get::<DatabaseDefinition>(
+							&crate::cache::epoch::Lookup::Database(epoch, ns, db),
+						) {
+						self.cache.insert(qey, cache::tx::Entry::Any(def.clone()));
+						return Ok(Some(def));
+					}
 				}
+				let ns_name = ns;
 				let Some(ns) = self.get_ns_by_name(ns, version).await? else {
 					return Ok(None);
 				};
@@ -10806,6 +10893,10 @@ impl DatabaseProvider for Transaction {
 				if version.is_none() {
 					let entry = cache::tx::Entry::Any(val.clone());
 					self.cache.insert(qey, entry);
+					self.keep_for_epoch(
+						|epoch| crate::cache::epoch::Lookup::Database(epoch, ns_name, db),
+						&val,
+					);
 				}
 				Ok(Some(val))
 			}
@@ -11733,11 +11824,21 @@ impl TableProvider for Transaction {
 		Box::pin(async move {
 			self.catalog_reads.note(crate::catalog_reads::CatalogRead::TableByName(ns, db, tb));
 			let qey = cache::tx::Lookup::TbByName(ns, db, tb.as_str());
-			if version.is_none()
-				&& let Some(val) = self.cache.get(&qey)
-			{
-				return val.try_into_type().map(Some);
+			if version.is_none() {
+				if let Some(val) = self.cache.get(&qey) {
+					return val.try_into_type().map(Some);
+				}
+				if let Some((epoch, shared)) = self.epoch_catalog()
+					&& let Some(def) = shared.get::<TableDefinition>(
+						&crate::cache::epoch::Lookup::Table(epoch, ns, db, tb),
+					) {
+					// What a read through the database would have noted.
+					self.catalog_reads.note(crate::catalog_reads::CatalogRead::Database(ns, db));
+					self.cache.insert(qey, cache::tx::Entry::Any(def.clone()));
+					return Ok(Some(def));
+				}
 			}
+			let (ns_name, db_name) = (ns, db);
 			let Some(db) = self.get_db_by_name(ns, db, version).await? else {
 				return Ok(None);
 			};
@@ -11755,6 +11856,10 @@ impl TableProvider for Transaction {
 			if version.is_none() {
 				let entr = cache::tx::Entry::Any(tb.clone());
 				self.cache.insert(qey, entr);
+				self.keep_for_epoch(
+					|epoch| crate::cache::epoch::Lookup::Table(epoch, ns_name, db_name, &tb.name),
+					&tb,
+				);
 			}
 			Ok(Some(tb))
 		})
@@ -13939,6 +14044,48 @@ impl TableDefinitionChange {
 /// Called on every single-key write, so it rejects on the fixed bytes of a database-scoped
 /// catalog key (`/*{ns}*{db}!tb`, the namespace and database ids being four bytes each) before
 /// decoding anything.
+/// Whether `key` is the definition of a namespace, a database, a user or an
+/// access method at the root, a namespace or a database: the definitions whose
+/// writes move the catalog epoch without stamping a catalog version. Called on
+/// every write that is examined as a definition, so it checks fixed bytes only.
+fn root_definition_at(key: &[u8]) -> bool {
+	let tag = |at: usize| key.get(at..at + 3);
+	match (key.first(), key.get(1)) {
+		(Some(b'/'), Some(b'!')) => {
+			matches!(tag(1), Some(b"!ns") | Some(b"!us") | Some(b"!ac"))
+		}
+		(Some(b'/'), Some(b'*')) => match key.get(6) {
+			Some(b'!') => matches!(tag(6), Some(b"!db") | Some(b"!us") | Some(b"!ac")),
+			Some(b'*') => key.get(11) == Some(&b'!') && matches!(tag(11), Some(b"!us")),
+			_ => false,
+		},
+		_ => false,
+	}
+}
+
+/// Whether a range deleted from `start` may hold a definition whose removal
+/// moves the catalog epoch: one that starts at a namespace's or a database's
+/// root, at the root keyspace, or at a definition [`root_definition_at`] or
+/// [`table_definition_at`] names. A range of records starts under a table and
+/// is not one.
+fn range_may_hold_definitions(start: &[u8]) -> bool {
+	if start.len() <= 1 || root_definition_at(start) {
+		return true;
+	}
+	if start.first() != Some(&b'/') || start.get(1) != Some(&b'*') {
+		return false;
+	}
+	match start.len() {
+		..=6 => true,
+		_ if start.get(6) == Some(&b'*') && start.len() <= 11 => true,
+		_ => {
+			start.get(6) == Some(&b'*')
+				&& start.get(11) == Some(&b'!')
+				&& start.get(11..14) == Some(b"!tb".as_slice())
+		}
+	}
+}
+
 fn table_definition_at(key: &[u8]) -> Option<(NamespaceId, DatabaseId, TableName)> {
 	if key.len() < 14
 		|| key.first() != Some(&b'/')

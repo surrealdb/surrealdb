@@ -1388,6 +1388,18 @@ impl Context {
 		self.shared_value(key).map(Arc::as_ref)
 	}
 
+	/// Whether `key` reads here as a request parameter: the request bound it
+	/// and no binding made since, a `LET` or a `FOR`, has replaced it.
+	pub(crate) fn is_request_param(&self, key: &str) -> bool {
+		match (
+			self.request_params.as_ref().and_then(|params| params.get(key)),
+			self.shared_value(key),
+		) {
+			(Some(param), Some(visible)) => Arc::ptr_eq(param, visible),
+			_ => false,
+		}
+	}
+
 	/// This context's own binding of `key`, with no walk to the parent
 	/// contexts. [`Self::value`] cannot tell an own binding from an inherited
 	/// one, which an exact restore of a binding needs.

@@ -935,6 +935,7 @@ mod datastore {
 	use crate::exec::ir::cache::answer::{CatalogAnswer, ExactAnswer, FreeName, SessionValues};
 	use crate::exec::ir::cache::planning::PlanBinding;
 	use crate::exec::ir::core::ir::{Walk, WalkOrder};
+	#[cfg(feature = "egraph")]
 	use crate::exec::ir::egraph::{EgraphMode, set_mode};
 	use crate::exec::ir::error::IrError;
 	use crate::exec::ir::iface::IndexRef;
@@ -2172,6 +2173,7 @@ mod datastore {
 
 	/// The e-graph reorders and replaces ops. What the plan records of the values it consumed
 	/// does not depend on whether the e-graph runs.
+	#[cfg(feature = "egraph")]
 	#[tokio::test]
 	async fn value_deps_stable_across_rewrites() {
 		struct Mode(EgraphMode);

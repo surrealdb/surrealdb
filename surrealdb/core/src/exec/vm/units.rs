@@ -303,6 +303,9 @@ pub(crate) struct CompiledUnits {
 	/// Statements reached at run time through an expression the program did not
 	/// compile, by text ([`super::serve::statement`]).
 	statements: super::compile_cache::UnitCache<Arc<dyn crate::exec::ExecOperator>>,
+	/// Top-level statements of requests, by text ([`super::serve::request_statement`]),
+	/// at most `ExecConfig::statement_cache_size` of them.
+	request_statements: super::compile_cache::UnitCache<Arc<dyn crate::exec::ExecOperator>>,
 	/// Top-level statements of requests served for the session values they
 	/// fold ([`super::serve::request_statement`]), at most
 	/// `ExecConfig::specialised_body_cache_size` of them.
@@ -367,6 +370,9 @@ impl CompiledUnits {
 			stage_bundles: super::compile_cache::UnitCache::tables(capacity),
 			exprs: super::compile_cache::UnitCache::functions(capacity),
 			statements: super::compile_cache::UnitCache::functions(capacity),
+			request_statements: super::compile_cache::UnitCache::functions(
+				crate::exec::config::ExecConfig::default().statement_cache_size,
+			),
 			session_statements: super::compile_cache::UnitCache::functions(
 				crate::exec::config::ExecConfig::default().specialised_body_cache_size,
 			),
@@ -384,6 +390,8 @@ impl CompiledUnits {
 	/// Units for the limits `config` sets.
 	pub(crate) fn for_config(config: &crate::exec::config::ExecConfig) -> Self {
 		let mut units = Self::new(config.compiled_unit_cache_size);
+		units.request_statements =
+			super::compile_cache::UnitCache::functions(config.statement_cache_size);
 		units.specialised_bodies =
 			super::compile_cache::UnitCache::functions(config.specialised_body_cache_size);
 		units.session_statements =
@@ -391,6 +399,25 @@ impl CompiledUnits {
 		units.specialised_values = config.specialised_body_values;
 		units.specialised_arg_bytes = config.specialised_body_max_arg_bytes;
 		units
+	}
+
+	/// Whether the node keeps compiled top-level statements for later requests
+	/// (`ExecConfig::statement_cache_size` is not `0`).
+	pub(crate) fn caches_statements(&self) -> bool {
+		self.request_statements.capacity() > 0
+	}
+
+	/// How the requests for compiled top-level statements were served.
+	pub(crate) fn statement_stats(&self) -> super::compile_cache::Stats {
+		let kept = self.request_statements.stats();
+		let session = self.session_statements.stats();
+		super::compile_cache::Stats {
+			hits: kept.hits + session.hits,
+			compiles: kept.compiles + session.compiles,
+			waits: kept.waits + session.waits,
+			stale: kept.stale + session.stale,
+			private: kept.private + session.private,
+		}
 	}
 
 	/// The size of the encoding of the largest argument values a body
@@ -417,6 +444,13 @@ impl CompiledUnits {
 		&self,
 	) -> &super::compile_cache::UnitCache<Arc<dyn crate::exec::ExecOperator>> {
 		&self.statements
+	}
+
+	/// Top-level statements of requests, by text.
+	pub(crate) fn request_statements(
+		&self,
+	) -> &super::compile_cache::UnitCache<Arc<dyn crate::exec::ExecOperator>> {
+		&self.request_statements
 	}
 
 	/// Top-level statements of requests served for the session values they

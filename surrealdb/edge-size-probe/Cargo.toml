@@ -23,6 +23,7 @@ full = [
     "surrealdb-core/collate",
     "surrealdb-core/crypto-digest",
     "surrealdb-core/crypto-password",
+    "surrealdb-core/egraph",
     "surrealdb-core/encoding",
     "surrealdb-core/files",
     "surrealdb-core/fulltext",

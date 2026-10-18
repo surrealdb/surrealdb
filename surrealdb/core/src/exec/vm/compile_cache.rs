@@ -135,6 +135,7 @@ pub(crate) enum UnitObject {
 	SessionStatement {
 		op: Arc<crate::expr::logical::LogicalOp>,
 		session: ArgValues,
+		shadowed: Vec<String>,
 	},
 	/// A front end's plan — a GQL query `eval::gql` evaluates — compiled at
 	/// re-entry depth `depth`, with the names `shadowed` read when it runs
@@ -535,9 +536,13 @@ impl<V: Clone + Send + Sync + 'static> UnitCache<V> {
 	}
 
 	/// How this cache's requests were served.
-	#[cfg(test)]
 	pub(crate) fn stats(&self) -> Stats {
 		self.counters.stats()
+	}
+
+	/// The most keys this cache keeps; `0` for a cache that keeps none.
+	pub(crate) fn capacity(&self) -> usize {
+		self.entries.as_ref().map_or(0, |entries| entries.capacity() as usize)
 	}
 
 	/// The unit for `key` linked into `frame`, as the transaction `txn` and
@@ -635,6 +640,7 @@ impl<V: Clone + Send + Sync + 'static> UnitCache<V> {
 			match held {
 				// A unit already judged among those kept is not judged again.
 				Some(found) if ready && kept.iter().any(|k| Arc::ptr_eq(k, &found)) => {
+					self.counters.stale.fetch_add(1, Ordering::Relaxed);
 					flight = entry.replace(frame, &flight);
 				}
 				Some(kept) => {

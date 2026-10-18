@@ -65,8 +65,10 @@ pub(crate) fn build() -> &'static Registry {
 	REGISTRY.get_or_init(|| {
 		let mut r = Registry::empty();
 		super::phys::reg::register(&mut r);
+		#[cfg(feature = "egraph")]
 		super::egraph::rules_phys::register(&mut r);
 		super::analysis::reg::register(&mut r);
+		#[cfg(feature = "egraph")]
 		super::egraph::reg::register(&mut r);
 		super::passes::reg::register(&mut r);
 		super::passes::loop_reg::register(&mut r);

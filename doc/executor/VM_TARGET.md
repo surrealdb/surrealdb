@@ -162,6 +162,25 @@ body again. Lookup and compilation happen only while a query is planned.
   value or client parameter read from outside, in it or any function it
   calls), a body reached from inside another body's compilation (the outer
   unit holds it), a `VERSION`ed call, a body the VM does not run.
+- **Request statements**: a read-only top-level statement of a request that
+  reads its request's variables only as the key of a record of a constant
+  table (`FROM type::record('person', $n)`) is served from the node's cache of
+  statements
+  (`ExecConfig::statement_cache_size`, least recently used evicted first; `0`
+  keeps none and compiles each statement with its request;
+  `Datastore::statement_cache_stats` counts hits, misses and invalidations).
+  The key is the statement as written, the namespace and database, the class
+  of the principal, whether permissions are suppressed and the capabilities.
+  The compilation reads those variables when it runs, so requests that bind
+  other values to them are served the one compilation. Main plans such a
+  source as a value the statement computes, whatever the key, so the kept plan
+  is the plan main makes. A variable read anywhere else, a `FROM $name` among
+  those places (which is planned for the table or record its value names),
+  compiles the statement with its request. A kept compilation is
+  served while the catalog it read holds (`exec::catalog_deps`): a `DEFINE` or
+  `REMOVE` of anything it read compiles the statement again for the next
+  request. A write, a schema statement and an `EXPLAIN` are compiled with
+  their request.
 - **Specialization**: a small body is still inlined into its caller rather than
   linked.
 - **Catalog units**: what a plan lowers from the catalog alone, the same for

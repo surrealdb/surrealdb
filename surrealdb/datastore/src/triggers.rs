@@ -386,6 +386,9 @@ impl PendingGuardFences {
 pub struct CommitTriggers {
 	/// The catalog commits made through the datastore.
 	pub(crate) catalog_epoch: CatalogEpoch,
+	/// The catalog definitions read under each catalog epoch
+	/// ([`crate::cache::epoch`]).
+	pub(crate) epoch_catalog: crate::cache::epoch::EpochCatalog,
 	/// The fences between DiskANN pending-state guard arming and stepping.
 	pub(crate) pending_guard_fences: PendingGuardFences,
 	/// Async event processing, notified when a commit queues events.

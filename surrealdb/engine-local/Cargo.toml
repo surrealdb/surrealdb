@@ -57,6 +57,7 @@ surrealdb-core = { workspace = true, default-features = false, features = [
     "files",
     "search",
     "encoding",
+    "egraph",
 ] }
 surrealdb-engine-api = { workspace = true }
 surrealdb-cnf = { workspace = true }
@@ -113,4 +114,8 @@ workspace = true
 
 [[bench]]
 name = "datastore"
+harness = false
+
+[[bench]]
+name = "point_read"
 harness = false

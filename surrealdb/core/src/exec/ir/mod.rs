@@ -57,6 +57,10 @@ pub(crate) mod analysis;
 pub(crate) mod build;
 pub(crate) mod cache;
 pub(crate) mod core;
+#[cfg(feature = "egraph")]
+pub(crate) mod egraph;
+#[cfg(not(feature = "egraph"))]
+#[path = "egraph_off.rs"]
 pub(crate) mod egraph;
 pub(crate) mod error;
 pub(crate) mod expr;

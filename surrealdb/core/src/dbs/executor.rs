@@ -1948,7 +1948,12 @@ impl Executor {
 						crate::exec::vm::serve::front_end(&probe, op, principal, 0, Vec::new())
 							.await
 					}
-					false => crate::exec::vm::serve::request_statement(&probe, op, principal).await,
+					false => {
+						crate::exec::vm::out_of_line(|| {
+							crate::exec::vm::serve::request_statement(&probe, op, principal)
+						})
+						.await
+					}
 				};
 				match served {
 					Ok(plan) => plan,
@@ -4998,6 +5003,7 @@ impl Executor {
 									op,
 									&plan_session,
 									inline,
+									false,
 									keep_logged,
 									&mut builder,
 								)
@@ -5037,6 +5043,7 @@ impl Executor {
 									lowered,
 									&plan_session,
 									inline,
+									*read_only,
 									keep_logged,
 									&mut builder,
 								)
@@ -5194,13 +5201,22 @@ impl Executor {
 	/// Compile `op`, a statement of the request, in `txn` under the session
 	/// the statements before it leave, into the request `builder` builds;
 	/// or, where it is not `inline`, or where it reads a parameter only the run
-	/// computes, leave it to be served when it is reached.
+	/// computes, leave it to be served when it is reached. A `cacheable`
+	/// statement that reads the request's variables only as the key of a record
+	/// of a constant table ([`crate::exec::vm::serve::kept_for_requests`]) is served here, as
+	/// the request arrives, from the cache of compiled statements, when the
+	/// node keeps one.
+	#[expect(
+		clippy::too_many_arguments,
+		reason = "the request being built, the session its statements leave and what the statement may be"
+	)]
 	async fn compile_one(
 		&self,
 		txn: &Arc<Transaction>,
 		op: &LogicalOp,
 		planning: &crate::exec::vm::PlanSession,
 		inline: bool,
+		cacheable: bool,
 		keep_logged: bool,
 		builder: &mut crate::exec::vm::RequestBuilder,
 	) -> PlannedStatement {
@@ -5222,6 +5238,44 @@ impl Executor {
 			}
 			ctx.freeze()
 		});
+		if cacheable
+			&& self.ctx.compiled_units().is_some_and(|units| units.caches_statements())
+			&& !crate::exec::planner::fold::changes_the_catalog(op)
+			&& !op.any(|node| matches!(node, LogicalOp::Explain(_)))
+			&& crate::exec::vm::serve::kept_for_requests(op, &ctx)
+		{
+			// Served from the cache of compiled statements as the request
+			// arrives, in a context of the session the statements before it
+			// leave. One whose compilation fails is served when it is reached,
+			// which raises its error as a statement planned then does.
+			let probe = crate::exec::context::statement_context(
+				&ctx,
+				opt,
+				self.extract_session_info(),
+				txn,
+				&tokio_util::sync::CancellationToken::new(),
+				true,
+				crate::exec::context::ContextLevel::Root,
+				None,
+			)
+			.await;
+			if let Ok(probe) = probe
+				&& let Ok(plan) = crate::exec::vm::out_of_line(|| {
+					crate::exec::vm::serve::kept_request_statement(
+						&probe,
+						op.clone(),
+						Some(Arc::clone(&opt.auth)),
+					)
+				})
+				.await
+			{
+				return PlannedStatement {
+					entry: Planned::Compiled(Ok(crate::exec::vm::RequestEntry::Operator(plan))),
+					logged,
+				};
+			}
+			return served();
+		}
 		let planned = crate::exec::planner::plan_request_statement(
 			op.clone(),
 			&ctx,

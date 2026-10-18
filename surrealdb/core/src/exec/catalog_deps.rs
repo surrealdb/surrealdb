@@ -36,6 +36,9 @@
 //! ([`Transaction::reference_fields`]), and stand under a catalog epoch as a
 //! listing does.
 //!
+//! The tables are not read again by a transaction under the catalog epoch
+//! they were last found to hold under, as a listing is not.
+//!
 //! A recording that read anything its names cannot identify
 //! ([`CatalogReads::opaque`](crate::kvs::catalog_reads::CatalogReads))
 //! resolves to nothing: what was compiled under it is not reused.
@@ -85,6 +88,9 @@ impl Eq for FunctionState {}
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct CatalogDeps {
 	tables: Vec<(NamespaceId, DatabaseId, TableName, TableState)>,
+	/// The catalog epoch [`Self::tables`] were last found to hold under; every
+	/// transaction under that epoch finds them so.
+	tables_seen: SeenAt,
 	/// Tables read by name whose database did not exist.
 	missing_databases: Vec<(String, String)>,
 	functions: Vec<(NamespaceId, DatabaseId, String, Option<FunctionState>)>,
@@ -178,6 +184,12 @@ impl SeenAt {
 	}
 }
 
+impl Default for SeenAt {
+	fn default() -> Self {
+		Self::unseen()
+	}
+}
+
 impl Clone for SeenAt {
 	fn clone(&self) -> Self {
 		Self(std::sync::atomic::AtomicU64::new(self.0.load(std::sync::atomic::Ordering::Acquire)))
@@ -264,15 +276,37 @@ impl CatalogDeps {
 		deps.tables.retain(|(ns, db, _, _)| {
 			!listed.iter().any(|(listed_ns, listed_db, _)| listed_ns == ns && listed_db == db)
 		});
+		// The epoch is asked after the reads, which it then covers.
+		if let Some(epoch) = txn.catalog_epoch() {
+			deps.tables_seen.set(epoch);
+		}
 		Some(deps)
 	}
 
 	/// Whether every entry is, as `txn` reads it, in the state it was
 	/// resolved in.
+	///
+	/// A transaction under the catalog epoch the tables were last found to
+	/// hold under reads them so, and reads none of them: every table the store
+	/// defines is in the state that epoch's transactions see
+	/// ([`Transaction::catalog_epoch`]). The entries beyond tables — functions,
+	/// parameters, databases — are read again whatever the epoch, since a
+	/// change to one of them does not move it.
 	pub(crate) async fn hold(&self, txn: &Transaction) -> bool {
-		for (ns, db, tb, state) in &self.tables {
-			if table_state(txn, *ns, *db, tb).await.as_ref() != Some(state) {
-				return false;
+		if txn.catalog_epoch().is_some_and(|epoch| self.tables_seen.is(epoch)) {
+			// What a compilation holding this one compiles depends on the
+			// same tables.
+			for (ns, db, tb, _) in &self.tables {
+				txn.note_table_read(*ns, *db, tb);
+			}
+		} else {
+			for (ns, db, tb, state) in &self.tables {
+				if table_state(txn, *ns, *db, tb).await.as_ref() != Some(state) {
+					return false;
+				}
+			}
+			if let Some(epoch) = txn.catalog_epoch() {
+				self.tables_seen.set(epoch);
 			}
 		}
 		self.hold_beyond_tables(txn).await
@@ -455,5 +489,67 @@ async fn param_state(
 			Some(None)
 		}
 		Err(_) => None,
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use surrealdb_strand::TableName;
+
+	use super::CatalogDeps;
+	use crate::catalog::providers::DatabaseProvider;
+	use crate::exec::operators::test_util::TestDb;
+	use crate::kvs::TransactionType;
+
+	/// The catalog deps of a read of `person`'s catalog version, resolved in a
+	/// fresh read transaction of `db`.
+	async fn person_deps(db: &TestDb) -> CatalogDeps {
+		let txn = db.datastore().transaction(TransactionType::Read).await.expect("a transaction");
+		let def = txn.get_db_by_name("test", "test", None).await.expect("read").expect("defined");
+		let recording = txn.record_catalog_reads();
+		txn.catalog_version(def.namespace_id, def.database_id, &TableName::new("person"))
+			.await
+			.expect("read");
+		let reads = recording.finish();
+		let deps = CatalogDeps::resolve(&txn, &reads).await.expect("resolved");
+		txn.cancel().await.expect("cancelled");
+		deps
+	}
+
+	async fn holds(db: &TestDb, deps: &CatalogDeps) -> bool {
+		let txn = db.datastore().transaction(TransactionType::Read).await.expect("a transaction");
+		let recording = txn.record_catalog_reads();
+		let held = deps.hold(&txn).await;
+		let reads = recording.finish();
+		assert_eq!(reads.tables.len(), 1, "the table is noted as read either way: {reads:?}");
+		txn.cancel().await.expect("cancelled");
+		held
+	}
+
+	#[tokio::test]
+	async fn tables_held_under_an_epoch_are_not_read_again_until_the_catalog_changes() {
+		let db = TestDb::new("DEFINE TABLE person SCHEMALESS").await;
+		let deps = person_deps(&db).await;
+		let txn = db.datastore().transaction(TransactionType::Read).await.expect("a transaction");
+		let epoch = txn.catalog_epoch().expect("a sole writer's transaction names its epoch");
+		txn.cancel().await.expect("cancelled");
+		assert!(
+			deps.tables_seen.is(epoch),
+			"resolving records the epoch the tables were read under"
+		);
+		assert!(holds(&db, &deps).await);
+
+		db.run("DEFINE FIELD name ON person TYPE string").await;
+		assert!(!holds(&db, &deps).await, "a field defined on the table is a change");
+
+		let deps = person_deps(&db).await;
+		assert!(holds(&db, &deps).await);
+		db.run("REMOVE TABLE person").await;
+		assert!(!holds(&db, &deps).await, "a table removed is a change");
+
+		let deps = person_deps(&db).await;
+		assert!(holds(&db, &deps).await);
+		db.run("DEFINE TABLE person SCHEMAFULL").await;
+		assert!(!holds(&db, &deps).await, "a table defined where none was is a change");
 	}
 }

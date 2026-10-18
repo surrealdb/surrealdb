@@ -414,6 +414,7 @@ mod event_tests {
 	use super::COMPILE_PHASES;
 	use crate::catalog::providers::CatalogProvider;
 	use crate::dbs::Session;
+	#[cfg(feature = "egraph")]
 	use crate::exec::ir::egraph::{EgraphMode, ForcedPlanning};
 	use crate::kvs::{Datastore, TransactionType};
 
@@ -599,6 +600,7 @@ mod event_tests {
 	}
 
 	/// The e-graph is forced on for the statement, so its run is reported with what it held.
+	#[cfg(feature = "egraph")]
 	#[tokio::test]
 	async fn an_egraph_run_reports_its_nodes_and_iterations() {
 		let ds = datastore().await;

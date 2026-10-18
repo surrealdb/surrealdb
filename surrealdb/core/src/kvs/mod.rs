@@ -44,7 +44,8 @@ pub(crate) use consts::{
 	RECLAIM_BATCH_SIZE, RECLAIM_PASS_ENTRY_QUOTA, RECLAIM_PASS_KEY_BUDGET,
 };
 pub use ds::{
-	Builder, Datastore, LiveQueryEngine, TransactionBuilderFactory, TransactionBuilderParts,
+	Builder, Datastore, LiveQueryEngine, StatementCacheStats, TransactionBuilderFactory,
+	TransactionBuilderParts,
 };
 pub(crate) use err::Error;
 pub use request::{Dialect, QueryRequest, QuerySource};

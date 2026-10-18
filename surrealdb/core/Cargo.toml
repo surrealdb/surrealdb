@@ -37,6 +37,7 @@ default = [
     "observability",
     "vector-index",
     "fulltext",
+    "egraph",
 ]
 kv-mem = [
     "surrealdb-kvs-any/kv-mem",
@@ -95,6 +96,12 @@ vector-index = ["surrealdb-idx/vector-index"]
 # writes to a table with a full-text index fail with an error naming this
 # feature.
 fulltext = ["surrealdb-idx/fulltext"]
+# The e-graph optimiser (`exec::ir::egraph`, built on the `egg` crate), which
+# rewrites a statement's plan by equality saturation before it is lowered.
+# Without it every statement is lowered from the plan the binder and the loop
+# passes leave, which answers the same rows, and the build carries none of
+# `egg`: for an edge build that has no use for the extra planning time or code.
+egraph = ["dep:egg"]
 # Tracing spans on the engine's functions (`#[instrument]`), here and in the
 # datastore, key-value, parser and in-memory storage crates. Without it those
 # functions run with no span wrapper; log events are not affected. A build that
@@ -251,7 +258,7 @@ bytes.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 ciborium.workspace = true
 dashmap.workspace = true
-egg.workspace = true
+egg = { workspace = true, optional = true }
 futures.workspace = true
 geo-types = { workspace = true }
 http.workspace = true
@@ -274,7 +281,9 @@ serde_json.workspace = true
 sha1.workspace = true
 sha2.workspace = true
 slotmap.workspace = true
-smallvec.workspace = true
+# The `union` layout keeps `SmallVec` a word smaller, which the size bound of the IR's `OpData`
+# (`exec::ir::iface::bounds`) is set against.
+smallvec = { workspace = true, features = ["union"] }
 subtle.workspace = true
 sysinfo.workspace = true
 thiserror.workspace = true

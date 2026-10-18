@@ -97,6 +97,7 @@ surrealdb-core = { workspace = true, features = [
     "files",
     "search",
     "encoding",
+    "egraph",
 ] }
 surrealdb-cnf.workspace = true
 common.workspace = true

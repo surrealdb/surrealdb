@@ -81,6 +81,10 @@ const DEFAULT_MEMORY_WAIT_MS: u64 = 1000;
 /// per deployment via the `compiled_unit_cache_size` key.
 const DEFAULT_COMPILED_UNIT_CACHE_SIZE: usize = 1024;
 
+/// Default number of top-level statements a node keeps compiled for later
+/// requests. Overridable per deployment via the `statement_cache_size` key.
+const DEFAULT_STATEMENT_CACHE_SIZE: usize = 1024;
+
 /// Default number of function bodies compiled for a call's argument values a
 /// node keeps. Overridable per deployment via the
 /// `specialised_body_cache_size` key.
@@ -218,6 +222,15 @@ pub(crate) struct ExecConfig {
 	/// recently used evicted first (default: 1024); `0` keeps none and
 	/// compiles each with the plan that needs it (`crate::exec::vm::units`).
 	pub compiled_unit_cache_size: usize,
+	/// How many top-level statements a node keeps compiled for later requests,
+	/// least recently used evicted first (default: 1024): a request's
+	/// read-only statement that reads its variables only as the key of a
+	/// record of a constant table is served the compilation of the same
+	/// statement text under the same namespace, database, principal class and
+	/// capabilities, which reads those variables when it runs
+	/// (`crate::exec::vm::serve::kept_request_statement`); `0` keeps none and
+	/// compiles each statement with the request that carries it.
+	pub statement_cache_size: usize,
 	/// The units of work a running program does between two yields to the
 	/// host's scheduler (default: 4096). A unit is a row, a loop iteration
 	/// or a host step, and an instruction that walks an array spends one per
@@ -318,6 +331,7 @@ impl Default for ExecConfig {
 			morsel_explain_analyze: false,
 			compiled_unit_cache_size: DEFAULT_COMPILED_UNIT_CACHE_SIZE,
 			vm_quantum: DEFAULT_VM_QUANTUM,
+			statement_cache_size: DEFAULT_STATEMENT_CACHE_SIZE,
 			specialised_body_cache_size: DEFAULT_SPECIALISED_BODY_CACHE_SIZE,
 			specialised_body_max_arg_bytes: DEFAULT_SPECIALISED_BODY_MAX_ARG_BYTES,
 			specialised_body_values: DEFAULT_SPECIALISED_BODY_VALUES,
@@ -364,6 +378,7 @@ impl cnf::Config for ExecConfig {
 			.parse_key_bool("morsel_explain_analyze", &mut self.morsel_explain_analyze)
 			.parse_key("compiled_unit_cache_size", &mut self.compiled_unit_cache_size)
 			.parse_key("vm_quantum", &mut self.vm_quantum)
+			.parse_key("statement_cache_size", &mut self.statement_cache_size)
 			.parse_key("specialised_body_cache_size", &mut self.specialised_body_cache_size)
 			.parse_key("specialised_body_max_arg_bytes", &mut self.specialised_body_max_arg_bytes)
 			.parse_key("specialised_body_values", &mut self.specialised_body_values)

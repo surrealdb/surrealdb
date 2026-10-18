@@ -29,7 +29,9 @@
 //! `$session` — when it runs and never folds them
 //! ([`crate::exec::planner::Planner::reading_session_values`]). The one
 //! exception is a request's own top-level statement, which folds them and is
-//! kept under the values it folded ([`request_statement`]).
+//! kept under the values it folded ([`request_statement`]). A statement the
+//! request keeps for later requests also reads the record keys its sources
+//! name when it runs ([`kept_request_statement`]).
 //!
 //! An expression reached where no database is selected names no database to
 //! key by: it is compiled on each miss, never kept.
@@ -230,6 +232,31 @@ pub(crate) async fn statement(
 	op: LogicalOp,
 	principal: Option<Arc<crate::iam::Auth>>,
 	depth: u32,
+	shadowed: Vec<String>,
+) -> anyhow::Result<Arc<dyn ExecOperator>> {
+	statement_in(
+		exec,
+		super::units::CompiledUnits::statements,
+		false,
+		op,
+		principal,
+		depth,
+		shadowed,
+	)
+	.await
+}
+
+/// [`statement`], kept in the cache `cache` picks from the node's units, and
+/// planned as the statement of a request where `request_root`.
+async fn statement_in(
+	exec: &ExecutionContext,
+	cache: fn(
+		&super::units::CompiledUnits,
+	) -> &super::compile_cache::UnitCache<Arc<dyn ExecOperator>>,
+	request_root: bool,
+	op: LogicalOp,
+	principal: Option<Arc<crate::iam::Auth>>,
+	depth: u32,
 	mut shadowed: Vec<String>,
 ) -> anyhow::Result<Arc<dyn ExecOperator>> {
 	for name in crate::exec::planner::UNIT_RUNTIME_PARAMS {
@@ -246,17 +273,37 @@ pub(crate) async fn statement(
 	let params = statement_params(&op);
 	let params = params.into_iter().filter(|name| !shadowed.contains(name)).collect();
 	let compile = || async {
-		Ok(crate::exec::planner::plan_statement_scoped(
-			(*op).clone(),
-			exec.ctx(),
-			exec.function_registry(),
-			Arc::clone(&txn),
-			principal.clone(),
-			depth,
-			exec.root().perms_suppressed,
-			&shadowed,
-		)
-		.await?)
+		Ok(match request_root {
+			true => {
+				super::out_of_line(|| {
+					crate::exec::planner::plan_request_statement_scoped(
+						(*op).clone(),
+						exec.ctx(),
+						exec.function_registry(),
+						Arc::clone(&txn),
+						principal.clone(),
+						exec.root().perms_suppressed,
+						&shadowed,
+					)
+				})
+				.await?
+			}
+			false => {
+				super::out_of_line(|| {
+					crate::exec::planner::plan_statement_scoped(
+						(*op).clone(),
+						exec.ctx(),
+						exec.function_registry(),
+						Arc::clone(&txn),
+						principal.clone(),
+						depth,
+						exec.root().perms_suppressed,
+						&shadowed,
+					)
+				})
+				.await?
+			}
+		})
 	};
 	let Some(units) = exec.ctx().compiled_units() else {
 		return compile().await;
@@ -270,11 +317,11 @@ pub(crate) async fn statement(
 		},
 		principal.as_deref(),
 	);
-	served(exec, units.statements(), keyed, params, compile).await
+	served(exec, cache(units), keyed, params, compile).await
 }
 
 /// `op`, a top-level statement of a request, planned for its run in `exec`
-/// for `principal` and served from the compile cache.
+/// for `principal` and served from the compile cache, when it is reached.
 ///
 /// The request's program is compiled for one session, so a statement of it
 /// folds the values that session's own parameters — `$auth`, `$access`,
@@ -291,6 +338,7 @@ pub(crate) async fn request_statement(
 	op: LogicalOp,
 	principal: Option<Arc<crate::iam::Auth>>,
 ) -> anyhow::Result<Arc<dyn ExecOperator>> {
+	crate::exec::compiles::note_statement_served();
 	let params = statement_params(&op);
 	let folded: Vec<&str> = crate::exec::planner::UNIT_RUNTIME_PARAMS
 		.iter()
@@ -315,16 +363,18 @@ pub(crate) async fn request_statement(
 	};
 	let op = Arc::new(op);
 	let compile = || async {
-		Ok(crate::exec::planner::plan_statement_scoped(
-			(*op).clone(),
-			exec.ctx(),
-			exec.function_registry(),
-			Arc::clone(&txn),
-			principal.clone(),
-			0,
-			exec.root().perms_suppressed,
-			&[],
-		)
+		Ok(super::out_of_line(|| {
+			crate::exec::planner::plan_statement_scoped(
+				(*op).clone(),
+				exec.ctx(),
+				exec.function_registry(),
+				Arc::clone(&txn),
+				principal.clone(),
+				0,
+				exec.root().perms_suppressed,
+				&[],
+			)
+		})
 		.await?)
 	};
 	let keyed = key_of(
@@ -332,10 +382,200 @@ pub(crate) async fn request_statement(
 		UnitObject::SessionStatement {
 			op: Arc::clone(&op),
 			session,
+			shadowed: Vec::new(),
 		},
 		principal.as_deref(),
 	);
 	served(exec, units.session_statements(), keyed, params, compile).await
+}
+
+/// `op`, a top-level statement of a request that the request compiles when it
+/// arrives and that [`kept_for_requests`] keeps, planned as the statement of a
+/// request it is and served from the node's cache of request statements
+/// (`ExecConfig::statement_cache_size`). The caller has judged it read-only,
+/// changing no catalog and holding no `EXPLAIN`.
+///
+/// The request variables it reads only as the key of a record its sources
+/// name ([`source_only_request_variables`]) are read when it runs, never
+/// folded, so one compilation serves every value of them; it is kept for the
+/// statement as written, the frame and the state of the catalog it read. The
+/// session's own values it reads are folded and keyed as [`request_statement`]
+/// folds and keys them.
+pub(crate) async fn kept_request_statement(
+	exec: &ExecutionContext,
+	op: LogicalOp,
+	principal: Option<Arc<crate::iam::Auth>>,
+) -> anyhow::Result<Arc<dyn ExecOperator>> {
+	let params = statement_params(&op);
+	let folded: Vec<&str> = crate::exec::planner::UNIT_RUNTIME_PARAMS
+		.iter()
+		.copied()
+		.filter(|name| params.contains(*name))
+		.collect();
+	let bound = source_only_request_variables(&op, exec.ctx());
+	let Some(units) = exec.ctx().compiled_units().filter(|_| !folded.is_empty()) else {
+		return statement_in(
+			exec,
+			super::units::CompiledUnits::request_statements,
+			true,
+			op,
+			principal,
+			0,
+			bound,
+		)
+		.await;
+	};
+	let values: Vec<crate::val::Value> = folded
+		.iter()
+		.map(|name| exec.ctx().value(name).cloned().unwrap_or(crate::val::Value::None))
+		.collect();
+	let Some(session) = super::compile_cache::ArgValues::of(&values, units.specialised_arg_bytes())
+	else {
+		return statement_in(
+			exec,
+			super::units::CompiledUnits::request_statements,
+			true,
+			op,
+			principal,
+			0,
+			bound,
+		)
+		.await;
+	};
+	let Some(txn) = exec.try_txn() else {
+		anyhow::bail!(crate::exec::Error::InvalidStatement(
+			"a statement of a request is planned in a transaction".to_owned()
+		));
+	};
+	let op = Arc::new(op);
+	let compile = || async {
+		Ok(super::out_of_line(|| {
+			crate::exec::planner::plan_request_statement_scoped(
+				(*op).clone(),
+				exec.ctx(),
+				exec.function_registry(),
+				Arc::clone(&txn),
+				principal.clone(),
+				exec.root().perms_suppressed,
+				&bound,
+			)
+		})
+		.await?)
+	};
+	let keyed = key_of(
+		exec,
+		UnitObject::SessionStatement {
+			op: Arc::clone(&op),
+			session,
+			shadowed: bound.clone(),
+		},
+		principal.as_deref(),
+	);
+	let params = params.into_iter().filter(|name| !bound.contains(name)).collect();
+	served(exec, units.session_statements(), keyed, params, compile).await
+}
+
+/// The request variables `op` reads only as the key of a record its sources
+/// name through `type::record(<table>, $name)`, the table a constant. Main plans such a source as a
+/// value the statement computes when it runs, whatever the key holds: the record's table is not
+/// resolved when the statement is planned, so no decision of the plan (access path, the
+/// table's definitions, a `MATCHES` scope, the catalog the plan depends on)
+/// depends on the key, and one compilation that reads the name when it runs
+/// is the plan main makes for every value of it.
+///
+/// A name read anywhere else is folded into the plan by its value and is not
+/// among them: not a `FROM $name`, which main resolves to the table or record
+/// the value names and plans an access path for; not a name an argument of
+/// the call only contains, a filter, a subquery or an operator; and not one a
+/// statement nested in a source reads.
+pub(crate) fn source_only_request_variables(
+	op: &LogicalOp,
+	ctx: &crate::ctx::FrozenContext,
+) -> Vec<String> {
+	use std::collections::BTreeMap;
+
+	use crate::expr::logical::{LogicalSource, SourceRef};
+	let mut everywhere: BTreeMap<String, usize> = BTreeMap::new();
+	let _ = op.visit_scalars_deep(&mut |scalar| {
+		let _ = scalar.visit_deep(&mut |node| {
+			if let LogicalExpr::Param(param) = node {
+				*everywhere.entry(param.as_str().to_owned()).or_default() += 1;
+			}
+			std::ops::ControlFlow::<()>::Continue(())
+		});
+		Ok::<(), std::convert::Infallible>(())
+	});
+	let mut as_keys: BTreeMap<String, usize> = BTreeMap::new();
+	let mut as_sources = std::collections::BTreeSet::new();
+	let _ = op.visit_ops_deep(&mut |node| {
+		if let LogicalOp::Source(LogicalSource {
+			source,
+			..
+		}) = node
+		{
+			match source {
+				SourceRef::Dynamic(expr) => {
+					if let Some(name) = record_key_param(expr) {
+						*as_keys.entry(name.to_owned()).or_default() += 1;
+					}
+				}
+				SourceRef::Param(param) => {
+					as_sources.insert(param.as_str().to_owned());
+				}
+				_ => {}
+			}
+		}
+		std::ops::ControlFlow::<()>::Continue(())
+	});
+	as_keys
+		.into_iter()
+		.filter(|(name, count)| {
+			everywhere.get(name).copied().unwrap_or(0) == *count && !as_sources.contains(name)
+		})
+		.map(|(name, _)| name)
+		.filter(|name| {
+			!crate::exec::planner::UNIT_RUNTIME_PARAMS.contains(&name.as_str())
+				&& ctx.is_request_param(name)
+		})
+		.collect()
+}
+
+/// The name `expr` reads as the key of a record of a constant table:
+/// `type::record(<table>, $name)`.
+fn record_key_param(expr: &LogicalExpr) -> Option<&str> {
+	let LogicalExpr::Call(call) = expr else {
+		return None;
+	};
+	let crate::expr::Function::Normal(name) = &call.receiver else {
+		return None;
+	};
+	if name != "type::record" {
+		return None;
+	}
+	let [table, LogicalExpr::Param(key)] = call.args.as_slice() else {
+		return None;
+	};
+	match crate::exec::planner::static_value(table) {
+		Some(crate::val::Value::String(_) | crate::val::Value::Table(_)) => Some(key.as_str()),
+		_ => None,
+	}
+}
+
+/// Whether `op`, a top-level statement of a request, is kept compiled for
+/// later requests: it reads a request variable, and reads every one it reads
+/// only as the key of a record its sources name
+/// ([`source_only_request_variables`]), so a request that binds other values
+/// to them is served the compilation. A statement that reads none, or reads
+/// one elsewhere (a `FROM $name` among those places), is compiled with its
+/// request.
+pub(crate) fn kept_for_requests(op: &LogicalOp, ctx: &crate::ctx::FrozenContext) -> bool {
+	let source_only = source_only_request_variables(op, ctx);
+	if source_only.is_empty() {
+		return false;
+	}
+	let elsewhere =
+		|name: &str| ctx.is_request_param(name) && !source_only.iter().any(|kept| kept == name);
+	statement_params(op).iter().all(|name| !elsewhere(name))
 }
 
 /// `op`, a front end's plan compiled for a run in `exec` at re-entry depth

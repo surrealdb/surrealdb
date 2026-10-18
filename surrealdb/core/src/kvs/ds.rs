@@ -361,6 +361,20 @@ fn archive_node_for_shutdown(
 	}
 }
 
+/// How a datastore served the requests for compiled top-level statements
+/// ([`Datastore::statement_cache_stats`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct StatementCacheStats {
+	/// Requests served a kept compilation.
+	pub hits: u64,
+	/// Requests that compiled the statement.
+	pub misses: u64,
+	/// Lookups that found a kept compilation whose catalog dependencies, or
+	/// the variable values it was compiled for, no longer held; each is also
+	/// counted as a miss.
+	pub invalidations: u64,
+}
+
 /// The underlying datastore instance which stores the dataset.
 pub struct Datastore {
 	transaction_factory: TransactionFactory,
@@ -1167,6 +1181,25 @@ impl Datastore {
 	/// - `metric`: The name of the metric to collect.
 	pub fn collect_u64_metric(&self, metric: &str) -> Option<u64> {
 		self.transaction_factory.collect_u64_metric(metric)
+	}
+
+	/// How the requests for compiled top-level statements have been served
+	/// since this datastore started.
+	///
+	/// A request's read-only statement is served the compilation kept for the
+	/// same statement text under the same namespace, database, principal class
+	/// and capabilities (a hit), or compiled and kept for later requests (a
+	/// miss). A kept compilation reads the request's variables when it runs, so
+	/// requests that bind other values to them hit it. One whose catalog
+	/// dependencies no longer hold when it is looked up counts as an
+	/// invalidation and a miss.
+	pub fn statement_cache_stats(&self) -> StatementCacheStats {
+		let stats = self.compiled_units.statement_stats();
+		StatementCacheStats {
+			hits: stats.hits + stats.waits,
+			misses: stats.compiles + stats.private,
+			invalidations: stats.stale,
+		}
 	}
 
 	/// The currently installed observer. Cheap to clone; internal handle is

@@ -1610,8 +1610,19 @@ pub(crate) async fn plan_statement_on(
 	speculation: Option<Arc<crate::dbs::Options>>,
 	perms_suppressed: bool,
 ) -> Result<Arc<dyn ExecOperator>, Error> {
-	plan_statement_with(op, ctx, registry, txn, auth, depth, speculation, perms_suppressed, &[])
-		.await
+	plan_statement_with(
+		op,
+		ctx,
+		registry,
+		txn,
+		auth,
+		depth,
+		speculation,
+		perms_suppressed,
+		&[],
+		false,
+	)
+	.await
 }
 
 /// [`plan_statement_on`] for a statement whose parameters `shadowed` names
@@ -1631,7 +1642,35 @@ pub(crate) async fn plan_statement_scoped(
 	perms_suppressed: bool,
 	shadowed: &[String],
 ) -> Result<Arc<dyn ExecOperator>, Error> {
-	plan_statement_with(op, ctx, registry, txn, auth, depth, None, perms_suppressed, shadowed).await
+	plan_statement_with(
+		op,
+		ctx,
+		registry,
+		txn,
+		auth,
+		depth,
+		None,
+		perms_suppressed,
+		shadowed,
+		false,
+	)
+	.await
+}
+
+/// [`plan_statement_scoped`] for a top-level statement of a request, planned
+/// as the statement of a request it is ([`Planner::at_request_root`]): the
+/// request's own frame runs it.
+pub(crate) async fn plan_request_statement_scoped(
+	op: LogicalOp,
+	ctx: &FrozenContext,
+	registry: &FunctionRegistry,
+	txn: Arc<crate::kvs::Transaction>,
+	auth: Option<Arc<crate::iam::Auth>>,
+	perms_suppressed: bool,
+	shadowed: &[String],
+) -> Result<Arc<dyn ExecOperator>, Error> {
+	plan_statement_with(op, ctx, registry, txn, auth, 0, None, perms_suppressed, shadowed, true)
+		.await
 }
 
 /// Plan a top-level statement of a request when the request arrives, in the
@@ -1728,6 +1767,7 @@ async fn plan_statement_with(
 	speculation: Option<Arc<crate::dbs::Options>>,
 	perms_suppressed: bool,
 	shadowed: &[String],
+	request_root: bool,
 ) -> Result<Arc<dyn ExecOperator>, Error> {
 	// Before anything is bound or planned, so a write the planner cannot
 	// compile is refused as `PlannerUnsupported` rather than after a sibling
@@ -1749,6 +1789,9 @@ async fn plan_statement_with(
 		.trusting_index_shapes(op.read_only());
 	if let Some(auth) = auth {
 		planner = planner.with_auth(auth);
+	}
+	if request_root {
+		planner = planner.at_request_root();
 	}
 	if !shadowed.is_empty() {
 		planner = planner.shadowing(shadowed.iter().cloned());

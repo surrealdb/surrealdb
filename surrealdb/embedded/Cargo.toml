@@ -46,6 +46,7 @@ surrealdb-core = { workspace = true, features = [
     "files",
     "search",
     "encoding",
+    "egraph",
 ] }
 surrealdb-cnf = { workspace = true }
 surrealdb-datastore = { workspace = true }
