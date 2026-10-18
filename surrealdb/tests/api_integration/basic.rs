@@ -2286,6 +2286,96 @@ pub async fn set_on_an_expired_session_is_rejected(new_db: impl CreateDb) {
 	drop(permit);
 }
 
+/// `Begin::client` and `Transaction::client` expose the underlying session
+/// handle, whose direct operations execute outside any transaction and whose
+/// clones open independent sessions inheriting the session state.
+#[cfg(not(feature = "protocol-http"))]
+pub async fn client_accessor_clones_from_begin(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+	db.set("session_var", "inherited").await.unwrap();
+
+	let begin = db.begin();
+
+	// Cloning from `Begin::client()` yields a new independent session with the
+	// same namespace, database, and variables.
+	let from_begin = begin.client().clone();
+	let mut res = from_begin.query("RETURN $session_var").await.unwrap().check().unwrap();
+	let inherited: Option<String> = res.take(0).unwrap();
+	assert_eq!(inherited.as_deref(), Some("inherited"));
+	from_begin.set("session_var", "changed_on_begin_clone").await.unwrap();
+
+	let txn = begin.await.unwrap();
+
+	// Uncommitted write inside the transaction.
+	txn.query("CREATE item:in_tx SET name = 'inside'").await.unwrap().check().unwrap();
+
+	// `Transaction::client()` returns the underlying session handle, which does
+	// not carry the transaction ID: operations on it execute outside the
+	// transaction, cannot see uncommitted writes in `txn`, and auto-commit
+	// immediately so cancelling `txn` does not roll them back.
+	let mut res = txn.client().query("RETURN $session_var").await.unwrap().check().unwrap();
+	let still_inherited: Option<String> = res.take(0).unwrap();
+	assert_eq!(still_inherited.as_deref(), Some("inherited"));
+
+	let unseen: Option<Value> = txn.client().select(("item", "in_tx")).await.unwrap();
+	assert!(
+		unseen.is_none(),
+		"tx.client() runs outside the transaction and must not see uncommitted writes"
+	);
+
+	txn.client()
+		.query("CREATE item:outside_tx SET name = 'outside'")
+		.await
+		.unwrap()
+		.check()
+		.unwrap();
+
+	// Cloning from `Transaction::client()` yields a new independent session
+	// inheriting the session state and running outside the transaction.
+	let from_tx = txn.client().clone();
+	let mut res = from_tx.query("RETURN $session_var").await.unwrap().check().unwrap();
+	let tx_clone_var: Option<String> = res.take(0).unwrap();
+	assert_eq!(tx_clone_var.as_deref(), Some("inherited"));
+	from_tx.set("session_var", "changed_on_tx_clone").await.unwrap();
+
+	let unseen_by_clone: Option<Value> = from_tx.select(("item", "in_tx")).await.unwrap();
+	assert!(unseen_by_clone.is_none());
+
+	let db = txn.cancel().await.unwrap();
+
+	// The transactional write was rolled back, whereas the write through
+	// `txn.client()` ran outside the transaction and remains committed.
+	let in_tx: Option<Value> = db.select(("item", "in_tx")).await.unwrap();
+	assert!(in_tx.is_none());
+	let outside_tx: Option<Value> = db.select(("item", "outside_tx")).await.unwrap();
+	assert!(outside_tx.is_some());
+
+	// And the original session's variable was not mutated by either clone.
+	let mut res = db.query("RETURN $session_var").await.unwrap().check().unwrap();
+	let final_var: Option<String> = res.take(0).unwrap();
+	assert_eq!(final_var.as_deref(), Some("inherited"));
+
+	drop(permit);
+}
+
+#[cfg(feature = "protocol-http")]
+pub async fn client_accessor_clones_from_begin(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+	db.set("session_var", "inherited").await.unwrap();
+
+	let begin = db.begin();
+	let from_begin = begin.client().clone();
+	let mut res = from_begin.query("RETURN $session_var").await.unwrap().check().unwrap();
+	let inherited: Option<String> = res.take(0).unwrap();
+	assert_eq!(inherited.as_deref(), Some("inherited"));
+
+	drop(permit);
+}
+
 define_include_tests!(basic => {
 	#[test_log::test(tokio::test)]
 	connect,
@@ -2399,6 +2489,8 @@ define_include_tests!(basic => {
 	field_and_index_methods,
 	#[test_log::test(tokio::test)]
 	client_side_transactions,
+	#[test_log::test(tokio::test)]
+	client_accessor_clones_from_begin,
 	#[test_log::test(tokio::test)]
 	client_side_read_only_transactions,
 	#[test_log::test(tokio::test)]

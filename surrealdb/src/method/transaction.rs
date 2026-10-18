@@ -44,6 +44,22 @@ where
 		Cancel::from_transaction(self)
 	}
 
+	/// Returns the underlying [`Surreal`] session handle for this transaction.
+	///
+	/// Because [`Surreal`] carries only the session ID and not the transaction
+	/// ID, any query or data operation executed on `tx.client()` runs **outside**
+	/// this transaction on the same session: it is auto-committed immediately,
+	/// cannot observe uncommitted writes made through `tx`, and is not rolled
+	/// back by [`Transaction::cancel`]. Use [`Transaction::query`] and the other
+	/// methods on [`Transaction`] for transactional operations.
+	///
+	/// Calling `tx.client().clone()` creates a new independent session on the
+	/// same connection, inheriting the session's namespace, database,
+	/// authentication, and variables.
+	pub fn client(&self) -> &Surreal<C> {
+		&self.client
+	}
+
 	/// See [Surreal::query]
 	pub fn query<'client>(&'client self, query: impl Into<Cow<'client, str>>) -> Query<'client, C> {
 		self.client.query(query).with_transaction(self.id)

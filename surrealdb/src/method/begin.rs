@@ -55,6 +55,22 @@ impl<C: Connection> Begin<C> {
 	}
 }
 
+impl<C> Begin<C>
+where
+	C: Connection,
+{
+	/// Returns the underlying [`Surreal`] session handle that this [`Begin`]
+	/// future will start a transaction on when awaited.
+	///
+	/// Operations run on `begin.client()` execute on that session outside any
+	/// transaction. Calling `begin.client().clone()` creates a new independent
+	/// session on the same connection, inheriting the session's namespace,
+	/// database, authentication, and variables.
+	pub fn client(&self) -> &Surreal<C> {
+		&self.client
+	}
+}
+
 impl<C> IntoFuture for Begin<C>
 where
 	C: Connection,

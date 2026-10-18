@@ -165,6 +165,16 @@ async fn api() {
 
 	// version
 	let _: Version = DB.version().await.unwrap();
+
+	// transaction and client accessors
+	let begin = DB.clone().begin();
+	let _: &Surreal<Client> = begin.client();
+	let _: Surreal<Client> = begin.client().clone();
+	let txn = begin.await.unwrap();
+	let _: &Surreal<Client> = txn.client();
+	let _: Surreal<Client> = txn.client().clone();
+	let _: QueryResponse = txn.query("SELECT * FROM user").await.unwrap();
+	let _: Surreal<Client> = txn.commit().await.unwrap();
 }
 
 fn assert_send(_: impl Send) {}
