@@ -640,6 +640,9 @@ fn kind_to_type_inner(
 			}
 		}
 		Kind::Either(ks) => {
+			// A `null` member admits a stored NULL just as `none` admits a
+			// missing value, so either makes the field nullable.
+			let optional = optional || ks.iter().any(|k| matches!(k, Kind::Null));
 			// Strip None/Null from the Either variants — they are already handled
 			// by the `optional` flag at the top of kind_to_type() which makes the
 			// resulting TypeRef nullable. This prevents spurious unions like
@@ -692,7 +695,7 @@ fn kind_to_type_inner(
 
 				types.push(Type::Enum(tmp));
 				if others.is_empty() {
-					return Ok(TypeRef::named(enum_ty));
+					return Ok(nullability(TypeRef::named(enum_ty), optional));
 				}
 				Some(enum_ty)
 			} else {
@@ -716,7 +719,7 @@ fn kind_to_type_inner(
 			}
 
 			types.push(Type::Union(tmp_union));
-			TypeRef::named(ty_name)
+			return Ok(nullability(TypeRef::named(ty_name), optional));
 		}
 		Kind::Set(_, _) => return Err(schema_error("Kind::Set is not yet supported")),
 		Kind::Array(k, _) => {
@@ -760,6 +763,14 @@ fn kind_to_type_inner(
 		false => TypeRef::NonNull(Box::new(out_ty)),
 	};
 	Ok(out)
+}
+
+/// `ty` as nullable when the kind admits `none`, otherwise non-null.
+fn nullability(ty: TypeRef, optional: bool) -> TypeRef {
+	match optional {
+		true => ty,
+		false => TypeRef::NonNull(Box::new(ty)),
+	}
 }
 
 /// Strip `NonNull` wrappers from a [`TypeRef`], making it nullable.

@@ -1,0 +1,27 @@
+/**
+[env]
+imports = ["reproductions/7452_import.surql"]
+
+[test]
+reason = "A required field typed as a literal union is non-null in the generated schema, like every other required type; an option<> union stays nullable"
+issue = 7452
+
+[[test.results]]
+value = "{ __type: { fields: [{ name: 'id', type: { kind: 'NON_NULL', name: NULL, ofType: { kind: 'SCALAR', name: 'ID' } } }, { name: 'many', type: { kind: 'NON_NULL', name: NULL, ofType: { kind: 'LIST', name: NULL } } }, { name: 'maybe', type: { kind: 'ENUM', name: 'PERSON_MAYBE_ENUM_A_OR_B', ofType: NULL } }, { name: 'name', type: { kind: 'NON_NULL', name: NULL, ofType: { kind: 'SCALAR', name: 'String' } } }, { name: 'note', type: { kind: 'SCALAR', name: 'String', ofType: NULL } }, { name: 'nullable', type: { kind: 'ENUM', name: 'PERSON_NULLABLE_ENUM_P_OR_Q', ofType: NULL } }, { name: 'status', type: { kind: 'NON_NULL', name: NULL, ofType: { kind: 'ENUM', name: 'PERSON_STATUS_ENUM_ACTIVE_OR_BANNED' } } }] } }"
+
+*/
+{
+  __type(name: "person") {
+    fields {
+      name
+      type {
+        kind
+        name
+        ofType {
+          kind
+          name
+        }
+      }
+    }
+  }
+}
