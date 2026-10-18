@@ -118,7 +118,7 @@ pub(crate) fn collect_with(
 ) -> (NameSet, BTreeSet<TableName>) {
 	let mut collector = Collector::default();
 	let _ = match stmt {
-		TopLevelExpr::Begin | TopLevelExpr::Cancel | TopLevelExpr::Commit => Ok(()),
+		TopLevelExpr::Begin(_) | TopLevelExpr::Cancel | TopLevelExpr::Commit => Ok(()),
 		TopLevelExpr::Access(access) => collector.visit_access(access),
 		TopLevelExpr::Kill(kill) => collector.visit_kill(kill),
 		TopLevelExpr::Live(live) => collector.visit_live(live),

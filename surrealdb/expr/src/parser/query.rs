@@ -11,9 +11,54 @@ pub struct Query {
 	pub expressions: Vec<TopLevelExpr>,
 }
 
+/// How a transaction-bound staleness is written: a literal or a parameter
+/// resolved when the transaction opens.
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+pub enum Staleness {
+	Duration(std::time::Duration),
+	Param(String),
+}
+
+/// The `READ ONLY` clause of `BEGIN`.
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+pub struct ReadOnly {
+	pub max_staleness: Option<Staleness>,
+	pub strict: bool,
+}
+
+/// The options of a `BEGIN` statement. The default is a plain `BEGIN`.
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Default)]
+pub struct BeginOptions {
+	pub read_only: Option<ReadOnly>,
+}
+
+impl ToSql for BeginOptions {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("BEGIN");
+		let Some(read_only) = &self.read_only else {
+			return;
+		};
+		f.push_str(" READ ONLY");
+		match &read_only.max_staleness {
+			None => {}
+			Some(Staleness::Duration(d)) => {
+				f.push_str(" MAX STALENESS ");
+				surrealdb_types::Duration::from(*d).fmt_sql(f, fmt);
+			}
+			Some(Staleness::Param(name)) => {
+				f.push_str(" MAX STALENESS ");
+				Param::from(name.clone()).fmt_sql(f, fmt);
+			}
+		}
+		if read_only.strict {
+			f.push_str(" STRICT");
+		}
+	}
+}
+
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub enum TopLevelExpr {
-	Begin,
+	Begin(BeginOptions),
 	Cancel,
 	Commit,
 	Access(Box<AccessStatement>),
@@ -43,7 +88,7 @@ impl TopLevelExpr {
 			Self::Use(x) => prepare(x),
 			Self::Show(x) => prepare(x),
 			Self::Expr(x) => prepare(x),
-			Self::Begin | Self::Cancel | Self::Commit => {}
+			Self::Begin(_) | Self::Cancel | Self::Commit => {}
 		}
 	}
 
@@ -67,7 +112,7 @@ impl TopLevelExpr {
 			Self::Use(x) => redact(x),
 			Self::Show(x) => redact(x),
 			Self::Expr(x) => redact(x),
-			Self::Begin | Self::Cancel | Self::Commit => {}
+			Self::Begin(_) | Self::Cancel | Self::Commit => {}
 		}
 		value.fmt_sql(output, fmt)
 	}
@@ -75,7 +120,7 @@ impl TopLevelExpr {
 	/// Check if we require a writeable transaction
 	pub fn read_only(&self) -> bool {
 		match self {
-			TopLevelExpr::Begin
+			TopLevelExpr::Begin(_)
 			| TopLevelExpr::Cancel
 			| TopLevelExpr::Commit
 			| TopLevelExpr::Show(_) => true,
@@ -92,7 +137,7 @@ impl TopLevelExpr {
 impl ToSql for TopLevelExpr {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			TopLevelExpr::Begin => f.push_str("BEGIN"),
+			TopLevelExpr::Begin(options) => options.fmt_sql(f, fmt),
 			TopLevelExpr::Cancel => f.push_str("CANCEL"),
 			TopLevelExpr::Commit => f.push_str("COMMIT"),
 			TopLevelExpr::Access(s) => s.fmt_sql(f, fmt),
@@ -207,7 +252,7 @@ impl Query {
 		let mut block: Option<Vec<TopLevelExpr>> = None;
 		for expr in self.expressions {
 			match expr {
-				TopLevelExpr::Begin => {
+				TopLevelExpr::Begin(_) => {
 					block.get_or_insert_with(Vec::new).push(expr);
 				}
 				TopLevelExpr::Commit | TopLevelExpr::Cancel => match block.take() {

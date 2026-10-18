@@ -292,6 +292,26 @@ pub enum DatastoreError {
 	StoreReadOnly {
 		features: String,
 	},
+
+	/// A read-only transaction asked for a staleness bound above the
+	/// operator's maximum.
+	#[error(
+		"The requested MAX STALENESS of {bound:?} is above the maximum of {maximum:?} this datastore allows"
+	)]
+	StalenessAboveMaximum {
+		bound: std::time::Duration,
+		maximum: std::time::Duration,
+	},
+
+	/// No published snapshot met the staleness bound, and the request or the
+	/// fall-back policy forbids reading the current state instead.
+	#[error(
+		"ReadSnapshotTooStale: no snapshot within MAX STALENESS {bound:?}; the newest is {newest_age:?} old"
+	)]
+	ReadSnapshotTooStale {
+		bound: std::time::Duration,
+		newest_age: std::time::Duration,
+	},
 }
 
 impl LeafError for DatastoreError {
@@ -375,6 +395,12 @@ impl LeafError for DatastoreError {
 			| DatastoreError::StoreReadOnly {
 				..
 			} => TypesError::configuration(message, None),
+			DatastoreError::StalenessAboveMaximum {
+				..
+			}
+			| DatastoreError::ReadSnapshotTooStale {
+				..
+			} => TypesError::query(message, None),
 			DatastoreError::GenerationRingFull {
 				..
 			}

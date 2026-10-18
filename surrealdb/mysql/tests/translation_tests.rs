@@ -90,6 +90,15 @@ fn test_translate_transactions() {
 	let surql = translate_sql(sql).unwrap();
 	assert_eq!(surql, "BEGIN TRANSACTION;");
 
+	let surql = translate_sql("START TRANSACTION READ ONLY").unwrap();
+	assert_eq!(surql, "BEGIN TRANSACTION READ ONLY;");
+
+	let surql = translate_sql("START TRANSACTION READ WRITE").unwrap();
+	assert_eq!(surql, "BEGIN TRANSACTION;");
+
+	let surql = translate_sql("BEGIN").unwrap();
+	assert_eq!(surql, "BEGIN TRANSACTION;");
+
 	let sql = "COMMIT";
 	let surql = translate_sql(sql).unwrap();
 	assert_eq!(surql, "COMMIT TRANSACTION;");

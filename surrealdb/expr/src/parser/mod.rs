@@ -68,7 +68,7 @@ pub mod api;
 mod execution;
 mod query;
 pub use execution::{ExecutionStatement, LogicalStatement, StatementKind, StatementText};
-pub use query::{Query, TopLevelExpr};
+pub use query::{BeginOptions, Query, ReadOnly, Staleness, TopLevelExpr};
 mod define;
 pub mod entry;
 mod extension;
@@ -205,11 +205,33 @@ impl<'a> Lower<'a> {
 		}
 	}
 
+	/// The options of a `BEGIN` node.
+	fn begin_options(&self, n: &Node) -> R<BeginOptions> {
+		if n.op & 1 == 0 {
+			return Ok(BeginOptions::default());
+		}
+		let max_staleness = if n.a == NONE {
+			None
+		} else if self.n(n.a).tag == Tag::Param {
+			Some(Staleness::Param(self.param_name(n.a)?))
+		} else {
+			let (s, ns) = decode_duration(self.text(n.a).as_bytes())
+				.ok_or(Reject::new("duration overflow"))?;
+			Some(Staleness::Duration(Duration::new(s, ns)))
+		};
+		Ok(BeginOptions {
+			read_only: Some(ReadOnly {
+				max_staleness,
+				strict: n.op & 2 != 0,
+			}),
+		})
+	}
+
 	/// A top-level statement.
 	pub fn top(&self, id: NodeId) -> R<TopLevelExpr> {
 		let n = self.n(id);
 		Ok(match n.tag {
-			Tag::Begin => TopLevelExpr::Begin,
+			Tag::Begin => TopLevelExpr::Begin(self.begin_options(n)?),
 			Tag::Cancel => TopLevelExpr::Cancel,
 			Tag::Commit => TopLevelExpr::Commit,
 			Tag::Use => TopLevelExpr::Use(match n.op {

@@ -408,7 +408,7 @@ fn logical_of(
 /// What the request grouping makes of `statement`.
 fn request_kind(statement: &RequestStatement<'_>) -> RequestStatementKind {
 	match statement {
-		RequestStatement::Ast(TopLevelExpr::Begin) => RequestStatementKind::Begin,
+		RequestStatement::Ast(TopLevelExpr::Begin(_)) => RequestStatementKind::Begin,
 		RequestStatement::Ast(TopLevelExpr::Commit) => RequestStatementKind::Commit,
 		RequestStatement::Ast(TopLevelExpr::Cancel) => RequestStatementKind::Cancel,
 		RequestStatement::Ast(TopLevelExpr::Option(_)) => RequestStatementKind::Option,
@@ -532,7 +532,7 @@ fn bind_statement(cx: &mut BindCx<'_>, statement: RequestStatement<'_>) -> Resul
 			})?;
 			bind_logical_statement(cx, &op)
 		}
-		TopLevelExpr::Begin | TopLevelExpr::Commit | TopLevelExpr::Cancel => {
+		TopLevelExpr::Begin(_) | TopLevelExpr::Commit | TopLevelExpr::Cancel => {
 			Err(invariant("a transaction control is bound by the body its slot names"))
 		}
 		TopLevelExpr::Option(statement) => {

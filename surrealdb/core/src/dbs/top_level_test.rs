@@ -94,7 +94,10 @@ fn transaction_statements_are_never_siblings() {
 	assert_eq!(
 		shapes,
 		[
-			(Dispatch::Begin, RequestStatementKind::Begin),
+			(
+				Dispatch::Begin(surrealdb_expr::parser::BeginOptions::default()),
+				RequestStatementKind::Begin
+			),
 			(Dispatch::Runnable, RequestStatementKind::Run),
 			(Dispatch::Commit, RequestStatementKind::Commit),
 			(Dispatch::Runnable, RequestStatementKind::Run),

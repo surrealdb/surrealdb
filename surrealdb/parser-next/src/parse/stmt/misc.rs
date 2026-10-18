@@ -6,9 +6,51 @@ use crate::parse::*;
 
 impl<'a, 's> Parser<'a, 's> {
 	/// `BEGIN`, `CANCEL` or `COMMIT`, after the keyword.
+	///
+	/// `BEGIN` may be followed by `READ ONLY [MAX STALENESS <duration or
+	/// parameter> [STRICT]]`. `READ`, `MAX` and `STALENESS` are plain
+	/// identifiers. The node's `op` holds `1` for `READ ONLY` and `2` for
+	/// `STRICT`; `a` is the `Duration` or `Param` leaf of `MAX STALENESS`, or
+	/// `NONE`.
 	pub(crate) fn transaction(&mut self, tag: Tag, t: Tok) -> R<NodeId> {
 		self.eat_kw(Kw::Transaction);
-		Ok(self.leaf_span(tag, 0, 0, 0, t.start, self.prev_end))
+		if tag != Tag::Begin {
+			return Ok(self.leaf_span(tag, 0, 0, 0, t.start, self.prev_end));
+		}
+		let word = |p: &Self, w: &str| {
+			p.tok.kind == T::Ident
+				&& p.tok.kw == Kw::None
+				&& p.text_of(p.tok).eq_ignore_ascii_case(w)
+		};
+		let mut op = 0;
+		let mut a = NONE;
+		if word(self, "READ") {
+			self.bump();
+			self.expect_kw(Kw::Only, "`ONLY`")?;
+			op |= 1;
+			if word(self, "MAX") {
+				self.bump();
+				if !word(self, "STALENESS") {
+					return Err(self.unexpected("`STALENESS`"));
+				}
+				self.bump();
+				a = if self.at(T::Param) {
+					let p = self.tok;
+					self.bump();
+					self.leaf(Tag::Param, 0, p)
+				} else {
+					self.duration_lit()?
+				};
+				if self.eat_kw(Kw::Strict) {
+					op |= 2;
+				}
+			} else if self.at_kw(Kw::Strict) {
+				return Err(self.unexpected("`MAX STALENESS` before `STRICT`"));
+			}
+		} else if word(self, "MAX") {
+			return Err(self.unexpected("`READ ONLY` before `MAX STALENESS`"));
+		}
+		Ok(self.leaf_span(tag, op, a, 0, t.start, self.prev_end))
 	}
 
 	pub(crate) fn use_stmt(&mut self, start: u32) -> R<NodeId> {

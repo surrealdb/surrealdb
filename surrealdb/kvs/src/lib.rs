@@ -31,6 +31,7 @@ pub mod release;
 pub mod savepoint;
 pub mod snapshot;
 pub mod split;
+pub mod stale;
 pub mod threadpool;
 pub mod timestamp;
 mod types;
@@ -48,6 +49,10 @@ pub use release::{FeatureLevel, Release};
 pub use savepoint::SavepointStack;
 pub use snapshot::{RangeCursor, Resume, Snapshot};
 pub use split::{Estimate, SplitTarget};
+pub use stale::{
+	MAX_POSITION_BYTES, ReadOutcome, ReadSnapshotRequest, SnapshotInfo, SnapshotPosition,
+	StaleReads, StaleReadsHandle,
+};
 pub use types::{Key, KeyRange};
 pub use value::{EncodeContext, Encoded};
 

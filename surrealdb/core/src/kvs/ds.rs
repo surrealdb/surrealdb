@@ -28,11 +28,13 @@ use surrealdb_datastore::index_state::index_has_unmaterialised_updates;
 use surrealdb_datastore::out_of_line::OutOfLine;
 use surrealdb_datastore::triggers::CommitTriggers;
 use surrealdb_datastore::values::graph::GraphFoldScope;
-use surrealdb_datastore::{FeatureLevelCell, FeatureLevelState};
+use surrealdb_datastore::{FeatureLevelCell, FeatureLevelState, ReadRequest};
 use surrealdb_expr::parser::Query as Ast;
 use surrealdb_kvs::TransactionType::*;
 use surrealdb_kvs::value::EncodeContext;
-use surrealdb_kvs::{DestroyRange, DestroyRangeHandle, FeatureLevel, Release, TransactionType};
+use surrealdb_kvs::{
+	DestroyRange, DestroyRangeHandle, FeatureLevel, Release, SnapshotInfo, TransactionType,
+};
 use surrealdb_types::{AuthError, Error as TypesError, SurrealValue, object};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, trace, warn};
@@ -6602,6 +6604,19 @@ impl Datastore {
 	/// ```
 	pub async fn transaction(&self, write: TransactionType) -> Result<Transaction> {
 		self.transaction_factory.transaction(write, self.sequences.clone()).await
+	}
+
+	/// Opens a read-only transaction over a snapshot no older than the
+	/// request's staleness bound, with the description of the snapshot it
+	/// reads.
+	///
+	/// A datastore whose backend has no stale tier reads its current state,
+	/// which meets every bound. See [`TransactionFactory::read_transaction`].
+	pub async fn read_transaction(
+		&self,
+		request: ReadRequest,
+	) -> Result<(Transaction, SnapshotInfo)> {
+		self.transaction_factory.read_transaction(request, self.sequences.clone()).await
 	}
 
 	/// A write transaction that a read-only store still opens.

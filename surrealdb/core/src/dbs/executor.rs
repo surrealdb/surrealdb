@@ -12,7 +12,7 @@ use futures::channel::oneshot;
 use futures::{Stream, StreamExt};
 use rand::Rng;
 use surrealdb_datastore::close::{AfterCommitDeadline, AfterCommitWaits, CommitAction};
-use surrealdb_expr::parser::TopLevelExpr;
+use surrealdb_expr::parser::{BeginOptions, Staleness, TopLevelExpr};
 use surrealdb_strand::Strand;
 use surrealdb_types::{Error as TypesError, QueryError, ToSql};
 use web_time::Instant;
@@ -44,7 +44,7 @@ use crate::expr::statements::{OptionStatement, UseStatement};
 use crate::expr::visit::{Visit, Visitor};
 use crate::expr::{ControlFlow, Expr, FlowResult};
 use crate::kvs::slowlog::{ParamVisitor, SlowLogVisit};
-use crate::kvs::{Datastore, DatastoreError, Transaction, TransactionType};
+use crate::kvs::{Datastore, DatastoreError, ReadRequest, Transaction, TransactionType};
 use crate::observe::{
 	Outcome, QueryCounters, QueryEvent, QueryEventSafe, StatementEvent, StatementEventCtx,
 	StatementEventSafe, StatementType,
@@ -225,6 +225,48 @@ pub(super) struct SlotRewrite {
 	/// is not the block's terminator. `None` means the block end involves no
 	/// interrupt.
 	pub interrupted_statement: Option<SlotValue>,
+}
+
+impl SlotRewrite {
+	/// Names why a block's transaction could not be opened, in place of the
+	/// generic not-started text, when the cause is one the request controls.
+	fn name_begin_failure(&mut self, reason: &str) {
+		let named = |text: String| SlotValue::Error {
+			text: Cow::Owned(text),
+			kind: Some(QueryError::NotExecuted),
+		};
+		if self.following.is_some() {
+			self.following = Some(named(reason.to_string()));
+		}
+		if matches!(self.terminator, Some(SlotValue::Error { .. })) {
+			self.terminator = Some(named(format!("Cannot COMMIT: {reason}")));
+		}
+	}
+}
+
+/// A `BEGIN` option the request supplied that cannot be honoured.
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+struct BeginOptionError(String);
+
+/// The message of a failed transaction open that the request itself caused:
+/// a bad option, a bound above the maximum, or a bound no snapshot meets that
+/// the request or policy forbids serving fresh.
+fn begin_failure_reason(failure: &anyhow::Error) -> Option<String> {
+	if failure.downcast_ref::<BeginOptionError>().is_some() {
+		return Some(failure.to_string());
+	}
+	match failure.downcast_ref::<DatastoreError>() {
+		Some(
+			DatastoreError::StalenessAboveMaximum {
+				..
+			}
+			| DatastoreError::ReadSnapshotTooStale {
+				..
+			},
+		) => Some(failure.to_string()),
+		_ => None,
+	}
 }
 
 const CANCELLED_TXN: &str = "The query was not executed due to a cancelled transaction";
@@ -2342,7 +2384,7 @@ impl Executor {
 			TopLevelExpr::Use(stmt) => self.run_use(stmt, txn).await,
 			TopLevelExpr::Option(_) => Self::option_reached_an_engine(),
 			TopLevelExpr::Expr(Expr::Let(stmt)) => self.run_let(*stmt, txn, start).await,
-			TopLevelExpr::Begin | TopLevelExpr::Commit | TopLevelExpr::Cancel => {
+			TopLevelExpr::Begin(_) | TopLevelExpr::Commit | TopLevelExpr::Cancel => {
 				match self.misplaced_control.take() {
 					Some(misplaced) => Self::transaction_control_error(misplaced.message()),
 					None => Err(ControlFlow::Err(anyhow::Error::new(EngineError::unreachable(
@@ -3389,6 +3431,11 @@ impl Executor {
 			let _ = txn.cancel().await;
 			return Err(e);
 		}
+		// A read-only block has nothing to commit; `COMMIT` releases its
+		// snapshot and cannot fail.
+		if !txn.writeable() {
+			return txn.cancel().await;
+		}
 		txn.commit().await
 	}
 
@@ -3400,6 +3447,7 @@ impl Executor {
 		stream: Pin<&mut S>,
 		grouper: &mut RequestGrouper,
 		emission: Emission,
+		options: &BeginOptions,
 	) -> Result<()>
 	where
 		S: Stream<Item = Result<TopLevelStatement>>,
@@ -3407,7 +3455,7 @@ impl Executor {
 		debug_assert!(!self.holding);
 		self.broker_owned_by_executor = false;
 		self.holding = matches!(emission, Emission::Hold) && self.stream.is_some();
-		let result = self.execute_begin_statement_impl(kvs, stream, grouper).await;
+		let result = self.execute_begin_statement_impl(kvs, stream, grouper, options).await;
 		if self.broker_owned_by_executor {
 			self.clear_broker();
 		}
@@ -3419,50 +3467,102 @@ impl Executor {
 		result
 	}
 
+	/// Opens the transaction a `BEGIN` block runs in: a write transaction for
+	/// a plain `BEGIN`, a read transaction for `READ ONLY`, over a snapshot no
+	/// older than `MAX STALENESS` when one is given.
+	async fn open_begin_transaction(
+		&mut self,
+		kvs: &Datastore,
+		options: &BeginOptions,
+	) -> Result<Transaction> {
+		let Some(read_only) = &options.read_only else {
+			return kvs.transaction(TransactionType::Write).await;
+		};
+		let max_staleness = match &read_only.max_staleness {
+			None => Duration::ZERO,
+			Some(Staleness::Duration(bound)) => *bound,
+			Some(Staleness::Param(name)) => match self.ctx.value(name) {
+				Some(Value::Duration(bound)) => bound.0,
+				Some(_) => {
+					return Err(anyhow::Error::new(BeginOptionError(format!(
+						"The parameter ${name} used for MAX STALENESS is not a duration"
+					))));
+				}
+				None => {
+					return Err(anyhow::Error::new(BeginOptionError(format!(
+						"The parameter ${name} used for MAX STALENESS is not defined"
+					))));
+				}
+			},
+		};
+		let (txn, info) = kvs
+			.read_transaction(ReadRequest {
+				max_staleness,
+				strict: read_only.strict,
+			})
+			.await?;
+		debug!(
+			target: "surrealdb::core::dbs",
+			age = ?info.age,
+			stale = info.stale,
+			"opened a read-only transaction"
+		);
+		Ok(txn)
+	}
+
 	async fn execute_begin_statement_impl<S>(
 		&mut self,
 		kvs: &Datastore,
 		mut stream: Pin<&mut S>,
 		grouper: &mut RequestGrouper,
+		options: &BeginOptions,
 	) -> Result<()>
 	where
 		S: Stream<Item = Result<TopLevelStatement>>,
 	{
-		let Ok(txn) = kvs.transaction(TransactionType::Write).await.map(|tx| {
+		let opened = self.open_begin_transaction(kvs, options).await.map(|tx| {
 			tx.with_tenant_identity(self.ctx.tenant_identity().cloned())
 				.with_write_keys_limit(kvs.transaction_max_write_keys())
-		}) else {
-			// couldn't create a transaction.
-			// Fast forward until we hit CANCEL or COMMIT, which take their
-			// terminator slot like every other statement of the block.
-			while let Some(stmt) = stream.next().await {
-				yield_now!();
-				let stmt = stmt?;
-				let place = place_statement(grouper, &stmt);
-				let end = match place.role {
-					StatementRole::Commit => FailedEnd::Commit,
-					StatementRole::Cancel => FailedEnd::Cancel,
-					_ => FailedEnd::RequestEnd,
-				};
-				let terminates = !matches!(end, FailedEnd::RequestEnd);
-				let rewrite = finalise_slots(&BlockEnd::BeginFailed {
-					end,
-				});
-				self.push_fast_forward_slot(&rewrite, terminates);
-				self.emit_statement_event_unexecuted(
-					kvs,
-					stmt.statement_type(),
-					crate::observe::error_class::TXN_CREATE_FAILED,
-				);
-				if terminates {
-					return Ok(());
+		});
+		let txn = match opened {
+			Ok(txn) => txn,
+			Err(failure) => {
+				let reason = begin_failure_reason(&failure);
+				// couldn't create a transaction.
+				// Fast forward until we hit CANCEL or COMMIT, which take their
+				// terminator slot like every other statement of the block.
+				while let Some(stmt) = stream.next().await {
+					yield_now!();
+					let stmt = stmt?;
+					let place = place_statement(grouper, &stmt);
+					let end = match place.role {
+						StatementRole::Commit => FailedEnd::Commit,
+						StatementRole::Cancel => FailedEnd::Cancel,
+						_ => FailedEnd::RequestEnd,
+					};
+					let terminates = !matches!(end, FailedEnd::RequestEnd);
+					let mut rewrite = finalise_slots(&BlockEnd::BeginFailed {
+						end,
+					});
+					if let Some(reason) = &reason {
+						rewrite.name_begin_failure(reason);
+					}
+					self.push_fast_forward_slot(&rewrite, terminates);
+					self.emit_statement_event_unexecuted(
+						kvs,
+						stmt.statement_type(),
+						crate::observe::error_class::TXN_CREATE_FAILED,
+					);
+					if terminates {
+						return Ok(());
+					}
 				}
-			}
 
-			// Ran out of statements but still didn't hit a COMMIT or CANCEL
-			// Just break as we can't do anything else since the query is already
-			// effectively canceled.
-			return Ok(());
+				// Ran out of statements but still didn't hit a COMMIT or CANCEL
+				// Just break as we can't do anything else since the query is already
+				// effectively canceled.
+				return Ok(());
+			}
 		};
 		// The block's blocking index statements build inside its transaction, so
 		// a failed build rolls the whole block back, and each queues the wait
@@ -4601,8 +4701,18 @@ impl Executor {
 						});
 					}
 
+					let begin_options = match stmt.dispatch() {
+						Dispatch::Begin(options) => options,
+						_ => BeginOptions::default(),
+					};
 					let begin_result = self
-						.execute_begin_statement(kvs, stream.as_mut(), &mut grouper, place.emission)
+						.execute_begin_statement(
+							kvs,
+							stream.as_mut(),
+							&mut grouper,
+							place.emission,
+							&begin_options,
+						)
 						.await;
 					let outcome = Outcome::from(&begin_result);
 					// `execute_begin_statement` returns `anyhow::Result`; on
@@ -4771,7 +4881,7 @@ impl Executor {
 				},
 			},
 			TopLevelStatement::Ast(stmt) => match stmt {
-				TopLevelExpr::Begin => RequestEntry::Begin,
+				TopLevelExpr::Begin(_) => RequestEntry::Begin,
 				TopLevelExpr::Commit => RequestEntry::Commit,
 				TopLevelExpr::Cancel => RequestEntry::Cancel,
 				TopLevelExpr::Option(option) => RequestEntry::Option(option.clone()),
@@ -5462,7 +5572,7 @@ fn place_statement(grouper: &mut RequestGrouper, stmt: &TopLevelStatement) -> St
 /// classifies. Debug checks only.
 fn role_agrees_with_dispatch(role: StatementRole, dispatch: &Dispatch) -> bool {
 	match dispatch {
-		Dispatch::Begin => matches!(
+		Dispatch::Begin(_) => matches!(
 			role,
 			StatementRole::Begin
 				| StatementRole::Misplaced(

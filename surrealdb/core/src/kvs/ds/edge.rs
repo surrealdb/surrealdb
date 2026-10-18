@@ -116,7 +116,7 @@ fn admit(statement: TopLevelStatement) -> Result<Admitted, TypesError> {
 				)));
 			}
 		},
-		TopLevelStatement::Ast(TopLevelExpr::Begin) => return Err(not_served("BEGIN")),
+		TopLevelStatement::Ast(TopLevelExpr::Begin(_)) => return Err(not_served("BEGIN")),
 		TopLevelStatement::Ast(TopLevelExpr::Commit) => return Err(not_served("COMMIT")),
 		TopLevelStatement::Ast(TopLevelExpr::Cancel) => return Err(not_served("CANCEL")),
 		TopLevelStatement::Ast(TopLevelExpr::Access(_)) => return Err(not_served("ACCESS")),

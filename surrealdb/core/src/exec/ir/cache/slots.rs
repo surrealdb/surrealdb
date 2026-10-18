@@ -97,7 +97,7 @@ impl SlotTable {
 	pub(crate) fn of(stmt: &TopLevelExpr) -> Self {
 		let mut walker = Walker::default();
 		let _ = match stmt {
-			TopLevelExpr::Begin | TopLevelExpr::Cancel | TopLevelExpr::Commit => Ok(()),
+			TopLevelExpr::Begin(_) | TopLevelExpr::Cancel | TopLevelExpr::Commit => Ok(()),
 			TopLevelExpr::Access(access) => walker.visit_access(access),
 			TopLevelExpr::Kill(kill) => walker.visit_kill(kill),
 			TopLevelExpr::Live(live) => walker.visit_live(live),

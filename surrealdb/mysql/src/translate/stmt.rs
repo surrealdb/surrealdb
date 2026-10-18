@@ -396,11 +396,18 @@ pub fn translate_transaction(
 	out: &mut String,
 ) -> Result<(), TranslationError> {
 	match tx {
-		TransactionStmt::Begin(_)
-		| TransactionStmt::StartTransaction {
+		TransactionStmt::Begin(_) => {
+			out.push_str("BEGIN TRANSACTION;");
+		}
+		TransactionStmt::StartTransaction {
+			read_only,
 			..
 		} => {
-			out.push_str("BEGIN TRANSACTION;");
+			out.push_str(if *read_only {
+				"BEGIN TRANSACTION READ ONLY;"
+			} else {
+				"BEGIN TRANSACTION;"
+			});
 		}
 		TransactionStmt::Commit(_) => {
 			out.push_str("COMMIT TRANSACTION;");

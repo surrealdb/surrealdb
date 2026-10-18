@@ -149,6 +149,15 @@ fn test_translate_dml_unsupported_for_typed_lowering() {
 #[test]
 fn test_translate_transactions() {
 	assert_eq!(translate_sql("BEGIN;").expect("translate"), "BEGIN TRANSACTION;");
+	assert_eq!(
+		translate_sql("BEGIN READ ONLY;").expect("translate"),
+		"BEGIN TRANSACTION READ ONLY;"
+	);
+	assert_eq!(translate_sql("BEGIN READ WRITE;").expect("translate"), "BEGIN TRANSACTION;");
+	assert_eq!(
+		translate_sql("START TRANSACTION READ ONLY;").expect("translate"),
+		"BEGIN TRANSACTION READ ONLY;"
+	);
 	assert_eq!(translate_sql("COMMIT;").expect("translate"), "COMMIT TRANSACTION;");
 	assert_eq!(translate_sql("ROLLBACK;").expect("translate"), "CANCEL TRANSACTION;");
 }

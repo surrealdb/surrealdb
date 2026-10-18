@@ -2781,7 +2781,7 @@ impl Connection {
 			// into the persistent connection session. Committed blocks still
 			// persist their LET/USE, matching how the interactive shell behaves.
 			let capture_session = !unit.contains_cancel();
-			let has_begin = unit.expressions.iter().any(|e| matches!(e, TopLevelExpr::Begin));
+			let has_begin = unit.expressions.iter().any(|e| matches!(e, TopLevelExpr::Begin(_)));
 			let let_vars = if capture_session {
 				let names = unit.get_let_statements();
 				for name in &names {

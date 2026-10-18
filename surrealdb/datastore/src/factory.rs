@@ -8,12 +8,17 @@
 use std::any::{Any, TypeId};
 use std::future::Future;
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use anyhow::Result;
-use surrealdb_kvs::{Metrics, TransactionBuilder, TransactionType};
+use surrealdb_kvs::{
+	Metrics, ReadOutcome, ReadSnapshotRequest, SnapshotInfo, StaleReads, StaleReadsHandle,
+	TransactionBuilder, TransactionType,
+};
 use surrealdb_observe::{ExecutionObserver, NoopObserver};
+use web_time::Instant;
 
-use crate::config::TransactionConfig;
+use crate::config::{FallbackPolicy, TransactionConfig};
 use crate::error::DatastoreError;
 use crate::feature::FeatureLevelCell;
 use crate::out_of_line::OutOfLine;
@@ -41,6 +46,17 @@ pub struct TransactionFactory {
 	/// once: the store is read-only exactly when the cell is set, so that [`Self::transaction`]
 	/// refuses to open a write transaction. See [`Self::bookkeeping`].
 	read_only: Arc<OnceLock<String>>,
+	/// The window the rate-limited fall-back policy counts in.
+	fallbacks: Arc<std::sync::Mutex<(Instant, u32)>>,
+}
+
+/// A request to open a read-only transaction over a snapshot no older than
+/// `max_staleness`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReadRequest {
+	pub max_staleness: Duration,
+	/// Refuse a current read when no snapshot meets the bound.
+	pub strict: bool,
 }
 
 impl TransactionFactory {
@@ -56,6 +72,7 @@ impl TransactionFactory {
 			config,
 			feature: Arc::new(FeatureLevelCell::unsettled()),
 			read_only: Arc::new(OnceLock::new()),
+			fallbacks: Arc::new(std::sync::Mutex::new((Instant::now(), 0))),
 		}
 	}
 
@@ -127,6 +144,140 @@ impl TransactionFactory {
 			.into());
 		}
 		self.open(write, sequences).await
+	}
+
+	/// Opens a read-only transaction over a snapshot no older than the
+	/// request's bound.
+	///
+	/// A backend that publishes no [`StaleReadsHandle`] is read at its current
+	/// state, which meets every bound; the fall-back policy is not consulted.
+	/// Otherwise the backend's newest snapshot within the bound is used, and
+	/// when there is none the configured [`FallbackPolicy`] decides between a
+	/// current read and [`DatastoreError::ReadSnapshotTooStale`]. A `STRICT`
+	/// request never gets a current read after the stale tier has declined.
+	///
+	/// A bound above the configured maximum fails with
+	/// [`DatastoreError::StalenessAboveMaximum`] before anything is opened.
+	pub async fn read_transaction(
+		&self,
+		request: ReadRequest,
+		sequences: Sequences,
+	) -> Result<(Transaction, SnapshotInfo)> {
+		let maximum = self.config.read_snapshot_max_staleness;
+		if request.max_staleness > maximum {
+			return Err(DatastoreError::StalenessAboveMaximum {
+				bound: request.max_staleness,
+				maximum,
+			}
+			.into());
+		}
+		if request.max_staleness.is_zero() {
+			let tx = self.transaction(TransactionType::Read, sequences).await?;
+			return Ok((tx, SnapshotInfo::current()));
+		}
+		let tier = self
+			.builder
+			.extension(TypeId::of::<StaleReadsHandle>())
+			.and_then(|ext| ext.downcast::<StaleReadsHandle>().ok());
+		let Some(tier) = tier else {
+			let tx = self.transaction(TransactionType::Read, sequences).await?;
+			return Ok((tx, SnapshotInfo::current()));
+		};
+		let tier: &Arc<dyn StaleReads> = &tier.0;
+		let newest_age = match self
+			.open_stale(
+				tier,
+				ReadSnapshotRequest {
+					max_staleness: request.max_staleness,
+				},
+				sequences.clone(),
+			)
+			.await?
+		{
+			Ok(opened) => return Ok(opened),
+			Err(newest_age) => newest_age,
+		};
+		let allowed = !request.strict
+			&& match self.config.read_snapshot_fallback {
+				FallbackPolicy::Allow => true,
+				FallbackPolicy::Deny => false,
+				FallbackPolicy::RateLimited(per_second) => self.admit_fallback(per_second),
+			};
+		if !allowed {
+			return Err(DatastoreError::ReadSnapshotTooStale {
+				bound: request.max_staleness,
+				newest_age,
+			}
+			.into());
+		}
+		let tx = self.transaction(TransactionType::Read, sequences).await?;
+		Ok((tx, SnapshotInfo::current()))
+	}
+
+	/// Whether one more fall-back fits in the current one-second window.
+	fn admit_fallback(&self, per_second: u32) -> bool {
+		let mut window = self.fallbacks.lock().unwrap_or_else(|e| e.into_inner());
+		if window.0.elapsed() >= Duration::from_secs(1) {
+			*window = (Instant::now(), 0);
+		}
+		if window.1 < per_second {
+			window.1 += 1;
+			true
+		} else {
+			false
+		}
+	}
+
+	/// Opens a transaction over a published snapshot, or reports the age of
+	/// the newest one when none is within the bound.
+	async fn open_stale(
+		&self,
+		tier: &Arc<dyn StaleReads>,
+		request: ReadSnapshotRequest,
+		sequences: Sequences,
+	) -> Result<std::result::Result<(Transaction, SnapshotInfo), Duration>> {
+		let settled = self.triggers.catalog_epoch.settled();
+		let live_bucket = self.triggers.live.open();
+		let outcome = match tier.open(request).await {
+			Ok(outcome) => outcome,
+			Err(e) => {
+				self.triggers.live.close(live_bucket);
+				return Err(e.into());
+			}
+		};
+		match outcome {
+			ReadOutcome::BoundUnmet {
+				newest_age,
+			} => {
+				self.triggers.live.close(live_bucket);
+				Ok(Err(newest_age))
+			}
+			ReadOutcome::Opened {
+				transaction,
+				local,
+				info,
+			} => {
+				// A stale snapshot may predate catalog changes the settled epoch
+				// counts, so it is never identified as reading the current catalog
+				// and never trusted as the sole writer's view.
+				let sole_writer = transaction.sole_writer() && !info.stale;
+				let catalog_epoch =
+					settled.filter(|_| sole_writer).unwrap_or(crate::tx::NO_CATALOG_EPOCH);
+				let tx = Transaction::new(
+					local,
+					sequences,
+					Arc::clone(&self.triggers),
+					Arc::clone(&self.observer),
+					Transactor::new(transaction),
+					&self.config,
+					catalog_epoch,
+					sole_writer,
+					Arc::clone(&self.feature),
+				)
+				.with_live_bucket(live_bucket);
+				Ok(Ok((tx, info)))
+			}
+		}
 	}
 
 	/// Opens a write transaction that ignores the read-only mark.
@@ -205,6 +356,7 @@ impl TransactionFactory {
 			config: Arc::clone(&self.config),
 			feature: Arc::clone(&self.feature),
 			read_only: Arc::clone(&self.read_only),
+			fallbacks: Arc::clone(&self.fallbacks),
 		}
 	}
 

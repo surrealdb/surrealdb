@@ -316,9 +316,14 @@ fn translate_table_ref(
 fn translate_transaction(tx: &TransactionStmt, out: &mut String) -> Result<(), TranslationError> {
 	match tx {
 		TransactionStmt::Begin {
+			read_only,
 			..
 		} => {
-			out.push_str("BEGIN TRANSACTION;");
+			out.push_str(if *read_only {
+				"BEGIN TRANSACTION READ ONLY;"
+			} else {
+				"BEGIN TRANSACTION;"
+			});
 			Ok(())
 		}
 		TransactionStmt::Commit {

@@ -56,6 +56,7 @@ pub use rollback::{
 // reports.
 pub use surrealdb_datastore::FeatureLevelState;
 pub(crate) use surrealdb_datastore::IntoBytes;
+pub use surrealdb_datastore::ReadRequest;
 // Named for the layer rather than re-exported as `Error`: `kvs::Error` above is
 // the storage backend's, and a datastore failure is a different thing.
 pub(crate) use surrealdb_datastore::error::DatastoreError;
@@ -74,7 +75,7 @@ pub(crate) use surrealdb_datastore::{
 pub(crate) use surrealdb_datastore::{
 	is_indeterminate_commit, is_retryable_transaction_conflict, is_shutdown_error, storage_error,
 };
-pub use surrealdb_kvs::{FeatureLevel, Release};
+pub use surrealdb_kvs::{FeatureLevel, Release, SnapshotInfo};
 pub(crate) use tx::Transaction;
 
 pub(crate) use crate::catalog::providers::CachePolicy;

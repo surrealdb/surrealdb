@@ -3179,6 +3179,9 @@ bdb8d635611b10fe language-tests/tests/language/statements/select/where_record_an
 83526e9464490b8b language-tests/tests/language/statements/throw/basic.surql
 2c3e47125837cefa language-tests/tests/language/statements/throw/param.surql
 422470bed830e760 language-tests/tests/language/statements/throw/value.surql
+3ea8cfc502d98dbd language-tests/tests/language/statements/transaction/read_only_max_staleness_parameter.surql
+e63cd49ef8b6b9b6 language-tests/tests/language/statements/transaction/read_only_reads_current_state.surql
+3a1d5b36a1f74767 language-tests/tests/language/statements/transaction/read_only_rejects_writes.surql
 4bb6b0cf35d2861d language-tests/tests/language/statements/transaction/schema_in_a_failed_transaction.surql
 7d216e9e089aa9a5 language-tests/tests/language/statements/transaction/throw_error_handling.surql
 29cb8a378c601509 language-tests/tests/language/statements/update/complex_with_input.surql
@@ -4666,6 +4669,11 @@ cbf29ce484222325 surrealdb/parser-next/tests/corpus/empty_statements.surql
 86e05eb2c4457a23 surrealdb/parser-next/tests/corpus/errors/access_purge_missing_kind.surql
 317567122b84fcad surrealdb/parser-next/tests/corpus/errors/access_revoke_invalid_target.surql
 d56049f9fe628b38 surrealdb/parser-next/tests/corpus/errors/alter_database_without_clause.surql
+1bed6fe5c23fb401 surrealdb/parser-next/tests/corpus/errors/begin_max_staleness_not_a_duration.surql
+0c28d43afd8e21be surrealdb/parser-next/tests/corpus/errors/begin_max_staleness_without_read_only.surql
+fc98a3e75d71625d surrealdb/parser-next/tests/corpus/errors/begin_read_only_twice.surql
+110108c2a64419ab surrealdb/parser-next/tests/corpus/errors/begin_read_without_only.surql
+b66da1d46df76d46 surrealdb/parser-next/tests/corpus/errors/begin_strict_without_max_staleness.surql
 b3df01bfddbef244 surrealdb/parser-next/tests/corpus/errors/compatibility_level.surql
 39b2aec4ac5692ba surrealdb/parser-next/tests/corpus/errors/insert_has_no_only.surql
 548df921c6fce279 surrealdb/parser-next/tests/corpus/errors/invalid_clause.surql
@@ -4782,6 +4790,7 @@ e8cab10b57708122 surrealdb/parser-next/tests/corpus/stmts/alter/system.surql
 1c6c439891cffc33 surrealdb/parser-next/tests/corpus/stmts/alter/system_compatibility.surql
 264c102b8a637a02 surrealdb/parser-next/tests/corpus/stmts/alter/table.surql
 925b63cb30fdef9c surrealdb/parser-next/tests/corpus/stmts/alter/table_migrate.surql
+3987d84f35dd97e1 surrealdb/parser-next/tests/corpus/stmts/begin_read_only.surql
 4b40d6cc3ce252a6 surrealdb/parser-next/tests/corpus/stmts/break_outside_loop.surql
 0a32f36645f5cff6 surrealdb/parser-next/tests/corpus/stmts/break_outside_loop_fn_def.surql
 098f11cc6839d03b surrealdb/parser-next/tests/corpus/stmts/create.surql

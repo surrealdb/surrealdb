@@ -1,6 +1,6 @@
 //! The executor's unit of work.
 
-use surrealdb_expr::parser::TopLevelExpr;
+use surrealdb_expr::parser::{BeginOptions, TopLevelExpr};
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::dbs::QueryType;
@@ -32,7 +32,7 @@ pub(crate) enum TopLevelStatement {
 /// options every later statement in the batch runs under.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Dispatch {
-	Begin,
+	Begin(BeginOptions),
 	Cancel,
 	Commit,
 	Option(OptionStatement),
@@ -45,7 +45,7 @@ impl TopLevelStatement {
 	pub(crate) fn dispatch(&self) -> Dispatch {
 		match self {
 			TopLevelStatement::Ast(stmt) => match stmt {
-				TopLevelExpr::Begin => Dispatch::Begin,
+				TopLevelExpr::Begin(options) => Dispatch::Begin(options.clone()),
 				TopLevelExpr::Cancel => Dispatch::Cancel,
 				TopLevelExpr::Commit => Dispatch::Commit,
 				TopLevelExpr::Option(stmt) => Dispatch::Option(stmt.clone()),
@@ -66,7 +66,7 @@ impl TopLevelStatement {
 	pub(crate) fn request_kind(&self) -> RequestStatementKind {
 		match self {
 			TopLevelStatement::Ast(stmt) => match stmt {
-				TopLevelExpr::Begin => RequestStatementKind::Begin,
+				TopLevelExpr::Begin(_) => RequestStatementKind::Begin,
 				TopLevelExpr::Commit => RequestStatementKind::Commit,
 				TopLevelExpr::Cancel => RequestStatementKind::Cancel,
 				TopLevelExpr::Option(_) => RequestStatementKind::Option,
@@ -257,7 +257,7 @@ fn query_type(kind: StatementType) -> QueryType {
 /// [`StatementType`] category.
 fn statement_type(expr: &TopLevelExpr) -> StatementType {
 	match expr {
-		TopLevelExpr::Begin => StatementType::Begin,
+		TopLevelExpr::Begin(_) => StatementType::Begin,
 		TopLevelExpr::Cancel => StatementType::Cancel,
 		TopLevelExpr::Commit => StatementType::Commit,
 		TopLevelExpr::Access(_) => StatementType::Access,

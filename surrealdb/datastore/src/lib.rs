@@ -187,7 +187,7 @@ mod storage_error_tests {
 }
 
 pub use config::TransactionConfig;
-pub use factory::TransactionFactory;
+pub use factory::{ReadRequest, TransactionFactory};
 pub use feature::{FeatureLevelCell, FeatureLevelState, LevelledMode, Readable};
 pub use into::IntoBytes;
 pub use layouts::{Admission, LayoutSet, RowGate};

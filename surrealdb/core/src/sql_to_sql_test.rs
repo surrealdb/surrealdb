@@ -337,7 +337,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
     "{ user: { name: 'Alice', settings: { theme: 'dark', notifications: { email: true, push: false } }, tags: ['admin', 'premium'] } }",
     "{\n\tuser: {\n\t\tname: 'Alice',\n\t\tsettings: {\n\t\t\ttheme: 'dark',\n\t\t\tnotifications: {\n\t\t\t\temail: true,\n\t\t\t\tpush: false\n\t\t\t}\n\t\t},\n\t\ttags: [\n\t\t\t'admin',\n\t\t\t'premium'\n\t\t]\n\t}\n}"
 )]
-#[case::top_level_begin(TopLevelExpr::Begin, "BEGIN", "BEGIN")]
+#[case::top_level_begin(TopLevelExpr::Begin(Default::default()), "BEGIN", "BEGIN")]
 #[case::top_level_cancel(TopLevelExpr::Cancel, "CANCEL", "CANCEL")]
 #[case::top_level_commit(TopLevelExpr::Commit, "COMMIT", "COMMIT")]
 #[case::top_level_access(TopLevelExpr::Access(Box::new(AccessStatement::Grant(
