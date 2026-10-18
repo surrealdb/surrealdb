@@ -12,7 +12,7 @@ use surrealdb_core::kvs::{Datastore, QueryRequest};
 use surrealdb_core::obs;
 use surrealdb_expr::expr::Expr;
 use surrealdb_expr::expr::statements::{RemoveModelStatement, RemoveStatement};
-use surrealdb_expr::parser::{Query, TopLevelExpr};
+use surrealdb_expr::parser::{BeginOptions, Query, TopLevelExpr};
 
 /// `REMOVE MODEL` has no SurrealQL spelling, so it runs as an AST.
 fn remove_model() -> TopLevelExpr {
@@ -69,9 +69,12 @@ async fn remove_model_deletes_the_artifact_only_on_commit() -> anyhow::Result<()
 
 	// A cancelled transaction rolls the definition's removal back, so the
 	// artifact must survive it.
-	let cancelled =
-		run_ast(&ds, &session, vec![TopLevelExpr::Begin, remove_model(), TopLevelExpr::Cancel])
-			.await;
+	let cancelled = run_ast(
+		&ds,
+		&session,
+		vec![TopLevelExpr::Begin(BeginOptions::default()), remove_model(), TopLevelExpr::Cancel],
+	)
+	.await;
 	assert!(cancelled.is_err(), "the statements of a cancelled transaction report it");
 	assert!(obs::get(&path).await.is_ok(), "a cancelled REMOVE MODEL keeps the artifact");
 

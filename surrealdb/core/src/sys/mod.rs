@@ -76,9 +76,15 @@ pub struct Environment {
 }
 
 impl Default for Environment {
+	/// Builds an environment that tracks only this process.
+	///
+	/// `System::new()` holds no process table; [`Environment::refresh`] adds
+	/// the one pid that is read. `System::new_all()` would enumerate every
+	/// process on the host, which grows with the host rather than with this
+	/// process.
 	fn default() -> Self {
 		Self {
-			sys: System::new_all(),
+			sys: System::new(),
 			#[cfg(target_family = "wasm")]
 			pid: 0.into(),
 			#[cfg(not(target_family = "wasm"))]
@@ -146,5 +152,19 @@ impl Environment {
 			true,
 			sysinfo::ProcessRefreshKind::nothing().with_memory().with_cpu(),
 		);
+	}
+}
+
+#[cfg(all(test, not(target_family = "wasm")))]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn refresh_reports_this_process_only() {
+		let mut env = Environment::default();
+		assert_eq!(env.sys.processes().len(), 0, "a fresh environment holds no process table");
+		env.refresh();
+		assert_eq!(env.sys.processes().len(), 1, "refresh reads only this process");
+		assert!(env.memory_usage() > 0);
 	}
 }
