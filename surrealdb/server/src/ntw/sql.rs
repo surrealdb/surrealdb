@@ -10,9 +10,10 @@ use axum_extra::TypedHeader;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use surrealdb_core::dbs::Session;
+use surrealdb_core::rpc::format::json::json_to_value;
 use surrealdb_rpc::RowFormat;
 use surrealdb_rpc::capabilities::RouteTarget;
-use surrealdb_types::{SurrealValue, Variables};
+use surrealdb_types::{SurrealValue, Value, Variables};
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::AppState;
@@ -37,6 +38,32 @@ where
 		.layer(RequestBodyLimitLayer::new(*HTTP_MAX_SQL_BODY_SIZE))
 }
 
+/// The variables a request's query string binds.
+///
+/// A value that is JSON is bound as the value it encodes, so `?Data={"a":1}`
+/// binds an object; any other value is bound as the text it arrived as. Only
+/// JSON is read: a record id, datetime or uuid spelled in the query string
+/// stays text, as it would in a JSON body.
+fn query_variables(params: BTreeMap<String, String>) -> Variables {
+	params
+		.into_iter()
+		.map(|(name, text)| {
+			// Only text that can begin a JSON value is worth handing to the
+			// deserializer; most query parameters are plain words.
+			let value = match text.trim_start().chars().next() {
+				Some('{' | '[' | '"' | 't' | 'f' | 'n' | '-' | '0'..='9') => {
+					match serde_json::from_str(&text) {
+						Ok(json) => json_to_value(json),
+						Err(_) => Value::String(text),
+					}
+				}
+				_ => Value::String(text),
+			};
+			(name, value)
+		})
+		.collect()
+}
+
 async fn post_handler(
 	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
@@ -45,7 +72,7 @@ async fn post_handler(
 	sql: Bytes,
 ) -> Result<Output, ResponseError> {
 	let read_only = take_read_only(&mut params).map_err(|e| ResponseError(e.into()))?;
-	let vars = Variables::from(params);
+	let vars = query_variables(params);
 	// Get a database reference
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
@@ -250,10 +277,30 @@ async fn handle_socket(state: AppState, ws: WebSocket, session: Session) {
 
 #[cfg(test)]
 mod tests {
-	use std::collections::BTreeMap;
 	use std::time::Duration;
 
-	use super::take_read_only;
+	use super::*;
+
+	fn bound(text: &str) -> Value {
+		let params = BTreeMap::from([("p".to_owned(), text.to_owned())]);
+		query_variables(params).get("p").cloned().expect("the variable is bound")
+	}
+
+	#[test]
+	fn json_in_a_query_string_binds_as_the_value_it_encodes() {
+		assert!(matches!(bound(r#"{"Settings":{"testing":"hello"}}"#), Value::Object(_)));
+		assert!(matches!(bound("[1,2,3]"), Value::Array(_)));
+		assert!(matches!(bound("true"), Value::Bool(true)));
+		assert!(matches!(bound("42"), Value::Number(_)));
+		assert!(matches!(bound(r#""quoted""#), Value::String(_)));
+	}
+
+	#[test]
+	fn anything_else_in_a_query_string_binds_as_its_text() {
+		for text in ["hello", "person:1", "2024-01-01T00:00:00Z", "{not json", "", "a b"] {
+			assert_eq!(bound(text), Value::String(text.to_owned()), "{text:?}");
+		}
+	}
 
 	fn params(entries: &[(&str, &str)]) -> BTreeMap<String, String> {
 		entries.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
