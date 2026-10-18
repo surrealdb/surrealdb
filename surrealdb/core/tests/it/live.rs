@@ -1095,3 +1095,58 @@ fn id_string(id: &Value) -> Result<String> {
 	};
 	Ok(id.to_string())
 }
+
+/// A live projection that traverses a graph edge reports the edges present
+/// when the record changes. A `RELATE` writes no `person` record, so only the
+/// later `UPDATE` notifies, and it carries the new edge.
+#[tokio::test]
+async fn live_graph_projection_sees_a_new_edge() -> Result<()> {
+	let (channel, dbs) = new_ds("test", "test", true).await?;
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	let res = &mut dbs
+		.execute(
+			"CREATE person:jessy; CREATE person:jamie;
+			LIVE SELECT <-love<-person AS who FROM person;
+			RELATE person:jamie->love->person:jessy;
+			UPDATE person:jessy SET n = 1;",
+			&ses,
+			None,
+		)
+		.await?;
+	assert_eq!(res.len(), 5);
+	let n = tokio::time::timeout(Duration::from_secs(5), channel.recv()).await??;
+	assert_eq!(n.action, Action::Update);
+	assert_eq!(n.result, syn::value("{ who: [person:jamie] }").unwrap());
+	tokio::time::sleep(Duration::from_millis(300)).await;
+	assert!(channel.try_recv().is_err());
+	Ok(())
+}
+
+/// A `LIVE SELECT DIFF` notification carries the operations `value::diff`
+/// returns: a replaced scalar is a `replace` op, and a string becomes a
+/// `change` op holding a text patch.
+#[tokio::test]
+async fn live_diff_notifications_carry_value_diff_operations() -> Result<()> {
+	let (channel, dbs) = new_ds("test", "test", true).await?;
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	let res = &mut dbs
+		.execute(
+			"CREATE t:1 SET n = 301, s = 'x';
+			LIVE SELECT DIFF FROM t;
+			UPDATE t:1 SET n = 439, s = 'y';",
+			&ses,
+			None,
+		)
+		.await?;
+	assert_eq!(res.len(), 3);
+	let n = tokio::time::timeout(Duration::from_secs(5), channel.recv()).await??;
+	assert_eq!(n.action, Action::Update);
+	assert_eq!(
+		n.result,
+		syn::value(
+			"[{ op: 'replace', path: '/n', value: 439 }, { op: 'change', path: '/s', value: '@@ -1,1 +1,1 @@\n-x\n+y\n' }]"
+		)
+		.unwrap()
+	);
+	Ok(())
+}
