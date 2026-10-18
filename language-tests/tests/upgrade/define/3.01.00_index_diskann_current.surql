@@ -16,7 +16,13 @@ array of plan objects with entirely different operator names — and the write
 cannot go in a body carrying a `[[test.repair]]`, since that body is run twice
 against one store and the first pass's write would be visible to the second
 pass's reads. Gating to the current checkout as the upgrade target costs no
-coverage that matters: the seed axis runs every released version straight to it."""
+coverage that matters: the seed axis runs every released version straight to it.
+
+The delete that follows removes the record the old binary seeded the graph
+with, its entry point. The old binary wrote the graph state at revision 1,
+with no start points beside the entry point; the new binary must retire that
+entry point from the state it reads, and write it back at revision 2, without
+losing the graph."""
 version = ">=3.4.0-a"
 introduced = ">=3.1.0-beta.3"
 
@@ -32,6 +38,12 @@ value = "[{ id: pts:4, point: [2f, 3f, 4f, 6f] }]"
 [[test.results]]
 value = "[{ id: pts:4 }]"
 
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ id: pts:4 }]"
+
 */
 LET $pt = [2.0, 3.0, 4.0, 5.0];
 EXPLAIN SELECT id FROM pts WHERE point <|1,100|> $pt;
@@ -39,3 +51,6 @@ EXPLAIN SELECT id FROM pts WHERE point <|1,100|> $pt;
 -- as nearest once the new binary has indexed it.
 CREATE pts:4 SET point = [2.0, 3.0, 4.0, 6.0];
 SELECT id FROM pts WHERE point <|1,100|> $pt;
+-- pts:1 seeded the old binary's graph, so it is the graph's entry point.
+DELETE pts:1 RETURN NONE;
+SELECT id FROM pts WHERE point <|1,100|> [1.0, 2.0, 3.0, 4.0];

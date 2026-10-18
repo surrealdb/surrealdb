@@ -408,6 +408,35 @@ short statements. A deployment that tuned `SURREAL_HNSW_BUILD_PARALLELISM`
 for throughput checks the morsel settings too, since they now decide the
 width it gets.
 
+### DiskANN builds write their graph as they scan, and keep several start points
+
+A `DEFINE INDEX … DISKANN` or `REBUILD INDEX` builds the graph from the records
+its scan reads, in the transaction that reads them, instead of queueing one
+pending update per record for compaction to fold afterwards. Writes that arrive
+while the build runs are still queued and folded once the index is ready. When
+the scan ends, the build re-prunes every adjacency list that later inserts grew
+past the index's `DEGREE`, before the index is published.
+
+A graph seeded on this release enters at the medoid of its first batch and keeps
+up to three more start points spread across it; searches start from all of them,
+and deleting one replaces it rather than leaving the graph a single entry point.
+The graph state that holds them (`!ds`) is written in a new revision, by every
+compaction and build of a DiskANN index, including one an earlier release built.
+
+**Impact**:
+
+- A blocking build reports `compacting: false` sooner, and a `CONCURRENTLY`
+  build writes far less: the backfill's vectors are no longer written twice.
+- A 3.x release cannot decode the graph state of a DiskANN index this release
+  has compacted or built, so searching or compacting that index fails there.
+  This holds for a store held at Legacy too, and `rollback_check` does not
+  report it: it covers the ledger, layouts and catalog entries, not index
+  data.
+
+**What to do**: nothing when upgrading. Before going back to a 3.x release,
+rebuild each DiskANN index on that release with `REBUILD INDEX`, which writes
+its graph again from the table.
+
 ### `ext::` in stored text is not downgrade-safe
 
 An extension call keeps the prefix it is written with, `ext::` or the

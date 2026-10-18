@@ -17,6 +17,8 @@ pub(crate) mod docs;
 #[cfg(not(target_family = "wasm"))]
 mod filter;
 #[cfg(not(target_family = "wasm"))]
+mod frame;
+#[cfg(not(target_family = "wasm"))]
 pub mod index;
 #[cfg(not(target_family = "wasm"))]
 mod provider;

@@ -23,9 +23,10 @@ Compaction is what turns pendings into graph, one bounded batch at a time:
    `!hg` compaction generation from the value the plan observed, deletes each
    captured entry on the condition that it still holds the captured bytes, and
    folds the plan's operations into the graph.
-3. **Commit** — by the caller: the build's own drain
-   (`Building::compact_hnsw_pendings`, from `DEFINE INDEX` / `REBUILD INDEX`)
-   or background maintenance (`Datastore::process_hnsw_compaction`).
+3. **Commit** — by the caller, the materialiser's HNSW pass
+   (`Materialiser::process_hnsw_compaction`), run by background compaction or
+   by a blocking `DEFINE INDEX` / `REBUILD INDEX` waiting for its index to be
+   materialised. The build itself folds nothing: it stops at `Online`.
 
 Each batch is one transaction and, per index, one batch is in flight. A batch's
 graph changes are derived from the graph every earlier batch committed, and
@@ -34,8 +35,8 @@ two batches built concurrently would conflict on nearly every commit — the
 `!hg` generation lets exactly one of them win. That rules out parallelism
 *across* batches. Everything below is parallelism *inside* one batch's apply.
 
-A `CONCURRENTLY` build over an existing table reaches `Online` once every row
-has a pending entry, and only then starts the drain, so the drain is where the
+A build over an existing table reaches `Online` once every row has a pending
+entry, and folds none of them, so the materialiser's passes are where the
 whole graph of that table gets built. Graph construction is dominated by
 distance evaluation — the neighbourhood search each insertion runs at `EFC`,
 and the re-pruning of every neighbour whose degree an insertion takes past its
@@ -48,8 +49,8 @@ anything, so a plan never switches shape part-way.
 
 * **Staged** — no operation removes a vector from the graph: every operation
   adds vectors, attaches documents to vectors the graph already holds, or only
-  drops a document mapping. This is the shape of every batch a build drain
-  applies, and of every batch under an insert-only workload. It is built on
+  drops a document mapping. This is the shape of every batch that folds a
+  build's pendings, and of every batch under an insert-only workload. It is built on
   many tasks and published after the commit, as described below.
 * **In place** — at least one operation removes a vector, or the index engines
   are configured `serial`. The operations apply one at a time under the graph
@@ -147,8 +148,8 @@ own memory, and its commit action runs only once the commit has succeeded. So:
   committed, and the caches without the batch's elements. The caller discards
   nothing, and the next batch starts from the graph as it stands.
 * **Lease expiry cannot make it happen.** Two appliers that start from the same
-  base — a lease that expired mid-batch, or a build drain and background
-  maintenance racing — both stage, and at most one commits, because both
+  base — a lease that expired mid-batch, or a statement's phase-2 pass and
+  background compaction on two nodes — both stage, and at most one commits, because both
   advance the same `!hg` generation. Only the one that commits publishes.
 * **A handle held across a failed batch reads committed topology.** A reader
   that cloned a `SharedHnswIndex` before a staged batch failed reads *G₀*
@@ -211,7 +212,7 @@ time. Three choices keep it comparable:
 * **Batch elements see each other exactly.** An element inserted one at a time
   finds earlier batch elements only if its search reaches them; here each
   element is offered the exact nearest batch elements at every layer. This is
-  what keeps the first batch of a drain over an empty graph — where *G₀* has
+  what keeps the first batch over an empty graph — where *G₀* has
   nothing to search — from producing isolated nodes.
 * **Every layer keeps its cap.** Out-edges come from the same heuristic, and
   every node whose degree the batch takes past its cap is re-pruned by it.
@@ -316,6 +317,7 @@ index contend only when their ids fall in the same shard.
 * **Building the initial graph straight from the table scan**, instead of
   enumerating every row into a pending entry first.
 * **What `ready` promises.** `Online` still means every row has been
-  enumerated; `INFO FOR INDEX` reports `compacting` until the drain has folded
-  them in.
-* **A progress count for the drain.** `compacting` stays an existence test.
+  enumerated; `INFO FOR INDEX` reports `compacting` until the materialiser has
+  folded them in.
+* **A progress count for materialisation.** `compacting` stays an existence
+  test.

@@ -590,6 +590,33 @@ impl IndexBuilder {
 		building
 	}
 
+	/// Stop the local build of an index whose statement is `txn`, as `txn`
+	/// stages the index's retirement.
+	///
+	/// A build awaited inside its statement's transaction keeps its published
+	/// ownership heartbeated from transactions of its own until that statement
+	/// closes. A retirement staged in the same transaction deletes `!bs`, so a
+	/// heartbeat committed meanwhile would conflict that transaction's own
+	/// commit. Both outcomes leave nothing for the build to keep: a commit
+	/// retires the index, and a rollback rolls back the definition with it. A
+	/// build whose statement is another transaction is left to the retirement's
+	/// commit ([`Self::remove_index`]).
+	pub(crate) async fn stop_build_of_statement(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+		txn: &std::sync::Arc<crate::kvs::Transaction>,
+	) {
+		let key = IndexKey::new(ns, db, tb, ix);
+		if let Some(building) = self.indexes.read().await.get(&key)
+			&& building.started_by(txn)
+		{
+			building.abort();
+		}
+	}
+
 	/// Abort a builder task running in this process.
 	///
 	/// Retirement fences the build durably: the schema transaction deletes `!bs`,

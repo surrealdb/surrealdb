@@ -36,13 +36,18 @@ use super::vector::SerializedVector;
 pub const DISKANN_PENDING_STATE_SHARDS: u16 = 32;
 
 /// Persisted DiskANN graph state.
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct DiskAnnState {
 	/// The graph entry point, if the graph contains a valid element.
 	pub enter_point: Option<ElementId>,
 	/// The next available element ID.
 	pub next_element_id: ElementId,
+	/// Further elements a search starts from beside the entry point, spread across the vectors
+	/// the graph was seeded with. Empty for a graph seeded before they were kept, which starts
+	/// from its entry point alone.
+	#[revision(start = 2)]
+	pub start_points: Vec<ElementId>,
 }
 
 impl KVValue for DiskAnnState {

@@ -600,6 +600,7 @@ impl Builder {
 				config.idx.segment_dictionary_path.clone(),
 			),
 			index_builder: IndexBuilder::new(tf.clone()),
+			compaction_swept_at: parking_lot::Mutex::new(None),
 			#[cfg(storage)]
 			temporary_directory: self.temporary_directory,
 			cache: Arc::new(DatastoreCache::new(config.datastore.datastore_cache_size)),

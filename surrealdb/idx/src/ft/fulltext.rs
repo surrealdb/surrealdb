@@ -40,6 +40,7 @@ use crate::ft::highlighter::HighlightParams;
 use crate::ft::{DocLength, MatchesHitsIterator, Score, TermFrequency};
 use crate::key::schema::{
 	DocStatsBatchKey, DocStatsDeltaKey, DocStatsKey, TermChangeBatchKey, TermChangeKey,
+	TermDocsResidualKey,
 };
 use crate::key::{KVKey, KVKeyDecode, KVValue, Resumable};
 use crate::trees::store::IndexStores;
@@ -386,12 +387,21 @@ struct TermDocsCompactionPlan {
 	/// which is why one cutoff covers a split within either family and a split
 	/// between them.
 	captured_below: Option<String>,
+	/// The terms holding a residual (`!tr`) and no delta this snapshot saw,
+	/// every one of them captured whole. Only the term is kept: the write phase
+	/// reads each residual once, under the generation it advances, as it does
+	/// for a term it folds deltas for.
+	standalone_residuals: Vec<String>,
 	has_more: bool,
 }
 
 impl TermDocsCompactionPlan {
+	/// Whether the plan holds anything to fold: a delta of either family, or a
+	/// residual no delta sits beside.
 	fn has_logs(&self) -> bool {
-		!self.tt_keys.is_empty() || !self.tx_keys.is_empty()
+		!self.tt_keys.is_empty()
+			|| !self.tx_keys.is_empty()
+			|| !self.standalone_residuals.is_empty()
 	}
 
 	/// Returns true when either delta family left entries for the next round: the
@@ -962,13 +972,59 @@ impl FullTextIndex {
 		if batched_has_more {
 			stopped_at(tx_keys.last().map(|k| k.term.as_ref()));
 		}
+		let mut has_more = tt_cut_short || batched_has_more;
+		// A residual with no delta beside it is reached by no delta scan, so the
+		// round looks for one itself. Only below the cutoff, where both delta scans
+		// passed: a term there that holds no delta in this snapshot has none at
+		// all, so its residual is its whole remaining total and folds as a term
+		// captured whole. A term at or past the cutoff is left for the round that
+		// reaches its deltas, and the round already reports more work.
+		//
+		// The round captures at most what the delta scans left of its budget,
+		// counted in entries as the `!tt` scan counts them, and looks one term
+		// further to learn whether a later round is owed. A residual of a term
+		// whose deltas this round folds is read and folded with those deltas, so
+		// the scan steps over it: it counts toward neither the capture nor the
+		// look ahead. With nothing left of the budget, the scan only looks.
+		let spent = (tt_keys.len() as u64).saturating_add(folded_docs.max(tx_keys.len() as u64));
+		let residual_budget = (limit as u64).saturating_sub(spent) as usize;
+		let mut standalone_residuals = Vec::new();
+		if residual_budget > 0 || !has_more {
+			let mut range = self.ikb.new_tr_terms_range(captured_below.as_deref())?;
+			loop {
+				let wanted = residual_budget + 1 - standalone_residuals.len();
+				let rows = (wanted as u64).clamp(1, TERM_DELTA_SCAN_PAGE as u64) as u32;
+				let keys = tx.keys(range.clone(), rows, 0, None).await?;
+				let page_full = keys.len() as u32 == rows;
+				let resume_after = keys.last().cloned();
+				for k in keys {
+					let term = TermDocsResidualKey::decode_key(&k)?.term.into_owned();
+					// A term counts as folded with its deltas only where it has some:
+					// an empty `!tx` batch leaves an empty entry, which the write
+					// skips, so its residual is folded on its own.
+					if deltas_by_term.get(&term).is_none_or(HashMap::is_empty) {
+						standalone_residuals.push(term);
+					}
+				}
+				if standalone_residuals.len() > residual_budget {
+					standalone_residuals.truncate(residual_budget);
+					has_more = true;
+					break;
+				}
+				match resume_after {
+					Some(k) if page_full => range = range.resume_after(&k, Direction::Forward),
+					_ => break,
+				}
+			}
+		}
 		Ok(TermDocsCompactionPlan {
 			generation,
 			deltas_by_term,
 			tt_keys,
 			tx_keys,
 			captured_below,
-			has_more: tt_cut_short || batched_has_more,
+			standalone_residuals,
+			has_more,
 		})
 	}
 
@@ -1008,7 +1064,7 @@ impl FullTextIndex {
 		tx: &Transaction,
 		mut plan: TermDocsCompactionPlan,
 	) -> Result<()> {
-		let folded: Vec<(String, HashMap<DocId, i64>, bool)> =
+		let mut folded: Vec<(String, HashMap<DocId, i64>, bool)> =
 			std::mem::take(&mut plan.deltas_by_term)
 				.into_iter()
 				.filter(|(_, deltas)| !deltas.is_empty())
@@ -1017,9 +1073,16 @@ impl FullTextIndex {
 					(term, deltas, captured_whole)
 				})
 				.collect();
+		// A standalone residual is folded as a term with no deltas, captured
+		// whole: its total lands in the bitmap and the residual is removed.
+		folded.extend(
+			std::mem::take(&mut plan.standalone_residuals)
+				.into_iter()
+				.map(|term| (term, HashMap::new(), true)),
+		);
 		// One round trip for every term's residual rather than one per term. A
 		// round folds as many terms as its budget allows, and all but the term it
-		// stopped inside have no residual to read.
+		// stopped inside and the standalone residuals have no residual to read.
 		let keys: Vec<_> = folded.iter().map(|(term, ..)| self.ikb.new_tr_root(term)).collect();
 		let residuals = tx.get_many_key(keys, None).await?;
 		for ((term, deltas, captured_whole), residual) in folded.into_iter().zip(residuals) {
@@ -2756,6 +2819,167 @@ mod tests {
 		test.drain_term_docs(64).await;
 		assert_eq!(test.term_docs("hello").await, None);
 		assert_eq!(test.term_residual("hello").await, None);
+	}
+
+	/// A residual with no delta beside it is folded into its term's bitmap and
+	/// removed, and the term answers the same documents before and after.
+	///
+	/// A compactor that predates the residual family strands one, so no delta of
+	/// the term is left to bring a round to it: the round captures it on its own.
+	#[test(tokio::test)]
+	async fn a_residual_left_without_deltas_is_folded_into_its_bitmap() {
+		let test = TestContext::new().await;
+		let kept: DocId = 7;
+		let dropped: DocId = 9;
+
+		// One document the residual adds, and one the bitmap holds that the
+		// residual takes back out.
+		let tx = test.new_tx(TransactionType::Write).await;
+		tx.set_key(&test.ikb.new_td_root("hello"), &RoaringTreemap::from_iter([dropped]))
+			.await
+			.unwrap();
+		tx.set_key(
+			&test.ikb.new_tr_root("hello"),
+			&TermDocsResidual::new([(kept, 1), (dropped, -1)]),
+		)
+		.await
+		.unwrap();
+		tx.commit().await.unwrap();
+		let before = test.query_docs("hello").await;
+		assert_eq!(before, RoaringTreemap::from_iter([kept]));
+
+		assert_eq!(test.drain_term_docs(64).await, 1, "one round folds the standalone residual");
+		assert_eq!(test.term_docs("hello").await, Some(RoaringTreemap::from_iter([kept])));
+		assert_eq!(test.term_residual("hello").await, None);
+		assert_eq!(test.query_docs("hello").await, before);
+	}
+
+	/// A residual whose term has only an empty `!tx` batch beside it is folded
+	/// in the round that deletes that batch.
+	///
+	/// The batch adds no delta to the term, so the term is folded as a
+	/// standalone residual; were it counted as folded with its deltas, the
+	/// round would delete the batch and leave the residual behind.
+	#[test(tokio::test)]
+	async fn a_residual_beside_only_an_empty_delta_batch_is_folded() {
+		let test = TestContext::new().await;
+		let kept: DocId = 7;
+
+		let tx = test.new_tx(TransactionType::Write).await;
+		tx.set_key(&test.ikb.new_tr_root("hello"), &TermDocsResidual::new([(kept, 1)]))
+			.await
+			.unwrap();
+		test.write_tx_delta(&tx, "hello", 1, true, &RoaringTreemap::new()).await;
+		tx.commit().await.unwrap();
+
+		test.drain_term_docs(64).await;
+		assert_eq!(test.term_residual("hello").await, None, "the residual is folded");
+		assert_eq!(test.term_docs("hello").await, Some(RoaringTreemap::from_iter([kept])));
+		assert_eq!(test.query_docs("hello").await, RoaringTreemap::from_iter([kept]));
+	}
+
+	/// A residual is folded on its own only once both delta scans have passed
+	/// its term, so a term whose deltas a round stopped short of keeps its
+	/// residual for the round that reaches them.
+	#[test(tokio::test)]
+	async fn a_residual_past_the_rounds_cutoff_waits_for_its_deltas() {
+		let test = TestContext::new().await;
+		let doc: DocId = 7;
+
+		// Two terms of deltas, a budget of one entry, and a residual on the term
+		// sorting after the one the round stops on.
+		let tx = test.new_tx(TransactionType::Write).await;
+		test.write_tx_delta(&tx, "alpha", 1, true, &RoaringTreemap::from_iter([1])).await;
+		test.write_tx_delta(&tx, "omega", 2, true, &RoaringTreemap::from_iter([doc])).await;
+		tx.set_key(&test.ikb.new_tr_root("omega"), &TermDocsResidual::new([(doc, -1)]))
+			.await
+			.unwrap();
+		tx.commit().await.unwrap();
+		let before = test.query_docs("omega").await;
+
+		let tx = test.new_tx(TransactionType::Write).await;
+		let plan = test.fti.prepare_term_docs_compaction_with_limit(&tx, 1).await.unwrap();
+		assert!(plan.has_more());
+		assert!(plan.standalone_residuals.is_empty(), "omega's deltas were not captured");
+		assert!(test.fti.apply_term_docs_compaction(&tx, plan).await.unwrap());
+		tx.commit().await.unwrap();
+		assert_eq!(test.term_residual("omega").await, Some(vec![(doc, -1)]));
+
+		test.drain_term_docs(1).await;
+		assert_eq!(test.term_residual("omega").await, None);
+		assert_eq!(test.term_docs("omega").await, None);
+		assert_eq!(test.query_docs("omega").await, before);
+	}
+
+	/// The residual scan spends what is left of the round's budget, and a scan
+	/// it cuts short leaves the rest for the next round.
+	#[test(tokio::test)]
+	async fn standalone_residuals_share_the_rounds_budget() {
+		let test = TestContext::new().await;
+		let tx = test.new_tx(TransactionType::Write).await;
+		for (doc, term) in ["a", "b", "c"].into_iter().enumerate() {
+			tx.set_key(&test.ikb.new_tr_root(term), &TermDocsResidual::new([(doc as DocId, 1)]))
+				.await
+				.unwrap();
+		}
+		tx.commit().await.unwrap();
+
+		let tx = test.new_tx(TransactionType::Write).await;
+		let plan = test.fti.prepare_term_docs_compaction_with_limit(&tx, 2).await.unwrap();
+		assert_eq!(plan.standalone_residuals.len(), 2);
+		assert!(plan.has_more(), "the third residual is the next round's");
+		tx.cancel().await.unwrap();
+
+		assert_eq!(test.drain_term_docs(2).await, 2);
+		for (doc, term) in ["a", "b", "c"].into_iter().enumerate() {
+			assert_eq!(test.term_residual(term).await, None);
+			assert_eq!(test.term_docs(term).await, Some(RoaringTreemap::from_iter([doc as DocId])));
+		}
+	}
+
+	/// A residual of a term whose deltas the round folds is folded with them,
+	/// so the residual scan steps over it: it takes none of the budget, and a
+	/// standalone residual behind it is captured in the same round.
+	#[test(tokio::test)]
+	async fn the_residual_scan_steps_over_a_term_the_round_folds() {
+		let test = TestContext::new().await;
+		let tx = test.new_tx(TransactionType::Write).await;
+		test.write_tx_delta(&tx, "a", 1, true, &RoaringTreemap::from_iter([1])).await;
+		tx.set_key(&test.ikb.new_tr_root("a"), &TermDocsResidual::new([(1, 1)])).await.unwrap();
+		tx.set_key(&test.ikb.new_tr_root("b"), &TermDocsResidual::new([(2, 1)])).await.unwrap();
+		tx.commit().await.unwrap();
+
+		// One `!tx` entry of one document leaves one entry of a budget of two.
+		let tx = test.new_tx(TransactionType::Write).await;
+		let plan = test.fti.prepare_term_docs_compaction_with_limit(&tx, 2).await.unwrap();
+		assert_eq!(plan.standalone_residuals, vec!["b".to_string()]);
+		assert!(!plan.has_more(), "nothing is left beyond the residual captured");
+		assert!(test.fti.apply_term_docs_compaction(&tx, plan).await.unwrap());
+		tx.commit().await.unwrap();
+		assert_eq!(test.term_residual("a").await, None);
+		assert_eq!(test.term_residual("b").await, None);
+		assert_eq!(test.term_docs("b").await, Some(RoaringTreemap::from_iter([2])));
+	}
+
+	/// Exactly as many standalone residuals as the budget allows are captured
+	/// in one round that owes no other.
+	#[test(tokio::test)]
+	async fn standalone_residuals_that_fill_the_budget_owe_no_later_round() {
+		let test = TestContext::new().await;
+		let tx = test.new_tx(TransactionType::Write).await;
+		for (doc, term) in ["a", "b"].into_iter().enumerate() {
+			tx.set_key(&test.ikb.new_tr_root(term), &TermDocsResidual::new([(doc as DocId, 1)]))
+				.await
+				.unwrap();
+		}
+		tx.commit().await.unwrap();
+
+		let tx = test.new_tx(TransactionType::Write).await;
+		let plan = test.fti.prepare_term_docs_compaction_with_limit(&tx, 2).await.unwrap();
+		tx.cancel().await.unwrap();
+		assert_eq!(plan.standalone_residuals.len(), 2);
+		assert!(!plan.has_more(), "no residual is left behind the ones captured");
+		assert_eq!(test.drain_term_docs(2).await, 1, "one round folds them both");
 	}
 
 	/// A query must observe the documents its own transaction has just indexed,

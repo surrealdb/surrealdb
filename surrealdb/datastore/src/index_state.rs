@@ -12,12 +12,17 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use anyhow::Result;
+use surrealdb_kvs::key::{KVKeyDecode, RawRange};
 use surrealdb_strand::Strand;
 
 use crate::Transaction;
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, Index, IndexDefinition, IndexId, NamespaceId};
-use crate::key::schema::{BuildStateKey, HnswPendingLegacyPrefix, HnswRecordPendingPrefix};
+use crate::key::schema::{
+	BuildStateKey, DocStatsBatchPrefix, DocStatsKey, HnswPendingLegacyPrefix,
+	HnswRecordPendingPrefix, IndexCountKey, IndexCountPrefix, TermChangeBatchPrefix,
+	TermChangesKey, TermDocsResidualPrefix,
+};
 #[cfg(diskann)]
 use crate::key::schema::{DiskannPendingPrefix, DiskannRecordPendingPrefix};
 use crate::val::{Object, TableName, Value};
@@ -41,11 +46,20 @@ pub fn durable_index_error_reason(ix: &IndexDefinition, state: &IndexBuildState)
 
 /// Whether this index still has record updates waiting to be folded into it.
 ///
-/// A vector index answers a kNN search over its graph *plus* any updates not yet
-/// materialised into that graph, and the unmaterialised ones have to be scored
-/// by hand. A large enough set of them turns an indexed search into something
-/// much closer to a scan: measured at ~600ms per query against ~5ms once the
-/// index had absorbed them, on a 1M-row HNSW index.
+/// Every queued kind answers a read over its compacted state *plus* the updates
+/// not yet folded into it, so a backlog never changes an answer, only what a
+/// read costs. A vector index scores its unmaterialised updates by hand beside
+/// the graph it walks, so a large enough set of them turns an indexed search
+/// into something much closer to a scan. A full-text read folds its term and
+/// statistics deltas, and any residual a compaction left, into the compacted
+/// state it reads; a count sums every uncompacted delta.
+///
+/// Each kind is probed over exactly the ranges its compaction folds, and never
+/// over the keys a compaction writes as its result: the `!td` bitmaps, the
+/// `!dc` root and the `!iu` aggregate at the `None` bound are compacted state,
+/// not a backlog. A full-text residual (`!tr`) is a backlog: it is what a
+/// compaction left for a later round to fold, and is present until that
+/// round. A b-tree kind writes final entries and has nothing to fold.
 ///
 /// This reads the per-record pending entries themselves rather than the `!ic`
 /// compaction-trigger queue. The trigger queue cannot answer the question: a
@@ -58,17 +72,59 @@ pub fn durable_index_error_reason(ix: &IndexDefinition, state: &IndexBuildState)
 /// would scan a range that after a bulk load is as long as the table. Callers
 /// that need progress rather than a gate are better served by a count added
 /// deliberately, with its cost understood.
-async fn index_has_unmaterialised_updates(
+///
+/// # Arguments
+/// * `tx` - the transaction the probe reads through.
+/// * `ns`, `db` - the namespace and database the index's table is in.
+/// * `ix` - the index to probe.
+///
+/// # Returns
+/// Whether any update waits to be folded into the index.
+pub async fn index_has_unmaterialised_updates(
 	tx: &Transaction,
 	ns: NamespaceId,
 	db: DatabaseId,
 	ix: &IndexDefinition,
 ) -> Result<bool> {
 	let tb = Cow::Borrowed(&ix.table_name);
-	// Only the graph indexes defer work this way; everything else is materialised
-	// by the write that caused it. The ranges are separately typed, so they are
-	// probed in place rather than collected — `||` also stops at the first hit.
+	// The ranges are separately typed, so they are probed in place rather than
+	// collected, and each kind stops at the first range that holds a key.
 	let unmaterialised = match ix.index {
+		Index::FullText(_) => {
+			let ix_id = ix.index_id;
+			// The per-transaction deltas of both families, the per-document
+			// deltas an upgraded index still carries beneath the `!tt` and `!dc`
+			// bounds, and the residuals.
+			let ranges: [RawRange; 5] = [
+				TermChangeBatchPrefix::new(ns, db, tb.clone(), ix_id).range()?.into(),
+				DocStatsBatchPrefix::new(ns, db, tb.clone(), ix_id).range()?.into(),
+				TermChangesKey::new(ns, db, tb.clone(), ix_id).range()?.into(),
+				DocStatsKey::new(ns, db, tb.clone(), ix_id).range()?.into(),
+				TermDocsResidualPrefix::new(ns, db, tb, ix_id).range()?.into(),
+			];
+			let mut unmaterialised = false;
+			for range in ranges {
+				if !tx.keys_raw(range, 1, 0, None).await?.is_empty() {
+					unmaterialised = true;
+					break;
+				}
+			}
+			unmaterialised
+		}
+		Index::Count(_) => {
+			// The aggregate sits at the `None` bound, which sorts before every
+			// delta, so the second key is the first delta if there is one.
+			let range = IndexCountPrefix::new(ns, db, tb, ix.index_id).range()?;
+			let keys = tx.keys(range, 2, 0, None).await?;
+			let mut unmaterialised = false;
+			for key in &keys {
+				if IndexCountKey::decode_key(key)?.uid.is_some() {
+					unmaterialised = true;
+					break;
+				}
+			}
+			unmaterialised
+		}
 		Index::Hnsw(_) => {
 			let current = HnswRecordPendingPrefix::new(ns, db, tb.clone(), ix.index_id).range()?;
 			if !tx.keys(current, 1, 0, None).await?.is_empty() {

@@ -370,7 +370,10 @@ where
 		let mut f_dist = w.peek_last_dist().unwrap_or(f64::MAX);
 
 		while let Some((dist, doc)) = candidates.pop_first() {
-			if dist > f_dist {
+			// `f_dist` bounds the walk only once `w` holds `ef` admitted rows. Before
+			// then it is the furthest of the rows admitted so far, and a candidate the
+			// filter rejected can lie beyond it while still leading to rows it admits.
+			if w.len() >= search.ef && dist > f_dist {
 				break;
 			}
 			if let Some(neighbourhood) = self.graph.get_edges(doc) {

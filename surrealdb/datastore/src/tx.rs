@@ -920,11 +920,17 @@ pub struct Transaction {
 	/// Work queued for this transaction's owner to await once it has committed.
 	///
 	/// `None` unless the owner promised to await it, by building the
-	/// transaction [`Self::with_after_commit_waits`]: a statement that finds no
-	/// queue does its work inline instead. Held weakly, because the owner holds
-	/// the queue (see [`AfterCommitWaits`]); discarded by [`Self::cancel`] and
-	/// by a failed commit.
+	/// transaction [`Self::with_after_commit_waits`] or
+	/// [`Self::with_materialise_waits`]: a statement that finds no queue does
+	/// its work inline, or not at all. Held weakly, because the owner holds the
+	/// queue (see [`AfterCommitWaits`]); discarded by [`Self::cancel`] and by a
+	/// failed commit.
 	after_commit_waits: Option<std::sync::Weak<AfterCommitQueue>>,
+	/// Whether the owner of [`Self::after_commit_waits`] also accepts a
+	/// blocking build's wait for its index to come online, rather than only the
+	/// wait for that index to be materialised. See
+	/// [`Self::accepts_after_commit_waits`].
+	defers_build_waits: bool,
 	/// Per-table memo of the settled `graph_doc_ids` marker, backing
 	/// [`Self::graph_doc_ids_settled`]. The first read per table is locked
 	/// (`getu`), and its conflict registration covers the rest of the
@@ -1690,6 +1696,7 @@ impl Transaction {
 			commit_actions: Mutex::new(Vec::new()),
 			rollback_actions: Mutex::new(Vec::new()),
 			after_commit_waits: None,
+			defers_build_waits: false,
 			graph_doc_ids_settled: Mutex::new(HashMap::new()),
 		}
 	}
@@ -2018,19 +2025,47 @@ impl Transaction {
 		self.commit_actions.lock().await.push(action);
 	}
 
-	/// Accept work that statements leave for the owner to await after commit.
+	/// Accept work that statements leave for the owner to await after commit,
+	/// a blocking build's wait for its index to come online included.
 	///
 	/// An owner that builds its transaction this way takes on awaiting whatever
 	/// is queued with [`Self::wait_after_commit`] — taken from `waits` once
 	/// [`Self::commit`] has succeeded — and reporting its outcome as the
-	/// statement's.
+	/// statement's. Only a transaction holding nothing but one blocking index
+	/// statement offers this: a build awaited after the commit may still fail,
+	/// and the definition it takes back must be all the transaction wrote.
 	pub fn with_after_commit_waits(mut self, waits: &AfterCommitWaits) -> Self {
 		self.after_commit_waits = Some(waits.downgrade());
+		self.defers_build_waits = true;
 		self
 	}
 
-	/// Whether this transaction's owner awaits queued work after it commits.
+	/// Accept, for the owner to await after commit, only a blocking index
+	/// statement's wait for its index to be materialised: its build is awaited
+	/// inside the transaction, so a build that fails rolls the whole
+	/// transaction back.
+	///
+	/// The owner takes on awaiting what is queued, as for
+	/// [`Self::with_after_commit_waits`], and reporting each wait's outcome as
+	/// the result of the statement that queued it.
+	pub fn with_materialise_waits(mut self, waits: &AfterCommitWaits) -> Self {
+		self.after_commit_waits = Some(waits.downgrade());
+		self.defers_build_waits = false;
+		self
+	}
+
+	/// Whether this transaction's owner awaits a blocking build after it
+	/// commits, rather than the statement awaiting it inside the transaction
+	/// (see [`Self::with_after_commit_waits`]).
 	pub fn accepts_after_commit_waits(&self) -> bool {
+		self.defers_build_waits && self.accepts_materialise_waits()
+	}
+
+	/// Whether this transaction's owner awaits, after it commits, a blocking
+	/// index statement's wait for its index to be materialised. True for every
+	/// transaction that [`Self::accepts_after_commit_waits`], and for one built
+	/// [`Self::with_materialise_waits`].
+	pub fn accepts_materialise_waits(&self) -> bool {
 		self.after_commit_waits.as_ref().is_some_and(|waits| waits.strong_count() > 0)
 	}
 
@@ -8585,6 +8620,7 @@ impl Transaction {
 			commit_actions: Mutex::new(Vec::new()),
 			rollback_actions: Mutex::new(Vec::new()),
 			after_commit_waits: None,
+			defers_build_waits: false,
 			graph_doc_ids_settled: Mutex::new(HashMap::new()),
 		};
 		Some(Speculation {

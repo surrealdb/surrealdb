@@ -50,6 +50,11 @@
 //!    an id another commit already used and rewinds the allocator, so every later allocation
 //!    collides too.
 //!
+//! A compaction frame with a read view adds one publisher: what the view reads is committed at the
+//! view's own generation, so it is published as a read-only transaction's read is, under the
+//! overlay rule its frame enforces (`DiskAnnBuildFrame::publish_clean_elements`): never for a key
+//! the frame has written, and never after the frame is closed.
+//!
 //! Every view is taken under the wrapper's graph lock and used only while it is held, shared by
 //! readers and exclusive for a frame. That orders a reader's fence check and its publish against a
 //! frame's commit and its extension of the span. A wrapper the registry has dropped still runs the
@@ -58,13 +63,15 @@
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use anyhow::{Result, ensure};
 use diskann::graph::glue::{
-	CopyIds, DefaultPostProcessor, HybridPredicate, InsertStrategy, PruneAccessor, PruneStrategy,
-	SearchAccessor, SearchStrategy,
+	CopyIds, DefaultPostProcessor, HybridPredicate, InsertStrategy, MultiInsertStrategy,
+	PruneAccessor, PruneStrategy, SearchAccessor, SearchStrategy,
 };
 use diskann::graph::{AdjacencyList, workingset};
 use diskann::provider::{
@@ -73,6 +80,7 @@ use diskann::provider::{
 };
 use diskann::utils::VectorRepr;
 use diskann::{ANNError, ANNResult, default_post_processor};
+use diskann_utils::views::Matrix;
 use diskann_vector::distance::Metric;
 use diskann_vector::{Half, PreprocessedDistanceFunction};
 use surrealdb_datastore::Transaction;
@@ -83,10 +91,21 @@ use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId};
 use crate::key::KVValue;
 use crate::key::schema::DiskannElementKey;
 use crate::trees::diskann::cache::{CacheView, Continuity, DiskAnnCache, Stamp};
+use crate::trees::diskann::frame::{DiskAnnBuildFrame, FrameKv, TaskGuard};
 use crate::trees::diskann::{DiskAnnElement, DiskAnnNode, DiskAnnState, ElementId};
 use crate::trees::vector::SerializedVector;
 #[cfg(test)]
 use crate::trees::vector::Vector;
+
+/// Whose choice an adjacency list written to the graph is.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum NodeWrite {
+	/// The list an insert chose for the element it inserted, or any other full write outside a
+	/// batched insert's back-edge phase.
+	Own,
+	/// A back-edge a batched insert added to an existing list.
+	BackEdge,
+}
 
 /// Provider execution context passed through the upstream DiskANN trait calls.
 #[derive(Clone)]
@@ -97,6 +116,9 @@ pub(super) struct DiskAnnProviderContext {
 	pub(super) ikb: IndexKeyBase,
 	/// What `tx` is served from, and publishes into, the cache.
 	pub(super) view: CacheView,
+	/// The compaction frame this context runs in, if any. `None` for KNN search and the
+	/// pending-write path.
+	pub(super) frame: Option<Arc<DiskAnnBuildFrame>>,
 }
 
 impl DiskAnnProviderContext {
@@ -109,13 +131,68 @@ impl DiskAnnProviderContext {
 			self.view.publication()
 		}
 	}
+
+	/// The same context, running in `frame`.
+	pub(super) fn in_frame(self, frame: Arc<DiskAnnBuildFrame>) -> Self {
+		Self {
+			frame: Some(frame),
+			..self
+		}
+	}
+
+	/// The frame this context runs in, if any.
+	pub(super) fn frame(&self) -> Option<&DiskAnnBuildFrame> {
+		self.frame.as_deref()
+	}
+
+	/// How this context reaches KV: through `tx`, checked against the frame's cancellation before
+	/// every operation.
+	pub(super) fn kv(&self) -> FrameKv<'_> {
+		FrameKv::new(&self.tx, self.frame())
+	}
+
+	/// Maps a provider failure into the error upstream takes, and records it, typed, as the frame's
+	/// failure. Upstream stringifies the error, and in its batched paths drops it altogether, so
+	/// the frame's record is what fails the frame, with the error's classification intact.
+	fn ann_err(&self, e: anyhow::Error) -> ANNError {
+		let message = e.to_string();
+		if let Some(frame) = self.frame() {
+			frame.record_error(e);
+		}
+		ANNError::message(message)
+	}
 }
 
-impl ExecutionContext for DiskAnnProviderContext {}
+impl ExecutionContext for DiskAnnProviderContext {
+	/// Wraps every future upstream's batched insert spawns.
+	///
+	/// Builds the frame's [`TaskGuard`] before returning, and moves it inside the returned future
+	/// so it is dropped there: upstream joins its tasks and discards the `JoinError`, so a panic
+	/// is only observable from within the task. The guard is built here, synchronously, so the
+	/// task's share of the frame's places is held from the moment this returns, before the future
+	/// is first polled. The current tracing span is carried into the task for attribution in logs;
+	/// it is not what routes the failure.
+	fn wrap_spawn<F, T>(&self, f: F) -> impl std::future::Future<Output = T> + Send + 'static
+	where
+		F: std::future::Future<Output = T> + Send + 'static,
+	{
+		let guard = self.frame.as_ref().map(TaskGuard::new);
+		let span = tracing::Span::current();
+		tracing::Instrument::instrument(
+			async move {
+				// Dropped inside the future: during an unwind from `f.await`, and with the future
+				// when it is dropped without ever being polled.
+				let _guard = guard;
+				f.await
+			},
+			span,
+		)
+	}
+}
 
 /// Vector element types that DiskANN can read from and write to persisted SurrealDB vectors.
 pub(super) trait DiskAnnVectorElement:
-	VectorRepr + Copy + Default + Send + Sync + 'static
+	VectorRepr + Copy + Default + Send + Sync + std::fmt::Debug + 'static
 {
 	/// Converts a typed DiskANN slice into SurrealDB's revisioned vector representation.
 	fn serialized_from_slice(slice: &[Self]) -> SerializedVector;
@@ -240,6 +317,25 @@ impl DiskAnnProvider {
 		}
 	}
 
+	/// A provider for the same index that publishes under this provider's cache owner, so what a
+	/// handle built over it writes through is attributed exactly as this provider's writes are.
+	pub(super) fn same_owner(&self) -> Self {
+		Self {
+			ikb: self.ikb.clone(),
+			table_id: self.table_id,
+			format_version: self.format_version,
+			cache: self.cache.clone(),
+			owner: self.owner,
+			dim: self.dim,
+			metric: self.metric,
+		}
+	}
+
+	/// The vector dimension of this provider's index.
+	pub(super) fn dim(&self) -> usize {
+		self.dim
+	}
+
 	/// Returns the cache scope tuple for this provider's index.
 	fn cache_index(&self) -> (NamespaceId, DatabaseId, TableId, IndexId, u16) {
 		(self.ikb.ns(), self.ikb.db(), self.table_id, self.ikb.index(), self.format_version)
@@ -257,6 +353,7 @@ impl DiskAnnProvider {
 			tx,
 			ikb: self.ikb.clone(),
 			view: self.reader_view(generation, continuity),
+			frame: None,
 		}
 	}
 
@@ -282,6 +379,7 @@ impl DiskAnnProvider {
 			tx,
 			ikb: self.ikb.clone(),
 			view: CacheView::frame(self.owner, generation, continuity),
+			frame: None,
 		}
 	}
 
@@ -291,6 +389,9 @@ impl DiskAnnProvider {
 	/// [`Self::read_state_for_update`] instead (rule 3 of the module-level
 	/// [cache coherency invariant](self)).
 	async fn read_state(&self, context: &DiskAnnProviderContext) -> Result<DiskAnnState> {
+		if let Some(state) = context.frame().and_then(DiskAnnBuildFrame::written_state) {
+			return Ok(state);
+		}
 		let index = self.cache_index();
 		if let Some(state) = self.cache.get_state(index, &context.view) {
 			return Ok(state);
@@ -302,27 +403,32 @@ impl DiskAnnProvider {
 		Ok(state)
 	}
 
-	/// Reads persisted graph state for a read-modify-write, always through the transaction.
+	/// Reads persisted graph state for a read-modify-write: the state a frame last wrote, or the
+	/// transaction's — never the cache, and never a frame's read view.
 	///
 	/// `!ds` holds the element-id allocator alongside the entry point, and
 	/// [`Self::write_state`] persists both, so the value written back must be exactly the
 	/// transaction's. The transaction's snapshot includes every committed write, and on a
-	/// writable transaction also this frame's own earlier allocations, so successive calls within
-	/// one frame see each other. Two *concurrent* frames are fenced by the `!dg` conditional bump
-	/// that lets only one commit.
+	/// writable transaction also this frame's own earlier allocations, which the frame's overlay
+	/// holds too, so successive calls within one frame see each other. Two *concurrent* frames are
+	/// fenced by the `!dg` conditional bump that lets only one commit.
 	///
-	/// Costs one point read per call. Every caller is on a compaction path that performs orders
+	/// Costs one point read per call outside a frame, or in a frame that has not written the state
+	/// yet. Every caller is on a compaction path that performs orders
 	/// of magnitude more KV work per vector, and the search path does not use this.
 	async fn read_state_for_update(
 		&self,
 		context: &DiskAnnProviderContext,
 	) -> Result<DiskAnnState> {
+		if let Some(state) = context.frame().and_then(DiskAnnBuildFrame::written_state) {
+			return Ok(state);
+		}
 		self.load_state(context).await
 	}
 
 	/// Reads `!ds` from the transaction, defaulting when the key is absent.
 	async fn load_state(&self, context: &DiskAnnProviderContext) -> Result<DiskAnnState> {
-		Ok(context.tx.get_key(&context.ikb.new_ds_key(), None).await?.unwrap_or_default())
+		Ok(context.kv().get_key(&context.ikb.new_ds_key()).await?.unwrap_or_default())
 	}
 
 	/// Persists graph state, and writes it through to the cache as
@@ -332,10 +438,14 @@ impl DiskAnnProvider {
 		context: &DiskAnnProviderContext,
 		state: &DiskAnnState,
 	) -> Result<()> {
-		context.tx.set_key(&context.ikb.new_ds_key(), state).await?;
-		match context.view.write_through() {
+		context.kv().set_key(&context.ikb.new_ds_key(), state).await?;
+		let through = || match context.view.write_through() {
 			Some(stamp) => self.cache.insert_state(self.cache_index(), stamp, state.clone()),
 			None => self.cache.remove_state(self.cache_index()),
+		};
+		match context.frame() {
+			Some(frame) => frame.wrote_state(state.clone(), through),
+			None => through(),
 		}
 		Ok(())
 	}
@@ -343,17 +453,30 @@ impl DiskAnnProvider {
 	/// Writes one element through to the cache (rule 2 of the module-level
 	/// [cache coherency invariant](self)): at the frame's commit generation inside a compaction
 	/// frame, and outside one by evicting whatever the cache held for it.
+	///
+	/// Inside a frame the element is also recorded as written, in the same critical section, and a
+	/// closed frame does neither.
 	fn write_element_through(
 		&self,
 		context: &DiskAnnProviderContext,
 		element_id: ElementId,
 		element: DiskAnnElement,
 	) {
-		match context.view.write_through() {
+		let element = Arc::new(element);
+		let through = || match context.view.write_through() {
 			Some(stamp) => {
-				self.cache.insert_element(self.cache_index(), element_id, stamp, element);
+				self.cache.insert_shared_element(
+					self.cache_index(),
+					element_id,
+					stamp,
+					Arc::clone(&element),
+				);
 			}
 			None => self.cache.remove_element(self.cache_index(), element_id),
+		};
+		match context.frame() {
+			Some(frame) => frame.wrote_element(element_id, Some(Arc::clone(&element)), through),
+			None => through(),
 		}
 	}
 
@@ -364,27 +487,59 @@ impl DiskAnnProvider {
 		context: &DiskAnnProviderContext,
 		element_id: ElementId,
 		node: DiskAnnNode,
+		write: NodeWrite,
 	) {
-		match context.view.write_through() {
+		let node = Arc::new(node);
+		let through = || match context.view.write_through() {
 			Some(stamp) => {
-				self.cache.insert_node(self.cache_index(), element_id, stamp, node);
+				self.cache.insert_shared_node(
+					self.cache_index(),
+					element_id,
+					stamp,
+					Arc::clone(&node),
+				);
 			}
 			None => self.cache.remove_node(self.cache_index(), element_id),
+		};
+		match context.frame() {
+			Some(frame) => {
+				frame.wrote_node(element_id, Arc::clone(&node), write == NodeWrite::Own, through)
+			}
+			None => through(),
 		}
+	}
+
+	/// Persists an adjacency list and writes it through, as `NeighborAccessorMut::set_neighbors`
+	/// does. `write` says whose choice the list is.
+	pub(super) async fn write_node(
+		&self,
+		context: &DiskAnnProviderContext,
+		element_id: ElementId,
+		node: DiskAnnNode,
+		write: NodeWrite,
+	) -> Result<()> {
+		context.kv().set_key(&context.ikb.new_dn_key(element_id), &node).await?;
+		self.write_node_through(context, element_id, node, write);
+		Ok(())
 	}
 
 	/// Reads element vector/status pairs in input order.
 	///
-	/// Cached entries are returned immediately; each distinct miss is sent to KV once, through
-	/// `getm`. Missing
-	/// elements remain `None` so callers can preserve the previous single-read behavior.
+	/// Inside a frame, an element the frame wrote is answered from its overlay. Every other id is
+	/// answered from the cache when the context's view is served the entry, and each distinct miss
+	/// is read once, in one batch: through the frame's read view when it has one, which publishes
+	/// what it read (see [`DiskAnnBuildFrame::publish_clean_elements`]), and through the
+	/// transaction otherwise. Missing elements remain `None` so callers can preserve the previous
+	/// single-read behavior.
 	pub(super) async fn read_elements(
 		&self,
 		context: &DiskAnnProviderContext,
 		element_ids: &[ElementId],
 	) -> Result<Vec<Option<Arc<DiskAnnElement>>>> {
 		let index = self.cache_index();
+		let frame = context.frame();
 		let mut elements = vec![None; element_ids.len()];
+		let written = frame.map(|frame| frame.written_elements_of(element_ids));
 		// Each distinct missing element, at the first position asking for it.
 		let mut misses: Vec<(ElementId, usize)> = Vec::new();
 		// Each later position asking for an element already known missing,
@@ -392,7 +547,12 @@ impl DiskAnnProvider {
 		let mut repeats: Vec<(usize, usize)> = Vec::new();
 		let mut miss_slot: HashMap<ElementId, usize> = HashMap::default();
 		for (pos, element_id) in element_ids.iter().copied().enumerate() {
-			if let Some(element) = self.cache.get_element(index, element_id, &context.view) {
+			if let Some(own) = written.as_ref().and_then(|written| written[pos].clone()) {
+				if let Some(frame) = frame {
+					frame.stats.reads_overlay.fetch_add(1, Ordering::Relaxed);
+				}
+				elements[pos] = own;
+			} else if let Some(element) = self.cache.get_element(index, element_id, &context.view) {
 				elements[pos] = Some(element);
 			} else {
 				match miss_slot.entry(element_id) {
@@ -405,23 +565,63 @@ impl DiskAnnProvider {
 			}
 		}
 		if !misses.is_empty() {
-			let keys = misses.iter().map(|(id, _)| context.ikb.new_de_key(*id)).collect();
-			let fetched: Vec<Option<DiskAnnElement>> = context.tx.get_many_key(keys, None).await?;
-			// A short answer would leave the trailing misses unread, silently.
-			ensure!(
-				fetched.len() == misses.len(),
-				"{} elements read for {} requested",
-				fetched.len(),
-				misses.len()
-			);
-			let publish = context.publication();
-			for ((element_id, pos), element) in misses.iter().copied().zip(fetched) {
-				if let Some(element) = element {
-					let element = match publish {
-						Some(stamp) => self.cache.insert_element(index, element_id, stamp, element),
-						None => Arc::new(element),
-					};
-					elements[pos] = Some(element);
+			let keys: Vec<_> = misses.iter().map(|(id, _)| context.ikb.new_de_key(*id)).collect();
+			let view = match frame {
+				Some(frame) => frame.view()?,
+				None => None,
+			};
+			match (frame, view) {
+				(Some(frame), Some(view)) => {
+					let fetched: Vec<Option<DiskAnnElement>> =
+						frame.read_through(&view, &keys).await?;
+					let fetched: Vec<(ElementId, usize, Arc<DiskAnnElement>)> = misses
+						.iter()
+						.copied()
+						.zip(fetched)
+						.filter_map(|((id, pos), element)| Some((id, pos, Arc::new(element?))))
+						.collect();
+					if let Some(stamp) = view.publication() {
+						frame.publish_clean_elements(
+							fetched.iter().map(|(id, _, element)| (*id, element)),
+							|id, element| {
+								self.cache.insert_shared_element(
+									index,
+									id,
+									stamp,
+									Arc::clone(element),
+								);
+							},
+						);
+					}
+					for (_, pos, element) in fetched {
+						elements[pos] = Some(element);
+					}
+				}
+				(frame, _) => {
+					if let Some(frame) = frame {
+						frame.stats.reads_tx.fetch_add(1, Ordering::Relaxed);
+					}
+					let fetched: Vec<Option<DiskAnnElement>> =
+						context.kv().get_many_key(keys).await?;
+					// A short answer would leave the trailing misses unread, silently.
+					ensure!(
+						fetched.len() == misses.len(),
+						"{} elements read for {} requested",
+						fetched.len(),
+						misses.len()
+					);
+					let publish = context.publication();
+					for ((element_id, pos), element) in misses.iter().copied().zip(fetched) {
+						if let Some(element) = element {
+							let element = match publish {
+								Some(stamp) => {
+									self.cache.insert_element(index, element_id, stamp, element)
+								}
+								None => Arc::new(element),
+							};
+							elements[pos] = Some(element);
+						}
+					}
 				}
 			}
 			for (slot, pos) in repeats {
@@ -432,37 +632,83 @@ impl DiskAnnProvider {
 		Ok(elements)
 	}
 
-	/// Reads adjacency lists in input order.
+	/// Reads adjacency lists in input order, routed as [`Self::read_elements`] routes elements.
 	///
 	/// Graph search fans out through adjacency lists, so batching cache misses here removes a
 	/// large number of sequential point reads on KV backends that support efficient multi-get.
-	async fn read_nodes(
+	pub(super) async fn read_nodes(
 		&self,
 		context: &DiskAnnProviderContext,
 		element_ids: &[ElementId],
 	) -> Result<Vec<Option<Arc<DiskAnnNode>>>> {
 		let index = self.cache_index();
+		let frame = context.frame();
 		let mut nodes = vec![None; element_ids.len()];
+		let written = frame.map(|frame| frame.written_nodes_of(element_ids));
 		let mut miss_positions = Vec::new();
 		let mut miss_keys = Vec::new();
 		for (pos, element_id) in element_ids.iter().copied().enumerate() {
-			if let Some(node) = self.cache.get_node(index, element_id, &context.view) {
+			if let Some(own) = written.as_ref().and_then(|written| written[pos].clone()) {
+				if let Some(frame) = frame {
+					frame.stats.reads_overlay.fetch_add(1, Ordering::Relaxed);
+				}
+				nodes[pos] = Some(own);
+			} else if let Some(node) = self.cache.get_node(index, element_id, &context.view) {
 				nodes[pos] = Some(node);
 			} else {
 				miss_positions.push((pos, element_id));
 				miss_keys.push(context.ikb.new_dn_key(element_id));
 			}
 		}
-		if !miss_keys.is_empty() {
-			let fetched: Vec<Option<DiskAnnNode>> =
-				context.tx.get_many_key(miss_keys, None).await?;
-			let publish = context.publication();
-			for ((pos, element_id), node) in miss_positions.into_iter().zip(fetched) {
-				if let Some(node) = node {
-					nodes[pos] = Some(match publish {
-						Some(stamp) => self.cache.insert_node(index, element_id, stamp, node),
-						None => Arc::new(node),
-					});
+		if miss_keys.is_empty() {
+			return Ok(nodes);
+		}
+		let view = match frame {
+			Some(frame) => frame.view()?,
+			None => None,
+		};
+		match (frame, view) {
+			(Some(frame), Some(view)) => {
+				let fetched: Vec<Option<DiskAnnNode>> =
+					frame.read_through(&view, &miss_keys).await?;
+				let fetched: Vec<(ElementId, usize, Arc<DiskAnnNode>)> = miss_positions
+					.into_iter()
+					.zip(fetched)
+					.filter_map(|((pos, id), node)| Some((id, pos, Arc::new(node?))))
+					.collect();
+				if let Some(stamp) = view.publication() {
+					frame.publish_clean_nodes(
+						fetched.iter().map(|(id, _, node)| (*id, node)),
+						|id, node| {
+							self.cache.insert_shared_node(index, id, stamp, Arc::clone(node));
+						},
+					);
+				}
+				for (_, pos, node) in fetched {
+					nodes[pos] = Some(node);
+				}
+			}
+			(frame, _) => {
+				if let Some(frame) = frame {
+					frame.stats.reads_tx.fetch_add(1, Ordering::Relaxed);
+				}
+				let fetched: Vec<Option<DiskAnnNode>> =
+					context.kv().get_many_key(miss_keys).await?;
+				// A short answer would leave the trailing misses unread, silently.
+				ensure!(
+					fetched.len() == miss_positions.len(),
+					"{} nodes read for {} requested",
+					fetched.len(),
+					miss_positions.len()
+				);
+				let publish = context.publication();
+				for ((pos, element_id), node) in miss_positions.into_iter().zip(fetched) {
+					if let Some(node) = node {
+						nodes[pos] = Some(match publish {
+							Some(stamp) => self.cache.insert_node(index, element_id, stamp, node),
+							None => Arc::new(node),
+						});
+					}
 				}
 			}
 		}
@@ -474,11 +720,23 @@ impl DiskAnnProvider {
 		&self,
 		context: &DiskAnnProviderContext,
 	) -> Result<ElementId> {
+		Ok(self.allocate_element_ids(context, 1).await?.start)
+	}
+
+	/// Reserves `count` consecutive element ids and persists the advanced counter once.
+	///
+	/// The range is the caller's alone for the life of the transaction. Ids are never reused, so a
+	/// frame that does not commit leaves a gap.
+	pub(super) async fn allocate_element_ids(
+		&self,
+		context: &DiskAnnProviderContext,
+		count: u64,
+	) -> Result<std::ops::Range<ElementId>> {
 		let mut state = self.read_state_for_update(context).await?;
-		let element_id = state.next_element_id;
-		state.next_element_id = state.next_element_id.saturating_add(1);
+		let start = state.next_element_id;
+		state.next_element_id = start.saturating_add(count);
 		self.write_state(context, &state).await?;
-		Ok(element_id)
+		Ok(start..state.next_element_id)
 	}
 
 	/// Sets the entry point only when the graph has none.
@@ -553,37 +811,38 @@ impl DiskAnnProvider {
 		} else {
 			self.read_state(context).await
 		}
-		.map_err(|e| ANNError::message(e.to_string()))?;
-		if let Some(element_id) = state.enter_point
-			&& self
-				.entry_point_is_live(context, element_id, for_update)
-				.await
-				.is_ok_and(|live| live)
-		{
-			return Ok(vec![element_id]);
+		.map_err(|e| context.ann_err(e))?;
+		// The entry point first, then the other start points, each only while live. A failure to
+		// read one is the search's failure, not a sign that it is gone: falling through to the
+		// scan would hide it, and scan the whole range.
+		let candidates: Vec<ElementId> = state
+			.enter_point
+			.into_iter()
+			.chain(state.start_points.iter().copied().filter(|p| Some(*p) != state.enter_point))
+			.collect();
+		let live = self.live_of(context, &candidates, for_update).await?;
+		if !live.is_empty() {
+			return Ok(live);
 		}
 		// The stored entry point may have been deleted. Scan for a replacement and populate the
 		// element cache with any entries touched during the fallback scan.
-		let rng = context.ikb.new_de_range().map_err(|e| ANNError::message(e.to_string()))?;
-		let mut cursor = context
-			.tx
-			.open_vals_cursor(rng, surrealdb_kvs::Direction::Forward, 0, None)
-			.await
-			.map_err(|e| ANNError::message(e.to_string()))?;
+		let rng = context.ikb.new_de_range().map_err(|e| context.ann_err(e))?;
+		let kv = context.kv();
+		let mut cursor = kv.open_vals_cursor(rng).await.map_err(|e| context.ann_err(e))?;
 		let publish = context.publication();
 		loop {
 			let batch = cursor
 				.next_batch(surrealdb_kvs::consts::NORMAL_BATCH_SIZE)
 				.await
-				.map_err(|e| ANNError::message(e.to_string()))?;
+				.map_err(|e| context.ann_err(e))?;
 			if batch.is_empty() {
 				break;
 			}
 			for (key, value) in &batch {
 				let key: DiskannElementKey<'_> =
-					storekey::decode_borrow(key).map_err(|e| ANNError::message(e.to_string()))?;
-				let element = DiskAnnElement::kv_decode_value(value, ())
-					.map_err(|e| ANNError::message(e.to_string()))?;
+					storekey::decode_borrow(key).map_err(|e| context.ann_err(e.into()))?;
+				let element =
+					DiskAnnElement::kv_decode_value(value, ()).map_err(|e| context.ann_err(e))?;
 				let deleted = element.deleted;
 				// Only publish non-tombstoned entries into the shared cache, and only where the
 				// context may publish at all (see `DiskAnnProviderContext::publication`).
@@ -595,13 +854,16 @@ impl DiskAnnProvider {
 					// On a writable tx (i.e. compaction or a record-write path), persist
 					// the discovered entry point so subsequent searches don't have to
 					// re-scan `!de:*` from the dangling stored value. On a read-only tx
-					// (KNN search) we can't write — the next compaction will fix it.
+					// (KNN search) we can't write — the next compaction will fix it. A
+					// `for_update` caller persists the result itself, so it is not
+					// written here as well.
 					//
 					// Persistence is a pure hint: a transient failure here (e.g. a
 					// concurrent `delc` on the state key) shouldn't fail the whole
 					// search, since the discovered entry point is already correct in
 					// memory and the next compaction will rediscover it.
-					if context.tx.writeable()
+					if !for_update
+						&& context.tx.writeable()
 						&& let Err(e) = self.set_entry_point(context, Some(key.element_id)).await
 					{
 						warn!(
@@ -617,7 +879,115 @@ impl DiskAnnProvider {
 		Ok(Vec::new())
 	}
 
-	/// Whether an element exists and is not tombstoned.
+	/// The elements of `candidates` that exist and are not tombstoned, in input order, read as
+	/// [`Self::entry_point_is_live`] reads one.
+	async fn live_of(
+		&self,
+		context: &DiskAnnProviderContext,
+		candidates: &[ElementId],
+		for_update: bool,
+	) -> ANNResult<Vec<ElementId>> {
+		if candidates.is_empty() {
+			return Ok(Vec::new());
+		}
+		if !for_update {
+			let elements =
+				self.read_elements(context, candidates).await.map_err(|e| context.ann_err(e))?;
+			return Ok(candidates
+				.iter()
+				.zip(elements)
+				.filter(|(_, e)| e.as_ref().is_some_and(|e| !e.deleted))
+				.map(|(id, _)| *id)
+				.collect());
+		}
+		let mut live = Vec::with_capacity(candidates.len());
+		for id in candidates {
+			if self.entry_point_is_live(context, *id, true).await? {
+				live.push(*id);
+			}
+		}
+		Ok(live)
+	}
+
+	/// Replaces the graph's start points other than its entry point.
+	pub(super) async fn set_start_points(
+		&self,
+		context: &DiskAnnProviderContext,
+		start_points: Vec<ElementId>,
+	) -> Result<()> {
+		let mut state = self.read_state_for_update(context).await?;
+		state.start_points = start_points;
+		self.write_state(context, &state).await
+	}
+
+	/// Keeps the graph's start points usable once `deleted` has been tombstoned.
+	///
+	/// `deleted`, and any other start point no longer live, leaves the set. When the entry point
+	/// is gone, the first live start point takes its place, and only a graph with none left falls
+	/// back to scanning for a live element. When `deleted` was a start point, a live neighbour of
+	/// it joins the set in its place, so deleting start points one at a time does not shrink the
+	/// set while the graph holds elements near them. The deletion of any other element, while the
+	/// entry point is live, leaves the state as it is and writes nothing.
+	///
+	/// Everything it reads to decide what it persists — the state, the liveness of each start
+	/// point and of each candidate, and the deleted element's adjacency list — comes from the
+	/// transaction (rule 3 of the module-level [cache coherency invariant](self)).
+	pub(super) async fn retire_start_point(
+		&self,
+		context: &DiskAnnProviderContext,
+		deleted: ElementId,
+	) -> Result<()> {
+		let mut state = self.read_state_for_update(context).await?;
+		let was_start = state.enter_point == Some(deleted) || state.start_points.contains(&deleted);
+		if !was_start
+			&& let Some(entry) = state.enter_point
+			&& self.entry_point_is_live(context, entry, true).await?
+		{
+			return Ok(());
+		}
+		let before = (state.enter_point, state.start_points.clone());
+		let others: Vec<ElementId> =
+			state.start_points.iter().copied().filter(|p| *p != deleted).collect();
+		let mut kept = self.live_of(context, &others, true).await?;
+		let entry_live = match state.enter_point {
+			Some(entry) if entry != deleted => {
+				self.entry_point_is_live(context, entry, true).await?
+			}
+			_ => false,
+		};
+		if !entry_live {
+			state.enter_point = (!kept.is_empty()).then(|| kept.remove(0));
+		}
+		if was_start && let Some(entry) = state.enter_point {
+			let node: Option<DiskAnnNode> =
+				context.kv().get_key(&context.ikb.new_dn_key(deleted)).await?;
+			let neighbours = node.map(|node| node.neighbors).unwrap_or_default();
+			for candidate in neighbours {
+				if candidate != entry
+					&& candidate != deleted
+					&& !kept.contains(&candidate)
+					&& self.entry_point_is_live(context, candidate, true).await?
+				{
+					kept.push(candidate);
+					break;
+				}
+			}
+		}
+		state.start_points = kept;
+		if state.enter_point.is_some() {
+			if (state.enter_point, &state.start_points) == (before.0, &before.1) {
+				return Ok(());
+			}
+			return self.write_state(context, &state).await;
+		}
+		// No start point is left: scan for a live element to enter the graph from.
+		self.write_state(context, &state).await?;
+		let next = self.valid_starting_points_for_update(context).await?.into_iter().next();
+		self.set_entry_point(context, next).await
+	}
+
+	/// Whether an element exists and is not tombstoned. A missing element answers `false`; a
+	/// failure to read it is an error.
 	///
 	/// `for_update` reads `!de` through the transaction instead of the cache, for a caller whose
 	/// answer will be persisted: a cached element can report a node live after another process
@@ -629,16 +999,19 @@ impl DiskAnnProvider {
 		for_update: bool,
 	) -> ANNResult<bool> {
 		if !for_update {
-			return Ok(self
-				.status_by_internal_id(context, element_id)
+			let element = self
+				.read_elements(context, std::slice::from_ref(&element_id))
 				.await
-				.is_ok_and(ElementStatus::is_valid));
+				.map_err(|e| context.ann_err(e))?
+				.pop()
+				.flatten();
+			return Ok(element.is_some_and(|e| !e.deleted));
 		}
 		let element: Option<DiskAnnElement> = context
-			.tx
-			.get_key(&context.ikb.new_de_key(element_id), None)
+			.kv()
+			.get_key(&context.ikb.new_de_key(element_id))
 			.await
-			.map_err(|e| ANNError::message(e.to_string()))?;
+			.map_err(|e| context.ann_err(e))?;
 		Ok(element.is_some_and(|e| !e.deleted))
 	}
 
@@ -707,12 +1080,22 @@ where
 		if element.len() != self.dim {
 			return Err(vector_len_mismatch(element.len(), self.dim));
 		}
+		#[cfg(test)]
+		if let Some(faults) = context.frame().and_then(|f| f.faults.as_ref()) {
+			let fail = *faults.fail_set_element.lock().unwrap_or_else(|p| p.into_inner());
+			if fail == Some(*id) {
+				return Err(context.ann_err(anyhow::anyhow!("injected set_element failure")));
+			}
+			if let Some(park) = &faults.park_set_element {
+				park.park().await;
+			}
+		}
 		let key = context.ikb.new_de_key(*id);
 		let element = DiskAnnElement {
 			vector: T::serialized_from_slice(element),
 			deleted: false,
 		};
-		context.tx.set_key(&key, &element).await.map_err(|e| ANNError::message(e.to_string()))?;
+		context.kv().set_key(&key, &element).await.map_err(|e| context.ann_err(e))?;
 		self.write_element_through(context, *id, element);
 		Ok(NoopGuard::new(*id))
 	}
@@ -728,7 +1111,7 @@ impl Delete for DiskAnnProvider {
 		let Some(element) = self
 			.read_elements(context, std::slice::from_ref(gid))
 			.await
-			.map_err(|e| ANNError::message(e.to_string()))?
+			.map_err(|e| context.ann_err(e))?
 			.pop()
 			.flatten()
 		else {
@@ -736,7 +1119,7 @@ impl Delete for DiskAnnProvider {
 		};
 		let mut element = (*element).clone();
 		element.deleted = true;
-		context.tx.set_key(&key, &element).await.map_err(|e| ANNError::message(e.to_string()))?;
+		context.kv().set_key(&key, &element).await.map_err(|e| context.ann_err(e))?;
 		self.write_element_through(context, *gid, element);
 		Ok(())
 	}
@@ -746,13 +1129,13 @@ impl Delete for DiskAnnProvider {
 		context: &Self::Context,
 		id: Self::InternalId,
 	) -> Result<(), Self::Error> {
-		context
-			.tx
-			.del_key(&context.ikb.new_de_key(id))
-			.await
-			.map_err(|e| ANNError::message(e.to_string()))?;
+		context.kv().del_key(&context.ikb.new_de_key(id)).await.map_err(|e| context.ann_err(e))?;
 		// Release removes the element record entirely, so remove any cached vector/status too.
-		self.cache.remove_element(self.cache_index(), id);
+		let evict = || self.cache.remove_element(self.cache_index(), id);
+		match context.frame() {
+			Some(frame) => frame.wrote_element(id, None, evict),
+			None => evict(),
+		}
 		Ok(())
 	}
 
@@ -764,7 +1147,7 @@ impl Delete for DiskAnnProvider {
 		let Some(element) = self
 			.read_elements(context, std::slice::from_ref(&id))
 			.await
-			.map_err(|e| ANNError::message(e.to_string()))?
+			.map_err(|e| context.ann_err(e))?
 			.pop()
 			.flatten()
 		else {
@@ -800,6 +1183,9 @@ pub(super) struct DiskAnnSearchAccessor<'a, T: DiskAnnVectorElement> {
 	query: <T as VectorRepr>::QueryDistance,
 	/// Reusable scratch buffer for converting persisted vectors into typed slices.
 	buffer: Box<[T]>,
+	/// Whether a test injected a failure into the search for this query.
+	#[cfg(test)]
+	fail_search: bool,
 }
 
 impl<'a, T> DiskAnnSearchAccessor<'a, T>
@@ -814,11 +1200,18 @@ where
 		if query.len() != provider.dim {
 			return Err(vector_len_mismatch(query.len(), provider.dim));
 		}
+		#[cfg(test)]
+		let fail_search = context.frame().and_then(|f| f.faults.as_ref()).is_some_and(|f| {
+			let target = f.fail_search_for.lock().unwrap_or_else(|p| p.into_inner());
+			target.as_ref() == Some(&T::serialized_from_slice(query))
+		});
 		Ok(Self {
 			provider,
 			context,
 			query: T::query_distance(query, provider.metric),
 			buffer: vec![T::default(); provider.dim].into_boxed_slice(),
+			#[cfg(test)]
+			fail_search,
 		})
 	}
 
@@ -845,12 +1238,16 @@ where
 	where
 		F: FnMut(ElementId, f32) + Send,
 	{
+		#[cfg(test)]
+		if self.fail_search {
+			return Err(ANNError::message("injected candidate-generation failure"));
+		}
 		let ids = self.provider.valid_starting_points(self.context).await?;
 		let elements = self
 			.provider
 			.read_elements(self.context, &ids)
 			.await
-			.map_err(|e| ANNError::message(e.to_string()))?;
+			.map_err(|e| self.context.ann_err(e))?;
 		for (id, element) in ids.into_iter().zip(elements) {
 			let Some(element) = element else {
 				return Err(ANNError::message(format!("DiskANN start point {id} is missing")));
@@ -883,7 +1280,7 @@ where
 			.provider
 			.read_nodes(self.context, &ids)
 			.await
-			.map_err(|e| ANNError::message(e.to_string()))?;
+			.map_err(|e| self.context.ann_err(e))?;
 		// A well-behaved predicate never re-admits an id it has already yielded, so filtering
 		// the neighbors with `eval_mut` also deduplicates the surviving candidates.
 		let mut candidates = Vec::new();
@@ -898,7 +1295,7 @@ where
 			.provider
 			.read_elements(self.context, &candidates)
 			.await
-			.map_err(|e| ANNError::message(e.to_string()))?;
+			.map_err(|e| self.context.ann_err(e))?;
 		for (id, element) in candidates.into_iter().zip(elements) {
 			// A candidate whose element was compacted away mid-search is dropped: the
 			// `expand_beam` contract tolerates skipping candidates in exceptional cases.
@@ -929,6 +1326,9 @@ pub(super) struct DiskAnnPruneAccessor<'a, T: DiskAnnVectorElement> {
 	context: &'a DiskAnnProviderContext,
 	/// Bounded cache of decoded vectors, reused across the operation's prune rounds.
 	set: DiskAnnWorkingSet<T>,
+	/// What the lists this accessor writes are: back-edges for the accessors upstream's batched
+	/// insert builds from its seed, which its back-edge phase alone writes through.
+	writes: NodeWrite,
 }
 
 impl<'a, T> DiskAnnPruneAccessor<'a, T>
@@ -939,11 +1339,13 @@ where
 		provider: &'a DiskAnnProvider,
 		context: &'a DiskAnnProviderContext,
 		set: DiskAnnWorkingSet<T>,
+		writes: NodeWrite,
 	) -> Self {
 		Self {
 			provider,
 			context,
 			set,
+			writes,
 		}
 	}
 }
@@ -974,6 +1376,7 @@ where
 		DiskAnnNeighborAccessor {
 			provider: self.provider,
 			context: self.context,
+			writes: self.writes,
 		}
 	}
 
@@ -993,7 +1396,7 @@ where
 			.provider
 			.read_elements(self.context, &missing)
 			.await
-			.map_err(|e| ANNError::message(e.to_string()))?;
+			.map_err(|e| self.context.ann_err(e))?;
 		let mut decoded: HashMap<ElementId, Box<[T]>> = HashMap::with_capacity(missing.len());
 		for (id, element) in missing.into_iter().zip(fetched) {
 			if let Some(element) = element
@@ -1018,6 +1421,8 @@ pub(super) struct DiskAnnNeighborAccessor<'a> {
 	provider: &'a DiskAnnProvider,
 	/// Transaction/key context for the current DiskANN operation.
 	context: &'a DiskAnnProviderContext,
+	/// What the lists this accessor writes are.
+	writes: NodeWrite,
 }
 
 impl HasId for DiskAnnNeighborAccessor<'_> {
@@ -1034,7 +1439,7 @@ impl NeighborAccessor for DiskAnnNeighborAccessor<'_> {
 			.provider
 			.read_nodes(self.context, &[id])
 			.await
-			.map_err(|e| ANNError::message(e.to_string()))?
+			.map_err(|e| self.context.ann_err(e))?
 			.into_iter()
 			.next()
 			.flatten()
@@ -1052,22 +1457,28 @@ impl NeighborAccessorMut for DiskAnnNeighborAccessor<'_> {
 		let node = DiskAnnNode {
 			neighbors: neighbors.to_vec(),
 		};
-		self.context
-			.tx
-			.set_key(&self.context.ikb.new_dn_key(id), &node)
+		self.provider
+			.write_node(self.context, id, node, self.writes)
 			.await
-			.map_err(|e| ANNError::message(e.to_string()))?;
-		self.provider.write_node_through(self.context, id, node);
-		Ok(())
+			.map_err(|e| self.context.ann_err(e))
 	}
 
 	async fn append_vector(&mut self, id: ElementId, neighbors: &[ElementId]) -> ANNResult<()> {
-		let key = self.context.ikb.new_dn_key(id);
+		#[cfg(test)]
+		if let Some(faults) = self.context.frame().and_then(|f| f.faults.as_ref()) {
+			if faults.panic_append.swap(false, Ordering::AcqRel) {
+				panic!("injected panic in append_vector");
+			}
+			let fail = faults.fail_append.lock().unwrap_or_else(|p| p.into_inner()).take();
+			if let Some(fail) = fail {
+				return Err(self.context.ann_err(fail()));
+			}
+		}
 		let mut node: DiskAnnNode = self
 			.provider
 			.read_nodes(self.context, &[id])
 			.await
-			.map_err(|e| ANNError::message(e.to_string()))?
+			.map_err(|e| self.context.ann_err(e))?
 			.into_iter()
 			.next()
 			.flatten()
@@ -1078,9 +1489,10 @@ impl NeighborAccessorMut for DiskAnnNeighborAccessor<'_> {
 				node.neighbors.push(*neighbor);
 			}
 		}
-		self.context.tx.set_key(&key, &node).await.map_err(|e| ANNError::message(e.to_string()))?;
-		self.provider.write_node_through(self.context, id, node);
-		Ok(())
+		self.provider
+			.write_node(self.context, id, node, self.writes)
+			.await
+			.map_err(|e| self.context.ann_err(e))
 	}
 }
 
@@ -1138,7 +1550,7 @@ where
 		capacity: usize,
 	) -> Result<Self::PruneAccessor<'a>, ANNError> {
 		let set = workingset::map::Builder::new(workingset::map::Capacity::Default).build(capacity);
-		Ok(DiskAnnPruneAccessor::new(provider, context, set))
+		Ok(DiskAnnPruneAccessor::new(provider, context, set, NodeWrite::Own))
 	}
 }
 
@@ -1150,6 +1562,54 @@ where
 
 	fn prune_strategy(&self) -> Self::PruneStrategy {
 		self.clone()
+	}
+}
+
+impl<T> MultiInsertStrategy<DiskAnnProvider, Matrix<T>> for DiskAnnStrategy<T>
+where
+	T: DiskAnnVectorElement,
+{
+	/// A working-set builder carrying the batch as a zero-copy overlay, so a prune candidate that
+	/// is a member of the batch is read from memory, never from KV.
+	type Seed = workingset::map::Builder<ElementId, workingset::map::Ref<[T]>>;
+	type FinishError = Infallible;
+	type PruneStrategy = Self;
+	type InsertStrategy = Self;
+
+	fn insert_strategy(&self) -> Self {
+		self.clone()
+	}
+
+	fn finish<Itr>(
+		&self,
+		_: &DiskAnnProvider,
+		_: &DiskAnnProviderContext,
+		batch: &Arc<Matrix<T>>,
+		ids: Itr,
+	) -> impl std::future::Future<Output = Result<Self::Seed, Infallible>> + Send
+	where
+		Itr: ExactSizeIterator<Item = ElementId> + Send,
+	{
+		use workingset::map::{Builder, Capacity, Overlay};
+		std::future::ready(Ok(Builder::new(Capacity::Default)
+			.with_overlay(Overlay::from_batch(Arc::clone(batch), ids))))
+	}
+
+	fn seeded_prune_accessor<'a>(
+		&'a self,
+		provider: &'a DiskAnnProvider,
+		context: &'a DiskAnnProviderContext,
+		seed: &'a Self::Seed,
+		capacity: usize,
+	) -> ANNResult<DiskAnnPruneAccessor<'a, T>> {
+		// Upstream builds a seeded accessor for candidate generation, which writes nothing, and
+		// for the back-edge phase, which writes only back-edges.
+		Ok(DiskAnnPruneAccessor::new(
+			provider,
+			context,
+			seed.clone().build(capacity),
+			NodeWrite::BackEdge,
+		))
 	}
 }
 
@@ -1251,6 +1711,7 @@ mod tests {
 		let mut neighbor_accessor = DiskAnnNeighborAccessor {
 			provider: &provider,
 			context: &context,
+			writes: NodeWrite::Own,
 		};
 		neighbor_accessor.set_neighbors(1, &[8, 9]).await.unwrap();
 		let reader_at =
@@ -1263,6 +1724,7 @@ mod tests {
 		let mut neighbor_accessor = DiskAnnNeighborAccessor {
 			provider: &provider,
 			context: &frame,
+			writes: NodeWrite::Own,
 		};
 		neighbor_accessor.set_neighbors(1, &[8, 9]).await.unwrap();
 		let cached =

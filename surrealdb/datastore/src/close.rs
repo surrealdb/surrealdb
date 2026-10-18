@@ -96,6 +96,19 @@ pub trait AfterCommitWait: Send + 'static {
 		self: Box<Self>,
 		deadline: Option<AfterCommitDeadline>,
 	) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
+
+	/// Whether the wait can owe the commit something: work that takes back
+	/// what the commit applied should the awaited work fail.
+	///
+	/// An owner must run every such wait once its commit may have applied,
+	/// and must not commit at all once its query has ended, since the wait
+	/// could then only compensate. A wait that owes nothing — one that only
+	/// waits for work the commit left to background maintenance anyway — can
+	/// be skipped where nothing hears its outcome, and its owner commits as it
+	/// would with nothing queued.
+	fn compensates(&self) -> bool {
+		true
+	}
 }
 
 /// The time limit an [`AfterCommitWait`] still answers to.
@@ -131,6 +144,18 @@ impl AfterCommitWaits {
 	/// took unless the commit succeeds.
 	pub async fn take(&self) -> Vec<Box<dyn AfterCommitWait>> {
 		std::mem::take(&mut *self.0.lock().await)
+	}
+
+	/// How many waits are queued: an owner that runs several statements in
+	/// one transaction reads it before and after each, to tell which statement
+	/// queued which wait.
+	pub async fn len(&self) -> usize {
+		self.0.lock().await.len()
+	}
+
+	/// Whether nothing is queued.
+	pub async fn is_empty(&self) -> bool {
+		self.0.lock().await.is_empty()
 	}
 
 	pub(crate) fn downgrade(&self) -> Weak<AfterCommitQueue> {

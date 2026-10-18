@@ -758,6 +758,33 @@ pub struct Executor {
 	/// parameters (see [`Executor::run_on_streaming_engine`]). Taken by
 	/// [`Executor::execute_plan_impl`] once that work has settled.
 	slow_log_after_commit: Option<(TopLevelStatement, LogicalOp)>,
+	/// The statements of the open explicit block that queued work for after
+	/// its commit, in the order they ran, each with the event it holds until
+	/// that work settles (see [`Executor::settle_block_waits`]).
+	block_waits: Vec<BlockWait>,
+}
+
+/// A statement of an explicit block that queued work for after the block's
+/// commit: the wait for the index it built to be materialised.
+struct BlockWait {
+	/// The statement's slot in [`Executor::results`].
+	slot: usize,
+	/// How many waits it queued, consecutive in the block's queue.
+	waits: usize,
+	/// Its `StatementEvent`, held until its waits settle, so that the event's
+	/// outcome, error class and duration are the ones its slot ends with.
+	event: HeldStatementEvent,
+}
+
+/// What a `StatementEvent` held back from a block statement is emitted with.
+struct HeldStatementEvent {
+	kind: StatementType,
+	read_only: bool,
+	sql: Option<String>,
+	/// When the statement began, which both its slot's time and its event's
+	/// duration are measured from.
+	before: Instant,
+	rows: u64,
 }
 
 /// What a request's statement needs to be compiled with the rest of the
@@ -1246,6 +1273,7 @@ impl Executor {
 			let_undo: LetUndo::default(),
 			session_sink: Arc::default(),
 			slow_log_after_commit: None,
+			block_waits: Vec::new(),
 		}
 	}
 
@@ -2171,13 +2199,15 @@ impl Executor {
 					self.execute_operator_plan(plan, Arc::clone(&txn), stream_rows).await;
 				// Statement rendering redacts credentials in every nested position;
 				// the plan supplies the parameters referenced by the statement.
-				// A statement whose transaction accepts after-commit waits is
-				// slow-logged once that work has settled, by
-				// `execute_plan_impl`: its caller waits for that work too, so
-				// the time it takes is part of the statement's.
+				// A statement outside a block whose transaction accepts work for
+				// after its commit, a deferred build or a materialise wait, is
+				// slow-logged once that work has settled, by `execute_plan_impl`:
+				// its caller waits for that work too, so the time it takes is
+				// part of the statement's. A block's waits settle only once the
+				// whole block has committed, so its statements are logged here.
 				if let (Some(op), Some(expr)) = (logged, logged_expr) {
 					let statement = TopLevelStatement::Ast(TopLevelExpr::Expr(expr));
-					if txn.accepts_after_commit_waits() {
+					if !self.in_block && txn.accepts_materialise_waits() {
 						self.slow_log_after_commit = Some((statement, op));
 					} else {
 						self.check_slow_log(start, &statement, &PlanParams(&op));
@@ -2984,11 +3014,17 @@ impl Executor {
 		// A standalone blocking `DEFINE INDEX` or `REBUILD INDEX` commits its
 		// catalog change first and its build is awaited below, once the commit
 		// has applied: the build commits far more writes than a transaction can
-		// stay open across on an optimistic storage engine. Any other statement
-		// leaves nothing for after its commit, and pays nothing for the queue.
-		let after_commit = stmt.awaits_its_build_after_commit().then(AfterCommitWaits::default);
+		// stay open across on an optimistic storage engine. Every blocking index
+		// statement a write transaction runs, wherever it sits in the statement,
+		// queues the wait for its index to be materialised, which only a
+		// committed index can be. A transaction that queues nothing commits as
+		// any other does.
+		let defers_builds = stmt.awaits_its_build_after_commit();
+		let after_commit =
+			matches!(transaction_type, TransactionType::Write).then(AfterCommitWaits::default);
 		let txn = Arc::new(match &after_commit {
-			Some(waits) => txn.with_after_commit_waits(waits),
+			Some(waits) if defers_builds => txn.with_after_commit_waits(waits),
+			Some(waits) => txn.with_materialise_waits(waits),
 			None => txn,
 		});
 		let receiver = self.prepare_broker(
@@ -3041,7 +3077,7 @@ impl Executor {
 				// Stands in for a lost commit of a statement whose build has
 				// started and is queued for after the commit.
 				#[cfg(test)]
-				if after_commit.is_some()
+				if defers_builds
 					&& let Err(e) = crate::kvs::testing::maybe_inject_retryable_conflict(
 						crate::kvs::testing::RetryableConflictSite::AwaitedBuildCommit,
 						self.ctx.node_id(),
@@ -3063,11 +3099,15 @@ impl Executor {
 					Self::commit_and_flush(&txn, receiver).await?;
 					return Ok(value);
 				}
-				// Past this point the commit is followed by a wait that can only
-				// compensate for it, so a query that has already timed out or
-				// been cancelled is answered by cancelling the transaction
-				// instead: its build is then aborted by the rollback.
-				if let Err(e) = self.bail_if_done() {
+				// Past this point a commit followed by a wait that can only
+				// compensate for it is answered, for a query that has already
+				// timed out or been cancelled, by cancelling the transaction
+				// instead: its build is then aborted by the rollback. A wait that
+				// owes the commit nothing leaves the commit as it would be with
+				// nothing queued.
+				if waits.iter().any(|wait| wait.compensates())
+					&& let Err(e) = self.bail_if_done()
+				{
 					// The timeout or cancellation is what the statement reports.
 					// The transaction never commits on this path, so a cancel
 					// that fails publishes none of its writes, and its own error
@@ -3088,8 +3128,8 @@ impl Executor {
 				let (outcome, settled) = oneshot::channel();
 				// A commit whose outcome is unknown may have applied, and with it
 				// the builds the waits stand for, which go on as the definitions
-				// they build committed. Its waits still run, for what they owe a
-				// commit that applied: each settles against what is durably
+				// they build committed. Its waits that can owe that commit
+				// something still run: each settles against what is durably
 				// recorded, and takes back nothing a commit that did not apply
 				// left. The statement reports the commit's error at once, and
 				// what the waits come to is only logged.
@@ -3106,7 +3146,7 @@ impl Executor {
 						let _ = outcome.send(Err(err));
 						if indeterminate {
 							let deadline = deadline(bound);
-							for wait in waits {
+							for wait in waits.into_iter().filter(|wait| wait.compensates()) {
 								if let Err(err) = wait.wait(deadline).await {
 									warn!(
 										error = %err,
@@ -3203,6 +3243,100 @@ impl Executor {
 		}
 	}
 
+	/// Run, once a block has committed, the work its statements queued for
+	/// after the commit, and resolve each statement's slot and held event.
+	///
+	/// Every queued wait runs, in the order it was queued, whatever an earlier
+	/// one came to: a wait that stops on an error leaves the later indexes to
+	/// materialise or report their own. The waits draw on one deadline, what is
+	/// left of the transaction timeout since the block began alongside the
+	/// query's own (see [`Self::after_commit_bound`]); a wait that reaches it
+	/// returns success with its work left queued, and every later one returns
+	/// at once on the same terms. A cancellation is seen by every remaining
+	/// wait. A wait's error is its own statement's result, never `COMMIT`'s,
+	/// which keeps its success, and a slot whose waits succeeded keeps its
+	/// committed value.
+	///
+	/// The waits run on a task of their own, as a standalone statement's do,
+	/// so a caller that stops listening does not abandon a pass part-way
+	/// through its transaction.
+	async fn settle_block_waits(
+		&mut self,
+		kvs: &Datastore,
+		waits: &AfterCommitWaits,
+		held: Vec<BlockWait>,
+		block_started: Instant,
+	) {
+		let queued = waits.take().await;
+		if held.is_empty() {
+			return;
+		}
+		let budget = kvs
+			.transaction_timeout()
+			.map(|timeout| timeout.saturating_sub(block_started.elapsed()));
+		let deadline =
+			self.after_commit_bound(kvs, budget).map(|(after, timeout)| AfterCommitDeadline {
+				timeout,
+				at: Instant::now() + after,
+			});
+		let (outcome, settled) = oneshot::channel();
+		common::rt::spawn_detached(async move {
+			let mut outcomes = Vec::with_capacity(queued.len());
+			for wait in queued {
+				outcomes.push(wait.wait(deadline).await);
+			}
+			// The caller may no longer be waiting for the outcome.
+			let _ = outcome.send(outcomes);
+		});
+		let mut outcomes = settled.await.unwrap_or_default().into_iter();
+		for wait in held {
+			let mut result = Ok(());
+			for _ in 0..wait.waits {
+				let outcome = outcomes.next().unwrap_or_else(|| {
+					Err(EngineError::unreachable(
+						"a wait after a block's commit ended without an outcome",
+					)
+					.into())
+				});
+				if let (Ok(()), Err(e)) = (&result, outcome) {
+					result = Err(e);
+				}
+			}
+			let slot = &mut self.results[wait.slot];
+			slot.time = wait.event.before.elapsed();
+			match result {
+				Ok(()) => self.emit_held_statement_event(kvs, wait.event, Outcome::Success, None),
+				Err(e) => {
+					let error = types_error_from_anyhow(e);
+					let class = crate::observe::error_class::classify_types_error(&error);
+					slot.result = Err(error);
+					self.emit_held_statement_event(kvs, wait.event, Outcome::Error, Some(class));
+				}
+			}
+		}
+	}
+
+	/// Emit the `StatementEvent` a block statement held back, with the
+	/// outcome its slot ends with.
+	fn emit_held_statement_event(
+		&self,
+		kvs: &Datastore,
+		event: HeldStatementEvent,
+		outcome: Outcome,
+		error_class: Option<&'static str>,
+	) {
+		self.emit_statement_event_cached(
+			kvs,
+			event.kind,
+			event.read_only,
+			event.sql,
+			&event.before,
+			outcome,
+			event.rows,
+			error_class,
+		);
+	}
+
 	/// Commit the transaction of a block ended by `COMMIT`.
 	async fn commit_block(&self, txn: &Transaction) -> Result<()> {
 		// Stands in for a lost commit: the writes are discarded and the
@@ -3290,11 +3424,28 @@ impl Executor {
 			// effectively canceled.
 			return Ok(());
 		};
-		let txn = Arc::new(txn);
+		// The block's blocking index statements build inside its transaction, so
+		// a failed build rolls the whole block back, and each queues the wait
+		// for its index to be materialised, which only a committed index can be.
+		let waits = AfterCommitWaits::default();
+		let txn = Arc::new(txn.with_materialise_waits(&waits));
 		self.in_block = true;
 		self.let_undo.begin();
-		let ran = self.execute_begin_statement_timed(kvs, txn, stream, grouper).await;
+		let block_started = Instant::now();
+		let ran = self.execute_begin_statement_timed(kvs, txn, &waits, stream, grouper).await;
 		self.in_block = false;
+		// Outside the block's timer, so that work outlasting it can never turn
+		// a committed block into one reported as timed out.
+		let held = std::mem::take(&mut self.block_waits);
+		if matches!(ran, Ok(BlockEnd::Committed)) {
+			self.settle_block_waits(kvs, &waits, held, block_started).await;
+		} else {
+			// The block ended before its commit, which discarded what was
+			// queued: each held event reports the statement as it ran.
+			for wait in held {
+				self.emit_held_statement_event(kvs, wait.event, Outcome::Success, None);
+			}
+		}
 		// The block's single exit: its bindings stand only where it committed.
 		// Every other end, and every error, puts them back.
 		let undone = match &ran {
@@ -3323,6 +3474,7 @@ impl Executor {
 		&mut self,
 		kvs: &Datastore,
 		txn: Arc<Transaction>,
+		waits: &AfterCommitWaits,
 		stream: Pin<&mut S>,
 		grouper: &mut RequestGrouper,
 	) -> Result<BlockEnd>
@@ -3334,7 +3486,13 @@ impl Executor {
 				let start_results = self.results.len();
 				match common::time::timeout(
 					timeout,
-					self.execute_begin_statement_inner(kvs, Arc::clone(&txn), stream, grouper),
+					self.execute_begin_statement_inner(
+						kvs,
+						Arc::clone(&txn),
+						waits,
+						stream,
+						grouper,
+					),
 				)
 				.await
 				{
@@ -3371,7 +3529,7 @@ impl Executor {
 					}
 				}
 			}
-			None => self.execute_begin_statement_inner(kvs, txn, stream, grouper).await,
+			None => self.execute_begin_statement_inner(kvs, txn, waits, stream, grouper).await,
 		}
 	}
 
@@ -3379,6 +3537,7 @@ impl Executor {
 		&mut self,
 		kvs: &Datastore,
 		txn: Arc<Transaction>,
+		waits: &AfterCommitWaits,
 		mut stream: Pin<&mut S>,
 		grouper: &mut RequestGrouper,
 	) -> Result<BlockEnd>
@@ -3521,6 +3680,9 @@ impl Executor {
 			let sql_text = kvs.observer().needs_statement_text().then(|| stmt.to_sql());
 
 			let before = Instant::now();
+			// What the block had queued for after its commit before this
+			// statement ran, so that what the statement queues is told apart.
+			let queued_before = waits.len().await;
 			// Row count populated by the `stmt =>` arm below before it
 			// consumes the internal `Value`. Every other arm of the
 			// match either returns early or contributes a non-DML
@@ -3848,16 +4010,33 @@ impl Executor {
 			let outcome = Outcome::from(&result);
 			let error_class =
 				result.as_ref().err().map(crate::observe::error_class::classify_types_error);
-			self.emit_statement_event_cached(
-				kvs,
-				statement_type,
-				statement_read_only,
-				sql_text,
-				&before,
-				outcome,
-				stmt_result_rows,
-				error_class,
-			);
+			// A statement that queued work for after the commit holds its event
+			// until that work settles, when its slot does.
+			let queued = waits.len().await.saturating_sub(queued_before);
+			if queued > 0 && result.is_ok() {
+				self.block_waits.push(BlockWait {
+					slot: self.results.len(),
+					waits: queued,
+					event: HeldStatementEvent {
+						kind: statement_type,
+						read_only: statement_read_only,
+						sql: sql_text,
+						before,
+						rows: stmt_result_rows,
+					},
+				});
+			} else {
+				self.emit_statement_event_cached(
+					kvs,
+					statement_type,
+					statement_read_only,
+					sql_text,
+					&before,
+					outcome,
+					stmt_result_rows,
+					error_class,
+				);
+			}
 
 			self.results.push(QueryResult {
 				time: before.elapsed(),

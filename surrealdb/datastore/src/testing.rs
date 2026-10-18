@@ -27,13 +27,6 @@ pub enum RetryableConflictSite {
 	ConcurrentIndexInitialCleanup,
 	ConcurrentIndexInitialBatch,
 	ConcurrentIndexReservationRelease,
-	/// A conflict on the commit that drains HNSW pendings at the end of a
-	/// build — the batch the datastore's periodic index compaction also
-	/// drains.
-	ConcurrentIndexHnswPendingCompaction,
-	/// The DiskANN counterpart, raised in place of the apply whose own commit
-	/// would have carried the conflict.
-	ConcurrentIndexDiskAnnPendingCompaction,
 	/// A conflict on the transaction that ends a stopped build's generation
 	/// in `Error`. Raised at the start of each attempt, before the build state
 	/// is read, so whatever the attempt would find, it holds a builder that
@@ -94,13 +87,6 @@ pub enum NonRetryableErrorSite {
 	ConcurrentIndexReservationRelease,
 	ConcurrentIndexCountTailCommitted,
 	ConcurrentIndexInitialBatchCommit,
-	/// Fails the commit that drains HNSW pendings at the end of a build, which
-	/// runs after the build has published its index `Online`. Raised where the
-	/// retryable site of the same name is, in place of that commit.
-	ConcurrentIndexHnswPendingCompaction,
-	/// The DiskANN counterpart, raised in place of the apply whose own commit
-	/// would have failed.
-	ConcurrentIndexDiskAnnPendingCompaction,
 	/// Simulates the commit that publishes a build `Online` applying but
 	/// reporting `CommitOutcomeUnknown`: raised after that commit succeeds, so
 	/// the published state is durable while the builder sees a failure.
@@ -146,6 +132,15 @@ pub enum NonRetryableErrorSite {
 	/// Simulates the commit that queues a compaction pass's fresh request for
 	/// its index failing: raised in place of that commit.
 	IndexCompactionRequeue,
+	/// Simulates a full-text compaction apply failing on an error no retry
+	/// cures: raised in place of the commit of a plan the pass applied.
+	FullTextCompaction,
+	/// The HNSW counterpart of [`Self::FullTextCompaction`], raised where the
+	/// retryable site of the same name is.
+	HnswCompaction,
+	/// The DiskANN counterpart, raised in place of the apply whose own commit
+	/// would have failed.
+	DiskAnnCompaction,
 }
 
 static RETRYABLE_CONFLICTS: OnceLock<Mutex<HashMap<(RetryableConflictSite, Uuid), usize>>> =
@@ -195,6 +190,11 @@ pub fn maybe_inject_retryable_conflict(site: RetryableConflictSite, node_id: Uui
 
 pub fn retryable_conflict_count(site: RetryableConflictSite, node_id: Uuid) -> usize {
 	retryable_conflicts().lock().unwrap().get(&(site, node_id)).copied().unwrap_or(0)
+}
+
+/// How many injected errors at `site` on `node_id` are still to be raised.
+pub fn non_retryable_error_count(site: NonRetryableErrorSite, node_id: Uuid) -> usize {
+	non_retryable_errors().lock().unwrap().get(&(site, node_id)).copied().unwrap_or(0)
 }
 
 pub fn inject_non_retryable_error(

@@ -347,6 +347,13 @@ fn every_datastore_variant() -> Vec<(&'static str, DatastoreError)> {
 			DatastoreError::IndexBuildOutlastedTimeout(Duration(std::time::Duration::from_secs(1))),
 		),
 		("IndexBuildWaitCancelled", DatastoreError::IndexBuildWaitCancelled),
+		(
+			"IndexMaterialiseWaitStopped",
+			DatastoreError::IndexMaterialiseWaitStopped {
+				cancelled: true,
+				reason: "sample".to_string(),
+			},
+		),
 		("QueryBeyondMemoryThreshold", DatastoreError::QueryBeyondMemoryThreshold),
 		(
 			"TransactionWriteKeysExceeded",

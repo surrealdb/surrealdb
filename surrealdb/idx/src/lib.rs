@@ -77,7 +77,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use roaring::RoaringTreemap;
-use surrealdb_datastore::values::fulltext::DocLengthAndCount;
+use surrealdb_datastore::values::fulltext::{DocLengthAndCount, TermDocsResidual};
 use surrealdb_datastore::values::index_build::{
 	Appending, AppendingId, BatchId, BuildGeneration, BuildTicket, BuildTicketMutationSeq,
 	IndexBuildReservation, PrimaryAppendingTicket,
@@ -120,7 +120,8 @@ use crate::key::schema::{
 	HnswPendingLegacyPrefix, HnswRecordPendingKey, HnswRecordPendingPrefix, HnswStateKey,
 	HnswVectorKey, IdxRoot, IndexAppendKey, IndexAppendPrefix, IndexCompactionKey, IndexPrimaryKey,
 	IndexVersionKey, TermChangeBatchPrefix, TermChangeBatchTermPrefix, TermChangeSetKey,
-	TermChangesKey, TermDocsKey, TermDocsResidualKey, TermGenerationKey, TermPostingKey,
+	TermChangesKey, TermDocsKey, TermDocsResidualKey, TermDocsResidualPrefix, TermGenerationKey,
+	TermPostingKey,
 };
 #[cfg(diskann)]
 use crate::key::schema::{
@@ -549,7 +550,7 @@ impl IndexKeyBase {
 
 	/// Range covering all DiskANN graph element payloads.
 	#[cfg(diskann)]
-	fn new_de_range(&self) -> Result<TypedRange<crate::trees::diskann::DiskAnnElement>> {
+	pub fn new_de_range(&self) -> Result<TypedRange<crate::trees::diskann::DiskAnnElement>> {
 		use crate::key::schema::DiskannElementPrefix;
 
 		DiskannElementPrefix {
@@ -674,7 +675,7 @@ impl IndexKeyBase {
 
 	/// Range covering the sharded `!dw` pending updates for one shard.
 	#[cfg(diskann)]
-	fn new_dw_shard_range(
+	pub fn new_dw_shard_range(
 		&self,
 		shard: u16,
 	) -> Result<TypedRange<crate::trees::diskann::DiskAnnRecordPendingUpdate>> {
@@ -1079,6 +1080,21 @@ impl IndexKeyBase {
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			term: Cow::Borrowed(term),
+		}
+	}
+
+	/// Every term's residual (`!tr`), or only those of terms sorting before
+	/// `below` where it is given.
+	fn new_tr_terms_range(&self, below: Option<&str>) -> Result<TypedRange<TermDocsResidual>> {
+		let prefix = TermDocsResidualPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+		};
+		match below {
+			Some(below) => prefix.range_where(..Cow::Borrowed(below)),
+			None => prefix.range(),
 		}
 	}
 

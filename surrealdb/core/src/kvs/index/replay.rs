@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -10,28 +10,31 @@ use uuid::Uuid;
 use web_time::Instant;
 
 use super::builder::Building;
+use super::count::{
+	CountPrimaryAppendingScan, CountPrimaryProgress, Marker, baselined_match, queued_no_later,
+};
+use super::kind::{BatchRange, InitialBatchSink, SinkFrame};
 use super::{
 	Appending, BUILD_CLOSING_SLEEP, BuildGeneration, ExistingPrimaryAppending, IndexBuildPhase,
 	IndexBuildReportStatus, LEGACY_BATCH_ID, PrimaryAppendingTicket,
 };
-use crate::catalog::providers::{NodeProvider, TableProvider};
-use crate::catalog::{Index, Record};
+use crate::catalog::Record;
+use crate::catalog::providers::NodeProvider;
 use crate::ctx::FrozenContext;
 use crate::exec::analyzer_function::StreamingAnalyzerFunction;
-use crate::idx::docids::{DocId, TableDocIds};
+use crate::idx::PreviousBuildPrimaryKey;
+use crate::idx::docids::TableDocIds;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
-use crate::idx::{IndexKeyBase, PreviousBuildPrimaryKey};
 use crate::key::schema::{
-	BuildAppendKey, BuildReservationKey, DocLookupKey, DocLookupPrefix, DocPendingKey,
-	DocPendingPrefix, IndexAppendKey, RecordKey, RecordPrefix,
+	BuildAppendKey, BuildReservationKey, DocPendingKey, IndexAppendKey, RecordKey, RecordPrefix,
 };
-use crate::key::{KVKey, KVKeyDecode, KVSubspace, KVValue, Key, Resumable};
+use crate::key::{KVKeyDecode, KVSubspace, KVValue, Key, Resumable};
 use crate::kvs::{
 	DatastoreError, Direction, INDEXING_BATCH_SIZE, LayoutSet, Transaction, Val,
 	is_retryable_transaction_conflict,
 };
-use crate::val::{Array, Number, Object, RecordId, RecordIdKey, RecordIdentity, Value};
+use crate::val::{RecordId, RecordIdKey, RecordIdentity, Value};
 
 /// The image of the record `rid` that an index entry is evaluated over, from
 /// the `data` its stored value decodes to.
@@ -54,16 +57,6 @@ fn entry_image<'a>(data: &'a Value, rid: &RecordId, needed: bool) -> Cow<'a, Val
 	Cow::Owned(Value::Object(object))
 }
 
-/// Maximum consecutive commit-conflict retries for one deferred doc-ID reclaim
-/// sweep chunk (and for its repair pass) before the sweep gives up.
-///
-/// The sweep runs after the build is durably `Online` and its `!dp` markers are
-/// durable, so giving up loses nothing — leftover markers are drained by the
-/// next doc-ID index build on the table. The bound exists so a conflict storm
-/// cannot wedge the finished build task (and, for a blocking `DEFINE INDEX`,
-/// the statement waiting on it).
-const DOC_ID_RECLAIM_MAX_RETRIES: usize = 10;
-
 /// Maximum consecutive commit-conflict retries for one page of the rebuild of a
 /// generation's primary-append markers before the build gives up.
 ///
@@ -74,140 +67,22 @@ const DOC_ID_RECLAIM_MAX_RETRIES: usize = 10;
 /// by starting a fresh generation.
 const PRIMARY_APPEND_REBUILD_MAX_RETRIES: usize = 10;
 
-/// Most ids a pending-reclaim marker in a 3.3 pre-release's spelling is read as.
-///
-/// That spelling drops a nested number's variant, so the marker stands for
-/// every id that differs only there — three per number, an integer, a float
-/// and a decimal of one value. The bound covers an id with three numbers in
-/// full and keeps a marker with more from costing a read per combination.
-const LEGACY_MARKER_MAX_READINGS: usize = 27;
-
-struct InitialIndexValue<'a> {
-	rid: &'a RecordId,
-	opt_values: Option<Vec<Value>>,
-	count_cond_match: Option<(bool, bool)>,
+/// What indexing one initial scan batch did.
+pub(super) struct InitialBatch<'s> {
+	/// The records it indexed.
+	pub(super) indexed: usize,
+	/// How many of the batch's records, from its first, it processed: all of them, unless the
+	/// kind's sink cut the batch where one frame would hold too many vectors. The rest belong
+	/// to the next transaction. At least 1 for a batch that was not aborted.
+	pub(super) consumed: usize,
+	/// The sink frame the batch was applied in, until the build transaction ends.
+	pub(super) frame: Option<SinkFrame<'s>>,
 }
 
-/// How far a COUNT build's merge of queued old states has reached, carried
-/// from one initial-scan batch to the next.
-///
-/// Cloned with the batch it belongs to, so a batch that is retried starts again
-/// from the state before it.
-#[derive(Clone, Debug, Default)]
-pub(super) struct CountPrimaryProgress {
-	/// The last record the merge has covered; `None` before the first batch.
-	cursor: Option<RecordIdKey>,
-	/// Markers met in a span before the one holding their record, by record,
-	/// to be taken up in that span. Only a marker an older node spelled under
-	/// the index format can sit there.
-	early: BTreeMap<RecordIdentity, PrimaryAppendingTicket>,
-	/// Records whose span read an older node's marker for them that sorts
-	/// after it, which the merge skips when it gets there.
-	late_read: BTreeSet<RecordIdentity>,
-}
-
-impl CountPrimaryProgress {
-	/// Progress resuming after `cursor`, the last record a checkpoint covered.
-	///
-	/// Nothing is set aside or read yet: a scan starts by rebuilding every
-	/// marker at its record's own key, so none is left in another record's span.
-	/// A resume that would leave an older node's marker unmet for a record at or
-	/// before the cursor rescans instead
-	/// ([`Building::resume_strands_an_older_marker`]).
-	pub(super) fn resuming_at(cursor: Option<RecordIdKey>) -> Self {
-		Self {
-			cursor,
-			..Self::default()
-		}
-	}
-
-	/// Takes the markers set aside for records up to `through`, or every one
-	/// once the scan has no live record left.
-	fn take_due(
-		&mut self,
-		through: Option<&RecordIdentity>,
-	) -> Vec<(RecordIdentity, PrimaryAppendingTicket)> {
-		match through {
-			Some(through) => self.early.extract_if(..=through, |_, _| true).collect(),
-			None => std::mem::take(&mut self.early).into_iter().collect(),
-		}
-	}
-}
-
-struct CountPrimaryAppendingScan<'a> {
-	lookup_tx: &'a Transaction,
-	progress: &'a mut CountPrimaryProgress,
-	through: Option<&'a RecordIdKey>,
-	live_ids: &'a BTreeSet<RecordIdentity>,
-	/// The keys of the older nodes' markers the batch's scan read, by record.
-	older_markers: &'a [(RecordIdentity, PreviousBuildPrimaryKey)],
-	initial_count: usize,
-}
-
-/// Whether mutation `a` of a record was queued no later than its mutation `b`.
-///
-/// A record's first queued mutation is the one with the lowest ticket, and its
-/// old state is the record before the queue: a writer draws its ticket after
-/// its snapshot and before it commits, and tickets are drawn in order, so no
-/// other queued mutation of the record committed before that writer's
-/// snapshot. That holds while every writer draws its tickets from the
-/// generation's one counter, which the build checks before it publishes
-/// (`ensure_single_ticket_allocator`).
-fn queued_no_later(a: PrimaryAppendingTicket, b: PrimaryAppendingTicket) -> bool {
-	(a.ticket, a.mutation_seq) <= (b.ticket, b.mutation_seq)
-}
-
-/// The predicate results a record baselined from its queued mutation's old
-/// state carries: no state before it, and the old state's own result.
-fn baselined_match(count_cond_match: Option<(bool, bool)>) -> Option<(bool, bool)> {
-	count_cond_match.map(|(old_matches, _)| (false, old_matches))
-}
-
-/// A `!bp` marker whose queued mutation has confirmed the marker's record,
-/// with that mutation.
-struct Marker {
-	ptr: PrimaryAppendingTicket,
-	appending: Appending,
-}
-
-impl Marker {
-	/// The earlier of two markers for one record.
-	fn earlier(self, other: Self) -> Self {
-		if queued_no_later(self.ptr, other.ptr) {
-			self
-		} else {
-			other
-		}
-	}
-}
-
-/// When the merge meets a marker, against the span that holds its record's
-/// own key.
-enum Met {
-	/// In a span before its record's.
-	Before,
-	/// In its record's span.
-	In,
-	/// In a span after its record's.
-	After,
-}
-
-impl Met {
-	/// Where `record` sorts against the span after `after` through `through`,
-	/// which runs to the end when `through` is `None`.
-	fn place(
-		record: &RecordIdentity,
-		after: Option<&RecordIdentity>,
-		through: Option<&RecordIdentity>,
-	) -> Self {
-		if through.is_some_and(|through| record > through) {
-			Met::Before
-		} else if after.is_some_and(|after| record <= after) {
-			Met::After
-		} else {
-			Met::In
-		}
-	}
+pub(super) struct InitialIndexValue<'a> {
+	pub(super) rid: &'a RecordId,
+	pub(super) opt_values: Option<Vec<Value>>,
+	pub(super) count_cond_match: Option<(bool, bool)>,
 }
 
 impl Building {
@@ -605,7 +480,14 @@ impl Building {
 	/// If a queued mutation already exists for a record, the scan indexes the
 	/// queued old state instead of the current record value. That avoids
 	/// double-counting the same write when the appending is replayed later.
-	pub(super) async fn index_initial_batch(
+	///
+	/// A record with no queued mutation goes to `sink` when the kind's sink
+	/// takes records, and through the kind's write path otherwise. A sink
+	/// takes records in scan order until one more would exceed what one of its
+	/// frames inserts; the batch is cut before that record, and the records
+	/// from it on — queued or not — are left to the next transaction.
+	#[allow(clippy::too_many_arguments)]
+	pub(super) async fn index_initial_batch<'s>(
 		&self,
 		ctx: &FrozenContext,
 		tx: &Transaction,
@@ -613,7 +495,8 @@ impl Building {
 		initial_count: usize,
 		v1_appending_sentinel: &mut bool,
 		count_progress: &mut Option<CountPrimaryProgress>,
-	) -> Result<usize> {
+		sink: &'s InitialBatchSink,
+	) -> Result<InitialBatch<'s>> {
 		let mut rc = false;
 		let mut count = 0;
 		let mut live_ids = BTreeSet::new();
@@ -623,7 +506,16 @@ impl Building {
 		// Each record's key, decoded once for the scan and the older markers.
 		let keys =
 			values.iter().map(|(k, _)| RecordKey::decode_key(k)).collect::<Result<Vec<_>>>()?;
-		let fulltext_index = self.fulltext_index(ctx).await?;
+		let range = match (values.first(), values.last()) {
+			(Some((first, _)), Some((last, _))) => Some(BatchRange {
+				first,
+				last,
+			}),
+			_ => None,
+		};
+		let batch = self.batch_context(ctx, range).await?;
+		let mut sink_records = sink.records(self.ctx.node_id());
+		let mut consumed = values.len();
 		let lookup_tx = self.new_read_tx().await?;
 		// The index's columns and `COUNT` guard, as the engine
 		// evaluates them: compiled once for the build, and the same
@@ -658,7 +550,7 @@ impl Building {
 				// so a long batch cannot starve the runtime worker.
 				yield_now!();
 				if self.is_aborted().await {
-					return Ok(count);
+					return Ok((count, i, true));
 				}
 				self.is_beyond_threshold(Some(initial_count + count))?;
 				let rid: Arc<RecordId> = RecordId {
@@ -706,7 +598,7 @@ impl Building {
 					None => None,
 				};
 				// Is there already a queued update for this record?
-				let (opt_values, count_cond_match) = if let Some(a) = self
+				let (opt_values, count_cond_match, queued) = if let Some(a) = self
 					.check_existing_primary_appending(
 						&lookup_tx,
 						&rid.key,
@@ -715,7 +607,7 @@ impl Building {
 					)
 					.await?
 				{
-					(a.old_values, baselined_match(a.count_cond_match))
+					(a.old_values, baselined_match(a.count_cond_match), true)
 				} else {
 					// Otherwise, proceed with normal indexing.
 					let image = entry_image(&val.data, &rid, entry.reads_record_id());
@@ -726,12 +618,23 @@ impl Building {
 					// before-image it is compared against is its absence.
 					let count_cond_match =
 						entry.guard_matches(&image, &exec).await?.map(|matches| (false, matches));
-					(opt_values, count_cond_match)
+					(opt_values, count_cond_match, false)
 				};
+				// A record with no queued mutation goes to the kind's sink when it
+				// takes records. A record with one keeps the write path, which
+				// queues it behind the mutation replay applies on top.
+				if !queued && sink.takes_records() {
+					if !sink.take(&mut sink_records, &rid.key, opt_values)? {
+						consumed = i;
+						break;
+					}
+					count += 1;
+					continue;
+				}
 				self.index_initial_values(
 					ctx,
 					&az_fn,
-					&fulltext_index,
+					&batch.fulltext,
 					InitialIndexValue {
 						rid: rid.as_ref(),
 						opt_values,
@@ -766,69 +669,41 @@ impl Building {
 			// Trigger compaction if needed.
 			self.check_index_compaction(tx, &mut rc).await?;
 			// We're done.
-			Ok(count)
+			Ok((count, consumed, false))
 		}
 		.await;
 		let cancel_result = lookup_tx.cancel().await;
-		match result {
-			Ok(count) => {
+		let (indexed, consumed, aborted) = match result {
+			Ok(done) => {
 				cancel_result?;
-				Ok(count)
+				done
 			}
 			Err(err) => {
 				let _ = cancel_result;
-				Err(err)
+				return Err(err);
 			}
-		}
-	}
-
-	/// Index queued old states for COUNT records the live scan has already passed.
-	pub(super) async fn index_remaining_count_primary_appendings(
-		&self,
-		ctx: &FrozenContext,
-		tx: &Transaction,
-		count_progress: &mut Option<CountPrimaryProgress>,
-		initial_count: usize,
-	) -> Result<usize> {
-		let Some(progress) = count_progress.as_mut() else {
-			return Ok(0);
 		};
-		let lookup_tx = self.new_read_tx().await?;
-		let mut rc = false;
-		let live_ids = BTreeSet::new();
-		let exec = self.exec_ctx(ctx).await?;
-		let az_fn = StreamingAnalyzerFunction::new(&exec);
-		let result = self
-			.index_missing_count_primary_appendings(
-				ctx,
-				CountPrimaryAppendingScan {
-					lookup_tx: &lookup_tx,
-					progress,
-					through: None,
-					live_ids: &live_ids,
-					older_markers: &[],
-					initial_count,
-				},
-				&az_fn,
-				&mut rc,
-			)
-			.await;
-		let cancel_result = lookup_tx.cancel().await;
-		match result {
-			Ok(count) => {
-				cancel_result?;
-				self.check_index_compaction(tx, &mut rc).await?;
-				Ok(count)
+		// The records the sink took, applied in the build transaction over the
+		// range the batch consumed. An aborted batch is discarded whole.
+		let frame = match (aborted, consumed) {
+			(false, 1..) => {
+				let range = BatchRange {
+					first: &values[0].0,
+					last: &values[consumed - 1].0,
+				};
+				sink.apply(ctx, &self.aborted, range, sink_records).await?
 			}
-			Err(err) => {
-				let _ = cancel_result;
-				Err(err)
-			}
-		}
+			_ => None,
+		};
+		Ok(InitialBatch {
+			indexed,
+			consumed,
+			frame,
+		})
 	}
 
 	/// Index one initial-scan value.
-	async fn index_initial_values(
+	pub(super) async fn index_initial_values(
 		&self,
 		ctx: &FrozenContext,
 		az_fn: &StreamingAnalyzerFunction<'_>,
@@ -862,198 +737,13 @@ impl Building {
 		}
 	}
 
-	/// Merge orphaned COUNT primary markers into the initial baseline.
-	///
-	/// Durable `!bp` markers record the first queued mutation for each record
-	/// while the initial scan is running. A COUNT build must index the queued
-	/// old state even when the live record scan no longer sees the record, so
-	/// later replay deltas are applied against the same baseline.
-	///
-	/// Each call covers the span of keys from the last record the merge covered
-	/// to the last live record of the batch just scanned, and settles the records
-	/// whose own keys it holds: the scan has baselined the live ones, and a gone
-	/// one is baselined from the marker at its own key. Either takes the earlier
-	/// of the mutations that marker and an older node's marker for the record
-	/// point at. An older node spells the id under the index format, so its
-	/// marker sits at another key, which can fall in a span before or after its
-	/// record's:
-	///
-	/// - one met before its record's span is set aside and judged there;
-	/// - one in its record's span counts only while the record is gone and its own key holds no
-	///   marker for it;
-	/// - one met after its record's span is skipped if that span read it, or if the record's own
-	///   key marks an earlier mutation, which that span read or which came after it. Otherwise the
-	///   marker came after the span, which baselined the record as it stood, or the record was gone
-	///   from the span: it counts only if the record is gone when it is met. That stands in for the
-	///   record's presence in its span, so a record that appears or goes in between is miscounted
-	///   by one.
-	///
-	/// A call without `through` covers the markers after the last span, takes up
-	/// every marker set aside and leaves nothing for a later span.
-	///
-	/// A marker is met only if it is written before the merge passes its key. One
-	/// sorting before its record that is written after that is read by the scan
-	/// when the record is live in its span, and by the record's own marker when it
-	/// has one; a record only older nodes marked that is gone from its span by
-	/// then is not counted.
-	async fn index_missing_count_primary_appendings(
-		&self,
-		ctx: &FrozenContext,
-		scan: CountPrimaryAppendingScan<'_>,
-		az_fn: &StreamingAnalyzerFunction<'_>,
-		rc: &mut bool,
-	) -> Result<usize> {
-		let Index::Count(_) = &self.ix.index else {
-			return Ok(0);
-		};
-		let generation = self.build_generation.load(Ordering::Acquire);
-		if generation == 0 {
-			return Ok(0);
-		}
-		let after = scan.progress.cursor.clone().map(RecordIdentity);
-		let through = scan.through.map(|t| RecordIdentity(t.clone()));
-		// An older marker this span reads is met again if it sorts past the span.
-		let span_end =
-			scan.through.map(|t| self.ikb.new_bp_key(generation, t).encode_key()).transpose()?;
-		let past_span = |key: &[u8]| span_end.as_ref().is_some_and(|end| key > &**end);
-		for (record, key) in scan.older_markers {
-			if past_span(key.as_bytes()) {
-				scan.progress.late_read.insert(record.clone());
-			}
-		}
-		let mut count = 0;
-		// Markers set aside earlier whose record this span holds.
-		for (record, ptr) in scan.progress.take_due(through.as_ref()) {
-			yield_now!();
-			if self.is_aborted().await {
-				return Ok(count);
-			}
-			self.is_beyond_threshold(Some(scan.initial_count + count))?;
-			if self.settled_in_span(&scan, generation, &record).await? {
-				continue;
-			}
-			let appending = self.queued_appending(scan.lookup_tx, generation, ptr).await?;
-			self.index_queued_baseline(ctx, az_fn, rc, appending).await?;
-			count += 1;
-		}
-		let range =
-			self.ikb.new_bp_span_range(generation, scan.progress.cursor.as_ref(), scan.through)?;
-		let mut next = (range.start() < range.end()).then_some(range);
-		while let Some(rng) = next {
-			if self.is_aborted().await {
-				return Ok(count);
-			}
-			let batch =
-				scan.lookup_tx.batch_keys_vals(rng.clone(), INDEXING_BATCH_SIZE, None).await?;
-			// A full page resumes just after the last key it returned; a short
-			// page means the span is drained.
-			next = match (&batch.next, batch.result.last()) {
-				(Some(_), Some((k, _))) => Some(rng.resume_after(k, Direction::Forward)),
-				_ => None,
-			};
-			for (key, val) in batch.result {
-				// Baseline indexing is synchronous CPU work; yield so a long
-				// batch cannot starve the runtime worker.
-				yield_now!();
-				if self.is_aborted().await {
-					return Ok(count);
-				}
-				self.is_beyond_threshold(Some(scan.initial_count + count))?;
-				// The record comes from the queued mutation, never from the
-				// marker's key: a key an older node spelled under the index
-				// format need not decode, and one that does can name another
-				// record. The mutation carries the id losslessly.
-				let ptr = PrimaryAppendingTicket::kv_decode_value(&val, ())?;
-				let appending = self.queued_appending(scan.lookup_tx, generation, ptr).await?;
-				let record = RecordIdentity(appending.id.clone());
-				// A record the batch just scanned was baselined by the scan.
-				if scan.live_ids.contains(&record) {
-					continue;
-				}
-				let own_key = self.ikb.new_bp_key(generation, &appending.id).encode_key()?;
-				let appending = if *own_key == *key {
-					// The record's own marker, unless an older node marked an
-					// earlier mutation of it.
-					let own = Marker {
-						ptr,
-						appending,
-					};
-					match self.older_marker(scan.lookup_tx, generation, &record.0).await? {
-						Some((older_key, older)) => {
-							if past_span(older_key.as_bytes()) {
-								scan.progress.late_read.insert(record);
-							}
-							own.earlier(older).appending
-						}
-						None => own.appending,
-					}
-				} else {
-					// A marker an older node wrote at another key than its
-					// record's, judged by where its record is.
-					match Met::place(&record, after.as_ref(), through.as_ref()) {
-						Met::Before => {
-							scan.progress.early.entry(record).or_insert(ptr);
-							continue;
-						}
-						Met::In => {
-							if self.settled_in_span(&scan, generation, &record).await? {
-								continue;
-							}
-						}
-						Met::After => {
-							// It is met only here, so the record's entry is spent
-							// however it is judged.
-							if scan.progress.late_read.remove(&record) {
-								continue;
-							}
-							let own =
-								self.own_marker(scan.lookup_tx, generation, &record.0).await?;
-							if own.is_some_and(|own| queued_no_later(own.ptr, ptr))
-								|| scan
-									.lookup_tx
-									.exists_key(&self.record_key(&record.0), None)
-									.await?
-							{
-								continue;
-							}
-						}
-					}
-					appending
-				};
-				self.index_queued_baseline(ctx, az_fn, rc, appending).await?;
-				count += 1;
-			}
-		}
-		if let Some(last) = scan.through {
-			scan.progress.cursor = Some(last.clone());
-		}
-		Ok(count)
-	}
-
-	/// The queued mutation a marker points at. The initial scan never consumes
-	/// one, so a marker naming a missing mutation is corruption.
-	async fn queued_appending(
-		&self,
-		tx: &Transaction,
-		generation: BuildGeneration,
-		ptr: PrimaryAppendingTicket,
-	) -> Result<Appending> {
-		let bg = self.ikb.new_bg_key(generation, ptr.ticket, ptr.mutation_seq);
-		let Some(appending) = tx.get_key(&bg, None).await? else {
-			return Err(
-				DatastoreError::CorruptedIndex("Durable appending record is missing").into()
-			);
-		};
-		Ok(appending)
-	}
-
 	/// The marker at `record`'s own key, with the queued mutation it points at,
 	/// when that mutation is `record`'s.
 	///
 	/// A marker an older node wrote for another record can sit there — the older
 	/// spelling of `[1, NONE]` is `[1]`'s key under this release — so the marker
 	/// at the key counts only once its queued mutation confirms the record.
-	async fn own_marker(
+	pub(super) async fn own_marker(
 		&self,
 		tx: &Transaction,
 		generation: BuildGeneration,
@@ -1063,40 +753,6 @@ impl Building {
 			return Ok(None);
 		};
 		self.confirmed_marker(tx, generation, ptr, record).await
-	}
-
-	/// The marker an older node left for `record` under its spelling, with the
-	/// key it sits at.
-	///
-	/// Only an id holding a number is spelled differently there, and the key can
-	/// be another record's, so the marker counts only once its queued mutation
-	/// confirms the record.
-	async fn older_marker(
-		&self,
-		tx: &Transaction,
-		generation: BuildGeneration,
-		record: &RecordIdKey,
-	) -> Result<Option<(PreviousBuildPrimaryKey, Marker)>> {
-		let Some(key) = self.ikb.new_bp_key_in_previous_spelling(generation, record)? else {
-			return Ok(None);
-		};
-		let Some(ptr) = tx.get_key(&key, None).await? else {
-			return Ok(None);
-		};
-		Ok(self.confirmed_marker(tx, generation, ptr, record).await?.map(|marker| (key, marker)))
-	}
-
-	/// Whether `record`, whose own key the span holds, is settled there without
-	/// an older node's marker: the scan baselined it, or its own key holds a
-	/// marker for it, which takes up the older one with it.
-	async fn settled_in_span(
-		&self,
-		scan: &CountPrimaryAppendingScan<'_>,
-		generation: BuildGeneration,
-		record: &RecordIdentity,
-	) -> Result<bool> {
-		Ok(scan.live_ids.contains(record)
-			|| self.own_marker(scan.lookup_tx, generation, &record.0).await?.is_some())
 	}
 
 	/// The markers an older node may have left for the batch's records under
@@ -1146,7 +802,7 @@ impl Building {
 	}
 
 	/// The marker pointing at `ptr`, if its queued mutation names `record`.
-	async fn confirmed_marker(
+	pub(super) async fn confirmed_marker(
 		&self,
 		tx: &Transaction,
 		generation: BuildGeneration,
@@ -1158,96 +814,6 @@ impl Building {
 			ptr,
 			appending,
 		}))
-	}
-
-	/// Indexes the old state a record's queued mutation carries, as the
-	/// record's baseline.
-	async fn index_queued_baseline(
-		&self,
-		ctx: &FrozenContext,
-		az_fn: &StreamingAnalyzerFunction<'_>,
-		rc: &mut bool,
-		appending: Appending,
-	) -> Result<()> {
-		let rid = RecordId {
-			table: self.ikb.table().clone(),
-			key: appending.id,
-		};
-		let count_cond_match = baselined_match(appending.count_cond_match);
-		self.index_initial_values(
-			ctx,
-			az_fn,
-			&None,
-			InitialIndexValue {
-				rid: &rid,
-				opt_values: appending.old_values,
-				count_cond_match,
-			},
-			rc,
-		)
-		.await
-	}
-
-	/// Whether resuming a COUNT build's scan after `cursor` would leave an older
-	/// node's marker unmet: one that sorts after the cursor's own key but names a
-	/// record at or before it.
-	///
-	/// The merge takes such a marker up only when a later span meets it, and the
-	/// rebuild that starts a resumed scan moves every marker to its record's own
-	/// key, which is behind the cursor for this one. Whether its record was live
-	/// when its span was scanned is not recorded, so any such marker counts. A
-	/// marker an older node writes after the check needs no span: its record's
-	/// span already saw the record as it stood before that write.
-	pub(super) async fn resume_strands_an_older_marker(
-		&self,
-		generation: BuildGeneration,
-		cursor: &RecordIdKey,
-	) -> Result<bool> {
-		let tx = self.new_read_tx().await?;
-		let result = async {
-			let passed = RecordIdentity(cursor.clone());
-			let range = self.ikb.new_bp_span_range(generation, Some(cursor), None)?;
-			let mut next = (range.start() < range.end()).then_some(range);
-			while let Some(rng) = next {
-				let batch = tx.batch_keys_vals(rng.clone(), INDEXING_BATCH_SIZE, None).await?;
-				next = match (&batch.next, batch.result.last()) {
-					(Some(_), Some((k, _))) => Some(rng.resume_after(k, Direction::Forward)),
-					_ => None,
-				};
-				let queued = batch
-					.result
-					.iter()
-					.map(|(_, val)| {
-						let ptr = PrimaryAppendingTicket::kv_decode_value(val, ())?;
-						Ok(self.ikb.new_bg_key(generation, ptr.ticket, ptr.mutation_seq))
-					})
-					.collect::<Result<Vec<_>>>()?;
-				for appending in tx.get_many_key(queued, None).await? {
-					let Some(appending) = appending else {
-						return Err(DatastoreError::CorruptedIndex(
-							"Durable appending record is missing",
-						)
-						.into());
-					};
-					if RecordIdentity(appending.id) <= passed {
-						return Ok(true);
-					}
-				}
-			}
-			Ok(false)
-		}
-		.await;
-		let cancel_result = tx.cancel().await;
-		match result {
-			Ok(strands) => {
-				cancel_result?;
-				Ok(strands)
-			}
-			Err(err) => {
-				let _ = cancel_result;
-				Err(err)
-			}
-		}
 	}
 
 	/// Rebuilds this generation's `!bp` markers from its queued mutations.
@@ -1513,7 +1079,7 @@ impl Building {
 		// `other_doc_id_index_building` below).
 		let reclaim_doc_id = appending.new_values.is_none()
 			&& appending.old_values.is_some()
-			&& self.ix.uses_shared_doc_ids();
+			&& self.kind().defers_doc_ids();
 		let rid = RecordId {
 			table: self.ikb.table().clone(),
 			key: rid_key.clone(),
@@ -1569,309 +1135,13 @@ impl Building {
 		Ok(rid_key)
 	}
 
-	/// Whether another doc-ID-consuming index on the same table is still building
-	/// (durable build phase `Building`/`Closing`), and so may still need the shared
-	/// `!dj`/`!dd` mapping to replay its own copy of a queued delete.
-	///
-	/// Gates the reclaim in [`apply_appending`](Self::apply_appending): while a
-	/// sibling is still building the mapping must be kept alive (each build resolves
-	/// and removes its own entries against it), so the reclaim is deferred through a
-	/// durable `!dp` marker and completed by
-	/// [`reclaim_deferred_doc_ids`](Self::reclaim_deferred_doc_ids). The common case
-	/// (a single building doc-ID index) finds no sibling and reclaims immediately;
-	/// an already-`Online` sibling keeps its `!bs` state but is not counted, since
-	/// it processed the delete synchronously.
-	///
-	/// The check counts a sibling by durable phase alone, deliberately ignoring
-	/// owner-lease expiry: a stranded `Building` sibling is resumable, and its
-	/// resumed build still needs the mapping to replay its unconsumed deletes, so
-	/// keeping the mapping (and the durable marker) is the safe answer either way.
-	async fn other_doc_id_index_building(&self, ctx: &FrozenContext) -> Result<bool> {
-		let tx = ctx.tx();
-		let indexes =
-			tx.all_tb_indexes(self.ix_key.ns, self.ix_key.db, self.ikb.table(), None).await?;
-		for other in indexes.iter() {
-			if other.index_id == self.ix.index_id || !other.uses_shared_doc_ids() {
-				continue;
-			}
-			let other_ikb = IndexKeyBase::new(
-				self.ix_key.ns,
-				self.ix_key.db,
-				self.ikb.table().clone(),
-				other.index_id,
-			);
-			if let Some(state) = tx.get_key(&other_ikb.new_bs_key(), None).await?
-				&& matches!(state.phase, IndexBuildPhase::Building | IndexBuildPhase::Closing)
-			{
-				return Ok(true);
-			}
-		}
-		Ok(false)
-	}
-
-	/// Records durably — in the same transaction that consumes the delete from
-	/// this builder's queue — that the shared doc-ID mapping for `id` could not
-	/// be reclaimed yet, because a sibling doc-ID index was still building and
-	/// may still need it to replay its own copy of the delete.
-	///
-	/// The `!dp` marker is table-scoped, so it is visible to *every* doc-ID
-	/// index build on the table — including builds that started after the delete
-	/// and resumed/taken-over builds — and survives builder errors, aborts and
-	/// crashes. It is consumed by
-	/// [`reclaim_deferred_doc_ids`](Self::reclaim_deferred_doc_ids).
-	async fn defer_doc_id_reclaim(&self, tx: &Transaction, id: &RecordIdKey) -> Result<()> {
-		let dp = DocPendingKey::new(
-			self.ix_key.ns,
-			self.ix_key.db,
-			Cow::Borrowed(self.ikb.table()),
-			RecordIdentity(id.clone()),
-		);
-		tx.set_key(&dp, &()).await
-	}
-
-	/// Every record a pending-reclaim marker in a 3.3 pre-release's spelling can
-	/// stand for, up to [`LEGACY_MARKER_MAX_READINGS`]: the id its bytes decode
-	/// to under the index format, in each variant of every number nested in it.
-	fn legacy_marker_readings(&self, marker: &[u8]) -> Result<Vec<RecordIdKey>> {
-		let table = Cow::Borrowed(self.ikb.table());
-		let pending =
-			DocPendingPrefix::new(self.ix_key.ns, self.ix_key.db, table.clone()).encode_bound()?;
-		let Some(spelling) = marker.strip_prefix(&*pending) else {
-			return Ok(Vec::new());
-		};
-		let mut erased =
-			DocLookupPrefix::new(self.ix_key.ns, self.ix_key.db, table).encode_bound()?.to_vec();
-		erased.extend_from_slice(spelling);
-		let Ok(di) = DocLookupKey::decode_key(&erased) else {
-			return Ok(Vec::new());
-		};
-		Ok(numeric_variants(&di.id, LEGACY_MARKER_MAX_READINGS))
-	}
-
-	/// Drains the table's durable `!dp` pending-reclaim markers, reclaiming the
-	/// shared `!dj`/`!dd` mapping of every marked record that is still absent
-	/// (see [`apply_appending`](Self::apply_appending)).
-	///
-	/// Runs best-effort, immediately after this builder publishes `Online`, and
-	/// only when no sibling doc-ID index is still `Building`/`Closing` — the
-	/// later-to-finish builder re-checks after its own `Online` commit, so it
-	/// deterministically observes every earlier finisher as `Online`. If a
-	/// sibling is still building, the sweep leaves the durable markers in place:
-	/// they are drained by whichever doc-ID index build finishes next with no
-	/// building sibling — including a build that started after the deletes, a
-	/// resumed/taken-over build, or a later `REBUILD` — and
-	/// [`TableDocIds::remove_all`] clears them when the table's last doc-ID
-	/// index is dropped. A marker is therefore never lost, only completed later.
-	///
-	/// The sweep processes markers in [`INDEXING_BATCH_SIZE`] chunks, each in its
-	/// own transaction, probing the marked records with one batched read:
-	/// - a record that is still absent has its `!dj`/`!dd` mapping reclaimed;
-	/// - a record re-created during the build keeps its live mapping;
-	/// - the `!dp` marker is consumed in both cases.
-	///
-	/// A record re-created *concurrently with a sweep chunk* can adopt the old
-	/// id from its snapshot (a pure read, which no backend validates at commit)
-	/// while the chunk reclaims that same mapping. Each chunk therefore re-probes
-	/// the records it reclaimed after committing and restores the mapping of any
-	/// that turn out live (see [`TableDocIds::restore`]); the doubly-raced
-	/// residual (a re-create overlapping both the chunk and its repair probe)
-	/// self-heals on the record's next indexed write. Duplicate sweeps (two
-	/// builders finishing in lock-step) are harmless: reclaim and restore are
-	/// both idempotent put-if-absent/delete shapes.
-	pub(super) async fn reclaim_deferred_doc_ids(&self) -> Result<()> {
-		// Only doc-ID-consuming index builds sweep; other index kinds never
-		// defer and skip the range probe entirely.
-		if !self.ix.uses_shared_doc_ids() {
-			return Ok(());
-		}
-		let docs = TableDocIds::new(self.ix_key.ns, self.ix_key.db, self.ikb.table().clone());
-		let mut retries = 0usize;
-		loop {
-			// The sweep runs after `Online`, so a `REMOVE INDEX` abort is the
-			// only cancellation signal left to honour.
-			if self.is_aborted().await {
-				return Ok(());
-			}
-			let ctx = self.new_write_tx_ctx().await?;
-			let tx = ctx.tx();
-			// A still-building sibling may still need the mappings to replay its
-			// queued deletes: leave the durable markers for a later finisher.
-			if catch!(tx, self.other_doc_id_index_building(&ctx).await) {
-				tx.cancel().await?;
-				return Ok(());
-			}
-			// Fetch the next chunk of pending markers.
-			let rng = catch!(
-				tx,
-				DocPendingPrefix::new(
-					self.ix_key.ns,
-					self.ix_key.db,
-					Cow::Borrowed(self.ikb.table())
-				)
-				.range()
-			);
-			let keys = catch!(tx, tx.keys(rng, INDEXING_BATCH_SIZE, 0, None).await);
-			if keys.is_empty() {
-				tx.cancel().await?;
-				return Ok(());
-			}
-			// A 3.3 pre-release spelled the id in a marker under the index format,
-			// which drops a nested number's variant, and which spelling a marker
-			// is in cannot be read off its bytes. The two overlap: an id under this
-			// release's spelling encodes to the same bytes as one under the
-			// pre-release's followed by `NONE`, `NULL` or a bool, because the tag
-			// after the number lands where its kind would have been. So a marker
-			// that decodes may still have been written for another record, and one
-			// that does not decode names a record only the old spelling reaches.
-			//
-			// Every reading is taken, and none has to be ruled out: the rule this
-			// sweep applies — reclaim a mapping only once its record is gone — is
-			// the right one for whichever record a reading turns out to be. One
-			// that is really a live record keeps its mapping; one that is absent
-			// should not be holding a mapping in any case.
-			let mut ids: Vec<RecordIdKey> = Vec::with_capacity(keys.len());
-			let mut seen = HashSet::with_capacity(keys.len());
-			let mut take = |id: RecordIdKey, ids: &mut Vec<RecordIdKey>| {
-				if seen.insert(RecordIdentity(id.clone())) {
-					ids.push(id);
-				}
-			};
-			for k in &keys {
-				if let Ok(dp) = DocPendingKey::decode_key(k) {
-					let decoded = dp.id.0;
-					// The two spellings differ only over numbers, so an id holding
-					// none encodes alike under both and has no second reading.
-					let alike = decoded.index_format_spells_alike();
-					take(decoded, &mut ids);
-					if alike {
-						continue;
-					}
-				}
-				for id in catch!(tx, self.legacy_marker_readings(k)) {
-					take(id, &mut ids);
-				}
-			}
-			// One batched probe decides every record's fate in this chunk.
-			let record_keys: Vec<RecordKey> = ids.iter().map(|id| self.record_key(id)).collect();
-			let records = catch!(tx, tx.getm_raw(record_keys, None).await);
-			// Records reclaimed in this chunk, remembered for the post-commit
-			// re-probe that repairs concurrent re-creates.
-			let mut reclaimed: Vec<(RecordIdKey, DocId)> = Vec::new();
-			for (id, existing) in ids.iter().zip(records) {
-				if existing.is_none()
-					&& let Some(doc_id) = catch!(tx, docs.remove(&tx, id).await)
-				{
-					reclaimed.push((id.clone(), doc_id));
-				}
-			}
-			// The marker is consumed whether the mapping was reclaimed (record
-			// absent), kept (record re-created during the build), already gone
-			// (reclaimed by an earlier inline pass or sweep), or named a record
-			// that could no longer be recovered at all. The key deleted is the one
-			// the scan returned: a marker in a 3.3 pre-release's spelling re-encodes to
-			// this release's, which is not the key on disk.
-			for k in &keys {
-				catch!(tx, tx.del(Key::from(k.as_slice())).await);
-			}
-			if self
-				.commit_and_retryable_conflict(
-					&tx,
-					"transient conflict reclaiming deferred doc-ID mappings, retrying",
-				)
-				.await?
-			{
-				// Retry the same chunk: the markers are still durable. Bounded so
-				// a conflict storm cannot wedge the (already Online) build task —
-				// leftover markers are picked up by the next doc-ID index build.
-				retries += 1;
-				if retries > DOC_ID_RECLAIM_MAX_RETRIES {
-					warn!(
-						index = %self.ix.name,
-						table = %self.ix.table_name,
-						"giving up the deferred doc-ID reclaim sweep after repeated \
-						 conflicts; leftover markers will be reclaimed by the next \
-						 doc-ID index build on the table"
-					);
-					return Ok(());
-				}
-				continue;
-			}
-			retries = 0;
-			// Repair the mappings of records re-created while the chunk committed.
-			self.repair_recreated_doc_ids(&docs, &reclaimed).await?;
-		}
-	}
-
 	/// Builds the datastore key of one record on the indexed table.
-	fn record_key<'a>(&'a self, id: &'a RecordIdKey) -> RecordKey<'a> {
+	pub(super) fn record_key<'a>(&'a self, id: &'a RecordIdKey) -> RecordKey<'a> {
 		RecordKey {
 			ns: self.ix_key.ns,
 			db: self.ix_key.db,
 			tb: std::borrow::Cow::Borrowed(self.ikb.table()),
 			id: std::borrow::Cow::Borrowed(id),
-		}
-	}
-
-	/// Restores the `!dj`/`!dd` mapping of any record in `reclaimed` that exists
-	/// again — i.e. was re-created concurrently with the sweep chunk that
-	/// reclaimed its mapping, adopting the old id from its pre-reclaim snapshot.
-	///
-	/// [`TableDocIds::restore`] claims the forward mapping with a put-if-absent,
-	/// so a record that instead re-acquired a *fresh* id after the reclaim is
-	/// left untouched. Best-effort like the sweep itself: on repeated conflicts
-	/// the remaining repairs are abandoned with a warning, and the affected
-	/// record self-heals on its next indexed write.
-	async fn repair_recreated_doc_ids(
-		&self,
-		docs: &TableDocIds,
-		reclaimed: &[(RecordIdKey, DocId)],
-	) -> Result<()> {
-		if reclaimed.is_empty() {
-			return Ok(());
-		}
-		let mut retries = 0usize;
-		loop {
-			let ctx = self.new_write_tx_ctx().await?;
-			let tx = ctx.tx();
-			let record_keys: Vec<RecordKey> =
-				reclaimed.iter().map(|(id, _)| self.record_key(id)).collect();
-			let records = catch!(tx, tx.getm_raw(record_keys, None).await);
-			let mut restored = 0usize;
-			for ((id, doc_id), existing) in reclaimed.iter().zip(records) {
-				if existing.is_some() && catch!(tx, docs.restore(&tx, id, *doc_id).await) {
-					restored += 1;
-				}
-			}
-			if restored == 0 {
-				tx.cancel().await?;
-				return Ok(());
-			}
-			if !self
-				.commit_and_retryable_conflict(
-					&tx,
-					"transient conflict repairing re-created doc-ID mappings, retrying",
-				)
-				.await?
-			{
-				warn!(
-					index = %self.ix.name,
-					table = %self.ix.table_name,
-					restored,
-					"restored doc-ID mappings of records re-created concurrently \
-					 with the deferred reclaim sweep"
-				);
-				return Ok(());
-			}
-			retries += 1;
-			if retries > DOC_ID_RECLAIM_MAX_RETRIES {
-				warn!(
-					index = %self.ix.name,
-					table = %self.ix.table_name,
-					"giving up doc-ID mapping repair after repeated conflicts; \
-					 affected records re-index on their next write"
-				);
-				return Ok(());
-			}
 		}
 	}
 
@@ -1884,7 +1154,7 @@ impl Building {
 		count: &mut usize,
 	) -> Result<()> {
 		let mut rc = false;
-		let fulltext_index = self.fulltext_index(ctx).await?;
+		let batch = self.batch_context(ctx, None).await?;
 		let exec = self.exec_ctx(ctx).await?;
 		let az_fn = StreamingAnalyzerFunction::new(&exec);
 		for k in keys {
@@ -1898,7 +1168,7 @@ impl Building {
 			let ig = IndexAppendKey::decode_key(&k)?;
 			if let Some(appending) = tx.get_key(&ig, None).await? {
 				let rid_key =
-					self.apply_appending(ctx, &az_fn, &fulltext_index, appending, &mut rc).await?;
+					self.apply_appending(ctx, &az_fn, &batch.fulltext, appending, &mut rc).await?;
 				tx.del_key(&ig).await?;
 
 				// We can delete the ip record if any
@@ -1923,7 +1193,7 @@ impl Building {
 		count: &mut usize,
 	) -> Result<()> {
 		let mut rc = false;
-		let fulltext_index = self.fulltext_index(ctx).await?;
+		let batch = self.batch_context(ctx, None).await?;
 		let exec = self.exec_ctx(ctx).await?;
 		let az_fn = StreamingAnalyzerFunction::new(&exec);
 		for k in keys {
@@ -1937,7 +1207,7 @@ impl Building {
 			let bg = BuildAppendKey::decode_key(&k)?;
 			if let Some(appending) = tx.get_key(&bg, None).await? {
 				let rid_key =
-					self.apply_appending(ctx, &az_fn, &fulltext_index, appending, &mut rc).await?;
+					self.apply_appending(ctx, &az_fn, &batch.fulltext, appending, &mut rc).await?;
 				tx.del_key(&bg).await?;
 				let bp = self.ikb.new_bp_key(bg.generation, &rid_key);
 				tx.del_key(&bp).await?;
@@ -1949,7 +1219,11 @@ impl Building {
 		Ok(())
 	}
 
-	async fn check_index_compaction(&self, tx: &Transaction, rc: &mut bool) -> Result<()> {
+	pub(super) async fn check_index_compaction(
+		&self,
+		tx: &Transaction,
+		rc: &mut bool,
+	) -> Result<()> {
 		if !*rc {
 			return Ok(());
 		}
@@ -1959,93 +1233,10 @@ impl Building {
 	}
 }
 
-/// `id` and every id that differs from it only in the variant of a number
-/// nested in it, up to `cap` of them: the ids the index format spells alike.
-fn numeric_variants(id: &RecordIdKey, cap: usize) -> Vec<RecordIdKey> {
-	let rebuild = |v: Value| match v {
-		Value::Array(a) => Some(RecordIdKey::Array(a)),
-		Value::Object(o) => Some(RecordIdKey::Object(o)),
-		_ => None,
-	};
-	match id {
-		RecordIdKey::Array(a) => {
-			value_variants(&Value::Array(a.clone()), cap).into_iter().filter_map(rebuild).collect()
-		}
-		RecordIdKey::Object(o) => {
-			value_variants(&Value::Object(o.clone()), cap).into_iter().filter_map(rebuild).collect()
-		}
-		other => vec![other.clone()],
-	}
-}
-
-/// [`numeric_variants`] over a value.
-fn value_variants(value: &Value, cap: usize) -> Vec<Value> {
-	match value {
-		Value::Number(n) => number_variants(*n).into_iter().map(Value::Number).take(cap).collect(),
-		Value::Array(a) => {
-			let parts = a.0.iter().map(|v| value_variants(v, cap)).collect();
-			capped_product(parts, cap).into_iter().map(|vs| Value::Array(Array(vs))).collect()
-		}
-		Value::Object(o) => {
-			let keys: Vec<_> = o.0.iter().map(|(k, _)| k.clone()).collect();
-			let parts = o.0.iter().map(|(_, v)| value_variants(v, cap)).collect();
-			capped_product(parts, cap)
-				.into_iter()
-				.map(|vs| Value::Object(Object(keys.iter().cloned().zip(vs).collect())))
-				.collect()
-		}
-		other => vec![other.clone()],
-	}
-}
-
-/// The integer, float and decimal a number's value can be written as.
-fn number_variants(n: Number) -> Vec<Number> {
-	use rust_decimal::Decimal;
-	use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
-	let exact = match n {
-		Number::Int(i) => Decimal::from(i),
-		Number::Float(f) => match Decimal::from_f64(f) {
-			Some(d) => d,
-			None => return vec![n],
-		},
-		Number::Decimal(d) => d,
-	};
-	let mut out = Vec::with_capacity(3);
-	if exact.is_integer()
-		&& let Some(i) = exact.to_i64()
-	{
-		out.push(Number::Int(i));
-	}
-	if let Some(f) = exact.to_f64() {
-		out.push(Number::Float(f));
-	}
-	out.push(Number::Decimal(exact));
-	out
-}
-
-/// Every choice of one value per part, in order, up to `cap` of them.
-fn capped_product(parts: Vec<Vec<Value>>, cap: usize) -> Vec<Vec<Value>> {
-	let mut acc: Vec<Vec<Value>> = vec![Vec::new()];
-	for choices in parts {
-		let mut next = Vec::new();
-		'fill: for prefix in &acc {
-			for choice in &choices {
-				if next.len() == cap {
-					break 'fill;
-				}
-				let mut combined = prefix.clone();
-				combined.push(choice.clone());
-				next.push(combined);
-			}
-		}
-		acc = next;
-	}
-	acc
-}
-
 #[cfg(test)]
 mod entry_image_tests {
 	use super::*;
+	use crate::val::{Array, Object};
 
 	fn record(n: i64) -> RecordId {
 		RecordId {

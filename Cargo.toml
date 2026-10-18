@@ -169,7 +169,7 @@ tikv = { version = "0.5.0", default-features = false, package = "surrealdb-tikv-
 # Other crates
 addr = { version = "0.15.6", default-features = false, features = ["std"] }
 ahash = "0.8.12"
-ammonia = "4.1.4"
+ammonia = "4.1.8"
 anyhow = "1.0.102"
 arbitrary = "1.4.2"
 argon2 = "0.5.3"
@@ -190,7 +190,7 @@ clap = "4.6.1"
 dashmap = "6.1.0"
 dialoguer = "0.11"
 deunicode = "1.6.2"
-diskann = { version = "=0.59.0", default-features = false }
+diskann = { version = "=0.59.0", default-features = false, features = ["tracing"] }
 diskann-utils = "=0.59.0"
 diskann-vector = "=0.59.0"
 ed25519-dalek = { version = "2.2.0", default-features = false }

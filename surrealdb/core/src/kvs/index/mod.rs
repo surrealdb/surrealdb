@@ -31,6 +31,10 @@
 mod admission;
 mod after_commit;
 mod builder;
+mod count;
+mod doc_ids;
+mod kind;
+pub(crate) mod materialise;
 mod replay;
 mod state;
 
@@ -43,7 +47,7 @@ pub(crate) use after_commit::RemoveFailedDefinition;
 pub(crate) use builder::{
 	AbortLocalBuild, BuildCompletion, CleanUncommittedBuild, IndexBuilder, IndexMutation,
 };
-pub(crate) use state::{build_owner_is_live, build_owner_is_live_locked, filter_online_indexes};
+pub(crate) use state::filter_online_indexes;
 // Only the frozen-fixture corpus names this directly; the builder reaches a
 // primary appending through its ticket.
 #[cfg(test)]
@@ -83,12 +87,15 @@ const BUILD_CLOSING_SLEEP: Duration = Duration::from_millis(100);
 /// it aborted to stop, before deleting their durable state anyway.
 ///
 /// A builder polls its abort flag per record during the initial scan and once
-/// per iteration in every replay, drain and retry loop, so the wait normally
+/// per iteration in every replay, sweep and retry loop, so the wait normally
 /// ends in microseconds. The budget only binds where a single uninterruptible
-/// stretch runs long, and the longest of those is one HNSW/DiskANN compaction
-/// plan, whose apply and commit carry no internal checkpoint. Overrunning it
-/// falls back to the compare-and-swap on `!bs` as the only ordering against the
-/// builder, which is exactly what the wait exists to replace, so the budget is
+/// stretch runs long: one initial-scan or replay batch's index writes and
+/// commit, or one chunk of the doc-ID reclaim sweep, each bounded by
+/// [`INDEXING_BATCH_SIZE`](crate::kvs::INDEXING_BATCH_SIZE) records
+/// and carrying no internal checkpoint. A build folds no compaction plan, so
+/// no vector graph apply runs inside it. Overrunning the budget falls back to
+/// the compare-and-swap on `!bs` as the only ordering against the builder,
+/// which is exactly what the wait exists to replace, so the budget is
 /// deliberately generous: a cancelled statement stalls for at most this long,
 /// whereas falling short strands durable state that nothing collects.
 const BUILD_ABORT_STOP_BUDGET: Duration = Duration::from_secs(15);

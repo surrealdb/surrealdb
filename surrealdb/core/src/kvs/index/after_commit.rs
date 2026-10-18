@@ -45,10 +45,10 @@ use crate::val::TableName;
 /// the statement is a `REBUILD INDEX`: its build carries on in the background
 /// once the statement stops waiting for it, which a timeout or a cancellation
 /// reports rather than a statement that did not complete. Once the index is
-/// online the statement has succeeded. The index is complete and queryable, so
-/// nothing that goes wrong while the build folds the writes queued during it —
-/// the build failing (see [`BuildCompletion`]) or the statement running out of
-/// time — takes it back.
+/// online the statement's build has succeeded. The index is complete and
+/// queryable, so nothing that goes wrong after the publish — the build
+/// reporting an error (see [`BuildCompletion`]) or the statement running out
+/// of time — takes it back.
 pub(crate) struct AwaitBuildAfterCommit {
 	/// The statement's context, whose deadline and cancellation still apply.
 	ctx: FrozenContext,

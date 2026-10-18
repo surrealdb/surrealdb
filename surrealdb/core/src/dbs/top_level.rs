@@ -104,11 +104,15 @@ impl TopLevelStatement {
 	/// runs, and commits, before the build's outcome is known, so a build that
 	/// then fails could no longer take back what those statements wrote. Only a
 	/// transaction with nothing else in it stays atomic. This is decided here,
-	/// from the statement, rather than by offering every transaction a queue:
-	/// the instruction that queues a build cannot tell whether anything follows
-	/// it. For the same reason a `DEFINE INDEX` whose name, table, fields or
-	/// comment run anything when evaluated is excluded: whatever that writes
-	/// would commit ahead of a build that may still fail. See
+	/// from the statement, rather than by letting every transaction defer its
+	/// builds: the instruction that queues a build cannot tell whether anything
+	/// follows it. Every write transaction the executor owns accepts the later
+	/// wait for an index to be materialised, which takes nothing back.
+	///
+	/// For the same reason as the deferral itself, a `DEFINE INDEX` whose
+	/// name, table, fields or comment run anything when evaluated is excluded:
+	/// whatever that writes would commit ahead of a build that may still fail.
+	/// See
 	/// [`evaluates_inertly`] for why that is decided on the operand's shape.
 	/// Both statements always reach the executor in this surface form.
 	///

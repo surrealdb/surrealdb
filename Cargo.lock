@@ -169,9 +169,9 @@ dependencies = [
 
 [[package]]
 name = "ammonia"
-version = "4.1.7"
+version = "4.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36322ccf536de7b7afd259098615203e4cc5caca1b78482b58334a720c66e40a"
+checksum = "2f6660fb4ff692ef4937b1b4e74ab3d378653d8588389587d91f96a296907ea0"
 dependencies = [
  "cssparser",
  "html5ever",
@@ -2290,6 +2290,7 @@ dependencies = [
  "rand 0.9.4",
  "thiserror 2.0.21",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

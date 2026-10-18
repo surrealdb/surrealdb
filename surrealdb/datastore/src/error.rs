@@ -62,6 +62,25 @@ pub enum DatastoreError {
 	)]
 	IndexBuildWaitCancelled,
 
+	/// A blocking `DEFINE INDEX` or `REBUILD INDEX` stopped waiting for its
+	/// index to be materialised.
+	///
+	/// Raised only once the statement has committed and its index is online:
+	/// the index answers every query correctly, merging what is not yet folded
+	/// into it at read time, and background compaction folds the rest. Only
+	/// the wait stopped, cancelled with its query or ended by an error a
+	/// compaction pass could not retry, which `reason` names. Running the
+	/// statement again changes nothing.
+	#[error(
+		"The index was committed and is ready, but the wait for its pending updates to be folded in stopped: {reason}. Background compaction folds them: follow it with `INFO FOR INDEX` rather than running the statement again"
+	)]
+	IndexMaterialiseWaitStopped {
+		/// Whether the query was cancelled, rather than a pass failing.
+		cancelled: bool,
+		/// Why the wait stopped.
+		reason: String,
+	},
+
 	/// The query did not execute, because the memory threshold has been reached
 	#[error("The query was not executed due to the memory threshold being reached")]
 	QueryBeyondMemoryThreshold,
@@ -291,9 +310,15 @@ impl LeafError for DatastoreError {
 					duration: duration.0,
 				},
 			),
-			DatastoreError::IndexBuildWaitCancelled => {
-				TypesError::query(message, QueryError::Cancelled)
-			}
+			DatastoreError::IndexBuildWaitCancelled
+			| DatastoreError::IndexMaterialiseWaitStopped {
+				cancelled: true,
+				..
+			} => TypesError::query(message, QueryError::Cancelled),
+			DatastoreError::IndexMaterialiseWaitStopped {
+				cancelled: false,
+				..
+			} => TypesError::query(message, None),
 			// Shadows `message` deliberately: the payload string is what reaches
 			// the client, not this error's own `Display` output.
 			DatastoreError::TransactionWriteKeysExceeded {

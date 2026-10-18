@@ -8,7 +8,7 @@
 #[cfg(not(target_family = "wasm"))]
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Result, ensure};
 use surrealdb_datastore::Transaction;
 // The vector-to-documents mapping is a stored value, and the bucket-mutation rule
 // that keeps one entry per distinct vector travels with it.
@@ -23,6 +23,8 @@ use crate::docids::{DocId, LegacyVectorDocIds, TableDocIds};
 use crate::env::IndexEnv;
 #[cfg(not(target_family = "wasm"))]
 use crate::trees::diskann::cache::{CacheView, DiskAnnCache};
+#[cfg(not(target_family = "wasm"))]
+use crate::trees::diskann::frame::FrameKv;
 #[cfg(not(target_family = "wasm"))]
 use crate::trees::diskann::index::{DiskAnnContext, DiskAnnGraph};
 use crate::trees::diskann::{DiskAnnElement, ElementId};
@@ -221,18 +223,18 @@ impl DiskAnnVecDocs {
 
 	/// Records that `doc` holds a vector in `element`, in the doc-ID →
 	/// elements mapping of an index that keeps one.
-	async fn link_doc(&self, tx: &Transaction, doc: DocId, element: ElementId) -> Result<()> {
+	async fn link_doc(&self, kv: &FrameKv<'_>, doc: DocId, element: ElementId) -> Result<()> {
 		if keeps_vector_doc_elements(self.format_version) {
-			doc_elements::link(tx, &self.ikb.new_dk_key(doc), element).await?;
+			doc_elements::link(kv, &self.ikb.new_dk_key(doc), element).await?;
 		}
 		Ok(())
 	}
 
 	/// Records that `doc` no longer holds a vector in `element`, in the doc-ID
 	/// → elements mapping of an index that keeps one.
-	async fn unlink_doc(&self, tx: &Transaction, doc: DocId, element: ElementId) -> Result<()> {
+	async fn unlink_doc(&self, kv: &FrameKv<'_>, doc: DocId, element: ElementId) -> Result<()> {
 		if keeps_vector_doc_elements(self.format_version) {
-			doc_elements::unlink(tx, &self.ikb.new_dk_key(doc), element).await?;
+			doc_elements::unlink(kv, &self.ikb.new_dk_key(doc), element).await?;
 		}
 		Ok(())
 	}
@@ -422,73 +424,155 @@ impl DiskAnnVecDocs {
 		Ok(docs.into_iter().map(|docs| docs.map(|docs| docs.docs)).collect())
 	}
 
-	#[cfg(not(target_family = "wasm"))]
-	async fn insert_hashed(
+	/// Resolves each distinct vector of `inserts` against the vector → docs mapping, in one
+	/// multi-get, and returns the ones the graph does not hold yet.
+	///
+	/// `inserts` is in plan order. Every doc carrying a vector the graph already holds is appended
+	/// to that vector's doc set here: its `!dq`/`!dh` entry is rewritten, the doc is linked to the
+	/// element in the doc → elements mapping, and the element's cached doc set is evicted. Docs
+	/// sharing a vector the graph does not hold come back together, as one [`StagedVector`] in the
+	/// order the vector first appears, so the vector gets one element carrying all of them.
+	///
+	/// Reads and writes go through the frame's transaction, so a vector phase A removed reads as
+	/// absent and gets a fresh element.
+	pub(super) async fn stage_inserts(
 		&self,
 		ctx: &DiskAnnContext<'_>,
-		graph: &mut DiskAnnGraph,
-		vec: Vector,
-		ser_vec: SerializedVector,
-		doc_id: DocId,
-	) -> Result<()> {
-		let key = self.ikb.new_dh_key(ser_vec.compute_hash());
-		match ctx.tx.get_key(&key, None).await? {
-			None => {
-				let element_id = graph.insert(ctx, vec).await?;
-				ctx.tx
-					.set_key(&key, &DiskAnnElementHashedDocs::new(element_id, ser_vec, doc_id))
-					.await?;
-				self.link_doc(&ctx.tx, doc_id, element_id).await?;
-				self.evict_cached_doc_set(element_id);
+		inserts: Vec<(DocId, SerializedVector)>,
+	) -> Result<Vec<StagedVector>> {
+		let staged = StagedVector::group(inserts);
+		if staged.is_empty() {
+			return Ok(staged);
+		}
+		let kv = ctx.kv();
+		if self.use_hashed_vector {
+			return self.stage_hashed(&kv, staged).await;
+		}
+		let keys: Vec<_> = staged.iter().map(|v| self.ikb.new_dq_key(&v.ser_vec)).collect();
+		let found: Vec<Option<DiskAnnElementDocs>> = kv.get_many_key(keys).await?;
+		// A short answer would leave the trailing vectors unresolved, silently.
+		ensure!(
+			found.len() == staged.len(),
+			"{} vector mappings read for {} requested",
+			found.len(),
+			staged.len()
+		);
+		let mut fresh = Vec::new();
+		for (vector, found) in staged.into_iter().zip(found) {
+			let Some(mut ed) = found else {
+				fresh.push(vector);
+				continue;
+			};
+			let added = add_docs(&mut ed.docs, &vector.docs);
+			if added.is_empty() {
+				continue;
 			}
-			Some(mut ehd) => {
-				if let Some(ed) = ehd.get_element_docs(&ser_vec) {
-					if let Some(docs) = ed.docs.insert(doc_id) {
-						let element_id = ed.e_id;
-						ed.docs = docs;
-						ctx.tx.set_key(&key, &ehd).await?;
-						self.link_doc(&ctx.tx, doc_id, element_id).await?;
-						self.evict_cached_doc_set(element_id);
-					}
-				} else {
-					let element_id = graph.insert(ctx, vec).await?;
-					ehd.add(element_id, ser_vec, doc_id);
-					ctx.tx.set_key(&key, &ehd).await?;
-					self.link_doc(&ctx.tx, doc_id, element_id).await?;
-					self.evict_cached_doc_set(element_id);
-				}
+			self.evict_cached_doc_set(ed.e_id);
+			kv.set_key(&self.ikb.new_dq_key(&vector.ser_vec), &ed).await?;
+			for doc in added {
+				self.link_doc(&kv, doc, ed.e_id).await?;
 			}
 		}
-		Ok(())
+		Ok(fresh)
 	}
 
-	#[cfg(not(target_family = "wasm"))]
-	pub(super) async fn insert(
+	/// [`Self::stage_inserts`] for an index that maps vectors by hash: one bucket read per distinct
+	/// hash, and each bucket written once with every doc appended to it.
+	async fn stage_hashed(
 		&self,
-		ctx: &DiskAnnContext<'_>,
-		vec: Vector,
-		doc_id: DocId,
-		graph: &mut DiskAnnGraph,
-	) -> Result<()> {
-		let ser_vec = SerializedVector::from(&vec);
-		if self.use_hashed_vector {
-			return self.insert_hashed(ctx, graph, vec, ser_vec, doc_id).await;
+		kv: &FrameKv<'_>,
+		staged: Vec<StagedVector>,
+	) -> Result<Vec<StagedVector>> {
+		let mut hashes: Vec<[u8; 32]> = Vec::new();
+		let mut bucket_of = Vec::with_capacity(staged.len());
+		for vector in &staged {
+			let hash = vector.ser_vec.compute_hash();
+			let bucket = match hashes.iter().position(|h| *h == hash) {
+				Some(bucket) => bucket,
+				None => {
+					hashes.push(hash);
+					hashes.len() - 1
+				}
+			};
+			bucket_of.push(bucket);
 		}
-		let key = self.ikb.new_dq_key(&ser_vec);
-		if let Some(ed) = match ctx.tx.get_key(&key, None).await? {
-			Some(mut ed) => ed.docs.insert(doc_id).map(|new_docs| {
-				ed.docs = new_docs;
-				ed
-			}),
-			None => {
-				let element_id = graph.insert(ctx, vec).await?;
-				self.evict_cached_doc_set(element_id);
-				Some(DiskAnnElementDocs::new(element_id, doc_id))
+		let keys: Vec<_> = hashes.iter().map(|hash| self.ikb.new_dh_key(*hash)).collect();
+		let mut buckets: Vec<Option<DiskAnnElementHashedDocs>> = kv.get_many_key(keys).await?;
+		// A short answer would leave a vector without its bucket.
+		ensure!(
+			buckets.len() == hashes.len(),
+			"{} vector buckets read for {} requested",
+			buckets.len(),
+			hashes.len()
+		);
+		let mut changed = vec![false; buckets.len()];
+		let mut links = Vec::new();
+		let mut fresh = Vec::new();
+		for (vector, bucket) in staged.into_iter().zip(bucket_of) {
+			let held =
+				buckets[bucket].as_mut().and_then(|ehd| ehd.get_element_docs(&vector.ser_vec));
+			let Some(ed) = held else {
+				fresh.push(vector);
+				continue;
+			};
+			let added = add_docs(&mut ed.docs, &vector.docs);
+			if added.is_empty() {
+				continue;
 			}
-		} {
+			changed[bucket] = true;
 			self.evict_cached_doc_set(ed.e_id);
-			ctx.tx.set_key(&key, &ed).await?;
-			self.link_doc(&ctx.tx, doc_id, ed.e_id).await?;
+			links.extend(added.into_iter().map(|doc| (doc, ed.e_id)));
+		}
+		for ((hash, bucket), changed) in hashes.iter().zip(&buckets).zip(changed) {
+			if let (true, Some(ehd)) = (changed, bucket) {
+				kv.set_key(&self.ikb.new_dh_key(*hash), ehd).await?;
+			}
+		}
+		for (doc, element) in links {
+			self.link_doc(kv, doc, element).await?;
+		}
+		Ok(fresh)
+	}
+
+	/// For vectors [`Self::stage_inserts`] staged and the graph has just given an element: writes
+	/// each vector's `!dq`/`!dh` mapping to its element and docs, links every doc to the element in
+	/// the doc → elements mapping, and evicts the element's cached doc set.
+	pub(super) async fn commit_fresh<I>(&self, ctx: &DiskAnnContext<'_>, fresh: I) -> Result<()>
+	where
+		I: IntoIterator<Item = (StagedVector, ElementId)>,
+	{
+		let kv = ctx.kv();
+		for (vector, element_id) in fresh {
+			let StagedVector {
+				ser_vec,
+				docs,
+				..
+			} = vector;
+			let Some((&first, rest)) = docs.split_first() else {
+				continue;
+			};
+			if self.use_hashed_vector {
+				let key = self.ikb.new_dh_key(ser_vec.compute_hash());
+				let mut ehd = match kv.get_key(&key).await? {
+					None => DiskAnnElementHashedDocs::new(element_id, ser_vec.clone(), first),
+					Some(mut ehd) => {
+						ehd.add(element_id, ser_vec.clone(), first);
+						ehd
+					}
+				};
+				if let Some(ed) = ehd.get_element_docs(&ser_vec) {
+					add_docs(&mut ed.docs, rest);
+				}
+				kv.set_key(&key, &ehd).await?;
+			} else {
+				let mut ed = DiskAnnElementDocs::new(element_id, first);
+				add_docs(&mut ed.docs, rest);
+				kv.set_key(&self.ikb.new_dq_key(&ser_vec), &ed).await?;
+			}
+			self.evict_cached_doc_set(element_id);
+			for doc in docs {
+				self.link_doc(&kv, doc, element_id).await?;
+			}
 		}
 		Ok(())
 	}
@@ -497,31 +581,32 @@ impl DiskAnnVecDocs {
 	async fn remove_hashed(
 		&self,
 		ctx: &DiskAnnContext<'_>,
-		graph: &mut DiskAnnGraph,
+		graph: &DiskAnnGraph,
 		ser_vec: SerializedVector,
 		doc_id: DocId,
 	) -> Result<()> {
+		let kv = ctx.kv();
 		let key = self.ikb.new_dh_key(ser_vec.compute_hash());
-		if let Some(mut ehd) = ctx.tx.get_key(&key, None).await? {
+		if let Some(mut ehd) = kv.get_key(&key).await? {
 			match ehd.remove(&ser_vec, doc_id) {
 				RemoveResult::Empty(e_id) => {
-					ctx.tx.del_key(&key).await?;
-					self.unlink_doc(&ctx.tx, doc_id, e_id).await?;
+					kv.del_key(&key).await?;
+					self.unlink_doc(&kv, doc_id, e_id).await?;
 					self.evict_cached_doc_set(e_id);
 					graph.remove(ctx, e_id).await?;
 				}
 				RemoveResult::BucketShrunk {
 					e_id,
 				} => {
-					ctx.tx.set_key(&key, &ehd).await?;
-					self.unlink_doc(&ctx.tx, doc_id, e_id).await?;
+					kv.set_key(&key, &ehd).await?;
+					self.unlink_doc(&kv, doc_id, e_id).await?;
 					self.evict_cached_doc_set(e_id);
 				}
 				RemoveResult::EntryRemoved {
 					e_id,
 				} => {
-					ctx.tx.set_key(&key, &ehd).await?;
-					self.unlink_doc(&ctx.tx, doc_id, e_id).await?;
+					kv.set_key(&key, &ehd).await?;
+					self.unlink_doc(&kv, doc_id, e_id).await?;
 					self.evict_cached_doc_set(e_id);
 					graph.remove(ctx, e_id).await?;
 				}
@@ -537,29 +622,88 @@ impl DiskAnnVecDocs {
 		ctx: &DiskAnnContext<'_>,
 		vec: &Vector,
 		doc_id: DocId,
-		graph: &mut DiskAnnGraph,
+		graph: &DiskAnnGraph,
 	) -> Result<()> {
 		let ser_vec = vec.into();
 		if self.use_hashed_vector {
 			return self.remove_hashed(ctx, graph, ser_vec, doc_id).await;
 		}
+		let kv = ctx.kv();
 		let key = self.ikb.new_dq_key(&ser_vec);
-		if let Some(mut ed) = ctx.tx.get_key(&key, None).await?
+		if let Some(mut ed) = kv.get_key(&key).await?
 			&& let Some(new_docs) = ed.docs.remove(doc_id)
 		{
-			self.unlink_doc(&ctx.tx, doc_id, ed.e_id).await?;
+			self.unlink_doc(&kv, doc_id, ed.e_id).await?;
 			if new_docs.is_empty() {
-				ctx.tx.del_key(&key).await?;
+				kv.del_key(&key).await?;
 				self.evict_cached_doc_set(ed.e_id);
 				graph.remove(ctx, ed.e_id).await?;
 			} else {
 				ed.docs = new_docs;
-				ctx.tx.set_key(&key, &ed).await?;
+				kv.set_key(&key, &ed).await?;
 				self.evict_cached_doc_set(ed.e_id);
 			}
 		}
 		Ok(())
 	}
+}
+
+/// A distinct vector [`DiskAnnVecDocs::stage_inserts`] found absent from the vector → docs
+/// mapping, with every doc of the batch that carries it.
+#[cfg(not(target_family = "wasm"))]
+pub(super) struct StagedVector {
+	ser_vec: SerializedVector,
+	vector: Vector,
+	/// Every doc in the batch carrying this exact vector, in plan order, without repeats.
+	docs: Vec<DocId>,
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl StagedVector {
+	/// The vector, as the graph inserts it.
+	pub(super) fn vector(&self) -> &Vector {
+		&self.vector
+	}
+
+	/// Groups `inserts` by exact vector, in the order each vector first appears, collecting each
+	/// vector's docs in plan order without repeats.
+	fn group(inserts: Vec<(DocId, SerializedVector)>) -> Vec<Self> {
+		let mut staged: Vec<Self> = Vec::new();
+		let mut by_hash: ahash::HashMap<[u8; 32], Vec<usize>> = ahash::HashMap::default();
+		for (doc, ser_vec) in inserts {
+			let slots = by_hash.entry(ser_vec.compute_hash()).or_default();
+			match slots.iter().copied().find(|&slot| staged[slot].ser_vec == ser_vec) {
+				Some(slot) => {
+					let docs = &mut staged[slot].docs;
+					if !docs.contains(&doc) {
+						docs.push(doc);
+					}
+				}
+				None => {
+					slots.push(staged.len());
+					staged.push(Self {
+						vector: Vector::from(ser_vec.clone()),
+						ser_vec,
+						docs: vec![doc],
+					});
+				}
+			}
+		}
+		staged
+	}
+}
+
+/// Adds every doc of `docs` to `set`, returning the ones it did not already hold.
+#[cfg(not(target_family = "wasm"))]
+fn add_docs(set: &mut Ids64, docs: &[DocId]) -> Vec<DocId> {
+	let mut added = Vec::new();
+	for &doc in docs {
+		if let Some(grown) = set.insert(doc) {
+			*set = grown;
+			added.push(doc);
+		}
+	}
+	added
 }
 
 #[cfg(test)]

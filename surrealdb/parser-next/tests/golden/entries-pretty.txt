@@ -4614,7 +4614,7 @@ c9ea2ca58123e824 language-tests/tests/upgrade/define/3.00.02_index_unique_nullis
 8f508bb103983d85 language-tests/tests/upgrade/define/3.01.00_index_diskann_compound_id_rebuild.surql
 299280af56105403 language-tests/tests/upgrade/define/3.01.00_index_diskann_compound_id_write.surql
 c4151583b093b992 language-tests/tests/upgrade/define/3.01.00_index_diskann_compound_id_write_import.surql
-5fad5f48579aa86c language-tests/tests/upgrade/define/3.01.00_index_diskann_current.surql
+b1f22f750e3c97a9 language-tests/tests/upgrade/define/3.01.00_index_diskann_current.surql
 02ede98c8ef3fa96 language-tests/tests/upgrade/define/3.01.00_index_diskann_import.surql
 f0b86c63d797fca1 language-tests/tests/upgrade/define/3.01.00_index_diskann_rebuild.surql
 4a0453d4c334592c language-tests/tests/upgrade/define/3.01.00_index_hnsw_compound_id.surql

@@ -467,6 +467,19 @@ impl TestIndexStore {
 		}
 	}
 
+	/// The same store, whose environments take their workers from a pool of
+	/// `places` places of its own.
+	pub(crate) fn with_places(mut self, places: usize) -> Self {
+		self.places = CountingPlaces::new(places, TEST_QUANTUM);
+		self
+	}
+
+	/// The pool this store's environments take their workers from, whose books
+	/// a test reads.
+	pub(crate) fn places(&self) -> &Arc<CountingPlaces> {
+		&self.places
+	}
+
 	/// How many read-only transactions have been opened on the backend so far, by this store and
 	/// by every node over it.
 	pub(crate) fn reads_opened(&self) -> usize {

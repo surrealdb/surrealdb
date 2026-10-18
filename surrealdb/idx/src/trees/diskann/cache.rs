@@ -204,6 +204,16 @@ enum DiskAnnCacheValue {
 	State(Stamped<DiskAnnState>),
 }
 
+/// One cached entry of an index, as [`DiskAnnCache::entries_of`] lists it.
+#[cfg(all(test, feature = "kv-rocksdb"))]
+pub(super) enum CachedEntry {
+	State(DiskAnnState),
+	Element(ElementId, Arc<DiskAnnElement>),
+	Node(ElementId, Arc<DiskAnnNode>),
+	DocSet(ElementId, Ids64),
+	DocId(DocId, Arc<RecordIdKey>),
+}
+
 #[derive(Clone)]
 struct DiskAnnCacheWeighter;
 
@@ -257,6 +267,10 @@ struct Inner {
 	cache: Cache<DiskAnnCacheKey, DiskAnnCacheValue, DiskAnnCacheWeighter>,
 	/// The last id [`DiskAnnCache::new_owner`] handed out.
 	owners: AtomicU64,
+	/// How many times an index's entries were cleared, for the tests that pin when a frame
+	/// invalidates the cache.
+	#[cfg(test)]
+	clears: AtomicU64,
 }
 
 impl DiskAnnCache {
@@ -266,6 +280,8 @@ impl DiskAnnCache {
 		Self(Arc::new(Inner {
 			cache: Cache::with_weighter(estimated_items, cache_size, DiskAnnCacheWeighter),
 			owners: AtomicU64::new(0),
+			#[cfg(test)]
+			clears: AtomicU64::new(0),
 		}))
 	}
 
@@ -342,7 +358,17 @@ impl DiskAnnCache {
 		stamp: Stamp,
 		element: DiskAnnElement,
 	) -> Arc<DiskAnnElement> {
-		let element = Arc::new(element);
+		self.insert_shared_element(index, element_id, stamp, Arc::new(element))
+	}
+
+	/// Inserts or replaces a graph element already shared elsewhere, and returns it.
+	pub(super) fn insert_shared_element(
+		&self,
+		index: IndexKey,
+		element_id: ElementId,
+		stamp: Stamp,
+		element: Arc<DiskAnnElement>,
+	) -> Arc<DiskAnnElement> {
 		self.0.cache.insert(
 			DiskAnnCacheKey::Element(Self::element_key(index, element_id)),
 			DiskAnnCacheValue::Element(Stamped {
@@ -379,7 +405,17 @@ impl DiskAnnCache {
 		stamp: Stamp,
 		node: DiskAnnNode,
 	) -> Arc<DiskAnnNode> {
-		let node = Arc::new(node);
+		self.insert_shared_node(index, element_id, stamp, Arc::new(node))
+	}
+
+	/// Inserts or replaces an adjacency list already shared elsewhere, and returns it.
+	pub(super) fn insert_shared_node(
+		&self,
+		index: IndexKey,
+		element_id: ElementId,
+		stamp: Stamp,
+		node: Arc<DiskAnnNode>,
+	) -> Arc<DiskAnnNode> {
 		self.0.cache.insert(
 			DiskAnnCacheKey::Node(Self::element_key(index, element_id)),
 			DiskAnnCacheValue::Node(Stamped {
@@ -493,7 +529,23 @@ impl DiskAnnCache {
 		index_id: IndexId,
 		format_version: u16,
 	) {
+		self.remove_index_now(namespace_id, database_id, table_id, index_id, format_version);
+		yield_now!();
+	}
+
+	/// [`Self::remove_index`] without yielding to the runtime afterwards, for a caller that cannot
+	/// await: a frame's cleanup on a path that unwinds.
+	pub(crate) fn remove_index_now(
+		&self,
+		namespace_id: NamespaceId,
+		database_id: DatabaseId,
+		table_id: TableId,
+		index_id: IndexId,
+		format_version: u16,
+	) {
 		let index = Self::index_key(namespace_id, database_id, table_id, index_id, format_version);
+		#[cfg(test)]
+		self.0.clears.fetch_add(1, Ordering::Relaxed);
 		self.0.cache.retain(|key, _| match key {
 			DiskAnnCacheKey::State(k) => *k != index,
 			DiskAnnCacheKey::Element(k) => (k.0, k.1, k.2, k.3, k.4) != index,
@@ -501,7 +553,49 @@ impl DiskAnnCache {
 			DiskAnnCacheKey::DocSet(k) => (k.0, k.1, k.2, k.3, k.4) != index,
 			DiskAnnCacheKey::DocId(k) => (k.0, k.1, k.2, k.3, k.4) != index,
 		});
-		yield_now!();
+	}
+
+	/// Every entry this cache holds for one index, whatever its stamp, for the tests that compare
+	/// the cache against KV.
+	#[cfg(all(test, feature = "kv-rocksdb"))]
+	pub(super) fn entries_of(
+		&self,
+		namespace_id: NamespaceId,
+		database_id: DatabaseId,
+		table_id: TableId,
+		index_id: IndexId,
+		format_version: u16,
+	) -> Vec<CachedEntry> {
+		let index = Self::index_key(namespace_id, database_id, table_id, index_id, format_version);
+		let of = |k: &ElementCacheKey| (k.0, k.1, k.2, k.3, k.4) == index;
+		self.0
+			.cache
+			.iter()
+			.filter_map(|(key, value)| match (key, value) {
+				(DiskAnnCacheKey::State(k), DiskAnnCacheValue::State(v)) if k == index => {
+					Some(CachedEntry::State(v.value))
+				}
+				(DiskAnnCacheKey::Element(k), DiskAnnCacheValue::Element(v)) if of(&k) => {
+					Some(CachedEntry::Element(k.5, v.value))
+				}
+				(DiskAnnCacheKey::Node(k), DiskAnnCacheValue::Node(v)) if of(&k) => {
+					Some(CachedEntry::Node(k.5, v.value))
+				}
+				(DiskAnnCacheKey::DocSet(k), DiskAnnCacheValue::DocSet(v)) if of(&k) => {
+					Some(CachedEntry::DocSet(k.5, v.value))
+				}
+				(DiskAnnCacheKey::DocId(k), DiskAnnCacheValue::DocId(v)) if of(&k) => {
+					Some(CachedEntry::DocId(k.5, v.value))
+				}
+				_ => None,
+			})
+			.collect()
+	}
+
+	/// How many times an index's entries were cleared from this cache.
+	#[cfg(test)]
+	pub(super) fn clears(&self) -> u64 {
+		self.0.clears.load(Ordering::Relaxed)
 	}
 
 	#[cfg(test)]
@@ -563,6 +657,7 @@ mod tests {
 		DiskAnnState {
 			enter_point: Some(7),
 			next_element_id: 10,
+			start_points: Vec::new(),
 		}
 	}
 

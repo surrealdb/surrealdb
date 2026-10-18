@@ -19,25 +19,28 @@
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
+use std::num::{NonZeroU32, NonZeroUsize};
 use std::sync::Arc;
 
 use ahash::HashMap;
 use anyhow::{Result, bail};
 use common::EngineError;
 use diskann::graph::DiskANNIndex as RawDiskAnnIndex;
-use diskann::graph::config::{Builder, MaxDegree, PruneKind};
+use diskann::graph::config::experimental::InsertRetry;
+use diskann::graph::config::{Builder, IntraBatchCandidates, MaxDegree, PruneKind};
 use diskann::graph::glue::{HybridPredicate, Predicate, PredicateMut, SearchAccessor as _};
 use diskann::graph::search::Knn;
 use diskann::graph::search_output_buffer::IdDistance;
 use diskann::neighbor::{Neighbor, NeighborPriorityQueue};
 use diskann::provider::{Delete, Guard, SetElement};
+use diskann_utils::views::Matrix;
 use diskann_vector::Half;
 use diskann_vector::distance::Metric;
 use roaring::RoaringTreemap;
 use surrealdb_datastore::Transaction;
 use surrealdb_kvs::api::ValsBatch;
-use surrealdb_kvs::{Direction, Val};
-use tokio::sync::RwLock;
+use surrealdb_kvs::{Direction, Error as KvsError, Val};
+use tokio::sync::{RwLock, RwLockWriteGuard};
 
 use crate::catalog::{
 	DiskAnnParams, Distance, TableId, VectorType, keeps_pending_members, keeps_vector_doc_elements,
@@ -46,14 +49,16 @@ use crate::docids::{DocId, LegacyVectorDocIds};
 use crate::env::{IndexEnv, expect_not_done};
 use crate::key::schema::{DiskannRecordPendingKey, DiskannRecordPendingShardKey};
 use crate::key::{KVKey, KVKeyDecode, KVValue, Key, TypedRange};
-#[cfg(test)]
-use crate::trees::diskann::cache::CacheView;
-use crate::trees::diskann::cache::{Continuity, DiskAnnCache};
-use crate::trees::diskann::docs::{DiskAnnDocs, DiskAnnVecDocs};
+use crate::parallel::ReadView;
+use crate::trees::diskann::cache::{CacheView, Continuity, DiskAnnCache};
+use crate::trees::diskann::docs::{DiskAnnDocs, DiskAnnVecDocs, StagedVector};
 use crate::trees::diskann::filter::{DiskAnnTruthyDocumentFilter, FilterCache};
+use crate::trees::diskann::frame::{DiskAnnBuildFrame, FrameEnv, FrameKv, ViewGeneration};
+#[cfg(test)]
+use crate::trees::diskann::frame::{FrameFaults, FrameHooks};
 use crate::trees::diskann::provider::{
 	DiskAnnProvider, DiskAnnProviderContext, DiskAnnSearchAccessor, DiskAnnStrategy,
-	DiskAnnVectorElement,
+	DiskAnnVectorElement, NodeWrite,
 };
 use crate::trees::diskann::{
 	DISKANN_PENDING_STATE_SHARDS, DiskAnnElement, DiskAnnPendingState, DiskAnnPendingStateKind,
@@ -84,6 +89,34 @@ use crate::{
 /// set on every query.
 const DISKANN_COMPACTION_MAX_PENDING_KEYS: usize = 1024;
 const DISKANN_COMPACTION_MAX_PENDING_BYTES: usize = 16 * 1024 * 1024;
+
+/// The most new vectors one compaction plan captures, summed over its pendings' `new_vectors`.
+///
+/// Bounds a frame's fresh vectors, and with them its overlay and its write batch. An empty plan
+/// still admits its first entry whatever it carries, so a record whose own vectors exceed the cap
+/// is captured in a plan of its own, in one frame. Either way the frame inserts its fresh vectors
+/// in calls of at most [`DISKANN_INSERT_BATCH_MAX_VECTORS`].
+const DISKANN_COMPACTION_MAX_PENDING_VECTORS: usize = 1024;
+
+/// Positional intra-batch candidates a batched insert considers for each vector: the batch members
+/// next to it that its prune sees beside what its search of the pre-batch graph found.
+const DISKANN_INTRA_BATCH_CANDIDATES: u32 = 32;
+
+/// The most fresh vectors one call of upstream's batched insert takes. A frame inserts its fresh
+/// vectors in consecutive calls of at most this many, in batch order, each searching a graph that
+/// holds the calls before it.
+///
+/// This bounds graph quality, not memory. A vector in a batched insert searches the graph as it
+/// stood before its call, and sees the call's other vectors only through the
+/// [`DISKANN_INTRA_BATCH_CANDIDATES`] positionally next to it. Batch order is pending-key order,
+/// which says nothing about similarity, so two near vectors of one call farther apart than that
+/// window never see each other, where a serial build links them. The smaller the call, the fewer
+/// such pairs; below this size, recall stops improving while each of a frame's tasks gets less
+/// work between the call's join barriers.
+const DISKANN_INSERT_BATCH_MAX_VECTORS: usize = 256;
+
+/// How often a frame checks whether the statement running it has been cancelled.
+const DISKANN_FRAME_WATCHDOG_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// Exact pending key/value observed by a DiskANN compaction read phase.
 ///
@@ -174,6 +207,10 @@ struct PendingPlanBuilder {
 	pending: Vec<PendingOperation>,
 	pending_by_id: HashMap<VectorId, usize>,
 	encoded_bytes: usize,
+	/// The new vectors of every captured pending, counted as captured: an upper bound on the
+	/// frame's fresh vectors, since coalescing replaces a record's vectors rather than adding to
+	/// them, and the apply only removes vectors already in the graph or repeated in the batch.
+	new_vectors: usize,
 	has_more: bool,
 }
 
@@ -186,6 +223,7 @@ impl PendingPlanBuilder {
 			pending: Vec::new(),
 			pending_by_id: HashMap::default(),
 			encoded_bytes: 0,
+			new_vectors: 0,
 			has_more: false,
 		}
 	}
@@ -198,42 +236,35 @@ impl PendingPlanBuilder {
 		value: Val,
 		pending: impl IntoIterator<Item = PendingOperation>,
 	) -> bool {
+		let pending: Vec<PendingOperation> = pending.into_iter().collect();
+		let vectors: usize = pending.iter().map(|p| p.new_vectors.len()).sum();
 		if self.captured_keys.len() >= DISKANN_COMPACTION_MAX_PENDING_KEYS
 			|| (!self.captured_keys.is_empty()
-				&& self.encoded_bytes + key.len() + value.len()
-					> DISKANN_COMPACTION_MAX_PENDING_BYTES)
+				&& (self.encoded_bytes + key.len() + value.len()
+					> DISKANN_COMPACTION_MAX_PENDING_BYTES
+					|| self.new_vectors + vectors > DISKANN_COMPACTION_MAX_PENDING_VECTORS))
 		{
 			self.has_more = true;
 			return false;
 		}
-		self.encoded_bytes += key.len() + value.len();
-		self.captured_keys.push(CapturedPendingKey {
-			key,
-			value,
-		});
-		for pending in pending {
-			self.add_pending(pending);
-		}
-		if self.captured_keys.len() >= DISKANN_COMPACTION_MAX_PENDING_KEYS
-			|| self.encoded_bytes >= DISKANN_COMPACTION_MAX_PENDING_BYTES
-		{
-			self.has_more = true;
-		}
+		self.add_authorized(key, value, pending);
 		true
 	}
 
-	/// Whether the bounded batch can still admit `keys` more captured keys totalling `bytes`,
-	/// mirroring the reject condition in [`Self::add`]. Used to admit a legacy `!dr` entry and its
-	/// folded sharded `!dw` counterpart as a single atomic pair, so the budget never splits the
-	/// pair across compaction passes (which would reintroduce the phantom the fold prevents).
-	fn has_room_for(&self, keys: usize, bytes: usize) -> bool {
+	/// Whether the bounded batch can still admit `keys` more captured keys totalling `bytes` and
+	/// carrying `vectors` new vectors, mirroring the reject condition in [`Self::add`]. Used to
+	/// admit a legacy `!dr` entry and its folded sharded `!dw` counterpart as a single atomic pair,
+	/// so the budget never splits the pair across compaction passes (which would reintroduce the
+	/// phantom the fold prevents).
+	fn has_room_for(&self, keys: usize, bytes: usize, vectors: usize) -> bool {
 		if self.captured_keys.len() + keys > DISKANN_COMPACTION_MAX_PENDING_KEYS {
 			return false;
 		}
 		// An empty batch always admits its first entries (mirrors `add`'s `!is_empty()` guard) so a
 		// single oversized pair can still make progress.
 		self.captured_keys.is_empty()
-			|| self.encoded_bytes + bytes <= DISKANN_COMPACTION_MAX_PENDING_BYTES
+			|| (self.encoded_bytes + bytes <= DISKANN_COMPACTION_MAX_PENDING_BYTES
+				&& self.new_vectors + vectors <= DISKANN_COMPACTION_MAX_PENDING_VECTORS)
 	}
 
 	/// Captures a key/op already authorized by [`Self::has_room_for`], bypassing the per-call
@@ -257,10 +288,12 @@ impl PendingPlanBuilder {
 			value,
 		});
 		for pending in pending {
+			self.new_vectors += pending.new_vectors.len();
 			self.add_pending(pending);
 		}
 		if self.captured_keys.len() >= DISKANN_COMPACTION_MAX_PENDING_KEYS
 			|| self.encoded_bytes >= DISKANN_COMPACTION_MAX_PENDING_BYTES
+			|| self.new_vectors >= DISKANN_COMPACTION_MAX_PENDING_VECTORS
 		{
 			self.has_more = true;
 		}
@@ -350,6 +383,16 @@ pub struct DiskAnnIndex {
 	/// What the KNN pending scans on this index materialised. Zero-sized outside
 	/// test builds.
 	pending_scan_stats: PendingScanStats,
+	/// Faults the next compaction frames on this index inject.
+	#[cfg(test)]
+	faults: std::sync::Mutex<Option<Arc<FrameFaults>>>,
+	/// Every compaction frame this index opened, for the tests that read their stats.
+	#[cfg(test)]
+	frames: std::sync::Mutex<Vec<Arc<DiskAnnBuildFrame>>>,
+	/// Lets this index's frames take places without a read view, so a test runs the batched
+	/// insert on an engine that gives none.
+	#[cfg(test)]
+	batch_without_view: std::sync::atomic::AtomicBool,
 }
 
 /// Context passed from SurrealDB execution into DiskANN provider calls.
@@ -378,6 +421,17 @@ impl<'a> DiskAnnContext<'a> {
 			ikb,
 			provider_context,
 		}
+	}
+
+	/// How this operation reaches KV: through its transaction, checked against the frame's
+	/// cancellation before every operation when it runs in one.
+	pub(super) fn kv(&self) -> FrameKv<'_> {
+		FrameKv::new(&self.tx, self.provider_context.frame())
+	}
+
+	/// The compaction frame this operation runs in, if any.
+	pub(super) fn frame(&self) -> Option<&DiskAnnBuildFrame> {
+		self.provider_context.frame()
 	}
 }
 
@@ -418,12 +472,120 @@ impl PredicateMut<ElementId> for NotVisited<'_> {
 
 impl HybridPredicate<ElementId> for NotVisited<'_> {}
 
+/// Runs `$body` with `$values` bound to `$vector`'s elements as a typed slice, or fails for a
+/// vector type or storage DiskANN cannot insert.
+macro_rules! with_typed_slice {
+	($vector:expr, $values:ident => $body:expr) => {
+		match $vector {
+			Vector::F32(v) => match v.as_slice() {
+				Some($values) => $body,
+				None => bail!("DISKANN vector storage must be contiguous"),
+			},
+			Vector::F16(v) => match v.as_slice() {
+				Some($values) => $body,
+				None => bail!("DISKANN vector storage must be contiguous"),
+			},
+			Vector::I8(v) => match v.as_slice() {
+				Some($values) => $body,
+				None => bail!("DISKANN vector storage must be contiguous"),
+			},
+			Vector::U8(v) => match v.as_slice() {
+				Some($values) => $body,
+				None => bail!("DISKANN vector storage must be contiguous"),
+			},
+			_ => bail!("DISKANN supports TYPE F32, F16, I8, and U8"),
+		}
+	};
+}
+
+/// An element type whose vectors a batched insert reads rows from.
+trait TypedVector: Sized {
+	/// `vector`'s elements, when it holds this type in contiguous storage.
+	fn slice_of(vector: &Vector) -> Option<&[Self]>;
+}
+
+impl TypedVector for f32 {
+	fn slice_of(vector: &Vector) -> Option<&[Self]> {
+		match vector {
+			Vector::F32(v) => v.as_slice(),
+			_ => None,
+		}
+	}
+}
+
+impl TypedVector for Half {
+	fn slice_of(vector: &Vector) -> Option<&[Self]> {
+		match vector {
+			Vector::F16(v) => v.as_slice(),
+			_ => None,
+		}
+	}
+}
+
+impl TypedVector for i8 {
+	fn slice_of(vector: &Vector) -> Option<&[Self]> {
+		match vector {
+			Vector::I8(v) => v.as_slice(),
+			_ => None,
+		}
+	}
+}
+
+impl TypedVector for u8 {
+	fn slice_of(vector: &Vector) -> Option<&[Self]> {
+		match vector {
+			Vector::U8(v) => v.as_slice(),
+			_ => None,
+		}
+	}
+}
+
 /// Thin wrapper around the upstream DiskANN graph using SurrealDB's provider implementation.
+///
+/// Its methods take `&self`: exclusive access to the graph comes from the `RwLock` around it, not
+/// from `&mut`.
 pub(super) struct DiskAnnGraph {
 	index: RawDiskAnnIndex<DiskAnnProvider>,
 	/// The span over which this wrapper's cached graph has followed every commit to the index.
 	/// Only a compaction frame changes it, under the graph write lock.
 	continuity: Option<Continuity>,
+	/// What the upstream configuration was built from, so a frame can build a handle of its own
+	/// sized to its place grant ([`Self::frame_index`]).
+	degree: usize,
+	l_build: usize,
+	alpha: f32,
+	metric: Metric,
+	/// Whether inserts run with the construction retry ([`insert_retry`]); only a test turns it
+	/// off.
+	insert_retry: bool,
+	/// How many times a frame opened the span afresh, for the tests that pin when a frame
+	/// invalidates what the wrapper cached.
+	#[cfg(test)]
+	span_opens: u64,
+}
+
+/// The upstream configuration of one DiskANN graph: its degree, build list, alpha and prune
+/// kind, the construction retry when `retry` is set, and — for a frame's batched insert —
+/// `tasks` as its minibatch parallelism, with its intra-batch candidates.
+fn graph_config(
+	degree: usize,
+	l_build: usize,
+	alpha: f32,
+	metric: Metric,
+	retry: bool,
+	tasks: Option<NonZeroUsize>,
+) -> Result<diskann::graph::Config> {
+	let mut builder =
+		Builder::new(degree, MaxDegree::default_slack(), l_build, PruneKind::from_metric(metric));
+	builder.alpha(alpha);
+	if retry {
+		builder.insert_retry(insert_retry(degree));
+	}
+	if let Some(tasks) = tasks {
+		builder.max_minibatch_par(tasks.get());
+		builder.intra_batch_candidates(IntraBatchCandidates::new(DISKANN_INTRA_BATCH_CANDIDATES));
+	}
+	Ok(builder.build()?)
 }
 
 /// Raw graph-search output before document filtering.
@@ -446,20 +608,56 @@ impl DiskAnnGraph {
 		if !alpha.is_finite() || alpha <= 0.0 {
 			bail!("DISKANN ALPHA must be finite and greater than 0")
 		}
-		let mut builder = Builder::new(
-			p.degree as usize,
-			MaxDegree::default_slack(),
-			p.l_build as usize,
-			PruneKind::from_metric(metric),
-		);
-		builder.alpha(alpha);
-		let config = builder.build()?;
+		let config =
+			graph_config(p.degree as usize, p.l_build as usize, alpha, metric, true, None)?;
 		let provider =
 			DiskAnnProvider::new(ikb, tb, format_version, cache, p.dimension as usize, metric);
 		Ok(Self {
 			index: RawDiskAnnIndex::new(config, provider, None),
 			continuity: None,
+			degree: p.degree as usize,
+			l_build: p.l_build as usize,
+			alpha,
+			metric,
+			insert_retry: true,
+			#[cfg(test)]
+			span_opens: 0,
 		})
+	}
+
+	/// Rebuilds the upstream index without the construction retry, for the tests that measure
+	/// what it changes.
+	#[cfg(test)]
+	fn without_insert_retry(&mut self) -> Result<()> {
+		self.insert_retry = false;
+		let config = graph_config(self.degree, self.l_build, self.alpha, self.metric, false, None)?;
+		self.index = RawDiskAnnIndex::new(config, self.provider().same_owner(), None);
+		Ok(())
+	}
+
+	/// The provider the graph reads and writes through.
+	pub(super) fn provider(&self) -> &DiskAnnProvider {
+		self.index.provider()
+	}
+
+	/// The upstream index one batched insert runs on, with `tasks` as both its minibatch
+	/// parallelism and its scratch-pool size.
+	///
+	/// `tasks` is the frame's place grant: upstream spawns at most `tasks` tasks in any phase of a
+	/// batched insert, so every task it can spawn has a place. The handle wraps a provider that
+	/// keeps this wrapper's cache owner, so what it writes through is attributed exactly as the
+	/// long-lived index's writes are. It holds no graph state, and is dropped when the insert
+	/// returns; exclusive access to the graph still comes from the lock around this type.
+	fn frame_index(&self, tasks: NonZeroUsize) -> Result<Arc<RawDiskAnnIndex<DiskAnnProvider>>> {
+		let config = graph_config(
+			self.degree,
+			self.l_build,
+			self.alpha,
+			self.metric,
+			self.insert_retry,
+			Some(tasks),
+		)?;
+		Ok(Arc::new(RawDiskAnnIndex::new(config, self.provider().same_owner(), Some(tasks))))
 	}
 
 	/// Reads the stored elements (vector and tombstone) of `element_ids`, in input order, through
@@ -489,7 +687,7 @@ impl DiskAnnGraph {
 	/// A snapshot anywhere but the span's head reopens the span there: either the wrapper has not
 	/// committed yet, or another process has committed since, and the wrapper cannot tell which
 	/// entries a commit it did not make changed.
-	fn open_frame(
+	pub(super) fn open_frame(
 		&mut self,
 		tx: Arc<Transaction>,
 		generation: Option<u64>,
@@ -498,6 +696,10 @@ impl DiskAnnGraph {
 			Some(span) if generation < span.head => return None,
 			Some(span) if generation == span.head => {}
 			_ => {
+				#[cfg(test)]
+				{
+					self.span_opens += 1;
+				}
 				self.continuity = Some(Continuity {
 					base: generation,
 					head: generation,
@@ -520,88 +722,211 @@ impl DiskAnnGraph {
 		self.continuity = None;
 	}
 
-	/// The view a search taking the graph lock now would read this wrapper's entries through,
-	/// at `generation`.
-	#[cfg(test)]
+	/// The view a transaction reading the graph under the lock now would read this wrapper's
+	/// entries through, at `generation`.
 	fn reader_view(&self, generation: Option<u64>) -> CacheView {
 		self.index.provider().reader_view(generation, self.continuity)
 	}
 
 	/// Inserts one vector into the graph and returns its new element ID.
 	pub(super) async fn insert(
-		&mut self,
+		&self,
 		ctx: &DiskAnnContext<'_>,
-		vector: Vector,
+		vector: &Vector,
 	) -> Result<ElementId> {
-		match vector {
-			Vector::F32(values) => {
-				let Some(values) = values.as_slice() else {
-					bail!("DISKANN vector storage must be contiguous")
-				};
-				self.insert_typed(ctx, values).await
-			}
-			Vector::F16(values) => {
-				let Some(values) = values.as_slice() else {
-					bail!("DISKANN vector storage must be contiguous")
-				};
-				self.insert_typed(ctx, values).await
-			}
-			Vector::I8(values) => {
-				let Some(values) = values.as_slice() else {
-					bail!("DISKANN vector storage must be contiguous")
-				};
-				self.insert_typed(ctx, values).await
-			}
-			Vector::U8(values) => {
-				let Some(values) = values.as_slice() else {
-					bail!("DISKANN vector storage must be contiguous")
-				};
-				self.insert_typed(ctx, values).await
-			}
-			_ => bail!("DISKANN supports TYPE F32, F16, I8, and U8"),
-		}
+		let element_id = self.provider().allocate_element_id(&ctx.provider_context).await?;
+		with_typed_slice!(vector, values => self.insert_typed(ctx, values, element_id).await)?;
+		Ok(element_id)
 	}
 
-	/// Inserts a typed vector slice through the upstream DiskANN insertion strategy.
-	async fn insert_typed<T>(&mut self, ctx: &DiskAnnContext<'_>, values: &[T]) -> Result<ElementId>
+	/// Inserts one vector into the graph under `element_id`, which the caller allocated in this
+	/// transaction and the graph does not hold, through upstream's single-vector insert. Spawns
+	/// nothing.
+	pub(super) async fn insert_with_id(
+		&self,
+		ctx: &DiskAnnContext<'_>,
+		vector: &Vector,
+		element_id: ElementId,
+	) -> Result<()> {
+		with_typed_slice!(vector, values => self.insert_typed(ctx, values, element_id).await)
+	}
+
+	/// Inserts a typed vector slice under `element_id`: as the graph's first element when it has no
+	/// entry point, through the upstream insertion strategy otherwise.
+	async fn insert_typed<T>(
+		&self,
+		ctx: &DiskAnnContext<'_>,
+		values: &[T],
+		element_id: ElementId,
+	) -> Result<()>
 	where
 		T: DiskAnnVectorElement,
 		for<'a> DiskAnnProvider: SetElement<&'a [T], SetError = diskann::ANNError>,
 	{
-		let provider = self.index.provider();
-		let element_id = provider.allocate_element_id(&ctx.provider_context).await?;
+		let provider = self.provider();
 		if provider.valid_starting_points(&ctx.provider_context).await?.is_empty() {
-			let guard = provider.set_element(&ctx.provider_context, &element_id, values).await?;
-			guard.complete().await;
-			let node: crate::trees::diskann::DiskAnnNode = Default::default();
-			ctx.tx.set_key(&ctx.ikb.new_dn_key(element_id), &node).await?;
-			provider.set_entry_point(&ctx.provider_context, Some(element_id)).await?;
+			self.seed_typed(ctx, values, element_id).await
 		} else {
 			let strategy = DiskAnnStrategy::<T>::default();
 			self.index.insert(&strategy, &ctx.provider_context, &element_id, values).await?;
-			provider.ensure_entry_point(&ctx.provider_context, element_id).await?;
+			provider.ensure_entry_point(&ctx.provider_context, element_id).await
 		}
+	}
+
+	/// Seeds an empty graph with `vector` as its first element and entry point, and returns the
+	/// element's id.
+	pub(super) async fn seed_first(
+		&self,
+		ctx: &DiskAnnContext<'_>,
+		vector: &Vector,
+	) -> Result<ElementId> {
+		let element_id = self.provider().allocate_element_id(&ctx.provider_context).await?;
+		with_typed_slice!(vector, values => self.seed_typed(ctx, values, element_id).await)?;
 		Ok(element_id)
+	}
+
+	/// Writes `element_id`'s vector, an empty adjacency list, and the entry point naming it.
+	async fn seed_typed<T>(
+		&self,
+		ctx: &DiskAnnContext<'_>,
+		values: &[T],
+		element_id: ElementId,
+	) -> Result<()>
+	where
+		T: DiskAnnVectorElement,
+		for<'a> DiskAnnProvider: SetElement<&'a [T], SetError = diskann::ANNError>,
+	{
+		let provider = self.provider();
+		let guard = provider.set_element(&ctx.provider_context, &element_id, values).await?;
+		guard.complete().await;
+		provider
+			.write_node(&ctx.provider_context, element_id, Default::default(), NodeWrite::Own)
+			.await?;
+		provider.set_entry_point(&ctx.provider_context, Some(element_id)).await
+	}
+
+	/// Inserts `vectors` under `ids` through upstream's batched insert, on at most `tasks` tasks
+	/// per phase.
+	///
+	/// `ids` come from `allocate_element_ids` in this transaction, one per vector in order, and the
+	/// graph holds none of them; the graph already has a live entry point. `tasks` is the frame's
+	/// place grant, so every task upstream spawns is backed by a place.
+	pub(super) async fn insert_batch(
+		&self,
+		ctx: &DiskAnnContext<'_>,
+		vectors: &[&Vector],
+		ids: &[ElementId],
+		tasks: NonZeroUsize,
+	) -> Result<()> {
+		match vectors.first() {
+			Some(Vector::F32(_)) => self.insert_batch_typed::<f32>(ctx, vectors, ids, tasks).await,
+			Some(Vector::F16(_)) => self.insert_batch_typed::<Half>(ctx, vectors, ids, tasks).await,
+			Some(Vector::I8(_)) => self.insert_batch_typed::<i8>(ctx, vectors, ids, tasks).await,
+			Some(Vector::U8(_)) => self.insert_batch_typed::<u8>(ctx, vectors, ids, tasks).await,
+			Some(_) => bail!("DISKANN supports TYPE F32, F16, I8, and U8"),
+			None => Ok(()),
+		}
+	}
+
+	/// Typed body of [`Self::insert_batch`]: packs the batch into one row-major matrix.
+	async fn insert_batch_typed<T>(
+		&self,
+		ctx: &DiskAnnContext<'_>,
+		vectors: &[&Vector],
+		ids: &[ElementId],
+		tasks: NonZeroUsize,
+	) -> Result<()>
+	where
+		T: DiskAnnVectorElement + TypedVector,
+		for<'a> DiskAnnProvider: SetElement<&'a [T], SetError = diskann::ANNError>,
+	{
+		let dim = self.provider().dim();
+		let mut data: Vec<T> = Vec::with_capacity(vectors.len() * dim);
+		for vector in vectors {
+			let Some(row) = T::slice_of(vector) else {
+				bail!("DISKANN vector storage must be contiguous")
+			};
+			Vector::check_expected_dimension(row.len(), dim)?;
+			data.extend_from_slice(row);
+		}
+		let batch: Matrix<T> = Matrix::try_from(data.into_boxed_slice(), vectors.len(), dim)
+			.map_err(|_| anyhow::anyhow!("DISKANN batch dimension mismatch"))?;
+		self.frame_index(tasks)?
+			.multi_insert::<DiskAnnStrategy<T>, Matrix<T>>(
+				DiskAnnStrategy::<T>::default(),
+				&ctx.provider_context,
+				Arc::new(batch),
+				Arc::<[ElementId]>::from(ids),
+			)
+			.await?;
+		Ok(())
+	}
+
+	/// Re-prunes the adjacency lists of the live elements among `ids` that have grown past the
+	/// degree, through upstream `prune_range`.
+	///
+	/// The chunk's adjacency lists are read in one batch first, so only the lists past the degree
+	/// go further: their elements are read in one more batch, which also leaves upstream's
+	/// one-at-a-time reads of both served from the frame's overlay or the cache.
+	pub(super) async fn reprune(
+		&self,
+		ctx: &DiskAnnContext<'_>,
+		ids: std::ops::Range<ElementId>,
+	) -> Result<()> {
+		let context = &ctx.provider_context;
+		let ids: Vec<ElementId> = ids.collect();
+		let nodes = self.provider().read_nodes(context, &ids).await?;
+		let over: Vec<ElementId> = ids
+			.into_iter()
+			.zip(nodes)
+			.filter(|(_, node)| {
+				node.as_ref().is_some_and(|node| node.neighbors.len() > self.degree)
+			})
+			.map(|(id, _)| id)
+			.collect();
+		if over.is_empty() {
+			return Ok(());
+		}
+		let elements = self.read_elements(context, &over).await?;
+		let live: Vec<(ElementId, Arc<DiskAnnElement>)> = over
+			.into_iter()
+			.zip(elements)
+			.filter_map(|(id, element)| Some((id, element.filter(|e| !e.deleted)?)))
+			.collect();
+		let Some((_, first)) = live.first() else {
+			return Ok(());
+		};
+		let ids: Vec<ElementId> = live.iter().map(|(id, _)| *id).collect();
+		match &first.vector {
+			SerializedVector::F32(_) => {
+				self.index.prune_range(&DiskAnnStrategy::<f32>::default(), context, ids).await?
+			}
+			SerializedVector::F16(_) => {
+				self.index.prune_range(&DiskAnnStrategy::<Half>::default(), context, ids).await?
+			}
+			SerializedVector::I8(_) => {
+				self.index.prune_range(&DiskAnnStrategy::<i8>::default(), context, ids).await?
+			}
+			SerializedVector::U8(_) => {
+				self.index.prune_range(&DiskAnnStrategy::<u8>::default(), context, ids).await?
+			}
+			_ => bail!("DISKANN supports TYPE F32, F16, I8, and U8"),
+		}
+		Ok(())
 	}
 
 	/// Marks one graph element deleted and refreshes the entry point if needed.
 	pub(super) async fn remove(
-		&mut self,
+		&self,
 		ctx: &DiskAnnContext<'_>,
 		element_id: ElementId,
 	) -> Result<()> {
 		let provider = self.index.provider();
 		provider.delete(&ctx.provider_context, &element_id).await?;
-		// `_for_update` because the result is persisted on the next line: a cached entry point,
-		// validated against a cached element, would overwrite a live entry point another process
-		// committed with one it has already deleted.
-		let next = provider
-			.valid_starting_points_for_update(&ctx.provider_context)
-			.await?
-			.into_iter()
-			.next();
-		provider.set_entry_point(&ctx.provider_context, next).await?;
-		Ok(())
+		// Reads what it persists through the transaction: a cached entry point, validated against
+		// a cached element, would overwrite a live entry point another process committed with one
+		// it has already deleted.
+		provider.retire_start_point(&ctx.provider_context, element_id).await
 	}
 
 	/// Dispatches a typed graph search based on the prepared query vector representation.
@@ -774,6 +1099,386 @@ impl DiskAnnGraph {
 /// sites.
 async fn cancel_silently(tx: &Transaction) {
 	let _ = tx.cancel().await;
+}
+
+/// How a frame's batch ended: on its own, or stopped by the watchdog, with what the watchdog saw.
+enum FrameOutcome {
+	Done(Result<()>),
+	Stopped(Result<()>),
+}
+
+/// Resolves once the statement running a frame is done: `Ok(())` when it was cancelled or timed
+/// out, and the error `is_done` raised otherwise, such as the memory threshold, unchanged.
+async fn frame_watchdog(env: &dyn IndexEnv, frame: &DiskAnnBuildFrame) -> Result<()> {
+	let watch = async {
+		loop {
+			if env.is_done(None).await? {
+				return Ok(());
+			}
+			common::time::sleep(DISKANN_FRAME_WATCHDOG_INTERVAL).await;
+		}
+	};
+	#[cfg(test)]
+	if let Some(faults) = &frame.faults
+		&& let (Some(park), Some(parked)) =
+			(&faults.park_set_element, faults.panic_frame_when_parked)
+	{
+		tokio::select! {
+			_ = park.wait_for(parked) => panic!("injected panic in the frame task"),
+			r = watch => return r,
+		}
+	}
+	#[cfg(not(test))]
+	let _ = frame;
+	watch.await
+}
+
+/// Undoes a frame that will not commit: the lock's cleanup and release, then the write
+/// transaction's cancel, inline.
+async fn fail(
+	lock: FrameLock<'_>,
+	tx: &Transaction,
+	tx_guard: TxGuard,
+	e: anyhow::Error,
+) -> Result<CompactionApply> {
+	let frame = lock.frame.clone();
+	lock.abort().await;
+	if let Some(frame) = &frame {
+		frame.stats.tx_ended(frame.live_tasks());
+	}
+	cancel_silently(tx).await;
+	tx_guard.disarm();
+	Err(e)
+}
+
+/// Cancels a frame's write transaction if the code that opened it does not end it: on an early
+/// `?` or a panic.
+///
+/// Its cancel runs in a task of its own, since `Drop` cannot await, and only after every task of
+/// the attached frame has exited, so no worker is still writing into the transaction, or reading
+/// through it, when it ends. A transaction that has already ended is left alone.
+struct TxGuard {
+	/// The transaction, until [`Self::disarm`].
+	tx: Option<Arc<Transaction>>,
+	frame: Option<Arc<DiskAnnBuildFrame>>,
+}
+
+impl TxGuard {
+	fn new(tx: Arc<Transaction>) -> Self {
+		Self {
+			tx: Some(tx),
+			frame: None,
+		}
+	}
+
+	/// Called once the transaction has ended inline.
+	fn disarm(mut self) {
+		self.tx = None;
+	}
+}
+
+impl Drop for TxGuard {
+	fn drop(&mut self) {
+		let Some(tx) = self.tx.take() else {
+			return;
+		};
+		let frame = self.frame.take();
+		if let Some(frame) = &frame {
+			frame.cancel();
+		}
+		let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+			return;
+		};
+		drop(runtime.spawn(async move {
+			if let Some(frame) = &frame {
+				frame.drain_tasks().await;
+				frame.stats.tx_ended(frame.live_tasks());
+			}
+			if !tx.closed() {
+				cancel_silently(&tx).await;
+			}
+		}));
+	}
+}
+
+/// The graph write lock of one frame, and what the frame must undo if it ends without committing:
+/// the span `open_frame` moved, the cache entries the frame wrote through, and the frame itself
+/// with its places. It does not hold the write transaction, which stays with the code that opened
+/// it.
+///
+/// [`Self::committed`], called once the write transaction has committed, extends the span and
+/// closes the frame under the lock, then releases it. [`Self::abort`] first cancels the frame and
+/// waits for every task it spawned — including one upstream detached — to exit, then undoes the
+/// frame under the lock and releases it. Undoing, in both `abort` and `Drop`, is synchronous:
+///  1. the frame is closed, so a task still running writes nothing through or publishes nothing
+///     afterwards, and the frame's share of its places is dropped;
+///  2. the continuity span is closed;
+///  3. every cache entry of this index is cleared.
+///
+/// The frame's read view is closed — its read transaction cancelled — only after the lock is
+/// released: inline in `committed` and `abort`, which have drained the frame's tasks first.
+///
+/// `Drop` without `committed` or `abort` happens only on a panic or an early `?` in the frame's
+/// task, and undoes the frame the same way, with no `.await` between the drop and the lock's
+/// release. It leaves the read transaction to a spawned task, which drains the frame's tasks
+/// before it cancels it.
+struct FrameLock<'a> {
+	index: &'a DiskAnnIndex,
+	/// Attached once the frame is open; `None` before.
+	frame: Option<Arc<DiskAnnBuildFrame>>,
+	done: bool,
+	/// Declared last, so it is dropped after `Drop::drop` has run.
+	graph: RwLockWriteGuard<'a, DiskAnnGraph>,
+}
+
+impl<'a> FrameLock<'a> {
+	fn new(index: &'a DiskAnnIndex, graph: RwLockWriteGuard<'a, DiskAnnGraph>) -> Self {
+		Self {
+			index,
+			frame: None,
+			done: false,
+			graph,
+		}
+	}
+
+	/// Gives `frame` to this lock and to the write transaction's guard in one synchronous step,
+	/// before anything can spawn a task, so no task runs while either guard does not know it.
+	fn attach(&mut self, frame: Arc<DiskAnnBuildFrame>, tx_guard: &mut TxGuard) {
+		tx_guard.frame = Some(Arc::clone(&frame));
+		self.frame = Some(frame);
+	}
+
+	fn graph(&self) -> &DiskAnnGraph {
+		&self.graph
+	}
+
+	/// Extends the span over `generation`, which the frame's transaction has just committed,
+	/// closes the frame, releases the lock, then cancels the frame's read transaction.
+	async fn committed(mut self, generation: Option<u64>) {
+		self.graph.commit_frame(generation);
+		let view = self.frame.as_ref().and_then(|frame| frame.close_now());
+		self.done = true;
+		let frame = self.frame.take();
+		// Releases the graph lock: no read transaction is ended while it is held.
+		drop(self);
+		close_view(frame.as_deref(), view).await;
+	}
+
+	/// Cancels the frame, waits for every task it spawned to exit, undoes it, releases the lock,
+	/// then cancels the frame's read transaction.
+	async fn abort(mut self) {
+		if let Some(frame) = &self.frame {
+			frame.cancel();
+			frame.drain_tasks().await;
+		}
+		let view = self.undo();
+		self.done = true;
+		let frame = self.frame.take();
+		drop(self);
+		close_view(frame.as_deref(), view).await;
+	}
+
+	/// The synchronous cleanup: closes the frame, closes the span and clears the index's cache
+	/// entries. Returns the frame's read view, for the caller to close once the lock is released.
+	fn undo(&mut self) -> Option<Arc<ReadView>> {
+		let view = self.frame.as_ref().and_then(|frame| frame.close_now());
+		self.graph.abandon_frame();
+		self.index.clear_local_cache_now();
+		view
+	}
+}
+
+impl Drop for FrameLock<'_> {
+	/// Undoes the frame before the lock is released, then leaves the read transaction to a task
+	/// of its own, which cancels it once every task the frame spawned has exited.
+	fn drop(&mut self) {
+		if self.done {
+			return;
+		}
+		let view = self.undo();
+		let frame = self.frame.take();
+		if view.is_none() {
+			return;
+		}
+		let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+			return;
+		};
+		drop(runtime.spawn(async move {
+			if let Some(frame) = &frame {
+				frame.drain_tasks().await;
+			}
+			close_view(frame.as_deref(), view).await;
+		}));
+	}
+}
+
+/// Cancels a frame's read transaction, once no task of the frame reads through it any more.
+async fn close_view(frame: Option<&DiskAnnBuildFrame>, view: Option<Arc<ReadView>>) {
+	let Some(view) = view else {
+		return;
+	};
+	if let Some(frame) = frame {
+		frame.stats.tx_ended(frame.live_tasks());
+	}
+	view.close().await;
+}
+
+/// The most fresh vectors one initial-batch sink frame inserts: a scan batch is cut before the
+/// record that would take it past this, unless that record is the batch's first.
+pub const DISKANN_DIRECT_MAX_VECTORS: usize = DISKANN_COMPACTION_MAX_PENDING_VECTORS;
+
+/// How many element ids one re-prune frame covers.
+pub const DISKANN_REPRUNE_CHUNK: ElementId = 1024;
+
+/// What one frame does to the graph.
+enum FrameWork {
+	/// Folds pending operations: removals, then fresh inserts.
+	Apply(Vec<PendingOperation>),
+	/// Re-prunes the adjacency lists of the live elements with these ids.
+	Reprune(std::ops::Range<ElementId>),
+}
+
+/// A build transaction's guard while a DiskANN sink frame may run in it: cancels the transaction if
+/// the code that opened it does not end it — on an early return or a panic — once every task of
+/// the frame [`DiskAnnIndex::apply_direct`] attached has exited. A transaction that has already
+/// ended is left alone.
+pub struct BuildTxGuard(TxGuard);
+
+impl BuildTxGuard {
+	/// Guards `tx`, the build transaction a scan batch is indexed in.
+	pub fn new(tx: Arc<Transaction>) -> Self {
+		Self(TxGuard::new(tx))
+	}
+
+	/// Called once the transaction has ended inline.
+	pub fn disarm(self) {
+		self.0.disarm()
+	}
+}
+
+/// A sink frame applied in a build transaction that has not committed yet: the graph write lock,
+/// the frame, and what undoing it takes (see [`DiskAnnIndex::apply_direct`]).
+pub struct DirectApplyGuard<'a> {
+	lock: FrameLock<'a>,
+	committed: Option<u64>,
+}
+
+impl DirectApplyGuard<'_> {
+	/// Called once the build transaction has committed: extends the span over the generation it
+	/// committed, closes the frame and releases the graph lock, then cancels the frame's read
+	/// transaction.
+	pub async fn finish(self) {
+		self.lock.committed(self.committed).await
+	}
+
+	/// Called when the build transaction will not commit, before the caller cancels it: undoes
+	/// the frame under the graph lock, releases it, then cancels the frame's read transaction.
+	pub async fn abort(self) {
+		self.lock.abort().await
+	}
+}
+
+/// How many attempts an insert makes at an adjacency list of at least half its degree.
+const DISKANN_INSERT_ATTEMPTS: u32 = 3;
+
+/// The upstream construction retry every insert runs with: an insert whose pruned adjacency list
+/// holds fewer than half the index's degree searches again with a doubled list, up to
+/// [`DISKANN_INSERT_ATTEMPTS`] attempts, keeping the list of its last attempt. Both the
+/// single-vector and the batched insert honour it.
+///
+/// No attempt saturates its list. Pruning legitimately leaves short lists where it occludes most
+/// candidates — points along a line keep the nearest on either side — and saturating those adds
+/// edges the prune had good reason to drop, which the post-build re-prune then strips again.
+fn insert_retry(degree: usize) -> InsertRetry {
+	let threshold = u32::try_from(degree / 2).unwrap_or(u32::MAX);
+	InsertRetry::new(
+		NonZeroU32::new(DISKANN_INSERT_ATTEMPTS).unwrap_or(NonZeroU32::MIN),
+		NonZeroU32::new(threshold).unwrap_or(NonZeroU32::MIN),
+		false,
+	)
+}
+
+/// How many elements a graph seeded from a batch starts its searches from: its entry point and
+/// the start points chosen beside it.
+const DISKANN_START_POINTS: usize = 4;
+
+/// How many of a seeding batch's vectors, in batch order, the start points are chosen among.
+const DISKANN_START_POINT_SAMPLE: usize = 256;
+
+/// The positions, among the first [`DISKANN_START_POINT_SAMPLE`] of `vectors`, of the graph's
+/// start points: first the medoid — the vector with the least summed distance to the others —
+/// then, greedily, the vector farthest from every one chosen so far, until
+/// [`DISKANN_START_POINTS`] are chosen or the sample runs out. Ties go to the earlier position.
+///
+/// Distances are Euclidean over the vectors' components, normalised first for an angular
+/// metric, which is all a seed's spread needs. The choice is a function of the batch's vectors
+/// and their order alone, so it is the same whatever the frame's grant.
+fn start_point_positions(vectors: &[&Vector], metric: Metric) -> Vec<usize> {
+	let normalise =
+		matches!(metric, Metric::Cosine | Metric::CosineNormalized | Metric::InnerProduct);
+	let sample: Vec<Vec<f64>> = vectors
+		.iter()
+		.take(DISKANN_START_POINT_SAMPLE)
+		.map(|v| {
+			let mut c = components(v);
+			if normalise {
+				let norm = c.iter().map(|x| x * x).sum::<f64>().sqrt();
+				if norm > 0.0 {
+					c.iter_mut().for_each(|x| *x /= norm);
+				}
+			}
+			c
+		})
+		.collect();
+	if sample.is_empty() {
+		return Vec::new();
+	}
+	let distance = |a: &[f64], b: &[f64]| -> f64 {
+		a.iter().zip(b).map(|(x, y)| (x - y) * (x - y)).sum::<f64>().sqrt()
+	};
+	let medoid = (0..sample.len())
+		.map(|i| (i, sample.iter().map(|other| distance(&sample[i], other)).sum::<f64>()))
+		.fold((0, f64::INFINITY), |best, (i, total)| {
+			if total < best.1 {
+				(i, total)
+			} else {
+				best
+			}
+		})
+		.0;
+	let mut chosen = vec![medoid];
+	let mut nearest: Vec<f64> = sample.iter().map(|v| distance(v, &sample[medoid])).collect();
+	while chosen.len() < DISKANN_START_POINTS {
+		let (far, gap) = nearest.iter().copied().enumerate().fold((0, 0.0), |best, (i, d)| {
+			if d > best.1 {
+				(i, d)
+			} else {
+				best
+			}
+		});
+		if gap <= 0.0 {
+			break;
+		}
+		chosen.push(far);
+		for (i, v) in sample.iter().enumerate() {
+			nearest[i] = nearest[i].min(distance(v, &sample[far]));
+		}
+	}
+	chosen
+}
+
+/// A vector's components as `f64`.
+fn components(vector: &Vector) -> Vec<f64> {
+	match vector {
+		Vector::F32(v) => v.iter().map(|x| f64::from(*x)).collect(),
+		Vector::F16(v) => v.iter().map(|x| f64::from(x.to_f32())).collect(),
+		Vector::I8(v) => v.iter().map(|x| f64::from(*x)).collect(),
+		Vector::U8(v) => v.iter().map(|x| f64::from(*x)).collect(),
+		Vector::F64(v) => v.iter().copied().collect(),
+		Vector::I64(v) => v.iter().map(|x| *x as f64).collect(),
+		Vector::I32(v) => v.iter().map(|x| f64::from(*x)).collect(),
+		Vector::I16(v) => v.iter().map(|x| f64::from(*x)).collect(),
+	}
 }
 
 /// Converts SurrealDB's distance enum to the metric supported by the DiskANN crate.
@@ -1065,7 +1770,37 @@ impl DiskAnnIndex {
 			format_version,
 			pending_backlog_reported: PendingBacklogReport::default(),
 			pending_scan_stats: PendingScanStats::default(),
+			#[cfg(test)]
+			faults: std::sync::Mutex::new(None),
+			#[cfg(test)]
+			frames: std::sync::Mutex::new(Vec::new()),
+			#[cfg(test)]
+			batch_without_view: std::sync::atomic::AtomicBool::new(false),
 		})
+	}
+
+	/// Lets this index's frames take places without a read view from now on.
+	#[cfg(test)]
+	pub(crate) fn batch_without_view(&self) {
+		self.batch_without_view.store(true, std::sync::atomic::Ordering::Release);
+	}
+
+	/// Injects `faults` into every compaction frame this index opens from now on.
+	#[cfg(test)]
+	pub(crate) fn set_faults(&self, faults: Option<Arc<FrameFaults>>) {
+		*self.faults.lock().unwrap_or_else(|p| p.into_inner()) = faults;
+	}
+
+	/// The last compaction frame this index opened.
+	#[cfg(test)]
+	pub(crate) fn last_frame(&self) -> Option<Arc<DiskAnnBuildFrame>> {
+		self.frames.lock().unwrap_or_else(|p| p.into_inner()).last().cloned()
+	}
+
+	/// Every compaction frame this index opened, oldest first.
+	#[cfg(test)]
+	pub(crate) fn frames(&self) -> Vec<Arc<DiskAnnBuildFrame>> {
+		self.frames.lock().unwrap_or_else(|p| p.into_inner()).clone()
 	}
 
 	/// What the KNN pending scans on this index materialised.
@@ -1558,7 +2293,11 @@ impl DiskAnnIndex {
 				let pair_bytes = legacy_key.len()
 					+ legacy_value.len()
 					+ shard_entry.as_ref().map_or(0, |(k, v, _)| k.len() + v.len());
-				if !builder.has_room_for(pair_keys, pair_bytes) {
+				let pair_vectors = legacy_op.new_vectors.len()
+					+ shard_entry
+						.as_ref()
+						.map_or(0, |(_, _, ops)| ops.iter().map(|op| op.new_vectors.len()).sum());
+				if !builder.has_room_for(pair_keys, pair_bytes, pair_vectors) {
 					return Ok(false);
 				}
 				// The pair is authorized; capture both halves unconditionally so the byte guard can
@@ -1677,19 +2416,34 @@ impl DiskAnnIndex {
 				CompactionApply::Empty
 			});
 		}
-		if !bump_compaction_generation(&tx, &self.ikb.new_dg_key(), generation).await? {
-			cancel_silently(&tx).await;
-			return Ok(CompactionApply::LostRace);
+		// The write transaction belongs to this call from here: it is committed or cancelled inline
+		// on every path, and the guard covers an early `?` or a panic by cancelling it in a task of
+		// its own once every task of the frame has exited.
+		let mut tx_guard = TxGuard::new(Arc::clone(&tx));
+		match bump_compaction_generation(&tx, &self.ikb.new_dg_key(), generation).await {
+			Ok(true) => {}
+			Ok(false) => {
+				cancel_silently(&tx).await;
+				tx_guard.disarm();
+				return Ok(CompactionApply::LostRace);
+			}
+			Err(e) => {
+				cancel_silently(&tx).await;
+				tx_guard.disarm();
+				return Err(e);
+			}
 		}
 		for captured in &captured_keys {
 			match tx.del_compare(Key::from(&captured.key), Some(&captured.value)).await {
 				Ok(()) => {}
 				Err(e) if is_transaction_condition_not_met(&e) => {
 					cancel_silently(&tx).await;
+					tx_guard.disarm();
 					return Ok(CompactionApply::LostRace);
 				}
 				Err(e) => {
 					cancel_silently(&tx).await;
+					tx_guard.disarm();
 					return Err(e);
 				}
 			}
@@ -1701,36 +2455,51 @@ impl DiskAnnIndex {
 		// that pre-empts KV.
 		let mut graph = self.graph.write().await;
 		let Some(provider_context) = graph.open_frame(Arc::clone(&tx), generation) else {
+			drop(graph);
 			cancel_silently(&tx).await;
+			tx_guard.disarm();
 			return Ok(CompactionApply::LostRace);
 		};
 		let committed = provider_context.view.commit_generation();
-		let apply_result: Result<()> = async {
-			let docs = DiskAnnDocs::with_format_version(self.ikb.clone(), self.format_version);
-			let diskann_ctx = self.new_diskann_context(env, provider_context);
-			for pending in pending {
-				self.apply_pending_operation(&diskann_ctx, &docs, &mut graph, pending).await?;
+		// The span moved: the lock owns it, and the cache cleanup, from here.
+		let mut lock = FrameLock::new(self, graph);
+		let frame = match self.open_frame_view(env, &tx, &lock).await {
+			// One synchronous step gives the frame to both guards, before any task can be spawned.
+			Ok((frame, held)) => {
+				lock.attach(Arc::clone(&frame), &mut tx_guard);
+				// The view holds the generation every commit of the graph advances. One other than
+				// the plan's means a commit landed after this frame's fence, so the frame's
+				// conditional bump cannot commit.
+				if let ViewGeneration::Holds(held) = held
+					&& held != generation
+				{
+					lock.abort().await;
+					frame.stats.tx_ended(frame.live_tasks());
+					cancel_silently(&tx).await;
+					tx_guard.disarm();
+					return Ok(CompactionApply::LostRace);
+				}
+				frame
 			}
-			Ok(())
-		}
-		.await;
-		if let Err(e) = apply_result {
-			cancel_silently(&tx).await;
-			graph.abandon_frame();
-			self.clear_local_cache().await;
-			return Err(e);
+			Err(e) => return fail(lock, &tx, tx_guard, e).await,
+		};
+		if let Err(e) =
+			self.run_frame(env, &lock, &frame, provider_context, FrameWork::Apply(pending)).await
+		{
+			return fail(lock, &tx, tx_guard, e).await;
 		}
 		if let Err(e) = tx.commit().await {
-			graph.abandon_frame();
-			self.clear_local_cache().await;
+			tx_guard.disarm();
+			lock.abort().await;
 			return Err(e);
 		}
-		graph.commit_frame(committed);
-		// By the time any concurrent reader can acquire `graph.read()` the cache
-		// and KV are consistent and the span covers the committed generation
-		// (commit succeeded) — or, on the error paths above, the cache has been
-		// cleared and the span closed (commit failed) before the lock was released.
-		drop(graph);
+		tx_guard.disarm();
+		// Extends the span, closes the frame and releases the graph lock, then cancels the frame's
+		// read transaction. By the time any concurrent reader can acquire `graph.read()` the cache
+		// and KV are consistent and the span covers the committed generation — or, on the error
+		// paths above, the cache has been cleared and the span closed before the lock was
+		// released.
+		lock.committed(committed).await;
 		// The apply has committed, so a failed step does not undo it: the guard is left as it was,
 		// which may only make lookups scan a drained shard, and the next pass steps it.
 		if let Err(e) = self.step_pending_guards(&tx, &cleared_shards).await {
@@ -1740,6 +2509,272 @@ impl DiskAnnIndex {
 			);
 		}
 		Ok(CompactionApply::Applied)
+	}
+
+	/// Runs one frame's graph work, `pending`, under `lock`, and returns once every task the frame
+	/// spawned has exited. A failure — the batch's, one a task recorded, or the statement stopping
+	/// — is returned only after the batch has been driven to completion; the caller then undoes
+	/// the frame and cancels its write transaction.
+	async fn run_frame(
+		&self,
+		env: &dyn IndexEnv,
+		lock: &FrameLock<'_>,
+		frame: &Arc<DiskAnnBuildFrame>,
+		provider_context: DiskAnnProviderContext,
+		work: FrameWork,
+	) -> Result<()> {
+		let docs = DiskAnnDocs::with_format_version(self.ikb.clone(), self.format_version);
+		let diskann_ctx =
+			self.new_diskann_context(env, provider_context.in_frame(Arc::clone(frame)));
+		// The watchdog polls the statement's cancellation and stops the frame. The batch is always
+		// driven to completion afterwards, so no task it spawned outlives it unobserved: each fails
+		// at its next KV operation, which checks the frame first.
+		let outcome = {
+			let work = async {
+				match work {
+					FrameWork::Apply(pending) => {
+						self.apply_pending_batch(&diskann_ctx, &docs, lock.graph(), pending).await
+					}
+					FrameWork::Reprune(ids) => lock.graph().reprune(&diskann_ctx, ids).await,
+				}
+			};
+			let mut work = std::pin::pin!(work);
+			let first = tokio::select! {
+				biased;
+				r = &mut work => FrameOutcome::Done(r),
+				stop = frame_watchdog(env, frame) => FrameOutcome::Stopped(stop),
+			};
+			match first {
+				FrameOutcome::Done(r) => FrameOutcome::Done(r),
+				FrameOutcome::Stopped(stop) => {
+					frame.cancel();
+					let _ = work.await;
+					FrameOutcome::Stopped(stop)
+				}
+			}
+		};
+		let r = match outcome {
+			FrameOutcome::Done(r) => r,
+			// `is_done` answers `true` for a cancellation or a timeout, and fails for the memory
+			// threshold; the latter keeps its classification.
+			FrameOutcome::Stopped(Err(e)) => return Err(e),
+			FrameOutcome::Stopped(Ok(())) => return Err(EngineError::QueryCancelled.into()),
+		};
+		// A failure a task recorded wins over the stringified error upstream returned, so its
+		// classification survives.
+		if let Some(e) = frame.take_error() {
+			return Err(e);
+		}
+		r?;
+		// No task the frame spawned may still be writing into its transaction when it commits.
+		// Upstream has joined them all on this path, so this returns at once.
+		frame.drain_tasks().await;
+		Ok(())
+	}
+
+	/// Opens the frame of one apply under `lock`, with a read view taken alongside `tx` where the
+	/// engine gives one. What the view reads is published as a reader at the view's own generation
+	/// would publish it, under the span the frame holds.
+	async fn open_frame_view(
+		&self,
+		env: &dyn IndexEnv,
+		tx: &Transaction,
+		lock: &FrameLock<'_>,
+	) -> Result<(Arc<DiskAnnBuildFrame>, ViewGeneration)> {
+		let graph = lock.graph();
+		let publication = |held: Option<u64>| graph.reader_view(held).publication();
+		#[cfg(not(test))]
+		let opened =
+			DiskAnnBuildFrame::open(tx, env.places(), &self.ikb.new_dg_key(), publication).await?;
+		#[cfg(test)]
+		let opened = {
+			let hooks = FrameHooks {
+				faults: self.faults.lock().unwrap_or_else(|p| p.into_inner()).clone(),
+				batch_without_view: self
+					.batch_without_view
+					.load(std::sync::atomic::Ordering::Acquire),
+			};
+			let opened = DiskAnnBuildFrame::open(
+				tx,
+				env.places(),
+				&self.ikb.new_dg_key(),
+				publication,
+				hooks,
+			)
+			.await?;
+			self.frames.lock().unwrap_or_else(|p| p.into_inner()).push(Arc::clone(&opened.0));
+			opened
+		};
+		Ok(opened)
+	}
+
+	/// Applies a batch of freshly scanned records straight to the graph inside `env`'s write
+	/// transaction, the build transaction of the scan batch that read them, as a frame with no
+	/// captured pending keys: the initial-batch sink of a DiskANN build.
+	///
+	/// `range` is the first and last record key of the scan batch the records come from. The sink
+	/// keeps no state across batches beyond it, so calls over disjoint ranges that tile a table
+	/// index the same documents as one call over the whole range.
+	///
+	/// `records` are the records of the batch with no queued mutation, each with the vectors of
+	/// its current value, holding at most [`DISKANN_DIRECT_MAX_VECTORS`] vectors between them
+	/// unless one record alone exceeds it. Each is inserted under the doc-ID its record resolves
+	/// to, exactly as a compaction folding its pending would insert it; nothing is written to
+	/// `!dw`.
+	///
+	/// Returns a guard rather than `()`, because the build transaction is still open: the caller
+	/// writes its continuation checkpoint after this returns and commits both together. The guard
+	/// holds the graph write lock and the frame until then, so no search is served the frame's
+	/// write-throughs before the commit makes them real. After the commit the caller calls
+	/// [`DirectApplyGuard::finish`]; on any other path [`DirectApplyGuard::abort`], and then
+	/// cancels its transaction. A guard dropped without either, on a panic or an early return,
+	/// undoes the frame in `Drop`.
+	///
+	/// `tx_guard` is the caller's guard on the build transaction. The frame is attached to it in
+	/// the same synchronous step as to the lock, so a panic anywhere after the frame's tasks can
+	/// exist cancels the build transaction only after those tasks have drained.
+	///
+	/// Before it returns — with the guard or with an error — every task the frame spawned has
+	/// exited, so nothing but the caller writes into the build transaction afterwards. On an error
+	/// the frame is already undone; the build transaction stays the caller's to cancel.
+	pub async fn apply_direct<'a>(
+		&'a self,
+		env: &dyn IndexEnv,
+		range: (&[u8], &[u8]),
+		records: Vec<(RecordIdKey, Vec<SerializedVector>)>,
+		tx_guard: &mut BuildTxGuard,
+	) -> Result<DirectApplyGuard<'a>> {
+		let tx = env.tx();
+		tracing::trace!(
+			target: "surrealdb::idx::diskann",
+			records = records.len(),
+			from = ?range.0,
+			to = ?range.1,
+			"applying a scan batch directly to the DiskANN graph"
+		);
+		let (lock, frame, provider_context, committed) =
+			self.open_direct_frame(env, &tx, tx_guard).await?;
+		let pending = records
+			.into_iter()
+			.filter(|(_, vectors)| !vectors.is_empty())
+			.map(|(id, new_vectors)| {
+				let record = Arc::new(id);
+				PendingOperation {
+					id: VectorId::RecordKey(Arc::clone(&record)),
+					record: Some(record),
+					old_vectors: Vec::new(),
+					new_vectors,
+				}
+			})
+			.collect();
+		if let Err(e) =
+			self.run_frame(env, &lock, &frame, provider_context, FrameWork::Apply(pending)).await
+		{
+			lock.abort().await;
+			return Err(e);
+		}
+		Ok(DirectApplyGuard {
+			lock,
+			committed,
+		})
+	}
+
+	/// Opens a frame in `env`'s write transaction, `tx`, the build transaction a sink or a
+	/// re-prune step runs in: fences the graph at the generation the transaction reads, takes
+	/// the graph write lock, opens the span and the frame's read view, and attaches the frame to
+	/// the lock and to `tx_guard` in one step. On an error nothing is left open but `tx`, the
+	/// caller's to cancel.
+	async fn open_direct_frame<'a>(
+		&'a self,
+		env: &dyn IndexEnv,
+		tx: &Arc<Transaction>,
+		tx_guard: &mut BuildTxGuard,
+	) -> Result<(FrameLock<'a>, Arc<DiskAnnBuildFrame>, DiskAnnProviderContext, Option<u64>)> {
+		// The generation this transaction reads, so the frame's bump fences any compaction planned
+		// against an older one.
+		let dg = self.ikb.new_dg_key();
+		let generation = read_compaction_generation(tx, &dg).await?;
+		if !bump_compaction_generation(tx, &dg, generation).await? {
+			bail!(EngineError::unreachable(
+				"a DiskANN generation read in the transaction that bumps it moved"
+			));
+		}
+		let mut graph = self.graph.write().await;
+		let Some(provider_context) = graph.open_frame(Arc::clone(tx), generation) else {
+			// This wrapper committed past the transaction's snapshot: the build transaction cannot
+			// commit its bump, and the builder retries the batch in a fresh one.
+			bail!(KvsError::TransactionConflict(
+				"a DiskANN commit landed after this build transaction began".into()
+			));
+		};
+		let committed = provider_context.view.commit_generation();
+		let mut lock = FrameLock::new(self, graph);
+		let frame = match self.open_frame_view(env, tx, &lock).await {
+			Ok((frame, held)) => {
+				lock.attach(Arc::clone(&frame), &mut tx_guard.0);
+				if let ViewGeneration::Holds(held) = held
+					&& held != generation
+				{
+					lock.abort().await;
+					bail!(KvsError::TransactionConflict(
+						"a DiskANN commit landed after this build transaction began".into()
+					));
+				}
+				frame
+			}
+			Err(e) => {
+				lock.abort().await;
+				return Err(e);
+			}
+		};
+		Ok((lock, frame, provider_context, committed))
+	}
+
+	/// Re-prunes, in `env`'s write transaction, the adjacency lists of the live elements whose ids
+	/// lie in one chunk of [`DISKANN_REPRUNE_CHUNK`] from `from`: every list grown past the
+	/// degree since it was pruned — by back-edges later inserts appended — is pruned again
+	/// against the graph as it now stands, the pass upstream runs at the end of a build.
+	///
+	/// Runs as a frame, as [`Self::apply_direct`] does, and returns its guard the same way, with
+	/// the id the next chunk starts at; or no guard and no next id once `from` is past every id
+	/// the graph has allocated. A list at or under the degree is left as it is, so a sweep that
+	/// starts again from the beginning after an interruption redoes nothing it has done.
+	pub async fn reprune_direct<'a>(
+		&'a self,
+		env: &dyn IndexEnv,
+		from: ElementId,
+		tx_guard: &mut BuildTxGuard,
+	) -> Result<(Option<DirectApplyGuard<'a>>, Option<ElementId>)> {
+		let tx = env.tx();
+		// An index that has never been written has no state, and no ids to sweep.
+		let state: crate::trees::diskann::DiskAnnState =
+			tx.get_key(&self.ikb.new_ds_key(), None).await?.unwrap_or_default();
+		if from >= state.next_element_id {
+			return Ok((None, None));
+		}
+		let end = from.saturating_add(DISKANN_REPRUNE_CHUNK).min(state.next_element_id);
+		let (lock, frame, provider_context, committed) =
+			self.open_direct_frame(env, &tx, tx_guard).await?;
+		if let Err(e) = self
+			.run_frame(env, &lock, &frame, provider_context, FrameWork::Reprune(from..end))
+			.await
+		{
+			lock.abort().await;
+			return Err(e);
+		}
+		Ok((
+			Some(DirectApplyGuard {
+				lock,
+				committed,
+			}),
+			(end < state.next_element_id).then_some(end),
+		))
+	}
+
+	/// The vectors a record's indexed values hold, as a write of them would queue them: one per
+	/// non-null column, each checked against the index's type and dimension.
+	pub fn vectors_of(&self, content: Vec<Value>) -> Result<Vec<SerializedVector>> {
+		self.content_to_vectors(content)
 	}
 
 	/// Steps the drained shards' guards to `Empty`, in a transaction of their own under the index's
@@ -1763,72 +2798,218 @@ impl DiskAnnIndex {
 		.await
 	}
 
-	/// Drops every entry in the process-local [`DiskAnnCache`] that is scoped to
-	/// this index, keeping the [`DiskAnnIndex`] registration intact so the graph
-	/// `RwLock` continues to serialise compaction and KNN search.
-	async fn clear_local_cache(&self) {
-		self.cache
-			.remove_index(
-				self.ikb.ns(),
-				self.ikb.db(),
-				self.table_id,
-				self.ikb.index(),
-				self.format_version,
-			)
-			.await;
+	/// Drops every entry in the process-local [`DiskAnnCache`] that is scoped to this index,
+	/// keeping the [`DiskAnnIndex`] registration intact so the graph `RwLock` continues to
+	/// serialise compaction and KNN search. Synchronous, so a frame's cleanup runs it on a path
+	/// that cannot await.
+	fn clear_local_cache_now(&self) {
+		self.cache.remove_index_now(
+			self.ikb.ns(),
+			self.ikb.db(),
+			self.table_id,
+			self.ikb.index(),
+			self.format_version,
+		);
 	}
 
-	/// Applies one coalesced pending operation to document mappings and the DiskANN graph.
-	async fn apply_pending_operation(
+	/// One frame's graph work.
+	///
+	/// Phase A applies removals and resolves doc-ids in plan order, one pending at a time. Phase B
+	/// resolves each distinct new vector against the vector → docs mapping in one multi-get, so
+	/// duplicates within the batch and vectors already in the graph never reach the graph. Phase C
+	/// inserts the remaining fresh vectors: the first into an empty graph as its seed, a lone one
+	/// through the single-vector insert, and more than one under ids allocated together, in
+	/// consecutive batches of at most [`DISKANN_INSERT_BATCH_MAX_VECTORS`] — through
+	/// upstream's batched insert on the frame's place grant, or one at a time on the calling task
+	/// when the grant is empty. Every batch is checked before any doc mapping of a fresh vector is
+	/// written: the first failure a task recorded fails the frame, and then every element of the
+	/// batch must have an adjacency list written by the frame.
+	async fn apply_pending_batch(
 		&self,
 		ctx: &DiskAnnContext<'_>,
 		docs: &DiskAnnDocs,
-		graph: &mut DiskAnnGraph,
-		pending: PendingOperation,
+		graph: &DiskAnnGraph,
+		pending: Vec<PendingOperation>,
 	) -> Result<()> {
-		match pending.id {
-			VectorId::DocId(doc_id) => {
-				// Remove the graph baseline under the doc-ID those vectors live under.
-				for vector in pending.old_vectors {
-					let vector = Vector::from(vector);
-					self.vec_docs.remove(ctx, &vector, doc_id, graph).await?;
-				}
-				if pending.new_vectors.is_empty() {
-					if self.format_version < crate::catalog::DOC_IDS_FORMAT_VERSION
-						&& let Some(record) = &pending.record
-					{
-						LegacyVectorDocIds::DiskAnn(self.ikb.clone())
-							.remove(&ctx.env.tx(), record)
-							.await?;
+		let inserts = self.apply_removals(ctx, docs, graph, pending).await?;
+		let fresh: Vec<StagedVector> = self.vec_docs.stage_inserts(ctx, inserts).await?;
+		if fresh.is_empty() {
+			return Ok(());
+		}
+		let provider = graph.provider();
+		let mut fresh = fresh;
+		// An empty graph is seeded from its batch's medoid, and starts its searches from the
+		// medoid and the batch vectors spread farthest from it, once they are inserted.
+		let mut seeding: Option<(ElementId, Vec<usize>)> = None;
+		if provider.valid_starting_points(&ctx.provider_context).await?.is_empty() {
+			let vectors: Vec<&Vector> = fresh.iter().map(StagedVector::vector).collect();
+			let positions = start_point_positions(&vectors, graph.metric);
+			let Some(&medoid) = positions.first() else {
+				return Ok(());
+			};
+			let first = fresh.remove(medoid);
+			let id = graph.seed_first(ctx, first.vector()).await?;
+			self.vec_docs.commit_fresh(ctx, std::iter::once((first, id))).await?;
+			// The other start points' positions among the vectors left once the seed is out.
+			let others = positions[1..]
+				.iter()
+				.map(|&p| {
+					if p > medoid {
+						p - 1
+					} else {
+						p
 					}
-					docs.remove(doc_id, self.table_id, &self.cache);
-				} else {
-					// A delete removes the record's shared doc-ID mapping and a
-					// re-create before compaction folds its vectors in here, so
-					// resolve the *current* doc-ID from the record key rather than
-					// reusing the captured (possibly deleted) one. For a plain
-					// update the mapping is unchanged and this returns the same id.
-					let insert_doc_id = match &pending.record {
-						Some(record) => docs.resolve(ctx.env, record).await?,
-						None => doc_id,
-					};
-					for vector in pending.new_vectors {
-						self.vec_docs
-							.insert(ctx, Vector::from(vector), insert_doc_id, graph)
-							.await?;
+				})
+				.collect();
+			seeding = Some((id, others));
+		}
+		let rest: Vec<StagedVector> = fresh;
+		let ids: Vec<ElementId> = match rest.as_slice() {
+			[] => return Ok(()),
+			[only] => vec![graph.insert(ctx, only.vector()).await?],
+			_ => {
+				let n = rest.len();
+				let ids: Vec<ElementId> =
+					provider.allocate_element_ids(&ctx.provider_context, n as u64).await?.collect();
+				let frame = ctx.frame().ok_or_else(|| {
+					EngineError::unreachable("a DiskANN compaction runs inside a frame")
+				})?;
+				// The frame's up-front grant: it never waits, returns between none and the
+				// requested places, and is held until the frame ends. No more than one task per
+				// vector of a batch is useful.
+				let granted = frame.take_places(n.min(DISKANN_INSERT_BATCH_MAX_VECTORS));
+				for (vectors, chunk) in rest
+					.chunks(DISKANN_INSERT_BATCH_MAX_VECTORS)
+					.zip(ids.chunks(DISKANN_INSERT_BATCH_MAX_VECTORS))
+				{
+					match granted {
+						// No place: nothing is spawned, and the vectors are inserted one at a time
+						// on this task, in batch order, under the ids allocated above.
+						None => {
+							for (vector, id) in vectors.iter().zip(chunk) {
+								graph.insert_with_id(ctx, vector.vector(), *id).await?;
+							}
+							frame.stats.sequential_vectors.fetch_add(
+								vectors.len() as u64,
+								std::sync::atomic::Ordering::Relaxed,
+							);
+						}
+						Some(tasks) => {
+							let rows: Vec<&Vector> =
+								vectors.iter().map(StagedVector::vector).collect();
+							graph.insert_batch(ctx, &rows, chunk, tasks).await?;
+							frame
+								.stats
+								.batch_calls
+								.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+							frame.stats.batched_vectors.fetch_add(
+								vectors.len() as u64,
+								std::sync::atomic::Ordering::Relaxed,
+							);
+							frame
+								.stats
+								.largest_batch
+								.fetch_max(vectors.len(), std::sync::atomic::Ordering::Relaxed);
+						}
 					}
+					// Upstream's batched insert answers `Ok(())` even when its tasks failed. A
+					// failure a task recorded, or a task panic, wins; then the structural
+					// post-condition.
+					if let Some(e) = frame.take_error() {
+						return Err(e);
+					}
+					frame.verify_nodes_written(chunk)?;
 				}
+				ids
 			}
-			VectorId::RecordKey(id) => {
-				if !pending.new_vectors.is_empty() {
-					let doc_id = docs.resolve(ctx.env, &id).await?;
-					for vector in pending.new_vectors {
-						self.vec_docs.insert(ctx, Vector::from(vector), doc_id, graph).await?;
+		};
+		let first_inserted = ids[0];
+		if let Some((_, others)) = &seeding {
+			let start_points: Vec<ElementId> = others.iter().map(|&p| ids[p]).collect();
+			provider.set_start_points(&ctx.provider_context, start_points).await?;
+		}
+		self.vec_docs.commit_fresh(ctx, rest.into_iter().zip(ids)).await?;
+		// A no-op once the graph has an entry point, which it has by now on every path.
+		provider.ensure_entry_point(&ctx.provider_context, first_inserted).await
+	}
+
+	/// Phase A of [`Self::apply_pending_batch`]: removes every pending's old vectors and resolves
+	/// the doc-id its new vectors are inserted under, in plan order, and returns those inserts.
+	async fn apply_removals(
+		&self,
+		ctx: &DiskAnnContext<'_>,
+		docs: &DiskAnnDocs,
+		graph: &DiskAnnGraph,
+		pending: Vec<PendingOperation>,
+	) -> Result<Vec<(DocId, SerializedVector)>> {
+		let mut inserts = Vec::new();
+		for pending in pending {
+			match pending.id {
+				VectorId::DocId(doc_id) => {
+					// Remove the graph baseline under the doc-ID those vectors live under.
+					for vector in pending.old_vectors {
+						let vector = Vector::from(vector);
+						self.vec_docs.remove(ctx, &vector, doc_id, graph).await?;
+					}
+					if pending.new_vectors.is_empty() {
+						if self.format_version < crate::catalog::DOC_IDS_FORMAT_VERSION
+							&& let Some(record) = &pending.record
+						{
+							// A bounded group of operations of its own: checked once, before it.
+							ctx.kv().check()?;
+							LegacyVectorDocIds::DiskAnn(self.ikb.clone())
+								.remove(&ctx.env.tx(), record)
+								.await?;
+						}
+						docs.remove(doc_id, self.table_id, &self.cache);
+					} else {
+						// A delete removes the record's shared doc-ID mapping and a
+						// re-create before compaction folds its vectors in here, so
+						// resolve the *current* doc-ID from the record key rather than
+						// reusing the captured (possibly deleted) one. For a plain
+						// update the mapping is unchanged and this returns the same id.
+						let insert_doc_id = match &pending.record {
+							Some(record) => self.resolve_doc_id(ctx, docs, record).await?,
+							None => doc_id,
+						};
+						inserts.extend(pending.new_vectors.into_iter().map(|v| (insert_doc_id, v)));
+					}
+				}
+				VectorId::RecordKey(id) => {
+					if !pending.new_vectors.is_empty() {
+						let doc_id = self.resolve_doc_id(ctx, docs, &id).await?;
+						inserts.extend(pending.new_vectors.into_iter().map(|v| (doc_id, v)));
 					}
 				}
 			}
 		}
-		Ok(())
+		Ok(inserts)
+	}
+
+	/// Resolves, or allocates, the doc-id of `record` for a frame.
+	///
+	/// The resolution is one bounded group of KV operations, checked against the frame before it
+	/// starts, and the sequence allocator it may call polls the frame through its probe before
+	/// every window claim. So once the frame is cancelled no further record is resolved, and at
+	/// most the one window claim already in flight completes.
+	async fn resolve_doc_id(
+		&self,
+		ctx: &DiskAnnContext<'_>,
+		docs: &DiskAnnDocs,
+		record: &RecordIdKey,
+	) -> Result<DocId> {
+		ctx.kv().check()?;
+		match ctx.frame() {
+			Some(frame) => {
+				let env = FrameEnv {
+					inner: ctx.env,
+					frame,
+				};
+				// Its probe is this environment, which fails once the frame is cancelled.
+				docs.resolve(&env, record).await
+			}
+			None => docs.resolve(ctx.env, record).await,
+		}
 	}
 
 	/// Placeholder consistency hook matching the HNSW index-store interface.
@@ -6516,7 +7697,10 @@ mod tests {
 
 		// The fix: both halves of an authorized pair are captured.
 		let mut builder = PendingPlanBuilder::new(None, empty_state.clone());
-		assert!(builder.has_room_for(2, 2 + half + half), "empty batch admits the oversized pair");
+		assert!(
+			builder.has_room_for(2, 2 + half + half, 0),
+			"empty batch admits the oversized pair"
+		);
 		builder.add_authorized(vec![0u8; 1], vec![0u8; half], [op(1)]);
 		builder.add_authorized(vec![1u8; 1], vec![0u8; half], [op(2)]);
 		assert_eq!(builder.captured_keys.len(), 2, "both halves captured");
@@ -7335,6 +8519,9 @@ mod tests {
 		/// wholesale, so its edges going missing measures the id collision rather than a stale
 		/// adjacency read. What is left is what a read-modify-write of an adjacency list lost.
 		dropped_edges: Vec<(ElementId, ElementId)>,
+		/// Batched point reads B's compaction frame sent to its read view: none on an engine
+		/// that gives no view.
+		b_view_reads: u64,
 	}
 
 	/// Node A builds a graph, node B warms its cache over it, node A commits a further generation,
@@ -7399,10 +8586,15 @@ mod tests {
 				}
 			}
 		}
+		let b_view_reads = nodes
+			.b
+			.last_frame()
+			.map_or(0, |frame| frame.stats.reads_view.load(std::sync::atomic::Ordering::Acquire));
 		Ok(CompactionObservation {
 			next_element_id: (before_id, after_id),
 			overwritten_elements,
 			dropped_edges,
+			b_view_reads,
 		})
 	}
 
@@ -7942,6 +9134,80 @@ mod tests {
 			"a k larger than the index still did not reach the vectors the other node committed"
 		);
 		Ok(())
+	}
+
+	/// #1177: two handles over one store, each with its own cache. B warms its cache with
+	/// queries, A commits a frame, and B's next frame — reading clean keys through its view on an
+	/// engine that gives one — keeps every edge A committed. Then, on one node, a sequence of
+	/// frames between queries clears no cache entry and opens the span once, at the first.
+	async fn frames_keep_foreign_edges_and_invalidate_nothing_on_one_node(
+		two_node_ds: TestIndexStore,
+		one_node_ds: TestIndexStore,
+		with_view: bool,
+	) -> Result<()> {
+		let compaction = two_node_compaction(two_node_ds, true).await?;
+		assert!(compaction.overwritten_elements.is_empty());
+		assert!(
+			compaction.dropped_edges.is_empty(),
+			"B's frame dropped edges A committed: {:?}",
+			compaction.dropped_edges
+		);
+		assert_eq!(compaction.b_view_reads > 0, with_view, "B's frame read through a view");
+
+		let cache = cache();
+		let p = two_node_params();
+		let index = new_index(ikb(), TableId(4), &p, cache.clone()).await?;
+		for round in 0..5i64 {
+			let ctx = new_ctx(&one_node_ds, TransactionType::Write).await;
+			for i in 0..8 {
+				let id = round * 8 + i;
+				let v = id as f32;
+				index
+					.index(
+						&ctx,
+						&RecordIdKey::Number(id),
+						None,
+						Some(f32_content(&[v, v, 0.0, 0.0])),
+					)
+					.await?;
+			}
+			ctx.tx().commit().await?;
+			assert!(compact_once(&index, &one_node_ds, &ikb()).await?);
+			knn_len_with_k(&index, &one_node_ds, &[round as f32, 0.0, 0.0, 0.0], 4).await?;
+		}
+		assert_eq!(cache.clears(), 0, "a frame on a single node cleared the cache");
+		assert_eq!(
+			index.graph.read().await.span_opens,
+			1,
+			"the span was reopened after the first frame"
+		);
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn diskann_frames_keep_foreign_edges_and_invalidate_nothing_on_one_node() -> Result<()> {
+		frames_keep_foreign_edges_and_invalidate_nothing_on_one_node(
+			TestIndexStore::new().await,
+			TestIndexStore::new().await,
+			false,
+		)
+		.await
+	}
+
+	#[cfg(feature = "kv-rocksdb")]
+	#[tokio::test]
+	async fn diskann_frames_keep_foreign_edges_and_invalidate_nothing_on_one_node_rocksdb()
+	-> Result<()> {
+		async fn store(dir: &TempDir) -> TestIndexStore {
+			TestIndexStore::with_path(&format!("rocksdb:{}", dir.path().to_string_lossy())).await
+		}
+		let (two, one) = (TempDir::new()?, TempDir::new()?);
+		frames_keep_foreign_edges_and_invalidate_nothing_on_one_node(
+			store(&two).await,
+			store(&one).await,
+			true,
+		)
+		.await
 	}
 
 	/// A record key with its vector before and after one write; `None` is no vector.
@@ -8675,6 +9941,2329 @@ mod tests {
 				vec![1, 33, 65]
 			);
 			assert_eq!(ds.guard_repairs(), 0);
+			Ok(())
+		}
+	}
+
+	// ------------------------------------------------------------------
+	// Batched compaction frames
+	// ------------------------------------------------------------------
+	//
+	// A frame inserts its fresh vectors through upstream `multi_insert` on the
+	// places it was granted, or one at a time when granted none. These pin what
+	// that may and may not change: the element, mapping and state bytes are the
+	// same whatever the grant, the adjacency is valid and as good, every failure
+	// a task meets fails the frame, and the frame holds no more places than it
+	// was granted and none once it has ended.
+
+	mod frames {
+		use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+		use surrealdb_datastore::sequences::Sequences;
+		use surrealdb_datastore::{DatastoreError, is_shutdown_error};
+		use surrealdb_kvs::key::RawRange;
+
+		use super::*;
+		use crate::catalog::providers::{BoxProviderFut, CancellationProbe};
+		use crate::config::IdxConfig;
+		use crate::env::BoxEnvFut;
+		use crate::places::Ticket;
+		use crate::trees::diskann::docs::DiskAnnElementDocs;
+		use crate::trees::diskann::frame::{DiskAnnFrameError, FrameFaults, Park};
+		use crate::trees::store::IndexStores;
+
+		/// A starved graph budget, so a frame's back-edges append to lists with room and its
+		/// prunes have candidates to choose between.
+		fn small_params(dimension: u16) -> DiskAnnParams {
+			graph_params(dimension, Distance::Euclidean, 8, 24)
+		}
+
+		/// Indexes `vectors` under record ids `first..`, one record each, in one write
+		/// transaction.
+		async fn ingest(
+			index: &DiskAnnIndex,
+			ds: &TestIndexStore,
+			first: i64,
+			vectors: &[Vec<f32>],
+		) -> Result<()> {
+			let ctx = new_ctx(ds, TransactionType::Write).await;
+			for (i, v) in vectors.iter().enumerate() {
+				let id = RecordIdKey::Number(first + i as i64);
+				index.index(&ctx, &id, None, Some(f32_content(v))).await?;
+			}
+			ctx.tx().commit().await
+		}
+
+		/// Prepares the next plan on a read transaction.
+		async fn next_plan(
+			ds: &TestIndexStore,
+			ikb: &IndexKeyBase,
+		) -> Result<DiskAnnCompactionPlan> {
+			let ctx = new_ctx(ds, TransactionType::Read).await;
+			let plan = DiskAnnIndex::prepare_compaction(&ctx, ikb).await?;
+			ctx.tx().cancel().await?;
+			Ok(plan)
+		}
+
+		/// The pending keys the next plan would capture.
+		async fn captured(ds: &TestIndexStore, ikb: &IndexKeyBase) -> Result<usize> {
+			Ok(next_plan(ds, ikb).await?.captured_keys.len())
+		}
+
+		/// Points along one axis: `n` of them `step` apart, from `start`.
+		fn line(dim: usize, start: f32, step: f32, n: usize) -> Vec<Vec<f32>> {
+			(0..n)
+				.map(|i| {
+					let mut v = vec![0.0; dim];
+					v[0] = start + step * i as f32;
+					v[1] = (i % 3) as f32 * 0.01;
+					v
+				})
+				.collect()
+		}
+
+		/// Every stored element of the index.
+		async fn elements(
+			ds: &TestIndexStore,
+			ikb: &IndexKeyBase,
+		) -> Result<Vec<(ElementId, DiskAnnElement)>> {
+			let tx = ds.transaction(TransactionType::Read).await?;
+			let mut cursor =
+				tx.open_vals_cursor(ikb.new_de_range()?, Direction::Forward, 0, None).await?;
+			let mut out = Vec::new();
+			loop {
+				let batch = cursor.next_batch(surrealdb_kvs::consts::NORMAL_BATCH_SIZE).await?;
+				if batch.is_empty() {
+					break;
+				}
+				for (key, value) in batch.iter() {
+					let key: crate::key::schema::DiskannElementKey<'_> =
+						storekey::decode_borrow(key)?;
+					out.push((key.element_id, DiskAnnElement::kv_decode_value(value, ())?));
+				}
+			}
+			drop(cursor);
+			tx.cancel().await?;
+			Ok(out)
+		}
+
+		/// Asserts every live element has an adjacency list, non-empty once the graph holds more
+		/// than one, whose neighbours are all live elements — or, once the graph has had
+		/// deletions, stored elements: a delete tombstones its element and leaves the edges to it
+		/// for searches to skip. Returns the live elements.
+		async fn assert_adjacency_valid(ds: &TestIndexStore, ikb: &IndexKeyBase) -> Result<usize> {
+			let stored = elements(ds, ikb).await?;
+			let tombstoned = stored.iter().any(|(_, e)| e.deleted);
+			let reachable: HashSet<ElementId> = stored
+				.iter()
+				.filter(|(_, e)| tombstoned || !e.deleted)
+				.map(|(id, _)| *id)
+				.collect();
+			let live: HashSet<ElementId> =
+				stored.iter().filter(|(_, e)| !e.deleted).map(|(id, _)| *id).collect();
+			let tx = ds.transaction(TransactionType::Read).await?;
+			for id in &live {
+				let node: Option<DiskAnnNode> = tx.get_key(&ikb.new_dn_key(*id), None).await?;
+				let Some(node) = node else {
+					panic!("live element {id} has no adjacency list");
+				};
+				if live.len() > 1 {
+					assert!(!node.neighbors.is_empty(), "live element {id} has no neighbour");
+				}
+				for n in &node.neighbors {
+					assert!(
+						reachable.contains(n),
+						"element {id} links to {n}, which is not stored"
+					);
+				}
+			}
+			tx.cancel().await?;
+			Ok(live.len())
+		}
+
+		/// The index's own keys except its adjacency lists (`!dn`), which a frame's task count may
+		/// change, and the table's doc-ID mappings (`!di`, `!dd`, `!dj`). The table's doc-ID
+		/// sequence state is left out: it names the node that allocated.
+		async fn state_without_adjacency(
+			ds: &TestIndexStore,
+			ikb: &IndexKeyBase,
+		) -> Result<BTreeMap<Vec<u8>, Vec<u8>>> {
+			let ds_key = ikb.new_ds_key().encode_key()?.as_slice().to_vec();
+			assert!(ds_key.ends_with(b"!ds"), "unexpected state key layout");
+			let index_prefix = &ds_key[..ds_key.len() - 3];
+			let table_prefix = &index_prefix[..index_prefix.len() - 5];
+			assert_eq!(index_prefix[index_prefix.len() - 5], b'+', "unexpected index key layout");
+			let adjacency: Vec<u8> = [index_prefix, b"!dn"].concat();
+			let tx = ds.transaction(TransactionType::Read).await?;
+			let mut cursor =
+				tx.open_vals_cursor_raw(RawRange::every_key(), Direction::Forward, 0, None).await?;
+			let mut out = BTreeMap::new();
+			loop {
+				let batch = cursor.next_batch(surrealdb_kvs::consts::NORMAL_BATCH_SIZE).await?;
+				if batch.is_empty() {
+					break;
+				}
+				for (key, value) in batch.iter() {
+					let index_key = key.starts_with(index_prefix) && !key.starts_with(&adjacency);
+					let mapping = [b"!di", b"!dd", b"!dj"]
+						.iter()
+						.any(|family| key.starts_with(&[table_prefix, &family[..]].concat()));
+					if index_key || mapping {
+						out.insert(key.to_vec(), value.to_vec());
+					}
+				}
+			}
+			drop(cursor);
+			tx.cancel().await?;
+			Ok(out)
+		}
+
+		/// Recall@`k` of `index` over `queries` against brute force over `corpus`, per `ef`.
+		async fn recalls(
+			index: &DiskAnnIndex,
+			ds: &TestIndexStore,
+			params: &DiskAnnParams,
+			corpus: &[Vec<f32>],
+			queries: &[Vec<f32>],
+			k: usize,
+			efs: &[usize],
+		) -> Result<Vec<f64>> {
+			let vectors: Vec<Vector> =
+				corpus.iter().map(|v| Vector::F32(v.clone().into())).collect();
+			let truth: Vec<Vec<i64>> = queries
+				.iter()
+				.map(|q| brute_force_top_k(&vectors, q, &params.distance, k))
+				.collect();
+			let mut out = Vec::new();
+			for &ef in efs {
+				let mut total = 0.0;
+				for (query, truth) in queries.iter().zip(&truth) {
+					total += recall(truth, &knn_ids(index, ds, query, k, ef).await?);
+				}
+				out.push(total / queries.len() as f64);
+			}
+			Ok(out)
+		}
+
+		/// The starved-degree recall dataset, its parameters and its floors.
+		struct Starved {
+			base: Vec<Vec<f32>>,
+			queries: Vec<Vec<f32>>,
+			params: DiskAnnParams,
+			floors: Vec<(usize, f64)>,
+		}
+
+		fn starved_corpus() -> Starved {
+			let mut rng = recall_rng();
+			let mut corpus = ClusteredCorpus::new(&mut rng, 64, 1500, 0.35);
+			let base = corpus.draw(&mut rng, 4000);
+			let queries = corpus.draw(&mut rng, 100);
+			Starved {
+				base,
+				queries,
+				params: graph_params(64, Distance::Cosine, 8, 24),
+				floors: vec![(10, 0.55), (20, 0.67), (40, 0.77), (100, 0.89), (200, 0.94)],
+			}
+		}
+
+		/// One build of `corpus` on a store of `places` places.
+		struct Build {
+			ds: TestIndexStore,
+			index: DiskAnnIndex,
+		}
+
+		async fn build(
+			places: usize,
+			params: &DiskAnnParams,
+			corpus: &[Vec<f32>],
+		) -> Result<Build> {
+			let ds = TestIndexStore::new().await.with_places(places);
+			let index = batching_index(ikb(), TableId(4), params, cache()).await?;
+			ingest(&index, &ds, 0, corpus).await?;
+			compact_all(&index, &ds, &ikb()).await?;
+			Ok(Build {
+				ds,
+				index,
+			})
+		}
+
+		/// T-3: the element, mapping and state bytes of a build do not depend on the places its
+		/// frames were granted, and its adjacency is valid and as good either way.
+		///
+		/// The sequential path (no place) spawns nothing; a frame granted `g` places never has
+		/// more than `g` of its tasks alive at once, and the books show none held afterwards. The
+		/// adjacency bytes are not compared: upstream's bootstrap breaks equal-distance ties by
+		/// task interleaving.
+		#[test_log::test(tokio::test(flavor = "multi_thread"))]
+		async fn diskann_batched_build_is_independent_of_its_places() -> Result<()> {
+			let Starved {
+				base,
+				queries,
+				params,
+				floors,
+			} = starved_corpus();
+			let efs: Vec<usize> = floors.iter().map(|(ef, _)| *ef).collect();
+			let mut states = Vec::new();
+			let mut measured = Vec::new();
+			for places in [0, 1, 4] {
+				let b = build(places, &params, &base).await?;
+				let frames = b.index.frames();
+				assert!(!frames.is_empty());
+				for frame in &frames {
+					let stats = &frame.stats;
+					let granted = stats.granted.load(Ordering::Acquire);
+					assert!(granted <= places, "a frame was granted {granted} of {places}");
+					if places == 0 {
+						assert_eq!(
+							stats.spawns.load(Ordering::Acquire),
+							0,
+							"nothing is spawned without a place"
+						);
+						assert_eq!(stats.batch_calls.load(Ordering::Acquire), 0);
+					} else {
+						assert!(stats.peak_tasks.load(Ordering::Acquire) <= granted);
+					}
+					assert_eq!(frame.live_tasks(), 0);
+				}
+				let inserted: u64 = frames
+					.iter()
+					.map(|f| {
+						f.stats.batched_vectors.load(Ordering::Acquire)
+							+ f.stats.sequential_vectors.load(Ordering::Acquire)
+					})
+					.sum();
+				// The first vector seeds the graph; every other one goes through a batch.
+				assert_eq!(inserted, base.len() as u64 - 1);
+				if places > 0 {
+					assert!(
+						frames
+							.iter()
+							.all(|f| f.stats.sequential_vectors.load(Ordering::Acquire) == 0)
+					);
+					assert!(b.ds.places().peak() <= places);
+				}
+				assert_eq!(b.ds.places().held(), 0, "a frame held places after it ended");
+				assert_eq!(assert_adjacency_valid(&b.ds, &ikb()).await?, base.len());
+				states.push(state_without_adjacency(&b.ds, &ikb()).await?);
+				let r = recalls(&b.index, &b.ds, &params, &base, &queries, 10, &efs).await?;
+				info!("places={places}: Recall@10 {r:?}");
+				for ((ef, floor), got) in floors.iter().zip(&r) {
+					assert!(got >= floor, "places={places} ef={ef}: {got} below floor {floor}");
+				}
+				measured.push(r);
+			}
+			for (i, state) in states.iter().enumerate().skip(1) {
+				if state != &states[0] {
+					let differing: Vec<_> = state
+						.keys()
+						.chain(states[0].keys())
+						.filter(|k| state.get(*k) != states[0].get(*k))
+						.take(5)
+						.collect();
+					panic!("build {i} differs from the sequential build at {differing:?}");
+				}
+			}
+			// Batched builds agree with each other; the sequential build is the serial graph,
+			// which a batched build must not fall below.
+			for (ef, (one, four)) in efs.iter().zip(measured[1].iter().zip(&measured[2])) {
+				assert!((one - four).abs() <= 0.02, "ef={ef}: 1 place {one} vs 4 places {four}");
+			}
+			for (ef, (serial, batched)) in efs.iter().zip(measured[0].iter().zip(&measured[2])) {
+				assert!(
+					batched + 0.02 >= *serial,
+					"ef={ef}: batched {batched} below serial {serial}"
+				);
+			}
+			Ok(())
+		}
+
+		/// T-2: a mixed workload — inserts, updates and deletes over several compaction rounds —
+		/// built batched answers at least as well as built one vector at a time.
+		#[test_log::test(tokio::test(flavor = "multi_thread"))]
+		async fn diskann_batched_mixed_workload_keeps_recall() -> Result<()> {
+			let Starved {
+				base,
+				queries,
+				params,
+				floors,
+			} = starved_corpus();
+			let efs: Vec<usize> = floors.iter().map(|(ef, _)| *ef).collect();
+			let mut measured = Vec::new();
+			for places in [0, 4] {
+				let ds = TestIndexStore::new().await.with_places(places);
+				let index = batching_index(ikb(), TableId(4), &params, cache()).await?;
+				let mut current: BTreeMap<i64, Vec<f32>> = BTreeMap::new();
+				// Round 1: the first half. Round 2: the second half, and an update of every tenth
+				// record of the first to a vector of the second half's. Round 3: a delete of every
+				// seventh record.
+				let half = base.len() / 2;
+				ingest(&index, &ds, 0, &base[..half]).await?;
+				current
+					.extend(base[..half].iter().cloned().enumerate().map(|(i, v)| (i as i64, v)));
+				compact_all(&index, &ds, &ikb()).await?;
+				ingest(&index, &ds, half as i64, &base[half..]).await?;
+				current.extend(
+					base[half..].iter().cloned().enumerate().map(|(i, v)| ((half + i) as i64, v)),
+				);
+				{
+					let ctx = new_ctx(&ds, TransactionType::Write).await;
+					for id in (0..half as i64).step_by(10) {
+						let old = current[&id].clone();
+						let mut new = base[half + id as usize].clone();
+						new[0] += 0.001;
+						index
+							.index(
+								&ctx,
+								&RecordIdKey::Number(id),
+								Some(f32_content(&old)),
+								Some(f32_content(&new)),
+							)
+							.await?;
+						current.insert(id, new);
+					}
+					ctx.tx().commit().await?;
+				}
+				compact_all(&index, &ds, &ikb()).await?;
+				{
+					let ctx = new_ctx(&ds, TransactionType::Write).await;
+					for id in (0..base.len() as i64).step_by(7) {
+						let old = current.remove(&id).expect("indexed");
+						index
+							.index(&ctx, &RecordIdKey::Number(id), Some(f32_content(&old)), None)
+							.await?;
+					}
+					ctx.tx().commit().await?;
+				}
+				compact_all(&index, &ds, &ikb()).await?;
+				assert_eq!(assert_adjacency_valid(&ds, &ikb()).await?, current.len());
+				// Ground truth over what is indexed now, under its record ids.
+				let ids: Vec<i64> = current.keys().copied().collect();
+				let corpus: Vec<Vec<f32>> = current.values().cloned().collect();
+				let vectors: Vec<Vector> =
+					corpus.iter().map(|v| Vector::F32(v.clone().into())).collect();
+				let mut r = Vec::new();
+				for &ef in &efs {
+					let mut total = 0.0;
+					for q in &queries {
+						let truth: Vec<i64> = brute_force_top_k(&vectors, q, &params.distance, 10)
+							.into_iter()
+							.map(|pos| ids[pos as usize])
+							.collect();
+						total += recall(&truth, &knn_ids(&index, &ds, q, 10, ef).await?);
+					}
+					r.push(total / queries.len() as f64);
+				}
+				info!("mixed workload, places={places}: Recall@10 {r:?}");
+				measured.push(r);
+			}
+			for (ef, (serial, batched)) in efs.iter().zip(measured[0].iter().zip(&measured[1])) {
+				assert!(
+					batched + 0.02 >= *serial,
+					"ef={ef}: batched {batched} below serial {serial}"
+				);
+			}
+			Ok(())
+		}
+
+		/// A graph of `seed` vectors, compacted, on a store of `places` places.
+		async fn seeded(
+			places: usize,
+			params: &DiskAnnParams,
+			seed: &[Vec<f32>],
+		) -> Result<(TestIndexStore, DiskAnnIndex, DiskAnnCache)> {
+			let ds = TestIndexStore::new().await.with_places(places);
+			let cache = cache();
+			let index = batching_index(ikb(), TableId(4), params, cache.clone()).await?;
+			ingest(&index, &ds, 0, seed).await?;
+			compact_all(&index, &ds, &ikb()).await?;
+			Ok((ds, index, cache))
+		}
+
+		/// T-4: a frame inserting many fresh vectors into a non-empty graph writes the graph state
+		/// once, for the whole batch's element ids.
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_frame_allocates_its_ids_with_one_state_write() -> Result<()> {
+			for places in [0, 4] {
+				let (ds, index, _) =
+					seeded(places, &small_params(4), &line(4, 0.0, 1.0, 20)).await?;
+				ingest(&index, &ds, 100, &line(4, 0.5, 1.0, 30)).await?;
+				assert!(compact_once(&index, &ds, &ikb()).await?);
+				let frame = index.last_frame().expect("a frame");
+				assert_eq!(frame.stats.state_writes.load(Ordering::Acquire), 1, "places={places}");
+				assert_eq!(assert_adjacency_valid(&ds, &ikb()).await?, 50);
+			}
+			Ok(())
+		}
+
+		/// Asserts the failed frame left everything as it found it: the pendings still queued,
+		/// the elements unchanged, nothing of the index in the cache and no place held; then that
+		/// a frame without the fault folds the backlog.
+		async fn assert_frame_undone(
+			ds: &TestIndexStore,
+			index: &DiskAnnIndex,
+			cache: &DiskAnnCache,
+			captured_before: usize,
+			elements_before: usize,
+		) -> Result<()> {
+			assert_eq!(captured(ds, &ikb()).await?, captured_before, "the pendings were consumed");
+			assert_eq!(
+				elements(ds, &ikb()).await?.len(),
+				elements_before,
+				"graph elements committed"
+			);
+			assert_eq!(cache.weight(), 0, "the failed frame left entries in the cache");
+			assert_eq!(ds.places().held(), 0, "the failed frame holds places");
+			let frame = index.last_frame().expect("a frame");
+			assert_eq!(frame.live_tasks(), 0);
+			index.set_faults(None);
+			compact_all(index, ds, &ikb()).await?;
+			assert_eq!(captured(ds, &ikb()).await?, 0);
+			assert_adjacency_valid(ds, &ikb()).await?;
+			Ok(())
+		}
+
+		/// Applies the next plan on `index`, under `faults`.
+		async fn apply_with(
+			ds: &TestIndexStore,
+			index: &DiskAnnIndex,
+			faults: FrameFaults,
+		) -> Result<CompactionApply> {
+			index.set_faults(Some(Arc::new(faults)));
+			let plan = next_plan(ds, &ikb()).await?;
+			let ctx = new_ctx(ds, TransactionType::Write).await;
+			let res = index.apply_compaction(&ctx, plan).await;
+			assert!(ctx.tx().closed(), "the frame left its transaction open");
+			res
+		}
+
+		/// T-7: a provider error inside the batch's back-edge phase fails the frame, although
+		/// upstream swallows it, and nothing of the frame survives.
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_frame_fails_on_a_suppressed_provider_error() -> Result<()> {
+			for places in [0, 4] {
+				let (ds, index, cache) =
+					seeded(places, &small_params(4), &line(4, 0.0, 1.0, 20)).await?;
+				ingest(&index, &ds, 100, &line(4, 0.5, 1.0, 30)).await?;
+				let before = captured(&ds, &ikb()).await?;
+				let faults = FrameFaults::default();
+				*faults.fail_append.lock().unwrap() =
+					Some(Box::new(|| anyhow::anyhow!("injected append failure")));
+				let err = apply_with(&ds, &index, faults).await.expect_err("the frame must fail");
+				assert!(
+					err.to_string().contains("injected append failure"),
+					"places={places}: {err:#}"
+				);
+				assert_frame_undone(&ds, &index, &cache, before, 20).await?;
+			}
+			Ok(())
+		}
+
+		/// T-8: the failure a task recorded keeps its type, so a shutdown is still classified as
+		/// one, on the sequential path as well as the batched one.
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_frame_failure_keeps_its_classification() -> Result<()> {
+			for places in [0, 4] {
+				let (ds, index, cache) =
+					seeded(places, &small_params(4), &line(4, 0.0, 1.0, 20)).await?;
+				ingest(&index, &ds, 100, &line(4, 0.5, 1.0, 30)).await?;
+				let before = captured(&ds, &ikb()).await?;
+				let faults = FrameFaults::default();
+				*faults.fail_append.lock().unwrap() =
+					Some(Box::new(|| anyhow::Error::new(surrealdb_kvs::Error::Shutdown)));
+				let err = apply_with(&ds, &index, faults).await.expect_err("the frame must fail");
+				assert!(is_shutdown_error(&err), "places={places}: not a shutdown: {err:#}");
+				assert_frame_undone(&ds, &index, &cache, before, 20).await?;
+			}
+			Ok(())
+		}
+
+		/// T-7a: a panic in a task the batch spawned fails the frame, although upstream discards
+		/// the task's `JoinError`, and the cause names the panic.
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_frame_fails_on_a_panicking_task() -> Result<()> {
+			let (ds, index, cache) = seeded(4, &small_params(4), &line(4, 0.0, 1.0, 20)).await?;
+			ingest(&index, &ds, 100, &line(4, 0.5, 1.0, 30)).await?;
+			let before = captured(&ds, &ikb()).await?;
+			let faults = FrameFaults::default();
+			faults.panic_append.store(true, Ordering::Release);
+			let err = apply_with(&ds, &index, faults).await.expect_err("the frame must fail");
+			assert!(
+				matches!(err.downcast_ref(), Some(DiskAnnFrameError::TaskPanicked)),
+				"expected a task panic, got {err:#}"
+			);
+			assert_frame_undone(&ds, &index, &cache, before, 20).await
+		}
+
+		/// A spawned task's guard observes its panic during the unwind, before upstream sees the
+		/// `JoinError`.
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_task_guard_observes_a_panic() -> Result<()> {
+			use diskann::provider::ExecutionContext as _;
+			let ds = TestIndexStore::new().await;
+			let index = new_index(ikb(), TableId(4), &small_params(4), cache()).await?;
+			let tx = Arc::new(ds.transaction(TransactionType::Write).await?);
+			let frame = DiskAnnBuildFrame::without_view(ds.places().ticket(), true);
+			let context = index
+				.graph
+				.read()
+				.await
+				.context(Arc::clone(&tx), None)
+				.in_frame(Arc::clone(&frame));
+			let task = tokio::spawn(context.wrap_spawn(async { panic!("injected") }));
+			assert!(task.await.is_err_and(|e| e.is_panic()));
+			assert!(matches!(
+				frame.take_error().and_then(|e| e.downcast::<DiskAnnFrameError>().ok()),
+				Some(DiskAnnFrameError::TaskPanicked)
+			));
+			assert_eq!(frame.live_tasks(), 0);
+			tx.cancel().await
+		}
+
+		/// T-7b: a panic in one frame fails that frame alone, while another index's frame runs
+		/// beside it: a task reaches its frame through its context, not through a span or a
+		/// thread.
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_frame_failure_is_attributed_to_its_frame() -> Result<()> {
+			let ds = TestIndexStore::new().await.with_places(8);
+			// Another table, so the two frames resolve no doc-ID in common.
+			let ikb_b = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb2".into(), IndexId(9));
+			let a = batching_index(ikb(), TableId(4), &small_params(4), cache()).await?;
+			let b = batching_index(ikb_b.clone(), TableId(4), &small_params(4), cache()).await?;
+			for (index, ikb) in [(&a, ikb()), (&b, ikb_b.clone())] {
+				ingest(index, &ds, 0, &line(4, 0.0, 1.0, 20)).await?;
+				compact_all(index, &ds, &ikb).await?;
+				ingest(index, &ds, 100, &line(4, 0.5, 1.0, 30)).await?;
+			}
+			let faults = FrameFaults::default();
+			faults.panic_append.store(true, Ordering::Release);
+			a.set_faults(Some(Arc::new(faults)));
+			let plan_a = next_plan(&ds, &ikb()).await?;
+			let plan_b = next_plan(&ds, &ikb_b).await?;
+			let ctx_a = new_ctx(&ds, TransactionType::Write).await;
+			let ctx_b = new_ctx(&ds, TransactionType::Write).await;
+			let (ra, rb) = tokio::join!(
+				a.apply_compaction(&ctx_a, plan_a),
+				b.apply_compaction(&ctx_b, plan_b)
+			);
+			assert!(matches!(
+				ra.expect_err("the faulted frame fails").downcast_ref(),
+				Some(DiskAnnFrameError::TaskPanicked)
+			));
+			assert_eq!(rb?, CompactionApply::Applied, "the other frame commits");
+			assert_eq!(captured(&ds, &ikb_b).await?, 0);
+			assert!(captured(&ds, &ikb()).await? > 0);
+			Ok(())
+		}
+
+		/// T-7c: an item whose candidate generation failed without reaching the provider has no
+		/// adjacency list of its own, and the structural post-condition fails the frame naming it,
+		/// before any mapping of the batch is written.
+		///
+		/// In one placement the failed item sits far out on the axis, just past a committed
+		/// element, so every other item's prune keeps that element and drops it: nothing writes it
+		/// a list at all. In the other it sits among the batch, so other items choose it as a
+		/// neighbour and the back-edge phase writes it a list made of their edges — which is not a
+		/// list of its own, and fails the frame all the same.
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_frame_post_condition_catches_a_lost_item() -> Result<()> {
+			for among_the_batch in [false, true] {
+				let mut seed = line(4, 0.0, 0.1, 20);
+				seed.push(vec![99.9, 0.0, 0.0, 0.0]);
+				let (ds, index, cache) = seeded(4, &small_params(4), &seed).await?;
+				let lost = if among_the_batch {
+					vec![0.42, 0.0, 0.0, 0.0]
+				} else {
+					vec![100.0, 0.0, 0.0, 0.0]
+				};
+				let mut fresh = line(4, 0.05, 0.1, 9);
+				fresh.insert(4, lost.clone());
+				ingest(&index, &ds, 100, &fresh).await?;
+				let before = captured(&ds, &ikb()).await?;
+				let faults = FrameFaults::default();
+				*faults.fail_search_for.lock().unwrap() = Some(SerializedVector::F32(lost.clone()));
+				let err = apply_with(&ds, &index, faults).await.expect_err("the frame must fail");
+				let Some(DiskAnnFrameError::NodeNotWritten {
+					element_id,
+				}) = err.downcast_ref()
+				else {
+					panic!("expected the post-condition, got {err:#}");
+				};
+				let frame = index.last_frame().expect("a frame");
+				let lost_element = frame
+					.written_elements()
+					.iter()
+					.find(|(_, e)| {
+						e.as_ref().is_some_and(|e| e.vector == SerializedVector::F32(lost.clone()))
+					})
+					.map(|(id, _)| *id);
+				assert_eq!(lost_element, Some(*element_id), "the error names another element");
+				if among_the_batch {
+					assert!(
+						frame.written_nodes().contains(element_id),
+						"no back-edge reached the lost item, so this case tests nothing"
+					);
+				}
+				// Nothing of the batch committed: no element, and no vector mapping.
+				let tx = ds.transaction(TransactionType::Read).await?;
+				assert!(
+					tx.get_key(&ikb().new_dq_key(&SerializedVector::F32(lost)), None)
+						.await?
+						.is_none()
+				);
+				tx.cancel().await?;
+				assert_frame_undone(&ds, &index, &cache, before, seed.len()).await?;
+			}
+			Ok(())
+		}
+
+		/// An environment whose statement is done once `done` is set, or which raises
+		/// `DatastoreError::QueryBeyondMemoryThreshold` instead when `threshold` is set.
+		struct StopEnv {
+			inner: TestIndexEnv,
+			done: Arc<AtomicBool>,
+			threshold: bool,
+		}
+
+		impl CancellationProbe for StopEnv {
+			fn expect_not_timedout(&self) -> BoxProviderFut<'_, Result<()>> {
+				self.inner.expect_not_timedout()
+			}
+		}
+
+		impl IndexEnv for StopEnv {
+			fn tx(&self) -> Arc<Transaction> {
+				IndexEnv::tx(&self.inner)
+			}
+
+			fn is_done(&self, count: Option<usize>) -> BoxEnvFut<'_> {
+				if self.done.load(Ordering::Acquire) {
+					if self.threshold {
+						return Box::pin(async {
+							Err(DatastoreError::QueryBeyondMemoryThreshold.into())
+						});
+					}
+					return Box::pin(async { Ok(true) });
+				}
+				self.inner.is_done(count)
+			}
+
+			fn index_stores(&self) -> &IndexStores {
+				self.inner.index_stores()
+			}
+
+			fn node_id(&self) -> Uuid {
+				self.inner.node_id()
+			}
+
+			fn sequences(&self) -> Result<&Sequences> {
+				self.inner.sequences()
+			}
+
+			fn config(&self) -> &IdxConfig {
+				self.inner.config()
+			}
+
+			fn places(&self) -> Ticket {
+				self.inner.places()
+			}
+		}
+
+		/// T-9 / T-9a: a statement stopped while the batch's write tasks are parked mid-phase
+		/// stops the frame. Each task issues no write after the stop — the one it had started is
+		/// checked before it reaches KV — and the frame drains them before it ends its
+		/// transaction. A cancellation ends the frame as cancelled; a memory-threshold error
+		/// survives unchanged.
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_frame_stops_with_its_statement() -> Result<()> {
+			for threshold in [false, true] {
+				let (ds, index, cache) =
+					seeded(4, &small_params(4), &line(4, 0.0, 1.0, 20)).await?;
+				ingest(&index, &ds, 100, &line(4, 0.5, 1.0, 30)).await?;
+				let before = captured(&ds, &ikb()).await?;
+				let park = Park::new();
+				let faults = FrameFaults {
+					park_set_element: Some(Arc::clone(&park)),
+					..FrameFaults::default()
+				};
+				index.set_faults(Some(Arc::new(faults)));
+				let plan = next_plan(&ds, &ikb()).await?;
+				let done = Arc::new(AtomicBool::new(false));
+				let env = Arc::new(StopEnv {
+					inner: new_ctx(&ds, TransactionType::Write).await,
+					done: Arc::clone(&done),
+					threshold,
+				});
+				let tx = IndexEnv::tx(&*env);
+				let index = Arc::new(index);
+				let apply = {
+					let index = Arc::clone(&index);
+					let env = Arc::clone(&env);
+					tokio::spawn(async move { index.apply_compaction(&*env, plan).await })
+				};
+				// All four write partitions are parked before their first write.
+				park.wait_for(4).await;
+				done.store(true, Ordering::Release);
+				// The watchdog sees the stop; the frame cannot end until its tasks exit.
+				common::time::sleep(DISKANN_FRAME_WATCHDOG_INTERVAL * 3).await;
+				assert!(!tx.closed(), "the transaction ended while the frame's tasks ran");
+				assert!(!apply.is_finished());
+				park.release();
+				let err = apply.await?.expect_err("a stopped frame fails");
+				if threshold {
+					assert!(
+						matches!(
+							err.downcast_ref(),
+							Some(DatastoreError::QueryBeyondMemoryThreshold)
+						),
+						"the threshold error was not kept: {err:#}"
+					);
+				} else {
+					assert!(
+						matches!(err.downcast_ref(), Some(EngineError::QueryCancelled)),
+						"expected a cancellation, got {err:#}"
+					);
+				}
+				let frame = index.last_frame().expect("a frame");
+				assert_eq!(frame.live_tasks(), 0);
+				assert!(frame.written_elements().is_empty(), "a task wrote after the stop");
+				assert_eq!(*frame.stats.live_at_tx_end.lock().unwrap(), vec![0]);
+				assert!(tx.closed());
+				let index = Arc::into_inner(index).expect("the apply has returned");
+				assert_frame_undone(&ds, &index, &cache, before, 20).await?;
+			}
+			Ok(())
+		}
+
+		/// T-9: a write partition that fails returns from upstream at once, detaching its parked
+		/// siblings. The frame still drains them before its transaction ends.
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_frame_drains_tasks_upstream_detached() -> Result<()> {
+			let (ds, index, cache) = seeded(4, &small_params(4), &line(4, 0.0, 1.0, 20)).await?;
+			ingest(&index, &ds, 100, &line(4, 0.5, 1.0, 30)).await?;
+			let before = captured(&ds, &ikb()).await?;
+			let park = Park::new();
+			// The first batch id belongs to the first partition, which upstream awaits first.
+			let first_id =
+				elements(&ds, &ikb()).await?.iter().map(|(id, _)| *id).max().unwrap() + 1;
+			let faults = FrameFaults {
+				park_set_element: Some(Arc::clone(&park)),
+				..FrameFaults::default()
+			};
+			*faults.fail_set_element.lock().unwrap() = Some(first_id);
+			index.set_faults(Some(Arc::new(faults)));
+			let plan = next_plan(&ds, &ikb()).await?;
+			let env = Arc::new(new_ctx(&ds, TransactionType::Write).await);
+			let tx = env.tx();
+			let index = Arc::new(index);
+			let apply = {
+				let index = Arc::clone(&index);
+				let env = Arc::clone(&env);
+				tokio::spawn(async move { index.apply_compaction(&*env, plan).await })
+			};
+			park.wait_for(3).await;
+			common::time::sleep(DISKANN_FRAME_WATCHDOG_INTERVAL * 2).await;
+			let frame = index.last_frame().expect("a frame");
+			assert_eq!(frame.live_tasks(), 3, "the detached siblings are still running");
+			assert!(!tx.closed(), "the transaction ended while detached tasks ran");
+			park.release();
+			let err = apply.await?.expect_err("the frame fails");
+			assert!(err.to_string().contains("injected set_element failure"), "{err:#}");
+			assert_eq!(frame.live_tasks(), 0);
+			assert_eq!(*frame.stats.live_at_tx_end.lock().unwrap(), vec![0]);
+			let index = Arc::into_inner(index).expect("the apply has returned");
+			assert_frame_undone(&ds, &index, &cache, before, 20).await
+		}
+
+		/// T-11 / T-13: a frame task that panics mid-batch while its tasks are parked. The lock's
+		/// cleanup runs at once, so a reader can take the graph lock and finds no entry of the
+		/// batch in the cache; but the places stay on the books, and the write transaction stays
+		/// open, until the parked tasks are released and have exited. The transaction is then
+		/// cancelled exactly once, with no task alive, and nothing of the batch commits.
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_frame_panic_keeps_its_places_until_its_tasks_exit() -> Result<()> {
+			let (ds, index, cache) = seeded(4, &small_params(4), &line(4, 0.0, 1.0, 20)).await?;
+			ingest(&index, &ds, 100, &line(4, 0.5, 1.0, 30)).await?;
+			let before = captured(&ds, &ikb()).await?;
+			let park = Park::new();
+			let faults = FrameFaults {
+				park_set_element: Some(Arc::clone(&park)),
+				panic_frame_when_parked: Some(4),
+				..FrameFaults::default()
+			};
+			index.set_faults(Some(Arc::new(faults)));
+			let plan = next_plan(&ds, &ikb()).await?;
+			let env = Arc::new(new_ctx(&ds, TransactionType::Write).await);
+			let tx = env.tx();
+			let index = Arc::new(index);
+			let apply = {
+				let index = Arc::clone(&index);
+				let env = Arc::clone(&env);
+				tokio::spawn(async move { index.apply_compaction(&*env, plan).await })
+			};
+			assert!(apply.await.is_err_and(|e| e.is_panic()), "the frame task panics");
+			// The cleanup ran synchronously on the unwind: the lock is free and the cache clear.
+			let reader = index.graph.read().await;
+			assert_eq!(cache.weight(), 0, "the panicked frame left entries in the cache");
+			drop(reader);
+			let frame = index.last_frame().expect("a frame");
+			assert!(frame.is_closed());
+			assert_eq!(ds.places().held(), 4, "the parked tasks hold their places");
+			common::time::sleep(DISKANN_FRAME_WATCHDOG_INTERVAL * 2).await;
+			assert!(!tx.closed(), "the transaction ended while the frame's tasks ran");
+			park.release();
+			for _ in 0..200 {
+				if tx.closed() {
+					break;
+				}
+				common::time::sleep(std::time::Duration::from_millis(10)).await;
+			}
+			assert!(tx.closed(), "the backstop never cancelled the transaction");
+			assert_eq!(frame.live_tasks(), 0);
+			assert_eq!(ds.places().held(), 0);
+			assert_eq!(
+				*frame.stats.live_at_tx_end.lock().unwrap(),
+				vec![0],
+				"one end, after the drain"
+			);
+			assert!(frame.written_elements().is_empty(), "a task wrote after the frame closed");
+			let index = Arc::into_inner(index).expect("the apply has returned");
+			assert_frame_undone(&ds, &index, &cache, before, 20).await
+		}
+
+		/// T-13: a frame asking for more places than are free gets what is free, without waiting;
+		/// a store with none runs it on one task; two indexes compacting at once hold no more
+		/// than the store has between them; and every place is back once the frames end.
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_frame_places_are_bounded_by_the_pool() -> Result<()> {
+			for free in [0, 3] {
+				let (ds, index, _) = seeded(free, &small_params(4), &line(4, 0.0, 1.0, 20)).await?;
+				ingest(&index, &ds, 100, &line(4, 0.5, 1.0, 30)).await?;
+				assert!(compact_once(&index, &ds, &ikb()).await?);
+				let frame = index.last_frame().expect("a frame");
+				assert_eq!(frame.stats.granted.load(Ordering::Acquire), free.min(30));
+				if free == 0 {
+					assert_eq!(frame.stats.spawns.load(Ordering::Acquire), 0);
+				}
+				assert!(frame.stats.peak_tasks.load(Ordering::Acquire) <= free);
+				assert_eq!(ds.places().held(), 0);
+			}
+			let ds = TestIndexStore::new().await.with_places(5);
+			// Another table, so the two frames resolve no doc-ID in common.
+			let ikb_b = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb2".into(), IndexId(9));
+			let a = batching_index(ikb(), TableId(4), &small_params(4), cache()).await?;
+			let b = batching_index(ikb_b.clone(), TableId(4), &small_params(4), cache()).await?;
+			for (index, ikb) in [(&a, ikb()), (&b, ikb_b.clone())] {
+				ingest(index, &ds, 0, &line(4, 0.0, 1.0, 20)).await?;
+				compact_all(index, &ds, &ikb).await?;
+				ingest(index, &ds, 100, &line(4, 0.5, 1.0, 30)).await?;
+			}
+			let ikb_a = ikb();
+			let (ra, rb) = tokio::join!(compact_all(&a, &ds, &ikb_a), compact_all(&b, &ds, &ikb_b));
+			ra?;
+			rb?;
+			assert!(ds.places().peak() <= 5, "two frames held {} places", ds.places().peak());
+			assert_eq!(ds.places().held(), 0);
+			Ok(())
+		}
+
+		/// T-13: a task built through `wrap_spawn` holds its share of the frame's places from the
+		/// moment it is built, so a future never polled keeps them past the frame's close, and
+		/// gives them back when dropped.
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_unpolled_task_keeps_its_places() -> Result<()> {
+			use diskann::provider::ExecutionContext as _;
+			let ds = TestIndexStore::new().await.with_places(2);
+			let index = new_index(ikb(), TableId(4), &small_params(4), cache()).await?;
+			let tx = Arc::new(ds.transaction(TransactionType::Write).await?);
+			let frame = DiskAnnBuildFrame::without_view(ds.places().ticket(), true);
+			assert_eq!(
+				frame.take_places(4).map(|n| n.get()),
+				Some(2),
+				"a grant takes what is free"
+			);
+			assert_eq!(frame.take_places(4), None, "a frame asks once");
+			let context = index
+				.graph
+				.read()
+				.await
+				.context(Arc::clone(&tx), None)
+				.in_frame(Arc::clone(&frame));
+			let task = context.wrap_spawn(async {});
+			frame.close_now();
+			assert_eq!(ds.places().held(), 2, "the unpolled task holds the grant");
+			drop(task);
+			assert_eq!(ds.places().held(), 0);
+			assert_eq!(frame.live_tasks(), 0);
+			tx.cancel().await
+		}
+
+		/// T-10: docs sharing a vector collapse onto one new element, a doc whose vector the graph
+		/// holds is appended to it, a doc whose vector moves is linked only to its new element,
+		/// and the cached doc sets of the elements a frame changed are never served stale.
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_frame_dedupes_and_keeps_both_mapping_directions() -> Result<()> {
+			let p = small_params(4);
+			let ds = TestIndexStore::new().await.with_places(4);
+			let cache = cache();
+			let index = DiskAnnIndex::new(
+				ikb(),
+				TableId(4),
+				&p,
+				cache.clone(),
+				VECTOR_DOC_ELEMENTS_FORMAT_VERSION,
+			)
+			.await?;
+			index.batch_without_view();
+			let existing = vec![5.0, 0.0, 0.0, 0.0];
+			let mut seed = line(4, 0.0, 1.0, 10);
+			seed.push(existing.clone());
+			ingest(&index, &ds, 0, &seed).await?;
+			compact_all(&index, &ds, &ikb()).await?;
+			// Prewarm the doc sets with a read-only query.
+			assert!(knn_ids(&index, &ds, &existing, 3, 40).await?.contains(&10));
+			let shared = vec![50.0, 1.0, 0.0, 0.0];
+			let moved_to = vec![60.0, 1.0, 0.0, 0.0];
+			{
+				let ctx = new_ctx(&ds, TransactionType::Write).await;
+				for id in [20, 21] {
+					index
+						.index(&ctx, &RecordIdKey::Number(id), None, Some(f32_content(&shared)))
+						.await?;
+				}
+				index
+					.index(&ctx, &RecordIdKey::Number(22), None, Some(f32_content(&existing)))
+					.await?;
+				// Record 3 moves from its vector to a fresh one.
+				index
+					.index(
+						&ctx,
+						&RecordIdKey::Number(3),
+						Some(f32_content(&seed[3])),
+						Some(f32_content(&moved_to)),
+					)
+					.await?;
+				for (i, v) in line(4, 30.0, 1.0, 5).iter().enumerate() {
+					index
+						.index(
+							&ctx,
+							&RecordIdKey::Number(40 + i as i64),
+							None,
+							Some(f32_content(v)),
+						)
+						.await?;
+				}
+				ctx.tx().commit().await?;
+			}
+			let elements_before = elements(&ds, &ikb()).await?.len();
+			assert!(compact_once(&index, &ds, &ikb()).await?);
+			// `shared` is one element; `existing` gains no element; `moved_to` and the line are
+			// new.
+			assert_eq!(elements(&ds, &ikb()).await?.len(), elements_before + 1 + 1 + 5);
+			let tx = ds.transaction(TransactionType::Read).await?;
+			let doc_of = |id: i64| {
+				let tx = &tx;
+				async move {
+					DiskAnnDocs::get_doc_id(
+						&ikb(),
+						VECTOR_DOC_ELEMENTS_FORMAT_VERSION,
+						tx,
+						&RecordIdKey::Number(id),
+					)
+					.await
+					.map(|d| d.expect("mapped"))
+				}
+			};
+			let shared_docs: Option<DiskAnnElementDocs> =
+				tx.get_key(&ikb().new_dq_key(&SerializedVector::F32(shared.clone())), None).await?;
+			let shared_docs = shared_docs.expect("shared vector mapped");
+			let (d20, d21, d22, d3, d10) = (
+				doc_of(20).await?,
+				doc_of(21).await?,
+				doc_of(22).await?,
+				doc_of(3).await?,
+				doc_of(10).await?,
+			);
+			assert_eq!(shared_docs.docs.iter().collect::<Vec<_>>(), {
+				let mut v = vec![d20, d21];
+				v.sort();
+				v
+			});
+			let existing_docs: DiskAnnElementDocs = tx
+				.get_key(&ikb().new_dq_key(&SerializedVector::F32(existing.clone())), None)
+				.await?
+				.expect("existing vector mapped");
+			assert_eq!(existing_docs.docs.iter().collect::<Vec<_>>(), {
+				let mut v = vec![d10, d22];
+				v.sort();
+				v
+			});
+			let moved: DiskAnnElementDocs = tx
+				.get_key(&ikb().new_dq_key(&SerializedVector::F32(moved_to.clone())), None)
+				.await?
+				.expect("moved vector mapped");
+			let elements_of = index.vec_docs.elements_of(&tx, &[d20, d21, d22, d3]).await?;
+			let ids = |e: &Option<Ids64>| e.as_ref().map(|e| e.iter().collect::<Vec<_>>());
+			assert_eq!(ids(&elements_of[0]), Some(vec![shared_docs.e_id]));
+			assert_eq!(ids(&elements_of[1]), Some(vec![shared_docs.e_id]));
+			assert_eq!(ids(&elements_of[2]), Some(vec![existing_docs.e_id]));
+			assert_eq!(
+				ids(&elements_of[3]),
+				Some(vec![moved.e_id]),
+				"the moved doc kept its old element"
+			);
+			tx.cancel().await?;
+			// The existing element's cached doc set is the new one, or not cached at all.
+			let generation = {
+				let tx = ds.transaction(TransactionType::Read).await?;
+				let g = read_compaction_generation(&tx, &ikb().new_dg_key()).await?;
+				tx.cancel().await?;
+				g
+			};
+			let view = index.graph.read().await.reader_view(generation);
+			let cache_index = (
+				ikb().ns(),
+				ikb().db(),
+				TableId(4),
+				ikb().index(),
+				VECTOR_DOC_ELEMENTS_FORMAT_VERSION,
+			);
+			if let Some(cached) = cache.get_doc_set(cache_index, existing_docs.e_id, &view) {
+				assert_eq!(cached, existing_docs.docs, "a stale doc set is served");
+			}
+			// A filtered query admitting exactly the deduplicated and appended docs returns them.
+			let allow: RoaringTreemap = [d20, d21, d22].into_iter().collect();
+			let got = knn_keys_with_allow(&index, &ds, &shared, 3, Some(&allow)).await?;
+			assert_eq!(got, vec![20, 21, 22]);
+			assert_adjacency_valid(&ds, &ikb()).await?;
+			Ok(())
+		}
+
+		/// T-14: multi-valued records totalling more new vectors than a plan holds, in far fewer
+		/// keys and bytes, are cut by the vector cap; no frame inserts more fresh vectors than the
+		/// cap, no batched call more than [`DISKANN_INSERT_BATCH_MAX_VECTORS`], and the next plans
+		/// fold the rest.
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_plan_caps_its_new_vectors() -> Result<()> {
+			let ds = TestIndexStore::new().await.with_places(4);
+			let index = batching_index(ikb(), TableId(4), &small_params(4), cache()).await?;
+			// 600 records of 3 vectors each: 1800 vectors, under the key cap.
+			let per_record = 3;
+			{
+				let ctx = new_ctx(&ds, TransactionType::Write).await;
+				for r in 0..600_i64 {
+					let content: Vec<Value> = (0..per_record)
+						.map(|c| f32_value(&[r as f32, c as f32, 0.5, 0.25]))
+						.collect();
+					index.index(&ctx, &RecordIdKey::Number(r), None, Some(content)).await?;
+				}
+				ctx.tx().commit().await?;
+			}
+			let plan = next_plan(&ds, &ikb()).await?;
+			assert!(plan.has_more(), "the vector cap ends the plan");
+			let vectors: usize = plan.pending.iter().map(|p| p.new_vectors.len()).sum();
+			assert!(
+				vectors <= DISKANN_COMPACTION_MAX_PENDING_VECTORS,
+				"{vectors} vectors in one plan"
+			);
+			assert!(vectors > DISKANN_COMPACTION_MAX_PENDING_VECTORS - per_record);
+			let passes = compact_all(&index, &ds, &ikb()).await?;
+			assert!(passes >= 2);
+			for frame in index.frames() {
+				let largest = frame.stats.largest_batch.load(Ordering::Acquire);
+				assert!(largest <= DISKANN_INSERT_BATCH_MAX_VECTORS);
+			}
+			assert_eq!(assert_adjacency_valid(&ds, &ikb()).await?, 1800);
+			Ok(())
+		}
+
+		/// Near vectors of one frame link to each other however far apart the batch puts them.
+		///
+		/// Each pair below is two vectors a hair apart, one batched-insert call's length apart in
+		/// the frame's batch: all records sit in one pending shard, which the plan captures in key
+		/// order. A batched insert sees the rest of its call only through the intra-batch
+		/// candidates positionally next to each vector, so a call holding both halves of a pair
+		/// would leave them unaware of each other, and neither would list the other. The frame's
+		/// calls are small enough that the second half searches a graph that already holds the
+		/// first.
+		///
+		/// The graph is large against the batch, at `DEGREE 64`, so that upstream's bootstrap —
+		/// which prunes every vector against the whole batch, and runs while a batch's back-edge
+		/// sources are few — does not run and hide the gap, as it does in a young or starved graph.
+		/// In one call of the whole batch, no pair links at all.
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_frame_links_near_vectors_far_apart_in_its_batch() -> Result<()> {
+			let pairs = DISKANN_INSERT_BATCH_MAX_VECTORS + 4;
+			assert!(pairs > DISKANN_INTRA_BATCH_CANDIDATES as usize);
+			assert!(
+				2 * pairs <= DISKANN_COMPACTION_MAX_PENDING_VECTORS,
+				"both halves in one frame"
+			);
+			let mut rng = recall_rng();
+			let dim = 16;
+			let mut point =
+				|| -> Vec<f32> { (0..dim).map(|_| rng.random_range(-1.0f32..=1.0)).collect() };
+			let seed: Vec<Vec<f32>> = (0..10_000).map(|_| point()).collect();
+			let params = graph_params(dim as u16, Distance::Euclidean, 64, 100);
+			let firsts: Vec<Vec<f32>> = (0..pairs).map(|_| point()).collect();
+			let seconds: Vec<Vec<f32>> =
+				firsts.iter().map(|v| v.iter().map(|x| x + 1e-3).collect()).collect();
+			// Batched only: on no place a frame inserts one vector at a time, the serial build.
+			for places in [4] {
+				let ds = TestIndexStore::new().await.with_places(places);
+				let index = batching_index(ikb(), TableId(4), &params, cache()).await?;
+				ingest(&index, &ds, 0, &seed).await?;
+				compact_all(&index, &ds, &ikb()).await?;
+				// Every id a multiple of the shard count, so one shard holds them all, in id order.
+				{
+					let ctx = new_ctx(&ds, TransactionType::Write).await;
+					let shards = i64::from(DISKANN_PENDING_STATE_SHARDS);
+					for (pos, v) in firsts.iter().chain(&seconds).enumerate() {
+						let id = RecordIdKey::Number(shards * (1000 + pos as i64));
+						index.index(&ctx, &id, None, Some(f32_content(v))).await?;
+					}
+					ctx.tx().commit().await?;
+				}
+				assert!(compact_once(&index, &ds, &ikb()).await?);
+				assert_eq!(captured(&ds, &ikb()).await?, 0, "both halves are in one frame");
+				let tx = ds.transaction(TransactionType::Read).await?;
+				let element_of = |v: &Vec<f32>| {
+					let tx = &tx;
+					let key = SerializedVector::F32(v.clone());
+					async move {
+						let docs: Option<DiskAnnElementDocs> =
+							tx.get_key(&ikb().new_dq_key(&key), None).await?;
+						Ok::<_, anyhow::Error>(docs.expect("mapped").e_id)
+					}
+				};
+				let mut linked = 0;
+				for (a, b) in firsts.iter().zip(&seconds) {
+					let (a, b) = (element_of(a).await?, element_of(b).await?);
+					let lists = |e: ElementId| {
+						let tx = &tx;
+						async move {
+							let node: Option<DiskAnnNode> =
+								tx.get_key(&ikb().new_dn_key(e), None).await?;
+							Ok::<_, anyhow::Error>(node.map(|n| n.neighbors).unwrap_or_default())
+						}
+					};
+					if lists(a).await?.contains(&b) || lists(b).await?.contains(&a) {
+						linked += 1;
+					}
+				}
+				tx.cancel().await?;
+				info!("places={places}: {linked}/{pairs} near pairs linked");
+				assert!(
+					linked * 100 >= pairs * 95,
+					"places={places}: only {linked}/{pairs} near pairs linked"
+				);
+			}
+			Ok(())
+		}
+
+		/// T-14: a record carrying more vectors than the cap is captured alone and inserted in
+		/// calls of at most [`DISKANN_INSERT_BATCH_MAX_VECTORS`], all inside one frame that commits
+		/// its pending's delete, its mappings and its graph together. Such a record needs an index
+		/// over more columns than the cap, so the index API is called directly.
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_record_over_the_cap_is_one_frame() -> Result<()> {
+			let ds = TestIndexStore::new().await.with_places(4);
+			let index = batching_index(ikb(), TableId(4), &small_params(4), cache()).await?;
+			ingest(&index, &ds, 0, &line(4, 0.0, 1.0, 10)).await?;
+			compact_all(&index, &ds, &ikb()).await?;
+			let n = DISKANN_COMPACTION_MAX_PENDING_VECTORS + 300;
+			{
+				let ctx = new_ctx(&ds, TransactionType::Write).await;
+				let content: Vec<Value> = (0..n)
+					.map(|c| f32_value(&[100.0 + c as f32, (c % 7) as f32, 0.0, 1.0]))
+					.collect();
+				index.index(&ctx, &RecordIdKey::Number(1000), None, Some(content)).await?;
+				ingest_in(&index, &ctx, 2000, &line(4, 0.5, 1.0, 5)).await?;
+				ctx.tx().commit().await?;
+			}
+			let plan = next_plan(&ds, &ikb()).await?;
+			assert_eq!(plan.captured_keys.len(), 1, "the oversized record is captured alone");
+			assert!(compact_once(&index, &ds, &ikb()).await?);
+			let frame = index.last_frame().expect("a frame");
+			assert_eq!(
+				frame.stats.batch_calls.load(Ordering::Acquire),
+				n.div_ceil(DISKANN_INSERT_BATCH_MAX_VECTORS) as u64
+			);
+			assert_eq!(
+				frame.stats.largest_batch.load(Ordering::Acquire),
+				DISKANN_INSERT_BATCH_MAX_VECTORS
+			);
+			assert_eq!(frame.stats.batched_vectors.load(Ordering::Acquire), n as u64);
+			compact_all(&index, &ds, &ikb()).await?;
+			assert_eq!(assert_adjacency_valid(&ds, &ikb()).await?, 10 + n + 5);
+			Ok(())
+		}
+
+		/// [`ingest`] into an open transaction.
+		async fn ingest_in(
+			index: &DiskAnnIndex,
+			ctx: &TestIndexEnv,
+			first: i64,
+			vectors: &[Vec<f32>],
+		) -> Result<()> {
+			for (i, v) in vectors.iter().enumerate() {
+				let id = RecordIdKey::Number(first + i as i64);
+				index.index(ctx, &id, None, Some(f32_content(v))).await?;
+			}
+			Ok(())
+		}
+
+		/// T-14: one field holding several vectors is not split into them: the write fails the
+		/// dimension check.
+		#[tokio::test]
+		async fn diskann_array_of_vectors_in_one_field_is_rejected() -> Result<()> {
+			let ds = TestIndexStore::new().await;
+			let index = new_index(ikb(), TableId(4), &small_params(4), cache()).await?;
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let nested = Value::from(vec![
+				f32_value(&[1.0, 2.0, 3.0, 4.0]),
+				f32_value(&[5.0, 6.0, 7.0, 8.0]),
+			]);
+			assert!(
+				index.index(&ctx, &RecordIdKey::Number(1), None, Some(vec![nested])).await.is_err()
+			);
+			ctx.tx().cancel().await
+		}
+
+		/// An environment that cancels `frame_of`'s last frame on its `at`-th probe, standing in
+		/// for a statement cancelled while phase A claims doc-id windows.
+		struct CancelOnProbe {
+			inner: TestIndexEnv,
+			index: Arc<DiskAnnIndex>,
+			at: usize,
+			probes: AtomicUsize,
+		}
+
+		impl CancellationProbe for CancelOnProbe {
+			fn expect_not_timedout(&self) -> BoxProviderFut<'_, Result<()>> {
+				Box::pin(async move {
+					if self.probes.fetch_add(1, Ordering::AcqRel) + 1 == self.at {
+						self.index.last_frame().expect("a frame").cancel();
+					}
+					self.inner.expect_not_timedout().await
+				})
+			}
+		}
+
+		impl IndexEnv for CancelOnProbe {
+			fn tx(&self) -> Arc<Transaction> {
+				IndexEnv::tx(&self.inner)
+			}
+
+			fn is_done(&self, count: Option<usize>) -> BoxEnvFut<'_> {
+				self.inner.is_done(count)
+			}
+
+			fn index_stores(&self) -> &IndexStores {
+				self.inner.index_stores()
+			}
+
+			fn node_id(&self) -> Uuid {
+				self.inner.node_id()
+			}
+
+			fn sequences(&self) -> Result<&Sequences> {
+				self.inner.sequences()
+			}
+
+			fn config(&self) -> &IdxConfig {
+				self.inner.config()
+			}
+
+			fn places(&self) -> Ticket {
+				self.inner.places()
+			}
+		}
+
+		/// T-9: a frame cancelled while phase A claims doc-id windows resolves no further record:
+		/// the window claim in flight completes, the next record's resolution checks the frame,
+		/// and nothing commits.
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_frame_cancelled_in_phase_a_resolves_no_further_record() -> Result<()> {
+			let ds = TestIndexStore::with_idx_config(|c| c.table_doc_ids_batch_size = 1)
+				.await
+				.with_places(4);
+			let index =
+				Arc::new(batching_index(ikb(), TableId(4), &small_params(4), cache()).await?);
+			// Records written before any doc-id exists, so each pending resolves one at compaction.
+			ingest(&index, &ds, 0, &line(4, 0.0, 1.0, 12)).await?;
+			let before = captured(&ds, &ikb()).await?;
+			let plan = next_plan(&ds, &ikb()).await?;
+			let env = CancelOnProbe {
+				inner: new_ctx(&ds, TransactionType::Write).await,
+				index: Arc::clone(&index),
+				at: 3,
+				probes: AtomicUsize::new(0),
+			};
+			let err = index.apply_compaction(&env, plan).await.expect_err("the frame is cancelled");
+			assert!(matches!(err.downcast_ref(), Some(EngineError::QueryCancelled)), "{err:#}");
+			assert_eq!(
+				env.probes.load(Ordering::Acquire),
+				3,
+				"a record was resolved after the cancel"
+			);
+			assert!(IndexEnv::tx(&env).closed());
+			assert_eq!(captured(&ds, &ikb()).await?, before);
+			assert!(elements(&ds, &ikb()).await?.is_empty());
+			Ok(())
+		}
+
+		/// T-9: a frame cancelled while the entry-point repair scans `!de` reads no further batch
+		/// and persists no entry point.
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_frame_cancelled_mid_scan_reads_no_further_batch() -> Result<()> {
+			let ds = TestIndexStore::new().await.with_places(4);
+			let index = batching_index(ikb(), TableId(4), &small_params(4), cache()).await?;
+			// A stored graph whose entry point and first page of elements are tombstoned, so the
+			// repair has to read a second page to find a live element.
+			let tombstoned = surrealdb_kvs::consts::NORMAL_BATCH_SIZE as u64 + 10;
+			{
+				let tx = ds.transaction(TransactionType::Write).await?;
+				for id in 0..=tombstoned {
+					let element = DiskAnnElement {
+						vector: SerializedVector::F32(vec![id as f32, 0.0, 0.0, 0.0]),
+						deleted: id < tombstoned,
+					};
+					tx.set_key(&ikb().new_de_key(id), &element).await?;
+				}
+				tx.set_key(
+					&ikb().new_ds_key(),
+					&DiskAnnState {
+						enter_point: Some(0),
+						next_element_id: tombstoned + 1,
+						start_points: Vec::new(),
+					},
+				)
+				.await?;
+				tx.commit().await?;
+			}
+			ingest(&index, &ds, 100, &line(4, 0.5, 1.0, 4)).await?;
+			let faults = FrameFaults::default();
+			faults.cancel_after_scan_batches.store(1, Ordering::Release);
+			let err = apply_with(&ds, &index, faults).await.expect_err("the frame is cancelled");
+			assert!(err.to_string().contains("cancelled"), "{err:#}");
+			let frame = index.last_frame().expect("a frame");
+			assert_eq!(
+				frame.stats.scan_batches.load(Ordering::Acquire),
+				1,
+				"a batch was read after the cancel"
+			);
+			assert_eq!(
+				frame.stats.state_writes.load(Ordering::Acquire),
+				0,
+				"an entry point was written"
+			);
+			Ok(())
+		}
+
+		/// A fresh index whose frames take places without a read view, so its batched insert runs
+		/// on the in-memory engine, which gives none.
+		async fn batching_index(
+			ikb: IndexKeyBase,
+			table_id: TableId,
+			params: &DiskAnnParams,
+			cache: DiskAnnCache,
+		) -> Result<DiskAnnIndex> {
+			let index = new_index(ikb, table_id, params, cache).await?;
+			index.batch_without_view();
+			Ok(index)
+		}
+
+		/// `seed` indexed and compacted into a fresh index on `ds`, whose frames take places only
+		/// with a read view, as in production.
+		#[cfg(feature = "kv-rocksdb")]
+		async fn seeded_on(
+			ds: TestIndexStore,
+			params: &DiskAnnParams,
+			seed: &[Vec<f32>],
+		) -> Result<(TestIndexStore, DiskAnnIndex, DiskAnnCache)> {
+			let cache = cache();
+			let index = new_index(ikb(), TableId(4), params, cache.clone()).await?;
+			ingest(&index, &ds, 0, seed).await?;
+			compact_all(&index, &ds, &ikb()).await?;
+			Ok((ds, index, cache))
+		}
+
+		/// A RocksDB store, whose read-only transactions get a view, with `places` places.
+		#[cfg(feature = "kv-rocksdb")]
+		async fn rocksdb_store(dir: &TempDir, places: usize) -> TestIndexStore {
+			TestIndexStore::with_path(&format!("rocksdb:{}", dir.path().to_string_lossy()))
+				.await
+				.with_places(places)
+		}
+
+		/// The record whose vector the graph's stored entry point holds, for a seed built by
+		/// [`line`], whose `i`th vector starts at `i`.
+		#[cfg(feature = "kv-rocksdb")]
+		async fn entry_point_record(ds: &TestIndexStore) -> Result<i64> {
+			let tx = ds.transaction(TransactionType::Read).await?;
+			let state: DiskAnnState =
+				tx.get_key(&ikb().new_ds_key(), None).await?.expect("a state");
+			let entry = state.enter_point.expect("an entry point");
+			let element: DiskAnnElement =
+				tx.get_key(&ikb().new_de_key(entry), None).await?.expect("the entry element");
+			tx.cancel().await?;
+			let SerializedVector::F32(v) = element.vector else {
+				panic!("an F32 vector");
+			};
+			Ok(v[0] as i64)
+		}
+
+		/// Asserts every entry the cache holds for the index equals what a fresh read
+		/// transaction reads from KV, family by family. Returns how many entries it compared.
+		#[cfg(feature = "kv-rocksdb")]
+		async fn assert_cache_matches_kv(
+			ds: &TestIndexStore,
+			cache: &DiskAnnCache,
+		) -> Result<usize> {
+			use crate::trees::diskann::cache::CachedEntry;
+			let ikb = ikb();
+			let entries = cache.entries_of(
+				ikb.ns(),
+				ikb.db(),
+				TableId(4),
+				ikb.index(),
+				DOC_IDS_FORMAT_VERSION,
+			);
+			let tx = ds.transaction(TransactionType::Read).await?;
+			for entry in &entries {
+				match entry {
+					CachedEntry::State(cached) => {
+						let stored: DiskAnnState =
+							tx.get_key(&ikb.new_ds_key(), None).await?.expect("a stored state");
+						assert_eq!(
+							(cached.enter_point, cached.next_element_id, &cached.start_points),
+							(stored.enter_point, stored.next_element_id, &stored.start_points),
+							"the cached graph state is not the stored one"
+						);
+					}
+					CachedEntry::Element(id, cached) => {
+						let stored: DiskAnnElement = tx
+							.get_key(&ikb.new_de_key(*id), None)
+							.await?
+							.unwrap_or_else(|| panic!("cached element {id} is not stored"));
+						assert_eq!(
+							(&cached.vector, cached.deleted),
+							(&stored.vector, stored.deleted),
+							"cached element {id} differs from the stored one"
+						);
+					}
+					CachedEntry::Node(id, cached) => {
+						let stored: DiskAnnNode = tx
+							.get_key(&ikb.new_dn_key(*id), None)
+							.await?
+							.unwrap_or_else(|| panic!("cached adjacency list {id} is not stored"));
+						assert_eq!(
+							cached.neighbors, stored.neighbors,
+							"cached adjacency list {id} differs from the stored one"
+						);
+					}
+					CachedEntry::DocSet(id, cached) => {
+						let element: DiskAnnElement = tx
+							.get_key(&ikb.new_de_key(*id), None)
+							.await?
+							.expect("a stored element");
+						let stored: DiskAnnElementDocs = tx
+							.get_key(&ikb.new_dq_key(&element.vector), None)
+							.await?
+							.unwrap_or_else(|| panic!("cached doc set {id} is not stored"));
+						assert_eq!(stored.e_id, *id, "the stored doc set names another element");
+						assert_eq!(cached, &stored.docs, "cached doc set {id} differs from KV");
+					}
+					CachedEntry::DocId(doc, cached) => {
+						let stored = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone())
+							.get_record_ids_batch(&tx, &[*doc])
+							.await?;
+						assert_eq!(
+							stored,
+							vec![Some(cached.as_ref().clone())],
+							"cached doc-ID {doc} names another record"
+						);
+					}
+				}
+			}
+			tx.cancel().await?;
+			Ok(entries.len())
+		}
+
+		/// A read-only query over every vector of `seed`, so the state, elements, adjacency
+		/// lists, doc sets and doc-IDs it touches are cached.
+		#[cfg(feature = "kv-rocksdb")]
+		async fn prewarm(
+			index: &DiskAnnIndex,
+			ds: &TestIndexStore,
+			seed: &[Vec<f32>],
+		) -> Result<()> {
+			for v in seed {
+				knn_ids(index, ds, v, 3, 8).await?;
+			}
+			Ok(())
+		}
+
+		/// T-5: on RocksDB a frame with a place reads every clean graph key through its one read
+		/// view, none through its write transaction, answers the keys it wrote from its overlay,
+		/// publishes what the view read, and ends its read transaction once, with no task alive.
+		#[cfg(feature = "kv-rocksdb")]
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_frame_reads_clean_keys_through_its_view() -> Result<()> {
+			let dir = TempDir::new()?;
+			let (ds, index, _) =
+				seeded_on(rocksdb_store(&dir, 1).await, &small_params(4), &line(4, 0.0, 1.0, 20))
+					.await?;
+			ingest(&index, &ds, 100, &line(4, 0.5, 1.0, 30)).await?;
+			// The seeding frames wrote the whole graph through; a cold cache sends the frame's
+			// reads to KV.
+			index.clear_local_cache_now();
+			assert!(compact_once(&index, &ds, &ikb()).await?);
+			let frame = index.last_frame().expect("a frame");
+			let stats = &frame.stats;
+			assert_eq!(stats.read_txs_opened.load(Ordering::Acquire), 1, "one read transaction");
+			assert_eq!(stats.reads_tx.load(Ordering::Acquire), 0, "a graph key read through tx");
+			assert!(stats.reads_view.load(Ordering::Acquire) > 0, "nothing read through the view");
+			assert!(
+				stats.reads_overlay.load(Ordering::Acquire) > 0,
+				"no key read from the overlay"
+			);
+			assert!(
+				stats.cache_publishes.load(Ordering::Acquire) > 0,
+				"the view published nothing"
+			);
+			assert_eq!(stats.granted.load(Ordering::Acquire), 1);
+			assert_eq!(stats.batched_vectors.load(Ordering::Acquire), 30);
+			assert_eq!(*stats.live_at_tx_end.lock().unwrap(), vec![0], "one read transaction end");
+			assert!(frame.is_closed());
+			assert_eq!(ds.places().held(), 0);
+			assert_eq!(assert_adjacency_valid(&ds, &ikb()).await?, 50);
+			Ok(())
+		}
+
+		/// T-5: with the stored entry point tombstoned, the repair cursor reads `!de` through the
+		/// write transaction, and those batches are the only reads the transaction serves.
+		#[cfg(feature = "kv-rocksdb")]
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_frame_repair_scan_is_its_only_transaction_read() -> Result<()> {
+			let dir = TempDir::new()?;
+			let seed = line(4, 0.0, 1.0, 20);
+			let (ds, index, _) =
+				seeded_on(rocksdb_store(&dir, 1).await, &small_params(4), &seed).await?;
+			let entry = entry_point_record(&ds).await?;
+			// Without start points beside it, a deleted entry point leaves nothing to start from
+			// but a scan for a live element.
+			{
+				let tx = ds.transaction(TransactionType::Write).await?;
+				let mut state: DiskAnnState =
+					tx.get_key(&ikb().new_ds_key(), None).await?.expect("a state");
+				assert!(!state.start_points.is_empty(), "the seed kept no start point");
+				state.start_points.clear();
+				tx.set_key(&ikb().new_ds_key(), &state).await?;
+				tx.commit().await?;
+			}
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let id = RecordIdKey::Number(entry);
+			index.index(&ctx, &id, Some(f32_content(&seed[entry as usize])), None).await?;
+			ctx.tx().commit().await?;
+			ingest(&index, &ds, 100, &line(4, 0.5, 1.0, 30)).await?;
+			index.clear_local_cache_now();
+			assert!(compact_once(&index, &ds, &ikb()).await?);
+			let frame = index.last_frame().expect("a frame");
+			let scans = frame.stats.scan_batches.load(Ordering::Acquire);
+			assert!(scans > 0, "the entry point was not repaired by a scan");
+			assert_eq!(frame.stats.reads_tx.load(Ordering::Acquire), scans);
+			assert!(frame.stats.reads_view.load(Ordering::Acquire) > 0);
+			assert_ne!(entry_point_record(&ds).await?, entry, "the tombstone is still the entry");
+			assert_eq!(assert_adjacency_valid(&ds, &ikb()).await?, 49);
+			Ok(())
+		}
+
+		/// T-5 / T-3: a frame with no view opens no read transaction, reads nothing through a view
+		/// and takes no place, however many are free: it inserts on its calling task. On mem,
+		/// which gives no view, and on RocksDB with its view refused by a test hook.
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_frame_without_a_view_takes_no_place() -> Result<()> {
+			async fn check(ds: TestIndexStore, faults: FrameFaults) -> Result<()> {
+				// Every frame of the index runs under `faults`, the seeding ones included.
+				let index = new_index(ikb(), TableId(4), &small_params(4), cache()).await?;
+				index.set_faults(Some(Arc::new(faults)));
+				ingest(&index, &ds, 0, &line(4, 0.0, 1.0, 20)).await?;
+				compact_all(&index, &ds, &ikb()).await?;
+				ingest(&index, &ds, 100, &line(4, 0.5, 1.0, 30)).await?;
+				index.clear_local_cache_now();
+				assert!(compact_once(&index, &ds, &ikb()).await?);
+				let frame = index.last_frame().expect("a frame");
+				let stats = &frame.stats;
+				assert_eq!(stats.read_txs_opened.load(Ordering::Acquire), 0);
+				assert_eq!(stats.reads_view.load(Ordering::Acquire), 0);
+				assert_eq!(stats.cache_publishes.load(Ordering::Acquire), 0);
+				assert!(stats.reads_tx.load(Ordering::Acquire) > 0);
+				assert_eq!(stats.granted.load(Ordering::Acquire), 0);
+				assert_eq!(stats.spawns.load(Ordering::Acquire), 0, "a task was spawned");
+				assert_eq!(stats.sequential_vectors.load(Ordering::Acquire), 30);
+				assert_eq!(ds.places().peak(), 0, "a frame without a view took a place");
+				assert_eq!(assert_adjacency_valid(&ds, &ikb()).await?, 50);
+				Ok(())
+			}
+			check(TestIndexStore::new().await.with_places(4), FrameFaults::default()).await?;
+			#[cfg(feature = "kv-rocksdb")]
+			{
+				let dir = TempDir::new()?;
+				let faults = FrameFaults {
+					no_view: true,
+					..FrameFaults::default()
+				};
+				check(rocksdb_store(&dir, 4).await, faults).await?;
+			}
+			Ok(())
+		}
+
+		/// T-6: after a committed frame every entry the cache holds for the index — state,
+		/// elements, adjacency lists, doc sets and doc-IDs, prewarmed by a read-only query before
+		/// the frame — equals its KV value; after a frame that fails, the cache holds nothing of
+		/// the index.
+		#[cfg(feature = "kv-rocksdb")]
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_frame_with_a_view_keeps_the_cache_coherent() -> Result<()> {
+			let dir = TempDir::new()?;
+			let seed = line(4, 0.0, 1.0, 20);
+			let (ds, index, cache) =
+				seeded_on(rocksdb_store(&dir, 2).await, &small_params(4), &seed).await?;
+			let entry = entry_point_record(&ds).await?;
+			// A cold cache, then a read-only query over part of the graph: the frame is served
+			// some entries from the cache and reads the rest through its view.
+			index.clear_local_cache_now();
+			prewarm(&index, &ds, &seed[..3]).await?;
+			assert!(assert_cache_matches_kv(&ds, &cache).await? > 0, "nothing was prewarmed");
+			// Fresh vectors, and moves of records other than the entry point's, so the frame
+			// changes elements, adjacency lists, doc sets and the state the prewarm cached.
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			for i in (1..20).filter(|i| *i != entry).step_by(4) {
+				let id = RecordIdKey::Number(i);
+				let moved = vec![i as f32 + 0.25, 0.5, 0.0, 0.0];
+				index
+					.index(
+						&ctx,
+						&id,
+						Some(f32_content(&seed[i as usize])),
+						Some(f32_content(&moved)),
+					)
+					.await?;
+			}
+			ctx.tx().commit().await?;
+			ingest(&index, &ds, 100, &line(4, 0.5, 1.0, 30)).await?;
+			assert!(compact_once(&index, &ds, &ikb()).await?);
+			let frame = index.last_frame().expect("a frame");
+			assert_eq!(frame.stats.read_txs_opened.load(Ordering::Acquire), 1);
+			assert!(frame.stats.cache_publishes.load(Ordering::Acquire) > 0);
+			assert!(assert_cache_matches_kv(&ds, &cache).await? > 0);
+			prewarm(&index, &ds, &seed).await?;
+			assert!(assert_cache_matches_kv(&ds, &cache).await? > 0);
+			// A frame that fails after its view has published leaves no entry of the index.
+			ingest(&index, &ds, 200, &line(4, 0.75, 1.0, 30)).await?;
+			index.clear_local_cache_now();
+			let faults = FrameFaults::default();
+			*faults.fail_append.lock().unwrap() =
+				Some(Box::new(|| anyhow::anyhow!("injected append failure")));
+			apply_with(&ds, &index, faults).await.expect_err("the frame fails");
+			let frame = index.last_frame().expect("a frame");
+			assert!(frame.stats.reads_view.load(Ordering::Acquire) > 0);
+			assert_eq!(assert_cache_matches_kv(&ds, &cache).await?, 0, "the cache kept entries");
+			assert_eq!(*frame.stats.live_at_tx_end.lock().unwrap(), vec![0, 0]);
+			Ok(())
+		}
+
+		/// T-12: a failure while the frame opens its read view — before the read transaction
+		/// opens, or once it has — cancels the write transaction, which holds the `!dg` bump and
+		/// the conditional deletes, and any read transaction it opened, and commits nothing.
+		#[cfg(feature = "kv-rocksdb")]
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_frame_view_failure_ends_both_transactions() -> Result<()> {
+			use crate::trees::diskann::frame::ViewOpenFault;
+			for fault in [ViewOpenFault::BeforeOpen, ViewOpenFault::AfterOpen] {
+				let dir = TempDir::new()?;
+				let (ds, index, cache) = seeded_on(
+					rocksdb_store(&dir, 1).await,
+					&small_params(4),
+					&line(4, 0.0, 1.0, 20),
+				)
+				.await?;
+				ingest(&index, &ds, 100, &line(4, 0.5, 1.0, 30)).await?;
+				let before = captured(&ds, &ikb()).await?;
+				let generation = {
+					let tx = ds.transaction(TransactionType::Read).await?;
+					let g = read_compaction_generation(&tx, &ikb().new_dg_key()).await?;
+					tx.cancel().await?;
+					g
+				};
+				let faults = Arc::new(FrameFaults {
+					view_open: Some(fault),
+					..FrameFaults::default()
+				});
+				index.set_faults(Some(Arc::clone(&faults)));
+				let plan = next_plan(&ds, &ikb()).await?;
+				let ctx = new_ctx(&ds, TransactionType::Write).await;
+				let err = index.apply_compaction(&ctx, plan).await.expect_err("the frame fails");
+				assert!(err.to_string().contains("injected"), "{fault:?}: {err:#}");
+				assert!(ctx.tx().closed(), "{fault:?}: the write transaction was left open");
+				let views = faults.opened_views.lock().unwrap().clone();
+				match fault {
+					ViewOpenFault::BeforeOpen => assert!(views.is_empty()),
+					ViewOpenFault::AfterOpen => {
+						assert_eq!(views.len(), 1);
+						assert!(views[0].tx().closed(), "the read transaction was left open");
+					}
+				}
+				let tx = ds.transaction(TransactionType::Read).await?;
+				assert_eq!(
+					read_compaction_generation(&tx, &ikb().new_dg_key()).await?,
+					generation,
+					"{fault:?}: the generation bump committed"
+				);
+				tx.cancel().await?;
+				assert_frame_undone(&ds, &index, &cache, before, 20).await?;
+			}
+			Ok(())
+		}
+
+		/// T-11 on the production path: a frame with a read view whose task panics while its
+		/// spawned tasks are parked. Neither transaction ends — the read transaction its lock's
+		/// backstop cancels, nor the write transaction its guard's backstop cancels — until the
+		/// tasks are released and have exited, and each ends once.
+		#[cfg(feature = "kv-rocksdb")]
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_frame_panic_with_a_view_drains_before_either_end() -> Result<()> {
+			let dir = TempDir::new()?;
+			let (ds, index, cache) =
+				seeded_on(rocksdb_store(&dir, 4).await, &small_params(4), &line(4, 0.0, 1.0, 20))
+					.await?;
+			ingest(&index, &ds, 100, &line(4, 0.5, 1.0, 30)).await?;
+			let before = captured(&ds, &ikb()).await?;
+			let park = Park::new();
+			let faults = Arc::new(FrameFaults {
+				park_set_element: Some(Arc::clone(&park)),
+				panic_frame_when_parked: Some(4),
+				..FrameFaults::default()
+			});
+			index.set_faults(Some(Arc::clone(&faults)));
+			let plan = next_plan(&ds, &ikb()).await?;
+			let env = Arc::new(new_ctx(&ds, TransactionType::Write).await);
+			let tx = env.tx();
+			let index = Arc::new(index);
+			let apply = {
+				let index = Arc::clone(&index);
+				let env = Arc::clone(&env);
+				tokio::spawn(async move { index.apply_compaction(&*env, plan).await })
+			};
+			assert!(apply.await.is_err_and(|e| e.is_panic()), "the frame task panics");
+			let reader = index.graph.read().await;
+			assert_eq!(cache.weight(), 0, "the panicked frame left entries in the cache");
+			drop(reader);
+			let view = faults.opened_views.lock().unwrap().last().cloned().expect("a view");
+			common::time::sleep(DISKANN_FRAME_WATCHDOG_INTERVAL * 2).await;
+			assert!(!tx.closed(), "the write transaction ended while the frame's tasks ran");
+			assert!(!view.tx().closed(), "the read transaction ended while the frame's tasks ran");
+			park.release();
+			for _ in 0..200 {
+				if tx.closed() && view.tx().closed() {
+					break;
+				}
+				common::time::sleep(std::time::Duration::from_millis(10)).await;
+			}
+			assert!(tx.closed() && view.tx().closed(), "a backstop never ended its transaction");
+			let frame = index.last_frame().expect("a frame");
+			assert_eq!(frame.live_tasks(), 0);
+			assert_eq!(ds.places().held(), 0);
+			assert_eq!(*frame.stats.live_at_tx_end.lock().unwrap(), vec![0, 0]);
+			let index = Arc::into_inner(index).expect("the apply has returned");
+			assert_frame_undone(&ds, &index, &cache, before, 20).await
+		}
+
+		/// `vectors` as sink records, one record each, under record ids `first..`.
+		fn sink_records(
+			first: i64,
+			vectors: &[Vec<f32>],
+		) -> Vec<(RecordIdKey, Vec<SerializedVector>)> {
+			vectors
+				.iter()
+				.enumerate()
+				.map(|(i, v)| {
+					(RecordIdKey::Number(first + i as i64), vec![SerializedVector::F32(v.clone())])
+				})
+				.collect()
+		}
+
+		/// T-11, sink success: the sink frame holds the graph lock until the build transaction it
+		/// was applied in commits and the frame finishes; then the graph, its mappings and the
+		/// span cover the commit, and nothing went through `!dw`.
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_sink_frame_commits_with_its_build_transaction() -> Result<()> {
+			sink_frame_commits_with_its_build_transaction(TestIndexStore::new().await).await
+		}
+
+		/// The same on RocksDB, whose sink frame reads through a view and batches on places.
+		#[cfg(feature = "kv-rocksdb")]
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_sink_frame_commits_with_its_build_transaction_rocksdb() -> Result<()> {
+			let dir = TempDir::new()?;
+			sink_frame_commits_with_its_build_transaction(rocksdb_store(&dir, 4).await).await
+		}
+
+		async fn sink_frame_commits_with_its_build_transaction(ds: TestIndexStore) -> Result<()> {
+			let index = new_index(ikb(), TableId(4), &small_params(4), cache()).await?;
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let mut tx_guard = BuildTxGuard::new(ctx.tx());
+			let frame = index
+				.apply_direct(
+					&ctx,
+					(b"first", b"last"),
+					sink_records(0, &line(4, 0.0, 1.0, 40)),
+					&mut tx_guard,
+				)
+				.await?;
+			assert!(index.graph.try_read().is_err(), "a search was let in before the commit");
+			ctx.tx().commit().await?;
+			tx_guard.disarm();
+			frame.finish().await;
+			let graph = index.graph.read().await;
+			let generation = {
+				let tx = ds.transaction(TransactionType::Read).await?;
+				let g = read_compaction_generation(&tx, &ikb().new_dg_key()).await?;
+				tx.cancel().await?;
+				g
+			};
+			assert_eq!(
+				graph.continuity.map(|span| span.head),
+				Some(generation),
+				"the span stops short"
+			);
+			drop(graph);
+			assert_eq!(captured(&ds, &ikb()).await?, 0, "the sink queued pendings");
+			assert_eq!(assert_adjacency_valid(&ds, &ikb()).await?, 40);
+			assert_eq!(knn_ids(&index, &ds, &[20.0, 0.0, 0.0, 0.0], 1, 40).await?, vec![20]);
+			// The materialiser folds later writes on top of what the sink built.
+			ingest(&index, &ds, 100, &line(4, 0.5, 1.0, 10)).await?;
+			compact_all(&index, &ds, &ikb()).await?;
+			assert_eq!(assert_adjacency_valid(&ds, &ikb()).await?, 50);
+			Ok(())
+		}
+
+		/// T-11, sink failure after `apply_direct`: the build transaction does not commit, the
+		/// builder aborts the frame and then cancels it. A search waiting on the graph lock gets
+		/// in only once the cleanup has run, and finds no entry of the batch; nothing commits.
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_sink_frame_abort_leaves_nothing() -> Result<()> {
+			let ds = TestIndexStore::new().await;
+			let cache = cache();
+			let index =
+				Arc::new(new_index(ikb(), TableId(4), &small_params(4), cache.clone()).await?);
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let mut tx_guard = BuildTxGuard::new(ctx.tx());
+			let frame = index
+				.apply_direct(
+					&ctx,
+					(b"first", b"last"),
+					sink_records(0, &line(4, 0.0, 1.0, 40)),
+					&mut tx_guard,
+				)
+				.await?;
+			assert!(cache.weight() > 0, "the frame wrote nothing through");
+			let reader = {
+				let index = Arc::clone(&index);
+				let cache = cache.clone();
+				tokio::spawn(async move {
+					let _graph = index.graph.read().await;
+					cache.weight()
+				})
+			};
+			common::time::sleep(std::time::Duration::from_millis(50)).await;
+			assert!(!reader.is_finished(), "a search got past the frame's lock");
+			frame.abort().await;
+			ctx.tx().cancel().await?;
+			tx_guard.disarm();
+			assert_eq!(reader.await?, 0, "the search was served the aborted batch");
+			assert!(elements(&ds, &ikb()).await?.is_empty(), "the aborted batch committed");
+			// A later batch, in a transaction of its own, applies.
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let mut tx_guard = BuildTxGuard::new(ctx.tx());
+			let frame = index
+				.apply_direct(
+					&ctx,
+					(b"first", b"last"),
+					sink_records(0, &line(4, 0.0, 1.0, 40)),
+					&mut tx_guard,
+				)
+				.await?;
+			ctx.tx().commit().await?;
+			tx_guard.disarm();
+			frame.finish().await;
+			assert_eq!(assert_adjacency_valid(&ds, &ikb()).await?, 40);
+			Ok(())
+		}
+
+		/// T-11, a panic between `apply_direct` and `finish`: the frame's `Drop` undoes it before
+		/// the lock goes, and the build transaction's guard cancels it, once; nothing of the batch
+		/// commits.
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_sink_frame_dropped_on_a_panic_commits_nothing() -> Result<()> {
+			sink_frame_dropped_on_a_panic_commits_nothing(TestIndexStore::new().await, 1).await
+		}
+
+		/// The same on RocksDB: the frame's read transaction and the build transaction both end
+		/// after the frame's tasks have drained.
+		#[cfg(feature = "kv-rocksdb")]
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_sink_frame_dropped_on_a_panic_commits_nothing_rocksdb() -> Result<()> {
+			let dir = TempDir::new()?;
+			sink_frame_dropped_on_a_panic_commits_nothing(rocksdb_store(&dir, 4).await, 2).await
+		}
+
+		/// `ends` is how many transactions the frame has: its build transaction, and a read
+		/// transaction where the engine gives a view.
+		async fn sink_frame_dropped_on_a_panic_commits_nothing(
+			ds: TestIndexStore,
+			ends: usize,
+		) -> Result<()> {
+			let cache = cache();
+			let index =
+				Arc::new(new_index(ikb(), TableId(4), &small_params(4), cache.clone()).await?);
+			let ctx = Arc::new(new_ctx(&ds, TransactionType::Write).await);
+			let tx = ctx.tx();
+			let builder = {
+				let (index, ctx) = (Arc::clone(&index), Arc::clone(&ctx));
+				tokio::spawn(async move {
+					let mut tx_guard = BuildTxGuard::new(ctx.tx());
+					let _frame = index
+						.apply_direct(
+							&*ctx,
+							(b"first", b"last"),
+							sink_records(0, &line(4, 0.0, 1.0, 40)),
+							&mut tx_guard,
+						)
+						.await
+						.expect("the sink frame applies");
+					panic!("injected panic before the build transaction commits");
+				})
+			};
+			assert!(builder.await.is_err_and(|e| e.is_panic()), "the builder panics");
+			let graph = index.graph.read().await;
+			assert_eq!(cache.weight(), 0, "the dropped frame left entries in the cache");
+			assert!(graph.continuity.is_none(), "the span outlived the dropped frame");
+			drop(graph);
+			for _ in 0..200 {
+				if tx.closed() {
+					break;
+				}
+				common::time::sleep(std::time::Duration::from_millis(10)).await;
+			}
+			assert!(tx.closed(), "the build transaction's guard never cancelled it");
+			let frame = index.last_frame().expect("a frame");
+			for _ in 0..200 {
+				if frame.stats.live_at_tx_end.lock().unwrap().len() == ends {
+					break;
+				}
+				common::time::sleep(std::time::Duration::from_millis(10)).await;
+			}
+			assert_eq!(*frame.stats.live_at_tx_end.lock().unwrap(), vec![0; ends]);
+			assert!(elements(&ds, &ikb()).await?.is_empty(), "the batch committed");
+			Ok(())
+		}
+
+		/// T-14, a record over the cap: one sink record holding more vectors than one batched
+		/// insert takes is inserted in consecutive batches of at most the cap, inside the one
+		/// frame, which commits them together.
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_sink_inserts_a_record_over_the_cap_in_one_frame() -> Result<()> {
+			let ds = TestIndexStore::new().await.with_places(4);
+			let index = batching_index(ikb(), TableId(4), &small_params(4), cache()).await?;
+			let n = DISKANN_DIRECT_MAX_VECTORS + 77;
+			let vectors: Vec<SerializedVector> = (0..n)
+				.map(|i| SerializedVector::F32(vec![i as f32, (i % 7) as f32, 0.0, 0.0]))
+				.collect();
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let mut tx_guard = BuildTxGuard::new(ctx.tx());
+			let frame = index
+				.apply_direct(
+					&ctx,
+					(b"first", b"last"),
+					vec![(RecordIdKey::Number(1), vectors)],
+					&mut tx_guard,
+				)
+				.await?;
+			ctx.tx().commit().await?;
+			tx_guard.disarm();
+			frame.finish().await;
+			let stats = &index.last_frame().expect("a frame").stats;
+			// The first vector seeds the empty graph; the rest go in calls of at most
+			// DISKANN_INSERT_BATCH_MAX_VECTORS.
+			assert_eq!(
+				stats.batch_calls.load(Ordering::Acquire),
+				(n - 1).div_ceil(DISKANN_INSERT_BATCH_MAX_VECTORS) as u64
+			);
+			assert_eq!(
+				stats.largest_batch.load(Ordering::Acquire),
+				DISKANN_INSERT_BATCH_MAX_VECTORS
+			);
+			assert_eq!(stats.batched_vectors.load(Ordering::Acquire), n as u64 - 1);
+			assert_eq!(assert_adjacency_valid(&ds, &ikb()).await?, n);
+			Ok(())
+		}
+
+		/// The stored graph state.
+		async fn stored_state(ds: &TestIndexStore) -> Result<DiskAnnState> {
+			let tx = ds.transaction(TransactionType::Read).await?;
+			let state = tx.get_key(&ikb().new_ds_key(), None).await?.expect("a state");
+			tx.cancel().await?;
+			Ok(state)
+		}
+
+		/// The record a [`line`] seed's element holds: its vector's first component.
+		async fn record_of(ds: &TestIndexStore, id: ElementId) -> Result<i64> {
+			let tx = ds.transaction(TransactionType::Read).await?;
+			let element: DiskAnnElement =
+				tx.get_key(&ikb().new_de_key(id), None).await?.expect("a stored element");
+			tx.cancel().await?;
+			let SerializedVector::F32(v) = element.vector else {
+				panic!("an F32 vector");
+			};
+			Ok(v[0] as i64)
+		}
+
+		/// #1179: a graph seeded from a batch enters at the batch's medoid and keeps, beside it,
+		/// the batch vectors spread farthest from it — on a line, its two ends.
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_seed_keeps_a_medoid_entry_and_spread_start_points() -> Result<()> {
+			let (ds, _, _) = seeded(0, &small_params(4), &line(4, 0.0, 1.0, 40)).await?;
+			let state = stored_state(&ds).await?;
+			let entry = record_of(&ds, state.enter_point.expect("an entry point")).await?;
+			assert!(
+				(19..=20).contains(&entry),
+				"the entry point is record {entry}, not the medoid"
+			);
+			assert_eq!(state.start_points.len(), DISKANN_START_POINTS - 1);
+			let mut starts = Vec::new();
+			for id in &state.start_points {
+				starts.push(record_of(&ds, *id).await?);
+			}
+			assert!(starts.contains(&0) && starts.contains(&39), "start points {starts:?}");
+			Ok(())
+		}
+
+		/// #1179: deleting the entry point and a start point leaves the graph entering at a live
+		/// start point, with the set refilled from the deleted point's neighbours, and with no
+		/// scan for a survivor; every search still finds its nearest record.
+		#[tokio::test(flavor = "multi_thread")]
+		async fn diskann_start_points_survive_their_deletion() -> Result<()> {
+			let seed = line(4, 0.0, 1.0, 40);
+			let (ds, index, _) = seeded(0, &small_params(4), &seed).await?;
+			let state = stored_state(&ds).await?;
+			let doomed = [state.enter_point.expect("an entry point"), state.start_points[0]];
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			for id in doomed {
+				let record = record_of(&ds, id).await?;
+				let content = f32_content(&seed[record as usize]);
+				index.index(&ctx, &RecordIdKey::Number(record), Some(content), None).await?;
+			}
+			ctx.tx().commit().await?;
+			assert!(compact_once(&index, &ds, &ikb()).await?);
+			let frame = index.last_frame().expect("a frame");
+			assert_eq!(
+				frame.stats.scan_batches.load(Ordering::Acquire),
+				0,
+				"a survivor was scanned for"
+			);
+			let state = stored_state(&ds).await?;
+			let entry = state.enter_point.expect("an entry point");
+			assert!(!doomed.contains(&entry), "a deleted element is still the entry point");
+			assert_eq!(
+				state.start_points.len(),
+				DISKANN_START_POINTS - 1,
+				"deleting start points shrank the set"
+			);
+			let live: HashSet<ElementId> = elements(&ds, &ikb())
+				.await?
+				.into_iter()
+				.filter(|(_, e)| !e.deleted)
+				.map(|(id, _)| id)
+				.collect();
+			assert!(live.contains(&entry));
+			assert!(state.start_points.iter().all(|p| live.contains(p) && *p != entry));
+			for probe in [1, 10, 25, 38] {
+				let nearest = knn_ids(&index, &ds, &seed[probe], 1, 40).await?;
+				assert_eq!(nearest, vec![probe as i64]);
+			}
+			Ok(())
+		}
+
+		/// The adjacency list lengths of the live elements.
+		async fn list_lengths(ds: &TestIndexStore) -> Result<Vec<usize>> {
+			let live: Vec<ElementId> = elements(ds, &ikb())
+				.await?
+				.into_iter()
+				.filter(|(_, e)| !e.deleted)
+				.map(|(id, _)| id)
+				.collect();
+			let tx = ds.transaction(TransactionType::Read).await?;
+			let mut lengths = Vec::with_capacity(live.len());
+			for id in live {
+				let node: DiskAnnNode =
+					tx.get_key(&ikb().new_dn_key(id), None).await?.expect("a list");
+				lengths.push(node.neighbors.len());
+			}
+			tx.cancel().await?;
+			Ok(lengths)
+		}
+
+		/// A starved-degree corpus of `n` clustered vectors, with queries drawn from the same
+		/// clusters.
+		fn starved_sample(n: usize) -> (Vec<Vec<f32>>, Vec<Vec<f32>>, DiskAnnParams) {
+			let mut rng = recall_rng();
+			let mut corpus = ClusteredCorpus::new(&mut rng, 32, 200, 0.35);
+			let base = corpus.draw(&mut rng, n);
+			let queries = corpus.draw(&mut rng, 50);
+			(base, queries, graph_params(32, Distance::Cosine, 8, 24))
+		}
+
+		/// #1180: every insert runs with the construction retry — the long-lived handle's
+		/// single-vector inserts and every frame's batched handle alike — and a starved graph built
+		/// with it answers at least as well as one built without. The build time and recall of
+		/// both are logged for the comparison the retry is judged on.
+		#[test_log::test(tokio::test(flavor = "multi_thread"))]
+		async fn diskann_insert_retry_runs_on_every_insert() -> Result<()> {
+			let (base, queries, params) = starved_sample(1500);
+			let efs = [10, 40];
+			let mut measured = Vec::new();
+			for retry in [false, true] {
+				let ds = TestIndexStore::new().await.with_places(4);
+				let mut index = batching_index(ikb(), TableId(4), &params, cache()).await?;
+				let graph = index.graph.get_mut();
+				let tasks = NonZeroUsize::new(4).expect("non-zero");
+				assert!(graph.index.config.experimental_insert_retry().is_some());
+				assert!(graph.frame_index(tasks)?.config.experimental_insert_retry().is_some());
+				if !retry {
+					graph.without_insert_retry()?;
+					assert!(graph.index.config.experimental_insert_retry().is_none());
+					assert!(graph.frame_index(tasks)?.config.experimental_insert_retry().is_none());
+				}
+				let started = web_time::Instant::now();
+				ingest(&index, &ds, 0, &base).await?;
+				compact_all(&index, &ds, &ikb()).await?;
+				let built = started.elapsed();
+				let lengths = list_lengths(&ds).await?;
+				let short = lengths.iter().filter(|n| **n < params.degree as usize / 2).count();
+				let mean = lengths.iter().sum::<usize>() as f64 / lengths.len() as f64;
+				let r = recalls(&index, &ds, &params, &base, &queries, 10, &efs).await?;
+				info!(
+					"insert retry {retry}: build {built:?}, mean degree {mean:.2}, {short} short \
+					 lists, Recall@10 {r:?}"
+				);
+				measured.push(r);
+			}
+			for (ef, (a, b)) in efs.iter().zip(measured[0].iter().zip(&measured[1])) {
+				assert!(b + 0.02 >= *a, "ef={ef}: recall {b} with the retry, {a} without");
+			}
+			// Points along a line prune to their neighbours on either side: short lists, but not
+			// isolated ones, so the retry leaves them as they are rather than saturating them.
+			let params = graph_params(4, Distance::Euclidean, 64, 100);
+			let base: Vec<Vec<f32>> = (0..128).map(|i| vec![i as f32, 0.0, 0.0, 0.0]).collect();
+			let mut means = Vec::new();
+			for retry in [false, true] {
+				let ds = TestIndexStore::new().await;
+				let mut index = new_index(ikb(), TableId(4), &params, cache()).await?;
+				if !retry {
+					index.graph.get_mut().without_insert_retry()?;
+				}
+				ingest(&index, &ds, 0, &base).await?;
+				compact_all(&index, &ds, &ikb()).await?;
+				let lengths = list_lengths(&ds).await?;
+				means.push(lengths.iter().sum::<usize>() as f64 / lengths.len() as f64);
+			}
+			assert!((means[1] - means[0]).abs() < 1.0, "the retry saturated a line: {means:?}");
+			Ok(())
+		}
+
+		/// Runs the re-prune sweep over the whole graph, one committed chunk per transaction.
+		async fn sweep(index: &DiskAnnIndex, ds: &TestIndexStore) -> Result<usize> {
+			let mut from = Some(0);
+			let mut chunks = 0;
+			while let Some(start) = from {
+				let ctx = new_ctx(ds, TransactionType::Write).await;
+				let mut tx_guard = BuildTxGuard::new(ctx.tx());
+				let (frame, next) = index.reprune_direct(&ctx, start, &mut tx_guard).await?;
+				match frame {
+					Some(frame) => {
+						ctx.tx().commit().await?;
+						tx_guard.disarm();
+						frame.finish().await;
+						chunks += 1;
+					}
+					None => {
+						ctx.tx().cancel().await?;
+						tx_guard.disarm();
+					}
+				}
+				from = next;
+			}
+			Ok(chunks)
+		}
+
+		/// #1181: after a graph is built, the re-prune sweep prunes every adjacency list that
+		/// back-edges grew past the degree, in chunks of its own transactions; the graph stays
+		/// valid and answers as well. A sweep interrupted mid-way and started again from the
+		/// beginning ends in the same place.
+		#[test_log::test(tokio::test(flavor = "multi_thread"))]
+		async fn diskann_reprune_sweep_trims_lists_past_the_degree() -> Result<()> {
+			let (base, queries, params) = starved_sample(1500);
+			let degree = params.degree as usize;
+			let ds = TestIndexStore::new().await.with_places(4);
+			let index = batching_index(ikb(), TableId(4), &params, cache()).await?;
+			ingest(&index, &ds, 0, &base).await?;
+			compact_all(&index, &ds, &ikb()).await?;
+			let over = list_lengths(&ds).await?.into_iter().filter(|n| *n > degree).count();
+			assert!(over > 0, "no list grew past the degree, so the sweep has nothing to do");
+			let efs = [10, 40];
+			let before = recalls(&index, &ds, &params, &base, &queries, 10, &efs).await?;
+			// An interrupted sweep: its second chunk is abandoned and nothing of it commits.
+			{
+				let ctx = new_ctx(&ds, TransactionType::Write).await;
+				let mut tx_guard = BuildTxGuard::new(ctx.tx());
+				let (frame, next) = index.reprune_direct(&ctx, 0, &mut tx_guard).await?;
+				ctx.tx().commit().await?;
+				tx_guard.disarm();
+				frame.expect("a chunk").finish().await;
+				let ctx = new_ctx(&ds, TransactionType::Write).await;
+				let mut tx_guard = BuildTxGuard::new(ctx.tx());
+				let (frame, _) = index
+					.reprune_direct(&ctx, next.expect("a second chunk"), &mut tx_guard)
+					.await?;
+				frame.expect("a chunk").abort().await;
+				ctx.tx().cancel().await?;
+				tx_guard.disarm();
+			}
+			let started = web_time::Instant::now();
+			assert_eq!(sweep(&index, &ds).await?, 2, "1500 elements are two chunks");
+			let swept = started.elapsed();
+			let lengths = list_lengths(&ds).await?;
+			assert!(lengths.iter().all(|n| *n <= degree), "a list is still past the degree");
+			assert_eq!(assert_adjacency_valid(&ds, &ikb()).await?, base.len());
+			let after = recalls(&index, &ds, &params, &base, &queries, 10, &efs).await?;
+			info!(
+				"re-prune: {over} lists past the degree, swept in {swept:?}; Recall@10 {before:?} \
+				 -> {after:?}"
+			);
+			for (ef, (b, a)) in efs.iter().zip(before.iter().zip(&after)) {
+				assert!(a + 0.02 >= *b, "ef={ef}: recall {a} after the sweep, {b} before");
+			}
+			// A sweep over a graph already swept changes no list.
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let mut tx_guard = BuildTxGuard::new(ctx.tx());
+			let (frame, _) = index.reprune_direct(&ctx, 0, &mut tx_guard).await?;
+			let frame_stats = index.last_frame().expect("a frame");
+			assert!(frame_stats.written_nodes().is_empty(), "a second sweep rewrote a list");
+			frame.expect("a chunk").abort().await;
+			ctx.tx().cancel().await?;
+			tx_guard.disarm();
 			Ok(())
 		}
 	}

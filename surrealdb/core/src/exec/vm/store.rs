@@ -1451,8 +1451,11 @@ async fn step_inner(
 				.await
 				.map_err(ControlFlow::Err)?;
 			// The builder task is process memory, so it is aborted only once
-			// the removal commits.
+			// the removal commits; a build this transaction started stops now.
 			if let Some(builder) = frozen.get_index_builder() {
+				builder
+					.stop_build_of_statement(ns, db, &table.name, index.index_id, &ctx.txn())
+					.await;
 				ctx.txn()
 					.on_commit(crate::kvs::index::AbortLocalBuild::boxed(
 						builder.clone(),
@@ -1948,6 +1951,19 @@ async fn step_inner(
 				}
 				_ => None,
 			};
+			let materialise =
+				(*blocking && index.index.queues_compaction() && txn.accepts_materialise_waits())
+					.then(|| {
+						crate::kvs::index::materialise::MaterialiseAfterCommit::new(
+							std::sync::Arc::clone(frozen),
+							crate::idx::IndexKeyBase::new(
+								table.namespace_id,
+								table.database_id,
+								table.name.clone(),
+								index.index_id,
+							),
+						)
+					});
 			match after_commit {
 				Some(undo) => {
 					builder
@@ -1964,6 +1980,19 @@ async fn step_inner(
 				None => builder.run(frozen, options, table.table_id, index, *blocking).await,
 			}
 			.map_err(ControlFlow::Err)?;
+			// Phase 2: once the transaction has committed and phase 1 has
+			// brought the index online, wait for it to be materialised. Queued
+			// behind phase 1, which the owner awaits first and which ends the
+			// statement on a failure before this runs.
+			if let Some(materialise) = materialise
+				&& txn.wait_after_commit(Box::new(materialise)).await.is_some()
+			{
+				return Err(ControlFlow::Err(anyhow::Error::new(
+					crate::err::EngineError::unreachable(
+						"a transaction accepting materialise waits refused one",
+					),
+				)));
+			}
 		}
 		StoreInstr::SharesDocIds {
 			index,

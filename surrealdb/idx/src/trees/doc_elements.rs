@@ -14,6 +14,7 @@
 //! none of these keys until it is rebuilt.
 
 use std::fmt::Debug;
+use std::future::Future;
 
 use anyhow::{Result, ensure};
 use surrealdb_datastore::Transaction;
@@ -32,15 +33,78 @@ const MEMBER_BATCH: usize = 256;
 /// a single document.
 const ELEMENT_BATCH: usize = 1024;
 
+/// The point reads and writes of the doc-ID → elements mapping, through
+/// whatever the caller reaches KV by: a transaction, or an accessor that checks
+/// its caller's cancellation before each operation.
+pub(crate) trait ElementsKv: Sync {
+	fn get_elements<K>(&self, key: &K) -> impl Future<Output = Result<Option<Ids64>>> + Send
+	where
+		K: KVKey<Value = Ids64> + Debug + Sync;
+
+	fn set_elements<K>(&self, key: &K, elements: &Ids64) -> impl Future<Output = Result<()>> + Send
+	where
+		K: KVKey<Value = Ids64> + Debug + Sync;
+
+	fn del_elements<K>(&self, key: &K) -> impl Future<Output = Result<()>> + Send
+	where
+		K: KVKey<Value = Ids64> + Debug + Sync;
+}
+
+impl ElementsKv for Transaction {
+	async fn get_elements<K>(&self, key: &K) -> Result<Option<Ids64>>
+	where
+		K: KVKey<Value = Ids64> + Debug + Sync,
+	{
+		self.get_key(key, None).await
+	}
+
+	async fn set_elements<K>(&self, key: &K, elements: &Ids64) -> Result<()>
+	where
+		K: KVKey<Value = Ids64> + Debug + Sync,
+	{
+		self.set_key(key, elements).await
+	}
+
+	async fn del_elements<K>(&self, key: &K) -> Result<()>
+	where
+		K: KVKey<Value = Ids64> + Debug + Sync,
+	{
+		self.del_key(key).await
+	}
+}
+
+impl ElementsKv for std::sync::Arc<Transaction> {
+	async fn get_elements<K>(&self, key: &K) -> Result<Option<Ids64>>
+	where
+		K: KVKey<Value = Ids64> + Debug + Sync,
+	{
+		self.as_ref().get_elements(key).await
+	}
+
+	async fn set_elements<K>(&self, key: &K, elements: &Ids64) -> Result<()>
+	where
+		K: KVKey<Value = Ids64> + Debug + Sync,
+	{
+		self.as_ref().set_elements(key, elements).await
+	}
+
+	async fn del_elements<K>(&self, key: &K) -> Result<()>
+	where
+		K: KVKey<Value = Ids64> + Debug + Sync,
+	{
+		self.as_ref().del_elements(key).await
+	}
+}
+
 /// Records that the document addressed by `key` holds a vector in `element`,
 /// writing the entry only when that adds the element.
-pub(crate) async fn link<K>(tx: &Transaction, key: &K, element: ElementId) -> Result<()>
+pub(crate) async fn link<K>(kv: &impl ElementsKv, key: &K, element: ElementId) -> Result<()>
 where
-	K: KVKey<Value = Ids64> + Debug,
+	K: KVKey<Value = Ids64> + Debug + Sync,
 {
-	let mut elements = tx.get_key(key, None).await?.unwrap_or(Ids64::Empty);
+	let mut elements = kv.get_elements(key).await?.unwrap_or(Ids64::Empty);
 	if let Some(grown) = elements.insert(element) {
-		tx.set_key(key, &grown).await?;
+		kv.set_elements(key, &grown).await?;
 	}
 	Ok(())
 }
@@ -48,16 +112,16 @@ where
 /// Records that the document addressed by `key` no longer holds a vector in
 /// `element`, deleting the entry once the document holds none, and writing
 /// nothing when the element was not linked.
-pub(crate) async fn unlink<K>(tx: &Transaction, key: &K, element: ElementId) -> Result<()>
+pub(crate) async fn unlink<K>(kv: &impl ElementsKv, key: &K, element: ElementId) -> Result<()>
 where
-	K: KVKey<Value = Ids64> + Debug,
+	K: KVKey<Value = Ids64> + Debug + Sync,
 {
-	let Some(mut elements) = tx.get_key(key, None).await? else {
+	let Some(mut elements) = kv.get_elements(key).await? else {
 		return Ok(());
 	};
 	match elements.remove(element) {
-		Some(shrunk) if shrunk.is_empty() => tx.del_key(key).await,
-		Some(shrunk) => tx.set_key(key, &shrunk).await,
+		Some(shrunk) if shrunk.is_empty() => kv.del_elements(key).await,
+		Some(shrunk) => kv.set_elements(key, &shrunk).await,
 		None => Ok(()),
 	}
 }
