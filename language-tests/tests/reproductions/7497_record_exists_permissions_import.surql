@@ -1,5 +1,6 @@
 /**
 [test]
+run = false
 reason = "Setup for 7497_record_exists_respects_permissions: a visible and a hidden table, each with a computed field that errors if it is ever derived"
 */
 
