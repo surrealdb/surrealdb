@@ -880,8 +880,8 @@ records:
 { echoed: NONE, id: doc:1, n: 9, open: 1, twice: 18 }
 { echoed: NONE, id: doc:2, n: 9, open: 2, twice: 18, veiled: 'v2' }
 records:
-{ echoed: NONE, id: doc:1, n: 9, open: 1, twice: 18 }
-{ echoed: NONE, id: doc:2, n: 9, open: 2, twice: 18, veiled: 'v2' }
+{ echoed: 's1', id: doc:1, n: 9, open: 1, secret: 's1', twice: 18, veiled: 'v1' }
+{ echoed: 's2', id: doc:2, n: 9, open: 2, secret: 's2', twice: 18, veiled: 'v2' }
 ### record user: CREATE doc:4 CONTENT { id: doc:5 }
 error: Found doc:5 for the `id` field, but a specific record has been specified
 records:

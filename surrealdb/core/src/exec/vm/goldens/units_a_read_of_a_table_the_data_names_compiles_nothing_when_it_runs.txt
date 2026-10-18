@@ -67,7 +67,7 @@ state:
 [{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
 [{ a: 1, id: t:1 }, { a: 1, id: t:9 }]
 ### record user: { CREATE fresh:9 SET a = 1; RETURN SELECT VALUE id FROM type::table(rand::enum('fresh')) }
-error: The table 'fresh' does not exist
+[]
 state:
 [{ id: item:1, n: 1, secret: 's1', tags: [1, 2] }, { id: item:2, n: 2, secret: 's2', tags: [3] }, { hidden: true, id: item:3, n: 3 }]
 [{ a: 1, id: t:1 }]

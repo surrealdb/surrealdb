@@ -3,7 +3,7 @@
 //!
 //! A value in `FROM` ([`Source::Values`]) is evaluated when its pipeline opens
 //! and read as [`ValuesRead`](super::payload::ValuesRead) describes. A record id among the values
-//! is read under the caller's permissions. A table found by a dynamic read is read as
+//! is read under the caller's permissions. A table that is the value is read as
 //! the pipeline takes its rows: storage is asked for no more records than the
 //! pipeline's paging admits, and no more once a limit of the pipeline is
 //! spent. When the program was lowered with the units that read each table its
@@ -12,7 +12,9 @@
 //! A table no unit reads was not in the catalog when the program was lowered. The run
 //! created it by writing to it, so no unit was lowered for it. It is read
 //! by key range, the way a scan reads any table ([`undispatched_table`]).
-//! Nothing is planned or lowered while the program runs.
+//! Nothing is planned or lowered while the program runs. A value a write's
+//! subjects are read from is read as storage holds the records it names, for
+//! the write to judge ([`stored_records`]).
 //!
 //! A statement in `FROM` ([`Source::Nested`]) and a statement in scalar
 //! position ([`BlockInstr::Nested`]) are groups of the program
@@ -45,14 +47,15 @@ use super::ledger::Site;
 use super::membership::Members;
 use super::payload::ValuesRead;
 use super::program::{BlockInstr, HostScalar, Pipeline, Program, Source};
+use crate::exec::fan_out::evaluate_each;
 use crate::exec::operators::fetch::fetch_raw_record;
 use crate::exec::operators::scan::common::resolve_version_stamp;
 use crate::exec::operators::scan::pipeline::kv_scan_stream;
 use crate::exec::operators::scan::resolved::EnforcementMode;
 use crate::exec::operators::scan::{execute_record_lookup, record_key_range};
-use crate::exec::{ExecutionContext, FlowResult, ValueBatchStream};
+use crate::exec::{AccessMode, ExecutionContext, FlowResult, ValueBatchStream};
 use crate::expr::ControlFlow;
-use crate::val::{RecordIdKey, TableName, Value};
+use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
 // How many probes this thread has read the rows of, for tests that must
 // know a probe read its rows once.
@@ -87,7 +90,9 @@ fn note_statement_run(ctx: &ExecutionContext) {
 }
 
 /// Run `pipeline` over the rows of `source`, a value or a statement in
-/// `FROM`. `spent` is whether a limit of the pipeline admits no row. Answers
+/// `FROM`. `spent` is whether a limit of the pipeline admits no row. Under a
+/// write in flight, the rows of a value are the write's subjects: the records
+/// it names are read as storage holds them ([`stored_records`]). Answers
 /// whether the pipeline stopped.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn run_source(
@@ -107,7 +112,11 @@ pub(super) async fn run_source(
 		} => {
 			let zeroed = spent || state.zeroed;
 			let reads = paged_reads(pipeline, state);
-			match values(program, value, *read, zeroed, reads, ctx).await? {
+			// A statement run beneath a write runs with the write set aside
+			// ([`run_group`]), so a write state here is the one this
+			// pipeline's rows are written through.
+			let subjects = state.write.is_some();
+			match values(program, value, *read, zeroed, reads, subjects, ctx).await? {
 				Values::Rows(rows) => {
 					let rows = rows.into_iter().map(|row| (Vec::new(), row)).collect();
 					run_rows(program, pipeline, rows, state, ctx, yielder, flush_at).await
@@ -346,15 +355,19 @@ fn source_value(ran: FlowResult<Value>) -> FlowResult<Value> {
 
 /// The rows `value` yields, read as `read` says; see
 /// [`ValuesRead`](super::payload::ValuesRead). Under `zeroed`, a record id or
-/// table a dynamic read finds reads no record; a table a dynamic read finds
-/// is read `reads` records at a time first, where the pipeline takes no more
-/// ([`paged_reads`]).
+/// table a dynamic read finds, and a record range or table any read finds,
+/// reads no record; such a table is read `reads` records at a time first,
+/// where the pipeline takes no more ([`paged_reads`]). Where `subjects`, the
+/// value is evaluated as `read` says and the records it names are read as
+/// storage holds them ([`stored_records`]), whatever the limit.
+#[allow(clippy::too_many_arguments)]
 async fn values(
 	program: &Program,
 	value: &HostScalar,
 	read: ValuesRead,
 	zeroed: bool,
 	reads: Option<u32>,
+	subjects: bool,
 	ctx: &ExecutionContext,
 ) -> FlowResult<Values> {
 	match read {
@@ -366,6 +379,9 @@ async fn values(
 			let (this, forbidding) = ctx.enclosing_row();
 			let ctx = forbidding.as_ref().unwrap_or(ctx);
 			let value = source_value(host_scalar(program, value, ctx, this).await)?;
+			if subjects {
+				return stored_records(value, written, ctx).await;
+			}
 			let rows = match value {
 				Value::Array(array) => {
 					let mut rows = Vec::with_capacity(array.len());
@@ -378,6 +394,12 @@ async fn values(
 					records_of(ctx, rows).await?
 				}
 				Value::None | Value::Null => Vec::new(),
+				// A record range or a table is a set of records, read as a
+				// dynamic read reads it.
+				Value::RecordId(rid) if rid.key.is_range() => {
+					return found(Value::RecordId(rid), zeroed, reads, ctx).await;
+				}
+				table @ Value::Table(_) => return found(table, zeroed, reads, ctx).await,
 				Value::RecordId(rid) => {
 					match crate::exec::operators::fetch::fetch_record(ctx, &rid).await? {
 						Value::None => Vec::new(),
@@ -419,69 +441,209 @@ async fn values(
 		}
 		ValuesRead::Dynamic => {
 			let value = source_value(host_scalar(program, value, ctx, None).await)?;
-			if let Some(deref) = ctx.vm_deref().cloned()
-				&& reads_through(&deref, &value, ctx).await?
-			{
-				return dispatched(&deref, value, zeroed, reads, ctx).await;
+			if subjects {
+				return stored_records(value, false, ctx).await;
 			}
-			match value {
-				Value::RecordId(rid)
-					if !zeroed
-						&& let Some(view) =
-							own_record(ctx, &rid, resolve_version_stamp(ctx, None).await?)
-								.await? =>
-				{
-					Ok(Values::Rows(view.into_iter().collect()))
-				}
-				Value::RecordId(rid) => {
-					let db_ctx = ctx.database()?;
-					let check_perms = crate::exec::permission::should_check_perms(
-						db_ctx,
-						crate::iam::Action::View,
-					)
-					.map_err(|e| ControlFlow::Err(e.into()))?;
-					let version = resolve_version_stamp(ctx, None).await?;
-					// A zero limit checks the table and its permission and
-					// reads no record.
-					let rows = execute_record_lookup(
-						&rid,
-						version,
-						false,
-						check_perms,
-						None,
-						ctx,
-						None,
-						zeroed.then_some(0),
-						0,
-						EnforcementMode::Runtime,
-					)
-					.await?;
-					Ok(Values::Rows(rows))
-				}
-				Value::Array(array) => Ok(Values::Rows(records_of(ctx, array.0).await?)),
-				Value::Table(table) => {
-					let db_ctx = ctx.database()?;
-					let version = resolve_version_stamp(ctx, None).await?;
-					if absent_and_hidden(ctx, &table, version).await? {
-						return Ok(Values::Rows(Vec::new()));
-					}
-					if db_ctx.get_table_def(&table, version).await?.is_none() {
-						return Err(ControlFlow::Err(anyhow::Error::new(
-							crate::catalog::Error::TbNotFound {
-								name: table,
-							},
-						)));
-					}
-					// A zero limit reads no record once the table is known.
-					if zeroed {
-						return Ok(Values::Rows(Vec::new()));
-					}
-					undispatched_table(ctx, &table, version, reads).await
-				}
-				Value::None | Value::Null => Ok(Values::Rows(Vec::new())),
-				other => Ok(Values::Rows(vec![other])),
-			}
+			found(value, zeroed, reads, ctx).await
 		}
+	}
+}
+
+/// The records `value` names as storage holds them, read as a write's
+/// subjects, which the write's gate judges as it writes each one: no
+/// permission or computed field is applied to them here. A record id, and an
+/// object carrying one as its `id`, is the record stored under that id, and no
+/// row where none is: the object is never taken as the record's image. A
+/// record range or a
+/// table is every record stored in it, in key order, read as the write takes
+/// them, the table required to be defined. An array's elements are the rows,
+/// an element that is an array contributing its elements, one level deep,
+/// where `written`; each record id or object among them is read as one is,
+/// and a range among them names no row, as a read of the array reads none.
+/// `NONE` and `NULL` are no row, and any other value is one row.
+async fn stored_records(value: Value, written: bool, ctx: &ExecutionContext) -> FlowResult<Values> {
+	let version = ctx.version_stamp();
+	let subjects = match value {
+		Value::RecordId(RecordId {
+			table,
+			key: RecordIdKey::Range(range),
+		}) => {
+			require_defined(ctx, &table, version).await?;
+			let scan =
+				crate::exec::operators::write::scan_subjects(ctx, &table, Some(&range)).await?;
+			return Ok(Values::Stream(replayed(scan, &table, version, ctx).await?));
+		}
+		Value::Table(table) => {
+			if absent_and_hidden(ctx, &table, version).await? {
+				return Ok(Values::Rows(Vec::new()));
+			}
+			require_defined(ctx, &table, version).await?;
+			let scan = crate::exec::operators::write::scan_subjects(ctx, &table, None).await?;
+			return Ok(Values::Stream(replayed(scan, &table, version, ctx).await?));
+		}
+		Value::Array(array) => {
+			let mut subjects = Vec::with_capacity(array.len());
+			for value in array {
+				match value {
+					Value::Array(inner) if written => {
+						subjects.extend(inner.into_iter().filter_map(stored_subject))
+					}
+					other => subjects.extend(stored_subject(other)),
+				}
+			}
+			subjects
+		}
+		other => stored_subject(other).into_iter().collect(),
+	};
+	Ok(Values::Rows(stored_rows(ctx, subjects, version).await?))
+}
+
+/// `scan`, the stored records of `table` as
+/// [`scan_subjects`](crate::exec::operators::write::scan_subjects) reads them
+/// at `version`, each brought through the migration steps of `table` it has
+/// not passed, as a scan of the table hands its records on. Its batches carry
+/// each record's stamp, which the replay takes.
+async fn replayed(
+	scan: ValueBatchStream,
+	table: &TableName,
+	version: Option<u64>,
+	ctx: &ExecutionContext,
+) -> FlowResult<ValueBatchStream> {
+	let Some(replay) = crate::exec::migrate::replay_for(ctx, table, version).await? else {
+		return Ok(scan);
+	};
+	let ctx = ctx.clone();
+	Ok(Box::pin(scan.then(move |batch| {
+		let (ctx, replay) = (ctx.clone(), replay.clone());
+		async move {
+			let mut batch = batch?;
+			replay.apply_batch(&ctx, &mut batch).await?;
+			Ok(batch)
+		}
+	})))
+}
+
+/// `value` as one subject of [`stored_records`]: a record id, or the id an
+/// object carries as its `id`, names the record stored under it, so the
+/// object is never taken as the record's image; a range among an array's
+/// elements, `NONE` and `NULL` are none; any other value is itself.
+fn stored_subject(value: Value) -> Option<Value> {
+	match value {
+		Value::None | Value::Null => None,
+		Value::RecordId(rid) if rid.key.is_range() => None,
+		Value::Object(object) => match object.rid() {
+			Some(rid) if rid.key.is_range() => None,
+			Some(rid) => Some(Value::RecordId(rid)),
+			None => Some(Value::Object(object)),
+		},
+		other => Some(other),
+	}
+}
+
+/// `subjects`, each record id among them replaced by the record stored under
+/// it at `version` and dropped where none is. The reads touch storage only,
+/// so they are overlapped as [`evaluate_each`] admits a read-only batch.
+async fn stored_rows(
+	ctx: &ExecutionContext,
+	mut subjects: Vec<Value>,
+	version: Option<u64>,
+) -> FlowResult<Vec<Value>> {
+	let (at, rids): (Vec<usize>, Vec<RecordId>) = subjects
+		.iter()
+		.enumerate()
+		.filter_map(|(at, subject)| match subject {
+			Value::RecordId(rid) => Some((at, rid.clone())),
+			_ => None,
+		})
+		.unzip();
+	if rids.is_empty() {
+		return Ok(subjects);
+	}
+	let stored = evaluate_each(ctx, AccessMode::ReadOnly, &rids, |rid| async move {
+		Ok(fetch_raw_record(ctx, rid, version).await?.unwrap_or(Value::None))
+	})
+	.await?;
+	for (at, record) in at.into_iter().zip(stored) {
+		subjects[at] = record;
+	}
+	subjects.retain(|subject| !matches!(subject, Value::None));
+	Ok(subjects)
+}
+
+/// The rows a read of `value`, a value found when the statement runs, yields:
+/// a record id or range read under the caller's table and field permissions,
+/// checking only its table and permission under `zeroed`, a range read in key
+/// order as the pipeline takes its rows, as a table is; a table read whole
+/// under them, in key order, `reads` records at a time first where the
+/// pipeline takes no more, and not at all under `zeroed` once its existence is
+/// checked; an array's elements as the rows, its records read with the
+/// caller's permissions and computed fields; `NONE` and `NULL` as no row; and
+/// any other value as one row.
+async fn found(
+	value: Value,
+	zeroed: bool,
+	reads: Option<u32>,
+	ctx: &ExecutionContext,
+) -> FlowResult<Values> {
+	if let Some(deref) = ctx.vm_deref().cloned()
+		&& reads_through(&deref, &value, ctx).await?
+	{
+		return dispatched(&deref, value, zeroed, reads, ctx).await;
+	}
+	match value {
+		Value::RecordId(rid)
+			if !zeroed
+				&& let Some(view) =
+					own_record(ctx, &rid, resolve_version_stamp(ctx, None).await?).await? =>
+		{
+			Ok(Values::Rows(view.into_iter().collect()))
+		}
+		Value::RecordId(rid) => {
+			let db_ctx = ctx.database()?;
+			let version = resolve_version_stamp(ctx, None).await?;
+			require_defined(ctx, &rid.table, version).await?;
+			// A range no unit of the program holds is read as the pipeline
+			// takes its rows, as such a table is.
+			if let RecordIdKey::Range(range) = &rid.key
+				&& !zeroed && !ctx.vm_deref().is_some_and(|deref| deref.holds(&rid.table))
+			{
+				return undispatched_table(ctx, &rid.table, Some(range), version, reads).await;
+			}
+			let check_perms =
+				crate::exec::permission::should_check_perms(db_ctx, crate::iam::Action::View)
+					.map_err(|e| ControlFlow::Err(e.into()))?;
+			// A zero limit checks the table and its permission and
+			// reads no record.
+			let rows = execute_record_lookup(
+				&rid,
+				version,
+				false,
+				check_perms,
+				None,
+				ctx,
+				None,
+				zeroed.then_some(0),
+				0,
+				EnforcementMode::Runtime,
+			)
+			.await?;
+			Ok(Values::Rows(rows))
+		}
+		Value::Array(array) => Ok(Values::Rows(records_of(ctx, array.0).await?)),
+		Value::Table(table) => {
+			let version = resolve_version_stamp(ctx, None).await?;
+			if absent_and_hidden(ctx, &table, version).await? {
+				return Ok(Values::Rows(Vec::new()));
+			}
+			require_defined(ctx, &table, version).await?;
+			// A zero limit reads no record once the table is known.
+			if zeroed {
+				return Ok(Values::Rows(Vec::new()));
+			}
+			undispatched_table(ctx, &table, None, version, reads).await
+		}
+		Value::None | Value::Null => Ok(Values::Rows(Vec::new())),
+		other => Ok(Values::Rows(vec![other])),
 	}
 }
 
@@ -529,7 +691,8 @@ async fn own_record(
 /// known to exist. A table is read by its unit with the same paging as a
 /// table named in the text: the unit asks storage for no more than `reads`
 /// records before it hands its rows on, and no more once the pipeline stops
-/// taking rows.
+/// taking rows. A range is read in key order the same way, each record handed
+/// to its table's unit as storage returns it.
 async fn dispatched(
 	deref: &Arc<super::Deref>,
 	value: Value,
@@ -555,6 +718,9 @@ async fn dispatched(
 						&rid.table,
 						range,
 					)?;
+					// The range is read as the pipeline takes its rows, as a
+					// table is: no more records asked of storage first than
+					// its paging admits.
 					let txn = ctx.txn();
 					let (ns, db) = (db_ctx.ns_ctx.ns.namespace_id, db_ctx.db.database_id);
 					let epoch = txn.layout_epoch();
@@ -566,7 +732,7 @@ async fn dispatched(
 					let gate =
 						crate::kvs::RowGate::new(layouts, ns, db, &rid.table, version, epoch)
 							.map_err(ControlFlow::Err)?;
-					let mut source = kv_scan_stream(
+					let source = kv_scan_stream(
 						txn,
 						range,
 						gate,
@@ -574,27 +740,32 @@ async fn dispatched(
 						None,
 						crate::kvs::Direction::Forward,
 						0,
-						None,
+						reads,
 						None,
 						None,
 						replay.clone(),
 					);
-					while let Some(batch) = source.next().await {
-						let mut batch = batch?;
-						if let Some(replay) = &replay {
-							replay.apply_batch(ctx, &mut batch).await?;
-						}
-						for raw in batch.into_values() {
-							super::fuel::tick(ctx, 1).await?;
-							match deref
-								.read(ctx, &rid.table, raw, ctx.root().skip_fetch_perms)
-								.await?
-							{
-								Value::None => {}
-								row => rows.push(row),
+					let (deref, ctx, table) = (Arc::clone(deref), ctx.clone(), rid.table.clone());
+					let unchecked = ctx.root().skip_fetch_perms;
+					return Ok(Values::Stream(Box::pin(source.then(move |batch| {
+						let (deref, ctx, table, replay) =
+							(Arc::clone(&deref), ctx.clone(), table.clone(), replay.clone());
+						async move {
+							let mut batch = batch?;
+							if let Some(replay) = &replay {
+								replay.apply_batch(&ctx, &mut batch).await?;
 							}
+							let mut rows = Vec::new();
+							for raw in batch.into_values() {
+								super::fuel::tick(&ctx, 1).await?;
+								match deref.read(&ctx, &table, raw, unchecked).await? {
+									Value::None => {}
+									row => rows.push(row),
+								}
+							}
+							Ok(crate::exec::ValueBatch::from(rows))
 						}
-					}
+					}))));
 				}
 				_ if let Some(view) = own_record(ctx, &rid, version).await? => rows.extend(view),
 				_ => {
@@ -654,7 +825,10 @@ async fn require_defined(
 	table: &TableName,
 	version: Option<u64>,
 ) -> FlowResult<()> {
-	if ctx.database()?.get_table_def(table, version).await?.is_none() {
+	// An absence the execution's catalog cache holds is read again before it
+	// is believed: a block that defined the table by writing to it after an
+	// earlier read cached its absence leaves the cache behind the catalog.
+	if ctx.database()?.table_is_undefined(table, version).await? {
 		return Err(ControlFlow::Err(anyhow::Error::new(crate::catalog::Error::TbNotFound {
 			name: table.clone(),
 		})));
@@ -690,9 +864,11 @@ async fn records_of(ctx: &ExecutionContext, mut values: Vec<Value>) -> FlowResul
 /// table that the program's own units read in another frame is an internal
 /// error, and so is a lightweight relation, which keeps no records to scan.
 /// Storage is asked for no more than `reads` records first, and the pipeline takes no more.
+/// Where `range` is given, only the records of the table in that key range are read.
 async fn undispatched_table(
 	ctx: &ExecutionContext,
 	table: &TableName,
+	range: Option<&crate::val::RecordIdKeyRange>,
 	version: Option<u64>,
 	reads: Option<u32>,
 ) -> FlowResult<Values> {
@@ -729,12 +905,15 @@ async fn undispatched_table(
 			crate::catalog::Permission::Full => true,
 			crate::catalog::Permission::Specific(_) => ctx.root().skip_fetch_perms,
 		};
-	let range = crate::key::schema::RecordPrefix {
-		ns,
-		db,
-		tb: std::borrow::Cow::Borrowed(table),
-	}
-	.range()?;
+	let range = match range {
+		Some(range) => record_key_range(ns, db, table, range)?,
+		None => crate::key::schema::RecordPrefix {
+			ns,
+			db,
+			tb: std::borrow::Cow::Borrowed(table),
+		}
+		.range()?,
+	};
 	let records = kv_scan_stream(
 		ctx.txn(),
 		range,

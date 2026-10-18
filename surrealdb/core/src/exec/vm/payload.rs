@@ -429,7 +429,9 @@ pub(crate) enum CountSelect {
 	Conditional,
 }
 
-/// How a `phys.values` reads the value it evaluates.
+/// How a `phys.values` reads the value it evaluates. Beneath a write, the
+/// value is evaluated as each variant says and the records it names are read as
+/// storage holds them, for the write to judge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ValuesRead {
 	/// A value or mock written in `FROM`, or an expression other than a
@@ -439,7 +441,8 @@ pub(crate) enum ValuesRead {
 	/// says the array is written in `FROM` — and any other value is one row.
 	/// `NONE` and `NULL` are no row; a record id is the record it names, read
 	/// with the caller's permissions and computed fields, and no row where no
-	/// record answers. A zero limit reads as any other.
+	/// record answers, whatever the limit. A record range or a table the
+	/// expression evaluates to is read as [`Self::Dynamic`] reads it.
 	Expression {
 		written: bool,
 	},
