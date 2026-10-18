@@ -162,17 +162,30 @@ impl Operation {
 	}
 
 	/// Converts a value to a JSON path.
+	///
+	/// The value is an RFC 6901 JSON Pointer: reference tokens are separated by
+	/// `/` and `~1` and `~0` stand for a literal `/` and `~` inside a token.
+	/// Any other character, `.` included, is part of the token it appears in.
 	fn value_to_jsonpath(val: &Value) -> Vec<Strand> {
 		// Per RFC 6901, an empty JSON Pointer ("") refers to the root document.
 		// Splitting an empty string would produce `[Strand("")]` rather than the
 		// empty `Vec` round-trip target of `path_to_jsonpath(&[])`.
 		let raw = val.to_raw_string();
-		let trimmed = raw.trim_start_matches('/');
-		if trimmed.is_empty() {
-			Vec::new()
-		} else {
-			trimmed.split(&['.', '/']).map(Strand::from).collect()
+		if raw.is_empty() {
+			return Vec::new();
 		}
+		// A pointer that omits its leading `/` is read as if it had one.
+		let tokens = raw.strip_prefix('/').unwrap_or(&raw);
+		tokens
+			.split('/')
+			.map(|token| {
+				if token.contains('~') {
+					Strand::from(unescape_pointer_token(token))
+				} else {
+					Strand::from(token)
+				}
+			})
+			.collect()
 	}
 
 	/// Converts the operation to a JSON patch object.
@@ -182,7 +195,7 @@ impl Operation {
 			let mut res = String::with_capacity(p.len() + p.iter().map(|x| x.len()).sum::<usize>());
 			for p in p {
 				res.push('/');
-				res.push_str(p.as_str());
+				escape_pointer_token(p.as_str(), &mut res);
 			}
 			res.into()
 		}
@@ -370,6 +383,29 @@ impl ToSql for Operation {
 	}
 }
 
+/// Decodes one RFC 6901 reference token: `~1` is `/` and `~0` is `~`.
+///
+/// `~1` is decoded before `~0` so that `~01` yields `~1` rather than `/`.
+/// A `~` followed by anything else is not an escape and is kept as written.
+fn unescape_pointer_token(token: &str) -> String {
+	token.replace("~1", "/").replace("~0", "~")
+}
+
+/// Appends `token` to `out` as an RFC 6901 reference token.
+fn escape_pointer_token(token: &str, out: &mut String) {
+	if !token.contains(['~', '/']) {
+		out.push_str(token);
+		return;
+	}
+	for c in token.chars() {
+		match c {
+			'~' => out.push_str("~0"),
+			'/' => out.push_str("~1"),
+			c => out.push(c),
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -413,6 +449,35 @@ mod tests {
 		roundtrip(&Operation::Test {
 			path,
 			value,
+		});
+	}
+
+	/// A reference token is one path element whatever characters it holds: `~1`
+	/// and `~0` decode to `/` and `~`, and `.` is an ordinary character.
+	#[test]
+	fn pointer_tokens_follow_rfc_6901() {
+		let path_of = |pointer: &str| Operation::value_to_jsonpath(&Value::from(pointer));
+		let strands = |tokens: &[&str]| tokens.iter().map(|t| Strand::from(*t)).collect::<Vec<_>>();
+
+		assert_eq!(path_of(""), strands(&[]));
+		assert_eq!(path_of("/"), strands(&[""]));
+		assert_eq!(path_of("/foo/0"), strands(&["foo", "0"]));
+		assert_eq!(path_of("/a~1b"), strands(&["a/b"]));
+		assert_eq!(path_of("/m~0n"), strands(&["m~n"]));
+		assert_eq!(path_of("/~01"), strands(&["~1"]));
+		assert_eq!(path_of("/a.b"), strands(&["a.b"]));
+		assert_eq!(path_of("/c%d/e^f/ /k\"l"), strands(&["c%d", "e^f", " ", "k\"l"]));
+	}
+
+	/// A key holding `/`, `~` or `.` survives a trip through the patch object
+	/// form, which is also the form a diff of such a document is emitted in.
+	#[test]
+	fn round_trip_path_tokens_needing_escapes() {
+		let path: Vec<Strand> =
+			vec!["a/b".into(), "m~n".into(), "~1".into(), "x.y".into(), "".into()];
+		roundtrip(&Operation::Replace {
+			path,
+			value: Value::Bool(true),
 		});
 	}
 
