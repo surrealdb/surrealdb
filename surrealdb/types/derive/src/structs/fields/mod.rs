@@ -412,7 +412,7 @@ impl Fields {
 						tag,
 						variant,
 					} => With::Map(quote! {{
-						if map.get(#tag).is_some_and(|v| v == Value::String(#variant.to_string())) {
+						if map.get(#tag).is_some_and(|v| v == #value_ty::String(#variant.to_string())) {
 							#(#map_retrievals)*
 							#final_ok
 						}
@@ -426,7 +426,7 @@ impl Fields {
 						if skip_content.is_some() {
 							let default_inits = fields.default_initializers();
 							With::Map(quote! {{
-								if map.get(#tag).is_some_and(|v| v == Value::String(#variant.to_string())) {
+								if map.get(#tag).is_some_and(|v| v == #value_ty::String(#variant.to_string())) {
 									match map.remove(#content) {
 										Some(#value_ty::Object(mut map)) => {
 											#(#map_retrievals)*
@@ -447,7 +447,7 @@ impl Fields {
 							}})
 						} else {
 							With::Map(quote! {{
-								if map.get(#tag).is_some_and(|v| v == Value::String(#variant.to_string())) {
+								if map.get(#tag).is_some_and(|v| v == #value_ty::String(#variant.to_string())) {
 									if let Some(#value_ty::Object(mut map)) = map.remove(#content) {
 										#(#map_retrievals)*
 										#final_ok
