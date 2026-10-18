@@ -3658,16 +3658,25 @@ pub(super) fn run_row<'r>(
 			} => {
 				let value = read_value(regs, *value)?;
 				if let Some(groups) = state.groups[*aggregate as usize].as_mut() {
-					let mut grew = 0;
-					if let Some(accumulator) = groups.accumulator(*field as usize, *agg as usize) {
-						if accumulator.holds_inputs() {
-							grew = crate::exec::memory::size::value_bytes(&value);
+					// A morsel that leaves the fold of this accumulator to the merge keeps the
+					// value.
+					if let Some(value) = groups.log(*field as usize, *agg as usize, value)? {
+						let mut grew = 0;
+						if let Some(accumulator) =
+							groups.accumulator(*field as usize, *agg as usize)
+						{
+							if accumulator.holds_inputs() {
+								grew = crate::exec::memory::size::value_bytes(&value);
+							}
+							if let Err(e) = accumulator.update(value) {
+								tracing::debug!(
+									error = %e,
+									"Accumulator update failed, skipping value"
+								);
+							}
 						}
-						if let Err(e) = accumulator.update(value) {
-							tracing::debug!(error = %e, "Accumulator update failed, skipping value");
-						}
+						groups.grew(grew);
 					}
-					groups.grew(grew);
 				}
 				pc += 1;
 			}

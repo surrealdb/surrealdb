@@ -56,14 +56,10 @@ use crate::exec::ir::iface::{
 	ApplyCut, BarrierCause, Estimate as PlanEstimate, Exit, LoopFacts, LoopMode, LoopRefusal,
 };
 use crate::exec::ir::phys::ops::Batch;
+use crate::exec::ir::phys::write_cut::WriteCut;
 use crate::exec::logical::pipelines::{
-	AggregateCombine, ChainRefusal, Legality, SinkCombine, SourceSplit, StatementLegality,
+	AggregateCombine, Arrival, ChainRefusal, Legality, SinkCombine, SourceSplit, StatementLegality,
 };
-
-/// Whether a write loop's iterations may run as morsels on workers, their effects applied in
-/// iteration order afterwards. While `false`, [`Policy::judge_loop`] refuses every loop whose apply
-/// is ordered, and no write pipeline is placed as morsels.
-pub(crate) const WRITE_FANOUT_WORKERS: bool = false;
 
 /// The reason a loop that exits in iteration order runs serially.
 const ORDERED_EXIT: &str = "the loop exits in iteration order";
@@ -105,6 +101,64 @@ pub(crate) struct MorselPlan {
 	/// raise for any row: the serial scan over stored bytes runs every entry, so an entry the
 	/// threshold rejects must have no failure to raise.
 	pub(crate) prunes: bool,
+	/// In what order the merge takes the morsels' results.
+	pub(crate) merge: MergeOrder,
+	/// The places, among the calls of the aggregate's functions in the order its fields name
+	/// them, of the accumulators whose morsels keep the numbers their rows hand over instead of
+	/// folding them, for the merge to fold in the order of the serial run; empty when no morsel
+	/// keeps any. Not empty only with [`MergeOrder::Serial`].
+	pub(crate) ordered_fold: Vec<usize>,
+}
+
+/// In what order the merge of a pipeline's morsels takes their results, from the weakest to the
+/// strongest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum MergeOrder {
+	/// In the order of the serial run's input: the morsel at the front first, however long it
+	/// takes, and every other morsel holds its output until the front has merged.
+	Serial,
+	/// The sorted runs of a sort that keeps every row are taken as the morsels finish and kept at
+	/// their positions in the input, which is where its ties are defined, until the morsels before
+	/// them have merged: the sort then takes them in the order of the serial run. A run held in
+	/// memory takes no place of the morsels the policy lets be in flight, so a slow morsel at the
+	/// front does not stop the morsels after it. Chosen only for a [`Combine::StableMerge`]
+	/// pipeline over a key range whose logical plan states [`Arrival::Positioned`].
+	Positioned,
+	/// The partial groups of an aggregate are taken as the morsels finish, and those of morsels
+	/// next to one another in the input are combined, the earlier before the later, before the
+	/// first of them is next to the groups the statement holds. Chosen only for a
+	/// [`Combine::Aggregate`] pipeline whose logical plan states [`Arrival::Adjacent`] or
+	/// [`Arrival::Free`].
+	Adjacent,
+	/// As the morsels finish: no morsel waits for another to be merged. The rows of the
+	/// statement's output reach the reader in no order the plan promises, and the partial counts
+	/// of an aggregate add in whatever order they are taken. Chosen only for a pipeline whose
+	/// logical plan states [`Arrival::Free`].
+	Free,
+}
+
+impl MergeOrder {
+	/// The arrival the logical plan must state for the merge to take results in this order.
+	pub(crate) fn as_arrival(self) -> Arrival {
+		match self {
+			Self::Serial => Arrival::Serial,
+			Self::Positioned => Arrival::Positioned,
+			Self::Adjacent => Arrival::Adjacent,
+			Self::Free => Arrival::Free,
+		}
+	}
+
+	/// Whether a merge in this order is one the merge of `combine` has a meaning for: a sort
+	/// positions runs, an aggregate combines adjacent partial states, a concatenation of rows is
+	/// free where no reader sees their order, and no other combine takes its morsels out of order.
+	pub(crate) fn fits(self, combine: Combine) -> bool {
+		match self {
+			Self::Serial => true,
+			Self::Positioned => combine == Combine::StableMerge,
+			Self::Adjacent => combine == Combine::Aggregate,
+			Self::Free => matches!(combine, Combine::Concat | Combine::Aggregate),
+		}
+	}
 }
 
 /// Where a morsel's rows come from.
@@ -121,7 +175,8 @@ pub(crate) enum MorselInput {
 /// How the results of a pipeline's morsels combine at its sink.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Combine {
-	/// The statement's output: the morsels' rows concatenated in order.
+	/// The statement's output: the morsels' rows concatenated, in the order of the serial run or,
+	/// where the merge order is [`MergeOrder::Free`], in the order the morsels finish.
 	Concat,
 	/// A sort that keeps every row: the morsels' entries in order, merged stably.
 	StableMerge,
@@ -132,6 +187,9 @@ pub(crate) enum Combine {
 	/// The statement's output, whose rows pass through one distinct set: each morsel keeps the
 	/// first occurrence of each row it runs, and the merge keeps the first of the morsels'.
 	Distinct,
+	/// A write over rows: each morsel computes its records' images ahead of the write loop's cut,
+	/// and the statement's task applies them in the order of the serial run.
+	OrderedApply,
 }
 
 impl Combine {
@@ -144,6 +202,7 @@ impl Combine {
 			Self::TopK => SinkCombine::TopK,
 			Self::Aggregate => SinkCombine::Aggregate(Vec::new()),
 			Self::Distinct => SinkCombine::Distinct,
+			Self::OrderedApply => SinkCombine::OrderedApply,
 		}
 	}
 }
@@ -173,8 +232,14 @@ pub(crate) enum Decision {
 
 impl Decision {
 	/// The decision as bytecode, the paging clause being slot `limit` of the program. `None` when
-	/// the decision pages and no slot is given.
-	pub(crate) fn to_parallel(self, limit: Option<u16>) -> Option<Parallel> {
+	/// the decision pages and no slot is given. The merge takes the morsels' results in `merge`,
+	/// and folds the terms the morsels keep for the accumulators at `ordered_fold` in order.
+	pub(crate) fn to_parallel(
+		self,
+		limit: Option<u16>,
+		merge: MergeOrder,
+		ordered_fold: Vec<usize>,
+	) -> Option<Parallel> {
 		match self {
 			Self::Serial => Some(Parallel::Serial),
 			Self::Morsels {
@@ -191,6 +256,8 @@ impl Decision {
 					(true, None) => return None,
 				},
 				prunes,
+				merge,
+				ordered_fold,
 			})),
 		}
 	}
@@ -214,6 +281,9 @@ pub(crate) enum SourceKind {
 	LightweightEdges,
 	/// A union every member of which is a storage source.
 	Union,
+	/// The ids of a range that a write's one mock names: the coordinator generates them in order
+	/// and reads no stored record for them.
+	Mock,
 	/// Every other source: values, a statement, a sorted or grouped input, a split, a join, a
 	/// count, a write's targets, a once-evaluated input.
 	Other,
@@ -240,7 +310,8 @@ impl SourceKind {
 			| Self::FullText
 			| Self::Knn
 			| Self::LightweightEdges
-			| Self::Union => SourceSplit::Ordinal,
+			| Self::Union
+			| Self::Mock => SourceSplit::Ordinal,
 			Self::Other => SourceSplit::Whole,
 		}
 	}
@@ -343,7 +414,10 @@ pub(crate) struct Signals {
 	/// values they held.
 	pub(crate) visited: u64,
 	pub(crate) visited_bytes: u64,
-	/// What is left of the range being run, when the statistics know it; `None` otherwise.
+	/// Whether the transaction gives workers no read view, so that no worker can read a morsel.
+	pub(crate) no_view: bool,
+	/// What is left of the range being run, when the coordinator has measured it from the
+	/// entries it has read; `None` otherwise.
 	pub(crate) remaining_estimate: Option<Estimate>,
 	/// The places of the node's worker pool the statement holds.
 	pub(crate) places_held: usize,
@@ -390,6 +464,8 @@ pub(crate) struct Policy {
 	place_quantum: u32,
 	/// `EXPLAIN ANALYZE` renders the morsel counters.
 	explain_analyze: bool,
+	/// Whether a range is cut only where workers can read the parts through a read view.
+	needs_view: bool,
 }
 
 impl Policy {
@@ -404,7 +480,19 @@ impl Policy {
 			steal_always: config.morsel_steal_always,
 			place_quantum: config.morsel_place_quantum,
 			explain_analyze: config.morsel_explain_analyze,
+			needs_view: config.morsel_needs_view,
 		}
+	}
+
+	/// Whether a range is cut only where workers can read its parts through a read view.
+	pub(crate) fn needs_view(self) -> bool {
+		self.needs_view
+	}
+
+	/// Whether the policy ever cuts a range or hands a batch to a worker: `false` for a split
+	/// threshold of `usize::MAX`, which keeps every row on the statement's task.
+	pub(crate) fn may_split_at_all(self) -> bool {
+		self.split_rows != usize::MAX
 	}
 
 	/// The decision for a pipeline outside a loop, and for a pipeline that runs serially the
@@ -433,6 +521,12 @@ impl Policy {
 		}
 		if !sink_combines(legality) {
 			return Err("the sink does not combine");
+		}
+		// The answer of a split run must equal the serial fold bit for bit, and a float fold's
+		// low bits depend on how its terms are grouped: a split run folds them only where the
+		// morsels keep the terms for the merge to fold in the order of the serial run.
+		if facts.sink == SinkKind::Aggregate && folds_floats(legality) && !legality.ordered_fold {
+			return Err("a float fold depends on how its terms are grouped");
 		}
 		if facts.binds_row {
 			return Err("a binding step replaces the row");
@@ -492,30 +586,119 @@ impl Policy {
 		})
 	}
 
+	/// The order in which the merge of `decision`'s morsels takes their results: the weakest of
+	/// what the logical plan states ([`Legality::arrival`]) and what the merge of the decision's
+	/// combine can do without a reader seeing a difference. The concatenation of a statement's
+	/// output that no paging counts takes results as the morsels finish where the plan states them
+	/// free; a sort that keeps every row over a key range keeps the runs it takes at their
+	/// positions; an aggregate combines the partial states of morsels that lie next to one another,
+	/// or adds counts in any order where the plan states them free. Every other combine merges in
+	/// the order of the serial run, which is the order a top-k's ties, a distinct set's first
+	/// occurrences and an ordered apply are defined in. A body whose morsels read batches of rows
+	/// the coordinator hands on merges batches whole and in order, except for the output and the
+	/// counts that take them free.
+	pub(crate) fn merge_order(
+		legality: &Legality,
+		facts: &PhysicalFacts,
+		decision: Decision,
+	) -> MergeOrder {
+		let Decision::Morsels {
+			input,
+			combine,
+			paged: false,
+			..
+		} = decision
+		else {
+			return MergeOrder::Serial;
+		};
+		let aggregates = matches!(legality.sink, SinkCombine::Aggregate(_));
+		let picked = match combine {
+			Combine::Concat if facts.output && legality.arrival == Arrival::Free => {
+				MergeOrder::Free
+			}
+			Combine::Aggregate if aggregates && legality.arrival == Arrival::Free => {
+				MergeOrder::Free
+			}
+			Combine::Aggregate
+				if aggregates
+					&& legality.arrival >= Arrival::Adjacent
+					&& input == MorselInput::Range =>
+			{
+				MergeOrder::Adjacent
+			}
+			Combine::StableMerge
+				if legality.sink == SinkCombine::StableMerge
+					&& legality.arrival >= Arrival::Positioned
+					&& input == MorselInput::Range =>
+			{
+				MergeOrder::Positioned
+			}
+			_ => MergeOrder::Serial,
+		};
+		debug_assert!(picked.fits(combine));
+		picked
+	}
+
+	/// The places of the accumulators whose terms the morsels of `decision` keep for the merge to
+	/// fold in the order of the serial run: for an aggregate of morsels whose merge takes them in
+	/// the order of the serial run, and whose logical plan states its float folds may be replayed
+	/// ([`Legality::ordered_fold`]), each accumulator that folds inexact floats, by its place
+	/// among the aggregate's calls. Empty for any other pipeline.
+	pub(crate) fn ordered_fold(
+		legality: &Legality,
+		decision: Decision,
+		merge: MergeOrder,
+	) -> Vec<usize> {
+		let SinkCombine::Aggregate(combines) = &legality.sink else {
+			return Vec::new();
+		};
+		if !matches!(
+			decision,
+			Decision::Morsels {
+				combine: Combine::Aggregate,
+				..
+			}
+		) || !legality.ordered_fold
+			|| merge != MergeOrder::Serial
+		{
+			return Vec::new();
+		}
+		combines
+			.iter()
+			.enumerate()
+			.filter(|(_, combine)| **combine == AggregateCombine::InexactFloat)
+			.map(|(place, _)| place)
+			.collect()
+	}
+
 	/// The decision for a pipeline in a loop: [`Decision::Serial`] where the loop refuses.
+	/// `write_cut` is the cut of the iterations of a write loop, where it has one.
 	#[allow(dead_code)]
 	pub(crate) fn plan_loop(
 		legality: &Legality,
 		statement: StatementLegality,
 		loop_facts: &LoopFacts,
 		facts: &PhysicalFacts,
+		write_cut: Result<&WriteCut, &'static str>,
 	) -> Decision {
-		Self::judge_loop(legality, statement, loop_facts, facts).unwrap_or(Decision::Serial)
+		Self::judge_loop(legality, statement, loop_facts, facts, write_cut)
+			.unwrap_or(Decision::Serial)
 	}
 
 	/// [`Self::plan_loop`], and for a pipeline that runs serially the reason.
 	///
 	/// The loop's verdict narrows the pipeline's own judgement and never widens it. In order: a
 	/// loop whose mode is serial answers the reason analysis gave; a loop that may exit in
-	/// iteration order runs serially, since a part would run iterations past the exit; a loop
-	/// whose apply is ordered runs serially while [`WRITE_FANOUT_WORKERS`] is `false`. A loop that
-	/// passes all three is judged as [`Self::judge`] judges a pipeline outside a loop.
+	/// iteration order runs serially, since a part would run iterations past the exit; a loop whose
+	/// apply is ordered is judged by [`Self::judge_write`]. Any other loop is judged as
+	/// [`Self::judge`] judges a pipeline outside a loop.
 	#[allow(dead_code)]
 	pub(crate) fn judge_loop(
 		legality: &Legality,
 		statement: StatementLegality,
 		loop_facts: &LoopFacts,
 		facts: &PhysicalFacts,
+		write_cut: Result<&WriteCut, &'static str>,
 	) -> Result<Decision, &'static str> {
 		if let LoopMode::Serial(refusal) = &loop_facts.mode {
 			return Err(loop_refusal_reason(*refusal));
@@ -523,10 +706,74 @@ impl Policy {
 		if matches!(loop_facts.exit, Exit::Ordered(_)) {
 			return Err(ORDERED_EXIT);
 		}
-		if loop_facts.apply == ApplyCut::Ordered && !WRITE_FANOUT_WORKERS {
-			return Err("write fan-out is not enabled");
+		if loop_facts.apply == ApplyCut::Ordered {
+			return Self::judge_write(legality, statement, facts, write_cut);
 		}
 		Self::judge(legality, statement, facts)
+	}
+
+	/// The decision for the pipeline of a write loop whose apply is ordered: the iterations'
+	/// compute halves run as morsels over batches of the rows the coordinator reads, and their
+	/// effects are applied by the statement's task in iteration order.
+	///
+	/// In order: the statement refuses nothing but what its own write is; the logical plan states
+	/// an ordered apply that may split; the sink is the write; the rows are not put through
+	/// enforcement; the source is a table scan or the ids of a range the coordinator generates (a
+	/// read of one record has no second batch to hand on, and an index is written by the body's
+	/// own maintenance, so its entries may move under the scan); the write does not page in the
+	/// loop; what its expressions nest only reads, afresh for each row; its body holds no block
+	/// construct; it reads no record each row names; the write has a cut and its compute half
+	/// reads no stored data, which the statement's transaction holds while the apply half writes
+	/// it.
+	pub(crate) fn judge_write(
+		legality: &Legality,
+		statement: StatementLegality,
+		facts: &PhysicalFacts,
+		write_cut: Result<&WriteCut, &'static str>,
+	) -> Result<Decision, &'static str> {
+		if let Some(refusal) = statement.refusal {
+			return Err(chain_refusal_reason(refusal));
+		}
+		if !legality.may_split() || legality.sink != SinkCombine::OrderedApply {
+			return Err("the logical plan does not allow the writes to apply in order");
+		}
+		if facts.sink != SinkKind::Write {
+			return Err("the pipeline's sink is not the write");
+		}
+		if facts.enforce {
+			return Err("rows are put through enforcement");
+		}
+		if facts.source == SourceKind::Record {
+			return Err("the write reads one record, which leaves no second batch to hand on");
+		}
+		if !matches!(facts.source, SourceKind::Scan | SourceKind::Mock) {
+			return Err("the write reads its rows through an access path its own writes may move");
+		}
+		if facts.limits != 0 {
+			return Err("the write pages its rows in the loop");
+		}
+		if !matches!(facts.nested, NestedUse::None | NestedUse::PerRowReadOnly) {
+			return Err("a nested statement is evaluated once, probed, or writes");
+		}
+		if facts.host_blocks {
+			return Err("an expression holds a block construct");
+		}
+		if facts.fetches_row {
+			return Err("the body reads the record each row names");
+		}
+		if facts.binds_row {
+			return Err("a binding step replaces the row");
+		}
+		let cut = write_cut?;
+		if cut.compute_reads_data {
+			return Err("the compute half reads stored data");
+		}
+		Ok(Decision::Morsels {
+			input: MorselInput::Batches,
+			combine: Combine::OrderedApply,
+			paged: false,
+			prunes: false,
+		})
 	}
 
 	/// The bounds of one batch of a loop: the iterations a fan-out batch holds and the bytes of
@@ -552,32 +799,67 @@ impl Policy {
 		1
 	}
 
-	/// Run time: what to do with the remainder of the range the coordinator is running, once it
-	/// has read `signals.visited` entries of it: cut it into morsels when the coordinator has read
-	/// as many as the split threshold, unless a reader that takes few rows is still waiting for
-	/// the first.
-	pub(crate) fn split(self, signals: &Signals) -> Split {
+	/// Run time: whether the coordinator running a range, having read `signals.visited` entries of
+	/// it, has the gates of a split open: it has read as many entries as the split threshold, no
+	/// reader that takes few rows is waiting for the first, the paging does not need fewer rows
+	/// than that, and the transaction gives workers a read view where the policy needs one.
+	/// [`Self::split`] answers the cut, from what [`Signals::remaining_estimate`] says is left.
+	pub(crate) fn may_split(self, signals: &Signals) -> bool {
 		if self.split_rows == usize::MAX
 			|| signals.visited < self.split_rows as u64
 			|| signals.scan_hint.is_some()
+			|| (self.needs_view && signals.no_view)
 		{
-			return Split::Whole;
+			return false;
 		}
 		// A paging that needs few more rows is reached by the coordinator before morsels
 		// would repay their cost.
-		if signals.paged
-			&& let Some(remaining) = signals.remaining
-			&& signals.skip.saturating_add(remaining) < self.split_rows
-		{
+		!(signals.paged
+			&& signals
+				.remaining
+				.is_some_and(|remaining| signals.skip.saturating_add(remaining) < self.split_rows))
+	}
+
+	/// Run time: what to do with the remainder of the range the coordinator is running, once
+	/// [`Self::may_split`] holds.
+	///
+	/// With the entries and bytes the coordinator has measured the remainder to hold
+	/// (`signals.remaining_estimate`), the remainder is cut into as many morsels as it fills of
+	/// the target size, no more than it has entries, and kept whole when that is fewer than two:
+	/// a scan that ends within a morsel of where it stands costs more split than it saves. With no
+	/// measure, the datastore sizes the parts from its own estimate, a morsel being no smaller
+	/// than an entry.
+	pub(crate) fn split(self, signals: &Signals) -> Split {
+		if !self.may_split(signals) {
 			return Split::Whole;
 		}
-		// A morsel is no smaller than an entry: a target below the entries seen cuts one entry
-		// a morsel.
 		let entry = signals.visited_bytes.checked_div(signals.visited).unwrap_or(1).max(1);
-		Split::Split {
-			target: SplitTarget::Bytes((self.target_bytes as u64).max(entry)),
+		let target = (self.target_bytes as u64).max(entry);
+		match signals.remaining_estimate {
+			None => Split::Split {
+				target: SplitTarget::Bytes(target),
+			},
+			Some(left) => {
+				let parts = left
+					.bytes
+					.div_ceil(target)
+					.min(left.keys)
+					.min(u64::from(surrealdb_kvs::split::MAX_SPLIT_PARTS));
+				if parts < 2 {
+					Split::Whole
+				} else {
+					Split::Split {
+						target: SplitTarget::Parts(parts as u32),
+					}
+				}
+			}
 		}
 	}
+
+	/// The entries a coordinator must have read before its measure of what is left of a range
+	/// is worth more than the datastore's estimate: a few entries say nothing of how the keys
+	/// lie.
+	pub(crate) const MEASURED_FROM: u64 = 64;
 
 	/// Run time: the entries the coordinator reads in its next chunk of a range, no more than
 	/// `most`: no more than it takes to reach the split threshold while the range is whole.
@@ -824,14 +1106,19 @@ fn loop_refusal_reason(refusal: LoopRefusal) -> &'static str {
 			BarrierCause::UnpinnedDynamicTarget => "the loop body writes a target no fact pins",
 		},
 		LoopRefusal::NoCombine => "the loop's sink has no combine",
+		LoopRefusal::SourceWritten => {
+			"the loop body, or the code its table stores, may write a record of the table its source reads at another key"
+		}
 		LoopRefusal::MayRepeatWrite => "two iterations may write one key",
 	}
 }
 
 /// Whether the sink of `legality` combines the partial results of morsels: not a sink that holds
 /// state a part cannot own, and not an aggregate with a function that has no combine over partial
-/// states. A float fold combines: its answer may differ from the serial fold's in its low bits. An
-/// ordered apply combines, by applying the parts' effects in iteration order.
+/// states. A float fold's partial states combine, and [`Policy::judge`] declines the split because
+/// the answer must equal the serial fold bit for bit, unless the morsels keep the terms for the
+/// merge to fold in the order of the serial run ([`Legality::ordered_fold`]). An ordered apply
+/// combines, by applying the parts' effects in iteration order.
 fn sink_combines(legality: &Legality) -> bool {
 	match &legality.sink {
 		SinkCombine::NotSplittable => false,
@@ -851,8 +1138,144 @@ fn sink_combines(legality: &Legality) -> bool {
 	}
 }
 
+/// Whether the sink of `legality` folds a float: an aggregate with a function whose partial
+/// states combine to a value that depends on how the terms were grouped.
+fn folds_floats(legality: &Legality) -> bool {
+	matches!(
+		&legality.sink,
+		SinkCombine::Aggregate(combines) if combines.contains(&AggregateCombine::InexactFloat)
+	)
+}
+
 #[cfg(test)]
 thread_local! {
 	/// Whether [`fact_assertions`] holds on this thread.
 	pub(crate) static FACT_ASSERTIONS: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::exec::logical::pipelines::{Arrival, ChainLegality, ErrorOrder, Paging};
+
+	/// The legality and facts of a pipeline that scans a table into an aggregate over `combines`.
+	fn aggregate(combines: Vec<AggregateCombine>) -> (Legality, PhysicalFacts) {
+		let legality = Legality {
+			source: SourceSplit::Range,
+			chain: ChainLegality::RowLocal,
+			sink: SinkCombine::Aggregate(combines),
+			paging: Paging::None,
+			arrival: Arrival::Serial,
+			ordered_fold: false,
+			error_order: ErrorOrder::FirstByInputPosition,
+			may_raise: false,
+		};
+		let facts = PhysicalFacts {
+			source: SourceKind::Scan,
+			enforce: false,
+			writes: false,
+			limits: 0,
+			output: false,
+			sink: SinkKind::Aggregate,
+			binds_row: false,
+			fetches_row: false,
+			distincts: 0,
+			nested: NestedUse::None,
+			host_blocks: false,
+			paging_replayable: false,
+			estimate: None,
+		};
+		(legality, facts)
+	}
+
+	/// A fold of floats depends on how its terms are grouped, so the policy declines it whatever
+	/// the logical plan states of it, while an aggregate whose states combine exactly splits.
+	#[test]
+	fn a_float_fold_is_declined() {
+		let statement = StatementLegality {
+			refusal: None,
+		};
+		let (legality, facts) =
+			aggregate(vec![AggregateCombine::Exact, AggregateCombine::Appending]);
+		assert!(matches!(
+			Policy::judge(&legality, statement, &facts),
+			Ok(Decision::Morsels {
+				combine: Combine::Aggregate,
+				..
+			})
+		));
+		for combines in [
+			vec![AggregateCombine::InexactFloat],
+			vec![AggregateCombine::Exact, AggregateCombine::InexactFloat],
+		] {
+			let (legality, facts) = aggregate(combines);
+			assert!(legality.may_split());
+			assert_eq!(
+				Policy::judge(&legality, statement, &facts),
+				Err("a float fold depends on how its terms are grouped")
+			);
+		}
+	}
+
+	/// A range is cut into as many morsels as what is left of it fills, once the coordinator has
+	/// read the split threshold's entries, and kept whole where it holds fewer than two morsels or
+	/// no worker can read it.
+	#[test]
+	fn a_range_is_cut_by_what_is_left_of_it() {
+		let policy = Policy::from_config(&ExecConfig::default());
+		let blind = Policy::from_config(&ExecConfig {
+			morsel_needs_view: false,
+			..ExecConfig::default()
+		});
+		let target = ExecConfig::default().morsel_target_bytes as u64;
+		let read = Signals {
+			visited: 256,
+			visited_bytes: 256_000,
+			..Signals::default()
+		};
+		let left = |bytes: u64, keys: u64| Signals {
+			remaining_estimate: Some(Estimate {
+				keys,
+				bytes,
+				exact: false,
+			}),
+			..read
+		};
+		assert_eq!(
+			policy.split(&left(10 * target, 10_000)),
+			Split::Split {
+				target: SplitTarget::Parts(10)
+			},
+			"ten morsels' worth"
+		);
+		assert_eq!(
+			policy.split(&left(100 * target, 5)),
+			Split::Split {
+				target: SplitTarget::Parts(5)
+			},
+			"no more morsels than entries"
+		);
+		assert_eq!(policy.split(&left(target, 1_000)), Split::Whole, "one morsel's worth");
+		assert_eq!(
+			policy.split(&Signals {
+				visited: 255,
+				..left(10 * target, 10_000)
+			}),
+			Split::Whole,
+			"fewer entries than the threshold"
+		);
+		let no_view = Signals {
+			no_view: true,
+			..left(10 * target, 10_000)
+		};
+		assert_eq!(policy.split(&no_view), Split::Whole, "no worker can read a part");
+		assert!(matches!(blind.split(&no_view), Split::Split { .. }));
+		assert_eq!(
+			policy.split(&read),
+			Split::Split {
+				target: SplitTarget::Bytes(target)
+			},
+			"unmeasured: the datastore sizes the parts"
+		);
+	}
 }

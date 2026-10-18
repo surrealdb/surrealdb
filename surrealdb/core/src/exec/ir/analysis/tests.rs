@@ -34,14 +34,18 @@ use crate::exec::ir::iface::identity::AttrDigest;
 use crate::exec::ir::iface::ids::{FrameId, OpId, SnapshotId, ValueId, WriteEpoch};
 use crate::exec::ir::iface::region_kind::{FieldRole, RegionKind, RegionProperties};
 use crate::exec::ir::iface::types::{FactSource, TokenClass, TypeKnowledge};
-use crate::exec::ir::logical::ops::{FieldsShape, LogOp, LogTag, LoopKind, ProjectAttrs};
+use crate::exec::ir::logical::ops::{
+	FieldsShape, LogOp, LogTag, LoopKind, ProjectAttrs, WriteStageKind,
+};
 use crate::exec::ir::op_kind::{OpKind, OpTag};
 #[cfg(feature = "kv-mem")]
 use crate::exec::ir::tests_plan_request::Bound;
 use crate::exec::ir::{RequestInput, RequestStatement};
 #[cfg(feature = "kv-mem")]
 use crate::exec::logical::pipelines::ErrorOrder;
-use crate::exec::logical::pipelines::{ChainLegality, ChainRefusal, SinkCombine, SourceSplit};
+use crate::exec::logical::pipelines::{
+	Arrival, ChainLegality, ChainRefusal, SinkCombine, SourceSplit,
+};
 use crate::expr::logical::EffectSet;
 use crate::expr::{Function, Kind};
 use crate::val::Value;
@@ -248,6 +252,69 @@ async fn reads_separated_by_writes() {
 	}
 	let writes = write_epoch::statement_writes(&ir, &mut facts, &env.cx(), last);
 	assert!(!writes.is_empty(), "the statement writes");
+}
+
+/// The record reads of the last statement of `ir`, which read `t:1.n`.
+fn record_reads_of_last_statement(ir: &Ir, facts: &mut FactCache, env: &Env) -> (OpId, Vec<OpId>) {
+	let statements = ops_tagged(ir, OpTag::Logical(LogTag::Stmt));
+	let last = *statements.last().expect("the request holds statements");
+	let reads: Vec<OpId> = ops_below(ir, last)
+		.into_iter()
+		.filter(|op| {
+			let tag = kind_of(ir, *op).tag();
+			let record_read =
+				tag == OpTag::Expr(ExprTag::Access) || tag == OpTag::Expr(ExprTag::Deref);
+			record_read
+				&& ir.op(*op).is_some_and(|data| data.regions.is_empty())
+				&& effects::local(ir, facts, &env.cx(), *op).set.contains(EffectSet::READS_DATA)
+		})
+		.collect();
+	(last, reads)
+}
+
+/// A statement whose ops only read, draw entropy or read the clock writes nothing, so its reads
+/// of stored data share one epoch; a statement holding a body the plan does not show writes
+/// anything, so each of its reads has an epoch of its own.
+#[tokio::test]
+async fn reads_share_an_epoch_unless_the_statement_may_write() {
+	let env = Env::new();
+	for sql in [
+		"RETURN [t:1.n, t:1.n]",
+		"RETURN [t:1.n, rand::float(), time::now(), t:1.n]",
+		"RETURN [t:1.n, (SELECT VALUE n FROM t WHERE n > 0), t:1.n]",
+	] {
+		let ir = bind(sql).await;
+		let mut facts = FactCache::new();
+		let (last, reads) = record_reads_of_last_statement(&ir, &mut facts, &env);
+		assert!(!reads.is_empty(), "`{sql}` holds a read of t:1.n");
+		let writes = write_epoch::statement_writes(&ir, &mut facts, &env.cx(), last);
+		assert!(writes.is_empty(), "`{sql}` writes {writes:?}");
+		for read in reads {
+			assert_eq!(
+				write_epoch::assign_with(&ir, &mut facts, &env.cx(), read),
+				WriteEpoch::Stable(0),
+				"`{sql}`: no write reaches the read"
+			);
+		}
+	}
+	for sql in [
+		"RETURN [t:1.n, fn::unseen(), t:1.n]",
+		"RETURN [t:1.n, (UPDATE t:1 SET n += 1 RETURN NONE)]",
+	] {
+		let ir = bind(sql).await;
+		let mut facts = FactCache::new();
+		let (last, reads) = record_reads_of_last_statement(&ir, &mut facts, &env);
+		assert!(!reads.is_empty(), "`{sql}` holds a read of t:1.n");
+		let writes = write_epoch::statement_writes(&ir, &mut facts, &env.cx(), last);
+		assert!(!writes.is_empty(), "`{sql}` may write");
+		for read in reads {
+			assert_eq!(
+				write_epoch::assign_with(&ir, &mut facts, &env.cx(), read),
+				WriteEpoch::Unique(read),
+				"`{sql}`: a write of the statement reaches the read"
+			);
+		}
+	}
 }
 
 #[tokio::test]
@@ -524,6 +591,24 @@ async fn write_target_pins_by_provenance() {
 		let write = first_tagged(&ir, OpTag::Logical(LogTag::Write));
 		assert_eq!(types::write_target_table(&ir, &mut facts, &env.cx(), write), None, "`{sql}`");
 		assert_eq!(footprint::key_of(&ir, write), KeyOf::Any, "`{sql}`");
+	}
+}
+
+/// The ids a write's one range mock names are each named once, along the element itself; a count of
+/// ids drawn at random, two mocks and a mock beside another target may name one twice.
+#[tokio::test]
+async fn the_ids_of_a_range_mock_are_distinct() {
+	for (sql, expected) in [
+		("CREATE |t:1..4| SET n = 1", (Multiplicity::Distinct, ElemPath::Elem)),
+		("CREATE |t:1..=4| SET n = 1", (Multiplicity::Distinct, ElemPath::Elem)),
+		("CREATE |t:3| SET n = 1", (Multiplicity::MayRepeat, ElemPath::Elem)),
+		("CREATE |t:1..4|, |t:2..6| SET n = 1", (Multiplicity::MayRepeat, ElemPath::Elem)),
+		("CREATE |t:1..4|, t:9 SET n = 1", (Multiplicity::MayRepeat, ElemPath::Elem)),
+		("CREATE t:1, t:1 SET n = 1", (Multiplicity::MayRepeat, ElemPath::Elem)),
+	] {
+		let ir = bind(sql).await;
+		let write = loop_of(&ir, LoopKind::Write);
+		assert_eq!(multiplicity::of_stream(&ir, write), expected, "`{sql}`");
 	}
 }
 
@@ -1392,7 +1477,9 @@ async fn legality_cases() {
 	assert_eq!(held.key_path, ElemPath::Id);
 	assert_eq!(held.barrier, None, "provenance pins the subject to `user`");
 	assert_eq!(held.apply, ApplyCut::Ordered);
-	assert_eq!(held.mode(), LoopMode::Independent);
+	// The write's footprint states its key unknown, so it may write a record of `user` other than
+	// the element's: the loop is serial.
+	assert_eq!(held.mode(), LoopMode::Serial(LoopRefusal::SourceWritten));
 
 	// A stored result is an array of unknown provenance: the subject's table is not pinned.
 	let held = legality_of(
@@ -1528,6 +1615,29 @@ async fn delivery_is_read_whole_for_table_sources() {
 		let held = legality_of(sql, kind).await;
 		assert_eq!(held.delivery, SourceDelivery::ReadWhole, "`{sql}`");
 	}
+}
+
+/// The arrival a loop's legality states follows the consumer that combines its rows: a sort that
+/// keeps every row positions them, an aggregate of associative combines is adjacent, and a loop
+/// whose rows a clause counts, whose sink concatenates, or whose combine is not associative
+/// arrives in iteration order.
+#[tokio::test]
+async fn a_loops_arrival_follows_the_consumer_that_combines_its_rows() {
+	for (sql, arrival) in [
+		("SELECT * FROM person ORDER BY age", Arrival::Positioned),
+		("SELECT city, count() FROM person GROUP BY city", Arrival::Adjacent),
+		("SELECT array::group(age) FROM person GROUP ALL", Arrival::Adjacent),
+		("SELECT city, math::sum(age) FROM person GROUP BY city", Arrival::Serial),
+		("SELECT name FROM person ORDER BY age LIMIT 10", Arrival::Serial),
+		("SELECT * FROM person", Arrival::Serial),
+		("SELECT * FROM person LIMIT 10 START 5", Arrival::Serial),
+	] {
+		let verdict = legality_of(sql, LoopKind::Select).await.legality();
+		assert_eq!(verdict.arrival, arrival, "`{sql}`");
+	}
+	// A write applies the effects of its iterations in iteration order.
+	let verdict = legality_of("UPDATE person SET age = 1", LoopKind::Write).await.legality();
+	assert_eq!(verdict.arrival, Arrival::Serial);
 }
 
 /// The ops of every loop of `sql`, the legality of each in pre-order.
@@ -1824,4 +1934,52 @@ async fn port_of_pipelines_tests() {
 		}
 	}
 	assert!(refused > 3, "{refused} refused chains");
+}
+
+/// The `GenerateRecordId` stage of a write declares entropy exactly where the write's subjects may
+/// name no id, so that the slice puts the draw in the residue of a loop that applies in order, and
+/// leaves the stage of a write whose ids are given in the compute slice.
+#[tokio::test]
+async fn the_stage_that_generates_a_record_id_draws_entropy_only_where_it_draws_the_id() {
+	let env = Env::new();
+	let cx = env.cx();
+	for (sql, draws) in [
+		// A table alone, a count of ids and a subject the plan does not state draw an id.
+		("CREATE t SET n = 1", true),
+		("CREATE |t:3| SET n = 1", true),
+		("CREATE t:7000, u SET n = 1", true),
+		("LET $subject = u; CREATE $subject SET n = 1", true),
+		// The objects an `INSERT` writes hold an id only when they name one.
+		("INSERT INTO t (SELECT n FROM t)", true),
+		// An id written out and a range of ids hold theirs.
+		("CREATE t:7000 SET n = 1", false),
+		("CREATE |t:5000..5003| SET n = 1", false),
+		("CREATE t:1, t:2 SET n = 1", false),
+	] {
+		let ir = bind(sql).await;
+		let write = loop_of(&ir, LoopKind::Write);
+		let stages: Vec<OpId> = ops_tagged(&ir, OpTag::Logical(LogTag::WriteStage))
+			.into_iter()
+			.filter(|op| {
+				matches!(
+					kind_of(&ir, *op),
+					OpKind::Logical(LogOp::WriteStage {
+						stage: WriteStageKind::GenerateRecordId,
+						..
+					})
+				)
+			})
+			.collect();
+		assert_eq!(stages.len(), 1, "`{sql}` holds one stage that generates the id");
+		let drawn = slice::judged_effects(&ir, &mut FactCache::new(), &cx, write, stages[0])
+			.contains(EffectSet::ENTROPY);
+		assert_eq!(drawn, draws, "`{sql}`");
+		let held = slice::of(&ir, &mut FactCache::new(), &cx, write);
+		let why = exclusion_of(&held, stages[0]);
+		if draws {
+			assert_eq!(why, Some(SliceExclusion::Effect(ChainRefusal::Entropy)), "`{sql}`");
+		} else {
+			assert_eq!(why, None, "`{sql}`: the stage that holds an id given is compute");
+		}
+	}
 }

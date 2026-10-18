@@ -947,6 +947,9 @@ fn validate_upgrade_case(
 	if cfg.env.versioned {
 		ignored.push("env.versioned");
 	}
+	if !cfg.env.config.is_empty() {
+		ignored.push("env.config");
+	}
 	if !cfg.env.backend.is_empty() {
 		ignored.push("env.backend");
 	}

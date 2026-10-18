@@ -42,6 +42,9 @@ pub enum Unsupported {
 	/// The test configures non-default capabilities, which are fixed at server
 	/// startup and cannot be set per-test on a shared remote instance.
 	NonDefaultCapabilities,
+	/// The test names datastore configuration keys, which are fixed at server startup and cannot
+	/// be set per-test on a shared remote instance.
+	DatastoreConfig,
 	/// The test requires a versioned (MVCC) datastore, which is server-startup
 	/// configuration.
 	Versioned,
@@ -78,6 +81,9 @@ impl Unsupported {
 			Unsupported::WireDialect => Cow::Borrowed(
 				"is written in a wire dialect the server accepts on its own protocol port rather than through the SurrealQL RPC this harness connects over",
 			),
+			Unsupported::DatastoreConfig => {
+				Cow::Borrowed("names datastore configuration keys (fixed at server startup)")
+			}
 			Unsupported::Versioned => {
 				Cow::Borrowed("requires a versioned datastore (server-startup config)")
 			}
@@ -957,6 +963,9 @@ use crate::cmd::util::ImportFailure;
 		}
 		if !matches!(env.capabilities, BoolOr::Bool(true)) {
 			return Some(Unsupported::NonDefaultCapabilities);
+		}
+		if !env.config.is_empty() {
+			return Some(Unsupported::DatastoreConfig);
 		}
 		if env.versioned {
 			return Some(Unsupported::Versioned);

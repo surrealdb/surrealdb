@@ -10,10 +10,10 @@ use super::super::interp::{Arrivals, Groups, Paging, PooledState, SortRow, State
 use super::super::ir_exec::{MemoCell, install_memos, ir_state, memos_of};
 use super::super::partial::Partial;
 use super::super::program::{Pipeline, Program};
-use super::lease::FanoutLease;
-#[cfg(not(target_family = "wasm"))]
-use super::lease::Grant;
+use super::fold::Fold;
+use super::lease::{FanoutLease, Grant};
 use super::merge::held_bytes;
+use super::outbox::Outbox;
 #[cfg(not(target_family = "wasm"))]
 use super::places::Place;
 use crate::exec::memory::Reservation;
@@ -107,7 +107,7 @@ pub(super) enum PendingBatch {
 }
 
 #[cfg(not(target_family = "wasm"))]
-pub(super) struct Worker(Option<tokio::task::JoinHandle<FlowResult<MorselResult>>>);
+pub(super) struct Worker(pub(super) Option<tokio::task::JoinHandle<FlowResult<MorselResult>>>);
 
 #[cfg(not(target_family = "wasm"))]
 impl Drop for Worker {
@@ -175,6 +175,8 @@ pub(super) struct Under {
 	/// cell is read by the others, and a morsel that resets a cell empties it for itself alone.
 	/// Empty when the statement's state holds no IR run state.
 	pub(super) memos: Vec<Arc<MemoCell>>,
+	/// The accumulators whose terms the morsel keeps for the merge to fold in order.
+	pub(super) fold: Option<Fold>,
 }
 
 impl Under {
@@ -193,6 +195,7 @@ impl Under {
 			bypassed: state.permissions_bypassed,
 			shared: state.shared(program, ctx.function_registry()).map_err(ControlFlow::Err)?,
 			memos: memos_of(ir_state(state)),
+			fold: None,
 		})
 	}
 }
@@ -242,6 +245,7 @@ pub(super) async fn run_batch(
 	ctx: &ExecutionContext,
 ) -> FlowResult<MorselResult> {
 	let started = web_time::Instant::now();
+	let fold = under.fold.clone();
 	let mut state = batch_state(program, paged, under, ctx).await?;
 	if bound {
 		super::super::host::bound_batch(program, &mut state, ctx);
@@ -252,6 +256,10 @@ pub(super) async fn run_batch(
 		super::super::host::fill_frontier_rows(program, pipeline, &rows, &mut state, ctx).await;
 	}
 	let count = rows.len();
+	if let Some(fold) = &fold {
+		fold.log(&mut state);
+		fold.open_block(&mut state, count);
+	}
 	let mut ends = Vec::new();
 	let distinct = distinct_rows(pipeline);
 	state.capture_distinct = distinct;
@@ -460,15 +468,23 @@ pub(super) fn spawn(
 	super::test_hooks::note_handed(ctx);
 	let program = Arc::clone(program);
 	let ctx = worker_ctx(ctx);
+	let fold = under.fold.clone();
 	let handle = tokio::spawn(crate::exec::compiles::while_running_task(async move {
 		let _place = place;
-		let _grant = grant;
 		let body =
 			Box::pin(async move { run_batch(&program, at, rows, paged, bound, under, &ctx).await });
 		// What nests beneath the body runs on this worker's own frame stack.
 		let mut driven = crate::exec::trampoline::Trampolined::root(futures::stream::once(body));
 		match driven.next().await {
-			Some(result) => result,
+			Some(mut result) => {
+				// The terms the batch keeps for the merge stay charged until the merge folds
+				// them, so the grant goes with them.
+				match (&mut result, fold) {
+					(Ok(result), Some(fold)) => fold.hold_result(result, Box::new(grant)),
+					_ => drop(grant),
+				}
+				result
+			}
 			None => Err(ControlFlow::Err(anyhow::anyhow!("a morsel worker answered nothing"))),
 		}
 	}));
@@ -512,7 +528,10 @@ pub(super) struct RangeRun<'a> {
 	/// Output bytes the morsel holds before it parks.
 	pub(super) window: usize,
 	/// The run's fan-out lease: a morsel parks at the first chunk boundary after it is revoked.
-	pub(super) lease: &'a FanoutLease,
+	pub(super) lease: &'a Arc<FanoutLease>,
+	/// Where the morsel puts the rows of each chunk for the coordinator to take as they are
+	/// produced, when the scan streams its rows ([`Outbox`]).
+	pub(super) outbox: Option<&'a Outbox>,
 	/// How the morsel gives part of its range away, or returns its place, at a chunk boundary.
 	pub(super) donor: super::steal::Donor<'a>,
 }
@@ -552,22 +571,32 @@ pub(super) async fn run_range(
 		chunk: most,
 		window,
 		lease,
+		outbox,
 		donor,
 	} = run;
 	let started = web_time::Instant::now();
+	let fold = under.fold.clone();
 	let mut state = batch_state(program, paged.map(|paged| (paged.limit, 0)), under, ctx).await?;
 	if paged.is_none() {
 		super::super::host::bound_batch(program, &mut state, ctx);
 	}
 	let pipeline = &program.pipelines[at];
+	if let Some(fold) = &fold {
+		fold.log(&mut state);
+	}
+	// What the blocks of terms the morsel has opened charge the lease.
+	let mut charged: Option<Grant> = None;
 	let distinct = distinct_rows(pipeline);
 	state.capture_distinct = distinct;
 	let mut rows = 0usize;
 	let mut ends = Vec::new();
 	let mut reached = 0usize;
-	// The output and the row ends the morsel holds, in bytes, counted as chunks add to them.
-	let (mut held, mut sized, mut counted) = (0usize, 0usize, 0usize);
+	// The output, the row ends and the terms kept for the merge to fold that the morsel holds, in
+	// bytes, counted as chunks add to them.
+	let (mut held, mut sized, mut counted, mut logged) = (0usize, 0usize, 0usize, 0usize);
 	let mut parked = None;
+	#[cfg(test)]
+	let mut chunk_refused = false;
 	let mut own = span.clone();
 	let mut progress = super::steal::Progress::default();
 	let mut bytes = 0u64;
@@ -578,6 +607,20 @@ pub(super) async fn run_range(
 			return Ok(RangeEnd::Cancelled);
 		}
 		let chunk = super::super::fuel::batch(most);
+		if let Some(fold) = &fold {
+			// The chunk hands each kept accumulator at most one term for each entry it reads. A
+			// refusal revokes the lease, so the morsel parks after the chunk and the coordinator
+			// runs what is left of its range.
+			let reserved = fold.open_block(&mut state, chunk as usize);
+			if let Some(grant) = lease.grant_terms(reserved, ctx) {
+				#[cfg(test)]
+				super::test_hooks::note_terms_charged(ctx, reserved);
+				charged = Some(match charged.take() {
+					Some(held) => held.with(grant),
+					None => grant,
+				});
+			}
+		}
 		let budget = super::super::fuel::left();
 		let mut unspent = budget;
 		let mut failed = None;
@@ -595,6 +638,20 @@ pub(super) async fn run_range(
 					std::ops::ControlFlow::Break(())
 				} else {
 					std::ops::ControlFlow::Continue(())
+				};
+				// A breaker whose lease no longer covers the row it took is spilled at the next
+				// chunk boundary, so the chunk ends there: a morsel holds at most the rows its
+				// lease covered and the one that passed it, as the batches of a coordinator do.
+				// A query with no store to spill to holds the row through the governor instead
+				// and takes the next row in the same chunk, so a due spill ends the chunk only
+				// where the boundary can write a run.
+				let ended = |state: &State, spent: &mut bool| {
+					let due =
+						state.spill_due && state.memory.as_ref().is_some_and(|m| m.can_spill());
+					if due {
+						*spent = true;
+					}
+					due
 				};
 				if progress.first.is_empty() {
 					progress.first.extend_from_slice(key);
@@ -621,7 +678,7 @@ pub(super) async fn run_range(
 							key: taken,
 						}));
 					}
-					return Ok(if halted {
+					return Ok(if halted || ended(&state, &mut spent) {
 						std::ops::ControlFlow::Break(())
 					} else {
 						next
@@ -644,6 +701,9 @@ pub(super) async fn run_range(
 					return match super::super::host::in_place_row_admitted(
 						program, pipeline, key, value, &admitted, layouts, &mut state,
 					) {
+						Ok(false) if ended(&state, &mut spent) => {
+							Ok(std::ops::ControlFlow::Break(()))
+						}
 						Ok(false) => Ok(next),
 						Ok(true) => {
 							failed = Some(stopped_pipeline());
@@ -681,7 +741,7 @@ pub(super) async fn run_range(
 					reached += 1;
 					halted |= paged.needed.is_some_and(|needed| reached >= needed);
 				}
-				Ok(if halted {
+				Ok(if halted || ended(&state, &mut spent) {
 					std::ops::ControlFlow::Break(())
 				} else {
 					next
@@ -709,7 +769,10 @@ pub(super) async fn run_range(
 		progress.since_cut += stats.rows;
 		progress.quanta += 1;
 		#[cfg(test)]
-		super::test_hooks::note_scanned(ctx, stats.rows as usize);
+		{
+			super::test_hooks::note_scanned(ctx, stats.rows as usize);
+			super::test_hooks::note_chunk(ctx);
+		}
 		crate::exec::operators::scan::common::ensure_below_memory_threshold()?;
 		if state.memory.is_some() {
 			super::super::host::spill_breakers(&mut state, ctx).await?;
@@ -722,14 +785,42 @@ pub(super) async fn run_range(
 		if super::super::fuel::spent() {
 			super::super::fuel::yield_point(ctx).await?;
 		}
-		for row in &state.output[sized..] {
-			held += crate::exec::memory::size::value_bytes(row);
-		}
-		sized = state.output.len();
+		// What the chunk emitted is the coordinator's to take as it is produced, so it counts
+		// against the window only while it waits in the outbox.
+		let waiting = match outbox {
+			Some(outbox) => {
+				let rows = std::mem::replace(&mut state.output, outbox.buffer());
+				let bytes = rows.iter().map(crate::exec::memory::size::value_bytes).sum();
+				// A refusal revokes the lease, which parks the morsel after this chunk.
+				let grant = lease.grant_queued(bytes, ctx);
+				#[cfg(test)]
+				{
+					chunk_refused = grant.is_none();
+					if grant.is_some() {
+						super::test_hooks::note_output_charged(ctx, bytes);
+					} else {
+						super::test_hooks::note_output_refused(ctx);
+					}
+				}
+				outbox.put(rows, bytes, grant);
+				donor.gate.shared.fed.notify_one();
+				outbox.held()
+			}
+			None => {
+				for row in &state.output[sized..] {
+					held += crate::exec::memory::size::value_bytes(row);
+				}
+				sized = state.output.len();
+				0
+			}
+		};
 		held += (ends.len() - counted) * std::mem::size_of::<End>();
 		counted = ends.len();
-		held_most = held_most.max(held);
-		let yielded = if held >= window || lease.revoked() {
+		let kept = fold.as_ref().map_or(0, |fold| fold.logged_bytes(&state));
+		held += kept - logged;
+		logged = kept;
+		held_most = held_most.max(held + waiting);
+		let yielded = if held + waiting >= window || lease.revoked() {
 			false
 		} else {
 			match donor.boundary(cursor, &mut own, dir, &progress).await? {
@@ -746,6 +837,9 @@ pub(super) async fn run_range(
 		#[cfg(test)]
 		if resume.is_some() {
 			super::test_hooks::note_parked(ctx);
+			if chunk_refused {
+				super::test_hooks::note_parked_after_refusal(ctx);
+			}
 		}
 		if yielded && resume.is_some() {
 			donor.gate.shared.metrics().yielded += 1;
@@ -756,6 +850,15 @@ pub(super) async fn run_range(
 			own.part(rest.start.as_slice(), rest.end.as_slice())
 		});
 		break;
+	}
+	if let (Some(fold), Some(grant)) = (&fold, charged) {
+		fold.hold(&mut state, Box::new(grant));
+	}
+	// What the coordinator has not taken from the outbox is the morsel's output, ahead of the rows
+	// of its last chunk.
+	if let Some(outbox) = outbox {
+		let last = std::mem::take(&mut state.output);
+		state.output = outbox.finish(last);
 	}
 	let mut result = finish(program, state, ends, rows, started.elapsed(), ctx).await?;
 	result.bytes = bytes;

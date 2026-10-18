@@ -6,17 +6,64 @@ use std::sync::Arc;
 use super::super::host::{Out, flush};
 use super::super::interp::State;
 use super::super::program::Program;
+use super::fold::Fold;
 use super::grouped::Pending;
 use super::lease::FanoutLease;
-use super::merge::{BodyBreakers, Replay, body_breakers, dedupe};
+use super::merge::{BodyBreakers, Replay, body_breakers, combinable, dedupe, fold_into};
 use super::places::{self, Asking, Place};
+#[cfg(not(target_family = "wasm"))]
+use super::run::Worker as BatchWorker;
 use super::run::{MorselResult, PendingBatch, Under, run_batch};
 use crate::catalog::TableLayouts;
+#[cfg(not(target_family = "wasm"))]
+use crate::exec::memory::size::values_bytes;
 use crate::exec::planner::placement::{INLINE_BUDGET, Policy, Signals};
 use crate::exec::topk_pushdown::TopKThresholdProbe;
 use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::ControlFlow;
 use crate::val::Value;
+
+/// A batch whose results the merge has not taken.
+pub(super) struct Held {
+	batch: PendingBatch,
+	/// Until when a test holds the batch back from the merge, as though its worker were still
+	/// running.
+	#[cfg(test)]
+	ready: Option<tokio::time::Instant>,
+}
+
+impl Held {
+	fn new(batch: PendingBatch) -> Self {
+		Self {
+			batch,
+			#[cfg(test)]
+			ready: None,
+		}
+	}
+
+	/// Whether the batch's results can be taken without waiting.
+	fn is_done(&self) -> bool {
+		#[cfg(test)]
+		if self.ready.is_some_and(|at| at > tokio::time::Instant::now()) {
+			return false;
+		}
+		self.batch.is_done()
+	}
+
+	/// Whether the batch is running on a worker, which holds a place until it is done.
+	fn holds_place(&self) -> bool {
+		self.batch.holds_place()
+	}
+
+	/// The batch's results, waiting for its worker.
+	async fn result(self) -> FlowResult<MorselResult> {
+		#[cfg(test)]
+		if let Some(at) = self.ready {
+			tokio::time::sleep_until(at).await;
+		}
+		self.batch.result().await
+	}
+}
 
 /// The morsels of a Batches-input pipeline in progress; see the module documentation.
 pub(in crate::exec::vm) struct MorselSet<'p> {
@@ -27,7 +74,7 @@ pub(in crate::exec::vm) struct MorselSet<'p> {
 	pub(super) filling: Vec<Value>,
 	/// The place the batch being filled holds, once it is to go to a worker.
 	place: Option<Place>,
-	pub(super) merging: VecDeque<PendingBatch>,
+	pub(super) merging: VecDeque<Held>,
 	/// The cost of a row measured so far, in nanoseconds.
 	cost: Option<f64>,
 	/// The sorts and aggregates the body fills.
@@ -45,10 +92,16 @@ pub(in crate::exec::vm) struct MorselSet<'p> {
 	asking: Asking,
 	/// The bytes the run's workers hold only because it fanned out, granted before each hand-out.
 	lease: Arc<FanoutLease>,
+	/// Whether the merge takes a batch's results as it finishes, whatever the batches before it
+	/// are doing ([`MergeOrder::Free`](crate::exec::planner::placement::MergeOrder::Free)).
+	free: bool,
+	/// The accumulators whose terms the batches keep for the merge to fold in order.
+	fold: Option<Fold>,
 }
 
 impl<'p> MorselSet<'p> {
 	pub(super) fn new(program: &'p Arc<Program>, at: usize, ctx: &ExecutionContext) -> Self {
+		let breakers = body_breakers(&program.pipelines[at].code);
 		Self {
 			program,
 			at,
@@ -57,13 +110,15 @@ impl<'p> MorselSet<'p> {
 			place: None,
 			merging: VecDeque::new(),
 			cost: None,
-			breakers: body_breakers(&program.pipelines[at].code),
+			fold: Fold::of(&program.pipelines[at], &breakers),
+			breakers,
 			replay: Replay::default(),
 			pending: Pending::default(),
 			reads: None,
 			in_flight: 0,
 			asking: Asking::default(),
 			lease: FanoutLease::new(ctx.ctx().memory().cloned()),
+			free: super::merge_of(&program.pipelines[at]) == MergeOrder::Free,
 		}
 	}
 
@@ -182,6 +237,7 @@ impl<'p> MorselSet<'p> {
 			.map(|limit| (limit, state.paging[limit as usize].skip.saturating_sub(self.in_flight)));
 		self.in_flight += rows.len();
 		let mut under = Under::of(state, self.program, ctx)?;
+		under.fold.clone_from(&self.fold);
 		// A paged body's batches hold their rows for the merge to count and are never bound.
 		let bound = self.breakers.paged.is_none();
 		// The grant is asked for with the place in hand, so a refusal gives the place back and the
@@ -189,7 +245,25 @@ impl<'p> MorselSet<'p> {
 		#[cfg(not(target_family = "wasm"))]
 		let grant = match place {
 			Some(_) if self.policy.hands_to_worker(rows.len(), true) => {
-				self.lease.grant(under.kept.iter().sum(), ctx).await
+				match self.lease.grant(under.kept.iter().sum(), ctx).await {
+					// The rows read ahead of the merge are held only because the batch fanned out,
+					// and so are the terms it keeps for the merge to fold.
+					Some(copy) => {
+						let read = if self.lease.bounded() {
+							values_bytes(&rows)
+								+ self.fold.as_ref().map_or(0, |fold| fold.block_bytes(rows.len()))
+						} else {
+							0
+						};
+						#[cfg(test)]
+						super::test_hooks::note_terms_charged(
+							ctx,
+							self.fold.as_ref().map_or(0, |fold| fold.block_bytes(rows.len())),
+						);
+						self.lease.grant_rows(read).map(|read| copy.with(read))
+					}
+					None => None,
+				}
 			}
 			_ => None,
 		};
@@ -200,7 +274,7 @@ impl<'p> MorselSet<'p> {
 		under.covered = true;
 		let batch = match place.zip(grant) {
 			#[cfg(not(target_family = "wasm"))]
-			Some((place, grant)) => PendingBatch::Running(super::run::spawn(
+			Some((place, grant)) => Held::new(PendingBatch::Running(super::run::spawn(
 				self.program,
 				self.at,
 				rows,
@@ -210,10 +284,38 @@ impl<'p> MorselSet<'p> {
 				ctx,
 				place,
 				grant,
-			)),
-			_ => PendingBatch::Done(Box::new(
-				run_batch(self.program, self.at, rows, paged, bound, under, ctx).await,
-			)),
+			))),
+			_ => {
+				// The terms a batch run here keeps for the merge stay held until the merge has
+				// folded them, as the terms of a batch on a worker do, so they are charged the
+				// same way. A refused grant, or a revoked lease, still runs the batch with its
+				// block open, because the merge folds the terms in order to answer bit for bit
+				// as the serial fold does. Those terms are held outside the lease until the
+				// merge takes the batch, so they stay within the batches in flight, at most
+				// `read_ahead` and the one merging, times the rows of a batch, the kept slots
+				// and `size_of::<Number>()`.
+				let terms = self.fold.as_ref().and_then(|fold| {
+					let bytes = fold.block_bytes(rows.len());
+					#[cfg(test)]
+					super::test_hooks::note_terms_charged(ctx, bytes);
+					self.lease.grant_terms(bytes, ctx)
+				});
+				let mut done =
+					run_batch(self.program, self.at, rows, paged, bound, under, ctx).await;
+				if let (Ok(result), Some(fold), Some(terms)) = (&mut done, &self.fold, terms) {
+					fold.hold_result(result, Box::new(terms));
+				}
+				Held::new(PendingBatch::Done(Box::new(done)))
+			}
+		};
+		#[cfg(test)]
+		let batch = {
+			let mut batch = batch;
+			if matches!(batch.batch, PendingBatch::Running(_)) {
+				batch.ready = super::test_hooks::claim_delay(ctx)
+					.map(|delay| tokio::time::Instant::now() + delay);
+			}
+			batch
 		};
 		self.merging.push_back(batch);
 		let waiting = self.merging.len() > self.policy.read_ahead();
@@ -238,9 +340,99 @@ impl<'p> MorselSet<'p> {
 		Ok(self.replay.stopped)
 	}
 
-	/// Take the results of the batches at the front that are done, in order, waiting for the first
-	/// when `waiting`. Once a paged body's limit is spent, every batch still out is dropped,
-	/// aborting its worker.
+	/// The next batch the merge takes: the one at the front when it is done or `waiting`, or, for
+	/// a merge that takes results as batches finish, the first batch that is done, waiting for the
+	/// first to finish when `waiting` and none has.
+	async fn next_batch(&mut self, waiting: bool, ctx: &ExecutionContext) -> Option<Held> {
+		if !self.free {
+			return if self.merging.front().is_some_and(|batch| waiting || batch.is_done()) {
+				self.merging.pop_front()
+			} else {
+				None
+			};
+		}
+		let at = if waiting {
+			self.first_done().await?
+		} else {
+			self.merging.iter().position(Held::is_done)?
+		};
+		#[cfg(test)]
+		if at > 0 {
+			super::test_hooks::note_merged_early(ctx);
+		}
+		#[cfg(not(test))]
+		let _ = ctx;
+		self.merging.remove(at)
+	}
+
+	/// The index of the first batch whose results can be taken without waiting, waiting for the
+	/// first of the batches on workers to finish when none can; `None` when no batch is running or
+	/// held back. A batch that finished while waited for is turned into its results, so nothing is
+	/// polled twice.
+	#[cfg(not(target_family = "wasm"))]
+	async fn first_done(&mut self) -> Option<usize> {
+		use std::task::Poll;
+		loop {
+			if let Some(at) = self.merging.iter().position(Held::is_done) {
+				return Some(at);
+			}
+			#[cfg(test)]
+			let mut held_back = {
+				let now = tokio::time::Instant::now();
+				self.merging
+					.iter()
+					.filter_map(|held| held.ready)
+					.filter(|at| *at > now)
+					.min()
+					.map(|at| Box::pin(tokio::time::sleep_until(at)))
+			};
+			#[cfg(test)]
+			let waits = held_back.is_some();
+			#[cfg(not(test))]
+			let waits = false;
+			let running = self
+				.merging
+				.iter()
+				.any(|held| matches!(&held.batch, PendingBatch::Running(BatchWorker(Some(_)))));
+			if !running && !waits {
+				return None;
+			}
+			let finished = std::future::poll_fn(|cx| {
+				for (at, held) in self.merging.iter_mut().enumerate() {
+					if let PendingBatch::Running(BatchWorker(Some(handle))) = &mut held.batch
+						&& let Poll::Ready(joined) = std::pin::Pin::new(handle).poll(cx)
+					{
+						return Poll::Ready(Some((at, joined)));
+					}
+				}
+				#[cfg(test)]
+				if let Some(sleep) = held_back.as_mut()
+					&& sleep.as_mut().poll(cx).is_ready()
+				{
+					return Poll::Ready(None);
+				}
+				Poll::Pending
+			})
+			.await;
+			if let Some((at, joined)) = finished {
+				self.merging[at].batch = PendingBatch::Done(Box::new(match joined {
+					Ok(result) => result,
+					Err(e) => Err(ControlFlow::Err(anyhow::anyhow!("a morsel worker failed: {e}"))),
+				}));
+			}
+		}
+	}
+
+	/// The index of the first batch whose results can be taken: with no workers, every batch has
+	/// run.
+	#[cfg(target_family = "wasm")]
+	async fn first_done(&mut self) -> Option<usize> {
+		self.merging.iter().position(Held::is_done)
+	}
+
+	/// Take the results of the batches that are done, waiting for the first when `waiting`: the
+	/// ones at the front, in order, or, for a merge that takes results as batches finish, any.
+	/// Once a paged body's limit is spent, every batch still out is dropped, aborting its worker.
 	pub(super) async fn merge(
 		&mut self,
 		mut waiting: bool,
@@ -249,9 +441,8 @@ impl<'p> MorselSet<'p> {
 		flush_at: usize,
 		ctx: &ExecutionContext,
 	) -> FlowResult<()> {
-		while self.merging.front().is_some_and(|batch| waiting || batch.is_done()) {
+		while let Some(batch) = self.next_batch(waiting, ctx).await {
 			waiting = false;
-			let batch = self.merging.pop_front().expect("checked above");
 			let result: MorselResult = batch.result().await?;
 			// Merging a batch walks its rows, sorted rows and groups once: no more than a batch's
 			// worth, spent whole, the driver yielding at the next row it takes.
@@ -305,7 +496,7 @@ impl<'p> MorselSet<'p> {
 		if self.replay.stopped {
 			return Ok(true);
 		}
-		self.merging.push_back(PendingBatch::Done(Box::new(Err(failure))));
+		self.merging.push_back(Held::new(PendingBatch::Done(Box::new(Err(failure)))));
 		while !self.merging.is_empty() {
 			self.merge(true, state, yielder, flush_at, ctx).await?;
 		}
@@ -329,12 +520,13 @@ use surrealdb_kvs::Snapshot;
 
 use super::super::host::{admit_row, in_place_row_admitted};
 use super::metrics::{MorselMetrics, MorselStat};
+use super::outbox::Outbox;
 #[cfg(not(target_family = "wasm"))]
 use super::run::Paged;
 use super::run::RangeEnd;
 use super::steal::{self, Gate, Origin, Progress, Registered, Slot};
 use crate::err::EngineError;
-use crate::exec::planner::placement::Split;
+use crate::exec::planner::placement::{Combine, MergeOrder, MorselPlan, Parallel, Split};
 use crate::expr::ControlFlowExt;
 #[cfg(not(target_family = "wasm"))]
 use crate::key::AnyRange;
@@ -392,8 +584,8 @@ impl PartialOrd for OrderKey {
 
 /// A morsel a worker has taken.
 enum Started {
-	/// Running on a worker.
-	Running,
+	/// Running on a worker; a morsel that streams its rows hands them over through its outbox.
+	Running(Option<Arc<Outbox>>),
 	/// Finished, waiting for the merge.
 	Done(Box<FlowResult<MorselResult>>),
 }
@@ -408,9 +600,12 @@ pub(super) struct Queued {
 pub(super) struct Table {
 	/// The morsels waiting for a worker or the coordinator, by order key.
 	pub(super) queued: BTreeMap<OrderKey, Queued>,
-	/// The morsels a worker has taken and the merge has not, by order key: as many as the policy
-	/// lets be in flight.
+	/// The morsels a worker has taken and the merge has not, by order key.
 	started: BTreeMap<OrderKey, Started>,
+	/// The results of morsels the coordinator took out of `started` and holds until the morsels
+	/// before them are merged. They count with `started` against the number of morsels the policy
+	/// lets be running or finished and unmerged.
+	held: usize,
 	/// The earliest morsel that failed: no morsel after it is needed.
 	failed: Option<OrderKey>,
 	/// What the morsels running now publish, for an idle worker to choose whom to ask.
@@ -419,8 +614,9 @@ pub(super) struct Table {
 
 /// What a worker finds in the table.
 enum Claim {
-	/// The earliest waiting morsel, now the worker's.
-	Morsel(OrderKey, RawRange),
+	/// The earliest waiting morsel, now the worker's, with the outbox its rows leave through where
+	/// the scan streams them.
+	Morsel(OrderKey, RawRange, Option<Arc<Outbox>>),
 	/// Morsels wait, but as many are in flight as the policy allows.
 	Full,
 	/// No morsel waits, or the scan is done.
@@ -429,8 +625,17 @@ enum Claim {
 
 /// What the coordinator takes from the table next.
 enum Step {
-	/// The morsel at the front is done. Boxed: a result is large, and the other steps are not.
-	Merge(Box<FlowResult<MorselResult>>),
+	/// A morsel is done, and the merge takes it. Boxed: a result is large, and the other steps are
+	/// not. `true` when a morsel before it in the scan had not finished, which only a merge that
+	/// takes results as morsels finish does.
+	Merge(Box<FlowResult<MorselResult>>, bool),
+	/// A running morsel has produced rows, taken in the order the morsel produced them: its merge
+	/// order is the serial run's when it is at the front, or free.
+	Rows(Vec<Value>, Arc<Outbox>),
+	/// A morsel is done, ahead of morsels before it in the scan that are not: the coordinator holds
+	/// its results until they are next to what the statement has merged. Only a merge that takes
+	/// results as morsels finish and absorbs them in order does.
+	Collect(OrderKey, Box<FlowResult<MorselResult>>),
 	/// The morsel at the front is waiting: run it on the coordinator.
 	Run(RawRange),
 	/// The morsel at the front is running on a worker.
@@ -449,6 +654,11 @@ pub(super) struct Shared {
 	pub(super) arrived: tokio::sync::Notify,
 	/// Set once the statement needs no more from its morsels.
 	stop: AtomicBool,
+	/// Whether the morsels hand their rows to the coordinator as they produce them.
+	streams: bool,
+	/// Rung when a running morsel puts rows in its outbox, for the coordinator waiting on the
+	/// morsels.
+	pub(super) fed: tokio::sync::Notify,
 	/// What the scan's morsels did.
 	metrics: Mutex<MorselMetrics>,
 }
@@ -460,8 +670,16 @@ impl Shared {
 			wake: tokio::sync::Notify::new(),
 			arrived: tokio::sync::Notify::new(),
 			stop: AtomicBool::new(false),
+			streams: false,
+			fed: tokio::sync::Notify::new(),
 			metrics: Mutex::new(MorselMetrics::default()),
 		}
+	}
+
+	/// This scan with its morsels handing their rows to the coordinator as they produce them.
+	pub(super) fn streaming(mut self) -> Self {
+		self.streams = true;
+		self
 	}
 
 	pub(super) fn table(&self) -> std::sync::MutexGuard<'_, Table> {
@@ -513,7 +731,7 @@ impl Shared {
 	/// or finished and waiting for the merge.
 	fn open(&self, most: usize) -> (usize, usize) {
 		let table = self.table();
-		(table.queued.len(), most.saturating_sub(table.started.len()))
+		(table.queued.len(), most.saturating_sub(table.started.len() + table.held))
 	}
 
 	/// Whether the morsel at `key` is no longer needed: the statement is done, or an earlier
@@ -541,7 +759,7 @@ impl Shared {
 		if table.queued.is_empty() {
 			return Claim::Empty;
 		}
-		if table.started.len() >= most {
+		if table.started.len() + table.held >= most {
 			return Claim::Full;
 		}
 		let Some((key, queued)) = table.queued.pop_first() else {
@@ -550,8 +768,9 @@ impl Shared {
 		if queued.origin == Origin::Parked {
 			self.metrics().resumed += 1;
 		}
-		table.started.insert(key.clone(), Started::Running);
-		Claim::Morsel(key, queued.span)
+		let outbox = self.streams.then(|| Arc::new(Outbox::default()));
+		table.started.insert(key.clone(), Started::Running(outbox.clone()));
+		Claim::Morsel(key, queued.span, outbox)
 	}
 
 	/// A worker's morsel at `key` ended with `end`.
@@ -596,6 +815,115 @@ impl Shared {
 		self.arrived.notify_waiters();
 	}
 
+	/// What the coordinator does next, for a merge that takes results as morsels finish: it takes
+	/// the earliest morsel that is done, runs the earliest one that waits when none is, and waits
+	/// for a running one when none waits.
+	fn step_free(&self) -> Step {
+		let mut table = self.table();
+		let table = &mut *table;
+		let done = table.started.iter().enumerate().find_map(|(at, (key, started))| {
+			matches!(started, Started::Done(_)).then(|| (at, key.clone()))
+		});
+		if let Some((at, key)) = done {
+			let early =
+				at > 0 || table.queued.first_key_value().is_some_and(|(queued, _)| *queued < key);
+			if let Some(Started::Done(result)) = table.started.remove(&key) {
+				return Step::Merge(result, early);
+			}
+		}
+		for started in table.started.values() {
+			if let Started::Running(Some(outbox)) = started
+				&& let Some(rows) = outbox.take()
+			{
+				return Step::Rows(rows, Arc::clone(outbox));
+			}
+		}
+		if let Some((_, queued)) = table.queued.pop_first() {
+			if queued.origin == Origin::Parked {
+				self.metrics().resumed += 1;
+			}
+			return Step::Run(queued.span);
+		}
+		if table.started.is_empty() {
+			Step::Empty
+		} else {
+			Step::Wait
+		}
+	}
+
+	/// The earliest order key of a morsel the merge has not taken from the table: queued, running,
+	/// or done and not yet taken.
+	fn front_key(&self) -> Option<OrderKey> {
+		let table = self.table();
+		match (table.queued.first_key_value(), table.started.first_key_value()) {
+			(None, None) => None,
+			(Some((key, _)), None) | (None, Some((key, _))) => Some(key.clone()),
+			(Some((queued, _)), Some((started, _))) => Some(queued.min(started).clone()),
+		}
+	}
+
+	/// Whether a morsel lies between those at `after` and `before` in the scan, queued, running, or
+	/// done and not yet taken.
+	fn between(&self, after: &OrderKey, before: &OrderKey) -> bool {
+		use std::ops::Bound::Excluded;
+		let range = (Excluded(after), Excluded(before));
+		if after >= before {
+			return false;
+		}
+		let table = self.table();
+		table.queued.range::<OrderKey, _>(range).next().is_some()
+			|| table.started.range::<OrderKey, _>(range).next().is_some()
+	}
+
+	/// What the coordinator does next, for a merge that takes results as morsels finish and
+	/// absorbs them in the order of the scan: it takes the earliest morsel that is done when
+	/// `collect` allows (the one at the front is merged at once), runs the one that waits at the
+	/// front, `ready` being the earliest results it holds, and otherwise waits for a running one.
+	fn step_early(&self, collect: bool, ready: Option<&OrderKey>) -> Step {
+		let mut table = self.table();
+		let table = &mut *table;
+		let queued_first = table.queued.first_key_value().map(|(key, _)| key);
+		let started_first = table.started.first_key_value().map(|(key, _)| key);
+		let done = table
+			.started
+			.iter()
+			.find_map(|(key, started)| matches!(started, Started::Done(_)).then(|| key.clone()));
+		if let Some(key) = done {
+			let front = queued_first.is_none_or(|queued| key < *queued)
+				&& started_first.is_some_and(|first| *first == key)
+				&& ready.is_none_or(|ready| key < *ready);
+			if (front || collect)
+				&& let Some(Started::Done(result)) = table.started.remove(&key)
+			{
+				return if front {
+					Step::Merge(result, false)
+				} else {
+					// Counted as holding a place until the coordinator has decided, in
+					// `RangeSet::collect`, whether it does.
+					table.held += 1;
+					Step::Collect(key, result)
+				};
+			}
+		}
+		let queued_first = table.queued.first_key_value().map(|(key, _)| key.clone());
+		let started_first = table.started.first_key_value().map(|(key, _)| key.clone());
+		if let Some(queued) = queued_first
+			&& started_first.as_ref().is_none_or(|started| queued < *started)
+			&& ready.is_none_or(|ready| queued < *ready)
+			&& let Some((_, queued)) = table.queued.pop_first()
+		{
+			if queued.origin == Origin::Parked {
+				self.metrics().resumed += 1;
+			}
+			return Step::Run(queued.span);
+		}
+		if table.queued.is_empty() && table.started.is_empty() && ready.is_none() {
+			Step::Empty
+		} else {
+			Step::Wait
+		}
+	}
+
 	/// What the coordinator does next with the morsel at the front.
 	fn step(&self) -> Step {
 		let mut table = self.table();
@@ -619,11 +947,14 @@ impl Shared {
 				None => Step::Empty,
 			};
 		}
-		if matches!(table.started.first_key_value(), Some((_, Started::Running))) {
-			return Step::Wait;
+		if let Some((_, Started::Running(outbox))) = table.started.first_key_value() {
+			return match outbox.as_ref().and_then(|outbox| outbox.take().zip(Some(outbox))) {
+				Some((rows, outbox)) => Step::Rows(rows, Arc::clone(outbox)),
+				None => Step::Wait,
+			};
 		}
 		match table.started.pop_first() {
-			Some((_, Started::Done(result))) => Step::Merge(result),
+			Some((_, Started::Done(result))) => Step::Merge(result, false),
 			_ => Step::Empty,
 		}
 	}
@@ -631,17 +962,26 @@ impl Shared {
 	/// [`Self::step`], waiting while the front morsel runs on a worker. A morsel queued meanwhile,
 	/// which a donation does, ends the wait with [`Step::Wait`] so the coordinator can hand it to a
 	/// worker.
-	async fn next(&self) -> Step {
+	async fn next(&self, pace: Pace<'_>) -> Step {
 		loop {
 			let finished = self.wake.notified();
 			let queued = self.arrived.notified();
-			tokio::pin!(finished, queued);
+			let fed = self.fed.notified();
+			tokio::pin!(finished, queued, fed);
 			finished.as_mut().enable();
 			queued.as_mut().enable();
-			match self.step() {
+			fed.as_mut().enable();
+			match match pace.merge {
+				MergeOrder::Free => self.step_free(),
+				MergeOrder::Positioned | MergeOrder::Adjacent => {
+					self.step_early(pace.collect, pace.ready)
+				}
+				MergeOrder::Serial => self.step(),
+			} {
 				Step::Wait => {
-					if let futures::future::Either::Right(_) =
-						futures::future::select(finished, queued).await
+					let woken = futures::future::select(finished, queued);
+					if let futures::future::Either::Left((futures::future::Either::Right(_), _)) =
+						futures::future::select(woken, fed).await
 					{
 						return Step::Wait;
 					}
@@ -650,6 +990,124 @@ impl Shared {
 			}
 		}
 	}
+}
+
+/// The results of a run of adjacent morsels that the coordinator holds until the morsels before
+/// them have been merged, and the key of the last morsel the run holds.
+struct Ready {
+	result: FlowResult<MorselResult>,
+	last: OrderKey,
+	/// Whether the results count against the morsels the policy lets be running or finished and
+	/// unmerged ([`takes_a_place`]), decided once, when the coordinator takes them.
+	placed: bool,
+}
+
+/// Whether the results of a morsel that finished ahead of an earlier one, held by a merge in order
+/// `merge`, count against the morsels the policy lets be running or finished and unmerged; where
+/// they do not, the bytes the coordinator spends holding them are charged to the query's lease.
+///
+/// Every held result either holds a place or has its whole size charged to the lease, so what the
+/// coordinator holds is bounded by the policy's read-ahead and the lease together. A sort's sorted
+/// run that lies in memory, holds entries and whose every non-empty sort the morsel charged to the
+/// query's lease frees its place once its fixed size ([`held_result_bytes`]) is charged to the
+/// account of its first non-empty sort: the lease bounds what the morsels hold of the sort, as it
+/// bounds what the statement's own sort would, and the statement's sort holds the same rows once it
+/// absorbs them, so the places of the morsels after the run stay free for the morsels that follow.
+/// A morsel charges its sort entries only where the query can spill (`host::bound_batch`). Every
+/// other result holds its place: a run of a query with no store to spill to, which is held
+/// uncharged; an empty run, which charges the lease nothing; a run the lease refuses the fixed size
+/// of; a run that was spilled and a failure, which the lease does not bound; and the results of the
+/// other merges, which hold output or groups the lease does not bound by itself.
+fn takes_a_place(merge: MergeOrder, result: &mut FlowResult<MorselResult>) -> bool {
+	if merge != MergeOrder::Positioned {
+		return true;
+	}
+	let Ok(result) = result else {
+		return true;
+	};
+	if !result.spilled.is_empty() || !sorts_are_charged(result) {
+		return true;
+	}
+	let Some(first) = result.sorts.iter().position(|entries| !entries.is_empty()) else {
+		return true;
+	};
+	let bytes = held_result_bytes(result);
+	!matches!(result.sort_accounts[first].charge(bytes), crate::exec::memory::Verdict::Hold)
+}
+
+/// Whether every sort of `result` that holds entries holds them against the query's lease.
+fn sorts_are_charged(result: &MorselResult) -> bool {
+	result.sorts.iter().enumerate().all(|(at, entries)| {
+		entries.is_empty()
+			|| result.sort_accounts.get(at).is_some_and(|account| account.memory().is_some())
+	})
+}
+
+/// The bytes the coordinator spends holding `result` beyond the sort entries its accounts charge:
+/// the entry of `RangeSet::ready` with its share of a map node and the key's bytes, and the
+/// buffers of the result's own fields.
+fn held_result_bytes(result: &MorselResult) -> usize {
+	use std::mem::size_of;
+	/// A B-tree node holds up to eleven entries; an entry is charged a whole node's share of
+	/// edges and header, rounded up.
+	const MAP_NODE_SHARE: usize = 64;
+	size_of::<OrderKey>()
+		+ size_of::<Ready>()
+		+ MAP_NODE_SHARE
+		+ result.output.capacity() * size_of::<Value>()
+		+ result.sorts.capacity() * size_of::<Vec<(Vec<Value>, super::super::interp::SortRow)>>()
+		+ result.slabs.capacity() * size_of::<Vec<u8>>()
+		+ result.slabs.iter().map(Vec::capacity).sum::<usize>()
+		+ result.arrivals.capacity() * size_of::<super::super::interp::Arrivals>()
+		+ result.groups.capacity() * size_of::<Option<super::super::interp::Groups>>()
+		+ result.spilled.capacity() * size_of::<super::super::partial::Partial>()
+		+ (result.sort_accounts.capacity() + result.group_accounts.capacity())
+			* size_of::<crate::exec::memory::Reservation>()
+		+ result.ends.capacity() * size_of::<super::run::End>()
+}
+
+impl Ready {
+	/// The rows the held results stand for: none for a failure.
+	fn rows(&self) -> usize {
+		self.result.as_ref().map_or(0, |result| result.rows)
+	}
+
+	/// Take `later`, the results of the morsels that follow this run's, into this run's: the groups
+	/// of each aggregate fold into one another, the earlier before the later, and the run now ends
+	/// where `later` did. A run that failed, or holds anything but groups it can fold, is not taken
+	/// and is answered back.
+	fn absorb(&mut self, later: Ready, breakers: &BodyBreakers) -> Option<Ready> {
+		let (Ok(mine), Ok(theirs)) = (&mut self.result, &later.result) else {
+			return Some(later);
+		};
+		if !combinable(mine, breakers) || !combinable(theirs, breakers) {
+			return Some(later);
+		}
+		let Ready {
+			result: Ok(mut theirs),
+			last,
+			..
+		} = later
+		else {
+			unreachable!("checked above");
+		};
+		match fold_into(mine, &mut theirs, breakers) {
+			Ok(()) => self.last = last,
+			Err(failure) => self.result = Err(failure),
+		}
+		None
+	}
+}
+
+/// How the coordinator takes the results of the morsels of a scan.
+#[derive(Clone, Copy)]
+struct Pace<'r> {
+	merge: MergeOrder,
+	/// For a merge that absorbs in the order of the scan, whether it may hold the results of one
+	/// more morsel.
+	collect: bool,
+	/// The earliest results it holds, which are not yet next to what the statement has merged.
+	ready: Option<&'r OrderKey>,
 }
 
 /// A worker's hold on the morsel it runs: if the worker ends without completing it, whether by
@@ -707,6 +1165,17 @@ pub(in crate::exec::vm) struct RangeSet<'p> {
 	/// The bytes the scan's workers hold only because it fanned out, granted before each worker is
 	/// spawned.
 	lease: Arc<FanoutLease>,
+	/// The order the merge takes the morsels' results in
+	/// ([`MorselPlan::merge`](crate::exec::planner::placement::MorselPlan::merge)).
+	merge: MergeOrder,
+	/// For a merge that takes results as morsels finish and absorbs them in the order of the scan:
+	/// the results of the morsels done, by the first key of the morsels each holds, which wait
+	/// until what lies before them has been merged.
+	ready: BTreeMap<OrderKey, Ready>,
+	/// How many of `ready` hold no place of the morsels in flight ([`Ready::placed`]).
+	unplaced: usize,
+	/// The accumulators whose terms the morsels keep for the merge to fold in order.
+	fold: Option<Fold>,
 	/// The transaction's read view, asked for once the range is first split.
 	view: Option<Arc<dyn Snapshot>>,
 	view_asked: bool,
@@ -734,20 +1203,37 @@ impl<'p> RangeSet<'p> {
 		layouts: Option<Arc<TableLayouts>>,
 		ctx: &ExecutionContext,
 	) -> Self {
+		let breakers = body_breakers(&program.pipelines[at].code);
+		let streams = matches!(
+			&program.pipelines[at].parallel,
+			Parallel::Morsels(MorselPlan {
+				combine: Combine::Concat,
+				paged: None,
+				..
+			})
+		);
 		Self {
 			program,
 			at,
 			policy: Policy::from_config(&ctx.root().ctx.config.exec),
 			dir,
 			version,
-			breakers: body_breakers(&program.pipelines[at].code),
+			fold: Fold::of(&program.pipelines[at], &breakers),
+			breakers,
 			replay: Replay::default(),
 			probe,
 			layouts,
 			pending: Pending::default(),
-			shared: Arc::new(Shared::new()),
+			shared: Arc::new(if streams {
+				Shared::new().streaming()
+			} else {
+				Shared::new()
+			}),
 			asking: Asking::default(),
 			lease: FanoutLease::new(ctx.ctx().memory().cloned()),
+			merge: super::merge_of(&program.pipelines[at]),
+			ready: BTreeMap::new(),
+			unplaced: 0,
 			view: None,
 			view_asked: false,
 			#[cfg(not(target_family = "wasm"))]
@@ -814,7 +1300,19 @@ impl<'p> RangeSet<'p> {
 		loop {
 			self.top_up(state, ctx).await?;
 			let waited = web_time::Instant::now();
-			let step = self.shared.next().await;
+			// Results held for the order of the scan are merged once nothing lies before them.
+			if let Some(result) = self.next_ready() {
+				if self.merged(result, waited, &mut hint, state, ctx, yielder, flush_at).await? {
+					return Ok(true);
+				}
+				continue;
+			}
+			let pace = Pace {
+				merge: self.merge,
+				collect: self.ready.len() - self.unplaced < self.policy.read_ahead(),
+				ready: self.ready.keys().next(),
+			};
+			let step = self.shared.next(pace).await;
 			match step {
 				Step::Empty => {
 					self.pending
@@ -824,61 +1322,35 @@ impl<'p> RangeSet<'p> {
 				}
 				// A morsel was queued while the front one runs: the next turn hands it on.
 				Step::Wait => {}
-				Step::Merge(result) => {
-					self.shared.metrics().front_wait_ns +=
-						u64::try_from(waited.elapsed().as_nanos()).unwrap_or(u64::MAX);
-					let ordinal = self.shared.metrics().merged;
-					let result = match *result {
-						Ok(result) => result,
-						Err(failure) => {
-							tracing::trace_span!("morsel", ordinal, outcome = "failed")
-								.in_scope(|| tracing::trace!("morsel failed"));
-							return Err(failure);
-						}
-					};
-					tracing::trace_span!("morsel", ordinal, outcome = "merged", rows = result.rows)
-						.in_scope(|| tracing::trace!("morsel merged"));
-					{
-						let keep = cfg!(test) || self.policy.explain_analyze();
-						let mut metrics = self.shared.metrics();
-						metrics.merged_morsel(
-							MorselStat {
-								rows: result.rows as u64,
-								bytes: result.bytes,
-								elapsed_ns: u64::try_from(result.elapsed.as_nanos())
-									.unwrap_or(u64::MAX),
-								chunks: result.chunks,
-							},
-							true,
-							keep,
-						);
-						metrics.held_window(result.held);
+				Step::Rows(mut rows, outbox) => {
+					#[cfg(test)]
+					super::test_hooks::note_streamed(ctx, rows.len());
+					super::super::fuel::tick(ctx, super::super::fuel::units(rows.len())).await?;
+					if state.output.is_empty() {
+						std::mem::swap(&mut state.output, &mut rows);
+					} else {
+						state.output.append(&mut rows);
 					}
-					// Merging a morsel walks its rows, sorted rows and groups once: no more than a
-					// morsel's worth, spent whole, the driver yielding at the next one it takes.
-					super::super::fuel::tick(ctx, super::super::fuel::units(result.rows)).await?;
-					match self.breakers.paged {
-						Some(limit) => self.replay.page(limit, result, state)?,
-						None => match self.breakers.distinct {
-							Some(distinct) => dedupe(distinct, result, state)?,
-							None => {
-								self.pending
-									.take(
-										self.program,
-										&self.breakers,
-										self.policy,
-										result,
-										state,
-										ctx,
-									)
-									.await?
-							}
-						},
-					}
+					outbox.recycle(rows);
 					hint = hint.filter(|_| state.output_len() < flush_at);
 					flush(state, yielder, flush_at, ctx).await?;
-					// Once the paging's limit is spent no morsel after it is read, merged or run.
-					if self.replay.stopped {
+				}
+				Step::Collect(key, result) => {
+					#[cfg(test)]
+					super::test_hooks::note_collected_early(ctx);
+					self.collect(key, *result, ctx).await?;
+				}
+				Step::Merge(result, early) => {
+					#[cfg(test)]
+					if early {
+						super::test_hooks::note_merged_early(ctx);
+					}
+					#[cfg(not(test))]
+					let _ = early;
+					if self
+						.merged(*result, waited, &mut hint, state, ctx, yielder, flush_at)
+						.await?
+					{
 						return Ok(true);
 					}
 				}
@@ -893,6 +1365,163 @@ impl<'p> RangeSet<'p> {
 				}
 			}
 		}
+	}
+
+	/// The earliest results the merge holds, when no morsel lies before them in the scan.
+	fn next_ready(&mut self) -> Option<FlowResult<MorselResult>> {
+		let first = self.ready.keys().next()?;
+		if self.shared.front_key().is_some_and(|front| front < *first) {
+			return None;
+		}
+		let (_, first) = self.ready.pop_first()?;
+		if !first.placed {
+			self.unplaced -= 1;
+		}
+		self.shared.table().held = self.ready.len() - self.unplaced;
+		Some(first.result)
+	}
+
+	/// Hold the results of the morsel at `key`, which is done before morsels that precede it in
+	/// the scan. A merge that combines the partial states of morsels next to one another does so
+	/// with those it holds, the earlier before the later, wherever no morsel lies between them.
+	/// The rows of the results folded into one another are charged to the thread's fuel once they
+	/// are held, as merging a morsel charges its rows, so the driver yields between one fold and
+	/// the next.
+	async fn collect(
+		&mut self,
+		key: OrderKey,
+		result: FlowResult<MorselResult>,
+		ctx: &ExecutionContext,
+	) -> FlowResult<()> {
+		use std::ops::Bound::{Excluded, Unbounded};
+		let mut held = Ready {
+			result,
+			last: key.clone(),
+			placed: true,
+		};
+		let mut first = key;
+		let mut folded = 0usize;
+		if self.merge == MergeOrder::Adjacent {
+			let before = self.ready.range(..first.clone()).next_back().map(|(key, _)| key.clone());
+			if let Some(before) = before
+				&& let Some(left) = self.ready.get_mut(&before)
+				&& !self.shared.between(&left.last, &first)
+			{
+				let rows = held.rows();
+				match left.absorb(held, &self.breakers) {
+					None => {
+						folded += rows;
+						#[cfg(test)]
+						super::test_hooks::note_combined(ctx);
+						first = before;
+						held = self.ready.remove(&first).expect("the entry just combined into");
+					}
+					Some(rejected) => held = rejected,
+				}
+			}
+			loop {
+				let after = self
+					.ready
+					.range((Excluded(first.clone()), Unbounded))
+					.next()
+					.map(|(key, _)| key.clone());
+				let Some(after) = after else {
+					break;
+				};
+				if self.shared.between(&held.last, &after) {
+					break;
+				}
+				let Some(right) = self.ready.remove(&after) else {
+					break;
+				};
+				let rows = right.rows();
+				match held.absorb(right, &self.breakers) {
+					None => {
+						folded += rows;
+						#[cfg(test)]
+						super::test_hooks::note_combined(ctx);
+					}
+					Some(rejected) => {
+						self.ready.insert(after, rejected);
+						break;
+					}
+				}
+			}
+		}
+		held.placed = takes_a_place(self.merge, &mut held.result);
+		if !held.placed {
+			self.unplaced += 1;
+		}
+		self.ready.insert(first, held);
+		self.shared.table().held = self.ready.len() - self.unplaced;
+		#[cfg(test)]
+		super::test_hooks::note_results_held(ctx, self.ready.len());
+		super::super::fuel::tick(ctx, super::super::fuel::units(folded)).await
+	}
+
+	/// Take the results of a morsel the merge has reached: raise its failure, or absorb it into the
+	/// statement's state. `true` when the paging's limit is spent and the pipeline takes no more
+	/// rows.
+	#[expect(
+		clippy::too_many_arguments,
+		reason = "a result with when it was waited for, the hint, state, context and output"
+	)]
+	async fn merged(
+		&mut self,
+		result: FlowResult<MorselResult>,
+		waited: web_time::Instant,
+		hint: &mut Option<u32>,
+		state: &mut State,
+		ctx: &ExecutionContext,
+		yielder: &mut Out<'_, '_>,
+		flush_at: usize,
+	) -> FlowResult<bool> {
+		self.shared.metrics().front_wait_ns +=
+			u64::try_from(waited.elapsed().as_nanos()).unwrap_or(u64::MAX);
+		let ordinal = self.shared.metrics().merged;
+		let result = match result {
+			Ok(result) => result,
+			Err(failure) => {
+				tracing::trace_span!("morsel", ordinal, outcome = "failed")
+					.in_scope(|| tracing::trace!("morsel failed"));
+				return Err(failure);
+			}
+		};
+		tracing::trace_span!("morsel", ordinal, outcome = "merged", rows = result.rows)
+			.in_scope(|| tracing::trace!("morsel merged"));
+		{
+			let keep = cfg!(test) || self.policy.explain_analyze();
+			let mut metrics = self.shared.metrics();
+			metrics.merged_morsel(
+				MorselStat {
+					rows: result.rows as u64,
+					bytes: result.bytes,
+					elapsed_ns: u64::try_from(result.elapsed.as_nanos()).unwrap_or(u64::MAX),
+					chunks: result.chunks,
+				},
+				true,
+				keep,
+			);
+			metrics.held_window(result.held);
+		}
+		// Merging a morsel walks its rows, sorted rows and groups once: no more than a morsel's
+		// worth, spent whole, the driver yielding at the next one it takes.
+		super::super::fuel::tick(ctx, super::super::fuel::units(result.rows)).await?;
+		match self.breakers.paged {
+			Some(limit) => self.replay.page(limit, result, state)?,
+			None => match self.breakers.distinct {
+				Some(distinct) => dedupe(distinct, result, state)?,
+				None => {
+					self.pending
+						.take(self.program, &self.breakers, self.policy, result, state, ctx)
+						.await?;
+				}
+			},
+		}
+		*hint = hint.filter(|_| state.output_len() < flush_at);
+		flush(state, yielder, flush_at, ctx).await?;
+		// Once the paging's limit is spent no morsel after it is read, merged or run.
+		Ok(self.replay.stopped)
 	}
 
 	/// What the run has observed, for the policy's run-time questions.
@@ -932,6 +1561,16 @@ impl<'p> RangeSet<'p> {
 		0
 	}
 
+	/// The transaction's read view, which workers read their morsels through: asked for once, and
+	/// `None` where the backend gives none.
+	fn read_view(&mut self, ctx: &ExecutionContext) -> Option<Arc<dyn Snapshot>> {
+		if !self.view_asked {
+			self.view_asked = true;
+			self.view = ctx.txn().snapshot();
+		}
+		self.view.clone()
+	}
+
 	/// Hand waiting morsels to workers, as many as there are places for and the lease grants a
 	/// worker's copy of the slots for. A refused grant revokes the lease: no worker is spawned from
 	/// then on, and the running ones park at their next chunk boundary, leaving the morsels that
@@ -957,11 +1596,7 @@ impl<'p> RangeSet<'p> {
 			}
 			return Ok(());
 		}
-		if !self.view_asked {
-			self.view_asked = true;
-			self.view = ctx.txn().snapshot();
-		}
-		let Some(view) = self.view.clone() else {
+		let Some(view) = self.read_view(ctx) else {
 			return Ok(());
 		};
 		let statement = places::of(state).clone();
@@ -980,6 +1615,7 @@ impl<'p> RangeSet<'p> {
 				break;
 			};
 			let mut under = Under::of(state, self.program, ctx)?;
+			under.fold.clone_from(&self.fold);
 			// A refused grant gives the place back: the coordinator runs what waits.
 			let Some(grant) = self.lease.grant(under.kept.iter().sum(), ctx).await else {
 				break;
@@ -1094,6 +1730,9 @@ impl<'p> RangeSet<'p> {
 		let mut first = true;
 		let mut last: Vec<u8> = Vec::new();
 		let mut own = span.clone();
+		// The far end of the range, read once: the last key a forward scan reaches, the first a
+		// backward one does; `None` inside when the range holds nothing past what was read.
+		let mut far: Option<Option<Vec<u8>>> = None;
 		let shared = Arc::clone(&self.shared);
 		let running = Registered::new(&shared);
 		// The source ends its producer on every exit path, so the loop runs in a block whose
@@ -1220,7 +1859,36 @@ impl<'p> RangeSet<'p> {
 				};
 				// Where the range is cut next, and why: the policy's first split, or once that is
 				// done a morsel's donation.
+				let rest = rest_of(&own, self.dir, &last);
 				let (target, origin, requested) = if !asked {
+					let mut signals = Signals {
+						no_view: self.read_view(ctx).is_none(),
+						..signals
+					};
+					if self.policy.may_split(&signals) && progress.visited >= Policy::MEASURED_FROM
+					{
+						let far = match &far {
+							Some(far) => far.clone(),
+							None => {
+								let found = far_key(&txn, &rest, self.dir, self.version)
+									.await
+									.context("Failed to read the far end of the scan")?;
+								far = Some(found.clone());
+								found
+							}
+						};
+						signals.remaining_estimate = Some(match far {
+							Some(far) => steal::remaining_to(
+								&far,
+								self.dir,
+								&progress.first,
+								&last,
+								progress.visited,
+								progress.bytes,
+							),
+							None => surrealdb_kvs::Estimate::default(),
+						});
+					}
 					match self.policy.split(&signals) {
 						Split::Split {
 							target,
@@ -1245,14 +1913,6 @@ impl<'p> RangeSet<'p> {
 						Some(cut) => cut,
 						None => continue,
 					}
-				};
-				let rest = match self.dir {
-					Direction::Forward => {
-						let mut start = last.clone();
-						start.push(0);
-						own.part(&start, own.bounds().1)
-					}
-					Direction::Backward => own.part(own.bounds().0, &last),
 				};
 				let (lo, hi) = rest.bounds();
 				if lo >= hi {
@@ -1327,6 +1987,38 @@ impl<'p> RangeSet<'p> {
 	}
 }
 
+/// The part of `own` that a scan in `dir` has not read, `last` being the last key it read.
+fn rest_of(own: &RawRange, dir: Direction, last: &[u8]) -> RawRange {
+	match dir {
+		Direction::Forward => {
+			let mut start = last.to_vec();
+			start.push(0);
+			own.part(&start, own.bounds().1)
+		}
+		Direction::Backward => own.part(own.bounds().0, last),
+	}
+}
+
+/// The far end of `rest`, the unread part of a scan in `dir`: the last key it holds for a forward
+/// scan, the first for a backward one. `None` when it holds none; a failed read is the scan's
+/// failure.
+async fn far_key(
+	txn: &crate::kvs::Transaction,
+	rest: &RawRange,
+	dir: Direction,
+	version: Option<u64>,
+) -> anyhow::Result<Option<Vec<u8>>> {
+	let (lo, hi) = rest.bounds();
+	if lo >= hi {
+		return Ok(None);
+	}
+	let found = match dir {
+		Direction::Forward => txn.keysr_raw(rest.clone(), 1, 0, version).await,
+		Direction::Backward => txn.keys_raw(rest.clone(), 1, 0, version).await,
+	};
+	Ok(found?.pop())
+}
+
 /// A worker: take the earliest waiting morsel, read its range through `view` and run it, until none
 /// waits or the scan is done. A worker with no morsel to take asks the running morsel with the most
 /// left to donate part of it; a worker whose statement is no longer the one that should hold its
@@ -1359,8 +2051,8 @@ impl Worker {
 		loop {
 			// A worker with no morsel to take, or no room for one, returns its place; the
 			// coordinator hands morsels to new workers as the merge makes room.
-			let (key, span) = match self.shared.claim(self.policy.read_ahead()) {
-				Claim::Morsel(key, span) => (key, span),
+			let (key, span, outbox) = match self.shared.claim(self.policy.read_ahead()) {
+				Claim::Morsel(key, span, outbox) => (key, span, outbox),
 				Claim::Full => break,
 				Claim::Empty => {
 					if self.shared.steal(self.policy, &self.statement, &mut tried).await {
@@ -1375,8 +2067,11 @@ impl Worker {
 				key: Some(key.clone()),
 			};
 			let cancelled = || self.shared.cancelled(&key);
+			#[cfg(test)]
+			super::test_hooks::delay_claimed(&self.ctx).await;
 			let running = Registered::new(&self.shared);
-			let end = self.read(&mut cursor, &span, &cancelled, running.slot()).await;
+			let end =
+				self.read(&mut cursor, &span, &cancelled, running.slot(), outbox.as_deref()).await;
 			drop(running);
 			// A cursor that failed, or stopped before its range ended, is not reused.
 			if !matches!(end, Ok(RangeEnd::Done(_))) {
@@ -1399,6 +2094,7 @@ impl Worker {
 		span: &RawRange,
 		cancelled: &(dyn Fn() -> bool + Sync),
 		slot: &Slot,
+		outbox: Option<&Outbox>,
 	) -> FlowResult<RangeEnd> {
 		let range = span.clone().into_key_range();
 		match cursor {
@@ -1426,6 +2122,7 @@ impl Worker {
 				chunk: self.policy.owner_chunk(self.policy.scan_chunk()),
 				window: self.policy.window_bytes(),
 				lease: &self.lease,
+				outbox,
 				donor: steal::Donor {
 					gate: Gate {
 						shared: &self.shared,
@@ -1444,5 +2141,153 @@ impl Worker {
 			cancelled,
 		)
 		.await
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::exec::memory::runs::{BreakerKind, RunOrder, RunSpec};
+
+	fn span(at: u8) -> RawRange {
+		RawRange::of_bytes(&[at], &[at + 1])
+	}
+
+	fn finished() -> Box<FlowResult<MorselResult>> {
+		Box::new(Ok(MorselResult {
+			output: Vec::new(),
+			sorts: Vec::new(),
+			slabs: Vec::new(),
+			arrivals: Vec::new(),
+			groups: Vec::new(),
+			spilled: Vec::new(),
+			sort_accounts: Vec::new(),
+			group_accounts: Vec::new(),
+			ends: Vec::new(),
+			rows: 0,
+			elapsed: std::time::Duration::ZERO,
+			bytes: 0,
+			chunks: 0,
+			held: 0,
+		}))
+	}
+
+	/// The morsels running, finished and waiting for the merge, and the results the coordinator
+	/// holds for it, are bounded together: results moved out of the table to be held for the
+	/// morsels before them still count, and a worker takes a morsel again once they are merged.
+	#[test]
+	fn running_and_held_morsels_are_bounded_together() {
+		const MOST: usize = 3;
+		let shared = Shared::new();
+		for at in 0..5 {
+			shared.queue(OrderKey::of(&span(at), Direction::Forward), span(at), Origin::Split);
+		}
+		for at in 0..MOST as u8 {
+			let Claim::Morsel(key, ..) = shared.claim(MOST) else {
+				panic!("morsel {at} is taken");
+			};
+			assert_eq!(key, OrderKey::of(&span(at), Direction::Forward));
+		}
+		assert!(matches!(shared.claim(MOST), Claim::Full));
+		assert_eq!(shared.open(MOST), (2, 0));
+
+		// The last morsel finishes ahead of the first: the coordinator holds its results.
+		let last = OrderKey::of(&span(2), Direction::Forward);
+		shared.table().started.insert(last.clone(), Started::Done(finished()));
+		let Step::Collect(key, _) = shared.step_early(true, None) else {
+			panic!("the results are held for the morsels before them");
+		};
+		assert_eq!(key, last);
+		assert!(matches!(shared.claim(MOST), Claim::Full), "a held result counts as in flight");
+		assert_eq!(shared.open(MOST), (2, 0));
+
+		// The merge takes what it held: its place is free again.
+		shared.table().held = 0;
+		assert_eq!(shared.open(MOST), (2, 1));
+		assert!(matches!(shared.claim(MOST), Claim::Morsel(..)));
+		assert!(matches!(shared.claim(MOST), Claim::Full));
+	}
+
+	/// A result the coordinator takes ahead of the morsels before it counts as a morsel in flight
+	/// until the coordinator has decided whether it holds a place.
+	#[test]
+	fn a_result_taken_early_counts_as_in_flight() {
+		const MOST: usize = 3;
+		let shared = Shared::new();
+		for at in 0..5 {
+			shared.queue(OrderKey::of(&span(at), Direction::Forward), span(at), Origin::Split);
+		}
+		for _ in 0..MOST {
+			assert!(matches!(shared.claim(MOST), Claim::Morsel(..)));
+		}
+		let last = OrderKey::of(&span(2), Direction::Forward);
+		shared.table().started.insert(last, Started::Done(finished()));
+		assert!(matches!(shared.step_early(true, None), Step::Collect(..)));
+		assert_eq!(shared.open(MOST).1, 0, "the held result counts as in flight");
+	}
+
+	/// A sorted run in memory frees the place of its morsel only where it holds entries, the morsel
+	/// charged every non-empty sort to the query's lease, and the lease takes the bytes of holding
+	/// the result too. An empty run, a run no lease covers, a spilled run and the results of every
+	/// other merge hold their places.
+	#[test]
+	fn a_held_result_holds_a_place_or_charges_its_size() {
+		let entries = || {
+			vec![vec![(
+				vec![crate::val::Value::from(1)],
+				crate::exec::vm::interp::SortRow::Value(crate::val::Value::from(1)),
+			)]]
+		};
+		let memory = crate::exec::memory::MemoryHost {
+			governor: Arc::new(crate::exec::memory::Unlimited),
+			store: None,
+			settings: crate::exec::memory::MemorySettings {
+				floor: 100,
+				fan_in: 2,
+				chunk: 64,
+				wait: std::time::Duration::ZERO,
+				max: usize::MAX,
+			},
+		}
+		.query();
+		let charged =
+			|sorts: Vec<Vec<(Vec<crate::val::Value>, crate::exec::vm::interp::SortRow)>>| {
+				let mut result = finished();
+				if let Ok(result) = &mut *result {
+					result.sorts = sorts;
+					result.sort_accounts = vec![memory.reservation()];
+				}
+				result
+			};
+
+		let mut run = charged(entries());
+		assert!(!takes_a_place(MergeOrder::Positioned, &mut run), "a charged run frees it");
+		let used = (*run).as_ref().map_or(0, |run| run.sort_accounts[0].used());
+		let size = (*run).as_ref().map_or(0, held_result_bytes);
+		assert!(size > 0 && used >= size, "the run's size is charged: {used} of {size}");
+
+		let mut empty = charged(vec![Vec::new()]);
+		assert!(takes_a_place(MergeOrder::Positioned, &mut empty), "an empty run holds it");
+
+		let mut uncharged = finished();
+		if let Ok(result) = &mut *uncharged {
+			result.sorts = entries();
+		}
+		assert!(takes_a_place(MergeOrder::Positioned, &mut uncharged), "no lease: it holds it");
+
+		let mut spilled = charged(entries());
+		if let Ok(result) = &mut *spilled {
+			result.spilled.push(crate::exec::vm::partial::Partial {
+				spec: RunSpec::new(BreakerKind::Sort, 0, 1, RunOrder::Plain),
+				runs: Default::default(),
+				held: Vec::new(),
+				side: Vec::new(),
+				counts: Default::default(),
+			});
+		}
+		assert!(takes_a_place(MergeOrder::Positioned, &mut spilled), "a spilled run holds it");
+
+		let mut other = charged(entries());
+		assert!(takes_a_place(MergeOrder::Adjacent, &mut other), "other merges hold it");
 	}
 }

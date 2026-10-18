@@ -39,7 +39,7 @@ use surrealdb_kvs::Page;
 
 use super::fuel;
 use super::interp::State;
-use super::ir_exec::{PendingCandidate, held_ahead, install_in_flight, ir_state, scalar_of};
+use super::ir_exec::{PendingCandidate, held_ahead, ir_state, scalar_of};
 use super::ir_instr::{
 	BatchRead, BufferScope, IrForm, IrInstr, LookAhead, SiteKey, WriteResumeSpec,
 };
@@ -146,7 +146,12 @@ fn resume_candidate<'r>(
 	regs: &mut [Scalar<'r>],
 	state: &mut State,
 ) -> FlowResult<IrResume> {
-	let Some(candidate) = ir_state(state).and_then(|ir| ir.candidate.take()) else {
+	let Some(write) = state.write.as_deref_mut() else {
+		return Err(ControlFlow::Err(anyhow::anyhow!(
+			"a write candidate was pending with no write state"
+		)));
+	};
+	let Some(candidate) = write.take_pending() else {
 		return Err(ControlFlow::Err(anyhow::anyhow!(
 			"a write resume reached the host with no candidate"
 		)));
@@ -159,12 +164,7 @@ fn resume_candidate<'r>(
 	} = candidate;
 	let target = resume_target(spec, &stop)?;
 	fuel::interrupted(host.ctx())?;
-	let Some(write) = state.write.as_deref_mut() else {
-		return Err(ControlFlow::Err(anyhow::anyhow!(
-			"a write candidate was pending with no write state"
-		)));
-	};
-	install_in_flight(write, row, ctx)?;
+	write.resume_candidate(row, ctx);
 	restore_live(live, regs)?;
 	Ok(IrResume::At(target))
 }

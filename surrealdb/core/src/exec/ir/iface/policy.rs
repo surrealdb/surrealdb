@@ -24,6 +24,12 @@ pub(crate) struct LoopFacts {
 	pub(crate) delivery: SourceDelivery,
 	pub(crate) multiplicity: Multiplicity,
 	pub(crate) key_path: ElemPath,
+	/// For a write loop: whether an op the compute slice holds reads stored data. A compute half
+	/// that reads data reads what the apply half of earlier iterations writes.
+	pub(crate) compute_reads_data: bool,
+	/// For a write loop: whether every stage the plan marks `Compute` is in the compute slice, so
+	/// that the plan's marks are where the apply half starts.
+	pub(crate) cut_at_marks: bool,
 }
 
 /// The single placement decision point.

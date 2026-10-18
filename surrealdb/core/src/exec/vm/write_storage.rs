@@ -1302,6 +1302,43 @@ async fn record_format<'c>(
 	.map_err(ControlFlow::Err)
 }
 
+/// Encodes the post-image of the record in flight, for the stage that stores it, from the part of a
+/// write that runs apart from its apply.
+///
+/// Reads the format only where the table's slot already holds it at the transaction's current
+/// layout epoch, so nothing is resolved, committed or forfeited here. A record that names another
+/// table than the statement's, a statement that imports, a slot that holds no format and an image
+/// that does not encode leave the record as it is: the storing stage encodes it, and raises what
+/// encoding raises, where the serial run raises it.
+#[cfg(not(target_family = "wasm"))]
+pub(in crate::exec::vm) fn encode_ahead(row: &mut WriteRow, ctx: &WriteCtx) {
+	let Some(rid) = row.id.as_ref() else {
+		return;
+	};
+	if rid.table != ctx.table.name || ctx.exec().options().is_some_and(|options| options.import) {
+		return;
+	}
+	let epoch = ctx.txn().layout_epoch();
+	let Some(hit) = ctx.format.get(epoch) else {
+		return;
+	};
+	let generation = crate::catalog::written_generation(hit.format, row.metadata.as_ref());
+	let Ok(bytes) = crate::catalog::encode_record_with(
+		hit.format,
+		hit.layouts,
+		row.metadata.as_ref(),
+		&row.current,
+		Some(rid),
+	) else {
+		return;
+	};
+	row.encoded = Some(crate::exec::operators::write::row::EncodedImage {
+		bytes,
+		epoch,
+		generation,
+	});
+}
+
 /// Write the record in flight at its key, as [`StorageInstr::Store`] states.
 async fn store(
 	row: &mut WriteRow,
@@ -1340,14 +1377,39 @@ async fn store(
 	// every later read of it would recurse past what a thread's stack holds. It packs the row
 	// when the table's layout is packed and the row fits it, and checks the layouts against the
 	// row's table.
-	let bytes = crate::catalog::encode_record_with(
-		resolved.format(),
-		resolved.layouts(),
-		row.metadata.as_ref(),
-		&row.current,
-		Some(&rid),
-	)
-	.map_err(ControlFlow::Err)?;
+	let ahead = row
+		.encoded
+		.take()
+		.filter(|encoded| encoded.epoch == txn.layout_epoch() && encoded.generation == generation);
+	let bytes = match ahead {
+		Some(encoded) => {
+			// The bytes were made from the image the stages left, which no stage since has changed.
+			debug_assert_eq!(
+				Some(&encoded.bytes),
+				crate::catalog::encode_record_with(
+					resolved.format(),
+					resolved.layouts(),
+					row.metadata.as_ref(),
+					&row.current,
+					Some(&rid),
+				)
+				.ok()
+				.as_ref(),
+				"a record encoded ahead of its store differs from its image"
+			);
+			#[cfg(test)]
+			crate::exec::vm::note_encoded_ahead();
+			encoded.bytes
+		}
+		None => crate::catalog::encode_record_with(
+			resolved.format(),
+			resolved.layouts(),
+			row.metadata.as_ref(),
+			&row.current,
+			Some(&rid),
+		)
+		.map_err(ControlFlow::Err)?,
+	};
 	if create {
 		txn.put(key.into(), bytes).await.map_err(|err| {
 			if matches!(storage_error(&err), Some(crate::kvs::Error::TransactionKeyAlreadyExists)) {

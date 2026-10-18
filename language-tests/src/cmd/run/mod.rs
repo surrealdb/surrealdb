@@ -36,9 +36,14 @@ mod provisioner;
 pub struct TestRunConfig {
 	pub backend: Backend,
 	pub mode: RunMode,
+	pub unordered_rows: bool,
 }
 
 impl RunConfig for TestRunConfig {
+	fn unordered_rows(&self) -> bool {
+		self.unordered_rows
+	}
+
 	fn name(&self, case: &CaseImports) -> String {
 		match self.mode {
 			RunMode::Request => format!("{} on {}", case.test.origin.path, self.backend),
@@ -63,6 +68,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 
 	let backend = *matches.get_one::<Backend>("backend").unwrap();
 	let mode = *matches.get_one::<RunMode>("mode").unwrap();
+	let unordered_rows = matches.get_flag("unordered-rows");
 
 	#[cfg(not(feature = "internal-fragments"))]
 	if mode == RunMode::Fragments {
@@ -179,6 +185,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 			vec![TestRunConfig {
 				backend,
 				mode,
+				unordered_rows,
 			}]
 		});
 
@@ -1628,6 +1635,7 @@ mod tests {
 			config: TestRunConfig {
 				backend: Backend::Memory,
 				mode: RunMode::Request,
+				unordered_rows: false,
 			},
 		}
 	}

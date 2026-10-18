@@ -290,6 +290,52 @@ pub(crate) fn static_mark(stage: WriteStageKind) -> WriteMark {
 	}
 }
 
+/// Whether running the stage may change the record's after-image or its metadata.
+///
+/// A stage that builds, derives or clears the image does; a stage that checks it, stores it, or
+/// reads it into an index, an event, a notification, the change feed or the output does not. The
+/// physical plan encodes the after-image ahead of the apply half only where no stage between the
+/// cut and the stage that stores it changes it.
+pub(crate) fn stage_mutates_image(stage: WriteStageKind) -> bool {
+	match stage {
+		WriteStageKind::ComputeInputData
+		| WriteStageKind::CheckDataFields
+		| WriteStageKind::ProcessRecordData
+		| WriteStageKind::ProcessMergeData
+		| WriteStageKind::DefaultRecordData
+		| WriteStageKind::GenerateRecordId
+		| WriteStageKind::ProcessTableFields
+		| WriteStageKind::CleanupTableFields
+		| WriteStageKind::ClearRecordData
+		| WriteStageKind::StoreEdgesData
+		| WriteStageKind::MaterialiseObservedFields => true,
+		WriteStageKind::CheckRecordUserAccess
+		| WriteStageKind::CheckRecordExists
+		| WriteStageKind::CheckTableNotView
+		| WriteStageKind::CheckTableNotLightweight(_)
+		| WriteStageKind::CheckTableType(_)
+		| WriteStageKind::CheckPermissionsQuickCreate
+		| WriteStageKind::CheckUpdatePermissions
+		| WriteStageKind::CheckDeletePermissions
+		| WriteStageKind::CheckCreatePermissions
+		| WriteStageKind::RecheckUpdatePermissions
+		| WriteStageKind::CheckWhereCondition
+		| WriteStageKind::CleanupTableReferences
+		| WriteStageKind::StoreRecordData
+		| WriteStageKind::StoreInlineAdjacencyData
+		| WriteStageKind::StoreIndexData
+		| WriteStageKind::ReclaimDocId
+		| WriteStageKind::PurgeRecordData
+		| WriteStageKind::ProcessTableReferences
+		| WriteStageKind::ProcessTableViews(_)
+		| WriteStageKind::ProcessTableEvents(_)
+		| WriteStageKind::ProcessTableLives(_)
+		| WriteStageKind::ProcessChangefeeds
+		| WriteStageKind::CheckSelectPermissions(_)
+		| WriteStageKind::OutputWrite => false,
+	}
+}
+
 /// The IR's name for an executor stage. The two enums name the same stages with the same
 /// payloads, so the map is total and [`stage_id`] is its inverse.
 pub(crate) fn stage_kind(id: StageId) -> WriteStageKind {

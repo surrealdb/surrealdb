@@ -32,6 +32,10 @@ pub(crate) enum LoopRefusal {
 	Barrier(BarrierCause),
 	/// The sink has no combine.
 	NoCombine,
+	/// A write loop whose body writes a record of the table its source reads, at a key that is not
+	/// the element's own, triggered writes included: a serial run's source may read what an
+	/// earlier iteration rewrote.
+	SourceWritten,
 	/// A write loop over a stream that may repeat an identity, or whose write key is not the
 	/// stream's key path: two iterations may write one key.
 	MayRepeatWrite,

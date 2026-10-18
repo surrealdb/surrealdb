@@ -297,6 +297,10 @@ pub struct Planner<'ctx> {
 	/// plan states at the current version is read at it ([`Self::at_request_root`]). A unit
 	/// compiled on its own, and every planner derived to compile one, is not.
 	request_root: bool,
+	/// Whether the statement planned is the value a top-level `LET` binds, whose rows the
+	/// statements after the `LET` read in the order they were bound
+	/// ([`Self::binding_rows`]).
+	binds_rows: bool,
 }
 
 /// How a statement reaches the catalog objects that code it runs may redefine
@@ -374,6 +378,7 @@ impl<'ctx> Planner<'ctx> {
 			stored_clause: false,
 			trusts_index_shapes: false,
 			request_root: false,
+			binds_rows: false,
 		}
 	}
 
@@ -419,6 +424,7 @@ impl<'ctx> Planner<'ctx> {
 			stored_clause: false,
 			trusts_index_shapes: false,
 			request_root: false,
+			binds_rows: false,
 		}
 	}
 
@@ -1091,6 +1097,7 @@ impl<'ctx> Planner<'ctx> {
 			stored_clause: false,
 			trusts_index_shapes: false,
 			request_root: false,
+			binds_rows: false,
 		}
 	}
 
@@ -1143,6 +1150,7 @@ impl<'ctx> Planner<'ctx> {
 			stored_clause: self.stored_clause,
 			trusts_index_shapes: self.trusts_index_shapes,
 			request_root: self.request_root,
+			binds_rows: self.binds_rows,
 		}
 	}
 
@@ -1203,6 +1211,20 @@ impl<'ctx> Planner<'ctx> {
 	pub(crate) fn trusting_index_shapes(mut self, reads_only: bool) -> Self {
 		self.trusts_index_shapes = reads_only;
 		self
+	}
+
+	/// This planner planning the value of a top-level `LET`: the statements after the `LET`
+	/// read its rows in the order they were bound, so no pipeline of it may hand its rows on in
+	/// another order than the serial run's.
+	pub(crate) fn binding_rows(mut self) -> Self {
+		self.binds_rows = true;
+		self
+	}
+
+	/// Whether this planner plans the value of a top-level `LET`
+	/// ([`Self::binding_rows`]).
+	pub(crate) fn binds_rows(&self) -> bool {
+		self.binds_rows
 	}
 
 	/// Whether access-path selection may trust the value shapes the indexes
@@ -1621,16 +1643,32 @@ pub(crate) async fn plan_statement_on(
 		perms_suppressed,
 		&[],
 		false,
+		false,
 	)
 	.await
 }
 
+/// [`plan_statement_inner`] for the value a top-level `LET` binds: the statements after the
+/// `LET` read its rows in the order they were bound.
+pub(crate) async fn plan_binding_value(
+	op: LogicalOp,
+	ctx: &FrozenContext,
+	registry: &FunctionRegistry,
+	txn: Arc<crate::kvs::Transaction>,
+	auth: Option<Arc<crate::iam::Auth>>,
+	speculation: Option<Arc<crate::dbs::Options>>,
+) -> Result<Arc<dyn ExecOperator>, Error> {
+	plan_statement_with(op, ctx, registry, txn, auth, 0, speculation, false, &[], false, true).await
+}
+
 /// [`plan_statement_on`] for a statement whose parameters `shadowed` names
 /// are looked up when the program runs, never substituted into the plan: the
-/// plan then serves every evaluation that binds them differently.
+/// plan then serves every evaluation that binds them differently. `binds_rows` is
+/// whether the statement is the value of a top-level `LET`
+/// ([`Planner::binding_rows`]).
 #[expect(
 	clippy::too_many_arguments,
-	reason = "the arguments of plan_statement_on and the names the plan leaves to the run"
+	reason = "the arguments of plan_statement_on, the names the plan leaves to the run and how its rows are read"
 )]
 pub(crate) async fn plan_statement_scoped(
 	op: LogicalOp,
@@ -1641,6 +1679,7 @@ pub(crate) async fn plan_statement_scoped(
 	depth: u32,
 	perms_suppressed: bool,
 	shadowed: &[String],
+	binds_rows: bool,
 ) -> Result<Arc<dyn ExecOperator>, Error> {
 	plan_statement_with(
 		op,
@@ -1653,13 +1692,19 @@ pub(crate) async fn plan_statement_scoped(
 		perms_suppressed,
 		shadowed,
 		false,
+		binds_rows,
 	)
 	.await
 }
 
 /// [`plan_statement_scoped`] for a top-level statement of a request, planned
 /// as the statement of a request it is ([`Planner::at_request_root`]): the
-/// request's own frame runs it.
+/// request's own frame runs it. `binds_rows` is as [`plan_statement_scoped`]
+/// takes it.
+#[expect(
+	clippy::too_many_arguments,
+	reason = "the arguments of plan_statement_scoped without the depth a request's statement starts at"
+)]
 pub(crate) async fn plan_request_statement_scoped(
 	op: LogicalOp,
 	ctx: &FrozenContext,
@@ -1668,9 +1713,22 @@ pub(crate) async fn plan_request_statement_scoped(
 	auth: Option<Arc<crate::iam::Auth>>,
 	perms_suppressed: bool,
 	shadowed: &[String],
+	binds_rows: bool,
 ) -> Result<Arc<dyn ExecOperator>, Error> {
-	plan_statement_with(op, ctx, registry, txn, auth, 0, None, perms_suppressed, shadowed, true)
-		.await
+	plan_statement_with(
+		op,
+		ctx,
+		registry,
+		txn,
+		auth,
+		0,
+		None,
+		perms_suppressed,
+		shadowed,
+		true,
+		binds_rows,
+	)
+	.await
 }
 
 /// Plan a top-level statement of a request when the request arrives, in the
@@ -1681,6 +1739,10 @@ pub(crate) async fn plan_request_statement_scoped(
 /// The executor plans here only a statement that runs in this transaction with
 /// no statement before it that may have changed the catalog, so the plan
 /// meets the catalog it was planned against.
+#[expect(
+	clippy::too_many_arguments,
+	reason = "the statement, its planning context, how its rows are read and the request it joins"
+)]
 pub(crate) async fn plan_request_statement(
 	op: LogicalOp,
 	ctx: &FrozenContext,
@@ -1688,6 +1750,7 @@ pub(crate) async fn plan_request_statement(
 	txn: Arc<crate::kvs::Transaction>,
 	auth: Option<Arc<crate::iam::Auth>>,
 	speculation: Option<Arc<crate::dbs::Options>>,
+	binds_rows: bool,
 	request: &mut crate::exec::vm::RequestBuilder,
 ) -> Result<crate::exec::vm::RequestEntry, Error> {
 	if let Some(why) = crate::exec::logical::unplannable_write(&op) {
@@ -1700,6 +1763,9 @@ pub(crate) async fn plan_request_statement(
 		let mut planner = Planner::with_txn(ctx, registry, Arc::clone(&txn), ns, db)
 			.trusting_index_shapes(op.read_only())
 			.at_request_root();
+		if binds_rows {
+			planner = planner.binding_rows();
+		}
 		if let Some(auth) = auth {
 			planner = planner.with_auth(auth);
 		}
@@ -1768,6 +1834,7 @@ async fn plan_statement_with(
 	perms_suppressed: bool,
 	shadowed: &[String],
 	request_root: bool,
+	binds_rows: bool,
 ) -> Result<Arc<dyn ExecOperator>, Error> {
 	// Before anything is bound or planned, so a write the planner cannot
 	// compile is refused as `PlannerUnsupported` rather than after a sibling
@@ -1787,6 +1854,9 @@ async fn plan_statement_with(
 		.with_depth(depth)
 		.with_perms_suppressed(perms_suppressed)
 		.trusting_index_shapes(op.read_only());
+	if binds_rows {
+		planner = planner.binding_rows();
+	}
 	if let Some(auth) = auth {
 		planner = planner.with_auth(auth);
 	}

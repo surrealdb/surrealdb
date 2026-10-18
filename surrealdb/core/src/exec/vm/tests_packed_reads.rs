@@ -135,6 +135,17 @@ pub(in crate::exec) async fn layouts_of(
 	layouts
 }
 
+/// A datastore holding `setup` whose scans never split, so every scan runs on the statement's
+/// task and the counters of [`observed`], which each thread keeps, count its rows.
+async fn serial_db(setup: &str) -> TestDb {
+	TestDb::new_with_config(
+		setup,
+		surrealdb_cnf::ConfigMap::empty()
+			.with_key_value("morsel_split_rows", usize::MAX.to_string()),
+	)
+	.await
+}
+
 /// The names a reader is asked for: every root field of every generation's descriptor, a name
 /// that no descriptor has, and `id`.
 fn names(layouts: &TableLayouts, rows: &[(Vec<u8>, Vec<u8>)]) -> Vec<String> {
@@ -228,7 +239,7 @@ fn assert_reads_as_the_whole_decode(
 /// its whole decode does. A packed row is read in place, a document row by [`StoredRow`].
 #[tokio::test]
 async fn a_row_reads_in_place_as_its_whole_decode_holds_it() {
-	let db = TestDb::new(&dataset()).await;
+	let db = serial_db(&dataset()).await;
 	let mut packed_generations = BTreeSet::new();
 	let (mut packed, mut documents) = (0usize, 0usize);
 	for table in ["p", LONG] {
@@ -275,7 +286,7 @@ fn refusal(error: &anyhow::Error) -> (String, String) {
 /// same bytes raises. A row the whole decode accepts is read as it is.
 #[tokio::test]
 async fn a_refused_packed_row_raises_the_whole_decodes_error() {
-	let db = TestDb::new(&dataset()).await;
+	let db = serial_db(&dataset()).await;
 	let rows = rows(&db, "p").await;
 	let layouts = layouts_of(&db, "p", &rows).await;
 	let names = names(&layouts, &rows);
@@ -346,7 +357,7 @@ async fn rows_of_another_table(db: &TestDb) -> Vec<u8> {
 /// place.
 #[tokio::test]
 async fn a_scan_reads_a_packed_row_in_place_when_its_body_reads_a_field() {
-	let db = TestDb::new(&dataset()).await;
+	let db = serial_db(&dataset()).await;
 	let owner = TestDb::owner();
 	let run = |sql: &'static str| {
 		let db = &db;
@@ -421,7 +432,7 @@ fn assert_scans_read_in_place(sql: &str) {
 /// the packed row in place, and the shapes that decode first compile to pipelines that do not.
 #[tokio::test]
 async fn the_allocation_shapes_compile_to_the_path_they_measure() {
-	let db = TestDb::new(
+	let db = serial_db(
 		"
 		DEFINE TABLE p SCHEMAFULL;
 		DEFINE FIELD a ON p TYPE int;
@@ -474,8 +485,8 @@ async fn the_allocation_shapes_compile_to_the_path_they_measure() {
 		("SELECT * FROM po WHERE b = 99", true),
 		("SELECT * FROM p WHERE b = 3", true),
 		("SELECT VALUE s FROM p WHERE b = 3", true),
-		("SELECT count() FROM p WHERE b = 99 GROUP ALL", false),
-		("SELECT lo, count() AS c FROM p GROUP BY lo", false),
+		("SELECT count() FROM p WHERE b = 99 GROUP ALL", true),
+		("SELECT lo, count() AS c FROM p GROUP BY lo", true),
 		("SELECT * FROM p ORDER BY a DESC LIMIT 10", false),
 		("SELECT * FROM p ORDER BY a ASC LIMIT 10", false),
 		("SELECT * FROM p WHERE b < 7 ORDER BY a ASC LIMIT 10", false),
@@ -498,8 +509,9 @@ async fn the_allocation_shapes_compile_to_the_path_they_measure() {
 	// A body that decodes its rows first has a source that judges stored bytes before the decode
 	// where the scan's filter allows it, and only a document answers that judgement: a packed row
 	// is always decoded. The same statement over the documents of `t` compiles to the same shape.
-	let packed = "SELECT count() FROM p WHERE b = 99 GROUP ALL";
-	let twin = "SELECT count() FROM t WHERE b = 99 GROUP ALL";
+	let packed =
+		"SELECT count() AS c, math::max(string::len(s)) AS m FROM p WHERE b = 99 GROUP ALL";
+	let twin = "SELECT count() AS c, math::max(string::len(s)) AS m FROM t WHERE b = 99 GROUP ALL";
 	let mut seen = Vec::new();
 	for sql in [packed, twin] {
 		observed::reset();
@@ -521,7 +533,7 @@ async fn the_allocation_shapes_compile_to_the_path_they_measure() {
 /// body running on the stored row.
 #[tokio::test]
 async fn the_failing_arithmetic_filters_compile_to_scans_read_in_place() {
-	let db = TestDb::new(
+	let db = serial_db(
 		"
 		DEFINE TABLE ip SCHEMAFULL;
 		DEFINE FIELD n ON ip TYPE int;
@@ -572,7 +584,7 @@ async fn the_bench_datasets_are_written_packed() {
 		10_000,
 		200,
 	);
-	let db = TestDb::new(&schemafull).await;
+	let db = serial_db(&schemafull).await;
 	let held = rows(&db, "record").await;
 	assert_eq!(held.len(), 200);
 	let mut generations = BTreeSet::new();
@@ -585,14 +597,14 @@ async fn the_bench_datasets_are_written_packed() {
 	let owner = TestDb::owner();
 	for (sql, in_place) in [
 		("SELECT * FROM record WHERE number = 21", true),
-		("SELECT count() FROM record WHERE number = 21 GROUP ALL", false),
-		("SELECT count() FROM record WHERE city = 'Tokyo' GROUP ALL", false),
+		("SELECT count() FROM record WHERE number = 21 GROUP ALL", true),
+		("SELECT count() FROM record WHERE city = 'Tokyo' GROUP ALL", true),
 		(
 			"SELECT count() FROM record WHERE geography.region.details.continent = 'Asia' GROUP ALL",
 			false,
 		),
-		("SELECT count() FROM record WHERE note IS NONE GROUP ALL", false),
-		("SELECT city, count() AS c, math::mean(score) AS m FROM record GROUP BY city", false),
+		("SELECT count() FROM record WHERE note IS NONE GROUP ALL", true),
+		("SELECT city, count() AS c, math::mean(score) AS m FROM record GROUP BY city", true),
 		("SELECT * FROM record", false),
 		("SELECT * FROM record ORDER BY score DESC", false),
 	] {
@@ -617,7 +629,7 @@ async fn the_bench_datasets_are_written_packed() {
 		5_000,
 		100,
 	);
-	let db = TestDb::new(&mixed).await;
+	let db = serial_db(&mixed).await;
 	let held = rows(&db, "record").await;
 	assert_eq!(held.len(), 200);
 	let mut generations = BTreeSet::new();
@@ -629,8 +641,9 @@ async fn the_bench_datasets_are_written_packed() {
 }
 
 /// The bench shapes over packed tables (`bench/scans/packed/*`) reach the filter and the probe over
-/// packed rows: over the bench table with a computed field, each projection decodes its rows, and
-/// the pre-decode filter judges a packed row from its columns where its predicate is selective;
+/// packed rows: over the bench table with a computed field, a projection that calls a function
+/// decodes its rows, and the pre-decode filter judges a packed row from its columns where its
+/// predicate is selective;
 /// the top-k scan of the table without one holds a probe that may refuse a packed row and refuses
 /// them.
 #[tokio::test]
@@ -642,7 +655,7 @@ async fn the_filter_and_top_k_bench_shapes_reach_the_filter_and_the_probe_of_a_p
 		10_000,
 		1_200,
 	);
-	let db = TestDb::new(&computed).await;
+	let db = serial_db(&computed).await;
 	let held = rows(&db, "record").await;
 	assert_eq!(held.len(), 1_200);
 	assert!(held.iter().all(|(_, value)| StoredRecord::is_packed_bytes(value)));
@@ -652,9 +665,9 @@ async fn the_filter_and_top_k_bench_shapes_reach_the_filter_and_the_probe_of_a_p
 	// predicate selective: an equality and a set of integers refuse most rows, which an
 	// inequality does not, so no packed row is checked for it and each is left to the decode.
 	for (sql, judges_packed) in [
-		("SELECT name, age FROM record WHERE number = 21".to_owned(), true),
-		(format!("SELECT name FROM record WHERE number IN [{many}]"), true),
-		("SELECT name FROM record WHERE number != 21".to_owned(), false),
+		("SELECT name, age, string::len(name) AS l FROM record WHERE number = 21".to_owned(), true),
+		(format!("SELECT name, string::len(name) AS l FROM record WHERE number IN [{many}]"), true),
+		("SELECT name, string::len(name) AS l FROM record WHERE number != 21".to_owned(), false),
 	] {
 		observed::reset();
 		for response in db.datastore().execute(&sql, &owner, None).await.expect("runs") {
@@ -685,14 +698,14 @@ async fn the_filter_and_top_k_bench_shapes_reach_the_filter_and_the_probe_of_a_p
 		10_000,
 		1_200,
 	);
-	let db = TestDb::new(&twin).await;
+	let db = serial_db(&twin).await;
 	let held = rows(&db, "record").await;
 	assert_eq!(held.len(), 1_200);
 	assert!(held.iter().all(|(_, value)| !StoredRecord::is_packed_bytes(value)));
 	for sql in [
-		"SELECT name, age FROM record WHERE number = 21".to_owned(),
-		format!("SELECT name FROM record WHERE number IN [{many}]"),
-		"SELECT name FROM record WHERE number != 21".to_owned(),
+		"SELECT name, age, string::len(name) AS l FROM record WHERE number = 21".to_owned(),
+		format!("SELECT name, string::len(name) AS l FROM record WHERE number IN [{many}]"),
+		"SELECT name, string::len(name) AS l FROM record WHERE number != 21".to_owned(),
 	] {
 		observed::reset();
 		for response in db.datastore().execute(&sql, &owner, None).await.expect("runs") {
@@ -712,7 +725,7 @@ async fn the_filter_and_top_k_bench_shapes_reach_the_filter_and_the_probe_of_a_p
 		10_000,
 		1_200,
 	);
-	let db = TestDb::new(&schemafull).await;
+	let db = serial_db(&schemafull).await;
 	let sql = "SELECT * FROM record ORDER BY score DESC LIMIT 100";
 	observed::reset();
 	for response in db.datastore().execute(sql, &owner, None).await.expect("runs") {
@@ -721,8 +734,7 @@ async fn the_filter_and_top_k_bench_shapes_reach_the_filter_and_the_probe_of_a_p
 	let shapes = observed::pipelines();
 	let scans: Vec<_> = shapes.iter().filter(|shape| shape.scan).collect();
 	assert!(
-		!scans.is_empty()
-			&& scans.iter().all(|shape| !shape.in_place && shape.topk_packed == Some(true)),
+		!scans.is_empty() && scans.iter().all(|shape| shape.topk_packed == Some(true)),
 		"`{sql}`: {shapes:?}"
 	);
 	assert!(observed::probed() > 100, "`{sql}` refuses {} packed rows", observed::probed());
@@ -736,12 +748,10 @@ enum BenchPath {
 	/// The scan decodes its rows, and its pre-decode filter refuses most of them from their
 	/// columns first.
 	Filtered,
-	/// The scan decodes its rows after a pre-decode filter that refuses some of them from their
-	/// columns.
-	Judged,
 	/// The scan decodes every row whole, with no filter to judge it first.
 	Decoded,
-	/// The scan decodes its rows, and its top-k probe refuses most of them from their columns.
+	/// The scan's top-k probe refuses most of its rows from their columns before the sort takes
+	/// them.
 	TopK,
 }
 
@@ -773,11 +783,11 @@ async fn every_bench_shape_takes_the_path_it_claims() {
 	use BenchPath::*;
 	let shapes = [
 		shape!("where_integer_eq_full", InPlace),
-		shape!("where_integer_eq_count", Filtered),
-		shape!("where_string_eq_count", Filtered),
-		shape!("where_option_none_count", Judged),
+		shape!("where_integer_eq_count", InPlace),
+		shape!("where_string_eq_count", InPlace),
+		shape!("where_option_none_count", InPlace),
 		shape!("where_nested_eq_count", Filtered),
-		shape!("aggregate_group_by_city", Decoded),
+		shape!("aggregate_group_by_city", InPlace),
 		shape!("scan_full", Decoded),
 		shape!("order_by_score_full", Decoded),
 		shape!("order_by_score_limit", TopK),
@@ -799,7 +809,7 @@ async fn every_bench_shape_takes_the_path_it_claims() {
 		} else {
 			600
 		};
-		let db = TestDb::new(&bench_dataset(dataset, count, loaded)).await;
+		let db = serial_db(&bench_dataset(dataset, count, loaded)).await;
 		let held = rows(&db, "record").await;
 		assert!(held.iter().all(|(_, value)| StoredRecord::is_packed_bytes(value)));
 		for (name, file, path) in shapes {
@@ -828,15 +838,6 @@ async fn every_bench_shape_takes_the_path_it_claims() {
 					);
 					assert!(filtered > held.len() / 2, "{what}: filtered {filtered}");
 				}
-				Judged => {
-					assert!(
-						scans.iter().all(|shape| {
-							!shape.in_place && shape.prefilter && shape.judges_packed
-						}),
-						"{what}"
-					);
-					assert!(filtered > 0, "{what}");
-				}
 				Decoded => {
 					assert!(
 						scans.iter().all(|shape| {
@@ -847,12 +848,7 @@ async fn every_bench_shape_takes_the_path_it_claims() {
 					assert_eq!(in_place + filtered + observed::probed(), 0, "{what}");
 				}
 				TopK => {
-					assert!(
-						scans
-							.iter()
-							.all(|shape| !shape.in_place && shape.topk_packed == Some(true)),
-						"{what}"
-					);
+					assert!(scans.iter().all(|shape| shape.topk_packed == Some(true)), "{what}");
 					assert!(observed::probed() > 0, "{what}");
 				}
 			}
@@ -892,7 +888,7 @@ async fn a_packed_scan_split_into_morsels_answers_the_serial_scan() {
 		"SELECT * FROM p WHERE s = 'five'",
 		"SELECT * FROM p WHERE i = 99",
 	];
-	let serial = TestDb::new(&dataset()).await;
+	let serial = serial_db(&dataset()).await;
 	let morsels = TestDb::new_with_config(
 		&dataset(),
 		surrealdb_cnf::ConfigMap::empty()
@@ -929,7 +925,7 @@ fn a_field_then_path_read_is_a_field_read_of_the_row() {
 /// and is not.
 #[tokio::test]
 async fn a_top_k_scan_rejects_packed_rows_only_beneath_row_local_ops() {
-	let db = TestDb::new(
+	let db = serial_db(
 		"
 		DEFINE TABLE t SCHEMAFULL;
 		DEFINE FIELD a ON t TYPE int;
@@ -967,7 +963,15 @@ async fn a_top_k_scan_rejects_packed_rows_only_beneath_row_local_ops() {
 		}
 		let keys: Vec<_> =
 			observed::pipelines().into_iter().filter_map(|shape| shape.topk_packed).collect();
-		assert_eq!(keys, [packed_rows], "`{sql}`: {:?}", observed::pipelines());
+		// A scan whose body may raise for a row carries no threshold at all, since the serial run
+		// runs the body of every row; any other carries one that judges packed rows only beneath
+		// row-local ops.
+		let judged = if packed_rows {
+			keys == [true]
+		} else {
+			keys.is_empty() || keys == [false]
+		};
+		assert!(judged, "`{sql}`: {keys:?} {:?}", observed::pipelines());
 	}
 }
 
@@ -977,7 +981,7 @@ async fn a_top_k_scan_rejects_packed_rows_only_beneath_row_local_ops() {
 #[tokio::test]
 async fn an_admitted_row_is_refused_where_the_whole_decode_refuses_it() {
 	use crate::exec::packed_view::AdmittedRow;
-	let db = TestDb::new(&dataset()).await;
+	let db = serial_db(&dataset()).await;
 	let rows = rows(&db, "p").await;
 	let layouts = layouts_of(&db, "p", &rows).await;
 	let other = rows_of_another_table(&db).await;
@@ -1041,7 +1045,7 @@ async fn an_admitted_row_is_refused_where_the_whole_decode_refuses_it() {
 /// of documents doing as much.
 #[tokio::test]
 async fn the_filter_and_the_probe_refuse_packed_rows_from_their_columns() {
-	let db = TestDb::new(
+	let db = serial_db(
 		"
 		DEFINE TABLE p SCHEMAFULL;
 		DEFINE FIELD a ON p TYPE int;
@@ -1075,9 +1079,14 @@ async fn the_filter_and_the_probe_refuse_packed_rows_from_their_columns() {
 	};
 	// The filter refuses a row it judges false, and keeps the rest for the body.
 	let (filtered, probed, _, shapes) =
-		run("SELECT count() FROM p WHERE b = 99 GROUP ALL".into()).await;
+		run("SELECT count() AS c, math::max(string::len(s)) AS m FROM p WHERE b = 99 GROUP ALL"
+			.into())
+		.await;
 	assert_eq!((filtered, probed), (2000, 0), "{shapes:?}");
-	let (filtered, ..) = run("SELECT count() FROM p WHERE b = 3 GROUP ALL".into()).await;
+	let (filtered, ..) =
+		run("SELECT count() AS c, math::max(string::len(s)) AS m FROM p WHERE b = 3 GROUP ALL"
+			.into())
+		.await;
 	assert_eq!(filtered, 2000 - (0..2000).filter(|i| i % 7 == 3).count());
 	// The probe refuses the rows that come after the sort holds its ten, best first.
 	for sql in [
@@ -1086,10 +1095,7 @@ async fn the_filter_and_the_probe_refuse_packed_rows_from_their_columns() {
 	] {
 		let (_, probed, _, shapes) = run(sql.into()).await;
 		let scans: Vec<_> = shapes.iter().filter(|shape| shape.scan).collect();
-		assert!(
-			scans.iter().all(|shape| !shape.in_place && shape.topk_packed == Some(true)),
-			"`{sql}`: {shapes:?}"
-		);
+		assert!(scans.iter().all(|shape| shape.topk_packed == Some(true)), "`{sql}`: {shapes:?}");
 		assert!(probed > 1_000, "`{sql}` refuses {probed} packed rows");
 		let twin = run(sql.replace(" p ", " t ")).await;
 		assert_eq!(twin.2, probed, "`{sql}` refuses as many rows as its twin");
@@ -1120,7 +1126,7 @@ async fn the_filter_and_the_probe_change_no_answer_over_packed_rows() {
 			};
 		};
 	";
-	let db = TestDb::new(&format!("{}{bulk}", dataset())).await;
+	let db = serial_db(&format!("{}{bulk}", dataset())).await;
 	let mut statements: Vec<(String, String)> = Vec::new();
 	let predicates = [
 		"i < 8",

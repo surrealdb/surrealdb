@@ -277,7 +277,7 @@ impl ValueEnum for ColorMode {
 }
 
 /// A `KEY=VALUE` datastore configuration pair.
-fn config_pair(pair: &str) -> Result<(String, String), String> {
+pub(crate) fn config_pair(pair: &str) -> Result<(String, String), String> {
 	match pair.split_once('=') {
 		Some((key, value)) if !key.trim().is_empty() => {
 			Ok((key.trim().to_lowercase(), value.trim().to_owned()))
@@ -310,6 +310,9 @@ pub fn parse() -> ArgMatches {
 			)
 			.arg(
 				arg!(--"no-wip" "Skips tests marked work-in-progress")
+			)
+			.arg(
+				arg!(--"unordered-rows" "Grade the rows of a SELECT of a table or a record range that has no ORDER BY, LIMIT or START as a multiset, for runs under settings that leave their order unspecified (parallel scans). Nested values, and the rows of every other statement, are still compared exactly.")
 			)
 			.arg(
 				arg!(--"no-results" "Skips tests that have defined results, usefull when adding new tests.")

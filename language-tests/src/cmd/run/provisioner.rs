@@ -63,7 +63,14 @@ impl CreateInfo {
 		})
 	}
 
-	pub async fn produce_ds(&self, versioned: bool, cap: Capabilities) -> Result<Ds> {
+	/// A datastore opened with the keys of the run and then `own`, the keys a test names for
+	/// itself, which take the place of the run's keys of the same name.
+	pub async fn produce_ds(
+		&self,
+		versioned: bool,
+		cap: Capabilities,
+		own: &[(String, String)],
+	) -> Result<Ds> {
 		let mut path = None;
 
 		let allows_live = cap.allows_live_query_notifications();
@@ -91,7 +98,7 @@ impl CreateInfo {
 		// now-empty allowlist denies *all* `mapper()` access — every mapper test
 		// would then fail with `File access denied`. This also sets a single
 		// global allowlist shared by every language test.
-		let config = self.config.iter().fold(
+		let config = self.config.iter().chain(own).fold(
 			ConfigMap::empty().with_key_value("file_allowlist", "../tests"),
 			|config, (key, value)| config.with_key_value(key.as_str(), value.as_str()),
 		);
@@ -237,6 +244,7 @@ enum PermitInner {
 	Create {
 		versioned: bool,
 		capabilities: Box<Capabilities>,
+		config: Vec<(String, String)>,
 	},
 }
 
@@ -276,7 +284,8 @@ impl Permit {
 			PermitInner::Create {
 				versioned,
 				capabilities,
-			} => self.info.produce_ds(versioned, *capabilities).await?,
+				config,
+			} => self.info.produce_ds(versioned, *capabilities, &config).await?,
 		};
 
 		let (can_reuse, res) = f(&store.store, &self.grade_ds).await;
@@ -303,7 +312,7 @@ impl Permit {
 				}
 				// We need to send back a new datastore otherwise the que might get exhausted and
 				// jobs will get stuck forever waiting for a new task.
-				let ds = match self.info.produce_ds(false, Capabilities::all()).await {
+				let ds = match self.info.produce_ds(false, Capabilities::all(), &[]).await {
 					Ok(x) => x,
 					Err(e) => {
 						println!(
@@ -370,8 +379,9 @@ impl Provisioner {
 
 		let (send, recv) = mpsc::channel(num_jobs);
 		for at in 0..num_jobs {
-			let ds =
-				info.produce_ds(false, Capabilities::all().with_experimental(Targets::All)).await?;
+			let ds = info
+				.produce_ds(false, Capabilities::all().with_experimental(Targets::All), &[])
+				.await?;
 			if at == 0 {
 				report_memory(&ds.store, &info.config)?;
 			}
@@ -418,6 +428,7 @@ impl Provisioner {
 				inner: PermitInner::Create {
 					versioned: env.versioned,
 					capabilities: Box::new(capabilities),
+					config: env.config.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
 				},
 			}
 		}
@@ -455,7 +466,10 @@ impl Provisioner {
 }
 
 fn is_base_environment(env: &TestEnv) -> bool {
-	!env.clean && !env.versioned && matches!(env.capabilities, BoolOr::Bool(true))
+	!env.clean
+		&& !env.versioned
+		&& env.config.is_empty()
+		&& matches!(env.capabilities, BoolOr::Bool(true))
 }
 
 /// Pool of connections to a remote SurrealDB instance for `--endpoint` runs.
@@ -738,7 +752,7 @@ mod tests {
 	async fn a_config_key_reaches_the_datastore() {
 		let config = vec![("memory_limit".to_owned(), "8388608".to_owned())];
 		let info = CreateInfo::new(Backend::Memory, config.clone()).await.unwrap();
-		let ds = info.produce_ds(false, Capabilities::all()).await.unwrap();
+		let ds = info.produce_ds(false, Capabilities::all(), &[]).await.unwrap();
 		assert_eq!(ds.store.memory_limit(), Some(8_388_608));
 		report_memory(&ds.store, &config).unwrap();
 		let wrong = vec![("memory_limit".to_owned(), "1MiB".to_owned())];
@@ -758,7 +772,7 @@ mod tests {
 			("morsel_steal_always".to_owned(), "true".to_owned()),
 		];
 		let info = CreateInfo::new(Backend::Memory, config.clone()).await.unwrap();
-		let ds = info.produce_ds(false, Capabilities::all()).await.unwrap();
+		let ds = info.produce_ds(false, Capabilities::all(), &[]).await.unwrap();
 		let held = ds.store.morsel_knobs();
 		assert!(held.contains(&("morsel_split_rows", "1".to_owned())), "{held:?}");
 		assert!(held.contains(&("morsel_target_bytes", "1".to_owned())), "{held:?}");
@@ -769,5 +783,30 @@ mod tests {
 		assert!(report_memory(&ds.store, &wrong).is_err());
 		let wrong = vec![("morsel_steal_always".to_owned(), "false".to_owned())];
 		assert!(report_memory(&ds.store, &wrong).is_err());
+	}
+
+	/// A key a test names for itself takes the place of the run's key of the same name, and the
+	/// run's other keys stay: a test that must run serially under a run that forces morsels.
+	#[tokio::test]
+	async fn a_key_a_test_names_takes_the_place_of_the_runs() {
+		let config = vec![
+			("morsel_split_rows".to_owned(), "1".to_owned()),
+			("morsel_places".to_owned(), "0".to_owned()),
+		];
+		let info = CreateInfo::new(Backend::Memory, config).await.unwrap();
+		let own = vec![("morsel_split_rows".to_owned(), usize::MAX.to_string())];
+		let ds = info.produce_ds(false, Capabilities::all(), &own).await.unwrap();
+		let held = ds.store.morsel_knobs();
+		assert!(held.contains(&("morsel_split_rows", usize::MAX.to_string())), "{held:?}");
+		assert!(held.contains(&("morsel_places", "0".to_owned())), "{held:?}");
+		let env: TestEnv =
+			toml::from_str("[config]\nmorsel_split_rows = \"18446744073709551615\"\n").unwrap();
+		assert_eq!(
+			env.config.get("morsel_split_rows").map(String::as_str),
+			Some("18446744073709551615")
+		);
+		let mut env = env;
+		env.capabilities = BoolOr::Bool(true);
+		assert!(!is_base_environment(&env));
 	}
 }

@@ -1,5 +1,6 @@
 //! A read pipeline's rows run as morsels: parts of its input run on the statement's task or on
-//! workers of their own, their results merged in the order of the serial run.
+//! workers of their own, their results merged in the order of the serial run, or as the morsels
+//! finish where nothing reads the rows in order ([`MergeOrder::Free`]).
 //!
 //! The serial run is what a morsel pipeline means. The pipeline's body only reads, and fills the
 //! statement's output, a sort, or an aggregate whose partial states combine exactly
@@ -27,9 +28,63 @@
 //! in serial arrival order. A breaker whose state cannot be saved, or `GROUP ALL`, never spills in
 //! a morsel.
 //!
-//! A failure is the failure of the earliest morsel that fails, or of the source when no morsel
-//! before it failed, raised once every earlier morsel's results are merged, which is where the
-//! serial run raises it. The error is the serial run's, never a wrapper.
+//! Where the merge takes results in the order of the serial run, a failure is the failure of the
+//! earliest morsel that fails, or of the source when no morsel before it failed, raised once every
+//! earlier morsel's results are merged, which is where the serial run raises it. The error is the
+//! serial run's, never a wrapper. A merge that takes results as morsels finish raises the failure
+//! it meets first, as the next section states.
+//!
+//! # The order results are merged in
+//!
+//! The merge takes the morsels' results in the order of the serial run, except for the pipeline
+//! whose plan merges freely ([`MergeOrder::Free`]): the rows of a statement's result that no
+//! `ORDER BY` sorts, no paging counts, no distinct set deduplicates and no operator reads as its
+//! input, and that no `LET` binds for the statements after it to read in order. Its rows are
+//! unordered, so the merge takes a morsel's rows as soon as the morsel finishes, whatever the
+//! morsels before it are doing, and the rows reach the reader in the order the morsels finished. A
+//! morsel that takes long therefore holds back no morsel after it: the places it would have kept
+//! busy run further morsels, and the output a morsel holds before it is merged stays within the
+//! window and the read-ahead that bound every merge. A failure of such a pipeline is the failure of
+//! the first morsel the merge meets that has failed, which is one of the failures of the rows that
+//! fail; the statement fails and answers no row of those after it. The same holds for an aggregate
+//! of one group whose every function is `count`, whose partial counts add to one total in any
+//! order. Every other pipeline, a sort, an aggregate, a paged or distinct output, merges in the
+//! order of the serial run, which is the order its ties, its appends and its first occurrences are
+//! defined in.
+//!
+//! An aggregate whose partial states combine associatively ([`MergeOrder::Adjacent`]) takes the
+//! results of a key range's morsels as the morsels finish, and merges them in the order of the
+//! scan. The coordinator holds a finished morsel's results until no morsel lies before them, and
+//! then absorbs them as the merge of the serial run does, so an aggregate's appends and first
+//! values are the serial run's. While it waits for the morsels before them it combines the results
+//! it holds of morsels that lie next to one another, the earlier before the later: the fold of a
+//! run of adjacent morsels is the fold of the morsels in order, however the run was put together,
+//! and the combined partial states are what the statement then folds in one step. The combining
+//! runs on the coordinator, which charges the rows it folds to the thread's fuel. A result the
+//! coordinator holds counts against the morsels in flight as a running morsel does, so only
+//! combining, which turns several held results into one, frees a place for another morsel.
+//!
+//! A sort that keeps every row over a key range ([`MergeOrder::Positioned`]) takes the sorted runs
+//! of its morsels as the morsels finish, and holds each at the position of its morsel in the scan,
+//! which is where the sort's ties are defined: the run's own order key is the tie tag of every
+//! entry in it, and an entry's place in its run, which is sorted stably, is its row index among
+//! the entries that tie. The coordinator absorbs the held runs into the statement's sort in the
+//! order of the scan, once no morsel lies before them, so the sort, which is stable and merges
+//! runs a quantum at a time, meets equal keys in the order of the serial run. A run held in
+//! memory takes none of the places of the morsels in flight where the morsel that built it charged
+//! its entries to the query's lease, which a morsel does only where the query can spill: holding
+//! them then takes no memory the statement's sort would not, and the morsels behind a slow one go
+//! on. A run of a query with no store to spill to is held uncharged and keeps its place, so the
+//! runs held stay within the policy's read-ahead. A spilled run and a failure keep their places
+//! and are absorbed or raised only when no morsel lies before them, so the first failure and the
+//! order of a sort's spilled runs are the serial run's. Where the morsels read batches of rows the
+//! coordinator hands on, whole batches merge in order.
+//!
+//! The state of a float fold (`math::sum`, `mean`, `stddev`, `variance`) of one group depends on
+//! the order its terms are folded in, and the partial states of morsels combine to other bits than
+//! the serial fold's. The morsels of such an aggregate keep the terms their rows hand to those
+//! folds instead of folding them (`fold`), and the merge, which takes them in the order of the
+//! serial run, folds the kept terms into the statement's accumulators as it takes each morsel.
 //!
 //! A body that pages its rows to the statement's output runs each morsel as though every row were
 //! taken, but for the rows `START` is sure to skip — those it still skips when every row in flight
@@ -66,6 +121,20 @@
 //! nests beneath its body on its own frame stack. On wasm there are no workers and every batch runs
 //! on the coordinator.
 //!
+//! # A write's records
+//!
+//! The rows of a write over a table scan or a record range run through the same batches, and the
+//! write runs in two halves ([`write_set`]). The stages its plan marks as compute (the permission
+//! checks, the condition, the data clauses and the schema) run on a worker over each row of a
+//! batch and hand the coordinator a candidate: the record in flight, its write context and where
+//! the body stopped. The stages it marks as apply run on the statement's task, one candidate after
+//! another in the order the rows were read, so every write, index and reference update, event,
+//! notification, change feed entry and output happens in the order of the serial run. A worker
+//! writes nothing and reads no stored data: the statement's task reads the record-type marker of
+//! each row it hands on, and the compute half takes it with the row; what a record's compute half
+//! raises is raised when its candidate is taken, after the records before it
+//! have been applied.
+//!
 //! # Range input
 //!
 //! A body that runs in the storage cursor over a table scan or a record range
@@ -80,12 +149,20 @@
 //! they take; where the backend gives no view the coordinator runs the queued morsels itself, in
 //! order, which answers the same at width one.
 //!
+//! - A morsel whose pipeline emits rows to the statement's output hands them to the coordinator as
+//!   it reads them ([`outbox`]): the rows of each chunk go into a bounded queue of the morsel, and
+//!   the coordinator takes them while the morsel runs, from the morsel at the front or, where the
+//!   merge is free, from any. A morsel counts the rows it has queued against its window, so one the
+//!   coordinator is not taking from parks as it does when it holds its output until it ends.
 //! - A worker takes the earliest queued morsel and runs each entry in place on a state of its own,
 //!   chunk by chunk under the thread's fuel, like the coordinator's reads. It takes none while as
 //!   many morsels are running or finished and unmerged as the policy allows, and stops at a chunk
 //!   boundary once the statement does not need it.
 //! - The coordinator merges in order. A finished morsel is absorbed as a batch is; a running one is
-//!   awaited; a queued one is run on the statement's own state, which makes it the front.
+//!   awaited; a queued one is run on the statement's own state, which makes it the front. A merge
+//!   that takes results as morsels finish absorbs any finished morsel first, then runs the earliest
+//!   queued one on the statement's own state, and awaits a running one only when none is finished
+//!   or queued.
 //! - A morsel that is not at the front and holds as much output as the window allows parks at a
 //!   chunk boundary: its result so far is finished and the rest of its range is queued at the
 //!   position where it stopped, which orders it where the serial run reads it.
@@ -139,11 +216,13 @@
 // what only workers use goes unused there.
 #![cfg_attr(target_family = "wasm", allow(dead_code))]
 
+mod fold;
 mod grouped;
 mod held;
 mod lease;
 mod merge;
 mod metrics;
+mod outbox;
 pub(crate) mod places;
 mod run;
 mod set;
@@ -151,8 +230,10 @@ mod sorted;
 mod steal;
 #[cfg(test)]
 mod test_hooks;
-mod write_apply;
+#[cfg(all(test, feature = "kv-mem"))]
+mod tests_lease;
 mod write_compute;
+mod write_set;
 
 use std::sync::Arc;
 
@@ -162,11 +243,23 @@ pub(super) use self::merge::body_breakers;
 pub(crate) use self::metrics::MorselMetrics;
 pub(super) use self::places::Statement;
 use self::set::{MorselSet, RangeSet};
+#[cfg(test)]
+pub(super) use self::test_hooks::{
+	Counts, batch_partials, counts_of, delay_morsels, encoded_ahead, fail_splits, forget_ends,
+	metrics_of, txn_reads_on_workers, writes_ended,
+};
+#[cfg(all(test, feature = "kv-rocksdb"))]
+pub(super) use self::test_hooks::{fail_grants, fail_narrows, waiting_statement};
+#[cfg(test)]
+pub(crate) use self::test_hooks::{
+	forget_datastore, note_encoded_ahead, note_txn_read_on_worker, note_write_ended,
+};
 pub(super) use self::write_compute::Stop;
+use self::write_set::WriteSet;
 use super::host::{Ended, Out, flush, run_value_row};
 use super::interp::State;
 use super::program::{Pipeline, Program};
-use crate::exec::planner::placement::{MorselInput, MorselPlan, Parallel};
+use crate::exec::planner::placement::{Combine, MergeOrder, MorselInput, MorselPlan, Parallel};
 use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::ControlFlow;
 use crate::val::Value;
@@ -227,17 +320,15 @@ pub(super) async fn scan_range_in_place(
 /// |---|---|---|
 /// | `Range` (a scan or a record range) | yes | `Range`, workers read their key ranges in place |
 /// | `Range` (a scan or a record range) | no | `Batches` over decoded rows |
-/// | `Batches` (any other source that splits) | no | `Batches` |
-/// | `Batches` (any other source that splits) | yes | serial |
+/// | `Batches` (any other source that splits) | either | `Batches`: only a key range is read in a cursor |
 /// | serial | either | serial |
 ///
 /// This is the one implementation of the table: the readers of a pipeline's decision and the
 /// recorders of the placement of a program call it.
-pub(crate) fn effective_mode(decided: MorselInput, in_place: bool) -> Option<MorselInput> {
+pub(crate) fn effective_mode(decided: MorselInput, in_place: bool) -> MorselInput {
 	match (decided, in_place) {
-		(MorselInput::Range, true) => Some(MorselInput::Range),
-		(MorselInput::Range, false) | (MorselInput::Batches, false) => Some(MorselInput::Batches),
-		(MorselInput::Batches, true) => None,
+		(MorselInput::Range, true) => MorselInput::Range,
+		(MorselInput::Range, false) | (MorselInput::Batches, _) => MorselInput::Batches,
 	}
 }
 
@@ -245,8 +336,29 @@ pub(crate) fn effective_mode(decided: MorselInput, in_place: bool) -> Option<Mor
 pub(crate) fn effective_input(pipeline: &Pipeline) -> Option<MorselInput> {
 	match &pipeline.parallel {
 		Parallel::Serial => None,
-		Parallel::Morsels(plan) => effective_mode(plan.input, pipeline.in_place),
+		Parallel::Morsels(plan) => Some(effective_mode(plan.input, pipeline.in_place)),
 	}
+}
+
+/// The order the plan merges `pipeline`'s morsels in ([`MorselPlan::merge`]); the serial order for
+/// a pipeline that runs serially.
+fn merge_of(pipeline: &Pipeline) -> MergeOrder {
+	match &pipeline.parallel {
+		Parallel::Morsels(plan) => plan.merge,
+		Parallel::Serial => MergeOrder::Serial,
+	}
+}
+
+/// Whether `pipeline`'s morsels compute the records of a write and the statement's task applies
+/// them in order.
+fn applies_in_order(pipeline: &Pipeline) -> bool {
+	matches!(
+		&pipeline.parallel,
+		Parallel::Morsels(MorselPlan {
+			combine: Combine::OrderedApply,
+			..
+		})
+	)
 }
 
 /// Where a pipeline's rows go as a storage read yields them: run one at a time, or gathered into
@@ -254,6 +366,18 @@ pub(crate) fn effective_input(pipeline: &Pipeline) -> Option<MorselInput> {
 pub(super) enum Rows<'p> {
 	Serial,
 	Morsels(Box<MorselSet<'p>>),
+	/// The records of a write whose compute halves run as morsels.
+	Writes(Box<WriteSet<'p>>),
+	/// A pipeline planned as an ordered apply whose body holds no cut. Lowering refuses such a
+	/// program, so no run holds one; a row, or the end of the source, raises the internal error.
+	Unplaced,
+}
+
+/// The internal error of a pipeline planned as an ordered apply that holds no write cut.
+fn unplaced() -> ControlFlow {
+	ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(
+		"a pipeline planned as an ordered apply holds no write cut".to_owned(),
+	)))
 }
 
 impl<'p> Rows<'p> {
@@ -266,7 +390,13 @@ impl<'p> Rows<'p> {
 	) -> Self {
 		match program.pipelines.iter().position(|p| std::ptr::eq(p, pipeline)) {
 			Some(at) if effective_input(pipeline) == Some(MorselInput::Batches) => {
-				Rows::Morsels(Box::new(MorselSet::new(program, at, ctx)))
+				if !applies_in_order(pipeline) {
+					Rows::Morsels(Box::new(MorselSet::new(program, at, ctx)))
+				} else if write_set::holds_cut(pipeline) {
+					Rows::Writes(Box::new(WriteSet::new(program, at, ctx)))
+				} else {
+					Rows::Unplaced
+				}
 			}
 			_ => Rows::Serial,
 		}
@@ -294,6 +424,8 @@ impl<'p> Rows<'p> {
 				Ok(stop)
 			}
 			Rows::Morsels(set) => set.push(row, state, ctx, yielder, flush_at).await,
+			Rows::Writes(set) => set.push(row, state, ctx, yielder, flush_at).await,
+			Rows::Unplaced => Err(unplaced()),
 		}
 	}
 
@@ -379,6 +511,7 @@ impl<'p> Rows<'p> {
 				})
 				.map_or(usize::MAX, |wanted| wanted.max(1)),
 			Rows::Morsels(set) => set.wanted(state),
+			Rows::Writes(_) | Rows::Unplaced => usize::MAX,
 		}
 	}
 
@@ -400,6 +533,8 @@ impl<'p> Rows<'p> {
 				Ok(false)
 			}
 			Rows::Morsels(set) => set.finish(state, ctx, yielder, flush_at).await,
+			Rows::Writes(set) => set.finish(state, ctx, yielder, flush_at).await,
+			Rows::Unplaced => Err(unplaced()),
 		}
 	}
 
@@ -417,7 +552,9 @@ impl<'p> Rows<'p> {
 	) -> FlowResult<bool> {
 		match self {
 			Rows::Morsels(set) => set.fail(failure, state, ctx, yielder, flush_at).await,
+			Rows::Writes(set) => set.fail(failure, state, ctx, yielder, flush_at).await,
 			Rows::Serial => Err(failure),
+			Rows::Unplaced => Err(unplaced()),
 		}
 	}
 }

@@ -25,8 +25,8 @@ use super::ops::{
 use super::print::LogicalSyntax;
 use super::scope::{LoopExit, loop_exit, return_target};
 use super::stages::{
-	declares_id_default, gates_fault, gates_of, image_of, orders, stage_run, statement_of_text,
-	statement_text, static_mark, stored_of, view_of,
+	declares_id_default, gates_fault, gates_of, image_of, orders, stage_mutates_image, stage_run,
+	statement_of_text, statement_text, static_mark, stored_of, view_of,
 };
 use super::txn::{StatementBody, StatementSlot, TopRegion, regions_of};
 use super::verify::{loop_body_args, timestamp_arg, verify_op};
@@ -653,6 +653,41 @@ fn stage_run_holds_every_stage_once() {
 				}
 			}
 			split_of(&run);
+		}
+	}
+}
+
+/// The stages that build, derive or clear the image are the ones [`stage_mutates_image`] names,
+/// and no stage that runs between the first apply stage and the stage that stores the record of an
+/// order changes it: the physical plan encodes the image ahead of its apply wherever that holds.
+#[test]
+fn only_compute_stages_and_the_clearing_of_a_record_change_its_image() {
+	assert!(stage_mutates_image(WriteStageKind::ComputeInputData));
+	assert!(stage_mutates_image(WriteStageKind::ProcessTableFields));
+	assert!(stage_mutates_image(WriteStageKind::ClearRecordData));
+	assert!(stage_mutates_image(WriteStageKind::MaterialiseObservedFields));
+	assert!(!stage_mutates_image(WriteStageKind::StoreRecordData));
+	assert!(!stage_mutates_image(WriteStageKind::StoreIndexData));
+	assert!(!stage_mutates_image(WriteStageKind::ProcessChangefeeds));
+	assert!(!stage_mutates_image(WriteStageKind::OutputWrite));
+	for form in FORMS {
+		for facts in every_facts(form) {
+			for (_, order) in orders(form, facts) {
+				let Some(store) = order.iter().position(|s| *s == WriteStageKind::StoreRecordData)
+				else {
+					continue;
+				};
+				let first_apply = order
+					.iter()
+					.position(|stage| static_mark(*stage) == WriteMark::Apply)
+					.expect("an order that stores applies");
+				for stage in &order[first_apply..store] {
+					assert!(
+						!stage_mutates_image(*stage),
+						"{form:?}: {stage:?} runs before the store"
+					);
+				}
+			}
 		}
 	}
 }

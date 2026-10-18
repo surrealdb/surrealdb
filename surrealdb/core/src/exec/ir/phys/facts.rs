@@ -41,6 +41,7 @@ use crate::exec::ir::op_kind::OpKind;
 use crate::exec::logical::pipelines::SourceSplit;
 use crate::exec::planner::placement::{NestedUse, PhysicalFacts, SinkKind, SourceKind};
 use crate::exec::vm::payload::ValuesRead;
+use crate::expr::Mock;
 use crate::expr::with::With;
 
 /// How deep the input of a pipeline is followed when its rows are classified. A pipeline nested
@@ -100,16 +101,19 @@ pub(crate) fn facts_reading(
 	}
 	let entries = pipeline_entries(ir, pipeline_op);
 	let entries = through_select_loop(ir, &entries).unwrap_or(entries);
-	// A first op that streams reads its input from outside the pipeline: no source is held.
-	let (source, steps) = match entries.split_first() {
-		Some((first, rest)) if !streams(first.1) => (Some(*first), rest),
-		_ => (None, entries.as_slice()),
-	};
+	let (source, steps) = source_and_steps(ir, &entries);
+	// The pipelines that continue this one are its steps too: its rows end in the sink of the last.
+	let onward = onward_of(ir, pipeline_op);
+	let mut steps = steps.to_vec();
+	steps.extend(onward.steps);
 	let step_kinds: Vec<&PhysOp> = steps.iter().map(|(_, kind)| *kind).collect();
-	let source_kind =
-		source.map_or(SourceKind::Other, |(op, kind)| source_kind_of(ir, op, kind, 0));
+	let source_kind = if entries.first().is_some_and(|head| writes_range_mock(ir, *head)) {
+		SourceKind::Mock
+	} else {
+		source.map_or(SourceKind::Other, |(op, kind)| source_kind_of(ir, op, kind, 0))
+	};
 	let source_rows = source.map_or(Rows::UNKNOWN, |(op, _)| rows_of_source(ir, op, 0));
-	let cut = cut_of(ir, pipeline_op);
+	let cut = cut_of(ir, onward.last);
 	let chain = chain_facts(source.map(|(_, kind)| kind), source_rows, &step_kinds);
 
 	let mut scanned: Vec<OpId> = steps.iter().map(|(op, _)| *op).collect();
@@ -148,6 +152,143 @@ fn through_select_loop<'a>(
 	);
 	through.extend(rest.iter().copied());
 	Some(through)
+}
+
+/// The ops a pipeline holds, each with its physical kind.
+type Entries<'a> = [(OpId, &'a PhysOp)];
+
+/// The source of a pipeline whose entries are `entries`, and the steps its rows pass through.
+///
+/// A first op that streams reads its input from outside the pipeline: no source is held. The loop
+/// of a write reads the access path of the pipeline, and stands in its steps.
+fn source_and_steps<'a>(
+	ir: &'a Ir,
+	entries: &'a Entries<'a>,
+) -> (Option<(OpId, &'a PhysOp)>, &'a Entries<'a>) {
+	match entries.split_first() {
+		Some((first, _)) if write_source(ir, *first).is_some() => {
+			(write_source(ir, *first), entries)
+		}
+		Some((first, rest)) if !streams(first.1) => (Some(*first), rest),
+		_ => (None, entries),
+	}
+}
+
+/// The op that is the source of the pipeline `pipeline_op`, when it holds one.
+pub(super) fn source_of(ir: &Ir, pipeline_op: OpId) -> Option<OpId> {
+	let entries = pipeline_entries(ir, pipeline_op);
+	let entries = through_select_loop(ir, &entries).unwrap_or(entries);
+	source_and_steps(ir, &entries).0.map(|(op, _)| op)
+}
+
+/// The source op the write loop `head` reads, where `head` is a write loop and the op that
+/// produces its rows is a source and not a streaming op.
+fn write_source<'a>(ir: &'a Ir, head: (OpId, &'a PhysOp)) -> Option<(OpId, &'a PhysOp)> {
+	let PhysOp::Loop {
+		kind: LoopKind::Write,
+		..
+	} = head.1
+	else {
+		return None;
+	};
+	let source = producer(ir, *ir.op(head.0)?.operands.first()?)?;
+	let kind = phys_of(ir, source)?;
+	(!streams(kind)).then_some((source, kind))
+}
+
+/// Whether `head` is a write loop whose subjects are one mock that names the ids of a range.
+fn writes_range_mock(ir: &Ir, head: (OpId, &PhysOp)) -> bool {
+	matches!(
+		head.1,
+		PhysOp::Loop {
+			kind: LoopKind::Write,
+			..
+		}
+	) && subjects_are_range_mock(ir, head.0)
+}
+
+/// Whether the subjects of the write loop `loop_op` are one mock that names the ids of a range:
+/// the coordinator generates the ids in order, and no stored record is read for them.
+pub(super) fn subjects_are_range_mock(ir: &Ir, loop_op: OpId) -> bool {
+	let Some(array) = ir
+		.op(loop_op)
+		.and_then(|data| data.operands.first().copied())
+		.and_then(|subjects| producer(ir, subjects))
+		.and_then(|op| ir.op(op))
+	else {
+		return false;
+	};
+	let [member] = array.operands.as_slice() else {
+		return false;
+	};
+	matches!(array.kind, OpKind::Expr(ExprOp::Array))
+		&& producer(ir, *member).and_then(|op| ir.op(op)).is_some_and(|data| {
+			matches!(&data.kind, OpKind::Expr(ExprOp::Mock(mock)) if matches!(**mock, Mock::Range(..)))
+		})
+}
+
+/// What follows a pipeline: the ops its rows pass through before they reach a sink, the op whose
+/// result the sink reads, and the pipelines of the chain, the first included.
+struct Onward<'a> {
+	steps: Vec<(OpId, &'a PhysOp)>,
+	last: OpId,
+	pipelines: usize,
+}
+
+/// The ops that continue the pipeline `pipeline_op`, in data-flow order.
+///
+/// A streaming op that is the only reader of the rows, and a select loop that is the only reader of
+/// them and heads a pipeline of its own, continue the pipeline: the ops of that loop's body and of
+/// the pipeline after it are steps of the one chain the rows run through, and the lowering emits
+/// the pipelines as one body. The chain ends at the first op that more than one op reads or that is
+/// not one of these, and its result is the one a sink reads.
+fn onward_of(ir: &Ir, pipeline_op: OpId) -> Onward<'_> {
+	let mut steps: Vec<(OpId, &PhysOp)> = Vec::new();
+	let mut last = pipeline_op;
+	let mut pipelines = 1;
+	while let Some(result) = ir.op(last).and_then(|data| data.results.first().copied()) {
+		let [only] = ir.uses(result) else {
+			break;
+		};
+		if only.operand != 0 {
+			break;
+		}
+		let Some(OpKind::Phys(kind)) = ir.op(only.user).map(|data| &data.kind) else {
+			break;
+		};
+		if streams(kind) {
+			steps.push((only.user, kind));
+			last = only.user;
+			continue;
+		}
+		let Some(next) = ir.parent_op(ir.enclosing_region(only.user)) else {
+			break;
+		};
+		if !matches!(phys_of(ir, next), Some(PhysOp::Pipeline(..))) {
+			break;
+		}
+		let entries = pipeline_entries(ir, next);
+		if entries.first().map(|(op, _)| *op) != Some(only.user) {
+			break;
+		}
+		let Some(through) = through_select_loop(ir, &entries) else {
+			break;
+		};
+		steps.extend(through.into_iter().skip(1));
+		last = next;
+		pipelines += 1;
+	}
+	Onward {
+		steps,
+		last,
+		pipelines,
+	}
+}
+
+/// The pipelines of the chain that starts at the pipeline `pipeline_op`, itself included: one when
+/// no pipeline continues it.
+pub(super) fn chain_pipelines(ir: &Ir, pipeline_op: OpId) -> usize {
+	onward_of(ir, pipeline_op).pipelines
 }
 
 /// The facts of a pipeline from what [`facts_of`] reads of it.

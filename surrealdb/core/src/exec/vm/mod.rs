@@ -44,6 +44,8 @@ pub(crate) mod serve;
 pub(crate) use dispatch::Deref;
 pub(crate) use leaf::Class as LeafClass;
 pub(crate) use morsel::MorselMetrics;
+#[cfg(test)]
+pub(crate) use morsel::{note_encoded_ahead, note_txn_read_on_worker, note_write_ended};
 pub(crate) use program::ClosureDigest;
 pub(crate) use speculate::catalog_within;
 pub(crate) mod codec;
@@ -103,7 +105,13 @@ mod tests_frontier;
 mod tests_late_layers;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
+mod tests_morsel;
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_once;
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
+mod tests_placement;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod tests_principal;
@@ -119,6 +127,9 @@ mod tests_stack;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod tests_statement_cache;
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
+mod tests_write_fanout;
 // The golden is recorded from a build that runs no script and no model.
 
 /// The units of a root program or a function bundle, which the ids of the

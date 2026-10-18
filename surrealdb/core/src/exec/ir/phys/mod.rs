@@ -76,6 +76,7 @@ pub(crate) mod seed_host;
 mod tests_write_prune;
 mod topk_packed;
 pub(crate) mod verify;
+pub(crate) mod write_cut;
 mod write_prune;
 
 use ops::{

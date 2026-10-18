@@ -30,6 +30,7 @@ use super::value_table::ValueTable;
 use super::verify::{VerifyAt, VerifyError, VerifyRule, verify, violation_of};
 use super::walk::{ControlTarget, control_target, enclosing_statement, ops_in};
 use crate::exec::function::FunctionRegistry;
+use crate::exec::ir::build::phys::UNBATCHED;
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::{ClosureAttrs, ExprOp, ExprTag, NestedStrategy};
 use crate::exec::ir::iface::catalog::{EffectCx, PhysCx, PhysicalCatalog, SemanticCatalog};
@@ -71,7 +72,7 @@ use crate::exec::ir::phys::ops::{
 use crate::exec::ir::phys::placement::place_for_test;
 use crate::exec::logical::footprint::CatalogKind;
 use crate::exec::logical::pipelines::{
-	ChainLegality, ErrorOrder, Legality, Paging, SinkCombine, SourceSplit,
+	Arrival, ChainLegality, ErrorOrder, Legality, Paging, SinkCombine, SourceSplit,
 };
 use crate::exec::planner::placement::{
 	Combine, Decision, MorselInput, NestedUse, PhysicalFacts, SinkKind, SourceKind,
@@ -671,7 +672,7 @@ fn a_dangling_op_answers_the_top_facts_and_an_erased_op_keeps_its_last_facts() {
 		rw.facts(op);
 	}
 	assert!(facts.get(op, ir.generation(op), &default_key(&ir)).is_none());
-	assert!(facts.last(op).is_some());
+	assert!(facts.last_under(op, &default_key(&ir)).is_some());
 }
 
 #[test]
@@ -2476,6 +2477,8 @@ fn loop_facts() -> LoopFacts {
 		delivery: SourceDelivery::Stream,
 		multiplicity: Multiplicity::Distinct,
 		key_path: ElemPath::Id,
+		compute_reads_data: false,
+		cut_at_marks: true,
 	}
 }
 
@@ -2513,9 +2516,33 @@ fn legality_recompute_requires_every_snapshot_loop_to_be_covered() {
 	assert!(violation_of(&ir, &mut facts, after_pass, &PHYSICAL_PHASE, rule).is_none());
 }
 
+/// The physical facts of a read-only scan that splits.
+fn scan_facts() -> PhysicalFacts {
+	PhysicalFacts {
+		source: SourceKind::Scan,
+		enforce: false,
+		writes: false,
+		limits: 0,
+		output: true,
+		sink: SinkKind::Output,
+		binds_row: false,
+		fetches_row: false,
+		distincts: 0,
+		nested: NestedUse::None,
+		host_blocks: false,
+		paging_replayable: false,
+		estimate: None,
+	}
+}
+
 /// A container holding one pipeline that stands for the eliminated logical loop `loop_op`, placed
 /// as `decision` over a splittable scan; answers the container, the pipeline and the loop.
 fn placed_pipeline(decision: Decision) -> (Ir, OpId, OpId) {
+	placed_pipeline_over(decision, scan_facts())
+}
+
+/// [`placed_pipeline`] over the physical facts `physical`.
+fn placed_pipeline_over(decision: Decision, physical: PhysicalFacts) -> (Ir, OpId, OpId) {
 	let mut ir = request();
 	let top = top_block(&ir);
 	let (loop_op, pipeline) = edit(&mut ir, |rw| {
@@ -2534,23 +2561,10 @@ fn placed_pipeline(decision: Decision) -> (Ir, OpId, OpId) {
 		chain: ChainLegality::RowLocal,
 		sink: SinkCombine::Concat,
 		paging: Paging::None,
+		arrival: Arrival::Serial,
+		ordered_fold: false,
 		error_order: ErrorOrder::FirstByInputPosition,
 		may_raise: false,
-	};
-	let physical = PhysicalFacts {
-		source: SourceKind::Scan,
-		enforce: false,
-		writes: false,
-		limits: 0,
-		output: true,
-		sink: SinkKind::Output,
-		binds_row: false,
-		fetches_row: false,
-		distincts: 0,
-		nested: NestedUse::None,
-		host_blocks: false,
-		paging_replayable: false,
-		estimate: None,
 	};
 	place_for_test(&mut ir, pipeline, legality, decision, physical);
 	(ir, pipeline, loop_op)
@@ -2590,6 +2604,53 @@ fn legality_recompute_rejects_a_fan_out_its_loop_does_not_admit() {
 	assert!(judge(carried).is_some(), "a serial loop is not placed as morsels");
 	let mut absent = FactCache::new();
 	assert!(violation_of(&ir, &mut absent, at, &PHYSICAL_PHASE, rule).is_none());
+}
+
+/// A pipeline that stands for no loop has no loop verdict and is judged on its own source and sink.
+#[test]
+fn admission_judges_a_pipeline_that_stands_for_no_loop_on_its_own_facts() {
+	use crate::exec::ir::phys::placement::admission_gap;
+
+	let writing = PhysicalFacts {
+		writes: true,
+		..scan_facts()
+	};
+	let (ir, pipeline, _) = placed_pipeline_over(concat_morsels(), writing);
+	let placed = ir.placement(pipeline).expect("the pipeline is placed");
+	assert!(
+		admission_gap(placed, None).is_some(),
+		"a fan-out whose facts state a write is refused"
+	);
+	let (ir, pipeline, _) = placed_pipeline(concat_morsels());
+	let placed = ir.placement(pipeline).expect("the pipeline is placed");
+	assert_eq!(admission_gap(placed, None), None);
+}
+
+/// A pipeline that holds a loop op the legality snapshot says nothing of has the serial verdict, so
+/// a loop the logical boundary did not judge is never split.
+#[test]
+fn a_loop_the_snapshot_omits_has_the_serial_verdict() {
+	use crate::exec::ir::phys::placement::loop_verdict;
+
+	let (mut ir, pipeline, _) = placed_pipeline(concat_morsels());
+	let mut cache = FactCache::new();
+	cache.set_legality_snapshot(BTreeMap::new());
+	assert!(loop_verdict(&ir, &cache, pipeline).is_none(), "a pipeline with no loop has none");
+	edit(&mut ir, |rw| {
+		let (_, block) =
+			rw.create_region(pipeline, RegionKind::Pipeline, &[]).expect("the region is created");
+		let kind = OpKind::Phys(PhysOp::Loop {
+			kind: LoopKind::Select,
+			first: false,
+			batch: UNBATCHED,
+			unroll: 1,
+			value: false,
+			step: None,
+		});
+		add(rw, InsertPoint::End(block), kind, &[], 0);
+	});
+	let verdict = loop_verdict(&ir, &cache, pipeline).expect("the loop op has a verdict");
+	assert!(matches!(verdict.mode, LoopMode::Serial(_)), "{:?}", verdict.mode);
 }
 
 #[test]

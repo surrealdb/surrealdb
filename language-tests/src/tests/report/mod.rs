@@ -8,7 +8,9 @@ use parse_common::error::RenderedError;
 use surrealdb_types::{Object, Value as SurValue, Variables};
 
 use super::cmp::{RoughlyEq, RoughlyEqConfig};
+use super::unordered::{same_rows, unordered_statements};
 use crate::tests::TestRun;
+use crate::tests::case::Dialect;
 use crate::tests::run::{CaseImports, RunConfig, TestRunId};
 use crate::tests::schema::{self, BoolOr, TestConfig, TestDetailsResults};
 
@@ -59,6 +61,9 @@ fn strip_api_request_id_for_comparison(expected: &SurValue, got: SurValue) -> Su
 pub struct MatchContext<'a> {
 	pub datastore: &'a Datastore,
 	pub vars: Variables,
+	/// For each result of a statement run, whether its rows may be graded in any order. Empty
+	/// when no result may be.
+	pub unordered: Vec<bool>,
 }
 
 impl<'a> MatchContext<'a> {
@@ -66,13 +71,21 @@ impl<'a> MatchContext<'a> {
 		MatchContext {
 			datastore,
 			vars: Variables::default(),
+			unordered: Vec::new(),
 		}
+	}
+
+	/// Grade the rows of the results `unordered` marks in any order.
+	pub fn with_unordered(mut self, unordered: Vec<bool>) -> Self {
+		self.unordered = unordered;
+		self
 	}
 
 	pub fn with_vars(datastore: &'a Datastore, vars: Variables) -> Self {
 		MatchContext {
 			datastore,
 			vars,
+			unordered: Vec::new(),
 		}
 	}
 }
@@ -404,6 +417,24 @@ impl TestExpectation {
 	}
 }
 
+/// For each result of the run of `run` that `job_result` holds, whether its rows are graded in any
+/// order: the run asks for it, and the statement is one whose rows nothing orders. Empty when the
+/// statements of the source cannot be matched up with its results, which are then compared
+/// exactly.
+fn unordered_results<T: RunConfig>(run: &TestRun<T>, job_result: &TestTaskResult) -> Vec<bool> {
+	if !run.config.unordered_rows() || run.case.test.dialect != Dialect::SurrealQl {
+		return Vec::new();
+	}
+	let TestTaskResult::Results {
+		res,
+		..
+	} = job_result
+	else {
+		return Vec::new();
+	};
+	unordered_statements(&run.case.test.source).filter(|bits| bits.len() == res.len()).unwrap_or_default()
+}
+
 /// The output `--results accept` writes for a refused request: the error text, and only when the
 /// test expects a request error. Any other running error is not gradable and is never written.
 fn request_error_output(config: &TestConfig, error: &anyhow::Error) -> Option<TestOutputs> {
@@ -604,7 +635,9 @@ impl TestReport {
 		};
 
 		let cfg = &run.case.test.config.parsed;
-		let kind = Self::grade_result(cfg, job_result, &MatchContext::new(matching_datastore)).await;
+		let match_ctx = MatchContext::new(matching_datastore)
+			.with_unordered(unordered_results(&run, &job_result));
+		let kind = Self::grade_result(cfg, job_result, &match_ctx).await;
 		// A chain reports one hop; its values are the ones worth showing and the
 		// ones `--results accept` should write.
 		let outputs = match &kind {
@@ -927,7 +960,8 @@ impl TestReport {
 					},
 				},
 				(Some(e), Some(v)) => {
-					match Self::match_value_to_expectation(v, e, match_ctx).await {
+					let unordered = match_ctx.unordered.get(index).copied().unwrap_or(false);
+					match Self::match_value_to_expectation(v, e, match_ctx, unordered).await {
 						Some(kind) => Mismatch {
 							index,
 							kind,
@@ -955,6 +989,7 @@ impl TestReport {
 		value: Result<SurValue, String>,
 		expectation: &TestValueExpectation,
 		match_ctx: &MatchContext<'_>,
+		unordered: bool,
 	) -> Option<MismatchKind> {
 		match expectation {
 			TestValueExpectation::Error(expected) => match value {
@@ -1001,6 +1036,11 @@ impl TestReport {
 
 					if expected.expected.roughly_equal(&x_normalized, &expected.equality) {
 						// value matched, result is valid.
+						return None;
+					}
+
+					// The rows of a result nothing orders match in any order.
+					if unordered && same_rows(&expected.expected, &x_normalized, &expected.equality) {
 						return None;
 					}
 
@@ -1187,5 +1227,51 @@ mod request_error_tests {
 			TestExpectation::from_test_config(&parsed),
 			Some(TestExpectation::Request(Some(t))) if t == "The request was refused"
 		));
+	}
+}
+
+#[cfg(test)]
+mod unordered_rows_tests {
+	use super::*;
+
+	/// The grade of `got` against the expected results `expected`, with the statements `unordered`
+	/// marks graded in any order.
+	async fn grade(
+		expected: &str,
+		got: Vec<Result<SurValue, String>>,
+		unordered: Vec<bool>,
+	) -> TestReportKind {
+		let datastore = Datastore::new("memory").await.expect("a datastore");
+		let config: TestConfig =
+			toml::from_str(&format!("[test]\n{expected}")).expect("test config parses");
+		let context = MatchContext::new(&datastore).with_unordered(unordered);
+		TestReport::grade_value_results(TestExpectation::from_test_config(&config), got, &context)
+			.await
+	}
+
+	fn rows(numbers: &[i64]) -> Result<SurValue, String> {
+		Ok(SurValue::Array(numbers.to_vec().into()))
+	}
+
+	const EXPECTED: &str = "[[test.results]]\nvalue = \"[1, 2, 3]\"";
+
+	#[tokio::test]
+	async fn rows_come_in_any_order_where_the_statement_is_unordered() {
+		let kind = grade(EXPECTED, vec![rows(&[3, 1, 2])], vec![true]).await;
+		assert!(matches!(kind, TestReportKind::Valid));
+	}
+
+	#[tokio::test]
+	async fn rows_come_in_the_order_expected_where_the_statement_is_ordered() {
+		for unordered in [vec![false], Vec::new()] {
+			let kind = grade(EXPECTED, vec![rows(&[3, 1, 2])], unordered).await;
+			assert!(matches!(kind, TestReportKind::MismatchedValues(_)));
+		}
+	}
+
+	#[tokio::test]
+	async fn other_rows_fail_in_any_order() {
+		let kind = grade(EXPECTED, vec![rows(&[3, 1, 1])], vec![true]).await;
+		assert!(matches!(kind, TestReportKind::MismatchedValues(_)));
 	}
 }

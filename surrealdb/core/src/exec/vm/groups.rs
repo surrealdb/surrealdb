@@ -20,7 +20,7 @@ use std::sync::Arc;
 use super::partition::Splitters;
 use crate::exec::function::{AccumulatorState, AggregateFunction};
 use crate::exec::memory::runs::Record;
-use crate::val::Value;
+use crate::val::{Number, Value};
 
 /// What a group holds beyond its key and slots: its place in the key index.
 const GROUP_OVERHEAD: usize = 48;
@@ -44,6 +44,67 @@ pub(super) struct Groups {
 	/// when it opens, each first value when it is set, and each value an
 	/// accumulator that keeps its inputs takes ([`Self::grew`]).
 	bytes: usize,
+	/// The terms of the accumulators this part leaves to the merge to fold,
+	/// in the order its rows handed them over ([`Self::log_folds`]).
+	logged: Option<Box<Logged>>,
+}
+
+/// The values an aggregate's morsel hands to some of its accumulators, kept
+/// instead of folded, so that the merge folds them in the order of the serial
+/// run. Only `GROUP ALL`'s one group keeps a log.
+///
+/// An accumulator that folds numbers one at a time ([`Accumulator::update`] of
+/// the sum, mean, variance and deviation) skips an absent value, folds a
+/// number, and records the first value of another kind it was handed. The log
+/// keeps each of these and nothing else: the numbers in order, and the first
+/// value of another kind, whose place among the numbers no fold's result
+/// depends on.
+///
+/// The numbers of a slot are kept in blocks, each allocated at its full size
+/// before the rows it holds the numbers of run ([`Groups::open_log_block`]), so
+/// no number is ever moved once logged and no block grows.
+struct Logged {
+	/// The places in a group's accumulators of the accumulators that are
+	/// logged, ascending.
+	slots: Arc<[usize]>,
+	/// By slot, the blocks of numbers, in the order the numbers were handed
+	/// over; the last block of a slot is the one being filled.
+	numbers: Vec<Vec<Vec<Number>>>,
+	/// The numbers a block of a slot holds.
+	block: usize,
+	/// By slot, the first value that is neither a number nor absent.
+	rejected: Vec<Option<Value>>,
+	/// What the numbers hold, in bytes.
+	bytes: usize,
+	/// What keeps the memory the blocks hold charged to the query, released
+	/// with the log.
+	holds: Vec<Box<dyn std::any::Any + Send + Sync>>,
+}
+
+impl Logged {
+	/// Append what `later`, the log of the rows after these, holds.
+	fn append(&mut self, later: Logged) -> anyhow::Result<()> {
+		anyhow::ensure!(self.slots == later.slots, "a region merged logs of other accumulators");
+		self.bytes += later.bytes;
+		for (mine, theirs) in self.numbers.iter_mut().zip(later.numbers) {
+			mine.extend(theirs);
+		}
+		for (mine, theirs) in self.rejected.iter_mut().zip(later.rejected) {
+			if mine.is_none() {
+				*mine = theirs;
+			}
+		}
+		self.holds.extend(later.holds);
+		Ok(())
+	}
+
+	/// Open a block of `block` numbers for each slot, which the next `block` rows fill.
+	fn open(&mut self, block: usize) {
+		self.block = block;
+		for blocks in &mut self.numbers {
+			blocks.push(Vec::with_capacity(block));
+		}
+	}
 }
 
 /// A group's place by its key.
@@ -152,6 +213,7 @@ impl Groups {
 			firsts: Vec::new(),
 			len: 0,
 			bytes: 0,
+			logged: None,
 		};
 		if keys == 0 {
 			groups.open(functions);
@@ -306,6 +368,7 @@ impl Groups {
 			firsts: Vec::new(),
 			len: 0,
 			bytes: 0,
+			logged: None,
 		}
 	}
 
@@ -478,6 +541,136 @@ impl Groups {
 		self.accumulators.get_mut(at)
 	}
 
+	/// Keep the values the accumulators at `slots`, ascending, of `GROUP ALL`'s one group are
+	/// handed, in the order they are handed over, instead of folding them: a merge that folds the
+	/// groups of the morsels in the order of the serial run folds the kept values as the rows
+	/// would have. The groups of a key take no log. No block is open until
+	/// [`Self::open_log_block`].
+	pub(super) fn log_folds(&mut self, slots: &Arc<[usize]>) {
+		debug_assert!(slots.windows(2).all(|pair| pair[0] < pair[1]), "slots ascend: {slots:?}");
+		if slots.is_empty() || !matches!(self.index, KeyIndex::All) {
+			return;
+		}
+		let kept = slots.len();
+		self.logged = Some(Box::new(Logged {
+			slots: Arc::clone(slots),
+			numbers: vec![Vec::new(); kept],
+			block: 0,
+			rejected: vec![None; kept],
+			bytes: 0,
+			holds: Vec::new(),
+		}));
+	}
+
+	/// Open a block of `numbers` numbers for each logged accumulator, for the rows to come: a row
+	/// hands each accumulator at most one number, so `numbers` rows fill no more than the block.
+	/// Answers the bytes the blocks reserve, which the caller charges, `0` where nothing is
+	/// logged.
+	pub(super) fn open_log_block(&mut self, numbers: usize) -> usize {
+		let Some(logged) = self.logged.as_mut() else {
+			return 0;
+		};
+		logged.open(numbers);
+		Self::block_bytes(logged.slots.len(), numbers)
+	}
+
+	/// The bytes `slots` logged accumulators reserve for a block of `numbers` numbers each.
+	pub(super) fn block_bytes(slots: usize, numbers: usize) -> usize {
+		slots.saturating_mul(numbers).saturating_mul(std::mem::size_of::<Number>())
+	}
+
+	/// Keep `hold` charged for as long as the log holds the blocks it charged.
+	pub(super) fn hold_log(&mut self, hold: Box<dyn std::any::Any + Send + Sync>) {
+		if let Some(logged) = self.logged.as_mut() {
+			logged.holds.push(hold);
+		}
+	}
+
+	/// Take `value`, handed to call `call` of field `field`, into the log when that accumulator is
+	/// logged ([`Self::log_folds`]); give it back when it is not, for the accumulator to fold.
+	///
+	/// A number goes into the room of the last block [`Self::open_log_block`] opened, whose bytes
+	/// the caller charged. A block holds the numbers of the rows it was opened for, and a row
+	/// hands an accumulator at most one, so a number with no room left is an internal error: no
+	/// block is opened here, since nothing would charge it.
+	#[inline]
+	pub(super) fn log(
+		&mut self,
+		field: usize,
+		call: usize,
+		value: Value,
+	) -> anyhow::Result<Option<Value>> {
+		let Some(logged) = self.logged.as_mut() else {
+			return Ok(Some(value));
+		};
+		let (start, end) = (self.starts[field] as usize, self.starts[field + 1] as usize);
+		if start + call >= end {
+			return Ok(Some(value));
+		}
+		let Ok(at) = logged.slots.binary_search(&(start + call)) else {
+			return Ok(Some(value));
+		};
+		match value {
+			Value::Number(number) => {
+				let Some(block) =
+					logged.numbers[at].last_mut().filter(|block| block.len() < block.capacity())
+				else {
+					anyhow::bail!("a row handed a logged accumulator a number past its block");
+				};
+				block.push(number);
+				logged.bytes += std::mem::size_of::<Number>();
+			}
+			Value::None | Value::Null => {}
+			other => {
+				if logged.rejected[at].is_none() {
+					logged.rejected[at] = Some(other);
+				}
+			}
+		}
+		Ok(None)
+	}
+
+	/// What the values kept for the merge hold, in bytes.
+	pub(super) fn logged_bytes(&self) -> usize {
+		self.logged.as_ref().map_or(0, |logged| logged.bytes)
+	}
+
+	/// Fold the values `later` kept, the log of the rows after the ones these groups hold: into
+	/// the accumulators of `GROUP ALL`'s group in order, or after the values these groups keep.
+	fn fold_logged(&mut self, later: Logged) -> anyhow::Result<()> {
+		if let Some(mine) = self.logged.as_mut() {
+			return mine.append(later);
+		}
+		anyhow::ensure!(
+			matches!(self.index, KeyIndex::All) && self.len == 1,
+			"a region folded a log into groups of a key"
+		);
+		let fold = |state: &mut AccumulatorState, value: Value| {
+			if let Err(e) = state.update(value) {
+				tracing::debug!(error = %e, "Accumulator update failed, skipping value");
+			}
+		};
+		let Logged {
+			slots,
+			numbers,
+			rejected,
+			..
+		} = later;
+		for ((slot, numbers), rejected) in slots.iter().zip(numbers).zip(rejected) {
+			let state = self
+				.accumulators
+				.get_mut(*slot)
+				.ok_or_else(|| anyhow::anyhow!("a logged accumulator is not in the group"))?;
+			for number in numbers.into_iter().flatten() {
+				fold(state, Value::Number(number));
+			}
+			if let Some(value) = rejected {
+				fold(state, value);
+			}
+		}
+		Ok(())
+	}
+
 	/// The groups in key order, for their finish.
 	pub(super) fn finish(self) -> Finished {
 		let keys = match self.index {
@@ -503,6 +696,8 @@ impl Groups {
 		}
 		let (width, fields) = (self.width(), self.fields());
 		self.bytes += part.bytes;
+		let mut part = part;
+		let logged = part.logged.take();
 		let mut part = part.finish();
 		for (key, from) in std::mem::take(&mut part.keys) {
 			let found = match (&self.index, &key) {
@@ -516,6 +711,14 @@ impl Groups {
 			match found {
 				Some(into) => {
 					for (j, state) in accumulators.iter_mut().enumerate() {
+						// A logged accumulator holds nothing to merge: its values are folded
+						// below.
+						if logged
+							.as_ref()
+							.is_some_and(|logged| logged.slots.binary_search(&j).is_ok())
+						{
+							continue;
+						}
 						let state = std::mem::replace(state, AccumulatorState::placeholder());
 						self.accumulators[into * width + j].merge(state)?;
 					}
@@ -547,7 +750,10 @@ impl Groups {
 				}
 			}
 		}
-		Ok(())
+		match logged {
+			Some(logged) => self.fold_logged(*logged),
+			None => Ok(()),
+		}
 	}
 }
 
@@ -764,6 +970,205 @@ mod tests {
 			}
 			assert_eq!(got, expected, "{splitters:?}");
 		}
+	}
+
+	/// The values of a `GROUP ALL` over a sum, a mean, a deviation, a variance and a count, such
+	/// that the order they are folded in changes the low bits of the floats, and some of them
+	/// are absent or of another kind.
+	fn float_terms() -> Vec<Value> {
+		(0..400i64)
+			.map(|i| match i {
+				_ if i % 31 == 0 => Value::String("a string".to_owned().into()),
+				_ if i % 17 == 0 => Value::None,
+				_ if i % 13 == 0 => Value::Null,
+				_ if i % 11 == 0 => Value::Number(Number::Int(i)),
+				_ => Value::Number(Number::Float(
+					i as f64 * 0.1
+						+ if i % 2 == 0 {
+							1e15
+						} else {
+							-1e15
+						},
+				)),
+			})
+			.collect()
+	}
+
+	fn float_functions() -> Vec<Vec<Arc<dyn AggregateFunction>>> {
+		let registry = FunctionRegistry::with_builtins();
+		let get = |name| Arc::clone(registry.get_aggregate(name).expect("a built-in aggregate"));
+		vec![vec![
+			get("math::sum"),
+			get("math::mean"),
+			get("math::stddev"),
+			get("math::variance"),
+			get("count"),
+		]]
+	}
+
+	/// The calls of `float_functions` that fold floats.
+	const FLOATS: [usize; 4] = [0, 1, 2, 3];
+
+	fn floats() -> Arc<[usize]> {
+		Arc::from(FLOATS)
+	}
+
+	/// Hand `terms` to every call of `groups`, as the instruction that folds a row does: to the log
+	/// where the call is logged, to the accumulator where it is not.
+	fn hand_over(groups: &mut Groups, terms: &[Value]) {
+		groups.open_log_block(terms.len());
+		for term in terms {
+			for call in 0..5 {
+				if let Some(value) =
+					groups.log(0, call, term.clone()).expect("room in the block opened for it")
+				{
+					let _ = groups.accumulator(0, call).expect("an accumulator").update(value);
+				}
+			}
+		}
+	}
+
+	/// What each accumulator of the one group answers, or the failure it answers with, as text: the
+	/// bits of a float are part of what it prints.
+	fn finals(groups: Groups) -> Vec<String> {
+		let mut finished = groups.finish();
+		let (_, mut group) = finished.group(0);
+		group
+			.accumulators(0)
+			.iter()
+			.map(|state| match state.finalize() {
+				Ok(value) => format!("{value:?}"),
+				Err(e) => format!("{e}"),
+			})
+			.collect()
+	}
+
+	/// Logged values folded by the merge in the order of the parts answer what the serial fold
+	/// answers, bit for bit, whatever the parts' sizes, and whether the parts are merged one by
+	/// one into the statement's groups or into one another first.
+	#[test]
+	fn logged_terms_fold_as_the_serial_fold_does() {
+		let functions = float_functions();
+		let terms = float_terms();
+		let mut serial = Groups::new(0, &functions);
+		hand_over(&mut serial, &terms);
+		let expected = finals(serial);
+		// An order-sensitive fold: the same terms, in another order, answer something else.
+		let mut reversed = Groups::new(0, &functions);
+		hand_over(&mut reversed, &terms.iter().rev().cloned().collect::<Vec<_>>());
+		assert_ne!(finals(reversed)[..4], expected[..4], "the terms do not tell the order");
+		for cuts in
+			[vec![200], vec![1, 399], vec![100, 101, 250], vec![0, 0, 400], vec![7, 8, 9, 300]]
+		{
+			let mut parts = Vec::new();
+			let mut from = 0;
+			for cut in cuts.iter().copied().chain([terms.len()]) {
+				let mut part = Groups::new(0, &functions);
+				part.log_folds(&floats());
+				hand_over(&mut part, &terms[from..cut]);
+				parts.push(part);
+				from = cut;
+			}
+			let kept: usize = parts.iter().map(Groups::logged_bytes).sum();
+			assert!(kept > 0);
+			// One into the statement's groups after another.
+			let mut main = Groups::new(0, &functions);
+			for part in
+				parts.iter_mut().map(|part| std::mem::replace(part, Groups::new(0, &functions)))
+			{
+				main.absorb(part).expect("same shape");
+			}
+			assert_eq!(main.logged_bytes(), 0);
+			assert_eq!(finals(main), expected, "{cuts:?}, one by one");
+		}
+		// Parts folded into one another keep their terms in order for the statement's groups.
+		let mut parts: Vec<Groups> = terms
+			.chunks(97)
+			.map(|chunk| {
+				let mut part = Groups::new(0, &functions);
+				part.log_folds(&floats());
+				hand_over(&mut part, chunk);
+				part
+			})
+			.collect();
+		let mut right = parts.split_off(2);
+		let mut left = parts.remove(0);
+		left.absorb(parts.remove(0)).expect("same shape");
+		let mut rest = right.remove(0);
+		for part in right {
+			rest.absorb(part).expect("same shape");
+		}
+		assert!(left.logged_bytes() > 0 && rest.logged_bytes() > 0);
+		let mut main = Groups::new(0, &functions);
+		main.absorb(left).expect("same shape");
+		main.absorb(rest).expect("same shape");
+		assert_eq!(finals(main), expected, "pairs first");
+	}
+
+	/// The terms of a slot are kept in blocks allocated at their full size and never grown: the
+	/// block a chunk opens holds the terms of its rows, and the memory the blocks charge is
+	/// released with the log, once the merge has folded it.
+	#[test]
+	fn logged_terms_are_kept_in_blocks_that_never_grow() {
+		let functions = float_functions();
+		let terms: Vec<Value> = (0..50).map(|i| Value::Number(Number::Float(i as f64))).collect();
+		let mut part = Groups::new(0, &functions);
+		part.log_folds(&floats());
+		let token = Arc::new(());
+		for chunk in terms.chunks(8) {
+			assert_eq!(part.open_log_block(8), Groups::block_bytes(FLOATS.len(), 8));
+			part.hold_log(Box::new(Arc::clone(&token)));
+			for term in chunk {
+				for call in 0..5 {
+					if let Some(value) =
+						part.log(0, call, term.clone()).expect("room in the block opened for it")
+					{
+						let _ = part.accumulator(0, call).expect("an accumulator").update(value);
+					}
+				}
+			}
+		}
+		let logged = part.logged.as_ref().expect("a log");
+		for blocks in &logged.numbers {
+			assert_eq!(blocks.iter().map(Vec::len).sum::<usize>(), terms.len());
+			assert!(blocks.iter().all(|block| block.len() <= block.capacity()));
+			assert!(blocks.iter().all(|block| block.capacity() == 8), "a block grew");
+		}
+		assert_eq!(part.logged_bytes(), terms.len() * FLOATS.len() * std::mem::size_of::<Number>());
+		assert_eq!(Arc::strong_count(&token), 1 + terms.chunks(8).count());
+		let mut main = Groups::new(0, &functions);
+		main.absorb(part).expect("same shape");
+		assert_eq!(Arc::strong_count(&token), 1, "the charge outlived the log");
+	}
+
+	/// A term past the room of the block opened for it is an error: a block nothing charged is
+	/// never opened to hold it, and the terms before it stay where they were put.
+	#[test]
+	fn a_term_past_its_block_is_an_error() {
+		let functions = float_functions();
+		let mut part = Groups::new(0, &functions);
+		part.log_folds(&floats());
+		part.open_log_block(2);
+		for term in [1.0, 2.0] {
+			assert_eq!(part.log(0, 0, Value::Number(Number::Float(term))).expect("room"), None);
+		}
+		let bytes = part.logged_bytes();
+		assert!(part.log(0, 0, Value::Number(Number::Float(3.0))).is_err());
+		assert_eq!(part.logged_bytes(), bytes);
+		let logged = part.logged.as_ref().expect("a log");
+		assert!(logged.numbers.iter().all(|blocks| blocks.len() == 1));
+	}
+
+	/// A group of a key keeps no log: its values fold where they are handed over.
+	#[test]
+	fn a_group_of_a_key_logs_nothing() {
+		let functions = functions();
+		let mut groups = Groups::new(1, &functions);
+		groups.log_folds(&Arc::from([0, 1]));
+		groups.set_key(0, int(1));
+		groups.select(&functions);
+		assert_eq!(groups.log(1, 1, int(5)).expect("no log"), Some(int(5)));
+		assert_eq!(groups.logged_bytes(), 0);
 	}
 
 	#[test]

@@ -9,7 +9,10 @@
 //! that runs only where the closure is invoked, are not part of the body. The rules apply in this
 //! order, and the first that excludes an op is the one recorded:
 //!
-//! 1. an op that writes, or a write stage marked as apply, belongs to the residue;
+//! 1. an op that writes, or a write stage marked as apply, belongs to the residue. A write stage
+//!    the plan marks as compute writes nothing shared, and an op that assigns, unsets or sets the
+//!    content of the record in flight edits an image only the iteration holds: both are judged by
+//!    the ops they hold ([`judged_effects`]);
 //! 2. when the loop has an apply residue, an op that advances state or draws entropy does too,
 //!    since its answers depend on how many ran before it. A clock read stays in the slice;
 //! 3. a read of stored data belongs to the residue when it overlaps a write of the body that
@@ -30,15 +33,18 @@ use smallvec::SmallVec;
 use super::{effects, footprint, loop_legality, multiplicity, types};
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::Ir;
+use crate::exec::ir::core::value::ValueDef;
 use crate::exec::ir::core::walk::ops_in;
+use crate::exec::ir::expr::ops::ExprOp;
 use crate::exec::ir::iface::catalog::EffectCx;
 use crate::exec::ir::iface::effects::{ElemPath, IrFootprint, IrResource, Multiplicity};
-use crate::exec::ir::iface::ids::{OpId, RegionId};
+use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
 use crate::exec::ir::iface::r#loop::ApplyCut;
 use crate::exec::ir::iface::region_kind::RegionKind;
-use crate::exec::ir::logical::ops::{LogOp, WriteMark};
+use crate::exec::ir::logical::ops::{LogOp, LoopKind, SourceRefShape, WriteMark, WriteStageKind};
 use crate::exec::ir::op_kind::OpKind;
 use crate::exec::logical::pipelines::ChainRefusal;
+use crate::expr::Mock;
 use crate::expr::logical::EffectSet;
 
 /// The effects an op may have on state other than the loop's own values: any op that holds one
@@ -108,7 +114,7 @@ pub(crate) fn of(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, loop_op: OpI
 	let (stream, key_path) = multiplicity::of_stream(ir, loop_op);
 
 	let judged: Vec<EffectSet> =
-		ops.ops.iter().map(|op| effects::of_with(ir, facts, cx, *op).set).collect();
+		ops.ops.iter().map(|op| judged_effects(ir, facts, cx, loop_op, *op)).collect();
 	let touches = EffectSet::READS_DATA.union(WRITES);
 	let prints: Vec<IrFootprint> = ops
 		.ops
@@ -158,6 +164,129 @@ pub(crate) fn of(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, loop_op: OpI
 		}
 	}
 	out
+}
+
+/// The effects of `op`, an op of the body of the loop `loop_op`, and of every op in its regions
+/// as the slice of that loop judges them.
+///
+/// Where `loop_op` is the subject loop of a write and `op` belongs to that write's record in
+/// flight: a write stage the plan marks as compute ([`WriteMark::Compute`]) reads the row's
+/// images, the catalog and the principal and may reject, and writes nothing shared;
+/// `GenerateRecordId` also draws entropy where the write's subjects may name no id
+/// ([`draws_record_id`]). An op that assigns to, unsets from or sets the content of the record in
+/// flight edits an image that only the iteration holds. Each is judged by what it reads and by the
+/// ops of its regions. The stages of a write nested in the body handle a record its apply loads,
+/// and they, like any other op, are judged by their transitive effects.
+pub(super) fn judged_effects(
+	ir: &Ir,
+	facts: &mut FactCache,
+	cx: &EffectCx<'_>,
+	loop_op: OpId,
+	op: OpId,
+) -> EffectSet {
+	let Some(data) = ir.op(op) else {
+		return effects::of_with(ir, facts, cx, op).set;
+	};
+	if write_loop_of(ir, op) != Some(loop_op) {
+		return effects::of_with(ir, facts, cx, op).set;
+	}
+	let own = match &data.kind {
+		OpKind::Logical(LogOp::WriteStage {
+			stage,
+			mark: WriteMark::Compute,
+		}) => {
+			let own = EffectSet::READS_ROW
+				.union(EffectSet::READS_CATALOG)
+				.union(EffectSet::READS_PRINCIPAL)
+				.union(EffectSet::MAY_REJECT);
+			if *stage == WriteStageKind::GenerateRecordId && draws_record_id(ir, op) {
+				own.union(EffectSet::ENTROPY)
+			} else {
+				own
+			}
+		}
+		OpKind::Logical(
+			LogOp::Assign(..)
+			| LogOp::Unset {
+				..
+			}
+			| LogOp::Content {
+				..
+			},
+		) => EffectSet::READS_ROW.union(EffectSet::MAY_REJECT),
+		OpKind::Logical(_) | OpKind::Expr(_) | OpKind::Phys(_) => {
+			return effects::of_with(ir, facts, cx, op).set;
+		}
+	};
+	let mut set = own;
+	for region in data.regions.iter().copied() {
+		let Some(info) = ir.region(region) else {
+			continue;
+		};
+		if !effects::runs(&data.kind, info.kind) {
+			continue;
+		}
+		for inner in ops_in(ir, region) {
+			set = set.union(judged_effects(ir, facts, cx, loop_op, inner));
+		}
+	}
+	set
+}
+
+/// The nearest write loop around `op`: the subject loop of the write whose record `op` handles.
+fn write_loop_of(ir: &Ir, op: OpId) -> Option<OpId> {
+	let mut at = op;
+	loop {
+		let owner = ir.parent_op(ir.enclosing_region(at))?;
+		if multiplicity::loop_kind(ir, owner) == Some(LoopKind::Write) {
+			return Some(owner);
+		}
+		at = owner;
+	}
+}
+
+/// Whether the `GenerateRecordId` stage `stage` of a write loop may draw a record id at random:
+/// the loop's subjects may name a record by its table alone, or by a count of ids to draw.
+///
+/// A subject that names its id (`t:1`, an id range) and rows read from storage hold their ids.
+/// Any other subject (a table, a count, a parameter) is read as one that draws.
+fn draws_record_id(ir: &Ir, stage: OpId) -> bool {
+	let Some(loop_op) = write_loop_of(ir, stage) else {
+		return true;
+	};
+	match ir.op(loop_op).and_then(|data| data.operands.first().copied()) {
+		Some(subjects) => subject_draws(ir, subjects, 0),
+		None => true,
+	}
+}
+
+/// Whether the subjects `value` of a write may draw a record id.
+fn subject_draws(ir: &Ir, value: ValueId, depth: usize) -> bool {
+	if depth > multiplicity::MAX_DEPTH {
+		return true;
+	}
+	let Some(ValueDef::OpResult {
+		op,
+		..
+	}) = ir.value(value).map(|data| data.def)
+	else {
+		return true;
+	};
+	let Some(data) = ir.op(op) else {
+		return true;
+	};
+	match &data.kind {
+		OpKind::Expr(ExprOp::RecordId(_)) => false,
+		OpKind::Expr(ExprOp::Mock(mock)) => matches!(**mock, Mock::Count(..)),
+		OpKind::Expr(ExprOp::Array) => {
+			data.operands.iter().any(|member| subject_draws(ir, *member, depth + 1))
+		}
+		OpKind::Logical(LogOp::Source(attrs)) => match attrs.source_ref {
+			SourceRefShape::Table(_) | SourceRefShape::RecordId => false,
+			SourceRefShape::Mock | SourceRefShape::Param | SourceRefShape::Dynamic => true,
+		},
+		OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => true,
+	}
 }
 
 /// What a failure in an iteration of the loop `loop_op` does to the iterations around it:

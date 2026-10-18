@@ -729,16 +729,12 @@ impl Ddl<'_, '_> {
 		else {
 			return Ok(true);
 		};
-		let effects = match self.facts.last(op) {
-			Some(facts) => facts.effects.clone(),
-			None => effects::of_with(
-				self.ir,
-				&mut FactCache::new(),
-				&structural_cx(self.cx.registry(), self.ir),
-				op,
-			),
+		let cx = structural_cx(self.cx.registry(), self.ir);
+		let set = match self.facts.get(op, self.ir.generation(op), &cx.memo_key()) {
+			Some(facts) => facts.effects.set,
+			None => effects::of_with(self.ir, &mut FactCache::new(), &cx, op).set,
 		};
-		Ok(!super::super::speculate::admits(effects.set) || self.holds_opaque_node(op))
+		Ok(!super::super::speculate::admits(set) || self.holds_opaque_node(op))
 	}
 
 	/// Whether the expression defined by `op`, or an expression it reads, is a node whose repeat

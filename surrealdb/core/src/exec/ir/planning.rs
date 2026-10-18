@@ -68,7 +68,9 @@ use crate::exec::ir::cache::deps::ValueDeps;
 use crate::exec::ir::cache::planning::PlanningCatalog;
 use crate::exec::ir::logical::constraints::RegionRejection;
 use crate::exec::ir::logical::seam::{BindNotes, node_identity};
-use crate::exec::logical::pipelines::{Legality, LegalityIndex, statement_legality_with};
+use crate::exec::logical::pipelines::{
+	Legality, LegalityIndex, statement_legality_with, write_statement_legality,
+};
 use crate::exec::logical::summaries::CatalogSummaries;
 use crate::exec::planner::Planner;
 use crate::exec::vm::PlanSession;
@@ -653,7 +655,8 @@ async fn plan_bound(
 			physical: &memo,
 			config: &planner.frozen().config.exec,
 		};
-		let placement = Placement::default();
+		let placement =
+			Placement::from_config(cx.config).with_read_views(cx.physical.io_caps().read_views);
 		let physical = compile_phase!(
 			"phys",
 			plan_physical(&mut ir, &mut facts, &cx, folder, &placement).await?
@@ -809,8 +812,14 @@ async fn state_legalities(
 			continue;
 		}
 		let summaries = CatalogSummaries::of(planner, plan).await;
-		let index = LegalityIndex::with_summaries(plan, registry, &summaries);
-		let refusal = statement_legality_with(plan, registry, &summaries);
+		let index = match planner.binds_rows() {
+			true => LegalityIndex::binding(plan, registry, &summaries),
+			false => LegalityIndex::with_summaries(plan, registry, &summaries),
+		};
+		let refusal = match plan {
+			LogicalOp::Write(_) => write_statement_legality(plan, registry, &summaries),
+			_ => statement_legality_with(plan, registry, &summaries),
+		};
 		for holder in holders {
 			stated.statements.insert(holder, refusal);
 		}

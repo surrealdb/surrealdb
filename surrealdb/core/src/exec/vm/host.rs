@@ -1234,44 +1234,72 @@ pub(super) async fn run_pipelines(
 					continue;
 				}
 				// A row held as stored bytes is decoded as the sort hands it
-				// on, a unit each, charged a stretch at a time.
-				let mut decoded = Vec::with_capacity(rows.len());
-				let mut stretch = super::fuel::left().clamp(1, 256);
-				let mut taken = 0;
-				for (keys, row) in rows {
-					decoded.push((keys, row.into_value_in(&slab).map_err(ControlFlow::Err)?));
-					taken += 1;
-					if taken == stretch {
-						super::fuel::tick(ctx, taken).await?;
-						stretch = super::fuel::left().clamp(1, 256);
-						taken = 0;
+				// on, a unit each, charged a stretch at a time. Only a brute-force
+				// KNN needs every row decoded before the first is yielded; any
+				// other sort decodes a row as the pipeline after it takes the row,
+				// so the decoded rows are never all held at once.
+				if spec.knn_slot.is_none() {
+					let mut stretch = super::fuel::left().clamp(1, 256);
+					let mut taken = 0;
+					for (keys, row) in rows {
+						let row = row.into_value_in(&slab).map_err(ControlFlow::Err)?;
+						state.sorted_keys = keys;
+						let stop =
+							out_of_line(|| run_value_row(program, pipeline, row, state, ctx))
+								.await? == Ended::Stop;
+						if stop {
+							break;
+						}
+						taken += 1;
+						if taken == stretch {
+							super::fuel::tick(ctx, taken).await?;
+							stretch = super::fuel::left().clamp(1, 256);
+							taken = 0;
+						}
+						flush(state, yielder, flush_at, ctx).await?;
 					}
-				}
-				super::fuel::tick(ctx, taken).await?;
-				let rows = decoded;
-				// A brute-force KNN publishes the distance it ranked each row
-				// by before any row is yielded, so a projection reading
-				// them finds them.
-				if let Some(slot) = spec.knn_slot {
-					let published = state.knn_context(slot);
-					published
-						.insert_all(rows.iter().filter_map(|(keys, row)| {
-							match (keys.first(), row) {
-								(Some(Value::Number(distance)), Value::Object(object)) => {
-									match object.get("id") {
-										Some(Value::RecordId(rid)) => {
-											Some((rid.clone(), *distance))
+					super::fuel::tick(ctx, taken).await?;
+				} else {
+					let mut decoded = Vec::with_capacity(rows.len());
+					let mut stretch = super::fuel::left().clamp(1, 256);
+					let mut taken = 0;
+					for (keys, row) in rows {
+						decoded.push((keys, row.into_value_in(&slab).map_err(ControlFlow::Err)?));
+						taken += 1;
+						if taken == stretch {
+							super::fuel::tick(ctx, taken).await?;
+							stretch = super::fuel::left().clamp(1, 256);
+							taken = 0;
+						}
+					}
+					super::fuel::tick(ctx, taken).await?;
+					let rows = decoded;
+					// A brute-force KNN publishes the distance it ranked each row
+					// by before any row is yielded, so a projection reading
+					// them finds them.
+					if let Some(slot) = spec.knn_slot {
+						let published = state.knn_context(slot);
+						published
+							.insert_all(rows.iter().filter_map(|(keys, row)| {
+								match (keys.first(), row) {
+									(Some(Value::Number(distance)), Value::Object(object)) => {
+										match object.get("id") {
+											Some(Value::RecordId(rid)) => {
+												Some((rid.clone(), *distance))
+											}
+											_ => None,
 										}
-										_ => None,
 									}
+									_ => None,
 								}
-								_ => None,
-							}
-						}))
-						.await;
-				}
-				out_of_line(|| run_rows(program, pipeline, rows, state, ctx, yielder, flush_at))
+							}))
+							.await;
+					}
+					out_of_line(|| {
+						run_rows(program, pipeline, rows, state, ctx, yielder, flush_at)
+					})
 					.await?;
+				}
 			}
 			Source::Once => {
 				// The enclosing row is read where it is held, and copied only
@@ -2725,8 +2753,12 @@ async fn scan_rows(
 	let first = state.scan_hint.take();
 	if pipeline.in_place {
 		// A body in the storage cursor planned as morsels reads its key range in parts; a scan cut
-		// by a coarse gate reads in one cursor, which the gate stops.
-		if coarse.is_none() && super::morsel::effective_input(pipeline) == Some(MorselInput::Range)
+		// by a coarse gate reads in one cursor, which the gate stops, and a scan of a table whose
+		// records may be stamped below its newest migration step reads in one cursor, which
+		// brings each such record through the steps it has not passed.
+		if coarse.is_none()
+			&& replay.is_none()
+			&& super::morsel::effective_input(pipeline) == Some(MorselInput::Range)
 		{
 			// Morsels decode a packed record through the layouts the gate lists as the scan
 			// opens.
@@ -3062,7 +3094,6 @@ async fn scan_in_place(
 	mut coarse: Option<&mut CoarseGate>,
 ) -> FlowResult<bool> {
 	let topk_probe = armed_probe(pipeline, state);
-	let topk_threshold = topk_probe.as_ref().and_then(|p| p.snapshot());
 	let txn = ctx.txn();
 	let reader: Arc<dyn super::read_ahead::Reader> = Arc::clone(&txn) as _;
 	let budget = pipeline.read_ahead.then(|| ctx.root().ctx.config.exec.scan_batch_bytes);
@@ -3102,6 +3133,9 @@ async fn scan_in_place(
 				coarse.refresh();
 			}
 			let mut cut = false;
+			// The threshold is read once a chunk, after the rows before it reached the sort: a
+			// stale one only rejects less.
+			let topk_threshold = topk_probe.as_ref().and_then(|probe| probe.snapshot());
 			let stats = source
 				.for_each(chunk, &mut |key, value| {
 					if coarse.as_deref_mut().is_some_and(|coarse| coarse.passes_stored(key)) {

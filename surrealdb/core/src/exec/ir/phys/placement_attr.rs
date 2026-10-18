@@ -11,9 +11,10 @@ use slotmap::SecondaryMap;
 use smallvec::SmallVec;
 use surrealdb_strand::Strand;
 
+use super::write_cut::WriteCut;
 use crate::exec::ir::iface::ids::OpId;
 use crate::exec::logical::pipelines::{Legality, StatementLegality};
-use crate::exec::planner::placement::{Decision, PhysicalFacts};
+use crate::exec::planner::placement::{Decision, MergeOrder, PhysicalFacts};
 
 /// How one pipeline reads storage beyond what its ops state. Every field is conservative at its
 /// default: no window, no read-ahead.
@@ -137,12 +138,27 @@ pub(crate) struct PlacementAttr {
 	decision: Option<Decision>,
 	/// The physical facts the decision was made from. `None` until the pipeline is placed.
 	facts: Option<PhysicalFacts>,
-	/// Whether the pipeline's body cannot fail, so a morsel that overruns an ordered exit may be
-	/// pruned. Answered from the transitive fallibility of the body.
+	/// The pipelines of the chain the decision judged, this one first: the pipelines that continue
+	/// it through the streaming ops and select loops that read its rows, up to the one whose
+	/// result a sink reads. `None` until the pipeline is placed.
+	chain: Option<usize>,
+	/// Whether the pipeline raises for no row, so an entry that a top-k threshold shows worse than
+	/// every row the sort keeps may be rejected before the body runs.
 	prunes: bool,
 	/// How the pipeline reads storage. Placement is not part of op identity, so it changes no
 	/// digest and is never printed.
 	io: PipelineIo,
+	/// Where the iterations of a write loop that fans out are cut in two: the compute half runs
+	/// ahead of the cut on any task and the rest in iteration order. `None` for every pipeline
+	/// whose decision is not an ordered apply.
+	write_cut: Option<WriteCut>,
+	/// In what order the merge of the pipeline's morsels takes their results; serial for a
+	/// pipeline that runs serially.
+	merge: MergeOrder,
+	/// The places of the accumulators whose terms the morsels of the pipeline keep for the merge
+	/// to fold in the order of the serial run
+	/// ([`crate::exec::planner::placement::MorselPlan::ordered_fold`]); empty when none do.
+	ordered_fold: Vec<usize>,
 }
 
 impl PlacementAttr {
@@ -153,8 +169,12 @@ impl PlacementAttr {
 			statement,
 			decision: None,
 			facts: None,
+			chain: None,
 			prunes: false,
 			io: PipelineIo::default(),
+			write_cut: None,
+			merge: MergeOrder::Serial,
+			ordered_fold: Vec::new(),
 		}
 	}
 
@@ -174,12 +194,28 @@ impl PlacementAttr {
 		self.facts = facts;
 	}
 
+	pub(super) fn set_chain(&mut self, chain: Option<usize>) {
+		self.chain = chain;
+	}
+
 	pub(super) fn set_prunes(&mut self, prunes: bool) {
 		self.prunes = prunes;
 	}
 
 	pub(super) fn set_io(&mut self, io: PipelineIo) {
 		self.io = io;
+	}
+
+	pub(super) fn set_write_cut(&mut self, write_cut: Option<WriteCut>) {
+		self.write_cut = write_cut;
+	}
+
+	pub(super) fn set_merge(&mut self, merge: MergeOrder) {
+		self.merge = merge;
+	}
+
+	pub(super) fn set_ordered_fold(&mut self, ordered_fold: Vec<usize>) {
+		self.ordered_fold = ordered_fold;
 	}
 
 	pub(crate) fn legality(&self) -> &Legality {
@@ -198,12 +234,28 @@ impl PlacementAttr {
 		self.facts.as_ref()
 	}
 
+	pub(crate) fn chain(&self) -> Option<usize> {
+		self.chain
+	}
+
 	pub(crate) fn prunes(&self) -> bool {
 		self.prunes
 	}
 
 	pub(crate) fn io(&self) -> &PipelineIo {
 		&self.io
+	}
+
+	pub(crate) fn write_cut(&self) -> Option<WriteCut> {
+		self.write_cut
+	}
+
+	pub(crate) fn merge(&self) -> MergeOrder {
+		self.merge
+	}
+
+	pub(crate) fn ordered_fold(&self) -> &[usize] {
+		&self.ordered_fold
 	}
 }
 

@@ -201,6 +201,15 @@ impl TestDb {
 		Self::build(setup, true, surrealdb_cnf::ConfigMap::empty()).await
 	}
 
+	/// As [`Self::new_with_auth`], with `config` applied.
+	#[cfg(feature = "kv-mem")]
+	pub(crate) async fn new_with_auth_and_config(
+		setup: &str,
+		config: surrealdb_cnf::ConfigMap,
+	) -> Self {
+		Self::build(setup, true, config).await
+	}
+
 	/// As [`Self::new`], but with `config` applied, for exercising a knob whose
 	/// effect is only visible through a built datastore.
 	///
@@ -209,15 +218,6 @@ impl TestDb {
 	#[cfg(feature = "kv-mem")]
 	pub(crate) async fn new_with_config(setup: &str, config: surrealdb_cnf::ConfigMap) -> Self {
 		Self::build(setup, false, config).await
-	}
-
-	/// As [`Self::new_with_auth`], but with `config` applied.
-	#[cfg(feature = "kv-mem")]
-	pub(crate) async fn new_with_auth_and_config(
-		setup: &str,
-		config: surrealdb_cnf::ConfigMap,
-	) -> Self {
-		Self::build(setup, true, config).await
 	}
 
 	/// As [`Self::new`], or [`Self::new_with_auth`] when `auth_enabled`, on a
@@ -241,6 +241,17 @@ impl TestDb {
 		}
 	}
 
+	/// As [`Self::new_with_config`], over a datastore that `builder` prepares, such as one with a
+	/// test-owned memory governor or temporary store.
+	#[cfg(feature = "kv-mem")]
+	pub(crate) async fn new_on(
+		builder: crate::kvs::ds::Builder,
+		setup: &str,
+		config: surrealdb_cnf::ConfigMap,
+	) -> Self {
+		Self::build_from(builder, setup, false, config).await
+	}
+
 	async fn build(setup: &str, auth_enabled: bool, config: surrealdb_cnf::ConfigMap) -> Self {
 		Self::build_from(Datastore::builder(), setup, auth_enabled, config).await
 	}
@@ -253,6 +264,25 @@ impl TestDb {
 		config: surrealdb_cnf::ConfigMap,
 	) -> Self {
 		Self::new_on_rocksdb_over(Datastore::builder(), setup, dir, config).await
+	}
+
+	/// As [`Self::new_with_config`], on a SurrealKV datastore in `dir`.
+	#[cfg(feature = "kv-surrealkv")]
+	pub(crate) async fn new_on_surrealkv(
+		setup: &str,
+		dir: &std::path::Path,
+		config: surrealdb_cnf::ConfigMap,
+	) -> Self {
+		let path = format!("surrealkv://{}", dir.display());
+		Self::build_at(
+			Datastore::builder(),
+			&path,
+			setup,
+			false,
+			config,
+			crate::dbs::Capabilities::all(),
+		)
+		.await
 	}
 
 	/// As [`Self::new_on_rocksdb`], over a datastore that `builder` prepares, such as one with a

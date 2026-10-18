@@ -762,6 +762,10 @@ pub struct Executor {
 	/// its commit, in the order they ran, each with the event it holds until
 	/// that work settles (see [`Executor::settle_block_waits`]).
 	block_waits: Vec<BlockWait>,
+	/// Whether the statement running binds its rows to a `LET`'s name: the statements after it
+	/// read them in the order they were bound, so the plan runs them in the order of the serial
+	/// run.
+	binds_rows: bool,
 }
 
 /// A statement of an explicit block that queued work for after the block's
@@ -1274,6 +1278,7 @@ impl Executor {
 			session_sink: Arc::default(),
 			slow_log_after_commit: None,
 			block_waits: Vec::new(),
+			binds_rows: false,
 		}
 	}
 
@@ -1950,7 +1955,12 @@ impl Executor {
 					}
 					false => {
 						crate::exec::vm::out_of_line(|| {
-							crate::exec::vm::serve::request_statement(&probe, op, principal)
+							crate::exec::vm::serve::request_statement(
+								&probe,
+								op,
+								principal,
+								self.binds_rows,
+							)
 						})
 						.await
 					}
@@ -1982,6 +1992,9 @@ impl Executor {
 								0,
 							)
 							.await
+						}
+						false if self.binds_rows => {
+							self.plan_binding_expression(op, Arc::clone(&txn)).await
 						}
 						false => self.plan_bare_expression(op, Arc::clone(&txn)).await,
 					}
@@ -2257,6 +2270,24 @@ impl Executor {
 			txn,
 			Some(Arc::clone(&self.opt.auth)),
 			0,
+			Some(Arc::new(self.opt.clone())),
+		)
+		.await
+	}
+
+	/// [`Self::plan_bare_expression`] for the value of a top-level `LET`, whose rows the
+	/// statements after it read in the order they were bound.
+	async fn plan_binding_expression(
+		&self,
+		op: LogicalOp,
+		txn: Arc<Transaction>,
+	) -> Result<Arc<dyn crate::exec::ExecOperator>, Error> {
+		crate::exec::planner::plan_binding_value(
+			op,
+			&self.ctx,
+			&self.function_registry,
+			txn,
+			Some(Arc::clone(&self.opt.auth)),
 			Some(Arc::new(self.opt.clone())),
 		)
 		.await
@@ -2623,7 +2654,9 @@ impl Executor {
 				let op = lower_value()?;
 				let logged = self.ctx.slow_log().is_some().then(|| op.clone());
 				(
-					self.plan_bare_expression(op, Arc::clone(&txn)).await.map(StatementPlan::Ready),
+					self.plan_binding_expression(op, Arc::clone(&txn))
+						.await
+						.map(StatementPlan::Ready),
 					logged,
 				)
 			}
@@ -2634,7 +2667,9 @@ impl Executor {
 		};
 		// The RHS binds to a param rather than being returned, so its
 		// values are not the statement's rows and must not stream.
+		self.binds_rows = true;
 		let res = self.execute_operator_plan(plan, Arc::clone(&txn), false).await;
+		self.binds_rows = false;
 
 		let res = match res {
 			Err(ControlFlow::Return(value)) if !bare_return => value,
@@ -5005,6 +5040,7 @@ impl Executor {
 									inline,
 									false,
 									keep_logged,
+									true,
 									&mut builder,
 								)
 								.await;
@@ -5045,6 +5081,7 @@ impl Executor {
 									inline,
 									*read_only,
 									keep_logged,
+									false,
 									&mut builder,
 								)
 								.await;
@@ -5205,10 +5242,11 @@ impl Executor {
 	/// statement that reads the request's variables only as the key of a record
 	/// of a constant table ([`crate::exec::vm::serve::kept_for_requests`]) is served here, as
 	/// the request arrives, from the cache of compiled statements, when the
-	/// node keeps one.
+	/// node keeps one. `binds_rows` is whether the statement is the value of a
+	/// top-level `LET`, whose rows are read in the order they were bound.
 	#[expect(
 		clippy::too_many_arguments,
-		reason = "the request being built, the session its statements leave and what the statement may be"
+		reason = "the request being built, the session its statements leave, what the statement may be and how its rows are read"
 	)]
 	async fn compile_one(
 		&self,
@@ -5218,6 +5256,7 @@ impl Executor {
 		inline: bool,
 		cacheable: bool,
 		keep_logged: bool,
+		binds_rows: bool,
 		builder: &mut crate::exec::vm::RequestBuilder,
 	) -> PlannedStatement {
 		let logged = keep_logged.then(|| op.clone());
@@ -5283,6 +5322,7 @@ impl Executor {
 			Arc::clone(txn),
 			Some(Arc::clone(&opt.auth)),
 			Some(Arc::new(opt.clone())),
+			binds_rows,
 			builder,
 		)
 		.await;

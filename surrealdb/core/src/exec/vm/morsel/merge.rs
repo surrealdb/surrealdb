@@ -1,7 +1,10 @@
-//! Merging morsels' results into the statement's state, in the order of the serial run.
+//! Merging morsels' results into the statement's state, in the order the caller hands them over.
 //!
-//! Every function here takes results that are already in order: the caller hands them over
-//! front morsel first, and nothing here reorders or waits.
+//! The caller hands results over front morsel first, which is the order of the serial run, except
+//! for a pipeline whose plan merges freely
+//! ([`MergeOrder::Free`](crate::exec::planner::placement::MergeOrder::Free)): its rows are the
+//! statement's unordered output, so the caller hands each morsel over as it finishes. Nothing here
+//! reorders or waits.
 
 use std::sync::Arc;
 
@@ -287,6 +290,43 @@ pub(super) async fn absorb(
 	{
 		super::test_hooks::note_lease_fault(state, super::test_hooks::LeaseFault::Uncounted);
 	}
+	Ok(())
+}
+
+/// Whether the results of a morsel hold nothing but groups that fold into the groups of the morsel
+/// after it: every aggregate of the body has its groups in hand, none spilled, and no rows,
+/// sorted entries or row ends came with them.
+pub(super) fn combinable(result: &MorselResult, breakers: &BodyBreakers) -> bool {
+	breakers.paged.is_none()
+		&& breakers.distinct.is_none()
+		&& breakers.sorts.is_empty()
+		&& !breakers.aggregates.is_empty()
+		&& result.spilled.is_empty()
+		&& result.output.is_empty()
+		&& result.ends.is_empty()
+		&& breakers.aggregates.iter().all(|&aggregate| result.groups[aggregate as usize].is_some())
+}
+
+/// Fold the groups of `later`, the results of the morsels after those of `earlier`, into the
+/// groups of `earlier`, an aggregate at a time, and what `later` holds of the query's lease with
+/// them: `earlier` then holds what both did, as the statement's merge of the two in turn would.
+pub(super) fn fold_into(
+	earlier: &mut MorselResult,
+	later: &mut MorselResult,
+	breakers: &BodyBreakers,
+) -> FlowResult<()> {
+	for &aggregate in &breakers.aggregates {
+		let at = aggregate as usize;
+		if let Some(mine) = earlier.group_accounts.get_mut(at) {
+			adopt_reservation(mine, later.group_accounts.get_mut(at));
+		}
+		merge_groups(&mut earlier.groups[at], later.groups[at].take())?;
+	}
+	earlier.rows += later.rows;
+	earlier.elapsed += later.elapsed;
+	earlier.bytes += later.bytes;
+	earlier.chunks += later.chunks;
+	earlier.held = earlier.held.max(later.held);
 	Ok(())
 }
 

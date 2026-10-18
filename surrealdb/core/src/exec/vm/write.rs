@@ -16,6 +16,8 @@ use surrealdb_types::ToSql as _;
 
 use super::host::{Out, flush, out_of_line, run_storage_source, run_value_row};
 use super::interp::{PooledState, State};
+use super::ir_exec::{PendingCandidate, PrefixStop};
+use super::morsel::Rows as MorselRows;
 use super::program::{
 	InsertRowsSpec, Instr, Label, Pipeline, Program, Source, UnitId, WriteInstr, WriteOutput,
 	WriteSpec,
@@ -60,6 +62,8 @@ pub(super) use observe::{
 	SubscriptionFieldsLowered,
 };
 pub(super) use schema::{FieldPermission, FieldPlan, FieldWrite, SchemaInstr, SchemaPlan};
+#[cfg(not(target_family = "wasm"))]
+pub(super) use storage::encode_ahead;
 pub(super) use storage::{IndexPlan, LoweredIndexes, NativeIndexKind, StorageFact, StorageInstr};
 pub(super) use view::{
 	LoweredView, LoweredViews, Recalc, ViewClause, ViewRows, action_pipeline, view_row_exec,
@@ -146,6 +150,46 @@ pub(super) struct WriteState {
 	/// Shared, so the maintenance of each record's views holds it without
 	/// copying it.
 	maintaining: Arc<[surrealdb_strand::TableName]>,
+	/// Whether the body runs as the compute half of a write that fans out: it
+	/// ends at the first marker it reaches, with the record in flight left for
+	/// the candidate it hands the coordinator.
+	prefix: bool,
+	/// Where the compute half of the current record stopped, set by the marker
+	/// that ended it and taken once by [`Self::take_prefix_stop`].
+	prefix_stop: Option<PrefixStop>,
+	/// The candidate the coordinator holds for the record its next run of the
+	/// body resumes, taken by the host arm of the body's `WriteResume`.
+	pending: Option<PendingCandidate>,
+	/// The record-type marker the statement's task read for the record the compute half runs
+	/// next, taken once by the body's first instruction ([`Self::hold_stored_metadata`]).
+	stored_metadata: Option<Option<crate::catalog::Metadata>>,
+}
+
+/// What a write's state holds once a record has ended, for a test that compares the state of a
+/// write whose records resumed at a cut with that of a write that ran each record whole.
+///
+/// The compute half of a record changes the state's fields only through the record in flight, its
+/// write context and what a stage records for the record (the shown images, the field schema's
+/// state, the reference keys, the open handlers and the failure, retry and carry a handler holds),
+/// and each of them is held by the candidate or cleared with the record: the counters a record
+/// moves (`matched`, `returned`) are moved by the instruction that ends it.
+#[cfg(test)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WriteAudit {
+	pub(crate) only: bool,
+	pub(crate) per_record: bool,
+	pub(crate) returned: usize,
+	pub(crate) matched: usize,
+	pub(crate) shown: [bool; 2],
+	pub(crate) schema: bool,
+	pub(crate) references: bool,
+	pub(crate) handlers: usize,
+	pub(crate) failed: bool,
+	pub(crate) retry: bool,
+	pub(crate) carrying: bool,
+	pub(crate) nested: bool,
+	pub(crate) group: Option<u16>,
+	pub(crate) in_flight: bool,
 }
 
 /// The bundle of a table's stages a run holds ([`WriteState::bundle_for`]),
@@ -189,7 +233,105 @@ impl WriteState {
 			cascades: Vec::new(),
 			group: None,
 			maintaining: Arc::default(),
+			prefix: false,
+			prefix_stop: None,
+			pending: None,
+			stored_metadata: None,
 		})
+	}
+
+	/// A state for the compute half of the records of a write that fans out: it shares the
+	/// write's scope, so the contexts the statement resolved are the worker's too, and ends each
+	/// record at the first marker of its body ([`Self::take_prefix_stop`]).
+	#[cfg_attr(target_family = "wasm", allow(dead_code))]
+	pub(super) fn for_prefix(&self, spec: &WriteSpec, ctx: &ExecutionContext) -> FlowResult<Self> {
+		let mut state = Self::new(spec, ctx)?;
+		state.scope = Arc::clone(&self.scope);
+		state.group = self.group;
+		state.prefix = true;
+		Ok(state)
+	}
+
+	/// Whether the body runs as the compute half of a write that fans out.
+	pub(super) fn in_prefix_mode(&self) -> bool {
+		self.prefix
+	}
+
+	/// Records where the compute half of the current record stopped.
+	pub(super) fn stop_prefix(&mut self, stop: PrefixStop) {
+		self.prefix_stop = Some(stop);
+	}
+
+	/// Where the compute half of the current record stopped, once a marker ended it.
+	#[cfg_attr(target_family = "wasm", allow(dead_code))]
+	pub(super) fn take_prefix_stop(&mut self) -> Option<PrefixStop> {
+		self.prefix_stop.take()
+	}
+
+	/// The record in flight and its write context, left by a compute half that stopped; the
+	/// state holds neither afterwards.
+	#[cfg_attr(target_family = "wasm", allow(dead_code))]
+	pub(super) fn take_in_flight(&mut self) -> Option<(WriteRow, Option<Arc<WriteCtx>>)> {
+		let ctx = self.ctx.take();
+		self.clear().map(|row| (row, ctx))
+	}
+
+	/// Holds `candidate` for the next run of the body, which resumes the record it carries.
+	#[cfg_attr(target_family = "wasm", allow(dead_code))]
+	pub(super) fn hold_pending(&mut self, candidate: PendingCandidate) {
+		self.pending = Some(candidate);
+	}
+
+	/// Puts the record that `target` names in flight, as a write over targets begins each of its
+	/// records.
+	pub(super) fn begin_target(&mut self, target: Value) -> Result<(), ControlFlow> {
+		self.row = Some(WriteRow::for_target(target)?);
+		Ok(())
+	}
+
+	/// Holds the record-type marker stored with the record the compute half runs next, which the
+	/// statement's task read ahead: the half reads no stored data.
+	#[cfg_attr(target_family = "wasm", allow(dead_code))]
+	pub(super) fn hold_stored_metadata(&mut self, stored: Option<crate::catalog::Metadata>) {
+		self.stored_metadata = Some(stored);
+	}
+
+	/// What the state holds, for a test.
+	#[cfg(test)]
+	fn audit(&self) -> WriteAudit {
+		WriteAudit {
+			only: self.only,
+			per_record: self.per_record,
+			returned: self.returned,
+			matched: self.matched,
+			shown: [self.shown[0].is_some(), self.shown[1].is_some()],
+			schema: self.schema.is_some(),
+			references: self.references.is_some(),
+			handlers: self.handlers.len(),
+			failed: self.failure.is_some(),
+			retry: self.retry.is_some(),
+			carrying: self.carrying,
+			nested: self.nested,
+			group: self.group,
+			in_flight: self.row.is_some() || self.ctx.is_some(),
+		}
+	}
+
+	/// Whether a candidate waits for the next run of the body.
+	pub(super) fn has_pending(&self) -> bool {
+		self.pending.is_some()
+	}
+
+	/// The candidate that waits for the next run of the body.
+	pub(super) fn take_pending(&mut self) -> Option<PendingCandidate> {
+		self.pending.take()
+	}
+
+	/// Installs the record a compute half left in flight, as the stage that follows its cut finds
+	/// it.
+	pub(super) fn resume_candidate(&mut self, row: WriteRow, ctx: Option<Arc<WriteCtx>>) {
+		self.row = Some(row);
+		self.ctx = ctx;
 	}
 
 	/// The write of a row a view's maintenance computed on its view table,
@@ -231,6 +373,10 @@ impl WriteState {
 			cascades: Vec::new(),
 			group: None,
 			maintaining,
+			prefix: false,
+			prefix_stop: None,
+			pending: None,
+			stored_metadata: None,
 		}
 	}
 
@@ -315,6 +461,10 @@ impl WriteState {
 		self.schema = None;
 		self.references = None;
 		self.group = Some(group);
+		self.prefix = false;
+		self.prefix_stop = None;
+		self.pending = None;
+		self.stored_metadata = None;
 		Ok(())
 	}
 
@@ -439,7 +589,14 @@ impl WriteState {
 				// The record-type marker does not travel with a stored value,
 				// so a record picks it up here, before any stage that
 				// dispatches on it runs.
-				self.row()?.load_stored_metadata(&ctx).await?;
+				if self.prefix {
+					let stored = self.stored_metadata.take().ok_or_else(|| {
+						internal("the compute half of a record began with no stored marker")
+					})?;
+					self.row()?.adopt_metadata(stored);
+				} else {
+					self.row()?.load_stored_metadata(&ctx).await?;
+				}
 				// The bundle of a write that may reach any table is taken with
 				// the context, before anything of the record runs, so it is the
 				// bundle of the definitions the context read.
@@ -643,6 +800,8 @@ impl WriteState {
 					}
 					output.push(value);
 				}
+				#[cfg(test)]
+				super::note_write_ended(self.scope.exec(), self.audit());
 				next
 			}
 		})
@@ -1419,7 +1578,7 @@ pub(super) async fn run_write(
 /// is written here.
 #[allow(clippy::too_many_arguments)]
 async fn run_targets(
-	program: &Program,
+	program: &Arc<Program>,
 	pipeline: &Pipeline,
 	targets: &[super::program::Target],
 	(deferable, guarantees): (bool, bool),
@@ -1442,7 +1601,26 @@ async fn run_targets(
 					.map_err(|err| refused_by(err, form))?;
 				TargetSubjects::Named(named.into_iter())
 			}
-			super::program::Target::Mock(mock) => TargetSubjects::Mock(mock.clone().into_iter()),
+			super::program::Target::Mock(mock) => {
+				// The ids of a range that the plan fans out are the rows of a write set: the
+				// compute half of each runs on a worker, and this task applies them in the
+				// order the ids are generated in.
+				let mut rows = MorselRows::of(program, pipeline, ctx);
+				if !matches!(rows, MorselRows::Serial) {
+					if !deferable || !matches!(form, WriteForm::Create) {
+						return Err(internal(
+							"a write over the ids of a mock that is no create fans out",
+						));
+					}
+					for id in mock.clone() {
+						let row = Value::RecordId(id);
+						rows.row(program, pipeline, row, state, ctx, yielder, flush_at).await?;
+					}
+					rows.finish(state, ctx, yielder, flush_at).await?;
+					continue;
+				}
+				TargetSubjects::Mock(mock.clone().into_iter())
+			}
 		};
 		while let Some(subject) =
 			subjects.next(form, deferable).map_err(|err| refused_by(err, form))?
@@ -1649,6 +1827,22 @@ fn spec_of<'p>(program: &'p Program, state: &State) -> FlowResult<&'p WriteSpec>
 		Some(group) => program.groups.get(group as usize).and_then(|spec| spec.write.as_ref()),
 	}
 	.ok_or_else(|| internal("a write body in a read"))
+}
+
+/// A write state for the compute half of the records of the write `state` runs, over the scope
+/// `state`'s own write state holds ([`WriteState::for_prefix`]).
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
+pub(super) fn prefix_state(
+	program: &Program,
+	state: &State,
+	ctx: &ExecutionContext,
+) -> FlowResult<Box<WriteState>> {
+	let spec = spec_of(program, state)?;
+	let write = state
+		.write
+		.as_deref()
+		.ok_or_else(|| internal("the compute half of a write with no write state"))?;
+	Ok(Box::new(write.for_prefix(spec, ctx)?))
 }
 
 fn write_state(state: &mut State) -> FlowResult<&mut WriteState> {

@@ -143,6 +143,9 @@ pub trait MemoryGovernor: Send + Sync + 'static {
 	}
 }
 
+/// How many times [`Lease::reserve`] asks the governor to grow the grant for one reservation.
+const MOST_GROWTHS: u32 = 16;
+
 static NEXT_LEASE: AtomicU64 = AtomicU64::new(1);
 
 /// What one query may hold, and what it holds, under its node's governor.
@@ -292,20 +295,30 @@ impl Lease {
 
 	/// Reserve `bytes` more, asking the governor to grow the grant when it
 	/// does not cover them. Answers whether the bytes are reserved.
+	///
+	/// Other holders of the lease reserve against the same grant, so the grant
+	/// the governor raised may be used up before these bytes are held. The
+	/// governor is asked again for what is then short, as long as it answers
+	/// that it grew, up to [`MOST_GROWTHS`] times: an answer of `false` is the
+	/// governor's refusal, which tells the query to spill, and never the
+	/// outcome of a race between holders.
 	pub fn reserve(&self, bytes: usize) -> bool {
-		let mut asked = false;
+		let mut asked = 0;
 		loop {
 			if self.hold(bytes) {
 				return true;
 			}
 			let want = self.held().saturating_add(bytes);
-			if want <= self.usable() {
+			// One read of the usable grant: another holder of the lease can
+			// shrink it between two reads.
+			let usable = self.usable();
+			if want <= usable {
 				continue;
 			}
-			if asked || !self.governor.grow(self, want - self.usable()) {
+			if asked == MOST_GROWTHS || !self.governor.grow(self, want - usable) {
 				return false;
 			}
-			asked = true;
+			asked += 1;
 		}
 	}
 
@@ -937,6 +950,41 @@ mod tests {
 		}
 	}
 
+	/// Reservations on one lease whose grant another holder keeps lowering never
+	/// ask the governor to grow it by a negative amount.
+	#[test]
+	fn reserving_while_the_grant_shrinks_does_not_underflow() {
+		let governor = Arc::new(FairGovernor::new(64 * 1024));
+		let lease = Lease::open(&dynamic(&governor), 0, 0);
+		let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+		let shrinker = {
+			let (lease, stop) = (Arc::clone(&lease), Arc::clone(&stop));
+			std::thread::spawn(move || {
+				while !stop.load(Ordering::Acquire) {
+					lease.set_grant(0);
+					lease.set_grant(4096);
+				}
+			})
+		};
+		let reservers: Vec<_> = (0..4)
+			.map(|_| {
+				let lease = Arc::clone(&lease);
+				std::thread::spawn(move || {
+					for _ in 0..20_000 {
+						if lease.reserve(512) {
+							lease.release(512);
+						}
+					}
+				})
+			})
+			.collect();
+		for thread in reservers {
+			thread.join().expect("a reserving thread");
+		}
+		stop.store(true, Ordering::Release);
+		shrinker.join().expect("the shrinking thread");
+	}
+
 	/// Each branch of the decision, in order: the grant covers the bytes, grows
 	/// from free memory, the lease displaces onto what it can spill, waits for
 	/// others to give memory back, and is granted past the limit once its wait
@@ -1304,5 +1352,166 @@ mod tests {
 		let before = governor.epoch.load(Ordering::Relaxed);
 		let _opened = Lease::open(&dynamic(&governor), 100, 0);
 		assert!(governor.epoch.load(Ordering::Relaxed) > before, "an open while a lease waits");
+	}
+
+	/// A governor that raises a lease's grant by what was asked, while another holder of the lease
+	/// takes what it raised before the asker can: the first `raced` growths are used up so. One
+	/// that `refuses` raises nothing.
+	struct Raced {
+		raced: usize,
+		refuses: bool,
+		asked: AtomicUsize,
+	}
+
+	impl Raced {
+		fn new(raced: usize) -> Arc<Self> {
+			Arc::new(Self {
+				raced,
+				refuses: false,
+				asked: AtomicUsize::new(0),
+			})
+		}
+
+		fn refusing() -> Arc<Self> {
+			Arc::new(Self {
+				raced: 0,
+				refuses: true,
+				asked: AtomicUsize::new(0),
+			})
+		}
+
+		fn asked(&self) -> usize {
+			self.asked.load(Ordering::Relaxed)
+		}
+	}
+
+	impl MemoryGovernor for Raced {
+		fn opened(&self, _lease: &Arc<Lease>) {}
+
+		fn grow(&self, lease: &Lease, bytes: usize) -> bool {
+			let asked = self.asked.fetch_add(1, Ordering::Relaxed);
+			if self.refuses {
+				return false;
+			}
+			lease.set_grant(lease.grant() + bytes);
+			if asked < self.raced {
+				assert!(lease.hold(bytes), "the other holder finds the raised grant");
+			}
+			true
+		}
+
+		fn closed(&self, _lease: &Lease) {}
+	}
+
+	/// A reservation whose raised grant another holder uses up asks the governor again for what is
+	/// then short, and holds its bytes once a growth is not raced.
+	#[test]
+	fn a_grant_another_holder_used_up_is_asked_for_again() {
+		let governor = Raced::new(3);
+		let lease = Lease::open(&(Arc::clone(&governor) as Arc<dyn MemoryGovernor>), 100, 0);
+		assert!(lease.reserve(500));
+		assert_eq!(governor.asked(), 4, "three raced growths and the one that held");
+		// The bytes the other holder took in three growths, and the bytes reserved, are held.
+		assert_eq!(lease.held(), 3 * 400 + 500);
+	}
+
+	/// A governor that answers that it grew, however often another holder takes what it raised, is
+	/// asked at most `MOST_GROWTHS` times, and the reservation is then refused.
+	#[test]
+	fn a_reservation_asks_a_raced_governor_a_bounded_number_of_times() {
+		let governor = Raced::new(usize::MAX);
+		let lease = Lease::open(&(Arc::clone(&governor) as Arc<dyn MemoryGovernor>), 100, 0);
+		assert!(!lease.reserve(500));
+		assert_eq!(governor.asked(), MOST_GROWTHS as usize);
+	}
+
+	/// A governor's refusal is the answer at once: it is not asked again.
+	#[test]
+	fn a_refusal_is_not_asked_again() {
+		let governor = Raced::refusing();
+		let lease = Lease::open(&(Arc::clone(&governor) as Arc<dyn MemoryGovernor>), 100, 0);
+		assert!(!lease.reserve(500));
+		assert_eq!(governor.asked(), 1);
+		assert_eq!(lease.held(), 0);
+	}
+
+	/// Workers of one query reserve against its one lease at once. While the node has free memory
+	/// no reservation is refused: a refusal tells the query to spill, and a grant that another
+	/// worker used up before the asker held its bytes is not one.
+	#[test]
+	fn concurrent_reservations_on_one_lease_are_not_refused_while_the_node_has_memory() {
+		let governor = Arc::new(FairGovernor::new(1 << 32));
+		let lease = Lease::open(&dynamic(&governor), 0, 0);
+		let workers: Vec<_> = (0..8)
+			.map(|_| {
+				let lease = Arc::clone(&lease);
+				std::thread::spawn(move || (0..20_000).filter(|_| !lease.reserve(512)).count())
+			})
+			.collect();
+		let refused: usize = workers.into_iter().map(|w| w.join().expect("a worker")).sum();
+		assert_eq!(refused, 0, "a reservation was refused with memory free on the node");
+		assert_eq!(lease.held(), 8 * 20_000 * 512);
+	}
+
+	/// A governor of one lease that delegates to a [`FairGovernor`] and, for the first `raced`
+	/// growths, has another holder of the asking lease take the bytes the growth raised.
+	struct Racing {
+		inner: Arc<FairGovernor>,
+		raced: usize,
+		asked: AtomicUsize,
+	}
+
+	impl MemoryGovernor for Racing {
+		fn opened(&self, lease: &Arc<Lease>) {
+			self.inner.opened(lease);
+		}
+
+		fn grow(&self, lease: &Lease, bytes: usize) -> bool {
+			let asked = self.asked.fetch_add(1, Ordering::Relaxed);
+			let grown = self.inner.grow(lease, bytes);
+			if grown && asked < self.raced {
+				assert!(lease.hold(bytes), "the other holder finds the raised grant");
+			}
+			grown
+		}
+
+		fn closed(&self, lease: &Lease) {
+			self.inner.closed(lease);
+		}
+	}
+
+	/// What another lease holds and is granted after the lease it shares a governor with reserves
+	/// `bytes`, the first `raced` of that lease's growths used up by another of its holders.
+	fn neighbour_after(raced: usize) -> (usize, usize, usize, usize) {
+		let inner = Arc::new(FairGovernor::new(1000));
+		let neighbour = Lease::open(&dynamic(&inner), 0, 0);
+		assert!(neighbour.reserve(900));
+		let racing = Arc::new(Racing {
+			inner: Arc::clone(&inner),
+			raced,
+			asked: AtomicUsize::new(0),
+		});
+		let lease = Lease::open(&(Arc::clone(&racing) as Arc<dyn MemoryGovernor>), 100, 0);
+		assert!(lease.reserve(150), "the lease holds its bytes");
+		check(&inner, &[&neighbour, &lease]);
+		(neighbour.grant(), neighbour.held(), inner.granted(), racing.asked.load(Ordering::Relaxed))
+	}
+
+	/// Asking again for a grant another holder used up lowers no other lease further than the
+	/// first ask does: the neighbour that borrowed past its fair share is brought back to it once,
+	/// holds what it held, and the node's grants are what they are after one clean ask plus what
+	/// the raced growths added to the asking lease alone.
+	#[test]
+	fn asking_again_leaves_the_leases_beside_it_as_one_ask_does() {
+		let (grant, held, granted, asked) = neighbour_after(0);
+		assert_eq!(asked, 1);
+		assert_eq!(grant, 500, "brought back to its fair share");
+		assert_eq!(held, 900, "its bytes untouched");
+		let (raced_grant, raced_held, raced_granted, raced_asked) = neighbour_after(3);
+		assert_eq!(raced_asked, 4);
+		assert_eq!(raced_grant, grant, "no further lowered");
+		assert_eq!(raced_held, held);
+		// The lease's own grant rose by the three growths another holder used.
+		assert!(raced_granted > granted && raced_granted <= 1000);
 	}
 }

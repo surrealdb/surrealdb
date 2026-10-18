@@ -451,6 +451,31 @@ it is written with, so analyzers stay readable by 3.x.
 **Impact**: before going back to a 3.x release, rewrite `ext::` calls in stored
 definitions as `mod::`.
 
+### Parallel scans leave row order and the choice of error unspecified
+
+A statement that runs its scan as morsels, which the default configuration
+allows, specifies two properties less than 3.x did:
+
+- **Row order without `ORDER BY`.** Rows may come back in any order, and a
+  `LIMIT` or `START` without `ORDER BY` returns some rows rather than the first
+  ones by key. The rows of a statement that no `ORDER BY` orders are returned
+  as the parts of the scan finish, so a slow part holds back none after it.
+  With `ORDER BY` the order is exact, ties included. The rows a `LET` binds
+  when its value is itself a statement (`LET $s = SELECT … FROM t`) keep the
+  order of the scan, since later statements read them in the order they were
+  bound. A function or closure the value calls returns its rows as any other
+  statement does, in no specified order without `ORDER BY`. A client that reads
+  rows in key order must say so with `ORDER BY id`.
+- **Which error is reported.** When several rows fail the statement, it fails
+  with the error of one of them, not necessarily the first in key order. It
+  never succeeds, and a write never commits part of its effects.
+
+The result as a multiset, counts, aggregates, and the state a write leaves
+are unchanged, and so are statements with an observable effect, which stay
+serial. A float aggregate (`math::sum`, `math::mean`, `math::stddev`,
+`math::variance`, `vector::sum`) is folded serially, so its low bits are the
+ones a serial run gives.
+
 ## v3.4.0 — export/import contract changes, vector indexes that lost records sharing a vector, a doc-ID → elements mapping on vector indexes, JACCARD/PEARSON as distances, named record-id components, pre-filtered KNN choosing its strategy by cost, chronological Datetime order in new and rebuilt indexes, field definitions re-keyed at startup, exact float/decimal comparison, index entries for records whose ids differ only in a number's kind, and the type-erased doc-ID mappings retired at startup
 
 **Impact**:

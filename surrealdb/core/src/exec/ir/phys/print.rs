@@ -2943,6 +2943,7 @@ impl Text for TopKKey {
 		w.field("depth_limit", &self.depth_limit);
 		w.field("packed_rows", &self.packed_rows);
 		w.field("coarse_cutoff", &self.coarse_cutoff);
+		w.field("rejects_entries", &self.rejects_entries);
 		out.push_str(" }");
 	}
 
@@ -2955,6 +2956,7 @@ impl Text for TopKKey {
 		let depth_limit = c.field("depth_limit", first)?;
 		let packed_rows = c.field("packed_rows", first)?;
 		let coarse_cutoff = c.field("coarse_cutoff", first)?;
+		let rejects_entries = c.field("rejects_entries", first)?;
 		c.expect('}')?;
 		let path: Arc<[PathSegment]> = names.into_iter().map(PathSegment::from).collect();
 		Ok(TopKKey {
@@ -2964,6 +2966,7 @@ impl Text for TopKKey {
 			depth_limit,
 			packed_rows,
 			coarse_cutoff,
+			rejects_entries,
 		})
 	}
 }
@@ -3403,6 +3406,7 @@ mod tests {
 					depth_limit: 4,
 					packed_rows: true,
 					coarse_cutoff: None,
+					rejects_entries: true,
 				}),
 				lightweight: true,
 				id_order: true,
@@ -3505,6 +3509,7 @@ mod tests {
 						position: 1,
 						keep: 3,
 					}),
+					rejects_entries: true,
 				}),
 				prefilter: None,
 			})),

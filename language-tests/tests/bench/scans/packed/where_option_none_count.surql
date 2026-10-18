@@ -1,6 +1,6 @@
 /**
 [bench]
-reason = "Count records whose optional field is NONE: the scan's pre-decode filter refuses a packed row whose field is set from its columns, and the grouped body runs on each record that remains, decoded whole"
+reason = "Count records whose optional field is NONE: the grouped body runs on each stored row, reading the field from a packed row's columns"
 run = true
 rebuild = false
 datasets = { schemaless = "bench/util/records-10000.surql", schemafull = "bench/util/records-10000-schemafull.surql", mixed = "bench/util/records-10000-schemafull-mixed.surql" }

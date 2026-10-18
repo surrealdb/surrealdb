@@ -43,15 +43,18 @@
 
 use std::sync::Arc;
 
+use smallvec::SmallVec;
+
 use super::super::program::{
 	GroupSpec, Instr, Label, Operand, Pipeline, Source, StageTables, WriteInstr, WriteSpec,
 };
 use super::emit::Emitter;
 use super::expr::{Lowerer, Needs};
 use super::pipe::{PoolBase, Reads, lower_pipelines_at};
-use super::place::{Lowered, Provenance};
+use super::place::{Lowered, Provenance, parallel_of};
 use super::stage::{StageRun, Stages};
 use super::units::LowerCx;
+use super::write::{WriteCutEmit, emit_cut, emit_skip};
 use super::write_place::write_shape;
 use super::write_source::{
 	HostPlaces, edges_source, guaranteed_source, inserts_source, targets_source,
@@ -61,6 +64,7 @@ use crate::exec::ContextLevel;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::core::op::OpData;
+use crate::exec::ir::core::value::ValueDef;
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
 use crate::exec::ir::logical::ops::{
@@ -69,7 +73,10 @@ use crate::exec::ir::logical::ops::{
 use crate::exec::ir::logical::stages::{plan_form, stage_id, view_row_order, write_loop};
 use crate::exec::ir::op_kind::OpKind;
 use crate::exec::ir::phys::ops::{PhysOp, PhysWriteAttrs, WriteSubjectsShape};
+use crate::exec::ir::phys::write_cut::WriteCut;
 use crate::exec::operators::write::plan::RetryPolicy;
+use crate::exec::planner::placement::Parallel;
+use crate::exec::vm::ir_instr::{IrInstr, WriteCutSpec, WriteResumeSpec};
 use crate::val::Value;
 
 /// What emits the stages of one run into the body of a write.
@@ -147,11 +154,22 @@ fn write(instr: WriteInstr) -> Instr {
 	Instr::Write(instr)
 }
 
+/// The labels and instruction indices of the cut a write body is emitted with.
+struct CutMarks {
+	/// Where a candidate that stopped at the cut continues.
+	cut: Label,
+	/// Where a candidate that stopped at the skip continues.
+	skip: Label,
+	/// The index of the body's first instruction, the `WriteResume`.
+	resume_at: usize,
+}
+
 /// Emits the body that writes the record in flight through the orders `body` names, the stages of
 /// which are the ops `run` lists, and ends the row.
 ///
 /// The stages are emitted by `sink`. Answers [`IrError::Stale`] for a position of `body` that
-/// `run` has no stage at.
+/// `run` has no stage at. The body is emitted whole: see [`write_body_cut`] for a write the plan
+/// cuts.
 pub(super) fn write_body(
 	em: &mut Emitter,
 	body: &WriteBody,
@@ -159,8 +177,70 @@ pub(super) fn write_body(
 	entry: WriteEntry,
 	sink: &mut dyn StageSink,
 ) -> Result<(), IrError> {
+	write_body_cut(em, body, run, entry, sink, None).map(|_| ())
+}
+
+/// The pipeline op that yields the rows of the write `write`.
+fn rows_pipeline_of(ir: &Ir, write: &OpData) -> Option<OpId> {
+	let rows = write.operands.first()?;
+	match ir.value(*rows)?.def {
+		ValueDef::OpResult {
+			op,
+			..
+		} => Some(op),
+		ValueDef::BlockArg {
+			..
+		} => None,
+	}
+}
+
+/// The cut the placement of the pipeline that yields the rows of the write `write` states, where
+/// the pipeline fans out.
+pub(super) fn cut_of_rows(ir: &Ir, write: &OpData) -> Option<WriteCut> {
+	ir.placement(rows_pipeline_of(ir, write)?)?.write_cut()
+}
+
+/// [`write_body`] with the `cut` the plan states for the write, where it has one. Answers whether
+/// the body holds the markers of a write that fans out.
+///
+/// With a `cut`, the body of a write of one order that starts its pipeline is emitted in two
+/// halves: the stages ahead of `cut.stage` run on any task, the `WriteCut` ends them, and the
+/// stages after it run for the candidate a `WriteResume`, the body's first instruction, installs.
+/// The plan states a cut only for such a body, and a cut for any other is
+/// [`IrError::Invariant`]. Without a `cut` the body is emitted whole.
+pub(super) fn write_body_cut(
+	em: &mut Emitter,
+	body: &WriteBody,
+	run: &[WriteStageKind],
+	entry: WriteEntry,
+	sink: &mut dyn StageSink,
+	cut: Option<WriteCut>,
+) -> Result<bool, IrError> {
 	let skip = em.label()?;
 	let done = em.label()?;
+	let start = em.here() as usize;
+	if cut.is_some() && (start != 0 || body.branching != WriteBranching::Sole) {
+		return Err(IrError::Invariant {
+			what: "ir_lower::write_stmt: a write cut for a body that is not the pipeline's first code of one order",
+		});
+	}
+	let marks = match cut {
+		Some(_) => {
+			let cut = em.label()?;
+			let skip = em.label()?;
+			let resume_at = em.emit(Instr::Ir(IrInstr::write_resume(WriteResumeSpec {
+				cut,
+				skip,
+				live: SmallVec::new(),
+			}))) as usize;
+			Some(CutMarks {
+				cut,
+				skip,
+				resume_at,
+			})
+		}
+		None => None,
+	};
 	if entry.from_row {
 		em.emit(write(WriteInstr::Record));
 	}
@@ -172,8 +252,21 @@ pub(super) fn write_body(
 	em.emit(write(WriteInstr::Begin));
 	let first = order(run, &body.first)?;
 	let second = order(run, &body.second)?;
+	let mut cut_at = None;
 	match body.branching {
-		WriteBranching::Sole => sink.stages(em, &first, skip)?,
+		WriteBranching::Sole => match (&marks, cut) {
+			(Some(marks), Some(cut)) => {
+				let at = body.first.iter().position(|position| *position == cut.stage).ok_or(
+					IrError::Invariant {
+						what: "ir_lower::write_stmt: a write cut at a stage its order does not run",
+					},
+				)?;
+				sink.stages(em, &first[..at], skip)?;
+				cut_at = Some(emit_cut_marker(em, marks)?);
+				sink.stages(em, &first[at..], skip)?;
+			}
+			_ => sink.stages(em, &first, skip)?,
+		},
 		// A view row is written by its view's maintenance, which runs the order of the action it
 		// settled from the unit of the view table's order ([`view_row_sites`]); no statement's
 		// body writes one.
@@ -282,17 +375,66 @@ pub(super) fn write_body(
 	}));
 	em.emit(Instr::EndRow);
 	em.bind(skip)?;
+	if let Some(marks) = &marks {
+		emit_skip(em.code_mut());
+		em.bind(marks.skip)?;
+	}
 	em.emit(write(WriteInstr::End {
 		skipped: true,
 	}));
 	em.emit(Instr::EndRow);
-	Ok(())
+	if let (Some(marks), Some(cut_at)) = (&marks, cut_at) {
+		settle_live(em, marks, start, cut_at, cut.is_some_and(|cut| cut.encode_at_cut));
+	}
+	Ok(marks.is_some())
+}
+
+/// Emits the `WriteCut` that ends the halves ahead of the cut, answers its index, and binds the
+/// label a candidate that stopped there continues at to the instruction after it. The registers it
+/// carries are settled once the body is emitted ([`settle_live`]).
+fn emit_cut_marker(em: &mut Emitter, marks: &CutMarks) -> Result<usize, IrError> {
+	let at = em.here() as usize;
+	emit_cut(
+		em.code_mut(),
+		&WriteCutEmit {
+			cut: marks.cut,
+			skip: marks.skip,
+			live: SmallVec::new(),
+			encode: false,
+		},
+	);
+	em.bind(marks.cut)?;
+	Ok(at)
+}
+
+/// Gives the `WriteResume` and the `WriteCut` of a body emitted from `start`, cut at the
+/// instruction `cut_at`, the registers written ahead of the cut that the code after it reads.
+fn settle_live(em: &mut Emitter, marks: &CutMarks, start: usize, cut_at: usize, encode: bool) {
+	let registers = em.register_count();
+	let emitted = WriteCutEmit::scanned(
+		&em.code()[start..],
+		cut_at - start,
+		registers,
+		marks.cut,
+		marks.skip,
+	);
+	let code = em.code_mut();
+	code[marks.resume_at] = Instr::Ir(IrInstr::write_resume(WriteResumeSpec {
+		cut: marks.cut,
+		skip: marks.skip,
+		live: emitted.live.clone(),
+	}));
+	code[cut_at] = Instr::Ir(IrInstr::write_cut(WriteCutSpec {
+		live: emitted.live,
+		encode,
+	}));
 }
 
 /// The pipeline of a write body over `source`: [`write_body`], then the pipeline it ends.
 ///
-/// A write's own source produces its records, so the pipeline has no node of the physical plan to
-/// place. It is serial by construction, as every write is.
+/// A write the plan does not cut runs serially: its own source produces its records, and the
+/// pipeline takes no decision from the physical plan ([`write_pipeline_cut`] is the pipeline of a
+/// write it does).
 pub(super) fn write_pipeline(
 	em: &mut Emitter,
 	body: &WriteBody,
@@ -303,6 +445,23 @@ pub(super) fn write_pipeline(
 ) -> Result<Pipeline, IrError> {
 	write_body(em, body, run, entry, sink)?;
 	em.finish_pipeline(source)
+}
+
+/// [`write_pipeline`] for a write the plan cuts: the body is emitted with the markers of `cut`,
+/// and the pipeline takes the parallelism `parallel` the plan decided for it.
+pub(super) fn write_pipeline_cut(
+	em: &mut Emitter,
+	body: &WriteBody,
+	run: &[WriteStageKind],
+	entry: WriteEntry,
+	sink: &mut dyn StageSink,
+	source: Source,
+	(cut, parallel): (WriteCut, Parallel),
+) -> Result<Pipeline, IrError> {
+	write_body_cut(em, body, run, entry, sink, Some(cut))?;
+	let mut pipeline = em.finish_pipeline(source)?;
+	pipeline.parallel = parallel;
+	Ok(pipeline)
 }
 
 /// One pipeline per run of `sites`, each the run's stages answering `true` when every stage kept
@@ -523,9 +682,11 @@ fn subjects_of(ir: &Ir, write: &OpData) -> Result<ValueId, IrError> {
 /// Whether the caller's reads are permission-checked is a fact of the frame the lowering is for:
 /// a checked caller's images are cut for the fields it may select, never shown whole.
 ///
-/// A write over rows a read yields is lowered with the read ([`lower_write_over_rows`]). Answers
-/// [`IrError::NotYet`] for the stages and clauses the stage arms have no form for. A write to
-/// tables the statement does not name runs each run of stages as a site ([`SiteSink`]).
+/// A write over the ids of one range that the plan cuts takes the cut and the decision of its
+/// pipeline ([`write_pipeline_cut`]). A write over rows a read yields is lowered with the read
+/// ([`lower_write_over_rows`]). Answers [`IrError::NotYet`] for the stages and clauses the stage
+/// arms have no form for. A write to tables the statement does not name runs each run of stages
+/// as a site ([`SiteSink`]).
 pub(super) fn lower_write(
 	cx: &mut LowerCx<'_>,
 	em: &mut Emitter,
@@ -586,8 +747,28 @@ pub(super) fn lower_write(
 		}
 		None => {
 			let mut stages = Stages::new(&run, ir, cx.limits(), cx.registry()).in_context(cx);
-			let pipeline =
-				write_pipeline(em, &attrs.write.body, &run.stages, entry, &mut stages, source)?;
+			// A write over the ids of a range, which the plan cuts, runs its compute half as
+			// morsels under the decision the plan states for its pipeline.
+			let placed = match (subjects, cut_of_rows(ir, data), rows_pipeline_of(ir, data)) {
+				(WriteSubjectsShape::Targets, Some(cut), Some(pipeline)) => {
+					Some((cut, parallel_of(ir, pipeline, None)?))
+				}
+				_ => None,
+			};
+			let pipeline = match placed {
+				Some(placed) => write_pipeline_cut(
+					em,
+					&attrs.write.body,
+					&run.stages,
+					entry,
+					&mut stages,
+					source,
+					placed,
+				)?,
+				None => {
+					write_pipeline(em, &attrs.write.body, &run.stages, entry, &mut stages, source)?
+				}
+			};
 			(pipeline, stages.needs.take())
 		}
 	};

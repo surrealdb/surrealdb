@@ -269,12 +269,27 @@ A pipeline planned as Range morsels starts as one morsel over its whole range, r
 statement's own task (the **coordinator**) directly on the statement's state, reading through the
 transaction's own cursor and emitting as the serial run does. After each chunk the coordinator asks
 `Policy::split`. The policy answers `Split` once the coordinator has visited `morsel_split_rows`
-entries (default 256), so a small scan never pays for a split, a view, or a worker.
+entries (default 256), the transaction gives workers a read view to read through (unless
+`morsel_needs_view` is `false`), and what is left of the range fills at least two morsels.
 
-On `Split` the coordinator asks the transaction to `split` its remainder `[position, hi)` for parts
-of about `morsel_target_bytes` (default 1 MiB, and never less than one entry: the target is raised
-to the mean entry the coordinator has read, so a tiny target cuts one entry a morsel and not one
-part a byte). It keeps the first part in scan order, narrows its own read to it — the first entry
+What is left is measured from what the coordinator has read. One read of the last key the range
+holds, made once, gives the far end of the keys it can still reach, and the position of the key the
+coordinator has reached between the first key it read and that far end says what share of the
+range it has read; the entries and bytes read, scaled by what remains, are what is left. The far
+end is taken from the range's own keys and not from the end of the table's key space, so keys that
+cluster in a narrow band, such as consecutive integer ids, measure as they lie. A share too small
+to measure leaves the range as much as has been read, and no range is credited more than a thousand
+times what has been read. Until the coordinator has read a few dozen entries the measure says
+nothing, and the datastore sizes the parts from its own estimate. A scan that ends within a morsel
+of where it stands is never cut, and a scan of many morsels is cut at once, whatever time it has
+run.
+
+On `Split` the coordinator asks the transaction to `split` its remainder `[position, hi)` into as
+many parts as it fills morsels of `morsel_target_bytes` (default 1 MiB), no more than it has entries
+and no more than the datastore answers (1023). When the datastore sizes the parts, it is for parts of
+about `morsel_target_bytes`, never less than one entry: the target is raised to the mean entry the
+coordinator has read, so a tiny target cuts one entry a morsel and not one part a byte. It keeps
+the first part in scan order, narrows its own read to it — the first entry
 at or past the cut belongs to the next morsel, which opens its own cursor — and queues the rest in
 scan order. Only the part that starts the scan is cut: a morsel queued by a split is not cut again
 (§5.3 and §5.4 are how a large one is cut later).
@@ -567,17 +582,38 @@ the serial run's.
 
 ### 8.1 Output with no sort: concatenation in scan order
 
-The output is the morsels' output pages concatenated in order-key order. The **front** morsel —
-the unfinished morsel with the smallest order key — hands its pages straight to the statement's
-output. Every other running morsel writes into an output window of `morsel_window_bytes`, charged
-to the lease. A morsel whose window is full **parks** at its next chunk boundary: it records its
-position, drops its cursor back to its worker, and returns its place. When the front morsel
-completes, the next morsel's window is drained to the output and that morsel becomes the front; a
-parked front morsel resumes from its position.
+The output is the morsels' output concatenated in order-key order. A key range's morsel hands its
+rows to the coordinator as it produces them: the rows of each chunk go into a bounded queue of the
+morsel (`morsel/outbox.rs`) and the coordinator moves them to the statement's output while the
+morsel runs. Only the output of an unpaged body streams; a morsel over batches of rows hands its
+rows over whole, with its batch. A chunk waits in the queue with a grant that charges its bytes to
+the run's fan-out lease (`FanoutLease::grant_queued`), reserved when the chunk is queued and
+released when the coordinator takes it, when the morsel ends and hands what is left on as its output,
+or when the queue drops. The lease refusing a chunk revokes the lease, as any refusal does (§10): the
+chunk reaches the coordinator without a grant, the morsel parks after it, and the coordinator runs
+what is left of the range in order. A revoked lease refuses every later ask, so each Range morsel
+still running queues at most one more chunk without a grant before it parks: what the lease does not
+see is bounded by one chunk per morsel in flight.
+
+Where the rows are read in order the coordinator takes them from the **front** morsel — the
+unfinished morsel with the smallest order key — and from no other. A morsel counts the bytes it has
+queued against `morsel_window_bytes`. A morsel that is not at the front and holds a window parks at
+its next chunk boundary: it records its position, drops its cursor back to its worker, and returns
+its place. When the front morsel completes, the next morsel's queue is drained to the output and
+that morsel becomes the front; a parked front morsel resumes from its position. A morsel holds at
+most its window and the chunk that took it past the window.
+
+A pipeline whose rows nothing reads in order merges **freely** (`MergeOrder::Free`): no `ORDER BY`
+sorts them, no paging counts them, no distinct set deduplicates them, no operator reads them as its
+input, and no `LET` binds them. The coordinator takes rows from any running morsel and absorbs
+finished morsels as they finish, so a slow morsel holds back none after it, and the rows reach the
+reader in the order the morsels produced them. Its failure is the failure of the first failing
+morsel the merge meets, one of the failures of the rows that fail. A `GROUP ALL` whose every
+function is `count` merges freely too, since its partial counts add in any order.
 
 The statement's output is consumed through the existing flush (`host::flush`) and the response
-stream's backpressure. A slow consumer stalls the front morsel, which stalls the merge, which
-fills the windows, which parks the rest: no buffer grows past its window.
+stream's backpressure. A slow consumer stalls the queues the coordinator takes from, which fill the
+windows, which park the rest: no buffer grows past its window.
 
 ### 8.2 `START` and `LIMIT`: the replay, over morsels
 
@@ -615,6 +651,29 @@ appends the morsel's runs after it, and takes the morsel's buffer as its own, so
 stay in serial order. The final merge reads memory and spilled runs alike through the loser tree, no
 more at once than the query's fan-in (`QueryMemory::fan_in`), in several passes otherwise. Ordering
 and spilling are one mechanism.
+
+A sort that keeps every row over a key range merges **by position** (`MergeOrder::Positioned`): the
+coordinator takes the sorted run of a morsel as the morsel finishes, and holds it at the morsel's
+order key until no morsel lies before it, when the statement absorbs it. The order key is the tie
+tag of every entry in the run: a run is stably sorted, so an entry's place among those that tie is
+its row index in the morsel, and nothing is stored per entry. Absorbing the runs in order key order
+puts equal keys in the statement's buffer in the order the serial run reads them, so the statement's
+sort gives the serial stable order whatever order the morsels finished in. The sort lives in the
+statement's state and is merged by the statement's own loser tree, so a run is not merged into
+another before it is absorbed.
+
+Every result the coordinator holds either holds a place of the morsels in flight or has its whole
+size charged to the query's lease, so what it holds is bounded by the policy's read-ahead and the
+lease together. A run held in memory takes no place (`takes_a_place`) where it holds entries, the
+morsel that built it charged every non-empty sort to the query's lease, which a morsel does only
+where the query can spill (`bound_batch`), and the lease also takes the fixed size of holding the
+result (`held_result_bytes`): a run is then the sort's content whether the coordinator holds it or
+the statement does, so a slow morsel at the front stops none of the morsels behind it. An empty run,
+a run of a query with no store to spill to, which is held uncharged, and a run whose fixed size the
+lease refuses keep their places, so the results the coordinator holds stay within the policy's
+read-ahead. A spilled run and a failure keep their places and are absorbed or raised only when no
+morsel lies before them, so the first failure and the order of spilled runs are the serial run's.
+A sort over batches of rows merges the batches whole and in order.
 
 ### 8.4 Top-k: per-morsel heaps and one shared threshold
 
@@ -671,6 +730,20 @@ which merges by key without re-partitioning: the statement writes the groups it 
 appends the morsel's runs, and the final merge reads the runs and the groups still held in key order,
 the saved states of one key folded in the order they were written.
 
+An aggregate whose partial states combine associatively merges **by adjacency**
+(`MergeOrder::Adjacent`), over a key range: the coordinator holds the partial states of finished
+morsels until no morsel lies before them, and combines those it holds of morsels next to one
+another, the earlier before the later, on the coordinator, charging the rows it folds to the
+thread's fuel. The fold of a run of adjacent morsels is the fold of the morsels in order however the
+run was put together, so appends, first values and joined strings equal the serial run's. A held
+result counts with the running morsels against the number the policy lets be in flight, so
+combining, which turns several held results into one, is what frees a place. The partitioned merge
+of `GROUP BY` partials runs per window of held results, not per adjacent pair. A result that failed,
+or that holds spilled groups, is not combined and is absorbed when it reaches the front. A failure
+of a held morsel is raised once every morsel before it has merged, so the failure raised is the
+failure of the earliest failing morsel. An aggregate over batches of rows merges the batches whole
+and in order.
+
 ### 8.6 `DISTINCT`
 
 A body whose rows pass through one distinct set, with the output as its sink and no paging, runs as
@@ -709,11 +782,15 @@ Every byte a morsel run holds is charged to the query's lease (`exec/memory`, `L
 
 - **output windows**: a Range morsel that is not at the front parks once its output holds
   `morsel_window_bytes` (default 1 MiB) and entries remain (§8.1), so no morsel holds more than its
-  window beyond one chunk, and no more morsels are in flight than the policy allows;
+  window beyond one chunk, and no more morsels are in flight than the policy allows; the chunks a
+  streaming morsel has queued for the coordinator are reserved from the lease while they wait
+  (§8.1);
 - **breaker partials**: each morsel's sort entries and group map, through the breaker's own
   `Reservation`, charged as the statement's are and spilling as the statement's do when the query
   can spill (`bound_batch`); the merge takes a morsel's reservations over for the statement's, so a
-  morsel waiting to merge still counts against the lease and rows are counted once;
+  morsel waiting to merge still counts against the lease and rows are counted once. A sorted run
+  held in memory for the morsels before it is such a reservation, which is why it holds no place of
+  the morsels in flight (§8.3);
 - **merge state**: the statement's sorts and groups, the loser tree's heads, the groups of the
   morsels that wait for a partitioned `GROUP BY` merge, which keep their reservations until the
   merge takes them over, and the distinct set.

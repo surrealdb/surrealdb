@@ -1,5 +1,5 @@
 use clap::builder::EnumValueParser;
-use clap::{Command, arg};
+use clap::{Arg, ArgAction, Command, arg};
 
 use crate::cli::Backend;
 
@@ -25,6 +25,14 @@ pub fn cmd() -> Command {
 			.arg(arg!(-s --save "Save the result to the comparison datastore"))
 			.arg(arg!(-q --quick "Run a fast, low-sample comparison (coarse: catches large regressions, not small drift)"))
 			.arg(arg!(--json <PATH> "Write per-bench results and the comparison verdict to a JSON file"))
+			.arg(
+				Arg::new("config")
+					.long("config")
+					.value_name("KEY=VALUE")
+					.action(ArgAction::Append)
+					.value_parser(crate::cli::config_pair)
+					.help("Set a datastore configuration key for every datastore the run builds, e.g. `--config morsel_split_rows=18446744073709551615`. A run that sets one cannot be saved")
+			)
 		)
 		.subcommand_required(true)
 }

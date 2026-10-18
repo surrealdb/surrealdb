@@ -12,8 +12,8 @@ use surrealdb_types::ToSql;
 
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{Generation, Metadata, Record};
-use crate::doc::alter::ComputedData;
 use crate::exec::Error as ExecError;
+#[cfg(not(target_family = "wasm"))]
 use crate::exec::memory::size::value_bytes;
 use crate::exec::operators::write::ctx::WriteCtx;
 use crate::expr::ControlFlow;
@@ -41,6 +41,45 @@ const _: fn() = || {
 	fn send<T: Send>() {}
 	send::<WriteRow>();
 };
+
+/// The stored bytes of a record's post-image, encoded under the format the table's slot held at one
+/// layout epoch of the transaction.
+///
+/// The bytes stand for the record as it was when they were made. The stage that stores the record
+/// uses them only while the transaction's layout epoch is the one they were made at and the format
+/// it resolves carries the generation they were stamped with; otherwise it encodes the image
+/// itself.
+#[derive(Debug)]
+pub(crate) struct EncodedImage {
+	pub(crate) bytes: Vec<u8>,
+	pub(crate) epoch: u64,
+	pub(crate) generation: Option<crate::catalog::Generation>,
+}
+
+/// The record-type marker stored with the record `id`, read through the transaction of `exec`
+/// at its read version.
+///
+/// A read of stored data: the statement's task makes it, never a worker of a write.
+pub(crate) async fn stored_metadata(
+	exec: &crate::exec::ExecutionContext,
+	id: &RecordId,
+) -> Result<Option<Metadata>, ControlFlow> {
+	#[cfg(test)]
+	crate::exec::vm::note_txn_read_on_worker();
+	let db = exec.database().map_err(|e| ControlFlow::Err(anyhow::Error::new(e)))?;
+	let stored = exec
+		.txn()
+		.get_record(
+			db.ns_ctx.ns.namespace_id,
+			db.db.database_id,
+			&id.table,
+			&id.key,
+			exec.version_stamp(),
+		)
+		.await
+		.map_err(ControlFlow::Err)?;
+	Ok(stored.metadata.clone())
+}
 
 /// Per-record state threaded through a stage list.
 #[derive(Debug)]
@@ -165,6 +204,10 @@ pub(crate) struct WriteRow {
 	/// Setting it anywhere but after a successful storage write inflates a
 	/// number the executor reports as fact.
 	pub(crate) mutated: bool,
+
+	/// The post-image as stored, encoded ahead of the stage that stores it by the part of a write
+	/// that runs apart from its apply ([`EncodedImage`]). `None` for every other record.
+	pub(crate) encoded: Option<EncodedImage>,
 
 	/// Whether an in-flight index build deferred this record's doc-id removal.
 	/// `store_index_data` reports it; `reclaim_doc_id`, the next stage of
@@ -321,6 +364,7 @@ impl WriteRow {
 			extras: WriteExtras::Normal,
 			retry: false,
 			mutated: false,
+			encoded: None,
 			doc_id_removal_deferred: false,
 			matched: false,
 			output: None,
@@ -399,8 +443,10 @@ impl WriteRow {
 	/// the `Record` it read itself
 	/// ([`WriteRow::reset_for_update_retry`]).
 	///
-	/// The read is served from the transaction's record cache in the ordinary
-	/// case, the row source having just read the same record through it.
+	/// The marker is read through the statement's transaction by
+	/// [`stored_metadata`]. The compute half of a write that fans out never
+	/// reads it: the statement's task reads it ahead for each row it hands on
+	/// and the half takes it with [`WriteRow::adopt_metadata`].
 	pub(crate) async fn load_stored_metadata(&mut self, ctx: &WriteCtx) -> Result<(), ControlFlow> {
 		if self.initial.is_none() {
 			return Ok(());
@@ -408,20 +454,20 @@ impl WriteRow {
 		let Some(id) = self.id.clone() else {
 			return Ok(());
 		};
-		let stored = ctx
-			.txn()
-			.get_record(
-				ctx.ns.namespace_id,
-				ctx.db.database_id,
-				&id.table,
-				&id.key,
-				ctx.exec().version_stamp(),
-			)
-			.await
-			.map_err(ControlFlow::Err)?;
-		self.initial_metadata.clone_from(&stored.metadata);
-		self.metadata.clone_from(&stored.metadata);
+		let stored = stored_metadata(ctx.exec(), &id).await?;
+		self.adopt_metadata(stored);
 		Ok(())
+	}
+
+	/// Take the record-type marker a read of the stored record answered, as
+	/// [`WriteRow::load_stored_metadata`] does for a row that read nothing
+	/// else.
+	pub(crate) fn adopt_metadata(&mut self, stored: Option<Metadata>) {
+		if self.initial.is_none() || self.id.is_none() {
+			return;
+		}
+		self.initial_metadata.clone_from(&stored);
+		self.metadata = stored;
 	}
 
 	/// Read the record this row's subject named, so a caller choosing between
@@ -439,6 +485,8 @@ impl WriteRow {
 		let Some(id) = self.id.clone() else {
 			return Ok(());
 		};
+		#[cfg(test)]
+		crate::exec::vm::note_txn_read_on_worker();
 		let (stored, stamp) = crate::exec::migrate::stamped_record(
 			&ctx.txn(),
 			ctx.ns.namespace_id,
@@ -546,7 +594,7 @@ impl WriteRow {
 	///
 	/// An estimate for a memory account: close enough to bound the candidates held at once, and
 	/// cheap enough to take once per record. It walks borrowed values and never clones.
-	#[allow(dead_code, reason = "the morsel runtime is the first caller")]
+	#[cfg(not(target_family = "wasm"))]
 	pub(crate) fn held_bytes(&self) -> usize {
 		let images = [
 			Some(&self.initial),
@@ -558,21 +606,21 @@ impl WriteRow {
 		let input = match &self.input {
 			None => 0,
 			Some(
-				ComputedData::Patch(value)
-				| ComputedData::Merge(value)
-				| ComputedData::Replace(value)
-				| ComputedData::Content(value),
+				ComputedInput::Patch(value)
+				| ComputedInput::Merge(value)
+				| ComputedInput::Replace(value)
+				| ComputedInput::Content(value),
 			) => value_bytes(value),
-			Some(ComputedData::Unset(idioms)) => std::mem::size_of_val(idioms.as_slice()),
-			Some(ComputedData::Set(assignments)) => {
+			Some(ComputedInput::Unset(idioms)) => std::mem::size_of_val(idioms.as_slice()),
+			Some(ComputedInput::Set(assignments)) => {
 				assignments.iter().map(|assignment| value_bytes(&assignment.value)).sum()
 			}
 		};
-		images
-			.into_iter()
-			.flatten()
-			.map(value_bytes)
-			.fold(std::mem::size_of::<Self>().saturating_add(input), usize::saturating_add)
+		let encoded = self.encoded.as_ref().map_or(0, |encoded| encoded.bytes.capacity());
+		images.into_iter().flatten().map(value_bytes).fold(
+			std::mem::size_of::<Self>().saturating_add(input).saturating_add(encoded),
+			usize::saturating_add,
+		)
 	}
 }
 

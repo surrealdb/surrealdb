@@ -173,11 +173,8 @@ pub(super) fn cut(rest: &RawRange, dir: Direction, bounds: Vec<Vec<u8>>) -> Cut 
 
 /// What a morsel has left, estimated from what it has read: the entries `visited` and their
 /// `bytes`, the first key it read, `first`, and where reading continues, `at`, within `span`, the
-/// range the morsel is reading. The share of the range read is measured from `first` to the far end
-/// of the range on the key bytes the datastore splits on, and the entries read are scaled by what
-/// remains of it. A share too small to measure, which clustered keys give, leaves the morsel as
-/// much as it has read, and no morsel is credited more than a thousand times what it has read. The
-/// estimate chooses whom a thief asks and whether to ask; it never decides where a range is cut.
+/// range the morsel is reading. See [`remaining_between`]; the far end of the range is taken to be
+/// the end of `span`, which holds keys of the whole key space when `span` is a table's.
 pub(super) fn remaining(
 	span: &RawRange,
 	dir: Direction,
@@ -187,6 +184,27 @@ pub(super) fn remaining(
 	bytes: u64,
 ) -> Estimate {
 	let (lo, hi) = span.bounds();
+	remaining_between(lo, hi, dir, first, at, visited, bytes)
+}
+
+/// What a scan has left, measured from what it has read and the keys that bound where it lies:
+/// the entries `visited` and their `bytes`, the first key read, `first`, where reading continues,
+/// `at`, and the bounds `lo` and `hi` of the keys the scan can still reach (for a forward scan
+/// only `hi` is read, for a backward one only `lo`). The share of the keys read is measured from
+/// `first` to the far bound on the key bytes the datastore splits on, and the entries read are
+/// scaled by what remains of it. A share too small to measure leaves the scan as much as it has
+/// read, and no scan is credited more than a thousand times what it has read. Bounds that are the
+/// first and last keys the scan holds measure clustered keys, which the end of the key space does
+/// not.
+pub(super) fn remaining_between(
+	lo: &[u8],
+	hi: &[u8],
+	dir: Direction,
+	first: &[u8],
+	at: &[u8],
+	visited: u64,
+	bytes: u64,
+) -> Estimate {
 	let read = if first.is_empty() {
 		0.0
 	} else {
@@ -209,6 +227,26 @@ pub(super) fn remaining(
 		keys: (visited as f64 * left) as u64,
 		bytes: (bytes as f64 * left) as u64,
 		exact: false,
+	}
+}
+
+/// What a scan has left once the key at the far end of what it still reaches is known, `far`: the
+/// last key a forward scan reaches, the first a backward one does. See [`remaining_between`].
+pub(super) fn remaining_to(
+	far: &[u8],
+	dir: Direction,
+	first: &[u8],
+	at: &[u8],
+	visited: u64,
+	bytes: u64,
+) -> Estimate {
+	match dir {
+		Direction::Forward => {
+			let mut hi = far.to_vec();
+			hi.push(0);
+			remaining_between(&[], &hi, dir, first, at, visited, bytes)
+		}
+		Direction::Backward => remaining_between(far, &[], dir, first, at, visited, bytes),
 	}
 }
 
@@ -642,6 +680,90 @@ mod tests {
 		assert_eq!(outcome.ok(), Some(Boundary::Go));
 		assert_eq!((running.slot().answers(), running.slot().declines()), (2, 1));
 		assert_eq!(shared.table().queued.len(), 1, "nothing more was queued");
+	}
+
+	/// A morsel cuts its own remainder when nobody asked, while no morsel waits and the remainder
+	/// and what it has read since it was last cut are large enough; a morsel that waits, or a read
+	/// too short, leaves the remainder whole.
+	#[cfg(feature = "kv-rocksdb")]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn a_hot_morsel_cuts_its_own_remainder_while_none_waits() {
+		use std::borrow::Cow;
+
+		use super::super::places;
+		use crate::exec::operators::test_util::TestDb;
+		use crate::key::schema::RecordPrefix;
+
+		let dir = tempfile::tempdir().expect("temporary directory");
+		let setup = "DEFINE TABLE t; FOR $i IN 0..300 { CREATE type::record('t', $i) SET n = $i };";
+		let db = TestDb::new_on_rocksdb(setup, dir.path(), surrealdb_cnf::ConfigMap::empty()).await;
+		let ctx = db.exec_ctx().await;
+		let view = ctx.txn().snapshot().expect("a read-only transaction on RocksDB gives a view");
+		let db_ctx = ctx.database().expect("a database context");
+		let table = crate::val::TableName::from("t".to_owned());
+		let span = RecordPrefix {
+			ns: db_ctx.ns_ctx.ns.namespace_id,
+			db: db_ctx.db.database_id,
+			tb: Cow::Borrowed(&table),
+		}
+		.range()
+		.expect("the table's range");
+		let config = crate::exec::config::ExecConfig {
+			morsel_target_bytes: 1_000,
+			..Default::default()
+		};
+		let shared = Shared::new();
+		let running = Registered::new(&shared);
+		let statement = places::register();
+		let donor = Donor {
+			gate: Gate {
+				shared: &shared,
+				slot: running.slot(),
+				policy: Policy::from_config(&config),
+			},
+			view: &*view,
+			version: None,
+			statement: &statement,
+			ctx: &ctx,
+		};
+		let mut cursor = view
+			.open(span.clone().into_key_range(), Direction::Forward, None)
+			.await
+			.expect("opens");
+		let mut visitor = |_: &[u8], _: &[u8]| Ok(std::ops::ControlFlow::Continue(()));
+		cursor.for_each(1, &mut visitor).await.expect("reads");
+		let mut own = span.clone();
+		// A read that holds three morsels' bytes and has run past the first chunks since its last
+		// cut.
+		let read_since = |since_cut, cuts| Progress {
+			first: span.bounds().0.to_vec(),
+			visited: 100,
+			bytes: 3_000,
+			since_cut,
+			cuts,
+			quanta: 0,
+		};
+		// Too few entries since the last cut: the remainder stays whole.
+		let outcome =
+			donor.boundary(&mut *cursor, &mut own, Direction::Forward, &read_since(10, 0)).await;
+		assert_eq!(outcome.ok(), Some(Boundary::Go));
+		assert_eq!(shared.metrics().resplit, 0);
+		assert!(shared.table().queued.is_empty());
+		// Enough read, and nobody waits: the morsel cuts its remainder without being asked.
+		let since = 2 * u64::from(Policy::from_config(&config).scan_chunk());
+		let outcome =
+			donor.boundary(&mut *cursor, &mut own, Direction::Forward, &read_since(since, 0)).await;
+		assert_eq!(outcome.ok(), Some(Boundary::Donated));
+		assert!(shared.metrics().resplit > 0);
+		assert_eq!(shared.metrics().stolen, 0);
+		assert!(!shared.table().queued.is_empty());
+		// The parts it gave wait for a place: it cuts nothing more, however much it has read.
+		let waiting = shared.table().queued.len();
+		let outcome = donor
+			.boundary(&mut *cursor, &mut own, Direction::Forward, &read_since(since << 1, 1))
+			.await;
+		assert_eq!(outcome.ok(), Some(Boundary::Go));
+		assert_eq!(shared.table().queued.len(), waiting);
 	}
 
 	/// A cursor that refuses to narrow leaves the owner with the whole of its remainder: nothing is

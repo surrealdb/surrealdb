@@ -43,11 +43,13 @@ use crate::exec::ir::iface::r#loop::{
 };
 use crate::exec::ir::iface::policy::LoopFacts;
 use crate::exec::ir::iface::region_kind::{LoopRule, RegionKind, RegionProperties, ReturnRule};
-use crate::exec::ir::logical::ops::{LogOp, LogTag, LoopKind, LoopSink, SourceRefShape};
+use crate::exec::ir::logical::ops::{
+	LogOp, LogTag, LoopKind, LoopSink, SourceRefShape, Stored, WriteMark, WriteStored,
+};
 use crate::exec::ir::op_kind::{OpKind, OpTag};
 use crate::exec::logical::pipelines::{
-	AggregateCombine, ChainLegality, ChainRefusal, ErrorOrder, ForeachLegality, Legality, Paging,
-	SinkCombine, SourceSplit,
+	AggregateCombine, Arrival, ChainLegality, ChainRefusal, ErrorOrder, ForeachLegality, Legality,
+	Paging, SinkCombine, SourceSplit,
 };
 use crate::expr::logical::EffectSet;
 use crate::val::Value;
@@ -157,6 +159,14 @@ pub(crate) struct LoopLegality {
 	/// How the partial results of the rows combine when the sink concatenates them: the combine of
 	/// the first sort, aggregate or distinct set that reads the loop's rows, else concatenation.
 	pub(crate) consumer_combine: SinkCombine,
+	/// Whether an op the compute slice holds reads stored data.
+	pub(crate) compute_reads_data: bool,
+	/// Whether every write stage the plan marks `Compute` is wholly in the compute slice, so the
+	/// apply half of an iteration starts where the plan's marks say it does.
+	pub(crate) cut_at_marks: bool,
+	/// Whether an op of the body writes a record of the table the loop's source reads at a key
+	/// that is not the loop element's own, triggered writes included.
+	pub(crate) source_written: bool,
 }
 
 impl LoopLegality {
@@ -165,7 +175,8 @@ impl LoopLegality {
 	///
 	/// The conditions are checked in the order the refusals are declared: an unsplittable source,
 	/// a carried value, an ordered exit, an effect in the compute slice or the apply residue, a
-	/// barrier, a sink without a combine, and a write that two iterations may make to one key. A
+	/// barrier, a sink without a combine, a write to the table the source reads at a key that is
+	/// not the element's, and a write that two iterations may make to one key. A
 	/// loop with an apply residue writes in iteration order, which is safe only for a stream that
 	/// holds each identity once and whose element-keyed writes follow its key path.
 	pub(crate) fn mode(&self) -> LoopMode {
@@ -194,6 +205,9 @@ impl LoopLegality {
 		if !has_combine {
 			return LoopMode::Serial(LoopRefusal::NoCombine);
 		}
+		if self.apply == ApplyCut::Ordered && self.source_written {
+			return LoopMode::Serial(LoopRefusal::SourceWritten);
+		}
 		if self.apply == ApplyCut::Ordered
 			&& !(self.multiplicity == Multiplicity::Distinct && self.writes_follow_key_path)
 		{
@@ -217,6 +231,8 @@ impl LoopLegality {
 			delivery: self.delivery,
 			multiplicity: self.multiplicity,
 			key_path: self.key_path,
+			compute_reads_data: self.compute_reads_data,
+			cut_at_marks: self.cut_at_marks,
 		}
 	}
 
@@ -225,8 +241,11 @@ impl LoopLegality {
 	/// The chain refuses as the compute slice does, as the apply residue does, and as a barrier
 	/// does (an opaque body), by the first refusal of those. A sink that concatenates its rows
 	/// combines as the first breaker that reads them does. A decisive, folding or writing sink
-	/// holds state a part cannot own, so it is not splittable. The pipeline may raise whenever
-	/// the compute slice may.
+	/// holds state a part cannot own, so it is not splittable, except a writing sink of a loop
+	/// that is independent and whose compute half ends where the plan's marks put the cut, which
+	/// applies its iterations' effects in iteration order. The rows arrive as the combine of the
+	/// sink allows ([`Arrival::of_combine`]), in iteration order where a clause pages them. The
+	/// pipeline may raise whenever the compute slice may.
 	pub(crate) fn legality(&self) -> Legality {
 		let mut chain = self.effects;
 		if let ApplyEffects::Refused(refusal) = self.apply_effects {
@@ -239,15 +258,31 @@ impl LoopLegality {
 			LoopSink::Output | LoopSink::Filter | LoopSink::Discard => {
 				self.consumer_combine.clone()
 			}
+			LoopSink::Write(_)
+				if self.mode() == LoopMode::Independent
+					&& self.apply == ApplyCut::Ordered
+					&& self.cut_at_marks =>
+			{
+				SinkCombine::OrderedApply
+			}
 			LoopSink::Decisive(_) | LoopSink::Fold | LoopSink::Write(_) => {
 				SinkCombine::NotSplittable
 			}
+		};
+		// The combine of a loop's rows, a sort or an aggregate in or after the loop, states how the
+		// order of their arrival is observed. Where a clause counts the rows, or the sink
+		// concatenates, the rows are observed in iteration order.
+		let arrival = match self.paging {
+			Paging::None => Arrival::of_combine(&sink),
+			Paging::One | Paging::Many => Arrival::Serial,
 		};
 		Legality {
 			source: self.source,
 			chain,
 			sink,
 			paging: self.paging,
+			arrival,
+			ordered_fold: false,
 			error_order: self.error_order,
 			may_raise: self.compute_fallibility != FallibilityClass::Infallible,
 		}
@@ -338,7 +373,9 @@ pub(crate) fn of_with(
 		body_order(ir, body, &mut body_ops, 0);
 	}
 
-	let compute = transitive_set(ir, facts, cx, held.compute.iter().copied());
+	let compute = held.compute.iter().fold(EffectSet::PURE, |all, op| {
+		all.union(slice::judged_effects(ir, facts, cx, loop_op, *op))
+	});
 	let residue = transitive_set(ir, facts, cx, held.residue.iter().map(|(op, _)| *op));
 	let compute_fallibility = held
 		.compute
@@ -348,6 +385,11 @@ pub(crate) fn of_with(
 		})
 		.class();
 	let consumers = consumers_of(ir, loop_op);
+	let compute_reads_data = held.compute.iter().any(|op| {
+		slice::judged_effects(ir, facts, cx, loop_op, *op).contains(EffectSet::READS_DATA)
+	});
+	let cut_at_marks = compute_stages_in_slice(ir, loop_op, &held);
+	let writes_subjects = matches!(sink, LoopSink::Write(_));
 	let carried = if sink == LoopSink::Fold || kind == LoopKind::Recurse {
 		Carried::Accumulator {
 			combine: None,
@@ -376,6 +418,17 @@ pub(crate) fn of_with(
 		slice: held,
 		writes_follow_key_path: writes_follow_key_path(ir, facts, cx, loop_op, &body_ops, key_path),
 		consumer_combine: consumer_combine(ir, loop_op, &consumers),
+		compute_reads_data,
+		cut_at_marks,
+		source_written: source_written(
+			ir,
+			facts,
+			cx,
+			loop_op,
+			&body_ops,
+			key_path,
+			writes_subjects,
+		),
 	})
 }
 
@@ -829,6 +882,162 @@ fn static_target(ir: &Ir, value: ValueId) -> bool {
 	}
 	let tag = data.kind.tag();
 	tag == OpTag::Expr(ExprTag::RecordId) || tag == OpTag::Expr(ExprTag::Table)
+}
+
+/// Whether every write stage of the loop `loop_op` that the plan marks `Compute` is wholly in the
+/// compute slice `held`: no op of the stage, or of a region it owns, is in the residue.
+fn compute_stages_in_slice(ir: &Ir, loop_op: OpId, held: &Slice) -> bool {
+	let Some(body) = multiplicity::loop_body(ir, loop_op) else {
+		return true;
+	};
+	let held_back: HashSet<OpId> =
+		held.residue.iter().filter_map(|(op, _)| body_child_of(ir, *op, body)).collect();
+	ops_in(ir, body).all(|op| {
+		!matches!(
+			ir.op(op).map(|data| &data.kind),
+			Some(OpKind::Logical(LogOp::WriteStage {
+				mark: WriteMark::Compute,
+				..
+			}))
+		) || !held_back.contains(&op)
+	})
+}
+
+/// The op that stands directly in `body` and holds `op`: `op` itself, or the op that owns the
+/// region `op` stands in, and so on outward. `None` when `op` is not in `body`.
+fn body_child_of(ir: &Ir, op: OpId, body: RegionId) -> Option<OpId> {
+	let mut at = op;
+	for _ in 0..MAX_HOPS {
+		let region = ir.enclosing_region(at);
+		if region == body {
+			return Some(at);
+		}
+		at = ir.parent_op(region)?;
+	}
+	None
+}
+
+/// Whether the body of the loop `loop_op` writes a record of the table its source reads at a key
+/// that is not the loop element's own along `key_path`, triggered writes included.
+///
+/// Two things write at another key. An op of the body that is a write of its own: its table, when
+/// pinned, is compared with the source's, and a write whose table is not pinned or whose footprint
+/// is unknown may reach it. And the stored code the write's stages run, which the plan states
+/// ([`WriteStored`]): the events, views and references of the written table, and the references
+/// that name it, write at keys the plan does not show, so any that is not [`Stored::Nothing`]
+/// counts. The stages' own writes, and the edits of the record in flight, are to the record the
+/// element names. A source that names no one table is read as if it named every one.
+fn source_written(
+	ir: &Ir,
+	facts: &mut FactCache,
+	cx: &EffectCx<'_>,
+	loop_op: OpId,
+	body_ops: &[OpId],
+	key_path: ElemPath,
+	writes_subjects: bool,
+) -> bool {
+	match written_stored(ir, loop_op) {
+		Some(stored)
+			if [stored.events, stored.views, stored.references, stored.referenced]
+				.iter()
+				.any(|held| *held != Stored::Nothing) =>
+		{
+			return true;
+		}
+		None if writes_subjects => return true,
+		Some(_) | None => {}
+	}
+	if !source_reads_stored(ir, facts, cx, loop_op) {
+		return false;
+	}
+	let source = multiplicity::stream_table(ir, loop_op);
+	for op in body_ops.iter().copied() {
+		let Some(data) = ir.op(op) else {
+			continue;
+		};
+		let edits_image = matches!(
+			data.kind,
+			OpKind::Logical(
+				LogOp::WriteStage { .. }
+					| LogOp::Assign(..)
+					| LogOp::Unset { .. }
+					| LogOp::Content { .. }
+			)
+		);
+		if edits_image || !effects::local(ir, facts, cx, op).set.contains(EffectSet::WRITES_DATA) {
+			continue;
+		}
+		let print = footprint::relative_to(ir, facts, cx, op, loop_op);
+		for write in &print.writes {
+			let reaches = match write {
+				IrResource::Unknown => true,
+				IrResource::Data {
+					table,
+					key,
+					..
+				} => {
+					*key != KeyOf::Elem(key_path)
+						&& match (table, &source) {
+							(Some(written), Some(read)) => written == read,
+							(None, _) | (_, None) => true,
+						}
+				}
+				IrResource::Catalog {
+					..
+				}
+				| IrResource::Snapshot(_)
+				| IrResource::Cascade {
+					..
+				}
+				| IrResource::Reject {
+					..
+				}
+				| IrResource::Queue {
+					..
+				}
+				| IrResource::Session {
+					..
+				} => false,
+			};
+			if reaches {
+				return true;
+			}
+		}
+	}
+	false
+}
+
+/// Whether the source of the loop `loop_op` may read stored data: the ops its value is computed
+/// from read data ([`value_effects`]), or it is not computed by an op (a parameter, a block
+/// argument). A source
+/// that reads nothing stored, a literal or a range of numbers, delivers what no write of the body
+/// changes.
+fn source_reads_stored(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, loop_op: OpId) -> bool {
+	let Some(source) = ir.op(loop_op).and_then(|data| data.operands.first().copied()) else {
+		return true;
+	};
+	match ir.value(source).map(|value| &value.def) {
+		Some(ValueDef::OpResult {
+			..
+		}) => value_effects(ir, facts, cx, source).set.intersects(EffectSet::READS_DATA),
+		Some(_) | None => true,
+	}
+}
+
+/// The stored code the write that consumes the loop `loop_op` states its table holds, or `None`
+/// when no write consumes it, as a loop that is not a write's subject loop.
+fn written_stored(ir: &Ir, loop_op: OpId) -> Option<&WriteStored> {
+	let data = ir.op(loop_op)?;
+	for result in data.results.iter().copied() {
+		for used in ir.uses(result) {
+			if let Some(OpKind::Logical(LogOp::Write(attrs))) = ir.op(used.user).map(|d| &d.kind)
+				&& types::subject_loop(ir, used.user) == Some(loop_op)
+			{
+				return Some(&attrs.stored);
+			}
+		}
+	}
+	None
 }
 
 /// Whether every write of the body of `loop_op` that is keyed along the loop's element is keyed

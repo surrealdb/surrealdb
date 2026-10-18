@@ -390,6 +390,13 @@ impl Builder {
 		self
 	}
 
+	/// Make queries spill nowhere, even where the platform has a default store to spill to.
+	#[cfg(all(test, feature = "kv-rocksdb"))]
+	pub(crate) fn without_temp_store(mut self) -> Self {
+		self.no_temp_store = true;
+		self
+	}
+
 	pub fn with_temporary_directory<P: AsRef<Path>>(mut self, directory: Option<P>) -> Self {
 		self.temporary_directory = directory.map(|x| Arc::new(x.as_ref().to_path_buf()));
 		self

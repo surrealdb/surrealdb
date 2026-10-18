@@ -52,6 +52,14 @@ environment's `SURREAL_*` variables are not read: only the keys a run names
 reach its datastores. It is refused with `--endpoint`, whose datastores belong
 to the server and are configured where that was started.
 
+The `--unordered-rows` flag grades the rows of a `SELECT` of a table or a record
+range that has no `ORDER BY`, `LIMIT` or `START` as a multiset, for a run under
+settings that leave the order of such rows unspecified, such as
+`--config morsel_split_rows=1` (add `--config morsel_needs_view=false` on a backend that gives
+workers no read view, to cut ranges there as well). A row nested in a result, the rows of every
+other statement, and every error are still compared exactly: a test that must
+accept one of several errors states them with a `match` expression.
+
 ## Running against a remote endpoint
 
 By default the suite runs against an embedded, in-process datastore. Build with
@@ -140,8 +148,8 @@ with no way to undo it, so the check is worth making while the data is there.
 
 Some tests can't be faithfully reproduced over the API and are reported as
 **skipped** (with a reason and a count, never failing the run): tests requiring
-non-default capabilities or a versioned datastore (both are server-startup
-config), record-auth tests, and tests written in a wire dialect (`.pgsql`,
+non-default capabilities, datastore configuration keys or a versioned datastore
+(all server-startup config), record-auth tests, and tests written in a wire dialect (`.pgsql`,
 `.mysql`), which the server accepts on its own protocol port rather than through
 the SurrealQL RPC this harness connects over. The embedded-only
 retained-key/tombstone leak check is also skipped (no raw KV access over the
@@ -203,6 +211,9 @@ cargo make bench -- scans/count --quick
 
 # write per-bench results + the comparison verdict to a JSON file
 cargo make bench -- scans/count --json results.json
+
+# set a datastore configuration key for every datastore the run builds (see "--config" below)
+cargo make bench -- scans/count --config morsel_split_rows=18446744073709551615 --json off.json
 ```
 
 Benches run **strictly serially** (never in parallel — that would corrupt
@@ -218,6 +229,12 @@ reliably surfaces **large** regressions but is too coarse for few-percent drift.
 `--json <path>` writes a machine-readable report — for each bench its median /
 mean times and, when a baseline was found, the baseline's median, percentage
 change, p-value and verdict. Used to render the PR-comparison comment.
+
+`--config KEY=VALUE` (repeatable) sets a datastore configuration key for every datastore the
+run builds, as `run --config` does: `--config morsel_split_rows=18446744073709551615` turns morsel
+splitting and hand-off off, to compare a bench with and without them. Stores built under different
+keys are never shared between benches, a key a bench sets itself cannot be overridden, and a run
+that sets one cannot be saved with `--save`, so it cannot replace the stored baseline.
 
 `--store-url <ws>` compares against (and, with `--save`, writes to) a remote
 SurrealDB bench datastore instead of the local one. The harness `fetch_latest`es
@@ -990,6 +1007,24 @@ versioned = true
 
 Defaults to `false`
 
+#### `[env.config]`
+
+Datastore configuration keys the test needs, as `--config KEY=VALUE` gives them to a run. Each
+takes the place of the same key given to the run, and the run's other keys stay. A test that names
+a key gets a datastore of its own. Values are strings, since a count can exceed what a TOML integer
+holds. A remote (`--endpoint`) run skips such a test, since the endpoint's datastore is configured
+where it started.
+
+A test that holds a property only when its scans do not split pins it this way under a run that
+forces morsels:
+
+```toml
+[env.config]
+morsel_split_rows = "18446744073709551615"
+```
+
+Defaults to no keys.
+
 #### `[env.timeout]`
 
 Specifies a duration in milliseconds within which the entire test should finish. 
@@ -1109,8 +1144,8 @@ It is for the narrow case of a test whose expectation only holds against an
 embedded, in-process datastore, and which would therefore fail over the API for
 a reason that is not a defect — a connection-less `$session`, the absence of a
 bootstrap root user, or a path resolved against the harness's working directory.
-Everything the harness can decide for itself (non-default capabilities, a
-versioned datastore, record auth, wire dialects, and GraphQL/GQL under non-owner
+Everything the harness can decide for itself (non-default capabilities,
+datastore configuration keys, a versioned datastore, record auth, wire dialects, and GraphQL/GQL under non-owner
 auth) is skipped automatically and needs no key.
 
 The string is shown in the run summary, grouped by reason, so write it as the

@@ -180,7 +180,11 @@ pub(super) fn lower_source_under(
 					table: attrs.table.clone(),
 					direction: attrs.direction,
 					topk: match (&attrs.topk, topk_sort) {
-						(Some(key), Some(sort)) => Some(TopKScan::new(key, sort)),
+						(Some(key), Some(sort))
+							if key.rejects_entries || key.coarse_cutoff.is_some() =>
+						{
+							Some(TopKScan::new(key, sort))
+						}
 						_ => None,
 					},
 					prefilter: attrs
@@ -272,7 +276,11 @@ pub(super) fn lower_source_under(
 					table: attrs.table.clone(),
 					direction: attrs.access.direction,
 					topk: match (&attrs.topk, topk_sort) {
-						(Some(key), Some(sort)) => Some(TopKScan::new(key, sort)),
+						(Some(key), Some(sort))
+							if key.rejects_entries || key.coarse_cutoff.is_some() =>
+						{
+							Some(TopKScan::new(key, sort))
+						}
 						_ => None,
 					},
 					prefilter: attrs

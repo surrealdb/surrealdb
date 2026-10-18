@@ -45,9 +45,10 @@
 //!
 //! A select loop that reads the rows of another pipeline, through the streaming ops that follow
 //! it, continues that pipeline: the two are one body, over the earlier pipeline's source, and the
-//! earlier pipeline is lowered by the later one. The body runs serially, because no placement
-//! decision was made for it. The streaming ops that stand between a sort, a step or a source and
-//! the select loop that reads it run in that loop's body before it.
+//! earlier pipeline is lowered by the later one. The body takes the placement of the first
+//! pipeline of the chain, whose facts the physical plan derived over every pipeline that continues
+//! it. The streaming ops that stand between a sort, a step or a source and the select loop that
+//! reads it run in that loop's body before it.
 //!
 //! # A write over rows
 //!
@@ -137,7 +138,7 @@ use super::place::{Lowered, Provenance, parallel_of};
 use super::read::{host_scalar_of, is_source, lower_source_under, producer_of, schema_of};
 use super::stage::{StageRun, Stages};
 use super::units::LowerCx;
-use super::write_stmt::{SiteSink, WriteEntry, write_body};
+use super::write_stmt::{SiteSink, WriteEntry, cut_of_rows, write_body, write_body_cut};
 use crate::exec::field_path::{FieldPath, FieldPathPart};
 use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::core::facts::FactCache;
@@ -2135,11 +2136,21 @@ fn lower_part(
 			let rows = first_result(ir.op(split).ok_or(IrError::Stale("ir_lower::pipe: op"))?)?;
 			(opened, (stage, at + 1), Some(rows))
 		}
-		None => (
-			open_source(em, cx, ir, facts, reads, head.input, topk_sort)?,
-			(0, 0),
-			head.element.map(|(element, _)| element),
-		),
+		None => {
+			let opened = open_source(em, cx, ir, facts, reads, head.input, topk_sort)?;
+			// A threshold rejects an entry before the body runs, which only a pipeline that
+			// raises for no row may leave unrun. The source is the first pipeline's, and so is
+			// the placement, which states whether the pipeline prunes.
+			let first = stages.first().map_or(op, |stage| stage.op);
+			if opened.source.rejects_by_threshold()
+				&& !ir.placement(first).is_some_and(|placed| placed.prunes())
+			{
+				return Err(invariant(
+					"a scan rejects entries by a threshold in a pipeline that may raise",
+				));
+			}
+			(opened, (0, 0), head.element.map(|(element, _)| element))
+		}
 	};
 	let mut runs = Vec::with_capacity(3 * stages.len() + 1);
 	// The ops that stand between the source and the first stage's select loop run first, for each
@@ -2199,6 +2210,8 @@ fn lower_part(
 		(false, true) => Origin::Fused {
 			op,
 			id: attrs.id,
+			head: stages.first().map(|stage| stage.op).unwrap_or(op),
+			pipelines: stages.len(),
 		},
 		(false, false) => Origin::Placed {
 			op,
@@ -2275,11 +2288,15 @@ enum Origin {
 		op: OpId,
 		id: PipelineId,
 	},
-	/// The pipeline op `op` of id `id` with the pipelines it continues: serial, because a body that
-	/// holds the bodies of several pipelines is a decision no pipeline of the plan made.
+	/// The pipeline op `op` of id `id` with the pipelines it continues, the first of which is
+	/// `head`: the body holds the bodies of the `pipelines` of the chain, and the placement of
+	/// `head` is the one the physical plan derived for the chain it starts, taken only when it
+	/// judged a chain of as many pipelines.
 	Fused {
 		op: OpId,
 		id: PipelineId,
+		head: OpId,
+		pipelines: usize,
 	},
 	/// A reader of a breaker that no op stands for: serial, like the reader of a sort or a
 	/// grouping.
@@ -2408,11 +2425,30 @@ fn emit_pipeline(
 		[limit] => Some(*limit),
 		_ => None,
 	};
-	let parallel = match origin {
+	// The pipeline whose placement the body takes: the pipeline itself, or the first of the
+	// pipelines it continues when the physical plan judged a chain of as many pipelines as the
+	// body holds.
+	let placed = match origin {
 		Origin::Placed {
 			op,
 			..
-		} => {
+		} => Some(op),
+		Origin::Fused {
+			head,
+			pipelines,
+			..
+		} => ir
+			.placement(head)
+			.and_then(|placed| placed.chain())
+			.filter(|judged| *judged == pipelines)
+			.map(|_| head),
+		Origin::Cut {
+			..
+		}
+		| Origin::Reader => None,
+	};
+	let parallel = match placed {
+		Some(op) => {
 			let physical = facts_of(ir, facts, registry, op)?;
 			match parallel_of(ir, op, limit_slot)? {
 				// What the plan assumed of the body must be no more than the body holds: a
@@ -2429,13 +2465,7 @@ fn emit_pipeline(
 				parallel => parallel,
 			}
 		}
-		Origin::Cut {
-			..
-		}
-		| Origin::Fused {
-			..
-		}
-		| Origin::Reader => Parallel::Serial,
+		None => Parallel::Serial,
 	};
 
 	// A limit spent before the first row spares every pipeline feeding this one its records, as
@@ -2470,6 +2500,7 @@ fn emit_pipeline(
 		| Origin::Fused {
 			op,
 			id,
+			..
 		} => reads.provenance.record(index, op, id)?,
 		Origin::Reader => {}
 	}
@@ -3039,7 +3070,8 @@ impl Body<'_, '_, '_> {
 		} else {
 			let mut stages = Stages::new(&run, ir, self.cx.limits(), self.cx.registry())
 				.in_context(&mut *self.cx);
-			write_body(self.em, &attrs.write.body, &run.stages, entry, &mut stages)?;
+			let cut = cut_of_rows(ir, data);
+			write_body_cut(self.em, &attrs.write.body, &run.stages, entry, &mut stages, cut)?;
 			if let Some(held) = stages.needs.take() {
 				self.needs = self.needs.merged(&held);
 			}

@@ -1663,6 +1663,8 @@ fn unknown_loop_facts() -> LoopFacts {
 		delivery: SourceDelivery::ReadWhole,
 		multiplicity: Multiplicity::MayRepeat,
 		key_path: ElemPath::Id,
+		compute_reads_data: true,
+		cut_at_marks: false,
 	}
 }
 

@@ -5,6 +5,12 @@ use crate::tests::case::{CaseSet, TestCase};
 
 pub trait RunConfig {
 	fn name(&self, case: &CaseImports) -> String;
+
+	/// Whether the rows of a statement nothing orders are graded as a multiset: the run executes
+	/// under settings that leave their order unspecified.
+	fn unordered_rows(&self) -> bool {
+		false
+	}
 }
 
 #[derive(Debug)]

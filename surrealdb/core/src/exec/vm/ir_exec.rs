@@ -36,11 +36,9 @@
 //!   root context.
 //! - `worker_ctx`, in `morsel/run.rs`, answers the context a morsel's worker runs under, which
 //!   holds no read buffer.
-//! - [`take_pending`] answers the write candidate pending for the position, `None` while
-//!   `WriteState` holds none. [`in_prefix_mode`] answers whether the write body runs as a compute
-//!   prefix, `false` while `WriteState` holds no flag. [`install_in_flight`] installs a candidate's
-//!   record and context, and refuses while `WriteState` cannot hold them. Each one answers its
-//!   absent case as described above.
+//! - A write body's candidate state lives in the statement's `WriteState`: whether the body runs as
+//!   a compute prefix, where the prefix stopped, and the candidate pending for the next run of the
+//!   body. A form that finds no write state answers its absent case as described above.
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
@@ -68,7 +66,6 @@ use crate::exec::memory::size::kept_bytes;
 use crate::exec::memory::{QueryMemory, Reservation, Verdict as Charge};
 use crate::exec::operators::write::ctx::WriteCtx;
 use crate::exec::operators::write::row::WriteRow;
-use crate::expr::ControlFlow;
 use crate::val::{Number, Value};
 
 /// Where the row goes after an IR instruction the interpreter ran.
@@ -107,28 +104,30 @@ pub(super) struct IrRunState {
 	pub(super) buffer: Option<Arc<ReadBuffer>>,
 	/// The identity of the program the state runs, which names its partitions in the buffer.
 	pub(super) program_id: usize,
-	/// Where the write prefix of the current position stopped, recorded by the write marker that
-	/// ended it and read once by [`take_prefix_stop`]. `None` outside a prefix and before the
-	/// prefix reaches a marker.
-	pub(super) prefix_stop: Option<Stop>,
-	/// The candidate the coordinator's `WriteResume` took from the write state, held until the
-	/// host arm of that instruction installs it. Always `None` between the two.
-	pub(super) candidate: Option<PendingCandidate>,
 }
 
-/// A candidate the coordinator installed for this position: the record a compute prefix left in
-/// flight, its table's write context, the registers the prefix wrote that the residue reads, and
-/// where the prefix stopped.
-#[allow(dead_code, reason = "request L16-3 makes `take_pending` answer candidates")]
-pub(super) struct PendingCandidate {
+/// A candidate the coordinator installs for a position: the record a compute prefix left in
+/// flight, its table's write context where the prefix resolved it, the registers the prefix wrote
+/// that the residue reads, and where the prefix stopped.
+pub(in crate::exec::vm) struct PendingCandidate {
 	/// The record in flight after the prefix.
 	pub(super) row: WriteRow,
-	/// The write context of the record's table.
-	pub(super) ctx: Arc<WriteCtx>,
+	/// The write context of the record's table, which a prefix that stopped before resolving it
+	/// leaves unresolved.
+	pub(super) ctx: Option<Arc<WriteCtx>>,
 	/// The registers the prefix wrote that the residue reads, as `(register, value)`.
 	pub(super) live: SmallVec<[(u16, Value); 8]>,
 	/// Where the prefix stopped.
 	pub(super) stop: Stop,
+}
+
+/// Where the compute prefix of a record stopped and the registers it left for the residue.
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
+pub(in crate::exec::vm) struct PrefixStop {
+	pub(super) stop: Stop,
+	pub(super) live: SmallVec<[(u16, Value); 8]>,
+	/// Whether the part ahead of the cut encodes the after-image of the record it left in flight.
+	pub(super) encode: bool,
 }
 
 /// One memo cell: the kept value of a hoisted, row-independent region, or the refusal to keep
@@ -185,83 +184,35 @@ pub(super) fn ir_state(_state: &mut State) -> Option<&mut IrRunState> {
 	None
 }
 
-/// The candidate a compute prefix handed the coordinator for this position,
-/// taken from `write`, or `None` when `write` is absent or holds no candidate.
+/// Ends a write prefix at the marker that stops it with `stop`, carrying the values of the
+/// registers `live` of `regs`, or falls through on the coordinator, where a marker is the next
+/// instruction.
 ///
-/// `None` while `WriteState` holds no candidate slot, so no write form finds one pending.
-/// The row, context, liveness and stop are read from the pending entry.
-/// `WriteState::pending` gives that entry.
-fn take_pending(_write: Option<&mut WriteState>) -> Option<PendingCandidate> {
-	None
-}
-
-/// Whether the write body runs as a compute prefix.
-/// `false` while `WriteState` holds no prefix flag, so the write markers fall through.
-/// When a write state is present, the flag is `WriteState::in_prefix_mode`.
-/// It is `false` when no write state is passed.
-fn in_prefix_mode(_write: Option<&WriteState>) -> bool {
-	false
-}
-
-/// Installs `row` and `ctx` in `write` as the record in flight.
-///
-/// Answers an internal error while `WriteState` cannot hold a candidate's record.
-/// That case is unreachable, since [`take_pending`] answers no candidate until it can hold one.
-/// It calls `WriteState::resume_candidate`.
-pub(super) fn install_in_flight(
-	_write: &mut WriteState,
-	_row: WriteRow,
-	_ctx: Arc<WriteCtx>,
-) -> Result<(), ControlFlow> {
-	Err(ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(
-		"a write candidate was installed in a write state that cannot hold one".to_owned(),
-	))))
-}
-
-/// Where the write prefix of the current position stopped, taken from `ir`.
-///
-/// `Some` once a write marker ended the prefix, and `None` when none did; the stop is read at
-/// most once per prefix.
-#[allow(dead_code, reason = "the compute prefix of request L15-4 reads the stop")]
-pub(super) fn take_prefix_stop(ir: &mut IrRunState) -> Option<Stop> {
-	ir.prefix_stop.take()
-}
-
-/// Ends a write prefix at the marker that stops it with `stop`, or falls through on the
-/// coordinator, where a marker is the next instruction.
-///
-/// A prefix needs somewhere to record the stop: a prefix that runs with no run state is an error,
-/// because its candidate would carry no stop.
-fn stop_prefix(ir: Option<&mut IrRunState>, prefix: bool, stop: Stop) -> anyhow::Result<IrFlow> {
-	if !prefix {
-		return Ok(IrFlow::Fall);
-	}
-	let Some(ir) = ir else {
-		bail!("a write prefix ran with no IR run state");
-	};
-	ir.prefix_stop = Some(stop);
-	Ok(IrFlow::EndRow)
-}
-
-/// A coordinator's `WriteResume`: with a candidate pending, holds it in `ir` for the host arm and
-/// answers [`IrFlow::Host`]; with none, falls through.
-///
-/// A candidate that cannot be held would be dropped, so a missing or occupied slot is an error.
-fn stage_candidate(
-	ir: Option<&mut IrRunState>,
-	candidate: Option<PendingCandidate>,
+/// A prefix needs a write state to record the stop in: one that runs without is an error, because
+/// its candidate would carry no stop.
+fn stop_prefix<'r>(
+	write: Option<&mut WriteState>,
+	stop: Stop,
+	live: &[u16],
+	encode: bool,
+	regs: &[Scalar<'r>],
 ) -> anyhow::Result<IrFlow> {
-	let Some(candidate) = candidate else {
+	let Some(write) = write.filter(|write| write.in_prefix_mode()) else {
 		return Ok(IrFlow::Fall);
 	};
-	let Some(ir) = ir else {
-		bail!("a write candidate was pending with no IR run state");
-	};
-	if ir.candidate.is_some() {
-		bail!("a write candidate was pending while another awaited the host");
+	let mut held = SmallVec::new();
+	for register in live {
+		let Some(scalar) = regs.get(*register as usize) else {
+			bail!("a write prefix carries register {register}, which the row does not hold");
+		};
+		held.push((*register, scalar.to_value()));
 	}
-	ir.candidate = Some(candidate);
-	Ok(IrFlow::Host)
+	write.stop_prefix(PrefixStop {
+		stop,
+		live: held,
+		encode,
+	});
+	Ok(IrFlow::EndRow)
 }
 
 /// Runs `instr`, the instruction at `pc` of `pipeline`, over `regs`, and answers where the row
@@ -276,8 +227,7 @@ pub(super) fn run<'r>(
 	pc: usize,
 ) -> anyhow::Result<IrFlow> {
 	let (ir, parts) = split(state);
-	let prefix = in_prefix_mode(parts.write.as_deref());
-	run_form(instr, ir, parts, prefix, program, pipeline, row, regs, pc)
+	run_form(instr, ir, parts, program, pipeline, row, regs, pc)
 }
 
 /// Runs `instr` against the run state `ir` and the state parts `parts`, with no view of
@@ -285,14 +235,12 @@ pub(super) fn run<'r>(
 /// with constructed ones.
 ///
 /// Every form has an arm, and each arm gives its absent answer when `ir` is
-/// `None`. `prefix` is whether the write body runs as a compute prefix, which [`run`] reads from
-/// the write state and a test sets directly.
+/// `None`. The write forms read whether the body runs as a compute prefix from the write state.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run_form<'r>(
 	instr: &IrInstr,
 	ir: Option<&mut IrRunState>,
 	parts: StateParts<'_>,
-	prefix: bool,
 	program: &'r Program,
 	_pipeline: &'r Pipeline,
 	row: &'r dyn RowReader,
@@ -416,16 +364,16 @@ pub(super) fn run_form<'r>(
 		}
 		// A prefix never resumes a candidate. The coordinator hands a pending one to the host,
 		// which needs the registers and the context; with none pending the body runs in place.
-		IrForm::WriteResume(_) => {
-			if prefix {
-				return Ok(IrFlow::Fall);
-			}
-			stage_candidate(ir, take_pending(parts.write))
-		}
+		IrForm::WriteResume(_) => Ok(match parts.write {
+			Some(write) if !write.in_prefix_mode() && write.has_pending() => IrFlow::Host,
+			Some(_) | None => IrFlow::Fall,
+		}),
 		// A prefix ends at the first marker it reaches and says which; the coordinator runs on.
-		IrForm::WriteCut(_) => stop_prefix(ir, prefix, Stop::Cut),
-		IrForm::WriteSkip => stop_prefix(ir, prefix, Stop::Skip),
-		IrForm::WriteOffPath => stop_prefix(ir, prefix, Stop::OffPath),
+		IrForm::WriteCut(spec) => {
+			stop_prefix(parts.write, Stop::Cut, &spec.live, spec.encode, regs)
+		}
+		IrForm::WriteSkip => stop_prefix(parts.write, Stop::Skip, &[], false, regs),
+		IrForm::WriteOffPath => stop_prefix(parts.write, Stop::OffPath, &[], false, regs),
 	}
 }
 

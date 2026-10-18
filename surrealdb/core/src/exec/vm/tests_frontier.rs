@@ -600,8 +600,10 @@ async fn rocksdb_reads_the_ranges_of_a_window_with_one_iterator() {
 		"SELECT <-knows<-person<-knows<-person AS f FROM person",
 		"EXPLAIN ANALYZE SELECT ->knows->person->knows->person AS f FROM person",
 	] {
-		let off = run_on(Backend::RocksDb, Pins::OFF, &[], &setup, sql).await;
-		let on = run_on(Backend::RocksDb, Pins::ALL, &[], &setup, sql).await;
+		// Rows that no `ORDER BY` orders come back in the order of the scan only where the scan
+		// runs serially.
+		let off = run_on(Backend::RocksDb, Pins::OFF, SERIAL, &setup, sql).await;
+		let on = run_on(Backend::RocksDb, Pins::ALL, SERIAL, &setup, sql).await;
 		assert_eq!(off.filled, (0, 0));
 		assert!(on.served.0 > 0, "{sql}: {:?}", on.served);
 		if sql.starts_with("EXPLAIN") {

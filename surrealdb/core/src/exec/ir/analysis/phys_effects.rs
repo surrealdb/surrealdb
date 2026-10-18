@@ -182,9 +182,16 @@ pub(crate) fn of(op: &PhysOp, _cx: &EffectCx<'_>) -> OpEffects {
 ///
 /// - `Provenance::Bound`, and a `From` set that names nothing, answer [`of`].
 /// - `Provenance::From(ids)` answers the [`join`] over [`of_with`] of every id, and for `Prefetch`,
-///   `LoadUnit` and `Materialize` also the fixed table's answer. An id that names no live op, or
-///   the op itself, contributes [`OpEffects::top`]: the effects of an erased op are not
-///   recoverable.
+///   `LoadUnit` and `Materialize` also the fixed table's answer. An id that names a live op
+///   contributes that op's transitive answer. An id of an op the lowering replaced contributes the
+///   answer the analysis recorded for it under `cx` itself ([`FactCache::last_under`]) when that
+///   answer leaves nothing behind once the statement is done, and [`OpEffects::top`] otherwise: an
+///   answer recorded under another context never answers, and neither does the answer of a write,
+///   whose footprint widens with the stored code its stage ops do or do not show, which the record
+///   does not carry. The op itself contributes [`OpEffects::top`]. The recorded answer is the
+///   replaced op's region-local one, which leaves out the bodies of the closures its ops invoke; it
+///   still states unknown writes for them, since every op that invokes a closure or runs stored
+///   code the plan does not show states them as its own effect.
 /// - An op that is not physical answers its own kind's local effects, and a dangling `op` answers
 ///   [`OpEffects::top`].
 pub(crate) fn of_op(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, op: OpId) -> OpEffects {
@@ -207,6 +214,12 @@ pub(crate) fn of_op(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, op: OpId)
 	for id in ids.iter().copied() {
 		let named = if id == op {
 			OpEffects::top()
+		} else if ir.op(id).is_none() {
+			let key = cx.memo_key();
+			facts
+				.last_under(id, &key)
+				.filter(|kept| !kept.effects.set.mutates_state())
+				.map_or_else(OpEffects::top, |kept| kept.effects.clone())
 		} else {
 			of_with(ir, facts, cx, id)
 		};
@@ -307,6 +320,94 @@ mod tests {
 			assert_eq!(of(&PhysOp::Filter, cx), OpEffects::top());
 			assert_eq!(of(&PhysOp::Sleep, cx), OpEffects::top());
 		});
+	}
+
+	/// A physical op that stands for logical ops the lowering replaced answers what the analysis
+	/// stated for them, and the top where it stated nothing.
+	#[test]
+	fn a_physical_op_answers_the_effects_stated_for_the_logical_op_it_replaced() {
+		use crate::exec::ir::core::location::{LocOrigin, Location};
+		use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
+		use crate::exec::ir::expr::ops::ExprOp;
+		use crate::exec::ir::iface::conversion::EliminationReason;
+		use crate::exec::ir::iface::ids::{FrameId, SnapshotId};
+		use crate::exec::ir::iface::types::TypeKnowledge;
+		use crate::exec::ir::logical::ops::LogOp;
+
+		fn spec(kind: OpKind) -> OpSpec {
+			OpSpec {
+				kind,
+				operands: Default::default(),
+				results: std::iter::empty::<TypeKnowledge>().collect(),
+				frame: FrameId::new(0),
+				snapshot: SnapshotId::new(0),
+				loc: Location {
+					stmt: 0,
+					span: None,
+					origin: LocOrigin::Synthesized,
+				},
+			}
+		}
+
+		let mut ir = Ir::new(
+			IrScope::Request {
+				fragment: None,
+			},
+			RegionKind::Request,
+		);
+		let block = ir.region(ir.top()).expect("the top region exists").blocks[0];
+		let mut facts = FactCache::default();
+		let (stated, unstated, opaque, writer) = {
+			let mut rw = Rewriter::new(&mut ir, &mut facts)
+				.with_registry(super::super::cx::builtin_registry());
+			let fetch = || spec(OpKind::Logical(LogOp::Fetch));
+			let stated = rw.create(InsertPoint::End(block), fetch()).expect("the op is created");
+			let unstated = rw.create(InsertPoint::End(block), fetch()).expect("the op is created");
+			let opaque = rw
+				.create(InsertPoint::End(block), spec(OpKind::Expr(ExprOp::Invoke)))
+				.expect("the op is created");
+			let writer = rw
+				.create(InsertPoint::End(block), spec(OpKind::Logical(LogOp::Kill)))
+				.expect("the op is created");
+			let recorded = rw.facts(stated).effects;
+			assert_eq!(recorded.set, EffectSet::READS_DATA);
+			rw.facts(opaque);
+			assert!(rw.facts(writer).effects.set.mutates_state());
+			for erased in [stated, unstated, opaque, writer] {
+				rw.erase(erased, EliminationReason::DeadPure).expect("the op is erased");
+			}
+			(stated, unstated, opaque, writer)
+		};
+		let (replacing_stated, replacing_unstated, replacing_opaque, replacing_writer) = {
+			let mut rw = Rewriter::new(&mut ir, &mut facts);
+			let mut replacing = |of: OpId| {
+				rw.derived(&[of], |rw| {
+					rw.create(InsertPoint::End(block), spec(OpKind::Phys(PhysOp::Filter)))
+						.expect("the op is created")
+				})
+			};
+			(replacing(stated), replacing(unstated), replacing(opaque), replacing(writer))
+		};
+		let cx = super::super::cx::default_cx(&ir);
+		let effects = of_op(&ir, &mut facts, &cx, replacing_stated);
+		assert_eq!(effects.set, EffectSet::READS_DATA);
+		assert!(effects.footprint.writes.is_empty(), "a read writes nothing");
+		assert_eq!(of_op(&ir, &mut facts, &cx, replacing_unstated), OpEffects::top());
+		// An op that runs a body the plan does not show states unknown writes, so the op that
+		// replaces it does too.
+		let effects = of_op(&ir, &mut facts, &cx, replacing_opaque);
+		assert!(effects.set.contains(EffectSet::OPAQUE_BODY));
+		assert_eq!(effects.footprint.writes.as_slice(), &[IrResource::Unknown]);
+		// A write's recorded answer does not carry the stored code its stage ops show, so the op
+		// that replaces a write answers the top.
+		assert_eq!(of_op(&ir, &mut facts, &cx, replacing_writer), OpEffects::top());
+		// Under a context the analysis never ran under, a replaced op's answer is not known.
+		let other = FrameTable::default();
+		let elsewhere = EffectCx {
+			frames: &other,
+			..cx
+		};
+		assert_eq!(of_op(&ir, &mut facts, &elsewhere, replacing_stated), OpEffects::top());
 	}
 
 	#[test]

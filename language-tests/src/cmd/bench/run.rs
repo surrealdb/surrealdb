@@ -80,6 +80,7 @@ fn calc_group_key(
 	parsed: &TestConfig,
 	backend: Backend,
 	source: &str,
+	config: &[(String, String)],
 ) -> String {
 	let mut hasher = Sha256::new();
 	// Effective import chain: each import's path + mtime, in order.
@@ -101,6 +102,14 @@ fn calc_group_key(
 		Backend::TikV => "tikv",
 	};
 	hasher.update(backend_tag.as_bytes());
+	// The datastore configuration the run was given: a store built under one is not
+	// interchangeable with one built under another.
+	for (key, value) in config {
+		hasher.update(key.as_bytes());
+		hasher.update(b"=");
+		hasher.update(value.as_bytes());
+		hasher.update(b"\x00");
+	}
 	// Target namespace + database: imports physically land under exactly (ns, db).
 	hasher.update(parsed.env.namespace().unwrap_or("").as_bytes());
 	hasher.update(b"\x00");
@@ -126,6 +135,8 @@ fn calc_group_key(
 
 struct BenchConfig {
 	backend: Backend,
+	/// The datastore configuration keys given with `--config`.
+	config: Vec<(String, String)>,
 	/// Temp directory under which file-backed datastores (rocksdb/surrealkv) are
 	/// built; `None` for the in-memory backend. Removed when `run()` returns.
 	bench_root: Option<PathBuf>,
@@ -200,6 +211,9 @@ struct CmdConfig<'a> {
 	save: bool,
 	quick: bool,
 	json: Option<&'a String>,
+	/// The datastore configuration keys given with `--config`, for every datastore the run
+	/// builds.
+	config: Vec<(String, String)>,
 	store: StoreConfig<'a>,
 }
 
@@ -213,6 +227,10 @@ impl<'a> CmdConfig<'a> {
 		let save = current.get_flag("save");
 		let quick = current.get_flag("quick");
 		let json = current.get_one::<String>("json");
+		let config = current
+			.get_many::<(String, String)>("config")
+			.map(|pairs| pairs.cloned().collect())
+			.unwrap_or_default();
 
 		Self {
 			path,
@@ -222,6 +240,7 @@ impl<'a> CmdConfig<'a> {
 			save,
 			quick,
 			json,
+			config,
 			store: StoreConfig::from_matches(parent),
 		}
 	}
@@ -357,6 +376,11 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 	let mut load_errors = Vec::new();
 
 	let cfg = CmdConfig::from_matches(parent, current);
+	if cfg.save && !cfg.config.is_empty() {
+		bail!(
+			"--config cannot be combined with --save: a run under a datastore configuration of its own would replace the stored baseline. Use --json to compare runs"
+		);
+	}
 	let set = CaseSet::load_surrealql_files(cfg.path, &mut load_errors).await?;
 
 	// Resolve the backend. The in-memory engine needs no storage; file-backed
@@ -382,6 +406,7 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 
 	let config = BenchConfig {
 		backend: cfg.backend,
+		config: cfg.config.clone(),
 		bench_root,
 	};
 
@@ -498,6 +523,7 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 			&run.case.test.config.parsed,
 			cfg.backend,
 			&run.case.test.source,
+			&cfg.config,
 		);
 	}
 
@@ -906,7 +932,7 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 	Ok(())
 }
 
-pub fn builder_from_config(config: &TestConfig) -> Builder {
+pub fn builder_from_config(config: &TestConfig, run: &[(String, String)]) -> Result<Builder> {
 	let capabilities = resolve_capabilities(config);
 
 	// Quiescent, because a benchmark has to measure the statement rather than
@@ -923,14 +949,24 @@ pub fn builder_from_config(config: &TestConfig) -> Builder {
 	// post-import fold pass in `build_and_populate` then packs exactly those
 	// scopes. The threshold is a builder-level override, not a config key.
 	let builder = if config.bench.graph_fold || config.bench.graph_numeric_ids {
-		let builder = builder.with_graph_fold_threshold(1);
-		if config.bench.graph_numeric_ids {
-			builder.with_config(
-				surrealdb_cnf::ConfigMap::empty().with_key_value("graph_numeric_ids", "true"),
-			)
-		} else {
-			builder
+		builder.with_graph_fold_threshold(1)
+	} else {
+		builder
+	};
+	// The keys of the datastore are one map: the bench's own, then those of the run, which never
+	// override the bench's.
+	let mut keys = surrealdb_cnf::ConfigMap::empty();
+	if config.bench.graph_numeric_ids {
+		if run.iter().any(|(key, _)| key == "graph_numeric_ids") {
+			bail!("--config graph_numeric_ids collides with the key the bench sets itself");
 		}
+		keys = keys.with_key_value("graph_numeric_ids", "true");
+	}
+	for (key, value) in run {
+		keys = keys.with_key_value(key.as_str(), value.as_str());
+	}
+	let builder = if config.bench.graph_numeric_ids || !run.is_empty() {
+		builder.with_config(keys)
 	} else {
 		builder
 	};
@@ -940,7 +976,7 @@ pub fn builder_from_config(config: &TestConfig) -> Builder {
 	} else {
 		builder
 	};
-	builder.with_capabilities(capabilities)
+	Ok(builder.with_capabilities(capabilities))
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -1178,7 +1214,7 @@ async fn build_and_populate(
 	config: &BenchConfig,
 	token: &tokio_util::sync::CancellationToken,
 ) -> Result<std::result::Result<Arc<Datastore>, ImportFailure>> {
-	let dbs = builder_from_config(&run.case.test.config.parsed)
+	let dbs = builder_from_config(&run.case.test.config.parsed, &config.config)?
 		.build_with_path(&datastore_conn(config))
 		.await?;
 	match populate(run, token, &dbs).await {
@@ -1582,3 +1618,67 @@ fn release_freed_heap() {
 /// `malloc_trim`, and macOS would need `malloc_zone_pressure_relief`.
 #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
 fn release_freed_heap() {}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn pairs(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+		pairs.iter().map(|(key, value)| ((*key).to_owned(), (*value).to_owned())).collect()
+	}
+
+	/// A key given with `--config` reaches the datastore a bench builds.
+	#[tokio::test]
+	async fn a_morsel_key_reaches_the_datastore() {
+		let run = pairs(&[
+			("morsel_split_rows", "1"),
+			("morsel_target_bytes", "1"),
+			("morsel_places", "0"),
+			("morsel_steal_always", "true"),
+		]);
+		let ds = builder_from_config(&TestConfig::default(), &run)
+			.expect("a builder")
+			.build_with_path("mem://")
+			.await
+			.expect("a datastore");
+		let held = ds.morsel_knobs();
+		assert!(held.contains(&("morsel_split_rows", "1".to_owned())), "{held:?}");
+		assert!(held.contains(&("morsel_target_bytes", "1".to_owned())), "{held:?}");
+		assert!(held.contains(&("morsel_places", "0".to_owned())), "{held:?}");
+		assert!(held.contains(&("morsel_steal_always", "true".to_owned())), "{held:?}");
+	}
+
+	/// A run that gives no key builds the datastore the bench alone configures.
+	#[tokio::test]
+	async fn no_key_leaves_the_defaults() {
+		let ds = builder_from_config(&TestConfig::default(), &[])
+			.expect("a builder")
+			.build_with_path("mem://")
+			.await
+			.expect("a datastore");
+		let held = ds.morsel_knobs();
+		assert!(!held.contains(&("morsel_split_rows", "1".to_owned())), "{held:?}");
+	}
+
+	/// The keys of a run fold beside the keys a bench sets itself, and a key the bench sets is
+	/// never overridden by the run: a run that gives it is refused.
+	#[test]
+	fn a_key_the_bench_sets_is_not_overridden() {
+		let mut config = TestConfig::default();
+		config.bench.graph_numeric_ids = true;
+		assert!(builder_from_config(&config, &pairs(&[("morsel_places", "0")])).is_ok());
+		assert!(builder_from_config(&config, &pairs(&[("graph_numeric_ids", "false")])).is_err());
+	}
+
+	/// Stores built under different keys are never shared.
+	#[test]
+	fn the_group_key_holds_the_keys_of_the_run() {
+		let config = TestConfig::default();
+		let key = |run: &[(&str, &str)]| {
+			calc_group_key(&[], &config, Backend::Memory, "", &pairs(run))
+		};
+		assert_eq!(key(&[]), key(&[]));
+		assert_ne!(key(&[]), key(&[("morsel_split_rows", "1")]));
+		assert_ne!(key(&[("morsel_split_rows", "1")]), key(&[("morsel_split_rows", "2")]));
+	}
+}

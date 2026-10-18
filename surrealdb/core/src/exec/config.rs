@@ -192,6 +192,12 @@ pub(crate) struct ExecConfig {
 	/// everything runs on the statement's task: a worker costs a task spawn,
 	/// which a small morsel does not repay. `usize::MAX` never splits.
 	pub morsel_split_rows: usize,
+	/// Whether a coordinator cuts a key range into morsels only where the
+	/// transaction gives workers a read view to read them through (default:
+	/// true). Where it gives none, morsels only run one after another on the
+	/// statement's task, so a cut costs and gains nothing; `false` cuts the
+	/// range anyway, which runs the merge under the same load on every backend.
+	pub morsel_needs_view: bool,
 	/// The bytes a morsel over a key range aims at (default: 1 MiB). `1` makes
 	/// every entry a morsel of its own.
 	pub morsel_target_bytes: usize,
@@ -322,6 +328,7 @@ impl Default for ExecConfig {
 			generation_allocation_limit: 2 << 20,
 			fan_out_row_threshold: DEFAULT_FAN_OUT_ROW_THRESHOLD,
 			morsel_split_rows: DEFAULT_MORSEL_SPLIT_ROWS,
+			morsel_needs_view: true,
 			morsel_target_bytes: DEFAULT_MORSEL_TARGET_BYTES,
 			morsel_places: usize::MAX,
 			morsel_oltp_reserve: DEFAULT_MORSEL_OLTP_RESERVE,
@@ -365,6 +372,7 @@ impl cnf::Config for ExecConfig {
 			.parse_key("external_sorting_buffer_limit", &mut self.external_sorting_buffer_limit)
 			.parse_key("fan_out_row_threshold", &mut self.fan_out_row_threshold)
 			.parse_key("morsel_split_rows", &mut self.morsel_split_rows)
+			.parse_key_bool("morsel_needs_view", &mut self.morsel_needs_view)
 			.parse_key_with("morsel_target_bytes", &mut self.morsel_target_bytes, |x| {
 				x.parse_bytes::<usize>().ok().filter(|&n| n > 0)
 			})

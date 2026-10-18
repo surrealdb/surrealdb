@@ -378,6 +378,8 @@ pub(super) struct WriteResumeSpec {
 pub(super) struct WriteCutSpec {
 	/// The registers the part ahead of the cut wrote and the part after it reads.
 	pub(super) live: SmallVec<[u16; 8]>,
+	/// Whether the part ahead of the cut encodes the record's after-image for the part after it.
+	pub(super) encode: bool,
 }
 
 impl IrInstr {
@@ -606,6 +608,7 @@ mod tests {
 			}),
 			IrInstr::write_cut(WriteCutSpec {
 				live: SmallVec::from_slice(&[1, 2]),
+				encode: false,
 			}),
 			IrInstr::write_skip(),
 			IrInstr::write_off_path(),

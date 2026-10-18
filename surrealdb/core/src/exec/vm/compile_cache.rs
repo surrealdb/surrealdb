@@ -123,19 +123,25 @@ pub(crate) enum UnitObject {
 	/// A statement reached at run time through an expression the program did
 	/// not compile — a function body, an API handler — planned at re-entry
 	/// depth `depth`, with the names `shadowed` read when it runs
-	/// ([`super::serve::statement`]).
+	/// ([`super::serve::statement`]); `binds_rows` is whether it is the value
+	/// of a top-level `LET`, whose plan states that its rows arrive in the
+	/// order they were bound.
 	Statement {
 		op: Arc<crate::expr::logical::LogicalOp>,
 		depth: u32,
 		shadowed: Vec<String>,
+		binds_rows: bool,
 	},
 	/// A top-level statement of a request served when it is reached, planned
 	/// with the values the session's own parameters it reads hold folded in,
-	/// for those values ([`super::serve::request_statement`]).
+	/// for those values ([`super::serve::request_statement`]); `binds_rows` is
+	/// whether it is the value of a top-level `LET`, whose rows the statements
+	/// after it read in the order they were bound, which its plan states.
 	SessionStatement {
 		op: Arc<crate::expr::logical::LogicalOp>,
 		session: ArgValues,
 		shadowed: Vec<String>,
+		binds_rows: bool,
 	},
 	/// A front end's plan — a GQL query `eval::gql` evaluates — compiled at
 	/// re-entry depth `depth`, with the names `shadowed` read when it runs

@@ -1618,3 +1618,54 @@ fn alter_slots(object: &AlterObject, slots: &mut Slots) {
 		}
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::exec::ir::iface::effects::IrResource;
+
+	/// An op that only reads states unknown reads and no writes; an op that may leave something
+	/// behind or runs a body the plan does not show states unknown writes as well; a pure op
+	/// states neither.
+	#[test]
+	fn a_footprint_writes_only_what_the_effects_may_write() {
+		let unknown = [IrResource::Unknown];
+		let reads_only = [
+			EffectSet::READS_DATA,
+			EffectSet::READS_CATALOG,
+			EffectSet::READS_EXTERNAL,
+			EffectSet::READS_ROW,
+			EffectSet::READS_PRINCIPAL,
+			EffectSet::READS_SESSION_DB,
+			EffectSet::ENTROPY,
+			EffectSet::CLOCK,
+			EffectSet::BLOCKING,
+			EffectSet::MAY_REJECT,
+			EffectSet::READS_DATA.union(EffectSet::READS_CATALOG),
+		];
+		for set in reads_only {
+			let footprint = footprint_of(set);
+			assert_eq!(footprint.reads.as_slice(), &unknown, "{set:?}");
+			assert!(footprint.writes.is_empty(), "{set:?}");
+		}
+		let writes = [
+			EffectSet::WRITES_DATA,
+			EffectSet::WRITES_EXTERNAL,
+			EffectSet::ADVANCES_STATE,
+			EffectSet::WRITES_SESSION,
+			EffectSet::NOTIFY,
+			EffectSet::DEFERS,
+			EffectSet::CHANGES_CATALOG,
+			EffectSet::OPAQUE_BODY,
+			EffectSet::READS_DATA.union(EffectSet::WRITES_DATA),
+			EffectSet::TOP,
+		];
+		for set in writes {
+			let footprint = footprint_of(set);
+			assert_eq!(footprint.reads.as_slice(), &unknown, "{set:?}");
+			assert_eq!(footprint.writes.as_slice(), &unknown, "{set:?}");
+		}
+		let pure = footprint_of(EffectSet::PURE);
+		assert!(pure.reads.is_empty() && pure.writes.is_empty());
+	}
+}

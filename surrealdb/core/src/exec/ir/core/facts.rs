@@ -5,7 +5,8 @@
 //! and the pair is `Send`. An entry records the generation of its op when it was computed; an
 //! entry whose generation differs from the container's is stale and is recomputed on its next
 //! read. An entry of an erased op or value is dropped, so a recycled slot never answers with the
-//! entry of its previous occupant; only [`FactCache::last`] still answers for an erased op.
+//! entry of its previous occupant; only [`FactCache::last_under`] still answers for an erased op,
+//! and only to the context the entry was computed under.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -75,8 +76,8 @@ pub(crate) struct FactCache {
 	/// Per op: the facts computed under each context, with the generation they were computed at
 	/// and the context's key. The last entry is the one recorded last.
 	entries: SecondaryMap<OpId, ContextFacts>,
-	/// The facts of erased ops, as they stood when the op was erased.
-	retired: HashMap<OpId, OpFacts>,
+	/// The facts of erased ops, as they stood when the op was erased, one entry per context.
+	retired: HashMap<OpId, ContextFacts>,
 	/// Per value: the generation of its defining op when the knowledge was computed, and it.
 	types: SecondaryMap<ValueId, (u32, TypeKnowledge)>,
 	/// Per value: the invariance class computed against an op, with the generation of that op.
@@ -132,20 +133,23 @@ impl FactCache {
 		}
 	}
 
-	/// The facts last recorded for `op`, whatever their generation. An erased op answers the
-	/// facts it had when it was erased; an op never computed answers `None`.
-	pub(crate) fn last(&self, op: OpId) -> Option<&OpFacts> {
+	/// The facts last recorded for `op` under the context `key` names, whatever their generation.
+	/// An erased op answers the facts it had when it was erased; an op never computed under `key`
+	/// answers `None`. Facts computed under another context never answer.
+	pub(crate) fn last_under(&self, op: OpId, key: &CxKey) -> Option<&OpFacts> {
+		fn under<'a>(held: &'a ContextFacts, key: &CxKey) -> Option<&'a OpFacts> {
+			held.iter().rev().find(|(_, other, _)| other == key).map(|(_, _, facts)| facts)
+		}
 		self.entries
 			.get(op)
-			.and_then(|held| held.last())
-			.map(|(_, _, facts)| facts)
-			.or_else(|| self.retired.get(&op))
+			.and_then(|held| under(held, key))
+			.or_else(|| self.retired.get(&op).and_then(|held| under(held, key)))
 	}
 
-	/// Drops the entry of `op`, which keeps answering [`FactCache::last`].
+	/// Drops the entry of `op`, which keeps answering [`FactCache::last_under`].
 	pub(crate) fn invalidate(&mut self, op: OpId) {
-		if let Some((_, _, facts)) = self.entries.remove(op).and_then(|mut held| held.pop()) {
-			self.retired.insert(op, facts);
+		if let Some(held) = self.entries.remove(op) {
+			self.retired.insert(op, held);
 		}
 	}
 

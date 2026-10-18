@@ -8,7 +8,7 @@ use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::iface::ids::OpId;
 use crate::exec::ir::phys::ops::PipelineId;
-use crate::exec::planner::placement::{Decision, Parallel};
+use crate::exec::planner::placement::{Decision, MergeOrder, Parallel};
 use crate::exec::vm::program::Program;
 
 /// Where each pipeline of a lowered program came from.
@@ -80,17 +80,26 @@ pub(super) fn parallel_of(
 	let attr = ir.placement(pipeline).ok_or(IrError::Invariant {
 		what: "ir_lower::place::parallel_of: a pipeline with no placement",
 	})?;
-	copy_decision(attr.decision(), attr.prunes(), paging_slot)
+	copy_decision(
+		attr.decision(),
+		attr.prunes(),
+		attr.merge(),
+		attr.ordered_fold().to_vec(),
+		paging_slot,
+	)
 }
 
 /// The parallelism of a pipeline whose placement holds `decision` and whose attribute answers
-/// `attr_prunes`.
+/// `attr_prunes`, `merge` and `ordered_fold`.
 ///
 /// The decision is copied as it stands except for `prunes`, which holds only when the decision
 /// and the attribute both hold it: a morsel is pruned only where neither says its body can raise.
+/// The merge order and the fold order are the attribute's.
 fn copy_decision(
 	decision: Option<Decision>,
 	attr_prunes: bool,
+	merge: MergeOrder,
+	ordered_fold: Vec<usize>,
 	paging_slot: Option<u16>,
 ) -> Result<Parallel, IrError> {
 	let mut decision = decision.ok_or(IrError::Invariant {
@@ -103,7 +112,7 @@ fn copy_decision(
 	{
 		*prunes = *prunes && attr_prunes;
 	}
-	decision.to_parallel(paging_slot).ok_or(IrError::Invariant {
+	decision.to_parallel(paging_slot, merge, ordered_fold).ok_or(IrError::Invariant {
 		what: "ir_lower::place::parallel_of: a paged decision with no paging slot",
 	})
 }
@@ -153,7 +162,7 @@ mod tests {
 		));
 		// A placement that holds no decision is the same refusal, worded for what it is.
 		assert!(matches!(
-			copy_decision(None, true, None),
+			copy_decision(None, true, MergeOrder::Serial, Vec::new(), None),
 			Err(IrError::Invariant {
 				what: "ir_lower::place::parallel_of: a pipeline the physical plan did not place"
 			})
@@ -174,7 +183,9 @@ mod tests {
 		.expect("the container is a DAG");
 		install(b.ir.placement_table_mut(), placed);
 		let attr = b.ir.placement(op).expect("the pipeline is placed");
-		let expected = attr.decision().and_then(|decision| decision.to_parallel(None));
+		let expected = attr.decision().and_then(|decision| {
+			decision.to_parallel(None, attr.merge(), attr.ordered_fold().to_vec())
+		});
 		assert_eq!(parallel_of(&b.ir, op, None).ok(), expected);
 	}
 
@@ -224,29 +235,53 @@ mod tests {
 
 	#[test]
 	fn decision_copied_verbatim() {
-		assert_eq!(copy_decision(Some(Decision::Serial), true, None).ok(), Some(Parallel::Serial));
 		assert_eq!(
-			copy_decision(Some(morsels(true, true)), true, Some(3)).ok(),
+			copy_decision(Some(Decision::Serial), true, MergeOrder::Serial, Vec::new(), None).ok(),
+			Some(Parallel::Serial)
+		);
+		assert_eq!(
+			copy_decision(Some(morsels(true, true)), true, MergeOrder::Serial, Vec::new(), Some(3))
+				.ok(),
 			Some(Parallel::Morsels(MorselPlan {
 				input: MorselInput::Range,
 				combine: Combine::Concat,
 				paged: Some(3),
 				prunes: true,
+				merge: MergeOrder::Serial,
+				ordered_fold: Vec::new(),
 			}))
 		);
-		// An unpaged decision ignores a slot it is given.
+		// An unpaged decision ignores a slot it is given, and carries the order its merge takes
+		// results in.
 		assert_eq!(
-			copy_decision(Some(morsels(false, false)), false, Some(3)).ok(),
+			copy_decision(
+				Some(morsels(false, false)),
+				false,
+				MergeOrder::Free,
+				Vec::new(),
+				Some(3)
+			)
+			.ok(),
 			Some(Parallel::Morsels(MorselPlan {
 				input: MorselInput::Range,
 				combine: Combine::Concat,
 				paged: None,
 				prunes: false,
+				merge: MergeOrder::Free,
+				ordered_fold: Vec::new(),
 			}))
 		);
+		// The order its float folds take is the attribute's.
+		assert!(matches!(
+			copy_decision(Some(morsels(false, false)), true, MergeOrder::Serial, vec![1, 3], None).ok(),
+			Some(Parallel::Morsels(MorselPlan {
+				ordered_fold,
+				..
+			})) if ordered_fold == [1, 3]
+		));
 		// A paged decision with no slot has no parallel form.
 		assert!(matches!(
-			copy_decision(Some(morsels(true, true)), true, None),
+			copy_decision(Some(morsels(true, true)), true, MergeOrder::Serial, Vec::new(), None),
 			Err(IrError::Invariant {
 				what: "ir_lower::place::parallel_of: a paged decision with no paging slot"
 			})
@@ -257,8 +292,14 @@ mod tests {
 	fn prunes_is_the_conjunction() {
 		for decision_prunes in [false, true] {
 			for attr_prunes in [false, true] {
-				let parallel =
-					copy_decision(Some(morsels(false, decision_prunes)), attr_prunes, None).ok();
+				let parallel = copy_decision(
+					Some(morsels(false, decision_prunes)),
+					attr_prunes,
+					MergeOrder::Serial,
+					Vec::new(),
+					None,
+				)
+				.ok();
 				let Some(Parallel::Morsels(plan)) = parallel else {
 					panic!("a morsel decision copies to morsels");
 				};

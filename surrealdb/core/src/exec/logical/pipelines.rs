@@ -31,14 +31,16 @@
 //! at once: [`independent`] for sibling statements and [`foreach_legality`] for
 //! the iterations and `IF` arms of a `FOR` body.
 
-use super::effects::{SummaryOracle, permission_computed, plan_effects, scalar_effects};
+use super::effects::{
+	SummaryOracle, permission_computed, plan_effects, plan_effects_beneath_write, scalar_effects,
+};
 use super::summaries::CatalogSummaries;
 use crate::exec::function::FunctionRegistry;
 use crate::expr::logical::{
 	EffectSet, EvalFrame, LogicalAggregate, LogicalExpr, LogicalFetch, LogicalField, LogicalFields,
 	LogicalOp, LogicalProject, LogicalSource, LogicalWriteSource, SourceRef,
 };
-use crate::expr::{BinaryOperator, Function, PrefixOperator};
+use crate::expr::{BinaryOperator, Function, Mock, PrefixOperator};
 
 /// Whether a pipeline's input can be cut into parts read independently.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -159,7 +161,8 @@ pub(crate) enum AggregateCombine {
 	Appending,
 	/// `math::sum`, `math::mean`, `math::stddev`, `math::variance` and `vector::sum`:
 	/// decomposable, and a legal split. A float fold depends on how its terms are grouped, so the
-	/// low bits of the answer may differ from the serial fold's.
+	/// low bits of a split run's answer are the serial fold's only where the terms are folded in
+	/// input order ([`Legality::ordered_fold`]).
 	InexactFloat,
 	/// The function has no combine over partial states.
 	NotDecomposable,
@@ -171,6 +174,74 @@ pub(crate) enum Paging {
 	None,
 	One,
 	Many,
+}
+
+/// In what order the parts of a split pipeline's results may reach what consumes them.
+///
+/// Ordered from the weakest, which is the serial run, to the strongest. A physical plan may choose
+/// any arrival no stronger than the one stated.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Arrival {
+	/// A part's results are taken in the order of the serial run's input.
+	Serial,
+	/// A part's results are taken as the parts finish, and absorbed in the order of the serial
+	/// run's input.
+	///
+	/// For a sort that keeps every row: the order the parts' sorted runs arrive in is unobservable
+	/// so long as each is absorbed at its position in the input, where the sort's ties are
+	/// defined.
+	Positioned,
+	/// A part's results are taken as the parts finish, and combined with the results of the parts
+	/// next to them in the input, the earlier before the later.
+	///
+	/// For an aggregate whose every function's partial states combine associatively
+	/// ([`AggregateCombine::Exact`], [`AggregateCombine::Appending`]): the fold of a run of
+	/// adjacent parts is the fold of the parts in order, however the run was put together.
+	Adjacent,
+	/// A part's results are taken as the parts finish.
+	///
+	/// For the rows of a statement: no `ORDER BY` or paging of the statement orders or counts the
+	/// pipeline's rows, and the pipeline is neither the source of another operator nor a
+	/// statement nested in an expression, and no `LET` of the plan binds them. The statement's
+	/// rows are a result, and the order of such rows is unspecified where no clause orders them.
+	/// The value of a request's top-level `LET` is planned as a statement of its own, which the
+	/// planner is told ([`LegalityIndex::binding`]); its rows are read by the statements after the
+	/// `LET`, so its pipeline states `Serial`.
+	///
+	/// For an aggregate of no key whose every function is `count` and which no paging counts: the
+	/// partial states of a count add to one total, whatever order they are added in.
+	Free,
+}
+
+impl Arrival {
+	/// Whether taking the parts' results as `self` is no stronger than taking them as `stated`.
+	pub(crate) fn weaker_or_equal(self, stated: Arrival) -> bool {
+		self <= stated
+	}
+
+	/// The arrival the way parts combine at a sink allows by itself, for rows no clause counts:
+	/// [`Arrival::Positioned`] for a sort that keeps every row, [`Arrival::Adjacent`] for an
+	/// aggregate whose every function combines associatively, and [`Arrival::Serial`] for any
+	/// other combine. What only the statement around a pipeline can state, that nothing reads
+	/// its rows in order, is [`Arrival::Free`], which no combine states by itself.
+	pub(crate) fn of_combine(sink: &SinkCombine) -> Arrival {
+		match sink {
+			SinkCombine::Aggregate(combines)
+				if combines.iter().all(|combine| {
+					matches!(combine, AggregateCombine::Exact | AggregateCombine::Appending)
+				}) =>
+			{
+				Arrival::Adjacent
+			}
+			SinkCombine::StableMerge => Arrival::Positioned,
+			SinkCombine::Aggregate(_)
+			| SinkCombine::Concat
+			| SinkCombine::TopK
+			| SinkCombine::Distinct
+			| SinkCombine::NotSplittable
+			| SinkCombine::OrderedApply => Arrival::Serial,
+		}
+	}
 }
 
 /// Which failure a split run raises when several parts fail.
@@ -188,6 +259,14 @@ pub(crate) struct Legality {
 	pub(crate) chain: ChainLegality,
 	pub(crate) sink: SinkCombine,
 	pub(crate) paging: Paging,
+	/// In what order the parts' results may reach the pipeline's consumer.
+	pub(crate) arrival: Arrival,
+	/// Whether the pipeline's aggregate has no key and folds each of its
+	/// [`AggregateCombine::InexactFloat`] functions over numbers one at a time, so that a split
+	/// run may keep the values each part folds and fold them in input order. The state that
+	/// replay reaches is the serial fold's, bit for bit. `false` for a pipeline with no
+	/// aggregate.
+	pub(crate) ordered_fold: bool,
 	pub(crate) error_order: ErrorOrder,
 	/// Whether evaluating the pipeline's expressions may raise an error for some row.
 	///
@@ -210,6 +289,8 @@ impl Legality {
 			chain: ChainLegality::RowLocal,
 			sink: SinkCombine::NotSplittable,
 			paging: Paging::None,
+			arrival: Arrival::Serial,
+			ordered_fold: false,
 			error_order: ErrorOrder::FirstByInputPosition,
 			may_raise: true,
 		}
@@ -255,6 +336,14 @@ pub(crate) fn aggregate_combine(name: &str) -> AggregateCombine {
 		}
 		_ => AggregateCombine::NotDecomposable,
 	}
+}
+
+/// Whether the aggregate function `name` folds one number at a time into a state that depends on
+/// nothing but the numbers it has folded and their order, and on the first value it could not fold:
+/// a part may keep the values its rows hand the function and leave the fold to the merge, which
+/// folds the values of every part in input order.
+pub(crate) fn folds_in_order(name: &str) -> bool {
+	matches!(name, "math::sum" | "math::mean" | "math::stddev" | "math::variance")
 }
 
 /// Whether `chain` is row-local, from the effects `exprs` declare, in the order a refusal is
@@ -404,6 +493,23 @@ pub(crate) fn statement_legality_with(
 	}
 }
 
+/// [`statement_legality_with`] of a write statement whose rows are applied in iteration order: the
+/// refusal its effects name without the write the statement itself makes.
+///
+/// A statement that writes only through its own apply refuses nothing on that account, whereas
+/// anything else that writes (a nested statement, a function, an `eval`) still refuses it. A
+/// statement that is no write answers [`statement_legality_with`].
+pub(crate) fn write_statement_legality(
+	op: &LogicalOp,
+	registry: &FunctionRegistry,
+	summaries: &CatalogSummaries,
+) -> StatementLegality {
+	let oracle = SummaryOracle::new(registry, summaries);
+	StatementLegality {
+		refusal: refusal_of(plan_effects_beneath_write(op, &oracle)),
+	}
+}
+
 /// The logical pipelines of one statement, keyed by the operator that is each pipeline's source,
 /// and the segments above its breakers, keyed by the breaker.
 ///
@@ -422,7 +528,21 @@ impl<'a> LegalityIndex<'a> {
 		registry: &FunctionRegistry,
 		summaries: &CatalogSummaries,
 	) -> Self {
-		let walked = walk(op, registry, summaries);
+		Self::walked(walk(op, registry, summaries, false))
+	}
+
+	/// [`Self::with_summaries`] for `op`, the value a top-level `LET` binds: the statements after
+	/// the `LET` read its rows in the order they were bound, as they read the rows of a statement
+	/// nested in an expression.
+	pub(crate) fn binding(
+		op: &'a LogicalOp,
+		registry: &FunctionRegistry,
+		summaries: &CatalogSummaries,
+	) -> Self {
+		Self::walked(walk(op, registry, summaries, true))
+	}
+
+	fn walked(walked: Walked<'a>) -> Self {
 		Self {
 			entries: walked.sources.into_iter().zip(walked.pipelines).collect(),
 			segments: walked.segments,
@@ -460,7 +580,7 @@ pub(crate) fn pipelines_of_with(
 	registry: &FunctionRegistry,
 	summaries: &CatalogSummaries,
 ) -> Vec<LogicalPipeline> {
-	walk(op, registry, summaries).pipelines
+	walk(op, registry, summaries, false).pipelines
 }
 
 /// What [`walk`] found: the pipelines, the operator that is the source of each (in the same
@@ -475,6 +595,7 @@ fn walk<'a>(
 	op: &'a LogicalOp,
 	registry: &FunctionRegistry,
 	summaries: &CatalogSummaries,
+	bound: bool,
 ) -> Walked<'a> {
 	let mut walker = Walker {
 		registry,
@@ -482,6 +603,7 @@ fn walk<'a>(
 		out: Vec::new(),
 		sources: Vec::new(),
 		segments: Vec::new(),
+		inner: u32::from(bound),
 	};
 	walker.statement(op);
 	Walked {
@@ -543,6 +665,14 @@ struct Walker<'r, 'a> {
 	/// The source operator of each pipeline of `out`.
 	sources: Vec<&'a LogicalOp>,
 	segments: Vec<(&'a LogicalOp, Legality)>,
+	/// How many operators or expressions around the statement being walked read its rows as their
+	/// input: the source of a pipeline, a member of a union, a statement written in an expression.
+	/// The value a `LET` binds counts: the statements after it read the bound rows in the order
+	/// they were bound, whether the `LET` is walked as an operator or its value is the statement
+	/// walked ([`LegalityIndex::binding`]). Zero for a statement the walk reaches as a statement
+	/// of the program, including the one a `RETURN`, `IF` or `FOR` holds, whose rows are a
+	/// result.
+	inner: u32,
 }
 
 impl<'a> Walker<'_, 'a> {
@@ -576,16 +706,49 @@ impl<'a> Walker<'_, 'a> {
 				match &write.source {
 					LogicalWriteSource::Rows(input) => {
 						let open = self.stream(input);
-						self.finish(open, SinkCombine::NotSplittable, own, true);
+						// A write over rows applies their effects in iteration order when its own
+						// expressions are row-local: they hold no nested write, no entropy, no
+						// state advance and nothing that blocks or is opaque.
+						let sink = if self.chain(&own, EffectSet::PURE) == ChainLegality::RowLocal {
+							SinkCombine::OrderedApply
+						} else {
+							SinkCombine::NotSplittable
+						};
+						self.finish(open, sink, own, true);
+					}
+					// A write whose only target is a mock of an id range is a pipeline over those
+					// ids, which the coordinator hands on in order, and applies by the same rule.
+					LogicalWriteSource::Targets(targets) if is_range_mock(targets) => {
+						let open = Open::Live(Live {
+							source: SourceSplit::Ordinal,
+							source_op: op,
+							exprs: Vec::new(),
+							limits: 0,
+							derived: EffectSet::PURE,
+							may_raise: false,
+						});
+						let sink = if self.chain(&own, EffectSet::PURE) == ChainLegality::RowLocal {
+							SinkCombine::OrderedApply
+						} else {
+							SinkCombine::NotSplittable
+						};
+						self.finish(open, sink, own, true);
 					}
 					LogicalWriteSource::Targets(_) | LogicalWriteSource::Inserts(_) => {
 						self.nested(&own, None);
 					}
 				}
 			}
+			// The value a `LET` binds is read by the statements after it, which may see which row
+			// came first or run an effect for each row in that order.
+			LogicalOp::Let(_) => {
+				self.nested(&op.scalars(), None);
+				for child in op.children() {
+					self.inner_statement(child);
+				}
+			}
 			LogicalOp::Sequence(_)
 			| LogicalOp::If(_)
-			| LogicalOp::Let(_)
 			| LogicalOp::Return(_)
 			| LogicalOp::Foreach(_)
 			| LogicalOp::Eval(_)
@@ -601,6 +764,14 @@ impl<'a> Walker<'_, 'a> {
 				}
 			}
 		}
+	}
+
+	/// Walk `op`, a statement whose rows an operator or an expression of the statement around it
+	/// reads, so the order of its rows is the order that reader sees.
+	fn inner_statement(&mut self, op: &'a LogicalOp) {
+		self.inner += 1;
+		self.statement(op);
+		self.inner -= 1;
 	}
 
 	/// Walk the relational operator `op` and what it reads, answering what is left open.
@@ -635,7 +806,7 @@ impl<'a> Walker<'_, 'a> {
 				may_raise: true,
 			}),
 			LogicalOp::Subquery(subquery) => {
-				self.statement(&subquery.input);
+				self.inner_statement(&subquery.input);
 				Open::Live(Live {
 					source: SourceSplit::Whole,
 					source_op: op,
@@ -657,7 +828,7 @@ impl<'a> Walker<'_, 'a> {
 					);
 					if !bare {
 						storage = false;
-						self.statement(input);
+						self.inner_statement(input);
 					}
 				}
 				Open::Live(Live {
@@ -748,10 +919,10 @@ impl<'a> Walker<'_, 'a> {
 			}
 			LogicalOp::Aggregate(aggregate) => {
 				let open = self.stream(&aggregate.input);
-				let sink = self.aggregate_sink(aggregate);
+				let (sink, shape) = self.aggregate_sink(aggregate);
 				let exprs = op.scalars();
 				let raises = self.may_raise_any(&exprs);
-				self.finish(open, sink, exprs, raises);
+				self.finish_shaped(open, sink, shape, exprs, raises);
 				Open::Spent(Some(Above::of(op)))
 			}
 			LogicalOp::Split(split) => {
@@ -870,6 +1041,18 @@ impl<'a> Walker<'_, 'a> {
 		extra: Vec<&'a LogicalExpr>,
 		raises: bool,
 	) {
+		self.finish_shaped(open, sink, Shape::default(), extra, raises);
+	}
+
+	/// [`Self::finish`] for a sink whose `shape` states more than how its parts combine.
+	fn finish_shaped(
+		&mut self,
+		open: Open<'a>,
+		sink: SinkCombine,
+		shape: Shape,
+		extra: Vec<&'a LogicalExpr>,
+		raises: bool,
+	) {
 		let mut live = match open {
 			Open::Live(live) => live,
 			Open::Spent(above) => {
@@ -881,6 +1064,8 @@ impl<'a> Walker<'_, 'a> {
 						chain: self.chain(&above.exprs, above.derived),
 						sink,
 						paging: paging_of(above.limits),
+						arrival: Arrival::Serial,
+						ordered_fold: shape.ordered_fold,
 						error_order: ErrorOrder::FirstByInputPosition,
 						may_raise: above.may_raise || raises,
 					};
@@ -890,6 +1075,19 @@ impl<'a> Walker<'_, 'a> {
 			}
 		};
 		live.exprs.extend(extra);
+		let paging = paging_of(live.limits);
+		// A pipeline that no clause of its statement orders or counts, and that no operator or
+		// expression reads as its input, has no order to keep: `ORDER BY` is a breaker, so a
+		// pipeline that is still live holds none.
+		let arrival = if paging != Paging::None {
+			Arrival::Serial
+		} else if sink == SinkCombine::Concat && self.inner == 0
+			|| matches!(sink, SinkCombine::Aggregate(_)) && shape.counts_only
+		{
+			Arrival::Free
+		} else {
+			Arrival::of_combine(&sink)
+		};
 		let id = u32::try_from(self.out.len()).unwrap_or(u32::MAX);
 		self.out.push(LogicalPipeline {
 			id,
@@ -897,7 +1095,9 @@ impl<'a> Walker<'_, 'a> {
 				source: live.source,
 				chain: self.chain(&live.exprs, live.derived),
 				sink,
-				paging: paging_of(live.limits),
+				paging,
+				arrival,
+				ordered_fold: shape.ordered_fold,
 				error_order: ErrorOrder::FirstByInputPosition,
 				may_raise: live.may_raise || raises,
 			},
@@ -915,7 +1115,7 @@ impl<'a> Walker<'_, 'a> {
 		}
 		for plan in plans {
 			let first = self.out.len();
-			self.statement(plan);
+			self.inner_statement(plan);
 			if let Some(host) = host {
 				for pipeline in &mut self.out[first..] {
 					pipeline.feeds.get_or_insert(host);
@@ -924,24 +1124,49 @@ impl<'a> Walker<'_, 'a> {
 		}
 	}
 
-	/// How each aggregate function of `aggregate` combines.
-	fn aggregate_sink(&self, aggregate: &LogicalAggregate) -> SinkCombine {
+	/// How each aggregate function of `aggregate` combines, and what else its sink states.
+	fn aggregate_sink(&self, aggregate: &LogicalAggregate) -> (SinkCombine, Shape) {
 		let analysis = crate::exec::planner::analyse_aggregation(
 			self.registry,
 			&aggregate.fields,
 			&aggregate.group,
 		);
-		SinkCombine::Aggregate(match analysis {
-			Ok(analysis) => analysis
-				.fields
-				.iter()
-				.filter_map(|field| field.info.as_ref())
-				.flat_map(|info| info.calls.iter())
-				.map(|call| aggregate_combine(call.id.name()))
-				.collect(),
-			Err(_) => vec![AggregateCombine::NotDecomposable],
-		})
+		let Ok(analysis) = analysis else {
+			return (
+				SinkCombine::Aggregate(vec![AggregateCombine::NotDecomposable]),
+				Shape::default(),
+			);
+		};
+		let names: Vec<&str> = analysis
+			.fields
+			.iter()
+			.filter_map(|field| field.info.as_ref())
+			.flat_map(|info| info.calls.iter())
+			.map(|call| call.id.name())
+			.collect();
+		let combines = names.iter().map(|name| aggregate_combine(name)).collect();
+		let shape = Shape {
+			counts_only: aggregate.group.is_empty()
+				&& !names.is_empty()
+				&& names.iter().all(|name| *name == "count"),
+			ordered_fold: aggregate.group.is_empty()
+				&& names.iter().all(|name| {
+					aggregate_combine(name) != AggregateCombine::InexactFloat
+						|| folds_in_order(name)
+				}),
+		};
+		(SinkCombine::Aggregate(combines), shape)
 	}
+}
+
+/// What the walk states about a sink besides how its parts combine.
+#[derive(Clone, Copy, Default)]
+struct Shape {
+	/// Whether the aggregate has no key and every function it calls is `count`: the arrival of its
+	/// parts is free ([`Arrival::Free`]).
+	counts_only: bool,
+	/// [`Legality::ordered_fold`].
+	ordered_fold: bool,
 }
 
 /// Whether `expr` is built only of what answers for every row without raising: a read of a field
@@ -1033,6 +1258,11 @@ fn paging_of(limits: usize) -> Paging {
 	}
 }
 
+/// Whether `targets` are one mock that names the ids of a range, each once.
+pub(crate) fn is_range_mock(targets: &[LogicalExpr]) -> bool {
+	matches!(targets, [LogicalExpr::Mock(Mock::Range(..))])
+}
+
 /// The expressions of the sort `op`.
 fn sort_exprs(op: &LogicalOp) -> Vec<&LogicalExpr> {
 	op.scalars()
@@ -1059,4 +1289,182 @@ pub(crate) struct ForeachLegality {
 	/// The legality of each arm of each `IF` among the body's statements, in order, with the
 	/// conditions evaluated to reach it.
 	pub(crate) arms: Vec<ChainLegality>,
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// The arrival each pipeline of the statement `sql` states, in the order the walk lists them.
+	fn arrivals(sql: &str) -> Vec<Arrival> {
+		let ast = crate::syn::parse(sql).expect("statement parses");
+		let surrealdb_expr::parser::TopLevelExpr::Expr(expr) =
+			ast.expressions.into_iter().next().expect("one statement")
+		else {
+			panic!("not an expression statement: {sql}");
+		};
+		let op = crate::expr::logical::lower(expr).expect("statement lowers");
+		let registry = FunctionRegistry::with_builtins();
+		pipelines_of_with(&op, &registry, &CatalogSummaries::none())
+			.into_iter()
+			.map(|pipeline| pipeline.legality.arrival)
+			.collect()
+	}
+
+	/// The rows of a statement's result, which no `ORDER BY` sorts and no paging counts, arrive in
+	/// any order.
+	#[test]
+	fn an_unordered_result_arrives_free() {
+		for sql in [
+			"SELECT * FROM t",
+			"SELECT n, s FROM t WHERE n % 3 = 0",
+			"SELECT VALUE n FROM t:1..9",
+			"SELECT * FROM a, b",
+		] {
+			assert_eq!(arrivals(sql), [Arrival::Free], "`{sql}`");
+		}
+	}
+
+	/// The partial states of counts of one group add up whatever order they are added in; the
+	/// states of anything else an aggregate folds, and of a count of groups of a key, do not
+	/// arrive free.
+	#[test]
+	fn the_counts_of_one_group_arrive_free() {
+		for sql in [
+			"SELECT count() FROM t WHERE n > 2 GROUP ALL",
+			"SELECT count(n > 2) AS c, count() AS d FROM t WHERE n % 2 = 0 GROUP ALL",
+			"SELECT count() + 1 AS c FROM t GROUP ALL",
+			"SELECT 7 AS seven, count() AS c FROM t GROUP ALL",
+		] {
+			let arrivals = arrivals(sql);
+			assert_eq!(arrivals.first(), Some(&Arrival::Free), "`{sql}`: {arrivals:?}");
+		}
+	}
+
+	/// What pages its rows, keeps a bounded sort or folds a float arrives in the order of the
+	/// serial run.
+	#[test]
+	fn a_pipeline_that_keeps_an_order_arrives_serial() {
+		for sql in [
+			"SELECT * FROM t ORDER BY n LIMIT 3",
+			"SELECT * FROM t LIMIT 3",
+			"SELECT * FROM t START 3",
+			"SELECT count(), math::sum(n) FROM t GROUP ALL",
+			"SELECT k, math::mean(n) FROM t GROUP BY k",
+		] {
+			assert!(
+				arrivals(sql).iter().all(|arrival| *arrival == Arrival::Serial),
+				"`{sql}`: {:?}",
+				arrivals(sql)
+			);
+		}
+	}
+
+	/// A sort that keeps every row takes its input's runs by position, wherever they arrive from.
+	#[test]
+	fn the_input_of_a_sort_that_keeps_every_row_arrives_positioned() {
+		for sql in ["SELECT * FROM t ORDER BY n", "SELECT * FROM t ORDER BY id"] {
+			assert_eq!(arrivals(sql), [Arrival::Positioned], "`{sql}`");
+		}
+	}
+
+	/// An aggregate whose partial states combine associatively takes the partial states of the
+	/// parts next to one another, the earlier before the later.
+	#[test]
+	fn an_aggregate_that_combines_associatively_arrives_adjacent() {
+		for sql in [
+			"SELECT k, count() FROM t GROUP BY k",
+			"SELECT count(), array::group(n) FROM t GROUP ALL",
+			"SELECT count(), math::max(n) FROM t GROUP ALL",
+			"SELECT n, count() FROM t GROUP ALL",
+		] {
+			assert_eq!(arrivals(sql), [Arrival::Adjacent], "`{sql}`");
+		}
+	}
+
+	/// The rows of a statement another operator or an expression reads arrive in order: the
+	/// reader may see which row came first.
+	#[test]
+	fn a_statement_another_reads_arrives_serial() {
+		assert_eq!(
+			arrivals("SELECT * FROM (SELECT * FROM t) ORDER BY n"),
+			[Arrival::Serial, Arrival::Positioned]
+		);
+		// The inner statement is the one that is not free: the outer one is a result.
+		assert_eq!(arrivals("SELECT * FROM (SELECT * FROM t)"), [Arrival::Serial, Arrival::Free]);
+		assert_eq!(
+			arrivals("SELECT *, (SELECT VALUE n FROM u) AS ns FROM t"),
+			[Arrival::Free, Arrival::Serial]
+		);
+	}
+
+	/// The value of a top-level `LET`, planned as the statement it is, arrives in order too when
+	/// the walk is told it is bound; the counts of one group stay free.
+	#[test]
+	fn a_statement_walked_as_a_binding_arrives_serial() {
+		let registry = FunctionRegistry::with_builtins();
+		let bound_arrivals = |sql: &str| {
+			let ast = crate::syn::parse(sql).expect("statement parses");
+			let surrealdb_expr::parser::TopLevelExpr::Expr(expr) =
+				ast.expressions.into_iter().next().expect("one statement")
+			else {
+				panic!("not an expression statement: {sql}");
+			};
+			let op = crate::expr::logical::lower(expr).expect("statement lowers");
+			let walked = walk(&op, &registry, &CatalogSummaries::none(), true);
+			walked
+				.pipelines
+				.into_iter()
+				.map(|pipeline| pipeline.legality.arrival)
+				.collect::<Vec<_>>()
+		};
+		for sql in ["SELECT * FROM t", "SELECT n FROM t WHERE n % 3 = 0"] {
+			assert_eq!(arrivals(sql), [Arrival::Free], "`{sql}`");
+			assert_eq!(bound_arrivals(sql), [Arrival::Serial], "`{sql}` bound");
+		}
+		assert_eq!(bound_arrivals("SELECT count() FROM t GROUP ALL"), [Arrival::Free]);
+	}
+
+	/// The value a `LET` binds is read by the statements after it, so its rows arrive in order
+	/// whatever statement holds the `SELECT`; the rows of a `RETURN` are a result.
+	#[test]
+	fn a_value_a_let_binds_arrives_serial() {
+		for sql in [
+			"LET $s = SELECT * FROM t",
+			"LET $s = { SELECT * FROM t }",
+			"LET $s = IF true { SELECT * FROM t } ELSE { SELECT * FROM u }",
+			"LET $s = { LET $r = SELECT * FROM t; $r }",
+		] {
+			assert!(
+				arrivals(sql).iter().all(|arrival| *arrival == Arrival::Serial),
+				"`{sql}`: {:?}",
+				arrivals(sql)
+			);
+		}
+		assert_eq!(arrivals("RETURN SELECT * FROM t"), [Arrival::Free]);
+		assert_eq!(
+			arrivals("IF true { SELECT * FROM t } ELSE { SELECT * FROM u }"),
+			[Arrival::Free, Arrival::Free]
+		);
+		// A row an expression of the loop reads arrives in order too.
+		assert!(
+			arrivals("FOR $r IN (SELECT * FROM t) { RETURN $r }")
+				.iter()
+				.all(|arrival| *arrival == Arrival::Serial)
+		);
+	}
+
+	#[test]
+	fn arrival_weakens_from_free_to_serial() {
+		for weaker in [Arrival::Serial, Arrival::Positioned, Arrival::Adjacent] {
+			assert!(weaker.weaker_or_equal(Arrival::Free));
+			assert!(!Arrival::Free.weaker_or_equal(weaker));
+		}
+		assert!(Arrival::Positioned.weaker_or_equal(Arrival::Adjacent));
+		assert!(Arrival::Serial.weaker_or_equal(Arrival::Free));
+		assert!(Arrival::Free.weaker_or_equal(Arrival::Free));
+		assert!(Arrival::Serial.weaker_or_equal(Arrival::Serial));
+		assert!(!Arrival::Free.weaker_or_equal(Arrival::Serial));
+		assert_eq!(Legality::not_listed().arrival, Arrival::Serial);
+	}
 }

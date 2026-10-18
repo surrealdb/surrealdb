@@ -264,6 +264,38 @@ pub(crate) fn plan_effects(op: &LogicalOp, oracle: &SummaryOracle<'_>) -> Effect
 	set
 }
 
+/// [`plan_effects`] of the write statement `op`, without the write `op` itself makes.
+///
+/// A write that applies its effects in iteration order writes through that apply and nothing
+/// else: the statement's remaining effects are those of its expressions, of the statements nested
+/// in them and of the `COMPUTED` fields its permissions derive. A nested write, a function that
+/// writes and an `eval` still count. `op` that is no write answers [`plan_effects`].
+pub(crate) fn plan_effects_beneath_write(op: &LogicalOp, oracle: &SummaryOracle<'_>) -> EffectSet {
+	use std::ops::ControlFlow;
+	let LogicalOp::Write(_) = op else {
+		return plan_effects(op, oracle);
+	};
+	let mut out = PlanEffects::default();
+	let walked: Result<(), std::convert::Infallible> = op.visit_scalars(&mut |scalar| {
+		fold_scalar(scalar, oracle, &mut out);
+		Ok(())
+	});
+	let Ok(()) = walked;
+	for child in op.children() {
+		fold_plan(child, oracle, &mut out);
+	}
+	let mut set = out.set.union(blocking_effects(op)).union(permission_effects(op, oracle));
+	let walked: Result<(), std::convert::Infallible> = op.visit_scalars_deep(&mut |scalar| {
+		let _: ControlFlow<()> = scalar.visit_deep(&mut |inner| {
+			set = set.union(reached_effects(inner, oracle));
+			ControlFlow::Continue(())
+		});
+		Ok(())
+	});
+	let Ok(()) = walked;
+	set
+}
+
 /// `BLOCKING` where the statement `op`, or a statement nested in it, is a `SLEEP`: the statement
 /// blocks as the builtin of that name does, and no scalar says so.
 fn blocking_effects(op: &LogicalOp) -> EffectSet {

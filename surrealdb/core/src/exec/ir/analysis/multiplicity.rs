@@ -4,7 +4,8 @@
 //! stands between the scan and the loop. It is read by walking from the operand to its defining
 //! op and is recomputed on every call.
 //!
-//! A table scan, a record-id range and a set deliver each identity once. An array, a parameter, a
+//! A table scan, a record-id range and a set deliver each identity once, and so does an array
+//! whose one member is a mock that names the ids of a range. Any other array, a parameter, a
 //! stored subquery result, a call result, a `SPLIT`, a second source, a join, a graph step and an
 //! aggregate may repeat one. A `SELECT` written directly as the source delivers its scan's stream
 //! when its projection keeps `id` as itself: the identity then holds along the record's `id`;
@@ -33,7 +34,7 @@ use crate::exec::ir::logical::ops::{
 };
 use crate::exec::ir::op_kind::{OpKind, OpTag};
 use crate::expr::logical::OutputPathPart;
-use crate::expr::{BinaryOperator, Function, Kind};
+use crate::expr::{BinaryOperator, Function, Kind, Mock};
 use crate::val::{Number, Range, Value};
 
 /// The most defining ops followed from a source operand. A longer chain is not a source the
@@ -439,6 +440,21 @@ fn logical_stream(ir: &Ir, op: OpId, data: &OpData, log: &LogOp, depth: usize) -
 	}
 }
 
+/// Whether `value` is a mock that names the ids of a range, each once.
+fn is_id_range_mock(ir: &Ir, value: ValueId) -> bool {
+	let Some(ValueDef::OpResult {
+		op,
+		index: 0,
+	}) = ir.value(value).map(|data| data.def)
+	else {
+		return false;
+	};
+	matches!(
+		ir.op(op).map(|data| &data.kind),
+		Some(OpKind::Expr(ExprOp::Mock(mock))) if matches!(**mock, Mock::Range(..))
+	)
+}
+
 fn expr_stream(ir: &Ir, data: &OpData, expr: &ExprOp, depth: usize) -> StreamFact {
 	match expr {
 		ExprOp::Set => StreamFact::distinct(ElemPath::Elem),
@@ -481,8 +497,14 @@ fn expr_stream(ir: &Ir, data: &OpData, expr: &ExprOp, depth: usize) -> StreamFac
 			}
 		}
 		ExprOp::Subquery(_) => subquery_stream(ir, data, depth),
-		ExprOp::Array
-		| ExprOp::Object {
+		ExprOp::Array => {
+			if data.operands.len() == 1 && is_id_range_mock(ir, data.operands[0]) {
+				StreamFact::distinct(ElemPath::Elem)
+			} else {
+				StreamFact::repeating()
+			}
+		}
+		ExprOp::Object {
 			..
 		}
 		| ExprOp::RecordId(_)

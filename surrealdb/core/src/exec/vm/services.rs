@@ -380,6 +380,8 @@ impl Services for EngineServices<'_> {
 		direction: Direction,
 		limit: u32,
 	) -> FlowResult<Vec<(Vec<u8>, Vec<u8>)>> {
+		#[cfg(test)]
+		super::morsel::note_txn_read_on_worker();
 		check_cancelled(self.ctx)?;
 		let txn = self.ctx.txn();
 		match direction {
@@ -395,6 +397,8 @@ impl Services for EngineServices<'_> {
 		direction: Direction,
 		limit: u32,
 	) -> FlowResult<Vec<Vec<u8>>> {
+		#[cfg(test)]
+		super::morsel::note_txn_read_on_worker();
 		check_cancelled(self.ctx)?;
 		let txn = self.ctx.txn();
 		match direction {
@@ -510,6 +514,8 @@ impl Services for EngineServices<'_> {
 		version: Option<u64>,
 		policy: CachePolicy,
 	) -> FlowResult<Vec<Value>> {
+		#[cfg(test)]
+		super::morsel::note_txn_read_on_worker();
 		let db_ctx = self.ctx.database().context("the VM requires a database context")?;
 		let records = crate::exec::migrate::get_records(
 			self.ctx,
@@ -554,6 +560,8 @@ impl Services for EngineServices<'_> {
 	}
 
 	async fn read_record(&self, rid: &RecordId, version: Option<u64>) -> FlowResult<Option<Value>> {
+		#[cfg(test)]
+		super::morsel::note_txn_read_on_worker();
 		fetch_raw_record(self.ctx, rid, version).await
 	}
 
@@ -589,6 +597,8 @@ impl Services for EngineServices<'_> {
 	}
 
 	async fn record_exists(&self, rid: &RecordId, version: Option<u64>) -> FlowResult<bool> {
+		#[cfg(test)]
+		super::morsel::note_txn_read_on_worker();
 		let db_ctx = self.ctx.database().context("the VM requires a database context")?;
 		let key = RecordKey {
 			ns: db_ctx.ns_ctx.ns.namespace_id,

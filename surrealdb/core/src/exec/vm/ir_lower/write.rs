@@ -33,9 +33,9 @@ use smallvec::SmallVec;
 
 use crate::exec::AccessMode;
 use crate::exec::ir::error::IrError;
-use crate::exec::planner::placement::Parallel;
+use crate::exec::planner::placement::{Combine, MorselPlan, Parallel};
 use crate::exec::vm::ir_instr::{IrForm, IrInstr, WriteCutSpec, WriteResumeSpec};
-use crate::exec::vm::program::{Instr, Label, Operand, Program, ROW, Reg};
+use crate::exec::vm::program::{Instr, Label, Operand, Pipeline, Program, ROW, Reg};
 
 /// The labels and live registers of one write body's cut.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,6 +46,8 @@ pub(in crate::exec::vm) struct WriteCutEmit {
 	pub(in crate::exec::vm) skip: Label,
 	/// The registers written ahead of the cut and read after it.
 	pub(in crate::exec::vm) live: SmallVec<[u16; 8]>,
+	/// Whether the part ahead of the cut encodes the record's after-image.
+	pub(in crate::exec::vm) encode: bool,
 }
 
 impl WriteCutEmit {
@@ -64,6 +66,7 @@ impl WriteCutEmit {
 			cut,
 			skip,
 			live: live_across(code, cut_at, registers),
+			encode: false,
 		}
 	}
 }
@@ -83,6 +86,7 @@ pub(in crate::exec::vm) fn emit_resume(code: &mut Vec<Instr>, cut: &WriteCutEmit
 pub(in crate::exec::vm) fn emit_cut(code: &mut Vec<Instr>, cut: &WriteCutEmit) {
 	code.push(Instr::Ir(IrInstr::write_cut(WriteCutSpec {
 		live: cut.live.clone(),
+		encode: cut.encode,
 	})));
 }
 
@@ -374,6 +378,9 @@ fn touched(instr: &Instr, out: &mut Vec<Touch>) -> bool {
 			}
 			out.push(Touch::Write(*dst));
 		}
+		// A write instruction works on the record in flight, which the write state holds, and
+		// carries nothing in the registers.
+		Instr::Write(_) => {}
 		Instr::Ir(ir) => return ir_touched(ir, out),
 		_ => return false,
 	}
@@ -393,17 +400,27 @@ fn ir_touched(ir: &IrInstr, out: &mut Vec<Touch>) -> bool {
 		}
 		| IrForm::SkipRow
 		| IrForm::MemoReset(_)
-		| IrForm::MemoTruthy(_)
-		| IrForm::WriteResume(_)
-		| IrForm::WriteCut(_)
-		| IrForm::WriteSkip
-		| IrForm::WriteOffPath => return false,
+		| IrForm::MemoTruthy(_) => return false,
+		// A marker restores or ends the part of the body that wrote the registers it lists: it
+		// reads and writes none of its own.
+		IrForm::WriteResume(_) | IrForm::WriteCut(_) | IrForm::WriteSkip | IrForm::WriteOffPath => {
+		}
 	}
 	true
 }
 
+/// Whether `pipeline`'s body opens with the `WriteResume` of a write cut.
+pub(in crate::exec::vm) fn holds_cut(pipeline: &Pipeline) -> bool {
+	matches!(
+		pipeline.code.first(),
+		Some(Instr::Ir(ir)) if matches!(ir.form(), IrForm::WriteResume(_))
+	)
+}
+
 /// Refuses a read-write program that holds a morsel decision on a pipeline of its own unless
-/// `cut_of` answers `true` for that pipeline's index. The refusal is an internal error, raised in
+/// `cut_of` answers `true` for that pipeline's index, and any program that holds a write cut in
+/// a pipeline of its own that is not planned as an ordered apply, whose body would then run its
+/// halves in one task with the markers of two. The refusal is an internal error, raised in
 /// release builds too.
 ///
 /// A pipeline of a group is exempt: it is placed with its group. With `cut_of` answering `false`
@@ -424,13 +441,28 @@ pub(in crate::exec::vm) fn guard_writing_morsels(
 			what: "a writing program planned morsels",
 		});
 	}
+	if program.pipelines.iter().any(|pipeline| {
+		pipeline.group.is_none()
+			&& holds_cut(pipeline)
+			&& !matches!(
+				pipeline.parallel,
+				Parallel::Morsels(MorselPlan {
+					combine: Combine::OrderedApply,
+					..
+				})
+			)
+	}) {
+		return Err(IrError::Invariant {
+			what: "a write cut in a pipeline not planned as an ordered apply",
+		});
+	}
 	Ok(())
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::exec::planner::placement::{Combine, MorselInput, MorselPlan};
+	use crate::exec::planner::placement::{Combine, MergeOrder, MorselInput, MorselPlan};
 	use crate::exec::vm::ir_lower::emit::Emitter;
 	use crate::exec::vm::program::{ArithOp, Pipeline, Source};
 
@@ -546,7 +578,7 @@ mod tests {
 	}
 
 	fn program(access_mode: AccessMode, pipelines: Vec<Pipeline>) -> Program {
-		Emitter::new().finish_program(pipelines, access_mode).unwrap()
+		Emitter::new().assemble_program(pipelines, access_mode).unwrap()
 	}
 
 	fn pipeline(parallel: Parallel, group: Option<u16>) -> Pipeline {
@@ -562,7 +594,57 @@ mod tests {
 			combine: Combine::Concat,
 			paged: None,
 			prunes: false,
+			merge: MergeOrder::Serial,
+			ordered_fold: Vec::new(),
 		})
+	}
+
+	fn resume() -> Instr {
+		Instr::Ir(IrInstr::write_resume(WriteResumeSpec {
+			cut: 0,
+			skip: 0,
+			live: SmallVec::new(),
+		}))
+	}
+
+	fn ordered_apply() -> Parallel {
+		Parallel::Morsels(MorselPlan {
+			input: MorselInput::Batches,
+			combine: Combine::OrderedApply,
+			paged: None,
+			prunes: false,
+			merge: MergeOrder::Serial,
+			ordered_fold: Vec::new(),
+		})
+	}
+
+	#[test]
+	fn guard_refuses_a_cut_in_a_pipeline_not_planned_as_an_ordered_apply() {
+		let never = |_: usize| false;
+		let cut = |parallel: Parallel, group: Option<u16>| {
+			let mut held = pipeline(parallel, group);
+			held.code.insert(0, resume());
+			held
+		};
+		for parallel in [Parallel::Serial, morsels()] {
+			let writing = program(AccessMode::ReadWrite, vec![cut(parallel, None)]);
+			let err = guard_writing_morsels(&writing, &|_| true).unwrap_err();
+			assert!(
+				err.to_string()
+					.contains("a write cut in a pipeline not planned as an ordered apply"),
+				"{err}"
+			);
+			assert!(matches!(err, IrError::Invariant { .. }), "{err}");
+		}
+		// An ordered apply that holds its cut is admitted, and one that holds none is refused as
+		// any other pipeline planned as morsels.
+		let held = program(AccessMode::ReadWrite, vec![cut(ordered_apply(), None)]);
+		assert!(guard_writing_morsels(&held, &|_| true).is_ok());
+		let bare = program(AccessMode::ReadWrite, vec![pipeline(ordered_apply(), None)]);
+		assert!(guard_writing_morsels(&bare, &never).is_err());
+		// The cut of a pipeline of a group is placed with its group.
+		let grouped = program(AccessMode::ReadWrite, vec![cut(Parallel::Serial, Some(0))]);
+		assert!(guard_writing_morsels(&grouped, &never).is_ok());
 	}
 
 	#[test]

@@ -42,10 +42,13 @@ const SMALL_MORSELS: (&str, &str) = ("morsel_target_bytes", "8KiB");
 /// Every morsel donates the rest of its range at each chunk boundary, so a cut is published while
 /// the next chunk is already being read.
 const DONATING: (&str, &str) = ("morsel_steal_always", "true");
+/// The settings `pairs` names. A range is cut where workers get no read view, so the front run
+/// over an in-memory datastore is cut as it is over one with views.
 fn config(pairs: &[(&str, &str)]) -> ConfigMap {
-	pairs
-		.iter()
-		.fold(ConfigMap::empty(), |config, (key, value)| config.with_key_value(*key, *value))
+	pairs.iter().fold(
+		ConfigMap::empty().with_key_value("morsel_needs_view", "false"),
+		|config, (key, value)| config.with_key_value(*key, *value),
+	)
 }
 
 /// The datastore a test runs on when it is not in memory: a directory of RocksDB or of SurrealKV.
@@ -171,13 +174,13 @@ async fn a_scan_reads_ahead_and_answers_as_it_does_not() {
 		("SELECT * FROM t;", true),
 		("SELECT * FROM t WHERE n % 3 = 0;", true),
 		("SELECT * FROM t ORDER BY id DESC;", true),
-		// The sink of a group or of a computed sort key reads decoded rows, so the body does not
-		// run in the storage cursor.
-		("SELECT g, count() AS c FROM t GROUP BY g ORDER BY g;", false),
-		("SELECT VALUE n FROM t ORDER BY n DESC;", false),
+		// The steps of a group and of a sort run on the row, so their bodies run in the storage
+		// cursor too.
+		("SELECT g, count() AS c FROM t GROUP BY g ORDER BY g;", true),
+		("SELECT VALUE n FROM t ORDER BY n DESC;", true),
 		("SELECT * FROM t WHERE id > t:100 AND id < t:2900;", true),
 		("SELECT count() FROM t GROUP ALL;", false),
-		("SELECT g, count() FROM t GROUP BY g;", false),
+		("SELECT g, count() FROM t GROUP BY g;", true),
 		("SELECT * FROM t WHERE g = 3 AND n > 100;", true),
 	];
 	for placement in [SERIAL, MORSELS] {
@@ -567,9 +570,25 @@ async fn rocksdb_front_run_cut_while_reading_ahead_runs_no_entry_twice() {
 		let off = run_morsels(false, Some(Disk::Rocks(off_dir.path())), &pairs, &setup, sql).await;
 		assert!(on.cuts_ahead > 0, "the front run cuts its range while it reads ahead: {sql}");
 		assert!(on.producers.0 > 0, "and the scan reads ahead: {sql}");
-		assert_eq!(on.answers, off.answers, "the answers of {sql}");
+		// Without `ORDER BY` the rows of a statement whose morsels run on workers arrive in no
+		// specified order, so the answers are compared as multisets.
+		assert_eq!(rows_of(&on.answers), rows_of(&off.answers), "the answers of {sql}");
 		assert_eq!(on.joined, on.producers.0, "every producer was awaited: {sql}");
 	}
+}
+
+/// The rows of each answer, an array of flat objects, in sorted order.
+#[cfg(feature = "kv-rocksdb")]
+fn rows_of(answers: &[String]) -> Vec<Vec<String>> {
+	answers
+		.iter()
+		.map(|answer| {
+			let inner = answer.trim().trim_start_matches("[{").trim_end_matches("}]");
+			let mut rows: Vec<String> = inner.split("}, {").map(str::to_owned).collect();
+			rows.sort();
+			rows
+		})
+		.collect()
 }
 
 /// `EXPLAIN ANALYZE` of a front run that is cut while it reads ahead states what one that reads

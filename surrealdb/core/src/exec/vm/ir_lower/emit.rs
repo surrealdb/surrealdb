@@ -291,6 +291,11 @@ impl Emitter {
 		at
 	}
 
+	/// The registers handed out so far, [`ROW`] included.
+	pub(super) fn register_count(&self) -> usize {
+		usize::from(self.registers)
+	}
+
 	/// The index the next instruction will sit at.
 	pub(super) fn here(&self) -> Label {
 		self.code.len() as Label
@@ -697,7 +702,23 @@ impl Emitter {
 	/// A constant pool that holds a closure answers [`IrError::Invariant`]: a closure value is made
 	/// by [`Instr::MakeClosure`] when the program runs, the binder binds a closure literal as
 	/// `expr.closure_create`, and the plan-time folder folds no closure, so no literal holds one.
+	///
+	/// A program that writes holds a pipeline of its own planned as morsels only where the pipeline
+	/// holds the cut of a write ([`write::guard_writing_morsels`](super::write)).
 	pub(super) fn finish_program(
+		self,
+		pipelines: Vec<Pipeline>,
+		access_mode: AccessMode,
+	) -> Result<Program, IrError> {
+		let program = self.assemble_program(pipelines, access_mode)?;
+		super::write::guard_writing_morsels(&program, &|at| {
+			program.pipelines.get(at).is_some_and(super::write::holds_cut)
+		})?;
+		Ok(program)
+	}
+
+	/// [`Self::finish_program`] without the check of the pipelines' placement.
+	pub(super) fn assemble_program(
 		self,
 		pipelines: Vec<Pipeline>,
 		access_mode: AccessMode,
@@ -816,6 +837,16 @@ fn runs_on_the_row(instr: &Instr) -> bool {
 			| Instr::CollectPush { .. }
 			| Instr::NewObject { .. }
 			| Instr::BuildObject { .. }
+			| Instr::SetField { .. }
+			| Instr::Skip { .. }
+			| Instr::Take { .. }
+			| Instr::JumpIfLimitReached { .. }
+			| Instr::SortPush { .. }
+			| Instr::GroupKey { .. }
+			| Instr::GroupSelect { .. }
+			| Instr::GroupFirstNeeded { .. }
+			| Instr::GroupFirstSet { .. }
+			| Instr::AccUpdate { .. }
 			| Instr::Emit { .. }
 			| Instr::EmitEnd { .. }
 			| Instr::EndRow

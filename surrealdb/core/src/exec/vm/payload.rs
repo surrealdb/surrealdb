@@ -32,6 +32,11 @@ pub(crate) struct TopKKey {
 	/// (`phys.key_range_scan`): the scan reads no stored bytes for the key,
 	/// and stops once it reads past the second of the sort's threshold.
 	pub(crate) coarse_cutoff: Option<CoarseCutoff>,
+	/// Whether the scan rejects an entry whose key the sort's threshold shows worse than every
+	/// row the sort keeps, so that the body of the entry never runs. The placement of the
+	/// scan's pipeline states it: only a pipeline that raises for no row may leave a body unrun.
+	/// A scan holding a [`Self::coarse_cutoff`] rejects no single entry whatever this says.
+	pub(crate) rejects_entries: bool,
 }
 
 /// The cut a key-range scan makes beneath a sort that keeps `keep` rows,

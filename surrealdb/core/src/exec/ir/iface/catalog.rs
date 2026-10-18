@@ -69,6 +69,9 @@ pub(crate) struct IoCaps {
 	/// A multi-get and a multi-range read cost less than the same reads one by one, so a plan may
 	/// batch the random key reads of a row stream into windows.
 	pub(crate) multi_read: bool,
+	/// A read-only transaction may hand out an owned read view, so workers can read parts of a
+	/// key range the statement's task does not.
+	pub(crate) read_views: bool,
 }
 
 /// How the field view of a table is applied to an image of one of its records, for the principal

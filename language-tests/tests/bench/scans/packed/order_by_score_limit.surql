@@ -1,6 +1,6 @@
 /**
 [bench]
-reason = "Top 100 records by score: the top-k probe refuses a packed row whose score cannot enter the sort from its columns, before the row is decoded"
+reason = "Top 100 records by score: the top-k probe refuses a packed row whose score cannot enter the sort from its columns, and a row that enters the sort is decoded as it enters"
 run = true
 rebuild = false
 datasets = { schemaless = "bench/util/records-10000.surql", schemafull = "bench/util/records-10000-schemafull.surql", mixed = "bench/util/records-10000-schemafull-mixed.surql" }

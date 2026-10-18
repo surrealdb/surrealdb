@@ -103,7 +103,9 @@ pub(crate) fn patterns() -> Vec<Box<dyn Pattern<PhysDialect>>> {
 /// Then every pipeline is placed again through `placement`, using the facts of the container the
 /// rules left and the strategies ([`NestedReading::Strategy`]). The new placements replace the
 /// ones [`super::plan_physical`] installed. The facts of a pipeline come from the sorts the rules
-/// removed, the limits they bounded and the statements that took an arm.
+/// removed, the limits they bounded and the statements that took an arm. A pipeline whose
+/// placement does not prune has its scan reject no entry by a top-k threshold
+/// ([`settle_thresholds`]).
 ///
 /// A container in another phase is left as it is, and the report is empty. The caller verifies the
 /// container afterwards.
@@ -147,9 +149,58 @@ pub(crate) async fn run(
 		cx.physical.backend(),
 		NestedReading::Strategy,
 	)?;
+	let pruning: Vec<(OpId, bool)> = placed.iter().map(|(op, attr)| (*op, attr.prunes())).collect();
 	install(ir.placement_table_mut(), placed);
+	settle_thresholds(ir, facts, &pruning)?;
 	io::run(ir, facts, cx)?;
 	Ok(report)
+}
+
+/// States that the scan of every pipeline whose placement does not prune rejects no entry by a
+/// top-k threshold ([`TopKKey::rejects_entries`]).
+///
+/// A scan that rejects an entry whose key the sort's threshold shows worse than every row the sort
+/// keeps leaves the entry's body unrun. The serial run runs the body of every entry, so only a
+/// pipeline that raises for no row may leave one unrun: `pruning` states, for each placed
+/// pipeline, whether its placement does ([`PlacementAttr::prunes`]). The plan keeps the key, which
+/// `EXPLAIN` shows as written; a scan that a datetime component of its keys cuts keeps its cutoff,
+/// which stops the scan and rejects no single entry.
+fn settle_thresholds(
+	ir: &mut Ir,
+	facts: &mut FactCache,
+	pruning: &[(OpId, bool)],
+) -> Result<(), IrError> {
+	let mut keyed = Vec::new();
+	for (pipeline, prunes) in pruning {
+		if *prunes {
+			continue;
+		}
+		let Some(source) = super::facts::source_of(ir, *pipeline) else {
+			continue;
+		};
+		let key = match phys(ir, source) {
+			Some(PhysOp::TableScan(attrs)) => attrs.topk.as_ref(),
+			Some(PhysOp::KeyRangeScan(attrs)) => attrs.topk.as_ref(),
+			Some(_) | None => None,
+		};
+		if key.is_some_and(|key| key.rejects_entries) {
+			keyed.push(source);
+		}
+	}
+	let mut rw = Rewriter::new(ir, facts);
+	for scan in keyed {
+		rw.update_kind(scan, |kind| {
+			let key = match kind {
+				OpKind::Phys(PhysOp::TableScan(attrs)) => attrs.topk.as_mut(),
+				OpKind::Phys(PhysOp::KeyRangeScan(attrs)) => attrs.topk.as_mut(),
+				OpKind::Phys(_) | OpKind::Logical(_) | OpKind::Expr(_) => None,
+			};
+			if let Some(key) = key {
+				key.rejects_entries = false;
+			}
+		})?;
+	}
+	Ok(())
 }
 
 /// The physical op `op` is, or `None` for an op of another dialect or one that is gone.
@@ -672,6 +723,7 @@ fn topk_key(ir: &Ir, op: OpId, sort: &SortAttrs) -> Option<TopKKey> {
 		depth_limit: TOPK_DEPTH_LIMIT,
 		packed_rows: false,
 		coarse_cutoff: None,
+		rejects_entries: true,
 	})
 }
 
@@ -688,7 +740,8 @@ fn topk_key(ir: &Ir, op: OpId, sort: &SortAttrs) -> Option<TopKKey> {
 /// bytes ([`TopKKey`]). A key-range scan takes no key whose path opens with the name of a
 /// component of the record id, which the record body does not store; the sort still publishes its
 /// threshold. A permission or a layer between the scan and the sort is not crossed: the scan stays
-/// as it is.
+/// as it is. A scan rejects entries by the key only where the placement of its
+/// pipeline prunes ([`settle_thresholds`]).
 ///
 /// A sort that already keeps exactly the rows the limit reaches, as the conversion of a sort under
 /// a literal limit states it, takes its threshold and its scan's key here too; a sort that keeps
@@ -877,6 +930,7 @@ impl Pattern<PhysDialect> for CoarseCutoffSort {
 				position,
 				keep,
 			}),
+			rejects_entries: true,
 		};
 		let scan = chain.source;
 		rw.update_kind(scan, |kind| {

@@ -501,12 +501,11 @@ struct Pair {
 /// A scan reads a packed row where it lies when the body that runs on it holds only filters over
 /// fields and emits the row or a field of it (`packed_filter`, `packed_in_place_reject`,
 /// the `*_keys` shapes, `packed_in_place_value`). The aggregates and the sort
-/// (`packed_filter_reject`, `packed_group_lo`, the `packed_*order*` shapes) read the row decoded,
-/// as the twin's documents are, after the pre-decode filter and the top-k probe have judged it from
-/// its columns where they can. `packed_order_limit10` reads its rows best last, so every row
-/// enters the sort and none is refused. Which shapes read in place is proved from their compiled
-/// programs by `the_allocation_shapes_compile_to_the_path_they_measure` in
-/// `exec::vm::tests_packed_reads`.
+/// (`packed_filter_reject`, `packed_group_lo`, the `packed_*order*` shapes) run on the row too,
+/// after the top-k probe has judged it from its columns where it can. `packed_order_limit10` reads
+/// its rows best last, so every row enters the sort and none is refused ([`DECODED_INTO_SORT`]).
+/// Which shapes read in place is proved from their compiled programs by
+/// `the_allocation_shapes_compile_to_the_path_they_measure` in `exec::vm::tests_packed_reads`.
 const PACKED_SHAPES: &[Pair] = &[
 	Pair {
 		packed: Shape {
@@ -1235,6 +1234,15 @@ const ZERO_PER_ROW: &[&str] = &[
 /// here makes as well.
 const BATCH_FLOOR: f64 = 0.02;
 
+/// The shapes whose rows all enter a sort that keeps a bounded number of rows. A document enters
+/// such a sort as its stored bytes and is decoded only if it keeps its place, while a packed row is
+/// decoded as it enters, so a sort holds no packed bytes and reads no layouts: these shapes cost a
+/// packed row its decode, [`DECODED_ROW`] at most, rather than what the twin's documents cost.
+const DECODED_INTO_SORT: &[&str] = &["packed_order_limit10"];
+
+/// The allocations a packed row's whole decode makes, per row, at most.
+const DECODED_ROW: f64 = 2.1;
+
 /// A packed row costs no more allocations than the same row as a document, in every shape of
 /// [`PACKED_SHAPES`]: the read of a packed row in place, the judgement of the filter and the
 /// probe from its columns, and the check that makes them safe (the whole row's decode run to build
@@ -1257,9 +1265,14 @@ async fn packed_rows_read_in_place_allocate_no_more_than_documents() {
 		let packed = per_row(sizes.0, sizes.1, &session, &pair.packed).await;
 		let twin = per_row(sizes.0, sizes.1, &session, &pair.twin).await;
 		println!("{:<32} {packed:>12.3} {twin:>12.3}", pair.packed.name);
-		if packed > twin + 0.01 {
+		let bound = if DECODED_INTO_SORT.contains(&pair.packed.name) {
+			DECODED_ROW
+		} else {
+			twin + 0.01
+		};
+		if packed > bound {
 			over.push(format!(
-				"{}: {packed:.2} allocs/row > the twin's {twin:.2} (+0.01)",
+				"{}: {packed:.2} allocs/row > {bound:.2} (the twin's {twin:.2})",
 				pair.packed.name
 			));
 		}
@@ -1379,6 +1392,16 @@ async fn generated_id_creates_stay_within_budget() {
 const CEILING_ROWS: usize = 12_000;
 
 async fn ceiling_datastore(bounded: bool) -> (Arc<Datastore>, Session) {
+	ceiling_datastore_over(bounded, "memory", &[]).await
+}
+
+/// [`ceiling_datastore`] over the store at `path`, with the configuration keys `extra` beside the
+/// ones a bounded datastore holds.
+async fn ceiling_datastore_over(
+	bounded: bool,
+	path: &str,
+	extra: &[(&str, &str)],
+) -> (Arc<Datastore>, Session) {
 	use std::sync::Arc;
 
 	use surrealdb_core::exec::memory::{FairGovernor, FileTempStore};
@@ -1395,13 +1418,22 @@ async fn ceiling_datastore(bounded: bool) -> (Arc<Datastore>, Session) {
 				.expect("a temporary store"),
 			))
 			.with_config(
-				surrealdb_cnf::ConfigMap::empty()
-					.with_key_value("spill_part_size", "65536")
-					.with_key_value("spill_merge_fan_in", "4")
-					.with_key_value("query_memory_minimum", "262144"),
+				extra.iter().fold(
+					surrealdb_cnf::ConfigMap::empty()
+						.with_key_value("spill_part_size", "65536")
+						.with_key_value("spill_merge_fan_in", "4")
+						.with_key_value("query_memory_minimum", "262144"),
+					|config, &(key, value)| config.with_key_value(key, value),
+				),
 			);
+	} else if !extra.is_empty() {
+		builder = builder.with_config(
+			extra.iter().fold(surrealdb_cnf::ConfigMap::empty(), |config, &(key, value)| {
+				config.with_key_value(key, value)
+			}),
+		);
 	}
-	let ds = builder.build_with_path("memory").await.expect("datastore");
+	let ds = builder.build_with_path(path).await.expect("datastore");
 	let session = Session::owner().with_ns("test").with_db("test");
 	ds.execute("DEFINE NS test; USE NS test; DEFINE DB test;", &Session::owner(), None)
 		.await
@@ -1433,22 +1465,23 @@ async fn peak_of(ds: &Datastore, session: &Session, sql: &str) -> (Vec<Value>, i
 	(answers, peak_since(base))
 }
 
-/// A sort and an aggregate over a table several times the size of a 1 MiB
-/// budget answer what they answer unbounded, while the heap they hold at
-/// once stays a fraction of what they hold unbounded. The statements answer
-/// little, so what they hold is what their breakers hold.
-#[tokio::test(flavor = "current_thread")]
-async fn breakers_over_a_small_budget_hold_a_bounded_heap() {
-	let _measuring = MEASURING.lock().await;
-	let statements = [
-		"SELECT VALUE n FROM t ORDER BY pad, n",
-		"SELECT n % 100 AS b, array::len(array::group(pad)) AS c FROM t GROUP BY b",
-	];
-	let (free, session) = ceiling_datastore(false).await;
-	let (bounded, _) = ceiling_datastore(true).await;
-	for sql in statements {
-		let (expected, unbounded_peak) = peak_of(&free, &session, sql).await;
-		let (got, bounded_peak) = peak_of(&bounded, &session, sql).await;
+/// The statements the memory-ceiling tests run. A sort over fields holds nothing the interpreter
+/// hands the host, so its morsels read key ranges. A grouping by a computed key, and the
+/// statements that call a function, hold a region or a step of the host, so their morsels are
+/// batches of rows the coordinator read.
+const BREAKERS: [&str; 4] = [
+	"SELECT VALUE n FROM t ORDER BY pad, n",
+	"SELECT n % 100 AS b, array::len(array::group(pad)) AS c FROM t GROUP BY b",
+	"SELECT string::len(pad) AS l, n FROM t ORDER BY l, n",
+	"SELECT math::abs(n % 100) AS b, array::len(array::group(pad)) AS c FROM t GROUP BY b",
+];
+
+/// Each of [`BREAKERS`] answers over `bounded` what it answers over `free`, while the heap it holds
+/// at once stays under half of what it holds over `free`.
+async fn assert_breakers_stay_bounded(free: &Datastore, bounded: &Datastore, session: &Session) {
+	for sql in BREAKERS {
+		let (expected, unbounded_peak) = peak_of(free, session, sql).await;
+		let (got, bounded_peak) = peak_of(bounded, session, sql).await;
 		assert_eq!(got, expected, "`{sql}` under a small budget");
 		eprintln!(
 			"{sql}: unbounded peak {unbounded_peak} bytes, bounded peak {bounded_peak} bytes"
@@ -1458,4 +1491,67 @@ async fn breakers_over_a_small_budget_hold_a_bounded_heap() {
 			"`{sql}` held {bounded_peak} bytes under a 1 MiB budget, {unbounded_peak} unbounded"
 		);
 	}
+}
+
+/// A sort and an aggregate over a table several times the size of a 1 MiB
+/// budget answer what they answer unbounded, while the heap they hold at
+/// once stays a fraction of what they hold unbounded. The statements answer
+/// little, so what they hold is what their breakers hold. The in-memory store gives
+/// workers no read view, so nothing here reaches a worker: the case below runs the same
+/// statements where morsels do.
+#[tokio::test(flavor = "current_thread")]
+async fn breakers_over_a_small_budget_hold_a_bounded_heap() {
+	let _measuring = MEASURING.lock().await;
+	let (free, session) = ceiling_datastore(false).await;
+	let (bounded, _) = ceiling_datastore(true).await;
+	assert_breakers_stay_bounded(&free, &bounded, &session).await;
+}
+
+/// The rows a statement's `EXPLAIN ANALYZE` reports workers read in its `Morsels:` block, or
+/// `None` where it renders none.
+#[cfg(feature = "kv-rocksdb")]
+async fn worker_rows(ds: &Datastore, session: &Session, sql: &str) -> Option<u64> {
+	let responses =
+		ds.execute(&format!("EXPLAIN ANALYZE {sql}"), session, None).await.expect("explains");
+	let Ok(Value::String(text)) = &responses[0].result else {
+		panic!("`{sql}` answers {:?}", responses[0].result);
+	};
+	let (_, block) = text.split_once("Morsels:")?;
+	let (_, workers) = block.split_once("workers: rows: ")?;
+	let digits: String = workers.chars().take_while(char::is_ascii_digit).collect();
+	Some(digits.parse().unwrap_or_else(|_| panic!("`{sql}` renders {block}")))
+}
+
+/// Over RocksDB, whose workers read through a view, the sort over fields runs its key ranges on
+/// workers under the 1 MiB budget, and the heap the statements hold at once still stays under half
+/// of what they hold unbounded. Workers read rows, so the bound is not the bound of a serial run.
+#[cfg(feature = "kv-rocksdb")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn breakers_over_a_small_budget_hold_a_bounded_heap_with_workers_on_rocksdb() {
+	let _measuring = MEASURING.lock().await;
+	let (free_dir, bounded_dir, observed_dir) = (
+		temp_dir::TempDir::new().unwrap(),
+		temp_dir::TempDir::new().unwrap(),
+		temp_dir::TempDir::new().unwrap(),
+	);
+	let path = |dir: &temp_dir::TempDir| format!("rocksdb://{}", dir.path().display());
+	let (free, session) = ceiling_datastore_over(false, &path(&free_dir), &[]).await;
+	let (bounded, _) = ceiling_datastore_over(true, &path(&bounded_dir), &[]).await;
+	assert_breakers_stay_bounded(&free, &bounded, &session).await;
+	// A datastore that renders what the morsels did, under the same budget, shows the workers read
+	// rows: a statement that renders a `Morsels:` block shows workers in it, and the sort does.
+	let (observed, _) =
+		ceiling_datastore_over(true, &path(&observed_dir), &[("morsel_explain_analyze", "true")])
+			.await;
+	let mut rendered = Vec::new();
+	for sql in BREAKERS {
+		if let Some(rows) = worker_rows(&observed, &session, sql).await {
+			assert!(rows > 0, "`{sql}`: no worker read a row under a 1 MiB budget");
+			rendered.push(sql);
+		}
+	}
+	assert!(
+		rendered.contains(&BREAKERS[0]),
+		"the sort over fields renders no morsels: {rendered:?}"
+	);
 }

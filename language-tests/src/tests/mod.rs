@@ -3,6 +3,7 @@ pub mod cmp;
 pub mod report;
 pub mod run;
 pub mod schema;
+pub mod unordered;
 
 use std::fmt::Write;
 use std::io::{self, IsTerminal as _};

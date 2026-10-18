@@ -264,6 +264,8 @@ pub(crate) async fn read_subject(
 	exec: &ExecutionContext,
 	id: RecordId,
 ) -> Result<WriteRow, ControlFlow> {
+	#[cfg(test)]
+	crate::exec::vm::note_txn_read_on_worker();
 	let db = exec.database().context("a write requires a database context")?;
 	let (stored, stamp) = crate::exec::migrate::stamped_record(
 		&exec.txn(),

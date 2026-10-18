@@ -5989,6 +5989,13 @@ impl Source {
 		}
 	}
 
+	/// Whether this scan rejects entries by a top-k threshold, so that the body of an entry whose
+	/// key the threshold shows worse than every row the sort keeps never runs. A scan that a
+	/// datetime component of its keys cuts rejects no single entry.
+	pub(super) fn rejects_by_threshold(&self) -> bool {
+		matches!(self, Source::Scan { topk: Some(topk), .. } if topk.coarse.is_none())
+	}
+
 	/// Whether every row comes from storage, so a body with no instruction
 	/// that hands back to the host can run inside the storage cursor.
 	pub(super) fn reads_storage(&self) -> bool {
@@ -6306,6 +6313,45 @@ fn row_use(instr: &Instr) -> RowUse {
 		Instr::EmitEnd {
 			src,
 		} => RowUse::of(*src),
+		// Paging and the steps of a sort or an aggregate read the row only through the operands
+		// they take.
+		Instr::Skip {
+			..
+		}
+		| Instr::Take {
+			..
+		}
+		| Instr::JumpIfLimitReached {
+			..
+		}
+		| Instr::GroupSelect {
+			..
+		}
+		| Instr::GroupFirstNeeded {
+			..
+		} => RowUse::Neither,
+		Instr::SetField {
+			object,
+			value,
+			..
+		} => RowUse::of(Operand::Reg(*object)).and(RowUse::of(*value)),
+		Instr::SortPush {
+			keys,
+			src,
+			..
+		} => RowUse::of(Operand::Reg(*keys)).and(RowUse::of(Operand::Reg(*src))),
+		Instr::GroupKey {
+			value,
+			..
+		}
+		| Instr::AccUpdate {
+			value,
+			..
+		}
+		| Instr::GroupFirstSet {
+			src: value,
+			..
+		} => RowUse::of(*value),
 		// The rest hand back to the host, take the row whole, or read it through a register that
 		// is not a field: none runs in place on a packed record.
 		Instr::CoerceField {
@@ -6434,15 +6480,6 @@ fn row_use(instr: &Instr) -> RowUse {
 		| Instr::MethodClosure {
 			..
 		}
-		| Instr::Skip {
-			..
-		}
-		| Instr::Take {
-			..
-		}
-		| Instr::JumpIfLimitReached {
-			..
-		}
 		| Instr::SeedObject {
 			..
 		}
@@ -6461,9 +6498,6 @@ fn row_use(instr: &Instr) -> RowUse {
 		| Instr::Omit {
 			..
 		}
-		| Instr::SetField {
-			..
-		}
 		| Instr::WriteProjection {
 			..
 		}
@@ -6471,9 +6505,6 @@ fn row_use(instr: &Instr) -> RowUse {
 			..
 		}
 		| Instr::SplitPush {
-			..
-		}
-		| Instr::SortPush {
 			..
 		}
 		| Instr::Distinct {
@@ -6491,15 +6522,6 @@ fn row_use(instr: &Instr) -> RowUse {
 		| Instr::JoinPair {
 			..
 		}
-		| Instr::GroupKey {
-			..
-		}
-		| Instr::GroupSelect {
-			..
-		}
-		| Instr::AccUpdate {
-			..
-		}
 		| Instr::Next {
 			..
 		}
@@ -6514,12 +6536,6 @@ fn row_use(instr: &Instr) -> RowUse {
 			..
 		}
 		| Instr::PermissionRegion {
-			..
-		}
-		| Instr::GroupFirstNeeded {
-			..
-		}
-		| Instr::GroupFirstSet {
 			..
 		}
 		| Instr::CallIndexFn {

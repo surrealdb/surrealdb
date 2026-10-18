@@ -116,6 +116,7 @@ use crate::exec::ir::op_kind::OpKind;
 use crate::exec::ir::unit::{UnitForm, UnitKind};
 use crate::exec::ir::{RequestInput, RequestStatement};
 use crate::exec::logical::may_read_clock;
+use crate::exec::logical::pipelines::is_range_mock;
 use crate::exec::operators::write::plan::{WriteFacts, WriteForm as PlanForm};
 use crate::exec::operators::{SplitTarget, split_target};
 use crate::exec::planner::analyse_aggregation;
@@ -832,7 +833,7 @@ fn bind_op(cx: &mut BindCx<'_>, op: &LogicalOp, pos: Pos) -> Result<Flow, IrErro
 		| LogicalOp::VersionScope(_)
 		| LogicalOp::Only(_)
 		| LogicalOp::Explain(_) => bind_relational(cx, op),
-		LogicalOp::Write(write) => bind_write(cx, write),
+		LogicalOp::Write(write) => bind_write(cx, op, write),
 		LogicalOp::Match(statement) => stmt::bind_match(cx, statement),
 		LogicalOp::Ddl(statement) => {
 			cx.note_catalog_touch();
@@ -3114,7 +3115,7 @@ fn bind_join(cx: &mut BindCx<'_>, join: &LogicalJoin) -> Result<Flow, IrError> {
 /// The subjects and the `INTO` table are evaluated before the loop, so an error in them, or a
 /// `BREAK` written in them, ends the statement before any subject is written. Answers the value
 /// of the write.
-fn bind_write(cx: &mut BindCx<'_>, write: &LogicalWrite) -> Result<Flow, IrError> {
+fn bind_write(cx: &mut BindCx<'_>, op: &LogicalOp, write: &LogicalWrite) -> Result<Flow, IrError> {
 	let bundle = cx.take_bundle_table();
 	let named = cx.take_named_table().or_else(|| written_table(write));
 	let mut facts = write_facts(write);
@@ -3214,6 +3215,17 @@ fn bind_write(cx: &mut BindCx<'_>, write: &LogicalWrite) -> Result<Flow, IrError
 		&[source],
 		&[TypeKnowledge::Unknown],
 	)?;
+	// The legality the plan states of the pipeline that reads the rows of a write is the legality
+	// of its loop.
+	match &write.source {
+		LogicalWriteSource::Rows(rows) => cx.note_loop(subject_loop, rows),
+		// The pipeline of a write over the ids of a range stands at the write: it has no rows
+		// below it to read.
+		LogicalWriteSource::Targets(targets) if is_range_mock(targets) => {
+			cx.note_loop(subject_loop, op);
+		}
+		LogicalWriteSource::Targets(_) | LogicalWriteSource::Inserts(_) => {}
+	}
 	cx.within(subject_loop, RegionKind::Loop, &entry, |cx, args| {
 		let element = args.first().copied().ok_or(IrError::Stale("loop element"))?;
 		let stored = StoredClauses {

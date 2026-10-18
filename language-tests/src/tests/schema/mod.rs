@@ -131,6 +131,12 @@ pub struct TestEnv {
 	/// accept only `3`, the level every released binary's databases stand
 	/// at.
 	pub compatibility: Option<u8>,
+	/// Datastore configuration keys the test needs, as `--config KEY=VALUE` gives them to a run:
+	/// `[env.config] morsel_split_rows = "18446744073709551615"`. Each takes the place of the same
+	/// key given to the run, and a test that names any gets a datastore of its own. Values are
+	/// strings, since a count can exceed what TOML integers hold.
+	#[serde(default)]
+	pub config: BTreeMap<String, String>,
 	/// Whether EXPLAIN ANALYZE output omits elapsed durations, making
 	/// output deterministic for test assertions. Defaults to true in the
 	/// language test framework. Set to `false` explicitly if you need
@@ -181,6 +187,7 @@ impl Default for TestEnv {
 			backend: Default::default(),
 			versioned: Default::default(),
 			compatibility: None,
+			config: Default::default(),
 			redact_volatile_explain_attrs: Default::default(),
 			remote_skip: None,
 			remote_exclusive: Default::default(),

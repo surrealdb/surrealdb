@@ -242,12 +242,21 @@ pub(crate) async fn statement(
 		principal,
 		depth,
 		shadowed,
+		false,
 	)
 	.await
 }
 
 /// [`statement`], kept in the cache `cache` picks from the node's units, and
-/// planned as the statement of a request where `request_root`.
+/// planned as the statement of a request where `request_root`. `binds_rows` is
+/// whether the statement is the value of a top-level `LET`, whose plan states
+/// that its rows arrive in the order they were bound. Such a plan differs from
+/// the same statement's anywhere else, so the cache keeps it under `binds_rows`
+/// as well.
+#[expect(
+	clippy::too_many_arguments,
+	reason = "the statement, the cache and frame it is planned for, and how its rows are read"
+)]
 async fn statement_in(
 	exec: &ExecutionContext,
 	cache: fn(
@@ -258,6 +267,7 @@ async fn statement_in(
 	principal: Option<Arc<crate::iam::Auth>>,
 	depth: u32,
 	mut shadowed: Vec<String>,
+	binds_rows: bool,
 ) -> anyhow::Result<Arc<dyn ExecOperator>> {
 	for name in crate::exec::planner::UNIT_RUNTIME_PARAMS {
 		if !shadowed.iter().any(|shadow| shadow == name) {
@@ -284,6 +294,7 @@ async fn statement_in(
 						principal.clone(),
 						exec.root().perms_suppressed,
 						&shadowed,
+						binds_rows,
 					)
 				})
 				.await?
@@ -299,6 +310,7 @@ async fn statement_in(
 						depth,
 						exec.root().perms_suppressed,
 						&shadowed,
+						binds_rows,
 					)
 				})
 				.await?
@@ -314,6 +326,7 @@ async fn statement_in(
 			op: Arc::clone(&op),
 			depth,
 			shadowed: shadowed.clone(),
+			binds_rows,
 		},
 		principal.as_deref(),
 	);
@@ -337,6 +350,7 @@ pub(crate) async fn request_statement(
 	exec: &ExecutionContext,
 	op: LogicalOp,
 	principal: Option<Arc<crate::iam::Auth>>,
+	binds_rows: bool,
 ) -> anyhow::Result<Arc<dyn ExecOperator>> {
 	crate::exec::compiles::note_statement_served();
 	let params = statement_params(&op);
@@ -346,7 +360,17 @@ pub(crate) async fn request_statement(
 		.filter(|name| params.contains(*name))
 		.collect();
 	let Some(units) = exec.ctx().compiled_units().filter(|_| !folded.is_empty()) else {
-		return statement(exec, op, principal, 0, Vec::new()).await;
+		return statement_in(
+			exec,
+			super::units::CompiledUnits::statements,
+			false,
+			op,
+			principal,
+			0,
+			Vec::new(),
+			binds_rows,
+		)
+		.await;
 	};
 	let values: Vec<crate::val::Value> = folded
 		.iter()
@@ -354,7 +378,17 @@ pub(crate) async fn request_statement(
 		.collect();
 	let Some(session) = super::compile_cache::ArgValues::of(&values, units.specialised_arg_bytes())
 	else {
-		return statement(exec, op, principal, 0, Vec::new()).await;
+		return statement_in(
+			exec,
+			super::units::CompiledUnits::statements,
+			false,
+			op,
+			principal,
+			0,
+			Vec::new(),
+			binds_rows,
+		)
+		.await;
 	};
 	let Some(txn) = exec.try_txn() else {
 		anyhow::bail!(crate::exec::Error::InvalidStatement(
@@ -373,6 +407,7 @@ pub(crate) async fn request_statement(
 				0,
 				exec.root().perms_suppressed,
 				&[],
+				binds_rows,
 			)
 		})
 		.await?)
@@ -383,6 +418,7 @@ pub(crate) async fn request_statement(
 			op: Arc::clone(&op),
 			session,
 			shadowed: Vec::new(),
+			binds_rows,
 		},
 		principal.as_deref(),
 	);
@@ -422,6 +458,7 @@ pub(crate) async fn kept_request_statement(
 			principal,
 			0,
 			bound,
+			false,
 		)
 		.await;
 	};
@@ -439,6 +476,7 @@ pub(crate) async fn kept_request_statement(
 			principal,
 			0,
 			bound,
+			false,
 		)
 		.await;
 	};
@@ -458,6 +496,7 @@ pub(crate) async fn kept_request_statement(
 				principal.clone(),
 				exec.root().perms_suppressed,
 				&bound,
+				false,
 			)
 		})
 		.await?)
@@ -468,6 +507,7 @@ pub(crate) async fn kept_request_statement(
 			op: Arc::clone(&op),
 			session,
 			shadowed: bound.clone(),
+			binds_rows: false,
 		},
 		principal.as_deref(),
 	);

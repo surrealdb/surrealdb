@@ -1287,6 +1287,7 @@ impl PhysicalCatalog for PlanningCatalog {
 			untracked_reads: !self.txn.plain_reads_tracked(),
 			scan_read_ahead: self.txn.scan_read_ahead(),
 			multi_read: self.txn.multi_read(),
+			read_views: self.txn.view_capabilities().read_only,
 		}
 	}
 

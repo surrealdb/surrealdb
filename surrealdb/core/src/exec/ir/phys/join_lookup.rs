@@ -306,6 +306,8 @@ mod tests {
 			paging: Paging::None,
 			error_order: ErrorOrder::FirstByInputPosition,
 			may_raise: false,
+			arrival: crate::exec::logical::pipelines::Arrival::Serial,
+			ordered_fold: false,
 		};
 		let facts = PhysicalFacts {
 			source: SourceKind::Scan,

@@ -335,6 +335,15 @@ impl std::fmt::Debug for CompiledUnits {
 	}
 }
 
+/// The morsel test hooks name a datastore by the address of its units, so they forget it when
+/// the units drop and a later datastore may take the address.
+#[cfg(test)]
+impl Drop for CompiledUnits {
+	fn drop(&mut self) {
+		super::morsel::forget_datastore(self as *const Self as usize);
+	}
+}
+
 impl Default for CompiledUnits {
 	fn default() -> Self {
 		Self::new(crate::exec::config::ExecConfig::default().compiled_unit_cache_size)
