@@ -75,6 +75,13 @@ impl Child {
 		output
 	}
 
+	/// Wait for the child and read its stdout concatenated with its stderr,
+	/// whatever its exit status. For tests that assert on an error a command
+	/// reports and exits non-zero for.
+	pub fn output_even_on_failure(&mut self) -> String {
+		self.output().unwrap_or_else(|output| output)
+	}
+
 	/// Read the child's stdout concatenated with its stderr. Returns Ok if the
 	/// child returns successfully, Err otherwise.
 	pub fn output(&mut self) -> Result<String, String> {

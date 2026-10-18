@@ -772,8 +772,7 @@ mod cli_integration {
 				CREATE thing:also_success;
 				",
 				)
-				.output()
-				.unwrap();
+				.output_even_on_failure();
 
 			assert!(output.contains("thing:success"), "missing success in {output}");
 			assert!(output.contains("rgument"), "missing argument error in {output}");
@@ -800,8 +799,7 @@ mod cli_integration {
 				COMMIT;
 				",
 				)
-				.output()
-				.unwrap();
+				.output_even_on_failure();
 
 			// BEGIN batch: failed txn, then cancelled (skipped stmts), then explicit COMMIT error
 			// (#7207).
@@ -925,8 +923,7 @@ mod cli_integration {
 				.input(format!("DEFINE USER {USER} ON ROOT PASSWORD '{PASS}' ROLES OWNER;
                                                 DEFINE USER {USER} ON NAMESPACE PASSWORD '{PASS}' ROLES OWNER;
                                                 DEFINE USER {USER} ON DATABASE PASSWORD '{PASS}' ROLES OWNER;\n").as_str())
-				.output()
-				.expect("success");
+				.output_even_on_failure();
 		}
 
 		info!("* Pass root auth level and access root info");
@@ -981,8 +978,7 @@ mod cli_integration {
 			);
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR ROOT;\n").as_str())
-				.output()
-				.expect("success");
+				.output_even_on_failure();
 			assert!(
 				output.contains("IAM error: Not enough permissions to perform this action"),
 				"auth level namespace should not be able to access root info: {output}"
@@ -1026,8 +1022,7 @@ mod cli_integration {
 			);
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR ROOT;\n").as_str())
-				.output()
-				.expect("success");
+				.output_even_on_failure();
 			assert!(
 				output.contains("IAM error: Not enough permissions to perform this action"),
 				"auth level database should not be able to access root info: {output}",
@@ -1041,8 +1036,7 @@ mod cli_integration {
 			);
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
-				.output()
-				.expect("success");
+				.output_even_on_failure();
 			assert!(
 				output.contains("IAM error: Not enough permissions to perform this action"),
 				"auth level database should not be able to access namespace info: {output}",
@@ -1285,8 +1279,7 @@ mod cli_integration {
 				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_ns}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR ROOT;\n").as_str())
-				.output()
-				.expect("success");
+				.output_even_on_failure();
 			assert!(
 				output.contains("IAM error: Not enough permissions to perform this action"),
 				"namespace token should not be able to access root info: {output}"
@@ -1327,8 +1320,7 @@ mod cli_integration {
 				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_db}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR ROOT;\n").as_str())
-				.output()
-				.expect("success");
+				.output_even_on_failure();
 			assert!(
 				output.contains("IAM error: Not enough permissions to perform this action"),
 				"database token should not be able to access root info: {output}",
@@ -1341,8 +1333,7 @@ mod cli_integration {
 				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_db}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
-				.output()
-				.expect("success");
+				.output_even_on_failure();
 			assert!(
 				output.contains("IAM error: Not enough permissions to perform this action"),
 				"database token should not be able to access namespace info: {output}",
@@ -1689,6 +1680,36 @@ mod cli_integration {
 		}
 	}
 
+	/// A script piping statements into `surreal sql` learns of a failure only
+	/// through the exit status: a statement that errors at runtime and a line that
+	/// does not parse must both end the command unsuccessfully, and a clean run
+	/// must still succeed.
+	#[test(tokio::test)]
+	async fn sql_with_piped_input_exits_nonzero_when_a_statement_fails() {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let ns = Ulid::new();
+		let db = Ulid::new();
+		let args = format!(
+			"sql --endpoint http://{addr} --user {USER} --pass {PASS} --ns {ns} --db {db} --hide-welcome"
+		);
+
+		info!("* A runtime error fails the command");
+		let mut child = common::run(&args).input("THROW 'boom';\n");
+		assert!(child.output().is_err(), "a failed statement must not exit 0");
+
+		info!("* A statement that fails after earlier ones succeeded fails the command");
+		let mut child = common::run(&args).input("CREATE a:1;\nTHROW 'boom';\nCREATE a:2;\n");
+		assert!(child.output().is_err(), "a later failure must not be masked by earlier successes");
+
+		info!("* A parse error fails the command");
+		let mut child = common::run(&args).input("SELEKT 1;\n");
+		assert!(child.output().is_err(), "a parse error must not exit 0");
+
+		info!("* A clean run still succeeds");
+		let mut child = common::run(&args).input("CREATE b:1;\nRETURN 1;\n");
+		child.output().expect("success");
+	}
+
 	#[test(tokio::test)]
 	async fn node() {
 		// Commands without credentials when auth is disabled, should succeed
@@ -1926,14 +1947,14 @@ mod cli_integration {
 			);
 
 			let query = "RETURN http::get('http://127.0.0.1/');\n\n";
-			let output = common::run(&cmd).input(query).output().unwrap();
+			let output = common::run(&cmd).input(query).output_even_on_failure();
 			assert!(
 				output.contains("Access to network target '127.0.0.1:80' is not allowed"),
 				"unexpected output: {output:?}"
 			);
 
 			let query = "RETURN function() { return '1' };";
-			let output = common::run(&cmd).input(query).output().unwrap();
+			let output = common::run(&cmd).input(query).output_even_on_failure();
 			assert!(
 				output.contains("Scripting functions are not allowed")
 					|| output.contains("Embedded functions are not enabled"),
@@ -1960,14 +1981,14 @@ mod cli_integration {
 			);
 
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(
 				output.contains("Function 'http::get' is not allowed"),
 				"unexpected output: {output:?}"
 			);
 
 			let query = "RETURN function() { return '1' };";
-			let output = common::run(&cmd).input(query).output().unwrap();
+			let output = common::run(&cmd).input(query).output_even_on_failure();
 			assert!(
 				output.contains("Scripting functions are not allowed")
 					|| output.contains("Embedded functions are not enabled"),
@@ -1993,11 +2014,11 @@ mod cli_integration {
 			);
 
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(output.contains("['surrealdb-"), "unexpected output: {output:?}");
 
 			let query = "RETURN function() { return '1' };";
-			let output = common::run(&cmd).input(query).output().unwrap();
+			let output = common::run(&cmd).input(query).output_even_on_failure();
 			assert!(output.contains("['1']"), "unexpected output: {output:?}");
 
 			server.finish().unwrap();
@@ -2018,7 +2039,7 @@ mod cli_integration {
 			);
 
 			let query = "RETURN function() { return '1' };";
-			let output = common::run(&cmd).input(query).output().unwrap();
+			let output = common::run(&cmd).input(query).output_even_on_failure();
 			assert!(
 				output.contains("Scripting functions are not allowed")
 					|| output.contains("Embedded functions are not enabled"),
@@ -2042,7 +2063,7 @@ mod cli_integration {
 			);
 
 			let query = "RETURN string::len('123');\n\n".to_string();
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(output.contains("[3]"), "unexpected output: {output:?}");
 
 			server.finish().unwrap();
@@ -2065,7 +2086,7 @@ mod cli_integration {
 			);
 
 			let query = "RETURN string::len('123');\n\n".to_string();
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(output.contains("[3]"), "unexpected output: {output:?}");
 
 			server.finish().unwrap();
@@ -2086,7 +2107,7 @@ mod cli_integration {
 			);
 
 			let query = "RETURN string::lowercase('SURREALDB');\n\n".to_string();
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(
 				output.contains("Function 'string::lowercase' is not allowed"),
 				"unexpected output: {output:?}"
@@ -2112,14 +2133,14 @@ mod cli_integration {
 			);
 
 			let query = "RETURN string::lowercase('SURREALDB');\n\n".to_string();
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(
 				output.contains("Function 'string::lowercase' is not allowed"),
 				"unexpected output: {output:?}"
 			);
 
 			let query = "RETURN string::len('123');\n\n".to_string();
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(output.contains("[3]"), "unexpected output: {output:?}");
 
 			server.finish().unwrap();
@@ -2140,14 +2161,14 @@ mod cli_integration {
 			);
 
 			let query = "RETURN string::lowercase('SURREALDB');\n\n".to_string();
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(
 				output.contains("Function 'string::lowercase' is not allowed"),
 				"unexpected output: {output:?}"
 			);
 
 			let query = "RETURN string::len('123');\n\n".to_string();
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(output.contains("[3]"), "unexpected output: {output:?}");
 
 			server.finish().unwrap();
@@ -2168,14 +2189,14 @@ mod cli_integration {
 			);
 
 			let query = "RETURN string::lowercase('SURREALDB');\n\n".to_string();
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(
 				output.contains("Function 'string::lowercase' is not allowed"),
 				"unexpected output: {output:?}"
 			);
 
 			let query = "RETURN string::len('123');\n\n".to_string();
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(output.contains("[3]"), "unexpected output: {output:?}");
 
 			server.finish().unwrap();
@@ -2198,14 +2219,14 @@ mod cli_integration {
 			);
 
 			let query = "RETURN string::lowercase('SURREALDB');\n\n".to_string();
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(
 				output.contains("Function 'string::lowercase' is not allowed"),
 				"unexpected output: {output:?}"
 			);
 
 			let query = "RETURN string::len('123');\n\n".to_string();
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(output.contains("[3]"), "unexpected output: {output:?}");
 
 			server.finish().unwrap();
@@ -2228,14 +2249,14 @@ mod cli_integration {
 			);
 
 			let query = "RETURN string::lowercase('SURREALDB');\n\n".to_string();
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(
 				output.contains("Function 'string::lowercase' is not allowed"),
 				"unexpected output: {output:?}"
 			);
 
 			let query = "RETURN string::len('123');\n\n".to_string();
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(
 				output.contains("Function 'string::len' is not allowed"),
 				"unexpected output: {output:?}"
@@ -2259,7 +2280,7 @@ mod cli_integration {
 			);
 
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(output.contains("['surrealdb-"), "unexpected output: {output:?}");
 			server.finish().unwrap();
 		}
@@ -2279,7 +2300,7 @@ mod cli_integration {
 			);
 
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(output.contains("['surrealdb-"), "unexpected output: {output:?}");
 			server.finish().unwrap();
 		}
@@ -2299,7 +2320,7 @@ mod cli_integration {
 			);
 
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(
 				output
 					.contains(format!("Access to network target '{addr}' is not allowed").as_str()),
@@ -2323,7 +2344,7 @@ mod cli_integration {
 			);
 
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(
 				output
 					.contains(format!("Access to network target '{addr}' is not allowed").as_str()),
@@ -2347,7 +2368,7 @@ mod cli_integration {
 			);
 
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(output.contains("['surrealdb-"), "unexpected output: {output:?}");
 			server.finish().unwrap();
 		}
@@ -2367,7 +2388,7 @@ mod cli_integration {
 			);
 
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(
 				output
 					.contains(format!("Access to network target '{addr}' is not allowed").as_str()),
@@ -2392,7 +2413,7 @@ mod cli_integration {
 			);
 
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(output.contains("['surrealdb-"), "unexpected output: {output:?}");
 			server.finish().unwrap();
 		}
@@ -2413,7 +2434,7 @@ mod cli_integration {
 			);
 
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(
 				output
 					.contains(format!("Access to network target '{addr}' is not allowed").as_str()),
@@ -2437,7 +2458,7 @@ mod cli_integration {
 			);
 
 			let query = format!("RETURN http::get('http://{addr}/version');\n\n");
-			let output = common::run(&cmd).input(&query).output().unwrap();
+			let output = common::run(&cmd).input(&query).output_even_on_failure();
 			assert!(
 				output
 					.contains(format!("Access to network target '{addr}' is not allowed").as_str()),
@@ -2462,7 +2483,7 @@ mod cli_integration {
 			);
 
 			let query = "RETURN 1;\n\n";
-			let output = common::run(&cmd).input(query).output().unwrap();
+			let output = common::run(&cmd).input(query).output_even_on_failure();
 			assert!(output.contains("[1]"), "unexpected output: {output:?}");
 			server.finish().unwrap();
 		}
@@ -2483,7 +2504,7 @@ mod cli_integration {
 			);
 
 			let query = "RETURN 1;\n\n";
-			let output = common::run(&cmd).input(query).output().unwrap();
+			let output = common::run(&cmd).input(query).output_even_on_failure();
 			assert!(
 				output.contains("Not enough permissions to perform this action"),
 				"unexpected output: {output:?}"
@@ -2507,7 +2528,7 @@ mod cli_integration {
 			);
 
 			let query = "RETURN 1;\n\n";
-			let output = common::run(&cmd).input(query).output().unwrap();
+			let output = common::run(&cmd).input(query).output_even_on_failure();
 			assert!(output.contains("[1]"), "unexpected output: {output:?}");
 			server.finish().unwrap();
 		}
