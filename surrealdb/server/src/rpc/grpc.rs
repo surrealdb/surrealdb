@@ -833,7 +833,15 @@ impl RpcProtocol for Grpc {
 		self.cleanup_txns_filtered(Some(session_id)).await;
 	}
 
-	async fn begin(&self, _txn: Option<Uuid>, session_id: Uuid) -> Result<DbResult, TypesError> {
+	async fn begin(
+		&self,
+		_txn: Option<Uuid>,
+		session_id: Uuid,
+		params: Array,
+	) -> Result<DbResult, TypesError> {
+		if !params.is_empty() {
+			return Err(invalid_params("The gRPC begin takes no options"));
+		}
 		// Reject a `begin` for a session that was never attached, so a client
 		// cannot mint an endless stream of fabricated session ids -- each with
 		// its own transaction budget and its own counter entry.
@@ -880,7 +888,13 @@ impl RpcProtocol for Grpc {
 			return Err(invalid_params("Transaction not found"));
 		};
 		self.release_transaction_slot(&session_id);
-		tx.commit().await.map_err(types_error_from_anyhow)?;
+		// A read-only transaction has nothing to commit; committing releases it.
+		let finished = if tx.writeable() {
+			tx.commit().await
+		} else {
+			tx.cancel().await
+		};
+		finished.map_err(types_error_from_anyhow)?;
 		Ok(DbResult::Other(Value::None))
 	}
 
@@ -3610,8 +3624,11 @@ mod tests {
 
 	/// Opens a transaction on an attached session and hands back its id.
 	async fn begin_txn(service: &GrpcService, session_id: Uuid) -> Uuid {
-		let DbResult::Other(Value::Uuid(txn)) =
-			service.rpc().begin(None, session_id).await.expect("begin")
+		let DbResult::Other(Value::Uuid(txn)) = service
+			.rpc()
+			.begin(None, session_id, surrealdb_types::Array::new())
+			.await
+			.expect("begin")
 		else {
 			panic!("begin should answer with a transaction id");
 		};
@@ -3668,7 +3685,7 @@ mod tests {
 		let owner = Uuid::new_v4();
 		service.rpc().attach(owner).await.expect("attach");
 		let DbResult::Other(Value::Uuid(txn)) =
-			service.rpc().begin(None, owner).await.expect("begin")
+			service.rpc().begin(None, owner, surrealdb_types::Array::new()).await.expect("begin")
 		else {
 			panic!("begin should answer with a transaction id");
 		};
@@ -3692,7 +3709,7 @@ mod tests {
 
 		let refused = service
 			.rpc()
-			.begin(None, ephemeral)
+			.begin(None, ephemeral, surrealdb_types::Array::new())
 			.await
 			.expect_err("an ephemeral session must not open a transaction");
 		assert!(refused.is_validation(), "expected a validation error, got {refused:?}");
@@ -3751,7 +3768,7 @@ mod tests {
 		let service = service().await;
 		let session_id = Uuid::new_v4();
 		service.rpc().attach(session_id).await.expect("attach");
-		service.rpc().begin(None, session_id).await.expect("begin");
+		service.rpc().begin(None, session_id, surrealdb_types::Array::new()).await.expect("begin");
 		assert_eq!(service.rpc().transactions.len(), 1);
 
 		service.rpc().cleanup_all_txns().await;

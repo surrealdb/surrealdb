@@ -21,10 +21,27 @@ dispatch and executor, the `StaleReads` datastore seam
 without a stale tier, and `read_only` pass-through in the PostgreSQL and MySQL
 translators.
 
-Not yet implemented: the transport field and `begin` RPC options, snapshot and
-commit-position metadata on responses, the read-only snapshot lifetime cap,
-`ReadSnapshotTooStale` as a distinct typed error kind (it is a query error
-carrying the name in its message), and Part B.
+Also implemented, as the transport surface:
+
+- **Snapshot description.** The `BEGIN` of a read-only block answers with
+  `{ position, age, stale }` instead of `NONE`; the `begin` RPC answers with
+  `{ id, snapshot }` when it carries options. `position` is the backend's
+  opaque token as bytes, or `NONE`.
+- **Request form.** `QueryRequest::read_only` wraps a request's statements in
+  the block (`BEGIN … COMMIT` results included, so the result indexes are those
+  of the wrapped text). RPC `query` and `query_stream` take it as the third
+  parameter, `{ read_only: { max_staleness, strict } }`; HTTP `/sql` takes the
+  query-string parameters `read_only_max_staleness` and `read_only_strict`,
+  which are removed from the variables.
+- **`begin` RPC options.** The same options object, over WebSocket and the
+  embedded and local engines; the SDK's `Begin` builder has `.read_only()`,
+  `.max_staleness(Duration)` and `.strict()`, and the `Transaction` has
+  `.snapshot()`. `COMMIT` of a read-only transaction releases it.
+
+Not yet implemented: gRPC (its `begin` and `query` messages carry no options;
+a gRPC `begin` with options is refused), commit positions, the read-only
+snapshot lifetime cap, `ReadSnapshotTooStale` as a distinct typed error kind
+(it is a query error carrying the name in its message), and Part B.
 
 ## Why
 
@@ -241,13 +258,18 @@ Single-statement transactions read the current state. A stale read of one
 statement, and a router's view of the bound, use a transport field defined as
 exact sugar for the language form:
 
-- RPC `query` takes an optional `read_only` object: `{ max_staleness, strict }`.
-  HTTP `/sql` takes the query-string parameters `max_staleness` (a duration)
-  and `strict` (a boolean).
+- RPC `query` takes an optional third parameter, an options object holding
+  `read_only: { max_staleness, strict }`. HTTP `/sql` takes the query-string
+  parameters `read_only_max_staleness` (a duration) and `read_only_strict` (a
+  boolean), which are not bound as variables.
 - A request carrying the field behaves exactly as if its statements were
   wrapped as `BEGIN READ ONLY MAX STALENESS <d> [STRICT]; <statements> COMMIT;`.
-  One snapshot serves every statement. A request whose own text contains
-  `BEGIN`, `COMMIT` or `CANCEL` fails as the wrapping would make it fail.
+  One snapshot serves every statement. The results are those of the wrapped
+  text, the `BEGIN` and `COMMIT` results included. A request whose own text
+  contains `BEGIN`, `COMMIT` or `CANCEL` is refused: the first such statement
+  would end the wrapping block and let the statements after it run outside it,
+  as writes. An options object without `max_staleness` asks for a bound of
+  `0s`, the current state.
 - The executor applies the field as the options of the request's implicit
   block, without rewriting the statement text. The text, and any compiled
   statement cache keyed on it, is therefore the same for every bound, which is
@@ -498,11 +520,12 @@ read-only transaction holds a snapshot and counts toward the cap.
 
 - The `begin` reply is the transaction id. With options it returns the id and
   the snapshot metadata.
-- Query responses carry it in the statistics: `DbResultStats`
-  (`surrealdb/rpc/src/response.rs`) gains an optional `snapshot` field with
-  `position`, `age` and `stale`, and an optional `commit_position` for a request
-  that committed writes. Both are absent otherwise, so existing clients see no
-  change. The `commit` RPC reply carries `commit_position`.
+- Query responses carry it in the result of the read-only `BEGIN`, which
+  answers `{ position, age, stale }` where a plain `BEGIN` answers `NONE`. A
+  separate response-level field would need a new field on every result, and a
+  result value is visible to every transport and SDK unchanged. A request that
+  committed writes will carry `commit_position` the same way once a backend
+  provides one.
 - The streaming protocol (`QueryStreamFrame` in `surrealdb/rpc/src/stream.rs`,
   `surrealdb/embedded/src/stream.rs`, the gRPC frames in
   `surrealdb/server/src/rpc/grpc.rs`) carries them on the frame that closes the

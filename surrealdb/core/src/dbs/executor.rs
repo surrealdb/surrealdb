@@ -735,6 +735,9 @@ pub struct Executor {
 	request: Option<RequestPlan>,
 	/// Whether the statement running is inside `BEGIN … COMMIT`.
 	in_block: bool,
+	/// The index in `results` of the `BEGIN` result being opened, which a read-only
+	/// block overwrites with the description of its snapshot.
+	begin_result_slot: Option<usize>,
 	/// The bare `LIVE` statement converted as it arrived, with the unit
 	/// compiled for it in a read transaction before its write transaction
 	/// opened. [`Executor::run_live`] takes it, so the statement registers
@@ -1305,6 +1308,7 @@ impl Executor {
 			result_shape: OutputShape::Scalar,
 			request: None,
 			in_block: false,
+			begin_result_slot: None,
 			arrived_live: None,
 			misplaced_control: None,
 			explicit_emission: Emission::Stream,
@@ -3507,6 +3511,11 @@ impl Executor {
 			stale = info.stale,
 			"opened a read-only transaction"
 		);
+		if let Some(slot) = self.begin_result_slot.take()
+			&& let Some(result) = self.results.get_mut(slot)
+		{
+			result.result = Ok(crate::kvs::snapshot_description(&info));
+		}
 		Ok(txn)
 	}
 
@@ -4693,6 +4702,7 @@ impl Executor {
 					}
 				}
 				StatementRole::Begin => {
+					self.begin_result_slot = (!skip_success_results).then_some(self.results.len());
 					if !skip_success_results {
 						self.results.push(QueryResult {
 							time: Duration::ZERO,

@@ -122,6 +122,61 @@ pub struct MlExportConfig {
 	pub version: String,
 }
 
+/// The mode of a read-only transaction opened with `begin`: a snapshot no older
+/// than `max_staleness`, and whether to refuse a current read when no snapshot
+/// meets the bound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReadOnlyBegin {
+	pub max_staleness: std::time::Duration,
+	pub strict: bool,
+}
+
+impl ReadOnlyBegin {
+	/// The options object a `begin` call carries on the wire:
+	/// `{ read_only: { max_staleness, strict } }`.
+	pub fn into_options(self) -> Value {
+		let mut entry = Object::new();
+		entry.insert("max_staleness", surrealdb_types::Duration::from(self.max_staleness));
+		entry.insert("strict", self.strict);
+		let mut options = Object::new();
+		options.insert("read_only", Value::Object(entry));
+		Value::Object(options)
+	}
+}
+
+/// A transaction an engine opened: its id and, for a read-only one, the
+/// description of the snapshot it reads (`position`, `age`, `stale`).
+#[derive(Debug, Clone)]
+pub struct OpenedTransaction {
+	pub id: Uuid,
+	pub snapshot: Option<Value>,
+}
+
+impl OpenedTransaction {
+	/// Reads the answer of a `begin` call: a bare transaction id, or an object
+	/// holding the id and the snapshot of a read-only transaction.
+	pub fn from_reply(reply: Value) -> Result<Self, Error> {
+		match reply {
+			Value::Uuid(id) => Ok(Self {
+				id: id.into_inner(),
+				snapshot: None,
+			}),
+			Value::Object(mut reply) => {
+				let Some(Value::Uuid(id)) = reply.remove("id") else {
+					return Err(Error::internal(
+						"Begin did not return a transaction id".to_string(),
+					));
+				};
+				Ok(Self {
+					id: id.into_inner(),
+					snapshot: reply.remove("snapshot"),
+				})
+			}
+			other => Err(Error::internal(format!("Begin returned an unexpected value: {other:?}"))),
+		}
+	}
+}
+
 /// The operations an engine can be asked to perform.
 #[derive(Debug, Clone)]
 pub enum Command {
@@ -154,8 +209,10 @@ pub enum Command {
 	},
 	/// Drop the session's authentication.
 	Invalidate,
-	/// Begin a manual transaction.
-	Begin,
+	/// Begin a manual transaction, read-only when `read_only` is set.
+	Begin {
+		read_only: Option<ReadOnlyBegin>,
+	},
 	/// Cancel a manual transaction.
 	Rollback {
 		/// The transaction to cancel.
@@ -451,8 +508,13 @@ pub trait SurrealEngine: Debug + Send + Sync + 'static {
 	// Transactions
 	// ------------------------------------------------------------------
 
-	/// Opens an explicit transaction, returning its id.
-	fn begin(&self, ctx: EngineContext) -> EngineFuture<'_, Uuid>;
+	/// Opens an explicit transaction, returning its id and, when `read_only` is
+	/// set, the snapshot it reads.
+	fn begin(
+		&self,
+		ctx: EngineContext,
+		read_only: Option<ReadOnlyBegin>,
+	) -> EngineFuture<'_, OpenedTransaction>;
 
 	/// Commits an explicit transaction.
 	fn commit(&self, ctx: EngineContext, txn: Uuid) -> EngineFuture<'_, ()>;
@@ -805,11 +867,33 @@ impl SurrealEngine for RouteChannelEngine {
 		Box::pin(self.unit(Command::Invalidate, ctx.session))
 	}
 
-	fn begin(&self, ctx: EngineContext) -> EngineFuture<'_, Uuid> {
+	fn begin(
+		&self,
+		ctx: EngineContext,
+		read_only: Option<ReadOnlyBegin>,
+	) -> EngineFuture<'_, OpenedTransaction> {
 		Box::pin(async move {
-			let value = self.value(Command::Begin, ctx.session).await?;
-			let uuid = value.into_uuid().map_err(|e| Error::internal(e.to_string()))?;
-			Ok(uuid.into_inner())
+			let reply = self
+				.value(
+					Command::Begin {
+						read_only,
+					},
+					ctx.session,
+				)
+				.await?;
+			let opened = OpenedTransaction::from_reply(reply)?;
+			// A server that predates the options ignores them and answers with
+			// a bare id for a writable transaction. A read-only transaction
+			// that is not one is released and refused, not handed back.
+			if read_only.is_some() && opened.snapshot.is_none() {
+				let _ = self.rollback(ctx, opened.id).await;
+				return Err(Error::validation(
+					"The server did not open a read-only transaction; it may not support read-only transactions"
+						.to_string(),
+					None,
+				));
+			}
+			Ok(opened)
 		})
 	}
 

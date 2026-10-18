@@ -17,7 +17,7 @@ value = "[{ id: item:one, value: 1 }]"
 value = "NONE"
 
 [[test.results]]
-value = "NONE"
+value = "{ age: 0ns, position: NONE, stale: false }"
 
 [[test.results]]
 value = "[1]"

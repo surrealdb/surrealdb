@@ -1429,7 +1429,11 @@ impl RpcProtocol for Websocket {
 		&self,
 		_txn: Option<Uuid>,
 		session_id: Uuid,
+		params: Array,
 	) -> Result<DbResult, surrealdb_types::Error> {
+		// Validated before the slot is reserved, so a malformed call never
+		// touches the counters.
+		let read_only = surrealdb_core::rpc::extract_begin_options(params)?;
 		// Reject a `begin` for a session that was never attached (the durable
 		// copy, if any, is consulted by `get_session`), matching every other
 		// handler's session guard. Without this a client could supply an endless
@@ -1471,8 +1475,14 @@ impl RpcProtocol for Websocket {
 		// encapsulates the pre-await + post-await + cancel-on-loss
 		// pattern; any future RPC method that needs to open its own
 		// transaction outside the executor SHOULD route through it.
-		let tx = match self.cancel_aware_transaction(TransactionType::Write).await {
-			Ok(tx) => tx,
+		let opened = match read_only {
+			Some(options) => self.cancel_aware_read_transaction(options).await,
+			None => {
+				self.cancel_aware_transaction(TransactionType::Write).await.map(|tx| (tx, None))
+			}
+		};
+		let (tx, snapshot) = match opened {
+			Ok(opened) => opened,
 			Err(e) => {
 				// Opening the transaction failed, so give the reserved slot back.
 				self.release_txn_slot(&session_id);
@@ -1508,8 +1518,18 @@ impl RpcProtocol for Websocket {
 			self.cleanup_txns_filtered(Some(&session_id)).await;
 			return Err(surrealdb_rpc::error::session_not_found(session_id));
 		}
-		// Return the transaction ID to the client
-		Ok(DbResult::Other(Value::Uuid(surrealdb::types::Uuid::from(id))))
+		// Return the transaction ID to the client. A read-only transaction also
+		// answers with the snapshot it reads.
+		let id = Value::Uuid(surrealdb::types::Uuid::from(id));
+		Ok(DbResult::Other(match snapshot {
+			None => id,
+			Some(snapshot) => {
+				let mut reply = surrealdb_types::Object::new();
+				reply.insert("id", id);
+				reply.insert("snapshot", snapshot);
+				Value::Object(reply)
+			}
+		}))
 	}
 
 	/// Commit a transaction
@@ -1534,8 +1554,14 @@ impl RpcProtocol for Websocket {
 		// The transaction is no longer open, so free its reserved slot.
 		self.release_txn_slot(&session_id);
 
-		// Commit the transaction
-		tx.commit().await.map_err(surrealdb_core::rpc::types_error_from_anyhow)?;
+		// Commit the transaction. A read-only transaction has nothing to commit;
+		// committing releases it.
+		let finished = if tx.writeable() {
+			tx.commit().await
+		} else {
+			tx.cancel().await
+		};
+		finished.map_err(surrealdb_core::rpc::types_error_from_anyhow)?;
 
 		// Return success
 		Ok(DbResult::Other(Value::None))
@@ -1671,6 +1697,33 @@ impl Websocket {
 			return Err(TypesError::internal(REQUEST_CANCELLED.to_string()));
 		}
 		Ok(tx)
+	}
+
+	/// [`Self::cancel_aware_transaction`] for a read-only transaction over a
+	/// snapshot no older than the options' bound, with the description of the
+	/// snapshot it reads.
+	async fn cancel_aware_read_transaction(
+		&self,
+		options: surrealdb_core::kvs::ReadOnlyOptions,
+	) -> Result<(Transaction, Option<Value>), surrealdb_types::Error> {
+		if self.cancel.is_cancelled() {
+			return Err(TypesError::internal(REQUEST_CANCELLED.to_string()));
+		}
+		let (tx, info) = self
+			.kvs()
+			.read_transaction(surrealdb_core::kvs::ReadRequest {
+				max_staleness: options.max_staleness,
+				strict: options.strict,
+			})
+			.await
+			.map_err(surrealdb_core::rpc::types_error_from_anyhow)?;
+		if self.cancel.is_cancelled() {
+			if let Err(err) = tx.cancel().await {
+				error!("Error cancelling unused transaction after WebSocket cancel: {err}");
+			}
+			return Err(TypesError::internal(REQUEST_CANCELLED.to_string()));
+		}
+		Ok((tx, Some(surrealdb_core::kvs::snapshot_description(&info))))
 	}
 
 	/// Release one reserved open-transaction slot for a session, undoing the
@@ -3380,8 +3433,10 @@ mod tests {
 			// Open transactions up to the limit on the default session.
 			let mut first_id = None;
 			for _ in 0..limit {
-				let res =
-					rpc.begin(None, rpc.id).await.expect("begin under the limit should succeed");
+				let res = rpc
+					.begin(None, rpc.id, surrealdb_types::Array::new())
+					.await
+					.expect("begin under the limit should succeed");
 				if first_id.is_none() {
 					let DbResult::Other(Value::Uuid(id)) = res else {
 						panic!("begin should return a transaction uuid");
@@ -3395,8 +3450,10 @@ mod tests {
 				"every begin under the limit should be stored",
 			);
 			// The next begin must be rejected without opening a transaction.
-			let err =
-				rpc.begin(None, rpc.id).await.expect_err("begin over the limit should be rejected");
+			let err = rpc
+				.begin(None, rpc.id, surrealdb_types::Array::new())
+				.await
+				.expect_err("begin over the limit should be rejected");
 			assert!(
 				err.to_string().contains("Too many open transactions"),
 				"unexpected error: {err}",
@@ -3411,7 +3468,9 @@ mod tests {
 			let params = Array::from(vec![Value::Uuid(id)]);
 			rpc.cancel(None, rpc.id, params).await.expect("cancel should succeed");
 			assert_eq!(rpc.transactions.len(), limit - 1);
-			rpc.begin(None, rpc.id).await.expect("begin after a cancel frees a slot");
+			rpc.begin(None, rpc.id, surrealdb_types::Array::new())
+				.await
+				.expect("begin after a cancel frees a slot");
 			assert_eq!(rpc.transactions.len(), limit);
 			// Drain everything so no transaction is dropped uncommitted.
 			rpc.cleanup_all_txns().await;
@@ -3432,9 +3491,9 @@ mod tests {
 			let attached = Uuid::new_v4();
 			rpc.attach(attached).await.expect("attach a second session");
 			// Two transactions on the default session, one on an attached session.
-			rpc.begin(None, rpc.id).await.expect("default begin 1");
-			rpc.begin(None, rpc.id).await.expect("default begin 2");
-			rpc.begin(None, attached).await.expect("attached begin");
+			rpc.begin(None, rpc.id, surrealdb_types::Array::new()).await.expect("default begin 1");
+			rpc.begin(None, rpc.id, surrealdb_types::Array::new()).await.expect("default begin 2");
+			rpc.begin(None, attached, surrealdb_types::Array::new()).await.expect("attached begin");
 			assert_eq!(rpc.transactions.len(), 3);
 			// Clean up just the attached session.
 			rpc.cleanup_txns(&attached).await;
@@ -3467,7 +3526,7 @@ mod tests {
 			let rpc = ws_with_observer(None).await;
 			let unknown = Uuid::new_v4();
 			let err = rpc
-				.begin(None, unknown)
+				.begin(None, unknown, surrealdb_types::Array::new())
 				.await
 				.expect_err("begin on an unattached session should be rejected");
 			assert!(
@@ -3492,7 +3551,7 @@ mod tests {
 			let s = Uuid::new_v4();
 			rpc.attach(s).await.expect("attach a session");
 			// Open a transaction on the attached session: a counter entry appears.
-			let res = rpc.begin(None, s).await.expect("begin");
+			let res = rpc.begin(None, s, surrealdb_types::Array::new()).await.expect("begin");
 			let DbResult::Other(Value::Uuid(id)) = res else {
 				panic!("begin should return a transaction uuid");
 			};
@@ -3506,7 +3565,10 @@ mod tests {
 			);
 			// The default-session counter, by contrast, is retained across a
 			// begin/cancel cycle so the hot path does not churn its entry.
-			let res = rpc.begin(None, rpc.id).await.expect("default begin");
+			let res = rpc
+				.begin(None, rpc.id, surrealdb_types::Array::new())
+				.await
+				.expect("default begin");
 			let DbResult::Other(Value::Uuid(did)) = res else {
 				panic!("begin should return a transaction uuid");
 			};
@@ -3515,6 +3577,120 @@ mod tests {
 				rpc.counters.get(&rpc.id).map(|c| c.value().load(Ordering::Acquire)),
 				Some(0),
 			);
+		});
+	}
+
+	fn read_only_options(bound_secs: u64, strict: bool) -> Array {
+		let mut entry = surrealdb_types::Object::new();
+		entry.insert("max_staleness", surrealdb_types::Duration::from_secs(bound_secs));
+		entry.insert("strict", strict);
+		let mut options = surrealdb_types::Object::new();
+		options.insert("read_only", Value::Object(entry));
+		Array::from(vec![Value::Object(options)])
+	}
+
+	/// `begin` with a `read_only` options object opens a read-only
+	/// transaction and answers with its id and the snapshot it reads; a write
+	/// on it fails, and `commit` releases it without error.
+	#[test]
+	fn begin_with_read_only_options_opens_a_read_only_transaction() {
+		with_big_stack(|| async {
+			let rpc = ws_with_observer(None).await;
+			let res = rpc
+				.begin(None, rpc.id, read_only_options(5, true))
+				.await
+				.expect("a read-only begin");
+			let DbResult::Other(Value::Object(reply)) = res else {
+				panic!("a read-only begin answers with an object");
+			};
+			let Some(Value::Uuid(id)) = reply.get("id").cloned() else {
+				panic!("the reply names the transaction");
+			};
+			let Some(Value::Object(snapshot)) = reply.get("snapshot") else {
+				panic!("the reply describes the snapshot");
+			};
+			assert_eq!(snapshot.get("stale"), Some(&Value::Bool(false)));
+			assert_eq!(
+				rpc.counters.get(&rpc.id).map(|c| c.value().load(Ordering::Acquire)),
+				Some(1)
+			);
+
+			let tx = rpc.transactions.get(&id.into_inner()).expect("the transaction is open");
+			assert!(!tx.1.writeable());
+			drop(tx);
+
+			rpc.commit(None, rpc.id, Array::from(vec![Value::Uuid(id)]))
+				.await
+				.expect("committing a read-only transaction releases it");
+			assert!(rpc.transactions.is_empty());
+			assert_eq!(
+				rpc.counters.get(&rpc.id).map(|c| c.value().load(Ordering::Acquire)),
+				Some(0)
+			);
+		});
+	}
+
+	/// A `query` call whose options carry `read_only` answers as the query
+	/// wrapped in a read-only block would: the `BEGIN` result describes the
+	/// snapshot, the statements run, a write fails.
+	#[test]
+	fn query_with_read_only_options_runs_as_a_read_only_block() {
+		with_big_stack(|| async {
+			let rpc = ws_with_observer(None).await;
+			let results_of = |reply: DbResult| match reply {
+				DbResult::Query(results) => results,
+				DbResult::Encoded(encoded) => {
+					surrealdb_core::rpc::format::encoded::into_query_results(encoded)
+				}
+				_ => panic!("a query answers with its results"),
+			};
+			let session = Uuid::new_v4();
+			rpc.attach(session).await.expect("attach a session");
+			let run = |sql: &str| {
+				let mut params = vec![Value::String(sql.to_string()), Value::None];
+				params.push(read_only_options(5, false).into_vec().remove(0));
+				Array::from(params)
+			};
+			let results = results_of(
+				rpc.query(None, session, run("RETURN 1")).await.expect("a read-only query"),
+			);
+			assert_eq!(results.len(), 3, "BEGIN, the statement and COMMIT: {results:?}");
+			assert!(matches!(results[0].result, Ok(Value::Object(_))), "{:?}", results[0]);
+			assert_eq!(
+				results[1].result.as_ref().unwrap(),
+				&Value::Number(surrealdb_types::Number::Int(1))
+			);
+
+			let results = results_of(
+				rpc.query(None, session, run("DEFINE TABLE nope"))
+					.await
+					.expect("a read-only query"),
+			);
+			assert!(results.iter().any(|r| r.result.is_err()), "{results:?}");
+		});
+	}
+
+	/// A malformed options object is refused before a transaction slot is
+	/// reserved.
+	#[test]
+	fn begin_with_malformed_options_reserves_nothing() {
+		with_big_stack(|| async {
+			let rpc = ws_with_observer(None).await;
+			let mut entry = surrealdb_types::Object::new();
+			entry.insert("max_staleness", 5_i64);
+			let mut options = surrealdb_types::Object::new();
+			options.insert("read_only", Value::Object(entry));
+			for params in [
+				Array::from(vec![Value::Object(options)]),
+				Array::from(vec![Value::String("read_only".to_string())]),
+				Array::from(vec![Value::Object(surrealdb_types::Object::new()), Value::None]),
+			] {
+				rpc.begin(None, rpc.id, params).await.expect_err("malformed options are refused");
+			}
+			assert!(
+				rpc.counters.get(&rpc.id).is_none_or(|c| c.value().load(Ordering::Acquire) == 0)
+			);
+			assert!(rpc.transactions.is_empty());
 		});
 	}
 
@@ -3537,7 +3713,7 @@ mod tests {
 				let r1 = Arc::clone(&rpc);
 				let r2 = Arc::clone(&rpc);
 				let begin = tokio::spawn(async move {
-					let _ = r1.begin(None, s).await;
+					let _ = r1.begin(None, s, surrealdb_types::Array::new()).await;
 				});
 				let detach = tokio::spawn(async move {
 					let _ = r2.detach(s).await;

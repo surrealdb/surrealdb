@@ -41,9 +41,10 @@ async fn post_handler(
 	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	output: Option<TypedHeader<Accept>>,
-	Query(params): Query<BTreeMap<String, String>>,
+	Query(mut params): Query<BTreeMap<String, String>>,
 	sql: Bytes,
 ) -> Result<Output, ResponseError> {
+	let read_only = take_read_only(&mut params).map_err(|e| ResponseError(e.into()))?;
 	let vars = Variables::from(params);
 	// Get a database reference
 	let db = &state.datastore;
@@ -74,6 +75,7 @@ async fn post_handler(
 			&session,
 			Some(vars),
 			format,
+			read_only,
 		);
 		return match with_query_timeout(db.query_timeout(), run).await {
 			Ok(res) => {
@@ -90,7 +92,12 @@ async fn post_handler(
 			Err(err) => Err(ResponseError(err.into())),
 		};
 	}
-	match with_query_timeout(db.query_timeout(), db.execute(sql, &session, Some(vars))).await {
+	let run = db.run(
+		surrealdb_core::kvs::QueryRequest::new(sql, &session)
+			.with_variables(Some(vars))
+			.with_read_only(read_only),
+	);
+	match with_query_timeout(db.query_timeout(), run).await {
 		Ok(res) => match output.as_deref() {
 			// Internal serialization
 			Some(Accept::ApplicationFlatbuffers) => {
@@ -104,6 +111,58 @@ async fn post_handler(
 		// There was an error when executing the query
 		Err(err) => Err(ResponseError(err.into())),
 	}
+}
+
+/// The query-string parameter that asks for the request to run as one read-only
+/// block, and the bound it carries: `read_only_max_staleness=<duration>`.
+const READ_ONLY_MAX_STALENESS: &str = "read_only_max_staleness";
+/// The query-string parameter that makes the bound strict. See
+/// [`READ_ONLY_MAX_STALENESS`].
+const READ_ONLY_STRICT: &str = "read_only_strict";
+
+/// Takes the read-only parameters out of the query string, so they are not also
+/// bound as variables. The request then runs exactly as if its statements were
+/// wrapped in `BEGIN READ ONLY MAX STALENESS <duration> [STRICT]; …; COMMIT;`.
+/// `read_only_strict` without `read_only_max_staleness` is refused rather than
+/// ignored.
+fn take_read_only(
+	params: &mut BTreeMap<String, String>,
+) -> Result<Option<surrealdb_core::kvs::ReadOnlyOptions>, surrealdb_types::Error> {
+	let bound = params.remove(READ_ONLY_MAX_STALENESS);
+	let strict = params.remove(READ_ONLY_STRICT);
+	let Some(bound) = bound else {
+		return match strict {
+			Some(_) => Err(surrealdb_types::Error::validation(
+				format!("`{READ_ONLY_STRICT}` requires `{READ_ONLY_MAX_STALENESS}`"),
+				None,
+			)),
+			None => Ok(None),
+		};
+	};
+	let max_staleness = bound
+		.parse::<surrealdb_types::Duration>()
+		.map(std::time::Duration::from)
+		.map_err(|_| {
+		surrealdb_types::Error::validation(
+			format!("`{READ_ONLY_MAX_STALENESS}` must be a duration, got `{bound}`"),
+			None,
+		)
+	})?;
+	let strict = match strict.as_deref() {
+		None => false,
+		Some(v) if v.eq_ignore_ascii_case("true") || v == "1" => true,
+		Some(v) if v.eq_ignore_ascii_case("false") || v == "0" => false,
+		Some(v) => {
+			return Err(surrealdb_types::Error::validation(
+				format!("`{READ_ONLY_STRICT}` must be a boolean, got `{v}`"),
+				None,
+			));
+		}
+	};
+	Ok(Some(surrealdb_core::kvs::ReadOnlyOptions {
+		max_staleness,
+		strict,
+	}))
 }
 
 async fn get_handler(
@@ -160,6 +219,7 @@ async fn handle_socket(state: AppState, ws: WebSocket, session: Session) {
 				&session,
 				None,
 				RowFormat::Json,
+				None,
 			);
 			let _ = match with_query_timeout(db.query_timeout(), run).await {
 				// Write the JSON response around the encoded rows
@@ -184,6 +244,50 @@ async fn handle_socket(state: AppState, ws: WebSocket, session: Session) {
 				// There was an error when executing the query
 				Err(e) => tx.send(Message::Text(e.to_string().into())).await,
 			};
+		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::collections::BTreeMap;
+	use std::time::Duration;
+
+	use super::take_read_only;
+
+	fn params(entries: &[(&str, &str)]) -> BTreeMap<String, String> {
+		entries.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+	}
+
+	#[test]
+	fn the_read_only_parameters_are_taken_out_of_the_variables() {
+		let mut p = params(&[
+			("read_only_max_staleness", "5s"),
+			("read_only_strict", "true"),
+			("other", "1"),
+		]);
+		let read_only = take_read_only(&mut p).unwrap().unwrap();
+		assert_eq!(read_only.max_staleness, Duration::from_secs(5));
+		assert!(read_only.strict);
+		assert_eq!(p, params(&[("other", "1")]));
+
+		let mut p = params(&[("read_only_max_staleness", "250ms")]);
+		let read_only = take_read_only(&mut p).unwrap().unwrap();
+		assert_eq!(read_only.max_staleness, Duration::from_millis(250));
+		assert!(!read_only.strict);
+
+		let mut p = params(&[("other", "1")]);
+		assert!(take_read_only(&mut p).unwrap().is_none());
+	}
+
+	#[test]
+	fn a_malformed_read_only_parameter_is_refused() {
+		for p in [
+			params(&[("read_only_strict", "true")]),
+			params(&[("read_only_max_staleness", "soon")]),
+			params(&[("read_only_max_staleness", "5s"), ("read_only_strict", "maybe")]),
+		] {
+			assert!(take_read_only(&mut p.clone()).is_err(), "{p:?}");
 		}
 	}
 }

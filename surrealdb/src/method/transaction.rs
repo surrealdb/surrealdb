@@ -16,12 +16,20 @@ use crate::{Connection, Surreal};
 pub struct Transaction<C: Connection> {
 	pub(crate) id: Uuid,
 	pub(crate) client: Surreal<C>,
+	pub(crate) snapshot: Option<surrealdb_types::Value>,
 }
 
 impl<C> Transaction<C>
 where
 	C: Connection,
 {
+	/// For a read-only transaction, the snapshot it reads: an object holding
+	/// `position` (an opaque token, or `NONE`), `age` and `stale`. `None` for a
+	/// read-write transaction.
+	pub fn snapshot(&self) -> Option<&surrealdb_types::Value> {
+		self.snapshot.as_ref()
+	}
+
 	/// Commits this transaction, persisting the changes, and returns a
 	/// [`Commit`] future that yields the original [`Surreal`] client on
 	/// success.

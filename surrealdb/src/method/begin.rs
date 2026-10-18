@@ -1,4 +1,7 @@
 use std::future::IntoFuture;
+use std::time::Duration;
+
+use surrealdb_engine_api::ReadOnlyBegin;
 
 use crate::conn::ctx;
 use crate::method::{BoxFuture, Transaction};
@@ -13,6 +16,43 @@ use crate::{Connection, OnceLockExt, Result, Surreal};
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Begin<C: Connection> {
 	pub(super) client: Surreal<C>,
+	pub(super) read_only: Option<ReadOnlyBegin>,
+}
+
+impl<C: Connection> Begin<C> {
+	/// Opens a read-only transaction that reads the current state. Any write
+	/// on it fails.
+	pub fn read_only(mut self) -> Self {
+		self.read_only.get_or_insert(ReadOnlyBegin {
+			max_staleness: Duration::ZERO,
+			strict: false,
+		});
+		self
+	}
+
+	/// Opens a read-only transaction over a snapshot no older than `bound`.
+	///
+	/// A datastore with no stale tier reads the current state, which meets any
+	/// bound. See [`Self::strict`] for what happens when no snapshot does.
+	pub fn max_staleness(mut self, bound: Duration) -> Self {
+		let strict = self.read_only.is_some_and(|read_only| read_only.strict);
+		self.read_only = Some(ReadOnlyBegin {
+			max_staleness: bound,
+			strict,
+		});
+		self
+	}
+
+	/// Fails, instead of reading the current state, when no snapshot meets the
+	/// staleness bound. Implies a read-only transaction.
+	pub fn strict(mut self) -> Self {
+		let max_staleness = self.read_only.map_or(Duration::ZERO, |r| r.max_staleness);
+		self.read_only = Some(ReadOnlyBegin {
+			max_staleness,
+			strict: true,
+		});
+		self
+	}
 }
 
 impl<C> IntoFuture for Begin<C>
@@ -24,12 +64,14 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		let client = self.client;
+		let read_only = self.read_only;
 		Box::pin(async move {
 			let router = client.inner.router.extract()?;
-			let id = router.engine.begin(ctx(client.session_id)).await?;
+			let opened = router.engine.begin(ctx(client.session_id), read_only).await?;
 			Ok(Transaction {
-				id,
+				id: opened.id,
 				client,
+				snapshot: opened.snapshot,
 			})
 		})
 	}

@@ -693,7 +693,12 @@ impl RpcProtocol for Http {
 	// ------------------------------
 
 	/// Transactions are not supported on HTTP RPC context
-	async fn begin(&self, _txn: Option<Uuid>, _session_id: Uuid) -> Result<DbResult, TypesError> {
+	async fn begin(
+		&self,
+		_txn: Option<Uuid>,
+		_session_id: Uuid,
+		_params: Array,
+	) -> Result<DbResult, TypesError> {
 		Err(method_not_found(Method::Begin.to_string()))
 	}
 

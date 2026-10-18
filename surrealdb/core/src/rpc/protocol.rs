@@ -29,7 +29,7 @@ use crate::expr::statements::{
 use crate::expr::{
 	Data as SqlData, Expr, ExtPrefix, Fields, Function, FunctionCall, Literal, Model, Output,
 };
-use crate::kvs::{Datastore, Dialect, QueryRequest, QuerySource, TransactionType};
+use crate::kvs::{Datastore, Dialect, QueryRequest, QuerySource, ReadOnlyOptions, TransactionType};
 use crate::observe::{
 	AuthAction, AuthEvent, AuthEventSafe, AuthScope, Outcome, RpcEvent, RpcEventSafe,
 	TenantIdentity,
@@ -533,7 +533,7 @@ pub trait RpcProtocol {
 				Method::Gql => self.gql(txn, session, params).await,
 				Method::Graphql => self.graphql(txn, session, params).await,
 				Method::Version => self.version(txn, params).await,
-				Method::Begin => self.begin(txn, session).await,
+				Method::Begin => self.begin(txn, session, params).await,
 				Method::Commit => self.commit(txn, session, params).await,
 				Method::Cancel => self.cancel(txn, session, params).await,
 				Method::Sessions => self.sessions().await,
@@ -1952,7 +1952,7 @@ pub trait RpcProtocol {
 			return Err(method_not_allowed(Method::Query.to_string()));
 		}
 		// Process the method arguments
-		let (query, vars) = extract_query_params(params, &session)?;
+		let (query, vars, read_only) = extract_query_params(params, &session)?;
 
 		if let Some(format) = self.row_format() {
 			return Ok(DbResult::Encoded(
@@ -1964,6 +1964,7 @@ pub trait RpcProtocol {
 					QueryForm::Text(&query, Dialect::SurrealQl),
 					vars,
 					format,
+					read_only,
 				)
 				.await
 				.map_err(types_error_from_anyhow)?,
@@ -1971,13 +1972,14 @@ pub trait RpcProtocol {
 		}
 
 		Ok(DbResult::Query(
-			run_query(
+			run_query_as(
 				self,
 				txn,
 				session_id,
 				&session,
 				QueryForm::Text(&query, Dialect::SurrealQl),
 				vars,
+				read_only,
 			)
 			.await
 			.map_err(types_error_from_anyhow)?,
@@ -2040,7 +2042,7 @@ pub trait RpcProtocol {
 		// execution runs against the session as it was when the query started,
 		// which is what the buffered path effectively gives it too — there, a
 		// concurrent mutation simply waits instead.
-		let (query, vars, session, principal) = {
+		let (query, vars, read_only, session, principal) = {
 			let session_lock = self.get_session(&session_id).await?;
 			let session = session_lock.read().await;
 			// Check if the user is allowed to query
@@ -2050,12 +2052,12 @@ pub trait RpcProtocol {
 			if !Self::LQ_SUPPORT && session.rt {
 				return Err(bad_lq_config());
 			}
-			let (query, vars) = extract_query_params(params, &session)?;
+			let (query, vars, read_only) = extract_query_params(params, &session)?;
 			// Captured under the same guard as everything else the execution
 			// needs, so it names the principal the query actually runs as rather
 			// than whoever the session belongs to by the time it finishes.
 			let principal = AuthPrincipalSnapshot::capture(&session);
-			(query, vars, session.clone(), principal)
+			(query, vars, read_only, session.clone(), principal)
 		};
 
 		// Kept so the wall-clock guard below can stop the execution
@@ -2075,7 +2077,8 @@ pub trait RpcProtocol {
 				.with_variables(vars)
 				.with_optional_transaction(transaction)
 				.with_optional_cancel(cancel)
-				.with_row_format(self.row_format()),
+				.with_row_format(self.row_format())
+				.with_read_only(read_only),
 			items,
 		)?;
 
@@ -2549,11 +2552,17 @@ pub trait RpcProtocol {
 	// Methods for transactions
 	// ------------------------------
 
-	/// Begin a new transaction
+	/// Begin a new transaction.
+	///
+	/// `params` is empty or holds one options object, as for a query call's
+	/// options: `{ read_only: { max_staleness, strict } }` opens a read-only
+	/// transaction over a snapshot no older than the bound. See
+	/// [`extract_begin_options`].
 	async fn begin(
 		&self,
 		_txn: Option<Uuid>,
 		_session_id: Uuid,
+		_params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		Err(method_not_allowed(Method::Begin.to_string()))
 	}
@@ -2595,9 +2604,13 @@ enum QueryForm<'a> {
 fn extract_query_params(
 	params: PublicArray,
 	session: &Session,
-) -> Result<(String, Option<PublicVariables>), surrealdb_types::Error> {
-	let (query, vars) = extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
-		.ok_or(invalid_params("Expected (query:string, vars:object)".to_string()))?;
+) -> Result<(String, Option<PublicVariables>, Option<ReadOnlyOptions>), surrealdb_types::Error> {
+	let (query, vars, options) =
+		extract_args::<(PublicValue, Option<PublicValue>, Option<PublicValue>)>(params.into_vec())
+			.ok_or(invalid_params(
+				"Expected (query:string, vars:object, options:object)".to_string(),
+			))?;
+	let read_only = extract_read_only(options)?;
 
 	let PublicValue::String(query) = query else {
 		return Err(invalid_params("Expected query to be string".to_string()));
@@ -2616,7 +2629,86 @@ fn extract_query_params(
 		}
 	};
 
-	Ok((query, vars))
+	Ok((query, vars, read_only))
+}
+
+/// The options of a `begin` call: nothing, or one options object holding
+/// `read_only`. See [`extract_read_only`].
+pub fn extract_begin_options(
+	params: PublicArray,
+) -> Result<Option<ReadOnlyOptions>, surrealdb_types::Error> {
+	let mut params = params.into_vec().into_iter();
+	let options = params.next();
+	if params.next().is_some() {
+		return Err(invalid_params("Expected (options:object)".to_string()));
+	}
+	extract_read_only(options)
+}
+
+/// The `read_only` entry of a query call's options object.
+///
+/// `{ read_only: { max_staleness: <duration>, strict: <bool> } }` asks for the
+/// query to run as one read-only block, exactly as if its statements were
+/// wrapped in `BEGIN READ ONLY MAX STALENESS <duration> [STRICT]; …; COMMIT;`.
+/// A missing or null options object, or one without `read_only`, asks for
+/// nothing. Unknown entries are refused rather than ignored, so a misspelt
+/// option is never silently dropped.
+fn extract_read_only(
+	options: Option<PublicValue>,
+) -> Result<Option<ReadOnlyOptions>, surrealdb_types::Error> {
+	let object = match options {
+		None | Some(PublicValue::None | PublicValue::Null) => return Ok(None),
+		Some(PublicValue::Object(object)) => object,
+		Some(other) => {
+			return Err(invalid_params(format!("Expected options to be object, got {other:?}")));
+		}
+	};
+	let mut read_only = None;
+	for (key, value) in object.iter() {
+		match (key.as_str(), value) {
+			("read_only", PublicValue::None | PublicValue::Null) => {}
+			("read_only", PublicValue::Object(entry)) => {
+				let mut max_staleness = None;
+				let mut strict = false;
+				for (key, value) in entry.iter() {
+					match (key.as_str(), value) {
+						("max_staleness", PublicValue::Duration(bound)) => {
+							max_staleness = Some(std::time::Duration::from(*bound));
+						}
+						("max_staleness", other) => {
+							return Err(invalid_params(format!(
+								"Expected max_staleness to be a duration, got {other:?}"
+							)));
+						}
+						("strict", PublicValue::Bool(flag)) => strict = *flag,
+						("strict", other) => {
+							return Err(invalid_params(format!(
+								"Expected strict to be a bool, got {other:?}"
+							)));
+						}
+						(other, _) => {
+							return Err(invalid_params(format!(
+								"Unknown read_only option `{other}`"
+							)));
+						}
+					}
+				}
+				read_only = Some(ReadOnlyOptions {
+					max_staleness: max_staleness.unwrap_or(std::time::Duration::ZERO),
+					strict,
+				});
+			}
+			("read_only", other) => {
+				return Err(invalid_params(format!(
+					"Expected read_only to be object, got {other:?}"
+				)));
+			}
+			(other, _) => {
+				return Err(invalid_params(format!("Unknown query option `{other}`")));
+			}
+		}
+	}
+	Ok(read_only)
 }
 
 /// Runs a query against a session the caller already holds a read guard on.
@@ -2636,6 +2728,23 @@ async fn run_query<T>(
 	session: &Session,
 	query: QueryForm<'_>,
 	vars: Option<PublicVariables>,
+) -> Result<Vec<QueryResult>>
+where
+	T: RpcProtocol + ?Sized,
+{
+	run_query_as(this, txn, session_id, session, query, vars, None).await
+}
+
+/// [`run_query`] for a query that may run as one read-only block. See
+/// [`ReadOnlyOptions`].
+async fn run_query_as<T>(
+	this: &T,
+	txn: Option<Uuid>,
+	session_id: Uuid,
+	session: &Session,
+	query: QueryForm<'_>,
+	vars: Option<PublicVariables>,
+	read_only: Option<ReadOnlyOptions>,
 ) -> Result<Vec<QueryResult>>
 where
 	T: RpcProtocol + ?Sized,
@@ -2662,7 +2771,8 @@ where
 			QueryRequest::new(source, session)
 				.with_variables(vars)
 				.with_optional_transaction(transaction)
-				.with_optional_cancel(cancel),
+				.with_optional_cancel(cancel)
+				.with_read_only(read_only),
 		)
 		.await?;
 
@@ -2713,6 +2823,7 @@ pub async fn with_response_format<F: std::future::Future>(
 /// built for any row. See
 /// [`collect_encoded`](crate::rpc::format::encoded::collect_encoded) for how
 /// the execution is stopped if this future is dropped.
+#[expect(clippy::too_many_arguments, reason = "each argument is a distinct input of the call")]
 async fn run_query_encoded<T>(
 	this: &T,
 	txn: Option<Uuid>,
@@ -2721,6 +2832,7 @@ async fn run_query_encoded<T>(
 	query: QueryForm<'_>,
 	vars: Option<PublicVariables>,
 	format: surrealdb_rpc::RowFormat,
+	read_only: Option<ReadOnlyOptions>,
 ) -> Result<Vec<surrealdb_rpc::EncodedQueryResult>>
 where
 	T: RpcProtocol + ?Sized,
@@ -2738,7 +2850,8 @@ where
 	};
 	let request = QueryRequest::new(source, session)
 		.with_variables(vars)
-		.with_optional_transaction(transaction);
+		.with_optional_transaction(transaction)
+		.with_read_only(read_only);
 	let kvs = this.kvs_arc();
 	let (res, encoded) =
 		crate::rpc::format::encoded::collect_encoded(&kvs, request, this.cancel_handle(), format)
@@ -3422,5 +3535,88 @@ mod tests {
 		rpc.execute(None, sid, Some(sid), Method::Detach, PublicArray::new()).await.unwrap();
 		assert!(rpc.durable.lock().unwrap().is_empty());
 		assert!(!rpc.session_map().contains_key(&sid));
+	}
+}
+
+#[cfg(test)]
+mod read_only_option_tests {
+	use std::time::Duration;
+
+	use surrealdb_types::{Array, Object, Value};
+
+	use super::*;
+
+	fn options(entry: Object) -> Value {
+		let mut options = Object::new();
+		options.insert("read_only", Value::Object(entry));
+		Value::Object(options)
+	}
+
+	fn entry(bound: Option<Value>, strict: Option<Value>) -> Object {
+		let mut entry = Object::new();
+		if let Some(bound) = bound {
+			entry.insert("max_staleness", bound);
+		}
+		if let Some(strict) = strict {
+			entry.insert("strict", strict);
+		}
+		entry
+	}
+
+	#[test]
+	fn a_read_only_option_asks_for_a_bounded_read_block() {
+		let bound = Value::Duration(surrealdb_types::Duration::from_secs(5));
+		let read_only =
+			extract_read_only(Some(options(entry(Some(bound.clone()), Some(Value::Bool(true))))))
+				.unwrap()
+				.unwrap();
+		assert_eq!(read_only.max_staleness, Duration::from_secs(5));
+		assert!(read_only.strict);
+
+		let read_only =
+			extract_read_only(Some(options(entry(Some(bound), None)))).unwrap().unwrap();
+		assert!(!read_only.strict);
+	}
+
+	#[test]
+	fn a_read_only_option_without_a_bound_reads_the_current_state() {
+		let read_only = extract_read_only(Some(options(entry(None, None)))).unwrap().unwrap();
+		assert_eq!(read_only.max_staleness, Duration::ZERO);
+		assert!(!read_only.strict);
+	}
+
+	#[test]
+	fn no_options_ask_for_nothing() {
+		assert!(extract_read_only(None).unwrap().is_none());
+		assert!(extract_read_only(Some(Value::None)).unwrap().is_none());
+		assert!(extract_read_only(Some(Value::Object(Object::new()))).unwrap().is_none());
+	}
+
+	#[test]
+	fn a_malformed_read_only_option_is_refused() {
+		let bound = Value::Duration(surrealdb_types::Duration::from_secs(5));
+		let mut misspelt = Object::new();
+		misspelt.insert("readonly", Value::Object(entry(Some(bound.clone()), None)));
+		for options in [
+			Some(Value::Bool(true)),
+			Some(options(entry(Some(Value::Bool(true)), None))),
+			Some({
+				let mut unknown = entry(Some(bound), None);
+				unknown.insert("stict", true);
+				options(unknown)
+			}),
+			Some(Value::Object(misspelt)),
+		] {
+			assert!(extract_read_only(options.clone()).is_err(), "{options:?}");
+		}
+	}
+
+	#[test]
+	fn begin_takes_at_most_one_options_object() {
+		assert!(extract_begin_options(Array::new()).unwrap().is_none());
+		assert!(
+			extract_begin_options(Array::from(vec![Value::Object(Object::new()), Value::None]))
+				.is_err()
+		);
 	}
 }

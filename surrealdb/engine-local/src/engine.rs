@@ -18,10 +18,12 @@ use surrealdb_core::dbs::{AuthPrincipalSnapshot, Session};
 use surrealdb_core::iam;
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_core::iam::check::check_ns_db;
-use surrealdb_core::kvs::{Datastore, QueryRequest};
+use surrealdb_core::kvs::{Datastore, QueryRequest, ReadRequest, snapshot_description};
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_engine_api::MlExportConfig;
-use surrealdb_engine_api::{EngineContext, EngineFuture, SurrealEngine, single_result};
+use surrealdb_engine_api::{
+	EngineContext, EngineFuture, OpenedTransaction, ReadOnlyBegin, SurrealEngine, single_result,
+};
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_iam::{Action, ResourceKind};
 use surrealdb_kvs::TransactionType;
@@ -640,17 +642,40 @@ impl SurrealEngine for LocalEngine {
 		})
 	}
 
-	fn begin(&self, ctx: EngineContext) -> EngineFuture<'_, Uuid> {
+	fn begin(
+		&self,
+		ctx: EngineContext,
+		read_only: Option<ReadOnlyBegin>,
+	) -> EngineFuture<'_, OpenedTransaction> {
 		Box::pin(async move {
 			let state = self.state(ctx).await?;
-			let txn = self
-				.kvs
-				.transaction(TransactionType::Write)
-				.await
-				.map_err(|error| Error::internal(error.to_string()))?;
+			let (txn, snapshot) = match read_only {
+				None => {
+					let txn = self
+						.kvs
+						.transaction(TransactionType::Write)
+						.await
+						.map_err(|error| Error::internal(error.to_string()))?;
+					(txn, None)
+				}
+				Some(read_only) => {
+					let (txn, info) = self
+						.kvs
+						.read_transaction(ReadRequest {
+							max_staleness: read_only.max_staleness,
+							strict: read_only.strict,
+						})
+						.await
+						.map_err(std_error_to_types_error)?;
+					(txn, Some(snapshot_description(&info)))
+				}
+			};
 			let id = Uuid::now_v7();
 			state.transactions.insert(id, Arc::new(txn));
-			Ok(id)
+			Ok(OpenedTransaction {
+				id,
+				snapshot,
+			})
 		})
 	}
 
@@ -667,7 +692,13 @@ impl SurrealEngine for LocalEngine {
 			// Removing is what claims the transaction, so two concurrent calls
 			// naming the same one cannot both go on to finalise it.
 			let tx = state.transactions.take(&txn).ok_or_else(transaction_not_found)?;
-			tx.commit().await.map_err(std_error_to_types_error)?;
+			// A read-only transaction has nothing to commit; committing releases it.
+			let finished = if tx.writeable() {
+				tx.commit().await
+			} else {
+				tx.cancel().await
+			};
+			finished.map_err(std_error_to_types_error)?;
 			Ok(())
 		})
 	}

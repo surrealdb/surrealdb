@@ -1951,6 +1951,40 @@ pub async fn client_side_transactions(new_db: impl CreateDb) {
 	drop(permit);
 }
 
+/// A read-only transaction reads, rejects writes, commits without error, and
+/// describes the snapshot it reads.
+#[cfg(not(feature = "protocol-http"))]
+pub async fn client_side_read_only_transactions(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+	db.query("CREATE item:one SET value = 1").await.unwrap().check().unwrap();
+
+	let txn = db.begin().max_staleness(std::time::Duration::from_secs(5)).strict().await.unwrap();
+	let snapshot = txn.snapshot().cloned().expect("a read-only transaction describes its snapshot");
+	let surrealdb_types::Value::Object(snapshot) = snapshot else {
+		panic!("the snapshot is an object");
+	};
+	assert_eq!(snapshot.get("stale"), Some(&surrealdb_types::Value::Bool(false)));
+	let rows: Vec<Value> = txn.select("item").await.unwrap();
+	assert_eq!(rows.len(), 1);
+	assert!(txn.create::<Option<Value>>("item").await.is_err());
+	let db = txn.commit().await.unwrap();
+
+	// Nothing was written, and a plain transaction still has no snapshot.
+	let rows: Vec<Value> = db.select("item").await.unwrap();
+	assert_eq!(rows.len(), 1);
+	let txn = db.begin().await.unwrap();
+	assert!(txn.snapshot().is_none());
+	let db = txn.cancel().await.unwrap();
+
+	let txn = db.begin().read_only().await.unwrap();
+	assert!(txn.snapshot().is_some());
+	txn.cancel().await.unwrap();
+
+	drop(permit);
+}
+
 /// A query abandoned part-way through cannot leave work a later commit would
 /// persist.
 ///
@@ -2004,6 +2038,11 @@ pub async fn an_abandoned_query_cannot_be_committed(_new_db: impl CreateDb) {
 
 #[cfg(feature = "protocol-http")]
 pub async fn client_side_transactions(_new_db: impl CreateDb) {
+	// Client-side transactions are not supported on HTTP
+}
+
+#[cfg(feature = "protocol-http")]
+pub async fn client_side_read_only_transactions(_new_db: impl CreateDb) {
 	// Client-side transactions are not supported on HTTP
 }
 
@@ -2268,6 +2307,8 @@ define_include_tests!(basic => {
 	field_and_index_methods,
 	#[test_log::test(tokio::test)]
 	client_side_transactions,
+	#[test_log::test(tokio::test)]
+	client_side_read_only_transactions,
 	#[test_log::test(tokio::test)]
 	an_abandoned_query_cannot_be_committed,
 	#[test_log::test(tokio::test)]

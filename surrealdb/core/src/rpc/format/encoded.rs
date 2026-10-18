@@ -525,8 +525,10 @@ pub async fn execute_encoded(
 	session: &crate::dbs::Session,
 	vars: Option<surrealdb_types::Variables>,
 	format: RowFormat,
+	read_only: Option<crate::kvs::ReadOnlyOptions>,
 ) -> Result<Vec<EncodedQueryResult>, TypesError> {
-	let request = crate::kvs::QueryRequest::new(sql, session).with_variables(vars);
+	let request =
+		crate::kvs::QueryRequest::new(sql, session).with_variables(vars).with_read_only(read_only);
 	Ok(collect_encoded(ds, request, None, format).await?.1)
 }
 
@@ -875,7 +877,7 @@ mod tests {
 		ds.execute("DEFINE TABLE e", &session, None).await.expect("defines the table");
 		let alive = || tokio::runtime::Handle::current().metrics().num_alive_tasks();
 		let before = alive();
-		let run = super::execute_encoded(&ds, ENDLESS, &session, None, RowFormat::Cbor);
+		let run = super::execute_encoded(&ds, ENDLESS, &session, None, RowFormat::Cbor, None);
 		let dropped = tokio::time::timeout(Duration::from_millis(200), run).await;
 		assert!(dropped.is_err(), "the query was still running when it was dropped");
 		let stopped = async {

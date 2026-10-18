@@ -63,7 +63,7 @@ use crate::dbs::capabilities::{
 use crate::dbs::executor::CarryBound;
 use crate::dbs::node::{Node, NodeRelease, Timestamp};
 use crate::dbs::{
-	Capabilities, DurableSession, Executor, MessageBroker, Options, QueryResult,
+	Capabilities, Dispatch, DurableSession, Executor, MessageBroker, Options, QueryResult,
 	QueryResultBuilder, QueryStreamItem, QueryStreamJob, Session, TopLevelStatement,
 	durable_session, restore_session,
 };
@@ -116,7 +116,7 @@ use crate::kvs::index::materialise::{
 #[cfg(all(test, feature = "kv-rocksdb"))]
 use crate::kvs::index::materialise::{CompactionWriteGuard, compaction_write_guard};
 use crate::kvs::paging::{PageCompanion, PagedDelete, PagedOutcome};
-use crate::kvs::request::{Dialect, QueryRequest, QuerySource};
+use crate::kvs::request::{Dialect, QueryRequest, QuerySource, ReadOnlyOptions};
 use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
 use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
@@ -6809,9 +6809,10 @@ impl Datastore {
 			transaction,
 			cancel,
 			row_format: _,
+			read_only,
 			held_transactions: _,
 		} = req;
-		let statements = self.statements_for(source)?;
+		let statements = self.request_statements(source, read_only, transaction.is_some())?;
 		let (opt, ctx) = self.setup_query(session, variables, transaction.as_ref(), cancel)?;
 		match transaction {
 			Some(_) => {
@@ -6854,6 +6855,7 @@ impl Datastore {
 			transaction,
 			cancel,
 			row_format: _,
+			read_only: _,
 			held_transactions: _,
 		} = req;
 		if transaction.is_some() {
@@ -6902,9 +6904,10 @@ impl Datastore {
 			transaction,
 			cancel,
 			row_format,
+			read_only,
 			held_transactions,
 		} = req;
-		let statements = self.statements_for(source)?;
+		let statements = self.request_statements(source, read_only, transaction.is_some())?;
 		let (opt, ctx) = self.setup_query(session, variables, transaction.as_ref(), cancel)?;
 		let in_transaction = transaction.is_some();
 		// The count is known now because parsing is done, which is what lets a
@@ -6934,6 +6937,49 @@ impl Datastore {
 				executed.map_err(crate::err::anyhow_to_types_error)
 			}),
 		})
+	}
+
+	/// The statements of a request: those of its source, wrapped in a read-only
+	/// block when the request asks for one. See [`ReadOnlyOptions`].
+	fn request_statements(
+		&self,
+		source: QuerySource<'_>,
+		read_only: Option<ReadOnlyOptions>,
+		in_caller_transaction: bool,
+	) -> std::result::Result<Vec<TopLevelStatement>, TypesError> {
+		let statements = self.statements_for(source)?;
+		let Some(read_only) = read_only else {
+			return Ok(statements);
+		};
+		if in_caller_transaction {
+			return Err(TypesError::validation(
+				"A read-only request cannot run inside a caller-owned transaction".to_string(),
+				None,
+			));
+		}
+		// The wrapping block ends at the first transaction-control statement, so
+		// any later statement would run outside it, as a write. A request that
+		// asks for a read-only block therefore carries none of its own.
+		if statements.iter().any(|statement| {
+			matches!(statement.dispatch(), Dispatch::Begin(_) | Dispatch::Commit | Dispatch::Cancel)
+		}) {
+			return Err(TypesError::validation(
+				"A read-only request cannot contain BEGIN, COMMIT or CANCEL statements".to_string(),
+				None,
+			));
+		}
+		use surrealdb_expr::parser::{BeginOptions, ReadOnly, Staleness, TopLevelExpr};
+		let begin = TopLevelExpr::Begin(BeginOptions {
+			read_only: Some(ReadOnly {
+				max_staleness: Some(Staleness::Duration(read_only.max_staleness)),
+				strict: read_only.strict,
+			}),
+		});
+		let mut wrapped = Vec::with_capacity(statements.len() + 2);
+		wrapped.push(TopLevelStatement::Ast(begin));
+		wrapped.extend(statements);
+		wrapped.push(TopLevelStatement::Ast(TopLevelExpr::Commit));
+		Ok(wrapped)
 	}
 
 	/// Split a [`QuerySource`] into the statements the executor runs.

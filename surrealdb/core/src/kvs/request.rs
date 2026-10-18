@@ -128,6 +128,42 @@ impl<'src> From<&'src str> for QuerySource<'src> {
 	}
 }
 
+/// A request to run every statement of a query in one read-only transaction
+/// over a snapshot no older than `max_staleness`.
+///
+/// Exactly the statements wrapped as
+/// `BEGIN READ ONLY MAX STALENESS <max_staleness> [STRICT]; …; COMMIT;`, so the
+/// results are those of the wrapped query, the `BEGIN` result (which carries
+/// the snapshot description) and the `COMMIT` result included. The bound is
+/// applied as the options of the wrapping block and never spliced into the
+/// text, so anything keyed on the statement text is the same for every bound.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReadOnlyOptions {
+	pub max_staleness: std::time::Duration,
+	pub strict: bool,
+}
+
+/// What a read-only `BEGIN` answers: the snapshot its block reads.
+///
+/// `position` is the backend's opaque token as bytes, or `NONE` where the
+/// backend has no such notion; `age` is how old the snapshot was when the block
+/// opened; `stale` is whether it is older than the current state.
+pub fn snapshot_description(info: &surrealdb_kvs::SnapshotInfo) -> surrealdb_types::Value {
+	let mut object = surrealdb_types::Object::new();
+	object.insert(
+		"position",
+		match &info.position {
+			Some(position) => surrealdb_types::Value::Bytes(surrealdb_types::Bytes::from(
+				position.as_bytes().to_vec(),
+			)),
+			None => surrealdb_types::Value::None,
+		},
+	);
+	object.insert("age", surrealdb_types::Duration::from(info.age));
+	object.insert("stale", info.stale);
+	surrealdb_types::Value::Object(object)
+}
+
 /// A query and the execution conditions it runs under.
 ///
 /// Build one with [`QueryRequest::new`] and the `with_*` methods, or with a
@@ -171,6 +207,10 @@ pub struct QueryRequest<'a> {
 	/// the server builds no public value for them. `None` streams rows as
 	/// values. A buffered execution ignores it.
 	pub row_format: Option<surrealdb_rpc::RowFormat>,
+	/// Run the whole query as one read-only block. See [`ReadOnlyOptions`].
+	/// Refused together with a caller-owned transaction, which has its own
+	/// mode.
+	pub read_only: Option<ReadOnlyOptions>,
 	/// Whether each explicit `BEGIN … COMMIT` transaction's rows are held until
 	/// it resolves. Visible to the datastore only, so the public field set is
 	/// unchanged.
@@ -188,8 +228,15 @@ impl<'a> QueryRequest<'a> {
 			transaction: None,
 			cancel: None,
 			row_format: None,
+			read_only: None,
 			held_transactions: false,
 		}
+	}
+
+	/// Run the whole query as one read-only block. See [`Self::read_only`].
+	pub fn with_read_only(mut self, read_only: Option<ReadOnlyOptions>) -> Self {
+		self.read_only = read_only;
+		self
 	}
 
 	/// Bind variables for the duration of the query.

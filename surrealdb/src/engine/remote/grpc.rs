@@ -23,7 +23,8 @@ use std::time::Duration as StdDuration;
 
 use async_channel::Sender;
 use surrealdb_engine_api::{
-	DbExportConfig, EngineContext, EngineFuture, MlExportConfig, SurrealEngine,
+	DbExportConfig, EngineContext, EngineFuture, MlExportConfig, OpenedTransaction, ReadOnlyBegin,
+	SurrealEngine,
 };
 use surrealdb_protocol::proto::rpc::v1 as rpc;
 use surrealdb_protocol::proto::rpc::v1::surreal_db_service_client::SurrealDbServiceClient;
@@ -1253,8 +1254,18 @@ impl SurrealEngine for GrpcEngine {
 		})
 	}
 
-	fn begin(&self, ctx: EngineContext) -> EngineFuture<'_, Uuid> {
+	fn begin(
+		&self,
+		ctx: EngineContext,
+		read_only: Option<ReadOnlyBegin>,
+	) -> EngineFuture<'_, OpenedTransaction> {
 		Box::pin(async move {
+			if read_only.is_some() {
+				return Err(Error::validation(
+					"A read-only transaction cannot be opened over gRPC yet".to_string(),
+					None,
+				));
+			}
 			let context = self.ready(ctx).await?;
 			let response = self
 				.client()
@@ -1264,13 +1275,17 @@ impl SurrealEngine for GrpcEngine {
 				.await
 				.map_err(status_to_error)?
 				.into_inner();
-			response
+			let id = response
 				.transaction
 				.ok_or_else(|| {
 					Error::internal("Server did not return a transaction id".to_string())
 				})?
 				.to_uuid()
-				.map_err(|e| Error::internal(e.to_string()))
+				.map_err(|e| Error::internal(e.to_string()))?;
+			Ok(OpenedTransaction {
+				id,
+				snapshot: None,
+			})
 		})
 	}
 

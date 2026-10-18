@@ -242,10 +242,13 @@ impl RemoteCommand for Command {
 				txn: None,
 				session_id,
 			},
-			Command::Begin => RouterRequest {
+			Command::Begin {
+				read_only,
+			} => RouterRequest {
 				id,
 				method: "begin",
-				params: None,
+				params: read_only
+					.map(|read_only| Value::Array(Array::from(vec![read_only.into_options()]))),
 				txn: None,
 				session_id,
 			},

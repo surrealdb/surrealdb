@@ -121,3 +121,68 @@ async fn staleness_words_stay_usable_as_names() {
 		.unwrap();
 	assert!(!failed(&results), "{results:?}");
 }
+
+#[tokio::test]
+async fn a_read_only_begin_answers_with_the_snapshot_it_reads() {
+	let (ds, ses) = memory_ds().await;
+	let results = ds
+		.execute("BEGIN READ ONLY MAX STALENESS 5s; SELECT * FROM item; COMMIT;", &ses, None)
+		.await
+		.unwrap();
+	let Value::Object(snapshot) = results[0].result.as_ref().unwrap() else {
+		panic!("the BEGIN result describes the snapshot: {:?}", results[0]);
+	};
+	assert_eq!(snapshot.get("position"), Some(&Value::None));
+	assert_eq!(snapshot.get("stale"), Some(&Value::Bool(false)));
+	assert!(matches!(snapshot.get("age"), Some(Value::Duration(d)) if d.is_zero()));
+
+	// A plain BEGIN still answers NONE.
+	let results = ds.execute("BEGIN; RETURN 1; COMMIT;", &ses, None).await.unwrap();
+	assert_eq!(results[0].result.as_ref().unwrap(), &Value::None);
+}
+
+#[tokio::test]
+async fn a_read_only_request_is_the_query_wrapped_in_a_read_only_block() {
+	use crate::kvs::{QueryRequest, ReadOnlyOptions};
+
+	let (ds, ses) = memory_ds().await;
+	let options = ReadOnlyOptions {
+		max_staleness: std::time::Duration::from_secs(5),
+		strict: true,
+	};
+	let sugar = ds
+		.run(QueryRequest::new("SELECT * FROM item;", &ses).with_read_only(Some(options)))
+		.await
+		.unwrap();
+	let wrapped = ds
+		.execute("BEGIN READ ONLY MAX STALENESS 5s STRICT; SELECT * FROM item; COMMIT;", &ses, None)
+		.await
+		.unwrap();
+	let shape = |r: &[crate::dbs::QueryResult]| {
+		r.iter().map(|r| format!("{:?}", r.result)).collect::<Vec<_>>()
+	};
+	assert_eq!(shape(&sugar), shape(&wrapped));
+	assert_eq!(sugar.len(), 3);
+
+	let write = ds
+		.run(QueryRequest::new("CREATE item:two;", &ses).with_read_only(Some(options)))
+		.await
+		.unwrap();
+	assert!(failed(&write), "{write:?}");
+
+	// A transaction-control statement of its own would end the wrapping block
+	// and let the statements after it run outside it.
+	for sql in [
+		"BEGIN; RETURN 1; COMMIT;",
+		"RETURN 1; COMMIT; CREATE item:three;",
+		"RETURN 1; CANCEL; CREATE item:three;",
+	] {
+		let refused = ds
+			.run(QueryRequest::new(sql, &ses).with_read_only(Some(options)))
+			.await
+			.expect_err(sql);
+		assert!(refused.message().contains("cannot contain"), "{sql}: {refused:?}");
+	}
+	let after = ds.execute("SELECT VALUE id FROM item;", &ses, None).await.unwrap();
+	assert_eq!(after.last().unwrap().result.as_ref().unwrap().to_sql(), "[item:one]");
+}

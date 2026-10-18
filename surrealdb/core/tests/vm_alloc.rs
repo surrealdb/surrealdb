@@ -1017,8 +1017,9 @@ async fn respond(
 			encode_response(format, response).expect("encodes").len()
 		}
 		Path::Frames => {
-			let results =
-				execute_encoded(ds, sql, session, None, format).await.expect("the query runs");
+			let results = execute_encoded(ds, sql, session, None, format, None)
+				.await
+				.expect("the query runs");
 			let response = DbResponse::success(id, None, DbResult::Encoded(results));
 			encode_response(format, response).expect("encodes").len()
 		}

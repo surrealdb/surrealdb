@@ -48,7 +48,7 @@ pub use ds::{
 	TransactionBuilderParts,
 };
 pub(crate) use err::Error;
-pub use request::{Dialect, QueryRequest, QuerySource};
+pub use request::{Dialect, QueryRequest, QuerySource, ReadOnlyOptions, snapshot_description};
 pub use rollback::{
 	EntryFinding, GenerationFinding, LedgerFinding, RollbackCheck, RollbackVerdict,
 };

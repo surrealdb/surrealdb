@@ -14,7 +14,7 @@ value = "NONE"
 value = "[{ id: item:one, value: 1 }]"
 
 [[test.results]]
-value = "NONE"
+value = "{ age: 0ns, position: NONE, stale: false }"
 
 [[test.results]]
 error = "Invalid statement: Cannot run CREATE on a read only transaction"
@@ -23,7 +23,7 @@ error = "Invalid statement: Cannot run CREATE on a read only transaction"
 error = "Cannot COMMIT: the transaction was aborted due to a prior error"
 
 [[test.results]]
-value = "NONE"
+value = "{ age: 0ns, position: NONE, stale: false }"
 
 [[test.results]]
 error = "Invalid statement: Cannot run UPDATE on a read only transaction"
@@ -32,7 +32,7 @@ error = "Invalid statement: Cannot run UPDATE on a read only transaction"
 error = "Cannot COMMIT: the transaction was aborted due to a prior error"
 
 [[test.results]]
-value = "NONE"
+value = "{ age: 0ns, position: NONE, stale: false }"
 
 [[test.results]]
 error = "There was a problem with the key-value store: Couldn't write to a read only transaction"

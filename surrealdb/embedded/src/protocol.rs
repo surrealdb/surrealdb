@@ -138,16 +138,38 @@ impl RpcProtocol for EmbeddedEngine {
 	// responsible for cleaning it up, so an implementation here could only
 	// produce an untracked transaction that no cleanup path finds.
 
-	async fn begin(&self, _txn: Option<Uuid>, session_id: Uuid) -> TxResult<DbResult> {
+	async fn begin(
+		&self,
+		_txn: Option<Uuid>,
+		session_id: Uuid,
+		params: Array,
+	) -> TxResult<DbResult> {
+		let read_only = surrealdb_core::rpc::extract_begin_options(params)?;
 		// Reject a `begin` for a session that was never attached, so a caller
 		// cannot strand transactions under a session id nothing will ever clean
 		// up. The implicit default session is always registered.
 		self.get_session(&session_id).await?;
-		let tx = self
-			.kvs()
-			.transaction(TransactionType::Write)
-			.await
-			.map_err(types_error_from_anyhow)?;
+		let (tx, snapshot) = match read_only {
+			None => {
+				let tx = self
+					.kvs()
+					.transaction(TransactionType::Write)
+					.await
+					.map_err(types_error_from_anyhow)?;
+				(tx, None)
+			}
+			Some(options) => {
+				let (tx, info) = self
+					.kvs()
+					.read_transaction(surrealdb_core::kvs::ReadRequest {
+						max_staleness: options.max_staleness,
+						strict: options.strict,
+					})
+					.await
+					.map_err(types_error_from_anyhow)?;
+				(tx, Some(surrealdb_core::kvs::snapshot_description(&info)))
+			}
+		};
 		let id = Uuid::now_v7();
 		self.transactions.insert(id, (session_id, Arc::new(tx)));
 		// Close the begin/detach race: `del_session` removes the session from
@@ -159,7 +181,16 @@ impl RpcProtocol for EmbeddedEngine {
 			self.cleanup_txns(&session_id).await;
 			return Err(session_not_found(session_id));
 		}
-		Ok(DbResult::Other(Value::Uuid(surrealdb_types::Uuid::from(id))))
+		let id = Value::Uuid(surrealdb_types::Uuid::from(id));
+		Ok(DbResult::Other(match snapshot {
+			None => id,
+			Some(snapshot) => {
+				let mut reply = surrealdb_types::Object::new();
+				reply.insert("id", id);
+				reply.insert("snapshot", snapshot);
+				Value::Object(reply)
+			}
+		}))
 	}
 
 	async fn commit(
@@ -169,7 +200,13 @@ impl RpcProtocol for EmbeddedEngine {
 		params: Array,
 	) -> TxResult<DbResult> {
 		let (_, tx) = self.take_tx(params)?;
-		tx.commit().await.map_err(types_error_from_anyhow)?;
+		// A read-only transaction has nothing to commit; committing releases it.
+		let finished = if tx.writeable() {
+			tx.commit().await
+		} else {
+			tx.cancel().await
+		};
+		finished.map_err(types_error_from_anyhow)?;
 		Ok(DbResult::Other(Value::None))
 	}
 
