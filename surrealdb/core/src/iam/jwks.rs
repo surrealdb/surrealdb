@@ -218,6 +218,14 @@ pub(super) async fn config(
 	}
 }
 
+// Renders a failed fetch with its whole cause chain. The outermost error of a
+// failed request only names the URL; the cause is what tells an operator that
+// the network policy refused an address the host name resolved to, which an
+// allowed host name does not cover.
+fn describe_fetch_failure(err: &anyhow::Error) -> String {
+	format!("{err:#}")
+}
+
 // Checks if network access to a remote location is allowed by the datastore
 // capabilities Attempts to find a relevant JWK object inside a JWKS object
 // fetched from the remote location
@@ -244,7 +252,10 @@ async fn find_jwk_from_url(kvs: &Datastore, url: &str, kid: &str) -> Result<Jwk>
 			}
 		}
 		Err(err) => {
-			warn!("Failed to fetch JWKS object from remote location: '{}'", err);
+			warn!(
+				"Failed to fetch JWKS object from remote location: '{}'",
+				describe_fetch_failure(&err)
+			);
 			Err(anyhow::Error::new(AuthError::InvalidAuth)) // Return opaque error
 		}
 	}
@@ -556,6 +567,27 @@ mod tests {
 		)
 		.await;
 		assert!(res.is_err(), "Unexpected success validating token from unallowed remote location");
+	}
+
+	#[tokio::test]
+	async fn test_fetch_failure_names_a_refused_address() {
+		// The host name is allowed but the loopback address it resolves to is
+		// not, so the connection is refused by the resolver.
+		let ds = Datastore::builder()
+			.with_capabilities(Capabilities::default().with_network_targets(
+				Targets::<NetTarget>::Some([NetTarget::from_str("localhost").unwrap()].into()),
+			))
+			.build_with_path("memory")
+			.await
+			.unwrap();
+		let mock_server = MockServer::start().await;
+		let url = format!("http://localhost:{}/jwks.json", mock_server.address().port());
+		let err = fetch_jwks_from_url(&ds, &url).await.expect_err("the address is refused");
+		let described = describe_fetch_failure(&err);
+		assert!(
+			described.contains("Access to network target"),
+			"the cause of the refusal is part of the description, got: {described}"
+		);
 	}
 
 	#[tokio::test]
