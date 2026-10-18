@@ -183,7 +183,7 @@ fn generate_input_types(
 	fds: &[FieldDefinition],
 	is_relation: bool,
 	types: &mut Vec<Type>,
-) -> Result<(String, String, String), GraphqlError> {
+) -> Result<(String, Option<String>, String), GraphqlError> {
 	let cap_name = capitalize_first(tb_name);
 	let create_name = format!("Create{cap_name}Input");
 	let update_name = format!("Update{cap_name}Input");
@@ -209,6 +209,10 @@ fn generate_input_types(
 			.field(InputValue::new("in", TypeRef::named_nn(TypeRef::ID)))
 			.field(InputValue::new("out", TypeRef::named_nn(TypeRef::ID)));
 	}
+
+	// An input object type must define a field (GraphQL spec 3.10), and every
+	// update field comes from a declared field definition.
+	let mut update_has_fields = false;
 
 	// Add fields from field definitions
 	for fd in fds.iter() {
@@ -274,10 +278,14 @@ fn generate_input_types(
 			update_iv = update_iv.description(d);
 		}
 		update_input = update_input.field(update_iv);
+		update_has_fields = true;
 	}
 
 	types.push(Type::InputObject(create_input));
-	types.push(Type::InputObject(update_input));
+	let update_name = update_has_fields.then_some(update_name);
+	if update_has_fields {
+		types.push(Type::InputObject(update_input));
+	}
 	types.push(Type::InputObject(upsert_input));
 
 	Ok((create_name, update_name, upsert_name))
@@ -396,13 +404,17 @@ pub async fn process_mutations(
 
 		// --- Single-record mutations ---
 		mutation = add_create_field(mutation, &ctx, &create_input_name);
-		mutation = add_update_field(mutation, &ctx, &update_input_name);
+		if let Some(name) = &update_input_name {
+			mutation = add_update_field(mutation, &ctx, name);
+		}
 		mutation = add_upsert_field(mutation, &ctx, &upsert_input_name);
 		mutation = add_delete_field(mutation, &ctx);
 
 		// --- Bulk mutations ---
 		mutation = add_create_many_field(mutation, &ctx, &create_input_name);
-		mutation = add_update_many_field(mutation, &ctx, &update_input_name);
+		if let Some(name) = &update_input_name {
+			mutation = add_update_many_field(mutation, &ctx, name);
+		}
 		mutation = add_upsert_many_field(mutation, &ctx, &upsert_input_name);
 		mutation = add_delete_many_field(mutation, &ctx);
 	}

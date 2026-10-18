@@ -1,0 +1,21 @@
+/**
+[env]
+imports = ["reproductions/7457_import.surql"]
+
+[test]
+reason = "An input object type defines at least one field (GraphQL spec 3.10), so a schemaless table, which declares no field an update could set, has no UpdateThingInput with zero fields"
+issue = 7457
+
+[[test.results]]
+value = "{ __type: NULL }"
+
+*/
+{
+  __type(name: "UpdateThingInput") {
+    name
+    kind
+    inputFields {
+      name
+    }
+  }
+}
