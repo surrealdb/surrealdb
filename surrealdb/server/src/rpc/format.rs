@@ -53,6 +53,11 @@ fn encode_response(format: RowFormat, res: DbResponse) -> Result<Vec<u8>, TypesE
 pub trait WsFormat {
 	/// Process a WebSocket RPC request
 	fn req_ws(&self, msg: Message, recursion_limit: usize) -> Result<Request, TypesError>;
+	/// The `id` of a WebSocket RPC request that [`WsFormat::req_ws`] refused, so
+	/// that the refusal is answered to the call that caused it. A client matches
+	/// a response to its request by this `id`; one without it never settles the
+	/// pending call.
+	fn req_id_ws(&self, msg: &Message, recursion_limit: usize) -> Option<Value>;
 	/// Process a WebSocket RPC response
 	fn res_ws(&self, res: DbResponse) -> Result<(usize, Message), TypesError>;
 	/// The `query_stream` `rows` frame of statement `index`, carrying `rows`,
@@ -68,6 +73,19 @@ pub trait WsFormat {
 }
 
 impl WsFormat for Format {
+	fn req_id_ws(&self, msg: &Message, recursion_limit: usize) -> Option<Value> {
+		let data = match msg {
+			Message::Text(text) => text.as_bytes(),
+			Message::Binary(bytes) => bytes.as_ref(),
+			_ => return None,
+		};
+		match self {
+			Format::Json => surrealdb_core::rpc::format::json::request_id(data),
+			Format::Cbor => surrealdb_core::rpc::format::cbor::request_id(data, recursion_limit),
+			Format::Flatbuffers | Format::Unsupported => None,
+		}
+	}
+
 	/// Process a WebSocket RPC request
 	fn req_ws(&self, msg: Message, recursion_limit: usize) -> Result<Request, TypesError> {
 		let val = msg.into_data();

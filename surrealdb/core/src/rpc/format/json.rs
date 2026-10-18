@@ -29,6 +29,19 @@ pub fn decode(value: &[u8], limit: usize) -> anyhow::Result<PublicValue> {
 		.map_err(|err| anyhow::anyhow!(err.to_string()))
 }
 
+/// The `id` of a request envelope whose decoding failed, so that the failure
+/// can be answered to the call that caused it. `None` when the bytes are not a
+/// JSON object or carry no usable `id`.
+pub fn request_id(value: &[u8]) -> Option<PublicValue> {
+	let serde_json::Value::Object(mut envelope) = serde_json::from_slice(value).ok()? else {
+		return None;
+	};
+	match json_to_value(envelope.remove("id")?) {
+		id @ (PublicValue::Null | PublicValue::Number(_) | PublicValue::String(_)) => Some(id),
+		_ => None,
+	}
+}
+
 /// Converts a `serde_json::Value` into a `PublicValue`. Uses an RFC 8259
 /// compliant parser rather than the SurrealQL parser, which does not handle
 /// all valid JSON escape sequences (e.g. `\/` or surrogate pairs).

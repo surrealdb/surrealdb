@@ -877,6 +877,9 @@ impl Websocket {
 		// regression test below
 		// (`set_parent_before_instrument_attaches_remote_trace_id`)
 		// guards this ordering.
+		// Kept to name the request a refusal answers; a `Message` shares its
+		// payload when cloned.
+		let raw = msg.clone();
 		let parsed = rpc.format.req_ws(msg, rec_limit);
 		if let Ok(req) = &parsed {
 			// Now that we know the method, update the tracing span so
@@ -1023,13 +1026,11 @@ impl Websocket {
 					}
 				}
 				Err(err) => {
-					// Process the response
-					crate::rpc::response::send(
-						DbResponse::failure(None, None, err),
-						rpc.format,
-						chn,
-					)
-					.await;
+					// Answer the request that was refused, by its id, so the
+					// client can match the failure to the call that caused it.
+					let id = rpc.format.req_id_ws(&raw, rec_limit);
+					crate::rpc::response::send(DbResponse::failure(id, None, err), rpc.format, chn)
+						.await;
 				}
 			}
 		}
@@ -3850,6 +3851,26 @@ mod tests {
 			.and_then(|m| m["result"]["value"].as_str())
 			.unwrap_or_else(|| panic!("that statement carried its id: {frames:#?}"))
 			.to_owned()
+	}
+
+	/// A request the server refuses is answered under the request's own `id`. A
+	/// client matches responses to requests by it, so a refusal without one is
+	/// never delivered and the call that caused it waits forever.
+	#[test]
+	fn a_refused_request_is_answered_under_its_id() {
+		with_big_stack(|| async {
+			use surrealdb_rpc::capabilities::Capabilities;
+			let rpc = streaming_rpc(Capabilities::all()).await;
+			// Decodes, but is not a request the server accepts.
+			let messages = collect_messages(
+				&rpc,
+				serde_json::json!({ "id": "r1", "method": "query", "version": 99, "params": [] }),
+			)
+			.await;
+			assert_eq!(messages.len(), 1, "one answer: {messages:?}");
+			assert!(messages[0].get("error").is_some(), "a refusal: {}", messages[0]);
+			assert_eq!(messages[0]["id"], "r1", "the refusal names its request: {}", messages[0]);
+		})
 	}
 
 	/// The `query_stream` answer is the framed form of the buffered answer:
