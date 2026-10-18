@@ -205,6 +205,175 @@ impl Value {
 			},
 		}
 	}
+
+	/// Rebuild every set that holds a value [`Value::walk`] reaches along any
+	/// of `paths`, innermost first.
+	///
+	/// A write that replaces the values `walk` names, through the concrete
+	/// paths it answers with, leaves each set on the way holding its elements in
+	/// their old positions: two of them may now be equal, or out of order. A
+	/// [`Set`](crate::val::Set) must hold distinct elements in ascending order —
+	/// its encoding is decoded under that contract — so each set the traversal
+	/// passes through is rebuilt with [`Set::normalize`](crate::val::Set::normalize).
+	///
+	/// Rebuilding a set reorders its elements, which changes the element a
+	/// positional step into it (`[0]`, `[$]`, `[1]`) names. The sets are
+	/// therefore rebuilt one depth at a time, deepest first, across every path:
+	/// a set is rebuilt only once every set within it is, and before any set
+	/// holding it, so each step of every path still names the element it named
+	/// when the values were written.
+	///
+	/// The value a path ends at is not itself rebuilt: it was replaced whole,
+	/// not changed in place. The traversal is the one `walk` takes, arm for
+	/// arm — on an array or a set, a step that is not a position descends into
+	/// every element, as `walk` does — so the sets rebuilt are exactly those on
+	/// the way to the values `walk` returns.
+	pub fn normalize_sets_along(&mut self, paths: &[&[Part]]) {
+		let deepest = paths.iter().map(|path| path.len()).max().unwrap_or(0);
+		for depth in (0..deepest).rev() {
+			for path in paths {
+				self.normalize_sets_at(path, depth);
+			}
+		}
+	}
+
+	/// Rebuild the sets `depth` steps along `path` that a further step of
+	/// `path` descends into.
+	fn normalize_sets_at(&mut self, path: &[Part], depth: usize) {
+		let Some(p) = path.first() else {
+			return;
+		};
+		let Some(depth) = depth.checked_sub(1) else {
+			if let Value::Set(v) = self {
+				v.0.normalize();
+			}
+			return;
+		};
+		match self {
+			Value::Object(v) => match p {
+				Part::Field(f) => {
+					if let Some(v) = v.get_mut(f.as_str()) {
+						v.normalize_sets_at(path.next(), depth);
+					}
+				}
+				Part::All => {
+					for v in v.values_mut() {
+						v.normalize_sets_at(path.next(), depth);
+					}
+				}
+				x => {
+					if let Some(v) = x.as_old_index().and_then(|idx| v.get_mut(&idx.to_string())) {
+						v.normalize_sets_at(path.next(), depth);
+					}
+				}
+			},
+			Value::Array(v) => match p {
+				Part::First => {
+					if let Some(v) = v.first_mut() {
+						v.normalize_sets_at(path.next(), depth);
+					}
+				}
+				Part::Last => {
+					if let Some(v) = v.last_mut() {
+						v.normalize_sets_at(path.next(), depth);
+					}
+				}
+				x => match x.as_old_index() {
+					Some(idx) => {
+						if let Some(v) = v.get_mut(idx) {
+							v.normalize_sets_at(path.next(), depth);
+						}
+					}
+					None => {
+						for v in v.iter_mut() {
+							v.normalize_sets_at(path.next(), depth);
+						}
+					}
+				},
+			},
+			Value::Set(v) => match p {
+				Part::First => {
+					if let Some(v) = v.first_mut() {
+						v.normalize_sets_at(path.next(), depth);
+					}
+				}
+				Part::Last => {
+					if let Some(v) = v.last_mut() {
+						v.normalize_sets_at(path.next(), depth);
+					}
+				}
+				x => match x.as_old_index() {
+					Some(idx) => {
+						if let Some(v) = v.nth_mut(idx) {
+							v.normalize_sets_at(path.next(), depth);
+						}
+					}
+					None => {
+						for idx in 0..v.len() {
+							if let Some(v) = v.nth_mut(idx) {
+								v.normalize_sets_at(path.next(), depth);
+							}
+						}
+					}
+				},
+			},
+			// A value no path step descends into holds no set.
+			_ => {}
+		}
+	}
+
+	/// Rebuild every set within this value, at any depth, innermost first, so
+	/// that each holds distinct elements in ascending order.
+	pub fn normalize_all_sets(&mut self) {
+		match self {
+			Value::Object(v) => v.values_mut().for_each(Value::normalize_all_sets),
+			Value::Array(v) => v.iter_mut().for_each(Value::normalize_all_sets),
+			Value::Set(v) => {
+				for idx in 0..v.len() {
+					if let Some(v) = v.nth_mut(idx) {
+						v.normalize_all_sets();
+					}
+				}
+				v.0.normalize();
+			}
+			_ => {}
+		}
+	}
+
+	/// Whether a set holds the value a concrete path — one [`Value::walk`]
+	/// answers with — names, at any depth.
+	pub fn path_crosses_set(&self, path: &[Part]) -> bool {
+		let mut value = self;
+		for p in path {
+			value = match (value, p) {
+				(Value::Set(_), _) => return true,
+				(Value::Object(v), Part::Field(f)) => match v.get(f.as_str()) {
+					Some(v) => v,
+					None => return false,
+				},
+				(Value::Object(v), x) => {
+					match x.as_old_index().and_then(|idx| v.get(&idx.to_string())) {
+						Some(v) => v,
+						None => return false,
+					}
+				}
+				(Value::Array(v), Part::First) => match v.first() {
+					Some(v) => v,
+					None => return false,
+				},
+				(Value::Array(v), Part::Last) => match v.last() {
+					Some(v) => v,
+					None => return false,
+				},
+				(Value::Array(v), x) => match x.as_old_index().and_then(|idx| v.get(idx)) {
+					Some(v) => v,
+					None => return false,
+				},
+				_ => return false,
+			};
+		}
+		false
+	}
 }
 
 #[cfg(test)]
@@ -340,6 +509,96 @@ mod tests {
 			(syn::idiom("test.something[1].tags[1]").unwrap(), Value::from("operations")),
 		];
 		assert_eq!(res, val.walk(&idi));
+	}
+
+	/// Rewriting the elements of a set's elements through the concrete paths
+	/// `walk` answers with, then rebuilding along the field's path, leaves
+	/// every set distinct and ascending, and never replaces an element with
+	/// the set that holds it.
+	#[test]
+	fn normalize_sets_along_rebuilds_each_set_in_place() {
+		let field: Idiom = syn::idiom("s[*][*]").unwrap();
+		for (input, rewrite, expected) in [
+			// Nothing rewritten: each set is kept as it is.
+			("{ s: { [1, 2], [3], } }", None, "{ s: { [1, 2], [3], } }"),
+			("{ s: { [1, 2], } }", None, "{ s: { [1, 2], } }"),
+			("{ s: { { 1, 2, }, { 3, }, } }", None, "{ s: { { 1, 2, }, { 3, }, } }"),
+			// Every element rewritten to one value: the outer set collapses.
+			("{ s: { [1, 2], [3, 4], } }", Some(0), "{ s: { [0, 0], } }"),
+			// The inner sets collapse first, and then the outer one.
+			("{ s: { { 1, 2, }, { 3, }, } }", Some(0), "{ s: { { 0, }, } }"),
+		] {
+			let mut val = parse_val!(input);
+			if let Some(n) = rewrite {
+				for (path, _) in val.walk(&field) {
+					val.put(&path, Value::from(n));
+				}
+			}
+			val.normalize_sets_along(&[&field.0[..]]);
+			assert_eq!(val, parse_val!(expected), "on `{input}`");
+		}
+	}
+
+	/// An element moved out of order by an in-place write is put back in
+	/// order, at every level that holds it.
+	#[test]
+	fn path_crosses_set_names_a_place_within_a_set() {
+		let val = parse_val!("{ s: { { x: 1 }, }, a: [{ x: 1 }], o: { x: 1 } }");
+		for (path, within) in [
+			("s[0].x", true),
+			("s[0]", true),
+			// The set itself is not within one.
+			("s", false),
+			("a[0].x", false),
+			("o.x", false),
+			("missing.x", false),
+		] {
+			let path: Idiom = syn::idiom(path).unwrap();
+			assert_eq!(val.path_crosses_set(&path), within, "at `{path:?}`");
+		}
+	}
+
+	/// A path that reorders a set and a path naming one of its elements by
+	/// position: whichever comes first, every inner set is rebuilt before the
+	/// set holding it, so the positional path still names the element it wrote.
+	#[test]
+	fn normalize_sets_along_rebuilds_inner_sets_first_across_paths() {
+		let reorder: Idiom = syn::idiom("s[*].x").unwrap();
+		let positional: Idiom = syn::idiom("s[0].z[*]").unwrap();
+		for paths in [[&reorder, &positional], [&positional, &reorder]] {
+			let mut val = parse_val!("{ s: { { x: 1, z: { 1, 2, } }, { x: 2, z: { 3, } } } }");
+			// The values each field writes, at the paths it wrote them.
+			val.put(&syn::idiom("s[0].x").unwrap(), Value::from(2));
+			val.put(&syn::idiom("s[1].x").unwrap(), Value::from(1));
+			val.put(&syn::idiom("s[0].z[0]").unwrap(), Value::from(9));
+			val.put(&syn::idiom("s[0].z[1]").unwrap(), Value::from(8));
+			val.normalize_sets_along(&[&paths[0].0[..], &paths[1].0[..]]);
+			assert_eq!(
+				val,
+				parse_val!("{ s: { { x: 1, z: { 3, } }, { x: 2, z: { 8, 9 } } } }"),
+				"paths in the order {paths:?}"
+			);
+		}
+	}
+
+	#[test]
+	fn normalize_sets_along_restores_order() {
+		let field: Idiom = syn::idiom("o.s[*][*]").unwrap();
+		let mut val = parse_val!("{ o: { s: { { 1, }, { 2, }, } } }");
+		val.put(&syn::idiom("o.s[0][0]").unwrap(), Value::from(9));
+		val.normalize_sets_along(&[&field.0[..]]);
+		assert_eq!(val, parse_val!("{ o: { s: { { 2, }, { 9, }, } } }"));
+		let Value::Object(o) = &val else {
+			panic!("expected an object");
+		};
+		let Some(Value::Object(o)) = o.get("o") else {
+			panic!("expected an object");
+		};
+		let Some(Value::Set(s)) = o.get("s") else {
+			panic!("expected a set");
+		};
+		let elements: Vec<&Value> = s.iter().collect();
+		assert!(elements.windows(2).all(|w| w[0] < w[1]), "the set must be ascending");
 	}
 
 	/// The borrowing walk is the owning one with the clone left out, so it must

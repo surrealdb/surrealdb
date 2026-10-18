@@ -3090,6 +3090,8 @@ fn process_fields(em: &mut Emitter, cx: &mut Stages<'_, '_>) -> Result<(), IrErr
 			}
 		}
 	}
+	let computed: Arc<[Idiom]> =
+		declared.computed.iter().map(|name| Idiom::field(name.clone())).collect();
 	let end = em.label()?;
 	em.emit(schema(SchemaInstr::Begin {
 		table: plan,
@@ -3100,6 +3102,7 @@ fn process_fields(em: &mut Emitter, cx: &mut Stages<'_, '_>) -> Result<(), IrErr
 			Compiled::Derive(pipeline) => {
 				em.emit(schema(SchemaInstr::Derive {
 					pipeline,
+					computed: Arc::clone(&computed),
 				}));
 				continue;
 			}
@@ -3164,7 +3167,7 @@ fn process_fields(em: &mut Emitter, cx: &mut Stages<'_, '_>) -> Result<(), IrErr
 		}));
 	}
 	em.emit(schema(SchemaInstr::Finish {
-		computed: declared.computed.iter().map(|name| Idiom::field(name.clone())).collect(),
+		computed,
 	}));
 	em.bind(end)
 }
@@ -6379,7 +6382,11 @@ mod tests {
 		assert_eq!(
 			code[1],
 			schema(SchemaInstr::Derive {
-				pipeline: 0
+				pipeline: 0,
+				computed: Arc::from(vec![
+					Idiom::field(Strand::new("net")),
+					Idiom::field(Strand::new("total"))
+				])
 			})
 		);
 		assert_eq!(

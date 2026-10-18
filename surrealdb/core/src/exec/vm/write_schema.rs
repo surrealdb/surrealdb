@@ -192,9 +192,12 @@ pub(in crate::exec::vm) enum SchemaInstr {
 	/// Derive one `COMPUTED` field a later field's clause reads onto the
 	/// post-image, by host pipeline [`Program::host_code`]`[pipeline]`, for a
 	/// record with an id. The post-image is not marked as carrying its
-	/// computed values: only this one is derived.
+	/// computed values: only this one is derived. While a set awaits its
+	/// rebuild, the derivation reads the image with it rebuilt, and only the
+	/// table's `COMPUTED` fields, `computed`, are taken back from it.
 	Derive {
 		pipeline: u16,
+		computed: Arc<[Idiom]>,
 	},
 	/// Refuse the record: the table's producing clauses read each other in a
 	/// cycle, `fields`, so no record is correctly produced.
@@ -273,11 +276,24 @@ pub(super) struct SchemaRecord {
 	/// one element of `a.*` left empty skips the places within that element
 	/// and no other.
 	absent: Vec<Idiom>,
-	/// The places whose `ASSERT` is judged once every field is produced, as
-	/// the field's index and the path within the record.
-	deferred: Vec<(usize, Idiom)>,
+	/// The places whose `ASSERT` is judged once every field is produced.
+	deferred: Vec<Deferred>,
+	/// The fields that landed a value within a set, whose sets are rebuilt
+	/// once every field is produced. Rebuilding a set reorders its elements,
+	/// and every field names an element of one by its position, in the
+	/// post-image and in the before-image alike, so no set is rebuilt while a
+	/// field may still read one.
+	rebuild: Vec<usize>,
 	/// The field open.
 	field: Option<FieldCursor>,
+}
+
+/// A place whose `ASSERT` is judged once every field is produced.
+struct Deferred {
+	/// The index of the field.
+	index: usize,
+	/// The place's path within the record.
+	path: Idiom,
 }
 
 /// The field of a [`SchemaRecord`] that is open.
@@ -294,6 +310,9 @@ struct FieldCursor {
 	places: std::vec::IntoIter<(Idiom, Value)>,
 	/// The place stepped to.
 	place: Option<Place>,
+	/// Whether the field landed a value within a set, whose sets are then
+	/// rebuilt once every field is produced.
+	within_set: bool,
 }
 
 /// One place of a field: its path, its value, what the record held there
@@ -344,6 +363,35 @@ fn record(write: &mut WriteState) -> Result<&mut SchemaRecord, ControlFlow> {
 	write.schema.as_deref_mut().ok_or_else(|| internal("a schema step before its record began"))
 }
 
+/// The fields whose sets await their rebuild — those recorded, and the open
+/// field when it has landed a value within a set — and the table's fields.
+///
+/// The open field is included because a clause reads a copy of the record,
+/// never the record itself: the record keeps its sets' positions while the
+/// field's later places still name elements by position, and the copy a
+/// clause reads holds every set rebuilt. A set the field has landed a value in
+/// is out of order until it is rebuilt, and a lookup in it (`CONTAINS`, `IN`)
+/// searches its elements by order, so read unrebuilt it would miss elements it
+/// holds.
+fn pending_sets(schema: &SchemaRecord) -> (Vec<usize>, Arc<[FieldDefinition]>) {
+	let open = schema.field.as_ref().filter(|cursor| cursor.within_set).map(|cursor| cursor.index);
+	(schema.rebuild.iter().copied().chain(open).collect(), Arc::clone(&schema.fields))
+}
+
+/// Rebuild every set holding a value a field landed, once every field is
+/// produced: the record's sets are then distinct and ascending, as they are
+/// stored and as its assertions judge them.
+fn rebuild_sets(write: &mut WriteState) -> Result<(), ControlFlow> {
+	let schema = record(write)?;
+	if schema.rebuild.is_empty() {
+		return Ok(());
+	}
+	let rebuild = std::mem::take(&mut schema.rebuild);
+	let fields = Arc::clone(&schema.fields);
+	normalise_set_elements(&mut write.row()?.current, rebuild.iter().map(|&index| &fields[index]));
+	Ok(())
+}
+
 /// Run clause pipeline `pipeline` for the open field's place: over the
 /// post-image as it stands, in the field's frame with the place's parameters
 /// bound to `value`, or to the place's own value, refusing what the clause
@@ -353,6 +401,11 @@ fn record(write: &mut WriteState) -> Result<&mut SchemaRecord, ControlFlow> {
 /// a loop outside the clause, so it fails with
 /// [`InvalidControlFlow`](crate::exec::Error::InvalidControlFlow) and never
 /// leaves the write. A `RETURN` gives the clause's value.
+///
+/// The post-image's sets are rebuilt only once every field is produced, so
+/// that each field names the elements of one by position; a clause reads the
+/// image with every set a field has landed a value within rebuilt, as it will
+/// be stored.
 async fn place_clause(
 	program: &Program,
 	pipeline: u16,
@@ -361,9 +414,13 @@ async fn place_clause(
 	refusing: NoWriteFrame,
 ) -> FlowResult<Value> {
 	let write = write_state(state)?;
+	let (pending, fields) = pending_sets(record(write)?);
 	let (row, ctx) = write.in_flight()?;
 	let exec = ctx.exec().clone();
-	let doc = row.current.clone();
+	let mut doc = row.current.clone();
+	if !pending.is_empty() {
+		normalise_set_elements(&mut doc, pending.iter().map(|&index| &fields[index]));
+	}
 	let cursor = record(write)?.cursor()?;
 	let place = cursor.place.as_ref().ok_or_else(|| internal("a clause with no place"))?;
 	let value = value.unwrap_or_else(|| place.val.clone());
@@ -443,6 +500,7 @@ pub(super) async fn step(
 				creating,
 				absent: Vec::new(),
 				deferred: Vec::new(),
+				rebuild: Vec::new(),
 				field: None,
 			}));
 			Ok(next)
@@ -472,6 +530,7 @@ pub(super) async fn step(
 				write: *permissions,
 				places: places.into_iter(),
 				place: None,
+				within_set: false,
 			});
 			Ok(next)
 		}
@@ -614,7 +673,10 @@ pub(super) async fn step(
 			let schema = record(write_state(state)?)?;
 			let index = schema.cursor()?.index;
 			let path = schema.place()?.path.clone();
-			schema.deferred.push((index, path));
+			schema.deferred.push(Deferred {
+				index,
+				path,
+			});
 			Ok(next)
 		}
 		SchemaInstr::Permit => {
@@ -641,28 +703,63 @@ pub(super) async fn step(
 			if optional_and_absent(&schema.fields[index], &place.val) {
 				schema.absent.push(place.path.clone());
 			}
+			let row = write.row()?;
+			let within_set = row.current.path_crosses_set(&place.path);
 			// `put` on a `NONE` keeps an array's element positions, which `cut`
 			// would shift.
-			write.row()?.current.put(&place.path, place.val);
+			row.current.put(&place.path, place.val);
+			if within_set {
+				record(write)?.cursor()?.within_set = true;
+			}
 			Ok(next)
 		}
 		SchemaInstr::EndField => {
 			let write = write_state(state)?;
 			let schema = record(write)?;
 			let cursor = schema.field.take().ok_or_else(|| internal("no field open"))?;
-			let fields = Arc::clone(&schema.fields);
-			normalise_set_elements(write.row()?, &fields[cursor.index]);
+			// Only a set holding a value the field landed can have lost its
+			// order or the distinctness of its elements.
+			if cursor.within_set && !schema.rebuild.contains(&cursor.index) {
+				schema.rebuild.push(cursor.index);
+			}
 			Ok(next)
 		}
 		SchemaInstr::Asserts {
 			pipelines,
 		} => {
-			let schema = record(write_state(state)?)?;
+			let write = write_state(state)?;
+			let schema = record(write)?;
+			let pending = !schema.rebuild.is_empty();
 			let deferred = std::mem::take(&mut schema.deferred);
+			// `$value` is each place's finished value, after its `PERMISSIONS`
+			// may have reverted what the field produced and after any nested
+			// field rewrote within it. It is read before the sets are rebuilt,
+			// while every path still names the element its field wrote, and
+			// with every set within it in the order it is stored.
+			let current = &write.row()?.current;
+			let values: Vec<Value> = deferred
+				.iter()
+				.map(|place| {
+					let mut val = current.pick(&place.path);
+					if pending {
+						val.normalize_all_sets();
+					}
+					val
+				})
+				.collect();
+			rebuild_sets(write)?;
+			let schema = record(write_state(state)?)?;
 			let fields = Arc::clone(&schema.fields);
 			let rid = schema.rid.to_sql();
 			let input = Arc::clone(&schema.input);
-			for (index, path) in deferred {
+			for (
+				Deferred {
+					index,
+					path,
+				},
+				val,
+			) in deferred.into_iter().zip(values)
+			{
 				let Some(pipeline) = pipelines[index] else {
 					continue;
 				};
@@ -671,9 +768,6 @@ pub(super) async fn step(
 				let (row, ctx) = write.in_flight()?;
 				let exec = ctx.exec().clone();
 				let doc = row.current.clone();
-				// `$value` is read back from the record: the field's
-				// `PERMISSIONS` may have reverted what it produced.
-				let val = doc.pick(&path);
 				// An absent optional value is not judged: the field declared
 				// that absence acceptable.
 				if optional_and_absent(fd, &val) {
@@ -704,6 +798,7 @@ pub(super) async fn step(
 			computed,
 		} => {
 			let write = write_state(state)?;
+			rebuild_sets(write)?;
 			write.schema = None;
 			let row = write.row()?;
 			// A computed value is never stored.
@@ -736,8 +831,10 @@ pub(super) async fn step(
 		}
 		SchemaInstr::Derive {
 			pipeline,
+			computed,
 		} => {
 			let write = write_state(state)?;
+			let (pending, fields) = pending_sets(record(write)?);
 			let (row, ctx) = write.in_flight()?;
 			// A record with no id is not addressable, so there is no subject to
 			// derive a body for.
@@ -745,9 +842,21 @@ pub(super) async fn step(
 				return Ok(next);
 			}
 			let exec = ctx.exec().clone();
-			let image = row.current.clone();
+			let mut image = row.current.clone();
+			if pending.is_empty() {
+				let derived = run_image(program, *pipeline, image, None, state, &exec).await?;
+				write_state(state)?.row()?.current = derived;
+				return Ok(next);
+			}
+			// The record keeps its sets' positions until their rebuild, so the
+			// derivation reads a rebuilt copy, and only the computed values
+			// it derived are taken back.
+			normalise_set_elements(&mut image, pending.iter().map(|&index| &fields[index]));
 			let derived = run_image(program, *pipeline, image, None, state, &exec).await?;
-			write_state(state)?.row()?.current = derived;
+			let row = write_state(state)?.row()?;
+			for name in computed.iter() {
+				row.current.put(name, derived.pick(name));
+			}
 			Ok(next)
 		}
 		SchemaInstr::Cycle {

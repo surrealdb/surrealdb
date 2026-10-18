@@ -4296,6 +4296,7 @@ d2096eabefb42ae6 language-tests/tests/reproductions/type_field_id_point_lookup.s
 cdf2161c5eade14f language-tests/tests/reproductions/type_field_projection_perm.surql
 c065ed52ac4b632c language-tests/tests/reproductions/type_field_projection_perm_import.surql
 1b788d02dfa28414 language-tests/tests/reproductions/type_record_upsert.surql
+164f3f85f60638bb language-tests/tests/reproductions/typed_set_of_containers_stays_readable.surql
 7ba35ab5efb57b36 language-tests/tests/reproductions/udf_frame_import.surql
 3e16018044885147 language-tests/tests/reproductions/udf_frame_perms.surql
 7afe6c4555d3ab4c language-tests/tests/reproductions/udf_frame_perms_plan.surql
@@ -4645,6 +4646,8 @@ a5c057a5ca786e09 language-tests/tests/upgrade/value/3.00.00_set_import.surql
 634e67fc1c629e33 language-tests/tests/upgrade/value/3.00.00_table_import.surql
 29eb7e2fd580177c language-tests/tests/upgrade/value/3.02.04_record_id_datetime.surql
 4dfcd110d725a8aa language-tests/tests/upgrade/value/3.02.04_record_id_datetime_import.surql
+a39878c0c0f17d11 language-tests/tests/upgrade/value/3.03.00_typed_set_of_containers.surql
+d1bdc7fce85d9c12 language-tests/tests/upgrade/value/3.03.00_typed_set_of_containers_import.surql
 dc28998526b8cf61 surrealdb/parser-next/tests/corpus/bugs/integer_token_not_properly_eaten.surql
 c35fab8af6586476 surrealdb/parser-next/tests/corpus/bugs/table_named_tb.surql
 3e31762a0e569b0d surrealdb/parser-next/tests/corpus/comments.surql

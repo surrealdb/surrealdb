@@ -29,7 +29,6 @@ use crate::doc::Error as DocError;
 use crate::exec::function::FunctionRegistry;
 use crate::exec::logical::effects::effects_of_expr;
 use crate::exec::operators::write::ctx::WriteCtx;
-use crate::exec::operators::write::row::WriteRow;
 use crate::expr::ControlFlow;
 use crate::expr::idiom::{Idiom, IdiomTrie, IdiomTrieContains};
 use crate::expr::kind::{Kind, KindLiteral};
@@ -49,84 +48,29 @@ pub(crate) fn optional_and_absent(fd: &FieldDefinition, val: &Value) -> bool {
 	val.is_none() && fd.field_kind.as_ref().is_some_and(Kind::can_be_none)
 }
 
-/// Restore the order and uniqueness of every set holding a place of field
-/// `fd`, once the field's places are written back.
+/// Restore the uniqueness and order of every set holding a value the fields
+/// `fields` rewrote.
 ///
-/// A place is written back into a set at the position it was read from, and a
-/// clause or coercion can change it, so the set can come out unordered or
-/// holding two equal elements, which storage refuses to encode. The sets
-/// rebuilt are those on the way from the record to each place [`Value::walk`]
-/// names for the field's path, each rebuilt where it stands: a path such as
-/// `v[*][*]` names many places, and each set holding one is rebuilt from its
-/// own elements alone.
-pub(crate) fn normalise_set_elements(row: &mut WriteRow, fd: &FieldDefinition) {
-	rebuild_sets_holding(&mut row.current, &fd.name);
-}
-
-/// Rebuild every set within `value` that holds a place `path` names, stepping
-/// as [`Value::walk`] does. A set nested in another is rebuilt before the set
-/// holding it, since an element's own order decides where it sorts in its
-/// set. A place is not itself rebuilt: a value a clause or coercion produced
-/// is a well-formed set already.
-fn rebuild_sets_holding(value: &mut Value, path: &[Part]) {
-	let Some((part, rest)) = path.split_first() else {
-		return;
-	};
-	match value {
-		Value::Object(object) => match part {
-			Part::Field(field) => {
-				if let Some(held) = object.get_mut(field as &str) {
-					rebuild_sets_holding(held, rest);
-				}
-			}
-			Part::All => object.values_mut().for_each(|held| rebuild_sets_holding(held, rest)),
-			x => {
-				if let Some(held) =
-					x.as_old_index().and_then(|idx| object.get_mut(idx.to_string().as_str()))
-				{
-					rebuild_sets_holding(held, rest);
-				}
-			}
-		},
-		Value::Array(array) => {
-			let held = match part {
-				Part::First => array.first_mut(),
-				Part::Last => array.last_mut(),
-				x => match x.as_old_index() {
-					Some(idx) => array.get_mut(idx),
-					None => {
-						array.iter_mut().for_each(|held| rebuild_sets_holding(held, rest));
-						return;
-					}
-				},
-			};
-			if let Some(held) = held {
-				rebuild_sets_holding(held, rest);
-			}
-		}
-		Value::Set(set) => {
-			let held = match part {
-				Part::First => set.first_mut(),
-				Part::Last => set.last_mut(),
-				x => match x.as_old_index() {
-					Some(idx) => set.nth_mut(idx),
-					None => {
-						for i in 0..set.len() {
-							if let Some(held) = set.nth_mut(i) {
-								rebuild_sets_holding(held, rest);
-							}
-						}
-						None
-					}
-				},
-			};
-			if let Some(held) = held {
-				rebuild_sets_holding(held, rest);
-			}
-			*set = std::mem::take(set).normalize();
-		}
-		_ => (),
-	}
+/// A nested field — `field[*]`, `field[*][*]`, `field[*].x` — is applied to
+/// each value its path reaches, in place, and coercion or a `VALUE` clause can
+/// make two distinct set elements equal or move one out of its sorted
+/// position. Every set a path passes through holds a rewritten value,
+/// directly or within one of its own elements, so each is rebuilt in place,
+/// innermost first across every path (see [`Value::normalize_sets_along`]),
+/// so that no positional step of one field's path is reordered under it by
+/// another's rebuild. A set is never written back through a path carrying
+/// `[*]`: `put` writes one value into every element such a path reaches.
+pub(crate) fn normalise_set_elements<'a>(
+	doc: &mut Value,
+	fields: impl IntoIterator<Item = &'a FieldDefinition>,
+) {
+	// A single-part path names a top-level field, which no set holds.
+	let paths: Vec<&[Part]> = fields
+		.into_iter()
+		.map(|fd| fd.name.0.as_slice())
+		.filter(|parts| parts.len() >= 2)
+		.collect();
+	doc.normalize_sets_along(&paths);
 }
 
 /// Raise on the first path of the post-image that the table's field

@@ -142,12 +142,12 @@ impl Set {
 		Set(self.0.difference(&other.0))
 	}
 
-	/// Rebuild the set so equal values collapse to one entry.
-	///
-	/// Used after in-place element transformations
-	/// (for example a `.*` field VALUE clause)
-	pub fn normalize(self) -> Self {
-		Set::from(Vec::from(self))
+	/// Restore distinct elements in ascending order after elements were
+	/// changed in place (for example by a `.*` field VALUE clause): equal
+	/// values collapse to one entry.
+	pub fn normalize(mut self) -> Self {
+		self.0.normalize();
+		self
 	}
 
 	/// Flatten nested sets and arrays into a single set

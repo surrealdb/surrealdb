@@ -284,6 +284,13 @@ where
 {
 	type Item = T;
 	fn serialize_indexed_set<W: std::io::Write>(&self, w: &mut W) -> Result<(), Error> {
+		// The decoder collapses equal elements, so a set written with its
+		// invariant broken would read back without complaint: debug builds
+		// refuse to encode one.
+		debug_assert!(
+			self.iter().zip(self.iter().skip(1)).all(|(a, b)| a < b),
+			"indexed-set encode: elements are not distinct and ascending"
+		);
 		revision::optimised::indexed::serialize_indexed_set_iter(self.iter(), w)
 	}
 	fn deserialize_indexed_set<R: std::io::Read>(r: &mut R) -> Result<Self, Error> {
@@ -300,6 +307,11 @@ where
 			})?;
 			revision::slice_reader::advance_read(r, table_bytes)?;
 		}
+		// Equal elements merge: a payload holding them decodes to the set they
+		// describe rather than failing, so a record carrying one stays
+		// readable, and therefore updatable and deletable, by every statement
+		// that touches it. The encoder never writes equal elements from a
+		// well-formed set.
 		let entries = bounded::read_vec_with(r, len, T::deserialize_revisioned)?;
 		set_from_decoded(entries)
 	}
@@ -598,6 +610,25 @@ mod tests {
 		1u32.serialize_revisioned(&mut w).unwrap();
 		let set = VecSet::<u32>::deserialize_revisioned(&mut w.as_slice()).unwrap();
 		assert_eq!(set.iter().copied().collect::<Vec<_>>(), [1]);
+	}
+
+	/// An indexed-set payload holding equal elements decodes to the set they
+	/// describe, in both body shapes: below the offset-table threshold and at
+	/// or above it.
+	#[test]
+	fn indexed_set_decode_collapses_equal_elements() {
+		use revision::optimised::indexed::{IndexedSetEncoded, serialize_indexed_set_iter};
+		for len in [2u32, 3, 16] {
+			// Every element written twice, in descending order.
+			let written: Vec<u32> = (0..len).rev().flat_map(|i| [i, i]).collect();
+			let mut bytes = Vec::new();
+			serialize_indexed_set_iter(written.iter(), &mut bytes).unwrap();
+			bytes.push(0xEF);
+			let mut reader: &[u8] = &bytes;
+			let set = VecSet::<u32>::deserialize_indexed_set(&mut reader).unwrap();
+			assert_eq!(set.iter().copied().collect::<Vec<_>>(), (0..len).collect::<Vec<_>>());
+			assert_eq!(reader, &[0xEF], "the whole payload is consumed at length {len}");
+		}
 	}
 
 	// ---- Skip fast path (delegates to revision's O(1) indexed skip) ----

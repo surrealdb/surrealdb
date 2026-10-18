@@ -245,6 +245,22 @@ impl<T: Ord> VecSet<T> {
 		}
 	}
 
+	/// Restore the set's invariant — distinct elements in ascending order —
+	/// after elements were changed in place through [`get_mut`](Self::get_mut),
+	/// [`first_mut`](Self::first_mut) or [`last_mut`](Self::last_mut).
+	///
+	/// Elements that compare equal under `Ord` collapse to the first in sorted
+	/// order, as [`FromIterator`] collapses them, and the sort cannot panic
+	/// whatever `Ord` does ([`sort_by_ord`]). A set whose elements are already
+	/// distinct and ascending is checked in one pass and left as it is.
+	pub fn normalize(&mut self) {
+		if !is_strictly_ascending(&self.entries) {
+			let mut entries = sort_by_ord(std::mem::take(&mut self.entries));
+			entries.dedup_by(|a, b| Ord::cmp(&*a, &*b) == Ordering::Equal);
+			self.entries = entries;
+		}
+	}
+
 	#[must_use]
 	pub fn contains<Q: ?Sized + Ord>(&self, value: &Q) -> bool
 	where
@@ -816,6 +832,22 @@ mod tests {
 		let s = set_of([3, 1, 2]);
 		let v: Vec<_> = (&s).into_iter().copied().collect();
 		assert_eq!(v, vec![1, 2, 3]);
+	}
+
+	#[test]
+	fn normalize_restores_order_and_distinctness_in_place() {
+		let mut s = set_of([1, 2, 3, 4]);
+		*s.get_mut(0).unwrap() = 4;
+		*s.get_mut(1).unwrap() = 9;
+		s.normalize();
+		assert_sorted(&s);
+		assert_eq!(s.iter().copied().collect::<Vec<_>>(), vec![3, 4, 9]);
+		// A set already in order keeps its elements and its buffer.
+		let mut s = set_of([1, 2, 3]);
+		let buffer = s.iter().as_slice().as_ptr();
+		s.normalize();
+		assert_eq!(s.iter().copied().collect::<Vec<_>>(), vec![1, 2, 3]);
+		assert_eq!(s.iter().as_slice().as_ptr(), buffer);
 	}
 
 	#[test]
