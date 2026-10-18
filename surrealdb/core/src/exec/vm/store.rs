@@ -28,6 +28,23 @@ use crate::iam::Action;
 use crate::kvs::sequences::CatalogSequence;
 use crate::val::Value;
 
+/// Deletes a model's `.surml` artifact once the transaction that removed the
+/// model's definition has committed.
+///
+/// A failed delete is logged and not retried: the definition is gone, so the
+/// artifact is unreachable whether or not it was removed.
+struct DeleteModelArtifactOnCommit(String);
+
+impl surrealdb_datastore::close::CommitAction for DeleteModelArtifactOnCommit {
+	fn run(self: Box<Self>) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
+		Box::pin(async move {
+			if let Err(e) = crate::obs::del(&self.0).await {
+				tracing::warn!("failed to delete model artifact `{}`: {e}", self.0);
+			}
+		})
+	}
+}
+
 pub(super) fn read(regs: &[Scalar<'_>], reg: u16) -> Value {
 	regs[reg as usize].to_value()
 }
@@ -505,7 +522,9 @@ async fn step_inner(
 					&model.version,
 					&model.hash,
 				);
-				let _ = crate::obs::del(&path).await;
+				// The artifact outlives a rollback: it is deleted only once the
+				// definition's removal has committed.
+				ctx.txn().on_commit(Box::new(DeleteModelArtifactOnCommit(path))).await;
 			}
 		}
 		StoreInstr::DeleteRange {
