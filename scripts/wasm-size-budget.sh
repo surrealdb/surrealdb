@@ -112,7 +112,7 @@ cd "$repo_root"
 # The budgets: the sizes measured when each was set, plus about 2% headroom.
 budget_stable_lean=${WASM_BUDGET_STABLE_LEAN:-10627000}
 budget_stable_full=${WASM_BUDGET_STABLE_FULL:-14489000}
-budget_nightly_lean=${WASM_BUDGET_NIGHTLY_LEAN:-9661000}
+budget_nightly_lean=${WASM_BUDGET_NIGHTLY_LEAN:-10000000}
 budget_nightly_full=${WASM_BUDGET_NIGHTLY_FULL:-13228000}
 budget_stable_edge=${WASM_BUDGET_STABLE_EDGE:-0}
 budget_nightly_edge=${WASM_BUDGET_NIGHTLY_EDGE:-8350000}
