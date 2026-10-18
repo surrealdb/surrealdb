@@ -5,7 +5,6 @@ mod cli_integration {
 	use std::collections::HashMap;
 	use std::fs::File;
 	use std::io::Write;
-	#[cfg(unix)]
 	use std::time;
 
 	use assert_fs::prelude::{FileTouch, FileWriteStr, PathChild};
@@ -1610,6 +1609,82 @@ mod cli_integration {
 					assert!(e.to_string().contains("server failed to start"))
 				}
 			}
+		}
+	}
+
+	/// A startup import file need not open with `USE`: its statements apply to the
+	/// default namespace and database the server was started with.
+	#[test(tokio::test)]
+	async fn a_startup_import_applies_to_the_default_database() {
+		let import_file = common::tmp_file("no_use.surql");
+		std::fs::write(&import_file, "DEFINE TABLE hi; CREATE hi:1 SET greeting = 'hello';")
+			.unwrap();
+		let (addr, mut server) = common::start_server_with_import_file(&import_file).await.unwrap();
+		let args = format!(
+			"sql --endpoint http://{addr} --user {USER} --pass {PASS} --ns main --db main --hide-welcome"
+		);
+		let output = common::run(&args).input("SELECT * FROM hi;\n").output().expect("success");
+		assert!(output.contains("hello"), "the imported record is missing: {output}");
+		server.finish().unwrap();
+	}
+
+	/// The import runs in the default database the datastore records, which a
+	/// later start with different (or no) default flags must not override.
+	#[test(tokio::test)]
+	async fn a_startup_import_applies_to_the_recorded_default_database() {
+		let path = format!("surrealkv://{}", common::tmp_file("recorded_default.db"));
+		let (_addr, mut first) = common::start_server(common::StartServerArguments {
+			path: Some(path.clone()),
+			args: "--default-namespace acme --default-database prod".to_string(),
+			..Default::default()
+		})
+		.await
+		.unwrap();
+		first.finish().unwrap();
+
+		let import_file = common::tmp_file("recorded_default.surql");
+		std::fs::write(&import_file, "DEFINE TABLE hi; CREATE hi:1 SET greeting = 'hello';")
+			.unwrap();
+		let (addr, mut second) = common::start_server(common::StartServerArguments {
+			path: Some(path),
+			import_file: Some(import_file),
+			..Default::default()
+		})
+		.await
+		.unwrap();
+		let args = format!(
+			"sql --endpoint http://{addr} --user {USER} --pass {PASS} --ns acme --db prod --hide-welcome"
+		);
+		let output = common::run(&args).input("SELECT * FROM hi;\n").output().expect("success");
+		assert!(output.contains("hello"), "the imported record is missing: {output}");
+		second.finish().unwrap();
+	}
+
+	/// A startup import file that does not parse reads the same on every attempt,
+	/// so the failure must be reported at once rather than after the whole
+	/// startup retry budget, and the instance must not become ready.
+	#[test(tokio::test)]
+	async fn an_unparseable_import_file_is_reported_without_retrying() {
+		let import_file = common::tmp_file("unparseable.surql");
+		std::fs::write(&import_file, "DEFINE USER ON ROOT test PASSWORD 'secret';").unwrap();
+		let server = common::run(&format!(
+			"start --bind 127.0.0.1:0 memory --log trace --user {USER} --pass {PASS} --import-file {import_file}"
+		));
+		let started = time::Instant::now();
+		loop {
+			let output = server.stdout_and_stderr();
+			if output.contains("Startup failed; instance will not become ready") {
+				assert!(
+					!output.contains("Startup complete"),
+					"an instance whose import failed must not become ready:\n{output}"
+				);
+				break;
+			}
+			assert!(
+				started.elapsed() < time::Duration::from_secs(20),
+				"the server kept retrying an import file that can never parse:\n{output}"
+			);
+			tokio::time::sleep(time::Duration::from_millis(100)).await;
 		}
 	}
 

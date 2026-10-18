@@ -7,10 +7,12 @@ use anyhow::Result;
 use clap::Args;
 use rand::Rng;
 use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
+use surrealdb_catalog::providers::RootProvider;
 use surrealdb_cnf::ConfigMap;
 use surrealdb_core::channel::Receiver;
 use surrealdb_core::kvs::{Datastore, TransactionBuilderFactory};
 use surrealdb_core::options::EngineOptions;
+use surrealdb_datastore::TransactionType;
 use surrealdb_observe::ExecutionObserver;
 use surrealdb_rpc::capabilities::{
 	ArbitraryQueryTarget, Capabilities, EvalQueryTarget, ExperimentalTarget, FuncTarget,
@@ -826,6 +828,15 @@ fn is_permanent_storage_error(e: &anyhow::Error) -> bool {
 		|| message.contains("invalid storage version")
 }
 
+/// Whether a startup import failed because the file itself is unusable.
+///
+/// A file that does not parse reads the same on every attempt, so retrying it
+/// would hold the start for the whole retry budget and then report a timeout
+/// rather than the parse error the operator has to act on.
+fn is_permanent_import_error(e: &anyhow::Error) -> bool {
+	e.downcast_ref::<surrealdb_types::Error>().is_some_and(surrealdb_types::Error::is_validation)
+}
+
 #[instrument(level = "trace", target = "surreal::dbs", skip_all)]
 // The return tuple is the established shape of this internal startup
 // entrypoint; the deferred startup work is just one more element on it.
@@ -1079,6 +1090,39 @@ pub(crate) struct PendingStartup {
 }
 
 impl PendingStartup {
+	/// The session the startup import runs under.
+	///
+	/// It is the owner, positioned in the datastore's default namespace and
+	/// database unless those are disabled, so that a file's statements apply to
+	/// the database the server serves by default without every file having to
+	/// open with `USE`. The default is the one the datastore records
+	/// (`DEFINE CONFIG DEFAULT`), which is what an empty `USE` resolves to
+	/// everywhere else; the configured names are only the fallback for a
+	/// datastore that records none. A `USE` in the file moves the session as it
+	/// would anywhere else. Without a default there is no database to name, and
+	/// a statement that needs one is refused until the file selects it.
+	async fn import_session(&self, ds: &Datastore) -> Result<Session> {
+		let session = Session::owner();
+		if self.no_defaults {
+			return Ok(session);
+		}
+		let txn = ds.transaction(TransactionType::Read).await?;
+		let recorded = txn.get_default_config().await;
+		let _ = txn.cancel().await;
+		let recorded = recorded?;
+		let namespace = recorded
+			.as_ref()
+			.and_then(|c| c.namespace.as_deref())
+			.or(self.default_namespace.as_deref())
+			.unwrap_or("main");
+		let database = recorded
+			.as_ref()
+			.and_then(|c| c.database.as_deref())
+			.or(self.default_database.as_deref())
+			.unwrap_or("main");
+		Ok(session.with_ns(namespace).with_db(database))
+	}
+
 	/// Whether a startup import is part of the deferred work.
 	///
 	/// The caller uses this to decide whether the HTTP bind waits for that work:
@@ -1207,9 +1251,15 @@ pub(crate) async fn finish_startup(ds: &Datastore, pending: &PendingStartup) -> 
 	if let Some(file) = &pending.import_file {
 		info!(target: TARGET, file = ?file, "Importing data from file");
 		let sql = fs::read_to_string(file)?;
-		let results = retry_with_timeout("startup", pending.timeout, || async {
-			ds.startup(&sql, &Session::owner()).await
-		})
+		let results = retry_with_timeout_check(
+			"startup",
+			pending.timeout,
+			|| async {
+				let session = pending.import_session(ds).await?;
+				ds.startup(&sql, &session).await
+			},
+			is_permanent_import_error,
+		)
 		.await?;
 		let failed = results.iter().filter(|r| r.result.is_err()).count();
 		if failed > 0 {
