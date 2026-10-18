@@ -2705,9 +2705,11 @@ cb55de5ab346a4d9 language-tests/tests/language/statements/define/table/view/aggr
 2e9cbf45077cc672 language-tests/tests/language/statements/define/table/view/cond_group_count.surql
 2972c83a15e3a5a4 language-tests/tests/language/statements/define/table/view/delete_view.surql
 905fe51009f3bd6b language-tests/tests/language/statements/define/table/view/foreigntable.surql
+a2d746c8ce5def93 language-tests/tests/language/statements/define/table/view/group_alias_names_another_column.surql
 b78aeeac819b0f53 language-tests/tests/language/statements/define/table/view/import_derives_no_computed_field_for_a_view.surql
 cfb9592f5ec271c7 language-tests/tests/language/statements/define/table/view/increment_immediate/mean.surql
 68afd18fbff3c6db language-tests/tests/language/statements/define/table/view/initial_aggregates.surql
+43d8a2858a551a05 language-tests/tests/language/statements/define/table/view/initial_group_columns.surql
 e15931fd9971b187 language-tests/tests/language/statements/define/table/view/initial_select.surql
 5cb3a83f9910cdac language-tests/tests/language/statements/define/table/view/mean.surql
 7c0c63f73ec058c5 language-tests/tests/language/statements/define/table/view/no_doubles.surql
@@ -2979,6 +2981,7 @@ a333963dcf6d0f39 language-tests/tests/language/statements/select/group/array_cou
 5cefab6e99e96918 language-tests/tests/language/statements/select/group/count_range_permissions_import.surql
 fed6ed2c061e9fd8 language-tests/tests/language/statements/select/group/count_scan_optimization.surql
 d86719987bb9a3b1 language-tests/tests/language/statements/select/group/empty_group_statistical_aggregates.surql
+8b4ae30e833ce1dd language-tests/tests/language/statements/select/group/group_alias_names_another_key.surql
 c4e011bf53b894fb language-tests/tests/language/statements/select/group/group_all_order.surql
 774dce09f91e2747 language-tests/tests/language/statements/select/group/group_all_where.surql
 3ace15217e6602a5 language-tests/tests/language/statements/select/group/group_array_aggregates.surql
@@ -3865,6 +3868,7 @@ b00a1acaf40c07bb language-tests/tests/reproductions/a_write_where_matches_answer
 8753223f125926c4 language-tests/tests/reproductions/a_written_value_no_one_reads_keeps_its_value_regions.surql
 9f0f45f4d279f318 language-tests/tests/reproductions/a_zero_limit_and_unselected_order_in_a_write_subquery.surql
 0b8edcbc034b7f9e language-tests/tests/reproductions/a_zero_limit_reads_no_record.surql
+1ca6b5687412baba language-tests/tests/reproductions/aggregate_view_over_existing_rows_keeps_each_group_column.surql
 40c3ce28b5792957 language-tests/tests/reproductions/alter_auth_limit_escalation.surql
 78fdef170147ea22 language-tests/tests/reproductions/alter_auth_limit_escalation_import.surql
 635974ba88c894f5 language-tests/tests/reproductions/alter_field_drop_reference_cleans_keys.surql
@@ -4591,6 +4595,8 @@ fab22edc5a30085c language-tests/tests/upgrade/define/3.00.00_table_schemafull.su
 8f9b326868f370c5 language-tests/tests/upgrade/define/3.00.00_table_type.surql
 14531a8ce5f14be5 language-tests/tests/upgrade/define/3.00.00_table_type_import.surql
 7fc1522270465a35 language-tests/tests/upgrade/define/3.00.00_table_view_aggregate.surql
+2fb16b9807789369 language-tests/tests/upgrade/define/3.00.00_table_view_aggregate_backfill.surql
+5d5e334169a51a80 language-tests/tests/upgrade/define/3.00.00_table_view_aggregate_backfill_import.surql
 0621962466b42bd0 language-tests/tests/upgrade/define/3.00.00_table_view_aggregate_current.surql
 ac3269202d481e93 language-tests/tests/upgrade/define/3.00.00_table_view_aggregate_import.surql
 94db14ba639af197 language-tests/tests/upgrade/define/3.00.00_table_view_keyword_alias.surql

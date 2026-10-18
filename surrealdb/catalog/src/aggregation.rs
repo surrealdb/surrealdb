@@ -1976,17 +1976,13 @@ impl AggregationAnalysis {
 						})
 					};
 
+					// An alias names a group as `GROUP BY` wrote it, which `group_expressions`
+					// stops holding once an earlier field has replaced that entry with its
+					// expression: in `SELECT g1 AS flag, g0 AS g1 ... GROUP BY flag, g1` the
+					// entry of `flag` becomes the path `g1`, and the second field's alias must
+					// still find the group `g1`.
 					if let Some((alias, x)) = alias.as_ref().and_then(|alias| {
-						group_expressions
-							.iter()
-							.position(|x| {
-								if let Expr::Idiom(i) = x {
-									*i == *alias
-								} else {
-									false
-								}
-							})
-							.map(|x| (alias, x))
+						groups.0.iter().position(|g| g.0 == *alias).map(|x| (alias, x))
 					}) {
 						// The alias is used within the group statement, therefore this expression
 						// is a group expression. i.e. year in the statement:
@@ -2336,6 +2332,75 @@ pub fn backfill_stats(
 		});
 	}
 	Ok(Some(stats))
+}
+
+#[cfg(test)]
+mod analysis_tests {
+	use super::*;
+	use crate::expr::{FunctionCall, Group};
+
+	fn path(name: &str) -> Idiom {
+		Idiom::field(name.to_owned())
+	}
+
+	fn column(from: &str, alias: &str) -> Field {
+		Field::Single(Selector {
+			expr: Expr::Idiom(path(from)),
+			alias: Some(path(alias)),
+		})
+	}
+
+	fn count(alias: &str) -> Field {
+		Field::Single(Selector {
+			expr: Expr::FunctionCall(Box::new(FunctionCall {
+				receiver: Function::Normal("count".to_string()),
+				arguments: Vec::new(),
+			})),
+			alias: Some(path(alias)),
+		})
+	}
+
+	fn group_read(idx: usize) -> Expr {
+		Expr::Idiom(Idiom::field(group_field_name(idx)))
+	}
+
+	/// A column's alias names the group as `GROUP BY` wrote it. An earlier column
+	/// that is a path of the same name as this alias has replaced that group's
+	/// entry, and must not take this column's place.
+	#[test]
+	fn an_alias_finds_its_group_after_an_earlier_column_replaced_the_group_named_like_it() {
+		let fields = Fields::Select(vec![column("g1", "flag"), column("g0", "g1"), count("c")]);
+		let groups = Groups(vec![Group(path("flag")), Group(path("g1"))]);
+		let analysis = AggregationAnalysis::analyze_fields_groups(&fields, &groups, true)
+			.expect("the view's fields and groups analyse");
+		assert_eq!(
+			analysis.group_expressions,
+			vec![Expr::Idiom(path("g1")), Expr::Idiom(path("g0"))]
+		);
+		let AggregateFields::Fields(columns) = &analysis.fields else {
+			panic!("a view of columns analyses to columns");
+		};
+		assert_eq!(columns[0], (path("flag"), group_read(0)));
+		assert_eq!(columns[1], (path("g1"), group_read(1)));
+	}
+
+	/// Two columns that name each other's source, each grouped by its alias.
+	#[test]
+	fn columns_that_swap_the_names_of_their_sources_keep_their_own_groups() {
+		let fields = Fields::Select(vec![column("g1", "g0"), column("g0", "g1"), count("c")]);
+		let groups = Groups(vec![Group(path("g0")), Group(path("g1"))]);
+		let analysis = AggregationAnalysis::analyze_fields_groups(&fields, &groups, true)
+			.expect("the view's fields and groups analyse");
+		assert_eq!(
+			analysis.group_expressions,
+			vec![Expr::Idiom(path("g1")), Expr::Idiom(path("g0"))]
+		);
+		let AggregateFields::Fields(columns) = &analysis.fields else {
+			panic!("a view of columns analyses to columns");
+		};
+		assert_eq!(columns[0], (path("g0"), group_read(0)));
+		assert_eq!(columns[1], (path("g1"), group_read(1)));
+	}
 }
 
 #[cfg(test)]

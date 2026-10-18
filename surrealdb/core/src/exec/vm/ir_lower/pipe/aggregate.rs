@@ -819,16 +819,24 @@ fn plain_names(steps: &[Step]) -> Option<Vec<String>> {
 		.collect()
 }
 
-/// The position of the key a field answers: it is a path a written key is, or its alias is the
-/// text of a key.
+/// The position of the key a field answers: its alias is the text of a key, or else it is a path a
+/// written key is.
+///
+/// The alias is judged first because a key written as the alias of a field means that field (the
+/// keys are evaluated that way), whatever else the name spells. In
+/// `SELECT g1 AS g0, g2 AS g1 ... GROUP BY g0, g1` the path `g1` the first field reads is also the
+/// text of the second key, but the first field is key 0.
 fn key_of(ir: &Ir, eval: &Eval, alias: Option<&OutputPath>, written: &[Written]) -> Option<usize> {
-	if let Some(index) = written_key(ir, eval.row, eval.value, written, true) {
-		return Some(index);
+	if let Some(alias) = alias {
+		let alias = output_keys(alias);
+		if let Some(index) = written
+			.iter()
+			.position(|key| key.plain().and_then(plain_names).is_some_and(|names| names == alias))
+		{
+			return Some(index);
+		}
 	}
-	let alias = output_keys(alias?);
-	written
-		.iter()
-		.position(|key| key.plain().and_then(plain_names).is_some_and(|names| names == alias))
+	written_key(ir, eval.row, eval.value, written, true)
 }
 
 /// A value the host evaluates once for a group, over an object of placeholder fields.
