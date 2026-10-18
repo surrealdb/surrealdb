@@ -29,6 +29,12 @@ use crate::kvs::TransactionType::*;
 use crate::types::PublicValue;
 use crate::{catalog, syn};
 
+/// How far ahead of the verifying host's clock a token's `nbf` claim may be
+/// and still be accepted. Tokens the server issues carry `nbf` equal to the
+/// issue time, so any step of the clock back since issue would otherwise
+/// reject them. Only `nbf` is relaxed: an `exp` in the past is always expired.
+const NBF_LEEWAY_SECS: i64 = 60;
+
 /// Returns the decoding key as wel as the method by which to verify the key against
 fn decode_key(alg: catalog::Algorithm, key: &[u8]) -> Result<(DecodingKey, Validation)> {
 	let (dec, mut val) = match alg {
@@ -251,9 +257,11 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 	let token_data = decode_claims_unverified(token)?;
 	// Convert the token to a SurrealQL object value
 	let value = crate::val::Value::from(token_data.claims.clone().into_claims_object());
-	// Check if the auth token can be used
+	// Check if the auth token can be used. A token is honoured up to
+	// `NBF_LEEWAY_SECS` before its `nbf`, so a host clock stepped backwards
+	// after the token was issued does not invalidate it (RFC 7519 §4.1.5).
 	if let Some(nbf) = token_data.claims.nbf
-		&& nbf > Utc::now().timestamp()
+		&& nbf.saturating_sub(NBF_LEEWAY_SECS) > Utc::now().timestamp()
 	{
 		debug!("Token verification failed due to the 'nbf' claim containing a future time");
 		bail!(AuthError::InvalidAuth);
@@ -2336,6 +2344,45 @@ mod tests {
 		// The same principal is stable across presentations.
 		assert_eq!(with_sub("api", "alice"), with_sub("api", "alice"));
 		assert_eq!(no_sub("api"), no_sub("api"));
+	}
+
+	#[tokio::test]
+	async fn test_token_nbf_leeway() {
+		let secret = "jwt_secret";
+		let key = EncodingKey::from_secret(secret.as_ref());
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			format!("DEFINE ACCESS token ON DATABASE TYPE JWT ALGORITHM HS512 KEY '{secret}' DURATION FOR SESSION 30d, FOR TOKEN 30d")
+				.as_str(),
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
+		let present = |nbf_offset: Duration| {
+			let claims = Claims {
+				iss: Some("surrealdb-test".to_string()),
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some((Utc::now() + nbf_offset).timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ac: Some("token".to_string()),
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Claims::default()
+			};
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			let ds = &ds;
+			async move {
+				let mut sess = Session::default();
+				token(ds, &mut sess, &enc).await
+			}
+		};
+		// A clock stepped back a few seconds leaves the token valid.
+		present(Duration::seconds(5)).await.expect("a token a few seconds early is accepted");
+		// A token that is far from valid yet is still refused.
+		let err = present(Duration::hours(1)).await.expect_err("a distant nbf is refused");
+		assert_eq!(err.to_string(), "There was a problem with authentication");
 	}
 
 	#[tokio::test]
