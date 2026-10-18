@@ -348,15 +348,15 @@ impl WriteCtx {
 		};
 		let version = exec.version_stamp();
 		let tb = match existence {
-			TableExistence::Required => {
-				db_ctx.get_table_def(table, version).await.map_err(ControlFlow::Err)?.ok_or_else(
-					|| {
-						ControlFlow::Err(anyhow::anyhow!(CatalogError::TbNotFound {
-							name: table.to_owned()
-						}))
-					},
-				)?
-			}
+			TableExistence::Required => db_ctx
+				.current_table_def(table, version)
+				.await
+				.map_err(ControlFlow::Err)?
+				.ok_or_else(|| {
+					ControlFlow::Err(anyhow::anyhow!(CatalogError::TbNotFound {
+						name: table.to_owned()
+					}))
+				})?,
 			TableExistence::DefinedOnDemand => {
 				if version.is_none()
 					&& !db_ctx.db.strict

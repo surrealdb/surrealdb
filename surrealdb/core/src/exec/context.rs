@@ -629,27 +629,39 @@ impl DatabaseContext {
 	}
 
 	/// Whether `table` is not defined at `version`, for a read that found no
-	/// record in it and fails with `TbNotFound` where the answer is yes.
-	///
-	/// An absence the execution-level cache holds is read again from the
-	/// transaction before it is believed: a statement block that implicitly
-	/// defines the table after an earlier read cached its absence leaves the
-	/// cache behind the catalog, and a read must not fail for a table the
-	/// block itself defined. The repeat is paid only by a read that is about
-	/// to fail.
+	/// record in it and fails with `TbNotFound` where the answer is yes. The
+	/// absence is the one [`Self::current_table_def`] answers.
 	pub(crate) async fn table_is_undefined(
 		&self,
 		table: &TableName,
 		version: Option<u64>,
 	) -> anyhow::Result<bool> {
-		if self.get_table_def(table, version).await?.is_some() {
-			return Ok(false);
+		Ok(self.current_table_def(table, version).await?.is_none())
+	}
+
+	/// The definition of `table` at `version`, as [`Self::get_table_def`]
+	/// answers it, except that an absence the execution-level cache holds is
+	/// read again from the transaction before it is believed, and the cache
+	/// takes the answer.
+	///
+	/// A statement block that implicitly defines the table after an earlier
+	/// read cached its absence leaves the cache behind the catalog; whatever
+	/// fails, or decides what to write, on the table being absent must not do
+	/// so for a table the block itself defined. The repeat is paid only where
+	/// the cache answers no definition. A versioned lookup bypasses the cache,
+	/// so its absence is read once.
+	pub(crate) async fn current_table_def(
+		&self,
+		table: &TableName,
+		version: Option<u64>,
+	) -> anyhow::Result<Option<Arc<TableDefinition>>> {
+		let cached = self.get_table_def(table, version).await?;
+		if cached.is_some() || version.is_some() {
+			return Ok(cached);
 		}
 		let current = crate::exec::vm::descriptor::definition(self, table, version).await?;
-		if version.is_none() {
-			self.table_def_cache.write().await.insert(table.clone(), current.clone());
-		}
-		Ok(current.is_none())
+		self.table_def_cache.write().await.insert(table.clone(), current.clone());
+		Ok(current)
 	}
 
 	/// Look up all index definitions for a table, checking the execution-level cache first.

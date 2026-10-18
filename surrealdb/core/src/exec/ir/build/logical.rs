@@ -3118,6 +3118,16 @@ fn bind_join(cx: &mut BindCx<'_>, join: &LogicalJoin) -> Result<Flow, IrError> {
 fn bind_write(cx: &mut BindCx<'_>, op: &LogicalOp, write: &LogicalWrite) -> Result<Flow, IrError> {
 	let bundle = cx.take_bundle_table();
 	let named = cx.take_named_table().or_else(|| written_table(write));
+	// As for a `LET` of a protected name ([`bind_let`]): where the write is planned with its
+	// top-level statement the refusal is the whole statement's, raised before any of it runs.
+	if let Some(refusal) = mixed_targets_search_refusal(write) {
+		if cx.eager() {
+			cx.hoist_refusal(refusal.clone());
+			return raise_refused(cx, refusal);
+		}
+		cx.raise(RaiseKind::Refused(Box::new(refusal)))?;
+		return Ok(Flow::Diverged);
+	}
 	let mut facts = write_facts(write);
 	// The write of a view row runs the view table's order for the action its view's maintenance
 	// settled, whatever statement stands for it.
@@ -3497,7 +3507,10 @@ fn bind_subjects(
 			}
 		},
 		LogicalWriteSource::Rows(rows) => match value_targets(rows) {
-			Some(targets) => {
+			Some(ValueTargets {
+				targets,
+				..
+			}) => {
 				let Some(values) = bind_all(cx, &targets)? else {
 					return Ok(None);
 				};
@@ -3510,35 +3523,183 @@ fn bind_subjects(
 	}
 }
 
-/// The targets a write's rows name when they are values: an expression, a parameter or a call,
-/// unlocked, or a union of them, in the order the statement wrote them. Each value is classified
-/// as a target written in place is: a record id or an object whose `id` names one is the stored
-/// record, a table is its records, and any other value is refused when the write runs. `None` for
-/// any other rows.
-fn value_targets(rows: &LogicalOp) -> Option<Vec<LogicalExpr>> {
-	if let LogicalOp::Values(values) = rows {
-		return (!values.for_update).then(|| vec![values.expr.clone()]);
-	}
-	if let LogicalOp::Source(source) = rows {
-		if source.for_update {
-			return None;
+/// What a refused `UPDATE` or `DELETE` is answered with when its targets mix stored records with
+/// values under a nearest-neighbour condition ([`mixed_targets_search_refusal`]).
+const MIXED_TARGETS_UNDER_KNN: &str = "A nearest-neighbour (KNN) condition cannot be used on a \
+	write whose targets mix a table or record with a subquery, parameter or value. Write those \
+	targets in separate statements instead.";
+
+/// What a refused `UPDATE` or `DELETE` is answered with when its targets list a nested `SELECT`
+/// beside other targets, and no table, under a nearest-neighbour or full-text condition
+/// ([`mixed_targets_search_refusal`]).
+const LISTED_SUBQUERY_UNDER_SEARCH: &str = "A nearest-neighbour (KNN) or full-text condition \
+	cannot be used on a write whose targets list a subquery beside other targets but no table. \
+	Write those targets in separate statements instead.";
+
+/// The targets a write's rows name, written as targets rather than read as rows
+/// ([`value_targets`]).
+#[derive(Debug, PartialEq)]
+struct ValueTargets {
+	/// Every target, in the order the statement wrote them.
+	targets: Vec<LogicalExpr>,
+	/// Whether a table, a record id or range, or a mock is among them beside the values.
+	stored: bool,
+	/// Whether a table is among them beside the values.
+	table: bool,
+	/// Whether a nested `SELECT` is among them.
+	subquery: bool,
+}
+
+/// The targets a write's rows name when they are values, in the order the statement wrote them.
+/// `None` for rows the relational plan reads.
+///
+/// A value is an expression, a parameter or a call, unlocked. One alone is a target, and so is
+/// every leaf of a union that holds at least one value or nested `SELECT`, when each other leaf
+/// names stored records: a table, a record id or range, or a mock, unlocked. Each value is
+/// classified as a target written in place is: a record id or an object whose `id` names one is
+/// the stored record, which the write reads from storage; a table is its records; any other value
+/// is refused when the write runs. Read as rows beside a table's records, a value would be written
+/// as the record it names, its own fields in place of the stored ones, so a union holding one is
+/// written as targets whole. Each target is evaluated when the write reaches it, after the
+/// subjects of every target before it were written.
+///
+/// The rows path keeps a table alone, a union naming only stored records (whose read of a table
+/// can take an index), a nested `SELECT` alone, and a locked target.
+#[allow(clippy::wildcard_enum_match_arm)]
+fn value_targets(rows: &LogicalOp) -> Option<ValueTargets> {
+	let mut targets = Vec::new();
+	let listed = match rows {
+		LogicalOp::UnionAll(union) => {
+			let listed = listed_targets(&union.inputs, &mut targets)?;
+			if !listed.valued {
+				return None;
+			}
+			listed
 		}
-		return match &source.source {
-			SourceRef::Param(param) => Some(vec![LogicalExpr::Param(param.clone())]),
-			SourceRef::Dynamic(expr) => Some(vec![expr.clone()]),
+		leaf => {
+			targets.push(value_target(leaf)?);
+			Listed::default()
+		}
+	};
+	Some(ValueTargets {
+		targets,
+		stored: listed.stored,
+		table: listed.table,
+		subquery: listed.subquery,
+	})
+}
+
+/// What the leaves of a union of write targets hold ([`listed_targets`]).
+#[derive(Clone, Copy, Default)]
+struct Listed {
+	/// A value or a nested `SELECT` is among them.
+	valued: bool,
+	/// A table, a record id or range, or a mock is among them.
+	stored: bool,
+	/// A table is among them.
+	table: bool,
+	/// A nested `SELECT` is among them.
+	subquery: bool,
+}
+
+/// Pushes the target each leaf of `inputs` names onto `targets`, in order, nested unions
+/// flattened. `None` when a leaf is neither a value, a nested `SELECT`, nor stored records.
+#[allow(clippy::wildcard_enum_match_arm)]
+fn listed_targets(inputs: &[LogicalOp], targets: &mut Vec<LogicalExpr>) -> Option<Listed> {
+	let mut listed = Listed::default();
+	for input in inputs {
+		match input {
+			LogicalOp::UnionAll(union) => {
+				let nested = listed_targets(&union.inputs, targets)?;
+				listed.valued |= nested.valued;
+				listed.stored |= nested.stored;
+				listed.table |= nested.table;
+				listed.subquery |= nested.subquery;
+			}
+			LogicalOp::Subquery(subquery) => {
+				targets.push(LogicalExpr::Subquery(subquery.input.clone()));
+				listed.valued = true;
+				listed.subquery = true;
+			}
+			LogicalOp::Source(LogicalSource {
+				source,
+				for_update: false,
+				..
+			}) if stored_target(source).is_some() => {
+				targets.extend(stored_target(source));
+				listed.stored = true;
+				listed.table |= matches!(source, SourceRef::Table(_));
+			}
+			leaf => {
+				targets.push(value_target(leaf)?);
+				listed.valued = true;
+			}
+		}
+	}
+	Some(listed)
+}
+
+/// The target a source naming stored records is written as: a table, a record id or range, or a
+/// mock. `None` for any other source.
+fn stored_target(source: &SourceRef) -> Option<LogicalExpr> {
+	match source {
+		SourceRef::Table(table) => Some(LogicalExpr::Table(table.clone())),
+		SourceRef::RecordId(rid) => Some(LogicalExpr::RecordId(rid.clone())),
+		SourceRef::Mock(mock) => Some(LogicalExpr::Mock(mock.clone())),
+		SourceRef::Param(_) | SourceRef::Dynamic(_) => None,
+	}
+}
+
+/// The value a leaf of a write's rows is, unlocked: a literal, a parameter or a dynamic
+/// expression. `None` for any other leaf.
+#[allow(clippy::wildcard_enum_match_arm)]
+fn value_target(leaf: &LogicalOp) -> Option<LogicalExpr> {
+	match leaf {
+		LogicalOp::Values(values) => (!values.for_update).then(|| values.expr.clone()),
+		LogicalOp::Source(source) if !source.for_update => match &source.source {
+			SourceRef::Param(param) => Some(LogicalExpr::Param(param.clone())),
+			SourceRef::Dynamic(expr) => Some(expr.clone()),
 			SourceRef::Table(_) | SourceRef::RecordId(_) | SourceRef::Mock(_) => None,
-		};
+		},
+		_ => None,
 	}
-	if let LogicalOp::UnionAll(union) = rows
-		&& !union.inputs.is_empty()
-	{
-		let mut targets = Vec::new();
-		for input in &union.inputs {
-			targets.extend(value_targets(input)?);
-		}
-		return Some(targets);
+}
+
+/// The refusal of an `UPDATE` or `DELETE` written as a list of targets ([`value_targets`]) whose
+/// condition searches an index the list cannot be answered from:
+///
+/// - a nearest-neighbour condition over a list holding stored records ([`ValueTargets::stored`]) or
+///   a nested `SELECT` ([`ValueTargets::subquery`]) beside its other targets. A write over targets
+///   runs no search, so the condition would match no record of a table the list names whole, and a
+///   read of the list would write a value as the record it names;
+/// - a full-text condition over a list holding a nested `SELECT` and no table
+///   ([`ValueTargets::table`]). The condition is answered from the full-text index for the records
+///   of a table the statement names whole only, so over such a list it would match no record, where
+///   a read of the list would judge, and write, each value as the record it names.
+///
+/// A value, or a list of values alone, is written as the same statement naming each would be, and
+/// is not refused.
+fn mixed_targets_search_refusal(write: &LogicalWrite) -> Option<Refusal> {
+	let LogicalWriteSource::Rows(rows) = &write.source else {
+		return None;
+	};
+	let cond = write.cond.as_ref()?;
+	let knn = crate::exec::planner::util::has_knn_operator(cond);
+	let matches = crate::exec::planner::util::expr_contains_matches(cond);
+	if !knn && !matches {
+		return None;
 	}
-	None
+	let targets = value_targets(rows)?;
+	let message = if knn && targets.stored {
+		MIXED_TARGETS_UNDER_KNN
+	} else if targets.subquery && (knn || !targets.table) {
+		LISTED_SUBQUERY_UNDER_SEARCH
+	} else {
+		return None;
+	};
+	Some(Refusal::Query {
+		message: message.to_owned(),
+	})
 }
 
 /// One tuple of an `INSERT … VALUES`: an `expr.tuple_row` that writes each value at the place it is
@@ -5692,5 +5853,108 @@ mod tests {
 		let (row, _) = args_of(regions[2]);
 		assert!(!ir.uses(reference).is_empty(), "`$reference` reads the second argument");
 		assert!(!ir.uses(row).is_empty(), "`$this` reads the first argument");
+	}
+
+	/// The rows of the `UPDATE` `sql` lowers to.
+	fn update_rows(sql: &str) -> LogicalOp {
+		let ast = crate::syn::parse(sql).expect("the statement parses");
+		let TopLevelExpr::Expr(statement) =
+			ast.expressions.into_iter().next().expect("one statement")
+		else {
+			panic!("expected an expression statement");
+		};
+		let LogicalOp::Write(write) = lower(statement).expect("the statement lowers") else {
+			panic!("expected a write");
+		};
+		let crate::expr::logical::LogicalWriteSource::Rows(rows) = write.source else {
+			panic!("expected rows");
+		};
+		*rows
+	}
+
+	/// A list mixing stored records with a value, a parameter or a nested `SELECT` is written as
+	/// targets, every target in the order written; a list naming only stored records, a table
+	/// alone and a nested `SELECT` alone are read as rows.
+	#[test]
+	fn a_list_holding_a_value_is_written_as_targets() {
+		use surrealdb_types::ToSql;
+
+		use super::{ValueTargets, value_targets};
+		let targets = |sql: &str| {
+			let ValueTargets {
+				targets,
+				stored,
+				..
+			} = value_targets(&update_rows(sql))?;
+			// A nested `SELECT` renders as its plan, so it is named by its kind alone.
+			let shown = targets.iter().map(|target| {
+				if let LogicalExpr::Subquery(_) = target {
+					"subquery".to_owned()
+				} else {
+					target.to_sql()
+				}
+			});
+			Some((shown.collect::<Vec<_>>(), stored))
+		};
+		let listed = |targets: &[&str], stored: bool| {
+			Some((targets.iter().map(|target| (*target).to_owned()).collect::<Vec<_>>(), stored))
+		};
+		assert_eq!(targets("UPDATE nn, $o SET a = 1"), listed(&["nn", "$o"], true));
+		assert_eq!(
+			targets("UPDATE nn:1, |nn:1..2|, nn:1..=2, (SELECT VALUE nn:2 FROM ONLY 1) SET a = 1"),
+			listed(&["nn:1", "|nn:1..2|", "nn:1..=2", "subquery"], true)
+		);
+		assert_eq!(
+			targets("UPDATE (SELECT VALUE nn:2 FROM ONLY 1), { id: nn:1 } SET a = 1"),
+			listed(&["subquery", "{ id: nn:1 }"], false)
+		);
+		assert_eq!(targets("UPDATE $a, $b SET a = 1"), listed(&["$a", "$b"], false));
+		assert_eq!(targets("UPDATE $a SET a = 1"), listed(&["$a"], false));
+		for rows in [
+			"UPDATE nn SET a = 1",
+			"UPDATE nn, nn:1 SET a = 1",
+			"UPDATE (SELECT VALUE nn:2 FROM ONLY 1) SET a = 1",
+		] {
+			assert_eq!(targets(rows), None, "`{rows}` is read as rows");
+		}
+	}
+
+	/// A list of stored targets nested in a list beside a value is written as targets, every
+	/// target in the order written; nested lists naming only stored records are read as rows.
+	/// SurrealQL writes no nested list, so the lists are built here.
+	#[test]
+	fn a_nested_list_of_stored_targets_beside_a_value_is_targets() {
+		use super::{ValueTargets, value_targets};
+		use crate::expr::Param;
+		use crate::expr::logical::{LogicalSource, LogicalUnionAll, SourceRef};
+		let source = |expr: LogicalExpr| {
+			LogicalOp::Source(LogicalSource {
+				source: SourceRef::classify(expr),
+				schema: None,
+				with: None,
+				for_update: false,
+			})
+		};
+		let table = |name: &str| LogicalExpr::Table(name.into());
+		let param = |name: &str| LogicalExpr::Param(Param::from(name.to_string()));
+		let union = |inputs: Vec<LogicalOp>| {
+			LogicalOp::UnionAll(LogicalUnionAll {
+				inputs,
+			})
+		};
+		let op =
+			union(vec![union(vec![source(table("a")), source(table("b"))]), source(param("x"))]);
+		assert_eq!(
+			value_targets(&op),
+			Some(ValueTargets {
+				targets: vec![table("a"), table("b"), param("x")],
+				stored: true,
+				table: true,
+				subquery: false,
+			})
+		);
+		let op =
+			union(vec![union(vec![source(table("a")), source(table("b"))]), source(table("c"))]);
+		assert_eq!(value_targets(&op), None);
 	}
 }

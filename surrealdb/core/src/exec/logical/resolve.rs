@@ -1285,6 +1285,14 @@ impl Resolver<'_> {
 				let rows = scope.writing(write_clause(&write.statement));
 				let mut op =
 					LogicalOp::Write(write).map_children(|child| self.resolve_op(child, &rows))?;
+				// A leaf the caller may not write yields no row; a list drops it.
+				if let LogicalOp::Write(LogicalWrite {
+					source: crate::expr::logical::LogicalWriteSource::Rows(input),
+					..
+				}) = &mut op
+				{
+					drop_refused_leaves(input);
+				}
 				self.resolve_scalars(&mut op, &scope)?;
 				op
 			}
@@ -3317,6 +3325,53 @@ fn reassemble(stages: Vec<LogicalOp>, leaf: LogicalOp) -> LogicalOp {
 		current = stage;
 	}
 	current
+}
+
+/// Whether `op` is a leaf the binding refused: a table or record whose clause
+/// for the statement is `NONE` for the caller, under a permission filter of
+/// `false` ([`Resolver::filtered_source`]). It yields no row, so the write has
+/// nothing to judge there.
+fn is_refused_leaf(op: &LogicalOp) -> bool {
+	matches!(
+		op,
+		LogicalOp::PermissionFilter(LogicalPermissionFilter {
+			predicate: LogicalExpr::Literal(LogicalLiteral::Bool(false)),
+			guard: GuardKind::Write,
+			..
+		})
+	)
+}
+
+/// Remove from a mutation's list of row sources each leaf the binding refused
+/// ([`is_refused_leaf`]).
+///
+/// A refused leaf yields no row, so removing it changes no write. It only
+/// stops the leaf, which is no longer a plain table or record, from keeping
+/// the rest of the list from being classified as write targets. A list left
+/// with one leaf is that leaf; a list whose every leaf was refused keeps its
+/// first, which yields nothing, as the list did. A single source is left as it
+/// is.
+fn drop_refused_leaves(op: &mut LogicalOp) {
+	let LogicalOp::UnionAll(LogicalUnionAll {
+		inputs,
+	}) = op
+	else {
+		return;
+	};
+	inputs.iter_mut().for_each(drop_refused_leaves);
+	if !inputs.iter().any(is_refused_leaf) {
+		return;
+	}
+	if inputs.iter().all(is_refused_leaf) {
+		inputs.truncate(1);
+	} else {
+		inputs.retain(|input| !is_refused_leaf(input));
+	}
+	if inputs.len() == 1
+		&& let Some(only) = inputs.pop()
+	{
+		*op = only;
+	}
 }
 
 #[cfg(all(test, feature = "kv-mem"))]

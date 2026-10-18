@@ -588,8 +588,10 @@ impl WriteGate {
 			return Ok(*admitted);
 		}
 		let db_ctx = exec.database().context("a write requires a database context")?;
-		let def =
-			db_ctx.get_table_def(table, exec.version_stamp()).await.map_err(ControlFlow::Err)?;
+		let def = db_ctx
+			.current_table_def(table, exec.version_stamp())
+			.await
+			.map_err(ControlFlow::Err)?;
 		// Only an outright `NONE` declines here. A predicate is judged per
 		// record by the order's own gate, against a record this one has not
 		// seen.
@@ -621,8 +623,10 @@ impl WriteGate {
 			return Ok(true);
 		}
 		let db_ctx = exec.database().context("a write requires a database context")?;
-		let def =
-			db_ctx.get_table_def(table, exec.version_stamp()).await.map_err(ControlFlow::Err)?;
+		let def = db_ctx
+			.current_table_def(table, exec.version_stamp())
+			.await
+			.map_err(ControlFlow::Err)?;
 		Ok(def.is_none_or(|def| !def.permissions.create.is_none()))
 	}
 }

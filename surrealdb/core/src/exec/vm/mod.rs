@@ -130,6 +130,9 @@ mod tests_statement_cache;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod tests_write_fanout;
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
+mod tests_write_targets;
 // The golden is recorded from a build that runs no script and no model.
 
 /// The units of a root program or a function bundle, which the ids of the
