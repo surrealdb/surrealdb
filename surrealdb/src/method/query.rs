@@ -433,11 +433,7 @@ where
 						)
 						.await
 						.map(|rx| {
-							Stream::new(
-								Arc::clone(&client.inner).into(),
-								live_query_id.into(),
-								Some(rx),
-							)
+							Stream::new(client.share_session(), live_query_id.into(), Some(rx))
 						});
 						indexed_results.live_queries.insert(index, live_stream);
 						indexed_results

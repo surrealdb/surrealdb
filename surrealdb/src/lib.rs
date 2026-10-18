@@ -256,7 +256,23 @@ impl Inner {
 pub struct Surreal<C: Connection> {
 	inner: Arc<Inner>,
 	session_id: Uuid,
+	/// Ends the session when the last handle sharing it is dropped.
+	lease: Arc<SessionLease>,
 	engine: PhantomData<C>,
+}
+
+/// Holds a session open. The session is detached when the last handle that
+/// shares it goes away, so a live stream can outlive the client that
+/// created it without losing the session its notifications are delivered to.
+struct SessionLease {
+	inner: Arc<Inner>,
+	session_id: Uuid,
+}
+
+impl Drop for SessionLease {
+	fn drop(&mut self) {
+		self.inner.session_clone.sender.try_send(SessionId::Drop(self.session_id)).ok();
+	}
 }
 
 #[doc(hidden)]
@@ -268,6 +284,10 @@ where
 		let session_id = Uuid::new_v4();
 		inner.session_clone.sender.try_send(SessionId::Initial(session_id)).ok();
 		Surreal {
+			lease: Arc::new(SessionLease {
+				inner: Arc::clone(&inner),
+				session_id,
+			}),
 			inner,
 			session_id,
 			engine: PhantomData,
@@ -341,6 +361,10 @@ where
 		let session_id = Uuid::new_v4();
 		self.inner.clone_session(self.session_id, session_id);
 		Self {
+			lease: Arc::new(SessionLease {
+				inner: Arc::clone(&self.inner),
+				session_id,
+			}),
 			inner: Arc::clone(&self.inner),
 			session_id,
 			engine: self.engine,
@@ -348,12 +372,19 @@ where
 	}
 }
 
-impl<C> Drop for Surreal<C>
+impl<C> Surreal<C>
 where
 	C: Connection,
 {
-	fn drop(&mut self) {
-		self.inner.session_clone.sender.try_send(SessionId::Drop(self.session_id)).ok();
+	/// A handle on this same session, which stays open until every such handle
+	/// is dropped. Unlike `clone`, it does not start a new session.
+	pub(crate) fn share_session<D: Connection>(&self) -> Surreal<D> {
+		Surreal {
+			inner: Arc::clone(&self.inner),
+			session_id: self.session_id,
+			lease: Arc::clone(&self.lease),
+			engine: PhantomData,
+		}
 	}
 }
 

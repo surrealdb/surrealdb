@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use async_channel::Receiver;
@@ -158,7 +157,7 @@ where
 		};
 
 		let rx = register(router, id, client.session_id).await?;
-		Ok(Stream::new(Arc::clone(&client.inner).into(), id, Some(rx)))
+		Ok(Stream::new(client.share_session(), id, Some(rx)))
 	})
 }
 
@@ -346,7 +345,7 @@ pub(crate) fn kill<Client>(client: &Surreal<Client>, uuid: Uuid)
 where
 	Client: Connection,
 {
-	let client = client.clone();
+	let client: Surreal<Client> = client.share_session();
 	spawn(async move {
 		if let Ok(router) = client.inner.router.extract()
 			&& let Err(error) = router.engine.kill(ctx(client.session_id), uuid).await

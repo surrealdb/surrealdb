@@ -522,7 +522,7 @@ where
 				false => Err(Error::internal(format!("Query statement {} is out of bounds", self))),
 			})?;
 		Ok(crate::method::QueryStream(Either::Left(Stream {
-			client: stream.client.clone(),
+			client: stream.client.share_session(),
 			id: mem::take(&mut stream.id),
 			rx: stream.rx.take(),
 			response_type: PhantomData,
@@ -565,7 +565,7 @@ where
 				}
 			};
 			streams.push(Stream {
-				client: stream.client.clone(),
+				client: stream.client.share_session(),
 				id: mem::take(&mut stream.id),
 				rx: stream.rx.take(),
 				response_type: PhantomData,
