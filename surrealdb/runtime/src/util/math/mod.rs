@@ -1,6 +1,7 @@
 use core::f64;
 
 use anyhow::Result;
+use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::{Decimal, MathematicalOps};
 use surrealdb_expr::val::{Number, TryAdd, TryPow};
 
@@ -24,10 +25,19 @@ pub async fn mean(array: &[Number]) -> Result<Number> {
 		return Ok(f64::NAN.into());
 	}
 	let len = array.len();
-	let sum = crate::fuel::try_fold(array, Number::from(0.0f64), |sum, n| sum.try_add(*n)).await?;
+	let (sum, all_int) =
+		crate::fuel::try_fold(array, (Number::Int(0), true), |(sum, all_int), n| {
+			Ok::<_, anyhow::Error>((sum.add_exact(*n)?, all_int && n.is_int()))
+		})
+		.await?;
 	match sum {
-		Number::Int(_) => unreachable!(),
+		// Integers are summed exactly, so the result is the one division of
+		// the true total by the count and does not depend on element order.
+		Number::Int(x) => Ok((x as f64 / len as f64).into()),
 		Number::Float(x) => Ok((x / len as f64).into()),
+		// Decimal inputs keep a decimal mean. A decimal total of integers
+		// (one that left `i64`) is a float mean, as for any integers.
+		Number::Decimal(d) if all_int => Ok((d.to_f64().unwrap_or(f64::NAN) / len as f64).into()),
 		Number::Decimal(d) => Ok((d / Decimal::from(len)).into()),
 	}
 }

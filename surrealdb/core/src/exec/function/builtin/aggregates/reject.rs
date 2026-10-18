@@ -40,6 +40,10 @@ pub(super) struct Rejected {
 	reason: Option<String>,
 	/// Whether any value was actually folded into the accumulator.
 	folded: bool,
+	/// The first error folding a value raised (an integer total leaving
+	/// `i64`). Unlike a rejection it fails the group however many other
+	/// values folded, since the total is then no answer.
+	failure: Option<String>,
 }
 
 impl Rejected {
@@ -100,15 +104,29 @@ impl Rejected {
 
 	/// The rejection's reason and whether a value was folded, for a saved
 	/// state.
-	pub(super) fn parts(&self) -> (&Option<String>, bool) {
-		(&self.reason, self.folded)
+	pub(super) fn parts(&self) -> (&Option<String>, bool, &Option<String>) {
+		(&self.reason, self.folded, &self.failure)
 	}
 
 	/// A rejection rebuilt from the parts [`Self::parts`] answered.
-	pub(super) fn from_parts(reason: Option<String>, folded: bool) -> Self {
+	pub(super) fn from_parts(
+		reason: Option<String>,
+		folded: bool,
+		failure: Option<String>,
+	) -> Self {
 		Self {
 			reason,
 			folded,
+			failure,
+		}
+	}
+
+	/// Record the error folding a value raised, keeping the first so the
+	/// reported error does not depend on the order rows arrive in. The group
+	/// fails when it is finalised.
+	pub(super) fn fail(&mut self, error: &anyhow::Error) {
+		if self.failure.is_none() {
+			self.failure = Some(error.to_string());
 		}
 	}
 
@@ -120,11 +138,17 @@ impl Rejected {
 		if self.reason.is_none() {
 			self.reason.clone_from(&other.reason);
 		}
+		if self.failure.is_none() {
+			self.failure.clone_from(&other.failure);
+		}
 	}
 
 	/// Fail if a wrong-kind value was seen and nothing folded. Called from
 	/// `finalize`.
 	pub(super) fn check(&self) -> Result<()> {
+		if let Some(failure) = &self.failure {
+			bail!("{failure}");
+		}
 		if let Some(reason) = &self.reason
 			&& !self.folded
 		{
@@ -136,5 +160,6 @@ impl Rejected {
 	pub(super) fn reset(&mut self) {
 		self.reason = None;
 		self.folded = false;
+		self.failure = None;
 	}
 }

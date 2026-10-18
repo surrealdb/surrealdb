@@ -51,9 +51,21 @@ pub(crate) struct SumAccumulator {
 
 impl SumAccumulator {
 	/// Fold `other`, a partial state over the same group, into this one.
-	pub(crate) fn absorb(&mut self, other: &Self) {
+	pub(crate) fn absorb(&mut self, other: &Self) -> Result<()> {
 		self.rejected.merge_from(&other.rejected);
-		self.sum = self.sum + other.sum;
+		self.add(other.sum);
+		Ok(())
+	}
+}
+
+impl SumAccumulator {
+	/// Fold `n` into the total. A total leaving `i64` fails the group when it
+	/// is finalised: wrapping would answer with a number that is not the sum.
+	fn add(&mut self, n: Number) {
+		match self.sum.try_add(n) {
+			Ok(sum) => self.sum = sum,
+			Err(e) => self.rejected.fail(&e),
+		}
 	}
 }
 
@@ -71,7 +83,7 @@ impl Accumulator for SumAccumulator {
 
 	fn update(&mut self, value: Value) -> Result<()> {
 		if let Some(n) = self.rejected.number("math::sum", &value) {
-			self.sum = self.sum + n;
+			self.add(n);
 		}
 		Ok(())
 	}
@@ -80,7 +92,7 @@ impl Accumulator for SumAccumulator {
 	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
 		for value in values {
 			if let Some(n) = self.rejected.number("math::sum", value) {
-				self.sum = self.sum + n;
+				self.add(n);
 			}
 		}
 		Ok(())
@@ -91,8 +103,7 @@ impl Accumulator for SumAccumulator {
 			.as_any()
 			.downcast_ref::<SumAccumulator>()
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
-		self.absorb(other);
-		Ok(())
+		self.absorb(other)
 	}
 
 	fn finalize(&self) -> Result<Value> {
@@ -153,10 +164,23 @@ pub(crate) struct MeanAccumulator {
 
 impl MeanAccumulator {
 	/// Fold `other`, a partial state over the same group, into this one.
-	pub(crate) fn absorb(&mut self, other: &Self) {
+	pub(crate) fn absorb(&mut self, other: &Self) -> Result<()> {
 		self.rejected.merge_from(&other.rejected);
-		self.sum = self.sum + other.sum;
+		self.add(other.sum);
 		self.count += other.count;
+		Ok(())
+	}
+}
+
+impl MeanAccumulator {
+	/// Fold `n` into the total, which stays exact: integers that leave `i64`
+	/// continue as a decimal. A total no decimal holds fails the group when it
+	/// is finalised.
+	fn add(&mut self, n: Number) {
+		match self.sum.add_exact(n) {
+			Ok(sum) => self.sum = sum,
+			Err(e) => self.rejected.fail(&e),
+		}
 	}
 }
 
@@ -175,7 +199,7 @@ impl Accumulator for MeanAccumulator {
 
 	fn update(&mut self, value: Value) -> Result<()> {
 		if let Some(n) = self.rejected.number("math::mean", &value) {
-			self.sum = self.sum + n;
+			self.add(n);
 			self.count += 1;
 		}
 		Ok(())
@@ -185,7 +209,7 @@ impl Accumulator for MeanAccumulator {
 	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
 		for value in values {
 			if let Some(n) = self.rejected.number("math::mean", value) {
-				self.sum = self.sum + n;
+				self.add(n);
 				self.count += 1;
 			}
 		}
@@ -197,8 +221,7 @@ impl Accumulator for MeanAccumulator {
 			.as_any()
 			.downcast_ref::<MeanAccumulator>()
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
-		self.absorb(other);
-		Ok(())
+		self.absorb(other)
 	}
 
 	fn finalize(&self) -> Result<Value> {

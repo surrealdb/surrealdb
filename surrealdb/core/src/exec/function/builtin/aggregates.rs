@@ -127,8 +127,8 @@ impl AccumulatorState {
 		match (self, other) {
 			(Self::Count(a), Self::Count(b)) => a.absorb(&b),
 			(Self::CountField(a), Self::CountField(b)) => a.absorb(&b),
-			(Self::Sum(a), Self::Sum(b)) => a.absorb(&b),
-			(Self::Mean(a), Self::Mean(b)) => a.absorb(&b),
+			(Self::Sum(a), Self::Sum(b)) => return a.absorb(&b),
+			(Self::Mean(a), Self::Mean(b)) => return a.absorb(&b),
 			(Self::Min(a), Self::Min(b)) => a.absorb(&b),
 			(Self::Max(a), Self::Max(b)) => a.absorb(&b),
 			(Self::Boxed(a), Self::Boxed(b)) => return a.merge(b),

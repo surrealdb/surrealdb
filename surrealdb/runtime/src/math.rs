@@ -4,7 +4,7 @@ use anyhow::{Result, bail, ensure};
 use surrealdb_cnf::GENERATION_ALLOCATION_LIMIT;
 use surrealdb_expr::expr::Error;
 use surrealdb_expr::val::number::Sorted;
-use surrealdb_expr::val::{Number, TryPow, Value};
+use surrealdb_expr::val::{Number, TryAdd, TryPow, Value};
 use surrealdb_types::ToSql;
 
 use crate::util::math::interquartile::Interquartile;
@@ -283,7 +283,7 @@ pub async fn stddev_walk((array,): (Vec<Number>,)) -> Result<Value> {
 }
 
 pub async fn sum_walk((array,): (Vec<Number>,)) -> Result<Value> {
-	Ok(fuel::fold(array, Number::Int(0), |sum, n| sum + n).await.into())
+	Ok(fuel::try_fold(array, Number::Int(0), |sum, n| sum.try_add(n)).await?.into())
 }
 pub fn tan((arg,): (Number,)) -> Result<Value> {
 	Ok(arg.tan().into())

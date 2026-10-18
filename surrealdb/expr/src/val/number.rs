@@ -279,6 +279,47 @@ impl Number {
 		matches!(self, Number::Int(_))
 	}
 
+	/// Adds `other` to a running total that must stay exact.
+	///
+	/// Two integers whose sum does not fit an `i64` are summed as a `Decimal`
+	/// rather than wrapping or failing. A float anywhere makes the total a
+	/// float, whichever side holds the decimal that came of widening integers,
+	/// so a total does not depend on the order its terms arrive in. Every other
+	/// pairing is [`TryAdd`]. Used by aggregates that finish with a division
+	/// (`math::mean`), where an intermediate total may leave `i64` range and
+	/// come back.
+	pub fn add_exact(self, other: Number) -> Result<Number> {
+		match (self, other) {
+			(Number::Int(v), Number::Int(w)) => Ok(match v.checked_add(w) {
+				Some(sum) => Number::Int(sum),
+				None => Number::Decimal(Decimal::from(v) + Decimal::from(w)),
+			}),
+			(Number::Decimal(d), Number::Float(f)) | (Number::Float(f), Number::Decimal(d)) => {
+				Ok(Number::Float(d.to_f64().unwrap_or(f64::NAN) + f))
+			}
+			(v, w) => v.try_add(w),
+		}
+	}
+
+	/// Subtracts `other` from a running total kept by [`Self::add_exact`], with
+	/// the same widening: two integers whose difference does not fit an `i64`
+	/// are subtracted as a `Decimal`, and a float makes the result a float.
+	pub fn sub_exact(self, other: Number) -> Result<Number> {
+		match (self, other) {
+			(Number::Int(v), Number::Int(w)) => Ok(match v.checked_sub(w) {
+				Some(difference) => Number::Int(difference),
+				None => Number::Decimal(Decimal::from(v) - Decimal::from(w)),
+			}),
+			(Number::Decimal(d), Number::Float(f)) => {
+				Ok(Number::Float(d.to_f64().unwrap_or(f64::NAN) - f))
+			}
+			(Number::Float(f), Number::Decimal(d)) => {
+				Ok(Number::Float(f - d.to_f64().unwrap_or(f64::NAN)))
+			}
+			(v, w) => v.try_sub(w),
+		}
+	}
+
 	pub fn is_float(&self) -> bool {
 		matches!(self, Number::Float(_))
 	}

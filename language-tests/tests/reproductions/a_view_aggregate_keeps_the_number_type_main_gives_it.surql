@@ -4,7 +4,7 @@ namespace = true
 database = true
 
 [test]
-reason = "A sum or a mean a view keeps over integers is a float, whether the view is filled from rows that exist when it is defined or maintained as rows are written, and one over decimals is a decimal."
+reason = "A mean a view keeps over integers is a float, whether the view is filled from rows that exist when it is defined or maintained as rows are written; a sum over integers is an exact integer, as the ad hoc sum is; over decimals both are decimals. The types are pinned with type::is_*, since the numeric expectations below are type-blind."
 
 [[test.results]]
 value = "[{ g: 'a', id: e:1, v: 1 }]"
@@ -69,6 +69,15 @@ value = "[{ avg: 1.750dec, id: m3:[], s: 3.5dec }]"
 [[test.results]]
 value = "[{ avg: 5.666666666666667f, s: 17 }]"
 
+[[test.results]]
+value = "[{ avg_float: true, mn_int: true, s_int: true }]"
+
+[[test.results]]
+value = "[{ g: 'a', id: e:2, v: 11 }]"
+
+[[test.results]]
+value = "[{ avg_float: true, mn_int: true, s_int: true }]"
+
 */
 CREATE e:1 SET v = 1, g = 'a';
 CREATE e:2 SET v = 2, g = 'a';
@@ -91,3 +100,6 @@ CREATE f:2 SET v = 2dec;
 DEFINE TABLE m3 AS SELECT math::mean(v) AS avg, math::sum(v) AS s FROM f GROUP ALL;
 SELECT * FROM m3;
 SELECT math::mean(v) AS avg, math::sum(v) AS s FROM e GROUP ALL;
+SELECT type::is_float(avg) AS avg_float, type::is_int(s) AS s_int, type::is_int(mn) AS mn_int FROM m;
+UPDATE e:2 SET v = 11;
+SELECT type::is_float(avg) AS avg_float, type::is_int(s) AS s_int, type::is_int(mn) AS mn_int FROM m;

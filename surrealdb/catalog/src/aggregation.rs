@@ -105,12 +105,12 @@ impl Aggregation {
 			},
 			Aggregation::Sum(arg) => AggregationStat::Sum {
 				arg,
-				sum: 0.0.into(),
+				sum: Number::Int(0),
 			},
 			Aggregation::Mean(arg) => AggregationStat::Mean {
 				arg,
 				count: 0,
-				sum: 0.0.into(),
+				sum: Number::Int(0),
 			},
 			Aggregation::StdDev(arg) => AggregationStat::StdDev {
 				arg,
@@ -660,7 +660,7 @@ pub fn remove_from_aggregation_stats(
 				let Value::Number(n) = &arguments[*arg] else {
 					fail!("Old record wasn't a number but was created with a number");
 				};
-				*sum = *sum - *n;
+				*sum = (*sum).try_sub(*n)?;
 			}
 			AggregationStat::Mean {
 				arg,
@@ -670,7 +670,7 @@ pub fn remove_from_aggregation_stats(
 				let Value::Number(n) = &arguments[*arg] else {
 					fail!("Old record wasn't a number but was created with a number");
 				};
-				*sum = *sum - *n;
+				*sum = (*sum).sub_exact(*n)?;
 				*count -= 1;
 			}
 			AggregationStat::TimeMax {
@@ -810,8 +810,21 @@ pub fn update_aggregation_stats(
 				let Value::Number(before) = &before_args[*arg] else {
 					fail!("Old record wasn't a number but was created with a number");
 				};
-				*sum = *sum - *before;
-				*sum = sum.try_add(after)?;
+				*sum = (*sum).sub_exact(*before)?;
+				*sum = match *sum {
+					Number::Decimal(d)
+						if matches!(before, Number::Int(_)) && matches!(after, Number::Int(_)) =>
+					{
+						let total = d
+							.checked_add(after.to_decimal())
+							.ok_or_else(|| ExprError::TryAdd(d.to_string(), after.to_sql()))?;
+						Number::Int(
+							i64::try_from(total)
+								.map_err(|_| ExprError::TryAdd(d.to_string(), after.to_sql()))?,
+						)
+					}
+					s => s.try_add(after)?,
+				};
 			}
 			AggregationStat::Mean {
 				arg,
@@ -822,8 +835,8 @@ pub fn update_aggregation_stats(
 				let Value::Number(before) = &before_args[*arg] else {
 					fail!("Old record wasn't a number but was created with a number");
 				};
-				*sum = *sum - *before;
-				*sum = sum.try_add(after)?;
+				*sum = (*sum).sub_exact(*before)?;
+				*sum = sum.add_exact(after)?;
 			}
 			AggregationStat::TimeMax {
 				arg,
@@ -1062,7 +1075,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 					})
 				};
 
-				*sum = (*sum).try_add(*n)?;
+				*sum = (*sum).add_exact(*n)?;
 				*count += 1;
 			}
 			AggregationStat::StdDev {
@@ -1180,7 +1193,25 @@ pub fn create_field_document(group: &[Value], stats: &[AggregationStat]) -> Obje
 				sum,
 				count,
 				..
-			} => sum.try_float_div((*count).into()).unwrap_or(f64::NAN.into()).into(),
+			} => {
+				if *count == 0 {
+					f64::NAN.into()
+				} else {
+					match sum {
+						// An integer total (or one widened to an integer-scale
+						// decimal on i64 overflow) has a float mean, divided
+						// once in f64 as scalar and ad-hoc math::mean do.
+						Number::Int(x) => Number::Float(*x as f64 / *count as f64).into(),
+						Number::Float(x) => Number::Float(*x / *count as f64).into(),
+						Number::Decimal(d) if d.scale() == 0 => {
+							Number::Float(sum.to_float() / *count as f64).into()
+						}
+						Number::Decimal(_) => {
+							sum.try_float_div((*count).into()).unwrap_or(f64::NAN.into()).into()
+						}
+					}
+				}
+			}
 			AggregationStat::StdDev {
 				sum,
 				sum_of_squares,
@@ -1830,6 +1861,10 @@ impl AggregationAnalysis {
 pub enum BackfillValue {
 	/// The result of the aggregate itself.
 	Aggregate(Aggregation),
+	/// The exact sum of aggregate argument `n` for reconstructing a mean's
+	/// running total, widening integers to `Decimal` before summing so totals
+	/// outside `i64` do not overflow `math::sum`.
+	MeanSum(usize),
 	/// The accurate two-pass sample variance of aggregate argument `n`, from
 	/// which a variance or deviation's shifted state is reconstructed
 	/// ([`shifted_state_from_summary`]).
@@ -1850,6 +1885,26 @@ impl BackfillValue {
 			}))
 		};
 		Ok(match self {
+			BackfillValue::MeanSum(arg) => {
+				let arg = analysis.aggregate_arguments[*arg].clone();
+				let widened = Expr::IfElse(Box::new(crate::expr::statements::IfelseStatement {
+					exprs: vec![(
+						Expr::FunctionCall(Box::new(FunctionCall {
+							receiver: Function::Normal("type::is_int".to_string()),
+							arguments: vec![arg.clone()],
+						})),
+						Expr::Prefix {
+							op: crate::expr::PrefixOperator::Cast(crate::expr::Kind::Decimal),
+							expr: Box::new(arg.clone()),
+						},
+					)],
+					close: Some(arg),
+				}));
+				Expr::FunctionCall(Box::new(FunctionCall {
+					receiver: Function::Normal("math::sum".to_string()),
+					arguments: vec![widened],
+				}))
+			}
 			BackfillValue::SampleVariance(arg) => call("math::variance", Some(*arg)),
 			BackfillValue::Aggregate(aggregation) => match aggregation {
 				Aggregation::Count => call("count", None),
@@ -1895,7 +1950,7 @@ impl AggregationAnalysis {
 					want(BackfillValue::Aggregate(aggregation.clone()));
 				}
 				Aggregation::Mean(arg) => {
-					want(BackfillValue::Aggregate(Aggregation::Sum(*arg)));
+					want(BackfillValue::MeanSum(*arg));
 					want(BackfillValue::Aggregate(Aggregation::Count));
 				}
 				Aggregation::StdDev(arg) | Aggregation::Variance(arg) => {
@@ -2032,19 +2087,27 @@ pub fn backfill_stats(
 				arg,
 				min: number_of(BackfillValue::Aggregate(Aggregation::NumberMin(arg)))?,
 			},
-			// A sum is kept from a float zero, as [`Aggregation::to_stat`] starts
-			// one, so the view holds the type the incremental path gives it.
+			// A sum is kept from an integer zero, as [`Aggregation::to_stat`]
+			// starts one, so the view holds the type the incremental path gives
+			// it: integers stay exact integers.
 			Aggregation::Sum(arg) => AggregationStat::Sum {
 				arg,
-				sum: Number::from(0.0)
+				sum: Number::Int(0)
 					.try_add(number_of(BackfillValue::Aggregate(Aggregation::Sum(arg)))?)?,
 			},
-			Aggregation::Mean(arg) => AggregationStat::Mean {
-				arg,
-				sum: Number::from(0.0)
-					.try_add(number_of(BackfillValue::Aggregate(Aggregation::Sum(arg)))?)?,
-				count: count_of()?,
-			},
+			Aggregation::Mean(arg) => {
+				let sum = match number_of(BackfillValue::MeanSum(arg))? {
+					Number::Decimal(d) if d.scale() == 0 => {
+						i64::try_from(d).map(Number::Int).unwrap_or(Number::Decimal(d))
+					}
+					n => Number::Int(0).add_exact(n)?,
+				};
+				AggregationStat::Mean {
+					arg,
+					sum,
+					count: count_of()?,
+				}
+			}
 			Aggregation::DatetimeMax(arg) => AggregationStat::TimeMax {
 				arg,
 				max: datetime_of(BackfillValue::Aggregate(Aggregation::DatetimeMax(arg)))?,
@@ -2106,7 +2169,7 @@ mod backfill_tests {
 				BackfillValue::Aggregate(Aggregation::Mean(0)),
 				BackfillValue::SampleVariance(0),
 				BackfillValue::Aggregate(Aggregation::Count),
-				BackfillValue::Aggregate(Aggregation::Sum(0)),
+				BackfillValue::MeanSum(0),
 			]
 		);
 	}

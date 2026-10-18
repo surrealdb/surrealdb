@@ -72,10 +72,10 @@ impl Saving {
 	}
 
 	pub(super) fn rejected(self, rejected: &Rejected) -> Self {
-		let (reason, folded) = rejected.parts();
+		let (reason, folded, failure) = rejected.parts();
 		let mut this = self.option_string(reason);
 		this.0.push(Value::Bool(folded));
-		this
+		this.option_string(failure)
 	}
 
 	pub(super) fn done(self) -> Value {
@@ -173,7 +173,8 @@ impl Loading {
 	pub(super) fn rejected(&mut self) -> Result<Rejected> {
 		let reason = self.option_string()?;
 		let folded = matches!(self.next()?, Value::Bool(true));
-		Ok(Rejected::from_parts(reason, folded))
+		let failure = self.option_string()?;
+		Ok(Rejected::from_parts(reason, folded, failure))
 	}
 }
 
