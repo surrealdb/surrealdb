@@ -229,6 +229,9 @@ struct AsyncEventContext {
 	opt: Options,
 	tf: TransactionFactory,
 	sequences: Sequences,
+	/// Delivers the live-query notifications an attempt's writes raise, once
+	/// that attempt commits. `None` when the datastore delivers none inline.
+	broker: Option<Arc<dyn crate::dbs::MessageBroker>>,
 	k: Vec<u8>,
 	v: Option<AsyncEventRecord>,
 }
@@ -240,6 +243,7 @@ impl AsyncEventContext {
 			opt: ds.setup_options(&Session::default()),
 			tf: ds.transaction_factory().clone(),
 			sequences: ds.sequences().clone(),
+			broker: ds.live_query_broker(),
 			k,
 			v: Some(v),
 		})
@@ -283,6 +287,21 @@ impl AsyncEventContext {
 			// instant this attempt started at.
 			ctx.set_statement_clock(crate::val::Datetime::now());
 			let ctx = ctx.freeze();
+			// The body's writes are the event's own: their live-query
+			// notifications are buffered and released with this attempt's
+			// commit, so a rolled-back or re-run attempt notifies nobody.
+			let ctx =
+				{
+					let mut ctx = ctx;
+					if let Some(prepared) = self.broker.clone().and_then(|delivery| {
+						crate::dbs::executor::install_broker(&mut ctx, delivery)
+					}) {
+						ctx.tx()
+							.on_commit(Box::new(crate::dbs::executor::FlushOnCommit(prepared)))
+							.await;
+					}
+					ctx
+				};
 			let Err(e) = self.run_event_once(&ctx, &eq, &ev).await else {
 				return Ok(());
 			};

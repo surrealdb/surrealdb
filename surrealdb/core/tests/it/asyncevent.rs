@@ -124,3 +124,41 @@ async fn test_async_event_retry() -> Result<()> {
 	t.expect_val("20")?;
 	Ok(())
 }
+
+/// An async event's write is an ordinary write: a live query on the table it
+/// writes to is notified of it.
+#[tokio::test]
+async fn an_async_event_write_notifies_a_live_query() -> Result<()> {
+	use surrealdb_core::dbs::Session;
+	use surrealdb_types::{Action, Kind};
+
+	use crate::helpers::new_ds;
+
+	let (channel, ds) = new_ds("test", "test", false).await?;
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	let mut res = ds
+		.execute(
+			"DEFINE TABLE test SCHEMALESS;
+			LIVE SELECT * FROM test;
+			DEFINE EVENT evt ON TABLE test ASYNC MAXDEPTH 1 WHEN true THEN {
+				UPDATE $after.id SET data = 'set by the event';
+			};
+			CREATE test:1;",
+			&ses,
+			None,
+		)
+		.await?;
+	assert_eq!(res.len(), 4);
+	assert_eq!(res.remove(1).result?.kind(), Kind::Uuid);
+
+	let created = timeout(Duration::from_secs(5), channel.recv()).await??;
+	assert_eq!(created.action, Action::Create);
+
+	wait_for_events_processing(&ds).await?;
+
+	let updated = timeout(Duration::from_secs(5), channel.recv())
+		.await
+		.map_err(|_| anyhow::anyhow!("the event's UPDATE never reached the live query"))??;
+	assert_eq!(updated.action, Action::Update);
+	Ok(())
+}

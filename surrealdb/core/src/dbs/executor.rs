@@ -512,7 +512,7 @@ pub(crate) struct PreparedBroker {
 /// Only the owner commits such a transaction, so the executor has no commit of
 /// its own to flush after. Queued on the transaction, the notifications go out
 /// with the commit and are dropped with a cancel or a failed commit.
-struct FlushOnCommit(PreparedBroker);
+pub(crate) struct FlushOnCommit(pub(crate) PreparedBroker);
 
 impl CommitAction for FlushOnCommit {
 	fn run(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
