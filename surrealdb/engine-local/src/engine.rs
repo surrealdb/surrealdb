@@ -698,7 +698,7 @@ impl SurrealEngine for LocalEngine {
 			} else {
 				tx.cancel().await
 			};
-			finished.map_err(std_error_to_types_error)?;
+			finished.map_err(surrealdb_core::err::anyhow_to_types_error)?;
 			Ok(())
 		})
 	}

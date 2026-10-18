@@ -2036,6 +2036,98 @@ pub async fn an_abandoned_query_cannot_be_committed(_new_db: impl CreateDb) {
 	// A remote engine's execution outlives the caller's future; see above.
 }
 
+/// A write conflict raised when a client-side transaction commits reaches the caller
+/// as `QueryError::TransactionConflict`, the kind a retry loop keys on, whichever
+/// engine ran the commit.
+#[cfg(not(feature = "protocol-http"))]
+pub async fn a_commit_conflict_keeps_its_kind(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+
+	let first = db.clone().begin().await.unwrap();
+	let second = db.clone().begin().await.unwrap();
+	first.query("CREATE conflicted:one SET n = 1").await.unwrap().check().unwrap();
+	second.query("CREATE conflicted:one SET n = 2").await.unwrap().check().unwrap();
+	first.commit().await.unwrap();
+
+	let error = match second.commit().await {
+		Ok(_) => panic!("the second writer of one record must not commit"),
+		Err(error) => error,
+	};
+	assert_eq!(
+		error.query_details(),
+		Some(&surrealdb_types::QueryError::TransactionConflict),
+		"unexpected commit error: {error:?}"
+	);
+	drop(permit);
+}
+
+/// Concurrent read-modify-write transactions on one record lose no increment: each
+/// either commits or fails with a conflict a retry loop recognises by kind.
+#[cfg(not(feature = "protocol-http"))]
+pub async fn concurrent_counter_increments_are_not_lost(new_db: impl CreateDb) {
+	const WORKERS: usize = 4;
+	const INCREMENTS: usize = 8;
+
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+	db.query("CREATE counter:main SET n = 0").await.unwrap().check().unwrap();
+
+	let mut workers = Vec::new();
+	for _ in 0..WORKERS {
+		let db = db.clone();
+		workers.push(tokio::spawn(async move {
+			for _ in 0..INCREMENTS {
+				loop {
+					let txn = db.clone().begin().await.unwrap();
+					let current: Option<i64> = txn
+						.query("SELECT VALUE n FROM ONLY counter:main")
+						.await
+						.unwrap()
+						.take(0)
+						.unwrap();
+					txn.query("UPDATE counter:main SET n = $n")
+						.bind(("n", current.unwrap() + 1))
+						.await
+						.unwrap()
+						.check()
+						.unwrap();
+					match txn.commit().await {
+						Ok(_) => break,
+						Err(error) => {
+							assert_eq!(
+								error.query_details(),
+								Some(&surrealdb_types::QueryError::TransactionConflict),
+								"only a conflict may fail a commit here: {error:?}"
+							);
+						}
+					}
+				}
+			}
+		}));
+	}
+	for worker in workers {
+		worker.await.unwrap();
+	}
+
+	let total: Option<i64> =
+		db.query("SELECT VALUE n FROM ONLY counter:main").await.unwrap().take(0).unwrap();
+	assert_eq!(total, Some((WORKERS * INCREMENTS) as i64));
+	drop(permit);
+}
+
+#[cfg(feature = "protocol-http")]
+pub async fn concurrent_counter_increments_are_not_lost(_new_db: impl CreateDb) {
+	// Client-side transactions are not supported on HTTP
+}
+
+#[cfg(feature = "protocol-http")]
+pub async fn a_commit_conflict_keeps_its_kind(_new_db: impl CreateDb) {
+	// Client-side transactions are not supported on HTTP
+}
+
 #[cfg(feature = "protocol-http")]
 pub async fn client_side_transactions(_new_db: impl CreateDb) {
 	// Client-side transactions are not supported on HTTP
@@ -2311,6 +2403,10 @@ define_include_tests!(basic => {
 	client_side_read_only_transactions,
 	#[test_log::test(tokio::test)]
 	an_abandoned_query_cannot_be_committed,
+	#[test_log::test(tokio::test)]
+	a_commit_conflict_keeps_its_kind,
+	#[test_log::test(tokio::test)]
+	concurrent_counter_increments_are_not_lost,
 	#[test_log::test(tokio::test)]
 	refresh_tokens,
 });
