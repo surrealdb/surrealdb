@@ -69,10 +69,12 @@ impl SchemaPlan {
 		let fields = Arc::clone(&ctx.fields);
 		let same = fields.len() == self.fields.len()
 			&& ctx.id_field == self.id_field
-			&& fields
+			&& ctx
+				.field_names
+				.get_or_init(|| fields.iter().map(|fd| fd.name.to_raw_string()).collect())
 				.iter()
 				.zip(&self.fields)
-				.all(|(fd, plan)| fd.name.to_raw_string() == plan.name);
+				.all(|(name, plan)| *name == plan.name);
 		if !same {
 			return Err(internal(&format!(
 				"the fields of {} are not those its write was planned against",
@@ -416,7 +418,7 @@ async fn place_clause(
 	let write = write_state(state)?;
 	let (pending, fields) = pending_sets(record(write)?);
 	let (row, ctx) = write.in_flight()?;
-	let exec = ctx.exec().clone();
+	let exec = ctx.exec();
 	let mut doc = row.current.clone();
 	if !pending.is_empty() {
 		normalise_set_elements(&mut doc, pending.iter().map(|&index| &fields[index]));
@@ -425,7 +427,7 @@ async fn place_clause(
 	let place = cursor.place.as_ref().ok_or_else(|| internal("a clause with no place"))?;
 	let value = value.unwrap_or_else(|| place.val.clone());
 	let bound = clause_frame(&cursor.frame, place, &value).refusing_writes(refusing);
-	match run_image(program, pipeline, doc, Some(bound), state, &exec).await {
+	match run_image(program, pipeline, doc, Some(bound), state, exec).await {
 		Err(ControlFlow::Return(value)) => Ok(value),
 		Err(ControlFlow::Break | ControlFlow::Continue) => {
 			Err(fail(crate::exec::Error::InvalidControlFlow))
@@ -643,22 +645,25 @@ pub(super) async fn step(
 		}
 		SchemaInstr::Coerce => {
 			let schema = record(write_state(state)?)?;
-			let rid = schema.rid.to_sql();
-			let fd = schema.definition()?;
+			let fields = Arc::clone(&schema.fields);
+			let fd = &fields[schema.cursor()?.index];
 			// The `id` field's kind is enforced where the record id is derived.
-			let (Some(kind), false) = (fd.field_kind.clone(), fd.name.is_id()) else {
+			let (Some(kind), false) = (fd.field_kind.as_ref(), fd.name.is_id()) else {
 				return Ok(next);
 			};
-			let field_name = fd.name.to_sql();
 			let place = schema.place()?;
 			let val = std::mem::take(&mut place.val);
-			place.val = val.coerce_to_kind(&kind).map_err(|e| {
-				fail(DocError::FieldCoerce {
-					record: rid,
-					field_name,
-					error: Box::new(e),
-				})
-			})?;
+			match val.coerce_to_kind(kind) {
+				Ok(val) => place.val = val,
+				// The record and field are rendered only for the error.
+				Err(e) => {
+					return Err(fail(DocError::FieldCoerce {
+						record: schema.rid.to_sql(),
+						field_name: fd.name.to_sql(),
+						error: Box::new(e),
+					}));
+				}
+			}
 			Ok(next)
 		}
 		SchemaInstr::Value {
@@ -748,9 +753,12 @@ pub(super) async fn step(
 				})
 				.collect();
 			rebuild_sets(write)?;
+			if deferred.is_empty() {
+				return Ok(next);
+			}
 			let schema = record(write_state(state)?)?;
 			let fields = Arc::clone(&schema.fields);
-			let rid = schema.rid.to_sql();
+			let rid = schema.rid.clone();
 			let input = Arc::clone(&schema.input);
 			for (
 				Deferred {
@@ -766,7 +774,7 @@ pub(super) async fn step(
 				let fd = &fields[index];
 				let write = write_state(state)?;
 				let (row, ctx) = write.in_flight()?;
-				let exec = ctx.exec().clone();
+				let exec = ctx.exec();
 				let doc = row.current.clone();
 				// An absent optional value is not judged: the field declared
 				// that absence acceptable.
@@ -779,13 +787,13 @@ pub(super) async fn step(
 					path,
 					val: Value::None,
 				};
-				let frame = field_default_frame(&exec, fd).map_err(ControlFlow::Err)?;
+				let frame = field_default_frame(exec, fd).map_err(ControlFlow::Err)?;
 				let bound =
 					clause_frame(&frame, &place, &val).refusing_writes(NoWriteFrame::FieldAssert);
-				let answer = run_image(program, pipeline, doc, Some(bound), state, &exec).await?;
+				let answer = run_image(program, pipeline, doc, Some(bound), state, exec).await?;
 				if !answer.is_truthy() {
 					return Err(fail(DocError::FieldValue {
-						record: rid,
+						record: rid.to_sql(),
 						field: fd.name.clone(),
 						check: fd.assert.as_ref().map(ToSql::to_sql).unwrap_or_default(),
 						value: val.to_sql(),
@@ -841,10 +849,10 @@ pub(super) async fn step(
 			if row.id.is_none() {
 				return Ok(next);
 			}
-			let exec = ctx.exec().clone();
+			let exec = ctx.exec();
 			let mut image = row.current.clone();
 			if pending.is_empty() {
-				let derived = run_image(program, *pipeline, image, None, state, &exec).await?;
+				let derived = run_image(program, *pipeline, image, None, state, exec).await?;
 				write_state(state)?.row()?.current = derived;
 				return Ok(next);
 			}
@@ -852,7 +860,7 @@ pub(super) async fn step(
 			// derivation reads a rebuilt copy, and only the computed values
 			// it derived are taken back.
 			normalise_set_elements(&mut image, pending.iter().map(|&index| &fields[index]));
-			let derived = run_image(program, *pipeline, image, None, state, &exec).await?;
+			let derived = run_image(program, *pipeline, image, None, state, exec).await?;
 			let row = write_state(state)?.row()?;
 			for name in computed.iter() {
 				row.current.put(name, derived.pick(name));
@@ -876,13 +884,13 @@ pub(super) async fn step(
 			if !has_record_observers(&ctx) || row.id.is_none() {
 				return Ok(next);
 			}
-			let exec = ctx.exec().clone();
+			let exec = ctx.exec();
 			let current =
 				(!row.current.is_none() && !row.fields_computed).then(|| row.current.clone());
 			let initial = (!row.initial.is_none()).then(|| row.initial.clone());
 			if let Some(mut image) = current {
 				for pipeline in pipelines.iter() {
-					image = run_image(program, *pipeline, image, None, state, &exec).await?;
+					image = run_image(program, *pipeline, image, None, state, exec).await?;
 				}
 				let row = write_state(state)?.row()?;
 				row.current = image;
@@ -890,7 +898,7 @@ pub(super) async fn step(
 			}
 			if let Some(mut image) = initial {
 				for pipeline in pipelines.iter() {
-					image = run_image(program, *pipeline, image, None, state, &exec).await?;
+					image = run_image(program, *pipeline, image, None, state, exec).await?;
 				}
 				let row = write_state(state)?.row()?;
 				row.initial = image;

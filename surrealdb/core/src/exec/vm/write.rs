@@ -418,8 +418,7 @@ impl WriteState {
 				skip,
 			} => {
 				let table = self.row()?.table().cloned();
-				let exec = self.scope.exec().clone();
-				if self.gate.admits(table.as_ref(), &exec).await? {
+				if self.gate.admits(table.as_ref(), self.scope.exec()).await? {
 					next
 				} else {
 					*skip as usize
@@ -428,8 +427,8 @@ impl WriteState {
 			WriteInstr::Begin => {
 				// Polled per record: a statement whose stages are slow pulls no
 				// fresh subject for as long as one record takes.
-				let exec = self.scope.exec().clone();
-				check_cancelled(&exec)?;
+				let exec = self.scope.exec();
+				check_cancelled(exec)?;
 				exec.ctx().expect_not_timedout().await.map_err(ControlFlow::Err)?;
 				let table = self.row()?.table().cloned().ok_or_else(|| {
 					ControlFlow::Err(anyhow::anyhow!(ExecError::InvalidStatement(
@@ -800,7 +799,18 @@ pub(super) async fn step(
 		};
 	}
 	if matches!(instr, WriteInstr::ShowImage { .. } | WriteInstr::SetOutput { .. }) {
-		let shown = out_of_line(|| show(program, instr, state)).await;
+		// Boxed only where a pipeline runs: the settled forms, which every
+		// record of a `RETURN NONE` or plain `RETURN AFTER` write takes, build
+		// no future.
+		let settled = match state.write.as_deref_mut() {
+			Some(write) => show_settled(instr, write),
+			None => Err(internal("a write body with no write state")),
+		};
+		let shown = match settled {
+			Ok(true) => Ok(()),
+			Ok(false) => out_of_line(|| show(program, instr, state)).await,
+			Err(failure) => Err(failure),
+		};
 		let write = state
 			.write
 			.as_deref_mut()
@@ -931,7 +941,7 @@ async fn run_stages(program: &Program, site: u16, state: &mut State) -> FlowResu
 	let write =
 		state.write.as_deref_mut().ok_or_else(|| internal("a write body with no write state"))?;
 	let (_, ctx) = write.in_flight()?;
-	let exec = ctx.exec().clone();
+	let exec = ctx.exec();
 	let outside = || internal(&format!("a table outside the dispatch set: {}", ctx.table.name));
 	let (stages, units) = match &tables.by_name {
 		Some(named) => {
@@ -943,15 +953,15 @@ async fn run_stages(program: &Program, site: u16, state: &mut State) -> FlowResu
 		}
 		None => {
 			let unit = tables.unit(&ctx.table.name).ok_or_else(outside)?;
-			write_unit(program, unit, state, &exec)?
+			write_unit(program, unit, state, exec)?
 		}
 	};
 	let pipeline = stages
 		.pipelines
 		.get(site as usize)
 		.ok_or_else(|| internal("a run of stages the stage program does not hold"))?;
-	let (mut nested, group) = enter_unit(&stages, units, state, &exec)?;
-	let ran = run_value_row(&stages, pipeline, Value::None, &mut nested, &exec).await;
+	let (mut nested, group) = enter_unit(&stages, units, state, exec)?;
+	let ran = run_value_row(&stages, pipeline, Value::None, &mut nested, exec).await;
 	leave_unit(&mut nested, group, state);
 	ran?;
 	match nested.take_output().pop() {
@@ -1048,52 +1058,122 @@ fn slot(image: RecordImage) -> usize {
 }
 
 /// Take [`WriteInstr::ShowImage`] or [`WriteInstr::SetOutput`] for the record
-/// in flight, running the host pipelines they name over its images.
-async fn show(program: &Program, instr: &WriteInstr, state: &mut State) -> FlowResult<()> {
-	let write =
-		state.write.as_deref_mut().ok_or_else(|| internal("a write body with no write state"))?;
-	let (row, ctx) = write.in_flight()?;
-	let exec = ctx.exec().clone();
+/// in flight where no host pipeline runs, and answer whether it was taken.
+///
+/// An instruction that runs a pipeline — a shown image's view over an image
+/// that is not shown as it is, or a projection — is left untouched and
+/// answers `false`, for [`show`] to take. Either way the instruction has the
+/// same effect: this is the part of [`show`] that awaits nothing, taken
+/// without building [`show`]'s future.
+fn show_settled(instr: &WriteInstr, write: &mut WriteState) -> FlowResult<bool> {
+	if write.ctx.is_none() {
+		return Err(internal("a write step before the record's context was resolved"));
+	}
 	match instr {
 		WriteInstr::ShowImage {
 			image,
 			view,
 			checked,
 		} => {
-			let source = match image {
-				RecordImage::Current => &row.current,
-				RecordImage::Initial => &row.initial,
-			};
-			// No record to show, or an unchecked caller's post-image that
-			// already carries its `COMPUTED` values: deriving them again would
-			// answer a non-deterministic body differently from the one the
-			// record's observers were given.
-			let as_is = !matches!(source, Value::Object(_))
-				|| row.id.is_none()
-				|| (!*checked && *image == RecordImage::Current && row.fields_computed);
-			let shown = match view {
-				// A pipeline may raise, and the record's failure handlers then
-				// see the row as it stood, so it runs over a copy.
-				Some(view) if !as_is => {
-					let source = source.clone();
-					run_image(program, *view, source, None, state, &exec).await?
+			let row = write.row()?;
+			let as_is = shown_as_is(row, *image, *checked);
+			if view.is_some() && !as_is {
+				return Ok(false);
+			}
+			// No pipeline runs: the output stage is the last of every order,
+			// so nothing reads the image once it is shown, and the output
+			// takes it.
+			let shown = std::mem::replace(
+				match image {
+					RecordImage::Current => &mut row.current,
+					RecordImage::Initial => &mut row.initial,
+				},
+				Value::None,
+			);
+			if *checked && !as_is {
+				match image {
+					RecordImage::Current => row.current_reduced = Some(shown.clone()),
+					RecordImage::Initial => row.initial_reduced = Some(shown.clone()),
 				}
-				// No pipeline runs: the output stage is the last of every order,
-				// so nothing reads the image once it is shown, and the output
-				// takes it.
-				_ => std::mem::replace(
-					match image {
-						RecordImage::Current => &mut row.current,
-						RecordImage::Initial => &mut row.initial,
-					},
-					Value::None,
-				),
+			}
+			write.shown[slot(*image)] = Some(shown);
+			Ok(true)
+		}
+		WriteInstr::SetOutput {
+			output,
+		} => {
+			// The output stage shows an image and sets the output from it, and
+			// nothing reads a shown image after that: the output takes it.
+			let value = match output {
+				WriteOutput::None => None,
+				WriteOutput::Null => Some(Value::Null),
+				WriteOutput::Shown(image) => Some(take_shown(write, *image)?),
+				WriteOutput::Diff => {
+					let before = take_shown(write, RecordImage::Initial)?;
+					let after = take_shown(write, RecordImage::Current)?;
+					Some(Operation::operations_to_value(before.diff(&after)))
+				}
+				WriteOutput::Projection(_) => return Ok(false),
 			};
+			write.row()?.output = value;
+			Ok(true)
+		}
+		_ => Err(internal("an image step at an instruction that is not one")),
+	}
+}
+
+/// Whether `image` of `row` is shown as it stands, with no view run over it:
+/// there is no record to show, or it is an unchecked caller's post-image that
+/// already carries its `COMPUTED` values — deriving them again would answer a
+/// non-deterministic body differently from the one the record's observers
+/// were given.
+fn shown_as_is(row: &WriteRow, image: RecordImage, checked: bool) -> bool {
+	let source = match image {
+		RecordImage::Current => &row.current,
+		RecordImage::Initial => &row.initial,
+	};
+	!matches!(source, Value::Object(_))
+		|| row.id.is_none()
+		|| (!checked && image == RecordImage::Current && row.fields_computed)
+}
+
+/// Take the image in `image`'s shown slot, which the output stage shows before
+/// it sets the output.
+fn take_shown(write: &mut WriteState, image: RecordImage) -> FlowResult<Value> {
+	write.shown[slot(image)]
+		.take()
+		.ok_or_else(|| internal("an image output before the image was shown"))
+}
+
+/// Take [`WriteInstr::ShowImage`] or [`WriteInstr::SetOutput`] for the record
+/// in flight, running the host pipelines they name over its images. An
+/// instruction that runs none is taken as [`show_settled`] takes it.
+async fn show(program: &Program, instr: &WriteInstr, state: &mut State) -> FlowResult<()> {
+	let write =
+		state.write.as_deref_mut().ok_or_else(|| internal("a write body with no write state"))?;
+	if show_settled(instr, write)? {
+		return Ok(());
+	}
+	let (row, ctx) = write.in_flight()?;
+	let exec = ctx.exec();
+	match instr {
+		WriteInstr::ShowImage {
+			image,
+			view: Some(view),
+			checked,
+		} => {
+			// The view may raise, and the record's failure handlers then see
+			// the row as it stood, so it runs over a copy.
+			let source = match image {
+				RecordImage::Current => row.current.clone(),
+				RecordImage::Initial => row.initial.clone(),
+			};
+			let shown = run_image(program, *view, source, None, state, exec).await?;
 			let write = state
 				.write
 				.as_deref_mut()
 				.ok_or_else(|| internal("a write body with no write state"))?;
-			if *checked && !as_is {
+			if *checked {
 				let row = write.row()?;
 				match image {
 					RecordImage::Current => row.current_reduced = Some(shown.clone()),
@@ -1103,38 +1183,19 @@ async fn show(program: &Program, instr: &WriteInstr, state: &mut State) -> FlowR
 			write.shown[slot(*image)] = Some(shown);
 		}
 		WriteInstr::SetOutput {
-			output,
+			output: WriteOutput::Projection(pipeline),
 		} => {
-			// The output stage shows an image and sets the output from it, and
-			// nothing reads a shown image after that: the output takes it.
-			let shown = |write: &mut WriteState, image: RecordImage| {
-				write.shown[slot(image)]
-					.take()
-					.ok_or_else(|| internal("an image output before the image was shown"))
-			};
-			let value = match output {
-				WriteOutput::None => None,
-				WriteOutput::Null => Some(Value::Null),
-				WriteOutput::Shown(image) => Some(shown(write, *image)?),
-				WriteOutput::Diff => {
-					let before = shown(write, RecordImage::Initial)?;
-					let after = shown(write, RecordImage::Current)?;
-					Some(Operation::operations_to_value(before.diff(&after)))
-				}
-				WriteOutput::Projection(pipeline) => {
-					let before = shown(write, RecordImage::Initial)?;
-					let after = shown(write, RecordImage::Current)?;
-					let frame = exec.with_params([("before", before), ("after", after.clone())]);
-					Some(run_image(program, *pipeline, after, Some(frame), state, &exec).await?)
-				}
-			};
+			let before = take_shown(write, RecordImage::Initial)?;
+			let after = take_shown(write, RecordImage::Current)?;
+			let frame = exec.with_params([("before", before), ("after", after.clone())]);
+			let value = run_image(program, *pipeline, after, Some(frame), state, exec).await?;
 			let write = state
 				.write
 				.as_deref_mut()
 				.ok_or_else(|| internal("a write body with no write state"))?;
-			write.row()?.output = value;
+			write.row()?.output = Some(value);
 		}
-		_ => return Err(internal("an image step at an instruction that is not one")),
+		_ => return Err(internal("an image step that runs no pipeline left untaken")),
 	}
 	Ok(())
 }

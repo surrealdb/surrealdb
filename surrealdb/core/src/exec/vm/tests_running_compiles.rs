@@ -95,3 +95,29 @@ async fn table_and_field_permissions_compile_nothing_while_they_run() {
 	}
 	assert_eq!(running_compiles(&db, &alice, &statements).await, 0, "a warm node");
 }
+
+#[tokio::test]
+async fn a_generated_id_create_compiles_nothing_while_it_runs() {
+	let db = TestDb::new(
+		"
+		DEFINE TABLE free SCHEMALESS;
+		DEFINE TABLE full SCHEMAFULL;
+		DEFINE FIELD score ON full TYPE option<int> ASSERT $value = NONE OR $value >= 0;
+		DEFINE FIELD name ON full TYPE option<string> DEFAULT 'anon';
+		DEFINE INDEX by_score ON full FIELDS score;
+		",
+	)
+	.await;
+	let owner = crate::dbs::Session::owner().with_ns("test").with_db("test");
+	let statements = [
+		"CREATE |free:50|",
+		"CREATE |free:50| SET score = rand::int(0, 100) RETURN NONE",
+		"CREATE |full:50| RETURN NONE",
+		"CREATE |full:50| SET score = rand::int(0, 100)",
+		"CREATE |made:50| SET score = rand::int(0, 100) RETURN NONE",
+	];
+	for sql in statements {
+		assert_eq!(running_compiles(&db, &owner, &[sql]).await, 0, "`{sql}` on a cold node");
+	}
+	assert_eq!(running_compiles(&db, &owner, &statements).await, 0, "a warm node");
+}

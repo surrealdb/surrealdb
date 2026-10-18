@@ -460,12 +460,30 @@ impl RecordIdKey {
 		}
 	}
 
-	/// Generate a new random ID
+	/// Generate a new random ID: 20 characters of [`ID_CHARS`], one draw each.
+	///
+	/// The text is assembled on the stack, so the id, which fits a [`Strand`]
+	/// inline, allocates nothing.
 	pub fn rand() -> Self {
-		let id: String = crate::rnd::with_rng(|rng| {
-			(0..20).map(|_| *ID_CHARS[..].choose(&mut *rng).unwrap_or(&'0')).collect()
+		const LEN: usize = 20;
+		// Each character of the alphabet is one byte of the id's text.
+		const _: () = {
+			let mut i = 0;
+			while i < ID_CHARS.len() {
+				assert!(ID_CHARS[i].is_ascii());
+				i += 1;
+			}
+		};
+		let mut buf = [0u8; LEN];
+		crate::rnd::with_rng(|rng| {
+			for byte in buf.iter_mut() {
+				*byte = *ID_CHARS[..].choose(&mut *rng).unwrap_or(&'0') as u8;
+			}
 		});
-		Self::String(id.into())
+		match std::str::from_utf8(&buf) {
+			Ok(id) => Self::String(Strand::from(id)),
+			Err(_) => unreachable!("the id alphabet is ASCII"),
+		}
 	}
 	/// Generate a new random ULID
 	pub fn ulid() -> Self {

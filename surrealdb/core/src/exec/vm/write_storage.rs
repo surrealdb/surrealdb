@@ -370,7 +370,13 @@ pub(super) async fn step(
 		position,
 	} = instr
 	{
-		index_step(program, lowered, *position as usize, state).await?;
+		// Boxed: index maintenance is the largest future of the storage
+		// stages, and held inline it would size every record's write step,
+		// on tables with no index too.
+		crate::exec::vm::host::out_of_line(|| {
+			index_step(program, lowered, *position as usize, state)
+		})
+		.await?;
 		return Ok(next);
 	}
 	if let StorageInstr::References(instr) = instr {
@@ -794,12 +800,12 @@ async fn index_step(
 	let rid = indexed_record(row)?.clone();
 	let initial = row.initial.clone();
 	let current = row.current.clone();
-	let exec = ctx.exec().clone();
+	let exec = ctx.exec();
 	let mut values = [None, None];
 	for (image, values) in [&initial, &current].into_iter().zip(values.iter_mut()) {
 		if !image.is_nullish() {
 			*values = Some(
-				match super::run_image(program, columns, image.clone(), None, state, &exec).await? {
+				match super::run_image(program, columns, image.clone(), None, state, exec).await? {
 					Value::Array(values) => values.0,
 					_ => return Err(internal("an index's columns that answered no list")),
 				},
@@ -826,7 +832,7 @@ async fn index_step(
 				_ => None,
 			};
 			let outer = std::mem::replace(&mut state.computing, computing);
-			let verdict = super::run_image(program, guard, image.clone(), None, state, &exec).await;
+			let verdict = super::run_image(program, guard, image.clone(), None, state, exec).await;
 			state.computing = outer;
 			*answer = verdict?.is_truthy();
 		}

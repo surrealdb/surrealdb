@@ -127,8 +127,7 @@ pub(super) async fn step(
 				RecordImage::Initial => row.initial.clone(),
 			};
 			let pipeline = derived.unwrap_or(*plain);
-			let exec = ctx.exec().clone();
-			let verdict = run_image(program, pipeline, subject, None, state, &exec).await?;
+			let verdict = run_image(program, pipeline, subject, None, state, ctx.exec()).await?;
 			Ok(if verdict.is_truthy() {
 				next
 			} else {

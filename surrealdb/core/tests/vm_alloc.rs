@@ -1275,6 +1275,101 @@ async fn packed_rows_read_in_place_allocate_no_more_than_documents() {
 }
 
 // --------------------------------------------------
+// Generated-id creates
+// --------------------------------------------------
+
+/// The bulk creates of generated ids whose per-record cost is checked: a name,
+/// the table's definition, the statement (over table `$t` and count `$n`), the
+/// most allocations and the most bytes allocated per record, and what they are.
+///
+/// The byte budget holds a record's write step to its own work: a future the
+/// step builds for every record is allocated whole however little of it a
+/// record reaches, so a stage that awaits a large body inline, or a step that
+/// builds one it does not run, shows here as kilobytes per record.
+const CREATE_BUDGETS: &[(&str, &str, &str, f64, f64, &str)] = &[
+	(
+		"schemaless",
+		"DEFINE TABLE $t SCHEMALESS;",
+		"CREATE |$t:$n| RETURN NONE",
+		18.0,
+		16_384.0,
+		"the generated row, its key and document encodings, the kv-mem write, the transaction cache entry, and the record's boxed write step",
+	),
+	(
+		"schemaless_set",
+		"DEFINE TABLE $t SCHEMALESS;",
+		"CREATE |$t:$n| SET score = rand::int(0, 100) RETURN NONE",
+		28.0,
+		18_432.0,
+		"as `schemaless`, with the data clause's evaluation, `$input`, and the assignment",
+	),
+	(
+		"schemafull",
+		"DEFINE TABLE $t SCHEMAFULL; DEFINE FIELD score ON $t TYPE option<int>; DEFINE FIELD name ON $t TYPE option<string>;",
+		"CREATE |$t:$n| RETURN NONE",
+		31.0,
+		18_432.0,
+		"as `schemaless`, with each field's frame and the places it walks",
+	),
+	(
+		"schemafull_set",
+		"DEFINE TABLE $t SCHEMAFULL; DEFINE FIELD score ON $t TYPE option<int>; DEFINE FIELD name ON $t TYPE option<string>;",
+		"CREATE |$t:$n| SET score = rand::int(0, 100) RETURN NONE",
+		40.0,
+		20_480.0,
+		"as `schemafull`, with the data clause's evaluation, `$input`, and the assignment",
+	),
+];
+
+/// Each shape of [`CREATE_BUDGETS`] allocates no more per record than its
+/// budget, counted as the difference between two creates of different sizes
+/// into tables of their own, so the statement's planning and commit cancel.
+#[tokio::test]
+async fn generated_id_creates_stay_within_budget() {
+	let _measuring = MEASURING.lock().await;
+	const CHECK_SMALL: usize = 2_000;
+	const CHECK_LARGE: usize = 4_000;
+	let ds = Datastore::builder()
+		.without_maintenance_tasks()
+		.build_with_path("memory")
+		.await
+		.expect("datastore");
+	let session = Session::owner().with_ns("test").with_db("test");
+	ds.execute("DEFINE NS test; USE NS test; DEFINE DB test;", &Session::owner(), None)
+		.await
+		.expect("namespace and database defined");
+	let run = async |sql: String| {
+		for response in ds.execute(&sql, &session, None).await.expect("query runs") {
+			if let Err(e) = &response.result {
+				panic!("`{sql}` failed: {e}");
+			}
+		}
+	};
+	let mut over = Vec::new();
+	for (name, define, create, allocs_budget, bytes_budget, _) in CREATE_BUDGETS {
+		let mut counted = Vec::new();
+		for n in [CHECK_SMALL, CHECK_LARGE] {
+			let table = format!("{name}_{n}");
+			run(define.replace("$t", &table)).await;
+			let sql = create.replace("$t", &table).replace("$n", &n.to_string());
+			let ((), counts, _) = count(0, run(sql)).await;
+			counted.push(counts);
+		}
+		let rows = (CHECK_LARGE - CHECK_SMALL) as f64;
+		let allocs = (counted[1].allocs as f64 - counted[0].allocs as f64) / rows;
+		let bytes = (counted[1].bytes as f64 - counted[0].bytes as f64) / rows;
+		println!("{name:<16} {allocs:>8.2} allocs/record {bytes:>10.0} bytes/record");
+		if allocs > *allocs_budget {
+			over.push(format!("{name}: {allocs:.2} allocs/record > {allocs_budget}"));
+		}
+		if bytes > *bytes_budget {
+			over.push(format!("{name}: {bytes:.0} bytes/record > {bytes_budget}"));
+		}
+	}
+	assert!(over.is_empty(), "over budget:\n{}", over.join("\n"));
+}
+
+// --------------------------------------------------
 // Memory ceilings
 // --------------------------------------------------
 

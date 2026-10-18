@@ -1305,9 +1305,9 @@ impl Context {
 			if ALLOC.is_beyond_threshold() {
 				bail!(DatastoreError::QueryBeyondMemoryThreshold);
 			}
-			let now = Instant::now();
+			// The clock is read only by a context that holds a deadline.
 			if let Some((deadline, timeout)) = self.deadline
-				&& deadline <= now
+				&& deadline <= Instant::now()
 			{
 				return Ok(Some(Reason::Timedout(timeout.into())));
 			}

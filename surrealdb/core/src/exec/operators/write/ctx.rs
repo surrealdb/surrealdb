@@ -225,6 +225,14 @@ pub(crate) struct WriteCtx {
 	pub(crate) table: Arc<TableDefinition>,
 	/// The table's field definitions, in the order the catalog holds them.
 	pub(crate) fields: Arc<[FieldDefinition]>,
+	/// The catalog text of each of `fields`' names ([`Idiom::to_raw_string`]),
+	/// in the same order: rendered once, the first time a record of the
+	/// statement checks its schema plan against `fields`, and read by every
+	/// later record. Shared with every context [`Self::rebound`] from this one,
+	/// which reads the same `fields`.
+	///
+	/// [`Idiom::to_raw_string`]: crate::expr::idiom::Idiom::to_raw_string
+	pub(crate) field_names: Arc<OnceLock<Box<[String]>>>,
 	/// The event bodies this write triggers.
 	pub(crate) events: Arc<[EventDefinition]>,
 	/// The foreign materialised views this write maintains.
@@ -365,6 +373,7 @@ impl WriteCtx {
 			db: catalog.db,
 			table: catalog.tb,
 			fields: catalog.fields,
+			field_names: Arc::new(OnceLock::new()),
 			events: catalog.events,
 			views: catalog.tables,
 			views_observe,
@@ -395,6 +404,7 @@ impl WriteCtx {
 			db: Arc::clone(&self.db),
 			table: Arc::clone(&self.table),
 			fields: Arc::clone(&self.fields),
+			field_names: Arc::clone(&self.field_names),
 			events: Arc::clone(&self.events),
 			views: Arc::clone(&self.views),
 			views_observe: self.views_observe,

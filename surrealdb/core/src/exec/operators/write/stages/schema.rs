@@ -92,6 +92,9 @@ pub(crate) fn refuse_undefined_fields(
 	fields: &[FieldDefinition],
 	table: &crate::val::TableName,
 ) -> Result<(), ControlFlow> {
+	if flat_and_defined(current, fields) {
+		return Ok(());
+	}
 	// Which paths a definition reaches, and whether paths *below* each one are
 	// admitted without a definition of their own.
 	let mut defined: IdiomTrie<bool> = IdiomTrie::new();
@@ -166,6 +169,27 @@ pub(crate) fn refuse_undefined_fields(
 		}
 	}
 	Ok(())
+}
+
+/// Whether `current` is an object each of whose places is a key holding
+/// neither an object nor an array, every key being the record's own (`id`,
+/// `in`, `out`) or the whole path of a field definition.
+///
+/// Such a record holds no undefined field: each of its paths is a key a
+/// definition names exactly or a special one, so [`refuse_undefined_fields`]
+/// admits it, and answers so here without building its trie. `false` says
+/// only that the full judgement is needed.
+fn flat_and_defined(current: &Value, fields: &[FieldDefinition]) -> bool {
+	let Value::Object(object) = current else {
+		return false;
+	};
+	object.0.iter().all(|(key, value)| {
+		!matches!(value, Value::Object(_) | Value::Array(_))
+			&& (matches!(key.as_str(), "id" | "in" | "out")
+				|| fields.iter().any(
+					|fd| matches!(fd.name.0.as_slice(), [Part::Field(name)] if name.as_str() == key.as_str()),
+				))
+	})
 }
 
 /// Whether a field of kind `kind`, `FLEXIBLE` when `flexible`, admits paths

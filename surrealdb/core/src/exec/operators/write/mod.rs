@@ -189,11 +189,7 @@ impl TargetSubjects {
 			TargetSubjects::Named(subjects) => Ok(subjects.next()),
 			TargetSubjects::Mock(ids) => match ids.next() {
 				None => Ok(None),
-				Some(id) => {
-					let mut named = Vec::new();
-					target_subjects(Value::RecordId(id), form, deferable, &mut named)?;
-					Ok(named.into_iter().next())
-				}
+				Some(id) => record_subject(id, form, deferable).map(Some),
 			},
 		}
 	}
@@ -205,11 +201,6 @@ pub(crate) fn target_subjects(
 	deferable: bool,
 	out: &mut Vec<Subject>,
 ) -> Result<(), ControlFlow> {
-	let refuse = |value: &Value| {
-		ControlFlow::Err(anyhow::anyhow!(ExecError::InvalidStatementTarget {
-			value: value.to_sql()
-		}))
-	};
 	match value {
 		Value::Array(array) => {
 			for value in array {
@@ -220,30 +211,47 @@ pub(crate) fn target_subjects(
 			out.push(Subject::Row(Box::new(WriteRow::for_target(Value::Table(table))?)))
 		}
 		Value::Table(table) => out.push(Subject::Scan(table, None)),
-		Value::RecordId(id) if id.key.is_range() => {
-			if matches!(form, plan::WriteForm::Create) {
-				return Err(refuse(&Value::RecordId(id)));
-			}
-			let RecordId {
-				table,
-				key: RecordIdKey::Range(range),
-			} = id
-			else {
-				unreachable!("the key was just tested for a range")
-			};
-			out.push(Subject::Scan(table, Some(range)));
-		}
-		Value::RecordId(id) if deferable && matches!(form, plan::WriteForm::Create) => {
-			out.push(Subject::Row(Box::new(WriteRow::for_target(Value::RecordId(id))?)))
-		}
-		Value::RecordId(id) => out.push(Subject::Read(id)),
+		Value::RecordId(id) => out.push(record_subject(id, form, deferable)?),
 		Value::Object(object) => match object.rid() {
-			Some(id) => target_subjects(Value::RecordId(id), form, deferable, out)?,
-			None => return Err(refuse(&Value::Object(object))),
+			Some(id) => out.push(record_subject(id, form, deferable)?),
+			None => return Err(refuse_target(&Value::Object(object))),
 		},
-		other => return Err(refuse(&other)),
+		other => return Err(refuse_target(&other)),
 	}
 	Ok(())
+}
+
+/// The subject a record-id target names, classified as [`target_subjects`]
+/// classifies every record id a target evaluates to.
+fn record_subject(
+	id: RecordId,
+	form: plan::WriteForm,
+	deferable: bool,
+) -> Result<Subject, ControlFlow> {
+	if id.key.is_range() {
+		if matches!(form, plan::WriteForm::Create) {
+			return Err(refuse_target(&Value::RecordId(id)));
+		}
+		let RecordId {
+			table,
+			key: RecordIdKey::Range(range),
+		} = id
+		else {
+			unreachable!("the key was just tested for a range")
+		};
+		return Ok(Subject::Scan(table, Some(range)));
+	}
+	if deferable && matches!(form, plan::WriteForm::Create) {
+		return Ok(Subject::Row(Box::new(WriteRow::for_target(Value::RecordId(id))?)));
+	}
+	Ok(Subject::Read(id))
+}
+
+/// The refusal of a value that names no subject a write can take.
+fn refuse_target(value: &Value) -> ControlFlow {
+	ControlFlow::Err(anyhow::anyhow!(ExecError::InvalidStatementTarget {
+		value: value.to_sql()
+	}))
 }
 
 /// The row for a record-id subject an updating form named, with the stored

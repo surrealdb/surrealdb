@@ -409,7 +409,7 @@ pub(super) async fn step(
 	state: &mut State,
 ) -> FlowResult<usize> {
 	let (row, ctx) = write_state(state)?.in_flight()?;
-	let exec = ctx.exec().clone();
+	let exec = ctx.exec();
 	match instr {
 		DataInstr::Matched => {
 			row.matched = true;
@@ -420,7 +420,7 @@ pub(super) async fn step(
 			bare,
 			checked,
 		} => {
-			materialise(program, *view, *bare, *checked, state, &exec).await?;
+			materialise(program, *view, *bare, *checked, state, exec).await?;
 			Ok(next)
 		}
 		DataInstr::Where {
@@ -428,7 +428,7 @@ pub(super) async fn step(
 			skip,
 		} => {
 			let image = snapshot(row).clone();
-			let verdict = clause(run_image(program, *pipeline, image, None, state, &exec).await)?;
+			let verdict = clause(run_image(program, *pipeline, image, None, state, exec).await)?;
 			if verdict.is_truthy() {
 				// Recorded before carrying on: a later stage may still decline
 				// to show the record, and it is this flag that tells a matched
@@ -459,7 +459,7 @@ pub(super) async fn step(
 						None
 					};
 					let outer = std::mem::replace(&mut state.write_input, input);
-					let ran = run_image(program, *pipeline, image, None, state, &exec).await;
+					let ran = run_image(program, *pipeline, image, None, state, exec).await;
 					state.write_input = outer;
 					Some(clause(ran)?)
 				}
@@ -518,7 +518,7 @@ pub(super) async fn step(
 				// the record is set aside while they do.
 				ComputedInput::Set(computed) => {
 					let mut target = std::mem::replace(&mut row.current, Value::None);
-					let applied = apply_places(program, &mut target, computed, state, &exec).await;
+					let applied = apply_places(program, &mut target, computed, state, exec).await;
 					write_state(state)?.row()?.current = target;
 					applied
 				}
@@ -542,7 +542,7 @@ pub(super) async fn step(
 				return Err(internal("a PATCH applied with no evaluated PATCH"));
 			};
 			let data = Arc::clone(data);
-			check_patch_pointers(program, *view, *bare, *checked, &data, state, &exec).await?;
+			check_patch_pointers(program, *view, *bare, *checked, &data, state, exec).await?;
 			let row = write_state(state)?.row()?;
 			row.current.patch(Value::clone(&data)).map_err(ControlFlow::Err)?;
 			row.current_reduced = None;
@@ -575,12 +575,12 @@ pub(super) async fn step(
 			else {
 				return Err(internal("an id DEFAULT the statement was not planned with"));
 			};
-			let frame = field_default_frame(&exec, field)
+			let frame = field_default_frame(exec, field)
 				.map_err(ControlFlow::Err)?
 				.refusing_writes(crate::dbs::NoWriteFrame::FieldDefault);
 			let doc = data::id_default_doc(row).clone();
 			let value =
-				field_clause(run_image(program, *pipeline, doc, Some(frame), state, &exec).await)?;
+				field_clause(run_image(program, *pipeline, doc, Some(frame), state, exec).await)?;
 			let row = write_state(state)?.row()?;
 			data::check_default_id(row, &ctx, &table, &value)?;
 			let id = value.generate(table, false).map_err(ControlFlow::Err)?;
