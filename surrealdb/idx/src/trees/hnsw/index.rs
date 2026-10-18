@@ -979,8 +979,10 @@ impl HnswIndex {
 		let vector: SharedVector = Vector::try_from_vector(self.vector_type, pt)?.into();
 		vector.check_dimension(self.dim)?;
 		let search = HnswSearch::new(vector, k, ef);
+		// Doc sets are read as of this search's snapshot.
+		let vec_docs = self.vec_docs.at_snapshot(&env.tx(), compaction_generation);
 		// Get a new HNSW context
-		let ctx = self.new_hnsw_context(env);
+		let ctx = HnswContext::new(env, self.ikb.clone(), &vec_docs);
 		// Collect the result
 		let mut builder = KnnResultBuilder::new(k);
 
@@ -1093,7 +1095,8 @@ impl HnswIndex {
 		let tx = env.tx();
 		let compaction_generation = read_compaction_generation(&tx, &self.ikb.new_hg_key()).await?;
 		let search = HnswSearch::new(vector, k, k);
-		let ctx = self.new_hnsw_context(env);
+		let vec_docs = self.vec_docs.at_snapshot(&tx, compaction_generation);
+		let ctx = HnswContext::new(env, self.ikb.clone(), &vec_docs);
 		let mut builder = KnnResultBuilder::new(k);
 		let pending_docs =
 			self.search_pendings(&ctx, &search, &mut None, Some(allow_list), &mut builder).await?;
@@ -1698,10 +1701,8 @@ impl HnswIndex {
 			if !builder.check_add(e_dist) {
 				continue;
 			}
-			let docs = if let Some(docs) = self.vec_docs.get_cached_doc_set(e_id).await {
-				Some(docs)
-			} else if let Some(v) = hnsw.get_vector(&ctx.tx, &e_id).await? {
-				self.vec_docs.get_docs_by_element(&ctx.tx, e_id, &v).await?
+			let docs = if let Some(v) = hnsw.get_vector(&ctx.tx, &e_id).await? {
+				ctx.vec_docs.get_docs_by_element(&ctx.tx, e_id, &v).await?
 			} else {
 				None
 			};
