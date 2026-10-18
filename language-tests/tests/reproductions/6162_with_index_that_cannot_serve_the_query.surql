@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [test]
-reason = "WITH INDEX naming an index the query cannot use is reported instead of silently scanning"
+reason = "WITH INDEX is an allow-list and falls back to TableScan when none of the named indexes can serve the query"
 issue = 6162
 
 [[test.results]]

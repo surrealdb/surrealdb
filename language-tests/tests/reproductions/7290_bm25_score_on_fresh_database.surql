@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [test]
-reason = "search::score over a BM25 index is positive and ranks the higher term frequency first"
+reason = "search::score over a BM25 index is positive and ranks test_docs:3 (2 occurrences in 3 words) ahead of test_docs:1 (3 occurrences in 6 words) under BM25 length normalization (b = 0.75)"
 issue = 7290
 wip = true
 

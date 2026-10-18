@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [test]
-reason = "An uncorrelated subquery on the right of IN is evaluated once and the outer index is used for the lookup"
+reason = "An uncorrelated subquery on the right of IN is evaluated once using its own index while the outer table falls back to a filtered table scan and returns the matching rows"
 issue = 5439
 
 [[test.results]]

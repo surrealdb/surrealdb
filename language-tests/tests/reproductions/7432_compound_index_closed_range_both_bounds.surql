@@ -22,7 +22,7 @@ value = "NONE"
 value = "[9, 8, 7, 6, 5]"
 
 [[test.results]]
-value = """{ attributes: { expr: 'd' }, children: [{ attributes: { limit: '50' }, children: [{ attributes: { predicate: 'd < 10' }, children: [{ attributes: { access: "['Paid'] MoreThanEqual 5 LessThan 10", direction: 'Backward', index: 'idx', table: 'inv' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'Limit' }], context: 'Db', operator: 'ProjectValue' }"""
+value = """{ attributes: { expr: 'd' }, children: [{ attributes: { access: "['Paid'] MoreThanEqual 5 LessThan 10", direction: 'Backward', index: 'idx', limit: '50', table: 'inv' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'ProjectValue' }"""
 */
 
 DEFINE TABLE inv SCHEMALESS;
