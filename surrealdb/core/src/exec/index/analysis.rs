@@ -2059,8 +2059,9 @@ impl<'a> IndexAnalyzer<'a> {
 		candidates: &mut Vec<IndexCandidate>,
 	) {
 		// Extract the field path and value from the comparison. Parameters
-		// are pre-folded into literals before the analyzer runs (see
-		// `resolve_condition_params` in the planner and dynamic scan). A bare
+		// are folded into literals before the analyzer runs (binding's
+		// `logical::params::resolve_params`, for a read's predicate and a
+		// mutation's `WHERE` alike). A bare
 		// `LogicalExpr::Param` reaching the analyzer means the param could not
 		// be resolved at plan time, so it cannot be pushed down to the index
 		// and the comparison falls through to the table-scan path.
