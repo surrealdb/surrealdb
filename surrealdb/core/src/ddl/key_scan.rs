@@ -177,14 +177,14 @@ impl RecordReads {
 /// What `expr`, evaluated in `context`, reads of the record.
 ///
 /// A name is read when the clause spells it: a field it names bare (`city`,
-/// counted wherever it appears, a nested statement included, as
-/// [`extract_computed_deps`] counts it), a static path or destructure through
-/// a parameter bound to the record (`$this.city`, `$parent['city']`,
-/// `$this.{city}`) or through the document where the document is the record
-/// (`@.city`), or a literal `type::field('city')`. A bare name inside a nested
-/// statement over another table (`UPDATE other SET n += 1`) is counted as a
-/// read of the record's field of that name too: it fails closed, and the
-/// refusal then names a read that is another table's field.
+/// counted where [`extract_computed_deps`] counts it), a static path or
+/// destructure through a parameter bound to the record (`$this.city`,
+/// `$parent['city']`, `$this.{city}`) or through the document where the
+/// document is the record (`@.city`), or a literal `type::field('city')`. A
+/// bare name inside a nested write statement over another table
+/// (`UPDATE other SET n += 1`) is counted as a read of the record's field of
+/// that name too: it fails closed, and the refusal then names a read that is
+/// another table's field.
 ///
 /// The clause reads the record by names that cannot be determined
 /// (`unresolved`) when, where the record is the document its evaluation reads
@@ -1579,6 +1579,7 @@ mod tests {
 				("@.city", &["city"], false),
 				("@['city'] = 'x'", &["city"], false),
 				("@.{city, time}", &["city", "time"], false),
+				("(SELECT VALUE city FROM $this)", &["city"], false),
 			],
 		);
 	}
@@ -1724,21 +1725,9 @@ mod tests {
 				("$session.ns != NONE", &[], false),
 				("$after.city", &[], false),
 				("fn::x($after)", &[], true),
-				(
-					"(SELECT VALUE name FROM other WHERE fn::ok() AND $this.n > 1)",
-					&["n", "name"],
-					false,
-				),
-				(
-					"(SELECT VALUE name FROM other WHERE ok = $parent.city)",
-					&["city", "name", "ok"],
-					false,
-				),
-				(
-					"string::lowercase((SELECT VALUE name FROM ONLY other LIMIT 1))",
-					&["name"],
-					false,
-				),
+				("(SELECT VALUE name FROM other WHERE fn::ok() AND $this.n > 1)", &[], false),
+				("(SELECT VALUE name FROM other WHERE ok = $parent.city)", &["city"], false),
+				("string::lowercase((SELECT VALUE name FROM ONLY other LIMIT 1))", &[], false),
 			],
 		);
 	}

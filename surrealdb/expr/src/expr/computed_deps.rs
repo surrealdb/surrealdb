@@ -9,6 +9,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::expr::function::{Function, FunctionCall};
+use crate::expr::statements::SelectStatement;
 use crate::expr::visit::{Visit, Visitor};
 use crate::expr::{Expr, Idiom, Literal, Part};
 
@@ -41,6 +42,7 @@ pub fn extract_computed_deps(expr: &Expr) -> ComputedDeps {
 	let mut extractor = FieldDependencyExtractor {
 		deps: HashSet::new(),
 		is_complete: true,
+		nested: 0,
 	};
 	// Errors from our visitor are `Infallible`, so this cannot fail.
 	let _ = extractor.visit_expr(expr);
@@ -81,6 +83,11 @@ struct FieldDependencyExtractor {
 	deps: HashSet<String>,
 	/// Whether all dependencies could be statically determined.
 	is_complete: bool,
+	/// How many subquery scopes away from the analysed document the current
+	/// row is (`0` when the current row is the document itself). A bare field
+	/// at `nested > 0` names a field of that subquery's record, not of the
+	/// document being analysed.
+	nested: u32,
 }
 
 impl Visitor for FieldDependencyExtractor {
@@ -88,22 +95,40 @@ impl Visitor for FieldDependencyExtractor {
 
 	fn visit_idiom(&mut self, idiom: &Idiom) -> Result<(), Self::Error> {
 		// Try to extract a root field name from the idiom, skipping the
-		// `$this`/`$self` prefix when present. Returns the number of
-		// leading parts that were consumed (0, 1, or 2).
+		// `$this`/`$self`/`$parent` prefix when present. Returns the number
+		// of leading parts that were consumed (0, 1, or 2).
 		let consumed = match idiom.0.as_slice() {
 			// Direct field access: `field_name` or `field.nested.path`
 			[Part::Field(name), ..] => {
-				self.deps.insert(name.as_str().to_owned());
+				if self.nested == 0 {
+					self.deps.insert(name.as_str().to_owned());
+				}
 				1
 			}
 			// `$this.field` / `$self["field"]` — equivalent to bare field.
 			[Part::Start(Expr::Param(p)), second, ..] if matches!(p.as_str(), "this" | "self") => {
 				match field_name_from_part(second) {
 					Some(name) => {
-						self.deps.insert(name);
+						if self.nested == 0 {
+							self.deps.insert(name);
+						}
 						2
 					}
 					// $this.* / $this[0] / etc — can't determine field statically
+					None => 0,
+				}
+			}
+			// `$parent.field` / `$parent["field"]` inside a direct subquery
+			// reads a field of the outer document.
+			[Part::Start(Expr::Param(p)), second, ..] if p.as_str() == "parent" => {
+				self.is_complete = false;
+				match field_name_from_part(second) {
+					Some(name) => {
+						if self.nested == 1 {
+							self.deps.insert(name);
+						}
+						2
+					}
 					None => 0,
 				}
 			}
@@ -154,9 +179,19 @@ impl Visitor for FieldDependencyExtractor {
 			}
 
 			// === Opaque (flip + walk) ===
-			// Subqueries can access arbitrary fields/tables at runtime.
-			Expr::Select(_)
-			| Expr::Create(_)
+			// A SELECT evaluates its source, pagination, version, and timeout
+			// clauses in the current scope, then its projection, filtering,
+			// grouping, ordering, and fetch clauses against the rows it selects.
+			// The analysis is still incomplete, since the body can read the
+			// document through parameters and nested sources.
+			Expr::Select(select) => {
+				self.is_complete = false;
+				self.visit_select(select)?;
+			}
+
+			// === Opaque (flip + walk) ===
+			// Other subqueries can access arbitrary fields/tables at runtime.
+			Expr::Create(_)
 			| Expr::Update(_)
 			| Expr::Upsert(_)
 			| Expr::Delete(_)
@@ -193,6 +228,79 @@ impl Visitor for FieldDependencyExtractor {
 				self.visit_function_call(call)?;
 			}
 		}
+		Ok(())
+	}
+
+	fn visit_select(&mut self, select: &SelectStatement) -> Result<(), Self::Error> {
+		let SelectStatement {
+			fields,
+			omit,
+			only: _,
+			what,
+			with: _,
+			cond,
+			split,
+			group,
+			order,
+			limit,
+			start,
+			fetch,
+			version,
+			timeout,
+			explain: _,
+			tempfiles: _,
+			for_update: _,
+		} = select;
+
+		let selects_outer_doc =
+			!what.is_empty() && what.iter().all(|target| self.is_outer_doc_target(target));
+
+		for v in what {
+			self.visit_expr(v)?;
+		}
+		if let Some(limit) = limit {
+			self.visit_expr(&limit.0)?;
+		}
+		if let Some(start) = start {
+			self.visit_expr(&start.0)?;
+		}
+		self.visit_expr(version)?;
+		self.visit_expr(timeout)?;
+
+		let prev_nested = self.nested;
+		self.nested = if selects_outer_doc {
+			0
+		} else {
+			self.nested + 1
+		};
+
+		self.visit_fields(fields)?;
+		for v in omit {
+			self.visit_expr(v)?;
+		}
+		if let Some(cond) = cond {
+			self.visit_expr(&cond.0)?;
+		}
+		if let Some(split) = split {
+			for v in &split.0 {
+				self.visit_idiom(&v.0)?;
+			}
+		}
+		if let Some(group) = group {
+			for v in &group.0 {
+				self.visit_idiom(&v.0)?;
+			}
+		}
+		if let Some(order) = order {
+			self.visit_ordering(order)?;
+		}
+		if let Some(fetch) = fetch {
+			for v in fetch.iter() {
+				self.visit_expr(&v.0)?;
+			}
+		}
+
+		self.nested = prev_nested;
 		Ok(())
 	}
 
@@ -240,6 +348,20 @@ impl Visitor for FieldDependencyExtractor {
 }
 
 impl FieldDependencyExtractor {
+	/// Whether a `SELECT ... FROM <target>` source expression refers directly
+	/// to the outer document being analysed, so that the rows the `SELECT`
+	/// iterates over are that document itself.
+	fn is_outer_doc_target(&self, expr: &Expr) -> bool {
+		match expr {
+			Expr::Param(p) => match p.as_str() {
+				"this" | "self" => self.nested == 0,
+				"parent" => self.nested <= 1,
+				_ => false,
+			},
+			_ => false,
+		}
+	}
+
 	/// Handle a function call: the fields its receiver reads of the current
 	/// document, then the fields its arguments read.
 	///
@@ -284,13 +406,16 @@ impl FieldDependencyExtractor {
 	}
 
 	/// `type::field("static_name")` — single literal-string arg whose parsed
-	/// idiom starts with a static `Part::Field` adds the root to deps. Any
-	/// dynamic shape flips `is_complete = false`.
+	/// idiom starts with a static `Part::Field` adds the root to deps when the
+	/// current row is the analysed document (`nested == 0`). Any dynamic shape
+	/// flips `is_complete = false`.
 	fn analyse_type_field(&mut self, args: &[Expr]) {
 		match args {
 			[Expr::Literal(Literal::String(s))] => match parse_idiom_root(s.as_str()) {
 				Some(root) => {
-					self.deps.insert(root);
+					if self.nested == 0 {
+						self.deps.insert(root);
+					}
 				}
 				None => {
 					self.is_complete = false;
@@ -303,8 +428,9 @@ impl FieldDependencyExtractor {
 	}
 
 	/// `type::fields(["a", "b.c"])` — single literal-array arg with all
-	/// literal-string elements adds each root to deps. Any dynamic element or
-	/// non-array arg flips `is_complete = false`.
+	/// literal-string elements adds each root to deps when the current row is
+	/// the analysed document (`nested == 0`). Any dynamic element or non-array
+	/// arg flips `is_complete = false`.
 	fn analyse_type_fields(&mut self, args: &[Expr]) {
 		let [Expr::Literal(Literal::Array(items))] = args else {
 			self.is_complete = false;
@@ -322,7 +448,9 @@ impl FieldDependencyExtractor {
 			};
 			pending.push(root);
 		}
-		self.deps.extend(pending);
+		if self.nested == 0 {
+			self.deps.extend(pending);
+		}
 	}
 }
 
@@ -787,6 +915,50 @@ mod tests {
 		let deps = extract(&expr);
 		assert_eq!(deps.fields, vec!["a", "b", "c"]);
 		assert!(deps.is_complete);
+	}
+
+	/// A subquery's fields, conditions and clauses name fields of the records it
+	/// selects, while its sources, outer-scope clauses (`LIMIT`, `START`,
+	/// `VERSION`, `TIMEOUT`), `$parent.<field>` references from an immediate
+	/// subquery, and subqueries selecting from the outer document (`FROM $this`,
+	/// `FROM $self`, `FROM $parent`) read fields of the document.
+	#[test]
+	fn subquery_names_no_field_of_the_document() {
+		let deps =
+			extract(&parse("(SELECT VALUE loc FROM child WHERE ref = $parent.id LIMIT 1)[0]"));
+		assert_eq!(deps.fields, vec!["id"]);
+		assert!(!deps.is_complete);
+		let deps = extract(&parse("(SELECT VALUE name FROM $this.members WHERE kind = 1)"));
+		assert_eq!(deps.fields, vec!["members"]);
+		assert!(!deps.is_complete);
+		let deps = extract(&parse(
+			"(SELECT VALUE type::field('sub_a') FROM child WHERE type::fields(['sub_b', 'sub_c']) != NONE)",
+		));
+		assert!(deps.fields.is_empty(), "{deps:?}");
+		assert!(!deps.is_complete);
+		let deps = extract(&parse(
+			"(SELECT VALUE child_field FROM child LIMIT lim START st VERSION ver TIMEOUT dur)",
+		));
+		assert_eq!(deps.fields, vec!["dur", "lim", "st", "ver"]);
+		assert!(!deps.is_complete);
+		let deps = extract(&parse("(SELECT VALUE city FROM $this WHERE active = true)"));
+		assert_eq!(deps.fields, vec!["active", "city"]);
+		assert!(!deps.is_complete);
+		let deps = extract(&parse("(SELECT VALUE type::field('city') FROM $self)"));
+		assert_eq!(deps.fields, vec!["city"]);
+		assert!(!deps.is_complete);
+		let deps = extract(&parse("(SELECT VALUE (SELECT VALUE city FROM $parent) FROM child)"));
+		assert_eq!(deps.fields, vec!["city"]);
+		assert!(!deps.is_complete);
+		let deps = extract(&parse(
+			"(SELECT $parent.other_field, $parent['bracket_field'] FROM other WHERE col = 1)",
+		));
+		assert_eq!(deps.fields, vec!["bracket_field", "other_field"]);
+		assert!(!deps.is_complete);
+		let deps =
+			extract(&parse("(SELECT (SELECT VALUE $parent.inner_only FROM other2) FROM other1)"));
+		assert!(deps.fields.is_empty(), "{deps:?}");
+		assert!(!deps.is_complete);
 	}
 
 	/// `$auth`, `$access`, `$token` and `$session` are bound by the session, so
