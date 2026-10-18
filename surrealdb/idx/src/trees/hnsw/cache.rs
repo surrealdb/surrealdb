@@ -27,6 +27,15 @@ struct CachedDocId {
 	id: Arc<RecordIdKey>,
 }
 
+/// The document IDs of one element and the compaction generation of the snapshot they were
+/// read from.
+#[derive(Clone)]
+struct CachedDocSet {
+	/// Compaction generation observed when this set was read from KV.
+	generation: Option<u64>,
+	docs: Ids64,
+}
+
 #[derive(Clone, Eq, Hash, PartialEq)]
 enum HnswCacheKey {
 	Vector(VectorCacheKey),
@@ -37,7 +46,7 @@ enum HnswCacheKey {
 #[derive(Clone)]
 enum HnswCacheValue {
 	Vector(SharedVector),
-	DocSet(Ids64),
+	DocSet(CachedDocSet),
 	DocId(CachedDocId),
 }
 
@@ -53,8 +62,9 @@ impl Weighter<HnswCacheKey, HnswCacheValue> for HnswCacheWeighter {
 					as u64
 			}
 			(HnswCacheKey::DocSet(key), HnswCacheValue::DocSet(val)) => {
-				(val.iter().count() * std::mem::size_of::<u64>() + std::mem::size_of_val(key))
-					as u64
+				(val.docs.iter().count() * std::mem::size_of::<u64>()
+					+ std::mem::size_of_val(&val.generation)
+					+ std::mem::size_of_val(key)) as u64
 			}
 			(HnswCacheKey::DocId(key), HnswCacheValue::DocId(val)) => {
 				(std::mem::size_of_val(key)
@@ -353,29 +363,40 @@ impl VectorCache {
 		)));
 	}
 
-	/// Retrieves cached compact document IDs for an element, if present.
+	/// Retrieves the cached compact document IDs for an element, if they were read at
+	/// `generation`.
 	pub(super) async fn get_doc_set(
 		&self,
 		index: HnswCacheIndex,
 		element_id: ElementId,
+		generation: Option<u64>,
 	) -> Option<Ids64> {
 		let key = HnswCacheKey::DocSet((index.0, index.1, index.2, index.3, index.4, element_id));
 		match self.0.cache.get(&key) {
-			Some(HnswCacheValue::DocSet(docs)) => Some(docs),
+			Some(HnswCacheValue::DocSet(cached)) => {
+				(cached.generation == generation).then_some(cached.docs)
+			}
 			_ => None,
 		}
 	}
 
-	/// Inserts or refreshes compact document IDs represented by one element.
+	/// Inserts or refreshes the compact document IDs an element carried at `generation`.
 	pub(super) async fn insert_doc_set(
 		&self,
 		index: HnswCacheIndex,
 		element_id: ElementId,
+		generation: Option<u64>,
 		docs: Ids64,
 	) {
 		let key = (index.0, index.1, index.2, index.3, index.4, element_id);
 		self.0.doc_set_indexes.insert(index.0, index.1, index.2, index.3, index.4, element_id);
-		self.0.cache.insert(HnswCacheKey::DocSet(key), HnswCacheValue::DocSet(docs));
+		self.0.cache.insert(
+			HnswCacheKey::DocSet(key),
+			HnswCacheValue::DocSet(CachedDocSet {
+				generation,
+				docs,
+			}),
+		);
 	}
 
 	/// Evicts cached compact document IDs for one element.
@@ -613,7 +634,7 @@ mod tests {
 		cache
 			.insert(namespace_id, database_id, table_id, index_id, 0, 7, SharedVector::from(vector))
 			.await;
-		cache.insert_doc_set(index, 7, Ids64::Vec2([11, 12])).await;
+		cache.insert_doc_set(index, 7, None, Ids64::Vec2([11, 12])).await;
 		cache.insert_doc_id(index, 11, Some(1), RecordIdKey::Number(99)).await;
 
 		assert_eq!(cache.capacity(), 1024);
@@ -671,8 +692,10 @@ mod tests {
 			cache.get(namespace_id, database_id, table_id, index_id, 0, element_id).await;
 		assert!(retrieved.is_some());
 		assert_eq!(retrieved.unwrap(), shared);
-		cache.insert_doc_set(index, element_id, Ids64::Vec2([7, 8])).await;
-		assert_eq!(cache.get_doc_set(index, element_id).await, Some(Ids64::Vec2([7, 8])));
+		cache.insert_doc_set(index, element_id, None, Ids64::Vec2([7, 8])).await;
+		assert_eq!(cache.get_doc_set(index, element_id, None).await, Some(Ids64::Vec2([7, 8])));
+		// A reader at another compaction generation is not served the set.
+		assert_eq!(cache.get_doc_set(index, element_id, Some(1)).await, None);
 		let id = cache.insert_doc_id(index, 7, Some(3), RecordIdKey::Number(99)).await;
 		assert_eq!(id.as_ref(), &RecordIdKey::Number(99));
 		assert_eq!(
@@ -709,7 +732,7 @@ mod tests {
 			let vector = Vector::F32(Array1::from_vec(data));
 			let shared = SharedVector::from(vector);
 			cache.insert(namespace_id, database_id, table_id, index_id, 0, i, shared).await;
-			cache.insert_doc_set(index, i, Ids64::One(i)).await;
+			cache.insert_doc_set(index, i, None, Ids64::One(i)).await;
 			cache.insert_doc_id(index, i, Some(1), RecordIdKey::Number(i as i64)).await;
 		}
 
@@ -723,7 +746,7 @@ mod tests {
 		// All vectors should be gone
 		for i in 0..10u64 {
 			assert!(!cache.contains(namespace_id, database_id, table_id, index_id, 0, i).await);
-			assert!(cache.get_doc_set(index, i).await.is_none());
+			assert!(cache.get_doc_set(index, i, None).await.is_none());
 			assert!(cache.get_doc_id(index, i, Some(1)).await.is_none());
 		}
 	}
@@ -743,22 +766,22 @@ mod tests {
 		// by accident through the other format's tracked ids.
 		let vector = SharedVector::from(Vector::F32(Array1::from_vec(vec![1.0, 2.0, 3.0, 4.0])));
 		cache.insert(namespace_id, database_id, table_id, index_id, 0, 7, vector.clone()).await;
-		cache.insert_doc_set(legacy, 7, Ids64::One(11)).await;
+		cache.insert_doc_set(legacy, 7, None, Ids64::One(11)).await;
 		cache.insert_doc_id(legacy, 11, Some(1), RecordIdKey::Number(17)).await;
 		cache.insert(namespace_id, database_id, table_id, index_id, 1, 8, vector).await;
-		cache.insert_doc_set(rebuilt, 8, Ids64::One(12)).await;
+		cache.insert_doc_set(rebuilt, 8, None, Ids64::One(12)).await;
 		cache.insert_doc_id(rebuilt, 12, Some(1), RecordIdKey::Number(18)).await;
 
 		cache.remove_index(namespace_id, database_id, table_id, index_id, 0).await;
 
 		// The evicted format is fully gone.
 		assert!(!cache.contains(namespace_id, database_id, table_id, index_id, 0, 7).await);
-		assert!(cache.get_doc_set(legacy, 7).await.is_none());
+		assert!(cache.get_doc_set(legacy, 7, None).await.is_none());
 		assert!(cache.get_doc_id(legacy, 11, Some(1)).await.is_none());
 
 		// The other format keeps its entries and its trackers.
 		assert!(cache.contains(namespace_id, database_id, table_id, index_id, 1, 8).await);
-		assert_eq!(cache.get_doc_set(rebuilt, 8).await, Some(Ids64::One(12)));
+		assert_eq!(cache.get_doc_set(rebuilt, 8, None).await, Some(Ids64::One(12)));
 		assert!(cache.get_doc_id(rebuilt, 12, Some(1)).await.is_some());
 		assert_eq!(cache.len(namespace_id, database_id, table_id, index_id, 1).await, 1);
 		assert_eq!(cache.doc_set_len(namespace_id, database_id, table_id, index_id, 1).await, 1);
@@ -767,7 +790,7 @@ mod tests {
 		// The surviving tracker still drives a later scoped eviction.
 		cache.remove_index(namespace_id, database_id, table_id, index_id, 1).await;
 		assert!(!cache.contains(namespace_id, database_id, table_id, index_id, 1, 8).await);
-		assert!(cache.get_doc_set(rebuilt, 8).await.is_none());
+		assert!(cache.get_doc_set(rebuilt, 8, None).await.is_none());
 		assert!(cache.get_doc_id(rebuilt, 12, Some(1)).await.is_none());
 	}
 }

@@ -127,6 +127,9 @@ async fn test_hnsw_filtered_knn_batches_record_fetches() -> Result<()> {
 		tokio_util::sync::CancellationToken::new(),
 	)
 	.await?;
+	// The first search after a compaction reads each element's doc set from the
+	// store; the next shares them through the cache.
+	run(&ds, &session, query).await?;
 	let (committed_len, committed_m) = run(&ds, &session, query).await?;
 	eprintln!(
 		"COMMITTED ops_get={} keys_read={} results={committed_len}",

@@ -168,12 +168,12 @@ impl HnswDocs {
 }
 
 /// Where [`VecDocs::insert`] puts a vector the index does not hold yet, and
-/// where it records the document set an element carries after the write.
+/// where it records that an element's document set changed.
 ///
 /// The mapping rules are the same either way; only this differs. Applying in
-/// place adds the element to the resident graph and caches its set at once. A
-/// staged batch allocates the element and holds the set back until its
-/// transaction commits.
+/// place adds the element to the resident graph and evicts its cached set at
+/// once. A staged batch allocates the element and holds the eviction back until
+/// its transaction commits.
 pub(super) trait ElementSink {
 	/// Adds `vector` to the index as a new element and returns its id.
 	async fn add_element(
@@ -183,12 +183,12 @@ pub(super) trait ElementSink {
 		ser_vec: &SerializedVector,
 	) -> Result<ElementId>;
 
-	/// Records the document set `element` carries after this write.
+	/// Records that `element` carries the document set `docs` after this write.
 	async fn record_doc_set(&mut self, vec_docs: &VecDocs, element: ElementId, docs: Ids64);
 }
 
-/// Adds elements straight to the resident graph, caching their document sets
-/// as it goes: the in-place apply.
+/// Adds elements straight to the resident graph, evicting their cached document
+/// sets as it goes: the in-place apply.
 pub(super) struct InPlace<'a>(pub(super) &'a mut HnswFlavor);
 
 impl ElementSink for InPlace<'_> {
@@ -201,9 +201,22 @@ impl ElementSink for InPlace<'_> {
 		self.0.insert(ctx, vector).await
 	}
 
-	async fn record_doc_set(&mut self, vec_docs: &VecDocs, element: ElementId, docs: Ids64) {
-		vec_docs.insert_cached_doc_set(element, docs).await;
+	async fn record_doc_set(&mut self, vec_docs: &VecDocs, element: ElementId, _docs: Ids64) {
+		vec_docs.remove_cached_doc_set(element).await;
 	}
+}
+
+/// How [`VecDocs::get_docs_by_element`] uses the process-wide doc-set cache.
+#[derive(Clone, Copy)]
+enum DocSetRead {
+	/// Every read goes to the transaction. This is what a writer needs, since a write
+	/// transaction can observe uncommitted mappings.
+	Uncached,
+	/// Reads share cache entries read at `generation`, the compaction generation of the
+	/// reader's snapshot. A compaction commits its doc-set changes together with a new
+	/// generation, so a set read at one generation is exactly the set every snapshot at that
+	/// generation sees, and no other.
+	AtGeneration(Option<u64>),
 }
 
 /// Manages the mapping between vectors and document IDs in the HNSW index.
@@ -214,6 +227,7 @@ pub(crate) struct VecDocs {
 	cache: VectorCache,
 	use_hashed_vector: bool,
 	format_version: u16,
+	read: DocSetRead,
 }
 
 impl VecDocs {
@@ -231,6 +245,23 @@ impl VecDocs {
 			cache,
 			use_hashed_vector,
 			format_version,
+			read: DocSetRead::Uncached,
+		}
+	}
+
+	/// A copy whose doc-set reads are scoped to `tx`'s snapshot, taken at compaction
+	/// generation `generation`.
+	///
+	/// Only a read-only transaction shares the cache; a write transaction keeps reading its
+	/// own view.
+	pub(super) fn at_snapshot(&self, tx: &Transaction, generation: Option<u64>) -> Self {
+		Self {
+			read: if tx.writeable() {
+				DocSetRead::Uncached
+			} else {
+				DocSetRead::AtGeneration(generation)
+			},
+			..self.clone()
 		}
 	}
 
@@ -238,16 +269,7 @@ impl VecDocs {
 		(self.ikb.ns(), self.ikb.db(), self.table_id, self.ikb.index(), self.format_version)
 	}
 
-	pub(super) async fn get_cached_doc_set(&self, element_id: ElementId) -> Option<Ids64> {
-		let index = self.cache_index();
-		self.cache.get_doc_set(index, element_id).await
-	}
-
-	pub(super) async fn insert_cached_doc_set(&self, element_id: ElementId, docs: Ids64) {
-		let index = self.cache_index();
-		self.cache.insert_doc_set(index, element_id, docs).await;
-	}
-
+	/// Evicts the cached doc set of an element whose set a compaction changes.
 	pub(super) async fn remove_cached_doc_set(&self, element_id: ElementId) {
 		let index = self.cache_index();
 		self.cache.remove_doc_set(index, element_id).await;
@@ -284,19 +306,28 @@ impl VecDocs {
 		Ok(None)
 	}
 
-	/// Retrieves document IDs for a graph element, caching the vector-to-doc mapping by element ID.
+	/// Retrieves the document IDs of a graph element as `tx` sees them.
+	///
+	/// A compaction can add or remove a document of an element already in the graph without
+	/// changing the index state, so a reader must never be served a set committed after its
+	/// snapshot. Entries are shared only between reads at the same compaction generation (see
+	/// [`DocSetRead`]); any other read comes from `tx`.
 	pub(super) async fn get_docs_by_element(
 		&self,
 		tx: &Transaction,
 		element_id: ElementId,
 		pt: &Vector,
 	) -> Result<Option<Ids64>> {
-		if let Some(docs) = self.get_cached_doc_set(element_id).await {
+		let DocSetRead::AtGeneration(generation) = self.read else {
+			return self.get_docs_uncached(tx, pt).await;
+		};
+		let index = self.cache_index();
+		if let Some(docs) = self.cache.get_doc_set(index, element_id, generation).await {
 			return Ok(Some(docs));
 		}
 		let docs = self.get_docs_uncached(tx, pt).await?;
 		if let Some(docs) = docs.clone() {
-			self.insert_cached_doc_set(element_id, docs).await;
+			self.cache.insert_doc_set(index, element_id, generation, docs).await;
 		}
 		Ok(docs)
 	}
@@ -397,9 +428,9 @@ impl VecDocs {
 					self.remove_cached_doc_set(deleted_element_id).await;
 					h.remove(ctx, deleted_element_id).await?;
 				}
-				RemoveResult::Updated(element_id, docs) => {
+				RemoveResult::Updated(element_id, _) => {
 					ctx.tx.set_key(&key, &ehd).await?;
-					self.insert_cached_doc_set(element_id, docs).await;
+					self.remove_cached_doc_set(element_id).await;
 				}
 				RemoveResult::RemovedElement(deleted_element_id) => {
 					ctx.tx.set_key(&key, &ehd).await?;
@@ -437,7 +468,7 @@ impl VecDocs {
 			} else {
 				ed.docs = new_docs;
 				ctx.tx.set_key(&key, &ed).await?;
-				self.insert_cached_doc_set(ed.e_id, ed.docs.clone()).await;
+				self.remove_cached_doc_set(ed.e_id).await;
 			}
 		};
 		Ok(())
@@ -649,39 +680,95 @@ mod tests {
 		Ok(())
 	}
 
-	#[tokio::test]
-	async fn hnsw_vec_docs_populates_and_uses_doc_set_cache() -> Result<()> {
-		let ds = TestIndexStore::new().await;
+	fn cache_key() -> (NamespaceId, DatabaseId, TableId, IndexId, u16) {
+		(NamespaceId(1), DatabaseId(2), TableId(4), IndexId(3), 0u16)
+	}
+
+	async fn write_mapping(
+		ds: &TestIndexStore,
+		ser_vec: &SerializedVector,
+		docs: Ids64,
+	) -> Result<()> {
 		let tx = ds.transaction(TransactionType::Write).await?;
-		let ikb = ikb();
-		let cache = VectorCache::new(1024 * 1024);
-		let vec_docs = VecDocs::new(ikb.clone(), TableId(4), cache.clone(), false, 0);
-		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
-		let vector = Vector::from(ser_vec.clone());
 		tx.set_key(
-			&ikb.new_hv_key(&ser_vec),
+			&ikb().new_hv_key(ser_vec),
 			&ElementDocs {
 				e_id: 7,
-				docs: Ids64::One(42),
+				docs,
 			},
 		)
 		.await?;
-
-		assert_eq!(vec_docs.get_docs_by_element(&tx, 7, &vector).await?, Some(Ids64::One(42)));
-		assert_eq!(
-			cache.get_doc_set((ikb.ns(), ikb.db(), TableId(4), ikb.index(), 0u16), 7).await,
-			Some(Ids64::One(42))
-		);
-
-		tx.del_key(&ikb.new_hv_key(&ser_vec)).await?;
-		assert_eq!(vec_docs.get_docs_by_element(&tx, 7, &vector).await?, Some(Ids64::One(42)));
-		assert_eq!(vec_docs.get_docs_uncached(&tx, &vector).await?, None);
-		tx.cancel().await?;
+		tx.commit().await?;
 		Ok(())
 	}
 
 	#[tokio::test]
-	async fn hnsw_vec_docs_hashed_disambiguates_and_caches_by_element() -> Result<()> {
+	async fn hnsw_vec_docs_share_a_cached_set_only_within_a_generation() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let cache = VectorCache::new(1024 * 1024);
+		let vec_docs = VecDocs::new(ikb(), TableId(4), cache.clone(), false, 0);
+		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
+		let vector = Vector::from(ser_vec.clone());
+		write_mapping(&ds, &ser_vec, Ids64::One(42)).await?;
+
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let at_3 = vec_docs.at_snapshot(&tx, Some(3));
+		assert_eq!(at_3.get_docs_by_element(&tx, 7, &vector).await?, Some(Ids64::One(42)));
+		tx.cancel().await?;
+		assert_eq!(cache.get_doc_set(cache_key(), 7, Some(3)).await, Some(Ids64::One(42)));
+		assert_eq!(cache.get_doc_set(cache_key(), 7, Some(4)).await, None);
+		assert_eq!(cache.get_doc_set(cache_key(), 7, None).await, None);
+
+		// A compaction commits a new set together with a new generation.
+		write_mapping(&ds, &ser_vec, Ids64::Vec2([42, 43])).await?;
+		let tx = ds.transaction(TransactionType::Read).await?;
+		// A reader still at the old generation shares the entry read there.
+		assert_eq!(
+			vec_docs.at_snapshot(&tx, Some(3)).get_docs_by_element(&tx, 7, &vector).await?,
+			Some(Ids64::One(42))
+		);
+		// A reader at the new generation never sees it, and replaces it.
+		let at_4 = vec_docs.at_snapshot(&tx, Some(4));
+		assert_eq!(at_4.get_docs_by_element(&tx, 7, &vector).await?, Some(Ids64::Vec2([42, 43])));
+		tx.cancel().await?;
+		assert_eq!(cache.get_doc_set(cache_key(), 7, Some(3)).await, None);
+		assert_eq!(cache.get_doc_set(cache_key(), 7, Some(4)).await, Some(Ids64::Vec2([42, 43])));
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn hnsw_vec_docs_writers_and_default_reads_bypass_the_cache() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let cache = VectorCache::new(1024 * 1024);
+		let vec_docs = VecDocs::new(ikb(), TableId(4), cache.clone(), false, 0);
+		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
+		let vector = Vector::from(ser_vec.clone());
+		write_mapping(&ds, &ser_vec, Ids64::One(42)).await?;
+
+		// A read-only transaction through the unscoped handle.
+		let tx = ds.transaction(TransactionType::Read).await?;
+		assert_eq!(vec_docs.get_docs_by_element(&tx, 7, &vector).await?, Some(Ids64::One(42)));
+		tx.cancel().await?;
+		// A write transaction, whose own uncommitted mapping it must see.
+		let tx = ds.transaction(TransactionType::Write).await?;
+		let scoped = vec_docs.at_snapshot(&tx, Some(3));
+		tx.set_key(
+			&ikb().new_hv_key(&ser_vec),
+			&ElementDocs {
+				e_id: 7,
+				docs: Ids64::Vec2([42, 43]),
+			},
+		)
+		.await?;
+		assert_eq!(scoped.get_docs_by_element(&tx, 7, &vector).await?, Some(Ids64::Vec2([42, 43])));
+		tx.cancel().await?;
+		assert_eq!(cache.get_doc_set(cache_key(), 7, None).await, None);
+		assert_eq!(cache.get_doc_set(cache_key(), 7, Some(3)).await, None);
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn hnsw_vec_docs_hashed_disambiguates_by_vector() -> Result<()> {
 		let ds = TestIndexStore::new().await;
 		let tx = ds.transaction(TransactionType::Write).await?;
 		let ikb = ikb();
@@ -700,7 +787,7 @@ mod tests {
 
 		assert_eq!(vec_docs.get_docs_by_element(&tx, 7, &vector).await?, Some(Ids64::One(42)));
 		tx.del_key(&key).await?;
-		assert_eq!(vec_docs.get_docs_by_element(&tx, 7, &vector).await?, Some(Ids64::One(42)));
+		assert_eq!(vec_docs.get_docs_by_element(&tx, 7, &vector).await?, None);
 		tx.cancel().await?;
 		Ok(())
 	}
@@ -708,20 +795,15 @@ mod tests {
 	#[tokio::test]
 	async fn hnsw_vec_docs_missing_mapping_returns_none_without_caching() -> Result<()> {
 		let ds = TestIndexStore::new().await;
-		let tx = ds.transaction(TransactionType::Write).await?;
-		let ikb = ikb();
 		let cache = VectorCache::new(1024 * 1024);
-		let vec_docs = VecDocs::new(ikb.clone(), TableId(4), cache.clone(), false, 0);
+		let vec_docs = VecDocs::new(ikb(), TableId(4), cache.clone(), false, 0);
 		let vector = Vector::from(SerializedVector::F32(vec![1.0, 2.0]));
 
-		assert_eq!(vec_docs.get_docs_by_element(&tx, 7, &vector).await?, None);
-		assert!(
-			cache
-				.get_doc_set((ikb.ns(), ikb.db(), TableId(4), ikb.index(), 0u16), 7)
-				.await
-				.is_none()
-		);
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let scoped = vec_docs.at_snapshot(&tx, Some(3));
+		assert_eq!(scoped.get_docs_by_element(&tx, 7, &vector).await?, None);
 		tx.cancel().await?;
+		assert_eq!(cache.get_doc_set(cache_key(), 7, Some(3)).await, None);
 		Ok(())
 	}
 }

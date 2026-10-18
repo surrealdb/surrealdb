@@ -1378,6 +1378,94 @@ mod tests {
 		Ok(())
 	}
 
+	/// A compaction can add a document to an element already in the graph (a
+	/// duplicate vector) without changing the index state, so a search whose
+	/// snapshot predates it is not told to reload. The doc set it reads for that
+	/// element must still be the one committed as of its own snapshot: a newer
+	/// set carries a doc-ID the snapshot cannot resolve, which would take a top-k
+	/// slot from a real neighbour.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_search_reads_doc_sets_as_of_its_snapshot() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(2, VectorType::F32, Distance::Euclidean, 4, 16, false, false, true);
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&ctx.tx(),
+				ikb.clone(),
+				TableId(3),
+				&p,
+				DOC_IDS_FORMAT_VERSION,
+			)
+			.await?;
+			ctx.tx().commit().await?;
+			h
+		};
+		let vec_at =
+			|x: f32| -> SharedVector { Vector::F32(Array1::from_vec(vec![x, 0.0])).into() };
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			for i in 0..5_i64 {
+				let v = vec_at(10.0 * i as f32);
+				h.index(&ctx, &RecordIdKey::Number(i), None, Some(vector_content(&v))).await?;
+			}
+			ctx.tx().commit().await?;
+		}
+		compact_committed(&ds, &h).await;
+		// Warm the doc-set cache for every element.
+		{
+			let q = new_ctx(&ds, TransactionType::Read).await;
+			h.check_state(&q).await?;
+			let pt = vec![Number::Float(0.0), Number::Float(0.0)];
+			let mut stack = reblessive::tree::TreeStack::new();
+			stack
+				.enter(|stk| async { h.knn_search(&q, stk, &pt, 5, 40, None, None).await })
+				.finish()
+				.await?;
+			q.tx().cancel().await?;
+		}
+		// Record 5 duplicates record 0's vector; it is still only a pending.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let v = vec_at(0.0);
+			h.index(&ctx, &RecordIdKey::Number(5), None, Some(vector_content(&v))).await?;
+			ctx.tx().commit().await?;
+		}
+		let query = new_ctx(&ds, TransactionType::Read).await;
+		h.check_state(&query).await?;
+		// Compaction adds record 5's doc to the existing element.
+		compact_committed(&ds, &h).await;
+		// A search that starts after it caches the new set.
+		{
+			let fresh = new_ctx(&ds, TransactionType::Read).await;
+			h.check_state(&fresh).await?;
+			let pt = vec![Number::Float(0.0), Number::Float(0.0)];
+			let mut stack = reblessive::tree::TreeStack::new();
+			stack
+				.enter(|stk| async { h.knn_search(&fresh, stk, &pt, 6, 40, None, None).await })
+				.finish()
+				.await?;
+			fresh.tx().cancel().await?;
+		}
+		let pt = vec![Number::Float(0.0), Number::Float(0.0)];
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack
+			.enter(|stk| async { h.knn_search(&query, stk, &pt, 6, 40, None, None).await })
+			.finish()
+			.await?;
+		query.tx().cancel().await?;
+		let mut ids: Vec<RecordIdKey> = res.iter().map(|(rid, _, _)| rid.key.clone()).collect();
+		ids.sort();
+		assert_eq!(
+			ids,
+			(0..6_i64).map(RecordIdKey::Number).collect::<Vec<_>>(),
+			"every record: {res:?}"
+		);
+		Ok(())
+	}
+
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn hnsw_pending_preserves_existing_doc_baseline() -> Result<()> {
 		let ds = TestIndexStore::new().await;

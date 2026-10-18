@@ -633,8 +633,8 @@ impl CommitAction for PublishBatch {
 			// Committed now, so the vectors and document sets are correct to
 			// cache whether or not the resident graph took the nodes.
 			elements.cache_committed(vectors.into_iter()).await;
-			for (element, docs) in doc_sets {
-				vec_docs.insert_cached_doc_set(element, docs).await;
+			for (element, _) in doc_sets {
+				vec_docs.remove_cached_doc_set(element).await;
 			}
 		})
 	}
