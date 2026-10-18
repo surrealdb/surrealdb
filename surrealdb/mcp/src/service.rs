@@ -1116,9 +1116,11 @@ impl ServerHandler for McpService {
 	) -> Result<ListToolsResult, McpError> {
 		self.verify_request_subject(&ctx)?;
 		let supports_cache_hints = Self::claims_sessionless_revision(&ctx);
+		let mut tools = Self::tool_router().list_all();
+		crate::tools::input_schemas::object_subschemas(&mut tools);
 		Ok(ListToolsResult {
 			result_type: Some(ResultType::COMPLETE),
-			tools: Self::tool_router().list_all(),
+			tools,
 			meta: None,
 			next_cursor: None,
 			ttl_ms: supports_cache_hints.then_some(0),

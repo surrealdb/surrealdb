@@ -8,6 +8,7 @@ pub mod connection;
 pub mod crud;
 pub mod gql;
 pub mod graphql;
+pub(crate) mod input_schemas;
 pub mod output;
 pub(crate) mod output_schemas;
 pub mod query;

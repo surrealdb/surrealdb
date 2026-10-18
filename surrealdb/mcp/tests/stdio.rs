@@ -174,6 +174,71 @@ async fn stdio_tools_list_matches_surface() {
 	server.abort();
 }
 
+/// Providers that accept only object schemas (OpenAI-style function
+/// parameters, Moonshot) reject a request carrying any tool whose input schema
+/// has a boolean `items` or property subschema, so none may be advertised.
+#[tokio::test(flavor = "multi_thread")]
+async fn stdio_tool_input_schemas_have_no_boolean_subschemas() {
+	fn boolean_subschemas(path: &str, schema: &serde_json::Value, found: &mut Vec<String>) {
+		use serde_json::Value;
+		// `false` is a valid schema that providers accept; only `true` is refused.
+		fn visit(path: String, sub: &Value, found: &mut Vec<String>) {
+			match sub {
+				Value::Bool(true) => found.push(path),
+				Value::Array(subs) => {
+					for (i, sub) in subs.iter().enumerate() {
+						visit(format!("{path}[{i}]"), sub, found);
+					}
+				}
+				other => boolean_subschemas(&path, other, found),
+			}
+		}
+		let Some(map) = schema.as_object() else {
+			return;
+		};
+		for keyword in [
+			"items",
+			"contains",
+			"not",
+			"if",
+			"then",
+			"else",
+			"propertyNames",
+			"additionalProperties",
+			"additionalItems",
+			"unevaluatedProperties",
+			"unevaluatedItems",
+			"anyOf",
+			"oneOf",
+			"allOf",
+			"prefixItems",
+		] {
+			if let Some(sub) = map.get(keyword) {
+				visit(format!("{path}.{keyword}"), sub, found);
+			}
+		}
+		for keyword in ["properties", "patternProperties", "$defs", "definitions"] {
+			if let Some(subs) = map.get(keyword).and_then(|v| v.as_object()) {
+				for (name, sub) in subs {
+					visit(format!("{path}.{keyword}.{name}"), sub, found);
+				}
+			}
+		}
+	}
+
+	let (client, server) = spawn_server().await;
+	let tools = within("list_all_tools", client.list_all_tools()).await.expect("list_all_tools");
+	let mut found = Vec::new();
+	for tool in &tools {
+		let schema = serde_json::Value::Object((*tool.input_schema).clone());
+		boolean_subschemas(tool.name.as_ref(), &schema, &mut found);
+	}
+	assert!(found.is_empty(), "boolean subschemas advertised: {found:?}");
+
+	within("client cancel", client.cancel()).await.expect("client cancel");
+	server.abort();
+}
+
 // ---------------------------------------------------------------------------
 // tools/call: query / run / list / use / invalid params
 // ---------------------------------------------------------------------------
