@@ -8,7 +8,7 @@ use ahash::HashMap;
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use roaring::RoaringTreemap;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::catalog::{Distance, HnswParams, TableId, VectorType};
 use crate::ctx::{Context, FrozenContext};
@@ -606,29 +606,39 @@ impl HnswIndex {
 		Ok(())
 	}
 
-	/// Ensures the in-memory graph layers are up-to-date with the persisted state.
+	/// Brings the in-memory graph level with `ctx`'s view of the store.
 	///
-	/// Concurrent kNN searches all invoke this before reading the graph. To keep
-	/// them from serialising on a single write lock, we validate under a shared
-	/// read lock first and only escalate to a write lock when an actual reload
-	/// is required. The write-lock branch double-checks because another task may
-	/// have refreshed the state while we waited.
+	/// A graph search reconciles on its own (see [`Self::reconciled`]); this is
+	/// for callers that want the graph current without searching it.
 	pub(crate) async fn check_state(&self, ctx: &FrozenContext) -> Result<()> {
-		// Fast path: validate under a read lock. Multiple readers run concurrently,
-		// so steady-state (no peer writer bumped the version) no longer serialises.
-		{
-			let guard = self.hnsw.read().await;
-			if !guard.needs_state_reload(ctx).await? {
-				return Ok(());
-			}
+		self.reconciled(ctx).await.map(drop)
+	}
+
+	/// The in-memory graph as of `ctx`'s snapshot, under a read guard the
+	/// caller holds for as long as it reads the graph.
+	///
+	/// While the guard is held no compaction can change the graph and no other
+	/// reader can reload it, so a search that walks the graph under it reads the
+	/// topology of the same snapshot its pendings and doc-ID lookups come from.
+	/// A graph from another snapshot would pair the search's pendings with nodes
+	/// for the same records, whose doc-IDs the search cannot resolve, or point
+	/// it at an entry point whose vector its snapshot does not hold.
+	///
+	/// Validation runs under the shared read lock, so concurrent searches of an
+	/// unchanged graph do not serialise. A graph that needs reloading takes the
+	/// write lock, re-validates — another task may have reloaded it meanwhile —
+	/// and downgrades without letting a writer in between.
+	async fn reconciled(&self, ctx: &FrozenContext) -> Result<RwLockReadGuard<'_, HnswFlavor>> {
+		let guard = self.hnsw.read().await;
+		if !guard.needs_state_reload(ctx).await? {
+			return Ok(guard);
 		}
-		// Slow path: a reload is required. Acquire the write lock and re-validate
-		// before reloading — a concurrent task may have already refreshed.
+		drop(guard);
 		let mut guard = self.hnsw.write().await;
 		if guard.needs_state_reload(ctx).await? {
 			guard.check_state(ctx).await?;
 		}
-		Ok(())
+		Ok(guard.downgrade())
 	}
 
 	/// Performs a k-nearest neighbor search, combining pending and committed results.
@@ -730,7 +740,8 @@ impl HnswIndex {
 
 	/// Searches for nearest neighbors in the committed HNSW graph.
 	///
-	/// Acquires a read lock on the graph and performs KNN search, optionally
+	/// Reconciles the graph with the query's snapshot and walks it under the
+	/// same read guard (see [`Self::reconciled`]), optionally
 	/// excluding documents that are present in `pending_docs`.
 	pub(super) async fn search_graph(
 		&self,
@@ -741,7 +752,7 @@ impl HnswIndex {
 		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
 		builder: &mut KnnResultBuilder,
 	) -> Result<()> {
-		let hnsw = self.hnsw.read().await;
+		let hnsw = self.reconciled(ctx.ctx).await?;
 		// Do the search
 		if let Some(filter) = filter {
 			let neighbours = hnsw

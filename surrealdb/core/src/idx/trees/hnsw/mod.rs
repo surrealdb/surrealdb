@@ -1327,6 +1327,69 @@ mod tests {
 		Ok(())
 	}
 
+	/// A search reads the graph as of its own snapshot, even when a compaction
+	/// commits between the executor's state check and the search. The search's
+	/// snapshot predates the compaction, so it still holds the records' pendings
+	/// and cannot resolve the doc-IDs the compaction assigned: a walk over the
+	/// compacted nodes would put a second, unresolvable copy of each record in
+	/// the candidate list and push the resolvable pending copies out of the top k.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_search_reads_the_graph_as_of_its_snapshot() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(2, VectorType::F32, Distance::Euclidean, 4, 16, false, false, true);
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let h = HnswIndex::new(
+				ctx.get_index_stores().vector_cache().clone(),
+				&ctx.tx(),
+				ikb.clone(),
+				TableId(3),
+				&p,
+			)
+			.await?;
+			ctx.tx().commit().await?;
+			h
+		};
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			for i in 0..5_i64 {
+				let v: SharedVector =
+					Vector::F32(Array1::from_vec(vec![10.0 * i as f32, 0.0])).into();
+				h.index(&ctx, &RecordIdKey::Number(i), None, Some(vector_content(&v))).await?;
+			}
+			ctx.tx().commit().await?;
+		}
+		// The executor checks the in-memory graph against the query's snapshot
+		// before it searches.
+		let query = new_ctx(&ds, TransactionType::Read).await;
+		h.check_state(&query).await?;
+		// A compaction changes the in-memory graph, and commits, before the
+		// search walks it.
+		loop {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let compacted = h.index_pendings(&ctx).await?;
+			ctx.tx().commit().await?;
+			if compacted == 0 {
+				break;
+			}
+		}
+		let pt = vec![Number::Float(0.0), Number::Float(0.0)];
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack
+			.enter(|stk| async { h.knn_search(&query, stk, &pt, 5, 40, None).await })
+			.finish()
+			.await?;
+		query.tx().cancel().await?;
+		let ids: Vec<RecordIdKey> = res.iter().map(|(rid, _, _)| rid.key.clone()).collect();
+		assert_eq!(
+			ids,
+			(0..5_i64).map(RecordIdKey::Number).collect::<Vec<_>>(),
+			"every record, nearest first: {res:?}"
+		);
+		Ok(())
+	}
+
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn hnsw_pending_preserves_existing_doc_baseline() -> Result<()> {
 		let ds = Datastore::new("memory").await?;
