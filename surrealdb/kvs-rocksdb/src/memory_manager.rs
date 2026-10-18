@@ -30,7 +30,8 @@ impl MemoryReporter for MemoryManager {
 	/// the row cache and the blob cache, and the [`WriteBufferManager`] is
 	/// constructed against that same cache, so memtable arena bytes are charged
 	/// into it as reservation entries and `Cache::get_usage` covers memtables
-	/// too.
+	/// too. Those entries are never evicted, so the usage exceeds the cache's
+	/// capacity whenever memtables alone do (see [`Self::configure`]).
 	///
 	/// Not covered: per-SST table-reader memory (top-level index and filter
 	/// blocks, table properties), compaction and flush buffers, iterator
@@ -65,9 +66,16 @@ impl MemoryManager {
 		// history only as writes grow the live memtable, so a completed flush
 		// need not free anything. A manager that stalled writers at its budget
 		// would wait for memory that only a write can release, and park every
-		// writer for good. Memtable memory is bounded instead by the memtable
-		// count and the history size, and exceeds the budget whenever the
-		// history alone fills it or a single commit is larger than it.
+		// writer for good.
+		//
+		// Memtable memory is bounded instead by the history limit,
+		// `max(2, max_write_buffer_number) * write_buffer_size`, plus the oldest
+		// memtable still in the history, which is at least as large as any
+		// commit it holds. Steady writes can take that to the budget whenever
+		// the block cache is no larger than one write buffer (two when
+		// `max_write_buffer_number` is one), and a single commit larger than the
+		// budget takes it past on any configuration. It stays resident while
+		// writes are idle, since only a write trims the history.
 		let write_buffer_manager = WriteBufferManager::new_write_buffer_manager_with_cache(
 			total_memory_limit,
 			false,

@@ -929,9 +929,11 @@ async fn memory_reporter_observes_memtable_charge() {
 	ds.shutdown().await.unwrap();
 }
 
+const MIB: usize = 1024 * 1024;
+
 /// Commit each `(step, mib)` in order, as one transaction of `mib` MiB of
-/// 1 KiB values, on a datastore whose memtable history can fill its write
-/// buffer budget, and fail if the writers park.
+/// 1 KiB values, on a datastore opened with `config`, and fail if the writers
+/// park. Returns the RocksDB memory reported after each commit.
 ///
 /// `MemoryManager::configure` sizes the write buffer manager at
 /// `max_write_buffer_number * write_buffer_size + block_cache_size`. An
@@ -939,44 +941,42 @@ async fn memory_reporter_observes_memtable_charge() {
 /// commit-time conflict checking, sized to `max(2, max_write_buffer_number) *
 /// write_buffer_size`. A flush moves its memtable into that history rather
 /// than freeing it, and the history is trimmed only as later writes grow the
-/// live memtable. A manager that stalls writers once memtable memory reaches
-/// its budget can therefore park them with nothing left to release the
-/// stall: the flush has finished, and only a write can free memory.
-///
-/// The configuration is small but real: a 16 MiB write buffer, one memtable
-/// (which RocksDB raises to two) and a 16 MiB block cache, so the history
-/// limit alone matches the 32 MiB budget.
+/// live memtable, so memtable memory can climb to the history limit plus the
+/// oldest memtable it holds. A manager that stalls writers once memtable
+/// memory reaches its budget can therefore park them with nothing left to
+/// release the stall: the flush has finished, and only a write can free
+/// memory. Steady writes get there whenever the block cache is no larger than
+/// one write buffer, or two when `max_write_buffer_number` is one, and a
+/// single commit larger than the budget gets there on any configuration.
 ///
 /// A parked writer never returns from `commit`, and it may be the tokio
 /// worker that drives the runtime's timers. The steps therefore run on their
 /// own thread and runtime and report progress over a channel, and the calling
 /// thread judges it with a plain `recv_timeout`.
-fn assert_commits_are_not_parked(steps: Vec<(String, usize)>) {
+fn assert_commits_are_not_parked(
+	config: crate::RocksDbConfig,
+	steps: Vec<(String, usize)>,
+) -> Vec<usize> {
 	use std::sync::mpsc::{self, RecvTimeoutError};
 	use std::time::Duration;
 
-	use crate::{Datastore as RocksDbDatastore, RocksDbConfig};
+	use common::mem_registry::MemoryReporter;
 
-	const MIB: usize = 1024 * 1024;
+	use crate::Datastore as RocksDbDatastore;
+
 	/// Orders of magnitude longer than any step takes. A parked writer never
 	/// returns, so this bounds only how long a regression takes to report.
 	const STALL_TIMEOUT: Duration = Duration::from_secs(60);
 
 	let dir = TempDir::new().unwrap();
 	let path = dir.path().to_string_lossy().to_string();
-	let config = RocksDbConfig {
-		write_buffer_size: 16 * MIB,
-		max_write_buffer_number: 1,
-		min_write_buffer_number_to_merge: 1,
-		block_cache_size: 16 * MIB,
-		..RocksDbConfig::default()
-	};
 
 	let (progress, observed) = mpsc::channel();
 	let workload = std::thread::spawn(move || {
 		let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
 		runtime.block_on(async move {
 			let ds = RocksDbDatastore::new(&path, config).await.unwrap();
+			let mut reported = Vec::with_capacity(steps.len());
 			for (step, mib) in steps {
 				let tx = ds.transaction(TransactionType::Write).await.unwrap();
 				for m in 0..mib {
@@ -987,10 +987,12 @@ fn assert_commits_are_not_parked(steps: Vec<(String, usize)>) {
 					progress.send(format!("staged {} MiB of {step}", m + 1)).unwrap();
 				}
 				tx.commit().await.unwrap();
+				reported.push(ds.memory_manager.memory_allocated());
 				progress.send(format!("committed {step}")).unwrap();
 			}
 			ds.shutdown().await.unwrap();
-		});
+			reported
+		})
 	});
 
 	// The channel disconnects once the workload returns or panics.
@@ -1004,26 +1006,87 @@ fn assert_commits_are_not_parked(steps: Vec<(String, usize)>) {
 			}
 		}
 	}
-	if let Err(panic) = workload.join() {
-		std::panic::resume_unwind(panic);
+	match workload.join() {
+		Ok(reported) => reported,
+		Err(panic) => std::panic::resume_unwind(panic),
 	}
 }
 
-/// Steady 1 MiB commits, twice the budget in all, fill the history until it
-/// and the live memtable reach the budget.
+/// Commit 1 MiB at a time, twice the write buffer budget in all, so the
+/// history and the live memtable reach the budget.
+fn assert_steady_commits_are_not_parked(config: crate::RocksDbConfig) {
+	let budget =
+		config.max_write_buffer_number * config.write_buffer_size + config.block_cache_size;
+	let steps = (0..2 * budget / MIB).map(|c| (format!("steady-{c:03}"), 1)).collect();
+	assert_commits_are_not_parked(config, steps);
+}
+
+/// One write buffer, which RocksDB raises to two for the history, and a block
+/// cache of the same size, so the history limit alone matches the 32 MiB
+/// budget.
 #[test]
-fn steady_commits_are_not_parked_by_memtable_history() {
-	assert_commits_are_not_parked((0..64).map(|c| (format!("steady-{c:02}"), 1)).collect());
+fn steady_commits_are_not_parked_with_one_write_buffer() {
+	use crate::RocksDbConfig;
+
+	assert_steady_commits_are_not_parked(RocksDbConfig {
+		write_buffer_size: 16 * MIB,
+		max_write_buffer_number: 1,
+		min_write_buffer_number_to_merge: 1,
+		block_cache_size: 16 * MIB,
+		..RocksDbConfig::default()
+	});
+}
+
+/// Two write buffers and a block cache smaller than one, as
+/// `RocksDbConfig::default()` sizes them below 1 GiB of memory, so the history
+/// and one more memtable exceed the 80 MiB budget.
+#[test]
+fn steady_commits_are_not_parked_with_two_write_buffers() {
+	use crate::RocksDbConfig;
+
+	assert_steady_commits_are_not_parked(RocksDbConfig {
+		write_buffer_size: 32 * MIB,
+		max_write_buffer_number: 2,
+		min_write_buffer_number_to_merge: 2,
+		block_cache_size: 16 * MIB,
+		..RocksDbConfig::default()
+	});
 }
 
 /// A commit twice the budget lands in a single memtable, which exceeds the
 /// budget on its own. The commits behind it outlast that memtable's flush and
-/// its stay in the history, and every one of them must land.
+/// its stay in the history, and every one of them must land. Once they have
+/// trimmed it from the history the memtable is released, and the memory the
+/// reporter reads falls back below the size of that one commit.
 #[test]
 fn commits_behind_one_larger_than_the_budget_are_not_parked() {
-	let large = std::iter::once(("large".to_string(), 64));
+	use crate::RocksDbConfig;
+
+	const LARGE_MIB: usize = 64;
+	let config = RocksDbConfig {
+		write_buffer_size: 16 * MIB,
+		max_write_buffer_number: 1,
+		min_write_buffer_number_to_merge: 1,
+		block_cache_size: 16 * MIB,
+		..RocksDbConfig::default()
+	};
+	let large = std::iter::once(("large".to_string(), LARGE_MIB));
 	let behind = (0..48).map(|c| (format!("behind-large-{c:02}"), 1));
-	assert_commits_are_not_parked(large.chain(behind).collect());
+	let reported = assert_commits_are_not_parked(config, large.chain(behind).collect());
+
+	let in_mib: Vec<usize> = reported.iter().map(|bytes| bytes / MIB).collect();
+	let after_large = reported[0];
+	let settled = *reported.last().unwrap();
+	assert!(
+		after_large >= LARGE_MIB * MIB,
+		"the reporter did not see the memtable holding the large commit, so its release cannot \
+		 be observed. Reported MiB after each commit: {in_mib:?}"
+	);
+	assert!(
+		settled < LARGE_MIB * MIB,
+		"the memtable holding the large commit was not released once later writes trimmed the \
+		 history. Reported MiB after each commit: {in_mib:?}"
+	);
 }
 
 /// Pins the snapshot-lifetime contract documented on `attach_snapshot`: the

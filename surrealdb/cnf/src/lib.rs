@@ -119,8 +119,9 @@ pub fn extract_allowed_paths(input: &str, canonicalize: bool, subject: &str) -> 
 /// The guard compares this value against *tracked* bytes, not process RSS: for
 /// each live Rust-heap allocation the size class the allocator reserved for it,
 /// plus every registered external memory reporter (the RocksDB block/row/blob
-/// cache). Tracked bytes are a lower bound on the process's real footprint. Not
-/// counted, and therefore requiring headroom below a container memory limit:
+/// cache, into which RocksDB also charges its memtables). Tracked bytes are a
+/// lower bound on the process's real footprint. Not counted, and therefore
+/// requiring headroom below a container memory limit:
 ///
 /// - allocator arena metadata, slab-level fragmentation, and pages the allocator retains rather
 ///   than returning to the operating system
@@ -139,9 +140,17 @@ pub fn extract_allowed_paths(input: &str, canonicalize: bool, subject: &str) -> 
 /// Set this *below* the container's memory limit so the guard sheds load before
 /// the kernel's OOM killer intervenes, and *above* the configured RocksDB block
 /// cache size (`SURREAL_ROCKSDB_BLOCK_CACHE_SIZE`, which defaults to half of
-/// system memory less 1 GiB): a warm cache occupies its full capacity
-/// indefinitely, so a threshold at or below that size refuses every query once
-/// the cache fills and does not recover without a restart.
+/// system memory less 1 GiB) plus room for its memtables. A warm cache occupies
+/// its full capacity indefinitely, so a threshold at or below that size refuses
+/// every query once the cache fills and does not recover without a restart.
+/// Memtables are charged to the same cache on top of that, past its capacity:
+/// RocksDB keeps flushed memtables resident for conflict checking, so they
+/// reach about `max(2, max_write_buffer_number) + 1` write buffers
+/// (`SURREAL_ROCKSDB_MAX_WRITE_BUFFER_NUMBER`,
+/// `SURREAL_ROCKSDB_WRITE_BUFFER_SIZE`), and more after a single commit larger
+/// than a write buffer. They are released only as later writes trim them, so
+/// a threshold without room for them can refuse the very writes that would
+/// bring memory back under it.
 ///
 /// # When the guard is inert
 ///
