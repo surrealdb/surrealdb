@@ -1553,6 +1553,44 @@ fn plan_source(ir: &Ir, op: OpId, cx: &PhysCx<'_>) -> Result<Option<Planned>, Ir
 			ReadVersion::Stamped(_) | ReadVersion::Deferred,
 			SourceRefShape::Table(_),
 		) => knn::exact_at_stamp(ir, stages, &answers.indexes)?,
+		// A current read of a table with a vector index that is not online yet (a concurrent
+		// build still running) ranks the operators of that index's field by brute force: the
+		// index cannot answer, and no search answering would admit no row.
+		// `WITH NOINDEX` keeps its contract: no index, no answer.
+		(Some(stages), ReadVersion::Current, SourceRefShape::Table(_))
+			if !matches!(attrs.with, Some(With::NoIndex)) =>
+		{
+			match cx.physical.indexes(&key.0) {
+				CatalogAnswer::Found(defined) => {
+					let building: Vec<_> = defined
+						.iter()
+						.filter(|ix| !answers.indexes.iter().any(|online| online.name == ix.name))
+						// A vector index already online over the same field answers the
+						// operator; an unrelated build beside it must not change its ranking.
+						.filter(|ix| {
+							!answers.indexes.iter().any(|online| {
+								matches!(online.index, Index::Hnsw(_) | Index::DiskAnn(_))
+									&& online.cols.first() == ix.cols.first()
+							})
+						})
+						.cloned()
+						.collect();
+					knn::exact_at_stamp(ir, stages, &building)?
+				}
+				CatalogAnswer::NotLoaded => {
+					return Err(IrError::NotLoaded {
+						what: "access::convert_source: the defined indexes of a table",
+					});
+				}
+				CatalogAnswer::Unknown if cx.physical.plans_unknown_reads() => Vec::new(),
+				CatalogAnswer::Unknown => {
+					return Err(IrError::LateBind {
+						what: "access::convert_source: the defined indexes of a table",
+					});
+				}
+				CatalogAnswer::Absent => Vec::new(),
+			}
+		}
 		_ => Vec::new(),
 	};
 	let ranks = match stages.as_ref() {
