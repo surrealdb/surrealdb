@@ -17262,3 +17262,154 @@ async fn retiring_an_uncommitted_build_fences_its_statement() -> Result<()> {
 	assert!(get_table_index(&ds, "t", "cy").await.is_err(), "and its definition is absent");
 	Ok(())
 }
+
+/// Starts the blocking `define` over a table `t` of `rows` records, scanned one record a batch,
+/// and holds the build at a batch commit after at least one batch has committed. The records
+/// scanned by then are indexed from the state before any later write; the rest are still to be
+/// read. Dropping the returned guard lets the build go on.
+#[cfg(feature = "kv-mem")]
+async fn spawn_blocking_build_held_mid_scan(
+	ds: &Arc<Datastore>,
+	session: &Session,
+	define: &'static str,
+) -> Result<(
+	RetryableConflictGuard,
+	(super::kind::test_sink::ScanGuard, super::kind::test_sink::HoldGuard),
+	tokio::task::JoinHandle<Result<()>>,
+)> {
+	let scan = super::kind::test_sink::set_scan_batch(ds.id(), 1);
+	let committed_before = super::kind::test_sink::counts(ds.id()).committed;
+	// Armed before the build starts, and deferred by the sink until its first batch has
+	// committed, so no scan speed lets the build reach the end first.
+	let hold = super::kind::test_sink::hold_after_commits(ds.id(), committed_before + 1);
+	let site = RetryableConflictSite::ConcurrentIndexInitialBatch;
+	let guard = inject_retryable_conflicts(site, ds.id(), REPEATED_RETRY_CONFLICTS);
+	let task = tokio::spawn({
+		let ds = Arc::clone(ds);
+		let session = session.clone();
+		async move { execute_all(&ds, &session, define).await }
+	});
+	wait_for_retry_conflict(site, ds.id(), REPEATED_RETRY_CONFLICTS).await?;
+	assert!(!task.is_finished(), "the build must still be scanning");
+	Ok((guard, (scan, hold), task))
+}
+
+/// An UPDATE that commits while a blocking `DEFINE INDEX` is mid-scan reaches the finished
+/// index, whether the build had already scanned the record (it holds the old value, which must
+/// go) or not (it reads the new one). The index answers the same as a scan.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn blocking_define_index_keeps_an_update_committed_mid_scan() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE TABLE t SCHEMALESS; CREATE |t:1..=300| SET flag = false RETURN NONE;",
+	)
+	.await?;
+	let (guard, _scan, define) =
+		spawn_blocking_build_held_mid_scan(&ds, &session, "DEFINE INDEX ix ON t FIELDS flag")
+			.await?;
+	// `t:1` is the first record the scan reads; `t:300` is the last.
+	execute_all_retrying_conflicts(
+		&ds,
+		&session,
+		"UPDATE t:1 SET flag = true RETURN NONE; UPDATE t:300 SET flag = true RETURN NONE;",
+	)
+	.await?;
+	drop(guard);
+	define.await??;
+	for flag in ["true", "false"] {
+		let via = |clause: &str| {
+			format!("SELECT VALUE id FROM t {clause} WHERE flag = {flag} ORDER BY id")
+		};
+		let indexed = query_json(&ds, &session, &via("WITH INDEX ix")).await?;
+		let scanned = query_json(&ds, &session, &via("WITH NOINDEX")).await?;
+		assert_eq!(indexed, scanned, "the index disagrees with a scan for flag = {flag}");
+		let expected = if flag == "true" {
+			2
+		} else {
+			298
+		};
+		assert_eq!(indexed.as_array().map(Vec::len), Some(expected), "flag = {flag}");
+	}
+	Ok(())
+}
+
+/// The UNIQUE counterpart: the value an UPDATE moved a scanned record off is free again and the
+/// value it moved to is taken, once the build is done.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn blocking_unique_define_index_keeps_an_update_committed_mid_scan() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE TABLE t SCHEMALESS;
+		 FOR $i IN 1..=300 { CREATE type::record('t', $i) SET code = 'c' + <string> $i RETURN NONE; };",
+	)
+	.await?;
+	let (guard, _scan, define) = spawn_blocking_build_held_mid_scan(
+		&ds,
+		&session,
+		"DEFINE INDEX ux ON t FIELDS code UNIQUE",
+	)
+	.await?;
+	execute_all_retrying_conflicts(&ds, &session, "UPDATE t:1 SET code = 'moved' RETURN NONE;")
+		.await?;
+	drop(guard);
+	define.await??;
+	assert!(
+		execute_all(&ds, &session, "CREATE t:dup SET code = 'moved' RETURN NONE").await.is_err(),
+		"the value the record moved to is taken"
+	);
+	execute_all(&ds, &session, "CREATE t:reuse SET code = 'c1' RETURN NONE").await?;
+	assert_eq!(
+		query_json(&ds, &session, "SELECT VALUE id FROM t WITH INDEX ux WHERE code = 'moved'")
+			.await?,
+		serde_json::json!(["t:1"])
+	);
+	assert_eq!(
+		query_json(&ds, &session, "SELECT VALUE id FROM t WITH INDEX ux WHERE code = 'c1'").await?,
+		serde_json::json!(["t:reuse"])
+	);
+	Ok(())
+}
+
+/// Creates issued from several tasks at once against a table with a full-text index and its
+/// analyzer all commit, and every document is findable.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn parallel_creates_over_a_fulltext_index_all_commit() -> Result<()> {
+	const WRITERS: usize = 8;
+	const CREATES: usize = 25;
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase,snowball(english);
+		 DEFINE TABLE doc SCHEMALESS;
+		 DEFINE INDEX ft ON doc FIELDS body FULLTEXT ANALYZER simple BM25;",
+	)
+	.await?;
+	let mut tasks = Vec::new();
+	for writer in 0..WRITERS {
+		let (ds, session) = (Arc::clone(&ds), session.clone());
+		tasks.push(tokio::spawn(async move {
+			for n in 0..CREATES {
+				let sql = format!("CREATE doc SET body = 'hello world {n} from {writer}'");
+				execute_all(&ds, &session, &sql).await?;
+			}
+			Ok::<_, anyhow::Error>(())
+		}));
+	}
+	for task in tasks {
+		task.await??;
+	}
+	assert_eq!(
+		query_json(&ds, &session, "SELECT VALUE count() FROM doc WHERE body @@ 'hello' GROUP ALL")
+			.await?,
+		serde_json::json!([WRITERS * CREATES])
+	);
+	Ok(())
+}

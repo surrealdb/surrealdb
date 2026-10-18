@@ -553,6 +553,38 @@ pub(super) mod test_sink {
 		}
 	}
 
+	static HOLD_AFTER: LazyLock<Mutex<HashMap<uuid::Uuid, usize>>> =
+		LazyLock::new(Default::default);
+
+	/// Holds `node`'s builds at the batch commit that follows their first `commits` committed
+	/// batches, once an injected conflict is armed at the batch site: until then the conflict
+	/// is not consumed. The hold starts at a batch boundary, however fast the scan runs.
+	pub(in crate::kvs::index) fn hold_after_commits(node: uuid::Uuid, commits: usize) -> HoldGuard {
+		HOLD_AFTER.lock().unwrap_or_else(|p| p.into_inner()).insert(node, commits);
+		HoldGuard(node)
+	}
+
+	pub(in crate::kvs::index) struct HoldGuard(uuid::Uuid);
+
+	impl Drop for HoldGuard {
+		fn drop(&mut self) {
+			HOLD_AFTER.lock().unwrap_or_else(|p| p.into_inner()).remove(&self.0);
+		}
+	}
+
+	/// The injected conflict at the initial-batch commit site, deferred while a
+	/// [`hold_after_commits`] has not yet seen its commits.
+	pub(in crate::kvs::index) fn maybe_hold_batch(node: uuid::Uuid) -> anyhow::Result<()> {
+		let after = HOLD_AFTER.lock().unwrap_or_else(|p| p.into_inner()).get(&node).copied();
+		if after.is_some_and(|after| counts(node).committed < after) {
+			return Ok(());
+		}
+		crate::kvs::testing::maybe_inject_retryable_conflict(
+			crate::kvs::testing::RetryableConflictSite::ConcurrentIndexInitialBatch,
+			node,
+		)
+	}
+
 	pub(in crate::kvs::index) fn record_apply(node: uuid::Uuid) {
 		COUNTS.lock().unwrap_or_else(|p| p.into_inner()).entry(node).or_default().applied += 1;
 	}

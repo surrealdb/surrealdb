@@ -3417,10 +3417,7 @@ impl Building {
 							)
 							.await?;
 							#[cfg(test)]
-							maybe_inject_retryable_conflict(
-								RetryableConflictSite::ConcurrentIndexInitialBatch,
-								self.ctx.node_id(),
-							)?;
+							super::kind::test_sink::maybe_hold_batch(self.ctx.node_id())?;
 							#[cfg(test)]
 							maybe_inject_initial_batch_commit_error(self.ctx.node_id())?;
 							tx.commit().await
