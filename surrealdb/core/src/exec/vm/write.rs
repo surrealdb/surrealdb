@@ -1055,6 +1055,8 @@ async fn define_shared_table(
 	{
 		return Ok(());
 	}
+	crate::exec::operators::write::ctx::require_authority_to_define_table(exec)
+		.map_err(ControlFlow::Err)?;
 	let reserved = |at: u32| program.reservations[at as usize];
 	let id = TableId(reserved(shared.id) as i64 as u32);
 	let mut stored = StoredTableDefinition::new(ns_id, db_id, id, table.clone());

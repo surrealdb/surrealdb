@@ -816,6 +816,14 @@ relate), Key API, field evaluation, events, views, cascades
   that does not exceed definer intent.
 - UPSERT and INSERT operations that fall back from create to update must apply the
   correct permission kind at both table and field levels.
+- A write that names a table the database does not hold (`CREATE`, `UPSERT`,
+  `INSERT`, `RELATE`, at the top level or nested) defines it only for a principal
+  that may `DEFINE TABLE`: a checked principal without editor authority at the
+  database's level is refused with the IAM error `DEFINE TABLE` gives, and no table
+  is left behind (`require_authority_to_define_table`, `exec/operators/write/ctx.rs`;
+  a frame that runs without permission enforcement — an event body, a view's
+  maintenance — defines on demand with its definer's authority). Verified by
+  `reproductions/7600_viewer_write_defines_no_table.surql`.
 - RELATE must validate that the caller has sufficient access to reference endpoint
   records, or that the edge table's permission policy accounts for this.
 - **Key API bodies must be treated as data, never as code.** Request bodies for CRUD

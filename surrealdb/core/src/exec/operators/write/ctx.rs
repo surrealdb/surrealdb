@@ -39,6 +39,26 @@ pub(crate) enum TableExistence {
 	DefinedOnDemand,
 }
 
+/// Whether the caller may define a table the statement names and the database
+/// does not hold.
+///
+/// Defining a table on demand is a schema change, so it needs the authority
+/// `DEFINE TABLE` needs (editor or owner at the database's level); a principal
+/// who lacks it is refused as that statement refuses it. A record user is not
+/// asked: the table it would define is one its own permissions then deny
+/// (an undefined table carries none), and a block's later reads of it rely on
+/// the definition. A `STRICT` database never defines a table on demand, so
+/// nothing is asked there either. A frame that runs
+/// without permission enforcement — an event body, a view's maintenance —
+/// defines on demand with its definer's authority and is not asked.
+pub(crate) fn require_authority_to_define_table(exec: &ExecutionContext) -> anyhow::Result<()> {
+	use crate::iam::{Action, ResourceKind};
+	if !exec.root().auth.is_record() && exec.should_check_perms(Action::Edit)? {
+		exec.is_allowed(Action::Edit, ResourceKind::Table, crate::expr::Base::Db)?;
+	}
+	Ok(())
+}
+
 /// The format a statement's record writes give the rows of its table, as resolved at one layout
 /// epoch of its transaction ([`Transaction::layout_epoch`]), with the layouts a packed format
 /// reads its descriptor from.
@@ -337,11 +357,27 @@ impl WriteCtx {
 					},
 				)?
 			}
-			TableExistence::DefinedOnDemand => exec
-				.txn()
-				.get_or_add_tb(Some(exec.ctx()), &parent.ns.name, &parent.db.name, table, version)
-				.await
-				.map_err(ControlFlow::Err)?,
+			TableExistence::DefinedOnDemand => {
+				if version.is_none()
+					&& !db_ctx.db.strict
+					&& crate::exec::vm::descriptor::definition(db_ctx, table, None)
+						.await
+						.map_err(ControlFlow::Err)?
+						.is_none()
+				{
+					require_authority_to_define_table(exec).map_err(ControlFlow::Err)?;
+				}
+				exec.txn()
+					.get_or_add_tb(
+						Some(exec.ctx()),
+						&parent.ns.name,
+						&parent.db.name,
+						table,
+						version,
+					)
+					.await
+					.map_err(ControlFlow::Err)?
+			}
 		};
 		let txn = exec.txn();
 		let stamps = txn.catalog_stamps();
