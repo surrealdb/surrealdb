@@ -11,6 +11,7 @@ use http::StatusCode;
 use http::request::Parts;
 use hyper::{Request, Response};
 use surrealdb_core::dbs::Session;
+use surrealdb_core::iam::is_expired_token_error;
 use surrealdb_core::iam::verify::{basic, token};
 use surrealdb_observe::HttpRequestEventCtx;
 use tower::{Layer, Service};
@@ -82,7 +83,18 @@ where
 		let mut inner = std::mem::replace(&mut self.inner, clone);
 		Box::pin(async move {
 			let (mut parts, body) = request.into_parts();
-			match check_auth(&mut parts).await {
+			let mut checked = check_auth(&mut parts, true).await;
+			// The credential-exchange routes are how a client replaces an
+			// expired token, so an expired bearer token on one of them is
+			// ignored and the request is authenticated as a fresh, anonymous
+			// session. Any other failure, and every other route, is refused.
+			if is_credential_exchange(&parts)
+				&& let Err(err) = &checked
+				&& is_expired_token_error(err)
+			{
+				checked = check_auth(&mut parts, false).await;
+			}
+			match checked {
 				Ok(sess) => {
 					// Build the per-tenant ctx from the authenticated
 					// session before we hand the request down. We stash
@@ -112,7 +124,15 @@ where
 	}
 }
 
-async fn check_auth(parts: &mut Parts) -> Result<Session> {
+/// Whether the request is to a route that exchanges credentials for a token.
+fn is_credential_exchange(parts: &Parts) -> bool {
+	parts.method == http::Method::POST && matches!(parts.uri.path(), "/signin" | "/signup")
+}
+
+/// Authenticates the request from its headers. With `use_credentials` false the
+/// `Authorization` header is not read, and the session is the anonymous one the
+/// `Surreal-*` headers select.
+async fn check_auth(parts: &mut Parts, use_credentials: bool) -> Result<Session> {
 	let or = match parts.extract::<TypedHeader<Origin>>().await {
 		Ok(or) => {
 			if !or.is_null() {
@@ -179,7 +199,7 @@ async fn check_auth(parts: &mut Parts) -> Result<Session> {
 	};
 
 	// If Basic authentication data was supplied
-	if let Ok(au) = parts.extract::<TypedHeader<Authorization<Basic>>>().await {
+	if use_credentials && let Ok(au) = parts.extract::<TypedHeader<Authorization<Basic>>>().await {
 		basic(
 			kvs,
 			&mut session,
@@ -192,7 +212,7 @@ async fn check_auth(parts: &mut Parts) -> Result<Session> {
 	};
 
 	// If Token authentication data was supplied
-	if let Ok(au) = parts.extract::<TypedHeader<Authorization<Bearer>>>().await {
+	if use_credentials && let Ok(au) = parts.extract::<TypedHeader<Authorization<Bearer>>>().await {
 		token(kvs, &mut session, au.token()).await?;
 	};
 

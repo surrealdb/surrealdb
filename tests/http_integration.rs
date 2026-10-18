@@ -1998,6 +1998,101 @@ mod http_integration {
 	}
 
 	#[test(tokio::test)]
+	async fn signin_and_signup_ignore_an_expired_token() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+
+		// A database user whose tokens live for one second, and a record access
+		// method that can be signed up to.
+		let res = client
+			.post(format!("http://{addr}/sql"))
+			.basic_auth(USER, Some(PASS))
+			.body(
+				r#"DEFINE USER u ON DB PASSWORD 'pass' DURATION FOR TOKEN 1s, FOR SESSION 1h;
+				DEFINE ACCESS acc ON DATABASE TYPE RECORD
+					SIGNUP (CREATE user SET name = $name)
+					SIGNIN (SELECT * FROM user WHERE name = $name);"#,
+			)
+			.send()
+			.await?;
+		assert!(res.status().is_success(), "body: {}", res.text().await?);
+
+		let signin = |ns: &str, db: &str| {
+			serde_json::to_string(&json!({"ns": ns, "db": db, "user": "u", "pass": "pass"}))
+		};
+		let res =
+			client.post(format!("http://{addr}/signin")).body(signin(&ns, &db)?).send().await?;
+		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+		let body: serde_json::Value = serde_json::from_str(&res.text().await?)?;
+		let expired = body["token"].as_str().unwrap().to_string();
+
+		// Let the token expire.
+		tokio::time::sleep(Duration::from_millis(2500)).await;
+
+		// The expired token is refused wherever it is used to act.
+		let res = client
+			.post(format!("http://{addr}/sql"))
+			.bearer_auth(&expired)
+			.body("RETURN 1")
+			.send()
+			.await?;
+		assert_eq!(res.status(), 401, "body: {}", res.text().await?);
+
+		// It does not stop a client from exchanging credentials for a new one.
+		let res = client
+			.post(format!("http://{addr}/signin"))
+			.bearer_auth(&expired)
+			.body(signin(&ns, &db)?)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200, "signin body: {}", res.text().await?);
+		let body: serde_json::Value = serde_json::from_str(&res.text().await?)?;
+		let fresh = body["token"].as_str().unwrap().to_string();
+		assert_ne!(fresh, expired);
+
+		let res = client
+			.post(format!("http://{addr}/signup"))
+			.bearer_auth(&expired)
+			.body(serde_json::to_string(&json!({"ns": ns, "db": db, "ac": "acc", "name": "bob"}))?)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200, "signup body: {}", res.text().await?);
+
+		// Bad credentials are still refused under an expired token.
+		let res = client
+			.post(format!("http://{addr}/signin"))
+			.bearer_auth(&expired)
+			.body(serde_json::to_string(
+				&json!({"ns": ns, "db": db, "user": "u", "pass": "wrong"}),
+			)?)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 401, "body: {}", res.text().await?);
+
+		// A malformed token is not an expired one: it is refused on every route.
+		let res = client
+			.post(format!("http://{addr}/signin"))
+			.bearer_auth("not-a-token")
+			.body(signin(&ns, &db)?)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 401, "body: {}", res.text().await?);
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
 	async fn signin_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let url = &format!("http://{addr}/signin");
