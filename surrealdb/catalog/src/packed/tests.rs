@@ -69,7 +69,8 @@ impl Rng {
 }
 
 /// The seeds the generated tests run.
-const SEEDS: &[u64] = &[1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 610, 987, 0xDEAD_BEEF];
+pub(super) const SEEDS: &[u64] =
+	&[1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 610, 987, 0xDEAD_BEEF];
 
 // Building descriptors
 
@@ -360,7 +361,7 @@ pub(super) fn leap_second() -> DateTime<Utc> {
 }
 
 /// `data` without the root `id`, which no row holds.
-fn without_id(data: &Object) -> Object {
+pub(super) fn without_id(data: &Object) -> Object {
 	let mut kept = data.clone();
 	kept.0.remove("id");
 	kept
@@ -652,7 +653,7 @@ fn gen_leaf(rng: &mut Rng, presence: Pres) -> Spec {
 	}
 }
 
-fn gen_children(rng: &mut Rng, depth: usize) -> Vec<(String, Spec)> {
+pub(super) fn gen_children(rng: &mut Rng, depth: usize) -> Vec<(String, Spec)> {
 	let most = if depth == 0 {
 		10
 	} else {
@@ -854,7 +855,12 @@ fn gen_value(rng: &mut Rng, kind: PhysicalKind, literals: &[Value], tables: &[Ta
 
 /// A record for a node over `children`: each key absent, `NULL` or present as its presence
 /// allows, one in forty in a state it does not, and, in an open node, keys that have no column.
-fn gen_object(rng: &mut Rng, children: &[(String, Spec)], open: bool, root: bool) -> Object {
+pub(super) fn gen_object(
+	rng: &mut Rng,
+	children: &[(String, Spec)],
+	open: bool,
+	root: bool,
+) -> Object {
 	let mut object = Object::default();
 	for (name, spec) in children {
 		let presence = spec.presence();

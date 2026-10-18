@@ -26,7 +26,7 @@ use crate::catalog::{StoredRecord, TableLayouts};
 use crate::exec::operators::scan::pipeline::decode_record_value;
 use crate::key::KVKeyDecode as _;
 use crate::key::schema::{RecordKey, TblPrefix};
-use crate::val::key_read::{KeyIdRead, KeyText};
+use crate::val::key_read::{KeyIdRead, KeyIdRef, KeyText};
 use crate::val::{Datetime, Duration, Geometry, Number, RecordId, Uuid, Value, stored};
 
 /// A packed row read in place, as a [`RowReader`].
@@ -113,6 +113,79 @@ impl<'a> PackedRowReader<'a> {
 	}
 }
 
+/// A packed row run through a body that reads none of its fields ([`Pipeline::reads_row`] clear):
+/// the record is decoded whole the first time the body asks for any of it, and never otherwise, so
+/// a row the body hands on untouched can be written out from its bytes
+/// ([`RowFrame::push_stored`](super::row_frame::RowFrame::push_stored)).
+///
+/// [`Pipeline::reads_row`]: super::program::Pipeline::reads_row
+pub(super) struct LazyPackedRow<'a> {
+	key: &'a [u8],
+	value: &'a [u8],
+	layouts: Option<&'a TableLayouts>,
+	admitted: &'a crate::exec::packed_view::AdmittedRow<'a>,
+	decoded: OnceCell<Value>,
+}
+
+impl<'a> LazyPackedRow<'a> {
+	/// The packed row `value` of the record `key` names, as `admitted` admitted it through
+	/// `layouts`.
+	pub(super) fn new(
+		key: &'a [u8],
+		value: &'a [u8],
+		layouts: Option<&'a TableLayouts>,
+		admitted: &'a crate::exec::packed_view::AdmittedRow<'a>,
+	) -> Self {
+		Self {
+			key,
+			value,
+			layouts,
+			admitted,
+			decoded: OnceCell::new(),
+		}
+	}
+
+	/// The record decoded whole, once: the value [`decode_record_value`] answers for the same
+	/// bytes, or its error.
+	fn decoded(&self) -> anyhow::Result<&Value> {
+		if let Some(value) = self.decoded.get() {
+			return Ok(value);
+		}
+		#[cfg(test)]
+		observed::note_whole();
+		let value = self.admitted.decode(self.key, self.value, self.layouts)?;
+		Ok(self.decoded.get_or_init(|| value))
+	}
+
+	/// The record, when the body asked for it and so it was decoded.
+	pub(super) fn into_decoded(self) -> Option<Value> {
+		self.decoded.into_inner()
+	}
+}
+
+impl RowReader for LazyPackedRow<'_> {
+	fn field(&self, name: &FieldName) -> anyhow::Result<Scalar<'_>> {
+		match self.decoded()? {
+			Value::Object(object) => {
+				Ok(object.get(name.as_str()).map(Scalar::of).unwrap_or(Scalar::None))
+			}
+			_ => anyhow::bail!("the VM read a field from a row that is not an object"),
+		}
+	}
+
+	fn record(&self) -> anyhow::Result<Value> {
+		Ok(self.decoded()?.clone())
+	}
+
+	fn borrowed(&self) -> Option<&Value> {
+		self.decoded.get()
+	}
+
+	fn has_any_field(&self, names: &[surrealdb_strand::Strand]) -> anyhow::Result<bool> {
+		super::row::ValueRow(self.decoded()?).has_any_field(names)
+	}
+}
+
 /// The record id the record key `key` names, decoded as the whole decode decodes it.
 fn record_id(key: &[u8]) -> anyhow::Result<Value> {
 	let key = RecordKey::decode_key(key).map_err(|e| e.context("Failed to decode record key"))?;
@@ -146,6 +219,21 @@ fn read_key(key: &[u8]) -> Option<&EscapedSlice> {
 	}
 	KeyIdRead::borrow_decode(&mut reader).ok()?;
 	reader.is_empty().then_some(table)
+}
+
+/// The table a record key names, as the key's own bytes, and its id, read as [`read_key`] reads
+/// them: `None` exactly where [`read_key`] answers `None`. A number or string id is borrowed from
+/// the key; any other is validated and held as [`KeyIdRef::Other`].
+pub(super) fn read_key_id(key: &[u8]) -> Option<(&EscapedSlice, KeyIdRef<'_>)> {
+	let mut reader = BorrowReader::new(key);
+	<TblPrefix as BorrowDecode<'_, ()>>::borrow_decode(&mut reader).ok()?;
+	let table = KeyText::borrow_decode(&mut reader).ok()?.escaped();
+	let separator: u8 = BorrowDecode::<()>::borrow_decode(&mut reader).ok()?;
+	if separator != b'*' {
+		return None;
+	}
+	let id = KeyIdRef::borrow_decode(&mut reader).ok()?;
+	reader.is_empty().then_some((table, id))
 }
 
 /// The packed row `value` of the record `key` names, checked, or `None` when any step of the whole

@@ -171,6 +171,8 @@ mod tests_link_window;
 mod tests_methods;
 #[cfg(all(test, feature = "kv-mem"))]
 pub(in crate::exec) mod tests_packed_reads;
+#[cfg(all(test, feature = "kv-mem"))]
+mod tests_packed_transcode;
 #[cfg(test)]
 mod tests_plain;
 #[cfg(all(test, feature = "kv-mem"))]

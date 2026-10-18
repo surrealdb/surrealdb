@@ -813,7 +813,9 @@ fn jumps_back(code: &[Instr]) -> bool {
 /// such instructions runs on the stored bytes of a record without a hand-off to the host.
 ///
 /// An instruction that yields to the host (a parameter read, a call, a method), reads a record,
-/// writes or defines is not one, and neither is any instruction this list does not name.
+/// writes or defines is not one, and neither is any instruction this list does not name. The
+/// paging instructions ([`Instr::Skip`], [`Instr::Take`], [`Instr::JumpIfLimitReached`]) are: they
+/// read and count the statement's paging state alone, never the row.
 fn runs_on_the_row(instr: &Instr) -> bool {
 	matches!(
 		instr,

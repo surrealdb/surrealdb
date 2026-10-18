@@ -255,6 +255,41 @@ pub(crate) fn ops(kind: PhysicalKind) -> &'static KindOps {
 	}
 }
 
+/// Reads a present slot of `column` in place: the kind table's [`KindOps::read`], dispatched on the
+/// kind directly so that a reader walking many columns inlines it.
+#[inline]
+pub(crate) fn read<'a>(
+	column: &'a Column,
+	index: u32,
+	slot: Slot<'a>,
+) -> Result<FieldRef<'a>, PackedError> {
+	match column.kind {
+		PhysicalKind::Bool => read_bool(column, index, slot),
+		PhysicalKind::I8 | PhysicalKind::I16 | PhysicalKind::I32 | PhysicalKind::I64 => {
+			read_signed(column, index, slot)
+		}
+		PhysicalKind::U8 | PhysicalKind::U16 | PhysicalKind::U32 | PhysicalKind::U64 => {
+			read_unsigned(column, index, slot)
+		}
+		PhysicalKind::F32 => read_f32(column, index, slot),
+		PhysicalKind::F64 => read_f64(column, index, slot),
+		PhysicalKind::Decimal16 => read_decimal16(column, index, slot),
+		PhysicalKind::Fixed(_) => read_fixed_bytes(column, index, slot),
+		PhysicalKind::Uuid => read_uuid(column, index, slot),
+		PhysicalKind::Datetime => read_datetime(column, index, slot),
+		PhysicalKind::DatetimeWide => read_datetime_wide(column, index, slot),
+		PhysicalKind::Duration => read_duration(column, index, slot),
+		PhysicalKind::Point => read_point(column, index, slot),
+		PhysicalKind::LiteralCode(_) => read_literal(column, index, slot),
+		PhysicalKind::String => read_string(column, index, slot),
+		PhysicalKind::Bytes => read_var_bytes(column, index, slot),
+		PhysicalKind::RecordKey => read_record_key(column, index, slot),
+		PhysicalKind::DecimalVar => read_decimal_var(column, index, slot),
+		PhysicalKind::Value => read_value(column, index, slot),
+		PhysicalKind::Object => read_no_slot(column, index, slot),
+	}
+}
+
 /// Where a temporal value goes in its 8-byte slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SlotFit<T> {

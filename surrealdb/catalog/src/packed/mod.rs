@@ -119,6 +119,10 @@
 //!   nothing, that no key is both in a column holding a value or `NULL` and in a remainder, and
 //!   that every trailer entry is consumed in column order.
 //!
+//! [`PackedRow::visit`] reads a row for a writer that copies the record out without building it:
+//! it walks the columns in key order and reads only what it hands on, so it does not prove the
+//! rules that span what it does not read. Those are the writer's to keep ([`check_packed`]).
+//!
 //! The check of a [`CheckedPackedRow`] is [`PackedRow::decode`] run in a mode that constructs no
 //! value: one walk, one body for every rule, so the two accept the same rows and refuse them in
 //! the same order. A refusal is the decode's own error.
@@ -146,9 +150,11 @@ mod mode;
 mod row;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod visit_tests;
 
 pub use encode::{Packing, check_packed, pack};
-pub use row::{CheckedPackedRow, FieldRef, PackedRow, PathRead};
+pub use row::{CheckedPackedRow, FieldRef, PackedRow, PackedVisitor, PathRead};
 
 /// The 8-byte datetime slot value of a datetime before the slot's nanosecond range, or at exactly
 /// `i64::MIN` nanoseconds: its value is in the trailer, and it orders below every datetime the slot

@@ -36,13 +36,34 @@ pub(super) fn encode_json(
 		Value::Datetime(d) => {
 			use std::fmt::Write as _;
 
-			use chrono::Datelike as _;
+			use chrono::{Datelike as _, Timelike as _};
 			scratch.clear();
 			// RFC 3339 with as many fractional digits as the nanoseconds need
-			// (0, 3, 6 or 9) and `Z`, written in place; a year outside four
-			// digits takes chrono's own rendering.
-			if (0..=9999).contains(&d.0.year()) {
-				let _ = write!(scratch, "{}", d.0.format("%Y-%m-%dT%H:%M:%S%.fZ"));
+			// (0, 3, 6 or 9) and `Z`, written field by field into the scratch;
+			// a year outside four digits, or a leap second, takes chrono's own
+			// rendering.
+			let nanos = d.0.nanosecond();
+			if (0..=9999).contains(&d.0.year()) && nanos < 1_000_000_000 {
+				let _ = write!(
+					scratch,
+					"{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
+					d.0.year(),
+					d.0.month(),
+					d.0.day(),
+					d.0.hour(),
+					d.0.minute(),
+					d.0.second()
+				);
+				let _ = if nanos == 0 {
+					Ok(())
+				} else if nanos % 1_000_000 == 0 {
+					write!(scratch, ".{:03}", nanos / 1_000_000)
+				} else if nanos % 1_000 == 0 {
+					write!(scratch, ".{:06}", nanos / 1_000)
+				} else {
+					write!(scratch, ".{nanos:09}")
+				};
+				scratch.push('Z');
 			} else {
 				scratch.push_str(&d.0.to_rfc3339_opts(SecondsFormat::AutoSi, true));
 			}
@@ -169,6 +190,23 @@ pub(super) fn record_id_text_str(
 	surrealdb_types::EscapeSqonIdent(table).fmt_sql(scratch, SqlFormat::SingleLine);
 	scratch.push(':');
 	surrealdb_types::EscapeRecordKey(key).fmt_sql(scratch, SqlFormat::SingleLine);
+	string(out, scratch)
+}
+
+/// Write a record id of table `table` and uuid key `key` as JSON text.
+pub(super) fn record_id_text_uuid(
+	out: &mut Vec<u8>,
+	table: &str,
+	key: uuid::Uuid,
+	scratch: &mut String,
+) -> anyhow::Result<()> {
+	scratch.clear();
+	surrealdb_types::EscapeSqonIdent(table).fmt_sql(scratch, SqlFormat::SingleLine);
+	// The public uuid's rendering, `u'` and its hyphenated lower-case text, from the stack.
+	let mut buffer = [0u8; uuid::fmt::Hyphenated::LENGTH];
+	scratch.push_str(":u'");
+	scratch.push_str(key.hyphenated().encode_lower(&mut buffer));
+	scratch.push('\'');
 	string(out, scratch)
 }
 

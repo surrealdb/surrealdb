@@ -3334,10 +3334,12 @@ pub(super) fn in_place_row(
 /// them where they lie, from the checked row: a row the check refused is
 /// refused before the body runs, with the error its whole decode raises, and
 /// one not yet checked is checked here ([`PackedRowReader`]). Any other body
-/// runs on the record decoded whole, as a value row. Either way the row the
-/// body leaves pending is settled as the value the whole decode answers, so a
-/// packed record never becomes a sort's stored bytes or a frame's late
-/// transcode, and neither needs layouts when it is read again.
+/// runs on the record decoded whole when it first asks for it. The row the
+/// body leaves pending is settled as the value the whole decode answers,
+/// except a row emitted untouched into a frame, which is transcoded from its
+/// bytes there ([`State::settle_packed`]); so a packed record never becomes a
+/// sort's stored bytes or a spill's, and neither needs layouts when it is read
+/// again.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn in_place_row_admitted(
 	program: &Program,
@@ -3350,12 +3352,13 @@ pub(super) fn in_place_row_admitted(
 ) -> anyhow::Result<bool> {
 	if StoredRecord::is_packed_bytes(value) {
 		if !pipeline.reads_row {
-			#[cfg(test)]
-			super::row_packed::observed::note_whole();
-			let row = admitted.decode(key, value, layouts)?;
-			let stop = finish_in_place(run_in_place(program, pipeline, &ValueRow(&row), state))?;
+			let row = super::row_packed::LazyPackedRow::new(key, value, layouts, admitted);
+			let stop = finish_in_place(run_in_place(program, pipeline, &row, state))?;
 			if state.pending.is_some() {
-				state.settle(program, row);
+				match row.into_decoded() {
+					Some(row) => state.settle(program, row),
+					None => state.settle_packed(program, key, value, layouts, admitted)?,
+				}
 			}
 			return Ok(stop);
 		}

@@ -31,6 +31,27 @@ impl<'de> BorrowDecode<'de, ()> for KeyIdRead {
 	}
 }
 
+/// The id of a record key, read as [`KeyIdRead`] reads it, holding the id where it is a number, a
+/// string or a uuid: the number, the string's escaped bytes borrowed from the key, or the uuid. Any
+/// other id is read and validated the same way and held as [`KeyIdRef::Other`].
+pub enum KeyIdRef<'a> {
+	Number(i64),
+	String(&'a EscapedSlice),
+	Uuid(Uuid),
+	Other,
+}
+
+impl<'de> BorrowDecode<'de, ()> for KeyIdRef<'de> {
+	fn borrow_decode(reader: &mut BorrowReader<'de>) -> Result<Self, DecodeError> {
+		Ok(match <KeyId<'de> as BorrowDecode<'de, ()>>::borrow_decode(reader)? {
+			KeyId::Number(n) => Self::Number(n),
+			KeyId::String(text) => Self::String(text.0),
+			KeyId::Uuid(uuid) => Self::Uuid(uuid),
+			_ => Self::Other,
+		})
+	}
+}
+
 /// A string of a key, read as the string decode reads it: the escaped bytes of valid UTF-8,
 /// borrowed from the key.
 pub struct KeyText<'a>(&'a EscapedSlice);
@@ -59,7 +80,10 @@ impl<'de> BorrowDecode<'de, ()> for KeyText<'de> {
 /// id) allocates when it is read.
 #[derive(BorrowDecode)]
 #[storekey(format = "()")]
-#[expect(dead_code, reason = "an id is read to be validated and dropped unread")]
+#[expect(
+	dead_code,
+	reason = "an id other than a number or a string is read to be validated and dropped unread"
+)]
 enum KeyId<'a> {
 	Number(i64),
 	String(Text<'a>),

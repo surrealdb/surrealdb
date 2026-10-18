@@ -28,8 +28,24 @@ use crate::record::StoredRecord;
 use crate::val::stored::{self, ValueRef, varint};
 use crate::val::{Object, Strand, TableName, Value};
 
+mod visit;
+
+pub use visit::PackedVisitor;
+
 /// A trailer entry: its column, its payload, and where the next entry starts.
 type TrailerEntry<'a> = (u64, &'a [u8], usize);
+
+#[cfg(test)]
+thread_local! {
+	/// How many trailer entries this thread's reads have read.
+	static TRAILER_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many trailer entries this thread's reads have read.
+#[cfg(test)]
+pub(super) fn trailer_reads() -> usize {
+	TRAILER_READS.with(std::cell::Cell::get)
+}
 
 /// The key the record's own id is restored under.
 const ID_KEY: Strand = Strand::new_static("id");
@@ -584,6 +600,8 @@ impl<'a> PackedRow<'a> {
 	/// at the end of the trailer. The payload's width is the escape width of the kind of the
 	/// column the entry names.
 	fn entry_at(&self, at: usize) -> Result<Option<TrailerEntry<'a>>, PackedError> {
+		#[cfg(test)]
+		TRAILER_READS.with(|n| n.set(n.get() + 1));
 		let trailer: &'a [u8] = self.trailer;
 		let rest = trailer.get(at..).ok_or(PackedError::Trailer)?;
 		if rest.is_empty() {
@@ -611,6 +629,31 @@ impl<'a> PackedRow<'a> {
 				Ordering::Equal => return Ok(payload),
 				Ordering::Greater => break,
 				Ordering::Less => at = next,
+			}
+		}
+		Err(PackedError::Escape {
+			column,
+		})
+	}
+
+	/// The payload of the trailer entry of `column`, sought from offset `*from` on, which is left
+	/// at the entry after it. A visit seeks escapes in column order, and the entries ascend by
+	/// column, so the search only moves forward and a whole visit reads each entry at most once.
+	/// An entry for an earlier column is passed over; none for `column` at or after `*from` is an
+	/// [`Escape`](PackedError::Escape) refusal.
+	pub(super) fn escape_from(
+		&self,
+		from: &mut usize,
+		column: u32,
+	) -> Result<&'a [u8], PackedError> {
+		while let Some((entry, payload, next)) = self.entry_at(*from)? {
+			match entry.cmp(&u64::from(column)) {
+				Ordering::Less => *from = next,
+				Ordering::Equal => {
+					*from = next;
+					return Ok(payload);
+				}
+				Ordering::Greater => break,
 			}
 		}
 		Err(PackedError::Escape {

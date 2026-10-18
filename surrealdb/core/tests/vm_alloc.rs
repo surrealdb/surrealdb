@@ -362,6 +362,18 @@ fn setup(n: usize) -> String {
 			CREATE type::record('po', {{ n: $i, f: 1.5f + $i, d: 2.5dec + $i, s: 'an_entry_longer_than_23_bytes', u: rand::uuid::v4() }}) SET b = $i % 7;
 			CREATE type::record('to', {{ n: $i, f: 1.5f + $i, d: 2.5dec + $i, s: 'an_entry_longer_than_23_bytes', u: rand::uuid::v4() }}) SET b = $i % 7;
 		}};
+		DEFINE TABLE pw SCHEMAFULL;
+		DEFINE FIELD score ON pw TYPE int; DEFINE FIELD cat ON pw TYPE int;
+		DEFINE FIELD name ON pw TYPE string; DEFINE FIELD flag ON pw TYPE bool;
+		DEFINE FIELD body ON pw TYPE string; DEFINE FIELD at ON pw TYPE datetime;
+		DEFINE FIELD ratio ON pw TYPE float; DEFINE FIELD note ON pw TYPE option<string>;
+		DEFINE FIELD tags ON pw TYPE array<string>; DEFINE FIELD link ON pw TYPE option<record<pw>>;
+		FOR $i IN 0..{n} {{
+			CREATE type::record('pw', $i) SET score = $i * 7, cat = $i % 13, name = 'name ' + <string> $i,
+				flag = $i % 2 = 0, body = string::repeat('b', 40), at = d'2024-01-01T00:00:00Z' + duration::from_secs($i),
+				ratio = $i / 3f, note = IF $i % 2 = 0 THEN 'even' ELSE NONE END, tags = ['x', 'y'],
+				link = type::record('pw', ($i + 1) % {n});
+		}};
 		DEFINE TABLE ix SCHEMALESS;
 		DEFINE INDEX ix_k ON ix FIELDS k;
 		DEFINE TABLE c SCHEMALESS;
@@ -1285,6 +1297,95 @@ async fn packed_rows_read_in_place_allocate_no_more_than_documents() {
 		"packed rows cost more allocations than the documents:\n{}",
 		over.join("\n")
 	);
+}
+
+/// The most allocations per row a packed `SELECT *` into frames may make: the frame buffers grow
+/// by doubling, which is amortised to a few hundredths of an allocation per row.
+const FRAME_PER_ROW: f64 = 0.02;
+
+/// Packed rows written into frames allocate nothing per row beyond the growth of the frame's own
+/// buffers: the transcode from stored bytes into a frame (`exec::row_frame_probe`), and a streamed
+/// `SELECT *` with rows encoded for the wire, in CBOR and in JSON, over packed tables of int,
+/// string and uuid keys and of a wide row of every common field kind. An array key (`pa`) is
+/// decoded to be written, as a document's is, and is printed beside them without a bound.
+#[tokio::test]
+async fn packed_rows_into_frames_allocate_nothing_per_row() {
+	use surrealdb_core::kvs::QueryRequest;
+	use surrealdb_rpc::{QUERY_STREAM_BUFFER, RowFormat};
+
+	let _measuring = MEASURING.lock().await;
+	let sample_every: u64 =
+		std::env::var("ALLOC_SAMPLE").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
+	const CHECK_SMALL: usize = 2_000;
+	const CHECK_LARGE: usize = 4_000;
+	let (small, session) = datastore(CHECK_SMALL).await;
+	let (large, _) = datastore(CHECK_LARGE).await;
+	let rows = (CHECK_LARGE - CHECK_SMALL) as f64;
+	let stream = |ds: Arc<Datastore>, sql: String, format: RowFormat| {
+		let session = session.clone();
+		async move {
+			let (items, received) = async_channel::bounded(QUERY_STREAM_BUFFER);
+			let job = ds
+				.run_streaming(
+					QueryRequest::new(sql.as_str(), &session).with_row_format(Some(format)),
+					items,
+				)
+				.expect("the query starts");
+			let drain = async {
+				while let Ok(item) = received.recv().await {
+					drop(item);
+				}
+			};
+			let (ran, ()) = futures::join!(job.run, drain);
+			ran.expect("the query runs");
+		}
+	};
+	let mut over = Vec::new();
+	println!("{:<24} {:>12}", "shape", "allocs/row");
+	for table in ["pw", "p", "ps", "pu", "pa"] {
+		let bounded = table != "pa";
+		let floor = |ds: Arc<Datastore>| async move {
+			let run = || transcode_table(&ds, "test", "test", table);
+			run().await.expect("transcodes");
+			count(0, async { run().await.expect("transcodes") }).await.1
+		};
+		let (a, b) = (floor(Arc::clone(&small)).await, floor(Arc::clone(&large)).await);
+		let per_row = (b.allocs as f64 - a.allocs as f64) / rows;
+		println!("{:<24} {per_row:>12.3}", format!("transcode {table}"));
+		if bounded && per_row > FRAME_PER_ROW {
+			over.push(format!("transcode {table}: {per_row:.3} allocs/row"));
+		}
+		for format in [RowFormat::Cbor, RowFormat::Json] {
+			let sql = format!("SELECT * FROM {table}");
+			let measure = |ds: Arc<Datastore>| {
+				let sql = sql.clone();
+				async move {
+					stream(Arc::clone(&ds), sql.clone(), format).await;
+					let ((), counts, samples) = count(sample_every, stream(ds, sql, format)).await;
+					(counts, samples)
+				}
+			};
+			let ((a, sa), (b, sb)) =
+				(measure(Arc::clone(&small)).await, measure(Arc::clone(&large)).await);
+			let per_row = (b.allocs as f64 - a.allocs as f64) / rows;
+			let name = format!("{sql} {format:?}");
+			println!("{name:<24} {per_row:>12.3}");
+			if bounded && per_row > FRAME_PER_ROW {
+				over.push(format!("{name}: {per_row:.3} allocs/row"));
+			}
+			if sample_every != 0 {
+				let (small_sites, large_sites) = (tally(&sa), tally(&sb));
+				for (site, &n) in &large_sites {
+					let m = small_sites.get(site).copied().unwrap_or(0);
+					let per = (n - m) as f64 * sample_every as f64 / rows;
+					if per > 0.05 {
+						println!("{per:>7.2}  {site}");
+					}
+				}
+			}
+		}
+	}
+	assert!(over.is_empty(), "packed rows allocate per row into frames:\n{}", over.join("\n"));
 }
 
 // --------------------------------------------------

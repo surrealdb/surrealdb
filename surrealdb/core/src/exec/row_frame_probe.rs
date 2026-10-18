@@ -13,6 +13,17 @@ use crate::kvs::{Admission, Datastore, RowGate, TransactionType};
 /// executor's output batches are flushed.
 const FLUSH_AT: usize = 1000;
 
+/// What [`scan_table`] does with each record it reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Probe {
+	/// Admit it and nothing more: the cost of reading the table.
+	Scan,
+	/// Decode it whole and encode the value into the frame.
+	Decoded,
+	/// Transcode it into the frame from its stored bytes.
+	Transcoded,
+}
+
 /// Read every record of table `tb` in `ns`/`db` and transcode each into one
 /// reused output frame, flushed every [`FLUSH_AT`] rows: what a `SELECT *`
 /// over the table writes for the wire with frames as its output. Answers
@@ -22,6 +33,18 @@ pub async fn transcode_table(
 	ns: &str,
 	db: &str,
 	tb: &str,
+) -> anyhow::Result<(usize, usize)> {
+	scan_table(ds, ns, db, tb, Probe::Transcoded).await
+}
+
+/// Read every record of table `tb` in `ns`/`db` as [`transcode_table`] does, doing what `probe`
+/// says with each. Answers the rows and the bytes written.
+pub async fn scan_table(
+	ds: &Datastore,
+	ns: &str,
+	db: &str,
+	tb: &str,
+	probe: Probe,
 ) -> anyhow::Result<(usize, usize)> {
 	let txn = ds.transaction(TransactionType::Read).await?;
 	let def = txn
@@ -42,6 +65,7 @@ pub async fn transcode_table(
 		txn.open_vals_cursor_raw(range, crate::kvs::Direction::Forward, 0, None).await?;
 	let mut frame = super::vm::row_frame::RowFrame::new();
 	let (mut rows, mut bytes) = (0usize, 0usize);
+	let mut scanned = 0usize;
 	loop {
 		let mut failed = None;
 		// The row that named a generation the gate does not list yet; the
@@ -62,7 +86,20 @@ pub async fn transcode_table(
 						return Ok(std::ops::ControlFlow::Break(()));
 					}
 				}
-				if let Err(e) = frame.push_stored(key, value, Some(layouts)) {
+				let pushed = match probe {
+					Probe::Scan => {
+						scanned += 1;
+						Ok(())
+					}
+					Probe::Decoded => crate::exec::operators::scan::pipeline::decode_record_value(
+						key,
+						value,
+						Some(layouts),
+					)
+					.and_then(|row| frame.push_value(&row)),
+					Probe::Transcoded => frame.push_stored(key, value, Some(layouts)),
+				};
+				if let Err(e) = pushed {
 					failed = Some(e);
 					return Ok(std::ops::ControlFlow::Break(()));
 				}
@@ -90,7 +127,7 @@ pub async fn transcode_table(
 			break;
 		}
 	}
-	rows += frame.len();
+	rows += frame.len() + scanned;
 	bytes += frame.data().len();
 	txn.cancel().await?;
 	Ok((rows, bytes))

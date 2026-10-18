@@ -1850,9 +1850,8 @@ impl State {
 	/// The caller has admitted the record's generation against its table's
 	/// layouts ([`crate::kvs::RowGate`]); the bytes a sort keeps are decoded
 	/// later without a check. A record in a packed layout is never given: the
-	/// host decodes it and settles it as a value ([`Self::settle`]), so a sort,
-	/// a frame's late transcode and a spill run hold no packed bytes and read
-	/// no layouts.
+	/// host settles it through [`Self::settle_packed`], so a sort and a spill run
+	/// hold no packed bytes and read no layouts.
 	pub(super) fn settle_stored(
 		&mut self,
 		program: &Program,
@@ -1915,6 +1914,38 @@ impl State {
 				self.settle(program, row);
 			}
 		}
+		Ok(())
+	}
+
+	/// Settle the row left pending by a body that never asked for the packed
+	/// record `key` names, whose stored value is `value` and which `admitted`
+	/// admitted through `layouts`. A row emitted into a frame is transcoded there
+	/// from its bytes, after the rows emitted before it; any other is decoded
+	/// whole and settled as a value, so a sort or a spill never holds packed
+	/// bytes.
+	pub(super) fn settle_packed(
+		&mut self,
+		program: &Program,
+		key: &[u8],
+		value: &[u8],
+		layouts: Option<&crate::catalog::TableLayouts>,
+		admitted: &crate::exec::packed_view::AdmittedRow<'_>,
+	) -> anyhow::Result<()> {
+		if matches!(self.pending, Some(Pending::Emit))
+			&& self.row_frame.is_some()
+			&& !matches!(admitted, crate::exec::packed_view::AdmittedRow::Refused)
+		{
+			self.pending = None;
+			self.drain_output_into_frame()?;
+			if let Some(frame) = &mut self.row_frame {
+				frame.push_stored(key, value, layouts)?;
+			}
+			return Ok(());
+		}
+		#[cfg(test)]
+		super::row_packed::observed::note_whole();
+		let row = admitted.decode(key, value, layouts)?;
+		self.settle(program, row);
 		Ok(())
 	}
 

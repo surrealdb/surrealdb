@@ -13,7 +13,8 @@
 //! - [`RowFrame::push_stored`] transcodes a stored record — its key and its stored value, in the
 //!   stored-value encoding or in `revision` — reading the stored bytes in place. Objects, arrays,
 //!   strings, integers and the other leaves are copied from where they lie; a value of a kind the
-//!   transcoder does not read in place is decoded alone and encoded as an in-memory value.
+//!   transcoder does not read in place is decoded alone and encoded as an in-memory value. A packed
+//!   row is read column by column through its generation's descriptor, its `id` from the key.
 //!
 //! A frame's buffers are the host's: [`RowFrame::clear`] keeps their capacity,
 //! so a frame reused across batches encodes in steady state without asking
@@ -28,11 +29,13 @@ use revision::optimised::tag::{SizeClass, Tag};
 use surrealdb_rpc::{EncodedRows, RowFormat};
 
 use super::scalar::Scalar;
+use crate::catalog::packed::{FieldRef, PackedRow, PackedVisitor};
 use crate::catalog::{StoredRecord, TableLayouts};
 use crate::exec::object_extract::indexed_map_walker_from_object_bytes;
 use crate::exec::object_extract::wire_skip::{rev2_optimised_payload_unchecked, skip_value_wire};
 use crate::exec::pre_decode_filter::strand_payload_str;
 use crate::key::KVKeyDecode as _;
+use crate::val::key_read::KeyIdRef;
 use crate::val::stored::{Kind, OrderedObjectRef, ValueRef};
 use crate::val::{Number, RecordIdKey, Value};
 
@@ -69,6 +72,23 @@ thread_local! {
 	static WHOLE_DECODES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 	/// How many stored values the transcoder decoded whole into a [`Value`].
 	static VALUE_DECODES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+	/// How many packed rows [`RowFrame::push_stored`] transcoded by visiting them, neither checked
+	/// whole nor decoded.
+	static PACKED_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// What [`RowFrame::push_stored`] did with the stored records it was given on this thread.
+#[cfg(test)]
+pub(super) mod observed {
+	/// The packed rows transcoded by visiting them, neither checked whole nor decoded.
+	pub(in crate::exec::vm) fn packed_visits() -> usize {
+		super::PACKED_VISITS.with(std::cell::Cell::get)
+	}
+
+	/// The stored records decoded whole rather than transcoded in place.
+	pub(in crate::exec::vm) fn whole_decodes() -> usize {
+		super::WHOLE_DECODES.with(std::cell::Cell::get)
+	}
 }
 
 /// The record field a stored record's key supplies.
@@ -87,6 +107,8 @@ pub(crate) struct RowFrame {
 	/// transcoded, in the order they are written. Each nested object uses
 	/// the tail past its parent's entries.
 	scratch: Vec<Entry>,
+	/// A reused buffer for a record key's string id that holds an escaped byte, unescaped.
+	id_text: Vec<u8>,
 }
 
 /// One stored object entry: where its key's UTF-8 and its value wire lie,
@@ -122,6 +144,7 @@ impl RowFrame {
 			ends: Vec::new(),
 			text: String::new(),
 			scratch: Vec::new(),
+			id_text: Vec::new(),
 		}
 	}
 
@@ -238,10 +261,13 @@ impl RowFrame {
 	///
 	/// The caller has admitted `value`'s generation against its table's layouts
 	/// ([`crate::kvs::RowGate`]) and passes the layouts that admitted it. A
-	/// document row is transcoded in place; a packed row is decoded through its
-	/// generation's descriptor in `layouts` and transcoded as a value, and is
-	/// refused without them. An envelope this build does not read fails with its
-	/// typed error.
+	/// document row is checked whole and transcoded in place. A packed row is
+	/// visited through its generation's descriptor in `layouts`
+	/// ([`PackedRow::visit`]): its columns are copied from where they lie and its
+	/// `id` from the key, and it is not checked whole, its writer having checked
+	/// it. A packed row the visit refuses, or one given without layouts, is
+	/// decoded whole, which raises the error a client sees. An envelope this build
+	/// does not read fails with its typed error.
 	pub(crate) fn push_stored(
 		&mut self,
 		key: &[u8],
@@ -254,6 +280,7 @@ impl RowFrame {
 				data,
 				scratch,
 				text,
+				id_text,
 				..
 			} = frame;
 			let mut stored = Stored {
@@ -262,8 +289,21 @@ impl RowFrame {
 				scratch,
 				json: (*format == RowFormat::Json).then_some(text),
 			};
+			let record = StoredRecord::parse(value)?;
+			if let Some(record) = &record
+				&& record.is_packed()
+				&& let Some(layouts) = layouts
+			{
+				let start = stored.out.len();
+				if stored.packed(key, record, layouts, id_text).is_ok() {
+					#[cfg(test)]
+					PACKED_VISITS.with(|n| n.set(n.get() + 1));
+					return Ok(());
+				}
+				stored.out.truncate(start);
+			}
 			// A document the whole decode refuses falls through to that decode, which reports it.
-			if let Some(record) = StoredRecord::parse(value)?
+			if let Some(record) = record
 				&& let Ok(Some(document)) = record.checked_document()
 				&& let Some(object) = document.value()?.as_ordered_object()?
 			{
@@ -973,6 +1013,13 @@ impl<'b> Stored<'b, '_> {
 	fn stored_value(&mut self, value: ValueRef<'b>, depth: usize) -> anyhow::Result<()> {
 		too_deep(depth)?;
 		match value.kind() {
+			// A string's payload is its UTF-8, checked when it was written: CBOR copies it as it
+			// lies and forms no `str` from it.
+			Kind::String if self.json.is_none() => {
+				head(self.out, MAJOR_TEXT, value.payload().len() as u64);
+				self.out.extend_from_slice(value.payload());
+				return Ok(());
+			}
 			Kind::Object => {
 				if let Some(object) = value.as_ordered_object()? {
 					return self.stored_object(object, None, depth);
@@ -1013,7 +1060,7 @@ impl<'b> Stored<'b, '_> {
 		self.scalar(&scalar, depth)
 	}
 
-	/// Write a record id whose key is a number or a string, read in place.
+	/// Write a record id whose key is a number, a string or a uuid, read in place.
 	fn record_id_in_place(&mut self, table: &str, key: StoredKey<'_>) -> anyhow::Result<()> {
 		match &mut self.json {
 			Some(text_buf) => match key {
@@ -1023,6 +1070,9 @@ impl<'b> Stored<'b, '_> {
 				StoredKey::String(s) => {
 					super::row_json::record_id_text_str(self.out, table, s, text_buf)
 				}
+				StoredKey::Uuid(u) => {
+					super::row_json::record_id_text_uuid(self.out, table, u, text_buf)
+				}
 			},
 			None => {
 				tag(self.out, TAG_RECORDID);
@@ -1031,6 +1081,7 @@ impl<'b> Stored<'b, '_> {
 				match key {
 					StoredKey::Number(n) => int(self.out, n),
 					StoredKey::String(s) => text(self.out, s),
+					StoredKey::Uuid(u) => uuid(self.out, u.as_bytes()),
 				}
 				Ok(())
 			}
@@ -1086,11 +1137,246 @@ impl<'b> Stored<'b, '_> {
 	}
 }
 
+impl Stored<'_, '_> {
+	/// Transcode the packed row `record`, of the record `key` names, through its generation's
+	/// descriptor in `layouts`, with its `id` from the key ([`PackedRow::visit`]). On an error some
+	/// of the row may have been written; the caller drops it.
+	fn packed(
+		&mut self,
+		key: &[u8],
+		record: &StoredRecord<'_>,
+		layouts: &TableLayouts,
+		id_text: &mut Vec<u8>,
+	) -> anyhow::Result<()> {
+		let Ok(Some(generation)) = record.generation() else {
+			anyhow::bail!("a packed row whose stamp names no generation");
+		};
+		let descriptor = layouts.admit_packed(generation)?;
+		let row = PackedRow::new(record, descriptor)?;
+		let table = layouts.table().as_str();
+		let Some((key_table, id)) = super::row_packed::read_key_id(key) else {
+			anyhow::bail!("a record key that does not decode");
+		};
+		if !key_table.iter().eq(table.as_bytes()) {
+			anyhow::bail!("a record read through another table's layouts");
+		}
+		let mut sink = PackedSink {
+			stored: Stored {
+				base: self.base,
+				out: &mut *self.out,
+				scratch: &mut *self.scratch,
+				json: self.json.as_deref_mut(),
+			},
+			key,
+			table,
+			id,
+			id_text,
+			depth: 0,
+		};
+		row.visit(&mut sink)
+	}
+}
+
+/// A packed row's record as [`PackedRow::visit`] hands it, written to a frame.
+struct PackedSink<'a, 'o> {
+	stored: Stored<'a, 'o>,
+	/// The record's key, for an id read only by decoding it.
+	key: &'a [u8],
+	/// The record's table, which the key names.
+	table: &'a str,
+	/// The record's id, read from the key in place.
+	id: KeyIdRef<'a>,
+	/// The scratch an escaped string id is unescaped into.
+	id_text: &'o mut Vec<u8>,
+	/// The depth of the open object: 1 for the record.
+	depth: usize,
+}
+
+impl<'a> PackedVisitor<'a> for PackedSink<'a, '_> {
+	type Error = anyhow::Error;
+
+	fn open(&mut self) -> anyhow::Result<usize> {
+		self.depth += 1;
+		too_deep(self.depth)?;
+		let mark = self.stored.out.len();
+		match self.stored.json {
+			Some(_) => self.stored.out.push(b'{'),
+			// The head of a map of up to 23 entries, which `close` rewrites with the count.
+			None => self.stored.out.push(MAJOR_MAP << 5),
+		}
+		Ok(mark)
+	}
+
+	fn key(&mut self, at: usize, key: &str) -> anyhow::Result<()> {
+		self.stored.map_key(at, key)
+	}
+
+	fn id(&mut self, at: usize) -> anyhow::Result<()> {
+		let key = match self.id {
+			KeyIdRef::Number(n) => StoredKey::Number(n),
+			KeyIdRef::String(escaped) => {
+				let raw = escaped.as_bytes();
+				let raw = raw.get(..raw.len().saturating_sub(1)).unwrap_or_default();
+				// The key escapes a byte with a 1 before it; most strings hold neither.
+				let utf8 = if raw.contains(&1) {
+					self.id_text.clear();
+					self.id_text.extend(escaped.iter());
+					&self.id_text[..]
+				} else {
+					raw
+				};
+				// The key read proved the id UTF-8; CBOR copies its bytes, JSON escapes its text.
+				if self.stored.json.is_none() {
+					self.stored.map_key(at, ID_KEY)?;
+					too_deep(self.depth + 2)?;
+					let out = &mut *self.stored.out;
+					tag(out, TAG_RECORDID);
+					head(out, MAJOR_ARRAY, 2);
+					text(out, self.table);
+					head(out, MAJOR_TEXT, utf8.len() as u64);
+					out.extend_from_slice(utf8);
+					return Ok(());
+				}
+				StoredKey::String(
+					std::str::from_utf8(utf8)
+						.map_err(|_| anyhow::anyhow!("a record key id that is not UTF-8"))?,
+				)
+			}
+			KeyIdRef::Uuid(u) => StoredKey::Uuid(u.0),
+			KeyIdRef::Other => return self.stored.record_key(at, self.key, self.depth + 1),
+		};
+		self.stored.map_key(at, ID_KEY)?;
+		too_deep(self.depth + 2)?;
+		self.stored.record_id_in_place(self.table, key)
+	}
+
+	/// CBOR text is copied from storage as written: a string is checked to be UTF-8 when it is
+	/// written, and this read forms no `str` from the bytes. JSON reads the string as `str`, which
+	/// it checks, since it escapes the text.
+	fn raw_text(&self) -> bool {
+		self.stored.json.is_none()
+	}
+
+	fn text(&mut self, bytes: &'a [u8]) -> anyhow::Result<()> {
+		head(self.stored.out, MAJOR_TEXT, bytes.len() as u64);
+		self.stored.out.extend_from_slice(bytes);
+		Ok(())
+	}
+
+	fn field(&mut self, field: FieldRef<'a>) -> anyhow::Result<()> {
+		let depth = self.depth + 1;
+		// The common leaves, straight to CBOR.
+		if self.stored.json.is_none() {
+			let out = &mut *self.stored.out;
+			match field {
+				FieldRef::Null => out.push(0xf6),
+				FieldRef::Bool(v) => out.push(if v {
+					0xf5
+				} else {
+					0xf4
+				}),
+				FieldRef::Int(v) => int(out, v),
+				FieldRef::Float(v) => float(out, v),
+				FieldRef::String(v) => text(out, v),
+				FieldRef::Datetime(v) => {
+					tag(out, TAG_CUSTOM_DATETIME);
+					head(out, MAJOR_ARRAY, 2);
+					int(out, v.timestamp());
+					int(out, v.timestamp_subsec_nanos() as i64);
+				}
+				_ => return self.field_value(field, depth),
+			}
+			return Ok(());
+		}
+		self.field_value(field, depth)
+	}
+
+	fn close(&mut self, mark: usize, len: usize) -> anyhow::Result<()> {
+		self.depth -= 1;
+		if self.stored.json.is_some() {
+			self.stored.out.push(b'}');
+			return Ok(());
+		}
+		// The map's head was written for up to 23 entries; a longer one moves its entries along
+		// by the bytes its head takes beyond one.
+		let n = len as u64;
+		let m = MAJOR_MAP << 5;
+		let mut wide = [0u8; 9];
+		let used = if n <= 23 {
+			wide[0] = m | n as u8;
+			1
+		} else if n <= u64::from(u8::MAX) {
+			wide[..2].copy_from_slice(&[m | 24, n as u8]);
+			2
+		} else if n <= u64::from(u16::MAX) {
+			wide[0] = m | 25;
+			wide[1..3].copy_from_slice(&(n as u16).to_be_bytes());
+			3
+		} else if n <= u64::from(u32::MAX) {
+			wide[0] = m | 26;
+			wide[1..5].copy_from_slice(&(n as u32).to_be_bytes());
+			5
+		} else {
+			wide[0] = m | 27;
+			wide[1..9].copy_from_slice(&n.to_be_bytes());
+			9
+		};
+		self.stored.out.splice(mark..mark + 1, wide[..used].iter().copied());
+		Ok(())
+	}
+}
+
+impl<'a> PackedSink<'a, '_> {
+	/// Write `field`, at depth `depth`, through the scalar or stored-value encoders.
+	fn field_value(&mut self, field: FieldRef<'a>, depth: usize) -> anyhow::Result<()> {
+		let scalar = match field {
+			FieldRef::Absent | FieldRef::Object => {
+				anyhow::bail!("a packed row visit handed an absent field or an object node")
+			}
+			FieldRef::Stored(value) => return self.stored.stored_value(value, depth),
+			FieldRef::RecordId(table, key) => {
+				let link = ValueRef::new_nested(key, self.depth + 1)?;
+				let in_place = match link.kind() {
+					Kind::Int => link.as_int()?.map(StoredKey::Number),
+					Kind::String => link.as_str()?.map(StoredKey::String),
+					_ => None,
+				};
+				if let Some(link) = in_place {
+					too_deep(depth + 1)?;
+					return self.stored.record_id_in_place(table.as_str(), link);
+				}
+				let key = crate::val::stored::decode_key_nested(key, self.depth + 1)?;
+				let link = Value::RecordId(crate::val::RecordId {
+					table: table.clone(),
+					key,
+				});
+				return self.stored.encoded(&link, depth);
+			}
+			FieldRef::Null => Scalar::Null,
+			FieldRef::Bool(v) => Scalar::Bool(v),
+			FieldRef::Int(v) => Scalar::Number(Number::Int(v)),
+			FieldRef::Float(v) => Scalar::Number(Number::Float(v)),
+			FieldRef::Decimal(v) => Scalar::Number(Number::Decimal(v)),
+			FieldRef::Uuid(v) => Scalar::Uuid(crate::val::Uuid(v)),
+			FieldRef::Datetime(v) => Scalar::Datetime(crate::val::Datetime(v)),
+			FieldRef::Duration(v) => Scalar::Duration(crate::val::Duration(v)),
+			FieldRef::String(v) => Scalar::Str(v),
+			FieldRef::Bytes(v) => Scalar::Bytes(v),
+			FieldRef::Literal(v) => Scalar::of(v),
+			FieldRef::Point(x, y) => Scalar::Value(std::borrow::Cow::Owned(Value::Geometry(
+				crate::val::Geometry::Point((x, y).into()),
+			))),
+		};
+		self.stored.scalar(&scalar, depth)
+	}
+}
+
 /// A record id key read in place.
 #[derive(Clone, Copy)]
 enum StoredKey<'b> {
 	Number(i64),
 	String(&'b str),
+	Uuid(uuid::Uuid),
 }
 
 /// The table and key of a stored `RecordId` wire (revision 1: `rev, table
@@ -1179,6 +1465,47 @@ mod tests {
 				let mut frame = RowFrame::new();
 				frame.push_value(&value).expect("encodes");
 				assert_eq!(frame.row(0), expected(&value).as_slice(), "{v:e}");
+			}
+		}
+	}
+
+	/// A datetime is written as the RPC layer writes it, in JSON and in CBOR: every count of
+	/// fractional digits, the edges of four-digit years, years beyond them and a leap second.
+	#[test]
+	fn a_datetime_encodes_as_the_rpc_layer_encodes_it() {
+		use chrono::{TimeZone as _, Utc};
+		let mut datetimes = Vec::new();
+		for (secs, nanos) in [
+			(0, 0),
+			(1_700_000_000, 0),
+			(1_700_000_000, 6_000_000),
+			(1_700_000_000, 120_000),
+			(1_700_000_000, 7),
+			(1_700_000_000, 999_999_999),
+			(-62_135_596_800, 0),
+			(-62_135_596_801, 5),
+			(253_402_300_799, 1_000),
+			(253_402_300_800, 0),
+			(-1, 500_000_000),
+		] {
+			datetimes.push(Utc.timestamp_opt(secs, nanos).single().expect("a datetime"));
+		}
+		datetimes.push(
+			chrono::NaiveDate::from_ymd_opt(2016, 12, 31)
+				.and_then(|d| d.and_hms_nano_opt(23, 59, 59, 1_500_000_000))
+				.expect("a leap second")
+				.and_utc(),
+		);
+		for d in datetimes {
+			let value = Value::Datetime(crate::val::Datetime(d));
+			for format in [RowFormat::Cbor, RowFormat::Json] {
+				let mut frame = RowFrame::with_format(format);
+				frame.push_value(&value).expect("encodes");
+				assert_eq!(
+					String::from_utf8_lossy(frame.row(0)),
+					String::from_utf8_lossy(&expected_in(format, &value)),
+					"{format:?} {d:?}"
+				);
 			}
 		}
 	}
