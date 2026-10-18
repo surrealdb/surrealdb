@@ -1489,6 +1489,15 @@ pub(super) async fn run_storage_source(
 	flush_at: usize,
 ) -> FlowResult<bool> {
 	let db_ctx = ctx.database().context("the VM requires a database context")?;
+	// A write reading its subjects begins its read of each table the source
+	// opens before any row of it runs.
+	if let Some(write) = state.write.as_deref_mut() {
+		let mut tables = Vec::new();
+		super::write::opened_tables(source, &mut tables);
+		for table in tables {
+			write.read_table(table)?;
+		}
+	}
 	match source {
 		Source::Scan {
 			table,
@@ -1589,6 +1598,12 @@ pub(super) async fn run_storage_source(
 						table,
 						bounds,
 					)?;
+					// A write over the records of a range begins reading them
+					// once its bounds are known, so a record evaluating them
+					// created is one the read begins with.
+					if let Some(write) = state.write.as_deref_mut() {
+						write.read_table(table)?;
+					}
 					let gate = descriptor.row_gate().map_err(ControlFlow::Err)?;
 					scan_range(
 						program,
@@ -1617,7 +1632,12 @@ pub(super) async fn run_storage_source(
 					let Some(row) = row else {
 						return Ok(false);
 					};
-					let step = run_value_row(program, pipeline, row, state, ctx).await?;
+					let named = state.write.as_deref_mut().map(|write| write.row_named(true));
+					let step = run_value_row(program, pipeline, row, state, ctx).await;
+					if let (Some(named), Some(write)) = (named, state.write.as_deref_mut()) {
+						write.row_named(named);
+					}
+					let step = step?;
 					flush(state, yielder, flush_at, ctx).await?;
 					Ok(step == Ended::Stop)
 				}
@@ -2069,7 +2089,12 @@ pub(super) async fn run_storage_source(
 						let Some(row) = fetch_raw_record(ctx, &rid, version).await? else {
 							return Ok(false);
 						};
-						let step = run_value_row(program, pipeline, row, state, ctx).await?;
+						let named = state.write.as_deref_mut().map(|write| write.row_named(true));
+						let step = run_value_row(program, pipeline, row, state, ctx).await;
+						if let (Some(named), Some(write)) = (named, state.write.as_deref_mut()) {
+							write.row_named(named);
+						}
+						let step = step?;
 						flush(state, yielder, flush_at, ctx).await?;
 						return Ok(step == Ended::Stop);
 					}
@@ -2080,6 +2105,13 @@ pub(super) async fn run_storage_source(
 					}
 				},
 			};
+			// A write over the edges of a range begins reading them once its
+			// bounds are known, as it reads a record range.
+			if wanted.is_some()
+				&& let Some(write) = state.write.as_deref_mut()
+			{
+				write.read_table(table)?;
+			}
 			let services = EngineServices::new(ctx);
 			let mut edges = services.scan_lightweight_edges(table, wanted, *direction, version);
 			let mut rows = Rows::of(program, pipeline, ctx);
@@ -6362,22 +6394,25 @@ pub(super) async fn flush(
 	Ok(())
 }
 
-/// Charge what the statement's transaction has written to the query's
-/// lease, unless the backend bounds its own write buffer
-/// ([`Transaction::bounds_write_buffer`](crate::kvs::Transaction)). Where it
-/// does not, the write buffer holds the bytes until the transaction commits
-/// and cannot be spilled, so they are pinned: the governor sees the memory,
-/// the statement waits when other queries can give memory back, and the bytes
-/// are otherwise granted past the node's limit. The statement fails only
-/// where its pinned bytes would pass the query's ceiling.
+/// Charge what the statement's transaction holds for its writes to the
+/// query's lease: its creation log ([`crate::kvs::creations`]), which holds
+/// the records created in the tables its writes are reading, on every
+/// backend; and what it has written, unless the backend bounds its own write
+/// buffer ([`Transaction::bounds_write_buffer`](crate::kvs::Transaction)).
+/// Neither can be spilled, so the bytes are pinned: the governor sees the
+/// memory, the statement waits when other queries can give memory back, and
+/// the bytes are otherwise granted past the node's limit. The statement fails
+/// only where its pinned bytes would pass the query's ceiling. A creation log
+/// that holds what the query holds for it costs one load.
 async fn held_writes(ctx: &ExecutionContext) -> FlowResult<()> {
 	let (Some(memory), Some(txn)) = (ctx.ctx().memory(), ctx.try_txn()) else {
 		return Ok(());
 	};
+	let address = Arc::as_ptr(&txn) as usize;
+	memory.hold_creations(address, txn.creation_log_bytes(), ctx).await?;
 	if txn.bounds_write_buffer() {
 		return Ok(());
 	}
-	let address = Arc::as_ptr(&txn) as usize;
 	memory.hold_writes(address, txn.bytes_written(), ctx).await
 }
 

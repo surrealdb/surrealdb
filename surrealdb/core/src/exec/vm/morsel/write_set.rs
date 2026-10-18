@@ -11,6 +11,14 @@
 //! the events, the live notifications, the change feed and the output happen there, one record
 //! after another, exactly as in the serial run.
 //!
+//! The statement passes over a record it created once it had begun reading the record's table,
+//! as the gate of the serial run does. A worker's write state holds none of the statement's watches
+//! on the tables it reads, so the coordinator, which does, judges it: of each row as it hands the
+//! row on, so a worker runs nothing of a record passed over and hands back a candidate that skips
+//! it, and again of each candidate as it applies it, for a record an earlier record's apply created
+//! since. A record fetched by the id the statement names is never passed over, and never reaches a
+//! write set: its source runs it whole through the body.
+//!
 //! A write over the ids of a range reads no source: its rows are the ids the coordinator generates,
 //! in order, and the record each begins is the one that id names, with no stored record read for
 //! it, so no marker of the record type travels with a row.
@@ -101,11 +109,14 @@ fn enter(pipeline: &Pipeline, row: Value, state: &mut State) -> FlowResult<Value
 }
 
 /// The rows of a batch with the record-type marker stored with each, which the statement's task
-/// read for them.
+/// read for them, and whether the statement passes over each.
 #[cfg(not(target_family = "wasm"))]
 struct Rows {
 	rows: Vec<Value>,
 	markers: Vec<Option<crate::catalog::Metadata>>,
+	/// Whether each row is a record the statement created once it had begun reading its table,
+	/// which the gate of the serial run passes over ([`passed_over`]).
+	passed: Vec<bool>,
 }
 
 /// The record-type marker stored with each of `rows`, read through the statement's transaction.
@@ -124,6 +135,24 @@ async fn stored_markers(
 		});
 	}
 	Ok(markers)
+}
+
+/// Whether the statement passes over each of `rows`: a record read from a table that the
+/// statement created once it had begun reading that table, as the gate of the serial run judges
+/// it. The coordinator judges it, since it holds the statement's watches and the compute half
+/// holds none. A row is read only once it is stored and every store is the coordinator's, so the
+/// judgement is final for every creation made before the row was read.
+#[cfg(not(target_family = "wasm"))]
+fn passed_over(rows: &[Value], state: &State) -> FlowResult<Vec<bool>> {
+	let Some(write) = state.write.as_deref() else {
+		return Err(ControlFlow::Err(anyhow::anyhow!("a write with no write state")));
+	};
+	rows.iter()
+		.map(|row| match row.rid() {
+			Value::RecordId(id) => write.read_after_created(Some(&id)),
+			_ => Ok(false),
+		})
+		.collect()
 }
 
 /// What a worker keeps from one batch to the next: its state, its write state, and the lease's
@@ -425,6 +454,7 @@ impl<'p> WriteSet<'p> {
 				drop(place);
 				return self.run_whole(rows, state, ctx, yielder, flush_at).await;
 			};
+			let passed = passed_over(&rows, state)?;
 			let first = self.next;
 			self.next += count as u64;
 			let bounds = Bounds {
@@ -438,6 +468,7 @@ impl<'p> WriteSet<'p> {
 				Rows {
 					rows,
 					markers,
+					passed,
 				},
 				first,
 				start,
@@ -574,7 +605,7 @@ impl<'p> WriteSet<'p> {
 			held: _held,
 			..
 		} = computed;
-		for candidate in candidates {
+		for mut candidate in candidates {
 			// Candidates are taken in the order their rows were delivered in.
 			if candidate.pos != Pos(self.applied) {
 				return Err(ControlFlow::Err(anyhow::Error::new(
@@ -586,12 +617,20 @@ impl<'p> WriteSet<'p> {
 			self.applied += 1;
 			match candidate.stop {
 				Stop::Cut | Stop::Skip => {
-					let pending = candidate.into_pending().map_err(ControlFlow::Err)?;
+					let mut pending = candidate.into_pending().map_err(ControlFlow::Err)?;
 					let Some(write) = state.write.as_deref_mut() else {
 						return Err(ControlFlow::Err(anyhow::anyhow!(
 							"a write candidate was taken with no write state"
 						)));
 					};
+					// A record the statement created once it had begun reading the record's table
+					// is passed over, as the serial run's gate passes over it: the creations made
+					// before its row was read were judged as it was handed on, and this judges
+					// those an earlier record's apply made since. Nothing created since the table
+					// was watched costs one load.
+					if write.read_after_created(pending.row.id.as_ref())? {
+						pending.pass_over();
+					}
 					write.hold_pending(pending);
 					run_value_row(program, pipeline, Value::None, state, ctx).await?;
 					flush(state, yielder, flush_at, ctx).await?;
@@ -604,7 +643,36 @@ impl<'p> WriteSet<'p> {
 						),
 					)));
 				}
-				Stop::Failed(failure) => return Err(failure),
+				Stop::Failed(failure) => {
+					let Some(write) = state.write.as_deref_mut() else {
+						return Err(ControlFlow::Err(anyhow::anyhow!(
+							"a write candidate was taken with no write state"
+						)));
+					};
+					// A record the statement created since the row was handed on is passed over,
+					// as the serial run's gate passes over it before the stages that raised: the
+					// failure is never raised, and the record ends as a skipped one does.
+					let Some(id) = candidate.failed_on.take() else {
+						return Err(failure);
+					};
+					if !write.read_after_created(Some(&id))? {
+						return Err(failure);
+					}
+					let record = WriteRow::for_record(Value::RecordId(id))?;
+					let mut pending = Candidate::new(
+						candidate.pos,
+						Some(Box::new(record)),
+						None,
+						Stop::Skip,
+						smallvec::SmallVec::new(),
+					)
+					.and_then(Candidate::into_pending)
+					.map_err(ControlFlow::Err)?;
+					pending.pass_over();
+					write.hold_pending(pending);
+					run_value_row(program, pipeline, Value::None, state, ctx).await?;
+					flush(state, yielder, flush_at, ctx).await?;
+				}
 			}
 		}
 		// The rows a batch held its bound before reaching run whole, after the records before
@@ -761,15 +829,43 @@ async fn compute(
 	let Rows {
 		rows,
 		markers,
+		passed,
 	} = batch;
 	let mut candidates = Vec::with_capacity(rows.len());
 	let mut charged = 0usize;
 	let mut held: Option<Grant> = None;
 	#[cfg(test)]
 	let total = rows.len();
-	let mut remaining = rows.into_iter().zip(markers);
-	for (row, marker) in remaining.by_ref() {
+	let mut remaining = rows.into_iter().zip(markers).zip(passed);
+	for ((row, marker), passed) in remaining.by_ref() {
 		let pos = Pos(first + candidates.len() as u64);
+		// A row the statement passes over runs no stage here: its candidate skips the record
+		// as the serial run's gate does, before anything of it is computed or can fail.
+		if passed {
+			let candidate = match WriteRow::for_record(row) {
+				Ok(record) => Candidate::new(
+					pos,
+					Some(Box::new(record)),
+					None,
+					Stop::Skip,
+					smallvec::SmallVec::new(),
+				),
+				Err(failure) => Candidate::new(
+					pos,
+					None,
+					None,
+					Stop::Failed(failure),
+					smallvec::SmallVec::new(),
+				),
+			}
+			.map_err(ControlFlow::Err)?;
+			let failed = matches!(candidate.stop, Stop::Failed(_));
+			candidates.push(candidate);
+			if failed {
+				break;
+			}
+			continue;
+		}
 		let Some(write) = state.write.as_deref_mut() else {
 			return Err(ControlFlow::Err(anyhow::anyhow!("a write worker lost its write state")));
 		};
@@ -809,9 +905,11 @@ async fn compute(
 					),
 				)));
 			}
+			// The record the prefix had taken up travels with the failure, so the coordinator can
+			// pass over a record the statement created since the row was handed on.
 			(Err(failure), _) => {
-				Candidate::new(pos, None, None, Stop::Failed(failure), smallvec::SmallVec::new())
-					.map_err(ControlFlow::Err)?
+				let failed_on = write.take_in_flight().and_then(|(row, _)| row.id);
+				Candidate::failed(pos, failure, failed_on)
 			}
 		};
 		let failed = matches!(candidate.stop, Stop::Failed(_));
@@ -848,7 +946,7 @@ async fn compute(
 			break;
 		}
 	}
-	let rest = remaining.map(|(row, _)| row).collect();
+	let rest = remaining.map(|((row, _), _)| row).collect();
 	let write = state
 		.write
 		.take()

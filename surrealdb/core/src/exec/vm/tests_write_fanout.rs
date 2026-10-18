@@ -1878,3 +1878,82 @@ async fn the_range_create_of_the_placement_corpus_answers_as_the_serial_run() {
 	)
 	.await;
 }
+
+/// A record a write creates in the table it reads, sorting after every record the write read
+/// before creating it, is never visited by the write, whether its row reaches a worker or the
+/// statement's task: the coordinator, which holds the statement's watches on the tables it reads,
+/// passes over it as the serial run's gate does. Each shape here fans out, and creates the record
+/// from the apply half of an earlier record: its `RETURN` clause, directly, through a function, or
+/// through the event of another table a nested write triggers. These shapes fan out because the
+/// refusal of a write to the table its source reads does not see the writes of the `RETURN`
+/// clause; a refusal that does leaves this test to find another route that fans out. A record
+/// whose compute half would fail is passed over before anything of it runs.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_record_the_write_creates_in_the_table_it_reads_is_never_visited() {
+	let _turn = TURNS.lock().await;
+	let spawn = "(CREATE t:99999 SET n = 99999).id";
+	let event_on_u = "DEFINE TABLE u; CREATE u:1; \
+		DEFINE EVENT spawn ON u WHEN $event = 'UPDATE' THEN { CREATE t:99999 SET n = 99999 };";
+	let shapes: [(&str, String, String, &str); 6] = [
+		(
+			"a RETURN subquery",
+			String::new(),
+			format!("UPDATE t SET touched = true RETURN (IF id = t:1 {{ {spawn} }} ELSE {{ NONE }})"),
+			"SELECT VALUE touched FROM t:99999",
+		),
+		(
+			"a DELETE whose RETURN subquery creates",
+			String::new(),
+			format!("DELETE t RETURN (IF $before.id = t:1 {{ {spawn} }} ELSE {{ NONE }})"),
+			"SELECT VALUE id FROM t:99999",
+		),
+		(
+			"a function its RETURN calls",
+			"DEFINE FUNCTION fn::spawn($id: any) { IF $id = t:1 { CREATE t:99999 SET n = 99999 }; RETURN 1; };".to_owned(),
+			"UPDATE t SET touched = true RETURN fn::spawn(id)".to_owned(),
+			"SELECT VALUE touched FROM t:99999",
+		),
+		(
+			"the event of another table a nested write triggers",
+			event_on_u.to_owned(),
+			"UPDATE t SET touched = true RETURN (IF id = t:1 { (UPDATE u:1 SET y = 1).id } ELSE { NONE })".to_owned(),
+			"SELECT VALUE touched FROM t:99999",
+		),
+		(
+			"the event of another table a function's write triggers",
+			format!(
+				"{event_on_u} DEFINE FUNCTION fn::poke($id: any) {{ IF $id = t:1 {{ UPDATE u:1 SET y = 1 }}; RETURN 1; }};"
+			),
+			"UPDATE t SET touched = true RETURN fn::poke(id)".to_owned(),
+			"SELECT VALUE touched FROM t:99999",
+		),
+		(
+			"a record whose compute half would fail",
+			String::new(),
+			format!(
+				"UPDATE t SET touched = true, k = <int> (IF n > 5000 {{ 'x' }} ELSE {{ n }}) \
+				 RETURN (IF id = t:1 {{ {spawn} }} ELSE {{ NONE }})"
+			),
+			"SELECT VALUE touched FROM t:99999",
+		),
+	];
+	for (what, extra, sql, check) in &shapes {
+		let schema = format!("{} {extra}", setup());
+		let serial = TestDb::new_with_config(&schema, whole()).await;
+		let wide = TestDb::new_with_config(&schema, tiny()).await;
+		let handed = same_answers_over(&serial, &wide, &[(sql.as_str(), true)], &[check]).await;
+		assert!(handed > 0, "{what}: no batch went to a worker");
+		// The created record is left as its creation left it: unwritten by the statement, and not
+		// deleted by a `DELETE`.
+		let untouched = if check.contains("touched") {
+			"RETURN NONE"
+		} else {
+			"RETURN t:99999"
+		};
+		assert_eq!(
+			answered(&wide, check).await,
+			answered(&wide, untouched).await,
+			"{what}: the write visited the record it created"
+		);
+	}
+}

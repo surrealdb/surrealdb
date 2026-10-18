@@ -123,6 +123,10 @@ impl MemoryHost {
 			waited: AtomicU64::new(0),
 			unspillable: std::sync::Mutex::new((0, 0)),
 			writes: std::sync::Mutex::new((0, 0)),
+			creations: std::sync::Mutex::new((0, 0)),
+			creations_held: AtomicUsize::new(0),
+			#[cfg(test)]
+			creations_peak: AtomicUsize::new(0),
 			counted: AtomicUsize::new(0),
 			writers: Arc::new(tokio::sync::Semaphore::new(1)),
 		})
@@ -146,6 +150,15 @@ pub(crate) struct QueryMemory {
 	/// The transaction whose write buffer the query last charged, by
 	/// address, and the bytes it had written then.
 	writes: std::sync::Mutex<(usize, u64)>,
+	/// The transaction whose creation log the query last charged, by
+	/// address, and the bytes the query holds for that log, counted among
+	/// `unspillable`.
+	creations: std::sync::Mutex<(usize, usize)>,
+	/// The bytes of `creations`, read without its lock.
+	creations_held: AtomicUsize,
+	/// The most `creations_held` has been.
+	#[cfg(test)]
+	creations_peak: AtomicUsize,
 	/// The pinned bytes the query holds, counted exactly: what each pinned
 	/// account has charged, and what its transaction's buffers hold. The
 	/// ceiling is checked against it, so it is what the query holds and not
@@ -416,7 +429,7 @@ impl QueryMemory {
 
 	/// Give back what the query charged for the buffers of the transaction
 	/// that has ended, committed or cancelled: its change-feed and live-event
-	/// buffers and its write buffer. What a query holds for transactions is
+	/// buffers, its creation log and its write buffer. What a query holds for transactions is
 	/// then never more than the one transaction running, however many a
 	/// request runs.
 	pub(crate) fn transaction_ended(&self) {
@@ -426,6 +439,8 @@ impl QueryMemory {
 		};
 		self.uncount(held);
 		*self.writes.lock().unwrap_or_else(|e| e.into_inner()) = (0, 0);
+		*self.creations.lock().unwrap_or_else(|e| e.into_inner()) = (0, 0);
+		self.creations_held.store(0, Ordering::Release);
 		if reserved > 0
 			&& let Some(lease) = self.lease.get()
 		{
@@ -459,6 +474,100 @@ impl QueryMemory {
 			0 => Ok(()),
 			grown => self.hold_unspillable(grown as usize, ctx).await,
 		}
+	}
+
+	/// Give back `bytes` of what [`Self::hold_unspillable`] counted, which a
+	/// buffer no longer holds: they stop counting toward the ceiling, and the
+	/// chunks reserved for them go back to the lease once they number more
+	/// than one beyond what is still held.
+	fn release_unspillable(&self, bytes: usize) {
+		if bytes == 0 {
+			return;
+		}
+		let give = {
+			let mut held = self.unspillable.lock().unwrap_or_else(|e| e.into_inner());
+			held.0 = held.0.saturating_sub(bytes);
+			let chunk = self.host.settings.chunk.max(1);
+			let keep = held.0.div_ceil(chunk) * chunk;
+			match held.1 > keep.saturating_add(chunk) {
+				true => std::mem::replace(&mut held.1, keep) - keep,
+				false => 0,
+			}
+		};
+		self.uncount(bytes);
+		if give > 0
+			&& let Some(lease) = self.lease.get()
+		{
+			lease.release_pinned(give);
+		}
+	}
+
+	/// Charge the creation log of transaction `txn` (named by its address) at
+	/// `bytes`, what it holds now. The log holds its notes in memory until the
+	/// watches on their tables close and cannot spill them, so growth is held
+	/// as [`Self::hold_unspillable`] holds it — the governor sees the memory,
+	/// the query waits when other queries can give memory back, and the bytes
+	/// are otherwise granted past the node's limit — and fails only where the
+	/// bytes would take the query's pinned bytes past its ceiling. What the
+	/// log has given back is released ([`Self::shed_creations`]). A log
+	/// holding what the query holds for it costs one load.
+	pub(crate) async fn hold_creations(
+		&self,
+		txn: usize,
+		bytes: usize,
+		ctx: &ExecutionContext,
+	) -> FlowResult<()> {
+		if bytes == self.creations_held.load(Ordering::Acquire) {
+			return Ok(());
+		}
+		let grown = {
+			let mut held = self.creations.lock().unwrap_or_else(|e| e.into_inner());
+			if held.0 != txn {
+				self.release_unspillable(std::mem::replace(&mut *held, (txn, 0)).1);
+			}
+			if bytes <= held.1 {
+				self.release_unspillable(held.1 - bytes);
+				held.1 = bytes;
+				self.creations_held.store(bytes, Ordering::Release);
+				return Ok(());
+			}
+			bytes - held.1
+		};
+		self.hold_unspillable(grown, ctx).await?;
+		// Where another transaction was charged while the query waited, the
+		// bytes stay counted until the transaction ends
+		// ([`Self::transaction_ended`]), which gives back all it counted.
+		let mut held = self.creations.lock().unwrap_or_else(|e| e.into_inner());
+		if held.0 == txn {
+			held.1 += grown;
+			self.creations_held.store(held.1, Ordering::Release);
+			#[cfg(test)]
+			self.creations_peak.fetch_max(held.1, Ordering::AcqRel);
+		}
+		Ok(())
+	}
+
+	/// Release what the query holds for the creation log of transaction `txn`
+	/// beyond `bytes`, what the log holds now, without waiting: for a caller
+	/// whose watches have just closed. Growth is left to the next
+	/// [`Self::hold_creations`].
+	pub(crate) fn shed_creations(&self, txn: usize, bytes: usize) {
+		if bytes >= self.creations_held.load(Ordering::Acquire) {
+			return;
+		}
+		let mut held = self.creations.lock().unwrap_or_else(|e| e.into_inner());
+		if held.0 == txn && bytes < held.1 {
+			self.release_unspillable(held.1 - bytes);
+			held.1 = bytes;
+			self.creations_held.store(bytes, Ordering::Release);
+		}
+	}
+
+	/// What the query holds for a transaction's creation log, and the most it
+	/// has held.
+	#[cfg(test)]
+	pub(crate) fn creations_held(&self) -> (usize, usize) {
+		(self.creations_held.load(Ordering::Acquire), self.creations_peak.load(Ordering::Acquire))
 	}
 
 	/// Count `bytes` written to the store against its quota.
@@ -961,6 +1070,31 @@ mod tests {
 		memory.insist(600, &ctx).await.expect("granted without waiting");
 		assert_eq!(memory.waited.load(Ordering::Acquire), before, "a second request waited");
 		assert!(older.waiting());
+	}
+
+	#[tokio::test]
+	async fn a_creation_log_is_held_as_it_grows_and_released_as_it_shrinks() {
+		let (_, host) = host(1 << 20, Duration::ZERO, usize::MAX);
+		let ctx = root_ctx();
+		let memory = host.query();
+		memory.hold_creations(1, 1000, &ctx).await.expect("held");
+		assert_eq!((memory.pinned(), memory.creations_held()), (1000, (1000, 1000)));
+		assert!(memory.lease().pinned() >= 1000, "the lease holds the log");
+		memory.shed_creations(1, 1200);
+		assert_eq!(memory.pinned(), 1000, "growth waits for the next hold");
+		memory.shed_creations(1, 100);
+		assert_eq!((memory.pinned(), memory.creations_held().0), (100, 100));
+		assert!(memory.lease().pinned() <= 100usize.div_ceil(64) * 64 + 64, "chunks go back");
+		memory.hold_creations(1, 300, &ctx).await.expect("held");
+		memory.hold_creations(2, 50, &ctx).await.expect("held");
+		assert_eq!(memory.pinned(), 50, "another transaction's log replaces the last one's");
+		memory.transaction_ended();
+		assert_eq!((memory.pinned(), memory.creations_held().0), (0, 0));
+
+		let (_, host) = super::tests::host(1 << 20, Duration::ZERO, 500);
+		let memory = host.query();
+		assert!(is_ceiling(&memory.hold_creations(1, 600, &ctx).await));
+		assert_eq!((memory.pinned(), memory.creations_held().0), (0, 0), "a refusal holds nothing");
 	}
 
 	/// A governor that records, for each lease, the `may_wait` of every request

@@ -182,6 +182,8 @@ mod tests_plain;
 mod tests_record_format;
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests_view_reentry;
+#[cfg(all(test, feature = "kv-mem"))]
+mod tests_write_scan;
 pub(crate) mod units;
 mod write;
 

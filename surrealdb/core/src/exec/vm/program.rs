@@ -3071,7 +3071,9 @@ pub(crate) enum StatementError {
 pub(super) enum WriteInstr {
 	/// Make the pipeline's row, a stored record, the record in flight.
 	Record,
-	/// Jump to `skip` when the statement gate refuses the record's table.
+	/// Jump to `skip` when the record is one the statement created while
+	/// reading the records it writes, or when the statement gate refuses the
+	/// record's table.
 	Gate {
 		skip: Label,
 	},

@@ -143,6 +143,9 @@ pub(super) async fn step(
 			let key = key.encode_key().map_err(ControlFlow::Err)?;
 			txn.set(key, bytes).await.map_err(ControlFlow::Err)?;
 			txn.forget_record(ns, db, &table, &id.key);
+			if before.is_none() {
+				super::write::note_created(&txn, ns, db, &table, &id.key)?;
+			}
 			let action = match before {
 				Some(_) => Action::Update,
 				None => Action::Create,
@@ -186,10 +189,11 @@ pub(super) async fn step(
 			});
 			let key = RecordIdKey::Array(Array(group));
 			let (ns, db) = ids(ctx).await?;
-			ctx.txn()
-				.put_record(ns, db, &table, &key, Arc::clone(&record))
+			let txn = ctx.txn();
+			txn.put_record(ns, db, &table, &key, Arc::clone(&record))
 				.await
 				.map_err(ControlFlow::Err)?;
+			super::write::note_created(&txn, ns, db, &table, &key)?;
 			maintain(state, ctx, &table, key, Action::Create, None, Some(&record)).await?;
 		}
 		StoreInstr::RetireViewRows {

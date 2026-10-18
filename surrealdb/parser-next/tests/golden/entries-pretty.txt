@@ -3328,7 +3328,7 @@ ea2565bf288d0dd0 language-tests/tests/language/write/return_none_select_gate_ine
 b90ad5c819ef8303 language-tests/tests/language/write/return_none_vs_null_refusing_gate.surql
 a07f7991bf21e337 language-tests/tests/language/write/return_none_vs_null_refusing_gate_import.surql
 841a818b8e778b6d language-tests/tests/language/write/return_projection_with_computed_fields.surql
-794564f250b34348 language-tests/tests/language/write/self_insert_not_reobserved.surql
+a9d3e52ae3fa75e2 language-tests/tests/language/write/self_insert_not_reobserved.surql
 fee9b0382dae0385 language-tests/tests/language/write/set_and_unset_at_array_paths.surql
 981af9f46371d6b2 language-tests/tests/language/write/set_assign_operators_at_nested_paths.surql
 4b3d1820c3709acd language-tests/tests/language/write/set_through_absent_intermediates.surql

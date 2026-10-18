@@ -121,6 +121,18 @@ pub(in crate::exec::vm) struct PendingCandidate {
 	pub(super) stop: Stop,
 }
 
+impl PendingCandidate {
+	/// Turns the candidate into the record the gate passes over: it resumes at the skip, matched
+	/// by no condition and having changed nothing, as a record the gate skips ends before any stage
+	/// of its compute half runs.
+	#[cfg_attr(target_family = "wasm", allow(dead_code))]
+	pub(super) fn pass_over(&mut self) {
+		self.stop = Stop::Skip;
+		self.row.matched = false;
+		self.row.mutated = false;
+	}
+}
+
 /// Where the compute prefix of a record stopped and the registers it left for the residue.
 #[cfg_attr(target_family = "wasm", allow(dead_code))]
 pub(in crate::exec::vm) struct PrefixStop {

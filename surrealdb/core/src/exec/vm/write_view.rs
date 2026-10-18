@@ -304,7 +304,7 @@ async fn materialized(
 	let (view_action, after) = if admitted {
 		let data = clause(m, view.projection, current, state).await?;
 		let record = Record::new(data);
-		set_view_row(&m.ctx, view.table, &key, &record).await?;
+		set_view_row(&m.ctx, view.table, &key, &record, before.is_none()).await?;
 		let action = match before {
 			Some(_) => Action::Update,
 			None => Action::Create,
@@ -526,7 +526,7 @@ async fn store_group(
 		apply::set_with(&mut data, steps, value, &mut run).await?;
 	}
 	record.data = data;
-	set_view_row(&m.ctx, view.table, &key, &record).await?;
+	set_view_row(&m.ctx, view.table, &key, &record, action == Action::Create).await?;
 	let row = RecordId {
 		table: view.table.clone(),
 		key,

@@ -65,7 +65,7 @@ pub(crate) use surrealdb_datastore::error::DatastoreError;
 // Depend on that crate directly to reach them from outside core.
 pub(crate) use surrealdb_datastore::{
 	Admission, LayoutSet, RowGate, TransactionConfig, TransactionFactory, cache, catalog_reads,
-	sequences, speculation, tasklease, tx, util, version,
+	creations, sequences, speculation, tasklease, tx, util, version,
 };
 // Recognising a storage failure descends with the transaction layer: the code
 // that classifies one sits on both sides of the crate boundary. Both shapes stay

@@ -11,6 +11,7 @@
 
 use std::sync::Arc;
 
+use anyhow::Context as _;
 use common::future::stream::Yielder;
 use surrealdb_types::ToSql as _;
 
@@ -64,7 +65,9 @@ pub(super) use observe::{
 pub(super) use schema::{FieldPermission, FieldPlan, FieldWrite, SchemaInstr, SchemaPlan};
 #[cfg(not(target_family = "wasm"))]
 pub(super) use storage::encode_ahead;
-pub(super) use storage::{IndexPlan, LoweredIndexes, NativeIndexKind, StorageFact, StorageInstr};
+pub(super) use storage::{
+	IndexPlan, LoweredIndexes, NativeIndexKind, StorageFact, StorageInstr, note_created,
+};
 pub(super) use view::{
 	LoweredView, LoweredViews, Recalc, ViewClause, ViewRows, action_pipeline, view_row_exec,
 };
@@ -141,6 +144,18 @@ pub(super) struct WriteState {
 	/// The block statement compiled into the program whose write this is, or
 	/// `None` for the program's own.
 	pub(super) group: Option<u16>,
+	/// A watch on each table the statement has read subjects from, opened as
+	/// its first read of the table began and kept until the statement ends
+	/// ([`Self::read_table`]).
+	reading: Vec<crate::kvs::creations::CreationWatch>,
+	/// Whether the subjects being written are read from a table, rather than
+	/// named, so that a record the statement created is passed over
+	/// ([`Self::created_while_read`]).
+	scanning: bool,
+	/// Whether the row being run is a record a source fetched by the id the
+	/// statement names, which is never passed over
+	/// ([`Self::row_named`]).
+	named: bool,
 	/// The view tables whose rows are in flight through their tables' orders
 	/// beneath this write, outermost first, each read by the next: empty for a
 	/// statement's write, and ending with its own table for the write of a
@@ -232,6 +247,9 @@ impl WriteState {
 			events_held: None,
 			cascades: Vec::new(),
 			group: None,
+			reading: Vec::new(),
+			scanning: false,
+			named: false,
 			maintaining: Arc::default(),
 			prefix: false,
 			prefix_stop: None,
@@ -372,6 +390,9 @@ impl WriteState {
 			events_held: None,
 			cascades: Vec::new(),
 			group: None,
+			reading: Vec::new(),
+			scanning: false,
+			named: false,
 			maintaining,
 			prefix: false,
 			prefix_stop: None,
@@ -525,6 +546,95 @@ impl WriteState {
 		Ok((self.row()?, ctx))
 	}
 
+	/// Whether the subjects that follow are read from a table (`true`) or
+	/// named by the statement (`false`).
+	fn reads_subjects(&mut self, scanning: bool) {
+		self.scanning = scanning;
+	}
+
+	/// End the statement's reads, closing their watches, and release what
+	/// the query holds for the notes they kept ([`super::host::flush`]
+	/// charges them).
+	fn end_reads(&mut self) {
+		self.scanning = false;
+		if self.reading.is_empty() {
+			return;
+		}
+		self.reading.clear();
+		let exec = self.scope.exec();
+		if let (Some(memory), Some(txn)) = (exec.ctx().memory(), exec.try_txn()) {
+			memory.shed_creations(Arc::as_ptr(&txn) as usize, txn.creation_log_bytes());
+		}
+	}
+
+	/// Begin a read of the records of `table`, a batch at a time through the
+	/// statement's own transaction while the statement writes between
+	/// batches: a later batch would see the records the statement, or one
+	/// nested in it, has created since. The statement's first read of the
+	/// table opens a watch on it, kept for every later read of the table until
+	/// the statement ends, so a record created in the table from then on is
+	/// passed over ([`Self::created_while_read`]) and one created before is
+	/// read. Called as each read begins, after the value naming its range is
+	/// evaluated; a read while the subjects are named watches nothing.
+	pub(super) fn read_table(&mut self, table: &crate::val::TableName) -> FlowResult<()> {
+		if !self.scanning || self.reading.iter().any(|watch| watch.table() == table) {
+			return Ok(());
+		}
+		let exec = self.scope.exec();
+		let db = exec.database().context("a write requires a database context")?;
+		let watch = exec.txn().watch_creations(db.ns_ctx.ns.namespace_id, db.db.database_id, table);
+		self.reading.push(watch);
+		Ok(())
+	}
+
+	/// Whether the row a source is about to run, until it has run, is a
+	/// record fetched by the id the statement names rather than one read from
+	/// a table: such a record reaches the gate as named, whatever the
+	/// statement created.
+	/// Answers whether it was so before.
+	pub(super) fn row_named(&mut self, named: bool) -> bool {
+		std::mem::replace(&mut self.named, named)
+	}
+
+	/// Whether the record in flight, read from a table, is one the statement
+	/// created once it had begun reading that table, which the statement
+	/// passes over as though the read had not reached it.
+	fn created_while_read(&self) -> FlowResult<bool> {
+		if self.named {
+			return Ok(false);
+		}
+		self.read_after_created(self.row.as_ref().and_then(|row| row.id.as_ref()))
+	}
+
+	/// Whether the record `id`, read from a table rather than named, is one
+	/// the statement created once it had begun reading that table: the test
+	/// of [`Self::created_while_read`] for a record other than the one in
+	/// flight. The compute half of a write that fans out holds no watch, so
+	/// the coordinator asks this of each row it hands a worker and of each
+	/// candidate it applies. Every row a write set takes is read from a
+	/// table: a record fetched by the id the statement names runs whole
+	/// through the body on the statement's task, never through a write set.
+	pub(super) fn read_after_created(&self, id: Option<&RecordId>) -> FlowResult<bool> {
+		if !self.scanning {
+			return Ok(false);
+		}
+		let Some(id) = id else {
+			return Ok(false);
+		};
+		let Some(watch) = self.reading.iter().find(|watch| *watch.table() == id.table) else {
+			return Ok(false);
+		};
+		// Nothing created since the record's table was watched is one load,
+		// the whole cost to a read of a table the statement creates nothing
+		// in: the record's key is encoded only to ask about a creation.
+		if !watch.any_created() {
+			return Ok(false);
+		}
+		let db = self.scope.exec().database().context("a write requires a database context")?;
+		let key = storage::record_key(db.ns_ctx.ns.namespace_id, db.db.database_id, id)?;
+		Ok(watch.created(&key))
+	}
+
 	/// Forget the record in flight.
 	fn clear(&mut self) -> Option<WriteRow> {
 		self.ctx = None;
@@ -567,6 +677,9 @@ impl WriteState {
 			WriteInstr::Gate {
 				skip,
 			} => {
+				if self.created_while_read()? {
+					return Ok(*skip as usize);
+				}
 				let table = self.row()?.table().cloned();
 				if self.gate.admits(table.as_ref(), self.scope.exec()).await? {
 					next
@@ -1481,7 +1594,42 @@ pub(super) async fn run_write(
 	flush_at: usize,
 ) -> FlowResult<()> {
 	super::host::forget_knn_queries(program, group, state);
+	write_state(state)?.end_reads();
+	let ran = run_write_pipelines(program, group, version, state, ctx, yielder, flush_at).await;
+	// The statement's reads end however its pipelines did: finished, failed,
+	// or left by a control-flow signal such as a `BREAK`. A block keeps the write state of a
+	// statement it ran for the statement's next run, so a watch left open
+	// would go on noting the creations of every later statement of the
+	// transaction in its table.
+	if let Some(write) = state.write.as_deref_mut() {
+		write.end_reads();
+	}
+	ran?;
+	let write = write_state(state)?;
+	write.judge_only()?;
+	let none = write.only && write.returned == 0;
+	if none {
+		state.output.push(Value::None);
+	}
+	Ok(())
+}
+
+/// Run the write pipelines of `program` that `group` owns over the
+/// statement's subjects, for [`run_write`].
+#[allow(clippy::too_many_arguments)]
+async fn run_write_pipelines(
+	program: &Arc<Program>,
+	group: Option<u16>,
+	version: Option<u64>,
+	state: &mut State,
+	ctx: &ExecutionContext,
+	yielder: &mut Out<'_, '_>,
+	flush_at: usize,
+) -> FlowResult<()> {
 	for pipeline in program.pipelines.iter().filter(|pipeline| pipeline.group == group) {
+		// The host begins each read of a table as the source opens it
+		// ([`WriteState::read_table`]); the targets say per subject.
+		write_state(state)?.reads_subjects(reads_stored_records(&pipeline.source));
 		match &pipeline.source {
 			Source::WriteTargets {
 				targets,
@@ -1563,13 +1711,173 @@ pub(super) async fn run_write(
 			}
 		}
 	}
-	let write = write_state(state)?;
-	write.judge_only()?;
-	let none = write.only && write.returned == 0;
-	if none {
-		state.output.push(Value::None);
-	}
 	Ok(())
+}
+
+/// Whether a write over the rows of `source` reads its subjects from the
+/// stored records of a table, rather than from values.
+fn reads_stored_records(source: &Source) -> bool {
+	match source {
+		Source::Scan {
+			..
+		}
+		| Source::Record {
+			..
+		}
+		| Source::Index {
+			..
+		}
+		| Source::Lookup {
+			..
+		}
+		| Source::IndexUnion {
+			..
+		}
+		| Source::Bitmap {
+			..
+		}
+		| Source::FullText {
+			..
+		}
+		| Source::Knn {
+			..
+		}
+		| Source::LightweightEdges {
+			..
+		}
+		| Source::Union(_) => true,
+		Source::Count {
+			..
+		}
+		| Source::Values {
+			..
+		}
+		| Source::Nested {
+			..
+		}
+		| Source::Probe {
+			..
+		}
+		| Source::Sorted {
+			..
+		}
+		| Source::Groups {
+			..
+		}
+		| Source::Split {
+			..
+		}
+		| Source::Join {
+			..
+		}
+		| Source::Once
+		| Source::WriteTargets {
+			..
+		}
+		| Source::WriteInserts {
+			..
+		}
+		| Source::WriteEdges {
+			..
+		}
+		| Source::Changes {
+			..
+		}
+		| Source::Vacant {
+			..
+		} => false,
+	}
+}
+
+/// The tables whose stored records `source` reads as it opens, before it
+/// yields a row ([`WriteState::read_table`]). A union's sources are read as
+/// each opens, and a source whose range is a value it evaluates — a record
+/// range, or a lightweight relation's edges in one — begins its read once the
+/// value is known, so neither names a table here.
+pub(super) fn opened_tables<'a>(source: &'a Source, out: &mut Vec<&'a crate::val::TableName>) {
+	match source {
+		Source::Scan {
+			table,
+			..
+		}
+		| Source::Lookup {
+			table,
+			..
+		}
+		| Source::Bitmap {
+			table,
+			..
+		}
+		| Source::FullText {
+			table,
+			..
+		}
+		| Source::Knn {
+			table,
+			..
+		}
+		| Source::LightweightEdges {
+			table,
+			record: None,
+			..
+		} => out.push(table),
+		Source::Index {
+			index,
+			..
+		} => out.push(&index.definition().table_name),
+		Source::IndexUnion {
+			branches,
+			..
+		} => out.extend(branches.iter().map(|branch| &branch.index.definition().table_name)),
+		Source::Union(_)
+		| Source::Record {
+			..
+		}
+		| Source::LightweightEdges {
+			record: Some(_),
+			..
+		}
+		| Source::Count {
+			..
+		}
+		| Source::Values {
+			..
+		}
+		| Source::Nested {
+			..
+		}
+		| Source::Probe {
+			..
+		}
+		| Source::Sorted {
+			..
+		}
+		| Source::Groups {
+			..
+		}
+		| Source::Split {
+			..
+		}
+		| Source::Join {
+			..
+		}
+		| Source::Once
+		| Source::WriteTargets {
+			..
+		}
+		| Source::WriteInserts {
+			..
+		}
+		| Source::WriteEdges {
+			..
+		}
+		| Source::Changes {
+			..
+		}
+		| Source::Vacant {
+			..
+		} => {}
+	}
 }
 
 /// Run a write body over the subjects each target names: a record to create,
@@ -1631,8 +1939,14 @@ async fn run_targets(
 			// row it yields is one more as it runs.
 			super::fuel::tick(ctx, 1).await?;
 			let mut rows = match subject {
-				Subject::Row(row) => Rows::One(Some(row)),
-				Subject::Read(id) => Rows::One(Some(Box::new(read_subject(ctx, id).await?))),
+				Subject::Row(row) => {
+					write_state(state)?.reads_subjects(false);
+					Rows::One(Some(row))
+				}
+				Subject::Read(id) => {
+					write_state(state)?.reads_subjects(false);
+					Rows::One(Some(Box::new(read_subject(ctx, id).await?)))
+				}
 				Subject::Scan(table, range) => {
 					// The guaranteed record's table is the last bare table the
 					// caller may create a record on: one the gate denies that
@@ -1654,6 +1968,9 @@ async fn run_targets(
 					if matches!(form.table_existence(), TableExistence::Required) {
 						super::host::require_defined(ctx, &table, ctx.version_stamp()).await?;
 					}
+					let write = write_state(state)?;
+					write.reads_subjects(true);
+					write.read_table(&table)?;
 					Rows::Scan(scan_subjects(ctx, &table, range.as_deref()).await?)
 				}
 			};
@@ -1664,6 +1981,8 @@ async fn run_targets(
 			}
 		}
 	}
+	// The guaranteed record is no subject of a read.
+	write_state(state)?.reads_subjects(false);
 	// What the statement matched is counted, not what it returned, and an
 	// import writes no record its export never held. The table is one the
 	// gate admitted, and its answer is memoised.

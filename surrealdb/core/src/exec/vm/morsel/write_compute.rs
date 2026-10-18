@@ -50,6 +50,11 @@ pub(crate) struct Candidate {
 	pub(crate) stop: Stop,
 	/// Registers the prefix wrote that the residue reads, as `(register, value)`.
 	pub(crate) live: SmallVec<[(u16, Value); 8]>,
+	/// For a `Failed` candidate, the record the prefix had taken up when it raised: the
+	/// coordinator judges it before raising, as the serial run's gate judges it before the stages
+	/// that raised. `None` for every other candidate, and for a failure raised before the prefix
+	/// took a record up.
+	pub(crate) failed_on: Option<crate::val::RecordId>,
 }
 
 const _: () = {
@@ -83,7 +88,25 @@ impl Candidate {
 			ctx,
 			stop,
 			live,
+			failed_on: None,
 		})
+	}
+
+	/// The candidate for the position `pos` whose prefix raised `failure`, holding the record it
+	/// had taken up when it raised, if any.
+	pub(crate) fn failed(
+		pos: Pos,
+		failure: ControlFlow,
+		failed_on: Option<crate::val::RecordId>,
+	) -> Candidate {
+		Candidate {
+			pos,
+			row: None,
+			ctx: None,
+			stop: Stop::Failed(failure),
+			live: SmallVec::new(),
+			failed_on,
+		}
 	}
 
 	/// The candidate the coordinator holds for the next run of the write body, which resumes the

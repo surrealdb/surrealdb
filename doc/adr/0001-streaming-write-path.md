@@ -425,19 +425,45 @@ does not drain its input before writing. It consumes a batch, applies the stage 
 in order, and then consumes the next batch, so a mutation over a large table holds one batch rather
 than the table.
 
-R4 depends on a storage property:
+R4 depends on one property the batching does not give by itself:
 
-> A cursor opened by a statement does not observe records written by that same statement.
+> A write statement never reads, as a subject, a record that it or a statement nested in it created
+> after the statement began reading that record's table.
 
-That property is pinned by a language test and holds in both key directions. Because the language
-suite runs on `mem`, `rocksdb` and `surrealkv`, the pin confirms it on those three. It is a property
-of each backend's cursor rather than of the engine, and the suite has no `tikv` job, so `tikv`
-remains unconfirmed.
+No backend's cursor supplies it. Every batch is read through the statement's own transaction,
+so a batch read after a write sees what the write created, and a batch holds at most
+`NORMAL_BATCH_SIZE` records and no more than the thread's fuel left (`fuel::batch`), so a table of
+two records can already span two batches.
 
-The second limit on the evidence is not a backend question. The property was measured with one
-task advancing one cursor and performing the writes between batches. R3.1 is what guarantees that
-single-task regime, so R4 is sound only where R3.1 holds; without it the scan can sit on a spawned
-task and the concurrency is not the arrangement that was measured.
+The engine enforces it. A write's first read of a table — a target naming the table or a range of
+it, or a source of the write's pipeline as it opens, once it has evaluated the range it reads —
+opens a creation watch on that table (`kvs::creations`), kept for every later read of the table
+until the statement ends. Every record created in a watched table is noted in the transaction's log
+— an edge of a lightweight relation too, which is created when its adjacency keys are written for an
+edge the relation did not hold — and the statement gate passes over a record read from the table
+that the log shows was created since the watch opened, before any stage runs for it, as though the
+read had not reached it. A record created before the statement first reads its table is read, and a
+record the statement names by its id is never passed over. The notes follow the transaction's save
+points, so a rolled-back attempt hides nothing. The log notes creations only in watched tables, and
+a table's notes go when the last watch on it closes, so a write that creates nothing pays a read of
+one counter per record it reads. The log holds its notes in memory and cannot spill them: the query
+charges what it holds to its memory at each batch the write hands on, as it charges the
+transaction's write buffer, and releases the charge as the statement's watches close. Like any
+memory a query cannot spill, the charge grows the query's lease, waits for other queries, or is
+granted past the node's limit, and fails the statement only past its ceiling.
+
+The property is checked where a record reaches the write rather than in the cursor, so it holds on
+every backend and wherever the read runs, and it holds in both key directions: a record created
+behind the cursor is never read again, and one created ahead of it is passed over. A language test
+pins both directions on tables that span more than one batch, through a target, a condition, an
+index, `UPSERT`, `DELETE` and a lightweight relation, and a core test pins them with batches of a
+single record.
+
+The property covers the records a statement creates, and no other record it writes. An update
+creates nothing, so a record an update moves forward within an index the write is reading through
+can be read again by a later batch: `UPDATE t SET n = n + 10000 WHERE n >= 1` through an index on
+`n`, over more records than one batch of the index holds, moves each record it updates to an entry
+ahead of the cursor. Such a record is outside R4's property, and nothing passes over it.
 
 The GQL mutation operators in `exec/operators/mutate.rs` drain their input fully instead. That is
 correct for them, because a binding table is bounded by the match that produced it, and it is not
@@ -527,7 +553,7 @@ reconstructed inconsistently.
 | R1 | No operator begins, commits or cancels a transaction | Write operators read the transaction from their context and have no other handle |
 | R2 | A `ReadWrite` plan requires a writable transaction | Checked at `execute()`; error, not panic. Complemented by `read_only()` over-approximating the statement's write behaviour, verified as a corpus property over the origin of the mode (Decision 1) |
 | R3 | At most one write in flight per transaction | Any `ReadWrite` operator buffers its input with its own mode; every expression fan-out routes through one helper that serialises on a `ReadWrite` argument; debug assertion in `spawn_buffered` |
-| R4 | Reads and writes interleave batch-at-a-time | Write operators consume batch by batch; sound only where R3.1 holds, and depends on the storage property that a cursor does not observe its statement's own writes |
+| R4 | Reads and writes interleave batch-at-a-time | Write operators consume batch by batch, and pass over every record the statement created while reading |
 
 Alongside these, the epic's standing invariants apply: the language-test suite stays green, table and field permission behaviour is unchanged, no wire or SDK behaviour
 changes for clients, and `revision.lock` discipline holds for any `#[revisioned]` change.
@@ -557,11 +583,6 @@ the `NONE` versus conditional create-permission timing described in the Context 
 tests pin the behaviour of the one engine through recorded expectations.
 
 Two questions are deliberately left open, because neither blocks the interface.
-
-**R4's storage property is unconfirmed on `tikv`.** The language suite pins it on `mem`, `rocksdb`
-and `surrealkv` but has no `tikv` job, so that backend needs its own check. The property also needs
-confirming under R3.1's single-task arrangement, which is a question about the engine rather than
-about any backend.
 
 **`AccessMode` conflates a storage write with a barrier.** `ReadWrite` means "may write or have
 side effects", which is what makes Decision 1's contract unstatable over the mode itself and forces

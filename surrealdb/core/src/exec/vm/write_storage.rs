@@ -601,8 +601,27 @@ pub(super) async fn step(
 			let ltr = pointer_key(&ctx, &l, Dir::Out, &rid, &r)?;
 			let rtl = pointer_key(&ctx, &r, Dir::In, &rid, &l)?;
 			if *lightweight {
+				// A lightweight edge is stored as these keys alone, so the
+				// edge they create is noted as `store` notes a record it
+				// creates: one relating an edge that exists creates nothing.
+				// Whether it exists is read only while its relation is
+				// watched.
+				let (ns, db) = (ctx.ns.namespace_id, ctx.db.database_id);
+				let noted = if txn.creations_watched(ns, db, &rid.table)
+					&& !txn
+						.record_exists(ns, db, &rid.table, &rid.key, None)
+						.await
+						.map_err(ControlFlow::Err)?
+				{
+					Some(record_key(ns, db, &rid)?)
+				} else {
+					None
+				};
 				futures::try_join!(txn.set(ltr.into(), live.clone()), txn.set(rtl.into(), live),)
 					.map_err(ControlFlow::Err)?;
+				if let Some(key) = noted {
+					txn.note_creation(ns, db, &rid.table, key);
+				}
 			} else {
 				let etl = graph_key(&ctx, &rid, Dir::In, &l)?;
 				let etr = graph_key(&ctx, &rid, Dir::Out, &r)?;
@@ -1010,7 +1029,7 @@ async fn delete_entry(
 }
 
 /// The key a record is stored at.
-fn record_key(
+pub(super) fn record_key(
 	ns: crate::catalog::NamespaceId,
 	db: crate::catalog::DatabaseId,
 	rid: &crate::val::RecordId,
@@ -1411,6 +1430,9 @@ async fn store(
 		.map_err(ControlFlow::Err)?,
 	};
 	if create {
+		// A record created while a write reads its table is noted, so that
+		// write's read passes over it (`kvs::creations`).
+		let noted = txn.creations_watched(ns, db, &rid.table).then(|| key.clone());
 		txn.put(key.into(), bytes).await.map_err(|err| {
 			if matches!(storage_error(&err), Some(crate::kvs::Error::TransactionKeyAlreadyExists)) {
 				ControlFlow::Err(anyhow::Error::new(DocError::RecordExists {
@@ -1420,6 +1442,9 @@ async fn store(
 				ControlFlow::Err(err)
 			}
 		})?;
+		if let Some(key) = noted {
+			txn.note_creation(ns, db, &rid.table, key);
+		}
 		// The transaction holds the record it just put, as a record put
 		// through its record API is held.
 		txn.cache_record(
@@ -1441,15 +1466,34 @@ async fn store(
 	Ok(())
 }
 
+/// Note that the record of `table` under `key` was created, for a write
+/// reading `table` to pass over it ([`crate::kvs::creations`]): called by a
+/// writer that stores a record other than through [`store`], once it is
+/// written. Nothing is encoded when no watch is open on `table`.
+pub(in crate::exec::vm) fn note_created(
+	txn: &crate::kvs::Transaction,
+	ns: crate::catalog::NamespaceId,
+	db: crate::catalog::DatabaseId,
+	table: &crate::val::TableName,
+	key: &crate::val::RecordIdKey,
+) -> FlowResult<()> {
+	if txn.creations_watched(ns, db, table) {
+		txn.note_creation(ns, db, table, table_record_key(ns, db, table, key)?);
+	}
+	Ok(())
+}
+
 /// Store `record` as the row of view table `table` under `key`, as a view's
 /// maintenance stores the row it computed: the key overwritten whole, and the
 /// row dropped from the transaction's record cache, as a record set through
-/// the record API is.
+/// the record API is. `created` says the view held no row under `key`, so the
+/// row is noted as created ([`crate::kvs::creations`]).
 pub(super) async fn set_view_row(
 	ctx: &crate::exec::operators::write::ctx::WriteCtx,
 	table: &crate::val::TableName,
 	key: &crate::val::RecordIdKey,
 	record: &crate::catalog::Record,
+	created: bool,
 ) -> FlowResult<()> {
 	let ns = ctx.ns.namespace_id;
 	let db = ctx.db.database_id;
@@ -1463,7 +1507,13 @@ pub(super) async fn set_view_row(
 	// written in the `revision` encoding without cloning it. The record's encoding refuses a
 	// value nested past the cap.
 	let value = writer.encode_whole(record, None).map_err(ControlFlow::Err)?;
+	// A row the view did not hold is noted as `store` notes a record it
+	// creates, for a write reading the view table to pass over it.
+	let noted = (created && txn.creations_watched(ns, db, table)).then(|| bytes.clone());
 	txn.set(bytes.into(), value).await.map_err(ControlFlow::Err)?;
+	if let Some(key) = noted {
+		txn.note_creation(ns, db, table, key);
+	}
 	txn.forget_record(ns, db, table, key);
 	Ok(())
 }

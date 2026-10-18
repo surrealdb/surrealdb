@@ -749,6 +749,9 @@ pub struct Transaction {
 	/// The recordings of catalog reads open on this transaction
 	/// ([`Self::record_catalog_reads`]).
 	catalog_reads: crate::catalog_reads::CatalogReadLog,
+	/// The records created in the tables a write of this transaction is
+	/// reading ([`Self::watch_creations`]).
+	creations: crate::creations::Creations,
 	/// The changefeed buffer.
 	changefeed: OnceLock<Changefeed>,
 	/// The live-query event buffer (dedicated keyspace, Router engine).
@@ -1674,6 +1677,7 @@ impl Transaction {
 			catalog_touched: AtomicBool::new(false),
 			object_stamps: AtomicU64::new(0),
 			stamped_tables: Default::default(),
+			creations: Default::default(),
 			shaped_indexes: Default::default(),
 			catalog_epoch,
 			state_changes: Arc::new(AtomicU64::new(0)),
@@ -6574,6 +6578,47 @@ impl Transaction {
 		Ok(DocIdsReclaimClaim::Available)
 	}
 
+	/// Open a watch on the records this transaction creates in table `tb` from
+	/// now until the watch is dropped ([`crate::creations`]). A writer that
+	/// creates a record notes it ([`Self::note_creation`]) for the watch to
+	/// answer.
+	pub fn watch_creations(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> crate::creations::CreationWatch {
+		self.creations.watch(ns, db, tb)
+	}
+
+	/// Whether a creation watch is open on table `tb`, so a writer that
+	/// creates a record in it must note it ([`Self::note_creation`]). With no
+	/// watch open on any table this is one atomic load.
+	pub fn creations_watched(&self, ns: NamespaceId, db: DatabaseId, tb: &TableName) -> bool {
+		self.creations.watches(ns, db, tb)
+	}
+
+	/// An estimate of the bytes this transaction's creation log holds
+	/// ([`crate::creations`]), which it holds in memory until the watches on
+	/// the tables they belong to close: read without a lock, for the query
+	/// whose writes opened the watches to charge to its memory.
+	pub fn creation_log_bytes(&self) -> usize {
+		self.creations.bytes()
+	}
+
+	/// How many creation watches are open on this transaction.
+	pub fn creation_watches(&self) -> usize {
+		self.creations.open()
+	}
+
+	/// Note that the record stored at `key`, a record of table `tb`, was
+	/// created, for the creation watches open on `tb` to answer: called by a
+	/// writer that encodes the record's key and bytes itself, once the record
+	/// is written.
+	pub fn note_creation(&self, ns: NamespaceId, db: DatabaseId, tb: &TableName, key: Vec<u8>) {
+		self.creations.note(ns, db, tb, key)
+	}
+
 	/// Hold `record` in this transaction's cache as the record at `id` of
 	/// table `tb`, as [`TableProvider::put_record`] leaves it once the record
 	/// is written: for a writer that encodes the record's key and bytes itself.
@@ -8660,6 +8705,7 @@ impl Transaction {
 			catalog_touched: AtomicBool::new(self.catalog_touched.load(Ordering::Acquire)),
 			object_stamps: AtomicU64::new(self.catalog_object_stamps()),
 			stamped_tables: Default::default(),
+			creations: Default::default(),
 			shaped_indexes: Default::default(),
 			catalog_epoch: NO_CATALOG_EPOCH,
 			state_changes: Arc::new(AtomicU64::new(0)),
@@ -8747,7 +8793,8 @@ impl Transaction {
 	/// The buffered index deltas are scoped alongside the storage save point.
 	/// They describe writes this transaction has made, so a rollback that undoes
 	/// those writes has to undo the buffered description of them too. So are
-	/// the provisional sequences — see [`Self::provisional_save_points`].
+	/// the notes of the records it created ([`crate::creations`]) and the
+	/// provisional sequences — see [`Self::provisional_save_points`].
 	pub async fn new_save_point(&self) -> Result<()> {
 		// The storage save point opens first: the buffer's frames mirror its
 		// stack, so a failed open must not leave a frame behind for some outer
@@ -8759,6 +8806,7 @@ impl Transaction {
 		// rollback cannot reach it.
 		self.index_deltas.get_or_init(|| Box::new(IndexDeltaBuffer::new())).push_save_point();
 		self.cache.push_save_point();
+		self.creations.push_save_point();
 		let snapshot = self.snapshot_provisional_sequences().await;
 		self.provisional_save_points.lock().await.push(snapshot);
 		// The commit actions queued from here on answer to this scope's writes, and the layout
@@ -8783,6 +8831,7 @@ impl Transaction {
 			buffer.release_save_point();
 		}
 		self.cache.release_save_point();
+		self.creations.release_save_point();
 		// Released, the scope folds into the enclosing one, whose snapshot
 		// still describes the state an outer rollback returns to.
 		self.provisional_save_points.lock().await.pop();
@@ -8809,6 +8858,7 @@ impl Transaction {
 		// the writes the rollback undoes, and the journal above reaches only this
 		// transaction's own cache, so none of them may outlive the rollback.
 		self.speculative_caches.lock().await.clear();
+		self.creations.rollback_save_point();
 		// Whether a locked read's conflict registration survives a savepoint
 		// rollback is engine-defined, so no memo of one may outlive it: the
 		// next `graph_doc_ids_settled` call re-issues the locked read.

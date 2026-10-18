@@ -117,11 +117,33 @@ pub(super) async fn run_source(
 			// pipeline's rows are written through.
 			let subjects = state.write.is_some();
 			match values(program, value, *read, zeroed, reads, subjects, ctx).await? {
-				Values::Rows(rows) => {
+				// The records a value names are named by the statement; those a
+				// range it evaluates holds are read from the table, a read the
+				// write begins here.
+				Values::Rows(rows, range) => {
 					let rows = rows.into_iter().map(|row| (Vec::new(), row)).collect();
-					run_rows(program, pipeline, rows, state, ctx, yielder, flush_at).await
+					let named = match state.write.as_deref_mut() {
+						Some(write) => {
+							if let Some(table) = &range {
+								write.read_table(table)?;
+							}
+							Some(write.row_named(range.is_none()))
+						}
+						None => None,
+					};
+					let ran =
+						run_rows(program, pipeline, rows, state, ctx, yielder, flush_at).await;
+					if let (Some(named), Some(write)) = (named, state.write.as_deref_mut()) {
+						write.row_named(named);
+					}
+					ran
 				}
-				Values::Stream(rows) => {
+				// A write reading the records of a table a value names begins
+				// that read as the stream opens.
+				Values::Stream(rows, table) => {
+					if let Some(write) = state.write.as_deref_mut() {
+						write.read_table(&table)?;
+					}
 					stream_rows(program, pipeline, rows, state, ctx, yielder, flush_at).await
 				}
 			}
@@ -137,7 +159,14 @@ pub(super) async fn run_source(
 			state.zeroed = outer;
 			ran?;
 			let rows = rows.into_iter().map(|row| (Vec::new(), row)).collect();
-			run_rows(program, pipeline, rows, state, ctx, yielder, flush_at).await
+			// The statement's rows are values it answered, so a write names
+			// each record among them rather than reading it from a table.
+			let named = state.write.as_deref_mut().map(|write| write.row_named(true));
+			let ran = run_rows(program, pipeline, rows, state, ctx, yielder, flush_at).await;
+			if let (Some(named), Some(write)) = (named, state.write.as_deref_mut()) {
+				write.row_named(named);
+			}
+			ran
 		}
 		Source::Probe {
 			build,
@@ -322,10 +351,13 @@ impl Iterator for Candidates<'_> {
 /// What a value in `FROM` yields: its rows, or, for a table it names, the
 /// table's rows as they are read.
 enum Values {
-	Rows(Vec<Value>),
-	/// The rows of a table: those its unit reads, or every record of a table
-	/// no unit reads ([`undispatched_table`]).
-	Stream(ValueBatchStream),
+	/// Rows read whole before any runs: the records a range of table `1`
+	/// holds, read from storage, or, where `1` is `None`, the records and
+	/// values the value names.
+	Rows(Vec<Value>, Option<TableName>),
+	/// The rows of `1`, a table: those its unit reads, or every record of a
+	/// table no unit reads ([`undispatched_table`]).
+	Stream(ValueBatchStream, TableName),
 }
 
 /// How many rows `pipeline` takes before a limit of it is spent, as `state`
@@ -408,7 +440,7 @@ async fn values(
 				}
 				other => vec![other],
 			};
-			Ok(Values::Rows(rows))
+			Ok(Values::Rows(rows, None))
 		}
 		ValuesRead::Locked => {
 			let value = source_value(host_scalar(program, value, ctx, None).await)?;
@@ -437,7 +469,7 @@ async fn values(
 				EnforcementMode::Runtime,
 			)
 			.await?;
-			Ok(Values::Rows(rows))
+			Ok(Values::Rows(rows, None))
 		}
 		ValuesRead::Dynamic => {
 			let value = source_value(host_scalar(program, value, ctx, None).await)?;
@@ -471,15 +503,17 @@ async fn stored_records(value: Value, written: bool, ctx: &ExecutionContext) -> 
 			require_defined(ctx, &table, version).await?;
 			let scan =
 				crate::exec::operators::write::scan_subjects(ctx, &table, Some(&range)).await?;
-			return Ok(Values::Stream(replayed(scan, &table, version, ctx).await?));
+			let rows = replayed(scan, &table, version, ctx).await?;
+			return Ok(Values::Stream(rows, table));
 		}
 		Value::Table(table) => {
 			if absent_and_hidden(ctx, &table, version).await? {
-				return Ok(Values::Rows(Vec::new()));
+				return Ok(Values::Rows(Vec::new(), None));
 			}
 			require_defined(ctx, &table, version).await?;
 			let scan = crate::exec::operators::write::scan_subjects(ctx, &table, None).await?;
-			return Ok(Values::Stream(replayed(scan, &table, version, ctx).await?));
+			let rows = replayed(scan, &table, version, ctx).await?;
+			return Ok(Values::Stream(rows, table));
 		}
 		Value::Array(array) => {
 			let mut subjects = Vec::with_capacity(array.len());
@@ -495,7 +529,7 @@ async fn stored_records(value: Value, written: bool, ctx: &ExecutionContext) -> 
 		}
 		other => stored_subject(other).into_iter().collect(),
 	};
-	Ok(Values::Rows(stored_rows(ctx, subjects, version).await?))
+	Ok(Values::Rows(stored_rows(ctx, subjects, version).await?, None))
 }
 
 /// `scan`, the stored records of `table` as
@@ -596,7 +630,7 @@ async fn found(
 				&& let Some(view) =
 					own_record(ctx, &rid, resolve_version_stamp(ctx, None).await?).await? =>
 		{
-			Ok(Values::Rows(view.into_iter().collect()))
+			Ok(Values::Rows(view.into_iter().collect(), None))
 		}
 		Value::RecordId(rid) => {
 			let db_ctx = ctx.database()?;
@@ -627,23 +661,24 @@ async fn found(
 				EnforcementMode::Runtime,
 			)
 			.await?;
-			Ok(Values::Rows(rows))
+			let range = rid.key.is_range().then(|| rid.table.clone());
+			Ok(Values::Rows(rows, range))
 		}
-		Value::Array(array) => Ok(Values::Rows(records_of(ctx, array.0).await?)),
+		Value::Array(array) => Ok(Values::Rows(records_of(ctx, array.0).await?, None)),
 		Value::Table(table) => {
 			let version = resolve_version_stamp(ctx, None).await?;
 			if absent_and_hidden(ctx, &table, version).await? {
-				return Ok(Values::Rows(Vec::new()));
+				return Ok(Values::Rows(Vec::new(), None));
 			}
 			require_defined(ctx, &table, version).await?;
 			// A zero limit reads no record once the table is known.
 			if zeroed {
-				return Ok(Values::Rows(Vec::new()));
+				return Ok(Values::Rows(Vec::new(), None));
 			}
 			undispatched_table(ctx, &table, None, version, reads).await
 		}
-		Value::None | Value::Null => Ok(Values::Rows(Vec::new())),
-		other => Ok(Values::Rows(vec![other])),
+		Value::None | Value::Null => Ok(Values::Rows(Vec::new(), None)),
+		other => Ok(Values::Rows(vec![other], None)),
 	}
 }
 
@@ -705,7 +740,7 @@ async fn dispatched(
 		Value::RecordId(rid) => {
 			require_defined(ctx, &rid.table, version).await?;
 			if zeroed {
-				return Ok(Values::Rows(Vec::new()));
+				return Ok(Values::Rows(Vec::new(), None));
 			}
 			crate::exec::permission::validate_record_user_access(ctx.database()?)?;
 			let mut rows = Vec::new();
@@ -747,25 +782,28 @@ async fn dispatched(
 					);
 					let (deref, ctx, table) = (Arc::clone(deref), ctx.clone(), rid.table.clone());
 					let unchecked = ctx.root().skip_fetch_perms;
-					return Ok(Values::Stream(Box::pin(source.then(move |batch| {
-						let (deref, ctx, table, replay) =
-							(Arc::clone(&deref), ctx.clone(), table.clone(), replay.clone());
-						async move {
-							let mut batch = batch?;
-							if let Some(replay) = &replay {
-								replay.apply_batch(&ctx, &mut batch).await?;
-							}
-							let mut rows = Vec::new();
-							for raw in batch.into_values() {
-								super::fuel::tick(&ctx, 1).await?;
-								match deref.read(&ctx, &table, raw, unchecked).await? {
-									Value::None => {}
-									row => rows.push(row),
+					return Ok(Values::Stream(
+						Box::pin(source.then(move |batch| {
+							let (deref, ctx, table, replay) =
+								(Arc::clone(&deref), ctx.clone(), table.clone(), replay.clone());
+							async move {
+								let mut batch = batch?;
+								if let Some(replay) = &replay {
+									replay.apply_batch(&ctx, &mut batch).await?;
 								}
+								let mut rows = Vec::new();
+								for raw in batch.into_values() {
+									super::fuel::tick(&ctx, 1).await?;
+									match deref.read(&ctx, &table, raw, unchecked).await? {
+										Value::None => {}
+										row => rows.push(row),
+									}
+								}
+								Ok(crate::exec::ValueBatch::from(rows))
 							}
-							Ok(crate::exec::ValueBatch::from(rows))
-						}
-					}))));
+						})),
+						rid.table.clone(),
+					));
 				}
 				_ if let Some(view) = own_record(ctx, &rid, version).await? => rows.extend(view),
 				_ => {
@@ -777,16 +815,17 @@ async fn dispatched(
 					}
 				}
 			}
-			Ok(Values::Rows(rows))
+			let range = rid.key.is_range().then(|| rid.table.clone());
+			Ok(Values::Rows(rows, range))
 		}
-		Value::Array(array) => Ok(Values::Rows(records_of(ctx, array.0).await?)),
+		Value::Array(array) => Ok(Values::Rows(records_of(ctx, array.0).await?, None)),
 		Value::Table(table) => {
 			if absent_and_hidden(ctx, &table, version).await? {
-				return Ok(Values::Rows(Vec::new()));
+				return Ok(Values::Rows(Vec::new(), None));
 			}
 			require_defined(ctx, &table, version).await?;
 			if zeroed {
-				return Ok(Values::Rows(Vec::new()));
+				return Ok(Values::Rows(Vec::new(), None));
 			}
 			let unchecked = ctx.root().skip_fetch_perms;
 			let Some(served) = deref.serving(ctx, &table, unchecked).await? else {
@@ -796,10 +835,10 @@ async fn dispatched(
 			};
 			// A loaded unit holds the units it calls.
 			let program = Arc::clone(served.program());
-			Ok(Values::Stream(execute_program_reading(&program, ctx, reads)?))
+			Ok(Values::Stream(execute_program_reading(&program, ctx, reads)?, table))
 		}
-		Value::None | Value::Null => Ok(Values::Rows(Vec::new())),
-		other => Ok(Values::Rows(vec![other])),
+		Value::None | Value::Null => Ok(Values::Rows(Vec::new(), None)),
+		other => Ok(Values::Rows(vec![other], None)),
 	}
 }
 
@@ -901,7 +940,7 @@ async fn undispatched_table(
 		&& replay.is_none()
 		&& match &definition.permissions.select {
 			_ if !checked => true,
-			crate::catalog::Permission::None => return Ok(Values::Rows(Vec::new())),
+			crate::catalog::Permission::None => return Ok(Values::Rows(Vec::new(), None)),
 			crate::catalog::Permission::Full => true,
 			crate::catalog::Permission::Specific(_) => ctx.root().skip_fetch_perms,
 		};
@@ -928,39 +967,46 @@ async fn undispatched_table(
 		replay.clone(),
 	);
 	if plain {
-		return Ok(Values::Stream(records));
+		return Ok(Values::Stream(records, table.clone()));
 	}
 	let ctx = ctx.clone();
-	Ok(Values::Stream(Box::pin(records.then(move |batch| {
-		let ctx = ctx.clone();
-		let replay = replay.clone();
-		async move {
-			let mut batch = batch?;
-			if let Some(replay) = &replay {
-				replay.apply_batch(&ctx, &mut batch).await?;
-			}
-			// The records the permission refuses spend the fuel here, as
-			// their rows never run.
-			let read = batch.len();
-			let mut rows = Vec::new();
-			for mut record in batch.into_values() {
-				let rid = match &record {
-					Value::Object(object) => match object.get("id") {
-						Some(Value::RecordId(rid)) => rid.clone(),
-						_ => continue,
-					},
-					_ => continue,
-				};
-				if crate::exec::operators::fetch::process_fetched_record(&ctx, &rid, &mut record)
-					.await?
-				{
-					rows.push(record);
+	Ok(Values::Stream(
+		Box::pin(records.then(move |batch| {
+			let ctx = ctx.clone();
+			let replay = replay.clone();
+			async move {
+				let mut batch = batch?;
+				if let Some(replay) = &replay {
+					replay.apply_batch(&ctx, &mut batch).await?;
 				}
+				// The records the permission refuses spend the fuel here, as
+				// their rows never run.
+				let read = batch.len();
+				let mut rows = Vec::new();
+				for mut record in batch.into_values() {
+					let rid = match &record {
+						Value::Object(object) => match object.get("id") {
+							Some(Value::RecordId(rid)) => rid.clone(),
+							_ => continue,
+						},
+						_ => continue,
+					};
+					if crate::exec::operators::fetch::process_fetched_record(
+						&ctx,
+						&rid,
+						&mut record,
+					)
+					.await?
+					{
+						rows.push(record);
+					}
+				}
+				super::fuel::tick(&ctx, super::fuel::units(read - rows.len())).await?;
+				Ok(crate::exec::ValueBatch::from(rows))
 			}
-			super::fuel::tick(&ctx, super::fuel::units(read - rows.len())).await?;
-			Ok(crate::exec::ValueBatch::from(rows))
-		}
-	}))))
+		})),
+		table.clone(),
+	))
 }
 
 fn internal(why: String) -> ControlFlow {

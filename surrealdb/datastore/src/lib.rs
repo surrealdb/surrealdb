@@ -54,6 +54,7 @@ pub mod cache;
 pub mod catalog_reads;
 pub mod close;
 pub mod config;
+pub mod creations;
 pub mod factory;
 pub mod feature;
 pub mod index_shapes;
