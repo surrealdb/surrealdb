@@ -128,13 +128,17 @@ impl QueryTerms {
 		self.tokens.list().is_empty()
 	}
 
-	pub fn contains_doc(&self, doc_id: DocId) -> bool {
-		for d in self.docs.iter().flatten() {
-			if d.contains(doc_id) {
-				return true;
+	/// Whether the document matches the query under `op`: it carries every
+	/// term for `AND`, any term for `OR`. A term no document carries has no
+	/// document set, so it can never be carried.
+	pub fn contains_doc(&self, doc_id: DocId, op: BooleanOperator) -> bool {
+		match op {
+			BooleanOperator::And => {
+				!self.docs.is_empty()
+					&& self.docs.iter().all(|d| d.as_ref().is_some_and(|d| d.contains(doc_id)))
 			}
+			BooleanOperator::Or => self.docs.iter().flatten().any(|d| d.contains(doc_id)),
 		}
-		false
 	}
 
 	pub(in crate::ft) fn matches_or(&self, tks: &[Tokens]) -> Result<bool> {
@@ -1848,7 +1852,7 @@ mod tests {
 			let qt =
 				self.fti.extract_querying_terms(&ctx, &az_fn, query.to_string()).await.unwrap();
 			let doc_id = self.fti.get_doc_id(&tx, rid).await.unwrap().unwrap();
-			let found = qt.contains_doc(doc_id);
+			let found = qt.contains_doc(doc_id, BooleanOperator::Or);
 			tx.cancel().await.unwrap();
 			found
 		}

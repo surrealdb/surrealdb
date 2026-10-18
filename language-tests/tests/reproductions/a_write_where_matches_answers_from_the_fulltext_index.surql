@@ -28,7 +28,7 @@ value = "[doc:1, doc:3]"
 value = "[doc:2]"
 
 [[test.results]]
-value = "[doc:1, doc:2, doc:3]"
+value = "[doc:1, doc:2]"
 
 [[test.results]]
 value = "[]"
@@ -37,7 +37,7 @@ value = "[]"
 value = "[doc:1]"
 
 [[test.results]]
-value = "[{ body: 'hello world', hit: true, id: doc:1, x: 1, z: 1 }, { body: 'hello there', hit: true, id: doc:3, x: 1 }]"
+value = "[{ body: 'hello world', hit: true, id: doc:1, x: 1, z: 1 }, { body: 'hello there', hit: true, id: doc:3 }]"
 
 [[test.results]]
 value = "[doc:2]"

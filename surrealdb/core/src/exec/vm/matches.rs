@@ -506,7 +506,7 @@ impl MatchesEval {
 				let tx = ctx.txn();
 				// Resolve RecordId → DocId, then bitmap check.
 				let matches = match fti.get_doc_id(&tx, &rid).await? {
-					Some(doc_id) => qt.contains_doc(doc_id),
+					Some(doc_id) => qt.contains_doc(doc_id, self.operator.operator),
 					// Record not in the index → doesn't match
 					None => false,
 				};
