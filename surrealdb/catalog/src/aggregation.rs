@@ -609,6 +609,11 @@ pub fn remove_from_aggregation_stats(
 ) -> Result<Vec<Recalculation>> {
 	let mut recalculations = Vec::new();
 	for (idx, stat) in stats.iter_mut().enumerate() {
+		if let Some((arg, _)) = skipping_stat(stat)
+			&& is_absent(&arguments[arg])
+		{
+			continue;
+		}
 		match stat {
 			AggregationStat::Count {
 				count,
@@ -751,6 +756,20 @@ pub fn update_aggregation_stats(
 ) -> Result<Vec<Recalculation>> {
 	let mut recalculations = Vec::new();
 	for (idx, stat) in stats.iter_mut().enumerate() {
+		if let Some((arg, name)) = skipping_stat(stat) {
+			match (is_absent(&before_args[arg]), is_absent(&after_args[arg])) {
+				(true, true) => continue,
+				(true, false) => {
+					fold_in(stat, &after_args[arg], name)?;
+					continue;
+				}
+				(false, true) => {
+					fold_out(idx, stat, &before_args[arg], &mut recalculations)?;
+					continue;
+				}
+				(false, false) => {}
+			}
+		}
 		match stat {
 			AggregationStat::Count {
 				..
@@ -935,16 +954,21 @@ pub fn apply_recalculations(
 			AggregationStat::TimeMin {
 				min: stat,
 				..
-			}
-			| AggregationStat::TimeMax {
+			} => match value {
+				Value::Datetime(d) => *stat = d,
+				// No record of the group holds a datetime any more: the stat
+				// is the one a group that has seen none starts from.
+				Value::None | Value::Null => *stat = Datetime::MAX_UTC,
+				_ => fail!("Got wrong recalculation value"),
+			},
+			AggregationStat::TimeMax {
 				max: stat,
 				..
-			} => {
-				let Value::Datetime(d) = value else {
-					fail!("Got wrong recalculation value")
-				};
-				*stat = d;
-			}
+			} => match value {
+				Value::Datetime(d) => *stat = d,
+				Value::None | Value::Null => *stat = Datetime::MIN_UTC,
+				_ => fail!("Got wrong recalculation value"),
+			},
 			AggregationStat::NumberMin {
 				min: stat,
 				..
@@ -962,6 +986,159 @@ pub fn apply_recalculations(
 		}
 	}
 	Ok(())
+}
+
+/// Whether an aggregate's argument is absent rather than wrong: `NONE` and
+/// `NULL` are skipped by `math::sum`, `math::min` and `math::max`, so a record
+/// that lacks the field contributes nothing to a group and takes nothing out.
+fn is_absent(value: &Value) -> bool {
+	matches!(value, Value::None | Value::Null)
+}
+
+/// The argument and function name of a stat that skips absent values.
+fn skipping_stat(stat: &AggregationStat) -> Option<(usize, &'static str)> {
+	match stat {
+		AggregationStat::NumberMax {
+			arg,
+			..
+		} => Some((*arg, "math::max")),
+		AggregationStat::NumberMin {
+			arg,
+			..
+		} => Some((*arg, "math::min")),
+		AggregationStat::Sum {
+			arg,
+			..
+		} => Some((*arg, "math::sum")),
+		AggregationStat::TimeMax {
+			arg,
+			..
+		} => Some((*arg, "time::max")),
+		AggregationStat::TimeMin {
+			arg,
+			..
+		} => Some((*arg, "time::min")),
+		_ => None,
+	}
+}
+
+/// Fold one present value into a stat of [`skipping_stat`], a wrong kind
+/// refused as the function's argument error.
+fn fold_in(stat: &mut AggregationStat, value: &Value, function: &str) -> Result<()> {
+	match stat {
+		AggregationStat::NumberMax {
+			max,
+			..
+		} => {
+			let n = number(value, function)?;
+			if *max < n {
+				*max = n;
+			}
+		}
+		AggregationStat::NumberMin {
+			min,
+			..
+		} => {
+			let n = number(value, function)?;
+			if *min > n {
+				*min = n;
+			}
+		}
+		AggregationStat::Sum {
+			sum,
+			..
+		} => *sum = (*sum).try_add(number(value, function)?)?,
+		AggregationStat::TimeMax {
+			max,
+			..
+		} => {
+			let d = datetime(value, function)?;
+			if *max < d {
+				*max = d;
+			}
+		}
+		AggregationStat::TimeMin {
+			min,
+			..
+		} => {
+			let d = datetime(value, function)?;
+			if *min > d {
+				*min = d;
+			}
+		}
+		_ => {}
+	}
+	Ok(())
+}
+
+/// Take one present value out of a stat of [`skipping_stat`]; an extreme the
+/// value held is reported for recomputation.
+fn fold_out(
+	idx: usize,
+	stat: &mut AggregationStat,
+	value: &Value,
+	recalculations: &mut Vec<Recalculation>,
+) -> Result<()> {
+	let held_extreme = match (&*stat, value) {
+		(
+			AggregationStat::NumberMax {
+				arg,
+				max: held,
+			},
+			Value::Number(n),
+		)
+		| (
+			AggregationStat::NumberMin {
+				arg,
+				min: held,
+			},
+			Value::Number(n),
+		) => (n == held).then_some((*arg, stat_function(stat))),
+		(
+			AggregationStat::TimeMax {
+				arg,
+				max: held,
+			},
+			Value::Datetime(d),
+		)
+		| (
+			AggregationStat::TimeMin {
+				arg,
+				min: held,
+			},
+			Value::Datetime(d),
+		) => (d == held).then_some((*arg, stat_function(stat))),
+		(
+			AggregationStat::Sum {
+				..
+			},
+			Value::Number(_),
+		) => None,
+		_ => fail!("Old record wasn't the kind its aggregate was created with"),
+	};
+	if let (
+		AggregationStat::Sum {
+			sum,
+			..
+		},
+		Value::Number(n),
+	) = (&mut *stat, value)
+	{
+		*sum = (*sum).try_sub(*n)?;
+	}
+	if let Some((arg, function)) = held_extreme {
+		recalculations.push(Recalculation {
+			function: function.to_string(),
+			stat: idx,
+			arg,
+		});
+	}
+	Ok(())
+}
+
+/// The function a stat of [`skipping_stat`] is the state of.
+fn stat_function(stat: &AggregationStat) -> &'static str {
+	skipping_stat(stat).map_or("", |(_, name)| name)
 }
 
 /// The numeric argument an aggregate was defined over, named by the function
@@ -999,6 +1176,11 @@ fn datetime(value: &Value, function: &str) -> Result<Datetime> {
 /// required by the aggregation stats.
 pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationStat]) -> Result<()> {
 	for stat in stats {
+		if let Some((arg, _)) = skipping_stat(stat)
+			&& is_absent(&arguments[arg])
+		{
+			continue;
+		}
 		match stat {
 			AggregationStat::Count {
 				count,
@@ -1227,14 +1409,22 @@ pub fn create_field_document(group: &[Value], stats: &[AggregationStat]) -> Obje
 				let num = shifted_sample_variance(*sum, *sum_of_squares, *count);
 				num.into()
 			}
+			// A group that has seen no datetime holds the stat's starting value,
+			// and answers `NONE` as the ad hoc aggregate does.
 			AggregationStat::TimeMax {
 				max,
 				..
-			} => (*max).into(),
+			} => match *max == Datetime::MIN_UTC {
+				true => Value::None,
+				false => (*max).into(),
+			},
 			AggregationStat::TimeMin {
 				min,
 				..
-			} => (*min).into(),
+			} => match *min == Datetime::MAX_UTC {
+				true => Value::None,
+				false => (*min).into(),
+			},
 			AggregationStat::Accumulate {
 				values,
 				..
