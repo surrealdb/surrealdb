@@ -76,6 +76,9 @@ pub struct LocalConfig {
 	pub transaction_timeout: Option<Duration>,
 	/// What the datastore is allowed to do.
 	pub capabilities: Capabilities,
+	/// The directories a local `file:` bucket backend may be defined in. Empty
+	/// refuses every such bucket.
+	pub bucket_folder_allowlist: Vec<PathBuf>,
 	/// Where the datastore spills large intermediate results, when the storage
 	/// backends that need one are compiled in.
 	pub temporary_directory: Option<PathBuf>,
@@ -157,6 +160,22 @@ pub async fn connect(
 
 	#[cfg(storage)]
 	let builder = builder.with_temporary_directory(config.temporary_directory);
+
+	let builder = if config.bucket_folder_allowlist.is_empty() {
+		builder
+	} else {
+		// The datastore reads the allowlist as a path list, the form the
+		// server's environment variable takes.
+		let joined = std::env::join_paths(&config.bucket_folder_allowlist)
+			.map_err(|e| std_error_to_types_error(format!("invalid bucket folder allowlist: {e}")))?
+			.into_string()
+			.map_err(|_| {
+				std_error_to_types_error("the bucket folder allowlist is not valid UTF-8")
+			})?;
+		builder.with_config(
+			surrealdb_cnf::ConfigMap::empty().with_key_value("bucket_folder_allowlist", joined),
+		)
+	};
 
 	let (notifications, builder) = if config.capabilities.allows_live_query_notifications() {
 		let (send, recv) = async_channel::bounded(surrealdb_cnf::NOTIFICATIONS_CHANNEL_SIZE);

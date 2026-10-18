@@ -331,6 +331,7 @@ pub(crate) fn local_config(address: Endpoint) -> LocalConfig {
 		query_timeout: config.query_timeout,
 		transaction_timeout: config.transaction_timeout,
 		capabilities: config.capabilities,
+		bucket_folder_allowlist: config.bucket_folder_allowlist,
 		temporary_directory,
 		node_membership_refresh_interval: config.node_membership_refresh_interval,
 		node_membership_check_interval: config.node_membership_check_interval,

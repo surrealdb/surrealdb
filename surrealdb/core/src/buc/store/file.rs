@@ -216,6 +216,35 @@ impl FileStore {
 	}
 }
 
+/// Windows spells the same location `C:\dir` and `\\?\C:\dir`, and
+/// canonicalisation always yields the second. Returns `path` in the first
+/// spelling, with `\\?\UNC\server\share` as `\\server\share`; every other
+/// path is returned as is.
+///
+/// A path on any other platform never begins `\\?\` while absolute, so it is
+/// never altered there.
+fn without_verbatim_prefix(path: &std::path::Path) -> std::borrow::Cow<'_, std::path::Path> {
+	const VERBATIM: &str = r"\\?\";
+	const VERBATIM_UNC: &str = r"\\?\UNC\";
+	let Some(raw) = path.to_str() else {
+		return std::borrow::Cow::Borrowed(path);
+	};
+	if let Some(rest) = raw.strip_prefix(VERBATIM_UNC) {
+		std::borrow::Cow::Owned(PathBuf::from(format!(r"\\{rest}")))
+	} else if let Some(rest) = raw.strip_prefix(VERBATIM) {
+		std::borrow::Cow::Owned(PathBuf::from(rest))
+	} else {
+		std::borrow::Cow::Borrowed(path)
+	}
+}
+
+/// Whether `allowed` is a bare root (`/`), which names every path on the
+/// platform. On Windows such an entry carries no drive, so it must cover every
+/// drive rather than none.
+fn is_bare_root(allowed: &std::path::Path) -> bool {
+	allowed.has_root() && allowed.components().count() == 1
+}
+
 /// Check if a path is allowed according to the allowlist
 fn is_path_allowed(
 	path_to_check: &std::path::Path,
@@ -225,39 +254,62 @@ fn is_path_allowed(
 	if !lowercase_paths {
 		// Case-sensitive comparison goes component-wise, which already handles
 		// non-UTF-8 bytes correctly (each component is compared as an `OsStr`).
-		return allowed.iter().any(|allowed_path| path_to_check.starts_with(allowed_path));
+		let path_to_check = without_verbatim_prefix(path_to_check);
+		for allowed_path in allowed {
+			let allowed = without_verbatim_prefix(allowed_path);
+			// `Path::starts_with("")` holds for every path, so an empty entry
+			// (or bare `\\?\`) must never be allowed to match.
+			if allowed.as_os_str().is_empty() {
+				continue;
+			}
+			if is_bare_root(allowed_path) || path_to_check.starts_with(&allowed) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	// Reject paths that aren't valid UTF-8: `to_string_lossy` would collapse
 	// every invalid byte onto the same `U+FFFD` replacement character, so two
 	// distinct paths that differ only in their invalid bytes would compare
 	// equal and slip past the prefix check.
+	let path_to_check = without_verbatim_prefix(path_to_check);
 	let Some(raw_path) = path_to_check.to_str() else {
 		return false;
 	};
 
-	// Windows canonical paths often carry a `\\?\` prefix; after lowercasing
-	// and normalising separators it becomes `//?/`. Strip it so callers can
-	// pass either form interchangeably.
-	const WINDOWS_CANONICAL_PATH_PREFIX: &str = "//?/";
-	let normalized = raw_path.to_lowercase().replace('\\', "/");
-	let path_str = normalized.strip_prefix(WINDOWS_CANONICAL_PATH_PREFIX).unwrap_or(&normalized);
+	let normalize = |raw: &str| raw.to_lowercase().replace('\\', "/");
+	let path_str = normalize(raw_path);
 
-	allowed.iter().any(|allowed_path| {
-		let Some(raw_allowed) = allowed_path.to_str() else {
-			return false;
+	for allowed_path in allowed {
+		let allowed = without_verbatim_prefix(allowed_path);
+		let Some(raw_allowed) = allowed.to_str() else {
+			continue;
 		};
-		let allowed_str = raw_allowed.to_lowercase().replace('\\', "/");
+		let allowed_str = normalize(raw_allowed);
+		if allowed_str.is_empty() {
+			continue;
+		}
 		// Strip a trailing separator so an entry like `/srv/data/` accepts
 		// `/srv/data` itself, not just children.
 		let allowed_str = allowed_str.trim_end_matches('/');
+		// Only a bare root normalises to nothing and names every path.
+		if allowed_str.is_empty() {
+			if is_bare_root(allowed_path) {
+				return true;
+			}
+			continue;
+		}
 		// Require the prefix to land on a component boundary: bare
 		// `str::starts_with` would let `/srv/data-evil` match `/srv/data`.
 		let Some(rest) = path_str.strip_prefix(allowed_str) else {
-			return false;
+			continue;
 		};
-		rest.is_empty() || rest.starts_with('/')
-	})
+		if rest.is_empty() || rest.starts_with('/') {
+			return true;
+		}
+	}
+	false
 }
 
 impl ObjectStore for FileStore {
@@ -765,6 +817,91 @@ mod tests {
 	/// byte onto `U+FFFD`, so two distinct non-UTF-8 paths could compare equal
 	/// and bypass the allowlist. With the lossless `Path::to_str` check, any
 	/// non-UTF-8 candidate is rejected outright when `lowercase_paths` is on.
+	/// A canonical Windows path (`\\?\C:\...`) matches an allowlist entry
+	/// spelled either way, and a bare `/` covers every drive.
+	#[test]
+	fn lowercase_allowlist_matches_windows_spellings() {
+		let canonical = OsPath::new(r"\\?\C:\Users\me\bucket\Cargo.toml");
+		for entry in [r"C:\Users\me", "C:/Users/me/", r"\\?\C:\Users\me", "C:/", "/"] {
+			let allowed = vec![PathBuf::from(entry)];
+			assert!(is_path_allowed(canonical, true, &allowed), "entry {entry}");
+		}
+		let allowed = vec![PathBuf::from("C:/Users/other")];
+		assert!(!is_path_allowed(canonical, true, &allowed));
+		assert!(is_path_allowed(OsPath::new("C:/Users/me/bucket"), true, &[PathBuf::from("/")]));
+
+		let unc = OsPath::new(r"\\?\UNC\srv\share\bucket\Cargo.toml");
+		for entry in [r"\\srv\share\bucket", r"\\?\UNC\srv\share\bucket", "//srv/share/bucket", "/"]
+		{
+			let allowed = vec![PathBuf::from(entry)];
+			assert!(is_path_allowed(unc, true, &allowed), "UNC entry {entry}");
+		}
+		assert!(is_path_allowed(
+			OsPath::new(r"\\srv\share\bucket\Cargo.toml"),
+			true,
+			&[PathBuf::from(r"\\?\UNC\srv\share\bucket")],
+		));
+		assert!(!is_path_allowed(unc, true, &[PathBuf::from(r"\\srv\share\other")]));
+	}
+
+	/// An empty entry or a bare verbatim prefix names no directory, so it
+	/// allows nothing.
+	#[test]
+	fn an_empty_allowlist_entry_matches_nothing() {
+		for lowercase in [false, true] {
+			let allowed = vec![PathBuf::new(), PathBuf::from(r"\\?\")];
+			assert!(!is_path_allowed(OsPath::new("/srv/data"), lowercase, &allowed));
+			assert!(!is_path_allowed(OsPath::new(r"\\?\C:\srv\data"), lowercase, &allowed));
+		}
+	}
+
+	#[test]
+	fn verbatim_prefix_is_removed_from_drive_and_unc_paths() {
+		assert_eq!(
+			without_verbatim_prefix(OsPath::new(r"\\?\C:\a\b")).as_ref(),
+			OsPath::new(r"C:\a\b")
+		);
+		assert_eq!(
+			without_verbatim_prefix(OsPath::new(r"\\?\UNC\srv\share\a")).as_ref(),
+			OsPath::new(r"\\srv\share\a")
+		);
+		assert_eq!(
+			without_verbatim_prefix(OsPath::new("/srv/data")).as_ref(),
+			OsPath::new("/srv/data")
+		);
+		assert!(is_path_allowed(
+			OsPath::new(r"\\?\UNC\srv\share\bucket"),
+			false,
+			&[PathBuf::from(r"\\srv\share\bucket")],
+		));
+		assert!(is_path_allowed(
+			OsPath::new(r"\\srv\share\bucket"),
+			false,
+			&[PathBuf::from(r"\\?\UNC\srv\share\bucket")],
+		));
+	}
+
+	/// A case-sensitive allowlist treats the canonical and plain spellings of a
+	/// Windows path alike, and a bare root covers every drive.
+	#[cfg(windows)]
+	#[test]
+	fn case_sensitive_allowlist_matches_windows_spellings() {
+		let canonical = OsPath::new(r"\\?\C:\Users\me\bucket\Cargo.toml");
+		for entry in [r"C:\Users\me", "C:/Users/me/", r"\\?\C:\Users\me", "C:/", "/"] {
+			let allowed = vec![PathBuf::from(entry)];
+			assert!(is_path_allowed(canonical, false, &allowed), "entry {entry}");
+		}
+		let allowed = vec![PathBuf::from("C:/Users/other")];
+		assert!(!is_path_allowed(canonical, false, &allowed));
+
+		let unc = OsPath::new(r"\\?\UNC\srv\share\bucket\Cargo.toml");
+		for entry in [r"\\srv\share\bucket", r"\\?\UNC\srv\share\bucket", "/"] {
+			let allowed = vec![PathBuf::from(entry)];
+			assert!(is_path_allowed(unc, false, &allowed), "UNC entry {entry}");
+		}
+		assert!(!is_path_allowed(unc, false, &[PathBuf::from(r"\\srv\share\other")]));
+	}
+
 	#[cfg(unix)]
 	#[test]
 	fn lowercase_mode_rejects_non_utf8_paths() {

@@ -1,4 +1,3 @@
-#[cfg(storage)]
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -24,6 +23,7 @@ pub struct Config {
 	pub(crate) username: String,
 	pub(crate) password: String,
 	pub(crate) capabilities: CoreCapabilities,
+	pub(crate) bucket_folder_allowlist: Vec<PathBuf>,
 	pub(crate) websocket: WebsocketConfig,
 	pub(crate) grpc: GrpcConfig,
 	#[cfg(storage)]
@@ -154,6 +154,21 @@ impl Config {
 		}
 		self.grpc = grpc;
 		Ok(self)
+	}
+
+	/// Set the directories a local `file:` bucket backend may be defined in.
+	///
+	/// Only the embedded engines read this. A server reads
+	/// `SURREAL_BUCKET_FOLDER_ALLOWLIST` instead. A bucket whose backend path
+	/// is not inside one of these directories is refused, so with the default
+	/// empty list no local `file:` bucket can be defined. Each directory must
+	/// not contain the platform's path-list separator (`:` or, on Windows, `;`).
+	pub fn bucket_folder_allowlist(
+		mut self,
+		directories: impl IntoIterator<Item = impl Into<PathBuf>>,
+	) -> Self {
+		self.bucket_folder_allowlist = directories.into_iter().map(Into::into).collect();
+		self
 	}
 
 	#[cfg(storage)]

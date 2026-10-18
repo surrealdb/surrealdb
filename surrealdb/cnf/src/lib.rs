@@ -80,11 +80,10 @@ pub fn extract_allowed_paths(input: &str, canonicalize: bool, subject: &str) -> 
 	input
 		.split(delimiter)
 		.filter_map(|s| {
-			let trimmed = s.trim();
-			if trimmed.is_empty() {
+			if s.trim().is_empty() {
 				None
 			} else {
-				let path = PathBuf::from(trimmed).clean();
+				let path = PathBuf::from(s).clean();
 				let path = if canonicalize {
 					let Ok(path) = fs::canonicalize(&path) else {
 						warn!("Failed to canonicalize {subject} path: {}", path.to_string_lossy());
@@ -488,5 +487,19 @@ mod tests {
 
 		set_default_hnsw_build_seed(u64::MAX);
 		assert_eq!(hnsw_build_seed(), Some(u64::MAX), "a later install replaces the default");
+	}
+
+	/// `extract_allowed_paths` must preserve leading and trailing spaces in
+	/// directory names while ignoring empty or whitespace-only segments.
+	#[test]
+	fn extract_allowed_paths_preserves_significant_whitespace() {
+		let delim = if cfg!(target_os = "windows") {
+			";"
+		} else {
+			":"
+		};
+		let input = format!("/tmp/ leading{delim}  {delim}/tmp/trailing {delim}");
+		let paths = extract_allowed_paths(&input, false, "bucket");
+		assert_eq!(paths, vec![PathBuf::from("/tmp/ leading"), PathBuf::from("/tmp/trailing ")]);
 	}
 }
