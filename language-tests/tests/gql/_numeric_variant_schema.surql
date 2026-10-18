@@ -4,9 +4,9 @@ run = false
 */
 
 -- Seed for `distinct_numeric_variants.gql`: one value per row, spelled with
--- different numeric variants. `0.1f` and `0.1dec` compare equal but hash apart,
--- so they are the pair that catches a dedup keyed on hashes rather than on
--- ordering; the integral spellings hash alike and would collapse either way.
+-- different numeric variants. `1`, `1.0f` and `1dec` are one value, as are
+-- `1.5f` and `1.50dec`; `0.1f` and `0.1dec` are two, a float equalling a
+-- decimal only where the decimal spells the float's exact value.
 CREATE num:1 SET v = 0.1f RETURN NONE;
 CREATE num:2 SET v = 0.1dec RETURN NONE;
 CREATE num:3 SET v = 1 RETURN NONE;

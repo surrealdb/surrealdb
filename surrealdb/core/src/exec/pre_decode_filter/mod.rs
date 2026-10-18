@@ -855,11 +855,10 @@ impl PreDecodeFilter {
 /// [`Evidence`] for a set-membership probe that went through a `HashSet<Value>`.
 ///
 /// A hit is always a hit. A **miss** only proves absence when
-/// [`hash_miss_is_decisive`] says so —
-/// numbers break the `Hash`/`Eq` contract, so `0.1f` misses a set holding
-/// `0.1dec` even though the two compare equal, and a stored regex misses a set
-/// holding a string it matches. An inconclusive miss sends the row to the
-/// authoritative predicate.
+/// [`hash_miss_is_decisive`] says so: a value whose hash may disagree with its
+/// equality ([`Value::hash_agrees_with_eq`]) can miss a set holding a value it
+/// equals, and a stored regex misses a set holding a string it matches. An
+/// inconclusive miss sends the row to the authoritative predicate.
 #[inline]
 fn hash_set_evidence_for(
 	op: &BinaryOperator,
@@ -965,7 +964,7 @@ fn apply_binary(op: &BinaryOperator, left: &Value, right: &Value) -> Option<Valu
 mod tests {
 	use std::collections::hash_map::DefaultHasher;
 	use std::collections::{BTreeMap, HashSet};
-	use std::hash::{BuildHasherDefault, Hash, Hasher};
+	use std::hash::{Hash, Hasher};
 	use std::sync::Arc;
 
 	use memchr::memmem;
@@ -1217,56 +1216,62 @@ mod tests {
 		assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), PreDecodeFilterOutcome::Reject);
 	}
 
-	/// `0.1f` and `0.1dec` compare equal but hash apart, so the decoded probe
-	/// misses a set that does contain the value. A miss like that must not
-	/// reject the row — the authoritative predicate decides.
+	/// A float and a decimal are one value only when the decimal spells the
+	/// float's exact expansion, and hash alike exactly then: `0.5f` hits a set
+	/// holding `0.5dec`, and `0.1f` misses one holding `0.1dec` decisively.
 	#[test]
-	fn eval_set_membership_cross_variant_number_miss_needs_full_decode() {
-		let float = Value::Number(Number::Float(0.1));
-		let decimal = Value::Number(Number::Decimal("0.1".parse().unwrap()));
-		// Precondition: the two are one value to `==` and two keys to `Hash`.
-		// Compare the hashes directly under a fixed seed rather than probing a
-		// `HashSet`: a probe consults `==` whenever the two land in the same
-		// bucket, which under `RandomState` is a per-process coin flip.
+	fn eval_set_membership_float_and_decimal_hit_only_their_exact_value() {
 		let hash_of = |v: &Value| {
 			let mut hasher = DefaultHasher::new();
 			v.hash(&mut hasher);
 			hasher.finish()
 		};
-		assert_eq!(float, decimal);
-		assert_ne!(hash_of(&float), hash_of(&decimal));
-
-		for (stored, field) in [(&decimal, &float), (&float, &decimal)] {
-			let set = Arc::new(HashSet::from([stored.clone()]));
-			let root = set_membership(vec!["a".into()], BinaryOperator::Inside, set, false);
-			let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
-			let obj = Object::from(BTreeMap::from([(Strand::from("a"), field.clone())]));
-			let rec = wire_record_plain_object(obj);
-			assert_eq!(
-				pf.apply(&AdmittedRow::Bytes(&rec)),
-				PreDecodeFilterOutcome::NeedFullDecode,
-				"stored {stored:?} field {field:?}"
-			);
+		for (f, d, outcome) in [
+			(0.5, "0.5", PreDecodeFilterOutcome::NeedFullDecode),
+			(0.1, "0.1", PreDecodeFilterOutcome::Reject),
+		] {
+			let float = Value::Number(Number::Float(f));
+			let decimal = Value::Number(Number::Decimal(d.parse().unwrap()));
+			let equal = outcome == PreDecodeFilterOutcome::NeedFullDecode;
+			assert_eq!(float == decimal, equal);
+			assert_eq!(hash_of(&float) == hash_of(&decimal), equal);
+			for (stored, field) in [(&decimal, &float), (&float, &decimal)] {
+				let set = Arc::new(HashSet::from([stored.clone()]));
+				let root = set_membership(vec!["a".into()], BinaryOperator::Inside, set, false);
+				let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
+				let obj = Object::from(BTreeMap::from([(Strand::from("a"), field.clone())]));
+				let rec = wire_record_plain_object(obj);
+				assert_eq!(
+					pf.apply(&AdmittedRow::Bytes(&rec)),
+					outcome,
+					"stored {stored:?} field {field:?}"
+				);
+			}
 		}
 	}
 
-	/// The same hazard one level down: both sides take the decode path because
+	/// The same one level down, where both sides take the decode path because
 	/// an object element has no wire partition.
 	#[test]
-	fn eval_set_membership_nested_number_miss_needs_full_decode() {
+	fn eval_set_membership_nested_float_and_decimal_hit_only_their_exact_value() {
 		let nested =
 			|v: Value| Value::Object(Object::from(BTreeMap::from([(Strand::from("v"), v)])));
-		let set = Arc::new(HashSet::from([nested(Value::Number(Number::Decimal(
-			"0.1".parse().unwrap(),
-		)))]));
-		let root = set_membership(vec!["a".into()], BinaryOperator::Inside, set, false);
-		let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
-		let obj = Object::from(BTreeMap::from([(
-			Strand::from("a"),
-			nested(Value::Number(Number::Float(0.1))),
-		)]));
-		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), PreDecodeFilterOutcome::NeedFullDecode);
+		for (f, d, outcome) in [
+			(0.5, "0.5", PreDecodeFilterOutcome::NeedFullDecode),
+			(0.1, "0.1", PreDecodeFilterOutcome::Reject),
+		] {
+			let set = Arc::new(HashSet::from([nested(Value::Number(Number::Decimal(
+				d.parse().unwrap(),
+			)))]));
+			let root = set_membership(vec!["a".into()], BinaryOperator::Inside, set, false);
+			let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
+			let obj = Object::from(BTreeMap::from([(
+				Strand::from("a"),
+				nested(Value::Number(Number::Float(f))),
+			)]));
+			let rec = wire_record_plain_object(obj);
+			assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), outcome, "{f}");
+		}
 	}
 
 	/// A number-free value keeps its rejection even against a set full of
@@ -1689,28 +1694,22 @@ mod tests {
 		assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), PreDecodeFilterOutcome::Reject);
 	}
 
-	/// A bit index identifies a literal value, not a spelling of one. A set that
-	/// spells one value twice (`0.1f` and `0.1dec` compare equal but hash apart,
-	/// so a `HashSet` keeps both) asks for that value once, so an array holding
-	/// either spelling satisfies `ContainAll`.
+	/// A bit index identifies a literal value, not a spelling of one. A set
+	/// that spells one value in several kinds holds it once, as equal numbers
+	/// hash alike, so an array holding any spelling satisfies `ContainAll`.
 	#[test]
 	fn streaming_array_overlap_all_collapses_equal_literal_spellings() {
-		let float = Value::Number(Number::Float(0.1));
-		let decimal = Value::Number(Number::Decimal("0.1".parse().unwrap()));
-		// Precondition: the set really holds both spellings. Whether a set
-		// keeps two values that are equal but hash apart depends on whether
-		// their hashes meet during the probe, which under `RandomState` is a
-		// per-process coin flip, so the set is built under a fixed seed.
-		let mut set: HashSet<Value, BuildHasherDefault<DefaultHasher>> = HashSet::default();
-		set.insert(float.clone());
-		set.insert(decimal.clone());
-		assert_eq!(set.len(), 2);
+		let spellings = [
+			Value::Number(Number::Int(1)),
+			Value::Number(Number::Float(1.0)),
+			Value::Number(Number::Decimal("1.0".parse().unwrap())),
+		];
+		let set: HashSet<Value> = spellings.iter().cloned().collect();
+		assert_eq!(set.len(), 1);
 
 		let tables = overlap_streaming_from_set(&set);
-		assert_eq!(tables.literal_count, 1, "both spellings share one bit");
-		// The value map may keep one entry or two for the pair, by the same
-		// coin flip; either way a lookup by each spelling finds the one bit.
-		for spelling in [&float, &decimal] {
+		assert_eq!(tables.literal_count, 1, "the spellings share one bit");
+		for spelling in &spellings {
 			assert_eq!(
 				tables.literal_to_idx.get(spelling),
 				Some(&0),
@@ -1718,7 +1717,7 @@ mod tests {
 			);
 		}
 
-		for element in [&float, &decimal] {
+		for element in &spellings {
 			let eval: Arc<dyn super::StreamingLeafEvaluator> = Arc::new(ArrayOverlapsLiteralSet {
 				literal_to_idx: Arc::clone(&tables.literal_to_idx),
 				wire_to_idx: Arc::clone(&tables.wire_to_idx),
@@ -1731,7 +1730,7 @@ mod tests {
 				evaluator: eval,
 				fallback: LeafFallback {
 					op: BinaryOperator::ContainAll,
-					literal: Value::from(vec![float.clone(), decimal.clone()]),
+					literal: Value::from(spellings.to_vec()),
 					reversed: false,
 				},
 			};
@@ -1787,72 +1786,90 @@ mod tests {
 		assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), PreDecodeFilterOutcome::Reject);
 	}
 
-	/// A compound element holding a number, judged against a set holding one,
-	/// is undecidable in every mode. Hashing disagrees with equality on both
-	/// sides, so whether the probe meets the equal entry depends on the hasher's
-	/// seed, and `ContainNone` would turn a hit into a rejection only some seeds
-	/// produce. Each pass builds the plan afresh, drawing fresh seeds.
+	/// The array-overlap evaluators resolve compound elements through the same
+	/// `HashMap<Value, _>`, which answers a nested float against a nested
+	/// decimal exactly: a hit where the decimal spells the float, a decisive
+	/// miss otherwise. The verdict is the same under every hasher seed.
 	#[test]
-	fn streaming_array_overlap_cross_variant_number_miss_needs_full_decode() {
+	fn streaming_array_overlap_nested_float_and_decimal_resolve_exactly() {
 		// Wrapped in an object so the element takes the decode path rather than
 		// the Number wire partition.
 		let wrap = |v: Value| Value::Object(Object::from(BTreeMap::from([(Strand::from("v"), v)])));
-		let stored = wrap(Value::Number(Number::Decimal("0.1".parse().unwrap())));
-		let field = wrap(Value::Number(Number::Float(0.1)));
-		let rec = wire_record_plain_object(Object::from(BTreeMap::from([(
-			Strand::from("tags"),
-			Value::from(vec![field]),
-		)])));
-
-		for (mode, op) in [
-			(OverlapMode::Any, BinaryOperator::ContainAny),
-			(OverlapMode::All, BinaryOperator::ContainAll),
-			(OverlapMode::None, BinaryOperator::ContainNone),
-		] {
-			for _ in 0..SEED_DRAWS {
-				let set = Arc::new(HashSet::from([stored.clone()]));
-				let tables = overlap_streaming_from_set(set.as_ref());
-				let eval: Arc<dyn super::StreamingLeafEvaluator> =
-					Arc::new(ArrayOverlapsLiteralSet {
-						literal_to_idx: tables.literal_to_idx,
-						wire_to_idx: tables.wire_to_idx,
-						literal_set: tables.literal_set,
-						literal_count: tables.literal_count,
-						mode,
-					});
-				let root = PredNode::LeafStreaming {
-					path: vec!["tags".into()],
-					evaluator: eval,
-					fallback: LeafFallback {
-						op: op.clone(),
-						literal: Value::from(vec![stored.clone()]),
-						reversed: false,
+		let (hit, miss) = (PreDecodeFilterOutcome::NeedFullDecode, PreDecodeFilterOutcome::Reject);
+		for (f, d, equal) in [(0.5, "0.5", true), (0.1, "0.1", false)] {
+			let stored = wrap(Value::Number(Number::Decimal(d.parse().unwrap())));
+			let field = wrap(Value::Number(Number::Float(f)));
+			let rec = wire_record_plain_object(Object::from(BTreeMap::from([(
+				Strand::from("tags"),
+				Value::from(vec![field]),
+			)])));
+			for (mode, op, outcome) in [
+				(
+					OverlapMode::Any,
+					BinaryOperator::ContainAny,
+					if equal {
+						hit
+					} else {
+						miss
 					},
-				};
-				let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
-				assert_eq!(
-					pf.apply(&AdmittedRow::Bytes(&rec)),
-					PreDecodeFilterOutcome::NeedFullDecode,
-					"{mode:?}"
-				);
+				),
+				(
+					OverlapMode::All,
+					BinaryOperator::ContainAll,
+					if equal {
+						hit
+					} else {
+						miss
+					},
+				),
+				(
+					OverlapMode::None,
+					BinaryOperator::ContainNone,
+					if equal {
+						miss
+					} else {
+						hit
+					},
+				),
+			] {
+				for _ in 0..SEED_DRAWS {
+					let set = Arc::new(HashSet::from([stored.clone()]));
+					let tables = overlap_streaming_from_set(set.as_ref());
+					let eval: Arc<dyn super::StreamingLeafEvaluator> =
+						Arc::new(ArrayOverlapsLiteralSet {
+							literal_to_idx: tables.literal_to_idx,
+							wire_to_idx: tables.wire_to_idx,
+							literal_set: tables.literal_set,
+							literal_count: tables.literal_count,
+							mode,
+						});
+					let root = PredNode::LeafStreaming {
+						path: vec!["tags".into()],
+						evaluator: eval,
+						fallback: LeafFallback {
+							op: op.clone(),
+							literal: Value::from(vec![stored.clone()]),
+							reversed: false,
+						},
+					};
+					let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
+					assert_eq!(pf.apply(&AdmittedRow::Bytes(&rec)), outcome, "{f} {mode:?}");
+				}
 			}
 		}
 	}
 
-	/// `Float` / `Decimal` equality is not transitive: this float equals both
-	/// decimals, which differ from each other. An array holding the float alone
-	/// satisfies `ContainAll` over the two, but a probe resolves the float to
-	/// one bit at most. The evaluator makes no probe for an element and set that
-	/// both hold a number, so it needs a full decode under every seed, for the
+	/// One float is equal to at most one of two decimals that differ from each
+	/// other, so `ContainAll` over the two is never satisfied by an array
+	/// holding the float alone, and the filter says so under every seed, for the
 	/// numbers bare or nested.
 	#[test]
-	fn streaming_array_overlap_all_float_equal_to_two_decimals_needs_full_decode() {
+	fn streaming_array_overlap_all_float_equals_at_most_one_of_two_decimals() {
 		let float = Value::Number(Number::Float(0.8800000005551132));
 		let lo = Value::Number(Number::Decimal("0.8800000005551131776471763448".parse().unwrap()));
 		let hi = Value::Number(Number::Decimal("0.8800000005551131776471763449".parse().unwrap()));
-		assert_eq!(float, lo);
-		assert_eq!(float, hi);
 		assert_ne!(lo, hi);
+		assert!((float == lo) as u8 + (float == hi) as u8 <= 1, "equality is transitive");
 
 		let wrap = |v: &Value| {
 			Value::Object(Object::from(BTreeMap::from([(Strand::from("v"), v.clone())])))
@@ -1865,6 +1882,12 @@ mod tests {
 				Strand::from("tags"),
 				Value::from(vec![element.clone()]),
 			)])));
+			let holds = apply_binary(
+				&BinaryOperator::ContainAll,
+				&Value::from(vec![element.clone()]),
+				&Value::from(literals.clone()),
+			);
+			assert_eq!(holds, Some(Value::Bool(false)), "{element:?}");
 			for _ in 0..SEED_DRAWS {
 				let set: HashSet<Value> = literals.iter().cloned().collect();
 				let tables = overlap_streaming_from_set(&set);
@@ -1889,48 +1912,81 @@ mod tests {
 				let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
 				assert_eq!(
 					pf.apply(&AdmittedRow::Bytes(&rec)),
-					PreDecodeFilterOutcome::NeedFullDecode,
+					PreDecodeFilterOutcome::Reject,
 					"{element:?}"
 				);
 			}
 		}
 	}
 
-	/// The float equals both decimals, which differ from each other, so these
-	/// literals form no equivalence classes for `ContainAll`'s array-overlap
-	/// evaluator to count: the classes it would form depend on the order a
-	/// seeded set yields the literals in. The plan judges such a set by decoding
-	/// the field, so a row the predicate holds for is never rejected, whatever
-	/// seeds the plan draws.
+	/// A plan over literals that spell one number as floats and decimals judges
+	/// rows exactly as the operator does, under every seed: a row the predicate
+	/// holds for is never rejected, and one it fails for is.
+	/// A float and a decimal are one value only where the decimal spells the
+	/// float's exact value, so literals mixing the two form equivalence classes
+	/// as any others do: `ContainAll` over them is planned as the streaming
+	/// array-overlap evaluator, never as a decode of the field.
 	#[test]
-	fn contains_all_over_floats_and_decimals_judges_the_decoded_field() {
+	fn contains_all_over_floats_and_decimals_plans_a_streaming_leaf() {
+		let dec = |s: &str| Value::Number(Number::Decimal(s.parse().unwrap()));
+		let float = |f: f64| Value::Number(Number::Float(f));
+		for literal in [
+			Value::from(vec![float(0.1), dec("0.1")]),
+			Value::from(vec![float(0.5), dec("0.5"), dec("0.50")]),
+		] {
+			let shape = PreDecodeShape::Leaf {
+				path: vec![PathSegment::from("tags")].into(),
+				op: BinaryOperator::ContainAll,
+				literal: literal.clone(),
+				reversed: false,
+			};
+			let pf = shape.filter(TEST_DEPTH_LIMIT);
+			assert!(
+				matches!(pf.root, PredNode::LeafStreaming { .. }),
+				"{literal:?} planned as {:?}",
+				pf.root
+			);
+		}
+	}
+
+	#[test]
+	fn contains_all_over_floats_and_decimals_judges_as_the_operator() {
 		let float = Value::Number(Number::Float(0.8800000005551132));
 		let lo = Value::Number(Number::Decimal("0.8800000005551131776471763448".parse().unwrap()));
 		let hi = Value::Number(Number::Decimal("0.8800000005551131776471763449".parse().unwrap()));
+		let literal = Value::from(vec![float.clone(), lo.clone(), hi.clone()]);
 		let contains_all = PreDecodeShape::Leaf {
 			path: vec![PathSegment::from("tags")].into(),
 			op: BinaryOperator::ContainAll,
-			literal: Value::from(vec![float.clone(), lo.clone(), hi]),
+			literal: literal.clone(),
 			reversed: false,
 		};
 		let not_contains_all = PreDecodeShape::Not(Box::new(contains_all.clone()));
-		let tags = |v: &Value| {
-			wire_record_plain_object(Object::from(BTreeMap::from([(
-				Strand::from("tags"),
-				Value::from(vec![v.clone()]),
-			)])))
+		let tags = |v: &[&Value]| {
+			let field = Value::from(v.iter().map(|v| (*v).clone()).collect::<Vec<_>>());
+			(
+				wire_record_plain_object(Object::from(BTreeMap::from([(
+					Strand::from("tags"),
+					field.clone(),
+				)]))),
+				apply_binary(&BinaryOperator::ContainAll, &field, &literal)
+					== Some(Value::Bool(true)),
+			)
 		};
-		// The float matches every literal, so `ContainAll` holds; `lo` alone
-		// leaves `hi` unmatched, so its negation holds.
-		let cases = [(&contains_all, tags(&float)), (&not_contains_all, tags(&lo))];
+		let (all, all_holds) = tags(&[&float, &lo, &hi]);
+		let (one, one_holds) = tags(&[&float]);
+		assert!(all_holds && !one_holds);
+		// `ContainAll` holds for the array holding every literal, and its
+		// negation for the array holding the float alone.
+		let cases = [
+			(&contains_all, &all, PreDecodeFilterOutcome::NeedFullDecode),
+			(&not_contains_all, &one, PreDecodeFilterOutcome::NeedFullDecode),
+			(&contains_all, &one, PreDecodeFilterOutcome::Reject),
+		];
 		for _ in 0..SEED_DRAWS {
-			for (shape, rec) in &cases {
+			for (shape, rec, outcome) in &cases {
 				let pf = shape.filter(TEST_DEPTH_LIMIT);
-				assert_eq!(
-					pf.apply(&AdmittedRow::Bytes(rec)),
-					PreDecodeFilterOutcome::NeedFullDecode,
-					"{shape:?}"
-				);
+				assert_eq!(pf.apply(&AdmittedRow::Bytes(rec)), *outcome, "{shape:?}");
 			}
 		}
 	}

@@ -523,12 +523,12 @@ keyspace! {
 					#[format(IndexFormat)]
 					doc_lookup_identity = ["!dj", @, id: Identity] => DocId;
 
-					/// The same direction with the id encoded under `IndexFormat`.
-					/// Read as a fallback, and written alongside `!dj` so a node
-					/// still on the previous release keeps resolving records this
-					/// one maps. A fallback hit is only trusted when `!dd` agrees
-					/// that the doc-ID names the id that was asked for, which is
-					/// what keeps a collision on this key from being adopted.
+					/// The same direction with the id encoded under `IndexFormat`,
+					/// which every id with the same decimal expansion shares.
+					/// Written by 3.3 nodes alongside `!dj`, and read by nothing
+					/// on this release: the startup migration that retires it
+					/// deletes the band, and a table's doc-ID reclaim removes rows
+					/// a 3.3 node writes afterwards.
 					#[format(IndexFormat)]
 					doc_lookup = ["!di", @, id: Id] => DocId;
 
@@ -608,18 +608,19 @@ keyspace! {
 						/// (`idx::kernels::btree::IndexKeyspace`), which chooses the
 						/// spelling from the index definition.
 						///
-						/// The id keeps the erased spelling. Two records whose ids
-						/// differ only in a nested value's numeric variant therefore
-						/// share one entry, the later write replacing the earlier, and
-						/// the index finds one of the two. The value carries the exact
-						/// id, so a record on its own reads back as itself. Spelling the
-						/// id as an identity changes every entry's key, so it takes a
-						/// format bump, and a rebuild of each index to reach.
-						/// TODO(surrealdb/surrealdb#7437): spell the id as an identity
-						/// behind a format bump.
+						/// The id is an `Identity`, which keeps a number's kind, so two
+						/// records whose ids differ only in a nested number's kind
+						/// have an entry each. That is the spelling of an index stamped
+						/// at `BTREE_IDENTITY_ENTRY_IDS_FORMAT_VERSION` or later. One
+						/// stamped earlier ends the key with the id spelled as the
+						/// values are, which drops the kind, so such a pair shares one
+						/// entry there; the index keyspace builds those keys by hand.
+						/// The two spellings are one for an id holding no number. The
+						/// value carries the exact id either way, and every reader takes
+						/// the record from it.
 						#[format(IndexFormat)]
 						#[also_format(IndexIdFormat)]
-						entry = ["*", @, fd: [Value..], @open, @, raw 0x03, id: Id]
+						entry = ["*", @, fd: [Value..], @open, @, raw 0x03, id: Identity]
 							=> crate::values::entry::IndexEntryValue (derive(-Eq));
 
 						/// A unique slot. Its values are spelled as an `entry`'s are.
@@ -816,13 +817,14 @@ keyspace! {
 						/// Record-keyed HNSW pending updates: one coalesced entry per
 						/// record, drained into the graph by compaction.
 						///
-						/// The id keeps the erased spelling. Two records whose ids
-						/// differ only in a nested value's numeric variant therefore
-						/// share one entry, and a write to either folds into it; the
-						/// value names the exact record it was last written for. Such
-						/// a pair is indexed as one record, however the index was built.
-						/// TODO(surrealdb/surrealdb#7437): hold one update per record
-						/// that shares the key.
+						/// The id keeps the erased spelling, so two records whose ids
+						/// differ only in a nested value's numeric variant share one
+						/// key. On an index stamped at
+						/// `VECTOR_PENDING_MEMBERS_FORMAT_VERSION` or later the value
+						/// holds a pending update for each of them, under its exact id
+						/// (`HnswRecordPendingUpdate::others`); on one stamped earlier a
+						/// write to either folds into the one entry, which names the
+						/// record last written, until the index is rebuilt.
 						#[format(IndexFormat)]
 						hnsw_record_pending = ["!hr", @, id: Id]
 							=> crate::values::hnsw::HnswRecordPendingUpdate;
@@ -898,11 +900,9 @@ keyspace! {
 						/// The sharded successor to the legacy pending layout, under a
 						/// distinct tag so the two never overlap during a dual read.
 						///
-						/// The id keeps the erased spelling, with the consequence `!hr`
-						/// describes: two records whose ids differ only in a nested
-						/// value's numeric variant share one entry, and are indexed as
-						/// one record. TODO(surrealdb/surrealdb#7437): hold one update
-						/// per record that shares the key.
+						/// The id keeps the erased spelling, as `!hr`'s does, and the
+						/// value holds every record sharing the key in the same way
+						/// (`DiskAnnRecordPendingUpdate::others`).
 						#[cfg(diskann)]
 						#[format(IndexFormat)]
 						diskann_record_pending_shard = ["!dw", shard: u16, @, id: Id]
@@ -1707,7 +1707,7 @@ mod tests {
 			Cow::Borrowed(&tb),
 			IndexId(3),
 			Cow::Borrowed(&fd),
-			Cow::Borrowed(&id),
+			RecordIdentity(id),
 		);
 		assert_eq!(
 			&*entry.encode_key().unwrap(),
@@ -1765,7 +1765,7 @@ mod tests {
 			Cow::Borrowed(&tb),
 			IndexId(3),
 			Cow::Borrowed(&longer),
-			Cow::Borrowed(&id),
+			RecordIdentity(id),
 		)
 		.encode_key()
 		.unwrap();
@@ -2647,9 +2647,9 @@ mod tests {
 	/// routes have it.
 	///
 	/// It also pins the routes that still let the format reach the id, so that
-	/// each is a recorded decision: `!di`, the compatibility fallback, and the
-	/// b-tree `entry` and the ANN pending queues, whose route docs say what that
-	/// costs. Moving one of those onto an identity fails its assertion here.
+	/// each is a recorded decision: `!di`, the retired type-erased band, and the
+	/// ANN pending queues, whose values hold every record sharing a key. Moving
+	/// one of those onto an identity fails its assertion here.
 	#[test]
 	fn keys_that_name_a_record_address_exactly_one() {
 		use surrealdb_expr::val::{Number, Value};
@@ -2734,13 +2734,13 @@ mod tests {
 				Cow::Borrowed(&tb),
 				IndexId(3),
 				Cow::Borrowed(&fd),
-				Cow::Borrowed(id),
+				RecordIdentity(id.clone()),
 			)
 			.encode_key()
 			.unwrap()
 			.to_vec()
 		};
-		assert_eq!(entry(&int), entry(&dec), "the b-tree entry still shares one key");
+		assert_ne!(entry(&int), entry(&dec), "a b-tree entry names one record");
 		let hr = |id: &RecordIdKey| {
 			HnswRecordPendingKey::new(
 				NamespaceId(1),
@@ -2753,7 +2753,11 @@ mod tests {
 			.unwrap()
 			.to_vec()
 		};
-		assert_eq!(hr(&int), hr(&dec), "the HNSW pending queue still shares one key");
+		assert_eq!(
+			hr(&int),
+			hr(&dec),
+			"the HNSW pending queue shares one key; its value holds each"
+		);
 		#[cfg(diskann)]
 		{
 			let dw = |id: &RecordIdKey| {
@@ -2769,7 +2773,11 @@ mod tests {
 				.unwrap()
 				.to_vec()
 			};
-			assert_eq!(dw(&int), dw(&dec), "the DiskANN pending queue still shares one key");
+			assert_eq!(
+				dw(&int),
+				dw(&dec),
+				"the DiskANN pending queue shares one key; its value holds each"
+			);
 		}
 	}
 }

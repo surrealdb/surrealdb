@@ -14,7 +14,7 @@ use super::ids::DocId;
 /// the catalog's b-tree doc-IDs format version append the record's table-level
 /// doc-ID as 8 big-endian bytes, so doc-ID-based plans
 /// (roaring bitmap candidate fusion) can read the doc-ID straight from the entry
-/// without probing the `!di` mapping.
+/// without probing the `!dj` mapping.
 ///
 /// The format is self-describing on decode: a revision-encoded `RecordId`
 /// followed by either nothing (pre-doc-ID entry) or exactly 8 bytes. Readers that

@@ -20,7 +20,7 @@ records:
 { id: a:6, k: 3dec, xs: [80] }
 { id: a:7, k: [1, 'x'], xs: [90, 100] }
 { id: a:8, k: 'abc', xs: [110] }
-{ id: a:9, k: 0.1f, xs: [120] }
+{ id: a:9, k: 0.1f, xs: [] }
 { id: a:10, k: -0f, xs: [130] }
 { id: a:11, k: 9, xs: [] }
 records:
@@ -33,7 +33,7 @@ records:
 { xs: [80] }
 { xs: [90, 100] }
 { xs: [110] }
-{ xs: [120] }
+{ xs: [] }
 { xs: [130] }
 { xs: [] }
 records:

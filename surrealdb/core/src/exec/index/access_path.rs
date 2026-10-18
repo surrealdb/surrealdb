@@ -12,7 +12,10 @@ use surrealdb_datastore::index_shapes::{TableIndexShapes, ValueShape};
 
 use super::IndexCandidate;
 use super::key_range::{DeliveredKeyOrder, KeyRangeAccess, plan_key_range};
-use crate::catalog::{DefineDefault, FieldDefinition, Index, IndexDefinition, KeyStructure};
+use crate::catalog::{
+	DefineDefault, FieldDefinition, Index, IndexDefinition, KeyStructure,
+	spells_normalised_decimal_keys,
+};
 use crate::err::Error;
 use crate::exec::function::FunctionRegistry;
 use crate::exec::operators::scan::pipeline::determine_scan_direction;
@@ -882,18 +885,16 @@ pub(crate) fn access_misses_arrays(index: &IndexRef, access: &BTreeAccess) -> bo
 	range_reaches_arrays(start.as_ref().map(|v| &**v), end.as_ref().map(|v| &**v))
 }
 
-/// Whether the keys `access` reads hold exactly the values its predicate
-/// admits, for a column holding one entry per record: every number the access
-/// names, as an equality, a compound prefix or a range bound, is the same
-/// number as a float and as a decimal ([`exact_across_kinds`]). Numbers are
-/// keyed by their exact value, while a comparison between a float and a
-/// decimal converts the float to the decimal it prints as — the float `0.1`
-/// compares equal to the decimal `0.1` it keys apart from — so an access that
-/// names such a number reads keys that miss records its comparison accepts, or
-/// lists records it rejects, and the comparison has to judge each one.
-pub(crate) fn range_matches_comparison(access: &BTreeAccess) -> bool {
+/// Whether the keys `access` reads over `index` hold exactly the values its
+/// predicate admits, for a column holding one entry per record: every number
+/// the access names, as an equality, a compound prefix or a range bound, is
+/// keyed where it compares ([`number_keyed_as_compared`]). Otherwise the
+/// access reads keys that miss records its comparison accepts, or lists
+/// records it rejects, and the comparison has to judge each one.
+pub(crate) fn range_matches_comparison(index: &IndexDefinition, access: &BTreeAccess) -> bool {
+	let normalised = spells_normalised_decimal_keys(index.format_version);
 	// A bound that reads the clock is a datetime, which is no number.
-	let inexact = |v: &BoundOperand| matches!(v.as_literal(), Some(Value::Number(n)) if !exact_across_kinds(n));
+	let inexact = |v: &BoundOperand| matches!(v.as_literal(), Some(Value::Number(n)) if !number_keyed_as_compared(n, normalised));
 	match access {
 		BTreeAccess::Equality(v) => !inexact(v),
 		BTreeAccess::Range {
@@ -907,10 +908,22 @@ pub(crate) fn range_matches_comparison(access: &BTreeAccess) -> bool {
 	}
 }
 
-/// Whether `n` is the same number as a float and as a decimal, so its key and
-/// every comparison with it agree: an integer, which compares exactly with
-/// both, or a finite float or a decimal whose value a float and a decimal both
-/// hold exactly (`1.5`, not `0.1`).
+/// Whether every number that compares equal to `n` is keyed at `n`'s own key,
+/// in an index whose keys spell decimals without trailing zeros when
+/// `normalised` ([`spells_normalised_decimal_keys`]). `n` must be the same
+/// number as a float and as a decimal ([`exact_across_kinds`]), and the index
+/// must spell decimals without trailing zeros: one that keeps them keys
+/// `2.50dec` apart from `2.5dec`, and `2.0dec` apart from `2`, though each
+/// pair compares equal.
+pub(crate) fn number_keyed_as_compared(n: &Number, normalised: bool) -> bool {
+	normalised && exact_across_kinds(n)
+}
+
+/// Whether `n` is the same number as a float and as a decimal: an integer, or
+/// a finite float or a decimal whose value a float and a decimal both hold
+/// exactly (`1.5`, not `0.1`). A comparison between a float and a decimal is
+/// exact, and a number's key holds its exact value, so the key of such a
+/// number is the key of every float and decimal equal to it.
 pub(crate) fn exact_across_kinds(n: &Number) -> bool {
 	use rust_decimal::Decimal;
 	use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
@@ -2365,8 +2378,14 @@ fn conjuncts(expr: &LogicalExpr) -> Vec<&LogicalExpr> {
 #[cfg(test)]
 mod range_comparison_tests {
 	use std::ops::Bound;
+	use std::str::FromStr;
 
 	use super::{BTreeAccess, BoundOperand, range_matches_comparison};
+	use crate::catalog::{
+		BTREE_NORMALISED_DECIMAL_KEYS_FORMAT_VERSION, INDEX_FORMAT_VERSION, Index, IndexDefinition,
+		IndexId,
+	};
+	use crate::expr::Idiom;
 	use crate::val::{Number, Range, Value};
 
 	fn below(v: Value) -> BTreeAccess {
@@ -2376,9 +2395,27 @@ mod range_comparison_tests {
 		})
 	}
 
+	fn index(format_version: u16) -> IndexDefinition {
+		IndexDefinition {
+			index_id: IndexId(1),
+			name: "ix".into(),
+			table_name: "t".into(),
+			cols: vec![Idiom::from_str("c").expect("valid idiom")],
+			index: Index::Idx,
+			count_cond: None,
+			comment: None,
+			prepare_remove: false,
+			format_version,
+		}
+	}
+
+	fn decimal(s: &str) -> Value {
+		Value::Number(Number::Decimal(s.parse().expect("decimal")))
+	}
+
 	#[test]
 	fn a_number_bounds_a_range_exactly_when_both_kinds_hold_it() {
-		let decimal = |s: &str| Value::Number(Number::Decimal(s.parse().expect("decimal")));
+		let index = index(INDEX_FORMAT_VERSION);
 		for (bound, exact) in [
 			(Value::from(5), true),
 			(Value::from(i64::MAX), true),
@@ -2389,7 +2426,7 @@ mod range_comparison_tests {
 			(decimal("0.1"), false),
 			(Value::from("p"), true),
 		] {
-			assert_eq!(range_matches_comparison(&below(bound.clone())), exact, "{bound:?}");
+			assert_eq!(range_matches_comparison(&index, &below(bound.clone())), exact, "{bound:?}");
 		}
 		for (value, exact) in [
 			(Value::Number(Number::Float(0.1)), false),
@@ -2399,21 +2436,43 @@ mod range_comparison_tests {
 			(Value::from("a"), true),
 		] {
 			assert_eq!(
-				range_matches_comparison(&BTreeAccess::literal_equality(value.clone())),
+				range_matches_comparison(&index, &BTreeAccess::literal_equality(value.clone())),
 				exact,
 				"= {value:?}"
 			);
 			assert_eq!(
-				range_matches_comparison(&BTreeAccess::Compound {
-					prefix: vec![
-						BoundOperand::Literal(Value::from("a")),
-						BoundOperand::Literal(value.clone()),
-					],
-					range: None,
-				}),
+				range_matches_comparison(
+					&index,
+					&BTreeAccess::Compound {
+						prefix: vec![
+							BoundOperand::Literal(Value::from("a")),
+							BoundOperand::Literal(value.clone()),
+						],
+						range: None,
+					}
+				),
 				exact,
 				"compound prefix {value:?}"
 			);
 		}
+	}
+
+	/// An index that keeps a decimal's trailing zeros keys `2.50dec` apart from
+	/// `2.5dec` and `2.0dec` apart from `2`, so no number bounds a range over it
+	/// exactly, nor is sought by an equality exactly.
+	#[test]
+	fn no_number_is_exact_over_an_index_that_keeps_trailing_zeros() {
+		let index = index(BTREE_NORMALISED_DECIMAL_KEYS_FORMAT_VERSION - 1);
+		for value in
+			[Value::from(5), Value::Number(Number::Float(1.5)), decimal("2.5"), decimal("2.50")]
+		{
+			assert!(!range_matches_comparison(&index, &below(value.clone())), "{value:?}");
+			assert!(
+				!range_matches_comparison(&index, &BTreeAccess::literal_equality(value.clone())),
+				"= {value:?}"
+			);
+		}
+		assert!(range_matches_comparison(&index, &below(Value::from("p"))));
+		assert!(range_matches_comparison(&index, &BTreeAccess::literal_equality(Value::from("a"))));
 	}
 }

@@ -74,7 +74,7 @@ const DOC_ID_RECLAIM_MAX_RETRIES: usize = 10;
 /// by starting a fresh generation.
 const PRIMARY_APPEND_REBUILD_MAX_RETRIES: usize = 10;
 
-/// Most ids a pending-reclaim marker in the previous spelling is read as.
+/// Most ids a pending-reclaim marker in a 3.3 pre-release's spelling is read as.
 ///
 /// That spelling drops a nested number's variant, so the marker stands for
 /// every id that differs only there — three per number, an integer, a float
@@ -1504,7 +1504,7 @@ impl Building {
 	) -> Result<RecordIdKey> {
 		let rid_key = appending.id;
 		// A queued delete (old present, new absent) on a doc-ID index is a consumer
-		// of the shared doc-ID space: the delete path deferred the `!di`/`!dd`
+		// of the shared doc-ID space: the delete path deferred the `!dj`/`!dd`
 		// removal precisely so this replay could still resolve the doc-ID (full-text
 		// reads it; HNSW/DiskAnn capture it into the pending). The mapping is
 		// table-scoped, so it may only be reclaimed by the LAST building consumer —
@@ -1541,7 +1541,7 @@ impl Building {
 			let tx = ctx.tx();
 			if self.other_doc_id_index_building(ctx).await? {
 				// A sibling doc-ID index is still building and may still need the
-				// shared `!di`/`!dd` mapping to replay its own copy of this delete,
+				// shared `!dj`/`!dd` mapping to replay its own copy of this delete,
 				// so the mapping must stay live. The delete transaction already
 				// wrote a durable `!dp` marker when it deferred the removal (see
 				// `doc::index`'s `defer_doc_id_removal`); re-assert it here —
@@ -1571,7 +1571,7 @@ impl Building {
 
 	/// Whether another doc-ID-consuming index on the same table is still building
 	/// (durable build phase `Building`/`Closing`), and so may still need the shared
-	/// `!di`/`!dd` mapping to replay its own copy of a queued delete.
+	/// `!dj`/`!dd` mapping to replay its own copy of a queued delete.
 	///
 	/// Gates the reclaim in [`apply_appending`](Self::apply_appending): while a
 	/// sibling is still building the mapping must be kept alive (each build resolves
@@ -1629,44 +1629,9 @@ impl Building {
 		tx.set_key(&dp, &()).await
 	}
 
-	/// The record a pending-reclaim marker names, when the marker was written by
-	/// a release that spelled the id under the index format.
-	///
-	/// That spelling is not injective and does not decode as an identity, so the
-	/// id cannot be read out of the key directly. It is still exactly how `!di`
-	/// spells an id, so the marker's own suffix addresses that mapping, and the
-	/// reverse mapping it names carries the id losslessly (see
-	/// [`TableDocIds::record_spelled_as`]). Recovering it this way keeps the
-	/// reclaim the marker was written for, rather than forfeiting it.
-	///
-	/// Returns `None` when the chain does not resolve — the mapping is already
-	/// gone, or the space is torn — in which case there is nothing left to
-	/// reclaim and the marker is simply consumed.
-	async fn record_named_by_legacy_marker(
-		&self,
-		tx: &Transaction,
-		marker: &[u8],
-	) -> Result<Option<RecordIdKey>> {
-		let table = self.ikb.table();
-		let pending = DocPendingPrefix::new(self.ix_key.ns, self.ix_key.db, Cow::Borrowed(table))
-			.encode_bound()?;
-		let Some(spelling) = marker.strip_prefix(&*pending) else {
-			return Ok(None);
-		};
-		TableDocIds::new(self.ix_key.ns, self.ix_key.db, table.clone())
-			.record_spelled_as(tx, spelling)
-			.await
-	}
-
-	/// Every record a pending-reclaim marker in the previous spelling can stand
-	/// for, up to [`LEGACY_MARKER_MAX_READINGS`]: the id its bytes decode to under
-	/// the index format, in each variant of every number nested in it.
-	///
-	/// The chain [`record_named_by_legacy_marker`](Self::record_named_by_legacy_marker)
-	/// follows reaches whichever of those records holds the type-erased key now,
-	/// which need not be the one marked: once another takes the key over, the
-	/// marked record is reached only through its own injective mapping, under
-	/// the variant it was written with.
+	/// Every record a pending-reclaim marker in a 3.3 pre-release's spelling can
+	/// stand for, up to [`LEGACY_MARKER_MAX_READINGS`]: the id its bytes decode
+	/// to under the index format, in each variant of every number nested in it.
 	fn legacy_marker_readings(&self, marker: &[u8]) -> Result<Vec<RecordIdKey>> {
 		let table = Cow::Borrowed(self.ikb.table());
 		let pending =
@@ -1684,7 +1649,7 @@ impl Building {
 	}
 
 	/// Drains the table's durable `!dp` pending-reclaim markers, reclaiming the
-	/// shared `!di`/`!dd` mapping of every marked record that is still absent
+	/// shared `!dj`/`!dd` mapping of every marked record that is still absent
 	/// (see [`apply_appending`](Self::apply_appending)).
 	///
 	/// Runs best-effort, immediately after this builder publishes `Online`, and
@@ -1700,7 +1665,7 @@ impl Building {
 	///
 	/// The sweep processes markers in [`INDEXING_BATCH_SIZE`] chunks, each in its
 	/// own transaction, probing the marked records with one batched read:
-	/// - a record that is still absent has its `!di`/`!dd` mapping reclaimed;
+	/// - a record that is still absent has its `!dj`/`!dd` mapping reclaimed;
 	/// - a record re-created during the build keeps its live mapping;
 	/// - the `!dp` marker is consumed in both cases.
 	///
@@ -1750,19 +1715,20 @@ impl Building {
 				tx.cancel().await?;
 				return Ok(());
 			}
-			// Which spelling a marker is in cannot be read off its bytes. The two
-			// overlap: an id under this release's spelling encodes to the same
-			// bytes as one under the previous release's followed by `NONE`, `NULL`
-			// or a bool, because the tag after the number lands where its kind
-			// would have been. So a marker that decodes may still name a different
-			// record than the one it was written for, and a marker that does not
-			// decode names one only the previous release's chain can reach.
+			// A 3.3 pre-release spelled the id in a marker under the index format,
+			// which drops a nested number's variant, and which spelling a marker
+			// is in cannot be read off its bytes. The two overlap: an id under this
+			// release's spelling encodes to the same bytes as one under the
+			// pre-release's followed by `NONE`, `NULL` or a bool, because the tag
+			// after the number lands where its kind would have been. So a marker
+			// that decodes may still have been written for another record, and one
+			// that does not decode names a record only the old spelling reaches.
 			//
-			// Both readings are taken, and neither has to be ruled out: the rule
-			// this sweep applies — reclaim a mapping only once its record is gone —
-			// is the right one for whichever record a candidate turns out to be. A
-			// candidate that is really a live record keeps its mapping; one that is
-			// absent should not be holding a mapping in any case.
+			// Every reading is taken, and none has to be ruled out: the rule this
+			// sweep applies — reclaim a mapping only once its record is gone — is
+			// the right one for whichever record a reading turns out to be. One
+			// that is really a live record keeps its mapping; one that is absent
+			// should not be holding a mapping in any case.
 			let mut ids: Vec<RecordIdKey> = Vec::with_capacity(keys.len());
 			let mut seen = HashSet::with_capacity(keys.len());
 			let mut take = |id: RecordIdKey, ids: &mut Vec<RecordIdKey>| {
@@ -1771,40 +1737,18 @@ impl Building {
 				}
 			};
 			for k in &keys {
-				let decodes = match DocPendingKey::decode_key(k) {
-					Ok(dp) => {
-						let decoded = dp.id.0;
-						// The index format differs from this one only over numbers,
-						// so an id holding none encodes the same under both
-						// spellings and the previous release's chain can only lead
-						// back to the record just named. Only an id carrying a
-						// number in a nested value has a second reading worth
-						// paying two reads for.
-						let has_second_reading = !decoded.hash_agrees_with_eq();
-						take(decoded, &mut ids);
-						if !has_second_reading {
-							continue;
-						}
-						true
+				if let Ok(dp) = DocPendingKey::decode_key(k) {
+					let decoded = dp.id.0;
+					// The two spellings differ only over numbers, so an id holding
+					// none encodes alike under both and has no second reading.
+					let alike = decoded.index_format_spells_alike();
+					take(decoded, &mut ids);
+					if alike {
+						continue;
 					}
-					Err(_) => false,
-				};
-				// The previous release spelled the id the way `!di` still spells
-				// one, so the marker's own bytes address that mapping and the
-				// reverse mapping behind it names the record losslessly. Forfeiting
-				// the reclaim instead would strand the mapping, which `REBUILD
-				// INDEX` does not clear.
-				if let Some(id) = catch!(tx, self.record_named_by_legacy_marker(&tx, k).await) {
-					take(id, &mut ids);
 				}
-				// A marker this release's spelling cannot decode is in the previous
-				// one, and the chain above reaches the record holding the erased key
-				// now, which another record of the same spelling may have taken
-				// over. So every record the spelling stands for is a reading too.
-				if !decodes {
-					for id in catch!(tx, self.legacy_marker_readings(k)) {
-						take(id, &mut ids);
-					}
+				for id in catch!(tx, self.legacy_marker_readings(k)) {
+					take(id, &mut ids);
 				}
 			}
 			// One batched probe decides every record's fate in this chunk.
@@ -1824,7 +1768,7 @@ impl Building {
 			// absent), kept (record re-created during the build), already gone
 			// (reclaimed by an earlier inline pass or sweep), or named a record
 			// that could no longer be recovered at all. The key deleted is the one
-			// the scan returned: a marker in the previous spelling re-encodes to
+			// the scan returned: a marker in a 3.3 pre-release's spelling re-encodes to
 			// this release's, which is not the key on disk.
 			for k in &keys {
 				catch!(tx, tx.del(Key::from(k.as_slice())).await);
@@ -1868,7 +1812,7 @@ impl Building {
 		}
 	}
 
-	/// Restores the `!di`/`!dd` mapping of any record in `reclaimed` that exists
+	/// Restores the `!dj`/`!dd` mapping of any record in `reclaimed` that exists
 	/// again — i.e. was re-created concurrently with the sweep chunk that
 	/// reclaimed its mapping, adopting the old id from its pre-reclaim snapshot.
 	///

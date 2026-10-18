@@ -57,18 +57,14 @@
 //! probe row whose key holds a regex matches build rows in every range. So the
 //! join's partitions are united ([`SpilledJoin::union`]) and finished as one.
 //!
-//! `Value::cmp` returns `Equal` where `partial_cmp` has no answer. This makes it
-//! non-transitive in two cases: floats and decimals that agree to about sixteen
-//! significant digits without being equal, and a value holding a geometry with a
-//! NaN coordinate, which has no comparison answer against a geometry of its kind.
-//! Such a key is routed like any other key and is never sent to an unpartitioned
-//! path. In these cases two keys that compare `Equal` can route to different
-//! partitions, so the partition's result for them depends on the splitters. The
-//! unpartitioned breaker's result depends on the shape of its tree in the same
-//! way. Keys that compare under a total preorder are not affected. A closure
-//! compares `Equal` to every other closure, whatever either holds. That is a
-//! total preorder, so closures always route together and form one group, one
-//! distinct row or one join key, as they do unpartitioned.
+//! `Value::cmp` is a total preorder over every value: `partial_cmp` always has
+//! an answer, since numbers of every kind compare exactly and a geometry is
+//! totally ordered, NaN coordinates included. So two keys that compare `Equal`
+//! always route to the same partition, and a partition groups, deduplicates and
+//! joins its keys as the unpartitioned breaker does. A closure compares `Equal`
+//! to every other closure, whatever either holds, so closures always route
+//! together and form one group, one distinct row or one join key, as they do
+//! unpartitioned.
 
 // Items in this module may have no caller in the current build.
 #![allow(dead_code)]
@@ -693,7 +689,6 @@ mod tests {
 		vec![
 			vec![vec![int(1)], vec![float(1.0)], vec![dec("1")], vec![dec("1.00")]],
 			vec![vec![int(0)], vec![float(0.0)], vec![float(-0.0)], vec![dec("0")]],
-			vec![vec![float(0.1)], vec![dec("0.1")]],
 			vec![
 				vec![arr(vec![int(1), arr(vec![float(1.0)])])],
 				vec![arr(vec![dec("1"), arr(vec![int(1)])])],
@@ -721,6 +716,8 @@ mod tests {
 			vec![dec("1.5")],
 			vec![float(0.09)],
 			vec![dec("0.11")],
+			vec![float(0.1)],
+			vec![dec("0.1")],
 			vec![Value::None],
 			vec![Value::Null],
 			vec![s("a")],

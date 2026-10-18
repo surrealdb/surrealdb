@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Numerically equal group keys collapse into one group regardless of which numeric variant carries them"
+reason = "Numerically equal group keys collapse into one group regardless of which numeric variant carries them, and a float and a decimal that are not exactly equal form two groups"
 
 [[test.results]]
 value = "'OK'"
@@ -12,7 +12,7 @@ value = "[{ count: 5, k: 1, total: 31 }]"
 value = "'OK'"
 
 [[test.results]]
-value = "[{ count: 3, k: 0.1f, total: 7 }]"
+value = "[{ count: 2, k: 0.1dec, total: 6 }, { count: 1, k: 0.1f, total: 1 }]"
 
 [[test.results]]
 value = "'OK'"
@@ -47,7 +47,8 @@ value = "[{ a: 1, b: 2dec, count: 2, total: 3 }, { a: 1f, b: 2.5f, count: 1, tot
 
 SELECT k, count() AS count, math::sum(v) AS total FROM scale GROUP BY k;
 
--- A float and a decimal that print the same but hold different binary values.
+-- A float and a decimal that print the same but are two values: `0.1f` is
+-- `0.100000000000000005551115123125782702118`, above `0.1dec`, which `0.10dec` equals.
 {
 	CREATE tenth:1 SET k = 0.1f, v = 1;
 	CREATE tenth:2 SET k = 0.1dec, v = 2;

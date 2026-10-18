@@ -6,11 +6,12 @@ database = true
 [test]
 reason = """
 	A count of an indexed table in value position, correlated with the enclosing row through an
-	equality or a membership, over every kind of key the enclosing row can hold. An index lists the
-	records of a float or decimal key only approximately, and the count of the statement is the
-	number of records whose field equals the key, so a key of any kind counts what a filter over the
-	records counts: numbers of another representation that compare equal, a string, an array, a
-	record id, `NULL`, a missing field and an enclosing row that is a record id.
+	equality or a membership, over every kind of key the enclosing row can hold. The count of the
+	statement is the number of records whose field equals the key, so a key of any kind counts what
+	a filter over the records counts: numbers of another representation that are the same number
+	(`3`, `3.0f` and `3dec`), a float and a decimal of the same digits that are two numbers (`0.1f`
+	and `0.1dec`, each counting only itself), a string, an array, a record id, `NULL`, a missing
+	field and an enclosing row that is a record id.
 """
 
 [[test.results]]
@@ -32,28 +33,29 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ c: [{ count: 4 }], id: small:1 }, { c: [{ count: 4 }], id: small:2 }, { c: [{ count: 4 }], id: small:3 }, { c: [{ count: 1 }], id: small:4 }, { c: [{ count: 2 }], id: small:5 }, { c: [{ count: 2 }], id: small:6 }, { c: [{ count: 1 }], id: small:7 }, { c: [{ count: 1 }], id: small:8 }, { c: [{ count: 1 }], id: small:9 }, { c: [{ count: 1 }], id: small:10 }, { c: [{ count: 1 }], id: small:11 }, { c: [{ count: 1 }], id: small:12 }, { c: [{ count: 1 }], id: small:13 }, { c: [{ count: 4 }], id: small:14 }, { c: [{ count: 2 }], id: small:15 }, { c: [{ count: 2 }], id: small:16 }, { c: [{ count: 1 }], id: small:17 }, { c: [{ count: 2 }], id: small:18 }, { c: [{ count: 2 }], id: small:19 }]"
+value = "[{ c: [{ count: 4 }], id: small:1 }, { c: [{ count: 4 }], id: small:2 }, { c: [{ count: 4 }], id: small:3 }, { c: [{ count: 1 }], id: small:4 }, { c: [{ count: 1 }], id: small:5 }, { c: [{ count: 1 }], id: small:6 }, { c: [{ count: 1 }], id: small:7 }, { c: [{ count: 1 }], id: small:8 }, { c: [{ count: 1 }], id: small:9 }, { c: [{ count: 1 }], id: small:10 }, { c: [{ count: 1 }], id: small:11 }, { c: [{ count: 1 }], id: small:12 }, { c: [{ count: 1 }], id: small:13 }, { c: [{ count: 4 }], id: small:14 }, { c: [{ count: 2 }], id: small:15 }, { c: [{ count: 2 }], id: small:16 }, { c: [{ count: 1 }], id: small:17 }, { c: [{ count: 2 }], id: small:18 }, { c: [{ count: 2 }], id: small:19 }]"
 
 [[test.results]]
-value = "[{ c: 4, id: small:1 }, { c: 4, id: small:2 }, { c: 4, id: small:3 }, { c: 1, id: small:4 }, { c: 2, id: small:5 }, { c: 2, id: small:6 }, { c: 1, id: small:7 }, { c: 1, id: small:8 }, { c: 1, id: small:9 }, { c: 1, id: small:10 }, { c: 1, id: small:11 }, { c: 1, id: small:12 }, { c: 1, id: small:13 }, { c: 4, id: small:14 }, { c: 2, id: small:15 }, { c: 2, id: small:16 }, { c: 1, id: small:17 }, { c: 2, id: small:18 }, { c: 2, id: small:19 }]"
+value = "[{ c: 4, id: small:1 }, { c: 4, id: small:2 }, { c: 4, id: small:3 }, { c: 1, id: small:4 }, { c: 1, id: small:5 }, { c: 1, id: small:6 }, { c: 1, id: small:7 }, { c: 1, id: small:8 }, { c: 1, id: small:9 }, { c: 1, id: small:10 }, { c: 1, id: small:11 }, { c: 1, id: small:12 }, { c: 1, id: small:13 }, { c: 4, id: small:14 }, { c: 2, id: small:15 }, { c: 2, id: small:16 }, { c: 1, id: small:17 }, { c: 2, id: small:18 }, { c: 2, id: small:19 }]"
 
 [[test.results]]
-value = "[{ c: [{ count: 4 }], id: small:1 }, { c: [{ count: 4 }], id: small:2 }, { c: [{ count: 4 }], id: small:3 }, { c: [{ count: 1 }], id: small:4 }, { c: [{ count: 2 }], id: small:5 }, { c: [{ count: 2 }], id: small:6 }, { c: [{ count: 1 }], id: small:7 }, { c: [{ count: 1 }], id: small:8 }, { c: [{ count: 1 }], id: small:9 }, { c: [{ count: 1 }], id: small:10 }, { c: [{ count: 1 }], id: small:11 }, { c: [{ count: 1 }], id: small:12 }, { c: [{ count: 1 }], id: small:13 }, { c: [{ count: 4 }], id: small:14 }, { c: [{ count: 2 }], id: small:15 }, { c: [{ count: 2 }], id: small:16 }, { c: [{ count: 1 }], id: small:17 }, { c: [{ count: 2 }], id: small:18 }, { c: [{ count: 2 }], id: small:19 }]"
+value = "[{ c: [{ count: 4 }], id: small:1 }, { c: [{ count: 4 }], id: small:2 }, { c: [{ count: 4 }], id: small:3 }, { c: [{ count: 1 }], id: small:4 }, { c: [{ count: 1 }], id: small:5 }, { c: [{ count: 1 }], id: small:6 }, { c: [{ count: 1 }], id: small:7 }, { c: [{ count: 1 }], id: small:8 }, { c: [{ count: 1 }], id: small:9 }, { c: [{ count: 1 }], id: small:10 }, { c: [{ count: 1 }], id: small:11 }, { c: [{ count: 1 }], id: small:12 }, { c: [{ count: 1 }], id: small:13 }, { c: [{ count: 4 }], id: small:14 }, { c: [{ count: 2 }], id: small:15 }, { c: [{ count: 2 }], id: small:16 }, { c: [{ count: 1 }], id: small:17 }, { c: [{ count: 2 }], id: small:18 }, { c: [{ count: 2 }], id: small:19 }]"
 
 [[test.results]]
-value = "[{ c: [{ count: 4 }], id: small:1 }, { c: [{ count: 2 }], id: small:5 }, { c: [{ count: 1 }], id: small:11 }, { c: [{ count: 2 }], id: small:18 }]"
+value = "[{ c: [{ count: 4 }], id: small:1 }, { c: [{ count: 1 }], id: small:5 }, { c: [{ count: 1 }], id: small:11 }, { c: [{ count: 2 }], id: small:18 }]"
 
 [[test.results]]
-value = "[{ c: [{ count: 0 }], id: multi:1 }, { c: [{ count: 0 }], id: multi:2 }, { c: [{ count: 4 }], id: multi:3 }, { c: [{ count: 0 }], id: multi:4 }, { c: [{ count: 8 }], id: multi:5 }, { c: [{ count: 3 }], id: multi:6 }, { c: [{ count: 1 }], id: multi:7 }, { c: [{ count: 0 }], id: multi:8 }, { c: [{ count: 2 }], id: multi:9 }]"
+value = "[{ c: [{ count: 0 }], id: multi:1 }, { c: [{ count: 0 }], id: multi:2 }, { c: [{ count: 4 }], id: multi:3 }, { c: [{ count: 0 }], id: multi:4 }, { c: [{ count: 7 }], id: multi:5 }, { c: [{ count: 2 }], id: multi:6 }, { c: [{ count: 1 }], id: multi:7 }, { c: [{ count: 0 }], id: multi:8 }, { c: [{ count: 2 }], id: multi:9 }]"
 
 [[test.results]]
-value = "[{ c: [{ count: 6 }], id: small:1 }, { c: [{ count: 6 }], id: small:2 }, { c: [{ count: 6 }], id: small:3 }, { c: [{ count: 3 }], id: small:4 }, { c: [{ count: 4 }], id: small:5 }, { c: [{ count: 4 }], id: small:6 }, { c: [{ count: 3 }], id: small:7 }, { c: [{ count: 3 }], id: small:8 }, { c: [{ count: 3 }], id: small:9 }, { c: [{ count: 3 }], id: small:10 }, { c: [{ count: 3 }], id: small:11 }, { c: [{ count: 3 }], id: small:12 }, { c: [{ count: 3 }], id: small:13 }, { c: [{ count: 6 }], id: small:14 }, { c: [{ count: 2 }], id: small:15 }, { c: [{ count: 2 }], id: small:16 }, { c: [{ count: 3 }], id: small:17 }, { c: [{ count: 4 }], id: small:18 }, { c: [{ count: 4 }], id: small:19 }]"
+value = "[{ c: [{ count: 6 }], id: small:1 }, { c: [{ count: 6 }], id: small:2 }, { c: [{ count: 6 }], id: small:3 }, { c: [{ count: 3 }], id: small:4 }, { c: [{ count: 3 }], id: small:5 }, { c: [{ count: 3 }], id: small:6 }, { c: [{ count: 3 }], id: small:7 }, { c: [{ count: 3 }], id: small:8 }, { c: [{ count: 3 }], id: small:9 }, { c: [{ count: 3 }], id: small:10 }, { c: [{ count: 3 }], id: small:11 }, { c: [{ count: 3 }], id: small:12 }, { c: [{ count: 3 }], id: small:13 }, { c: [{ count: 6 }], id: small:14 }, { c: [{ count: 2 }], id: small:15 }, { c: [{ count: 2 }], id: small:16 }, { c: [{ count: 3 }], id: small:17 }, { c: [{ count: 4 }], id: small:18 }, { c: [{ count: 4 }], id: small:19 }]"
 
 [[test.results]]
-value = "[{ c: [{ count: 4 }], id: small:1 }, { c: [{ count: 4 }], id: small:2 }, { c: [{ count: 4 }], id: small:3 }, { c: [{ count: 5 }], id: small:4 }, { c: [{ count: 6 }], id: small:5 }, { c: [{ count: 6 }], id: small:6 }, { c: [{ count: 5 }], id: small:7 }, { c: [{ count: 5 }], id: small:8 }, { c: [{ count: 5 }], id: small:9 }, { c: [{ count: 5 }], id: small:10 }, { c: [{ count: 5 }], id: small:11 }, { c: [{ count: 5 }], id: small:12 }, { c: [{ count: 5 }], id: small:13 }, { c: [{ count: 4 }], id: small:14 }, { c: [{ count: 6 }], id: small:15 }, { c: [{ count: 6 }], id: small:16 }, { c: [{ count: 5 }], id: small:17 }, { c: [{ count: 6 }], id: small:18 }, { c: [{ count: 6 }], id: small:19 }]"
+value = "[{ c: [{ count: 4 }], id: small:1 }, { c: [{ count: 4 }], id: small:2 }, { c: [{ count: 4 }], id: small:3 }, { c: [{ count: 5 }], id: small:4 }, { c: [{ count: 5 }], id: small:5 }, { c: [{ count: 5 }], id: small:6 }, { c: [{ count: 5 }], id: small:7 }, { c: [{ count: 5 }], id: small:8 }, { c: [{ count: 5 }], id: small:9 }, { c: [{ count: 5 }], id: small:10 }, { c: [{ count: 5 }], id: small:11 }, { c: [{ count: 5 }], id: small:12 }, { c: [{ count: 5 }], id: small:13 }, { c: [{ count: 4 }], id: small:14 }, { c: [{ count: 6 }], id: small:15 }, { c: [{ count: 6 }], id: small:16 }, { c: [{ count: 5 }], id: small:17 }, { c: [{ count: 6 }], id: small:18 }, { c: [{ count: 6 }], id: small:19 }]"
 
 [[test.results]]
-value = "[{ c: [{ count: 4 }], id: small:1 }, { c: [{ count: 4 }], id: small:2 }, { c: [{ count: 4 }], id: small:3 }, { c: [{ count: 5 }], id: small:4 }, { c: [{ count: 6 }], id: small:5 }, { c: [{ count: 6 }], id: small:6 }, { c: [{ count: 5 }], id: small:7 }, { c: [{ count: 5 }], id: small:8 }, { c: [{ count: 5 }], id: small:9 }, { c: [{ count: 5 }], id: small:10 }, { c: [{ count: 5 }], id: small:11 }, { c: [{ count: 5 }], id: small:12 }, { c: [{ count: 5 }], id: small:13 }, { c: [{ count: 4 }], id: small:14 }, { c: [{ count: 6 }], id: small:15 }, { c: [{ count: 6 }], id: small:16 }, { c: [{ count: 5 }], id: small:17 }, { c: [{ count: 6 }], id: small:18 }, { c: [{ count: 6 }], id: small:19 }]"
+value = "[{ c: [{ count: 4 }], id: small:1 }, { c: [{ count: 4 }], id: small:2 }, { c: [{ count: 4 }], id: small:3 }, { c: [{ count: 5 }], id: small:4 }, { c: [{ count: 5 }], id: small:5 }, { c: [{ count: 5 }], id: small:6 }, { c: [{ count: 5 }], id: small:7 }, { c: [{ count: 5 }], id: small:8 }, { c: [{ count: 5 }], id: small:9 }, { c: [{ count: 5 }], id: small:10 }, { c: [{ count: 5 }], id: small:11 }, { c: [{ count: 5 }], id: small:12 }, { c: [{ count: 5 }], id: small:13 }, { c: [{ count: 4 }], id: small:14 }, { c: [{ count: 6 }], id: small:15 }, { c: [{ count: 6 }], id: small:16 }, { c: [{ count: 5 }], id: small:17 }, { c: [{ count: 6 }], id: small:18 }, { c: [{ count: 6 }], id: small:19 }]"
+
 */
 
 DEFINE TABLE big SCHEMALESS;

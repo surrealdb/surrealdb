@@ -8,8 +8,14 @@
 //! values across variants normalize to identical bytes.
 //!
 //! Key points:
-//! - Ordering: PartialOrd/Ord behavior aims to reflect mathematical ordering across variants; for
-//!   index keys we rely on DecimalLexEncoder to preserve ordering at the byte level.
+//! - Ordering: `Ord`, `Eq` and `Hash` are [`surrealdb_types::Number`]'s, which compares numbers of
+//!   every kind by exact value, so `0.1f` sits above `0.1dec`. That is the order of their key
+//!   encodings once a decimal is normalised (`Decimal::normalize`), so an index read and a scan
+//!   admit the same numbers, and `Hash` agrees with `Eq`.
+//! - Decimal scale in keys: the encoding keeps a decimal's trailing zeros, so a computed `2.50dec`
+//!   and the literal `2.5dec` encode apart though one value. A B-tree index stamped at
+//!   `BTREE_NORMALISED_DECIMAL_KEYS_FORMAT_VERSION` or later respells each decimal without them
+//!   before encoding, so its keys agree with the order above.
 //! - Normalization in keys: 0 (Int), 0.0 (Float) and 0dec (Decimal) encode to the same byte
 //!   sequence for keys, so UNIQUE indexes treat them as equal.
 //! - Special float values: NaN, +∞ and −∞ are given fixed encodings that fit in the total ordering
@@ -745,224 +751,35 @@ pub(crate) fn cmp_f64(a: f64, b: f64) -> Ordering {
 	}
 }
 
-/// Numbers of every kind order as one line. Every NaN, whatever its sign
-/// and payload, is one value above every other number, `+inf` included:
-/// the place an index key gives it, so an indexed range and a scan admit the
-/// same NaNs.
+/// Numbers order, compare and hash as [`surrealdb_types::Number`] does, so a
+/// value reads the same in the engine and once returned. Every NaN, whatever its
+/// sign and payload, is one value above every other number, `+inf` included;
+/// numbers of different kinds are equal exactly when they are the same number,
+/// and equal numbers hash alike.
+///
+/// That is also the order of their index keys, so an indexed range and a scan
+/// admit the same numbers. A key spells a float by [`LexDecimal::from_f64`],
+/// exactly except when the expansion overflows a `u128` coefficient, and then
+/// to at least 38 significant digits, within `10^-37` of the float relatively.
+/// A float rounded so has at least 33 fractional bits, `a · 2^-k` with `a` odd
+/// and below `2^53`, and differs from any decimal `m · 10^-s` (`s <= 28`) by at
+/// least `1 / (a · 5^s) > 1 / (2^53 · 5^28)`, about `3 · 10^-36` relatively, so
+/// the rounding never reaches or crosses a decimal.
 impl Ord for Number {
 	fn cmp(&self, other: &Self) -> Ordering {
-		fn total_cmp_f64(a: f64, b: f64) -> Ordering {
-			match (a.is_nan(), b.is_nan()) {
-				(true, true) => Ordering::Equal,
-				(true, false) => Ordering::Greater,
-				(false, true) => Ordering::Less,
-				// -0.0 = 0.0
-				(false, false) if a == 0.0 && b == 0.0 => Ordering::Equal,
-				(false, false) => a.total_cmp(&b),
-			}
-		}
-
-		// Pick the greater number depending on whether it's positive.
-		macro_rules! greater {
-			($f:ident) => {
-				if $f.is_sign_positive() {
-					Ordering::Greater
-				} else {
-					Ordering::Less
-				}
-			};
-		}
-
-		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => v.cmp(w),
-			(Number::Float(v), Number::Float(w)) => total_cmp_f64(*v, *w),
-			(Number::Decimal(v), Number::Decimal(w)) => v.cmp(w),
-			// ------------------------------
-			(Number::Int(v), Number::Float(w)) => {
-				// A NaN is above every integer.
-				if w.is_nan() {
-					return Ordering::Less;
-				}
-				// If the float is not finite, we don't need to compare it to the integer.
-				if !w.is_finite() {
-					return greater!(w).reverse();
-				}
-				// Cast int to i128 to avoid saturating.
-				let l = *v as i128;
-				// Cast the integer-part of the float to i128 to avoid saturating.
-				let r = *w as i128;
-				// Compare both integer parts.
-				match l.cmp(&r) {
-					// If the integer parts are equal then we need to compare the mantissa.
-					Ordering::Equal => total_cmp_f64(0.0, w.fract()),
-					// If the integer parts are not equal then we already know the correct ordering.
-					ordering => ordering,
-				}
-			}
-			(v @ Number::Float(_), w @ Number::Int(_)) => w.cmp(v).reverse(),
-			// ------------------------------
-			(Number::Int(v), Number::Decimal(w)) => Decimal::from(*v).cmp(w),
-			(Number::Decimal(v), Number::Int(w)) => v.cmp(&Decimal::from(*w)),
-			// ------------------------------
-			(Number::Float(v), Number::Decimal(w)) => {
-				// Compare fractional parts of the float and decimal.
-				macro_rules! compare_fractions {
-					($l:ident, $r:ident) => {
-						match ($l == 0.0, $r == Decimal::ZERO) {
-							// If both numbers are zero, these are equal.
-							(true, true) => {
-								return Ordering::Equal;
-							}
-							// If only the float is zero, check the decimal's sign.
-							(true, false) => {
-								return greater!($r).reverse();
-							}
-							// If only the decimal is zero, check the float's sign.
-							(false, true) => {
-								return greater!($l);
-							}
-							// If neither is zero, continue checking the rest of the digits.
-							(false, false) => {
-								continue;
-							}
-						}
-					};
-				}
-				// A NaN is above every decimal.
-				if v.is_nan() {
-					return Ordering::Greater;
-				}
-				// If the float is not finite, we don't need to compare it to the decimal
-				if !v.is_finite() {
-					return greater!(v);
-				}
-				// Cast int to i128 to avoid saturating.
-				let l = *v as i128;
-				// Cast the integer-part of the decimal to i128.
-				let Ok(r) = i128::try_from(*w) else {
-					return greater!(w).reverse();
-				};
-				// Compare both integer parts.
-				match l.cmp(&r) {
-					// If the integer parts are equal then we need to compare the fractional parts.
-					Ordering::Equal => {
-						// We can't compare the fractional parts of floats with decimals reliably.
-						// Instead, we need to compare them as integers. To do this, we need to
-						// multiply the fraction with a number large enough to move some digits
-						// to the integer part of the float or decimal. The number should fit in
-						// 52 bits and be able to multiply f64 fractions between -1 and 1 without
-						// losing precision. Since we may need to do this repeatedly it helps if
-						// the number is as big as possible to reduce the number of
-						// iterations needed.
-						//
-						// This number is roughly 2 ^ 53 with the last digits truncated in order
-						// to make sure the fraction converges to 0 every time we multiply it.
-						// This is a magic number I found through my experiments so don't ask me
-						// the logic behind it :) Before changing this number, please make sure
-						// that the relevant tests aren't flaky after changing it.
-						const SAFE_MULTIPLIER: i64 = 9_007_199_254_740_000;
-						// Get the fractional part of the float.
-						let mut l = v.fract();
-						// Get the fractional part of the decimal.
-						let mut r = w.fract();
-						// Move the digits and compare them.
-						// This is very generous. For example, for our tests to pass we only need
-						// 3 iterations. This should be at least 6 to make sure we cover all
-						// possible decimals and floats.
-						for _ in 0..12 {
-							l *= SAFE_MULTIPLIER as f64;
-							r *= Decimal::new(SAFE_MULTIPLIER, 0);
-							// Cast the integer part of the decimal to i64. The fractions are always
-							// less than 1 so we know this will always be less than SAFE_MULTIPLIER.
-							match r.to_i64() {
-								Some(ref right) => match (l as i64).cmp(right) {
-									// If the integer parts are equal, we need to check the
-									// remaining fractional parts.
-									Ordering::Equal => {
-										// Drop the integer parts we already compared.
-										l = l.fract();
-										r = r.fract();
-										// Compare the fractional parts and decide whether to return
-										// or continue checking the next digits.
-										compare_fractions!(l, r);
-									}
-									ordering => {
-										// If the integer parts are not equal then we already know
-										// the correct ordering.
-										return ordering;
-									}
-								},
-								// This is technically unreachable. Reaching this part likely
-								// indicates a bug in `rust-decimal`'s `to_f64`'s
-								// implementation.
-								None => {
-									// We will assume the decimal is bigger or smaller depending on
-									// its sign.
-									return greater!(w).reverse();
-								}
-							}
-						}
-						// After our iterations, if we still haven't exhausted both fractions we
-						// will just treat them as equal. It should be impossible to reach
-						// this point after at least 6 iterations. We could use an infinite
-						// loop instead but this way we make sure the loop always exits.
-						Ordering::Equal
-					}
-					// If the integer parts are not equal then we already know the correct ordering.
-					ordering => ordering,
-				}
-			}
-			(v @ Number::Decimal(..), w @ Number::Float(..)) => w.cmp(v).reverse(),
-		}
+		surrealdb_types::Number::from(*self).cmp(&surrealdb_types::Number::from(*other))
 	}
 }
 
 impl hash::Hash for Number {
-	/// # This hash does not satisfy the `Hash`/`Eq` contract
-	///
-	/// It hashes the decimal buffer encoding, so numerically-equal values with an
-	/// identical decimal expansion agree across variants — `Int(1)`, `Float(1.0)`
-	/// and `Decimal(1)` share a hash. But [`Number`]'s equality is *approximate*
-	/// between `Float` and `Decimal`: it agrees to roughly sixteen significant
-	/// digits and then calls it equal, so `Float(0.1) == Decimal("0.1")` while the
-	/// buffers differ, the float's key digits being
-	/// `0.100000000000000005551115123125782702118`. (Going the other way,
-	/// `Float(0.11111) != Decimal("0.11111")` — the relation is not even
-	/// transitive across the boundary.)
-	///
-	/// So `a == b` does **not** imply `hash(a) == hash(b)`, and an approximate,
-	/// non-transitive equality admits no canonical form that would fix it. Any
-	/// `HashMap`/`HashSet` keyed on a [`Number`] — or on any value that can hold
-	/// one — will therefore miss entries it contains. Key such structures on `Ord`
-	/// instead, or treat a miss as inconclusive; see
-	/// [`Value::hash_agrees_with_eq`](crate::val::Value::hash_agrees_with_eq) for
-	/// deciding when a miss can still be trusted.
 	fn hash<H: hash::Hasher>(&self, state: &mut H) {
-		self.as_decimal_buf().hash(state);
+		surrealdb_types::Number::from(*self).hash(state);
 	}
 }
 
 impl PartialEq for Number {
 	fn eq(&self, other: &Self) -> bool {
-		// Every NaN is one value, as `Ord` orders it.
-		fn total_eq_f64(a: f64, b: f64) -> bool {
-			a.to_bits().eq(&b.to_bits()) || (a == 0.0 && b == 0.0) || (a.is_nan() && b.is_nan())
-		}
-
-		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => v.eq(w),
-			(Number::Float(v), Number::Float(w)) => total_eq_f64(*v, *w),
-			(Number::Decimal(v), Number::Decimal(w)) => v.eq(w),
-			// ------------------------------
-			(v @ Number::Int(_), w @ Number::Float(_)) => v.cmp(w) == Ordering::Equal,
-			(v @ Number::Float(_), w @ Number::Int(_)) => v.cmp(w) == Ordering::Equal,
-			// ------------------------------
-			(Number::Int(v), Number::Decimal(w)) => Decimal::from(*v).eq(w),
-			(Number::Decimal(v), Number::Int(w)) => v.eq(&Decimal::from(*w)),
-			// ------------------------------
-			(v @ Number::Float(_), w @ Number::Decimal(_)) => v.cmp(w) == Ordering::Equal,
-			(v @ Number::Decimal(_), w @ Number::Float(_)) => v.cmp(w) == Ordering::Equal,
-		}
+		surrealdb_types::Number::from(*self).eq(&surrealdb_types::Number::from(*other))
 	}
 }
 
@@ -1659,6 +1476,179 @@ mod tests {
 			let b = random_permutation(a);
 			let c = random_permutation(b);
 			assert_consistent(a, b, c);
+		}
+	}
+
+	/// A float equals a decimal only when the decimal spells the float's exact
+	/// value, so `0.1f`, whose key spelling is
+	/// `0.100000000000000005551115123125782702118`, is above `0.1dec`.
+	#[test]
+	fn a_float_compares_with_a_decimal_by_its_exact_expansion() {
+		let dec = |s: &str| Number::Decimal(Decimal::from_str_normalized(s).unwrap());
+		for s in ["0.1", "0.3", "0.07", "1.1", "19.99", "0.11111"] {
+			let f = Number::Float(s.parse().unwrap());
+			assert_ne!(f, dec(s), "{s}");
+		}
+		assert!(Number::Float(0.1) > dec("0.1"));
+		assert!(Number::Float(0.3) < dec("0.3"));
+		assert_eq!(Number::Float(2f64.powi(-20)), dec("0.00000095367431640625"));
+		for s in ["0", "0.5", "1", "1.5", "-2.25", "1024"] {
+			let f = Number::Float(s.parse().unwrap());
+			assert_eq!(f, dec(s), "{s}");
+		}
+		assert_eq!(Number::Float(-0.0), dec("0"));
+		assert!(Number::Float(1.0) < dec("1.0000000000000000000000000001"));
+		assert!(Number::Float(f64::INFINITY) > dec("79228162514264337593543950335"));
+		assert!(Number::Float(f64::NEG_INFINITY) < dec("-79228162514264337593543950335"));
+		// A decimal's trailing zeros, and the bounds of an `i64`, change nothing.
+		let mut padded = Decimal::from_str_normalized("2.5").unwrap();
+		padded.rescale(3);
+		assert_eq!(Number::Float(2.5), Number::Decimal(padded));
+		assert_eq!(Number::Float(2f64.powi(63)), dec("9223372036854775808"));
+		assert_eq!(Number::Float(-(2f64.powi(63))), Number::Int(i64::MIN));
+		// A subnormal float lies between zero and the smallest decimals.
+		let subnormal = f64::from_bits(1);
+		assert!(Number::Float(subnormal) < Number::Decimal(Decimal::new(1, 28)));
+		assert!(Number::Float(subnormal) > dec("0"));
+		assert!(Number::Float(-subnormal) > Number::Decimal(Decimal::new(-1, 28)));
+	}
+
+	/// A float and a decimal order as their index keys whatever the float's
+	/// expansion, including a float whose key rounds it: no decimal lies within
+	/// that rounding of it.
+	#[test]
+	fn a_float_and_a_decimal_order_as_their_keys_whatever_the_expansion() {
+		fn key(n: Number) -> Vec<u8> {
+			match n {
+				Number::Decimal(d) => Number::Decimal(d.normalize()).as_decimal_buf(),
+				n => n.as_decimal_buf(),
+			}
+		}
+		let mut rng = rand::rng();
+		let mut floats =
+			vec![0.1, 0.3, 1.0 / 3.0, 2f64.powi(-33), 2f64.powi(-60), f64::from_bits(1)];
+		let mut decimals =
+			vec![Decimal::new(1, 1), Decimal::new(1, 28), Decimal::MAX, Decimal::MIN];
+		for _ in 0..2_000 {
+			let scale = rng.random_range(0..=28);
+			let mantissa = rng.random::<i64>() as i128 >> rng.random_range(0..40);
+			let d = Decimal::from_i128_with_scale(mantissa, scale);
+			decimals.push(d);
+			if let Some(f) = d.to_f64() {
+				// The float nearest the decimal, and its neighbours.
+				floats.extend([
+					f,
+					f64::from_bits(f.to_bits() + 1),
+					f64::from_bits(f.to_bits() - 1),
+				]);
+			}
+			let f = f64::from_bits(rng.random());
+			if f.is_finite() {
+				floats.push(f);
+			}
+		}
+		// A float with a binary fraction finer than `2^-33` is one a key can round.
+		let fine = floats.iter().filter(|f| (**f * 2f64.powi(33)).fract() != 0.0).count();
+		assert!(fine > 1_000, "the sample holds floats whose keys round: {fine}");
+		for &f in &floats {
+			let (f, kf) = (Number::Float(f), key(Number::Float(f)));
+			for &d in &decimals {
+				let d = Number::Decimal(d);
+				assert_eq!(f.cmp(&d), kf.cmp(&key(d)), "{f:?} {d:?}");
+			}
+		}
+	}
+
+	/// `Ord` orders every pair of numbers as their key bytes do, and numbers that
+	/// compare equal hash alike, whatever their kinds.
+	#[test]
+	fn ord_and_hash_agree_with_the_key_encoding() {
+		fn hash(n: &impl std::hash::Hash) -> u64 {
+			use std::hash::{BuildHasher, BuildHasherDefault};
+			BuildHasherDefault::<std::collections::hash_map::DefaultHasher>::default().hash_one(n)
+		}
+		fn kinds_of(n: Number) -> [Number; 3] {
+			[Number::Int(n.as_int()), Number::Float(n.as_float()), Number::Decimal(n.to_decimal())]
+		}
+		/// `a` and `b` order as the key bytes of their normalised forms, and hash
+		/// alike when equal.
+		fn agree((a, ka): &(Number, Vec<u8>), (b, kb): &(Number, Vec<u8>)) {
+			assert_eq!(a.cmp(b), ka.cmp(kb), "{a:?} {b:?}");
+			if a == b {
+				assert_eq!(hash(a), hash(b), "{a:?} {b:?}");
+			}
+		}
+		let mut rng = rand::rng();
+		let numbers = vec![
+			Number::Float(f64::NAN),
+			Number::Float(f64::INFINITY),
+			Number::Float(f64::NEG_INFINITY),
+			Number::Float(-0.0),
+			Number::Float(0.0),
+			Number::Float(0.1),
+			Number::Float(-1.0),
+			Number::Float(f64::MIN_POSITIVE),
+			Number::Float(f64::MAX),
+			Number::Int(i64::MAX),
+			Number::Int(i64::MIN),
+			Number::Float(2f64.powi(53)),
+			Number::Int(9_007_199_254_740_993),
+			Number::Float(2f64.powi(63)),
+			Number::Float(-(2f64.powi(63))),
+			Number::Float(f64::from_bits(1)),
+			Number::Float(-f64::from_bits(1)),
+		];
+		// Every kind of every special value, checked against every other.
+		// Each kind, and a decimal with trailing zeros that compares equal to it.
+		let keyed = |ns: &[Number]| -> Vec<(Number, Vec<u8>)> {
+			ns.iter()
+				.flat_map(|n| kinds_of(*n))
+				.flat_map(|n| match n {
+					Number::Decimal(d) => {
+						let mut padded = d;
+						padded.rescale(d.scale() + 2);
+						vec![n, Number::Decimal(padded)]
+					}
+					n => vec![n],
+				})
+				.map(|n| {
+					let key = match n {
+						Number::Decimal(d) => Number::Decimal(d.normalize()).as_decimal_buf(),
+						n => n.as_decimal_buf(),
+					};
+					(n, key)
+				})
+				.collect()
+		};
+		let specials = keyed(&numbers);
+		for a in &specials {
+			for b in &specials {
+				agree(a, b);
+			}
+		}
+		// Random values next to their neighbours and to decimals near them.
+		let mut randoms = Vec::new();
+		for _ in 0..300 {
+			let f = match rng.random_range(0..3) {
+				0 => f64::from_bits(rng.random()),
+				1 => rng.random_range(-1e6..1e6),
+				_ => rng.random_range(-1.0..1.0),
+			};
+			if f.is_finite() {
+				randoms.push(Number::Float(f));
+				randoms.push(Number::Float(f.next_up()));
+				randoms.push(Number::Decimal(Number::Float(f).as_decimal()));
+			}
+		}
+		let mut keyed = keyed(&randoms);
+		keyed.extend(specials);
+		keyed.shuffle(&mut rng);
+		for pair in keyed.chunks(2).filter(|c| c.len() == 2).chain(keyed.windows(2)) {
+			agree(&pair[0], &pair[1]);
+		}
+		keyed.sort_by_key(|a| a.0);
+		for pair in keyed.windows(2) {
+			agree(&pair[0], &pair[1]);
 		}
 	}
 

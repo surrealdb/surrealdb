@@ -835,7 +835,7 @@ async fn a_fold_refuses_numeric_over_a_started_doc_id_reclaim() {
 	assert_eq!(battery(&ds, &ses).await, before);
 }
 
-/// `REMOVE TABLE` resets a table's doc-ID generation: it wipes the `!di`/
+/// `REMOVE TABLE` resets a table's doc-ID generation: it wipes the `!dj`/
 /// `!dd` mappings and the allocator along with the rest of the table's
 /// keyspace, so a redefinition restarts allocation from scratch and a new
 /// record can be handed an id a foreign block still names. The process-wide

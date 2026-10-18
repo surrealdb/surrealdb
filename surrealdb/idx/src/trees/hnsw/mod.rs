@@ -47,7 +47,7 @@ use surrealdb_datastore::Transaction;
 // identity they carry and the element id they address are keyspace values, so
 // they are declared below this layer; the graph built from them stays here.
 pub use surrealdb_datastore::values::hnsw::{
-	HnswRecordPendingUpdate, HnswState, VectorId, VectorPendingUpdate,
+	HnswRecordPendingMember, HnswRecordPendingUpdate, HnswState, VectorId, VectorPendingUpdate,
 };
 pub(crate) use surrealdb_datastore::values::vector::ElementId;
 
@@ -1588,6 +1588,7 @@ mod tests {
 					old_vectors: vec![],
 					new_vectors: vec![serialized(&vec)],
 					id: None,
+					others: Vec::new(),
 				},
 			)
 			.await?;
@@ -1686,6 +1687,102 @@ mod tests {
 				res.iter().any(|(rid, _, _)| record_key(&rid.key) == record_key(&id)),
 				"KNN must resolve back to {id:?}, got {res:?}"
 			);
+		}
+		Ok(())
+	}
+
+	/// Records whose ids differ only in a number's kind (`[1]` and `[1dec]`) share
+	/// one pending key. On an index stamped to keep a pending update for every
+	/// record its key spells, each keeps its own: both reach the graph from one
+	/// compaction, and an update to one and a delete of the other in one window
+	/// leave the survivor's new vector, with no trace of the deleted record.
+	///
+	/// Comparisons are on encoded record keys, not `==`, which compares the
+	/// numbers across kinds.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_records_sharing_a_pending_key_keep_their_own_vectors() -> Result<()> {
+		fn record_key(id: &RecordIdKey) -> Vec<u8> {
+			storekey::encode_vec(id).unwrap()
+		}
+		async fn nearest(
+			h: &HnswIndex,
+			ds: &TestIndexStore,
+			x: i64,
+			y: i64,
+		) -> Result<Vec<Vec<u8>>> {
+			let ctx = new_ctx(ds, TransactionType::Read).await;
+			let pt = vec![Number::Int(x), Number::Int(y)];
+			let res = h.knn_search(&ctx, &pt, 2, 500, None, None).await?;
+			ctx.tx().cancel().await?;
+			Ok(res.iter().map(|(rid, _, _)| record_key(&rid.key)).collect())
+		}
+
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true, true);
+		let int = RecordIdKey::Array(vec![Value::Number(Number::Int(1))].into());
+		let dec = RecordIdKey::Array(vec![Value::Number(Number::Decimal(1.into()))].into());
+		assert_eq!(ikb.new_hr_key(&int), ikb.new_hr_key(&dec), "the pair shares a pending key");
+
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&tx,
+				ikb.clone(),
+				TableId(3),
+				&p,
+				crate::catalog::INDEX_FORMAT_VERSION,
+			)
+			.await?;
+			h.index(&ctx, &int, None, Some(vector_content(&new_i16_vec(1, 1)))).await?;
+			h.index(&ctx, &dec, None, Some(vector_content(&new_i16_vec(9, 9)))).await?;
+			tx.commit().await?;
+			h
+		};
+		// Read from the pending queue, then from the graph.
+		for compacted in [false, true] {
+			if compacted {
+				let ctx = new_ctx(&ds, TransactionType::Write).await;
+				h.index_pendings(&ctx).await?;
+				ctx.tx().commit().await?;
+			}
+			assert_eq!(nearest(&h, &ds, 1, 1).await?, vec![record_key(&int), record_key(&dec)]);
+			assert_eq!(nearest(&h, &ds, 9, 9).await?, vec![record_key(&dec), record_key(&int)]);
+		}
+
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			h.index(
+				&ctx,
+				&int,
+				Some(vector_content(&new_i16_vec(1, 1))),
+				Some(vector_content(&new_i16_vec(5, 5))),
+			)
+			.await?;
+			h.index(&ctx, &dec, Some(vector_content(&new_i16_vec(9, 9))), None).await?;
+			tx.commit().await?;
+		}
+		for compacted in [false, true] {
+			if compacted {
+				let ctx = new_ctx(&ds, TransactionType::Write).await;
+				h.index_pendings(&ctx).await?;
+				ctx.tx().commit().await?;
+			}
+			assert_eq!(
+				nearest(&h, &ds, 9, 9).await?,
+				vec![record_key(&int)],
+				"compacted={compacted}"
+			);
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let res =
+				h.knn_search(&ctx, &[Number::Int(5), Number::Int(5)], 1, 500, None, None).await?;
+			ctx.tx().cancel().await?;
+			assert_eq!(res.len(), 1);
+			assert_eq!(record_key(&res[0].0.key), record_key(&int));
+			assert_eq!(res[0].1, 0.0, "the survivor holds its new vector, compacted={compacted}");
 		}
 		Ok(())
 	}

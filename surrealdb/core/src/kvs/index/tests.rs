@@ -31,9 +31,10 @@ use crate::idx::IndexKeyBase;
 use crate::idx::index::IndexOperation;
 use crate::key::reclaim::{Expunge, ReclaimKind};
 use crate::key::schema::{
-	DocKeyPrefix, DocLookupKey, DocLookupPrefix, DocPendingKey, DocPendingPrefix,
-	DocStatsBatchPrefix, EntryPrefix, IdxRoot, IndexCompactionIxPrefix, IndexCountKey,
-	IndexCountPrefix, ReclaimKey, ReclaimPrefix, RecordPrefix, TermChangeBatchPrefix,
+	DocKeyPrefix, DocLookupIdentityPrefix, DocLookupKey, DocLookupPrefix, DocPendingKey,
+	DocPendingPrefix, DocStatsBatchPrefix, EntryPrefix, IdxRoot, IndexCompactionIxPrefix,
+	IndexCountKey, IndexCountPrefix, ReclaimKey, ReclaimPrefix, RecordPrefix,
+	TermChangeBatchPrefix,
 };
 use crate::key::{KVKey, KVKeyDecode, KVSubspace, KVValue, Key};
 use crate::kvs::index::CleanUncommittedBuild;
@@ -9470,7 +9471,7 @@ async fn datastore_drop_releases_index_builder_after_build() -> Result<()> {
 // ---------------------------------------------------------------------------
 // Table-level doc-ID space lifecycle under concurrent index DDL.
 //
-// A table's shared doc-ID space (`!di` record→doc, `!dd` doc→record) exists iff
+// A table's shared doc-ID space (`!dj` record→doc, `!dd` doc→record) exists iff
 // the table carries at least one doc-ID-consuming index (full-text / HNSW /
 // DiskAnn). These tests exercise that lifecycle through the real DEFINE/REMOVE
 // INDEX statement paths — including concurrent removal, where each REMOVE
@@ -9504,12 +9505,13 @@ async fn count_doc_id_mappings(ds: &Datastore, table: &str) -> Result<(usize, us
 	let ns = tx.get_ns_by_name("test", None).await?.expect("namespace should exist");
 	let db = tx.get_db_by_name("test", "test", None).await?.expect("database should exist");
 	let tb: TableName = table.into();
-	let di = DocLookupPrefix::new(ns.namespace_id, db.database_id, Cow::Borrowed(&tb)).range()?;
+	let dj = DocLookupIdentityPrefix::new(ns.namespace_id, db.database_id, Cow::Borrowed(&tb))
+		.range()?;
 	let dd = DocKeyPrefix::new(ns.namespace_id, db.database_id, Cow::Borrowed(&tb)).range()?;
-	let di_keys = tx.keys(di, u32::MAX, 0, None).await?;
+	let dj_keys = tx.keys(dj, u32::MAX, 0, None).await?;
 	let dd_keys = tx.keys(dd, u32::MAX, 0, None).await?;
 	tx.cancel().await?;
-	Ok((di_keys.len(), dd_keys.len()))
+	Ok((dj_keys.len(), dd_keys.len()))
 }
 
 /// The shared doc-ID space must survive removal of a non-last consumer and be
@@ -10279,7 +10281,7 @@ async fn concurrent_removal_of_last_doc_id_indexes_purges_mappings() -> Result<(
 
 /// Concurrently building two doc-ID indexes over the same pre-existing records
 /// must converge on a single shared doc-ID per record (no divergence or
-/// duplication): `resolve_or_assign` is serialized by the per-record `!di` write
+/// duplication): `resolve_or_assign` is serialized by the per-record `!dj` write
 /// conflict.
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -10600,7 +10602,7 @@ async fn seed_pending_reclaim(
 }
 
 /// Writes a `!dp` marker in the encoding a previous release used for it: the
-/// record id under the index format, which is what `!di` still spells, so the
+/// record id under the index format, as the type-erased `!di` key spells it, so the
 /// bytes are that key's with its route tag swapped. Such a marker names an id
 /// this release cannot decode.
 async fn seed_pending_reclaim_in_previous_encoding(
@@ -10641,7 +10643,7 @@ async fn count_pending_reclaims(
 /// same time, each defers a deleted record's central mapping removal through a
 /// durable `!dp` marker (the sibling may still need the mapping to replay its
 /// own copy of the delete); a later sweep with no building sibling must reclaim
-/// it, or the `!di`/`!dd` pair is orphaned and a later re-create wrongly reuses
+/// it, or the `!dj`/`!dd` pair is orphaned and a later re-create wrongly reuses
 /// the id.
 ///
 /// Drives [`Building::reclaim_deferred_doc_ids`] directly against a simulated
@@ -10651,12 +10653,12 @@ async fn count_pending_reclaims(
 /// its live mapping while its stale marker is consumed. Both directions of the
 /// mapping are asserted, for a plain id and for one holding a number in a
 /// nested value — which the marker must address as precisely as the mapping
-/// does, or the reclaim is aimed at a different record. A marker a previous
-/// release wrote is translated through the erased mapping its bytes
-/// address, so its reclaim is carried out rather than forfeited; one that
-/// resolves to nothing is still consumed; and one whose two spellings alias —
-/// which decodes cleanly as a record other than its own — is reclaimed through
-/// the same chain, because decoding proves nothing about a marker's spelling. The end-to-end wiring
+/// does, or the reclaim is aimed at a different record. A marker a 3.3
+/// pre-release wrote is read as every record its spelling stands for, so its
+/// reclaim is carried out rather than forfeited; one that resolves to nothing
+/// is still consumed; and one whose two spellings alias — which decodes
+/// cleanly as a record other than its own — is reclaimed through its other
+/// readings, because decoding proves nothing about a marker's spelling. The end-to-end wiring
 /// (a real replayed delete writing the marker, and a real build completion running the sweep) is
 /// covered by [`deferred_doc_id_reclaim_survives_across_builds`].
 #[cfg(feature = "kv-mem")]
@@ -10664,7 +10666,7 @@ async fn count_pending_reclaims(
 #[test_log::test]
 async fn concurrent_doc_id_index_build_reclaims_deferred_mapping() -> Result<()> {
 	let (ds, session) = new_index_test_ds().await?;
-	// Two full-text indexes on one table => two consumers of the shared !di/!dd
+	// Two full-text indexes on one table => two consumers of the shared !dj/!dd
 	// space. `ia` is our builder; `ib` stands in for the concurrent sibling.
 	execute_all(
 		&ds,
@@ -10792,10 +10794,10 @@ async fn concurrent_doc_id_index_build_reclaims_deferred_mapping() -> Result<()>
 		"its marker must be consumed"
 	);
 
-	// (5) A marker in the spelling a previous release used. Its id does not
-	// decode as an identity here, so the record it names is recovered through
-	// the erased mapping the marker's own bytes address — and the reclaim it was
-	// written for is carried out rather than forfeited. `REBUILD INDEX` does not
+	// (5) A marker in the spelling a 3.3 pre-release used. Its id does not
+	// decode as an identity here, so it is read as every record that spelling
+	// stands for — and the reclaim it was written for is carried out rather than
+	// forfeited. `REBUILD INDEX` does not
 	// clear the doc-ID space, so a forfeited mapping would survive until the
 	// table's last doc-ID index was dropped.
 	let legacy = RecordIdKey::Array(vec![Value::Number(crate::val::Number::Int(2))].into());
@@ -10825,8 +10827,8 @@ async fn concurrent_doc_id_index_build_reclaims_deferred_mapping() -> Result<()>
 	assert_eq!(read_shared_record_id(&ds, &docs, readable_id).await?, None);
 
 	// A float whose exact expansion the index format cannot hold. Decoding the
-	// marker's bytes rounds it to the nearest decimal, which does not encode back
-	// to the key its mapping was written at, so only the bytes as they are find it.
+	// marker's bytes rounds it to the nearest decimal, and the float reading of
+	// that decimal is the record the marker was written for.
 	for float in [0.1, 0.7] {
 		let id = RecordIdKey::Array(vec![Value::Number(crate::val::Number::Float(float))].into());
 		let doc_id = assign_shared_doc_id(&ds, &docs, &id).await?;
@@ -10841,11 +10843,9 @@ async fn concurrent_doc_id_index_build_reclaims_deferred_mapping() -> Result<()>
 		assert_eq!(count_pending_reclaims(&ds, ns, db, &table).await?, 0);
 	}
 
-	// A marker whose record has since lost the type-erased key. `[7]` is gone,
-	// and `[7dec]`, which the previous spelling cannot tell from it, is live and
-	// took the key over when it was indexed. The chain through that key leads to
-	// the live record, so the marked one is reached only as another record the
-	// same spelling stands for.
+	// A marker whose spelling a live record shares. `[7]` is gone, and `[7dec]`,
+	// which the pre-release spelling cannot tell from it, is live: both are
+	// readings of the marker, and only the absent one is reclaimed.
 	let displaced = RecordIdKey::Array(vec![Value::Number(crate::val::Number::Int(7))].into());
 	let displaced_id = assign_shared_doc_id(&ds, &docs, &displaced).await?;
 	execute_all(&ds, &session, "CREATE t:[7dec] SET a = 'alpha', b = 'beta';").await?;
@@ -10853,13 +10853,6 @@ async fn concurrent_doc_id_index_build_reclaims_deferred_mapping() -> Result<()>
 		vec![Value::Number(crate::val::Number::Decimal(rust_decimal::Decimal::from(7)))].into(),
 	);
 	let twin_id = read_shared_doc_id(&ds, &docs, &twin).await?.expect("the live twin is indexed");
-	{
-		let tx = ds.transaction(TransactionType::Read).await?;
-		let erased = DocLookupKey::new(ns, db, Cow::Borrowed(&table), Cow::Borrowed(&displaced));
-		let held = tx.get_key(&erased, None).await?;
-		tx.cancel().await?;
-		assert_eq!(held, Some(twin_id), "the premise: the twin holds the erased key");
-	}
 	seed_pending_reclaim_in_previous_encoding(&ds, ns, db, &table, &displaced).await?;
 	ia_building.reclaim_deferred_doc_ids().await?;
 	assert_eq!(
@@ -10871,7 +10864,7 @@ async fn concurrent_doc_id_index_build_reclaims_deferred_mapping() -> Result<()>
 	assert_eq!(
 		read_shared_doc_id(&ds, &docs, &twin).await?,
 		Some(twin_id),
-		"and the live record the chain reached keeps its own"
+		"and the live record the spelling also reaches keeps its own"
 	);
 	assert_eq!(count_pending_reclaims(&ds, ns, db, &table).await?, 0);
 
@@ -10885,11 +10878,12 @@ async fn concurrent_doc_id_index_build_reclaims_deferred_mapping() -> Result<()>
 		"an unresolvable marker must be consumed, not left to wedge the range"
 	);
 
-	// (6) A marker whose two spellings alias. Under the previous release
-	// `[2, NONE]` encodes to the same bytes as `[2]` does under this one, so this
-	// marker decodes cleanly — as a record it was not written for. Decoding is
-	// therefore no proof of a marker's spelling, and the sweep has to follow both
-	// readings or this record's mapping is stranded while its marker is consumed.
+	// (6) A marker whose two spellings alias. Under a 3.3 pre-release
+	// `[2, NONE]` encodes to the same bytes as `[2]` does under this release, so
+	// this marker decodes cleanly — as a record it was not written for. Decoding
+	// is therefore no proof of a marker's spelling, and the sweep has to take
+	// every reading or this record's mapping is stranded while its marker is
+	// consumed.
 	let aliased =
 		RecordIdKey::Array(vec![Value::Number(crate::val::Number::Int(2)), Value::None].into());
 	let aliased_id = assign_shared_doc_id(&ds, &docs, &aliased).await?;
@@ -12509,7 +12503,7 @@ async fn knn_prefilter_narrows_the_search_to_the_allow_list() -> Result<()> {
 }
 
 /// The bytes a previous release wrote a `!bp` marker at: this release's key up
-/// to the record id, then the id under the index format — which is what `!di`
+/// to the record id, then the id under the index format — as the type-erased `!di`
 /// still spells, so that key supplies the suffix.
 fn primary_append_key_in_previous_encoding(
 	ikb: &IndexKeyBase,

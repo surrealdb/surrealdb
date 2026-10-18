@@ -217,26 +217,16 @@ pub(super) fn key_at<'a>(
 /// The rows a probe keeps, in the order they were read. Each is indexed by
 /// the value of the join field, or `NONE` when a row has none.
 ///
-/// [`Probe::candidates`] returns a superset of the rows whose field `=`
-/// ([`Value::equal`]) the key. The join predicate still judges each one.
-/// A map is exact only where hashing agrees with `=`
-/// ([`Value::hash_agrees_with_eq`]). A number's hash differs between its
-/// representations, so numbers are indexed by representation. A key is
-/// looked up in each representation it can equal exactly: an integer equals
-/// a float or decimal only when both have the same integral value. A float
-/// and a decimal compare approximately, so they match any row of the other
-/// representation. A field value that is neither a number nor hash-agreeing
-/// is a candidate for every key, and so is a regex that can match a string
-/// key. A key that is neither matches every row.
+/// [`Probe::candidates`] answers a superset of the rows whose field `=`
+/// ([`Value::equal`]) the key, which the join predicate still judges. A map
+/// is decisive only where hashing agrees with `=`
+/// ([`Value::hash_agrees_with_eq`]), as it does for numbers of every kind. A
+/// field whose value does not agree, a regex matching a string key among
+/// them, is a candidate for every key; a key that does not agree matches
+/// every row.
 pub(crate) struct Probe {
 	rows: Vec<Value>,
-	ints: HashMap<i64, Vec<usize>>,
-	floats: HashMap<u64, Vec<usize>>,
-	decimals: HashMap<rust_decimal::Decimal, Vec<usize>>,
 	hashed: HashMap<Value, Vec<usize>>,
-	/// Every row indexed by a float, and by a decimal.
-	float_rows: Vec<usize>,
-	decimal_rows: Vec<usize>,
 	/// The rows whose field is a candidate for every key.
 	loose: Vec<usize>,
 }
@@ -247,36 +237,11 @@ impl std::fmt::Debug for Probe {
 	}
 }
 
-/// A float's bits with both zeros one key, as `=` holds them equal.
-fn float_key(f: f64) -> u64 {
-	if f == 0.0 {
-		0.0f64.to_bits()
-	} else {
-		f.to_bits()
-	}
-}
-
-/// The integer a float denotes exactly, if any.
-fn float_int(f: f64) -> Option<i64> {
-	// The bounds are the i64 range, the upper exclusive as 2^63 is not an
-	// i64.
-	(f.is_finite()
-		&& f.fract() == 0.0
-		&& (-9_223_372_036_854_776_000.0..9_223_372_036_854_776_000.0).contains(&f))
-	.then_some(f as i64)
-}
-
 impl Probe {
 	fn new(rows: Vec<Value>, field: &str) -> Self {
-		use crate::val::Number;
 		let mut probe = Self {
 			rows: Vec::new(),
-			ints: HashMap::new(),
-			floats: HashMap::new(),
-			decimals: HashMap::new(),
 			hashed: HashMap::new(),
-			float_rows: Vec::new(),
-			decimal_rows: Vec::new(),
 			loose: Vec::new(),
 		};
 		for (at, row) in rows.iter().enumerate() {
@@ -284,20 +249,10 @@ impl Probe {
 				Value::Object(object) => object.get(field).unwrap_or(&Value::None),
 				_ => &Value::None,
 			};
-			match key {
-				Value::Number(Number::Int(i)) => probe.ints.entry(*i).or_default().push(at),
-				Value::Number(Number::Float(f)) => {
-					probe.floats.entry(float_key(*f)).or_default().push(at);
-					probe.float_rows.push(at);
-				}
-				Value::Number(Number::Decimal(d)) => {
-					probe.decimals.entry(d.normalize()).or_default().push(at);
-					probe.decimal_rows.push(at);
-				}
-				key if key.hash_agrees_with_eq() => {
-					probe.hashed.entry(key.clone()).or_default().push(at)
-				}
-				_ => probe.loose.push(at),
+			if key.hash_agrees_with_eq() {
+				probe.hashed.entry(key.clone()).or_default().push(at)
+			} else {
+				probe.loose.push(at)
 			}
 		}
 		probe.rows = rows;
@@ -305,47 +260,53 @@ impl Probe {
 	}
 
 	/// The rows whose field may equal `key`, in the order they were read.
-	fn candidates(&self, key: &Value) -> impl Iterator<Item = usize> {
-		use crate::val::Number;
-		let mut out: Vec<usize> = Vec::new();
-		let mut all = false;
-		let mut take = |rows: Option<&Vec<usize>>| out.extend(rows.into_iter().flatten().copied());
-		match key {
-			Value::Number(Number::Int(i)) => {
-				take(self.ints.get(i));
-				let f = *i as f64;
-				if float_int(f) == Some(*i) {
-					take(self.floats.get(&float_key(f)));
-				}
-				take(self.decimals.get(&rust_decimal::Decimal::from(*i).normalize()));
-			}
-			Value::Number(Number::Float(f)) => {
-				take(self.floats.get(&float_key(*f)));
-				if let Some(i) = float_int(*f) {
-					take(self.ints.get(&i));
-				}
-				take(Some(&self.decimal_rows));
-			}
-			Value::Number(Number::Decimal(d)) => {
-				take(self.decimals.get(&d.normalize()));
-				if d.fract().is_zero()
-					&& let Some(i) = rust_decimal::prelude::ToPrimitive::to_i64(d)
-				{
-					take(self.ints.get(&i));
-				}
-				take(Some(&self.float_rows));
-			}
-			key if key.hash_agrees_with_eq() => take(self.hashed.get(key)),
-			_ => all = true,
+	///
+	/// [`Probe::new`] files rows in the order they were read, so each list in
+	/// `hashed` and `loose` is ascending and holds a row once: a key's own
+	/// list is borrowed as it is, and only its union with `loose` is sorted
+	/// into a buffer.
+	fn candidates<'a>(&'a self, key: &Value) -> Candidates<'a> {
+		if !key.hash_agrees_with_eq() {
+			return Candidates::Every(0..self.rows.len());
 		}
-		if all {
-			out = (0..self.rows.len()).collect();
-		} else {
-			out.extend(self.loose.iter().copied());
-			out.sort_unstable();
-			out.dedup();
+		let own = self.hashed.get(key).map_or(&[][..], Vec::as_slice);
+		if self.loose.is_empty() {
+			return Candidates::Listed(own.iter().copied());
 		}
-		out.into_iter()
+		let mut out: Vec<usize> = own.iter().chain(&self.loose).copied().collect();
+		out.sort_unstable();
+		out.dedup();
+		Candidates::Merged(out.into_iter())
+	}
+}
+
+/// The rows [`Probe::candidates`] answers: every row, a key's own list
+/// borrowed from the probe, or that list merged with the loose rows.
+enum Candidates<'a> {
+	Every(std::ops::Range<usize>),
+	Listed(std::iter::Copied<std::slice::Iter<'a, usize>>),
+	Merged(std::vec::IntoIter<usize>),
+}
+
+impl Iterator for Candidates<'_> {
+	type Item = usize;
+
+	#[inline]
+	fn next(&mut self) -> Option<usize> {
+		match self {
+			Self::Every(rows) => rows.next(),
+			Self::Listed(rows) => rows.next(),
+			Self::Merged(rows) => rows.next(),
+		}
+	}
+
+	#[inline]
+	fn size_hint(&self) -> (usize, Option<usize>) {
+		match self {
+			Self::Every(rows) => rows.size_hint(),
+			Self::Listed(rows) => rows.size_hint(),
+			Self::Merged(rows) => rows.size_hint(),
+		}
 	}
 }
 
@@ -988,5 +949,84 @@ impl Aside {
 		state.unchecked_reads = self.unchecked_reads;
 		state.permissions_bypassed = self.permissions_bypassed;
 		state.zeroed = self.zeroed;
+	}
+}
+
+#[cfg(test)]
+mod probe_tests {
+	use std::collections::BTreeMap;
+
+	use surrealdb_strand::Strand;
+
+	use super::Probe;
+	use crate::val::{Number, Object, Regex, Value};
+
+	fn row(k: Value) -> Value {
+		Value::Object(Object::from(BTreeMap::from([(Strand::from("k"), k)])))
+	}
+
+	fn dec(s: &str) -> Value {
+		Value::Number(Number::Decimal(s.parse().unwrap()))
+	}
+
+	fn candidates(probe: &Probe, key: &Value) -> Vec<usize> {
+		probe.candidates(key).collect()
+	}
+
+	/// Every kind of one number finds the rows holding any kind of it, and a
+	/// float and a decimal that are not exactly equal find only their own.
+	#[test]
+	fn a_number_of_any_kind_finds_every_row_holding_it() {
+		let probe = Probe::new(
+			vec![
+				row(Value::Number(Number::Int(42))),
+				row(Value::Number(Number::Float(42.0))),
+				row(dec("42.00")),
+				row(Value::Number(Number::Float(0.1))),
+				row(dec("0.1")),
+				row(Value::from("42")),
+			],
+			"k",
+		);
+		for key in [Value::Number(Number::Int(42)), Value::Number(Number::Float(42.0)), dec("42")] {
+			assert_eq!(candidates(&probe, &key), vec![0, 1, 2], "{key:?}");
+		}
+		assert_eq!(candidates(&probe, &Value::Number(Number::Float(0.1))), vec![3]);
+		assert_eq!(candidates(&probe, &dec("0.10")), vec![4]);
+		assert_eq!(candidates(&probe, &Value::Number(Number::Int(7))), Vec::<usize>::new());
+	}
+
+	/// A row whose field hashes apart from what it equals, a regex here, is a
+	/// candidate for every key, merged with the hashed rows in read order.
+	#[test]
+	fn a_loose_row_is_a_candidate_for_every_key() {
+		let regex = Value::Regex(Regex(crate::val::regex::regex_new("4").expect("a regex")));
+		let probe = Probe::new(
+			vec![
+				row(Value::Number(Number::Float(42.0))),
+				row(regex),
+				row(Value::Number(Number::Int(42))),
+				row(Value::from("x")),
+			],
+			"k",
+		);
+		assert_eq!(candidates(&probe, &Value::Number(Number::Int(42))), vec![0, 1, 2]);
+		assert_eq!(candidates(&probe, &Value::from("x")), vec![1, 3]);
+	}
+
+	/// A key whose hash disagrees with its equality, a regex here, is a
+	/// candidate key for every row.
+	#[test]
+	fn a_loose_key_finds_every_row() {
+		let regex = Value::Regex(Regex(crate::val::regex::regex_new("4").expect("a regex")));
+		let probe = Probe::new(
+			vec![
+				row(Value::Number(Number::Float(42.0))),
+				row(Value::from("x")),
+				row(Value::Number(Number::Int(7))),
+			],
+			"k",
+		);
+		assert_eq!(candidates(&probe, &regex), vec![0, 1, 2]);
 	}
 }

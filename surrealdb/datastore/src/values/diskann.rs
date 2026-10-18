@@ -219,7 +219,13 @@ impl DiskAnnWriterLease {
 /// encoding keeps it exactly where the entry's key cannot. `None` means an
 /// entry written before this field existed; what reads it, and what the key
 /// can and cannot spell, is `surrealdb_idx::trees::pending`.
-#[revisioned(revision = 2)]
+///
+/// A key spells its id under `IndexFormat`, which drops a number's kind, so
+/// records whose ids differ only there (`pt:[1]` and `pt:[1dec]`) share one key,
+/// and one shard. The entry holds each of them: its own fields describe one
+/// record, and `others` every other record sharing the key, each with its own
+/// state. [`Self::into_records`] reads them as one entry each.
+#[revisioned(revision = 3)]
 pub struct DiskAnnRecordPendingUpdate {
 	/// Existing internal document ID, if the record has already reached the graph.
 	pub doc_id: Option<DocId>,
@@ -230,9 +236,57 @@ pub struct DiskAnnRecordPendingUpdate {
 	/// The record this entry belongs to, as it is stored.
 	#[revision(start = 2)]
 	pub id: Option<RecordIdKey>,
+	/// The other records whose ids share this entry's key, each with its own
+	/// pending state.
+	#[revision(start = 3)]
+	pub others: Vec<DiskAnnRecordPendingMember>,
 }
 
-impl_kv_value_revisioned!(DiskAnnRecordPendingUpdate);
+/// The pending state of one more record sharing a
+/// [`DiskAnnRecordPendingUpdate`]'s key: the same fields, for a record whose id
+/// is always known.
+#[revisioned(revision = 1)]
+pub struct DiskAnnRecordPendingMember {
+	/// Existing internal document ID, if the record has already reached the graph.
+	pub doc_id: Option<DocId>,
+	/// Vectors currently represented in the graph for this pending record.
+	pub old_vectors: Vec<SerializedVector>,
+	/// Latest vectors that should represent the record after compaction.
+	pub new_vectors: Vec<SerializedVector>,
+	/// The record, as it is stored.
+	pub id: RecordIdKey,
+}
+
+impl DiskAnnRecordPendingUpdate {
+	/// The entry's records, one entry each: its own fields, then every other
+	/// record sharing its key, each carrying its id and no others.
+	pub fn into_records(mut self) -> impl Iterator<Item = Self> {
+		let others = std::mem::take(&mut self.others);
+		std::iter::once(self).chain(others.into_iter().map(|m| Self {
+			doc_id: m.doc_id,
+			old_vectors: m.old_vectors,
+			new_vectors: m.new_vectors,
+			id: Some(m.id),
+			others: Vec::new(),
+		}))
+	}
+}
+
+impl surrealdb_kvs::value::KVValue for DiskAnnRecordPendingUpdate {
+	type KeyContext = ();
+
+	/// An entry naming one record is written at revision 2, which a release
+	/// predating `others` reads; see
+	/// [`super::hnsw::pending_revision_2_when_alone`].
+	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+		let bytes = revision::to_vec(self)?;
+		Ok(super::hnsw::pending_revision_2_when_alone(bytes, self.others.is_empty()))
+	}
+
+	fn kv_decode_value(bytes: &[u8], _: ()) -> anyhow::Result<Self> {
+		Ok(revision::from_slice(bytes)?)
+	}
+}
 
 #[revisioned(revision = 1)]
 #[derive(Serialize, Deserialize)]

@@ -10,10 +10,9 @@
 //! for a single key of a scalar kind.
 //!
 //! Two rows belong to the same group iff their keys compare equal under
-//! `Value: Ord`, so the key index is ordered (`GroupMap`, in
-//! `operators/aggregate.rs`, says why a hash does not serve), and the groups
-//! are finished in key order. A single key is indexed by its value, and a
-//! compound key by the vector of its values. Both order the way that vector does.
+//! `Value: Ord`, so the key index is ordered, and the groups are finished in
+//! key order. A single key is indexed by its value, and a compound key by the
+//! vector of its values. Both order the way that vector does.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

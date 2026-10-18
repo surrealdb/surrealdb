@@ -36,10 +36,8 @@ Four rules fix the boundaries of this design:
 4. **Main's results do not change.** Every merge preserves main's order,
    stability, first-value, and error semantics exactly. Where an exact
    equivalence cannot be proven the design falls back to the unpartitioned path
-   (a join probe key holding a regex, C.3). The one place partitioning cannot
-   promise main's grouping is keys on which `Value::cmp` is not transitive, which
-   are routed like any other key, where main's own grouping depends on its tree's
-   shape (C.1).
+   (a join probe key holding a regex, C.3). Grouping is exact for every key
+   set, since `Value::cmp` is a total preorder over every value (C.1).
 
 Temporary runs are not durable state: they never outlive the process that
 wrote them (or the session sweep), and no released binary reads a run another
@@ -61,15 +59,12 @@ reason. No breaker that decides equality uses a hash.
 - `Int` against `Float` is exact (integer parts as `i128`, then the float's
   fraction), so `1 == 1.0f`.
 - `Int` against `Decimal` is exact (`Decimal::from(i64)`), so `1 == 1dec`.
-- `Float` against `Decimal` compares integer parts, then fractional digits by
-  repeated scaling in `f64`, and is **approximate**: `0.1f == 0.1dec` holds
-  although the decimal nearest `0.1f` differs from `0.1dec`, and the relation is
-  not transitive across the boundary (`Number`'s `Hash` documentation records
-  `0.11111f != 0.11111dec`).
-- `Number: Hash` hashes the decimal expansion: `Int(1)`, `Float(1.0)` and
-  `Decimal(1)` agree, `Float(0.1)` and `Decimal(0.1)` do not.
-  `Value::hash_agrees_with_eq` reports `false` for any value that holds a number
-  anywhere.
+- `Float` against `Decimal` is exact (integer arithmetic on the float's binary
+  parts and the decimal's mantissa and scale), so `0.5f == 0.5dec` while
+  `0.1f > 0.1dec`, and the order is transitive across every kind.
+- `Number: Hash` agrees with that equality: `Int(1)`, `Float(1.0)` and
+  `Decimal(1.00)` hash alike, and `Value::hash_agrees_with_eq` reports `true`
+  for a number at any depth.
 
 `KeyOrder { ascending, collate, numeric }` belongs to sort keys alone.
 `collate` and `numeric` change only the comparison of two top-level strings
@@ -492,38 +487,24 @@ arrays and objects all route by the same comparison that decides equality.
 Splitters and routes use `cmp` alone, never `PartialEq` or `PartialOrd`.
 
 Why not a hash: a partition hash must satisfy `a == b ⇒ h(a) == h(b)` for
-`Value::cmp` equality. `Value: Hash` does not (`0.1f == 0.1dec`, different
-hashes). A canonical hash (map every number to its nearest `f64` and hash the
-bits) is consistent for `Int`/`Float` and `Int`/`Decimal`, but
-`Float`/`Decimal` equality is decided by a scaled `f64` comparison that is
-neither exact nor transitive, so no canonical form provably agrees with it. No
-existing dependency supplies one either. Range partitioning needs no hash at
+`Value::cmp` equality, which `Value: Hash` does not for a value holding a
+regex, a range, a closure or a geometry. Range partitioning needs no hash at
 all.
 
-Residual: `Value::cmp` is `partial_cmp().unwrap_or(Equal)`, which is not
-transitive in one place: a `Float` and a `Decimal` that agree to about sixteen
-significant digits without being equal. A `Geometry` is totally ordered,
-NaN coordinates included, so it adds no case.
+`Value::cmp` is `partial_cmp().unwrap_or(Equal)`, and `partial_cmp` always has an
+answer: numbers of every kind compare exactly, and a `Geometry` is totally
+ordered, NaN coordinates included. So `Value::cmp` is a total preorder over
+every value, containers (`Array`, `Set`, `Object`) included since they compare
+element by element, and two `cmp`-equal keys always route to the same
+partition: the guarantee is exact for every key set. A `Closure` compares
+`Equal` to every other, whatever it holds, which is a total preorder too, so
+closures always route together and form one group, one distinct row or one
+join key, as they do unpartitioned.
 
-A `Closure` is not a second case: every closure compares `Equal` to every other,
-whatever it holds, which is a total preorder, so closures always route together
-and form one group, one distinct row or one join key, as they do unpartitioned.
-
-For that case there can be a splitter `s` with `s < a` and
-`!(s < b)` although `a == b`, so two `cmp`-equal keys may route apart. Such a
-key is routed by `Splitters::route` like any other and never sent to an
-unpartitioned path. Main's `BTreeMap` is itself insertion-order dependent for
-such keys (which of several mutually "equal" keys it finds depends on the tree's
-shape), so no partitioning can promise main's exact grouping there, and a hash
-would fare no better. The guarantee is exact wherever the keys present are
-totally preordered by `Value::cmp`: every key set holding no `Float`/`Decimal`
-pair of that kind, at any depth: a container (`Array`, `Set`, `Object`) compares
-element by element, so it is non-transitive wherever such a pair sits inside it. The
-equivalence tests pin `1`, `1.0f`, `1dec`, `-0.0f`/`0.0f`, `0.1f`/`0.1dec`
-(equal, and routed together when no splitter lies between them), and keys
-equal under `collate`/`numeric` sort flags but distinct under `Value::cmp`
-(which group apart, as in main; grouping, distinct and join never apply
-`collate` or `numeric`).
+The equivalence tests pin `1`, `1.0f`, `1dec`, `-0.0f`/`0.0f`, `0.1f`/`0.1dec`
+(two values, adjacent in the order), and keys equal under `collate`/`numeric`
+sort flags but distinct under `Value::cmp` (which group apart, as in main;
+grouping, distinct and join never apply `collate` or `numeric`).
 
 ### C.2 Splitters
 

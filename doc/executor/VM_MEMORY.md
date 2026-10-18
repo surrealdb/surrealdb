@@ -252,9 +252,10 @@ as it is kept. The physical plan decides this (`plan::Nested::membership`, with
 
 The answer is the one `Value::contains` gives, which tests each row with
 `Value::equal`. That is not `Value::cmp`: a string equals a regex that matches
-it, and the order of a value holding a geometry, range or closure is not
-defined. So the rows whose order agrees with their equality
+it, and the order of a value holding a geometry, range or closure does not
+agree with its equality. So the rows whose order agrees with their equality
 (`Value::ord_agrees_with_equal`) are kept sorted and deduplicated by
 `Value::cmp`, and a probe that agrees too is found by binary search. Every other
 row is kept aside in arrival order and tested with `Value::equal`, as is every
-probe that does not agree. Numbers agree: `1`, `1.0` and `1dec` are one value.
+probe that does not agree. Numbers agree: `1`, `1.0` and `1dec` are one value,
+and `0.1f` and `0.1dec` are two.

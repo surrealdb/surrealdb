@@ -13,38 +13,13 @@
 //! the lossless codec and so is injective. This migration populates it from
 //! `!dd`, which is the only place a record key survives in full.
 //!
-//! # Why the legacy key stays
+//! # What it leaves for migration 10
 //!
-//! `!di` is left in place, and this release keeps writing it alongside `!dj`.
-//! A migration runs as soon as the first upgraded node starts, while the rest
-//! of a cluster may still run a release that predates `!dj` and resolves
-//! doc-IDs at `!di` and nowhere else — a 3.3 pre-release, the only kind that
-//! has a table-scoped doc-ID space without it. Removing it would strand every
-//! record those nodes hold — and a record they then failed to resolve would be
-//! handed a *second* doc-ID, which is the one thing the shared space exists to
-//! prevent. A store from a stable release before those has no `!dd` at all, so
-//! the walk below finds nothing to copy.
-//!
-//! What the older nodes cannot see is the disambiguation itself: a colliding
-//! pair still shares one `!di` key there, so they keep returning one of the two.
-//! That is the asymmetry the upgrade window carries, and it belongs in the
-//! release notes.
-//!
-//! A reader on this release treats a `!di` hit as a hint, not an answer: it is
-//! adopted only when `!dd` agrees that the doc-ID names the record that was
-//! asked for. That is what keeps a pre-existing collision from being inherited
-//! by the record that did not own it.
-//!
-//! TODO(3.4, surrealdb/surrealdb#7437): once no supported upgrade path starts
-//! below 3.3, reconcile `!dj` from `!dd` *with overwrite*, then delete the
-//! `!di` band and drop the mirrored write in `TableDocIds::resolve_or_assign`.
-//!
-//! The overwrite is what this migration cannot do. Its puts are create-only, so
-//! they treat any existing `!dj` as the fresher answer — which an entry a node
-//! on the previous release orphaned, by purging a record through `!di` and
-//! `!dd` alone, contradicts. Deleting `!di` before reconciling would strand
-//! every record that still resolves only through it, and the next resolve would
-//! mint each a second doc-ID while the first still owned its postings.
+//! The copy is create-only: an existing `!dj` is treated as the fresher answer
+//! and left alone, even one a 3.3 pre-release node orphaned by purging its
+//! record through `!di` and `!dd` alone. `!di` is left in place. Migration 10
+//! ([`super::doc_lookup_erased`]) reconciles `!dj` from `!dd` with overwrite,
+//! prunes what `!dd` does not back, and deletes `!di`.
 //!
 //! # Re-entrancy
 //!
@@ -66,12 +41,10 @@
 //!
 //! # Best effort
 //!
-//! Nothing reads `!dj` without falling back: a record without one still
-//! resolves through the verified `!di` fallback, publishes its own `!dj` the
-//! next time it is written, and is reconciled from `!dd` before `!di` is
-//! retired. So a batch that keeps losing its commit, and an entry that does
-//! not decode, are skipped with a warning rather than failing the start, which
-//! is where this runs.
+//! A batch that keeps losing its commit, and an entry that does not decode, are
+//! skipped with a warning rather than failing the start, which is where this
+//! runs: migration 10 reconciles every mapping from `!dd` before any reader
+//! relies on `!dj` alone.
 
 use std::borrow::Cow;
 use std::time::Duration;
@@ -99,6 +72,19 @@ const BATCH: usize = 500;
 
 /// Populates `!dj` from `!dd` for every table in the datastore.
 pub(super) async fn rebuild_forward_doc_ids_under_an_injective_key(ds: &Datastore) -> Result<()> {
+	let lease = super::lease(ds)?;
+	let mut copied = 0usize;
+	for (ns, db, tb) in tables(ds).await? {
+		copied += migrate_table(ds, &lease, ns, db, &tb).await?;
+	}
+	if copied > 0 {
+		debug!(target: TARGET, count = copied, "Rebuilt forward doc-ID mappings under an injective key");
+	}
+	Ok(())
+}
+
+/// Every table the datastore defines, each of which may hold a doc-ID space.
+pub(super) async fn tables(ds: &Datastore) -> Result<Vec<(NamespaceId, DatabaseId, TableName)>> {
 	let txn = ds.transaction(TransactionType::Read).await?;
 	let tables = async {
 		let mut tables = Vec::new();
@@ -113,16 +99,7 @@ pub(super) async fn rebuild_forward_doc_ids_under_an_injective_key(ds: &Datastor
 	}
 	.await;
 	txn.cancel().await?;
-
-	let lease = super::lease(ds)?;
-	let mut copied = 0usize;
-	for (ns, db, tb) in tables? {
-		copied += migrate_table(ds, &lease, ns, db, &tb).await?;
-	}
-	if copied > 0 {
-		debug!(target: TARGET, count = copied, "Rebuilt forward doc-ID mappings under an injective key");
-	}
-	Ok(())
+	tables
 }
 
 /// Copies one table's mappings, returning how many were written.
@@ -149,7 +126,7 @@ async fn migrate_table(
 					mappings = batch.len(),
 					error = %e,
 					"Skipped a batch of doc-ID mappings after repeated write conflicts; \
-					 they resolve through the verified fallback until written again"
+					 the doc-ID retirement migration reconciles them"
 				);
 			}
 			Err(e) => return Err(e),
@@ -225,7 +202,7 @@ async fn write_batch_with_retry(
 /// key, but resuming on re-encoded bytes would assume an encoding rather than
 /// observe one. An entry that does not decode is left out of the batch with a
 /// warning, and the batch still resumes past it.
-async fn read_batch(
+pub(super) async fn read_batch(
 	ds: &Datastore,
 	ns: NamespaceId,
 	db: DatabaseId,
@@ -279,9 +256,9 @@ async fn read_batch(
 /// which is the failure this migration exists to remove rather than introduce.
 /// The reverse mapping is only read, so a delete of it between that read and
 /// this commit still wins: it leaves a `!dj` naming a doc-ID with no reverse
-/// mapping, which every reader verifies away and the record's next resolve
-/// replaces. A purge on this release deletes `!dj` as well, which the
-/// create-only put below does conflict with.
+/// mapping, which migration 10, run after this one, prunes. A purge on this
+/// release deletes `!dj` as well, which the create-only put below does conflict
+/// with.
 ///
 /// Both directions are read for the whole batch at once, so only a mapping
 /// that is written costs a round trip of its own.
@@ -405,9 +382,8 @@ mod tests {
 
 		rebuild_forward_doc_ids_under_an_injective_key(&ds).await.unwrap();
 
-		// Asserted on the injective key itself, not through `get_doc_id`: the
-		// verified `!di` fallback answers for this record either way, so a read
-		// through it would pass whether or not the migration wrote anything.
+		// Asserted on the injective key itself, which is what the migration
+		// writes.
 		let dj = DocLookupIdentityKey::new(ns, db, Cow::Borrowed(&tb), RecordIdentity(int.clone()));
 		let txn = ds.transaction(TransactionType::Read).await.unwrap();
 		assert_eq!(
@@ -510,9 +486,9 @@ mod tests {
 
 	/// A batch that keeps losing its commit is skipped, and the start goes on.
 	///
-	/// The records it leaves behind are not stranded — they resolve through the
-	/// verified fallback — so failing the start for them would trade a slower
-	/// lookup for a node that does not come up. The next run copies them.
+	/// The records it leaves behind are not stranded — migration 10, run after
+	/// this one, reconciles them from `!dd` — so failing the start for them would
+	/// keep a node from coming up for nothing. The next run copies them too.
 	#[tokio::test]
 	async fn a_batch_that_keeps_losing_its_commit_is_skipped_not_fatal() {
 		let ds = crate::kvs::Datastore::new("memory").await.unwrap();

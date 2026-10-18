@@ -486,7 +486,9 @@ fn indexed(
 /// An array value is indexed once per element, so a record holding `[3, 4]` is listed under `3`
 /// although `[3, 4] = 3` is false: the walk is chosen only for an index every column of which holds
 /// one entry per record, as recorded by the index as storing no array in it. A range
-/// widened to the seconds of its bounds counts records its predicate rejects.
+/// widened to the seconds of its bounds counts records its predicate rejects, and so does an
+/// access naming a number the index keys apart from values equal to it
+/// ([`range_matches_comparison`]), which may miss records its predicate accepts besides.
 fn btree_walk(
 	answers: &TableAnswers,
 	cond: &LogicalExpr,
@@ -505,7 +507,7 @@ fn btree_walk(
 		.with_clock(answers.allows_clock);
 	for candidate in analyzer.analyze(Some(cond), None) {
 		if !one_key_per_record(&candidate.index_ref)
-			|| !range_matches_comparison(&candidate.access)
+			|| !range_matches_comparison(&candidate.index_ref, &candidate.access)
 			|| access_fans_out(&candidate.index_ref.cols, &candidate.access)
 			|| range_is_widened(&candidate.index_ref, &candidate.access)
 		{

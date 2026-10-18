@@ -12,7 +12,7 @@ mod tikv_concurrency {
 	use crate::CommunityComposer;
 	use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 	use crate::dbs::Session;
-	use crate::key::schema::{DocKeyPrefix, DocLookupPrefix, RootRoot, VersionKey};
+	use crate::key::schema::{DocKeyPrefix, DocLookupIdentityPrefix, RootRoot, VersionKey};
 	use crate::kvs::{Datastore, TransactionType};
 
 	async fn fresh_tikv_ds() -> Arc<Datastore> {
@@ -72,7 +72,7 @@ mod tikv_concurrency {
 	/// Race #3: two `REMOVE INDEX`es dropping the final two doc-ID consumers of a
 	/// table concurrently must not both skip the shared-mapping purge. On TiKV a
 	/// blind `put_tb` does not serialize them, so both could read the pre-delete
-	/// index list, each see the other still present, and leave the `!di`/`!dd`
+	/// index list, each see the other still present, and leave the `!dj`/`!dd`
 	/// mappings behind. The serialization guard (`replace_tb`'s locked read of
 	/// the table-definition key) forces one to retry and re-decide as the sole
 	/// remover, so the mappings are always purged. Repeated to make the racing
@@ -87,7 +87,7 @@ mod tikv_concurrency {
 		for k in 0..ITERS {
 			let tb = format!("t{k}");
 			// Two full-text indexes (both doc-ID consumers) plus data, so the
-			// shared `!di`/`!dd` mappings are populated for this table.
+			// shared `!dj`/`!dd` mappings are populated for this table.
 			let setup = format!(
 				"DEFINE ANALYZER a{k} TOKENIZERS blank;
 				 DEFINE INDEX i1 ON {tb} FIELDS a1 FULLTEXT ANALYZER a{k} BM25;
@@ -118,7 +118,10 @@ mod tikv_concurrency {
 			let db = tx.get_db_by_name("test", "test", None).await.unwrap().unwrap().database_id;
 			let tb_name: TableName = tb.as_str().into();
 			let forward = tx
-				.getr(DocLookupPrefix::new(ns, db, Cow::Borrowed(&tb_name)).range().unwrap(), None)
+				.getr(
+					DocLookupIdentityPrefix::new(ns, db, Cow::Borrowed(&tb_name)).range().unwrap(),
+					None,
+				)
 				.await
 				.unwrap();
 			let reverse = tx
@@ -201,7 +204,10 @@ mod tikv_concurrency {
 			let db = tx.get_db_by_name("test", "test", None).await.unwrap().unwrap().database_id;
 			let tb_name: TableName = tb.as_str().into();
 			let forward = tx
-				.getr(DocLookupPrefix::new(ns, db, Cow::Borrowed(&tb_name)).range().unwrap(), None)
+				.getr(
+					DocLookupIdentityPrefix::new(ns, db, Cow::Borrowed(&tb_name)).range().unwrap(),
+					None,
+				)
 				.await
 				.unwrap();
 			let reverse = tx

@@ -27,6 +27,6 @@ mod provider;
 pub(super) use surrealdb_datastore::values::diskann::DISKANN_PENDING_STATE_SHARDS;
 pub(crate) use surrealdb_datastore::values::diskann::{
 	DiskAnnElement, DiskAnnNode, DiskAnnPendingState, DiskAnnPendingStateKind,
-	DiskAnnRecordPendingUpdate, DiskAnnState,
+	DiskAnnRecordPendingMember, DiskAnnRecordPendingUpdate, DiskAnnState,
 };
 pub(crate) use surrealdb_datastore::values::vector::ElementId;

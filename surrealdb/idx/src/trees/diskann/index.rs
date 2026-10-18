@@ -16,7 +16,6 @@
 //! is transient and never loses or corrupts data; full read consistency during the upgrade would
 //! require gating `!dw` writes on a cluster storage version, which is intentionally not done here.
 
-use std::borrow::Cow;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
@@ -40,13 +39,13 @@ use surrealdb_kvs::api::ValsBatch;
 use surrealdb_kvs::{Direction, Val};
 use tokio::sync::RwLock;
 
-use crate::catalog::{DiskAnnParams, Distance, TableId, VectorType, keeps_vector_doc_elements};
-use crate::docids::{DocId, LegacyVectorDocIds, TableDocIds};
-use crate::env::{IndexEnv, expect_not_done};
-use crate::key::schema::{
-	DiskannRecordPendingKey, DiskannRecordPendingShardKey, DiskannRecordPendingShardShardPrefix,
+use crate::catalog::{
+	DiskAnnParams, Distance, TableId, VectorType, keeps_pending_members, keeps_vector_doc_elements,
 };
-use crate::key::{KVKey, KVKeyDecode, KVSubspace, KVValue, Key, TypedRange};
+use crate::docids::{DocId, LegacyVectorDocIds};
+use crate::env::{IndexEnv, expect_not_done};
+use crate::key::schema::{DiskannRecordPendingKey, DiskannRecordPendingShardKey};
+use crate::key::{KVKey, KVKeyDecode, KVValue, Key, TypedRange};
 #[cfg(test)]
 use crate::trees::diskann::cache::CacheView;
 use crate::trees::diskann::cache::{Continuity, DiskAnnCache};
@@ -58,13 +57,12 @@ use crate::trees::diskann::provider::{
 };
 use crate::trees::diskann::{
 	DISKANN_PENDING_STATE_SHARDS, DiskAnnElement, DiskAnnPendingState, DiskAnnPendingStateKind,
-	DiskAnnRecordPendingUpdate, ElementId,
+	DiskAnnRecordPendingMember, DiskAnnRecordPendingUpdate, ElementId,
 };
 use crate::trees::hnsw::VectorId;
 use crate::trees::knn::{Ids64, KnnResultBuilder, OVERQUERY_CEILING_FACTOR};
 use crate::trees::pending::{
-	PendingBacklogReport, PendingScan, PendingScanStats, take_compacted_record_id,
-	take_pending_record_id,
+	PendingBacklogReport, PendingScan, PendingScanStats, take_pending_record_id,
 };
 use crate::trees::vector::{
 	DistanceExt as _, SerializedVector, SharedVector, Vector, serialized_vector_from_value,
@@ -192,7 +190,14 @@ impl PendingPlanBuilder {
 		}
 	}
 
-	fn add(&mut self, key: Vec<u8>, value: Val, pending: PendingOperation) -> bool {
+	/// Captures one pending key/value and folds its operations into the plan:
+	/// one per record the entry holds.
+	fn add(
+		&mut self,
+		key: Vec<u8>,
+		value: Val,
+		pending: impl IntoIterator<Item = PendingOperation>,
+	) -> bool {
 		if self.captured_keys.len() >= DISKANN_COMPACTION_MAX_PENDING_KEYS
 			|| (!self.captured_keys.is_empty()
 				&& self.encoded_bytes + key.len() + value.len()
@@ -206,7 +211,9 @@ impl PendingPlanBuilder {
 			key,
 			value,
 		});
-		self.add_pending(pending);
+		for pending in pending {
+			self.add_pending(pending);
+		}
 		if self.captured_keys.len() >= DISKANN_COMPACTION_MAX_PENDING_KEYS
 			|| self.encoded_bytes >= DISKANN_COMPACTION_MAX_PENDING_BYTES
 		{
@@ -238,13 +245,20 @@ impl PendingPlanBuilder {
 	/// combined value exceeds `DISKANN_COMPACTION_MAX_PENDING_BYTES`), orphaning the sharded entry
 	/// — phase 2 skips it as folded, so it is neither applied nor deleted and resurfaces as a
 	/// phantom.
-	fn add_authorized(&mut self, key: Vec<u8>, value: Val, pending: PendingOperation) {
+	fn add_authorized(
+		&mut self,
+		key: Vec<u8>,
+		value: Val,
+		pending: impl IntoIterator<Item = PendingOperation>,
+	) {
 		self.encoded_bytes += key.len() + value.len();
 		self.captured_keys.push(CapturedPendingKey {
 			key,
 			value,
 		});
-		self.add_pending(pending);
+		for pending in pending {
+			self.add_pending(pending);
+		}
 		if self.captured_keys.len() >= DISKANN_COMPACTION_MAX_PENDING_KEYS
 			|| self.encoded_bytes >= DISKANN_COMPACTION_MAX_PENDING_BYTES
 		{
@@ -942,7 +956,8 @@ impl ElementClassifier for GraphCandidateClassifier<'_, '_, '_> {
 
 /// Which record-keyed pending layout a scanned range belongs to.
 ///
-/// Both hold at most one entry per record; they differ in how the key is decoded
+/// Both hold at most one pending state per record, in the entry its key names, which may
+/// also hold the states of other records spelled alike; they differ in how the key is decoded
 /// and in which of them owns a record the other also holds.
 #[derive(Clone, Copy)]
 enum PendingLayout {
@@ -970,37 +985,6 @@ fn pending_record_id(
 			PendingLayout::Legacy => DiskannRecordPendingKey::decode_key(key)?.id.into_owned(),
 		})
 	})
-}
-
-/// [`pending_record_id`] for compaction of a sharded entry, which maps the
-/// record to a doc-ID; the rule is [`take_compacted_record_id`]. Only the
-/// sharded layout can belong to an index on the table's doc-ID space: nothing
-/// that writes the legacy layout knows that space.
-async fn compacted_record_id(
-	tx: &Transaction,
-	key: &[u8],
-	pending: &mut DiskAnnRecordPendingUpdate,
-) -> Result<RecordIdKey> {
-	take_compacted_record_id(
-		tx,
-		&mut pending.id,
-		|| {
-			let entry = DiskannRecordPendingShardKey::decode_key(key)?;
-			let prefix = DiskannRecordPendingShardShardPrefix {
-				ns: entry.ns,
-				db: entry.db,
-				tb: Cow::Borrowed(entry.tb.as_ref()),
-				ix: entry.ix,
-				shard: entry.shard,
-			}
-			.encode_bound()?;
-			Ok(key.strip_prefix(&*prefix).map(|spelled| {
-				(TableDocIds::new(entry.ns, entry.db, entry.tb.as_ref().clone()), spelled.to_vec())
-			}))
-		},
-		|| Ok(DiskannRecordPendingShardKey::decode_key(key)?.id.into_owned()),
-	)
-	.await
 }
 
 /// Mutable state threaded through the pending scan of one KNN lookup.
@@ -1225,8 +1209,39 @@ impl DiskAnnIndex {
 		// lookup — which scans the legacy range last — would let it overwrite the newer vectors.
 		// The two layouts always chain (each write's `old_vectors` is the previous value), so fold
 		// them into a single `!dw` entry that keeps the chain head's `old_vectors`.
+		//
+		// The entry's key spells `id` without its numbers' kinds, so it may hold
+		// other records. On an index stamped for it, a write folds into its own
+		// record's state, kept apart from the others'. Only a release predating
+		// that stamp writes `!dr`, so the dual-layout arms below read an entry
+		// naming one record, and keep any others it holds.
 		let legacy = Self::take_legacy_pending(&tx, &self.ikb, id).await?;
+		let members = keeps_pending_members(self.format_version);
 		let mut pending = match (tx.get_key(&key, None).await?, legacy) {
+			(Some(mut sharded), None)
+				if members
+					&& sharded
+						.id
+						.as_ref()
+						.is_some_and(|named| !named.addresses_same_record(id)) =>
+			{
+				if let Some(member) =
+					sharded.others.iter_mut().find(|m| m.id.addresses_same_record(id))
+				{
+					member.new_vectors = new_vectors;
+				} else {
+					sharded.others.push(DiskAnnRecordPendingMember {
+						doc_id: DiskAnnDocs::get_doc_id(&self.ikb, self.format_version, &tx, id)
+							.await?,
+						old_vectors,
+						new_vectors,
+						id: id.clone(),
+					});
+				}
+				tx.set_key(&key, &sharded).await?;
+				Self::mark_pending_non_empty(&tx, &self.ikb, id);
+				return Ok(());
+			}
 			(Some(mut sharded), None) => {
 				sharded.new_vectors = new_vectors;
 				sharded
@@ -1260,6 +1275,7 @@ impl DiskAnnIndex {
 					},
 					new_vectors,
 					id: None,
+					others: sharded.others,
 				}
 			}
 			(None, None) => DiskAnnRecordPendingUpdate {
@@ -1267,6 +1283,7 @@ impl DiskAnnIndex {
 				old_vectors,
 				new_vectors,
 				id: None,
+				others: Vec::new(),
 			},
 		};
 		// Every write stamps the exact id, whichever arm built the entry, so
@@ -1502,22 +1519,36 @@ impl DiskAnnIndex {
 					let encoded = value.is_some().then(|| shard_key.encode_key()).transpose()?;
 					(encoded, value)
 				};
-				let mut shard_update = shard_value
+				// The sharded entry's records: its own, which the legacy entry pairs with, then
+				// any other record sharing its key, each carrying its id.
+				let mut shard_records = shard_value
 					.as_ref()
-					.map(|v| DiskAnnRecordPendingUpdate::kv_decode_value(v, ()))
+					.map(|v| {
+						DiskAnnRecordPendingUpdate::kv_decode_value(v, ())
+							.map(|u| u.into_records().collect::<Vec<_>>())
+					})
 					.transpose()?;
 				// Nothing writes the legacy layout any more, so its entries never carry the id and
 				// the spelling above is whatever the key could express — decimalised, for an id
 				// holding a number. Both entries name one record, so when the sharded counterpart
 				// carries the exact id, that is the one the pair folds under.
-				if let Some(exact) = shard_update.as_mut().and_then(|u| u.id.take()) {
+				if let Some(exact) =
+					shard_records.as_mut().and_then(|r| r.first_mut()).and_then(|u| u.id.take())
+				{
 					id = exact;
 				}
 				let legacy_op = Self::record_pending_to_operation(id.clone(), legacy_update);
-				let shard_entry = match (shard_key, shard_value, shard_update) {
-					(Some(shard_key), Some(shard_value), Some(update)) => {
-						let op = Self::record_pending_to_operation(id.clone(), update);
-						Some((shard_key, shard_value, op))
+				let shard_entry = match (shard_key, shard_value, shard_records) {
+					(Some(shard_key), Some(shard_value), Some(records)) => {
+						let mut ops = Vec::with_capacity(records.len());
+						for (i, mut update) in records.into_iter().enumerate() {
+							let record = match update.id.take() {
+								Some(other) if i > 0 => other,
+								_ => id.clone(),
+							};
+							ops.push(Self::record_pending_to_operation(record, update));
+						}
+						Some((shard_key, shard_value, ops))
 					}
 					_ => None,
 				};
@@ -1536,7 +1567,7 @@ impl DiskAnnIndex {
 				// made here rather than for the whole batch up front: the caps above stop a
 				// part-read batch as a matter of course, and what the loop never reaches is never
 				// copied.
-				builder.add_authorized(legacy_key.to_vec(), legacy_value.to_vec(), legacy_op);
+				builder.add_authorized(legacy_key.to_vec(), legacy_value.to_vec(), [legacy_op]);
 				if let Some((shard_key_bytes, shard_value, shard_op)) = shard_entry {
 					folded_shard_keys.insert(shard_key_bytes.as_slice().to_vec());
 					builder.add_authorized(
@@ -1580,12 +1611,18 @@ impl DiskAnnIndex {
 					// it.
 					continue;
 				}
-				let mut pending = DiskAnnRecordPendingUpdate::kv_decode_value(value, ())?;
-				let id = compacted_record_id(tx, key, &mut pending).await?;
-				let pending = Self::record_pending_to_operation(id, pending);
+				// One operation per record the entry holds; only the first can
+				// predate the id field, and so need its key to name it.
+				let mut operations = Vec::with_capacity(1);
+				for mut pending in
+					DiskAnnRecordPendingUpdate::kv_decode_value(value, ())?.into_records()
+				{
+					let id = pending_record_id(key, PendingLayout::Sharded, &mut pending)?;
+					operations.push(Self::record_pending_to_operation(id, pending));
+				}
 				// Copied per entry rather than per batch, for the reason given in
 				// `collect_legacy_record_pending`.
-				if !builder.add(key.to_vec(), value.to_vec(), pending) {
+				if !builder.add(key.to_vec(), value.to_vec(), operations) {
 					return Ok(false);
 				}
 				*count += 1;
@@ -2290,7 +2327,7 @@ impl DiskAnnIndex {
 	/// # Coalescing
 	///
 	/// Both pending layouts are record-keyed and a record maps to exactly one `!dw`
-	/// shard, so each range holds at most one entry per record and every entry read
+	/// shard, so each range holds at most one pending state per record and every state read
 	/// is live on its own — with a single exception. One record can carry an entry
 	/// in both layouts, which a mixed-version cluster produces when a pre-sharding
 	/// node writes `!dr` for a record an upgraded node already wrote `!dw` for. The
@@ -2404,7 +2441,9 @@ impl DiskAnnIndex {
 				Vec::new()
 			};
 			for (row, (key, value)) in read.iter().enumerate() {
-				let entry_bytes = key.len() + value.len();
+				// The entry's bytes go to the first of its records the batch keeps;
+				// the others it holds add none.
+				let mut entry_bytes = key.len() + value.len();
 				// Charged before the checkpoint, so an entry the scan has read is
 				// accounted — and reported, if it crosses — before an expired
 				// deadline can bail out of the scan.
@@ -2412,53 +2451,63 @@ impl DiskAnnIndex {
 				if ctx.env.is_done(Some(scan.pending.entries())).await? {
 					bail!(EngineError::QueryCancelled)
 				}
-				let mut pending = DiskAnnRecordPendingUpdate::kv_decode_value(value, ())?;
-				let id = pending_record_id(key, layout, &mut pending)?;
-				// The suppression bitmap covers every doc-ID the queue mentions,
-				// superseded entries included: the graph entry such an id masks is
-				// stale either way.
-				if let Some(doc_id) = pending.doc_id {
-					scan.suppressed.insert(doc_id);
-				}
-				match layout {
-					// A legacy record can collide only with the one shard it hashes
-					// to, so recording the shard is enough to spare every other
-					// shard the resolution below.
-					PendingLayout::Legacy => {
-						scan.legacy_shards |= 1u32 << u32::from(Self::pending_state_shard(&id));
+				// One candidate per record the entry holds; only the first can
+				// predate the id field, and so need its key to name it.
+				for (record, mut pending) in DiskAnnRecordPendingUpdate::kv_decode_value(value, ())?
+					.into_records()
+					.enumerate()
+				{
+					let first = record == 0;
+					let id = pending_record_id(key, layout, &mut pending)?;
+					// The suppression bitmap covers every doc-ID the queue mentions,
+					// superseded entries included: the graph entry such an id masks is
+					// stale either way.
+					if let Some(doc_id) = pending.doc_id {
+						scan.suppressed.insert(doc_id);
 					}
-					PendingLayout::Sharded if probe_legacy => {
-						if legacy_owned[row] {
-							continue;
+					match layout {
+						// A legacy record can collide only with the one shard it hashes
+						// to, so recording the shard is enough to spare every other
+						// shard the resolution below.
+						PendingLayout::Legacy => {
+							scan.legacy_shards |= 1u32 << u32::from(Self::pending_state_shard(&id));
 						}
+						// A legacy entry stands for the record the row names first, the
+						// one a release writing that layout knew of.
+						PendingLayout::Sharded if probe_legacy => {
+							if first && legacy_owned[row] {
+								continue;
+							}
+						}
+						PendingLayout::Sharded => {}
 					}
-					PendingLayout::Sharded => {}
+					if pending.new_vectors.is_empty() {
+						continue;
+					}
+					// Drop candidates outside the allow-list before they take batch
+					// budget, so non-members are never fetched. The suppression bitmap
+					// above is deliberately NOT gated: a pending doc must mask its stale
+					// graph entries whether or not it is allowed.
+					if !self.allow_list_admits(&ctx.tx, scan.allow_list, &id).await? {
+						continue;
+					}
+					// Every pending candidate is scored under its record key rather than
+					// under the doc-ID the entry captured. A record deleted and
+					// re-created before compaction leaves that captured id without a
+					// shared mapping, so a DocId-keyed hit could not be resolved back to
+					// a record and would be silently dropped; the record key is always
+					// resolvable, and the captured id still masks the graph's stale
+					// entries through the bitmap above.
+					let bytes = std::mem::take(&mut entry_bytes);
+					if scan.pending.rollover_required(bytes) {
+						self.score_pending_batch(ctx, scan).await?;
+					}
+					scan.pending.push(
+						VectorId::RecordKey(Arc::new(id)),
+						pending.new_vectors,
+						bytes,
+					);
 				}
-				if pending.new_vectors.is_empty() {
-					continue;
-				}
-				// Drop candidates outside the allow-list before they take batch
-				// budget, so non-members are never fetched. The suppression bitmap
-				// above is deliberately NOT gated: a pending doc must mask its stale
-				// graph entries whether or not it is allowed.
-				if !self.allow_list_admits(&ctx.tx, scan.allow_list, &id).await? {
-					continue;
-				}
-				// Every pending candidate is scored under its record key rather than
-				// under the doc-ID the entry captured. A record deleted and
-				// re-created before compaction leaves that captured id without a
-				// shared mapping, so a DocId-keyed hit could not be resolved back to
-				// a record and would be silently dropped; the record key is always
-				// resolvable, and the captured id still masks the graph's stale
-				// entries through the bitmap above.
-				if scan.pending.rollover_required(entry_bytes) {
-					self.score_pending_batch(ctx, scan).await?;
-				}
-				scan.pending.push(
-					VectorId::RecordKey(Arc::new(id)),
-					pending.new_vectors,
-					entry_bytes,
-				);
 			}
 		}
 		Ok(())
@@ -2606,6 +2655,7 @@ impl DiskAnnIndex {
 
 #[cfg(test)]
 mod tests {
+	use std::borrow::Cow;
 	use std::collections::BTreeMap;
 
 	use rand::rngs::SmallRng;
@@ -2723,6 +2773,7 @@ mod tests {
 			old_vectors: vec![],
 			new_vectors: vec![SerializedVector::F32(values.to_vec())],
 			id: None,
+			others: Vec::new(),
 		}
 	}
 
@@ -4249,6 +4300,7 @@ mod tests {
 					old_vectors: vec![SerializedVector::F32(vec![1.0, 0.0, 0.0, 0.0])],
 					new_vectors: vec![],
 					id: None,
+					others: Vec::new(),
 				},
 			)
 			.await?;
@@ -6053,6 +6105,7 @@ mod tests {
 					old_vectors: vec![SerializedVector::F32(vec![1.0, 2.0, 3.0, 4.0])],
 					new_vectors: vec![SerializedVector::F32(vec![5.0, 6.0, 7.0, 8.0])],
 					id: None,
+					others: Vec::new(),
 				},
 			)
 			.await?;
@@ -6163,6 +6216,7 @@ mod tests {
 					old_vectors: vec![SerializedVector::F32(vec![1.0, 1.0, 1.0, 1.0])],
 					new_vectors: vec![SerializedVector::F32(vec![2.0, 2.0, 2.0, 2.0])],
 					id: None,
+					others: Vec::new(),
 				},
 			)
 			.await?;
@@ -6173,6 +6227,7 @@ mod tests {
 					old_vectors: vec![SerializedVector::F32(vec![2.0, 2.0, 2.0, 2.0])],
 					new_vectors: vec![SerializedVector::F32(vec![3.0, 3.0, 3.0, 3.0])],
 					id: None,
+					others: Vec::new(),
 				},
 			)
 			.await?;
@@ -6250,6 +6305,7 @@ mod tests {
 					old_vectors: vec![SerializedVector::F32(vec![10.0, 10.0, 10.0, 10.0])],
 					new_vectors: vec![SerializedVector::F32(vec![20.0, 20.0, 20.0, 20.0])],
 					id: None,
+					others: Vec::new(),
 				},
 			)
 			.await?;
@@ -6260,6 +6316,7 @@ mod tests {
 					old_vectors: vec![SerializedVector::F32(vec![20.0, 20.0, 20.0, 20.0])],
 					new_vectors: vec![SerializedVector::F32(vec![30.0, 30.0, 30.0, 30.0])],
 					id: None,
+					others: Vec::new(),
 				},
 			)
 			.await?;
@@ -6338,6 +6395,7 @@ mod tests {
 						old_vectors: vec![SerializedVector::F32(b.to_vec())],
 						new_vectors: vec![SerializedVector::F32(a.to_vec())],
 						id: None,
+						others: Vec::new(),
 					},
 				)
 				.await?;
@@ -6405,6 +6463,7 @@ mod tests {
 						old_vectors: vec![SerializedVector::F32(b.to_vec())],
 						new_vectors: vec![SerializedVector::F32(a.to_vec())],
 						id: None,
+						others: Vec::new(),
 					},
 				)
 				.await?;
@@ -6458,15 +6517,15 @@ mod tests {
 		// The fix: both halves of an authorized pair are captured.
 		let mut builder = PendingPlanBuilder::new(None, empty_state.clone());
 		assert!(builder.has_room_for(2, 2 + half + half), "empty batch admits the oversized pair");
-		builder.add_authorized(vec![0u8; 1], vec![0u8; half], op(1));
-		builder.add_authorized(vec![1u8; 1], vec![0u8; half], op(2));
+		builder.add_authorized(vec![0u8; 1], vec![0u8; half], [op(1)]);
+		builder.add_authorized(vec![1u8; 1], vec![0u8; half], [op(2)]);
 		assert_eq!(builder.captured_keys.len(), 2, "both halves captured");
 
 		// Contrast: plain `add` rejects the second half once the batch is non-empty and over the
 		// byte budget — the orphaning path this fix closes.
 		let mut naive = PendingPlanBuilder::new(None, empty_state);
-		assert!(naive.add(vec![0u8; 1], vec![0u8; half], op(1)));
-		assert!(!naive.add(vec![1u8; 1], vec![0u8; half], op(2)));
+		assert!(naive.add(vec![0u8; 1], vec![0u8; half], [op(1)]));
+		assert!(!naive.add(vec![1u8; 1], vec![0u8; half], [op(2)]));
 		assert_eq!(naive.captured_keys.len(), 1, "second half rejected by the byte guard");
 	}
 
@@ -6519,6 +6578,7 @@ mod tests {
 					old_vectors: vec![SerializedVector::F32(vec![2.0, 2.0, 2.0, 2.0])],
 					new_vectors: vec![SerializedVector::F32(vec![3.0, 3.0, 3.0, 3.0])],
 					id: None,
+					others: Vec::new(),
 				},
 			)
 			.await?;
@@ -6531,6 +6591,7 @@ mod tests {
 						old_vectors: vec![],
 						new_vectors: vec![],
 						id: None,
+						others: Vec::new(),
 					},
 				)
 				.await?;
@@ -6606,6 +6667,7 @@ mod tests {
 						old_vectors: vec![],
 						new_vectors: vec![],
 						id: None,
+						others: Vec::new(),
 					},
 				)
 				.await?;
@@ -6619,6 +6681,7 @@ mod tests {
 					old_vectors: vec![SerializedVector::F32(vec![1.0, 1.0, 1.0, 1.0])],
 					new_vectors: vec![SerializedVector::F32(vec![2.0, 2.0, 2.0, 2.0])],
 					id: None,
+					others: Vec::new(),
 				},
 			)
 			.await?;
@@ -7881,55 +7944,6 @@ mod tests {
 		Ok(())
 	}
 
-	/// Compaction takes the record of a sharded entry whose value carries no id
-	/// from the table's mappings, not from the id its key decodes to, which is
-	/// decimalised once it holds a number and names no record.
-	#[tokio::test]
-	async fn compaction_names_the_mapped_record_of_an_entry_without_an_id() {
-		use crate::key::schema::{DocKeyKey, DocLookupKey};
-		let ikb = ikb();
-		let id =
-			RecordIdKey::Array(vec![Value::Number(Number::Int(42)), Value::from("intro")].into());
-		let key = ikb
-			.new_dw_key(DiskAnnIndex::pending_state_shard(&id), &id)
-			.encode_key()
-			.unwrap()
-			.to_vec();
-		let decoded = DiskannRecordPendingShardKey::decode_key(&key).unwrap().id.into_owned();
-		assert!(
-			!decoded.addresses_same_record(&id),
-			"the premise: the key's id is not the record's"
-		);
-		let entry = || DiskAnnRecordPendingUpdate {
-			doc_id: None,
-			old_vectors: Vec::new(),
-			new_vectors: Vec::new(),
-			id: None,
-		};
-
-		let ds = TestIndexStore::new().await;
-		let tx = ds.transaction(TransactionType::Write).await.unwrap();
-		assert!(
-			compacted_record_id(&tx, &key, &mut entry())
-				.await
-				.unwrap()
-				.addresses_same_record(&decoded),
-			"with no mapping at that spelling, the decoded id is all there is"
-		);
-		let tb = crate::val::TableName::from("tb");
-		let (ns, db) = (ikb.ns(), ikb.db());
-		tx.set_key(&DocLookupKey::new(ns, db, Cow::Borrowed(&tb), Cow::Borrowed(&id)), &7u64)
-			.await
-			.unwrap();
-		tx.set_key(&DocKeyKey::new(ns, db, Cow::Borrowed(&tb), 7), &id).await.unwrap();
-		let named = compacted_record_id(&tx, &key, &mut entry()).await.unwrap();
-		assert!(
-			named.addresses_same_record(&id),
-			"the mapping names the record exactly: {named:?}"
-		);
-		tx.cancel().await.unwrap();
-	}
-
 	/// A record key with its vector before and after one write; `None` is no vector.
 	type SharedVectorWrite = (i64, Option<[f32; 4]>, Option<[f32; 4]>);
 
@@ -8000,6 +8014,98 @@ mod tests {
 				vec![100],
 				"{case}"
 			);
+		}
+		Ok(())
+	}
+
+	/// Records whose ids differ only in a number's kind (`[1]` and `[1dec]`) share
+	/// one pending key and one shard. On an index stamped to keep a pending update
+	/// for every record its key spells, each keeps its own: both reach the graph
+	/// from one compaction, and an update to one and a delete of the other in one
+	/// window leave the survivor's new vector, with no trace of the deleted record.
+	///
+	/// Comparisons are on encoded record keys, not `==`, which compares the
+	/// numbers across kinds.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn diskann_records_sharing_a_pending_key_keep_their_own_vectors() -> Result<()> {
+		fn record_key(id: &RecordIdKey) -> Vec<u8> {
+			storekey::encode_vec(id).unwrap()
+		}
+		async fn nearest(
+			index: &DiskAnnIndex,
+			ds: &TestIndexStore,
+			at: [f32; 4],
+			k: usize,
+		) -> Result<Vec<(Vec<u8>, f64)>> {
+			let ctx = new_ctx(ds, TransactionType::Read).await;
+			let pt: Vec<Number> = at.iter().map(|v| Number::Float(*v as f64)).collect();
+			let res = index.knn_search(&ctx, &pt, k, 100, None, None).await?;
+			ctx.tx().cancel().await?;
+			Ok(res.iter().map(|(rid, d, _)| (record_key(&rid.key), *d)).collect())
+		}
+
+		let ds = TestIndexStore::new().await;
+		let ikb = ikb();
+		let p = params(VectorType::F32, Distance::Euclidean);
+		let index = DiskAnnIndex::new(
+			ikb.clone(),
+			TableId(4),
+			&p,
+			cache(),
+			crate::catalog::INDEX_FORMAT_VERSION,
+		)
+		.await?;
+		let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+		let int = RecordIdKey::Array(vec![Value::Number(Number::Int(1))].into());
+		let dec = RecordIdKey::Array(vec![Value::Number(Number::Decimal(1.into()))].into());
+		assert_eq!(
+			DiskAnnIndex::pending_state_shard(&int),
+			DiskAnnIndex::pending_state_shard(&dec),
+			"the pair shares a shard"
+		);
+		let (near, far, moved) = ([1.0f32; 4], [9.0f32; 4], [5.0f32; 4]);
+
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			for (id, v) in [(&int, near), (&dec, far)] {
+				docids.resolve_or_assign(&ctx, id).await?;
+				index.index(&ctx, id, None, Some(f32_content(&v))).await?;
+			}
+			ctx.tx().commit().await?;
+		}
+		// Read from the pending queue, then from the graph.
+		for compacted in [false, true] {
+			if compacted {
+				compact_all(&index, &ds, &ikb).await?;
+			}
+			let keys = |r: Vec<(Vec<u8>, f64)>| r.into_iter().map(|(k, _)| k).collect::<Vec<_>>();
+			assert_eq!(
+				keys(nearest(&index, &ds, near, 2).await?),
+				vec![record_key(&int), record_key(&dec)],
+				"compacted={compacted}"
+			);
+			assert_eq!(
+				keys(nearest(&index, &ds, far, 2).await?),
+				vec![record_key(&dec), record_key(&int)],
+				"compacted={compacted}"
+			);
+		}
+
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			index.index(&ctx, &int, Some(f32_content(&near)), Some(f32_content(&moved))).await?;
+			index.index(&ctx, &dec, Some(f32_content(&far)), None).await?;
+			docids.remove(&ctx.tx(), &dec).await?;
+			ctx.tx().commit().await?;
+		}
+		for compacted in [false, true] {
+			if compacted {
+				compact_all(&index, &ds, &ikb).await?;
+			}
+			let hits = nearest(&index, &ds, moved, 2).await?;
+			assert_eq!(hits.len(), 1, "compacted={compacted}: {hits:?}");
+			assert_eq!(hits[0].0, record_key(&int));
+			assert_eq!(hits[0].1, 0.0, "the survivor holds its new vector, compacted={compacted}");
 		}
 		Ok(())
 	}

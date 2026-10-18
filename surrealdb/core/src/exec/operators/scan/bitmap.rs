@@ -342,7 +342,7 @@ async fn build_btree_bitmap(
 	}
 	// Entries written before the index's doc-ID format (e.g. by an older
 	// binary during a rolling upgrade) carry no doc-ID; resolve them
-	// through the shared `!di` mapping instead.
+	// through the shared `!dj` mapping instead.
 	for rid in missing {
 		match bctx
 			.doc_ids

@@ -103,13 +103,6 @@ fn try_compile_leaf_streaming(
 				BinaryOperator::ContainAll => OverlapMode::All,
 				_ => return None,
 			};
-			// With `All`, the literals' equivalence classes must be well defined. Literals
-			// that spell a number both as a float and as a decimal do not form such
-			// classes (see `overlap_streaming_from_set`), so no streaming leaf is built.
-			// The plain leaf then decodes the field and the operator judges it.
-			if mode == OverlapMode::All && tables.literal_set.numbers_mix_float_and_decimal() {
-				return None;
-			}
 			let evaluator: Arc<dyn StreamingLeafEvaluator> = Arc::new(ArrayOverlapsLiteralSet {
 				literal_to_idx: tables.literal_to_idx,
 				wire_to_idx: tables.wire_to_idx,
@@ -300,7 +293,8 @@ fn flatten_or_into(acc: &mut Vec<PredNode>, node: PredNode) {
 /// loose equality (`=` / [`operate::equal`]). Collapsing the chain pays one field
 /// descent + one hash probe per row instead of one descent + comparison per arm;
 /// `eval_set_membership` keeps the two relations apart where hashing cannot
-/// decide loose equality (numbers, and a regex against strings — see
+/// decide loose equality (a regex against strings, and a value whose hash may
+/// disagree with its equality — see
 /// [`hash_miss_is_decisive`](super::wire_literal::hash_miss_is_decisive)).
 ///
 /// Conservative — an arm only joins a fused group when it is:

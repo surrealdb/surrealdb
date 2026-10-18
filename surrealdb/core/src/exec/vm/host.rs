@@ -1710,6 +1710,13 @@ pub(super) async fn run_storage_source(
 		} => {
 			let branch_distinct =
 				matches!(merge, Some(MergeMode::ById(_) | MergeMode::ByIndexKey { .. }));
+			// A merge by id follows the order its branches list records in: an
+			// index spelling its entries' ids as identities lists the records of
+			// one value as a table scan does, one stamped earlier by their ids'
+			// values.
+			let by_encoding = branches
+				.iter()
+				.all(|b| crate::catalog::spells_identity_entry_ids(b.index.format_version));
 			let mut branches = branches
 				.iter()
 				.map(|b| match &b.read {
@@ -1748,12 +1755,15 @@ pub(super) async fn run_storage_source(
 					}
 				};
 			}
+			// A record is passed once whichever branches list it, told apart by
+			// the record it addresses (`RecordAddress`), not by `RecordId`'s
+			// equality, under which `k:[1]` and `k:[1dec]` are one.
 			let Some(merge) = merge else {
 				let mut seen = HashSet::new();
 				for branch in &mut branches {
 					while let Some(row) = read!(branch.next(ctx).await) {
 						if let Some(rid) = record_id(&row)
-							&& !seen.insert(rid)
+							&& !seen.insert(crate::val::RecordAddress(rid))
 						{
 							continue;
 						}
@@ -1772,8 +1782,8 @@ pub(super) async fn run_storage_source(
 				for (i, branch) in branches.iter_mut().enumerate() {
 					// A row with no key is passed over, as the union
 					// operator passes over it.
-					let Some(key) =
-						read!(branch.peek(ctx).await).and_then(|row| merge_key(merge, row))
+					let Some(key) = read!(branch.peek(ctx).await)
+						.and_then(|row| merge_key(merge, row, by_encoding))
 					else {
 						continue;
 					};
@@ -1796,14 +1806,14 @@ pub(super) async fn run_storage_source(
 				// Merged by id, a record listed by several branches arrives
 				// once per branch in succession.
 				if let MergeKey::Rid(rid) = &key {
-					if last.as_ref() == Some(rid) {
+					if last.as_ref() == Some(&rid.address) {
 						continue;
 					}
-					last = Some(rid.clone());
+					last = Some(rid.address.clone());
 				}
 				if matches!(merge, MergeMode::ByIndexKeyDedup { .. })
 					&& let Some(rid) = record_id(&row)
-					&& !seen.insert(rid)
+					&& !seen.insert(crate::val::RecordAddress(rid))
 				{
 					continue;
 				}
@@ -2154,11 +2164,16 @@ pub(super) async fn run_storage_source(
 /// index's order, stands for the record. The repeats are dropped from the ids
 /// before any record is read, so they cost no read.
 /// Whether a B-tree equality on `key` lists every record whose field `=` the
-/// key ([`Source::Lookup`]): a value keyed alike by every value equal to it.
-/// An array is listed by its elements, a float or decimal equals a number of
-/// another representation inexactly, and a record id with a composite key
-/// may hold either. A string equals a regex it matches, but no entry is keyed
-/// by a regex.
+/// key ([`Source::Lookup`]): a value keyed alike by every value equal to it,
+/// whatever format the index was stamped at. An array is listed by its
+/// elements. An index stamped below
+/// [`crate::catalog::BTREE_NORMALISED_DECIMAL_KEYS_FORMAT_VERSION`] keys a
+/// computed `2.50dec` apart from an equal `2.5dec` or `2.5f`, so a float, a
+/// decimal and a record id with a composite key, which may hold either, are
+/// read through the table. An integer is looked up on every index; one stamped
+/// below that format misses a computed decimal equal to it (`2.0dec`) for every
+/// read until it is rebuilt. A string equals a regex it matches, but no entry is
+/// keyed by a regex.
 pub(super) fn lookup_key(key: &Value) -> bool {
 	match key {
 		Value::None
@@ -2187,7 +2202,7 @@ struct IndexRecords {
 	exhausted: bool,
 	/// The ids listed so far, kept only by a scan that can name a record more
 	/// than once.
-	seen: Option<HashSet<crate::val::RecordId>>,
+	seen: Option<HashSet<crate::val::RecordAddress>>,
 	/// The most rows the pipeline reading these records still takes under
 	/// its own paging, so that a B-tree read asks for no more entries than
 	/// that; `usize::MAX` where it pages nothing.
@@ -2293,7 +2308,7 @@ impl IndexRecords {
 					break;
 				}
 				if let Some(seen) = &mut self.seen {
-					batch.retain(|rid| seen.insert(rid.clone()));
+					batch.retain(|rid| seen.insert(crate::val::RecordAddress(rid.clone())));
 				}
 				self.reader.push(batch);
 			}
@@ -2363,19 +2378,61 @@ fn refuse_lightweight(
 	Ok(())
 }
 
-/// What an index union merges its branches by: a record's id, or the value
-/// at the merge path.
+/// What an index union merges its branches by: a record's id ([`MergeRid`]),
+/// or the value at the merge path.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 enum MergeKey {
-	Rid(crate::val::RecordId),
+	Rid(MergeRid),
 	Field(Value),
+}
+
+/// A record id as a merge by id orders it: equal exactly when it names the
+/// same record, so `k:[1]` and `k:[1dec]` stay two, and ordered as the merge's
+/// branches list records — by the key's encoding where `by_encoding`
+/// ([`crate::val::RecordIdKey::cmp_by_encoding`]), else by value with the
+/// encoding breaking ties ([`crate::val::RecordIdKey::cmp_by_record_address`]).
+struct MergeRid {
+	address: crate::val::RecordAddress,
+	by_encoding: bool,
+}
+
+impl PartialEq for MergeRid {
+	fn eq(&self, other: &Self) -> bool {
+		self.address == other.address
+	}
+}
+
+impl Eq for MergeRid {}
+
+impl PartialOrd for MergeRid {
+	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl Ord for MergeRid {
+	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+		let (a, b) = (&self.address.0, &other.address.0);
+		a.table.cmp(&b.table).then_with(|| {
+			if self.by_encoding {
+				a.key.cmp_by_encoding(&b.key)
+			} else {
+				a.key.cmp_by_record_address(&b.key)
+			}
+		})
+	}
 }
 
 /// The key `row` merges by, as the union index operator reads it: a row with
 /// no record id has no key when merging by id.
-fn merge_key(merge: &MergeMode, row: &Value) -> Option<MergeKey> {
+fn merge_key(merge: &MergeMode, row: &Value, by_encoding: bool) -> Option<MergeKey> {
 	match merge {
-		MergeMode::ById(_) => record_id(row).map(MergeKey::Rid),
+		MergeMode::ById(_) => record_id(row).map(|rid| {
+			MergeKey::Rid(MergeRid {
+				address: crate::val::RecordAddress(rid),
+				by_encoding,
+			})
+		}),
 		MergeMode::ByIndexKey {
 			path,
 			..

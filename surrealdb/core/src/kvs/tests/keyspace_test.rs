@@ -133,7 +133,7 @@ async fn recognised_keys_are_attributed_to_the_right_route() {
 		// Both directions of the document id mapping, encoded under the index
 		// format.
 		KeyKind::DocKey,
-		KeyKind::DocLookup,
+		KeyKind::DocLookupIdentity,
 		// The index build family, whose keys an interrupted build resumes from.
 		KeyKind::BuildState,
 		KeyKind::BuildTicket,

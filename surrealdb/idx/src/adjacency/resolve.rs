@@ -11,7 +11,7 @@
 //! it, so a stale positive is always masked by the merge.
 //!
 //! `REMOVE TABLE` ends a generation: it wipes the table's whole keyspace,
-//! including the `!di`/`!dd` mappings and the allocator that hands out
+//! including the `!dj`/`!dd` mappings and the allocator that hands out
 //! ids, so a redefinition restarts id allocation from scratch. A numeric
 //! block naming one of the removed table's ids can still exist — a block
 //! lives under its *vertex*'s keyspace, which may be a different,

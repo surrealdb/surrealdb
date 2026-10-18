@@ -16,9 +16,10 @@ reason = """
 	value stored under its own key lists every record it accepts, arrays
 	included, and narrows the search; a number the same as a float and as a
 	decimal matches whatever its kind. A number that is not, such as `0.1`, is
-	keyed by each kind's exact value yet equals the other kind's spelling, and
-	a regex equals every string it matches, each stored under its own key, so
-	both are judged on the candidates too. No record stores a regex, so a string
+	judged on the candidates, where the float `0.1` and the decimal `0.1` are
+	two values, as they are to the scan. A regex equals every string it
+	matches, each stored under its own key, so it is judged on the candidates
+	too. No record stores a regex, so a string
 	equality never misses a record whose value equals the string as a regex.
 """
 
@@ -170,37 +171,39 @@ value = "[]"
 value = "[]"
 
 [[test.results]]
-value = "[k:12, k:13]"
+value = "[k:13]"
 
 [[test.results]]
-value = "[k:12, k:13]"
+value = "[k:13]"
 
 [[test.results]]
-value = "[k:12, k:13]"
+value = "[k:12]"
 
 [[test.results]]
-value = "[k:12, k:13]"
-
-[[test.results]]
-value = "[]"
+value = "[k:12]"
 
 [[test.results]]
 value = "[]"
 
 [[test.results]]
-value = "[k:14, k:15]"
+value = "[]"
 
 [[test.results]]
-value = "[k:14, k:15]"
+value = "[k:15]"
 
 [[test.results]]
-value = "[k:14, k:15]"
+value = "[k:15]"
 
 [[test.results]]
-value = "[k:14, k:15]"
+value = "[k:14]"
+
+[[test.results]]
+value = "[k:14]"
 
 [[test.results]]
 error = "Tried to serialize a value which cannot be serialized."
+
+
 */
 
 DEFINE INDEX idx_c ON k FIELDS c;
@@ -255,8 +258,8 @@ SELECT VALUE id FROM kc WITH NOINDEX WHERE c = 'zz' AND vec <|3,EUCLIDEAN|> [0.0
 SELECT VALUE id FROM kc WHERE c = 'zz' AND extra = 1 AND vec <|2,40|> [0.0, 0.0] ORDER BY id;
 SELECT VALUE id FROM kc WITH NOINDEX WHERE c = 'zz' AND extra = 1 AND vec <|2,EUCLIDEAN|> [0.0, 0.0] ORDER BY id;
 EXPLAIN SELECT VALUE id FROM kc WHERE c = 'zz' AND extra = 1 AND vec <|2,40|> [0.0, 0.0];
--- A number whose float and decimal spellings are different numbers is keyed
--- by each kind's exact value, yet a float equals the decimal it prints as.
+-- A number whose float and decimal spellings are different numbers names
+-- one of them: the float `0.1` and the decimal `0.1` are two values.
 CREATE k:12 SET c = 0.1f, vec = [0.97, 0.97] RETURN NONE;
 CREATE k:13 SET c = 0.1dec, vec = [0.98, 0.98] RETURN NONE;
 SELECT VALUE id FROM k WHERE c = 0.1dec AND vec <|3,40|> [0.0, 0.0] ORDER BY id;

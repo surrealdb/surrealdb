@@ -1,10 +1,9 @@
 //! [`SeenSet`] — the set of rows a `DISTINCT` has already emitted.
 //!
 //! Two rows are the same row when they compare equal, so the seen set is
-//! **ordered** (`Value: Ord`) rather than hashed. `Value: Hash` disagrees with
-//! `Value: PartialEq` for numbers — `0.1f == 0.1dec` while the two hash apart, so
-//! a hash-bucketed set would never compare them and would emit one value as two
-//! rows (see [`Value::hash_agrees_with_eq`]).
+//! **ordered** (`Value: Ord`): one comparison decides it for every row, including
+//! one whose hash may disagree with its equality (see
+//! [`Value::hash_agrees_with_eq`]).
 //!
 //! The set grows with the number of *distinct* rows; its size is bounded by
 //! `SURREAL_GQL_MAX_JOIN_BUILD_ROWS` (the shared GQL in-memory-build budget), and

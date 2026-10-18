@@ -4,7 +4,7 @@
 //! The answer is `Value::Array(rows).contains(probe)`, which tests each row
 //! with [`Value::equal`]. That is not [`Value::cmp`]: a string equals a regex
 //! that matches it, and the order of a value holding a geometry, range or
-//! closure is not defined. So only the rows whose order agrees with their
+//! closure does not agree with its equality. So only the rows whose order agrees with their
 //! equality ([`Value::ord_agrees_with_equal`]) are indexed, sorted and
 //! deduplicated by `cmp`, where a probe that agrees too is found by a binary
 //! search. The other rows are kept aside and tested one by one with `equal`,

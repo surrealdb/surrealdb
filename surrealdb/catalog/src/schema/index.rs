@@ -84,7 +84,7 @@ impl From<u32> for IndexId {
 /// Bump when any index kind's persisted layout changes. An existing index keeps
 /// the version it was stamped with, and is read and written in that version's
 /// layout until `REBUILD INDEX` restamps it.
-pub const INDEX_FORMAT_VERSION: u16 = 4;
+pub const INDEX_FORMAT_VERSION: u16 = 5;
 
 /// Format version at which full-text, HNSW and DiskAnn indexes migrated onto
 /// the shared table-level doc-ID space.
@@ -105,6 +105,30 @@ pub const BTREE_ENTRY_DOC_IDS_FORMAT_VERSION: u16 = 2;
 /// entries and unique slots it writes and deletes, and the bounds it seeks — is
 /// spelled for its stamp, so each index is consistent with itself either way.
 pub const DATETIME_ORDER_FORMAT_VERSION: u16 = 4;
+
+/// Format version from which a b-tree (`Idx`/`Uniq`) index spells every decimal
+/// among its indexed values without trailing zeros (`2.50dec` as `2.5dec`), so
+/// values that compare equal share one key. An index stamped below it spells a
+/// decimal as it was written, which leaves two equal decimals at two keys, until
+/// `REBUILD INDEX` restamps it.
+pub const BTREE_NORMALISED_DECIMAL_KEYS_FORMAT_VERSION: u16 = 5;
+
+/// Format version from which a non-unique b-tree (`Idx`) entry spells the
+/// record id that ends its key as a `RecordIdentity`, which keeps a number's
+/// kind: `c:[1]` and `c:[1dec]` are two records with two entries. An index
+/// stamped below it spells the id as its indexed values are spelled, which
+/// drops the kind, so such a pair shares one entry, the later write replacing
+/// the earlier, until `REBUILD INDEX` restamps it. An id holding no number is
+/// spelled alike under both.
+pub const BTREE_IDENTITY_ENTRY_IDS_FORMAT_VERSION: u16 = 5;
+
+/// Format version from which an HNSW or DiskANN index's record-keyed pending
+/// entry (`!hr`, `!dw`) holds every record whose id its key spells. The key
+/// spells an id under `IndexFormat`, which drops a number's kind, so `pt:[1]`
+/// and `pt:[1dec]` share one key: from this version the entry keeps a pending
+/// update for each, and before it a write to either replaces the other's,
+/// until `REBUILD INDEX` restamps the index.
+pub const VECTOR_PENDING_MEMBERS_FORMAT_VERSION: u16 = 5;
 
 /// Format version at which HNSW and DiskANN indexes keep a doc-ID → elements
 /// mapping (`!hk` / `!dk`) alongside their vector → elements + doc-IDs mapping,
@@ -817,6 +841,27 @@ impl IndexDefinition {
 /// keep their private per-index layouts until explicitly rebuilt.
 pub fn uses_shared_doc_ids(format_version: u16) -> bool {
 	format_version >= DOC_IDS_FORMAT_VERSION
+}
+
+/// Whether a b-tree index stamped with `format_version` spells the decimals of
+/// its keys without trailing zeros. See
+/// [`BTREE_NORMALISED_DECIMAL_KEYS_FORMAT_VERSION`].
+pub fn spells_normalised_decimal_keys(format_version: u16) -> bool {
+	format_version >= BTREE_NORMALISED_DECIMAL_KEYS_FORMAT_VERSION
+}
+
+/// Whether a b-tree index stamped with `format_version` spells the record id
+/// of a non-unique entry as a `RecordIdentity`. See
+/// [`BTREE_IDENTITY_ENTRY_IDS_FORMAT_VERSION`].
+pub fn spells_identity_entry_ids(format_version: u16) -> bool {
+	format_version >= BTREE_IDENTITY_ENTRY_IDS_FORMAT_VERSION
+}
+
+/// Whether a vector index stamped with `format_version` keeps a pending update
+/// for every record its pending key spells. See
+/// [`VECTOR_PENDING_MEMBERS_FORMAT_VERSION`].
+pub fn keeps_pending_members(format_version: u16) -> bool {
+	format_version >= VECTOR_PENDING_MEMBERS_FORMAT_VERSION
 }
 
 /// Whether a vector index with the given stored format version keeps the

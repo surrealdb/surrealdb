@@ -9,9 +9,9 @@ use std::sync::Arc;
 
 use super::access_path::{
 	AccessPath, BTreeAccess, BitmapPlan, BoundOperand, IndexRef, KnnPrefilterPlan, OperandRange,
-	exact_across_kinds, select_access_path,
+	number_keyed_as_compared, select_access_path,
 };
-use crate::catalog::{Index, IndexDefinition, KeyStructure};
+use crate::catalog::{Index, IndexDefinition, KeyStructure, spells_normalised_decimal_keys};
 use crate::exec::planner::util::{
 	KnnQueryVector, KnnVectorClass, classify_knn_vector, expr_contains_matches,
 	idiom_matches_column_in, idiom_matches_containment, try_bound_operand, try_literal_to_value,
@@ -1091,9 +1091,10 @@ impl<'a> IndexAnalyzer<'a> {
 	///   filter path evaluates membership on the same bitmaps);
 	/// - b-tree equality/range/compound leaves whose pinned columns each hold one entry per record
 	///   (`exact_col`) — array values fan out to one index entry per element, which would make the
-	///   bitmap a superset of the predicate's truth set — whose range no number bounds
+	///   bitmap a superset of the predicate's truth set — whose range no number bounds that the
+	///   index keys apart from values it compares equal to
 	///   ([`super::access_path::range_matches_comparison`]), and whose equalities name only values
-	///   of a kind [`Self::key_equality_covers`] admits ([`Self::equality_keys_cover`]);
+	///   [`Self::key_equality_covers`] admits for that index ([`Self::equality_keys_cover`]);
 	/// - an OR of such leaves (`B OR C` is exactly `B ∪ C`).
 	///
 	/// Anything else returns `None`.
@@ -1111,24 +1112,26 @@ impl<'a> IndexAnalyzer<'a> {
 			// its bitmap is a superset of the truth set.
 			access if super::derived_columns::range_is_widened(&c.index_ref, access) => false,
 			_ => {
-				super::access_path::range_matches_comparison(&c.access)
-					&& Self::equality_keys_cover(&c.access)
+				super::access_path::range_matches_comparison(&c.index_ref, &c.access)
+					&& Self::equality_keys_cover(&c.index_ref, &c.access)
 					&& (0..Self::candidate_pinned_columns(c).len())
 						.all(|col| exact_col(&c.index_ref, col))
 			}
 		})
 	}
 
-	/// Whether every value `access` seeks by equality is of a kind
-	/// [`Self::key_equality_covers`] admits: the keys it reads then hold every
-	/// record the equality accepts. A value of another kind (an array, an
-	/// object, a regex, a record id with a compound key) may equal values
-	/// stored under keys of their own, which a bitmap that stands in for the
-	/// conjunct would omit. A range bound is judged by
-	/// [`super::access_path::range_matches_comparison`].
-	fn equality_keys_cover(access: &BTreeAccess) -> bool {
-		let covers =
-			|operand: &BoundOperand| operand.as_literal().is_none_or(Self::key_equality_covers);
+	/// Whether every value `access` seeks by equality over `index` is one
+	/// [`Self::key_equality_covers`] admits for it: the keys it reads then hold
+	/// every record the equality accepts. Another value (an array, an object, a
+	/// regex, a record id with a compound key, a number the index keys apart
+	/// from numbers equal to it) may equal values stored under keys of their
+	/// own, which a bitmap that stands in for the conjunct would omit. A range
+	/// bound is judged by [`super::access_path::range_matches_comparison`].
+	fn equality_keys_cover(index: &IndexDefinition, access: &BTreeAccess) -> bool {
+		let normalised = spells_normalised_decimal_keys(index.format_version);
+		let covers = |operand: &BoundOperand| {
+			operand.as_literal().is_none_or(|value| Self::key_equality_covers(value, normalised))
+		};
 		match access {
 			BTreeAccess::Equality(value) => covers(value),
 			BTreeAccess::Compound {
@@ -1190,9 +1193,9 @@ impl<'a> IndexAnalyzer<'a> {
 
 	/// A bitmap plan holding every record that satisfies `inner`, and possibly
 	/// others, whatever the indexed columns hold: an equality between a plain
-	/// column and a value of a kind [`Self::key_equality_covers`] admits,
-	/// answered by a b-tree leaf that pins every column it reads, or an OR of
-	/// such equalities.
+	/// column and a value [`Self::key_equality_covers`] admits for the index
+	/// answering it, answered by a b-tree leaf that pins every column it reads,
+	/// or an OR of such equalities.
 	///
 	/// A value equal to the sought one is stored under its own key, and a
 	/// record holding an array is listed under each element besides, so the
@@ -1233,28 +1236,30 @@ impl<'a> IndexAnalyzer<'a> {
 					} => prefix,
 					_ => return false,
 				};
+				let normalised = spells_normalised_decimal_keys(c.index_ref.format_version);
 				// An operand that reads the clock is no value fixed before the scan opens.
-				sought
-					.iter()
-					.all(|operand| operand.as_literal().is_some_and(Self::key_equality_covers))
-					&& pinned_plain()
+				sought.iter().all(|operand| {
+					operand
+						.as_literal()
+						.is_some_and(|value| Self::key_equality_covers(value, normalised))
+				}) && pinned_plain()
 			}),
 			_ => None,
 		}
 	}
 
 	/// Whether every value `=` holds equal to `value` is stored under
-	/// `value`'s own index key. True for the kinds whose equality is equality
-	/// of their keys: `NONE`, `NULL`, booleans, strings, durations, datetimes,
-	/// UUIDs, record ids whose key is a whole number, string or UUID, and a
-	/// number the same as a float and as a decimal ([`exact_across_kinds`]).
-	/// An index key holds a number's exact value, while a comparison converts
-	/// a float to the decimal it prints as, so the float `0.1` equals the
-	/// decimal `0.1` yet is keyed apart from it; a record id whose key is an
-	/// array, object or range may hold such a number, and is not taken on
-	/// trust. Not for a regex, which `=` holds equal to every string it
-	/// matches, each stored under its own key; nor for any other kind.
-	fn key_equality_covers(value: &Value) -> bool {
+	/// `value`'s own key, in an index whose keys spell decimals without
+	/// trailing zeros when `normalised`. True for the kinds whose equality is
+	/// equality of their keys: `NONE`, `NULL`, booleans, strings, durations,
+	/// datetimes, UUIDs, record ids whose key is a whole number, string or
+	/// UUID, and a number keyed where it compares
+	/// ([`number_keyed_as_compared`]). An equality naming any other number, or
+	/// a record id whose key is an array, object or range and so may hold one,
+	/// is judged on the rows, which costs reads and never rows. Not for a
+	/// regex, which `=` holds equal to every string it matches, each stored
+	/// under its own key; nor for any other kind.
+	fn key_equality_covers(value: &Value, normalised: bool) -> bool {
 		matches!(
 			value,
 			Value::None
@@ -1264,7 +1269,7 @@ impl<'a> IndexAnalyzer<'a> {
 				| Value::Duration(_)
 				| Value::Datetime(_)
 				| Value::Uuid(_)
-		) || matches!(value, Value::Number(n) if exact_across_kinds(n))
+		) || matches!(value, Value::Number(n) if number_keyed_as_compared(n, normalised))
 			|| matches!(
 				value,
 				Value::RecordId(id) if matches!(
@@ -3063,12 +3068,13 @@ mod tests {
 	// ------------------------------------------------------------------
 	mod bitmap_fusion {
 		use super::*;
-		use crate::catalog::BTREE_ENTRY_DOC_IDS_FORMAT_VERSION;
+		use crate::catalog::INDEX_FORMAT_VERSION;
 
-		/// A b-tree index at the doc-ID entry format (bitmap-capable).
+		/// A b-tree index of the current format: bitmap-capable, and keyed
+		/// where each number it holds compares.
 		pub(super) fn idx_v2(id: u32, name: &str, cols: &[&str]) -> IndexDefinition {
 			let mut def = idx_basic(id, name, cols);
-			def.format_version = BTREE_ENTRY_DOC_IDS_FORMAT_VERSION;
+			def.format_version = INDEX_FORMAT_VERSION;
 			def
 		}
 
@@ -3195,10 +3201,10 @@ mod tests {
 			}
 		}
 
-		/// A unique index at the doc-ID entry format (bitmap-capable).
+		/// A unique index of the current format, as [`idx_v2`].
 		fn idx_uniq_v2(id: u32, name: &str, cols: &[&str]) -> IndexDefinition {
 			let mut def = idx_uniq(id, name, cols);
-			def.format_version = BTREE_ENTRY_DOC_IDS_FORMAT_VERSION;
+			def.format_version = INDEX_FORMAT_VERSION;
 			def
 		}
 
@@ -4454,6 +4460,22 @@ mod tests {
 			);
 			let residual = plan.residual.expect("the superset conjunct stays residual");
 			assert_eq!(surrealdb_types::ToSql::to_sql(&residual), "a = 1");
+		}
+
+		#[test]
+		fn a_number_over_an_index_that_keeps_trailing_zeros_stays_residual() {
+			// Such an index keys `1.0dec` apart from `1`, so its entries at `1`
+			// hold neither the truth set of `a = 1` nor a superset of it.
+			let mut older = idx_v2(1, "idx_a", &["a"]);
+			older.format_version = crate::catalog::BTREE_NORMALISED_DECIMAL_KEYS_FORMAT_VERSION - 1;
+			let az = scalar_analyzer(vec![older, idx_hnsw(2, "hn_vec", &["vec"])], None);
+			let cond = parse_cond("a = 1 AND vec <|2,100|> [0.0, 0.0]");
+			assert!(split(&az, &cond, true).is_none());
+			assert!(split(&az, &cond, false).is_none());
+			// A string is keyed where it compares in every format.
+			let cond = parse_cond("a = 'x' AND vec <|2,100|> [0.0, 0.0]");
+			let plan = split(&az, &cond, true).expect("the equality covers the conjunct");
+			assert!(plan.residual.is_none(), "{:?}", plan.residual);
 		}
 
 		#[test]

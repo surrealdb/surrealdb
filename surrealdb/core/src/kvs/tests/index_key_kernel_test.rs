@@ -762,14 +762,56 @@ async fn an_entry_names_its_record_with_its_number_kind() {
 	}
 }
 
-/// A non-unique entry's key spells the record id under the index format,
-/// which erases a nested number's kind: records whose ids differ only there,
-/// holding the same indexed value, share one entry. The entry names the
-/// record written last, and an indexed read answers that record alone.
+/// From the stamp that spells it as a `RecordIdentity`, a non-unique entry's
+/// key keeps the number kind of its record's id: records whose ids differ only
+/// there, holding the same indexed value, have an entry each, and an indexed
+/// read answers every one of them, as a scan does.
 #[tokio::test]
-async fn records_differing_only_in_id_number_kind_share_a_non_unique_entry() {
+async fn records_differing_only_in_id_number_kind_have_an_entry_each() {
 	let (ds, ses) = datastore().await;
 	run(&ds, &ses, "DEFINE TABLE kd; DEFINE INDEX ix ON kd FIELDS v;", &[]).await;
+	assert!(crate::catalog::spells_identity_entry_ids(index_format(&ds, "kd").await));
+	let rows: Vec<Row> = kind_ids()
+		.into_iter()
+		.map(|id| Row {
+			id,
+			values: vec![int(5)],
+		})
+		.collect();
+	create(&ds, &ses, "kd", &["v"], &rows).await;
+	let e = entries(&ds, &ses, "kd", &["v"], &rows).await;
+	assert_kernel_bytes("kd", "a statement", &e);
+	assert_eq!(e.stored.len(), rows.len(), "kd: {:?}", e.stored);
+	let mut every: Vec<String> =
+		rows.iter().map(|r| exact(&RecordId::new(TableName::from("kd"), r.id.clone()))).collect();
+	every.sort();
+	let read = |noindex: bool| {
+		let with = if noindex {
+			"NOINDEX"
+		} else {
+			"INDEX ix"
+		};
+		format!("SELECT VALUE id FROM kd WITH {with} WHERE v = $x;")
+	};
+	for noindex in [false, true] {
+		let mut ids = exact_ids(run(&ds, &ses, &read(noindex), &[("x", &int(5))]).await);
+		ids.sort();
+		assert_eq!(ids, every, "noindex={noindex}");
+	}
+}
+
+/// An index stamped before ids are spelled as a `RecordIdentity` keeps the
+/// spelling it was written with: records whose ids differ only in a nested
+/// number's kind share one entry, which names the record written last, and an
+/// indexed read answers that record alone. `REBUILD INDEX` restamps it, and
+/// the rebuilt index has an entry for each.
+#[tokio::test]
+async fn an_older_index_shares_one_entry_for_ids_differing_in_number_kind_until_rebuilt() {
+	let (ds, ses) = datastore().await;
+	run(&ds, &ses, "DEFINE TABLE kd; DEFINE INDEX ix ON kd FIELDS v;", &[]).await;
+	let older = crate::catalog::BTREE_IDENTITY_ENTRY_IDS_FORMAT_VERSION - 1;
+	stamp_index_format(&ds, "kd", older).await;
+	assert_eq!(index_format(&ds, "kd").await, older);
 	let rows: Vec<Row> = kind_ids()
 		.into_iter()
 		.map(|id| Row {
@@ -791,22 +833,26 @@ async fn records_differing_only_in_id_number_kind_share_a_non_unique_entry() {
 		run(&ds, &ses, "SELECT VALUE id FROM kd WITH NOINDEX WHERE v = $x;", &[("x", &int(5))])
 			.await;
 	assert_eq!(exact_ids(scanned).len(), rows.len());
+
+	run(&ds, &ses, "REBUILD INDEX ix ON kd;", &[]).await;
+	assert!(crate::catalog::spells_identity_entry_ids(index_format(&ds, "kd").await));
+	let e = entries(&ds, &ses, "kd", &["v"], &rows).await;
+	assert_kernel_bytes("kd", "a rebuild", &e);
+	assert_eq!(e.stored.len(), rows.len(), "kd after the rebuild: {:?}", e.stored);
+	let indexed =
+		run(&ds, &ses, "SELECT VALUE id FROM kd WITH INDEX ix WHERE v = $x;", &[("x", &int(5))])
+			.await;
+	assert_eq!(exact_ids(indexed).len(), rows.len());
 }
 
 /// A float and a decimal that agree to an `f64`'s precision but not exactly
-/// are two keys, each spelling its exact value. Value comparison treats such
-/// a float and decimal as equal. An unindexed read answers the records whose
-/// values the predicate admits; an indexed read answers those of them whose
-/// keys the predicate's key range also holds. So an equality, or an inclusive
-/// bound, on one of the pair reads both through a scan and one through the
-/// index.
-///
-/// A range is answered by its keys alone only where its bound is a number a
-/// float and a decimal both hold exactly; there the key range and the
-/// comparison admit the same values. A bound like either of the pair keeps the
-/// comparison as a recheck, over a column declared a number kind as over an
-/// undeclared one, so an exclusive bound on one of the pair never reads the
-/// other through the index.
+/// are two keys, each spelling its exact value, and two values: value
+/// comparison orders a float by the expansion its key spells. So an indexed
+/// and an unindexed read answer the same records, for an equality and for
+/// every bound on either of the pair, on a plain index and on a unique one,
+/// over an undeclared column and over one declared a number kind. A range the
+/// index answers by its keys alone and one it rechecks against the values
+/// admit the same records, as the key order is the value order.
 #[tokio::test]
 async fn a_float_and_a_finer_decimal_are_two_keys_read_by_their_exact_values() {
 	let (ds, ses) = datastore().await;
@@ -816,6 +862,11 @@ async fn a_float_and_a_finer_decimal_are_two_keys_read_by_their_exact_values() {
 	let key = |v: &Value| ks.unique_key(std::slice::from_ref(v)).unwrap().as_slice().to_vec();
 	assert!(key(&dec("0.1")) < key(&float(0.1)));
 	assert!(key(&float(1.0)) < key(&dec("1.0000000000000000000000000001")));
+	for a in &values {
+		for b in &values {
+			assert_eq!(a.cmp(b), key(a).cmp(&key(b)), "{a:?} against {b:?}");
+		}
+	}
 	for (unique, declared) in [(false, false), (true, false), (false, true), (true, true)] {
 		let tb = match (unique, declared) {
 			(false, false) => "xn",
@@ -861,19 +912,401 @@ async fn a_float_and_a_finer_decimal_are_two_keys_read_by_their_exact_values() {
 					">=" => o.is_ge(),
 					_ => o.is_gt(),
 				};
+				let expected = ids(&|v| admits(v.cmp(x)));
 				let sql = format!("SELECT VALUE id FROM {tb} WITH INDEX ix WHERE v {op} $x;");
 				let indexed = exact_ids(run(&ds, &ses, &sql, &[("x", x)]).await);
-				let expected = ids(&|v| admits(key(v).cmp(&key(x))) && admits(v.cmp(x)));
 				assert_eq!(indexed, expected, "{tb}: indexed v {op} {x:?}");
 				let sql = format!("SELECT VALUE id FROM {tb} WITH NOINDEX WHERE v {op} $x;");
 				let scanned = exact_ids(run(&ds, &ses, &sql, &[("x", x)]).await);
-				assert_eq!(scanned, ids(&|v| admits(v.cmp(x))), "{tb}: scanned v {op} {x:?}");
+				assert_eq!(scanned, expected, "{tb}: scanned v {op} {x:?}");
 			}
 		}
 		let sql = |hint: &str| format!("SELECT VALUE id FROM {tb} WITH {hint} WHERE v = $x;");
 		let x = float(0.1);
 		let indexed = exact_ids(run(&ds, &ses, &sql("INDEX ix"), &[("x", &x)]).await);
 		let scanned = exact_ids(run(&ds, &ses, &sql("NOINDEX"), &[("x", &x)]).await);
-		assert_eq!((indexed.len(), scanned.len()), (1, 2), "{tb}: v = 0.1f");
+		assert_eq!((indexed.len(), scanned.len()), (1, 1), "{tb}: v = 0.1f");
 	}
+}
+
+// ------------------------------
+// Decimals spelled with trailing zeros
+// ------------------------------
+//
+// `1.25dec * 2` is the decimal 2.50, which compares equal to the literal
+// `2.5dec` and has different bytes under the index format unless the index
+// respells it. An index stamped with the normalised-decimal format version
+// does, and an older index keeps the spelling it was written with.
+
+/// The index format version before decimals are spelled without trailing zeros.
+const SPELLS_TRAILING_ZEROS: u16 = crate::catalog::BTREE_NORMALISED_DECIMAL_KEYS_FORMAT_VERSION - 1;
+
+/// Stamps index `ix` of `tb` with `format_version`, as a binary that wrote it
+/// at that version would have. Called while the table is empty, so only the
+/// definition changes.
+async fn stamp_index_format(ds: &Datastore, tb: &str, format_version: u16) {
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
+	let db = tx.expect_db_by_name("test", "test").await.unwrap();
+	let table = TableName::from(tb);
+	let ix = tx.expect_tb_index(db.namespace_id, db.database_id, &table, "ix").await.unwrap();
+	let mut stamped = (*ix).clone();
+	stamped.format_version = format_version;
+	tx.put_tb_index(db.namespace_id, db.database_id, &table, &stamped).await.unwrap();
+	let tb_def = tx.expect_tb(db.namespace_id, db.database_id, &table).await.unwrap();
+	tx.put_tb("test", "test", &tb_def).await.unwrap();
+	tx.commit().await.unwrap();
+}
+
+async fn index_format(ds: &Datastore, tb: &str) -> u16 {
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
+	let db = tx.expect_db_by_name("test", "test").await.unwrap();
+	let table = TableName::from(tb);
+	let ix = tx.expect_tb_index(db.namespace_id, db.database_id, &table, "ix").await.unwrap();
+	tx.cancel().await.unwrap();
+	ix.format_version
+}
+
+/// The decimal 2.50, computed, and the literal 2.5: equal values, two spellings.
+async fn two_spellings(ds: &Datastore, ses: &Session) -> (Value, Value) {
+	let untidy = run(ds, ses, "RETURN 1.25dec * 2;", &[]).await.remove(0);
+	let tidy = run(ds, ses, "RETURN 2.5dec;", &[]).await.remove(0);
+	assert_eq!(untidy, tidy);
+	assert_ne!(format!("{untidy:?}"), format!("{tidy:?}"), "the computed decimal keeps its zero");
+	(untidy, tidy)
+}
+
+/// The ids of the records `tb:key`, in the order a result lists them.
+fn ids_of(tb: &str, keys: &[i64]) -> Vec<String> {
+	let mut out: Vec<String> = keys
+		.iter()
+		.map(|k| exact(&RecordId::new(TableName::from(tb), RecordIdKey::Number(*k))))
+		.collect();
+	out.sort();
+	out
+}
+
+/// Checks `cond` is answered from the index.
+async fn assert_indexed(
+	ds: &Datastore,
+	ses: &Session,
+	tb: &str,
+	cond: &str,
+	vars: &[(&str, &Value)],
+) {
+	let plan =
+		run(ds, ses, &format!("EXPLAIN SELECT VALUE id FROM {tb} WHERE {cond};"), vars).await;
+	assert!(format!("{plan:?}").contains("IndexScan"), "{tb}: WHERE {cond} is not an index scan");
+}
+
+/// Writes `values` as records `0..` holding `c`.
+async fn fill(ds: &Datastore, ses: &Session, tb: &str, values: Vec<Value>) -> Vec<Row> {
+	let rows = rows(values);
+	create(ds, ses, tb, &["c"], &rows).await;
+	rows
+}
+
+async fn equal_decimals_read_the_same_through_a_current_index(unique: bool) {
+	let (ds, ses) = datastore().await;
+	let (untidy, tidy) = two_spellings(&ds, &ses).await;
+	let kind = if unique {
+		" UNIQUE"
+	} else {
+		""
+	};
+	run(&ds, &ses, &format!("DEFINE TABLE t; DEFINE INDEX ix ON t FIELDS c{kind};"), &[]).await;
+	assert_eq!(index_format(&ds, "t").await, crate::catalog::INDEX_FORMAT_VERSION);
+	// A `UNIQUE` index holds one of the pair; records 0 and 1 hold the pair
+	// otherwise, and record 2 sits below it and record 3 above it.
+	let (equal, below, above): (Vec<i64>, i64, i64) = if unique {
+		(vec![0], 1, 2)
+	} else {
+		(vec![0, 1], 2, 3)
+	};
+	let mut values = vec![untidy.clone()];
+	if !unique {
+		values.push(tidy.clone());
+	}
+	values.extend([dec("2.4"), dec("2.6")]);
+	let rows = fill(&ds, &ses, "t", values).await;
+	assert_kernel_bytes("t", "a statement", &entries(&ds, &ses, "t", &["c"], &rows).await);
+	let expect = |ks: &[&[i64]]| ids_of("t", &ks.concat());
+	for probe in [&untidy, &tidy] {
+		let v = [("x", probe)];
+		for cond in ["c = $x", "c >= $x AND c <= $x"] {
+			assert_indexed(&ds, &ses, "t", cond, &v).await;
+			assert_eq!(read_both_ways(&ds, &ses, "t", cond, &v).await, expect(&[&equal]), "{cond}");
+		}
+		let cases = [
+			("c >= $x", expect(&[&equal, &[above]])),
+			("c > $x", expect(&[&[above]])),
+			("c <= $x", expect(&[&equal, &[below]])),
+			("c < $x", expect(&[&[below]])),
+		];
+		for (cond, expected) in cases {
+			assert_eq!(
+				read_both_ways(&ds, &ses, "t", cond, &v).await,
+				expected,
+				"{cond} on {probe:?}"
+			);
+		}
+	}
+	if unique {
+		// The other spelling of a value the index holds is refused, by a create
+		// as by an update, whichever spelling was written first.
+		let res = try_run(&ds, &ses, "CREATE t:10 SET c = $x;", &[("x", &tidy)]).await;
+		assert!(matches!(&res[..], [Err(e)] if e.contains("already contains")), "{res:?}");
+		let res = try_run(&ds, &ses, "UPDATE t:1 SET c = $x;", &[("x", &tidy)]).await;
+		assert!(matches!(&res[..], [Err(e)] if e.contains("already contains")), "{res:?}");
+		run(&ds, &ses, "DEFINE TABLE s; DEFINE INDEX ix ON s FIELDS c UNIQUE;", &[]).await;
+		fill(&ds, &ses, "s", vec![tidy.clone()]).await;
+		let res = try_run(&ds, &ses, "CREATE s:10 SET c = $x;", &[("x", &untidy)]).await;
+		assert!(matches!(&res[..], [Err(e)] if e.contains("already contains")), "{res:?}");
+		// Building over both spellings is refused too.
+		run(&ds, &ses, "DEFINE TABLE b;", &[]).await;
+		fill(&ds, &ses, "b", vec![untidy.clone(), tidy.clone()]).await;
+		let res = try_run(&ds, &ses, "DEFINE INDEX ix ON b FIELDS c UNIQUE;", &[]).await;
+		assert!(matches!(&res[..], [Err(e)] if e.contains("already contains")), "{res:?}");
+	}
+}
+
+#[tokio::test]
+async fn equal_decimals_are_one_key_to_a_current_non_unique_index() {
+	equal_decimals_read_the_same_through_a_current_index(false).await;
+}
+
+#[tokio::test]
+async fn equal_decimals_are_one_key_to_a_current_unique_index() {
+	equal_decimals_read_the_same_through_a_current_index(true).await;
+}
+
+/// A decimal nested in an object, a record id, or the columns of a compound
+/// index is respelled as a bare one is.
+#[tokio::test]
+async fn decimals_nested_in_a_value_are_one_key_on_a_current_index() {
+	let (ds, ses) = datastore().await;
+	let cases = [
+		("obj", "c", "{ k: 1.25dec * 2 }", "{ k: 2.5dec }", "c = { k: 2.5dec }"),
+		("rid", "c", "other:[1.25dec * 2]", "other:[2.5dec]", "c = other:[2.5dec]"),
+	];
+	for (tb, cols, untidy, tidy, cond) in cases {
+		let sql = format!(
+			"DEFINE TABLE {tb}; DEFINE INDEX ix ON {tb} FIELDS {cols};
+			 CREATE {tb}:1 SET c = {untidy};
+			 CREATE {tb}:2 SET c = {tidy};
+			 CREATE {tb}:3 SET c = {tidy};
+			 CREATE {tb}:4 SET c = 0;"
+		);
+		run(&ds, &ses, &sql, &[]).await;
+		// The planner answers an equality to a record id by a scan, so the
+		// kernel's own tests carry that case.
+		if tb == "obj" {
+			assert_indexed(&ds, &ses, tb, cond, &[]).await;
+		}
+		let ids = read_both_ways(&ds, &ses, tb, cond, &[]).await;
+		assert_eq!(ids, ids_of(tb, &[1, 2, 3]), "{tb}: {cond}");
+	}
+	// A compound index respells its leading values and its range value.
+	run(
+		&ds,
+		&ses,
+		"DEFINE TABLE pair; DEFINE INDEX ix ON pair FIELDS c, d;
+		 CREATE pair:1 SET c = 1.25dec * 2, d = 3dec * 2.5;
+		 CREATE pair:2 SET c = 2.5dec, d = 7.5dec;
+		 CREATE pair:3 SET c = 2.5dec, d = 8dec;
+		 CREATE pair:4 SET c = 3dec, d = 7.5dec;",
+		&[],
+	)
+	.await;
+	for (cond, expected) in [
+		("c = 2.5dec AND d = 7.5dec", vec![1, 2]),
+		("c = 2.50dec AND d >= 7.5dec", vec![1, 2, 3]),
+		("c = 2.5dec AND d > 7.5dec", vec![3]),
+		("c = 2.5dec AND d <= 7.50dec", vec![1, 2]),
+		("c = 2.5dec AND d < 7.5dec", vec![]),
+	] {
+		assert_indexed(&ds, &ses, "pair", cond, &[]).await;
+		assert_eq!(
+			read_both_ways(&ds, &ses, "pair", cond, &[]).await,
+			ids_of("pair", &expected),
+			"{cond}"
+		);
+	}
+}
+
+/// An index stamped before decimals were respelled keeps writing them as they
+/// are, so what it holds is still found at the keys it was written under, and
+/// an update or a delete of an entry leaves nothing behind.
+async fn an_older_index_keeps_its_spelling_and_cleans_up_after_itself(unique: bool) {
+	let (ds, ses) = datastore().await;
+	let (untidy, tidy) = two_spellings(&ds, &ses).await;
+	let kind = if unique {
+		" UNIQUE"
+	} else {
+		""
+	};
+	run(&ds, &ses, &format!("DEFINE TABLE t; DEFINE INDEX ix ON t FIELDS c{kind};"), &[]).await;
+	stamp_index_format(&ds, "t", SPELLS_TRAILING_ZEROS).await;
+	assert_eq!(index_format(&ds, "t").await, SPELLS_TRAILING_ZEROS);
+
+	// An index of the older format, `UNIQUE` or not, takes both spellings.
+	let mut rows = fill(&ds, &ses, "t", vec![untidy.clone(), tidy.clone(), dec("2.6")]).await;
+	assert_kernel_bytes("t", "a statement", &entries(&ds, &ses, "t", &["c"], &rows).await);
+	let x = [("x", &tidy)];
+	let indexed = "SELECT VALUE id FROM t WITH INDEX ix WHERE c = $x;";
+	assert_eq!(exact_ids(run(&ds, &ses, indexed, &x).await), ids_of("t", &[1]));
+	let scanned = "SELECT VALUE id FROM t WITH NOINDEX WHERE c = $x;";
+	assert_eq!(exact_ids(run(&ds, &ses, scanned, &x).await), ids_of("t", &[0, 1]));
+	// A range is read from the keys and every record it reaches is judged
+	// again, so a bound past one spelling of its value leaves the other out.
+	assert_eq!(read_both_ways(&ds, &ses, "t", "c > $x", &x).await, ids_of("t", &[2]));
+	assert_eq!(count_above(&ds, &ses, &tidy).await, 1);
+	let indexed = "SELECT VALUE id FROM t WITH INDEX ix WHERE c <= $x;";
+	assert_eq!(exact_ids(run(&ds, &ses, indexed, &x).await), ids_of("t", &[1]));
+	let scanned = "SELECT VALUE id FROM t WITH NOINDEX WHERE c <= $x;";
+	assert_eq!(exact_ids(run(&ds, &ses, scanned, &x).await), ids_of("t", &[0, 1]));
+	// The computed decimal's entry sits at the key its own spelling gives it.
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
+	let db = tx.expect_db_by_name("test", "test").await.unwrap();
+	let table = TableName::from("t");
+	let def = tx.expect_tb_index(db.namespace_id, db.database_id, &table, "ix").await.unwrap();
+	assert!(!crate::catalog::spells_normalised_decimal_keys(def.format_version));
+	let ks = IndexKeyspace::of(db.namespace_id, db.database_id, &def);
+	let raw =
+		ks.stored_key(unique, std::slice::from_ref(&untidy), &RecordIdKey::Number(0)).unwrap();
+	let respelled =
+		ks.stored_key(unique, std::slice::from_ref(&tidy), &RecordIdKey::Number(0)).unwrap();
+	assert_ne!(raw.key, respelled.key);
+	assert!(tx.get_key(&raw, None).await.unwrap().is_some(), "the computed decimal's entry");
+	tx.cancel().await.unwrap();
+
+	// Rewriting and deleting entries leaves none of them behind.
+	let three = int(3);
+	run(&ds, &ses, "UPDATE t:0 SET c = $x;", &[("x", &three)]).await;
+	rows[0].values = vec![three];
+	assert_kernel_bytes("t", "an update", &entries(&ds, &ses, "t", &["c"], &rows).await);
+	run(&ds, &ses, "UPDATE t:2 SET c = 1.25dec * 2;", &[]).await;
+	rows[2].values = vec![untidy.clone()];
+	assert_kernel_bytes("t", "an update", &entries(&ds, &ses, "t", &["c"], &rows).await);
+	run(&ds, &ses, "UPDATE t:2 SET c = 1.7dec * 2;", &[]).await;
+	rows[2].values = run(&ds, &ses, "RETURN 1.7dec * 2;", &[]).await;
+	assert_kernel_bytes("t", "an update", &entries(&ds, &ses, "t", &["c"], &rows).await);
+	run(&ds, &ses, "DELETE t:2;", &[]).await;
+	rows.truncate(2);
+	assert_kernel_bytes("t", "a delete", &entries(&ds, &ses, "t", &["c"], &rows).await);
+	run(&ds, &ses, "DELETE t:1; DELETE t:0;", &[]).await;
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
+	let left = tx.scan(ks.all().unwrap(), 100, 0, None).await.unwrap();
+	tx.cancel().await.unwrap();
+	assert!(left.is_empty(), "{} entries left behind", left.len());
+
+	// A rebuild respells every entry, and the index then answers as a scan
+	// does. A `UNIQUE` index holding both spellings refuses the rebuild.
+	let values = if unique {
+		vec![untidy, dec("2.6")]
+	} else {
+		vec![untidy, tidy.clone(), dec("2.6")]
+	};
+	let last = values.len() as i64 - 1;
+	let at_most: Vec<i64> = (0..last).collect();
+	fill(&ds, &ses, "t", values).await;
+	run(&ds, &ses, "REBUILD INDEX ix ON t;", &[]).await;
+	assert!(crate::catalog::spells_normalised_decimal_keys(index_format(&ds, "t").await));
+	assert_eq!(read_both_ways(&ds, &ses, "t", "c > $x", &x).await, ids_of("t", &[last]));
+	assert_eq!(read_both_ways(&ds, &ses, "t", "c <= $x", &x).await, ids_of("t", &at_most));
+	assert_eq!(count_above(&ds, &ses, &tidy).await, 1);
+}
+
+/// `count()` of the records of `t` whose `c` lies above `x`.
+async fn count_above(ds: &Datastore, ses: &Session, x: &Value) -> i64 {
+	let sql = "SELECT count() FROM t WHERE c > $x GROUP ALL;";
+	let out = run(ds, ses, sql, &[("x", x)]).await;
+	match out.as_slice() {
+		[Value::Array(Array(rows))] => match rows.as_slice() {
+			[Value::Object(row)] => match row.get("count") {
+				Some(Value::Number(Number::Int(n))) => *n,
+				v => panic!("count: {v:?}"),
+			},
+			rows => panic!("rows: {rows:?}"),
+		},
+		out => panic!("{sql}: {out:?}"),
+	}
+}
+
+#[tokio::test]
+async fn an_older_non_unique_index_keeps_its_spelling_and_cleans_up_after_itself() {
+	an_older_index_keeps_its_spelling_and_cleans_up_after_itself(false).await;
+}
+
+#[tokio::test]
+async fn an_older_unique_index_keeps_its_spelling_and_cleans_up_after_itself() {
+	an_older_index_keeps_its_spelling_and_cleans_up_after_itself(true).await;
+}
+
+/// `REBUILD INDEX` stamps the current format, the build writes the respelled
+/// keys, and every write after it maintains them: no entry in the older
+/// spelling survives the rebuild.
+async fn a_rebuild_respells_the_entries_of_an_older_index(unique: bool) {
+	let (ds, ses) = datastore().await;
+	let (untidy, tidy) = two_spellings(&ds, &ses).await;
+	let kind = if unique {
+		" UNIQUE"
+	} else {
+		""
+	};
+	run(&ds, &ses, &format!("DEFINE TABLE t; DEFINE INDEX ix ON t FIELDS c{kind};"), &[]).await;
+	stamp_index_format(&ds, "t", SPELLS_TRAILING_ZEROS).await;
+	// An older `UNIQUE` index could hold both spellings, but a rebuild over
+	// both is refused, so it starts from a table holding one.
+	let mut values = vec![untidy.clone()];
+	if !unique {
+		values.push(tidy.clone());
+	}
+	values.push(int(7));
+	let mut rows = fill(&ds, &ses, "t", values).await;
+	assert_kernel_bytes("t", "a statement", &entries(&ds, &ses, "t", &["c"], &rows).await);
+
+	run(&ds, &ses, "REBUILD INDEX ix ON t;", &[]).await;
+	assert_eq!(index_format(&ds, "t").await, crate::catalog::INDEX_FORMAT_VERSION);
+	assert_kernel_bytes("t", "a rebuild", &entries(&ds, &ses, "t", &["c"], &rows).await);
+	let x = [("x", &tidy)];
+	let equal: &[i64] = if unique {
+		&[0]
+	} else {
+		&[0, 1]
+	};
+	assert_eq!(read_both_ways(&ds, &ses, "t", "c = $x", &x).await, ids_of("t", equal));
+
+	// Writes after the rebuild are maintained at the respelled keys.
+	run(&ds, &ses, "UPDATE t:0 SET c = 1.7dec * 2;", &[]).await;
+	rows[0].values = run(&ds, &ses, "RETURN 1.7dec * 2;", &[]).await;
+	assert_kernel_bytes("t", "an update", &entries(&ds, &ses, "t", &["c"], &rows).await);
+	run(&ds, &ses, "CREATE t:9 SET c = 1.25dec * 2;", &[]).await;
+	rows.push(Row {
+		id: RecordIdKey::Number(9),
+		values: vec![untidy.clone()],
+	});
+	assert_kernel_bytes("t", "a create", &entries(&ds, &ses, "t", &["c"], &rows).await);
+	let equal: &[i64] = if unique {
+		&[9]
+	} else {
+		&[1, 9]
+	};
+	assert_eq!(read_both_ways(&ds, &ses, "t", "c = $x", &x).await, ids_of("t", equal));
+	if unique {
+		let res = try_run(&ds, &ses, "CREATE t:10 SET c = 2.5dec;", &[]).await;
+		assert!(matches!(&res[..], [Err(e)] if e.contains("already contains")), "{res:?}");
+	}
+	run(&ds, &ses, "DELETE t:9;", &[]).await;
+	rows.pop();
+	assert_kernel_bytes("t", "a delete", &entries(&ds, &ses, "t", &["c"], &rows).await);
+}
+
+#[tokio::test]
+async fn a_rebuild_respells_the_entries_of_an_older_non_unique_index() {
+	a_rebuild_respells_the_entries_of_an_older_index(false).await;
+}
+
+#[tokio::test]
+async fn a_rebuild_respells_the_entries_of_an_older_unique_index() {
+	a_rebuild_respells_the_entries_of_an_older_index(true).await;
 }

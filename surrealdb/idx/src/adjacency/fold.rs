@@ -543,7 +543,7 @@ async fn fold_edge_table(
 		// space load-bearing, so the space must be claimed from any queued
 		// reclaim before the marker commits — dropping a table's last
 		// doc-ID index while it is unmarked enqueues exactly such a
-		// reclaim, and letting it drain would wipe the `!di`/`!dd` mappings
+		// reclaim, and letting it drain would wipe the `!dj`/`!dd` mappings
 		// the new blocks resolve through, while a part-drained queue could
 		// hand the fold a torn mapping to adopt. Probe first, across every
 		// table: like definedness, the decision is all-or-nothing, and
@@ -752,7 +752,7 @@ fn props_width(props: Option<&[u8]>) -> usize {
 ///
 /// Ids carried through the merge are reused verbatim — refolding an
 /// already-numeric scope assigns nothing new. The rest resolve through one
-/// batched `!di` lookup per table, and only records with no mapping — new
+/// batched `!dj` lookup per table, and only records with no mapping — new
 /// to their table's space — take
 /// [`TableDocIds::resolve_or_assign`]'s sequence allocation and
 /// conditional claim, inside this same transaction.

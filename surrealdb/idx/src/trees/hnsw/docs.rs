@@ -21,7 +21,7 @@ use crate::val::{RecordId, RecordIdKey};
 
 /// Per-index facade over the table's shared doc-ID space for HNSW.
 ///
-/// The record ↔ doc-ID mapping lives in [`TableDocIds`] (keys `!di`/`!dd` under
+/// The record ↔ doc-ID mapping lives in [`TableDocIds`] (keys `!dj`/`!dd` under
 /// the table prefix), shared by every index on the table so cross-index candidate
 /// composition can rely on one doc-ID per record. HNSW keeps its own element/graph
 /// keys; this type only maps between record IDs and those shared doc-IDs (plus the

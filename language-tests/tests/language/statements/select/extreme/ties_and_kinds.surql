@@ -9,7 +9,8 @@ reason = """
 	The extreme of an indexed `int` field whose rows were written before the declaration. The
 	index keeps one key for equal numbers of every kind, so the answer's kind and the row it comes
 	from are the first of the equal numbers in record id order, as the fold over the rows keeps
-	them. Covers zero beside negative zero, a float beside a decimal of the same digits, integers
+	them. Covers zero beside negative zero, a float beside a decimal of the same digits (two numbers,
+	so the extreme is the one their exact values put first), integers
 	past the range a float holds exactly, NaN, an infinity, three kinds of one number in every
 	order, equal numbers of one kind, rows that are not numbers in every position, and one row.
 """
@@ -258,7 +259,7 @@ value = "[{ m: 0.1f }]"
 value = "[{ m: 0 }]"
 
 [[test.results]]
-value = "[{ m: 0.1dec }]"
+value = "[{ m: 0.1f }]"
 
 [[test.results]]
 value = "[{ m: 0 }]"
@@ -267,7 +268,7 @@ value = "[{ m: 0 }]"
 value = "[{ m: 3 }]"
 
 [[test.results]]
-value = "[{ m: 0.1f }]"
+value = "[{ m: 0.1dec }]"
 
 [[test.results]]
 value = "[{ m: 3 }]"
@@ -456,7 +457,7 @@ value = "0.1f"
 value = "0"
 
 [[test.results]]
-value = "0.1dec"
+value = "0.1f"
 
 [[test.results]]
 value = "0"
@@ -598,6 +599,7 @@ value = "true"
 
 [[test.results]]
 value = "true"
+
 */
 
 {

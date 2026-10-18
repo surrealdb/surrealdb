@@ -422,7 +422,7 @@ it is written with, so analyzers stay readable by 3.x.
 **Impact**: before going back to a 3.x release, rewrite `ext::` calls in stored
 definitions as `mod::`.
 
-## v3.4.0 — export/import contract changes, vector indexes that lost records sharing a vector, a doc-ID → elements mapping on vector indexes, JACCARD/PEARSON as distances, named record-id components, pre-filtered KNN choosing its strategy by cost, chronological Datetime order in new and rebuilt indexes, and field definitions re-keyed at startup
+## v3.4.0 — export/import contract changes, vector indexes that lost records sharing a vector, a doc-ID → elements mapping on vector indexes, JACCARD/PEARSON as distances, named record-id components, pre-filtered KNN choosing its strategy by cost, chronological Datetime order in new and rebuilt indexes, field definitions re-keyed at startup, exact float/decimal comparison, index entries for records whose ids differ only in a number's kind, and the type-erased doc-ID mappings retired at startup
 
 **Impact**:
 
@@ -450,6 +450,10 @@ definitions as `mod::`.
   candidates from the index instead of reading every matching record. An index
   defined before the upgrade has no mapping and keeps answering from the
   records, correctly but more slowly, until `REBUILD INDEX`.
+- HNSW and DiskANN indexes defined or rebuilt on this release index records
+  whose ids differ only in a nested number's kind (`pt:[1]` and `pt:[1dec]`) as
+  two records. An index an earlier release built indexes such a pair as one,
+  and a KNN search finds one of the two, until `REBUILD INDEX`. See below.
 - `vector::similarity::jaccard` is now the weighted Jaccard similarity of vector
   search, `Σ min(aᵢ, bᵢ) / Σ max(aᵢ, bᵢ)`, compared position by position; it
   was a Jaccard over the *sets of values* in the two arrays. Its results change,
@@ -477,12 +481,19 @@ definitions as `mod::`.
   unchanged. `REBUILD INDEX`, once every node runs this release, restores the
   index plans for a field that never held an array. See below.
 - An index defined or rebuilt on this release orders `Datetime` values
-  chronologically. An index an earlier release wrote keeps the order it had
-  there and needs nothing; `REBUILD INDEX` is optional and gives it
-  chronological order. Finish upgrading every node before running
-  `DEFINE INDEX` or `REBUILD INDEX` on any index that may hold or later receive
-  a `Datetime`, an empty or schemaless table's included: a node on an earlier
-  release writes the old spelling into the new index.
+  chronologically, keeps one key for equal decimals (`2.5dec` and a computed
+  `2.50dec`), and gives records whose ids differ only in a nested number's kind
+  (`c:[1]` and `c:[1dec]`) an entry each. An index an earlier release wrote keeps
+  the order and the spelling it had there and needs nothing; `REBUILD INDEX` is
+  optional and gives it all three. An index that has held two spellings of one decimal returns fewer rows
+  through an equality or a range than the same read without the index until it
+  is rebuilt, and rebuilding a `UNIQUE` index over a table that holds both
+  spellings of one value now fails with a duplicate. Finish upgrading every node
+  before running `DEFINE INDEX` or `REBUILD INDEX` on any index that may hold or
+  later receive a `Datetime` or a decimal, an empty or schemaless table's
+  included, or on any non-unique index over a table whose record ids may hold a
+  number inside an array or object: a node on an earlier release writes the old
+  spelling into the new index.
 - A table whose `id` field names the components of its array ids, such as
   `DEFINE FIELD id ON reading TYPE [city: string, time: datetime]`, cannot be
   read by an earlier release. Defining one while any node still runs an earlier
@@ -501,6 +512,11 @@ definitions as `mod::`.
   stored row answers `[]` where it raised the refusal that a view is read-only.
 - `surrealdb-catalog`, `surrealdb-expr` and `surrealdb-parser-next` gain public
   items that a struct literal or an exhaustive `match` must account for.
+- A float now equals a decimal only when the decimal spells the float's exact
+  value. `0.1f = 0.1dec` and `0.07f = 0.07dec` were true and are now false;
+  `0.5f = 0.5dec` and `1f = 1dec` still hold. A query comparing a decimal field
+  with a float literal or parameter below 1 can stop matching rows it matched.
+  The Rust SDK's `Number` and `Value` compare the same way.
 - A B-tree index over a field with no declared type that was built by an
   earlier release plans every query as if the field could hold an array:
   `ORDER BY` over it sorts instead of reading the index in order, and a scan
@@ -521,6 +537,11 @@ definitions as `mod::`.
   kind implies for the elements (`select.*`) under a key no statement
   addressed. Startup migration 9 moves it. Upgrade every node of a cluster
   before defining such a field: a v3.3 node still writes the old key.
+- Startup migration 10 reconciles every table's shared doc-ID mappings — the
+  ones full-text, HNSW and DiskANN indexes and compressed graph edges share —
+  and deletes their type-erased copy. Its cost is proportional to the records
+  those indexes have mapped and counts against `--startup-operation-timeout`.
+  No v3.3.0 pre-release node may run alongside this release. See below.
 - On a store several nodes share (TiKV, and the enterprise engines), a write to
   a DiskANN index no longer fails with a retryable `TransactionConflict` when
   background compaction of the index runs at the same time. The upgrade is not
@@ -688,6 +709,29 @@ older node that compacts the index's pending updates does not maintain the
 mapping, and filtered queries on the new nodes would then miss or mis-rank the
 records it wrote.
 
+### Vector indexes keep records whose ids differ only in a number's kind
+
+An HNSW or DiskANN index queues each write as a pending update, keyed by the
+record's id (`!hr`, `!dw`), until compaction applies it to the graph. The key
+spells the id without its numbers' kinds, so records whose ids differ only
+there (`pt:[1]` and `pt:[1dec]`, two records) shared one pending update: a write
+to either replaced the other's, the pair was indexed as one record however the
+index was built, and deleting one could remove the other's vector from the
+graph.
+
+From this release's index format a pending update holds the state of every
+record its key spells, each under its exact id, and compaction and KNN treat
+them as the records they are. An entry naming one record is still written as
+before; only an entry several records share uses the new layout. An index an
+earlier release defined keeps folding such writes into one record until it is
+rebuilt.
+
+**What to do**: once every node runs this release, `REBUILD INDEX` an HNSW or
+DiskANN index over a table whose record ids hold numbers of different kinds.
+Do not define or rebuild a vector index while nodes of an earlier release still
+run: a pending update several records share is written in a layout an earlier
+release cannot read.
+
 ### JACCARD and PEARSON rank by distance
 
 KNN orders candidates by ascending distance, but `JACCARD` and `PEARSON` were
@@ -798,7 +842,7 @@ not declared as one is not found through the index under that spelling.
 condition with the flatten — `field.* CONTAINS v`, `field[*] CONTAINS v`,
 `field.* CONTAINSANY [..]` — to keep the index seek.
 
-### Datetime order in an index, and the optional rebuild
+### Datetime order, decimal spelling and record ids in an index, and the optional rebuild
 
 Earlier releases spell a `Datetime` in an index entry the way it is displayed:
 RFC 3339 text with only as many fractional digits as the value needs
@@ -811,13 +855,14 @@ backwards (`-0100` before `-0200`) and years after 9999 (`+10000`) before every
 other year.
 
 An index defined or rebuilt on this release is stamped at index format version
-4, and spells a `Datetime` as 12 bytes: its seconds since the Unix epoch and its
+5. From version 4 an index spells a `Datetime` as 12 bytes: its seconds since the Unix epoch and its
 nanoseconds, as fixed-width integers whose byte order is numeric order. Its
 order is chronological for every year a `Datetime` can hold, and one instant
 written at any precision or UTC offset is one entry.
 
 An index an earlier release wrote is stamped below version 4 and keeps the text
-spelling. Every key this release builds for it — equality seeks, range bounds,
+spelling (an index stamped 4 by an earlier build of this release has the
+chronological one). Every key this release builds for it — equality seeks, range bounds,
 writes, deletes and `UNIQUE` checks — uses that spelling, so the index answers
 as it did on the release that wrote it, including the ordering above, and a
 `UNIQUE` index refuses a duplicate of a value written before the upgrade. One
@@ -826,26 +871,70 @@ nothing about the value shapes it stores, so a range open at its upper end
 (`WHERE ts >= $since`) is read from the table and returns every row it should,
 where the index's text order would have left some out.
 
-Record ids are unaffected. A record id holding a `Datetime`
+A decimal keeps the trailing zeros its computation gave it: `1.25dec * 2` is
+stored as `2.50dec`, where the literal `2.5dec` is `2.5dec`, and `2.0dec` is not
+spelled as `2`. Each pair compares equal, but an index spelled each value at its
+own key. An indexed equality returned only the records holding the spelling it
+was asked for (`c = 2` missed `2.0dec`) where the same read without the index
+(`WITH NOINDEX`) returned both, and a `UNIQUE` index admitted both values. A
+range differed only at a bound that lands on a value stored under both
+spellings: `c <= 2.5dec` missed `2.50dec`, which sorts just after `2.5dec`,
+while `c >= 2.5dec` and `c >= 2dec AND c <= 3dec` returned both. From version 5
+an index respells every decimal in its values, and in the values and bounds it
+is read with, without trailing zeros, including decimals nested in arrays, sets,
+objects, record ids and ranges. The record's own id in an entry is not
+respelled.
+
+An index stamped below version 5 is read and maintained exactly as it was
+written, its entries found, replaced and deleted at the keys they were written
+at. Until it is rebuilt, decimal equality and range queries answered from it
+may behave unexpectedly: they keep the gaps above. Every record a numeric
+equality or range reads from such an index is checked against the condition
+again, a `count()` with such a condition reads the records rather than counting
+index keys, and a KNN search is not narrowed by a numeric equality on such an
+index, so none of them lists a record the condition rejects.
+
+Before rebuilding a `UNIQUE` index over decimals, find the values held under both
+spellings with a table scan (the query below), since the rebuild now fails on a
+table that holds one value as `2.5dec` and as `2.50dec`.
+
+A non-unique entry's key ends with the id of the record it names. An earlier
+release spelled that id as it spells indexed values, which drops a number's
+kind, so records whose ids differ only in a nested number's kind (`c:[1]` and
+`c:[1dec]`, two records) shared one entry holding the same value: the later
+write replaced the earlier, and an indexed read returned one of the two where
+`WITH NOINDEX` returned both. From version 5 the id keeps its number's kind,
+and each record has its own entry. An id holding no number is spelled as
+before. An index stamped below version 5 keeps sharing the entry until it is
+rebuilt; a `UNIQUE` index keys an entry by its values alone and is unaffected.
+
+A record id's `Datetime` is unaffected. A record id holding a `Datetime`
 (`reading:['London', d'2026-08-28T09:00:00Z']`) keeps the text spelling, both in
 the record's own key and where an index entry names the record, whatever the
 index's stamp. Ranges over those ids keep the text ordering, in which a whole
 second sorts after its fractions.
 
 **What to do**: nothing is required. To give an existing index chronological
-order, run `REBUILD INDEX <name> ON <table>` once every node runs this release.
-It matters only for an index whose indexed values hold `Datetime`s, including
-compound and `UNIQUE` indexes and values nested in arrays or objects. While an
+order, one key per decimal value and an entry for each record, run
+`REBUILD INDEX <name> ON <table>` once every node runs this release; one rebuild
+gives all three. It matters only for an index whose indexed values hold
+`Datetime`s or decimals, including compound and `UNIQUE` indexes and values
+nested in arrays or objects, and for a non-unique index over a table whose
+record ids hold numbers of different kinds. While an
 index rebuilds, queries do not use it and read the table instead.
 
 Finish upgrading every node before running `DEFINE INDEX` or `REBUILD INDEX` on
-any B-tree index that may hold or later receive a `Datetime`, which includes an
+any B-tree index that may hold or later receive a `Datetime` or a decimal, which includes an
 index on an empty or schemaless table and one over a field with no declared
 type: the stamp is written when the index is defined, and a node on an earlier
-release can add a `Datetime` to it afterwards. Alternatively, stop the earlier
+release can add a `Datetime` to it afterwards. The same holds, whatever the
+index holds, for a non-unique B-tree index on a table whose record ids may hold
+a number inside an array or object (`c:[1]`, `c:{k: 1}`); an integer id such as
+`c:1` is spelled alike by both releases. Alternatively, stop the earlier
 nodes' writes to the table until every node is upgraded. A node still on an
-earlier release spells a `Datetime` as text whatever the index's stamp, so while
-it serves writes to an index stamped at version 4, the entries it writes are
+earlier release spells a `Datetime` as text, a decimal as computed and an entry's
+record id without its numbers' kinds whatever the index's stamp, so while
+it serves writes to an index stamped at version 4 or 5, the entries it writes are
 missed by seeks and ranges, its updates and deletes leave the index's own
 entries behind, and a `UNIQUE` index can accept a duplicate. Running
 `REBUILD INDEX` again once no earlier release is serving rewrites the index from
@@ -868,6 +957,36 @@ SELECT * FROM (
 A `UNIQUE` index keeps `NONE`, `NULL` and an empty array (which it keys as
 `NONE`) as non-unique entries, so those are left out. Then update or delete
 records until each remaining value is held once, and rebuild again.
+
+### A float compared with a decimal is compared exactly
+
+An index key spells a float by its decimal expansion, to as many digits as a
+128-bit coefficient holds: `0.1f` is `0.100000000000000005551115123125782702118`.
+Earlier releases compared a float with a
+decimal approximately when both were below 1 in magnitude, calling them equal
+once they agreed to about sixteen significant digits, and exactly otherwise. So
+`0.1f = 0.1dec` was true while `1.1f = 1.1dec` was false, the relation was not
+transitive, and an indexed read could answer fewer records than a scan:
+`WHERE v = 0.1f` over an index on `v` returned the record holding `0.1f` and
+missed the one holding `0.1dec`, which `WITH NOINDEX` returned.
+
+This release compares a float with a decimal by the same exact expansion the
+key uses, everywhere a value is compared: `WHERE`, `IN` and `CONTAINS`,
+`ORDER BY`, `GROUP BY`, `DISTINCT`, `array::distinct`, set and object keys. An
+indexed read and a scan now answer the same records. `0.1f` sorts just above
+`0.1dec` and the two group apart. A `UNIQUE` index already kept them apart, and
+nothing stored changes: no index needs rebuilding.
+
+The Rust SDK's `surrealdb_types::Number` (and so `Value`) compares and hashes the
+same way, by exact value: `Number::Float(0.1) == Number::Decimal(0.1)` is now
+false, `Number::Int(1)`, `Number::Float(1.0)` and `Number::Decimal(1.00)` are
+equal and hash alike, and a returned set such as `{ 0.1f, 0.1dec }` keeps both
+elements.
+
+**What to do**: where a decimal field is compared with a float below 1 —
+typically a fractional literal written without the `dec` suffix, or a parameter
+an SDK sends as a JSON number — write the literal as a decimal (`0.1dec`) or
+cast the operand, `<decimal> $x`, so both sides are decimals.
 
 ### A named record id cannot be read by an earlier release
 
@@ -1384,6 +1503,57 @@ What doesn't:
 
 The migration reads every field definition in the datastore once and moves only
 the element definitions of keyword-named array and set fields.
+
+### Migration 10 retires the type-erased doc-ID mappings
+
+A table's full-text, HNSW and DiskANN indexes, and its compressed graph edges,
+give each record one doc-ID from a space they share. v3.3 writes the record →
+doc-ID direction twice: under `!dj`, keyed by the record id exactly, and under
+`!di`, keyed with a nested number's kind dropped, so `c:[1]` and `c:[1dec]`
+share one `!di` key. Every v3.3 read checks a hit against the reverse mapping
+`!dd` before using it. This release reads and writes `!dj` alone and uses a hit
+as it is.
+
+Migration 10 makes that safe, table by table. Its ledger entry is in the
+Compatible class (`/!mg` id `0x4000000a`). It:
+
+1. gives every record `!dd` maps a `!dj` naming that doc-ID, replacing one that
+   names a doc-ID `!dd` does not map back to the record;
+2. deletes every `!dj` that `!dd` does not back;
+3. deletes the `!di` mappings.
+
+The `!dj` entries it replaces or deletes were left by v3.3.0 pre-release nodes,
+which purge a record through `!di` and `!dd` alone. Unlike the earlier
+migrations it skips nothing: a batch that keeps losing its commit to concurrent
+writes fails the start, and the next start runs the migration again.
+
+What still works during a mixed-version rollout:
+
+- A v3.3.x node that is already running resolves every record, since it reads
+  `!dj` first, and keeps `!dj` and `!dd` in step as it writes. The `!di` rows
+  it keeps writing are never read, and are removed when the table's last
+  doc-ID index is dropped.
+
+What doesn't:
+
+- A v3.3.x node that restarts refuses the store, as it refuses any migration it
+  does not know.
+- A v3.3.0 pre-release node resolves doc-IDs through `!di` alone, and mints a
+  second doc-ID for every record it can no longer find there. Stop every such
+  node before starting this release.
+- A store last written by a v3.3.0 pre-release can hold HNSW and DiskANN pending
+  entries, and deferred doc-ID reclaim markers, that name their record only
+  with a nested number's kind dropped. This release reads them without `!di`,
+  so an entry whose record id holds a nested number can be attributed to the
+  record id with that number's kind dropped. Run
+  `REBUILD INDEX <name> ON <table>` once per HNSW and DiskANN index of such a
+  store, as the v3.3.0 note on pre-release stores below already advises.
+
+The migration reads each table's doc-ID mappings three times, in batches of
+500, and writes only what it repairs and deletes. Its cost is proportional to
+the number of records any full-text, HNSW or DiskANN index, or compressed
+graph edge, has mapped. If a start times out during it, raise
+`--startup-operation-timeout` rather than restarting into the same timeout.
 
 ## v3.3.0 — datastore version stamp, startup data migrations, the sequence keyspace move, module re-keying, rollbacks reported as `cancelled`, and ANN pending entries at a new revision
 

@@ -33,8 +33,8 @@ use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::dbs::{Capabilities, Session};
 use crate::key::reclaim::{ALL_DOC_ID_KINDS, Expunge, ReclaimKind, ReclaimState};
 use crate::key::schema::{
-	DbRoot, DocKeyPrefix, DocLookupPrefix, DocPendingPrefix, IdxRoot, NsRoot, ReclaimKey,
-	ReclaimPrefix, ReclaimTbPrefix,
+	DbRoot, DocKeyPrefix, DocLookupIdentityPrefix, DocLookupPrefix, DocPendingPrefix, IdxRoot,
+	NsRoot, ReclaimKey, ReclaimPrefix, ReclaimTbPrefix,
 };
 use crate::key::{AnyRange, KVKeyDecode, KVSubspace, Key, RawRange};
 use crate::kvs::test_support::{WriteTxSizeObserver, cleanup_sizes};
@@ -1711,14 +1711,14 @@ async fn defining_a_doc_id_index_cancels_a_queued_doc_id_reclaim() {
 
 	let (ns_id, db_id) = ids(&ds, "test", "tenant").await;
 	let tb = TableName::from("thing");
-	let di = DocLookupPrefix::new(ns_id, db_id, Cow::Borrowed(&tb)).raw_range().unwrap();
+	let dj = DocLookupIdentityPrefix::new(ns_id, db_id, Cow::Borrowed(&tb)).raw_range().unwrap();
 	let dd = DocKeyPrefix::new(ns_id, db_id, Cow::Borrowed(&tb)).raw_range().unwrap();
-	let mapped = keys_in_range(&ds, di.clone()).await;
+	let mapped = keys_in_range(&ds, dj.clone()).await;
 	assert!(!mapped.is_empty(), "the index must have mapped the records it covers");
 
 	ds.execute("REMOVE INDEX idx ON thing;", &ses, None).await.unwrap();
 	assert_eq!(
-		keys_in_range(&ds, di.clone()).await,
+		keys_in_range(&ds, dj.clone()).await,
 		mapped,
 		"the drop must leave the shared space for the background reclaim"
 	);
@@ -1747,7 +1747,7 @@ async fn defining_a_doc_id_index_cancels_a_queued_doc_id_reclaim() {
 	.unwrap();
 
 	assert_eq!(
-		keys_in_range(&ds, di).await,
+		keys_in_range(&ds, dj).await,
 		mapped,
 		"the reclaim must not delete mappings the redefined index has adopted"
 	);
@@ -1769,7 +1769,7 @@ async fn defining_a_doc_id_index_cancels_a_queued_doc_id_reclaim() {
 /// purging the remainder in the DDL transaction.
 ///
 /// The prefixes are reclaimed independently and page by page, so a
-/// surviving `!di` entry may have lost the `!dd` twin that resolves its id.
+/// surviving `!dj` entry may have lost the `!dd` twin that resolves its id.
 /// Adopting one would give the new index entries pointing at a doc-ID that
 /// resolves to no record.
 #[tokio::test]
@@ -1997,8 +1997,8 @@ async fn a_partly_reclaimed_doc_id_space_is_left_whole_when_a_consumer_reappears
 
 	let (ns_id, db_id) = ids(&ds, "test", "tenant").await;
 	let tb = TableName::from("thing");
-	let di = DocLookupPrefix::new(ns_id, db_id, Cow::Borrowed(&tb)).raw_range().unwrap();
-	let mapped = keys_in_range(&ds, di.clone()).await;
+	let dj = DocLookupIdentityPrefix::new(ns_id, db_id, Cow::Borrowed(&tb)).raw_range().unwrap();
+	let mapped = keys_in_range(&ds, dj.clone()).await;
 	assert!(!mapped.is_empty(), "the index must have mapped the record it covers");
 
 	// The input a reclaim that committed a page and then had a consumer defined
@@ -2032,7 +2032,7 @@ async fn a_partly_reclaimed_doc_id_space_is_left_whole_when_a_consumer_reappears
 	.unwrap();
 
 	assert_eq!(
-		keys_in_range(&ds, di).await,
+		keys_in_range(&ds, dj).await,
 		mapped,
 		"the reclaim must leave a space its table still consumes whole"
 	);
@@ -2147,8 +2147,8 @@ async fn a_queued_doc_id_reclaim_is_retired_once_the_table_has_a_consumer_again(
 
 	let (ns_id, db_id) = ids(&ds, "test", "tenant").await;
 	let tb = TableName::from("thing");
-	let di = DocLookupPrefix::new(ns_id, db_id, Cow::Borrowed(&tb)).raw_range().unwrap();
-	let mapped = keys_in_range(&ds, di.clone()).await;
+	let dj = DocLookupIdentityPrefix::new(ns_id, db_id, Cow::Borrowed(&tb)).raw_range().unwrap();
+	let mapped = keys_in_range(&ds, dj.clone()).await;
 	assert!(!mapped.is_empty(), "the index must have mapped the record it covers");
 
 	// The input a node that queued the space and then had a consumer defined
@@ -2178,7 +2178,7 @@ async fn a_queued_doc_id_reclaim_is_retired_once_the_table_has_a_consumer_again(
 	.unwrap();
 
 	assert_eq!(
-		keys_in_range(&ds, di).await,
+		keys_in_range(&ds, dj).await,
 		mapped,
 		"the reclaim must leave a space its table still consumes whole"
 	);
@@ -2296,8 +2296,8 @@ async fn rebuilding_a_legacy_index_cancels_a_queued_doc_id_reclaim() {
 	.unwrap();
 
 	let (ns_id, db_id) = ids(&ds, "test", "tenant").await;
-	let di = DocLookupPrefix::new(ns_id, db_id, Cow::Borrowed(&tb)).raw_range().unwrap();
-	let mapped = keys_in_range(&ds, di.clone()).await;
+	let dj = DocLookupIdentityPrefix::new(ns_id, db_id, Cow::Borrowed(&tb)).raw_range().unwrap();
+	let mapped = keys_in_range(&ds, dj.clone()).await;
 	assert!(!mapped.is_empty(), "the current-format index must have mapped its records");
 
 	// The legacy index is not a consumer, so dropping the only current-format
@@ -2329,7 +2329,7 @@ async fn rebuilding_a_legacy_index_cancels_a_queued_doc_id_reclaim() {
 	.await
 	.unwrap();
 	assert!(
-		!keys_in_range(&ds, di).await.is_empty(),
+		!keys_in_range(&ds, dj).await.is_empty(),
 		"the reclaim must not delete mappings the rebuilt index resolves through"
 	);
 }

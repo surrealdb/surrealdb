@@ -10,9 +10,9 @@ An index that has recorded one entry per record answers an equality exactly,
 so its bitmap stands in for the conjunct: a KNN allow-list drops the residual
 and a NOT subtracts the bitmap. That holds only for a value whose key is the
 key of everything it equals. An object or a record id with a compound key may
-hold a float where the sought one holds the decimal it prints as, and a regex
-equals every string it matches, each stored under its own key, so such an
-equality is judged on the rows and answers as `WITH NOINDEX` does.
+hold a number a float and a decimal do not both hold, such as `0.1`, and a
+regex equals every string it matches, each stored under its own key, so such
+an equality is judged on the rows and answers as `WITH NOINDEX` does.
 """
 
 [[test.results]]
@@ -43,34 +43,34 @@ value = "[]"
 value = "[]"
 
 [[test.results]]
-value = "[ks:1, ks:2]"
+value = "[ks:2]"
 
 [[test.results]]
-value = "[ks:1, ks:2]"
+value = "[ks:2]"
 
 [[test.results]]
-value = "[{ count: 2 }]"
+value = "[{ count: 1 }]"
 
 [[test.results]]
-value = "[{ count: 2 }]"
+value = "[{ count: 1 }]"
 
 [[test.results]]
-value = "[{ count: 3 }]"
+value = "[{ count: 4 }]"
 
 [[test.results]]
-value = "[{ count: 3 }]"
+value = "[{ count: 4 }]"
 
 [[test.results]]
-value = "[ks:3, ks:4]"
+value = "[ks:4]"
 
 [[test.results]]
-value = "[ks:3, ks:4]"
+value = "[ks:4]"
 
 [[test.results]]
-value = "[{ count: 3 }]"
+value = "[{ count: 4 }]"
 
 [[test.results]]
-value = "[{ count: 3 }]"
+value = "[{ count: 4 }]"
 
 [[test.results]]
 value = "[ks:5]"
@@ -83,6 +83,8 @@ value = "[{ count: 4 }]"
 
 [[test.results]]
 value = "[{ count: 4 }]"
+
+
 */
 
 DEFINE INDEX idx_c ON ks FIELDS c;

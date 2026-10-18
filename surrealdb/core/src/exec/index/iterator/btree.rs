@@ -85,7 +85,7 @@ fn decode_record_ids(res: Vec<(Vec<u8>, Val)>) -> Result<Vec<RecordId>> {
 /// Doc-IDs found in the entry values are inserted into `docs`. Entries whose
 /// value carries no doc-ID (see
 /// [`crate::idx::entry::IndexEntryValue`]) are pushed onto `missing` so the
-/// caller can resolve their doc-ID through the table's shared `!di` mapping.
+/// caller can resolve their doc-ID through the table's shared `!dj` mapping.
 /// Returns the number of entries decoded.
 pub(crate) fn decode_entry_doc_ids(
 	res: Vec<(Vec<u8>, Val)>,

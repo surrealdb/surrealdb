@@ -69,6 +69,9 @@ pub enum RetryableConflictSite {
 	/// A conflict on the commit of one batch of the migration that copies the
 	/// table-scoped doc-ID mappings under their injective key.
 	DocLookupIdentityMigration,
+	/// A conflict on the commit of one batch of the migration that retires the
+	/// type-erased forward doc-ID mappings.
+	DocLookupErasedMigration,
 	/// A conflict on the commit of a transaction that ran a LIVE or KILL
 	/// statement: one run in a transaction of its own, or a transaction block
 	/// ended by COMMIT (consulted at every such COMMIT, so a test arms it only

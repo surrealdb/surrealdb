@@ -114,17 +114,9 @@ pub fn group_key_field_name(idx: usize) -> String {
 // ---------------------------------------------------------------------------
 //
 // Two rows belong to the same group iff their group keys compare equal under
-// `Value: Ord`, so the map has to be *ordered*. Hash-partitioning the keys is
-// not an option, because `Value: Hash` is not consistent with `Value: Eq` for
-// numbers: `Number`'s comparison is cross-variant and, between `Float` and
-// `Decimal`, approximate — `0.1f == 0.1dec` while `0.11111f != 0.11111dec` —
-// whereas `Number: Hash` hashes each variant's exact decimal expansion. So
-// `0.1f` and `0.1dec` bucket apart and silently form two groups. No canonical
-// form reproduces that comparison, which is why the identity relation here is
-// `Ord` and not a hash.
-//
-// Ordered keys also make the group order deterministic, and they let the drain
-// feed results downstream already sorted by key.
+// `Value: Ord`, which holds every numeric variant of one value equal. The map
+// is *ordered*: the group order is deterministic, and the drain feeds results
+// downstream already sorted by key.
 //
 // `Vec<Value>: Borrow<[Value]>`, so a row probes with the borrowed slice its key
 // values already live in and nothing is cloned unless the row opens a new group.
@@ -283,22 +275,21 @@ mod tests {
 		Value::Number(Number::Float(f))
 	}
 
-	/// The reason [`GroupMap`] is ordered rather than hash-partitioned:
-	/// `Number: Hash` hashes each variant's exact decimal expansion, so it
-	/// disagrees with the cross-variant `Number: PartialEq` that decides group
-	/// membership. Bucketing by hash splits one group in two.
+	/// Numeric keys hash as they group: keys that share a group hash alike,
+	/// whatever their variants.
 	#[test]
-	fn hash_disagrees_with_the_equality_that_decides_grouping() {
+	fn hash_agrees_with_the_equality_that_decides_grouping() {
 		fn hash(v: &Value) -> u64 {
 			let mut hasher = DefaultHasher::new();
 			v.hash(&mut hasher);
 			hasher.finish()
 		}
 
-		for (a, b) in [(float(0.1), dec("0.1")), (float(1.5), dec("1.50"))] {
+		for (a, b) in [(float(1.5), dec("1.50")), (Value::from(1i64), float(1.0))] {
 			assert_eq!(a, b, "{a:?} and {b:?} are one group");
-			assert_ne!(hash(&a), hash(&b), "{a:?} and {b:?} would bucket apart");
+			assert_eq!(hash(&a), hash(&b), "{a:?} and {b:?} hash alike");
 		}
+		assert_ne!(float(0.1), dec("0.1"));
 	}
 
 	#[test]

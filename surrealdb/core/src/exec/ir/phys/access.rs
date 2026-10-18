@@ -1194,15 +1194,15 @@ fn answers_exactly(
 }
 
 /// Whether the range of `access` over `index` admits exactly the values its comparison does: no
-/// number bounding it keys differently from how it compares (a float that is no decimal), and no
-/// datetime bounds a column that orders only by the whole second, which widens the range to the
-/// seconds of its bounds.
+/// number bounding it keys differently from how it compares (a float that is no decimal, or any
+/// number over an index that keeps a decimal's trailing zeros), and no datetime bounds a column
+/// that orders only by the whole second, which widens the range to the seconds of its bounds.
 fn bounds_admit_exactly(
 	index: &crate::exec::index::access_path::IndexRef,
 	access: &BTreeAccess,
 ) -> bool {
 	!crate::exec::index::derived_columns::range_is_widened(index, access)
-		&& crate::exec::index::access_path::range_matches_comparison(access)
+		&& crate::exec::index::access_path::range_matches_comparison(index, access)
 }
 
 /// The columns of `index` that the B-tree `access` pins, in definition order: all of them for an
@@ -2747,7 +2747,9 @@ mod tests {
 		use crate::expr::BinaryOperator;
 		use crate::val::{Number, Value};
 
-		let defs = [idx(1, "ix", &["a", "b"])];
+		let mut def = idx(1, "ix", &["a", "b"]);
+		def.format_version = crate::catalog::INDEX_FORMAT_VERSION;
+		let defs = [def];
 		let compound = |prefix: i64, bound: Value| BTreeAccess::Compound {
 			prefix: vec![BoundOperand::Literal(Value::from(prefix))],
 			range: Some((BinaryOperator::MoreThan, BoundOperand::Literal(bound))),
@@ -2765,6 +2767,13 @@ mod tests {
 		let datetime = Value::Datetime(crate::val::Datetime::now());
 		assert!(!bounds_admit_exactly(&coarse, &compound(1, datetime.clone())));
 		assert!(bounds_admit_exactly(&plain, &compound(1, datetime)));
+		// An index that keeps a decimal's trailing zeros keys `2.0dec` apart from `2`.
+		let mut older = defs[0].clone();
+		older.format_version = crate::catalog::BTREE_NORMALISED_DECIMAL_KEYS_FORMAT_VERSION - 1;
+		let older = [older];
+		let older = IndexRef::new(&older, 0);
+		assert!(!bounds_admit_exactly(&older, &compound(1, Value::from(2i64))));
+		assert!(!bounds_admit_exactly(&older, &BTreeAccess::literal_equality(Value::from(1i64))));
 	}
 
 	#[test]

@@ -385,13 +385,59 @@ impl RecordIdKey {
 	/// doc-ID mapping, where a forward hit is adopted only once the reverse
 	/// mapping agrees it names the record asked for.
 	pub fn addresses_same_record(&self, other: &Self) -> bool {
+		// A key holding no number is addressed by its value: `==` compares it
+		// exactly, and spares the encodings.
+		if self.index_format_spells_alike() && other.index_format_spells_alike() {
+			return self == other;
+		}
 		addressed_by(self) == addressed_by(other)
 	}
 
+	/// Orders keys as `RecordIdKey`'s own order does, and two that compare
+	/// equal there but address different records by their lossless encodings:
+	/// `[1]` before `[1f]` before `[1dec]`, the order a table scan lists them in.
+	/// Equal exactly when [`Self::addresses_same_record`] holds.
+	pub fn cmp_by_record_address(&self, other: &Self) -> Ordering {
+		self.cmp(other).then_with(|| {
+			if self.index_format_spells_alike() && other.index_format_spells_alike() {
+				Ordering::Equal
+			} else {
+				addressed_by(self).cmp(&addressed_by(other))
+			}
+		})
+	}
+
+	/// Orders keys as their lossless encodings do: the order a table scan lists
+	/// records in, and the order a B-tree index spelling its entries' ids as
+	/// identities lists the records of one value in. `[1, 'b']` comes before
+	/// `[1dec, 'a']`, since a number's kind follows its value in the encoding,
+	/// and `[d'…:00.1Z']` before `[d'…:00Z']`, since a datetime in a compound
+	/// key encodes as its text. Two integer, string or UUID keys encode in the
+	/// order their values compare, so they compare by value and spare the
+	/// encodings; every other pair compares its encodings. Equal exactly when
+	/// [`Self::addresses_same_record`] holds.
+	pub fn cmp_by_encoding(&self, other: &Self) -> Ordering {
+		match (self, other) {
+			(RecordIdKey::Number(a), RecordIdKey::Number(b)) => a.cmp(b),
+			(RecordIdKey::String(a), RecordIdKey::String(b)) => a.cmp(b),
+			(RecordIdKey::Uuid(a), RecordIdKey::Uuid(b)) => a.cmp(b),
+			_ => addressed_by(self).cmp(&addressed_by(other)),
+		}
+	}
+
+	/// Hashes the key so that keys [`Self::addresses_same_record`] holds for
+	/// hash alike: a key holding no number by its value, any other by its
+	/// lossless encoding.
+	pub fn hash_by_record_address<H: std::hash::Hasher>(&self, state: &mut H) {
+		use std::hash::Hash;
+		if self.index_format_spells_alike() {
+			(0u8, self).hash(state);
+		} else {
+			(1u8, addressed_by(self)).hash(state);
+		}
+	}
+
 	/// [`Value::hash_agrees_with_eq`] for a record id's key.
-	///
-	/// [`RecordIdKey::Number`] is an `i64`, not a [`crate::val::Number`], so plain
-	/// record ids are always decisive; only a compound id can hold one.
 	pub fn hash_agrees_with_eq(&self) -> bool {
 		match self {
 			RecordIdKey::Number(_) | RecordIdKey::String(_) | RecordIdKey::Uuid(_) => true,
@@ -401,12 +447,15 @@ impl RecordIdKey {
 		}
 	}
 
-	/// [`Value::ord_agrees_with_equal`] for a record id's key.
-	pub fn ord_agrees_with_equal(&self) -> bool {
+	/// [`Value::index_format_spells_alike`] for a record id's key.
+	///
+	/// [`RecordIdKey::Number`] is an `i64`, not a [`crate::val::Number`], so a
+	/// plain record id is spelled alike; only a compound id can hold a number.
+	pub fn index_format_spells_alike(&self) -> bool {
 		match self {
 			RecordIdKey::Number(_) | RecordIdKey::String(_) | RecordIdKey::Uuid(_) => true,
-			RecordIdKey::Array(a) => a.iter().all(Value::ord_agrees_with_equal),
-			RecordIdKey::Object(o) => o.values().all(Value::ord_agrees_with_equal),
+			RecordIdKey::Array(a) => a.iter().all(Value::index_format_spells_alike),
+			RecordIdKey::Object(o) => o.values().all(Value::index_format_spells_alike),
 			RecordIdKey::Range(_) => false,
 		}
 	}
@@ -606,6 +655,44 @@ impl ToSql for RecordIdKey {
 			RecordIdKey::Array(array) => write_sql!(f, sql_fmt, "{}", array),
 			RecordIdKey::Range(rid) => write_sql!(f, sql_fmt, "{}", rid),
 		}
+	}
+}
+
+/// A record id compared by the record it addresses: two are equal exactly when
+/// they name one record, so `k:[1]` and `k:[1dec]` are two. [`RecordId`]'s own
+/// equality, order and hash compare numbers across kinds, under which those are
+/// one, so a set, a dedupe or a merge that must keep records apart keys by this
+/// instead. It orders by table, then as [`RecordIdKey::cmp_by_record_address`].
+#[derive(Clone, Debug)]
+pub struct RecordAddress(pub RecordId);
+
+impl PartialEq for RecordAddress {
+	fn eq(&self, other: &Self) -> bool {
+		self.0.table == other.0.table && self.0.key.addresses_same_record(&other.0.key)
+	}
+}
+
+impl Eq for RecordAddress {}
+
+impl PartialOrd for RecordAddress {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl Ord for RecordAddress {
+	fn cmp(&self, other: &Self) -> Ordering {
+		self.0
+			.table
+			.cmp(&other.0.table)
+			.then_with(|| self.0.key.cmp_by_record_address(&other.0.key))
+	}
+}
+
+impl std::hash::Hash for RecordAddress {
+	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+		self.0.table.hash(state);
+		self.0.key.hash_by_record_address(state);
 	}
 }
 
@@ -844,5 +931,48 @@ mod record_identity_comparison_tests {
 		);
 		assert_ne!(int.cmp(&dec), std::cmp::Ordering::Equal, "ordering must agree");
 		assert_eq!(int, int.clone(), "an identity still equals itself");
+	}
+
+	/// The order an index union merges by id in must be the encoded order a
+	/// B-tree index lists the records of one value in, for every key: the merge
+	/// relies on both branches agreeing with it, and on it being a total order.
+	/// A datetime in a compound key encodes as its text, which does not order
+	/// as the datetime does.
+	#[test]
+	fn cmp_by_encoding_is_the_encoded_order() {
+		use std::str::FromStr;
+
+		use crate::val::{Datetime, Duration};
+
+		let dt = |s: &str| Value::Datetime(Datetime::from_str(s).unwrap());
+		let arr = |v: Vec<Value>| RecordIdKey::Array(v.into());
+		let keys = [
+			RecordIdKey::Number(-5),
+			RecordIdKey::Number(0),
+			RecordIdKey::Number(3),
+			RecordIdKey::String("a".into()),
+			RecordIdKey::String("a\0b".into()),
+			RecordIdKey::String("b".into()),
+			RecordIdKey::Uuid(Uuid(uuid::Uuid::from_u128(1))),
+			RecordIdKey::Uuid(Uuid(uuid::Uuid::from_u128(u128::MAX))),
+			arr(vec![dt("2026-08-28T09:00:00Z")]),
+			arr(vec![dt("2026-08-28T09:00:00.1Z")]),
+			arr(vec![dt("2026-08-28T09:00:00.2Z"), Value::Number(Number::Int(1))]),
+			arr(vec![Value::Duration(Duration::from_secs(1))]),
+			arr(vec![Value::Duration(Duration::from_millis(500))]),
+			arr(vec![Value::Number(Number::Int(1)), Value::from("b")]),
+			arr(vec![Value::Number(Number::Decimal(1.into())), Value::from("a")]),
+			arr(vec![Value::None]),
+			arr(vec![Value::from("x")]),
+		];
+		for a in &keys {
+			for b in &keys {
+				assert_eq!(
+					a.cmp_by_encoding(b),
+					addressed_by(a).cmp(&addressed_by(b)),
+					"{a:?} against {b:?}"
+				);
+			}
+		}
 	}
 }

@@ -71,7 +71,7 @@ pub use self::key_encoding::{
 pub use self::number::Number;
 pub use self::object::Object;
 pub use self::range::Range;
-pub use self::record_id::{RecordId, RecordIdKey, RecordIdKeyRange, RecordIdentity};
+pub use self::record_id::{RecordAddress, RecordId, RecordIdKey, RecordIdKeyRange, RecordIdentity};
 pub use self::regex::Regex;
 pub use self::set::Set;
 pub use self::uuid::Uuid;
@@ -268,14 +268,14 @@ impl Value {
 	/// does not hold it — i.e. whether this value's [`Hash`](std::hash::Hash) is
 	/// consistent with its [`PartialEq`].
 	///
-	/// [`Number`] is the one leaf where the two disagree, and it cannot be
-	/// repaired: see [`Number`]'s `Hash` impl for why. A value that can reach a
-	/// [`Number`] may hash into a different bucket than an equal value, so
-	/// `contains` answers `false` for something the collection holds.
+	/// Variants whose hash/equality pairing is not established — [`Value::Geometry`]
+	/// (hashes `f64` coordinates), [`Value::Range`] and [`Value::Closure`] —
+	/// report `false`, at any depth, so callers take the conservative path. Every
+	/// other value hashes alike when equal, a [`Number`] of any kind included.
 	///
-	/// For `==` a probe is decisive as soon as *either* side is number-free,
+	/// For `==` a probe is decisive as soon as *either* side reports `true`,
 	/// because `==` requires matching variants at every level: two values can
-	/// only hash apart while comparing equal if both carry a [`Number`] in the
+	/// only hash apart while comparing equal if both carry such a variant in the
 	/// same position. So a caller judging `==` may trust a miss when this returns
 	/// `true` for the probed value, *or* when it returns `true` for every element
 	/// of the collection.
@@ -289,11 +289,37 @@ impl Value {
 	/// over, since a string reports `true`: it would trust a regex's miss against
 	/// a set of the strings it matches, unless the caller rules that pairing out
 	/// itself.
-	///
-	/// Variants whose hash/equality pairing is not established — [`Value::Geometry`]
-	/// (hashes `f64` coordinates), [`Value::Range`] and [`Value::Closure`] —
-	/// report `false` so they take the same conservative path.
 	pub fn hash_agrees_with_eq(&self) -> bool {
+		match self {
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Bytes(_)
+			| Value::Number(_)
+			| Value::Table(_)
+			| Value::File(_) => true,
+			Value::Geometry(_) | Value::Regex(_) | Value::Range(_) | Value::Closure(_) => false,
+			Value::Array(a) => a.iter().all(Value::hash_agrees_with_eq),
+			Value::Set(s) => s.iter().all(Value::hash_agrees_with_eq),
+			// An `Object`'s equality covers its keys too, but those are `Strand`
+			// (hash is `as_str().hash`), so only the values can disagree.
+			Value::Object(o) => o.values().all(Value::hash_agrees_with_eq),
+			Value::RecordId(r) => r.key.hash_agrees_with_eq(),
+		}
+	}
+
+	/// Whether [`IndexFormat`] spells this value as the storage format does. The
+	/// index format drops a number's kind (`1`, `1f` and `1dec` share bytes),
+	/// so a value holding a [`Number`] at any depth reports `false`, as do the
+	/// variants whose spelling under both formats is not established
+	/// ([`Value::Geometry`], [`Value::Regex`], [`Value::Range`],
+	/// [`Value::Closure`]). `true` proves the two spellings are one; `false`
+	/// leaves the caller to compare them.
+	pub fn index_format_spells_alike(&self) -> bool {
 		match self {
 			Value::None
 			| Value::Null
@@ -310,45 +336,30 @@ impl Value {
 			| Value::Regex(_)
 			| Value::Range(_)
 			| Value::Closure(_) => false,
-			Value::Array(a) => a.iter().all(Value::hash_agrees_with_eq),
-			Value::Set(s) => s.iter().all(Value::hash_agrees_with_eq),
-			// An `Object`'s equality covers its keys too, but those are `Strand`
-			// (hash is `as_str().hash`), so only the values can carry a `Number`.
-			Value::Object(o) => o.values().all(Value::hash_agrees_with_eq),
-			Value::RecordId(r) => r.key.hash_agrees_with_eq(),
+			Value::Array(a) => a.iter().all(Value::index_format_spells_alike),
+			Value::Set(s) => s.iter().all(Value::index_format_spells_alike),
+			Value::Object(o) => o.values().all(Value::index_format_spells_alike),
+			Value::RecordId(r) => r.key.index_format_spells_alike(),
 		}
 	}
 
 	/// Whether [`Value::cmp`] agrees with [`Value::equal`] for this value
 	/// against any other value that also agrees: `a.equal(b) == (a.cmp(b) ==
-	/// Equal)`. A value for which it does not — a regex (which `equal` matches
-	/// against strings), a range or closure (whose `partial_cmp` may be
-	/// undefined), or a geometry (totally ordered, but its order equates NaN
-	/// coordinates that `equal` does not) — must be compared with `equal`.
+	/// Equal)`. It holds for exactly the values whose hash agrees with their
+	/// equality ([`Value::hash_agrees_with_eq`]). A value for which it does not
+	/// must be compared with `equal`: a regex, which `equal` matches against
+	/// strings; a closure, which orders equal to every other closure while `==`
+	/// compares what it holds; a range, whose order compares its bounds by
+	/// [`Value::cmp`] rather than by `equal`; and a geometry, totally ordered,
+	/// but whose order equates NaN coordinates that `equal` does not.
 	///
 	/// A [`Number`] agrees at any depth: `Number`'s equality and order both
-	/// treat `1`, `1.0` and `1dec` as one value, `-0.0` as `0.0`, and a NaN by
-	/// its bits. `NONE` and `NULL` agree, since they are distinct variants
-	/// that order apart.
+	/// treat `1`, `1.0` and `1dec` as one value, `-0.0` as `0.0`, every NaN as
+	/// one value whatever its sign and payload, and a float and a decimal as one
+	/// value only when they are the same number. `NONE` and `NULL` agree, since
+	/// they are distinct variants that order apart.
 	pub fn ord_agrees_with_equal(&self) -> bool {
-		match self {
-			Value::None
-			| Value::Null
-			| Value::Bool(_)
-			| Value::Number(_)
-			| Value::String(_)
-			| Value::Duration(_)
-			| Value::Datetime(_)
-			| Value::Uuid(_)
-			| Value::Bytes(_)
-			| Value::Table(_)
-			| Value::File(_) => true,
-			Value::Geometry(_) | Value::Regex(_) | Value::Range(_) | Value::Closure(_) => false,
-			Value::Array(a) => a.iter().all(Value::ord_agrees_with_equal),
-			Value::Set(s) => s.iter().all(Value::ord_agrees_with_equal),
-			Value::Object(o) => o.values().all(Value::ord_agrees_with_equal),
-			Value::RecordId(r) => r.key.ord_agrees_with_equal(),
-		}
+		self.hash_agrees_with_eq()
 	}
 
 	pub const NONE: Self = Self::None;
@@ -2181,14 +2192,10 @@ mod tests {
 		assert!(err.to_string().contains("nested too deeply"), "unexpected error: {err}");
 	}
 
-	/// A table name that collides with a keyword must render quoted, or the
-	/// output cannot be parsed back. `TableName` derefs to `str`, so the
-	/// rendering here cannot rely on method resolution finding an escaping
-	/// impl — this pins the escaping itself rather than which impl provides it.
-	/// `Number: Hash` disagrees with `Number: PartialEq`, so any value that can
-	/// reach a number must report that a hash miss on it proves nothing.
+	/// The index format drops a number's kind, so any value that can reach a
+	/// number must report that its spelling there may differ.
 	#[test]
-	fn hash_agrees_with_eq_flags_numbers_at_any_depth() {
+	fn index_format_spells_alike_flags_numbers_at_any_depth() {
 		use std::collections::BTreeMap;
 
 		use crate::val::{Number, Object, RecordId, RecordIdKey, Value};
@@ -2209,7 +2216,7 @@ mod tests {
 				key: RecordIdKey::Number(1),
 			}),
 		] {
-			assert!(v.hash_agrees_with_eq(), "{v:?}");
+			assert!(v.index_format_spells_alike(), "{v:?}");
 		}
 
 		for v in [
@@ -2222,13 +2229,49 @@ mod tests {
 				key: RecordIdKey::Array(vec![num].into()),
 			}),
 		] {
-			assert!(!v.hash_agrees_with_eq(), "{v:?}");
+			assert!(!v.index_format_spells_alike(), "{v:?}");
+		}
+	}
+
+	/// Equal numbers hash alike whatever their kinds, so a hash miss on a value
+	/// holding one is decisive; a geometry or a regex at any depth is not.
+	#[test]
+	fn hash_agrees_with_eq_holds_for_numbers_and_flags_geometries_and_regexes() {
+		use std::collections::BTreeMap;
+
+		use crate::val::{Geometry, Number, Object, RecordId, RecordIdKey, Regex, Value};
+
+		let nested =
+			|v: Value| Value::Object(Object::from(BTreeMap::from([(Strand::from("v"), v)])));
+
+		for num in [Number::Int(1), Number::Float(0.1), Number::Decimal(1.into())] {
+			let num = Value::Number(num);
+			for v in [
+				num.clone(),
+				Value::from(vec![num.clone()]),
+				nested(Value::from(vec![num.clone()])),
+				Value::RecordId(RecordId {
+					table: "t".into(),
+					key: RecordIdKey::Array(vec![num].into()),
+				}),
+			] {
+				assert!(v.hash_agrees_with_eq(), "{v:?}");
+			}
+		}
+
+		let geometry = Value::Geometry(Geometry::Point(geo_types::Point::new(1.0, 2.0)));
+		let regex = Value::Regex(Regex(crate::val::regex::regex_new("a").expect("a regex")));
+		for v in [geometry, regex] {
+			for v in [v.clone(), Value::from(vec![v.clone()]), nested(v)] {
+				assert!(!v.hash_agrees_with_eq(), "{v:?}");
+			}
 		}
 	}
 
 	/// The values `Value::ord_agrees_with_equal` is judged over: every kind of
-	/// number, the two nothings, strings and a regex that matches one, a
-	/// geometry with a NaN coordinate, and the collections and record ids that
+	/// number (a float and a decimal that are one number and two that print
+	/// alike but are not, and NaNs of several payloads), the two nothings, strings and a regex that
+	/// matches one, a geometry with a NaN coordinate, and the collections and record ids that
 	/// hold them.
 	fn ord_corpus() -> Vec<crate::val::Value> {
 		use std::collections::BTreeMap;
@@ -2268,11 +2311,17 @@ mod tests {
 			float(-0.0),
 			float(1.0),
 			float(1.5),
+			float(0.1),
 			float(f64::NAN),
+			float(f64::from_bits(0x7ff8_0000_0000_0002)),
+			float(-f64::NAN),
 			float(f64::INFINITY),
 			decimal(0),
 			decimal(1),
 			decimal(2),
+			Value::Number(Number::Decimal("0.1".parse().expect("a decimal"))),
+			Value::Number(Number::Decimal("1.5".parse().expect("a decimal"))),
+			Value::Number(Number::Decimal("1.50".parse().expect("a decimal"))),
 			Value::String("a".into()),
 			Value::String("abc".into()),
 			Value::String("b".into()),

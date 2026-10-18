@@ -7,10 +7,10 @@ timeout = 120000
 [test]
 reason = """
 	The extreme of an indexed `int` field whose rows were written before the declaration, over
-	equal numbers of different kinds that the index keeps under different keys: a float and a
-	decimal of the same digits, in both orders of record id, beside rows that are not equal to
-	them. The first of the equal numbers in record id order answers, with its kind, whichever key
-	the index lists it under first.
+	numbers of different kinds in both orders of record id, beside rows that are not equal to them.
+	Of equal numbers (`9`, `9f` and `9dec`; `1.5f` and `1.5dec`; `1e20f` and its decimal), the first
+	in record id order answers, with its kind. A float and a decimal of the same digits that are
+	two numbers (`0.1f` above `0.1dec`, `0.3f` below `0.3dec`) answer by their exact values.
 """
 
 [[test.results]]
@@ -197,7 +197,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ m: 0.1f }]"
+value = "[{ m: 0.1dec }]"
 
 [[test.results]]
 value = "[{ m: 0.1f }]"
@@ -206,7 +206,7 @@ value = "[{ m: 0.1f }]"
 value = "[{ m: 0.1dec }]"
 
 [[test.results]]
-value = "[{ m: 0.1dec }]"
+value = "[{ m: 0.1f }]"
 
 [[test.results]]
 value = "[{ m: 9 }]"
@@ -236,15 +236,15 @@ value = "[{ m: 9f }]"
 value = "[{ m: 0.3f }]"
 
 [[test.results]]
+value = "[{ m: 0.3dec }]"
+
+[[test.results]]
 value = "[{ m: 0.3f }]"
 
 [[test.results]]
 value = "[{ m: 0.3dec }]"
 
 [[test.results]]
-value = "[{ m: 0.3dec }]"
-
-[[test.results]]
 value = "[{ m: 1.5f }]"
 
 [[test.results]]
@@ -255,15 +255,15 @@ value = "[{ m: 1.5dec }]"
 
 [[test.results]]
 value = "[{ m: 1.5dec }]"
-
-[[test.results]]
-value = "[{ m: -0.1f }]"
 
 [[test.results]]
 value = "[{ m: -0.1f }]"
 
 [[test.results]]
 value = "[{ m: -0.1dec }]"
+
+[[test.results]]
+value = "[{ m: -0.1f }]"
 
 [[test.results]]
 value = "[{ m: -0.1dec }]"
@@ -285,6 +285,7 @@ value = "[{ m: 1001 }]"
 
 [[test.results]]
 value = "[{ m: 100000000000000000000dec }]"
+
 */
 {
 	CREATE p1a:1 SET n = 0.1f RETURN NONE;

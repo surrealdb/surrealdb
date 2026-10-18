@@ -4,7 +4,7 @@
 //! Every record in a table gets a compact number in a space shared by all of the
 //! table's indexes, so a posting list, a proximity graph or a bitmap can name a
 //! record in eight bytes instead of a full record id. The number is stored — it is
-//! the value under `!di` and a key field of `!dd` and of every full-text posting —
+//! the value under `!dj` and a key field of `!dd` and of every full-text posting —
 //! which is why it is declared here. The allocator that hands numbers out, and the
 //! record-to-number mapping it maintains, need a transaction and stay above.
 

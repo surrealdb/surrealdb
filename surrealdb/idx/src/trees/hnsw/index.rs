@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -15,12 +14,14 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::debug;
 use web_time::Instant;
 
-use crate::catalog::{Distance, HnswParams, TableId, VectorType, keeps_vector_doc_elements};
+use crate::catalog::{
+	Distance, HnswParams, TableId, VectorType, keeps_pending_members, keeps_vector_doc_elements,
+};
 use crate::config::BuildParallelism;
-use crate::docids::{DocId, LegacyVectorDocIds, TableDocIds};
+use crate::docids::{DocId, LegacyVectorDocIds};
 use crate::env::IndexEnv;
-use crate::key::schema::{HnswRecordPendingKey, HnswRecordPendingPrefix};
-use crate::key::{KVKeyDecode, KVSubspace, KVValue, Key, Resumable};
+use crate::key::schema::HnswRecordPendingKey;
+use crate::key::{KVKeyDecode, KVValue, Key, Resumable};
 use crate::trees::hnsw::batch::{
 	self, GraphBase, InvalidateResident, PublishBatch, RollBackBatch, Staged, Staging,
 };
@@ -30,12 +31,12 @@ use crate::trees::hnsw::filter::{FilterCache, HnswTruthyDocumentFilter};
 use crate::trees::hnsw::flavor::{HnswFlavor, with_hnsw};
 pub use crate::trees::hnsw::outcome::HnswCompactionOutcome;
 use crate::trees::hnsw::{
-	ElementId, HnswRecordPendingUpdate, HnswSearch, VectorId, VectorPendingUpdate,
+	ElementId, HnswRecordPendingMember, HnswRecordPendingUpdate, HnswSearch, VectorId,
+	VectorPendingUpdate,
 };
 use crate::trees::knn::{KnnResultBuilder, OVERQUERY_CEILING_FACTOR};
 use crate::trees::pending::{
-	PendingBacklogReport, PendingScan, PendingScanStats, take_compacted_record_id,
-	take_pending_record_id,
+	PendingBacklogReport, PendingScan, PendingScanStats, take_pending_record_id,
 };
 use crate::trees::vector::{
 	DistanceExt as _, SerializedVector, SharedVector, Vector, serialized_vector_from_value,
@@ -55,34 +56,6 @@ fn pending_record_id(key: &[u8], pending: &mut HnswRecordPendingUpdate) -> Resul
 	take_pending_record_id(&mut pending.id, || {
 		Ok(HnswRecordPendingKey::decode_key(key)?.id.into_owned())
 	})
-}
-
-/// [`pending_record_id`] for compaction, which maps the record to a doc-ID; the
-/// rule is [`take_compacted_record_id`].
-async fn compacted_record_id(
-	tx: &Transaction,
-	ikb: &IndexKeyBase,
-	key: &[u8],
-	pending: &mut HnswRecordPendingUpdate,
-) -> Result<RecordIdKey> {
-	take_compacted_record_id(
-		tx,
-		&mut pending.id,
-		|| {
-			let prefix = HnswRecordPendingPrefix {
-				ns: ikb.ns(),
-				db: ikb.db(),
-				tb: Cow::Borrowed(ikb.table()),
-				ix: ikb.index(),
-			}
-			.encode_bound()?;
-			Ok(key.strip_prefix(&*prefix).map(|spelled| {
-				(TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone()), spelled.to_vec())
-			}))
-		},
-		|| Ok(HnswRecordPendingKey::decode_key(key)?.id.into_owned()),
-	)
-	.await
 }
 
 pub use crate::trees::hnsw::HNSW_COMPACTION_MAX_PENDING_KEYS;
@@ -210,10 +183,16 @@ impl PendingPlanBuilder {
 		}
 	}
 
-	/// Captures one pending key/value and folds its operation into the plan.
+	/// Captures one pending key/value and folds its operations into the plan:
+	/// one per record the entry holds.
 	///
 	/// Returns `false` when adding the pending entry would exceed a batch cap.
-	fn add(&mut self, key: Vec<u8>, value: Val, pending: PendingOperation) -> bool {
+	fn add(
+		&mut self,
+		key: Vec<u8>,
+		value: Val,
+		pending: impl IntoIterator<Item = PendingOperation>,
+	) -> bool {
 		if self.captured_keys.len() >= HNSW_COMPACTION_MAX_PENDING_KEYS
 			|| (!self.captured_keys.is_empty()
 				&& self.encoded_bytes + key.len() + value.len() > HNSW_COMPACTION_MAX_PENDING_BYTES)
@@ -226,7 +205,9 @@ impl PendingPlanBuilder {
 			key,
 			value,
 		});
-		self.add_pending(pending);
+		for pending in pending {
+			self.add_pending(pending);
+		}
 		if self.captured_keys.len() >= HNSW_COMPACTION_MAX_PENDING_KEYS
 			|| self.encoded_bytes >= HNSW_COMPACTION_MAX_PENDING_BYTES
 		{
@@ -435,10 +416,11 @@ impl HnswIndex {
 
 	/// Enqueues a vector update for later application to the HNSW graph.
 	///
-	/// Converts old/new document values into serialized vectors and stores a
-	/// single record-keyed pending value. Repeated writes to the same record
-	/// preserve the original graph baseline and replace only the desired final
-	/// vectors, so compaction can apply the record's final state directly.
+	/// Converts old/new document values into serialized vectors and stores them
+	/// in the record-keyed pending value, as the state of `id`'s record. Repeated
+	/// writes to the same record preserve the original graph baseline and replace
+	/// only the desired final vectors, so compaction can apply the record's final
+	/// state directly.
 	pub(crate) async fn index(
 		&self,
 		env: &dyn IndexEnv,
@@ -461,22 +443,43 @@ impl HnswIndex {
 		};
 		let tx = env.tx();
 		let key = self.ikb.new_hr_key(id);
-		let mut pending = if let Some(mut pending) = tx.get_key(&key, None).await? {
-			pending.new_vectors = new_vectors;
-			pending
-		} else {
-			HnswRecordPendingUpdate {
+		// The entry's key spells `id` without its numbers' kinds, so it may hold
+		// other records. A write folds into its own record's state: the graph
+		// baseline is kept and the desired vectors replaced. An index stamped
+		// before entries hold every record they spell folds into whichever
+		// record the entry names, as that release did.
+		let pending = match tx.get_key(&key, None).await? {
+			Some(mut pending) => {
+				let own = !keeps_pending_members(self.format_version)
+					|| pending.id.as_ref().is_none_or(|named| named.addresses_same_record(id));
+				if own {
+					pending.new_vectors = new_vectors;
+					// Every write stamps the exact id, so compaction and lookup
+					// never recover it from a key that cannot spell it.
+					pending.id = Some(id.clone());
+				} else if let Some(member) =
+					pending.others.iter_mut().find(|m| m.id.addresses_same_record(id))
+				{
+					member.new_vectors = new_vectors;
+				} else {
+					pending.others.push(HnswRecordPendingMember {
+						doc_id: HnswDocs::get_doc_id(&self.ikb, self.format_version, &tx, id)
+							.await?,
+						old_vectors,
+						new_vectors,
+						id: id.clone(),
+					});
+				}
+				pending
+			}
+			None => HnswRecordPendingUpdate {
 				doc_id: HnswDocs::get_doc_id(&self.ikb, self.format_version, &tx, id).await?,
 				old_vectors,
 				new_vectors,
-				id: None,
-			}
+				id: Some(id.clone()),
+				others: Vec::new(),
+			},
 		};
-		// Every write stamps the exact id, whichever branch built the entry, so
-		// compaction and lookup never have to recover it from a key that cannot
-		// spell it. Stamping here rather than per branch keeps that true of a
-		// branch added later.
-		pending.id = Some(id.clone());
 		tx.set_key(&key, &pending).await?;
 		Ok(())
 	}
@@ -567,7 +570,7 @@ impl HnswIndex {
 				// delete, so the copy is made here rather than for the whole batch
 				// up front: the caps below stop a part-read batch as a matter of
 				// course, and what the loop never reaches is never copied.
-				if !builder.add(key.to_vec(), value.to_vec(), pending) {
+				if !builder.add(key.to_vec(), value.to_vec(), [pending]) {
 					return Ok(());
 				}
 				*count += 1;
@@ -602,12 +605,18 @@ impl HnswIndex {
 				if env.is_done(Some(*count)).await? {
 					bail!(EngineError::QueryCancelled)
 				}
-				let mut pending = HnswRecordPendingUpdate::kv_decode_value(value, ())?;
-				let id = compacted_record_id(tx, ikb, key, &mut pending).await?;
-				let pending = Self::record_pending_to_operation(id, pending);
+				// One operation per record the entry holds; only the first can
+				// predate the id field, and so need its key to name it.
+				let mut operations = Vec::with_capacity(1);
+				for mut pending in
+					HnswRecordPendingUpdate::kv_decode_value(value, ())?.into_records()
+				{
+					let id = pending_record_id(key, &mut pending)?;
+					operations.push(Self::record_pending_to_operation(id, pending));
+				}
 				// Copied per entry rather than per batch, for the reason given in
 				// `collect_append_pending_for_plan`.
-				if !builder.add(key.to_vec(), value.to_vec(), pending) {
+				if !builder.add(key.to_vec(), value.to_vec(), operations) {
 					return Ok(());
 				}
 				*count += 1;
@@ -1309,17 +1318,25 @@ impl HnswIndex {
 					if ctx.env.is_done(Some(*checkpoints)).await? {
 						bail!(EngineError::QueryCancelled)
 					}
-					let mut pending = HnswRecordPendingUpdate::kv_decode_value(value, ())?;
-					let id = pending_record_id(key, &mut pending)?;
-					let pending = Self::record_pending_to_operation(id, pending);
-					suppress_legacy_candidate(&pending.id, &scan.batch.ids, &positions, &mut live);
-					if let Some(record) = pending.record {
+					for mut pending in
+						HnswRecordPendingUpdate::kv_decode_value(value, ())?.into_records()
+					{
+						let id = pending_record_id(key, &mut pending)?;
+						let pending = Self::record_pending_to_operation(id, pending);
 						suppress_legacy_candidate(
-							&VectorId::RecordKey(record),
+							&pending.id,
 							&scan.batch.ids,
 							&positions,
 							&mut live,
 						);
+						if let Some(record) = pending.record {
+							suppress_legacy_candidate(
+								&VectorId::RecordKey(record),
+								&scan.batch.ids,
+								&positions,
+								&mut live,
+							);
+						}
 					}
 				}
 			}
@@ -1379,9 +1396,10 @@ impl HnswIndex {
 	/// deletes it, where scan order is the append-keyed `!hp` range followed by
 	/// the record-keyed `!hr` range. The two layouts coalesce differently:
 	///
-	/// * `!hr` holds exactly one entry per record — writes read-modify-write that single key — and
-	///   an entry only ever supersedes its own record's identity. Every non-deleting `!hr` entry is
-	///   therefore live the moment it is read, and is scored in the same pass that reads it.
+	/// * `!hr` holds exactly one pending state per record — writes read-modify-write the record's
+	///   key, whose value may hold the states of other records spelled alike — and a state only
+	///   ever supersedes its own record's identity. Every non-deleting `!hr` entry is therefore
+	///   live the moment it is read, and is scored in the same pass that reads it.
 	/// * `!hp` may hold several entries per identity, and any of them can be superseded by an `!hr`
 	///   entry read afterwards. It is divided into scoring-sized chunks. Within each chunk the last
 	///   entry per identity is retained, then the later `!hp` suffix and `!hr` range are scanned to
@@ -1502,45 +1520,52 @@ impl HnswIndex {
 					break;
 				}
 				for (key, value) in &read {
-					let entry_bytes = key.len() + value.len();
+					// The entry's bytes go to the first of its records the batch
+					// keeps; the others it holds add none.
+					let mut entry_bytes = key.len() + value.len();
 					// Charged before the checkpoint — see the legacy pass above.
 					scan.charge_entry(entry_bytes);
 					checkpoints += 1;
 					if env.is_done(Some(checkpoints)).await? {
 						bail!(EngineError::QueryCancelled)
 					}
-					let mut pending = HnswRecordPendingUpdate::kv_decode_value(value, ())?;
-					let id = pending_record_id(key, &mut pending)?;
-					let pending = Self::record_pending_to_operation(id, pending);
-					if let VectorId::DocId(doc_id) = &pending.id {
-						all_existing_docs.insert(*doc_id);
+					for mut pending in
+						HnswRecordPendingUpdate::kv_decode_value(value, ())?.into_records()
+					{
+						let id = pending_record_id(key, &mut pending)?;
+						let pending = Self::record_pending_to_operation(id, pending);
+						if let VectorId::DocId(doc_id) = &pending.id {
+							all_existing_docs.insert(*doc_id);
+						}
+						if pending.new_vectors.is_empty() {
+							continue;
+						}
+						// A record-keyed pending may carry a doc-ID captured before a
+						// delete → re-create of the record: that id's shared mapping is
+						// gone, so a DocId-keyed hit could not be resolved back to a
+						// record and would be silently dropped. Score the surviving
+						// vectors under the record key — always resolvable — while the
+						// captured id (inserted above) still masks the graph's stale
+						// entries.
+						let record = pending
+							.record
+							.expect("a record-keyed pending always carries its record key");
+						let id = VectorId::RecordKey(record);
+						// Drop candidates outside the allow-list before they take
+						// batch budget, so non-members are never fetched. The
+						// suppression bitmap above is deliberately NOT gated: a
+						// pending doc must mask its stale graph entries whether or
+						// not it is allowed.
+						if !self.allow_list_admits(tx, allow_list, &id).await? {
+							continue;
+						}
+						let bytes = std::mem::take(&mut entry_bytes);
+						if scan.rollover_required(bytes) {
+							self.score_pending_batch(ctx, search, filter, builder, &mut scan)
+								.await?;
+						}
+						scan.push(id, pending.new_vectors, bytes);
 					}
-					if pending.new_vectors.is_empty() {
-						continue;
-					}
-					// A record-keyed pending may carry a doc-ID captured before a
-					// delete → re-create of the record: that id's shared mapping is
-					// gone, so a DocId-keyed hit could not be resolved back to a
-					// record and would be silently dropped. Score the surviving
-					// vectors under the record key — always resolvable — while the
-					// captured id (inserted above) still masks the graph's stale
-					// entries.
-					let record = pending
-						.record
-						.expect("a record-keyed pending always carries its record key");
-					let id = VectorId::RecordKey(record);
-					// Drop candidates outside the allow-list before they take
-					// batch budget, so non-members are never fetched. The
-					// suppression bitmap above is deliberately NOT gated: a
-					// pending doc must mask its stale graph entries whether or
-					// not it is allowed.
-					if !self.allow_list_admits(tx, allow_list, &id).await? {
-						continue;
-					}
-					if scan.rollover_required(entry_bytes) {
-						self.score_pending_batch(ctx, search, filter, builder, &mut scan).await?;
-					}
-					scan.push(id, pending.new_vectors, entry_bytes);
 				}
 			}
 		}
@@ -1731,63 +1756,5 @@ impl HnswIndex {
 	pub(super) async fn adjacency(&self) -> super::Adjacency {
 		let resident = self.hnsw.read().await;
 		with_hnsw!(&resident.graph, h => h.adjacency())
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use surrealdb_kvs::TransactionType;
-
-	use super::*;
-	use crate::catalog::{DatabaseId, IndexId, NamespaceId};
-	use crate::key::KVKey;
-	use crate::key::schema::{DocKeyKey, DocLookupKey};
-	use crate::test_env::TestIndexStore;
-
-	/// Compaction takes the record of an entry whose value carries no id from
-	/// the table's mappings, not from the id its key decodes to.
-	///
-	/// The key spells the id under the index format, so `[42, 'intro']` decodes
-	/// as `[42dec, 'intro']`, a record that does not exist; resolving that would
-	/// mint it a doc-ID of its own.
-	#[tokio::test]
-	async fn compaction_names_the_mapped_record_of_an_entry_without_an_id() {
-		let (ns, db) = (NamespaceId(1), DatabaseId(2));
-		let ikb = IndexKeyBase::new(ns, db, "tb".into(), IndexId(3));
-		let id =
-			RecordIdKey::Array(vec![Value::Number(Number::Int(42)), Value::from("intro")].into());
-		let key = ikb.new_hr_key(&id).encode_key().unwrap().to_vec();
-		let decoded = HnswRecordPendingKey::decode_key(&key).unwrap().id.into_owned();
-		assert!(
-			!decoded.addresses_same_record(&id),
-			"the premise: the key's id is not the record's"
-		);
-		let entry = || HnswRecordPendingUpdate {
-			doc_id: None,
-			old_vectors: Vec::new(),
-			new_vectors: Vec::new(),
-			id: None,
-		};
-
-		let ds = TestIndexStore::new().await;
-		let tx = ds.transaction(TransactionType::Write).await.unwrap();
-		assert!(
-			compacted_record_id(&tx, &ikb, &key, &mut entry())
-				.await
-				.unwrap()
-				.addresses_same_record(&decoded),
-			"with no mapping at that spelling, the decoded id is all there is"
-		);
-		let tb = crate::val::TableName::from("tb");
-		tx.set_key(&DocLookupKey::new(ns, db, Cow::Borrowed(&tb), Cow::Borrowed(&id)), &7u64)
-			.await
-			.unwrap();
-		tx.set_key(&DocKeyKey::new(ns, db, Cow::Borrowed(&tb), 7), &id).await.unwrap();
-		let named = compacted_record_id(&tx, &ikb, &key, &mut entry()).await.unwrap();
-		assert!(
-			named.addresses_same_record(&id),
-			"the mapping names the record exactly: {named:?}"
-		);
-		tx.cancel().await.unwrap();
 	}
 }

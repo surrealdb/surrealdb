@@ -236,12 +236,9 @@ pub(crate) fn key_has_regex(key: &[Value]) -> bool {
 /// configured build-row budget.
 ///
 /// **Ordered, not hashed.** A probe row joins a build row when their keys compare
-/// equal, and `Value: Hash` does not agree with `Value: PartialEq` for numbers —
-/// `0.1f == 0.1dec` while the two hash apart (see
-/// [`Value::hash_agrees_with_eq`]). Hash-bucketing the keys would drop such a
-/// match, reachable here through a compound record id holding a non-integral
-/// number (`t:[0.1f]` against `t:[0.1dec]`). Ordering also makes iteration
-/// deterministic, which is what [`Self::all_rows`] needs.
+/// equal, which holds every numeric variant of one value equal, including inside
+/// a compound record id (`t:[1.5f]` against `t:[1.5dec]`). Ordering also makes
+/// iteration deterministic, which is what [`Self::all_rows`] needs.
 ///
 /// A key holding a regex is kept apart: `=` matches a regex against a string
 /// it satisfies, which no ordering expresses, so such keys are compared one

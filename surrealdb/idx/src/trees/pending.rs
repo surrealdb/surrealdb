@@ -15,8 +15,7 @@
 //!
 //! One rule about those engines' keys does live here, beside the scan that
 //! reads them: [`take_pending_record_id`], which decides whether a pending
-//! entry's record id comes from its value or from its key, and its compaction
-//! form [`take_compacted_record_id`].
+//! entry's record id comes from its value or from its key.
 //!
 //! # What the byte budget is and is not
 //!
@@ -54,12 +53,10 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::Result;
-use surrealdb_datastore::Transaction;
 use surrealdb_kvs::api::ValsBatch;
 use tracing::warn;
 
 use crate::IndexKeyBase;
-use crate::docids::TableDocIds;
 use crate::trees::hnsw::VectorId;
 use crate::trees::vector::SerializedVector;
 use crate::val::RecordIdKey;
@@ -121,7 +118,9 @@ pub(crate) const PENDING_MAX_ROWS: u32 = 16;
 /// slot.
 ///
 /// `decode_fallback` therefore answers only for an entry written before the
-/// value carried an id, and keeps whatever that key could express.
+/// value carried an id, and keeps whatever that key could express. Every
+/// release that writes into a table's shared doc-ID space from 3.3.0 on
+/// carries the id; only a 3.3 pre-release wrote such an entry without it.
 ///
 /// The id is *taken*, not copied: nothing reads the field afterwards, and a
 /// compound `Array`/`Object` id is a deep copy on paths that are O(backlog) by
@@ -137,36 +136,6 @@ pub(crate) fn take_pending_record_id(
 		Some(id) => Ok(id),
 		None => decode_fallback(),
 	}
-}
-
-/// [`take_pending_record_id`] for compaction, which maps the record it names to
-/// a doc-ID.
-///
-/// Mapping an id decoded from a key would mint a doc-ID for a record that does
-/// not exist once the id holds a number. So an entry whose value carries no id
-/// takes its record from the table's type-erased forward mapping at the key's
-/// own spelling of the id — spelled under the same codec — and the reverse
-/// mapping, which keeps the id exactly; see [`TableDocIds::record_spelled_as`].
-/// The decoded id stands only where no mapping resolves.
-///
-/// `spelling` yields the table's doc-ID space and the key's bytes for the id,
-/// or `None` when the key does not carry them where expected. It and
-/// `decode_fallback` run only for an entry whose value carries no id.
-pub(crate) async fn take_compacted_record_id(
-	tx: &Transaction,
-	exact_id: &mut Option<RecordIdKey>,
-	spelling: impl FnOnce() -> Result<Option<(TableDocIds, Vec<u8>)>>,
-	decode_fallback: impl FnOnce() -> Result<RecordIdKey>,
-) -> Result<RecordIdKey> {
-	if let Some(id) = exact_id.take() {
-		return Ok(id);
-	}
-	if let Some((docs, spelled)) = spelling()?
-		&& let Some(id) = docs.record_spelled_as(tx, &spelled).await?
-	{
-		return Ok(id);
-	}
-	decode_fallback()
 }
 
 /// The low bit of [`PendingBacklogReport::state`] records whether a backlog is

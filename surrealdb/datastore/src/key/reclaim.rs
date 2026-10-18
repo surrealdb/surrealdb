@@ -117,7 +117,8 @@ pub enum ReclaimKind {
 	Index,
 	/// A table's doc-ID to record-key direction (`!dd`).
 	DocKey,
-	/// A table's record-key to doc-ID direction (`!di`).
+	/// A table's record-key to doc-ID direction spelled under the index format
+	/// (`!di`), which 3.3 nodes write.
 	DocLookup,
 	/// The same direction spelled injectively (`!dj`).
 	DocLookupIdentity,

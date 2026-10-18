@@ -7,7 +7,7 @@
 { id: a:6, xs: [80] }
 { id: a:7, xs: [90, 100] }
 { id: a:8, xs: [110] }
-{ id: a:9, xs: [120] }
+{ id: a:9, xs: [] }
 { id: a:10, xs: [130] }
 { id: a:11, xs: [] }
 ### owner: SELECT id, (SELECT VALUE x FROM b WHERE $parent.k = k) AS xs FROM a
@@ -19,7 +19,7 @@
 { id: a:6, xs: [80] }
 { id: a:7, xs: [90, 100] }
 { id: a:8, xs: [110] }
-{ id: a:9, xs: [120] }
+{ id: a:9, xs: [] }
 { id: a:10, xs: [130] }
 { id: a:11, xs: [] }
 ### owner: SELECT id, (SELECT VALUE id FROM b WHERE k = $parent.k AND x > 10) AS xs FROM a
@@ -31,7 +31,7 @@
 { id: a:6, xs: [b:8] }
 { id: a:7, xs: [b:9, b:10] }
 { id: a:8, xs: [b:11] }
-{ id: a:9, xs: [b:12] }
+{ id: a:9, xs: [] }
 { id: a:10, xs: [b:13] }
 { id: a:11, xs: [] }
 ### owner: SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k ORDER BY x DESC LIMIT 1) AS top FROM a
@@ -43,7 +43,7 @@
 { id: a:6, top: [80] }
 { id: a:7, top: [100] }
 { id: a:8, top: [110] }
-{ id: a:9, top: [120] }
+{ id: a:9, top: [] }
 { id: a:10, top: [130] }
 { id: a:11, top: [] }
 ### owner: SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k LIMIT 1 START 1) AS second FROM a
@@ -67,7 +67,7 @@
 { g: [{ c: 1, k: 3f }], id: a:6 }
 { g: [{ c: 2, k: [1, 'x'] }], id: a:7 }
 { g: [{ c: 1, k: /b/ }], id: a:8 }
-{ g: [{ c: 1, k: 0.1dec }], id: a:9 }
+{ g: [], id: a:9 }
 { g: [{ c: 1, k: 0 }], id: a:10 }
 { g: [], id: a:11 }
 ### owner: SELECT id, (SELECT VALUE x FROM ONLY b WHERE k = $parent.k LIMIT 1) AS one FROM a
@@ -79,7 +79,7 @@
 { id: a:6, one: 80 }
 { id: a:7, one: 90 }
 { id: a:8, one: 110 }
-{ id: a:9, one: 120 }
+{ id: a:9, one: NONE }
 { id: a:10, one: 130 }
 { id: a:11, one: NONE }
 ### owner: SELECT VALUE id FROM a WHERE (SELECT VALUE x FROM b WHERE k = $parent.k) != []
@@ -91,7 +91,6 @@ a:5
 a:6
 a:7
 a:8
-a:9
 a:10
 ### owner: SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.ref.k) AS xs FROM a
 { id: a:1, xs: [10, 20, 5] }
@@ -114,7 +113,7 @@ a:10
 [80]
 [90, 100]
 [110]
-[120]
+[]
 [130]
 []
 ### owner: SELECT id, (SELECT VALUE twice FROM b WHERE k = $parent.k) AS t FROM a
@@ -126,7 +125,7 @@ a:10
 { id: a:6, t: [160] }
 { id: a:7, t: [180, 200] }
 { id: a:8, t: [220] }
-{ id: a:9, t: [240] }
+{ id: a:9, t: [] }
 { id: a:10, t: [260] }
 { id: a:11, t: [] }
 ### owner: SELECT id, (SELECT VALUE x FROM b WHERE twice = $parent.k) AS t FROM a
@@ -150,7 +149,7 @@ a:10
 { id: a:6, rows: [{ id: b:8, k: 3f, s: '8', twice: 160, x: 80 }] }
 { id: a:7, rows: [{ id: b:9, k: [1, 'x'], s: '9', twice: 180, x: 90 }, { id: b:10, k: [1f, 'x'], s: '10', twice: 200, x: 100 }] }
 { id: a:8, rows: [{ id: b:11, k: /b/, s: '11', twice: 220, x: 110 }] }
-{ id: a:9, rows: [{ id: b:12, k: 0.1dec, s: '12', twice: 240, x: 120 }] }
+{ id: a:9, rows: [] }
 { id: a:10, rows: [{ id: b:13, k: 0, s: '13', twice: 260, x: 130 }] }
 { id: a:11, rows: [] }
 ### owner: SELECT id, (SELECT VALUE x FROM empty WHERE k = $parent.k) AS xs FROM a
@@ -190,7 +189,7 @@ a:10
 { id: a:6, xs: [80] }
 { id: a:7, xs: [90, 100] }
 { id: a:8, xs: [110] }
-{ id: a:9, xs: [120] }
+{ id: a:9, xs: [] }
 { id: a:10, xs: [130] }
 { id: a:11, xs: [] }
 ### owner: SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k OR x = 10) AS xs FROM a
@@ -202,7 +201,7 @@ a:10
 { id: a:6, xs: [10, 80] }
 { id: a:7, xs: [10, 90, 100] }
 { id: a:8, xs: [10, 110] }
-{ id: a:9, xs: [10, 120] }
+{ id: a:9, xs: [10] }
 { id: a:10, xs: [10, 130] }
 { id: a:11, xs: [10] }
 ### owner: SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k AND x != $parent.k) AS xs FROM a
@@ -214,7 +213,7 @@ a:10
 { id: a:6, xs: [80] }
 { id: a:7, xs: [90, 100] }
 { id: a:8, xs: [110] }
-{ id: a:9, xs: [120] }
+{ id: a:9, xs: [] }
 { id: a:10, xs: [130] }
 { id: a:11, xs: [] }
 ### owner: SELECT id, (SELECT VALUE [x, $parent.id] FROM b WHERE k = $parent.k) AS xs FROM a
@@ -226,7 +225,7 @@ a:10
 { id: a:6, xs: [[80, a:6]] }
 { id: a:7, xs: [[90, a:7], [100, a:7]] }
 { id: a:8, xs: [[110, a:8]] }
-{ id: a:9, xs: [[120, a:9]] }
+{ id: a:9, xs: [] }
 { id: a:10, xs: [[130, a:10]] }
 { id: a:11, xs: [] }
 ### owner: SELECT id, (SELECT VALUE x FROM b WHERE k == $parent.k) AS xs FROM a
@@ -238,7 +237,7 @@ a:10
 { id: a:6, xs: [80] }
 { id: a:7, xs: [90, 100] }
 { id: a:8, xs: [] }
-{ id: a:9, xs: [120] }
+{ id: a:9, xs: [] }
 { id: a:10, xs: [130] }
 { id: a:11, xs: [] }
 ### record user: SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k) AS xs FROM a
@@ -250,7 +249,7 @@ a:10
 { id: a:6, xs: [80] }
 { id: a:7, xs: [90, 100] }
 { id: a:8, xs: [110] }
-{ id: a:9, xs: [120] }
+{ id: a:9, xs: [] }
 { id: a:10, xs: [130] }
 { id: a:11, xs: [] }
 ### record user: SELECT id, (SELECT VALUE x FROM b WHERE $parent.k = k) AS xs FROM a
@@ -262,7 +261,7 @@ a:10
 { id: a:6, xs: [80] }
 { id: a:7, xs: [90, 100] }
 { id: a:8, xs: [110] }
-{ id: a:9, xs: [120] }
+{ id: a:9, xs: [] }
 { id: a:10, xs: [130] }
 { id: a:11, xs: [] }
 ### record user: SELECT id, (SELECT VALUE id FROM b WHERE k = $parent.k AND x > 10) AS xs FROM a
@@ -274,7 +273,7 @@ a:10
 { id: a:6, xs: [b:8] }
 { id: a:7, xs: [b:9, b:10] }
 { id: a:8, xs: [b:11] }
-{ id: a:9, xs: [b:12] }
+{ id: a:9, xs: [] }
 { id: a:10, xs: [b:13] }
 { id: a:11, xs: [] }
 ### record user: SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k ORDER BY x DESC LIMIT 1) AS top FROM a
@@ -286,7 +285,7 @@ a:10
 { id: a:6, top: [80] }
 { id: a:7, top: [100] }
 { id: a:8, top: [110] }
-{ id: a:9, top: [120] }
+{ id: a:9, top: [] }
 { id: a:10, top: [130] }
 { id: a:11, top: [] }
 ### record user: SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k LIMIT 1 START 1) AS second FROM a
@@ -310,7 +309,7 @@ a:10
 { g: [{ c: 1, k: 3f }], id: a:6 }
 { g: [{ c: 2, k: [1, 'x'] }], id: a:7 }
 { g: [{ c: 1, k: /b/ }], id: a:8 }
-{ g: [{ c: 1, k: 0.1dec }], id: a:9 }
+{ g: [], id: a:9 }
 { g: [{ c: 1, k: 0 }], id: a:10 }
 { g: [], id: a:11 }
 ### record user: SELECT id, (SELECT VALUE x FROM ONLY b WHERE k = $parent.k LIMIT 1) AS one FROM a
@@ -322,7 +321,7 @@ a:10
 { id: a:6, one: 80 }
 { id: a:7, one: 90 }
 { id: a:8, one: 110 }
-{ id: a:9, one: 120 }
+{ id: a:9, one: NONE }
 { id: a:10, one: 130 }
 { id: a:11, one: NONE }
 ### record user: SELECT VALUE id FROM a WHERE (SELECT VALUE x FROM b WHERE k = $parent.k) != []
@@ -334,7 +333,6 @@ a:5
 a:6
 a:7
 a:8
-a:9
 a:10
 ### record user: SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.ref.k) AS xs FROM a
 { id: a:1, xs: [10, 20, 5] }
@@ -357,7 +355,7 @@ a:10
 [80]
 [90, 100]
 [110]
-[120]
+[]
 [130]
 []
 ### record user: SELECT id, (SELECT VALUE twice FROM b WHERE k = $parent.k) AS t FROM a
@@ -369,7 +367,7 @@ a:10
 { id: a:6, t: [160] }
 { id: a:7, t: [180, 200] }
 { id: a:8, t: [220] }
-{ id: a:9, t: [240] }
+{ id: a:9, t: [] }
 { id: a:10, t: [260] }
 { id: a:11, t: [] }
 ### record user: SELECT id, (SELECT VALUE x FROM b WHERE twice = $parent.k) AS t FROM a
@@ -393,7 +391,7 @@ a:10
 { id: a:6, rows: [{ id: b:8, k: 3f, s: '8', twice: 160, x: 80 }] }
 { id: a:7, rows: [{ id: b:9, k: [1, 'x'], s: '9', twice: 180, x: 90 }, { id: b:10, k: [1f, 'x'], s: '10', twice: 200, x: 100 }] }
 { id: a:8, rows: [{ id: b:11, k: /b/, s: '11', twice: 220, x: 110 }] }
-{ id: a:9, rows: [{ id: b:12, k: 0.1dec, s: '12', twice: 240, x: 120 }] }
+{ id: a:9, rows: [] }
 { id: a:10, rows: [{ id: b:13, k: 0, s: '13', twice: 260, x: 130 }] }
 { id: a:11, rows: [] }
 ### record user: SELECT id, (SELECT VALUE x FROM empty WHERE k = $parent.k) AS xs FROM a
@@ -433,7 +431,7 @@ a:10
 { id: a:6, xs: [80] }
 { id: a:7, xs: [90, 100] }
 { id: a:8, xs: [110] }
-{ id: a:9, xs: [120] }
+{ id: a:9, xs: [] }
 { id: a:10, xs: [130] }
 { id: a:11, xs: [] }
 ### record user: SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k OR x = 10) AS xs FROM a
@@ -445,7 +443,7 @@ a:10
 { id: a:6, xs: [10, 80] }
 { id: a:7, xs: [10, 90, 100] }
 { id: a:8, xs: [10, 110] }
-{ id: a:9, xs: [10, 120] }
+{ id: a:9, xs: [10] }
 { id: a:10, xs: [10, 130] }
 { id: a:11, xs: [10] }
 ### record user: SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k AND x != $parent.k) AS xs FROM a
@@ -457,7 +455,7 @@ a:10
 { id: a:6, xs: [80] }
 { id: a:7, xs: [90, 100] }
 { id: a:8, xs: [110] }
-{ id: a:9, xs: [120] }
+{ id: a:9, xs: [] }
 { id: a:10, xs: [130] }
 { id: a:11, xs: [] }
 ### record user: SELECT id, (SELECT VALUE [x, $parent.id] FROM b WHERE k = $parent.k) AS xs FROM a
@@ -469,7 +467,7 @@ a:10
 { id: a:6, xs: [[80, a:6]] }
 { id: a:7, xs: [[90, a:7], [100, a:7]] }
 { id: a:8, xs: [[110, a:8]] }
-{ id: a:9, xs: [[120, a:9]] }
+{ id: a:9, xs: [] }
 { id: a:10, xs: [[130, a:10]] }
 { id: a:11, xs: [] }
 ### record user: SELECT id, (SELECT VALUE x FROM b WHERE k == $parent.k) AS xs FROM a
@@ -481,6 +479,6 @@ a:10
 { id: a:6, xs: [80] }
 { id: a:7, xs: [90, 100] }
 { id: a:8, xs: [] }
-{ id: a:9, xs: [120] }
+{ id: a:9, xs: [] }
 { id: a:10, xs: [130] }
 { id: a:11, xs: [] }

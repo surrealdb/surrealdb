@@ -74,12 +74,9 @@ impl NumberSubVariant {
 /// shares. The probe compares with `==`, so a miss proves that much only when
 /// both of these hold:
 ///
-/// - **No element is `==` to `value`.** The miss proves this as soon as one side of the probe is
-///   number-free. See [`Value::hash_agrees_with_eq`] for why a number on both sides makes the miss
-///   meaningless, and [`LiteralSet::hash_agrees_with_eq`] for the set side. An `Int` against a set
-///   whose numbers are all `Int` is the exception: two integers are `==` exactly when they are the
-///   same integer, which hash alike, so the miss proves it whatever else the set holds
-///   ([`LiteralSet::numbers_are_ints`]).
+/// - **No element is `==` to `value`.** The miss proves this as soon as one side of the probe
+///   hashes as it compares: see [`Value::hash_agrees_with_eq`] for the values that may not, and
+///   [`LiteralSet::hash_agrees_with_eq`] for the set side.
 /// - **No element is `Value::equal` to `value` without being `==` to it.** The two differ only
 ///   between a top-level string and a top-level regex, which `Value::equal` matches by running the
 ///   regex over the string. A regex's miss is therefore decisive only against a set holding no
@@ -92,9 +89,7 @@ impl NumberSubVariant {
 /// meets that entry depends on the hasher's seed.
 #[inline]
 pub(crate) fn hash_miss_is_decisive(value: &Value, set: &LiteralSet) -> bool {
-	let integer_probe = matches!(value, Value::Number(Number::Int(_))) && set.numbers_are_ints();
-	let miss_rules_out_eq =
-		integer_probe || set.hash_agrees_with_eq() || value.hash_agrees_with_eq();
+	let miss_rules_out_eq = set.hash_agrees_with_eq() || value.hash_agrees_with_eq();
 	let eq_decides_equal = match value {
 		Value::String(_) => !set.has_strand_asymmetric_match(),
 		Value::Regex(_) => set.has_no_strings(),
@@ -135,10 +130,9 @@ pub(crate) enum LiteralWire {
 	/// - **Same `Decimal` sub-variant** → the runtime value's decimal body is decoded and compared
 	///   with `decimal_value`. The bytes carry a decimal's scale and the sign of a zero, which
 	///   `Decimal`'s equality ignores: `2.0` equals `2`, and `-0` equals `0`.
-	/// - **Same `Float` sub-variant** → bail to fallback regardless of byte equality: `+0.0` vs
-	///   `-0.0` byte-differ but compare equal under `f64::PartialEq`, and `NaN` bit patterns may
-	///   compare equal or unequal depending on the `Value::equal` arm. Cheap to defer the few
-	///   Float-eq predicates and keep wire-eq correct.
+	/// - **Same `Float` sub-variant** → a byte match is equal, a float comparing by its bits (every
+	///   NaN one value); a mismatch bails to fallback decode, since `+0.0` vs `-0.0` byte-differ
+	///   but compare equal, as do NaNs of different payloads.
 	///
 	/// `int_value` is the literal's `i64` body, pre-decoded at plan time
 	/// for the wire-fast same-sub-variant **range** comparator
@@ -338,13 +332,12 @@ pub(crate) struct LiteralSet {
 	/// - **The set holds another sub-variant** → a stored entry of that sub-variant may still be
 	///   cross-variant `==` to the runtime value (`Number::PartialEq`), defer to fallback.
 	number_sub_variants: u8,
-	/// True iff some element's `Hash` disagrees with its `PartialEq` — in
-	/// practice, iff some element holds a `Number` (see
-	/// [`Value::hash_agrees_with_eq`] for why numbers break the contract). When
-	/// set, a `HashSet<Value>` miss against this set does **not** prove that no
-	/// element is `==` to the probed value, and the decode-fallback path must
-	/// treat it as inconclusive unless the probed value is itself number-free
-	/// (see [`hash_miss_is_decisive`]).
+	/// True iff some element's `Hash` may disagree with its `PartialEq` (see
+	/// [`Value::hash_agrees_with_eq`]). When set, a `HashSet<Value>` miss
+	/// against this set does **not** prove that no element is `==` to the
+	/// probed value, and the decode-fallback path must treat it as
+	/// inconclusive unless the probed value's own hash agrees with its
+	/// equality (see [`hash_miss_is_decisive`]).
 	hash_eq_mismatch: bool,
 }
 
@@ -407,29 +400,6 @@ impl LiteralSet {
 		self.number_sub_variants
 	}
 
-	/// True iff the set holds no `Float` and no `Decimal` as an element: its numbers are all `Int`,
-	/// or it holds none. An `Int` is `Value::equal` to nothing but an `Int` of its own value, so
-	/// against such a set a `HashSet<Value>` miss decides membership.
-	#[inline]
-	pub(crate) fn numbers_are_ints(&self) -> bool {
-		let others =
-			(1u8 << NumberSubVariant::Float as u8) | (1u8 << NumberSubVariant::Decimal as u8);
-		self.number_sub_variants & others == 0
-	}
-
-	/// True iff [`Self::numbers`] holds both a `Float` and a `Decimal`.
-	///
-	/// `Number`'s equality between those two sub-variants is approximate and not
-	/// transitive — one float can equal two decimals that differ from each other
-	/// — so the set's numbers fall into equivalence classes only while they do
-	/// not mix the two. Every other pairing of sub-variants compares exactly.
-	#[inline]
-	pub(crate) fn numbers_mix_float_and_decimal(&self) -> bool {
-		let both =
-			(1u8 << NumberSubVariant::Float as u8) | (1u8 << NumberSubVariant::Decimal as u8);
-		self.number_sub_variants & both == both
-	}
-
 	/// Whether the Strand partition holds these exact rev-2 `Value` wire bytes.
 	#[inline]
 	pub(crate) fn strands_contain_wire(&self, wire: &[u8]) -> bool {
@@ -466,11 +436,11 @@ impl LiteralSet {
 	/// True iff a `HashSet<Value>` miss against this set proves that no element
 	/// is `==` to the probed value.
 	///
-	/// False once any element holds a `Number`, because `Number: Hash` and
-	/// `Number: PartialEq` disagree — see [`Value::hash_agrees_with_eq`]. A
-	/// caller whose probed value is number-free may still trust a miss, since
-	/// `==` requires matching variants on both sides. Whether the miss also
-	/// rules out `Value::equal` is [`hash_miss_is_decisive`]'s question.
+	/// False once any element's hash may disagree with its equality — see
+	/// [`Value::hash_agrees_with_eq`]. A caller whose probed value agrees may
+	/// still trust a miss, since `==` requires matching variants on both sides.
+	/// Whether the miss also rules out `Value::equal` is
+	/// [`hash_miss_is_decisive`]'s question.
 	#[inline]
 	pub(crate) fn hash_agrees_with_eq(&self) -> bool {
 		!self.hash_eq_mismatch
@@ -515,45 +485,51 @@ mod tests {
 		assert!(clean.hash_agrees_with_eq());
 		// The empty set has nothing to disagree about.
 		assert!(LiteralSet::from_set(&HashSet::new()).hash_agrees_with_eq());
-		// One number anywhere in the set is enough.
+		// Numbers of every kind hash as they compare.
 		let numeric = LiteralSet::from_set(&HashSet::from([
 			Value::String("x".into()),
 			Value::Number(Number::Decimal(Decimal::from_str_normalized("0.1").unwrap())),
+			Value::Number(Number::Float(0.1)),
 		]));
-		assert!(!numeric.hash_agrees_with_eq());
+		assert!(numeric.hash_agrees_with_eq());
+		// One element holding a geometry anywhere is enough.
+		let geometric = LiteralSet::from_set(&HashSet::from([
+			Value::String("x".into()),
+			Value::from(vec![Value::Geometry(crate::val::Geometry::Point(geo_types::Point::new(
+				1.0, 2.0,
+			)))]),
+		]));
+		assert!(!geometric.hash_agrees_with_eq());
 	}
 
-	/// A miss of an integer against a set of integers is decisive, and one against a set that holds
-	/// another kind of number is not, since the other kind may be equal to the integer.
+	/// A number's miss is decisive against a set of numbers of every kind: equal numbers hash
+	/// alike, so a probe for `3` meets an element `3.0f` or `3dec`, and misses only where no
+	/// element is the same number.
 	#[test]
-	fn an_integer_miss_is_decisive_against_integers_only() {
+	fn a_number_miss_is_decisive_against_numbers_of_every_kind() {
 		let int = |v| Value::Number(Number::Int(v));
-		let ints = LiteralSet::from_set(&HashSet::from([int(1), int(2), Value::from("a")]));
-		assert!(ints.numbers_are_ints());
-		assert!(hash_miss_is_decisive(&int(3), &ints));
-		let nested = LiteralSet::from_set(&HashSet::from([
-			int(1),
-			Value::from(vec![Value::Number(Number::Float(0.5))]),
-		]));
-		assert!(nested.numbers_are_ints());
-		assert!(hash_miss_is_decisive(&int(3), &nested));
-		let floats =
-			LiteralSet::from_set(&HashSet::from([int(1), Value::Number(Number::Float(3.0))]));
-		assert!(!floats.numbers_are_ints());
-		assert!(!hash_miss_is_decisive(&int(3), &floats));
-		let decimals = LiteralSet::from_set(&HashSet::from([Value::Number(Number::Decimal(
-			Decimal::from(3),
-		))]));
-		assert!(!decimals.numbers_are_ints());
-		assert!(!hash_miss_is_decisive(&int(3), &decimals));
-		// A float against integers is still not decisive.
-		assert!(!hash_miss_is_decisive(&Value::Number(Number::Float(3.0)), &ints));
+		let float = |v| Value::Number(Number::Float(v));
+		let decimal = |v: i64| Value::Number(Number::Decimal(Decimal::from(v)));
+		for set in [
+			HashSet::from([int(1), int(2), Value::from("a")]),
+			HashSet::from([int(1), float(3.0)]),
+			HashSet::from([decimal(3)]),
+			HashSet::from([int(1), Value::from(vec![float(0.5)])]),
+		] {
+			let literals = LiteralSet::from_set(&set);
+			for probe in [int(3), float(3.0), decimal(3)] {
+				assert!(hash_miss_is_decisive(&probe, &literals), "{probe:?} in {set:?}");
+				let equal = set.iter().any(|v| v.equal(&probe));
+				assert_eq!(set.contains(&probe), equal, "{probe:?} in {set:?}");
+			}
+		}
 	}
 
 	/// A miss [`hash_miss_is_decisive`] trusts proves that no element of the set
 	/// is `Value::equal` to the value. Checked over every pairing of a corpus
-	/// that covers the ways a hash probe parts from `Value::equal`: numbers that
-	/// hash apart across sub-variants, and a regex matching a string.
+	/// that covers the ways a hash probe parts from `Value::equal`: a regex
+	/// matching a string, with numbers of several kinds, equal and not, among
+	/// the elements.
 	#[test]
 	fn a_decisive_miss_proves_no_equal_element() {
 		use std::str::FromStr;

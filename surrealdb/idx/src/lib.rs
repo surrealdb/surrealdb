@@ -339,9 +339,9 @@ impl PreviousBpSpelling {
 	/// is `[1]`'s under this release, and `[1]` and `[1dec]` share one — so a
 	/// marker found at it is `id`'s only when its queued mutation names `id`.
 	pub fn key(&self, id: &RecordIdKey, spelled: &[u8]) -> Result<Option<PreviousBuildPrimaryKey>> {
-		// A number is the only value the index format spells differently, and
-		// an id holding none passes `hash_agrees_with_eq` without an encode.
-		if id.hash_agrees_with_eq() {
+		// An id the index format spells as this release does has no key of its
+		// own there, which `index_format_spells_alike` answers without an encode.
+		if id.index_format_spells_alike() {
 			return Ok(None);
 		}
 		let erased =

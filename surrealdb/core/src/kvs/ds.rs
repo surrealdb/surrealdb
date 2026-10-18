@@ -5640,7 +5640,7 @@ impl Datastore {
 			// kinds hold a revocable claim.
 			kind if kind.is_doc_id() && self.tb_has_doc_id_consumer(rc).await? => {
 				// A cursor means this entry had already deleted part of the
-				// space, so what the consumer adopted is torn: a `!di` mapping
+				// space, so what the consumer adopted is torn: a `!dj` mapping
 				// whose `!dd` twin is gone resolves to no record. Nothing here
 				// can repair it — the keys are already deleted, and the reaper
 				// must not delete further from a space a live index is reading —
@@ -9034,8 +9034,8 @@ mod test {
 	#[cfg(diskann)]
 	use crate::key::schema::{DiskannPendingPrefix, DiskannRecordPendingShardShardPrefix};
 	use crate::key::schema::{
-		DocKeyPrefix, DocLookupPrefix, DocStatsBatchPrefix, IndexCountKey, IndexCountPrefix,
-		TaskLeaseKey, TermChangeBatchPrefix,
+		DocKeyPrefix, DocLookupIdentityPrefix, DocStatsBatchPrefix, IndexCountKey,
+		IndexCountPrefix, TaskLeaseKey, TermChangeBatchPrefix,
 	};
 	use crate::kvs::test_support::{WriteTxSizeObserver, cleanup_sizes};
 	use crate::kvs::testing::{
@@ -13954,7 +13954,8 @@ mod test {
 		let forward = catch!(
 			txn,
 			txn.keys(
-				DocLookupPrefix::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table())).range()?,
+				DocLookupIdentityPrefix::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()))
+					.range()?,
 				u32::MAX,
 				0,
 				None

@@ -259,9 +259,7 @@ pub(crate) enum OverlapMode {
 	Any,
 	/// [`BinaryOperator::ContainNone`]
 	None,
-	/// [`BinaryOperator::ContainAll`]. The plan builds it only over a set whose
-	/// numbers do not mix `Float` and `Decimal` — see
-	/// [`overlap_streaming_from_set`].
+	/// [`BinaryOperator::ContainAll`]
 	All,
 }
 
@@ -417,11 +415,11 @@ impl ArrayOverlapsLiteralSet {
 	/// `Err(())` means undecidable, which the caller turns into
 	/// [`Evidence::Unknown`]. A decoded element is undecidable wherever
 	/// [`hash_miss_is_decisive`] does not trust a miss on it, and the probe is
-	/// then not made at all. That includes an element and a set that both hold a
-	/// number, and a string or a regex meeting a set that holds the other kind. A
-	/// miss would prove nothing, and with a number on both sides whether the probe
-	/// meets an equal entry that hashes apart depends on the hasher's seed, so no
-	/// verdict built on it would be reproducible.
+	/// then not made at all: a string or a regex meeting a set that holds the
+	/// other kind, or a value whose hash may disagree with its equality. A miss
+	/// would prove nothing, and whether the probe meets an equal entry that
+	/// hashes apart depends on the hasher's seed, so no verdict built on it
+	/// would be reproducible.
 	#[inline]
 	fn element_in_set(
 		elem_bytes: &[u8],
@@ -450,8 +448,8 @@ impl ArrayOverlapsLiteralSet {
 	/// `All` can count such an element neither as setting no bit, since it may
 	/// equal a literal, nor as setting the bit of the entry a probe meets: the
 	/// element may equal literals of two classes while the probe resolves it to
-	/// one. `Float` / `Decimal` equality is not transitive, and a string can be
-	/// `==` to one literal while a regex literal matches it.
+	/// one: a string can be `==` to one literal while a regex literal matches
+	/// it.
 	#[inline]
 	fn element_set_index(
 		elem_bytes: &[u8],
@@ -536,30 +534,26 @@ pub(crate) struct OverlapLookupTables {
 /// and Number literals), and the [`LiteralSet`] partitions used by the
 /// `Any` / `None` modes' fast paths. Indices are shared across all three.
 ///
-/// A bit index identifies a literal **value**, not a spelling of one. The
-/// incoming `HashSet<Value>` can hold two elements that compare equal but hash
-/// apart — `0.1f` and `0.1dec`, see
-/// [`Value::hash_agrees_with_eq`]
-/// — and `All` mode demands every bit be set, so a bit per spelling would ask a
-/// single array element to match both spellings at once and reject the row.
-/// Indices are therefore assigned through an ordered map, which collapses each
-/// equivalence class to one bit. `Ord`-equality is the same relation as
-/// `PartialEq` for every element type a literal set may hold: the variants whose
+/// A bit index identifies a literal **value**, not a spelling of one, and
+/// `All` mode demands every bit be set, so a bit per spelling would ask a
+/// single array element to match two spellings of one value at once and
+/// reject the row. Indices are therefore assigned through an ordered map,
+/// which collapses each equivalence class to one bit even where an element's
+/// hash disagrees with its equality ([`Value::hash_agrees_with_eq`]), as the
+/// incoming `HashSet<Value>` may then hold two equal elements. `Ord`-equality is the same relation
+/// as `PartialEq` for every element type a literal set may hold: the variants whose
 /// `partial_cmp` can return `None` (`Regex`, `Range`, `Closure`), and `Geometry`, which is
 /// totally ordered but whose order equates NaN coordinates that `PartialEq` does not, are
 /// excluded by `literal_hashset_element_safe`.
 ///
-/// The classes are equivalence classes only while equality among the literals
-/// is transitive, which `Float` / `Decimal` equality is not: one float can equal
-/// two decimals that differ from each other, and the class the ordered map files
-/// each spelling under then depends on the order the set yields them. `All`
-/// relies on the classes in two places. A wire hit reads the class of the
-/// top-level literal an element matches byte for byte, so `All` is not built over
-/// a set whose numbers spell both (see
-/// [`LiteralSet::numbers_mix_float_and_decimal`]). A decoded element is looked up
-/// only where [`hash_miss_is_decisive`] trusts a miss on it. Then one side is
-/// number-free, so the element is `==` to the literals of one class at most, and
-/// `==` decides [`Value::equal`] for it.
+/// The classes are equivalence classes because equality among the literals is
+/// transitive: `Number` compares exact values across every kind, so the ordered
+/// map files every spelling of one value under one class, whatever order the
+/// set yields them in. `All` relies on the classes in two places. A wire hit
+/// reads the class of the top-level literal an element matches byte for byte. A
+/// decoded element is looked up only where [`hash_miss_is_decisive`] trusts a
+/// miss on it; the element is then `==` to the literals of one class at most,
+/// and `==` decides [`Value::equal`] for it.
 pub(crate) fn overlap_streaming_from_set<S: BuildHasher>(
 	set: &HashSet<Value, S>,
 ) -> OverlapLookupTables {

@@ -232,6 +232,8 @@ d00e0196c24d4760 language-tests/tests/bench/scans/limit_id.surql
 a892a41bfbbe1d30 language-tests/tests/bench/scans/max_value_position.surql
 cfcf69c5a61808f5 language-tests/tests/bench/scans/min_indexed_int.surql
 530ebbdcfd3bbbb0 language-tests/tests/bench/scans/not_exists_correlated.surql
+4a16c3a5025d7fe0 language-tests/tests/bench/scans/order_by_id_full.surql
+76cff1894bc33467 language-tests/tests/bench/scans/order_by_id_limit.surql
 9043d24415d1fbe7 language-tests/tests/bench/scans/order_by_score_desc.surql
 729557d624a3e3c3 language-tests/tests/bench/scans/packed/aggregate_group_by_city.surql
 fef9b3332f853953 language-tests/tests/bench/scans/packed/order_by_score_full.surql
@@ -444,6 +446,10 @@ fdf688128ee58895 language-tests/tests/eval/surql_contexts.surql
 0754f590e4295ba7 language-tests/tests/eval/surql_schema_then_use.surql
 1d5d6cf402333d13 language-tests/tests/eval/surql_schema_then_use_same_statement.surql
 b287ba0e05e3a657 language-tests/tests/eval/surql_write_in_transaction.surql
+eb6c51ecdfb440e3 language-tests/tests/gql/_mutate_perm_delete_import.surql
+e6f6a0e5b3178772 language-tests/tests/gql/_mutate_perm_insert_import.surql
+704913185de43f0e language-tests/tests/gql/_mutate_perm_update_import.surql
+15543e6e44204f44 language-tests/tests/gql/_mutate_write_paths_import.surql
 9997ac3267d1f78a language-tests/tests/gql/_numeric_variant_schema.surql
 5fe2df935b911d88 language-tests/tests/gql/_perm_hidden_edge_import.surql
 e96e065a70c1eb45 language-tests/tests/gql/_perm_hidden_field_import.surql
@@ -1283,6 +1289,8 @@ d57a325490640290 language-tests/tests/language/control_flow/transaction/transact
 d7183fbcda5fd54d language-tests/tests/language/control_flow/transaction/value_scope_return_in_a_block_binds.surql
 03f40210c40f0bdb language-tests/tests/language/control_flow/transaction/with_return.surql
 7e420831e50ee242 language-tests/tests/language/control_flow/unreachable_statements_are_planned.surql
+fae078de886dc5b2 language-tests/tests/language/expression/a_false_left_gate_never_runs_its_right_operand.surql
+900d41709bb7ea92 language-tests/tests/language/expression/a_gate_with_a_literal_left_names_its_column_by_what_it_yields.surql
 7675b9401d5f9668 language-tests/tests/language/expression/kind_proofs.surql
 491d9300f835c8de language-tests/tests/language/expression/operators/casting/basic_literal_kind.surql
 ac5dcd1b9e02e093 language-tests/tests/language/expression/operators/casting/cast_string_to_record.surql
@@ -1904,6 +1912,7 @@ a787aee5a612f48b language-tests/tests/language/planner/bitmap_fusion_version_new
 79969e7583b478d7 language-tests/tests/language/planner/bitmap_or_fusion.surql
 4751deb01b033029 language-tests/tests/language/planner/bitmap_or_fusion_differential.surql
 ebe7331df4fb877c language-tests/tests/language/planner/bitmap_or_fusion_order_covered.surql
+edfdd386eab21e83 language-tests/tests/language/planner/block_conjunct_stays_above_a_layer.surql
 e751219eff703930 language-tests/tests/language/planner/boolean_behavior_index.surql
 e751219eff703930 language-tests/tests/language/planner/boolean_behavior_index_new_executor.surql
 409f5ec25ed750e0 language-tests/tests/language/planner/composite_index.surql
@@ -1913,6 +1922,7 @@ d2808c0b5bbb0ea4 language-tests/tests/language/planner/composite_index_range.sur
 47579cb7fd7f51fa language-tests/tests/language/planner/compound_index_matching.surql
 1ba0c3c2ef3fa046 language-tests/tests/language/planner/compound_index_matching_new_executor.surql
 80e45d5ce14dc492 language-tests/tests/language/planner/computed_field_kind_identity_projection_new_executor.surql
+1f5c5ccb1078cd5f language-tests/tests/language/planner/conjuncts_sharing_a_literal_move_below_layer.surql
 a6a6ab67009e0037 language-tests/tests/language/planner/contains_composite_index_order_new_executor.surql
 4424171a5bd294cd language-tests/tests/language/planner/contains_operators.surql
 4806d455b60cbb23 language-tests/tests/language/planner/contains_operators_new_executor.surql
@@ -1952,6 +1962,9 @@ a7fed6ff2568fdbf language-tests/tests/language/planner/explain_matrix/record_key
 41ac981e4d211bbb language-tests/tests/language/planner/explain_matrix/residual_stripping.surql
 74b2c15971877816 language-tests/tests/language/planner/explain_matrix/update_rejects_with_index_after_set.surql
 10985ea8d40c4f19 language-tests/tests/language/planner/fetch_with_limit_new_executor.surql
+da8e35550d3c36ab language-tests/tests/language/planner/filter_over_a_named_projection_keeps_its_rows.surql
+6ddf95b33f7eaca6 language-tests/tests/language/planner/filter_over_a_subquery_keeps_its_rows.surql
+b5a6fb2ec77e8208 language-tests/tests/language/planner/filter_over_a_subquery_reaches_its_source.surql
 97880e8276d5dd97 language-tests/tests/language/planner/id_components_bounds_from_params_functions_and_closures.surql
 3d1260778efb5ae5 language-tests/tests/language/planner/id_components_clock_bound.surql
 ba41e70734512e70 language-tests/tests/language/planner/id_components_correlated_subquery.surql
@@ -2031,6 +2044,7 @@ d34a07a096e011bd language-tests/tests/language/planner/select_from_unique_index_
 bfee8efee62b829d language-tests/tests/language/planner/sort_elimination_order_by_id_new_executor.surql
 743a13610e4a97fb language-tests/tests/language/planner/unique_index_reverse_range_none_upper_bound.surql
 e39cad771cd6d0e5 language-tests/tests/language/planner/view_key_string_equality_holds_no_regex.surql
+42467ee164b157f3 language-tests/tests/language/planner/written_constant_conjuncts_plan_shape.surql
 39f5f9f7b4548282 language-tests/tests/language/primitive/array/arithmic_operations.surql
 91e20ed9445f20ec language-tests/tests/language/primitive/array/basic.surql
 8c375ca403434642 language-tests/tests/language/primitive/array/empty.surql
@@ -2191,6 +2205,7 @@ ea4bd07acb1bcc3a language-tests/tests/language/statements/alter/alter_event.surq
 5aa9d39e41a94ab3 language-tests/tests/language/statements/alter/alter_field_id.surql
 c213da6aa1936e1c language-tests/tests/language/statements/alter/alter_field_id_components.surql
 36ab786730ba4507 language-tests/tests/language/statements/alter/alter_field_nested_kind.surql
+ecf0000a73566f39 language-tests/tests/language/statements/alter/alter_field_reference_options.surql
 3d0f61cd214bca97 language-tests/tests/language/statements/alter/alter_function.surql
 edc25d3dd2639804 language-tests/tests/language/statements/alter/alter_index_comment.surql
 c39ee9185219a6dc language-tests/tests/language/statements/alter/alter_index_invalid.surql
@@ -2576,7 +2591,10 @@ aca4b81497e5a5d8 language-tests/tests/language/statements/define/function/call_u
 0a5950dfad82c6a2 language-tests/tests/language/statements/define/function/caller_bindings_ordinary_call.surql
 b1b47f6f92e8637f language-tests/tests/language/statements/define/function/custom_optional_args.surql
 4bee0f0f9ecc01ca language-tests/tests/language/statements/define/function/expr_stmt_in_binary_expr.surql
+60057cd0e3bbf78d language-tests/tests/language/statements/define/function/inline_closure_redefinition.surql
+64e7790e24deae1d language-tests/tests/language/statements/define/function/inline_closure_redefinition_import.surql
 4af2e43d96a05030 language-tests/tests/language/statements/define/function/inline_plan.surql
+ac29618dd764843f language-tests/tests/language/statements/define/function/inline_site_values.surql
 64f1603ff020d43b language-tests/tests/language/statements/define/function/lexical_scope.surql
 82f45ad6fec32dde language-tests/tests/language/statements/define/function/no_returns.surql
 4ea4eabb2219a3cc language-tests/tests/language/statements/define/function/redefined_within_the_query.surql
@@ -3118,7 +3136,7 @@ ebde48d97e072db5 language-tests/tests/language/statements/select/select_value.su
 08dd1765609f5227 language-tests/tests/language/statements/select/select_value_omit.surql
 8c80a70e71cf418f language-tests/tests/language/statements/select/select_value_omit_record_id.surql
 7fb735fd14ac3c48 language-tests/tests/language/statements/select/select_value_order_by_parse_permissive.surql
-64edbaa2739ee0f5 language-tests/tests/language/statements/select/set_membership_numeric_variant_keys.surql
+3b439b647b5c797a language-tests/tests/language/statements/select/set_membership_numeric_variant_keys.surql
 d0afa19ae547caff language-tests/tests/language/statements/select/source_expr.surql
 85cd19f77756eff8 language-tests/tests/language/statements/select/split_group_all.surql
 3349e6128e57db83 language-tests/tests/language/statements/select/split_group_by.surql
@@ -3141,6 +3159,7 @@ a85ec17662c5c0b4 language-tests/tests/language/statements/select/topk_pushdown_r
 e36957fb5f6c43e1 language-tests/tests/language/statements/select/value.surql
 432aeddbec48c5b0 language-tests/tests/language/statements/select/version_clauses.surql
 b065c5f587d80c75 language-tests/tests/language/statements/select/version_computed_fields.surql
+4c500d4496e50cc5 language-tests/tests/language/statements/select/version_deleted_records.surql
 1f7460e54c3bc194 language-tests/tests/language/statements/select/version_errors_before_data.surql
 7748049197fba8d9 language-tests/tests/language/statements/select/version_errors_non_versioned.surql
 20bca08e534f86b3 language-tests/tests/language/statements/select/version_field_dereference_schema.surql
@@ -3224,6 +3243,8 @@ c6a3fc7a2f613aae language-tests/tests/language/subquery/ifelse_set.surql
 f2a8bbc9eaa74d96 language-tests/tests/language/subquery/select.surql
 bf85a818640a9159 language-tests/tests/language/subquery/sleep_and_explain.surql
 d843147aad1844ea language-tests/tests/language/subquery/statement_in_a_filter_outside_a_row.surql
+22e8c721e17f8ba6 language-tests/tests/language/subquery/uncorrelated_once_per_run_of_a_write.surql
+ff48488b4abb5a02 language-tests/tests/language/subquery/uncorrelated_once_per_statement.surql
 ec42c758029d92fc language-tests/tests/language/types/define_field.surql
 37510fe1f5cc6271 language-tests/tests/language/types/field_literal.surql
 47d67a16cf2819ba language-tests/tests/language/types/field_none_null.surql
@@ -3439,6 +3460,11 @@ c6881e674967d154 language-tests/tests/pgsql/_native_schemafull.surql
 1eeb7d037f5f7ff8 language-tests/tests/reproductions/1087_for_range_select_subquery_shape.surql
 85bc7d06cbb07ef2 language-tests/tests/reproductions/1088_flexible_object_with_value_clause.surql
 b7dd5cba336fedbb language-tests/tests/reproductions/1107_sequence_commit_per_indexed_record.surql
+c931206a8c0f9933 language-tests/tests/reproductions/1205_blocking_define_index_contract.surql
+796391dd43babd7c language-tests/tests/reproductions/1336_ann_pending_keeps_ids_differing_in_number_kind_apart.surql
+a734abe20507fd5d language-tests/tests/reproductions/1336_btree_entries_keep_ids_differing_in_number_kind_apart.surql
+e257594c833b963b language-tests/tests/reproductions/1336_equal_decimals_share_an_index_key.surql
+5d05bca27bfec0a1 language-tests/tests/reproductions/1336_index_and_scan_agree_on_a_float_and_a_finer_decimal.surql
 d0389729edcbc58a language-tests/tests/reproductions/1375_contains_wildcard_scalar.surql
 3efa73dc080882ba language-tests/tests/reproductions/1376_index_count_field_type_untyped_array.surql
 5b77517b5a591841 language-tests/tests/reproductions/215474_remove_database_tombstone.surql
@@ -3625,6 +3651,7 @@ e48ed993bcd17c5d language-tests/tests/reproductions/a_counted_value_is_the_count
 7533bd70bce72e9a language-tests/tests/reproductions/a_counted_value_survives_a_permission_import.surql
 5bdc223ba698c4d6 language-tests/tests/reproductions/a_decimal_record_id_component_reads_back_at_any_scale.surql
 57dd4c902e1ec1d4 language-tests/tests/reproductions/a_declared_field_kind_is_not_what_the_row_holds.surql
+907b7a65a187e7d1 language-tests/tests/reproductions/a_delete_on_a_drop_table_takes_its_index_entries.surql
 0894269aa86e3603 language-tests/tests/reproductions/a_denied_count_is_a_count_of_nothing.surql
 75ad44743c92b9d7 language-tests/tests/reproductions/a_denied_count_is_a_count_of_nothing_import.surql
 7193446fc8a099fb language-tests/tests/reproductions/a_denied_field_projected_by_name.surql
@@ -3632,6 +3659,7 @@ b3cb4066030c73ef language-tests/tests/reproductions/a_denied_function_is_refused
 2b5cd107f14a270a language-tests/tests/reproductions/a_denied_function_is_refused_whichever_syntax_reaches_it.surql
 d4395b0547be3565 language-tests/tests/reproductions/a_destructure_alias_reads_the_destructured_value_as_its_row_names.surql
 508c279a90b918bb language-tests/tests/reproductions/a_drop_table_keeps_the_reference_keys_of_what_it_stores.surql
+0cacf9188b215be9 language-tests/tests/reproductions/a_drop_view_table_indexes_the_rows_it_stores.surql
 e44e096136d5f227 language-tests/tests/reproductions/a_dropped_view_group_leaves_no_cached_row.surql
 ad2a14ad103c35ad language-tests/tests/reproductions/a_dynamic_source_row_is_the_predicates_root.surql
 99e23818dd880b21 language-tests/tests/reproductions/a_field_clause_without_a_logical_form.surql
@@ -3733,6 +3761,7 @@ eba22936ca068bf7 language-tests/tests/reproductions/a_record_user_of_an_undefine
 1bb73ae0183dae97 language-tests/tests/reproductions/a_record_user_of_an_undefined_table_reads_as_none_through_auth_import.surql
 326a7b87bf993a21 language-tests/tests/reproductions/a_recursive_event_chain_runs_to_its_base_case.surql
 d09b218cb437f0c8 language-tests/tests/reproductions/a_redefined_view_stops_reading_its_former_sources.surql
+5c8d65cad4308861 language-tests/tests/reproductions/a_redefined_view_stops_reading_the_tables_it_read_before.surql
 04cc23f5a0fef899 language-tests/tests/reproductions/a_refused_statement_in_an_arm_a_constant_let_rules_out_is_raised.surql
 b0485a1622f528b6 language-tests/tests/reproductions/a_registered_method_can_still_reach_a_closure.surql
 11e47281d068f6bc language-tests/tests/reproductions/a_registered_method_can_still_reach_a_closure_import.surql
@@ -3783,6 +3812,7 @@ ade5f2e86825490e language-tests/tests/reproductions/a_versioned_read_ignores_an_
 8380fc4cf9832104 language-tests/tests/reproductions/a_versioned_scan_keeps_its_sort_when_the_id_names_are_gone.surql
 924f23b5995274f6 language-tests/tests/reproductions/a_versioned_scan_keeps_its_sort_when_the_id_names_are_gone_import.surql
 b1b3444da39eac81 language-tests/tests/reproductions/a_view_aggregate_keeps_the_number_type_main_gives_it.surql
+e66bbb68b95f1a89 language-tests/tests/reproductions/a_view_cannot_read_itself.surql
 cca3b8a5b302fb5a language-tests/tests/reproductions/a_view_definition_reads_the_tables_its_subqueries_name.surql
 feee52616895e345 language-tests/tests/reproductions/a_view_filter_reads_the_params_it_names.surql
 d7e3229fac656dbd language-tests/tests/reproductions/a_view_follows_an_overwritten_param.surql
@@ -3800,6 +3830,7 @@ a6bda5c15eacbd21 language-tests/tests/reproductions/a_view_the_catalog_refuses_i
 fac95aeddb478be4 language-tests/tests/reproductions/a_writable_scan_survives_writes_between_batches.surql
 030ac00ffaaae9e1 language-tests/tests/reproductions/a_write_after_a_data_dependent_schema_statement_runs_the_definitions_it_meets.surql
 d1198625678513c6 language-tests/tests/reproductions/a_write_after_a_reference_action_that_runs_a_schema_statement_meets_its_definitions.surql
+6c222870cc978ebe language-tests/tests/reproductions/a_write_cannot_reach_a_view_that_reads_itself.surql
 d08282672196d3e4 language-tests/tests/reproductions/a_write_clause_element_filter_on_a_graph_or_field_path_reads_arguments_against_the_record.surql
 a57277939d7ccb73 language-tests/tests/reproductions/a_write_clause_element_filter_on_a_graph_or_field_path_reads_arguments_against_the_record_import.surql
 afbdf192c722b8c9 language-tests/tests/reproductions/a_write_clause_element_filter_reads_index_and_method_arguments_against_the_record.surql
@@ -3820,6 +3851,7 @@ ae13a6a99abca67d language-tests/tests/reproductions/a_write_permission_derives_a
 13022ae09521be39 language-tests/tests/reproductions/a_write_permission_predicate_may_not_write.surql
 098a6fa3bf85d96c language-tests/tests/reproductions/a_write_permission_reads_quoted_computed_fields.surql
 8a3637d09bf53878 language-tests/tests/reproductions/a_write_permission_reads_quoted_computed_fields_import.surql
+c3bf9e314b70eff8 language-tests/tests/reproductions/a_write_through_views_deeper_than_the_depth_budget_fails.surql
 8622be635c374455 language-tests/tests/reproductions/a_write_to_a_bound_table_needs_a_namespace_and_database.surql
 232f2546993b341e language-tests/tests/reproductions/a_write_where_knn_answers_from_the_vector_search.surql
 b00a1acaf40c07bb language-tests/tests/reproductions/a_write_where_matches_answers_from_the_fulltext_index.surql
@@ -3853,6 +3885,7 @@ cb8c2f3bca8dc6c5 language-tests/tests/reproductions/an_event_write_hitting_a_uni
 6fd71d5189ba6c87 language-tests/tests/reproductions/an_exact_equality_names_no_number_the_comparison_equates_apart.surql
 4178d9e047d7916f language-tests/tests/reproductions/an_exact_equality_names_only_values_keyed_as_they_compare.surql
 897928ca283917d2 language-tests/tests/reproductions/an_index_addresses_an_object_key.surql
+64815596e9bf004a language-tests/tests/reproductions/an_index_build_sees_its_defining_transaction.surql
 5cdb3f7e53226fdf language-tests/tests/reproductions/an_index_column_naming_its_own_record_reads_the_image.surql
 65ce6baa1bab7896 language-tests/tests/reproductions/an_index_equality_beside_another_conjunct_judges_the_array.surql
 6f65a381751c7e4c language-tests/tests/reproductions/an_index_over_a_column_holding_arrays_keeps_whole_value_order.surql
@@ -3862,8 +3895,11 @@ cb8c2f3bca8dc6c5 language-tests/tests/reproductions/an_event_write_hitting_a_uni
 1a1b8647917a884d language-tests/tests/reproductions/an_object_row_with_a_record_id_is_a_record.surql
 12160274356f6f2c language-tests/tests/reproductions/an_order_key_a_rename_reuses.surql
 23f3335bee91fbd5 language-tests/tests/reproductions/an_unbound_parent_in_a_write_is_none.surql
+4cb4acc70488ff75 language-tests/tests/reproductions/an_undeclared_array_id_is_not_in_id_order.surql
 5174a7911ae2a3b6 language-tests/tests/reproductions/an_untyped_collection_member_makes_the_element_kind_any.surql
 6f702c2d3291f86d language-tests/tests/reproductions/an_update_or_delete_on_a_missing_table_raises_whatever_its_where.surql
+c49d827bcb0d1f6b language-tests/tests/reproductions/an_upsert_of_a_stored_record_is_judged_by_its_update_permission.surql
+514d3f0b55727f38 language-tests/tests/reproductions/an_upsert_of_a_stored_record_is_judged_by_its_update_permission_import.surql
 f4f39d25ca2f44bd language-tests/tests/reproductions/an_upsert_of_several_tables_reads_each_and_guarantees_one_record.surql
 98c38de68e58d76b language-tests/tests/reproductions/an_upsert_only_that_matches_nothing_returns_the_record_it_writes.surql
 20ac1efc162fe8de language-tests/tests/reproductions/analyzer_mapper_file_allowlist.surql
@@ -4133,6 +4169,7 @@ a65157d7f1778e4b language-tests/tests/reproductions/lookup_join_keeps_the_raise_
 68e58c38de9caf29 language-tests/tests/reproductions/matches_dynamic_sources.surql
 8dd7232570b4949d language-tests/tests/reproductions/matches_dynamic_sources_plan.surql
 ea3c160fcaec5f5d language-tests/tests/reproductions/matches_multi_source_filters_each_source.surql
+1616e340256b5828 language-tests/tests/reproductions/matches_record_path_operand_plan.surql
 096ff52b1e686649 language-tests/tests/reproductions/missing_table_raises_regardless_of_where.surql
 9b5692e7c908e695 language-tests/tests/reproductions/mutually_recursive_functions_run_to_their_base_case.surql
 a7690a0d2b9fc502 language-tests/tests/reproductions/nested_block_is_a_value_step.surql
@@ -4218,6 +4255,7 @@ ced0ffd239a7c623 language-tests/tests/reproductions/recursion_in_a_function_argu
 3c0871a9e81f5520 language-tests/tests/reproductions/recursion_in_stored_code_spends_the_depth_budget.surql
 c1e64a978ca04c1e language-tests/tests/reproductions/recursion_path_repeat_marker_runs_in_the_lowered_loop.surql
 5826d61bd3a8ecdd language-tests/tests/reproductions/recursive_events_spend_the_computation_depth_budget.surql
+165312e5a1bc238e language-tests/tests/reproductions/redefining_a_view_keeps_the_views_that_read_it.surql
 e297a7213f856934 language-tests/tests/reproductions/reentrant_permission_check_cyclic_links.surql
 b9d2afe9ad0d268b language-tests/tests/reproductions/reentrant_permission_check_cyclic_links_import.surql
 cf6bed3bcf203464 language-tests/tests/reproductions/reference_cascade_edge_delete_permission_bypass.surql
@@ -4269,6 +4307,7 @@ b8f0feb06c5f2cd8 language-tests/tests/reproductions/udf_frame_write.surql
 b2a0da70cbd1a9e8 language-tests/tests/reproductions/udf_frame_write_plan.surql
 5636ef7c2018a2d0 language-tests/tests/reproductions/udf_recursion_depth_ceiling_diverges.surql
 6d473570764a8dde language-tests/tests/reproductions/unbounded_function_recursion_raises_the_depth_error.surql
+223931a8b088f4f6 language-tests/tests/reproductions/upsert_and_duplicate_key_update_read_the_stored_record.surql
 17e8cbf6071c8578 language-tests/tests/reproductions/upsert_of_an_existing_record_evaluates_field_values_on_the_stored_record.surql
 22ac47e885659e5e language-tests/tests/reproductions/upsert_where_option_import_phantom.surql
 9237c3f01fc1f783 language-tests/tests/reproductions/upsert_where_return_none_phantom.surql
@@ -4449,6 +4488,14 @@ ac759b618e455755 language-tests/tests/upgrade/define/3.00.00_index_btree_compoun
 5145ec77f6b7f8ff language-tests/tests/upgrade/define/3.00.00_index_btree_compound_ranges_current.surql
 fc647d1f234fa0b3 language-tests/tests/upgrade/define/3.00.00_index_btree_compound_ranges_import.surql
 ebcf4f700a268ec8 language-tests/tests/upgrade/define/3.00.00_index_btree_compound_ranges_rebuild.surql
+1282f80be5ca7668 language-tests/tests/upgrade/define/3.00.00_index_btree_decimal_spelling.surql
+4095ea170a692845 language-tests/tests/upgrade/define/3.00.00_index_btree_decimal_spelling_current.surql
+9a4701699973ecb6 language-tests/tests/upgrade/define/3.00.00_index_btree_decimal_spelling_import.surql
+3b8ad64d5becd677 language-tests/tests/upgrade/define/3.00.00_index_btree_decimal_spelling_rebuild.surql
+465707c1cbf38bb4 language-tests/tests/upgrade/define/3.00.00_index_btree_decimal_spelling_write.surql
+be88a09f2752e7f1 language-tests/tests/upgrade/define/3.00.00_index_btree_identity_entry_ids.surql
+fbe22a7673d8f664 language-tests/tests/upgrade/define/3.00.00_index_btree_identity_entry_ids_import.surql
+79796b5810571137 language-tests/tests/upgrade/define/3.00.00_index_btree_identity_entry_ids_rebuild.surql
 53eafe0bf8c0bb82 language-tests/tests/upgrade/define/3.00.00_index_btree_numeric_ranges.surql
 e44009839182b2a6 language-tests/tests/upgrade/define/3.00.00_index_btree_numeric_ranges_backward.surql
 72299f825010ee59 language-tests/tests/upgrade/define/3.00.00_index_btree_numeric_ranges_current.surql
@@ -4542,8 +4589,14 @@ fab22edc5a30085c language-tests/tests/upgrade/define/3.00.00_table_schemafull.su
 ac3269202d481e93 language-tests/tests/upgrade/define/3.00.00_table_view_aggregate_import.surql
 94db14ba639af197 language-tests/tests/upgrade/define/3.00.00_table_view_keyword_alias.surql
 8f0a374d2ef37607 language-tests/tests/upgrade/define/3.00.00_table_view_keyword_alias_import.surql
+2cf4595a3bd9c1a0 language-tests/tests/upgrade/define/3.00.00_table_view_reads_itself.surql
+ca81ce540e0388d4 language-tests/tests/upgrade/define/3.00.00_table_view_reads_itself_current.surql
+d3d42cf735c4f6f3 language-tests/tests/upgrade/define/3.00.00_table_view_reads_itself_import.surql
+e7d8d74762a1afca language-tests/tests/upgrade/define/3.00.00_table_view_reads_itself_redefine.surql
 de35b5ce56e34d3b language-tests/tests/upgrade/define/3.00.00_table_view_redefined_away_from_its_source.surql
 9e6983016e0ccbd9 language-tests/tests/upgrade/define/3.00.00_table_view_redefined_away_from_its_source_import.surql
+ab43ac735b9532bd language-tests/tests/upgrade/define/3.00.00_table_view_redefinition.surql
+3707b2fa1a2a2f82 language-tests/tests/upgrade/define/3.00.00_table_view_redefinition_import.surql
 6fdd1715a489e013 language-tests/tests/upgrade/define/3.00.00_table_view_select.surql
 86101d0b4cb7e413 language-tests/tests/upgrade/define/3.00.00_table_view_select_import.surql
 7c4b067d3de8fd12 language-tests/tests/upgrade/define/3.00.00_user_base.surql
@@ -4572,6 +4625,8 @@ dc30fbc9ed70e263 language-tests/tests/upgrade/define/3.01.00_index_hnsw_compound
 ba07d46cc8277feb language-tests/tests/upgrade/define/3.01.00_index_hnsw_compound_id_rebuild.surql
 3932af8ed2b05e20 language-tests/tests/upgrade/define/3.02.04_index_record_id_datetime.surql
 1f07ef33b2082339 language-tests/tests/upgrade/define/3.02.04_index_record_id_datetime_import.surql
+c1f29465db364e92 language-tests/tests/upgrade/define/3.03.00_doc_ids_numeric_twins.surql
+ae58a7e6455d02fe language-tests/tests/upgrade/define/3.03.00_doc_ids_numeric_twins_import.surql
 e340f6a1748387c5 language-tests/tests/upgrade/define/3.03.00_function_eval.surql
 d8f22fc397e712e0 language-tests/tests/upgrade/define/3.03.00_function_eval_import.surql
 603b3eac010fcd69 language-tests/tests/upgrade/define/3.03.00_index_vector_prefilter.surql

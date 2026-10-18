@@ -77,20 +77,20 @@ use crate::key::schema::{
 	BucketKey, BucketPrefix, BuildAppendTicketPrefix, BuildReservationKey, BuildStateKey,
 	CatalogVersionKey, CatalogVersionPrefix, ChangeFeedKey, ChangefeedFenceKey, DatabaseKey,
 	DatabasePrefix, DbAccessMethodKey, DbAccessMethodPrefix, DbAccessRoot, DbConfigKey,
-	DbConfigPrefix, DbGrantKey, DbGrantPrefix, DbUserKey, DbUserPrefix, DocKeyKey,
-	DocLookupIdentityKey, DocLookupKey, DocStatsBatchKey, EventKey, EventPrefix, FeatureLevelKey,
-	FieldKey, FieldPrefix, ForeignTablePrefix, FunctionKey, FunctionPrefix, GenerationMarkKey,
-	GraphFoldKey, GraphPointerKey, IdxRoot, IndexBuildShapesKey, IndexCompactionKey, IndexCountKey,
-	IndexDefKey, IndexDefPrefix, IndexNameKey, IndexShapesKey, IndexShapesTrackedKey, LayoutKey,
-	LayoutPrefix, LiveEventsKey, MigrationKey, MigrationRunKey, MigrationRunPrefix, MlModelKey,
-	MlModelPrefix, ModuleKey, ModulePrefix, NamespaceKey, NamespacePrefix, NodeKey, NodePrefix,
-	NodeReleaseKey, NsAccessMethodKey, NsAccessMethodPrefix, NsAccessRoot, NsGrantKey,
-	NsGrantPrefix, NsUserKey, NsUserPrefix, ObjectVersionKey, ParamKey, ParamPrefix, ReclaimKey,
-	ReclaimTbPrefix, RecordKey, RecordPrefix, RootAccessMethodKey, RootAccessMethodPrefix,
-	RootAccessRoot, RootConfigKey, RootGrantKey, RootGrantPrefix, RootUserKey, RootUserPrefix,
-	SequenceKey, SequencePrefix, StoreDefaultsKey, SubscriptionPrefix, TableConformanceKey,
-	TableKey, TableMigrationKey, TableMigrationRequestKey, TableMigrationRequestTbPrefix,
-	TableMigrationsKey, TablePrefix, TermChangeBatchKey, VersionKey,
+	DbConfigPrefix, DbGrantKey, DbGrantPrefix, DbUserKey, DbUserPrefix, DocLookupIdentityKey,
+	DocStatsBatchKey, EventKey, EventPrefix, FeatureLevelKey, FieldKey, FieldPrefix,
+	ForeignTablePrefix, FunctionKey, FunctionPrefix, GenerationMarkKey, GraphFoldKey,
+	GraphPointerKey, IdxRoot, IndexBuildShapesKey, IndexCompactionKey, IndexCountKey, IndexDefKey,
+	IndexDefPrefix, IndexNameKey, IndexShapesKey, IndexShapesTrackedKey, LayoutKey, LayoutPrefix,
+	LiveEventsKey, MigrationKey, MigrationRunKey, MigrationRunPrefix, MlModelKey, MlModelPrefix,
+	ModuleKey, ModulePrefix, NamespaceKey, NamespacePrefix, NodeKey, NodePrefix, NodeReleaseKey,
+	NsAccessMethodKey, NsAccessMethodPrefix, NsAccessRoot, NsGrantKey, NsGrantPrefix, NsUserKey,
+	NsUserPrefix, ObjectVersionKey, ParamKey, ParamPrefix, ReclaimKey, ReclaimTbPrefix, RecordKey,
+	RecordPrefix, RootAccessMethodKey, RootAccessMethodPrefix, RootAccessRoot, RootConfigKey,
+	RootGrantKey, RootGrantPrefix, RootUserKey, RootUserPrefix, SequenceKey, SequencePrefix,
+	StoreDefaultsKey, SubscriptionPrefix, TableConformanceKey, TableKey, TableMigrationKey,
+	TableMigrationRequestKey, TableMigrationRequestTbPrefix, TableMigrationsKey, TablePrefix,
+	TermChangeBatchKey, VersionKey,
 };
 #[cfg(diskann)]
 use crate::key::schema::{
@@ -6302,7 +6302,7 @@ impl Transaction {
 	/// The caller must guarantee no doc-ID-consuming index can adopt a surviving
 	/// mapping before the reclaim completes. The prefixes are reclaimed
 	/// independently and page by page, so an interrupted reclaim leaves the space
-	/// torn — a `!di` entry whose `!dd` twin is already gone. Adopting one of
+	/// torn — a `!dj` entry whose `!dd` twin is already gone. Adopting one of
 	/// those through
 	/// [`resolve_or_assign`](surrealdb_idx::docids::TableDocIds::resolve_or_assign)'s
 	/// fast path would give an index entries pointing at a doc-ID that resolves
@@ -13763,20 +13763,17 @@ impl Transaction {
 
 	/// Resolves `id` to the doc-ID this table has mapped it to, or `None`.
 	///
-	/// The forward mapping is spelled two ways. `!dj` keys the record id through
-	/// a lossless encoding and is injective. `!di` keys it through `IndexFormat`,
-	/// which erases a number's kind, so every id with the same decimal expansion
-	/// shares one key — `c:[1]` and `c:[1dec]` land on the same one.
-	///
-	/// A hit on either is therefore adopted only when the reverse mapping `!dd`
-	/// agrees that the doc-ID names the record asked for. `!dd` stores the record
-	/// key as a value and keeps it exactly, so it is what decides. Reading `!di`
-	/// without that check resolves one of a colliding pair to the other's doc-ID.
+	/// Reads the forward mapping `!dj`, which keys the record id through a
+	/// lossless encoding, so ids differing only in a number's kind — `c:[1]` and
+	/// `c:[1dec]` — have a mapping each. A hit is adopted as it is: every writer
+	/// publishes and deletes `!dj` together with the reverse mapping `!dd`, and
+	/// the startup migration that retired the type-erased band left every `!dj`
+	/// backed by its `!dd`.
 	///
 	/// `version` selects the snapshot to resolve against: mappings are removed
 	/// when their record is deleted, so a time-travel read must resolve through
 	/// the state its snapshot saw.
-	pub async fn resolve_doc_id_verified(
+	pub async fn resolve_doc_id(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -13784,48 +13781,13 @@ impl Transaction {
 		id: &RecordIdKey,
 		version: Option<u64>,
 	) -> Result<Option<DocId>> {
-		Ok(self.resolve_doc_id_mapping(ns, db, tb, id, version).await?.map(|(doc_id, _)| doc_id))
-	}
-
-	/// [`Self::resolve_doc_id_verified`], and which direction answered.
-	///
-	/// `true` means the injective key did; `false` means only the type-erased
-	/// one held the mapping, which is what a record mapped by a node on the
-	/// previous release looks like. A caller in a position to write can publish
-	/// the injective mapping for such a record, and one that only reads can
-	/// ignore the flag.
-	pub async fn resolve_doc_id_mapping(
-		&self,
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &TableName,
-		id: &RecordIdKey,
-		version: Option<u64>,
-	) -> Result<Option<(DocId, bool)>> {
-		let names_this_record = async |doc_id: DocId| -> Result<bool> {
-			let dd = DocKeyKey::new(ns, db, Cow::Borrowed(tb), doc_id);
-			let Some(mapped) = self.get_key(&dd, version).await? else {
-				return Ok(false);
-			};
-			Ok(mapped.addresses_same_record(id))
-		};
-
 		let dj = DocLookupIdentityKey::new(ns, db, Cow::Borrowed(tb), RecordIdentity(id.clone()));
-		if let Some(doc_id) = self.get_key(&dj, version).await?
-			&& names_this_record(doc_id).await?
-		{
-			return Ok(Some((doc_id, true)));
-		}
-		let di = DocLookupKey::new(ns, db, Cow::Borrowed(tb), Cow::Borrowed(id));
-		let Some(doc_id) = self.get_key(&di, version).await? else {
-			return Ok(None);
-		};
-		Ok(names_this_record(doc_id).await?.then_some((doc_id, false)))
+		self.get_key(&dj, version).await
 	}
 
 	/// Whether a decoded packed chunk holds the edge `(id -> r)`, matching
 	/// on the full entry identity. Numeric chunks are matched through the
-	/// verified forward key→doc-id mapping; a key with no mapping was never
+	/// forward key→doc-id mapping; a key with no mapping was never
 	/// compressed and cannot be in a numeric chunk.
 	#[allow(clippy::too_many_arguments)]
 	async fn block_holds_edge(
@@ -13849,12 +13811,10 @@ impl Transaction {
 				}))
 			}
 			BlockEntries::Numeric(entries) => {
-				// Both sides resolve through the verified injective mapping: a
-				// raw `!di` read would answer one of a numerically colliding
-				// pair with the other's doc-ID, reporting the edge absent or
-				// matching the wrong one.
-				let Some(edge_id) = self.resolve_doc_id_verified(ns, db, tb, id, version).await?
-				else {
+				// Both sides resolve through the injective mapping, so one of
+				// a numerically colliding pair never answers with the other's
+				// doc-ID.
+				let Some(edge_id) = self.resolve_doc_id(ns, db, tb, id, version).await? else {
 					return Ok(false);
 				};
 				let Some(entry) = entries.iter().find(|e| e.edge == edge_id) else {
@@ -13863,8 +13823,7 @@ impl Transaction {
 				if block.targets.get(entry.target_table as usize) != Some(&r.table) {
 					return Ok(false);
 				}
-				let target =
-					self.resolve_doc_id_verified(ns, db, &r.table, &r.key, version).await?;
+				let target = self.resolve_doc_id(ns, db, &r.table, &r.key, version).await?;
 				Ok(target == Some(entry.target))
 			}
 		}

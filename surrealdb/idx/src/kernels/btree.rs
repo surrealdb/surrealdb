@@ -22,6 +22,25 @@
 //! key below is encoded for the stamp of the index it belongs to, so a write, a
 //! delete, a unique-slot check and a read of one index all agree.
 //!
+//! The stamp also decides how a decimal is spelled. An index stamped at
+//! [`crate::catalog::BTREE_NORMALISED_DECIMAL_KEYS_FORMAT_VERSION`] or later respells every
+//! decimal in its values without trailing zeros before encoding them, in the
+//! entries it writes and in the probe values and bounds it reads with, so `2.5dec`
+//! and a computed `2.50dec` share one key as they compare equal. One stamped
+//! earlier spells them as written: its entries are found, replaced and deleted at
+//! the keys they were written at, until the index is rebuilt. Only the indexed
+//! values are respelled; the record's own id in an entry key never is.
+//!
+//! The stamp also decides how a non-unique entry spells the record id that
+//! ends its key. An index stamped at
+//! [`crate::catalog::BTREE_IDENTITY_ENTRY_IDS_FORMAT_VERSION`] or later spells it as a
+//! `RecordIdentity`, which keeps a number's kind, so `c:[1]` and `c:[1dec]` have an
+//! entry each. One stamped earlier spells it as the indexed values are spelled,
+//! dropping the kind, so such a pair shares one entry until the index is rebuilt.
+//! The two spellings differ only for an id holding a number, where the identity
+//! adds the number's kind after it: entries of one value still list their records
+//! in record id order.
+//!
 //! [`IndexKeyspace`] is the only builder of these keys: nothing else names
 //! `EntryKey`, `UniqueKey` or the bounds cut from `EntryKey` with indexed
 //! values in them, which a test in this module checks over the workspace's
@@ -40,12 +59,16 @@ use anyhow::Result;
 
 use crate::catalog::{
 	DATETIME_ORDER_FORMAT_VERSION, DatabaseId, IndexDefinition, IndexId, NamespaceId,
+	spells_identity_entry_ids, spells_normalised_decimal_keys,
 };
 use crate::entry::IndexEntryValue;
 use crate::expr::BinaryOperator;
-use crate::key::schema::{EntryFdOpenPrefix, EntryFdPrefix, EntryKey, EntryPrefix, UniqueKey};
+use crate::key::schema::{EntryFdOpenPrefix, EntryFdPrefix, EntryPrefix, UniqueKey};
 use crate::key::{KVKey, KVRange, KVValue, Key, KeyRange, TypedRange};
-use crate::val::{IndexFormat, IndexIdFormat, RecordId, RecordIdKey, TableName, Value};
+use crate::val::{
+	Array, IndexFormat, IndexIdFormat, Number, Object, Range, RecordId, RecordIdKey,
+	RecordIdKeyRange, TableName, Value,
+};
 
 /// Where an entry for one tuple of indexed values is stored.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,6 +136,10 @@ impl DatetimeSpelling {
 	}
 }
 
+/// The byte that follows a non-unique entry's values and precedes its record
+/// id (`raw 0x03` in the `entry` route of the key schema).
+const ENTRY_RECORD_ID: u8 = 0x03;
+
 /// One index's keyspace: every key of its entries starts with these fields,
 /// and spells its indexed values for the index's format-version stamp.
 #[derive(Debug, Clone, Copy)]
@@ -122,6 +149,11 @@ pub struct IndexKeyspace<'a> {
 	tb: &'a TableName,
 	ix: IndexId,
 	spelling: DatetimeSpelling,
+	/// Whether the stamp spells decimals without trailing zeros.
+	normalised_decimals: bool,
+	/// Whether the stamp spells a non-unique entry's record id as a
+	/// `RecordIdentity`.
+	identity_ids: bool,
 }
 
 impl<'a> IndexKeyspace<'a> {
@@ -146,6 +178,19 @@ impl<'a> IndexKeyspace<'a> {
 			tb,
 			ix,
 			spelling: DatetimeSpelling::of(format_version),
+			normalised_decimals: spells_normalised_decimal_keys(format_version),
+			identity_ids: spells_identity_entry_ids(format_version),
+		}
+	}
+
+	/// `fd` as this index spells it in a key.
+	fn spelled_all<'v>(&self, fd: &'v [Value]) -> Cow<'v, [Value]> {
+		if self.normalised_decimals && fd.iter().any(holds_untidy_decimal) {
+			let mut owned = fd.to_vec();
+			owned.iter_mut().for_each(normalise_decimals);
+			Cow::Owned(owned)
+		} else {
+			Cow::Borrowed(fd)
 		}
 	}
 
@@ -154,16 +199,30 @@ impl<'a> IndexKeyspace<'a> {
 		self.spelling
 	}
 
-	/// The key of a non-unique entry for values `fd` of the record keyed `id`.
+	/// The key of a non-unique entry for values `fd` of the record keyed `id`:
+	/// the closed prefix of the values, the `0x03` that marks a record id, then
+	/// the id, spelled for the stamp. An `EntryKey` is that layout with the id
+	/// as a `RecordIdentity`; the key is assembled here so the id is encoded
+	/// where it is borrowed, in either spelling.
 	pub fn entry_key(&self, fd: &[Value], id: &RecordIdKey) -> Result<Key<'static>> {
-		self.spelling.encode(&EntryKey {
-			ns: self.ns,
-			db: self.db,
-			tb: Cow::Borrowed(self.tb),
-			ix: self.ix,
-			fd: Cow::Borrowed(fd),
-			id: Cow::Borrowed(id),
-		})
+		let mut key = self
+			.spelling
+			.encode(&EntryFdPrefix {
+				ns: self.ns,
+				db: self.db,
+				tb: Cow::Borrowed(self.tb),
+				ix: self.ix,
+				fd: self.spelled_all(fd),
+			})?
+			.into_vec();
+		key.push(ENTRY_RECORD_ID);
+		let id = if self.identity_ids {
+			storekey::encode_vec(id)
+		} else {
+			storekey::encode_vec_format::<IndexIdFormat, _>(id)
+		};
+		key.extend(id.map_err(|_| surrealdb_kvs::key::Error::Unencodable)?);
+		Ok(Key::from(key))
 	}
 
 	/// The unique slot for values `fd`.
@@ -173,7 +232,7 @@ impl<'a> IndexKeyspace<'a> {
 			db: self.db,
 			tb: Cow::Borrowed(self.tb),
 			ix: self.ix,
-			fd: Cow::Borrowed(fd),
+			fd: self.spelled_all(fd),
 		})
 	}
 
@@ -216,7 +275,7 @@ impl<'a> IndexKeyspace<'a> {
 				db: self.db,
 				tb: Cow::Borrowed(self.tb),
 				ix: self.ix,
-				fd: Cow::Borrowed(fd),
+				fd: self.spelled_all(fd),
 			})?;
 			Ok(self.typed(bound.prefix_expect()))
 		}
@@ -308,7 +367,7 @@ impl<'a> IndexKeyspace<'a> {
 			db: self.db,
 			tb: Cow::Borrowed(self.tb),
 			ix: self.ix,
-			fd: Cow::Borrowed(fd),
+			fd: self.spelled_all(fd),
 		})
 	}
 
@@ -316,6 +375,91 @@ impl<'a> IndexKeyspace<'a> {
 	/// [`IndexEntryValue`].
 	fn typed(&self, range: KeyRange<'static>) -> TypedRange<IndexEntryValue> {
 		self.prefix().typed(range)
+	}
+}
+
+/// Whether `value` holds a decimal that [`normalise_decimals`] respells: one
+/// with trailing zeros after its point, anywhere in the value, including inside
+/// the id of a record id and the bounds of a range.
+fn holds_untidy_decimal(value: &Value) -> bool {
+	fn bound(bound: &Bound<Value>) -> bool {
+		matches!(bound, Bound::Included(v) | Bound::Excluded(v) if holds_untidy_decimal(v))
+	}
+	fn key_bound(bound: &Bound<RecordIdKey>) -> bool {
+		matches!(bound, Bound::Included(k) | Bound::Excluded(k) if key_holds_untidy_decimal(k))
+	}
+	fn key_holds_untidy_decimal(key: &RecordIdKey) -> bool {
+		match key {
+			RecordIdKey::Array(a) => a.iter().any(holds_untidy_decimal),
+			RecordIdKey::Object(o) => o.values().any(holds_untidy_decimal),
+			RecordIdKey::Range(r) => key_bound(&r.start) || key_bound(&r.end),
+			RecordIdKey::Number(_) | RecordIdKey::String(_) | RecordIdKey::Uuid(_) => false,
+		}
+	}
+	match value {
+		Value::Number(Number::Decimal(d)) => d.scale() > 0 && d.mantissa() % 10 == 0,
+		Value::Array(a) => a.iter().any(holds_untidy_decimal),
+		Value::Set(s) => s.iter().any(holds_untidy_decimal),
+		Value::Object(o) => o.values().any(holds_untidy_decimal),
+		Value::RecordId(r) => key_holds_untidy_decimal(&r.key),
+		Value::Range(r) => bound(&r.start) || bound(&r.end),
+		_ => false,
+	}
+}
+
+/// Respell every decimal in `value` without trailing zeros, through arrays,
+/// sets, objects, the ids of record ids and the bounds of ranges. Values that
+/// compare equal before compare equal after, and the order of a set or object
+/// is unchanged.
+fn normalise_decimals(value: &mut Value) {
+	fn bound(bound: &mut Bound<Value>) {
+		if let Bound::Included(v) | Bound::Excluded(v) = bound {
+			normalise_decimals(v);
+		}
+	}
+	fn key_bound(bound: &mut Bound<RecordIdKey>) {
+		if let Bound::Included(k) | Bound::Excluded(k) = bound {
+			normalise_key(k);
+		}
+	}
+	fn normalise_key(key: &mut RecordIdKey) {
+		match key {
+			RecordIdKey::Array(Array(a)) => a.iter_mut().for_each(normalise_decimals),
+			RecordIdKey::Object(Object(o)) => o.values_mut().for_each(normalise_decimals),
+			RecordIdKey::Range(r) => {
+				let RecordIdKeyRange {
+					start,
+					end,
+				} = &mut **r;
+				key_bound(start);
+				key_bound(end);
+			}
+			RecordIdKey::Number(_) | RecordIdKey::String(_) | RecordIdKey::Uuid(_) => {}
+		}
+	}
+	match value {
+		Value::Number(Number::Decimal(d)) => *d = d.normalize(),
+		Value::Array(Array(a)) => a.iter_mut().for_each(normalise_decimals),
+		Value::Set(set) if set.iter().any(holds_untidy_decimal) => {
+			*set = std::mem::take(set)
+				.into_iter()
+				.map(|mut v| {
+					normalise_decimals(&mut v);
+					v
+				})
+				.collect();
+		}
+		Value::Object(Object(o)) => o.values_mut().for_each(normalise_decimals),
+		Value::RecordId(r) => normalise_key(&mut r.key),
+		Value::Range(r) => {
+			let Range {
+				start,
+				end,
+			} = &mut **r;
+			bound(start);
+			bound(end);
+		}
+		_ => {}
 	}
 }
 
@@ -334,8 +478,12 @@ pub fn decode_record_id(bytes: &[u8]) -> Result<RecordId> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::catalog::{DatabaseId, INDEX_FORMAT_VERSION, IndexId, NamespaceId};
-	use crate::val::{Array, Number, Object};
+	use crate::catalog::{
+		BTREE_IDENTITY_ENTRY_IDS_FORMAT_VERSION, BTREE_NORMALISED_DECIMAL_KEYS_FORMAT_VERSION,
+		DatabaseId, INDEX_FORMAT_VERSION, IndexId, NamespaceId,
+	};
+	use crate::key::schema::EntryKey;
+	use crate::val::{RecordIdentity, Set, Strand};
 
 	fn space(tb: &TableName) -> IndexKeyspace<'_> {
 		IndexKeyspace::new(NamespaceId(1), DatabaseId(2), tb, IndexId(3), INDEX_FORMAT_VERSION)
@@ -736,6 +884,339 @@ mod tests {
 			"index entry keys built outside `IndexKeyspace`:\n{}",
 			found.join("\n")
 		);
+	}
+
+	fn current_space(tb: &TableName) -> IndexKeyspace<'_> {
+		at_version(tb, BTREE_NORMALISED_DECIMAL_KEYS_FORMAT_VERSION)
+	}
+
+	/// The stamp before decimals are spelled without trailing zeros.
+	fn earlier_space(tb: &TableName) -> IndexKeyspace<'_> {
+		at_version(tb, BTREE_NORMALISED_DECIMAL_KEYS_FORMAT_VERSION - 1)
+	}
+
+	#[test]
+	fn the_stamp_selects_the_decimal_spelling() {
+		let tb = TableName::from("t");
+		let current = BTREE_NORMALISED_DECIMAL_KEYS_FORMAT_VERSION;
+		assert!(spells_normalised_decimal_keys(current));
+		assert!(!spells_normalised_decimal_keys(current - 1));
+		assert!(!spells_normalised_decimal_keys(0));
+		assert!(spells_normalised_decimal_keys(INDEX_FORMAT_VERSION));
+		for format_version in [0, current - 1, current, INDEX_FORMAT_VERSION] {
+			assert_eq!(
+				at_version(&tb, format_version).normalised_decimals,
+				spells_normalised_decimal_keys(format_version),
+				"format version {format_version}"
+			);
+		}
+	}
+
+	fn dec(text: &str) -> Value {
+		Value::Number(Number::Decimal(text.parse().unwrap()))
+	}
+
+	fn object_of(key: &str, value: Value) -> Object {
+		Object(std::iter::once((Strand::from(key), value)).collect())
+	}
+
+	/// Values holding the decimal `text` in every place a key spells one.
+	fn holding(text: &str) -> Vec<Value> {
+		let d = || dec(text);
+		let id = |key: RecordIdKey| Value::RecordId(RecordId::new(TableName::from("r"), key));
+		vec![
+			d(),
+			Value::Array(Array::from(vec![Value::from(1), d()])),
+			Value::Set(Set(std::iter::once(d()).collect())),
+			Value::Object(object_of("k", d())),
+			id(RecordIdKey::Array(Array::from(vec![d()]))),
+			id(RecordIdKey::Object(object_of("k", d()))),
+			id(RecordIdKey::Range(Box::new(RecordIdKeyRange {
+				start: Bound::Included(RecordIdKey::Array(Array::from(vec![d()]))),
+				end: Bound::Unbounded,
+			}))),
+			Value::Range(Box::new(Range {
+				start: Bound::Included(d()),
+				end: Bound::Excluded(Value::Array(Array::from(vec![d()]))),
+			})),
+		]
+	}
+
+	#[test]
+	fn equal_decimals_share_a_key_on_an_index_that_spells_them_without_trailing_zeros() {
+		let tb = TableName::from("t");
+		let id = RecordIdKey::from("r".to_owned());
+		for (untidy, tidy) in holding("2.50").into_iter().zip(holding("2.5")) {
+			assert_eq!(untidy, tidy, "the two spellings compare equal");
+			for unique in [false, true] {
+				let (a, b) = (slice::from_ref(&untidy), slice::from_ref(&tidy));
+				let ks = current_space(&tb);
+				assert_eq!(
+					ks.stored_key(unique, a, &id).unwrap(),
+					ks.stored_key(unique, b, &id).unwrap(),
+					"unique={unique}: {untidy:?}"
+				);
+				// An index that spells them as written keeps two keys.
+				let old = earlier_space(&tb);
+				assert_ne!(
+					old.stored_key(unique, a, &id).unwrap(),
+					old.stored_key(unique, b, &id).unwrap(),
+					"unique={unique}: {untidy:?} on an index that does not normalise"
+				);
+			}
+		}
+		// An integer and a decimal with a zero after its point compare equal too.
+		let (decimal, integer) = (dec("2.0"), Value::from(2));
+		assert_eq!(decimal, integer);
+		let (a, b) = (slice::from_ref(&decimal), slice::from_ref(&integer));
+		let (ks, old) = (current_space(&tb), earlier_space(&tb));
+		assert_eq!(ks.stored_key(false, a, &id).unwrap(), ks.stored_key(false, b, &id).unwrap());
+		assert_ne!(old.stored_key(false, a, &id).unwrap(), old.stored_key(false, b, &id).unwrap());
+	}
+
+	#[test]
+	fn a_read_bound_spelled_either_way_reaches_an_entry_spelled_either_way() {
+		let tb = TableName::from("t");
+		let ks = current_space(&tb);
+		let id = RecordIdKey::from("r".to_owned());
+		let (untidy, tidy) = (dec("2.50"), dec("2.5"));
+		let (below, above) = (dec("2.49"), dec("2.51"));
+		for unique in [false, true] {
+			for stored in [&untidy, &tidy] {
+				let key = ks.stored_key(unique, slice::from_ref(stored), &id).unwrap().key;
+				for probe in [&untidy, &tidy] {
+					let eq = ks.equality(unique, probe).unwrap();
+					assert!(contains(&eq, &key), "unique={unique}: = {probe:?} misses {stored:?}");
+					let inclusive = [
+						ks.range(Bound::Included(probe), Bound::Unbounded).unwrap(),
+						ks.range(Bound::Unbounded, Bound::Included(probe)).unwrap(),
+						ks.range(Bound::Included(probe), Bound::Included(probe)).unwrap(),
+					];
+					for range in &inclusive {
+						assert!(contains(range, &key), "unique={unique}: inclusive on {probe:?}");
+					}
+					let exclusive = [
+						ks.range(Bound::Excluded(probe), Bound::Unbounded).unwrap(),
+						ks.range(Bound::Unbounded, Bound::Excluded(probe)).unwrap(),
+					];
+					for range in &exclusive {
+						assert!(!contains(range, &key), "unique={unique}: exclusive on {probe:?}");
+					}
+					let between =
+						ks.range(Bound::Excluded(&below), Bound::Excluded(&above)).unwrap();
+					assert!(contains(&between, &key));
+				}
+			}
+		}
+	}
+
+	#[test]
+	fn a_compound_prefix_and_range_value_are_spelled_without_trailing_zeros() {
+		let tb = TableName::from("t");
+		let ks = current_space(&tb);
+		let id = RecordIdKey::from("r".to_owned());
+		let ops = [
+			(BinaryOperator::Equal, true),
+			(BinaryOperator::MoreThanEqual, true),
+			(BinaryOperator::LessThanEqual, true),
+			(BinaryOperator::MoreThan, false),
+			(BinaryOperator::LessThan, false),
+		];
+		for unique in [false, true] {
+			for (lead, last) in [(dec("2.50"), dec("7.50")), (dec("2.5"), dec("7.5"))] {
+				let key = ks.stored_key(unique, &[lead.clone(), last.clone()], &id).unwrap().key;
+				for (probe_lead, probe_last) in
+					[(dec("2.50"), dec("7.5")), (dec("2.5"), dec("7.50"))]
+				{
+					let prefix = slice::from_ref(&probe_lead);
+					let under = ks.compound(prefix, None).unwrap();
+					assert!(contains(&under, &key), "prefix {probe_lead:?} misses ({lead:?}, ..)");
+					for (op, admits) in &ops {
+						let range = ks.compound(prefix, Some((op, &probe_last))).unwrap();
+						assert_eq!(
+							contains(&range, &key),
+							*admits,
+							"{op:?} {probe_last:?} on ({lead:?}, {last:?})"
+						);
+					}
+				}
+			}
+		}
+	}
+
+	/// Ids of one value whose numbers differ only in kind, and others around them.
+	fn kinded_ids() -> Vec<RecordIdKey> {
+		let arr = |n: Number| RecordIdKey::Array(Array::from(vec![Value::Number(n)]));
+		vec![
+			arr(Number::Int(1)),
+			arr(Number::Float(1.0)),
+			arr(Number::Decimal(1.into())),
+			arr(Number::Int(2)),
+			RecordIdKey::Number(1),
+			RecordIdKey::from("a".to_owned()),
+			RecordIdKey::Array(Array::from(vec![
+				Value::from("a"),
+				datetime("2026-08-28T09:00:00Z"),
+			])),
+		]
+	}
+
+	/// From the stamp that spells it, an entry's id is a `RecordIdentity`: the key
+	/// [`IndexKeyspace::entry_key`] assembles is the `entry` route's, under both
+	/// datetime spellings, values respelled as the stamp asks.
+	#[test]
+	fn an_entry_key_is_the_entry_route_with_the_id_as_an_identity() {
+		let tb = TableName::from("t");
+		let ks = at_version(&tb, BTREE_IDENTITY_ENTRY_IDS_FORMAT_VERSION);
+		for fd in [vec![Value::from(1)], vec![dec("2.50"), datetime("2026-08-28T09:00:00.5Z")]] {
+			for id in kinded_ids() {
+				let route = ks
+					.spelling
+					.encode(&EntryKey {
+						ns: NamespaceId(1),
+						db: DatabaseId(2),
+						tb: Cow::Borrowed(&tb),
+						ix: IndexId(3),
+						fd: ks.spelled_all(&fd),
+						id: RecordIdentity(id.clone()),
+					})
+					.unwrap();
+				assert_eq!(ks.entry_key(&fd, &id).unwrap(), route, "{fd:?} {id:?}");
+			}
+		}
+	}
+
+	/// Records whose ids differ only in a number's kind have an entry each from
+	/// the stamp that spells the id as an identity, and share one before it. The
+	/// two spellings are one exactly for an id that holds no number.
+	#[test]
+	fn ids_differing_in_a_numbers_kind_are_two_entries_from_the_identity_stamp() {
+		let tb = TableName::from("t");
+		let fd = [Value::from(1)];
+		let (current, earlier) = (
+			at_version(&tb, BTREE_IDENTITY_ENTRY_IDS_FORMAT_VERSION),
+			at_version(&tb, BTREE_IDENTITY_ENTRY_IDS_FORMAT_VERSION - 1),
+		);
+		let ids = kinded_ids();
+		let (int, float, decimal) = (&ids[0], &ids[1], &ids[2]);
+		for (a, b) in [(int, float), (int, decimal), (float, decimal)] {
+			assert_ne!(current.entry_key(&fd, a).unwrap(), current.entry_key(&fd, b).unwrap());
+			assert_eq!(earlier.entry_key(&fd, a).unwrap(), earlier.entry_key(&fd, b).unwrap());
+		}
+		for id in &ids {
+			let alike = current.entry_key(&fd, id).unwrap() == earlier.entry_key(&fd, id).unwrap();
+			assert_eq!(alike, id.index_format_spells_alike(), "{id:?}");
+		}
+		// Both entries of a unique index's nullish tuple are kept apart too.
+		for unique in [false, true] {
+			let none = [Value::None];
+			assert_ne!(
+				current.stored_key(unique, &none, int).unwrap(),
+				current.stored_key(unique, &none, decimal).unwrap()
+			);
+		}
+	}
+
+	/// The identity adds a number's kind after the number, so the entries of one
+	/// value list their records in record id order: by value, then by kind among
+	/// equal numbers, as a table scan lists them.
+	#[test]
+	fn entries_of_one_value_list_their_records_in_record_id_order() {
+		let tb = TableName::from("t");
+		let ks = at_version(&tb, BTREE_IDENTITY_ENTRY_IDS_FORMAT_VERSION);
+		let fd = [Value::from(1)];
+		let arr = |n: Number| RecordIdKey::Array(Array::from(vec![Value::Number(n)]));
+		let ordered = [
+			arr(Number::Int(0)),
+			arr(Number::Int(1)),
+			arr(Number::Float(1.0)),
+			arr(Number::Decimal(1.into())),
+			arr(Number::Float(1.5)),
+			arr(Number::Int(2)),
+		];
+		let keys: Vec<_> = ordered.iter().map(|id| ks.entry_key(&fd, id).unwrap()).collect();
+		for (pair, ids) in keys.windows(2).zip(ordered.windows(2)) {
+			assert!(pair[0] < pair[1], "{:?} before {:?}", ids[0], ids[1]);
+			let record = |id: &RecordIdKey| storekey::encode_vec(id).unwrap();
+			assert!(record(&ids[0]) < record(&ids[1]), "record key order agrees");
+		}
+	}
+
+	#[test]
+	fn the_records_own_id_is_never_respelled() {
+		let tb = TableName::from("t");
+		let ks = current_space(&tb);
+		let fd = [Value::from(1)];
+		let id = |text: &str| RecordIdKey::Array(Array::from(vec![dec(text)]));
+		assert_ne!(ks.entry_key(&fd, &id("2.50")).unwrap(), ks.entry_key(&fd, &id("2.5")).unwrap());
+	}
+
+	#[test]
+	fn a_value_with_nothing_to_respell_is_borrowed() {
+		let tb = TableName::from("t");
+		let ks = current_space(&tb);
+		let tidy = holding("2.5");
+		for v in &tidy {
+			let one = slice::from_ref(v);
+			assert!(matches!(ks.spelled_all(one), Cow::Borrowed(_)), "{v:?} was cloned");
+		}
+		assert!(matches!(ks.spelled_all(&tidy), Cow::Borrowed(_)));
+		let untidy = holding("2.50");
+		for v in &untidy {
+			let one = slice::from_ref(v);
+			assert!(matches!(ks.spelled_all(one), Cow::Owned(_)), "{v:?} was not respelled");
+		}
+		// An index that does not normalise never inspects, let alone clones.
+		let old = earlier_space(&tb);
+		assert!(matches!(old.spelled_all(&untidy), Cow::Borrowed(_)));
+	}
+
+	/// A decimal is untidy exactly when respelling it changes its scale: a
+	/// zero after the point, a zero value included.
+	#[test]
+	fn a_decimal_is_untidy_when_its_point_is_followed_by_a_trailing_zero() {
+		for (text, untidy) in [
+			("2.50", true),
+			("-2.50", true),
+			("0.00", true),
+			("-0.0", true),
+			("100.0", true),
+			("2.5", false),
+			("-2.5", false),
+			("10", false),
+			("0", false),
+			("0.0000000000000000000000000001", false),
+		] {
+			let Value::Number(Number::Decimal(d)) = dec(text) else {
+				unreachable!("a decimal")
+			};
+			assert_eq!(holds_untidy_decimal(&dec(text)), untidy, "{text}");
+			assert_eq!(d.normalize().scale() != d.scale(), untidy, "{text}");
+		}
+	}
+
+	#[test]
+	fn respelling_changes_only_the_scale_of_decimals() {
+		let tb = TableName::from("t");
+		let ks = current_space(&tb);
+		for (untidy, tidy) in holding("2.50").iter().zip(holding("2.5")) {
+			let spelled = ks.spelled_all(slice::from_ref(untidy));
+			let [spelled] = &*spelled else {
+				panic!("{untidy:?} was respelled into {} values", spelled.len());
+			};
+			assert_eq!(*spelled, tidy);
+			assert_eq!(format!("{spelled:?}"), format!("{tidy:?}"));
+		}
+		for v in [Value::from(3), Value::from(2.50f64), dec("0.000"), dec("100"), dec("-1.10")] {
+			let spelled = ks.spelled_all(slice::from_ref(&v));
+			let [spelled] = &*spelled else {
+				panic!("{v:?} was respelled into {} values", spelled.len());
+			};
+			assert_eq!(*spelled, v);
+			if let Value::Number(Number::Decimal(d)) = spelled {
+				assert_eq!(d.scale(), d.normalize().scale());
+			}
+		}
 	}
 
 	#[test]

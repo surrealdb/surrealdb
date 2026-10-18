@@ -86,6 +86,7 @@
 //! fix authored on a release branch carries that branch's version, so a store
 //! already stamped past it would skip it forever if the stamp gated selection.
 
+mod doc_lookup_erased;
 mod doc_lookup_identity;
 mod field_keys;
 mod kinds_as_text;
@@ -227,6 +228,13 @@ pub(crate) static MIGRATIONS: &[Migration] = &[
 		run: |ds| Box::pin(field_keys::rekey_definitions_to_their_storage_name(ds)),
 		on_demand: false,
 	},
+	Migration {
+		id: doc_lookup_erased::LEDGER_ID.raw(),
+		name: "retire the type-erased forward doc-ID mappings",
+		version: (3, 4, 0),
+		run: |ds| Box::pin(doc_lookup_erased::retire_the_type_erased_forward_doc_ids(ds)),
+		on_demand: false,
+	},
 ];
 
 /// The ledger facts of one migration, readable without the work.
@@ -332,6 +340,18 @@ pub(crate) static LEDGER: &[LedgerRow] = &[
 	LedgerRow {
 		id: STORE_DEFAULTS.raw(),
 		name: "record the database defaults of the release that created the datastore",
+		version: (3, 4, 0),
+		on_demand: false,
+	},
+	LedgerRow {
+		id: field_keys::LEDGER_ID.raw(),
+		name: "re-key field definitions to their storage name",
+		version: (3, 4, 0),
+		on_demand: false,
+	},
+	LedgerRow {
+		id: doc_lookup_erased::LEDGER_ID.raw(),
+		name: "retire the type-erased forward doc-ID mappings",
 		version: (3, 4, 0),
 		on_demand: false,
 	},

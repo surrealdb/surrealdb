@@ -857,12 +857,12 @@ async fn numeric_chunks_fill_to_the_entry_cap() {
 }
 
 /// Refolding an already-numeric scope reuses the ids carried through the
-/// merge verbatim: no `!di`/`!dd` mapping appears or changes in either
+/// merge verbatim: no `!dj`/`!dd` mapping appears or changes in either
 /// involved table's space, and the rewritten chunk still resolves to the
 /// same edges.
 #[tokio::test]
 async fn refolding_a_numeric_scope_assigns_no_new_ids() {
-	use crate::key::schema::{DocKeyPrefix, DocLookupPrefix};
+	use crate::key::schema::{DocKeyPrefix, DocLookupIdentityPrefix};
 
 	let store = TestIndexStore::with_idx_config(|config| config.graph_numeric_ids = true).await;
 	{
@@ -882,14 +882,14 @@ async fn refolding_a_numeric_scope_assigns_no_new_ids() {
 	let oracle = read_all(&store, false).await;
 	assert_eq!(fold_all(&store, 1024).await, 5);
 
-	/// Every `!di`/`!dd` mapping of both involved tables, raw.
+	/// Every `!dj`/`!dd` mapping of both involved tables, raw.
 	async fn mappings(store: &TestIndexStore) -> Vec<(Vec<u8>, Vec<u8>)> {
 		let txn = store.transaction(Read).await.unwrap();
 		let mut out = Vec::new();
 		for table in ["person", "likes"] {
 			let tb = TableName::from(table);
 			let ranges: [crate::key::RawRange; 2] = [
-				DocLookupPrefix::new(NS, DB, Cow::Borrowed(&tb)).range().unwrap().into(),
+				DocLookupIdentityPrefix::new(NS, DB, Cow::Borrowed(&tb)).range().unwrap().into(),
 				DocKeyPrefix::new(NS, DB, Cow::Borrowed(&tb)).range().unwrap().into(),
 			];
 			for range in ranges {

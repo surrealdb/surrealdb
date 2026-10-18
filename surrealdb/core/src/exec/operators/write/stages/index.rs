@@ -51,7 +51,7 @@ pub(crate) async fn one_index(
 		match ib.consume(&ctx.db, frozen, ix, mutation).await.map_err(ControlFlow::Err)? {
 			// The build owns this mutation now and applies it when it replays,
 			// so nothing is written here. For a doc-ID index that carries the
-			// record's use of the shared `!di`/`!dd` mapping into the replay.
+			// record's use of the shared `!dj`/`!dd` mapping into the replay.
 			ConsumeResult::Enqueued => return Ok(doc_id_index),
 			// The build is finished; index the record normally.
 			ConsumeResult::Ignored(o, n) => (o, n),

@@ -14,16 +14,15 @@ adopts the first's doc-ID, and the reverse mapping names only one of them.
 Every doc-ID-consuming index — full-text and both ANN families — then returns
 that one and silently drops the other.
 
-The forward mapping therefore has a second, injective key, `!dj`, spelled with
-`RecordIdentity`. `!di` is still written beside it so a node on the previous
-release keeps resolving records this one maps, and a `!di` hit is adopted only
-when `!dd` agrees the doc-ID names the record that was asked for — which is
-what stops a record inheriting a collision it did not own.
+The forward mapping is therefore keyed by `!dj`, spelled with `RecordIdentity`,
+which is injective. Nothing reads or writes `!di`; startup migration 10 deletes
+it.
 
 That makes the doc-ID mapping whole, which is all a full-text index reads, so
 the full-text index is what this pins. A plain index and the HNSW and DiskANN
-pending queues key the id under `IndexFormat` themselves and still treat the
-pair as one record; their routes in the keyspace say so.
+pending queues keep the pair apart on their own terms, from the index format
+that spells them so; 1336_btree_entries_keep_ids_differing_in_number_kind_apart
+and 1336_ann_pending_keeps_ids_differing_in_number_kind_apart pin those.
 """
 issue = 7437
 

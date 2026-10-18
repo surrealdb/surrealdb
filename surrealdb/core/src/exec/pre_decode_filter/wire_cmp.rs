@@ -459,12 +459,10 @@ fn wire_eq(value_bytes: &[u8], lit: &LiteralWire) -> Option<bool> {
 				NumberSubVariant::Decimal => {
 					Some(decimal_in_number_payload(peek.payload)? == (*decimal_value)?)
 				}
-				// `Float` byte equality is unreliable (NaN bit-equal but ≠
-				// under `f64::PartialEq`; `+0.0` ↔ `-0.0` byte-differ but `==`
-				// under `f64::PartialEq`). Cheap to defer the few Float-eq
-				// predicates to the full decode and keep the wire-fast path
-				// correct.
-				NumberSubVariant::Float => None,
+				// A float compares by its bits and every NaN is one value, so
+				// a byte match is equal; a mismatch is left to the full
+				// decode (`+0.0` ↔ `-0.0`, NaN payloads).
+				NumberSubVariant::Float => (value_bytes == full_wire.as_slice()).then_some(true),
 			}
 		}
 		LiteralWire::Canonical {
@@ -1285,16 +1283,18 @@ mod tests {
 		assert_eq!(wire_eq(&v, &lit), None);
 	}
 
+	/// A float compares by its bits, every NaN as one value, so a byte-exact
+	/// Float match is equal; `+0.0` against `-0.0` byte-differs though equal,
+	/// so a mismatch is left to the decode.
 	#[test]
-	fn wire_eq_number_float_byte_match_bails_to_none() {
-		// Even a byte-exact Float match bails: NaN bit patterns can
-		// byte-equal yet compare unequal (`f64::PartialEq` says NaN !=
-		// NaN). Conservatively deferring all Float comparisons to the
-		// fallback keeps the wire-fast path correct for both NaN and the
-		// `±0.0` case. The cost is the rare Float-eq predicate paying a
-		// decode; the per-row Int/Decimal hot loop is unaffected.
-		let lit = LiteralWire::from_value(&Value::Number(Number::Float(1.5)));
-		let v = encoded(&Value::Number(Number::Float(1.5)));
+	fn wire_eq_number_float_byte_match_is_equal() {
+		for f in [1.5, f64::NAN, -0.0] {
+			let lit = LiteralWire::from_value(&Value::Number(Number::Float(f)));
+			let v = encoded(&Value::Number(Number::Float(f)));
+			assert_eq!(wire_eq(&v, &lit), Some(true), "{f}");
+		}
+		let lit = LiteralWire::from_value(&Value::Number(Number::Float(0.0)));
+		let v = encoded(&Value::Number(Number::Float(-0.0)));
 		assert_eq!(wire_eq(&v, &lit), None);
 	}
 
