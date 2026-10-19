@@ -69,6 +69,11 @@ rustdoc-args = ["--cfg", "docsrs"]
 # (`engine::local::SurrealKv`, versioned storage) is documented through the
 # pure-Rust SurrealKV backend; a C++ backend such as `kv-rocksdb` exceeds the
 # cap.
+# docs.rs builds with the latest nightly, whose trait solver rejects the `diskann`
+# crate (`Arc<B>: Batch` not satisfied); `-Znext-solver=no` keeps it compiling there.
+# `-j4` bounds the peak memory of the C++ build scripts, as the sandbox kills the
+# build at 6 GiB.
+cargo-args = ["-j4", "--config", 'build.rustflags=["-Znext-solver=no"]']
 features = [
     "protocol-ws",
     "protocol-http",
