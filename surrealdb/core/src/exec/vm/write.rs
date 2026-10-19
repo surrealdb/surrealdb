@@ -90,6 +90,8 @@ pub(super) struct WriteState {
 	retry: Option<RecordId>,
 	/// The failure the classification carried into the retry.
 	carried: Option<anyhow::Error>,
+	/// The conflict the retry raises if its record is gone after the rollback.
+	retry_cause: Option<anyhow::Error>,
 	/// Whether the carrying region is open, so a failure is replaced by the
 	/// carried one.
 	carrying: bool,
@@ -231,6 +233,7 @@ impl WriteState {
 			failure: None,
 			retry: None,
 			carried: None,
+			retry_cause: None,
 			carrying: false,
 			only: spec.only,
 			per_record: false,
@@ -374,6 +377,7 @@ impl WriteState {
 			failure: None,
 			retry: None,
 			carried: None,
+			retry_cause: None,
 			carrying: false,
 			only: false,
 			per_record: false,
@@ -472,6 +476,7 @@ impl WriteState {
 		self.failure = None;
 		self.retry = None;
 		self.carried = None;
+		self.retry_cause = None;
 		self.carrying = false;
 		self.only = spec.only;
 		self.per_record = false;
@@ -642,6 +647,7 @@ impl WriteState {
 		self.failure = None;
 		self.retry = None;
 		self.carried = None;
+		self.retry_cause = None;
 		self.carrying = false;
 		self.shown = [None, None];
 		self.schema = None;
@@ -801,9 +807,11 @@ impl WriteState {
 					CreateFailure::RetryAsUpdate {
 						record,
 						carried,
+						cause,
 					} => {
 						self.retry = Some(record);
 						self.carried = carried;
+						self.retry_cause = cause;
 						next
 					}
 				}
@@ -834,9 +842,16 @@ impl WriteState {
 				)
 				.await
 				.map_err(ControlFlow::Err)?;
+				// A conflict whose record the rollback took with it — one the attempt's
+				// own evaluation wrote, as an event does — leaves nothing to update.
+				// Updating nothing would drop the statement without a word.
+				let gone = stored.data.is_nullish();
 				row.reset_for_update_retry(target, &stored, stamp);
 				row.replay_stored(ctx.exec()).await?;
-				next
+				match self.retry_cause.take() {
+					Some(cause) if gone => return Err(ControlFlow::Err(cause)),
+					_ => next,
+				}
 			}
 			WriteInstr::CarryBegin => {
 				self.carrying = true;

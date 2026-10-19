@@ -307,9 +307,15 @@ impl WritePlan {
 pub(crate) enum CreateFailure {
 	/// Run the updating order against this record, carrying the original
 	/// failure when it is one the update is expected to resolve.
+	///
+	/// `cause` is the conflict itself, which the retry raises if the record it
+	/// names is not there once the attempt is rolled back: a conflict with a
+	/// record the rolled-back attempt had itself written leaves nothing to update, and
+	/// an update of nothing writes nothing and reports nothing.
 	RetryAsUpdate {
 		record: RecordId,
 		carried: Option<anyhow::Error>,
+		cause: Option<anyhow::Error>,
 	},
 	/// Abandon the record; the statement succeeds.
 	Skip,
@@ -340,6 +346,7 @@ pub(crate) fn classify_create_failure(
 			CreateFailure::RetryAsUpdate {
 				record,
 				carried: None,
+				cause: Some(err),
 			}
 		};
 	}
@@ -350,6 +357,7 @@ pub(crate) fn classify_create_failure(
 		return CreateFailure::RetryAsUpdate {
 			record: record.clone(),
 			carried: None,
+			cause: Some(err),
 		};
 	}
 	// A schema failure is retried against the record the attempt was building,
@@ -365,6 +373,7 @@ pub(crate) fn classify_create_failure(
 		return CreateFailure::RetryAsUpdate {
 			record: id,
 			carried: Some(err),
+			cause: None,
 		};
 	}
 	unretried(err, policy)
