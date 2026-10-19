@@ -739,6 +739,139 @@ mod tests {
 		Ok((recv, ds))
 	}
 
+	/// A write inside a caller-owned transaction notifies live subscribers once
+	/// the caller commits, and not before.
+	#[tokio::test]
+	async fn test_live_notification_from_caller_owned_transaction() {
+		use surrealdb_kvs::TransactionType;
+
+		use crate::kvs::QueryRequest;
+
+		let (recv, ds) = new_ds_with_broker().await.unwrap();
+		let (ns, db, tb) = ("test", "test", "person");
+		setup_ns_db_table(&ds, ns, db, tb).await;
+
+		let ses = Session::owner().with_ns(ns).with_db(db).with_rt(true);
+		ds.execute(&format!("LIVE SELECT * FROM {tb}"), &ses, None).await.unwrap();
+		while recv.try_recv().is_ok() {}
+
+		let tx = Arc::new(ds.transaction(TransactionType::Write).await.unwrap());
+		let ses_write = Session::owner().with_ns(ns).with_db(db);
+		let mut res = ds
+			.run(
+				QueryRequest::new("CREATE person:42", &ses_write).with_transaction(Arc::clone(&tx)),
+			)
+			.await
+			.expect("run should not return an Err");
+		res.remove(0).result.expect("CREATE should succeed");
+
+		let early =
+			tokio::time::timeout(tokio::time::Duration::from_millis(200), recv.recv()).await;
+		assert!(early.is_err(), "notification delivered before the caller committed");
+
+		tx.commit().await.unwrap();
+
+		let notification = tokio::time::timeout(tokio::time::Duration::from_secs(3), recv.recv())
+			.await
+			.expect("timed out waiting for the notification")
+			.expect("notification channel closed");
+		assert_eq!(notification.action, PublicAction::Create);
+	}
+
+	/// A rolled-back caller-owned transaction delivers nothing. The committed
+	/// write afterwards proves the subscription was live, so its record must be
+	/// the first one to arrive.
+	#[tokio::test]
+	async fn test_no_live_notification_from_rolled_back_caller_owned_transaction() {
+		use surrealdb_kvs::TransactionType;
+
+		use crate::kvs::QueryRequest;
+
+		let (recv, ds) = new_ds_with_broker().await.unwrap();
+		let (ns, db, tb) = ("test", "test", "person");
+		setup_ns_db_table(&ds, ns, db, tb).await;
+
+		let ses = Session::owner().with_ns(ns).with_db(db).with_rt(true);
+		ds.execute(&format!("LIVE SELECT * FROM {tb}"), &ses, None).await.unwrap();
+		while recv.try_recv().is_ok() {}
+
+		let tx = Arc::new(ds.transaction(TransactionType::Write).await.unwrap());
+		let ses_write = Session::owner().with_ns(ns).with_db(db);
+		let mut res = ds
+			.run(
+				QueryRequest::new("CREATE person:99", &ses_write).with_transaction(Arc::clone(&tx)),
+			)
+			.await
+			.expect("run should not return an Err");
+		res.remove(0).result.expect("CREATE should succeed");
+
+		tx.cancel().await.unwrap();
+
+		ds.execute("CREATE person:100", &ses_write, None).await.unwrap();
+
+		let notification = tokio::time::timeout(tokio::time::Duration::from_secs(3), recv.recv())
+			.await
+			.expect("timed out: the subscription delivered nothing at all")
+			.expect("notification channel closed");
+		assert_eq!(
+			notification.record,
+			PublicValue::RecordId(PublicRecordId {
+				table: tb.to_string().into(),
+				key: PublicRecordIdKey::Number(100),
+			}),
+			"the first notification must be the committed record, not the rolled back one",
+		);
+	}
+
+	/// Every batch run against one caller-owned transaction queues its own
+	/// flush, and a single commit delivers all of them.
+	#[tokio::test]
+	async fn test_live_notifications_from_several_batches_in_one_transaction() {
+		use surrealdb_kvs::TransactionType;
+
+		use crate::kvs::QueryRequest;
+
+		let (recv, ds) = new_ds_with_broker().await.unwrap();
+		let (ns, db, tb) = ("test", "test", "person");
+		setup_ns_db_table(&ds, ns, db, tb).await;
+
+		let ses = Session::owner().with_ns(ns).with_db(db).with_rt(true);
+		ds.execute(&format!("LIVE SELECT * FROM {tb}"), &ses, None).await.unwrap();
+		while recv.try_recv().is_ok() {}
+
+		let tx = Arc::new(ds.transaction(TransactionType::Write).await.unwrap());
+		let ses_write = Session::owner().with_ns(ns).with_db(db);
+		for sql in ["CREATE person:1", "CREATE person:2"] {
+			let mut res = ds
+				.run(QueryRequest::new(sql, &ses_write).with_transaction(Arc::clone(&tx)))
+				.await
+				.expect("run should not return an Err");
+			res.remove(0).result.expect("CREATE should succeed");
+		}
+
+		tx.commit().await.unwrap();
+
+		// Each batch's flush is its own task, so arrival order is not fixed.
+		let mut seen = Vec::new();
+		for _ in 0..2 {
+			let notification =
+				tokio::time::timeout(tokio::time::Duration::from_secs(3), recv.recv())
+					.await
+					.expect("timed out waiting for a notification")
+					.expect("notification channel closed");
+			assert_eq!(notification.action, PublicAction::Create);
+			seen.push(notification.record);
+		}
+		let expected = |n: i64| {
+			PublicValue::RecordId(PublicRecordId {
+				table: tb.to_string().into(),
+				key: PublicRecordIdKey::Number(n),
+			})
+		};
+		assert!(seen.contains(&expected(1)), "missing the first batch's notification: {seen:?}");
+		assert!(seen.contains(&expected(2)), "missing the second batch's notification: {seen:?}");
+	}
+
 	async fn setup_ns_db_table(ds: &Datastore, ns: &str, db: &str, tb: &str) {
 		let tx = ds.transaction(Write).await.unwrap();
 		tx.ensure_ns_db(None, ns, db).await.unwrap();

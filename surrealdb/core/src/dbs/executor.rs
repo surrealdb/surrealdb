@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::future::Future;
 use std::pin::{Pin, pin};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -8,6 +9,7 @@ use anyhow::{Result, anyhow, bail};
 use async_channel::Sender;
 use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
+use surrealdb_datastore::close::CommitAction;
 use surrealdb_types::{Error as TypesError, QueryError, ToSql};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
@@ -188,6 +190,22 @@ struct PreparedBroker {
 	delivery: Arc<dyn MessageBroker>,
 }
 
+/// Flush a batch's buffered live-query notifications once the caller-owned
+/// transaction that produced them commits.
+///
+/// Only the owner commits such a transaction, so the executor has no commit of
+/// its own to flush after. Queued on the transaction, the notifications go out
+/// with the commit and are dropped with a cancel or a failed commit.
+struct FlushOnCommit(PreparedBroker);
+
+impl CommitAction for FlushOnCommit {
+	fn run(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+		Box::pin(async move {
+			Executor::flush_live_query_notifications(self.0);
+		})
+	}
+}
+
 /// An executor which relies on the `compute` methods of the logical expressions.
 pub struct Executor {
 	stack: TreeStack,
@@ -262,6 +280,10 @@ impl Executor {
 			receiver,
 			delivery,
 		} = prepared;
+		// Every sender is gone and nothing is buffered, so no item can arrive.
+		if receiver.is_empty() && receiver.is_closed() {
+			return;
+		}
 		spawn(async move {
 			while let Ok(item) = receiver.recv().await {
 				delivery.send(item).await;
@@ -2310,6 +2332,13 @@ impl Executor {
 		// The transaction is already set in the context
 		// Execute each expression with the transaction
 		let tx = self.ctx.tx();
+		// The caller commits this transaction, so buffered notifications are flushed by a
+		// commit action rather than when the batch ends. The broker stays installed for the
+		// whole batch: every statement runs through `execute_plan_in_transaction`, which
+		// never clears it, and the context dies with this executor.
+		if let Some(prepared) = self.prepare_broker(tx.writeable(), kvs.live_query_broker()) {
+			tx.on_commit(Box::new(FlushOnCommit(prepared))).await;
+		}
 		let batch_start = Instant::now();
 		let results_start = self.results.len();
 
