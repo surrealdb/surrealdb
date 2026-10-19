@@ -75,6 +75,7 @@ mod extension;
 pub(crate) mod geometry;
 pub mod lit;
 mod logical;
+mod render;
 
 pub mod diagnostic;
 pub mod settings;

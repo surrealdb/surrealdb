@@ -8,18 +8,21 @@
 //! - `--depth-probe`: the deepest nesting accepted for each of 48 templates is the frozen ceiling.
 //! - `--round-trip`: every accepted statement, printed and parsed again, gives the same tree.
 //! - `--logical`: direct flat-tree lowering agrees with runtime-expression lowering.
+//! - `--render`: rendering SurrealQL from the arena gives the text the lowered expression prints.
+//!   `--render-fuzz` runs the same check over byte mutations of the corpus that still parse.
 //!
 //! The golden check (`--example golden`) pins every entry point's output.
 //!
 //! ```text
 //! cargo run --locked --release -p surrealdb-expr --example invariants [DIR] [-v]
-//!     [--fuzz | --stream | --stream-fuzz | --depth-probe | --round-trip | --logical]
+//!     [--fuzz | --stream | --stream-fuzz | --depth-probe | --round-trip | --logical | --render | --render-fuzz]
 //! ```
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use surrealdb_expr::parser;
+use surrealdb_parser_next::ast::Cl;
 use surrealdb_parser_next::{
 	Ast, Limits, Scratch, StatementEnd, Step, StreamParser, Tag, parse_script, parse_statement,
 };
@@ -574,6 +577,423 @@ fn logical_check(files: &[PathBuf], verbose: bool) {
 	}
 }
 
+/// Replaces every quoted run of exactly 128 alphanumeric characters, the
+/// shape of a generated signing key, in either quote style.
+fn mask_generated_keys(sql: &str) -> String {
+	let mut out = String::with_capacity(sql.len());
+	let mut rest = sql;
+	while let Some(i) = rest.find(['\'', '"']) {
+		let quote = rest.as_bytes()[i];
+		let after = &rest[i + 1..];
+		let key = after.len() > 128
+			&& after.as_bytes()[128] == quote
+			&& after.as_bytes()[..128].iter().all(|b| b.is_ascii_alphanumeric());
+		if key {
+			out.push_str(&rest[..=i]);
+			out.push_str("[GENERATED KEY]");
+			out.push(quote as char);
+			rest = &after[129..];
+		} else {
+			out.push_str(&rest[..=i]);
+			rest = after;
+		}
+	}
+	out.push_str(rest);
+	out
+}
+
+/// The tags `Lower::expr` handles.
+const EXPR_TAGS: &[Tag] = &[
+	Tag::Array,
+	Tag::Object,
+	Tag::Prefix,
+	Tag::Cast,
+	Tag::Binary,
+	Tag::Block,
+	Tag::Set,
+	Tag::None,
+	Tag::Null,
+	Tag::True,
+	Tag::False,
+	Tag::Int,
+	Tag::Float,
+	Tag::NaN,
+	Tag::Infinity,
+	Tag::UnboundedRange,
+	Tag::Decimal,
+	Tag::Regex,
+	Tag::Path,
+	Tag::Duration,
+	Tag::Str,
+	Tag::Param,
+	Tag::Field,
+	Tag::Table,
+	Tag::RecordId,
+	Tag::BinaryX,
+	Tag::PostfixRange,
+	Tag::Call,
+	Tag::Script,
+	Tag::Point,
+	Tag::CallExpr,
+	Tag::Idiom,
+	Tag::Select,
+	Tag::Create,
+	Tag::Update,
+	Tag::Upsert,
+	Tag::Delete,
+	Tag::Return,
+	Tag::Let,
+	Tag::If,
+	Tag::For,
+	Tag::Relate,
+	Tag::Insert,
+	Tag::Explain,
+	Tag::Alter,
+	Tag::Remove,
+	Tag::Define,
+	Tag::Closure,
+	Tag::Mock,
+	Tag::Sleep,
+	Tag::Throw,
+	Tag::Break,
+	Tag::Continue,
+	Tag::Info,
+	Tag::Rebuild,
+];
+
+#[derive(Default)]
+struct RenderTag {
+	compared: u64,
+	mismatched: u64,
+	rejected: u64,
+	panicked: u64,
+	differs_from_logical: u64,
+}
+
+/// The outcome of a call that may panic: the panic is a mismatch, not an abort.
+type Caught<T> = Result<T, ()>;
+
+fn catch<T>(f: impl FnOnce() -> T) -> Caught<T> {
+	std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).map_err(|_| ())
+}
+
+/// The generator of the byte mutations `--render-fuzz` applies.
+struct RenderRng(u64);
+
+impl RenderRng {
+	fn next(&mut self) -> u64 {
+		self.0 ^= self.0 << 13;
+		self.0 ^= self.0 >> 7;
+		self.0 ^= self.0 << 17;
+		self.0
+	}
+}
+
+/// Byte mutations of `src` that parse without a diagnostic.
+fn render_mutants(src: &str, rng: &mut RenderRng, probe: &mut (Ast, Scratch)) -> Vec<String> {
+	const PUNCT: &[u8] = b"()[]{}<>;:,.'\"`$-+*/|&=!?@#~0aZ \n";
+	const ATTEMPTS: usize = 8;
+	let mut out = Vec::new();
+	if src.is_empty() {
+		return out;
+	}
+	for _ in 0..ATTEMPTS {
+		let mut b = src.as_bytes().to_vec();
+		for _ in 0..3 {
+			let at = rng.next() as usize % b.len();
+			if b[at].is_ascii() {
+				b[at] = PUNCT[rng.next() as usize % PUNCT.len()];
+			}
+		}
+		let Ok(mutant) = String::from_utf8(b) else {
+			continue;
+		};
+		parse_script(&mutant, Limits::default(), &mut probe.0, &mut probe.1);
+		if probe.1.diags.is_empty() && !probe.0.stmts.is_empty() {
+			out.push(mutant);
+		}
+	}
+	out
+}
+
+/// Rendering from the arena gives the text of the lowered expression, under
+/// three option sets, for every expression, idiom, part and statement of the
+/// corpus.
+fn render_check(files: &[PathBuf], verbose: bool, fuzz: bool) {
+	use surrealdb_expr::expr::logical::lower_expr;
+	use surrealdb_expr::parser::{Lower, Options};
+	let sets = [
+		("ALL", Options::ALL),
+		(
+			"legacy_strands",
+			Options {
+				legacy_strands: true,
+				..Options::ALL
+			},
+		),
+		(
+			"no files, no surrealism",
+			Options {
+				files: false,
+				surrealism: false,
+				legacy_strands: false,
+			},
+		),
+	];
+	let mut failed = false;
+	for (name, opts) in sets {
+		let mut stats: BTreeMap<String, RenderTag> = BTreeMap::new();
+		let mut shown: BTreeMap<String, u32> = BTreeMap::new();
+		let (mut with_errors, mut gate_misses) = (0u64, 0u64);
+		let mut ast = Ast::new();
+		let mut scratch = Scratch::default();
+		let mut probe = (Ast::new(), Scratch::default());
+		let mut rng = RenderRng(0x9e37_79b9_7f4a_7c15);
+		for file in files {
+			let Ok(base) = std::fs::read_to_string(file) else {
+				continue;
+			};
+			let sources = if fuzz {
+				render_mutants(&base, &mut rng, &mut probe)
+			} else {
+				vec![base]
+			};
+			for src in sources {
+				parse_script(&src, Limits::default(), &mut ast, &mut scratch);
+				if !scratch.diags.is_empty() {
+					with_errors += 1;
+				}
+				// Nodes a failed statement left behind may hold dangling indexes, so
+				// only nodes inside a statement that parsed are visited.
+				let good: Vec<(u32, u32)> = ast
+					.stmts
+					.iter()
+					.zip(&ast.spans)
+					.filter(|&(&s, _)| ast.node(s).tag != Tag::Error)
+					.map(|(_, &span)| span)
+					.collect();
+				let inside = |start: u32, end: u32| {
+					let i = good.partition_point(|&(a, _)| a <= start);
+					i > 0 && end <= good[i - 1].1
+				};
+				// The `SELECT` of a table view is read by the definition's own
+				// lowering; as an expression node it is outside `Lower::expr`'s domain.
+				let views: std::collections::HashSet<u32> = ast
+					.nodes
+					.iter()
+					.filter(|n| n.tag == Tag::Clause && n.op == Cl::View as u8)
+					.map(|n| n.a)
+					.collect();
+				let lower = Lower {
+					ast: &ast,
+					src: &src,
+					opts,
+				};
+				let mut report = |key: &str, id: u32, want: &str, got: &str| {
+					let shown = shown.entry(key.to_owned()).or_default();
+					*shown += 1;
+					if verbose || *shown <= 5 {
+						let n = ast.node(id);
+						println!(
+							"  {key} {}:{}..{}\n    src:  {}\n    want: {want}\n    got:  {got}",
+							file.display(),
+							n.start,
+							n.end,
+							&src[n.start as usize..n.end as usize]
+						);
+					}
+				};
+				let mut record = |key: &str,
+				                  id: u32,
+				                  want: Caught<Result<String, String>>,
+				                  got: Caught<Result<String, String>>,
+				                  logical: Option<String>,
+				                  must_reject: bool| {
+					let entry = stats.entry(key.to_owned()).or_default();
+					let want = match want {
+						Ok(Ok(w)) => w,
+						Ok(Err(_)) => {
+							entry.rejected += 1;
+							if must_reject && matches!(got, Ok(Ok(_))) {
+								entry.mismatched += 1;
+								gate_misses += 1;
+								report(key, id, "Err", "rendered a disabled grammar");
+							}
+							return;
+						}
+						Err(()) => {
+							entry.panicked += 1;
+							entry.mismatched += 1;
+							report(key, id, "panic in Lower", "");
+							return;
+						}
+					};
+					entry.compared += 1;
+					match got {
+						Ok(Ok(g)) => {
+							if mask_generated_keys(&g) != mask_generated_keys(&want) {
+								entry.mismatched += 1;
+								report(key, id, &want, &g);
+							} else if logical
+								.is_some_and(|l| mask_generated_keys(&l) != mask_generated_keys(&g))
+							{
+								entry.differs_from_logical += 1;
+							}
+						}
+						Ok(Err(e)) => {
+							entry.mismatched += 1;
+							report(key, id, &want, &format!("Err({e})"));
+						}
+						Err(()) => {
+							entry.panicked += 1;
+							entry.mismatched += 1;
+							report(key, id, &want, "panic in render");
+						}
+					}
+				};
+				for (&s, &(a, _)) in ast.stmts.iter().zip(&ast.spans) {
+					if ast.node(s).tag == Tag::Error {
+						continue;
+					}
+					let _ = a;
+					let want =
+						catch(|| lower.top(s).map(|t| t.to_sql()).map_err(|e| e.msg.to_string()));
+					let got = catch(|| {
+						let mut out = String::new();
+						lower.render_top(s, &mut out).map(|()| out).map_err(|e| e.msg.to_string())
+					});
+					record("(statement)", s, want, got, None, false);
+				}
+				for id in 0..ast.nodes.len() as u32 {
+					let n = ast.node(id);
+					if !inside(n.start, n.end) {
+						continue;
+					}
+					if matches!(n.tag, Tag::Field | Tag::Idiom) {
+						let want = catch(|| {
+							lower.idiom(id).map_err(|e| e.msg.to_string()).map(|i| {
+								let parts: Vec<String> = i.0.iter().map(|p| p.to_sql()).collect();
+								(i.to_sql(), parts)
+							})
+						});
+						match want {
+							Ok(Ok((text, parts))) => {
+								let got = catch(|| {
+									let mut out = String::new();
+									lower
+										.render_idiom(id, &mut out)
+										.map(|()| out)
+										.map_err(|e| e.msg.to_string())
+								});
+								record("(idiom)", id, Ok(Ok(text)), got, None, false);
+								for (i, part) in parts.into_iter().enumerate() {
+									let got = catch(|| {
+										let mut out = String::new();
+										lower
+											.render_part(id, i, &mut out)
+											.map(|()| out)
+											.map_err(|e| e.msg.to_string())
+									});
+									record("(part)", id, Ok(Ok(part)), got, None, false);
+								}
+							}
+							Ok(Err(e)) => record(
+								"(idiom)",
+								id,
+								Ok(Err(e)),
+								Ok(Err(String::new())),
+								None,
+								false,
+							),
+							Err(()) => record("(idiom)", id, Err(()), Err(()), None, false),
+						}
+					}
+					if !EXPR_TAGS.contains(&n.tag) || views.contains(&id) {
+						continue;
+					}
+					let key = format!("{:?}", n.tag);
+					let want =
+						catch(|| lower.expr(id).map(|e| e.to_sql()).map_err(|e| e.msg.to_string()));
+					let got = catch(|| {
+						let mut out = String::new();
+						lower.render_expr(id, &mut out).map(|()| out).map_err(|e| e.msg.to_string())
+					});
+					let gated = !opts.files && n.op == b'f' && n.tag == Tag::Str
+						|| !opts.surrealism
+							&& n.tag == Tag::Call && ast
+							.nodes
+							.get(n.a as usize)
+							.is_some_and(|c| matches!(c.op, 2 | 3));
+					// The logical form of the lowered expression, which `--logical` shows
+					// equals direct lowering; report-only, and a panic there counts as no form.
+					let logical = if verbose {
+						catch(|| {
+							lower.expr(id).ok().and_then(|e| lower_expr(e).ok()).map(|l| l.to_sql())
+						})
+						.ok()
+						.flatten()
+					} else {
+						None
+					};
+					record(&key, id, want, got, logical, gated);
+				}
+			}
+		}
+		let (mut compared, mut rejected, mut mismatches) = (0, 0, 0);
+		for t in stats.values() {
+			compared += t.compared;
+			rejected += t.rejected;
+			mismatches += t.mismatched;
+		}
+		let (statements, parts) = (stats.remove("(statement)"), stats.remove("(part)"));
+		let idioms = stats.remove("(idiom)");
+		compared -= [&statements, &parts, &idioms]
+			.iter()
+			.filter_map(|t| t.as_ref())
+			.map(|t| t.compared)
+			.sum::<u64>();
+		println!(
+			"render parity [opts={name}]: files {} (with parse errors: {with_errors}), nodes compared {compared}, lower-rejected {rejected}, mismatches {mismatches}",
+			files.len()
+		);
+		for (label, t) in [("statements", &statements), ("idioms", &idioms), ("parts", &parts)] {
+			if let Some(t) = t {
+				println!(
+					"  {label}: compared={} mismatched={} rejected={}",
+					t.compared, t.mismatched, t.rejected
+				);
+			}
+		}
+		let mut tags: Vec<_> = stats.iter().filter(|(_, t)| t.compared > 0).collect();
+		tags.sort_by(|a, b| b.1.mismatched.cmp(&a.1.mismatched).then(a.0.cmp(b.0)));
+		println!("  per tag:");
+		for (tag, t) in tags {
+			println!(
+				"    {tag} compared={} mismatched={}{}{}",
+				t.compared,
+				t.mismatched,
+				if t.panicked > 0 {
+					format!(" panicked={}", t.panicked)
+				} else {
+					String::new()
+				},
+				if verbose {
+					format!(" differs_from_logical={}", t.differs_from_logical)
+				} else {
+					String::new()
+				}
+			);
+		}
+		if gate_misses > 0 {
+			println!("  disabled grammar rendered: {gate_misses}");
+		}
+		failed |= mismatches > 0;
+	}
+	if failed {
+		std::process::exit(1);
+	}
+}
+
 fn round_trip(files: &[PathBuf], verbose: bool) {
 	let (mut checked, mut differ) = (0u64, 0u64);
 	for f in files {
@@ -626,6 +1046,10 @@ fn main() {
 		round_trip(&files, verbose);
 	} else if args.iter().any(|a| a == "--logical") {
 		logical_check(&files, verbose);
+	} else if args.iter().any(|a| a == "--render") {
+		render_check(&files, verbose, false);
+	} else if args.iter().any(|a| a == "--render-fuzz") {
+		render_check(&files, verbose, true);
 	} else {
 		fuzz(&files);
 	}
