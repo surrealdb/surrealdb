@@ -16,7 +16,7 @@ use surrealdb_datastore::TransactionType;
 use surrealdb_observe::ExecutionObserver;
 use surrealdb_rpc::capabilities::{
 	ArbitraryQueryTarget, Capabilities, EvalQueryTarget, ExperimentalTarget, FuncTarget,
-	MethodTarget, NetTarget, RouteTarget, Targets,
+	McpToolTarget, MethodTarget, NetTarget, RouteTarget, Targets,
 };
 use surrealdb_types::Notification;
 use tokio::time::{Instant, sleep, timeout};
@@ -216,6 +216,17 @@ A wildcard is only allowed as the whole leftmost label and must be followed by a
 	#[arg(value_parser = super::cli::validator::route_targets)]
 	allow_http: Option<Targets<RouteTarget>>,
 
+	#[arg(
+		help = "Allow all MCP tools to be called except for tools that are specifically denied. Alternatively, you can provide a comma-separated list of MCP tool names to allow."
+	)]
+	#[arg(env = "SURREAL_CAPS_ALLOW_MCP", long)]
+	// If the arg is provided without value, then assume it's "", which gets parsed into
+	// Targets::All
+	#[arg(default_missing_value_os = "", num_args = 0..)]
+	#[arg(default_value_os = "")] // Allow all MCP tools by default
+	#[arg(value_parser = super::cli::validator::mcp_tool_targets)]
+	allow_mcp: Option<Targets<McpToolTarget>>,
+
 	//
 	// Deny
 	#[arg(help = "Deny all capabilities except for those more specifically allowed")]
@@ -322,6 +333,16 @@ A wildcard is only allowed as the whole leftmost label and must be followed by a
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::route_targets)]
 	deny_http: Option<Targets<RouteTarget>>,
+
+	#[arg(
+		help = "Deny all MCP tools from being called except for tools that are specifically allowed. Alternatively, you can provide a comma-separated list of MCP tool names to deny."
+	)]
+	#[arg(env = "SURREAL_CAPS_DENY_MCP", long)]
+	// If the arg is provided without value, then assume it's "", which gets parsed into
+	// Targets::All
+	#[arg(default_missing_value_os = "", num_args = 0..)]
+	#[arg(value_parser = super::cli::validator::mcp_tool_targets)]
+	deny_mcp: Option<Targets<McpToolTarget>>,
 
 	// Accepted so that an existing deployment keeps starting, and ignored: the
 	// engine has a single execution path. Hidden from `--help`; `init` logs a
@@ -609,6 +630,52 @@ impl DbsCapabilities {
 		Targets::None
 	}
 
+	fn get_allow_mcp(&self) -> Targets<McpToolTarget> {
+		// If there was a global deny, we allow if there is a general allow or some
+		// specific allows for MCP
+		if self.deny_all {
+			if let Some(targets) = &self.allow_mcp {
+				match targets {
+					Targets::None => {}
+					Targets::Some(_) => return targets.clone(),
+					Targets::All => return Targets::All,
+				}
+			}
+			return Targets::None;
+		}
+
+		// If there was a general deny for MCP, we allow if there are specific allows
+		// for MCP tools
+		if let Some(Targets::All) = self.deny_mcp {
+			if let Some(targets) = self.allow_mcp.as_ref()
+				&& let Targets::Some(_) = targets
+			{
+				return targets.clone();
+			}
+			return Targets::None;
+		}
+
+		// If there are no high level denies but there is a global allow, we allow MCP
+		if self.allow_all {
+			return Targets::All;
+		}
+
+		// If there are no high level denies, we allow the provided MCP tools
+		// If nothing was provided, we allow MCP by default (Targets::All)
+		self.allow_mcp.clone().unwrap_or(Targets::All)
+	}
+
+	fn get_deny_mcp(&self) -> Targets<McpToolTarget> {
+		// Allowed MCP tools already consider a global deny and a general deny for MCP
+		// On top of what is explicitly allowed, we deny what is specifically denied
+		if let Some(targets) = &self.deny_mcp
+			&& let Targets::Some(_) = targets
+		{
+			return targets.clone();
+		}
+		Targets::None
+	}
+
 	fn get_deny_http(&self) -> Targets<RouteTarget> {
 		// Allowed HTTP routes already consider a global deny and a general deny for
 		// HTTP On top of what is explicitly allowed, we deny what is specifically
@@ -667,6 +734,8 @@ fn merge_capabilities(initial: Capabilities, caps: &DbsCapabilities) -> Capabili
 		.without_network_targets(caps.get_deny_net())
 		.with_rpc_methods(caps.get_allow_rpc())
 		.without_rpc_methods(caps.get_deny_rpc())
+		.with_mcp_tools(caps.get_allow_mcp())
+		.without_mcp_tools(caps.get_deny_mcp())
 		.with_http_routes(caps.get_allow_http())
 		.without_http_routes(caps.get_deny_http())
 		.with_experimental(caps.get_allow_experimental())
@@ -1950,6 +2019,7 @@ mod tests {
 			allow_net: None,
 			allow_rpc: None,
 			allow_http: None,
+			allow_mcp: None,
 			deny_all: false,
 			#[cfg(feature = "scripting")]
 			deny_scripting: false,
@@ -1961,10 +2031,101 @@ mod tests {
 			deny_net: None,
 			deny_rpc: None,
 			deny_http: None,
+			deny_mcp: None,
 			planner_strategy: None,
 		};
 		assert_eq!(caps.get_allow_experimental(), Targets::All);
 		assert_eq!(caps.get_allow_arbitrary_query(), Targets::All);
+	}
+
+	#[test]
+	fn test_dbs_capabilities_mcp() {
+		// A baseline with nothing set. Each case overrides only the MCP fields it
+		// exercises, so the resolution precedence is what is under test.
+		let base = || DbsCapabilities {
+			allow_all: false,
+			#[cfg(feature = "scripting")]
+			allow_scripting: false,
+			allow_guests: false,
+			allow_funcs: None,
+			allow_experimental: None,
+			allow_arbitrary_query: None,
+			allow_eval_query: None,
+			allow_net: None,
+			allow_rpc: None,
+			allow_http: None,
+			allow_mcp: None,
+			deny_all: false,
+			#[cfg(feature = "scripting")]
+			deny_scripting: false,
+			deny_guests: false,
+			deny_funcs: None,
+			deny_experimental: None,
+			deny_arbitrary_query: None,
+			deny_eval_query: None,
+			deny_net: None,
+			deny_rpc: None,
+			deny_http: None,
+			deny_mcp: None,
+			planner_strategy: None,
+		};
+		let one = |name: &str| -> Targets<McpToolTarget> {
+			Targets::Some([McpToolTarget::from_str(name).unwrap()].into_iter().collect())
+		};
+
+		// Default: MCP enabled (All), nothing denied.
+		let caps = base();
+		assert_eq!(caps.get_allow_mcp(), Targets::All);
+		assert_eq!(caps.get_deny_mcp(), Targets::None);
+
+		// A specific `--deny-mcp graphql`: allow stays All, deny carries the tool.
+		let caps = DbsCapabilities {
+			deny_mcp: Some(one("graphql")),
+			..base()
+		};
+		assert_eq!(caps.get_allow_mcp(), Targets::All);
+		assert_eq!(caps.get_deny_mcp(), one("graphql"));
+
+		// A general `--deny-mcp` with no value (`Targets::All`): nothing is
+		// allowed, and `get_deny_mcp` reports None because the shut-off is
+		// expressed through the allow side.
+		let caps = DbsCapabilities {
+			deny_mcp: Some(Targets::All),
+			..base()
+		};
+		assert_eq!(caps.get_allow_mcp(), Targets::None);
+		assert_eq!(caps.get_deny_mcp(), Targets::None);
+
+		// A general deny plus a specific allow re-enables only that tool.
+		let caps = DbsCapabilities {
+			deny_mcp: Some(Targets::All),
+			allow_mcp: Some(one("query")),
+			..base()
+		};
+		assert_eq!(caps.get_allow_mcp(), one("query"));
+
+		// A global `--deny-all`: MCP follows, but a specific allow re-enables it.
+		let caps = DbsCapabilities {
+			deny_all: true,
+			..base()
+		};
+		assert_eq!(caps.get_allow_mcp(), Targets::None);
+		let caps = DbsCapabilities {
+			deny_all: true,
+			allow_mcp: Some(one("query")),
+			..base()
+		};
+		assert_eq!(caps.get_allow_mcp(), one("query"));
+
+		// A global `--allow-all`: everything is allowed; a specific `--deny-mcp`
+		// still layers on top via `get_deny_mcp`.
+		let caps = DbsCapabilities {
+			allow_all: true,
+			deny_mcp: Some(one("graphql")),
+			..base()
+		};
+		assert_eq!(caps.get_allow_mcp(), Targets::All);
+		assert_eq!(caps.get_deny_mcp(), one("graphql"));
 	}
 
 	#[test]
@@ -1983,6 +2144,7 @@ mod tests {
 			allow_net: None,
 			allow_rpc: None,
 			allow_http: None,
+			allow_mcp: None,
 			deny_all: false,
 			#[cfg(feature = "scripting")]
 			deny_scripting: false,
@@ -1994,6 +2156,7 @@ mod tests {
 			deny_net: None,
 			deny_rpc: None,
 			deny_http: None,
+			deny_mcp: None,
 			planner_strategy: None,
 		};
 		assert_eq!(caps.get_allow_arbitrary_query(), Targets::All);
@@ -2020,6 +2183,7 @@ mod tests {
 			allow_net: None,
 			allow_rpc: None,
 			allow_http: None,
+			allow_mcp: None,
 			deny_all: false,
 			#[cfg(feature = "scripting")]
 			deny_scripting: false,
@@ -2031,6 +2195,7 @@ mod tests {
 			deny_net: None,
 			deny_rpc: None,
 			deny_http: None,
+			deny_mcp: None,
 			planner_strategy: None,
 		};
 		assert_eq!(
@@ -2053,6 +2218,7 @@ mod tests {
 			allow_net: None,
 			allow_rpc: None,
 			allow_http: Some(Targets::All),
+			allow_mcp: None,
 			deny_all: false,
 			#[cfg(feature = "scripting")]
 			deny_scripting: false,
@@ -2064,6 +2230,7 @@ mod tests {
 			deny_net: None,
 			deny_rpc: None,
 			deny_http: Some(Targets::All),
+			deny_mcp: None,
 			planner_strategy: None,
 		};
 		assert_eq!(
@@ -2086,6 +2253,7 @@ mod tests {
 			allow_net: None,
 			allow_rpc: None,
 			allow_http: None,
+			allow_mcp: None,
 			deny_all: false,
 			#[cfg(feature = "scripting")]
 			deny_scripting: false,
@@ -2097,6 +2265,7 @@ mod tests {
 			deny_net: None,
 			deny_rpc: None,
 			deny_http: None,
+			deny_mcp: None,
 			planner_strategy: None,
 		};
 		assert_eq!(

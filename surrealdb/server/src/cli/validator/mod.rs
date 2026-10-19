@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use surrealdb_rpc::capabilities::{
-	ArbitraryQueryTarget, EvalQueryTarget, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
-	RouteTarget, Targets,
+	ArbitraryQueryTarget, EvalQueryTarget, ExperimentalTarget, FuncTarget, McpToolTarget,
+	MethodTarget, NetTarget, RouteTarget, Targets,
 };
 use surrealdb_rpc::export::{ExcludedTables, TableConfig};
 
@@ -155,6 +155,20 @@ pub(crate) fn method_targets(value: &str) -> Result<Targets<MethodTarget>, Strin
 	Ok(Targets::Some(result))
 }
 
+pub(crate) fn mcp_tool_targets(value: &str) -> Result<Targets<McpToolTarget>, String> {
+	if ["*", ""].contains(&value) {
+		return Ok(Targets::All);
+	}
+
+	let mut result = HashSet::new();
+
+	for target in value.split(',').filter(|s| !s.is_empty()) {
+		result.insert(McpToolTarget::from_str(target).map_err(|e| e.to_string())?);
+	}
+
+	Ok(Targets::Some(result))
+}
+
 pub(crate) fn route_targets(value: &str) -> Result<Targets<RouteTarget>, String> {
 	if ["*", ""].contains(&value) {
 		return Ok(Targets::All);
@@ -274,6 +288,17 @@ mod tests {
 					.collect()
 			)
 		);
+	}
+
+	#[test]
+	fn test_mcp_tool_targets() {
+		assert_eq!(mcp_tool_targets("*").unwrap(), Targets::<McpToolTarget>::All);
+		assert_eq!(mcp_tool_targets("").unwrap(), Targets::<McpToolTarget>::All);
+		assert_eq!(
+			mcp_tool_targets("graphql").unwrap(),
+			Targets::<McpToolTarget>::Some(vec!["graphql".parse().unwrap()].into_iter().collect())
+		);
+		assert!(mcp_tool_targets("not_a_tool").is_err());
 	}
 
 	#[test]

@@ -13,6 +13,7 @@ use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, tool, tool_handler, tool_router};
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
+use surrealdb_rpc::capabilities::McpToolTarget;
 use tokio::sync::OnceCell;
 use web_time::Instant;
 
@@ -20,7 +21,9 @@ use crate::auth::{self, BoundSubject};
 use crate::cnf::McpConfig;
 use crate::metrics::{McpMetricsRecorder, McpToolOutcome};
 use crate::session::McpSession;
-use crate::tools::{ToolScope, connection, crud, gql, graphql, query, run as run_tool, schema};
+use crate::tools::{
+	ToolScope, connection, crud, gql, graphql, query, run as run_tool, schema, tool_error,
+};
 use crate::{audit, completions, prompts, resources};
 
 const LOG: &str = "surrealdb::mcp";
@@ -685,7 +688,23 @@ impl McpService {
 			Err(_) => (None, None),
 		};
 		let outcome: Result<CallToolResult, McpError> = match resolved {
-			Ok(session) => handler(session.get()).await,
+			Ok(session) => {
+				// Capability gate: reject tools disabled via `--deny-mcp` /
+				// `--allow-mcp` before they run. Returning an in-band tool error
+				// (not a protocol error) means the caller, and the audit log
+				// via `audit::classify`, see a "capability denied" outcome.
+				let mcp_target = McpToolTarget(tool.to_string());
+				if self.datastore.get_capabilities().allows_mcp_tool(&mcp_target) {
+					handler(session.get()).await
+				} else {
+					Ok(tool_error(
+						"capability_denied",
+						format!(
+							"The MCP tool `{tool}` is denied by the server's capability configuration"
+						),
+					))
+				}
+			}
 			Err(err) => Err(err),
 		};
 		let elapsed = started.elapsed();

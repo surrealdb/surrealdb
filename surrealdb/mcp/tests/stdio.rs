@@ -16,6 +16,7 @@
 mod common;
 
 use std::future::Future;
+use std::sync::Arc;
 use std::time::Duration;
 
 use common::test_datastore;
@@ -27,7 +28,9 @@ use rmcp::model::{
 use rmcp::service::RunningService;
 use serde_json::json;
 use surrealdb_core::dbs::Session;
+use surrealdb_core::kvs::Datastore;
 use surrealdb_mcp::McpService;
+use surrealdb_rpc::capabilities::{Capabilities, McpToolTarget, Targets};
 use tokio::time::timeout;
 
 /// Ceiling on every round-trip a test in this file performs against the
@@ -60,7 +63,15 @@ async fn within<F: Future>(label: &str, fut: F) -> F::Output {
 /// the duration of the test without extra bootstrapping.
 async fn spawn_server()
 -> (RunningService<rmcp::RoleClient, ClientConfig>, tokio::task::JoinHandle<Result<(), String>>) {
-	let ds = test_datastore().await;
+	spawn_server_with(test_datastore().await).await
+}
+
+/// Like [`spawn_server`] but serves a caller-provided datastore, so a test can
+/// install a specific capability set (e.g. a denied MCP tool via
+/// [`Datastore::set_capabilities`]) before the server starts.
+async fn spawn_server_with(
+	ds: Arc<Datastore>,
+) -> (RunningService<rmcp::RoleClient, ClientConfig>, tokio::task::JoinHandle<Result<(), String>>) {
 	let service =
 		McpService::new(ds, Some("test".to_string()), Some("test".to_string()), Session::owner());
 	let (server_io, client_io) = tokio::io::duplex(8192);
@@ -255,6 +266,54 @@ async fn stdio_call_query() {
 	.expect("query tool call");
 	let text = tool_text(&result);
 	assert!(text.contains('2'), "expected 2 in result: {text}");
+
+	within("client cancel", client.cancel()).await.expect("client cancel");
+	server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stdio_denied_tool_returns_capability_denied() {
+	// Model `--deny-mcp select`: deny the `select` tool while every other tool
+	// stays allowed, then drive the real dispatch path to confirm the gate.
+	let ds = test_datastore().await;
+	ds.set_capabilities(
+		Capabilities::default()
+			.without_mcp_tools(Targets::from(McpToolTarget("select".to_string()))),
+	)
+	.expect("set capabilities");
+	let (client, server) = spawn_server_with(ds).await;
+
+	// The denied tool is rejected in-band before its handler runs: `is_error`
+	// is set and the payload carries the `capability_denied` kind, not a
+	// protocol error and not a silent success.
+	let select_args = json!({ "target": "person" }).as_object().cloned().unwrap();
+	let denied = within(
+		"denied select tool call",
+		client.call_tool(CallToolRequestParams::new("select").with_arguments(select_args)),
+	)
+	.await
+	.expect("select tool call");
+	assert_eq!(denied.is_error, Some(true), "a denied tool must report an error");
+	let denied_text = tool_text(&denied);
+	assert!(
+		denied_text.contains("capability_denied"),
+		"expected a capability_denied outcome, got: {denied_text}"
+	);
+
+	// A tool that was not denied still runs normally through the same gate.
+	let query_args = json!({ "query": "RETURN 1 + 1" }).as_object().cloned().unwrap();
+	let allowed = within(
+		"allowed query tool call",
+		client.call_tool(CallToolRequestParams::new("query").with_arguments(query_args)),
+	)
+	.await
+	.expect("query tool call");
+	let allowed_text = tool_text(&allowed);
+	assert!(
+		!allowed.is_error.unwrap_or(false),
+		"a tool that was not denied should succeed: {allowed_text}"
+	);
+	assert!(allowed_text.contains('2'), "expected 2 in result: {allowed_text}");
 
 	within("client cancel", client.cancel()).await.expect("client cancel");
 	server.abort();

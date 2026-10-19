@@ -4,8 +4,8 @@ use std::collections::HashSet;
 use std::mem;
 
 use surrealdb_rpc::capabilities::{
-	Capabilities as CoreCapabilities, ExperimentalTarget, FuncTarget, ParseFuncTargetError,
-	ParseNetTargetError, Targets,
+	Capabilities as CoreCapabilities, ExperimentalTarget, FuncTarget, McpToolTarget,
+	ParseFuncTargetError, ParseMcpToolTargetError, ParseNetTargetError, Targets,
 };
 
 /// The retired planner-strategy setting.
@@ -474,6 +474,134 @@ impl Capabilities {
 		Ok(self)
 	}
 
+	/// Set the allow list to allow all MCP tools
+	pub fn allow_all_mcp_tools(&mut self) -> &mut Self {
+		*self.cap.allowed_mcp_tools_mut() = Targets::All;
+		self
+	}
+
+	/// Set the allow list to allow all MCP tools
+	pub fn with_all_mcp_tools_allowed(mut self) -> Self {
+		self.allow_all_mcp_tools();
+		self
+	}
+
+	/// Set the deny list to deny all MCP tools
+	pub fn deny_all_mcp_tools(&mut self) -> &mut Self {
+		*self.cap.denied_mcp_tools_mut() = Targets::All;
+		self
+	}
+
+	/// Set the deny list to deny all MCP tools
+	pub fn with_all_mcp_tools_denied(mut self) -> Self {
+		self.deny_all_mcp_tools();
+		self
+	}
+
+	/// Set the allow list to allow no MCP tools
+	pub fn allow_no_mcp_tools(&mut self) -> &mut Self {
+		*self.cap.allowed_mcp_tools_mut() = Targets::None;
+		self
+	}
+
+	/// Set the allow list to allow no MCP tools
+	pub fn with_no_mcp_tools_allowed(mut self) -> Self {
+		self.allow_no_mcp_tools();
+		self
+	}
+
+	/// Set the deny list to deny no MCP tools
+	pub fn deny_no_mcp_tools(&mut self) -> &mut Self {
+		*self.cap.denied_mcp_tools_mut() = Targets::None;
+		self
+	}
+
+	/// Set the deny list to deny no MCP tools
+	pub fn with_no_mcp_tools_denied(mut self) -> Self {
+		self.deny_no_mcp_tools();
+		self
+	}
+
+	/// Add an MCP tool to the allow lists
+	///
+	/// Adding a tool to the allow list overwrites previously set allow-all or
+	/// allow-none filters. The name must be a valid MCP tool (e.g. `query`,
+	/// `select`, `graphql`); unknown names are rejected.
+	pub fn allow_mcp_tool<S: AsRef<str>>(
+		&mut self,
+		tool: S,
+	) -> Result<&mut Self, ParseMcpToolTargetError> {
+		self.allow_mcp_tool_str(tool.as_ref())
+	}
+
+	/// Add an MCP tool to the allow lists
+	///
+	/// Adding a tool to the allow list overwrites previously set allow-all or
+	/// allow-none filters. The name must be a valid MCP tool (e.g. `query`,
+	/// `select`, `graphql`); unknown names are rejected.
+	pub fn with_mcp_tool_allowed<S: AsRef<str>>(
+		mut self,
+		tool: S,
+	) -> Result<Self, ParseMcpToolTargetError> {
+		self.allow_mcp_tool(tool)?;
+		Ok(self)
+	}
+
+	fn allow_mcp_tool_str(&mut self, s: &str) -> Result<&mut Self, ParseMcpToolTargetError> {
+		let target: McpToolTarget = s.parse()?;
+		match self.cap.allowed_mcp_tools_mut() {
+			Targets::None | Targets::All => {
+				let mut set = HashSet::new();
+				set.insert(target);
+				*self.cap.allowed_mcp_tools_mut() = Targets::Some(set);
+			}
+			Targets::Some(x) => {
+				x.insert(target);
+			}
+		}
+		Ok(self)
+	}
+
+	/// Add an MCP tool to the deny lists
+	///
+	/// Adding a tool to the deny list overwrites previously set deny-all or
+	/// deny-none filters. The name must be a valid MCP tool (e.g. `query`,
+	/// `select`, `graphql`); unknown names are rejected.
+	pub fn deny_mcp_tool<S: AsRef<str>>(
+		&mut self,
+		tool: S,
+	) -> Result<&mut Self, ParseMcpToolTargetError> {
+		self.deny_mcp_tool_str(tool.as_ref())
+	}
+
+	/// Add an MCP tool to the deny lists
+	///
+	/// Adding a tool to the deny list overwrites previously set deny-all or
+	/// deny-none filters. The name must be a valid MCP tool (e.g. `query`,
+	/// `select`, `graphql`); unknown names are rejected.
+	pub fn with_mcp_tool_denied<S: AsRef<str>>(
+		mut self,
+		tool: S,
+	) -> Result<Self, ParseMcpToolTargetError> {
+		self.deny_mcp_tool(tool)?;
+		Ok(self)
+	}
+
+	fn deny_mcp_tool_str(&mut self, s: &str) -> Result<&mut Self, ParseMcpToolTargetError> {
+		let target: McpToolTarget = s.parse()?;
+		match self.cap.denied_mcp_tools_mut() {
+			Targets::None | Targets::All => {
+				let mut set = HashSet::new();
+				set.insert(target);
+				*self.cap.denied_mcp_tools_mut() = Targets::Some(set);
+			}
+			Targets::Some(x) => {
+				x.insert(target);
+			}
+		}
+		Ok(self)
+	}
+
 	/// Set the allow list to allow all experimental features
 	pub fn allow_all_experimental_features(&mut self) -> &mut Self {
 		*self.cap.allowed_experimental_features_mut() = Targets::All;
@@ -654,5 +782,51 @@ impl From<CoreCapabilities> for Capabilities {
 		Self {
 			cap,
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// Resolve the built capabilities and ask whether `tool` would be allowed,
+	/// exercising the same `allows_mcp_tool` gate the MCP dispatcher uses.
+	fn allows(cap: &Capabilities, tool: &str) -> bool {
+		let core: CoreCapabilities = cap.clone().into();
+		core.allows_mcp_tool(&McpToolTarget(tool.to_string()))
+	}
+
+	#[test]
+	fn mcp_tools_allowed_by_default() {
+		let cap = Capabilities::default();
+		assert!(allows(&cap, "query"));
+		assert!(allows(&cap, "graphql"));
+	}
+
+	#[test]
+	fn deny_single_mcp_tool_leaves_the_rest_allowed() {
+		let cap = Capabilities::default().with_mcp_tool_denied("graphql").unwrap();
+		assert!(allows(&cap, "query"));
+		assert!(!allows(&cap, "graphql"));
+	}
+
+	#[test]
+	fn allow_only_named_mcp_tools_from_none() {
+		let cap = Capabilities::none().with_mcp_tool_allowed("query").unwrap();
+		assert!(allows(&cap, "query"));
+		assert!(!allows(&cap, "select"));
+	}
+
+	#[test]
+	fn deny_all_mcp_tools() {
+		let cap = Capabilities::default().with_all_mcp_tools_denied();
+		assert!(!allows(&cap, "query"));
+		assert!(!allows(&cap, "graphql"));
+	}
+
+	#[test]
+	fn unknown_mcp_tool_is_rejected() {
+		assert!(Capabilities::default().with_mcp_tool_denied("not_a_tool").is_err());
+		assert!(Capabilities::default().with_mcp_tool_allowed("not_a_tool").is_err());
 	}
 }

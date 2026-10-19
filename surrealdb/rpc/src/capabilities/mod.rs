@@ -511,6 +511,61 @@ impl std::str::FromStr for RouteTarget {
 	}
 }
 
+/// A single MCP tool-name target for the `--allow-mcp` / `--deny-mcp`
+/// capability. Mirrors [`MethodTarget`] (RPC) and [`RouteTarget`] (HTTP) but
+/// keyed on MCP tool names. Matching is case-insensitive.
+#[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
+pub struct McpToolTarget(pub String);
+
+impl fmt::Display for McpToolTarget {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "{}", self.0)
+	}
+}
+
+impl Target for McpToolTarget {
+	fn matches(&self, elem: &Self) -> bool {
+		self.0.eq_ignore_ascii_case(&elem.0)
+	}
+}
+
+impl Target<str> for McpToolTarget {
+	fn matches(&self, elem: &str) -> bool {
+		self.0.eq_ignore_ascii_case(elem)
+	}
+}
+
+#[derive(Debug)]
+pub struct ParseMcpToolTargetError;
+
+impl std::error::Error for ParseMcpToolTargetError {}
+impl fmt::Display for ParseMcpToolTargetError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "The provided MCP tool target is not a valid MCP tool name")
+	}
+}
+
+/// The canonical set of MCP tool names that may be targeted by the
+/// `--allow-mcp` / `--deny-mcp` capability flags. Kept in sync with the
+/// `#[tool]` handlers registered on `McpService`.
+pub const MCP_TOOL_NAMES: &[&str] = &[
+	"query", "select", "create", "insert", "upsert", "update", "delete", "relate", "info", "list",
+	"use", "run", "gql", "graphql",
+];
+
+impl std::str::FromStr for McpToolTarget {
+	type Err = ParseMcpToolTargetError;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		let s = s.trim();
+		if MCP_TOOL_NAMES.iter().any(|n| n.eq_ignore_ascii_case(s)) {
+			Ok(McpToolTarget(s.to_ascii_lowercase()))
+		} else {
+			Err(ParseMcpToolTargetError)
+		}
+	}
+}
+
 #[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub enum ArbitraryQueryTarget {
 	Guest,
@@ -751,6 +806,8 @@ pub struct Capabilities {
 	pub deny_net: Targets<NetTarget>,
 	allow_rpc: Targets<MethodTarget>,
 	deny_rpc: Targets<MethodTarget>,
+	allow_mcp: Targets<McpToolTarget>,
+	deny_mcp: Targets<McpToolTarget>,
 	allow_http: Targets<RouteTarget>,
 	deny_http: Targets<RouteTarget>,
 	allow_experimental: Targets<ExperimentalTarget>,
@@ -765,7 +822,7 @@ impl fmt::Display for Capabilities {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(
 			f,
-			"scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}, allow_http={}, deny_http={}, allow_experimental={}, deny_experimental={}, allow_arbitrary_query={}, deny_arbitrary_query={}, allow_eval_query={}, deny_eval_query={},",
+			"scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}, allow_mcp={}, deny_mcp={}, allow_http={}, deny_http={}, allow_experimental={}, deny_experimental={}, allow_arbitrary_query={}, deny_arbitrary_query={}, allow_eval_query={}, deny_eval_query={},",
 			self.scripting,
 			self.guest_access,
 			self.live_query_notifications,
@@ -775,6 +832,8 @@ impl fmt::Display for Capabilities {
 			self.deny_net,
 			self.allow_rpc,
 			self.deny_rpc,
+			self.allow_mcp,
+			self.deny_mcp,
 			self.allow_http,
 			self.deny_http,
 			self.allow_experimental,
@@ -800,6 +859,8 @@ impl Default for Capabilities {
 			deny_net: Targets::None,
 			allow_rpc: Targets::All,
 			deny_rpc: Targets::None,
+			allow_mcp: Targets::All,
+			deny_mcp: Targets::None,
 			allow_http: Targets::All,
 			deny_http: Targets::None,
 			allow_experimental: Targets::None,
@@ -827,6 +888,8 @@ impl Capabilities {
 			deny_net: Targets::None,
 			allow_rpc: Targets::All,
 			deny_rpc: Targets::None,
+			allow_mcp: Targets::All,
+			deny_mcp: Targets::None,
 			allow_http: Targets::All,
 			deny_http: Targets::None,
 			allow_experimental: Targets::None,
@@ -852,6 +915,8 @@ impl Capabilities {
 			deny_net: Targets::None,
 			allow_rpc: Targets::None,
 			deny_rpc: Targets::None,
+			allow_mcp: Targets::None,
+			deny_mcp: Targets::None,
 			allow_http: Targets::None,
 			deny_http: Targets::None,
 			allow_experimental: Targets::None,
@@ -984,6 +1049,24 @@ impl Capabilities {
 		self
 	}
 
+	pub fn with_mcp_tools(mut self, allow_mcp: Targets<McpToolTarget>) -> Self {
+		self.allow_mcp = allow_mcp;
+		self
+	}
+
+	pub fn allowed_mcp_tools_mut(&mut self) -> &mut Targets<McpToolTarget> {
+		&mut self.allow_mcp
+	}
+
+	pub fn without_mcp_tools(mut self, deny_mcp: Targets<McpToolTarget>) -> Self {
+		self.deny_mcp = deny_mcp;
+		self
+	}
+
+	pub fn denied_mcp_tools_mut(&mut self) -> &mut Targets<McpToolTarget> {
+		&mut self.deny_mcp
+	}
+
 	pub fn with_http_routes(mut self, allow_http: Targets<RouteTarget>) -> Self {
 		self.allow_http = allow_http;
 		self
@@ -1070,6 +1153,10 @@ impl Capabilities {
 
 	pub fn allows_rpc_method(&self, target: &MethodTarget) -> bool {
 		self.allow_rpc.matches(target) && !self.deny_rpc.matches(target)
+	}
+
+	pub fn allows_mcp_tool(&self, target: &McpToolTarget) -> bool {
+		self.allow_mcp.matches(target) && !self.deny_mcp.matches(target)
 	}
 
 	pub fn allows_http_route(&self, target: &RouteTarget) -> bool {
@@ -1526,6 +1613,27 @@ mod tests {
 			.with_network_targets(Targets::Some([net("*.example.com")].into()));
 		assert!(!caps.allows_network_target(&net("example.com")));
 		assert!(!caps.allows_network_target(&net("93.184.216.34")));
+	}
+
+	#[test]
+	fn test_mcp_tool_target() {
+		assert!(
+			McpToolTarget::from_str("query")
+				.unwrap()
+				.matches(&McpToolTarget::from_str("QUERY").unwrap())
+		);
+		assert!(McpToolTarget::from_str("graphql").unwrap().matches("graphql"));
+		assert!(!McpToolTarget::from_str("graphql").unwrap().matches("gql"));
+		McpToolTarget::from_str("not_a_tool").unwrap_err();
+
+		let caps = Capabilities::default();
+		assert!(caps.allows_mcp_tool(&McpToolTarget::from_str("query").unwrap()));
+
+		let caps = Capabilities::default().without_mcp_tools(Targets::<McpToolTarget>::from(
+			McpToolTarget::from_str("graphql").unwrap(),
+		));
+		assert!(caps.allows_mcp_tool(&McpToolTarget::from_str("query").unwrap()));
+		assert!(!caps.allows_mcp_tool(&McpToolTarget::from_str("graphql").unwrap()));
 	}
 
 	#[test]

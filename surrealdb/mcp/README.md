@@ -93,6 +93,18 @@ forward the audit target to your SIEM as-is.
   inherit capability decisions; locking down `http::*`, `sql::*`, and
   filesystem-touching functions limits blast radius if a session is
   hijacked.
+- **Gate individual MCP tools** with `--deny-mcp` / `--allow-mcp` (env
+  `SURREAL_CAPS_DENY_MCP` / `SURREAL_CAPS_ALLOW_MCP`), which take a
+  comma-separated list of tool names (`query`, `select`, `create`,
+  `insert`, `upsert`, `update`, `delete`, `relate`, `info`, `list`,
+  `use`, `run`, `gql`, `graphql`) and gate `tools/call` by name, mirroring
+  `--deny-rpc` / `--deny-http`. For example, `--deny-mcp graphql,gql`
+  turns off the GraphQL tools while leaving the rest available; deny
+  overrides allow, and MCP is fully enabled by default. A denied call is
+  rejected in-band (audit `outcome = tool_error`, `kind =
+  capability_denied`) rather than executed. These flags gate `tools/call`
+  only; the resource, prompt, and completion surfaces expose metadata and
+  schema rather than query execution and are not affected.
 - **Define a least-privilege user** for MCP clients via
   `DEFINE USER ... ON DATABASE ROLES VIEWER` (or a custom role with
   table-level `PERMISSIONS`) rather than handing out root credentials.
