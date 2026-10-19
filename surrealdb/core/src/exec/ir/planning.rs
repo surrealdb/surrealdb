@@ -8,9 +8,10 @@
 //! 2. The binder builds the container and the region-constraint check judges it. A rejection is the
 //!    error the request is answered with ([`IrError::Rejected`]); the check runs only for a unit
 //!    the request wrote ([`UnitKind::checked`](super::UnitKind::checked)).
-//! 3. The fill reads the answers of every table read the container names, and the field statements
-//!    that stand where the catalog they read is the one they run against are given their checks
-//!    ([`fill_field_checks`]).
+//! 3. The fill reads the answers of every table read the container names, and, for an entry that
+//!    serves schema statements, the field statements that stand where the catalog they read is the
+//!    one they run against are given their checks
+//!    ([`SchemaBinding::fill_field_checks`](crate::exec::ir::build::stmt::SchemaBinding::fill_field_checks)).
 //! 4. The container is verified at the logical boundary, and leaves the bound phase.
 //! 5. The loop optimiser runs with [`PassConfig::PRODUCTION`] and the plan-time folder of the
 //!    request, and the row-independent record paths of the filters' predicates are folded for the
@@ -75,9 +76,7 @@ use crate::exec::logical::summaries::CatalogSummaries;
 use crate::exec::planner::Planner;
 use crate::exec::vm::PlanSession;
 use crate::exec::vm::fold_host::HOST_RUNNER;
-use crate::exec::vm::ir_catalog::{
-	PlannerLoader, fill, fill_field_checks, fill_record_folds, top_up,
-};
+use crate::exec::vm::ir_catalog::{PlannerLoader, fill, fill_record_folds, top_up};
 use crate::exec::vm::payload::Refusal;
 use crate::expr::logical::{LogicalExpr, LogicalOp, Schema, lower, lower_expr};
 use crate::expr::{Kind, PrefixOperator};
@@ -570,7 +569,9 @@ async fn plan_bound(
 		fill(&ir, planner, &mut memo).await?;
 		(ir.frames().clone(), FactCache::new())
 	});
-	compile_phase!("bind", fill_field_checks(&mut ir, &mut facts, planner).await?);
+	if let Some(schema) = planner.frozen().surface().schema_binding {
+		compile_phase!("bind", schema.fill_field_checks(&mut ir, &mut facts, planner).await?);
+	}
 	compile_phase!("bind", state_legalities(planner, bound, &notes, &mut facts).await);
 	{
 		let effects = EffectCx {

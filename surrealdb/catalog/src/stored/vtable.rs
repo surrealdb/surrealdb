@@ -47,8 +47,10 @@ pub struct CatalogVTable {
 ///
 /// `catalog_vtable!(T)` is for a type written in both grammars; `catalog_vtable!(stored T)` is for
 /// a type that has no `revision` form, whose container copies are refused;
-/// `catalog_vtable!(unserved T)` is the row of a type a table leaves out, which names the type and
-/// refuses every read and write of it with [`unserved`].
+/// `catalog_vtable!(read_only T)` is the row of a type a table reads as `catalog_vtable!(T)` does
+/// and refuses to write with [`unwritten`]; `catalog_vtable!(unserved T)` is the row of a type a
+/// table leaves out, which names the type and refuses every read and write of it with
+/// [`unserved`].
 #[macro_export]
 macro_rules! catalog_vtable {
 	($t:ty) => {
@@ -58,6 +60,16 @@ macro_rules! catalog_vtable {
 			encode_at: $crate::stored::vtable::encode_at::<$t>,
 			decode_embedded: $crate::stored::vtable::decode_embedded::<$t>,
 			encode_embedded: $crate::stored::vtable::encode_embedded::<$t>,
+			schemas: $crate::stored::vtable::schemas::<$t>,
+		}
+	};
+	(read_only $t:ty) => {
+		$crate::stored::CatalogVTable {
+			name: <$t as $crate::stored::StoredType>::SCHEMA.name,
+			decode: $crate::stored::vtable::decode::<$t>,
+			encode_at: $crate::stored::vtable::unwritten_encode_at::<$t>,
+			decode_embedded: $crate::stored::vtable::decode_embedded::<$t>,
+			encode_embedded: $crate::stored::vtable::unwritten_encode_embedded::<$t>,
 			schemas: $crate::stored::vtable::schemas::<$t>,
 		}
 	};
@@ -83,8 +95,7 @@ macro_rules! catalog_vtable {
 	};
 }
 
-/// The rows of the catalog types, each built once: [`CATALOG_TYPES`] and [`EDGE_CATALOG_TYPES`]
-/// both list these constants, so a type's functions are the same in either table.
+/// The rows of the catalog types, each built once, which [`CATALOG_TYPES`] lists.
 mod rows {
 	use super::*;
 
@@ -143,33 +154,36 @@ pub static CATALOG_TYPES: &[CatalogVTable] = &[
 	rows::ACCESS_GRANT,
 ];
 
-/// The catalog types an edge entry reads or writes through a key route: [`CATALOG_TYPES`] with
-/// the rows of the kinds the entry never meets (access methods and their grants, users, nodes, the
-/// live queries of a node, buckets) replaced by [`catalog_vtable!`]`(unserved T)`. A row stays at
-/// its position and keeps its name, so a type is the same index in both tables, and a key of a
-/// kind that is left out is refused with [`unserved`] rather than skipped. The rows of the kinds
-/// the table serves are the constants of `rows`, so their bytes are those of [`CATALOG_TYPES`].
+/// The catalog types an edge entry reads through a key route: [`CATALOG_TYPES`] with the rows of
+/// the kinds the entry never meets (access methods and their grants, users, nodes, the live
+/// queries of a node, buckets) replaced by [`catalog_vtable!`]`(unserved T)`, and every other row
+/// by [`catalog_vtable!`]`(read_only T)`. The table names no encoder: an edge entry writes a
+/// catalog entry only through the datastore's typed path (a namespace, database or table a write
+/// defines), never through the VM's codec, whose catalog writes are store steps of the schema
+/// statements the entry does not serve. A row stays at its position and keeps its name, so a type
+/// is the same index in both tables, and a key of a kind that is left out is refused with
+/// [`unserved`] rather than skipped.
 pub static EDGE_CATALOG_TYPES: &[CatalogVTable] = &[
-	rows::NAMESPACE,
-	rows::DATABASE,
-	rows::TABLE,
-	rows::FIELD,
-	rows::INDEX,
-	rows::EVENT,
-	rows::FUNCTION,
-	rows::PARAM,
+	catalog_vtable!(read_only NamespaceDefinition),
+	catalog_vtable!(read_only DatabaseDefinition),
+	catalog_vtable!(read_only StoredTableDefinition),
+	catalog_vtable!(read_only StoredFieldDefinition),
+	catalog_vtable!(read_only StoredIndexDefinition),
+	catalog_vtable!(read_only StoredEventDefinition),
+	catalog_vtable!(read_only StoredFunctionDefinition),
+	catalog_vtable!(read_only StoredParamDefinition),
 	catalog_vtable!(unserved StoredAccessDefinition),
 	catalog_vtable!(unserved UserDefinition),
-	rows::ANALYZER,
-	rows::SEQUENCE,
-	rows::MODULE,
-	rows::ML_MODEL,
+	catalog_vtable!(read_only AnalyzerDefinition),
+	catalog_vtable!(read_only SequenceDefinition),
+	catalog_vtable!(read_only StoredModuleDefinition),
+	catalog_vtable!(read_only StoredMlModelDefinition),
 	catalog_vtable!(unserved StoredBucketDefinition),
-	rows::API,
-	rows::CONFIG,
-	rows::SUBSCRIPTION,
+	catalog_vtable!(read_only StoredApiDefinition),
+	catalog_vtable!(read_only StoredConfigDefinition),
+	catalog_vtable!(read_only StoredSubscriptionDefinition),
 	catalog_vtable!(unserved Node),
-	rows::TASK_LEASE,
+	catalog_vtable!(read_only TaskLease),
 	catalog_vtable!(unserved NodeLiveQuery),
 	catalog_vtable!(unserved AccessGrant),
 ];
@@ -270,6 +284,27 @@ pub fn schemas<T: StoredType>(out: &mut Vec<&'static TypeSchema>) {
 /// The refusal of a read or write of the catalog type `T`, whose row a table leaves out.
 pub fn unserved<T: StoredType>() -> anyhow::Error {
 	anyhow::anyhow!("catalog kind {} is not served by this entry", T::SCHEMA.name)
+}
+
+/// The refusal of a write of the catalog type `T`, whose row a table reads only.
+pub fn unwritten<T: StoredType>() -> anyhow::Error {
+	anyhow::anyhow!("catalog kind {} is not written by this entry", T::SCHEMA.name)
+}
+
+/// [`CatalogVTable::encode_at`] of a type a table reads only: refused.
+pub fn unwritten_encode_at<T: StoredType>(
+	_value: &Value,
+	_ctx: &EncodeContext<'_>,
+) -> anyhow::Result<Encoded> {
+	Err(unwritten::<T>())
+}
+
+/// [`CatalogVTable::encode_embedded`] of a type a table reads only: refused.
+pub fn unwritten_encode_embedded<T: StoredType>(
+	_value: &Value,
+	_out: &mut Vec<u8>,
+) -> anyhow::Result<()> {
+	Err(unwritten::<T>())
 }
 
 /// [`CatalogVTable::decode`] of a type a table leaves out: refused.

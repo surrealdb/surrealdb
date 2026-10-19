@@ -16,6 +16,7 @@
 //! fails at that statement.
 
 pub(crate) use super::ir::build::match_fold::MatchBinding;
+pub(crate) use super::ir::build::stmt::SchemaBinding;
 pub(crate) use super::vm::codec::Codec;
 pub(crate) use super::vm::ir_lower::{ExplainLowering, SchemaLowering};
 pub(crate) use super::vm::store::SchemaSteps;
@@ -23,6 +24,9 @@ pub(crate) use super::vm::store::SchemaSteps;
 /// The statement families an entry serves, as the hooks that lower and run the ones that are not
 /// data statements.
 pub(crate) struct Surface {
+	/// Binds schema statements, `INFO`, `LIVE`, `KILL`, `USE`, `OPTION`, `ACCESS` and `SHOW`.
+	/// `None` refuses each of them.
+	pub(crate) schema_binding: Option<&'static (dyn SchemaBinding + Sync)>,
 	/// Lowers schema statements, `INFO`, `LIVE`, `KILL`, `USE`, `OPTION`, `ACCESS` and `SHOW`.
 	/// `None` refuses each of them.
 	pub(crate) schema_lowering: Option<&'static (dyn SchemaLowering + Sync)>,
@@ -39,6 +43,7 @@ pub(crate) struct Surface {
 
 /// The data statements alone.
 pub(crate) static DML: Surface = Surface {
+	schema_binding: None,
 	schema_lowering: None,
 	schema_steps: None,
 	explain_lowering: None,
@@ -48,6 +53,7 @@ pub(crate) static DML: Surface = Surface {
 
 /// Every statement family.
 pub(crate) static FULL: Surface = Surface {
+	schema_binding: Some(&crate::exec::ir::build::stmt::FULL_SCHEMA_BINDING),
 	schema_lowering: Some(&crate::exec::vm::ir_lower::FULL_SCHEMA_LOWERING),
 	schema_steps: Some(&crate::exec::vm::store::FULL_SCHEMA_STEPS),
 	explain_lowering: Some(&crate::exec::vm::ir_lower::FULL_EXPLAIN_LOWERING),

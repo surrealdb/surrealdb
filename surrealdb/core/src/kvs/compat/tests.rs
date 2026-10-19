@@ -148,8 +148,14 @@ const EDGE_UNSERVED: &[&str] = &[
 	"StoredBucketDefinition",
 ];
 
-/// The edge codec reads the fixture of a kind it serves as the full codec does and writes back
-/// the bytes `expected`, and refuses the fixture of a kind it leaves out by naming the kind.
+/// The types that are not catalog kinds but can hold a catalog entry: the edge codec refuses to
+/// write a value of one that holds an entry.
+const EDGE_CATALOG_HOLDERS: &[&str] = &["TableMutations"];
+
+/// The edge codec reads the fixture of a kind it serves as the full codec does, and writes back
+/// the bytes `expected`, except a catalog kind, and a value of an [`EDGE_CATALOG_HOLDERS`] type
+/// that holds a catalog entry, which it refuses to write; the full codec writes back `expected`
+/// either way. It refuses the fixture of a kind it leaves out by naming the kind.
 fn assert_edge_codec_agrees(
 	type_name: &str,
 	fixture: &[u8],
@@ -162,8 +168,20 @@ fn assert_edge_codec_agrees(
 			assert!(!EDGE_UNSERVED.contains(&type_name), "the edge codec read a {type_name}");
 			assert_eq!(Some(&value), decode(&FULL_CODEC, type_name, fixture).ok().as_ref());
 			let value = ctx.read(value);
-			let written = encode(&EDGE_CODEC, type_name, &value).unwrap();
-			assert_eq!(written, expected, "the edge codec wrote a {type_name} differently");
+			let catalog = crate::catalog::stored::CATALOG_TYPES.iter().any(|t| t.name == type_name);
+			match encode(&EDGE_CODEC, type_name, &value) {
+				Ok(written) => {
+					assert!(!catalog, "the edge codec wrote a {type_name}");
+					assert_eq!(written, expected, "the edge codec wrote a {type_name} differently")
+				}
+				Err(error) => assert!(
+					(catalog || EDGE_CATALOG_HOLDERS.contains(&type_name))
+						&& format!("{error:#}").contains("is not written by this entry"),
+					"the edge codec refused to write a {type_name}: {error:#}"
+				),
+			}
+			let written = encode(&FULL_CODEC, type_name, &value).unwrap();
+			assert_eq!(written, expected, "the full codec wrote a {type_name} differently");
 		}
 		Err(error) => {
 			assert!(EDGE_UNSERVED.contains(&type_name), "the edge codec refused a {type_name}");

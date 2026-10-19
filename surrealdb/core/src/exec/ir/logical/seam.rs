@@ -30,6 +30,7 @@ use crate::exec::ir::build::logical::{
 	bind_closure, bind_loop_site, bind_value_statement, receives_row,
 };
 use crate::exec::ir::build::match_fold::MatchBinding;
+use crate::exec::ir::build::stmt::SchemaBinding;
 use crate::exec::ir::cache::deps::ValueDeps;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::Ir;
@@ -625,8 +626,8 @@ impl<'a> BindCx<'a> {
 		self.serves_late = serves_late;
 	}
 
-	/// Sets the surface of the entry the container is bound for. Without it, a `MATCH` and a
-	/// schema statement are refused.
+	/// Sets the surface of the entry the container is bound for. Without it, a `MATCH`, a
+	/// schema statement, `INFO`, `LIVE`, `KILL`, `USE`, `OPTION`, `ACCESS` and `SHOW` are refused.
 	pub(crate) fn set_surface(&mut self, surface: Option<&'static Surface>) {
 		self.surface = surface;
 	}
@@ -634,6 +635,11 @@ impl<'a> BindCx<'a> {
 	/// The binding of a `MATCH` statement, if the entry serves one.
 	pub(crate) fn match_binding(&self) -> Option<&'static (dyn MatchBinding + Sync)> {
 		self.surface.and_then(|surface| surface.match_binding)
+	}
+
+	/// The binding of the statements that are not data statements, if the entry serves them.
+	pub(crate) fn schema_binding(&self) -> Option<&'static (dyn SchemaBinding + Sync)> {
+		self.surface.and_then(|surface| surface.schema_binding)
 	}
 
 	/// The codec that reads the definitions of the schema statements bound for this entry.

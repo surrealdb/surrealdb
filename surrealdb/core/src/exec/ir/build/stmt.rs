@@ -15,6 +15,7 @@
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
+use surrealdb_expr::parser::TopLevelExpr;
 use surrealdb_strand::Strand;
 use surrealdb_types::ToSql;
 
@@ -23,6 +24,9 @@ use super::logical::{
 	owner_flow, raise_refused, row_clause, statements_of,
 };
 use super::match_fold;
+use crate::exec::BoxFut;
+use crate::exec::ir::core::facts::FactCache;
+use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::ExprOp;
 use crate::exec::ir::iface::ids::{OpId, ValueId};
@@ -35,6 +39,8 @@ use crate::exec::ir::logical::seam::{BindCx, Built, bind_expr, invariant};
 use crate::exec::ir::logical::verify::timestamp_arg;
 use crate::exec::ir::logical::{access, live};
 use crate::exec::ir::op_kind::OpKind;
+use crate::exec::planner::Planner;
+use crate::exec::vm::ir_catalog::fill_field_checks;
 use crate::exec::vm::payload::Refusal;
 use crate::expr::Expr;
 use crate::expr::logical::{
@@ -76,12 +82,96 @@ fn bind_all<'a>(
 }
 
 // ---------------------------------------------------------------------------------------------
+// The hook
+// ---------------------------------------------------------------------------------------------
+
+/// The refusal of a statement the entry's surface leaves out.
+pub(crate) const NOT_SERVED_SCHEMA: &str = "ir build: a schema, INFO, LIVE, KILL, USE, OPTION, ACCESS or SHOW statement is not served by this entry";
+
+/// Binds the statements that are not data statements: schema statements, `INFO`, `LIVE`, `KILL`,
+/// `USE`, `OPTION`, `ACCESS` and `SHOW`.
+///
+/// The binder reaches them only through this hook, held by the binding context as an `Option`.
+/// The context of an entry that serves them holds [`FULL_SCHEMA_BINDING`]; one that does not holds
+/// nothing, names none of their binding, and refuses each of them with [`NOT_SERVED_SCHEMA`].
+pub(crate) trait SchemaBinding {
+	/// Binds the schema statement `ddl` ([`bind_ddl`]).
+	fn ddl(&self, cx: &mut BindCx<'_>, ddl: &LogicalDdl) -> Result<Flow, IrError>;
+	/// Binds `INFO` ([`bind_info`]).
+	fn info(&self, cx: &mut BindCx<'_>, info: &LogicalInfo) -> Result<Flow, IrError>;
+	/// Binds the top-level statement `statement`, an `OPTION`, `USE`, `ACCESS`, `KILL`, `LIVE` or
+	/// `SHOW`. Any other statement is an invariant break.
+	fn statement(&self, cx: &mut BindCx<'_>, statement: &TopLevelExpr) -> Result<Flow, IrError>;
+	/// Gives the field statements of the bound container `ir` their catalog checks
+	/// ([`fill_field_checks`]). An entry without this hook binds no field statement, so it has
+	/// none to check.
+	fn fill_field_checks<'a>(
+		&'a self,
+		ir: &'a mut Ir,
+		facts: &'a mut FactCache,
+		planner: &'a Planner<'_>,
+	) -> BoxFut<'a, Result<(), IrError>>;
+}
+
+/// The binding of every statement family [`SchemaBinding`] covers.
+pub(crate) struct FullSchemaBinding;
+
+/// The one [`FullSchemaBinding`], named only by the surface that serves those statements.
+pub(crate) static FULL_SCHEMA_BINDING: FullSchemaBinding = FullSchemaBinding;
+
+impl SchemaBinding for FullSchemaBinding {
+	fn ddl(&self, cx: &mut BindCx<'_>, ddl: &LogicalDdl) -> Result<Flow, IrError> {
+		bind_ddl(cx, ddl)
+	}
+
+	fn info(&self, cx: &mut BindCx<'_>, info: &LogicalInfo) -> Result<Flow, IrError> {
+		bind_info(cx, info)
+	}
+
+	fn statement(&self, cx: &mut BindCx<'_>, statement: &TopLevelExpr) -> Result<Flow, IrError> {
+		match statement {
+			TopLevelExpr::Option(statement) => bind_option(cx, statement),
+			TopLevelExpr::Use(statement) => bind_use(cx, statement),
+			TopLevelExpr::Access(statement) => bind_access(cx, statement),
+			TopLevelExpr::Kill(statement) => bind_kill(cx, statement),
+			TopLevelExpr::Live(statement) => bind_live(cx, statement),
+			TopLevelExpr::Show(statement) => bind_show(cx, statement),
+			TopLevelExpr::Expr(_)
+			| TopLevelExpr::Begin(_)
+			| TopLevelExpr::Commit
+			| TopLevelExpr::Cancel => {
+				Err(invariant("a data or transaction statement bound as a schema statement"))
+			}
+		}
+	}
+
+	fn fill_field_checks<'a>(
+		&'a self,
+		ir: &'a mut Ir,
+		facts: &'a mut FactCache,
+		planner: &'a Planner<'_>,
+	) -> BoxFut<'a, Result<(), IrError>> {
+		Box::pin(fill_field_checks(ir, facts, planner))
+	}
+}
+
+/// The binding `cx` holds for the statements that are not data statements, or
+/// [`NOT_SERVED_SCHEMA`] where its entry serves data statements alone.
+pub(super) fn schema_binding(
+	cx: &BindCx<'_>,
+) -> Result<&'static (dyn SchemaBinding + Sync), IrError> {
+	cx.schema_binding().ok_or(IrError::NotYet {
+		what: NOT_SERVED_SCHEMA,
+	})
+}
+
+// ---------------------------------------------------------------------------------------------
 // Schema statements
 // ---------------------------------------------------------------------------------------------
 
 /// A schema statement: its checks and operands in the order of its form, then its op and the
 /// regions of its stored clauses.
-pub(super) fn bind_ddl(cx: &mut BindCx<'_>, ddl: &LogicalDdl) -> Result<Flow, IrError> {
+fn bind_ddl(cx: &mut BindCx<'_>, ddl: &LogicalDdl) -> Result<Flow, IrError> {
 	let checks = ddl::checks_of(cx.catalog(), &ddl.statement);
 	let plan = ddl::plan(&ddl.statement, checks, cx.codec()?)?;
 	if let Some(refusal) = &plan.planning_refusal {
@@ -237,7 +327,7 @@ fn bind_region(
 /// `INFO`: the operands of its subject, then its `VERSION`, in the order the plan lists them. A
 /// name written bare (a table, a user or an index) is a string literal; any other name is the
 /// value of its expression, which lowering reads as a string.
-pub(super) fn bind_info(cx: &mut BindCx<'_>, info: &LogicalInfo) -> Result<Flow, IrError> {
+fn bind_info(cx: &mut BindCx<'_>, info: &LogicalInfo) -> Result<Flow, IrError> {
 	let (subject, structure) = match info {
 		LogicalInfo::Root {
 			structure,
@@ -318,10 +408,7 @@ pub(super) fn bind_info(cx: &mut BindCx<'_>, info: &LogicalInfo) -> Result<Flow,
 // ---------------------------------------------------------------------------------------------
 
 /// `ACCESS`: the operands the statement evaluates, then the op and the filter of its grants.
-pub(super) fn bind_access(
-	cx: &mut BindCx<'_>,
-	statement: &AccessStatement,
-) -> Result<Flow, IrError> {
+fn bind_access(cx: &mut BindCx<'_>, statement: &AccessStatement) -> Result<Flow, IrError> {
 	let plan = access::plan_access(statement);
 	let mut operands = Vec::with_capacity(plan.operands.len());
 	for expr in &plan.operands {
@@ -345,7 +432,7 @@ pub(super) fn bind_access(
 ///
 /// Errors that name the statement print the id as written. The op keeps that text as its
 /// location's surface text. The digest ignores it, whether or not the statement is explained.
-pub(super) fn bind_kill(cx: &mut BindCx<'_>, statement: &KillStatement) -> Result<Flow, IrError> {
+fn bind_kill(cx: &mut BindCx<'_>, statement: &KillStatement) -> Result<Flow, IrError> {
 	let Built::Value(id) = bind_expr(cx, &lowered(&statement.id)?)? else {
 		return Ok(Flow::Diverged);
 	};
@@ -356,7 +443,7 @@ pub(super) fn bind_kill(cx: &mut BindCx<'_>, statement: &KillStatement) -> Resul
 
 /// `LIVE`: the target, then the op and the stored clauses its subscription holds: the
 /// projection, the filter and the fetch paths, in that order.
-pub(super) fn bind_live(cx: &mut BindCx<'_>, statement: &LiveStatement) -> Result<Flow, IrError> {
+fn bind_live(cx: &mut BindCx<'_>, statement: &LiveStatement) -> Result<Flow, IrError> {
 	let plan = live::plan_live(statement, cx.codec()?)?;
 	let Built::Value(target) = bind_expr(cx, &lowered(plan.target)?)? else {
 		return Ok(Flow::Diverged);
@@ -398,7 +485,7 @@ pub(super) fn bind_live(cx: &mut BindCx<'_>, statement: &LiveStatement) -> Resul
 }
 
 /// `SHOW CHANGES`: its attributes alone.
-pub(super) fn bind_show(cx: &mut BindCx<'_>, statement: &ShowStatement) -> Result<Flow, IrError> {
+fn bind_show(cx: &mut BindCx<'_>, statement: &ShowStatement) -> Result<Flow, IrError> {
 	cx.emit_value(
 		OpKind::Logical(LogOp::Show(Box::new(access::show_attrs(statement)))),
 		&[],
@@ -408,10 +495,7 @@ pub(super) fn bind_show(cx: &mut BindCx<'_>, statement: &ShowStatement) -> Resul
 }
 
 /// `OPTION`: its attributes alone.
-pub(super) fn bind_option(
-	cx: &mut BindCx<'_>,
-	statement: &OptionStatement,
-) -> Result<Flow, IrError> {
+fn bind_option(cx: &mut BindCx<'_>, statement: &OptionStatement) -> Result<Flow, IrError> {
 	cx.emit_value(
 		OpKind::Logical(LogOp::Option {
 			name: Strand::new(statement.name.as_str()),
@@ -426,7 +510,7 @@ pub(super) fn bind_option(
 /// `USE`: the namespace, then the database, each when the target names it. A name written bare is
 /// a string literal: it reads no row, and a `USE` whose names are all literals is one the request
 /// carries as written.
-pub(super) fn bind_use(cx: &mut BindCx<'_>, statement: &UseStatement) -> Result<Flow, IrError> {
+fn bind_use(cx: &mut BindCx<'_>, statement: &UseStatement) -> Result<Flow, IrError> {
 	let (target, exprs): (UseTarget, Vec<&Expr>) = match statement {
 		UseStatement::Ns(ns) => (UseTarget::Ns, vec![ns]),
 		UseStatement::Db(db) => (UseTarget::Db, vec![db]),

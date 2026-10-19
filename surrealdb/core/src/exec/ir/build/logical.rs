@@ -535,28 +535,13 @@ fn bind_statement(cx: &mut BindCx<'_>, statement: RequestStatement<'_>) -> Resul
 		TopLevelExpr::Begin(_) | TopLevelExpr::Commit | TopLevelExpr::Cancel => {
 			Err(invariant("a transaction control is bound by the body its slot names"))
 		}
-		TopLevelExpr::Option(statement) => {
-			let flow = stmt::bind_option(cx, statement)?;
-			close_statement(cx, flow)
-		}
-		TopLevelExpr::Use(statement) => {
-			let flow = stmt::bind_use(cx, statement)?;
-			close_statement(cx, flow)
-		}
-		TopLevelExpr::Access(statement) => {
-			let flow = stmt::bind_access(cx, statement)?;
-			close_statement(cx, flow)
-		}
-		TopLevelExpr::Kill(statement) => {
-			let flow = stmt::bind_kill(cx, statement)?;
-			close_statement(cx, flow)
-		}
-		TopLevelExpr::Live(statement) => {
-			let flow = stmt::bind_live(cx, statement)?;
-			close_statement(cx, flow)
-		}
-		TopLevelExpr::Show(statement) => {
-			let flow = stmt::bind_show(cx, statement)?;
+		TopLevelExpr::Option(_)
+		| TopLevelExpr::Use(_)
+		| TopLevelExpr::Access(_)
+		| TopLevelExpr::Kill(_)
+		| TopLevelExpr::Live(_)
+		| TopLevelExpr::Show(_) => {
+			let flow = stmt::schema_binding(cx)?.statement(cx, statement)?;
 			close_statement(cx, flow)
 		}
 	}
@@ -837,9 +822,9 @@ fn bind_op(cx: &mut BindCx<'_>, op: &LogicalOp, pos: Pos) -> Result<Flow, IrErro
 		LogicalOp::Match(statement) => stmt::bind_match(cx, statement),
 		LogicalOp::Ddl(statement) => {
 			cx.note_catalog_touch();
-			stmt::bind_ddl(cx, statement)
+			stmt::schema_binding(cx)?.ddl(cx, statement)
 		}
-		LogicalOp::Info(info) => stmt::bind_info(cx, info),
+		LogicalOp::Info(info) => stmt::schema_binding(cx)?.info(cx, info),
 	}
 }
 
