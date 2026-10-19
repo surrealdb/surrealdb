@@ -917,11 +917,8 @@ mod tests {
 	}
 
 	/// Decodes JSON rows that are integers, which is all these tests encode.
-	fn decode_ints(
-		_: crate::RowFormat,
-		bytes: &[u8],
-		count: usize,
-	) -> Result<Vec<Value>, TypesError> {
+	fn decode_ints(rows: &EncodedRows) -> Result<Vec<Value>, TypesError> {
+		let (bytes, count) = (rows.bytes(), rows.len());
 		let text = std::str::from_utf8(bytes).map_err(|e| TypesError::internal(e.to_string()))?;
 		let values: Vec<Value> = text
 			.split(',')

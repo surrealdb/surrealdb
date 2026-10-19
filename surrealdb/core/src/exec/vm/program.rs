@@ -21,6 +21,7 @@
 use std::sync::Arc;
 
 use surrealdb_strand::{Strand, TableName};
+use surrealdb_types::shaped::Shape as SeedShape;
 
 use super::codec::TypeId;
 use super::codec::key::RouteId;
@@ -6703,6 +6704,11 @@ pub(crate) struct Program {
 	/// The table the statement reads, for `EXPLAIN`; none for a statement
 	/// over a value.
 	pub(super) table: Option<TableName>,
+	/// The seed shape of the statement's rows written shaped
+	/// ([`crate::exec::shaped::seed_shape`]): the fields of [`Self::table`] the
+	/// principal the program was compiled for may see, from the catalog it was
+	/// planned over. `None` without a table or a database.
+	pub(super) shaped_seed: Option<std::sync::Arc<SeedShape>>,
 	/// For a write statement, what its body is run with.
 	pub(super) write: Option<WriteSpec>,
 	/// Whether the statement's value is its one row rather than its rows.

@@ -393,3 +393,108 @@ fn segment(columns: &[Column], index: usize, depth: usize) -> Result<&str, Packe
 		},
 	)
 }
+
+/// A column's state from its own presence bits, which hold only while every object node enclosing
+/// it is present.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ColumnState {
+	/// NONE.
+	Absent,
+	/// `NULL`.
+	Null,
+	/// A value in the column's slot, or an object node that is present.
+	Present,
+}
+
+impl<'a> PackedRow<'a> {
+	/// The state column `index`'s own presence bits give it.
+	#[inline]
+	pub fn column_state(&self, index: usize) -> Result<ColumnState, PackedError> {
+		let column = self.descriptor.columns.get(index).ok_or(PackedError::NoColumn {
+			column: id_of(index),
+		})?;
+		Ok(match self.state(column.presence, id_of(index))? {
+			State::Absent => ColumnState::Absent,
+			State::Null => ColumnState::Null,
+			State::Present => ColumnState::Present,
+		})
+	}
+
+	/// The value of leaf column `index`, which is present, read in place as a visit reads it.
+	#[inline]
+	///
+	/// An escaped slot's payload is sought in the trailer from `*trailer` on, which is left past
+	/// it: a reader that reads columns in ascending order with one cursor, from 0, reads each
+	/// trailer entry at most once.
+	pub fn column_value(
+		&self,
+		index: usize,
+		trailer: &mut usize,
+	) -> Result<FieldRef<'a>, PackedError> {
+		let column: &'a Column =
+			self.descriptor.columns.get(index).ok_or(PackedError::NoColumn {
+				column: id_of(index),
+			})?;
+		self.visit_slot(column, index, trailer)
+	}
+
+	/// The stored bytes of variable column `index`, unchecked: a string's UTF-8 as written.
+	#[inline]
+	pub fn column_bytes(&self, index: usize) -> Result<&'a [u8], PackedError> {
+		match self.descriptor.columns.get(index).map(|column| column.location) {
+			Some(Location::Var(var)) => self.var_slice(widen(var)),
+			_ => Err(PackedError::Slot {
+				column: id_of(index),
+				reason: "a column without a variable slot",
+			}),
+		}
+	}
+
+	/// The remainder column `index` of the open node at depth `depth`: its object when its bit is
+	/// set, `None` when it is clear.
+	pub fn column_remainder(
+		&self,
+		index: usize,
+		depth: usize,
+	) -> Result<Option<ObjectRef<'a>>, PackedError> {
+		let column = self.descriptor.columns.get(index).ok_or(PackedError::NoColumn {
+			column: id_of(index),
+		})?;
+		self.visit_remainder(column, index, depth)
+	}
+
+	/// The `width` bytes at fixed offset `offset` of the row, inside its fixed region.
+	#[inline]
+	pub fn fixed_bytes(&self, offset: usize, width: usize) -> Result<&'a [u8], PackedError> {
+		self.fixed(offset, width)
+	}
+}
+
+impl<'a> PackedRow<'a> {
+	/// Where variable slice `var` ends, from the start of the variable region.
+	#[inline]
+	pub fn var_end(&self, var: usize) -> Result<usize, PackedError> {
+		let end = self.end(var)?;
+		if end > self.var_len {
+			return Err(PackedError::EndOffset {
+				var: id_of(var),
+			});
+		}
+		Ok(end)
+	}
+
+	/// The bytes `from..to` of the variable region.
+	#[inline]
+	pub fn var_bytes(&self, from: usize, to: usize) -> Result<&'a [u8], PackedError> {
+		let bad = PackedError::EndOffset {
+			var: u32::MAX,
+		};
+		if from > to || to > self.var_len {
+			return Err(bad);
+		}
+		let start = self.var.checked_add(from).ok_or(bad)?;
+		let end = self.var.checked_add(to).ok_or(bad)?;
+		let body: &'a [u8] = self.body;
+		body.get(start..end).ok_or(bad)
+	}
+}

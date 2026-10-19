@@ -6,6 +6,7 @@ use surrealdb_core::rpc::format::Format;
 use surrealdb_rpc::error::{invalid_request, parse_error};
 use surrealdb_rpc::request::Request;
 use surrealdb_rpc::{DbResponse, EncodedRows, RowFormat};
+use surrealdb_types::shaped::ShapeScope;
 use surrealdb_types::{Error as TypesError, SurrealValue, Value};
 
 use crate::ntw::headers::{Accept, ContentType};
@@ -18,6 +19,7 @@ impl From<&Accept> for Format {
 			Accept::ApplicationCbor => Format::Cbor,
 			Accept::ApplicationOctetStream => Format::Unsupported,
 			Accept::ApplicationFlatbuffers => Format::Flatbuffers,
+			Accept::ApplicationShaped => Format::shaped(),
 		}
 	}
 }
@@ -30,6 +32,7 @@ impl From<&ContentType> for Format {
 			ContentType::ApplicationCbor => Format::Cbor,
 			ContentType::ApplicationOctetStream => Format::Unsupported,
 			ContentType::ApplicationSurrealDBFlatbuffers => Format::Flatbuffers,
+			ContentType::ApplicationSurrealDBShaped => Format::shaped(),
 		}
 	}
 }
@@ -40,6 +43,7 @@ impl From<&Format> for ContentType {
 			Format::Json => ContentType::ApplicationJson,
 			Format::Cbor => ContentType::ApplicationCbor,
 			Format::Flatbuffers => ContentType::ApplicationSurrealDBFlatbuffers,
+			Format::Shaped => ContentType::ApplicationSurrealDBShaped,
 			Format::Unsupported => ContentType::ApplicationOctetStream,
 		}
 	}
@@ -69,6 +73,7 @@ pub trait WsFormat {
 		session_id: Option<uuid::Uuid>,
 		index: usize,
 		rows: &EncodedRows,
+		scope: &mut ShapeScope,
 	) -> Option<Result<(usize, Message), TypesError>>;
 }
 
@@ -81,7 +86,10 @@ impl WsFormat for Format {
 		};
 		match self {
 			Format::Json => surrealdb_core::rpc::format::json::request_id(data),
-			Format::Cbor => surrealdb_core::rpc::format::cbor::request_id(data, recursion_limit),
+			// A shaped connection's requests are CBOR.
+			Format::Cbor | Format::Shaped => {
+				surrealdb_core::rpc::format::cbor::request_id(data, recursion_limit)
+			}
 			Format::Flatbuffers | Format::Unsupported => None,
 		}
 	}
@@ -99,7 +107,8 @@ impl WsFormat for Format {
 					Err(parse_error())
 				}
 			}
-			Format::Cbor => {
+			// A shaped connection's requests are CBOR.
+			Format::Cbor | Format::Shaped => {
 				let val = surrealdb_core::rpc::format::cbor::decode(&val, recursion_limit)
 					.map_err(|_| parse_error())?;
 				if let Value::Object(obj) = val {
@@ -128,10 +137,11 @@ impl WsFormat for Format {
 		session_id: Option<uuid::Uuid>,
 		index: usize,
 		rows: &EncodedRows,
+		scope: &mut ShapeScope,
 	) -> Option<Result<(usize, Message), TypesError>> {
 		let format = self.row_format().filter(|format| *format == rows.format())?;
 		let encoded = surrealdb_core::rpc::format::encoded::encode_stream_rows(
-			format, id, session_id, index, rows,
+			format, id, session_id, index, rows, scope,
 		)
 		.map_err(|_| parse_error());
 		Some(encoded.and_then(|bytes| match format {
@@ -139,7 +149,7 @@ impl WsFormat for Format {
 				let text = String::from_utf8(bytes).map_err(|_| parse_error())?;
 				Ok((text.len(), Message::Text(text.into())))
 			}
-			RowFormat::Cbor => Ok((bytes.len(), Message::Binary(bytes.into()))),
+			RowFormat::Cbor | RowFormat::Shaped => Ok((bytes.len(), Message::Binary(bytes.into()))),
 		}))
 	}
 
@@ -152,6 +162,10 @@ impl WsFormat for Format {
 			}
 			Format::Cbor => {
 				let val = encode_response(RowFormat::Cbor, res)?;
+				Ok((val.len(), Message::Binary(val.into())))
+			}
+			Format::Shaped => {
+				let val = encode_response(RowFormat::Shaped, res)?;
 				Ok((val.len(), Message::Binary(val.into())))
 			}
 			Format::Flatbuffers => {
@@ -184,7 +198,8 @@ impl HttpFormat for Format {
 					Err(parse_error())
 				}
 			}
-			Format::Cbor => {
+			// A shaped request is CBOR.
+			Format::Cbor | Format::Shaped => {
 				let val = surrealdb_core::rpc::format::cbor::decode(&body, recursion_limit)
 					.map_err(|_| parse_error())?;
 				if let Value::Object(obj) = val {
@@ -210,6 +225,7 @@ impl HttpFormat for Format {
 		let val = match self {
 			Format::Json => encode_response(RowFormat::Json, res)?,
 			Format::Cbor => encode_response(RowFormat::Cbor, res)?,
+			Format::Shaped => encode_response(RowFormat::Shaped, res)?,
 			Format::Flatbuffers => {
 				let res_value = res.into_value();
 				surrealdb_types::encode(&res_value).map_err(|_| parse_error())?
@@ -221,5 +237,33 @@ impl HttpFormat for Format {
 			.header(CONTENT_TYPE, ContentType::from(self))
 			.body(val.into())
 			.map_err(|_| parse_error())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use axum_extra::headers::Header as _;
+	use http::HeaderValue;
+	use surrealdb_core::rpc::format::{Format, PROTOCOLS};
+
+	use crate::ntw::headers::{Accept, ContentType};
+
+	/// `shaped` is negotiated as every format is: a WebSocket subprotocol, an `Accept` and a
+	/// `Content-Type`; its responses are binary CBOR and its requests are read as CBOR.
+	#[test]
+	fn shaped_is_negotiated_as_the_other_formats_are() {
+		assert!(PROTOCOLS.contains(&"shaped"));
+		assert_eq!(Format::from("shaped"), Format::Shaped);
+		let value = HeaderValue::from_static(surrealdb_rpc::format::SHAPED);
+		let accept = Accept::decode(&mut std::iter::once(&value)).expect("decodes");
+		assert_eq!(Format::from(&accept), Format::Shaped);
+		let content_type = ContentType::decode(&mut std::iter::once(&value)).expect("decodes");
+		assert_eq!(Format::from(&content_type), Format::Shaped);
+		assert_eq!(
+			HeaderValue::from(ContentType::from(&Format::Shaped)),
+			HeaderValue::from_static(surrealdb_rpc::format::SHAPED)
+		);
+		assert_eq!(Format::Shaped.row_format(), Some(surrealdb_rpc::RowFormat::Shaped));
+		assert_eq!(Format::Cbor.row_format(), Some(surrealdb_rpc::RowFormat::Cbor));
 	}
 }

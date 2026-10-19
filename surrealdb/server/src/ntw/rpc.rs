@@ -174,12 +174,15 @@ async fn post_handler(
 	}
 	// Get the output format from the Accept header
 	let out: Option<Format> = accept.as_deref().map(Into::into);
-	// Check that the input format and the output format match
+	// Check that the input format and the output format match. A shaped response answers a
+	// CBOR request: shaped is CBOR with result rows as shaped blocks.
 	if let Some(out) = out
 		&& fmt != out
+		&& !(fmt == Format::Cbor && out == Format::Shaped)
 	{
 		return Err(NetError::InvalidType.into());
 	}
+	let fmt = out.unwrap_or(fmt);
 	let rpc = &*rpc_state.http;
 	// Snapshot the caller's request-level auth principal BEFORE moving the
 	// session into the ephemeral slot. This principal (derived by the

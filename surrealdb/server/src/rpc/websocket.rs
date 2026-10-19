@@ -188,6 +188,15 @@ pub struct Websocket {
 	/// notification queue full at once, one close frame is queued and the
 	/// client always learns the reason.
 	pub(crate) lagging_close: Sender<Message>,
+	/// On a shaped connection, each live query's shape scope and the shaper of its
+	/// notifications' payloads, from its first notification until its last (`KILLED`).
+	/// Per-connection, like every other registry here.
+	pub(crate) live_shapes: std::sync::Mutex<
+		std::collections::HashMap<
+			Uuid,
+			(surrealdb_types::shaped::ValueShaper, surrealdb_types::shaped::ShapeScope),
+		>,
+	>,
 }
 
 impl Websocket {
@@ -235,6 +244,7 @@ impl Websocket {
 			channel: sender.clone(),
 			notifications: notifier.clone(),
 			lagging_close: closer.clone(),
+			live_shapes: Default::default(),
 			datastore,
 		});
 
@@ -1098,7 +1108,11 @@ impl Websocket {
 		// slot. The queue carries notifications alone, so a full one means
 		// this client is not reading them -- not that it has replies
 		// outstanding.
-		match crate::rpc::response::try_send(response, self.format, &self.notifications) {
+		let queued = match (self.format, &response.result) {
+			(Format::Shaped, Ok(DbResult::Live(_))) => self.try_send_shaped_notification(response),
+			_ => crate::rpc::response::try_send(response, self.format, &self.notifications),
+		};
+		match queued {
 			Ok(()) => return true,
 			// The connection has already gone away, so there is no teardown
 			// left to do and nobody to tell.
@@ -1120,6 +1134,48 @@ impl Websocket {
 		// in-flight queries return early.
 		self.cancel_all();
 		false
+	}
+
+	/// Queue a live notification on a shaped connection: its payload is a block in the live
+	/// query's shape scope. The scope's lock is held across the queueing, so notifications of one
+	/// live query are queued in the order their shapes were announced; nothing awaits under it.
+	fn try_send_shaped_notification(
+		&self,
+		response: DbResponse,
+	) -> Result<(), TrySendError<Message>> {
+		let DbResponse {
+			id,
+			session_id,
+			result,
+		} = response;
+		let Ok(DbResult::Live(notification)) = result else {
+			return Ok(());
+		};
+		let live = notification.id.into();
+		let killed = notification.action == surrealdb_types::Action::Killed;
+		let mut shapes = self.live_shapes.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+		let (shaper, scope) = shapes.entry(live).or_default();
+		let message = match surrealdb_core::rpc::format::encoded::encode_shaped_notification(
+			id.clone(),
+			session_id,
+			notification,
+			shaper,
+			scope,
+		) {
+			Ok(bytes) => Message::Binary(bytes.into()),
+			Err(e) => {
+				let failure =
+					DbResponse::failure(id, session_id, TypesError::internal(e.to_string()));
+				match self.format.res_ws(failure) {
+					Ok((_, message)) => message,
+					Err(_) => return Ok(()),
+				}
+			}
+		};
+		if killed {
+			shapes.remove(&live);
+		}
+		self.notifications.try_send(message)
 	}
 
 	/// Snapshot the connection's default session into a
@@ -1635,6 +1691,14 @@ impl Websocket {
 				obs.adjust_live_query_active(-1, ns.as_deref(), db.as_deref());
 			}
 		}
+		// A removed live query sends no further notifications, so its shape scope goes with it.
+		{
+			let mut shapes =
+				self.live_shapes.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+			for id in &gc {
+				shapes.remove(id);
+			}
+		}
 		// Garbage collect the live queries on this connection
 		if let Err(err) = self.kvs().delete_queries(gc).await {
 			error!("Error handling RPC connection: {err}");
@@ -1846,6 +1910,7 @@ mod tests {
 			channel: tx,
 			notifications: notifier,
 			lagging_close: closer,
+			live_shapes: Default::default(),
 		})
 	}
 
@@ -1886,6 +1951,7 @@ mod tests {
 			channel: tx,
 			notifications: notifier,
 			lagging_close: closer,
+			live_shapes: Default::default(),
 		});
 		(
 			rpc,
@@ -1895,6 +1961,186 @@ mod tests {
 				lagging_close: close_rx,
 			},
 		)
+	}
+
+	/// A shaped connection reads a binary CBOR request and answers it in binary CBOR whose row
+	/// result is a block: the answer reads back to what a CBOR connection answers.
+	#[tokio::test]
+	async fn a_shaped_connection_answers_a_cbor_query_with_blocks() {
+		let ds = Datastore::builder().build_with_path("memory").await.unwrap();
+		ds.execute("DEFINE NS test; USE NS test; DEFINE DB test;", &Session::owner(), None)
+			.await
+			.unwrap();
+		let session = Session::owner().with_ns("test").with_db("test");
+		ds.execute("CREATE p:1 SET a = 1; CREATE p:2 SET a = 2, b = 'x';", &session, None)
+			.await
+			.unwrap();
+		let answer = |format: Format| {
+			let ds = Arc::clone(&ds);
+			let session = session.clone();
+			async move {
+				let (tx, _rx) = channel::<Message>(8);
+				let (notifier, _notify_rx) = channel::<Message>(8);
+				let (closer, _close_rx) = channel::<Message>(1);
+				let rpc = Arc::new(Websocket {
+					id: Uuid::new_v4(),
+					format,
+					state: Arc::new(crate::rpc::RpcState::new(Arc::clone(&ds))),
+					datastore: ds,
+					sessions: HashMap::new(),
+					transactions: DashMap::new(),
+					counters: DashMap::new(),
+					streams: DashMap::new(),
+					stream_slots: AtomicUsize::new(0),
+					shutdown: CancellationToken::new(),
+					cancel: surrealdb_core::ctx::CancelHandle::new(),
+					channel: tx,
+					notifications: notifier,
+					lagging_close: closer,
+					live_shapes: Default::default(),
+				});
+				rpc.set_session(rpc.id, Arc::new(RwLock::new(session)));
+				let mut request = surrealdb_types::Object::new();
+				request.insert("id", Value::String("1".into()));
+				request.insert("method", Value::String("query".into()));
+				request.insert(
+					"params",
+					Value::Array(vec![Value::String("SELECT * FROM p; RETURN 7".into())].into()),
+				);
+				let bytes = surrealdb_core::rpc::format::cbor::encode(Value::Object(request))
+					.expect("encodes");
+				let (chn, mut replies) = channel::<Message>(8);
+				Websocket::handle_message(&rpc, Message::Binary(bytes.into()), chn, 1024).await;
+				match replies.recv().await {
+					Some(Message::Binary(reply)) => reply.to_vec(),
+					other => panic!("a binary reply, got {other:?}"),
+				}
+			}
+		};
+		let shaped = answer(Format::Shaped).await;
+		let cbor = answer(Format::Cbor).await;
+		assert!(shaped.windows(3).any(|w| w == [0xd8, 0x39, 0x5a]), "the rows are a block");
+		let mut reader = surrealdb_types::shaped::BlockReader::new();
+		let shaped = surrealdb_core::rpc::format::encoded::decode_shaped(&shaped, &mut reader)
+			.expect("reads");
+		let cbor = surrealdb_core::rpc::format::cbor::decode(&cbor, 64).expect("decodes");
+		// Each statement's value, without its time.
+		let values = |v: &Value| -> Vec<Value> {
+			let Value::Object(o) = v else {
+				panic!("a response object");
+			};
+			let Some(Value::Array(results)) = o.get("result") else {
+				panic!("query results: {v:?}");
+			};
+			results
+				.iter()
+				.map(|r| match r {
+					Value::Object(r) => r.get("result").cloned().unwrap_or(Value::None),
+					other => other.clone(),
+				})
+				.collect()
+		};
+		assert_eq!(values(&shaped), values(&cbor));
+	}
+
+	/// On a shaped connection, the notifications of one live query carry their
+	/// payload as blocks read through one shape scope: each reads back to what
+	/// its CBOR notification decodes to, and the last (`KILLED`) ends the
+	/// scope.
+	#[tokio::test]
+	async fn shaped_notifications_share_their_live_query_s_shape_scope() {
+		use surrealdb_types::{Action, Notification, RecordId};
+		let (rpc, queues) = ws_with_channel(8).await;
+		let rpc = Arc::new(Websocket {
+			id: rpc.id,
+			format: Format::Shaped,
+			state: Arc::clone(&rpc.state),
+			datastore: Arc::clone(&rpc.datastore),
+			sessions: HashMap::new(),
+			transactions: DashMap::new(),
+			counters: DashMap::new(),
+			streams: DashMap::new(),
+			stream_slots: AtomicUsize::new(0),
+			shutdown: CancellationToken::new(),
+			cancel: surrealdb_core::ctx::CancelHandle::new(),
+			channel: rpc.channel.clone(),
+			notifications: rpc.notifications.clone(),
+			lagging_close: rpc.lagging_close.clone(),
+			live_shapes: Default::default(),
+		});
+		let mut frames = queues.merged();
+		let live = uuid::Uuid::from_u128(9);
+		let record = |n: i64| {
+			let mut object = surrealdb_types::Object::new();
+			object.insert("id", Value::RecordId(RecordId::new("person", n)));
+			object.insert("name", Value::String(format!("p{n}")));
+			object.insert("age", Value::from_t(n));
+			Value::Object(object)
+		};
+		let notes = [
+			Notification::new(live.into(), None, Action::Create, Value::None, record(1)),
+			Notification::new(live.into(), None, Action::Update, Value::None, record(2)),
+			Notification::new(live.into(), None, Action::Killed, Value::None, Value::None),
+		];
+		let mut reader = surrealdb_types::shaped::BlockReader::new();
+		for (at, note) in notes.into_iter().enumerate() {
+			let cbor = surrealdb_core::rpc::format::cbor::encode(
+				surrealdb_types::SurrealValue::into_value(DbResponse::success(
+					None,
+					None,
+					DbResult::Live(note.clone()),
+				)),
+			)
+			.expect("encodes");
+			assert!(rpc.deliver_notification(DbResponse::success(
+				None,
+				None,
+				DbResult::Live(note)
+			)));
+			let Some(Some(Message::Binary(bytes))) = frames.next().now_or_never() else {
+				panic!("a binary notification is queued");
+			};
+			let shaped = surrealdb_core::rpc::format::encoded::decode_shaped(&bytes, &mut reader)
+				.expect("reads");
+			let expected = surrealdb_core::rpc::format::cbor::decode(&cbor, 64).expect("decodes");
+			let row = |v: &Value| match v {
+				Value::Object(o) => match o.get("result") {
+					Some(Value::Object(r)) => r.get("result").cloned(),
+					_ => None,
+				},
+				_ => None,
+			};
+			assert_eq!(
+				row(&shaped),
+				row(&expected).map(|row| Value::Array(vec![row].into())),
+				"notification {at}"
+			);
+		}
+		assert!(
+			rpc.live_shapes.lock().expect("unpoisoned").is_empty(),
+			"KILLED ends the live query's shape scope"
+		);
+	}
+
+	/// A live query removed without a `KILLED` notification (its session detached or reset) takes
+	/// its shape scope with it.
+	#[tokio::test]
+	async fn removing_a_live_query_drops_its_shape_scope() {
+		let (rpc, _queues) = ws_with_channel(8).await;
+		let live = uuid::Uuid::from_u128(11);
+		let session = uuid::Uuid::from_u128(12);
+		rpc.state.live_queries.write().await.insert(
+			live,
+			crate::rpc::LiveQueryEntry {
+				websocket_id: rpc.id,
+				session_id: session,
+				namespace: None,
+				database: None,
+			},
+		);
+		rpc.live_shapes.lock().expect("unpoisoned").insert(live, Default::default());
+		rpc.cleanup_lqs_filtered(Some(&session)).await;
+		assert!(rpc.live_shapes.lock().expect("unpoisoned").is_empty());
 	}
 
 	/// Any response will do: `deliver_notification` is about how a response
@@ -2777,6 +3023,7 @@ mod tests {
 				channel: chn_internal,
 				notifications: chn_notify,
 				lagging_close: chn_close,
+				live_shapes: Default::default(),
 			});
 
 			// Pin the owner session under the connection's default session
@@ -2903,6 +3150,7 @@ mod tests {
 				channel: chn_internal,
 				notifications: chn_notify,
 				lagging_close: chn_close,
+				live_shapes: Default::default(),
 			});
 
 			// LIVE queries require a realtime-enabled session.
@@ -3017,6 +3265,7 @@ mod tests {
 				channel: chn_internal,
 				notifications: chn_notify,
 				lagging_close: chn_close,
+				live_shapes: Default::default(),
 			});
 
 			// Set the canceller before calling handle_live.
@@ -3114,6 +3363,7 @@ mod tests {
 				channel,
 				notifications: notifier,
 				lagging_close: closer,
+				live_shapes: Default::default(),
 			});
 			// The dispatcher delivers to connected WebSockets only.
 			state.web_sockets.write().await.insert(rpc.id, Arc::clone(&rpc));
@@ -3340,6 +3590,7 @@ mod tests {
 				channel: chn_internal,
 				notifications: chn_notify,
 				lagging_close: chn_close,
+				live_shapes: Default::default(),
 			});
 			let sess = Session::owner().with_ns("test").with_db("test");
 			rpc.set_session(rpc.id, Arc::new(RwLock::new(sess)));
@@ -3728,6 +3979,7 @@ mod tests {
 			channel: tx,
 			notifications: notifier,
 			lagging_close: closer,
+			live_shapes: Default::default(),
 		});
 		let sess = Session::owner().with_ns("test").with_db("test").with_rt(true);
 		rpc.set_session(rpc.id, Arc::new(RwLock::new(sess)));
@@ -4559,6 +4811,7 @@ mod tests {
 				channel: rpc.channel.clone(),
 				notifications: notifier,
 				lagging_close: closer,
+				live_shapes: Default::default(),
 			});
 			let sess = Session::owner().with_ns("test").with_db("test").with_rt(true);
 			rpc.set_session(rpc.id, Arc::new(RwLock::new(sess)));

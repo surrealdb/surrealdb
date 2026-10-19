@@ -80,6 +80,8 @@ mod leaf;
 mod ledger;
 pub(crate) mod row_frame;
 mod row_json;
+#[cfg(feature = "shaped")]
+mod row_shaped;
 pub(crate) use write::notify_at;
 #[cfg(test)]
 mod golden;
@@ -176,11 +178,13 @@ mod tests_methods;
 #[cfg(all(test, feature = "kv-mem"))]
 pub(in crate::exec) mod tests_packed_reads;
 #[cfg(all(test, feature = "kv-mem"))]
-mod tests_packed_transcode;
+pub(super) mod tests_packed_transcode;
 #[cfg(test)]
 mod tests_plain;
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests_record_format;
+#[cfg(all(test, feature = "kv-mem", feature = "shaped"))]
+mod tests_shaped;
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests_view_reentry;
 #[cfg(all(test, feature = "kv-mem"))]
@@ -368,7 +372,8 @@ impl RequestBuilder {
 	/// Plan and compile `op` into the request, answering its index, or the
 	/// reason the VM does not cover it.
 	async fn plan_statement(&mut self, planner: &Planner<'_>, op: &LogicalOp) -> Lowered<u32> {
-		let compiled = compile::compile(planner, op).await?;
+		let mut compiled = compile::compile(planner, op).await?;
+		compile::seed_statement(planner, &mut compiled.program).await?;
 		if leaf::reporting() {
 			leaf::report(op, &compiled.program, planner.function_registry());
 		}
@@ -428,7 +433,8 @@ pub(crate) async fn rejection(
 /// the VM does not cover it. A statement the planner refuses answers the
 /// refusal, before any of it runs.
 async fn plan_statement(planner: &Planner<'_>, op: &LogicalOp) -> Lowered<Arc<dyn ExecOperator>> {
-	let compiled = compile::compile(planner, op).await?;
+	let mut compiled = compile::compile(planner, op).await?;
+	compile::seed_statement(planner, &mut compiled.program).await?;
 	if leaf::reporting() {
 		leaf::report(op, &compiled.program, planner.function_registry());
 	}

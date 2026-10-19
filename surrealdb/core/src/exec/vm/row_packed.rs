@@ -236,6 +236,25 @@ pub(super) fn read_key_id(key: &[u8]) -> Option<(&EscapedSlice, KeyIdRef<'_>)> {
 	reader.is_empty().then_some((table, id))
 }
 
+/// Where the id of the record key `key` starts, past the prefix and table [`read_key_id`] reads:
+/// the keys of one table share the bytes before it.
+#[cfg(feature = "shaped")]
+pub(super) fn key_id_start(key: &[u8]) -> Option<usize> {
+	let (table, _) = read_key_id(key)?;
+	let start = (table.as_bytes().as_ptr() as usize).checked_sub(key.as_ptr() as usize)?;
+	let at = start.checked_add(table.as_bytes().len())?.checked_add(1)?;
+	(key.get(at - 1) == Some(&b'*')).then_some(at)
+}
+
+/// The id of the record key `key` whose id starts at `at` ([`key_id_start`]), read as
+/// [`read_key_id`] reads it.
+#[cfg(feature = "shaped")]
+pub(super) fn read_key_id_at(key: &[u8], at: usize) -> Option<KeyIdRef<'_>> {
+	let mut reader = BorrowReader::new(key.get(at..)?);
+	let id = KeyIdRef::borrow_decode(&mut reader).ok()?;
+	reader.is_empty().then_some(id)
+}
+
 /// The packed row `value` of the record `key` names, checked, or `None` when any step of the whole
 /// decode refuses it.
 ///

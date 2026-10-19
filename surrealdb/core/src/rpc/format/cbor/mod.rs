@@ -27,6 +27,15 @@ pub fn decode(bytes: &[u8], recursion_limit: usize) -> anyhow::Result<Value> {
 	convert::to_value(encoding).map_err(|e| anyhow::anyhow!(e))
 }
 
+/// Decode `bytes` as exactly one CBOR item: bytes after the item are an error.
+pub fn decode_exact(bytes: &[u8], recursion_limit: usize) -> anyhow::Result<Value> {
+	let mut reader = bytes;
+	let encoding = ciborium::de::from_reader_with_recursion_limit(&mut reader, recursion_limit)
+		.map_err(|e| anyhow::anyhow!(e.to_string()))?;
+	anyhow::ensure!(reader.is_empty(), "bytes after the CBOR item");
+	convert::to_value(encoding).map_err(|e| anyhow::anyhow!(e))
+}
+
 /// The `id` of a request envelope whose decoding failed.
 ///
 /// A client matches a response to its request by this `id`, so a failure that

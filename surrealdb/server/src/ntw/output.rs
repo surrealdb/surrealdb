@@ -13,6 +13,8 @@ pub enum Output {
 	Json(Vec<u8>),
 	Cbor(Vec<u8>),
 	Flatbuffers(Vec<u8>),
+	/// CBOR whose result rows are shaped blocks.
+	Shaped(Vec<u8>),
 	/// Raw bytes, for a request that negotiated `application/octet-stream`.
 	///
 	/// That content type carries no structure, so what goes in it has to be
@@ -75,6 +77,9 @@ impl IntoResponse for Output {
 			}
 			Output::Cbor(v) => {
 				([(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationCbor))], v).into_response()
+			}
+			Output::Shaped(v) => {
+				([(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationShaped))], v).into_response()
 			}
 			Output::Flatbuffers(v) => {
 				([(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationFlatbuffers))], v)

@@ -154,7 +154,7 @@ mod tests;
 mod visit_tests;
 
 pub use encode::{Packing, check_packed, pack};
-pub use row::{CheckedPackedRow, FieldRef, PackedRow, PackedVisitor, PathRead};
+pub use row::{CheckedPackedRow, ColumnState, FieldRef, PackedRow, PackedVisitor, PathRead};
 
 /// The 8-byte datetime slot value of a datetime before the slot's nanosecond range, or at exactly
 /// `i64::MIN` nanoseconds: its value is in the trailer, and it orders below every datetime the slot

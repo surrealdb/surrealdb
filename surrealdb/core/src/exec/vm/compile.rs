@@ -359,6 +359,47 @@ async fn compile_planned(
 	crate::kvs::catalog_reads::sealed(false, compiler.program(planned, BTreeSet::new())).await
 }
 
+/// Gives `program`, a statement's program `planner` compiled, the seed shape of its rows written
+/// shaped ([`shaped_seed`]). Called where a statement is compiled for its request, not for the
+/// units a program loads as it runs, whose rows are never written shaped.
+#[cfg(feature = "shaped")]
+pub(super) async fn seed_statement(planner: &Planner<'_>, program: &mut Program) -> Lowered<()> {
+	program.shaped_seed = Box::pin(crate::kvs::catalog_reads::sealed(
+		false,
+		shaped_seed(planner, program.table.as_ref()),
+	))
+	.await?;
+	Ok(())
+}
+
+/// [`seed_statement`] in a build without shaped frames: no seed, since no row is written shaped.
+#[cfg(not(feature = "shaped"))]
+pub(super) async fn seed_statement(_planner: &Planner<'_>, _program: &mut Program) -> Lowered<()> {
+	Ok(())
+}
+
+/// The seed shape of the shaped rows of a statement over `table`, from the catalog `planner`
+/// plans over and the principal it plans for; `None` without a table or a database, or for a
+/// table whose fields pass the limits of a shape (its rows then derive their shapes).
+#[cfg(feature = "shaped")]
+async fn shaped_seed(
+	planner: &Planner<'_>,
+	table: Option<&crate::val::TableName>,
+) -> Lowered<Option<Arc<surrealdb_types::shaped::Shape>>> {
+	use crate::catalog::providers::TableProvider as _;
+	let (Some(table), Some(txn)) = (table, planner.txn()) else {
+		return Ok(None);
+	};
+	let Some((ns, db)) = planner.ns_db_ids().await else {
+		return Ok(None);
+	};
+	let fields = txn
+		.all_tb_fields(ns, db, table, None)
+		.await
+		.map_err(|e| NotCovered::internal(format!("the fields of a shaped table: {e}")))?;
+	Ok(crate::exec::shaped::seed_shape(&fields, table.as_str(), planner.reads_are_checked()).ok())
+}
+
 /// `op`, bound by `planner`, compiled as a program that serves no late-bound statement: the
 /// program of a unit the run loads on its own.
 pub(super) async fn compile_unit(planner: &Planner<'_>, op: &LogicalOp) -> Lowered<Program> {

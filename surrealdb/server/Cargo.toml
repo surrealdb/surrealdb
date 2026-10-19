@@ -79,6 +79,7 @@ surrealdb = { workspace = true, features = [
     "rustls",
 ] }
 surrealdb-core = { workspace = true, features = [
+    "shaped",
     "crypto-digest",
     "crypto-password",
     "html-sanitize",

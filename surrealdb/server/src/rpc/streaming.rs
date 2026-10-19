@@ -52,6 +52,8 @@ use axum::extract::ws::Message;
 use surrealdb_core::channel::{Receiver, bounded};
 use surrealdb_core::ctx::CancelHandle;
 use surrealdb_core::dbs::AuthPrincipalSnapshot;
+use surrealdb_core::rpc::format::Format;
+use surrealdb_core::rpc::format::encoded::shaped_outgoing;
 use surrealdb_core::rpc::{RpcProtocol, live_query_owner};
 use surrealdb_rpc::capabilities::MethodTarget;
 use surrealdb_rpc::error::{invalid_params, method_not_allowed, stream_exists, too_many_streams};
@@ -60,6 +62,7 @@ use surrealdb_rpc::{
 	DbResponse, DbResult, Method, OutgoingFrame, QUERY_STREAM_BUFFER, QueryResult,
 	QueryStreamFrame, QueryStreamItem, QueryType, StreamFrames,
 };
+use surrealdb_types::shaped::{ShapeScope, ValueShaper};
 use surrealdb_types::{Array, Error as TypesError, ToSql, Value};
 use tokio::sync::mpsc::Sender;
 use tokio::time::Instant;
@@ -283,6 +286,8 @@ pub(crate) async fn process_query_stream(
 		muted: false,
 		failure: None,
 		answered: false,
+		shapes: ShapeScope::new(),
+		shaper: ValueShaper::new(),
 	};
 	driver.serve(job.statement_count, job.run).await;
 	drop(registration);
@@ -330,6 +335,11 @@ struct StreamDriver<'a> {
 	/// further for it: one request gets one answer, and a call already settled
 	/// by an error must not then receive a success.
 	answered: bool,
+	/// On a shaped connection, the shapes this stream has announced: one scope for every
+	/// `rows` frame of the stream.
+	shapes: ShapeScope,
+	/// On a shaped connection, the shaper of rows that reach the stream as values.
+	shaper: ValueShaper,
 }
 
 impl StreamDriver<'_> {
@@ -600,7 +610,15 @@ impl StreamDriver<'_> {
 	/// Encoded rows are written into the envelope as they are; rows encoded
 	/// in a format the connection does not speak are decoded and sent as the
 	/// values they encode.
-	fn encode(&self, frame: OutgoingFrame) -> Result<(usize, Message), TypesError> {
+	///
+	/// On a shaped connection every `rows` frame is a block, in the stream's
+	/// shape scope: rows that arrive as values, or encoded in another format,
+	/// are written as shaped rows first.
+	fn encode(&mut self, frame: OutgoingFrame) -> Result<(usize, Message), TypesError> {
+		let frame = match self.rpc.format {
+			Format::Shaped => shaped_outgoing(frame, &mut self.shaper)?,
+			_ => frame,
+		};
 		let frame = match frame {
 			OutgoingFrame::Frame(frame) => frame,
 			OutgoingFrame::Rows {
@@ -611,6 +629,7 @@ impl StreamDriver<'_> {
 				self.client_session,
 				index,
 				&rows,
+				&mut self.shapes,
 			) {
 				Some(message) => return message,
 				None => QueryStreamFrame::Rows {

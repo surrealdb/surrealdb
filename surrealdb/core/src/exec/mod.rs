@@ -93,6 +93,8 @@ pub(crate) mod reference_purge;
 #[doc(hidden)]
 pub mod row_frame_probe;
 pub mod scheduler;
+#[cfg(feature = "shaped")]
+pub(crate) mod shaped;
 pub(crate) mod table_view;
 pub(crate) mod topk_pushdown;
 pub(crate) mod trampoline;

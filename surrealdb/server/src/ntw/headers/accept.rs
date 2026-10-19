@@ -5,7 +5,7 @@ use http::{HeaderName, HeaderValue};
 use crate::ntw::headers::content_type::{
 	HEADER_VALUE_APPLICATION_CBOR, HEADER_VALUE_APPLICATION_JSON,
 	HEADER_VALUE_APPLICATION_OCTET_STREAM, HEADER_VALUE_APPLICATION_SURREAL_DB_FLATBUFFERS,
-	HEADER_VALUE_TEXT_PLAIN,
+	HEADER_VALUE_APPLICATION_SURREAL_DB_SHAPED, HEADER_VALUE_TEXT_PLAIN,
 };
 
 /// Typed header implementation for the `Accept` header.
@@ -16,6 +16,8 @@ pub enum Accept {
 	ApplicationCbor,
 	ApplicationOctetStream,
 	ApplicationFlatbuffers,
+	/// CBOR responses whose result rows are shaped blocks.
+	ApplicationShaped,
 }
 
 impl std::fmt::Display for Accept {
@@ -26,6 +28,7 @@ impl std::fmt::Display for Accept {
 			Accept::ApplicationCbor => f.write_str(surrealdb_rpc::format::CBOR),
 			Accept::ApplicationOctetStream => f.write_str(surrealdb_rpc::format::OCTET_STREAM),
 			Accept::ApplicationFlatbuffers => f.write_str(surrealdb_rpc::format::FLATBUFFERS),
+			Accept::ApplicationShaped => f.write_str(surrealdb_rpc::format::SHAPED),
 		}
 	}
 }
@@ -50,6 +53,7 @@ impl Header for Accept {
 			surrealdb_rpc::format::CBOR => Ok(Accept::ApplicationCbor),
 			surrealdb_rpc::format::OCTET_STREAM => Ok(Accept::ApplicationOctetStream),
 			surrealdb_rpc::format::FLATBUFFERS => Ok(Accept::ApplicationFlatbuffers),
+			surrealdb_rpc::format::SHAPED => Ok(Accept::ApplicationShaped),
 			_ => Err(headers::Error::invalid()),
 		}
 	}
@@ -78,6 +82,7 @@ impl From<&Accept> for HeaderValue {
 			Accept::ApplicationFlatbuffers => {
 				HEADER_VALUE_APPLICATION_SURREAL_DB_FLATBUFFERS.clone()
 			}
+			Accept::ApplicationShaped => HEADER_VALUE_APPLICATION_SURREAL_DB_SHAPED.clone(),
 		}
 	}
 }

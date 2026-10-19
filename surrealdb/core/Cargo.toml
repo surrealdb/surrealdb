@@ -38,7 +38,12 @@ default = [
     "vector-index",
     "fulltext",
     "egraph",
+    "shaped",
 ]
+# The shaped-frames result format (`application/vnd.surrealdb.shaped`): its row encoders, the
+# copy plans of packed rows, and the seed shapes statements are compiled with. Without it the
+# format is not offered, and a request for it is answered as for any unsupported format.
+shaped = []
 kv-mem = [
     "surrealdb-kvs-any/kv-mem",
     "tokio/time",

@@ -413,6 +413,18 @@ fn execute_untailed(
 	}
 }
 
+/// Hands `state`'s output frame the seed shape `program` was compiled with, when its rows are
+/// written shaped. Out of line, so the frame of a run that nests runs stays its size.
+#[cfg(feature = "shaped")]
+#[inline(never)]
+fn seed_frame(program: &Program, state: &mut State) {
+	if let (Some(table), Some(seed), Some(frame)) =
+		(&program.table, &program.shaped_seed, &mut state.row_frame)
+	{
+		frame.seed(table.as_str(), std::sync::Arc::clone(seed));
+	}
+}
+
 /// Run the pipelines of `program`, a statement that writes nothing, in `ctx`,
 /// handing their rows to `yielder`: its paging and its `VERSION` stamp
 /// evaluated first, over a state of its own, which is answered holding the
@@ -446,6 +458,8 @@ async fn run_untailed(
 	let mut state = State::new(program, paging, ctx.function_registry())?;
 	inherit_knn(program, &mut state, ctx);
 	state.row_frame = format.map(super::row_frame::RowFrame::with_format);
+	#[cfg(feature = "shaped")]
+	seed_frame(program, &mut state);
 	// A statement spends no more than its own quantum before its first yield.
 	super::fuel::cap(super::fuel::quantum(ctx));
 	state.build_budget = ctx.root().ctx.config.exec.gql_max_join_build_rows;

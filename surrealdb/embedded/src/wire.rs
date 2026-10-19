@@ -28,7 +28,8 @@ pub fn decode(format: Format, bytes: &[u8], recursion_limit: usize) -> Result<Va
 		// bounded by the buffer rather than by a configured depth.
 		Format::Flatbuffers => surrealdb_types::decode(bytes),
 		Format::Json => json::decode(bytes, recursion_limit),
-		Format::Unsupported => bail!("unsupported wire format"),
+		// Shaped frames are a network result format; embedded engines do not offer it.
+		Format::Shaped | Format::Unsupported => bail!("unsupported wire format"),
 	}
 }
 
@@ -38,6 +39,6 @@ pub fn encode(format: Format, value: Value) -> Result<Vec<u8>> {
 		Format::Cbor => cbor::encode(value),
 		Format::Flatbuffers => surrealdb_types::encode(&value),
 		Format::Json => json::encode(value),
-		Format::Unsupported => bail!("unsupported wire format"),
+		Format::Shaped | Format::Unsupported => bail!("unsupported wire format"),
 	}
 }

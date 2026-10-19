@@ -322,7 +322,7 @@ fn generated(seed: u64, count: usize) -> (String, Variables) {
 }
 
 /// A datastore holding the generated records of `seed`.
-async fn generated_db(seed: u64, count: usize) -> TestDb {
+pub(super) async fn generated_db(seed: u64, count: usize) -> TestDb {
 	let (sql, vars) = generated(seed, count);
 	let db = TestDb::new("").await;
 	let session = Session::owner().with_ns("test").with_db("test");
@@ -525,7 +525,9 @@ async fn streamed(
 					if let Ok((rows, text)) = answers.entry(index).or_insert(Ok(Default::default()))
 					{
 						match frame.format() {
-							RowFormat::Cbor => rows.extend(frame.to_values().expect("decodes")),
+							RowFormat::Cbor | RowFormat::Shaped => {
+								rows.extend(frame.to_values().expect("decodes"))
+							}
 							RowFormat::Json => {
 								join(text, std::str::from_utf8(frame.bytes()).expect("UTF-8"))
 							}
@@ -595,7 +597,7 @@ async fn assert_frames_answer_as_values(db: &TestDb, session: &Session, sql: &st
 	frames_against_values(db, session, sql).await.0
 }
 
-const GUARDED: &str = "
+pub(super) const GUARDED: &str = "
 	DEFINE ACCESS user ON DATABASE TYPE RECORD;
 	DEFINE TABLE user SCHEMALESS PERMISSIONS FULL;
 	CREATE user:alice;

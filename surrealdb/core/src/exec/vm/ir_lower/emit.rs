@@ -747,6 +747,7 @@ impl Emitter {
 			aggregates: Vec::new(),
 			permissions: self.permissions,
 			computed_names: self.computed_names,
+			shaped_seed: None,
 			table: None,
 			access_mode,
 			write: None,

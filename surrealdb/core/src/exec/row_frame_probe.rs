@@ -22,6 +22,10 @@ pub enum Probe {
 	Decoded,
 	/// Transcode it into the frame from its stored bytes.
 	Transcoded,
+	/// Write it into a shaped frame from its stored bytes: a packed row by its generation's copy
+	/// plan.
+	#[cfg(feature = "shaped")]
+	Shaped,
 }
 
 /// Read every record of table `tb` in `ns`/`db` and transcode each into one
@@ -63,7 +67,19 @@ pub async fn scan_table(
 	let mut gate = RowGate::new(layouts, def.namespace_id, def.database_id, &table, None, epoch)?;
 	let mut cursor =
 		txn.open_vals_cursor_raw(range, crate::kvs::Direction::Forward, 0, None).await?;
-	let mut frame = super::vm::row_frame::RowFrame::new();
+	let mut frame = match probe {
+		#[cfg(feature = "shaped")]
+		Probe::Shaped => {
+			let mut frame =
+				super::vm::row_frame::RowFrame::with_format(surrealdb_rpc::RowFormat::Shaped);
+			// The seed shape a statement over the table is compiled with, for an owner.
+			use crate::catalog::providers::TableProvider as _;
+			let fields = txn.all_tb_fields(def.namespace_id, def.database_id, &table, None).await?;
+			frame.seed(tb, super::shaped::seed_shape(&fields, tb, false)?);
+			frame
+		}
+		_ => super::vm::row_frame::RowFrame::new(),
+	};
 	let (mut rows, mut bytes) = (0usize, 0usize);
 	let mut scanned = 0usize;
 	loop {
@@ -98,6 +114,8 @@ pub async fn scan_table(
 					)
 					.and_then(|row| frame.push_value(&row)),
 					Probe::Transcoded => frame.push_stored(key, value, Some(layouts)),
+					#[cfg(feature = "shaped")]
+					Probe::Shaped => frame.push_stored(key, value, Some(layouts)),
 				};
 				if let Err(e) = pushed {
 					failed = Some(e);

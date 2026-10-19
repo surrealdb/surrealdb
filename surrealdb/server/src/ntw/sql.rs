@@ -93,6 +93,7 @@ async fn post_handler(
 	let encoded = match output.as_deref() {
 		None | Some(Accept::ApplicationJson) => Some(RowFormat::Json),
 		Some(Accept::ApplicationCbor) => Some(RowFormat::Cbor),
+		Some(Accept::ApplicationShaped) => Some(RowFormat::Shaped),
 		_ => None,
 	};
 	if let Some(format) = encoded {
@@ -112,6 +113,7 @@ async fn post_handler(
 					Ok(()) => Ok(match format {
 						RowFormat::Json => Output::Json(bytes),
 						RowFormat::Cbor => Output::Cbor(bytes),
+						RowFormat::Shaped => Output::Shaped(bytes),
 					}),
 					Err(_) => Ok(Output::Fail),
 				}

@@ -9,15 +9,18 @@
 //!
 //! On an in-memory datastore it prints, per table, the median and the least over several runs of:
 //!
-//! * `Scan`, `Decoded`, `Transcoded`: every stored record read and admitted, then nothing more,
-//!   decoded whole and encoded, or transcoded from its bytes, into one reused frame
-//!   (`exec::row_frame_probe::scan_table`): the floor below the executor;
-//! * `select cbor` / `select json`: a streamed `SELECT *` with rows encoded for the wire, the items
-//!   drained as a transport drains them;
-//! * `limit`: a streamed `SELECT * FROM table LIMIT 1000`, per statement, in µs;
+//! * `Scan`, `Decoded`, `Transcoded`, `Shaped`: every stored record read and admitted, then nothing
+//!   more, decoded whole and encoded, transcoded from its bytes, or written shaped by its copy
+//!   plan, into one reused frame (`exec::row_frame_probe::scan_table`): the floor below the
+//!   executor;
+//! * `select cbor` / `select json` / `select shaped`: a streamed `SELECT *` with rows encoded for
+//!   the wire, the items drained as a transport drains them;
+//! * `bytes`: the rows of `SELECT *` encoded, per row, in bytes;
+//! * `limit`: a streamed `SELECT * FROM table LIMIT 1000`, per statement, in µs, in each format;
 //! * `point`: a streamed `SELECT * FROM table:id` in CBOR, per statement, in µs.
 //!
 //! `BENCH_ROWS` sets the row count (default 200 000) and `BENCH_RUNS` the runs (default 7);
+//! `BENCH_TABLE=packed` (or `plain`) measures that table alone;
 //! `BENCH_ONLY=Transcoded` (or `Scan`, `Decoded`) runs that probe alone, for a profiler.
 
 use std::sync::Arc;
@@ -73,23 +76,40 @@ async fn datastore(rows: usize) -> (Arc<Datastore>, Session) {
 	(ds, session)
 }
 
-/// Run `sql` streamed with rows encoded in `format`, draining the items.
+/// Run `sql` streamed with rows encoded in `format`, draining the items: the bytes of the rows
+/// they carry, encoded.
 async fn stream(ds: &Arc<Datastore>, session: &Session, sql: &str, format: RowFormat) -> usize {
 	let (items, received) = async_channel::bounded(QUERY_STREAM_BUFFER);
 	let job = ds
 		.run_streaming(QueryRequest::new(sql, session).with_row_format(Some(format)), items)
 		.expect("the query starts");
 	let drain = async {
-		let mut n = 0usize;
+		let mut bytes = 0usize;
 		while let Ok(item) = received.recv().await {
-			n += 1;
+			if let surrealdb_rpc::QueryStreamItem::Frame {
+				rows,
+				..
+			} = &item
+			{
+				bytes += rows.bytes().len();
+			}
 			drop(item);
 		}
-		n
+		bytes
 	};
-	let (ran, n) = futures::join!(job.run, drain);
+	let (ran, bytes) = futures::join!(job.run, drain);
 	ran.expect("the query runs");
-	n
+	bytes
+}
+
+/// The formats a transport writes rows in that this build serves: CBOR, JSON, and shaped frames
+/// where the `shaped` feature builds them.
+fn wire_formats() -> Vec<surrealdb_rpc::RowFormat> {
+	let mut formats = vec![surrealdb_rpc::RowFormat::Cbor, surrealdb_rpc::RowFormat::Json];
+	if cfg!(feature = "shaped") {
+		formats.push(surrealdb_rpc::RowFormat::Shaped);
+	}
+	formats
 }
 
 fn least(samples: &[f64]) -> f64 {
@@ -108,12 +128,22 @@ async fn packed_select_star_ns_per_row() {
 	let runs = env("BENCH_RUNS", 7);
 	let (ds, session) = datastore(rows).await;
 	println!("rows {rows}, runs {runs}; ns/row (point: µs/statement), median then least");
+	let tables = std::env::var("BENCH_TABLE").ok();
 	for table in ["packed", "plain"] {
+		if tables.as_deref().is_some_and(|only| only != table) {
+			continue;
+		}
 		let only = std::env::var("BENCH_ONLY").ok();
-		let probes: Vec<Probe> = [Probe::Scan, Probe::Decoded, Probe::Transcoded]
-			.into_iter()
-			.filter(|probe| only.as_deref().is_none_or(|only| only == format!("{probe:?}")))
-			.collect();
+		let probes: Vec<Probe> = [
+			Probe::Scan,
+			Probe::Decoded,
+			Probe::Transcoded,
+			#[cfg(feature = "shaped")]
+			Probe::Shaped,
+		]
+		.into_iter()
+		.filter(|probe| only.as_deref().is_none_or(|only| only == format!("{probe:?}")))
+		.collect();
 		// The probes take turns run by run, so a slower stretch of a shared machine falls on each.
 		let mut samples = vec![Vec::new(); probes.len()];
 		for _ in 0..runs {
@@ -131,7 +161,7 @@ async fn packed_select_star_ns_per_row() {
 		if only.is_some() {
 			continue;
 		}
-		for format in [RowFormat::Cbor, RowFormat::Json] {
+		for format in wire_formats() {
 			let sql = format!("SELECT * FROM {table}");
 			stream(&ds, &session, &sql, format).await;
 			let mut samples = Vec::new();
@@ -143,7 +173,17 @@ async fn packed_select_star_ns_per_row() {
 			let (min, median) = (least(&samples), median(samples));
 			println!("{table:<7} select {:<5}{median:>8.1} {min:>8.1}", format!("{format:?}"));
 		}
-		for format in [RowFormat::Cbor, RowFormat::Json] {
+		// The rows' encoded bytes; a shaped block adds its shape once and a 13-byte header per
+		// frame of up to 256 rows, which this leaves out.
+		for format in wire_formats() {
+			let bytes = stream(&ds, &session, &format!("SELECT * FROM {table}"), format).await;
+			println!(
+				"{table:<7} bytes {:<6}{:>8.1}",
+				format!("{format:?}"),
+				bytes as f64 / rows as f64
+			);
+		}
+		for format in wire_formats() {
 			let sql = format!("SELECT * FROM {table} LIMIT 1000");
 			let queries = 200;
 			let mut samples = Vec::new();

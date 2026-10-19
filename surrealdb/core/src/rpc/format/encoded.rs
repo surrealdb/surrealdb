@@ -13,22 +13,46 @@ use surrealdb_rpc::{
 	DbResponse, DbResult, EncodedPayload, EncodedQueryResult, EncodedRows, QueryResult,
 	QueryStreamItem, RowFormat,
 };
+use surrealdb_types::shaped::ShapeScope;
+#[cfg(feature = "shaped")]
+use surrealdb_types::shaped::{PublicShaped, ShapedError, ValueShaper};
 use surrealdb_types::{Error as TypesError, SurrealValue, Value};
+
+/// Why shaped rows are refused by a build without shaped frames, which never offers them.
+#[cfg(not(feature = "shaped"))]
+const SHAPED_NOT_BUILT: &str = "this build does not serve shaped frames";
 
 /// The recursion limit for decoding rows this server encoded: deep enough for
 /// any value the storage depth guard admits, with its CBOR tags.
 const DECODE_RECURSION_LIMIT: usize = 4 * crate::val::MAX_VALUE_DEPTH + 16;
 
-/// Decode `count` rows encoded in `format` into public values: the
+/// Decode `rows` into public values: the
 /// [`RowDecoder`](surrealdb_rpc::RowDecoder) the executor attaches to the rows
 /// it encodes.
-pub fn decode_rows(
-	format: RowFormat,
-	bytes: &[u8],
-	count: usize,
-) -> Result<Vec<Value>, TypesError> {
+pub fn decode_rows(rows: &EncodedRows) -> Result<Vec<Value>, TypesError> {
+	let (bytes, count) = (rows.bytes(), rows.len());
 	let fail = |e: String| TypesError::internal(format!("Failed to decode encoded rows: {e}"));
-	match format {
+	match rows.format() {
+		#[cfg(not(feature = "shaped"))]
+		RowFormat::Shaped => Err(fail(SHAPED_NOT_BUILT.to_owned())),
+		#[cfg(feature = "shaped")]
+		RowFormat::Shaped => {
+			let mut values = Vec::with_capacity(count);
+			let mut start = 0usize;
+			for (end, shape) in rows.ends().iter().zip(rows.row_shapes()) {
+				let shape = &rows.shapes()[*shape as usize];
+				let row = &bytes[start..*end as usize];
+				let (value, used) =
+					surrealdb_types::shaped::decode_row(shape, row, &mut decode_dynamic)
+						.map_err(|e| fail(e.to_string()))?;
+				if used != row.len() {
+					return Err(fail("bytes past a shaped row".to_owned()));
+				}
+				values.push(value);
+				start = *end as usize;
+			}
+			Ok(values)
+		}
 		RowFormat::Cbor => {
 			let mut reader = bytes;
 			let mut values = Vec::with_capacity(count);
@@ -57,18 +81,122 @@ pub fn decode_rows(
 	}
 }
 
+#[cfg(feature = "shaped")]
+/// A dynamic slice of a shaped row: one CBOR item, read as the CBOR format
+/// reads one.
+pub fn decode_dynamic(bytes: &[u8]) -> Result<Value, String> {
+	super::cbor::decode_exact(bytes, DECODE_RECURSION_LIMIT).map_err(|e| e.to_string())
+}
+
+#[cfg(feature = "shaped")]
+/// Write `value` as a dynamic slice of a shaped row: one CBOR item, as the
+/// CBOR format encodes it.
+pub fn encode_dynamic(value: &Value, out: &mut Vec<u8>) -> Result<(), ShapedError> {
+	let bytes = super::cbor::encode(value.clone()).map_err(|e| ShapedError(e.to_string()))?;
+	out.extend_from_slice(&bytes);
+	Ok(())
+}
+
+#[cfg(feature = "shaped")]
+/// A shaped response or frame read back into the value its CBOR form would
+/// decode to: the CBOR item with every block (tag
+/// [`CBOR_TAG`](surrealdb_types::shaped::CBOR_TAG) around a byte string)
+/// replaced by the array of its rows, read by `reader`, whose shape scope
+/// carries across the responses of one stream or live query.
+pub fn decode_shaped(
+	bytes: &[u8],
+	reader: &mut surrealdb_types::shaped::BlockReader,
+) -> anyhow::Result<Value> {
+	let item: ciborium::Value =
+		ciborium::de::from_reader_with_recursion_limit(bytes, DECODE_RECURSION_LIMIT)
+			.map_err(|e| anyhow::anyhow!(e.to_string()))?;
+	shaped_item(item, reader)
+}
+
+#[cfg(feature = "shaped")]
+fn shaped_item(
+	item: ciborium::Value,
+	reader: &mut surrealdb_types::shaped::BlockReader,
+) -> anyhow::Result<Value> {
+	match item {
+		ciborium::Value::Tag(tag, inner) if tag == surrealdb_types::shaped::CBOR_TAG => {
+			let ciborium::Value::Bytes(contents) = *inner else {
+				anyhow::bail!("a shaped block that is not a byte string");
+			};
+			let rows = reader
+				.read_block(&contents, &mut decode_dynamic)
+				.map_err(|e| anyhow::anyhow!(e))?;
+			Ok(Value::Array(rows.into()))
+		}
+		ciborium::Value::Map(entries) => {
+			let mut object = std::collections::BTreeMap::new();
+			for (key, value) in entries {
+				let ciborium::Value::Text(key) = key else {
+					anyhow::bail!("a map key that is not text");
+				};
+				object.insert(key, shaped_item(value, reader)?);
+			}
+			Ok(Value::Object(object.into()))
+		}
+		ciborium::Value::Array(items) => Ok(Value::Array(
+			items
+				.into_iter()
+				.map(|i| shaped_item(i, reader))
+				.collect::<anyhow::Result<Vec<_>>>()?
+				.into(),
+		)),
+		other => super::cbor::to_value(other),
+	}
+}
+
 /// Encode a public value in `format`, as the response encoder does.
 fn encode_public(format: RowFormat, value: Value, out: &mut Vec<u8>) -> anyhow::Result<()> {
-	match format {
-		RowFormat::Cbor => out.extend_from_slice(&super::cbor::encode(value)?),
+	match format.envelope() {
 		RowFormat::Json => out.extend_from_slice(super::json::encode_str(value)?.as_bytes()),
+		_ => out.extend_from_slice(&super::cbor::encode(value)?),
 	}
 	Ok(())
+}
+
+#[cfg(feature = "shaped")]
+/// Shaped rows of public values, each written by `shaper`.
+pub fn shaped_rows_of_values(
+	shaper: &mut ValueShaper,
+	values: &[Value],
+) -> anyhow::Result<EncodedRows> {
+	let mut bytes = Vec::new();
+	let mut ends = Vec::with_capacity(values.len());
+	let mut shapes: Vec<std::sync::Arc<surrealdb_types::shaped::Shape>> = Vec::new();
+	let mut row_shapes = Vec::with_capacity(values.len());
+	for value in values {
+		let shape = shaper
+			.write(PublicShaped::new(value, encode_dynamic), &mut bytes)
+			.map_err(|e| anyhow::anyhow!(e))?;
+		let at = match shapes.iter().position(|s| std::sync::Arc::ptr_eq(s, &shape)) {
+			Some(at) => at,
+			None => {
+				shapes.push(shape);
+				shapes.len() - 1
+			}
+		};
+		row_shapes.push(u16::try_from(at)?);
+		ends.push(
+			u32::try_from(bytes.len())
+				.map_err(|_| anyhow::anyhow!("Encoded rows larger than 4 GiB"))?,
+		);
+	}
+	Ok(EncodedRows::shaped(bytes, ends, shapes, row_shapes, decode_rows))
 }
 
 /// The rows a list of public values encodes to, for a statement whose rows
 /// arrived as values.
 fn rows_of_values(format: RowFormat, values: Vec<Value>) -> anyhow::Result<EncodedRows> {
+	if format == RowFormat::Shaped {
+		#[cfg(feature = "shaped")]
+		return shaped_rows_of_values(&mut ValueShaper::new(), &values);
+		#[cfg(not(feature = "shaped"))]
+		anyhow::bail!(SHAPED_NOT_BUILT);
+	}
 	let mut bytes = Vec::new();
 	let mut ends = Vec::with_capacity(values.len());
 	for (i, value) in values.into_iter().enumerate() {
@@ -92,6 +220,9 @@ fn rows_of_values(format: RowFormat, values: Vec<Value>) -> anyhow::Result<Encod
 #[derive(Debug)]
 pub struct QueryCollector {
 	format: RowFormat,
+	/// For shaped rows that arrive as values, the shaper they are written by.
+	#[cfg(feature = "shaped")]
+	shaper: ValueShaper,
 	/// Statements with a payload but no `Finished` yet, by index.
 	pending: Vec<(usize, EncodedPayload)>,
 	results: Vec<EncodedQueryResult>,
@@ -101,6 +232,8 @@ impl QueryCollector {
 	pub fn new(format: RowFormat) -> Self {
 		Self {
 			format,
+			#[cfg(feature = "shaped")]
+			shaper: ValueShaper::new(),
 			pending: Vec::new(),
 			results: Vec::new(),
 		}
@@ -137,7 +270,7 @@ impl QueryCollector {
 				if rows.format() == self.format {
 					self.rows_for(index).extend(&rows)?;
 				} else {
-					let rows = rows_of_values(self.format, rows.to_values()?)?;
+					let rows = self.rows_of(rows.to_values()?)?;
 					self.rows_for(index).extend(&rows)?;
 				}
 			}
@@ -145,7 +278,7 @@ impl QueryCollector {
 				index,
 				values,
 			} => {
-				let rows = rows_of_values(self.format, values)?;
+				let rows = self.rows_of(values)?;
 				self.rows_for(index).extend(&rows)?;
 			}
 			QueryStreamItem::Value {
@@ -183,14 +316,29 @@ impl QueryCollector {
 		Ok(())
 	}
 
+	/// The rows `values` encode to in the collector's format.
+	fn rows_of(&mut self, values: Vec<Value>) -> anyhow::Result<EncodedRows> {
+		match self.format {
+			#[cfg(feature = "shaped")]
+			RowFormat::Shaped => shaped_rows_of_values(&mut self.shaper, &values),
+			format => rows_of_values(format, values),
+		}
+	}
+
 	/// The results, in the order their statements finished.
 	pub fn finish(self) -> Vec<EncodedQueryResult> {
 		self.results
 	}
 }
 
-/// Write `rows` as the list they are.
-fn write_rows(format: RowFormat, rows: &EncodedRows, out: &mut Vec<u8>) {
+/// Write `rows` as the list they are: for shaped rows, a block whose shapes
+/// are announced in `scope`.
+fn write_rows(
+	format: RowFormat,
+	rows: &EncodedRows,
+	scope: &mut ShapeScope,
+	out: &mut Vec<u8>,
+) -> anyhow::Result<()> {
 	match format {
 		RowFormat::Cbor => {
 			cbor_head(out, 4, rows.len() as u64);
@@ -201,7 +349,18 @@ fn write_rows(format: RowFormat, rows: &EncodedRows, out: &mut Vec<u8>) {
 			out.extend_from_slice(rows.bytes());
 			out.push(b']');
 		}
+		#[cfg(not(feature = "shaped"))]
+		RowFormat::Shaped => {
+			let _ = scope;
+			anyhow::bail!(SHAPED_NOT_BUILT);
+		}
+		#[cfg(feature = "shaped")]
+		RowFormat::Shaped => {
+			surrealdb_types::shaped::write_block(out, scope, rows.runs())
+				.map_err(|e| anyhow::anyhow!(e))?;
+		}
 	}
+	Ok(())
 }
 
 fn cbor_head(out: &mut Vec<u8>, major: u8, n: u64) {
@@ -232,9 +391,10 @@ struct ObjectWriter<'o> {
 
 impl<'o> ObjectWriter<'o> {
 	fn open(format: RowFormat, out: &'o mut Vec<u8>, entries: usize) -> Self {
+		let format = format.envelope();
 		match format {
-			RowFormat::Cbor => cbor_head(out, 5, entries as u64),
 			RowFormat::Json => out.push(b'{'),
+			_ => cbor_head(out, 5, entries as u64),
 		}
 		Self {
 			format,
@@ -246,16 +406,16 @@ impl<'o> ObjectWriter<'o> {
 	/// Start the entry `key`; its value is written next.
 	fn key(&mut self, key: &str) -> anyhow::Result<()> {
 		match self.format {
-			RowFormat::Cbor => {
-				cbor_head(self.out, 3, key.len() as u64);
-				self.out.extend_from_slice(key.as_bytes());
-			}
 			RowFormat::Json => {
 				if self.written > 0 {
 					self.out.push(b',');
 				}
 				serde_json::to_writer(&mut *self.out, key)?;
 				self.out.push(b':');
+			}
+			_ => {
+				cbor_head(self.out, 3, key.len() as u64);
+				self.out.extend_from_slice(key.as_bytes());
 			}
 		}
 		self.written += 1;
@@ -290,7 +450,8 @@ fn write_result(
 	let mut object = ObjectWriter::open(format, out, 4);
 	object.key("result")?;
 	match payload {
-		EncodedPayload::Rows(rows) => write_rows(format, rows, object.out),
+		// A buffered result's block is its own shape scope.
+		EncodedPayload::Rows(rows) => write_rows(format, rows, &mut ShapeScope::new(), object.out)?,
 		EncodedPayload::Value(value) => object.value(value.clone())?,
 	}
 	object.key("status")?;
@@ -309,9 +470,9 @@ pub fn encode_results(
 	results: &[EncodedQueryResult],
 	out: &mut Vec<u8>,
 ) -> anyhow::Result<()> {
-	match format {
-		RowFormat::Cbor => cbor_head(out, 4, results.len() as u64),
+	match format.envelope() {
 		RowFormat::Json => out.push(b'['),
+		_ => cbor_head(out, 4, results.len() as u64),
 	}
 	for (i, result) in results.iter().enumerate() {
 		if format == RowFormat::Json && i > 0 {
@@ -375,17 +536,83 @@ pub fn encode_response(format: RowFormat, response: DbResponse) -> anyhow::Resul
 	write_envelope(format, id, session_id, |out| encode_results(format, &results, out))
 }
 
+#[cfg(feature = "shaped")]
+/// A `query_stream` frame as a shaped stream sends it: rows that arrive as
+/// values, or encoded in another format, are written as shaped rows by
+/// `shaper`, the stream's, so every `rows` frame of the stream is a block.
+/// Any other frame is returned as it is.
+pub fn shaped_outgoing(
+	frame: surrealdb_rpc::OutgoingFrame,
+	shaper: &mut ValueShaper,
+) -> Result<surrealdb_rpc::OutgoingFrame, TypesError> {
+	use surrealdb_rpc::{OutgoingFrame, QueryStreamFrame};
+	let shaped = |values: &[Value], shaper: &mut ValueShaper| {
+		shaped_rows_of_values(shaper, values).map_err(|e| TypesError::internal(e.to_string()))
+	};
+	Ok(match frame {
+		OutgoingFrame::Frame(QueryStreamFrame::Rows {
+			index,
+			values,
+		}) => OutgoingFrame::Rows {
+			index,
+			rows: shaped(&values, shaper)?,
+		},
+		OutgoingFrame::Rows {
+			index,
+			rows,
+		} if rows.format() != RowFormat::Shaped => OutgoingFrame::Rows {
+			index,
+			rows: shaped(&rows.to_values()?, shaper)?,
+		},
+		frame => frame,
+	})
+}
+
+#[cfg(feature = "shaped")]
+/// Encode the live notification `notification`, as the response to request
+/// `id`, on a shaped connection: the CBOR its response encodes to, with the
+/// notification's `result` written as a block of one row, in the live query's
+/// shape scope `scope`, by its shaper `shaper`.
+pub fn encode_shaped_notification(
+	id: Option<Value>,
+	session_id: Option<uuid::Uuid>,
+	notification: surrealdb_types::Notification,
+	shaper: &mut ValueShaper,
+	scope: &mut ShapeScope,
+) -> anyhow::Result<Vec<u8>> {
+	let Value::Object(object) = DbResult::Live(notification).into_value() else {
+		anyhow::bail!("a notification that is not an object");
+	};
+	let object = object.into_inner();
+	write_envelope(RowFormat::Cbor, id, session_id, |out| {
+		let mut writer = ObjectWriter::open(RowFormat::Cbor, out, object.len());
+		for (key, value) in object {
+			writer.key(&key)?;
+			if key == "result" {
+				let rows = shaped_rows_of_values(shaper, std::slice::from_ref(&value))?;
+				write_rows(RowFormat::Shaped, &rows, scope, writer.out)?;
+			} else {
+				writer.value(value)?;
+			}
+		}
+		writer.close();
+		Ok(())
+	})
+}
+
 /// Encode the `query_stream` `rows` frame of statement `index` carrying
 /// `rows`, as the successful response to request `id`: byte-identical to
 /// encoding that response with the frame's value
 /// ([`QueryStreamFrame::into_value`](surrealdb_rpc::QueryStreamFrame::into_value))
-/// built from the values the rows encode.
+/// built from the values the rows encode. Shaped rows are one block, its
+/// shapes announced in `scope`, the stream's.
 pub fn encode_stream_rows(
 	format: RowFormat,
 	id: Option<Value>,
 	session_id: Option<uuid::Uuid>,
 	index: usize,
 	rows: &EncodedRows,
+	scope: &mut ShapeScope,
 ) -> anyhow::Result<Vec<u8>> {
 	anyhow::ensure!(rows.format() == format, "rows encoded in another format");
 	let index = i64::try_from(index)?;
@@ -397,7 +624,7 @@ pub fn encode_stream_rows(
 		object.key("stream")?;
 		object.value(Value::String("rows".to_owned()))?;
 		object.key("values")?;
-		write_rows(format, rows, object.out);
+		write_rows(format, rows, scope, object.out)?;
 		object.close();
 		Ok(())
 	})
@@ -538,19 +765,26 @@ pub fn into_query_results(results: Vec<EncodedQueryResult>) -> Vec<QueryResult> 
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
 	use std::sync::Arc;
 	use std::time::Duration;
 
 	use surrealdb_rpc::{DbResponse, DbResult, QUERY_STREAM_BUFFER, RowFormat};
 	use surrealdb_types::Value;
 
-	use super::{QueryCollector, encode_response, encode_results};
+	use super::{QueryCollector, decode_dynamic, encode_response, encode_results};
 	use crate::catalog::providers::CatalogProvider;
 	use crate::dbs::Session;
 	use crate::kvs::{Datastore, QueryRequest, TransactionType};
 
-	async fn datastore() -> Arc<Datastore> {
+	/// A dynamic slice is one CBOR item: a second item after it is refused.
+	#[test]
+	fn a_dynamic_slice_with_a_trailing_item_is_refused() {
+		assert!(decode_dynamic(&[0x01]).is_ok());
+		assert!(decode_dynamic(&[0x01, 0x02]).is_err());
+	}
+
+	pub(crate) async fn datastore() -> Arc<Datastore> {
 		let ds = Datastore::new("memory").await.expect("a memory datastore");
 		let tx = ds.transaction(TransactionType::Write).await.expect("a write transaction");
 		tx.ensure_ns_db(None, "test", "test").await.expect("the test namespace and database");
@@ -587,14 +821,14 @@ mod tests {
 		ds
 	}
 
-	fn session() -> Session {
+	pub(crate) fn session() -> Session {
 		Session::owner().with_ns("test").with_db("test")
 	}
 
 	/// The queries the identity is checked over: rows of every kind, a single
 	/// value, a list value, an empty list, errors, a failed transaction, and
 	/// statements that answer nothing.
-	const QUERIES: &[&str] = &[
+	pub(crate) const QUERIES: &[&str] = &[
 		"SELECT * FROM t",
 		"SELECT s, n FROM t WHERE n > 1",
 		"SELECT n AS z, s AS a, dt, u, d, f, link, arr, obj FROM t",
@@ -619,6 +853,8 @@ mod tests {
 		"SELECT * OMIT s FROM t",
 		"SELECT * FROM t:1 FETCH link",
 		"SELECT * FROM t SPLIT arr",
+		"SELECT NONE AS x, s FROM t",
+		"SELECT s, NONE AS x, { a: NONE, b: 1 } AS o FROM t ORDER BY s",
 		"RETURN [1, 2, 3]",
 		"RETURN []",
 		"RETURN 1 + 2",
@@ -639,7 +875,7 @@ mod tests {
 		results
 	}
 
-	async fn encoded(
+	pub(crate) async fn encoded(
 		ds: &Arc<Datastore>,
 		sql: &str,
 		format: RowFormat,
@@ -670,6 +906,7 @@ mod tests {
 		match format {
 			RowFormat::Cbor => super::super::cbor::encode(value).expect("encodes"),
 			RowFormat::Json => super::super::json::encode_str(value).expect("encodes").into_bytes(),
+			RowFormat::Shaped => unreachable!("shaped rows are compared decoded"),
 		}
 	}
 
@@ -729,7 +966,7 @@ mod tests {
 	}
 
 	/// A streaming execution's items, each `Finished` item's time zeroed.
-	async fn items(
+	pub(crate) async fn items(
 		ds: &Arc<Datastore>,
 		sql: &str,
 		format: Option<RowFormat>,
@@ -796,8 +1033,15 @@ mod tests {
 							rows,
 						} => {
 							encoded_frames += 1;
-							super::encode_stream_rows(format, id.clone(), session_id, index, &rows)
-								.expect("encodes")
+							super::encode_stream_rows(
+								format,
+								id.clone(),
+								session_id,
+								index,
+								&rows,
+								&mut surrealdb_types::shaped::ShapeScope::new(),
+							)
+							.expect("encodes")
 						}
 					})
 					.collect();
@@ -862,6 +1106,35 @@ mod tests {
 			}
 			other => panic!("nones: {other:?}"),
 		}
+	}
+
+	/// A build without shaped frames does not offer them: the subprotocol is not served, a
+	/// request naming it is answered as for any unsupported format, and a caller that asks the
+	/// executor for shaped rows anyway gets an error for each statement of rows, never a panic.
+	#[cfg(not(feature = "shaped"))]
+	#[tokio::test]
+	async fn a_build_without_shaped_frames_refuses_them_cleanly() {
+		use super::super::{Format, PROTOCOLS};
+		assert_eq!(Format::from("shaped"), Format::Unsupported);
+		assert_eq!(Format::shaped(), Format::Unsupported);
+		assert!(!PROTOCOLS.contains(&"shaped"));
+		assert_eq!(Format::Shaped.row_format(), None);
+		let ds = Datastore::new("memory").await.expect("a memory datastore");
+		let tx = ds.transaction(TransactionType::Write).await.expect("a write transaction");
+		tx.ensure_ns_db(None, "test", "test").await.expect("the test namespace and database");
+		tx.commit().await.expect("committing the namespace");
+		ds.execute("CREATE t:1 SET s = 'a'; CREATE t:2 SET s = 'b'", &session(), None)
+			.await
+			.expect("the seed runs");
+		let (results, _) =
+			encoded(&ds, "SELECT * FROM t; SELECT s FROM t; RETURN 1", RowFormat::Shaped).await;
+		for result in &results[..2] {
+			let error = result.result.as_ref().expect_err("a statement of rows is refused");
+			assert!(error.to_string().contains("does not serve shaped frames"), "{error}");
+		}
+		assert!(results[2].result.is_ok(), "a statement of no rows answers");
+		let mut out = Vec::new();
+		encode_results(RowFormat::Shaped, &results, &mut out).expect("errors encode as CBOR");
 	}
 
 	/// A query that runs until it is stopped, writing to the table `e`.

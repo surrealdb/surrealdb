@@ -16,10 +16,10 @@
 #          `regex-unicode`, `collate`, `geo`, `vector-index`, `fulltext`,
 #          `observability`, `maintenance-tasks`, `text-diff`, `scram`, nor the
 #          `api`, `files`, `search`, `encoding`, `url`, crypto and HTML function
-#          families.
+#          families, nor the `shaped` result format.
 #   full   every optional engine feature that builds for wasm32 (the probe's
 #          `full` feature).
-#   edge   the lean feature set, entered through `Datastore::execute_edge` on a
+#   edge   the lean feature set and the `shaped` result format, entered through `Datastore::execute_edge` on a
 #          datastore built by `Builder::for_edge` (the probe's `edge-entry`
 #          feature): data statements and the edge builtins alone, with no
 #          schema, `INFO`, live-query or sequence runtime, no index build and

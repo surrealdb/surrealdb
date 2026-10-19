@@ -23,10 +23,14 @@
 //! the same reason.
 
 use std::fmt::Write as _;
+#[cfg(feature = "shaped")]
+use std::sync::Arc;
 
 use revision::optimised::IndexedSeqWalker;
 use revision::optimised::tag::{SizeClass, Tag};
 use surrealdb_rpc::{EncodedRows, RowFormat};
+#[cfg(feature = "shaped")]
+use surrealdb_types::shaped::{Shape, ValueShaper};
 
 use super::scalar::Scalar;
 use crate::catalog::packed::{FieldRef, PackedRow, PackedVisitor};
@@ -91,6 +95,10 @@ pub(super) mod observed {
 	}
 }
 
+/// Why a shaped row is refused by a build without shaped frames, which never offers them.
+#[cfg(not(feature = "shaped"))]
+const SHAPED_NOT_BUILT: &str = "this build does not serve shaped frames";
+
 /// The record field a stored record's key supplies.
 const ID_KEY: &str = "id";
 
@@ -109,12 +117,92 @@ pub(crate) struct RowFrame {
 	scratch: Vec<Entry>,
 	/// A reused buffer for a record key's string id that holds an escaped byte, unescaped.
 	id_text: Vec<u8>,
+	/// For shaped rows, the shapes they are written in.
+	#[cfg(feature = "shaped")]
+	shaped: Option<Box<Shaped>>,
+}
+
+#[cfg(feature = "shaped")]
+/// The shaped rows of a frame: which shape each is written in, the shaper value rows go through,
+/// and the copy plans packed rows run.
+#[derive(Debug, Default)]
+struct Shaped {
+	shaper: ValueShaper,
+	shapes: Vec<Arc<Shape>>,
+	row_shapes: Vec<u16>,
+	/// The copy plan of each (table, generation) a packed row of this frame has been written in.
+	plans: Vec<(String, crate::catalog::Generation, Arc<crate::exec::shaped::CopyPlan>)>,
+	/// Which ops of a copy plan wrote a present column, for the row being written.
+	present: Vec<bool>,
+	/// The index in `plans` of the plan the last packed row ran.
+	last_plan: usize,
+	/// The layouts (by address) and generation of the last packed row, with its plan's index: a
+	/// row of the same layouts and generation runs that plan, its generation already admitted.
+	run: Option<(usize, crate::catalog::Generation, usize)>,
+	/// The shape documents are written in: their `id`, and every other entry in the root's
+	/// remainder.
+	document: Option<Arc<Shape>>,
+	/// The statement's seed shape, whose declared arrays the copy plans hold natively.
+	seed: Option<Arc<Shape>>,
+	/// The table of the packed rows last written and the bytes its record keys share before the
+	/// id: a key that starts with them is of that table, and only its id is read.
+	key_prefix: (String, Vec<u8>),
+}
+
+#[cfg(feature = "shaped")]
+impl Shaped {
+	/// Records that the row just written is in `shape`.
+	fn note(&mut self, shape: &Arc<Shape>) -> anyhow::Result<()> {
+		note_in(&mut self.shapes, &mut self.row_shapes, shape)
+	}
+
+	/// The index in [`Self::plans`] of the copy plan of generation `generation` of `table`, whose
+	/// descriptor is `descriptor`, built the first time it is asked for.
+	fn plan(
+		&mut self,
+		table: &str,
+		generation: crate::catalog::Generation,
+		descriptor: &crate::catalog::layout::PackedDescriptor,
+	) -> anyhow::Result<usize> {
+		let matches =
+			|(t, g, _): &(String, crate::catalog::Generation, _)| *g == generation && t == table;
+		if self.plans.get(self.last_plan).is_some_and(matches) {
+			return Ok(self.last_plan);
+		}
+		if let Some(at) = self.plans.iter().position(matches) {
+			self.last_plan = at;
+			return Ok(at);
+		}
+		let plan =
+			Arc::new(crate::exec::shaped::copy_plan(descriptor, table, self.seed.as_deref())?);
+		self.plans.push((table.to_owned(), generation, plan));
+		self.last_plan = self.plans.len() - 1;
+		Ok(self.last_plan)
+	}
+}
+
+#[cfg(feature = "shaped")]
+/// Records in `row_shapes` that the row just written is in `shape`, adding it to `shapes`.
+fn note_in(
+	shapes: &mut Vec<Arc<Shape>>,
+	row_shapes: &mut Vec<u16>,
+	shape: &Arc<Shape>,
+) -> anyhow::Result<()> {
+	let at = match shapes.iter().rposition(|s| Arc::ptr_eq(s, shape)) {
+		Some(at) => at,
+		None => {
+			shapes.push(Arc::clone(shape));
+			shapes.len() - 1
+		}
+	};
+	row_shapes.push(u16::try_from(at)?);
+	Ok(())
 }
 
 /// One stored object entry: where its key's UTF-8 and its value wire lie,
 /// relative to the start of the stored value being transcoded.
 #[derive(Debug, Clone, Copy)]
-struct Entry {
+pub(super) struct Entry {
 	key: (u32, u32),
 	value: (u32, u32),
 }
@@ -145,6 +233,17 @@ impl RowFrame {
 			text: String::new(),
 			scratch: Vec::new(),
 			id_text: Vec::new(),
+			#[cfg(feature = "shaped")]
+			shaped: (format == RowFormat::Shaped).then(Box::default),
+		}
+	}
+
+	#[cfg(feature = "shaped")]
+	/// For shaped rows, the seed shape value rows whose `id` names `table` start from.
+	pub(crate) fn seed(&mut self, table: &str, seed: Arc<Shape>) {
+		if let Some(shaped) = &mut self.shaped {
+			shaped.shaper = ValueShaper::with_seed(table.to_owned(), Arc::clone(&seed));
+			shaped.seed = Some(seed);
 		}
 	}
 
@@ -154,6 +253,19 @@ impl RowFrame {
 		let (data_capacity, ends_capacity) = (self.data.capacity(), self.ends.capacity());
 		let bytes = std::mem::replace(&mut self.data, Vec::with_capacity(data_capacity));
 		let ends = std::mem::replace(&mut self.ends, Vec::with_capacity(ends_capacity));
+		#[cfg(feature = "shaped")]
+		if let Some(shaped) = &mut self.shaped {
+			let shapes = std::mem::take(&mut shaped.shapes);
+			let row_shapes =
+				std::mem::replace(&mut shaped.row_shapes, Vec::with_capacity(ends_capacity));
+			return EncodedRows::shaped(
+				bytes,
+				ends,
+				shapes,
+				row_shapes,
+				crate::rpc::format::decode_rows,
+			);
+		}
 		EncodedRows::new(self.format, bytes, ends, crate::rpc::format::decode_rows)
 	}
 
@@ -182,6 +294,11 @@ impl RowFrame {
 	pub(crate) fn clear(&mut self) {
 		self.data.clear();
 		self.ends.clear();
+		#[cfg(feature = "shaped")]
+		if let Some(shaped) = &mut self.shaped {
+			shaped.shapes.clear();
+			shaped.row_shapes.clear();
+		}
 	}
 
 	/// Run `write` as the next row, which it leaves whole or, on an error,
@@ -203,6 +320,10 @@ impl RowFrame {
 			}
 			Err(e) => {
 				self.data.truncate(start);
+				#[cfg(feature = "shaped")]
+				if let Some(shaped) = &mut self.shaped {
+					shaped.row_shapes.truncate(self.ends.len());
+				}
 				Err(e)
 			}
 		}
@@ -215,7 +336,21 @@ impl RowFrame {
 			RowFormat::Json => {
 				super::row_json::encode_json(&mut frame.data, value, 1, &mut frame.text)
 			}
+			#[cfg(feature = "shaped")]
+			RowFormat::Shaped => frame.shaped_value(super::row_shaped::CoreShaped::Value(value)),
+			#[cfg(not(feature = "shaped"))]
+			RowFormat::Shaped => anyhow::bail!(SHAPED_NOT_BUILT),
 		})
+	}
+
+	#[cfg(feature = "shaped")]
+	/// Write `value` as a shaped row.
+	fn shaped_value(&mut self, value: super::row_shaped::CoreShaped<'_>) -> anyhow::Result<()> {
+		let Some(shaped) = &mut self.shaped else {
+			anyhow::bail!("a shaped row in a frame of another format");
+		};
+		let shape = shaped.shaper.write(value, &mut self.data)?;
+		shaped.note(&shape)
 	}
 
 	/// Append the object of `fields` as a row: what [`Self::push_value`]
@@ -223,6 +358,12 @@ impl RowFrame {
 	/// holds each key once, in ascending order of its text.
 	pub(crate) fn push_fields(&mut self, fields: &[(&str, Scalar<'_>)]) -> anyhow::Result<()> {
 		debug_assert!(fields.windows(2).all(|w| w[0].0 < w[1].0), "fields in key order");
+		#[cfg(feature = "shaped")]
+		if self.format == RowFormat::Shaped {
+			return self.row_with(|frame| {
+				frame.shaped_value(super::row_shaped::CoreShaped::Fields(fields))
+			});
+		}
 		self.row_with(|frame| {
 			let RowFrame {
 				format,
@@ -231,6 +372,7 @@ impl RowFrame {
 				..
 			} = frame;
 			match format {
+				RowFormat::Shaped => anyhow::bail!("shaped fields are written as a value"),
 				RowFormat::Cbor => {
 					head(data, MAJOR_MAP, fields.len() as u64);
 					for (key, value) in fields {
@@ -274,6 +416,14 @@ impl RowFrame {
 		value: &[u8],
 		layouts: Option<&TableLayouts>,
 	) -> anyhow::Result<()> {
+		#[cfg(feature = "shaped")]
+		if self.format == RowFormat::Shaped {
+			return self.row_with(|frame| frame.shaped_stored(key, value, layouts));
+		}
+		#[cfg(not(feature = "shaped"))]
+		if self.format == RowFormat::Shaped {
+			anyhow::bail!(SHAPED_NOT_BUILT);
+		}
 		self.row_with(|frame| {
 			let RowFrame {
 				format,
@@ -324,13 +474,131 @@ impl RowFrame {
 	}
 }
 
+#[cfg(feature = "shaped")]
+impl RowFrame {
+	/// [`Self::push_stored`] for shaped rows: a packed row runs its generation's copy plan; any
+	/// other record, and a packed row the plan refuses, is decoded whole and written as a value.
+	fn shaped_stored(
+		&mut self,
+		key: &[u8],
+		value: &[u8],
+		layouts: Option<&TableLayouts>,
+	) -> anyhow::Result<()> {
+		let RowFrame {
+			data,
+			scratch,
+			id_text,
+			shaped,
+			..
+		} = self;
+		let Some(shaped) = shaped else {
+			anyhow::bail!("a shaped row in a frame of another format");
+		};
+		let record = StoredRecord::parse(value)?;
+		if let Some(record) = &record
+			&& record.is_packed()
+			&& let Some(layouts) = layouts
+		{
+			let start = data.len();
+			let written = (|| -> anyhow::Result<usize> {
+				let Ok(Some(generation)) = record.generation() else {
+					anyhow::bail!("a packed row whose stamp names no generation");
+				};
+				let table = layouts.table().as_str();
+				let (prefix_table, prefix) = &shaped.key_prefix;
+				let id = if prefix_table == table && !prefix.is_empty() && key.starts_with(prefix) {
+					super::row_packed::read_key_id_at(key, prefix.len())
+						.ok_or_else(|| anyhow::anyhow!("a record key that does not decode"))?
+				} else {
+					let Some((key_table, id)) = super::row_packed::read_key_id(key) else {
+						anyhow::bail!("a record key that does not decode");
+					};
+					if !key_table.iter().eq(table.as_bytes()) {
+						anyhow::bail!("a record read through another table's layouts");
+					}
+					if let Some(at) = super::row_packed::key_id_start(key) {
+						shaped.key_prefix = (table.to_owned(), key[..at].to_vec());
+					}
+					id
+				};
+				let address = std::ptr::from_ref(layouts) as usize;
+				let at = match shaped.run {
+					Some((held, held_generation, at))
+						if held == address && held_generation == generation =>
+					{
+						at
+					}
+					_ => {
+						let descriptor = layouts.admit_packed(generation)?;
+						let at = shaped.plan(table, generation, descriptor)?;
+						shaped.run = Some((address, generation, at));
+						at
+					}
+				};
+				let row = PackedRow::new(record, &shaped.plans[at].2.descriptor)?;
+				super::row_shaped::write_packed(
+					&shaped.plans[at].2,
+					&row,
+					key,
+					&id,
+					value,
+					data,
+					scratch,
+					&mut shaped.present,
+					id_text,
+				)?;
+				Ok(at)
+			})();
+			match written {
+				Ok(at) => {
+					#[cfg(test)]
+					PACKED_VISITS.with(|n| n.set(n.get() + 1));
+					let shape = &shaped.plans[at].2.shape;
+					shaped.shaper.set_current(shape);
+					return note_in(&mut shaped.shapes, &mut shaped.row_shapes, shape);
+				}
+				Err(_) => data.truncate(start),
+			}
+		}
+		// A document is written in the document shape, its entries transcoded in place; one the
+		// whole decode refuses falls through to that decode, which reports it.
+		if let Some(record) = record
+			&& let Ok(Some(document)) = record.checked_document()
+			&& let Some(object) = document.value()?.as_ordered_object()?
+		{
+			let shape = match &shaped.document {
+				Some(shape) => Arc::clone(shape),
+				None => {
+					let shape = super::row_shaped::document_shape()?;
+					shaped.document = Some(Arc::clone(&shape));
+					shape
+				}
+			};
+			let mut stored = Stored {
+				base: value,
+				out: data,
+				scratch,
+				json: None,
+			};
+			super::row_shaped::write_document(&shape, key, object, &mut stored, id_text)?;
+			return shaped.note(&shape);
+		}
+		#[cfg(test)]
+		WHOLE_DECODES.with(|n| n.set(n.get() + 1));
+		let decoded =
+			crate::exec::operators::scan::pipeline::decode_record_value(key, value, layouts)?;
+		let shape = shaped.shaper.write(super::row_shaped::CoreShaped::Value(&decoded), data)?;
+		shaped.note(&shape)
+	}
+}
+
 // --------------------------------------------------
 // CBOR primitives
 // --------------------------------------------------
 
 /// A CBOR head: major type `major` with argument `n`, in its shortest form.
 #[inline]
-fn head(out: &mut Vec<u8>, major: u8, n: u64) {
+pub(super) fn head(out: &mut Vec<u8>, major: u8, n: u64) {
 	let m = major << 5;
 	if n <= 23 {
 		out.push(m | n as u8);
@@ -358,7 +626,7 @@ fn int(out: &mut Vec<u8>, v: i64) {
 }
 
 #[inline]
-fn text(out: &mut Vec<u8>, s: &str) {
+pub(super) fn text(out: &mut Vec<u8>, s: &str) {
 	head(out, MAJOR_TEXT, s.len() as u64);
 	out.extend_from_slice(s.as_bytes());
 }
@@ -486,7 +754,7 @@ fn too_deep(depth: usize) -> anyhow::Result<()> {
 
 /// Encode `value`, at nesting depth `depth`, as the RPC layer encodes the
 /// public value it converts to.
-fn encode_value(out: &mut Vec<u8>, value: &Value, depth: usize) -> anyhow::Result<()> {
+pub(super) fn encode_value(out: &mut Vec<u8>, value: &Value, depth: usize) -> anyhow::Result<()> {
 	too_deep(depth)?;
 	match value {
 		Value::None => {
@@ -642,7 +910,7 @@ fn record_id(
 
 /// Encode `scalar` at depth `depth`: as JSON when given the scratch text
 /// buffer JSON renderings use, as CBOR otherwise.
-fn encode_scalar(
+pub(super) fn encode_scalar(
 	out: &mut Vec<u8>,
 	json: Option<&mut String>,
 	scalar: &Scalar<'_>,
@@ -678,14 +946,14 @@ fn encode_scalar(
 // --------------------------------------------------
 
 /// The transcoder over one stored value.
-struct Stored<'b, 'o> {
+pub(super) struct Stored<'b, 'o> {
 	/// The stored value every [`Entry`] offset is relative to.
-	base: &'b [u8],
-	out: &'o mut Vec<u8>,
-	scratch: &'o mut Vec<Entry>,
+	pub(super) base: &'b [u8],
+	pub(super) out: &'o mut Vec<u8>,
+	pub(super) scratch: &'o mut Vec<Entry>,
 	/// For JSON rows, the scratch text renderings are written into; `None`
 	/// for CBOR.
-	json: Option<&'o mut String>,
+	pub(super) json: Option<&'o mut String>,
 }
 
 /// The payload of a rev-2 `Value` wire of variant `want`, past its rev, tag
@@ -1009,8 +1277,33 @@ impl<'b> Stored<'b, '_> {
 		Ok(())
 	}
 
+	#[cfg(feature = "shaped")]
+	/// Transcode the stored-value object `object`, every entry but `id`, as one CBOR map; nothing
+	/// when it holds no other entry.
+	pub(super) fn stored_object_rest(
+		&mut self,
+		object: OrderedObjectRef<'b>,
+		depth: usize,
+	) -> anyhow::Result<()> {
+		too_deep(depth)?;
+		let count = object.len() - usize::from(object.get(ID_KEY)?.is_some());
+		if count == 0 {
+			return Ok(());
+		}
+		head(self.out, MAJOR_MAP, count as u64);
+		for entry in object.iter() {
+			let (k, v) = entry?;
+			if k == ID_KEY {
+				continue;
+			}
+			text(self.out, k);
+			self.stored_value(v, depth + 1)?;
+		}
+		Ok(())
+	}
+
 	/// Transcode the stored-value `value` at depth `depth`.
-	fn stored_value(&mut self, value: ValueRef<'b>, depth: usize) -> anyhow::Result<()> {
+	pub(super) fn stored_value(&mut self, value: ValueRef<'b>, depth: usize) -> anyhow::Result<()> {
 		too_deep(depth)?;
 		match value.kind() {
 			// A string's payload is its UTF-8, checked when it was written: CBOR copies it as it
@@ -1436,6 +1729,7 @@ mod tests {
 			RowFormat::Json => {
 				crate::rpc::format::json::encode_str(public).expect("encodes").into_bytes()
 			}
+			RowFormat::Shaped => unreachable!("shaped rows are compared decoded"),
 		}
 	}
 

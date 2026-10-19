@@ -30,7 +30,7 @@ use crate::val::{Object, Strand, TableName, Value};
 
 mod visit;
 
-pub use visit::PackedVisitor;
+pub use visit::{ColumnState, PackedVisitor};
 
 /// A trailer entry: its column, its payload, and where the next entry starts.
 type TrailerEntry<'a> = (u64, &'a [u8], usize);

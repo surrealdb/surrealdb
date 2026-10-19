@@ -65,6 +65,16 @@ static MEASURING: AsyncMutex<()> = AsyncMutex::const_new(());
 static PEAK: AtomicI64 = AtomicI64::new(0);
 
 #[inline]
+/// The formats a transport writes rows in that this build serves: CBOR, JSON, and shaped frames
+/// where the `shaped` feature builds them.
+fn wire_formats() -> Vec<surrealdb_rpc::RowFormat> {
+	let mut formats = vec![surrealdb_rpc::RowFormat::Cbor, surrealdb_rpc::RowFormat::Json];
+	if cfg!(feature = "shaped") {
+		formats.push(surrealdb_rpc::RowFormat::Shaped);
+	}
+	formats
+}
+
 fn live(delta: i64) {
 	let now = LIVE.fetch_add(delta, Ordering::Relaxed) + delta;
 	PEAK.fetch_max(now, Ordering::Relaxed);
@@ -1008,6 +1018,7 @@ async fn respond(
 		encode_response, encode_stream_rows, execute_encoded,
 	};
 	use surrealdb_rpc::{DbResponse, DbResult, OutgoingFrame, QUERY_STREAM_BUFFER, StreamFrames};
+	use surrealdb_types::shaped::ShapeScope;
 
 	let id = Some(Value::Number(Number::Int(1)));
 	match path {
@@ -1038,7 +1049,8 @@ async fn respond(
 				StreamFrames::new()
 			};
 			// Frames are encoded as items arrive, as the WebSocket driver
-			// sends them.
+			// sends them, shaped rows in the stream's one shape scope.
+			let mut scope = ShapeScope::new();
 			let drain = async {
 				let mut sent = 0;
 				while let Ok(item) = received.recv().await {
@@ -1056,7 +1068,14 @@ async fn respond(
 							OutgoingFrame::Rows {
 								index,
 								rows,
-							} => encode_stream_rows(format, id.clone(), None, index, &rows),
+							} => encode_stream_rows(
+								format,
+								id.clone(),
+								None,
+								index,
+								&rows,
+								&mut scope,
+							),
 						}
 						.expect("encodes")
 						.len();
@@ -1170,7 +1189,6 @@ const RESPONSE_BUDGETS: &[(&str, f64, &str)] = &[
 /// check is quick; the per-row difference is unchanged.
 #[tokio::test]
 async fn response_allocations_stay_within_budget() {
-	use surrealdb_rpc::RowFormat;
 	let _measuring = MEASURING.lock().await;
 	const CHECK_SMALL: usize = 2_000;
 	const CHECK_LARGE: usize = 4_000;
@@ -1182,7 +1200,7 @@ async fn response_allocations_stay_within_budget() {
 			.iter()
 			.find(|(name, _, _)| *name == shape.name)
 			.map_or(0.1, |(_, budget, _)| *budget);
-		for format in [RowFormat::Cbor, RowFormat::Json] {
+		for format in wire_formats() {
 			for path in [Path::Frames, Path::StreamFrames] {
 				let (allocs, _) = response_allocations(
 					(&small, CHECK_SMALL),
@@ -1306,7 +1324,7 @@ const FRAME_PER_ROW: f64 = 0.02;
 
 /// Packed rows written into frames allocate nothing per row beyond the growth of the frame's own
 /// buffers: the transcode from stored bytes into a frame (`exec::row_frame_probe`), and a streamed
-/// `SELECT *` with rows encoded for the wire, in CBOR and in JSON, over packed tables of int,
+/// `SELECT *` with rows encoded for the wire, in CBOR, JSON and shaped, over packed tables of int,
 /// string and uuid keys and of a wide row of every common field kind. An array key (`pa`) is
 /// decoded to be written, as a document's is, and is printed beside them without a bound.
 #[tokio::test]
@@ -1356,7 +1374,7 @@ async fn packed_rows_into_frames_allocate_nothing_per_row() {
 		if bounded && per_row > FRAME_PER_ROW {
 			over.push(format!("transcode {table}: {per_row:.3} allocs/row"));
 		}
-		for format in [RowFormat::Cbor, RowFormat::Json] {
+		for format in wire_formats() {
 			let sql = format!("SELECT * FROM {table}");
 			let measure = |ds: Arc<Datastore>| {
 				let sql = sql.clone();

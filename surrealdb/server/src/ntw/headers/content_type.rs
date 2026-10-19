@@ -19,6 +19,9 @@ pub enum ContentType {
 	ApplicationOctetStream,
 	/// SurrealDB Flatbuffers format (`application/surrealdb+flatbuffers`)
 	ApplicationSurrealDBFlatbuffers,
+	/// SurrealDB shaped frames (`application/vnd.surrealdb.shaped`): a request is CBOR, and a
+	/// response is CBOR whose result rows are shaped blocks
+	ApplicationSurrealDBShaped,
 }
 
 /// Pre-allocated static header value for `text/plain` content type
@@ -36,6 +39,9 @@ pub(super) static HEADER_VALUE_APPLICATION_OCTET_STREAM: HeaderValue =
 /// Pre-allocated static header value for `application/surrealdb+flatbuffers` content type
 pub(super) static HEADER_VALUE_APPLICATION_SURREAL_DB_FLATBUFFERS: HeaderValue =
 	HeaderValue::from_static(surrealdb_rpc::format::FLATBUFFERS);
+/// Pre-allocated static header value for `application/vnd.surrealdb.shaped` content type
+pub(super) static HEADER_VALUE_APPLICATION_SURREAL_DB_SHAPED: HeaderValue =
+	HeaderValue::from_static(surrealdb_rpc::format::SHAPED);
 
 impl std::fmt::Display for ContentType {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -47,6 +53,7 @@ impl std::fmt::Display for ContentType {
 			ContentType::ApplicationSurrealDBFlatbuffers => {
 				f.write_str(surrealdb_rpc::format::FLATBUFFERS)
 			}
+			ContentType::ApplicationSurrealDBShaped => f.write_str(surrealdb_rpc::format::SHAPED),
 		}
 	}
 }
@@ -70,6 +77,7 @@ impl Header for ContentType {
 			surrealdb_rpc::format::CBOR => Ok(ContentType::ApplicationCbor),
 			surrealdb_rpc::format::OCTET_STREAM => Ok(ContentType::ApplicationOctetStream),
 			surrealdb_rpc::format::FLATBUFFERS => Ok(ContentType::ApplicationSurrealDBFlatbuffers),
+			surrealdb_rpc::format::SHAPED => Ok(ContentType::ApplicationSurrealDBShaped),
 			_ => Err(headers::Error::invalid()),
 		}
 	}
@@ -97,6 +105,9 @@ impl From<&ContentType> for HeaderValue {
 			ContentType::ApplicationOctetStream => HEADER_VALUE_APPLICATION_OCTET_STREAM.clone(),
 			ContentType::ApplicationSurrealDBFlatbuffers => {
 				HEADER_VALUE_APPLICATION_SURREAL_DB_FLATBUFFERS.clone()
+			}
+			ContentType::ApplicationSurrealDBShaped => {
+				HEADER_VALUE_APPLICATION_SURREAL_DB_SHAPED.clone()
 			}
 		}
 	}

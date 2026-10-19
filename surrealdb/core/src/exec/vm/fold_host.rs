@@ -471,6 +471,7 @@ pub(in crate::exec::vm) mod tests {
 			aggregates: Vec::new(),
 			permissions: Vec::new(),
 			computed_names: Vec::new(),
+			shaped_seed: None,
 			table: None,
 			write: None,
 			scalar: true,
