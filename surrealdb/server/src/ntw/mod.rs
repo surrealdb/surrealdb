@@ -16,6 +16,7 @@ pub mod key;
 pub mod kvexport;
 #[cfg(feature = "mcp")]
 pub mod mcp;
+pub(crate) mod memory_guard;
 pub mod ml;
 pub(crate) mod output;
 mod params;

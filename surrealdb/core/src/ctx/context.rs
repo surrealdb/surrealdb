@@ -906,6 +906,7 @@ impl Context {
 		}
 		if deep_check {
 			if ALLOC.is_beyond_threshold() {
+				crate::mem::record_refusal(crate::mem::RefusalSite::Query);
 				bail!(DatastoreError::QueryBeyondMemoryThreshold);
 			}
 			let now = Instant::now();

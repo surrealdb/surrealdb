@@ -1,7 +1,10 @@
 mod fake;
 mod notrack;
+mod refusals;
 mod track;
 mod usable;
+
+pub use refusals::{RefusalSite, record_refusal, refusal_count};
 
 /// The configured memory ceiling in bytes, or `0` when the memory guard is
 /// disabled.

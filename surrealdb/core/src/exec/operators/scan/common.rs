@@ -24,6 +24,7 @@ use crate::val::{RecordId, RecordIdKey, TableName, Value};
 /// the threshold is never reached and this always returns `Ok`.
 pub(crate) fn ensure_below_memory_threshold() -> FlowResult<()> {
 	if crate::mem::ALLOC.is_beyond_threshold() {
+		crate::mem::record_refusal(crate::mem::RefusalSite::Query);
 		return Err(ControlFlow::Err(anyhow::Error::new(
 			DatastoreError::QueryBeyondMemoryThreshold,
 		)));

@@ -47,6 +47,7 @@ use std::sync::Arc;
 
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram, UpDownCounter};
+use surrealdb_core::mem::{RefusalSite, refusal_count};
 use surrealdb_core::observe::process_snapshot;
 use surrealdb_observe::{
 	AuthEvent, BucketOperationEvent, ExecutionObserver, HttpRequestEvent, HttpRequestStartEvent,
@@ -658,6 +659,41 @@ pub fn register_process_metrics(runtime: &ObservabilityRuntime) {
 			obs.observe(surrealdb_core::mem::memory_threshold() as i64, &[]);
 		})
 		.build();
+	// Requests and queries the memory guard turned away, one series per
+	// `RefusalSite`. A refusal short-circuits before dispatch, so this is the
+	// only metric that moves when the guard sheds load. Monotonic for the
+	// process lifetime.
+	let _memory_refusals = meter
+		.u64_observable_counter(names::PROCESS_MEMORY_REFUSALS)
+		.with_description(
+			"Requests and queries refused because tracked memory was beyond \
+			 SURREAL_MEMORY_THRESHOLD, by the site that refused them",
+		)
+		.with_callback(|obs| {
+			for site in RefusalSite::ALL {
+				obs.observe(
+					refusal_count(site),
+					&[KeyValue::new(attrs::MEMORY_REFUSAL_SITE, site.as_label())],
+				);
+			}
+		})
+		.build();
+	// How long the memory guard has been engaged without a break: 0 while it
+	// is not. `/health` fails once this reaches
+	// SURREAL_MEMORY_THRESHOLD_UNHEALTHY_AFTER. Reading it observes the guard,
+	// as a `/health` probe does.
+	let _memory_guard_engaged = meter
+		.u64_observable_gauge(names::PROCESS_MEMORY_GUARD_ENGAGED)
+		.with_description(
+			"Seconds the memory guard has been refusing every request without a break, or 0 when \
+			 tracked memory is below SURREAL_MEMORY_THRESHOLD",
+		)
+		.with_unit("s")
+		.with_callback(|obs| {
+			let engaged = crate::ntw::memory_guard::probe().unwrap_or_default();
+			obs.observe(engaged.as_secs(), &[]);
+		})
+		.build();
 	let _cpu = meter
 		.f64_observable_gauge(names::PROCESS_CPU_PERCENT)
 		.with_description(
@@ -1019,6 +1055,71 @@ mod tests {
 			}
 		}
 		(total, points)
+	}
+
+	/// The `site`-labelled data-points of the memory refusal counter.
+	fn memory_refusals_by_site(reader: &TestReader) -> std::collections::BTreeMap<String, u64> {
+		use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+		let mut rm = ResourceMetrics::default();
+		reader.collect(&mut rm).expect("collect");
+		let mut out = std::collections::BTreeMap::new();
+		for sm in rm.scope_metrics() {
+			for metric in sm.metrics() {
+				if metric.name() != names::PROCESS_MEMORY_REFUSALS {
+					continue;
+				}
+				let AggregatedMetrics::U64(MetricData::Sum(sum)) = metric.data() else {
+					panic!("{} is not a u64 sum: {:?}", metric.name(), metric.data());
+				};
+				assert!(sum.is_monotonic(), "memory refusals must be a counter");
+				for dp in sum.data_points() {
+					let site = dp
+						.attributes()
+						.find(|kv| kv.key.as_str() == attrs::MEMORY_REFUSAL_SITE)
+						.map(|kv| kv.value.as_str().into_owned())
+						.expect("site attribute");
+					out.insert(site, dp.value());
+				}
+			}
+		}
+		out
+	}
+
+	/// Every refusal recorded at a site shows up on that site's series of the
+	/// counter, and every site is published even before it has refused anything.
+	#[tokio::test]
+	async fn memory_refusals_are_published_per_site() {
+		use surrealdb_core::mem::record_refusal;
+
+		let (provider, reader, runtime) = fresh_runtime();
+		register_process_metrics(&runtime);
+		let before = memory_refusals_by_site(&reader);
+		assert_eq!(
+			before.keys().map(String::as_str).collect::<Vec<_>>(),
+			["http", "query", "websocket"],
+		);
+		record_refusal(RefusalSite::Websocket);
+		record_refusal(RefusalSite::Http);
+		record_refusal(RefusalSite::Http);
+		let after = memory_refusals_by_site(&reader);
+		// The counters are process-wide, so other tests may add to them too.
+		assert!(after["websocket"] > before["websocket"]);
+		assert!(after["http"] >= before["http"] + 2);
+		provider.shutdown().expect("shutdown");
+	}
+
+	/// The engaged-for gauge is published, and reads 0 while the guard is not
+	/// engaged.
+	#[tokio::test]
+	async fn memory_guard_engaged_gauge_is_published() {
+		let (provider, reader, runtime) = fresh_runtime();
+		register_process_metrics(&runtime);
+		let names_seen = collect_names(&reader);
+		assert!(
+			names_seen.iter().any(|(_, n)| n == names::PROCESS_MEMORY_GUARD_ENGAGED),
+			"{names_seen:?}"
+		);
+		provider.shutdown().expect("shutdown");
 	}
 
 	/// Walk every data-point on every metric in every scope looking for

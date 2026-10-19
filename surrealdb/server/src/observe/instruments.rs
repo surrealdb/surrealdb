@@ -114,6 +114,8 @@ pub mod names {
 	pub static PROCESS_MEMORY_REQUESTED: &str = "surrealdb.process.memory_requested";
 	pub static PROCESS_MEMORY_RESERVED: &str = "surrealdb.process.memory_reserved";
 	pub static PROCESS_MEMORY_THRESHOLD: &str = "surrealdb.process.memory_threshold";
+	pub static PROCESS_MEMORY_REFUSALS: &str = "surrealdb.process.memory_refusals";
+	pub static PROCESS_MEMORY_GUARD_ENGAGED: &str = "surrealdb.process.memory_guard_engaged";
 	pub static PROCESS_CPU_PERCENT: &str = "surrealdb.process.cpu_percent";
 
 	// --- Statement (scope: STATEMENT) ----------------------------------
@@ -225,6 +227,9 @@ pub mod attrs {
 	pub static USER: &str = "user";
 	/// Bounded session protocol identifier (`websocket` / `http`).
 	pub static PROTOCOL: &str = "protocol";
+	/// Where the memory guard refused work (`websocket` / `http` / `query`,
+	/// from [`surrealdb_core::mem::RefusalSite::as_label`]).
+	pub static MEMORY_REFUSAL_SITE: &str = "site";
 	/// Lifecycle action on a session event (`connect` / `disconnect`).
 	pub static SESSION_ACTION: &str = "session_action";
 	/// Service name supplied by the client on session connect (sentinel `"-"` when unset).
@@ -308,6 +313,8 @@ mod tests {
 			names::PROCESS_CPU_PERCENT,
 			names::PROCESS_MEMORY,
 			names::PROCESS_MEMORY_ALLOCATED,
+			names::PROCESS_MEMORY_GUARD_ENGAGED,
+			names::PROCESS_MEMORY_REFUSALS,
 			names::PROCESS_MEMORY_REQUESTED,
 			names::PROCESS_MEMORY_RESERVED,
 			names::PROCESS_MEMORY_THRESHOLD,

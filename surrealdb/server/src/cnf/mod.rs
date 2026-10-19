@@ -206,6 +206,28 @@ pub static WEBSOCKET_STREAM_SEND_TIMEOUT_SECS: LazyLock<u64> = LazyLock::new(|| 
 	(*CONFIGURED).clamp(1, 86_400)
 });
 
+/// How long the memory guard may stay engaged before `/health` fails
+/// (`SURREAL_MEMORY_THRESHOLD_UNHEALTHY_AFTER`, in seconds; default: 60).
+///
+/// The guard is engaged while tracked memory is beyond
+/// `SURREAL_MEMORY_THRESHOLD`; while it is, every RPC request is refused before
+/// dispatch. Once it has been engaged without a break for this long, `/health`
+/// answers `503 Service Unavailable` so a liveness probe restarts the process.
+/// Any observation below the threshold, whether by a request or by a `/health`
+/// probe, resets the clock.
+///
+/// `0` disables the check, so `/health` reports only storage reachability. The
+/// check never fires while `SURREAL_MEMORY_THRESHOLD` is unset or in a build
+/// without allocation tracking, because the guard then never engages.
+pub static MEMORY_THRESHOLD_UNHEALTHY_AFTER: LazyLock<Option<Duration>> = LazyLock::new(|| {
+	static CONFIGURED: LazyLock<u64> =
+		lazy_env_parse!("SURREAL_MEMORY_THRESHOLD_UNHEALTHY_AFTER", u64, 60);
+	match *CONFIGURED {
+		0 => None,
+		secs => Some(Duration::from_secs(secs)),
+	}
+});
+
 /// The maximum number of concurrently executing streaming queries on a single
 /// WebSocket connection (default: 32).
 ///

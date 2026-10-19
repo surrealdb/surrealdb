@@ -13,7 +13,7 @@ use http::{HeaderMap, HeaderName, HeaderValue};
 use opentelemetry_http::HeaderExtractor;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::mem::ALLOC;
+use surrealdb_core::mem::RefusalSite;
 use surrealdb_core::rpc::RpcProtocol;
 use surrealdb_core::rpc::format::Format;
 use surrealdb_datastore::Transaction;
@@ -48,30 +48,13 @@ use crate::cnf::{
 	WEBSOCKET_MAX_ATTACHED_SESSIONS, WEBSOCKET_PING_FREQUENCY, WEBSOCKET_RESPONSE_BUFFER_SIZE,
 	WEBSOCKET_RESPONSE_CHANNEL_SIZE, WEBSOCKET_RESPONSE_FLUSH_PERIOD,
 };
+use crate::ntw::memory_guard;
 use crate::rpc::CONN_CLOSED_ERR;
 use crate::rpc::format::WsFormat;
 use crate::telemetry::traces::rpc::span_for_request;
 
 /// An error string sent when the server is out of memory
 const SERVER_OVERLOADED: &str = "The server is unable to handle the request";
-
-/// Report a request refused because tracked memory crossed
-/// `SURREAL_MEMORY_THRESHOLD`.
-///
-/// A refusal short-circuits before dispatch, so no statement or RPC metric
-/// moves and the only other outward sign is that clients stop getting answers.
-/// `transport` names the ingress that refused, and the two byte counts — taken
-/// from the check that refused, so the total is not recomputed — are what an
-/// operator needs to tell "the threshold is set too low" apart from "this
-/// instance is genuinely out of memory".
-pub(crate) fn log_memory_refusal(transport: &str, allocated: usize, threshold: usize) {
-	warn!(
-		transport,
-		memory_allocated = allocated,
-		memory_threshold = threshold,
-		"Refusing request: tracked memory is beyond SURREAL_MEMORY_THRESHOLD"
-	);
-}
 
 /// An error string sent when the server is gracefully shutting down
 const SERVER_SHUTTING_DOWN: &str = "The server is gracefully shutting down";
@@ -744,9 +727,9 @@ impl Websocket {
 							// Clone the response sending channel
 							let chn = internal_sender.clone();
 							// Check to see whether we have available memory
-							if let Some(over) = ALLOC.beyond_threshold_by() {
+							if memory_guard::admit(RefusalSite::Websocket).is_some() {
 								// Reject the message
-								Self::close_socket(Arc::clone(&rpc), over).await;
+								Self::close_socket(Arc::clone(&rpc)).await;
 								// Exit out of the loop
 								break;
 							}
@@ -935,8 +918,7 @@ impl Websocket {
 						.await;
 					}
 					// Check to see whether we have available memory
-					else if let Some((allocated, threshold)) = ALLOC.beyond_threshold_by() {
-						log_memory_refusal("websocket", allocated, threshold);
+					else if memory_guard::admit(RefusalSite::Websocket).is_some() {
 						crate::rpc::response::send(
 							DbResponse::failure(
 								req.id,
@@ -1064,12 +1046,7 @@ impl Websocket {
 	///
 	/// The frame goes on the solicited-output queue, not the notification
 	/// one: it answers the request being refused.
-	///
-	/// `over` is the tracked total and the threshold it exceeded, from the
-	/// check that refused the message.
-	async fn close_socket(rpc: Arc<Websocket>, over: (usize, usize)) {
-		// Log the error as a warning
-		log_memory_refusal("websocket", over.0, over.1);
+	async fn close_socket(rpc: Arc<Websocket>) {
 		// Create a custom close frame
 		let frame = CloseFrame {
 			code: AGAIN,
