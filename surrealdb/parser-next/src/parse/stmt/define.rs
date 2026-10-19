@@ -669,8 +669,33 @@ impl<'a, 's> Parser<'a, 's> {
 		self.clause(Cl::Jwt, idx, 0, start, first)
 	}
 
+	/// The clauses of a table definition. Each of `COMMENT`, `DROP`, `TYPE`, `PERMISSIONS`,
+	/// `CHANGEFEED`, `AS`, `INLINE EDGES`, `INLINE REFERENCES`, `GRAPHQL ALIAS` and
+	/// `GRAPHQL DEPRECATED` may appear once, and `SCHEMAFULL` and `SCHEMALESS` share one
+	/// slot, so a later clause never silently replaces an earlier one.
 	pub(crate) fn table_clauses(&mut self) -> R<()> {
+		let mut seen: [Option<Tok>; 11] = [None; 11];
 		loop {
+			let t = self.tok;
+			let slot = match t.kw {
+				Kw::Comment => Some(0),
+				Kw::Drop => Some(1),
+				Kw::Type => Some(2),
+				Kw::Schemaless | Kw::Schemafull => Some(3),
+				Kw::Permissions => Some(4),
+				Kw::ChangeFeed => Some(5),
+				Kw::As => Some(6),
+				Kw::Inline if self.peek1().kw == Kw::Edges => Some(7),
+				Kw::Inline if self.peek1().kw == Kw::References => Some(8),
+				Kw::GraphqlAlias => Some(9),
+				Kw::GraphqlDeprecated => Some(10),
+				_ => None,
+			};
+			if let Some(slot) = slot
+				&& let Some(first) = seen[slot].replace(t)
+			{
+				return Err(self.repeated_table_clause(t, first));
+			}
 			match self.tok.kw {
 				Kw::Comment => self.expr_clause(Cl::Comment)?,
 				Kw::Drop => self.flag_clause(Cl::Drop)?,
@@ -1634,6 +1659,14 @@ impl<'a, 's> Parser<'a, 's> {
 			return Err(self.unexpected("<"));
 		}
 		self.model_version()
+	}
+
+	/// The error for a table clause `t` that repeats, or contradicts, the clause `first`.
+	fn repeated_table_clause(&mut self, t: Tok, first: Tok) -> Stop {
+		let d = Diag::message(t.start, t.end, "Conflicting clause on this table definition")
+			.with_label("A table definition takes each clause once")
+			.with_extra(first.start, first.end, "First given here");
+		self.diag(d)
 	}
 
 	/// The error for an extension clause `t` that repeats, or contradicts, the
