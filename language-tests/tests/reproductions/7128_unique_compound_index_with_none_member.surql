@@ -5,9 +5,8 @@ database = true
 auth = { level = "owner" }
 
 [test]
-reason = "A compound UNIQUE index treats a NONE member as a value, so two rows with the same other member and NONE collide"
+reason = "By design: a UNIQUE index stores a tuple holding NONE or NULL as a plain entry that names its record, so rows that differ only by a NONE member coexist, as rows holding NULL do in SQL"
 issue = 7128
-wip = true
 
 [[test.results]]
 value = "NONE"
@@ -25,10 +24,10 @@ value = "NONE"
 value = "[{ i: 1, id: t:1 }]"
 
 [[test.results]]
-error = "Database index `t_idx` already contains [1, NONE], with record `t:1`"
+value = "[{ i: 1, id: t:2 }]"
 
 [[test.results]]
-value = "[{ i: 1, id: t:1 }]"
+value = "[{ i: 1, id: t:1 }, { i: 1, id: t:2 }]"
 */
 
 DEFINE TABLE t SCHEMAFUL;
