@@ -161,6 +161,28 @@ keyspace! {
 		/// A lease over one of the singleton background tasks.
 		task_lease = ["!tl", @, task_id: TaskLeaseType] => surrealdb_catalog::TaskLease;
 
+		/// The newest write barrier a build has asked of every node: a build that must read only
+		/// once every write transaction older than one of its commits has ended raises it past
+		/// that commit, and waits for every live node to answer it ([`write_barrier_ack`]).
+		write_barrier = ["!wb"] => u64;
+
+		/// The newest write barrier node `nd` has answered: every write transaction the node
+		/// opened before it read that barrier has ended. Written only by node `nd`, so no node's
+		/// writes contend with another's; a node writes it when it registers, before it opens any
+		/// transaction of its own, and a node with none runs a release without the barrier.
+		write_barrier_ack = ["!wa", @, nd: Uuid] => u64;
+
+		/// The heartbeat node `nd` last recorded as a release with the write barrier, in the
+		/// transaction of that heartbeat. A node whose current heartbeat (`!nd`) differs was last
+		/// refreshed by a release without the barrier, whose answer (`!wa`) nothing maintains.
+		write_barrier_heartbeat = ["!wh", @, nd: Uuid] => u64;
+
+		/// The table a build that raised write barrier `seq` builds an index of, so a node answering
+		/// the barrier fences, of the write transactions it stops waiting for, only those writing
+		/// that table. Kept for a bounded run of the newest barriers.
+		write_barrier_target = ["!wt", @, seq: u64, @, ns: NamespaceId, db: DatabaseId, tb: Table]
+			=> ();
+
 		/// A durable session.
 		session = ["!se", @, id: Uuid] => crate::values::session::DurableSession;
 
@@ -559,6 +581,11 @@ keyspace! {
 					/// claim, replay or discard exactly one generation, ticket or
 					/// mutation run.
 					build_state = ["!bs", @, ix: IndexId] => IndexBuildState;
+					/// The newest generation of the index whose build waited for the write
+					/// transactions older than its commit (the write barrier) before it scanned. A
+					/// takeover of a generation whose scan has completed without it rescans, since
+					/// a release without the barrier may have scanned before such a write committed.
+					build_barrier = ["!bw", @, ix: IndexId] => BuildGeneration;
 					build_ticket = ["!bt", ix: IndexId, @, generation: BuildGeneration]
 						=> BuildTicket;
 					build_reservation = ["!br", ix: IndexId, @, generation: BuildGeneration,

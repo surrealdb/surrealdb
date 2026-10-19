@@ -523,6 +523,9 @@ struct SavePointMark {
 	/// Whether the transaction already held the stored-format ledger entry; a rollback of a scope
 	/// that took it discards the observation ([`Transaction::admit_stored_format`]).
 	stored_format_admitted: bool,
+	/// The tables already written; a rollback returns to them, so a write it undid no longer
+	/// counts against a fence of its table ([`crate::triggers::WrittenTables`]).
+	written: crate::triggers::WrittenMark,
 }
 
 /// A record as a read answers it, with the generation its stored bytes carry: `None` for a
@@ -776,6 +779,19 @@ pub struct Transaction {
 	/// The live-transaction bucket this transaction counted itself into
 	/// ([`crate::triggers::LiveTransactions`]), or [`crate::triggers::NO_LIVE_BUCKET`].
 	live_bucket: u8,
+	/// The epoch of [`crate::triggers::LiveWrites`] a write transaction counted itself into, taken
+	/// back once the transaction's outcome is known ([`Self::end_live_write`]); [`NO_LIVE_EPOCH`]
+	/// for a read transaction and once counted out.
+	live_write_epoch: AtomicU64,
+	/// When the transaction opened, taken before its snapshot, for the heartbeat fence
+	/// ([`crate::triggers::WriteFence`]).
+	opened_at: Option<web_time::Instant>,
+	/// Whether the heartbeat fence lets this transaction commit whatever it finds: the heartbeat's
+	/// own transaction ([`Self::exempt_from_write_fence`]).
+	write_fence_exempt: AtomicBool,
+	/// Whether a build's wait for older write transactions ended while this one was set aside for
+	/// its own build ([`Self::rejoin_live_writes`]), so its commit is refused.
+	passed_a_wait: AtomicBool,
 	/// Write-cardinality guard: maximum number of individual key writes this
 	/// transaction may buffer before further writes fail. Unset by default,
 	/// leaving the transaction unbounded. Armed once — by the executor for
@@ -1303,11 +1319,54 @@ impl IndexBuildReservationRelease {
 	}
 }
 
+/// The epoch of a transaction not counted among the write transactions a build waits for.
+const NO_LIVE_EPOCH: u64 = u64::MAX;
+
+/// A commit counted as under way by [`crate::triggers::LiveWrites`] until dropped.
+struct LiveCommit<'a> {
+	live: &'a crate::triggers::LiveWrites,
+	epoch: u64,
+	/// Whether the transaction's epoch was fenced when the commit began.
+	fenced: bool,
+}
+
+impl Drop for LiveCommit<'_> {
+	fn drop(&mut self) {
+		self.live.end_commit(self.epoch);
+	}
+}
+
+/// A write transaction set aside from the writes a build waits for
+/// ([`Transaction::park_live_write`]), which counts itself back in when this is dropped.
+#[must_use]
+pub struct ParkedWrite {
+	txn: Arc<Transaction>,
+	/// How many waits had begun, and how many were running, when it was set aside.
+	waits: (u64, u64),
+	/// How many of the waits that begin while it is set aside are its own build's.
+	own: u64,
+}
+
+impl ParkedWrite {
+	/// Record that the build the transaction awaits began `own` of the waits that begin while it
+	/// is set aside. A guard dropped without it counts every such wait as another build's.
+	pub fn own_waits(&mut self, own: u64) {
+		self.own = own;
+	}
+}
+
+impl Drop for ParkedWrite {
+	fn drop(&mut self) {
+		self.txn.rejoin_live_writes(self.waits, self.own);
+	}
+}
+
 impl Drop for Transaction {
 	fn drop(&mut self) {
 		if self.live_bucket != crate::triggers::NO_LIVE_BUCKET {
 			self.triggers.live.close(self.live_bucket);
 		}
+		self.end_live_write();
 	}
 }
 
@@ -1691,6 +1750,10 @@ impl Transaction {
 			trigger_graph_fold: AtomicBool::new(false),
 			trigger_table_migration: AtomicBool::new(false),
 			live_bucket: crate::triggers::NO_LIVE_BUCKET,
+			live_write_epoch: AtomicU64::new(NO_LIVE_EPOCH),
+			opened_at: None,
+			write_fence_exempt: AtomicBool::new(false),
+			passed_a_wait: AtomicBool::new(false),
 			write_keys_limit: OnceLock::new(),
 			write_guard_poisoned: AtomicBool::new(false),
 			save_point_poisoned: AtomicBool::new(false),
@@ -2234,6 +2297,7 @@ impl Transaction {
 		// for a cancel the driver itself failed to perform, which leaves the
 		// transaction's durability unknown rather than known-discarded.
 		let result = self.tr.cancel().await;
+		self.end_live_write();
 		let cleanup_result = self.run_rollback_actions().await;
 		let release_result = self.release_index_build_reservations().await;
 		self.discard_commit_actions().await;
@@ -2263,7 +2327,11 @@ impl Transaction {
 	/// than a state to handle.
 	///
 	/// The poisons are checked for the same reason: a transaction that must not
-	/// persist its writes must not persist them by this route either.
+	/// persist its writes must not persist them by this route either. So is the
+	/// admission every write commit passes, and the bound on a commit to a shared
+	/// store ([`Self::admit_commit`], [`Self::commit_store_bounded`]): a write a
+	/// build stopped waiting for, or one from a node left out of a build's wait,
+	/// lands by no route.
 	pub async fn commit_bare(&self) -> Result<()> {
 		self.poisoned()?;
 		if self.index_deltas.get().is_some_and(|buffer| !buffer.is_empty()) {
@@ -2274,7 +2342,22 @@ impl Transaction {
 			}
 			.into());
 		}
-		Ok(self.commit_store().await?)
+		// Admitted, and bounded, as every write commit is ([`Self::admit_commit`]).
+		let committing = match self.admit_commit() {
+			Ok(committing) => committing,
+			Err(refused) => {
+				if let Err(err) = self.cancel_bare().await {
+					tracing::warn!(
+						target: "surrealdb::core::kvs::tx",
+						"transaction cleanup failed after its bare commit was refused: {err}"
+					);
+				}
+				return Err(refused.into());
+			}
+		};
+		let committed = self.commit_store_bounded().await;
+		drop(committing);
+		Ok(committed?)
 	}
 
 	/// The reason this transaction may not commit, if there is one.
@@ -2396,7 +2479,9 @@ impl Transaction {
 	/// Cancel without draining the registered close-time actions. See
 	/// [`Self::commit_bare`].
 	pub async fn cancel_bare(&self) -> Result<()> {
-		Ok(self.tr.cancel().await?)
+		let cancelled = self.tr.cancel().await;
+		self.end_live_write();
+		Ok(cancelled?)
 	}
 
 	/// Commit a transaction.
@@ -2480,8 +2565,22 @@ impl Transaction {
 		if let Some(hook) = self.triggers.take_before_commit_hook() {
 			hook().await;
 		}
-		// Commit the transaction
-		let committed = self.commit_store().await;
+		// The admission every write commit passes ([`Self::admit_commit`]).
+		let committing = match self.admit_commit() {
+			Ok(committing) => committing,
+			Err(refused) => {
+				guard_fences.finish();
+				if let Err(err) = self.cancel().await {
+					tracing::warn!(
+						target: "surrealdb::core::kvs::tx",
+						"transaction cleanup failed after its commit was refused: {err}"
+					);
+				}
+				return Err(refused.into());
+			}
+		};
+		let committed = self.commit_store_bounded().await;
+		drop(committing);
 		#[cfg(any(test, feature = "test-hooks"))]
 		let committed = match committed {
 			Ok(()) if !self.rollback_actions.lock().await.is_empty() => {
@@ -6388,7 +6487,86 @@ impl Transaction {
 	/// starts until it has returned, where it stamped a catalog version.
 	async fn commit_store(&self) -> std::result::Result<(), KvsError> {
 		let _counted = self.changed_catalog().then(|| self.triggers.catalog_epoch.committing());
-		self.tr.commit().await
+		let committed = self.tr.commit().await;
+		self.end_live_write();
+		committed
+	}
+
+	/// Keep this write transaction's commit, abandoned before its outcome was known, counted as
+	/// under way in its epoch for `settle` ([`crate::triggers::ABANDONED_COMMIT_SETTLE`]), since
+	/// the storage may still land it: this node answers no write barrier that would pass it before
+	/// then.
+	fn hold_abandoned_commit(&self, settle: std::time::Duration) {
+		let epoch = self.live_write_epoch.load(Ordering::SeqCst);
+		if epoch == NO_LIVE_EPOCH {
+			return;
+		}
+		self.triggers.live_writes.hold_commit(epoch);
+		let triggers = Arc::clone(&self.triggers);
+		common::rt::spawn_detached(async move {
+			sleep(settle).await;
+			triggers.live_writes.end_commit(epoch);
+		});
+	}
+
+	/// Admit this transaction's commit, which counts as under way until the answered guard is
+	/// dropped, so a wait for older write transactions does not end while it may still land; or
+	/// answer why it may not commit. Every write commit passes this, bare ones included:
+	///
+	/// - A build elsewhere may have read without waiting for this transaction while it awaited its
+	///   own index build ([`Self::rejoin_live_writes`]).
+	/// - A wait that ran its bound fenced the epoch it opened in, for every table or for one it
+	///   wrote ([`crate::triggers::LiveWrites::begin_commit`]).
+	/// - This node's heartbeat has lapsed, so a build may have left it out of its wait for the
+	///   writes older than its commit, and it commits no write to a store it shares
+	///   ([`crate::triggers::WriteFence`]). The heartbeat's own transaction is exempt.
+	fn admit_commit(&self) -> std::result::Result<Option<LiveCommit<'_>>, KvsError> {
+		if self.passed_a_wait.load(Ordering::SeqCst) {
+			return Err(KvsError::TransactionConflict(
+				"another index build read while this transaction awaited its own index build"
+					.to_string(),
+			));
+		}
+		let committing = self.begin_live_commit();
+		if committing.as_ref().is_some_and(|committing| committing.fenced) {
+			return Err(KvsError::TransactionConflict(
+				"an index build stopped waiting for this transaction, which ran too long"
+					.to_string(),
+			));
+		}
+		if self.writeable()
+			&& !self.sole_writer()
+			&& !self.write_fence_exempt.load(Ordering::Relaxed)
+			&& !self.triggers.write_fence.admits(self.opened_at)
+		{
+			return Err(KvsError::TransactionConflict(
+				"this node's heartbeat has lapsed, so it cannot commit writes until it records \
+				 one"
+				.to_string(),
+			));
+		}
+		Ok(committing)
+	}
+
+	/// [`Self::commit_store`], bounded on a store other datastores write: a build elsewhere stops
+	/// waiting for this node a bounded time after its fence lapses, so a commit that has not
+	/// returned within [`crate::triggers::WRITE_COMMIT_BOUND`] reports its outcome as unknown.
+	async fn commit_store_bounded(&self) -> std::result::Result<(), KvsError> {
+		if !self.writeable() || self.sole_writer() {
+			return self.commit_store().await;
+		}
+		match common::time::timeout(crate::triggers::WRITE_COMMIT_BOUND, self.commit_store()).await
+		{
+			Ok(committed) => committed,
+			Err(_) => {
+				self.hold_abandoned_commit(crate::triggers::ABANDONED_COMMIT_SETTLE);
+				self.end_live_write();
+				Err(KvsError::CommitOutcomeUnknown(format!(
+					"the commit did not return within {:?}",
+					crate::triggers::WRITE_COMMIT_BOUND
+				)))
+			}
+		}
 	}
 
 	/// Enqueue background reclaim of an index-data prefix by its stable id.
@@ -7541,6 +7719,95 @@ impl Transaction {
 	pub(crate) fn with_live_bucket(mut self, bucket: u8) -> Self {
 		self.live_bucket = bucket;
 		self
+	}
+
+	/// Count this write transaction as open in the epoch of its datastore's
+	/// [`crate::triggers::LiveWrites`] that `live` names, counted in before its snapshot was
+	/// taken, and opened at the instant it names; `None` for a read transaction, which is neither
+	/// counted nor dated.
+	pub(crate) fn with_live_write(mut self, live: Option<(u64, web_time::Instant)>) -> Self {
+		if let Some((epoch, opened)) = live {
+			self.live_write_epoch.store(epoch, Ordering::SeqCst);
+			self.opened_at = Some(opened);
+		}
+		self
+	}
+
+	/// Count this write transaction's commit as under way, answering whether its epoch is fenced
+	/// ([`crate::triggers::LiveWrites::begin_commit`]); `None` for a transaction not counted.
+	fn begin_live_commit(&self) -> Option<LiveCommit<'_>> {
+		let epoch = self.live_write_epoch.load(Ordering::SeqCst);
+		if epoch == NO_LIVE_EPOCH {
+			return None;
+		}
+		let live = &self.triggers.live_writes;
+		let fenced = live.begin_commit(epoch, &self.tr.written);
+		Some(LiveCommit {
+			fenced,
+			live,
+			epoch,
+		})
+	}
+
+	/// Let this transaction commit whatever the heartbeat fence finds
+	/// ([`crate::triggers::WriteFence`]): the transaction that records the heartbeat, which a node
+	/// whose heartbeat has lapsed must still be able to commit.
+	pub fn exempt_from_write_fence(&self) {
+		self.write_fence_exempt.store(true, Ordering::Relaxed);
+	}
+
+	/// Count this transaction out of its datastore's [`crate::triggers::LiveWrites`]: once its
+	/// commit or cancel has returned, when it is dropped, or while the statement holding it awaits
+	/// a build inside it ([`Self::park_live_write`]). Idempotent.
+	fn end_live_write(&self) {
+		let epoch = self.live_write_epoch.swap(NO_LIVE_EPOCH, Ordering::SeqCst);
+		if epoch != NO_LIVE_EPOCH {
+			self.triggers.live_writes.close(epoch);
+		}
+	}
+
+	/// Set this open write transaction aside from the writes a build waits for
+	/// ([`crate::triggers::LiveWrites`]) while the statement holding it awaits a build inside it,
+	/// which would otherwise wait for its own transaction, and so would every other build waiting
+	/// on this one. The transaction writes nothing while it is set aside, and counts itself back in
+	/// when the returned guard is dropped, however the wait for the build ends. `None` for a
+	/// transaction not counted.
+	pub fn park_live_write(self: &Arc<Self>) -> Option<ParkedWrite> {
+		if self.live_write_epoch.load(Ordering::SeqCst) == NO_LIVE_EPOCH {
+			return None;
+		}
+		// Read before the transaction leaves its bucket: a wait counted after this reads the epoch
+		// after the transaction may have left, so it counts as one begun while it was set aside.
+		let waits = self.triggers.live_writes.waits();
+		self.end_live_write();
+		Some(ParkedWrite {
+			txn: Arc::clone(self),
+			waits,
+			own: 0,
+		})
+	}
+
+	/// Count this transaction, set aside when `waits` had begun and were running, back among the
+	/// writes a build waits for, its own build having begun `own` of the waits begun since.
+	///
+	/// A wait that was running when the transaction was set aside, or that began while it was set
+	/// aside and is not its own build's, may not wait for it, and the build behind that wait may
+	/// read before what the transaction wrote or will write commits. Its commit is then refused
+	/// with a retryable conflict. A wait that begins after the transaction is counted back in
+	/// waits for it. A transaction already closed counts nothing.
+	fn rejoin_live_writes(&self, waits: (u64, u64), own: u64) {
+		if self.closed() {
+			return;
+		}
+		let live = &self.triggers.live_writes;
+		// Counted back into the current epoch, so a fence of the epochs before it, which the
+		// transaction's own build may set, does not refuse it.
+		self.live_write_epoch.store(live.open(), Ordering::SeqCst);
+		let (begun, running) = waits;
+		let (begun_now, _) = live.waits();
+		if running > 0 || begun_now.saturating_sub(begun) > own {
+			self.passed_a_wait.store(true, Ordering::SeqCst);
+		}
 	}
 
 	/// The count of events that change which generation of a table is current, what the
@@ -8739,6 +9006,10 @@ impl Transaction {
 			trigger_graph_fold: AtomicBool::new(false),
 			trigger_table_migration: AtomicBool::new(false),
 			live_bucket: crate::triggers::NO_LIVE_BUCKET,
+			live_write_epoch: AtomicU64::new(NO_LIVE_EPOCH),
+			opened_at: None,
+			write_fence_exempt: AtomicBool::new(false),
+			passed_a_wait: AtomicBool::new(false),
 			write_keys_limit: OnceLock::new(),
 			write_guard_poisoned: AtomicBool::new(false),
 			save_point_poisoned: AtomicBool::new(false),
@@ -8838,6 +9109,7 @@ impl Transaction {
 			layout_epoch: self.layout_epoch.load(Ordering::Acquire),
 			range_deletes: self.range_deletes.load(Ordering::Acquire),
 			stored_format_admitted: self.stored_format_admitted.load(Ordering::Acquire),
+			written: self.tr.written.lock().mark(),
 		});
 		Ok(())
 	}
@@ -8893,6 +9165,7 @@ impl Transaction {
 		}
 		let mark = self.save_point_marks.lock().await.pop();
 		if let Some(mark) = mark {
+			self.tr.written.lock().restore(mark.written);
 			// An effect queued in the scope answers to writes the rollback undid, unless it
 			// answers to the end of the transaction instead.
 			let mut actions = self.commit_actions.lock().await;
@@ -14728,6 +15001,25 @@ mod speculation_tests {
 
 	fn key(bytes: &[u8]) -> Key<'static> {
 		Key::from(bytes.to_vec())
+	}
+
+	/// A write commit abandoned before its outcome was known still counts as under way in its
+	/// epoch for the settle it is held for, so no wait for the writes older than it ends before
+	/// then, even though the transaction itself has ended.
+	#[tokio::test]
+	async fn an_abandoned_commit_holds_its_epoch_until_it_settles() {
+		use std::time::Duration;
+		let (tf, sequences) = factory().await;
+		let tx = tf.transaction(TransactionType::Write, sequences).await.unwrap();
+		let live = tf.live_writes();
+		let since = live.advance();
+		tx.hold_abandoned_commit(Duration::from_millis(300));
+		tx.cancel_bare().await.unwrap();
+		assert!(!live.ended_since(since), "the abandoned commit may still land");
+		tokio::time::sleep(Duration::from_millis(100)).await;
+		assert!(!live.ended_since(since), "nor before its settle has elapsed");
+		tokio::time::sleep(Duration::from_millis(500)).await;
+		assert!(live.ended_since(since), "it has landed, or never will, once it has");
 	}
 
 	/// A speculation that writes caches apart once it has, so what it caches

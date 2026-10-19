@@ -383,7 +383,7 @@ pub struct Datastore {
 	transaction_factory: TransactionFactory,
 	/// Cancellation for this datastore's own background work, tripped by
 	/// [`Self::shutdown`].
-	shutdown: CancellationToken,
+	pub(super) shutdown: CancellationToken,
 	/// Handles for this datastore's maintenance tasks, so [`Self::shutdown`]
 	/// can wait for them to stop.
 	///
@@ -394,6 +394,10 @@ pub struct Datastore {
 	/// [`Builder::without_maintenance_tasks`](self::builder::Builder::without_maintenance_tasks),
 	/// until [`Self::start_maintenance_tasks`] is called on it.
 	maintenance: parking_lot::Mutex<Option<crate::kvs::tasks::Tasks>>,
+	/// Whether this datastore answers write barriers and keeps its write fence armed
+	/// ([`Self::begin_answering_write_barriers`]), and so records that it does
+	/// ([`Self::advertises_write_barrier`]).
+	pub(super) answers_write_barriers: std::sync::atomic::AtomicBool,
 	/// The cadences the maintenance tasks run at, kept so
 	/// [`Self::start_maintenance_tasks`] starts them on the same schedule the
 	/// builder was given rather than on whatever its caller passes in.
@@ -1229,6 +1233,7 @@ impl Datastore {
 		Self {
 			shutdown: CancellationToken::new(),
 			maintenance: parking_lot::Mutex::new(None),
+			answers_write_barriers: std::sync::atomic::AtomicBool::new(false),
 			engine_options: self.engine_options,
 			shutdown_lock: tokio::sync::Mutex::new(()),
 			id: self.id,
@@ -1309,6 +1314,7 @@ impl Datastore {
 			// A fork is unshared, so it carries no maintenance tasks.
 			shutdown: CancellationToken::new(),
 			maintenance: parking_lot::Mutex::new(None),
+			answers_write_barriers: std::sync::atomic::AtomicBool::new(false),
 			engine_options: self.engine_options,
 			shutdown_lock: tokio::sync::Mutex::new(()),
 			id,
@@ -1369,6 +1375,23 @@ impl Datastore {
 			config: Arc::clone(&self.config),
 			parser_config: Arc::clone(&self.parser_config),
 		}
+	}
+
+	/// A fork as another process writing the same store would be: its own node id, and its own
+	/// commit triggers, so it counts its own transactions; both datastores then take the
+	/// protocols of a store other processes write too.
+	#[cfg(test)]
+	pub(crate) fn fork_for_test_as_another_process(&self, id: Uuid) -> Self {
+		let triggers = Arc::new(CommitTriggers::new());
+		triggers.assume_shared_store();
+		self.triggers.assume_shared_store();
+		let transaction_factory = self.transaction_factory.with_triggers(Arc::clone(&triggers));
+		let mut fork = self.fork_for_test_with_node_id(id);
+		fork.index_builder = IndexBuilder::new(transaction_factory.clone());
+		fork.sequences = Sequences::new(transaction_factory.clone(), id);
+		fork.transaction_factory = transaction_factory;
+		fork.triggers = triggers;
+		fork
 	}
 
 	/// Set the node id for this datastore.
@@ -2607,6 +2630,9 @@ impl Datastore {
 	/// node-membership refresh, because every other task writes state it refuses.
 	///
 	/// Idempotent: a datastore that already carries its tasks is left alone.
+	///
+	/// It does not check the node membership refresh interval against the write fence these
+	/// tasks arm on a store other nodes write; [`Self::start_maintenance_tasks_checked`] does.
 	pub fn start_maintenance_tasks(self: &Arc<Self>) {
 		let mut maintenance = self.maintenance.lock();
 		if maintenance.is_some() {
@@ -2617,6 +2643,22 @@ impl Datastore {
 		if cfg!(feature = "maintenance-tasks") {
 			*maintenance = Some(tasks);
 		}
+	}
+
+	/// [`Self::start_maintenance_tasks`], refusing first, as a datastore that starts them at
+	/// construction does, a node membership refresh interval the write fence they arm cannot run
+	/// with (see [`crate::kvs::write_barrier`]).
+	///
+	/// A node registered before this ([`Self::insert_node`]) records, before it returns, that it
+	/// answers write barriers ([`Self::publish_write_barrier_support`]), so it serves no write a
+	/// build elsewhere would take for one from a node without the barrier.
+	pub async fn start_maintenance_tasks_checked(self: &Arc<Self>) -> Result<()> {
+		self.check_heartbeat_interval(self.engine_options.node_membership_refresh_interval).await?;
+		if self.maintenance.lock().is_none() {
+			self.publish_write_barrier_support().await?;
+		}
+		self.start_maintenance_tasks();
+		Ok(())
 	}
 
 	/// Whether this datastore's maintenance tasks are running.
@@ -2674,6 +2716,34 @@ impl Datastore {
 		// durable change during shutdown and stays at its last committed
 		// checkpoint, so the periodic resume scan continues it after restart —
 		// exactly as it would after a crash.
+		// Once this node is archived, no build elsewhere waits for its writes (see
+		// `crate::kvs::write_barrier`), so no write commits after that: they are refused from
+		// here on, and those already committing are waited for, within the archive's own bound.
+		// On a store this datastore writes alone the fence takes no part, and no other node builds.
+		self.transaction_factory.write_fence().close();
+		let shared = match self.transaction(TransactionType::Read).await {
+			Ok(txn) => {
+				let shared = !txn.sole_writer();
+				let _ = txn.cancel().await;
+				shared
+			}
+			Err(_) => false,
+		};
+		if shared {
+			let live = self.transaction_factory.live_writes();
+			let since = live.advance();
+			let deadline = Instant::now() + NODE_DELETE_TIMEOUT;
+			while !live.ended_since(since) && Instant::now() < deadline {
+				sleep(Duration::from_millis(10)).await;
+			}
+			// Once every write has ended, this node answers every barrier, so no build waits out
+			// the liveness window for a node that left cleanly.
+			if live.ended_since(since)
+				&& let Err(err) = self.retire_write_barrier_answer().await
+			{
+				warn!(target: TARGET, "Could not answer the write barrier on shutdown: {err}");
+			}
+		}
 		// Archive this datastore in the cluster, but don't let a blocked
 		// metadata transaction prevent storage engine shutdown.
 		let _ = archive_node_for_shutdown(
@@ -3260,10 +3330,24 @@ impl Datastore {
 		node: &Node,
 		replace: bool,
 	) -> Result<()> {
+		// A node whose heartbeat has lapsed refuses its own writes until a heartbeat commits.
+		txn.exempt_from_write_fence();
 		if replace {
 			txn.replace_key(key, node).await?;
 		} else {
 			txn.set_key(key, node).await?;
+		}
+		// Marks this heartbeat as one from a node that answers the write barrier
+		// (`crate::kvs::write_barrier`). A node that does not leaves it unmarked, and builds take
+		// it for one that predates the barrier.
+		if self.advertises_write_barrier() {
+			txn.set_key(
+				&crate::key::schema::WriteBarrierHeartbeatKey {
+					nd: key.nd,
+				},
+				&node.heartbeat.value,
+			)
+			.await?;
 		}
 		txn.set_key(
 			&NodeReleaseKey {
@@ -3302,7 +3386,20 @@ impl Datastore {
 		};
 		let now = self.clock_now();
 		let node = Node::new_with_endpoint(self.id, now, false, self.http_endpoint.clone());
-		run!(txn, self.write_node(&txn, &key, &node, false).await)
+		run!(
+			txn,
+			async {
+				self.write_node(&txn, &key, &node, false).await?;
+				// Registered before this node opens a transaction of its own, so it answers every
+				// write barrier asked so far (see `crate::kvs::write_barrier`). A node that answers
+				// none records no answer, and builds take it for one that predates the barrier.
+				if self.advertises_write_barrier() {
+					self.register_write_barrier_answer(&txn).await?;
+				}
+				Ok(())
+			}
+			.await
+		)
 	}
 
 	/// Updates an already existing node in the cluster.
@@ -3564,8 +3661,18 @@ impl Datastore {
 					nd: *id,
 				};
 				let node = catch!(txn, txn.get_key(&key, None).await);
-				if !node.is_some_and(|nd| nd.is_archived()) {
+				let Some(node) = node.filter(|nd| nd.is_archived()) else {
 					trace!(target: TARGET, id = %id, "Skipping node that is no longer archived");
+					catch!(txn, txn.cancel().await);
+					continue;
+				};
+				// A build waits for an archived node's write barrier answer until its heartbeat is
+				// `WRITE_BARRIER_EXCLUDE_AFTER` old, and finds the node only through its row, so
+				// the row stays until then.
+				let excluded_before =
+					self.clock_now() - crate::kvs::write_barrier::WRITE_BARRIER_EXCLUDE_AFTER;
+				if node.heartbeat >= excluded_before {
+					trace!(target: TARGET, id = %id, "Keeping archived node a build may still wait for");
 					catch!(txn, txn.cancel().await);
 					continue;
 				}
@@ -3622,6 +3729,20 @@ impl Datastore {
 				catch!(
 					txn,
 					txn.clr_key(&NodeReleaseKey {
+						nd: *id,
+					})
+					.await
+				);
+				catch!(
+					txn,
+					txn.clr_key(&crate::key::schema::WriteBarrierAckKey {
+						nd: *id,
+					})
+					.await
+				);
+				catch!(
+					txn,
+					txn.clr_key(&crate::key::schema::WriteBarrierHeartbeatKey {
 						nd: *id,
 					})
 					.await

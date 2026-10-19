@@ -43,9 +43,12 @@ mod tests;
 
 use std::time::Duration;
 
-pub(crate) use after_commit::RemoveFailedDefinition;
+#[cfg(test)]
+pub(crate) use after_commit::unstarted;
+pub(crate) use after_commit::{RemoveFailedDefinition, StagedRebuild};
 pub(crate) use builder::{
 	AbortLocalBuild, BuildCompletion, CleanUncommittedBuild, IndexBuilder, IndexMutation,
+	RebuildStaging,
 };
 pub(crate) use state::filter_online_indexes;
 // Only the frozen-fixture corpus names this directly; the builder reaches a

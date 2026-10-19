@@ -32,6 +32,7 @@ pub(crate) mod paging;
 pub mod request;
 mod rollback;
 pub(crate) mod slowlog;
+pub(crate) mod write_barrier;
 
 #[cfg(test)]
 pub(crate) mod test_support;

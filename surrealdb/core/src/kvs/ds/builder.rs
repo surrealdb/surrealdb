@@ -597,6 +597,7 @@ impl Builder {
 		let datastore = Datastore {
 			shutdown,
 			maintenance: parking_lot::Mutex::new(None),
+			answers_write_barriers: std::sync::atomic::AtomicBool::new(false),
 			engine_options: options,
 			shutdown_lock: tokio::sync::Mutex::new(()),
 			created_here: std::sync::atomic::AtomicBool::new(false),
@@ -738,6 +739,7 @@ impl Builder {
 			datastore.created_here.fetch_or(is_new, std::sync::atomic::Ordering::SeqCst);
 			// A read-only store runs the membership refresh alone: every other task
 			// writes.
+			datastore.check_heartbeat_interval(options.node_membership_refresh_interval).await?;
 			let tasks = crate::kvs::tasks::init(&datastore, datastore.shutdown.clone(), &options);
 			// This is the only writer, and it runs before the datastore is
 			// handed to anyone.

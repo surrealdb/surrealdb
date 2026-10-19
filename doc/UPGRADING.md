@@ -41,6 +41,13 @@ is in, and a store may hold both side by side.
   it builds, a `DEFINE INDEX` whose build fails has its definition removed
   afterwards rather than rolled back, and the query timeout, the transaction
   timeout and a cancellation end the wait during the build.
+- A `REBUILD INDEX` that moves an index onto the current index format builds
+  once its transaction has committed, so a cancelled one leaves the index as it
+  was.
+- An index build reads only once every write transaction that began before
+  its index was defined or its rebuild committed has ended, on every node, so
+  a long-held write transaction delays it. On a store several nodes write, a
+  node whose heartbeat has lapsed for 30 s refuses its own write commits.
 - Index materialisation takes its workers from the node's place pool, the one
   parallel queries use. Staged HNSW batches and background index compaction
   run only as wide as that pool grants, a host with two cores or fewer runs
@@ -363,6 +370,88 @@ index, and commits before its build as a plain `DEFINE INDEX` does.
 the build is done. Such a deployment can wrap the statement in
 `BEGIN … COMMIT`, which keeps it atomic but also keeps the RocksDB limit on how
 large a build its transaction can outlast.
+
+### A `REBUILD INDEX` that moves an index's format builds once it has committed
+
+A `REBUILD INDEX` of an index built before the current index format, the step
+that moves such an index onto it, no longer builds while its transaction is
+open. It commits the new format together with a new build of the index, and the
+build starts once that commit lands. Until then every session keeps reading and
+maintaining the index in its previous format; a rebuild that is cancelled or
+rolled back leaves the index exactly as it was; and a build interrupted by a
+restart resumes in the format it started in. From the commit on, the index is
+reported as building and queries do not use it until the build is done, as for
+any `REBUILD INDEX`.
+
+For such a rebuild:
+
+- A blocking `REBUILD INDEX` run on its own still returns once its index is
+  ready. Inside `BEGIN … COMMIT` or a block, the statements after it see the
+  index as building, and `COMMIT` returns once the index is ready. In a
+  transaction a client holds open, the client's commit waits for the build.
+- A build that fails after the commit leaves the index in `Error`, which
+  `INFO FOR INDEX` reports, rather than failing the statement or rolling back
+  the transaction.
+
+A `REBUILD INDEX` that leaves the format unchanged builds as before.
+
+**What to do**: nothing, unless a deployment runs this rebuild inside a
+transaction and relies on the transaction failing with a failed build. Run it
+on its own, and check `INFO FOR INDEX` after it.
+
+### An index build waits for the write transactions older than it
+
+A build started by `DEFINE INDEX` or `REBUILD INDEX` reads the table only once
+every write transaction that began before the index was defined, or before the
+rebuild committed, has ended. A write that began before that commit maintains
+the index as it found it, and is indexed exactly once whether it commits
+before the build reads or not at all; one that begins after it sees the build
+and is queued for it. Until then `INFO FOR INDEX` reports the build as
+cleaning, and a blocking statement keeps waiting, within its timeout.
+
+- **A long-held write transaction delays a build, for at most a minute.** A
+  build waits up to 60 s for the write transactions older than it. One still
+  open after that — a transaction a client holds open, or one that runs for
+  minutes — is then refused at commit with a retryable conflict if it writes
+  the table being indexed, and the build goes ahead without it. A transaction
+  that writes only other tables, in this database or any other, commits as
+  before.
+- **A build inside `BEGIN … COMMIT`** does not wait for its own transaction.
+  If another build starts waiting while it runs, the transaction's `COMMIT`
+  fails with a retryable conflict, since that build may not have waited for it.
+- **On a store several nodes write** (TiKV), each node answers for its own
+  write transactions through new keys (`!wb`, `!wa`, `!wh`, and `!wt`, which
+  names the table of each of the newest 1024 barriers), and a build
+  waits for every node whose heartbeat is younger than 90 s, archived or not; a
+  node that shuts down cleanly answers every barrier before it leaves. A node
+  refuses its own write commits, with a retryable conflict, once it has gone
+  30 s without recording its heartbeat, so a node a build no longer counts as
+  live cannot commit a write the build missed. A write commit that has not
+  returned within 20 s reports its outcome as unknown, and since the store may
+  still land it, the node answers no barrier for 30 s after; the remaining
+  10 s is the margin within which the nodes' clocks must agree. A heartbeat gets at
+  most 14 s, so two in a row fit within those 30 s, and one that cannot commit
+  in time leaves the node refusing its writes until one does.
+- **A cluster running mixed releases.** While a live node runs a release
+  without this barrier — including a node rolled back to one, or a node that
+  runs no maintenance tasks and so answers no barriers — builds read without
+  waiting, as that release's builds do.
+  A build records the generation it waited for (`!bw`, one key per index), and
+  a build taken over after an owner on such a release finished its scan
+  rescans the table.
+- **A node membership refresh interval above 10 s is refused** on a store
+  several nodes write: a node with `--node-membership-refresh-interval` (or
+  `SURREAL_NODE_MEMBERSHIP_REFRESH_INTERVAL`) set above 10 s fails to start,
+  since it would refuse its own writes between healthy heartbeats. The default
+  is 3 s, and a store one node writes accepts any interval.
+
+**What to do**: nothing, unless a deployment:
+
+- holds write transactions open for more than a minute on a table while an
+  index on it is defined or rebuilt: such a transaction is refused at commit
+  and must be retried;
+- sets the node membership refresh interval above 10 s on a store several
+  nodes write: lower it to 10 s or less.
 
 ### A `LET` inside a cancelled transaction is undone
 

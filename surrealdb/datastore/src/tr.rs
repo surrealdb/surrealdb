@@ -33,6 +33,11 @@ pub struct Transactor {
 	pub(crate) overlay: Arc<Mutex<Option<Overlay>>>,
 	/// How many writes the speculation has taken.
 	pub(crate) writes: Arc<std::sync::atomic::AtomicU64>,
+	/// The tables this transaction has written keys of, which a fence of the write transactions a
+	/// build stopped waiting for refuses at commit
+	/// ([`crate::triggers::LiveWrites::fence_tables_through`]). A speculation's writes reach no
+	/// storage, so it records none.
+	pub(crate) written: parking_lot::Mutex<crate::triggers::WrittenTables>,
 }
 
 impl fmt::Display for Transactor {
@@ -63,6 +68,7 @@ impl Transactor {
 			speculating: false,
 			overlay: Arc::new(Mutex::new(None)),
 			writes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+			written: Default::default(),
 		}
 	}
 
@@ -77,6 +83,7 @@ impl Transactor {
 			speculating: true,
 			overlay,
 			writes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+			written: Default::default(),
 		}
 	}
 
@@ -401,6 +408,7 @@ impl Transactor {
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.set(&key, val));
 		}
+		self.written.lock().note_key(key.as_slice());
 		self.inner.set(key, val).await
 	}
 
@@ -417,6 +425,7 @@ impl Transactor {
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.set(&key, val));
 		}
+		self.written.lock().note_key(key.as_slice());
 		self.inner.replace(key, val).await
 	}
 
@@ -436,6 +445,7 @@ impl Transactor {
 			}
 			return self.overlay_mut(|overlay| overlay.set(&key, val));
 		}
+		self.written.lock().note_key(key.as_slice());
 		self.inner.put(key, val).await
 	}
 
@@ -456,6 +466,7 @@ impl Transactor {
 			}
 			return self.overlay_mut(|overlay| overlay.set(&key, val));
 		}
+		self.written.lock().note_key(key.as_slice());
 		self.inner.putc(key, val, chk).await
 	}
 
@@ -468,6 +479,7 @@ impl Transactor {
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.delete(&key));
 		}
+		self.written.lock().note_key(key.as_slice());
 		self.inner.del(key).await
 	}
 
@@ -484,6 +496,7 @@ impl Transactor {
 			}
 			return self.overlay_mut(|overlay| overlay.delete(&key));
 		}
+		self.written.lock().note_key(key.as_slice());
 		self.inner.delc(key, chk).await
 	}
 
@@ -499,6 +512,7 @@ impl Transactor {
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.clear(&rng));
 		}
+		self.written.lock().note_range(rng.start.as_slice(), rng.end.as_slice());
 		self.inner.delr(rng).await
 	}
 
@@ -511,6 +525,7 @@ impl Transactor {
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.delete(&key));
 		}
+		self.written.lock().note_key(key.as_slice());
 		self.inner.clr(key).await
 	}
 
@@ -527,6 +542,7 @@ impl Transactor {
 			}
 			return self.overlay_mut(|overlay| overlay.delete(&key));
 		}
+		self.written.lock().note_key(key.as_slice());
 		self.inner.clrc(key, chk).await
 	}
 
@@ -542,6 +558,7 @@ impl Transactor {
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.clear(&rng));
 		}
+		self.written.lock().note_range(rng.start.as_slice(), rng.end.as_slice());
 		self.inner.clrr(rng).await
 	}
 

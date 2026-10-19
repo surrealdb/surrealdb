@@ -35,7 +35,7 @@ use crate::key::reclaim::{Expunge, ReclaimKind};
 use crate::key::schema::{
 	DocKeyPrefix, DocLookupIdentityPrefix, DocLookupKey, DocLookupPrefix, DocPendingKey,
 	DocPendingPrefix, DocStatsBatchPrefix, EntryPrefix, IdxRoot, IndexCompactionIxPrefix,
-	IndexCountKey, IndexCountPrefix, ReclaimKey, ReclaimPrefix, RecordPrefix,
+	IndexCountKey, IndexCountPrefix, ReclaimKey, ReclaimPrefix, RecordKey, RecordPrefix,
 	TermChangeBatchPrefix,
 };
 use crate::key::{KVKey, KVKeyDecode, KVSubspace, KVValue, Key};
@@ -49,7 +49,9 @@ use crate::kvs::testing::{
 use crate::kvs::tx::{
 	CachedIndexBuildReservationKey, CachedIndexBuildReservationLookup, IndexBuildReservationRelease,
 };
-use crate::kvs::{Datastore, DatastoreError, is_retryable_transaction_conflict, storage_error};
+use crate::kvs::{
+	Datastore, DatastoreError, QueryRequest, is_retryable_transaction_conflict, storage_error,
+};
 use crate::val::{RecordId, RecordIdKey, RecordIdentity, TableName, Value};
 
 const REPEATED_RETRY_CONFLICTS: usize = 1000;
@@ -3802,6 +3804,9 @@ async fn takeover_preserves_durable_progress_counts() -> Result<()> {
 			},
 		)
 		.await?;
+		// The owner waited at the write barrier for its generation, so the takeover keeps its
+		// completed scan (see `a_takeover_rescans_a_completed_scan_without_barrier_proof`).
+		tx.set_key(&ikb.new_bw_key(), &generation).await?;
 		tx.commit().await?;
 
 		let build = new_building_for_index(&ds, &session, ns, db, &table, Arc::clone(&ix)).await?;
@@ -3883,6 +3888,10 @@ async fn takeover_resumes_initial_scan_from_checkpoint() -> Result<()> {
 		},
 	)
 	.await?;
+	// The crashed owner waited at the write barrier for its generation before it scanned, so the
+	// takeover keeps its checkpoint (see
+	// `a_takeover_rescans_a_completed_scan_without_barrier_proof`).
+	tx.set_key(&ikb.new_bw_key(), &2).await?;
 	tx.commit().await?;
 
 	let build = new_building_for_index(&ds, &session, ns, db, &table, Arc::clone(&ix)).await?;
@@ -3966,6 +3975,10 @@ async fn takeover_resumes_count_initial_scan_from_checkpoint() -> Result<()> {
 		},
 	)
 	.await?;
+	// The crashed owner waited at the write barrier for its generation before it scanned, so the
+	// takeover keeps its checkpoint (see
+	// `a_takeover_rescans_a_completed_scan_without_barrier_proof`).
+	tx.set_key(&ikb.new_bw_key(), &2).await?;
 	tx.commit().await?;
 
 	let build = new_building_for_index(&ds, &session, ns, db, &table, Arc::clone(&ix)).await?;
@@ -4162,6 +4175,10 @@ async fn abort_mid_scan_never_checkpoints_unindexed_records() -> Result<()> {
 		},
 	)
 	.await?;
+	// The crashed owner waited at the write barrier for its generation before it scanned, so the
+	// takeover keeps its checkpoint (see
+	// `a_takeover_rescans_a_completed_scan_without_barrier_proof`).
+	tx.set_key(&ikb.new_bw_key(), &2).await?;
 	tx.commit().await?;
 
 	let building =
@@ -7343,6 +7360,1820 @@ async fn diskann_compaction_folds_records_modified_twice() -> Result<()> {
 		RetryableConflictSite::DiskAnnCompaction,
 	)
 	.await
+}
+
+/// A storage engine a reproduction opens, at a fresh location that lives as
+/// long as the datastore does.
+#[cfg(feature = "kv-mem")]
+struct StorageEngine {
+	/// The name failures are reported under.
+	label: &'static str,
+	/// The path the datastore is opened at.
+	path: String,
+	#[cfg(any(feature = "kv-surrealkv", feature = "kv-rocksdb"))]
+	_dir: Option<TempDir>,
+}
+
+/// Every storage engine this build carries, each at a fresh location. Which
+/// reads an engine validates at commit decides whether a write racing a build
+/// can slip past it, so the reproductions below run on all of them.
+#[cfg(feature = "kv-mem")]
+fn storage_engines() -> Result<Vec<StorageEngine>> {
+	#[allow(unused_mut)]
+	let mut engines = vec![StorageEngine {
+		label: "memory",
+		path: "memory".to_owned(),
+		#[cfg(any(feature = "kv-surrealkv", feature = "kv-rocksdb"))]
+		_dir: None,
+	}];
+	#[cfg(feature = "kv-rocksdb")]
+	{
+		let dir = TempDir::new()?;
+		engines.push(StorageEngine {
+			label: "rocksdb",
+			path: format!("rocksdb://{}", dir.path().to_string_lossy()),
+			_dir: Some(dir),
+		});
+	}
+	#[cfg(feature = "kv-surrealkv")]
+	{
+		let dir = TempDir::new()?;
+		engines.push(StorageEngine {
+			label: "surrealkv",
+			path: format!("surrealkv://{}", dir.path().to_string_lossy()),
+			_dir: Some(dir),
+		});
+	}
+	Ok(engines)
+}
+
+/// Two nodes sharing one datastore opened at `path`, as
+/// [`new_distributed_index_test_ds`] builds them in memory.
+#[cfg(feature = "kv-mem")]
+async fn new_distributed_index_test_ds_at(
+	path: &str,
+) -> Result<(Arc<Datastore>, Datastore, Session)> {
+	let ds_a = Datastore::builder().without_maintenance_tasks().build_with_path(path).await?;
+	let session = Session::owner().with_ns("test").with_db("test");
+	let tx = ds_a.transaction(TransactionType::Write).await?;
+	tx.ensure_ns_db(None, "test", "test").await?;
+	tx.commit().await?;
+	let ds_b = ds_a.fork_for_test_with_node_id(Uuid::new_v4());
+	ds_a.insert_node().await?;
+	ds_b.insert_node().await?;
+	Ok((ds_a, ds_b, session))
+}
+
+/// Defines `t` and the analyzer a full-text `ix` uses, and seeds `t` from
+/// [`TWICE_MODIFIED_SEED`]: five records, which the first initial-scan batch
+/// reads all of.
+#[cfg(feature = "kv-mem")]
+async fn seed_raced_table(ds: &Datastore, session: &Session) -> Result<()> {
+	let seed: String = TWICE_MODIFIED_SEED
+		.iter()
+		.map(|(id, value)| format!("CREATE t:{id} SET f = '{value}' RETURN NONE;"))
+		.collect();
+	execute_all(
+		ds,
+		session,
+		&format!(
+			"DEFINE TABLE t SCHEMALESS; DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase; {seed}"
+		),
+	)
+	.await
+}
+
+/// A `count()` query's total. A query that groups no rows answers with no row
+/// at all, which is a total of zero.
+#[cfg(feature = "kv-mem")]
+async fn count_rows(ds: &Datastore, session: &Session, sql: &str) -> Result<i64> {
+	let rows = query_json(ds, session, sql).await?;
+	if rows.as_array().is_some_and(Vec::is_empty) {
+		return Ok(0);
+	}
+	rows.pointer("/0/count")
+		.and_then(serde_json::Value::as_i64)
+		.ok_or_else(|| anyhow::anyhow!("{sql} answered without a count: {rows}"))
+}
+
+/// The key base of the index a build running on `ds` is building, found
+/// through the node's local builder: a blocking statement has not committed
+/// the definition the catalog would find it by.
+#[cfg(feature = "kv-mem")]
+async fn running_build_key_base(ds: &Datastore, table: &str, index: &str) -> Result<IndexKeyBase> {
+	let ctx = ds.setup_ctx()?;
+	let builder = ctx.get_index_builder().expect("the datastore has an index builder");
+	let indexes = builder.indexes.read().await;
+	indexes
+		.values()
+		.find(|building| {
+			building.ix.table_name.as_str() == table && building.ix.name.as_str() == index
+		})
+		.map(|building| building.ikb.clone())
+		.ok_or_else(|| anyhow::anyhow!("no local build of {index} on {table}"))
+}
+
+/// An index kind a write can go missing from, and the question that shows it.
+#[cfg(feature = "kv-mem")]
+#[derive(Clone, Copy, Debug)]
+enum RacedIndexKind {
+	/// An equality lookup through a standard index.
+	Standard,
+	/// The table count a COUNT index answers. It answers `count()` over the
+	/// whole table with or without `WITH NOINDEX`, so the scan side counts the
+	/// rows by length instead.
+	Count,
+	/// The count query a conditional COUNT index answers.
+	CountWhere,
+	/// A term match through a full-text index.
+	FullText,
+}
+
+#[cfg(feature = "kv-mem")]
+impl RacedIndexKind {
+	const ALL: [Self; 4] = [Self::Standard, Self::Count, Self::CountWhere, Self::FullText];
+
+	/// The definition of `ix` on `t`, without `CONCURRENTLY`.
+	fn define(self) -> &'static str {
+		match self {
+			Self::Standard => "DEFINE INDEX ix ON t FIELDS f",
+			Self::Count => "DEFINE INDEX ix ON t COUNT",
+			Self::CountWhere => "DEFINE INDEX ix ON t COUNT WHERE f = 'v1'",
+			Self::FullText => "DEFINE INDEX ix ON t FIELDS f FULLTEXT ANALYZER simple BM25",
+		}
+	}
+
+	/// The published index's answer, then a table scan's answer to the same
+	/// question.
+	async fn answers(
+		self,
+		ds: &Datastore,
+		session: &Session,
+	) -> Result<(serde_json::Value, serde_json::Value)> {
+		const HOLDERS: &str =
+			"SELECT VALUE record::id(id) FROM t WITH NOINDEX WHERE f = 'v1' ORDER BY id";
+		Ok(match self {
+			Self::Standard => (
+				query_json(ds, session, &HOLDERS.replace("WITH NOINDEX", "WITH INDEX ix")).await?,
+				query_json(ds, session, HOLDERS).await?,
+			),
+			Self::Count => (
+				count_rows(ds, session, "SELECT count() FROM t GROUP ALL").await?.into(),
+				query_json(ds, session, "RETURN array::len(SELECT VALUE id FROM t WITH NOINDEX)")
+					.await?,
+			),
+			Self::CountWhere => (
+				count_rows(ds, session, "SELECT count() FROM t WHERE f = 'v1' GROUP ALL")
+					.await?
+					.into(),
+				query_json(
+					ds,
+					session,
+					"RETURN array::len(SELECT VALUE id FROM t WITH NOINDEX WHERE f = 'v1')",
+				)
+				.await?,
+			),
+			Self::FullText => (
+				query_json(
+					ds,
+					session,
+					"SELECT VALUE record::id(id) FROM t WITH INDEX ix WHERE f @@ 'v1' ORDER BY id",
+				)
+				.await?,
+				query_json(ds, session, HOLDERS).await?,
+			),
+		})
+	}
+}
+
+/// A build of `ix` on `t`, held in its initial scan while its first batch
+/// commits: every record that batch read has been read, and no later one has.
+/// The first batch holds sixteen records, so on a smaller table it is every
+/// record. The statement that started the build runs in a task of its own, so
+/// a blocking statement is held with its build, its definition still
+/// uncommitted.
+#[cfg(feature = "kv-mem")]
+struct HeldScan {
+	statement: tokio::task::JoinHandle<Result<()>>,
+	guard: RetryableConflictGuard,
+	node_id: Uuid,
+	/// The build's index, found through the running build rather than the
+	/// catalog, which a blocking statement has not committed to yet.
+	ikb: IndexKeyBase,
+}
+
+#[cfg(feature = "kv-mem")]
+impl HeldScan {
+	/// Runs `sql`, which starts a build of `ix`, on `ds`, and returns once the
+	/// build is held.
+	async fn start(ds: &Arc<Datastore>, session: &Session, sql: &str) -> Result<Self> {
+		let site = BuildPause::InScanBatch.site();
+		let node_id = ds.id();
+		let guard = inject_retryable_conflicts(site, node_id, REPEATED_RETRY_CONFLICTS);
+		let statement = tokio::spawn({
+			let ds = Arc::clone(ds);
+			let session = session.clone();
+			let sql = sql.to_owned();
+			async move { execute_all(&ds, &session, &sql).await }
+		});
+		wait_for_retry_conflict(site, node_id, REPEATED_RETRY_CONFLICTS).await?;
+		let ikb = running_build_key_base(ds, "t", "ix").await?;
+		Ok(Self {
+			statement,
+			guard,
+			node_id,
+			ikb,
+		})
+	}
+
+	/// Releases the build, then waits for the statement that started it and
+	/// for the index to publish.
+	async fn finish(self, ds: &Datastore, session: &Session) -> Result<()> {
+		assert!(
+			retryable_conflict_count(BuildPause::InScanBatch.site(), self.node_id) > 0,
+			"the build must still be held when the last write commits"
+		);
+		drop(self.guard);
+		timeout(Duration::from_secs(30), self.statement).await.map_err(|_| {
+			anyhow::anyhow!("timed out waiting for the statement that started the build")
+		})???;
+		wait_for_index_ready(ds, session, "t", "ix").await
+	}
+}
+
+/// Writes another node makes to `t` once a build's initial scan has read every
+/// record: a scanned record's indexed value changes, two scanned records go,
+/// and a record appears where the scan has already passed.
+#[cfg(feature = "kv-mem")]
+const WRITES_BEHIND_THE_SCAN: [&str; 4] = [
+	"UPDATE t:twice SET f = 'v1' RETURN NONE",
+	"DELETE t:gone RETURN NONE",
+	"DELETE t:back RETURN NONE",
+	"CREATE t:fresh SET f = 'v1' RETURN NONE",
+];
+
+/// A blocking `DEFINE INDEX` publishes an index that answers as a table scan
+/// does, whatever another node writes to the table while the statement builds
+/// it. A record the initial scan has already read and that is then changed or
+/// removed, and a record created behind the scan, all reach the index. Checked
+/// for every kind such a write can go missing from, on every storage engine.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn blocking_define_index_misses_writes_to_scanned_records() -> Result<()> {
+	let mut wrong = Vec::new();
+	for kind in RacedIndexKind::ALL {
+		for engine in storage_engines()? {
+			let (ds_a, ds_b, session) = new_distributed_index_test_ds_at(&engine.path).await?;
+			seed_raced_table(&ds_a, &session).await?;
+			let held = HeldScan::start(&ds_a, &session, kind.define()).await?;
+			for write in WRITES_BEHIND_THE_SCAN {
+				execute_all_retrying_conflicts(&ds_b, &session, write).await?;
+			}
+			let queued = durable_appending_count(&ds_a, &held.ikb).await?;
+			held.finish(&ds_a, &session).await?;
+			let (indexed, scanned) = kind.answers(&ds_a, &session).await?;
+			if indexed != scanned {
+				wrong.push(format!(
+					"{kind:?} on {}: the index answers {indexed} where a scan answers {scanned}; \
+					 {queued} of the {} writes were queued for the build",
+					engine.label,
+					WRITES_BEHIND_THE_SCAN.len()
+				));
+			}
+			ds_a.shutdown().await?;
+		}
+	}
+	assert!(wrong.is_empty(), "\n{}", wrong.join("\n"));
+	Ok(())
+}
+
+/// A new index's build publishes an index that answers as a table scan does, including for a
+/// transaction that began before the definition and writes records once the definition has
+/// committed. That transaction neither maintains nor queues for an index its snapshot does not
+/// hold, so the build reads only once it has ended, and it commits. Checked for `CONCURRENTLY`
+/// and for a definition inside `BEGIN … COMMIT`, whose build reads inside the defining
+/// transaction, for every kind such a write can go missing from, on every storage engine.
+///
+/// The table already carries a standard index on another field, as a table being given one more
+/// usually does. That index takes doc-IDs from the table, so removing a record does not re-read
+/// the table definition under a lock, which would otherwise refuse the older delete on its own.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn concurrent_define_index_misses_writes_from_an_older_snapshot() -> Result<()> {
+	let mut wrong = Vec::new();
+	for form in ["{} CONCURRENTLY", "BEGIN; {}; COMMIT;"] {
+		for kind in RacedIndexKind::ALL {
+			for engine in storage_engines()? {
+				let (ds_a, ds_b, session) = new_distributed_index_test_ds_at(&engine.path).await?;
+				seed_raced_table(&ds_a, &session).await?;
+				execute_all(&ds_a, &session, "DEFINE INDEX other ON t FIELDS g").await?;
+				// Begun before the definition exists, so its snapshot never holds it.
+				let older = Arc::new(ds_b.transaction(TransactionType::Write).await?);
+				let define = form.replace("{}", kind.define());
+				let waited = super::builder::write_barrier_waits::count(ds_a.id());
+				let statement = tokio::spawn({
+					let (ds, session) = (Arc::clone(&ds_a), session.clone());
+					async move { execute_all(&ds, &session, &define).await }
+				});
+				wait_for_a_build_at_the_write_barrier(ds_a.id(), waited).await?;
+				for write in WRITES_BEHIND_THE_SCAN {
+					let request =
+						QueryRequest::new(write, &session).with_transaction(Arc::clone(&older));
+					for result in ds_b.run(request).await? {
+						result.result?;
+					}
+				}
+				if let Err(err) = older.commit().await {
+					wrong.push(format!(
+						"`{form}` with {kind:?} on {}: the transaction the build waited for did \
+						 not commit: {err}",
+						engine.label
+					));
+				}
+				timeout(Duration::from_secs(30), statement)
+					.await
+					.map_err(|_| anyhow::anyhow!("timed out waiting for the definition"))???;
+				wait_for_index_ready(&ds_a, &session, "t", "ix").await?;
+				let (indexed, scanned) = kind.answers(&ds_a, &session).await?;
+				if indexed != scanned {
+					wrong.push(format!(
+						"`{form}` with {kind:?} on {}: the index answers {indexed} where a scan \
+						 answers {scanned}",
+						engine.label
+					));
+				}
+				ds_a.shutdown().await?;
+			}
+		}
+	}
+	assert!(wrong.is_empty(), "\n{}", wrong.join("\n"));
+	Ok(())
+}
+
+/// A `DEFINE INDEX` inside `BEGIN … COMMIT` publishes an index that answers as
+/// a table scan does, whatever another session on the same node writes while
+/// the transaction is open.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "reproduces #1961; fails until fixed"]
+async fn define_index_in_a_transaction_misses_a_concurrent_sessions_writes() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	seed_raced_table(&ds, &session).await?;
+	let held =
+		HeldScan::start(&ds, &session, "BEGIN; DEFINE INDEX ix ON t FIELDS f; COMMIT;").await?;
+	for write in WRITES_BEHIND_THE_SCAN {
+		execute_all_retrying_conflicts(&ds, &session, write).await?;
+	}
+	assert!(
+		!held.statement.is_finished(),
+		"the defining transaction must still be open when the writes commit"
+	);
+	held.finish(&ds, &session).await?;
+	let (indexed, scanned) = RacedIndexKind::Standard.answers(&ds, &session).await?;
+	assert_eq!(indexed, scanned, "the index must name the records a scan finds");
+	Ok(())
+}
+
+/// Records `t:r00` to `t:r39`, each holding its own value of `f`: more than the
+/// sixteen an initial scan's first batch reads, so a record sorting after them
+/// is only read by a later batch.
+#[cfg(feature = "kv-mem")]
+const REBUILT_RECORDS: usize = 40;
+
+/// Defines `t`, seeds it with [`REBUILT_RECORDS`] records, and builds `define`,
+/// an index named `ix`, over them, returning once it is online, so that every
+/// later write maintains it directly.
+#[cfg(feature = "kv-mem")]
+async fn seed_online_index(ds: &Datastore, session: &Session, define: &str) -> Result<()> {
+	let seed: String = (0..REBUILT_RECORDS)
+		.map(|i| format!("CREATE t:r{i:02} SET f = 'v{i:02}' RETURN NONE;"))
+		.collect();
+	execute_all(ds, session, &format!("DEFINE TABLE t SCHEMALESS; {seed} {define};")).await?;
+	wait_for_index_ready(ds, session, "t", "ix").await
+}
+
+/// An index kind whose entries a rebuild can apply twice: one whose writes are
+/// appended under keys of their own, or inserted only where no entry exists,
+/// so a second application neither overwrites nor collides with the first.
+#[cfg(feature = "kv-mem")]
+#[derive(Clone, Copy, Debug)]
+enum RebuiltIndexKind {
+	/// The table count a COUNT index answers, against the rows.
+	Count,
+	/// A lookup of a written value through a UNIQUE index, against a scan.
+	Unique,
+}
+
+#[cfg(feature = "kv-mem")]
+impl RebuiltIndexKind {
+	/// The definition of `ix` on `t`.
+	fn define(self) -> &'static str {
+		match self {
+			Self::Count => "DEFINE INDEX ix ON t COUNT",
+			Self::Unique => "DEFINE INDEX ix ON t FIELDS f UNIQUE",
+		}
+	}
+
+	/// The rebuilt index's answer, then the answer it has to match.
+	async fn answers(
+		self,
+		ds: &Datastore,
+		session: &Session,
+	) -> Result<(serde_json::Value, serde_json::Value)> {
+		Ok(match self {
+			Self::Count => (
+				count_rows(ds, session, "SELECT count() FROM t GROUP ALL").await?.into(),
+				query_json(ds, session, "RETURN array::len(SELECT VALUE id FROM t WITH NOINDEX)")
+					.await?,
+			),
+			Self::Unique => {
+				let lookup = "SELECT VALUE record::id(id) FROM t WITH INDEX ix WHERE f = 'vzzz'";
+				(
+					query_json(ds, session, lookup).await?,
+					query_json(ds, session, &lookup.replace("WITH INDEX ix", "WITH NOINDEX"))
+						.await?,
+				)
+			}
+		})
+	}
+}
+
+/// Writes a rebuild of `ix` never waits for: begun while `ix` is online, so
+/// each maintains the index in its own transaction and holds no reservation.
+/// One creates a record sorting after every other; one deletes a record past
+/// the scan's first batch.
+#[cfg(feature = "kv-mem")]
+const DIRECT_WRITES: [&str; 2] =
+	["CREATE t:zzz SET f = 'vzzz' RETURN NONE", "DELETE t:r39 RETURN NONE"];
+
+/// Waits until a build on `node` has found write transactions older than its commit still open
+/// at the write barrier more than `after` times.
+#[cfg(feature = "kv-mem")]
+async fn wait_for_a_build_at_the_write_barrier(node: Uuid, after: usize) -> Result<()> {
+	timeout(Duration::from_secs(20), async {
+		while super::builder::write_barrier_waits::count(node) <= after {
+			sleep(Duration::from_millis(10)).await;
+		}
+	})
+	.await
+	.map_err(|_| anyhow::anyhow!("no build waited at the write barrier"))
+}
+
+/// `REBUILD INDEX` publishes an index that holds each record once when a write that maintains the
+/// index directly is still open as the rebuild installs its generation. The write was admitted
+/// while the index was online, so it holds no reservation, and what it stored would survive the
+/// wipe for the scan to index a second time; the rebuild therefore wipes and scans only once that
+/// write has ended, and the write commits. Checked for the statement on its own, `CONCURRENTLY`
+/// and inside `BEGIN … COMMIT`, for every kind whose entries would double — a UNIQUE index
+/// included, whose rebuild would otherwise fail on the record it races — on every storage engine,
+/// and for an index with no durable build state, as one defined before that state existed, which
+/// the rebuild creates.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn rebuild_index_double_applies_direct_writes_that_outlive_its_wipe() -> Result<()> {
+	let [create, delete] = DIRECT_WRITES;
+	let cases = [
+		(RebuiltIndexKind::Count, create),
+		(RebuiltIndexKind::Count, delete),
+		(RebuiltIndexKind::Unique, create),
+	];
+	let mut wrong = Vec::new();
+	for rebuild in [
+		"REBUILD INDEX ix ON t CONCURRENTLY",
+		"REBUILD INDEX ix ON t",
+		"BEGIN; REBUILD INDEX ix ON t; COMMIT;",
+	] {
+		for ((kind, write), legacy) in cases.into_iter().flat_map(|c| [(c, false), (c, true)]) {
+			for engine in storage_engines()? {
+				let (ds_a, ds_b, session) = new_distributed_index_test_ds_at(&engine.path).await?;
+				seed_online_index(&ds_a, &session, kind.define()).await?;
+				if legacy {
+					let (ns, db, table, ix) = get_table_index(&ds_a, "t", "ix").await?;
+					let ikb = IndexKeyBase::new(ns, db, table, ix.index_id);
+					let tx = ds_a.transaction(TransactionType::Write).await?;
+					catch!(tx, tx.del_key(&ikb.new_bs_key()).await);
+					tx.commit().await?;
+				}
+				let kind = (kind, legacy);
+				let writer = Arc::new(ds_b.transaction(TransactionType::Write).await?);
+				let request =
+					QueryRequest::new(write, &session).with_transaction(Arc::clone(&writer));
+				for result in ds_b.run(request).await? {
+					result.result?;
+				}
+				let waited = super::builder::write_barrier_waits::count(ds_a.id());
+				let statement = tokio::spawn({
+					let (ds, session) = (Arc::clone(&ds_a), session.clone());
+					async move { execute_all(&ds, &session, rebuild).await }
+				});
+				wait_for_a_build_at_the_write_barrier(ds_a.id(), waited).await?;
+				match writer.commit().await {
+					Ok(()) => {}
+					// A delete re-reads the table's definition under a lock, which the rebuild's
+					// rewrite of that definition refuses; the client retries, and it is queued.
+					Err(err) if write == delete && is_retryable_transaction_conflict(&err) => {
+						execute_all_retrying_conflicts(&ds_b, &session, write).await?;
+					}
+					Err(err) => wrong.push(format!(
+						"`{rebuild}` with {kind:?} after `{write}` on {}: the write the rebuild \
+						 waited for did not commit: {err}",
+						engine.label
+					)),
+				}
+				let built = async {
+					timeout(Duration::from_secs(30), statement)
+						.await
+						.map_err(|_| anyhow::anyhow!("timed out waiting for the rebuild"))???;
+					wait_for_index_ready(&ds_a, &session, "t", "ix").await
+				};
+				let observed = match built.await {
+					Err(err) => Some(format!("the rebuild did not publish: {err}")),
+					Ok(()) => {
+						let (rebuilt, expected) = kind.0.answers(&ds_a, &session).await?;
+						(rebuilt != expected).then(|| {
+							format!("the index answers {rebuilt} where {expected} is expected")
+						})
+					}
+				};
+				if let Some(observed) = observed {
+					wrong.push(format!(
+						"`{rebuild}` with {kind:?} after `{write}` on {}: {observed}",
+						engine.label
+					));
+				}
+				ds_a.shutdown().await?;
+			}
+		}
+	}
+	assert!(wrong.is_empty(), "\n{}", wrong.join("\n"));
+	Ok(())
+}
+
+/// Seeds `t` with a COUNT index on `ds`, registers `ds` and a second process writing the same
+/// store as nodes, and answers that second node's write barriers in the background until the
+/// returned token is cancelled.
+#[cfg(feature = "kv-mem")]
+async fn two_nodes_with_a_count_index()
+-> Result<(Arc<Datastore>, Arc<Datastore>, Session, CancellationToken)> {
+	let (ds_a, session) = new_index_test_ds().await?;
+	let ds_b = Arc::new(ds_a.fork_for_test_as_another_process(Uuid::new_v4()));
+	// Both answer write barriers — node B below, node A where a test answers for it — so both
+	// record that they do as they register.
+	ds_a.begin_answering_write_barriers();
+	ds_b.begin_answering_write_barriers();
+	ds_a.insert_node().await?;
+	ds_b.insert_node().await?;
+	let answering = CancellationToken::new();
+	tokio::spawn({
+		let (ds, answering) = (Arc::clone(&ds_b), answering.clone());
+		async move {
+			while !answering.is_cancelled() {
+				let _ = ds.answer_write_barrier(&answering).await;
+				sleep(Duration::from_millis(20)).await;
+			}
+		}
+	});
+	execute_all(
+		&ds_a,
+		&session,
+		"DEFINE TABLE t SCHEMALESS; CREATE t:1; CREATE t:2; DEFINE INDEX ix ON t COUNT;",
+	)
+	.await?;
+	wait_for_index_ready(&ds_a, &session, "t", "ix").await?;
+	Ok((ds_a, ds_b, session, answering))
+}
+
+/// The index's table count, and the count of its rows.
+#[cfg(feature = "kv-mem")]
+async fn count_against_rows(ds: &Datastore, session: &Session) -> Result<(i64, i64)> {
+	Ok((
+		count_rows(ds, session, "SELECT count() FROM t GROUP ALL").await?,
+		query_json(ds, session, "RETURN array::len(SELECT VALUE id FROM t WITH NOINDEX)")
+			.await?
+			.as_i64()
+			.unwrap_or_default(),
+	))
+}
+
+/// On a store several nodes write, a rebuild on one node reads only once every other live node
+/// has answered its write barrier, which a node does only once its own write transactions older
+/// than the barrier have ended: a write another node holds open across the rebuild commits, and
+/// is counted once.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rebuild_waits_for_another_nodes_older_writes() -> Result<()> {
+	let (ds_a, ds_b, session, answering) = two_nodes_with_a_count_index().await?;
+	let writer = Arc::new(ds_b.transaction(TransactionType::Write).await?);
+	let request =
+		QueryRequest::new("CREATE t:3 RETURN NONE", &session).with_transaction(Arc::clone(&writer));
+	for result in ds_b.run(request).await? {
+		result.result?;
+	}
+	let waited = super::builder::write_barrier_waits::count(ds_a.id());
+	let rebuild = tokio::spawn({
+		let (ds, session) = (Arc::clone(&ds_a), session.clone());
+		async move { execute_all(&ds, &session, "REBUILD INDEX ix ON t").await }
+	});
+	wait_for_a_build_at_the_write_barrier(ds_a.id(), waited).await?;
+	sleep(Duration::from_millis(300)).await;
+	assert!(!rebuild.is_finished(), "the rebuild must wait for the other node's open write");
+	writer.commit().await?;
+	timeout(Duration::from_secs(20), rebuild)
+		.await
+		.map_err(|_| anyhow::anyhow!("timed out waiting for the rebuild"))???;
+	wait_for_index_ready(&ds_a, &session, "t", "ix").await?;
+	let (indexed, rows) = count_against_rows(&ds_a, &session).await?;
+	assert_eq!(indexed, rows, "the index counts each row once");
+	answering.cancel();
+	Ok(())
+}
+
+/// A rebuild does not wait for a node it cannot count on to answer: one whose heartbeat has lapsed
+/// past the exclusion window, which refuses its own write commits; one that has never answered a
+/// barrier; and one whose current heartbeat a release without the barrier recorded, leaving the
+/// answer an earlier process of it recorded unmaintained.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rebuild_does_not_wait_for_a_lapsed_or_older_node() -> Result<()> {
+	use crate::dbs::node::{Node, Timestamp};
+	for case in ["lapsed", "unanswered", "older release"] {
+		let (ds_a, ds_b, session, answering) = two_nodes_with_a_count_index().await?;
+		answering.cancel();
+		let tx = ds_a.transaction(TransactionType::Write).await?;
+		let now = crate::kvs::clock::SystemClock::new().now().value;
+		let node_key = crate::key::schema::NodeKey {
+			nd: ds_b.id(),
+		};
+		match case {
+			"lapsed" => {
+				let stale = Node::new(
+					ds_b.id(),
+					Timestamp {
+						value: now.saturating_sub(90_000),
+					},
+					false,
+				);
+				tx.set_key(&node_key, &stale).await?;
+			}
+			"unanswered" => {
+				tx.del_key(&crate::key::schema::WriteBarrierAckKey {
+					nd: ds_b.id(),
+				})
+				.await?;
+			}
+			_ => {
+				// A heartbeat that writes the node's row and nothing else, as an older release's.
+				let fresh = Node::new(
+					ds_b.id(),
+					Timestamp {
+						value: now + 1,
+					},
+					false,
+				);
+				tx.set_key(&node_key, &fresh).await?;
+			}
+		}
+		tx.commit().await?;
+		let writer = Arc::new(ds_b.transaction(TransactionType::Write).await?);
+		timeout(Duration::from_secs(20), execute_all(&ds_a, &session, "REBUILD INDEX ix ON t"))
+			.await
+			.map_err(|_| anyhow::anyhow!("the rebuild waited for a node it cannot count on"))??;
+		writer.cancel().await?;
+	}
+	Ok(())
+}
+
+/// On a store several nodes write, a transaction whose own blocking build ran while its own node
+/// answered that build's barrier commits: the answer covered only barriers its own node's builds
+/// raised, which wait for that node's transactions directly.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_transaction_is_not_refused_for_its_own_nodes_answer_to_its_build() -> Result<()> {
+	let (ds_a, _ds_b, session, answering) = two_nodes_with_a_count_index().await?;
+	tokio::spawn({
+		let (ds, answering) = (Arc::clone(&ds_a), answering.clone());
+		async move {
+			while !answering.is_cancelled() {
+				let _ = ds.answer_write_barrier(&answering).await;
+				sleep(Duration::from_millis(20)).await;
+			}
+		}
+	});
+	execute_all(&ds_a, &session, "DEFINE TABLE a SCHEMALESS;").await?;
+	let site = RetryableConflictSite::ConcurrentIndexInitialCleanup;
+	let guard = inject_retryable_conflicts(site, ds_a.id(), REPEATED_RETRY_CONFLICTS);
+	let txn = Arc::new(ds_a.transaction(TransactionType::Write).await?);
+	let own = tokio::spawn({
+		let (ds, session, txn) = (Arc::clone(&ds_a), session.clone(), Arc::clone(&txn));
+		async move {
+			let request =
+				QueryRequest::new("DEFINE INDEX ia ON a FIELDS f", &session).with_transaction(txn);
+			for result in ds.run(request).await? {
+				result.result?;
+			}
+			Ok::<_, anyhow::Error>(())
+		}
+	});
+	wait_for_retry_conflict(site, ds_a.id(), REPEATED_RETRY_CONFLICTS).await?;
+	// The build is held past its wait: its own node answers the barrier it raised.
+	timeout(Duration::from_secs(20), async {
+		loop {
+			let tx = ds_a.transaction(TransactionType::Read).await?;
+			let asked = tx.get_key(&crate::key::schema::WriteBarrierKey {}, None).await?;
+			let answered = tx
+				.get_key(
+					&crate::key::schema::WriteBarrierAckKey {
+						nd: ds_a.id(),
+					},
+					None,
+				)
+				.await?;
+			tx.cancel().await?;
+			if asked.is_some() && answered >= asked {
+				return Ok::<_, anyhow::Error>(());
+			}
+			sleep(Duration::from_millis(20)).await;
+		}
+	})
+	.await
+	.map_err(|_| anyhow::anyhow!("the node did not answer its own build's barrier"))??;
+	drop(guard);
+	timeout(Duration::from_secs(20), own)
+		.await
+		.map_err(|_| anyhow::anyhow!("timed out waiting for the own build"))???;
+	txn.commit().await?;
+	answering.cancel();
+	Ok(())
+}
+
+/// On a store several nodes write, a node whose heartbeat has lapsed refuses its own write
+/// commits, still commits the heartbeat that ends the lapse, and after it refuses a transaction
+/// that was open across the lapse, while a fresh one commits.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_node_whose_heartbeat_lapsed_refuses_the_writes_it_held_across_the_lapse() -> Result<()> {
+	let (ds_a, session) = new_index_test_ds().await?;
+	let ds_b = ds_a.fork_for_test_as_another_process(Uuid::new_v4());
+	ds_b.insert_node().await?;
+	execute_all(&ds_a, &session, "DEFINE TABLE t SCHEMALESS;").await?;
+	let fence = ds_b.transaction_factory().write_fence();
+	fence.heartbeat(web_time::Instant::now(), Duration::from_millis(200));
+	let across = ds_b.transaction(TransactionType::Write).await?;
+	sleep(Duration::from_millis(300)).await;
+
+	let lapsed = ds_b.transaction(TransactionType::Write).await?;
+	lapsed.set_key(&crate::key::schema::WriteBarrierKey {}, &7).await?;
+	let refused = lapsed.commit().await.expect_err("a lapsed node commits no write");
+	assert!(is_retryable_transaction_conflict(&refused), "{refused}");
+
+	ds_b.update_node().await?;
+	fence.heartbeat(web_time::Instant::now(), Duration::from_secs(10));
+
+	across.set_key(&crate::key::schema::WriteBarrierKey {}, &8).await?;
+	let refused = across.commit().await.expect_err("a write open across the lapse is refused");
+	assert!(is_retryable_transaction_conflict(&refused), "{refused}");
+	execute_all(&ds_b, &session, "CREATE t:1 RETURN NONE").await?;
+	Ok(())
+}
+
+/// A transaction that awaited a blocking build inside it counts again among the write
+/// transactions a later build waits for: a definition elsewhere, made once that build has ended,
+/// waits for the transaction, which then writes to the newly indexed table and commits, and the
+/// new index holds the write.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_transaction_counts_again_once_its_own_build_has_ended() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(&ds, &session, "DEFINE TABLE a SCHEMALESS; DEFINE TABLE b SCHEMALESS;").await?;
+	let txn = Arc::new(ds.transaction(TransactionType::Write).await?);
+	let request = QueryRequest::new("DEFINE INDEX ia ON a FIELDS f", &session)
+		.with_transaction(Arc::clone(&txn));
+	for result in ds.run(request).await? {
+		result.result?;
+	}
+	let waited = super::builder::write_barrier_waits::count(ds.id());
+	let define = tokio::spawn({
+		let (ds, session) = (Arc::clone(&ds), session.clone());
+		async move { execute_all(&ds, &session, "DEFINE INDEX ib ON b FIELDS f CONCURRENTLY").await }
+	});
+	wait_for_a_build_at_the_write_barrier(ds.id(), waited).await?;
+	let request = QueryRequest::new("CREATE b:1 SET f = 'x' RETURN NONE", &session)
+		.with_transaction(Arc::clone(&txn));
+	for result in ds.run(request).await? {
+		result.result?;
+	}
+	txn.commit().await?;
+	timeout(Duration::from_secs(20), define)
+		.await
+		.map_err(|_| anyhow::anyhow!("timed out waiting for the definition"))???;
+	wait_for_index_ready(&ds, &session, "b", "ib").await?;
+	expect_indexed_query_len(&ds, &session, "SELECT id FROM b WITH INDEX ib WHERE f = 'x'", 1).await
+}
+
+/// A transaction whose own blocking build ran while another build began its wait for older write
+/// transactions is refused at commit with a retryable conflict, even when that wait is still
+/// running once the transaction is counted back in: the wait read its epoch while the transaction
+/// was set aside, and may end without it.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_transaction_a_build_passed_while_it_awaited_its_own_is_refused() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE TABLE a SCHEMALESS; DEFINE TABLE b SCHEMALESS; CREATE b:1 SET f = 'x';",
+	)
+	.await?;
+	let site = RetryableConflictSite::ConcurrentIndexInitialCleanup;
+	let guard = inject_retryable_conflicts(site, ds.id(), REPEATED_RETRY_CONFLICTS);
+	let txn = Arc::new(ds.transaction(TransactionType::Write).await?);
+	let own = tokio::spawn({
+		let (ds, session, txn) = (Arc::clone(&ds), session.clone(), Arc::clone(&txn));
+		async move {
+			let request =
+				QueryRequest::new("DEFINE INDEX ia ON a FIELDS f", &session).with_transaction(txn);
+			for result in ds.run(request).await? {
+				result.result?;
+			}
+			Ok::<_, anyhow::Error>(())
+		}
+	});
+	wait_for_retry_conflict(site, ds.id(), REPEATED_RETRY_CONFLICTS).await?;
+	// Another build begins its wait while the transaction awaits its own build, held past its
+	// own wait, and a newer writer keeps that wait running past the transaction's return.
+	let newer = ds.transaction(TransactionType::Write).await?;
+	let (begun, _) = ds.transaction_factory().live_writes().waits();
+	let waited = super::builder::write_barrier_waits::count(ds.id());
+	let elsewhere = tokio::spawn({
+		let (ds, session) = (Arc::clone(&ds), session.clone());
+		async move { execute_all(&ds, &session, "DEFINE INDEX ib ON b FIELDS f CONCURRENTLY").await }
+	});
+	timeout(Duration::from_secs(20), async {
+		while ds.transaction_factory().live_writes().waits().0 <= begun {
+			sleep(Duration::from_millis(10)).await;
+		}
+	})
+	.await
+	.map_err(|_| anyhow::anyhow!("the other build's wait did not begin"))?;
+	drop(guard);
+	timeout(Duration::from_secs(20), own)
+		.await
+		.map_err(|_| anyhow::anyhow!("timed out waiting for the own build"))???;
+	wait_for_a_build_at_the_write_barrier(ds.id(), waited).await?;
+	let refused = txn.commit().await.expect_err("the transaction a build passed is refused");
+	assert!(is_retryable_transaction_conflict(&refused), "{refused}");
+	newer.cancel().await?;
+	timeout(Duration::from_secs(20), elsewhere)
+		.await
+		.map_err(|_| anyhow::anyhow!("timed out waiting for the other definition"))???;
+	Ok(())
+}
+
+/// A transaction whose statement is dropped while it awaits its own blocking build counts again
+/// among the write transactions a later build waits for, and, its own build's wait having ended
+/// unrecorded, is refused at commit.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_transaction_whose_build_wait_is_dropped_counts_again() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(&ds, &session, "DEFINE TABLE a SCHEMALESS; DEFINE TABLE b SCHEMALESS;").await?;
+	let site = RetryableConflictSite::ConcurrentIndexInitialCleanup;
+	let guard = inject_retryable_conflicts(site, ds.id(), REPEATED_RETRY_CONFLICTS);
+	let txn = Arc::new(ds.transaction(TransactionType::Write).await?);
+	let own = tokio::spawn({
+		let (ds, session, txn) = (Arc::clone(&ds), session.clone(), Arc::clone(&txn));
+		async move {
+			let request =
+				QueryRequest::new("DEFINE INDEX ia ON a FIELDS f", &session).with_transaction(txn);
+			ds.run(request).await.map(drop)
+		}
+	});
+	wait_for_retry_conflict(site, ds.id(), REPEATED_RETRY_CONFLICTS).await?;
+	own.abort();
+	let _ = own.await;
+	drop(guard);
+	let waited = super::builder::write_barrier_waits::count(ds.id());
+	let define = tokio::spawn({
+		let (ds, session) = (Arc::clone(&ds), session.clone());
+		async move { execute_all(&ds, &session, "DEFINE INDEX ib ON b FIELDS f CONCURRENTLY").await }
+	});
+	wait_for_a_build_at_the_write_barrier(ds.id(), waited).await?;
+	let refused = txn.commit().await.expect_err("a transaction whose build wait was dropped");
+	assert!(is_retryable_transaction_conflict(&refused), "{refused}");
+	timeout(Duration::from_secs(20), define)
+		.await
+		.map_err(|_| anyhow::anyhow!("timed out waiting for the definition"))???;
+	Ok(())
+}
+
+/// A node shutting down on a store several nodes write closes its write fence before it archives
+/// its node: an open write's commit is refused, while the node's answer to every barrier and the
+/// archive still commit, so builds elsewhere stop waiting for it.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_node_closing_its_write_fence_refuses_writes_but_archives() -> Result<()> {
+	let (ds_a, _) = new_index_test_ds().await?;
+	let ds_b = ds_a.fork_for_test_as_another_process(Uuid::new_v4());
+	ds_b.insert_node().await?;
+	let open = ds_b.transaction(TransactionType::Write).await?;
+	open.set_key(&crate::key::schema::WriteBarrierKey {}, &9).await?;
+	ds_b.transaction_factory().write_fence().close();
+	let refused = open.commit().await.expect_err("a closed fence refuses the write");
+	assert!(is_retryable_transaction_conflict(&refused), "{refused}");
+	ds_b.retire_write_barrier_answer().await?;
+	ds_b.delete_node().await?;
+	let answered = ds_a.transaction(TransactionType::Read).await?;
+	let answer = answered
+		.get_key(
+			&crate::key::schema::WriteBarrierAckKey {
+				nd: ds_b.id(),
+			},
+			None,
+		)
+		.await?;
+	answered.cancel().await?;
+	assert_eq!(answer, Some(u64::MAX), "a node that left answers every barrier");
+	Ok(())
+}
+
+/// A takeover of a generation whose initial scan has completed, or checkpointed a cursor, with no
+/// proof that its owner waited at the write barrier — as a release without the barrier leaves it —
+/// rescans the whole table rather than publishing, or resuming after, what that scan wrote.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_takeover_rescans_a_completed_scan_without_barrier_proof() -> Result<()> {
+	for checkpointed in [false, true] {
+		takeover_of_a_scan_without_barrier_proof(checkpointed).await?;
+	}
+	Ok(())
+}
+
+/// [`a_takeover_rescans_a_completed_scan_without_barrier_proof`], for a scan that completed, or
+/// one that `checkpointed` a cursor past every record.
+#[cfg(feature = "kv-mem")]
+async fn takeover_of_a_scan_without_barrier_proof(checkpointed: bool) -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE TABLE t SCHEMALESS; CREATE t:1; CREATE t:2; CREATE t:3; DEFINE INDEX ix ON t COUNT;",
+	)
+	.await?;
+	wait_for_index_ready(&ds, &session, "t", "ix").await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "ix").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	// An owner without the barrier takes a new generation, wipes the index, reports its scan
+	// complete having missed every record, and dies.
+	let building = new_building_for_index(&ds, &session, ns, db, &table, ix).await?;
+	let acquired = building.acquire_build_state().await?.expect("the build takes a new generation");
+	let ctx = building.new_write_tx_ctx().await?;
+	let tx = ctx.tx();
+	building
+		.maintain_build_ownership(&tx, acquired.generation, &[IndexBuildPhase::Building])
+		.await?;
+	crate::idx::wipe_index_data(&tx, &ikb, &building.ix.index).await?;
+	tx.commit().await?;
+	drop(building);
+	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+	let mut state = durable_build_state(&ds, &ikb).await?;
+	if checkpointed {
+		state.initial_cursor = Some(RecordIdKey::Number(3));
+	} else {
+		state.initial_complete = true;
+	}
+	state.initial = Some(0);
+	state.updated_at = expired;
+	state.owner_heartbeat_at = Some(expired);
+	set_durable_build_state(&ds, &ikb, state).await?;
+
+	let resumed =
+		ds.resume_stalled_index_builds(Duration::from_secs(30), CancellationToken::new()).await?;
+	assert_eq!(resumed, 1, "the resume scan adopts the generation");
+	wait_for_index_ready(&ds, &session, "t", "ix").await?;
+	let (indexed, rows) = count_against_rows(&ds, &session).await?;
+	assert_eq!(
+		indexed, rows,
+		"checkpointed: {checkpointed}: the takeover rescans what the unproven scan missed"
+	);
+	Ok(())
+}
+
+/// A build stops waiting for a write transaction older than it once its wait has run its bound,
+/// so a client holding a write transaction open cannot stall it: the transaction is then refused
+/// at commit, and the index answers as a table scan does.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_build_stops_waiting_for_a_write_held_open_and_refuses_its_commit() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(&ds, &session, "DEFINE TABLE t SCHEMALESS; CREATE t:1 SET f = 'x';").await?;
+	let _bounded =
+		crate::kvs::write_barrier::test_wait::bound_waits(ds.id(), Duration::from_millis(200));
+	let held = Arc::new(ds.transaction(TransactionType::Write).await?);
+	let request = QueryRequest::new("CREATE t:2 SET f = 'x' RETURN NONE", &session)
+		.with_transaction(Arc::clone(&held));
+	for result in ds.run(request).await? {
+		result.result?;
+	}
+	timeout(
+		Duration::from_secs(20),
+		execute_all(&ds, &session, "DEFINE INDEX ix ON t FIELDS f CONCURRENTLY"),
+	)
+	.await
+	.map_err(|_| anyhow::anyhow!("timed out defining the index"))??;
+	wait_for_index_ready(&ds, &session, "t", "ix").await?;
+	let refused = held.commit().await.expect_err("the held write is fenced");
+	assert!(is_retryable_transaction_conflict(&refused), "{refused}");
+	expect_indexed_query_len(&ds, &session, "SELECT id FROM t WITH INDEX ix WHERE f = 'x'", 1).await
+}
+
+/// A write transaction held open, which a build on a table stopped waiting for and fenced, holds
+/// up no later build on that table: the later one does not wait out its bound again.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_later_build_does_not_wait_again_for_a_write_its_table_fenced() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE TABLE t SCHEMALESS; DEFINE TABLE u SCHEMALESS; CREATE t:1 SET f = 'x', g = 'y';",
+	)
+	.await?;
+	// A write of another table, held open across both builds.
+	let held = Arc::new(ds.transaction(TransactionType::Write).await?);
+	let request = QueryRequest::new("CREATE u:1 SET f = 'x' RETURN NONE", &session)
+		.with_transaction(Arc::clone(&held));
+	for result in ds.run(request).await? {
+		result.result?;
+	}
+	{
+		let _bounded =
+			crate::kvs::write_barrier::test_wait::bound_waits(ds.id(), Duration::from_millis(200));
+		timeout(
+			Duration::from_secs(20),
+			execute_all(&ds, &session, "DEFINE INDEX ix ON t FIELDS f CONCURRENTLY"),
+		)
+		.await
+		.map_err(|_| anyhow::anyhow!("timed out defining the first index"))??;
+		wait_for_index_ready(&ds, &session, "t", "ix").await?;
+	}
+	// The next build on `t` waits with the full bound, which it must not need.
+	timeout(Duration::from_secs(20), async {
+		execute_all(&ds, &session, "DEFINE INDEX iy ON t FIELDS g CONCURRENTLY").await?;
+		wait_for_index_ready(&ds, &session, "t", "iy").await
+	})
+	.await
+	.map_err(|_| anyhow::anyhow!("the second build waited again for the fenced write"))??;
+	held.commit().await?;
+	expect_indexed_query_len(&ds, &session, "SELECT id FROM t WITH INDEX iy WHERE g = 'y'", 1).await
+}
+
+/// A build whose generation another has replaced records no barrier proof over the newer
+/// generation's, so a takeover of that generation cannot skip its rescan on the older build's word.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_superseded_build_records_no_barrier_proof() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(&ds, &session, "DEFINE TABLE t SCHEMALESS; CREATE t:1 SET f = 'x';").await?;
+	execute_all(&ds, &session, "DEFINE INDEX ix ON t FIELDS f;").await?;
+	wait_for_index_ready(&ds, &session, "t", "ix").await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "ix").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	let building = new_building_for_index(&ds, &session, ns, db, &table, ix).await?;
+	let acquired = building.acquire_build_state().await?.expect("the build takes a new generation");
+	let read_proof = || async {
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let proof = tx.get_key(&ikb.new_bw_key(), None).await?;
+		tx.cancel().await?;
+		anyhow::Ok(proof)
+	};
+	let before = read_proof().await?;
+	// Another owner replaces the generation.
+	let now = Utc::now();
+	let mut state = durable_build_state(&ds, &ikb).await?;
+	state.generation += 1;
+	state.owner = Some(Uuid::new_v4());
+	state.updated_at = now;
+	state.owner_heartbeat_at = Some(now);
+	set_durable_build_state(&ds, &ikb, state).await?;
+	let err = building
+		.record_barrier_proof(acquired.generation)
+		.await
+		.expect_err("a build that lost its generation records no proof");
+	assert!(!is_retryable_transaction_conflict(&err), "{err}");
+	assert_eq!(read_proof().await?, before, "the proof is left as it was");
+	Ok(())
+}
+
+/// A wait that has run its bound refuses only the held writes of the table it builds an index on,
+/// whichever path wrote them: a write held open on another table, of another tenant's or not,
+/// still commits.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_build_that_stops_waiting_refuses_only_held_writes_of_its_table() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE TABLE t SCHEMALESS; DEFINE TABLE u SCHEMALESS; CREATE t:1 SET f = 'x';
+		 CREATE u:1 SET f = 'x'; DEFINE INDEX other ON t FIELDS g;",
+	)
+	.await?;
+	let (ns, db, table, _) = get_table_index(&ds, "t", "other").await?;
+	let _bounded =
+		crate::kvs::write_barrier::test_wait::bound_waits(ds.id(), Duration::from_millis(200));
+	// A write of another table, held open.
+	let other_table = Arc::new(ds.transaction(TransactionType::Write).await?);
+	let request = QueryRequest::new("CREATE u:2 SET f = 'x' RETURN NONE", &session)
+		.with_transaction(Arc::clone(&other_table));
+	for result in ds.run(request).await? {
+		result.result?;
+	}
+	// A write in the built table's subtree that no statement made, held open.
+	let raw = ds.transaction(TransactionType::Write).await?;
+	let mut key = IdxRoot {
+		ns,
+		db,
+		tb: Cow::Borrowed(&table),
+		ix: IndexId(u32::MAX),
+	}
+	.encode_bound()?
+	.as_slice()
+	.to_vec();
+	key.push(b'*');
+	raw.set(Key::from(key), b"x".to_vec()).await?;
+	timeout(
+		Duration::from_secs(20),
+		execute_all(&ds, &session, "DEFINE INDEX ix ON t FIELDS f CONCURRENTLY"),
+	)
+	.await
+	.map_err(|_| anyhow::anyhow!("timed out defining the index"))??;
+	wait_for_index_ready(&ds, &session, "t", "ix").await?;
+	let refused = raw.commit().await.expect_err("the held write of the built table is fenced");
+	assert!(is_retryable_transaction_conflict(&refused), "{refused}");
+	other_table.commit().await?;
+	expect_indexed_query_len(&ds, &session, "SELECT id FROM u WHERE f = 'x'", 2).await
+}
+
+/// A node records that it answers write barriers — its answer as it registers, and the mark
+/// beside each heartbeat — only once it answers them, so a node running no responder is taken by
+/// every build for one that predates the barrier, never waited for nor counted on.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn only_a_node_that_answers_write_barriers_records_that_it_does() -> Result<()> {
+	let (ds, _) = new_index_test_ds().await?;
+	let node = ds.fork_for_test_with_node_id(Uuid::new_v4());
+	let recorded = |nd: Uuid| {
+		let ds = Arc::clone(&ds);
+		async move {
+			let tx = ds.transaction(TransactionType::Read).await?;
+			let answer = tx
+				.get_key(
+					&crate::key::schema::WriteBarrierAckKey {
+						nd,
+					},
+					None,
+				)
+				.await?
+				.is_some();
+			let mark = tx
+				.get_key(
+					&crate::key::schema::WriteBarrierHeartbeatKey {
+						nd,
+					},
+					None,
+				)
+				.await?
+				.is_some();
+			tx.cancel().await?;
+			anyhow::Ok((answer, mark))
+		}
+	};
+	node.insert_node().await?;
+	node.update_node().await?;
+	assert_eq!(recorded(node.id()).await?, (false, false), "a node that answers no barrier");
+	node.begin_answering_write_barriers();
+	node.update_node().await?;
+	assert_eq!(recorded(node.id()).await?.1, true, "its heartbeats are marked once it answers");
+	let restarted = ds.fork_for_test_with_node_id(Uuid::new_v4());
+	restarted.begin_answering_write_barriers();
+	restarted.insert_node().await?;
+	assert_eq!(recorded(restarted.id()).await?, (true, true), "a node that answers from the start");
+	Ok(())
+}
+
+/// A node registered before its maintenance tasks start records that it answers write barriers —
+/// its answer, and a marked heartbeat — before the start returns, so it serves no write while a
+/// build elsewhere would take it for a node without the barrier.
+#[cfg(all(feature = "kv-mem", feature = "maintenance-tasks"))]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_deferred_start_records_its_barrier_support_before_it_returns() -> Result<()> {
+	let (ds, _) = new_index_test_ds().await?;
+	ds.insert_node().await?;
+	let recorded = || async {
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let answer = tx
+			.get_key(
+				&crate::key::schema::WriteBarrierAckKey {
+					nd: ds.id(),
+				},
+				None,
+			)
+			.await?;
+		let mark = tx
+			.get_key(
+				&crate::key::schema::WriteBarrierHeartbeatKey {
+					nd: ds.id(),
+				},
+				None,
+			)
+			.await?;
+		let node = tx
+			.get_key(
+				&crate::key::schema::NodeKey {
+					nd: ds.id(),
+				},
+				None,
+			)
+			.await?
+			.expect("the node");
+		tx.cancel().await?;
+		anyhow::Ok((answer.is_some(), mark == Some(node.heartbeat.value)))
+	};
+	assert_eq!(recorded().await?, (false, false), "registered with no responder");
+	ds.start_maintenance_tasks_checked().await?;
+	assert_eq!(recorded().await?, (true, true), "recorded before the start returned");
+	ds.shutdown().await?;
+	Ok(())
+}
+
+/// Node cleanup keeps an archived node's row while a build may still wait for its write barrier
+/// answer — until its heartbeat is `WRITE_BARRIER_EXCLUDE_AFTER` old — since a build finds a node
+/// only through its row.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn node_cleanup_keeps_an_archived_node_a_build_may_still_wait_for() -> Result<()> {
+	let (ds, _) = new_index_test_ds().await?;
+	let exclude = crate::kvs::write_barrier::WRITE_BARRIER_EXCLUDE_AFTER;
+	let archived = |age: Duration| {
+		let ds = Arc::clone(&ds);
+		async move {
+			let id = Uuid::new_v4();
+			let tx = ds.transaction(TransactionType::Write).await?;
+			let node =
+				crate::catalog::node::Node::new_with_endpoint(id, ds.clock_now() - age, true, None);
+			tx.set_key(
+				&crate::key::schema::NodeKey {
+					nd: id,
+				},
+				&node,
+			)
+			.await?;
+			tx.commit().await?;
+			anyhow::Ok(id)
+		}
+	};
+	let recent = archived(exclude - Duration::from_secs(30)).await?;
+	let old = archived(exclude + Duration::from_secs(10)).await?;
+	ds.remove_nodes().await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let kept = tx
+		.get_key(
+			&crate::key::schema::NodeKey {
+				nd: recent,
+			},
+			None,
+		)
+		.await?
+		.is_some();
+	let removed = tx
+		.get_key(
+			&crate::key::schema::NodeKey {
+				nd: old,
+			},
+			None,
+		)
+		.await?
+		.is_none();
+	tx.cancel().await?;
+	assert!(kept, "an archived node within the window is kept");
+	assert!(removed, "one past it is removed");
+	Ok(())
+}
+
+/// A node membership refresh interval longer than the write fence can run with is refused on a
+/// store other nodes write, and accepted on one the datastore writes alone.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_heartbeat_interval_too_long_for_the_write_fence_is_refused_on_a_shared_store()
+-> Result<()> {
+	let (ds, _) = new_index_test_ds().await?;
+	let long = Duration::from_secs(15);
+	ds.check_heartbeat_interval(long).await?;
+	let other = ds.fork_for_test_as_another_process(Uuid::new_v4());
+	assert!(other.check_heartbeat_interval(long).await.is_err());
+	other.check_heartbeat_interval(Duration::from_secs(3)).await?;
+	Ok(())
+}
+
+/// Defines a full-text `ft` on `t.content` and moves it to format 0 while it
+/// is still empty, as a binary predating the shared doc-ID space would have
+/// defined it, then creates records `t:1` to `t:{count}` whose text holds
+/// `bravo`, which the index takes in that format's layout.
+#[cfg(feature = "kv-mem")]
+async fn seed_legacy_fulltext_index(ds: &Datastore, session: &Session, count: usize) -> Result<()> {
+	execute_all(
+		ds,
+		session,
+		"DEFINE ANALYZER simple TOKENIZERS blank;
+		 DEFINE INDEX ft ON t FIELDS content FULLTEXT ANALYZER simple BM25;",
+	)
+	.await?;
+	downgrade_index_format(ds, "t", "ft", 0).await?;
+	let creates: String = (1..=count)
+		.map(|i| format!("CREATE t:{i} SET content = 'bravo {i}' RETURN NONE;"))
+		.collect();
+	execute_all(ds, session, &creates).await
+}
+
+/// The ids [`BRAVO`] has to answer when `t:1` to `t:{count}` hold `bravo`,
+/// sorted as [`planner_result_ids`] sorts them.
+#[cfg(feature = "kv-mem")]
+fn bravo_carriers(count: usize) -> Vec<String> {
+	let mut ids: Vec<String> = (1..=count).map(|i| format!("t:{i}")).collect();
+	ids.sort();
+	ids
+}
+
+/// How the query engine's answer to `sql` differs from `expected`: one line when it does not
+/// answer it, none when it does.
+#[cfg(feature = "kv-mem")]
+async fn engines_answering_otherwise(
+	ds: &Datastore,
+	sql: &str,
+	expected: &[String],
+) -> Vec<String> {
+	match planner_result_ids(ds, sql).await {
+		Ok(ids) if ids == expected => Vec::new(),
+		Ok(ids) => vec![format!(
+			"the engine answers `{sql}` with {} of the {} records: {ids:?}",
+			ids.len(),
+			expected.len()
+		)],
+		Err(err) => vec![format!("the engine fails `{sql}`: {err}")],
+	}
+}
+
+/// A full-text match every record created by [`seed_legacy_fulltext_index`]
+/// answers.
+#[cfg(feature = "kv-mem")]
+const BRAVO: &str = "SELECT VALUE id FROM t WHERE content @@ 'bravo'";
+
+/// Runs `check` against a fresh datastore on every storage engine, and returns
+/// what it finds wrong, each line prefixed with the engine's name.
+#[cfg(feature = "kv-mem")]
+async fn on_every_engine<F, Fut>(check: F) -> Result<Vec<String>>
+where
+	F: Fn(Arc<Datastore>, Session) -> Fut,
+	Fut: std::future::Future<Output = Result<Vec<String>>>,
+{
+	let mut wrong = Vec::new();
+	for engine in storage_engines()? {
+		let (ds, _other_node, session) = new_distributed_index_test_ds_at(&engine.path).await?;
+		for line in check(Arc::clone(&ds), session).await? {
+			wrong.push(format!("{}: {line}", engine.label));
+		}
+		ds.shutdown().await?;
+	}
+	Ok(wrong)
+}
+
+/// A `REBUILD INDEX` that would move a legacy index onto the current layout,
+/// rolled back, leaves the index as it found it. The definition keeps its
+/// format, so the data it reads, and the doc-ID space it does not consume, must
+/// stay in that format's layout. Checked on every storage engine.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn cancelled_format_rebuild_leaves_its_layout_under_the_old_definition() -> Result<()> {
+	let wrong = on_every_engine(|ds, session| async move {
+		seed_legacy_fulltext_index(&ds, &session, 3).await?;
+		let before = engines_answering_otherwise(&ds, BRAVO, &bravo_carriers(3)).await;
+		assert!(before.is_empty(), "the legacy index must answer before the rebuild: {before:?}");
+
+		execute_cancelled_transaction(&ds, &session, "BEGIN; REBUILD INDEX ft ON t; CANCEL;")
+			.await?;
+		let (_, _, _, ix) = get_table_index(&ds, "t", "ft").await?;
+		assert_eq!(ix.format_version, 0, "the cancel keeps the legacy definition");
+
+		let mut wrong = engines_answering_otherwise(&ds, BRAVO, &bravo_carriers(3)).await;
+		execute_all(&ds, &session, "CREATE t:4 SET content = 'bravo 4'; DELETE t:1;").await?;
+		let after_writes: Vec<String> =
+			bravo_carriers(4).into_iter().filter(|id| id != "t:1").collect();
+		wrong.extend(engines_answering_otherwise(&ds, BRAVO, &after_writes).await);
+		let mappings = count_doc_id_mappings(&ds, "t").await?;
+		if mappings != (0, 0) {
+			wrong.push(format!(
+				"the table holds {mappings:?} shared doc-ID mappings, which no index on it consumes"
+			));
+		}
+		Ok(wrong)
+	})
+	.await?;
+	assert!(wrong.is_empty(), "\n{}", wrong.join("\n"));
+	Ok(())
+}
+
+/// While a `REBUILD INDEX` that moves a legacy index onto the current layout
+/// has published its build but not yet committed its definition, every other
+/// session still reads and maintains the index through the legacy definition.
+/// Their queries must find the records, and a record they write must be found
+/// once the rebuild commits. Checked on every storage engine.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn format_rebuild_publishes_its_layout_before_its_definition() -> Result<()> {
+	let wrong = on_every_engine(|ds, session| async move {
+		seed_legacy_fulltext_index(&ds, &session, 3).await?;
+		let statement = Arc::new(ds.transaction(TransactionType::Write).await?);
+		let request = QueryRequest::new("REBUILD INDEX ft ON t", &session)
+			.with_transaction(Arc::clone(&statement));
+		for result in ds.run(request).await? {
+			result.result?;
+		}
+		// The blocking build has published, and its statement is still open.
+		let mut wrong = engines_answering_otherwise(&ds, BRAVO, &bravo_carriers(3))
+			.await
+			.into_iter()
+			.map(|line| format!("before the rebuild commits, {line}"))
+			.collect::<Vec<_>>();
+		execute_all(&ds, &session, "CREATE t:4 SET content = 'bravo 4'").await?;
+		statement.commit().await?;
+		let (_, _, _, ix) = get_table_index(&ds, "t", "ft").await?;
+		assert_eq!(ix.format_version, INDEX_FORMAT_VERSION, "the commit stamps the current format");
+		wrong.extend(
+			engines_answering_otherwise(&ds, BRAVO, &bravo_carriers(4))
+				.await
+				.into_iter()
+				.map(|line| format!("after the rebuild commits, {line}")),
+		);
+		Ok(wrong)
+	})
+	.await?;
+	assert!(wrong.is_empty(), "\n{}", wrong.join("\n"));
+	Ok(())
+}
+
+/// A `REBUILD INDEX` that moves a legacy index onto the current layout, and
+/// whose node dies after its build has checkpointed part of its scan, leaves an
+/// index that one layout answers for in full once the resume scan finishes the
+/// build. The statement commits the new format together with the generation its
+/// build builds, so the build that resumes reads the definition its checkpoint
+/// was made under. Checked on every storage engine.
+///
+/// The node's death is written as the durable state it leaves: the statement
+/// committed, the build it started claimed the generation, wiped the index,
+/// indexed the first ten records and checkpointed after them, and its owner's
+/// lease lapsed.
+///
+/// The resumed scan waits for a write transaction open across the resume, as a scan resumed from
+/// a checkpoint an owner without the write barrier made must.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn resumed_format_rebuild_indexes_the_rest_in_the_old_layout() -> Result<()> {
+	const RECORDS: usize = 20;
+	const CHECKPOINTED: usize = 10;
+	let wrong = on_every_engine(|ds, session| async move {
+		seed_legacy_fulltext_index(&ds, &session, RECORDS).await?;
+		{
+			let _unstarted = super::unstarted::leave_unstarted(ds.id());
+			execute_all(&ds, &session, "REBUILD INDEX ft ON t").await?;
+		}
+		let (ns, db, table, ix) = get_table_index(&ds, "t", "ft").await?;
+		assert_eq!(ix.format_version, INDEX_FORMAT_VERSION, "the rebuild commits its format");
+		let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+		let staged = durable_build_state(&ds, &ikb).await?;
+		assert_eq!(
+			(staged.phase, staged.owner),
+			(IndexBuildPhase::Building, None),
+			"the rebuild commits its generation unclaimed"
+		);
+
+		let building = new_building_for_index(&ds, &session, ns, db, &table, ix).await?;
+		let acquired = building
+			.claim_staged_generation(staged.generation)
+			.await?
+			.expect("the build claims the generation its statement staged");
+		let values = scan_records(&ds, ns, db, &table).await?;
+		for batch in [None, Some(&values[..CHECKPOINTED])] {
+			let ctx = building.new_write_tx_ctx().await?;
+			let tx = ctx.tx();
+			building
+				.maintain_build_ownership(&tx, acquired.generation, &[IndexBuildPhase::Building])
+				.await?;
+			match batch {
+				None => crate::idx::wipe_index_data(&tx, &ikb, &building.ix.index).await?,
+				Some(batch) => {
+					building
+						.index_initial_batch(
+							&ctx,
+							&tx,
+							batch,
+							0,
+							&mut false,
+							&mut None,
+							&super::kind::InitialBatchSink::Pending,
+						)
+						.await?;
+				}
+			}
+			tx.commit().await?;
+		}
+		let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+		let mut state = durable_build_state(&ds, &ikb).await?;
+		state.initial_cursor =
+			Some(RecordKey::decode_key(&values[CHECKPOINTED - 1].0)?.id.into_owned());
+		state.initial = Some(CHECKPOINTED as u64);
+		state.updated_at = expired;
+		state.owner_heartbeat_at = Some(expired);
+		set_durable_build_state(&ds, &ikb, state).await?;
+		drop(building);
+
+		// A write transaction open across the resume: the build that dies may never have waited
+		// for it, so the resumed scan does.
+		let open = ds.transaction(TransactionType::Write).await?;
+		let waited = super::builder::write_barrier_waits::count(ds.id());
+		let resumed = ds
+			.resume_stalled_index_builds(Duration::from_secs(30), CancellationToken::new())
+			.await?;
+		assert_eq!(resumed, 1, "the resume scan adopts the stalled rebuild");
+		wait_for_a_build_at_the_write_barrier(ds.id(), waited).await?;
+		open.cancel().await?;
+		wait_for_index_ready(&ds, &session, "t", "ft").await?;
+		Ok(engines_answering_otherwise(&ds, BRAVO, &bravo_carriers(RECORDS)).await)
+	})
+	.await?;
+	assert!(wrong.is_empty(), "\n{}", wrong.join("\n"));
+	Ok(())
+}
+
+/// Within one transaction, writes after a `REBUILD INDEX` that moves a legacy index onto the
+/// current layout, and a second such rebuild, leave an index that the current layout answers for
+/// in full once the transaction commits: the rebuild is staged once, and its build reads the
+/// transaction's writes once they have committed. Checked on every storage engine.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_format_rebuild_in_a_transaction_builds_once_after_its_writes() -> Result<()> {
+	let wrong = on_every_engine(|ds, session| async move {
+		seed_legacy_fulltext_index(&ds, &session, 3).await?;
+		let (ns, db, table, ix) = get_table_index(&ds, "t", "ft").await?;
+		let ikb = IndexKeyBase::new(ns, db, table, ix.index_id);
+		let before = durable_build_state(&ds, &ikb).await?.generation;
+		execute_all(
+			&ds,
+			&session,
+			"BEGIN;
+			 REBUILD INDEX ft ON t;
+			 CREATE t:4 SET content = 'bravo 4';
+			 DELETE t:1;
+			 REBUILD INDEX ft ON t;
+			 COMMIT;",
+		)
+		.await?;
+		wait_for_index_ready(&ds, &session, "t", "ft").await?;
+		let mut wrong = Vec::new();
+		let after = durable_build_state(&ds, &ikb).await?.generation;
+		if after != before + 1 {
+			wrong.push(format!("the transaction built generations {before} to {after}"));
+		}
+		let carriers: Vec<String> =
+			bravo_carriers(4).into_iter().filter(|id| id != "t:1").collect();
+		wrong.extend(engines_answering_otherwise(&ds, BRAVO, &carriers).await);
+		Ok(wrong)
+	})
+	.await?;
+	assert!(wrong.is_empty(), "\n{}", wrong.join("\n"));
+	Ok(())
+}
+
+/// A `REBUILD INDEX` that moves an index onto the current layout, committed while a local build
+/// of the generation it replaces is still running, stops that build and builds its own: the
+/// statement, which has committed, succeeds, and the index answers in the current layout.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_format_rebuild_replaces_a_local_build_still_running() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	seed_legacy_fulltext_index(&ds, &session, 3).await?;
+	execute_all(&ds, &session, "REBUILD INDEX ft ON t").await?;
+	let guard =
+		start_index_build_paused(&ds, &session, "REBUILD INDEX ft ON t CONCURRENTLY").await?;
+	downgrade_index_format(&ds, "t", "ft", 0).await?;
+	let statement = tokio::spawn({
+		let (ds, session) = (Arc::clone(&ds), session.clone());
+		async move { execute_all(&ds, &session, "REBUILD INDEX ft ON t").await }
+	});
+	sleep(Duration::from_millis(500)).await;
+	drop(guard);
+	timeout(Duration::from_secs(60), statement)
+		.await
+		.map_err(|_| anyhow::anyhow!("timed out waiting for the rebuild"))???;
+	wait_for_index_ready(&ds, &session, "t", "ft").await?;
+	let wrong = engines_answering_otherwise(&ds, BRAVO, &bravo_carriers(3)).await;
+	assert!(wrong.is_empty(), "\n{}", wrong.join("\n"));
+	Ok(())
+}
+
+/// The start of a committed `REBUILD INDEX` that moves an index onto the current layout joins a
+/// build of the generation it staged that the resume scan adopted first on this node, rather than
+/// stopping it as the build of the generation it replaced.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_format_rebuild_joins_its_generation_adopted_by_the_resume_scan() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	seed_legacy_fulltext_index(&ds, &session, 3).await?;
+	{
+		let _unstarted = super::unstarted::leave_unstarted(ds.id());
+		execute_all(&ds, &session, "REBUILD INDEX ft ON t").await?;
+	}
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "ft").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	let mut staged = durable_build_state(&ds, &ikb).await?;
+	let generation = staged.generation;
+	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+	staged.updated_at = expired;
+	set_durable_build_state(&ds, &ikb, staged).await?;
+	// The resume scan adopts the generation, and its build is held in its cleanup.
+	let site = RetryableConflictSite::ConcurrentIndexInitialCleanup;
+	let guard = inject_retryable_conflicts(site, ds.id(), REPEATED_RETRY_CONFLICTS);
+	let resumed =
+		ds.resume_stalled_index_builds(Duration::from_secs(30), CancellationToken::new()).await?;
+	assert_eq!(resumed, 1, "the resume scan adopts the staged generation");
+	wait_for_retry_conflict(site, ds.id(), REPEATED_RETRY_CONFLICTS).await?;
+
+	let ctx = ds.setup_ctx()?.freeze();
+	let builder = ctx.get_index_builder().expect("index builder").clone();
+	let tb = {
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let tb = catch!(tx, tx.get_tb(ns, db, &table, None).await).expect("table").table_id;
+		tx.cancel().await?;
+		tb
+	};
+	let completion = builder
+		.start_staged_rebuild(&ctx, ds.setup_options(&session), ns, db, tb, ix, generation, true)
+		.await?
+		.expect("a blocking start answers a completion");
+	drop(guard);
+	timeout(Duration::from_secs(30), completion)
+		.await
+		.map_err(|_| anyhow::anyhow!("timed out waiting for the joined build"))??;
+	wait_for_index_ready(&ds, &session, "t", "ft").await?;
+	assert_eq!(durable_build_state(&ds, &ikb).await?.generation, generation);
+	let wrong = engines_answering_otherwise(&ds, BRAVO, &bravo_carriers(3)).await;
+	assert!(wrong.is_empty(), "\n{}", wrong.join("\n"));
+	Ok(())
+}
+
+/// The start of a committed `REBUILD INDEX` that moves an index onto the current layout leaves a
+/// local build of a later generation, which a later statement started first, to finish, rather
+/// than stopping it as the build of the generation it replaced.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_format_rebuild_start_leaves_a_later_generation_building() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	seed_legacy_fulltext_index(&ds, &session, 3).await?;
+	// The rebuild that moves the format, whose start comes late, staged this generation.
+	execute_all(&ds, &session, "REBUILD INDEX ft ON t").await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "ft").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	let staged = durable_build_state(&ds, &ikb).await?.generation;
+	// A later rebuild, which leaves the format as it is, builds the next generation, held in its
+	// cleanup.
+	let site = RetryableConflictSite::ConcurrentIndexInitialCleanup;
+	let guard = inject_retryable_conflicts(site, ds.id(), REPEATED_RETRY_CONFLICTS);
+	execute_all(&ds, &session, "REBUILD INDEX ft ON t CONCURRENTLY").await?;
+	wait_for_retry_conflict(site, ds.id(), REPEATED_RETRY_CONFLICTS).await?;
+	let later = durable_build_state(&ds, &ikb).await?.generation;
+	assert!(later > staged, "the later rebuild builds a generation of its own");
+
+	let ctx = ds.setup_ctx()?.freeze();
+	let builder = ctx.get_index_builder().expect("index builder").clone();
+	let tb = {
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let tb = catch!(tx, tx.get_tb(ns, db, &table, None).await).expect("table").table_id;
+		tx.cancel().await?;
+		tb
+	};
+	let started = builder
+		.start_staged_rebuild(&ctx, ds.setup_options(&session), ns, db, tb, ix, staged, false)
+		.await?;
+	assert!(started.is_none(), "a background start answers no completion");
+	drop(guard);
+	timeout(Duration::from_secs(30), wait_for_index_ready(&ds, &session, "t", "ft"))
+		.await
+		.map_err(|_| anyhow::anyhow!("the later generation's build did not finish"))??;
+	assert_eq!(durable_build_state(&ds, &ikb).await?.generation, later);
+	let wrong = engines_answering_otherwise(&ds, BRAVO, &bravo_carriers(3)).await;
+	assert!(wrong.is_empty(), "\n{}", wrong.join("\n"));
+	Ok(())
+}
+
+/// A blocking `REBUILD INDEX` that follows, in the same transaction, a `REBUILD INDEX …
+/// CONCURRENTLY` moving the index onto the current layout waits for the build the earlier
+/// statement staged, as it would for one it staged itself.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_blocking_format_rebuild_after_a_concurrent_one_waits_for_its_build() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	seed_legacy_fulltext_index(&ds, &session, 3).await?;
+	let site = RetryableConflictSite::ConcurrentIndexInitialCleanup;
+	let guard = inject_retryable_conflicts(site, ds.id(), REPEATED_RETRY_CONFLICTS);
+	let statement = tokio::spawn({
+		let (ds, session) = (Arc::clone(&ds), session.clone());
+		async move {
+			execute_all(
+				&ds,
+				&session,
+				"BEGIN; REBUILD INDEX ft ON t CONCURRENTLY; REBUILD INDEX ft ON t; COMMIT;",
+			)
+			.await
+		}
+	});
+	wait_for_retry_conflict(site, ds.id(), REPEATED_RETRY_CONFLICTS).await?;
+	sleep(Duration::from_millis(300)).await;
+	assert!(!statement.is_finished(), "the blocking rebuild returned before its build finished");
+	drop(guard);
+	timeout(Duration::from_secs(60), statement)
+		.await
+		.map_err(|_| anyhow::anyhow!("timed out waiting for the rebuild"))???;
+	assert_eq!(index_building_status(&ds, &session, "t", "ft").await?, "ready");
+	let wrong = engines_answering_otherwise(&ds, BRAVO, &bravo_carriers(3)).await;
+	assert!(wrong.is_empty(), "\n{}", wrong.join("\n"));
+	Ok(())
+}
+
+/// A blocking `REBUILD INDEX` moving an index onto the current layout, inside `BEGIN … COMMIT` or
+/// a compound statement, reports a build that fails after the commit as its own statement's
+/// error, and every other statement keeps its result.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_format_rebuild_in_a_block_reports_its_failed_build() -> Result<()> {
+	for (sql, slot) in
+		[("BEGIN; REBUILD INDEX ft ON t; COMMIT;", 1), ("IF true { REBUILD INDEX ft ON t }", 0)]
+	{
+		let (ds, session) = new_index_test_ds().await?;
+		seed_legacy_fulltext_index(&ds, &session, 3).await?;
+		let _failing = inject_non_retryable_error(
+			NonRetryableErrorSite::ConcurrentIndexInitialBatchCommit,
+			ds.id(),
+		);
+		let results = timeout(Duration::from_secs(60), ds.execute(sql, &session, None))
+			.await
+			.map_err(|_| anyhow::anyhow!("{sql}: timed out"))??;
+		for (at, result) in results.into_iter().enumerate() {
+			if at == slot {
+				result
+					.result
+					.expect_err(&format!("{sql}: the statement reports its build's failure"));
+			} else {
+				assert_eq!(result.result?, crate::types::PublicValue::None, "{sql}: slot {at}");
+			}
+		}
+	}
+	Ok(())
+}
+
+/// A blocking `REBUILD INDEX` moving an index onto the current layout inside `BEGIN … COMMIT`
+/// awaits its build outside the block's transaction timer: a build that outlasts what the block
+/// has left ends the statement's wait, never the committed block, whose `COMMIT` succeeds.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_format_rebuild_in_a_block_never_times_its_commit_out() -> Result<()> {
+	let (ds, session) =
+		new_index_test_ds_with_timeouts(None, Some(Duration::from_millis(500))).await?;
+	seed_legacy_fulltext_index(&ds, &session, 3).await?;
+	let site = RetryableConflictSite::ConcurrentIndexInitialCleanup;
+	let guard = inject_retryable_conflicts(site, ds.id(), REPEATED_RETRY_CONFLICTS);
+	let results = timeout(
+		Duration::from_secs(30),
+		run_cancellable(
+			&ds,
+			&session,
+			"BEGIN; REBUILD INDEX ft ON t; COMMIT;",
+			crate::ctx::CancelHandle::new(),
+		),
+	)
+	.await
+	.map_err(|_| anyhow::anyhow!("timed out running the block"))??;
+	drop(guard);
+	assert_eq!(results.len(), 3, "{results:?}");
+	assert_eq!(results[2], None, "the block's commit stands: {results:?}");
+	assert!(
+		results.iter().flatten().all(|err| !err.contains("The transaction timed out")),
+		"{results:?}"
+	);
+	let (_, _, _, ix) = get_table_index(&ds, "t", "ft").await?;
+	assert_ne!(ix.format_version, 0, "the rebuild's definition committed");
+	wait_for_index_ready(&ds, &session, "t", "ft").await?;
+	let wrong = engines_answering_otherwise(&ds, BRAVO, &bravo_carriers(3)).await;
+	assert!(wrong.is_empty(), "\n{}", wrong.join("\n"));
+	Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -14742,12 +16573,10 @@ impl CompletedTransactions {
 	}
 }
 
-/// A user transaction that updated a row while the index was online keeps
-/// maintaining the index directly for its later writes, and a build that
-/// started elsewhere in between still ends up with every value the
-/// transaction wrote and none it replaced: the transaction's commit and the
-/// builder's clean-then-scan decide it, not the moment of each write's
-/// admission.
+/// A user transaction that updated a row while the index was online keeps maintaining the index
+/// directly for its later writes, and commits, while a rebuild started elsewhere in between waits
+/// at the write barrier for it to end before it wipes and scans. The rebuilt index holds every
+/// value the transaction wrote and none it replaced.
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread")]
 async fn online_decision_holds_for_a_transaction_that_straddles_a_remote_rebuild() -> Result<()> {
@@ -14784,21 +16613,18 @@ async fn online_decision_holds_for_a_transaction_that_straddles_a_remote_rebuild
 	};
 	sleep(Duration::from_millis(500)).await;
 
-	let site = RetryableConflictSite::ConcurrentIndexInitialCleanup;
-	let node_id = ds_b.id();
-	let guard = inject_retryable_conflicts(site, node_id, REPEATED_RETRY_CONFLICTS);
 	let ds_b = Arc::new(ds_b);
+	let waited = super::builder::write_barrier_waits::count(ds_b.id());
 	let rebuild = {
 		let (ds, session) = (Arc::clone(&ds_b), session.clone());
 		tokio::spawn(async move { execute_all(&ds, &session, "REBUILD INDEX ix ON u").await })
 	};
-	wait_for_retry_conflict(site, node_id, REPEATED_RETRY_CONFLICTS).await?;
-	assert!(!writer.is_finished(), "the build must start while the transaction is still open");
+	wait_for_a_build_at_the_write_barrier(ds_b.id(), waited).await?;
+	assert!(!writer.is_finished(), "the build must wait while the transaction is still open");
 
 	timeout(Duration::from_secs(20), writer)
 		.await
 		.map_err(|_| anyhow::anyhow!("timed out waiting for the straddling transaction"))???;
-	drop(guard);
 	timeout(Duration::from_secs(20), rebuild)
 		.await
 		.map_err(|_| anyhow::anyhow!("timed out waiting for the rebuild"))???;

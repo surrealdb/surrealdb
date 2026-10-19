@@ -155,11 +155,12 @@ fn start(dbs: &Arc<Datastore>, canceller: CancellationToken, opts: &EngineOption
 	// The triggers are shared state in their own right, so a task holding them
 	// does not keep the datastore alive.
 	let triggers = dbs.commit_triggers();
-	let mut tasks = Vec::with_capacity(6);
+	let mut tasks = Vec::with_capacity(8);
 	tasks.push(spawn_task_node_membership_refresh(Weak::clone(&weak), canceller.clone(), opts));
 	if dbs.is_read_only() {
 		return Tasks(tasks);
 	}
+	tasks.push(spawn_task_write_barrier(Weak::clone(&weak), canceller.clone()));
 	tasks.push(spawn_task_event_processing(
 		Weak::clone(&weak),
 		Arc::clone(triggers),
@@ -272,6 +273,34 @@ fn spawn_task_node_membership_refresh(
 			}
 		}
 		trace!("Background task exited: Updating node registration information");
+	})
+}
+
+/// Spawns the task that answers this node's write barriers (see
+/// [`crate::kvs::write_barrier`]).
+///
+/// It runs alone, because answering a barrier waits for this node's open write transactions to
+/// end, and a datastore that answers barriers is the one whose write commits the heartbeat fence
+/// guards, so the fence is armed here.
+fn spawn_task_write_barrier(dbs: Weak<Datastore>, canceller: CancellationToken) -> Task {
+	if let Some(dbs) = dbs.upgrade() {
+		dbs.begin_answering_write_barriers();
+	}
+	into_task(async move {
+		let mut ticker = interval_ticker(crate::kvs::write_barrier::WRITE_BARRIER_POLL).await;
+		loop {
+			tokio::select! {
+				biased;
+				_ = canceller.cancelled() => break,
+				Some(_) = ticker.next() => {
+					let Some(dbs) = dbs.upgrade() else { break };
+					if let Err(e) = dbs.answer_write_barrier(&canceller).await {
+						warn!("Could not answer a write barrier: {e}");
+					}
+				}
+			}
+		}
+		trace!("Background task exited: Answering write barriers");
 	})
 }
 
@@ -798,19 +827,31 @@ async fn update_node_membership(
 	canceller: &CancellationToken,
 	timeout_duration: Duration,
 ) -> NodeMembershipUpdateResult {
-	match dbs.update_node_with_timeout(timeout_duration, canceller).await {
+	// Taken before the heartbeat reads the clock it records, so the fence lapses no later than
+	// other nodes stop counting this one live.
+	let beat = web_time::Instant::now();
+	// A heartbeat that commits rearms the write fence, so it is bounded within the fence's life,
+	// with the read of the feature level that follows it: the next heartbeat starts only once
+	// both have returned ([`crate::kvs::write_barrier::HEARTBEAT_ATTEMPT_BOUND`]).
+	let bound = crate::kvs::write_barrier::HEARTBEAT_ATTEMPT_BOUND;
+	let attempt = timeout_duration.min(bound);
+	match dbs.update_node_with_timeout(attempt, canceller).await {
 		Ok(()) => {
+			if !dbs.is_read_only() {
+				dbs.transaction_factory()
+					.write_fence()
+					.heartbeat(beat, crate::kvs::write_barrier::WRITE_FENCE_STALE_AFTER);
+			}
 			// Another node may have raised or lowered the feature level, so the
 			// heartbeat is when this node reads it again. A failure to read it
 			// leaves the cell as it was, possibly behind the store in either
 			// direction; writes stay safe because every floor above the cell's
 			// `in_use` is admitted by a locked read of the stored level.
-			match common::time::timeout(timeout_duration, dbs.refresh_feature_level()).await {
+			let refresh = timeout_duration.min(bound.saturating_sub(beat.elapsed()));
+			match common::time::timeout(refresh, dbs.refresh_feature_level()).await {
 				Ok(Ok(())) => {}
 				Ok(Err(e)) => warn!("Could not refresh the feature level: {e}"),
-				Err(_) => {
-					warn!("Timed out refreshing the feature level after {timeout_duration:?}")
-				}
+				Err(_) => warn!("Timed out refreshing the feature level after {refresh:?}"),
 			}
 			NodeMembershipUpdateResult::Updated
 		}
@@ -1241,9 +1282,9 @@ mod test {
 		let opt = EngineOptions::default();
 		let dbs = Datastore::new("memory").await.unwrap();
 		let tasks = tasks::init(&dbs, can.clone(), &opt);
-		// heartbeat, event processing, index compaction, graph fold, table
-		// migration, maintenance, sweeps.
-		assert_eq!(tasks.0.len(), 7);
+		// heartbeat, write barrier, event processing, index compaction, graph
+		// fold, table migration, maintenance, sweeps.
+		assert_eq!(tasks.0.len(), 8);
 		can.cancel();
 		tasks.resolve().await.unwrap();
 	}
@@ -1259,7 +1300,7 @@ mod test {
 			.with_rpc_session_gc_interval(Duration::ZERO);
 		let dbs = Datastore::new("memory").await.unwrap();
 		let tasks = tasks::init(&dbs, can.clone(), &opt);
-		assert_eq!(tasks.0.len(), 6, "the empty sweep group should not be spawned");
+		assert_eq!(tasks.0.len(), 7, "the empty sweep group should not be spawned");
 		can.cancel();
 		tasks.resolve().await.unwrap();
 	}

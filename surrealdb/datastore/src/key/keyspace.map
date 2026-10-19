@@ -28,6 +28,14 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /!cg                                                                                                 RootConfigPrefix ->  (range)
 /!tl{task_id}                                                                                            TaskLeaseKey ->  surrealdb_catalog::TaskLease
 /!tl                                                                                                  TaskLeasePrefix ->  (range)
+/!wb                                                                                                  WriteBarrierKey ->  u64
+/!wa{nd}                                                                                           WriteBarrierAckKey ->  u64
+/!wa                                                                                            WriteBarrierAckPrefix ->  (range)
+/!wh{nd}                                                                                     WriteBarrierHeartbeatKey ->  u64
+/!wh                                                                                      WriteBarrierHeartbeatPrefix ->  (range)
+/!wt{seq}{ns}{db}{tb}                                                                           WriteBarrierTargetKey ->  ()
+/!wt                                                                                         WriteBarrierTargetPrefix ->  (range)
+/!wt{seq}                                                                                 WriteBarrierTargetSeqPrefix ->  (range)
 /!se{id}                                                                                                   SessionKey ->  crate::values::session::DurableSession
 /!se                                                                                                    SessionPrefix ->  (range)
 /!nh{start}                                                                                              NsIdBatchKey ->  crate::sequences::BatchValue
@@ -192,6 +200,8 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}*{tb}!is                                                                                IndexIdStatePrefix ->  (range)
 /*{ns}*{db}*{tb}!bs{ix}                                                                                 BuildStateKey ->  IndexBuildState
 /*{ns}*{db}*{tb}!bs                                                                                  BuildStatePrefix ->  (range)
+/*{ns}*{db}*{tb}!bw{ix}                                                                               BuildBarrierKey ->  BuildGeneration
+/*{ns}*{db}*{tb}!bw                                                                                BuildBarrierPrefix ->  (range)
 /*{ns}*{db}*{tb}!bt{ix}{generation}                                                                    BuildTicketKey ->  BuildTicket
 /*{ns}*{db}*{tb}!bt{ix}                                                                           BuildTicketIxPrefix ->  (range)
 /*{ns}*{db}*{tb}!br{ix}{generation}{ticket}                                                       BuildReservationKey ->  IndexBuildReservation

@@ -131,7 +131,7 @@ impl EmbeddedEngine {
 		// by node id, so a datastore that never bootstraps has no node row for
 		// its own subscriptions to hang off.
 		kvs.bootstrap().await?;
-		kvs.start_maintenance_tasks();
+		kvs.start_maintenance_tasks_checked().await?;
 
 		if is_new && let Some((namespace, database)) = defaults.get_defaults() {
 			kvs.initialise_defaults(&namespace, &database).await?;

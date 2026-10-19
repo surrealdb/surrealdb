@@ -112,7 +112,7 @@ use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::docids::DocId;
 use crate::key::schema::{
 	BuildAppendGenerationPrefix, BuildAppendIxPrefix, BuildAppendKey, BuildAppendTicketPrefix,
-	BuildPrimaryGenerationPrefix, BuildPrimaryIxPrefix, BuildPrimaryKey,
+	BuildBarrierKey, BuildPrimaryGenerationPrefix, BuildPrimaryIxPrefix, BuildPrimaryKey,
 	BuildReservationGenerationPrefix, BuildReservationIxPrefix, BuildReservationKey, BuildStateKey,
 	BuildTicketIxPrefix, BuildTicketKey, DocCountKey, DocLengthKey, DocStatsBatchPrefix,
 	DocStatsKey, DocTermsKey, HnswDocElementsKey, HnswElementHashedKey, HnswElementKey,
@@ -764,6 +764,16 @@ impl IndexKeyBase {
 	/// Key storing durable build state for this table index.
 	pub fn new_bs_key(&self) -> BuildStateKey<'_> {
 		BuildStateKey {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+		}
+	}
+
+	/// Key storing the newest generation whose build waited at the write barrier.
+	pub fn new_bw_key(&self) -> BuildBarrierKey<'_> {
+		BuildBarrierKey {
 			ns: self.0.ns,
 			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),

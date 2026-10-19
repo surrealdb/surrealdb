@@ -401,6 +401,74 @@ async fn write_guard_poison_refuses_a_bare_commit() {
 	assert_intact(&ds, &ses, 10).await;
 }
 
+/// `commit_bare` passes the admission every write commit passes: a write transaction an index
+/// build stopped waiting for, whose epoch its wait fenced, is refused at a bare commit as at any
+/// other, and its write does not land.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_bare_commit_of_a_fenced_write_is_refused() {
+	let ds = Datastore::new("memory").await.unwrap();
+	let key = Key::from(b"zz-fenced".to_vec());
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
+	tx.set(key.clone(), vec![1u8]).await.unwrap();
+	// A wait for the write transactions open now runs its bound, and fences them.
+	let live = ds.transaction_factory().live_writes();
+	let since = live.advance();
+	live.fence_through(since);
+	let err = tx.commit_bare().await.expect_err("a fenced write must not commit bare");
+	assert!(crate::kvs::is_retryable_transaction_conflict(&err), "{err}");
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
+	assert_eq!(tx.get(key, None).await.unwrap(), None, "the refused write did not land");
+	tx.cancel().await.unwrap();
+}
+
+/// A write a rollback to a save point undid no longer counts against a fence of its table: a
+/// transaction whose remaining writes are of another table commits once a timed-out index build
+/// fences the table of the write it rolled back, and is refused while that write stands.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rolled_back_write_does_not_count_against_its_tables_fence() {
+	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::key::KVSubspace;
+
+	let ds = Datastore::new("memory").await.unwrap();
+	let in_table = |tb: &str| {
+		let tb = crate::val::TableName::from(tb);
+		let mut key = crate::key::schema::TblRoot {
+			ns: NamespaceId(1),
+			db: DatabaseId(2),
+			tb: std::borrow::Cow::Borrowed(&tb),
+		}
+		.encode_bound()
+		.unwrap()
+		.as_slice()
+		.to_vec();
+		key.extend_from_slice(b"*x");
+		Key::from(key)
+	};
+	let fenced = (NamespaceId(1), DatabaseId(2), crate::val::TableName::from("t"));
+	for rolled_back in [true, false] {
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		tx.new_save_point().await.unwrap();
+		tx.set(in_table("t"), vec![1u8]).await.unwrap();
+		if rolled_back {
+			tx.rollback_to_save_point().await.unwrap();
+		} else {
+			tx.release_last_save_point().await.unwrap();
+		}
+		tx.set(in_table("u"), vec![1u8]).await.unwrap();
+		let live = ds.transaction_factory().live_writes();
+		let since = live.advance();
+		live.fence_tables_through(since, std::slice::from_ref(&fenced));
+		let committed = tx.commit().await;
+		if rolled_back {
+			committed
+				.expect("the rolled-back write of the fenced table does not refuse the commit");
+		} else {
+			let err = committed.expect_err("a write of the fenced table refuses the commit");
+			assert!(crate::kvs::is_retryable_transaction_conflict(&err), "{err}");
+		}
+	}
+}
+
 /// Buffered index deltas describe writes the transaction is about to make durable,
 /// and `commit_bare` does not store them. Committing the writes without them would
 /// leave an index disagreeing with the records for good, so the transactions that

@@ -1941,6 +1941,28 @@ async fn step_inner(
 			})?;
 			let index = std::sync::Arc::new(index);
 			let txn = ctx.txn();
+			// A rebuild that moves the index's format stages the generation it builds in this
+			// transaction, and its build starts once the transaction commits
+			// (`IndexBuilder::stage_rebuild`).
+			let staged = if *fresh {
+				crate::kvs::index::RebuildStaging::Unstaged
+			} else {
+				builder
+					.stage_rebuild(&txn, table.namespace_id, table.database_id, &index)
+					.await
+					.map_err(ControlFlow::Err)?
+			};
+			let staged = match staged {
+				crate::kvs::index::RebuildStaging::Staged(generation) => Some(generation),
+				// An earlier rebuild of the index in this transaction staged the generation, and
+				// starts its build once the transaction commits. A blocking rebuild still waits for
+				// that build, as for one it staged itself; another has nothing more to do.
+				crate::kvs::index::RebuildStaging::AlreadyStaged(generation) if *blocking => {
+					Some(generation)
+				}
+				crate::kvs::index::RebuildStaging::AlreadyStaged(_) => return Ok(None),
+				crate::kvs::index::RebuildStaging::Unstaged => None,
+			};
 			// The one place a blocking build's wait is placed. Only a
 			// transaction whose owner awaits work after the commit offers that
 			// at all; any other waits inside the transaction. Where it is
@@ -1983,8 +2005,35 @@ async fn step_inner(
 							),
 						)
 					});
-			match after_commit {
-				Some(undo) => {
+			match (staged, after_commit) {
+				(Some(generation), _) => {
+					let rebuild = crate::kvs::index::StagedRebuild::new(
+						builder.clone(),
+						std::sync::Arc::clone(frozen),
+						options,
+						table.namespace_id,
+						table.database_id,
+						table.table_id,
+						index,
+						generation,
+					);
+					// A staged build starts only once the transaction has committed, wherever the
+					// statement sits, so its owner awaits it after the commit whenever it awaits
+					// anything there, and reports how it ends as the statement's result.
+					if *blocking && txn.accepts_materialise_waits() {
+						if txn.wait_after_commit(rebuild.awaited()).await.is_some() {
+							return Err(ControlFlow::Err(anyhow::Error::new(
+								crate::err::EngineError::unreachable(
+									"a transaction accepting materialise waits refused one",
+								),
+							)));
+						}
+					} else {
+						txn.on_commit(rebuild.on_commit(*blocking)).await;
+					}
+					Ok(())
+				}
+				(None, Some(undo)) => {
 					builder
 						.run_awaited_after_commit(
 							frozen,
@@ -1996,7 +2045,9 @@ async fn step_inner(
 						)
 						.await
 				}
-				None => builder.run(frozen, options, table.table_id, index, *blocking).await,
+				(None, None) => {
+					builder.run(frozen, options, table.table_id, index, *blocking).await
+				}
 			}
 			.map_err(ControlFlow::Err)?;
 			// Phase 2: once the transaction has committed and phase 1 has

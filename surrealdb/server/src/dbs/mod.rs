@@ -1205,7 +1205,7 @@ pub(crate) async fn initialise_datastore<C: TransactionBuilderFactory>(
 	// tasks may start writing. A read-only datastore starts only the membership
 	// refresh, and its first pass would only be refused: expiry and cleanup write
 	// state it does not accept.
-	dbs.start_maintenance_tasks();
+	dbs.start_maintenance_tasks_checked().await?;
 	if !dbs.is_read_only() {
 		spawn_first_node_maintenance_pass(dbs, &pending.engine, pending.canceller.clone());
 	}

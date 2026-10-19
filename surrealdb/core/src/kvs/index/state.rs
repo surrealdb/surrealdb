@@ -27,12 +27,14 @@ pub(super) async fn delete_durable_build_artifacts(
 ) -> Result<()> {
 	if expunge {
 		tx.clr_key(&ikb.new_bs_key()).await?;
+		tx.clr_key(&ikb.new_bw_key()).await?;
 		tx.clrr(ikb.new_bg_all_generations_range()?).await?;
 		tx.clrr(ikb.new_bp_all_generations_range()?).await?;
 		tx.clrr(ikb.new_br_all_generations_range()?).await?;
 		tx.clrr(ikb.new_bt_all_generations_range()?).await?;
 	} else {
 		tx.del_key(&ikb.new_bs_key()).await?;
+		tx.del_key(&ikb.new_bw_key()).await?;
 		delete_durable_build_queues(tx, ikb).await?;
 	}
 	Ok(())

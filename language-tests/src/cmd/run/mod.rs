@@ -1178,15 +1178,21 @@ async fn check_retained_keys(dbs: &Datastore) -> Result<Vec<Vec<u8>>> {
 	// prefix has no leading `/`.
 	//
 	// `/!nr` are node release records, written beside the node's heartbeat and so infrastructure
-	// like `/!nd`. `/!mg` are ledger entries: a store's first stored write, or the raise of its
+	// like `/!nd`. So are `/!wa`, a node's answer to the write barrier, which it records when it
+	// registers, `/!wh`, the mark beside each heartbeat of a release with the barrier, `/!wb`, the
+	// barrier an index build raises on a store several nodes write, and `/!wt`, the table each of
+	// the newest barriers was raised for.
+	// `/!mg` are ledger entries: a store's first stored write, or the raise of its
 	// feature level, records the record-format entry, so the entry persists in any store that
 	// has stored a record in the stored-value grammar.
 	//
 	// `!df` is the store's defaults record, which `ALTER SYSTEM COMPATIBILITY` writes and a
 	// migration records for a store an earlier release created. It sits outside the `/` root
 	// like `!fl`.
-	const ALLOWED_KEY_PREFIXES: &[&[u8]] =
-		&[b"/!ni", b"/!nh", b"/!nd", b"/!nr", b"/!mg", b"/!ic", b"/!tl", b"!fl", b"!df"];
+	const ALLOWED_KEY_PREFIXES: &[&[u8]] = &[
+		b"/!ni", b"/!nh", b"/!nd", b"/!nr", b"/!wa", b"/!wb", b"/!wh", b"/!wt", b"/!mg", b"/!ic",
+		b"/!tl", b"!fl", b"!df",
+	];
 
 	let txn = dbs.transaction(surrealdb_kvs::TransactionType::Read).await?;
 	// The point of this check is to find keys the declared keyspace does *not*

@@ -11,23 +11,23 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
 use common::time::sleep;
-use surrealdb_datastore::close::{AfterCommitDeadline, AfterCommitWait};
+use surrealdb_datastore::close::{AfterCommitDeadline, AfterCommitWait, CommitAction};
 use uuid::Uuid;
 use web_time::Instant;
 
-#[cfg(doc)]
-use super::IndexBuilder;
 use super::builder::query_ended;
 use super::state::delete_durable_build_artifacts;
-use super::{AbortLocalBuild, BuildCompletion, BuildGeneration, IndexBuildPhase};
+use super::{AbortLocalBuild, BuildCompletion, BuildGeneration, IndexBuildPhase, IndexBuilder};
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, IndexDefinition, IndexId, NamespaceId, TableDefinition, TableId};
 use crate::ctx::FrozenContext;
 use crate::ctx::reason::Reason;
+use crate::dbs::Options;
 use crate::err::EngineError;
 use crate::idx::IndexKeyBase;
 use crate::kvs::{DatastoreError, Transaction, TransactionType, is_retryable_transaction_conflict};
@@ -267,6 +267,168 @@ impl AfterCommitWait for AwaitBuildAfterCommit {
 		deadline: Option<AfterCommitDeadline>,
 	) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
 		Box::pin((*self).settle_and_undo(deadline))
+	}
+}
+
+/// The build of a `REBUILD INDEX` whose generation its transaction staged
+/// ([`IndexBuilder::stage_rebuild`]), started once that transaction has committed.
+pub(crate) struct StagedRebuild {
+	builder: IndexBuilder,
+	/// The statement's context, whose deadline and cancellation a blocking wait still answers to.
+	ctx: FrozenContext,
+	opt: Options,
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: TableId,
+	ix: Arc<IndexDefinition>,
+	generation: BuildGeneration,
+}
+
+impl StagedRebuild {
+	#[allow(clippy::too_many_arguments)]
+	pub(crate) fn new(
+		builder: IndexBuilder,
+		ctx: FrozenContext,
+		opt: Options,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: TableId,
+		ix: Arc<IndexDefinition>,
+		generation: BuildGeneration,
+	) -> Self {
+		Self {
+			builder,
+			ctx,
+			opt,
+			ns,
+			db,
+			tb,
+			ix,
+			generation,
+		}
+	}
+
+	async fn start(self, blocking: bool) -> Result<Option<BuildCompletion>> {
+		#[cfg(test)]
+		if unstarted::is_unstarted(self.ctx.node_id()) {
+			return Ok(None);
+		}
+		self.builder
+			.start_staged_rebuild(
+				&self.ctx,
+				self.opt,
+				self.ns,
+				self.db,
+				self.tb,
+				self.ix,
+				self.generation,
+				blocking,
+			)
+			.await
+	}
+
+	/// The wait a blocking statement's owner awaits once it has committed: the build is started,
+	/// then settles as [`AwaitBuildAfterCommit`] settles a rebuild.
+	pub(crate) fn awaited(self) -> Box<dyn AfterCommitWait> {
+		Box::new(AwaitStagedRebuild(self))
+	}
+
+	/// The start, run as the transaction commits, for an owner that awaits nothing after its
+	/// commit. When `blocking`, the commit waits for the build as the statement would have, until
+	/// the index is online or the statement's deadline or cancellation ends the wait, which then
+	/// leaves the build to carry on in the background. A build that fails is left in `Error`,
+	/// which `INFO FOR INDEX` reports: a commit has nothing to report it through. Otherwise the
+	/// build runs in the background.
+	pub(crate) fn on_commit(self, blocking: bool) -> Box<dyn CommitAction> {
+		Box::new(StartStagedRebuild {
+			rebuild: self,
+			blocking,
+		})
+	}
+}
+
+struct AwaitStagedRebuild(StagedRebuild);
+
+impl AfterCommitWait for AwaitStagedRebuild {
+	fn wait(
+		self: Box<Self>,
+		deadline: Option<AfterCommitDeadline>,
+	) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
+		Box::pin(async move {
+			let ctx = Arc::clone(&self.0.ctx);
+			match self.0.start(true).await? {
+				Some(completion) => {
+					AwaitBuildAfterCommit::new(ctx, completion, None)
+						.settle_and_undo(deadline)
+						.await
+				}
+				None => Ok(()),
+			}
+		})
+	}
+}
+
+struct StartStagedRebuild {
+	rebuild: StagedRebuild,
+	blocking: bool,
+}
+
+impl CommitAction for StartStagedRebuild {
+	fn run(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+		Box::pin(async move {
+			let (index, table) = (self.rebuild.ix.name.clone(), self.rebuild.ix.table_name.clone());
+			let ctx = Arc::clone(&self.rebuild.ctx);
+			let outcome = match self.rebuild.start(self.blocking).await {
+				Ok(Some(completion)) => {
+					AwaitBuildAfterCommit::new(ctx, completion, None).settle_and_undo(None).await
+				}
+				Ok(None) => Ok(()),
+				Err(err) => Err(err),
+			};
+			// The error can carry a record's values; `INFO FOR INDEX` reports the build's state.
+			if outcome.is_err() {
+				warn!(
+					target: "surrealdb::core::kvs::index",
+					index = %index,
+					table = %table,
+					"a committed REBUILD INDEX stopped waiting for its build before the index was \
+					 online; INFO FOR INDEX reports the build's state"
+				);
+			}
+		})
+	}
+}
+
+/// Leaves, for one node, the build of a committed `REBUILD INDEX` unstarted, as a node that dies
+/// as its transaction commits leaves it, so a test can recover it as the resume scan does.
+#[cfg(test)]
+pub(crate) mod unstarted {
+	use std::collections::HashSet;
+	use std::sync::{Mutex, OnceLock};
+
+	use uuid::Uuid;
+
+	fn nodes() -> &'static Mutex<HashSet<Uuid>> {
+		static NODES: OnceLock<Mutex<HashSet<Uuid>>> = OnceLock::new();
+		NODES.get_or_init(Default::default)
+	}
+
+	/// Keeps the builds `node` would start unstarted until dropped.
+	pub(crate) struct Unstarted(Uuid);
+
+	impl Drop for Unstarted {
+		fn drop(&mut self) {
+			nodes().lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&self.0);
+		}
+	}
+
+	pub(crate) fn leave_unstarted(node: Uuid) -> Unstarted {
+		nodes().lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(node);
+		Unstarted(node)
+	}
+
+	pub(super) fn is_unstarted(node: Uuid) -> bool {
+		nodes().lock().unwrap_or_else(std::sync::PoisonError::into_inner).contains(&node)
 	}
 }
 

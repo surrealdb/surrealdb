@@ -190,12 +190,17 @@ impl TransactionFactory {
 			}
 			.into());
 		}
+		// Counted, and dated, as `Self::open` counts and dates a transaction it opens.
 		let settled = self.triggers.catalog_epoch.settled();
 		let live_bucket = self.triggers.live.open();
+		let live_write = self.open_live_write(write);
 		let (inner, local) = match handle.0.open(write, isolation).await {
 			Ok(opened) => opened,
 			Err(e) => {
 				self.triggers.live.close(live_bucket);
+				if let Some((epoch, _)) = live_write {
+					self.triggers.live_writes.close(epoch);
+				}
 				return Err(e.into());
 			}
 		};
@@ -212,7 +217,8 @@ impl TransactionFactory {
 			sole_writer,
 			Arc::clone(&self.feature),
 		)
-		.with_live_bucket(live_bucket))
+		.with_live_bucket(live_bucket)
+		.with_live_write(live_write))
 	}
 
 	/// Opens a read-only transaction over a snapshot no older than the
@@ -364,6 +370,18 @@ impl TransactionFactory {
 		unused_variables,
 		reason = "Some variables are unused when no backends are enabled."
 	)]
+	/// Count a write transaction about to take its snapshot among the live writes, with the
+	/// instant it opens, taken before the snapshot for the heartbeat fence's judgement of when it
+	/// opened ([`crate::triggers::WriteFence`]); `None` for a read transaction, which is neither.
+	fn open_live_write(&self, write: TransactionType) -> Option<(u64, web_time::Instant)> {
+		match write {
+			TransactionType::Write => {
+				Some((self.triggers.live_writes.open(), web_time::Instant::now()))
+			}
+			TransactionType::Read => None,
+		}
+	}
+
 	async fn open(&self, write: TransactionType, sequences: Sequences) -> Result<Transaction> {
 		// The catalog commits finished before the transaction opens, read
 		// before it opens so that its snapshot holds at least those.
@@ -371,11 +389,15 @@ impl TransactionFactory {
 		// Counted live before its snapshot is taken, so a wait for the
 		// transactions older than a moment never misses this one.
 		let live_bucket = self.triggers.live.open();
+		let live_write = self.open_live_write(write);
 		// Create a new transaction on the datastore
 		let (inner, local) = match self.builder.new_transaction(write).await {
 			Ok(opened) => opened,
 			Err(e) => {
 				self.triggers.live.close(live_bucket);
+				if let Some((epoch, _)) = live_write {
+					self.triggers.live_writes.close(epoch);
+				}
 				return Err(e.into());
 			}
 		};
@@ -392,7 +414,8 @@ impl TransactionFactory {
 			sole_writer,
 			Arc::clone(&self.feature),
 		)
-		.with_live_bucket(live_bucket))
+		.with_live_bucket(live_bucket)
+		.with_live_write(live_write))
 	}
 
 	/// Release the DiskANN writer leases this datastore holds on indexes it has
@@ -404,6 +427,24 @@ impl TransactionFactory {
 		idle: std::time::Duration,
 	) -> Result<usize> {
 		crate::tx::release_idle_diskann_writer_leases(self, &self.triggers, sequences, idle).await
+	}
+
+	/// The write transactions open through this datastore
+	/// ([`crate::triggers::LiveWrites`]).
+	pub fn live_writes(&self) -> &crate::triggers::LiveWrites {
+		self.triggers.live_writes()
+	}
+
+	/// Count a wait for older write transactions that is about to begin, for as long as the
+	/// returned guard lives ([`crate::triggers::LiveWrites::waits`]).
+	pub fn begin_write_wait(&self) -> WriteWait {
+		self.triggers.live_writes.begin_wait();
+		WriteWait(Arc::clone(&self.triggers))
+	}
+
+	/// The heartbeat fence on this datastore's writes ([`crate::triggers::WriteFence`]).
+	pub fn write_fence(&self) -> &crate::triggers::WriteFence {
+		self.triggers.write_fence()
 	}
 
 	/// The commit triggers of the datastore this factory belongs to, for the
@@ -468,5 +509,16 @@ impl TransactionFactory {
 	/// Collects a specific u64 metric by name if supported by the datastore flavor.
 	pub fn collect_u64_metric(&self, metric: &str) -> Option<u64> {
 		self.builder.collect_u64_metric(metric)
+	}
+}
+
+/// A wait for older write transactions, counted as running by its datastore's
+/// [`crate::triggers::LiveWrites`] until dropped.
+#[must_use]
+pub struct WriteWait(Arc<CommitTriggers>);
+
+impl Drop for WriteWait {
+	fn drop(&mut self) {
+		self.0.live_writes.end_wait();
 	}
 }

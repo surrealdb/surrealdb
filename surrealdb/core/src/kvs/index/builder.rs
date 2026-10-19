@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use anyhow::{Result, ensure};
 use chrono::Utc;
-use common::time::sleep;
+use common::time::{sleep, timeout};
 use futures::channel::oneshot::{Sender, channel};
 use surrealdb_datastore::close::{CommitAction, RollbackAction};
 use tokio::sync::{Notify, OnceCell, RwLock};
@@ -167,6 +167,27 @@ fn is_memory_threshold_error(err: &anyhow::Error) -> bool {
 	matches!(err.downcast_ref::<DatastoreError>(), Some(DatastoreError::QueryBeyondMemoryThreshold))
 }
 
+/// How many times a build on each node found write transactions older than its commit still
+/// open, for the tests that commit one while a build waits for it.
+#[cfg(test)]
+pub(super) mod write_barrier_waits {
+	use std::collections::HashMap;
+	use std::sync::{LazyLock, Mutex};
+
+	use uuid::Uuid;
+
+	static WAITS: LazyLock<Mutex<HashMap<Uuid, usize>>> = LazyLock::new(Default::default);
+
+	pub(in crate::kvs::index) fn note(node: Uuid) {
+		*WAITS.lock().unwrap_or_else(|e| e.into_inner()).entry(node).or_default() += 1;
+	}
+
+	/// How many times a build on `node` has waited at the write barrier.
+	pub(in crate::kvs::index) fn count(node: Uuid) -> usize {
+		WAITS.lock().unwrap_or_else(|e| e.into_inner()).get(&node).copied().unwrap_or(0)
+	}
+}
+
 /// What each build a node started was lent, for the tests that check a
 /// blocking statement lends its registration to its build.
 #[cfg(test)]
@@ -294,6 +315,10 @@ pub(crate) struct BuildCompletion {
 	/// owner's.
 	started_here: bool,
 	finished: Pin<Box<dyn Future<Output = Result<()>> + Send>>,
+	/// The statement's transaction, set aside from the writes a build waits for while it awaits
+	/// this build inside it, and counted back in once the build has finished or the wait for it
+	/// is dropped ([`surrealdb_datastore::tx::ParkedWrite`]).
+	parked: Option<surrealdb_datastore::tx::ParkedWrite>,
 }
 
 impl BuildCompletion {
@@ -306,7 +331,15 @@ impl BuildCompletion {
 			building,
 			started_here,
 			finished: Box::pin(finished),
+			parked: None,
 		}
+	}
+
+	/// Count `parked` back in once this build has finished, crediting it the waits the build
+	/// began.
+	fn with_parked(mut self, parked: Option<surrealdb_datastore::tx::ParkedWrite>) -> Self {
+		self.parked = parked;
+		self
 	}
 
 	/// Whether this node runs the build, rather than waiting on a remote
@@ -375,10 +408,16 @@ impl Future for BuildCompletion {
 
 	fn poll(self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Self::Output> {
 		let this = self.get_mut();
-		match this.finished.as_mut().poll(cx) {
+		let polled = match this.finished.as_mut().poll(cx) {
 			Poll::Ready(Err(err)) if this.excused_once_online(&err) => Poll::Ready(Ok(())),
 			finished => finished,
+		};
+		if polled.is_ready()
+			&& let Some(mut parked) = this.parked.take()
+		{
+			parked.own_waits(this.building.write_barrier_waits_begun.load(Ordering::SeqCst));
 		}
+		polled
 	}
 }
 
@@ -749,6 +788,13 @@ impl IndexBuilder {
 				}
 			);
 		}
+		// A blocking build awaited inside its statement's open transaction would otherwise wait for
+		// that transaction at the write barrier: it is set aside until the build has finished
+		// ([`BuildCompletion`]), and counted back in however the wait for it ends.
+		let parked = match blocking && !waits_for_statement {
+			true => ctx.try_tx().and_then(|txn| txn.park_live_write()),
+			false => None,
+		};
 		match self.start_building(ctx, opt, tb, ix, key, sdr, waits_for_statement).await? {
 			BuildStart::Started(building) => Ok(rcv.map(|rcv| {
 				BuildCompletion::new(building, true, async move {
@@ -756,8 +802,179 @@ impl IndexBuilder {
 						reason: "Channel shutdown".to_string(),
 					})?
 				})
+				.with_parked(parked)
 			})),
 			BuildStart::RemoteOwner(building) if blocking => {
+				let builder = self.clone();
+				let ctx = Arc::clone(ctx);
+				let waited = Arc::clone(&building);
+				Ok(Some(
+					BuildCompletion::new(building, false, async move {
+						builder.wait_for_remote_building(&ctx, waited).await
+					})
+					.with_parked(parked),
+				))
+			}
+			BuildStart::RemoteOwner(_) => Ok(None),
+		}
+	}
+
+	/// Stages in `tx`, the transaction of a `REBUILD INDEX` that moves `ix` to another format, the
+	/// generation the rebuild builds, and answers it; `None` for a rebuild that leaves the format
+	/// as the committed catalog holds it, which builds as [`Self::build`] builds.
+	///
+	/// A build writes its layout in transactions of its own, which commit as they go, while the
+	/// format that layout follows is the one the statement stamps, which commits only with the
+	/// statement. So the generation is installed ownerless beside the stamp, and nothing is wiped
+	/// or scanned until the transaction has committed and [`Self::start_staged_rebuild`] claims
+	/// it. Until that commit every reader and writer keeps the previous format over the previous
+	/// layout, and a rollback leaves the index, its data and its build state as it found them.
+	/// From the commit on, every reader finds the index building, every writer queues for the
+	/// build, and a resumed build reads the same definition its checkpoint was made under. A build
+	/// in flight is replaced rather than joined, since it builds the previous format.
+	///
+	/// The flip compare-and-swaps the index's build state as `tx` reads it, so a build state
+	/// written since `tx` began fails the commit with a retryable conflict.
+	pub(crate) async fn stage_rebuild(
+		&self,
+		tx: &Transaction,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ix: &IndexDefinition,
+	) -> Result<RebuildStaging> {
+		let ikb = IndexKeyBase::new(ns, db, ix.table_name.clone(), ix.index_id);
+		let (moves, committed) = self.committed_rebuild_state(tx.sequences(), &ikb, ix).await?;
+		if !moves {
+			return Ok(RebuildStaging::Unstaged);
+		}
+		let existing: Option<IndexBuildState> = tx.get_key(&ikb.new_bs_key(), None).await?;
+		// A generation this transaction staged already, for an earlier rebuild of the index in
+		// it, is built once the transaction commits; a second would only supersede the first.
+		if let Some(staged) = &existing
+			&& staged.owner.is_none()
+			&& staged.phase == IndexBuildPhase::Building
+			&& committed.as_ref().map(|state| state.generation) != Some(staged.generation)
+		{
+			return Ok(RebuildStaging::AlreadyStaged(staged.generation));
+		}
+		// The writes that follow in this transaction decide afresh about this index.
+		tx.clear_cached_index_admissions();
+		stage_new_generation(tx, &ikb, existing.as_ref(), None).await.map(RebuildStaging::Staged)
+	}
+
+	/// Whether `ix`'s format differs from the one the committed catalog holds for the index, and
+	/// the index's committed build state, read together.
+	async fn committed_rebuild_state(
+		&self,
+		sequences: Sequences,
+		ikb: &IndexKeyBase,
+		ix: &IndexDefinition,
+	) -> Result<(bool, Option<IndexBuildState>)> {
+		use crate::catalog::FromStored as _;
+		let (ns, db) = (ikb.ns(), ikb.db());
+		let tx = self.tf.transaction(TransactionType::Read, sequences).await?;
+		let state: Option<IndexBuildState> = catch!(tx, tx.get_key(&ikb.new_bs_key(), None).await);
+		let committed = catch!(
+			tx,
+			async {
+				let tb = Cow::Borrowed(&ix.table_name);
+				let name = crate::key::schema::IndexNameKey {
+					ns,
+					db,
+					tb: tb.clone(),
+					ix: ix.index_id,
+				};
+				let Some(name) = tx.get_key(&name, None).await? else {
+					return Ok(None);
+				};
+				let definition = crate::key::schema::IndexDefKey {
+					ns,
+					db,
+					tb,
+					ix: Cow::Borrowed(name.as_str()),
+				};
+				match tx.get_key(&definition, None).await? {
+					Some(stored) => IndexDefinition::from_stored(&stored).map(Some),
+					None => Ok(None),
+				}
+			}
+			.await
+		);
+		tx.cancel().await?;
+		let moves =
+			committed.is_some_and(|committed| committed.format_version != ix.format_version);
+		Ok((moves, state))
+	}
+
+	/// Starts the build of `generation`, which the committed transaction of a `REBUILD INDEX`
+	/// staged ownerless ([`Self::stage_rebuild`]), and when `blocking` answers the
+	/// [`BuildCompletion`] to await.
+	///
+	/// The claim takes that generation and no other, whatever its lease: the statement's commit is
+	/// what installed it. A local build of the generation it replaced is stopped first, and waited
+	/// for at most [`SUPERSEDED_BUILD_STOP`], so a generation is never claimed without a task to
+	/// build it; a local build already building the staged generation is joined instead. A claim
+	/// another builder won — the resume scan, once the generation has stood a whole lease, here
+	/// or on another node — and one left unmade because the superseded build did not stop in time
+	/// are waited for as a remote owner's build, which the resume scan or that wait takes over once
+	/// its lease lapses. Nothing here fails a statement that has committed.
+	#[allow(clippy::too_many_arguments)]
+	pub(crate) async fn start_staged_rebuild(
+		&self,
+		ctx: &FrozenContext,
+		opt: Options,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: TableId,
+		ix: Arc<IndexDefinition>,
+		generation: BuildGeneration,
+		blocking: bool,
+	) -> Result<Option<BuildCompletion>> {
+		crate::idx::check_index_kernel(&ix.index)?;
+		let key = Arc::new(IndexKey::new(ns, db, &ix.table_name.clone(), ix.index_id));
+		// A local build already building the staged generation — the resume scan adopted it
+		// first, or another statement's start of it ran first — is joined, and one building a
+		// later generation is left to build it. One of the generation the staged one replaced
+		// loses its ownership at its next check; it is stopped, and waited for, so the claim below
+		// has a task to build with.
+		let local = self.indexes.read().await.get(&key).filter(|b| !b.is_finished()).cloned();
+		let claimable = match local {
+			Some(local) if local.build_generation.load(Ordering::Acquire) >= generation => false,
+			Some(superseded) => {
+				superseded.abort();
+				timeout(SUPERSEDED_BUILD_STOP, superseded.wait_finished()).await.is_ok()
+			}
+			None => true,
+		};
+		let carried = carried_places(ctx, blocking);
+		#[cfg(test)]
+		lent_places::note(ctx.node_id(), &ix.name, carried.is_some());
+		let building =
+			Arc::new(Building::with_places(ctx, self.tf.clone(), opt, tb, ix, key, carried)?);
+		let claimed = if claimable {
+			building.claim_staged_generation(generation).await?
+		} else {
+			None
+		};
+		match claimed {
+			Some(acquired) => {
+				let (rcv, sdr) = if blocking {
+					let (s, r) = channel();
+					(Some(r), Some(s))
+				} else {
+					(None, None)
+				};
+				self.start_acquired_building(Arc::clone(&building), acquired, sdr, false).await?;
+				Ok(rcv.map(|rcv| {
+					BuildCompletion::new(building, true, async move {
+						rcv.await.map_err(|_| DatastoreError::IndexingBuildingCancelled {
+							reason: "Channel shutdown".to_string(),
+						})?
+					})
+				}))
+			}
+			None if blocking => {
+				building.remote_generation.store(generation, Ordering::Release);
 				let builder = self.clone();
 				let ctx = Arc::clone(ctx);
 				let waited = Arc::clone(&building);
@@ -765,7 +982,7 @@ impl IndexBuilder {
 					builder.wait_for_remote_building(&ctx, waited).await
 				})))
 			}
-			BuildStart::RemoteOwner(_) => Ok(None),
+			None => Ok(None),
 		}
 	}
 
@@ -912,6 +1129,69 @@ impl IndexBuilder {
 	}
 }
 
+/// How long the build of a committed `REBUILD INDEX` waits for a local build of the generation it
+/// replaced to stop before it leaves its own generation to be taken over.
+const SUPERSEDED_BUILD_STOP: Duration = Duration::from_secs(30);
+
+/// What [`IndexBuilder::stage_rebuild`] did in a `REBUILD INDEX`'s transaction.
+pub(crate) enum RebuildStaging {
+	/// The rebuild leaves the format as it is, so it builds as any rebuild does.
+	Unstaged,
+	/// The generation the rebuild builds, staged ownerless, to be built once the transaction
+	/// commits.
+	Staged(BuildGeneration),
+	/// An earlier rebuild of the index in the same transaction staged this generation, which is
+	/// built once the transaction commits.
+	AlreadyStaged(BuildGeneration),
+}
+
+/// Stages in `tx` the flip from `existing`, the index's durable build state as `tx` reads it, to
+/// the next generation, in `Building` and owned by `owner`, and answers that generation.
+///
+/// The previous generation's ticket counter is removed with a read-then-write delete, which
+/// conflicts with any concurrent writer allocation, so once the flip commits no further reservation
+/// of the previous generation can be made: that is what lets the new generation's drain of prior
+/// reservations converge. A blind delete would not conflict on last-writer-wins backends. The new
+/// generation gets a counter of its own, so writer admission always compare-and-swaps a key that is
+/// present. `!bs` is compare-and-swapped against `existing`, and a miss is the caller's to retry.
+///
+/// An ownerless generation (`owner` is `None`) is adopted by the first builder to claim it
+/// ([`Building::claim_staged_generation`]), or, once it has stood for a whole lease unclaimed, by
+/// the takeover of an expired build.
+pub(super) async fn stage_new_generation(
+	tx: &Transaction,
+	ikb: &IndexKeyBase,
+	existing: Option<&IndexBuildState>,
+	owner: Option<Uuid>,
+) -> Result<BuildGeneration> {
+	let generation = existing.map(|s| s.generation.saturating_add(1)).unwrap_or(1);
+	let now = Utc::now();
+	let state = IndexBuildState {
+		generation,
+		phase: IndexBuildPhase::Building,
+		owner,
+		next_ticket: 0,
+		initial_complete: false,
+		updated_at: now,
+		owner_heartbeat_at: owner.map(|_| now),
+		error: None,
+		report_status: Some(IndexBuildReportStatus::Started),
+		initial: None,
+		updated: None,
+		pending: None,
+		initial_cursor: None,
+	};
+	if let Some(previous) = existing.map(|s| s.generation) {
+		let previous_bt = ikb.new_bt_key(previous);
+		if let Some(current) = tx.get_key(&previous_bt, None).await? {
+			tx.del_compare_key(&previous_bt, Some(&current)).await?;
+		}
+	}
+	tx.set_key(&ikb.new_bt_key(generation), &0).await?;
+	tx.put_compare_key(&ikb.new_bs_key(), &state, existing).await?;
+	Ok(generation)
+}
+
 pub(super) struct Building {
 	/// Context used during the build.
 	pub(super) ctx: FrozenContext,
@@ -939,6 +1219,9 @@ pub(super) struct Building {
 	pub(super) aborted: AtomicBool,
 	/// Set when the spawned task exits so a later local build can start.
 	pub(super) finished: AtomicBool,
+	/// How many waits for older write transactions this build has begun
+	/// ([`crate::kvs::write_barrier`]).
+	pub(super) write_barrier_waits_begun: AtomicU64,
 	/// Rendezvous controlling when durable build ownership is released.
 	///
 	/// Ownership is what keeps every node's background index compaction off an
@@ -1074,6 +1357,7 @@ impl Building {
 			ix_key,
 			build_generation: AtomicU64::new(0),
 			remote_generation: AtomicU64::new(0),
+			write_barrier_waits_begun: AtomicU64::new(0),
 			aborted: AtomicBool::new(false),
 			finished: AtomicBool::new(false),
 			release_gate: AtomicU8::new(RELEASE_GATE_STATEMENT),
@@ -1391,6 +1675,7 @@ impl Building {
 				}
 				let mut next = current.clone();
 				next.owner = Some(self.owner);
+				self.rescan_without_barrier_proof(&tx, &mut next).await?;
 				next.error = None;
 				next.report_status =
 					next.report_status.or_else(|| Some(report_status_from_phase(next.phase)));
@@ -1412,11 +1697,11 @@ impl Building {
 						self.build_generation.store(current.generation, Ordering::Release);
 						return Ok(Some(AcquiredBuild {
 							generation: current.generation,
-							phase: current.phase,
-							initial_complete: current.initial_complete,
-							initial_count: durable_report_count(current.initial),
-							updates_count: durable_report_count(current.updated),
-							initial_cursor: current.initial_cursor.clone(),
+							phase: next.phase,
+							initial_complete: next.initial_complete,
+							initial_count: durable_report_count(next.initial),
+							updates_count: durable_report_count(next.updated),
+							initial_cursor: next.initial_cursor.clone(),
 						}));
 					}
 					Err(err) if is_condition_not_met(&err) => {
@@ -1452,42 +1737,10 @@ impl Building {
 				continue;
 			}
 
-			let generation = existing.as_ref().map(|s| s.generation.saturating_add(1)).unwrap_or(1);
-			let now = Utc::now();
-			let state = IndexBuildState {
-				generation,
-				phase: IndexBuildPhase::Building,
-				owner: Some(self.owner),
-				next_ticket: 0,
-				initial_complete: false,
-				updated_at: now,
-				owner_heartbeat_at: Some(now),
-				error: None,
-				report_status: Some(IndexBuildReportStatus::Started),
-				initial: None,
-				updated: None,
-				pending: None,
-				initial_cursor: None,
-			};
-			// Fence writers still admitting under the previous generation.
-			// Removing its ticket counter with a read-then-write delete
-			// conflicts with any concurrent allocation, so once this flip
-			// commits no further old-generation reservation can be created —
-			// which is what makes the prior-generation drain below converge on
-			// a stable empty state. A blind delete would not conflict on
-			// last-writer-wins backends.
-			if let Some(previous) = existing.as_ref().map(|s| s.generation) {
-				let previous_bt = self.ikb.new_bt_key(previous);
-				if let Some(current) = tx.get_key(&previous_bt, None).await? {
-					tx.del_compare_key(&previous_bt, Some(&current)).await?;
-				}
-			}
-			// Every active generation owns a counter, so writer admission always
-			// compare-and-swaps a key that is present.
-			tx.set_key(&self.ikb.new_bt_key(generation), &0).await?;
-			let res = tx.put_compare_key(&state_key, &state, existing.as_ref()).await;
-			match res {
-				Ok(()) => {
+			let res =
+				stage_new_generation(&tx, &self.ikb, existing.as_ref(), Some(self.owner)).await;
+			let generation = match res {
+				Ok(generation) => {
 					if self
 						.commit_and_retryable_conflict(
 							&tx,
@@ -1497,6 +1750,7 @@ impl Building {
 					{
 						continue;
 					}
+					generation
 				}
 				Err(err) if is_condition_not_met(&err) => {
 					let _ = tx.cancel().await;
@@ -1506,7 +1760,7 @@ impl Building {
 					let _ = tx.cancel().await;
 					return Err(err);
 				}
-			}
+			};
 			self.build_generation.store(generation, Ordering::Release);
 			// Old-generation writers holding tickets either commit their
 			// queue entries (their rows become visible before the initial
@@ -1586,6 +1840,67 @@ impl Building {
 		Ok(state)
 	}
 
+	/// Claim `generation` while it stands ownerless in `Building`, as the transaction of a
+	/// `REBUILD INDEX` staged it ([`IndexBuilder::stage_rebuild`]); `None` once anything else
+	/// holds the index's build state.
+	pub(super) async fn claim_staged_generation(
+		&self,
+		generation: BuildGeneration,
+	) -> Result<Option<AcquiredBuild>> {
+		loop {
+			let ctx = self.new_write_tx_ctx().await?;
+			let tx = ctx.tx();
+			let state_key = self.ikb.new_bs_key();
+			let Some(current) = tx.get_key(&state_key, None).await? else {
+				tx.cancel().await?;
+				return Ok(None);
+			};
+			if current.generation != generation
+				|| current.owner.is_some()
+				|| current.phase != IndexBuildPhase::Building
+			{
+				tx.cancel().await?;
+				return Ok(None);
+			}
+			let mut next = current.clone();
+			next.owner = Some(self.owner);
+			self.rescan_without_barrier_proof(&tx, &mut next).await?;
+			let now = Utc::now();
+			next.updated_at = now;
+			next.owner_heartbeat_at = Some(now);
+			match tx.put_compare_key(&state_key, &next, Some(&current)).await {
+				Ok(()) => {
+					if self
+						.commit_and_retryable_conflict(
+							&tx,
+							"transient conflict claiming a staged rebuild, retrying",
+						)
+						.await?
+					{
+						continue;
+					}
+					self.build_generation.store(generation, Ordering::Release);
+					return Ok(Some(AcquiredBuild {
+						generation,
+						phase: next.phase,
+						initial_complete: next.initial_complete,
+						initial_count: durable_report_count(next.initial),
+						updates_count: durable_report_count(next.updated),
+						initial_cursor: next.initial_cursor.clone(),
+					}));
+				}
+				Err(err) if is_condition_not_met(&err) => {
+					let _ = tx.cancel().await;
+					continue;
+				}
+				Err(err) => {
+					let _ = tx.cancel().await;
+					return Err(err);
+				}
+			}
+		}
+	}
+
 	/// Take over an existing active generation after its owner lease expires.
 	///
 	/// This is intentionally narrower than `acquire_build_state`: it never
@@ -1629,6 +1944,7 @@ impl Building {
 			}
 			let mut next = current.clone();
 			next.owner = Some(self.owner);
+			self.rescan_without_barrier_proof(&tx, &mut next).await?;
 			next.error = None;
 			next.report_status =
 				next.report_status.or_else(|| Some(report_status_from_phase(next.phase)));
@@ -1650,11 +1966,11 @@ impl Building {
 					self.build_generation.store(current.generation, Ordering::Release);
 					return Ok(Some(AcquiredBuild {
 						generation: current.generation,
-						phase: current.phase,
-						initial_complete: current.initial_complete,
-						initial_count: durable_report_count(current.initial),
-						updates_count: durable_report_count(current.updated),
-						initial_cursor: current.initial_cursor.clone(),
+						phase: next.phase,
+						initial_complete: next.initial_complete,
+						initial_count: durable_report_count(next.initial),
+						updates_count: durable_report_count(next.updated),
+						initial_cursor: next.initial_cursor.clone(),
 					}));
 				}
 				Err(err) if is_condition_not_met(&err) => {
@@ -2542,6 +2858,111 @@ impl Building {
 		}
 	}
 
+	/// Wait until every write transaction that opened before the call has ended on every live
+	/// node ([`crate::kvs::write_barrier::WriteBarrier`]), heartbeating ownership of `generation`
+	/// meanwhile, since a write transaction a client holds open can outlast the owner lease.
+	/// Answers `false` when the build was aborted while it waited.
+	async fn wait_for_older_writes(&self, generation: BuildGeneration) -> Result<bool> {
+		let sequences = self.ctx.try_get_sequences()?.clone();
+		// Counted as this build's own before the wait begins, for a statement that set its
+		// transaction aside for this build.
+		self.write_barrier_waits_begun.fetch_add(1, Ordering::SeqCst);
+		let mut barrier = crate::kvs::write_barrier::WriteBarrier::start(
+			&self.tf,
+			&sequences,
+			self.ctx.node_id(),
+			(self.ix_key.ns, self.ix_key.db, self.ix_key.tb.clone()),
+		)
+		.await?;
+		let every = self.ownership_heartbeat_every();
+		let mut beat = Instant::now();
+		loop {
+			if self.is_aborted().await {
+				return Ok(false);
+			}
+			if barrier.done(&self.tf, &sequences).await? {
+				self.record_barrier_proof(generation).await?;
+				return Ok(true);
+			}
+			#[cfg(test)]
+			write_barrier_waits::note(self.ctx.node_id());
+			if beat.elapsed() >= every {
+				self.heartbeat_ownership(generation, IndexBuildPhase::Building).await?;
+				beat = Instant::now();
+			}
+			sleep(barrier.poll()).await;
+		}
+	}
+
+	/// Make a takeover of `next` rescan the table when its initial scan has scanned anything — it
+	/// completed, or checkpointed a cursor — without proof that its owner waited at the write
+	/// barrier for its generation (`!bw`), which a build records before it scans. An owner of a
+	/// release without the barrier may have scanned past a record before a write transaction
+	/// older than the generation's commit committed it, and that write was neither scanned nor
+	/// queued; resuming after the cursor would never read it. The scan restarts from the start,
+	/// and waits at the barrier before it wipes.
+	async fn rescan_without_barrier_proof(
+		&self,
+		tx: &Transaction,
+		next: &mut IndexBuildState,
+	) -> Result<()> {
+		let scanned = next.phase == IndexBuildPhase::Closing
+			|| (next.phase == IndexBuildPhase::Building
+				&& (next.initial_complete || next.initial_cursor.is_some()));
+		if !scanned {
+			return Ok(());
+		}
+		let proof: Option<BuildGeneration> = tx.get_key(&self.ikb.new_bw_key(), None).await?;
+		if proof == Some(next.generation) {
+			return Ok(());
+		}
+		next.phase = IndexBuildPhase::Building;
+		next.initial_complete = false;
+		next.initial_cursor = None;
+		next.initial = None;
+		next.report_status = Some(IndexBuildReportStatus::Started);
+		Ok(())
+	}
+
+	/// Record that this build waited at the write barrier for `generation` (`!bw`), so a takeover
+	/// of its completed scan need not rescan ([`Self::rescan_without_barrier_proof`]). Recorded
+	/// with a heartbeat of the build's ownership, so a build whose generation another replaced
+	/// records nothing over the newer generation's proof, and stops as it loses its ownership.
+	pub(super) async fn record_barrier_proof(&self, generation: BuildGeneration) -> Result<()> {
+		loop {
+			let tx = self.new_write_tx().await?;
+			let staged = async {
+				self.maintain_build_ownership(&tx, generation, &[IndexBuildPhase::Building])
+					.await?;
+				tx.set_key(&self.ikb.new_bw_key(), &generation).await
+			}
+			.await;
+			if let Err(err) = staged {
+				if self
+					.cancel_and_retryable_conflict(
+						&tx,
+						&err,
+						"transient conflict recording the write barrier's proof, retrying",
+					)
+					.await
+				{
+					continue;
+				}
+				return Err(err);
+			}
+			if self
+				.commit_and_retryable_conflict(
+					&tx,
+					"transient conflict recording the write barrier's proof, retrying",
+				)
+				.await?
+			{
+				continue;
+			}
+			return Ok(());
+		}
+	}
+
 	/// Heartbeat ownership of `generation` in a transaction of its own.
 	async fn heartbeat_ownership(
 		&self,
@@ -3095,6 +3516,16 @@ impl Building {
 		} else {
 			acquired.updates_count
 		};
+		// A scan resumed from a checkpoint reads the rest of the table only once the write
+		// transactions older than now have ended too: the checkpoint may come from an owner that
+		// never waited for those older than the generation's commit, a release without the write
+		// barrier, and a second wait after an owner that did only waits for writes that predate it.
+		if scanning_initial
+			&& !restarting_initial_scan
+			&& !self.wait_for_older_writes(generation).await?
+		{
+			return Ok(());
+		}
 
 		if restarting_initial_scan {
 			self.mark_durable_report(
@@ -3113,6 +3544,14 @@ impl Building {
 			// when the previous owner already completed them.
 			self.wait_for_prior_generation_reservations(generation).await?;
 			self.wipe_stale_build_queues(generation).await?;
+			// The wipe and the scan read only once every write transaction whose snapshot
+			// predates the commit this generation builds against — the index's definition, or the
+			// flip that installed the generation — has ended, on every live node: each has then
+			// committed before the wipe's snapshot, or not at all, and every later one sees the
+			// generation and queues for it (`crate::kvs::write_barrier`).
+			if !self.wait_for_older_writes(generation).await? {
+				return Ok(());
+			}
 			loop {
 				if self.is_aborted().await {
 					return Ok(());

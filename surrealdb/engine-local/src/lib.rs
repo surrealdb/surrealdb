@@ -198,7 +198,7 @@ pub async fn connect(
 		.map_err(std_error_to_types_error)?;
 	kvs.check_version().await.map_err(std_error_to_types_error)?;
 	kvs.bootstrap().await.map_err(std_error_to_types_error)?;
-	kvs.start_maintenance_tasks();
+	kvs.start_maintenance_tasks_checked().await.map_err(std_error_to_types_error)?;
 	// If a root user is specified, setup the initial datastore credentials. A datastore that is
 	// open read-only refuses the write, so the step is skipped and the store serves what it
 	// already holds.

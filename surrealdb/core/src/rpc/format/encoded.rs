@@ -772,12 +772,15 @@ pub(crate) mod tests {
 	use surrealdb_rpc::{DbResponse, DbResult, QUERY_STREAM_BUFFER, RowFormat};
 	use surrealdb_types::Value;
 
-	use super::{QueryCollector, decode_dynamic, encode_response, encode_results};
+	#[cfg(feature = "shaped")]
+	use super::decode_dynamic;
+	use super::{QueryCollector, encode_response, encode_results};
 	use crate::catalog::providers::CatalogProvider;
 	use crate::dbs::Session;
 	use crate::kvs::{Datastore, QueryRequest, TransactionType};
 
 	/// A dynamic slice is one CBOR item: a second item after it is refused.
+	#[cfg(feature = "shaped")]
 	#[test]
 	fn a_dynamic_slice_with_a_trailing_item_is_refused() {
 		assert!(decode_dynamic(&[0x01]).is_ok());
