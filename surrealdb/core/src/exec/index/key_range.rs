@@ -35,8 +35,9 @@
 //!   projected as `a` reads the element the key holds. The same rule plans a range over them, with
 //!   bounds that are literals alone, of the kinds a key orders exactly (see
 //!   [`view_literal_bound`]): a group value is whatever its expression yields, so no declared type
-//!   vouches for a bound, and a number is never one, since numbers of different kinds that are
-//!   equal do not share a key. A view claims no order.
+//!   vouches for a bound. A group the expression fixes to `int` (`<int> x`) is bounded as an int
+//!   component is, since every value it holds is an int; any other number is never a bound, since
+//!   numbers of different kinds that are equal do not share a key. A view claims no order.
 
 use std::sync::Arc;
 
@@ -170,9 +171,13 @@ pub(crate) struct KeyRangeAccess {
 /// an `id` field.
 ///
 /// Over an aggregated view's structure ([`KeyOrigin::AggregateView`]) the
-/// bounds are literals alone ([`view_literal_bound`]), every group value is
-/// an element of unknown type, and the access delivers no order: the sort
-/// stays, and an ordering led by `id DESC` alone reads backwards.
+/// bounds are literals alone, never a deferred expression, because a group
+/// value is whatever its group expression yielded. A component whose group
+/// expression fixes its kind is bounded as the same kind of an `id` field's
+/// component is; one of unknown type takes the literals
+/// [`view_literal_bound`] admits, whose encodings the key orders by kind. The
+/// access delivers no order whatever the kinds are: the sort stays, and an
+/// ordering led by `id DESC` alone reads backwards.
 pub(crate) fn plan_key_range(
 	key: &Arc<KeyStructure>,
 	conjuncts: &[&LogicalExpr],
@@ -186,8 +191,9 @@ pub(crate) fn plan_key_range(
 				return None;
 			}
 		}
-		// Every component of a view's key is of unknown order; the bounds that
-		// can be pushed are those `view_literal_bound` admits.
+		// A view's key is read whatever its components' orders are: a
+		// component of unknown order still takes the bounds
+		// `view_literal_bound` admits, and none of them delivers an order.
 		KeyOrigin::AggregateView => {}
 		// An origin added to the catalog is not one this rule reasons about.
 		_ => return None,
@@ -655,8 +661,9 @@ impl Classifier<'_> {
 	/// fractional one is no equality, and as a range bound rounds to the
 	/// nearest int inside the range, inclusively (`> 2.5` and `>= 2.5` are
 	/// `>= 3`); a bound that is not finite or rounds outside the ints is not
-	/// pushed. A component of a view's key takes the literals
-	/// [`view_literal_bound`] admits, and no expression.
+	/// pushed. A component of a view's key takes a literal alone and no
+	/// expression; where its kind is unknown the literals are those
+	/// [`view_literal_bound`] admits.
 	fn bound(&self, position: u32, expr: &LogicalExpr, using: Use) -> Option<(KeyBound, bool)> {
 		let inclusive = match using {
 			Use::Equality => true,

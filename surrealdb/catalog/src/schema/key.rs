@@ -34,7 +34,9 @@ use crate::catalog::{
 	FieldDefinition, LogicalBody, StoredFieldDefinition, TableDefinition, ViewDefinition,
 	from_stored_all,
 };
-use crate::expr::{Expr, Idiom, KeyNames, KeyNamesError, Kind, KindLiteral, Literal, Part};
+use crate::expr::{
+	Expr, Idiom, KeyNames, KeyNamesError, Kind, KindLiteral, Literal, Part, PrefixOperator,
+};
 use crate::val::{Number, RecordIdKey, TableName, Value};
 
 /// What a record id component holds.
@@ -51,8 +53,8 @@ pub enum ComponentKind {
 	Record(Box<[TableName]>),
 	/// A type outside the set a key range can reason about: a stored component
 	/// type that the allow-list ([`ComponentKind::classify`]) does not admit, or a
-	/// component of an aggregated view, whose type is whatever its group
-	/// expression yields.
+	/// component of an aggregated view whose group expression does not fix the
+	/// type of the values it yields ([`group_component_kind`]).
 	Unknown,
 }
 
@@ -151,7 +153,7 @@ pub enum ComponentOrder {
 	/// Equality is exact and no order is claimed. A record component.
 	EqualityOnly,
 	/// Nothing is known: the type is outside the set above, or the component
-	/// belongs to an aggregated view.
+	/// belongs to an aggregated view whose group expression does not fix it.
 	Unknown,
 }
 
@@ -396,9 +398,9 @@ impl KeyStructure {
 	/// (`SELECT a AS x, b AS x.y`). The stored row then holds at that name what the
 	/// last such item wrote, which need not be the group value the key holds. An
 	/// item repeated exactly is the one alias. Nor is a name that is `id` or a
-	/// path beneath it, since a read of the row's `id` reads its record id. The
-	/// component types are
-	/// [`ComponentKind::Unknown`]: they are whatever the group expressions yield.
+	/// path beneath it, since a read of the row's `id` reads its record id. A
+	/// component's kind is the one its group expression fixes
+	/// ([`group_component_kind`]), and [`ComponentKind::Unknown`] otherwise.
 	///
 	/// `None` for every other view, including `GROUP ALL`, whose single row has
 	/// no group values.
@@ -430,11 +432,14 @@ impl KeyStructure {
 				group_reference(expr, arity).map(|group| (name.clone(), group as u32))
 			})
 			.collect();
-		let components: Vec<KeyComponent> = (0..arity)
-			.map(|position| KeyComponent {
+		let components: Vec<KeyComponent> = analysis
+			.group_expressions
+			.iter()
+			.enumerate()
+			.map(|(position, expr)| KeyComponent {
 				position: position as u32,
 				name: None,
-				kind: ComponentKind::Unknown,
+				kind: group_component_kind(expr),
 				declared: None,
 			})
 			.collect();
@@ -586,6 +591,43 @@ impl KeyStructure {
 				})
 				.collect::<Vec<Value>>(),
 		)
+	}
+}
+
+/// The kind of the key element a group expression writes, or
+/// [`ComponentKind::Unknown`] where the expression does not fix it.
+///
+/// A view's rows are keyed by the values its group expressions evaluate to,
+/// element for element and with no coercion on the way in, so the kind has to
+/// be one every value the expression can yield holds. Only the expression
+/// itself says that. A cast does: it yields a value of its target kind or
+/// raises, so no row the view holds was keyed by anything else. A path to a
+/// field does not: a declared field kind is enforced when a record is written,
+/// so a record stored before the declaration, or before `DEFINE FIELD
+/// OVERWRITE` retyped it, holds what it held, and the view row keyed from it
+/// holds that.
+///
+/// Only a kind whose encoding orders exactly ([`ComponentOrder::Exact`]) is
+/// resolved. The orders below it are read under rules a view's keys do not
+/// keep: a key range over a datetime component takes the whole second its
+/// bound lies in, which reaches every key of that second only for a datetime
+/// within the years 0000 to 9999, and an element outside them is refused of an
+/// `id` field ([`KeyStructure::conforms`]) but of no group value.
+fn group_component_kind(expr: &Expr) -> ComponentKind {
+	let Expr::Prefix {
+		op: PrefixOperator::Cast(kind),
+		..
+	} = expr
+	else {
+		return ComponentKind::Unknown;
+	};
+	match kind {
+		Kind::String => ComponentKind::String,
+		Kind::Int => ComponentKind::Int,
+		Kind::Uuid => ComponentKind::Uuid,
+		Kind::Duration => ComponentKind::Duration,
+		Kind::Bool => ComponentKind::Bool,
+		_ => ComponentKind::Unknown,
 	}
 }
 
@@ -1278,6 +1320,68 @@ mod tests {
 			key.canonical_column(&Idiom::field("renamed")),
 			Some(KeyStructure::component_idiom(1))
 		);
+	}
+
+	/// What a group expression fixes about its key element. A cast yields a
+	/// value of its target kind or raises, so a component cast to a kind that
+	/// orders exactly is that kind; everything else — a field read, whose
+	/// declared kind binds only the writes that were checked against it, a
+	/// call, a cast to a kind a record id cannot hold — is unknown. A cast to
+	/// a datetime is unknown too: a group value may be a datetime outside the
+	/// years 0000 to 9999, which an `id` field admits at no component.
+	#[test]
+	fn a_views_group_expression_fixes_its_component_kind_only_by_a_cast() {
+		let exact = [
+			("<string> a", ComponentKind::String),
+			("<int> a", ComponentKind::Int),
+			("<uuid> a", ComponentKind::Uuid),
+			("<duration> a", ComponentKind::Duration),
+			("<bool> a", ComponentKind::Bool),
+		];
+		for (expr, expected) in exact {
+			let key =
+				KeyStructure::from_view(&aggregated(&format!("{expr} AS k, count() AS n"), &["k"]))
+					.unwrap();
+			assert_eq!(key.components[0].kind, expected, "{expr}");
+			assert_eq!(key.order(0), ComponentOrder::Exact, "{expr}");
+			assert!(key.all_exactly_ordered(), "{expr}");
+			// The kind is known; the type the view declares for the column is not.
+			assert!(key.components[0].declared.is_none(), "{expr}");
+		}
+
+		let unknown = [
+			"a",
+			"a.b",
+			"time::floor(a, 1h)",
+			"<datetime> a",
+			"<record<t>> a",
+			"<float> a",
+			"<number> a",
+			"<any> a",
+			"<option<string>> a",
+		];
+		for expr in unknown {
+			let key =
+				KeyStructure::from_view(&aggregated(&format!("{expr} AS k, count() AS n"), &["k"]))
+					.unwrap();
+			assert_eq!(key.components[0].kind, ComponentKind::Unknown, "{expr}");
+			assert!(!key.all_exactly_ordered(), "{expr}");
+		}
+	}
+
+	/// One unknown component is enough to take the exact order off the whole
+	/// key, and a component's kind follows its own group.
+	#[test]
+	fn a_views_components_are_judged_one_by_one() {
+		let key = KeyStructure::from_view(&aggregated(
+			"<string> a AS s, b AS plain, <int> c AS i, count() AS n",
+			&["s", "plain", "i"],
+		))
+		.unwrap();
+		assert_eq!(key.components[0].kind, ComponentKind::String);
+		assert_eq!(key.components[1].kind, ComponentKind::Unknown);
+		assert_eq!(key.components[2].kind, ComponentKind::Int);
+		assert!(!key.all_exactly_ordered());
 	}
 
 	#[test]
