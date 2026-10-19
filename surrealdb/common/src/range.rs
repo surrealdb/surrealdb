@@ -85,36 +85,42 @@ impl TypedRange<i64> {
 		}
 	}
 
-	pub fn slice<'a, T>(&self, s: &'a [T]) -> Option<&'a [T]> {
-		let r = match self.end {
-			Bound::Included(x) => s.get(..=(x as usize))?,
-			Bound::Excluded(x) => s.get(..(x as usize))?,
-			Bound::Unbounded => s,
+	/// The `start..end` positions the range selects in a slice of `len` elements. A bound past
+	/// the end selects up to the end, so a range wider than the slice yields what the slice
+	/// has. Returns `None` for a range with a negative bound or whose start lies after its end.
+	fn clamp(&self, len: usize) -> Option<(usize, usize)> {
+		// Compared as `i64` so a reversed range is judged the same on every target; only the
+		// positions that survive the comparison narrow to `usize`.
+		let start = match self.start {
+			Bound::Included(x) if x >= 0 => x,
+			Bound::Excluded(x) if x >= 0 => x.saturating_add(1),
+			Bound::Unbounded => 0,
+			_ => return None,
 		};
-		match self.start {
-			Bound::Included(x) => r.get((x as usize)..),
-			Bound::Excluded(x) => {
-				let x = (x as usize).checked_add(1)?;
-				r.get(x..)
-			}
-			Bound::Unbounded => Some(r),
+		let end = match self.end {
+			Bound::Included(x) if x >= 0 => x.saturating_add(1),
+			Bound::Excluded(x) if x >= 0 => x,
+			Bound::Unbounded => i64::MAX,
+			_ => return None,
+		};
+		if start > end {
+			return None;
 		}
+		let end = usize::try_from(end).unwrap_or(usize::MAX).min(len);
+		let start = usize::try_from(start).unwrap_or(usize::MAX).min(end);
+		Some((start, end))
 	}
 
+	/// The elements of `s` the range selects, as [`Self::clamp`] bounds them.
+	pub fn slice<'a, T>(&self, s: &'a [T]) -> Option<&'a [T]> {
+		let (start, end) = self.clamp(s.len())?;
+		Some(&s[start..end])
+	}
+
+	/// The elements of `s` the range selects, as [`Self::clamp`] bounds them.
 	pub fn slice_mut<'a, T>(&self, s: &'a mut [T]) -> Option<&'a mut [T]> {
-		let r = match self.end {
-			Bound::Included(x) => s.get_mut(..=(x as usize))?,
-			Bound::Excluded(x) => s.get_mut(..(x as usize))?,
-			Bound::Unbounded => s,
-		};
-		match self.start {
-			Bound::Included(x) => r.get_mut((x as usize)..),
-			Bound::Excluded(x) => {
-				let x = (x as usize).checked_add(1)?;
-				r.get_mut(x..)
-			}
-			Bound::Unbounded => Some(r),
-		}
+		let (start, end) = self.clamp(s.len())?;
+		Some(&mut s[start..end])
 	}
 
 	/// Returns the length of this range, or `None` when the range is unbounded

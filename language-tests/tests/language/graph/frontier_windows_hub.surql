@@ -47,7 +47,7 @@ value = "[{ first: [person:4, person:1001, person:1002], id: person:1 }, { first
 value = "[3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]"
 
 [[test.results]]
-value = "[[person:2000, person:2001, person:2002, person:2003], NONE]"
+value = "[[person:2000, person:2001, person:2002, person:2003], []]"
 
 [[test.results]]
 value = "[{ e: 3, id: person:2 }, { e: 3, id: person:3 }, { e: 4, id: person:4 }]"
