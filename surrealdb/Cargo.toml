@@ -64,12 +64,16 @@ allocation-tracking = ["surrealdb-engine-local/allocation-tracking"]
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
+# The docs.rs sandbox caps build memory, so the persistent local-engine API
+# (`engine::local::SurrealKv`, versioned storage) is documented through the
+# pure-Rust SurrealKV backend; a C++ backend such as `kv-rocksdb` exceeds the
+# cap.
 features = [
     "protocol-ws",
     "protocol-http",
     "protocol-grpc",
     "kv-mem",
-    "kv-rocksdb",
+    "kv-surrealkv",
     "rustls",
     "native-tls",
     "http",
