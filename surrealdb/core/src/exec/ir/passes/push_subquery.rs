@@ -316,7 +316,7 @@ fn writes_no_state(cx: &mut LoCx<'_>, value: ValueId) -> bool {
 	let computing = computing_ops(cx.ir, value);
 	!computing.is_empty()
 		&& computing.iter().all(|op| {
-			!effects::of_with(&*cx.ir, &mut *cx.facts, cx.effects, *op).set.mutates_state()
+			!effects::summary_with(&*cx.ir, &mut *cx.facts, cx.effects, *op).set.mutates_state()
 		})
 }
 

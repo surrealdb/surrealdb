@@ -388,7 +388,7 @@ pub(super) fn layer_effects_unobservable(
 			if !fallibility::of_with(ir, facts, cx, child).is_infallible() {
 				return false;
 			}
-			if !UNOBSERVABLE.contains(effects::of_with(ir, facts, cx, child).set) {
+			if !UNOBSERVABLE.contains(effects::summary_with(ir, facts, cx, child).set) {
 				return false;
 			}
 		}

@@ -278,7 +278,7 @@ fn roots_of(
 		}
 	}
 	for op in &ops {
-		if effects::of_with(ir, facts, &cx.effects, *op).set.intersects(REFUSED) {
+		if effects::summary_with(ir, facts, &cx.effects, *op).set.intersects(REFUSED) {
 			return None;
 		}
 	}

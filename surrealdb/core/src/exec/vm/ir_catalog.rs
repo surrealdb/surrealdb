@@ -271,7 +271,7 @@ pub(crate) async fn fill_record_folds(
 	}
 	let top: Vec<OpId> = ops_in(ir, ir.top()).collect();
 	for op in top {
-		let set = effects::of_with(ir, facts, cx, op).set;
+		let set = effects::summary_with(ir, facts, cx, op).set;
 		if set.mutates_state() {
 			return Ok(());
 		}
@@ -742,7 +742,7 @@ fn checkable_field_statements(
 			return Walk::SkipRegions;
 		}
 		if may_change_checked_catalog(
-			effects::of_with(ir, facts, &structural_cx(registry, ir), op).set,
+			effects::summary_with(ir, facts, &structural_cx(registry, ir), op).set,
 			&data.kind,
 		) {
 			changed = true;

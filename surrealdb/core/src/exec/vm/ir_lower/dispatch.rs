@@ -1021,7 +1021,7 @@ fn region_effects(ir: &Ir, registry: &FunctionRegistry, region: RegionId) -> Eff
 	let mut facts = FactCache::new();
 	let under = structural_cx(registry, ir);
 	ops_in(ir, region)
-		.map(|op| effects::of_with(ir, &mut facts, &under, op).set)
+		.map(|op| effects::summary_with(ir, &mut facts, &under, op).set)
 		.fold(EffectSet::PURE, EffectSet::union)
 }
 

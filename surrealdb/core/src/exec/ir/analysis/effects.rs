@@ -39,7 +39,7 @@ use crate::exec::ir::core::walk::ops_in;
 use crate::exec::ir::expr::ops::{DispatchTarget, ExprOp, ExprTag};
 use crate::exec::ir::iface::catalog::EffectCx;
 use crate::exec::ir::iface::effects::{
-	Determinism, IrFootprint, IrResource, KeyOf, OpEffects, Rollback,
+	Determinism, EffectSummary, IrFootprint, IrResource, KeyOf, OpEffects, Rollback,
 };
 use crate::exec::ir::iface::fallibility::{ContextDep, Fallibility};
 use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
@@ -81,6 +81,93 @@ pub(crate) fn of_with(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, op: OpI
 		out.footprint.writes = smallvec![IrResource::Unknown];
 	}
 	settle(out)
+}
+
+/// The set, failure classes and determinism of [`of_with`]'s answer for `op`, equal to those of
+/// that answer, computed without footprints when no closure is invoked in the subtree of `op`.
+///
+/// The closure contribution is the only part of [`of_with`] beyond the region-local answer that
+/// changes any of the three: the `Unknown` footprint of a write that hides its stage code, the
+/// write rule and the widening of a loop body's keys change the footprint alone.
+pub(crate) fn summary_with(
+	ir: &Ir,
+	facts: &mut FactCache,
+	cx: &EffectCx<'_>,
+	op: OpId,
+) -> EffectSummary {
+	if ir.op(op).is_none() {
+		return EffectSummary::of(&OpEffects::top());
+	}
+	let mut invoked: SmallVec<[OpId; 2]> = SmallVec::new();
+	collect_invoked(ir, op, &mut invoked);
+	if !invoked.is_empty() {
+		return EffectSummary::of(&of_with(ir, facts, cx, op));
+	}
+	regional_summary(ir, facts, cx, op)
+}
+
+/// [`summary_with`] for a container that holds no closure creation, in which no op invokes a
+/// closure; the caller states that the container holds none.
+pub(crate) fn summary_closure_free(
+	ir: &Ir,
+	facts: &mut FactCache,
+	cx: &EffectCx<'_>,
+	op: OpId,
+) -> EffectSummary {
+	if ir.op(op).is_none() {
+		return EffectSummary::of(&OpEffects::top());
+	}
+	regional_summary(ir, facts, cx, op)
+}
+
+/// Whether `ir` holds no closure creation, so that no op of it invokes a closure.
+pub(crate) fn closure_free(ir: &Ir) -> bool {
+	!ir.live_op_data().any(|data| data.kind.tag() == OpTag::Expr(ExprTag::ClosureCreate))
+}
+
+/// The [`EffectSummary`] of the region-local answer of `op` ([`regional`]), memoised apart from the
+/// full answer at the op's generation: the summary of its local answer joined with the summaries of
+/// the ops of its regions, with the determinism floors its set implies. A dangling id answers the
+/// summary of [`OpEffects::top`].
+fn regional_summary(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, op: OpId) -> EffectSummary {
+	let Some(data) = ir.op(op) else {
+		return EffectSummary::of(&OpEffects::top());
+	};
+	let generation = ir.generation(op);
+	let key = cx.memo_key();
+	if let Some(held) = facts.summary(op, generation, &key) {
+		return held;
+	}
+	if let Some(held) = facts.get(op, generation, &key) {
+		let summary = EffectSummary::of(&held.effects);
+		facts.insert_summary(op, generation, key, summary);
+		return summary;
+	}
+	let mut out = EffectSummary::of(&local(ir, facts, cx, op));
+	for region in data.regions.iter().copied() {
+		let Some(info) = ir.region(region) else {
+			out = join_summary(out, EffectSummary::of(&OpEffects::top()));
+			continue;
+		};
+		if !runs(&data.kind, info.kind) {
+			continue;
+		}
+		for child in ops_in(ir, region) {
+			out = join_summary(out, regional_summary(ir, facts, cx, child));
+		}
+	}
+	out.determinism = settled_determinism(out.set, out.determinism);
+	facts.insert_summary(op, generation, key, out);
+	out
+}
+
+/// The [`EffectSummary`] of [`join`] of two answers with summaries `a` and `b`.
+fn join_summary(a: EffectSummary, b: EffectSummary) -> EffectSummary {
+	EffectSummary {
+		set: a.set.union(b.set),
+		fallibility: a.fallibility.union(b.fallibility),
+		determinism: join_determinism(a.determinism, b.determinism),
+	}
 }
 
 /// The local answer of one op: its kind's own effects, never those of its regions.
@@ -239,16 +326,7 @@ fn settle(mut effects: OpEffects) -> OpEffects {
 	const UNDONE: EffectSet = EffectSet::WRITES_DATA.union(EffectSet::CHANGES_CATALOG);
 
 	let set = effects.set;
-	if set.contains(EffectSet::READS_DATA) {
-		effects.determinism =
-			join_determinism(effects.determinism, Determinism::WithinStatementUnlessWritten);
-	}
-	if set.contains(EffectSet::CLOCK) {
-		effects.determinism = join_determinism(effects.determinism, Determinism::PerStatement);
-	}
-	if set.intersects(EffectSet::NON_DETERMINISTIC_BUT_FOR_CLOCK) {
-		effects.determinism = Determinism::NonDeterministic;
-	}
+	effects.determinism = settled_determinism(set, effects.determinism);
 	if set.intersects(SURVIVES) {
 		effects.rollback = Rollback::Survives;
 	} else if set.intersects(UNDONE) {
@@ -257,19 +335,47 @@ fn settle(mut effects: OpEffects) -> OpEffects {
 	effects
 }
 
+/// `determinism` raised to the floors `set` implies, as [`settle`] raises an answer's.
+fn settled_determinism(set: EffectSet, mut determinism: Determinism) -> Determinism {
+	if set.contains(EffectSet::READS_DATA) {
+		determinism = join_determinism(determinism, Determinism::WithinStatementUnlessWritten);
+	}
+	if set.contains(EffectSet::CLOCK) {
+		determinism = join_determinism(determinism, Determinism::PerStatement);
+	}
+	if set.intersects(EffectSet::NON_DETERMINISTIC_BUT_FOR_CLOCK) {
+		determinism = Determinism::NonDeterministic;
+	}
+	determinism
+}
+
 /// The region-local answer of `op`, memoised at the op's generation: its local answer joined with
 /// the region-local answers of the ops of its regions, the write rule applied and the floors met.
 ///
 /// Reads nothing outside the subtree of `op`.
 fn regional(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, op: OpId) -> OpEffects {
+	if !ensure_regional(ir, facts, cx, op) {
+		return OpEffects::top();
+	}
+	match facts.get(op, ir.generation(op), &cx.memo_key()) {
+		Some(held) => held.effects.clone(),
+		None => OpEffects::top(),
+	}
+}
+
+/// Memoises the region-local answer of `op` ([`regional`]) at the op's generation unless the memo
+/// holds it already, and answers whether the memo holds it; a dangling id answers `false`, and its
+/// answer is [`OpEffects::top`]. The answers of the ops of its regions are joined from the memo,
+/// never cloned out of it.
+fn ensure_regional(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, op: OpId) -> bool {
+	let Some(data) = ir.op(op) else {
+		return false;
+	};
 	let generation = ir.generation(op);
 	let key = cx.memo_key();
-	if let Some(hit) = facts.get(op, generation, &key) {
-		return hit.effects.clone();
+	if facts.get(op, generation, &key).is_some() {
+		return true;
 	}
-	let Some(data) = ir.op(op) else {
-		return OpEffects::top();
-	};
 	let mut out = local(ir, facts, cx, op);
 	let loop_owner = is_loop(&data.kind);
 	for region in data.regions.iter().copied() {
@@ -282,7 +388,15 @@ fn regional(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, op: OpId) -> OpEf
 		}
 		let mut folded = bottom();
 		for child in ops_in(ir, region) {
-			folded = join(&folded, &regional(ir, facts, cx, child));
+			let held = if ensure_regional(ir, facts, cx, child) {
+				facts.get(child, ir.generation(child), &key).map(|held| &held.effects)
+			} else {
+				None
+			};
+			folded = match held {
+				Some(effects) => join(&folded, effects),
+				None => join(&folded, &OpEffects::top()),
+			};
 		}
 		if loop_owner && is_loop_body(info.kind) {
 			folded = widen_keys(folded);
@@ -293,16 +407,15 @@ fn regional(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, op: OpId) -> OpEf
 		out.footprint.reads = smallvec![IrResource::Unknown];
 		out.footprint.writes = smallvec![IrResource::Unknown];
 	}
-	let out = settle(out);
 	facts.insert(
 		op,
 		generation,
 		key,
 		OpFacts {
-			effects: out.clone(),
+			effects: settle(out),
 		},
 	);
-	out
+	true
 }
 
 /// The effects of the body of the closure `creator` creates: the transitive answers of the ops of

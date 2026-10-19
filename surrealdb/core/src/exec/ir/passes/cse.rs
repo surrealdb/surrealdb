@@ -172,6 +172,56 @@ struct Guards {
 	session: bool,
 }
 
+/// Whether two of `ops` that have the shape of a candidate ([`is_candidate`]: an expression op of
+/// a mergeable tag with one result and no region) share their tag, operands, frame and snapshot,
+/// which every pair of equal keys ([`key_with`]) does.
+fn has_shape_twins(ir: &Ir, ops: &[OpId]) -> bool {
+	use std::hash::{Hash, Hasher};
+	if ops.len() < 2 {
+		return false;
+	}
+	let shaped = |op: &OpId| {
+		let data = ir.op(*op)?;
+		let OpKind::Expr(kind) = &data.kind else {
+			return None;
+		};
+		(data.results.len() == 1 && data.regions.is_empty() && mergeable(kind.tag()))
+			.then_some(data)
+	};
+	let mut hashed: Vec<(u64, OpId)> = ops
+		.iter()
+		.filter_map(|op| {
+			let data = shaped(op)?;
+			let mut hasher = std::collections::hash_map::DefaultHasher::new();
+			data.kind.tag().hash(&mut hasher);
+			data.operands.hash(&mut hasher);
+			data.frame.hash(&mut hasher);
+			data.snapshot.hash(&mut hasher);
+			Some((hasher.finish(), *op))
+		})
+		.collect();
+	if hashed.len() < 2 {
+		return false;
+	}
+	hashed.sort_unstable_by_key(|(hash, _)| *hash);
+	let same = |a: OpId, b: OpId| match (ir.op(a), ir.op(b)) {
+		(Some(a), Some(b)) => {
+			a.kind.tag() == b.kind.tag()
+				&& a.operands == b.operands
+				&& a.frame == b.frame
+				&& a.snapshot == b.snapshot
+		}
+		_ => false,
+	};
+	hashed.chunk_by(|a, b| a.0 == b.0).any(|run| {
+		run.len() >= 2
+			&& run
+				.iter()
+				.enumerate()
+				.any(|(at, (_, a))| run[at + 1..].iter().any(|(_, b)| same(*a, *b)))
+	})
+}
+
 /// What the statement `statement` holds: its own transitive effects, the local effects of every op
 /// in it (for a physical op, the effects of the logical ops it stands for) and the catalog-change
 /// attribute of a physical statement. A statement missing from the IR bars both kinds of read.
@@ -182,7 +232,7 @@ fn guards_of(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, statement: OpId)
 			session: true,
 		};
 	};
-	let mut held = effects::of_with(ir, facts, cx, statement).set;
+	let mut held = effects::summary_with(ir, facts, cx, statement).set;
 	for region in &data.regions {
 		ir.walk(*region, WalkOrder::PreOrder, &mut |op| {
 			held = held.union(effects::local(ir, facts, cx, op).set);
@@ -227,7 +277,7 @@ fn is_candidate(
 	if scope == Scope::Physical && !in_physical_region(ir, op) {
 		return false;
 	}
-	let answer = effects::of_with(ir, facts, cx, op);
+	let answer = effects::summary_with(ir, facts, cx, op);
 	if !READS.contains(answer.set) {
 		return false;
 	}
@@ -281,6 +331,12 @@ pub(super) fn merge_equal_values(
 ) -> Result<u32, IrError> {
 	let mut merged = 0;
 	for (statement, ops) in by_statement(ir) {
+		// Two ops merge only under equal keys, and a key names the op's tag, operands, frame and
+		// snapshot: a statement where no two ops that could be candidates share all four has
+		// nothing to merge.
+		if !has_shape_twins(ir, &ops) {
+			continue;
+		}
 		let guards = guards_of(ir, facts, cx, statement);
 		let mut table = ValueTable::new();
 		table.enter_statement(Some(statement));

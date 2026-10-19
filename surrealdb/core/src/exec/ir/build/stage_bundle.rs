@@ -279,7 +279,7 @@ mod tests {
 			let ir = bound(found(events)).expect("the unit binds");
 			let (op, _) = events_op(&ir);
 			let mut facts = FactCache::new();
-			effects::of_with(&ir, &mut facts, &cx, op).set
+			effects::summary_with(&ir, &mut facts, &cx, op).set
 		};
 		let calling = effects_of(vec![event("one", "true", &["fn::audit()"], EventKind::Sync)]);
 		assert!(calling.writes_data(), "a call of a user-defined function may write");

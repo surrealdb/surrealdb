@@ -185,10 +185,10 @@ pub(super) fn judged_effects(
 	op: OpId,
 ) -> EffectSet {
 	let Some(data) = ir.op(op) else {
-		return effects::of_with(ir, facts, cx, op).set;
+		return effects::summary_with(ir, facts, cx, op).set;
 	};
 	if write_loop_of(ir, op) != Some(loop_op) {
-		return effects::of_with(ir, facts, cx, op).set;
+		return effects::summary_with(ir, facts, cx, op).set;
 	}
 	let own = match &data.kind {
 		OpKind::Logical(LogOp::WriteStage {
@@ -215,7 +215,7 @@ pub(super) fn judged_effects(
 			},
 		) => EffectSet::READS_ROW.union(EffectSet::MAY_REJECT),
 		OpKind::Logical(_) | OpKind::Expr(_) | OpKind::Phys(_) => {
-			return effects::of_with(ir, facts, cx, op).set;
+			return effects::summary_with(ir, facts, cx, op).set;
 		}
 	};
 	let mut set = own;

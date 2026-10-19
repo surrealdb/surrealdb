@@ -374,6 +374,8 @@ struct Walk<'a> {
 	/// twice; a live op missing from it after the walk is listed by no block.
 	seen: SecondaryMap<OpId, ()>,
 	stopped: bool,
+	/// Whether the container holds no closure creation ([`effects::closure_free`]).
+	closure_free: bool,
 }
 
 impl<'a> Walk<'a> {
@@ -397,6 +399,7 @@ impl<'a> Walk<'a> {
 			scratch: HashSet::new(),
 			seen: SecondaryMap::new(),
 			stopped: false,
+			closure_free: effects::closure_free(ir),
 		}
 	}
 
@@ -812,8 +815,13 @@ impl<'a> Walk<'a> {
 		let ir = self.ir;
 
 		let under = structural_cx(self.cx.registry, ir);
-		let set = effects::of_with(ir, self.facts, &under, id).set;
-		let failures = fallibility::of_with(ir, self.facts, &under, id);
+		let answer = if self.closure_free {
+			effects::summary_closure_free(ir, self.facts, &under, id)
+		} else {
+			effects::summary_with(ir, self.facts, &under, id)
+		};
+		let set = answer.set;
+		let failures = answer.fallibility.union(fallibility::floor(set));
 		if let Some(gap) = fallibility_gap(set, failures) {
 			self.fail(VerifyRule::FallibilityConsistency, Some(id), || {
 				format!("{gap}: the effects are {set:?} and the fallibility {failures:?}")

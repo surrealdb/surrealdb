@@ -67,7 +67,7 @@ pub(crate) fn assign_scratch(
 	if ir.op(op).is_none() {
 		return WriteEpoch::Unique(op);
 	}
-	if !effects::of_with(ir, facts, cx, op).set.contains(EffectSet::READS_DATA) {
+	if !effects::summary_with(ir, facts, cx, op).set.contains(EffectSet::READS_DATA) {
 		return WriteEpoch::Stable(0);
 	}
 	let mut reads = footprint::of_with(ir, facts, cx, op).reads;

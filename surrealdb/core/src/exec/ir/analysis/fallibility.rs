@@ -26,7 +26,7 @@ pub(crate) fn of(ir: &Ir, facts: &mut FactCache, op: OpId) -> Fallibility {
 /// A closure handed to a call contributes the failure classes of its body. A call's coercion
 /// failure (`VALUE`) is part of the call's one local answer and is never dropped.
 pub(crate) fn of_with(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, op: OpId) -> Fallibility {
-	let answer = effects::of_with(ir, facts, cx, op);
+	let answer = effects::summary_with(ir, facts, cx, op);
 	answer.fallibility.union(floor(answer.set))
 }
 

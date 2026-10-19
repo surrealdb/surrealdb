@@ -27,8 +27,8 @@ use std::sync::Arc;
 use anyhow::Result;
 use surrealdb_catalog::providers::TableProvider;
 use surrealdb_catalog::{
-	DatabaseId, FieldDefinition, IndexDefinition, KeyStructure, NamespaceId, TableDefinition,
-	TableLayouts, table_key,
+	DatabaseId, EventDefinition, FieldDefinition, IndexDefinition, KeyStructure, NamespaceId,
+	TableDefinition, TableLayouts, table_key,
 };
 use surrealdb_expr::val::TableName;
 use uuid::Uuid;
@@ -110,6 +110,16 @@ pub struct TableSnapshot {
 	/// change. Read for an undefined table too: rows may remain under its root until a range
 	/// delete reaches them.
 	pub layouts: Arc<TableLayouts>,
+	/// The table's event definitions. Every statement that defines or removes an event rewrites
+	/// the table's definition (its `cache_events_ts` stamp) and stamps its version, so the list is
+	/// valid under the version, or the definition content, the snapshot is keyed by.
+	pub events: Arc<[EventDefinition]>,
+	/// The view tables that read this table, as [`TableProvider::all_tb_views`] lists them. Every
+	/// statement that registers or unregisters a view on this table rewrites the table's
+	/// definition (its `cache_tables_ts` stamp) and stamps its version, and a view's sources leave
+	/// the list only through an unregistration, so the list is valid under the version, or the
+	/// definition content, the snapshot is keyed by.
+	pub views: Arc<[TableDefinition]>,
 	/// The catalog version the table was read under, or `None` for a table
 	/// that has never been stamped, whose snapshot is keyed by its
 	/// definition's content instead.
@@ -188,6 +198,8 @@ impl TableSnapshot {
 			Err(e) => return Err(e),
 		};
 		let layouts = txn.table_layouts(ns, db, table, None).await?;
+		let events = txn.all_tb_events(ns, db, table, None).await?;
+		let views = txn.all_tb_views(ns, db, table, None).await?;
 		let key = definition.as_deref().and_then(|definition| table_key(definition, &fields));
 		Ok(Self {
 			definition,
@@ -196,6 +208,8 @@ impl TableSnapshot {
 			indexes,
 			indexes_refused,
 			layouts,
+			events,
+			views,
 			version,
 		})
 	}
@@ -218,6 +232,7 @@ impl TableSnapshot {
 			&self.fields,
 			(!self.indexes_refused).then_some(&self.indexes),
 		);
+		txn.adopt_table_listings(ns, db, table, &self.events, &self.views);
 		txn.adopt_table_layouts(&self.layouts);
 	}
 }

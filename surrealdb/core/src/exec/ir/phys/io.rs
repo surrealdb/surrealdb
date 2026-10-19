@@ -360,7 +360,7 @@ fn only_reads(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, fetch: OpId) ->
 			))
 		);
 		is_step || {
-			let set = effects::of_with(ir, facts, cx, op).set;
+			let set = effects::summary_with(ir, facts, cx, op).set;
 			!set.mutates_state() && !set.intersects(EffectSet::OPAQUE_BODY)
 		}
 	})

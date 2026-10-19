@@ -237,6 +237,11 @@ impl Ir {
 		self.ops.get(id)
 	}
 
+	/// The data of every live op, in no particular order.
+	pub(crate) fn live_op_data(&self) -> impl Iterator<Item = &OpData> + '_ {
+		self.ops.values()
+	}
+
 	/// The value `id` names, or `None` for a dangling id.
 	pub(crate) fn value(&self, id: ValueId) -> Option<&ValueData> {
 		self.values.get(id)

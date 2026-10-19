@@ -89,7 +89,7 @@ impl Uses {
 				produces: TokenSet::ALL,
 			};
 		};
-		let answer = effects::of_with(ir, facts, cx, op);
+		let answer = effects::summary_with(ir, facts, cx, op);
 		let mut used = token_use(answer.set, answer.determinism);
 		for region in data.regions.iter().copied() {
 			let Some(info) = ir.region(region) else {

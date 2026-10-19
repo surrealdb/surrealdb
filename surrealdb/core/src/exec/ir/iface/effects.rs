@@ -48,6 +48,26 @@ impl OpEffects {
 	}
 }
 
+/// The parts of an [`OpEffects`] answer that are `Copy`: the effect set, the failure classes and
+/// the determinism.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct EffectSummary {
+	pub(crate) set: EffectSet,
+	pub(crate) fallibility: Fallibility,
+	pub(crate) determinism: Determinism,
+}
+
+impl EffectSummary {
+	/// The summary of `effects`.
+	pub(crate) fn of(effects: &OpEffects) -> Self {
+		Self {
+			set: effects.set,
+			fallibility: effects.fallibility,
+			determinism: effects.determinism,
+		}
+	}
+}
+
 /// The effect-token classes an op takes and produces.
 ///
 /// An op that produces a class takes the class's incoming token as well, so `produces` is a subset

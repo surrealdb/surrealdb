@@ -49,7 +49,7 @@ use super::deps::{
 };
 use super::names::{self, NameSet};
 use super::slots::SlotTable;
-use crate::catalog::providers::{DatabaseProvider, TableProvider};
+use crate::catalog::providers::DatabaseProvider;
 use crate::catalog::{
 	DatabaseDefinition, DatabaseId, Error as CatalogError, EventDefinition, FunctionDefinition,
 	IndexDefinition, NamespaceId, ParamDefinition, Permission, TableDefinition,
@@ -1058,19 +1058,23 @@ impl PlanningCatalog {
 			let tables_read = u64::try_from(tables.len()).unwrap_or(u64::MAX);
 			self.reads.add(tables_read.saturating_mul(2).saturating_add(1));
 			let cache = self.ctx.get_cache();
-			loaded.snapshot = Some(match base {
+			let snapshot = match base {
 				Some(base) => base.extended(cache.as_deref(), &self.txn, &tables).await?,
 				None => {
 					CatalogSnapshot::for_tables(cache.as_deref(), &self.txn, ns, db, &tables)
 						.await?
 				}
-			});
+			};
+			// Each table's events and views are held by its entry, under the version the entry
+			// is keyed by.
 			for table in tables {
-				let events = self.txn.all_tb_events(ns, db, &table, None).await?;
-				let views = self.txn.all_tb_views(ns, db, &table, None).await?;
-				loaded.events.push((table.clone(), events));
-				loaded.views.push((table, views));
+				let Some(entry) = snapshot.entry(&table) else {
+					anyhow::bail!("table `{table}` was not loaded into the catalog snapshot");
+				};
+				loaded.events.push((table.clone(), Arc::clone(&entry.events)));
+				loaded.views.push((table, Arc::clone(&entry.views)));
 			}
+			loaded.snapshot = Some(snapshot);
 		}
 		for name in &missing.functions {
 			if !self.function_allowed(name) {

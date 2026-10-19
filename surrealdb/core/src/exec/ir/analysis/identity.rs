@@ -59,7 +59,7 @@ pub(crate) fn key_with(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, op: Op
 			opaque: Some(op),
 		};
 	};
-	let answer = effects::of_with(ir, facts, cx, op);
+	let answer = effects::summary_with(ir, facts, cx, op);
 	let attrs = data.kind.attr_digest();
 	let tag = data.kind.tag();
 	let epoch = if answer.set.contains(EffectSet::READS_DATA) {

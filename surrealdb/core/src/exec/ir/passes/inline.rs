@@ -383,7 +383,8 @@ pub(crate) fn inline_admits(
 		Walk::Continue
 	});
 	admitted
-		&& ops_in(ir, body).all(|op| effects::of_with(ir, facts, cx, op).set == EffectSet::PURE)
+		&& ops_in(ir, body)
+			.all(|op| effects::summary_with(ir, facts, cx, op).set == EffectSet::PURE)
 }
 
 /// Whether `blocks` is one block whose last op yields one value.

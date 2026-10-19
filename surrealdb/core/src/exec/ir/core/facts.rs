@@ -14,7 +14,7 @@ use slotmap::SecondaryMap;
 use smallvec::SmallVec;
 
 use crate::exec::ir::iface::catalog::CxKey;
-use crate::exec::ir::iface::effects::OpEffects;
+use crate::exec::ir::iface::effects::{EffectSummary, OpEffects};
 use crate::exec::ir::iface::fold::{FoldOutcome, FoldRequest};
 use crate::exec::ir::iface::ids::{OpId, ValueId};
 use crate::exec::ir::iface::policy::LoopFacts;
@@ -66,7 +66,12 @@ type Invariance = SmallVec<[(OpId, u32, u8); 2]>;
 
 /// The facts of one op, one entry per context: the generation they were computed at, the
 /// context's key and the facts.
-type ContextFacts = SmallVec<[(u32, CxKey, OpFacts); 1]>;
+/// Held out of line: an answer is several hundred bytes, and a slot of `entries` is sized for one
+/// whether or not its op has any, so an inline answer makes every slot, and every growth of the
+/// map, that large.
+type ContextFacts = Vec<(u32, CxKey, OpFacts)>;
+
+type ContextSummaries = SmallVec<[(u32, CxKey, EffectSummary); 2]>;
 
 /// The memo of one container's analyses.
 #[derive(Clone, Debug)]
@@ -76,6 +81,9 @@ pub(crate) struct FactCache {
 	/// Per op: the facts computed under each context, with the generation they were computed at
 	/// and the context's key. The last entry is the one recorded last.
 	entries: SecondaryMap<OpId, ContextFacts>,
+	/// The [`EffectSummary`] of the region-local answer of an op at its generation, under each
+	/// context, held apart from `entries` so that it is computed without the footprint.
+	summaries: SecondaryMap<OpId, ContextSummaries>,
 	/// The facts of erased ops, as they stood when the op was erased, one entry per context.
 	retired: HashMap<OpId, ContextFacts>,
 	/// Per value: the generation of its defining op when the knowledge was computed, and it.
@@ -97,6 +105,7 @@ impl FactCache {
 		Self {
 			top: OpFacts::top(),
 			entries: SecondaryMap::new(),
+			summaries: SecondaryMap::new(),
 			retired: HashMap::new(),
 			types: SecondaryMap::new(),
 			invariance: SecondaryMap::new(),
@@ -117,6 +126,37 @@ impl FactCache {
 	}
 
 	/// The answer that holds for every op no analysis has computed a fact for.
+	/// The summary of the region-local answer of `op` computed at `generation` under `key`.
+	pub(crate) fn summary(&self, op: OpId, generation: u32, key: &CxKey) -> Option<EffectSummary> {
+		self.summaries
+			.get(op)?
+			.iter()
+			.find(|(computed_at, held, _)| *computed_at == generation && held == key)
+			.map(|(_, _, summary)| *summary)
+	}
+
+	/// Records the summary of the region-local answer of `op` at `generation` under `key`,
+	/// replacing what was held under `key` and dropping what was held at another generation.
+	pub(crate) fn insert_summary(
+		&mut self,
+		op: OpId,
+		generation: u32,
+		key: CxKey,
+		summary: EffectSummary,
+	) {
+		match self.summaries.get_mut(op) {
+			Some(held) => {
+				held.retain(|(computed_at, other, _)| *computed_at == generation && *other != key);
+				held.push((generation, key, summary));
+			}
+			None => {
+				let mut held = SmallVec::new();
+				held.push((generation, key, summary));
+				self.summaries.insert(op, held);
+			}
+		}
+	}
+
 	pub(crate) fn top(&self) -> &OpFacts {
 		&self.top
 	}
@@ -125,7 +165,7 @@ impl FactCache {
 	/// an older generation are dropped.
 	pub(crate) fn insert(&mut self, op: OpId, generation: u32, key: CxKey, facts: OpFacts) {
 		if self.entries.get(op).is_none() {
-			self.entries.insert(op, SmallVec::new());
+			self.entries.insert(op, Vec::new());
 		}
 		if let Some(held) = self.entries.get_mut(op) {
 			held.retain(|(computed_at, other, _)| *computed_at == generation && *other != key);
@@ -148,6 +188,7 @@ impl FactCache {
 
 	/// Drops the entry of `op`, which keeps answering [`FactCache::last_under`].
 	pub(crate) fn invalidate(&mut self, op: OpId) {
+		self.summaries.remove(op);
 		if let Some(held) = self.entries.remove(op) {
 			self.retired.insert(op, held);
 		}

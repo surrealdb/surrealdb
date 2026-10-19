@@ -6208,6 +6208,27 @@ impl Transaction {
 		}
 	}
 
+	/// Answer this transaction's later reads of the event and view listings of `tb` with `events`
+	/// and `views`, which a catalog snapshot served it under the version, or the definition
+	/// content, it read; a listing it holds already is kept.
+	pub(crate) fn adopt_table_listings(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		events: &Arc<[catalog::EventDefinition]>,
+		views: &Arc<[TableDefinition]>,
+	) {
+		let qey = cache::tx::Lookup::Evs(ns, db, tb.as_str());
+		if self.cache.get(&qey).is_none() {
+			self.cache.insert(qey, cache::tx::Entry::Evs(Arc::clone(events)));
+		}
+		let qey = cache::tx::Lookup::Fts(ns, db, tb.as_str());
+		if self.cache.get(&qey).is_none() {
+			self.cache.insert(qey, cache::tx::Entry::Fts(Arc::clone(views)));
+		}
+	}
+
 	/// The listing of [`TableProvider::all_tb`], with no read noted.
 	async fn all_tb_listed(
 		&self,

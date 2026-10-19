@@ -766,7 +766,7 @@ pub(super) fn reads_row_opaquely(
 		| Some(OpKind::Logical(_))
 		| None => true,
 		Some(OpKind::Expr(_) | OpKind::Phys(_)) => {
-			effects::of_with(ir, facts, cx, op).set.intersects(EffectSet::OPAQUE_BODY)
+			effects::summary_with(ir, facts, cx, op).set.intersects(EffectSet::OPAQUE_BODY)
 		}
 	}
 }

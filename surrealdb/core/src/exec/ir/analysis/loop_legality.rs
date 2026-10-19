@@ -538,7 +538,7 @@ fn arms_of(
 			continue;
 		}
 		let set = ops_in(ir, region)
-			.fold(conditions, |all, op| all.union(effects::of_with(ir, facts, cx, op).set));
+			.fold(conditions, |all, op| all.union(effects::summary_with(ir, facts, cx, op).set));
 		out.push(chain_of(set));
 	}
 }
@@ -589,7 +589,7 @@ fn transitive_set(
 	cx: &EffectCx<'_>,
 	ops: impl Iterator<Item = OpId>,
 ) -> EffectSet {
-	ops.fold(EffectSet::PURE, |all, op| all.union(effects::of_with(ir, facts, cx, op).set))
+	ops.fold(EffectSet::PURE, |all, op| all.union(effects::summary_with(ir, facts, cx, op).set))
 }
 
 /// What a chain that evaluates `set` makes of its legality: row-local, or the first refusal.
@@ -1327,7 +1327,7 @@ pub(crate) fn apply_cut(
 	if multiplicity::loop_kind(ir, loop_op).is_none() {
 		return ApplyCut::Ordered;
 	}
-	if effects::of_with(ir, facts, cx, loop_op).set.contains(EffectSet::WRITES_DATA) {
+	if effects::summary_with(ir, facts, cx, loop_op).set.contains(EffectSet::WRITES_DATA) {
 		ApplyCut::Ordered
 	} else {
 		ApplyCut::None
