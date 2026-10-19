@@ -389,10 +389,6 @@ pub struct DiskAnnIndex {
 	/// Every compaction frame this index opened, for the tests that read their stats.
 	#[cfg(test)]
 	frames: std::sync::Mutex<Vec<Arc<DiskAnnBuildFrame>>>,
-	/// Lets this index's frames take places without a read view, so a test runs the batched
-	/// insert on an engine that gives none.
-	#[cfg(test)]
-	batch_without_view: std::sync::atomic::AtomicBool,
 }
 
 /// Context passed from SurrealDB execution into DiskANN provider calls.
@@ -1774,15 +1770,7 @@ impl DiskAnnIndex {
 			faults: std::sync::Mutex::new(None),
 			#[cfg(test)]
 			frames: std::sync::Mutex::new(Vec::new()),
-			#[cfg(test)]
-			batch_without_view: std::sync::atomic::AtomicBool::new(false),
 		})
-	}
-
-	/// Lets this index's frames take places without a read view from now on.
-	#[cfg(test)]
-	pub(crate) fn batch_without_view(&self) {
-		self.batch_without_view.store(true, std::sync::atomic::Ordering::Release);
 	}
 
 	/// Injects `faults` into every compaction frame this index opens from now on.
@@ -2590,9 +2578,6 @@ impl DiskAnnIndex {
 		let opened = {
 			let hooks = FrameHooks {
 				faults: self.faults.lock().unwrap_or_else(|p| p.into_inner()).clone(),
-				batch_without_view: self
-					.batch_without_view
-					.load(std::sync::atomic::Ordering::Acquire),
 			};
 			let opened = DiskAnnBuildFrame::open(
 				tx,
@@ -10178,7 +10163,7 @@ mod tests {
 			corpus: &[Vec<f32>],
 		) -> Result<Build> {
 			let ds = TestIndexStore::new().await.with_places(places);
-			let index = batching_index(ikb(), TableId(4), params, cache()).await?;
+			let index = new_index(ikb(), TableId(4), params, cache()).await?;
 			ingest(&index, &ds, 0, corpus).await?;
 			compact_all(&index, &ds, &ikb()).await?;
 			Ok(Build {
@@ -10291,7 +10276,7 @@ mod tests {
 			let mut measured = Vec::new();
 			for places in [0, 4] {
 				let ds = TestIndexStore::new().await.with_places(places);
-				let index = batching_index(ikb(), TableId(4), &params, cache()).await?;
+				let index = new_index(ikb(), TableId(4), &params, cache()).await?;
 				let mut current: BTreeMap<i64, Vec<f32>> = BTreeMap::new();
 				// Round 1: the first half. Round 2: the second half, and an update of every tenth
 				// record of the first to a vector of the second half's. Round 3: a delete of every
@@ -10373,7 +10358,7 @@ mod tests {
 		) -> Result<(TestIndexStore, DiskAnnIndex, DiskAnnCache)> {
 			let ds = TestIndexStore::new().await.with_places(places);
 			let cache = cache();
-			let index = batching_index(ikb(), TableId(4), params, cache.clone()).await?;
+			let index = new_index(ikb(), TableId(4), params, cache.clone()).await?;
 			ingest(&index, &ds, 0, seed).await?;
 			compact_all(&index, &ds, &ikb()).await?;
 			Ok((ds, index, cache))
@@ -10502,7 +10487,7 @@ mod tests {
 			let ds = TestIndexStore::new().await;
 			let index = new_index(ikb(), TableId(4), &small_params(4), cache()).await?;
 			let tx = Arc::new(ds.transaction(TransactionType::Write).await?);
-			let frame = DiskAnnBuildFrame::without_view(ds.places().ticket(), true);
+			let frame = DiskAnnBuildFrame::without_view(ds.places().ticket());
 			let context = index
 				.graph
 				.read()
@@ -10527,8 +10512,8 @@ mod tests {
 			let ds = TestIndexStore::new().await.with_places(8);
 			// Another table, so the two frames resolve no doc-ID in common.
 			let ikb_b = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb2".into(), IndexId(9));
-			let a = batching_index(ikb(), TableId(4), &small_params(4), cache()).await?;
-			let b = batching_index(ikb_b.clone(), TableId(4), &small_params(4), cache()).await?;
+			let a = new_index(ikb(), TableId(4), &small_params(4), cache()).await?;
+			let b = new_index(ikb_b.clone(), TableId(4), &small_params(4), cache()).await?;
 			for (index, ikb) in [(&a, ikb()), (&b, ikb_b.clone())] {
 				ingest(index, &ds, 0, &line(4, 0.0, 1.0, 20)).await?;
 				compact_all(index, &ds, &ikb).await?;
@@ -10850,8 +10835,8 @@ mod tests {
 			let ds = TestIndexStore::new().await.with_places(5);
 			// Another table, so the two frames resolve no doc-ID in common.
 			let ikb_b = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb2".into(), IndexId(9));
-			let a = batching_index(ikb(), TableId(4), &small_params(4), cache()).await?;
-			let b = batching_index(ikb_b.clone(), TableId(4), &small_params(4), cache()).await?;
+			let a = new_index(ikb(), TableId(4), &small_params(4), cache()).await?;
+			let b = new_index(ikb_b.clone(), TableId(4), &small_params(4), cache()).await?;
 			for (index, ikb) in [(&a, ikb()), (&b, ikb_b.clone())] {
 				ingest(index, &ds, 0, &line(4, 0.0, 1.0, 20)).await?;
 				compact_all(index, &ds, &ikb).await?;
@@ -10875,7 +10860,7 @@ mod tests {
 			let ds = TestIndexStore::new().await.with_places(2);
 			let index = new_index(ikb(), TableId(4), &small_params(4), cache()).await?;
 			let tx = Arc::new(ds.transaction(TransactionType::Write).await?);
-			let frame = DiskAnnBuildFrame::without_view(ds.places().ticket(), true);
+			let frame = DiskAnnBuildFrame::without_view(ds.places().ticket());
 			assert_eq!(
 				frame.take_places(4).map(|n| n.get()),
 				Some(2),
@@ -10913,7 +10898,6 @@ mod tests {
 				VECTOR_DOC_ELEMENTS_FORMAT_VERSION,
 			)
 			.await?;
-			index.batch_without_view();
 			let existing = vec![5.0, 0.0, 0.0, 0.0];
 			let mut seed = line(4, 0.0, 1.0, 10);
 			seed.push(existing.clone());
@@ -11045,7 +11029,7 @@ mod tests {
 		#[tokio::test(flavor = "multi_thread")]
 		async fn diskann_plan_caps_its_new_vectors() -> Result<()> {
 			let ds = TestIndexStore::new().await.with_places(4);
-			let index = batching_index(ikb(), TableId(4), &small_params(4), cache()).await?;
+			let index = new_index(ikb(), TableId(4), &small_params(4), cache()).await?;
 			// 600 records of 3 vectors each: 1800 vectors, under the key cap.
 			let per_record = 3;
 			{
@@ -11110,7 +11094,7 @@ mod tests {
 			// Batched only: on no place a frame inserts one vector at a time, the serial build.
 			for places in [4] {
 				let ds = TestIndexStore::new().await.with_places(places);
-				let index = batching_index(ikb(), TableId(4), &params, cache()).await?;
+				let index = new_index(ikb(), TableId(4), &params, cache()).await?;
 				ingest(&index, &ds, 0, &seed).await?;
 				compact_all(&index, &ds, &ikb()).await?;
 				// Every id a multiple of the shard count, so one shard holds them all, in id order.
@@ -11167,7 +11151,7 @@ mod tests {
 		#[tokio::test(flavor = "multi_thread")]
 		async fn diskann_record_over_the_cap_is_one_frame() -> Result<()> {
 			let ds = TestIndexStore::new().await.with_places(4);
-			let index = batching_index(ikb(), TableId(4), &small_params(4), cache()).await?;
+			let index = new_index(ikb(), TableId(4), &small_params(4), cache()).await?;
 			ingest(&index, &ds, 0, &line(4, 0.0, 1.0, 10)).await?;
 			compact_all(&index, &ds, &ikb()).await?;
 			let n = DISKANN_COMPACTION_MAX_PENDING_VECTORS + 300;
@@ -11287,8 +11271,7 @@ mod tests {
 			let ds = TestIndexStore::with_idx_config(|c| c.table_doc_ids_batch_size = 1)
 				.await
 				.with_places(4);
-			let index =
-				Arc::new(batching_index(ikb(), TableId(4), &small_params(4), cache()).await?);
+			let index = Arc::new(new_index(ikb(), TableId(4), &small_params(4), cache()).await?);
 			// Records written before any doc-id exists, so each pending resolves one at compaction.
 			ingest(&index, &ds, 0, &line(4, 0.0, 1.0, 12)).await?;
 			let before = captured(&ds, &ikb()).await?;
@@ -11317,7 +11300,7 @@ mod tests {
 		#[tokio::test(flavor = "multi_thread")]
 		async fn diskann_frame_cancelled_mid_scan_reads_no_further_batch() -> Result<()> {
 			let ds = TestIndexStore::new().await.with_places(4);
-			let index = batching_index(ikb(), TableId(4), &small_params(4), cache()).await?;
+			let index = new_index(ikb(), TableId(4), &small_params(4), cache()).await?;
 			// A stored graph whose entry point and first page of elements are tombstoned, so the
 			// repair has to read a second page to find a live element.
 			let tombstoned = surrealdb_kvs::consts::NORMAL_BATCH_SIZE as u64 + 10;
@@ -11360,21 +11343,7 @@ mod tests {
 			Ok(())
 		}
 
-		/// A fresh index whose frames take places without a read view, so its batched insert runs
-		/// on the in-memory engine, which gives none.
-		async fn batching_index(
-			ikb: IndexKeyBase,
-			table_id: TableId,
-			params: &DiskAnnParams,
-			cache: DiskAnnCache,
-		) -> Result<DiskAnnIndex> {
-			let index = new_index(ikb, table_id, params, cache).await?;
-			index.batch_without_view();
-			Ok(index)
-		}
-
-		/// `seed` indexed and compacted into a fresh index on `ds`, whose frames take places only
-		/// with a read view, as in production.
+		/// `seed` indexed and compacted into a fresh index on `ds`.
 		#[cfg(feature = "kv-rocksdb")]
 		async fn seeded_on(
 			ds: TestIndexStore,
@@ -11580,10 +11549,11 @@ mod tests {
 		}
 
 		/// T-5 / T-3: a frame with no view opens no read transaction, reads nothing through a view
-		/// and takes no place, however many are free: it inserts on its calling task. On mem,
-		/// which gives no view, and on RocksDB with its view refused by a test hook.
+		/// and publishes nothing it read, yet takes the places that are free and inserts its batch
+		/// on them, reading through its write transaction. On mem, which gives no view, and on
+		/// RocksDB with its view refused by a test hook.
 		#[tokio::test(flavor = "multi_thread")]
-		async fn diskann_frame_without_a_view_takes_no_place() -> Result<()> {
+		async fn diskann_frame_without_a_view_batches_through_its_transaction() -> Result<()> {
 			async fn check(ds: TestIndexStore, faults: FrameFaults) -> Result<()> {
 				// Every frame of the index runs under `faults`, the seeding ones included.
 				let index = new_index(ikb(), TableId(4), &small_params(4), cache()).await?;
@@ -11599,10 +11569,11 @@ mod tests {
 				assert_eq!(stats.reads_view.load(Ordering::Acquire), 0);
 				assert_eq!(stats.cache_publishes.load(Ordering::Acquire), 0);
 				assert!(stats.reads_tx.load(Ordering::Acquire) > 0);
-				assert_eq!(stats.granted.load(Ordering::Acquire), 0);
-				assert_eq!(stats.spawns.load(Ordering::Acquire), 0, "a task was spawned");
-				assert_eq!(stats.sequential_vectors.load(Ordering::Acquire), 30);
-				assert_eq!(ds.places().peak(), 0, "a frame without a view took a place");
+				assert_eq!(stats.granted.load(Ordering::Acquire), 4);
+				assert!(stats.spawns.load(Ordering::Acquire) > 0, "no task was spawned");
+				assert_eq!(stats.batched_vectors.load(Ordering::Acquire), 30);
+				assert_eq!(stats.sequential_vectors.load(Ordering::Acquire), 0);
+				assert_eq!(ds.places().held(), 0, "a place was not given back");
 				assert_eq!(assert_adjacency_valid(&ds, &ikb()).await?, 50);
 				Ok(())
 			}
@@ -11976,7 +11947,7 @@ mod tests {
 		#[tokio::test(flavor = "multi_thread")]
 		async fn diskann_sink_inserts_a_record_over_the_cap_in_one_frame() -> Result<()> {
 			let ds = TestIndexStore::new().await.with_places(4);
-			let index = batching_index(ikb(), TableId(4), &small_params(4), cache()).await?;
+			let index = new_index(ikb(), TableId(4), &small_params(4), cache()).await?;
 			let n = DISKANN_DIRECT_MAX_VECTORS + 77;
 			let vectors: Vec<SerializedVector> = (0..n)
 				.map(|i| SerializedVector::F32(vec![i as f32, (i % 7) as f32, 0.0, 0.0]))
@@ -12136,7 +12107,7 @@ mod tests {
 			let mut measured = Vec::new();
 			for retry in [false, true] {
 				let ds = TestIndexStore::new().await.with_places(4);
-				let mut index = batching_index(ikb(), TableId(4), &params, cache()).await?;
+				let mut index = new_index(ikb(), TableId(4), &params, cache()).await?;
 				let graph = index.graph.get_mut();
 				let tasks = NonZeroUsize::new(4).expect("non-zero");
 				assert!(graph.index.config.experimental_insert_retry().is_some());
@@ -12217,7 +12188,7 @@ mod tests {
 			let (base, queries, params) = starved_sample(1500);
 			let degree = params.degree as usize;
 			let ds = TestIndexStore::new().await.with_places(4);
-			let index = batching_index(ikb(), TableId(4), &params, cache()).await?;
+			let index = new_index(ikb(), TableId(4), &params, cache()).await?;
 			ingest(&index, &ds, 0, &base).await?;
 			compact_all(&index, &ds, &ikb()).await?;
 			let over = list_lengths(&ds).await?.into_iter().filter(|n| *n > degree).count();

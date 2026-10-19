@@ -257,11 +257,10 @@ completes. No semaphore of the index engines bounds the tasks: the pool does.
 The most tasks per batch is `hnsw_build_parallelism`
 (`SURREAL_HNSW_BUILD_PARALLELISM`), the applying task included: `auto` (the
 default) uses the machine's available parallelism, a number fixes the most,
-and `serial` selects the in-place path for every batch. Where the datastore
-gives a read view (below), a batch runs on as many of them as it is granted
-places for; where it gives none, on one. Parallelism is a property of the
-machine, not of the index, so it is configuration rather than part of
-`DEFINE INDEX`. Without a tokio runtime to spawn onto (wasm, or an embedding
+and `serial` selects the in-place path for every batch. A batch runs on as
+many of them as it is granted places for, whether or not the datastore gives a
+read view (below). Parallelism is a property of the machine, not of the index,
+so it is configuration rather than part of `DEFINE INDEX`. Without a tokio runtime to spawn onto (wasm, or an embedding
 that runs none), or with one task, the steps run inline on the applying task.
 The graph is the same whichever tasks ran its jobs, and whether places were
 granted, given back mid-batch or never granted, because each job's result is a
@@ -289,15 +288,16 @@ another compactor committed can only belong to a batch that will fail on the
 
 Where the datastore gives no read view to a read-only transaction — mem,
 SurrealKV, TiKV, and IndexedDB on targets without worker threads — the batch
-opens no other transaction. It still takes the staged path, never the in-place one, and its
-steps run on one task, whatever `hnsw_build_parallelism` asks for, reading
-through the batch's write transaction. That transaction reads the same vectors
-as a view would: what it has buffered for the batch is the new elements'
-vectors, which the batch's own elements answer first, and a staged batch
-rewrites no committed vector. The graph is the same, since it is a function of
-*G₀* and the batch alone. On those engines a staged batch is therefore built on
-one task until the engine gives a view; that is the cost of one read model for
-every parallel stage.
+opens no other transaction. It still takes the staged path, never the in-place
+one, on the same tasks, and every task reads through the batch's write
+transaction. That transaction reads the same vectors as a view would: what it
+has buffered for the batch is the new elements' vectors, which the batch's own
+elements answer first, and a staged batch rewrites no committed vector. Nothing
+writes through it until the tasks have finished, so their reads may run side by
+side: on mem and SurrealKV a read takes the transaction's lock shared. An engine
+that runs one transaction's operations one at a time queues the tasks' misses
+behind each other, while their distance work still runs in parallel. The graph
+is the same, since it is a function of *G₀* and the batch alone.
 
 The same misses fill the process-wide vector cache, which tracks per index
 which entries it holds so an index can be dropped from it at once. That

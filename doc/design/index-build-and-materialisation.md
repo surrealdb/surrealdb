@@ -539,14 +539,16 @@ parallel.
   transaction's slot lock at most to take a keep-alive and reads under it, as
   a cursor does (`rocks/snapshot.rs:67-201`, `rocks/owned_tx.rs:87-101`), so point
   reads from many workers through one view run side by side.
-- **No view, one task.** [V] Where the engine gives no view, the batch takes
-  the staged path on one task, through the calling transaction, and opens no
-  other transaction. It does not fall back to the in-place path. The graph is
-  the same either way.
-- **The trade-off.** mem, SurrealKV and TiKV give no view, so their staged
-  batches run on one task until those engines provide one. This design
-  accepts that loss of speed in exchange for one place budget and one read
-  model; correctness is the same on every engine.
+- **No view, the calling transaction.** [V] Where the engine gives no view,
+  the batch takes the staged path on the same workers, every one reading
+  through the calling transaction, and opens no other transaction. It does not
+  fall back to the in-place path. The graph is the same either way.
+- **The trade-off.** mem, SurrealKV and TiKV give no view. Nothing writes
+  through the calling transaction while the workers read, and mem and
+  SurrealKV take its lock shared for a read, so their workers read side by
+  side. An engine that runs one transaction's operations one at a time queues
+  the workers' reads, while their distance work still runs in parallel.
+  Correctness is the same on every engine.
 
 A partitioned initial scan (see "Not covered here") needs the same two
 properties. It also needs range boundaries that tile the table's record

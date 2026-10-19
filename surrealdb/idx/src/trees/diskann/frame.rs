@@ -57,8 +57,10 @@
 //! frame wrote for the same key.
 //!
 //! Where the engine gives none (mem, SurrealKV, TiKV), the frame reads clean keys through its write
-//! transaction, through [`FrameKv`], and publishes nothing it read. Such a frame takes no places,
-//! so it runs on its calling task alone.
+//! transaction, through [`FrameKv`], and publishes nothing it read. Such a frame still takes its
+//! places, and its tasks share the write transaction: on mem and SurrealKV a read takes the
+//! transaction's lock shared, so their reads run side by side, while an engine that runs one
+//! transaction's operations one at a time queues them.
 //!
 //! The graph state (`!ds`) is never read through the view: it is read from the overlay, the cache,
 //! or the write transaction, and a read-modify-write of it from the overlay or the transaction
@@ -228,8 +230,7 @@ impl FrameStats {
 ///    `overlay`. Every write-through holds that lock too, after it records the key, so a value read
 ///    through the view never overwrites one the frame wrote.
 ///  * The frame holds at most one place grant, taken without waiting, and never more places than it
-///    was granted. Its batch spawns at most `granted` tasks per phase, and none at a grant of 0. A
-///    frame without a view asks for none.
+///    was granted. Its batch spawns at most `granted` tasks per phase, and none at a grant of 0.
 ///  * The grant returns to the pool only when the frame and every task it spawned have dropped
 ///    their share of it.
 pub(crate) struct DiskAnnBuildFrame {
@@ -255,10 +256,6 @@ pub(crate) struct DiskAnnBuildFrame {
 	/// Faults a test injects into this frame.
 	#[cfg(test)]
 	pub(crate) faults: Option<Arc<FrameFaults>>,
-	/// Lets a frame without a view still take places, so a test runs the batched path on an
-	/// engine that gives no view.
-	#[cfg(test)]
-	batch_without_view: bool,
 }
 
 impl DiskAnnBuildFrame {
@@ -276,8 +273,6 @@ impl DiskAnnBuildFrame {
 			stats: FrameStats::default(),
 			#[cfg(test)]
 			faults: None,
-			#[cfg(test)]
-			batch_without_view: false,
 		}
 	}
 
@@ -357,34 +352,24 @@ impl DiskAnnBuildFrame {
 		#[cfg(test)]
 		{
 			frame.faults = hooks.faults;
-			frame.batch_without_view = hooks.batch_without_view;
 		}
 		Ok((Arc::new(frame), generation))
 	}
 
 	/// A frame with no view, for the tests that drive a frame without a transaction.
 	#[cfg(test)]
-	pub(crate) fn without_view(ticket: Ticket, batch_without_view: bool) -> Arc<Self> {
-		let mut frame = Self::new(ticket, ViewSlot::Absent);
-		frame.batch_without_view = batch_without_view;
-		Arc::new(frame)
+	pub(crate) fn without_view(ticket: Ticket) -> Arc<Self> {
+		Arc::new(Self::new(ticket, ViewSlot::Absent))
 	}
 
 	/// Takes the frame's up-front grant, and returns how many places it holds: between none and
 	/// `max`, without waiting. Called at most once per frame; a later call answers `None`.
 	///
-	/// A frame without a view asks for nothing: its tasks would all read through the one write
-	/// transaction, so it runs on its calling task. Without a runtime to spawn onto, nothing is
-	/// asked for either, since the batch could spawn nothing.
+	/// A frame asks whether or not it has a view: without one, its tasks read clean keys through
+	/// the write transaction. Without a runtime to spawn onto, nothing is asked for, since the
+	/// batch could spawn nothing.
 	pub(crate) fn take_places(&self, max: usize) -> Option<NonZeroUsize> {
 		if self.asked.swap(true, Ordering::AcqRel) || self.is_cancelled() {
-			return None;
-		}
-		#[cfg(test)]
-		let without_view = self.batch_without_view;
-		#[cfg(not(test))]
-		let without_view = false;
-		if matches!(*lock(&self.view), ViewSlot::Absent) && !without_view {
 			return None;
 		}
 		if tokio::runtime::Handle::try_current().is_err() {
@@ -893,8 +878,6 @@ pub(crate) struct FrameFaults {
 #[derive(Default)]
 pub(crate) struct FrameHooks {
 	pub(crate) faults: Option<Arc<FrameFaults>>,
-	/// Lets the frame take places without a view.
-	pub(crate) batch_without_view: bool,
 }
 
 /// A place a test parks a frame's tasks in, and releases them from.

@@ -481,10 +481,9 @@ before it gives its place to a statement waiting for one; default `8`).
 - **`SURREAL_HNSW_BUILD_PARALLELISM` is a ceiling.** It caps how many tasks a
   staged batch runs on, the applying task included. The width it actually runs
   at is what the pool grants under the morsel settings above, and a worker
-  gives its place back early when a query waits for one. On a store that gives
-  no read view to a read-only transaction (in memory, SurrealKV and TiKV), a
-  staged batch runs on one task whatever the setting and the pool allow.
-  `serial` still selects the in-place path for every batch.
+  gives its place back early when a query waits for one. This holds on every
+  store, the in-memory one, SurrealKV and TiKV included. `serial` still selects
+  the in-place path for every batch.
 - **Bounded background compaction.** Background compaction no longer starts
   one task per index with queued work. It compacts one index on its own task
   and starts another only on a place the pool grants, so places bound how many

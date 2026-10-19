@@ -556,11 +556,10 @@ impl StagedGraph {
 	}
 
 	/// The task count the batch's steps were scheduled with: the count the
-	/// batch was given where the datastore gives a read view, and one where it
-	/// gives none. It is a ceiling: `parallel::run_jobs` runs on the calling
-	/// task and on as many workers beyond it as its ticket is granted places,
-	/// spawns at most one task per job, and none without a runtime to spawn
-	/// onto.
+	/// batch was given, whether or not the datastore gives a read view. It is a
+	/// ceiling: `parallel::run_jobs` runs on the calling task and on as many
+	/// workers beyond it as its ticket is granted places, spawns at most one
+	/// task per job, and none without a runtime to spawn onto.
 	pub(super) fn tasks(&self) -> usize {
 		self.tasks
 	}
@@ -733,18 +732,22 @@ impl RollbackAction for InvalidateResident {
 /// graph as it stands under `resident`. Every task beyond the calling one runs
 /// in a place taken through `places`.
 ///
-/// Every vector the steps read belongs to *G₀*, which was committed before this
-/// batch began, or to the batch, which they read from its own elements. Where
-/// the datastore gives a read view, the steps run on up to `tasks` tasks and
+/// The steps run on up to `tasks` tasks. Every vector they read belongs to
+/// *G₀*, which was committed before this batch began, or to the batch, which
+/// they read from its own elements. Where the datastore gives a read view, they
 /// read committed vectors through one view taken for them ([`ReadView`]),
 /// whose transaction is cancelled before this returns. They read nothing
 /// through `tx` then.
 ///
-/// Where it gives none, the steps run on one task and read through `tx`, the
-/// batch's own transaction. That reads the same vectors: what `tx` has buffered
-/// for the batch is its new elements' vectors, which the batch's own elements
-/// answer first, and a staged batch rewrites no committed vector. The graph is
-/// the same either way, because it is a function of *G₀* and the batch alone.
+/// Where it gives none, they read through `tx`, the batch's own transaction,
+/// and no other transaction is opened. That reads the same vectors: what `tx`
+/// has buffered for the batch is its new elements' vectors, which the batch's
+/// own elements answer first, and a staged batch rewrites no committed vector.
+/// Nothing writes through `tx` until the steps have finished, so their reads
+/// may run side by side; an engine that runs one transaction's operations one
+/// at a time queues them, while the steps' distance work still runs on every
+/// task. The graph is the same either way, because it is a function of *G₀*
+/// and the batch alone.
 pub(super) async fn build(
 	resident: Arc<tokio::sync::OwnedRwLockReadGuard<ResidentGraph>>,
 	tx: Arc<Transaction>,
@@ -754,7 +757,7 @@ pub(super) async fn build(
 	tasks: usize,
 ) -> Result<StagedGraph> {
 	let Some(view) = ReadView::open(&tx).await? else {
-		return build_on(resident, tx, None, base, elements, places, 1).await;
+		return build_on(resident, tx, None, base, elements, places, tasks).await;
 	};
 	let view = Arc::new(view);
 	let res = build_on(resident, tx, Some(Arc::clone(&view)), base, elements, places, tasks).await;
@@ -960,8 +963,7 @@ mod tests {
 	/// The graph a staged batch builds is a function of the committed graph
 	/// and the batch alone: however many tasks build it, every resolved node,
 	/// layer version and the entry point come out the same. The in-memory store
-	/// gives no read view, so the steps are run directly, on each task count,
-	/// through the one transaction.
+	/// gives no read view, so every build reads through the one transaction.
 	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 	async fn staged_batch_graph_does_not_depend_on_the_task_count() -> Result<()> {
 		for (extend, keep) in [(false, false), (true, false), (false, true), (true, true)] {
@@ -977,8 +979,7 @@ mod tests {
 				let (base, top) = with_hnsw!(&guard.graph, h => (GraphBase::of(h), h.layers.len()));
 				let elements = new_elements(base.next_element_id(), 120, top);
 				let staged =
-					build_on(guard, env.tx(), None, base, elements, &IndexEnv::places(&env), tasks)
-						.await?;
+					build(guard, env.tx(), base, elements, &IndexEnv::places(&env), tasks).await?;
 				builds.push((tasks, fingerprint(&staged)));
 			}
 			env.tx().cancel().await?;
@@ -1049,11 +1050,11 @@ mod tests {
 		Ok(())
 	}
 
-	/// Where a datastore gives no read view, a staged batch's steps run on one
-	/// task, whatever task count the batch was given, read through the batch's
-	/// own transaction, and open no other transaction.
+	/// Where a datastore gives no read view, a staged batch's steps run on the
+	/// task count the batch was given, read through the batch's own
+	/// transaction, and open no other transaction.
 	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-	async fn without_a_view_a_staged_batch_runs_on_one_task_through_its_transaction() -> Result<()>
+	async fn without_a_view_a_staged_batch_runs_on_its_tasks_through_its_transaction() -> Result<()>
 	{
 		let ds = TestIndexStore::new().await;
 		let h = seed(&ds, &params(false, false), 150).await?;
@@ -1064,7 +1065,7 @@ mod tests {
 			let (reads, gets_before) = (ds.reads_opened(), gets(&env.tx()));
 			let staged = build(guard, env.tx(), base, elements, &env.places(), tasks).await?;
 			assert_eq!(ds.reads_opened() - reads, 0, "tasks = {tasks}: read transactions opened");
-			assert_eq!(staged.tasks(), 1, "tasks = {tasks}: tasks the steps ran on");
+			assert_eq!(staged.tasks(), tasks, "tasks = {tasks}: tasks the steps ran on");
 			assert!(
 				gets(&env.tx()) > gets_before,
 				"tasks = {tasks}: no read through the batch's own transaction"
@@ -1120,7 +1121,7 @@ mod tests {
 	/// One plan over one base graph writes byte-identical `!hn` and `!hs`
 	/// entries whether its steps read through a read view, on any task count,
 	/// or through the batch's own transaction.
-	async fn one_plan_writes_one_graph(ds: &TestIndexStore, views: bool) -> Result<()> {
+	async fn one_plan_writes_one_graph(ds: &TestIndexStore) -> Result<()> {
 		let h = seed(ds, &params(true, true), 150).await?;
 		let mut writes = Vec::new();
 		for (tasks, as_built) in [(1, true), (4, true), (16, true), (1, false), (4, false)] {
@@ -1135,14 +1136,7 @@ mod tests {
 				build_on(Arc::clone(&guard), env.tx(), None, base, elements, &env.places(), tasks)
 					.await?
 			};
-			if as_built {
-				let expected = if views {
-					tasks
-				} else {
-					1
-				};
-				assert_eq!(staged.tasks(), expected, "tasks the steps ran on");
-			}
+			assert_eq!(staged.tasks(), tasks, "tasks the steps ran on");
 			with_hnsw!(&guard.graph, h => staged.write(h, &env.tx()).await)?;
 			writes.push((tasks, as_built, stored_graph(&env.tx(), top + 1).await?));
 			env.tx().cancel().await?;
@@ -1160,22 +1154,21 @@ mod tests {
 
 	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 	async fn one_plan_writes_one_graph_without_a_view() -> Result<()> {
-		one_plan_writes_one_graph(&TestIndexStore::new().await, false).await
+		one_plan_writes_one_graph(&TestIndexStore::new().await).await
 	}
 
 	#[cfg(feature = "kv-rocksdb")]
 	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 	async fn one_plan_writes_one_graph_with_a_view_or_without() -> Result<()> {
 		let (_dir, ds) = rocksdb_store().await;
-		one_plan_writes_one_graph(&ds, true).await
+		one_plan_writes_one_graph(&ds).await
 	}
 
 	/// The entries a staged batch writes, every `!hn` node and the `!hs`
 	/// state, are the same bytes whether its workers were granted places,
 	/// gave them back mid-run because another registration waited, or were
 	/// never granted one. The in-memory store gives no read view, so each batch
-	/// runs its steps on eight tasks through its own transaction, where `build`
-	/// would run them on one.
+	/// runs its steps on eight tasks through its own transaction.
 	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 	async fn staged_batch_entries_do_not_depend_on_the_places_granted() -> Result<()> {
 		let p = params(true, false);
@@ -1196,8 +1189,7 @@ mod tests {
 			let (base, top) = with_hnsw!(&guard.graph, h => (GraphBase::of(h), h.layers.len()));
 			let elements = new_elements(base.next_element_id(), 120, top);
 			let staged =
-				build_on(Arc::clone(&guard), env.tx(), None, base, elements, &pool.ticket(), 8)
-					.await?;
+				build(Arc::clone(&guard), env.tx(), base, elements, &pool.ticket(), 8).await?;
 			with_hnsw!(&guard.graph, h => staged.write(h, &env.tx()).await)?;
 			written.push(env.tx().scan_raw(RawRange::every_key(), u32::MAX, 0, None).await?);
 			env.tx().cancel().await?;
