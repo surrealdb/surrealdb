@@ -322,6 +322,14 @@ fn default_runtime_worker_threads() -> usize {
 	std::cmp::max(4, num_cpus::get())
 }
 
+/// Tokio's own `max_blocking_threads` default, which the server crate's
+/// `cnf::RUNTIME_MAX_BLOCKING_THREADS` lazy at
+/// `surrealdb/server/src/cnf/mod.rs` also uses. Keep the two definitions in
+/// lockstep — if one moves, move the other.
+fn default_runtime_max_blocking_threads() -> usize {
+	512
+}
+
 /// Configuration for the RocksDB storage engine, parsed from query parameters.
 #[derive(Debug, Clone)]
 pub struct RocksDbConfig {
@@ -587,6 +595,24 @@ pub struct RocksDbConfig {
 	/// workloads
 	/// (default: `2`).
 	pub runtime_reserve: usize,
+
+	/// The tokio runtime's cap on blocking threads (its
+	/// `max_blocking_threads`). Commits that run on a runtime's blocking
+	/// pool, across every datastore committing there, take at most half of
+	/// it, so that commits stalled there leave the rest to the runtime's
+	/// other blocking work. The first datastore opened on a runtime, or
+	/// failing that the first to commit on it, sizes that bound for all of
+	/// them.
+	///
+	/// Read from the shared `runtime_max_blocking_threads` `ConfigMap` key,
+	/// which the server populates via
+	/// `Datastore::builder().with_runtime_max_blocking_threads(...)` from
+	/// its `cnf::RUNTIME_MAX_BLOCKING_THREADS` static, itself sourced from
+	/// `SURREAL_RUNTIME_MAX_BLOCKING_THREADS`. Embedded callers building a
+	/// custom tokio runtime can match it the same way as
+	/// `runtime_worker_threads`
+	/// (default: `512`, tokio's own default).
+	pub runtime_max_blocking_threads: usize,
 }
 
 impl Default for RocksDbConfig {
@@ -649,6 +675,7 @@ impl Default for RocksDbConfig {
 			shutdown_wait_for_compact_seconds: default_shutdown_wait_for_compact_seconds(),
 			runtime_worker_threads: default_runtime_worker_threads(),
 			runtime_reserve: 2,
+			runtime_max_blocking_threads: default_runtime_max_blocking_threads(),
 		}
 	}
 }
@@ -753,7 +780,11 @@ impl Config for RocksDbConfig {
 			// explicit env override still wins. When neither is present
 			// the field retains its `default_runtime_worker_threads()`
 			// default and the inline cap is computed from that.
-			.parse_key("runtime_worker_threads", &mut self.runtime_worker_threads);
+			.parse_key("runtime_worker_threads", &mut self.runtime_worker_threads)
+			// Shared the same way: injected via
+			// `with_runtime_max_blocking_threads(...)`, or lowercased from
+			// `SURREAL_RUNTIME_MAX_BLOCKING_THREADS` by `ConfigMap::from_env()`.
+			.parse_key("runtime_max_blocking_threads", &mut self.runtime_max_blocking_threads);
 
 		if map.has_key("datastore_sync") {
 			map.parse_key("datastore_sync", &mut self.sync_mode);
@@ -918,5 +949,19 @@ mod test {
 			.with_key_value("runtime_worker_threads", "1")
 			.load::<RocksDbConfig>();
 		assert_eq!(config.runtime_worker_threads, 1);
+	}
+
+	#[test]
+	fn test_rocksdb_config_runtime_max_blocking_threads() {
+		// Without an injected value the field holds tokio's own default, and
+		// the shared `runtime_max_blocking_threads` key, which the builder's
+		// `with_runtime_max_blocking_threads` writes and
+		// `ConfigMap::from_env()` fills from
+		// `SURREAL_RUNTIME_MAX_BLOCKING_THREADS`, overrides it.
+		assert_eq!(ConfigMap::empty().load::<RocksDbConfig>().runtime_max_blocking_threads, 512);
+		let config = ConfigMap::empty()
+			.with_key_value("runtime_max_blocking_threads", "16")
+			.load::<RocksDbConfig>();
+		assert_eq!(config.runtime_max_blocking_threads, 16);
 	}
 }

@@ -648,7 +648,7 @@ async fn cancel_blocks_until_live_cursor_drops() {
 /// stays parked. The blocker pins the transaction in a known state
 /// (done == true, cursors_alive == 1) for the duration of the assertion,
 /// which removes a timing dependency on the commit coordinator's
-/// `wait_for_sync` path that fires once drain returns.
+/// grouped fsync that follows once drain returns.
 #[tokio::test(flavor = "multi_thread")]
 async fn open_cursor_after_commit_starts_fails() {
 	use futures::FutureExt;
@@ -854,6 +854,255 @@ async fn commit_after_coordinator_shutdown_is_refused_before_apply() {
 	let val = tx.get(b"refused/key".as_slice().into(), None).await.unwrap();
 	assert_eq!(val, None, "a refused commit must not have applied anything");
 	tx.cancel().await.unwrap();
+}
+
+/// Shutdown closes commit admission whatever the sync mode, so a commit
+/// attempted once it has run is refused before anything is applied, with
+/// or without a commit coordinator, and synced or not.
+#[tokio::test(flavor = "multi_thread")]
+async fn commit_after_shutdown_is_refused_before_apply_in_every_sync_mode() {
+	use std::time::Duration;
+
+	use surrealdb_kvs::config::SyncMode;
+	use surrealdb_kvs::err::Error;
+
+	use crate::{Datastore as RocksDbDatastore, RocksDbConfig};
+
+	for sync_mode in
+		[SyncMode::Never, SyncMode::Interval(Duration::from_millis(200)), SyncMode::Every]
+	{
+		let dir = TempDir::new().unwrap();
+		let path = dir.path().to_string_lossy().to_string();
+		let config = RocksDbConfig {
+			sync_mode,
+			..RocksDbConfig::default()
+		};
+		let ds = RocksDbDatastore::new(&path, config).await.unwrap();
+		let synced = ds.transaction(TransactionType::Write).await.unwrap();
+		synced.set(b"refused/synced".as_slice().into(), vec![1u8]).await.unwrap();
+		let unsynced = ds.transaction(TransactionType::Write).await.unwrap();
+		unsynced.set(b"refused/unsynced".as_slice().into(), vec![1u8]).await.unwrap();
+		ds.shutdown().await.unwrap();
+		let err = synced.commit().await.expect_err("a commit after shutdown must be refused");
+		assert!(matches!(err, Error::Shutdown), "sync={sync_mode}: expected Shutdown, got {err:?}");
+		let err = unsynced
+			.commit_unsynced()
+			.await
+			.expect_err("an unsynced commit after shutdown must be refused");
+		assert!(
+			matches!(err, Error::Shutdown),
+			"sync={sync_mode}: expected Shutdown for the unsynced commit, got {err:?}"
+		);
+
+		let tx = ds.transaction(TransactionType::Read).await.unwrap();
+		for key in [b"refused/synced".as_slice(), b"refused/unsynced".as_slice()] {
+			let val = tx.get(key.into(), None).await.unwrap();
+			assert_eq!(val, None, "sync={sync_mode}: a refused commit applied");
+		}
+		tx.cancel().await.unwrap();
+	}
+}
+
+/// Shutdown waits for a commit admitted before it, here one waiting for a
+/// live cursor to release its transaction, and stops the commit
+/// coordinator only once that commit has drained, so the commit applies
+/// ahead of the final flushes and has any grouped fsync confirmed.
+#[tokio::test(flavor = "multi_thread")]
+async fn shutdown_waits_for_a_commit_admitted_before_it() {
+	use std::sync::Arc;
+	use std::time::Duration;
+
+	use futures::FutureExt;
+	use surrealdb_kvs::Direction;
+	use surrealdb_kvs::api::Transactable;
+	use surrealdb_kvs::config::SyncMode;
+
+	use crate::{Datastore as RocksDbDatastore, RocksDbConfig};
+
+	for sync_mode in [SyncMode::Never, SyncMode::Every] {
+		let dir = TempDir::new().unwrap();
+		let path = dir.path().to_string_lossy().to_string();
+		let config = RocksDbConfig {
+			sync_mode,
+			..RocksDbConfig::default()
+		};
+		let ds = Arc::new(RocksDbDatastore::new(&path, config).await.unwrap());
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		tx.set(b"admitted/key".as_slice().into(), vec![1u8]).await.unwrap();
+		let rng = prefix_byte_range("admitted/");
+		let mut cursor =
+			Transactable::open_keys_cursor(tx.as_ref(), rng, Direction::Forward, 0, None)
+				.await
+				.unwrap();
+		let _ = cursor.next_batch(1).await.unwrap();
+		// One poll admits the commit, which then waits for the cursor.
+		let mut commit = tx.commit();
+		assert!(commit.as_mut().now_or_never().is_none(), "sync={sync_mode}: the commit ran");
+
+		let shutdown = tokio::spawn({
+			let ds = Arc::clone(&ds);
+			async move { ds.shutdown().await }
+		});
+		tokio::time::sleep(Duration::from_millis(500)).await;
+		assert!(
+			!shutdown.is_finished(),
+			"sync={sync_mode}: shutdown finished while an admitted commit waited"
+		);
+		drop(cursor);
+		tokio::time::timeout(Duration::from_secs(10), commit)
+			.await
+			.unwrap()
+			.unwrap_or_else(|e| panic!("sync={sync_mode}: the admitted commit failed: {e:?}"));
+		tokio::time::timeout(Duration::from_secs(10), shutdown).await.unwrap().unwrap().unwrap();
+
+		let tx = ds.transaction(TransactionType::Read).await.unwrap();
+		let val = tx.get(b"admitted/key".as_slice().into(), None).await.unwrap();
+		assert_eq!(val, Some(vec![1u8]), "sync={sync_mode}: the admitted commit did not apply");
+		tx.cancel().await.unwrap();
+	}
+}
+
+/// A commit stays admitted until its grouped fsync has confirmed it, so
+/// shutdown, which stops the commit coordinator only once the admitted
+/// commits have drained, never stops it under a commit still waiting for
+/// its fsync.
+#[tokio::test(flavor = "current_thread")]
+async fn a_commit_stays_admitted_until_its_grouped_fsync() {
+	use std::time::Duration;
+
+	use futures::FutureExt;
+
+	use crate::{Datastore as RocksDbDatastore, RocksDbConfig};
+
+	let dir = TempDir::new().unwrap();
+	let path = dir.path().to_string_lossy().to_string();
+	// The default configuration uses `sync=every`, which runs the coordinator.
+	// With a wait threshold of one, the batcher holds even a lone request for
+	// its whole timeout, collecting more, before it flushes.
+	let config = RocksDbConfig {
+		grouped_commit_wait_threshold: 1,
+		// Two seconds, in nanoseconds.
+		grouped_commit_timeout: 2_000_000_000,
+		..RocksDbConfig::default()
+	};
+	let ds = RocksDbDatastore::new(&path, config).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
+	tx.set(b"fsync/key".as_slice().into(), vec![1u8]).await.unwrap();
+	// On a current-thread runtime the apply runs on the blocking pool, so the
+	// first poll leaves the commit waiting for it.
+	let mut commit = tx.commit();
+	assert!(commit.as_mut().now_or_never().is_none(), "the commit ran in one poll");
+	let mut applied = false;
+	for _ in 0..10_000 {
+		applied = ds.inline_guard.stallable_calls_in_flight() == 0;
+		if applied {
+			break;
+		}
+		tokio::time::sleep(Duration::from_millis(1)).await;
+	}
+	assert!(applied, "the apply did not return");
+	let read = ds.transaction(TransactionType::Read).await.unwrap();
+	let val = read.get(b"fsync/key".as_slice().into(), None).await.unwrap();
+	assert_eq!(val, Some(vec![1u8]), "the commit did not apply");
+	read.cancel().await.unwrap();
+
+	// The next poll takes the applied commit to the wait for its grouped
+	// fsync, which the batcher is holding.
+	assert!(commit.as_mut().now_or_never().is_none(), "the grouped fsync was confirmed at once");
+	assert_eq!(ds.commits.count(), 1, "a commit waiting for its grouped fsync is not admitted");
+	tokio::time::timeout(Duration::from_secs(10), commit).await.unwrap().unwrap();
+	assert_eq!(ds.commits.count(), 0);
+	ds.shutdown().await.unwrap();
+}
+
+/// A commit whose caller drops it once its apply has begun still has its
+/// WAL write flushed by a grouped fsync, with no later commit or shutdown
+/// to flush the WAL for it.
+#[tokio::test(flavor = "current_thread")]
+async fn a_detached_commit_still_has_its_wal_write_flushed() {
+	use std::time::Duration;
+
+	use futures::FutureExt;
+
+	use crate::{Datastore as RocksDbDatastore, RocksDbConfig};
+
+	let dir = TempDir::new().unwrap();
+	let path = dir.path().to_string_lossy().to_string();
+	// The default configuration uses `sync=every`, which writes the WAL
+	// buffer to the WAL files only in a grouped fsync.
+	let ds = RocksDbDatastore::new(&path, RocksDbConfig::default()).await.unwrap();
+	let wal_bytes = || -> u64 {
+		std::fs::read_dir(dir.path())
+			.unwrap()
+			.map(|entry| entry.unwrap())
+			.filter(|entry| entry.path().extension().is_some_and(|ext| ext == "log"))
+			.map(|entry| entry.metadata().unwrap().len())
+			.sum()
+	};
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
+	tx.set(b"detached/key".as_slice().into(), vec![1u8]).await.unwrap();
+	let before = wal_bytes();
+	// On a current-thread runtime the apply runs on the blocking pool, so
+	// dropping the commit after its first poll detaches it.
+	let mut commit = tx.commit();
+	assert!(commit.as_mut().now_or_never().is_none(), "the commit ran in one poll");
+	drop(commit);
+
+	let mut flushed = false;
+	for _ in 0..1000 {
+		flushed = ds.inline_guard.stallable_calls_in_flight() == 0 && wal_bytes() > before;
+		if flushed {
+			break;
+		}
+		tokio::time::sleep(Duration::from_millis(10)).await;
+	}
+	assert!(flushed, "the detached commit's WAL write was not flushed");
+	let read = ds.transaction(TransactionType::Read).await.unwrap();
+	let val = read.get(b"detached/key".as_slice().into(), None).await.unwrap();
+	assert_eq!(val, Some(vec![1u8]), "the detached commit did not apply");
+	read.cancel().await.unwrap();
+	ds.shutdown().await.unwrap();
+}
+
+/// An unsynced commit applies without requesting a grouped fsync, so its
+/// WAL write stays buffered until a later synced commit's grouped fsync
+/// flushes it along with that commit's own.
+#[tokio::test(flavor = "current_thread")]
+async fn an_unsynced_commit_leaves_its_wal_write_to_a_later_synced_commit() {
+	use std::time::Duration;
+
+	use crate::{Datastore as RocksDbDatastore, RocksDbConfig};
+
+	let dir = TempDir::new().unwrap();
+	let path = dir.path().to_string_lossy().to_string();
+	// The default configuration uses `sync=every`, which writes the WAL
+	// buffer to the WAL files only in a grouped fsync.
+	let ds = RocksDbDatastore::new(&path, RocksDbConfig::default()).await.unwrap();
+	let wal_bytes = || -> u64 {
+		std::fs::read_dir(dir.path())
+			.unwrap()
+			.map(|entry| entry.unwrap())
+			.filter(|entry| entry.path().extension().is_some_and(|ext| ext == "log"))
+			.map(|entry| entry.metadata().unwrap().len())
+			.sum()
+	};
+	let before = wal_bytes();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
+	tx.set(b"unsynced/key".as_slice().into(), vec![1u8]).await.unwrap();
+	tx.commit_unsynced().await.unwrap();
+	let read = ds.transaction(TransactionType::Read).await.unwrap();
+	let val = read.get(b"unsynced/key".as_slice().into(), None).await.unwrap();
+	assert_eq!(val, Some(vec![1u8]), "the unsynced commit did not apply");
+	read.cancel().await.unwrap();
+	// A grouped fsync requested for it would have flushed well within this.
+	tokio::time::sleep(Duration::from_millis(200)).await;
+	assert_eq!(wal_bytes(), before, "the unsynced commit requested a grouped fsync");
+
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
+	tx.set(b"synced/key".as_slice().into(), vec![1u8]).await.unwrap();
+	tx.commit().await.unwrap();
+	assert!(wal_bytes() > before, "the synced commit's grouped fsync flushed nothing");
+	ds.shutdown().await.unwrap();
 }
 
 /// The memory reporter must see memtable memory.
@@ -1338,6 +1587,146 @@ async fn reads_survive_a_concurrent_cancel() {
 	}
 
 	ds.shutdown().await.unwrap();
+}
+
+/// A current-thread runtime has no second worker to take over its driver,
+/// so a commit polled there runs on the blocking pool, and counts as
+/// diverted, even with inline-blocking permits free.
+#[tokio::test(flavor = "current_thread")]
+async fn commit_on_a_current_thread_runtime_is_diverted() {
+	use crate::{Datastore as RocksDbDatastore, RocksDbConfig};
+
+	let dir = TempDir::new().unwrap();
+	let path = dir.path().to_string_lossy().to_string();
+	let ds = RocksDbDatastore::new(&path, RocksDbConfig::default()).await.unwrap();
+	let counters = || {
+		(
+			ds.collect_u64_metric(RocksDbDatastore::INLINE_BLOCKING_GRANTED).unwrap(),
+			ds.collect_u64_metric(RocksDbDatastore::INLINE_BLOCKING_DIVERTED).unwrap(),
+		)
+	};
+
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
+	tx.set(b"current_thread_commit".to_vec().into(), b"v".to_vec()).await.unwrap();
+	let (granted, diverted) = counters();
+	tx.commit().await.unwrap();
+	assert_eq!(counters(), (granted, diverted + 1));
+
+	ds.shutdown().await.unwrap();
+}
+
+/// Shutdown waits for a stallable call still running on the blocking pool
+/// after its caller dropped the future, as a commit whose request was
+/// cancelled would be, rather than flushing and cancelling background work
+/// under it.
+#[tokio::test(flavor = "current_thread")]
+async fn shutdown_waits_for_a_stallable_call_its_caller_dropped() {
+	use std::sync::Arc;
+	use std::time::Duration;
+
+	use crate::{Datastore as RocksDbDatastore, RocksDbConfig};
+
+	let dir = TempDir::new().unwrap();
+	let path = dir.path().to_string_lossy().to_string();
+	let ds = Arc::new(RocksDbDatastore::new(&path, RocksDbConfig::default()).await.unwrap());
+	let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+	let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+	// On a current-thread runtime every stallable call runs on the blocking
+	// pool.
+	let caller = tokio::spawn({
+		let guard = Arc::clone(&ds.inline_guard);
+		async move {
+			guard
+				.run_stallable(move || {
+					let _ = started_tx.send(());
+					let _ = release_rx.recv();
+				})
+				.await
+		}
+	});
+	started_rx.await.unwrap();
+	caller.abort();
+	assert!(caller.await.unwrap_err().is_cancelled());
+
+	let shutdown = tokio::spawn({
+		let ds = Arc::clone(&ds);
+		async move { ds.shutdown().await }
+	});
+	tokio::time::sleep(Duration::from_millis(500)).await;
+	assert!(!shutdown.is_finished(), "shutdown finished while the detached call ran");
+	release_tx.send(()).unwrap();
+	tokio::time::timeout(Duration::from_secs(10), shutdown).await.unwrap().unwrap().unwrap();
+}
+
+/// Shutdown waits for the admitted commits before the calls applying them,
+/// so an apply that has begun on the blocking pool when its caller drops
+/// the commit, releasing its admission, is still waited for.
+#[tokio::test(flavor = "current_thread")]
+async fn shutdown_waits_for_an_apply_that_outlives_its_admission() {
+	use std::sync::Arc;
+	use std::time::Duration;
+
+	use crate::{Datastore as RocksDbDatastore, RocksDbConfig};
+
+	let dir = TempDir::new().unwrap();
+	let path = dir.path().to_string_lossy().to_string();
+	let ds = Arc::new(RocksDbDatastore::new(&path, RocksDbConfig::default()).await.unwrap());
+	let admitted = ds.commits.admit().unwrap();
+	let shutdown = tokio::spawn({
+		let ds = Arc::clone(&ds);
+		async move { ds.shutdown().await }
+	});
+	tokio::time::sleep(Duration::from_millis(100)).await;
+	assert!(ds.commits.admit().is_none(), "shutdown did not close admission");
+	// The admitted commit begins its apply on the blocking pool, where every
+	// stallable call runs on a current-thread runtime, and its caller then
+	// drops it.
+	let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+	let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+	let caller = tokio::spawn({
+		let guard = Arc::clone(&ds.inline_guard);
+		async move {
+			guard
+				.run_stallable(move || {
+					let _ = started_tx.send(());
+					let _ = release_rx.recv();
+				})
+				.await
+		}
+	});
+	started_rx.await.unwrap();
+	caller.abort();
+	assert!(caller.await.unwrap_err().is_cancelled());
+	drop(admitted);
+
+	tokio::time::sleep(Duration::from_millis(500)).await;
+	assert!(!shutdown.is_finished(), "shutdown finished while an apply ran");
+	release_tx.send(()).unwrap();
+	tokio::time::timeout(Duration::from_secs(10), shutdown).await.unwrap().unwrap().unwrap();
+}
+
+/// Datastores opened on one runtime share its blocking pool, so they take
+/// the blocking-pool slots for their commits from one set, which the first
+/// of them sizes from its runtime's blocking-thread cap.
+#[tokio::test(flavor = "current_thread")]
+async fn datastores_on_one_runtime_share_the_blocking_slots_for_commits() {
+	use crate::{Datastore as RocksDbDatastore, RocksDbConfig};
+
+	let (a_dir, b_dir) = (TempDir::new().unwrap(), TempDir::new().unwrap());
+	let a_path = a_dir.path().to_string_lossy().to_string();
+	let b_path = b_dir.path().to_string_lossy().to_string();
+	// This test's runtime is its own, so `a` is the first datastore on it.
+	let a_config = RocksDbConfig {
+		runtime_max_blocking_threads: 4,
+		..RocksDbConfig::default()
+	};
+	let a = RocksDbDatastore::new(&a_path, a_config).await.unwrap();
+	let b = RocksDbDatastore::new(&b_path, RocksDbConfig::default()).await.unwrap();
+	assert!(a.inline_guard.shares_blocking_slots_with(&b.inline_guard));
+	// Half of the 4 blocking threads, below any `KVS_THREADPOOL_SIZE`.
+	assert_eq!(b.inline_guard.blocking_slots_available(), 2);
+	a.shutdown().await.unwrap();
+	b.shutdown().await.unwrap();
 }
 
 /// A savepoint rollback while a writable-transaction scan cursor is open must

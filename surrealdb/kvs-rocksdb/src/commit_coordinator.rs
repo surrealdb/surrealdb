@@ -7,7 +7,7 @@ use parking_lot::{Condvar, Mutex};
 use rocksdb::Options;
 use surrealdb_kvs::config::SyncMode;
 use surrealdb_kvs::err::{Error, Result};
-use tokio::sync::oneshot::{self, Sender};
+use tokio::sync::oneshot::{self, Receiver, Sender};
 use tracing::info;
 
 use super::TARGET;
@@ -22,13 +22,13 @@ use crate::owned_tx::Db;
 ///
 /// # Communication Protocol
 ///
-/// **Producers** ([`CommitCoordinator::wait_for_sync`]):
-/// 1. Commit their RocksDB transaction on the caller thread
+/// **Producers** ([`CommitCoordinator::request_sync`]):
+/// 1. Commit their RocksDB transaction, and in the same call:
 /// 2. Lock the `buffer` mutex
 /// 3. Check the `shutdown` flag to ensure the coordinator is still running
 /// 4. Push a [`SyncRequest`] into the buffer
 /// 5. Signal the `condvar` to wake the batcher
-/// 6. Release the lock and await the response channel
+/// 6. Release the lock, then await the response channel through the returned [`PendingSync`]
 ///
 /// **Consumer** ([`CommitBatcher::run`]):
 /// 1. Lock the `buffer` mutex
@@ -62,6 +62,20 @@ struct SharedState {
 struct SyncRequest {
 	/// The channel to send the result of the WAL flush
 	channel: Sender<Result<()>>,
+}
+
+/// A queued grouped WAL flush (see [`CommitCoordinator::request_sync`]).
+/// Dropping it leaves the request queued.
+pub struct PendingSync(Receiver<Result<()>>);
+
+impl PendingSync {
+	/// Wait for the grouped WAL flush that covers this request, which makes
+	/// the commit before it durable.
+	pub async fn wait(self) -> Result<()> {
+		self.0
+			.await
+			.map_err(|_| Error::Transaction("commit coordinator response channel closed".into()))?
+	}
 }
 
 /// Coordinator for batching WAL synchronization with adaptive grouping.
@@ -179,12 +193,14 @@ impl CommitCoordinator {
 		self.shared.shutdown.load(Ordering::Acquire)
 	}
 
-	/// Wait for the next grouped WAL flush.
+	/// Queue a request for the next grouped WAL flush, and return the wait
+	/// for it.
 	///
-	/// This should be called after the transaction has been committed on the caller thread.
-	/// The caller will block until the background batcher performs a `flush_wal(true)` operation,
-	/// ensuring that the transaction is durably persisted to disk.
-	pub async fn wait_for_sync(&self) -> Result<()> {
+	/// Call this once the transaction has been committed, in the same call
+	/// that committed it, so the flush is requested even when nothing awaits
+	/// the returned [`PendingSync`]: the batcher flushes every queued request,
+	/// and each flush covers everything written to the WAL before it.
+	pub fn request_sync(&self) -> Result<PendingSync> {
 		// Create a new oneshot response channel
 		let (tx, rx) = oneshot::channel();
 		// Create a new sync request
@@ -195,16 +211,16 @@ impl CommitCoordinator {
 		let should_notify = {
 			// Lock the buffer
 			let mut buffer = self.shared.buffer.lock();
-			// If shutdown completed while the batcher exited, do not enqueue: the
-			// request would never be flushed and `rx.await` would hang forever.
-			// The pre-apply `is_shutting_down` check refuses almost all commits
-			// before they reach this point; this covers the narrow race where
-			// shutdown begins after that check but before the sync wait. The
-			// commit has already been applied by the caller thread, so
-			// `Error::Shutdown` marks a shutdown-induced interruption rather
-			// than a permanent transaction error, and background work (such as
-			// a concurrent index build) stays resumable after restart instead
-			// of recording a durable failure.
+			// Once shutdown has begun the batcher may have exited, so do not
+			// enqueue: the request would never be flushed and its wait would
+			// hang forever. The datastore stops the coordinator only after
+			// waiting for the commits it admitted, so a commit reaches this
+			// point after shutdown only when that wait gave up on it. The
+			// commit has already been applied, so `Error::Shutdown` marks a
+			// shutdown-induced interruption rather than a permanent
+			// transaction error, and background work (such as a concurrent
+			// index build) stays resumable after restart instead of recording
+			// a durable failure.
 			if self.is_shutting_down() {
 				return Err(Error::Shutdown);
 			}
@@ -219,9 +235,7 @@ impl CommitCoordinator {
 		if should_notify {
 			self.shared.condvar.notify_one();
 		}
-		// Wait for the WAL flush to complete
-		rx.await
-			.map_err(|_| Error::Transaction("commit coordinator response channel closed".into()))?
+		Ok(PendingSync(rx))
 	}
 
 	/// Shutdown the commit coordinator
@@ -258,10 +272,10 @@ impl CommitCoordinator {
 ///
 /// # Important Design Note
 ///
-/// This batcher does **not** commit transactions. Each caller thread commits its own
-/// RocksDB transaction before calling `wait_for_sync()`. This allows transaction commits
-/// to happen in parallel across all CPU cores, while only the expensive fsync operation
-/// is serialized and batched.
+/// This batcher does **not** commit transactions. Each commit applies its own
+/// RocksDB transaction and then queues its request with `request_sync()`. This allows
+/// transaction commits to happen in parallel across all CPU cores, while only the expensive
+/// fsync operation is serialized and batched.
 ///
 /// # Batching Algorithm
 ///
@@ -329,9 +343,10 @@ impl CommitBatcher {
 					self.shared.condvar.wait(&mut buffer);
 					// After wakeup: exit only when shutdown is set *and* there is
 					// no pending work. If the buffer holds `SyncRequest`s they must
-					// be drained before returning, otherwise `wait_for_sync` hangs
-					// on `rx.await` (e.g. push completed before `shutdown()` set
-					// the flag, then both threads notified the batcher).
+					// be drained before returning, otherwise their `PendingSync`
+					// waits hang, and their commits' WAL writes stay unflushed
+					// (e.g. push completed before `shutdown()` set the flag, then
+					// both threads notified the batcher).
 					if self.shared.shutdown.load(Ordering::Acquire) && buffer.is_empty() {
 						return;
 					}

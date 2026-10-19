@@ -407,6 +407,14 @@ pub static RUNTIME_STACK_SIZE: LazyLock<usize> =
 	});
 
 /// How many threads which can be started for blocking operations (default: 512)
+///
+/// `dbs::init` injects this resolved value into the datastore config via
+/// `Datastore::builder().with_runtime_max_blocking_threads(...)`, so the
+/// rocksdb engine keeps the commits it runs on the blocking pool to at most
+/// half of it. The same default lives in `default_runtime_max_blocking_threads`
+/// at `surrealdb/kvs-rocksdb/src/cnf.rs`, for embedded callers that don't go
+/// through the server. Keep the two definitions in lockstep — if one moves,
+/// move the other.
 pub static RUNTIME_MAX_BLOCKING_THREADS: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_RUNTIME_MAX_BLOCKING_THREADS", usize, 512);
 

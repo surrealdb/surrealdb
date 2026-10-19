@@ -29,7 +29,7 @@ web-time = { workspace = true }
 [dev-dependencies]
 rand = { workspace = true }
 temp-dir = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
 
 [lints]
 workspace = true

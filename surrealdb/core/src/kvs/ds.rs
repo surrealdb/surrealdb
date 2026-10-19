@@ -2668,7 +2668,7 @@ impl Datastore {
 			}
 		}
 		// Local index builder tasks are deliberately left running: the storage
-		// engine shutdown below stops the commit coordinator first, after which
+		// engine shutdown below closes commit admission first, after which
 		// every commit is refused before it applies (see the engine
 		// `Transaction::commit` gate). An in-flight build therefore makes no
 		// durable change during shutdown and stays at its last committed

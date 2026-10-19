@@ -952,6 +952,10 @@ pub async fn init<C: TransactionBuilderFactory>(
 		// config so the RocksDB engine sizes its inline-blocking permit
 		// cap from the actual executor width.
 		.with_runtime_worker_threads(*crate::cnf::RUNTIME_WORKER_THREADS)
+		// Likewise its blocking-thread cap (see
+		// `cnf::RUNTIME_MAX_BLOCKING_THREADS`), which bounds the commits the
+		// engine runs on the runtime's blocking pool.
+		.with_runtime_max_blocking_threads(*crate::cnf::RUNTIME_MAX_BLOCKING_THREADS)
 		.with_query_timeout(query_timeout)
 		.with_transaction_timeout(transaction_timeout)
 		.with_auth(!unauthenticated)

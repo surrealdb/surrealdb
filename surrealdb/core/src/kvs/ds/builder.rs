@@ -256,6 +256,23 @@ impl Builder {
 		self
 	}
 
+	/// Inject the tokio runtime's cap on blocking threads into the config
+	/// map under the shared `runtime_max_blocking_threads` key.
+	///
+	/// The RocksDB engine reads this key to bound the commits it runs on
+	/// the runtime's blocking pool to at most half of it, leaving the rest
+	/// to the runtime's other blocking work. Embedders building a custom
+	/// tokio runtime should call this with the `max_blocking_threads` value
+	/// they passed to `tokio::runtime::Builder`. When unset, the engine
+	/// assumes tokio's default of 512. The datastores committing on one
+	/// runtime share its bound, which the first datastore opened on it
+	/// sizes.
+	pub fn with_runtime_max_blocking_threads(mut self, count: usize) -> Self {
+		self.config = std::mem::take(&mut self.config)
+			.with_key_value("runtime_max_blocking_threads", count.to_string());
+		self
+	}
+
 	/// Sets the capabilities for the datastore.
 	pub fn with_capabilities(mut self, cap: Capabilities) -> Self {
 		self.capabilities = cap;

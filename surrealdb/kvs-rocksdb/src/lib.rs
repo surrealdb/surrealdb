@@ -11,6 +11,7 @@ mod commit_coordinator;
 mod comparator;
 mod disk_space_manager;
 mod garbage_collector;
+mod in_flight;
 mod inline_guard;
 mod memory_manager;
 mod owned_tx;
@@ -31,7 +32,8 @@ pub use cnf::RocksDbConfig;
 use commit_coordinator::CommitCoordinator;
 use disk_space_manager::{DiskSpaceManager, DiskSpaceState, TransactionState};
 use garbage_collector::GarbageCollector;
-use inline_guard::InlineGuard;
+use in_flight::InFlight;
+use inline_guard::{InlineGuard, stallable_blocking_slots};
 use memory_manager::MemoryManager;
 use range_shard::{COUNT_PARALLEL_MAX_SHARDS, shard_range};
 use rocksdb::{
@@ -59,11 +61,18 @@ use surrealdb_kvs::{
 	TransactionType, Val,
 };
 use tokio::sync::{Mutex, MutexGuard};
-use tracing::{error, info, instrument};
+use tracing::{error, info, instrument, warn};
 
 use crate::owned_tx::{Db, OwnedTx};
 
 const TARGET: &str = "surrealdb::core::kvs::rocksdb";
+
+/// How long [`Datastore::shutdown`] waits, once it has closed commit
+/// admission, for the commits admitted before it. Long enough for a write
+/// stall to clear once background flushes and compactions catch up, and
+/// short enough to leave most of a typical 30-second SIGTERM grace period to
+/// the flushes and the compaction wait that follow.
+const SHUTDOWN_WAIT_FOR_COMMITS: Duration = Duration::from_secs(10);
 
 /// Convert a RocksDB engine error into the generic KVS error type.
 #[expect(
@@ -155,6 +164,11 @@ pub struct Datastore {
 	/// `Arc`) into every `Transaction` so the dispatch helpers can
 	/// probe / divert without going through global state.
 	inline_guard: Arc<InlineGuard>,
+	/// The commits in flight, each from its admission until it has applied
+	/// and had any grouped fsync confirmed, or has failed. [`Self::shutdown`]
+	/// closes admission, after which every commit is refused before it
+	/// applies.
+	commits: Arc<InFlight>,
 }
 
 pub struct Transaction {
@@ -222,10 +236,13 @@ pub struct Transaction {
 	scan_verify_checksums: bool,
 	/// Per-datastore starvation guard (cloned from the parent
 	/// `Datastore`). All dispatch helpers — `run_blocking`, the cursor
-	/// batch pump, commit's fsync — route through this so the
-	/// inline-vs-offload decision and metric counters are shared across
-	/// every transaction on this datastore.
+	/// batch pump, commit — route through this so the inline-vs-offload
+	/// decision and metric counters are shared across every transaction
+	/// on this datastore.
 	inline_guard: Arc<InlineGuard>,
+	/// The parent `Datastore`'s commits in flight, which a commit is
+	/// admitted to before it applies anything.
+	commits: Arc<InFlight>,
 }
 
 impl Transaction {
@@ -554,8 +571,19 @@ impl Datastore {
 		// (`max(4, num_cpus::get())`, matching the server's tokio
 		// runtime sizing default), keeping the inline fast path
 		// enabled out of the box.
-		let inline_guard =
-			Arc::new(InlineGuard::new(config.runtime_worker_threads, config.runtime_reserve));
+		// Commits past the inline cap run on tokio's blocking pool, in the
+		// slots of the runtime running each one, shared by every datastore.
+		// The first datastore opened on a runtime sizes its slots from the
+		// shared KVS threadpool and the runtime's blocking-thread cap, which
+		// the embedder injects the same way as its worker count.
+		let inline_guard = Arc::new(InlineGuard::sharing_blocking_slots(
+			config.runtime_worker_threads,
+			config.runtime_reserve,
+			stallable_blocking_slots(
+				*surrealdb_kvs::threadpool::KVS_THREADPOOL_SIZE,
+				config.runtime_max_blocking_threads,
+			),
+		));
 		// Return the datastore
 		Ok(Datastore {
 			db,
@@ -570,6 +598,7 @@ impl Datastore {
 			compact_on_shutdown: config.compact_on_shutdown,
 			shutdown_wait_for_compact_seconds: config.shutdown_wait_for_compact_seconds,
 			inline_guard,
+			commits: Arc::default(),
 		})
 	}
 
@@ -586,13 +615,16 @@ impl Datastore {
 	const NUM_RUNNING_FLUSHES: &str = "rocksdb.num_running_flushes";
 	/// Per-datastore counter: storage calls that ran inline on a tokio
 	/// worker. Counts each `get`/`getm`/`set`/`put`/`putc`/`del`/`delc`/
-	/// `exists`/`cancel`/`commit` invocation that successfully acquired
-	/// an inline-blocking permit on this datastore's `InlineGuard`.
+	/// `exists`/`commit` invocation that ran under an inline-blocking
+	/// permit on this datastore's `InlineGuard`.
 	const INLINE_BLOCKING_GRANTED: &str = "rocksdb.inline_blocking_granted";
-	/// Per-datastore counter: storage calls diverted to the affinity pool
-	/// because this datastore's inline-blocking cap was hit. A rising
-	/// delta indicates the runtime would have been at risk of starvation
-	/// without the guard.
+	/// Per-datastore counter: storage calls diverted off the tokio
+	/// workers because this datastore's inline-blocking cap was hit —
+	/// commits to tokio's blocking pool, other calls to the affinity
+	/// pool. Commits polled on a current-thread runtime always count
+	/// here, as do commits that would have left no worker to poll the
+	/// runtime's driver. A rising delta indicates the runtime would have
+	/// been at risk of starvation without the guard.
 	const INLINE_BLOCKING_DIVERTED: &str = "rocksdb.inline_blocking_diverted";
 
 	/// Registers metrics for the RocksDB datastore.
@@ -651,11 +683,11 @@ impl Datastore {
 				},
 				Metric {
 					name: Self::INLINE_BLOCKING_GRANTED,
-					description: "Per-datastore count of storage calls that ran inline on a tokio worker (inline-blocking permit granted).",
+					description: "Per-datastore count of storage calls that ran inline on a tokio worker under an inline-blocking permit.",
 				},
 				Metric {
 					name: Self::INLINE_BLOCKING_DIVERTED,
-					description: "Per-datastore count of storage calls diverted to the affinity pool because the inline-blocking cap was hit.",
+					description: "Per-datastore count of storage calls diverted off the tokio workers (commits to the blocking pool, other calls to the affinity pool) because the inline-blocking cap was hit, or because a commit ran on a current-thread runtime or would have left no worker to poll the runtime's driver.",
 				},
 			],
 		}
@@ -695,8 +727,11 @@ impl Datastore {
 	///
 	/// Order of operations matters and is documented inline. Roughly:
 	///
-	/// 1. Stop the application-level pumps (garbage collector, background flusher, commit
-	///    coordinator) so nothing schedules new work.
+	/// 1. Stop the application-level pumps (garbage collector, background flusher) so nothing
+	///    schedules new work. Close commit admission, so every later commit is refused before it
+	///    applies, then wait, for at most [`SHUTDOWN_WAIT_FOR_COMMITS`], for the commits admitted
+	///    before it, including ones waiting for a blocking-pool slot and ones whose callers dropped
+	///    them. Then stop the commit coordinator, whose grouped fsync those commits wait for.
 	/// 2. Flush the WAL to storage and the memtables to L0 SSTs so the next startup needs minimal
 	///    recovery.
 	/// 3. *Optionally* run a full-keyspace compaction (`compact_on_shutdown`) down to the
@@ -713,13 +748,40 @@ impl Datastore {
 	/// always better than panicking on the way out.
 	pub async fn shutdown(&self) -> Result<()> {
 		// (1) Stop the application-level pumps so nothing schedules new
-		//     compactions / flushes / commits while we tear the LSM down.
+		//     compactions / flushes while we tear the LSM down.
 		if let Some(garbage_collector) = &self.garbage_collector {
 			garbage_collector.shutdown()?;
 		}
 		if let Some(background_flusher) = &self.background_flusher {
 			background_flusher.shutdown()?;
 		}
+		// (1a) Close commit admission, then wait for the commits admitted
+		//      before it — through any grouped fsync, so the coordinator is
+		//      stopped only afterwards — and for the calls still applying a
+		//      commit and requesting its grouped fsync, including ones whose
+		//      callers dropped them, so that each is applied before the WAL
+		//      flush below. A commit's apply is counted as a call before its
+		//      admission is released, so once both have drained, in that
+		//      order, no admitted commit can still apply. A commit still
+		//      stalled when the wait ends may never return once (5) cancels
+		//      the background work it is waiting on.
+		self.commits.close();
+		let commits_returned = async {
+			self.commits.drained().await;
+			self.inline_guard.stallable_calls_returned().await;
+		};
+		if tokio::time::timeout(SHUTDOWN_WAIT_FOR_COMMITS, commits_returned).await.is_err() {
+			warn!(
+				target: TARGET,
+				"Commits still in flight after {SHUTDOWN_WAIT_FOR_COMMITS:?} ({} admitted, {} applying); continuing shutdown without them",
+				self.commits.count(),
+				self.inline_guard.stallable_calls_in_flight(),
+			);
+		}
+		// (1b) Stop the commit coordinator, whose batcher flushes every
+		//      request already queued, detached commits' included, before it
+		//      exits. A commit that reaches it afterwards is one the wait
+		//      above gave up on.
 		if let Some(commit_coordinator) = &self.commit_coordinator {
 			commit_coordinator.shutdown()?;
 		}
@@ -879,6 +941,7 @@ impl Datastore {
 			prefix_extractor_enabled: self.prefix_extractor_enabled,
 			scan_verify_checksums: self.scan_verify_checksums,
 			inline_guard: Arc::clone(&self.inline_guard),
+			commits: Arc::clone(&self.commits),
 		}))
 	}
 }
@@ -930,13 +993,21 @@ impl Transaction {
 		// across subsequent awaits (e.g. the commit coordinator wait below).
 		let tx = self.inner.lock().await.take().ok_or(Error::TransactionFinished)?;
 
-		// Refuse the commit before applying anything once the datastore
-		// has begun shutting down: the grouped fsync can no longer
-		// confirm durability, so no new commit should run past this
-		// point. Shutdown is treated as a controlled crash — the store
-		// is required to be consistent after any crash — so failing here
-		// leaves the transaction un-applied (the taken `inner` rolls
-		// back on drop) and safely retryable.
+		// Admit the commit before applying anything, or refuse it once
+		// the datastore has begun shutting down. Shutdown closes
+		// admission and then waits, for a bounded time, for every commit
+		// admitted before it, so an admitted commit applies ahead of the
+		// final WAL and memtable flushes unless that wait gives up on it.
+		// Shutdown is treated as a controlled crash — the store is
+		// required to be consistent after any crash — so a refused commit
+		// is left un-applied (the taken `inner` rolls back on drop) and
+		// safely retryable. The admission is held until any grouped fsync
+		// below has confirmed the commit.
+		let Some(admitted) = self.commits.admit() else {
+			return Err(Error::Shutdown);
+		};
+		// Refuse the commit the same way once the commit coordinator has
+		// stopped, since no grouped fsync could confirm it any more.
 		if let Some(coordinator) = &self.commit_coordinator
 			&& coordinator.is_shutting_down()
 		{
@@ -953,18 +1024,28 @@ impl Transaction {
 			tx.set_commit_timestamp(ts.0);
 		}
 
-		// RocksDB commit may invoke `fsync` when sync writes are
-		// enabled, so it is the highest-latency synchronous call in
-		// the transaction lifecycle and must respect the
-		// runtime-headroom guard. The helper probes the inline-blocking
-		// permit: granted → run on the calling tokio worker; refused →
-		// dispatched to the affinity pool.
-		self.inline_guard.try_inline_or_offload(move || tx.commit()).await.map_err(kvs_error)?;
+		// RocksDB's write admission control can park a commit for as
+		// long as a stall lasts, so it runs through `run_stallable`,
+		// which never leaves the runtime's driver unpolled behind it.
+		// A synced commit requests its grouped fsync in the same call,
+		// so one whose caller stops waiting once the call has begun is
+		// still made durable.
+		let coordinator = self.commit_coordinator.clone().filter(|_| sync);
+		let pending_sync = self
+			.inline_guard
+			.run_stallable(move || {
+				tx.commit().map_err(kvs_error)?;
+				coordinator.as_deref().map(CommitCoordinator::request_sync).transpose()
+			})
+			.await??;
 
 		// If we have a coordinator, wait for the grouped fsync
-		if sync && let Some(coordinator) = &self.commit_coordinator {
-			coordinator.wait_for_sync().await?;
+		if let Some(pending_sync) = pending_sync {
+			pending_sync.wait().await?;
 		}
+		// The commit is applied, and confirmed if synced, so shutdown
+		// need not wait for the compaction below.
+		drop(admitted);
 		// Perform compaction if necessary
 		if self.is_restricted(true) && self.contains_deletes() {
 			compact(db, None).await?;
@@ -1159,10 +1240,11 @@ impl Transaction {
 	/// stay free for async work.
 	///
 	/// This is the canonical dispatch shape for every *bounded* RocksDB
-	/// op — point reads/writes, scans/keys (read-only and writable),
-	/// cancel, commit's fsync. Unbounded ops (`count`, `compact`) and the
-	/// sharded read-only `count` fan-out bypass this helper and go to the
-	/// pool unconditionally.
+	/// op — point reads/writes and scans/keys (read-only and writable).
+	/// Long-running ops (`count`, `compact`) and the sharded read-only
+	/// `count` fan-out bypass this helper and go to the pool
+	/// unconditionally. `commit`, which RocksDB can stall, goes through
+	/// `InlineGuard::run_stallable` instead.
 	async fn run_blocking<'a, F, R>(&'a self, op: F) -> Result<R>
 	where
 		F: FnOnce(MutexGuard<'a, Option<OwnedTx>>) -> Result<R> + Send + 'a,
