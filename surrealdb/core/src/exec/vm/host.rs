@@ -289,11 +289,18 @@ fn execute_tailed(
 			}
 			None => None,
 		};
+		// `ONLY` alone takes at most two rows, the second to refuse it, so
+		// reading ahead on a task of its own gains nothing.
+		let cardinality = if tail.only && tail.timeout.is_none() && tail.version.is_none() {
+			crate::exec::CardinalityHint::AtMostOne
+		} else {
+			cardinality_hint(&program)
+		};
 		let input = crate::exec::buffer_stream(
 			// `ONLY` reads its one row back, so it is never encoded.
 			execute_untailed(&program, &ctx, None, format.filter(|_| !tail.only))?,
 			program.access_mode,
-			cardinality_hint(&program),
+			cardinality,
 			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		// A boundary: what the statement nests runs within this stream's
