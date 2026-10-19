@@ -53,6 +53,22 @@ pub(crate) async fn remove_field_statement_apply(
 			}
 		}
 	};
+	// Removing a `COMPUTED` field changes the value it derives to none.
+	if !opt.import && fd.computed.is_some() {
+		let removed = catalog::FieldDefinition {
+			name: fd.name.clone(),
+			table: table_name.clone(),
+			..Default::default()
+		};
+		crate::ddl::define_field_statement_validate_computed_views(
+			&txn,
+			ns,
+			db,
+			Some(fd.as_ref()),
+			&removed,
+		)
+		.await?;
+	}
 	// On a table that enforces migrations the field's stored values go with
 	// it; an import restores definitions as they were.
 	if !opt.import {

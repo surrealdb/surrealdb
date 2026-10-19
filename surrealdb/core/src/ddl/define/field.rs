@@ -5,9 +5,14 @@ use surrealdb_types::ToSql;
 use uuid::Uuid;
 
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{self, DatabaseId, Error as CatalogError, NamespaceId, Relation, TableType};
+use crate::catalog::{
+	self, DatabaseId, Error as CatalogError, NamespaceId, Relation, TableType, ViewDefinition,
+};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
+use crate::ddl::key_scan::{
+	ReadContext, RecordReads, first_of, holds_rows, record_reads, view_reads,
+};
 use crate::exec::Error as ExecError;
 use crate::exec::field_rules::{
 	define_field_nesting_restrictions, define_field_statement_validate_reference_options,
@@ -201,6 +206,19 @@ pub(crate) async fn define_field_definition_apply(
 	if let Some(key) = definition.live_key() {
 		let exec = crate::ddl::frame(ctx, opt, None).await;
 		crate::ddl::key_scan::validate_record_keys(&exec, &txn, ns, db, &tb_name, key).await?;
+	}
+
+	// A restore defines the table before it holds a record, so an import has
+	// no group an aggregated view could have keyed by an earlier derivation.
+	if !opt.import {
+		define_field_statement_validate_computed_views(
+			&txn,
+			ns,
+			db,
+			existing.as_deref(),
+			definition,
+		)
+		.await?;
 	}
 
 	// The rules of a table that enforces migrations, and the statement's migration, are judged
@@ -618,6 +636,154 @@ pub(crate) async fn define_field_statement_validate_computed_cycles(
 	}
 
 	Ok(())
+}
+
+/// Whether `definition` over `existing` can change the value the field derives
+/// for a record the table already holds: the field becomes `COMPUTED`, stops
+/// being `COMPUTED` (a removed field is replaced by a definition that is not),
+/// has its body changed, or is `COMPUTED` under another kind its derived value
+/// is coerced to.
+///
+/// A stored field keeps the value it was written with, so no clause of it
+/// changes what a record holds.
+pub(crate) fn derived_value_changes(
+	existing: Option<&catalog::FieldDefinition>,
+	definition: &catalog::FieldDefinition,
+) -> bool {
+	if existing.and_then(|existing| existing.computed.as_ref()) != definition.computed.as_ref() {
+		return true;
+	}
+	definition.computed.is_some()
+		&& existing.is_some_and(|existing| existing.field_kind != definition.field_kind)
+}
+
+/// Refuse `definition` when it changes the value a field derives
+/// ([`derived_value_changes`]) that an aggregated view of the table depends on,
+/// and the table holds a record.
+///
+/// An aggregated view keys the row of a group by the values its clauses derived
+/// when the records of the group were written, and an update or delete of a
+/// record leaves the group its stored state derives to under the definitions in
+/// force then. A changed derivation sends the record to a group the view holds
+/// no row for, or takes a contribution out of stats that never held it, and
+/// neither can be repaired from the view's rows. Rebuilding the view is a scan
+/// of the table in the defining transaction, which `DEFINE FIELD` does not
+/// make: the view is removed and defined again around the change. A table that
+/// holds no record has no group to disagree with.
+///
+/// A view depends on the field when a clause of it (its fields, condition or
+/// groups) spells the field's name or the name of a `COMPUTED` field that reads
+/// it, directly or through others, or reads the record by names it computes
+/// ([`view_reads`]). A `COMPUTED` field that reads the record by names it
+/// computes may read the field, so a view that spells it is refused as one that
+/// reads by names it computes is. A materialized view keys its row by the
+/// record's own key and reads no earlier image, so it never depends on the
+/// field.
+///
+/// The records are those the defining transaction's snapshot holds
+/// ([`holds_rows`]).
+///
+/// # Errors
+///
+/// [`ExecError::ComputedFieldReadByView`] or
+/// [`ExecError::ComputedFieldReadByViewUnresolved`]; the error of a catalog or
+/// storage read that fails.
+pub(crate) async fn define_field_statement_validate_computed_views(
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	existing: Option<&catalog::FieldDefinition>,
+	definition: &catalog::FieldDefinition,
+) -> Result<()> {
+	if !derived_value_changes(existing, definition) {
+		return Ok(());
+	}
+	// A `COMPUTED` field is top-level, and so is the field it replaces.
+	let Some(field) = definition.name.field_name() else {
+		return Ok(());
+	};
+	let table = &definition.table;
+	let mut views = Vec::new();
+	for view in txn.all_tb_views(ns, db, table, None).await?.iter() {
+		if let Some(
+			aggregated @ ViewDefinition::Aggregated {
+				..
+			},
+		) = &view.view
+		{
+			views.push((view.name.clone(), view_reads(aggregated)));
+		}
+	}
+	if views.is_empty() {
+		return Ok(());
+	}
+	let fields = txn.all_tb_fields(ns, db, table, None).await?;
+	let computed: Vec<(&str, RecordReads)> = fields
+		.iter()
+		.filter(|fd| !fd.is_key_part())
+		.filter_map(|fd| {
+			let body = fd.computed.as_ref()?;
+			Some((fd.name.field_name()?, record_reads(body, ReadContext::Record)))
+		})
+		.collect();
+	// A view that spells a name that moves is reported before one that may depend
+	// on the field only through a read by names that cannot be determined: its
+	// own, or that of a `COMPUTED` field it spells.
+	let moved = moved_with(field, &computed, false);
+	let reader = views
+		.iter()
+		.find(|(_, reads)| first_of(&moved, &reads.names).is_some())
+		.map(|(view, _)| (view, true))
+		.or_else(|| {
+			let moved = moved_with(field, &computed, true);
+			views
+				.iter()
+				.find(|(_, reads)| reads.unresolved || first_of(&moved, &reads.names).is_some())
+				.map(|(view, _)| (view, false))
+		});
+	let Some((view, spelled)) = reader else {
+		return Ok(());
+	};
+	if !holds_rows(txn, ns, db, table).await? {
+		return Ok(());
+	}
+	let (field, table, view) =
+		(field.to_owned(), table.as_str().to_owned(), view.as_str().to_owned());
+	if spelled {
+		bail!(ExecError::ComputedFieldReadByView {
+			field,
+			table,
+			view,
+		})
+	}
+	bail!(ExecError::ComputedFieldReadByViewUnresolved {
+		field,
+		table,
+		view,
+	})
+}
+
+/// The names whose derived value moves with the field `field`: its own, and
+/// that of each `COMPUTED` field of `computed` that reads one of them, directly
+/// or through others. With `opaque`, a `COMPUTED` field that may read fields of
+/// the record by names it does not spell ([`RecordReads::unresolved`]) moves
+/// as well, since the field may be one it reads.
+fn moved_with(field: &str, computed: &[(&str, RecordReads)], opaque: bool) -> Vec<String> {
+	let mut moved = vec![field.to_owned()];
+	loop {
+		let before = moved.len();
+		for (name, reads) in computed {
+			if !moved.iter().any(|moved| moved == *name)
+				&& ((opaque && reads.unresolved)
+					|| reads.names.iter().any(|read| moved.contains(read)))
+			{
+				moved.push((*name).to_owned());
+			}
+		}
+		if moved.len() == before {
+			return moved;
+		}
+	}
 }
 
 /// Whether the named table already exists as a relation — the only shape

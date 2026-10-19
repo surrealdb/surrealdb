@@ -1731,6 +1731,31 @@ async fn step_inner(
 						.await
 						.map_err(ControlFlow::Err)?;
 				}
+				FieldCheck::ComputedViews {
+					old,
+					field: reg,
+					ns,
+					db,
+				} => {
+					let definition = field(*reg)?;
+					let old = if read(regs, *old).is_none() {
+						None
+					} else {
+						Some(field(*old)?)
+					};
+					let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
+					let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
+					let txn = ctx.txn();
+					super::schema_host::check_computed_views(
+						&txn,
+						ns,
+						db,
+						old.as_ref(),
+						&definition,
+					)
+					.await
+					.map_err(ControlFlow::Err)?;
+				}
 				FieldCheck::IdUnread {
 					ns,
 					db,

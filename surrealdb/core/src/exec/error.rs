@@ -439,6 +439,33 @@ pub(crate) enum Error {
 		index: String,
 	},
 
+	/// A change to the value a field derives (`COMPUTED` defined, redefined or
+	/// removed, or its kind changed) that an aggregated view over the table
+	/// depends on, by spelling the field or a `COMPUTED` field that reads it,
+	/// while the table holds records the view has already grouped by the value
+	/// derived before the change.
+	#[error(
+		"Cannot change the value the computed field `{field}` of `{table}` derives: the aggregated view `{view}` depends on it, and `{table}` holds records the view has already grouped by the value derived before. Remove `{view}`, change the field, then define `{view}` again"
+	)]
+	ComputedFieldReadByView {
+		field: String,
+		table: String,
+		view: String,
+	},
+
+	/// As [`Self::ComputedFieldReadByView`], for a view that reads the record by
+	/// names it computes, or hands the record to a body that may read any of
+	/// its fields, or spells a `COMPUTED` field that does, so it may depend on
+	/// the field.
+	#[error(
+		"Cannot change the value the computed field `{field}` of `{table}` derives: the aggregated view `{view}` may depend on it, through a read of fields of the record by names that cannot be determined, and `{table}` holds records the view has already grouped by the value derived before. Remove `{view}`, change the field, then define `{view}` again"
+	)]
+	ComputedFieldReadByViewUnresolved {
+		field: String,
+		table: String,
+		view: String,
+	},
+
 	/// A component of a named record id has a type whose stored order a key
 	/// range cannot use.
 	#[error(
@@ -769,6 +796,16 @@ impl LeafError for Error {
 			// A view that reads itself is a definition no write can maintain,
 			// which its author can remove or define again.
 			Error::ViewReadsItself {
+				..
+			} => TypesError::validation(message, ValidationError::InvalidRequest),
+
+			// The statement would change what a computed field derives under an
+			// aggregated view that holds groups keyed by the old values: the
+			// author of the statement removes the view first.
+			Error::ComputedFieldReadByView {
+				..
+			}
+			| Error::ComputedFieldReadByViewUnresolved {
 				..
 			} => TypesError::validation(message, ValidationError::InvalidRequest),
 

@@ -1347,6 +1347,22 @@ fn every_exec_variant() -> Vec<(&'static str, ExecError)> {
 			},
 		),
 		(
+			"ComputedFieldReadByView",
+			ExecError::ComputedFieldReadByView {
+				field: "city".to_string(),
+				table: "sale".to_string(),
+				view: "by_city".to_string(),
+			},
+		),
+		(
+			"ComputedFieldReadByViewUnresolved",
+			ExecError::ComputedFieldReadByViewUnresolved {
+				field: "city".to_string(),
+				table: "sale".to_string(),
+				view: "by_city".to_string(),
+			},
+		),
+		(
 			"IdComponentUnsupportedKind",
 			ExecError::IdComponentUnsupportedKind {
 				table: "reading".to_string(),

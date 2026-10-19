@@ -2935,6 +2935,18 @@ pub(crate) enum FieldCheck {
 		db: Reg,
 		kind: crate::expr::statements::define::DefineKind,
 	},
+	/// No aggregated view of the table depends on the value the definition in
+	/// `field` changes the derivation of, replacing the stored definition in
+	/// `old` (`NONE` when the field is new) while the table holds a record,
+	/// judged against the catalog of the database `ns`, `db`. A removed field is
+	/// replaced by a definition that derives nothing
+	/// (`ddl::define_field_statement_validate_computed_views`).
+	ComputedViews {
+		old: Reg,
+		field: Reg,
+		ns: Reg,
+		db: Reg,
+	},
 	/// No definition of the table named in `table` reads a component of its
 	/// record id, judged against the catalog of the database `ns`, `db` and
 	/// the rows its views hold, so `REMOVE FIELD id` may remove its `id`

@@ -350,6 +350,23 @@ impl Ddl<'_, '_> {
 			previous: None,
 			object: ClauseObject::Field,
 		});
+		// A change to the value the field derives is judged against the definition the statement
+		// finds, the views and the records of its table as they stand when it runs, and not as
+		// they were planned: a block can change any of them before it. A restore defines the
+		// table before it holds a record.
+		let import = self.label()?;
+		self.store(StoreInstr::JumpIfImport {
+			target: import,
+		});
+		self.store(StoreInstr::FieldCheck {
+			check: FieldCheck::ComputedViews {
+				old: existing,
+				field: stored_field,
+				ns,
+				db,
+			},
+		});
+		self.bind(import)?;
 		// The rules of a table that enforces migrations, and the migration, are judged once every
 		// other check of the definition has passed: either can mint a step, and a refusal leaves
 		// no step behind for a transaction its caller goes on to commit.
@@ -555,6 +572,30 @@ impl Ddl<'_, '_> {
 		});
 		let name_reg = self.load(fd)?;
 		self.must_exist(if_exists, field, StatementError::FdNotFound, name_reg)?;
+		// Removing a `COMPUTED` field changes the value it derives to none, which the field the
+		// statement finds, the views and the records of its table decide when it runs, and not as
+		// they were planned: a block can change any of them before it.
+		let removed = catalog::FieldDefinition {
+			name: path,
+			table: table_name,
+			..Default::default()
+		};
+		let removed =
+			self.constant(super::stored(&removed.to_stored(), "StoredFieldDefinition")?)?;
+		let removed = self.load(removed)?;
+		let import = self.label()?;
+		self.store(StoreInstr::JumpIfImport {
+			target: import,
+		});
+		self.store(StoreInstr::FieldCheck {
+			check: FieldCheck::ComputedViews {
+				old: field,
+				field: removed,
+				ns,
+				db,
+			},
+		});
+		self.bind(import)?;
 		// On a table that enforces migrations the field's stored values go with it; an import
 		// restores definitions as they were.
 		let import = self.label()?;

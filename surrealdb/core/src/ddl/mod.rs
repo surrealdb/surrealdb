@@ -38,6 +38,7 @@ pub(crate) use self::define::field::{
 	define_field_statement_process_recursive_definitions,
 	define_field_statement_validate_computed_cycles,
 	define_field_statement_validate_computed_options,
+	define_field_statement_validate_computed_views,
 	define_field_statement_validate_flexible_restrictions,
 	define_field_statement_validate_key_components,
 };

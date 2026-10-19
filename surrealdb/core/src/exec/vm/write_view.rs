@@ -344,6 +344,13 @@ struct Aggregated<'a> {
 /// stats of the groups it joined, left or changed within adjusted by what it
 /// contributes. A record that moved between groups leaves one and joins the
 /// other.
+///
+/// The group a record leaves is derived from its before-image under the
+/// definitions in force, and the view holds a row for it only if the same
+/// derivation put the record there. A schema statement that changes what a
+/// clause of the view derives from a record the table holds, such as redefining
+/// a `COMPUTED` field the view depends on, is therefore refused
+/// (`ddl::define_field_statement_validate_computed_views`).
 async fn aggregated(
 	m: &Maintain<'_>,
 	state: &mut State,

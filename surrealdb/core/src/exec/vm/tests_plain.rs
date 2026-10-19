@@ -292,6 +292,12 @@ const PLAN_TIME_FUNCTIONS: &[(&str, &str, &str)] = &[
 	),
 	(
 		"schema_host.rs",
+		"check_computed_views",
+		"declared schema service: a change to the value a field derives that an aggregated view \
+		 reads, checked as DEFINE FIELD checks it",
+	),
+	(
+		"schema_host.rs",
 		"refuse_removing_id",
 		"declared schema service: what REMOVE FIELD refuses of the id of a table whose \
 		 definitions read its record id components, judged as its body judges it",

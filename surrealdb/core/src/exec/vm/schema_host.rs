@@ -203,6 +203,23 @@ pub(super) async fn check_key_components(
 	.await
 }
 
+/// What refuses a field statement of the definition `definition`, replacing
+/// `existing` when the field has one, in the database `ns`, `db`: a change to
+/// the value the field derives that an aggregated view of its table depends on,
+/// while the table holds a record, as `txn` holds the catalog and the table.
+pub(super) async fn check_computed_views(
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	existing: Option<&crate::catalog::FieldDefinition>,
+	definition: &crate::catalog::FieldDefinition,
+) -> anyhow::Result<()> {
+	crate::exec::vm::descriptor::schema(crate::ddl::define_field_statement_validate_computed_views(
+		txn, ns, db, existing, definition,
+	))
+	.await
+}
+
 /// What refuses `REMOVE FIELD id` on the table `table` of the database `ns`,
 /// `db`: a definition of the table that reads a component of its record id,
 /// as `txn` holds the catalog and the rows of the table's views.

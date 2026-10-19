@@ -412,6 +412,18 @@ async fn alter_field_write(
 		crate::ddl::key_scan::validate_record_keys(&exec, &txn, ns, db, what, key).await?;
 	}
 
+	// Altering the kind of a `COMPUTED` field changes the value it derives.
+	if !opt.import {
+		crate::ddl::define_field_statement_validate_computed_views(
+			&txn,
+			ns,
+			db,
+			Some(&old_definition),
+			&df,
+		)
+		.await?;
+	}
+
 	// A clause the statement changed holds no effect a schema clause must not
 	// have; one it left as it was is judged where it runs.
 	if !opt.import {

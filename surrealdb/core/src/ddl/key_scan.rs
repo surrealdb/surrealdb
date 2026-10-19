@@ -812,7 +812,7 @@ impl crate::expr::visit::Visitor for RecordReach {
 }
 
 /// The first of `names` that `reads` holds.
-fn first_of<'a>(names: &'a [String], reads: &[String]) -> Option<&'a String> {
+pub(crate) fn first_of<'a>(names: &'a [String], reads: &[String]) -> Option<&'a String> {
 	names.iter().find(|name| reads.contains(name))
 }
 
@@ -832,7 +832,7 @@ fn permission_reads(permission: &Permission) -> RecordReads {
 /// expression, as in `SELECT id[0] AS city ... GROUP BY city`, so it reads what
 /// the expression reads (already counted with the field list) and not a stored
 /// field of the alias's name.
-fn view_reads(view: &ViewDefinition) -> RecordReads {
+pub(crate) fn view_reads(view: &ViewDefinition) -> RecordReads {
 	let (fields, condition, groups) = view_clauses(view);
 	let mut reads = RecordReads::default();
 	for selector in fields.iter_non_all_fields() {
@@ -882,24 +882,25 @@ fn selects_every_field(view: &ViewDefinition) -> bool {
 	view_clauses(view).0.has_all_selection()
 }
 
-/// Whether the table `view` holds a record. Its graph edges and the references
-/// other records hold to it are not records of it.
+/// Whether the table `table`, a view or a table a view reads, holds a record.
+/// Its graph edges and the references other records hold to it are not records
+/// of it.
 ///
 /// The answer is the defining transaction's snapshot. A write planned against
 /// the catalog before the change committed can still add a row under the old
-/// record id afterwards, to a view found empty here or to one defined again
+/// record id afterwards, to a table found empty here or to a view defined again
 /// after the change; that is the stale-writer race of the record scan, which no
 /// row count closes (see ADR 0008, *Operational notes*).
-async fn holds_rows(
+pub(crate) async fn holds_rows(
 	txn: &Transaction,
 	ns: NamespaceId,
 	db: DatabaseId,
-	view: &TableName,
+	table: &TableName,
 ) -> Result<bool> {
 	let range = RecordPrefix {
 		ns,
 		db,
-		tb: Cow::Borrowed(view),
+		tb: Cow::Borrowed(table),
 	}
 	.range()?;
 	Ok(!txn.keys_raw(range, 1, 0, None).await?.is_empty())
