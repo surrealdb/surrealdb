@@ -134,7 +134,9 @@ async fn router_reconnect(state: &RouterState, endpoint: &Endpoint) {
 
 				// Replay state for ALL sessions
 				for (session_id, session_result) in state.sessions.to_vec() {
-					if let Ok(session_state) = session_result {
+					if let Ok(session_state) = session_result
+						&& !session_state.unattached.load(std::sync::atomic::Ordering::SeqCst)
+					{
 						replay_session::<Message, _, _>(session_id, &session_state, &state.sink)
 							.await
 							.ok();

@@ -10,7 +10,7 @@ pub(crate) mod native;
 pub(crate) mod wasm;
 
 use std::marker::PhantomData;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -68,6 +68,13 @@ struct SessionState {
 	deferred: Mutex<Vec<Route>>,
 	/// The last ID used for a request
 	last_id: AtomicI64,
+	/// Whether the session exists only in the router: its setup has not been
+	/// sent to the server yet.
+	///
+	/// A cloned session stays unattached until its first request, so a clone
+	/// nobody queries through costs no round trips, and no `Detach` when it is
+	/// dropped. Reconnects skip an unattached session for the same reason.
+	unattached: AtomicBool,
 }
 
 /// A replay in progress: the request id currently awaiting acknowledgement, and
@@ -99,6 +106,7 @@ impl Default for SessionState {
 			replay_cursor: Mutex::new(None),
 			deferred: Mutex::new(Vec::new()),
 			last_id: AtomicI64::new(0),
+			unattached: AtomicBool::new(false),
 		}
 	}
 }
@@ -114,6 +122,7 @@ impl Clone for SessionState {
 			replay_cursor: Mutex::new(None),
 			deferred: Mutex::new(Vec::new()),
 			last_id: AtomicI64::new(0),
+			unattached: AtomicBool::new(true),
 		}
 	}
 }
@@ -226,6 +235,12 @@ where
 			return HandleResult::Ok;
 		}
 	};
+
+	// The first request through an unattached clone sends its setup; the
+	// request then parks behind it like any other.
+	if session_state.unattached.swap(false, Ordering::SeqCst) {
+		replay_session::<M, S, E>(session_id, session_state.as_ref(), sink).await.ok();
+	}
 
 	// The session's replayed setup is still in flight, so the server has not
 	// applied all of it yet. Park the request until it has: dispatching now
@@ -950,7 +965,7 @@ async fn handle_session_clone<M, S, E>(
 	old: Uuid,
 	new: Uuid,
 	sessions: &HashMap<Uuid, Result<Arc<SessionState>, SessionError>>,
-	sink: &RwLock<S>,
+	_sink: &RwLock<S>,
 ) where
 	M: WsMessage,
 	S: Sink<M, Error = E> + Unpin,
@@ -965,12 +980,8 @@ async fn handle_session_clone<M, S, E>(
 					session_id: new,
 				};
 			}
-			let session_state = Arc::new(session_state);
-			sessions.insert(new, Ok(Arc::clone(&session_state)));
-
-			if let Err(error) = replay_session::<M, S, E>(new, &session_state, sink).await {
-				sessions.insert(new, Err(SessionError::Remote(error.to_string())));
-			}
+			// The setup is sent on the first request, not now.
+			sessions.insert(new, Ok(Arc::new(session_state)));
 		}
 		Some(Err(error)) => {
 			sessions.insert(new, Err(error));
@@ -991,6 +1002,15 @@ async fn handle_session_drop<M, S, E>(
 	S: Sink<M, Error = E> + Unpin,
 	E: std::fmt::Debug,
 {
+	// A session that never attached has nothing on the server to detach.
+	let unattached = match sessions.get(&session_id) {
+		Some(Ok(state)) => state.unattached.load(Ordering::SeqCst),
+		_ => false,
+	};
+	if unattached {
+		sessions.remove(&session_id);
+		return;
+	}
 	if sessions.get(&session_id).is_some() {
 		// Fire-and-forget: the session is going away, so there is nothing left
 		// to order the detach against and no one to hand an acknowledgement to.
@@ -1140,7 +1160,7 @@ mod tests {
 	use super::{
 		HandleResult, PendingRequest, SessionState, WsMessage, fail_all_pending_requests,
 		handle_live_notification, handle_parse_error, handle_response_with_id, handle_route,
-		replay_cursor, replay_session,
+		handle_session_clone, handle_session_drop, replay_cursor, replay_session,
 	};
 	use crate::conn::{Command, RequestData, Route};
 	use crate::engine::SessionError;
@@ -1399,6 +1419,57 @@ mod tests {
 		);
 		assert_eq!(sink.read().await.len(), 2, "released request should be sent");
 		assert_eq!(session_state.pending_requests.len(), 1, "released request should be pending");
+	}
+
+	/// A clone nobody queries through must cost nothing on the wire: no attach,
+	/// no replayed setup and, when dropped, no detach.
+	#[tokio::test]
+	async fn unused_clone_sends_nothing() {
+		let (parent, _state, sessions) = session_with_replay(vec![
+			Command::Attach {
+				session_id: Uuid::nil(),
+			},
+			set_cmd("x", 1),
+		]);
+		let sink = RwLock::new(Vec::<MockMessage>::new());
+		let clone = Uuid::new_v4();
+
+		handle_session_clone::<MockMessage, _, _>(parent, clone, &sessions, &sink).await;
+		assert!(sink.read().await.is_empty(), "cloning must not touch the wire");
+		assert!(sessions.get(&clone).is_some_and(|s| s.is_ok()), "the clone is registered");
+
+		handle_session_drop::<MockMessage, _, _>(clone, &sessions, &sink).await;
+		assert!(sink.read().await.is_empty(), "dropping an unattached clone sends no detach");
+		assert!(sessions.get(&clone).is_none(), "the clone is forgotten");
+	}
+
+	/// The first request through a clone sends its setup, in order, and parks
+	/// behind it; a later drop detaches the now-attached session.
+	#[tokio::test]
+	async fn first_request_through_a_clone_attaches_it() {
+		let (parent, _state, sessions) = session_with_replay(vec![
+			Command::Attach {
+				session_id: Uuid::nil(),
+			},
+			set_cmd("x", 1),
+		]);
+		let sink = RwLock::new(Vec::<MockMessage>::new());
+		let clone = Uuid::new_v4();
+		handle_session_clone::<MockMessage, _, _>(parent, clone, &sessions, &sink).await;
+		let clone_state = sessions.get(&clone).unwrap().unwrap();
+
+		let (route, _receiver) = route_for(clone);
+		handle_route::<MockMessage, _, _>(route, None, &sessions, &sink).await;
+		assert_eq!(sink.read().await.len(), 1, "only the first setup command is in flight");
+		assert_eq!(clone_state.deferred.lock().unwrap().len(), 1, "the request parks behind it");
+
+		ack_replay(clone, &clone_state, &sessions, &sink, Ok(DbResult::Other(Value::None))).await;
+		ack_replay(clone, &clone_state, &sessions, &sink, Ok(DbResult::Other(Value::None))).await;
+		assert!(replay_cursor(&clone_state).is_none(), "setup should be finished");
+		assert_eq!(sink.read().await.len(), 3, "attach, set, then the released request");
+
+		handle_session_drop::<MockMessage, _, _>(clone, &sessions, &sink).await;
+		assert_eq!(sink.read().await.len(), 4, "an attached clone is detached");
 	}
 
 	/// The replay log is order-sensitive: two `set`s of one key leave different
