@@ -4,6 +4,7 @@
 mod background_flusher;
 mod cnf;
 mod commit_coordinator;
+mod snapshot;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,14 +14,17 @@ use background_flusher::BackgroundFlusher;
 use chrono::{DateTime, Utc};
 pub use cnf::SurrealKvConfig;
 use commit_coordinator::CommitCoordinator;
+use snapshot::SurrealKvSnapshot;
 use surrealdb_kvs::api::{BoxFut, GetMultiResult, KeysResult, ScanResult, Transactable};
 use surrealdb_kvs::config::SyncMode;
 use surrealdb_kvs::err::{Error, Result};
+use surrealdb_kvs::snapshot::ViewCapabilities;
 use surrealdb_kvs::timestamp::{
 	BoxTimeStamp, BoxTimeStampImpl, MAX_TIMESTAMP_BYTES, TimeStamp, TimeStampImpl,
 };
 use surrealdb_kvs::{
-	Direction, Key, KeyRange, Metrics, SavepointStack, TransactionBuilder, TransactionType, Val,
+	Direction, Key, KeyRange, Metrics, SavepointStack, Snapshot, TransactionBuilder,
+	TransactionType, Val,
 };
 use surrealkv::{
 	Durability, HistoryOptions, LSMIterator, Mode, Transaction as Tx, Tree, TreeBuilder,
@@ -55,14 +59,14 @@ pub struct Datastore {
 }
 
 pub struct Transaction {
-	/// Is the transaction complete?
-	done: AtomicBool,
+	/// Is the transaction complete? Shared with the read view, which refuses once it is set.
+	done: Arc<AtomicBool>,
 	/// Is the transaction writeable?
 	write: bool,
 	/// Whether the datastore supports transaction versioning
 	versioned: bool,
-	/// The underlying datastore transaction
-	inner: RwLock<Tx>,
+	/// The underlying datastore transaction, shared with the read view and its cursors.
+	inner: Arc<RwLock<Tx>>,
 	/// Engine savepoints backing each open savepoint.
 	///
 	/// Always acquired before `inner` and held across it, so the scope counts
@@ -219,10 +223,10 @@ impl Datastore {
 		txn.set_durability(Durability::Eventual);
 		// Return the new transaction
 		Ok(Box::new(Transaction {
-			done: AtomicBool::new(false),
+			done: Arc::new(AtomicBool::new(false)),
 			write: matches!(write, TransactionType::Write),
 			versioned: self.versioned,
-			inner: RwLock::new(txn),
+			inner: Arc::new(RwLock::new(txn)),
 			savepoints: RwLock::new(SavepointStack::default()),
 			commit_coordinator: self.commit_coordinator.clone(),
 		}))
@@ -285,6 +289,30 @@ impl Transactable for Transaction {
 	/// the caller runs its rows; each chunk takes the transaction's lock for its own length only.
 	fn scan_read_ahead(&self) -> bool {
 		true
+	}
+
+	/// A read-only transaction gives a view of its engine snapshot, and a writable one gives none.
+	///
+	/// A read-only transaction holds one fixed engine snapshot and an empty write set, so every
+	/// read through it is the view. The engine's iterators always merge the transaction's write
+	/// set, so a view of a writable transaction would show the owner's later writes through it.
+	fn snapshot(&self) -> Option<Arc<dyn Snapshot>> {
+		if self.write || self.done.load(Ordering::Acquire) {
+			return None;
+		}
+		Some(Arc::new(SurrealKvSnapshot {
+			inner: Arc::clone(&self.inner),
+			done: Arc::clone(&self.done),
+			versioned: self.versioned,
+		}))
+	}
+
+	/// Read-only transactions give a view; writable ones never do.
+	fn view_capabilities(&self) -> ViewCapabilities {
+		ViewCapabilities {
+			read_only: true,
+			writable: false,
+		}
 	}
 
 	/// Cancels the transaction.
@@ -1017,6 +1045,11 @@ impl Transactable for Transaction {
 	/// Set a new save point on the transaction.
 	fn new_save_point(&self) -> BoxFut<'_, Result<()>> {
 		Box::pin(async move {
+			// A read-only transaction takes no write lock except in `cancel`, so views and their
+			// cursors never wait on the owner.
+			if !self.write {
+				return Err(Error::TransactionReadonly);
+			}
 			let mut savepoints = self.savepoints.write().await;
 			self.inner.write().await.set_savepoint().map_err(kvs_error)?;
 			// Counted only once the engine has accepted the savepoint, so a
@@ -1174,81 +1207,104 @@ struct HistoryCursor<'a> {
 }
 
 impl HistoryCursor<'_> {
-	/// Advance to the next key which holds a value as of `self.ts`, and return it. The value is
-	/// read only when `with_value` is set, and is empty otherwise.
-	fn advance(&mut self, with_value: bool) -> Result<Option<(Vec<u8>, Val)>> {
+	/// The next visible entry, with its value when `val` is given.
+	fn step(&mut self, key: &mut Vec<u8>, val: Option<&mut Vec<u8>>) -> Result<bool> {
 		match self.dir {
-			Direction::Forward => {
-				while self.inner.valid() {
-					let key_ref = self.inner.key();
-					// A version newer than `ts` is not the state of this key as of `ts`
-					if key_ref.timestamp() > self.ts {
-						self.inner.next().map_err(kvs_error)?;
-						continue;
-					}
-					// The newest version at or before `ts` is the state of this key as of `ts`
-					let user_key = key_ref.user_key().to_vec();
-					let live = !key_ref.is_tombstone();
-					let value = if live && with_value {
-						self.inner.value().map_err(kvs_error)?
-					} else {
-						Val::new()
-					};
-					// Skip the remaining older versions of this key
-					loop {
-						self.inner.next().map_err(kvs_error)?;
-						if !self.inner.valid() || self.inner.key().user_key() != user_key {
-							break;
-						}
-					}
-					// Pass over a key which was deleted as of `ts`
-					if live {
-						return Ok(Some((user_key, value)));
-					}
-				}
-				Ok(None)
-			}
-			Direction::Backward => {
-				while self.inner.valid() {
-					// Extract the user key once (owned for comparison across iterations)
-					let user_key = self.inner.key().user_key().to_vec();
-					// Whether the newest version seen at or before `ts` holds a value, and
-					// that value. Each newer version replaces the one before it.
-					let mut state: Option<(bool, Val)> = None;
-					// Scan all versions of the current key, oldest first
-					while self.inner.valid() && self.inner.key().user_key() == user_key {
-						let key_ref = self.inner.key();
-						if key_ref.timestamp() <= self.ts {
-							let live = !key_ref.is_tombstone();
-							let value = if live && with_value {
-								self.inner.value().map_err(kvs_error)?
-							} else {
-								Val::new()
-							};
-							state = Some((live, value));
-						}
-						// Continue to the next newer version
-						self.inner.prev().map_err(kvs_error)?;
-					}
-					// Pass over a key which was deleted as of `ts`, or created after it
-					if let Some((true, value)) = state {
-						return Ok(Some((user_key, value)));
-					}
-				}
-				Ok(None)
-			}
+			Direction::Forward => history_forward(&mut *self.inner, self.ts, key, val),
+			Direction::Backward => history_backward(&mut *self.inner, self.ts, key, val),
 		}
 	}
 }
 
 impl Cursor for HistoryCursor<'_> {
 	fn next_key(&mut self) -> Result<Option<Vec<u8>>> {
-		Ok(self.advance(false)?.map(|(key, _)| key))
+		let mut key = Vec::new();
+		Ok(self.step(&mut key, None)?.then_some(key))
 	}
 
 	fn next_entry(&mut self) -> Result<Option<(Vec<u8>, Val)>> {
-		self.advance(true)
+		let mut key = Vec::new();
+		let mut val = Vec::new();
+		Ok(self.step(&mut key, Some(&mut val))?.then_some((key, val)))
 	}
+}
+
+// History entries are sorted (key ASC, timestamp DESC), so forward iteration yields the newest
+// version of a key first, and backward iteration yields its oldest version first. These two
+// functions are the one rule that chooses which version of a key a read as of `ts` sees; every
+// read of a version, whole-range or cursor, goes through them. The iterator has tombstones
+// visible, so the newest version at or before `ts` is the state of the key as of `ts`: a value,
+// or a tombstone, in which case the key was deleted as of `ts` and is not yielded.
+//
+// Each leaves the chosen user key in `key` and, when `val` is given, its value in `val`, and
+// returns whether there was one. The iterator is left on the first entry of a later user key, or
+// invalid.
+
+/// Forward: the first entry at or before `ts` is the key's latest version, and the key's older
+/// versions are passed over.
+fn history_forward<I: LSMIterator + ?Sized>(
+	iter: &mut I,
+	ts: u64,
+	key: &mut Vec<u8>,
+	mut val: Option<&mut Vec<u8>>,
+) -> Result<bool> {
+	while iter.valid() {
+		let entry = iter.key();
+		// A version newer than `ts` is not the state of this key as of `ts`
+		if entry.timestamp() > ts {
+			iter.next().map_err(kvs_error)?;
+			continue;
+		}
+		let live = !entry.is_tombstone();
+		key.clear();
+		key.extend_from_slice(entry.user_key());
+		if live && let Some(val) = &mut val {
+			**val = iter.value().map_err(kvs_error)?;
+		}
+		// Skip the remaining older versions of this key
+		loop {
+			iter.next().map_err(kvs_error)?;
+			if !iter.valid() || iter.key().user_key() != key.as_slice() {
+				break;
+			}
+		}
+		// Pass over a key which was deleted as of `ts`
+		if live {
+			return Ok(true);
+		}
+	}
+	Ok(false)
+}
+
+/// Backward: every version of the key is passed, oldest first, and the last one at or before `ts`
+/// is the key's latest version. A key with no version at or before `ts`, or whose latest version
+/// is a tombstone, is skipped.
+fn history_backward<I: LSMIterator + ?Sized>(
+	iter: &mut I,
+	ts: u64,
+	key: &mut Vec<u8>,
+	mut val: Option<&mut Vec<u8>>,
+) -> Result<bool> {
+	while iter.valid() {
+		let mut live = false;
+		key.clear();
+		key.extend_from_slice(iter.key().user_key());
+		while iter.valid() && iter.key().user_key() == key.as_slice() {
+			let entry = iter.key();
+			if entry.timestamp() <= ts {
+				live = !entry.is_tombstone();
+				if live && let Some(val) = &mut val {
+					**val = iter.value().map_err(kvs_error)?;
+				}
+			}
+			// Continue to the previous version
+			iter.prev().map_err(kvs_error)?;
+		}
+		if live {
+			return Ok(true);
+		}
+	}
+	Ok(false)
 }
 
 // Consume and iterate over only keys
