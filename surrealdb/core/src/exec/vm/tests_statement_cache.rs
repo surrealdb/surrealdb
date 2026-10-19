@@ -268,6 +268,8 @@ async fn a_database_with_another_name_is_served_its_own_compilation() {
 const READS: &[(&str, &str, &[i64])] = &[
 	("SELECT * FROM $id", "id", &[1, 2, 3, 4, 9]),
 	("SELECT VALUE name FROM $id", "id", &[4, 1]),
+	("SELECT * FROM ONLY $id", "id", &[3, 9, 1]),
+	("SELECT name FROM $id LIMIT 1 FETCH friends", "id", &[2, 9]),
 	("SELECT name, age FROM type::record('person', $n)", "n", &[1, 2, 3, 4, 9]),
 	("SELECT VALUE id FROM person WHERE age = $n ORDER BY id", "n", &[25, 31, 99]),
 	("SELECT * FROM person WHERE age > $n ORDER BY age, id LIMIT 2", "n", &[0, 26, 40]),
@@ -736,4 +738,235 @@ async fn a_kept_plan_is_served_across_changes_it_did_not_read_and_compiled_again
 	.await;
 	assert_eq!(read(1).await, "['c-new']");
 	assert_eq!(now(), stats(4, 2, 0), "a database defined again is compiled for afresh");
+}
+
+const CLASSES: &str = "
+	DEFINE ACCESS user ON DATABASE TYPE RECORD;
+	DEFINE TABLE pk SCHEMAFULL PERMISSIONS FULL;
+	DEFINE FIELD name ON pk TYPE string;
+	DEFINE FIELD secret ON pk TYPE string PERMISSIONS FOR select NONE;
+	DEFINE FIELD owner ON pk TYPE record<user>;
+	DEFINE TABLE ls SCHEMALESS PERMISSIONS FOR select WHERE owner = $auth;
+	CREATE pk:1 SET name = 'p1', secret = 's1', owner = user:alice;
+	CREATE pk:2 SET name = 'p2', secret = 's2', owner = user:bob;
+	CREATE ls:1 SET name = 'l1', owner = user:alice, extra = true;
+	CREATE ls:2 SET name = 'l2', owner = user:bob;
+";
+
+/// The answer of `sql` with `vars` bound, as SurrealQL, or its error, for `session`.
+async fn either_as(
+	ds: &Datastore,
+	session: &Session,
+	sql: &str,
+	vars: Option<Variables>,
+) -> String {
+	match ds.execute(sql, session, vars).await.expect("the request runs").remove(0).result {
+		Ok(value) => value.to_sql(),
+		Err(e) => format!("error: {}", e.message()),
+	}
+}
+
+/// `value` written in place of `$id` in `sql`.
+fn written(sql: &str, value: &surrealdb_types::Value) -> String {
+	sql.replace("$id", &value.to_sql())
+}
+
+/// A statement that reads `FROM $id` only as its source is kept for the class of the value: two
+/// records of one table share one compilation, each answered with its own row, and a record of
+/// another table is compiled afresh and kept beside it.
+#[tokio::test]
+async fn a_source_variable_is_kept_for_the_table_its_record_names() {
+	let db = TestDb::new(CLASSES).await;
+	let (ds, owner) = (db.datastore(), TestDb::owner());
+	let base = ds.statement_cache_stats();
+	let now = || since(base, ds.statement_cache_stats());
+	for sql in ["SELECT * FROM $id", "SELECT name FROM ONLY $id"] {
+		let before = now();
+		let mut seen = Vec::new();
+		for (value, served) in [
+			(record("pk", 1), stats(0, 1, 0)),
+			(record("pk", 2), stats(1, 0, 0)),
+			(record("ls", 1), stats(0, 1, 0)),
+			(record("pk", 1), stats(1, 0, 0)),
+			(record("ls", 2), stats(1, 0, 0)),
+		] {
+			let at = now();
+			let got = either_as(ds, &owner, sql, bound("id", value.clone())).await;
+			assert_eq!(got, either_as(ds, &owner, &written(sql, &value), None).await, "{sql}");
+			assert_eq!(since(at, now()), served, "{sql} with {}", value.to_sql());
+			seen.push(got);
+		}
+		assert_ne!(seen[0], seen[1], "each record answers its own row");
+		assert_eq!(seen[0], seen[3]);
+		assert_eq!(since(before, now()), stats(3, 2, 0));
+	}
+}
+
+/// A record user is shown what the table the record names allows, cached or not: the field a
+/// permission hides on one table, the rows another table's permission refuses.
+#[tokio::test]
+async fn a_kept_source_variable_enforces_the_permissions_of_the_table_its_record_names() {
+	for size in [None, Some("0")] {
+		let config = match size {
+			Some(size) => ConfigMap::empty().with_key_value("statement_cache_size", size),
+			None => ConfigMap::empty(),
+		};
+		let db = TestDb::new_with_auth_and_config(CLASSES, config).await;
+		let ds = db.datastore();
+		let alice = record_user("alice");
+		for sql in ["SELECT * FROM $id", "SELECT * FROM ONLY $id", "SELECT VALUE secret FROM $id"] {
+			for _ in 0..2 {
+				for value in [record("pk", 1), record("ls", 1), record("ls", 2), record("pk", 2)] {
+					assert_eq!(
+						either_as(ds, &alice, sql, bound("id", value.clone())).await,
+						either_as(ds, &alice, &written(sql, &value), None).await,
+						"{sql} with {} (cache size {size:?})",
+						value.to_sql(),
+					);
+				}
+			}
+		}
+	}
+}
+
+/// A value that is not a record id naming one record, or an array of them, is never served a kept
+/// compilation: the statement is compiled with its request and answers as main does.
+#[tokio::test]
+async fn a_source_variable_bound_to_another_value_is_compiled_with_its_request() {
+	let range = surrealdb_types::Value::RecordId(RecordId::new(
+		"pk",
+		surrealdb_types::RecordIdKey::Range(Box::new(surrealdb_types::RecordIdKeyRange {
+			start: std::ops::Bound::Included(surrealdb_types::RecordIdKey::Number(1)),
+			end: std::ops::Bound::Included(surrealdb_types::RecordIdKey::Number(2)),
+		})),
+	));
+	let mixed = surrealdb_types::Value::Array(surrealdb_types::Array::from(vec![
+		record("pk", 1),
+		surrealdb_types::Value::String("pk".into()),
+	]));
+	let object = {
+		let mut object = surrealdb_types::Object::new();
+		object.insert("a".to_owned(), surrealdb_types::Value::Number(1.into()));
+		surrealdb_types::Value::Object(object)
+	};
+	let values = [
+		table("pk"),
+		surrealdb_types::Value::String("pk".into()),
+		range,
+		mixed,
+		surrealdb_types::Value::None,
+		object,
+	];
+	let cached = TestDb::new(CLASSES).await;
+	let plain = TestDb::new_with_config(
+		CLASSES,
+		ConfigMap::empty().with_key_value("statement_cache_size", "0"),
+	)
+	.await;
+	let owner = TestDb::owner();
+	let base = cached.datastore().statement_cache_stats();
+	for sql in ["SELECT * FROM $id", "SELECT * FROM ONLY $id"] {
+		for value in &values {
+			for _ in 0..2 {
+				assert_eq!(
+					either_as(cached.datastore(), &owner, sql, bound("id", value.clone())).await,
+					either_as(plain.datastore(), &owner, sql, bound("id", value.clone())).await,
+					"{sql} with {}",
+					value.to_sql(),
+				);
+			}
+		}
+	}
+	assert_eq!(since(base, cached.datastore().statement_cache_stats()), stats(0, 0, 0));
+}
+
+/// An array of record ids is kept for the tables it names, whatever records of them it holds; an
+/// array naming other tables, or none, is compiled afresh. Missing records, a table that does not
+/// exist and `ONLY` over an array answer as the value written in place does.
+#[tokio::test]
+async fn a_source_variable_bound_to_records_is_kept_for_the_tables_they_name() {
+	let db = TestDb::new(CLASSES).await;
+	let (ds, owner) = (db.datastore(), TestDb::owner());
+	let base = ds.statement_cache_stats();
+	let now = || since(base, ds.statement_cache_stats());
+	let array = |items: Vec<surrealdb_types::Value>| {
+		surrealdb_types::Value::Array(surrealdb_types::Array::from(items))
+	};
+	let sql = "SELECT VALUE name FROM $id";
+	for (value, served) in [
+		(array(vec![record("pk", 1), record("ls", 1)]), stats(0, 1, 0)),
+		(array(vec![record("ls", 2), record("pk", 2), record("pk", 1)]), stats(1, 0, 0)),
+		(array(vec![record("pk", 9)]), stats(0, 1, 0)),
+		(array(vec![record("pk", 2)]), stats(1, 0, 0)),
+		(array(vec![]), stats(0, 1, 0)),
+	] {
+		let at = now();
+		assert_eq!(
+			either_as(ds, &owner, sql, bound("id", value.clone())).await,
+			either_as(ds, &owner, &written(sql, &value), None).await,
+			"{}",
+			value.to_sql(),
+		);
+		assert_eq!(since(at, now()), served, "{}", value.to_sql());
+	}
+	for (sql, value) in [
+		("SELECT * FROM ONLY $id", array(vec![record("pk", 1), record("pk", 2)])),
+		("SELECT * FROM ONLY $id", record("pk", 9)),
+		("SELECT * FROM ONLY $id", record("nosuch", 1)),
+		("SELECT * FROM $id", record("nosuch", 1)),
+		("SELECT * FROM $id", array(vec![record("nosuch", 1), record("pk", 1)])),
+	] {
+		for _ in 0..2 {
+			assert_eq!(
+				either_as(ds, &owner, sql, bound("id", value.clone())).await,
+				either_as(ds, &owner, &written(sql, &value), None).await,
+				"{sql} with {}",
+				value.to_sql(),
+			);
+		}
+	}
+}
+
+/// A kept compilation reads the table its source's record names as the catalog holds it when the
+/// statement runs: a field defined on it afterwards is read, and one removed is not.
+#[tokio::test]
+async fn a_field_defined_on_the_table_a_kept_source_variable_names_is_read() {
+	let db = TestDb::new(CLASSES).await;
+	let (ds, owner) = (db.datastore(), TestDb::owner());
+	let sql = "SELECT VALUE twice FROM ONLY $id";
+	let read = |n: i64| either_as(ds, &owner, sql, bound("id", record("ls", n)));
+	assert_eq!(read(1).await, "NONE");
+	assert_eq!(read(2).await, "NONE");
+	db.run("DEFINE FIELD twice ON ls COMPUTED string::concat(name, name)").await;
+	assert_eq!(read(1).await, "'l1l1'");
+	assert_eq!(read(2).await, "'l2l2'");
+	db.run("REMOVE FIELD twice ON ls").await;
+	assert_eq!(read(1).await, "NONE");
+}
+
+/// A statement that filters or orders the rows of `FROM $id`, or reads it with an index hint, is
+/// compiled with its request: main resolves the source to the record the value names, and its plan
+/// may choose by that record's table.
+#[tokio::test]
+async fn a_source_variable_a_statement_filters_or_orders_is_compiled_with_its_request() {
+	let db = TestDb::new(CLASSES).await;
+	let (ds, owner) = (db.datastore(), TestDb::owner());
+	let base = ds.statement_cache_stats();
+	for sql in [
+		"SELECT * FROM $id WHERE name = 'p1'",
+		"SELECT * FROM $id ORDER BY name",
+		"SELECT * FROM $id WITH NOINDEX",
+		"SELECT name, (SELECT VALUE name FROM pk:2) AS other FROM $id",
+		"SELECT * FROM $id GROUP ALL",
+	] {
+		for n in [1, 2] {
+			let value = record("pk", n);
+			assert_eq!(
+				either_as(ds, &owner, sql, bound("id", value.clone())).await,
+				either_as(ds, &owner, &written(sql, &value), None).await,
+				"{sql}",
+			);
+		}
+	}
+	assert_eq!(since(base, ds.statement_cache_stats()), stats(0, 0, 0));
 }

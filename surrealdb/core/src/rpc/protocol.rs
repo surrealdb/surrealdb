@@ -117,6 +117,10 @@ pub(crate) async fn settle_detached_live_queries(
 /// so this bounds the wait rather than trusting the consumer to.
 const QUERY_STREAM_STOP_GRACE: Duration = Duration::from_secs(5);
 
+/// The variable the `select` method reads a single record through, the name
+/// the SDK's own `select` binds it under.
+const SELECT_RECORD_PARAM: &str = "_record_id";
+
 /// The session a streaming execution's `LIVE SELECT`s may be registered
 /// against, held so that registering them cannot race the teardown that would
 /// have removed them.
@@ -1396,8 +1400,17 @@ pub trait RpcProtocol {
 			_ => false,
 		};
 
-		// If value is a string, handle it as if it was a table.
+		// Specify the query parameters
+		let mut vars = session.variables.clone();
+
+		// A single record is read through a variable, so the statement is one
+		// text whichever record it names, kept compiled for later requests. If
+		// value is a string, handle it as if it was a table.
 		let what = match what {
+			PublicValue::RecordId(id) if only => {
+				vars.insert(SELECT_RECORD_PARAM, PublicValue::RecordId(id));
+				Expr::Param(crate::expr::Param::from(SELECT_RECORD_PARAM.to_owned()))
+			}
 			PublicValue::String(x) => Expr::Table(surrealdb_strand::TableName::new(x)),
 			x => Expr::from_surface_value(x),
 		};
@@ -1424,12 +1437,11 @@ pub trait RpcProtocol {
 		};
 		let ast = Ast::single_expr(Expr::Select(Box::new(sql)));
 
-		// Specify the query parameters
-		let vars = Some(session.variables.clone());
 		// Execute the query on the database
-		let mut res = run_query(self, txn, session_id, &session, QueryForm::Parsed(ast), vars)
-			.await
-			.map_err(types_error_from_anyhow)?;
+		let mut res =
+			run_query(self, txn, session_id, &session, QueryForm::Parsed(ast), Some(vars))
+				.await
+				.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
 		let first = res.remove(0).result?;
 		Ok(DbResult::Other(first))
@@ -3156,6 +3168,77 @@ mod tests {
 		match rpc.execute(None, sid, Some(sid), method, params.into()).await? {
 			DbResult::Other(value) => Ok(value),
 			other => panic!("`{method}` answered {other:?}"),
+		}
+	}
+
+	/// `select` of one record reads it through a variable, so the statement is
+	/// kept compiled for later requests: a second record of the table is a hit.
+	/// What it answers, a missing record, a table that does not exist and a
+	/// record a permission hides are answered as the statement with the record
+	/// written in place answers them.
+	#[tokio::test]
+	async fn select_rpc_of_one_record_is_kept_compiled_and_answers_as_written() {
+		use surrealdb_types::ToSql;
+		let db = crate::exec::operators::test_util::TestDb::new_with_auth(
+			"DEFINE ACCESS user ON DATABASE TYPE RECORD;
+			DEFINE TABLE doc SCHEMALESS PERMISSIONS FOR select WHERE owner = $auth;
+			CREATE doc:1 SET owner = user:alice, v = 1;
+			CREATE doc:2 SET owner = user:bob, v = 2;",
+		)
+		.await;
+		let ds = Arc::clone(db.datastore());
+		let rpc = DurableRpc::new(Arc::clone(&ds));
+		let owner = Uuid::from_u128(61);
+		let alice = Uuid::from_u128(62);
+		rpc.set_session(
+			owner,
+			Arc::new(RwLock::new(Session::owner().with_ns("test").with_db("test"))),
+		);
+		let user = PublicValue::RecordId(surrealdb_types::RecordId::new("user", "alice"));
+		rpc.set_session(
+			alice,
+			Arc::new(RwLock::new(Session::for_record("test", "test", "user", user))),
+		);
+		let written = |sid: Uuid, id: &str| {
+			let ds = Arc::clone(&ds);
+			let rpc = &rpc;
+			let id = id.to_owned();
+			async move {
+				let session = rpc.get_session(&sid).await.unwrap();
+				let session = session.read().await.clone();
+				let mut out = ds
+					.execute(&format!("SELECT * FROM ONLY {id}"), &session, None)
+					.await
+					.expect("the request runs");
+				match out.remove(0).result {
+					Ok(value) => value.to_sql(),
+					Err(e) => format!("error: {}", e.message()),
+				}
+			}
+		};
+		let selected = |sid: Uuid, id: &str| {
+			let rpc = &rpc;
+			let id = crate::syn::value(id).unwrap();
+			async move {
+				match answer(rpc, sid, Method::Select, vec![id]).await {
+					Ok(value) => value.to_sql(),
+					Err(e) => format!("error: {}", e.message()),
+				}
+			}
+		};
+		let base = ds.statement_cache_stats();
+		assert_eq!(selected(owner, "doc:1").await, written(owner, "doc:1").await);
+		assert_eq!(selected(owner, "doc:2").await, written(owner, "doc:2").await);
+		let kept = ds.statement_cache_stats();
+		assert_eq!((kept.hits - base.hits, kept.misses - base.misses), (1, 1));
+		for (sid, id) in [
+			(owner, "doc:9"),
+			(owner, "nosuch:1"),
+			(alice, "doc:1"),
+			(alice, "doc:2"),
+			(alice, "nosuch:1"),
+		] {
+			assert_eq!(selected(sid, id).await, written(sid, id).await, "{id}");
 		}
 	}
 

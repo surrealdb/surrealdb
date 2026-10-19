@@ -38,7 +38,7 @@
 
 use std::sync::Arc;
 
-use super::compile_cache::{BuildId, ObjectVersion, UnitKey, UnitObject};
+use super::compile_cache::{BuildId, ObjectVersion, SourceClass, UnitKey, UnitObject};
 use super::program::UnitFrame;
 use crate::exec::{Clause, ExecOperator, ExecutionContext};
 use crate::expr::logical::{LogicalExpr, LogicalOp};
@@ -243,6 +243,7 @@ pub(crate) async fn statement(
 		depth,
 		shadowed,
 		false,
+		Vec::new(),
 	)
 	.await
 }
@@ -252,7 +253,9 @@ pub(crate) async fn statement(
 /// whether the statement is the value of a top-level `LET`, whose plan states
 /// that its rows arrive in the order they were bound. Such a plan differs from
 /// the same statement's anywhere else, so the cache keeps it under `binds_rows`
-/// as well.
+/// as well. `sources` are the names among `shadowed` the statement reads as its
+/// source, with the class of each one's value, which the cache keeps it under
+/// too.
 #[expect(
 	clippy::too_many_arguments,
 	reason = "the statement, the cache and frame it is planned for, and how its rows are read"
@@ -268,6 +271,7 @@ async fn statement_in(
 	depth: u32,
 	mut shadowed: Vec<String>,
 	binds_rows: bool,
+	sources: Vec<(String, SourceClass)>,
 ) -> anyhow::Result<Arc<dyn ExecOperator>> {
 	for name in crate::exec::planner::UNIT_RUNTIME_PARAMS {
 		if !shadowed.iter().any(|shadow| shadow == name) {
@@ -327,6 +331,7 @@ async fn statement_in(
 			depth,
 			shadowed: shadowed.clone(),
 			binds_rows,
+			sources,
 		},
 		principal.as_deref(),
 	);
@@ -369,6 +374,7 @@ pub(crate) async fn request_statement(
 			0,
 			Vec::new(),
 			binds_rows,
+			Vec::new(),
 		)
 		.await;
 	};
@@ -387,6 +393,7 @@ pub(crate) async fn request_statement(
 			0,
 			Vec::new(),
 			binds_rows,
+			Vec::new(),
 		)
 		.await;
 	};
@@ -419,6 +426,7 @@ pub(crate) async fn request_statement(
 			session,
 			shadowed: Vec::new(),
 			binds_rows,
+			sources: Vec::new(),
 		},
 		principal.as_deref(),
 	);
@@ -432,11 +440,11 @@ pub(crate) async fn request_statement(
 /// changing no catalog and holding no `EXPLAIN`.
 ///
 /// The request variables it reads only as the key of a record its sources
-/// name ([`source_only_request_variables`]) are read when it runs, never
-/// folded, so one compilation serves every value of them; it is kept for the
-/// statement as written, the frame and the state of the catalog it read. The
-/// session's own values it reads are folded and keyed as [`request_statement`]
-/// folds and keys them.
+/// name, or only as its source ([`source_only_request_variables`]), are read
+/// when it runs, never folded, so one compilation serves every value of them;
+/// it is kept for the statement as written, the class of each source's value,
+/// the frame and the state of the catalog it read. The session's own values it
+/// reads are folded and keyed as [`request_statement`] folds and keys them.
 pub(crate) async fn kept_request_statement(
 	exec: &ExecutionContext,
 	op: LogicalOp,
@@ -448,7 +456,10 @@ pub(crate) async fn kept_request_statement(
 		.copied()
 		.filter(|name| params.contains(*name))
 		.collect();
-	let bound = source_only_request_variables(&op, exec.ctx());
+	let RunTimeReads {
+		names: bound,
+		sources,
+	} = source_only_request_variables(&op, exec.ctx());
 	let Some(units) = exec.ctx().compiled_units().filter(|_| !folded.is_empty()) else {
 		return statement_in(
 			exec,
@@ -459,6 +470,7 @@ pub(crate) async fn kept_request_statement(
 			0,
 			bound,
 			false,
+			sources,
 		)
 		.await;
 	};
@@ -477,6 +489,7 @@ pub(crate) async fn kept_request_statement(
 			0,
 			bound,
 			false,
+			sources,
 		)
 		.await;
 	};
@@ -508,6 +521,7 @@ pub(crate) async fn kept_request_statement(
 			session,
 			shadowed: bound.clone(),
 			binds_rows: false,
+			sources,
 		},
 		principal.as_deref(),
 	);
@@ -515,23 +529,48 @@ pub(crate) async fn kept_request_statement(
 	served(exec, units.session_statements(), keyed, params, compile).await
 }
 
-/// The request variables `op` reads only as the key of a record its sources
-/// name through `type::record(<table>, $name)`, the table a constant. Main plans such a source as a
-/// value the statement computes when it runs, whatever the key holds: the record's table is not
-/// resolved when the statement is planned, so no decision of the plan (access path, the
-/// table's definitions, a `MATCHES` scope, the catalog the plan depends on)
-/// depends on the key, and one compilation that reads the name when it runs
-/// is the plan main makes for every value of it.
+/// The request variables a kept request statement reads when it runs rather
+/// than folding them into its plan ([`source_only_request_variables`]).
+pub(crate) struct RunTimeReads {
+	/// Every such name: those of [`Self::sources`], and those read only as the
+	/// key of `type::record(<table>, $name)`.
+	pub(crate) names: Vec<String>,
+	/// The names read only as the statement's source, `FROM [ONLY] $name`,
+	/// with the class of the value each holds now.
+	pub(crate) sources: Vec<(String, SourceClass)>,
+}
+
+/// The request variables `op` reads only where one compilation serves every
+/// value of them, read when it runs rather than folded.
+///
+/// A name read only as the key of a record its sources name through
+/// `type::record(<table>, $name)`, the table a constant. Main plans such a
+/// source as a value the statement computes when it runs, whatever the key
+/// holds: the record's table is not resolved when the statement is planned,
+/// so no decision of the plan (access path, the table's definitions, a
+/// `MATCHES` scope, the catalog the plan depends on) depends on the key.
+///
+/// A name read only as the source of a statement that does nothing with its
+/// rows but project, fetch, limit them and take `ONLY` of them, whose value is
+/// a record id naming one record, or an array of such ids
+/// ([`SourceClass`]). Its plan is the one main makes for `FROM $name` whose
+/// value the binder cannot know: the source is read when the statement runs,
+/// and the table it names, its permissions and its fields are resolved then.
+/// The statement is kept under the class of the value, so a value of another
+/// class is compiled afresh. A statement that filters, orders, groups or
+/// splits its rows, holds a `MATCHES`, a nearest-neighbour operator, a
+/// `search::` call or a subquery, or reads `WITH` an index hint is not among
+/// them: main resolves `FROM $name` to the table or record the value names
+/// and its plan may choose by the table, so such a statement is compiled
+/// with its request, as is one bound to a table, a range or any other value.
 ///
 /// A name read anywhere else is folded into the plan by its value and is not
-/// among them: not a `FROM $name`, which main resolves to the table or record
-/// the value names and plans an access path for; not a name an argument of
-/// the call only contains, a filter, a subquery or an operator; and not one a
-/// statement nested in a source reads.
+/// among them: not a name an argument of the call only contains, a filter, a
+/// subquery or an operator; and not one a statement nested in a source reads.
 pub(crate) fn source_only_request_variables(
 	op: &LogicalOp,
 	ctx: &crate::ctx::FrozenContext,
-) -> Vec<String> {
+) -> RunTimeReads {
 	use std::collections::BTreeMap;
 
 	use crate::expr::logical::{LogicalSource, SourceRef};
@@ -546,7 +585,7 @@ pub(crate) fn source_only_request_variables(
 		Ok::<(), std::convert::Infallible>(())
 	});
 	let mut as_keys: BTreeMap<String, usize> = BTreeMap::new();
-	let mut as_sources = std::collections::BTreeSet::new();
+	let mut as_sources: BTreeMap<String, usize> = BTreeMap::new();
 	let _ = op.visit_ops_deep(&mut |node| {
 		if let LogicalOp::Source(LogicalSource {
 			source,
@@ -560,24 +599,126 @@ pub(crate) fn source_only_request_variables(
 					}
 				}
 				SourceRef::Param(param) => {
-					as_sources.insert(param.as_str().to_owned());
+					*as_sources.entry(param.as_str().to_owned()).or_default() += 1;
 				}
 				_ => {}
 			}
 		}
 		std::ops::ControlFlow::<()>::Continue(())
 	});
-	as_keys
-		.into_iter()
+	let readable = |name: &str| {
+		!crate::exec::planner::UNIT_RUNTIME_PARAMS.contains(&name) && ctx.is_request_param(name)
+	};
+	let mut names: Vec<String> = as_keys
+		.iter()
 		.filter(|(name, count)| {
-			everywhere.get(name).copied().unwrap_or(0) == *count && !as_sources.contains(name)
+			everywhere.get(*name).copied().unwrap_or(0) == **count
+				&& !as_sources.contains_key(*name)
+				&& readable(name)
 		})
-		.map(|(name, _)| name)
-		.filter(|name| {
-			!crate::exec::planner::UNIT_RUNTIME_PARAMS.contains(&name.as_str())
-				&& ctx.is_request_param(name)
+		.map(|(name, _)| name.clone())
+		.collect();
+	let mut sources = Vec::new();
+	if as_sources.len() == 1 && reads_only_its_source(op) {
+		for (name, count) in &as_sources {
+			if *count != 1
+				|| everywhere.contains_key(name)
+				|| as_keys.contains_key(name)
+				|| !readable(name)
+			{
+				continue;
+			}
+			let Some(class) = ctx.value(name).and_then(source_class) else {
+				continue;
+			};
+			names.push(name.clone());
+			sources.push((name.clone(), class));
+		}
+	}
+	RunTimeReads {
+		names,
+		sources,
+	}
+}
+
+/// Whether `op` does nothing with the rows of its one source but project,
+/// fetch and limit them and take `ONLY` of them, reading that source with no
+/// index hint, and evaluates no `MATCHES`, nearest-neighbour operator,
+/// `search::` call or subquery: a statement whose plan, main's for a source
+/// whose value the binder cannot know, makes no choice by the table the
+/// source names.
+fn reads_only_its_source(op: &LogicalOp) -> bool {
+	use std::ops::ControlFlow;
+
+	use crate::expr::logical::LogicalSource;
+	let shape = op.visit_ops_deep(&mut |node| match node {
+		LogicalOp::Source(LogicalSource {
+			with: None,
+			for_update: false,
+			..
 		})
-		.collect()
+		| LogicalOp::Project(_)
+		| LogicalOp::Fetch(_)
+		| LogicalOp::Limit(_)
+		| LogicalOp::Only(_) => ControlFlow::Continue(()),
+		_ => ControlFlow::Break(()),
+	});
+	if shape.is_break() {
+		return false;
+	}
+	op.visit_scalars_deep(&mut |scalar| match scalar.visit_deep(&mut |node| match node {
+		LogicalExpr::Subquery(_) => ControlFlow::Break(()),
+		LogicalExpr::Binary {
+			op:
+				crate::expr::BinaryOperator::Matches(_)
+				| crate::expr::BinaryOperator::NearestNeighbor(_),
+			..
+		} => ControlFlow::Break(()),
+		LogicalExpr::Call(call) => match &call.receiver {
+			crate::expr::Function::Normal(name) if name.starts_with("search::") => {
+				ControlFlow::Break(())
+			}
+			_ => ControlFlow::Continue(()),
+		},
+		_ => ControlFlow::Continue(()),
+	}) {
+		ControlFlow::Break(()) => Err(()),
+		ControlFlow::Continue(()) => Ok(()),
+	})
+	.is_ok()
+}
+
+/// The class of `value` as the source of a kept statement: a record id whose
+/// key names one record, or an array of such ids; `None` for any other value
+/// — a table, a range, a record id whose key holds a closure, which has no
+/// literal form, a mixed array.
+fn source_class(value: &crate::val::Value) -> Option<SourceClass> {
+	use crate::val::Value;
+	fn one(value: &Value) -> Option<&crate::val::TableName> {
+		match value {
+			Value::RecordId(id) if !id.key.is_range() => Some(&id.table),
+			_ => None,
+		}
+	}
+	if crate::exec::planner::util::substitution_is_lossy(value) {
+		return None;
+	}
+	match value {
+		Value::Array(items) => {
+			// Borrowed until the distinct tables are known, so an array of
+			// many ids of few tables clones each table once.
+			let mut tables = Vec::new();
+			for item in items.iter() {
+				let table = one(item)?;
+				if !tables.contains(&table) {
+					tables.push(table);
+				}
+			}
+			tables.sort();
+			Some(SourceClass::Records(tables.into_iter().cloned().collect()))
+		}
+		_ => one(value).cloned().map(SourceClass::Record),
+	}
 }
 
 /// The name `expr` reads as the key of a record of a constant table:
@@ -603,13 +744,12 @@ fn record_key_param(expr: &LogicalExpr) -> Option<&str> {
 
 /// Whether `op`, a top-level statement of a request, is kept compiled for
 /// later requests: it reads a request variable, and reads every one it reads
-/// only as the key of a record its sources name
+/// where one compilation serves every value of it
 /// ([`source_only_request_variables`]), so a request that binds other values
 /// to them is served the compilation. A statement that reads none, or reads
-/// one elsewhere (a `FROM $name` among those places), is compiled with its
-/// request.
+/// one elsewhere, is compiled with its request.
 pub(crate) fn kept_for_requests(op: &LogicalOp, ctx: &crate::ctx::FrozenContext) -> bool {
-	let source_only = source_only_request_variables(op, ctx);
+	let source_only = source_only_request_variables(op, ctx).names;
 	if source_only.is_empty() {
 		return false;
 	}

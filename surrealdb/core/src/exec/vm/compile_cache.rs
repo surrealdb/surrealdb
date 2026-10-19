@@ -88,6 +88,19 @@ pub(crate) enum ObjectVersion {
 	Inline,
 }
 
+/// The class of the value a kept request statement reads as its source when
+/// it runs (`FROM $name`): what the statement is kept under besides its text,
+/// so a value of another class is never served the compilation kept for this
+/// one. The compilation reads the value when it runs and holds none of it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum SourceClass {
+	/// A record id of the table, whose key names one record.
+	Record(crate::val::TableName),
+	/// An array whose every element is such a record id, by the tables they
+	/// name, sorted and each named once; empty for an empty array.
+	Records(Vec<crate::val::TableName>),
+}
+
 /// The catalog object a unit is compiled from.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum UnitObject {
@@ -125,12 +138,15 @@ pub(crate) enum UnitObject {
 	/// depth `depth`, with the names `shadowed` read when it runs
 	/// ([`super::serve::statement`]); `binds_rows` is whether it is the value
 	/// of a top-level `LET`, whose plan states that its rows arrive in the
-	/// order they were bound.
+	/// order they were bound. `sources` are the names among `shadowed` the
+	/// statement reads as its source, each with the class of the value it was
+	/// compiled for ([`SourceClass`]).
 	Statement {
 		op: Arc<crate::expr::logical::LogicalOp>,
 		depth: u32,
 		shadowed: Vec<String>,
 		binds_rows: bool,
+		sources: Vec<(String, SourceClass)>,
 	},
 	/// A top-level statement of a request served when it is reached, planned
 	/// with the values the session's own parameters it reads hold folded in,
@@ -142,6 +158,7 @@ pub(crate) enum UnitObject {
 		session: ArgValues,
 		shadowed: Vec<String>,
 		binds_rows: bool,
+		sources: Vec<(String, SourceClass)>,
 	},
 	/// A front end's plan — a GQL query `eval::gql` evaluates — compiled at
 	/// re-entry depth `depth`, with the names `shadowed` read when it runs
