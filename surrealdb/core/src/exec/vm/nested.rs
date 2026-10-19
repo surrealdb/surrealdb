@@ -481,18 +481,21 @@ async fn values(
 	}
 }
 
-/// The records `value` names as storage holds them, read as a write's
-/// subjects, which the write's gate judges as it writes each one: no
-/// permission or computed field is applied to them here. A record id, and an
-/// object carrying one as its `id`, is the record stored under that id, and no
-/// row where none is: the object is never taken as the record's image. A
-/// record range or a
+/// The records `value` names as storage holds them, read as a write's subjects,
+/// which the write's gate judges as it writes each one: no permission or
+/// computed field is applied to them here. A record id, and an object carrying
+/// one as its `id`, is the record stored under that id, and no row where none
+/// is: the object is never taken as the record's image. A record range or a
 /// table is every record stored in it, in key order, read as the write takes
-/// them, the table required to be defined. An array's elements are the rows,
-/// an element that is an array contributing its elements, one level deep,
-/// where `written`; each record id or object among them is read as one is,
-/// and a range among them names no row, as a read of the array reads none.
-/// `NONE` and `NULL` are no row, and any other value is one row.
+/// them. Its table is required to be defined, and an undefined one answers as
+/// the same target written out answers it: no row to a caller whose reads are
+/// permission-checked ([`absent_and_hidden`]), and the error of an undefined
+/// table to any other. An array's
+/// elements are the rows, an element that is an array contributing its
+/// elements, one level deep, where `written`; each record id or object among
+/// them is read as one is, and a range among them names no row, as a read of
+/// the array reads none. `NONE` and `NULL` are no row, and any other value is
+/// one row.
 async fn stored_records(value: Value, written: bool, ctx: &ExecutionContext) -> FlowResult<Values> {
 	let version = ctx.version_stamp();
 	let subjects = match value {
@@ -500,6 +503,9 @@ async fn stored_records(value: Value, written: bool, ctx: &ExecutionContext) -> 
 			table,
 			key: RecordIdKey::Range(range),
 		}) => {
+			if absent_and_hidden(ctx, &table, version).await? {
+				return Ok(Values::Rows(Vec::new(), None));
+			}
 			require_defined(ctx, &table, version).await?;
 			let scan =
 				crate::exec::operators::write::scan_subjects(ctx, &table, Some(&range)).await?;

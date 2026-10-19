@@ -165,7 +165,8 @@ pub(crate) mod store;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod tests_enforced;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_expression_ranges;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]

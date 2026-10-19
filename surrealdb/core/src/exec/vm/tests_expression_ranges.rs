@@ -434,23 +434,138 @@ async fn a_table_a_block_defined_after_reading_its_absence_is_read() {
 	}
 }
 
+/// `rr:[1]..=[1]` beside a range and beside a table of the undefined table
+/// `nope`, each yielded by an expression and written out.
+const UNDEFINED_TARGETS: [(&str, &str); 2] = [
+	("(IF rand::int(1, 1) = 1 { nope:[1].. } ELSE { NONE })", "nope:[1].."),
+	("(IF rand::int(1, 1) = 1 { nope } ELSE { NONE })", "nope"),
+];
+
 #[tokio::test]
-async fn a_mixed_write_over_an_undefined_tables_range_is_refused() {
-	for write in [
-		"UPDATE rr:[1]..=[1], (IF rand::int(1, 1) = 1 { nope:[1].. } ELSE { NONE }) SET touched = true",
-		"UPDATE rr:[1]..=[1], (IF rand::int(1, 1) = 1 { nope } ELSE { NONE }) SET touched = true",
-		"DELETE rr:[1]..=[1], (IF rand::int(1, 1) = 1 { nope:[1].. } ELSE { NONE })",
+async fn a_mixed_write_over_an_undefined_table_answers_as_written_out() {
+	// A range or a table of an undefined table that an expression yields
+	// answers as the same target written out does, to the owner and to a
+	// record user: the statement's answer, the tables the catalog holds after
+	// it, and the records it leaves.
+	let mut wrong = Vec::new();
+	for (who, session) in [("owner", TestDb::owner()), ("record user", record_user())] {
+		for write in [
+			"UPDATE rr:[1]..=[1], {target} SET touched = true RETURN VALUE id",
+			"UPDATE rr:[1]..=[1], {target} SET touched = true WHERE true RETURN VALUE id",
+			"DELETE rr:[1]..=[1], {target} RETURN VALUE id",
+			"UPSERT rr:[1]..=[1], {target} SET touched = true RETURN VALUE record::tb(id)",
+			"UPSERT rr:[1]..=[1], {target} SET touched = true WHERE true RETURN VALUE record::tb(id)",
+		] {
+			for (expression, written) in UNDEFINED_TARGETS {
+				let mut seen = Vec::new();
+				for target in [expression, written] {
+					let db = TestDb::new_with_auth(GUARDED).await;
+					let answer = values_as(&db, &session, &write.replace("{target}", target)).await;
+					let tables = last(&db, "RETURN object::keys((INFO FOR DB).tables)").await;
+					let records = last(&db, "SELECT VALUE [id, touched] FROM rr ORDER BY id").await;
+					seen.push((answer, tables, records));
+				}
+				if seen[0] != seen[1] {
+					wrong.push(format!("{who}: {write} over {expression} and {written}: {seen:?}"));
+				}
+			}
+		}
+	}
+	assert!(wrong.is_empty(), "{wrong:#?}");
+	// What both forms answer, and the records they leave: an `UPDATE` or a
+	// `DELETE` naming an undefined table is refused to a caller whose reads
+	// are not permission-checked, and writes nothing, not even the targets
+	// before the undefined one; to a caller whose reads are checked the
+	// absence is hidden, and the other targets are written as they are alone;
+	// an `UPSERT` defines the table on demand.
+	let (range, table) = (UNDEFINED_TARGETS[0].0, UNDEFINED_TARGETS[1].0);
+	let refused = Value::from("The table 'nope' does not exist".to_string());
+	for (who, session, write, answer, touched, kept) in [
+		(
+			"owner",
+			TestDb::owner(),
+			format!("UPDATE rr:[1]..=[1], {range} SET touched = true RETURN VALUE id"),
+			refused.clone(),
+			"[]",
+			true,
+		),
+		(
+			"owner",
+			TestDb::owner(),
+			format!("UPDATE rr:[1]..=[1], {table} SET touched = true RETURN VALUE id"),
+			refused.clone(),
+			"[]",
+			true,
+		),
+		(
+			"owner",
+			TestDb::owner(),
+			format!("DELETE rr:[1]..=[1], {range} RETURN VALUE id"),
+			refused.clone(),
+			"[]",
+			true,
+		),
+		(
+			"owner",
+			TestDb::owner(),
+			format!("DELETE rr:[1]..=[1], {table} RETURN VALUE id"),
+			refused.clone(),
+			"[]",
+			true,
+		),
+		(
+			"record user",
+			record_user(),
+			format!("UPDATE rr:[1]..=[1], {range} SET touched = true RETURN VALUE id"),
+			value("[rr:[1]]"),
+			"[rr:[1]]",
+			true,
+		),
+		(
+			"record user",
+			record_user(),
+			format!("UPDATE rr:[1]..=[1], {table} SET touched = true RETURN VALUE id"),
+			value("[rr:[1]]"),
+			"[rr:[1]]",
+			true,
+		),
+		// The record user may not delete `rr:[1]`, so its delete is refused too.
+		(
+			"record user",
+			record_user(),
+			format!("DELETE rr:[1]..=[1], {range} RETURN VALUE id"),
+			value("[]"),
+			"[]",
+			true,
+		),
+		(
+			"record user",
+			record_user(),
+			format!("DELETE rr:[1]..=[1], {table} RETURN VALUE id"),
+			value("[]"),
+			"[]",
+			true,
+		),
+		(
+			"owner",
+			TestDb::owner(),
+			format!("UPSERT rr:[1]..=[1], {table} SET touched = true RETURN VALUE record::tb(id)"),
+			value("['rr', 'nope']"),
+			"[rr:[1]]",
+			true,
+		),
 	] {
-		let db = TestDb::new(SETUP).await;
-		assert_eq!(
-			values_as(&db, &TestDb::owner(), write).await,
-			vec![Value::from("The table 'nope' does not exist".to_string())],
-			"{write}"
-		);
+		let db = TestDb::new_with_auth(GUARDED).await;
+		assert_eq!(values_as(&db, &session, &write).await, vec![answer], "{who}: {write}");
 		assert_eq!(
 			last(&db, "SELECT VALUE id FROM rr WHERE touched ORDER BY id").await,
-			value("[]"),
-			"{write}"
+			value(touched),
+			"{who}: {write}"
+		);
+		assert_eq!(
+			last(&db, "RETURN record::exists(rr:[1])").await,
+			Value::from(kept),
+			"{who}: {write}"
 		);
 	}
 }
