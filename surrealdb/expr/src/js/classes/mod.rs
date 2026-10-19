@@ -2,6 +2,7 @@ use js::{Class, Ctx, Result};
 
 pub mod duration;
 pub mod file;
+pub mod range;
 pub mod record;
 pub mod uuid;
 
@@ -11,5 +12,6 @@ pub fn init(ctx: &Ctx<'_>) -> Result<()> {
 	Class::<record::Record>::define(&globals)?;
 	Class::<uuid::Uuid>::define(&globals)?;
 	Class::<file::File>::define(&globals)?;
+	Class::<range::Range>::define(&globals)?;
 	Ok(())
 }

@@ -1,7 +1,7 @@
 //! JavaScript (QuickJS) conversions for the value model.
 //!
 //! Implements the `js` engine's conversion traits for [`Value`](crate::val::Value)
-//! and hosts the value-backed JS classes (Record, Uuid, Duration, File).
+//! and hosts the value-backed JS classes (Record, Uuid, Duration, File, Range).
 
 pub mod classes;
 

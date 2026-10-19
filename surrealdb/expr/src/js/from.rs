@@ -102,6 +102,20 @@ fn value_from_js<'js>(ctx: &Ctx<'js>, val: js::Value<'js>, depth: usize) -> Resu
 				return Ok(v.value.clone().into());
 			}
 
+			// Check to see if this object is a range
+			if let Some(v) = v.as_class::<classes::range::Range>() {
+				let borrow = v.borrow();
+				let v: &classes::range::Range = &borrow;
+				// A range built from ranges nests without any array or object
+				// between the levels, so its depth is judged here, from the levels the conversion
+				// has already entered: the value the
+				// walk would clone and drop recursively is refused first.
+				let range = Value::Range(Box::new(v.value.clone()));
+				crate::val::check_value_depth_from(&range, depth)
+					.map_err(|e| Error::new_from_js_message("Range", "value", e.to_string()))?;
+				return Ok(range);
+			}
+
 			if let Some(v) = v.as_typed_array::<u8>() {
 				let Some(data) = v.as_bytes() else {
 					return Err(Error::new_from_js_message(

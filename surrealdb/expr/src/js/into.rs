@@ -109,6 +109,13 @@ impl<'js> IntoJs<'js> for &Value {
 				},
 			)?
 			.into_value()),
+			Value::Range(ref v) => Ok(Class::<classes::range::Range>::instance(
+				ctx.clone(),
+				classes::range::Range {
+					value: (**v).clone(),
+				},
+			)?
+			.into_value()),
 			_ => Undefined.into_js(ctx),
 		}
 	}

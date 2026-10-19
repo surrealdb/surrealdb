@@ -1471,6 +1471,12 @@ fn within_shallow_depth(value: &Value, depth: usize) -> bool {
 /// so anything deep enough to overflow them must be rejected at the same point a
 /// deep field value is.
 pub fn check_value_depth(value: &Value) -> Result<()> {
+	check_value_depth_from(value, 1)
+}
+
+/// [`check_value_depth`] for a value that stands at `base` levels inside a
+/// larger one, so its own nesting counts on top of the levels around it.
+pub fn check_value_depth_from(value: &Value, base: usize) -> Result<()> {
 	use crate::val::RecordIdKey;
 	// Fast path: a value that nests nothing is depth 1 and cannot exceed the
 	// cap, so skip allocating the traversal stack. This keeps the check
@@ -1490,11 +1496,11 @@ pub fn check_value_depth(value: &Value) -> Result<()> {
 	) {
 		return Ok(());
 	}
-	if within_shallow_depth(value, 1) {
+	if within_shallow_depth(value, base) {
 		return Ok(());
 	}
 	// (node, depth of that node)
-	let mut stack: Vec<(DepthNode<'_>, usize)> = vec![(DepthNode::Value(value), 1)];
+	let mut stack: Vec<(DepthNode<'_>, usize)> = vec![(DepthNode::Value(value), base)];
 	while let Some((node, depth)) = stack.pop() {
 		if depth > MAX_VALUE_DEPTH {
 			bail!(Error::ValueTooDeep {
