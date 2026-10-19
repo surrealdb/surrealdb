@@ -13,7 +13,7 @@ sklearn-tests = []
 onnx-tests = []
 torch-tests = []
 tensorflow-tests = []
-gpu = []
+gpu = ["ort/cuda"]
 
 [dependencies]
 bytes.workspace = true

@@ -265,7 +265,7 @@ regex-lite = "0.1.9"
 regex-syntax = "0.8.10"
 reqwest = { version = "0.13.2", default-features = false }
 ring = "0.17.14"
-rmcp = { version = "3.1.2", default-features = false }
+rmcp = { version = "3.5", default-features = false }
 roaring = "0.11.3"
 rustls = { version = "0.23.38", default-features = false, features = ["logging", "std", "tls12"] }
 rust_decimal = "1.41.0"
@@ -331,7 +331,7 @@ wiremock = "0.6"
 libtest-mimic = "0.8.2"
 
 # SurrealML specific dependencies
-ort = { version = "2.0.0-rc.12", features = ["cuda", "ndarray"] }
+ort = { version = "2.0.0-rc.15", features = ["ndarray"] }
 
 # Surrealism specific dependencies
 tar = { version = "0.4.45", default-features = false }

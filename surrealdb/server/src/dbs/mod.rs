@@ -1906,8 +1906,7 @@ mod tests {
 			info!("Test case {idx}: query={query}, succeeds={succeeds}");
 			let res = ds.execute(&query, &sess, None).await;
 
-			if !succeeds && res.is_err() {
-				let res = res.unwrap_err();
+			if !succeeds && let Err(res) = &res {
 				assert!(
 					res.to_string().contains(&contains),
 					"Unexpected error for test case {}: {:?}",

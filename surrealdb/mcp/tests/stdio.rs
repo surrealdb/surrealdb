@@ -21,8 +21,8 @@ use std::time::Duration;
 use common::test_datastore;
 use rmcp::ServiceExt;
 use rmcp::model::{
-	CallToolRequestParams, ClientInfo, CompleteRequestParams, ContentBlock, GetPromptRequestParams,
-	ReadResourceRequestParams, Reference, ResourceContents,
+	CallToolRequestParams, ClientConfig, CompleteRequestParams, ContentBlock,
+	GetPromptRequestParams, ReadResourceRequestParams, Reference, ResourceContents,
 };
 use rmcp::service::RunningService;
 use serde_json::json;
@@ -59,7 +59,7 @@ async fn within<F: Future>(label: &str, fut: F) -> F::Output {
 /// `Session::default()` behaves as owner, so the server can DEFINE schema for
 /// the duration of the test without extra bootstrapping.
 async fn spawn_server()
--> (RunningService<rmcp::RoleClient, ClientInfo>, tokio::task::JoinHandle<Result<(), String>>) {
+-> (RunningService<rmcp::RoleClient, ClientConfig>, tokio::task::JoinHandle<Result<(), String>>) {
 	let ds = test_datastore().await;
 	let service =
 		McpService::new(ds, Some("test".to_string()), Some("test".to_string()), Session::owner());
@@ -71,10 +71,10 @@ async fn spawn_server()
 		Ok(())
 	});
 
-	// `ClientInfo` implements `ClientHandler` and provides a sensible default
+	// `ClientConfig` implements `ClientHandler` and provides a sensible default
 	// InitializeRequest via `get_info()`, so we can drive the handshake
 	// without constructing any non-exhaustive structs ourselves.
-	let client = within("client handshake", ClientInfo::default().serve(client_io))
+	let client = within("client handshake", ClientConfig::default().serve(client_io))
 		.await
 		.expect("client failed to complete handshake");
 	(client, server_handle)
@@ -385,7 +385,7 @@ async fn stdio_call_use_switches_context() {
 		running.waiting().await.map_err(|e| format!("wait: {e}"))?;
 		Ok::<(), String>(())
 	});
-	let client = within("client handshake", ClientInfo::default().serve(client_io))
+	let client = within("client handshake", ClientConfig::default().serve(client_io))
 		.await
 		.expect("client failed to complete handshake");
 
@@ -695,7 +695,7 @@ async fn stdio_uses_base_session_when_auth_enabled_and_guest_disabled() {
 		running.waiting().await.map_err(|e| format!("wait: {e}"))?;
 		Ok::<_, String>(())
 	});
-	let client = within("client handshake", ClientInfo::default().serve(client_io))
+	let client = within("client handshake", ClientConfig::default().serve(client_io))
 		.await
 		.expect("client failed to complete handshake");
 

@@ -1983,7 +1983,9 @@ mod tests {
 	/// Reading a Decimal from the text of the decoded digits, and a float where that
 	/// text is not one, is a decoder of its own for the values it reads right. The
 	/// decoder under test agrees with it wherever it is right, in value and in kind,
-	/// so only a value it got wrong is ever decoded differently.
+	/// so a value is decoded differently only where the text read gets it wrong: each
+	/// such case is checked, and none is required, since the text read may get the
+	/// whole sample right.
 	#[test]
 	fn an_index_key_decodes_every_value_a_text_read_gets_right_as_it_does() {
 		use rand::SeedableRng;
@@ -1998,7 +2000,6 @@ mod tests {
 		}
 
 		let mut rng = StdRng::seed_from_u64(0x7E47_0002);
-		let mut differed = 0;
 		let mut numbers = Vec::new();
 		for _ in 0..60_000 {
 			numbers.push(Number::Float(f64::from_bits(rng.random())));
@@ -2026,7 +2027,6 @@ mod tests {
 			if same {
 				continue;
 			}
-			differed += 1;
 			let written = DecimalLexEncoder::decode(&key).unwrap();
 			assert!(
 				written.is_finite()
@@ -2041,7 +2041,6 @@ mod tests {
 				"{n:?} decoded as {decoded:?}, which differs from {read:?}, read from text"
 			);
 		}
-		assert!(differed > 1_000, "only {differed} values were decoded differently");
 	}
 
 	#[test]

@@ -520,21 +520,20 @@ async fn missing_credentials_on_existing_session_is_rejected() {
 	);
 }
 
-/// A handshake naming a revision this server does not implement is answered
-/// with the advertised one, and the advertised revision is the sessionless
-/// `2026-07-28` — yet rmcp classifies that handshake by the *requested*
-/// revision, so it still runs the legacy lifecycle and issues an
-/// `mcp-session-id`. The result is a session that reports the sessionless
-/// revision from `ctx.protocol_version()` on every later request while holding
-/// both a session and a bound subject.
+/// A handshake naming a revision this server does not implement is answered by
+/// downgrading to the newest supported revision that still carries an
+/// `initialize` handshake, and a session bound to the handshake's subject is
+/// issued. An `initialize` is never answered with the sessionless revision,
+/// which has no handshake of its own.
 ///
-/// Deciding statelessness from that reported revision therefore skips the
-/// subject check on a session that has one, and possession of the session id
-/// alone is enough to run tool calls as the handshake's identity with no
-/// credentials at all. The binding, not the revision, has to be the
-/// discriminator.
+/// The resulting session reports a concrete revision from
+/// `ctx.protocol_version()` on every later request while holding both a session
+/// and a bound subject. Statelessness must be decided from the binding, not from
+/// that reported revision: a later request carrying only the session id and no
+/// credentials must not run as the bound subject. The binding, not the revision,
+/// is the discriminator.
 #[tokio::test]
-async fn credentialless_replay_is_rejected_when_negotiation_reports_the_sessionless_revision() {
+async fn credentialless_replay_on_a_negotiation_fallback_session_is_rejected() {
 	let ds = test_datastore().await;
 	let service = setup_service(ds);
 	// Any revision outside `SUPPORTED_PROTOCOL_VERSIONS` triggers the fallback.
@@ -544,8 +543,8 @@ async fn credentialless_replay_is_rejected_when_negotiation_reports_the_sessionl
 		initialize_with_version(&service, "2024-10-07", Some(owner_session())).await;
 	assert_eq!(
 		init.pointer("/result/protocolVersion").and_then(Value::as_str),
-		Some("2026-07-28"),
-		"fixture requires negotiation to answer with the advertised sessionless revision; body: {init}"
+		Some("2025-11-25"),
+		"fixture requires the initialize fallback to answer with the newest revision that has a handshake; body: {init}"
 	);
 	complete_handshake(&service, &session_id).await;
 

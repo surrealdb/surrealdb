@@ -20,15 +20,25 @@ import {
 const SUPPORTED_VERSIONS = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"] as const;
 
 /**
- * The revision the server names when a client asks for one it does not serve.
- * rmcp answers with the server's own advertised version rather than erroring,
- * so an unknown request must degrade to this instead of failing.
+ * The newest revision the server advertises (through discovery and the
+ * `surrealdb://info` resource). It is the sessionless revision, which has no
+ * `initialize` handshake of its own, so a handshake never settles on it; see
+ * `HANDSHAKE_FALLBACK_VERSION`.
  */
 const ADVERTISED_VERSION = "2026-07-28";
 
 /**
- * A version string no revision will ever use. Negotiation must degrade to the
- * advertised version rather than erroring, which is what lets a client probe.
+ * The revision an `initialize` handshake settles on when the client asks for one
+ * the server does not serve: the newest supported revision that still carries a
+ * handshake. The handshake cannot yield the sessionless advertised revision, so
+ * it downgrades to this rather than erroring.
+ */
+const HANDSHAKE_FALLBACK_VERSION = "2025-11-25";
+
+/**
+ * A version string no revision will ever use. An `initialize` handshake must
+ * downgrade it to `HANDSHAKE_FALLBACK_VERSION` rather than erroring, which is
+ * what lets a client probe.
  */
 const UNKNOWN_VERSION = "1999-01-01";
 
@@ -120,15 +130,16 @@ describe("protocol version negotiation", () => {
 		const { status, body } = await rawInitialize(server, UNKNOWN_VERSION);
 		expect(status).toBe(200);
 		expect(body?.error, "an unknown version must degrade, not error").toBeUndefined();
-		expect(body?.result?.protocolVersion).toBe(ADVERTISED_VERSION);
+		expect(body?.result?.protocolVersion).toBe(HANDSHAKE_FALLBACK_VERSION);
 	});
 
-	test(`negotiates ${ADVERTISED_VERSION} when a client asks for it by handshake`, async () => {
-		// A client may still send `initialize` while asking for the stateless
-		// revision; rmcp answers it and then serves the connection statelessly.
+	test(`downgrades an initialize that asks for ${ADVERTISED_VERSION} to the newest handshake revision`, async () => {
+		// The advertised revision is sessionless and has no handshake, so an
+		// `initialize` naming it cannot settle there; negotiation downgrades to
+		// the newest revision that does carry a handshake.
 		const { status, body } = await rawInitialize(server, ADVERTISED_VERSION);
 		expect(status).toBe(200);
-		expect(body?.result?.protocolVersion).toBe(ADVERTISED_VERSION);
+		expect(body?.result?.protocolVersion).toBe(HANDSHAKE_FALLBACK_VERSION);
 	});
 
 	test("declares tools, resources, prompts and completions at every version", async () => {

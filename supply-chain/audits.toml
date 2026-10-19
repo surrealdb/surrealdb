@@ -1473,7 +1473,7 @@ end = "2027-05-01"
 
 [[trusted.uuid]]
 criteria = "safe-to-deploy"
-user-id = 3204 # Ashley Mannix (KodrAus)
+user-id = 3204
 start = "2019-10-18"
 end = "2026-07-18"
 
