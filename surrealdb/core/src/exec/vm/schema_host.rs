@@ -297,14 +297,16 @@ pub(super) fn validate_reference_options(
 }
 
 /// Deletes every key beneath the root of the table `table` of the database
-/// `ns`, `db` but the registrations of the views that read it and, under
-/// `keep_records`, its records and the layout state they are decoded through,
+/// `ns`, `db` but the registrations of the views that read it, under
+/// `keep_fields` its field definitions and, under `keep_records`, its records
+/// and the layout state they are decoded through,
 /// before `DEFINE TABLE ... AS SELECT` fills the view.
 pub(super) async fn clear_view_table(
 	txn: &Transaction,
 	ns: NamespaceId,
 	db: DatabaseId,
 	table: &TableName,
+	keep_fields: bool,
 	keep_records: bool,
 ) -> anyhow::Result<()> {
 	crate::exec::vm::descriptor::schema(crate::ddl::define::table::clear_view_table(
@@ -312,6 +314,7 @@ pub(super) async fn clear_view_table(
 		ns,
 		db,
 		table,
+		keep_fields,
 		keep_records,
 	))
 	.await

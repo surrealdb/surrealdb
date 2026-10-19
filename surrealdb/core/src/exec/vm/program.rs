@@ -1516,15 +1516,18 @@ pub(crate) enum StoreInstr {
 	},
 	/// Delete every key beneath the root of the table `tb` of the database
 	/// `ns`, `db` except the registrations of the views that read it
-	/// (`ForeignTableKey`) and, under `keep_records`, its records and the layout
-	/// state they are decoded through: its field, index, event and subscription
-	/// definitions, its index entries, and the references and edges stored
-	/// under its records. The registrations belong to the views that wrote
-	/// them; kept records are left for [`StoreInstr::RetireViewRows`].
+	/// (`ForeignTableKey`), its field definitions when `keep_fields` holds a
+	/// truthy value (the sources of the definition being replaced, so a view
+	/// redefined as a view keeps its fields), and, under `keep_records`, its
+	/// records and the layout state they are decoded through: its index, event
+	/// and subscription definitions, its index entries, and the references and
+	/// edges stored under its records. The registrations belong to the views
+	/// that wrote them; kept records are left for [`StoreInstr::RetireViewRows`].
 	ClearViewTable {
 		ns: Reg,
 		db: Reg,
 		tb: Reg,
+		keep_fields: Reg,
 		keep_records: bool,
 	},
 	/// Raise what refuses the view `tb` of the database `ns`, `db` reading

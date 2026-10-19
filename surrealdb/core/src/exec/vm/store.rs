@@ -747,14 +747,23 @@ async fn step_inner(
 			ns,
 			db,
 			tb,
+			keep_fields,
 			keep_records,
 		} => {
 			let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
 			let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
 			let tb = table_named(&read(regs, *tb))?;
-			super::schema_host::clear_view_table(&ctx.txn(), ns, db, &tb, *keep_records)
-				.await
-				.map_err(ControlFlow::Err)?;
+			let keep_fields = read(regs, *keep_fields).is_truthy();
+			super::schema_host::clear_view_table(
+				&ctx.txn(),
+				ns,
+				db,
+				&tb,
+				keep_fields,
+				*keep_records,
+			)
+			.await
+			.map_err(ControlFlow::Err)?;
 		}
 		StoreInstr::RefuseViewCycle {
 			ns,

@@ -3,7 +3,7 @@
 timeout = 5000
 
 [test]
-reason = "Pins current behaviour, which the issue reports as a defect: DEFINE TABLE OVERWRITE of a view clears the view's field definitions (a plain table's OVERWRITE keeps them), because overwriting a view rebuilds it from nothing. Open question for the owner, not a decided contract."
+reason = "DEFINE TABLE OVERWRITE of a view keeps the fields declared on it, as the OVERWRITE of a plain table does"
 issue = 2545
 
 [[test.results]]
@@ -22,7 +22,7 @@ value = """{ events: {  }, fields: { a: "DEFINE FIELD a ON x VALUE 'a' PERMISSIO
 value = "NONE"
 
 [[test.results]]
-value = "{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"
+value = """{ events: {  }, fields: { a: "DEFINE FIELD a ON x VALUE 'a' PERMISSIONS FULL" }, indexes: {  }, lives: {  }, tables: {  } }"""
 
 [[test.results]]
 value = "NONE"

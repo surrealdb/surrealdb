@@ -7,7 +7,7 @@ use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId, Record, StoredRecord, TableDefinition, TableType};
 use crate::exec::ExecutionContext;
 use crate::key::schema::{
-	ForeignTablePrefix, LayoutPrefix, RecordKey, RecordPrefix, TableConformanceKey,
+	FieldPrefix, ForeignTablePrefix, LayoutPrefix, RecordKey, RecordPrefix, TableConformanceKey,
 	TableMigrationsKey, TblRoot,
 };
 use crate::key::{KVKey, KVKeyDecode, KVSubspace, RawRange};
@@ -118,12 +118,17 @@ pub(crate) async fn validate_records_survive_type_change(
 }
 
 /// Deletes every key beneath the root of the table `table` of the database
-/// `ns`, `db` except the registrations of the views that read it and, under
-/// `keep_records`, its records and the layout state they are decoded through
-/// (its layout descriptors, generation ring and conformance record). The
-/// definitions of the table's fields, indexes, events and subscriptions go,
-/// with its index entries and the references and edges stored under its
-/// records.
+/// `ns`, `db` except the registrations of the views that read it, under
+/// `keep_fields` its field definitions, and under `keep_records` its records
+/// and the layout state they are decoded through (its layout descriptors,
+/// generation ring and conformance record). The definitions of the table's
+/// indexes, events and subscriptions go, with its index entries and the
+/// references and edges stored under its records.
+///
+/// `keep_fields` holds when the definition being replaced is itself a view: a
+/// view redefined over a new query keeps the fields declared on it, as a plain
+/// table's `OVERWRITE` does. A table that becomes a view starts with none of
+/// the old table's fields.
 ///
 /// A registration (`ForeignTableKey`) is written by the view that reads the
 /// table, and stays for as long as that view's definition reads it. `DEFINE
@@ -136,6 +141,7 @@ pub(crate) async fn clear_view_table(
 	ns: NamespaceId,
 	db: DatabaseId,
 	table: &TableName,
+	keep_fields: bool,
 	keep_records: bool,
 ) -> Result<()> {
 	let tb = Cow::Borrowed(table);
@@ -159,6 +165,17 @@ pub(crate) async fn clear_view_table(
 		.range_subtree()?
 		.into(),
 	)];
+	if keep_fields {
+		kept.push(bounds(
+			FieldPrefix {
+				ns,
+				db,
+				tb: tb.clone(),
+			}
+			.range_subtree()?
+			.into(),
+		));
+	}
 	if keep_records {
 		kept.push(bounds(
 			RecordPrefix {

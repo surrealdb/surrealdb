@@ -335,6 +335,7 @@ impl Ddl<'_, '_> {
 				(ns, db),
 				(name_op, name_reg),
 				definition,
+				old_sources,
 			)?;
 			self.store(StoreInstr::ClearCache);
 		}
@@ -349,7 +350,9 @@ impl Ddl<'_, '_> {
 	/// row, so the views reading it take their removal. Each table the view reads records it as a
 	/// foreign table and refreshes its views' stamp; then the view is filled from them
 	/// ([`Ddl::backfill_view`]), each row through the order for a created row. `name` is the view
-	/// table's name as an operand and in a register.
+	/// table's name as an operand and in a register. `old_sources` holds the tables the replaced
+	/// definition read as a view, none when it was not one: a view redefined as a view keeps the
+	/// fields declared on it, and a table that becomes a view keeps none of its old fields.
 	fn define_view(
 		&mut self,
 		view: &ViewShape,
@@ -357,6 +360,7 @@ impl Ddl<'_, '_> {
 		(ns, db): (Reg, Reg),
 		(name_op, name_reg): (Operand, Reg),
 		definition: Reg,
+		old_sources: Reg,
 	) -> Result<(), IrError> {
 		let (ns_op, db_op) = (Operand::Reg(ns), Operand::Reg(db));
 		self.with_service(Service::Broker, |l| l.kill_table_subscriptions(ns, db, name_reg))?;
@@ -374,6 +378,7 @@ impl Ddl<'_, '_> {
 			ns,
 			db,
 			tb: name_reg,
+			keep_fields: old_sources,
 			keep_records: true,
 		});
 		self.store(StoreInstr::ClearCache);
@@ -384,6 +389,7 @@ impl Ddl<'_, '_> {
 			ns,
 			db,
 			tb: name_reg,
+			keep_fields: old_sources,
 			keep_records: false,
 		});
 		// The stamp follows the clear of the table's layout state, so no read of that state is
