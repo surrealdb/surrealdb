@@ -12,8 +12,9 @@ idiom's value with the remote index's analyzer (the value path). A MATCHES
 registered from the WHERE condition evaluates; one that is not (projection
 or function-argument position, a different expression than the WHERE's, an
 unresolvable idiom, or no WHERE at all) errors on rows of full table
-sources with 'no suitable index'; rows of record-id and array sources
-evaluate to false because they never get a query executor. `ts[*].name`
+sources with 'no suitable index'; a row a record-id source produces is
+judged on its own value with the analyzer of its table's full-text index,
+and a row of an array source with no record id evaluates to false. `ts[*].name`
 resolves through the auto-defined `ts[*]` child field while `ts.name` does
 not; `record<a | b>` uses the last resolvable target before the first
 unresolvable one; search::score/highlight on a remote match ref yield NONE.
@@ -185,10 +186,10 @@ value = "[{ i: i:A, id: c:A }]"
 error = "There was no suitable index supporting the expression: i.t.name @@ 'hello'"
 
 [[test.results]]
-value = "[]"
+value = "[{ id: t:1, name: 'Hello World' }]"
 
 [[test.results]]
-value = "[{ id: t:1, m: false }]"
+value = "[{ id: t:1, m: true }]"
 
 [[test.results]]
 value = "[]"

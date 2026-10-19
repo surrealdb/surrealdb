@@ -4,8 +4,12 @@
 //!
 //! 1. Rows without a record id never match and never error (array/value sources, documents without
 //!    `id`).
-//! 2. Rows of tables the enclosing SELECT does not iterate as a full table source evaluate to
-//!    `false` — record-id sources and graph/link hops register no full-text index. See
+//! 2. Rows of tables the enclosing SELECT does not iterate as a full table source — a record-id
+//!    source, an array of records, a graph or link hop — have no registered index to answer for
+//!    them, so each is judged on its own value: the operand is read off the row and analyzed with
+//!    the analyzer of the full-text index that resolves for the row's table as in rule 4, then
+//!    compared against the query terms (`FullTextIndex::matches_value`). A row for which no index
+//!    resolves, or whose expression names no index probe, evaluates to `false`. See
 //!    [`MatchesScope`].
 //! 3. On executor-table rows, an expression that was **not** registered from the SELECT's WHERE
 //!    condition (projection position, function arguments, a different expression than the one in
@@ -470,10 +474,43 @@ impl MatchesEval {
 		};
 
 		// Rows of tables with no registered index — record-id sources,
-		// graph/link hops — evaluate to `false` even when the expression
-		// sits in the WHERE condition.
+		// arrays of records, graph/link hops — are judged on the operand's
+		// value, analyzed as the table's full-text index analyzes it.
 		if !self.executor_tables.has_executor(&rid.table) {
-			return Ok(Value::Bool(false));
+			let target = match &self.probe {
+				Some(MatchProbe {
+					field: None,
+					..
+				})
+				| None => return Ok(Value::Bool(false)),
+				Some(
+					probe @ MatchProbe {
+						query: Some(query),
+						..
+					},
+				) => self.resolve_for_table(ctx, &rid.table, probe, query).await?,
+				Some(probe) => {
+					let query = right().await?.to_raw_string();
+					self.resolve_for_query(ctx, &rid.table, probe, query).await?
+				}
+			};
+			return match target.as_ref() {
+				MatchTarget::Unresolved => Ok(Value::Bool(false)),
+				MatchTarget::Local(fti, qt) | MatchTarget::Remote(fti, qt) => {
+					if qt.is_empty() {
+						return Ok(Value::Bool(false));
+					}
+					let value = left().await?;
+					// An absent operand holds no token to match.
+					if value.is_nullish() {
+						return Ok(Value::Bool(false));
+					}
+					let az_fn = StreamingAnalyzerFunction::new(ctx.exec_ctx);
+					Ok(Value::Bool(
+						fti.matches_value(&az_fn, qt, self.operator.operator, value).await?,
+					))
+				}
+			};
 		}
 
 		// Unregistered expressions (projection / fn-arg position, a

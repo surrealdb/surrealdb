@@ -131,7 +131,7 @@ error = "There was no suitable index supporting the expression: title @@ 'guide'
 error = "There was no suitable index supporting the expression: title @@ 'guide'"
 
 [[test.results]]
-value = "[]"
+value = "[{ id: book:1 }, { id: book:3 }]"
 
 */
 
@@ -186,5 +186,5 @@ SELECT id, (SELECT VALUE search::score(1) FROM book WHERE body @1@ 'dog' ORDER B
 -- A clause the WHERE does not register, and one with no WHERE.
 SELECT id, title @@ 'guide' AS m FROM book ORDER BY id;
 SELECT id FROM book WHERE array::len([title @@ 'guide']) > 0;
--- Rows a record id names get no answer from the index.
+-- Rows a record id names are judged on their own value.
 SELECT id FROM book:1..=3 WHERE title @@ 'alpha';

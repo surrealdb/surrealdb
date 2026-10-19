@@ -7,7 +7,6 @@ auth = { level = "owner" }
 [test]
 reason = "A full-text match applied to an array of record ids filters by the match"
 issue = 6811
-wip = true
 
 [[test.results]]
 value = "NONE"

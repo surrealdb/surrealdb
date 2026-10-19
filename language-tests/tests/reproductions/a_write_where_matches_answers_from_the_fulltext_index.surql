@@ -31,7 +31,7 @@ value = "[doc:2]"
 value = "[doc:1, doc:2]"
 
 [[test.results]]
-value = "[]"
+value = "[doc:2]"
 
 [[test.results]]
 value = "[doc:1]"

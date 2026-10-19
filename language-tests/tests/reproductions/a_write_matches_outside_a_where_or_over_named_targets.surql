@@ -4,7 +4,7 @@ namespace = true
 database = true
 
 [test]
-reason = "A MATCHES a write evaluates is judged as main judges it: answered from the full-text index for the records of a table the statement names whole, a type::table call's included; false for a record a record id or type::record names; refused outside the WHERE over a table read whole; and an index hint, a residual conjunct or an unbound query parameter leave the result as a read gives it."
+reason = "A MATCHES a write evaluates is judged as main judges it: answered from the full-text index for the records of a table the statement names whole, a type::table call's included; judged on its own value for a record a record id or type::record names; refused outside the WHERE over a table read whole; and an index hint, a residual conjunct or an unbound query parameter leave the result as a read gives it."
 
 [[test.results]]
 value = "NONE"
@@ -28,10 +28,10 @@ error = "There was no suitable index supporting the expression: body @@ 'hello'"
 value = "['<b>hello</b> world']"
 
 [[test.results]]
-value = "[]"
+value = "[doc:1]"
 
 [[test.results]]
-value = "[]"
+value = "[doc:1]"
 
 [[test.results]]
 value = "[doc:1, doc:1]"
@@ -46,7 +46,7 @@ value = "[doc:1]"
 value = "[doc:1]"
 
 [[test.results]]
-value = "[]"
+value = "[doc:1]"
 
 [[test.results]]
 error = "There was no suitable index supporting the expression: body @@ 'hello'"

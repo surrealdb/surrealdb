@@ -2520,9 +2520,9 @@ impl<'a> Lowerer<'a> {
 	/// or, for a parameter or any other expression the plan resolves ([`resolved_query`]), the
 	/// value the instruction reads when it runs. Any other right operand makes no probe.
 	/// An operand an error cannot name is shown as the planner rebuilds it, or else the operator is
-	/// shown as the statement wrote it. A left path of more
-	/// than one field can cross a record link, so it is read off the row by a host pipeline, which
-	/// the operator runs only on that path.
+	/// shown as the statement wrote it. A left operand that probes a position is read for the rows
+	/// no index answers for: a path off the row by a host pipeline the operator runs only then,
+	/// and a value the container is handed as the instruction's `left` operand.
 	fn matches(
 		&mut self,
 		operator: &MatchesOperator,
@@ -2587,6 +2587,7 @@ impl<'a> Lowerer<'a> {
 			}
 			(_, QueryOperand::Other) => (None, shown_expr(ir, right), false),
 		};
+		let left_is_path = left_expr.is_some();
 		let left_shown = left_expr.or_else(|| shown_expr(ir, left));
 		let sql = match (left_shown, right_expr, subquery_root(self.units.as_deref(), ir, right)) {
 			// A statement operand is named by the operator at the top of the plan `EXPLAIN`
@@ -2606,14 +2607,20 @@ impl<'a> Lowerer<'a> {
 				.or_else(|| ir.op(owner).and_then(|data| data.loc.text()).map(str::to_owned))
 				.unwrap_or_else(|| BinaryOperator::Matches(operator.clone()).to_sql()),
 		};
-		let crosses_link = probe
-			.as_ref()
-			.and_then(|probe| probe.field.as_ref())
-			.is_some_and(|path| path.segments().len() > 1);
-		let left_code = match (crosses_link, path_row(ir, left)) {
-			(true, Some(row)) => Some(self.host_code_reading_row(left, row)?),
-			_ => None,
-		};
+		// The operand is read for a row no index answers for — one a full table
+		// source did not produce — and for a path that crosses a record link,
+		// whatever the row. A path is read off the row by a host pipeline; a
+		// value the container is handed holds the operand already, and is read
+		// as it is.
+		let (left_code, left_value) =
+			match (left_is_path, probe.as_ref().and_then(|p| p.field.as_ref())) {
+				(true, Some(_)) => match path_row(ir, left) {
+					Some(row) => (Some(self.host_code_reading_row(left, row)?), None),
+					None => (None, None),
+				},
+				(false, Some(_)) => (None, Some(self.value(left)?)),
+				(_, None) => (None, None),
+			};
 		let query = if read_query {
 			Some(self.value(right)?)
 		} else {
@@ -2634,6 +2641,7 @@ impl<'a> Lowerer<'a> {
 		self.emit(Instr::Matches {
 			matches,
 			query,
+			left: left_value,
 			dst,
 			frame: self.frame.program,
 		});

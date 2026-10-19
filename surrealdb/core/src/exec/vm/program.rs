@@ -845,6 +845,9 @@ pub(super) enum Instr {
 	Matches {
 		matches: u32,
 		query: Option<Operand>,
+		/// The left operand, for one the container is handed as a value rather
+		/// than read off the row ([`MatchesSpec::left`]); `None` otherwise.
+		left: Option<Operand>,
 		dst: Reg,
 		frame: Option<u16>,
 	},
@@ -5354,7 +5357,8 @@ pub(super) struct MatchesSpec {
 	/// The expression as an error names it.
 	pub(super) sql: String,
 	/// The pipeline of [`Program::host_code`] that reads the left operand off
-	/// the row, for an operand that can cross a record link.
+	/// the row, for an operand that is a path off the row. An operand handed as
+	/// a value is [`Instr::Matches`]'s `left` instead.
 	pub(super) left: Option<u16>,
 }
 

@@ -4289,6 +4289,7 @@ async fn run_body(
 								let Instr::Matches {
 									matches,
 									query,
+									left,
 									dst,
 									frame,
 								} = &pipeline.code[at]
@@ -4302,6 +4303,13 @@ async fn run_body(
 									),
 									None => None,
 								};
+								let left = match left {
+									Some(left) => Some(
+										interp::read_operand(regs, reader, program, *left)
+											.map_err(ControlFlow::Err)?,
+									),
+									None => None,
+								};
 								let spec = &program.matches[*matches as usize];
 								let eval = state.matches_eval(*matches, spec);
 								let eval_ctx = frame_eval(program, state, ctx, *frame);
@@ -4310,8 +4318,8 @@ async fn run_body(
 									eval.evaluate(
 										&eval_ctx,
 										|| async {
-											match spec.left {
-												Some(code) => {
+											match (spec.left, left) {
+												(Some(code), _) => {
 													host_scalar(
 														program,
 														&super::program::HostScalar::Code(code),
@@ -4320,9 +4328,12 @@ async fn run_body(
 													)
 													.await
 												}
-												None => Err(ControlFlow::Err(anyhow::anyhow!(
-													"a MATCHES read an operand it was lowered without"
-												))),
+												(None, Some(value)) => Ok(value),
+												(None, None) => {
+													Err(ControlFlow::Err(anyhow::anyhow!(
+														"a MATCHES read an operand it was lowered without"
+													)))
+												}
 											}
 										},
 										|| async {
