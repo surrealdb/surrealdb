@@ -190,7 +190,7 @@ fn run_pass<D: Dialect>(
 	registry: &FunctionRegistry,
 	budget: u32,
 ) -> Result<PassOutcome, IrError> {
-	let mut ids = Vec::new();
+	let mut ids = super::OpList::with_capacity(ir.ops.len());
 	ir.walk_outside_stored(ir.top(), WalkOrder::PreOrder, &mut |op| {
 		ids.push(op);
 		Walk::Continue

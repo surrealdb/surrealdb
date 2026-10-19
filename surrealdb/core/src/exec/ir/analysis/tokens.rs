@@ -130,15 +130,18 @@ pub(crate) fn listed(set: TokenSet) -> SmallVec<[Option<TokenClass>; 6]> {
 	set.iter().map(Some).collect()
 }
 
+/// The roots of a container: one per statement, so a request of a few statements holds them inline.
+pub(crate) type Roots = SmallVec<[RegionId; 4]>;
+
 /// The regions the tokens are threaded from: the statements of a request, and the top region of a
 /// container that is a unit of its own.
-pub(crate) fn roots(ir: &Ir) -> Vec<RegionId> {
-	let mut out = Vec::new();
+pub(crate) fn roots(ir: &Ir) -> Roots {
+	let mut out = Roots::new();
 	collect_roots(ir, ir.top(), &mut out);
 	out
 }
 
-fn collect_roots(ir: &Ir, region: RegionId, out: &mut Vec<RegionId>) {
+fn collect_roots(ir: &Ir, region: RegionId, out: &mut Roots) {
 	let Some(info) = ir.region(region) else {
 		return;
 	};
@@ -216,7 +219,7 @@ pub(crate) fn rethread(
 pub(crate) struct Marks {
 	/// `None` when a root is the top region of a container that is a unit of its own, which has no
 	/// owner to compare.
-	owners: Option<Vec<(OpId, u32)>>,
+	owners: Option<SmallVec<[(OpId, u32); 4]>>,
 }
 
 /// Records the generation of the op that owns each statement of `ir`.
@@ -224,7 +227,7 @@ pub(crate) fn mark(ir: &Ir) -> Marks {
 	let owners = roots(ir)
 		.into_iter()
 		.map(|root| ir.parent_op(root).map(|owner| (owner, ir.generation(owner))))
-		.collect::<Option<Vec<_>>>();
+		.collect::<Option<SmallVec<_>>>();
 	Marks {
 		owners,
 	}

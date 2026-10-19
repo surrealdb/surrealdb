@@ -11,12 +11,14 @@
 
 use std::collections::{HashMap, HashSet};
 
-use slotmap::{SecondaryMap, SlotMap};
+use slotmap::SlotMap;
+use smallvec::SmallVec;
 
 use super::block::BlockData;
 use super::op::OpData;
 use super::region::RegionData;
 use super::rewriter::Provenance;
+use super::side_map::SideMap;
 use super::token::OpTokens;
 use super::value::{Use, ValueData, ValueDef};
 use super::walk::ops_in;
@@ -71,6 +73,14 @@ pub(crate) enum Walk {
 	Stop,
 }
 
+/// The arena capacities a new container starts with: enough for a small statement.
+const INITIAL_OPS: usize = 32;
+const INITIAL_VALUES: usize = 48;
+const INITIAL_REGIONS: usize = 16;
+
+/// A list of op ids collected from a walk, held inline for a small program.
+pub(crate) type OpList = SmallVec<[OpId; 32]>;
+
 /// One program: a request's or a fragment's, or one catalog version's definitions.
 ///
 /// The frame table and the snapshot table each hold the container's default entry at index 0:
@@ -93,7 +103,7 @@ pub(crate) struct Ir {
 	/// result the entry names is not erased while an op outside the erased ops reads it.
 	pub(super) snapshots: Vec<Snapshot>,
 	pub(super) eliminated: Vec<(OpId, EliminationReason)>,
-	pub(super) generations: SecondaryMap<OpId, u32>,
+	pub(super) generations: SideMap<OpId, u32>,
 	pub(super) placement: PlacementTable,
 	/// What the physical plan decided for each `MATCHES` operator; never identity.
 	pub(super) matches: MatchesTable,
@@ -107,27 +117,27 @@ pub(crate) struct Ir {
 	pub(super) logical_ids: Vec<OpId>,
 	/// For a live op created `Bound`: the owner of its innermost error-scope region at creation,
 	/// or `None` outside every error scope.
-	pub(super) bind_scope: SecondaryMap<OpId, Option<OpId>>,
+	pub(super) bind_scope: SideMap<OpId, Option<OpId>>,
 	/// The entries of `bind_scope` of erased ops.
 	pub(super) retired_scope: HashMap<OpId, Option<OpId>>,
 	/// The generation of each op inside a stored-clause region at the moment the container left
 	/// [`Phase::Bound`].
-	pub(super) sealed: SecondaryMap<OpId, u32>,
+	pub(super) sealed: SideMap<OpId, u32>,
 	/// The number of ops standing directly in each stored-clause region, and in each region
 	/// beneath one, at the moment the container left [`Phase::Bound`]. An entry is dropped with
 	/// its region when the region's owner is erased. A sealed region that is gone while its owner
 	/// lives, or that holds another number of ops, was edited.
-	pub(super) sealed_regions: SecondaryMap<RegionId, usize>,
+	pub(super) sealed_regions: SideMap<RegionId, usize>,
 	/// Whether the container holds code the request wrote, which the region constraints judge
 	/// ([`Ir::judges_constraints`]).
 	pub(super) constrained: bool,
 	/// The effect tokens each op takes and produces, apart from its operands and results.
-	pub(super) op_tokens: SecondaryMap<OpId, OpTokens>,
+	pub(super) op_tokens: SideMap<OpId, OpTokens>,
 	/// Whether effect tokens are threaded through the container ([`Ir::is_threaded`]).
 	pub(super) threaded: bool,
 	/// The ops created while the container is threaded and not threaded themselves since
 	/// ([`Ir::holds_no_tokens`]).
-	pub(super) untokened: SecondaryMap<OpId, ()>,
+	pub(super) untokened: SideMap<OpId, ()>,
 }
 
 impl Ir {
@@ -143,9 +153,11 @@ impl Ir {
 	/// supply the statement timestamp, so it takes the timestamp as the first argument of its
 	/// top block.
 	pub(crate) fn with_top_args(scope: IrScope, top: RegionKind, args: &[TypeKnowledge]) -> Self {
-		let mut regions = SlotMap::with_key();
-		let mut blocks = SlotMap::with_key();
-		let mut values = SlotMap::with_key();
+		// Each arena allocates on creation whatever its capacity, so it is sized for a small
+		// program at no extra allocation and grows only past that.
+		let mut regions = SlotMap::with_capacity_and_key(INITIAL_REGIONS);
+		let mut blocks = SlotMap::with_capacity_and_key(INITIAL_REGIONS);
+		let mut values = SlotMap::with_capacity_and_key(INITIAL_VALUES);
 		let top_id = regions.insert(RegionData {
 			kind: top,
 			blocks: Default::default(),
@@ -178,7 +190,7 @@ impl Ir {
 			scope,
 			phase: Phase::Bound,
 			top: top_id,
-			ops: SlotMap::with_key(),
+			ops: SlotMap::with_capacity_and_key(INITIAL_OPS),
 			values,
 			blocks,
 			regions,
@@ -188,20 +200,20 @@ impl Ir {
 			}]),
 			snapshots: vec![Snapshot::Current],
 			eliminated: Vec::new(),
-			generations: SecondaryMap::new(),
+			generations: SideMap::new(),
 			placement: PlacementTable::new(),
 			matches: MatchesTable::new(),
 			hop_keys: HopKeyTable::new(),
 			holders: HashMap::new(),
 			logical_ids: Vec::new(),
-			bind_scope: SecondaryMap::new(),
+			bind_scope: SideMap::new(),
 			retired_scope: HashMap::new(),
-			sealed: SecondaryMap::new(),
-			sealed_regions: SecondaryMap::new(),
+			sealed: SideMap::new(),
+			sealed_regions: SideMap::new(),
 			constrained: false,
-			op_tokens: SecondaryMap::new(),
+			op_tokens: SideMap::new(),
 			threaded: false,
-			untokened: SecondaryMap::new(),
+			untokened: SideMap::new(),
 		}
 	}
 
@@ -509,6 +521,26 @@ impl Ir {
 	/// Ops of one block are visited in block order. A dangling `r` visits nothing.
 	pub(crate) fn walk(&self, r: RegionId, order: WalkOrder, f: &mut dyn FnMut(OpId) -> Walk) {
 		self.walk_region(r, order, false, f);
+	}
+
+	/// The ops of `r` and of every region beneath them, in `order`, that `keep` admits.
+	///
+	/// The list is sized for every op of the container, so it grows at most once, and a program
+	/// of up to [`OpList`]'s inline length collects without allocating.
+	pub(crate) fn collect_ops(
+		&self,
+		r: RegionId,
+		order: WalkOrder,
+		mut keep: impl FnMut(OpId) -> bool,
+	) -> OpList {
+		let mut out = OpList::with_capacity(self.ops.len());
+		self.walk(r, order, &mut |op| {
+			if keep(op) {
+				out.push(op);
+			}
+			Walk::Continue
+		});
+		out
 	}
 
 	/// [`Ir::walk`] without the ops inside a [`RegionKind::StoredClause`] region: stored code

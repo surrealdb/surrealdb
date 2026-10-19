@@ -29,13 +29,11 @@
 //! catalog stores.
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::future::{Future, ready};
-use std::pin::Pin;
 use std::sync::Arc;
 
 use smallvec::{SmallVec, smallvec};
 
-use super::driver::{LoCx, LoPass, PassConfig, PassReport};
+use super::driver::{LoCx, LoPass, PassConfig, PassReport, PassRun};
 use super::perm_where::{computing_ops, def_op};
 use crate::exec::ir::analysis::{effects, fallibility};
 use crate::exec::ir::core::facts::FactCache;
@@ -73,11 +71,8 @@ impl LoPass for InlineCalls {
 		cfg.inline_calls
 	}
 
-	fn run<'a, 'b>(
-		&'a self,
-		cx: &'a mut LoCx<'b>,
-	) -> Pin<Box<dyn Future<Output = Result<PassReport, IrError>> + Send + 'a>> {
-		Box::pin(ready(run_inline(cx)))
+	fn run<'a, 'b>(&'a self, cx: &'a mut LoCx<'b>) -> PassRun<'a> {
+		PassRun::done(run_inline(cx))
 	}
 }
 

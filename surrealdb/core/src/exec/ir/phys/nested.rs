@@ -51,7 +51,7 @@ use crate::exec::index::access_path::{AccessPath, BTreeAccess};
 use crate::exec::ir::analysis::effects;
 use crate::exec::ir::build::phys::index_ref;
 use crate::exec::ir::core::facts::FactCache;
-use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
+use crate::exec::ir::core::ir::{Ir, OpList, Walk, WalkOrder};
 use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
 use crate::exec::ir::core::value::ValueDef;
 use crate::exec::ir::core::walk::{ancestors, ops_in};
@@ -344,7 +344,8 @@ pub(super) fn statement_writes(
 	cx: &EffectCx<'_>,
 	owner: OpId,
 ) -> bool {
-	let mut ops = vec![owner];
+	let mut ops = OpList::new();
+	ops.push(owner);
 	if let Some(data) = ir.op(owner) {
 		for region in &data.regions {
 			ir.walk(*region, WalkOrder::PreOrder, &mut |op| {

@@ -43,12 +43,10 @@
 
 use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
-use std::future::{Future, ready};
-use std::pin::Pin;
 
 use smallvec::SmallVec;
 
-use super::driver::{LoCx, LoPass, PassConfig, PassReport};
+use super::driver::{LoCx, LoPass, PassConfig, PassReport, PassRun};
 use super::perm_where::{
 	WhereFilter, can_move, chain_spine, computing_ops, def_op, in_stored_clause, live_ops,
 	localize_row_reads, move_selected, reads_row_opaquely, reads_through_operands, where_filter,
@@ -83,11 +81,8 @@ impl LoPass for PushIntoSubquery {
 		cfg.push_into_subquery
 	}
 
-	fn run<'a, 'b>(
-		&'a self,
-		cx: &'a mut LoCx<'b>,
-	) -> Pin<Box<dyn Future<Output = Result<PassReport, IrError>> + Send + 'a>> {
-		Box::pin(ready(run_push(cx)))
+	fn run<'a, 'b>(&'a self, cx: &'a mut LoCx<'b>) -> PassRun<'a> {
+		PassRun::done(run_push(cx))
 	}
 }
 

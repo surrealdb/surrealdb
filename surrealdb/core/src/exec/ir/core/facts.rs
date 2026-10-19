@@ -10,9 +10,9 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use slotmap::SecondaryMap;
 use smallvec::SmallVec;
 
+use super::side_map::SideMap;
 use crate::exec::ir::iface::catalog::CxKey;
 use crate::exec::ir::iface::effects::{EffectSummary, OpEffects};
 use crate::exec::ir::iface::fold::{FoldOutcome, FoldRequest};
@@ -80,18 +80,18 @@ pub(crate) struct FactCache {
 	top: OpFacts,
 	/// Per op: the facts computed under each context, with the generation they were computed at
 	/// and the context's key. The last entry is the one recorded last.
-	entries: SecondaryMap<OpId, ContextFacts>,
+	entries: SideMap<OpId, ContextFacts>,
 	/// The [`EffectSummary`] of the region-local answer of an op at its generation, under each
 	/// context, held apart from `entries` so that it is computed without the footprint.
-	summaries: SecondaryMap<OpId, ContextSummaries>,
+	summaries: SideMap<OpId, ContextSummaries>,
 	/// The facts of erased ops, as they stood when the op was erased, one entry per context.
 	retired: HashMap<OpId, ContextFacts>,
 	/// Per value: the generation of its defining op when the knowledge was computed, and it.
-	types: SecondaryMap<ValueId, (u32, TypeKnowledge)>,
+	types: SideMap<ValueId, (u32, TypeKnowledge)>,
 	/// Per value: the invariance class computed against an op, with the generation of that op.
-	invariance: SecondaryMap<ValueId, Invariance>,
+	invariance: SideMap<ValueId, Invariance>,
 	/// One fold slot per value.
-	folds: SecondaryMap<ValueId, FoldSlot>,
+	folds: SideMap<ValueId, FoldSlot>,
 	/// The snapshot taken at the logical boundary, once an analysis has filled it.
 	legality_snapshot: Option<LegalitySnapshotSlot>,
 	/// What the logical plan states of the container's pipelines and statements, once the planner
@@ -104,12 +104,12 @@ impl FactCache {
 	pub(crate) fn new() -> Self {
 		Self {
 			top: OpFacts::top(),
-			entries: SecondaryMap::new(),
-			summaries: SecondaryMap::new(),
+			entries: SideMap::new(),
+			summaries: SideMap::new(),
 			retired: HashMap::new(),
-			types: SecondaryMap::new(),
-			invariance: SecondaryMap::new(),
-			folds: SecondaryMap::new(),
+			types: SideMap::new(),
+			invariance: SideMap::new(),
+			folds: SideMap::new(),
 			legality_snapshot: None,
 			logical_legalities: None,
 		}

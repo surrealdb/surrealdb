@@ -1,10 +1,10 @@
 //! Tests of the loop optimiser's driver and of the rehoming helpers.
 
-use std::future::{Future, ready};
-use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
-use super::driver::{LoCx, LoPass, NoObserver, PassConfig, PassReport, run_lo, run_passes};
+use super::driver::{
+	LoCx, LoPass, NoObserver, PassConfig, PassReport, PassRun, run_lo, run_passes,
+};
 use super::reg::{PHYS_CSE, lo_passes, register};
 use super::rehome::{RehomeMode, and_chain, rebuild_and_chain, rehome_tree};
 use super::tests_support::{
@@ -57,15 +57,12 @@ impl LoPass for Recorder {
 		(self.enabled)(cfg)
 	}
 
-	fn run<'a, 'b>(
-		&'a self,
-		_cx: &'a mut LoCx<'b>,
-	) -> Pin<Box<dyn Future<Output = Result<PassReport, IrError>> + Send + 'a>> {
+	fn run<'a, 'b>(&'a self, _cx: &'a mut LoCx<'b>) -> PassRun<'a> {
 		self.log.lock().expect("the log is not poisoned").push(self.name);
-		Box::pin(ready(Ok(PassReport {
+		PassRun::done(Ok(PassReport {
 			rewrites: 1,
 			..PassReport::default()
-		})))
+		}))
 	}
 }
 

@@ -11,12 +11,10 @@
 #![deny(clippy::wildcard_enum_match_arm)]
 
 use std::collections::HashMap;
-use std::future::{Future, ready};
-use std::pin::Pin;
 
 use smallvec::{SmallVec, smallvec};
 
-use super::driver::{FoldObserver, LoCx, LoPass, PassConfig, PassReport};
+use super::driver::{FoldObserver, LoCx, LoPass, PassConfig, PassReport, PassRun};
 use crate::exec::ir::analysis::loop_legality::{exit_of, of_with};
 use crate::exec::ir::analysis::multiplicity::loop_body;
 use crate::exec::ir::core::facts::FactCache;
@@ -84,11 +82,8 @@ impl LoPass for LoopUnroll {
 		cfg.unroll
 	}
 
-	fn run<'a, 'b>(
-		&'a self,
-		cx: &'a mut LoCx<'b>,
-	) -> Pin<Box<dyn Future<Output = Result<PassReport, IrError>> + Send + 'a>> {
-		Box::pin(ready(run_unroll(cx)))
+	fn run<'a, 'b>(&'a self, cx: &'a mut LoCx<'b>) -> PassRun<'a> {
+		PassRun::done(run_unroll(cx))
 	}
 }
 

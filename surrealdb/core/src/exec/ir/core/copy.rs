@@ -102,6 +102,19 @@ impl std::ops::Deref for StatementCopy {
 type CopiedTop = (Ir, IdMap, Vec<(OpId, OpId)>);
 
 impl IdMap {
+	/// An empty map sized for `ops` ops, `values` values and `regions` regions.
+	fn with_capacity(ops: usize, values: usize, regions: usize) -> Self {
+		Self {
+			ops: HashMap::with_capacity(ops),
+			ops_back: HashMap::with_capacity(ops),
+			values: HashMap::with_capacity(values),
+			values_back: HashMap::with_capacity(values),
+			regions: HashMap::with_capacity(regions),
+			regions_back: HashMap::with_capacity(regions),
+			outside: HashSet::new(),
+		}
+	}
+
 	/// The op that stands for the original op `original`.
 	pub(crate) fn map_op(&self, original: OpId) -> Option<OpId> {
 		self.ops.get(&original).copied()
@@ -558,11 +571,17 @@ impl<'s, 'd> Transplant<'s, 'd> {
 	fn new(src: &'s Ir, dst: &'d mut Ir, mode: Mode<'s>) -> Self {
 		let frames_len = dst.frames.frames.len();
 		let snapshots_len = dst.snapshots.len();
+		// A copy holds at most every entity of the source, so the arenas and the map are sized
+		// for that once rather than grown one doubling at a time.
+		dst.ops.reserve(src.ops.len());
+		dst.values.reserve(src.values.len());
+		dst.blocks.reserve(src.blocks.len());
+		dst.regions.reserve(src.regions.len());
 		Self {
 			src,
 			dst,
 			mode,
-			map: IdMap::default(),
+			map: IdMap::with_capacity(src.ops.len(), src.values.len(), src.regions.len()),
 			ops: Vec::new(),
 			values: Vec::new(),
 			blocks: Vec::new(),

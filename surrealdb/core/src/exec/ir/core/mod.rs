@@ -18,6 +18,7 @@ pub(crate) mod pattern;
 pub(crate) mod print;
 pub(crate) mod region;
 pub(crate) mod rewriter;
+pub(crate) mod side_map;
 pub(crate) mod text;
 pub(crate) mod token;
 pub(crate) mod value;
@@ -39,7 +40,7 @@ pub(crate) use copy::{IdMap, RegionUnit, StatementCopy};
 #[allow(unused_imports)]
 pub(crate) use facts::{FactCache, LegalitySnapshotSlot, OpFacts};
 #[allow(unused_imports)]
-pub(crate) use ir::{Ir, IrScope, Walk, WalkOrder};
+pub(crate) use ir::{Ir, IrScope, OpList, Walk, WalkOrder};
 #[allow(unused_imports)]
 pub(crate) use location::{LocOrigin, Location, Span};
 #[allow(unused_imports)]

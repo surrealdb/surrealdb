@@ -30,16 +30,14 @@
 #![deny(clippy::wildcard_enum_match_arm)]
 
 use std::collections::{HashMap, HashSet};
-use std::future::{Future, ready};
-use std::pin::Pin;
 
 use smallvec::{SmallVec, smallvec};
 
-use super::driver::{LoCx, LoPass, PassConfig, PassReport};
+use super::driver::{LoCx, LoPass, PassConfig, PassReport, PassRun};
 use super::rehome::{and_chain, can_rehome, rebuild_and_chain, rebuild_and_chain_bound};
 use crate::exec::ir::analysis::{effects, fallibility, frames};
 use crate::exec::ir::core::facts::FactCache;
-use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
+use crate::exec::ir::core::ir::{Ir, OpList, Walk, WalkOrder};
 use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
 use crate::exec::ir::core::value::ValueDef;
 use crate::exec::ir::core::walk::{ancestors, ops_in};
@@ -79,11 +77,8 @@ impl LoPass for SpecialiseGuards {
 		cfg.specialise_guards
 	}
 
-	fn run<'a, 'b>(
-		&'a self,
-		cx: &'a mut LoCx<'b>,
-	) -> Pin<Box<dyn Future<Output = Result<PassReport, IrError>> + Send + 'a>> {
-		Box::pin(ready(run_specialise(cx)))
+	fn run<'a, 'b>(&'a self, cx: &'a mut LoCx<'b>) -> PassRun<'a> {
+		PassRun::done(run_specialise(cx))
 	}
 }
 
@@ -105,11 +100,8 @@ impl LoPass for PushBelowLayer {
 		cfg.push_below_layer
 	}
 
-	fn run<'a, 'b>(
-		&'a self,
-		cx: &'a mut LoCx<'b>,
-	) -> Pin<Box<dyn Future<Output = Result<PassReport, IrError>> + Send + 'a>> {
-		Box::pin(ready(run_push(cx, Target::Layer)))
+	fn run<'a, 'b>(&'a self, cx: &'a mut LoCx<'b>) -> PassRun<'a> {
+		PassRun::done(run_push(cx, Target::Layer))
 	}
 }
 
@@ -130,11 +122,8 @@ impl LoPass for PushBelowPermission {
 		cfg.push_below_permission
 	}
 
-	fn run<'a, 'b>(
-		&'a self,
-		cx: &'a mut LoCx<'b>,
-	) -> Pin<Box<dyn Future<Output = Result<PassReport, IrError>> + Send + 'a>> {
-		Box::pin(ready(run_push(cx, Target::Permission)))
+	fn run<'a, 'b>(&'a self, cx: &'a mut LoCx<'b>) -> PassRun<'a> {
+		PassRun::done(run_push(cx, Target::Permission))
 	}
 }
 
@@ -147,15 +136,8 @@ pub(super) fn in_stored_clause(ir: &Ir, op: OpId) -> bool {
 }
 
 /// Every op outside stored clauses, in program order: an op before the ops of its regions.
-pub(super) fn live_ops(ir: &Ir) -> Vec<OpId> {
-	let mut ops = Vec::new();
-	ir.walk(ir.top(), WalkOrder::PreOrder, &mut |op| {
-		if !in_stored_clause(ir, op) {
-			ops.push(op);
-		}
-		Walk::Continue
-	});
-	ops
+pub(super) fn live_ops(ir: &Ir) -> OpList {
+	ir.collect_ops(ir.top(), WalkOrder::PreOrder, |op| !in_stored_clause(ir, op))
 }
 
 /// The op that defines `value`, or `None` for a block argument and for a dangling id.

@@ -20,9 +20,10 @@
 //! A table no catalog write has stamped is validated by the content of its
 //! definition instead; see [`TableSnapshot`].
 
+use std::any::Any;
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use anyhow::Result;
 use surrealdb_catalog::providers::TableProvider;
@@ -124,6 +125,40 @@ pub struct TableSnapshot {
 	/// that has never been stamped, whose snapshot is keyed by its
 	/// definition's content instead.
 	version: Option<Uuid>,
+	/// What a planner derives from this entry alone, held for every later
+	/// bind under the same version.
+	pub derived: DerivedSlot,
+}
+
+/// A value a planner computes from one [`TableSnapshot`] and nothing else.
+///
+/// The snapshot is immutable under its version, so a value derived from it
+/// alone is valid for as long as the snapshot is, and is computed once per
+/// version rather than once per bind. The slot is filled at most once; the
+/// planner owns the type it stores and reads it back by downcasting.
+#[derive(Default)]
+pub struct DerivedSlot(OnceLock<Arc<dyn Any + Send + Sync>>);
+
+impl DerivedSlot {
+	/// The value held, filling the slot with `init` when it is empty. Two binds
+	/// racing to fill it both compute a value and one of them is kept, which is
+	/// sound because both are derived from the same snapshot.
+	pub fn get_or_init(
+		&self,
+		init: impl FnOnce() -> Arc<dyn Any + Send + Sync>,
+	) -> &Arc<dyn Any + Send + Sync> {
+		self.0.get_or_init(init)
+	}
+}
+
+impl std::fmt::Debug for DerivedSlot {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.write_str(if self.0.get().is_some() {
+			"DerivedSlot(filled)"
+		} else {
+			"DerivedSlot(empty)"
+		})
+	}
 }
 
 impl TableSnapshot {
@@ -211,6 +246,7 @@ impl TableSnapshot {
 			events,
 			views,
 			version,
+			derived: DerivedSlot::default(),
 		})
 	}
 

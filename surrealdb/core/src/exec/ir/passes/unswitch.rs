@@ -10,12 +10,10 @@
 #![deny(clippy::wildcard_enum_match_arm)]
 
 use std::collections::HashSet;
-use std::future::{Future, ready};
-use std::pin::Pin;
 
 use smallvec::{SmallVec, smallvec};
 
-use super::driver::{LoCx, LoPass, PassConfig, PassReport};
+use super::driver::{LoCx, LoPass, PassConfig, PassReport, PassRun};
 use super::rehome::{RehomeMode, and_chain, can_rehome, rehome_tree};
 use crate::exec::ir::analysis::multiplicity::is_loop_body;
 use crate::exec::ir::analysis::row_dep::{Invariance, invariant_in};
@@ -84,11 +82,8 @@ impl LoPass for Unswitch {
 		cfg.unswitch
 	}
 
-	fn run<'a, 'b>(
-		&'a self,
-		cx: &'a mut LoCx<'b>,
-	) -> Pin<Box<dyn Future<Output = Result<PassReport, IrError>> + Send + 'a>> {
-		Box::pin(ready(run_unswitch(cx)))
+	fn run<'a, 'b>(&'a self, cx: &'a mut LoCx<'b>) -> PassRun<'a> {
+		PassRun::done(run_unswitch(cx))
 	}
 }
 

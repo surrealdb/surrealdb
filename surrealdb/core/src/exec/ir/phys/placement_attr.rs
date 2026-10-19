@@ -7,11 +7,11 @@
 
 use std::collections::HashMap;
 
-use slotmap::SecondaryMap;
 use smallvec::SmallVec;
 use surrealdb_strand::Strand;
 
 use super::write_cut::WriteCut;
+use crate::exec::ir::core::side_map::SideMap;
 use crate::exec::ir::iface::ids::OpId;
 use crate::exec::logical::pipelines::{Legality, StatementLegality};
 use crate::exec::planner::placement::{Decision, MergeOrder, PhysicalFacts};
@@ -264,12 +264,12 @@ impl PlacementAttr {
 ///
 /// Never part of identity: two programs that differ only in placement hold equal ops.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct PlacementTable(SecondaryMap<OpId, PlacementAttr>);
+pub(crate) struct PlacementTable(SideMap<OpId, PlacementAttr>);
 
 impl PlacementTable {
 	/// A table holding no placement.
 	pub(crate) fn new() -> Self {
-		Self(SecondaryMap::new())
+		Self(SideMap::new())
 	}
 
 	/// The pipelines that hold a placement.

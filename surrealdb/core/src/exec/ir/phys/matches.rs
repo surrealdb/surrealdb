@@ -30,11 +30,10 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use slotmap::SecondaryMap;
-
 use super::knn::{is_select_loop, stages_of_loop};
 use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
+use crate::exec::ir::core::side_map::SideMap;
 use crate::exec::ir::core::value::ValueDef;
 use crate::exec::ir::core::walk::ops_in;
 use crate::exec::ir::expr::ops::{ExprOp, ShortCircuitOp};
@@ -72,22 +71,22 @@ pub(crate) struct MatchesAttr {
 /// `expr.binary` op. Never part of identity.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct MatchesTable {
-	matches: SecondaryMap<OpId, MatchesAttr>,
+	matches: SideMap<OpId, MatchesAttr>,
 	/// The `KNN` operators held by a select loop whose stages, or those of a loop around it, hold
 	/// a `KNN` operator: the operators a search is in scope for.
-	knn: SecondaryMap<OpId, ()>,
+	knn: SideMap<OpId, ()>,
 	/// Of those, the ones that judge the subjects of a write that no search of the statement
 	/// reads ([`crate::exec::ir::phys::knn`]).
-	unsearched: SecondaryMap<OpId, ()>,
+	unsearched: SideMap<OpId, ()>,
 	/// The literals that stand for a `KNN` operator no search answers
 	/// ([`crate::exec::ir::phys::knn`]): each reads the row as the operator it replaces does.
-	unanswered: SecondaryMap<OpId, ()>,
+	unanswered: SideMap<OpId, ()>,
 	/// The scope each index function call held by a select loop reports against, keyed by the id
 	/// of its `expr.call` op.
-	calls: SecondaryMap<OpId, Arc<IndexScope>>,
+	calls: SideMap<OpId, Arc<IndexScope>>,
 	/// The scope of the first select loop in each region that declares one. Used for an index
 	/// function call the conversion rebuilt, which has no entry in `calls`.
-	regions: SecondaryMap<RegionId, Arc<IndexScope>>,
+	regions: SideMap<RegionId, Arc<IndexScope>>,
 }
 
 /// What an index function call in a select loop reports against: the `MATCHES` clauses of the
@@ -166,12 +165,12 @@ impl MatchesTable {
 	/// An empty table, with no decisions.
 	pub(crate) fn new() -> Self {
 		Self {
-			matches: SecondaryMap::new(),
-			knn: SecondaryMap::new(),
-			unsearched: SecondaryMap::new(),
-			unanswered: SecondaryMap::new(),
-			calls: SecondaryMap::new(),
-			regions: SecondaryMap::new(),
+			matches: SideMap::new(),
+			knn: SideMap::new(),
+			unsearched: SideMap::new(),
+			unanswered: SideMap::new(),
+			calls: SideMap::new(),
+			regions: SideMap::new(),
 		}
 	}
 
@@ -283,7 +282,7 @@ impl MatchesTable {
 				self.calls.insert(to, remap(scope));
 			}
 		}
-		for (region, scope) in &source.regions {
+		for (region, scope) in source.regions.iter() {
 			if let Some(copy) = regions(region) {
 				self.regions.insert(copy, remap(scope));
 			}

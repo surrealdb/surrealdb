@@ -549,7 +549,7 @@ pub(super) fn ranks(
 /// forbidden to it, as it does any vector known only when the statement runs. Runs on the bound
 /// container, before its conversion.
 pub(crate) fn hoist_vectors(ir: &mut Ir, facts: &mut FactCache) -> Result<(), IrError> {
-	let mut loops = Vec::new();
+	let mut loops = SmallVec::<[OpId; 4]>::new();
 	ir.walk(ir.top(), WalkOrder::PreOrder, &mut |op| {
 		if ir.op(op).is_some_and(|data| is_select_loop(&data.kind)) {
 			loops.push(op);

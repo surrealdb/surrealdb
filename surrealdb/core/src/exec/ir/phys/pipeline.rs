@@ -77,10 +77,10 @@ impl PipelineIds {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct PipelineDag {
 	/// Every `phys.pipeline` op with its id, in pre-order.
-	pub(crate) nodes: Vec<(PipelineId, OpId)>,
+	pub(crate) nodes: SmallVec<[(PipelineId, OpId); 4]>,
 	/// Every edge as the pipeline that holds it, its kind and the pipeline it names, in the order
 	/// of the nodes and then of each node's edges.
-	pub(crate) edges: Vec<(PipelineId, PipelineEdge, PipelineId)>,
+	pub(crate) edges: SmallVec<[(PipelineId, PipelineEdge, PipelineId); 4]>,
 }
 
 /// The pipeline an edge orders first and the one it orders after it, from the pipeline that holds
@@ -131,7 +131,9 @@ impl PipelineDag {
 	/// function of the container alone.
 	///
 	/// Fails where [`PipelineDag::check_dag`] does.
-	pub(crate) fn topological_order(&self) -> Result<Vec<(PipelineId, OpId)>, VerifyError> {
+	pub(crate) fn topological_order(
+		&self,
+	) -> Result<SmallVec<[(PipelineId, OpId); 4]>, VerifyError> {
 		Ok(self.order()?.into_iter().map(|at| self.nodes[at]).collect())
 	}
 
@@ -143,7 +145,17 @@ impl PipelineDag {
 
 	/// The indices of the nodes in run order. The one place the three rules of the DAG are
 	/// checked.
-	fn order(&self) -> Result<Vec<usize>, VerifyError> {
+	fn order(&self) -> Result<SmallVec<[usize; 4]>, VerifyError> {
+		// Without edges the run order is pre-order, and only the ids need checking; a short list
+		// is checked pairwise so the common plan of a few pipelines allocates nothing.
+		if self.edges.is_empty() && self.nodes.len() <= 16 {
+			for (at, (id, op)) in self.nodes.iter().enumerate() {
+				if self.nodes[..at].iter().any(|(held, _)| held == id) {
+					return Err(fault(Some(*op), format!("pipeline id {} is held twice", id.0)));
+				}
+			}
+			return Ok((0..self.nodes.len()).collect());
+		}
 		let mut at_id: HashMap<PipelineId, usize> = HashMap::with_capacity(self.nodes.len());
 		for (at, (id, op)) in self.nodes.iter().enumerate() {
 			if at_id.insert(*id, at).is_some() {
@@ -179,7 +191,7 @@ impl PipelineDag {
 		// Kahn's algorithm; of the pipelines ready to run, the one first in pre-order goes first.
 		let mut ready: BinaryHeap<Reverse<usize>> =
 			(0..self.nodes.len()).filter(|at| waiting[*at] == 0).map(Reverse).collect();
-		let mut order = Vec::with_capacity(self.nodes.len());
+		let mut order = SmallVec::with_capacity(self.nodes.len());
 		while let Some(Reverse(at)) = ready.pop() {
 			order.push(at);
 			for next in &after[at] {

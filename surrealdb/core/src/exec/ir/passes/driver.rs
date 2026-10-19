@@ -8,6 +8,7 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::task::{Context, Poll};
 
 use super::reg::lo_passes;
 use crate::exec::ir::analysis::tokens;
@@ -152,10 +153,36 @@ pub(crate) trait LoPass: Send + Sync {
 	fn enabled(&self, cfg: &PassConfig) -> bool;
 
 	/// Runs the pass over every statement of the container.
-	fn run<'a, 'b>(
-		&'a self,
-		cx: &'a mut LoCx<'b>,
-	) -> Pin<Box<dyn Future<Output = Result<PassReport, IrError>> + Send + 'a>>;
+	fn run<'a, 'b>(&'a self, cx: &'a mut LoCx<'b>) -> PassRun<'a>;
+}
+
+/// What [`LoPass::run`] answers: the report of a pass that ran to completion, or the future of a
+/// pass that awaits plan-time folds. Awaiting it answers the report either way, and a pass that
+/// completes without awaiting is not boxed.
+pub(crate) enum PassRun<'a> {
+	/// The report, taken by the first poll.
+	Done(Option<Result<PassReport, IrError>>),
+	Pending(Pin<Box<dyn Future<Output = Result<PassReport, IrError>> + Send + 'a>>),
+}
+
+impl PassRun<'_> {
+	/// The run of a pass that has completed with `report`.
+	pub(crate) fn done(report: Result<PassReport, IrError>) -> Self {
+		Self::Done(Some(report))
+	}
+}
+
+impl Future for PassRun<'_> {
+	type Output = Result<PassReport, IrError>;
+
+	fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+		match self.get_mut() {
+			Self::Done(report) => Poll::Ready(
+				report.take().unwrap_or(Err(IrError::Stale("pass run polled after completion"))),
+			),
+			Self::Pending(future) => future.as_mut().poll(cx),
+		}
+	}
 }
 
 /// Runs the loop optimiser over every statement of `ir`, in the order of [`lo_passes`], and

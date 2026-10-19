@@ -17,13 +17,11 @@
 #![deny(clippy::wildcard_enum_match_arm)]
 
 use std::collections::HashSet;
-use std::future::Future;
-use std::pin::Pin;
 
 use smallvec::{SmallVec, smallvec};
 
 use super::dce::layer_column_names;
-use super::driver::{LoCx, LoPass, PassConfig, PassReport};
+use super::driver::{LoCx, LoPass, PassConfig, PassReport, PassRun};
 use super::rehome::{and_chain, rebuild_and_chain};
 use crate::exec::ir::analysis::cx::structural_cx;
 use crate::exec::ir::analysis::{effects, fallibility, types};
@@ -75,11 +73,8 @@ impl LoPass for FoldPass {
 		cfg.fold
 	}
 
-	fn run<'a, 'b>(
-		&'a self,
-		cx: &'a mut LoCx<'b>,
-	) -> Pin<Box<dyn Future<Output = Result<PassReport, IrError>> + Send + 'a>> {
-		Box::pin(run_fold(cx))
+	fn run<'a, 'b>(&'a self, cx: &'a mut LoCx<'b>) -> PassRun<'a> {
+		PassRun::Pending(Box::pin(run_fold(cx)))
 	}
 }
 

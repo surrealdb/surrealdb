@@ -208,7 +208,7 @@ use crate::expr::logical::{
 };
 use crate::expr::{BinaryOperator, Kind, KindLiteral};
 use crate::kvs::Transaction;
-use crate::kvs::cache::ds::CatalogSnapshot as SharedCatalog;
+use crate::kvs::cache::ds::{CatalogSnapshot as SharedCatalog, TableSnapshot};
 use crate::val::Value;
 
 /// Resolve every table source in `op` against the transaction's catalog and
@@ -628,7 +628,13 @@ async fn gather(
 						"table `{table}` was not loaded into the catalog snapshot"
 					))
 				})?;
-				(entry.definition.clone(), Arc::clone(&entry.fields))
+				let Some(gathered) = shared_facts(entry, &table, &write_clauses)? else {
+					tables.insert((table, stamp), None);
+					continue;
+				};
+				gathered.push_named(&mut worklist, stamp, follows_kinds);
+				tables.insert((table, stamp), Some(Arc::clone(&gathered.facts)));
+				continue;
 			}
 			(stamp, _) => (
 				txn.get_tb(ns, db, &table, stamp).await.map_err(|e| {
@@ -647,29 +653,9 @@ async fn gather(
 			tables.insert((table, stamp), None);
 			continue;
 		};
-		for field in &facts.fields {
-			if follows_kinds && let Some(kind) = &field.kind {
-				let mut targets = HashSet::new();
-				kind.collect_reference_target_tables(&mut targets);
-				worklist.extend(targets.into_iter().map(|t| (t, stamp)));
-			}
-			for body in field.computed.iter().chain(match &field.select {
-				LogicalPermission::Specific(guard) => Some(guard),
-				LogicalPermission::None | LogicalPermission::Full => None,
-			}) {
-				for named in tables_in_expr(body) {
-					worklist.push((named, stamp));
-				}
-			}
-		}
-		for permission in std::iter::once(&facts.select).chain(facts.write.iter().map(|(_, p)| p)) {
-			if let LogicalPermission::Specific(guard) = permission {
-				for named in tables_in_expr(guard) {
-					worklist.push((named, stamp));
-				}
-			}
-		}
-		tables.insert((table, stamp), Some(Arc::new(facts)));
+		let gathered = Gathered::of(facts);
+		gathered.push_named(&mut worklist, stamp, follows_kinds);
+		tables.insert((table, stamp), Some(gathered.facts));
 	}
 	Ok(CatalogSnapshot {
 		tables,
@@ -894,6 +880,101 @@ fn holds_an_unplannable_write(permission: &LogicalPermission) -> bool {
 		LogicalPermission::None | LogicalPermission::Full => false,
 	}
 }
+
+/// One table's facts with the tables they lead the gather to.
+struct Gathered {
+	facts: Arc<TableFacts>,
+	/// The tables named by the computed fields and the field and table
+	/// clauses, in the order the gather visits them.
+	named: Vec<TableName>,
+	/// The tables the fields' kinds reference, which the gather follows only
+	/// when the plan follows kinds.
+	kind_targets: Vec<TableName>,
+}
+
+impl Gathered {
+	fn of(facts: TableFacts) -> Self {
+		let mut named = Vec::new();
+		let mut kind_targets = Vec::new();
+		for field in &facts.fields {
+			if let Some(kind) = &field.kind {
+				let mut targets = HashSet::new();
+				kind.collect_reference_target_tables(&mut targets);
+				kind_targets.extend(targets);
+			}
+			for body in field.computed.iter().chain(match &field.select {
+				LogicalPermission::Specific(guard) => Some(guard),
+				LogicalPermission::None | LogicalPermission::Full => None,
+			}) {
+				named.extend(tables_in_expr(body));
+			}
+		}
+		for permission in std::iter::once(&facts.select).chain(facts.write.iter().map(|(_, p)| p)) {
+			if let LogicalPermission::Specific(guard) = permission {
+				named.extend(tables_in_expr(guard));
+			}
+		}
+		Self {
+			facts: Arc::new(facts),
+			named,
+			kind_targets,
+		}
+	}
+
+	fn push_named(
+		&self,
+		worklist: &mut Vec<(TableName, Option<u64>)>,
+		stamp: Option<u64>,
+		follows_kinds: bool,
+	) {
+		if follows_kinds {
+			worklist.extend(self.kind_targets.iter().map(|t| (t.clone(), stamp)));
+		}
+		worklist.extend(self.named.iter().map(|t| (t.clone(), stamp)));
+	}
+}
+
+/// The facts of a current-version table, derived once per catalog version.
+///
+/// [`table_facts`] reads the shared entry and the plan's mutation clauses and
+/// nothing else, so its answer for one set of clauses is held in the entry's
+/// derived slot and served to every later bind under the same version. A
+/// malformed `AUTH LIMIT` is an error and is not held: each bind reports it.
+fn shared_facts(
+	entry: &TableSnapshot,
+	table: &TableName,
+	writes: &[PermissionKind],
+) -> Result<Option<Arc<Gathered>>, Error> {
+	let memo = entry.derived.get_or_init(|| Arc::new(SharedFacts::default()));
+	let Some(memo) = memo.downcast_ref::<SharedFacts>() else {
+		return Err(EngineError::Internal(format!(
+			"the derived slot of table `{table}` holds another planner's value"
+		))
+		.into());
+	};
+	if let Ok(held) = memo.0.lock()
+		&& let Some((_, gathered)) = held.iter().find(|(clauses, _)| clauses.as_slice() == writes)
+	{
+		return Ok(gathered.clone());
+	}
+	let gathered = table_facts(table, entry.definition.as_deref(), &entry.fields, writes)?
+		.map(|facts| Arc::new(Gathered::of(facts)));
+	if let Ok(mut held) = memo.0.lock()
+		&& !held.iter().any(|(clauses, _)| clauses.as_slice() == writes)
+	{
+		held.push((writes.to_vec(), gathered.clone()));
+	}
+	Ok(gathered)
+}
+
+/// The facts [`shared_facts`] holds in one table's derived slot, one entry per
+/// set of mutation clauses a plan lowered.
+#[derive(Default)]
+struct SharedFacts(std::sync::Mutex<Vec<FactsFor>>);
+
+/// One set of mutation clauses and the facts gathered under it; `None` when
+/// the table's clauses have no logical form.
+type FactsFor = (Vec<PermissionKind>, Option<Arc<Gathered>>);
 
 /// Builds what the pass knows about one table from its definitions, reading
 /// each clause in the logical form the catalog compiled from its stored text.

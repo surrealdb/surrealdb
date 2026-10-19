@@ -17,16 +17,14 @@
 
 use std::cmp::Reverse;
 use std::collections::HashSet;
-use std::future::{Future, ready};
-use std::pin::Pin;
 
-use super::driver::{LoCx, LoPass, PassConfig, PassReport};
+use super::driver::{LoCx, LoPass, PassConfig, PassReport, PassRun};
 use super::rehome::{and_chain, can_rehome, rebuild_and_chain};
 use crate::exec::ir::analysis::multiplicity::is_loop_body;
 use crate::exec::ir::analysis::row_dep::{Invariance, invariant_in, outermost_scope};
 use crate::exec::ir::analysis::{effects, fallibility};
 use crate::exec::ir::core::facts::FactCache;
-use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
+use crate::exec::ir::core::ir::{Ir, OpList, Walk, WalkOrder};
 use crate::exec::ir::core::rewriter::{InsertPoint, Rewriter};
 use crate::exec::ir::core::value::ValueDef;
 use crate::exec::ir::core::walk::{ancestors, enclosing_statement, ops_in};
@@ -144,11 +142,8 @@ impl LoPass for Licm {
 		cfg.licm
 	}
 
-	fn run<'a, 'b>(
-		&'a self,
-		cx: &'a mut LoCx<'b>,
-	) -> Pin<Box<dyn Future<Output = Result<PassReport, IrError>> + Send + 'a>> {
-		Box::pin(ready(run_licm(cx)))
+	fn run<'a, 'b>(&'a self, cx: &'a mut LoCx<'b>) -> PassRun<'a> {
+		PassRun::done(run_licm(cx))
 	}
 }
 
@@ -178,11 +173,8 @@ impl LoPass for HoistLeadingConjuncts {
 		cfg.hoist_leading
 	}
 
-	fn run<'a, 'b>(
-		&'a self,
-		cx: &'a mut LoCx<'b>,
-	) -> Pin<Box<dyn Future<Output = Result<PassReport, IrError>> + Send + 'a>> {
-		Box::pin(ready(run_hoist(cx)))
+	fn run<'a, 'b>(&'a self, cx: &'a mut LoCx<'b>) -> PassRun<'a> {
+		PassRun::done(run_hoist(cx))
 	}
 }
 
@@ -199,15 +191,8 @@ fn in_stored_clause(ir: &Ir, op: OpId) -> bool {
 }
 
 /// Every op outside stored clauses, in program order: an op before the ops of its regions.
-fn live_ops(ir: &Ir) -> Vec<OpId> {
-	let mut ops = Vec::new();
-	ir.walk(ir.top(), WalkOrder::PreOrder, &mut |op| {
-		if !in_stored_clause(ir, op) {
-			ops.push(op);
-		}
-		Walk::Continue
-	});
-	ops
+fn live_ops(ir: &Ir) -> OpList {
+	ir.collect_ops(ir.top(), WalkOrder::PreOrder, |op| !in_stored_clause(ir, op))
 }
 
 /// The op that defines `value`, or `None` for a block argument and for a dangling id.

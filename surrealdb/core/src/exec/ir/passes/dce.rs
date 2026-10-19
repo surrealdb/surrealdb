@@ -39,16 +39,14 @@
 #![deny(clippy::wildcard_enum_match_arm)]
 
 use std::collections::HashSet;
-use std::future::{Future, ready};
-use std::pin::Pin;
 
 use smallvec::{SmallVec, smallvec};
 
-use super::driver::{LoCx, LoPass, PassConfig, PassReport};
+use super::driver::{LoCx, LoPass, PassConfig, PassReport, PassRun};
 use super::perm_where::reads_row_opaquely;
 use crate::exec::ir::analysis::{effects, fallibility};
 use crate::exec::ir::core::facts::FactCache;
-use crate::exec::ir::core::ir::{Ir, IrScope, Walk, WalkOrder};
+use crate::exec::ir::core::ir::{Ir, IrScope, OpList, Walk, WalkOrder};
 use crate::exec::ir::core::pattern::{GREEDY_DEFAULT, Limit};
 use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
 use crate::exec::ir::core::value::ValueDef;
@@ -98,11 +96,8 @@ impl LoPass for Dce {
 		cfg.dce
 	}
 
-	fn run<'a, 'b>(
-		&'a self,
-		cx: &'a mut LoCx<'b>,
-	) -> Pin<Box<dyn Future<Output = Result<PassReport, IrError>> + Send + 'a>> {
-		Box::pin(ready(run_dce(cx)))
+	fn run<'a, 'b>(&'a self, cx: &'a mut LoCx<'b>) -> PassRun<'a> {
+		PassRun::done(run_dce(cx))
 	}
 }
 
@@ -136,15 +131,8 @@ fn in_stored_clause(ir: &Ir, op: OpId) -> bool {
 }
 
 /// Every op outside stored clauses, in program order: an op before the ops of its regions.
-fn live_ops(ir: &Ir) -> Vec<OpId> {
-	let mut ops = Vec::new();
-	ir.walk(ir.top(), WalkOrder::PreOrder, &mut |op| {
-		if !in_stored_clause(ir, op) {
-			ops.push(op);
-		}
-		Walk::Continue
-	});
-	ops
+fn live_ops(ir: &Ir) -> OpList {
+	ir.collect_ops(ir.top(), WalkOrder::PreOrder, |op| !in_stored_clause(ir, op))
 }
 
 /// Erases `op` and answers whether it was erased. An op whose results are still read is left

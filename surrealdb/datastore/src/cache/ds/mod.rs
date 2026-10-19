@@ -5,7 +5,7 @@ mod key;
 mod lookup;
 mod weight;
 
-pub use catalog::{CatalogSnapshot, TableSnapshot};
+pub use catalog::{CatalogSnapshot, DerivedSlot, TableSnapshot};
 #[cfg(feature = "jwks")]
 pub use entry::CachedJwks;
 pub use entry::Entry;

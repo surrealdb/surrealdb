@@ -43,14 +43,13 @@
 use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 
-use slotmap::SecondaryMap;
-
 use super::access::ReadVersion;
 use super::conjunct::{def_op, strip_truthy};
 use super::ops::PhysOp;
 use crate::exec::ir::analysis::effects;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
+use crate::exec::ir::core::side_map::SideMap;
 use crate::exec::ir::core::value::ValueDef;
 use crate::exec::ir::core::walk::ops_in;
 use crate::exec::ir::expr::ops::{ExprOp, ShortCircuitOp};
@@ -96,12 +95,12 @@ pub(crate) struct KeyComparison {
 /// The key condition of every graph hop of one container that has one, keyed by the id of its
 /// `phys.loop`. Never part of identity.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct HopKeyTable(SecondaryMap<OpId, Arc<HopKey>>);
+pub(crate) struct HopKeyTable(SideMap<OpId, Arc<HopKey>>);
 
 impl HopKeyTable {
 	/// A table holding no key condition.
 	pub(crate) fn new() -> Self {
-		Self(SecondaryMap::new())
+		Self(SideMap::new())
 	}
 
 	/// The key condition of the hop `op`, or `None` when it has none.
