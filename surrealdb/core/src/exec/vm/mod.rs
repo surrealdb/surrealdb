@@ -119,6 +119,9 @@ mod tests_placement;
 mod tests_principal;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
+mod tests_range_limit;
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_read_ahead;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
