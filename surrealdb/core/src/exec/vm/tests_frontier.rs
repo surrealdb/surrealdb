@@ -140,8 +140,15 @@ async fn run_as(
 	for (key, value) in config {
 		map = map.with_key_value(*key, *value);
 	}
+	let mut exec = crate::exec::config::ExecConfig::default();
+	surrealdb_cnf::Config::parse(&mut exec, &map);
 	let (db, _directory) = database(backend, map, setup).await;
 	counters::reset();
+	// The thread's meter is what the work before the run left of it, and a fill reads no more
+	// keys than the meter holds, cutting the range it stops in. Each run starts on a full quantum
+	// of its own, as a statement first polled after a yield point does, so what a window holds
+	// does not depend on what the thread ran before.
+	super::fuel::refill(exec.vm_quantum);
 	let responses = db.datastore().execute(sql, session, None).await.expect("the request runs");
 	let answers = responses
 		.into_iter()
