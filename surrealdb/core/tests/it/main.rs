@@ -41,6 +41,7 @@ mod remove;
 mod round_trip;
 mod select;
 mod sequence;
+mod slow_log_aborted;
 mod table;
 mod timeout;
 mod update;
