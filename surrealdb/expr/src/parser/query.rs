@@ -26,15 +26,30 @@ pub struct ReadOnly {
 	pub strict: bool,
 }
 
+/// The isolation level a transaction is opened at.
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
+pub enum IsolationLevel {
+	/// The conflict set is the transaction's writes.
+	Snapshot,
+	/// The conflict set is the transaction's writes and everything it read.
+	Serializable,
+}
+
 /// The options of a `BEGIN` statement. The default is a plain `BEGIN`.
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Default)]
 pub struct BeginOptions {
+	pub isolation: Option<IsolationLevel>,
 	pub read_only: Option<ReadOnly>,
 }
 
 impl ToSql for BeginOptions {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		f.push_str("BEGIN");
+		match self.isolation {
+			None => {}
+			Some(IsolationLevel::Snapshot) => f.push_str(" ISOLATION LEVEL SNAPSHOT"),
+			Some(IsolationLevel::Serializable) => f.push_str(" ISOLATION LEVEL SERIALIZABLE"),
+		}
 		let Some(read_only) = &self.read_only else {
 			return;
 		};

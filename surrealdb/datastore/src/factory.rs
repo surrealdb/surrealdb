@@ -12,8 +12,8 @@ use std::time::Duration;
 
 use anyhow::Result;
 use surrealdb_kvs::{
-	Metrics, ReadOutcome, ReadSnapshotRequest, SnapshotInfo, StaleReads, StaleReadsHandle,
-	TransactionBuilder, TransactionType,
+	Isolation, IsolationLevelsHandle, Metrics, ReadOutcome, ReadSnapshotRequest, SnapshotInfo,
+	StaleReads, StaleReadsHandle, TransactionBuilder, TransactionType,
 };
 use surrealdb_observe::{ExecutionObserver, NoopObserver};
 use web_time::Instant;
@@ -144,6 +144,75 @@ impl TransactionFactory {
 			.into());
 		}
 		self.open(write, sequences).await
+	}
+
+	/// Opens a transaction at `isolation`.
+	///
+	/// [`Isolation::Snapshot`] is what every backend's ordinary transaction
+	/// provides, so a backend that publishes no [`IsolationLevelsHandle`] is
+	/// opened as [`Self::transaction`] opens it. Any other level needs a handle
+	/// that supports it, and is refused with
+	/// [`DatastoreError::IsolationNotSupported`] otherwise, naming the levels the
+	/// datastore does offer; a level is never silently downgraded.
+	pub async fn transaction_at(
+		&self,
+		write: TransactionType,
+		isolation: Isolation,
+		sequences: Sequences,
+	) -> Result<Transaction> {
+		let handle = self
+			.builder
+			.extension(TypeId::of::<IsolationLevelsHandle>())
+			.and_then(|ext| ext.downcast::<IsolationLevelsHandle>().ok());
+		let Some(handle) = handle else {
+			if isolation == Isolation::Snapshot {
+				return self.transaction(write, sequences).await;
+			}
+			return Err(DatastoreError::IsolationNotSupported {
+				requested: isolation.to_string(),
+				supported: Isolation::Snapshot.to_string(),
+			}
+			.into());
+		};
+		let levels = handle.0.supported();
+		if !levels.contains(&isolation) {
+			return Err(DatastoreError::IsolationNotSupported {
+				requested: isolation.to_string(),
+				supported: levels.iter().map(ToString::to_string).collect::<Vec<_>>().join(", "),
+			}
+			.into());
+		}
+		if matches!(write, TransactionType::Write)
+			&& let Some(features) = self.read_only.get()
+		{
+			return Err(DatastoreError::StoreReadOnly {
+				features: features.clone(),
+			}
+			.into());
+		}
+		let settled = self.triggers.catalog_epoch.settled();
+		let live_bucket = self.triggers.live.open();
+		let (inner, local) = match handle.0.open(write, isolation).await {
+			Ok(opened) => opened,
+			Err(e) => {
+				self.triggers.live.close(live_bucket);
+				return Err(e.into());
+			}
+		};
+		let sole_writer = inner.sole_writer();
+		let catalog_epoch = settled.filter(|_| sole_writer).unwrap_or(crate::tx::NO_CATALOG_EPOCH);
+		Ok(Transaction::new(
+			local,
+			sequences,
+			Arc::clone(&self.triggers),
+			Arc::clone(&self.observer),
+			Transactor::new(inner),
+			&self.config,
+			catalog_epoch,
+			sole_writer,
+			Arc::clone(&self.feature),
+		)
+		.with_live_bucket(live_bucket))
 	}
 
 	/// Opens a read-only transaction over a snapshot no older than the

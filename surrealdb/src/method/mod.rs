@@ -47,7 +47,7 @@ mod version;
 mod tests;
 
 pub use authenticate::Authenticate;
-pub use begin::Begin;
+pub use begin::{Begin, IsolationLevel};
 pub use cancel::Cancel;
 pub use commit::Commit;
 pub use content::Content;
@@ -286,6 +286,7 @@ where
 		Begin {
 			client: self,
 			read_only: None,
+			isolation: None,
 		}
 	}
 

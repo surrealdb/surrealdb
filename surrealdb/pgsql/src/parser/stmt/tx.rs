@@ -2,7 +2,7 @@
 //!
 //! gram.y: TransactionStmt
 
-use crate::ast::stmt::TransactionStmt;
+use crate::ast::stmt::{IsolationLevel, TransactionStmt};
 use crate::error::ParseResult;
 use crate::lexer::keyword::Keyword;
 use crate::lexer::token::TokenKind;
@@ -21,29 +21,93 @@ impl<'a> Parser<'a> {
 				self.eat(&TokenKind::Keyword(Keyword::Work))?;
 				self.eat(&TokenKind::Keyword(Keyword::Transaction))?;
 				let mut read_only = false;
+				let mut isolation = None;
+				let mut deferrable = false;
+				let unsupported = |span, message: &'static str| {
+					crate::error::ParseError::new(
+						span,
+						crate::error::ErrorKind::InvalidStatement(message),
+					)
+				};
 				while self.peek().kind != TokenKind::Semi && !self.peek().is_eof() {
 					if self.eat(&TokenKind::Keyword(Keyword::Isolation))? {
-						return Err(crate::error::ParseError::new(
-							self.peek().span,
-							crate::error::ErrorKind::InvalidStatement(
-								"unsupported transaction isolation level",
-							),
-						));
+						if !self.eat(&TokenKind::Keyword(Keyword::Level))? {
+							return Err(unsupported(
+								self.peek().span,
+								"expected LEVEL after ISOLATION",
+							));
+						}
+						isolation = Some(
+							if self.eat(&TokenKind::Keyword(Keyword::Serializable))? {
+								IsolationLevel::Serializable
+							} else if matches!(&self.peek().kind, TokenKind::Ident(id) if id.eq_ignore_ascii_case("repeatable"))
+							{
+								self.bump()?;
+								if !self.eat(&TokenKind::Keyword(Keyword::Read))? {
+									return Err(unsupported(
+										self.peek().span,
+										"expected READ after REPEATABLE",
+									));
+								}
+								IsolationLevel::RepeatableRead
+							} else if self.eat(&TokenKind::Keyword(Keyword::Read))? {
+								if self.eat(&TokenKind::Keyword(Keyword::Committed))? {
+									IsolationLevel::ReadCommitted
+								} else if self.eat(&TokenKind::Keyword(Keyword::Uncommitted))? {
+									IsolationLevel::ReadUncommitted
+								} else {
+									return Err(unsupported(
+										self.peek().span,
+										"expected COMMITTED or UNCOMMITTED after READ",
+									));
+								}
+							} else {
+								return Err(unsupported(
+									self.peek().span,
+									"unsupported transaction isolation level",
+								));
+							},
+						);
 					} else if self.eat(&TokenKind::Keyword(Keyword::Read))? {
 						if self.eat(&TokenKind::Keyword(Keyword::Only))? {
 							read_only = true;
 						} else if self.eat(&TokenKind::Keyword(Keyword::Write))? {
 							read_only = false;
+						} else {
+							return Err(unsupported(
+								self.peek().span,
+								"expected ONLY or WRITE after READ",
+							));
 						}
+					} else if self.eat(&TokenKind::Keyword(Keyword::Not))? {
+						if !self.eat(&TokenKind::Keyword(Keyword::Deferrable))? {
+							return Err(unsupported(
+								self.peek().span,
+								"expected DEFERRABLE after NOT",
+							));
+						}
+						deferrable = false;
+					} else if self.eat(&TokenKind::Keyword(Keyword::Deferrable))? {
+						deferrable = true;
 					} else if self.eat(&TokenKind::Comma)? {
 					} else {
 						break;
 					}
 				}
+				// `DEFERRABLE` only means something on a serializable read-only
+				// transaction, where it has no effect here; anywhere else it is
+				// refused rather than accepted and ignored.
+				if deferrable && !(read_only && isolation == Some(IsolationLevel::Serializable)) {
+					return Err(unsupported(
+						self.peek().span,
+						"DEFERRABLE needs SERIALIZABLE READ ONLY",
+					));
+				}
 				self.expect_tx_stmt_end()?;
 				let span = start_tok.span.merge(self.peek().span);
 				Ok(TransactionStmt::Begin {
 					read_only,
+					isolation,
 					span,
 				})
 			}

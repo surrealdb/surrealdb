@@ -221,7 +221,7 @@ impl GucStore {
 		);
 		self.register(
 			"transaction_isolation",
-			"read committed",
+			"repeatable read",
 			"Sets the current transaction's isolation level.",
 			false,
 			false,
@@ -235,7 +235,7 @@ impl GucStore {
 		);
 		self.register(
 			"default_transaction_isolation",
-			"read committed",
+			"repeatable read",
 			"Sets the default isolation level for transactions.",
 			false,
 			false,

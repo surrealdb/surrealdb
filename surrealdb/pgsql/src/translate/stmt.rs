@@ -317,13 +317,39 @@ fn translate_transaction(tx: &TransactionStmt, out: &mut String) -> Result<(), T
 	match tx {
 		TransactionStmt::Begin {
 			read_only,
+			isolation,
 			..
 		} => {
-			out.push_str(if *read_only {
-				"BEGIN TRANSACTION READ ONLY;"
-			} else {
-				"BEGIN TRANSACTION;"
-			});
+			out.push_str("BEGIN TRANSACTION");
+			// `REPEATABLE READ` is PostgreSQL's own snapshot isolation. The levels
+			// below it let a transaction see commits made while it runs, which a
+			// snapshot never does, so they are refused rather than quietly given
+			// something else.
+			match isolation {
+				None => {}
+				Some(IsolationLevel::Serializable) => {
+					out.push_str(" ISOLATION LEVEL SERIALIZABLE");
+				}
+				Some(IsolationLevel::RepeatableRead) => {
+					out.push_str(" ISOLATION LEVEL SNAPSHOT");
+				}
+				Some(IsolationLevel::ReadCommitted) => {
+					return Err(TranslationError::Unsupported(
+						"ISOLATION LEVEL READ COMMITTED is not supported; use REPEATABLE READ or SERIALIZABLE"
+							.to_string(),
+					));
+				}
+				Some(IsolationLevel::ReadUncommitted) => {
+					return Err(TranslationError::Unsupported(
+						"ISOLATION LEVEL READ UNCOMMITTED is not supported; use REPEATABLE READ or SERIALIZABLE"
+							.to_string(),
+					));
+				}
+			}
+			if *read_only {
+				out.push_str(" READ ONLY");
+			}
+			out.push(';');
 			Ok(())
 		}
 		TransactionStmt::Commit {

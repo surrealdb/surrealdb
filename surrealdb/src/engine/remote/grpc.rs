@@ -23,8 +23,8 @@ use std::time::Duration as StdDuration;
 
 use async_channel::Sender;
 use surrealdb_engine_api::{
-	DbExportConfig, EngineContext, EngineFuture, MlExportConfig, OpenedTransaction, ReadOnlyBegin,
-	SurrealEngine,
+	DbExportConfig, EngineContext, EngineFuture, IsolationLevel, MlExportConfig, OpenedTransaction,
+	ReadOnlyBegin, SurrealEngine,
 };
 use surrealdb_protocol::proto::rpc::v1 as rpc;
 use surrealdb_protocol::proto::rpc::v1::surreal_db_service_client::SurrealDbServiceClient;
@@ -1258,11 +1258,12 @@ impl SurrealEngine for GrpcEngine {
 		&self,
 		ctx: EngineContext,
 		read_only: Option<ReadOnlyBegin>,
+		isolation: Option<IsolationLevel>,
 	) -> EngineFuture<'_, OpenedTransaction> {
 		Box::pin(async move {
-			if read_only.is_some() {
+			if read_only.is_some() || isolation.is_some() {
 				return Err(Error::validation(
-					"A read-only transaction cannot be opened over gRPC yet".to_string(),
+					"Transaction options cannot be used over gRPC yet".to_string(),
 					None,
 				));
 			}
@@ -1285,6 +1286,7 @@ impl SurrealEngine for GrpcEngine {
 			Ok(OpenedTransaction {
 				id,
 				snapshot: None,
+				options_acknowledged: false,
 			})
 		})
 	}

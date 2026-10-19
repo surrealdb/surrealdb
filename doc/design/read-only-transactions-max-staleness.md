@@ -1,6 +1,6 @@
 # Read-only transactions with bounded staleness
 
-Status: Part A is partly implemented (see "Implementation status"); Part B is a proposal. The document has two parts that are
+Status: Part A and Part B are largely implemented (see "Implementation status"). The document has two parts that are
 independent changes. Part A adds `READ ONLY [MAX STALENESS <duration> [STRICT]]`
 to `BEGIN`, with a transport-level form for single statements. Part B
 (`ISOLATION LEVEL`, the `SNAPSHOT` default, and removing per-request isolation
@@ -25,7 +25,8 @@ Also implemented, as the transport surface:
 
 - **Snapshot description.** The `BEGIN` of a read-only block answers with
   `{ position, age, stale }` instead of `NONE`; the `begin` RPC answers with
-  `{ id, snapshot }` when it carries options. `position` is the backend's
+  `{ id, snapshot, isolation }` when it carries options (`snapshot` for a
+  read-only one). `position` is the backend's
   opaque token as bytes, or `NONE`.
 - **Request form.** `QueryRequest::read_only` wraps a request's statements in
   the block (`BEGIN … COMMIT` results included, so the result indexes are those
@@ -38,10 +39,31 @@ Also implemented, as the transport surface:
   `.max_staleness(Duration)` and `.strict()`, and the `Transaction` has
   `.snapshot()`. `COMMIT` of a read-only transaction releases it.
 
+Part B is implemented too: `ISOLATION LEVEL { SNAPSHOT | SERIALIZABLE }` parses
+and prints, in either order with `READ ONLY`; `SNAPSHOT` is the default for
+every transaction; the `IsolationLevels` backend handle
+(`surrealdb/kvs/src/isolation.rs`) offers other levels, and a backend without
+one refuses `SERIALIZABLE` naming the levels it offers; `Datastore::begin_transaction`
+opens the transaction a `BEGIN` asks for, refusing `SERIALIZABLE` with a
+`MAX STALENESS` above zero; the `begin` RPC takes `isolation` in its options
+object and answers with an object whenever it carried options; the SDK's
+`Begin` builder has `.isolation(...)`, and refuses a server that answers a
+read-only or isolation request with a bare id; the PostgreSQL parser,
+translator and connection layer map `ISOLATION LEVEL` as the table below
+describes, refuse `READ COMMITTED` and `READ UNCOMMITTED`, and no longer ignore
+the level; pgwire also honours `default_transaction_isolation` and refuses those
+levels there. The memory engine (SurrealMX) publishes an
+`IsolationLevels` handle that opens read-write transactions under serializable
+snapshot isolation for `SERIALIZABLE`, and reports their plain reads as tracked;
+SurrealKV, RocksDB and TiKV offer `SNAPSHOT` alone and refuse `SERIALIZABLE`,
+since their commits validate only written keys and locked reads.
+
 Not yet implemented: gRPC (its `begin` and `query` messages carry no options;
 a gRPC `begin` with options is refused), commit positions, the read-only
-snapshot lifetime cap, `ReadSnapshotTooStale` as a distinct typed error kind
-(it is a query error carrying the name in its message), and Part B.
+snapshot lifetime cap, and `ReadSnapshotTooStale` as a distinct typed error
+kind (it is a query error carrying the name in its message). Removing a
+per-request isolation header from an engine that carries one is that engine's
+change.
 
 ## Why
 
@@ -778,7 +800,8 @@ among a modifier whitelist and ignores them.
 | Source | Emitted clause |
 |---|---|
 | `ISOLATION LEVEL SERIALIZABLE` | `ISOLATION LEVEL SERIALIZABLE` |
-| `ISOLATION LEVEL REPEATABLE READ`, `READ COMMITTED`, `READ UNCOMMITTED` | `ISOLATION LEVEL SNAPSHOT` (the standard lets a database give a stronger level than requested) |
+| `ISOLATION LEVEL REPEATABLE READ` | `ISOLATION LEVEL SNAPSHOT` (PostgreSQL's own `REPEATABLE READ` is snapshot isolation) |
+| `ISOLATION LEVEL READ COMMITTED`, `READ UNCOMMITTED` | refused: a transaction at these levels sees commits made while it runs, which a snapshot never does, so `SNAPSHOT` would be a different behaviour, not a stronger one |
 | `DEFERRABLE`, `NOT DEFERRABLE` | accepted only with `SERIALIZABLE READ ONLY`, where it has no observable effect here; otherwise a syntax error |
 
 The PostgreSQL parser's `Begin` node gains an isolation field and keeps the
@@ -807,6 +830,9 @@ Part A.
 1. **Is `SNAPSHOT`-only acceptable for single statements?** If a
    single-statement serializable form is wanted, the transport field of Part A
    can carry it.
-2. **PostgreSQL mapping.** `READ COMMITTED` and `READ UNCOMMITTED` to `SNAPSHOT`
-   is permitted by the standard. Should the front-end reject them instead, so a
-   client that wants read-committed behaviour is told it does not get it?
+2. **Drivers that name `READ COMMITTED`.** Some ORMs and drivers send it
+   explicitly and now receive a clear error until they are configured to
+   `REPEATABLE READ` or `SERIALIZABLE`. The same rule applies to the
+   `default_transaction_isolation` and `transaction_isolation` settings, which
+   refuse those levels, report `repeatable read` by default, and are honoured by
+   a `BEGIN` that names no level.

@@ -68,7 +68,7 @@ pub mod api;
 mod execution;
 mod query;
 pub use execution::{ExecutionStatement, LogicalStatement, StatementKind, StatementText};
-pub use query::{BeginOptions, Query, ReadOnly, Staleness, TopLevelExpr};
+pub use query::{BeginOptions, IsolationLevel, Query, ReadOnly, Staleness, TopLevelExpr};
 mod define;
 pub mod entry;
 mod extension;
@@ -207,8 +207,16 @@ impl<'a> Lower<'a> {
 
 	/// The options of a `BEGIN` node.
 	fn begin_options(&self, n: &Node) -> R<BeginOptions> {
+		let isolation = match (n.op & 4 != 0, n.op & 8 != 0) {
+			(false, _) => None,
+			(true, false) => Some(IsolationLevel::Snapshot),
+			(true, true) => Some(IsolationLevel::Serializable),
+		};
 		if n.op & 1 == 0 {
-			return Ok(BeginOptions::default());
+			return Ok(BeginOptions {
+				isolation,
+				read_only: None,
+			});
 		}
 		let max_staleness = if n.a == NONE {
 			None
@@ -220,6 +228,7 @@ impl<'a> Lower<'a> {
 			Some(Staleness::Duration(Duration::new(s, ns)))
 		};
 		Ok(BeginOptions {
+			isolation,
 			read_only: Some(ReadOnly {
 				max_staleness,
 				strict: n.op & 2 != 0,

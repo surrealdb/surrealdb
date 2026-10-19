@@ -195,9 +195,10 @@ pub enum Tag {
 	Block,
 	/// `{ a, b }`: `a` the list of elements.
 	Set,
-	/// `BEGIN [TRANSACTION] [READ ONLY [MAX STALENESS a [STRICT]]]`: `op` bit 0
-	/// `READ ONLY`, bit 1 `STRICT`; `a` the `Duration` or `Param` leaf of
-	/// `MAX STALENESS`, or `NONE`.
+	/// `BEGIN [TRANSACTION] [ISOLATION LEVEL l] [READ ONLY [MAX STALENESS a
+	/// [STRICT]]]`: `op` bit 0 `READ ONLY`, bit 1 `STRICT`, bit 2 an isolation
+	/// level is given, bit 3 it is `SERIALIZABLE` (else `SNAPSHOT`); `a` the
+	/// `Duration` or `Param` leaf of `MAX STALENESS`, or `NONE`.
 	Begin,
 	Cancel,
 	Commit,

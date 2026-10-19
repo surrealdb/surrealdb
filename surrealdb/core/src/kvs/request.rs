@@ -164,6 +164,14 @@ pub fn snapshot_description(info: &surrealdb_kvs::SnapshotInfo) -> surrealdb_typ
 	surrealdb_types::Value::Object(object)
 }
 
+/// What a `begin` call asks for: an isolation level, and a read-only mode.
+/// A call that asks for neither opens a read-write transaction at `SNAPSHOT`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BeginRequest {
+	pub isolation: Option<crate::kvs::Isolation>,
+	pub read_only: Option<ReadOnlyOptions>,
+}
+
 /// A query and the execution conditions it runs under.
 ///
 /// Build one with [`QueryRequest::new`] and the `with_*` methods, or with a

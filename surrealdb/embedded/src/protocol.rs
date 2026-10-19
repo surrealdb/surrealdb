@@ -11,7 +11,6 @@ use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::rpc::{RpcProtocol, types_error_from_anyhow};
 use surrealdb_datastore::Transaction;
-use surrealdb_kvs::TransactionType;
 use surrealdb_rpc::DbResult;
 use surrealdb_rpc::error::{invalid_params, session_not_found};
 use surrealdb_types::{Array, HashMap, Value};
@@ -144,32 +143,17 @@ impl RpcProtocol for EmbeddedEngine {
 		session_id: Uuid,
 		params: Array,
 	) -> TxResult<DbResult> {
-		let read_only = surrealdb_core::rpc::extract_begin_options(params)?;
+		let request = surrealdb_core::rpc::extract_begin_options(params)?;
 		// Reject a `begin` for a session that was never attached, so a caller
 		// cannot strand transactions under a session id nothing will ever clean
 		// up. The implicit default session is always registered.
 		self.get_session(&session_id).await?;
-		let (tx, snapshot) = match read_only {
-			None => {
-				let tx = self
-					.kvs()
-					.transaction(TransactionType::Write)
-					.await
-					.map_err(types_error_from_anyhow)?;
-				(tx, None)
-			}
-			Some(options) => {
-				let (tx, info) = self
-					.kvs()
-					.read_transaction(surrealdb_core::kvs::ReadRequest {
-						max_staleness: options.max_staleness,
-						strict: options.strict,
-					})
-					.await
-					.map_err(types_error_from_anyhow)?;
-				(tx, Some(surrealdb_core::kvs::snapshot_description(&info)))
-			}
-		};
+		let (tx, info) = self
+			.kvs()
+			.begin_transaction(request.isolation, request.read_only)
+			.await
+			.map_err(types_error_from_anyhow)?;
+		let snapshot = info.map(|info| surrealdb_core::kvs::snapshot_description(&info));
 		let id = Uuid::now_v7();
 		self.transactions.insert(id, (session_id, Arc::new(tx)));
 		// Close the begin/detach race: `del_session` removes the session from
@@ -182,14 +166,23 @@ impl RpcProtocol for EmbeddedEngine {
 			return Err(session_not_found(session_id));
 		}
 		let id = Value::Uuid(surrealdb_types::Uuid::from(id));
-		Ok(DbResult::Other(match snapshot {
-			None => id,
-			Some(snapshot) => {
-				let mut reply = surrealdb_types::Object::new();
-				reply.insert("id", id);
+		Ok(DbResult::Other(if request == surrealdb_core::kvs::BeginRequest::default() {
+			id
+		} else {
+			// A call that carried options is answered with an object, which is
+			// how a client knows the server understood them.
+			let mut reply = surrealdb_types::Object::new();
+			reply.insert("id", id);
+			if let Some(snapshot) = snapshot {
 				reply.insert("snapshot", snapshot);
-				Value::Object(reply)
 			}
+			let isolation =
+				match request.isolation.unwrap_or(surrealdb_core::kvs::Isolation::Snapshot) {
+					surrealdb_core::kvs::Isolation::Snapshot => "snapshot",
+					surrealdb_core::kvs::Isolation::Serializable => "serializable",
+				};
+			reply.insert("isolation", isolation);
+			Value::Object(reply)
 		}))
 	}
 

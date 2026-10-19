@@ -2633,39 +2633,73 @@ fn extract_query_params(
 }
 
 /// The options of a `begin` call: nothing, or one options object holding
-/// `read_only`. See [`extract_read_only`].
+/// `isolation` and `read_only`. See [`parse_options`].
 pub fn extract_begin_options(
 	params: PublicArray,
-) -> Result<Option<ReadOnlyOptions>, surrealdb_types::Error> {
+) -> Result<crate::kvs::BeginRequest, surrealdb_types::Error> {
 	let mut params = params.into_vec().into_iter();
 	let options = params.next();
 	if params.next().is_some() {
 		return Err(invalid_params("Expected (options:object)".to_string()));
 	}
-	extract_read_only(options)
+	let (isolation, read_only) = parse_options(options, true)?;
+	Ok(crate::kvs::BeginRequest {
+		isolation,
+		read_only,
+	})
 }
 
-/// The `read_only` entry of a query call's options object.
-///
-/// `{ read_only: { max_staleness: <duration>, strict: <bool> } }` asks for the
-/// query to run as one read-only block, exactly as if its statements were
-/// wrapped in `BEGIN READ ONLY MAX STALENESS <duration> [STRICT]; …; COMMIT;`.
-/// A missing or null options object, or one without `read_only`, asks for
-/// nothing. Unknown entries are refused rather than ignored, so a misspelt
-/// option is never silently dropped.
+/// The `read_only` entry of a query call's options object. See
+/// [`parse_options`]; a query call takes no isolation level.
 fn extract_read_only(
 	options: Option<PublicValue>,
 ) -> Result<Option<ReadOnlyOptions>, surrealdb_types::Error> {
+	Ok(parse_options(options, false)?.1)
+}
+
+/// The options object of a `query` or `begin` call.
+///
+/// - `read_only: { max_staleness: <duration>, strict: <bool> }` asks for the statements to run as
+///   one read-only block, over a snapshot no older than the bound (default `0s`, the current
+///   state), exactly as if they were wrapped in `BEGIN READ ONLY MAX STALENESS <duration> [STRICT];
+///   …; COMMIT;`.
+/// - `isolation: "snapshot" | "serializable"` selects the isolation level of the transaction a
+///   `begin` opens. A query call does not take it: a lone statement is always `SNAPSHOT`.
+///
+/// A missing or null options object asks for nothing. Unknown entries are
+/// refused rather than ignored, so a misspelt option is never silently dropped.
+fn parse_options(
+	options: Option<PublicValue>,
+	allow_isolation: bool,
+) -> Result<(Option<crate::kvs::Isolation>, Option<ReadOnlyOptions>), surrealdb_types::Error> {
 	let object = match options {
-		None | Some(PublicValue::None | PublicValue::Null) => return Ok(None),
+		None | Some(PublicValue::None | PublicValue::Null) => return Ok((None, None)),
 		Some(PublicValue::Object(object)) => object,
 		Some(other) => {
 			return Err(invalid_params(format!("Expected options to be object, got {other:?}")));
 		}
 	};
+	let mut isolation = None;
 	let mut read_only = None;
 	for (key, value) in object.iter() {
 		match (key.as_str(), value) {
+			("isolation", PublicValue::None | PublicValue::Null) if allow_isolation => {}
+			("isolation", PublicValue::String(level)) if allow_isolation => {
+				isolation = Some(if level.eq_ignore_ascii_case("snapshot") {
+					crate::kvs::Isolation::Snapshot
+				} else if level.eq_ignore_ascii_case("serializable") {
+					crate::kvs::Isolation::Serializable
+				} else {
+					return Err(invalid_params(format!(
+						"Expected isolation to be `snapshot` or `serializable`, got `{level}`"
+					)));
+				});
+			}
+			("isolation", other) if allow_isolation => {
+				return Err(invalid_params(format!(
+					"Expected isolation to be a string, got {other:?}"
+				)));
+			}
 			("read_only", PublicValue::None | PublicValue::Null) => {}
 			("read_only", PublicValue::Object(entry)) => {
 				let mut max_staleness = None;
@@ -2708,7 +2742,7 @@ fn extract_read_only(
 			}
 		}
 	}
-	Ok(read_only)
+	Ok((isolation, read_only))
 }
 
 /// Runs a query against a session the caller already holds a read guard on.
@@ -3612,8 +3646,39 @@ mod read_only_option_tests {
 	}
 
 	#[test]
+	fn begin_takes_an_isolation_level_and_a_query_does_not() {
+		let isolation = |level: Value| {
+			let mut options = Object::new();
+			options.insert("isolation", level);
+			Value::Object(options)
+		};
+		let request = extract_begin_options(Array::from(vec![isolation(Value::String(
+			"Serializable".to_string(),
+		))]))
+		.unwrap();
+		assert_eq!(request.isolation, Some(crate::kvs::Isolation::Serializable));
+		assert!(request.read_only.is_none());
+		let request = extract_begin_options(Array::from(vec![isolation(Value::String(
+			"snapshot".to_string(),
+		))]))
+		.unwrap();
+		assert_eq!(request.isolation, Some(crate::kvs::Isolation::Snapshot));
+
+		for level in [Value::String("repeatable".to_string()), Value::Bool(true)] {
+			assert!(extract_begin_options(Array::from(vec![isolation(level)])).is_err());
+		}
+		// A lone statement is always `SNAPSHOT`, so a query call refuses the option.
+		assert!(
+			extract_read_only(Some(isolation(Value::String("serializable".to_string())))).is_err()
+		);
+	}
+
+	#[test]
 	fn begin_takes_at_most_one_options_object() {
-		assert!(extract_begin_options(Array::new()).unwrap().is_none());
+		assert_eq!(
+			extract_begin_options(Array::new()).unwrap(),
+			crate::kvs::BeginRequest::default()
+		);
 		assert!(
 			extract_begin_options(Array::from(vec![Value::Object(Object::new()), Value::None]))
 				.is_err()

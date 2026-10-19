@@ -1,6 +1,7 @@
 use std::future::IntoFuture;
 use std::time::Duration;
 
+pub use surrealdb_engine_api::IsolationLevel;
 use surrealdb_engine_api::ReadOnlyBegin;
 
 use crate::conn::ctx;
@@ -17,9 +18,19 @@ use crate::{Connection, OnceLockExt, Result, Surreal};
 pub struct Begin<C: Connection> {
 	pub(super) client: Surreal<C>,
 	pub(super) read_only: Option<ReadOnlyBegin>,
+	pub(super) isolation: Option<IsolationLevel>,
 }
 
 impl<C: Connection> Begin<C> {
+	/// Opens the transaction at `level`. Without this a transaction is
+	/// `Snapshot`, which conflicts on its writes only; `Serializable` also
+	/// conflicts on everything it read. A datastore that cannot provide the
+	/// level refuses the call.
+	pub fn isolation(mut self, level: IsolationLevel) -> Self {
+		self.isolation = Some(level);
+		self
+	}
+
 	/// Opens a read-only transaction that reads the current state. Any write
 	/// on it fails.
 	pub fn read_only(mut self) -> Self {
@@ -81,9 +92,10 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		let client = self.client;
 		let read_only = self.read_only;
+		let isolation = self.isolation;
 		Box::pin(async move {
 			let router = client.inner.router.extract()?;
-			let opened = router.engine.begin(ctx(client.session_id), read_only).await?;
+			let opened = router.engine.begin(ctx(client.session_id), read_only, isolation).await?;
 			Ok(Transaction {
 				id: opened.id,
 				client,

@@ -158,6 +158,33 @@ fn test_translate_transactions() {
 		translate_sql("START TRANSACTION READ ONLY;").expect("translate"),
 		"BEGIN TRANSACTION READ ONLY;"
 	);
+	for (sql, expected) in [
+		("BEGIN ISOLATION LEVEL SERIALIZABLE;", "BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;"),
+		("BEGIN ISOLATION LEVEL REPEATABLE READ;", "BEGIN TRANSACTION ISOLATION LEVEL SNAPSHOT;"),
+		(
+			"BEGIN ISOLATION LEVEL REPEATABLE READ, READ ONLY;",
+			"BEGIN TRANSACTION ISOLATION LEVEL SNAPSHOT READ ONLY;",
+		),
+		(
+			"START TRANSACTION ISOLATION LEVEL SERIALIZABLE READ ONLY DEFERRABLE;",
+			"BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE READ ONLY;",
+		),
+		("BEGIN NOT DEFERRABLE;", "BEGIN TRANSACTION;"),
+	] {
+		assert_eq!(translate_sql(sql).expect(sql), expected, "{sql}");
+	}
+	// A mode that is not honoured is refused, never accepted and ignored.
+	for sql in [
+		"BEGIN ISOLATION LEVEL READ COMMITTED;",
+		"BEGIN ISOLATION LEVEL READ UNCOMMITTED, READ ONLY;",
+		"BEGIN DEFERRABLE;",
+		"BEGIN ISOLATION LEVEL SERIALIZABLE DEFERRABLE;",
+		"BEGIN ISOLATION LEVEL;",
+		"BEGIN ISOLATION LEVEL REPEATABLE;",
+		"BEGIN READ;",
+	] {
+		assert!(translate_sql(sql).is_err(), "{sql}");
+	}
 	assert_eq!(translate_sql("COMMIT;").expect("translate"), "COMMIT TRANSACTION;");
 	assert_eq!(translate_sql("ROLLBACK;").expect("translate"), "CANCEL TRANSACTION;");
 }

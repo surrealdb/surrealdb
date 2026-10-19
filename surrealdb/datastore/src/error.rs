@@ -303,6 +303,20 @@ pub enum DatastoreError {
 		maximum: std::time::Duration,
 	},
 
+	/// A serializable transaction asked for a snapshot older than the current
+	/// state.
+	#[error("ISOLATION LEVEL SERIALIZABLE cannot be combined with a MAX STALENESS above zero")]
+	SerializableStaleRead,
+
+	/// A transaction asked for an isolation level the backend does not offer.
+	#[error(
+		"The isolation level {requested} is not available on this datastore; it offers {supported}"
+	)]
+	IsolationNotSupported {
+		requested: String,
+		supported: String,
+	},
+
 	/// No published snapshot met the staleness bound, and the request or the
 	/// fall-back policy forbids reading the current state instead.
 	#[error(
@@ -398,6 +412,10 @@ impl LeafError for DatastoreError {
 			DatastoreError::StalenessAboveMaximum {
 				..
 			}
+			| DatastoreError::IsolationNotSupported {
+				..
+			}
+			| DatastoreError::SerializableStaleRead
 			| DatastoreError::ReadSnapshotTooStale {
 				..
 			} => TypesError::query(message, None),

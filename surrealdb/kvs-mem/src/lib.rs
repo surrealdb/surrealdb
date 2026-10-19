@@ -3,6 +3,8 @@
 
 mod cnf;
 
+use std::any::{Any, TypeId};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub use cnf::MemoryConfig;
@@ -23,7 +25,10 @@ use surrealdb_kvs::api::{
 use surrealdb_kvs::config::{AolMode, SnapshotMode, SyncMode};
 use surrealdb_kvs::cursor::{fill_vals_batch, update_range};
 use surrealdb_kvs::err::{Error, Result};
-use surrealdb_kvs::{Direction, Key, KeyRange, Metrics, TransactionBuilder, TransactionType, Val};
+use surrealdb_kvs::{
+	Direction, Isolation, IsolationLevels, IsolationLevelsHandle, Key, KeyRange, Metrics,
+	TransactionBuilder, TransactionType, Val,
+};
 
 /// Convert a SurrealMX engine error into the generic KVS error type.
 #[expect(
@@ -44,7 +49,57 @@ fn kvs_error(e: surrealmx::Error) -> Error {
 }
 
 pub struct Datastore {
-	db: Database,
+	db: Arc<Database>,
+	/// The isolation levels the store opens transactions at, published to the
+	/// datastore through [`TransactionBuilder::extension`].
+	levels: Arc<IsolationLevelsHandle>,
+}
+
+/// SurrealMX opens a read-write transaction under snapshot isolation or under
+/// serializable snapshot isolation, which also tracks every read.
+struct MemoryLevels {
+	db: Arc<Database>,
+}
+
+impl IsolationLevels for MemoryLevels {
+	fn supported(&self) -> &'static [Isolation] {
+		&[Isolation::Snapshot, Isolation::Serializable]
+	}
+
+	fn open(
+		&self,
+		write: TransactionType,
+		isolation: Isolation,
+	) -> BoxFut<'_, Result<(Box<dyn Transactable>, bool)>> {
+		// Transactions are local: the store runs in-process.
+		Box::pin(async move { Ok((open_transaction(&self.db, write, isolation), true)) })
+	}
+}
+
+/// Opens a transaction at `isolation`.
+///
+/// A read-only transaction reads one consistent snapshot and commits nothing, so
+/// there is no commit to validate and the level changes nothing for it; only a
+/// read-write transaction is opened under serializable snapshot isolation.
+fn open_transaction(
+	db: &Database,
+	write: TransactionType,
+	isolation: Isolation,
+) -> Box<dyn Transactable> {
+	let write = matches!(write, TransactionType::Write);
+	let serializable = write && isolation == Isolation::Serializable;
+	let txn = db.transaction(write);
+	let txn = if serializable {
+		txn.with_serializable_snapshot_isolation()
+	} else {
+		txn.with_snapshot_isolation()
+	};
+	Box::new(Transaction {
+		done: AtomicBool::new(false),
+		write,
+		serializable,
+		inner: RwLock::new(txn),
+	})
 }
 
 pub struct Transaction {
@@ -52,6 +107,8 @@ pub struct Transaction {
 	done: AtomicBool,
 	/// Is the transaction writeable?
 	write: bool,
+	/// Does the commit validate everything the transaction read?
+	serializable: bool,
 	/// The underlying datastore transaction
 	inner: RwLock<Tx>,
 }
@@ -117,7 +174,11 @@ impl Datastore {
 		#[cfg(target_family = "wasm")]
 		let db = Database::new_with_options(opts);
 		// Return the new datastore
+		let db = Arc::new(db);
 		Ok(Datastore {
+			levels: Arc::new(IsolationLevelsHandle(Arc::new(MemoryLevels {
+				db: Arc::clone(&db),
+			}))),
 			db,
 		})
 	}
@@ -128,17 +189,9 @@ impl Datastore {
 		Ok(())
 	}
 
-	/// Start a new transaction
+	/// Start a new transaction, under snapshot isolation.
 	pub async fn transaction(&self, write: TransactionType) -> Result<Box<dyn Transactable>> {
-		let write = matches!(write, TransactionType::Write);
-		// Create a new transactio
-		let txn = self.db.transaction(write).with_snapshot_isolation();
-		// Return the new transaction
-		Ok(Box::new(Transaction {
-			done: AtomicBool::new(false),
-			write,
-			inner: RwLock::new(txn),
-		}))
+		Ok(open_transaction(&self.db, write, Isolation::Snapshot))
 	}
 }
 
@@ -166,6 +219,11 @@ impl TransactionBuilder for Datastore {
 	fn collect_u64_metric(&self, _metric: &str) -> Option<u64> {
 		None
 	}
+
+	fn extension(&self, id: TypeId) -> Option<Arc<dyn Any + Send + Sync>> {
+		(id == TypeId::of::<IsolationLevelsHandle>())
+			.then(|| Arc::clone(&self.levels) as Arc<dyn Any + Send + Sync>)
+	}
 }
 
 impl Transactable for Transaction {
@@ -188,10 +246,10 @@ impl Transactable for Transaction {
 		self.write
 	}
 
-	/// Transactions run under snapshot isolation, whose commit checks write-write overlap only: a
-	/// plain read never joins the conflict set.
+	/// A snapshot-isolation commit checks write-write overlap only, so a plain read never joins
+	/// the conflict set; a serializable-snapshot-isolation commit validates everything read.
 	fn plain_reads_tracked(&self) -> bool {
-		false
+		self.serializable
 	}
 
 	/// Cancels the transaction.
@@ -1207,6 +1265,74 @@ impl ScanCursorVals for MemValsCursor<'_> {
 
 #[cfg(all(test, not(target_family = "wasm")))]
 mod tests {
+	fn key(name: &str) -> Key<'_> {
+		Key::from(name.as_bytes())
+	}
+
+	/// The handle the store publishes.
+	fn levels(ds: &Datastore) -> Arc<IsolationLevelsHandle> {
+		let Ok(handle) = ds
+			.extension(TypeId::of::<IsolationLevelsHandle>())
+			.expect("a published handle")
+			.downcast::<IsolationLevelsHandle>()
+		else {
+			panic!("the handle's type");
+		};
+		handle
+	}
+
+	/// The store offers both levels through its published handle, and a
+	/// serializable read-write transaction reports that plain reads join its
+	/// conflict set while a snapshot one does not.
+	#[tokio::test]
+	async fn the_store_offers_snapshot_and_serializable() {
+		let ds = Datastore::new(MemoryConfig::default()).await.unwrap();
+		let handle = levels(&ds);
+		assert_eq!(handle.0.supported(), &[Isolation::Snapshot, Isolation::Serializable]);
+		for (write, isolation, tracked) in [
+			(TransactionType::Write, Isolation::Snapshot, false),
+			(TransactionType::Write, Isolation::Serializable, true),
+			(TransactionType::Read, Isolation::Serializable, false),
+		] {
+			let (tx, local) = handle.0.open(write, isolation).await.unwrap();
+			assert!(local);
+			assert_eq!(tx.plain_reads_tracked(), tracked, "{isolation}");
+			tx.cancel().await.unwrap();
+		}
+	}
+
+	/// Two transactions that each read both keys and write one of them commit
+	/// under snapshot isolation (write skew) and conflict under serializable.
+	#[tokio::test]
+	async fn serializable_refuses_the_write_skew_snapshot_allows() {
+		for (isolation, conflicts) in
+			[(Isolation::Snapshot, false), (Isolation::Serializable, true)]
+		{
+			let ds = Datastore::new(MemoryConfig::default()).await.unwrap();
+			let seed = ds.transaction(TransactionType::Write).await.unwrap();
+			seed.set(key("a"), b"1".to_vec()).await.unwrap();
+			seed.set(key("b"), b"1".to_vec()).await.unwrap();
+			seed.commit().await.unwrap();
+
+			let handle = levels(&ds);
+			let (t1, _) = handle.0.open(TransactionType::Write, isolation).await.unwrap();
+			let (t2, _) = handle.0.open(TransactionType::Write, isolation).await.unwrap();
+			for tx in [&t1, &t2] {
+				tx.get(key("a"), None).await.unwrap();
+				tx.get(key("b"), None).await.unwrap();
+			}
+			t1.set(key("a"), b"0".to_vec()).await.unwrap();
+			t2.set(key("b"), b"0".to_vec()).await.unwrap();
+			t1.commit().await.unwrap();
+			let second = t2.commit().await;
+			match (conflicts, second) {
+				(false, Ok(())) => {}
+				(true, Err(Error::TransactionConflict(_))) => {}
+				(conflicts, other) => panic!("{isolation}: conflicts={conflicts}, got {other:?}"),
+			}
+		}
+	}
+
 	use std::time::Duration;
 
 	use super::*;

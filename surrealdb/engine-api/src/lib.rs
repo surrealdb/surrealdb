@@ -131,17 +131,43 @@ pub struct ReadOnlyBegin {
 	pub strict: bool,
 }
 
-impl ReadOnlyBegin {
-	/// The options object a `begin` call carries on the wire:
-	/// `{ read_only: { max_staleness, strict } }`.
-	pub fn into_options(self) -> Value {
-		let mut entry = Object::new();
-		entry.insert("max_staleness", surrealdb_types::Duration::from(self.max_staleness));
-		entry.insert("strict", self.strict);
-		let mut options = Object::new();
-		options.insert("read_only", Value::Object(entry));
-		Value::Object(options)
+/// The isolation level of a transaction opened with `begin`. Omitted, a
+/// transaction is `Snapshot`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IsolationLevel {
+	/// The conflict set is the transaction's writes.
+	Snapshot,
+	/// The conflict set is the transaction's writes and everything it read.
+	Serializable,
+}
+
+/// The options object a `begin` call carries on the wire:
+/// `{ isolation, read_only: { max_staleness, strict } }`, or `None` when the
+/// call asks for neither.
+pub fn begin_options(
+	read_only: Option<ReadOnlyBegin>,
+	isolation: Option<IsolationLevel>,
+) -> Option<Value> {
+	if read_only.is_none() && isolation.is_none() {
+		return None;
 	}
+	let mut options = Object::new();
+	if let Some(isolation) = isolation {
+		options.insert(
+			"isolation",
+			match isolation {
+				IsolationLevel::Snapshot => "snapshot",
+				IsolationLevel::Serializable => "serializable",
+			},
+		);
+	}
+	if let Some(read_only) = read_only {
+		let mut entry = Object::new();
+		entry.insert("max_staleness", surrealdb_types::Duration::from(read_only.max_staleness));
+		entry.insert("strict", read_only.strict);
+		options.insert("read_only", Value::Object(entry));
+	}
+	Some(Value::Object(options))
 }
 
 /// A transaction an engine opened: its id and, for a read-only one, the
@@ -150,6 +176,10 @@ impl ReadOnlyBegin {
 pub struct OpenedTransaction {
 	pub id: Uuid,
 	pub snapshot: Option<Value>,
+	/// Whether the server answered with an object, which a server that
+	/// understood the call's options always does. A bare id means the options
+	/// were ignored.
+	pub options_acknowledged: bool,
 }
 
 impl OpenedTransaction {
@@ -160,6 +190,7 @@ impl OpenedTransaction {
 			Value::Uuid(id) => Ok(Self {
 				id: id.into_inner(),
 				snapshot: None,
+				options_acknowledged: false,
 			}),
 			Value::Object(mut reply) => {
 				let Some(Value::Uuid(id)) = reply.remove("id") else {
@@ -170,6 +201,7 @@ impl OpenedTransaction {
 				Ok(Self {
 					id: id.into_inner(),
 					snapshot: reply.remove("snapshot"),
+					options_acknowledged: true,
 				})
 			}
 			other => Err(Error::internal(format!("Begin returned an unexpected value: {other:?}"))),
@@ -212,6 +244,7 @@ pub enum Command {
 	/// Begin a manual transaction, read-only when `read_only` is set.
 	Begin {
 		read_only: Option<ReadOnlyBegin>,
+		isolation: Option<IsolationLevel>,
 	},
 	/// Cancel a manual transaction.
 	Rollback {
@@ -514,6 +547,7 @@ pub trait SurrealEngine: Debug + Send + Sync + 'static {
 		&self,
 		ctx: EngineContext,
 		read_only: Option<ReadOnlyBegin>,
+		isolation: Option<IsolationLevel>,
 	) -> EngineFuture<'_, OpenedTransaction>;
 
 	/// Commits an explicit transaction.
@@ -871,24 +905,27 @@ impl SurrealEngine for RouteChannelEngine {
 		&self,
 		ctx: EngineContext,
 		read_only: Option<ReadOnlyBegin>,
+		isolation: Option<IsolationLevel>,
 	) -> EngineFuture<'_, OpenedTransaction> {
 		Box::pin(async move {
 			let reply = self
 				.value(
 					Command::Begin {
 						read_only,
+						isolation,
 					},
 					ctx.session,
 				)
 				.await?;
 			let opened = OpenedTransaction::from_reply(reply)?;
 			// A server that predates the options ignores them and answers with
-			// a bare id for a writable transaction. A read-only transaction
-			// that is not one is released and refused, not handed back.
-			if read_only.is_some() && opened.snapshot.is_none() {
+			// a bare id for an ordinary transaction. A transaction that is not
+			// the one asked for is released and refused, not handed back: a
+			// read-only or serializable request must never be quietly weaker.
+			if (read_only.is_some() || isolation.is_some()) && !opened.options_acknowledged {
 				let _ = self.rollback(ctx, opened.id).await;
 				return Err(Error::validation(
-					"The server did not open a read-only transaction; it may not support read-only transactions"
+					"The server did not honour the transaction options; it may not support them"
 						.to_string(),
 					None,
 				));

@@ -25,6 +25,7 @@ pub mod consts;
 pub mod cursor;
 pub mod destroy;
 pub mod err;
+pub mod isolation;
 pub mod key;
 pub mod page;
 pub mod release;
@@ -44,6 +45,7 @@ pub use api::{
 pub use builder::{Metric, Metrics, TransactionBuilder};
 pub use destroy::{DestroyRange, DestroyRangeHandle};
 pub use err::{Error, Result};
+pub use isolation::{Isolation, IsolationLevels, IsolationLevelsHandle};
 pub use page::Page;
 pub use release::{FeatureLevel, Release};
 pub use savepoint::SavepointStack;

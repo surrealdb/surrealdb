@@ -33,7 +33,8 @@ use surrealdb_expr::parser::Query as Ast;
 use surrealdb_kvs::TransactionType::*;
 use surrealdb_kvs::value::EncodeContext;
 use surrealdb_kvs::{
-	DestroyRange, DestroyRangeHandle, FeatureLevel, Release, SnapshotInfo, TransactionType,
+	DestroyRange, DestroyRangeHandle, FeatureLevel, Isolation, Release, SnapshotInfo,
+	TransactionType,
 };
 use surrealdb_types::{AuthError, Error as TypesError, SurrealValue, object};
 use tokio_util::sync::CancellationToken;
@@ -6606,6 +6607,51 @@ impl Datastore {
 		self.transaction_factory.transaction(write, self.sequences.clone()).await
 	}
 
+	/// Opens the transaction a `BEGIN` asks for: a write transaction, or a
+	/// read-only one when `read_only` is given, at `isolation` (default
+	/// `SNAPSHOT`).
+	///
+	/// A read-only request with a bound of zero reads the current state at the
+	/// requested level. A bound above zero reads a snapshot, which is always
+	/// `SNAPSHOT`: combining it with `SERIALIZABLE` is refused, because a
+	/// serializable read must not come from a snapshot older than the data it
+	/// has to conflict with. The snapshot description is `None` for a write
+	/// transaction.
+	pub async fn begin_transaction(
+		&self,
+		isolation: Option<Isolation>,
+		read_only: Option<ReadOnlyOptions>,
+	) -> Result<(Transaction, Option<SnapshotInfo>)> {
+		let isolation = isolation.unwrap_or(Isolation::Snapshot);
+		let Some(read_only) = read_only else {
+			return Ok((self.transaction_at(TransactionType::Write, isolation).await?, None));
+		};
+		if read_only.max_staleness.is_zero() {
+			let txn = self.transaction_at(TransactionType::Read, isolation).await?;
+			return Ok((txn, Some(SnapshotInfo::current())));
+		}
+		if isolation == Isolation::Serializable {
+			return Err(surrealdb_datastore::error::DatastoreError::SerializableStaleRead.into());
+		}
+		let (txn, info) = self
+			.read_transaction(ReadRequest {
+				max_staleness: read_only.max_staleness,
+				strict: read_only.strict,
+			})
+			.await?;
+		Ok((txn, Some(info)))
+	}
+
+	/// Opens a transaction at `isolation`. See
+	/// [`TransactionFactory::transaction_at`].
+	pub async fn transaction_at(
+		&self,
+		write: TransactionType,
+		isolation: Isolation,
+	) -> Result<Transaction> {
+		self.transaction_factory.transaction_at(write, isolation, self.sequences.clone()).await
+	}
+
 	/// Opens a read-only transaction over a snapshot no older than the
 	/// request's staleness bound, with the description of the snapshot it
 	/// reads.
@@ -6970,6 +7016,7 @@ impl Datastore {
 		}
 		use surrealdb_expr::parser::{BeginOptions, ReadOnly, Staleness, TopLevelExpr};
 		let begin = TopLevelExpr::Begin(BeginOptions {
+			isolation: None,
 			read_only: Some(ReadOnly {
 				max_staleness: Some(Staleness::Duration(read_only.max_staleness)),
 				strict: read_only.strict,

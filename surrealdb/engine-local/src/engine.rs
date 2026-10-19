@@ -18,15 +18,17 @@ use surrealdb_core::dbs::{AuthPrincipalSnapshot, Session};
 use surrealdb_core::iam;
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_core::iam::check::check_ns_db;
-use surrealdb_core::kvs::{Datastore, QueryRequest, ReadRequest, snapshot_description};
+use surrealdb_core::kvs::{
+	Datastore, Isolation, QueryRequest, ReadOnlyOptions, snapshot_description,
+};
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_engine_api::MlExportConfig;
 use surrealdb_engine_api::{
-	EngineContext, EngineFuture, OpenedTransaction, ReadOnlyBegin, SurrealEngine, single_result,
+	EngineContext, EngineFuture, IsolationLevel, OpenedTransaction, ReadOnlyBegin, SurrealEngine,
+	single_result,
 };
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_iam::{Action, ResourceKind};
-use surrealdb_kvs::TransactionType;
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_rpc::export::Config as DbExportConfig;
 use surrealdb_rpc::{QueryResult, QueryResultBuilder, QueryStreamItem, QueryType, Token};
@@ -646,35 +648,30 @@ impl SurrealEngine for LocalEngine {
 		&self,
 		ctx: EngineContext,
 		read_only: Option<ReadOnlyBegin>,
+		isolation: Option<IsolationLevel>,
 	) -> EngineFuture<'_, OpenedTransaction> {
 		Box::pin(async move {
 			let state = self.state(ctx).await?;
-			let (txn, snapshot) = match read_only {
-				None => {
-					let txn = self
-						.kvs
-						.transaction(TransactionType::Write)
-						.await
-						.map_err(|error| Error::internal(error.to_string()))?;
-					(txn, None)
-				}
-				Some(read_only) => {
-					let (txn, info) = self
-						.kvs
-						.read_transaction(ReadRequest {
-							max_staleness: read_only.max_staleness,
-							strict: read_only.strict,
-						})
-						.await
-						.map_err(std_error_to_types_error)?;
-					(txn, Some(snapshot_description(&info)))
-				}
-			};
+			let acknowledged = read_only.is_some() || isolation.is_some();
+			let isolation = isolation.map(|level| match level {
+				IsolationLevel::Snapshot => Isolation::Snapshot,
+				IsolationLevel::Serializable => Isolation::Serializable,
+			});
+			let read_only = read_only.map(|read_only| ReadOnlyOptions {
+				max_staleness: read_only.max_staleness,
+				strict: read_only.strict,
+			});
+			let (txn, info) = self
+				.kvs
+				.begin_transaction(isolation, read_only)
+				.await
+				.map_err(std_error_to_types_error)?;
 			let id = Uuid::now_v7();
 			state.transactions.insert(id, Arc::new(txn));
 			Ok(OpenedTransaction {
 				id,
-				snapshot,
+				snapshot: info.map(|info| snapshot_description(&info)),
+				options_acknowledged: acknowledged,
 			})
 		})
 	}

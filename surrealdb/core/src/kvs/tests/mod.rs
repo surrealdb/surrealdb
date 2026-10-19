@@ -51,6 +51,8 @@ mod inline_props_test;
 #[cfg(feature = "kv-mem")]
 mod interrupted_write_test;
 #[cfg(feature = "kv-mem")]
+mod isolation_level_test;
+#[cfg(feature = "kv-mem")]
 mod keyspace_test;
 #[cfg(feature = "kv-mem")]
 mod layout_oracle_test;

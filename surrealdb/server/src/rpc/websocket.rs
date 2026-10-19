@@ -17,7 +17,6 @@ use surrealdb_core::mem::ALLOC;
 use surrealdb_core::rpc::RpcProtocol;
 use surrealdb_core::rpc::format::Format;
 use surrealdb_datastore::Transaction;
-use surrealdb_kvs::TransactionType;
 use surrealdb_observe::{
 	NetworkBytesEvent, NetworkBytesEventCtx, NetworkBytesEventSafe, NetworkDirection,
 	SessionAction, SessionEvent, SessionEventCtx, SessionEventSafe, SessionProtocol,
@@ -1434,7 +1433,7 @@ impl RpcProtocol for Websocket {
 	) -> Result<DbResult, surrealdb_types::Error> {
 		// Validated before the slot is reserved, so a malformed call never
 		// touches the counters.
-		let read_only = surrealdb_core::rpc::extract_begin_options(params)?;
+		let request = surrealdb_core::rpc::extract_begin_options(params)?;
 		// Reject a `begin` for a session that was never attached (the durable
 		// copy, if any, is consulted by `get_session`), matching every other
 		// handler's session guard. Without this a client could supply an endless
@@ -1472,16 +1471,11 @@ impl RpcProtocol for Websocket {
 		}
 		// `begin` bypasses the executor (which is where the
 		// `Context::done` cancel short-circuit lives), so the cancel
-		// handle has to be checked manually. `cancel_aware_transaction`
+		// handle has to be checked manually. `cancel_aware_begin`
 		// encapsulates the pre-await + post-await + cancel-on-loss
 		// pattern; any future RPC method that needs to open its own
 		// transaction outside the executor SHOULD route through it.
-		let opened = match read_only {
-			Some(options) => self.cancel_aware_read_transaction(options).await,
-			None => {
-				self.cancel_aware_transaction(TransactionType::Write).await.map(|tx| (tx, None))
-			}
-		};
+		let opened = self.cancel_aware_begin(request).await;
 		let (tx, snapshot) = match opened {
 			Ok(opened) => opened,
 			Err(e) => {
@@ -1522,14 +1516,23 @@ impl RpcProtocol for Websocket {
 		// Return the transaction ID to the client. A read-only transaction also
 		// answers with the snapshot it reads.
 		let id = Value::Uuid(surrealdb::types::Uuid::from(id));
-		Ok(DbResult::Other(match snapshot {
-			None => id,
-			Some(snapshot) => {
-				let mut reply = surrealdb_types::Object::new();
-				reply.insert("id", id);
+		Ok(DbResult::Other(if request == surrealdb_core::kvs::BeginRequest::default() {
+			id
+		} else {
+			// A call that carried options is answered with an object, which is
+			// how a client knows the server understood them.
+			let mut reply = surrealdb_types::Object::new();
+			reply.insert("id", id);
+			if let Some(snapshot) = snapshot {
 				reply.insert("snapshot", snapshot);
-				Value::Object(reply)
 			}
+			let isolation =
+				match request.isolation.unwrap_or(surrealdb_core::kvs::Isolation::Snapshot) {
+					surrealdb_core::kvs::Isolation::Snapshot => "snapshot",
+					surrealdb_core::kvs::Isolation::Serializable => "serializable",
+				};
+			reply.insert("isolation", isolation);
+			Value::Object(reply)
 		}))
 	}
 
@@ -1661,61 +1664,36 @@ impl Websocket {
 		}
 	}
 
-	/// Open a transaction outside the executor's cancellation scope,
-	/// while still honouring the connection-level cancel handle.
+	/// Open the transaction a `begin` call asks for outside the executor's
+	/// cancellation scope, while still honouring the connection-level cancel
+	/// handle: at the call's isolation level, read-only over a snapshot no older
+	/// than its bound when it says so, with the description of that snapshot.
 	///
-	/// `begin` and any other RPC method that needs a fresh transaction
-	/// without going through a cancellable `Datastore::run` MUST route
-	/// through here. The executor's `Context::done` short-circuit
-	/// does not cover `kvs().transaction(...)` directly, so the cancel
-	/// has to be observed manually at two points:
+	/// `begin` and any other RPC method that needs a fresh transaction without
+	/// going through a cancellable `Datastore::run` MUST route through here. The
+	/// executor's `Context::done` short-circuit does not cover opening a
+	/// transaction directly, so the cancel has to be observed manually at two
+	/// points:
 	///
 	/// 1. **Pre-await** — refuse to even start opening a transaction on a closing connection.
-	/// 2. **Post-await** — the storage layer yields during `transaction(...).await`, so the cancel
-	///    may have fired while we were blocked. If it did, finalise the just-created transaction
-	///    with `tx.cancel()` (instead of dropping it, which would trigger `Transactor::Drop`'s "A
+	/// 2. **Post-await** — the storage layer yields while the transaction opens, so the cancel may
+	///    have fired while we were blocked. If it did, finalise the just-created transaction with
+	///    `tx.cancel()` (instead of dropping it, which would trigger `Transactor::Drop`'s "A
 	///    transaction was dropped without being committed or cancelled" log).
 	///
-	/// `cleanup_all_txns` in `serve()` is the belt-and-suspenders drain
-	/// for transactions that *were* successfully inserted into
-	/// `self.transactions` by `begin` before the cancel landed.
-	async fn cancel_aware_transaction(
+	/// `cleanup_all_txns` in `serve()` is the belt-and-suspenders drain for
+	/// transactions that *were* successfully inserted into `self.transactions` by
+	/// `begin` before the cancel landed.
+	async fn cancel_aware_begin(
 		&self,
-		ty: TransactionType,
-	) -> Result<Transaction, surrealdb_types::Error> {
-		if self.cancel.is_cancelled() {
-			return Err(TypesError::internal(REQUEST_CANCELLED.to_string()));
-		}
-		let tx = self
-			.kvs()
-			.transaction(ty)
-			.await
-			.map_err(surrealdb_core::rpc::types_error_from_anyhow)?;
-		if self.cancel.is_cancelled() {
-			if let Err(err) = tx.cancel().await {
-				error!("Error cancelling unused transaction after WebSocket cancel: {err}");
-			}
-			return Err(TypesError::internal(REQUEST_CANCELLED.to_string()));
-		}
-		Ok(tx)
-	}
-
-	/// [`Self::cancel_aware_transaction`] for a read-only transaction over a
-	/// snapshot no older than the options' bound, with the description of the
-	/// snapshot it reads.
-	async fn cancel_aware_read_transaction(
-		&self,
-		options: surrealdb_core::kvs::ReadOnlyOptions,
+		request: surrealdb_core::kvs::BeginRequest,
 	) -> Result<(Transaction, Option<Value>), surrealdb_types::Error> {
 		if self.cancel.is_cancelled() {
 			return Err(TypesError::internal(REQUEST_CANCELLED.to_string()));
 		}
 		let (tx, info) = self
 			.kvs()
-			.read_transaction(surrealdb_core::kvs::ReadRequest {
-				max_staleness: options.max_staleness,
-				strict: options.strict,
-			})
+			.begin_transaction(request.isolation, request.read_only)
 			.await
 			.map_err(surrealdb_core::rpc::types_error_from_anyhow)?;
 		if self.cancel.is_cancelled() {
@@ -1724,7 +1702,7 @@ impl Websocket {
 			}
 			return Err(TypesError::internal(REQUEST_CANCELLED.to_string()));
 		}
-		Ok((tx, Some(surrealdb_core::kvs::snapshot_description(&info))))
+		Ok((tx, info.map(|info| surrealdb_core::kvs::snapshot_description(&info))))
 	}
 
 	/// Release one reserved open-transaction slot for a session, undoing the

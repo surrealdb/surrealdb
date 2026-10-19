@@ -7,11 +7,13 @@ use crate::parse::*;
 impl<'a, 's> Parser<'a, 's> {
 	/// `BEGIN`, `CANCEL` or `COMMIT`, after the keyword.
 	///
-	/// `BEGIN` may be followed by `READ ONLY [MAX STALENESS <duration or
-	/// parameter> [STRICT]]`. `READ`, `MAX` and `STALENESS` are plain
-	/// identifiers. The node's `op` holds `1` for `READ ONLY` and `2` for
-	/// `STRICT`; `a` is the `Duration` or `Param` leaf of `MAX STALENESS`, or
-	/// `NONE`.
+	/// `BEGIN` may be followed by `ISOLATION LEVEL { SNAPSHOT | SERIALIZABLE }`
+	/// and `READ ONLY [MAX STALENESS <duration or parameter> [STRICT]]`, each
+	/// at most once and in either order. The words other than `ONLY` and
+	/// `STRICT` are plain identifiers. The node's `op` holds `1` for `READ
+	/// ONLY`, `2` for `STRICT`, `4` when an isolation level is given and `8`
+	/// when it is `SERIALIZABLE`; `a` is the `Duration` or `Param` leaf of `MAX
+	/// STALENESS`, or `NONE`.
 	pub(crate) fn transaction(&mut self, tag: Tag, t: Tok) -> R<NodeId> {
 		self.eat_kw(Kw::Transaction);
 		if tag != Tag::Begin {
@@ -24,31 +26,63 @@ impl<'a, 's> Parser<'a, 's> {
 		};
 		let mut op = 0;
 		let mut a = NONE;
-		if word(self, "READ") {
-			self.bump();
-			self.expect_kw(Kw::Only, "`ONLY`")?;
-			op |= 1;
-			if word(self, "MAX") {
-				self.bump();
-				if !word(self, "STALENESS") {
-					return Err(self.unexpected("`STALENESS`"));
+		loop {
+			if word(self, "READ") {
+				if op & 1 != 0 {
+					return Err(self.error(
+						self.tok.start,
+						self.tok.end,
+						"`READ ONLY` is given twice",
+					));
 				}
 				self.bump();
-				a = if self.at(T::Param) {
-					let p = self.tok;
+				self.expect_kw(Kw::Only, "`ONLY`")?;
+				op |= 1;
+				if word(self, "MAX") {
 					self.bump();
-					self.leaf(Tag::Param, 0, p)
-				} else {
-					self.duration_lit()?
-				};
-				if self.eat_kw(Kw::Strict) {
-					op |= 2;
+					if !word(self, "STALENESS") {
+						return Err(self.unexpected("`STALENESS`"));
+					}
+					self.bump();
+					a = if self.at(T::Param) {
+						let p = self.tok;
+						self.bump();
+						self.leaf(Tag::Param, 0, p)
+					} else {
+						self.duration_lit()?
+					};
+					if self.eat_kw(Kw::Strict) {
+						op |= 2;
+					}
+				} else if self.at_kw(Kw::Strict) {
+					return Err(self.unexpected("`MAX STALENESS` before `STRICT`"));
 				}
-			} else if self.at_kw(Kw::Strict) {
-				return Err(self.unexpected("`MAX STALENESS` before `STRICT`"));
+			} else if word(self, "ISOLATION") {
+				if op & 4 != 0 {
+					return Err(self.error(
+						self.tok.start,
+						self.tok.end,
+						"`ISOLATION LEVEL` is given twice",
+					));
+				}
+				self.bump();
+				if !word(self, "LEVEL") {
+					return Err(self.unexpected("`LEVEL`"));
+				}
+				self.bump();
+				if word(self, "SNAPSHOT") {
+					op |= 4;
+				} else if word(self, "SERIALIZABLE") {
+					op |= 4 | 8;
+				} else {
+					return Err(self.unexpected("`SNAPSHOT` or `SERIALIZABLE`"));
+				}
+				self.bump();
+			} else if word(self, "MAX") {
+				return Err(self.unexpected("`READ ONLY` before `MAX STALENESS`"));
+			} else {
+				break;
 			}
-		} else if word(self, "MAX") {
-			return Err(self.unexpected("`READ ONLY` before `MAX STALENESS`"));
 		}
 		Ok(self.leaf_span(tag, op, a, 0, t.start, self.prev_end))
 	}

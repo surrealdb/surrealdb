@@ -244,11 +244,12 @@ impl RemoteCommand for Command {
 			},
 			Command::Begin {
 				read_only,
+				isolation,
 			} => RouterRequest {
 				id,
 				method: "begin",
-				params: read_only
-					.map(|read_only| Value::Array(Array::from(vec![read_only.into_options()]))),
+				params: surrealdb_engine_api::begin_options(read_only, isolation)
+					.map(|options| Value::Array(Array::from(vec![options]))),
 				txn: None,
 				session_id,
 			},

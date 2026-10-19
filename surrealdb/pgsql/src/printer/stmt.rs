@@ -13,11 +13,11 @@ use crate::ast::stmt::{
 	AlterTableAction, AlterTableStmt, ColumnConstraint, ColumnDef, CommonTableExpr, CopyDirection,
 	CopyFormat, CopyStmt, CopyTarget, CreateIndexStmt, CreateSchemaStmt, CreateTableStmt,
 	CreateViewStmt, DeallocateStmt, DeleteStmt, DistinctClause, DropObjectType, DropStmt,
-	ExecuteStmt, ExplainStmt, IndexElem, InsertStmt, JoinCondition, JoinType, LockingClause,
-	LockingStrength, LockingWaitPolicy, OnConflictAction, OnConflictClause, PrepareStmt, ResTarget,
-	ResetStmt, SelectStmt, SetClause, SetOpKind, SetOperation, SetStmt, ShowStmt, Statement,
-	TableAlias, TableConstraint, TableRef, TransactionStmt, TruncateStmt, UpdateStmt, WindowDef,
-	WithClause,
+	ExecuteStmt, ExplainStmt, IndexElem, InsertStmt, IsolationLevel, JoinCondition, JoinType,
+	LockingClause, LockingStrength, LockingWaitPolicy, OnConflictAction, OnConflictClause,
+	PrepareStmt, ResTarget, ResetStmt, SelectStmt, SetClause, SetOpKind, SetOperation, SetStmt,
+	ShowStmt, Statement, TableAlias, TableConstraint, TableRef, TransactionStmt, TruncateStmt,
+	UpdateStmt, WindowDef, WithClause,
 };
 use crate::printer::ToPgSql;
 use crate::printer::expr::print_ident;
@@ -743,13 +743,23 @@ impl ToPgSql for TransactionStmt {
 		match self {
 			Self::Begin {
 				read_only,
+				isolation,
 				..
 			} => {
-				if *read_only {
-					f.write_str("BEGIN READ ONLY")
-				} else {
-					f.write_str("BEGIN")
+				f.write_str("BEGIN")?;
+				if let Some(isolation) = isolation {
+					f.write_str(" ISOLATION LEVEL ")?;
+					f.write_str(match isolation {
+						IsolationLevel::ReadUncommitted => "READ UNCOMMITTED",
+						IsolationLevel::ReadCommitted => "READ COMMITTED",
+						IsolationLevel::RepeatableRead => "REPEATABLE READ",
+						IsolationLevel::Serializable => "SERIALIZABLE",
+					})?;
 				}
+				if *read_only {
+					f.write_str(" READ ONLY")?;
+				}
+				Ok(())
 			}
 			Self::Commit {
 				..

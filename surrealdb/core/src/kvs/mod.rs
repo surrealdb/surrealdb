@@ -48,7 +48,9 @@ pub use ds::{
 	TransactionBuilderParts,
 };
 pub(crate) use err::Error;
-pub use request::{Dialect, QueryRequest, QuerySource, ReadOnlyOptions, snapshot_description};
+pub use request::{
+	BeginRequest, Dialect, QueryRequest, QuerySource, ReadOnlyOptions, snapshot_description,
+};
 pub use rollback::{
 	EntryFinding, GenerationFinding, LedgerFinding, RollbackCheck, RollbackVerdict,
 };
@@ -57,6 +59,15 @@ pub use rollback::{
 pub use surrealdb_datastore::FeatureLevelState;
 pub(crate) use surrealdb_datastore::IntoBytes;
 pub use surrealdb_datastore::ReadRequest;
+
+/// Whether `error` is a refusal to open a transaction at an isolation level the
+/// datastore does not offer.
+pub fn is_isolation_not_supported(error: &anyhow::Error) -> bool {
+	matches!(
+		error.downcast_ref::<DatastoreError>(),
+		Some(DatastoreError::IsolationNotSupported { .. })
+	)
+}
 // Named for the layer rather than re-exported as `Error`: `kvs::Error` above is
 // the storage backend's, and a datastore failure is a different thing.
 pub(crate) use surrealdb_datastore::error::DatastoreError;
@@ -75,7 +86,7 @@ pub(crate) use surrealdb_datastore::{
 pub(crate) use surrealdb_datastore::{
 	is_indeterminate_commit, is_retryable_transaction_conflict, is_shutdown_error, storage_error,
 };
-pub use surrealdb_kvs::{FeatureLevel, Release, SnapshotInfo};
+pub use surrealdb_kvs::{FeatureLevel, Isolation, Release, SnapshotInfo};
 pub(crate) use tx::Transaction;
 
 pub(crate) use crate::catalog::providers::CachePolicy;

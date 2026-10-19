@@ -10,7 +10,10 @@ use surrealdb_catalog::providers::DatabaseProvider;
 use surrealdb_core::ctx::CancelHandle;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::verify::{self, ScramAuth, basic};
-use surrealdb_core::kvs::{Datastore, Dialect, QueryRequest, QuerySource};
+use surrealdb_core::kvs::{
+	Datastore, Dialect, Isolation, QueryRequest, QuerySource, ReadOnlyOptions,
+	is_isolation_not_supported,
+};
 use surrealdb_core::pgsql::lower::lower_stmt;
 use surrealdb_core::syn;
 use surrealdb_core::syn::{Query as Ast, TopLevelExpr};
@@ -2958,20 +2961,36 @@ impl Connection {
 		match op {
 			TxnOp::Begin {
 				read_only,
+				isolation,
 			} => {
 				if self.transaction.is_some() {
 					msg::write_notice(out, "25001", "there is already a transaction in progress");
 				} else {
-					let txn_type = if read_only {
-						TransactionType::Read
-					} else {
-						TransactionType::Write
+					// A `BEGIN` that names no level takes the session's default.
+					let isolation = match isolation {
+						Some(isolation) => Some(isolation),
+						None => match self.gucs.get("default_transaction_isolation") {
+							Some(setting) => Some(isolation_setting(setting)?),
+							None => None,
+						},
 					};
-					let tx = self
+					let (tx, _) = self
 						.ds
-						.transaction(txn_type)
+						.begin_transaction(
+							isolation,
+							read_only.then_some(ReadOnlyOptions {
+								max_staleness: std::time::Duration::ZERO,
+								strict: false,
+							}),
+						)
 						.await
-						.map_err(|err| PgError::internal(err.to_string()))?;
+						.map_err(|err| {
+							if is_isolation_not_supported(&err) {
+								PgError::feature_not_supported(err.to_string())
+							} else {
+								PgError::internal(err.to_string())
+							}
+						})?;
 					self.transaction = Some(Arc::new(tx));
 					self.txn_failed = false;
 					self.txn_session_snapshot = Some(self.session.clone());
@@ -3260,6 +3279,13 @@ impl Connection {
 			value,
 			is_local,
 		} = set;
+		if name.eq_ignore_ascii_case("default_transaction_isolation")
+			|| name.eq_ignore_ascii_case("transaction_isolation")
+		{
+			// A level the connection cannot give is refused here, not stored and
+			// ignored.
+			isolation_setting(&value)?;
+		}
 		if name.is_empty() {
 			let msg = if !value.is_empty() {
 				format!("SET {value} is not supported")
@@ -4222,11 +4248,96 @@ fn auth_failed(user: &str) -> PgError {
 	PgError::invalid_password(format!("password authentication failed for user \"{user}\"")).fatal()
 }
 
+/// The isolation level a `default_transaction_isolation` or `transaction_isolation`
+/// setting names. `repeatable read` is snapshot isolation, as in PostgreSQL;
+/// `read committed` and `read uncommitted` are refused for the reason `BEGIN`
+/// refuses them.
+fn isolation_setting(value: &str) -> Result<Isolation, PgError> {
+	let level = value.trim().trim_matches(|c| c == '\'' || c == '"').trim();
+	let normalised = level.split_whitespace().collect::<Vec<_>>().join(" ").to_ascii_lowercase();
+	match normalised.as_str() {
+		"serializable" => Ok(Isolation::Serializable),
+		"repeatable read" | "default" => Ok(Isolation::Snapshot),
+		"read committed" | "read uncommitted" => Err(PgError::feature_not_supported(format!(
+			"isolation level \"{normalised}\" is not supported; use \"repeatable read\" or \"serializable\""
+		))),
+		_ => Err(PgError::invalid_parameter_value(format!(
+			"invalid value for isolation level: \"{level}\""
+		))),
+	}
+}
+
+/// The modes of a `BEGIN` or `START TRANSACTION`, after its keywords: whether it
+/// is read-only and the isolation level it asks for.
+///
+/// Every mode is honoured. `SERIALIZABLE` is `Serializable` and `REPEATABLE READ`
+/// is `Snapshot`, which is what PostgreSQL's own `REPEATABLE READ` is. The levels
+/// below it are refused: they see commits made while the transaction runs, which a
+/// snapshot never does. `DEFERRABLE`
+/// is accepted only on a serializable read-only transaction, where it has no
+/// effect here. `None` means a token that is not a mode, or a combination that
+/// is not accepted, so the statement is not intercepted and the dialect parser
+/// reports it.
+fn begin_modes(tokens: &[String]) -> Option<(bool, Option<Isolation>)> {
+	let at = |i: usize| tokens.get(i).map(String::as_str);
+	let mut read_only = false;
+	let mut isolation = None;
+	let mut deferrable = false;
+	let mut i = 0;
+	while i < tokens.len() {
+		match tokens[i].as_str() {
+			"TRANSACTION" | "WORK" => i += 1,
+			"ISOLATION" => {
+				if at(i + 1) != Some("LEVEL") {
+					return None;
+				}
+				match (at(i + 2), at(i + 3)) {
+					(Some("SERIALIZABLE"), _) => {
+						isolation = Some(Isolation::Serializable);
+						i += 3;
+					}
+					(Some("REPEATABLE"), Some("READ")) => {
+						isolation = Some(Isolation::Snapshot);
+						i += 4;
+					}
+					// `READ COMMITTED` and `READ UNCOMMITTED` are not intercepted, so the
+					// PostgreSQL parser reports that they are not supported.
+					_ => return None,
+				}
+			}
+			"READ" => {
+				match at(i + 1) {
+					Some("ONLY") => read_only = true,
+					Some("WRITE") => read_only = false,
+					_ => return None,
+				}
+				i += 2;
+			}
+			"NOT" => {
+				if at(i + 1) != Some("DEFERRABLE") {
+					return None;
+				}
+				i += 2;
+			}
+			"DEFERRABLE" => {
+				deferrable = true;
+				i += 1;
+			}
+			_ => return None,
+		}
+	}
+	if deferrable && !(read_only && isolation == Some(Isolation::Serializable)) {
+		return None;
+	}
+	Some((read_only, isolation))
+}
+
 /// An intercepted transaction-control statement.
 #[derive(Clone, PartialEq, Eq, Debug)]
 enum TxnOp {
 	Begin {
 		read_only: bool,
+		isolation: Option<Isolation>,
 	},
 	Commit,
 	Rollback,
@@ -4319,33 +4430,30 @@ fn transaction_control(trimmed: &str) -> Option<TxnOp> {
 		"CHAIN",
 	];
 
-	let mut tokens = stripped.split_whitespace().map(str::to_ascii_uppercase);
+	// Modes may be separated by commas, as in `BEGIN ISOLATION LEVEL READ
+	// COMMITTED, READ ONLY`.
+	let spaced = stripped.replace(',', " ");
+	let mut tokens = spaced.split_whitespace().map(str::to_ascii_uppercase);
 	let first = tokens.next()?;
 	match first.as_str() {
 		"BEGIN" => {
 			let remaining: Vec<String> = tokens.collect();
-			if remaining.iter().all(|t| MODIFIERS.contains(&t.as_str())) {
-				let read_only = remaining.windows(2).any(|w| w[0] == "READ" && w[1] == "ONLY");
-				Some(TxnOp::Begin {
-					read_only,
-				})
-			} else {
-				None
-			}
+			let (read_only, isolation) = begin_modes(&remaining)?;
+			Some(TxnOp::Begin {
+				read_only,
+				isolation,
+			})
 		}
 		"START" => {
 			if tokens.next().as_deref() != Some("TRANSACTION") {
 				return None;
 			}
 			let remaining: Vec<String> = tokens.collect();
-			if remaining.iter().all(|t| MODIFIERS.contains(&t.as_str())) {
-				let read_only = remaining.windows(2).any(|w| w[0] == "READ" && w[1] == "ONLY");
-				Some(TxnOp::Begin {
-					read_only,
-				})
-			} else {
-				None
-			}
+			let (read_only, isolation) = begin_modes(&remaining)?;
+			Some(TxnOp::Begin {
+				read_only,
+				isolation,
+			})
 		}
 		"COMMIT" | "END" => {
 			let remaining: Vec<String> = tokens.collect();
@@ -4824,13 +4932,14 @@ fn dialect_name(dialect: Dialect) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_core::kvs::Isolation;
 	use surrealdb_types::{RecordId, RecordIdKey, Value};
 
 	use super::{
 		Dialect, TxnOp, copy_column_lookup_query, dialect_from_options, dialect_name,
-		parse_database_param, parse_dialect, parse_set, pg_ident, pg_string_literal,
-		rewrite_positional_params, row_within_wire_limit, split_statements, subject_names_record,
-		surql_object_key, transaction_control, wire_row_fits,
+		isolation_setting, parse_database_param, parse_dialect, parse_set, pg_ident,
+		pg_string_literal, rewrite_positional_params, row_within_wire_limit, split_statements,
+		subject_names_record, surql_object_key, transaction_control, wire_row_fits,
 	};
 
 	fn rewrite(query: &str) -> String {
@@ -4842,19 +4951,22 @@ mod tests {
 		assert_eq!(
 			transaction_control("BEGIN"),
 			Some(TxnOp::Begin {
-				read_only: false
+				read_only: false,
+				isolation: None
 			})
 		);
 		assert_eq!(
 			transaction_control("begin;"),
 			Some(TxnOp::Begin {
-				read_only: false
+				read_only: false,
+				isolation: None
 			})
 		);
 		assert_eq!(
 			transaction_control("START TRANSACTION"),
 			Some(TxnOp::Begin {
-				read_only: false
+				read_only: false,
+				isolation: None
 			})
 		);
 		assert_eq!(transaction_control("COMMIT"), Some(TxnOp::Commit));
@@ -4888,12 +5000,29 @@ mod tests {
 	}
 
 	#[test]
+	fn an_isolation_setting_names_a_level_the_connection_can_give() {
+		for (value, expected) in [
+			("serializable", Isolation::Serializable),
+			("'SERIALIZABLE'", Isolation::Serializable),
+			("repeatable read", Isolation::Snapshot),
+			("\"Repeatable   Read\"", Isolation::Snapshot),
+			("default", Isolation::Snapshot),
+		] {
+			assert_eq!(isolation_setting(value).ok(), Some(expected), "{value}");
+		}
+		for value in ["read committed", "'read uncommitted'", "snapshot", "", "chaos"] {
+			assert!(isolation_setting(value).is_err(), "{value}");
+		}
+	}
+
+	#[test]
 	fn recognises_transaction_preambles() {
 		// Comment stripping still allows clean transaction control.
 		assert_eq!(
 			transaction_control("BEGIN /* jdbc */"),
 			Some(TxnOp::Begin {
-				read_only: false
+				read_only: false,
+				isolation: None
 			})
 		);
 		assert_eq!(transaction_control("COMMIT -- done"), Some(TxnOp::Commit));
@@ -4901,21 +5030,61 @@ mod tests {
 		assert_eq!(
 			transaction_control("BEGIN ISOLATION LEVEL SERIALIZABLE"),
 			Some(TxnOp::Begin {
-				read_only: false
+				read_only: false,
+				isolation: Some(Isolation::Serializable)
 			})
 		);
 		assert_eq!(
 			transaction_control("START TRANSACTION READ WRITE"),
 			Some(TxnOp::Begin {
-				read_only: false
+				read_only: false,
+				isolation: None
 			})
 		);
 		assert_eq!(
 			transaction_control("BEGIN READ ONLY"),
 			Some(TxnOp::Begin {
-				read_only: true
+				read_only: true,
+				isolation: None
 			})
 		);
+		for (sql, read_only, isolation) in [
+			("BEGIN ISOLATION LEVEL REPEATABLE READ", false, Some(Isolation::Snapshot)),
+			(
+				"START TRANSACTION ISOLATION LEVEL SERIALIZABLE READ ONLY DEFERRABLE",
+				true,
+				Some(Isolation::Serializable),
+			),
+			("BEGIN NOT DEFERRABLE", false, None),
+			("BEGIN ISOLATION LEVEL REPEATABLE READ, READ ONLY", true, Some(Isolation::Snapshot)),
+			(
+				"BEGIN ISOLATION LEVEL SERIALIZABLE,READ ONLY , DEFERRABLE",
+				true,
+				Some(Isolation::Serializable),
+			),
+		] {
+			assert_eq!(
+				transaction_control(sql),
+				Some(TxnOp::Begin {
+					read_only,
+					isolation
+				}),
+				"{sql}"
+			);
+		}
+		// A mode that is not honoured is not intercepted, so the dialect parser
+		// reports it rather than the connection ignoring it.
+		for sql in [
+			"BEGIN ISOLATION LEVEL READ COMMITTED",
+			"BEGIN ISOLATION LEVEL READ UNCOMMITTED READ ONLY",
+			"BEGIN DEFERRABLE",
+			"BEGIN ISOLATION LEVEL SERIALIZABLE DEFERRABLE",
+			"BEGIN ISOLATION LEVEL",
+			"BEGIN ISOLATION LEVEL REPEATABLE",
+			"BEGIN READ",
+		] {
+			assert_eq!(transaction_control(sql), None, "{sql}");
+		}
 		assert_eq!(transaction_control("ROLLBACK AND NO CHAIN"), Some(TxnOp::Rollback));
 		// `START` without `TRANSACTION` is not a transaction statement.
 		assert_eq!(transaction_control("START"), None);

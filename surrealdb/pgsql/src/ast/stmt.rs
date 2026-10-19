@@ -435,12 +435,23 @@ pub struct DropStmt {
 	pub span: Span,
 }
 
+/// The isolation level of a PostgreSQL `BEGIN`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IsolationLevel {
+	ReadUncommitted,
+	ReadCommitted,
+	RepeatableRead,
+	Serializable,
+}
+
 /// A PostgreSQL transaction management statement.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransactionStmt {
-	/// `BEGIN [TRANSACTION] [READ ONLY | READ WRITE]`.
+	/// `BEGIN [TRANSACTION] [ISOLATION LEVEL l] [READ ONLY | READ WRITE]
+	/// [[NOT] DEFERRABLE]`.
 	Begin {
 		read_only: bool,
+		isolation: Option<IsolationLevel>,
 		span: Span,
 	},
 	/// `COMMIT [TRANSACTION]`.

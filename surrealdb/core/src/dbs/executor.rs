@@ -12,7 +12,7 @@ use futures::channel::oneshot;
 use futures::{Stream, StreamExt};
 use rand::Rng;
 use surrealdb_datastore::close::{AfterCommitDeadline, AfterCommitWaits, CommitAction};
-use surrealdb_expr::parser::{BeginOptions, Staleness, TopLevelExpr};
+use surrealdb_expr::parser::{BeginOptions, IsolationLevel, Staleness, TopLevelExpr};
 use surrealdb_strand::Strand;
 use surrealdb_types::{Error as TypesError, QueryError, ToSql};
 use web_time::Instant;
@@ -44,7 +44,9 @@ use crate::expr::statements::{OptionStatement, UseStatement};
 use crate::expr::visit::{Visit, Visitor};
 use crate::expr::{ControlFlow, Expr, FlowResult};
 use crate::kvs::slowlog::{ParamVisitor, SlowLogVisit};
-use crate::kvs::{Datastore, DatastoreError, ReadRequest, Transaction, TransactionType};
+use crate::kvs::{
+	Datastore, DatastoreError, Isolation, ReadOnlyOptions, Transaction, TransactionType,
+};
 use crate::observe::{
 	Outcome, QueryCounters, QueryEvent, QueryEventSafe, StatementEvent, StatementEventCtx,
 	StatementEventSafe, StatementType,
@@ -258,7 +260,11 @@ fn begin_failure_reason(failure: &anyhow::Error) -> Option<String> {
 	}
 	match failure.downcast_ref::<DatastoreError>() {
 		Some(
-			DatastoreError::StalenessAboveMaximum {
+			DatastoreError::IsolationNotSupported {
+				..
+			}
+			| DatastoreError::SerializableStaleRead
+			| DatastoreError::StalenessAboveMaximum {
 				..
 			}
 			| DatastoreError::ReadSnapshotTooStale {
@@ -3479,32 +3485,40 @@ impl Executor {
 		kvs: &Datastore,
 		options: &BeginOptions,
 	) -> Result<Transaction> {
-		let Some(read_only) = &options.read_only else {
-			return kvs.transaction(TransactionType::Write).await;
+		let isolation = options.isolation.map(|level| match level {
+			IsolationLevel::Snapshot => Isolation::Snapshot,
+			IsolationLevel::Serializable => Isolation::Serializable,
+		});
+		let read_only = match &options.read_only {
+			None => None,
+			Some(read_only) => {
+				let max_staleness = match &read_only.max_staleness {
+					None => Duration::ZERO,
+					Some(Staleness::Duration(bound)) => *bound,
+					Some(Staleness::Param(name)) => match self.ctx.value(name) {
+						Some(Value::Duration(bound)) => bound.0,
+						Some(_) => {
+							return Err(anyhow::Error::new(BeginOptionError(format!(
+								"The parameter ${name} used for MAX STALENESS is not a duration"
+							))));
+						}
+						None => {
+							return Err(anyhow::Error::new(BeginOptionError(format!(
+								"The parameter ${name} used for MAX STALENESS is not defined"
+							))));
+						}
+					},
+				};
+				Some(ReadOnlyOptions {
+					max_staleness,
+					strict: read_only.strict,
+				})
+			}
 		};
-		let max_staleness = match &read_only.max_staleness {
-			None => Duration::ZERO,
-			Some(Staleness::Duration(bound)) => *bound,
-			Some(Staleness::Param(name)) => match self.ctx.value(name) {
-				Some(Value::Duration(bound)) => bound.0,
-				Some(_) => {
-					return Err(anyhow::Error::new(BeginOptionError(format!(
-						"The parameter ${name} used for MAX STALENESS is not a duration"
-					))));
-				}
-				None => {
-					return Err(anyhow::Error::new(BeginOptionError(format!(
-						"The parameter ${name} used for MAX STALENESS is not defined"
-					))));
-				}
-			},
+		let (txn, info) = kvs.begin_transaction(isolation, read_only).await?;
+		let Some(info) = info else {
+			return Ok(txn);
 		};
-		let (txn, info) = kvs
-			.read_transaction(ReadRequest {
-				max_staleness,
-				strict: read_only.strict,
-			})
-			.await?;
 		debug!(
 			target: "surrealdb::core::dbs",
 			age = ?info.age,
