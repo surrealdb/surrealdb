@@ -30,6 +30,11 @@ pub enum Error {
 	#[error("There was a problem connecting with the storage engine")]
 	InvalidStorage,
 
+	#[error(
+		"Tracked memory has been beyond SURREAL_MEMORY_THRESHOLD for {0}s, so every request is being refused"
+	)]
+	MemoryGuardEngaged(u64),
+
 	#[error("There was an error with the remote request: {0}")]
 	Remote(#[from] reqwest::Error),
 
@@ -86,6 +91,13 @@ impl IntoResponse for Error {
 					code: StatusCode::INTERNAL_SERVER_ERROR,
 					details: Some("Health check failed".to_string()),
 					description: Some("The database health check for this instance failed. There was an issue with the underlying storage engine.".to_string()),
+					information: Some(self.to_string()),
+				}.into_response(),
+			Error::MemoryGuardEngaged(_) =>
+				ErrorMessage {
+					code: StatusCode::SERVICE_UNAVAILABLE,
+					details: Some("Health check failed".to_string()),
+					description: Some("The memory guard has refused every request for longer than SURREAL_MEMORY_THRESHOLD_UNHEALTHY_AFTER. The instance needs restarting to release memory.".to_string()),
 					information: Some(self.to_string()),
 				}.into_response(),
 			Error::NotReady =>

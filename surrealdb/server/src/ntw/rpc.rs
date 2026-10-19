@@ -13,7 +13,7 @@ use http::HeaderMap;
 use http::header::SEC_WEBSOCKET_PROTOCOL;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::mem::ALLOC;
+use surrealdb_core::mem::RefusalSite;
 use surrealdb_core::rpc::RpcProtocol;
 use surrealdb_core::rpc::format::{Format, PROTOCOLS};
 use surrealdb_iam::Auth;
@@ -192,8 +192,7 @@ async fn post_handler(
 	let request_session_id = Uuid::new_v4();
 	rpc.register_ephemeral_session(request_session_id, Arc::new(RwLock::new(session)));
 	// Check to see available memory
-	if let Some((allocated, threshold)) = ALLOC.beyond_threshold_by() {
-		crate::rpc::websocket::log_memory_refusal("http", allocated, threshold);
+	if crate::ntw::memory_guard::admit(RefusalSite::Http).is_some() {
 		rpc.remove_ephemeral_session(&request_session_id);
 		return Err(NetError::ServerOverloaded.into());
 	}

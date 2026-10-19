@@ -1303,6 +1303,7 @@ impl Context {
 				self.node_id,
 			)?;
 			if ALLOC.is_beyond_threshold() {
+				crate::mem::record_refusal(crate::mem::RefusalSite::Query);
 				bail!(DatastoreError::QueryBeyondMemoryThreshold);
 			}
 			// The clock is read only by a context that holds a deadline.
