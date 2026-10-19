@@ -67,7 +67,7 @@ use surrealdb_iam::AuthLimit;
 use surrealdb_strand::{Strand, TableName};
 use surrealdb_types::ToSql;
 
-use super::expr::{bind_judgement, key_range_shape, range_key_exprs};
+use super::expr::{bind_judgement, key_range_shape, range_key_exprs, record_id_list};
 use super::membership::memberships_of;
 use super::subscription::{bind_layer, subscriber_layer};
 use super::{stage_bundle, stmt};
@@ -3042,10 +3042,21 @@ pub(super) fn bind_source(cx: &mut BindCx<'_>, source: &LogicalSource) -> Result
 	}
 }
 
-/// Rows produced from a value, whose expression is the operand.
+/// Rows produced from a value, whose expression is the operand. A list of record ids written in
+/// `FROM` is one literal ([`record_id_list`]): the source reads it whole.
 fn bind_values(cx: &mut BindCx<'_>, values: &LogicalValues) -> Result<Flow, IrError> {
-	let Built::Value(value) = bind_expr(cx, &values.expr)? else {
-		return Ok(Flow::Diverged);
+	let value = match record_id_list(&values.expr) {
+		Some(list) => cx.emit_value(
+			OpKind::Expr(ExprOp::Literal(Box::new(list))),
+			&[],
+			TypeKnowledge::Unknown,
+		)?,
+		None => {
+			let Built::Value(value) = bind_expr(cx, &values.expr)? else {
+				return Ok(Flow::Diverged);
+			};
+			value
+		}
 	};
 	cx.emit_value(
 		OpKind::Logical(LogOp::Values {

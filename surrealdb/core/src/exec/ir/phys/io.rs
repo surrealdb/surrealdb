@@ -9,7 +9,9 @@
 //! - `deref_windows`: the pipeline's `.*` and field-over-array dereferences read their links in
 //!   windows. The datastore's plain reads are untracked, so a window reads no key the run would not
 //!   conflict on, and the pipeline reads at the current version. Between two positions of a window
-//!   only the position's own fetch runs, whose writes are refused, so no footprint is asked.
+//!   only the position's own fetch runs, whose writes are refused, so no footprint is asked. A
+//!   value source (`FROM $ids`, `FROM [t:1, t:2]`) reads the records its array names the same way,
+//!   every one of them before the first row runs; the subjects of a write are not read through it.
 //! - `fetch_windows`: the same for each collection of links a `FETCH` path reaches. A computed
 //!   index step of a path runs host code between positions, so the `FETCH` must write nothing.
 //!

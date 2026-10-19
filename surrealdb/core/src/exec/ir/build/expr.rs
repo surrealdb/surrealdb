@@ -53,7 +53,7 @@ use crate::expr::logical::{
 	coercion_is_identity,
 };
 use crate::expr::{BinaryOperator, Function, PrefixOperator};
-use crate::val::Value;
+use crate::val::{RecordId, RecordIdKey, Value};
 
 /// What a bound expression produced.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1360,6 +1360,40 @@ fn key_shape(key: &LogicalRecordIdKey) -> Result<KeyShape, IrError> {
 			end: key_bound(&range.end)?,
 		})),
 	})
+}
+
+/// The value of `expr` when it is an array of record ids whose keys are numbers, strings or uuids,
+/// written whole: the list a value source reads as one value, which no op of the plan reads an
+/// element of. `None` for every other expression.
+pub(super) fn record_id_list(expr: &LogicalExpr) -> Option<Value> {
+	let LogicalExpr::Array(items) = expr else {
+		return None;
+	};
+	if items.is_empty() {
+		return None;
+	}
+	let ids = items
+		.iter()
+		.map(|item| {
+			let LogicalExpr::RecordId(rid) = item else {
+				return None;
+			};
+			let key = match &rid.key {
+				LogicalRecordIdKey::Number(n) => RecordIdKey::Number(*n),
+				LogicalRecordIdKey::String(s) => RecordIdKey::String(s.clone()),
+				LogicalRecordIdKey::Uuid(u) => RecordIdKey::Uuid(*u),
+				LogicalRecordIdKey::Array(_)
+				| LogicalRecordIdKey::Object(_)
+				| LogicalRecordIdKey::Generate(_)
+				| LogicalRecordIdKey::Range(_) => return None,
+			};
+			Some(Value::RecordId(RecordId {
+				table: rid.table.clone(),
+				key,
+			}))
+		})
+		.collect::<Option<Vec<_>>>()?;
+	Some(Value::Array(crate::val::Array(ids)))
 }
 
 /// The shape of a key range, whose bounds' operands [`range_key_exprs`] lists.

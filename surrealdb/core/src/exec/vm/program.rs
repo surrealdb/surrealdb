@@ -6137,7 +6137,8 @@ pub(crate) struct Pipeline {
 	/// program's own, run when the program runs.
 	pub(super) group: Option<u16>,
 	/// Whether the pipeline's `.*` and field-over-array dereferences read their links in windows,
-	/// as the physical plan decided.
+	/// and its value source the records of the record ids an array holds, as the physical plan
+	/// decided.
 	pub(super) deref_windows: bool,
 	/// The lookups of the pipeline's projection whose first hop is read for a batch of source rows
 	/// before the rows run, as the physical plan decided.

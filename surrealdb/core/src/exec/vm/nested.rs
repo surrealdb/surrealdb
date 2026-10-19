@@ -49,6 +49,7 @@ use super::payload::ValuesRead;
 use super::program::{BlockInstr, HostScalar, Pipeline, Program, Source};
 use crate::exec::fan_out::evaluate_each;
 use crate::exec::operators::fetch::fetch_raw_record;
+use crate::exec::operators::link_window::LinkPool;
 use crate::exec::operators::scan::common::resolve_version_stamp;
 use crate::exec::operators::scan::pipeline::kv_scan_stream;
 use crate::exec::operators::scan::resolved::EnforcementMode;
@@ -116,7 +117,10 @@ pub(super) async fn run_source(
 			// ([`run_group`]), so a write state here is the one this
 			// pipeline's rows are written through.
 			let subjects = state.write.is_some();
-			match values(program, value, *read, zeroed, reads, subjects, ctx).await? {
+			// The records an array names are read in windows where the plan gave the pipeline
+			// them ([`Pipeline::deref_windows`]).
+			let links = pipeline.deref_windows.then_some(&state.link_pool);
+			match values(program, value, *read, zeroed, reads, subjects, links, ctx).await? {
 				// The records a value names are named by the statement; those a
 				// range it evaluates holds are read from the table, a read the
 				// write begins here.
@@ -391,7 +395,9 @@ fn source_value(ran: FlowResult<Value>) -> FlowResult<Value> {
 /// reads no record; such a table is read `reads` records at a time first,
 /// where the pipeline takes no more ([`paged_reads`]). Where `subjects`, the
 /// value is evaluated as `read` says and the records it names are read as
-/// storage holds them ([`stored_records`]), whatever the limit.
+/// storage holds them ([`stored_records`]), whatever the limit. The records
+/// an array names are read through the windows of `links`, where given
+/// ([`records_of`]).
 #[allow(clippy::too_many_arguments)]
 async fn values(
 	program: &Program,
@@ -400,6 +406,7 @@ async fn values(
 	zeroed: bool,
 	reads: Option<u32>,
 	subjects: bool,
+	links: Option<&LinkPool>,
 	ctx: &ExecutionContext,
 ) -> FlowResult<Values> {
 	match read {
@@ -423,15 +430,15 @@ async fn values(
 							other => rows.push(other),
 						}
 					}
-					records_of(ctx, rows).await?
+					records_of(ctx, rows, links).await?
 				}
 				Value::None | Value::Null => Vec::new(),
 				// A record range or a table is a set of records, read as a
 				// dynamic read reads it.
 				Value::RecordId(rid) if rid.key.is_range() => {
-					return found(Value::RecordId(rid), zeroed, reads, ctx).await;
+					return found(Value::RecordId(rid), zeroed, reads, links, ctx).await;
 				}
-				table @ Value::Table(_) => return found(table, zeroed, reads, ctx).await,
+				table @ Value::Table(_) => return found(table, zeroed, reads, links, ctx).await,
 				Value::RecordId(rid) => {
 					match crate::exec::operators::fetch::fetch_record(ctx, &rid).await? {
 						Value::None => Vec::new(),
@@ -476,7 +483,7 @@ async fn values(
 			if subjects {
 				return stored_records(value, false, ctx).await;
 			}
-			found(value, zeroed, reads, ctx).await
+			found(value, zeroed, reads, links, ctx).await
 		}
 	}
 }
@@ -623,12 +630,13 @@ async fn found(
 	value: Value,
 	zeroed: bool,
 	reads: Option<u32>,
+	links: Option<&LinkPool>,
 	ctx: &ExecutionContext,
 ) -> FlowResult<Values> {
 	if let Some(deref) = ctx.vm_deref().cloned()
 		&& reads_through(&deref, &value, ctx).await?
 	{
-		return dispatched(&deref, value, zeroed, reads, ctx).await;
+		return dispatched(&deref, value, zeroed, reads, links, ctx).await;
 	}
 	match value {
 		Value::RecordId(rid)
@@ -670,7 +678,7 @@ async fn found(
 			let range = rid.key.is_range().then(|| rid.table.clone());
 			Ok(Values::Rows(rows, range))
 		}
-		Value::Array(array) => Ok(Values::Rows(records_of(ctx, array.0).await?, None)),
+		Value::Array(array) => Ok(Values::Rows(records_of(ctx, array.0, links).await?, None)),
 		Value::Table(table) => {
 			let version = resolve_version_stamp(ctx, None).await?;
 			if absent_and_hidden(ctx, &table, version).await? {
@@ -739,6 +747,7 @@ async fn dispatched(
 	value: Value,
 	zeroed: bool,
 	reads: Option<u32>,
+	links: Option<&LinkPool>,
 	ctx: &ExecutionContext,
 ) -> FlowResult<Values> {
 	let version = resolve_version_stamp(ctx, None).await?;
@@ -824,7 +833,7 @@ async fn dispatched(
 			let range = rid.key.is_range().then(|| rid.table.clone());
 			Ok(Values::Rows(rows, range))
 		}
-		Value::Array(array) => Ok(Values::Rows(records_of(ctx, array.0).await?, None)),
+		Value::Array(array) => Ok(Values::Rows(records_of(ctx, array.0, links).await?, None)),
 		Value::Table(table) => {
 			if absent_and_hidden(ctx, &table, version).await? {
 				return Ok(Values::Rows(Vec::new(), None));
@@ -883,14 +892,24 @@ async fn require_defined(
 
 /// `values` as rows: `NONE` and `NULL` dropped, each record id replaced by
 /// the record it names, read with the caller's permissions and computed
-/// fields, and dropped where no record answers.
-async fn records_of(ctx: &ExecutionContext, mut values: Vec<Value>) -> FlowResult<Vec<Value>> {
+/// fields, and dropped where no record answers. Every record is read, in
+/// order, before any row is handed on, so the first id whose read fails fails
+/// the source before a row runs. With `links`, the records are read through
+/// its windows, one multi-get for each run of ids.
+async fn records_of(
+	ctx: &ExecutionContext,
+	mut values: Vec<Value>,
+	links: Option<&LinkPool>,
+) -> FlowResult<Vec<Value>> {
 	values.retain(|v| !matches!(v, Value::None | Value::Null));
 	if !values.is_empty() {
 		crate::exec::operators::fetch::batch_fetch_in_place(
 			ctx,
 			&mut values,
-			crate::exec::operators::fetch::FetchLinks::default(),
+			crate::exec::operators::fetch::FetchLinks {
+				pool: links,
+				ahead: None,
+			},
 		)
 		.await?;
 		values.retain(|v| !matches!(v, Value::None | Value::Null));

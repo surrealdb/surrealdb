@@ -84,6 +84,7 @@ use crate::exec::ir::phys::ops::{
 };
 use crate::exec::operators::scan::id_range::ScanIdRange;
 use crate::exec::operators::scan::key_range::{ScanEq, ScanKeyRange, ScanRangeOn, ScanSide};
+use crate::exec::vm::dispatch::Reach;
 use crate::expr::logical::Schema;
 use crate::val::{Array, Object, RecordId, RecordIdKey, Set, Value};
 
@@ -329,6 +330,10 @@ pub(super) fn lower_source_under(
 		} => {
 			let [value] = <[ValueId; 1]>::try_from(data.operands.as_slice())
 				.map_err(|_| invariant("a values read with other than one operand"))?;
+			*needs = needs.merged(&Needs {
+				reach: Some(values_reach(ir, value)),
+				..Needs::none()
+			});
 			Ok(Leaf {
 				source: Source::Values {
 					value: host_scalar_of(em, cx, ir, value, needs)?,
@@ -463,6 +468,37 @@ pub(super) fn is_source(tag: PhysTag) -> bool {
 			| PhysTag::Vacant
 			| PhysTag::Union
 	)
+}
+
+/// The tables a value source reads records of by id: those of the record ids, ranges and tables a
+/// value known when the program is lowered holds, as its elements and the elements of an array
+/// among them, and any table where only the run knows the value. The program reads those records
+/// through the units of their tables ([`crate::exec::vm::dispatch`]), as a `FETCH` reads the
+/// records its links name.
+fn values_reach(ir: &Ir, value: ValueId) -> Reach {
+	fn table_of(value: &Value) -> Option<TableName> {
+		match value {
+			Value::RecordId(rid) => Some(rid.table.clone()),
+			Value::Table(table) => Some(table.clone()),
+			_ => None,
+		}
+	}
+	let Some(known) = static_value(ir, value) else {
+		return Reach::Any;
+	};
+	let mut tables = std::collections::BTreeSet::new();
+	match &known {
+		Value::Array(items) => {
+			for item in items.iter() {
+				match item {
+					Value::Array(inner) => tables.extend(inner.iter().filter_map(table_of)),
+					other => tables.extend(table_of(other)),
+				}
+			}
+		}
+		other => tables.extend(table_of(other)),
+	}
+	Reach::Tables(tables)
 }
 
 /// The value `value` denotes without evaluation, when it denotes one.

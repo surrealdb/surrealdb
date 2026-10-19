@@ -22,7 +22,8 @@ use crate::exec::planner::placement::{Decision, MergeOrder, PhysicalFacts};
 pub(crate) struct PipelineIo {
 	/// The pipeline's `FETCH` reads each collection of links in windows.
 	pub(crate) fetch_windows: bool,
-	/// The pipeline's `.*` and field-over-array dereferences read their links in windows.
+	/// The pipeline's `.*` and field-over-array dereferences read their links in windows, and so
+	/// does a value source read the records of the record ids an array of it holds.
 	pub(crate) deref_windows: bool,
 	/// The graph and reference hops of the pipeline whose sources are read in windows: one
 	/// multi-get of their inline caches and one multi-range read of their adjacency keys. Empty

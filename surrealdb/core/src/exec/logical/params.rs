@@ -42,6 +42,11 @@
 //!   as membership of the row's id in its source's result, never from its operands, and the
 //!   physical planner resolves the vector once for the source; as a literal it would be a node per
 //!   component for every later pass to walk.
+//! - **Record id lists:** where a name holding a non-empty array of record ids is a whole `FROM`
+//!   source (`FROM $ids`, and an `UPDATE` or `DELETE` of `$ids`), it stays a parameter there, and
+//!   only there. The source reads each id's record whether the array is a parameter or a literal,
+//!   and as a literal it would be a node per id for every later pass to walk, and a plan that
+//!   depends on the ids themselves.
 //!
 //! A scalar subquery is part of the statement — it runs in the same
 //! transaction with the same context — so its plan is resolved with the
@@ -76,9 +81,12 @@ pub(super) async fn resolve_params(op: LogicalOp, bx: &BindContext<'_>) -> Logic
 	// Phase 1: the names the plan references in a resolvable position, and
 	// the names it binds itself.
 	let ReferencedNames {
-		names,
+		reads: Reads {
+			names,
+			outside_query_vectors,
+			outside_sources,
+		},
 		bound,
-		outside_query_vectors,
 	} = referenced_and_bound(&op);
 	// The names a table permission predicate reads: a privileged frame holds
 	// none of the caller's bindings, so those are looked up in the isolated
@@ -99,6 +107,13 @@ pub(super) async fn resolve_params(op: LogicalOp, bx: &BindContext<'_>) -> Logic
 			// Read only as a query vector, it stays a parameter everywhere:
 			// no literal is built for it.
 			if !outside_query_vectors.contains(&name) {
+				continue;
+			}
+		}
+		if is_record_id_list(&value) {
+			subs.record_id_lists.insert(name.clone());
+			// Read only as a whole source, it stays a parameter everywhere.
+			if !outside_sources.contains(&name) {
 				continue;
 			}
 		}
@@ -126,16 +141,24 @@ pub(super) async fn resolve_params(op: LogicalOp, bx: &BindContext<'_>) -> Logic
 }
 
 /// The literals [`resolve_params`] substitutes, and the names among them it
-/// leaves in place as the query vector of a KNN operator.
+/// leaves in place as the query vector of a KNN operator or as a whole `FROM`
+/// source.
 #[derive(Default)]
 struct Substitutions {
 	literals: HashMap<String, LogicalExpr>,
 	query_vectors: HashSet<String>,
+	record_id_lists: HashSet<String>,
 }
 
 /// Whether `value` can be a KNN query vector: a non-empty array of numbers.
 fn is_query_vector(value: &Value) -> bool {
 	matches!(value, Value::Array(a) if !a.is_empty() && a.iter().all(|v| matches!(v, Value::Number(_))))
+}
+
+/// Whether `value` is a list of records to read: a non-empty array of record ids, none a range.
+fn is_record_id_list(value: &Value) -> bool {
+	matches!(value, Value::Array(a) if !a.is_empty()
+		&& a.iter().all(|v| matches!(v, Value::RecordId(rid) if !rid.key.is_range())))
 }
 
 /// The value `name` takes in the context `ctx`, or `None` where the name is
@@ -177,7 +200,7 @@ fn permission_names(op: &LogicalOp, bound: &HashSet<String>) -> HashSet<String> 
 			collect_names(predicate, &mut names);
 			let _ = visit_binding(predicate, &mut |expr| {
 				if let LogicalExpr::Subquery(plan) = expr {
-					names.extend(referenced_and_bound(plan).names);
+					names.extend(referenced_and_bound(plan).reads.names);
 				}
 				ControlFlow::<()>::Continue(())
 			});
@@ -189,19 +212,26 @@ fn permission_names(op: &LogicalOp, bound: &HashSet<String>) -> HashSet<String> 
 
 /// The names a plan references in a position [`resolve_params`] substitutes.
 struct ReferencedNames {
-	/// Every name read there.
-	names: HashSet<String>,
+	reads: Reads,
 	/// The names the plan binds itself.
 	bound: HashSet<String>,
+}
+
+/// The names read in a position [`resolve_params`] substitutes, by how they are read.
+#[derive(Default)]
+struct Reads {
+	/// Every name read there.
+	names: HashSet<String>,
 	/// The names read there other than as the query vector of a KNN operator.
 	outside_query_vectors: HashSet<String>,
+	/// The names read there other than as a whole `FROM` source.
+	outside_sources: HashSet<String>,
 }
 
 /// The names `op` references in a position [`resolve_params`] substitutes,
 /// and the names it binds itself, in `op` and every plan nested in it.
 fn referenced_and_bound(op: &LogicalOp) -> ReferencedNames {
-	let mut names: HashSet<String> = HashSet::new();
-	let mut outside_query_vectors: HashSet<String> = HashSet::new();
+	let mut reads = Reads::default();
 	let mut bound: HashSet<String> = HashSet::new();
 	visit_deep(op, &mut |node| {
 		match node {
@@ -230,13 +260,13 @@ fn referenced_and_bound(op: &LogicalOp) -> ReferencedNames {
 			| LogicalOp::PermissionFilter(LogicalPermissionFilter {
 				predicate,
 				..
-			}) => collect_resolvable_names(predicate, &mut names, &mut outside_query_vectors),
+			}) => collect_resolvable_names(predicate, &mut reads),
 			// A mutation's `WHERE` is a predicate: it chooses the records the
 			// write reads, by the access path a read under it would take.
 			LogicalOp::Write(LogicalWrite {
 				cond: Some(cond),
 				..
-			}) => collect_resolvable_names(cond, &mut names, &mut outside_query_vectors),
+			}) => collect_resolvable_names(cond, &mut reads),
 			LogicalOp::Write(_) => {}
 			LogicalOp::Join(LogicalJoin {
 				on,
@@ -244,26 +274,31 @@ fn referenced_and_bound(op: &LogicalOp) -> ReferencedNames {
 				..
 			}) => {
 				for (left, right) in on {
-					collect_resolvable_names(left, &mut names, &mut outside_query_vectors);
-					collect_resolvable_names(right, &mut names, &mut outside_query_vectors);
+					collect_resolvable_names(left, &mut reads);
+					collect_resolvable_names(right, &mut reads);
 				}
 				if let Some(filter) = filter {
-					collect_resolvable_names(filter, &mut names, &mut outside_query_vectors);
+					collect_resolvable_names(filter, &mut reads);
 				}
 			}
 			LogicalOp::Source(LogicalSource {
 				source,
+				for_update,
 				..
 			}) => match source {
 				SourceRef::Param(param) => {
-					names.insert(param.as_str().to_owned());
-					outside_query_vectors.insert(param.as_str().to_owned());
+					reads.names.insert(param.as_str().to_owned());
+					reads.outside_query_vectors.insert(param.as_str().to_owned());
+					// A locked read takes the literal ([`substitute_node`]).
+					if *for_update {
+						reads.outside_sources.insert(param.as_str().to_owned());
+					}
 				}
 				SourceRef::RecordId(_) | SourceRef::Dynamic(_) => {
 					let mut exprs = Vec::new();
 					source.exprs(&mut exprs);
 					for expr in exprs {
-						collect_resolvable_names(expr, &mut names, &mut outside_query_vectors);
+						collect_resolvable_names(expr, &mut reads);
 					}
 				}
 				SourceRef::Table(_) | SourceRef::Mock(_) => {}
@@ -308,9 +343,8 @@ fn referenced_and_bound(op: &LogicalOp) -> ReferencedNames {
 		}
 	});
 	ReferencedNames {
-		names,
+		reads,
 		bound,
-		outside_query_vectors,
 	}
 }
 
@@ -431,8 +465,11 @@ fn substitute_node(node: LogicalOp, subs: &Substitutions, privileged: &Substitut
 			for_update,
 		}) => match source {
 			SourceRef::Param(param) => match subs.literals.get(param.as_str()) {
-				Some(literal) => classify_source(literal.clone(), None, with, for_update),
-				None => LogicalOp::Source(LogicalSource {
+				// A locked read takes the literal: what it locks is settled when the plan is.
+				Some(literal) if for_update || !subs.record_id_lists.contains(param.as_str()) => {
+					classify_source(literal.clone(), None, with, for_update)
+				}
+				_ => LogicalOp::Source(LogicalSource {
 					source: SourceRef::Param(param),
 					schema,
 					with,
@@ -510,14 +547,9 @@ fn collect_names(expr: &LogicalExpr, names: &mut HashSet<String>) {
 	});
 }
 
-/// Adds the names `expr` reads to `names`, and those it reads other than as a
-/// KNN operator's query vector to `outside_query_vectors`, in one walk; a
-/// nested plan and a closure body are not entered.
-fn collect_resolvable_names(
-	expr: &LogicalExpr,
-	names: &mut HashSet<String>,
-	outside_query_vectors: &mut HashSet<String>,
-) {
+/// Adds the names `expr` reads to `reads`, in one walk; a nested plan and a
+/// closure body are not entered. None of them is a whole `FROM` source.
+fn collect_resolvable_names(expr: &LogicalExpr, reads: &mut Reads) {
 	visit_binding_pruning(expr, &mut |e| {
 		if let LogicalExpr::Binary {
 			left,
@@ -525,13 +557,15 @@ fn collect_resolvable_names(
 			right,
 		} = e && let LogicalExpr::Param(param) = right.as_ref()
 		{
-			names.insert(param.as_str().to_owned());
-			collect_resolvable_names(left, names, outside_query_vectors);
+			reads.names.insert(param.as_str().to_owned());
+			reads.outside_sources.insert(param.as_str().to_owned());
+			collect_resolvable_names(left, reads);
 			return Descend::Over;
 		}
 		if let LogicalExpr::Param(param) = e {
-			names.insert(param.as_str().to_owned());
-			outside_query_vectors.insert(param.as_str().to_owned());
+			reads.names.insert(param.as_str().to_owned());
+			reads.outside_query_vectors.insert(param.as_str().to_owned());
+			reads.outside_sources.insert(param.as_str().to_owned());
 		}
 		Descend::Into
 	});
@@ -743,6 +777,49 @@ mod tests {
 		let rendered = plan.to_string();
 		assert!(rendered.contains("Source[person]"), "{rendered}");
 		assert!(rendered.contains("Values[[1, 2]]"), "{rendered}");
+	}
+
+	fn ids(table: &str, keys: &[i64]) -> Value {
+		Value::from(
+			keys.iter()
+				.map(|key| Value::RecordId(crate::val::RecordId::new(TableName::from(table), *key)))
+				.collect::<Vec<_>>(),
+		)
+	}
+
+	/// A parameter holding record ids, read as a whole source, stays one parameter there, and no
+	/// literal is built for it; read in a predicate too, it is substituted there alone. A locked
+	/// read, an array holding a range and an empty array take the literal.
+	#[tokio::test]
+	async fn a_record_id_list_source_stays_a_parameter() {
+		let list = ids("person", &[2, 1]);
+		for statement in ["SELECT * FROM $ids", "UPDATE $ids SET a = 1", "DELETE $ids"] {
+			let plan = bound(lower(statement), vec![("ids", list.clone())]).await.to_string();
+			assert!(plan.contains("$ids"), "{statement}:\n{plan}");
+			assert!(!plan.contains("person:2"), "{statement}:\n{plan}");
+		}
+		let plan = bound(lower("SELECT * FROM $ids WHERE id IN $ids"), vec![("ids", list.clone())])
+			.await
+			.to_string();
+		assert!(plan.contains("Source[$ids]"), "{plan}");
+		assert!(plan.contains("id INSIDE [person:2, person:1]"), "{plan}");
+		let plan =
+			bound(lower("SELECT * FROM $ids FOR UPDATE"), vec![("ids", list)]).await.to_string();
+		assert!(!plan.contains("$ids"), "{plan}");
+		let ranged = Value::from(vec![
+			Value::RecordId(crate::val::RecordId::new(TableName::from("person"), 1_i64)),
+			Value::RecordId(crate::val::RecordId {
+				table: TableName::from("person"),
+				key: crate::val::RecordIdKey::Range(Box::new(crate::val::RecordIdKeyRange {
+					start: std::ops::Bound::Unbounded,
+					end: std::ops::Bound::Unbounded,
+				})),
+			}),
+		]);
+		for value in [ranged, Value::from(Vec::<Value>::new())] {
+			let plan = bound(lower("SELECT * FROM $ids"), vec![("ids", value)]).await.to_string();
+			assert!(!plan.contains("$ids"), "{plan}");
+		}
 	}
 
 	#[tokio::test]
