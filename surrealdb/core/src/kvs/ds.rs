@@ -107,7 +107,6 @@ use crate::key::{
 };
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::clock::SystemClock;
-use crate::kvs::index::IndexBuilder;
 pub(crate) use crate::kvs::index::materialise::INDEX_COMPACTION_PASS_MAX_RETRIES;
 #[cfg(test)]
 use crate::kvs::index::materialise::INDEX_COMPACTION_PASS_PLAN_BUDGET;
@@ -116,6 +115,7 @@ use crate::kvs::index::materialise::{
 };
 #[cfg(all(test, feature = "kv-rocksdb"))]
 use crate::kvs::index::materialise::{CompactionWriteGuard, compaction_write_guard};
+use crate::kvs::index::{IndexBuilder, ResumeScope};
 use crate::kvs::paging::{PageCompanion, PagedDelete, PagedOutcome};
 use crate::kvs::request::{Dialect, QueryRequest, QuerySource, ReadOnlyOptions};
 use crate::kvs::sequences::Sequences;
@@ -4584,17 +4584,22 @@ impl Datastore {
 			return Ok(0);
 		}
 		// Serialize recovery: while any local builder task is still running
-		// (an already adopted build or a user-started one), defer further
-		// adoptions to a later pass. Without this, a restart with several
-		// stranded builds starts them all at once, and the concurrent initial
-		// scans can overwhelm a small instance's memory and CPU.
-		if self.index_builder.has_unfinished_build().await {
+		// (an already adopted build or a user-started one), defer adopting
+		// builds that still scan to a later pass. Without this, a restart with
+		// several stranded builds starts them all at once, and the concurrent
+		// initial scans can overwhelm a small instance's memory and CPU. A
+		// stranded `Closing` build is adopted regardless: it only drains its
+		// queues, and until it does every write that changes its index's
+		// fields waits in admission.
+		let scope = if self.index_builder.has_unfinished_build().await {
 			trace!(
 				target: TARGET,
-				"Deferring stalled index build adoption; a local index build is still running"
+				"Adopting only stalled Closing index builds; a local index build is still running"
 			);
-			return Ok(0);
-		}
+			ResumeScope::ClosingOnly
+		} else {
+			ResumeScope::Any
+		};
 		// An entry a newer release wrote, which this build cannot read, is
 		// skipped and counted: an index this build cannot read is not adopted,
 		// and the pass reports the count once.
@@ -4639,7 +4644,7 @@ impl Datastore {
 				&Session::owner().with_ns(ns_name.as_str()).with_db(db_name.as_str()),
 			);
 			match index_builder
-				.resume_stalled(&ctx, opt, ns_id, db_id, tb_id, Arc::clone(&ix))
+				.resume_stalled(&ctx, opt, ns_id, db_id, tb_id, Arc::clone(&ix), scope)
 				.await
 			{
 				Ok(true) => {

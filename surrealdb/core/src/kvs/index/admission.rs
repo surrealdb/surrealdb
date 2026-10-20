@@ -1,13 +1,13 @@
 use anyhow::Result;
 use chrono::Utc;
-use common::time::{sleep, timeout};
+use common::time::timeout;
 use surrealdb_strand::TableName;
 use web_time::Instant;
 
 use super::builder::{IndexKey, IndexMutation};
 use super::state::{CatalogIndexState, is_condition_not_met};
 use super::{
-	Appending, BUILD_CLOSING_SLEEP, BUILD_RESERVATION_TTL_SECS, ConsumeResult, DurableAdmission,
+	Appending, BUILD_RESERVATION_TTL_SECS, ConsumeResult, DurableAdmission,
 	DurableAdmissionDecision, DurableAdmissionFence, IndexBuildPhase, IndexBuildReservation,
 	IndexBuilder, IndexBuilding, PrimaryAppendingTicket,
 };
@@ -416,8 +416,10 @@ impl IndexBuilder {
 	/// Allocate a durable writer ticket while the index is building.
 	///
 	/// `Closing` rejects new tickets but may still have admitted writers in
-	/// flight, so callers poll durable state until the build becomes `Online`
-	/// or `Error`, or the request context is cancelled or timed out. `Error`
+	/// flight, so callers wait until the build becomes `Online` or `Error`, or
+	/// the request context is cancelled or timed out. The wait re-reads durable
+	/// state when a build in this process leaves `Closing`, and at least every
+	/// [`super::BUILD_CLOSING_SLEEP`] for a build owned elsewhere. `Error`
 	/// admits like `Building` so a failed build never blocks user writes; the
 	/// queued mutations are wiped and the table rescanned when a `REBUILD
 	/// INDEX` recovers the index.
@@ -433,6 +435,11 @@ impl IndexBuilder {
 			if let Some(reason) = ctx.done(true)? {
 				return Err(Error::from(reason).into());
 			}
+			// Registered before the state is read, so a build that leaves
+			// `Closing` after the read still wakes the wait below.
+			let settled = self.closing_settled.notified();
+			let mut settled = std::pin::pin!(settled);
+			settled.as_mut().enable();
 			let tx = self
 				.tf
 				.transaction(TransactionType::Write, ctx.try_get_sequences()?.clone())
@@ -483,7 +490,9 @@ impl IndexBuilder {
 				}
 				IndexBuildPhase::Closing => {
 					tx.cancel().await?;
-					sleep(BUILD_CLOSING_SLEEP).await;
+					#[cfg(test)]
+					self.closing_waits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+					let _ = timeout(self.closing_poll(), settled).await;
 					if let Some(reason) = ctx.done(true)? {
 						return Err(Error::from(reason).into());
 					}

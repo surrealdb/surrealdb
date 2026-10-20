@@ -20,7 +20,7 @@ use web_time::Instant;
 use super::after_commit::{AwaitBuildAfterCommit, RemoveFailedDefinition};
 use super::count::CountPrimaryProgress;
 use super::kind::{BaselinePolicy, BatchContext, BatchRange, Kind};
-use super::replay::InitialBatch;
+use super::replay::{InitialBatch, ReplayUntil};
 use super::state::{
 	BuildOwner, analyzers_analyse_alike, build_basis_is_stale, build_owner, build_owner_expired,
 	clear_lapsed_online_owner, delete_durable_build_artifacts, delete_stale_build_queues,
@@ -320,6 +320,19 @@ pub(crate) struct IndexBuilder {
 	/// ([`Self::materialise_lock`]). Held weakly: an entry lives only while a
 	/// pass holds or waits for it, and a dead one is replaced on the next ask.
 	materialising: Arc<parking_lot::Mutex<HashMap<IndexKeyBase, Weak<tokio::sync::Mutex<()>>>>>,
+	/// Signalled whenever a build in this process commits a transition out of
+	/// `Closing`, so writers that admission holds while a build is `Closing`
+	/// re-read its state at once rather than at their next poll. A build owned
+	/// by another node signals nothing here; its waiters rely on the poll.
+	pub(super) closing_settled: Arc<Notify>,
+	/// Overrides [`BUILD_CLOSING_SLEEP`] for this process's admissions, so a
+	/// test can tell a wait the signal ended from one the poll ended.
+	#[cfg(test)]
+	pub(super) closing_poll: Arc<parking_lot::Mutex<Option<Duration>>>,
+	/// How many times an admission in this process has begun waiting on a
+	/// `Closing` build, so a test can tell a writer has reached the wait.
+	#[cfg(test)]
+	pub(super) closing_waits: Arc<AtomicU64>,
 }
 
 enum BuildStart {
@@ -498,7 +511,22 @@ impl IndexBuilder {
 			tf,
 			indexes: Default::default(),
 			materialising: Default::default(),
+			closing_settled: Default::default(),
+			#[cfg(test)]
+			closing_poll: Default::default(),
+			#[cfg(test)]
+			closing_waits: Default::default(),
 		}
+	}
+
+	/// How long admission waits between reads of a `Closing` build's state
+	/// when nothing in this process signals that it has left `Closing`.
+	pub(super) fn closing_poll(&self) -> Duration {
+		#[cfg(test)]
+		if let Some(poll) = *self.closing_poll.lock() {
+			return poll;
+		}
+		BUILD_CLOSING_SLEEP
 	}
 
 	/// The process-local mutex the materialiser's passes over `ikb` take.
@@ -552,7 +580,8 @@ impl IndexBuilder {
 		#[cfg(test)]
 		lent_places::note(ctx.node_id(), &ix.name, carried.is_some());
 		let mut building =
-			Building::with_places(ctx, self.tf.clone(), opt, tb, ix, ix_key, carried)?;
+			Building::with_places(ctx, self.tf.clone(), opt, tb, ix, ix_key, carried)?
+				.signalling(&self.closing_settled);
 		// A sender is what a blocking statement waits on.
 		if sdr.is_some() {
 			building.analyzer = building.statement_analyzer(ctx).await?;
@@ -1042,8 +1071,10 @@ impl IndexBuilder {
 		let carried = carried_places(ctx, blocking);
 		#[cfg(test)]
 		lent_places::note(ctx.node_id(), &ix.name, carried.is_some());
-		let building =
-			Arc::new(Building::with_places(ctx, self.tf.clone(), opt, tb, ix, key, carried)?);
+		let building = Arc::new(
+			Building::with_places(ctx, self.tf.clone(), opt, tb, ix, key, carried)?
+				.signalling(&self.closing_settled),
+		);
 		let claimed = if claimable {
 			building.claim_staged_generation(generation).await?
 		} else {
@@ -1169,6 +1200,7 @@ impl IndexBuilder {
 	/// under the same index id. The transaction that claims the build state
 	/// also checks that the catalog still names table `tb` and holds `ix` as it
 	/// is, and claims nothing otherwise.
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn resume_stalled(
 		&self,
 		ctx: &FrozenContext,
@@ -1177,6 +1209,7 @@ impl IndexBuilder {
 		db: DatabaseId,
 		tb: TableId,
 		ix: Arc<IndexDefinition>,
+		scope: ResumeScope,
 	) -> Result<bool> {
 		let key = Arc::new(IndexKey::new(ns, db, &ix.table_name.clone(), ix.index_id));
 		// Skip if a builder task for this index is already running locally.
@@ -1185,7 +1218,10 @@ impl IndexBuilder {
 		{
 			return Ok(false);
 		}
-		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, tb, ix, key)?);
+		let building = Arc::new(
+			Building::new(ctx, self.tf.clone(), opt, tb, ix, key)?
+				.signalling(&self.closing_settled),
+		);
 		// Cheap read-only pre-check: only an unfinished build whose owner lease
 		// has expired is eligible. Healthy indexes and live builds bail out here
 		// without opening a write transaction.
@@ -1207,6 +1243,9 @@ impl IndexBuilder {
 			}
 			return Ok(false);
 		}
+		if scope == ResumeScope::ClosingOnly && state.phase != IndexBuildPhase::Closing {
+			return Ok(false);
+		}
 		// Claim the expired generation and spawn the resume task. A no-op result
 		// (`None`) means another scanner or a concurrent statement won the race.
 		match building.takeover_expired_build_state(None, true).await? {
@@ -1217,6 +1256,24 @@ impl IndexBuilder {
 			None => Ok(false),
 		}
 	}
+}
+
+/// The most keys one transaction of [`Building::delete_range_in_batches`]
+/// deletes.
+#[cfg(not(test))]
+const STALE_QUEUE_DELETE_BATCH: u32 = 10_000;
+/// Small enough that the tests' rebuilds wipe their stale queues over several
+/// transactions.
+#[cfg(test)]
+const STALE_QUEUE_DELETE_BATCH: u32 = 3;
+
+/// Which stalled builds [`IndexBuilder::resume_stalled`] may adopt.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ResumeScope {
+	/// A stalled build in any unfinished phase.
+	Any,
+	/// Only a stalled build in `Closing`, which has no scan left to run.
+	ClosingOnly,
 }
 
 /// How long the build of a committed `REBUILD INDEX` waits for a local build of the generation it
@@ -1392,6 +1449,8 @@ pub(super) struct Building {
 	/// context drops, so between batches, and once the build has finished, the
 	/// build keeps nothing reserved from the governor.
 	memory: Option<MemoryHost>,
+	/// Signalled whenever this build commits a transition out of `Closing`.
+	closing_settled: Arc<Notify>,
 }
 
 /// The ticket of a build, through its life.
@@ -1477,7 +1536,23 @@ impl Building {
 			key: OnceCell::new(),
 			places: parking_lot::Mutex::new(places),
 			memory: ctx.memory().map(|memory| memory.host().clone()),
+			closing_settled: Default::default(),
 		})
+	}
+
+	/// Wake the writers waiting on a `Closing` build once a committed
+	/// transition of this build's state from `from` to `to` has left `Closing`.
+	fn note_closing_left(&self, from: IndexBuildPhase, to: IndexBuildPhase) {
+		if from == IndexBuildPhase::Closing && to != IndexBuildPhase::Closing {
+			self.closing_settled.notify_waiters();
+		}
+	}
+
+	/// This build, signalling `settled` whenever it commits a transition out
+	/// of `Closing` (see [`IndexBuilder::closing_settled`]).
+	pub(super) fn signalling(mut self, settled: &Arc<Notify>) -> Self {
+		self.closing_settled = Arc::clone(settled);
+		self
 	}
 
 	/// The analyzer a blocking full-text build analyses with: the one its index
@@ -1825,6 +1900,7 @@ impl Building {
 							continue;
 						}
 						self.build_generation.store(current.generation, Ordering::Release);
+						self.note_closing_left(current.phase, next.phase);
 						return Ok(Some(AcquiredBuild {
 							generation: current.generation,
 							phase: next.phase,
@@ -1922,6 +1998,57 @@ impl Building {
 		}
 	}
 
+	/// Delete every key of `rng` in write transactions of at most
+	/// [`STALE_QUEUE_DELETE_BATCH`] keys each, retrying a batch on a retryable
+	/// conflict.
+	///
+	/// Only for a range nothing writes to any more, so that emptying it across
+	/// several commits is equivalent to emptying it in one.
+	async fn delete_range_in_batches<V>(&self, rng: crate::key::TypedRange<V>) -> Result<()> {
+		loop {
+			if self.is_aborted().await {
+				return Ok(());
+			}
+			let ctx = self.new_write_tx_ctx().await?;
+			let tx = ctx.tx();
+			let batch: Result<Option<bool>> = async {
+				let keys = tx.keys(rng.clone(), STALE_QUEUE_DELETE_BATCH, 0, None).await?;
+				if keys.is_empty() {
+					return Ok(None);
+				}
+				// A batch short of the limit read the rest of the range.
+				let more = keys.len() == STALE_QUEUE_DELETE_BATCH as usize;
+				for key in keys {
+					tx.del(crate::key::Key::from(key)).await?;
+				}
+				tx.commit().await?;
+				Ok(Some(more))
+			}
+			.await;
+			match batch {
+				Ok(Some(true)) => {}
+				Ok(Some(false)) => return Ok(()),
+				Ok(None) => {
+					tx.cancel().await?;
+					return Ok(());
+				}
+				Err(err) => {
+					if self
+						.cancel_and_retryable_conflict(
+							&tx,
+							&err,
+							"transient conflict deleting stale build queues, retrying",
+						)
+						.await
+					{
+						continue;
+					}
+					return Err(err);
+				}
+			}
+		}
+	}
+
 	/// Delete the queues of every generation below `below`, in its own
 	/// retry-looped transaction.
 	///
@@ -1930,6 +2057,13 @@ impl Building {
 	/// crash in between leaves only unreferenced keys, and the restarting
 	/// initial scan re-runs both steps.
 	async fn wipe_stale_build_queues(&self, below: BuildGeneration) -> Result<()> {
+		// The bulk of a large backlog goes in bounded transactions first, so
+		// the final sweep below never has to delete it in one: a store with a
+		// cap on the keys one transaction may delete (TiKV) would refuse it,
+		// and the rebuild would fail on every attempt.
+		self.delete_range_in_batches(self.ikb.new_bg_range_below(below)?).await?;
+		self.delete_range_in_batches(self.ikb.new_bp_range_below(below)?).await?;
+		self.delete_range_in_batches(self.ikb.new_br_range_below(below)?).await?;
 		loop {
 			if self.is_aborted().await {
 				return Ok(());
@@ -2135,6 +2269,7 @@ impl Building {
 						continue;
 					}
 					self.build_generation.store(current.generation, Ordering::Release);
+					self.note_closing_left(current.phase, next.phase);
 					return Ok(Some(AcquiredBuild {
 						generation: current.generation,
 						phase: next.phase,
@@ -2311,6 +2446,7 @@ impl Building {
 					staged.await?;
 				}
 				tx.commit().await?;
+				self.note_closing_left(current.phase, next.phase);
 				Ok(Some(next))
 			}
 			.await;
@@ -4501,7 +4637,15 @@ impl Building {
 		}
 		// First replay pass: catch up with writes that were admitted while the
 		// initial scan was running. The build is still in `Building`, so new
-		// writers may continue to reserve tickets.
+		// writers may continue to reserve tickets, and the pass returns once it
+		// has caught up with them rather than once they pause; the passes after
+		// `Closing` replay whatever they committed meanwhile. A takeover from
+		// `Closing` has nothing left to admit and drains outright.
+		let first_pass = if acquired.phase == IndexBuildPhase::Building {
+			ReplayUntil::CaughtUp
+		} else {
+			ReplayUntil::Drained
+		};
 		self.mark_durable_report(
 			generation,
 			IndexBuildReportStatus::Indexing,
@@ -4511,6 +4655,7 @@ impl Building {
 		)
 		.await?;
 		self.index_appending_loop(
+			first_pass,
 			initial_count,
 			&mut updates_count,
 			&mut last_prepare_remove_check,
@@ -4523,6 +4668,7 @@ impl Building {
 		// writers that already reserved tickets may still be committing their
 		// durable appendings.
 		self.index_appending_loop(
+			ReplayUntil::Drained,
 			initial_count,
 			&mut updates_count,
 			&mut last_prepare_remove_check,
@@ -4532,6 +4678,7 @@ impl Building {
 		// Final replay pass: reservations have cleared, so any remaining queued
 		// appendings are the last work that can exist before publishing `Online`.
 		self.index_appending_loop(
+			ReplayUntil::Drained,
 			initial_count,
 			&mut updates_count,
 			&mut last_prepare_remove_check,

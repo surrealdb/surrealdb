@@ -48,7 +48,7 @@ pub(crate) use after_commit::unstarted;
 pub(crate) use after_commit::{RemoveFailedDefinition, StagedRebuild};
 pub(crate) use builder::{
 	AbortLocalBuild, BuildCompletion, CleanUncommittedBuild, IndexBuilder, IndexMutation,
-	RebuildStaging,
+	RebuildStaging, ResumeScope,
 };
 pub(crate) use state::filter_online_indexes;
 // Only the frozen-fixture corpus names this directly; the builder reaches a

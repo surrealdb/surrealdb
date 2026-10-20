@@ -4,7 +4,7 @@ timeout = 15000
 context-timeout = 15000
 
 [test]
-reason = "Public issue surrealdb/surrealdb#7425: writes that change an indexed field while a CONCURRENTLY build runs are neither lost nor stalled indefinitely; the build reaches ready and the index agrees with a scan. Checked live with 4 writers on 100k rows: median 13 ms, max 18 ms. The Closing wait is bounded by the build and is by design."
+reason = "Public issue surrealdb/surrealdb#7425: writes that change an indexed field while a CONCURRENTLY build runs are neither lost nor stalled indefinitely; the build reaches ready and the index agrees with a scan. Such a write waits in admission only while the build is Closing, which drains what writers committed during the build's last replay batch; a build in the same process releases the waiting writes when it publishes (`a_write_held_by_closing_is_released_when_the_build_publishes`), and a build stranded in Closing by a dead owner is adopted by the next resume pass even while other builds run (`a_running_build_defers_stalled_scans_but_not_a_stalled_closing`). Sustained writers are pinned by `a_build_comes_online_while_writers_keep_queueing`; all three are in surrealdb/core/src/kvs/index/tests.rs."
 issue = 7425
 
 [[test.results]]

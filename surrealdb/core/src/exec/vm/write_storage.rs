@@ -945,21 +945,30 @@ async fn move_entries(
 				txn.set_key(&key, &value).await.map_err(ControlFlow::Err)?;
 				continue;
 			}
-			if txn.put_compare_key(&key, &value, None).await.is_err() {
-				let held: IndexEntryValue =
-					txn.get_key(&key, None).await.map_err(ControlFlow::Err)?.ok_or_else(|| {
-						internal("a unique entry that refused a write and is absent")
-					})?;
-				let mut n = n;
-				return Err(ControlFlow::Err(anyhow::Error::new(crate::idx::Error::IndexExists {
-					record: held.rid,
-					index: ix.name.to_string(),
-					value: match n.0.len() {
-						1 => n.0.remove(0).to_sql(),
-						_ => n.to_sql(),
-					},
-				})));
+			match txn.put_compare_key(&key, &value, None).await {
+				Ok(()) => continue,
+				// The key is taken: report the record that holds it.
+				Err(e) if condition_not_met(&e) => {}
+				Err(e) => return Err(ControlFlow::Err(e)),
 			}
+			let held: IndexEntryValue =
+				txn.get_key(&key, None).await.map_err(ControlFlow::Err)?.ok_or_else(|| {
+					ControlFlow::Err(
+						crate::kvs::DatastoreError::CorruptedIndex(
+							"a unique entry refused a write and is absent",
+						)
+						.into(),
+					)
+				})?;
+			let mut n = n;
+			return Err(ControlFlow::Err(anyhow::Error::new(crate::idx::Error::IndexExists {
+				record: held.rid,
+				index: ix.name.to_string(),
+				value: match n.0.len() {
+					1 => n.0.remove(0).to_sql(),
+					_ => n.to_sql(),
+				},
+			})));
 		}
 	}
 	Ok(false)
@@ -999,30 +1008,40 @@ async fn record_shapes(ctx: &WriteCtx, ix: &IndexDefinition, n: &[Value]) -> Flo
 	.map_err(ControlFlow::Err)
 }
 
+/// Whether `e` is a conditional write refused because the key did not hold
+/// the expected value.
+fn condition_not_met(e: &anyhow::Error) -> bool {
+	matches!(storage_error(e), Some(surrealdb_kvs::Error::TransactionConditionNotMet))
+}
+
 /// Delete the index entry at `key` while it names the record `expected`
 /// names, leaving an absent or foreign entry alone; an entry of the index's
 /// doc-id format may be stored without its doc-id, and is deleted too.
+///
+/// An entry left alone is read under a commit-time conflict registration.
+/// The delete is judged on this transaction's snapshot, and an entry for the
+/// record's old value can be written after it — by an index build replaying
+/// the write that produced that value. A miss that registered nothing would
+/// commit beside that entry and leave the record indexed under a value it no
+/// longer holds; registered, the commit fails as a retryable conflict.
 async fn delete_entry(
 	txn: &crate::kvs::Transaction,
 	key: &crate::idx::kernels::btree::StoredKey,
 	expected: &IndexEntryValue,
 ) -> FlowResult<()> {
-	fn condition_not_met(e: &anyhow::Error) -> bool {
-		matches!(storage_error(e), Some(surrealdb_kvs::Error::TransactionConditionNotMet))
-	}
 	match txn.del_compare_key(key, Some(expected)).await {
 		Err(e) if condition_not_met(&e) => {
-			if expected.doc_id.is_none() {
-				return Ok(());
+			if expected.doc_id.is_some() {
+				let bare = IndexEntryValue {
+					rid: expected.rid.clone(),
+					doc_id: None,
+				};
+				match txn.del_compare_key(key, Some(&bare)).await {
+					Err(e) if condition_not_met(&e) => {}
+					other => return other.map_err(ControlFlow::Err),
+				}
 			}
-			let bare = IndexEntryValue {
-				rid: expected.rid.clone(),
-				doc_id: None,
-			};
-			match txn.del_compare_key(key, Some(&bare)).await {
-				Err(e) if condition_not_met(&e) => Ok(()),
-				other => other.map_err(ControlFlow::Err),
-			}
+			txn.getu_key_raw(key).await.map(drop).map_err(ControlFlow::Err)
 		}
 		other => other.map_err(ControlFlow::Err),
 	}
