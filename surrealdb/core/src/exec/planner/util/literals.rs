@@ -240,8 +240,9 @@ pub(crate) fn leaf_literal_to_value(lit: &LogicalLiteral) -> Value {
 ///
 /// A leaf always does, and so does a `Table`, which denotes its name. An
 /// `Array`, `Set` or `Object` does when every element does; a `RecordId` when
-/// its key is a number, string or uuid — a compound key holds expressions and
-/// a generated key is allocated at evaluation. Every other expression,
+/// its key is a number, string, uuid, or an array or object whose elements all
+/// do — a generated key is allocated at evaluation and a range key is no one
+/// value. Every other expression,
 /// including a `Subquery`, answers `None`.
 ///
 /// Used by both the planner (for physical expression compilation) and the
@@ -302,10 +303,19 @@ pub(crate) fn try_literal_to_value(expr: &LogicalExpr) -> Option<Value> {
 				LogicalRecordIdKey::Number(n) => RecordIdKey::Number(*n),
 				LogicalRecordIdKey::String(s) => RecordIdKey::String(s.clone()),
 				LogicalRecordIdKey::Uuid(u) => RecordIdKey::Uuid(*u),
-				LogicalRecordIdKey::Array(_)
-				| LogicalRecordIdKey::Object(_)
-				| LogicalRecordIdKey::Generate(_)
-				| LogicalRecordIdKey::Range(_) => return None,
+				LogicalRecordIdKey::Array(items) => {
+					let values: Option<Vec<Value>> =
+						items.iter().map(try_literal_to_value).collect();
+					RecordIdKey::Array(crate::val::Array(values?))
+				}
+				LogicalRecordIdKey::Object(entries) => {
+					let mut map = BTreeMap::new();
+					for (key, value) in entries {
+						map.insert(key.clone(), try_literal_to_value(value)?);
+					}
+					RecordIdKey::Object(crate::val::Object::from(map))
+				}
+				LogicalRecordIdKey::Generate(_) | LogicalRecordIdKey::Range(_) => return None,
 			};
 			Some(Value::RecordId(RecordId::new(rid.table.clone(), key)))
 		}
@@ -1117,11 +1127,16 @@ mod tests {
 	}
 
 	#[test]
-	fn a_compound_record_key_is_not_a_static_value() {
-		assert!(try_literal_to_value(&expr("t:[1, 2]")).is_none());
-		assert!(try_literal_to_value(&expr("t:1")).is_some());
-		assert!(try_literal_to_value(&expr("[1, a]")).is_none());
-		assert!(try_literal_to_value(&expr("{ a: 1 }")).is_some());
+	fn a_compound_record_key_is_static_when_its_elements_are() {
+		let value = |sql: &str| try_literal_to_value(&expr(sql)).map(|v| v.to_sql());
+		assert_eq!(value("t:[1, 'a']").as_deref(), Some("t:[1, 'a']"));
+		assert_eq!(value("t:{ k: [1, 2] }").as_deref(), Some("t:{ k: [1, 2] }"));
+		assert_eq!(value("t:1").as_deref(), Some("t:1"));
+		assert!(value("t:[1, a]").is_none());
+		assert!(value("t:{ k: a }").is_none());
+		assert!(value("t:ulid()").is_none());
+		assert!(value("[1, a]").is_none());
+		assert!(value("{ a: 1 }").is_some());
 	}
 
 	#[test]

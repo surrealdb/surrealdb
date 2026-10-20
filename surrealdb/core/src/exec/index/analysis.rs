@@ -1591,7 +1591,7 @@ impl<'a> IndexAnalyzer<'a> {
 				right,
 			} => {
 				if left.is_path()
-					&& let Some(Value::Array(arr)) = try_literal_to_value(right)
+					&& let Some(Value::Array(arr)) = index_literal(right)
 				{
 					results.push((left.as_ref().clone(), arr.0));
 				}
@@ -1602,7 +1602,7 @@ impl<'a> IndexAnalyzer<'a> {
 				right,
 			} => {
 				if right.is_path()
-					&& let Some(Value::Array(arr)) = try_literal_to_value(left)
+					&& let Some(Value::Array(arr)) = index_literal(left)
 				{
 					results.push((right.as_ref().clone(), arr.0));
 				}
@@ -1634,7 +1634,7 @@ impl<'a> IndexAnalyzer<'a> {
 				right,
 			} => {
 				if left.is_path()
-					&& let Some(Value::Array(arr)) = try_literal_to_value(right)
+					&& let Some(Value::Array(arr)) = index_literal(right)
 				{
 					results.push((left.as_ref().clone(), arr.0));
 				}
@@ -1756,7 +1756,11 @@ impl<'a> IndexAnalyzer<'a> {
 	/// it and `op` is an equality or an ordering comparison
 	/// ([`try_bound_operand`]).
 	fn operand_of(&self, expr: &LogicalExpr, op: &BinaryOperator) -> Option<BoundOperand> {
-		try_bound_operand(expr, self.clock_allowed && is_ordering_comparison(op))
+		let operand = try_bound_operand(expr, self.clock_allowed && is_ordering_comparison(op))?;
+		match operand.as_literal() {
+			Some(value) if !keyed_as_compared(value, is_range_comparison(op)) => None,
+			_ => Some(operand),
+		}
 	}
 
 	/// Extract a simple condition (path op value) from a binary expression:
@@ -2388,11 +2392,11 @@ impl<'a> IndexAnalyzer<'a> {
 		candidates: &mut Vec<IndexCandidate>,
 	) {
 		let (path, value) = match op {
-			BinaryOperator::Contain if left.is_path() => match try_literal_to_value(right) {
+			BinaryOperator::Contain if left.is_path() => match index_literal(right) {
 				Some(v) => (left, v),
 				None => return,
 			},
-			BinaryOperator::Inside if right.is_path() => match try_literal_to_value(left) {
+			BinaryOperator::Inside if right.is_path() => match index_literal(left) {
 				Some(v) => (right, v),
 				None => return,
 			},
@@ -2884,6 +2888,73 @@ struct SimpleCondition {
 	op: BinaryOperator,
 	value: BoundOperand,
 	position: IdiomPosition,
+}
+
+/// Whether `op` compares by order rather than by equality.
+fn is_range_comparison(op: &BinaryOperator) -> bool {
+	matches!(
+		op,
+		BinaryOperator::LessThan
+			| BinaryOperator::LessThanEqual
+			| BinaryOperator::MoreThan
+			| BinaryOperator::MoreThanEqual
+	)
+}
+
+/// Whether the index key of every record id `value` holds with an array or
+/// object key compares as the record id does, for a range comparison when
+/// `range`. Such a key encodes its elements in the record-id key format, where
+/// a regex has no encoding at all and a datetime is RFC 3339 text, whose byte
+/// order is not chronological; so a key holding a regex is never an index
+/// operand, and one holding a datetime only for an equality. A key is judged
+/// through everything it holds, the bounds of a range in it included. A record
+/// id nested in an array, set or object is judged as the comparison judges the
+/// container, and a range (`IN a..b`) by its bounds as a range comparison.
+fn keyed_as_compared(value: &Value, range: bool) -> bool {
+	fn element_keyed(value: &Value, range: bool) -> bool {
+		match value {
+			Value::Regex(_) => false,
+			Value::Datetime(_) => !range,
+			Value::Array(items) => items.iter().all(|v| element_keyed(v, range)),
+			Value::Set(items) => items.iter().all(|v| element_keyed(v, range)),
+			Value::Object(entries) => entries.values().all(|v| element_keyed(v, range)),
+			Value::RecordId(id) => key_keyed(&id.key, range),
+			Value::Range(r) => [&r.start, &r.end].into_iter().all(|bound| match bound {
+				Bound::Included(v) | Bound::Excluded(v) => element_keyed(v, range),
+				Bound::Unbounded => true,
+			}),
+			_ => true,
+		}
+	}
+	fn key_keyed(key: &RecordIdKey, range: bool) -> bool {
+		match key {
+			RecordIdKey::Array(items) => items.iter().all(|v| element_keyed(v, range)),
+			RecordIdKey::Object(entries) => entries.values().all(|v| element_keyed(v, range)),
+			RecordIdKey::Range(r) => [&r.start, &r.end].into_iter().all(|bound| match bound {
+				Bound::Included(k) | Bound::Excluded(k) => key_keyed(k, range),
+				Bound::Unbounded => true,
+			}),
+			_ => true,
+		}
+	}
+	match value {
+		Value::RecordId(id) => key_keyed(&id.key, range),
+		Value::Array(items) => items.iter().all(|v| keyed_as_compared(v, range)),
+		Value::Set(items) => items.iter().all(|v| keyed_as_compared(v, range)),
+		Value::Object(entries) => entries.values().all(|v| keyed_as_compared(v, range)),
+		Value::Range(r) => [&r.start, &r.end].into_iter().all(|bound| match bound {
+			Bound::Included(v) | Bound::Excluded(v) => keyed_as_compared(v, true),
+			Bound::Unbounded => true,
+		}),
+		_ => true,
+	}
+}
+
+/// `expr` as a literal an equality-style index access (`CONTAINS`, `INSIDE`,
+/// an `IN` list, `CONTAINSANY` / `CONTAINSALL`) may seek, when it is one
+/// ([`keyed_as_compared`]).
+fn index_literal(expr: &LogicalExpr) -> Option<Value> {
+	try_literal_to_value(expr).filter(|value| keyed_as_compared(value, false))
 }
 
 /// Whether `op` compares for equality or order, the comparisons whose value
