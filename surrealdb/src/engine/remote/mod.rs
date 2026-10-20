@@ -93,22 +93,22 @@
 #[cfg_attr(docsrs, doc(cfg(feature = "protocol-grpc")))]
 pub mod grpc;
 
-#[cfg(feature = "protocol-http")]
+#[cfg(http_engine)]
 #[cfg_attr(docsrs, doc(cfg(feature = "protocol-http")))]
 pub mod http;
 
-#[cfg(feature = "protocol-ws")]
+#[cfg(ws_engine)]
 #[cfg_attr(docsrs, doc(cfg(feature = "protocol-ws")))]
 pub mod ws;
 
-#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
+#[cfg(any(ws_engine, http_engine))]
 use surrealdb_rpc::Token;
-#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
+#[cfg(any(ws_engine, http_engine))]
 use uuid::Uuid;
 
-#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
+#[cfg(any(ws_engine, http_engine))]
 use crate::conn::Command;
-#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
+#[cfg(any(ws_engine, http_engine))]
 use crate::types::{Array, SurrealValue, Value};
 
 /// A struct which will be serialized as a map to behave like the previously
@@ -119,7 +119,7 @@ use crate::types::{Array, SurrealValue, Value};
 /// This is the request shape of the JSON/CBOR/flatbuffers wire the WebSocket
 /// and HTTP engines speak; gRPC has its own generated messages and needs
 /// none of it.
-#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
+#[cfg(any(ws_engine, http_engine))]
 #[derive(Clone, Debug, SurrealValue)]
 #[surreal(crate = "crate::types")]
 pub(crate) struct RouterRequest {
@@ -134,7 +134,7 @@ pub(crate) struct RouterRequest {
 /// How a [`Command`] is presented to a remote server: the request it encodes
 /// to, and whether it belongs in the session replay log used to rebuild state
 /// after a reconnect.
-#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
+#[cfg(any(ws_engine, http_engine))]
 pub(crate) trait RemoteCommand: Sized {
 	/// The request to send for this command, or `None` when the remote
 	/// protocol has no equivalent (backups, live-query subscription).
@@ -160,11 +160,11 @@ pub(crate) trait RemoteCommand: Sized {
 	/// future change adds a clearing variant to `Command::Use` or maps `None`
 	/// to `Value::Null` on the wire, revisit this method and the corresponding
 	/// tests.
-	#[cfg(feature = "protocol-ws")]
+	#[cfg(ws_engine)]
 	fn is_replay_noop_after(&self, prev: &Command) -> bool;
 }
 
-#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
+#[cfg(any(ws_engine, http_engine))]
 impl RemoteCommand for Command {
 	fn into_router_request(
 		self,
@@ -411,7 +411,7 @@ impl RemoteCommand for Command {
 		)
 	}
 
-	#[cfg(feature = "protocol-ws")]
+	#[cfg(ws_engine)]
 	fn is_replay_noop_after(&self, prev: &Command) -> bool {
 		match (prev, self) {
 			(
@@ -445,7 +445,7 @@ impl RemoteCommand for Command {
 /// for a given session (e.g. the WS engine's single-threaded response loop).
 /// The HTTP engine handles each request in a spawned task and must keep using
 /// a plain `replay.push(command)`.
-#[cfg(feature = "protocol-ws")]
+#[cfg(ws_engine)]
 fn record_replayable(replay: &boxcar::Vec<Command>, command: Command) {
 	debug_assert!(
 		command.replayable(),
@@ -461,7 +461,7 @@ fn record_replayable(replay: &boxcar::Vec<Command>, command: Command) {
 	replay.push(command);
 }
 
-#[cfg(all(test, any(feature = "protocol-ws", feature = "protocol-http")))]
+#[cfg(all(test, any(ws_engine, http_engine)))]
 mod test {
 	use uuid::Uuid;
 
@@ -518,7 +518,7 @@ mod test {
 
 // Replay coalescing is only used by the WS engine, so gate these tests on the
 // same feature that compiles `record_replayable` / `is_replay_noop_after`.
-#[cfg(all(test, feature = "protocol-ws"))]
+#[cfg(all(test, ws_engine))]
 mod replay_test {
 	use super::{Command, RemoteCommand, record_replayable};
 

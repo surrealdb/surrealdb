@@ -7,10 +7,10 @@ use std::task::{Context, Poll};
 use async_channel::Receiver;
 use futures::StreamExt;
 use surrealdb_types::{ConfigurationError, QueryError, SerializationError, ValidationError};
-#[cfg(not(target_family = "wasm"))]
+#[cfg(not(browser))]
 pub(crate) use tokio::spawn;
 use uuid::Uuid;
-#[cfg(target_family = "wasm")]
+#[cfg(browser)]
 pub(crate) use wasm_bindgen_futures::spawn_local as spawn;
 
 use crate::conn::{Router, ctx, ctx_txn};

@@ -10,7 +10,6 @@ use rust_decimal::Decimal;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate as surrealdb_types;
 use crate::error::{ConversionError, LengthMismatchError, OutOfRangeError, SerializationError};
 use crate::traits::ser::Serializer;
 use crate::{

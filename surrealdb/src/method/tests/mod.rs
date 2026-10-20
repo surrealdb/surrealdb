@@ -1,4 +1,4 @@
-#![cfg(any(feature = "protocol-http", feature = "protocol-ws"))]
+#![cfg(any(http_engine, ws_engine))]
 #![cfg(not(target_family = "wasm"))]
 
 mod protocol;

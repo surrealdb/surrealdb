@@ -28,7 +28,7 @@ extern crate tracing;
 
 pub mod engine;
 #[doc(hidden)]
-#[cfg(feature = "protocol-http")]
+#[cfg(http_engine)]
 pub mod headers;
 pub mod method;
 pub mod opt;

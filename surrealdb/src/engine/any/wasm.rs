@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use tokio::sync::watch;
+#[cfg(browser)]
 #[allow(unused_imports, reason = "Used by the DB engines.")]
 use wasm_bindgen_futures::spawn_local;
 
@@ -140,7 +141,7 @@ impl conn::Sealed for Any {
 				}
 
 				EndpointKind::Http | EndpointKind::Https => {
-					#[cfg(feature = "protocol-http")]
+					#[cfg(http_engine)]
 					{
 						spawn_local(engine::remote::http::wasm::run_router(
 							address,
@@ -150,14 +151,14 @@ impl conn::Sealed for Any {
 						));
 					}
 
-					#[cfg(not(feature = "protocol-http"))]
+					#[cfg(not(http_engine))]
 				return Err(Error::internal(
-					"Cannot connect to the `HTTP` remote engine as it is not enabled in this build of SurrealDB".to_owned(),
+					"Cannot connect to the `HTTP` remote engine as it is not enabled in this build of SurrealDB or not available on this target".to_owned(),
 				));
 				}
 
 				EndpointKind::Ws | EndpointKind::Wss => {
-					#[cfg(feature = "protocol-ws")]
+					#[cfg(ws_engine)]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
 						let mut endpoint = address;
@@ -174,9 +175,9 @@ impl conn::Sealed for Any {
 						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
 					}
 
-					#[cfg(not(feature = "protocol-ws"))]
+					#[cfg(not(ws_engine))]
 				return Err(Error::internal(
-					"Cannot connect to the `WebSocket` remote engine as it is not enabled in this build of SurrealDB".to_owned(),
+					"Cannot connect to the `WebSocket` remote engine as it is not enabled in this build of SurrealDB or not available on this target".to_owned(),
 				));
 				}
 

@@ -1,10 +1,10 @@
 use std::collections::HashSet;
 
 use tokio::sync::watch;
-#[cfg(feature = "protocol-ws")]
+#[cfg(ws_engine)]
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use tokio_tungstenite::Connector;
-#[cfg(feature = "protocol-ws")]
+#[cfg(ws_engine)]
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 
 #[allow(unused_imports, reason = "Used by the DB engines.")]
@@ -13,7 +13,7 @@ use crate::conn::Router;
 #[allow(unused_imports, reason = "Used by the DB engines.")]
 use crate::engine;
 use crate::engine::any::Any;
-#[cfg(feature = "protocol-http")]
+#[cfg(http_engine)]
 use crate::engine::remote::http;
 use crate::method::BoxFuture;
 use crate::opt::{Endpoint, EndpointKind, WaitFor};
@@ -132,7 +132,7 @@ impl conn::Sealed for Any {
 				}
 
 				EndpointKind::Http | EndpointKind::Https => {
-					#[cfg(feature = "protocol-http")]
+					#[cfg(http_engine)]
 					{
 						features.insert(ExtraFeatures::Backup);
 						let base_url = address.url;
@@ -151,7 +151,7 @@ impl conn::Sealed for Any {
 						));
 					}
 
-					#[cfg(not(feature = "protocol-http"))]
+					#[cfg(not(http_engine))]
 				return Err(Error::configuration(
 					"Cannot connect to the `HTTP` remote engine as it is not enabled in this build of SurrealDB".to_string(),
 					None,
@@ -159,7 +159,7 @@ impl conn::Sealed for Any {
 				}
 
 				EndpointKind::Ws | EndpointKind::Wss => {
-					#[cfg(feature = "protocol-ws")]
+					#[cfg(ws_engine)]
 					{
 						let crate::opt::WebsocketConfig {
 							read_buffer_size,
@@ -201,7 +201,7 @@ impl conn::Sealed for Any {
 						));
 					}
 
-					#[cfg(not(feature = "protocol-ws"))]
+					#[cfg(not(ws_engine))]
 				return Err(Error::configuration(
 					"Cannot connect to the `WebSocket` remote engine as it is not enabled in this build of SurrealDB".to_string(),
 					None,

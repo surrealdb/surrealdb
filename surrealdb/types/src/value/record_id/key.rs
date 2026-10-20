@@ -1,7 +1,6 @@
 use rand::seq::IndexedRandom;
 use serde::{Deserialize, Serialize};
 
-use crate as surrealdb_types;
 use crate::sql::{SqlFormat, ToSql};
 use crate::{Array, Number, Object, RecordIdKeyRange, SurrealValue, Uuid, Value, kind};
 

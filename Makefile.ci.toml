@@ -630,6 +630,22 @@ script = '''
             -- -D warnings
     done
 
+    # The SDK for a WASI host, as a client: the WebSocket engine and TLS, without
+    # the SurrealQL parser (its JWT dependency brings in `js-sys` on every wasm
+    # target). The SDK's remote engines are the browser's, which import
+    # JavaScript a WASI runtime does not provide, so a WASI build must not
+    # depend on `wasm-bindgen` through the SDK: a module that does links and
+    # then fails to instantiate. The tree is captured before it is searched, so
+    # a failing `cargo tree` stops the task and `grep -q` closing the pipe early
+    # cannot mask a match.
+    wasi_tree=$(cargo tree --locked --package surrealdb \
+        --no-default-features --features protocol-ws,rustls \
+        --target wasm32-wasip2 --edges normal --prefix none)
+    if grep -q '^wasm-bindgen ' <<<"$wasi_tree"; then
+        echo "error: the SDK pulls wasm-bindgen into a wasm32-wasip2 build"
+        exit 1
+    fi
+
     # The extension signature verifier. Every build that loads extensions
     # verifies them, wasm32 hosts included, and nothing above depends on it.
     cargo clippy --locked --package surrealism-verify \

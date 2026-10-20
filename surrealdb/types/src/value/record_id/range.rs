@@ -3,7 +3,6 @@ use std::ops::{Bound, RangeFrom, RangeFull, RangeTo, RangeToInclusive};
 
 use serde::{Deserialize, Serialize};
 
-use crate as surrealdb_types;
 use crate::sql::{SqlFormat, ToSql};
 use crate::{Kind, Range, RecordIdKey, SurrealValue, Value, kind};
 

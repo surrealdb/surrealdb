@@ -41,11 +41,42 @@ pub use prost;
 pub use proto::{decode as decode_proto, encode as encode_proto};
 pub use sql::{SqlFormat, ToSql, fmt_non_finite_f64, write_sql};
 // Re-export the derive macro
-pub use surrealdb_types_derive::{SurrealValue, kind};
+pub use surrealdb_types_derive::SurrealValue;
+#[doc(hidden)]
+pub use surrealdb_types_derive::kind_in as __kind_in;
 pub use traits::*;
 pub use utils::either::*;
 pub use value::*;
 pub use variables::*;
+
+/// Builds a [`Kind`] from SurrealQL type syntax.
+///
+/// The expansion names `Kind` through `$crate`, so it resolves for a caller that
+/// reaches this macro through a re-export, such as `surrealdb::types::kind`,
+/// without a direct dependency on this crate.
+///
+/// Supported forms:
+/// - Basic types: `string`, `bool`, `int`, `datetime`, ...
+/// - Parameterized types: `array<string>`, `set<int, 5>`, `record<user | post>`
+/// - Union types: `string | bool | int`
+/// - Literal values: `true`, `42`, `"hello"`
+/// - Object literals: `{ status: string, "user-id": int }`
+/// - Array literals: `[string, int, bool]`
+/// - Escape hatch: `(expr)` for an arbitrary Rust expression
+/// - Prefixes: `Kind::String`, `Literal::Bool(true)`
+///
+/// ```
+/// use surrealdb_types::{Kind, kind};
+///
+/// assert_eq!(kind!(string), Kind::String);
+/// assert_eq!(kind!(array<int>), Kind::Array(Box::new(Kind::Int), None));
+/// ```
+#[macro_export]
+macro_rules! kind {
+	($($tokens:tt)*) => {
+		$crate::__kind_in!($crate; $($tokens)*)
+	};
+}
 
 /// Macro for creating a SurrealDB object.
 ///

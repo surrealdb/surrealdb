@@ -123,17 +123,22 @@ reqwest = { workspace = true, default-features = false, features = [
 ], optional = true }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
-getrandom = { workspace = true, features = ["wasm_js"] }
-js-sys = "0.3"
-rustls = { workspace = true, optional = true, features = ["ring"] }
-rustls-pki-types = { version = "1.14.0", features = ["web"] }
-ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }
 tokio = { workspace = true, default-features = false, features = [
     "rt",
     "sync",
 ] }
+uuid = { workspace = true, features = ["serde", "v4", "v7"] }
+rustls = { workspace = true, optional = true, features = ["ring"] }
+
+# The browser engines. A WASI host provides none of the JavaScript these
+# crates import, so they are left out of its builds.
+[target.'cfg(all(target_family = "wasm", not(target_os = "wasi")))'.dependencies]
+getrandom = { workspace = true, features = ["wasm_js"] }
+js-sys = "0.3"
+rustls-pki-types = { version = "1.14.0", features = ["web"] }
+ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }
 tokio-tungstenite-wasm.workspace = true
-uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
+uuid = { workspace = true, features = ["js"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures.workspace = true
 wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }

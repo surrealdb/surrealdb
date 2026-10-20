@@ -9,7 +9,7 @@ pub mod any;
 	feature = "kv-surrealkv",
 ))]
 pub mod local;
-#[cfg(any(feature = "protocol-http", feature = "protocol-ws", feature = "protocol-grpc"))]
+#[cfg(any(http_engine, ws_engine, feature = "protocol-grpc"))]
 pub mod remote;
 /// The embedded engine's background maintenance tasks.
 #[cfg(any(
@@ -23,7 +23,7 @@ pub mod remote;
 pub use surrealdb_engine_local::tasks;
 
 /// Compiled only where something polls on an interval: the WS ping loop.
-#[cfg(feature = "protocol-ws")]
+#[cfg(ws_engine)]
 mod interval {
 	use std::pin::Pin;
 	use std::task::{Context, Poll};
@@ -56,7 +56,7 @@ mod interval {
 		}
 	}
 }
-#[cfg(feature = "protocol-ws")]
+#[cfg(ws_engine)]
 use interval::IntervalStream;
-#[cfg(any(feature = "protocol-http", feature = "protocol-ws"))]
+#[cfg(any(http_engine, ws_engine))]
 pub(crate) use surrealdb_engine_api::{SessionError, session_error_to_error};

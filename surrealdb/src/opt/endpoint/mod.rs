@@ -1,8 +1,8 @@
 #[cfg(all(feature = "protocol-grpc", not(target_family = "wasm")))]
 mod grpc;
-#[cfg(feature = "protocol-http")]
+#[cfg(http_engine)]
 mod http;
-#[cfg(feature = "protocol-ws")]
+#[cfg(ws_engine)]
 mod ws;
 
 #[cfg(feature = "kv-indxdb")]
