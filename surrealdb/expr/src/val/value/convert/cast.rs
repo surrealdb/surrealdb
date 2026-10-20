@@ -884,7 +884,13 @@ impl Value {
 	}
 
 	fn can_cast_to_literal(&self, val: &KindLiteral) -> bool {
-		val.validate_value(self)
+		match val {
+			// The members are cast, so whether they can be is what the cast does.
+			KindLiteral::Array(_) | KindLiteral::Object(_) => {
+				self.clone().cast_to_literal(val).is_ok()
+			}
+			val => val.validate_value(self),
+		}
 	}
 
 	fn can_cast_to_file_buckets(&self, buckets: &[String]) -> bool {
@@ -962,15 +968,53 @@ impl Value {
 	}
 
 	/// Try to convert this value to a Literal, returns a `Value` with the
-	/// coerced value
+	/// converted value.
+	///
+	/// Array and object literals cast each member to its member kind, as
+	/// `array<T>` casts its elements: the shape (length, keys, optional
+	/// members) must match, and every member must be castable. Any other
+	/// literal is a value that must match exactly.
 	pub fn cast_to_literal(self, literal: &KindLiteral) -> Result<Value, CastError> {
-		if literal.validate_value(&self) {
-			Ok(self)
-		} else {
-			Err(CastError::InvalidKind {
-				from: self,
-				into: literal.to_sql(),
-			})
+		match (literal, self) {
+			(KindLiteral::Array(kinds), Value::Array(array)) => {
+				let original = array.clone();
+				if array.len() != kinds.len() {
+					return Err(literal_mismatch(Value::Array(original), literal));
+				}
+				array
+					.into_iter()
+					.zip(kinds)
+					.map(|(value, kind)| value.cast_to_kind(kind))
+					.collect::<Result<Array, CastError>>()
+					.map(Value::Array)
+					.map_err(|_| literal_mismatch(Value::Array(original), literal))
+			}
+			(KindLiteral::Object(kinds), Value::Object(mut object)) => {
+				let original = object.clone();
+				let extra = object.iter().any(|(key, _)| !kinds.contains_key(key));
+				let missing = kinds
+					.iter()
+					.any(|(key, kind)| object.get(key.as_str()).is_none() && !kind.can_be_none());
+				if extra || missing {
+					return Err(literal_mismatch(Value::Object(original), literal));
+				}
+				for (key, value) in object.iter_mut() {
+					if let Some(kind) = kinds.get(key) {
+						let taken = std::mem::replace(value, Value::None);
+						*value = taken.cast_to_kind(kind).map_err(|_| {
+							literal_mismatch(Value::Object(original.clone()), literal)
+						})?;
+					}
+				}
+				Ok(Value::Object(object))
+			}
+			(literal, value) => {
+				if literal.validate_value(&value) {
+					Ok(value)
+				} else {
+					Err(literal_mismatch(value, literal))
+				}
+			}
 		}
 	}
 
@@ -1176,6 +1220,13 @@ impl Value {
 			from: v.into(),
 			into: kind,
 		})
+	}
+}
+
+fn literal_mismatch(from: Value, literal: &KindLiteral) -> CastError {
+	CastError::InvalidKind {
+		from,
+		into: literal.to_sql(),
 	}
 }
 

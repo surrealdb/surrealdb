@@ -500,7 +500,9 @@ pub(crate) fn generate_typed_id(
 ///
 /// An array key of a table with named components is held to each component in
 /// turn instead ([`coerce_elements`]). Any other key of such a table is
-/// coerced to the declared tuple, which refuses it.
+/// coerced to the declared tuple, which refuses it. A key admitted by a
+/// literal kind stays as written, so the id a statement names is the id it
+/// writes.
 fn coerce_id_key(
 	id: RecordId,
 	kind: Option<&Kind>,
@@ -524,11 +526,30 @@ fn coerce_id_key(
 	coerce_whole_key(id, kind)
 }
 
+/// Whether `kind` admits `key` through a literal kind: `kind` itself, or the
+/// first arm of a union that accepts it, which is the arm coercion selects.
+fn admitted_by_literal(kind: &Kind, key: &Value) -> bool {
+	match kind {
+		Kind::Literal(_) => key.can_coerce_to_kind(kind),
+		Kind::Either(arms) => arms
+			.iter()
+			.find(|arm| key.can_coerce_to_kind(arm))
+			.is_some_and(|arm| admitted_by_literal(arm, key)),
+		_ => false,
+	}
+}
+
 /// Coerce the whole key of `id` to the declared `kind`.
 fn coerce_whole_key(id: RecordId, kind: &Kind) -> Result<RecordId, ControlFlow> {
 	// The key is cloned so the original id stays whole for the error, which is
 	// rendered only on failure.
-	match id.key.clone().into_value().coerce_to_kind(kind) {
+	let key = id.key.clone().into_value();
+	let literal_arm = admitted_by_literal(kind, &key);
+	match key.coerce_to_kind(kind) {
+		// A literal kind (a tuple, an object shape) admits a key as written: its
+		// members are not converted, so the key stays the id the statement
+		// named and a float or decimal element stays one.
+		Ok(_) if literal_arm => Ok(id),
 		Ok(coerced) => coerced.generate(id.table, false).map_err(ControlFlow::Err),
 		Err(error) => Err(fail(DocError::FieldCoerce {
 			record: id.to_sql(),

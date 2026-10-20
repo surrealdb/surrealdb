@@ -606,9 +606,9 @@ impl Value {
 	fn can_coerce_to_set_len(&self, kind: &Kind, len: u64) -> bool {
 		match self {
 			Value::Set(s) => s.len() as u64 == len && s.iter().all(|x| x.can_coerce_to_kind(kind)),
-			Value::Array(a) => {
-				a.len() as u64 == len && a.iter().all(|x| x.can_coerce_to_kind(kind))
-			}
+			// An array becomes a set by deduplicating its converted elements, so
+			// its length says nothing about the set's: the conversion decides.
+			Value::Array(_) => self.clone().coerce_to_set_kind_len(kind, len).is_ok(),
 			_ => false,
 		}
 	}
@@ -649,7 +649,16 @@ impl Value {
 	}
 
 	fn can_coerce_to_literal(&self, val: &KindLiteral) -> bool {
-		val.validate_value(self)
+		match val {
+			// The members are converted, so whether they can be is what the
+			// conversion does: a member kind may admit a value by length or
+			// shape that its conversion then refuses (a set deduplicating
+			// below its declared length).
+			KindLiteral::Array(_) | KindLiteral::Object(_) => {
+				self.clone().coerce_to_literal(val).is_ok()
+			}
+			val => val.validate_value(self),
+		}
 	}
 
 	fn can_coerce_to_file_buckets(&self, buckets: &[String]) -> bool {
@@ -760,14 +769,35 @@ impl Value {
 
 	/// Try to coerce this value to a Literal, returns a `Value` with the
 	/// coerced value
+	///
+	/// Array and object literals convert their members to the member kinds,
+	/// as `array<T>` converts its elements, so `[1.0]` coerced to `[int]` is
+	/// `[1]`. `validate_value` admits exactly the values whose members all
+	/// coerce, so the conversion below cannot fail once it has passed.
 	pub fn coerce_to_literal(self, literal: &KindLiteral) -> Result<Value, CoerceError> {
-		if literal.validate_value(&self) {
-			Ok(self)
-		} else {
-			Err(CoerceError::InvalidKind {
+		if !literal.validate_value(&self) {
+			return Err(CoerceError::InvalidKind {
 				from: self,
 				into: literal.to_sql(),
-			})
+			});
+		}
+		match (literal, self) {
+			(KindLiteral::Array(kinds), Value::Array(array)) => array
+				.into_iter()
+				.zip(kinds)
+				.map(|(value, kind)| value.coerce_to_kind(kind))
+				.collect::<Result<Array, CoerceError>>()
+				.map(Value::Array),
+			(KindLiteral::Object(kinds), Value::Object(mut object)) => {
+				for (key, value) in object.iter_mut() {
+					if let Some(kind) = kinds.get(key) {
+						let taken = std::mem::replace(value, Value::None);
+						*value = taken.coerce_to_kind(kind)?;
+					}
+				}
+				Ok(Value::Object(object))
+			}
+			(_, value) => Ok(value),
 		}
 	}
 
