@@ -773,6 +773,7 @@ impl<'a> IndexAnalyzer<'a> {
 			BTreeAccess::Compound {
 				prefix,
 				range,
+				..
 			} => {
 				let n = (prefix.len() + usize::from(range.is_some())).min(cols.len());
 				cols[..n].to_vec()
@@ -797,6 +798,7 @@ impl<'a> IndexAnalyzer<'a> {
 			BTreeAccess::Compound {
 				prefix,
 				range,
+				..
 			} => range.is_none() && prefix.len() >= c.index_ref.definition().cols.len(),
 			_ => false,
 		}
@@ -1233,6 +1235,7 @@ impl<'a> IndexAnalyzer<'a> {
 					BTreeAccess::Compound {
 						prefix,
 						range: None,
+						..
 					} => prefix,
 					_ => return false,
 				};
@@ -1837,6 +1840,7 @@ impl<'a> IndexAnalyzer<'a> {
 			// range so the index scan is narrowed at the storage level.
 			let mut prefix_values: Vec<BoundOperand> = Vec::new();
 			let mut range_condition: Option<(BinaryOperator, BoundOperand)> = None;
+			let mut upper_condition: Option<(BinaryOperator, BoundOperand)> = None;
 
 			for (col_idx, col) in ix_def.cols.iter().enumerate() {
 				// Find a condition that matches this column
@@ -1893,7 +1897,92 @@ impl<'a> IndexAnalyzer<'a> {
 							// on this column and stop. The range narrows the scan
 							// beyond the equality prefix.
 							if let Some(op) = normalize_range_op(&cond.op, cond.position) {
-								range_condition = Some((op, cond.value.clone()));
+								let cond_is_lower = matches!(
+									op,
+									BinaryOperator::MoreThan | BinaryOperator::MoreThanEqual
+								);
+								// A conjunct bounding the same column from the other side
+								// closes the range, so that the scan stops at the far end
+								// rather than reading every key past it. Of several literal
+								// bounds on one side the tightest is kept, so the scanned
+								// interval does not depend on the order of the conjuncts. A
+								// bound comparing with an array bounds nothing, since no key
+								// is a whole array. Nor does a bound naming a number the index
+								// keys apart from numbers equal to it
+								// ([`number_keyed_as_compared`]), the first conjunct's
+								// included: its key could end the scan before records the
+								// comparison accepts, which no filter recovers. Such a bound
+								// is judged by the residual filter alone, and a column left
+								// with no bound is scanned whole under the prefix.
+								let normalised =
+									spells_normalised_decimal_keys(ix_def.format_version);
+								let mut lower = None;
+								let mut upper = None;
+								for c in conditions.iter().filter(|c| {
+									path_matches_column(&c.path, col, self.key.as_deref())
+								}) {
+									let Some(op) = normalize_range_op(&c.op, c.position) else {
+										continue;
+									};
+									if matches!(c.value.as_literal(), Some(Value::Array(_))) {
+										continue;
+									}
+									if matches!(
+										c.value.as_literal(),
+										Some(Value::Number(n)) if !number_keyed_as_compared(n, normalised)
+									) {
+										continue;
+									}
+									let is_lower = matches!(
+										op,
+										BinaryOperator::MoreThan | BinaryOperator::MoreThanEqual
+									);
+									let side = if is_lower {
+										&mut lower
+									} else {
+										&mut upper
+									};
+									if side.as_ref().is_none_or(|kept| {
+										bound_is_tighter(is_lower, (&op, &c.value), kept)
+									}) {
+										*side = Some((op, &c.value));
+									}
+								}
+								// Bounds that admit nothing leave the scan to the tightest bound
+								// on the side of the first conjunct, rather than a reversed key
+								// range; the other side is judged by the residual filter. A
+								// column bounded on one side alone is scanned from that bound.
+								let closes = match (&lower, &upper) {
+									(Some((lower_op, lo)), Some((upper_op, up))) => {
+										match (lo.as_literal(), up.as_literal()) {
+											(Some(lo), Some(up)) => {
+												lo < up
+													|| (lo == up
+														&& matches!(
+															lower_op,
+															BinaryOperator::MoreThanEqual
+														) && matches!(
+														upper_op,
+														BinaryOperator::LessThanEqual
+													))
+											}
+											_ => false,
+										}
+									}
+									_ => false,
+								};
+								let (preferred, other) = if closes || cond_is_lower {
+									(&lower, &upper)
+								} else {
+									(&upper, &lower)
+								};
+								range_condition = preferred
+									.as_ref()
+									.or(other.as_ref())
+									.map(|(op, value)| (op.clone(), (*value).clone()));
+								if closes && let Some((op, value)) = upper {
+									upper_condition = Some((op, value.clone()));
+								}
 							} else if matches!(cond.op, BinaryOperator::NotEqual)
 								&& matches!(cond.value.as_literal(), Some(Value::None))
 							{
@@ -1928,6 +2017,7 @@ impl<'a> IndexAnalyzer<'a> {
 				let access = BTreeAccess::Compound {
 					prefix: prefix_values,
 					range: range_condition,
+					upper: upper_condition,
 				};
 
 				let index_ref = self.index_ref(idx);
@@ -2100,6 +2190,7 @@ impl<'a> IndexAnalyzer<'a> {
 						BTreeAccess::Equality(v) => BTreeAccess::Compound {
 							prefix: vec![v],
 							range: None,
+							upper: None,
 						},
 						other => other,
 					}
@@ -2618,6 +2709,7 @@ impl IndexCandidate {
 			BTreeAccess::Compound {
 				prefix,
 				range,
+				..
 			} => {
 				let len = (prefix.len() as u32).min(MAX_COMPOUND_PREFIX_BONUS_COLS);
 				score += 400 + len * 50;
@@ -2879,6 +2971,28 @@ fn next_string_after_prefix(prefix: &str) -> Option<String> {
 	None
 }
 
+/// Whether `candidate` admits fewer values than `kept`, both bounding one side
+/// of a column: a higher lower bound or a lower upper bound, and on equal
+/// values the exclusive operator. A bound that is not a literal cannot be
+/// compared, so a literal replaces it and it never replaces a literal.
+fn bound_is_tighter(
+	is_lower: bool,
+	candidate: (&BinaryOperator, &BoundOperand),
+	kept: &(BinaryOperator, &BoundOperand),
+) -> bool {
+	let (Some(new), Some(old)) = (candidate.1.as_literal(), kept.1.as_literal()) else {
+		return candidate.1.as_literal().is_some() && kept.1.as_literal().is_none();
+	};
+	match new.cmp(old) {
+		std::cmp::Ordering::Equal => {
+			matches!(candidate.0, BinaryOperator::MoreThan | BinaryOperator::LessThan)
+				&& !matches!(kept.0, BinaryOperator::MoreThan | BinaryOperator::LessThan)
+		}
+		std::cmp::Ordering::Greater => is_lower,
+		std::cmp::Ordering::Less => !is_lower,
+	}
+}
+
 /// Normalize a range operator based on the position of the path in the
 /// comparison expression.
 ///
@@ -2952,6 +3066,14 @@ mod tests {
 
 	fn idx_basic(id: u32, name: &str, cols: &[&str]) -> IndexDefinition {
 		idx_def(id, name, cols, Index::Idx)
+	}
+
+	/// An index in the current key format, which spells decimals without
+	/// trailing zeros, so a number exact across kinds is keyed where it compares.
+	fn idx_current(id: u32, name: &str, cols: &[&str]) -> IndexDefinition {
+		let mut def = idx_basic(id, name, cols);
+		def.format_version = crate::catalog::INDEX_FORMAT_VERSION;
+		def
 	}
 
 	fn idx_uniq(id: u32, name: &str, cols: &[&str]) -> IndexDefinition {
@@ -3492,6 +3614,7 @@ mod tests {
 				BTreeAccess::Compound {
 					prefix,
 					range,
+					..
 				} => {
 					assert_eq!(prefix.len(), 1);
 					assert!(range.is_none());
@@ -3660,6 +3783,7 @@ mod tests {
 				BTreeAccess::Compound {
 					prefix,
 					range,
+					..
 				} => {
 					assert_eq!(prefix.len(), 2, "two equalities → prefix length 2");
 					assert!(range.is_none());
@@ -3670,7 +3794,7 @@ mod tests {
 
 		#[test]
 		fn equality_then_range() {
-			let a = scalar_analyzer(vec![idx_basic(1, "ix_abc", &["a", "b", "c"])], None);
+			let a = scalar_analyzer(vec![idx_current(1, "ix_abc", &["a", "b", "c"])], None);
 			let cond = parse_cond("a = 1 AND b > 5");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_abc").expect("ix_abc");
@@ -3678,6 +3802,7 @@ mod tests {
 				BTreeAccess::Compound {
 					prefix,
 					range,
+					..
 				} => {
 					assert_eq!(prefix.len(), 1);
 					assert!(range.is_some(), "range on b captured");
@@ -3687,10 +3812,199 @@ mod tests {
 		}
 
 		#[test]
+		fn equality_then_closed_range_bounds_both_ends() {
+			// Both bounds on the column after the prefix are pushed into the
+			// key range, whichever order the conjuncts are written in and
+			// whichever side of the operator the field is on.
+			let a = scalar_analyzer(vec![idx_current(1, "ix_ab", &["a", "b"])], None);
+			for text in ["a = 1 AND b >= 5 AND b < 10", "b < 10 AND a = 1 AND 5 <= b"] {
+				let cond = parse_cond(text);
+				let cands = a.analyze(Some(&cond), None);
+				let c = find_for(&cands, "ix_ab").expect("ix_ab");
+				assert_eq!(
+					c.access,
+					BTreeAccess::Compound {
+						prefix: vec![Value::from(1).into()],
+						range: Some((BinaryOperator::MoreThanEqual, Value::from(5).into())),
+						upper: Some((BinaryOperator::LessThan, Value::from(10).into())),
+					},
+					"{text}"
+				);
+			}
+		}
+
+		#[test]
+		fn equality_then_closed_range_keeps_tightest_bounds() {
+			// Several bounds on one side narrow to the tightest, whatever the
+			// order of the conjuncts; on an equal value the exclusive one wins.
+			let a = scalar_analyzer(vec![idx_current(1, "ix_ab", &["a", "b"])], None);
+			for text in [
+				"a = 1 AND b > 0 AND b < 1000000 AND b < 10 AND b >= 3 AND b > 3",
+				"b > 3 AND b < 10 AND a = 1 AND b >= 3 AND b < 1000000 AND b > 0",
+				"a = 1 AND b <= 10 AND b < 10 AND 3 < b",
+			] {
+				let cond = parse_cond(text);
+				let cands = a.analyze(Some(&cond), None);
+				let c = find_for(&cands, "ix_ab").expect("ix_ab");
+				assert_eq!(
+					c.access,
+					BTreeAccess::Compound {
+						prefix: vec![Value::from(1).into()],
+						range: Some((BinaryOperator::MoreThan, Value::from(3).into())),
+						upper: Some((BinaryOperator::LessThan, Value::from(10).into())),
+					},
+					"{text}"
+				);
+			}
+		}
+
+		#[test]
+		fn equality_then_inclusive_singleton_range_bounds_both_ends() {
+			// Equal inclusive bounds admit exactly their value, so both are pushed.
+			let a = scalar_analyzer(vec![idx_current(1, "ix_ab", &["a", "b"])], None);
+			let cond = parse_cond("a = 1 AND b >= 5 AND b <= 5");
+			let cands = a.analyze(Some(&cond), None);
+			let c = find_for(&cands, "ix_ab").expect("ix_ab");
+			assert_eq!(
+				c.access,
+				BTreeAccess::Compound {
+					prefix: vec![Value::from(1).into()],
+					range: Some((BinaryOperator::MoreThanEqual, Value::from(5).into())),
+					upper: Some((BinaryOperator::LessThanEqual, Value::from(5).into())),
+				}
+			);
+		}
+
+		#[test]
+		fn equality_then_range_is_bounded_only_by_exactly_keyed_numbers() {
+			// An index that keeps decimals' trailing zeros keys `2.50dec` apart
+			// from `2.5dec`, and `5.0dec` apart from `5`, though each pair
+			// compares equal: a bound naming such a number could end the scan
+			// before records the comparison accepts, so none bounds the key
+			// range, whatever the order of the conjuncts, and the residual filter
+			// judges each.
+			let a = scalar_analyzer(vec![idx_basic(1, "ix_ab", &["a", "b"])], None);
+			for text in [
+				"a = 1 AND b >= 2.5dec AND b <= 2.5dec",
+				"a = 1 AND b <= 2.5dec AND b >= 2.5dec",
+				"a = 1 AND b >= 2 AND b <= 5",
+				"a = 1 AND b <= 5 AND b >= 2",
+				"a = 1 AND b < 5 AND b <= 4",
+				"a = 1 AND b > 2 AND b >= 3",
+			] {
+				let cond = parse_cond(text);
+				let cands = a.analyze(Some(&cond), None);
+				let c = find_for(&cands, "ix_ab").expect("ix_ab");
+				assert_eq!(
+					c.access,
+					BTreeAccess::Compound {
+						prefix: vec![Value::from(1).into()],
+						range: None,
+						upper: None,
+					},
+					"{text}"
+				);
+			}
+			// On the current format a float no decimal holds exactly is keyed
+			// apart too: the exact bound on the other side bounds the scan alone.
+			let a = scalar_analyzer(vec![idx_current(1, "ix_ab", &["a", "b"])], None);
+			for text in ["a = 1 AND b < 0.1f AND b > 0", "a = 1 AND b > 0 AND b < 0.1f"] {
+				let cond = parse_cond(text);
+				let cands = a.analyze(Some(&cond), None);
+				let c = find_for(&cands, "ix_ab").expect("ix_ab");
+				assert_eq!(
+					c.access,
+					BTreeAccess::Compound {
+						prefix: vec![Value::from(1).into()],
+						range: Some((BinaryOperator::MoreThan, Value::from(0).into())),
+						upper: None,
+					},
+					"{text}"
+				);
+			}
+			// The current format keys an exact number where it compares, and closes.
+			let cond = parse_cond("a = 1 AND b >= 2.5dec AND b <= 2.5dec");
+			let cands = a.analyze(Some(&cond), None);
+			let c = find_for(&cands, "ix_ab").expect("ix_ab");
+			assert!(
+				matches!(
+					&c.access,
+					BTreeAccess::Compound {
+						upper: Some(_),
+						..
+					}
+				),
+				"{:?}",
+				c.access
+			);
+		}
+
+		#[test]
+		fn equality_then_one_sided_range_keeps_tightest_bound() {
+			// Several bounds on one side alone narrow to the tightest too, and an
+			// empty interval keeps the tightest bound of the first conjunct's side.
+			let a = scalar_analyzer(vec![idx_current(1, "ix_ab", &["a", "b"])], None);
+			for (text, op, v) in [
+				("a = 1 AND b < 1000000 AND b < 4", BinaryOperator::LessThan, 4),
+				("a = 1 AND b > 0 AND b > 10", BinaryOperator::MoreThan, 10),
+				("a = 1 AND b > 0 AND b > 10 AND b < 5", BinaryOperator::MoreThan, 10),
+			] {
+				let cond = parse_cond(text);
+				let cands = a.analyze(Some(&cond), None);
+				let c = find_for(&cands, "ix_ab").expect("ix_ab");
+				assert_eq!(
+					c.access,
+					BTreeAccess::Compound {
+						prefix: vec![Value::from(1).into()],
+						range: Some((op, Value::from(v).into())),
+						upper: None,
+					},
+					"{text}"
+				);
+			}
+		}
+
+		#[test]
+		fn equality_then_range_ignores_an_array_bound() {
+			// No key is a whole array, so a bound comparing with one is left to
+			// the residual filter rather than pushed into the key range.
+			let a = scalar_analyzer(vec![idx_current(1, "ix_ab", &["a", "b"])], None);
+			let cond = parse_cond("a = 1 AND b > 5 AND b < [1, 2]");
+			let cands = a.analyze(Some(&cond), None);
+			let c = find_for(&cands, "ix_ab").expect("ix_ab");
+			assert_eq!(
+				c.access,
+				BTreeAccess::Compound {
+					prefix: vec![Value::from(1).into()],
+					range: Some((BinaryOperator::MoreThan, Value::from(5).into())),
+					upper: None,
+				}
+			);
+		}
+
+		#[test]
+		fn equality_then_empty_closed_range_keeps_one_bound() {
+			// Bounds that admit nothing leave the scan to the first bound and
+			// the other to the residual filter, rather than a reversed key range.
+			let a = scalar_analyzer(vec![idx_current(1, "ix_ab", &["a", "b"])], None);
+			let cond = parse_cond("a = 1 AND b > 10 AND b < 5");
+			let cands = a.analyze(Some(&cond), None);
+			let c = find_for(&cands, "ix_ab").expect("ix_ab");
+			assert_eq!(
+				c.access,
+				BTreeAccess::Compound {
+					prefix: vec![Value::from(1).into()],
+					range: Some((BinaryOperator::MoreThan, Value::from(10).into())),
+					upper: None,
+				}
+			);
+		}
+
+		#[test]
 		fn trailing_equality_after_range_is_dropped() {
 			// `a = 1 AND b > 5 AND c = 2` on (a,b,c): the c=2 must NOT be part
 			// of the index prefix (BTree limitation); becomes residual filter.
-			let a = scalar_analyzer(vec![idx_basic(1, "ix_abc", &["a", "b", "c"])], None);
+			let a = scalar_analyzer(vec![idx_current(1, "ix_abc", &["a", "b", "c"])], None);
 			let cond = parse_cond("a = 1 AND b > 5 AND c = 2");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_abc").expect("ix_abc");
@@ -3698,6 +4012,7 @@ mod tests {
 				BTreeAccess::Compound {
 					prefix,
 					range,
+					..
 				} => {
 					assert_eq!(prefix.len(), 1);
 					assert!(range.is_some());
@@ -3718,6 +4033,7 @@ mod tests {
 				BTreeAccess::Compound {
 					prefix,
 					range,
+					..
 				} => {
 					assert_eq!(prefix.len(), 2, "both columns pinned, not just the account");
 					assert!(range.is_none());
@@ -3744,7 +4060,7 @@ mod tests {
 		#[test]
 		fn a_containment_pins_a_fanning_column_before_a_trailing_range() {
 			let a = scalar_analyzer(
-				vec![idx_basic(1, "ix_aeb", &["account", "emails.*.norm", "b"])],
+				vec![idx_current(1, "ix_aeb", &["account", "emails.*.norm", "b"])],
 				None,
 			);
 			let cond = parse_cond("account = 1 AND emails.*.norm CONTAINS 'x' AND b > 5");
@@ -3754,6 +4070,7 @@ mod tests {
 				BTreeAccess::Compound {
 					prefix,
 					range,
+					..
 				} => {
 					assert_eq!(prefix.len(), 2);
 					assert!(range.is_some(), "the range on b terminates the prefix");
@@ -3775,6 +4092,7 @@ mod tests {
 				BTreeAccess::Compound {
 					prefix,
 					range,
+					..
 				} => {
 					assert_eq!(prefix.len(), 2, "both fanning columns pinned");
 					assert!(range.is_none());
@@ -4743,6 +5061,7 @@ mod tests {
 				access: BTreeAccess::Compound {
 					prefix: big_prefix,
 					range: None,
+					upper: None,
 				},
 				covers_order: false,
 				empty: false,
@@ -4814,6 +5133,7 @@ mod tests {
 				access: BTreeAccess::Compound {
 					prefix: vec![int(1).into()],
 					range: None,
+					upper: None,
 				},
 				covers_order: false,
 				empty: false,
@@ -4945,6 +5265,7 @@ mod tests {
 			let BTreeAccess::Compound {
 				prefix,
 				range,
+				..
 			} = &c.access
 			else {
 				panic!("expected Compound, got {:?}", c.access);
@@ -5157,6 +5478,7 @@ mod tests {
 			let BTreeAccess::Compound {
 				prefix,
 				range,
+				..
 			} = &c.access
 			else {
 				panic!("expected Compound, got {:?}", c.access);

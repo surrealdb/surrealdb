@@ -45,6 +45,7 @@ use anyhow::Result;
 use crate::catalog::{DatabaseId, IndexDefinition, NamespaceId};
 #[cfg(test)]
 use crate::exec::index::access_path::BTreeAccess;
+#[cfg(test)]
 use crate::expr::BinaryOperator;
 use crate::idx::entry::IndexEntryValue;
 use crate::idx::kernels::btree::IndexKeyspace;
@@ -56,7 +57,9 @@ use crate::kvs::Val;
 use crate::kvs::util::{scan, scanr};
 #[cfg(test)]
 use crate::kvs::{Direction, Transaction};
-use crate::val::{RecordId, Value};
+use crate::val::RecordId;
+#[cfg(test)]
+use crate::val::Value;
 
 /// Maximum number of KV entries fetched per batch in index scans.
 ///
@@ -529,7 +532,7 @@ impl CompoundEqualIterator {
 		range: Option<&(BinaryOperator, Value)>,
 		direction: Direction,
 	) -> Result<Self> {
-		let range = compute_compound_key_range(ns, db, ix, prefix, range)?;
+		let range = compute_compound_key_range(ns, db, ix, prefix, range, None)?;
 		Ok(Self {
 			range,
 			direction,
@@ -576,8 +579,9 @@ impl CompoundRangeForwardIterator {
 		ix: &IndexDefinition,
 		prefix: &[Value],
 		range: &(BinaryOperator, Value),
+		upper: Option<&(BinaryOperator, Value)>,
 	) -> Result<Self> {
-		let range = compute_compound_key_range(ns, db, ix, prefix, Some(range))?;
+		let range = compute_compound_key_range(ns, db, ix, prefix, Some(range), upper)?;
 		Ok(Self {
 			range,
 		})
@@ -617,15 +621,16 @@ impl CompoundRangeIterator {
 		ix: &IndexDefinition,
 		prefix: &[Value],
 		range: &(BinaryOperator, Value),
+		upper: Option<&(BinaryOperator, Value)>,
 		direction: Direction,
 	) -> Result<Self> {
 		match direction {
-			Direction::Forward => {
-				Ok(Self::Forward(CompoundRangeForwardIterator::new(ns, db, ix, prefix, range)?))
-			}
-			Direction::Backward => {
-				Ok(Self::Backward(CompoundRangeBackwardIterator::new(ns, db, ix, prefix, range)?))
-			}
+			Direction::Forward => Ok(Self::Forward(CompoundRangeForwardIterator::new(
+				ns, db, ix, prefix, range, upper,
+			)?)),
+			Direction::Backward => Ok(Self::Backward(CompoundRangeBackwardIterator::new(
+				ns, db, ix, prefix, range, upper,
+			)?)),
 		}
 	}
 
@@ -662,13 +667,14 @@ impl CompoundIterator {
 		ix: &IndexDefinition,
 		prefix: &[Value],
 		range: Option<&(BinaryOperator, Value)>,
+		upper: Option<&(BinaryOperator, Value)>,
 		direction: Direction,
 	) -> Result<Self> {
 		Ok(match range {
 			None => Self::Equal(CompoundEqualIterator::new(ns, db, ix, prefix, None, direction)?),
-			Some(range) => {
-				Self::Range(CompoundRangeIterator::new(ns, db, ix, prefix, range, direction)?)
-			}
+			Some(range) => Self::Range(CompoundRangeIterator::new(
+				ns, db, ix, prefix, range, upper, direction,
+			)?),
 		})
 	}
 
@@ -739,6 +745,7 @@ impl BTreeIterator {
 				Some(KeyAccess::Compound {
 					prefix,
 					range,
+					upper,
 				}),
 				_,
 			) => Self::Compound(CompoundIterator::new(
@@ -747,6 +754,7 @@ impl BTreeIterator {
 				ix,
 				&prefix,
 				range.as_ref(),
+				upper.as_ref(),
 				direction,
 			)?),
 			(None, _) => return Ok(None),
@@ -790,8 +798,9 @@ impl CompoundRangeBackwardIterator {
 		ix: &IndexDefinition,
 		prefix: &[Value],
 		range: &(BinaryOperator, Value),
+		upper: Option<&(BinaryOperator, Value)>,
 	) -> Result<Self> {
-		let range = compute_compound_key_range(ns, db, ix, prefix, Some(range))?;
+		let range = compute_compound_key_range(ns, db, ix, prefix, Some(range), upper)?;
 		Ok(Self {
 			range,
 		})
@@ -838,7 +847,12 @@ pub(crate) fn bitmap_scan_range(
 		Some(KeyAccess::Compound {
 			prefix,
 			range,
-		}) => compute_compound_key_range(ns, db, ix, &prefix, range.as_ref())?,
+			upper,
+		}) => IndexKeyspace::of(ns, db, ix).compound_between(
+			&prefix,
+			range.as_ref().map(|(op, v)| (op, v)),
+			upper.as_ref().map(|(op, v)| (op, v)),
+		)?,
 		None => {
 			return Err(anyhow::anyhow!("Access shape is not a B-tree scan and has no key range"));
 		}
@@ -849,16 +863,22 @@ pub(crate) fn bitmap_scan_range(
 // Private helpers
 // ---------------------------------------------------------------------------
 
-/// The entries of compound index `ix` under `prefix`, narrowed by `range`
-/// ([`IndexKeyspace::compound`]).
+/// The entries of compound index `ix` under `prefix`, narrowed by `range` and
+/// closed by `upper` on the same column ([`IndexKeyspace::compound_between`]).
+#[cfg(test)]
 fn compute_compound_key_range(
 	ns: NamespaceId,
 	db: DatabaseId,
 	ix: &IndexDefinition,
 	prefix: &[Value],
 	range: Option<&(BinaryOperator, Value)>,
+	upper: Option<&(BinaryOperator, Value)>,
 ) -> Result<TypedRange<IndexEntryValue>> {
-	IndexKeyspace::of(ns, db, ix).compound(prefix, range.map(|(op, v)| (op, v)))
+	IndexKeyspace::of(ns, db, ix).compound_between(
+		prefix,
+		range.map(|(op, v)| (op, v)),
+		upper.map(|(op, v)| (op, v)),
+	)
 }
 
 #[cfg(test)]
@@ -1329,20 +1349,30 @@ mod tests {
 		let db = compound_db().await;
 		let fx = Fixture::new(&db, "c").await;
 		let tx = fx.tx();
-		let compound = |range| BTreeAccess::Compound {
+		let compound = |range, upper| BTreeAccess::Compound {
 			prefix: vec![Value::from(1).into()],
 			range,
+			upper,
 		};
-		for (range, ids) in [
-			(None, vec!["c:1", "c:2", "c:3"]),
-			(Some((BinaryOperator::MoreThanEqual, Value::from(2).into())), vec!["c:2", "c:3"]),
+		for (range, upper, ids) in [
+			(None, None, vec!["c:1", "c:2", "c:3"]),
+			(
+				Some((BinaryOperator::MoreThanEqual, Value::from(2).into())),
+				None,
+				vec!["c:2", "c:3"],
+			),
+			(
+				Some((BinaryOperator::MoreThanEqual, Value::from(1).into())),
+				Some((BinaryOperator::LessThan, Value::from(3).into())),
+				vec!["c:1", "c:2"],
+			),
 		] {
 			let mut it = BTreeIterator::new(
 				fx.ns,
 				fx.db,
 				fx.ix("iab"),
 				false,
-				&compound(range),
+				&compound(range, upper),
 				Direction::Forward,
 			)
 			.expect("iterator")
@@ -1459,6 +1489,7 @@ mod tests {
 				fx.ix("iab"),
 				&prefix,
 				&range,
+				None,
 				Direction::Forward,
 			)
 			.expect("compound range iterator");
@@ -1473,6 +1504,7 @@ mod tests {
 				fx.ix("iab"),
 				&prefix,
 				&range,
+				None,
 				Direction::Backward,
 			)
 			.expect("compound range iterator");
@@ -1496,6 +1528,7 @@ mod tests {
 			fx.ix("iab"),
 			&prefix,
 			&range,
+			None,
 			Direction::Forward,
 		);
 		assert!(it.is_err(), "`!=` must not answer the whole prefix");
@@ -1559,13 +1592,14 @@ mod tests {
 		assert_eq!(batch.len(), 1);
 
 		let range = (BinaryOperator::MoreThanEqual, Value::from(1i64));
-		let mut it = CompoundRangeForwardIterator::new(fx.ns, fx.db, fx.ix("iab"), &prefix, &range)
-			.expect("compound range iterator");
+		let mut it =
+			CompoundRangeForwardIterator::new(fx.ns, fx.db, fx.ix("iab"), &prefix, &range, None)
+				.expect("compound range iterator");
 		let batch = it.next_batch(&tx, 0).await.expect("batch should scan");
 		assert_eq!(batch.len(), 1);
 
 		let mut it =
-			CompoundRangeBackwardIterator::new(fx.ns, fx.db, fx.ix("iab"), &prefix, &range)
+			CompoundRangeBackwardIterator::new(fx.ns, fx.db, fx.ix("iab"), &prefix, &range, None)
 				.expect("compound range iterator");
 		let batch = it.next_batch(&tx, 0).await.expect("batch should scan");
 		assert_eq!(batch.len(), 1);

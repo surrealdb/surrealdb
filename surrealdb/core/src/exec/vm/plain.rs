@@ -196,9 +196,10 @@ impl Values for BTreeAccess {
 			BTreeAccess::Compound {
 				prefix,
 				range,
+				upper,
 			} => {
 				prefix.iter().for_each(|operand| walk.operand(operand));
-				if let Some((_, operand)) = range {
+				for (_, operand) in range.iter().chain(upper) {
 					walk.operand(operand);
 				}
 			}

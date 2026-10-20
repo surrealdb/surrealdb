@@ -253,6 +253,7 @@ fn unique_equality(cx: &PhysCx<'_>, attrs: &IndexScanAttrs) -> bool {
 	} else if let BTreeAccess::Compound {
 		prefix,
 		range: None,
+		..
 	} = &attrs.access
 	{
 		prefix.as_slice()

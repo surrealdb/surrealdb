@@ -1491,6 +1491,7 @@ fn a_program_refuses_a_closure_value_as_an_internal_error() {
 	let compound = BTreeAccess::Compound {
 		prefix: vec![Value::from(1).into()],
 		range: Some((crate::expr::BinaryOperator::MoreThan, closure().into())),
+		upper: None,
 	};
 	assert!(ValueData::new(compound, "an index access").is_err());
 	let graph = |key: RecordIdKey| BitmapPlan::Graph {

@@ -622,6 +622,10 @@ pub enum BTreeAccess {
 		prefix: Vec<BoundOperand>,
 		/// Optional range condition on the next column after the prefix
 		range: Option<(BinaryOperator, BoundOperand)>,
+		/// The upper bound of a closed range on the next column. Only set
+		/// when `range` is a lower bound (`>` or `>=`), and then an upper
+		/// bound (`<` or `<=`) that is above it in the value order.
+		upper: Option<(BinaryOperator, BoundOperand)>,
 	},
 
 	/// Full-text search access
@@ -663,6 +667,7 @@ pub(crate) enum KeyAccess {
 	Compound {
 		prefix: Vec<Value>,
 		range: Option<(BinaryOperator, Value)>,
+		upper: Option<(BinaryOperator, Value)>,
 	},
 }
 
@@ -687,6 +692,7 @@ impl BTreeAccess {
 		BTreeAccess::Compound {
 			prefix: prefix.into_iter().map(BoundOperand::Literal).collect(),
 			range: range.map(|(op, value)| (op, BoundOperand::Literal(value))),
+			upper: None,
 		}
 	}
 
@@ -726,16 +732,21 @@ impl BTreeAccess {
 			BTreeAccess::Compound {
 				prefix,
 				range,
-			} => KeyAccess::Compound {
-				prefix: prefix
-					.iter()
-					.map(|operand| operand.resolve(clock))
-					.collect::<Result<Vec<_>>>()?,
-				range: match range {
-					Some((op, operand)) => Some((op.clone(), operand.resolve(clock)?)),
-					None => None,
-				},
-			},
+				upper,
+			} => {
+				let bound = |bound: &Option<(BinaryOperator, BoundOperand)>| match bound {
+					Some((op, operand)) => Ok(Some((op.clone(), operand.resolve(clock)?))),
+					None => Ok::<_, anyhow::Error>(None),
+				};
+				KeyAccess::Compound {
+					prefix: prefix
+						.iter()
+						.map(|operand| operand.resolve(clock))
+						.collect::<Result<Vec<_>>>()?,
+					range: bound(range)?,
+					upper: bound(upper)?,
+				}
+			}
 			BTreeAccess::FullText {
 				..
 			}
@@ -773,15 +784,15 @@ impl BTreeAccess {
 			BTreeAccess::Compound {
 				prefix,
 				range,
+				upper,
 			} => {
 				let prefix_str =
 					prefix.iter().map(BoundOperand::describe).collect::<Vec<_>>().join(", ");
-				if let Some((op, val)) = range {
-					let val_sql = val.describe();
-					format!("[{prefix_str}] {op:?} {val_sql}")
-				} else {
-					format!("[{prefix_str}]")
+				let mut described = format!("[{prefix_str}]");
+				for (op, val) in range.iter().chain(upper) {
+					described.push_str(&format!(" {op:?} {}", val.describe()));
 				}
+				described
 			}
 			BTreeAccess::FullText {
 				query,
@@ -865,15 +876,24 @@ pub(crate) fn access_misses_arrays(index: &IndexRef, access: &BTreeAccess) -> bo
 		BTreeAccess::Compound {
 			prefix,
 			range: Some((op, value)),
+			upper,
 		} => {
 			let value = value.witness();
-			let (start, end) = match op {
+			let (start, mut end) = match op {
 				BinaryOperator::MoreThan => (Bound::Excluded(value), Bound::Unbounded),
 				BinaryOperator::MoreThanEqual => (Bound::Included(value), Bound::Unbounded),
 				BinaryOperator::LessThan => (Bound::Unbounded, Bound::Excluded(value)),
 				BinaryOperator::LessThanEqual => (Bound::Unbounded, Bound::Included(value)),
 				_ => return false,
 			};
+			if let Some((op, value)) = upper {
+				let value = value.witness();
+				match op {
+					BinaryOperator::LessThan => end = Bound::Excluded(value),
+					BinaryOperator::LessThanEqual => end = Bound::Included(value),
+					_ => return false,
+				}
+			}
 			(prefix.len(), start, end)
 		}
 		_ => return false,
@@ -903,7 +923,8 @@ pub(crate) fn range_matches_comparison(index: &IndexDefinition, access: &BTreeAc
 		BTreeAccess::Compound {
 			prefix,
 			range,
-		} => !prefix.iter().any(inexact) && range.as_ref().is_none_or(|(_, v)| !inexact(v)),
+			upper,
+		} => !prefix.iter().any(inexact) && range.iter().chain(upper).all(|(_, v)| !inexact(v)),
 		_ => true,
 	}
 }
@@ -2449,6 +2470,7 @@ mod range_comparison_tests {
 							BoundOperand::Literal(value.clone()),
 						],
 						range: None,
+						upper: None,
 					}
 				),
 				exact,

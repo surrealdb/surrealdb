@@ -689,6 +689,7 @@ impl IndexConditionMatcher<'_> {
 			BTreeAccess::Compound {
 				prefix,
 				range,
+				upper,
 			} => {
 				// Check equality conditions against prefix values.
 				if is_equality {
@@ -712,6 +713,14 @@ impl IndexConditionMatcher<'_> {
 					}
 				}
 				// Check range condition on the column after the prefix.
+				if let Some(col) = self.cols.get(prefix.len())
+					&& idiom_matches_column_in(idiom, col, self.key)
+					&& upper
+						.as_ref()
+						.is_some_and(|(op, bound)| effective_op == *op && value == *bound)
+				{
+					return true;
+				}
 				if let Some((range_op, range_val)) = range
 					&& let Some(col) = self.cols.get(prefix.len())
 					&& idiom_matches_column_in(idiom, col, self.key)

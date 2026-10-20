@@ -316,6 +316,42 @@ impl<'a> IndexKeyspace<'a> {
 		prefix: &[Value],
 		range: Option<(&BinaryOperator, &Value)>,
 	) -> Result<TypedRange<IndexEntryValue>> {
+		self.compound_between(prefix, range, None)
+	}
+
+	/// [`Self::compound`] with a second bound on the same next value: `lower`
+	/// is a `>` or `>=` and `upper` a `<` or `<=`, so that the entries read
+	/// are those between them under `prefix`. With no `upper` the range is
+	/// `lower`'s alone, and with no `lower`, `upper`'s alone.
+	pub fn compound_between(
+		&self,
+		prefix: &[Value],
+		lower: Option<(&BinaryOperator, &Value)>,
+		upper: Option<(&BinaryOperator, &Value)>,
+	) -> Result<TypedRange<IndexEntryValue>> {
+		let range = match (lower, upper) {
+			(Some(lower), Some(upper)) => {
+				let key = |value: &Value| {
+					let mut fd = Vec::with_capacity(prefix.len() + 1);
+					fd.extend_from_slice(prefix);
+					fd.push(value.clone());
+					self.open(&fd)
+				};
+				let start = match lower.0 {
+					BinaryOperator::MoreThan => key(lower.1)?.next_neighbour_expect(),
+					BinaryOperator::MoreThanEqual => key(lower.1)?,
+					op => anyhow::bail!("`{op:?}` is no lower bound a compound index range has"),
+				};
+				let end = match upper.0 {
+					BinaryOperator::LessThan => key(upper.1)?,
+					BinaryOperator::LessThanEqual => key(upper.1)?.next_neighbour_expect(),
+					op => anyhow::bail!("`{op:?}` is no upper bound a compound index range has"),
+				};
+				return Ok(self.typed((start..end).into()));
+			}
+			(Some(only), None) | (None, Some(only)) => Some(only),
+			(None, None) => None,
+		};
 		let without = || self.open(prefix);
 		let Some((op, value)) = range else {
 			return Ok(self.typed(without()?.prefix_expect()));
@@ -656,6 +692,51 @@ mod tests {
 				}
 			}
 		}
+	}
+
+	#[test]
+	fn a_closed_compound_range_admits_the_entries_between_its_bounds() {
+		let tb = TableName::from("t");
+		let ks = space(&tb);
+		let id = RecordIdKey::from("r".to_owned());
+		let (two, four) = (Value::from(2), Value::from(4));
+		type Case<'a> = (&'a BinaryOperator, &'a BinaryOperator, fn(i64) -> bool);
+		let cases: [Case<'_>; 4] = [
+			(&BinaryOperator::MoreThan, &BinaryOperator::LessThan, |b| b > 2 && b < 4),
+			(&BinaryOperator::MoreThanEqual, &BinaryOperator::LessThan, |b| (2..4).contains(&b)),
+			(&BinaryOperator::MoreThan, &BinaryOperator::LessThanEqual, |b| b > 2 && b <= 4),
+			(&BinaryOperator::MoreThanEqual, &BinaryOperator::LessThanEqual, |b| {
+				(2..=4).contains(&b)
+			}),
+		];
+		for unique in [false, true] {
+			let key = |a: i64, b: i64| {
+				ks.stored_key(unique, &[Value::from(a), Value::from(b)], &id).unwrap().key
+			};
+			for (lower, upper, admits) in cases {
+				let r = ks
+					.compound_between(&[Value::from(1)], Some((lower, &two)), Some((upper, &four)))
+					.unwrap();
+				for a in 0..3 {
+					for b in 0..7 {
+						assert_eq!(
+							contains(&r, &key(a, b)),
+							a == 1 && admits(b),
+							"unique={unique} {lower:?} {upper:?} on ({a}, {b})"
+						);
+					}
+				}
+			}
+		}
+		assert!(
+			ks.compound_between(
+				&[Value::from(1)],
+				Some((&BinaryOperator::LessThan, &two)),
+				Some((&BinaryOperator::LessThan, &four))
+			)
+			.is_err(),
+			"two upper bounds are no closed range"
+		);
 	}
 
 	#[test]

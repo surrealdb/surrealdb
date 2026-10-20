@@ -55,8 +55,7 @@ value = "[{ id: t:{ id: 2, r: o:2 } }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id] {rows: 1}
-    Filter [ctx: Db] [predicate: b > 2020 AND id.id().r = (o:2) AND b <= 2024] {rows: 1}
-        IndexScan [ctx: Db] [table: t, index: idx, access: [o:2] MoreThan 2020, direction: Forward] {rows: 1}
+    IndexScan [ctx: Db] [table: t, index: idx, access: [o:2] MoreThan 2020 LessThanEqual 2024, direction: Forward] {rows: 1}
 
 Total rows: 1''''
 

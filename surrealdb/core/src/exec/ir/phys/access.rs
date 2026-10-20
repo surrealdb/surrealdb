@@ -1218,6 +1218,7 @@ fn pinned_columns<'a>(
 		BTreeAccess::Compound {
 			prefix,
 			range,
+			..
 		} => prefix.len() + usize::from(range.is_some()),
 		BTreeAccess::Range {
 			..
@@ -2791,6 +2792,7 @@ mod tests {
 		let compound = |prefix: i64, bound: Value| BTreeAccess::Compound {
 			prefix: vec![BoundOperand::Literal(Value::from(prefix))],
 			range: Some((BinaryOperator::MoreThan, BoundOperand::Literal(bound))),
+			upper: None,
 		};
 		let plain = IndexRef::new(&defs, 0);
 		assert!(bounds_admit_exactly(&plain, &compound(1, Value::from(2i64))));

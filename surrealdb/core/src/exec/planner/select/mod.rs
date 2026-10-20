@@ -863,6 +863,7 @@ pub(crate) fn detect_order_for_composite_union(
 			access: BTreeAccess::Compound {
 				prefix,
 				range: None,
+				..
 			},
 			..
 		} => (index_ref.clone(), prefix.len()),

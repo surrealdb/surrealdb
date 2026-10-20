@@ -184,28 +184,39 @@ pub(crate) fn widen_access(index: &IndexRef, access: &mut BTreeAccess) -> bool {
 		BTreeAccess::Compound {
 			prefix,
 			range,
+			upper,
 		} if index.orders_coarsely(prefix.len()) => {
-			let Some((op, operand)) = range.as_ref() else {
-				return true;
-			};
-			let datetime = match operand {
-				BoundOperand::Literal(Value::Datetime(datetime)) => datetime,
-				BoundOperand::StatementClock(_) => return false,
-				BoundOperand::Literal(_) => return true,
-			};
-			let (side, op) = match op {
-				BinaryOperator::MoreThan | BinaryOperator::MoreThanEqual => {
-					(Side::Lower, BinaryOperator::MoreThanEqual)
+			// Both bounds are widened before either is written, so a bound with
+			// no widening leaves `access` unchanged.
+			let mut widened_bounds = [None, None];
+			for (slot, bound) in widened_bounds.iter_mut().zip([&*range, &*upper]) {
+				let Some((op, operand)) = bound.as_ref() else {
+					continue;
+				};
+				let datetime = match operand {
+					BoundOperand::Literal(Value::Datetime(datetime)) => datetime,
+					BoundOperand::StatementClock(_) => return false,
+					BoundOperand::Literal(_) => continue,
+				};
+				let (side, op) = match op {
+					BinaryOperator::MoreThan | BinaryOperator::MoreThanEqual => {
+						(Side::Lower, BinaryOperator::MoreThanEqual)
+					}
+					BinaryOperator::LessThan | BinaryOperator::LessThanEqual => {
+						(Side::Upper, BinaryOperator::LessThanEqual)
+					}
+					_ => continue,
+				};
+				let Some(datetime) = widened(datetime, side) else {
+					return false;
+				};
+				*slot = Some((op, BoundOperand::Literal(Value::Datetime(datetime))));
+			}
+			for (bound, widened) in [range, upper].into_iter().zip(widened_bounds) {
+				if let Some(widened) = widened {
+					*bound = Some(widened);
 				}
-				BinaryOperator::LessThan | BinaryOperator::LessThanEqual => {
-					(Side::Upper, BinaryOperator::LessThanEqual)
-				}
-				_ => return true,
-			};
-			let Some(datetime) = widened(datetime, side) else {
-				return false;
-			};
-			*range = Some((op, BoundOperand::Literal(Value::Datetime(datetime))));
+			}
 		}
 		_ => {}
 	}
@@ -228,8 +239,12 @@ pub(crate) fn range_is_widened(index: &IndexRef, access: &BTreeAccess) -> bool {
 		} => index.orders_coarsely(0) && range.operands().any(is_datetime),
 		BTreeAccess::Compound {
 			prefix,
-			range: Some((_, operand)),
-		} => index.orders_coarsely(prefix.len()) && is_datetime(operand),
+			range,
+			upper,
+		} => {
+			index.orders_coarsely(prefix.len())
+				&& range.iter().chain(upper).any(|(_, operand)| is_datetime(operand))
+		}
 		_ => false,
 	}
 }
@@ -491,6 +506,7 @@ mod tests {
 		let compound = |op, datetime| BTreeAccess::Compound {
 			prefix: vec![Value::from("london").into()],
 			range: Some((op, value(datetime))),
+			upper: None,
 		};
 		let mut lower = compound(BinaryOperator::MoreThan, at(10, 0, 5, 500_000_000));
 		assert!(widen_access(&ix, &mut lower));
@@ -521,6 +537,7 @@ mod tests {
 		let before = BTreeAccess::Compound {
 			prefix: vec![Value::from("london").into()],
 			range: Some((BinaryOperator::MoreThan, value(far))),
+			upper: None,
 		};
 		let mut access = before.clone();
 		assert!(!widen_access(&compound, &mut access));
@@ -538,6 +555,7 @@ mod tests {
 		let both = BTreeAccess::Compound {
 			prefix: vec![Value::from("london").into(), value(at(10, 0, 5, 500_000_000))],
 			range: None,
+			upper: None,
 		};
 		let mut prefix = both.clone();
 		assert!(widen_access(&by_city, &mut prefix));
@@ -576,6 +594,7 @@ mod tests {
 			&BTreeAccess::Compound {
 				prefix: vec![Value::from("london").into()],
 				range: Some((BinaryOperator::LessThanEqual, value(at(10, 0, 5, 0)))),
+				upper: None,
 			}
 		));
 		assert!(!range_is_widened(
@@ -583,6 +602,7 @@ mod tests {
 			&BTreeAccess::Compound {
 				prefix: vec![Value::from("london").into()],
 				range: None,
+				upper: None,
 			}
 		));
 		// The range is on `city`, which orders exactly.

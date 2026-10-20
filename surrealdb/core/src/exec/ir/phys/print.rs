@@ -2476,7 +2476,11 @@ text_enum!(BTreeAccess {
 	tuple [Equality(value: BoundOperand)]
 	named [
 		Range { range: OperandRange },
-		Compound { prefix: Vec<BoundOperand>, range: Option<(BinaryOperator, BoundOperand)> },
+		Compound {
+			prefix: Vec<BoundOperand>,
+			range: Option<(BinaryOperator, BoundOperand)>,
+			upper: Option<(BinaryOperator, BoundOperand)>
+		},
 		FullText { query: String, operator: MatchesOperator },
 		Knn { vector: Arc<[Number]>, k: u32, ef: u32 }
 	]
@@ -3419,6 +3423,7 @@ mod tests {
 				access: BTreeAccess::Compound {
 					prefix: vec![Value::from(1i64).into(), Value::from("x").into()],
 					range: Some((BinaryOperator::MoreThanEqual, Value::from(3i64).into())),
+					upper: None,
 				},
 				direction: Direction::Forward,
 				ordered_by: Some(vec![field("a"), FieldPath(vec![FieldPathPart::Index(2)])]),
@@ -4568,6 +4573,7 @@ mod tests {
 			BTreeAccess::Compound {
 				prefix: vec![Value::from("x").into(), clock(None)],
 				range: Some((BinaryOperator::MoreThan, clock(Some((ClockSign::Minus, 90_061))))),
+				upper: None,
 			},
 		];
 		for access in accesses {
@@ -4604,6 +4610,7 @@ mod tests {
 			attrs.access = BTreeAccess::Compound {
 				prefix: Vec::new(),
 				range: Some((BinaryOperator::Add, Value::from(1i64).into())),
+				upper: None,
 			};
 		}
 		let text = print_op(&op);

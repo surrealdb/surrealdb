@@ -46,7 +46,12 @@ pub(super) fn entry_range(
 		Some(KeyAccess::Compound {
 			prefix,
 			range,
-		}) => ks.compound(prefix, range.as_ref().map(|(op, value)| (op, value))),
+			upper,
+		}) => ks.compound_between(
+			prefix,
+			range.as_ref().map(|(op, value)| (op, value)),
+			upper.as_ref().map(|(op, value)| (op, value)),
+		),
 		None => {
 			return Err(ControlFlow::Err(anyhow::anyhow!("an index source with no B-tree access")));
 		}
