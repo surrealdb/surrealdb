@@ -171,6 +171,10 @@ type SessionResult = std::result::Result<Arc<SessionState>, SessionError>;
 struct RouterState {
 	/// Per-session state (headers, auth for REST endpoints, replay commands)
 	sessions: HashMap<Uuid, SessionResult>,
+	/// Sessions whose setup failed and whose cleanup detach failed too, with
+	/// the headers and authentication to detach them with when they are
+	/// dropped.
+	undetached: HashMap<Uuid, (HeaderMap, Option<Auth>)>,
 	/// The shared HTTP client used to send requests.
 	/// On native platforms, this client is configured with a resolved address
 	/// via `reqwest::ClientBuilder::resolve()` to ensure all requests go to
@@ -185,16 +189,27 @@ impl RouterState {
 	fn new(client: reqwest::Client, base_url: Url) -> Self {
 		Self {
 			sessions: HashMap::new(),
+			undetached: HashMap::new(),
 			client,
 			base_url,
 		}
 	}
 
 	/// Replay all stored commands for a session (attach + any Use/Signin/etc.)
-	async fn replay_session(&self, session_id: Uuid, session_state: &SessionState) -> Result<()> {
-		// Clone headers and auth upfront to avoid holding the lock across network I/O
+	///
+	/// Each command is sent with the authentication the server session holds
+	/// at that point in the replay, the way the original session sent it: none
+	/// before the first sign-in, then whatever each successful sign-in, sign-up,
+	/// authenticate or invalidate left. Returns that authentication as it stands
+	/// after the commands that went through, alongside the first failure.
+	async fn replay_session(
+		&self,
+		session_id: Uuid,
+		session_state: &SessionState,
+	) -> (Option<Auth>, Result<()>) {
+		// Clone headers upfront to avoid holding the lock across network I/O
 		let headers = session_state.headers.read().await.clone();
-		let auth = session_state.auth.read().await.clone();
+		let mut auth = None;
 
 		for (_, command) in &session_state.replay {
 			let request = command
@@ -202,9 +217,12 @@ impl RouterState {
 				.into_router_request(None, Some(session_id))
 				.expect("replay command should convert to router request");
 
-			send_request(request, &self.base_url, &self.client, &headers, &auth).await?;
+			match send_request(request, &self.base_url, &self.client, &headers, &auth).await {
+				Ok(results) => auth = auth_after(command, &results, auth),
+				Err(error) => return (auth, Err(error)),
+			}
 		}
-		Ok(())
+		(auth, Ok(()))
 	}
 
 	/// Handle a new session being created.
@@ -216,7 +234,9 @@ impl RouterState {
 		let session_state = Arc::new(session_state);
 		self.sessions.insert(session_id, Ok(Arc::clone(&session_state)));
 
-		if let Err(error) = self.replay_session(session_id, &session_state).await {
+		if let (auth, Err(error)) = self.replay_session(session_id, &session_state).await {
+			// A failed response does not say whether the attach landed.
+			self.release_failed_setup(session_id, &session_state.headers, auth).await;
 			self.sessions.insert(session_id, Err(SessionError::Remote(error.to_string())));
 		}
 	}
@@ -235,8 +255,19 @@ impl RouterState {
 				let new_state = Arc::new(new_state);
 				self.sessions.insert(new, Ok(Arc::clone(&new_state)));
 
-				if let Err(error) = self.replay_session(new, &new_state).await {
-					self.sessions.insert(new, Err(SessionError::Remote(error.to_string())));
+				match self.replay_session(new, &new_state).await {
+					// The copied authentication belongs to the old session. A
+					// replayed sign-in may have issued the new one a different
+					// credential, which is the one its requests must carry.
+					(auth, Ok(())) => *new_state.auth.write().await = auth,
+					// The server may have accepted the attach before a later
+					// command failed. Nothing can use the session now, so it is
+					// detached here, as the principal the replay left it with,
+					// rather than when it is dropped.
+					(auth, Err(error)) => {
+						self.release_failed_setup(new, &new_state.headers, auth).await;
+						self.sessions.insert(new, Err(SessionError::Remote(error.to_string())));
+					}
 				}
 			}
 			Some(Err(error)) => {
@@ -248,16 +279,56 @@ impl RouterState {
 		}
 	}
 
+	/// Detach a session on the server, reporting whether the server answered.
+	///
+	/// The server only lets a session's owner detach it, so `auth` must be the
+	/// authentication the server session holds. The request is awaited so that
+	/// a detach reaches the server before any lifecycle event queued after it,
+	/// such as an attach that needs the slot it frees.
+	async fn detach(&self, session_id: Uuid, headers: &HeaderMap, auth: &Option<Auth>) -> bool {
+		let request = Command::Detach {
+			session_id,
+		}
+		.into_router_request(None, Some(session_id))
+		.expect("detach command should convert to router request");
+		send_request(request, &self.base_url, &self.client, headers, auth).await.is_ok()
+	}
+
+	/// Detach a session whose setup failed.
+	///
+	/// A failed response does not say whether the server accepted the attach,
+	/// so the session is detached now. If that fails as well, the detach is
+	/// kept and sent again when the session is dropped.
+	async fn release_failed_setup(
+		&self,
+		session_id: Uuid,
+		headers: &RwLock<HeaderMap>,
+		auth: Option<Auth>,
+	) {
+		let headers = headers.read().await.clone();
+		if !self.detach(session_id, &headers, &auth).await {
+			self.undetached.insert(session_id, (headers, auth));
+		}
+	}
+
 	/// Handle a session being dropped.
 	async fn handle_session_drop(&self, session_id: Uuid) {
-		if self.sessions.get(&session_id).is_some() {
-			let session_state = SessionState::default();
-			session_state.replay.push(Command::Detach {
-				session_id,
-			});
-			self.replay_session(session_id, &session_state).await.ok();
-		}
+		let found = self.sessions.get(&session_id);
 		self.sessions.remove(&session_id);
+		let undetached = self.undetached.get(&session_id);
+		self.undetached.remove(&session_id);
+		match found {
+			Some(Ok(state)) => {
+				let headers = state.headers.read().await.clone();
+				let auth = state.auth.read().await.clone();
+				self.detach(session_id, &headers, &auth).await;
+			}
+			_ => {
+				if let Some((headers, auth)) = undetached {
+					self.detach(session_id, &headers, &auth).await;
+				}
+			}
+		}
 	}
 
 	/// Detaches every session still attached, as the router exits.
@@ -612,6 +683,73 @@ pub(crate) async fn health(request: RequestBuilder) -> Result<()> {
 		.error_for_status()
 		.map_err(crate::std_error_to_types_error)?;
 	Ok(())
+}
+
+/// Record a command that succeeded on `session_state` in its replay log.
+///
+/// A refresh, and an authenticate the router refreshed on the way, leave the
+/// session holding an access token that no logged command produces. Both are
+/// logged as an authenticate with the token the session holds afterwards, so
+/// a replay ends with the credential the session has now.
+async fn record_replay(session_state: &SessionState, command: Command) {
+	if matches!(command, Command::Refresh { .. } | Command::Authenticate { .. })
+		&& let Some(Auth::Bearer {
+			token,
+		}) = &*session_state.auth.read().await
+	{
+		session_state.replay.push(Command::Authenticate {
+			token: CoreToken::Access(token.as_insecure_token().to_owned()),
+		});
+	} else if command.replayable() {
+		session_state.replay.push(command);
+	}
+}
+
+/// The authentication a server session holds after `command` succeeded with
+/// `results`, given the authentication it held before.
+///
+/// This mirrors what [`router`] records for the same commands, so a replay
+/// reaches each command holding what the original session held there.
+fn auth_after(command: &Command, results: &[QueryResult], auth: Option<Auth>) -> Option<Auth> {
+	let Some(Ok(value)) = results.first().map(|result| result.clone().result) else {
+		return auth;
+	};
+	match command {
+		Command::Signin {
+			..
+		} => match Credentials::from_value(value.clone()) {
+			Ok(credentials) => Some(Auth::Basic {
+				user: credentials.user,
+				pass: credentials.pass,
+				ns: credentials.ns,
+				db: credentials.db,
+			}),
+			Err(_) => match Token::from_value(value) {
+				Ok(token) => Some(Auth::Bearer {
+					token: token.access,
+				}),
+				Err(_) => auth,
+			},
+		},
+		Command::Signup {
+			..
+		} => match Token::from_value(value) {
+			Ok(token) => Some(Auth::Bearer {
+				token: token.access,
+			}),
+			Err(_) => auth,
+		},
+		Command::Authenticate {
+			token,
+		} => match Token::from_value(token.clone().into_value()) {
+			Ok(token) => Some(Auth::Bearer {
+				token: token.access,
+			}),
+			Err(_) => auth,
+		},
+		Command::Invalidate => None,
+		_ => auth,
+	}
 }
 
 /// Sends an RPC request to the SurrealDB server and returns the response.
@@ -1170,5 +1308,272 @@ async fn router(
 			.await?;
 			Ok(res)
 		}
+	}
+}
+
+#[cfg(all(test, not(target_family = "wasm")))]
+#[allow(clippy::unwrap_used)]
+mod tests {
+	use std::io::{Read, Write};
+	use std::net::TcpListener;
+	use std::thread::JoinHandle;
+
+	use super::*;
+
+	/// A request as the stub server received it: the lowercased head, and the
+	/// body.
+	struct Received {
+		head: String,
+		body: Vec<u8>,
+	}
+
+	/// An answer the stub server gives: a status, and a body.
+	type Answer = (u16, Vec<u8>);
+
+	/// An empty answer with `status`, which the client reads as a failure.
+	fn empty(status: u16) -> Answer {
+		(status, Vec::new())
+	}
+
+	/// A successful RPC answer.
+	fn ok() -> Answer {
+		let response = DbResponse::success(None, None, DbResult::Other(Value::None));
+		(200, surrealdb_types::encode(&response.into_value()).unwrap())
+	}
+
+	/// Answers one request per entry in `answers`, each on its own
+	/// connection, and returns what each request carried.
+	fn stub_server(answers: Vec<Answer>) -> (Url, JoinHandle<Vec<Received>>) {
+		let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+		let base_url = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+		let server = std::thread::spawn(move || {
+			let mut received = Vec::new();
+			for (status, answer) in answers {
+				let (mut stream, _) = listener.accept().unwrap();
+				let mut data = Vec::new();
+				let mut buf = [0u8; 1024];
+				let head_end = loop {
+					if let Some(i) = data.windows(4).position(|w| w == b"\r\n\r\n") {
+						break i + 4;
+					}
+					let n = stream.read(&mut buf).unwrap();
+					data.extend_from_slice(&buf[..n]);
+				};
+				let head = String::from_utf8_lossy(&data[..head_end]).to_lowercase();
+				let length = head
+					.lines()
+					.find_map(|line| line.strip_prefix("content-length: "))
+					.map_or(0, |n| n.trim().parse::<usize>().unwrap());
+				while data.len() < head_end + length {
+					let n = stream.read(&mut buf).unwrap();
+					data.extend_from_slice(&buf[..n]);
+				}
+				let body = data[head_end..head_end + length].to_vec();
+				let response = format!(
+					"HTTP/1.1 {status} X\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+					answer.len()
+				);
+				stream.write_all(response.as_bytes()).unwrap();
+				stream.write_all(&answer).unwrap();
+				received.push(Received {
+					head,
+					body,
+				});
+			}
+			received
+		});
+		(base_url, server)
+	}
+
+	fn authenticated_session() -> SessionState {
+		let session = SessionState::default();
+		*session.auth.try_write().unwrap() = Some(Auth::Basic {
+			user: "alice".to_owned(),
+			pass: "secret".to_owned(),
+			ns: None,
+			db: None,
+		});
+		session
+	}
+
+	fn is_detach(request: &Received) -> bool {
+		request.body.windows(6).any(|w| w == b"detach")
+	}
+
+	/// The server only lets a session's owner detach it, so the detach sent
+	/// when a session is dropped must carry that session's authentication.
+	#[tokio::test]
+	async fn dropping_a_session_sends_its_authentication_with_the_detach() {
+		let (base_url, server) = stub_server(vec![empty(200)]);
+		let state = RouterState::new(reqwest::Client::new(), base_url);
+		let session_id = Uuid::new_v4();
+		state.sessions.insert(session_id, Ok(Arc::new(authenticated_session())));
+
+		state.handle_session_drop(session_id).await;
+
+		// The detach is awaited, so it has reached the server by now.
+		let received = server.join().unwrap();
+		assert!(is_detach(&received[0]), "the drop sent no detach");
+		assert!(received[0].head.contains("authorization: basic "), "the detach was anonymous");
+		assert!(state.sessions.get(&session_id).is_none(), "the session was not released");
+	}
+
+	/// A clone whose replay fails may still hold a server session it attached
+	/// before the failure, so the failure detaches it. A failed response tells
+	/// the client nothing about whether the attach landed, so the detach is
+	/// sent whichever request failed.
+	#[tokio::test]
+	async fn a_clone_whose_replay_fails_is_detached() {
+		// The replay fails on its first request, then the detach.
+		let (base_url, server) = stub_server(vec![empty(500), empty(200)]);
+		let state = RouterState::new(reqwest::Client::new(), base_url);
+		let old = Uuid::new_v4();
+		let new = Uuid::new_v4();
+		let session = SessionState::default();
+		session.replay.push(Command::Attach {
+			session_id: old,
+		});
+		state.sessions.insert(old, Ok(Arc::new(session)));
+
+		state.handle_session_clone(old, new).await;
+
+		let received = server.join().unwrap();
+		assert!(matches!(state.sessions.get(&new), Some(Err(_))), "the clone should have failed");
+		assert!(is_detach(&received[1]), "the failed clone was not detached");
+		// No sign-in was replayed, so a session the attach created is anonymous.
+		assert!(!received[1].head.contains("authorization:"), "the detach claimed a principal");
+	}
+
+	/// A replay sends each command as the principal the original session held
+	/// at that point, and a failed replay detaches as the principal it reached,
+	/// not as the one the copied state ends with.
+	#[tokio::test]
+	async fn a_failed_replay_detaches_as_the_principal_it_reached() {
+		// The attach and the first authenticate succeed, the second fails.
+		let (base_url, server) = stub_server(vec![ok(), ok(), empty(500), empty(200)]);
+		let state = RouterState::new(reqwest::Client::new(), base_url);
+		let old = Uuid::new_v4();
+		let new = Uuid::new_v4();
+		let session = SessionState::default();
+		session.replay.push(Command::Attach {
+			session_id: old,
+		});
+		session.replay.push(Command::Authenticate {
+			token: CoreToken::Access("first".to_owned()),
+		});
+		session.replay.push(Command::Authenticate {
+			token: CoreToken::Access("second".to_owned()),
+		});
+		*session.auth.try_write().unwrap() = Some(Auth::Bearer {
+			token: Token::from_value(CoreToken::Access("second".to_owned()).into_value())
+				.unwrap()
+				.access,
+		});
+		state.sessions.insert(old, Ok(Arc::new(session)));
+
+		state.handle_session_clone(old, new).await;
+
+		let received = server.join().unwrap();
+		let authorization = |i: usize| {
+			received[i]
+				.head
+				.lines()
+				.find(|line| line.starts_with("authorization:"))
+				.map(str::to_owned)
+		};
+		assert_eq!(authorization(0), None, "the attach is sent before any sign-in");
+		assert_eq!(authorization(1), None, "the first authenticate is sent before any sign-in");
+		assert_eq!(authorization(2).as_deref(), Some("authorization: bearer first"));
+		assert!(is_detach(&received[3]), "the failed clone was not detached");
+		assert_eq!(authorization(3).as_deref(), Some("authorization: bearer first"));
+	}
+
+	/// A clone carries the credential its own replay produced, not the one
+	/// copied from the session it was cloned from.
+	#[tokio::test]
+	async fn a_replayed_clone_keeps_the_credential_its_replay_produced() {
+		let (base_url, server) = stub_server(vec![ok(), ok()]);
+		let state = RouterState::new(reqwest::Client::new(), base_url);
+		let old = Uuid::new_v4();
+		let new = Uuid::new_v4();
+		let session = SessionState::default();
+		session.replay.push(Command::Attach {
+			session_id: old,
+		});
+		session.replay.push(Command::Authenticate {
+			token: CoreToken::Access("replayed".to_owned()),
+		});
+		*session.auth.try_write().unwrap() = Some(Auth::Bearer {
+			token: Token::from_value(CoreToken::Access("copied".to_owned()).into_value())
+				.unwrap()
+				.access,
+		});
+		state.sessions.insert(old, Ok(Arc::new(session)));
+
+		state.handle_session_clone(old, new).await;
+
+		server.join().unwrap();
+		let Some(Ok(clone)) = state.sessions.get(&new) else {
+			panic!("the clone should have succeeded");
+		};
+		let auth = clone.auth.read().await;
+		let Some(Auth::Bearer {
+			token,
+		}) = &*auth
+		else {
+			panic!("the clone should carry a bearer token");
+		};
+		assert_eq!(token.as_insecure_token(), "replayed");
+	}
+
+	/// A session whose setup failed and whose cleanup detach failed too is
+	/// detached again when it is dropped.
+	#[tokio::test]
+	async fn a_failed_cleanup_detach_is_sent_again_on_drop() {
+		// The attach fails, its cleanup detach fails, the drop's detach.
+		let (base_url, server) = stub_server(vec![empty(500), empty(500), ok()]);
+		let state = RouterState::new(reqwest::Client::new(), base_url);
+		let session_id = Uuid::new_v4();
+
+		state.handle_session_initial(session_id).await;
+		assert!(matches!(state.sessions.get(&session_id), Some(Err(_))), "setup should fail");
+		state.handle_session_drop(session_id).await;
+
+		let received = server.join().unwrap();
+		assert!(is_detach(&received[1]), "the failed setup was not detached");
+		assert!(is_detach(&received[2]), "the failed cleanup was not retried on drop");
+		assert!(state.undetached.get(&session_id).is_none(), "the retry was not forgotten");
+	}
+
+	/// A refresh leaves the session holding a token no logged command
+	/// produced, so it is logged as an authenticate with that token, and a
+	/// clone's replay ends with the refreshed credential.
+	#[tokio::test]
+	async fn a_refresh_is_replayed_as_the_token_it_left() {
+		let session = SessionState::default();
+		*session.auth.write().await = Some(Auth::Bearer {
+			token: Token::from_value(CoreToken::Access("refreshed".to_owned()).into_value())
+				.unwrap()
+				.access,
+		});
+
+		record_replay(
+			&session,
+			Command::Refresh {
+				token: CoreToken::Access("original".to_owned()),
+			},
+		)
+		.await;
+
+		let logged: Vec<_> = session.replay.iter().map(|(_, command)| command.clone()).collect();
+		assert!(
+			matches!(
+				logged.as_slice(),
+				[Command::Authenticate {
+					token: CoreToken::Access(token),
+				}] if token == "refreshed"
+			),
+			"logged {logged:?}"
+		);
 	}
 }

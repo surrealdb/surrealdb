@@ -9,7 +9,6 @@ use url::Url;
 
 use super::{Client, RouterState};
 use crate::conn::{Route, Router};
-use crate::engine::remote::RemoteCommand;
 use crate::engine::{SessionError, session_error_to_error};
 use crate::method::BoxFuture;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
@@ -189,15 +188,15 @@ pub(crate) async fn run_router(
 					)
 					.await;
 
-					// On success, add replayable commands to the replay list.
+					// On success, record the command in the replay list.
 					// boxcar::Vec is lock-free, so this is safe to do concurrently.
 					// NOTE: unlike the WS engine we do not coalesce idempotent Use
 					// entries here. HTTP requests are processed in spawned tasks, so
 					// a tail-check + push isn't atomic — a concurrent task could
 					// drop a still-pending Use whose result hasn't been recorded
 					// yet. Append-only push is safe under that concurrency.
-					if result.is_ok() && command.replayable() {
-						session_state.replay.push(command);
+					if result.is_ok() {
+						super::record_replay(&session_state, command).await;
 					}
 
 					// Convert api::err::Error to wire error type

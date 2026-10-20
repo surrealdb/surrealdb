@@ -9,7 +9,6 @@ use wasm_bindgen_futures::spawn_local;
 
 use super::{Client, RouterState};
 use crate::conn::{Route, Router};
-use crate::engine::remote::RemoteCommand;
 use crate::engine::{SessionError, session_error_to_error};
 use crate::method::BoxFuture;
 use crate::opt::{Endpoint, WaitFor};
@@ -129,11 +128,11 @@ pub(crate) async fn run_router(
 					)
 					.await;
 
-					// On success, add replayable commands to the replay list.
+					// On success, record the command in the replay list.
 					// boxcar::Vec is lock-free, so this is safe to do concurrently.
 					// NOTE: see native.rs for why HTTP doesn't coalesce Use entries.
-					if result.is_ok() && command.replayable() {
-						session_state.replay.push(command);
+					if result.is_ok() {
+						super::record_replay(&session_state, command).await;
 					}
 
 					match result {
