@@ -1793,6 +1793,43 @@ mod surrealism_integration {
 		check_fetch_pokemon(&DEMO_DIR.canonical).await
 	}
 
+	/// `http::get` issued through `tx.sql` reaches a host the definition grants.
+	///
+	/// The request is made by the server, not by the guest's sockets, so it
+	/// follows the grant's `net` list through the host's HTTP client.
+	async fn check_host_http_get(bucket_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+		let api = LocalPokemonApi::start()?;
+		let api_base = api.base_url();
+		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
+		let capabilities = "CAPABILITIES { net: [\"localhost\", \"127.0.0.1\"], \
+			functions: [\"http::*\"], queries: true }";
+		setup_named_module(&addr, &ns, &db, bucket_dir, "demo", "demo.surli", capabilities).await;
+
+		let results = sql_query(
+			&addr,
+			&ns,
+			&db,
+			&format!("RETURN mod::demo::host_http_get('{api_base}/pokemon/pikachu');"),
+		)
+		.await;
+		assert_eq!(results[0].status, "OK", "host_http_get failed: {:?}", results[0].result);
+		assert!(
+			results[0].result.to_string().contains("pikachu"),
+			"unexpected body: {:?}",
+			results[0].result
+		);
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_host_http_get() -> Result<(), Box<dyn std::error::Error>> {
+		check_host_http_get(&DEMO_DIR.canonical).await
+	}
+
 	// -------------------------------------------------------------------
 	// DNS tests (the filtering shim in surrealism_runtime::dns)
 	// -------------------------------------------------------------------

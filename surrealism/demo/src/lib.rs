@@ -106,6 +106,16 @@ async fn sneaky_file_method(tx: Transaction, bucket: String) -> Result<surrealdb
 	tx.sql(format!("RETURN f'{bucket}:/evil.txt'.put('data')")).await
 }
 
+/// Fetch a URL through the host's `http::get`, by way of `tx.sql`.
+///
+/// This is the host-mediated route to the network, as opposed to the guest's
+/// own sockets in [`fetch_pokemon`]: the request is made by the server under
+/// the definition's network grant.
+#[surrealism]
+async fn host_http_get(tx: Transaction, url: String) -> Result<surrealdb_types::Value> {
+	tx.sql_with_vars("RETURN http::get($url)", [("url", url)]).await
+}
+
 /// Attempt a write through a read-only transaction.
 ///
 /// The mode marker cannot prevent this on its own: `sql` takes a string. The
