@@ -4,7 +4,7 @@ timeout = 15000
 context-timeout = 15000
 
 [test]
-reason = "Public issue surrealdb/surrealdb#7552: auto-commit UPDATEs of an indexed field issued while REBUILD INDEX … CONCURRENTLY runs could leave stale or missing index entries after the build reported ready. A language test runs its statements in order, so the overlap itself is pinned by the datastore tests; this pins the end state: after updates on either side of a concurrent rebuild, the index and a scan agree on every probed value. An UPDATE issued in the same instant as the rebuild starts can fail with a retryable write conflict against the build's admission state; that is why the updates follow a pause."
+reason = "Public issue surrealdb/surrealdb#7552: auto-commit UPDATEs of an indexed field issued while REBUILD INDEX … CONCURRENTLY runs could leave stale or missing index entries after the build reported ready. A language test runs its statements in order, so the overlap itself is pinned by `normal_write_from_a_snapshot_before_the_final_replay_conflicts` in surrealdb/core/src/kvs/index/tests.rs: a write whose snapshot predates the build's final replay fails with a retryable conflict rather than leave a stale entry; this pins the end state: after updates on either side of a concurrent rebuild, the index and a scan agree on every probed value. An UPDATE issued in the same instant as the rebuild starts can fail with a retryable write conflict against the build's admission state; that is why the updates follow a pause."
 issue = 7552
 
 [[test.results]]

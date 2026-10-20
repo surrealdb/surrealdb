@@ -191,6 +191,40 @@ pub(super) fn stages_of_loop(ir: &Ir, looped: OpId) -> Stages {
 	}
 }
 
+/// Whether the select loop `looped` only resolves the rows it reads: its body holds guard stages
+/// (permission filters and resolver layers) and yields the row the last of them delivers, so each
+/// row it yields is a row of the read beneath it.
+pub(super) fn yields_its_rows(ir: &Ir, looped: OpId) -> bool {
+	let Some(data) = ir.op(looped) else {
+		return false;
+	};
+	if !is_select_loop(&data.kind) {
+		return false;
+	}
+	let Some(body) = data.regions.first().copied() else {
+		return false;
+	};
+	let Some(element) = first_arg(ir, body) else {
+		return false;
+	};
+	let stages = stages_of_loop(ir, looped);
+	if stages.ops.iter().any(|op| stage_of(ir, *op) != Some(Stage::Guard)) {
+		return false;
+	}
+	let row = match stages.ops.last() {
+		Some(last) => match ir.op(*last).and_then(|data| data.results.first().copied()) {
+			Some(row) => row,
+			None => return false,
+		},
+		None => element,
+	};
+	let mut rest = ops_in(ir, body).skip(stages.ops.len());
+	let yielded = rest.next().and_then(|op| ir.op(op)).is_some_and(|data| {
+		matches!(data.kind, OpKind::Logical(LogOp::Yield)) && data.operands.as_slice() == [row]
+	});
+	yielded && rest.next().is_none()
+}
+
 /// The first block argument of `region`.
 fn first_arg(ir: &Ir, region: RegionId) -> Option<ValueId> {
 	let block = ir.region(region)?.blocks.first()?;

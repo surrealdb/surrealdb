@@ -328,7 +328,8 @@ async fn new_building_for_index(
 		table_def.table_id,
 		Arc::clone(&ix),
 		Arc::new(IndexKey::new(ns, db, table, ix.index_id)),
-	)?;
+	)?
+	.signalling(&ds.index_builder().closing_settled);
 	tx.cancel().await?;
 	Ok(build)
 }
@@ -4474,7 +4475,8 @@ async fn resume_does_not_adopt_a_build_for_a_stale_definition() -> Result<()> {
 		(other_table, Arc::clone(&ix), "a table id the catalog no longer holds"),
 		(tb, other_definition, "a definition the catalog no longer holds"),
 	] {
-		let adopted = builder.resume_stalled(&ctx, opt.clone(), ns, db, tb, ix).await?;
+		let adopted =
+			builder.resume_stalled(&ctx, opt.clone(), ns, db, tb, ix, ResumeScope::Any).await?;
 		assert!(!adopted, "a candidate with {what} must not be adopted");
 		assert_eq!(
 			durable_build_state(&ds, &ikb).await?.owner,
@@ -4483,7 +4485,7 @@ async fn resume_does_not_adopt_a_build_for_a_stale_definition() -> Result<()> {
 		);
 	}
 	assert!(
-		builder.resume_stalled(&ctx, opt, ns, db, tb, Arc::clone(&ix)).await?,
+		builder.resume_stalled(&ctx, opt, ns, db, tb, Arc::clone(&ix), ResumeScope::Any).await?,
 		"the current candidate is adopted"
 	);
 	let building = local_builder_for_key(&ds, ns, db, &table, ix.index_id)
@@ -20246,5 +20248,470 @@ async fn parallel_creates_over_a_fulltext_index_all_commit() -> Result<()> {
 			.await?,
 		serde_json::json!([WRITERS * CREATES])
 	);
+	Ok(())
+}
+
+/// A write that commits while a `DEFINE INDEX … CONCURRENTLY` statement's
+/// transaction is still open cannot see the definition, so it neither indexes
+/// the record nor queues it for the build. The build must therefore read the
+/// table only once that transaction has committed and every write that began
+/// before the commit has ended, or a record it scanned first would keep its old
+/// entry and never gain its new one (surrealdb/surrealdb#7550).
+#[tokio::test(flavor = "multi_thread")]
+async fn writes_inside_an_open_concurrent_definition_reach_the_index() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE t SCHEMALESS;
+			FOR $i IN 1..=200 { CREATE type::record('t', $i) SET x = 'old' RETURN NONE; };
+			",
+	)
+	.await?;
+
+	let define = tokio::spawn({
+		let (ds, session) = (Arc::clone(&ds), session.clone());
+		async move {
+			execute_all(
+				&ds,
+				&session,
+				"BEGIN; DEFINE INDEX ix ON t FIELDS x CONCURRENTLY; SLEEP 5s; COMMIT;",
+			)
+			.await
+		}
+	});
+	// Long enough for a build that did not wait for its statement to have
+	// scanned all 200 rows.
+	sleep(Duration::from_millis(500)).await;
+	execute_all(&ds, &session, "UPDATE t:1..=10 SET x = 'new' RETURN NONE").await?;
+	assert!(!define.is_finished(), "the write must land while the definition is uncommitted");
+	define.await??;
+	wait_for_index_ready(&ds, &session, "t", "ix").await?;
+
+	expect_indexed_query_len(&ds, &session, "SELECT id FROM t WITH INDEX ix WHERE x = 'new'", 10)
+		.await?;
+	expect_indexed_query_len(&ds, &session, "SELECT id FROM t WITH INDEX ix WHERE x = 'old'", 190)
+		.await?;
+	Ok(())
+}
+
+/// The keys of `ix`'s entries with the index's own prefix removed, so that two
+/// indexes over the same fields compare equal exactly when they hold the same
+/// entries.
+#[cfg(feature = "kv-mem")]
+async fn index_entry_suffixes(
+	ds: &Datastore,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table: &TableName,
+	ix: IndexId,
+) -> Result<std::collections::BTreeSet<Vec<u8>>> {
+	let prefix = EntryPrefix {
+		ns,
+		db,
+		tb: Cow::Borrowed(table),
+		ix,
+	};
+	let start = KVSubspace::encode_bound(&prefix)?.to_vec();
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let keys = catch!(tx, tx.keys(prefix.range()?, u32::MAX, 0, None).await);
+	tx.cancel().await?;
+	keys.into_iter()
+		.map(|key| {
+			anyhow::ensure!(key.starts_with(&start), "entry key outside its index prefix");
+			Ok(key[start.len()..].to_vec())
+		})
+		.collect()
+}
+
+/// A build comes online while writers keep queueing behind its replay, and the
+/// handover to inline maintenance loses and leaves no entry.
+///
+/// The catch-up hook commits a write before every read of the replay that runs
+/// while admissions are open, so no read of it ever finds the queues empty: a
+/// replay that waited for that would never reach `Closing`. Other writers run
+/// throughout, across `Closing` (where they wait) and past `Online` (where they
+/// maintain the index inline). The finished index must then hold exactly the
+/// entries of an index built afterwards with no writers.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_build_comes_online_while_writers_keep_queueing() -> Result<()> {
+	const ROWS: u64 = 200;
+	const WRITERS: u64 = 4;
+
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		&format!(
+			"DEFINE TABLE t SCHEMALESS;
+			 CREATE |t:1..={ROWS}| SET x = 0 RETURN NONE;
+			 DEFINE INDEX ix ON t FIELDS x;"
+		),
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "ix").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	// Strand a fresh generation `Building` under an expired owner, with no
+	// index data and its own ticket counter, for a hand-driven takeover.
+	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+	let mut state = durable_build_state_for_phase(IndexBuildPhase::Building, 2, None);
+	state.initial_complete = false;
+	state.initial = None;
+	state.updated_at = expired;
+	state.owner_heartbeat_at = Some(expired);
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.del_prefix_key(&IdxRoot {
+		ns,
+		db,
+		tb: Cow::Borrowed(&table),
+		ix: ix.index_id,
+	})
+	.await?;
+	tx.set_key(&ikb.new_bs_key(), &state).await?;
+	tx.set_key(&ikb.new_bt_key(2), &(0 as BuildTicket)).await?;
+	tx.commit().await?;
+
+	// One write per catch-up read, committed before the read runs.
+	let (hook, mut reads) = super::replay::catch_up_hook::register(ds.id());
+	let hooked = tokio::spawn({
+		let (ds, session) = (Arc::clone(&ds), session.clone());
+		async move {
+			let mut reads_held = 0usize;
+			while let Some(done) = reads.recv().await {
+				execute_all_retrying_conflicts(&ds, &session, "UPDATE t:1 SET x += 1 RETURN NONE")
+					.await?;
+				reads_held += 1;
+				let _ = done.send(());
+			}
+			Ok::<_, anyhow::Error>(reads_held)
+		}
+	});
+	// Writers on every other row, for the whole build and past it.
+	let stop = Arc::new(AtomicBool::new(false));
+	let writers: Vec<_> = (0..WRITERS)
+		.map(|w| {
+			let (ds, session, stop) = (Arc::clone(&ds), session.clone(), Arc::clone(&stop));
+			tokio::spawn(async move {
+				let mut i = 0u64;
+				while !stop.load(Ordering::Acquire) {
+					let id = 2 + (i * 7 + w * 53) % (ROWS - 1);
+					execute_all_retrying_conflicts(
+						&ds,
+						&session,
+						&format!("UPDATE t:{id} SET x += 1 RETURN NONE"),
+					)
+					.await?;
+					i += 1;
+				}
+				Ok::<_, anyhow::Error>(i)
+			})
+		})
+		.collect();
+
+	let build = new_building_for_index(&ds, &session, ns, db, &table, Arc::clone(&ix)).await?;
+	let acquired = build
+		.acquire_build_state()
+		.await?
+		.expect("the expired generation should be available for takeover");
+	assert_eq!(acquired.generation, 2);
+	timeout(Duration::from_secs(10), build.run_acquired(acquired)).await.map_err(|_| {
+		anyhow::anyhow!("the build did not come online while writers kept queueing")
+	})??;
+	assert_eq!(durable_build_state(&ds, &ikb).await?.phase, IndexBuildPhase::Online);
+
+	drop(hook);
+	let reads_held = hooked.await??;
+	assert!(reads_held >= 1, "the catch-up replay must have read the queues");
+	// Keep writing for a moment against the online index, then stop.
+	sleep(Duration::from_millis(100)).await;
+	stop.store(true, Ordering::Release);
+	let mut written = 0;
+	for writer in writers {
+		written += writer.await??;
+	}
+	assert!(written > 0, "the writers must have committed while the build ran");
+
+	execute_all(&ds, &session, "DEFINE INDEX reference ON t FIELDS x;").await?;
+	let (_, _, _, reference) = get_table_index(&ds, "t", "reference").await?;
+	let built = index_entry_suffixes(&ds, ns, db, &table, ix.index_id).await?;
+	let expected = index_entry_suffixes(&ds, ns, db, &table, reference.index_id).await?;
+	assert_eq!(expected.len(), ROWS as usize, "one entry per record");
+	assert_eq!(built, expected, "the built index must hold exactly the records' current entries");
+	Ok(())
+}
+
+/// Whether `t`'s index `ix` holds an entry for value `x` and record `t:<id>`.
+async fn has_entry(
+	ds: &Datastore,
+	(ns, db, ix): (NamespaceId, DatabaseId, &IndexDefinition),
+	x: &str,
+	id: i64,
+) -> Result<bool> {
+	let key = crate::idx::kernels::btree::IndexKeyspace::of(ns, db, ix).stored_key(
+		false,
+		&[Value::from(x)],
+		&RecordIdKey::Number(id),
+	)?;
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let entry = catch!(tx, tx.get_key(&key, None).await);
+	tx.cancel().await?;
+	Ok(entry.is_some())
+}
+
+/// A write that indexes normally once a build is `Online` must not leave the
+/// entry the build's last replay wrote for the record's previous value.
+///
+/// A writer held while the build is `Closing` began its transaction — and took
+/// its snapshot — before the final replay pass committed. Once it observes
+/// `Online` it moves the record's entries itself, from its snapshot: the entry
+/// for the old value that replay wrote is absent there, so the delete finds
+/// nothing. The write must then conflict with the replay rather than commit,
+/// or the old value's entry survives beside the new one and an index scan
+/// returns the record for a value it no longer holds.
+#[tokio::test(flavor = "multi_thread")]
+async fn normal_write_from_a_snapshot_before_the_final_replay_conflicts() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE t SCHEMALESS;
+			CREATE t:1 SET x = 'a' RETURN NONE;
+			DEFINE INDEX ix ON t FIELDS x;
+			",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "ix").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	let entries = (ns, db, &*ix);
+	assert!(has_entry(&ds, entries, "a", 1).await?);
+
+	// A `Building` generation whose initial scan is complete, taken over by a
+	// builder this test drives by hand.
+	const GENERATION: BuildGeneration = 3;
+	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+	let mut state = durable_build_state_for_phase(IndexBuildPhase::Building, GENERATION, None);
+	state.updated_at = expired;
+	state.owner_heartbeat_at = Some(expired);
+	set_durable_build_state(&ds, &ikb, state).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.set_key(&ikb.new_bt_key(GENERATION), &0u64).await?;
+	tx.commit().await?;
+	let build = new_building_for_index(&ds, &session, ns, db, &table, Arc::clone(&ix)).await?;
+	let acquired = build
+		.acquire_build_state()
+		.await?
+		.expect("the expired generation should be available for takeover");
+	assert_eq!(acquired.generation, GENERATION);
+
+	// The build queues `a -> b` rather than indexing it.
+	execute_all(&ds, &session, "UPDATE t:1 SET x = 'b' RETURN NONE").await?;
+	assert!(has_entry(&ds, entries, "a", 1).await?, "a queued write leaves the index alone");
+
+	// A writer whose snapshot sees `b` on the record but not yet in the index.
+	let writer = Arc::new(ds.transaction(TransactionType::Write).await?);
+	let seen = ds
+		.run(
+			crate::kvs::QueryRequest::new("SELECT VALUE x FROM ONLY t:1", &session)
+				.with_transaction(Arc::clone(&writer)),
+		)
+		.await?;
+	let seen = seen[0].result.as_ref().map_err(|e| anyhow::anyhow!("{e}"))?;
+	assert_eq!(seen.clone().into_json_value(), serde_json::json!("b"));
+
+	// The build replays `a -> b`, closes and publishes.
+	let mut updates = 0;
+	let mut last_check = Instant::now();
+	build
+		.index_appending_loop(super::replay::ReplayUntil::Drained, 1, &mut updates, &mut last_check)
+		.await?;
+	assert_eq!(updates, 1, "the queued write is replayed");
+	build.mark_durable_closing(GENERATION).await?;
+	build
+		.index_appending_loop(super::replay::ReplayUntil::Drained, 1, &mut updates, &mut last_check)
+		.await?;
+	build.mark_durable_online(GENERATION, 1, updates, true).await?;
+	assert!(has_entry(&ds, entries, "b", 1).await?, "the replay indexes `b`");
+	assert!(!has_entry(&ds, entries, "a", 1).await?, "the replay removes `a`");
+
+	// The writer now sees `Online` and moves `b -> c` from its snapshot, where
+	// the `b` entry the replay wrote does not exist yet.
+	let results = ds
+		.run(
+			crate::kvs::QueryRequest::new("UPDATE t:1 SET x = 'c' RETURN NONE", &session)
+				.with_transaction(Arc::clone(&writer)),
+		)
+		.await?;
+	for result in results {
+		result.result.map_err(|e| anyhow::anyhow!("{e}"))?;
+	}
+	let commit = writer.commit().await;
+	match &commit {
+		Err(err) => assert!(
+			is_retryable_transaction_conflict(err),
+			"the stale writer must fail with a retryable conflict, not {err:#}"
+		),
+		Ok(()) => panic!(
+			"a write whose snapshot predates the final replay committed; `b` still indexed: {}",
+			has_entry(&ds, entries, "b", 1).await?
+		),
+	}
+
+	// Retried from a fresh snapshot, the write leaves the index exact.
+	execute_all(&ds, &session, "UPDATE t:1 SET x = 'c' RETURN NONE").await?;
+	assert!(has_entry(&ds, entries, "c", 1).await?);
+	assert!(
+		!has_entry(&ds, entries, "b", 1).await?,
+		"no entry left for a value t:1 no longer holds"
+	);
+	assert!(!has_entry(&ds, entries, "a", 1).await?);
+	Ok(())
+}
+
+/// A write held in admission while a build is `Closing` is released as soon
+/// as a build in this process publishes `Online`, without waiting out a poll.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_write_held_by_closing_is_released_when_the_build_publishes() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE t SCHEMALESS;
+			CREATE t:1 SET x = 'a' RETURN NONE;
+			DEFINE INDEX ix ON t FIELDS x;
+			",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "ix").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	let entries = (ns, db, &*ix);
+
+	// A `Building` generation whose initial scan is complete, taken over by a
+	// builder this test drives by hand, and moved to `Closing`.
+	const GENERATION: BuildGeneration = 3;
+	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+	let mut state = durable_build_state_for_phase(IndexBuildPhase::Building, GENERATION, None);
+	state.updated_at = expired;
+	state.owner_heartbeat_at = Some(expired);
+	set_durable_build_state(&ds, &ikb, state).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.set_key(&ikb.new_bt_key(GENERATION), &0u64).await?;
+	tx.commit().await?;
+	let build = new_building_for_index(&ds, &session, ns, db, &table, Arc::clone(&ix)).await?;
+	let acquired = build
+		.acquire_build_state()
+		.await?
+		.expect("the expired generation should be available for takeover");
+	assert_eq!(acquired.generation, GENERATION);
+	build.mark_durable_closing(GENERATION).await?;
+
+	// Only the signal can end the writer's wait within the test's bound.
+	*ds.index_builder().closing_poll.lock() = Some(Duration::from_secs(60));
+	let writer = tokio::spawn({
+		let (ds, session) = (Arc::clone(&ds), session.clone());
+		async move { execute_all(&ds, &session, "UPDATE t:1 SET x = 'b' RETURN NONE").await }
+	});
+	timeout(Duration::from_secs(10), async {
+		while ds.index_builder().closing_waits.load(Ordering::Relaxed) == 0 {
+			sleep(Duration::from_millis(10)).await;
+		}
+	})
+	.await
+	.map_err(|_| anyhow::anyhow!("the writer never waited on the Closing build"))?;
+	assert!(!writer.is_finished(), "an indexed write waits while the build is Closing");
+
+	build.mark_durable_online(GENERATION, 1, 0, true).await?;
+	timeout(Duration::from_secs(10), writer)
+		.await
+		.map_err(|_| anyhow::anyhow!("the writer was not released when the build published"))???;
+	assert!(has_entry(&ds, entries, "b", 1).await?);
+	assert!(!has_entry(&ds, entries, "a", 1).await?);
+	Ok(())
+}
+
+/// While a build runs in this process, the resume scan adopts no stalled build
+/// that still has a scan to run, but does adopt one stranded in `Closing`:
+/// every write that changes that index's fields waits in admission until the
+/// build leaves `Closing`.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_running_build_defers_stalled_scans_but_not_a_stalled_closing() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE t SCHEMALESS;
+			CREATE t:1 SET vec = [1.0, 0.0], x = 'a', y = 'a' RETURN NONE;
+			DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;
+			DEFINE INDEX ix ON t FIELDS x;
+			DEFINE INDEX iy ON t FIELDS y;
+			",
+	)
+	.await?;
+	// A local build that stays unfinished until its statement commits.
+	let (ns, db, table, hx) = get_table_index(&ds, "t", "hx").await?;
+	let txn = build_index_inside_an_open_statement_transaction(
+		&ds,
+		&session,
+		ns,
+		db,
+		&table,
+		Arc::clone(&hx),
+		false,
+	)
+	.await?;
+	assert!(ds.index_builder().has_unfinished_build().await);
+
+	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+	let strand = |phase: IndexBuildPhase, ix: IndexId| {
+		let ds = Arc::clone(&ds);
+		let table = table.clone();
+		async move {
+			let ikb = IndexKeyBase::new(ns, db, table, ix);
+			let mut state = durable_build_state_for_phase(phase, 2, None);
+			state.owner = Some(Uuid::new_v4());
+			state.updated_at = expired;
+			state.owner_heartbeat_at = Some(expired);
+			set_durable_build_state(&ds, &ikb, state).await?;
+			let tx = ds.transaction(TransactionType::Write).await?;
+			tx.set_key(&ikb.new_bt_key(2), &0u64).await?;
+			// The proof that the stranded owner waited at the write barrier,
+			// without which a takeover rescans what it had scanned.
+			tx.set_key(&ikb.new_bw_key(), &2).await?;
+			tx.commit().await?;
+			anyhow::Ok(ikb)
+		}
+	};
+	let (_, _, _, iy) = get_table_index(&ds, "t", "iy").await?;
+	let iy_ikb = strand(IndexBuildPhase::Building, iy.index_id).await?;
+	let resumed =
+		ds.resume_stalled_index_builds(Duration::from_secs(30), CancellationToken::new()).await?;
+	assert_eq!(resumed, 0, "a stalled scan waits for the running build");
+
+	let (_, _, _, ix) = get_table_index(&ds, "t", "ix").await?;
+	let ix_ikb = strand(IndexBuildPhase::Closing, ix.index_id).await?;
+	let resumed =
+		ds.resume_stalled_index_builds(Duration::from_secs(30), CancellationToken::new()).await?;
+	assert_eq!(resumed, 1, "a stalled Closing build is adopted while another build runs");
+	timeout(Duration::from_secs(30), async {
+		while durable_build_state(&ds, &ix_ikb).await?.phase != IndexBuildPhase::Online {
+			sleep(Duration::from_millis(20)).await;
+		}
+		anyhow::Ok(())
+	})
+	.await
+	.map_err(|_| anyhow::anyhow!("the adopted Closing build never came online"))??;
+	assert_eq!(
+		durable_build_state(&ds, &iy_ikb).await?.phase,
+		IndexBuildPhase::Building,
+		"the stalled scan is still left for a later pass"
+	);
+
+	txn.commit().await?;
 	Ok(())
 }

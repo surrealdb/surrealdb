@@ -8,11 +8,14 @@
 //!   reaches it, or when it is written the same as one the predicate reaches: the same operator
 //!   over operands built the same way from the row.
 //! - **Executor tables.** The loop's read names them: a table read whole is known, a record-id
-//!   source is excluded, and a parameter or an expression that names its table only when the
-//!   statement runs leaves the set open.
+//!   source is excluded, and a `type::table` call, which names its table only when the statement
+//!   runs, leaves the set open. A source that builds its rows as values (a literal, a parameter, a
+//!   subquery, a lookup, a block argument) leaves the statement with no executor table, and each of
+//!   its rows is judged on its own value.
 //! - **Nesting.** A select loop inside another decides for its own operators. A loop whose stages
-//!   register nothing leaves the decision of the enclosing loop in force for the operators inside
-//!   it, as a nested statement inherits the scope of the statement that holds it.
+//!   register nothing leaves the registration of the enclosing loop in force for the operators
+//!   inside it, as a nested statement inherits the scope of the statement that holds it; their
+//!   executor tables are always the inner loop's, whose rows they read.
 //!
 //! - **Index functions and `KNN`.** An index function call in a select loop reports against the
 //!   `MATCHES` clauses of the loop's stages and whether they hold a `KNN` operator. A call that the
@@ -30,7 +33,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use super::knn::{is_select_loop, stages_of_loop};
+use super::knn::{is_select_loop, stages_of_loop, yields_its_rows};
 use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::side_map::SideMap;
@@ -345,7 +348,11 @@ pub(crate) fn run(ir: &mut Ir, registry: &FunctionRegistry) {
 				break;
 			};
 			let reads_rows = data.operands.first().is_some_and(|input| rows.contains(input));
-			if is_select_loop(&data.kind) && !reads_rows {
+			// A union joins the rows to those of the statement's other sources: the select loop
+			// over it is the statement's own, not a projection of these rows.
+			if (is_select_loop(&data.kind) && !reads_rows)
+				|| matches!(data.kind, OpKind::Logical(LogOp::UnionAll))
+			{
 				break;
 			}
 			if reads_rows {
@@ -398,7 +405,14 @@ pub(crate) fn run(ir: &mut Ir, registry: &FunctionRegistry) {
 			}
 		}
 		for op in held {
-			if !scoped && table.get(op).is_some_and(|outer| outer.scoped) {
+			// A loop that registers nothing leaves the registration of an enclosing loop that does
+			// in force; the rows the operator reads are this loop's, so the executor tables are.
+			if !scoped && let Some(outer) = table.get(op).filter(|outer| outer.scoped).cloned() {
+				let attr = MatchesAttr {
+					executor_tables: executor_tables.clone(),
+					..outer
+				};
+				table.matches.insert(op, attr);
 				continue;
 			}
 			let is_registered = registered.contains(&op)
@@ -815,21 +829,29 @@ fn same_value(ir: &Ir, a: ValueId, b: ValueId, depth: usize) -> bool {
 
 /// The tables whose rows an index answers a `MATCHES` for, read off the sources beneath the loop
 /// `looped`. For a write (`targets`), they are also read off the targets it names as values (an
-/// array of them): a table is known, a record id is excluded, a `type::table` call names its table
-/// only when the statement runs, which leaves the set open, and any other value names none.
+/// array of them), as [`source_rows`] classifies each: a table is known, a record id or a
+/// `type::record` call of a table the plan names is excluded, and a `type::table` call names its
+/// table only when the statement runs, which leaves the set open.
+///
+/// An index answers only for a row that is a record it stores. A row a source builds as a value
+/// (an object or array literal, a subquery, a lookup, a parameter, a block argument or any call
+/// but `type::table` and `type::record`) can carry an `id` naming a stored record while holding
+/// other content, and rows carry no mark of the source that produced them; so a statement with such
+/// a source has no executor table at all, and each of its rows is judged on its own value.
+/// Answering such a row from the index entry of the record its `id` names would report what that
+/// record stores to a caller its `select` permission may deny.
 fn executor_tables(ir: &Ir, looped: OpId, targets: bool) -> ExecutorTables {
-	let mut known: Vec<TableName> = Vec::new();
-	let mut excluded: Vec<TableName> = Vec::new();
-	let mut open = false;
+	let mut sources = Sources::default();
 	let mut pending: Vec<ValueId> =
 		ir.op(looped).and_then(|data| data.operands.first().copied()).into_iter().collect();
 	while let Some(rows) = pending.pop() {
+		// Rows handed in as a block argument (a correlated or closure value) are built, not read.
 		let Some(ValueDef::OpResult {
 			op,
 			..
 		}) = ir.value(rows).map(|data| data.def)
 		else {
-			continue;
+			return ExecutorTables::none();
 		};
 		let Some(data) = ir.op(op) else {
 			continue;
@@ -837,35 +859,120 @@ fn executor_tables(ir: &Ir, looped: OpId, targets: bool) -> ExecutorTables {
 		match &data.kind {
 			OpKind::Expr(ExprOp::Array) if targets => {
 				for target in &data.operands {
-					match expr_def(ir, *target).map(|(_, kind)| kind) {
-						Some(ExprOp::Table {
-							name,
-						}) => known.push(name.clone()),
-						Some(ExprOp::Call(call)) if matches!(&call.function, Function::Normal(name) if name == "type::table") =>
-						{
-							open = true;
-						}
-						_ => excluded.extend(record_table(ir, *target)),
+					if !sources.add(source_rows(ir, *target)) {
+						return ExecutorTables::none();
 					}
 				}
 			}
 			OpKind::Logical(LogOp::UnionAll) => pending.extend(data.operands.iter().copied()),
+			OpKind::Logical(LogOp::Values {
+				..
+			}) => return ExecutorTables::none(),
 			OpKind::Logical(LogOp::Source(attrs)) => match &attrs.source_ref {
-				SourceRefShape::Table(table) => known.push(table.clone()),
+				SourceRefShape::Table(table) => sources.known.push(table.clone()),
 				SourceRefShape::RecordId => {
 					if let Some(table) =
 						data.operands.first().and_then(|operand| record_table(ir, *operand))
 					{
-						excluded.push(table);
+						sources.excluded.push(table);
 					}
 				}
-				SourceRefShape::Param | SourceRefShape::Dynamic => open = true,
+				SourceRefShape::Param => return ExecutorTables::none(),
+				SourceRefShape::Dynamic => match data.operands.first() {
+					Some(operand) if sources.add(source_rows(ir, *operand)) => {}
+					_ => return ExecutorTables::none(),
+				},
 				SourceRefShape::Mock => {}
 			},
-			_ => {}
+			// A select loop that only resolves the rows of its read (a permission filter or a
+			// resolver layer over one source of several) yields that read's rows.
+			_ if yields_its_rows(ir, op) => pending.extend(data.operands.first().copied()),
+			// Any other rows (a subquery, a lookup, an expression) are built, not read.
+			_ => return ExecutorTables::none(),
 		}
 	}
-	ExecutorTables::new(known, excluded, open)
+	ExecutorTables::new(sources.known, sources.excluded, sources.open)
+}
+
+/// The tables [`executor_tables`] has read off the sources it has classified so far.
+#[derive(Default)]
+struct Sources {
+	known: Vec<TableName>,
+	excluded: Vec<TableName>,
+	open: bool,
+}
+
+impl Sources {
+	/// Folds `rows` into the sets; false when they are values, which leave the statement with no
+	/// executor table.
+	fn add(&mut self, rows: SourceRows) -> bool {
+		match rows {
+			SourceRows::Table(table) => self.known.push(table),
+			SourceRows::AnyTable => self.open = true,
+			SourceRows::Records(Some(table)) => self.excluded.push(table),
+			// Records read by id add no table an index answers for. Their table is excluded only
+			// when the plan names it, so beside a run-time table source an unnamed one is
+			// answered as that source's rows are.
+			SourceRows::Records(None) => {}
+			SourceRows::Values => return false,
+		}
+		true
+	}
+}
+
+/// What rows a source written as a value produces: a write target, or a source that resolves
+/// when the statement runs.
+enum SourceRows {
+	/// The records of a table it names.
+	Table(TableName),
+	/// The records of a table named only when the statement runs: `type::table(..)`.
+	AnyTable,
+	/// Records it reads by id: a record id or `type::record(..)`, of the table named when the
+	/// plan can read it.
+	Records(Option<TableName>),
+	/// Values it builds, which may name a record without being one.
+	Values,
+}
+
+/// The rows the source value `value` produces.
+fn source_rows(ir: &Ir, value: ValueId) -> SourceRows {
+	if let Some(table) = record_table(ir, value) {
+		return SourceRows::Records(Some(table));
+	}
+	let Some((op, kind)) = expr_def(ir, value) else {
+		return SourceRows::Values;
+	};
+	match kind {
+		ExprOp::Table {
+			name,
+		} => SourceRows::Table(name.clone()),
+		ExprOp::Call(call) => match &call.function {
+			Function::Normal(name) if name == "type::table" => SourceRows::AnyTable,
+			Function::Normal(name) if name == "type::record" => SourceRows::Records(
+				ir.op(op).and_then(|data| record_call_table(ir, &data.operands)),
+			),
+			_ => SourceRows::Values,
+		},
+		_ => SourceRows::Values,
+	}
+}
+
+/// The table a `type::record` call over `args` reads from, when the plan can name it: a record
+/// id it is handed, or the table of the two-argument form `type::record(table, key)`. A lone
+/// string is cast to a record id when the call runs, so it names no table here.
+fn record_call_table(ir: &Ir, args: &[ValueId]) -> Option<TableName> {
+	let first = *args.first()?;
+	if let Some(table) = record_table(ir, first) {
+		return Some(table);
+	}
+	match (expr_def(ir, first)?, args.len()) {
+		((_, ExprOp::Literal(literal)), 2) => match &**literal {
+			crate::val::Value::String(name) => Some(TableName::from(name.as_str())),
+			crate::val::Value::Table(table) => Some(table.clone()),
+			_ => None,
+		},
+		_ => None,
+	}
 }
 
 /// The table of the record id `value` names, when a record-id op builds it.

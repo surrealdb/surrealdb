@@ -183,6 +183,12 @@ impl<'a> IndexOperation<'a> {
 		})
 	}
 
+	/// Whether `e` is a conditional write refused because the key did not
+	/// hold the expected value.
+	fn is_condition_not_met(e: &anyhow::Error) -> bool {
+		matches!(storage_error(e), Some(surrealdb_kvs::Error::TransactionConditionNotMet))
+	}
+
 	/// Delete an index entry with a guarded (compare) delete, tolerating an
 	/// absent or foreign entry.
 	///
@@ -190,27 +196,31 @@ impl<'a> IndexOperation<'a> {
 	/// the delete is retried against the bare record-ID encoding: an entry may
 	/// predate the index's doc-ID format (e.g. written by an older binary
 	/// during a rolling upgrade) and must still be removable.
+	///
+	/// An entry left alone is read under a commit-time conflict registration.
+	/// The delete is judged on this transaction's snapshot, and an entry for
+	/// the record's old value can be written after it — by an index build
+	/// replaying the write that produced that value. A miss that registered
+	/// nothing would commit beside that entry and leave the record indexed
+	/// under a value it no longer holds; registered, the commit fails as a
+	/// retryable conflict.
 	async fn del_entry<K>(txn: &Transaction, key: &K, expected: &IndexEntryValue) -> Result<()>
 	where
 		K: key::KVKey<Value = IndexEntryValue> + std::fmt::Debug,
 	{
-		fn is_condition_not_met(e: &anyhow::Error) -> bool {
-			matches!(storage_error(e), Some(surrealdb_kvs::Error::TransactionConditionNotMet))
-		}
 		match txn.del_compare_key(key, Some(expected)).await {
-			Err(e) if is_condition_not_met(&e) => {
+			Err(e) if Self::is_condition_not_met(&e) => {
 				if expected.doc_id.is_some() {
 					let bare = IndexEntryValue {
 						rid: expected.rid.clone(),
 						doc_id: None,
 					};
 					match txn.del_compare_key(key, Some(&bare)).await {
-						Err(e) if is_condition_not_met(&e) => Ok(()),
-						other => other,
+						Err(e) if Self::is_condition_not_met(&e) => {}
+						other => return other,
 					}
-				} else {
-					Ok(())
 				}
+				txn.getu_key_raw(key).await.map(drop)
 			}
 			other => other,
 		}
@@ -258,10 +268,23 @@ impl<'a> IndexOperation<'a> {
 					// A tuple holding NONE or NULL names the record and is
 					// checked for no uniqueness: NULL equals no other NULL.
 					txn.set_key(&key, &value).await?;
-				} else if txn.put_compare_key(&key, &value, None).await.is_err() {
-					let entry: IndexEntryValue =
-						txn.get_key(&key, None).await?.expect("record should exist");
-					return self.err_index_exists(entry.rid, n);
+				} else {
+					match txn.put_compare_key(&key, &value, None).await {
+						Ok(()) => {}
+						// The key is taken: report the record that holds it. An
+						// entry that refused the write and then reads as absent
+						// is a corrupt index, which fails the write.
+						Err(e) if Self::is_condition_not_met(&e) => {
+							let Some(entry) = txn.get_key(&key, None).await? else {
+								return Err(surrealdb_datastore::DatastoreError::CorruptedIndex(
+									"a unique entry refused a write and is absent",
+								)
+								.into());
+							};
+							return self.err_index_exists(entry.rid, n);
+						}
+						Err(e) => return Err(e),
+					}
 				}
 			}
 		}
