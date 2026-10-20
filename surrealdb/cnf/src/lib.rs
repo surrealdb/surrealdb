@@ -139,7 +139,8 @@ pub fn extract_allowed_paths(input: &str, canonicalize: bool, subject: &str) -> 
 /// Set this *below* the container's memory limit so the guard sheds load before
 /// the kernel's OOM killer intervenes, and *above* the configured RocksDB block
 /// cache size (`SURREAL_ROCKSDB_BLOCK_CACHE_SIZE`, which defaults to half of
-/// system memory less 1 GiB) plus room for its memtables. A warm cache occupies
+/// the memory available to the process, as its cgroup limits bound it, less
+/// 1 GiB) plus room for its memtables. A warm cache occupies
 /// its full capacity indefinitely, so a threshold at or below that size refuses
 /// every query once the cache fills and does not recover without a restart.
 /// Memtables are charged to the same cache on top of that, past its capacity:
