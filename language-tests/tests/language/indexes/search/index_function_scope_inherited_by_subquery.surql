@@ -28,13 +28,13 @@ value = "[{ id: pt:2, v: [8f, 8f] }]"
 value = "NONE"
 
 [[test.results]]
-value = "[{ id: blog:2, score: 0f }]"
+value = "[{ id: blog:2, score: 0.6630103588104248f }]"
 
 [[test.results]]
 value = "[{ dist: 0f, id: pt:1 }]"
 
 [[test.results]]
-value = "[{ id: blog:2, inner: [0f, 0f] }]"
+value = "[{ id: blog:2, inner: [0f, 0.6630103588104248f] }]"
 
 [[test.results]]
 value = "[{ id: pt:1, inner: [0f, NONE] }]"

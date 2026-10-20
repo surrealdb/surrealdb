@@ -29,7 +29,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ distance: 0.0034969844824588314f, ft_score: 0.5366538763046265f, id: test:1, rrf_score: 0.03278688524590164f }, { distance: 0.056393806565797844f, id: test:3, rrf_score: 0.016129032258064516f }]"
+value = "[{ distance: 0.0034969844824588314f, ft_score: 1.0304217338562012f, id: test:1, rrf_score: 0.03278688524590164f }, { distance: 0.056393806565797844f, id: test:3, rrf_score: 0.016129032258064516f }]"
 
 [[test.results]]
 value = "[{ id: r:1, rrf_score: 1.5f }, { id: r:3, rrf_score: 1.3333333333333333f }, { id: r:2, rrf_score: 0.75f }]"

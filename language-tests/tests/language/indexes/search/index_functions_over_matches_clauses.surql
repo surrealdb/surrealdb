@@ -77,10 +77,10 @@ value = "[]"
 value = "[]"
 
 [[test.results]]
-value = "[{ id: book:1, s: 0.7192269563674927f }, { id: book:3, s: 0.7192269563674927f }]"
+value = "[{ id: book:1, s: 1.0610204935073853f }, { id: book:3, s: 1.0610204935073853f }]"
 
 [[test.results]]
-value = "[{ id: book:2, s: 1.4384539127349854f }, { id: book:3, s: 1.4384539127349854f }]"
+value = "[{ id: book:2, s: 2.1220409870147705f }, { id: book:3, s: 2.1220409870147705f }]"
 
 [[test.results]]
 value = "[{ h: 'Beta gamma <b>notes</b>', id: book:2 }, { h: 'Alpha gamma <b>notes</b>', id: book:3 }]"
@@ -95,7 +95,7 @@ value = '[{ id: book:2, o: { "0": [{ e: 10, s: 5 }] } }, { id: book:3, o: { "0":
 value = '[{ id: book:1, o: { "0": [{ e: 4, s: 1 }] } }, { id: book:3, o: { "0": [{ e: 4, s: 1 }] } }, { id: book:5, o: { "0": [{ e: 8, s: 5 }] } }, { id: book:7, o: { "0": [{ e: 4, s: 1 }] } }]'
 
 [[test.results]]
-value = "[{ a: 0.7192269563674927f, b: 0.2475634664297104f, id: book:1 }, { a: 0.84980708360672f, b: 0.2241452932357788f, id: book:4 }]"
+value = "[{ a: 1.0610204935073853f, b: 0.8143401145935059f, id: book:1 }, { a: 1.2536553144454956f, b: 0.7373079061508179f, id: book:4 }]"
 
 [[test.results]]
 value = "[{ h: 'running dogs and [cats]', id: book:1 }, { h: 'a dog and a [cat]', id: book:4 }]"
@@ -110,7 +110,7 @@ value = "[{ id: book:1 }, { id: book:2 }, { id: book:3 }, { id: book:4 }]"
 value = "[{ id: book:1 }, { id: book:4 }]"
 
 [[test.results]]
-value = "[{ id: book:1, s: 0f }, { id: book:2, s: 0.7192269563674927f }, { id: book:3, s: 0.7192269563674927f }]"
+value = "[{ id: book:1, s: 0f }, { id: book:2, s: 1.0610204935073853f }, { id: book:3, s: 1.0610204935073853f }]"
 
 [[test.results]]
 value = "[{ id: book:4 }]"
@@ -119,10 +119,10 @@ value = "[{ id: book:4 }]"
 value = "[{ id: book:3 }]"
 
 [[test.results]]
-value = "[{ id: book:1, label: 'book 1', s: 0.7192269563674927f }, { id: book:3, label: 'book 3', s: 0.7192269563674927f }]"
+value = "[{ id: book:1, label: 'book 1', s: 1.0610204935073853f }, { id: book:3, label: 'book 3', s: 1.0610204935073853f }]"
 
 [[test.results]]
-value = "[{ id: book:1, inner: [0.2475634664297104f] }]"
+value = "[{ id: book:1, inner: [0.8143401145935059f] }]"
 
 [[test.results]]
 error = "There was no suitable index supporting the expression: title @@ 'guide'"

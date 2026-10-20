@@ -21,7 +21,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ id: blog:3, score: 0.9227996468544006f }]"
+value = "[{ id: blog:3, score: 1.3112574815750122f }]"
 */
 
 CREATE blog:1 SET title = 'the quick brown fox jumped over the lazy dog';

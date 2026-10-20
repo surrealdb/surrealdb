@@ -100,10 +100,10 @@ value = '''
 ''''
 
 [[test.results]]
-value = "[{ id: doc:1, sc: 0f }, { id: doc:2, sc: 0f }]"
+value = "[{ id: doc:1, sc: 0.4531508982181549f }, { id: doc:2, sc: 0.4531508982181549f }]"
 
 [[test.results]]
-value = "[{ id: doc:1, sc: 0.4925091564655304f }]"
+value = "[{ id: doc:1, sc: 0.9456600546836853f }]"
 
 [[test.results]]
 value = '''

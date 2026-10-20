@@ -19,7 +19,7 @@ reason = "A full-text clause, the index functions that report against it and a v
 value = "user:alice"
 
 [[test.results]]
-value = "[{ id: note:1, s: 0f }, { id: note:3, s: 0f }, { id: note:5, s: 0f }]"
+value = "[{ id: note:1, s: 0.4418327510356903f }, { id: note:3, s: 0.4418327510356903f }, { id: note:5, s: 0.4418327510356903f }]"
 
 [[test.results]]
 value = "[{ h: 'red apple <b>pie</b>', id: note:1, owner: user:alice, point: [10f], text: 'red apple pie' }, { h: 'green apple <b>pie</b>', id: note:3, owner: user:alice, point: [30f], text: 'green apple pie' }]"
@@ -31,7 +31,7 @@ value = '[{ id: note:1, o: { "0": [{ e: 3, s: 0 }] } }, { id: note:5, o: { "0": 
 value = "[]"
 
 [[test.results]]
-value = "[{ id: note:1, s: 0f }, { id: note:3, s: 0f }, { id: note:5, s: 0f }]"
+value = "[{ id: note:1, s: 0.4418327510356903f }, { id: note:3, s: 0.4418327510356903f }, { id: note:5, s: 0.4418327510356903f }]"
 
 [[test.results]]
 value = "[{ count: 3 }]"

@@ -2117,20 +2117,11 @@ mod tests {
 		let doc1 = Arc::new(RecordId::new("t".into(), "doc1".to_owned()));
 		let doc2 = Arc::new(RecordId::new("t".into(), "doc2".to_owned()));
 
-		// Index two documents so that IDF is non-zero for a term that only
-		// appears in one of them (BM25 IDF clamps to 0 when term_doc_count
-		// >= doc_count / 2, so we need at least 2 docs).
 		test.remove_insert_task(&doc1).await;
 		test.remove_insert_task(&doc2).await;
 
-		// "lorem" appears in only 1 of 25 entries in the test content, so
-		// with 2 identical docs the term_doc_count=2 and doc_count=2, giving
-		// IDF = ln((2-2+0.5)/(2+0.5)) which clamps to 0. We need a search
-		// term where term_doc_count < doc_count. Since both docs have the
-		// same content, every term has term_doc_count == doc_count, so IDF=0.
-		//
-		// Instead, directly verify that `compute_doc_length_and_count`
-		// returns valid (non-zero) stats before and after compaction.
+		// Verify `compute_doc_length_and_count` returns valid (non-zero) stats
+		// before and after compaction.
 
 		// Before compaction: scorer should exist and have valid doc stats.
 		let (read_ctx, tx) = test.new_read_env().await;

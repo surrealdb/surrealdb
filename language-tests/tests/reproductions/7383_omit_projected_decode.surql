@@ -42,7 +42,7 @@ value = "[{ description: 'a report', grp: 'a', id: post:1, meta: { x: 1, y: 2 },
 value = "[{ description: 'a report', grp: 'a', id: post:1, meta: { x: 1, y: 2 }, n: 1, status: 'visible', title: 'student loans' }, { description: 'student report', grp: 'a', id: post:2, meta: { x: 3, y: 4 }, n: 2, title: 'campus news' }]"
 
 [[test.results]]
-value = "[{ _score: 0.4721917510032654f, description: 'student report', grp: 'a', id: post:2, meta: { x: 3, y: 4 }, n: 2, title: 'campus news' }, { _score: 0f, description: 'a report', grp: 'a', id: post:1, meta: { x: 1, y: 2 }, n: 1, status: 'visible', title: 'student loans' }]"
+value = "[{ _score: 0.9066488742828369f, description: 'student report', grp: 'a', id: post:2, meta: { x: 3, y: 4 }, n: 2, title: 'campus news' }, { _score: 0.4700036346912384f, description: 'a report', grp: 'a', id: post:1, meta: { x: 1, y: 2 }, n: 1, status: 'visible', title: 'student loans' }]"
 
 [[test.results]]
 value = "[{ description: 'student report', grp: 'a', id: post:2, meta: { x: 3, y: 4 }, n: 2, title: 'campus news' }]"

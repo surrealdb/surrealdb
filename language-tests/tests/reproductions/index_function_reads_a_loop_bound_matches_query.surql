@@ -40,7 +40,7 @@ value = "[{ q: 'world', s: [true, true] }]"
 value = "NONE"
 
 [[test.results]]
-value = '[{ id: doc:1, o: { "0": [{ e: 11, s: 6 }] }, s: false }, { id: doc:2, o: { "0": [{ e: 13, s: 8 }] }, s: false }]'
+value = '[{ id: doc:1, o: { "0": [{ e: 11, s: 6 }] }, s: true }, { id: doc:2, o: { "0": [{ e: 13, s: 8 }] }, s: true }]'
 
 [[test.results]]
 value = "[{ h: '<b>hello</b> world', id: doc:1 }]"

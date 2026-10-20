@@ -130,7 +130,7 @@ value = '''
 "'''
 
 [[test.results]]
-value = "[{ id: docs:3, score: 0.8472978472709656f }]"
+value = "[{ id: docs:3, score: 1.2039728164672852f }]"
 
 [[test.results]]
 value = '''

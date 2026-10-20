@@ -205,30 +205,28 @@ impl Bm25 {
 	/// document of `doc_length` tokens, where `term_doc_count` documents carry
 	/// the term.
 	///
-	/// The inverse document frequency is clamped at zero, so a term most
-	/// documents carry weighs nothing rather than counting against a
-	/// document, and the term frequency is lower-bounded as `1 + ln(tf)`
-	/// (Lv & Zhai, "Lower-Bounding Term Frequency Normalization", CIKM 2011):
+	/// The inverse document frequency is the smoothed form
+	/// `ln(1 + (N − n + 0.5) / (n + 0.5))`, which stays positive for every
+	/// `n ≤ N`, so a term most documents carry still scores above zero and
+	/// ranks documents by term frequency and length. The term frequency is
+	/// lower-bounded as `1 + ln(tf)` (Lv & Zhai, "Lower-Bounding Term
+	/// Frequency Normalization", CIKM 2011):
 	///
 	/// ```text
 	/// score = idf · (k1 + 1) · tf′ / (tf′ + k1 · (1 − b + b · doc_len / avg_doc_len))
-	/// idf   = max(0, ln((N − n + 0.5) / (n + 0.5)))
+	/// idf   = ln(1 + (N − n + 0.5) / (n + 0.5))
 	/// tf′   = 1 + ln(tf)
 	/// ```
 	pub fn score(&self, term_freq: f64, term_doc_count: f64, doc_length: f64) -> f64 {
 		if term_freq <= 0.0 {
 			return 0.0;
 		}
-		// The inverse document frequency is the logarithm of this ratio, so it
-		// is not positive where the ratio is at most one — including where
-		// more documents carry the term than the index counts, which makes the
-		// numerator negative and its logarithm undefined.
-		let numerator = self.doc_count - term_doc_count + 0.5;
-		let denominator = term_doc_count + 0.5;
-		if numerator <= denominator {
-			return 0.0;
-		}
-		let idf = (numerator / denominator).ln();
+		// A count outside `0..=N` (more documents carrying the term than the
+		// index counts, say) would make the ratio negative or undefined, so
+		// the count is clamped into that range.
+		let doc_count = self.doc_count.max(0.0);
+		let n = term_doc_count.max(0.0).min(doc_count);
+		let idf = ((doc_count - n + 0.5) / (n + 0.5)).ln_1p();
 		let tf_prime = 1.0 + term_freq.ln();
 		let length_norm = self.one_minus_b + self.b_over_avg_len * doc_length;
 		idf * self.k1_plus_1 * tf_prime / (tf_prime + self.k1 * length_norm)
@@ -322,13 +320,20 @@ mod tests {
 	}
 
 	#[test]
-	fn a_term_more_documents_carry_than_the_index_counts_weighs_nothing() {
-		// Postings that run ahead of the document count leave the ratio the
-		// logarithm is taken of below zero.
+	fn a_term_more_documents_carry_than_the_index_counts_scores_as_one_every_document_carries() {
+		// Postings that run ahead of the document count are capped at the
+		// index size rather than taking the logarithm of a negative ratio.
 		let bm25 = Bm25::new(1.2, 0.75, 3, 30);
 		let score = bm25.score(2.0, 5.0, 10.0);
-		assert_eq!(score, 0.0);
-		assert!(score.is_finite());
+		assert_eq!(score, bm25.score(2.0, 3.0, 10.0));
+		assert!(score.is_finite() && score > 0.0);
+	}
+
+	#[test]
+	fn a_negative_document_count_scores_as_an_empty_index() {
+		let bm25 = Bm25::new(1.2, 0.75, -2, 0);
+		let score = bm25.score(1.0, 1.0, 3.0);
+		assert!(score.is_finite() && score >= 0.0, "{score}");
 	}
 
 	#[test]
@@ -355,6 +360,10 @@ mod tests {
 		assert!(rare > common, "{rare} vs {common}");
 		assert!(bm25.score(1.0, 2.0, 5.0) > bm25.score(1.0, 2.0, 20.0));
 		assert_eq!(bm25.score(0.0, 2.0, 5.0), 0.0);
-		assert_eq!(bm25.score(1.0, 99.0, 5.0), 0.0, "a term most documents carry weighs nothing");
+		// A term every document carries still scores above zero, so a small or
+		// homogeneous corpus ranks its documents.
+		assert!(bm25.score(1.0, 100.0, 5.0) > 0.0);
+		assert!(bm25.score(1.0, 99.0, 5.0) > bm25.score(1.0, 100.0, 5.0));
+		assert!(bm25.score(3.0, 99.0, 5.0) > bm25.score(1.0, 99.0, 5.0));
 	}
 }

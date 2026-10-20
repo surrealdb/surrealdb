@@ -29,10 +29,10 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ distance: 0.0034969844824588314f, ft_score: 0.5366538763046265f, id: test:1, linear_score: 2f }, { distance: 0.056393806565797844f, id: test:3, linear_score: 0f }]"
+value = "[{ distance: 0.0034969844824588314f, ft_score: 1.0304217338562012f, id: test:1, linear_score: 2f }, { distance: 0.056393806565797844f, id: test:3, linear_score: 0f }]"
 
 [[test.results]]
-value = "[{ distance: 0.0034969844824588314f, ft_score: 0.5366538763046265f, id: test:1, linear_score: 1.9999999999999956f }, { distance: 0.056393806565797844f, id: test:3, linear_score: -2.0000000000000044f }]"
+value = "[{ distance: 0.0034969844824588314f, ft_score: 1.0304217338562012f, id: test:1, linear_score: 1.9999999999999956f }, { distance: 0.056393806565797844f, id: test:3, linear_score: -2.0000000000000044f }]"
 
 [[test.results]]
 value = "[{ id: l:1, linear_score: 1f, score: 10 }, { id: l:3, linear_score: 0.7777777777777778f, score: 8 }, { id: l:2, linear_score: 0.1111111111111111f, score: 2 }]"

@@ -7,7 +7,6 @@ auth = { level = "owner" }
 [test]
 reason = "search::score(n) reports the score of the n-th MATCHES clause for a row whichever branch of an OR matched"
 issue = 7112
-wip = true
 
 [[test.results]]
 value = "NONE"

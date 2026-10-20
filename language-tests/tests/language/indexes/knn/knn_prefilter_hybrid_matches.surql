@@ -85,7 +85,7 @@ value = '''
 Total rows: 2"'''
 
 [[test.results]]
-value = "[{ dist: 10f, id: docs:1, score: 0.2889266014099121f }, { dist: 50f, id: docs:5, score: 0.35173675417900085f }]"
+value = "[{ dist: 10f, id: docs:1, score: 0.7022854685783386f }, { dist: 50f, id: docs:5, score: 0.8549562096595764f }]"
 */
 
 DEFINE FIELD category ON docs TYPE string;

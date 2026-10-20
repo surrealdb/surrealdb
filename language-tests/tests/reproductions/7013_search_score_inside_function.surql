@@ -30,13 +30,13 @@ value = "[{ id: test:2, text: 'Governance model: Feed is the single governance s
 value = "[{ id: test:3, text: 'Target market is solo founders and tiny teams' }]"
 
 [[test.results]]
-value = "[{ id: test:2, score: 0.6499114632606506f, text: 'Governance model: Feed is the single governance surface' }]"
+value = "[{ id: test:2, score: 1.247886061668396f, text: 'Governance model: Feed is the single governance surface' }]"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "[{ id: test:2, score: 0.6499114632606506f, text: 'Governance model: Feed is the single governance surface' }]"
+value = "[{ id: test:2, score: 1.247886061668396f, text: 'Governance model: Feed is the single governance surface' }]"
 */
 
 DEFINE ANALYZER test_analyzer TOKENIZERS blank, class, camel, punct FILTERS snowball(english), lowercase;

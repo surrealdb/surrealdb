@@ -20,7 +20,7 @@ value = "[{ body: 'hello world', id: doc:1, tags: ['a', 'b'] }]"
 value = "[{ body: 'bye world', id: doc:2, tags: ['c'] }]"
 
 [[test.results]]
-value = "[{ id: doc:1, s: false, tags: 'a' }, { id: doc:1, s: false, tags: 'b' }]"
+value = "[{ id: doc:1, s: true, tags: 'a' }, { id: doc:1, s: true, tags: 'b' }]"
 
 [[test.results]]
 value = "[{ h: 'hello <world>', id: doc:1, tags: 'a' }, { h: 'hello <world>', id: doc:1, tags: 'b' }, { h: 'bye <world>', id: doc:2, tags: 'c' }]"
