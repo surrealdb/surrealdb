@@ -253,68 +253,68 @@ user-login = "tarcieri"
 user-name = "Tony Arcieri"
 
 [[publisher.cranelift-assembler-x64]]
-version = "0.135.6"
-when = "2026-10-14"
+version = "0.135.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.cranelift-assembler-x64-meta]]
-version = "0.135.6"
-when = "2026-10-14"
+version = "0.135.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.cranelift-bforest]]
-version = "0.135.6"
-when = "2026-10-14"
+version = "0.135.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.cranelift-bitset]]
-version = "0.135.6"
-when = "2026-10-14"
+version = "0.135.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.cranelift-codegen]]
-version = "0.135.6"
-when = "2026-10-14"
+version = "0.135.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.cranelift-codegen-meta]]
-version = "0.135.6"
-when = "2026-10-14"
+version = "0.135.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.cranelift-codegen-shared]]
-version = "0.135.6"
-when = "2026-10-14"
+version = "0.135.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.cranelift-control]]
-version = "0.135.6"
-when = "2026-10-14"
+version = "0.135.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.cranelift-entity]]
-version = "0.135.6"
-when = "2026-10-14"
+version = "0.135.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.cranelift-frontend]]
-version = "0.135.6"
-when = "2026-10-14"
+version = "0.135.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.cranelift-isle]]
-version = "0.135.6"
-when = "2026-10-14"
+version = "0.135.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.cranelift-native]]
-version = "0.135.6"
-when = "2026-10-14"
+version = "0.135.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.cranelift-srcgen]]
-version = "0.135.6"
-when = "2026-10-14"
+version = "0.135.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.crossbeam-epoch]]
@@ -775,13 +775,13 @@ user-login = "rushmorem"
 user-name = "Rushmore Mushambi"
 
 [[publisher.pulley-interpreter]]
-version = "48.0.6"
-when = "2026-10-14"
+version = "48.0.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.pulley-macros]]
-version = "48.0.6"
-when = "2026-10-14"
+version = "48.0.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.quinn]]
@@ -1386,78 +1386,78 @@ when = "2026-10-02"
 trusted-publisher = "github:bytecodealliance/wasm-tools"
 
 [[publisher.wasmtime]]
-version = "48.0.6"
-when = "2026-10-14"
+version = "48.0.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-environ]]
-version = "48.0.6"
-when = "2026-10-14"
+version = "48.0.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-internal-component-macro]]
-version = "48.0.6"
-when = "2026-10-14"
+version = "48.0.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-internal-component-util]]
-version = "48.0.6"
-when = "2026-10-14"
+version = "48.0.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-internal-core]]
-version = "48.0.6"
-when = "2026-10-14"
+version = "48.0.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-internal-cranelift]]
-version = "48.0.6"
-when = "2026-10-14"
+version = "48.0.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-internal-fiber]]
-version = "48.0.6"
-when = "2026-10-14"
+version = "48.0.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-internal-jit-debug]]
-version = "48.0.6"
-when = "2026-10-14"
+version = "48.0.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-internal-jit-icache-coherence]]
-version = "48.0.6"
-when = "2026-10-14"
+version = "48.0.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-internal-unwinder]]
-version = "48.0.6"
-when = "2026-10-14"
+version = "48.0.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-internal-versioned-export-macros]]
-version = "48.0.6"
-when = "2026-10-14"
+version = "48.0.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-internal-wit-bindgen]]
-version = "48.0.6"
-when = "2026-10-14"
+version = "48.0.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-wasi]]
-version = "48.0.6"
-when = "2026-10-14"
+version = "48.0.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-wasi-io]]
-version = "48.0.6"
-when = "2026-10-14"
+version = "48.0.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wasmtime-wizer]]
-version = "48.0.6"
-when = "2026-10-14"
+version = "48.0.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wast]]
@@ -1471,18 +1471,18 @@ when = "2026-10-13"
 trusted-publisher = "github:bytecodealliance/wasm-tools"
 
 [[publisher.wiggle]]
-version = "48.0.6"
-when = "2026-10-14"
+version = "48.0.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wiggle-generate]]
-version = "48.0.6"
-when = "2026-10-14"
+version = "48.0.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.wiggle-macro]]
-version = "48.0.6"
-when = "2026-10-14"
+version = "48.0.7"
+when = "2026-10-19"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.winapi-util]]
