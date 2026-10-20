@@ -105,7 +105,7 @@ pub enum IndexBuildPhase {
 /// source for writer admission. Writers only update this record on the legacy
 /// `next_ticket` path; only builders refresh `owner_heartbeat_at`, which
 /// controls lease expiry.
-#[revisioned(revision = 4)]
+#[revisioned(revision = 5)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct IndexBuildState {
 	/// Build epoch. Stale generation-scoped keys are ignored by newer builds.
@@ -163,9 +163,44 @@ pub struct IndexBuildState {
 	#[revision(start = 4)]
 	#[serde(skip)]
 	pub initial_cursor: Option<RecordIdKey>,
+	/// What the builder that owns, or last owned, this generation builds
+	/// against, recorded as it takes ownership.
+	///
+	/// A build can be made against a definition its statement stages but never
+	/// commits. Once the process that started it is gone, this is what lets
+	/// the node that settles its lapsed owner, or resumes it, find that the
+	/// committed catalog does not describe what it wrote, and withdraw it.
+	/// `None` for a generation no builder has claimed yet, and for one recorded
+	/// before this field existed: what it was built against is unknown, and it
+	/// is never withdrawn on that account.
+	///
+	/// Skipped for serde, like `initial_cursor`: the record is persisted only
+	/// through `revision`.
+	#[revision(start = 5)]
+	#[serde(skip)]
+	pub basis: Option<IndexBuildBasis>,
 }
 
 impl_kv_value_revisioned!(IndexBuildState);
+
+/// What a build generation is built against, beyond its index's id: the
+/// parts of what it writes that a statement can change without giving the
+/// index a new id.
+///
+/// A redefined index always takes a new id, so a build of an existing id can
+/// differ from the committed catalog only in the format version its layout
+/// follows, and in the analyzer a full-text build was handed by its
+/// statement's transaction.
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IndexBuildBasis {
+	/// The index format version the build's layout follows.
+	pub format_version: u16,
+	/// The analyzer a full-text build analyses with, as its statement's
+	/// transaction read it; `None` for a build that reads the committed
+	/// analyzer in each transaction of its own, which is never stale.
+	pub analyzer: Option<surrealdb_catalog::AnalyzerDefinition>,
+}
 
 /// Durable admission marker written before the user transaction commits.
 ///

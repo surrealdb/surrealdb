@@ -9,11 +9,102 @@ pub(super) use surrealdb_datastore::index_state::{
 	CatalogIndexState, catalog_index_state, durable_index_error_reason, report_status_from_phase,
 };
 
-use super::{BUILD_OWNER_LEASE_SECS, IndexBuildPhase, IndexBuildState};
+use super::{
+	BUILD_OWNER_LEASE_SECS, IndexBuildBasis, IndexBuildPhase, IndexBuildReportStatus,
+	IndexBuildState,
+};
+use crate::catalog::{AnalyzerDefinition, FromStored as _, IndexDefinition};
 use crate::idx::IndexKeyBase;
 use crate::key::KVKey;
-use crate::key::schema::{IdxRoot, IndexNameKey, TableKey};
+use crate::key::schema::{AnalyzerKey, IdxRoot, IndexDefKey, IndexNameKey, TableKey};
 use crate::kvs::{Error as KvsError, FeatureLevel, Release, Transaction, storage_error};
+
+/// Whether analyzers `a` and `b` analyse the same way: the same function,
+/// tokenizers and filters. Their names and comments do not count.
+pub(super) fn analyzers_analyse_alike(a: &AnalyzerDefinition, b: &AnalyzerDefinition) -> bool {
+	a.function == b.function && a.tokenizers == b.tokenizers && a.filters == b.filters
+}
+
+/// Whether the catalog, as `tx` reads it, describes what a build made against
+/// `basis` wrote for the index `ikb` names: a definition of the index at
+/// `basis`'s format version, and, where the build was handed an analyzer, an
+/// analyzer of that name that analyses as that one does.
+///
+/// `None` where the catalog holds no definition of the index, or one staged
+/// for removal: the index is being retired or was never committed, which the
+/// paths that retire it settle ([`retire_uncommitted_build`]).
+pub(super) async fn catalog_describes_basis(
+	tx: &Transaction,
+	ikb: &IndexKeyBase,
+	basis: &IndexBuildBasis,
+) -> Result<Option<bool>> {
+	let (ns, db, tb) = (ikb.ns(), ikb.db(), ikb.table());
+	let name = IndexNameKey {
+		ns,
+		db,
+		tb: Cow::Borrowed(tb),
+		ix: ikb.index(),
+	};
+	let Some(name) = tx.get_key(&name, None).await? else {
+		return Ok(None);
+	};
+	let definition = IndexDefKey {
+		ns,
+		db,
+		tb: Cow::Borrowed(tb),
+		ix: Cow::Borrowed(name.as_str()),
+	};
+	let Some(stored) = tx.get_key(&definition, None).await? else {
+		return Ok(None);
+	};
+	let definition = IndexDefinition::from_stored(&stored)?;
+	if definition.prepare_remove {
+		return Ok(None);
+	}
+	if definition.format_version != basis.format_version {
+		return Ok(Some(false));
+	}
+	let Some(built) = &basis.analyzer else {
+		return Ok(Some(true));
+	};
+	let key = AnalyzerKey {
+		ns,
+		db,
+		az: Cow::Borrowed(built.name.as_str()),
+	};
+	let Some(stored) = tx.get_key(&key, None).await? else {
+		return Ok(Some(false));
+	};
+	let committed = AnalyzerDefinition::from_stored(&stored)?;
+	Ok(Some(analyzers_analyse_alike(&committed, built)))
+}
+
+/// Whether `state` names a generation built against a basis the catalog, as
+/// `tx` reads it, does not describe ([`catalog_describes_basis`]). A
+/// generation with no recorded basis is never stale.
+pub(super) async fn build_basis_is_stale(
+	tx: &Transaction,
+	ikb: &IndexKeyBase,
+	state: &IndexBuildState,
+) -> Result<bool> {
+	let Some(basis) = &state.basis else {
+		return Ok(false);
+	};
+	Ok(catalog_describes_basis(tx, ikb, basis).await? == Some(false))
+}
+
+/// `state` withdrawn: its generation moved to `Error`, reported `aborted`,
+/// with its owner cleared, so no query reads it and the resume scan leaves it.
+fn withdrawn_build_state(state: &IndexBuildState) -> IndexBuildState {
+	let mut withdrawn = state.clone();
+	withdrawn.phase = IndexBuildPhase::Error;
+	withdrawn.owner = None;
+	withdrawn.error = None;
+	withdrawn.report_status = Some(IndexBuildReportStatus::Aborted);
+	withdrawn.updated_at = Utc::now();
+	withdrawn.owner_heartbeat_at = None;
+	withdrawn
+}
 
 /// Delete build state and every generation-scoped queue for one index.
 ///
@@ -110,7 +201,7 @@ pub(crate) enum BuildOwner {
 	/// owner may be cleared ([`lapsed_online_owners_clear`]), with the state
 	/// that names it. It still fences until a transaction clears it with
 	/// [`clear_lapsed_online_owner`].
-	Lapsed(IndexBuildState),
+	Lapsed(Box<IndexBuildState>),
 }
 
 /// Who holds the build of the index `ikb` names, read through `tx`: with a
@@ -140,8 +231,15 @@ pub(crate) async fn build_owner_of(
 	let Some(state) = state else {
 		return Ok(BuildOwner::Released);
 	};
-	if online_owner_lapsed(&state, Utc::now()) && lapsed_online_owners_clear(tx).await? {
-		return Ok(BuildOwner::Lapsed(state));
+	// A state that records its build's basis was written by a builder of this
+	// release, which writes nothing of the index after `Online` and heartbeats
+	// its ownership while its statement is open; a node of an earlier release
+	// cannot decode it, let alone own it. Its lapse means that builder has
+	// stopped, whatever the store's feature level.
+	if online_owner_lapsed(&state, Utc::now())
+		&& (state.basis.is_some() || lapsed_online_owners_clear(tx).await?)
+	{
+		return Ok(BuildOwner::Lapsed(Box::new(state)));
 	}
 	Ok(if build_owner_holds(Some(state)) {
 		BuildOwner::Held
@@ -216,7 +314,9 @@ pub(crate) fn online_owner_lapsed(state: &IndexBuildState, now: DateTime<Utc>) -
 /// feature level is the cluster-wide record that no such node runs: raising
 /// it is refused while a running node records an older release or none. A
 /// store held at [`FeatureLevel::Legacy`] keeps every `Online` owner fencing
-/// until it releases or a `REBUILD INDEX` rewrites its build state.
+/// until it releases or a `REBUILD INDEX` rewrites its build state, except one
+/// whose state records its build's basis, which only a builder of this release
+/// writes ([`build_owner_of`]).
 pub(crate) async fn lapsed_online_owners_clear(tx: &Transaction) -> Result<bool> {
 	Ok(matches!(
 		tx.feature_level_state().await?.level,
@@ -236,15 +336,52 @@ pub(crate) async fn lapsed_online_owners_clear(tx: &Transaction) -> Result<bool>
 /// statement that commits first leaves `tx` to retry against the definition
 /// it published. Clearing on expiry alone would let a compactor fold the
 /// build's pendings through the definition that statement is replacing.
+///
+/// A generation whose recorded basis the catalog, as `tx` reads it, does not
+/// describe is withdrawn instead of left `Online` ([`build_basis_is_stale`]):
+/// its statement did not commit what the build was made against, and the
+/// process that would have withdrawn it is gone. The fence makes that read
+/// final, as a statement still open can no longer commit after `tx`.
+///
+/// # Returns
+/// Whether it withdrew the generation. A caller owes a withdrawn generation no
+/// fold and no compaction request: no query reads it, and the next build of
+/// the index starts over.
 pub(crate) async fn clear_lapsed_online_owner(
 	tx: &Transaction,
 	ikb: &IndexKeyBase,
 	state: &IndexBuildState,
-) -> Result<()> {
-	let mut cleared = state.clone();
-	cleared.owner = None;
-	cleared.updated_at = Utc::now();
+) -> Result<bool> {
+	let stale = build_basis_is_stale(tx, ikb, state).await?;
+	let cleared = if stale {
+		withdrawn_build_state(state)
+	} else {
+		let mut cleared = state.clone();
+		cleared.owner = None;
+		cleared.updated_at = Utc::now();
+		cleared
+	};
 	tx.put_compare_key(&ikb.new_bs_key(), &cleared, Some(state)).await?;
+	fence_table_definition(tx, ikb).await?;
+	Ok(stale)
+}
+
+/// Withdraw, in `tx`, the lapsed `Building` or `Closing` generation that
+/// `state`, read from `!bs`, names, whose basis the catalog does not describe
+/// ([`build_basis_is_stale`]), and fence the statement its build may still be
+/// waiting on, as [`clear_lapsed_online_owner`] does.
+///
+/// The withdrawal is a compare-and-swap against `state`. The fence makes the
+/// catalog read that found the basis stale final: of `tx` and a statement
+/// still open on the index, whichever commits second fails, so a statement
+/// that commits what the build was made against first leaves `tx` to retry
+/// against it, and one still open can no longer commit after `tx`.
+pub(super) async fn withdraw_stale_lapsed_build(
+	tx: &Transaction,
+	ikb: &IndexKeyBase,
+	state: &IndexBuildState,
+) -> Result<()> {
+	tx.put_compare_key(&ikb.new_bs_key(), &withdrawn_build_state(state), Some(state)).await?;
 	fence_table_definition(tx, ikb).await
 }
 

@@ -17,12 +17,16 @@ use temp_dir::TempDir;
 use web_time::Instant;
 
 use crate::CommunityComposer;
-use crate::catalog::providers::CatalogProvider;
+use crate::catalog::INDEX_FORMAT_VERSION;
+use crate::catalog::providers::{
+	CatalogProvider, DatabaseProvider, NamespaceProvider, TableProvider,
+};
 use crate::ctx::CancelHandle;
 use crate::dbs::Session;
 use crate::kvs::testing::{RetryableConflictSite, inject_retryable_conflict};
 use crate::kvs::{Datastore, QueryRequest};
 use crate::types::PublicValue;
+use crate::val::TableName;
 
 /// Rows in the indexed table.
 const ROWS: usize = 2_000;
@@ -114,12 +118,12 @@ async fn building(ds: &Datastore, ses: &Session, ix: &str) -> serde_json::Value 
 	info.into_json_value().get("building").cloned().expect("INFO FOR INDEX reports the build")
 }
 
-/// Assert that `ix` is queryable, holds every row of `t`, and answers a KNN
-/// query from the index.
-async fn assert_ready_and_answers_knn(ds: &Datastore, ses: &Session, ix: &str) {
+/// Assert that `ix` is queryable, holds all `rows` rows of `t`, and answers a
+/// KNN query from the index.
+async fn assert_ready_and_answers_knn(ds: &Datastore, ses: &Session, ix: &str, rows: usize) {
 	let building = building(ds, ses, ix).await;
 	assert_eq!(building["status"], "ready", "{ix} is not ready: {building}");
-	assert_eq!(building["initial"], ROWS, "{ix} did not index every row: {building}");
+	assert_eq!(building["initial"], rows, "{ix} did not index every row: {building}");
 	let query = format!(
 		"SELECT id, vector::distance::knn() AS d FROM t \
 		 WHERE v <|3,40|> array::concat([5], array::repeat(0, {})) ORDER BY d",
@@ -146,7 +150,7 @@ async fn a_blocking_diskann_rebuild_outlasting_the_retained_history_commits() {
 	.await;
 	seed_rows(&ds, &ses).await;
 	run_one(&ds, &ses, "REBUILD INDEX knn_ix ON t").await;
-	assert_ready_and_answers_knn(&ds, &ses, "knn_ix").await;
+	assert_ready_and_answers_knn(&ds, &ses, "knn_ix", ROWS).await;
 	ds.shutdown().await.unwrap();
 }
 
@@ -368,5 +372,148 @@ async fn a_blocking_rebuild_nested_in_a_block_keeps_the_block_atomic() {
 	);
 	let markers = run_one(&ds, &ses, "SELECT * FROM marker").await.into_json_value();
 	assert_eq!(markers, serde_json::json!([]), "the block committed past its failed rebuild");
+	ds.shutdown().await.unwrap();
+}
+
+/// Stamp the stored definition of `ix` on `t` with `format_version`, as a
+/// binary that wrote that format would have left it, and bump the table so
+/// cached index lists pick the change up.
+///
+/// An index stamped at format 0 reads and writes its private, legacy doc-ID
+/// layout, which the current format's shared doc-ID layout does not share.
+async fn stamp_index_format(ds: &Datastore, ix: &str, format_version: u16) {
+	let tx = ds.transaction(Write).await.unwrap();
+	let ns = tx.get_ns_by_name("test", None).await.unwrap().expect("namespace exists");
+	let db = tx.get_db_by_name("test", "test", None).await.unwrap().expect("database exists");
+	let tb: TableName = "t".into();
+	let def = tx
+		.get_tb_index(ns.namespace_id, db.database_id, &tb, ix, None)
+		.await
+		.unwrap()
+		.expect("index exists");
+	let mut stamped = (*def).clone();
+	stamped.format_version = format_version;
+	tx.put_tb_index(ns.namespace_id, db.database_id, &tb, &stamped).await.unwrap();
+	let table = tx.expect_tb(ns.namespace_id, db.database_id, &tb).await.unwrap();
+	tx.put_tb("test", "test", &table).await.unwrap();
+	tx.commit().await.unwrap();
+}
+
+/// The format version the committed definition of `ix` on `t` names.
+async fn index_format(ds: &Datastore, ix: &str) -> u16 {
+	let tx = ds.transaction(Write).await.unwrap();
+	let ns = tx.get_ns_by_name("test", None).await.unwrap().expect("namespace exists");
+	let db = tx.get_db_by_name("test", "test", None).await.unwrap().expect("database exists");
+	let tb: TableName = "t".into();
+	let def = tx
+		.get_tb_index(ns.namespace_id, db.database_id, &tb, ix, None)
+		.await
+		.unwrap()
+		.expect("index exists");
+	tx.cancel().await.unwrap();
+	def.format_version
+}
+
+/// The rows the KNN query of [`assert_ready_and_answers_knn`] returns, or the
+/// error it fails with.
+async fn knn_rows(ds: &Datastore, ses: &Session) -> Result<serde_json::Value, String> {
+	let query = format!(
+		"SELECT id, vector::distance::knn() AS d FROM t \
+		 WHERE v <|3,40|> array::concat([5], array::repeat(0, {})) ORDER BY d",
+		DIMENSION - 1
+	);
+	let mut results = run(ds, ses, &query).await;
+	assert_eq!(results.len(), 1, "expected one result for the KNN query");
+	results.remove(0).map(PublicValue::into_json_value)
+}
+
+/// Run `sql`, a blocking `REBUILD INDEX` of a DiskANN index on the legacy
+/// doc-ID layout inside a transaction, over more rows than the retained write
+/// history holds.
+///
+/// A rebuild that moves the index's format stages its generation in the
+/// transaction and builds once the transaction has committed, so the build
+/// never holds the transaction open past the retained history. The commit
+/// succeeds and stamps the definition at the current format; once the build
+/// settles, the index is `ready` with every row and answers KNN through the
+/// index.
+async fn assert_legacy_rebuild_commits_and_answers_through_the_index(sql: &str) {
+	let (_dir, ds, ses) = small_history_ds().await;
+	run_one(
+		&ds,
+		&ses,
+		&format!(
+			"DEFINE INDEX knn_ix ON t FIELDS v DISKANN DIMENSION {DIMENSION} DIST EUCLIDEAN TYPE I8"
+		),
+	)
+	.await;
+	stamp_index_format(&ds, "knn_ix", 0).await;
+	seed_rows(&ds, &ses).await;
+	let found = knn_rows(&ds, &ses).await;
+	assert_eq!(
+		found.as_ref().ok().and_then(|rows| rows.as_array()).map(Vec::len),
+		Some(3),
+		"the legacy index does not answer KNN before the rebuild: {found:?}"
+	);
+	let results = run(&ds, &ses, sql).await;
+	assert!(
+		results.iter().all(Result::is_ok),
+		"the rebuild's transaction did not commit: {results:?}"
+	);
+	assert_eq!(
+		index_format(&ds, "knn_ix").await,
+		INDEX_FORMAT_VERSION,
+		"the committed rebuild did not stamp the current format"
+	);
+	// The commit publishes the staged generation, so the report is that
+	// generation's from here on, and settles once its build does.
+	let report = settled_build(&ds, &ses, "knn_ix").await;
+	assert_eq!(report["status"], "ready", "the committed rebuild did not finish: {report}");
+	assert_ready_and_answers_knn(&ds, &ses, "knn_ix", ROWS).await;
+	ds.shutdown().await.unwrap();
+}
+
+/// A blocking `REBUILD INDEX` of a legacy-layout index inside `BEGIN ...
+/// COMMIT` commits, and the rebuilt index answers KNN through the index.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_legacy_rebuild_in_a_transaction_commits_and_answers_through_the_index() {
+	assert_legacy_rebuild_commits_and_answers_through_the_index(
+		"BEGIN; REBUILD INDEX knn_ix ON t; COMMIT;",
+	)
+	.await;
+}
+
+/// A blocking `REBUILD INDEX` of a legacy-layout index nested in a block
+/// commits, and the rebuilt index answers KNN through the index.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_legacy_rebuild_nested_in_a_block_commits_and_answers_through_the_index() {
+	assert_legacy_rebuild_commits_and_answers_through_the_index("{ REBUILD INDEX knn_ix ON t; };")
+		.await;
+}
+
+/// A blocking `REBUILD INDEX` of an index already at the current format whose
+/// transaction cannot commit leaves the index `ready`: the definition the
+/// rollback keeps describes the layout the build wrote, so the published
+/// generation still serves it, and KNN goes through the index.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_uncommitted_current_format_rebuild_keeps_its_index_ready() {
+	let (_dir, ds, ses) = small_history_ds().await;
+	run_one(
+		&ds,
+		&ses,
+		&format!(
+			"DEFINE INDEX knn_ix ON t FIELDS v DISKANN DIMENSION {DIMENSION} DIST EUCLIDEAN TYPE I8"
+		),
+	)
+	.await;
+	seed_rows(&ds, &ses).await;
+	let results = run(&ds, &ses, "BEGIN; REBUILD INDEX knn_ix ON t; COMMIT;").await;
+	assert!(
+		results
+			.iter()
+			.any(|r| r.as_ref().is_err_and(|err| err.contains("could not check for conflicts"))),
+		"the rebuild's transaction did not fail to commit: {results:?}"
+	);
+	assert_ready_and_answers_knn(&ds, &ses, "knn_ix", ROWS).await;
 	ds.shutdown().await.unwrap();
 }

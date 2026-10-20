@@ -44,6 +44,7 @@ mod durable_session;
 mod field_migrations;
 pub(crate) mod fixtures;
 mod generator;
+mod index_build_state;
 mod module_definition;
 mod stored_record;
 mod table_migration_state;

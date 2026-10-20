@@ -296,6 +296,7 @@ fn durable_build_state_for_phase(
 		updated: Some(0),
 		pending: Some(0),
 		initial_cursor: None,
+		basis: None,
 	}
 }
 
@@ -3394,6 +3395,7 @@ async fn fresh_build_cleans_stale_durable_queue_generations() -> Result<()> {
 			updated: None,
 			pending: None,
 			initial_cursor: None,
+			basis: None,
 		},
 	)
 	.await?;
@@ -3801,6 +3803,7 @@ async fn takeover_preserves_durable_progress_counts() -> Result<()> {
 				updated: Some(updated),
 				pending: Some(5),
 				initial_cursor: None,
+				basis: None,
 			},
 		)
 		.await?;
@@ -3885,6 +3888,7 @@ async fn takeover_resumes_initial_scan_from_checkpoint() -> Result<()> {
 			updated: None,
 			pending: None,
 			initial_cursor: Some(RecordIdKey::from("c".to_string())),
+			basis: None,
 		},
 	)
 	.await?;
@@ -3972,6 +3976,7 @@ async fn takeover_resumes_count_initial_scan_from_checkpoint() -> Result<()> {
 			updated: None,
 			pending: None,
 			initial_cursor: Some(RecordIdKey::from("c".to_string())),
+			basis: None,
 		},
 	)
 	.await?;
@@ -4054,6 +4059,7 @@ async fn count_tail_crash_after_commit_does_not_double_count_on_takeover() -> Re
 			updated: None,
 			pending: None,
 			initial_cursor: None,
+			basis: None,
 		},
 	)
 	.await?;
@@ -4172,6 +4178,7 @@ async fn abort_mid_scan_never_checkpoints_unindexed_records() -> Result<()> {
 			updated: None,
 			pending: None,
 			initial_cursor: Some(RecordIdKey::from(1i64)),
+			basis: None,
 		},
 	)
 	.await?;
@@ -4271,6 +4278,7 @@ async fn abort_during_count_tail_pass_never_commits_partial_baselines() -> Resul
 			updated: None,
 			pending: None,
 			initial_cursor: Some(RecordIdKey::from(500i64)),
+			basis: None,
 		},
 	)
 	.await?;
@@ -4380,6 +4388,7 @@ async fn resume_scan_adopts_stalled_concurrent_build() -> Result<()> {
 			updated: None,
 			pending: None,
 			initial_cursor: None,
+			basis: None,
 		},
 	)
 	.await?;
@@ -4528,6 +4537,7 @@ async fn periodic_task_resumes_stalled_build() -> Result<()> {
 			updated: None,
 			pending: None,
 			initial_cursor: None,
+			basis: None,
 		},
 	)
 	.await?;
@@ -4608,6 +4618,7 @@ async fn distributed_writer_admission_does_not_extend_builder_lease() -> Result<
 		updated: None,
 		pending: None,
 		initial_cursor: None,
+		basis: None,
 	};
 	let tx = ds_a.transaction(TransactionType::Write).await?;
 	tx.set_key(&ikb.new_bs_key(), &stale_state).await?;
@@ -4708,6 +4719,7 @@ async fn writer_admission_batches_reservations_per_user_transaction() -> Result<
 		updated: None,
 		pending: None,
 		initial_cursor: None,
+		basis: None,
 	};
 	let tx = ds.transaction(TransactionType::Write).await?;
 	tx.set_key(&ikb.new_bs_key(), &building).await?;
@@ -4803,6 +4815,7 @@ async fn writer_admission_cancelled_batch_clears_durable_queue() -> Result<()> {
 		updated: None,
 		pending: None,
 		initial_cursor: None,
+		basis: None,
 	};
 	let tx = ds.transaction(TransactionType::Write).await?;
 	tx.set_key(&ikb.new_bs_key(), &building).await?;
@@ -5094,6 +5107,7 @@ async fn seed_build_state(
 		updated: None,
 		pending: None,
 		initial_cursor: None,
+		basis: None,
 	};
 	if matches!(phase, IndexBuildPhase::Error) {
 		state.error = Some("seeded test failure".to_string());
@@ -5271,6 +5285,7 @@ async fn acquire_build_state_waits_for_prior_generation_reservations() -> Result
 		updated: None,
 		pending: None,
 		initial_cursor: None,
+		basis: None,
 	};
 	let seed_tx = ds_a.transaction(TransactionType::Write).await?;
 	seed_tx.set_key(&ikb.new_bs_key(), &errored).await?;
@@ -5756,6 +5771,7 @@ async fn distributed_blocking_rebuild_takes_over_expired_remote_owner() -> Resul
 			updated: Some(0),
 			pending: Some(0),
 			initial_cursor: None,
+			basis: None,
 		},
 	)
 	.await?;
@@ -6130,8 +6146,8 @@ async fn a_build_whose_definition_committed_is_not_aborted_by_its_rollback() -> 
 }
 
 /// A rebuild whose statement's commit applied but reported its outcome
-/// unknown is not aborted by that statement's rollback actions, the rebuild's
-/// own abort included: the new generation goes on and publishes.
+/// unknown is not aborted by that statement's rollback actions: the new
+/// generation goes on and publishes.
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_rebuild_whose_statement_committed_is_not_aborted_by_its_rollback() -> Result<()> {
@@ -6191,7 +6207,6 @@ async fn assert_a_committed_rebuild_is_not_aborted(between: Option<&'static str>
 	let building = local_builder_for_key(&ds, ns, db, &table, ix.index_id)
 		.await?
 		.expect("the build registers a local builder");
-	txn.on_rollback(super::builder::AbortUncommittedRebuild::boxed(Arc::clone(&building))).await;
 
 	commit_with_an_unknown_outcome(&ds, &session, &txn, between).await?;
 
@@ -10456,7 +10471,8 @@ async fn build_ownership_outlives_a_concurrent_build_until_its_statement_commits
 /// A statement transaction dropped without being committed or cancelled runs
 /// neither of its hooks, so the half of the gate a concurrent build waits for
 /// never arrives. The build stops waiting once that transaction is gone,
-/// without building.
+/// without building, and ends `aborted` with its ownership cleared, as a
+/// rolled-back statement's build does.
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_concurrent_build_whose_statement_transaction_is_dropped_stops_waiting() -> Result<()> {
@@ -10489,7 +10505,15 @@ async fn a_concurrent_build_whose_statement_transaction_is_dropped_stops_waiting
 	wait_for_finished_builder(&building).await?;
 
 	let state = durable_build_state(&ds, &ikb).await?;
-	assert_eq!(state.phase, IndexBuildPhase::Building, "the build must not have scanned");
+	assert!(!state.initial_complete, "the build must not have scanned: {state:?}");
+	assert_eq!(state.initial, None, "the build must not have scanned: {state:?}");
+	assert_eq!(
+		state.phase,
+		IndexBuildPhase::Error,
+		"a build whose statement never committed must end as a rolled-back one does: {state:?}"
+	);
+	assert_eq!(state.report_status, Some(IndexBuildReportStatus::Aborted));
+	assert_eq!(state.owner, None, "a build no task runs must not keep its ownership");
 	Ok(())
 }
 
@@ -10753,7 +10777,9 @@ async fn releasing_build_ownership_requeues_compaction_skipped_by_the_fence() ->
 
 /// A statement that does not commit leaves the definition background
 /// compaction was already reading, so the fence it was holding has to go too —
-/// otherwise a rolled-back rebuild strands the index with no maintenance.
+/// otherwise a rolled-back rebuild strands the index with no maintenance. The
+/// committed definition describes the layout the build wrote, so the
+/// generation it published still serves it and stays `Online`.
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread")]
 async fn build_ownership_is_released_when_its_statement_rolls_back() -> Result<()> {
@@ -10782,6 +10808,981 @@ async fn build_ownership_is_released_when_its_statement_rolls_back() -> Result<(
 
 	let state = durable_build_state(&ds, &ikb).await?;
 	assert_eq!(state.owner, None, "a rolled-back statement must not leave the index fenced");
+	assert_eq!(
+		state.phase,
+		IndexBuildPhase::Online,
+		"a build of the committed definition must stay published"
+	);
+	Ok(())
+}
+
+/// A rolled-back statement whose build was made against a definition other
+/// than the committed one withdraws the generation it published: an index
+/// committed at format 0 reads its legacy doc-ID layout, not the one a build
+/// at the current format wrote, so `Online` would report it ready while it
+/// answered from data it cannot find.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rolled_back_build_of_an_uncommitted_definition_is_withdrawn() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;",
+	)
+	.await?;
+	// The build is handed the current-format definition, as a rebuild of a
+	// legacy index is, while the catalog keeps the legacy one.
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "hx").await?;
+	downgrade_index_format(&ds, "t", "hx", 0).await?;
+	execute_all(&ds, &session, "CREATE t:1 SET vec = [1.0, 0.0];").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	let txn = build_index_inside_an_open_statement_transaction(
+		&ds,
+		&session,
+		ns,
+		db,
+		&table,
+		Arc::clone(&ix),
+		true,
+	)
+	.await?;
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.phase, IndexBuildPhase::Online, "the build publishes before its statement");
+	txn.cancel().await?;
+
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.owner, None, "a rolled-back statement must not leave the index fenced");
+	assert_eq!(
+		state.phase,
+		IndexBuildPhase::Error,
+		"a build of a definition the rollback took back must not stay published"
+	);
+	assert_eq!(state.report_status, Some(IndexBuildReportStatus::Aborted));
+	Ok(())
+}
+
+/// Lapse whatever owner lease the build state of `ikb` holds, as time would,
+/// and run the resume scan, which settles a lapsed owner or carries on a
+/// stalled build through a builder of its own. Answers how many builds the
+/// scan carried on.
+#[cfg(feature = "kv-mem")]
+async fn lapse_and_run_the_resume_scan(ds: &Arc<Datastore>, ikb: &IndexKeyBase) -> Result<usize> {
+	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+	let mut lapsed = durable_build_state(ds, ikb).await?;
+	lapsed.updated_at = expired;
+	lapsed.owner_heartbeat_at = lapsed.owner_heartbeat_at.map(|_| expired);
+	set_durable_build_state(ds, ikb, lapsed).await?;
+	ds.resume_stalled_index_builds(Duration::from_secs(30), CancellationToken::new()).await
+}
+
+/// An HNSW index stamped at format 0, published `Online` by a build at the
+/// current format whose statement then rolled back, with the withdrawal that
+/// rollback owes cut short by the datastore's shutdown: the generation is left
+/// `Online`, owned by a build no process will settle.
+#[cfg(feature = "kv-mem")]
+async fn published_build_whose_withdrawal_was_cut_short() -> Result<(Arc<Datastore>, IndexKeyBase)>
+{
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "hx").await?;
+	downgrade_index_format(&ds, "t", "hx", 0).await?;
+	execute_all(&ds, &session, "CREATE t:1 SET vec = [1.0, 0.0];").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	let txn = build_index_inside_an_open_statement_transaction(
+		&ds,
+		&session,
+		ns,
+		db,
+		&table,
+		Arc::clone(&ix),
+		true,
+	)
+	.await?;
+	let shutdown = inject_non_retryable_error(
+		NonRetryableErrorSite::ConcurrentIndexWithdrawalShutdown,
+		ds.id(),
+	);
+	txn.cancel().await?;
+	drop(shutdown);
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.phase, IndexBuildPhase::Online, "the withdrawal was cut short: {state:?}");
+	assert!(state.owner.is_some(), "the cut-short withdrawal left the owner set: {state:?}");
+	Ok((ds, ikb))
+}
+
+/// Assert that the build state of `ikb` is withdrawn: `Error`, reported
+/// `aborted`, with no owner.
+#[cfg(feature = "kv-mem")]
+async fn assert_withdrawn(ds: &Datastore, ikb: &IndexKeyBase) -> Result<()> {
+	let state = durable_build_state(ds, ikb).await?;
+	assert_eq!(
+		(state.phase, state.report_status, state.owner),
+		(IndexBuildPhase::Error, Some(IndexBuildReportStatus::Aborted), None),
+		"a build of a definition the rollback took back stayed published: {state:?}"
+	);
+	Ok(())
+}
+
+/// A published build whose statement rolled back to a definition that does
+/// not describe it, and whose withdrawal the datastore's shutdown cut short,
+/// is withdrawn once its owner's lease lapses: the build state records what
+/// the build was made against, so the resume scan, which settles the lapsed
+/// owner, finds that the committed definition does not describe it, without
+/// the process that started the build.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_published_build_whose_withdrawal_was_cut_short_is_withdrawn_once_its_lease_lapses()
+-> Result<()> {
+	let (ds, ikb) = published_build_whose_withdrawal_was_cut_short().await?;
+	lapse_and_run_the_resume_scan(&ds, &ikb).await?;
+	assert_withdrawn(&ds, &ikb).await?;
+	// A compaction pass afterwards leaves the withdrawn generation as it is.
+	Datastore::index_compaction(Arc::clone(&ds), Duration::from_secs(1), CancellationToken::new())
+		.await?;
+	assert_withdrawn(&ds, &ikb).await
+}
+
+/// [`a_published_build_whose_withdrawal_was_cut_short_is_withdrawn_once_its_lease_lapses`],
+/// settled by a compaction pass rather than the resume scan: the pass withdraws
+/// the generation in a transaction of its own, rather than fold the build's
+/// pendings through the committed definition that does not read them.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_compaction_pass_withdraws_a_published_build_whose_withdrawal_was_cut_short() -> Result<()>
+{
+	let (ds, ikb) = published_build_whose_withdrawal_was_cut_short().await?;
+	assert!(
+		compaction_requests(&ds, &ikb).await? > 0,
+		"the build must leave compaction requests for the pass to visit"
+	);
+	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+	let mut lapsed = durable_build_state(&ds, &ikb).await?;
+	lapsed.updated_at = expired;
+	lapsed.owner_heartbeat_at = Some(expired);
+	set_durable_build_state(&ds, &ikb, lapsed).await?;
+	Datastore::index_compaction(Arc::clone(&ds), Duration::from_secs(1), CancellationToken::new())
+		.await?;
+	assert_withdrawn(&ds, &ikb).await
+}
+
+/// [`a_published_build_whose_withdrawal_was_cut_short_is_withdrawn_once_its_lease_lapses`]
+/// on a store held at the `Legacy` feature level, where a lapsed `Online` owner
+/// with no recorded basis keeps fencing: one whose state records its basis was
+/// written by a builder of this release, so its lapse is settled all the same.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_published_build_whose_withdrawal_was_cut_short_is_withdrawn_on_a_legacy_store()
+-> Result<()> {
+	let (ds, ikb) = published_build_whose_withdrawal_was_cut_short().await?;
+	hold_the_store_at_legacy(&ds).await?;
+	lapse_and_run_the_resume_scan(&ds, &ikb).await?;
+	assert_withdrawn(&ds, &ikb).await
+}
+
+/// An HNSW index stamped at format 0, whose build at the current format, started
+/// by a statement still open, stopped on the memory threshold before it
+/// published, and whose statement then rolled back with the withdrawal that
+/// rollback owes cut short by the datastore's shutdown: the generation is left
+/// `Building`, owned by a build no process will settle.
+#[cfg(feature = "kv-mem")]
+async fn stopped_build_whose_withdrawal_was_cut_short() -> Result<(Arc<Datastore>, IndexKeyBase)> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "hx").await?;
+	downgrade_index_format(&ds, "t", "hx", 0).await?;
+	execute_all(&ds, &session, "CREATE t:1 SET vec = [1.0, 0.0];").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	let threshold = inject_non_retryable_error(
+		NonRetryableErrorSite::ConcurrentIndexInitialBatchMemoryThreshold,
+		ds.id(),
+	);
+	let (txn, completion) = start_index_build_inside_an_open_statement_transaction(
+		&ds,
+		&session,
+		ns,
+		db,
+		&table,
+		Arc::clone(&ix),
+		true,
+	)
+	.await?;
+	completion
+		.expect("a blocking build has a completion")
+		.await
+		.expect_err("the build stops on the injected memory threshold");
+	drop(threshold);
+	let shutdown = inject_non_retryable_error(
+		NonRetryableErrorSite::ConcurrentIndexWithdrawalShutdown,
+		ds.id(),
+	);
+	txn.cancel().await?;
+	drop(shutdown);
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.phase, IndexBuildPhase::Building, "the withdrawal was cut short: {state:?}");
+	Ok((ds, ikb))
+}
+
+/// [`a_published_build_whose_withdrawal_was_cut_short_is_withdrawn_once_its_lease_lapses`]
+/// for a build that stopped on the memory threshold before it published: the
+/// resume scan withdraws it rather than carry it on from checkpoints written
+/// for a definition that never committed.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stopped_build_whose_withdrawal_was_cut_short_is_not_resumed() -> Result<()> {
+	let (ds, ikb) = stopped_build_whose_withdrawal_was_cut_short().await?;
+	let resumed = lapse_and_run_the_resume_scan(&ds, &ikb).await?;
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(resumed, 0, "the resume scan carried on the rolled-back build: {state:?}");
+	assert_withdrawn(&ds, &ikb).await
+}
+
+/// The resume scan's withdrawal of a stale stopped build fences the
+/// statements still open on its table, as clearing a lapsed `Online` owner
+/// does: the withdrawal decides from the committed catalog, so a statement
+/// that could still commit what the build was made against must not commit
+/// after it. Shown with a statement that restamps the table's definition, as
+/// `DEFINE INDEX` and `REBUILD INDEX` do.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn withdrawing_a_stale_stopped_build_fences_the_open_statements_on_its_table() -> Result<()> {
+	let (ds, ikb) = stopped_build_whose_withdrawal_was_cut_short().await?;
+	let session = Session::owner().with_ns("test").with_db("test");
+	let (ns, db, table) = (ikb.ns(), ikb.db(), ikb.table().clone());
+	let statement = Arc::new(ds.transaction(TransactionType::Write).await?);
+	let table_def = catch!(statement, statement.get_tb(ns, db, &table, None).await)
+		.expect("table should exist");
+	let opt = ds.setup_options(&session);
+	let (ns_name, db_name) = catch!(statement, opt.ns_db());
+	catch!(
+		statement,
+		statement
+			.replace_tb(
+				ns_name,
+				db_name,
+				&crate::catalog::TableDefinition {
+					cache_indexes_ts: Uuid::now_v7(),
+					..(*table_def).clone()
+				},
+			)
+			.await
+	);
+
+	assert_eq!(lapse_and_run_the_resume_scan(&ds, &ikb).await?, 0);
+	assert_withdrawn(&ds, &ikb).await?;
+	let err = statement
+		.commit()
+		.await
+		.expect_err("a statement open on the table must not commit after the withdrawal");
+	assert!(is_retryable_transaction_conflict(&err), "expected a conflict, got: {err}");
+	Ok(())
+}
+
+/// A generation recorded with no basis — as every generation written before
+/// the build state carried one is — is never withdrawn on that account: what
+/// it was built against is unknown, so the scan that settles its lapsed owner
+/// clears the owner and leaves it `Online`, as for any lapsed owner.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_lapsed_build_with_no_recorded_basis_is_not_withdrawn() -> Result<()> {
+	let (ds, ikb) = published_build_whose_withdrawal_was_cut_short().await?;
+	let mut unrecorded = durable_build_state(&ds, &ikb).await?;
+	unrecorded.basis = None;
+	set_durable_build_state(&ds, &ikb, unrecorded).await?;
+
+	lapse_and_run_the_resume_scan(&ds, &ikb).await?;
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(
+		(state.phase, state.owner),
+		(IndexBuildPhase::Online, None),
+		"a generation with no recorded basis was withdrawn: {state:?}"
+	);
+	Ok(())
+}
+
+/// A build records what it is made against as it takes ownership, and a
+/// lapsed owner of a generation whose basis the committed catalog describes is
+/// only cleared: the generation stays `Online`. On a store held at the
+/// `Legacy` feature level too, when `legacy`: a recorded basis shows the owner
+/// is a builder of this release.
+#[cfg(feature = "kv-mem")]
+async fn assert_a_lapsed_build_whose_basis_the_catalog_describes_stays_online(
+	legacy: bool,
+) -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;
+		 CREATE t:1 SET vec = [1.0, 0.0];",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "hx").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	let txn = build_index_inside_an_open_statement_transaction(
+		&ds,
+		&session,
+		ns,
+		db,
+		&table,
+		Arc::clone(&ix),
+		true,
+	)
+	.await?;
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(
+		state.basis,
+		Some(IndexBuildBasis {
+			format_version: ix.format_version,
+			analyzer: None,
+		}),
+		"the build did not record what it is made against: {state:?}"
+	);
+	assert!(state.owner.is_some(), "the open statement still holds the build's ownership");
+	if legacy {
+		hold_the_store_at_legacy(&ds).await?;
+	}
+
+	lapse_and_run_the_resume_scan(&ds, &ikb).await?;
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(
+		(state.phase, state.owner),
+		(IndexBuildPhase::Online, None),
+		"a generation whose basis the catalog describes was not kept online: {state:?}"
+	);
+	drop(txn);
+	Ok(())
+}
+
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_lapsed_build_whose_basis_the_catalog_describes_stays_online() -> Result<()> {
+	assert_a_lapsed_build_whose_basis_the_catalog_describes_stays_online(false).await
+}
+
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_lapsed_build_whose_basis_the_catalog_describes_stays_online_on_a_legacy_store()
+-> Result<()> {
+	assert_a_lapsed_build_whose_basis_the_catalog_describes_stays_online(true).await
+}
+
+/// A rollback whose close drain has already used its allowance does not read
+/// the committed catalog for a published build: it withdraws the build, the
+/// side that never leaves `ready` an index its definition may not read, rather
+/// than hold the statement's error behind a read. Shown for a rebuild of an
+/// unchanged definition, which a read within the allowance would keep.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rollback_past_its_drain_allowance_withdraws_a_published_rebuild() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(&ds, &session, "DEFINE INDEX ix ON t FIELDS v; CREATE t:1 SET v = 1;").await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "ix").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	let txn = build_index_inside_an_open_statement_transaction(
+		&ds,
+		&session,
+		ns,
+		db,
+		&table,
+		Arc::clone(&ix),
+		true,
+	)
+	.await?;
+	assert_eq!(durable_build_state(&ds, &ikb).await?.phase, IndexBuildPhase::Online);
+	let building = local_builder_for_key(&ds, ns, db, &table, ix.index_id)
+		.await?
+		.expect("the build registers a local builder");
+
+	let drain_started_at = Instant::now()
+		.checked_sub(Duration::from_secs(60))
+		.expect("the clock has run for a minute");
+	super::builder::ReleaseBuildOwnership::rollback_action(Arc::clone(&building))
+		.run(drain_started_at)
+		.await?;
+	assert_withdrawn(&ds, &ikb).await?;
+	// The rollback the transaction then runs finds nothing left to release.
+	txn.cancel().await?;
+	assert_withdrawn(&ds, &ikb).await
+}
+
+/// A rollback whose withdrawal of a published build meets conflicts past the
+/// close's allowance stops retrying at the allowance, rather than hold the
+/// close behind them. The generation it leaves `Online` records its basis, so
+/// once its owner's lease lapses the resume scan withdraws it.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rollback_gives_up_a_withdrawal_at_its_allowance_and_recovery_finishes_it() -> Result<()>
+{
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "hx").await?;
+	downgrade_index_format(&ds, "t", "hx", 0).await?;
+	execute_all(&ds, &session, "CREATE t:1 SET vec = [1.0, 0.0];").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	let txn = build_index_inside_an_open_statement_transaction(
+		&ds,
+		&session,
+		ns,
+		db,
+		&table,
+		Arc::clone(&ix),
+		true,
+	)
+	.await?;
+	assert_eq!(durable_build_state(&ds, &ikb).await?.phase, IndexBuildPhase::Online);
+	let building = local_builder_for_key(&ds, ns, db, &table, ix.index_id)
+		.await?
+		.expect("the build registers a local builder");
+
+	// The close's allowance ends a second from now, and every build-state
+	// transition conflicts for far longer.
+	let drain_started_at = Instant::now()
+		.checked_sub(super::BUILD_ABORT_STOP_BUDGET - Duration::from_secs(1))
+		.expect("the clock has run for the allowance");
+	let site = RetryableConflictSite::ConcurrentIndexBuildStateRead;
+	let conflicts = inject_retryable_conflicts(site, ds.id(), REPEATED_RETRY_CONFLICTS);
+	let rollback = timeout(
+		Duration::from_secs(10),
+		super::builder::ReleaseBuildOwnership::rollback_action(Arc::clone(&building))
+			.run(drain_started_at),
+	)
+	.await;
+	drop(conflicts);
+	rollback.map_err(|_| anyhow::anyhow!("the rollback outran its close's allowance"))??;
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(
+		(state.phase, state.owner.is_some()),
+		(IndexBuildPhase::Online, true),
+		"the withdrawal the allowance cut short leaves the generation for recovery: {state:?}"
+	);
+
+	lapse_and_run_the_resume_scan(&ds, &ikb).await?;
+	assert_withdrawn(&ds, &ikb).await?;
+	txn.cancel().await?;
+	assert_withdrawn(&ds, &ikb).await
+}
+
+/// A rollback of a statement whose commit's outcome is unknown reads the
+/// committed catalog once: the read that finds the catalog describing the
+/// build lets it go on, and its release keeps it `Online` without reading
+/// again, so no later read, nor the close's allowance running out before it,
+/// can withdraw a build that read confirmed.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rollback_of_a_commit_with_an_unknown_outcome_reads_the_catalog_once() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;
+		 CREATE t:1 SET vec = [1.0, 0.0];",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "hx").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	let txn = build_index_inside_an_open_statement_transaction(
+		&ds,
+		&session,
+		ns,
+		db,
+		&table,
+		Arc::clone(&ix),
+		true,
+	)
+	.await?;
+	assert_eq!(durable_build_state(&ds, &ikb).await?.phase, IndexBuildPhase::Online);
+
+	let before = super::builder::committed_catalog_reads::count(ds.id());
+	commit_with_an_unknown_outcome(&ds, &session, &txn, None).await?;
+	let reads = super::builder::committed_catalog_reads::count(ds.id()) - before;
+	assert_eq!(reads, 1, "the rollback read the committed catalog {reads} times");
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(
+		(state.phase, state.owner),
+		(IndexBuildPhase::Online, None),
+		"a build the catalog confirmed was not kept online: {state:?}"
+	);
+	Ok(())
+}
+
+/// The withdrawal of [`a_rolled_back_build_of_an_uncommitted_definition_is_withdrawn`]
+/// outlasts more conflicts than a best-effort transition retries: it is the
+/// only write that takes the generation out of `Online`, and a lapsed owner
+/// cleared later keeps the generation `Online`. However long the lease has
+/// lapsed afterwards, the resume scan finds the generation withdrawn.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_withdrawal_outlasts_the_conflicts_a_release_gives_up_on() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "hx").await?;
+	downgrade_index_format(&ds, "t", "hx", 0).await?;
+	execute_all(&ds, &session, "CREATE t:1 SET vec = [1.0, 0.0];").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	let txn = build_index_inside_an_open_statement_transaction(
+		&ds,
+		&session,
+		ns,
+		db,
+		&table,
+		Arc::clone(&ix),
+		true,
+	)
+	.await?;
+	assert_eq!(durable_build_state(&ds, &ikb).await?.phase, IndexBuildPhase::Online);
+	// One conflict for each attempt a best-effort transition makes, and one
+	// more.
+	let site = RetryableConflictSite::ConcurrentIndexBuildStateRead;
+	let conflicts = inject_retryable_conflicts(site, ds.id(), BEST_EFFORT_TRANSITION_RETRIES + 2);
+	txn.cancel().await?;
+	drop(conflicts);
+
+	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+	let mut lapsed = durable_build_state(&ds, &ikb).await?;
+	lapsed.updated_at = expired;
+	lapsed.owner_heartbeat_at = lapsed.owner_heartbeat_at.map(|_| expired);
+	set_durable_build_state(&ds, &ikb, lapsed).await?;
+	ds.resume_stalled_index_builds(Duration::from_secs(30), CancellationToken::new()).await?;
+
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(
+		(state.phase, state.report_status, state.owner),
+		(IndexBuildPhase::Error, Some(IndexBuildReportStatus::Aborted), None),
+		"a build of a definition the rollback took back must not stay published: {state:?}"
+	);
+	Ok(())
+}
+
+/// A build whose statement rolls back while its `Online` publish retries a
+/// conflict never commits `Online`: each attempt reads the abort first, so the
+/// publish declines and the build ends `aborted`. The definition is unchanged,
+/// so nothing at the release gate would withdraw a generation it published.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_build_aborted_while_retrying_its_publish_never_publishes() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;
+		 CREATE t:1 SET vec = [1.0, 0.0];",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "hx").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	let site = RetryableConflictSite::ConcurrentIndexOnlinePublish;
+	let held = inject_retryable_conflicts(site, ds.id(), REPEATED_RETRY_CONFLICTS);
+	let (txn, _completion) = start_index_build_inside_an_open_statement_transaction(
+		&ds,
+		&session,
+		ns,
+		db,
+		&table,
+		Arc::clone(&ix),
+		true,
+	)
+	.await?;
+	let building = local_builder_for_key(&ds, ns, db, &table, ix.index_id)
+		.await?
+		.expect("the build registers a local builder");
+	wait_for_retry_conflict(site, ds.id(), REPEATED_RETRY_CONFLICTS).await?;
+	txn.cancel().await?;
+	assert_ne!(
+		durable_build_state(&ds, &ikb).await?.phase,
+		IndexBuildPhase::Online,
+		"the build must still be held inside its publish"
+	);
+	drop(held);
+	wait_for_finished_builder(&building).await?;
+
+	assert!(!building.is_online(), "the aborted build committed its publish");
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.phase, IndexBuildPhase::Error, "the aborted build published: {state:?}");
+	assert_eq!(state.report_status, Some(IndexBuildReportStatus::Aborted));
+	assert_eq!(state.owner, None, "the aborted build must not leave the index fenced");
+	Ok(())
+}
+
+/// Whichever half of the release gate arrives second withdraws a build whose
+/// statement rolled back to a definition that does not describe it. Here the
+/// statement rolls back after the build has published `Online`, while the
+/// build is held in the doc-ID reclaim sweep it runs before arriving at the
+/// gate, so the statement arrives first and the build withdraws the generation
+/// itself.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_build_published_before_its_statement_rolled_back_is_withdrawn_by_its_task() -> Result<()>
+{
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "hx").await?;
+	downgrade_index_format(&ds, "t", "hx", 0).await?;
+	execute_all(&ds, &session, "CREATE t:1 SET vec = [1.0, 0.0];").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	let park = super::doc_ids::reclaim_sweep_park::park(ds.id());
+	let (txn, _completion) = start_index_build_inside_an_open_statement_transaction(
+		&ds,
+		&session,
+		ns,
+		db,
+		&table,
+		Arc::clone(&ix),
+		true,
+	)
+	.await?;
+	let building = local_builder_for_key(&ds, ns, db, &table, ix.index_id)
+		.await?
+		.expect("the build registers a local builder");
+	timeout(Duration::from_secs(10), park.parked())
+		.await
+		.map_err(|_| anyhow::anyhow!("the build did not reach its reclaim sweep"))?;
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.phase, IndexBuildPhase::Online, "the build publishes before its sweep");
+	assert_eq!(state.owner, Some(building.owner), "the sweep runs under the build's ownership");
+
+	txn.cancel().await?;
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(
+		(state.phase, state.owner),
+		(IndexBuildPhase::Online, Some(building.owner)),
+		"the statement arrives first, so it leaves the release to the build"
+	);
+	drop(park);
+	wait_for_finished_builder(&building).await?;
+
+	assert!(building.is_online(), "the build published before its statement rolled back");
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.owner, None, "the build's release must not leave the index fenced");
+	assert_eq!(
+		state.phase,
+		IndexBuildPhase::Error,
+		"a build of a definition the rollback took back must not stay published"
+	);
+	assert_eq!(state.report_status, Some(IndexBuildReportStatus::Aborted));
+	Ok(())
+}
+
+/// A statement transaction dropped without being committed or cancelled
+/// leaves the catalog as a rollback does, so the keeper of a build published
+/// against a definition the catalog does not hold withdraws the generation as
+/// it releases in the statement's place.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_dropped_statement_transaction_withdraws_a_build_of_an_uncommitted_definition()
+-> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "hx").await?;
+	downgrade_index_format(&ds, "t", "hx", 0).await?;
+	execute_all(&ds, &session, "CREATE t:1 SET vec = [1.0, 0.0];").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	let txn = build_index_inside_an_open_statement_transaction(
+		&ds,
+		&session,
+		ns,
+		db,
+		&table,
+		Arc::clone(&ix),
+		true,
+	)
+	.await?;
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.phase, IndexBuildPhase::Online, "the build publishes before its statement");
+	assert!(state.owner.is_some(), "the open statement still holds the build's ownership");
+
+	drop(txn);
+
+	timeout(Duration::from_secs(10), async {
+		while durable_build_state(&ds, &ikb).await?.owner.is_some() {
+			sleep(Duration::from_millis(20)).await;
+		}
+		anyhow::Ok(())
+	})
+	.await
+	.map_err(|_| anyhow::anyhow!("the keeper did not settle the dropped statement's build"))??;
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(
+		state.phase,
+		IndexBuildPhase::Error,
+		"a build of a definition the dropped statement never committed must not stay published"
+	);
+	assert_eq!(state.report_status, Some(IndexBuildReportStatus::Aborted));
+	Ok(())
+}
+
+/// A full-text index over `t.f` analysed by `simple`, which lowercases, with
+/// `t:1` holding `Hello World`, so `f @@ 'hello'` finds `t:1`.
+#[cfg(feature = "kv-mem")]
+async fn fulltext_index_over_a_lowercasing_analyzer() -> Result<(Arc<Datastore>, Session)> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase;
+		 DEFINE INDEX ft ON t FIELDS f FULLTEXT ANALYZER simple BM25;
+		 CREATE t:1 SET f = 'Hello World'; CREATE t:2 SET f = 'goodbye';",
+	)
+	.await?;
+	assert_eq!(planner_result_ids(&ds, "SELECT id FROM t WHERE f @@ 'hello'").await?, ["t:1"]);
+	Ok((ds, session))
+}
+
+/// A blocking rebuild of a full-text index analyses with the analyzer as its
+/// statement's transaction reads it. A transaction that redefines that
+/// analyzer, rebuilds the index and is cancelled leaves the committed analyzer
+/// in place, which does not produce the terms the build indexed: the build is
+/// withdrawn rather than kept `ready` while `@@` misses the rows it matched.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cancelled_rebuild_under_a_redefined_analyzer_withdraws_the_build() -> Result<()> {
+	let (ds, session) = fulltext_index_over_a_lowercasing_analyzer().await?;
+	ds.execute(
+		"BEGIN; DEFINE ANALYZER OVERWRITE simple TOKENIZERS blank; REBUILD INDEX ft ON t; CANCEL;",
+		&session,
+		None,
+	)
+	.await?;
+
+	let report = index_building_json(&ds, &session, "t", "ft").await?;
+	let found = planner_result_ids(&ds, "SELECT id FROM t WHERE f @@ 'hello'")
+		.await
+		.map_err(|err| err.to_string());
+	assert_eq!(
+		report["status"], "aborted",
+		"the rebuild under the cancelled analyzer is not reported as aborted, and `@@ 'hello'` \
+		 returned {found:?}: {report}"
+	);
+	assert_eq!(
+		found,
+		Err("There was no suitable index supporting the expression: f @@ 'hello'".to_owned()),
+		"`@@` over the withdrawn index does not refuse to answer"
+	);
+	Ok(())
+}
+
+/// The counterpart of
+/// [`a_cancelled_rebuild_under_a_redefined_analyzer_withdraws_the_build`]: a
+/// cancelled rebuild whose analyzer is unchanged built what the committed
+/// definition and analyzer read, so the index stays `ready` and `@@` still
+/// matches.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cancelled_rebuild_under_an_unchanged_analyzer_keeps_the_index_ready() -> Result<()> {
+	let (ds, session) = fulltext_index_over_a_lowercasing_analyzer().await?;
+	ds.execute("BEGIN; REBUILD INDEX ft ON t; CANCEL;", &session, None).await?;
+
+	assert_eq!(index_building_status(&ds, &session, "t", "ft").await?, "ready");
+	assert_eq!(planner_result_ids(&ds, "SELECT id FROM t WHERE f @@ 'hello'").await?, ["t:1"]);
+	Ok(())
+}
+
+/// [`a_cancelled_rebuild_under_a_redefined_analyzer_withdraws_the_build`],
+/// with the index's removal staged after the rebuild. The removal stops the
+/// rebuild's build, which has already published, and the cancel rolls the
+/// removal back with the rebuild and the analyzer. That earlier stop must not
+/// keep the rollback from withdrawing the build: `@@` needs an index to
+/// answer, so over the withdrawn index it fails with an error naming the
+/// expression.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cancelled_rebuild_and_removal_under_a_redefined_analyzer_withdraws_the_build()
+-> Result<()> {
+	let (ds, session) = fulltext_index_over_a_lowercasing_analyzer().await?;
+	ds.execute(
+		"BEGIN; DEFINE ANALYZER OVERWRITE simple TOKENIZERS blank; REBUILD INDEX ft ON t; \
+		 REMOVE INDEX ft ON t; CANCEL;",
+		&session,
+		None,
+	)
+	.await?;
+
+	let report = index_building_json(&ds, &session, "t", "ft").await?;
+	let found = planner_result_ids(&ds, "SELECT id FROM t WHERE f @@ 'hello'")
+		.await
+		.map_err(|err| err.to_string());
+	assert_eq!(
+		report["status"], "aborted",
+		"the cancelled rebuild is not reported as aborted, and `@@ 'hello'` returned \
+		 {found:?}: {report}"
+	);
+	assert_eq!(
+		found,
+		Err("There was no suitable index supporting the expression: f @@ 'hello'".to_owned()),
+		"`@@` over the withdrawn index does not refuse to answer"
+	);
+	Ok(())
+}
+
+/// A build that stops on the memory threshold leaves its generation
+/// `Building` for the resume scan to carry on. When its statement then rolls
+/// back to a definition that does not describe the build — here the format-0
+/// one a rebuild at the current format replaces — the generation is withdrawn
+/// instead, so the resume scan never carries on from checkpoints written for
+/// a definition that did not commit.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rolled_back_build_stopped_by_the_memory_threshold_is_withdrawn() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "hx").await?;
+	downgrade_index_format(&ds, "t", "hx", 0).await?;
+	execute_all(&ds, &session, "CREATE t:1 SET vec = [1.0, 0.0];").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	let threshold = inject_non_retryable_error(
+		NonRetryableErrorSite::ConcurrentIndexInitialBatchMemoryThreshold,
+		ds.id(),
+	);
+	let (txn, completion) = start_index_build_inside_an_open_statement_transaction(
+		&ds,
+		&session,
+		ns,
+		db,
+		&table,
+		Arc::clone(&ix),
+		true,
+	)
+	.await?;
+	let err = completion
+		.expect("a blocking build has a completion")
+		.await
+		.expect_err("the build stops on the injected memory threshold");
+	drop(threshold);
+	assert!(err.to_string().contains("memory threshold"), "unexpected build error: {err}");
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.phase, IndexBuildPhase::Building, "left for the resume scan: {state:?}");
+
+	txn.cancel().await?;
+
+	// Lapse whatever lease the rollback left, as time would, and let the
+	// resume scan look: nothing is left for it to carry on.
+	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+	let mut lapsed = durable_build_state(&ds, &ikb).await?;
+	lapsed.updated_at = expired;
+	lapsed.owner_heartbeat_at = lapsed.owner_heartbeat_at.map(|_| expired);
+	set_durable_build_state(&ds, &ikb, lapsed.clone()).await?;
+	let resumed =
+		ds.resume_stalled_index_builds(Duration::from_secs(30), CancellationToken::new()).await?;
+	assert_eq!(resumed, 0, "the resume scan carried on the rolled-back build: {lapsed:?}");
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(
+		(state.phase, state.report_status, state.owner),
+		(IndexBuildPhase::Error, Some(IndexBuildReportStatus::Aborted), None),
+		"a stopped build of a definition the rollback took back must be withdrawn: {state:?}"
+	);
+	Ok(())
+}
+
+/// A build aborted while it waits in `Closing` for an admitted writer never
+/// publishes `Online`: the stages it cut short leave queued work the index
+/// would be missing. The statement awaiting the build inside its transaction
+/// rolls back during that wait, against an unchanged definition, so no
+/// withdrawal at the release gate would take back a generation it published.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_build_aborted_while_closing_never_publishes() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX ix ON t FIELDS v; CREATE t:1 SET v = 1; CREATE t:2 SET v = 2;",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "ix").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	// Hold the build in its initial cleanup, so a writer's reservation can be
+	// planted against its generation before it reaches `Closing`.
+	let site = RetryableConflictSite::ConcurrentIndexInitialCleanup;
+	let guard = inject_retryable_conflicts(site, ds.id(), REPEATED_RETRY_CONFLICTS);
+	let (txn, _completion) = start_index_build_inside_an_open_statement_transaction(
+		&ds,
+		&session,
+		ns,
+		db,
+		&table,
+		Arc::clone(&ix),
+		true,
+	)
+	.await?;
+	wait_for_retry_conflict(site, ds.id(), REPEATED_RETRY_CONFLICTS).await?;
+	let generation = durable_build_state(&ds, &ikb).await?.generation;
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.set_key(
+		&ikb.new_br_key(generation, u64::MAX / 2),
+		&IndexBuildReservation {
+			node: ds.id(),
+			expires_at: Utc::now() + chrono::Duration::hours(1),
+		},
+	)
+	.await?;
+	tx.commit().await?;
+	drop(guard);
+
+	timeout(Duration::from_secs(10), async {
+		while durable_build_state(&ds, &ikb).await?.phase != IndexBuildPhase::Closing {
+			sleep(Duration::from_millis(10)).await;
+		}
+		anyhow::Ok(())
+	})
+	.await
+	.map_err(|_| anyhow::anyhow!("the build did not reach Closing"))??;
+	// Let the build enter its wait for the planted reservation.
+	sleep(Duration::from_millis(200)).await;
+	txn.cancel().await?;
+
+	let building = local_builder_for_key(&ds, ns, db, &table, ix.index_id)
+		.await?
+		.expect("the build registers a local builder");
+	wait_for_finished_builder(&building).await?;
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.phase, IndexBuildPhase::Error, "the aborted build published: {state:?}");
+	assert_eq!(state.report_status, Some(IndexBuildReportStatus::Aborted));
+	assert_eq!(state.owner, None, "the aborted build must not leave the index fenced");
 	Ok(())
 }
 
@@ -11385,7 +12386,7 @@ async fn a_release_that_fails_to_commit_keeps_ownership_and_queues_nothing() -> 
 		"a release that did not commit must queue nothing"
 	);
 
-	building.release_build_ownership(state.generation).await;
+	building.release_build_ownership(state.generation, None).await;
 
 	let state = durable_build_state(&ds, &ikb).await?;
 	assert_eq!(state.owner, None, "a release that commits must clear the owner");
@@ -13830,6 +14831,7 @@ async fn resume_scan_adopts_one_stalled_build_at_a_time() -> Result<()> {
 				updated: None,
 				pending: None,
 				initial_cursor: None,
+				basis: None,
 			},
 		)
 		.await?;
@@ -13946,6 +14948,7 @@ async fn takeover_installs_generation_before_draining_reservations() -> Result<(
 			updated: None,
 			pending: None,
 			initial_cursor: None,
+			basis: None,
 		},
 	)
 	.await?;
@@ -14670,6 +15673,7 @@ async fn generation_flip_fences_in_flight_ticket_allocation() -> Result<()> {
 			updated: None,
 			pending: None,
 			initial_cursor: None,
+			basis: None,
 		},
 	)
 	.await?;
@@ -16280,6 +17284,7 @@ async fn strand_count_build(
 			updated: None,
 			pending: None,
 			initial_cursor: cursor,
+			basis: None,
 		},
 	)
 	.await?;
@@ -18513,7 +19518,8 @@ async fn the_resume_scan_clears_a_stranded_online_owner() -> Result<()> {
 
 /// On a store whose feature level is not raised — a cluster that may still
 /// run a builder that folds after `Online` without a heartbeat — a lapsed
-/// `Online` owner keeps fencing: neither the compactor nor the resume scan
+/// `Online` owner whose state records no basis, as an earlier release's
+/// builder leaves it, keeps fencing: neither the compactor nor the resume scan
 /// clears it.
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread")]
@@ -18521,6 +19527,9 @@ async fn a_lapsed_online_owner_keeps_fencing_on_a_legacy_store() -> Result<()> {
 	let (ds, session) = new_index_test_ds().await?;
 	let ikb = hnsw_index_with_pendings(&ds, &session).await?;
 	let owner = strand_the_online_owner(&ds, &ikb).await?;
+	let mut unrecorded = durable_build_state(&ds, &ikb).await?;
+	unrecorded.basis = None;
+	set_durable_build_state(&ds, &ikb, unrecorded).await?;
 	hold_the_store_at_legacy(&ds).await?;
 
 	Datastore::index_compaction(Arc::clone(&ds), Duration::from_secs(1), CancellationToken::new())

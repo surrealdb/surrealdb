@@ -525,6 +525,26 @@ compaction and build of a DiskANN index, including one an earlier release built.
 rebuild each DiskANN index on that release with `REBUILD INDEX`, which writes
 its graph again from the table.
 
+### The index build state records what each build is made against
+
+An index's build state (`!bs`) is written in a new revision. It records the
+format, and for a full-text index the analyzer, that the build owning it is
+made against. When that build's process is gone, the node that settles its
+lapsed owner or resumes it compares the record with the committed definition,
+and ends the build `aborted` when its statement never committed what the build
+wrote. A build state an earlier release wrote records nothing, and is settled
+and resumed as before.
+
+**Impact**:
+
+- A 3.x release cannot decode the build state of an index this release has
+  built, rebuilt or resumed, so writes to its table and `REBUILD INDEX` fail
+  there. This holds for a store held at Legacy too, and `rollback_check` does
+  not report it.
+
+**What to do**: nothing when upgrading. Before going back to a 3.x release,
+remove each such index on this release, and define it again on that release.
+
 ### `ext::` in stored text is not downgrade-safe
 
 An extension call keeps the prefix it is written with, `ext::` or the

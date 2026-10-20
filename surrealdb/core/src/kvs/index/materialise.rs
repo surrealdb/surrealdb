@@ -34,8 +34,8 @@ use web_time::Instant;
 
 use super::IndexBuilder;
 use super::state::{
-	BuildOwner, build_owner, build_owner_of, clear_lapsed_online_owner, lapsed_online_owners_clear,
-	retire_uncommitted_build, uncommitted_build_lapsed,
+	BuildOwner, build_basis_is_stale, build_owner, build_owner_of, clear_lapsed_online_owner,
+	lapsed_online_owners_clear, retire_uncommitted_build, uncommitted_build_lapsed,
 };
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{FromStored, Index, IndexDefinition};
@@ -273,7 +273,17 @@ pub(crate) async fn compaction_write_guard(
 	if fenced_by_build_owner(&ix.index) {
 		match build_owner(tx, ikb, true).await? {
 			BuildOwner::Held => return Ok(CompactionWriteGuard::Fenced),
-			BuildOwner::Lapsed(state) => clear_lapsed_online_owner(tx, ikb, &state).await?,
+			// A lapsed generation built against what the catalog does not
+			// describe is not folded through the definition the catalog holds:
+			// the pass withdraws it in a transaction of its own
+			// ([`Materialiser::withdraw_stale_build`]), and this apply is
+			// fenced meanwhile.
+			BuildOwner::Lapsed(state) => {
+				if build_basis_is_stale(tx, ikb, &state).await? {
+					return Ok(CompactionWriteGuard::Fenced);
+				}
+				clear_lapsed_online_owner(tx, ikb, &state).await?;
+			}
 			BuildOwner::Released => {}
 		}
 	}
@@ -453,6 +463,43 @@ impl Materialiser {
 		self.run_pass_held(ikb, canceller, lease, places).await
 	}
 
+	/// Withdraw the lapsed `Online` generation of the index `ikb` names, built
+	/// against what the catalog does not describe, in a transaction of its own
+	/// ([`clear_lapsed_online_owner`]).
+	///
+	/// # Returns
+	/// Whether it withdrew. A retryable conflict answers `false`, and so does an
+	/// owner that is no longer lapsed or a basis the catalog now describes: the
+	/// request is kept for the next pass.
+	async fn withdraw_stale_build(&self, ikb: &IndexKeyBase) -> Result<bool> {
+		let tx = self.transaction(Write).await?;
+		let staged = async {
+			let BuildOwner::Lapsed(state) = build_owner(&tx, ikb, true).await? else {
+				return Ok(false);
+			};
+			// Answers whether it withdrew. A clear that kept the generation
+			// `Online` is not this pass's to commit: it is cancelled below, and
+			// the apply's write guard clears that owner.
+			clear_lapsed_online_owner(&tx, ikb, &state).await
+		}
+		.await;
+		let withdrew = match staged {
+			Ok(true) => tx.commit().await.map(|()| true),
+			Ok(false) => {
+				let _ = tx.cancel().await;
+				return Ok(false);
+			}
+			Err(e) => {
+				let _ = tx.cancel().await;
+				Err(e)
+			}
+		};
+		match withdrew {
+			Err(e) if is_retryable_transaction_conflict(&e) => Ok(false),
+			withdrew => withdrew,
+		}
+	}
+
 	/// Retire the lapsed build of the index `ikb` names, whose definition never
 	/// committed, in a transaction of its own ([`retire_uncommitted_build`]).
 	///
@@ -600,7 +647,7 @@ impl Materialiser {
 		Datastore::ensure_not_cancelled(canceller)?;
 		// The catalog definition and the index's durable build state, read
 		// together so the ownership decision below costs no extra transaction.
-		let (ix, owner, lapsed) = {
+		let (ix, owner, lapsed, stale) = {
 			let txn = self.transaction(Read).await?;
 			let res = async {
 				let ix = txn
@@ -616,7 +663,15 @@ impl Materialiser {
 					_ => false,
 				};
 				let live = build_owner_of(&txn, state).await?;
-				Ok::<_, anyhow::Error>((ix, live, lapsed))
+				// A lapsed owner of a generation built against what the
+				// catalog does not describe, which this pass withdraws.
+				let stale = match &live {
+					BuildOwner::Lapsed(state) if ix.is_some() => {
+						build_basis_is_stale(&txn, ikb, state).await?
+					}
+					_ => false,
+				};
+				Ok::<_, anyhow::Error>((ix, live, lapsed, stale))
 			}
 			.await;
 			let _ = txn.cancel().await;
@@ -671,6 +726,18 @@ impl Materialiser {
 				return Ok(CompactionPassOutcome::Empty);
 			}
 		};
+		// A lapsed generation built against what the catalog does not describe
+		// is withdrawn rather than folded through the definition the catalog
+		// holds, and its request dropped: no query reads a withdrawn
+		// generation, and the next build of the index starts over. One the
+		// withdrawal could not settle keeps its request for the next pass.
+		if stale {
+			if self.withdraw_stale_build(ikb).await? {
+				trace!(target: TARGET, "Index compaction: Index {ikb:?} had a lapsed build its catalog does not describe, withdrew it");
+				return Ok(CompactionPassOutcome::Empty);
+			}
+			return Ok(CompactionPassOutcome::Fenced);
+		}
 		// A vector index whose build is still in flight is left alone until
 		// its owner releases it, because the catalog this pass reads may name
 		// a layout the build is replacing. A `REBUILD INDEX` that migrates

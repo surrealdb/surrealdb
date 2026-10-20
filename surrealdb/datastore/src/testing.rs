@@ -108,6 +108,10 @@ pub enum NonRetryableErrorSite {
 	/// commit, leaving the transaction finished and its writes discarded. A
 	/// release that owes no request never reaches it.
 	ConcurrentIndexOwnershipReleaseCommit,
+	/// Simulates the datastore shutting down under the transaction that
+	/// withdraws a build whose statement did not commit: raised in place of
+	/// that transaction's commit, with the error graceful shutdown returns.
+	ConcurrentIndexWithdrawalShutdown,
 	/// Simulates the cancel that ends an owned build-state transition whose
 	/// outcome is already decided failing: raised in place of that cancel's
 	/// result.
@@ -231,7 +235,8 @@ pub fn maybe_inject_non_retryable_error(site: NonRetryableErrorSite, node_id: Uu
 	match site {
 		// The error a batch commit surfaces once graceful shutdown has
 		// begun: the pre-apply gate refuses the commit with `Shutdown`.
-		NonRetryableErrorSite::ConcurrentIndexInitialBatchShutdown => {
+		NonRetryableErrorSite::ConcurrentIndexInitialBatchShutdown
+		| NonRetryableErrorSite::ConcurrentIndexWithdrawalShutdown => {
 			Err(surrealdb_kvs::Error::Shutdown.into())
 		}
 		// The error the builder raises when the process crosses the

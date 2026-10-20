@@ -22,14 +22,15 @@ use super::count::CountPrimaryProgress;
 use super::kind::{BaselinePolicy, BatchContext, BatchRange, Kind};
 use super::replay::InitialBatch;
 use super::state::{
-	BuildOwner, build_owner, build_owner_expired, clear_lapsed_online_owner,
-	delete_durable_build_artifacts, delete_stale_build_queues, durable_index_error_reason,
-	durable_report_count, is_condition_not_met, online_owner_lapsed, report_status_from_phase,
+	BuildOwner, analyzers_analyse_alike, build_basis_is_stale, build_owner, build_owner_expired,
+	clear_lapsed_online_owner, delete_durable_build_artifacts, delete_stale_build_queues,
+	durable_index_error_reason, durable_report_count, is_condition_not_met, online_owner_lapsed,
+	report_status_from_phase, withdraw_stale_lapsed_build,
 };
 use super::{
 	AcquiredBuild, BUILD_CLOSING_SLEEP, BUILD_OWNER_LEASE_SECS, BUILD_WAITING_HEARTBEAT,
-	BuildGeneration, IndexBuildPhase, IndexBuildReportStatus, IndexBuildState, IndexBuilding,
-	build_abort_deadline,
+	BuildGeneration, IndexBuildBasis, IndexBuildPhase, IndexBuildReportStatus, IndexBuildState,
+	IndexBuilding, build_abort_deadline,
 };
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::catalog::{
@@ -72,6 +73,15 @@ const BUILD_STATE_RETRY_SLEEP: Duration = Duration::from_millis(100);
 /// gives up, leaving `!bs` as it found it.
 pub(super) const BEST_EFFORT_TRANSITION_RETRIES: usize = 5;
 
+/// How many times [`Building::committed_catalog_holds_this_build`] reads the
+/// committed catalog before it answers that the catalog does not hold the
+/// build.
+const COMMITTED_CATALOG_READ_ATTEMPTS: u32 = 4;
+
+/// The pause after the first failed read of the committed catalog, doubled
+/// after each one that follows.
+const COMMITTED_CATALOG_READ_RETRY_SLEEP: Duration = Duration::from_millis(50);
+
 /// Writes an owned state transition stages in its transaction, after the
 /// compare-and-swap on `!bs` and before the commit, so they commit with it or
 /// not at all. A stage returns `None` when it has nothing to write, which
@@ -97,6 +107,15 @@ enum TransitionMode {
 	/// that cannot fail — one running as a transaction's close action — is
 	/// never held for long.
 	BestEffort,
+	/// The transition applies only while this builder still owns the
+	/// generation, and is otherwise a no-op that writes nothing, as
+	/// [`TransitionMode::BestEffort`]; but a conflict is retried until the
+	/// transition commits or fails otherwise, as [`TransitionMode::Required`].
+	/// For a transition no later writer would make in its place, whose loss
+	/// would outlive the build. With a deadline, no retry starts once the pause
+	/// before it would reach the deadline: the transition gives up, as a
+	/// best-effort one does, leaving `!bs` as it found it.
+	Persistent(Option<Instant>),
 }
 
 use crate::mem::ALLOC;
@@ -112,6 +131,18 @@ const RELEASE_GATE_BUILDER: u8 = 1 << 0;
 const RELEASE_GATE_STATEMENT: u8 = 1 << 1;
 /// Both halves have arrived, so durable ownership can be released.
 const RELEASE_GATE_OPEN: u8 = RELEASE_GATE_BUILDER | RELEASE_GATE_STATEMENT;
+
+/// [`Building::rollback`]: nothing for the release to decide. The statement
+/// committed, or its commit's outcome is unknown and the committed catalog
+/// describes the build, which goes on.
+const ROLLBACK_NONE: u8 = 0;
+/// [`Building::rollback`]: the statement did not commit, and nothing has read
+/// the committed catalog for it; the release reads it.
+const ROLLBACK_UNDECIDED: u8 = 1;
+/// [`Building::rollback`]: the statement's commit's outcome is unknown, and
+/// the committed catalog, read as it rolled back, does not describe the build;
+/// the release withdraws it without reading again.
+const ROLLBACK_WITHDRAW: u8 = 2;
 
 /// How [`Building::await_statement_closed`] ended.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -154,6 +185,29 @@ pub(super) mod statement_heartbeat {
 		fn drop(&mut self) {
 			EVERY.lock().expect("cadence lock").remove(&self.0);
 		}
+	}
+}
+
+/// How many times builds on each node read the committed catalog to decide a
+/// build whose statement did not commit
+/// ([`Building::committed_catalog_holds_this_build`]), for the tests that
+/// count them.
+#[cfg(test)]
+pub(super) mod committed_catalog_reads {
+	use std::collections::HashMap;
+	use std::sync::{LazyLock, Mutex};
+
+	use uuid::Uuid;
+
+	static READS: LazyLock<Mutex<HashMap<Uuid, usize>>> = LazyLock::new(Default::default);
+
+	pub(super) fn note(node: Uuid) {
+		*READS.lock().expect("reads lock").entry(node).or_default() += 1;
+	}
+
+	/// How many reads `node` has made.
+	pub(crate) fn count(node: Uuid) -> usize {
+		READS.lock().expect("reads lock").get(&node).copied().unwrap_or_default()
 	}
 }
 
@@ -344,6 +398,7 @@ impl BuildCompletion {
 
 	/// Whether this node runs the build, rather than waiting on a remote
 	/// owner's.
+	#[cfg_attr(not(test), allow(dead_code))]
 	pub(crate) fn started_here(&self) -> bool {
 		self.started_here
 	}
@@ -555,18 +610,33 @@ impl IndexBuilder {
 		// otherwise never see a build that produced no writes at all.
 		//
 		// The `drop(guard)` below is what makes `async move` capture this, and it
-		// also has to stay where it is: it must run after the build's last durable
-		// write, so a waiter that sees the flag knows no further write is coming,
-		// and before the result is sent, so a blocking `DEFINE INDEX` that has
-		// returned cannot be rejected as `IndexAlreadyBuilding`. Letting the guard
-		// fall out of scope instead would drop it here, at the end of this
-		// function, and report every build finished before it had begun.
+		// also has to stay where it is: it must run after the build's last write
+		// of index data or of its build's progress, and before the result is
+		// sent, so a blocking `DEFINE INDEX` that has returned cannot be rejected
+		// as `IndexAlreadyBuilding`. What follows it is only the keeper of a
+		// published generation ([`Building::keep_online_ownership`]), whose writes
+		// are owned transitions of `!bs`: a compare-and-swap against the state it
+		// read, which writes nothing once `!bs` is deleted or its generation
+		// replaced, so a waiter that deletes the build state after the flag still
+		// writes last (see [`Building::wait_finished`]). Letting the guard fall out
+		// of scope instead would drop it here, at the end of this function, and
+		// report every build finished before it had begun.
 		let guard = BuildingFinishGuard(Arc::clone(&building));
 		common::rt::spawn_detached(async move {
 			let r = if waits_for_statement {
 				match b.await_statement_closed(acquired.generation, acquired.phase).await {
 					Ok(StatementWait::Closed) => b.run_acquired(acquired).await,
-					Ok(StatementWait::Dropped | StatementWait::Aborted) => Ok(()),
+					// A transaction dropped without closing never committed,
+					// so its build ends as a rolled-back statement's does:
+					// aborted, recorded below, with its ownership cleared.
+					// Left `Building`, the generation would keep an owner no
+					// task heartbeats until its lease lapsed, and a blocking
+					// `REBUILD INDEX` would wait that lease out.
+					Ok(StatementWait::Dropped) => {
+						b.abort();
+						Ok(())
+					}
+					Ok(StatementWait::Aborted) => Ok(()),
 					Err(err) => Err(err),
 				}
 			} else {
@@ -581,16 +651,28 @@ impl IndexBuilder {
 				// `Building`/`Closing` with its last committed checkpoint:
 				// once the owner lease expires, the periodic resume scan (or
 				// a blocking statement takeover) continues the build from
-				// there. Recording a durable `Error` here would instead stop
-				// the build permanently and fail every subsequent write to
-				// the table on admission.
-				if is_shutdown_error(err) {
+				// there. Recording a durable `Error` here would instead end
+				// the build for good: `Error` is terminal, so the index stays
+				// out of the planner, and the writes admitted meanwhile queue
+				// under a generation nothing replays, until an operator runs
+				// `REBUILD INDEX`.
+				//
+				// The builder still arrives at the release gate, as it writes
+				// nothing more. A release leaves a generation that is not
+				// `Online` as it is, so one whose statement committed resumes.
+				// One whose statement did not commit, to a definition that
+				// does not describe this build, is withdrawn instead
+				// ([`Building::release_build_ownership`]): the resume scan
+				// would carry it on through the committed definition from
+				// checkpoints written for the one that never committed.
+				let transient = if is_shutdown_error(err) {
 					info!(
 						index = %b.ix.name,
 						table = %b.ix.table_name,
 						"index build interrupted by datastore shutdown; \
 						 it will resume after restart"
 					);
+					true
 				} else if is_memory_threshold_error(err) {
 					warn!(
 						index = %b.ix.name,
@@ -599,15 +681,24 @@ impl IndexBuilder {
 						 it will resume from its checkpoint once the owner \
 						 lease expires"
 					);
+					true
+				} else {
+					false
+				};
+				if transient {
+					if generation != 0 && b.arrive_at_release_gate(RELEASE_GATE_BUILDER) {
+						b.release_build_ownership(generation, None).await;
+					}
 				} else if generation != 0 {
 					let _ = b.mark_durable_error(generation, err.to_string()).await;
 				}
 			} else if b.aborted.load(Ordering::Acquire) && generation != 0 {
 				let _ = b.mark_durable_aborted(generation).await;
 			}
-			// Publishes `finished` after the last durable write and before the
-			// result is sent; it is also the only reason the guard is captured by
-			// this future at all. See where the guard is constructed.
+			// Publishes `finished` after the last write of index data and
+			// progress and before the result is sent; it is also the only reason
+			// the guard is captured by this future at all. See where the guard is
+			// constructed.
 			drop(guard);
 			let published = r.is_ok() && generation != 0 && b.online.load(Ordering::Acquire);
 			if let Some(s) = sdr
@@ -859,7 +950,9 @@ impl IndexBuilder {
 		}
 		// The writes that follow in this transaction decide afresh about this index.
 		tx.clear_cached_index_admissions();
-		stage_new_generation(tx, &ikb, existing.as_ref(), None).await.map(RebuildStaging::Staged)
+		stage_new_generation(tx, &ikb, existing.as_ref(), None, None)
+			.await
+			.map(RebuildStaging::Staged)
 	}
 
 	/// Whether `ix`'s format differs from the one the committed catalog holds for the index, and
@@ -1020,9 +1113,11 @@ impl IndexBuilder {
 	/// [`AwaitBuildAfterCommit`]).
 	///
 	/// A rebuild awaited after the commit, started on this node, is unfinished
-	/// when `txn` closes, so it is aborted should `txn` not commit (see
-	/// [`AbortUncommittedRebuild`]). A new definition's build is cleaned up by
-	/// the rollback action its statement registers.
+	/// when `txn` closes, so it is aborted should `txn` not commit: its start
+	/// registers the release of its ownership on `txn`, whose rollback half
+	/// settles the build ([`Building::defer_ownership_release`]). A new
+	/// definition's build is also cleaned up by the rollback action its
+	/// statement registers.
 	pub(crate) async fn run_awaited_after_commit(
 		&self,
 		ctx: &FrozenContext,
@@ -1037,17 +1132,12 @@ impl IndexBuilder {
 		let Some(completion) = self.start_build(ctx, opt, tb, ix, true, true).await? else {
 			return Ok(());
 		};
-		let started_here = completion.started_here().then(|| Arc::clone(&completion.building));
-		let rebuild = undo.is_none();
 		let wait = Box::new(AwaitBuildAfterCommit::new(Arc::clone(ctx), completion, undo));
 		if txn.wait_after_commit(wait).await.is_some() {
 			return Err(EngineError::unreachable(
 				"a transaction accepting after-commit waits refused one",
 			)
 			.into());
-		}
-		if rebuild && let Some(building) = started_here {
-			txn.on_rollback(Box::new(AbortUncommittedRebuild(building))).await;
 		}
 		Ok(())
 	}
@@ -1157,12 +1247,14 @@ pub(crate) enum RebuildStaging {
 ///
 /// An ownerless generation (`owner` is `None`) is adopted by the first builder to claim it
 /// ([`Building::claim_staged_generation`]), or, once it has stood for a whole lease unclaimed, by
-/// the takeover of an expired build.
+/// the takeover of an expired build. `basis` is what `owner` builds against
+/// ([`IndexBuildState::basis`]); an ownerless generation records none until it is claimed.
 pub(super) async fn stage_new_generation(
 	tx: &Transaction,
 	ikb: &IndexKeyBase,
 	existing: Option<&IndexBuildState>,
 	owner: Option<Uuid>,
+	basis: Option<IndexBuildBasis>,
 ) -> Result<BuildGeneration> {
 	let generation = existing.map(|s| s.generation.saturating_add(1)).unwrap_or(1);
 	let now = Utc::now();
@@ -1180,6 +1272,7 @@ pub(super) async fn stage_new_generation(
 		updated: None,
 		pending: None,
 		initial_cursor: None,
+		basis,
 	};
 	if let Some(previous) = existing.map(|s| s.generation) {
 		let previous_bt = ikb.new_bt_key(previous);
@@ -1236,6 +1329,19 @@ pub(super) struct Building {
 	/// [`Building::defer_ownership_release`] clears it for every build a
 	/// statement started, before that build is spawned.
 	release_gate: AtomicU8,
+	/// What the release must decide for the statement that started this build
+	/// ([`ROLLBACK_NONE`], [`ROLLBACK_UNDECIDED`] or [`ROLLBACK_WITHDRAW`]),
+	/// as its close settled it ([`Building::settle_uncommitted_statement`]).
+	/// The committed catalog is read for it at most once: by the rollback for
+	/// a commit whose outcome is unknown, whose verdict this carries, or by the
+	/// release otherwise.
+	///
+	/// Stored before the statement's half of `release_gate` arrives, so
+	/// whichever half arrives second reads it: the release then decides
+	/// whether a generation this builder still owns is withdrawn rather than
+	/// kept `Online`, or left to the resume scan after a transient error
+	/// ([`Building::release_build_ownership`]).
+	rollback: AtomicU8,
 	/// Wakes [`Building::await_statement_closed`] once the statement half of
 	/// `release_gate` has arrived or the build has been aborted.
 	statement_closed: Notify,
@@ -1361,6 +1467,7 @@ impl Building {
 			aborted: AtomicBool::new(false),
 			finished: AtomicBool::new(false),
 			release_gate: AtomicU8::new(RELEASE_GATE_STATEMENT),
+			rollback: AtomicU8::new(ROLLBACK_NONE),
 			statement_closed: Notify::new(),
 			statement_tx: std::sync::OnceLock::new(),
 			finished_notify: Notify::new(),
@@ -1673,8 +1780,31 @@ impl Building {
 					self.remote_generation.store(current.generation, Ordering::Release);
 					return Ok(None);
 				}
+				// A lapsed generation built against what the catalog does not
+				// describe is withdrawn rather than carried on, and this build
+				// starts a generation of its own on the next pass.
+				if build_basis_is_stale(&tx, &self.ikb, current).await? {
+					match withdraw_stale_lapsed_build(&tx, &self.ikb, current).await {
+						Ok(()) => {
+							self.commit_and_retryable_conflict(
+								&tx,
+								"transient conflict withdrawing a stale build, retrying",
+							)
+							.await?;
+						}
+						Err(err) if is_condition_not_met(&err) => {
+							let _ = tx.cancel().await;
+						}
+						Err(err) => {
+							let _ = tx.cancel().await;
+							return Err(err);
+						}
+					}
+					continue;
+				}
 				let mut next = current.clone();
 				next.owner = Some(self.owner);
+				next.basis = Some(self.basis());
 				self.rescan_without_barrier_proof(&tx, &mut next).await?;
 				next.error = None;
 				next.report_status =
@@ -1737,8 +1867,14 @@ impl Building {
 				continue;
 			}
 
-			let res =
-				stage_new_generation(&tx, &self.ikb, existing.as_ref(), Some(self.owner)).await;
+			let res = stage_new_generation(
+				&tx,
+				&self.ikb,
+				existing.as_ref(),
+				Some(self.owner),
+				Some(self.basis()),
+			)
+			.await;
 			let generation = match res {
 				Ok(generation) => {
 					if self
@@ -1864,6 +2000,7 @@ impl Building {
 			}
 			let mut next = current.clone();
 			next.owner = Some(self.owner);
+			next.basis = Some(self.basis());
 			self.rescan_without_barrier_proof(&tx, &mut next).await?;
 			let now = Utc::now();
 			next.updated_at = now;
@@ -1938,12 +2075,46 @@ impl Building {
 				tx.cancel().await?;
 				return Ok(None);
 			}
+			// A generation built against what the catalog does not describe is
+			// withdrawn rather than taken over: its checkpoints were written for
+			// a statement that did not commit.
+			if build_basis_is_stale(&tx, &self.ikb, &current).await? {
+				match withdraw_stale_lapsed_build(&tx, &self.ikb, &current).await {
+					Ok(()) => {
+						if self
+							.commit_and_retryable_conflict(
+								&tx,
+								"transient conflict withdrawing a stale build, retrying",
+							)
+							.await?
+						{
+							continue;
+						}
+						warn!(
+							index = %self.ix.name,
+							table = %self.ix.table_name,
+							"withdrew a lapsed index build made against a definition that did not \
+							 commit; run `REBUILD INDEX` to rebuild the index"
+						);
+						return Ok(None);
+					}
+					Err(err) if is_condition_not_met(&err) => {
+						let _ = tx.cancel().await;
+						continue;
+					}
+					Err(err) => {
+						let _ = tx.cancel().await;
+						return Err(err);
+					}
+				}
+			}
 			if catalog && !self.catalog_holds_this_build(&tx).await? {
 				tx.cancel().await?;
 				return Ok(None);
 			}
 			let mut next = current.clone();
 			next.owner = Some(self.owner);
+			next.basis = Some(self.basis());
 			self.rescan_without_barrier_proof(&tx, &mut next).await?;
 			next.error = None;
 			next.report_status =
@@ -2086,7 +2257,7 @@ impl Building {
 							"Index build state is missing during state update",
 						)
 						.into()),
-						TransitionMode::BestEffort => Ok(None),
+						TransitionMode::BestEffort | TransitionMode::Persistent(_) => Ok(None),
 					};
 				};
 				if current.generation != generation || current.owner != Some(self.owner) {
@@ -2101,7 +2272,7 @@ impl Building {
 							}
 							.into())
 						}
-						TransitionMode::BestEffort => Ok(None),
+						TransitionMode::BestEffort | TransitionMode::Persistent(_) => Ok(None),
 					};
 				}
 				let mut next = current.clone();
@@ -2161,6 +2332,11 @@ impl Building {
 				return Err(err.context(format!(
 					"gave up on the build-state transition after {BEST_EFFORT_TRANSITION_RETRIES} retries"
 				)));
+			}
+			if let TransitionMode::Persistent(Some(deadline)) = mode
+				&& Instant::now() + BUILD_STATE_RETRY_SLEEP >= deadline
+			{
+				return Err(err.context("gave up on the build-state transition at its deadline"));
 			}
 			debug!(
 				target: "surrealdb::core::kvs::index",
@@ -2410,55 +2586,70 @@ impl Building {
 	/// elsewhere in the cluster must keep seeing this index as owned, and
 	/// [`Self::release_build_ownership`] ends that window.
 	///
+	/// An aborted build is not published. Every attempt of the transition reads
+	/// the abort before it stages `Online`, so an abort that arrives while the
+	/// publish retries a conflict stops it at its next attempt: every stage
+	/// since the scan stops short on an abort and reports success, so the work
+	/// it left queued would be missing from an index reported ready. An abort
+	/// that arrives while the last attempt commits is settled at the release
+	/// gate instead ([`Self::release_build_ownership`]).
+	///
 	/// # Arguments
 	/// * `generation` - the generation this builder owns and publishes.
 	/// * `initial`, `updated` - the counts the published report carries.
 	/// * `release` - whether the publish also releases ownership.
+	///
+	/// # Returns
+	/// Whether it published: `false` for a build aborted before it did.
 	pub(super) async fn mark_durable_online(
 		&self,
 		generation: BuildGeneration,
 		initial: usize,
 		updated: usize,
 		release: bool,
-	) -> Result<()> {
+	) -> Result<bool> {
 		let request = (release && self.ix.index.queues_compaction()).then(|| self.ikb.clone());
 		let node_id = self.ctx.node_id();
-		self.transition_owned_build_state(
-			generation,
-			TransitionMode::Required,
-			false,
-			|state| {
-				state.phase = IndexBuildPhase::Online;
-				state.initial_complete = true;
-				state.error = None;
-				if release {
-					state.owner = None;
-				}
-				Self::set_report(
-					state,
-					IndexBuildReportStatus::Ready,
-					Some(initial),
-					Some(0),
-					Some(updated),
-				);
-				true
-			},
-			|tx| {
-				// Stands in for a publish that conflicts, so a test can hold the
-				// task after its last batch and before it reaches the release gate.
-				#[cfg(test)]
-				if let Err(err) = maybe_inject_retryable_conflict(
-					RetryableConflictSite::ConcurrentIndexOnlinePublish,
-					node_id,
-				) {
-					return Some(Box::pin(std::future::ready(Err(err))));
-				}
-				let ikb = request.clone()?;
-				Some(Box::pin(Self::stage_compaction_request(tx, ikb, node_id)))
-			},
-		)
-		.await?;
-		Ok(())
+		let published = self
+			.transition_owned_build_state(
+				generation,
+				TransitionMode::Required,
+				false,
+				|state| {
+					if self.aborted.load(Ordering::Acquire) {
+						return false;
+					}
+					state.phase = IndexBuildPhase::Online;
+					state.initial_complete = true;
+					state.error = None;
+					if release {
+						state.owner = None;
+					}
+					Self::set_report(
+						state,
+						IndexBuildReportStatus::Ready,
+						Some(initial),
+						Some(0),
+						Some(updated),
+					);
+					true
+				},
+				|tx| {
+					// Stands in for a publish that conflicts, so a test can hold the
+					// task after its last batch and before it reaches the release gate.
+					#[cfg(test)]
+					if let Err(err) = maybe_inject_retryable_conflict(
+						RetryableConflictSite::ConcurrentIndexOnlinePublish,
+						node_id,
+					) {
+						return Some(Box::pin(std::future::ready(Err(err))));
+					}
+					let ikb = request.clone()?;
+					Some(Box::pin(Self::stage_compaction_request(tx, ikb, node_id)))
+				},
+			)
+			.await?;
+		Ok(published.is_some())
 	}
 
 	/// Whether a publish of `generation` whose commit reported `err` applied
@@ -2523,7 +2714,9 @@ impl Building {
 	/// ([`Building::await_statement_closed`]). Registered on both outcomes: a
 	/// rolled-back statement leaves the previous definition in place, which is
 	/// the one background compaction was already reading, so no fence is needed
-	/// for it.
+	/// for it. Where that definition does not describe the layout this build
+	/// writes, the release withdraws the build instead of keeping it published
+	/// ([`Building::release_build_ownership`]).
 	///
 	/// A no-op for a build with no open statement transaction behind it — a
 	/// maintenance resume, whose definition was committed long before, or a
@@ -2548,9 +2741,11 @@ impl Building {
 	/// Whether `tx` holds this build's table under its table id, and a
 	/// definition of its index that describes the layout this build writes: the
 	/// same index id, table, columns, kind, `COUNT` guard and format, not staged
-	/// for removal. A change that leaves the layout alone, such as a comment,
-	/// does not count. Read from the keys themselves rather than through the
-	/// catalog: a build is started by work sealed off catalog reads.
+	/// for removal, and, for a build handed its statement's analyzer, an
+	/// analyzer of that name with the same function, tokenizers and filters. A
+	/// change that leaves the layout alone, such as a comment, does not count.
+	/// Read from the keys themselves rather than through the catalog: a build
+	/// is started by work sealed off catalog reads.
 	async fn catalog_holds_this_build(&self, tx: &Transaction) -> Result<bool> {
 		use crate::catalog::FromStored as _;
 		let (ns, db, tb) = (self.ix_key.ns, self.ix_key.db, &self.ix_key.tb);
@@ -2585,65 +2780,170 @@ impl Building {
 		};
 		let current = IndexDefinition::from_stored(&stored)?;
 		let built = &self.ix;
-		Ok(!current.prepare_remove
-			&& current.index_id == built.index_id
-			&& current.table_name == built.table_name
-			&& current.cols == built.cols
-			&& current.index == built.index
-			&& current.count_cond == built.count_cond
-			&& current.format_version == built.format_version)
+		if current.prepare_remove
+			|| current.index_id != built.index_id
+			|| current.table_name != built.table_name
+			|| current.cols != built.cols
+			|| current.index != built.index
+			|| current.count_cond != built.count_cond
+			|| current.format_version != built.format_version
+		{
+			return Ok(false);
+		}
+		// A blocking full-text build analyses with the analyzer as its
+		// statement's transaction read it ([`Self::statement_analyzer`]), which
+		// that transaction may have redefined under the same name. The terms it
+		// indexed are the ones queries and writes look up only if `tx` holds an
+		// analyzer that analyses the same way; its comment does not count.
+		let Some(analyzer) = &self.analyzer else {
+			return Ok(true);
+		};
+		let key = crate::key::schema::AnalyzerKey {
+			ns,
+			db,
+			az: Cow::Borrowed(analyzer.name.as_str()),
+		};
+		let Some(stored) = tx.get_key(&key, None).await? else {
+			return Ok(false);
+		};
+		let committed = AnalyzerDefinition::from_stored(&stored)?;
+		Ok(analyzers_analyse_alike(&committed, analyzer))
 	}
 
-	/// Whether this build goes on although the commit of the statement that
-	/// started it failed.
-	///
-	/// A transaction runs its rollback actions on every failed commit, and a
-	/// commit that definitely did not apply leaves the catalog without what the
-	/// statement staged, so the build is undone. One whose outcome is unknown
-	/// may have applied ([`Transaction::commit_outcome_unknown`]), and nothing
-	/// the statement writes is a record of it a later statement cannot
-	/// overwrite. So the build is decided by the layout it writes instead: it
-	/// goes on exactly while the committed catalog, read in a transaction of its
-	/// own, holds a definition that describes that layout
-	/// ([`Self::catalog_holds_this_build`]). That definition is the statement's
-	/// own if it committed: a new index's, under an id drawn only for it, or a
-	/// rebuilt one's, restamped at the current format, which a later statement
-	/// on the same table leaves as it is. If the statement did not commit, the
-	/// catalog holds no such definition and the build is undone, unless the
-	/// definition it rolled back to already describes the same layout, which the
-	/// build then writes correctly as well. A catalog that cannot be read undoes
-	/// the build.
-	pub(super) async fn goes_on_after_failed_commit(&self) -> bool {
-		let indeterminate = self
-			.statement_tx
+	/// What this build is made against beyond its index's id, as its build
+	/// state records it when this builder takes ownership
+	/// ([`IndexBuildState::basis`]): the parts [`Self::catalog_holds_this_build`]
+	/// compares that a statement can change without giving the index a new id.
+	fn basis(&self) -> IndexBuildBasis {
+		IndexBuildBasis {
+			format_version: self.ix.format_version,
+			analyzer: self.analyzer.as_deref().cloned(),
+		}
+	}
+
+	/// Whether the commit of the statement that started this build failed with
+	/// an outcome that is unknown ([`Transaction::commit_outcome_unknown`]).
+	/// `false` for a build no statement started, and for a statement whose
+	/// transaction is gone.
+	fn statement_commit_outcome_unknown(&self) -> bool {
+		self.statement_tx
 			.get()
 			.and_then(std::sync::Weak::upgrade)
-			.is_some_and(|statement| statement.commit_outcome_unknown());
-		if !indeterminate {
-			return false;
-		}
-		let read = async {
-			let tx = self.new_read_tx().await?;
-			let holds = self.catalog_holds_this_build(&tx).await;
-			// A read-only transaction: its cancel discards nothing, and the
-			// read's outcome is what is returned.
-			let _ = tx.cancel().await;
-			holds
-		}
-		.await;
-		match read {
-			Ok(holds) => holds,
-			Err(err) => {
-				warn!(
-					index = %self.ix.name,
-					table = %self.ix.table_name,
-					error = %err,
-					"could not read whether the catalog describes this build after its \
-					 statement's commit failed; undoing the build"
-				);
-				false
+			.is_some_and(|statement| statement.commit_outcome_unknown())
+	}
+
+	/// Whether the committed catalog, read in a transaction of its own, holds a
+	/// definition that describes the layout this build writes
+	/// ([`Self::catalog_holds_this_build`]).
+	///
+	/// A read that fails is attempted up to [`COMMITTED_CATALOG_READ_ATTEMPTS`]
+	/// times in all, with a doubling pause between attempts, and none is started
+	/// or waited on past `deadline`. A read that still fails, or runs out of
+	/// time, answers `false`: a build undone or withdrawn in error is reported
+	/// `aborted` and restored by the next `REBUILD INDEX`, where one kept in
+	/// error could report `ready` through a definition that does not read what
+	/// it wrote.
+	async fn committed_catalog_holds_this_build(&self, deadline: Option<Instant>) -> bool {
+		#[cfg(test)]
+		committed_catalog_reads::note(self.ctx.node_id());
+		let out_of_time = || {
+			warn!(
+				index = %self.ix.name,
+				table = %self.ix.table_name,
+				"could not read whether the committed catalog describes this build within the \
+				 close's allowance; treating it as not described"
+			);
+			false
+		};
+		let mut pause = COMMITTED_CATALOG_READ_RETRY_SLEEP;
+		for attempt in 1..=COMMITTED_CATALOG_READ_ATTEMPTS {
+			let read = async {
+				let tx = self.new_read_tx().await?;
+				let holds = self.catalog_holds_this_build(&tx).await;
+				// A read-only transaction: its cancel discards nothing, and the
+				// read's outcome is what is returned.
+				let _ = tx.cancel().await;
+				holds
+			};
+			let read = match deadline {
+				Some(deadline) => {
+					let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+						return out_of_time();
+					};
+					match common::time::timeout(left, read).await {
+						Ok(read) => read,
+						Err(_) => return out_of_time(),
+					}
+				}
+				None => read.await,
+			};
+			match read {
+				Ok(holds) => return holds,
+				Err(err) if attempt < COMMITTED_CATALOG_READ_ATTEMPTS => {
+					debug!(
+						index = %self.ix.name,
+						table = %self.ix.table_name,
+						error = %err,
+						"could not read whether the committed catalog describes this build, \
+						 retrying"
+					);
+					if deadline.is_some_and(|deadline| Instant::now() + pause >= deadline) {
+						return out_of_time();
+					}
+					sleep(pause).await;
+					pause *= 2;
+				}
+				Err(err) => {
+					warn!(
+						index = %self.ix.name,
+						table = %self.ix.table_name,
+						error = %err,
+						"could not read whether the committed catalog describes this build; \
+						 treating it as not described"
+					);
+				}
 			}
 		}
+		false
+	}
+
+	/// Settle this build for the statement that started it, which closed its
+	/// transaction without committing. The one place a statement's rollback
+	/// decides its build ([`ReleaseBuildOwnership`]), before the statement's
+	/// half of [`Building::release_gate`] arrives.
+	///
+	/// The rollback is recorded, and the build is aborted, so a build still
+	/// running stops at its next check and publishes nothing. A build may have
+	/// published already, or a builder that stopped on a transient error may
+	/// still own its generation; either is decided only at the release
+	/// ([`Self::release_build_ownership`]), which reads the committed catalog
+	/// for it then. So a rolled-back build that never published, and that no
+	/// builder still owns, costs the rollback no read at all.
+	///
+	/// A commit whose outcome is unknown is the one exception: it may have
+	/// applied ([`Transaction::commit_outcome_unknown`]), and nothing the
+	/// statement writes is a record of it a later statement cannot overwrite.
+	/// So the build goes on, unaborted, exactly when the committed catalog,
+	/// read here within `deadline`, describes its layout: that definition is
+	/// the statement's own if it committed — a new index's, under an id drawn
+	/// only for it, or a rebuilt one's, restamped at the current format, which
+	/// a later statement on the same table leaves as it is — or one the
+	/// rollback kept that the build writes correctly as well. A catalog that
+	/// cannot be read in time undoes the build. Either way that read is the
+	/// only one this rollback makes: its verdict is what the release acts on
+	/// ([`Building::rollback`]), so a build it confirmed is released as any
+	/// other, and one it did not is withdrawn without reading again.
+	async fn settle_uncommitted_statement(&self, deadline: Option<Instant>) {
+		let verdict = if !self.statement_commit_outcome_unknown() {
+			ROLLBACK_UNDECIDED
+		} else if self.committed_catalog_holds_this_build(deadline).await {
+			// The build goes on, and its release has nothing to decide.
+			return;
+		} else {
+			ROLLBACK_WITHDRAW
+		};
+		self.rollback.store(verdict, Ordering::Release);
+		self.abort();
 	}
 
 	/// Keep ownership of a published generation while the statement that
@@ -2657,7 +2957,9 @@ impl Building {
 	/// - The statement commits or rolls back: its close releases the ownership, and the keeper
 	///   stops.
 	/// - The statement's transaction is dropped without either: no close action will run, so the
-	///   keeper arrives in its place and releases.
+	///   keeper arrives in its place and releases. The statement did not commit, so the release
+	///   withdraws the generation unless the committed catalog describes it
+	///   ([`Building::release_build_ownership`]).
 	/// - The heartbeat finds the ownership gone — cleared after a lapse, or the generation replaced
 	///   — and the keeper cancels the statement's transaction. A clear already fences that
 	///   statement ([`super::state::clear_lapsed_online_owner`]); the cancel ends it at once rather
@@ -2674,8 +2976,9 @@ impl Building {
 			// settles the ownership itself.
 			Ok(StatementWait::Closed | StatementWait::Aborted) => {}
 			Ok(StatementWait::Dropped) => {
+				self.rollback.store(ROLLBACK_UNDECIDED, Ordering::Release);
 				if self.arrive_at_release_gate(RELEASE_GATE_STATEMENT) {
-					self.release_build_ownership(generation).await;
+					self.release_build_ownership(generation, None).await;
 				}
 			}
 			Err(err) => {
@@ -2701,7 +3004,8 @@ impl Building {
 
 	/// Clear the `Online` owner of this build's index whose heartbeat lapsed,
 	/// where the store allows it, with the compaction request a release owes
-	/// staged beside it ([`super::state::clear_lapsed_online_owner`]).
+	/// staged beside it ([`super::state::clear_lapsed_online_owner`]). A
+	/// generation the clear withdraws instead is owed no request.
 	///
 	/// Answers whether this call cleared it. A transaction that finds the
 	/// owner held, released or replaced, or that loses a conflict to whatever
@@ -2712,8 +3016,8 @@ impl Building {
 			let BuildOwner::Lapsed(state) = build_owner(&tx, &self.ikb, true).await? else {
 				return Ok(false);
 			};
-			clear_lapsed_online_owner(&tx, &self.ikb, &state).await?;
-			if self.ix.index.queues_compaction() {
+			let withdrew = clear_lapsed_online_owner(&tx, &self.ikb, &state).await?;
+			if !withdrew && self.ix.index.queues_compaction() {
 				Self::stage_compaction_request(&tx, self.ikb.clone(), self.ctx.node_id()).await?;
 			}
 			Ok::<_, anyhow::Error>(true)
@@ -2740,9 +3044,11 @@ impl Building {
 	}
 
 	/// Record one half of [`Building::release_gate`], reporting whether this
-	/// arrival was the one that completed it.
+	/// arrival was the one that completed it. A half that arrives again reports
+	/// `false`, so the release runs once whichever paths arrive.
 	fn arrive_at_release_gate(&self, arrival: u8) -> bool {
-		(self.release_gate.fetch_or(arrival, Ordering::AcqRel) | arrival) == RELEASE_GATE_OPEN
+		let before = self.release_gate.fetch_or(arrival, Ordering::AcqRel);
+		before != RELEASE_GATE_OPEN && (before | arrival) == RELEASE_GATE_OPEN
 	}
 
 	/// Wait until the statement that started this build has closed its
@@ -3008,9 +3314,37 @@ impl Building {
 	///
 	/// A no-op for a generation this builder no longer owns: a build that ended
 	/// before publishing had its owner cleared by the transition that ended it.
+	/// A no-op too for one it still owns that is not `Online`: a builder that
+	/// stopped on a transient error leaves its generation `Building` or
+	/// `Closing` for the resume scan.
 	///
-	/// Best-effort by design: a build that reaches here has already published,
-	/// so failing to release must not fail the statement waiting on it. A
+	/// A build whose statement did not commit ([`Self::settle_uncommitted_statement`])
+	/// is withdrawn instead, unless the committed catalog describes what it
+	/// wrote ([`Self::committed_catalog_holds_this_build`]). The catalog is read
+	/// only for a generation this builder still owns and has not ended —
+	/// published `Online`, or left `Building` or `Closing` by a builder that
+	/// stopped on a transient error — and no later than `catalog_deadline`; a
+	/// read that does not answer in time withdraws. A statement that does not
+	/// commit leaves the catalog on the definition from before it, which need
+	/// not read the layout the build wrote: an index still at an earlier format
+	/// version reads a doc-ID layout of its own, not the shared one a rebuild at
+	/// the current format writes, and a full-text build handed its statement's
+	/// analyzer indexed terms the committed analyzer need not produce. A
+	/// generation kept `Online` would report `ready` and answer from data its
+	/// definition cannot find, and one left `Building` would be carried on by
+	/// the resume scan from checkpoints written for a definition that never
+	/// committed. Withdrawn, the generation moves to `Error`, reported
+	/// `aborted`, so no query reads it and the resume scan leaves it, and no
+	/// compaction request is staged for it; writes to the table are still
+	/// admitted, and the next `REBUILD INDEX` rescans the table. Ownership is
+	/// still held at that point, so the withdrawal is fenced like every other
+	/// owned transition. A catalog that does describe the build is served by it
+	/// as well, and the generation is released as any other.
+	///
+	/// A withdrawal retries conflicts until it commits
+	/// ([`Self::try_withdraw_build`]). A release is best-effort by design: a
+	/// build that reaches here has already published, so failing to release
+	/// must not fail the statement waiting on it. A
 	/// release that does not commit leaves the owner set and queues nothing.
 	/// Nothing heartbeats an owner whose release failed, so once its lease has
 	/// lapsed a compaction pass or the resume scan clears it, where the store
@@ -3019,7 +3353,62 @@ impl Building {
 	/// a vector index out of compaction. Any other index is compacted under a
 	/// live owner, from the request a pass that could not see its definition
 	/// kept, at the next drain. Either way readers merge the backlog meanwhile.
-	pub(super) async fn release_build_ownership(&self, generation: BuildGeneration) {
+	pub(super) async fn release_build_ownership(
+		&self,
+		generation: BuildGeneration,
+		catalog_deadline: Option<Instant>,
+	) {
+		match self.rollback.load(Ordering::Acquire) {
+			ROLLBACK_WITHDRAW => {
+				// The rollback's own read found the catalog not describing the
+				// build: withdraw without reading it again. A no-op for a
+				// generation this builder no longer owns or has ended.
+				self.withdraw_build(generation, catalog_deadline).await;
+				return;
+			}
+			ROLLBACK_UNDECIDED => {}
+			_ => {
+				self.release_owned(generation).await;
+				return;
+			}
+		}
+		{
+			// Whether this builder still owns a generation it has not ended,
+			// the only kind that has anything to decide. A state that cannot be
+			// read is decided as one that might be: the withdrawal below is a
+			// no-op for a generation this builder does not own.
+			let live = match self.read_durable_build_state().await {
+				Ok(Some(state)) => {
+					state.generation == generation
+						&& state.owner == Some(self.owner)
+						&& state.phase != IndexBuildPhase::Error
+				}
+				Ok(None) => false,
+				Err(err) => {
+					warn!(
+						index = %self.ix.name,
+						table = %self.ix.table_name,
+						error = %err,
+						"could not read the build state of an index whose statement did not \
+						 commit; withdrawing its build"
+					);
+					true
+				}
+			};
+			if !live {
+				return;
+			}
+			if !self.committed_catalog_holds_this_build(catalog_deadline).await {
+				self.withdraw_build(generation, catalog_deadline).await;
+				return;
+			}
+		}
+		self.release_owned(generation).await;
+	}
+
+	/// The ordinary release of [`Self::release_build_ownership`], logging a
+	/// failure.
+	async fn release_owned(&self, generation: BuildGeneration) {
 		if let Err(err) = self.try_release_build_ownership(generation).await {
 			warn!(
 				index = %self.ix.name,
@@ -3029,6 +3418,29 @@ impl Building {
 				 index until the ownership lapses and is cleared, and any other index \
 				 until its next write"
 			);
+		}
+	}
+
+	/// Withdraw `generation`, as [`Self::release_build_ownership`] does for a
+	/// build whose statement did not commit, retrying conflicts until
+	/// `deadline` ([`Self::try_withdraw_build`]), and logging the outcome.
+	async fn withdraw_build(&self, generation: BuildGeneration, deadline: Option<Instant>) {
+		match self.try_withdraw_build(generation, deadline).await {
+			Ok(Some(_)) => warn!(
+				index = %self.ix.name,
+				table = %self.ix.table_name,
+				"withdrew an index build whose statement did not commit, as the committed \
+				 definition does not read what it built; run `REBUILD INDEX` to rebuild the index"
+			),
+			Ok(None) => {}
+			Err(err) => warn!(
+				index = %self.ix.name,
+				table = %self.ix.table_name,
+				error = %err,
+				"could not withdraw an index build whose statement did not commit; it is \
+				 withdrawn once its owner's lease lapses, or run `REBUILD INDEX` to rebuild the \
+				 index against its committed definition"
+			),
 		}
 	}
 
@@ -3059,6 +3471,65 @@ impl Building {
 		)
 		.await?;
 		Ok(())
+	}
+
+	/// The transaction that withdraws a generation in place of its release
+	/// ([`Self::release_build_ownership`]): a transition that moves a
+	/// generation this builder still owns — published `Online`, or left
+	/// `Building` or `Closing` by a builder that stopped on a transient error —
+	/// to `Error`, reported `aborted`, and clears its owner. Answers the state
+	/// it wrote, or `None` where it wrote nothing.
+	///
+	/// [`TransitionMode::Persistent`]: a conflict is retried until the
+	/// withdrawal commits, the generation is no longer this builder's, or the
+	/// store fails otherwise, as it does when it shuts down. Recovery from the
+	/// generation's recorded basis would withdraw it too, but only once its
+	/// owner's lease has lapsed ([`super::state::clear_lapsed_online_owner`]),
+	/// and every reader meanwhile finds it `ready` under a definition that
+	/// does not read it; so the withdrawal lands here, at the release, rather
+	/// than waiting a lease for recovery.
+	///
+	/// With a `deadline` — the close's allowance, when a statement's rollback
+	/// performs the release — no retry starts past it, so a close is never held
+	/// longer than that allowance. A withdrawal given up there leaves the
+	/// generation as it found it, owned and published; that is safe because
+	/// its build state records the basis it was built against
+	/// ([`IndexBuildState::basis`]), so lapsed-owner recovery withdraws it once
+	/// its owner's lease lapses. Without one, as the builder, its keeper and a
+	/// transient exit release, the withdrawal retries without limit.
+	async fn try_withdraw_build(
+		&self,
+		generation: BuildGeneration,
+		deadline: Option<Instant>,
+	) -> Result<Option<IndexBuildState>> {
+		self.transition_owned_build_state(
+			generation,
+			TransitionMode::Persistent(deadline),
+			false,
+			|state| {
+				if state.phase == IndexBuildPhase::Error {
+					return false;
+				}
+				state.phase = IndexBuildPhase::Error;
+				state.owner = None;
+				state.error = None;
+				state.report_status = Some(IndexBuildReportStatus::Aborted);
+				true
+			},
+			|_| {
+				// Stands in for the datastore shutting down under the
+				// withdrawal, which no retry outlasts.
+				#[cfg(test)]
+				if let Err(err) = maybe_inject_non_retryable_error(
+					NonRetryableErrorSite::ConcurrentIndexWithdrawalShutdown,
+					self.ctx.node_id(),
+				) {
+					return Some(Box::pin(std::future::ready(Err(err))));
+				}
+				None
+			},
+		)
+		.await
 	}
 
 	/// Stage the compaction request a release owes the index `ikb` names, in the
@@ -3144,7 +3615,10 @@ impl Building {
 	/// readers see those writes until background compaction folds them once the
 	/// build releases its ownership. Demoting the generation would withdraw a
 	/// complete index from every reader over the failure of that follow-up
-	/// work, and a generation in `Error` is only ever rebuilt.
+	/// work, and a generation in `Error` is only ever rebuilt. A published
+	/// generation that its statement's rollback leaves without a definition to
+	/// read it is withdrawn by the release instead
+	/// ([`Self::release_build_ownership`]).
 	///
 	/// Runs after the build has already stopped, and its callers do not act on
 	/// the outcome, so it is a [`TransitionMode::BestEffort`] transition: a
@@ -4070,33 +4544,47 @@ impl Building {
 		// after the publish, and releases only once the sweep has run, so no
 		// compaction pass resolves doc-IDs through mappings the sweep is
 		// reclaiming.
+		//
+		// The gate is read before the publish reads the abort: a statement that
+		// rolls back aborts its build before its half arrives, so a publish that
+		// would release with it declines, and one that does not release is
+		// settled by whichever half arrives second
+		// ([`Self::release_build_ownership`]).
 		let release_with_online = !self.kind().defers_doc_ids()
 			&& self.release_gate.load(Ordering::Acquire) & RELEASE_GATE_STATEMENT != 0;
 		let published = self
 			.mark_durable_online(generation, initial_count, updates_count, release_with_online)
 			.await;
 		#[cfg(test)]
-		let published = published.and_then(|()| {
-			maybe_inject_non_retryable_error(
-				NonRetryableErrorSite::ConcurrentIndexOnlineCommitAppliedUnknown,
-				self.ctx.node_id(),
-			)
-		});
-		// A publish whose commit reported an error may still have applied, and
-		// the durable state says which. One that did is carried on as published:
-		// the generation stays `Online` whatever this builder reports (see
-		// `mark_durable_ended`).
-		if let Err(err) = published
-			&& !self.published_despite(generation, release_with_online, &err).await
-		{
-			// This builder writes nothing more. A release is a no-op for a
-			// generation that did not go `Online`, and brings the ownership
-			// down for one whose publish applied although the state could not
-			// be read back.
-			if self.arrive_at_release_gate(RELEASE_GATE_BUILDER) {
-				self.release_build_ownership(generation).await;
+		let published = published.and_then(|published| {
+			if published {
+				maybe_inject_non_retryable_error(
+					NonRetryableErrorSite::ConcurrentIndexOnlineCommitAppliedUnknown,
+					self.ctx.node_id(),
+				)?;
 			}
-			return Err(err);
+			Ok(published)
+		});
+		match published {
+			Ok(true) => {}
+			// Aborted before it published: its task ends the generation
+			// `aborted`, which also clears its ownership.
+			Ok(false) => return Ok(()),
+			// A publish whose commit reported an error may still have applied,
+			// and the durable state says which. One that did is carried on as
+			// published: the generation stays `Online` whatever this builder
+			// reports (see `mark_durable_ended`).
+			Err(err) if self.published_despite(generation, release_with_online, &err).await => {}
+			Err(err) => {
+				// This builder writes nothing more. A release is a no-op for a
+				// generation that did not go `Online`, and brings the ownership
+				// down for one whose publish applied although the state could not
+				// be read back.
+				if self.arrive_at_release_gate(RELEASE_GATE_BUILDER) {
+					self.release_build_ownership(generation, None).await;
+				}
+				return Err(err);
+			}
 		}
 		self.online.store(true, Ordering::Release);
 		// Drain the table's durable pending doc-ID reclaim markers, best-effort:
@@ -4124,7 +4612,7 @@ impl Building {
 		// closes in between finds the index `Online` when it releases. A release
 		// the publish already committed leaves nothing for the gate to do.
 		if self.arrive_at_release_gate(RELEASE_GATE_BUILDER) && !release_with_online {
-			self.release_build_ownership(generation).await;
+			self.release_build_ownership(generation, None).await;
 		}
 		Ok(())
 	}
@@ -4166,21 +4654,28 @@ impl Building {
 		}
 	}
 
-	/// Whether the spawned task for this build has exited.
+	/// Whether the spawned task for this build has finished building.
 	///
 	/// Loads `Acquire` to pair with the `Release` store in
 	/// [`BuildingFinishGuard`]: a caller that observes `true` also observes
-	/// everything the task did before it stopped, so this reads as "the builder
-	/// has stopped writing" without further reasoning about ordering.
+	/// everything the task did before then, so this reads as "the builder has
+	/// stopped writing index data and progress" without further reasoning about
+	/// ordering. A published build's keeper may still be holding its ownership
+	/// for an open statement ([`Self::keep_online_ownership`]); a later build of
+	/// the index replaces that generation and stops the keeper.
 	pub(super) fn is_finished(&self) -> bool {
 		self.finished.load(Ordering::Acquire)
 	}
 
-	/// Wait until the spawned task for this build has exited.
+	/// Wait until the spawned task for this build has finished building.
 	///
-	/// The task publishes its last durable write before it exits, so a caller
-	/// that deletes this index's durable build state waits here first to make
-	/// its delete the final write. Only a build reachable through
+	/// The task publishes its last write of index data and progress before
+	/// then, so a caller that deletes this index's durable build state waits
+	/// here first to make its delete the final write. The only writes that may
+	/// follow are a published build's keeper's ([`Self::keep_online_ownership`]):
+	/// owned transitions of `!bs`, each a compare-and-swap against the state it
+	/// read, so one ordered after the delete writes nothing, and one racing it
+	/// conflicts with it on `!bs`. Only a build reachable through
 	/// [`IndexBuilder::indexes`] has a task; waiting on a [`Building`] that was
 	/// never spawned never returns, so callers bound the wait with the drain's
 	/// deadline.
@@ -4204,25 +4699,37 @@ impl Building {
 /// build's definition has closed its transaction.
 ///
 /// Registered on both outcomes: a committed statement has made its definition
-/// visible to every node, and a rolled-back one aborts any build still waiting
-/// on the statement and releases the fence on one that already finished. See
+/// visible to every node, and a rolled-back one aborts any build still running
+/// and releases the fence on one that already finished, withdrawing it if the
+/// committed catalog does not describe what it built. See
 /// [`Building::defer_ownership_release`].
-struct ReleaseBuildOwnership(IndexBuilding);
+pub(super) struct ReleaseBuildOwnership(IndexBuilding);
 
 impl ReleaseBuildOwnership {
-	async fn release(self) {
+	/// Arrive at the release gate in the statement's place, and release if
+	/// this arrival opens it, reading the committed catalog no later than
+	/// `catalog_deadline` ([`Building::release_build_ownership`]).
+	async fn release(self, catalog_deadline: Option<Instant>) {
 		let open = self.0.arrive_at_release_gate(RELEASE_GATE_STATEMENT);
 		self.0.statement_closed.notify_waiters();
 		if open {
 			let generation = self.0.build_generation.load(Ordering::Acquire);
-			self.0.release_build_ownership(generation).await;
+			self.0.release_build_ownership(generation, catalog_deadline).await;
 		}
+	}
+
+	/// The rollback half for `building`, as a statement that started it
+	/// registers it.
+	#[cfg(test)]
+	#[cfg_attr(not(feature = "kv-mem"), allow(dead_code))]
+	pub(super) fn rollback_action(building: IndexBuilding) -> Box<dyn RollbackAction> {
+		Box::new(Self(building))
 	}
 }
 
 impl CommitAction for ReleaseBuildOwnership {
 	fn run(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
-		Box::pin((*self).release())
+		Box::pin((*self).release(None))
 	}
 
 	/// The release is owed when the transaction ends, however it ends. It does not
@@ -4233,55 +4740,25 @@ impl CommitAction for ReleaseBuildOwnership {
 	}
 }
 
-/// The rollback half: the statement did not commit, so its build is aborted,
-/// unless its commit's outcome is unknown and the committed catalog describes
-/// the build (see [`Building::goes_on_after_failed_commit`]). Either way the
-/// statement's half of the release gate arrives.
+/// The rollback half: the statement did not commit, so the rollback is
+/// recorded and the build aborted unless it goes on, before the statement's
+/// half of the release gate arrives (see
+/// [`Building::settle_uncommitted_statement`]). Registered for every build a
+/// statement starts, a rebuild awaited after the commit included, so it is the
+/// only hook that decides a build on rollback. Every catalog read it makes, to
+/// settle a commit whose outcome is unknown or to decide a generation its
+/// release finds published, ends by the close's allowance, measured from
+/// `drain_started_at` ([`build_abort_deadline`]); one that runs out of time
+/// aborts and withdraws.
 impl RollbackAction for ReleaseBuildOwnership {
 	fn run(
 		self: Box<Self>,
-		_drain_started_at: Instant,
+		drain_started_at: Instant,
 	) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
 		Box::pin(async move {
-			if !self.0.goes_on_after_failed_commit().await {
-				self.0.abort();
-			}
-			(*self).release().await;
-			Ok(())
-		})
-	}
-}
-
-/// Aborts a rebuild awaited after its statement's commit, should that
-/// statement not commit.
-///
-/// The build starts before the commit and is handed the definition the
-/// statement stages. A statement that does not commit leaves the catalog on the
-/// definition from before it, so a build left to finish would publish a layout
-/// that definition does not describe. Aborted, the generation ends in `Error`,
-/// reported as `aborted`, for the next `REBUILD INDEX` to retry. A commit
-/// whose outcome is unknown keeps the build while the committed catalog
-/// describes it (see [`Building::goes_on_after_failed_commit`]).
-pub(super) struct AbortUncommittedRebuild(IndexBuilding);
-
-impl AbortUncommittedRebuild {
-	/// The action for `building`, as a rebuild awaited after its commit
-	/// registers it.
-	#[cfg(test)]
-	pub(super) fn boxed(building: IndexBuilding) -> Box<dyn RollbackAction> {
-		Box::new(Self(building))
-	}
-}
-
-impl RollbackAction for AbortUncommittedRebuild {
-	fn run(
-		self: Box<Self>,
-		_drain_started_at: Instant,
-	) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
-		Box::pin(async move {
-			if !self.0.goes_on_after_failed_commit().await {
-				self.0.abort();
-			}
+			let deadline = Some(build_abort_deadline(drain_started_at));
+			self.0.settle_uncommitted_statement(deadline).await;
+			(*self).release(deadline).await;
 			Ok(())
 		})
 	}

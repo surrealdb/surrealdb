@@ -8492,6 +8492,7 @@ pub(crate) mod test {
 			updated: None,
 			pending: None,
 			initial_cursor: None,
+			basis: None,
 		};
 		{
 			let txn = ds.transaction(Write).await?;
@@ -11730,6 +11731,7 @@ pub(crate) mod test {
 			updated: None,
 			pending: None,
 			initial_cursor: None,
+			basis: None,
 		};
 		let txn = ds.transaction(Write).await?;
 		catch!(txn, txn.set_key(&ikb.new_bs_key(), &state).await);
