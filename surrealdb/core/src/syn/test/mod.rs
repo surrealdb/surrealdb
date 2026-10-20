@@ -4,6 +4,7 @@
 mod builtin_paths;
 mod json;
 mod limit;
+mod value;
 
 use super::parse;
 

@@ -1481,6 +1481,38 @@ mod test {
 		assert_eq!(call("RETURN silo::o::p::<1.2.3>::f()"), (3, SILO_NAME));
 	}
 
+	/// A literal's span is the literal alone, never the token after it.
+	#[test]
+	fn literal_spans_end_at_the_literal() {
+		let cases: [(&str, &[&str]); 7] = [
+			("RETURN 1 + 2", &["1", "2"]),
+			("RETURN 1.5 + 2", &["1.5", "2"]),
+			("RETURN 98dec = 98dec", &["98dec", "98dec"]),
+			(r#"RETURN ["x", 15h]"#, &[r#""x""#, "15h"]),
+			(r#"RETURN d"2024-01-01T00:00:00Z" = $value"#, &[r#"d"2024-01-01T00:00:00Z""#]),
+			(
+				r#"RETURN u"a8f30d8b-db67-47ec-8b38-ef703e05ad1b" = $value"#,
+				&[r#"u"a8f30d8b-db67-47ec-8b38-ef703e05ad1b""#],
+			),
+			("RETURN 1.5f;", &["1.5f"]),
+		];
+		for (src, expected) in cases {
+			let (ast, diags) = run(src);
+			assert!(diags.is_empty(), "{src}: {diags:?}");
+			let mut literals: Vec<_> = ast
+				.nodes
+				.iter()
+				.filter(|n| {
+					matches!(n.tag, Tag::Int | Tag::Float | Tag::Decimal | Tag::Duration | Tag::Str)
+				})
+				.map(|n| (n.start, Ast::text(n, src)))
+				.collect();
+			literals.sort_by_key(|&(start, _)| start);
+			let texts: Vec<_> = literals.into_iter().map(|(_, text)| text).collect();
+			assert_eq!(texts, expected, "{src}");
+		}
+	}
+
 	/// A new extension needs a name, in either keyword spelling, and the
 	/// unnamed silo form is refused with a message saying so.
 	#[test]

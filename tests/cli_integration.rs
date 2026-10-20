@@ -1688,6 +1688,28 @@ mod cli_integration {
 		}
 	}
 
+	/// The shell reads back a record nested forty-eight levels deep over a
+	/// WebSocket, and the session stays usable after it.
+	#[test(tokio::test)]
+	async fn shell_reads_a_deeply_nested_record_over_websocket() {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let creds = format!("--user {USER} --pass {PASS}");
+		let (ns, db) = (Ulid::new(), Ulid::new());
+		let mut nested = "{ name: 'first', inner: [] }".to_string();
+		for level in 1..=48 {
+			nested = format!("{{ level: {level}, inner: [{nested}] }}");
+		}
+
+		let args = format!("sql --endpoint ws://{addr} {creds} --ns {ns} --db {db}");
+		let input = format!(
+			"CREATE ws_article:1 CONTENT {nested} RETURN NONE;\nSELECT * FROM ws_article;\nRETURN 'still here';\n"
+		);
+		let output = common::run(&args).input(&input).output().unwrap();
+		assert!(output.contains("'first'"), "the innermost level should be printed: {output}");
+		assert!(output.contains("'still here'"), "the shell should answer after it: {output}");
+		assert!(!output.contains("Failed to deserialise"), "{output}");
+	}
+
 	/// The shell parses each line to validate it and to count the results it
 	/// should expect, then sends the line itself. Rendering the parsed
 	/// statements back instead would put every gap in `ToSql` between the user

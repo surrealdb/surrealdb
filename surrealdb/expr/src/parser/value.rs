@@ -36,14 +36,19 @@ pub fn json(src: &str, settings: &Settings) -> Result<Value, Error> {
 	Parser::new(src, settings, true, true).run()
 }
 
-/// Parses a record id, `table:key`, with a value key. Input after it is not
-/// read.
+/// Parses a record id, `table:key`, with a value key. The record id must be
+/// the whole of `src`: text after it is an error rather than ignored, so a
+/// string that only begins with a record id never names that record.
 pub fn record_id(src: &str, settings: &Settings) -> Result<RecordId, Error> {
 	let mut p = Parser::new(src, settings, false, false);
-	match p.run_record_id()? {
-		Value::RecordId(r) => Ok(r),
+	let r = match p.run_record_id()? {
+		Value::RecordId(r) => r,
 		_ => unreachable!("a record-id parse yields a record id"),
+	};
+	if p.tok.kind != T::Eof {
+		return Err(p.unexpected("the end of the record id"));
 	}
+	Ok(r)
 }
 
 type R<T> = Result<T, Error>;
@@ -808,8 +813,31 @@ impl<'a> Parser<'a> {
 				let v = self.number()?;
 				done(v)
 			}
-			_ => self.record_id_start(),
+			_ if self.record_only => self.record_id_start(),
+			_ => self.record_or_table(),
 		}
+	}
+
+	/// A record id, or a table name. A value of type `table` renders as its
+	/// bare name, so an identifier that ends a value - followed by the end of
+	/// input, or inside a collection by a `,` or a closing delimiter - is a
+	/// table; one followed by `:` begins a record id, and any other token is
+	/// an error. Within a record id's key an identifier always begins a record
+	/// id, as the key grammar has it.
+	fn record_or_table(&mut self) -> R<Start> {
+		let table = self.take_ident()?;
+		let ends_value = match self.tok.kind {
+			T::Eof => true,
+			T::Comma | T::RBracket | T::RBrace | T::RParen => !self.frames.is_empty(),
+			_ => false,
+		};
+		let in_key =
+			self.frames.iter().any(|f| matches!(f, Frame::KeyArray(..) | Frame::KeyObject(..)));
+		if ends_value && !in_key {
+			return Ok(Start::Done(Value::Table(Table::new(table)), false));
+		}
+		self.expect(T::Colon, ":")?;
+		self.record_key(table)
 	}
 
 	/// An `f64` token value: a number with an optional adjacent sign,
