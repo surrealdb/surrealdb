@@ -4,7 +4,7 @@ use quote::quote;
 use syn::Attribute;
 pub use variant::*;
 
-use crate::{CratePath, EnumAttributes, Strategy, WithMap};
+use crate::{CratePath, EnumAttributes, Fields, Strategy, With, WithMap};
 
 pub struct Enum {
 	pub attrs: EnumAttributes,
@@ -22,6 +22,22 @@ impl Enum {
 	fn strategy_for_variant(variant: &EnumVariant, attrs: &EnumAttributes) -> Strategy {
 		Strategy::for_enum(&variant.ident, attrs, variant.fields.rename())
 			.with_variant_skip_content(variant.fields.skip_content().cloned())
+	}
+
+	/// A unit variant of an externally tagged enum is written as `{ Name: {} }`
+	/// and `from_value` and `is_value` also accept the bare string `"Name"`, so a
+	/// wrapper that checks `is_value` first (an untagged variant, `Either`)
+	/// reaches `from_value`. `kind_of` keeps describing the written form.
+	fn bare_string_name(variant: &EnumVariant, strategy: &Strategy) -> Option<String> {
+		match (&variant.fields, strategy) {
+			(
+				Fields::Unit(attrs),
+				Strategy::VariantKey {
+					variant,
+				},
+			) if attrs.value.is_none() => Some(variant.clone()),
+			_ => None,
+		}
 	}
 
 	#[allow(clippy::wrong_self_convention)]
@@ -68,6 +84,13 @@ impl Enum {
 			let fields = variant.fields.match_fields();
 			let ok = quote!(return Ok(Self::#ident #fields));
 			let strategy = Self::strategy_for_variant(variant, attrs);
+			if let Some(name) = Self::bare_string_name(variant, &strategy) {
+				with_map.push(With::String(quote! {
+					if string == #name {
+						return Ok(Self::#ident);
+					}
+				}));
+			}
 			with_map.push(variant.fields.from_value(&ident.to_string(), &strategy, ok, crate_path));
 		}
 
@@ -137,6 +160,13 @@ impl Enum {
 
 		for variant in &self.variants {
 			let strategy = Self::strategy_for_variant(variant, attrs);
+			if let Some(name) = Self::bare_string_name(variant, &strategy) {
+				with_map.push(With::String(quote! {
+					if string == #name {
+						return true;
+					}
+				}));
+			}
 			with_map.push(variant.fields.is_value(&strategy, crate_path));
 		}
 
