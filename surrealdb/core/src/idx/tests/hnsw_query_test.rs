@@ -390,3 +390,206 @@ async fn hnsw_versioned_filtered_search_reads_each_candidate_once() -> Result<()
 	)
 	.await
 }
+
+/// Filtered kNN returns every qualifying record the bare operator returns at
+/// the same `k` and `ef`, through delete / re-create / overwrite churn that
+/// recycles element and doc ids, whether the churn is still queued or has been
+/// compacted into the graph, and whether the query's snapshot is current or
+/// predates the round's churn and compaction.
+///
+/// The churn also gives records duplicates of other records' vectors, so a
+/// compaction changes an element's doc set without changing the graph. The
+/// snapshot opened before a round is probed only after a current query has
+/// read the compacted doc sets back into the cache: a cache that served a
+/// reader a doc set from another generation would hand the old snapshot a
+/// set it cannot resolve.
+///
+/// The narrowest filter is the strictest detector: `tag = <id>` qualifies one
+/// record, so a graph walk that skips the element holding it yields an empty
+/// result. The bare operator's nearest records for each probe are filtered for
+/// in turn; a bare hit the filtered operator misses is a drop. In the old
+/// snapshot, every record the round moved or deleted is also filtered for at
+/// the vector that snapshot holds for it, where it is the nearest record.
+#[test(tokio::test(flavor = "multi_thread"))]
+async fn hnsw_filtered_knn_keeps_what_bare_knn_returns_through_churn() -> Result<()> {
+	// Compaction runs only where the test calls it.
+	let ds = Datastore::builder().without_maintenance_tasks().build_with_path("memory").await?;
+	{
+		let tx = ds.transaction(TransactionType::Write).await?;
+		tx.ensure_ns_db(None, "test", "test").await?;
+		tx.commit().await?;
+	}
+	let session = Session::owner().with_ns("test").with_db("test");
+
+	const DIM: usize = 8;
+	const ROWS: u64 = 240;
+	let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+	let mut next = move || {
+		state ^= state << 13;
+		state ^= state >> 7;
+		state ^= state << 17;
+		state
+	};
+	let vector = |next: &mut dyn FnMut() -> u64| -> String {
+		let parts: Vec<String> =
+			(0..DIM).map(|_| format!("{}f", (next() % 10_000) as f32 / 1000.0)).collect();
+		format!("[{}]", parts.join(", "))
+	};
+
+	// The vector each live record holds, for the duplicates the churn writes.
+	let mut live: std::collections::BTreeMap<u64, String> = Default::default();
+	let mut setup = String::from(
+		"DEFINE INDEX emb ON pts FIELDS vec HNSW DIMENSION 8 DIST EUCLIDEAN TYPE F32 EFC 100 M 12;\n",
+	);
+	for i in 0..ROWS {
+		let v = vector(&mut next);
+		setup.push_str(&format!("CREATE pts:{i} SET vec = {v}, tag = {i};\n"));
+		live.insert(i, v);
+	}
+	for response in ds.execute(&setup, &session, None).await? {
+		response.result?;
+	}
+
+	/// The record ids `query` returns, run on `tx` when given, else on a
+	/// transaction of its own.
+	async fn ids(
+		ds: &Arc<Datastore>,
+		session: &Session,
+		tx: Option<&Arc<crate::kvs::Transaction>>,
+		query: &str,
+	) -> Result<Vec<i64>> {
+		let mut request = QueryRequest::new(query, session);
+		if let Some(tx) = tx {
+			request = request.with_transaction(Arc::clone(tx));
+		}
+		let mut response = ds.run(request).await?;
+		let surrealdb_types::Value::Array(rows) = response.remove(0).result? else {
+			panic!("expected an array result");
+		};
+		Ok(rows
+			.iter()
+			.map(|row| match row {
+				surrealdb_types::Value::Object(o) => match o.get("id") {
+					Some(surrealdb_types::Value::RecordId(rid)) => match &rid.key {
+						surrealdb_types::RecordIdKey::Number(n) => *n,
+						other => panic!("unexpected record key: {other:?}"),
+					},
+					other => panic!("unexpected id field: {other:?}"),
+				},
+				other => panic!("unexpected row: {other:?}"),
+			})
+			.collect())
+	}
+	async fn compact(ds: &Arc<Datastore>) -> Result<()> {
+		Datastore::index_compaction(
+			Arc::clone(ds),
+			std::time::Duration::from_secs(1),
+			tokio_util::sync::CancellationToken::new(),
+		)
+		.await?;
+		Ok(())
+	}
+
+	compact(&ds).await?;
+	let mut drops = Vec::new();
+	let mut probed = 0usize;
+	for round in 0..10u32 {
+		// A snapshot from before this round's churn and compaction.
+		let old = Arc::new(ds.transaction(TransactionType::Read).await?);
+		let before = live.clone();
+		let mut touched = std::collections::BTreeSet::new();
+		let mut churn = String::new();
+		for _ in 0..ROWS / 5 {
+			let id = next() % ROWS;
+			churn.push_str(&format!("DELETE pts:{id};\n"));
+			live.remove(&id);
+			touched.insert(id);
+		}
+		for _ in 0..ROWS / 5 {
+			let id = next() % ROWS;
+			let v = vector(&mut next);
+			churn.push_str(&format!("UPSERT pts:{id} SET vec = {v}, tag = {id};\n"));
+			live.insert(id, v);
+			touched.insert(id);
+		}
+		for _ in 0..ROWS / 10 {
+			let id = next() % ROWS;
+			if let Some(held) = live.get_mut(&id) {
+				let v = vector(&mut next);
+				churn.push_str(&format!("UPDATE pts:{id} SET vec = {v};\n"));
+				*held = v;
+				touched.insert(id);
+			}
+		}
+		// Duplicates of other live records' vectors: a compaction adds their
+		// docs to elements already in the graph.
+		let keys: Vec<u64> = live.keys().copied().collect();
+		for _ in 0..ROWS / 20 {
+			let id = next() % ROWS;
+			let source = keys[(next() % keys.len() as u64) as usize];
+			let v = live[&source].clone();
+			churn.push_str(&format!("UPSERT pts:{id} SET vec = {v}, tag = {id};\n"));
+			live.insert(id, v);
+			touched.insert(id);
+		}
+		for response in ds.execute(&churn, &session, None).await? {
+			response.result?;
+		}
+		// Odd rounds are probed with the churn still queued.
+		if round % 2 == 0 {
+			compact(&ds).await?;
+		}
+		let queries: Vec<String> = (0..10).map(|_| vector(&mut next)).collect();
+		// Current snapshots first, so the cache holds what this round's
+		// compaction committed when the old snapshot is probed.
+		for snapshot in [None, Some(&old)] {
+			for q in &queries {
+				let bare = ids(
+					&ds,
+					&session,
+					snapshot,
+					&format!("SELECT id FROM pts WHERE vec <|10,40|> {q};"),
+				)
+				.await?;
+				for id in bare.iter().take(3) {
+					probed += 1;
+					let filtered = ids(
+						&ds,
+						&session,
+						snapshot,
+						&format!("SELECT id FROM pts WHERE vec <|10,40|> {q} AND tag = {id};"),
+					)
+					.await?;
+					if filtered != vec![*id] {
+						drops.push((round, snapshot.is_some(), q.clone(), *id, filtered));
+					}
+				}
+			}
+		}
+		// Every record this round moved or deleted, queried in the old
+		// snapshot at the vector that snapshot holds for it: at distance 0 it
+		// is the nearest, whichever doc sets the cache holds by now.
+		for id in touched.iter().filter(|id| before.contains_key(id)) {
+			probed += 1;
+			let q = &before[id];
+			let filtered = ids(
+				&ds,
+				&session,
+				Some(&old),
+				&format!("SELECT id FROM pts WHERE vec <|10,40|> {q} AND tag = {id};"),
+			)
+			.await?;
+			if filtered != vec![*id as i64] {
+				drops.push((round, true, q.clone(), *id as i64, filtered));
+			}
+		}
+		old.cancel().await?;
+	}
+	assert!(probed > 500, "the probe must run: {probed}");
+	assert!(
+		drops.is_empty(),
+		"{} of {probed} bare hits dropped by the filter (round, old snapshot, query, id, filtered): {drops:#?}",
+		drops.len()
+	);
+	Ok(())
+}
