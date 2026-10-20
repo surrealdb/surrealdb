@@ -453,8 +453,11 @@ async fn execute_select(
 
 /// Information about a sub-field of a nested object type.
 struct NestedSubField {
-	/// The GraphQL field name (e.g., "createdAt").
+	/// The key the value is stored under in the parent object.
 	name: String,
+	/// The name the GraphQL field is exposed as: the field's valid
+	/// `GRAPHQL_ALIAS`, otherwise `name`.
+	graphql_name: String,
 	/// The field's SurrealDB kind, if defined.
 	kind: Option<Kind>,
 	/// Optional comment from the field definition.
@@ -525,8 +528,17 @@ fn detect_nested_objects(
 
 		parent_has_wildcard.entry(parent_name.clone()).or_insert(has_wildcard);
 
+		let graphql_name = match fd.graphql_alias.as_deref() {
+			// `__` is reserved for introspection names, so such an alias is not
+			// exposed.
+			Some(alias) if is_valid_graphql_identifier(alias) && !alias.starts_with("__") => {
+				alias.to_owned()
+			}
+			_ => child_name.clone(),
+		};
 		children_by_parent.entry(parent_name.clone()).or_default().push(NestedSubField {
 			name: child_name,
+			graphql_name,
 			kind: fd.field_kind.clone(),
 			comment: fd.comment.clone(),
 		});
@@ -614,6 +626,7 @@ fn detect_nested_objects(
 			.iter()
 			.map(|(k, v)| NestedSubField {
 				name: k.as_str().to_owned(),
+				graphql_name: k.as_str().to_owned(),
 				kind: Some(v.clone()),
 				comment: None,
 			})
@@ -680,15 +693,23 @@ fn make_nested_object_type(
 	types: &mut Vec<Type>,
 ) -> Result<Object, GraphqlError> {
 	let mut obj = Object::new(type_name);
+	let mut seen: HashMap<&str, &str> = HashMap::new();
 
 	for sf in sub_fields {
 		let Some(ref kind) = sf.kind else {
 			continue;
 		};
-		let enum_scope = format!("{type_name}_{}", sf.name);
+		if let Some(prior) = seen.insert(sf.graphql_name.as_str(), sf.name.as_str()) {
+			return Err(super::error::schema_error(format!(
+				"GraphQL naming collision on `{}` in `{type_name}` — fields `{prior}` and `{}` \
+				 produce the same name. Set a distinct `GRAPHQL_ALIAS` on one of them.",
+				sf.graphql_name, sf.name
+			)));
+		}
+		let enum_scope = format!("{type_name}_{}", sf.graphql_name);
 		let fd_type = kind_to_type_with_enum_prefix(kind.clone(), types, false, Some(&enum_scope))?;
 		let resolver = make_sub_field_resolver(sf.name.clone(), sf.kind.clone(), Some(enum_scope));
-		let mut field = Field::new(&sf.name, fd_type, resolver);
+		let mut field = Field::new(&sf.graphql_name, fd_type, resolver);
 		if let Some(ref comment) = sf.comment {
 			field = field.description(comment.clone());
 		}

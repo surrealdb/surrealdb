@@ -1,0 +1,14 @@
+/**
+[env]
+imports = ["reproductions/7453_nested_alias_import.surql"]
+
+[test]
+reason = "A nested field's GRAPHQL_ALIAS is the name it is exposed and queried under, and it resolves the value stored under the SurrealQL key"
+issue = 7453
+
+[[test.results]]
+value = "{ widgets: [{ price: { inEuro: '9.5' } }] }"
+*/
+{
+  widgets { price { inEuro } }
+}
