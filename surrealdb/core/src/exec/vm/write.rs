@@ -70,6 +70,7 @@ pub(super) use storage::{
 };
 pub(super) use view::{
 	LoweredView, LoweredViews, Recalc, ViewClause, ViewRows, action_pipeline, view_row_exec,
+	view_row_key,
 };
 
 /// A write statement's state across its records.

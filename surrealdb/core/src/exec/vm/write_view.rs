@@ -2,7 +2,8 @@
 //!
 //! A write keeps every view its table feeds in step with the record, as the
 //! views stage does: a materialized view holds one row per source record under
-//! the record's own key, and an aggregated view one row per group, whose stats
+//! the record's own key, or under the key its projected `id` gives, and an
+//! aggregated view one row per group, whose stats
 //! the write adjusts by the change the record made. The views are the ones the
 //! table held when the program was lowered, and each view's clauses — its
 //! condition, projection, group key, aggregate arguments and fields — are host
@@ -39,6 +40,8 @@
 
 use std::sync::Arc;
 
+use surrealdb_types::ToSql as _;
+
 use super::data::PlaceRun;
 use super::storage::{del_view_row, set_view_row};
 use super::{State, WriteState, internal, run_image_in_frame};
@@ -62,6 +65,7 @@ use crate::exec::vm::host::{admitted_unit, gather_program, unit_table};
 use crate::exec::vm::program::{PlaceStepSpec, Program, UnitId};
 use crate::exec::{Error as ExecError, ExecutionContext, FlowResult};
 use crate::expr::ControlFlow;
+use crate::expr::paths::ID;
 use crate::val::{Array, RecordId, RecordIdKey, TableName, Value};
 
 /// A table's views, as the program was lowered from them.
@@ -87,6 +91,10 @@ pub(in crate::exec::vm) enum LoweredView {
 		condition: Option<ViewClause>,
 		/// The row the view holds for the record.
 		projection: ViewClause,
+		/// Whether the projection names the row's `id` (`... AS id`): the row
+		/// is then held under the key its `id` gives ([`view_row_key`]), and
+		/// otherwise under the source record's key.
+		keyed: bool,
 		rows: ViewRows,
 	},
 	/// One row per group.
@@ -191,8 +199,10 @@ pub(super) async fn views(
 	let Some(id) = row.id.clone() else {
 		return Ok(());
 	};
-	let initial = row.initial.clone();
-	let current = row.current.clone();
+	// A view's clauses read a record's `id` as a select over its table does,
+	// and a view row's images carry none, its identity being its key.
+	let initial = with_id(row.initial.clone(), &id);
+	let current = with_id(row.current.clone(), &id);
 	let m = Maintain {
 		program,
 		scope: ctx.scope()?,
@@ -206,6 +216,17 @@ pub(super) async fn views(
 	let maintained = maintain(&m, lowered, state, &id, &initial, &current, action).await;
 	state.frame = outer;
 	maintained
+}
+
+/// The image `image` of the record `id`, with its `id` field set when it is an
+/// object that holds none.
+fn with_id(mut image: Value, id: &RecordId) -> Value {
+	if let Value::Object(object) = &mut image
+		&& !object.contains_key("id")
+	{
+		object.insert("id", Value::RecordId(id.clone()));
+	}
+	image
 }
 
 /// Maintain each of `lowered`'s views for the record `id` whose images are
@@ -230,15 +251,17 @@ async fn maintain(
 			LoweredView::Materialized {
 				condition,
 				projection,
+				keyed,
 				rows,
 			} => {
 				let row = Materialized {
 					table: &definition.name,
 					condition: *condition,
 					projection: *projection,
+					keyed: *keyed,
 					rows,
 				};
-				materialized(m, state, &row, id, current, action).await?;
+				materialized(m, state, &row, id, initial, current, action).await?;
 			}
 			LoweredView::Aggregated {
 				condition,
@@ -277,52 +300,133 @@ struct Materialized<'a> {
 	table: &'a TableName,
 	condition: Option<ViewClause>,
 	projection: ViewClause,
+	keyed: bool,
 	rows: &'a ViewRows,
 }
 
-/// Maintain a materialized view: the row under the source record's key is
-/// written when the view's condition admits the record's post-image — every
-/// record the write did not delete, for a view with none — and removed
-/// otherwise. The view row's own action is what the view table held: a record
-/// the condition newly admits creates its row whatever the statement did.
+/// Maintain a materialized view: the record's row is written when the view's
+/// condition admits the record's post-image — every record the write did not
+/// delete, for a view with none — and removed otherwise. The view row's own
+/// action is what the view table held: a record the condition newly admits
+/// creates its row whatever the statement did.
+///
+/// The row is held under the source record's key, or, for a view whose
+/// projection sets the row's `id`, under the key that `id` gives. Such a
+/// view's row for the record before the write is found by judging the view's
+/// condition and projection over the pre-image, so an update or delete
+/// evaluates them over both images, and a write that moves the row to another
+/// key removes it from the old one. Records that make the same key share one
+/// row: the record written last holds it, and any of them leaving the view or
+/// moving to another key removes it.
 async fn materialized(
 	m: &Maintain<'_>,
 	state: &mut State,
 	view: &Materialized<'_>,
 	id: &RecordId,
+	initial: &Value,
 	current: &Value,
 	action: Action,
 ) -> FlowResult<()> {
-	let key = id.key.clone();
 	let admitted = match view.condition {
 		Some(condition) => clause(m, condition, current, state).await?.is_truthy(),
 		None => action != Action::Delete,
 	};
+	// The key of the row the record made before this write.
+	let held = if !view.keyed {
+		Some(id.key.clone())
+	} else if action == Action::Create {
+		None
+	} else {
+		let was_admitted = match view.condition {
+			Some(condition) => clause(m, condition, initial, state).await?.is_truthy(),
+			None => !initial.is_nullish(),
+		};
+		if was_admitted {
+			let data = clause(m, view.projection, initial, state).await?;
+			Some(view_row_key(data.pick(&ID), view.table)?)
+		} else {
+			None
+		}
+	};
+	if !admitted {
+		return match held {
+			Some(key) => remove_view_row(m, state, view, key).await,
+			None => Ok(()),
+		};
+	}
+	let mut data = clause(m, view.projection, current, state).await?;
+	let key = if view.keyed {
+		view_row_key(data.pick(&ID), view.table)?
+	} else {
+		id.key.clone()
+	};
+	// The row's identity is its key: its data carries no `id`, as the backfill
+	// stores it.
+	if let Value::Object(object) = &mut data {
+		object.remove("id");
+	}
+	if let Some(held) = held
+		&& held != key
+	{
+		remove_view_row(m, state, view, held).await?;
+	}
 	// Read before it is overwritten: it is the view row's before-image, and
 	// whether it was there decides whether the write creates or updates it.
 	let before = read_view_row(&m.ctx, view.table, &key).await?;
-	let (view_action, after) = if admitted {
-		let data = clause(m, view.projection, current, state).await?;
-		let record = Record::new(data);
-		set_view_row(&m.ctx, view.table, &key, &record, before.is_none()).await?;
-		let action = match before {
-			Some(_) => Action::Update,
-			None => Action::Create,
-		};
-		(action, Some(record))
-	} else {
-		del_view_row(&m.ctx, view.table, &key).await?;
-		// Removing a row the view never held changes nothing.
-		if before.is_none() {
-			return Ok(());
-		}
-		(Action::Delete, None)
+	let record = Record::new(data);
+	set_view_row(&m.ctx, view.table, &key, &record, before.is_none()).await?;
+	let view_action = match before {
+		Some(_) => Action::Update,
+		None => Action::Create,
 	};
 	let row = RecordId {
 		table: view.table.clone(),
 		key,
 	};
-	run_view_row(m, state, view.rows, row, view_action, before.as_deref(), after.as_ref()).await
+	run_view_row(m, state, view.rows, row, view_action, before.as_deref(), Some(&record)).await
+}
+
+/// Remove the row of materialized view `view` under `key`, running the view
+/// table's order for a deleted row. Removing a row the view never held changes
+/// nothing.
+async fn remove_view_row(
+	m: &Maintain<'_>,
+	state: &mut State,
+	view: &Materialized<'_>,
+	key: RecordIdKey,
+) -> FlowResult<()> {
+	let before = read_view_row(&m.ctx, view.table, &key).await?;
+	if before.is_none() {
+		return Ok(());
+	}
+	del_view_row(&m.ctx, view.table, &key).await?;
+	let row = RecordId {
+		table: view.table.clone(),
+		key,
+	};
+	run_view_row(m, state, view.rows, row, Action::Delete, before.as_deref(), None).await
+}
+
+/// The key a materialized view's row is held under, from the `id` of the row
+/// its projection made, as `CREATE` reads a record's `id` field: a record id
+/// gives its key whatever its table, and a number, string, array, object or
+/// UUID is the key itself. Any other `id` fails the write — `NONE`, since a
+/// row with no key of its own could not be found again to update or remove it,
+/// and a range, which names no one record.
+pub(in crate::exec::vm) fn view_row_key(id: Value, table: &TableName) -> FlowResult<RecordIdKey> {
+	let invalid = |id: &Value| {
+		ControlFlow::Err(anyhow::Error::new(crate::expr::Error::IdInvalid {
+			value: id.to_sql(),
+		}))
+	};
+	if id.is_none() {
+		return Err(invalid(&id));
+	}
+	let id = id.generate(table.clone(), true).map_err(ControlFlow::Err)?;
+	if id.key.is_range() {
+		return Err(invalid(&Value::RecordId(id)));
+	}
+	Ok(id.key)
 }
 
 /// One aggregated view's maintenance.

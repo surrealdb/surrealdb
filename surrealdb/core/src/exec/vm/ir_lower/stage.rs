@@ -2654,6 +2654,25 @@ fn views_stage(
 	Ok(())
 }
 
+/// Whether a materialized view's `fields` set the row's `id`, so that the row's key is the one
+/// the projection gives rather than the source record's: a field aliased `id` or a path within it
+/// (`... AS id`, `... AS id.k`), or an unaliased path into the record's `id` (`id.k`, `id[0]`),
+/// which a projection writes back at `id`. A bare `id` is the source record's own.
+fn projects_id(fields: &crate::expr::Fields) -> bool {
+	let crate::expr::Fields::Select(fields) = fields else {
+		return false;
+	};
+	let names_id = |idiom: &crate::expr::Idiom| idiom.0.first() == Some(&crate::expr::paths::ID[0]);
+	fields.iter().any(|field| match field {
+		crate::expr::Field::Single(selector) => match (&selector.alias, &selector.expr) {
+			(Some(alias), _) => names_id(alias),
+			(None, crate::expr::Expr::Idiom(idiom)) => idiom.0.len() > 1 && names_id(idiom),
+			(None, _) => false,
+		},
+		crate::expr::Field::All => false,
+	})
+}
+
 /// The views the written table feeds, each lowered as its definition and clause regions state:
 /// the clauses as host pipelines of the program, and the order of the view table's rows and the
 /// recalculation of an aggregated view's extremes as units of it.
@@ -2679,6 +2698,7 @@ fn lower_views(em: &mut Emitter, cx: &mut Stages<'_, '_>) -> Result<Arc<LoweredV
 		})?;
 		views.push(match view {
 			crate::catalog::ViewDefinition::Materialized {
+				fields,
 				condition,
 				..
 			} => {
@@ -2695,6 +2715,7 @@ fn lower_views(em: &mut Emitter, cx: &mut Stages<'_, '_>) -> Result<Arc<LoweredV
 						object: projection,
 						any: projection,
 					},
+					keyed: projects_id(fields),
 					rows,
 				}
 			}
@@ -7151,6 +7172,7 @@ mod tests {
 			LoweredView::Materialized {
 				condition: Some(condition),
 				projection,
+				keyed: false,
 				rows,
 			},
 		] = lowered.views.as_slice()
@@ -7208,6 +7230,36 @@ mod tests {
 				Instr::EndRow
 			]
 		));
+	}
+
+	#[test]
+	fn a_materialized_view_is_keyed_by_its_rows_id_only_where_its_projection_names_one() {
+		for (fields, keyed) in [
+			("*", false),
+			("a, id", false),
+			("a, a AS id", true),
+			("*, [a] AS id.k", true),
+			("a AS ids", false),
+			("a, id.k", true),
+			("a, id[0]", true),
+		] {
+			let mut b = Builder::new();
+			let regions = view_regions(&mut b, view_frame(), &[None]);
+			let run = viewing(vec![view_table_for_test("k", fields, None, None)], regions);
+			let stage = WriteStageKind::ProcessTableViews(Action::Create);
+			let (code, _, _) = emitted_views(&b.ir, &run, &[stage]).expect("it lowers");
+			let (_, lowered) = maintained(&code[0]);
+			let [
+				LoweredView::Materialized {
+					keyed: lowered_keyed,
+					..
+				},
+			] = lowered.views.as_slice()
+			else {
+				panic!("a materialized view: {:?}", lowered.views);
+			};
+			assert_eq!(*lowered_keyed, keyed, "fields `{fields}`");
+		}
 	}
 
 	#[test]

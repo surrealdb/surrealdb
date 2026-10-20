@@ -7,17 +7,19 @@
 //! express — an aggregated row's stats — so they are written to storage
 //! directly, and then run through the view table's own order (its indexes, its
 //! second-order views, events, live queries and change feed), as the
-//! incremental path runs the order for a created row. A materialized row whose
-//! key the backfill already wrote, because two source tables hold a record
-//! with the same id, replaces that row as the incremental path does, and runs
-//! the order for an updated row. The rows the view table held before are
-//! retired first, each deleted and run through the order for a deleted row, so
-//! a view reading the view table takes the old rows' removal and the new rows'
-//! arrival as it takes any other write; where that order writes nothing for the
-//! table, they are deleted as one range. The statement that defines the view
-//! changes the catalog the order is read from, so the order is the one of the
-//! view table's catalog version when the statement's retirement or fill meets
-//! the table, served from the compile cache ([`super::fault::view_rows`]).
+//! incremental path runs the order for a created row. A materialized row is
+//! keyed as the incremental path keys it: by its source record's key, or by
+//! the key its projected `id` gives. A row whose key the backfill already
+//! wrote, because two source records make the same key, replaces that row as
+//! the incremental path does, and runs the order for an updated row. The rows
+//! the view table held before are retired first, each deleted and run through
+//! the order for a deleted row, so a view reading the view table takes the old
+//! rows' removal and the new rows' arrival as it takes any other write; where
+//! that order writes nothing for the table, they are deleted as one range. The
+//! statement that defines the view changes the catalog the order is read from,
+//! so the order is the one of the view table's catalog version when the
+//! statement's retirement or fill meets the table, served from the compile
+//! cache ([`super::fault::view_rows`]).
 
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -30,7 +32,7 @@ use super::interp::State;
 use super::program::{Backfill, Program, StoreInstr};
 use super::scalar::Scalar;
 use super::store::{read, table_name_of, write};
-use super::write::{WriteState, action_pipeline, view_row_exec};
+use super::write::{WriteState, action_pipeline, view_row_exec, view_row_key};
 use crate::catalog::aggregation::{self, backfill_stats};
 use crate::catalog::providers::TableProvider as _;
 use crate::catalog::{Metadata, Record, RecordType, encode_whole_record_with};
@@ -99,8 +101,11 @@ pub(super) async fn step(
 			let Value::Object(mut object) = read(regs, *row) else {
 				return Err(internal("initial select for view did not return an array of objects"));
 			};
-			let Some(Value::RecordId(id)) = object.remove("id") else {
-				return Err(internal("select results did not contain a record id"));
+			// The row is held under the key its `id` gives, as maintaining the view holds it:
+			// the source record's, unless the projection names the `id`.
+			let id = RecordId {
+				key: view_row_key(object.remove("id").unwrap_or(Value::None), &table)?,
+				table: table.clone(),
 			};
 			let (ns, db) = ids(ctx).await?;
 			let record = Record::new(Value::Object(object));
@@ -111,10 +116,10 @@ pub(super) async fn step(
 				id: Cow::Borrowed(&id.key),
 			};
 			let txn = ctx.txn();
-			// A row is stored under its source record's key, so source records of different tables
-			// that share an id make one row. The view table was emptied before the backfill, so a
-			// row already under the key is one this backfill wrote, and it is replaced as
-			// maintaining the view replaces it: the source read last holds the row.
+			// Source records that make the same key make one row. The view table was emptied
+			// before the backfill, so a row already under the key is one this backfill wrote, and
+			// it is replaced as maintaining the view replaces it: the source read last holds the
+			// row.
 			let before = match txn.get_key_raw(&key, None).await.map_err(ControlFlow::Err)? {
 				Some(bytes) => Some(
 					txn.decode_record_as_written(
