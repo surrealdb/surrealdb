@@ -57,7 +57,7 @@ impl Body<'_, '_, '_> {
 			});
 		}
 		let mut reach = Needs::none();
-		reach.reach = Some(Reach::Any);
+		reach.reach = Some(Reach::any());
 		self.needs = self.needs.merged(&reach);
 		let dst = self.em.reg()?;
 		self.em.emit(Instr::Fetch {
@@ -338,7 +338,7 @@ mod tests {
 	fn a_fetch_reads_records_of_any_table_and_runs_beside_the_storage_cursor() {
 		let b = fetching(vec![Box::new(|b, row| field(b, row, "a"))]);
 		let lowered = lowered(&b);
-		assert_eq!(lowered.program.reach, Some(Reach::Any));
+		assert_eq!(lowered.program.reach, Some(Reach::any()));
 		let pipeline = &lowered.program.pipelines[0];
 		assert!(!pipeline.in_place);
 	}

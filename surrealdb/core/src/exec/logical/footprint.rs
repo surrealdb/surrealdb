@@ -320,17 +320,44 @@ pub(crate) fn write_targets(source: &LogicalWriteSource) -> Option<Vec<TableName
 			let mut tables = Vec::new();
 			let mut named = true;
 			let _ = rows.visit(&mut |op| {
-				if let LogicalOp::Source(source) = op {
-					match &source.source {
+				match op {
+					LogicalOp::Source(source) => match &source.source {
 						SourceRef::Table(table) => tables.push(table.clone()),
 						SourceRef::RecordId(rid) => tables.push(rid.table.clone()),
 						_ => named = false,
+					},
+					// A list of records written out, or a parameter's list a pass
+					// replaced with one: it names the tables of its elements, and
+					// any value it does not name leaves the tables open.
+					LogicalOp::Values(values) => {
+						named &= named_tables(&values.expr, &mut tables);
 					}
+					_ => {}
 				}
 				std::ops::ControlFlow::<()>::Continue(())
 			});
 			named.then_some(tables)
 		}
+	}
+}
+
+/// Pushes the table `expr`, or each element of it where it is a literal list, names, as a table
+/// or a record id; whether every one is named so.
+fn named_tables(expr: &LogicalExpr, tables: &mut Vec<TableName>) -> bool {
+	let mut push = |expr: &LogicalExpr| match expr {
+		LogicalExpr::Table(table) => {
+			tables.push(table.clone());
+			true
+		}
+		LogicalExpr::RecordId(rid) => {
+			tables.push(rid.table.clone());
+			true
+		}
+		_ => false,
+	};
+	match expr {
+		LogicalExpr::Array(items) => items.iter().all(push),
+		other => push(other),
 	}
 }
 

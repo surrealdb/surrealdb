@@ -224,6 +224,8 @@ pub(super) async fn serve_stage_bundle(
 	.await
 	.map_err(ControlFlow::Err)?;
 	let generic = !defined;
+	#[cfg(test)]
+	STAGE_FAULTS.with(|faults| faults.set(faults.get() + 1));
 	let frame = super::closure::frame_of(exec);
 	// When the frame suppresses enforcement for an actor that keeps its own, as the delete of a
 	// referencing record does, the stages are lowered for that actor. The cascades the stages
@@ -524,4 +526,7 @@ thread_local! {
 	/// from the node's units or lowered. Tests use it to tell table-read
 	/// faults from closure faults.
 	pub(super) static READ_FAULTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+	/// Counts the stage bundles of a write that may reach any table loaded on this thread for a
+	/// table its records were found in.
+	pub(super) static STAGE_FAULTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }

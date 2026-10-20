@@ -49,8 +49,8 @@ use crate::exec::planner::name_scope;
 use crate::exec::vm::payload::Refusal;
 use crate::expr::logical::{
 	LogicalCall, LogicalClosure, LogicalDestructureField, LogicalExpr, LogicalLiteral,
-	LogicalLookup, LogicalOp, LogicalRecordIdKey, LogicalRecordIdKeyRange, LogicalRecurse,
-	coercion_is_identity,
+	LogicalLookup, LogicalOp, LogicalRecordIdKey, LogicalRecordIdKeyRange, LogicalRecordIdLit,
+	LogicalRecurse, coercion_is_identity,
 };
 use crate::expr::{BinaryOperator, Function, PrefixOperator};
 use crate::val::{RecordId, RecordIdKey, Value};
@@ -764,26 +764,35 @@ fn bind_collection<'e>(
 /// values; `None` for every other expression. An object is built through a sorted map, as
 /// evaluation builds it, so key order and duplicate-key resolution agree with it.
 fn collapsed(expr: &LogicalExpr) -> Option<Value> {
+	collapse(expr, false)
+}
+
+/// [`collapsed`], and with `ids` a record id whose key collapses likewise and a table as well,
+/// each the value evaluation builds from it, at any depth.
+fn collapse(expr: &LogicalExpr, ids: bool) -> Option<Value> {
 	match expr {
 		LogicalExpr::Literal(lit) => Some(literal_value(lit)),
 		LogicalExpr::Array(items) => {
-			let values = items.iter().map(collapsed).collect::<Option<Vec<_>>>()?;
+			let values =
+				items.iter().map(|item| collapse(item, ids)).collect::<Option<Vec<_>>>()?;
 			Some(Value::Array(crate::val::Array(values)))
 		}
 		LogicalExpr::Set(items) => {
 			let mut set = crate::val::Set::new();
 			for item in items {
-				set.insert(collapsed(item)?);
+				set.insert(collapse(item, ids)?);
 			}
 			Some(Value::Set(set))
 		}
 		LogicalExpr::Object(entries) => {
 			let mut map = std::collections::BTreeMap::new();
 			for (key, item) in entries {
-				map.insert(key.clone(), collapsed(item)?);
+				map.insert(key.clone(), collapse(item, ids)?);
 			}
 			Some(Value::Object(crate::val::Object::from(map)))
 		}
+		LogicalExpr::RecordId(rid) if ids => record_id_value(rid).map(Value::RecordId),
+		LogicalExpr::Table(table) if ids => Some(Value::Table(table.clone())),
 		LogicalExpr::RecordId(_)
 		| LogicalExpr::Param(_)
 		| LogicalExpr::Table(_)
@@ -1362,9 +1371,10 @@ fn key_shape(key: &LogicalRecordIdKey) -> Result<KeyShape, IrError> {
 	})
 }
 
-/// The value of `expr` when it is an array of record ids whose keys are numbers, strings or uuids,
-/// written whole: the list a value source reads as one value, which no op of the plan reads an
-/// element of. `None` for every other expression.
+/// The value of `expr` when it is an array of record ids whose keys are numbers, strings, uuids, or
+/// arrays and objects of values that collapse ([`record_id_value`]), written whole: the list a
+/// value source reads as one value, which no op of the plan reads an element of. A compound key is
+/// the one evaluation builds from the same elements. `None` for every other expression.
 pub(super) fn record_id_list(expr: &LogicalExpr) -> Option<Value> {
 	let LogicalExpr::Array(items) = expr else {
 		return None;
@@ -1378,22 +1388,36 @@ pub(super) fn record_id_list(expr: &LogicalExpr) -> Option<Value> {
 			let LogicalExpr::RecordId(rid) = item else {
 				return None;
 			};
-			let key = match &rid.key {
-				LogicalRecordIdKey::Number(n) => RecordIdKey::Number(*n),
-				LogicalRecordIdKey::String(s) => RecordIdKey::String(s.clone()),
-				LogicalRecordIdKey::Uuid(u) => RecordIdKey::Uuid(*u),
-				LogicalRecordIdKey::Array(_)
-				| LogicalRecordIdKey::Object(_)
-				| LogicalRecordIdKey::Generate(_)
-				| LogicalRecordIdKey::Range(_) => return None,
-			};
-			Some(Value::RecordId(RecordId {
-				table: rid.table.clone(),
-				key,
-			}))
+			record_id_value(rid).map(Value::RecordId)
 		})
 		.collect::<Option<Vec<_>>>()?;
 	Some(Value::Array(crate::val::Array(ids)))
+}
+
+/// The record id `rid` writes, when its key is a number, a string or a uuid, or an array or object
+/// whose elements collapse, record ids and tables among them; `None` for a generated key and a
+/// range.
+fn record_id_value(rid: &LogicalRecordIdLit) -> Option<RecordId> {
+	let key = match &rid.key {
+		LogicalRecordIdKey::Number(n) => RecordIdKey::Number(*n),
+		LogicalRecordIdKey::String(s) => RecordIdKey::String(s.clone()),
+		LogicalRecordIdKey::Uuid(u) => RecordIdKey::Uuid(*u),
+		LogicalRecordIdKey::Array(items) => RecordIdKey::Array(crate::val::Array(
+			items.iter().map(|item| collapse(item, true)).collect::<Option<Vec<_>>>()?,
+		)),
+		LogicalRecordIdKey::Object(entries) => {
+			let mut map = std::collections::BTreeMap::new();
+			for (key, item) in entries {
+				map.insert(key.clone(), collapse(item, true)?);
+			}
+			RecordIdKey::Object(crate::val::Object::from(map))
+		}
+		LogicalRecordIdKey::Generate(_) | LogicalRecordIdKey::Range(_) => return None,
+	};
+	Some(RecordId {
+		table: rid.table.clone(),
+		key,
+	})
 }
 
 /// The shape of a key range, whose bounds' operands [`range_key_exprs`] lists.
@@ -1459,6 +1483,57 @@ fn key_exprs<'e>(key: &'e LogicalRecordIdKey, out: &mut Vec<&'e LogicalExpr>) {
 					key_exprs(key, out);
 				}
 			}
+		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::ops::ControlFlow;
+
+	use surrealdb_types::ToSql;
+
+	use super::*;
+
+	/// The list the `Values` leaf of `sql` collapses to, `None` where it does not collapse.
+	fn list(sql: &str) -> Option<String> {
+		let ast = crate::syn::parse(sql).expect("statement should parse");
+		let top = ast.expressions.into_iter().next().expect("one statement");
+		let surrealdb_expr::parser::TopLevelExpr::Expr(expr) = top else {
+			panic!("expected a bare expression");
+		};
+		let plan = crate::expr::logical::lower(expr).expect("statement should lower");
+		let mut found = None;
+		let _ = plan.visit(&mut |op| {
+			if let LogicalOp::Values(values) = op {
+				found = Some(record_id_list(&values.expr));
+			}
+			ControlFlow::<()>::Continue(())
+		});
+		found.expect("a Values leaf").map(|list| list.to_sql())
+	}
+
+	/// A list of record ids with compound keys collapses to one value whatever the elements of
+	/// the keys: values, record ids, or arrays and objects of either. A key holding anything
+	/// evaluated does not collapse.
+	#[test]
+	fn a_compound_key_collapses_with_the_record_ids_it_holds() {
+		for sql in [
+			"SELECT * FROM [edge:[person:1, person:2]]",
+			"SELECT * FROM [edge:{ from: person:1, to: person:2 }, edge:[1, 'a']]",
+			"SELECT * FROM [edge:[[person:1], { k: person:2 }]]",
+			"SELECT * FROM [edge:[person:[1, 2], edge:{ k: person:3 }]]",
+		] {
+			let collapsed = list(sql).unwrap_or_else(|| panic!("`{sql}` does not collapse"));
+			let from = sql.trim_start_matches("SELECT * FROM ");
+			assert_eq!(collapsed.replace(' ', ""), from.replace(' ', ""), "{sql}");
+		}
+		for sql in [
+			"SELECT * FROM [edge:[person:1, $x]]",
+			"SELECT * FROM [edge:[person:1, rand::uuid()]]",
+			"SELECT * FROM [edge:[person:1, person:2..4]]",
+		] {
+			assert_eq!(list(sql), None, "{sql}");
 		}
 	}
 }

@@ -470,35 +470,80 @@ pub(super) fn is_source(tag: PhysTag) -> bool {
 	)
 }
 
-/// The tables a value source reads records of by id: those of the record ids, ranges and tables a
-/// value known when the program is lowered holds, as its elements and the elements of an array
-/// among them, and any table where only the run knows the value. The program reads those records
-/// through the units of their tables ([`crate::exec::vm::dispatch`]), as a `FETCH` reads the
-/// records its links name.
+/// The tables a value source reads records of by id: those of the record ids, ranges and tables
+/// its value holds, as its elements and the elements of an array among them, whether the value is
+/// known when the program is lowered or built by record-id and table ops whose keys only the run
+/// computes; and any table besides where some part of the value only the run knows. The program
+/// reads those records through the units of their tables ([`crate::exec::vm::dispatch`]), as a
+/// `FETCH` reads the records its links name.
 fn values_reach(ir: &Ir, value: ValueId) -> Reach {
-	fn table_of(value: &Value) -> Option<TableName> {
-		match value {
-			Value::RecordId(rid) => Some(rid.table.clone()),
-			Value::Table(table) => Some(table.clone()),
-			_ => None,
-		}
-	}
-	let Some(known) = static_value(ir, value) else {
-		return Reach::Any;
-	};
 	let mut tables = std::collections::BTreeSet::new();
-	match &known {
-		Value::Array(items) => {
-			for item in items.iter() {
-				match item {
-					Value::Array(inner) => tables.extend(inner.iter().filter_map(table_of)),
-					other => tables.extend(table_of(other)),
+	if named_tables(ir, value, 0, &mut tables) {
+		Reach::Tables(tables)
+	} else {
+		Reach::Any(tables)
+	}
+}
+
+/// Adds to `tables` the tables of the records `value` names at `depth`: 0 for the value itself, 1
+/// for an element of it, 2 for an element of an array among its elements. Whether every part of
+/// it is known.
+fn named_tables(
+	ir: &Ir,
+	value: ValueId,
+	depth: u8,
+	tables: &mut std::collections::BTreeSet<TableName>,
+) -> bool {
+	fn of_value(value: &Value, depth: u8, tables: &mut std::collections::BTreeSet<TableName>) {
+		match value {
+			Value::RecordId(rid) => {
+				tables.insert(rid.table.clone());
+			}
+			Value::Table(table) => {
+				tables.insert(table.clone());
+			}
+			Value::Array(items) if depth < 2 => {
+				for item in items.iter() {
+					of_value(item, depth + 1, tables);
 				}
 			}
+			_ => {}
 		}
-		other => tables.extend(table_of(other)),
 	}
-	Reach::Tables(tables)
+	if let Some(known) = static_value(ir, value) {
+		of_value(&known, depth, tables);
+		return true;
+	}
+	let Some(ValueDef::OpResult {
+		op,
+		index: 0,
+	}) = ir.value(value).map(|data| data.def)
+	else {
+		return false;
+	};
+	let Some(data) = ir.op(op) else {
+		return false;
+	};
+	match &data.kind {
+		OpKind::Expr(ExprOp::RecordId(attrs)) => {
+			tables.insert(attrs.table.clone());
+			true
+		}
+		OpKind::Expr(ExprOp::Table {
+			name,
+		}) => {
+			tables.insert(name.clone());
+			true
+		}
+		OpKind::Expr(ExprOp::Array) if depth < 2 => {
+			let mut known = true;
+			for item in &data.operands {
+				known &= named_tables(ir, *item, depth + 1, tables);
+			}
+			known
+		}
+		_ => false,
+	}
 }
 
 /// The value `value` denotes without evaluation, when it denotes one.

@@ -104,6 +104,9 @@ mod tests_epoch_catalog;
 mod tests_frontier;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
+mod tests_id_list;
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_late_layers;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]

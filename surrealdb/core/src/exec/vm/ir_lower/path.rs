@@ -116,7 +116,7 @@ impl Lowerer<'_> {
 		self.require_frame(data)?;
 		let [base] = exactly::<1>(data)?;
 		let src = self.value(base)?;
-		self.reaches(Reach::Any);
+		self.reaches(Reach::any());
 		if self.each_guard == Some(base) {
 			let plain = self.em.reg()?;
 			self.emit(Instr::Load {
@@ -364,7 +364,7 @@ impl Lowerer<'_> {
 				"ir_lower::path: a destructure holds a region no alias uses",
 			));
 		}
-		self.reaches(Reach::Any);
+		self.reaches(Reach::any());
 		let dst = self.em.reg()?;
 		self.emit(Instr::Destructure {
 			src,
@@ -765,7 +765,7 @@ mod tests {
 				..
 			}
 		));
-		assert_eq!(needs.reach, Some(Reach::Any));
+		assert_eq!(needs.reach, Some(Reach::any()));
 	}
 
 	#[test]
@@ -961,7 +961,7 @@ mod tests {
 		let program =
 			em.finish_program(vec![pipeline], AccessMode::ReadOnly).expect("the program is built");
 		assert!(matches!(operand, Operand::Reg(_)));
-		assert_eq!(needs.reach, Some(Reach::Any));
+		assert_eq!(needs.reach, Some(Reach::any()));
 		assert_eq!(program.host_code.len(), 2);
 		let Instr::Destructure {
 			fields,

@@ -67,8 +67,9 @@ thread_local! {
 pub(crate) enum Reach {
 	/// These tables.
 	Tables(BTreeSet<TableName>),
-	/// Any table of the database.
-	Any,
+	/// Any table of the database. The tables it holds are those the program's sites name, whose
+	/// read units are linked when the query arrives; the run loads the rest.
+	Any(BTreeSet<TableName>),
 }
 
 assert_plain!(Reach);
@@ -79,21 +80,30 @@ impl Reach {
 		Reach::Tables(BTreeSet::new())
 	}
 
-	/// The reach of `self` and `other` together.
+	/// The reach of a read of any table, naming none.
+	pub(crate) fn any() -> Self {
+		Reach::Any(BTreeSet::new())
+	}
+
+	/// The reach of `self` and `other` together: the tables either names, and any table where
+	/// either reaches any.
 	pub(super) fn union(self, other: Reach) -> Reach {
 		match (self, other) {
 			(Reach::Tables(mut a), Reach::Tables(b)) => {
 				a.extend(b);
 				Reach::Tables(a)
 			}
-			_ => Reach::Any,
+			(Reach::Tables(mut a) | Reach::Any(mut a), Reach::Tables(b) | Reach::Any(b)) => {
+				a.extend(b);
+				Reach::Any(a)
+			}
 		}
 	}
 
 	/// Whether `table` is reached.
 	pub(super) fn reaches(&self, table: &TableName) -> bool {
 		match self {
-			Reach::Any => true,
+			Reach::Any(_) => true,
 			Reach::Tables(tables) => tables.contains(table),
 		}
 	}

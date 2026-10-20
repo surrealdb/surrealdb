@@ -1044,7 +1044,7 @@ impl<'a> Blocks<'a> {
 			paths.push(path_steps(&mut self.lw, self.ir, *region)?);
 		}
 		let fetch = self.lw.emitter().fetch(paths, false)?;
-		self.lw.reaches(Reach::Any);
+		self.lw.reaches(Reach::any());
 		let dst = self.reg()?;
 		self.emit(Instr::Fetch {
 			fetch,

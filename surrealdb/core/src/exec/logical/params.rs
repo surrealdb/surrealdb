@@ -43,10 +43,13 @@
 //!   physical planner resolves the vector once for the source; as a literal it would be a node per
 //!   component for every later pass to walk.
 //! - **Record id lists:** where a name holding a non-empty array of record ids is a whole `FROM`
-//!   source (`FROM $ids`, and an `UPDATE` or `DELETE` of `$ids`), it stays a parameter there, and
-//!   only there. The source reads each id's record whether the array is a parameter or a literal,
-//!   and as a literal it would be a node per id for every later pass to walk, and a plan that
-//!   depends on the ids themselves.
+//!   source (`FROM $ids`), the source becomes the `Values` leaf its literal would, with the
+//!   parameter as its expression, read when the statement runs. The leaf reads each id's record
+//!   whether its expression is the parameter or the literal, and every pass sees the leaf kind it
+//!   sees for the literal; as a literal it would be a node per id for every later pass to walk, and
+//!   a plan that depends on the ids themselves. The subjects of a write (`UPDATE $ids`) and a
+//!   locked read take the literal: the write's table and the locked keys are settled when the plan
+//!   is.
 //!
 //! A scalar subquery is part of the statement — it runs in the same
 //! transaction with the same context — so its plan is resolved with the
@@ -69,8 +72,8 @@ use crate::exec::planner::util::{
 };
 use crate::expr::logical::{
 	LogicalDdl, LogicalDdlStatement, LogicalEval, LogicalExpr, LogicalFilter, LogicalForeach,
-	LogicalJoin, LogicalLet, LogicalOp, LogicalPermissionFilter, LogicalSource, LogicalWrite,
-	SourceRef,
+	LogicalJoin, LogicalLet, LogicalOp, LogicalPermissionFilter, LogicalSource, LogicalValues,
+	LogicalWrite, LogicalWriteSource, SourceRef,
 };
 use crate::expr::operator::BinaryOperator;
 use crate::val::Value;
@@ -81,11 +84,13 @@ pub(super) async fn resolve_params(op: LogicalOp, bx: &BindContext<'_>) -> Logic
 	// Phase 1: the names the plan references in a resolvable position, and
 	// the names it binds itself.
 	let ReferencedNames {
-		reads: Reads {
-			names,
-			outside_query_vectors,
-			outside_sources,
-		},
+		reads:
+			Reads {
+				names,
+				outside_query_vectors,
+				outside_sources,
+				write_subjects,
+			},
 		bound,
 	} = referenced_and_bound(&op);
 	// The names a table permission predicate reads: a privileged frame holds
@@ -112,8 +117,9 @@ pub(super) async fn resolve_params(op: LogicalOp, bx: &BindContext<'_>) -> Logic
 		}
 		if is_record_id_list(&value) {
 			subs.record_id_lists.insert(name.clone());
-			// Read only as a whole source, it stays a parameter everywhere.
-			if !outside_sources.contains(&name) {
+			// Read only as a whole source, it stays a parameter everywhere. The subjects of a
+			// write take the literal, so a name that is one keeps it beside its other reads.
+			if !outside_sources.contains(&name) && !write_subjects.contains(&name) {
 				continue;
 			}
 		}
@@ -131,7 +137,8 @@ pub(super) async fn resolve_params(op: LogicalOp, bx: &BindContext<'_>) -> Logic
 			}
 		}
 	}
-	if subs.literals.is_empty() && privileged.literals.is_empty() {
+	if subs.literals.is_empty() && subs.record_id_lists.is_empty() && privileged.literals.is_empty()
+	{
 		return op;
 	}
 
@@ -226,6 +233,8 @@ struct Reads {
 	outside_query_vectors: HashSet<String>,
 	/// The names read there other than as a whole `FROM` source.
 	outside_sources: HashSet<String>,
+	/// The names read as a whole source of a write's subjects.
+	write_subjects: HashSet<String>,
 }
 
 /// The names `op` references in a position [`resolve_params`] substitutes,
@@ -264,10 +273,17 @@ fn referenced_and_bound(op: &LogicalOp) -> ReferencedNames {
 			// A mutation's `WHERE` is a predicate: it chooses the records the
 			// write reads, by the access path a read under it would take.
 			LogicalOp::Write(LogicalWrite {
-				cond: Some(cond),
+				cond,
+				source,
 				..
-			}) => collect_resolvable_names(cond, &mut reads),
-			LogicalOp::Write(_) => {}
+			}) => {
+				if let Some(cond) = cond {
+					collect_resolvable_names(cond, &mut reads);
+				}
+				if let LogicalWriteSource::Rows(rows) = source {
+					source_params(rows, &mut reads.write_subjects);
+				}
+			}
 			LogicalOp::Join(LogicalJoin {
 				on,
 				filter,
@@ -345,6 +361,52 @@ fn referenced_and_bound(op: &LogicalOp) -> ReferencedNames {
 	ReferencedNames {
 		reads,
 		bound,
+	}
+}
+
+/// Adds the names `rows` reads as a whole source to `names`: its own, or those of the leaves of the
+/// union it is. Every other plan reads no parameter as a whole source.
+#[allow(clippy::wildcard_enum_match_arm)]
+fn source_params(rows: &LogicalOp, names: &mut HashSet<String>) {
+	match rows {
+		LogicalOp::Source(LogicalSource {
+			source: SourceRef::Param(param),
+			..
+		}) => {
+			names.insert(param.as_str().to_owned());
+		}
+		LogicalOp::UnionAll(union) => {
+			for input in &union.inputs {
+				source_params(input, names);
+			}
+		}
+		_ => {}
+	}
+}
+
+/// Replaces the `Values` leaf [`substitute_node`] made of each record id list parameter among the
+/// subjects `rows` is, directly or as a leaf of the union it is, with the list's literal.
+#[allow(clippy::wildcard_enum_match_arm)]
+fn subject_literals(rows: &mut LogicalOp, subs: &Substitutions) {
+	let literal = match rows {
+		LogicalOp::Values(LogicalValues {
+			expr: LogicalExpr::Param(param),
+			for_update,
+			..
+		}) if subs.record_id_lists.contains(param.as_str()) => subs
+			.literals
+			.get(param.as_str())
+			.map(|literal| classify_source(literal.clone(), None, None, *for_update)),
+		LogicalOp::UnionAll(union) => {
+			for input in &mut union.inputs {
+				subject_literals(input, subs);
+			}
+			None
+		}
+		_ => None,
+	};
+	if let Some(literal) = literal {
+		*rows = literal;
 	}
 }
 
@@ -434,6 +496,11 @@ fn substitute_node(node: LogicalOp, subs: &Substitutions, privileged: &Substitut
 			if let Some(cond) = &mut write.cond {
 				substitute(cond, subs);
 			}
+			// The subjects were substituted as a read's source is, ahead of this node: a write
+			// of a record id list takes the literal, so its table is settled when the plan is.
+			if let LogicalWriteSource::Rows(rows) = &mut write.source {
+				subject_literals(rows, subs);
+			}
 			LogicalOp::Write(write)
 		}
 		// A `MATCHES` of the statement's own projection takes the query its `WHERE` takes, so
@@ -468,6 +535,13 @@ fn substitute_node(node: LogicalOp, subs: &Substitutions, privileged: &Substitut
 				// A locked read takes the literal: what it locks is settled when the plan is.
 				Some(literal) if for_update || !subs.record_id_lists.contains(param.as_str()) => {
 					classify_source(literal.clone(), None, with, for_update)
+				}
+				_ if !for_update && subs.record_id_lists.contains(param.as_str()) => {
+					LogicalOp::Values(LogicalValues {
+						expr: LogicalExpr::Param(param),
+						for_update,
+						written: false,
+					})
 				}
 				_ => LogicalOp::Source(LogicalSource {
 					source: SourceRef::Param(param),
@@ -787,21 +861,28 @@ mod tests {
 		)
 	}
 
-	/// A parameter holding record ids, read as a whole source, stays one parameter there, and no
-	/// literal is built for it; read in a predicate too, it is substituted there alone. A locked
-	/// read, an array holding a range and an empty array take the literal.
+	/// A parameter holding record ids, read as a whole source, becomes the `Values` leaf its
+	/// literal would, holding the parameter, and no literal is built for it; read in a predicate
+	/// too, it is substituted there alone. The subjects of a write, a locked read, an array
+	/// holding a range and an empty array take the literal.
 	#[tokio::test]
-	async fn a_record_id_list_source_stays_a_parameter() {
+	async fn a_record_id_list_source_reads_the_parameter() {
 		let list = ids("person", &[2, 1]);
-		for statement in ["SELECT * FROM $ids", "UPDATE $ids SET a = 1", "DELETE $ids"] {
+		let plan = bound(lower("SELECT * FROM $ids"), vec![("ids", list.clone())]).await;
+		let leaves: Vec<_> = plan.children().iter().map(LogicalOp::name).collect();
+		assert_eq!(leaves, ["Values"], "{plan}");
+		let rendered = plan.to_string();
+		assert!(rendered.contains("Values[$ids]"), "{rendered}");
+		assert!(!rendered.contains("person:2"), "{rendered}");
+		for statement in ["UPDATE $ids SET a = 1", "DELETE $ids"] {
 			let plan = bound(lower(statement), vec![("ids", list.clone())]).await.to_string();
-			assert!(plan.contains("$ids"), "{statement}:\n{plan}");
-			assert!(!plan.contains("person:2"), "{statement}:\n{plan}");
+			assert!(!plan.contains("$ids"), "{statement}:\n{plan}");
+			assert!(plan.contains("person:2"), "{statement}:\n{plan}");
 		}
 		let plan = bound(lower("SELECT * FROM $ids WHERE id IN $ids"), vec![("ids", list.clone())])
 			.await
 			.to_string();
-		assert!(plan.contains("Source[$ids]"), "{plan}");
+		assert!(plan.contains("Values[$ids]"), "{plan}");
 		assert!(plan.contains("id INSIDE [person:2, person:1]"), "{plan}");
 		let plan =
 			bound(lower("SELECT * FROM $ids FOR UPDATE"), vec![("ids", list)]).await.to_string();
@@ -819,6 +900,38 @@ mod tests {
 		for value in [ranged, Value::from(Vec::<Value>::new())] {
 			let plan = bound(lower("SELECT * FROM $ids"), vec![("ids", value)]).await.to_string();
 			assert!(!plan.contains("$ids"), "{plan}");
+		}
+	}
+
+	/// A parameter that is the subject of a write and a whole source elsewhere in the plan takes
+	/// the literal at the write alone: the write names the tables of the ids when the plan is
+	/// planned, and every read of the list keeps the parameter.
+	#[tokio::test]
+	#[allow(clippy::wildcard_enum_match_arm)]
+	async fn a_record_id_list_is_a_write_subject_and_a_source_in_one_plan() {
+		let list = ids("person", &[2, 1]);
+		for statement in [
+			"{ UPDATE $ids SET n += 1; RETURN (SELECT n FROM $ids); }",
+			"UPDATE $ids SET total = (SELECT VALUE math::sum(n) FROM $ids GROUP ALL)[0]",
+			"DELETE $ids WHERE n IN (SELECT VALUE n FROM $ids)",
+		] {
+			let plan = bound(lower(statement), vec![("ids", list.clone())]).await;
+			let mut subjects = Vec::new();
+			let mut reads = 0;
+			visit_deep(&plan, &mut |node| match node {
+				LogicalOp::Write(LogicalWrite {
+					source,
+					..
+				}) => subjects.push(super::super::footprint::write_targets(source)),
+				LogicalOp::Values(LogicalValues {
+					expr: LogicalExpr::Param(_),
+					..
+				}) => reads += 1,
+				_ => {}
+			});
+			let person = TableName::from("person");
+			assert_eq!(subjects, [Some(vec![person.clone(), person])], "{statement}:\n{plan}");
+			assert_eq!(reads, 1, "{statement}:\n{plan}");
 		}
 	}
 

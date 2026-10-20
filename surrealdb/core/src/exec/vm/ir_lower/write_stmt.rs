@@ -543,7 +543,7 @@ fn tables_by_name(
 	Ok(StageTables {
 		tables: Vec::new(),
 		default: None,
-		reach: crate::exec::vm::dispatch::Reach::Any,
+		reach: crate::exec::vm::dispatch::Reach::any(),
 		by_name: Some(Arc::new(crate::exec::vm::units::StageSetUnit::new(
 			Arc::clone(statement),
 			sites,

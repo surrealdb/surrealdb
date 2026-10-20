@@ -1565,8 +1565,8 @@ impl<'c, P: UnitPlanner, L: Lower> Compiler<'c, P, L> {
 	///
 	/// Each table has a read unit for the caller and, where the caller's reads are checked
 	/// ([`LowerCx::reads_checked`]), one for a frame that waives the checks (a permission
-	/// predicate, an event). A reach that may name any table names none beyond the tables written:
-	/// the run loads the rest.
+	/// predicate, an event). A reach that may name any table names the tables its sites name and
+	/// the tables written: the run loads the rest.
 	async fn seal(
 		&mut self,
 		program: &mut Program,
@@ -2010,11 +2010,10 @@ fn reaches_nothing(reach: &Reach) -> bool {
 	matches!(reach, Reach::Tables(tables) if tables.is_empty())
 }
 
-/// The tables `reach` names: none beyond those a reach of any table names.
+/// The tables `reach` names, whether or not it may reach any other.
 fn tables_named(reach: Reach) -> BTreeSet<TableName> {
 	match reach {
-		Reach::Tables(tables) => tables,
-		Reach::Any => BTreeSet::new(),
+		Reach::Tables(tables) | Reach::Any(tables) => tables,
 	}
 }
 

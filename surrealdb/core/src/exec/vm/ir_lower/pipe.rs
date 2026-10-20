@@ -2958,8 +2958,8 @@ impl Body<'_, '_, '_> {
 		};
 		if fetches {
 			self.needs.reach = Some(match self.needs.reach.take() {
-				Some(held) => held.union(crate::exec::vm::dispatch::Reach::Any),
-				None => crate::exec::vm::dispatch::Reach::Any,
+				Some(held) => held.union(crate::exec::vm::dispatch::Reach::any()),
+				None => crate::exec::vm::dispatch::Reach::any(),
 			});
 			let dst = self.em.reg()?;
 			self.em.emit(Instr::FetchRow {
