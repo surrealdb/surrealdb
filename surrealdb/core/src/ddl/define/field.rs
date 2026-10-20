@@ -247,20 +247,19 @@ pub(crate) async fn define_field_definition_apply(
 	.await?;
 
 	// Overwriting an existing reference field can drop target tables it
-	// referenced (the REFERENCE clause removed, or the record kind narrowed
-	// or changed); purge the stranded reference keys so the DELETE
-	// reference-purge gate stays sound. Skipped during import, which restores
-	// reference keys verbatim.
-	if !opt.import
-		&& let Some(existing) = &existing
-	{
-		crate::exec::reference_purge::purge_dropped_reference_keys(
+	// referenced (the REFERENCE clause removed, or the record kind narrowed or
+	// changed), whose stranded keys are purged so the DELETE reference-purge
+	// gate stays sound; a field that starts or retargets its REFERENCE over
+	// stored records gets the keys of the links they hold. Skipped during
+	// import, which restores reference keys verbatim.
+	if !opt.import {
+		crate::exec::reference_purge::reconcile_reference_keys(
 			&txn,
 			ns,
 			db,
 			&tb_name,
-			existing,
-			Some(definition),
+			existing.as_deref(),
+			definition,
 		)
 		.await?;
 	}

@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Change 23: REFERENCE added to, or dropped from, a field of a table that has rows is accepted by every table and mints nothing. Adding it backfills no backlink: rows stored before it have none until their value changes, and an ON DELETE action does not reach them. Dropping it purges every backlink of the field and leaves the stored values alone. The design rules do not describe this."
+reason = "Change 23: REFERENCE added to, or dropped from, a field of a table that has rows is accepted by every table and mints nothing. Adding it writes the backlink of every link the stored rows hold, so <~ and an ON DELETE action reach rows stored before it. Dropping it purges every backlink of the field and leaves the stored values alone; adding it again restores the backlinks from the stored values."
 
 [[test.results]]
 value = "NONE"
@@ -54,7 +54,7 @@ value = "[]"
 value = "[{ by: author:1, id: book:1, n: 1, ni: true }, { by: author:2, id: book:2, n: 2, ni: true }, { by: author:3, id: book:3, n: 3, ni: true }]"
 
 [[test.results]]
-value = "[{ b: [], id: author:1 }, { b: [], id: author:2 }, { b: [], id: author:3 }, { b: [], id: author:4 }]"
+value = "[{ b: [book:1], id: author:1 }, { b: [book:2], id: author:2 }, { b: [book:3], id: author:3 }, { b: [], id: author:4 }]"
 
 [[test.results]]
 value = "[]"
@@ -63,10 +63,10 @@ value = "[]"
 value = "[]"
 
 [[test.results]]
-value = "[{ b: [], id: author:1 }, { b: [], id: author:2 }, { b: [], id: author:3 }, { b: [], id: author:4 }]"
+value = "[{ b: [book:1], id: author:1 }, { b: [book:2], id: author:2 }, { b: [book:3], id: author:3 }, { b: [], id: author:4 }]"
 
 [[test.results]]
-value = "[]"
+error = "Cannot delete `author:1` as it is referenced by `book:1` with an ON DELETE REJECT clause"
 
 [[test.results]]
 value = "[{ by: author:1, id: book:1 }, { by: author:2, id: book:2 }, { by: author:3, id: book:3 }]"
@@ -75,25 +75,25 @@ value = "[{ by: author:1, id: book:1 }, { by: author:2, id: book:2 }, { by: auth
 value = "[]"
 
 [[test.results]]
-error = "Cannot delete `author:2` as it is referenced by `book:4` with an ON DELETE REJECT clause"
+error = "Cannot delete `author:2` as it is referenced by `book:2` with an ON DELETE REJECT clause"
 
 [[test.results]]
-value = "[{ b: [book:4], id: author:2 }, { b: [], id: author:3 }, { b: [], id: author:4 }]"
-
-[[test.results]]
-value = "[]"
+value = "[{ b: [book:1], id: author:1 }, { b: [book:2, book:4], id: author:2 }, { b: [book:3], id: author:3 }, { b: [], id: author:4 }]"
 
 [[test.results]]
 value = "[]"
 
 [[test.results]]
-value = "[{ b: [book:4], id: author:2 }, { b: [book:3], id: author:3 }, { b: [], id: author:4 }]"
+value = "[]"
+
+[[test.results]]
+value = "[{ b: [book:1], id: author:1 }, { b: [book:2, book:4], id: author:2 }, { b: [book:3], id: author:3 }, { b: [], id: author:4 }]"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "[{ b: [], id: author:2 }, { b: [], id: author:3 }, { b: [], id: author:4 }]"
+value = "[{ b: [], id: author:1 }, { b: [], id: author:2 }, { b: [], id: author:3 }, { b: [], id: author:4 }]"
 
 [[test.results]]
 value = "[{ by: author:1, id: book:1 }, { by: author:2, id: book:2 }, { by: author:3, id: book:3 }, { by: author:2, id: book:4 }]"
@@ -111,13 +111,13 @@ value = "[]"
 value = "NONE"
 
 [[test.results]]
-value = "[{ b: [], id: author:2 }, { b: [], id: author:3 }, { b: [], id: author:4 }]"
+value = "[{ b: [book:1], id: author:1 }, { b: [book:2, book:4], id: author:2 }, { b: [book:3], id: author:3 }, { b: [], id: author:4 }]"
 
 [[test.results]]
 value = "[]"
 
 [[test.results]]
-value = "[{ b: [], id: author:2 }, { b: [book:5], id: author:3 }, { b: [], id: author:4 }]"
+value = "[{ b: [book:1], id: author:1 }, { b: [book:2, book:4], id: author:2 }, { b: [book:3, book:5], id: author:3 }, { b: [], id: author:4 }]"
 
 [[test.results]]
 value = "6"
@@ -153,13 +153,13 @@ value = "[]"
 value = "NONE"
 
 [[test.results]]
-value = "[{ b: [], id: author:3 }]"
+value = "[{ b: [loose:1], id: author:3 }]"
 
 [[test.results]]
 value = "[]"
 
 [[test.results]]
-value = "[{ b: [], id: author:3 }]"
+value = "[{ b: [loose:1], id: author:3 }]"
 
 [[test.results]]
 value = "NONE"
@@ -186,7 +186,7 @@ value = "[]"
 value = "NONE"
 
 [[test.results]]
-value = "[{ b: [], id: author:1 }, { b: [], id: author:2 }]"
+value = "[{ b: [book:1], id: author:1 }, { b: [], id: author:2 }]"
 
 [[test.results]]
 value = "[]"
@@ -226,20 +226,20 @@ ALTER FIELD by ON book REFERENCE ON DELETE REJECT;
 (INFO FOR TABLE book).migrations.generation;
 (INFO FOR TABLE book).migrations.guaranteed;
 SELECT id, by, n, type::is_int(n) AS ni FROM book ORDER BY id;
--- The rows stored before it have no backlink, and a write that leaves their
--- value as it was adds none.
+-- The rows stored before it have their backlinks, and a write that leaves their
+-- value as it was changes none.
 SELECT id, <~book AS b FROM author ORDER BY id;
 UPDATE book:2 SET title = 't' RETURN NONE;
 UPDATE book:2 SET by = author:2 RETURN NONE;
 SELECT id, <~book AS b FROM author ORDER BY id;
--- So an ON DELETE action does not see them.
+-- So an ON DELETE action sees them.
 DELETE author:1;
 SELECT id, by FROM book ORDER BY id;
 -- A row written afterwards has its backlink, and its action.
 CREATE book:4 SET by = author:2, n = 4 RETURN NONE;
 DELETE author:2;
 SELECT id, <~book AS b FROM author ORDER BY id;
--- An old row whose value changes gets one.
+-- An old row whose value changes moves its backlink.
 UPDATE book:3 SET by = author:4 RETURN NONE;
 UPDATE book:3 SET by = author:3 RETURN NONE;
 SELECT id, <~book AS b FROM author ORDER BY id;
@@ -250,7 +250,7 @@ SELECT id, by FROM book ORDER BY id;
 (INFO FOR TABLE book).fields.by;
 (INFO FOR TABLE book).migrations.generation;
 (INFO FOR TABLE book).migrations.guaranteed;
--- Added again: nothing is restored for the rows that have a value.
+-- Added again: the backlinks of the rows that have a value are restored.
 ALTER FIELD by ON book REFERENCE;
 SELECT id, <~book AS b FROM author ORDER BY id;
 CREATE book:5 SET by = author:3, n = 5 RETURN NONE;

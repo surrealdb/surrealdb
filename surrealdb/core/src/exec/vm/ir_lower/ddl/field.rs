@@ -390,22 +390,22 @@ impl Ddl<'_, '_> {
 			self.queue_verification((ns, db), table_name, (stored_field, existing))?;
 		}
 		// Overwriting a reference field can strand the reference keys it wrote under target
-		// tables it no longer references; an import restores the keys verbatim.
-		if matches!(attrs.mode, DefineKind::Overwrite) {
-			let import = self.label()?;
-			self.store(StoreInstr::JumpIfImport {
-				target: import,
-			});
-			let table_reg = self.load(table_name)?;
-			self.store(StoreInstr::PurgeDroppedReferences {
-				ns,
-				db,
-				table: table_reg,
-				old: existing,
-				new: Some(stored_field),
-			});
-			self.bind(import)?;
-		}
+		// tables it no longer references, and a field that starts or widens its `REFERENCE` over
+		// stored records has keys to write for the links they hold; an import restores the keys
+		// verbatim.
+		let import = self.label()?;
+		self.store(StoreInstr::JumpIfImport {
+			target: import,
+		});
+		let table_reg = self.load(table_name)?;
+		self.store(StoreInstr::PurgeDroppedReferences {
+			ns,
+			db,
+			table: table_reg,
+			old: existing,
+			new: Some(stored_field),
+		});
+		self.bind(import)?;
 		self.stamp(ns, db, table_name)?;
 		// `replace_tb` with the fields' cache stamp refreshed.
 		let fields_ts = self.reg()?;

@@ -119,3 +119,144 @@ pub(crate) async fn purge_dropped_reference_keys(
 	}
 	Ok(())
 }
+
+/// Bring the reference keys of field `new` of table `ft` in line with a schema
+/// change from `old` (`None` for a field defined fresh): purge the keys `old`
+/// wrote under target tables `new` no longer references, then, when `new`
+/// starts a `REFERENCE` or changes its record kind, write the keys of the links
+/// the stored records hold that `new` references ([`backfill_reference_keys`]).
+/// Every statement that changes a field definition outside an import calls
+/// this, so the keys stay those a write of every stored record would produce.
+pub(crate) async fn reconcile_reference_keys(
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	ft: &TableName,
+	old: Option<&catalog::FieldDefinition>,
+	new: &catalog::FieldDefinition,
+) -> Result<()> {
+	if let Some(old) = old {
+		purge_dropped_reference_keys(txn, ns, db, ft, old, Some(new)).await?;
+	}
+	let starts_or_retargets = new.reference.is_some()
+		&& old.is_none_or(|old| old.reference.is_none() || old.field_kind != new.field_kind);
+	if starts_or_retargets {
+		backfill_reference_keys(txn, ns, db, ft, new).await?;
+	}
+	Ok(())
+}
+
+/// Write the reference keys a field declares for the records its table
+/// already holds, when a schema change starts or widens the field's
+/// `REFERENCE` (`DEFINE FIELD ... OVERWRITE` adding the clause, or changing
+/// the record kind).
+///
+/// Record writes keep a field's reference keys in step with its value by
+/// comparing the value before and after the write, so a record that already
+/// holds a link when the clause arrives has no key for it and a write that
+/// leaves the link unchanged writes none. This scans the table once and writes
+/// the key of every link a record holds under the field to a table the
+/// field's record kind can target, the same keys and inline caches a write of
+/// that record would have produced. A link to a table the kind no longer
+/// admits (a stored value a narrowed kind left behind) gets none. Writing a key
+/// that exists is a no-op, so the scan may cover links the previous definition
+/// already tracked. A collection (array or set) contributes a key per record it
+/// holds, as a write of it does.
+pub(crate) async fn backfill_reference_keys(
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	ft: &TableName,
+	field: &catalog::FieldDefinition,
+) -> Result<()> {
+	use crate::exec::vm::codec;
+	use crate::exec::vm::codec::key::KeyField;
+	use crate::key::schema::{RecordKey, RecordPrefix};
+	use crate::val::{RecordId, Value};
+
+	if field.reference.is_none() {
+		return Ok(());
+	}
+	// `ff` is the referencing field name exactly as the record writes encode it
+	// into each key's `ff` slot.
+	let ff = field.name.to_sql();
+	let layouts = txn.table_layouts(ns, db, ft, None).await?;
+	let range = RecordPrefix {
+		ns,
+		db,
+		tb: Cow::Borrowed(ft),
+	}
+	.range()?;
+	let mut cursor = txn.open_vals_cursor_raw(range, Direction::Forward, 0, None).await?;
+	loop {
+		// The links of one batch of records, written once the batch is read so
+		// the cursor's range is never mutated while it is scanning.
+		let mut links: Vec<(RecordId, RecordId)> = Vec::new();
+		let mut refused: Option<anyhow::Error> = None;
+		let stats = cursor
+			.for_each(NORMAL_BATCH_SIZE, &mut |raw_key, value| {
+				let mut read = || -> Result<()> {
+					let record_key = RecordKey::decode_key(raw_key)?;
+					let rid = RecordId {
+						table: ft.clone(),
+						key: record_key.id.as_ref().clone(),
+					};
+					let record =
+						catalog::Record::decode_admitted(value, Some(&layouts), rid.clone())?;
+					for (_, found) in record.data.walk(&field.name) {
+						match &found {
+							Value::RecordId(target) => links.push((rid.clone(), target.clone())),
+							Value::Array(items) => links.extend(items.iter().filter_map(|item| {
+								item.as_record().map(|target| (rid.clone(), target.clone()))
+							})),
+							Value::Set(items) => links.extend(items.iter().filter_map(|item| {
+								item.as_record().map(|target| (rid.clone(), target.clone()))
+							})),
+							_ => {}
+						}
+					}
+					Ok(())
+				};
+				match read() {
+					Ok(()) => Ok(std::ops::ControlFlow::Continue(())),
+					Err(error) => {
+						refused = Some(error);
+						Ok(std::ops::ControlFlow::Break(()))
+					}
+				}
+			})
+			.await?;
+		if let Some(error) = refused {
+			return Err(error);
+		}
+		for (rid, target) in &links {
+			if !field
+				.field_kind
+				.as_ref()
+				.is_none_or(|kind| kind.reference_can_target(&target.table))
+			{
+				continue;
+			}
+			let key = codec::key::encode_fields(
+				"ReferenceKey",
+				&[
+					("ns", KeyField::Int(ns.0 as i64)),
+					("db", KeyField::Int(db.0 as i64)),
+					("tb", KeyField::Str(target.table.as_str())),
+					("id", KeyField::Id(&target.key)),
+					("foreign_table", KeyField::Str(rid.table.as_str())),
+					("foreign_field", KeyField::Str(ff.as_str())),
+					("foreign_key", KeyField::Id(&rid.key)),
+				],
+			)?;
+			txn.set(key.into(), Vec::new()).await?;
+			crate::idx::inline_cache::record_ref_write(
+				txn, ns, db, target, &rid.table, &ff, &rid.key,
+			)
+			.await?;
+		}
+		if stats.rows == 0 {
+			return Ok(());
+		}
+	}
+}

@@ -1749,8 +1749,10 @@ pub(crate) enum StoreInstr {
 	/// Delete the reference keys the field defined in `old`, of the table
 	/// named in `table`, wrote under target tables the field defined in `new`
 	/// no longer references, or under any when `new` is absent
-	/// (`ddl::define::field::purge_dropped_reference_keys`). Does nothing when
-	/// `old` holds no definition or one with no `REFERENCE`.
+	/// (`reference_purge::purge_dropped_reference_keys`), and, when `new` starts
+	/// or widens a `REFERENCE`, write the keys of the links the table's stored
+	/// records already hold (`reference_purge::backfill_reference_keys`).
+	/// Purges nothing when `old` holds no definition or one with no `REFERENCE`.
 	PurgeDroppedReferences {
 		ns: Reg,
 		db: Reg,

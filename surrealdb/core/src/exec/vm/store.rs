@@ -1793,27 +1793,49 @@ async fn step_inner(
 				crate::catalog::FieldDefinition::from_stored(&stored).map_err(ControlFlow::Err)
 			};
 			let old = read(regs, *old);
-			if !old.is_none() {
-				let old = field(old)?;
-				let new = match new {
-					Some(new) => Some(field(read(regs, *new))?),
-					None => None,
-				};
-				let ns = crate::catalog::NamespaceId(id_of(&read(regs, *ns))?);
-				let db = crate::catalog::DatabaseId(id_of(&read(regs, *db))?);
-				let table = table_name_of(&read(regs, *table))?;
-				crate::exec::vm::descriptor::schema(
-					crate::exec::reference_purge::purge_dropped_reference_keys(
-						&ctx.txn(),
-						ns,
-						db,
-						&table,
-						&old,
-						new.as_ref(),
-					),
-				)
-				.await
-				.map_err(ControlFlow::Err)?;
+			let old = if old.is_none() {
+				None
+			} else {
+				Some(field(old)?)
+			};
+			let new = match new {
+				Some(new) => Some(field(read(regs, *new))?),
+				None => None,
+			};
+			let ns = crate::catalog::NamespaceId(id_of(&read(regs, *ns))?);
+			let db = crate::catalog::DatabaseId(id_of(&read(regs, *db))?);
+			let table = table_name_of(&read(regs, *table))?;
+			match &new {
+				Some(new) => {
+					crate::exec::vm::descriptor::schema(
+						crate::exec::reference_purge::reconcile_reference_keys(
+							&ctx.txn(),
+							ns,
+							db,
+							&table,
+							old.as_ref(),
+							new,
+						),
+					)
+					.await
+					.map_err(ControlFlow::Err)?;
+				}
+				None => {
+					if let Some(old) = &old {
+						crate::exec::vm::descriptor::schema(
+							crate::exec::reference_purge::purge_dropped_reference_keys(
+								&ctx.txn(),
+								ns,
+								db,
+								&table,
+								old,
+								None,
+							),
+						)
+						.await
+						.map_err(ControlFlow::Err)?;
+					}
+				}
 			}
 		}
 		StoreInstr::RefuseLightweight {

@@ -470,17 +470,18 @@ async fn alter_field_write(
 		.await?;
 	}
 	// Dropping REFERENCE, or narrowing or changing the record kind, can leave reference keys
-	// under target tables that the field no longer references. Those keys are purged so that
-	// DELETE's reference checks stay correct. Import skips the purge, since it restores
+	// under target tables that the field no longer references; those keys are purged so that
+	// DELETE's reference checks stay correct. Adding REFERENCE, or changing the kind of one,
+	// writes the keys of the links the stored records hold. Import skips both, since it restores
 	// reference keys as they were stored.
 	if !opt.import {
-		crate::exec::reference_purge::purge_dropped_reference_keys(
+		crate::exec::reference_purge::reconcile_reference_keys(
 			&txn,
 			ns,
 			db,
 			what,
-			&old_definition,
-			Some(&df),
+			Some(&old_definition),
+			&df,
 		)
 		.await?;
 	}
