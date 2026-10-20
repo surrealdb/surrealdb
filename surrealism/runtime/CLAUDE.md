@@ -110,4 +110,5 @@ The invocation's `InstanceSettings::strict_timeout` picks the engine (default `t
 | `exports.rs` | `ExportsManifest`, `FunctionExport` |
 | `net_allow.rs` | `NetPolicy`, `NetRule` — one policy for both network checks |
 | `dns.rs` | Name-filtering replacement for `wasi:sockets/ip-name-lookup` |
+| `http.rs` | `wasi:http` request sender that answers to the same `NetPolicy` |
 | `wasi_context.rs` | `WasiTemplate`: per-archive filesystem, per-invocation WASI context |

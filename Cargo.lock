@@ -8840,9 +8840,15 @@ version = "0.7.0-nightly"
 dependencies = [
  "anyhow",
  "async-trait",
+ "bytes",
  "hex",
+ "http",
+ "http-body",
+ "http-body-util",
+ "hyper",
  "ipnet",
  "parking_lot",
+ "rustls",
  "semver",
  "serde",
  "sha2 0.10.9",
@@ -8852,13 +8858,16 @@ dependencies = [
  "tar",
  "tempfile",
  "tokio",
+ "tokio-rustls",
  "toml",
  "toml_edit",
  "tracing",
  "url",
  "wasmtime",
  "wasmtime-wasi",
+ "wasmtime-wasi-http",
  "web-time",
+ "webpki-roots 1.0.9",
  "zstd 0.13.3",
 ]
 
@@ -10645,6 +10654,27 @@ dependencies = [
  "wiggle",
  "windows-sys 0.61.2",
  "winx",
+]
+
+[[package]]
+name = "wasmtime-wasi-http"
+version = "48.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f88b921f22c00db38dc7f2de03d534cc1dc6bd34bb641a199b267370305548b"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures",
+ "http",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "pin-project-lite",
+ "tokio",
+ "tracing",
+ "wasmtime",
+ "wasmtime-wasi",
+ "wasmtime-wasi-io",
 ]
 
 [[package]]

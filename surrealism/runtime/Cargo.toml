@@ -27,13 +27,22 @@ zstd.workspace = true
 semver.workspace = true
 sha2.workspace = true
 wasmtime-wasi.workspace = true
+wasmtime-wasi-http.workspace = true
+bytes.workspace = true
+http.workspace = true
+http-body = "1.0.1"
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["client", "http1"] }
+rustls = { workspace = true, features = ["aws_lc_rs"] }
+tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws_lc_rs"] }
+webpki-roots = "1.0.7"
 toml.workspace = true
 toml_edit.workspace = true
 tempfile.workspace = true
 # `time` for the bounded wait on an invocation slot in `Engines::acquire_slot`.
 # Named here rather than relied on through feature unification, so this crate
 # still builds when it is the only one asking.
-tokio = { workspace = true, default-features = false, features = ["sync", "io-util", "time"] }
+tokio = { workspace = true, default-features = false, features = ["sync", "io-util", "time", "net"] }
 tracing.workspace = true
 web-time.workspace = true
 

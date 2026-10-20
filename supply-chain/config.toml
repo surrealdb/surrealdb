@@ -2316,6 +2316,10 @@ criteria = "safe-to-deploy"
 version = "0.5.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.wasmtime-wasi-http]]
+version = "48.0.6"
+criteria = "safe-to-deploy"
+
 [[exemptions.wasmtimer]]
 version = "0.4.3"
 criteria = "safe-to-deploy"

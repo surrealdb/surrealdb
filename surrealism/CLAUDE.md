@@ -269,6 +269,8 @@ through a bespoke host binding. Two checks gate it, both driven by the `net` tar
   below `example.com`, not `example.com` itself.
 - **By address.** WASI's `socket_addr_check` gates every connect.
 
+Outbound `wasi:http` (a guest built on `waki` or another `wasi:http` client) is held to the same policy by `surrealism_runtime::http`: the host's own request sender replaces the one `wasmtime-wasi-http` ships, which would open sockets and resolve names outside both checks. It asks the policy for the name, filters and records what the name resolves to, and connects only to an address the policy then admits, so the answer it vetted is the answer it uses. A module granted no `net` reaches nothing through it.
+
 Hostnames are **not** resolved at module load. A stale pre-resolved address
 cannot be refreshed without reloading the module, so names are matched as names
 and the addresses the shim vends are recorded for the subsequent connect.

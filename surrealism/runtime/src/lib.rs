@@ -14,6 +14,7 @@ pub mod dns;
 pub mod epoch;
 pub mod exports;
 pub mod host;
+mod http;
 pub mod manifest;
 pub mod net_allow;
 pub mod package;

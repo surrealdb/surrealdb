@@ -302,6 +302,11 @@ impl Runtime {
 		let mut linker: component::Linker<StoreData> = component::Linker::new(engine);
 		wasmtime_wasi::p2::add_to_linker_async(&mut linker)
 			.prefix_err(|| "failed to add WASI P2 to component linker")?;
+		// Outbound `wasi:http`, held to the invocation's network policy by
+		// `crate::http`. Only the `wasi:http` interfaces: WASI P2 is already
+		// in the linker.
+		wasmtime_wasi_http::p2::add_only_http_to_linker_async(&mut linker)
+			.prefix_err(|| "failed to add wasi:http to component linker")?;
 		// Replaces WASI's own resolver, so it must come after the line above.
 		// The name is taken from the component's own imports, so the shim binds
 		// the interface the guest actually calls whatever WASI version it was
@@ -446,6 +451,8 @@ impl Runtime {
 		let store_data = StoreData {
 			wasi,
 			table,
+			http: wasmtime_wasi_http::WasiHttpCtx::new(),
+			http_hooks: crate::http::GuestHttp::new(Arc::clone(&net)),
 			net,
 			limiter: limits.build(),
 			deadline: None,
