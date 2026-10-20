@@ -1,8 +1,13 @@
+use std::sync::Mutex;
+
 use async_channel::Receiver;
 use surrealdb_rpc::QueryResultBuilder;
 
 use crate::conn::{Command, Route};
 use crate::types::{SurrealValue, Value};
+
+/// The transaction ids the mock has been asked to roll back, in order.
+pub(super) static ROLLED_BACK: Mutex<Vec<uuid::Uuid>> = Mutex::new(Vec::new());
 
 pub(super) fn mock(route_rx: Receiver<Route>) {
 	tokio::spawn(async move {
@@ -20,10 +25,13 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 				Command::Begin {
 					..
 				} => query_result.with_result(Ok(Value::Uuid(uuid::Uuid::now_v7().into()))),
-				Command::Commit {
-					..
+				Command::Rollback {
+					txn,
+				} => {
+					ROLLED_BACK.lock().expect("rollback log").push(txn);
+					query_result
 				}
-				| Command::Rollback {
+				Command::Commit {
 					..
 				}
 				| Command::Revoke {
@@ -95,9 +103,8 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 
 			let result = query_result.finish();
 
-			if let Err(message) = response.send(Ok(vec![result])).await {
-				panic!("message dropped; {message:?}");
-			}
+			// A caller that cancelled its request has dropped the receiver.
+			response.send(Ok(vec![result])).await.ok();
 		}
 	});
 }

@@ -5,6 +5,7 @@ pub use surrealdb_engine_api::IsolationLevel;
 use surrealdb_engine_api::ReadOnlyBegin;
 
 use crate::conn::ctx;
+use crate::method::transaction::RollbackOnDrop;
 use crate::method::{BoxFuture, Transaction};
 use crate::{Connection, OnceLockExt, Result, Surreal};
 
@@ -98,6 +99,7 @@ where
 			let opened = router.engine.begin(ctx(client.session_id), read_only, isolation).await?;
 			Ok(Transaction {
 				id: opened.id,
+				guard: RollbackOnDrop::new(&client, opened.id),
 				client,
 				snapshot: opened.snapshot,
 			})

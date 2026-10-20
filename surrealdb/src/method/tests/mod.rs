@@ -3,6 +3,7 @@
 
 mod protocol;
 mod server;
+mod transaction_drop;
 mod types;
 
 use std::ops::Bound;
