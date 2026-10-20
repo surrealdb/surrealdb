@@ -191,6 +191,49 @@ fn split_url(url: &str) -> (&str, &str) {
 	}
 }
 
+/// Percent-decodes the path of a local endpoint URL.
+///
+/// Every `%XX` escape with two hex digits is replaced by its byte; a `%` that
+/// does not start such an escape is kept literally. Fails if the decoded bytes
+/// are not UTF-8, if they contain a `?`, which the datastore would read as the
+/// start of the query string, or if they contain a NUL byte, which storage
+/// engines and filesystem APIs cannot accept in a path.
+fn percent_decode_path(path: &str) -> Result<String> {
+	let bytes = path.as_bytes();
+	let mut decoded = Vec::with_capacity(bytes.len());
+	let mut i = 0;
+	while i < bytes.len() {
+		if bytes[i] == b'%'
+			&& let Some(byte) = bytes
+				.get(i + 1..i + 3)
+				.and_then(|hex| std::str::from_utf8(hex).ok())
+				.and_then(|hex| u8::from_str_radix(hex, 16).ok())
+		{
+			decoded.push(byte);
+			i += 3;
+		} else {
+			decoded.push(bytes[i]);
+			i += 1;
+		}
+	}
+	let decoded = String::from_utf8(decoded).map_err(|_| {
+		Error::configuration(format!("Endpoint path `{path}` decodes to invalid UTF-8"), None)
+	})?;
+	if decoded.contains('?') {
+		return Err(Error::configuration(
+			format!("Endpoint path `{path}` decodes to a `?`, which is not supported"),
+			None,
+		));
+	}
+	if decoded.contains('\0') {
+		return Err(Error::configuration(
+			format!("Endpoint path `{path}` decodes to a NUL byte, which is not supported"),
+			None,
+		));
+	}
+	Ok(decoded)
+}
+
 impl IntoEndpoint for &str {}
 impl into_endpoint::Sealed for &str {
 	fn into_endpoint(self) -> Result<Endpoint> {
@@ -222,8 +265,14 @@ impl into_endpoint::Sealed for &str {
 			}
 
 			_ => {
-				let (scheme, path) = split_url(self);
+				let (scheme, rest) = split_url(self);
 				let protocol = format!("{scheme}://");
+				// Only the path is decoded; the query string is passed through
+				// as written.
+				let path = match rest.split_once('?') {
+					Some((path, query)) => format!("{}?{query}", percent_decode_path(path)?),
+					None => percent_decode_path(rest)?,
+				};
 				(
 					Url::parse(&protocol)
 						.map_err(|_| Error::internal(format!("Invalid URL: {}", self)))?,
@@ -373,6 +422,39 @@ mod endpoint_tests {
 		assert_eq!(endpoint.url.scheme(), "rocksdb");
 		assert_eq!(endpoint.url.host_str(), None);
 		assert_eq!(endpoint.path, "rocksdb://some/folder");
+	}
+
+	/// A local endpoint string is a URL, so its path is percent-decoded before
+	/// it reaches the filesystem. A `%` that does not start a valid escape is
+	/// kept literally, and the query string is passed through untouched.
+	#[test]
+	fn local_scheme_path_is_percent_decoded() {
+		let cases = [
+			(
+				"surrealkv:///tmp/surrealdb%20path%20test/db",
+				"surrealkv:///tmp/surrealdb path test/db",
+			),
+			("rocksdb://some%2Ffolder/db", "rocksdb://some/folder/db"),
+			("surrealkv:///tmp/100%/db", "surrealkv:///tmp/100%/db"),
+			("surrealkv:///tmp/50%zz/db", "surrealkv:///tmp/50%zz/db"),
+			("surrealkv:///tmp/a%2/db", "surrealkv:///tmp/a%2/db"),
+			("surrealkv:///tmp/caf%C3%A9", "surrealkv:///tmp/café"),
+			("mem:///tmp/my%20data?versioned=true", "mem:///tmp/my data?versioned=true"),
+			("surrealkv:///tmp/db?sync=a%20b", "surrealkv:///tmp/db?sync=a%20b"),
+		];
+		for (input, expected) in cases {
+			let endpoint = __into_endpoint(input).unwrap();
+			assert_eq!(endpoint.path, expected, "failed to decode `{input}`");
+		}
+	}
+
+	#[test]
+	fn local_scheme_path_rejects_undecodable_escapes() {
+		for input in
+			["surrealkv:///tmp/%FF/db", "surrealkv:///tmp/a%3Fb/db", "surrealkv:///tmp/a%00b/db"]
+		{
+			assert!(__into_endpoint(input).is_err(), "`{input}` should be rejected");
+		}
 	}
 }
 
