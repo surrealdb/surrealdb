@@ -507,6 +507,7 @@ systemd-units = { unit-name = "surreal", enable = true }
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(docker)',
     'cfg(storage)',
+    'cfg(tokio_unstable)',
 ] }
 
 [workspace.lints.clippy]
