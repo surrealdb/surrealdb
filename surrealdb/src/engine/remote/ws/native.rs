@@ -29,7 +29,7 @@ use crate::method::BoxFuture;
 use crate::opt::Tls;
 use crate::opt::{Endpoint, WaitFor};
 use crate::types::HashMap;
-use crate::{Error, ExtraFeatures, SessionClone, SessionId, Surreal};
+use crate::{Error, ExtraFeatures, SessionClone, Surreal};
 
 pub(crate) const NAGLE_ALG: bool = false;
 
@@ -155,7 +155,7 @@ impl conn::Sealed for super::Client {
 				ws_config,
 				socket,
 				route_rx,
-				session_clone.receiver.clone(),
+				session_clone.router_receiver(),
 			));
 
 			let mut features = HashSet::new();
@@ -238,7 +238,7 @@ pub(crate) async fn run_router(
 	config: WebSocketConfig,
 	socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
 	route_rx: Receiver<Route>,
-	session_rx: Receiver<SessionId>,
+	session_rx: crate::RouterSessions,
 ) {
 	let ping: Message = create_ping_message();
 

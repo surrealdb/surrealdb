@@ -567,6 +567,19 @@ pub trait SurrealEngine: Debug + Send + Sync + 'static {
 	/// `surrealdb-3.0.0`).
 	fn version(&self, ctx: EngineContext) -> EngineFuture<'_, String>;
 
+	/// Resolves once the engine has stopped: for an embedded engine, its
+	/// datastore has shut down and its background tasks no longer hold it, so
+	/// dropping the engine releases the storage. A failure to shut the
+	/// datastore down is reported to the first caller.
+	///
+	/// The caller has by then ended every session, which is what stops an
+	/// embedded engine; this only waits for that to finish. The default
+	/// returns immediately, which is right for an engine whose resources
+	/// belong to something else, such as a connection to a remote server.
+	fn shutdown(&self) -> EngineFuture<'_, ()> {
+		Box::pin(async { Ok(()) })
+	}
+
 	// ------------------------------------------------------------------
 	// Live queries
 	// ------------------------------------------------------------------

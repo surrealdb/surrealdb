@@ -20,7 +20,7 @@ use crate::engine::{IntervalStream, SessionError};
 use crate::method::BoxFuture;
 use crate::opt::{Endpoint, WaitFor};
 use crate::types::HashMap;
-use crate::{Error, ExtraFeatures, Result, SessionClone, SessionId, Surreal};
+use crate::{Error, ExtraFeatures, Result, SessionClone, Surreal};
 
 type MessageStream = SplitStream<WebSocketStream>;
 type MessageSink = SplitSink<WebSocketStream, Message>;
@@ -75,7 +75,7 @@ impl conn::Sealed for super::Client {
 			let config = address.config.clone();
 			let session_clone = session_clone.unwrap_or_else(SessionClone::new);
 
-			spawn_local(run_router(address, conn_tx, route_rx, session_clone.receiver.clone()));
+			spawn_local(run_router(address, conn_tx, route_rx, session_clone.router_receiver()));
 
 			conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
 
@@ -157,7 +157,7 @@ pub(crate) async fn run_router(
 	endpoint: Endpoint,
 	conn_tx: Sender<Result<()>>,
 	route_rx: Receiver<Route>,
-	session_rx: Receiver<SessionId>,
+	session_rx: crate::RouterSessions,
 ) {
 	// Connect to the WebSocket server with flatbuffers protocol negotiation
 	let ws_url = endpoint.url.as_str();

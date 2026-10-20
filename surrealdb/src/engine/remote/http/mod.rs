@@ -260,6 +260,13 @@ impl RouterState {
 		self.sessions.remove(&session_id);
 	}
 
+	/// Detaches every session still attached, as the router exits.
+	async fn detach_all(&self) {
+		for (session_id, _) in self.sessions.to_vec() {
+			self.handle_session_drop(session_id).await;
+		}
+	}
+
 	/// Dispatch a session-lifecycle event to the appropriate handler.
 	async fn handle_session(&self, session_id: crate::SessionId) {
 		match session_id {

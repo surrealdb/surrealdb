@@ -13,7 +13,7 @@ use crate::engine::remote::RemoteCommand;
 use crate::engine::{SessionError, session_error_to_error};
 use crate::method::BoxFuture;
 use crate::opt::{Endpoint, WaitFor};
-use crate::{ExtraFeatures, Result, SessionClone, SessionId, Surreal, conn};
+use crate::{ExtraFeatures, Result, SessionClone, Surreal, conn};
 
 impl crate::Connection for Client {}
 impl conn::Sealed for Client {
@@ -33,7 +33,7 @@ impl conn::Sealed for Client {
 			let config = address.config.clone();
 			let session_clone = session_clone.unwrap_or_else(SessionClone::new);
 
-			spawn_local(run_router(address, conn_tx, route_rx, session_clone.receiver.clone()));
+			spawn_local(run_router(address, conn_tx, route_rx, session_clone.router_receiver()));
 
 			conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
 
@@ -61,7 +61,7 @@ pub(crate) async fn run_router(
 	address: Endpoint,
 	conn_tx: Sender<Result<()>>,
 	route_rx: Receiver<Route>,
-	session_rx: Receiver<SessionId>,
+	session_rx: crate::RouterSessions,
 ) {
 	let base_url = address.url;
 
@@ -148,4 +148,7 @@ pub(crate) async fn run_router(
 			}
 		}
 	}
+	// The loop only ends once the SDK has closed its session channel, so no
+	// further `Drop` events will arrive to detach what is left.
+	state.detach_all().await;
 }

@@ -15,7 +15,7 @@ use crate::method::BoxFuture;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::opt::Tls;
 use crate::opt::{Endpoint, WaitFor};
-use crate::{Error, ExtraFeatures, Result, SessionClone, SessionId, Surreal, conn};
+use crate::{Error, ExtraFeatures, Result, SessionClone, Surreal, conn};
 
 /// Creates an HTTP client with address pinning for the given URL.
 ///
@@ -116,7 +116,7 @@ impl conn::Sealed for Client {
 			};
 			let session_clone = session_clone.unwrap_or_else(SessionClone::new);
 
-			tokio::spawn(run_router(client, base_url, route_rx, session_clone.receiver.clone()));
+			tokio::spawn(run_router(client, base_url, route_rx, session_clone.router_receiver()));
 
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::Backup);
@@ -133,7 +133,7 @@ pub(crate) async fn run_router(
 	client: reqwest::Client,
 	base_url: url::Url,
 	route_rx: Receiver<Route>,
-	session_rx: Receiver<SessionId>,
+	session_rx: crate::RouterSessions,
 ) {
 	let state = Arc::new(RouterState::new(client, base_url));
 	loop {
@@ -207,4 +207,7 @@ pub(crate) async fn run_router(
 			}
 		}
 	}
+	// The loop only ends once the SDK has closed its session channel, so no
+	// further `Drop` events will arrive to detach what is left.
+	state.detach_all().await;
 }

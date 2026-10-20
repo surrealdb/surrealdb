@@ -197,15 +197,23 @@ impl<T: Clone, E: Clone + From<SessionError>> SessionRegistry<T, E> {
 		outcome
 	}
 
-	/// Fails every session that has not been established, and every one asked
-	/// for from now on, because no further lifecycle event can arrive.
-	pub fn close(&self) {
+	/// Fails every session, established or not, and every one asked for from
+	/// now on, because the engine this registry serves has stopped. Returns the
+	/// payloads of the sessions that were established, so the caller can
+	/// release what each one holds.
+	///
+	/// A request that already resolved its session keeps the payload it was
+	/// given; every request that resolves afterwards fails.
+	pub fn close(&self) -> Vec<T> {
 		self.closed.store(true, Ordering::Release);
+		let mut established = Vec::new();
 		for (id, entry) in self.map().live.iter() {
-			if entry.outcome().is_none() {
-				entry.publish(Err(SessionError::NotFound(*id).into()));
+			if let Some(Ok(payload)) = entry.outcome() {
+				established.push(payload);
 			}
+			entry.publish(Err(SessionError::NotFound(*id).into()));
 		}
+		established
 	}
 }
 

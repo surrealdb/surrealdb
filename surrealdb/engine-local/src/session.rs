@@ -116,7 +116,7 @@ pub(crate) async fn run(
 	sessions: Arc<SessionRegistry>,
 	session_rx: Receiver<SessionId>,
 	notifications: Option<Receiver<Notification>>,
-) {
+) -> Result<(), Error> {
 	while let Ok(event) = session_rx.recv().await {
 		sessions.apply(event).await;
 	}
@@ -129,7 +129,7 @@ pub(crate) async fn run(
 		notifications.close();
 	}
 	// Stops the datastore's maintenance tasks as well as the storage engine.
-	kvs.shutdown().await.ok();
+	kvs.shutdown().await.map_err(|error| Error::internal(error.to_string()))
 }
 
 /// Delivers live-query notifications to the sessions that subscribed to them.
@@ -315,7 +315,7 @@ mod tests {
 
 		// The SDK's last handle going away is what closes this channel.
 		drop(session_tx);
-		run(kvs, Arc::clone(&sessions), session_rx, None).await;
+		run(kvs, Arc::clone(&sessions), session_rx, None).await.unwrap();
 
 		assert!(
 			waiter.await.unwrap().is_err(),

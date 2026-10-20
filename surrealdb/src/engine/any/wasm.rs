@@ -146,7 +146,7 @@ impl conn::Sealed for Any {
 							address,
 							conn_tx,
 							route_rx,
-							session_clone.receiver.clone(),
+							session_clone.router_receiver(),
 						));
 					}
 
@@ -169,7 +169,7 @@ impl conn::Sealed for Any {
 							endpoint,
 							conn_tx,
 							route_rx,
-							session_clone.receiver.clone(),
+							session_clone.router_receiver(),
 						));
 						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
 					}

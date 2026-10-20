@@ -9,7 +9,7 @@ use std::task::{Poll, ready};
 #[cfg(not(target_family = "wasm"))]
 use std::{future::Future, path::PathBuf};
 
-use async_channel::Sender;
+use async_channel::{Receiver, Sender};
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use futures::StreamExt;
 #[cfg(not(target_family = "wasm"))]
@@ -55,6 +55,9 @@ use crate::std_error_to_types_error;
 pub struct LocalEngine {
 	pub(crate) kvs: Arc<Datastore>,
 	pub(crate) sessions: Arc<SessionRegistry>,
+	/// Answers once, with how shutting the datastore down went, after the
+	/// engine's tasks have released it.
+	pub(crate) stopped: Receiver<Result<(), Error>>,
 }
 
 impl std::fmt::Debug for LocalEngine {
@@ -730,6 +733,13 @@ impl SurrealEngine for LocalEngine {
 			self.state(ctx).await?;
 			Ok(surrealdb_core::env::VERSION.to_string())
 		})
+	}
+
+	fn shutdown(&self) -> EngineFuture<'_, ()> {
+		// The session channel closing is what stops the engine (see
+		// `session::run`); this waits for it to have finished. The outcome is
+		// delivered to the first caller, later ones find it already settled.
+		Box::pin(async move { self.stopped.recv().await.unwrap_or(Ok(())) })
 	}
 
 	fn subscribe_live(

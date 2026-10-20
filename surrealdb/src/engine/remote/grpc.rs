@@ -188,8 +188,10 @@ pub(crate) async fn connect_engine(
 	}
 
 	let features = extra_features(&capabilities);
+	let (stopped_tx, stopped) = async_channel::bounded::<()>(1);
 	let engine = Arc::new(GrpcEngine {
 		client,
+		stopped,
 		compress_requests,
 		max_request_size,
 		server_version: capabilities.server_version,
@@ -201,7 +203,7 @@ pub(crate) async fn connect_engine(
 			.transpose()
 			.map_err(|e| Error::configuration(format!("Invalid query timeout: {e}"), None))?,
 	});
-	tokio::spawn(session_task(Arc::clone(&engine), session_rx));
+	tokio::spawn(session_task(Arc::clone(&engine), session_rx, stopped_tx));
 	Ok((engine, features))
 }
 
@@ -440,6 +442,8 @@ struct GrpcEngine {
 	/// spending a round trip, as the protocol intends.
 	server_version: String,
 	sessions: SessionRegistry,
+	/// Closes once the session task has ended and detached what it could.
+	stopped: async_channel::Receiver<()>,
 	/// The largest request this client will send, which is the smaller of what
 	/// the server said it accepts and what the caller configured, paired with
 	/// the side that set it so a refusal can name the setting that moves it.
@@ -1023,7 +1027,11 @@ fn finish_statements(statements: Vec<Option<Statement>>) -> Vec<QueryResult> {
 
 /// Consumes session lifecycle events in order: attach a new session, attach
 /// and replay a cloned one, detach a dropped one.
-async fn session_task(engine: Arc<GrpcEngine>, session_rx: async_channel::Receiver<SessionId>) {
+async fn session_task(
+	engine: Arc<GrpcEngine>,
+	session_rx: async_channel::Receiver<SessionId>,
+	_stopped: async_channel::Sender<()>,
+) {
 	while let Ok(event) = session_rx.recv().await {
 		match event {
 			SessionId::Initial(id) => {
@@ -1059,9 +1067,26 @@ async fn session_task(engine: Arc<GrpcEngine>, session_rx: async_channel::Receiv
 			}
 		}
 	}
+	// The channel closing means the SDK ended every session, on a shutdown or
+	// because the last handle went away. Nothing can reach the engine after
+	// this, so release what the server still holds for each.
+	for session in engine.sessions.close() {
+		if let Err(error) = engine.detach(session.server).await {
+			trace!("failed to detach session {}: {error}", session.server);
+		}
+	}
 }
 
 impl SurrealEngine for GrpcEngine {
+	fn shutdown(&self) -> EngineFuture<'_, ()> {
+		// Nothing is sent on this channel; `recv` returns once the session
+		// task has finished and dropped its sender.
+		Box::pin(async move {
+			self.stopped.recv().await.ok();
+			Ok(())
+		})
+	}
+
 	fn query(
 		&self,
 		ctx: EngineContext,

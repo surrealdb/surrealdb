@@ -242,17 +242,28 @@ fn serve(
 ) -> Arc<LocalEngine> {
 	let sessions = Arc::new(SessionRegistry::default());
 
-	if let Some(notifications) = notifications.clone() {
-		spawn(session::pump(Arc::clone(&kvs), Arc::clone(&sessions), notifications));
-	}
 	// Both tasks end without reference to the engine: `run` on the session
 	// channel closing, and `pump` on the notification channel `run` then closes.
 	// Holding the engine instead would make the engine's own liveness the
 	// condition for its tasks ending, which nothing would ever satisfy.
-	spawn(session::run(Arc::clone(&kvs), Arc::clone(&sessions), session_rx, notifications));
+	let pump = notifications
+		.clone()
+		.map(|notifications| session::pump(Arc::clone(&kvs), Arc::clone(&sessions), notifications));
+	let run = session::run(Arc::clone(&kvs), Arc::clone(&sessions), session_rx, notifications);
+	// Answers once, when both tasks have finished and dropped their handles on
+	// the datastore: what `run` reported of shutting it down.
+	let (stopped_tx, stopped) = async_channel::bounded::<Result<(), Error>>(1);
+	spawn(async move {
+		let outcome = match pump {
+			Some(pump) => futures::future::join(run, pump).await.0,
+			None => run.await,
+		};
+		stopped_tx.send(outcome).await.ok();
+	});
 
 	Arc::new(LocalEngine {
 		kvs,
 		sessions,
+		stopped,
 	})
 }

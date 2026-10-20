@@ -147,7 +147,7 @@ impl conn::Sealed for Any {
 							client,
 							base_url,
 							route_rx,
-							session_clone.receiver.clone(),
+							session_clone.router_receiver(),
 						));
 					}
 
@@ -197,7 +197,7 @@ impl conn::Sealed for Any {
 							config,
 							socket,
 							route_rx,
-							session_clone.receiver.clone(),
+							session_clone.router_receiver(),
 						));
 					}
 

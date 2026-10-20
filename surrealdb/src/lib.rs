@@ -217,15 +217,56 @@ struct SessionClone {
 	sender: Sender<SessionId>,
 	#[allow(dead_code)]
 	receiver: Receiver<SessionId>,
+	/// Closes once the router task that was handed [`Self::router_receiver`]
+	/// has ended.
+	router_stopped: Receiver<()>,
+	/// The sender behind [`Self::router_stopped`], until a router takes it.
+	router_guard: Arc<std::sync::Mutex<Option<Sender<()>>>>,
 }
 
 impl SessionClone {
 	fn new() -> Self {
 		let (sender, receiver) = async_channel::unbounded();
+		let (guard, router_stopped) = async_channel::bounded(1);
 		Self {
 			sender,
 			receiver,
+			router_stopped,
+			router_guard: Arc::new(std::sync::Mutex::new(Some(guard))),
 		}
+	}
+
+	/// The session events for a router task that runs apart from the engine
+	/// (the HTTP and WebSocket transports). Dropping it, which is what the
+	/// router does as it exits, is what [`Self::router_stopped`] reports.
+	fn router_receiver(&self) -> RouterSessions {
+		let guard = self.router_guard.lock().ok().and_then(|mut slot| slot.take());
+		RouterSessions {
+			receiver: self.receiver.clone(),
+			_stopped: guard,
+		}
+	}
+
+	/// Whether a router task was handed [`Self::router_receiver`].
+	fn has_router(&self) -> bool {
+		self.router_guard.lock().map(|slot| slot.is_none()).unwrap_or(false)
+	}
+}
+
+/// A router task's end of the session channel.
+#[derive(Debug)]
+pub(crate) struct RouterSessions {
+	receiver: Receiver<SessionId>,
+	_stopped: Option<Sender<()>>,
+}
+
+impl RouterSessions {
+	pub(crate) async fn recv(&self) -> std::result::Result<SessionId, async_channel::RecvError> {
+		self.receiver.recv().await
+	}
+
+	pub(crate) fn try_recv(&self) -> std::result::Result<SessionId, async_channel::TryRecvError> {
+		self.receiver.try_recv()
 	}
 }
 
@@ -376,6 +417,50 @@ impl<C> Surreal<C>
 where
 	C: Connection,
 {
+	/// Stops the connection and waits for it to wind down.
+	///
+	/// Dropping the last handle stops an embedded engine too, but on a task
+	/// nothing can await. This ends the sessions of **every** handle onto the
+	/// same connection, so they fail afterwards, and resolves once the embedded
+	/// datastore has shut down and no background task still holds it. Storage
+	/// that keeps its directory locked until the datastore is dropped, such as
+	/// RocksDB, is released when the last handle is then dropped. A remote
+	/// connection detaches its server sessions. A failure to shut the datastore
+	/// down is returned.
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// use surrealdb::Surreal;
+	/// use surrealdb::engine::any::Any;
+	///
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// let db = Surreal::<Any>::init();
+	/// db.connect("surrealkv://path/to/db").await?;
+	/// db.shutdown().await?;
+	/// drop(db);
+	/// // The directory can be opened again here.
+	/// # Ok(())
+	/// # }
+	/// ```
+	pub async fn shutdown(&self) -> Result<()> {
+		// Not connected yet: there is nothing to stop, and closing the session
+		// channel would leave a later `connect` with an engine that stops at
+		// once.
+		let Some(router) = self.inner.router.get() else {
+			return Ok(());
+		};
+		self.inner.session_clone.sender.close();
+		router.engine.shutdown().await?;
+		// A transport that runs its own router task is done once that task has
+		// detached its sessions and exited.
+		if self.inner.session_clone.has_router() {
+			self.inner.session_clone.router_stopped.recv().await.ok();
+		}
+		Ok(())
+	}
+
 	/// A handle on this same session, which stays open until every such handle
 	/// is dropped. Unlike `clone`, it does not start a new session.
 	pub(crate) fn share_session<D: Connection>(&self) -> Surreal<D> {
@@ -498,5 +583,26 @@ mod tests {
 		assert!(!supported("5.0.0-alpha.1"));
 		assert!(!supported("5.0.0"));
 		assert!(!supported("6.1.0"));
+	}
+}
+
+#[cfg(test)]
+mod session_clone_tests {
+	use super::SessionClone;
+
+	#[tokio::test]
+	async fn router_stopped_closes_when_the_router_drops_its_receiver() {
+		let sessions = SessionClone::new();
+		assert!(!sessions.has_router());
+		let router = sessions.router_receiver();
+		assert!(sessions.has_router());
+		let stopped = sessions.router_stopped.clone();
+		drop(router);
+		assert!(stopped.recv().await.is_err(), "the router has stopped");
+	}
+
+	#[test]
+	fn a_connection_without_a_router_task_has_nothing_to_wait_for() {
+		assert!(!SessionClone::new().has_router());
 	}
 }
