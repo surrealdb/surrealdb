@@ -5170,7 +5170,7 @@ impl Executor {
 								.compile_one(
 									txn,
 									op,
-									&plan_session,
+									&mut plan_session,
 									inline,
 									false,
 									keep_logged,
@@ -5179,7 +5179,7 @@ impl Executor {
 								)
 								.await;
 							if first == 0 && judged.is_none() {
-								judged = self.judge(txn, op, &plan_session, at, &planned).await;
+								judged = self.judge(txn, op, &mut plan_session, at, &planned).await;
 							}
 							compiled[at] = Some(planned);
 							constant_value(op, kind.as_ref())
@@ -5211,7 +5211,7 @@ impl Executor {
 								.compile_one(
 									txn,
 									lowered,
-									&plan_session,
+									&mut plan_session,
 									inline,
 									*read_only,
 									keep_logged,
@@ -5221,7 +5221,7 @@ impl Executor {
 								.await;
 							if first == 0 && judged.is_none() {
 								judged =
-									self.judge(txn, lowered, &plan_session, at, &planned).await;
+									self.judge(txn, lowered, &mut plan_session, at, &planned).await;
 							}
 							compiled[at] = Some(planned);
 						}
@@ -5307,7 +5307,7 @@ impl Executor {
 		&self,
 		txn: &Arc<Transaction>,
 		op: &LogicalOp,
-		planning: &crate::exec::vm::PlanSession,
+		planning: &mut crate::exec::vm::PlanSession,
 		position: usize,
 		planned: &PlannedStatement,
 	) -> Option<(usize, crate::exec::vm::payload::Refusal)> {
@@ -5347,16 +5347,10 @@ impl Executor {
 		&self,
 		txn: &Arc<Transaction>,
 		op: &LogicalOp,
-		planning: &crate::exec::vm::PlanSession,
+		planning: &mut crate::exec::vm::PlanSession,
 		position: usize,
 	) -> Option<(usize, crate::exec::vm::payload::Refusal)> {
-		let mut ctx = Context::snapshot(&self.ctx);
-		ctx.set_transaction(Arc::clone(txn));
-		ctx.add_value("session", planning.session.clone().into());
-		for (name, value) in &planning.bound {
-			ctx.add_value(name.clone(), value.clone().into());
-		}
-		let ctx = ctx.freeze();
+		let ctx = planning.bound_context(&self.ctx, txn);
 		crate::exec::planner::request_statement_rejection(
 			op.clone(),
 			&ctx,
@@ -5386,7 +5380,7 @@ impl Executor {
 		&self,
 		txn: &Arc<Transaction>,
 		op: &LogicalOp,
-		planning: &crate::exec::vm::PlanSession,
+		planning: &mut crate::exec::vm::PlanSession,
 		inline: bool,
 		cacheable: bool,
 		keep_logged: bool,
@@ -5401,16 +5395,8 @@ impl Executor {
 		if !inline || (!planning.computed.is_empty() && reads_any(op, &planning.computed)) {
 			return served();
 		}
+		let ctx = compile_phase!("bind", planning.bound_context(&self.ctx, txn));
 		let opt = &planning.opt;
-		let ctx = compile_phase!("bind", {
-			let mut ctx = Context::snapshot(&self.ctx);
-			ctx.set_transaction(Arc::clone(txn));
-			ctx.add_value("session", planning.session.clone().into());
-			for (name, value) in &planning.bound {
-				ctx.add_value(name.clone(), value.clone().into());
-			}
-			ctx.freeze()
-		});
 		if cacheable
 			&& self.ctx.compiled_units().is_some_and(|units| units.caches_statements())
 			&& !crate::exec::planner::fold::changes_the_catalog(op)

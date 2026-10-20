@@ -113,6 +113,7 @@ use super::program::{
 };
 use super::units::CompiledUnits;
 use super::{NotCovered, NotCoveredKind};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Capabilities, Force, Options};
 use crate::exec::config::ExecConfig;
 use crate::exec::function::FunctionRegistry;
@@ -139,6 +140,7 @@ use crate::exec::surface::Surface;
 use crate::exec::{AccessMode, BoxFut};
 use crate::expr::logical::{EffectSet, LogicalOp};
 use crate::expr::paths::{DB, NS};
+use crate::kvs::Transaction;
 use crate::kvs::speculation::Overlay;
 use crate::val::Value;
 
@@ -154,13 +156,27 @@ pub(crate) struct PlanSession {
 	/// The options the session carries: import, force, and the selected namespace and database.
 	pub(crate) opt: Options,
 	/// The `$session` value, with the namespace and database a `USE` selected.
-	pub(crate) session: Value,
-	/// The constants the `LET`s before the statement bound, in order.
-	pub(crate) bound: Vec<(String, Value)>,
+	session: Value,
+	/// The constants the `LET`s before the statement bound, by name.
+	bound: HashMap<String, Value>,
 	/// The names of the `LET`s whose value only the run computes.
 	pub(crate) computed: HashSet<String>,
 	/// The values of the request's own inputs, which a `USE` target may name as a parameter.
 	pub(crate) inputs: Vec<(String, Value)>,
+	/// The context a statement is bound in under this session, once [`Self::bound_context`] has
+	/// built it. The mutators keep it equal to what a fresh build would give, or drop it.
+	context: Option<BoundContext>,
+}
+
+/// The context [`PlanSession::bound_context`] built, with what it was built from.
+#[derive(Clone)]
+struct BoundContext {
+	/// The context the request runs in, which the bound context is a snapshot of.
+	base: FrozenContext,
+	/// The transaction the bound context carries.
+	txn: Arc<Transaction>,
+	/// `base` with `txn`, the session's `$session` value and its constants.
+	ctx: FrozenContext,
 }
 
 impl PlanSession {
@@ -169,9 +185,65 @@ impl PlanSession {
 		Self {
 			opt,
 			session,
-			bound: Vec::new(),
+			bound: HashMap::new(),
 			computed: HashSet::new(),
 			inputs: Vec::new(),
+			context: None,
+		}
+	}
+
+	/// The `$session` value, with the namespace and database a `USE` selected.
+	pub(crate) fn session(&self) -> &Value {
+		&self.session
+	}
+
+	/// Whether a `LET` before the statement bound `name` to a constant.
+	pub(crate) fn binds_constant(&self, name: &str) -> bool {
+		self.bound.contains_key(name)
+	}
+
+	/// The context a statement of the request running in `base` is bound in, in `txn`: a
+	/// snapshot of `base` holding the transaction, the `$session` value and the constants of this
+	/// session.
+	///
+	/// The context is built once and kept: the mutators bring it up to date in place while no
+	/// one else holds it, so a request of n statements builds it once rather than n times, and a
+	/// `LET` or `USE` between them costs one binding rather than a copy of every variable the
+	/// request holds.
+	pub(crate) fn bound_context(
+		&mut self,
+		base: &FrozenContext,
+		txn: &Arc<Transaction>,
+	) -> FrozenContext {
+		if let Some(bound) = &self.context
+			&& Arc::ptr_eq(&bound.base, base)
+			&& Arc::ptr_eq(&bound.txn, txn)
+		{
+			return Arc::clone(&bound.ctx);
+		}
+		let mut ctx = Context::snapshot(base);
+		ctx.set_transaction(Arc::clone(txn));
+		ctx.add_value("session", self.session.clone().into());
+		for (name, value) in &self.bound {
+			ctx.add_value(name.clone(), value.clone().into());
+		}
+		let ctx = ctx.freeze();
+		self.context = Some(BoundContext {
+			base: Arc::clone(base),
+			txn: Arc::clone(txn),
+			ctx: Arc::clone(&ctx),
+		});
+		ctx
+	}
+
+	/// Apply `edit` to the kept bound context in place, or drop the context when someone else
+	/// holds it, so the next [`Self::bound_context`] builds it afresh.
+	fn edit_context(&mut self, edit: impl FnOnce(&mut Context)) {
+		if let Some(bound) = &mut self.context {
+			match Arc::get_mut(&mut bound.ctx) {
+				Some(ctx) => edit(ctx),
+				None => self.context = None,
+			}
 		}
 	}
 
@@ -198,19 +270,29 @@ impl PlanSession {
 			self.opt.set_db(Some(db.into()));
 			self.session.put(DB.as_ref(), db.to_owned().into());
 		}
+		if ns.is_some() || db.is_some() {
+			let session = Arc::new(self.session.clone());
+			self.edit_context(|ctx| ctx.add_value("session", session));
+		}
 	}
 
 	/// A `LET` of `name`: a constant is bound for the statements after it, and any other value
 	/// leaves the name computed.
 	pub(crate) fn bind_let(&mut self, name: &str, constant: Option<Value>) {
-		self.bound.retain(|(bound, _)| bound != name);
 		match constant {
 			Some(constant) => {
 				self.computed.remove(name);
-				self.bound.push((name.to_owned(), constant));
+				let value = Arc::new(constant.clone());
+				self.bound.insert(name.to_owned(), constant);
+				self.edit_context(|ctx| ctx.add_value(name.to_owned(), value));
 			}
 			None => {
 				self.computed.insert(name.to_owned());
+				// The bound context holds the constant a name loses here; what a fresh build
+				// gives it instead is the base's binding, so the context is built afresh.
+				if self.bound.remove(name).is_some() {
+					self.context = None;
+				}
 			}
 		}
 	}
@@ -274,13 +356,9 @@ impl PlanSession {
 	fn named(&self, param: &str) -> Option<String> {
 		let held = match self.computed.contains(param) {
 			true => None,
-			false => self
-				.bound
-				.iter()
-				.rev()
-				.chain(self.inputs.iter().rev())
-				.find(|(name, _)| name == param)
-				.map(|(_, value)| value),
+			false => self.bound.get(param).or_else(|| {
+				self.inputs.iter().rev().find(|(name, _)| name == param).map(|(_, value)| value)
+			}),
 		};
 		match held {
 			Some(Value::String(name)) => Some(name.as_str().to_owned()),
@@ -2922,5 +3000,64 @@ mod tests {
 		session.bind_let("a", Some(Value::from(2_i64)));
 		assert!(session.computed.is_empty());
 		assert_eq!(session.bound.len(), 1);
+	}
+
+	/// The context statements are bound in is built once per request and kept up to date in
+	/// place: a `LET` of a constant or a `USE` binds one value in it, a `LET` the run computes
+	/// changes nothing, and none of them copies the variables the request holds. It always reads
+	/// as a fresh build would.
+	#[tokio::test]
+	async fn the_bound_context_is_built_once_and_kept_up_to_date() {
+		use crate::dbs::Variables;
+
+		let ds = crate::kvs::Datastore::new("memory").await.expect("a datastore");
+		let txn = Arc::new(
+			ds.transaction(crate::kvs::TransactionType::Read).await.expect("a transaction"),
+		);
+		let mut request = Context::new_test();
+		let mut vars = Variables::new();
+		for i in 0..1000_i64 {
+			vars.insert(format!("v{i}"), Value::from(i));
+		}
+		request.attach_variables(vars).expect("variables attach");
+		let request = request.freeze();
+		let mut session = session();
+
+		let first = session.bound_context(&request, &txn);
+		let values = first.values_addr();
+		drop(first);
+		session.bind_let("c", None);
+		session.bind_let("k", Some(Value::from(5_i64)));
+		session.use_names(Some("ns"), Some("db"));
+		session.bind_let("k", Some(Value::from(6_i64)));
+		let kept = session.bound_context(&request, &txn);
+		assert_eq!(kept.values_addr(), values, "a binding copied the request's variables");
+		assert_eq!(kept.value("k"), Some(&Value::from(6_i64)));
+		assert_eq!(kept.value("c"), None);
+		assert_eq!(kept.value("v999"), Some(&Value::from(999_i64)));
+		let selected = kept.value("session").expect("the session is bound");
+		assert_eq!(selected.pick(crate::expr::paths::NS.as_ref()), Value::from("ns"));
+
+		// Held elsewhere, the context is not edited under its holder: the next one is built
+		// afresh, and reads as the kept one would.
+		session.bind_let("h", Some(Value::from(1_i64)));
+		assert_eq!(kept.value("h"), None, "a binding reached a context someone holds");
+		let fresh = session.bound_context(&request, &txn);
+		assert!(!Arc::ptr_eq(&fresh, &kept));
+		assert_eq!(fresh.value("h"), Some(&Value::from(1_i64)));
+		assert_eq!(fresh.value("k"), Some(&Value::from(6_i64)));
+		drop(kept);
+
+		// A constant that becomes computed leaves the name to what the request binds.
+		drop(fresh);
+		session.bind_let("k", None);
+		assert_eq!(session.bound_context(&request, &txn).value("k"), None);
+
+		// Another transaction is another context.
+		let other = Arc::new(
+			ds.transaction(crate::kvs::TransactionType::Read).await.expect("a transaction"),
+		);
+		let held = session.bound_context(&request, &txn);
+		assert!(!Arc::ptr_eq(&session.bound_context(&request, &other), &held));
 	}
 }

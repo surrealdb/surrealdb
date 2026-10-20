@@ -371,6 +371,15 @@ pub(crate) struct ForbiddenRow {
 const ROW_PARAMS: [&str; 2] = ["parent", "this"];
 
 impl ForbiddenRow {
+	/// A forbidden row of the query vector `vector`, for a test that binds one by hand.
+	#[cfg(test)]
+	pub(crate) fn for_test(vector: &str) -> Self {
+		Self {
+			vector: Arc::from(vector),
+			row: true,
+		}
+	}
+
 	/// The error a read of the row being scanned raises: the planner's refusal
 	/// of a query vector that depends on it.
 	#[cold]

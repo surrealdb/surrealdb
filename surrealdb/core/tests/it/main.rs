@@ -42,6 +42,7 @@ mod round_trip;
 mod select;
 mod sequence;
 mod slow_log_aborted;
+mod statement_count_scaling;
 mod table;
 mod timeout;
 mod update;

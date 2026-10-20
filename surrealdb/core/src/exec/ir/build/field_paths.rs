@@ -168,8 +168,7 @@ fn reads_session_let(expr: &LogicalExpr, session: &PlanSession, bound: &[String]
 	if let LogicalExpr::Param(name) = expr {
 		let name = name.as_str();
 		return !bound.iter().any(|around| around == name)
-			&& (session.computed.contains(name)
-				|| session.bound.iter().any(|(bound, _)| bound == name));
+			&& (session.computed.contains(name) || session.binds_constant(name));
 	}
 	let mut reads = false;
 	expr.for_each_child(&mut |child| reads = reads || reads_session_let(child, session, bound));

@@ -104,8 +104,9 @@ pub struct Context {
 	// cancel instead of running to completion. `None` for contexts without
 	// an external cancel source (embedded callers, internal use).
 	cancel_token: Option<tokio_util::sync::CancellationToken>,
-	// A collection of read only values stored in this context.
-	values: HashMap<Strand, Arc<Value>>,
+	// A collection of read only values stored in this context. Shared with the
+	// snapshots taken of it, and copied on the first write made while one is held.
+	values: Arc<HashMap<Strand, Arc<Value>>>,
 	// The parameter names this context binds to a KNN query vector's row being
 	// scanned rather than to a value ([`Binding::Forbidden`]). A name is in
 	// at most one of `values` and `forbidden` at one level.
@@ -283,7 +284,7 @@ impl Context {
 	/// parent's values, so it carries none of its request parameters either.
 	pub(crate) fn background(parent: &Context) -> Self {
 		Self {
-			values: HashMap::default(),
+			values: Arc::default(),
 			forbidden: Vec::new(),
 			parent: None,
 			deadline: None,
@@ -363,7 +364,7 @@ impl Context {
 		#[cfg(feature = "http")] http_client: Arc<HttpClient>,
 	) -> Self {
 		Context {
-			values: HashMap::default(),
+			values: Arc::default(),
 			forbidden: Vec::new(),
 			deadline: parent.deadline,
 			slow_log: parent.slow_log.clone(),
@@ -424,7 +425,7 @@ impl Context {
 	/// the context holds none until it attaches its own.
 	pub(crate) fn new_isolated(parent: &FrozenContext) -> Self {
 		Self {
-			values: HashMap::default(),
+			values: Arc::default(),
 			forbidden: Vec::new(),
 			deadline: parent.deadline,
 			slow_log: parent.slow_log.clone(),
@@ -505,9 +506,12 @@ impl Context {
 		let in_call_body = from.in_call_body();
 		Self {
 			// Flatten all values from the parent chain into this context
-			values: match in_call_body {
-				true => from.lexical_values(),
-				false => from.collect_values(HashMap::default()),
+			values: match (in_call_body, &from.parent) {
+				(true, _) => Arc::new(from.lexical_values()),
+				// A context with no parent holds every value it answers: the
+				// snapshot shares them rather than copying each.
+				(false, None) => Arc::clone(&from.values),
+				(false, Some(_)) => Arc::new(from.collect_values(HashMap::default())),
 			},
 			forbidden: from.collect_forbidden(),
 			deadline: from.deadline,
@@ -597,7 +601,7 @@ impl Context {
 	/// into a table of the invocation's own.
 	pub(crate) fn new_concurrent(from: &FrozenContext) -> Self {
 		Self {
-			values: HashMap::default(),
+			values: Arc::default(),
 			forbidden: Vec::new(),
 			deadline: None,
 			slow_log: from.slow_log.clone(),
@@ -676,7 +680,7 @@ impl Context {
 		#[cfg(feature = "surrealism")]
 		let server_capabilities = Arc::clone(&capabilities);
 		let mut ctx = Self {
-			values: HashMap::default(),
+			values: Arc::default(),
 			forbidden: Vec::new(),
 			parent: None,
 			deadline: None,
@@ -737,7 +741,7 @@ impl Context {
 	#[cfg(test)]
 	pub(crate) fn new_test() -> Context {
 		Self {
-			values: HashMap::default(),
+			values: Arc::default(),
 			forbidden: Vec::new(),
 			parent: None,
 			deadline: None,
@@ -1081,7 +1085,7 @@ impl Context {
 		if !self.forbidden.is_empty() {
 			self.forbidden.retain(|(name, _)| *name != key);
 		}
-		self.values.insert(key, value);
+		Arc::make_mut(&mut self.values).insert(key, value);
 	}
 
 	/// Bind each of `names` to `row`, a KNN query vector's row being scanned,
@@ -1090,7 +1094,7 @@ impl Context {
 	/// or at a deeper one, shadows it.
 	pub(crate) fn add_forbidden(&mut self, names: &[&str], row: &Arc<ForbiddenRow>) {
 		for name in names {
-			self.values.remove(*name);
+			Arc::make_mut(&mut self.values).remove(*name);
 			self.forbidden.retain(|(bound, _)| bound.as_str() != *name);
 			self.forbidden.push((Strand::from(*name), Arc::clone(row)));
 		}
@@ -1408,6 +1412,13 @@ impl Context {
 		self.values.get(key)
 	}
 
+	/// The address of this context's value map, for a test asserting that a
+	/// write was made in place rather than to a copy.
+	#[cfg(test)]
+	pub(crate) fn values_addr(&self) -> usize {
+		Arc::as_ptr(&self.values) as *const () as usize
+	}
+
 	/// Puts the own binding of `key` back to `prev`: inserts the value, or
 	/// removes the binding when `prev` is `None`. A removed binding leaves the
 	/// name unbound here, so a parent's binding or a `DEFINE PARAM` of the same
@@ -1415,10 +1426,10 @@ impl Context {
 	pub(crate) fn restore_value(&mut self, key: &str, prev: Option<Arc<Value>>) {
 		match prev {
 			Some(value) => {
-				self.values.insert(Strand::from(key), value);
+				Arc::make_mut(&mut self.values).insert(Strand::from(key), value);
 			}
 			None => {
-				self.values.remove(key);
+				Arc::make_mut(&mut self.values).remove(key);
 			}
 		}
 	}
@@ -1610,25 +1621,39 @@ impl Context {
 	/// A binding the caller made with `LET` or `FOR` is not among them, so a
 	/// plan made in it folds none, and a name no binding holds is looked up
 	/// among the database's parameters.
+	///
+	/// The request parameters are shared with `parent`, never copied: a request
+	/// variable is never a protected or a row name ([`bound_name_refused`]), so
+	/// the scope holds them as they are, and the row names `parent` binds, when
+	/// it binds any, are held by a child node of their own above them. Entering
+	/// a body costs the row names, not the number of variables the request holds.
 	pub(crate) fn new_call_scope(parent: &FrozenContext) -> Self {
 		let mut scope = Self::new_isolated(parent);
 		scope.request_params.clone_from(&parent.request_params);
-		scope.call_boundary = true;
-		let mut held = Vec::new();
+		if let Some(params) = &parent.request_params {
+			scope.values = Arc::clone(params);
+		}
+		// What the body reads under a row name is `parent`'s binding of it.
+		let mut rows = Vec::new();
 		let mut forbidden = Vec::new();
-		for name in parent.visible_names() {
-			if PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
-				continue;
-			}
-			match scope.beyond_boundary(&name) {
-				Some(Binding::Value(value)) => held.push((name, Arc::clone(value))),
-				Some(Binding::Forbidden(row)) => forbidden.push((name, Arc::clone(row))),
+		for name in ROW_PARAM_NAMES {
+			match parent.binding(name) {
+				Some(Binding::Value(value)) => rows.push((Strand::from(*name), Arc::clone(value))),
+				Some(Binding::Forbidden(row)) => {
+					forbidden.push((Strand::from(*name), Arc::clone(row)))
+				}
 				None => {}
 			}
 		}
-		scope.values.extend(held);
-		scope.forbidden = forbidden;
-		scope
+		if rows.is_empty() && forbidden.is_empty() {
+			scope.call_boundary = true;
+			return scope;
+		}
+		let mut held = Self::new_child(&scope.freeze());
+		held.call_boundary = true;
+		held.values = Arc::new(rows.into_iter().collect());
+		held.forbidden = forbidden;
+		held
 	}
 
 	/// Get a 'static view into the cancellation status.
@@ -1710,7 +1735,7 @@ impl Context {
 	fn add_request_param(&mut self, name: Strand, value: Arc<Value>) {
 		Arc::make_mut(self.request_params.get_or_insert_with(Default::default))
 			.insert(name.clone(), Arc::clone(&value));
-		self.values.insert(name, value);
+		Arc::make_mut(&mut self.values).insert(name, value);
 	}
 
 	/// Attach variables of the public type to the context, as
@@ -2110,6 +2135,7 @@ impl crate::idx::places::PlaceSource for IndexPlaces {
 mod tests {
 	#[cfg(feature = "http")]
 	use std::str::FromStr;
+	use std::sync::Arc;
 	use std::time::Duration;
 
 	#[cfg(all(feature = "allocation-tracking", feature = "allocator"))]
@@ -2117,6 +2143,7 @@ mod tests {
 	#[cfg(feature = "http")]
 	use url::Url;
 
+	use super::Binding;
 	use crate::ctx::Context;
 	use crate::ctx::reason::Reason;
 	#[cfg(feature = "http")]
@@ -2124,6 +2151,7 @@ mod tests {
 	use crate::dbs::Options;
 	#[cfg(feature = "http")]
 	use crate::dbs::capabilities::{NetTarget, Targets};
+	use crate::exec::context::ForbiddenRow;
 	use crate::expr::Base;
 	use crate::iam::{Action, Auth, ResourceKind, Role};
 
@@ -2669,6 +2697,114 @@ mod tests {
 			assert_eq!(scope.value(name), None, "{name} reached a body's plan");
 			assert_eq!(scope.lexical_value(name), None);
 		}
+	}
+
+	/// A request of `n` bound variables, as a frozen context.
+	fn a_request_of(n: i64) -> std::sync::Arc<Context> {
+		use crate::dbs::Variables;
+		use crate::val::Value;
+
+		let mut request = Context::new_test();
+		let mut vars = Variables::new();
+		for i in 0..n {
+			vars.insert(format!("v{i}"), Value::from(i));
+		}
+		request.attach_variables(vars).expect("variables attach");
+		request.add_value("session", int(9));
+		request.freeze()
+	}
+
+	/// A call scope entered from a frame that binds no row name is one node
+	/// that shares the request's parameters: entering a body copies none of
+	/// them, however many the request holds.
+	#[test]
+	fn a_call_scope_shares_the_request_parameters() {
+		let request = a_request_of(1000);
+		let mut caller = Context::new_child(&request);
+		caller.add_value("l", int(7));
+		let caller = caller.freeze();
+		let scope = Context::new_call_scope(&caller);
+		let params = request.request_params.as_ref().expect("the request holds parameters");
+		assert!(Arc::ptr_eq(&scope.values, params), "the request's parameters were copied");
+		assert_eq!(scope.lexical_value("v999"), Some(&int(999)));
+		assert_eq!(scope.lexical_value("session"), Some(&int(9)));
+		assert_eq!(scope.lexical_value("l"), None);
+		assert_eq!(scope.value("l"), None);
+	}
+
+	/// A call scope entered from a frame that binds row names holds them in a
+	/// node of their own, above the shared request parameters, and reads as
+	/// the scope entered from a frame that binds none, with the row names.
+	#[test]
+	fn a_call_scope_holds_row_names_above_the_shared_parameters() {
+		let request = a_request_of(1000);
+		let mut row = Context::new_child(&request);
+		row.add_value("this", int(3));
+		row.add_value("l", int(7));
+		let row = row.freeze();
+		let scope = Context::new_call_scope(&row);
+		let params = request.request_params.as_ref().expect("the request holds parameters");
+		let below = scope.parent.as_ref().expect("the row names sit above the parameters");
+		assert!(Arc::ptr_eq(&below.values, params), "the request's parameters were copied");
+		assert_eq!(scope.values.len(), 1, "the row node holds only the row names");
+		assert!(scope.in_call_body());
+		assert_eq!(scope.lexical_value("this"), Some(&int(3)));
+		assert_eq!(scope.value("this"), Some(&*int(3)));
+		assert_eq!(scope.lexical_value("v0"), Some(&int(0)));
+		assert_eq!(scope.lexical_value("session"), Some(&int(9)));
+		assert_eq!(scope.lexical_value("parent"), None);
+		assert_eq!(scope.lexical_value("l"), None);
+		assert_eq!(scope.value("l"), None);
+		let mut names: Vec<_> = scope.visible_names().into_iter().map(|n| n.to_string()).collect();
+		names.sort();
+		names.dedup();
+		assert_eq!(names.len(), 1002, "the parameters, `session` and `this`: {names:?}");
+	}
+
+	/// A row name the frame binds to a KNN query vector's row being scanned
+	/// is bound so in the scope: a read of it is refused, not answered by a
+	/// value or by nothing.
+	#[test]
+	fn a_call_scope_keeps_a_forbidden_row_name_forbidden() {
+		let request = a_request_of(3);
+		let mut row = Context::new_child(&request);
+		row.add_value("this", int(3));
+		row.add_forbidden(&["parent"], &Arc::new(ForbiddenRow::for_test("$parent.v")));
+		let row = row.freeze();
+		let scope = Context::new_call_scope(&row);
+		assert!(matches!(scope.lexical_binding("parent"), Some(Binding::Forbidden(_))));
+		assert!(matches!(scope.binding("parent"), Some(Binding::Forbidden(_))));
+		assert_eq!(scope.value("parent"), None);
+		assert_eq!(scope.lexical_value("this"), Some(&int(3)));
+		assert_eq!(scope.lexical_value("v2"), Some(&int(2)));
+	}
+
+	/// A snapshot of a context with no parent shares its values, and each
+	/// write to either side after it is the writer's own: the other side reads
+	/// what it read before.
+	#[test]
+	fn a_snapshot_shares_values_and_writes_after_it_stay_apart() {
+		let mut root = Context::new_test();
+		root.add_value("a", int(1));
+		root.add_value("b", int(2));
+		let root = root.freeze();
+		let mut snapshot = Context::snapshot(&root);
+		assert!(Arc::ptr_eq(&snapshot.values, &root.values), "the values were copied");
+
+		snapshot.add_value("a", int(10));
+		snapshot.restore_value("b", None);
+		snapshot.add_forbidden(&["c"], &Arc::new(ForbiddenRow::for_test("$c")));
+		assert_eq!(snapshot.value("a"), Some(&*int(10)));
+		assert_eq!(snapshot.value("b"), None);
+		assert_eq!(root.value("a"), Some(&*int(1)), "a write to the snapshot reached the root");
+		assert_eq!(root.value("b"), Some(&*int(2)), "a removal from the snapshot reached the root");
+		assert!(root.binding("c").is_none());
+
+		let snapshot = snapshot.freeze();
+		let mut again = Context::snapshot(&snapshot);
+		again.add_value("a", int(20));
+		assert_eq!(snapshot.value("a"), Some(&*int(10)));
+		assert_eq!(again.value("a"), Some(&*int(20)));
 	}
 
 	/// A snapshot of a context inside a body is the body's view of it.
