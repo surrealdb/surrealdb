@@ -28,6 +28,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_channel::Receiver;
+use surrealdb_cnf::ConfigMap;
 #[doc(inline)]
 pub use surrealdb_core::kvs::Datastore;
 #[doc(inline)]
@@ -91,6 +92,12 @@ pub struct LocalConfig {
 	pub node_membership_cleanup_interval: Option<Duration>,
 	/// Overrides the changefeed garbage collection interval.
 	pub changefeed_gc_interval: Option<Duration>,
+	/// Datastore configuration keys and values, as the server reads them
+	/// from `SURREAL_<KEY>`: storage backend settings such as
+	/// `surrealkv_block_cache_capacity` and runtime settings such as
+	/// `memory_limit`. A parameter on `path` wins over a backend setting here.
+	/// `bucket_folder_allowlist` is refused: it is set by its own field.
+	pub datastore_options: Vec<(String, String)>,
 }
 
 impl LocalConfig {
@@ -111,6 +118,39 @@ impl LocalConfig {
 			opt.changefeed_gc_interval = interval;
 		}
 		opt
+	}
+
+	/// The configuration map the datastore is built with.
+	///
+	/// It holds only the keys this configuration sets. Nothing is read from the
+	/// process environment, so an embedded datastore can do only what its
+	/// caller configured.
+	fn datastore_config(&self) -> Result<ConfigMap, Error> {
+		let mut map = ConfigMap::empty();
+		for (key, value) in &self.datastore_options {
+			// Keys are matched as the environment produces them.
+			let key = key.to_lowercase();
+			if key == "bucket_folder_allowlist" {
+				return Err(std_error_to_types_error(
+					"the bucket folder allowlist is set by its own option, not as a datastore option",
+				));
+			}
+			map = map.with_key_value(key, value.clone());
+		}
+		if !self.bucket_folder_allowlist.is_empty() {
+			// The datastore reads the allowlist as a path list, the form the
+			// server's environment variable takes.
+			let joined = std::env::join_paths(&self.bucket_folder_allowlist)
+				.map_err(|e| {
+					std_error_to_types_error(format!("invalid bucket folder allowlist: {e}"))
+				})?
+				.into_string()
+				.map_err(|_| {
+					std_error_to_types_error("the bucket folder allowlist is not valid UTF-8")
+				})?;
+			map = map.with_key_value("bucket_folder_allowlist", joined);
+		}
+		Ok(map)
 	}
 }
 
@@ -151,6 +191,7 @@ pub async fn connect(
 	session_rx: Receiver<SessionId>,
 ) -> Result<Arc<LocalEngine>, Error> {
 	let builder = Datastore::builder()
+		.with_config(config.datastore_config()?)
 		// The datastore starts its own maintenance tasks, so the cadences go to
 		// the builder rather than to a `tasks::init` call here.
 		.with_engine_options(config.engine_options())
@@ -160,22 +201,6 @@ pub async fn connect(
 
 	#[cfg(storage)]
 	let builder = builder.with_temporary_directory(config.temporary_directory);
-
-	let builder = if config.bucket_folder_allowlist.is_empty() {
-		builder
-	} else {
-		// The datastore reads the allowlist as a path list, the form the
-		// server's environment variable takes.
-		let joined = std::env::join_paths(&config.bucket_folder_allowlist)
-			.map_err(|e| std_error_to_types_error(format!("invalid bucket folder allowlist: {e}")))?
-			.into_string()
-			.map_err(|_| {
-				std_error_to_types_error("the bucket folder allowlist is not valid UTF-8")
-			})?;
-		builder.with_config(
-			surrealdb_cnf::ConfigMap::empty().with_key_value("bucket_folder_allowlist", joined),
-		)
-	};
 
 	let (notifications, builder) = if config.capabilities.allows_live_query_notifications() {
 		let (send, recv) = async_channel::bounded(surrealdb_cnf::NOTIFICATIONS_CHANNEL_SIZE);
@@ -266,4 +291,48 @@ fn serve(
 		sessions,
 		stopped,
 	})
+}
+
+#[cfg(all(test, not(target_family = "wasm")))]
+mod tests {
+	use surrealdb_kvs_surrealkv::SurrealKvConfig;
+
+	use super::LocalConfig;
+
+	fn options(pairs: &[(&str, &str)]) -> LocalConfig {
+		LocalConfig {
+			datastore_options: pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+			..LocalConfig::default()
+		}
+	}
+
+	/// The storage settings an embedded caller sets reach the backend
+	/// configuration the datastore is opened with, whatever their case.
+	#[test]
+	fn datastore_options_reach_the_backend_config() {
+		let config = options(&[
+			("surrealkv_block_cache_capacity", "268435456"),
+			("SURREALKV_MAX_MEMTABLE_SIZE", "67108864"),
+		]);
+		let engine = config.datastore_config().unwrap().load::<SurrealKvConfig>();
+		assert_eq!(engine.block_cache_capacity, 256 * 1024 * 1024);
+		assert_eq!(engine.max_memtable_size, 64 * 1024 * 1024);
+	}
+
+	/// Unset options leave the backend's defaults in place.
+	#[test]
+	fn unset_datastore_options_keep_the_backend_defaults() {
+		let engine = LocalConfig::default().datastore_config().unwrap().load::<SurrealKvConfig>();
+		let defaults = SurrealKvConfig::default();
+		assert_eq!(engine.block_cache_capacity, defaults.block_cache_capacity);
+		assert_eq!(engine.max_memtable_size, defaults.max_memtable_size);
+	}
+
+	/// The allowlist is a capability, so it is set only by its own field.
+	#[test]
+	fn bucket_folder_allowlist_is_refused_as_a_datastore_option() {
+		for key in ["bucket_folder_allowlist", "BUCKET_FOLDER_ALLOWLIST"] {
+			assert!(options(&[(key, "/")]).datastore_config().is_err(), "{key}");
+		}
+	}
 }

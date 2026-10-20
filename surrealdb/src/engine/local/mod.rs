@@ -279,6 +279,30 @@ pub struct TiKv;
 /// # Ok(())
 /// # }
 /// ```
+///
+/// Capping the engine's memory, either on the connection path or with
+/// [`Config::datastore_option`](crate::opt::Config::datastore_option). The
+/// path wins when both set a value.
+///
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() -> surrealdb::Result<()> {
+/// use surrealdb::Surreal;
+/// use surrealdb::engine::local::SurrealKv;
+/// use surrealdb::opt::Config;
+///
+/// let db = Surreal::new::<SurrealKv>(
+///     "path/to/database-folder?block_cache_capacity=268435456&max_memtable_size=67108864",
+/// )
+/// .await?;
+///
+/// let config = Config::new()
+///     .datastore_option("surrealkv_block_cache_capacity", 256 * 1024 * 1024)
+///     .datastore_option("surrealkv_max_memtable_size", 64 * 1024 * 1024);
+/// let db = Surreal::new::<SurrealKv>(("path/to/other-folder", config)).await?;
+/// # Ok(())
+/// # }
+/// ```
 #[cfg(feature = "kv-surrealkv")]
 #[cfg_attr(docsrs, doc(cfg(feature = "kv-surrealkv")))]
 #[derive(Debug)]
@@ -337,5 +361,6 @@ pub(crate) fn local_config(address: Endpoint) -> LocalConfig {
 		node_membership_check_interval: config.node_membership_check_interval,
 		node_membership_cleanup_interval: config.node_membership_cleanup_interval,
 		changefeed_gc_interval: config.changefeed_gc_interval,
+		datastore_options: config.datastore_options,
 	}
 }

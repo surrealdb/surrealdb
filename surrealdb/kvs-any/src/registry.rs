@@ -68,14 +68,6 @@ impl<'a> Backends<'a> {
 			None => (path, None),
 		};
 
-		let config = if let Some(config_string) = config_string {
-			config.join(
-				ConfigMap::from_config_string(config_string).map_keys(|x| format!("datastore_{x}")),
-			)
-		} else {
-			config
-		};
-
 		// Extract the scheme and path components
 		let (scheme, path) = match raw_path.split_once("://").or_else(|| raw_path.split_once(':')) {
 			Some((scheme, path)) => (scheme, path),
@@ -111,6 +103,11 @@ impl<'a> Backends<'a> {
 					.into(),
 			));
 		}
+
+		let config = match config_string {
+			Some(config_string) => config.join(path_params(scheme, config_string)),
+			None => config,
+		};
 
 		let path = if path.starts_with("/") {
 			// if absolute, remove all slashes except one
@@ -193,6 +190,27 @@ impl<'a> Backends<'a> {
 		}
 		Err(Error::Datastore("Provide a valid database path parameter".to_owned()))
 	}
+}
+
+/// The configuration a `?key=value` query on a datastore path carries.
+///
+/// Each parameter is entered twice: as `datastore_<key>`, the settings every
+/// backend shares (`versioned`, `retention`, `sync`), and as `<scheme>_<key>`,
+/// the backend's own settings, which the server reads from
+/// `SURREAL_<SCHEME>_<KEY>`. So `surrealkv://data?block_cache_capacity=…`
+/// sets `surrealkv_block_cache_capacity`. Joined over the caller's
+/// configuration, a parameter on the path wins over the same key set
+/// elsewhere.
+///
+/// The result reaches only the storage backend. The datastore's own runtime
+/// configuration is read from the caller's map, so a path parameter cannot
+/// change it.
+fn path_params(scheme: &str, query: &str) -> ConfigMap {
+	let params = ConfigMap::from_config_string(query);
+	params
+		.clone()
+		.map_keys(|x| format!("datastore_{x}"))
+		.join(params.map_keys(|x| format!("{scheme}_{x}")))
 }
 
 #[cfg(test)]
@@ -292,5 +310,62 @@ mod tests {
 			panic!("expected an error for the removed `surrealkv+versioned:` scheme")
 		};
 		assert!(err.to_string().contains("versioned=true"), "got: {err}");
+	}
+
+	/// A path parameter reaches the backend under the shared `datastore_` key
+	/// and under its own scheme's key, and wins over the caller's value for
+	/// the same key.
+	#[tokio::test]
+	async fn path_params_reach_the_backend_under_both_spellings() {
+		use std::sync::Mutex;
+
+		use surrealdb_cnf::ConfigMap;
+		use surrealdb_kvs::err::Error;
+		use tokio_util::sync::CancellationToken;
+
+		struct Recording<'a>(&'a Mutex<Option<ConfigMap>>);
+
+		impl BackendProvider for Recording<'_> {
+			fn schemes(&self) -> &[&'static str] {
+				&["rec"]
+			}
+
+			fn connect<'a>(
+				&'a self,
+				ctx: ConnectContext<'a>,
+			) -> BoxFut<'a, Result<Box<dyn TransactionBuilder>>> {
+				*self.0.lock().unwrap() = Some(ctx.config);
+				Box::pin(async { Err(Error::Datastore("recorded".into())) })
+			}
+		}
+
+		let seen = Mutex::new(None);
+		let mut backends = Backends::empty();
+		backends.register(Recording(&seen));
+		let caller = ConfigMap::empty()
+			.with_key_value("rec_block_cache_capacity", "1")
+			.with_key_value("rec_max_memtable_size", "7");
+		let _ = backends
+			.new_transaction_builder(
+				"rec://data?block_cache_capacity=2&versioned=true",
+				CancellationToken::new(),
+				caller,
+			)
+			.await;
+		let config = seen.lock().unwrap().take().expect("the provider was reached");
+
+		let mut capacity = 0u64;
+		let mut memtable = 0u64;
+		let mut shared = 0u64;
+		let mut versioned = false;
+		config
+			.parse_key("rec_block_cache_capacity", &mut capacity)
+			.parse_key("rec_max_memtable_size", &mut memtable)
+			.parse_key("datastore_block_cache_capacity", &mut shared)
+			.parse_key("datastore_versioned", &mut versioned);
+		assert_eq!(capacity, 2, "the path wins over the caller's value");
+		assert_eq!(memtable, 7, "a key the path does not set is kept");
+		assert_eq!(shared, 2);
+		assert!(versioned);
 	}
 }

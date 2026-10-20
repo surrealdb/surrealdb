@@ -39,11 +39,10 @@ pub struct SurrealKvConfig {
 	/// This prevents unbounded memory growth while still allowing large batches for efficiency.
 	/// Larger batches improve throughput but increase memory usage and commit latency.
 	pub grouped_commit_max_batch_size: usize,
-	/// The maximum memtable size in bytes before flushing to disk
-	/// This is the arena of memory that is used to store the memtable data.
-	/// If a single transaction is larger than this size, it will throw an error.
-	/// If a single transaction needs to store larger than this size, this value should be
-	/// increased.
+	/// The maximum memtable size in bytes before flushing to disk.
+	/// This is the arena of memory that holds recent writes. It bounds memtable residency, not
+	/// transaction size: a commit too large for the memtable is written directly to a level-0
+	/// table instead.
 	pub max_memtable_size: usize,
 }
 

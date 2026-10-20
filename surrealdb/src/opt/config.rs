@@ -32,6 +32,7 @@ pub struct Config {
 	pub(crate) node_membership_check_interval: Option<Duration>,
 	pub(crate) node_membership_cleanup_interval: Option<Duration>,
 	pub(crate) changefeed_gc_interval: Option<Duration>,
+	pub(crate) datastore_options: Vec<(String, String)>,
 }
 
 impl Config {
@@ -204,6 +205,30 @@ impl Config {
 	/// Set the interval at which the database should run node maintenance tasks
 	pub fn changefeed_gc_interval(mut self, interval: impl Into<Option<Duration>>) -> Self {
 		self.changefeed_gc_interval = interval.into().filter(|x| !x.is_zero());
+		self
+	}
+
+	/// Set a datastore configuration key, as the server reads it from the
+	/// environment variable `SURREAL_<KEY>`.
+	///
+	/// Only the embedded engines read this. It reaches the storage backend's
+	/// settings, such as `surrealkv_block_cache_capacity`,
+	/// `surrealkv_max_memtable_size` or `tikv_request_timeout`, and the
+	/// datastore's runtime settings, such as `memory_limit`. Keys are not
+	/// case-sensitive, and a later call for the same key wins. A parameter on
+	/// the connection path, as in
+	/// `surrealkv://data?block_cache_capacity=268435456`, wins over a backend
+	/// setting made here.
+	///
+	/// `bucket_folder_allowlist` is set with
+	/// [`bucket_folder_allowlist`](Self::bucket_folder_allowlist); connecting
+	/// with it set here fails.
+	pub fn datastore_option(
+		mut self,
+		key: impl Into<String>,
+		value: impl std::fmt::Display,
+	) -> Self {
+		self.datastore_options.push((key.into(), value.to_string()));
 		self
 	}
 }

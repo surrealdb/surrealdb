@@ -109,6 +109,10 @@ tokio = { workspace = true, features = [
 ] }
 web-time.workspace = true
 
+# Checks that the engine configuration this crate builds reaches SurrealKV.
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+surrealdb-kvs-surrealkv = { workspace = true }
+
 [lints]
 workspace = true
 
