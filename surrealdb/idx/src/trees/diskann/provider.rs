@@ -357,6 +357,22 @@ impl DiskAnnProvider {
 		}
 	}
 
+	/// Builds the provider context for a transaction that only reads the graph, whose snapshot
+	/// holds `!dg` at `generation`, without the graph lock. Its view publishes nothing; see
+	/// [`CacheView::unlocked`].
+	pub(super) fn unlocked_context(
+		&self,
+		tx: Arc<Transaction>,
+		generation: Option<u64>,
+	) -> DiskAnnProviderContext {
+		DiskAnnProviderContext {
+			tx,
+			ikb: self.ikb.clone(),
+			view: CacheView::unlocked(self.owner, generation),
+			frame: None,
+		}
+	}
+
 	/// The view a transaction that only reads the graph, and whose snapshot holds `!dg` at
 	/// `generation`, reads this wrapper's entries through while the span is `continuity`.
 	pub(super) fn reader_view(

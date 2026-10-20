@@ -76,6 +76,8 @@ pub(super) struct CacheView {
 	continuity: Option<Continuity>,
 	/// For a compaction frame, the generation it commits at. `None` outside a frame.
 	commit_generation: Option<u64>,
+	/// Whether a value the view's transaction reads from KV may be published into the cache.
+	publishes: bool,
 }
 
 impl CacheView {
@@ -90,6 +92,21 @@ impl CacheView {
 			generation,
 			continuity,
 			commit_generation: None,
+			publishes: true,
+		}
+	}
+
+	/// The view of a transaction that only reads the graph, taken without the wrapper's graph
+	/// lock.
+	///
+	/// It carries no span, since only the lock keeps a span from moving, so it is served only
+	/// entries stamped at its own generation, which hold there whatever has committed since. It
+	/// publishes nothing: without the span it cannot tell whether it reads behind a frame that has
+	/// committed since.
+	pub(super) fn unlocked(owner: u64, generation: Option<u64>) -> Self {
+		Self {
+			publishes: false,
+			..Self::reader(owner, generation, None)
 		}
 	}
 
@@ -141,7 +158,7 @@ impl CacheView {
 		let behind_head = self
 			.continuity
 			.is_some_and(|span| span.base <= self.generation && self.generation < span.head);
-		(!behind_head).then_some(Stamp {
+		(self.publishes && !behind_head).then_some(Stamp {
 			owner: self.owner,
 			generation: self.generation,
 		})
@@ -841,6 +858,22 @@ mod tests {
 		}
 		assert_eq!(at(Some(6)).publication(), Some(stamp(Some(6))));
 		assert_eq!(at(Some(6)).write_through(), None);
+	}
+
+	/// A view taken without the graph lock is served only entries stamped at its own generation,
+	/// even where a span would cover them, and publishes nothing.
+	#[test]
+	fn diskann_cache_unlocked_view_is_served_its_generation_and_publishes_nothing() {
+		let view = CacheView::unlocked(OWNER, Some(6));
+		assert!(view.serves(stamp(Some(6))));
+		assert!(!view.serves(stamp(Some(5))));
+		assert!(!view.serves(stamp(Some(7))));
+		assert!(!view.serves(Stamp {
+			owner: OWNER + 1,
+			generation: Some(6),
+		}));
+		assert_eq!(view.publication(), None);
+		assert_eq!(view.write_through(), None);
 	}
 
 	/// A frame writes through at the generation it commits at, and is served what it wrote there

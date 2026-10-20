@@ -370,6 +370,9 @@ pub struct DiskAnnIndex {
 	cache: DiskAnnCache,
 	/// In-process DiskANN graph wrapper; writes take the lock during compaction.
 	graph: RwLock<DiskAnnGraph>,
+	/// A provider under the graph's cache owner, for the reads a search makes without the graph
+	/// lock: the pending scan and the result resolution.
+	unlocked: DiskAnnProvider,
 	/// Vector-to-document mapping helper for `!dq`/`!dh` resolution.
 	vec_docs: DiskAnnVecDocs,
 	/// Whether the index uses shared or legacy private doc-ID mappings.
@@ -1742,19 +1745,15 @@ impl DiskAnnIndex {
 			bail!("DISKANN COSINE_NORMALIZED supports TYPE F32 and F16 only")
 		}
 		distance_to_metric(&p.distance)?;
+		let graph = DiskAnnGraph::new(ikb.clone(), tb, p, cache.clone(), format_version)?;
 		Ok(Self {
 			dim: p.dimension as usize,
 			vector_type: p.vector_type,
 			distance: p.distance.clone(),
 			table_id: tb,
 			cache: cache.clone(),
-			graph: RwLock::new(DiskAnnGraph::new(
-				ikb.clone(),
-				tb,
-				p,
-				cache.clone(),
-				format_version,
-			)?),
+			unlocked: graph.provider().same_owner(),
+			graph: RwLock::new(graph),
 			vec_docs: DiskAnnVecDocs::new(
 				ikb.clone(),
 				tb,
@@ -3038,9 +3037,15 @@ impl DiskAnnIndex {
 		let vector = Vector::try_from_vector(self.vector_type, pt)?;
 		vector.check_dimension(self.dim)?;
 		let search = DiskAnnSearch::new(vector, k, ef)?;
-		let graph = self.graph.read().await;
-		let provider_context = graph.context(env.tx(), compaction_generation);
-		let ctx = self.new_diskann_context(env, provider_context);
+		// The pending scan and the result resolution read only the transaction,
+		// through a context taken without the graph lock. The graph is held for
+		// the walk alone: a search never holds it across a pending backlog, so a
+		// compaction is not kept waiting on the graph by a scan, and a search
+		// does not wait for a compaction before it can start scanning.
+		let ctx = self.new_diskann_context(
+			env,
+			self.unlocked.unlocked_context(env.tx(), compaction_generation),
+		);
 		let mut builder = KnnResultBuilder::new(k);
 		// `pending_state` reflects only the sharded `!dy` guard; legacy `!dr` records are not
 		// tracked there, so we always scan pendings. `search_pendings` sweeps the legacy `!dr`
@@ -3049,18 +3054,25 @@ impl DiskAnnIndex {
 		let pending_docs = self
 			.search_pendings(&ctx, &search, &mut filter, allow_list, &mut builder, &pending_state)
 			.await?;
-		self.search_graph(
-			&ctx,
-			DiskAnnGraphSearch {
-				graph: &graph,
-				search: &search,
-				pending_docs,
-				allow_list,
-				filter: &mut filter,
-				builder: &mut builder,
-			},
-		)
-		.await?;
+		{
+			// The walk reads the graph through a context built under the guard
+			// it runs under.
+			let graph = self.graph.read().await;
+			let walk =
+				self.new_diskann_context(env, graph.context(env.tx(), compaction_generation));
+			self.search_graph(
+				&walk,
+				DiskAnnGraphSearch {
+					graph: &graph,
+					search: &search,
+					pending_docs,
+					allow_list,
+					filter: &mut filter,
+					builder: &mut builder,
+				},
+			)
+			.await?;
+		}
 		let cache = filter.map(DiskAnnTruthyDocumentFilter::release);
 		self.resolve_results(&ctx, builder, cache.as_ref(), compaction_generation).await
 	}
@@ -3159,13 +3171,13 @@ impl DiskAnnIndex {
 		let pending_state = Self::read_pending_state(&tx, &self.ikb).await?;
 		let compaction_generation = read_compaction_generation(&tx, &self.ikb.new_dg_key()).await?;
 		let search = DiskAnnSearch::new(vector, k, k)?;
-		// The pending scan and the result resolution read only the transaction:
-		// the graph is held to build their context, and again only while member
-		// elements are read through it, so a long pending backlog does not keep
-		// a compaction waiting on the graph.
+		// The pending scan and the result resolution read only the transaction,
+		// through a context taken without the graph lock. The graph is held only
+		// while member elements are read through it, so a long pending backlog
+		// does not keep a compaction waiting on the graph.
 		let ctx = self.new_diskann_context(
 			env,
-			self.graph.read().await.context(Arc::clone(&tx), compaction_generation),
+			self.unlocked.unlocked_context(Arc::clone(&tx), compaction_generation),
 		);
 		let mut builder = KnnResultBuilder::new(k);
 		let pending_docs = self
@@ -9584,6 +9596,97 @@ mod tests {
 		assert_eq!(got, [RecordIdKey::Number(1), RecordIdKey::Number(2)], "compacted");
 		assert!(probe.checks.load(Relaxed) > 0, "scoring checks for cancellation");
 		assert_eq!(probe.held.load(Relaxed), 0, "the graph is not held across the scoring");
+		Ok(())
+	}
+
+	/// With every member pending, the exact tier never takes the graph: it
+	/// answers while a compaction holds the graph for writing.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn diskann_exact_knn_search_over_pending_members_does_not_take_the_graph() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = ikb();
+		let p = params(VectorType::F32, Distance::Euclidean);
+		let index = DiskAnnIndex::new(
+			ikb.clone(),
+			TableId(4),
+			&p,
+			cache(),
+			VECTOR_DOC_ELEMENTS_FORMAT_VERSION,
+		)
+		.await?;
+		let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+		let mut allow = RoaringTreemap::new();
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			for (key, v) in [(1i64, [5.0f32; 4]), (2, [4.0; 4]), (3, [1.0; 4])] {
+				let id = RecordIdKey::Number(key);
+				allow.insert(docids.resolve_or_assign(&ctx, &id).await?);
+				index.index(&ctx, &id, None, Some(f32_content(&v))).await?;
+			}
+			ctx.tx().commit().await?;
+		}
+		let held = index.graph.write().await;
+		let ctx = new_ctx(&ds, TransactionType::Read).await;
+		let pt = f32_query(&[5.0; 4]);
+		let res = tokio::time::timeout(
+			std::time::Duration::from_secs(30),
+			index.exact_knn_search(&ctx, &pt, 2, &allow),
+		)
+		.await
+		.expect("the search must not wait for the graph")?
+		.expect("a read-only snapshot is served");
+		ctx.tx().cancel().await?;
+		drop(held);
+		let got: Vec<RecordIdKey> = res.iter().map(|(rid, _, _)| rid.key.clone()).collect();
+		assert_eq!(got, [RecordIdKey::Number(1), RecordIdKey::Number(2)]);
+		Ok(())
+	}
+
+	/// A kNN search holds the graph for its walk alone, never while it scans
+	/// the pending backlog: a compaction waiting for the graph is not held up
+	/// by the scan, nor are the searches that queue behind that compaction. The
+	/// pending records are still ranked with the compacted ones.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn diskann_knn_search_leaves_the_graph_free_while_scanning_pendings() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = ikb();
+		let p = params(VectorType::F32, Distance::Euclidean);
+		let index = DiskAnnIndex::new(
+			ikb.clone(),
+			TableId(4),
+			&p,
+			cache(),
+			VECTOR_DOC_ELEMENTS_FORMAT_VERSION,
+		)
+		.await?;
+		// Records 1 and 3 are compacted into the graph, record 2 stays pending.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			for (key, v) in [(1i64, [5.0f32; 4]), (3, [1.0; 4])] {
+				index.index(&ctx, &RecordIdKey::Number(key), None, Some(f32_content(&v))).await?;
+			}
+			ctx.tx().commit().await?;
+		}
+		compact_all(&index, &ds, &ikb).await?;
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			index.index(&ctx, &RecordIdKey::Number(2), None, Some(f32_content(&[4.0; 4]))).await?;
+			ctx.tx().commit().await?;
+		}
+		let probe = GraphLockProbe {
+			inner: new_ctx(&ds, TransactionType::Read).await,
+			graph: &index.graph,
+			checks: Default::default(),
+			held: Default::default(),
+		};
+		let pt = f32_query(&[5.0; 4]);
+		let res = index.knn_search(&probe, &pt, 2, 40, None, None).await?;
+		probe.inner.tx().cancel().await?;
+		let got: Vec<RecordIdKey> = res.iter().map(|(rid, _, _)| rid.key.clone()).collect();
+		assert_eq!(got, [RecordIdKey::Number(1), RecordIdKey::Number(2)]);
+		use std::sync::atomic::Ordering::Relaxed;
+		assert!(probe.checks.load(Relaxed) > 0, "the pending scan checks for cancellation");
+		assert_eq!(probe.held.load(Relaxed), 0, "the graph is not held while scanning pendings");
 		Ok(())
 	}
 
