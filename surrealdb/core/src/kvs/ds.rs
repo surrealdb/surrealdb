@@ -8245,7 +8245,7 @@ impl Datastore {
 			name: name.to_string().into(),
 			version: version.to_string().into(),
 			comment: crate::expr::Expr::Literal(crate::expr::Literal::String(description.into())),
-			hash: hash.into(),
+			hash: hash.clone().into(),
 			kind: Default::default(),
 			permissions: Default::default(),
 		};
@@ -8253,7 +8253,38 @@ impl Datastore {
 			crate::expr::statements::DefineStatement::Model(model),
 		)));
 
-		self.run(QueryRequest::new(ast, session)).await.map_err(|e| anyhow::anyhow!(e))?;
+		let defined: Result<()> = async {
+			let results =
+				self.run(QueryRequest::new(ast, session)).await.map_err(|e| anyhow::anyhow!(e))?;
+			for r in results {
+				r.result.map_err(|e| anyhow::anyhow!(e))?;
+			}
+			Ok(())
+		}
+		.await;
+		if let Err(e) = defined {
+			// The definition did not commit, so the artifact stored above is
+			// unreachable unless a model already defined under this name and
+			// version references the same content-addressed path.
+			// An artifact is removed only once the catalog has been read and
+			// shown not to reference it: a failed read leaves it in place.
+			let referenced = match self.get_db_model(ns, db, name, version).await {
+				Ok(model) => model.is_some_and(|m| m.hash.as_str() == hash),
+				Err(read) => {
+					tracing::warn!(
+						"keeping the model artifact `{path}` of a failed import: could not \
+						 check whether a model references it: {read}"
+					);
+					true
+				}
+			};
+			if !referenced && let Err(del) = crate::obs::del(&path).await {
+				tracing::warn!(
+					"failed to delete the model artifact `{path}` of a failed import: {del}"
+				);
+			}
+			return Err(e);
+		}
 
 		Ok(())
 	}
