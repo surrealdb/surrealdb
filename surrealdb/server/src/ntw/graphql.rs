@@ -15,6 +15,10 @@ use surrealdb_core::dbs::Session;
 use surrealdb_rpc::capabilities::RouteTarget;
 use tracing::instrument;
 
+use crate::cnf::{
+	WEBSOCKET_MAX_MESSAGE_SIZE, WEBSOCKET_MAX_WRITE_BUFFER_SIZE, WEBSOCKET_READ_BUFFER_SIZE,
+	WEBSOCKET_WRITE_BUFFER_SIZE,
+};
 use crate::graphql::GraphQLService;
 use crate::ntw::AppState;
 use crate::ntw::error::Error as NetError;
@@ -66,9 +70,21 @@ async fn ws_handler(
 
 	let protocol = select_ws_protocol(&headers);
 
-	ws.protocols(ALL_WEBSOCKET_PROTOCOLS).on_upgrade(move |socket| async move {
-		serve_graphql_ws(socket, schema, protocol, data).await;
-	})
+	// Bind the same frame and buffer limits the /sql and /rpc WebSocket
+	// handlers apply, so a GraphQL subscription socket cannot exhaust memory
+	// with oversized frames or an unbounded write buffer.
+	ws.protocols(ALL_WEBSOCKET_PROTOCOLS)
+		.max_frame_size(*WEBSOCKET_MAX_MESSAGE_SIZE)
+		.max_message_size(*WEBSOCKET_MAX_MESSAGE_SIZE)
+		.read_buffer_size(*WEBSOCKET_READ_BUFFER_SIZE)
+		.write_buffer_size(*WEBSOCKET_WRITE_BUFFER_SIZE)
+		.max_write_buffer_size(*WEBSOCKET_MAX_WRITE_BUFFER_SIZE)
+		.on_failed_upgrade(|err| {
+			warn!("Failed to upgrade GraphQL WebSocket connection: {err}");
+		})
+		.on_upgrade(move |socket| async move {
+			serve_graphql_ws(socket, schema, protocol, data).await;
+		})
 }
 
 fn select_ws_protocol(headers: &HeaderMap) -> WebSocketProtocols {
