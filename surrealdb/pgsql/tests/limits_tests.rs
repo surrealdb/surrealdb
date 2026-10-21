@@ -203,12 +203,14 @@ fn test_statement_separator_required() {
 
 #[test]
 fn test_transaction_modes_rejected() {
-	assert!(parse_statement("BEGIN ISOLATION LEVEL SERIALIZABLE;").is_err());
+	assert!(parse_statement("BEGIN ISOLATION LEVEL;").is_err());
+	assert!(parse_statement("BEGIN DEFERRABLE;").is_err());
 	assert!(parse_statement("COMMIT AND CHAIN;").is_err());
 	assert!(parse_statement("ROLLBACK AND CHAIN;").is_err());
 
 	// Clean transactions succeed
 	assert!(parse_statement("BEGIN;").is_ok());
+	assert!(parse_statement("BEGIN ISOLATION LEVEL SERIALIZABLE;").is_ok());
 	assert!(parse_statement("BEGIN READ ONLY;").is_ok());
 	assert!(parse_statement("BEGIN READ WRITE;").is_ok());
 	assert!(parse_statement("START TRANSACTION;").is_ok());

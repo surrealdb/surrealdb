@@ -1852,7 +1852,7 @@ mod tests {
 			let qt =
 				self.fti.extract_querying_terms(&ctx, &az_fn, query.to_string()).await.unwrap();
 			let doc_id = self.fti.get_doc_id(&tx, rid).await.unwrap().unwrap();
-			let found = qt.contains_doc(doc_id, BooleanOperator::Or);
+			let found = qt.contains_doc(doc_id, crate::expr::operator::BooleanOperator::Or);
 			tx.cancel().await.unwrap();
 			found
 		}

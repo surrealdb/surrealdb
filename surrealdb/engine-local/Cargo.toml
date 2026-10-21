@@ -63,7 +63,6 @@ surrealdb-engine-api = { workspace = true }
 surrealdb-cnf = { workspace = true }
 surrealdb-datastore = { workspace = true }
 surrealdb-iam = { workspace = true }
-surrealdb-kvs = { workspace = true }
 surrealdb-rpc = { workspace = true }
 surrealdb-types = { workspace = true }
 surrealml-core = { workspace = true, optional = true }

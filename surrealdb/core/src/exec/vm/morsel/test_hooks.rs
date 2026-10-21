@@ -532,13 +532,13 @@ pub(super) fn grant_fails(ctx: &ExecutionContext) -> bool {
 
 /// A statement that waits for a place it is never given, which the scans running while it lives see
 /// as another statement waiting.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(all(feature = "kv-mem", feature = "kv-rocksdb"))]
 pub(in crate::exec::vm) struct Waiter(
 	#[expect(dead_code, reason = "held for its registration")] super::places::Statement,
 );
 
 /// Register a statement with the node's places and leave it waiting for one.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(all(feature = "kv-mem", feature = "kv-rocksdb"))]
 pub(in crate::exec::vm) fn waiting_statement() -> Waiter {
 	let statement = super::places::register();
 	let config = crate::exec::config::ExecConfig {

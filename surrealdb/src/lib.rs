@@ -239,6 +239,7 @@ impl SessionClone {
 	/// The session events for a router task that runs apart from the engine
 	/// (the HTTP and WebSocket transports). Dropping it, which is what the
 	/// router does as it exits, is what [`Self::router_stopped`] reports.
+	#[cfg(any(http_engine, ws_engine))]
 	fn router_receiver(&self) -> RouterSessions {
 		let guard = self.router_guard.lock().ok().and_then(|mut slot| slot.take());
 		RouterSessions {
@@ -254,12 +255,14 @@ impl SessionClone {
 }
 
 /// A router task's end of the session channel.
+#[cfg(any(http_engine, ws_engine))]
 #[derive(Debug)]
 pub(crate) struct RouterSessions {
 	receiver: Receiver<SessionId>,
 	_stopped: Option<Sender<()>>,
 }
 
+#[cfg(any(http_engine, ws_engine))]
 impl RouterSessions {
 	pub(crate) async fn recv(&self) -> std::result::Result<SessionId, async_channel::RecvError> {
 		self.receiver.recv().await
@@ -590,6 +593,7 @@ mod tests {
 mod session_clone_tests {
 	use super::SessionClone;
 
+	#[cfg(any(http_engine, ws_engine))]
 	#[tokio::test]
 	async fn router_stopped_closes_when_the_router_drops_its_receiver() {
 		let sessions = SessionClone::new();

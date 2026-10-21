@@ -4376,7 +4376,6 @@ dependencies = [
  "surrealdb-datastore",
  "surrealdb-engine-api",
  "surrealdb-iam",
- "surrealdb-kvs",
  "surrealdb-rpc",
  "surrealdb-types",
  "tokio",

@@ -56,8 +56,8 @@ test("@@ match operator filters rows to those the analyzer matches", async () =>
 test("search::score(n) with the @n@ matchref returns a positive BM25 relevance", async () => {
 	await withServer(async (server) => {
 		const { db } = await rootClient(server);
-		// "rust" appears in only two of six documents (a minority) so its IDF is
-		// positive — see the majority-term test below for why that matters.
+		// "rust" appears in two of six documents; the test below covers a term
+		// most documents carry.
 		await db
 			.query(
 				`CREATE book:1 SET title = 'Rust rust rust systems programming';
@@ -92,13 +92,12 @@ test("search::score(n) with the @n@ matchref returns a positive BM25 relevance",
 	});
 }, 30000);
 
-test("BM25 clamps a majority-term IDF to a zero score", async () => {
+test("BM25 scores a term most documents carry above zero", async () => {
 	await withServer(async (server) => {
 		const { db } = await rootClient(server);
-		// The scorer uses the Robertson IDF ln((N-n+0.5)/(n+0.5)); a term present
-		// in more than half the documents yields a negative IDF that is clamped
-		// to zero. Here "rust" is in two of three documents, so every matched row
-		// scores exactly 0 even though the rows still match and are returned.
+		// The scorer uses the smoothed IDF ln(1 + (N-n+0.5)/(n+0.5)), which stays
+		// positive for every n <= N. Here "rust" is in two of three documents, so
+		// both matched rows score above zero and still rank by term frequency.
 		await db
 			.query(
 				`CREATE book:1 SET title = 'Rust rust rust systems programming';
@@ -116,7 +115,10 @@ test("BM25 clamps a majority-term IDF to a zero score", async () => {
 			)
 			.json()) as [Array<{ id: string; score: number }>];
 		expect(rows.map((r) => String(r.id))).toEqual(["book:1", "book:2"]);
-		expect(rows.map((r) => r.score)).toEqual([0, 0]);
+		for (const r of rows) {
+			expect(r.score).toBeGreaterThan(0);
+		}
+		expect(rows[0].score).toBeGreaterThan(rows[1].score);
 
 		await db.close();
 	});

@@ -153,9 +153,9 @@ landed on `main` but is not yet in a stable release.
     rows collide when they share any single element, and the violation (an
     `InternalError`: "Database index `X` already contains VALUE, with record
     `RID`") names the one overlapping element, not the array (`indexes`).
-  - Full-text BM25 uses a Robertson IDF clamped at 0, so a term present in a
-    majority (> half) of documents scores exactly 0 for every matched row even
-    though the rows still match and are returned (`search`).
+  - Full-text BM25 uses the smoothed IDF `ln(1 + (N-n+0.5)/(n+0.5))`, so a term
+    present in a majority (> half) of documents still scores above zero and
+    ranks the matched rows by term frequency (`search`).
   - `DEFINE EVENT`: `$event` is exactly `CREATE`/`UPDATE`/`DELETE`; `$before` is
     absent on CREATE and `$after` absent on DELETE; inside a nested `CREATE` in
     the event body a bare `$this` rebinds to the row being created, so the

@@ -50,7 +50,6 @@ surrealdb-core = { workspace = true, features = [
 ] }
 surrealdb-cnf = { workspace = true }
 surrealdb-datastore = { workspace = true }
-surrealdb-kvs = { workspace = true }
 surrealdb-rpc = { workspace = true }
 surrealdb-types = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }

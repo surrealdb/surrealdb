@@ -243,12 +243,12 @@ pub(super) use self::merge::body_breakers;
 pub(crate) use self::metrics::MorselMetrics;
 pub(super) use self::places::Statement;
 use self::set::{MorselSet, RangeSet};
-#[cfg(test)]
+#[cfg(all(test, feature = "kv-mem"))]
 pub(super) use self::test_hooks::{
 	Counts, batch_partials, batches_of, counts_of, delay_morsels, encoded_ahead, fail_splits,
 	forget_ends, metrics_of, txn_reads_on_workers, writes_ended,
 };
-#[cfg(all(test, feature = "kv-rocksdb"))]
+#[cfg(all(test, feature = "kv-mem", feature = "kv-rocksdb"))]
 pub(super) use self::test_hooks::{fail_grants, fail_narrows, waiting_statement};
 #[cfg(test)]
 pub(crate) use self::test_hooks::{

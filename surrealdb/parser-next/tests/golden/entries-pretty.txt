@@ -3037,7 +3037,7 @@ b3fcbba2188ae864 language-tests/tests/language/statements/select/join/in_subquer
 72dd4fd60ec08a03 language-tests/tests/language/statements/select/multi_aggregate.surql
 b04f6b359cb71c04 language-tests/tests/language/statements/select/mutating_clause_gets_write_txn.surql
 69c626a5d6c3a4e1 language-tests/tests/language/statements/select/new_plan.surql
-46aa7c65ab8ae79b language-tests/tests/language/statements/select/omit.surql
+a3a2fb0e2760bdcb language-tests/tests/language/statements/select/omit.surql
 bb488ea63530e4d6 language-tests/tests/language/statements/select/omit_group_by.surql
 33483b954f8bb5c5 language-tests/tests/language/statements/select/only.surql
 c3938ff0028e2e05 language-tests/tests/language/statements/select/order/order_array.surql
@@ -3139,7 +3139,7 @@ fc2ca8571978a9a7 language-tests/tests/language/statements/select/select_start_li
 4ab5ddd4357aa527 language-tests/tests/language/statements/select/select_start_where.surql
 ebde48d97e072db5 language-tests/tests/language/statements/select/select_value.surql
 2613c5dee71c355c language-tests/tests/language/statements/select/select_value_omit.surql
-a6768e83c2bed950 language-tests/tests/language/statements/select/select_value_omit_record_id.surql
+c0aad04da747e1f0 language-tests/tests/language/statements/select/select_value_omit_record_id.surql
 b7b7481725545d7c language-tests/tests/language/statements/select/select_value_order_by_parse_permissive.surql
 1e0d096e5fee8f57 language-tests/tests/language/statements/select/set_membership_numeric_variant_keys.surql
 8236162b445f46c1 language-tests/tests/language/statements/select/source_expr.surql
@@ -3769,7 +3769,7 @@ dde4363594dc611d language-tests/tests/reproductions/a_read_by_data_after_a_schem
 664db880d59ca7fa language-tests/tests/reproductions/a_record_read_by_id_hides_the_fields_its_permissions_deny.surql
 b0e4f058b2a0308d language-tests/tests/reproductions/a_record_read_by_id_hides_the_fields_its_permissions_deny_import.surql
 fd7987c1ec684ce2 language-tests/tests/reproductions/a_record_read_follows_a_table_defined_earlier_in_the_block.surql
-99a5451ddac2eec3 language-tests/tests/reproductions/a_record_user_of_an_undefined_table_reads_as_none_through_auth.surql
+ef30322f17169b62 language-tests/tests/reproductions/a_record_user_of_an_undefined_table_reads_as_none_through_auth.surql
 d2163cc4c1412bda language-tests/tests/reproductions/a_record_user_of_an_undefined_table_reads_as_none_through_auth_import.surql
 52e0ebec712d4d92 language-tests/tests/reproductions/a_recursive_event_chain_runs_to_its_base_case.surql
 7e50b5ee44e8d121 language-tests/tests/reproductions/a_redefined_view_stops_reading_its_former_sources.surql

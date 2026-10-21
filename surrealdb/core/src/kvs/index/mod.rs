@@ -43,7 +43,7 @@ mod tests;
 
 use std::time::Duration;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "kv-mem"))]
 pub(crate) use after_commit::unstarted;
 pub(crate) use after_commit::{RemoveFailedDefinition, StagedRebuild};
 pub(crate) use builder::{
