@@ -1662,7 +1662,16 @@ async fn filter_fields_by_permission_inner(
 	// one. Per-field denies cut from `value`; predicates and `each` read from
 	// the snapshot so earlier cuts don't affect later field expansion.
 	let mut lazy_snapshot: Option<Value> = None;
-	let mut cut_any = false;
+	// SECURITY: gather every concrete path to cut against the immutable snapshot
+	// and apply them only once the loop has judged every field. `Value::cut`
+	// removes an array element through `Vec::remove`, shifting the elements after
+	// it down, so cutting as each field is judged would move a survivor under a
+	// concrete index a later overlapping field had already derived from the same
+	// snapshot — leaving that field's denial on the wrong element
+	// (GHSA-wjh3-m4pv-q6cp). The old code reversed the indices within one field
+	// for this reason; deferring extends that guarantee across every field that
+	// shares an array.
+	let mut to_cut: Vec<crate::expr::Idiom> = Vec::new();
 	for (entry, (idiom, perm)) in state.field_permissions.iter().enumerate() {
 		if !pass.applies_to(state, idiom) || judged.contains(&entry) {
 			continue;
@@ -1674,13 +1683,7 @@ async fn filter_fields_by_permission_inner(
 					Some(snapshot) => snapshot,
 					None => &*lazy_snapshot.get_or_insert_with(|| value.clone()),
 				};
-				// SECURITY: iterate in reverse. `each` yields ascending array indices and
-				// `Value::cut` removes via `Vec::remove`, which shifts later indices down.
-				// Removing higher indices first keeps the pending lower indices valid.
-				for path in original.each(&idiom.0).into_iter().rev() {
-					value.cut(&path.0);
-					cut_any = true;
-				}
+				to_cut.extend(original.each(&idiom.0));
 			}
 			PhysicalPermission::Conditional(_) => {
 				let original = match snapshot {
@@ -1688,9 +1691,10 @@ async fn filter_fields_by_permission_inner(
 					None => &*lazy_snapshot.get_or_insert_with(|| value.clone()),
 				};
 				let doc = predicate_doc.unwrap_or(original);
-				// SECURITY: iterate in reverse, as in the Deny arm above. Predicates read from
-				// `original` and `doc`, both immutable, so evaluation order is irrelevant.
-				for path in original.each(&idiom.0).into_iter().rev() {
+				// Predicates read from `original` and `doc`, both immutable, so the
+				// order the paths are judged in is irrelevant; the cut order is
+				// settled by `apply_field_permission_cuts`.
+				for path in original.each(&idiom.0) {
 					let field_value = original.pick(&path.0);
 					let allowed = check_permission_for_value(perm, doc, Some(&field_value), ctx)
 						.await
@@ -1700,15 +1704,85 @@ async fn filter_fields_by_permission_inner(
 							))
 						})?;
 					if !allowed {
-						value.cut(&path.0);
-						cut_any = true;
+						to_cut.push(path);
 					}
 				}
 			}
 		}
 	}
 
-	Ok(cut_any)
+	Ok(apply_field_permission_cuts(value, to_cut))
+}
+
+/// Cuts the denied concrete paths [`filter_fields_by_permission_inner`]
+/// gathered, in the one order in which removing one never invalidates a path
+/// still to be cut, and reports whether anything was cut.
+///
+/// Every path indexes into the single snapshot the whole pass was judged
+/// against. A path ending at an array element removes that element and shifts
+/// every later element of the array down, so the paths are cut greatest-first:
+/// ordered by their index structure and applied in reverse, at each array the
+/// higher element indices go before the lower, and an element's own fields
+/// before the element itself — the one order `Value::cut`'s `Vec::remove` leaves
+/// the remaining paths valid under. Identical paths are cut once, so an element
+/// two fields both denied is not removed twice (the second removal would take
+/// its neighbour).
+fn apply_field_permission_cuts(value: &mut Value, mut paths: Vec<crate::expr::Idiom>) -> bool {
+	if paths.is_empty() {
+		return false;
+	}
+	// Order the paths so that reverse iteration cuts the greatest first: at each
+	// array the higher element indices before the lower, and an element's fields
+	// before the element itself. The comparator borrows the paths rather than
+	// building a key per segment, and `dedup` drops the identical paths it has
+	// made adjacent, so an element two fields both denied is not removed twice.
+	paths.sort_by(|a, b| cut_path_order(&a.0, &b.0));
+	paths.dedup();
+	for path in paths.into_iter().rev() {
+		value.cut(&path.0);
+	}
+	true
+}
+
+/// Orders two concrete cut paths by their index structure, so reverse iteration
+/// of the sorted paths cuts the greatest first. Compared segment by segment: an
+/// array element by its numeric index, an element before any other segment kind,
+/// and a shorter path (a prefix of another) before the longer. The order only
+/// has to be total: two paths that differ in kind at one position address
+/// different shapes of the same value and never share an element whose index
+/// could drift between them.
+fn cut_path_order(
+	a: &[crate::expr::part::Part],
+	b: &[crate::expr::part::Part],
+) -> std::cmp::Ordering {
+	use std::cmp::Ordering;
+	for (pa, pb) in a.iter().zip(b.iter()) {
+		let ordering = match (pa.as_old_index(), pb.as_old_index()) {
+			(Some(ia), Some(ib)) => ia.cmp(&ib),
+			(Some(_), None) => Ordering::Less,
+			(None, Some(_)) => Ordering::Greater,
+			(None, None) => cut_segment_order(pa, pb),
+		};
+		if ordering != Ordering::Equal {
+			return ordering;
+		}
+	}
+	a.len().cmp(&b.len())
+}
+
+/// A total order over two non-index path segments. A field sorts by its name; any
+/// other kind, which only a set element reaches here, by a stable rendering. The
+/// order between two such segments does not affect the result: they address
+/// different object fields, which never share an element.
+fn cut_segment_order(
+	a: &crate::expr::part::Part,
+	b: &crate::expr::part::Part,
+) -> std::cmp::Ordering {
+	use crate::expr::part::Part;
+	match (a, b) {
+		(Part::Field(fa), Part::Field(fb)) => fa.as_str().cmp(fb.as_str()),
+		_ => format!("{a:?}").cmp(&format!("{b:?}")),
+	}
 }
 
 #[cfg(test)]
@@ -1752,6 +1826,11 @@ mod tests {
 	/// An `ORDER BY` clause over a single field.
 	fn order_by(field: &str, ascending: bool) -> LogicalOrdering {
 		LogicalOrdering::Order(vec![order(field, ascending)])
+	}
+
+	/// A value from its SurrealQL text, for the cut-ordering tests below.
+	fn val(src: &str) -> Value {
+		Value::from(crate::syn::value(src).expect("value should parse"))
 	}
 
 	// =========================================================================
@@ -1839,6 +1918,85 @@ mod tests {
 	// =========================================================================
 	// filter_fields_by_permission
 	// =========================================================================
+
+	/// The denied concrete paths two overlapping array permissions gather index
+	/// the single pre-filter snapshot. Cutting one that removes an array element
+	/// shifts the elements after it, so applying them must preserve each
+	/// survivor's identity whatever order they were gathered in — a later denial
+	/// must never land on a survivor that moved into a removed element's index
+	/// (GHSA-wjh3-m4pv-q6cp).
+	#[test]
+	fn overlapping_array_cuts_preserve_element_identity() {
+		let items = "[{ n: 0, secret: 's0' }, { n: 1, secret: 's1' }, \
+		              { n: 2, secret: 's2' }, { n: 3, secret: 's3' }]";
+		// Parent `items[*]` keeps even `n`, denying items[1] and items[3]; child
+		// `items[*].secret` keeps only 's1', denying the secret of items[0],
+		// items[2] and items[3]. Gathered parent-first, child-second, as the loop
+		// walks the entries.
+		let mut value = val(&format!("{{ items: {items} }}"));
+		let gathered = vec![
+			field_idiom("items[1]"),
+			field_idiom("items[3]"),
+			field_idiom("items[0].secret"),
+			field_idiom("items[2].secret"),
+			field_idiom("items[3].secret"),
+		];
+		assert!(apply_field_permission_cuts(&mut value, gathered));
+		// n=2 survives the parent and shifts into index 1, but its denied 's2'
+		// must still be gone — the drift left it visible.
+		assert_eq!(value, val("{ items: [{ n: 0 }, { n: 2 }] }"));
+
+		// The gather order must not change the outcome.
+		let mut value = val(&format!("{{ items: {items} }}"));
+		let gathered = vec![
+			field_idiom("items[3].secret"),
+			field_idiom("items[2].secret"),
+			field_idiom("items[0].secret"),
+			field_idiom("items[3]"),
+			field_idiom("items[1]"),
+		];
+		assert!(apply_field_permission_cuts(&mut value, gathered));
+		assert_eq!(value, val("{ items: [{ n: 0 }, { n: 2 }] }"));
+	}
+
+	/// An element two overlapping fields both deny is removed once: cutting the
+	/// same index twice would take the element that shifted into it.
+	#[test]
+	fn a_doubly_denied_element_is_cut_once() {
+		let mut value = val("{ items: [{ n: 0 }, { n: 1 }, { n: 2 }] }");
+		let gathered =
+			vec![field_idiom("items[1]"), field_idiom("items[1]"), field_idiom("items[2]")];
+		assert!(apply_field_permission_cuts(&mut value, gathered));
+		assert_eq!(value, val("{ items: [{ n: 0 }] }"));
+	}
+
+	/// Nested arrays with overlapping wildcard depths: an outer element removal
+	/// and inner element removals judged against the same snapshot keep their
+	/// identities, the inner cuts landing before the outer compaction shifts them.
+	#[test]
+	fn nested_array_cuts_preserve_identity() {
+		let mut value = val("{ items: [\
+			    { n: 0, tags: ['a', 'b'] }, \
+			    { n: 1, tags: ['c', 'd'] }, \
+			    { n: 2, tags: ['e', 'f'] }] }");
+		// Outer denies the whole items[1]; inner denies the first tag of the
+		// surviving elements by their original index.
+		let gathered = vec![
+			field_idiom("items[1]"),
+			field_idiom("items[0].tags[0]"),
+			field_idiom("items[2].tags[0]"),
+		];
+		assert!(apply_field_permission_cuts(&mut value, gathered));
+		assert_eq!(value, val("{ items: [{ n: 0, tags: ['b'] }, { n: 2, tags: ['f'] }] }"));
+	}
+
+	/// With nothing gathered the value is untouched and no cut is reported.
+	#[test]
+	fn no_gathered_paths_cuts_nothing() {
+		let mut value = val("{ items: [{ n: 0 }] }");
+		assert!(!apply_field_permission_cuts(&mut value, Vec::new()));
+		assert_eq!(value, val("{ items: [{ n: 0 }] }"));
+	}
 
 	// =========================================================================
 	// filter_field_state_for_projection
