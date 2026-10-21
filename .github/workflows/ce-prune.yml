@@ -1,0 +1,78 @@
+# Community rolling-set cleanup
+#
+# Once a week, deletes the community rolling sets (ce-rolling-build.yml) that
+# are more than 30 days old and that no release can still need: the newest
+# build of main and of each releases/* branch, and the commit of any release
+# that has not completed, are kept however old they are. A set younger than
+# that stays referenceable, so staging can keep pulling a recent build's
+# binaries and images. See .github/scripts/ce-prune.sh for the rules, and for
+# how it and ce-release.yml keep a release's set from being deleted under it.
+#
+# Dispatch it to clean up now or with another age; a dispatch previews by
+# default.
+
+name: CE rolling-set cleanup
+
+run-name: "${{ inputs.dry-run && '[dry-run] ' || '' }}CE rolling-set cleanup"
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      max-age-days:
+        description: "Delete sets older than this many days"
+        required: false
+        default: '30'
+        type: string
+      dry-run:
+        description: "Only list what would be deleted"
+        required: false
+        type: boolean
+        default: true
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ce-prune
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    name: Delete old rolling sets
+    if: ${{ github.repository == vars.PRIVATE_ENGINE_REPO }}
+    # Private runner: its ambient IAM role lists and deletes in the rolling
+    # bucket and the ECR repository.
+    runs-on: ${{ vars.RUNNER_AMD }}
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout the cleanup script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Delete old rolling sets
+        env:
+          BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
+          AWS_REGION: us-east-1
+          ECR_REGISTRY: ${{ secrets.AWS_ECR_REGISTRY }}
+          ECR_REPOSITORY: ${{ secrets.AWS_ECR_REPOSITORY }}
+          MAX_AGE_DAYS: ${{ inputs.max-age-days || '30' }}
+          DRY_RUN: ${{ inputs.dry-run == true }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ECR_REGION="$(printf '%s' "${ECR_REGISTRY}" | cut -d. -f4)" bash .github/scripts/ce-prune.sh

@@ -60,7 +60,7 @@ async function workspaceVersion(): Promise<string> {
  * registry hiccup.
  */
 async function isPublished(pkgName: string, pkgVersion: string): Promise<boolean> {
-	const url = `https://registry.npmjs.org/${pkgName.replace("/", "%2F")}`;
+	const url = `https://registry.npmjs.org/${pkgName.replaceAll("/", "%2F")}`;
 	let res: Response;
 	try {
 		res = await fetch(url, { headers: { accept: "application/vnd.npm.install-v1+json" } });
@@ -82,20 +82,54 @@ async function isPublished(pkgName: string, pkgVersion: string): Promise<boolean
 	}
 }
 
+/**
+ * The package's dist-tags on the registry, `{}` for a package not yet
+ * published. Unlike `isPublished`, this throws on any other failure: the tag
+ * chosen from its answer may be one users follow, so an unknown answer must not
+ * read as "no tags".
+ */
+async function distTags(pkgName: string): Promise<Record<string, string>> {
+	const url = `https://registry.npmjs.org/${pkgName.replaceAll("/", "%2F")}`;
+	const res = await fetch(url, { headers: { accept: "application/vnd.npm.install-v1+json" } });
+	if (res.status === 404) return {};
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	const doc = (await res.json()) as { "dist-tags"?: Record<string, string> };
+	return doc["dist-tags"] ?? {};
+}
+
 const version = process.env.SURREAL_VERSION || (await workspaceVersion());
 const pkg = await packageFile.json();
 const { name } = pkg;
 
-// The dist-tag `npm install <pkg>` resolves this to. `--latest` is the release
-// pipeline's single is-this-the-latest decision (the same one behind latest.txt
-// and the GitHub release), so npm never disagrees with them: when set, this
-// version owns `latest`; otherwise a pre-release ships under its channel label
-// and a non-latest stable under a `v<major>.<minor>` maintenance tag, so neither
-// can displace `latest`. An explicit --channel overrides.
-const label = version.match(/-([0-9A-Za-z]+)/)?.[1];
-const channel =
-	values.channel ??
-	(values.latest ? "latest" : (label ?? `v${version.split(".").slice(0, 2).join(".")}`));
+// The dist-tag `npm install <pkg>` resolves this set to. `--latest` is the
+// release pipeline's single is-this-the-latest decision (the same one behind
+// latest.txt and the GitHub release), so npm never disagrees with them. The
+// candidates, in order, are `latest` (only with --latest), then this version's
+// own line: its pre-release label (alpha/beta/rc) or, for a stable release, a
+// `latest-<major>.<minor>` maintenance tag. The first whose current holder is
+// not newer than this version is used, and `backfill`, which nothing follows,
+// if none is, so publishing an older version after a newer one (a resumed
+// release, a patch to an older line) never moves a tag back. An explicit
+// --channel is used as given; ce-release.yml chooses it the same way.
+async function chooseTag(): Promise<string> {
+	if (values.channel) return values.channel;
+	const label = version.match(/-([0-9A-Za-z]+)/)?.[1];
+	const own = label ?? `latest-${version.split(".").slice(0, 2).join(".")}`;
+	let tags: Record<string, string>;
+	try {
+		tags = await distTags(name);
+	} catch (err) {
+		console.error(`❌ Could not read ${name}'s dist-tags (${err}), so which tag is safe to move is unknown.`);
+		process.exit(1);
+	}
+	for (const tag of values.latest ? ["latest", own] : [own]) {
+		const holder = tags[tag];
+		if (!holder || Bun.semver.order(holder, version) <= 0) return tag;
+		console.log(`ℹ️ ${name}@${tag} is ${holder}, newer than ${version}; not moving it.`);
+	}
+	return "backfill";
+}
+const channel = await chooseTag();
 
 console.log(`✨ Publishing ${name} as version ${version} (tag ${channel})`);
 

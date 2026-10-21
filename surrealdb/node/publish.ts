@@ -61,7 +61,7 @@ if (!(await packageFile.exists())) {
  * registry hiccup.
  */
 async function isPublished(pkgName: string, pkgVersion: string): Promise<boolean> {
-	const url = `https://registry.npmjs.org/${pkgName.replace("/", "%2F")}`;
+	const url = `https://registry.npmjs.org/${pkgName.replaceAll("/", "%2F")}`;
 	let res: Response;
 	try {
 		res = await fetch(url, { headers: { accept: "application/vnd.npm.install-v1+json" } });
@@ -81,6 +81,21 @@ async function isPublished(pkgName: string, pkgVersion: string): Promise<boolean
 		console.warn(`⚠️ Could not read the registry response for ${pkgName} (${err}); proceeding with publish.`);
 		return false;
 	}
+}
+
+/**
+ * The package's dist-tags on the registry, `{}` for a package not yet
+ * published. Unlike `isPublished`, this throws on any other failure: the tag
+ * chosen from its answer may be one users follow, so an unknown answer must not
+ * read as "no tags".
+ */
+async function distTags(pkgName: string): Promise<Record<string, string>> {
+	const url = `https://registry.npmjs.org/${pkgName.replaceAll("/", "%2F")}`;
+	const res = await fetch(url, { headers: { accept: "application/vnd.npm.install-v1+json" } });
+	if (res.status === 404) return {};
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	const doc = (await res.json()) as { "dist-tags"?: Record<string, string> };
+	return doc["dist-tags"] ?? {};
 }
 
 /** One staged per-platform package: its npm name and the directory to publish. */
@@ -195,15 +210,16 @@ async function stagePlatformPackages(version: string): Promise<PlatformPackage[]
 }
 
 /**
- * Publish one package, tolerating a version that is already on the registry.
+ * Publish one package under `tag`, tolerating a version that is already on the
+ * registry.
  *
  * `target` is a packed tarball or a directory npm packs itself. Returns the
  * exit code, with an already-published version reported as success: a
  * concurrent or prior run may have landed it between the check and the publish,
  * the same way crate publishing tolerates an already-uploaded crate.
  */
-async function publishPackage(name: string, version: string, target: string): Promise<number> {
-	const cmd = ["npm", "publish", target, "--access", "public", "--tag", channel];
+async function publishPackage(name: string, version: string, target: string, tag: string): Promise<number> {
+	const cmd = ["npm", "publish", target, "--access", "public", "--tag", tag];
 
 	if (values.provenance) {
 		cmd.push("--provenance");
@@ -213,7 +229,7 @@ async function publishPackage(name: string, version: string, target: string): Pr
 		cmd.push("--dry-run");
 	}
 
-	console.log(`🚀 Publishing ${name}@${version} to ${channel} in NPM...`);
+	console.log(`🚀 Publishing ${name}@${version} to ${tag} in NPM...`);
 
 	const code = await Bun.spawn(cmd, { stdout: "inherit", stderr: "inherit" }).exited;
 
@@ -244,15 +260,38 @@ async function restoreManifest(): Promise<void> {
 
 // The dist-tag `npm install <pkg>` resolves this set to. `--latest` is the
 // release pipeline's single is-this-the-latest decision (the same one behind
-// latest.txt and the GitHub release), so npm never disagrees with them: when
-// set, this version owns `latest`; otherwise a pre-release ships under its
-// channel label and a non-latest stable under a `v<major>.<minor>` maintenance
-// tag, so neither can displace `latest`. An explicit --channel overrides.
-// Applied to the platform packages too, so the whole set moves in lockstep.
+// latest.txt and the GitHub release), so npm never disagrees with them. The
+// candidates, in order, are `latest` (only with --latest), then this version's
+// own line: its pre-release label (alpha/beta/rc) or, for a stable release, a
+// `latest-<major>.<minor>` maintenance tag; an explicit --channel (ce-release.yml
+// chooses it the same way) is the only candidate. Each package, root and
+// platform alike, is published under the first candidate whose current holder
+// in that package is not newer than this version, and under `backfill`, which
+// nothing follows, if none is. So publishing an older version after a newer
+// one (a resumed release, a patch to an older line) never moves a tag back,
+// including on a platform package a newer release published before it
+// stopped short of the root.
 const label = version.match(/-([0-9A-Za-z]+)/)?.[1];
-const channel =
-	values.channel ??
-	(values.latest ? "latest" : (label ?? `v${version.split(".").slice(0, 2).join(".")}`));
+const own = label ?? `latest-${version.split(".").slice(0, 2).join(".")}`;
+const candidates = values.channel ? [values.channel] : values.latest ? ["latest", own] : [own];
+
+async function tagFor(pkgName: string): Promise<string> {
+	let tags: Record<string, string>;
+	try {
+		tags = await distTags(pkgName);
+	} catch (err) {
+		console.error(`❌ Could not read ${pkgName}'s dist-tags (${err}), so which tag is safe to move is unknown.`);
+		process.exit(1);
+	}
+	for (const tag of candidates) {
+		if (tag === "backfill") return tag;
+		const holder = tags[tag];
+		if (!holder || Bun.semver.order(holder, version) <= 0) return tag;
+		console.log(`ℹ️ ${pkgName}@${tag} is ${holder}, newer than ${version}; not moving it.`);
+	}
+	return "backfill";
+}
+const channel = await tagFor(name);
 
 console.log(`✨ Publishing ${name} as version ${version} (tag ${channel})`);
 
@@ -269,7 +308,13 @@ if (values["dry-run"]) {
 	console.log("🔍 Preparing dry run release...");
 }
 
-const platforms = await stagePlatformPackages(version);
+const staged = await stagePlatformPackages(version);
+// Every tag is chosen before the manifest below is rewritten, so a registry
+// failure leaves nothing to restore.
+const platforms: (PlatformPackage & { tag: string })[] = [];
+for (const platform of staged) {
+	platforms.push({ ...platform, tag: await tagFor(platform.name) });
+}
 
 pkg.version = version;
 // The binaries are staged as copies, so the root package excludes them by
@@ -294,7 +339,7 @@ for (const platform of platforms) {
 		continue;
 	}
 
-	const code = await publishPackage(platform.name, version, platform.dir);
+	const code = await publishPackage(platform.name, version, platform.dir, platform.tag);
 
 	if (code !== 0) {
 		console.error(
@@ -324,7 +369,7 @@ if (packCode !== 0) {
 	process.exit(packCode);
 }
 
-const publishCode = await publishPackage(name, version, `${safeName}-${version}.tgz`);
+const publishCode = await publishPackage(name, version, `${safeName}-${version}.tgz`, channel);
 
 // Packing is done, so the manifest has served its purpose whether or not the
 // publish itself succeeded.

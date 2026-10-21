@@ -1,14 +1,23 @@
 name: 'Determine latest release pointer'
 description: >-
-  Determine latest release pointer.
-  Extracted verbatim from release.yml. The interface is the ENV VARS set
-  on the calling step (they propagate into this composite step's process
-  environment); see the call site in release.yml for the exact set.
+  Answers, from one read of the repository's published GitHub releases, whether
+  VERSION is the newest stable release overall (`latest`), on its major line
+  (`latest-major`) and on its major.minor line (`latest-minor`). Only a stable
+  engine release can be any of them. Inputs are the calling step's environment:
+  VERSION (X.Y.Z, or X.Y.Z-<pre>); RELEASE_ENGINE ('true' when the release
+  ships the engine); NIGHTLY ('true' for a nightly); GH_TOKEN (reads the
+  releases). A failed read fails the step rather than guess.
 
 outputs:
   latest:
-    description: 'latest (see step body)'
+    description: "'true' when no published stable release is newer than VERSION"
     value: ${{ steps.latest.outputs.latest }}
+  latest-major:
+    description: "'true' when no published stable release on VERSION's major line is newer than VERSION"
+    value: ${{ steps.latest.outputs.latest-major }}
+  latest-minor:
+    description: "'true' when no published stable release on VERSION's major.minor line is newer than VERSION"
+    value: ${{ steps.latest.outputs.latest-minor }}
 
 runs:
   using: 'composite'
@@ -19,6 +28,8 @@ runs:
       run: |
         set -euo pipefail
         latest=false
+        latest_major=false
+        latest_minor=false
         # Only a stable ENGINE release can ever own `latest`.
         if [[ "$RELEASE_ENGINE" == "true" && "$NIGHTLY" != "true" && "$VERSION" != *-* ]]; then
           # Collect every publicly released STABLE version (non-draft,
@@ -41,16 +52,25 @@ runs:
             (( n < 100 )) && break
             page=$(( page + 1 ))
           done
-          # Highest of {published stables} ∪ {this version}: normalise tags
-          # (vX.Y.Z -> X.Y.Z), keep only stable triples, version-sort. If the max
-          # is this version, this release becomes (or, on a re-release, remains)
-          # latest; if a strictly-higher stable exists, it does not.
-          highest=$(
+          # The published stable triples (vX.Y.Z -> X.Y.Z) plus this version.
+          stables=$(
             { printf '%s\n' "$published" \
                 | sed -n 's/^v\{0,1\}\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$/\1/p'
               printf '%s\n' "$VERSION"; } \
-              | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
-          [[ "$highest" == "$VERSION" ]] && latest=true
+              | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$')
+          # The highest of them starting with $1. When it is this version, this
+          # release is (or, on a re-release, remains) the newest there; when a
+          # strictly higher stable exists, it is not.
+          highest() {
+            awk -v line="$1" 'substr($0, 1, length(line)) == line' <<<"$stables" | sort -V | tail -n1
+          }
+          [[ "$(highest "")" == "$VERSION" ]] && latest=true
+          [[ "$(highest "$(cut -d. -f1 <<<"$VERSION").")" == "$VERSION" ]] && latest_major=true
+          [[ "$(highest "$(cut -d. -f1,2 <<<"$VERSION").")" == "$VERSION" ]] && latest_minor=true
         fi
-        echo "Computed latest=${latest} (version=${VERSION}, engine=${RELEASE_ENGINE}, nightly=${NIGHTLY})."
-        echo "latest=${latest}" >> "$GITHUB_OUTPUT"
+        echo "Computed latest=${latest}, latest-major=${latest_major}, latest-minor=${latest_minor} (version=${VERSION}, engine=${RELEASE_ENGINE}, nightly=${NIGHTLY})."
+        {
+          echo "latest=${latest}"
+          echo "latest-major=${latest_major}"
+          echo "latest-minor=${latest_minor}"
+        } >> "$GITHUB_OUTPUT"

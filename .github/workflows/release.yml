@@ -835,7 +835,12 @@ jobs:
     # Empty string => no environment (no gate) for dry-runs; the channel
     # environment (with its reviewers) only binds on a real publish.
     environment: ${{ needs.prepare-vars.outputs.publish == 'true' && needs.prepare-vars.outputs.release-name || '' }}
-    runs-on: ubuntu-latest
+    # Private runner: binding the version writes the private release bucket
+    # with the runner's ambient IAM role.
+    runs-on: ${{ vars.RUNNER_AMD }}
+    permissions:
+      contents: read
+      actions: read
     steps:
       # The pre-approval facts are in summarize-pending-release; this step runs
       # only once the gate clears, so it records that the release was approved.
@@ -843,6 +848,42 @@ jobs:
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
+
+      - name: Checkout the release scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      # Runs dispatched with different git-sha inputs are not serialized by
+      # this workflow's concurrency, and ce-release.yml releases the same
+      # engine versions; this keeps two releasing one engine version from both
+      # claiming it below. ce-release.yml's approval job makes the same check
+      # against this workflow.
+      - name: Refuse to publish alongside another release of this version
+        if: ${{ needs.prepare-vars.outputs.publish == 'true' && needs.prepare-vars.outputs.nightly-release != 'true' && needs.prepare-vars.outputs.release-engine == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NAME: ${{ needs.prepare-vars.outputs.name }}
+        run: |
+          set -euo pipefail
+          bash .github/scripts/release-publishing.sh release.yml "${NAME}"
+          bash .github/scripts/release-publishing.sh ce-release.yml "${NAME}"
+
+      # See the script: refuses an engine version that completed while this run
+      # waited (unless overwriting), and from here on releases it from this
+      # commit only, whichever workflow resumes it. Same scope as the engine
+      # overwrite guard. A dry-run checks and writes no binding.
+      - name: Claim the engine version for the released commit
+        if: ${{ needs.prepare-vars.outputs.nightly-release != 'true' && needs.prepare-vars.outputs.release-engine == 'true' }}
+        env:
+          NAME: ${{ needs.prepare-vars.outputs.name }}
+          GIT_SHA: ${{ needs.prepare-vars.outputs.git-sha }}
+          PUBLISH: ${{ needs.prepare-vars.outputs.publish }}
+          OVERWRITE: ${{ inputs.overwrite }}
+          BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
+          AWS_REGION: us-east-1
+        run: bash .github/scripts/claim-release-version.sh
 
       - name: Record approval
         run: echo "✅ Release ${{ needs.prepare-vars.outputs.name }} (${{ needs.prepare-vars.outputs.release-name }}) approved - publishing begins." >> "$GITHUB_STEP_SUMMARY"
@@ -994,6 +1035,11 @@ jobs:
     # GitHub-hosted: npm trusted publishing (OIDC) rejects self-hosted runners, and
     # this job needs no bucket access — it consumes the staged artifact.
     runs-on: ubuntu-latest
+    # Takes turns with every other release's job that moves the same shared
+    # pointer, ce-release.yml's included (see ce-release.yml).
+    concurrency:
+      group: publish-npm-${{ matrix.slot }}${{ needs.prepare-vars.outputs.publish != 'true' && format('-dryrun-{0}', github.run_id) || '' }}
+      cancel-in-progress: false
     continue-on-error: ${{ needs.prepare-vars.outputs.publish != 'true' }}
     permissions:
       contents: read
@@ -1091,6 +1137,13 @@ jobs:
     permissions:
       contents: write
     needs: [prepare-vars, approve, publish-crates]
+    # Takes turns with every other release's job that moves the same shared
+    # pointer, ce-release.yml's included (see ce-release.yml).
+    concurrency:
+      group: publish-pointers${{ needs.prepare-vars.outputs.publish != 'true' && format('-dryrun-{0}', github.run_id) || '' }}
+      cancel-in-progress: false
+    outputs:
+      latest: ${{ steps.owns.outputs.latest }}
     # Engine side only: binaries/GitHub release/download pointers are not
     # produced for a downstream-only release.
     if: ${{ needs.prepare-vars.outputs.release-engine == 'true' }}
@@ -1123,6 +1176,32 @@ jobs:
           sparse-checkout-cone-mode: false
           path: .ci
 
+      # A nightly whose commit is not ahead of the published nightly's
+      # publishes nothing. promote-binaries then records this one's commit
+      # before it writes anything public: the release manifest it writes to
+      # releases/nightly/release.json is the record (.sha) the script reads.
+      - name: Check the nightly only moves forward
+        if: ${{ needs.prepare-vars.outputs.nightly-release == 'true' }}
+        env:
+          BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
+          AWS_REGION: us-east-1
+          GIT_SHA: ${{ needs.prepare-vars.outputs.git-sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: bash .ci/.github/scripts/nightly-record.sh check
+
+      # prepare-vars decided `latest` before the gate; a newer stable, from
+      # either release workflow, may have been published since. Re-derived
+      # here, where every release's pointer updates take turns, so an older
+      # release cannot take the latest flag or latest.txt back.
+      - name: Re-check that this release owns latest
+        id: owns
+        env:
+          VERSION: ${{ needs.prepare-vars.outputs.version }}
+          RELEASE_ENGINE: ${{ needs.prepare-vars.outputs.release-engine }}
+          NIGHTLY: ${{ needs.prepare-vars.outputs.nightly-release }}
+          GH_TOKEN: ${{ github.token }}
+        uses: ./.ci/.github/actions/determine-latest-pointer
+
       - name: Promote binaries
         uses: ./.ci/.github/actions/promote-binaries
         with:
@@ -1135,7 +1214,7 @@ jobs:
           release-name: ${{ needs.prepare-vars.outputs.release-name }}
           publish: ${{ needs.prepare-vars.outputs.publish }}
           create-release: ${{ needs.prepare-vars.outputs.publish == 'true' && needs.prepare-vars.outputs.nightly-release != 'true' }}
-          latest: ${{ needs.prepare-vars.outputs.latest }}
+          latest: ${{ steps.owns.outputs.latest }}
           git-ref: ${{ needs.prepare-vars.outputs.git-sha }}
           aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
@@ -1162,6 +1241,11 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    # Takes turns with every other release's job that moves the same shared
+    # pointer, ce-release.yml's included (see ce-release.yml).
+    concurrency:
+      group: publish-docker${{ matrix.tag-suffix }}${{ needs.prepare-vars.outputs.publish != 'true' && format('-dryrun-{0}', github.run_id) || '' }}
+      cancel-in-progress: false
     strategy:
       fail-fast: false
       matrix:
@@ -1185,7 +1269,66 @@ jobs:
           tag_prefix=$(echo '${{ needs.prepare-vars.outputs.name }}' | sed 's/[^a-zA-Z0-9_.-]/-/g' | tr '[:upper:]' '[:lower:]')
           echo "tag-prefix=${tag_prefix}" >> "$GITHUB_OUTPUT"
 
+      # `:latest` follows the GitHub release promote marked latest, re-read
+      # here, where each image's mirrors take turns: a newer release may have
+      # become latest since.
+      - name: Re-check that this release is latest
+        id: owns
+        env:
+          LATEST: ${{ needs.promote.outputs.latest }}
+          PUBLISH: ${{ needs.prepare-vars.outputs.publish }}
+          VERSION: ${{ needs.prepare-vars.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          latest="${LATEST}"
+          if [[ "${latest}" == true && "${PUBLISH}" == true ]]; then
+            if ! current=$(curl -fsS --retry 3 --retry-delay 2 \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases/latest" | jq -r '.tag_name'); then
+              echo "::error::Could not read the latest GitHub release."
+              exit 1
+            fi
+            if [[ "${current}" != "v${VERSION}" ]]; then
+              echo "::notice::${current} has become latest since this release was promoted; not moving the latest tag."
+              latest=false
+            fi
+          fi
+          echo "latest=${latest}" >> "$GITHUB_OUTPUT"
+
+      # `:<major>` and `:<major>.<minor>` name the newest stable on their line,
+      # so an older release published after a newer one on the same line
+      # leaves them where they are. Read here too.
+      - name: Check this release is the newest on its lines
+        id: line
+        env:
+          VERSION: ${{ needs.prepare-vars.outputs.version }}
+          RELEASE_ENGINE: ${{ needs.prepare-vars.outputs.release-engine }}
+          NIGHTLY: ${{ needs.prepare-vars.outputs.nightly-release }}
+          GH_TOKEN: ${{ github.token }}
+        uses: ./.github/actions/determine-latest-pointer
+
+      # A nightly moves the nightly tags only while it is still the newest
+      # nightly promoted (see the script).
+      - name: Check this is still the newest nightly
+        id: nightly
+        env:
+          NIGHTLY: ${{ needs.prepare-vars.outputs.nightly-release }}
+          PUBLISH: ${{ needs.prepare-vars.outputs.publish }}
+          GIT_SHA: ${{ needs.prepare-vars.outputs.git-sha }}
+          BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
+          AWS_REGION: us-east-1
+        run: |
+          set -euo pipefail
+          current=true
+          if [[ "${NIGHTLY}" == true && "${PUBLISH}" == true ]]; then
+            current=$(bash .github/scripts/nightly-record.sh current)
+          fi
+          echo "current=${current}" >> "$GITHUB_OUTPUT"
+
       - name: Mirror Docker image
+        if: ${{ steps.nightly.outputs.current == 'true' }}
         uses: ./.github/actions/mirror-docker
         with:
           dry-run: ${{ needs.prepare-vars.outputs.publish != 'true' }}
@@ -1195,7 +1338,9 @@ jobs:
           tag-prefix: ${{ steps.tag.outputs.tag-prefix }}
           tag-suffix: ${{ matrix.tag-suffix }}
           environment: ${{ needs.prepare-vars.outputs.release-name }}
-          latest: ${{ needs.prepare-vars.outputs.latest }}
+          latest: ${{ steps.owns.outputs.latest }}
+          major-tag: ${{ steps.line.outputs.latest-major }}
+          minor-tag: ${{ steps.line.outputs.latest-minor }}
           dest-repo: surrealdb/surrealdb
           oidc-connection-id: ${{ vars.DOCKERHUB_OIDC_CONNECTION_ID }}
 
@@ -1579,6 +1724,11 @@ jobs:
     if: ${{ needs.prepare-vars.outputs.release-engine == 'true' }}
     needs: [prepare-vars, approve, promote]
     runs-on: ubuntu-latest
+    # Takes turns with every other release's job that moves the same shared
+    # pointer, ce-release.yml's included (see ce-release.yml).
+    concurrency:
+      group: publish-propagate${{ needs.prepare-vars.outputs.publish != 'true' && format('-dryrun-{0}', github.run_id) || '' }}
+      cancel-in-progress: false
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -2085,7 +2235,7 @@ jobs:
       ${{ always() && github.repository == vars.PRIVATE_ENGINE_REPO
       && inputs.release-type == 'versioned'
       && needs.prepare-vars.result == 'success'
-      && needs.prepare-vars.outputs.latest == 'true'
+      && needs.promote.outputs.latest == 'true'
       && needs.promote.result == 'success'
       && ((needs.prepare-vars.outputs.publish == 'true' && needs.propagate.result == 'success')
           || (needs.prepare-vars.outputs.publish != 'true' && (needs.propagate.result == 'success' || needs.propagate.result == 'skipped'))) }}
@@ -2097,6 +2247,11 @@ jobs:
     outputs:
       pr-url: ${{ steps.open-pr.outputs.pr-url }}
       merged: ${{ steps.open-pr.outputs.merged }}
+    # Takes turns with every other release's job that moves the same shared
+    # pointer, ce-release.yml's included (see ce-release.yml).
+    concurrency:
+      group: publish-homebrew${{ needs.prepare-vars.outputs.publish != 'true' && format('-dryrun-{0}', github.run_id) || '' }}
+      cancel-in-progress: false
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -2111,14 +2266,24 @@ jobs:
           # gating on the id would run the token mint without a key and hard-fail
           # instead of no-opping. Matches downstream-compat.yml.
           HAS_APP: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY != '' }}
+          PUBLISH: ${{ needs.prepare-vars.outputs.publish }}
+          VERSION: ${{ needs.prepare-vars.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        # Also skips when a newer release has become latest since promote,
+        # checked here, where every release's formula bump takes turns.
         run: |
           set -euo pipefail
-          if [[ "${HAS_APP}" == "true" ]]; then
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=false" >> "$GITHUB_OUTPUT"
+          configured="${HAS_APP}"
+          if [[ "${HAS_APP}" != "true" ]]; then
             echo "::notice title=Update Homebrew tap::Not configured (release App secrets absent) — skipping."
+          elif [[ "${PUBLISH}" == "true" ]]; then
+            current=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name')
+            if [[ "${current}" != "v${VERSION}" ]]; then
+              echo "::notice title=Update Homebrew tap::${current} has become latest since this release was promoted; skipping."
+              configured=false
+            fi
           fi
+          echo "configured=${configured}" >> "$GITHUB_OUTPUT"
 
       - name: Generate a token for the Homebrew tap
         id: app-token

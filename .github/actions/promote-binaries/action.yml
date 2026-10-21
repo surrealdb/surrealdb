@@ -234,6 +234,9 @@ runs:
     # keys configured below are for the public download bucket only. Unlike the
     # rolling manifest, this lives under releases/<name>/ and is never pruned, so
     # the engine + downstream commits a release shipped from stay recoverable.
+    # For the nightly it is also the record that keeps the nightly channel from
+    # moving back: .github/scripts/nightly-record.sh reads the commit at .sha in
+    # releases/nightly/release.json, so that key and field must stay.
     - name: Publish release manifest (private bucket)
       if: ${{ inputs.publish == 'true' }}
       shell: bash

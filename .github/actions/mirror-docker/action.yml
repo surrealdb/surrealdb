@@ -38,6 +38,20 @@ inputs:
       which follows the downstream tag convention (<name> + optional :latest only).
     required: false
     default: 'true'
+  major-tag:
+    description: >-
+      Whether a stable release that gets the extra stable tags moves :<major>.
+      False when a newer stable on the same major line is already released, so
+      :<major> keeps naming the newest.
+    required: false
+    default: 'true'
+  minor-tag:
+    description: >-
+      Whether a stable release that gets the extra stable tags moves
+      :<major>.<minor>. False when a newer stable on the same minor line is
+      already released.
+    required: false
+    default: 'true'
   dry-run:
     description: 'Verify the source manifests in ECR and compute the public tags, but do not create/push anything on DockerHub'
     required: false
@@ -112,6 +126,8 @@ runs:
         LATEST: ${{ inputs.latest }}
         DEST_REPO: ${{ inputs.dest-repo }}
         EXTRA_STABLE_TAGS: ${{ inputs.extra-stable-tags }}
+        MAJOR_TAG: ${{ inputs.major-tag }}
+        MINOR_TAG: ${{ inputs.minor-tag }}
         DRY_RUN: ${{ inputs.dry-run }}
       run: |
         set -euo pipefail
@@ -135,7 +151,12 @@ runs:
         if [[ "$ENVIRONMENT" == "stable" && "${EXTRA_STABLE_TAGS}" == "true" ]]; then
           major=$(echo "$TAG_PREFIX" | cut -d. -f1)
           minor=$(echo "$TAG_PREFIX" | cut -d. -f2)
-          tags+=("${dest}:${major}.${minor}${TAG_SUFFIX}" "${dest}:${major}${TAG_SUFFIX}")
+          if [[ "${MINOR_TAG}" == "true" ]]; then
+            tags+=("${dest}:${major}.${minor}${TAG_SUFFIX}")
+          fi
+          if [[ "${MAJOR_TAG}" == "true" ]]; then
+            tags+=("${dest}:${major}${TAG_SUFFIX}")
+          fi
         fi
         if [[ "$LATEST" == "true" ]]; then
           tags+=("${dest}:latest${TAG_SUFFIX}")
