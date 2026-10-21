@@ -1,6 +1,7 @@
 /**
 [env]
 clean = true
+remote-exclusive = true
 
 [test]
 reason = "ALTER SYSTEM COMPATIBILITY sets the level a database created later takes when it names none, and leaves every existing database at its own; a database created implicitly takes it too, and a COMPATIBILITY clause overrides it."
