@@ -25,20 +25,6 @@ pub struct SurrealKvConfig {
 	pub vlog_threshold: usize,
 	/// The block cache capacity in bytes (default: dynamic based on memory)
 	pub block_cache_capacity: u64,
-	/// The maximum wait time in nanoseconds before forcing a grouped commit (default: 5ms).
-	/// This timeout ensures that transactions don't wait indefinitely under low concurrency and
-	/// balances commit latency against write throughput.
-	pub grouped_commit_timeout: u64,
-	/// Threshold for deciding whether to wait for more transactions (default: 12)
-	/// If the current batch size is greater or equal to this threshold (and below
-	/// SURREALKV_GROUPED_COMMIT_MAX_BATCH_SIZE), then the coordinator will wait up to
-	/// SURREALKV_GROUPED_COMMIT_TIMEOUT to collect more transactions. Smaller batches are flushed
-	/// immediately to preserve low latency.
-	pub grouped_commit_wait_threshold: usize,
-	/// The maximum number of transactions in a single grouped commit batch (default: 4096)
-	/// This prevents unbounded memory growth while still allowing large batches for efficiency.
-	/// Larger batches improve throughput but increase memory usage and commit latency.
-	pub grouped_commit_max_batch_size: usize,
 	/// The maximum memtable size in bytes before flushing to disk.
 	/// This is the arena of memory that holds recent writes. It bounds memtable residency, not
 	/// transaction size: a commit too large for the memtable is written directly to a level-0
@@ -94,9 +80,6 @@ impl Default for SurrealKvConfig {
 			vlog_max_file_size: default_log_file_size(),
 			vlog_threshold: (4 * KIB) as usize,
 			block_cache_capacity: default_block_cache_capacity(),
-			grouped_commit_timeout: Duration::from_millis(5).as_nanos() as u64,
-			grouped_commit_wait_threshold: 12,
-			grouped_commit_max_batch_size: 4096,
 			max_memtable_size: default_max_memtable_size(),
 		}
 	}
@@ -111,15 +94,6 @@ impl Config for SurrealKvConfig {
 			.parse_key("surrealkv_vlog_max_file_size", &mut self.vlog_max_file_size)
 			.parse_key("surrealkv_vlog_threshold", &mut self.vlog_threshold)
 			.parse_key("surrealkv_block_cache_capacity", &mut self.block_cache_capacity)
-			.parse_key("surrealkv_grouped_commit_timeout", &mut self.grouped_commit_timeout)
-			.parse_key(
-				"surrealkv_grouped_commit_wait_threshold",
-				&mut self.grouped_commit_wait_threshold,
-			)
-			.parse_key(
-				"surrealkv_grouped_commit_max_batch_size",
-				&mut self.grouped_commit_max_batch_size,
-			)
 			.parse_key("surrealkv_max_memtable_size", &mut self.max_memtable_size);
 
 		if map.has_key("datastore_sync") {
@@ -136,6 +110,20 @@ impl Config for SurrealKvConfig {
 				target: "surrealdb::core::kvs::surrealkv",
 				"The surrealkv_versioned_index setting has no effect and is ignored"
 			);
+		}
+		// SurrealKV groups the syncs of concurrent commits itself, so the grouped commit
+		// settings have no effect and are ignored the same way.
+		for key in [
+			"surrealkv_grouped_commit_timeout",
+			"surrealkv_grouped_commit_wait_threshold",
+			"surrealkv_grouped_commit_max_batch_size",
+		] {
+			if map.has_key(key) {
+				warn!(
+					target: "surrealdb::core::kvs::surrealkv",
+					"The {key} setting has no effect and is ignored"
+				);
+			}
 		}
 	}
 }

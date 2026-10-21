@@ -3,7 +3,6 @@
 
 mod background_flusher;
 mod cnf;
-mod commit_coordinator;
 mod snapshot;
 
 use std::sync::Arc;
@@ -13,7 +12,6 @@ use std::time::Duration;
 use background_flusher::BackgroundFlusher;
 use chrono::{DateTime, Utc};
 pub use cnf::SurrealKvConfig;
-use commit_coordinator::CommitCoordinator;
 use snapshot::SurrealKvSnapshot;
 use surrealdb_kvs::api::{BoxFut, GetMultiResult, KeysResult, ScanResult, Transactable};
 use surrealdb_kvs::config::SyncMode;
@@ -52,8 +50,10 @@ pub struct Datastore {
 	db: Tree,
 	/// Whether the datastore supports transaction versioning
 	versioned: bool,
-	/// Commit coordinator for batching transaction commits when sync=every
-	commit_coordinator: Option<Arc<CommitCoordinator>>,
+	/// Whether a commit is durable before it returns (sync=every)
+	sync: bool,
+	/// Set once shutdown has begun, after which no commit is applied
+	shutting_down: Arc<AtomicBool>,
 	/// Background flusher for periodically flushing WAL when sync=<interval>
 	background_flusher: Option<Arc<BackgroundFlusher>>,
 }
@@ -73,8 +73,10 @@ pub struct Transaction {
 	/// and the engine's savepoint stack cannot drift apart between the two.
 	/// Nothing acquires the pair in the opposite order, so they cannot deadlock.
 	savepoints: RwLock<SavepointStack>,
-	/// Commit coordinator for grouped fsync (when sync=every)
-	commit_coordinator: Option<Arc<CommitCoordinator>>,
+	/// Whether a commit is durable before it returns (sync=every)
+	sync: bool,
+	/// Set once the datastore has begun shutting down
+	shutting_down: Arc<AtomicBool>,
 }
 
 impl Transaction {
@@ -85,7 +87,12 @@ impl Transaction {
 		Ok(())
 	}
 
-	/// Commits the transaction, waiting for the grouped fsync when `sync`.
+	/// Commits the transaction, durably when `sync` and the datastore syncs every commit.
+	///
+	/// A durable commit is made visible to other transactions only once it is
+	/// synced: SurrealKV logs, syncs and only then publishes it, grouping the
+	/// syncs of concurrent commits. Syncing after a commit is visible would let
+	/// another transaction read a write that a crash then loses.
 	async fn commit_with(&self, sync: bool) -> Result<()> {
 		// Atomically mark transaction as done and check if it was already closed
 		if self.done.swap(true, Ordering::AcqRel) {
@@ -96,24 +103,33 @@ impl Transaction {
 			return Err(Error::TransactionReadonly);
 		}
 		// Refuse the commit before applying anything once the datastore
-		// has begun shutting down: the grouped fsync can no longer
-		// confirm durability, so no new commit should run past this
-		// point. Shutdown is treated as a controlled crash — the store
-		// is required to be consistent after any crash — so failing here
+		// has begun shutting down, so no new commit runs past this point.
+		// Shutdown is treated as a controlled crash — the store is
+		// required to be consistent after any crash — so failing here
 		// leaves the transaction un-applied and safely retryable.
-		if let Some(coordinator) = &self.commit_coordinator
-			&& coordinator.is_shutting_down()
-		{
+		if self.shutting_down.load(Ordering::Acquire) {
 			return Err(Error::Shutdown);
 		}
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
-		// Commit the transaction (writes to WAL)
-		inner.commit().await.map_err(kvs_error)?;
-		// If we have a coordinator, wait for the grouped fsync
-		if sync && let Some(coordinator) = &self.commit_coordinator {
-			coordinator.wait_for_sync().await?;
-		}
+		// An unsynced commit is visible before it is durable, which its caller accepts
+		inner.set_durability(if self.sync && sync {
+			Durability::Immediate
+		} else {
+			Durability::Eventual
+		});
+		// Commit the transaction, syncing the WAL before it is visible if durable.
+		// A shutdown can still close the tree after the check above, while this
+		// commit waits for its transaction or inside SurrealKV's commit pipeline,
+		// which then refuses it with `PipelineStall`. That is reported as
+		// `Error::Shutdown` too, so that callers treat the commit as interrupted
+		// by the shutdown rather than as failed.
+		inner.commit().await.map_err(|e| match e {
+			surrealkv::Error::PipelineStall if self.shutting_down.load(Ordering::Acquire) => {
+				Error::Shutdown
+			}
+			e => kvs_error(e),
+		})?;
 		// Continue
 		Ok(())
 	}
@@ -162,20 +178,18 @@ impl Datastore {
 		let db = builder.build().map_err(|e| Error::Datastore(e.to_string()))?;
 
 		// Create sync components based on sync mode
-		let (commit_coordinator, background_flusher) = match config.sync_mode {
+		let background_flusher = match config.sync_mode {
 			SyncMode::Every => {
 				info!(target: TARGET, "Sync mode: every transaction commit");
-				let coordinator = Arc::new(CommitCoordinator::new(db.clone(), &config)?);
-				(Some(coordinator), None)
+				None
 			}
 			SyncMode::Interval(interval) => {
 				info!(target: TARGET, "Sync mode: background syncing on interval ({}ms)", interval.as_millis());
-				let flusher = Arc::new(BackgroundFlusher::new(db.clone(), interval)?);
-				(None, Some(flusher))
+				Some(Arc::new(BackgroundFlusher::new(db.clone(), interval)?))
 			}
 			SyncMode::Never => {
 				info!(target: TARGET, "Sync mode: never (handled by the OS)");
-				(None, None)
+				None
 			}
 		};
 
@@ -183,20 +197,19 @@ impl Datastore {
 		Ok(Datastore {
 			db,
 			versioned: config.versioned,
-			commit_coordinator,
+			sync: matches!(config.sync_mode, SyncMode::Every),
+			shutting_down: Arc::new(AtomicBool::new(false)),
 			background_flusher,
 		})
 	}
 
 	/// Shutdown the database
 	pub async fn shutdown(&self) -> Result<()> {
+		// Refuse every commit that has not applied yet
+		self.shutting_down.store(true, Ordering::Release);
 		// Wait for the background flusher to finish
 		if let Some(background_flusher) = &self.background_flusher {
 			background_flusher.shutdown()?;
-		}
-		// Wait for the commit coordinator to finish
-		if let Some(commit_coordinator) = &self.commit_coordinator {
-			commit_coordinator.shutdown()?;
 		}
 		// Flush WAL before closing
 		if let Err(e) = self.db.flush_wal(true) {
@@ -213,14 +226,11 @@ impl Datastore {
 	/// Start a new transaction
 	pub async fn transaction(&self, write: TransactionType) -> Result<Box<dyn Transactable>> {
 		// Create a new transaction
-		let mut txn = match write {
+		let txn = match write {
 			TransactionType::Write => self.db.begin_with_mode(Mode::ReadWrite),
 			TransactionType::Read => self.db.begin_with_mode(Mode::ReadOnly),
 		}
 		.map_err(kvs_error)?;
-		// For sync=every mode, use Eventual durability and let coordinator handle fsync
-		// For sync=never/interval modes, also use Eventual (OS or background thread handles sync)
-		txn.set_durability(Durability::Eventual);
 		// Return the new transaction
 		Ok(Box::new(Transaction {
 			done: Arc::new(AtomicBool::new(false)),
@@ -228,7 +238,8 @@ impl Datastore {
 			versioned: self.versioned,
 			inner: Arc::new(RwLock::new(txn)),
 			savepoints: RwLock::new(SavepointStack::default()),
-			commit_coordinator: self.commit_coordinator.clone(),
+			sync: self.sync,
+			shutting_down: Arc::clone(&self.shutting_down),
 		}))
 	}
 }
@@ -338,9 +349,8 @@ impl Transactable for Transaction {
 		Box::pin(self.commit_with(true))
 	}
 
-	/// Commits the transaction without waiting for the grouped fsync. The
-	/// write-ahead log applies commits in order, so a later synced commit
-	/// makes this one durable with it.
+	/// Commits the transaction without syncing it. The write-ahead log applies
+	/// commits in order, so a later synced commit makes this one durable with it.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
 	fn commit_unsynced(&self) -> BoxFut<'_, Result<()>> {
 		Box::pin(self.commit_with(false))
