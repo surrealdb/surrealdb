@@ -183,11 +183,23 @@ async fn export_file(
 	chn: Sender<Vec<u8>>,
 	config: Option<DbExportConfig>,
 ) -> Result<(), Error> {
+	// A pre-flight refusal from the export - an unsupported config option, or a
+	// principal whose reads are permission checked and so may not receive a dump
+	// read with the authority of root - is raised before any chunk is sent and is
+	// the caller's to correct. `anyhow_to_types_error` preserves its structured
+	// kind, so a denied principal reaches the SDK as a not-allowed error rather
+	// than an internal one that reads as a server fault. A failure from the export
+	// job itself, handled below, carries no such kind and stays internal.
 	let res = match config {
 		Some(config) => {
-			kvs.export_with_config(sess, chn, config).await.map_err(std_error_to_types_error)?.await
+			kvs.export_with_config(sess, chn, config)
+				.await
+				.map_err(surrealdb_core::err::anyhow_to_types_error)?
+				.await
 		}
-		None => kvs.export(sess, chn).await.map_err(std_error_to_types_error)?.await,
+		None => {
+			kvs.export(sess, chn).await.map_err(surrealdb_core::err::anyhow_to_types_error)?.await
+		}
 	};
 
 	if let Err(error) = res {
@@ -1157,6 +1169,58 @@ mod live_query_tests {
 		assert!(
 			harness.engine.kill(harness.ctx, live).await.is_err(),
 			"the datastore still holds a subscription the kill was supposed to remove"
+		);
+	}
+}
+
+/// The embedded engine's export path, against a datastore that applies the
+/// permission gate.
+///
+/// A pre-flight refusal is raised before any chunk is sent, and `export_file`
+/// hands the resulting `surrealdb_types::Error` straight to the embedded SDK. It
+/// must keep the structured kind the gate chose, so a denied principal surfaces
+/// as a not-allowed error rather than an internal one the caller would retry.
+#[cfg(all(test, feature = "kv-mem", not(target_family = "wasm")))]
+mod export_tests {
+	use surrealdb_iam::{Actor, Auth, Level};
+
+	use super::*;
+
+	/// A roleless (RL:[]) database-level token: it clears the transport's
+	/// level-only `View` check, but its reads are permission checked, so it must
+	/// not receive a dump read with the authority of root.
+	fn roleless_session() -> Session {
+		Session {
+			au: Arc::new(Auth::new(Actor::new(
+				"token".to_owned(),
+				vec![],
+				Level::Database("test".to_owned(), "test".to_owned()),
+			))),
+			ns: Some("test".to_owned()),
+			db: Some("test".to_owned()),
+			..Session::default()
+		}
+	}
+
+	/// The refusal must reach the SDK as not-allowed, not as an internal error.
+	#[tokio::test]
+	async fn export_refusal_reaches_the_sdk_as_not_allowed() {
+		let kvs = Datastore::builder()
+			.with_auth(true)
+			.build_with_path("memory")
+			.await
+			.expect("an in-memory datastore should open");
+		let session = roleless_session();
+		let (tx, _rx) = async_channel::bounded::<Vec<u8>>(16);
+
+		let err = export_file(&kvs, &session, tx, None)
+			.await
+			.expect_err("a roleless database-level token must not export");
+
+		assert!(
+			err.is_not_allowed(),
+			"the export refusal must reach the SDK as not-allowed, got {}",
+			err.kind_str(),
 		);
 	}
 }

@@ -10,6 +10,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
+use surrealdb_iam::{Actor, Auth, Level, Role};
 use surrealdb_rpc::capabilities::Capabilities;
 use surrealdb_types::Value;
 
@@ -724,5 +725,52 @@ async fn grouping_follows_what_a_migration_step_makes_of_a_record() -> Result<()
 		widest < 40,
 		"rows an array of 401 entries is read from must group more tightly than one: {groups:?}"
 	);
+	Ok(())
+}
+
+/// `/export` reads the whole database with the authority of root and applies no
+/// table or field SELECT permission, so only a principal that bypasses record
+/// permissions at the database level may use it. A roleless database-level token
+/// passes the level-only `View` check the transport makes, but its reads are
+/// permission checked on `/sql`; it must not receive an unfiltered dump
+/// (GHSA-qh3v-rr48-x3cq). A database owner still exports.
+#[tokio::test]
+async fn export_refuses_a_permission_checked_principal() -> Result<()> {
+	let ds = ds_with_batch_size(None).await?;
+
+	// The advisory's vector: a roleless (RL:[]) database-level token.
+	let roleless = Session {
+		au: Arc::new(Auth::new(Actor::new(
+			"token".to_owned(),
+			vec![],
+			Level::Database("test".to_owned(), "test".to_owned()),
+		))),
+		ns: Some("test".to_owned()),
+		db: Some("test".to_owned()),
+		..Session::default()
+	};
+	let (tx, _rx) = surrealdb_core::channel::bounded::<Vec<u8>>(16);
+	let err = ds
+		.export(&roleless, tx)
+		.await
+		.err()
+		.expect("a roleless database-level token must not export");
+	// The refusal must classify as not-allowed on the wire, not as a bare internal
+	// error. Every transport reads this kind to pick its status (gRPC
+	// PERMISSION_DENIED, HTTP 403); an unclassified refusal would instead arrive as
+	// a retryable server fault. `anyhow_to_types_error` is the shared converter the
+	// transports apply, so asserting its verdict covers all of them.
+	let wire = surrealdb_core::err::anyhow_to_types_error(err);
+	assert!(
+		wire.is_not_allowed(),
+		"the export refusal must classify as not-allowed, got {}",
+		wire.kind_str(),
+	);
+
+	// A database owner bypasses record permissions and still exports.
+	let owner =
+		Session::for_level(Level::Database("test".to_owned(), "test".to_owned()), Role::Owner);
+	let (tx, _rx) = surrealdb_core::channel::bounded::<Vec<u8>>(16);
+	assert!(ds.export(&owner, tx).await.is_ok(), "a database owner must still be able to export",);
 	Ok(())
 }

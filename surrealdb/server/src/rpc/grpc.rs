@@ -2080,17 +2080,19 @@ impl GrpcService {
 			)
 			.map_err(|err| Status::permission_denied(err.to_string()))?;
 		let (sender, chunks) = surrealdb::channel::bounded(1);
-		// A config the export cannot honour is refused here, before any chunk is
-		// sent, and it is the caller's to correct — so a structured error keeps its
-		// classification instead of arriving as `INTERNAL`, which reads as a server
-		// fault worth retrying.
-		let task =
-			self.kvs().export_with_config(&session, sender, config).await.map_err(|err| {
-				match err.downcast_ref::<TypesError>() {
-					Some(err) => to_status(err),
-					None => Status::internal(err.to_string()),
-				}
-			})?;
+		// A pre-flight refusal from the export - an unsupported config option, or a
+		// principal whose reads are permission checked and so may not receive a
+		// root-authority dump - is the caller's to correct and is raised before any
+		// chunk is sent. Converting it with `types_error_from_anyhow` preserves the
+		// structured kind so `to_status` reports the matching status (an unsupported
+		// option as INVALID_ARGUMENT, a denied principal as PERMISSION_DENIED) rather
+		// than collapsing every refusal to INTERNAL, which reads as a server fault
+		// worth retrying.
+		let task = self
+			.kvs()
+			.export_with_config(&session, sender, config)
+			.await
+			.map_err(|err| to_status(&types_error_from_anyhow(err)))?;
 		Ok(Export {
 			chunks,
 			outcome: tokio::spawn(task),

@@ -7764,6 +7764,27 @@ impl Datastore {
 		}
 		// Retrieve the provided NS and DB
 		let (ns, db) = crate::iam::check::check_ns_db(sess)?;
+		// The dump is read with the authority of root and applies no table or
+		// field SELECT permission (see the frame below), so a caller whose reads
+		// are permission checked on `/sql` must not receive an export through it:
+		// the level-only `View` check the transport makes admits a roleless
+		// database- or namespace-level token, which `/sql` would still filter.
+		// Only a principal that bypasses record permissions at this level - a
+		// role at or above the database - may export (GHSA-qh3v-rr48-x3cq).
+		if crate::exec::permission::action_is_checked(
+			self.auth_enabled,
+			&sess.au,
+			Action::View,
+			Some(ns.as_str()),
+			Some(db.as_str()),
+		) {
+			return Err(Error::from(PolicyError::NotAllowed {
+				actor: sess.au.id().to_string(),
+				action: Action::View.to_string(),
+				resource: format!("the `{ns}`/`{db}` database export"),
+			})
+			.into());
+		}
 		// Create a new readonly transaction
 		let txn = Arc::new(self.transaction(Read).await?);
 		let batch_size = self.config.datastore.export_batch_size;
