@@ -556,11 +556,14 @@ fn fresh_state(
 	Ok(running)
 }
 
-/// Run a `THEN` repair: host pipeline `clause` running it, in the frame the
-/// purge evaluates it in — permissions off, `$reference` the deleted record,
-/// one level deeper — with the referencing record's id as the current value. A
-/// `RETURN` out of it finishes the repair; a `BREAK` or `CONTINUE` has no loop
-/// to leave.
+/// Run a `THEN` repair: host pipeline `clause`, with the referencing record's
+/// id as the current value, `$reference` the deleted record, and one level
+/// deeper. The repair is a user-supplied expression, so it runs under the
+/// deleting caller's own permissions
+/// ([`ExecutionContext::with_caller_perms`]), not the referential-integrity
+/// suppression the cascade mechanics run under: the record cleanup those
+/// mechanics perform is system-internal, the expression is not. A `RETURN` out
+/// of it finishes the repair; a `BREAK` or `CONTINUE` has no loop to leave.
 async fn custom(
 	program: &Program,
 	clause: u16,
@@ -570,7 +573,7 @@ async fn custom(
 ) -> FlowResult<()> {
 	let exec = held_exec(state)?;
 	let frame = exec
-		.with_perms_suppressed(true)
+		.with_caller_perms()
 		.with_params([(purge::REFERENCE, Value::from(rid.clone()))])
 		.dive()
 		.map_err(|err| purge::wrap(rid, ControlFlow::Err(err)))?;
