@@ -18,8 +18,9 @@ use tracing::info;
 const TARGET: &str = "surrealdb::core::kvs::mem";
 
 use surrealdb_kvs::api::{
-	BoxFut, GetMultiResult, KeySpan, KeyValSpan, KeyVisitor, KeysBatch, KeysResult, ScanChunkStats,
-	ScanCursorKeys, ScanCursorVals, ScanResult, Transactable, ValVisitor, ValsBatch,
+	BoxFut, GetMultiResult, KeySpan, KeyValSpan, KeyVisitor, KeysBatch, KeysResult,
+	RangeKeyVisitor, ScanChunkStats, ScanCursorKeys, ScanCursorVals, ScanResult, Transactable,
+	ValVisitor, ValsBatch,
 };
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_kvs::config::{AolMode, SnapshotMode, SyncMode};
@@ -250,6 +251,13 @@ impl Transactable for Transaction {
 	/// the conflict set; a serializable-snapshot-isolation commit validates everything read.
 	fn plain_reads_tracked(&self) -> bool {
 		self.serializable
+	}
+
+	/// One acquisition of the transaction's lock serves every range of
+	/// [`Transactable::visit_key_ranges`], and `getm` reads all its keys under one acquisition, so
+	/// a batch pays the lock once where the same reads one by one pay each.
+	fn multi_read(&self) -> bool {
+		true
 	}
 
 	/// Cancels the transaction.
@@ -676,6 +684,56 @@ impl Transactable for Transaction {
 				inner.keys_iter(beg.into_inner()..end.into_inner()).map_err(kvs_error)?;
 			// Consume the iterator
 			Ok(consume_keys(&mut iter, limit, skip))
+		})
+	}
+
+	/// Visit the keys of each range under one acquisition of the transaction's lock, one key
+	/// iterator per range as [`Self::keys`] reads each range, each key borrowed from the iterator.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(
+			level = "trace",
+			target = "surrealdb::core::kvs::api",
+			skip(self, ranges, f)
+		)
+	)]
+	fn visit_key_ranges<'a>(
+		&'a self,
+		ranges: &'a [KeyRange<'a>],
+		limit: u32,
+		version: Option<u64>,
+		f: &'a mut dyn RangeKeyVisitor,
+	) -> BoxFut<'a, Result<ScanChunkStats>> {
+		Box::pin(async move {
+			// The memory backend does not support versioned queries.
+			if version.is_some() {
+				return Err(Error::UnsupportedVersionedQueries);
+			}
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			let mut stats = ScanChunkStats::default();
+			if limit == 0 || ranges.is_empty() {
+				return Ok(stats);
+			}
+			// Load the inner transaction once for every range
+			let inner = self.inner.read().await;
+			'ranges: for (at, rng) in ranges.iter().enumerate() {
+				let mut iter =
+					inner.keys_iter(rng.start.as_slice()..rng.end.as_slice()).map_err(kvs_error)?;
+				for _ in 0..limit {
+					let Some(key) = iter.next() else {
+						break;
+					};
+					stats.rows += 1;
+					stats.key_bytes += key.len() as u64;
+					if f(at, &key[..])?.is_break() {
+						break 'ranges;
+					}
+				}
+			}
+			Ok(stats)
 		})
 	}
 

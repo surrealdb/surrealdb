@@ -43,7 +43,9 @@ thread_local! {
 		const { std::cell::Cell::new(None) };
 }
 
-/// Whether the datastore offers reading many keys and ranges at once.
+/// Whether the datastore offers reading many keys and ranges at once. Asked only for a pipeline
+/// whose plain reads join no conflict set (`io::io_of`), so a window that reads ahead of the
+/// positions it serves widens no transaction's conflicts.
 pub(super) fn hops_offered(cx: &PhysCx<'_>) -> bool {
 	#[cfg(test)]
 	if let Some(forced) = FORCE_FRONTIER_HOPS.with(std::cell::Cell::get) {

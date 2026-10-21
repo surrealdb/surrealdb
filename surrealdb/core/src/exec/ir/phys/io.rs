@@ -951,11 +951,9 @@ mod tests {
 
 	#[tokio::test]
 	async fn a_datastore_that_does_not_batch_reads_gets_no_hop_window() {
-		for offered in [Some(false), None] {
-			let found =
-				hop_windows("SELECT ->knows->person FROM person", offered, Some(true), false).await;
-			assert!(found.iter().all(|window| !*window), "{offered:?}: {found:?}");
-		}
+		let found =
+			hop_windows("SELECT ->knows->person FROM person", Some(false), Some(true), false).await;
+		assert!(found.iter().all(|window| !*window), "{found:?}");
 	}
 
 	#[tokio::test]
@@ -1174,7 +1172,9 @@ mod tests {
 
 	#[tokio::test]
 	async fn a_datastore_that_does_not_batch_reads_gets_no_rows_window() {
+		super::frontier::FORCE_FRONTIER_HOPS.with(|pinned| pinned.set(Some(false)));
 		let planned = planned_request(SETUP, "SELECT ->knows->person AS f FROM person").await;
+		super::frontier::FORCE_FRONTIER_HOPS.with(|pinned| pinned.set(None));
 		let found: Vec<_> = PipelineDag::of(&planned.ir)
 			.nodes
 			.iter()

@@ -13,7 +13,9 @@ use background_flusher::BackgroundFlusher;
 use chrono::{DateTime, Utc};
 pub use cnf::SurrealKvConfig;
 use snapshot::SurrealKvSnapshot;
-use surrealdb_kvs::api::{BoxFut, GetMultiResult, KeysResult, ScanResult, Transactable};
+use surrealdb_kvs::api::{
+	BoxFut, GetMultiResult, KeysResult, RangeKeyVisitor, ScanChunkStats, ScanResult, Transactable,
+};
 use surrealdb_kvs::config::SyncMode;
 use surrealdb_kvs::err::{Error, Result};
 use surrealdb_kvs::snapshot::ViewCapabilities;
@@ -322,6 +324,13 @@ impl Transactable for Transaction {
 	/// A chunk read re-seeks the range and copies each entry out, which another task may do while
 	/// the caller runs its rows; each chunk takes the transaction's lock for its own length only.
 	fn scan_read_ahead(&self) -> bool {
+		true
+	}
+
+	/// One acquisition of the transaction's lock serves every range of
+	/// [`Transactable::visit_key_ranges`], and `getm` reads all its keys under one acquisition, so
+	/// a batch pays the lock once where the same reads one by one pay each.
+	fn multi_read(&self) -> bool {
 		true
 	}
 
@@ -835,6 +844,75 @@ impl Transactable for Transaction {
 			};
 			// Return result
 			Ok(res)
+		})
+	}
+
+	/// Visit the keys of each range under one acquisition of the transaction's lock, one iterator
+	/// per range, as [`Self::keys`] reads each range. The current state is read on the range
+	/// iterator, each key borrowed from it; a version is read on the history iterator through
+	/// [`history_forward`], its keys copied into one buffer reused across keys and ranges.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self, ranges, f))]
+	fn visit_key_ranges<'a>(
+		&'a self,
+		ranges: &'a [KeyRange<'a>],
+		limit: u32,
+		version: Option<u64>,
+		f: &'a mut dyn RangeKeyVisitor,
+	) -> BoxFut<'a, Result<ScanChunkStats>> {
+		Box::pin(async move {
+			// Versioned queries require a versioned datastore
+			self.ensure_versioned(version)?;
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			let mut stats = ScanChunkStats::default();
+			if limit == 0 || ranges.is_empty() {
+				return Ok(stats);
+			}
+			// Load the inner transaction once for every range
+			let inner = self.inner.read().await;
+			let mut buf = Vec::new();
+			'ranges: for (at, rng) in ranges.iter().enumerate() {
+				let (beg, end) = (rng.start.as_slice(), rng.end.as_slice());
+				let mut taken = 0u32;
+				match version {
+					Some(ts) => {
+						let mut iter = history_iter(&inner, beg, end)?;
+						iter.seek_first().map_err(kvs_error)?;
+						while taken < limit && history_forward(&mut iter, ts, &mut buf, None)? {
+							taken += 1;
+							stats.rows += 1;
+							stats.key_bytes += buf.len() as u64;
+							if f(at, &buf)?.is_break() {
+								break 'ranges;
+							}
+						}
+					}
+					None => {
+						let mut iter = inner.range(beg, end).map_err(kvs_error)?;
+						iter.seek_first().map_err(kvs_error)?;
+						while taken < limit && iter.valid() {
+							let flow = {
+								let key = iter.key();
+								let key = key.user_key();
+								stats.rows += 1;
+								stats.key_bytes += key.len() as u64;
+								f(at, key)?
+							};
+							taken += 1;
+							if flow.is_break() {
+								break 'ranges;
+							}
+							if taken == limit {
+								break;
+							}
+							iter.next().map_err(kvs_error)?;
+						}
+					}
+				}
+			}
+			Ok(stats)
 		})
 	}
 

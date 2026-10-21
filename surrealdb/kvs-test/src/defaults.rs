@@ -471,3 +471,147 @@ async fn visit_key_ranges_after_the_transaction_finished(b: &TestBackend) {
 }
 
 kvs_test!(visit_key_ranges_after_the_transaction_finished);
+
+/// A small deterministic generator, so a failing case reproduces.
+struct Lcg(u64);
+
+impl Lcg {
+	fn below(&mut self, n: usize) -> usize {
+		self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+		((self.0 >> 33) as usize) % n
+	}
+}
+
+/// Random well-formed ranges over `c0000..` keys, overlapping ones and empty ones included.
+fn random_ranges(rng: &mut Lcg, n: usize, span_of: usize) -> Vec<(Vec<u8>, Vec<u8>)> {
+	(0..n)
+		.map(|_| {
+			let (a, b) = (rng.below(span_of + 10), rng.below(span_of + 10));
+			let (a, b) = (a.min(b), a.max(b));
+			(format!("c{a:04}").into_bytes(), format!("c{b:04}").into_bytes())
+		})
+		.collect()
+}
+
+/// What `visit_key_ranges` hands out equals what `keys` reads range by range at the same limit,
+/// for random, overlapping and empty ranges, several limits, and a `Break` at every position
+/// (which ends the whole read after the key it was returned for).
+async fn assert_visit_matches_keys(tx: &dyn Transactable, version: Option<u64>) {
+	let mut rng = Lcg(7);
+	for round in 0..20 {
+		let count = 1 + rng.below(5);
+		let raw = random_ranges(&mut rng, count, 60);
+		let ranges: Vec<KeyRange<'_>> = raw.iter().map(|(a, b)| span(a, b)).collect();
+		for limit in [1u32, 2, 5, 1000] {
+			let mut expected = Vec::new();
+			let mut expected_bytes = 0;
+			for (at, r) in ranges.iter().enumerate() {
+				let read = tx.keys(r.as_borrowed(), limit, 0, version).await.unwrap();
+				expected_bytes += read.key_bytes;
+				expected.extend(read.keys.into_iter().map(|k| (at, k)));
+			}
+			let mut seen = Vec::new();
+			let stats = tx
+				.visit_key_ranges(&ranges, limit, version, &mut |at: usize, key: &[u8]| {
+					seen.push((at, key.to_vec()));
+					Ok(std::ops::ControlFlow::Continue(()))
+				})
+				.await
+				.unwrap();
+			assert_eq!(seen, expected, "round {round}, limit {limit}");
+			assert_eq!(stats.rows as usize, expected.len());
+			assert_eq!(stats.key_bytes, expected_bytes);
+			for stop in 0..expected.len().min(12) {
+				let mut seen = Vec::new();
+				let stats = tx
+					.visit_key_ranges(&ranges, limit, version, &mut |at: usize, key: &[u8]| {
+						seen.push((at, key.to_vec()));
+						Ok(if seen.len() == stop + 1 {
+							std::ops::ControlFlow::Break(())
+						} else {
+							std::ops::ControlFlow::Continue(())
+						})
+					})
+					.await
+					.unwrap();
+				assert_eq!(seen, expected[..=stop], "round {round}, limit {limit}, break {stop}");
+				assert_eq!(stats.rows as usize, stop + 1);
+				let seen_bytes: u64 = seen.iter().map(|(_, key)| key.len() as u64).sum();
+				assert_eq!(stats.key_bytes, seen_bytes);
+			}
+		}
+	}
+}
+
+/// `visit_key_ranges` agrees with `keys` over each range, on committed data.
+async fn visit_key_ranges_matches_keys(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	seed_many(&ds, 60).await;
+	let tx = ds.transaction(Read).await.unwrap();
+	assert_visit_matches_keys(&*tx, None).await;
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(visit_key_ranges_matches_keys);
+
+/// `visit_key_ranges` agrees with `keys` after the transaction's own writes and deletes.
+async fn visit_key_ranges_matches_keys_after_own_writes(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	seed_many(&ds, 60).await;
+	let tx = ds.transaction(Write).await.unwrap();
+	for i in (0..60).step_by(4) {
+		tx.del(format!("c{i:04}").as_bytes().into()).await.unwrap();
+	}
+	for i in (0..60).step_by(7) {
+		tx.set(format!("c{i:04}x").as_bytes().into(), b"v".to_vec()).await.unwrap();
+	}
+	assert_visit_matches_keys(&*tx, None).await;
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(visit_key_ranges_matches_keys_after_own_writes);
+
+/// On a versioned store, `visit_key_ranges` as of a version agrees with `keys` as of it: as of
+/// the latest version the live keys, as of a version before any write none.
+async fn visit_key_ranges_at_a_version(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	seed_many(&ds, 60).await;
+	let tx = ds.transaction(Write).await.unwrap();
+	for i in (0..60).step_by(3) {
+		tx.del(format!("c{i:04}").as_bytes().into()).await.unwrap();
+	}
+	tx.commit().await.unwrap();
+	let tx = ds.transaction(Read).await.unwrap();
+	for version in [u64::MAX, 1] {
+		assert_visit_matches_keys(&*tx, Some(version)).await;
+	}
+	let ranges = [span(b"c0000", b"c9999")];
+	let mut visited_any = false;
+	tx.visit_key_ranges(&ranges, 1000, Some(1), &mut |_: usize, _: &[u8]| {
+		visited_any = true;
+		Ok(std::ops::ControlFlow::Continue(()))
+	})
+	.await
+	.unwrap();
+	assert!(!visited_any, "no key exists before the first write");
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(visit_key_ranges_at_a_version, only = [surrealkv_versioned]);
+
+/// A version on a store that keeps none is refused, as `keys` refuses it.
+async fn visit_key_ranges_refuses_a_version_without_versioning(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	seed(&ds).await;
+	let tx = ds.transaction(Read).await.unwrap();
+	let ranges = [span(b"k1", b"k3")];
+	let outcome = tx
+		.visit_key_ranges(&ranges, 10, Some(1), &mut |_: usize, _: &[u8]| {
+			Ok(std::ops::ControlFlow::Continue(()))
+		})
+		.await;
+	assert!(matches!(outcome, Err(surrealdb_kvs::Error::UnsupportedVersionedQueries)));
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(visit_key_ranges_refuses_a_version_without_versioning, only = [surrealkv, mem]);
