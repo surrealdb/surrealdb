@@ -285,6 +285,9 @@ enum SequenceError {
 	/// would have made the cursor durable is the one that failed or was
 	/// cancelled.
 	Reset,
+	/// No window can start at the cursor without passing `i64::MAX`. Not
+	/// transient: no allocation attempt can change it, so it is never retried.
+	Exhausted,
 	Other(anyhow::Error),
 }
 
@@ -297,6 +300,7 @@ impl std::fmt::Display for SequenceError {
 			Self::Reset => f.write_str(
 				"the sequence was redefined or removed while this allocator was serving it",
 			),
+			Self::Exhausted => f.write_str("the sequence is exhausted"),
 			Self::Other(e) => write!(f, "{e}"),
 		}
 	}
@@ -321,6 +325,7 @@ impl SequenceError {
 		match self {
 			Self::Other(err) => err,
 			Self::Reset => anyhow::Error::new(crate::error::DatastoreError::SequenceReset),
+			Self::Exhausted => anyhow::Error::new(crate::error::DatastoreError::SequenceExhausted),
 		}
 	}
 }
@@ -1752,6 +1757,7 @@ impl Sequence {
 				// and retrying would claim a window under a definition that has
 				// been removed. The caller rebuilds instead.
 				Err(SequenceError::Reset) => return Err(SequenceError::Reset),
+				Err(SequenceError::Exhausted) => return Err(SequenceError::Exhausted),
 				// Also not transient. What the backoff waits for is the state
 				// another transaction holds to change, and a provisional claim
 				// runs in the caller's own transaction: whatever it failed on —
@@ -1927,7 +1933,14 @@ impl Sequence {
 			// id, so a restart would resume on it and hand it out twice.
 			// `batch` reaches here straight from configuration, which sets no
 			// lower bound of its own.
-			let next_to = next_start + batch.max(1) as i64;
+			//
+			// The window's end saturates at `i64::MAX`, so a window never
+			// overflows and `i64::MAX` itself is never issued. A start with no
+			// room for even one id means the sequence is exhausted.
+			let next_to = next_start.saturating_add(batch.max(1) as i64);
+			if next_to <= next_start {
+				return Err(SequenceError::Exhausted);
+			}
 			// And store it in the KV store
 			let bv = BatchValue {
 				to: next_to,

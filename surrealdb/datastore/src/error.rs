@@ -116,6 +116,13 @@ pub enum DatastoreError {
 	)]
 	SequenceReset,
 
+	/// A sequence has no value left to issue below `i64::MAX`.
+	///
+	/// Raised when the next window would start at or past `i64::MAX`, so no
+	/// value is issued and the sequence stays where it was.
+	#[error("The sequence is exhausted: no value can be issued below i64::MAX")]
+	SequenceExhausted,
+
 	/// The index has been found to be inconsistent
 	#[error("Index is corrupted: {0}")]
 	CorruptedIndex(&'static str),
@@ -366,6 +373,7 @@ impl LeafError for DatastoreError {
 			DatastoreError::SequenceReset => {
 				TypesError::query(message, QueryError::TransactionConflict)
 			}
+			DatastoreError::SequenceExhausted => TypesError::query(message, None),
 			DatastoreError::CorruptedIndex(_)
 			| DatastoreError::IndexAlreadyBuilding {
 				..

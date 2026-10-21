@@ -753,7 +753,13 @@ impl Number {
 	pub fn sign(self) -> Self {
 		match self {
 			Number::Int(n) => n.signum().into(),
-			Number::Float(n) => n.signum().into(),
+			// Either zero signs to zero, as an integer or a decimal zero does.
+			Number::Float(n) => if n == 0.0 {
+				0.0
+			} else {
+				n.signum()
+			}
+			.into(),
 			Number::Decimal(n) => n.signum().into(),
 		}
 	}

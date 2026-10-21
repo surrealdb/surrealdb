@@ -4,7 +4,7 @@ use anyhow::{Result, bail, ensure};
 use surrealdb_cnf::GENERATION_ALLOCATION_LIMIT;
 use surrealdb_expr::expr::Error;
 use surrealdb_expr::val::number::Sorted;
-use surrealdb_expr::val::{Number, TryAdd, TryPow, Value};
+use surrealdb_expr::val::{Number, TryAdd, TryMul, TryPow, TrySub, Value};
 use surrealdb_types::ToSql;
 
 use crate::util::math::interquartile::Interquartile;
@@ -238,7 +238,7 @@ pub fn pow((arg, pow): (Number, Number)) -> Result<Value> {
 }
 
 pub async fn product_walk((array,): (Vec<Number>,)) -> Result<Value> {
-	Ok(fuel::fold(array, Number::Int(1), |product, n| product * n).await.into())
+	Ok(fuel::try_fold(array, Number::Int(1), |product, n| product.try_mul(n)).await?.into())
 }
 
 pub fn rad2deg((arg,): (Number,)) -> Result<Value> {
@@ -264,7 +264,7 @@ pub async fn spread_walk((array,): (Vec<Number>,)) -> Result<Value> {
 	})
 	.await;
 	Ok(match (min, max) {
-		(Some(min), Some(max)) => max - min,
+		(Some(min), Some(max)) => max.try_sub(min)?,
 		_ => Number::NAN,
 	}
 	.into())
