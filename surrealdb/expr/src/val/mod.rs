@@ -930,11 +930,10 @@ impl TryMul for Value {
 					bail!("Cannot multiply a duration with a negative number");
 				}
 
-				let factor: u32 = i.try_into()?;
-
-				let res =
-					d.0.checked_mul(factor)
-						.ok_or_else(|| Error::ArithmeticOverflow(format!("{d} * {i}")))?;
+				let overflow = || Error::ArithmeticOverflow(format!("{d} * {i}"));
+				let nanos = d.0.as_nanos().checked_mul(i as u128).ok_or_else(overflow)?;
+				let secs = u64::try_from(nanos / 1_000_000_000).map_err(|_| overflow())?;
+				let res = StdDuration::new(secs, (nanos % 1_000_000_000) as u32);
 
 				Ok(Value::Duration(Duration(res)))
 			}

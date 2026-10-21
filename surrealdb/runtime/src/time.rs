@@ -443,8 +443,24 @@ pub mod from {
 	pub fn uuid((val,): (Uuid,)) -> Result<Value> {
 		match val.0.get_timestamp() {
 			Some(v) => {
-				let (s, ns) = v.to_unix();
-				match Datetime::try_from((s as i64, ns)) {
+				// v1 and v6 count 100ns ticks from 1582-10-15, so the Unix offset is
+				// subtracted in signed arithmetic to keep pre-1970 instants negative.
+				let (secs, nanos) = if matches!(val.0.get_version_num(), 1 | 6) {
+					let (ticks, _) = v.to_gregorian();
+					let ticks =
+						i128::from(ticks) - i128::from(uuid::timestamp::UUID_TICKS_BETWEEN_EPOCHS);
+					(
+						ticks.div_euclid(10_000_000) as i64,
+						(ticks.rem_euclid(10_000_000) * 100) as u32,
+					)
+				} else {
+					let (s, ns) = v.to_unix();
+					match i64::try_from(s) {
+						Ok(s) => (s, ns),
+						Err(_) => fail!("Failed to convert UUID Timestamp to Datetime."),
+					}
+				};
+				match Datetime::try_from((secs, nanos)) {
 					Ok(v) => Ok(v.into()),
 					_ => fail!("Failed to convert UUID Timestamp to Datetime."),
 				}
