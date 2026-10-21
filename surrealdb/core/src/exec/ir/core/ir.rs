@@ -672,7 +672,7 @@ impl Ir {
 
 	/// The owner of the innermost error-scope region enclosing `block`, or `None` when no
 	/// error-scope region encloses it.
-	pub(super) fn error_scope_owner(&self, block: BlockId) -> Option<OpId> {
+	pub(crate) fn error_scope_owner(&self, block: BlockId) -> Option<OpId> {
 		let mut block = block;
 		loop {
 			let region = self.regions.get(self.blocks.get(block)?.parent)?;

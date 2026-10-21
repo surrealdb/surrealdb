@@ -16,9 +16,9 @@ use crate::exec::ir::iface::conversion::Phase;
 use crate::exec::ir::iface::fold::NotYetFolder;
 use crate::exec::ir::iface::frame::Snapshot;
 use crate::exec::ir::iface::ids::{FrameId, OpId};
-use crate::exec::ir::iface::region_kind::{ClauseRole, RegionKind, StatementCommit};
+use crate::exec::ir::iface::region_kind::{ClauseRole, ErrorScope, RegionKind, StatementCommit};
 use crate::exec::ir::iface::types::TypeKnowledge;
-use crate::exec::ir::logical::ops::LogTag;
+use crate::exec::ir::logical::ops::{LogOp, LogTag};
 use crate::exec::ir::op_kind::{OpKind, OpTag};
 use crate::exec::ir::phys::ops::PhysOp;
 use crate::expr::BinaryOperator;
@@ -146,6 +146,72 @@ fn literal_in(frame: u16) -> OpSpec {
 		frame: FrameId::new(frame),
 		..spec(literal(7), &[], 1)
 	}
+}
+
+/// A statement-shaped owner under which one `ErrorScope(ShapeToNone)` region holds the ops of a
+/// test. The owner is a `Stmt` only so that the scope has an owner op; the ops of the region are
+/// grouped with the enclosing statement.
+fn scope_owner() -> OpKind {
+	OpKind::Logical(LogOp::Stmt {
+		commit: StatementCommit::Auto,
+		control: None,
+	})
+}
+
+/// Builds, before the first op of the statement, a sum over the literals `7` and `8` outside any
+/// scope and an owner whose error scope holds `inside` sums of the same operands. Answers the sum
+/// outside the scope, the sums inside it and the scope block.
+fn sums_around_an_error_scope(
+	ir: &mut Ir,
+	facts: &mut FactCache,
+	inside: usize,
+) -> (OpId, Vec<OpId>, crate::exec::ir::iface::ids::BlockId) {
+	let at = InsertPoint::Before(first_in_statement(ir));
+	let mut rw = Rewriter::new(ir, facts);
+	let (_, one) = create(&mut rw, at, literal(7), &[], 1);
+	let (_, two) = create(&mut rw, at, literal(8), &[], 1);
+	let operands = [one[0], two[0]];
+	let (outside, _) = create(&mut rw, at, add(), &operands, 1);
+	let (owner, _) = create(&mut rw, at, scope_owner(), &[], 0);
+	let (_, scope) = rw
+		.create_region(owner, RegionKind::ErrorScope(ErrorScope::ShapeToNone), &[])
+		.expect("the scope is created");
+	let inner = (0..inside)
+		.map(|_| create(&mut rw, InsertPoint::End(scope), add(), &operands, 1).0)
+		.collect();
+	(outside, inner, scope)
+}
+
+/// An op bound in an error scope is not merged into an equal op outside it: the merge would give
+/// the outside op the scope's provenance, which the outside op does not stand in.
+#[tokio::test]
+async fn cse_never_merges_an_op_out_of_its_error_scope() {
+	let mut ir = bind("RETURN 0").await;
+	let mut facts = FactCache::new();
+	let (_, inner, _) = sums_around_an_error_scope(&mut ir, &mut facts, 1);
+	let env = Env::new();
+	let merged =
+		merge_equal_values(&mut ir, &mut facts, &env.cx(), Scope::Logical).expect("the merge runs");
+	assert_eq!(merged, 0);
+	assert!(ir.op(inner[0]).is_some(), "the op inside the scope stays");
+	assert_eq!(count(&ir, BINARY), 2);
+}
+
+/// Equal sums inside one error scope still merge with each other, though not with the sum outside.
+#[tokio::test]
+async fn cse_merges_equal_ops_within_one_error_scope() {
+	let mut ir = bind("RETURN 0").await;
+	let mut facts = FactCache::new();
+	let (_, inner, _) = sums_around_an_error_scope(&mut ir, &mut facts, 2);
+	let env = Env::new();
+	let merged =
+		merge_equal_values(&mut ir, &mut facts, &env.cx(), Scope::Logical).expect("the merge runs");
+	assert_eq!(
+		merged, 1,
+		"the second inner sum merges into the first; the outer sum is out of scope"
+	);
+	assert!(ir.op(inner[1]).is_none());
+	assert!(ir.op(inner[0]).is_some());
 }
 
 /// Equal sums in two statements are two, and two equal literals of different frames are two while

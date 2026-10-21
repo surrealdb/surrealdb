@@ -19,6 +19,8 @@
 //!   that writes the session, a session read is never merged, because the key holds no catalog or
 //!   session epoch. The statement is judged as a whole, since a loop runs a read written before a
 //!   change after that change.
+//! - an op is merged only into an op of the same error scope, so the merged op's provenance stays
+//!   with the scope it was bound in; the verifier checks that binding.
 //!
 //! Ops outside every statement are left alone.
 #![deny(clippy::wildcard_enum_match_arm)]
@@ -325,6 +327,25 @@ fn defining_kind(ir: &Ir, value: ValueId) -> Option<&OpKind> {
 	ir.op(op).map(|data| &data.kind)
 }
 
+/// Whether the op defining `earlier` stands in the error scope `op_scope`, the scope being the
+/// owner of the innermost `ErrorScope` region that encloses an op. The caller computes `op_scope`
+/// for the op being merged as `ir.op(op).map(|data| ir.error_scope_owner(data.parent))`: the outer
+/// `None` marks an op id that names no op, the inner `None` an op outside every error scope.
+/// A merge hands the removed op's provenance to the definer, and the verifier requires every id of
+/// a provenance to stand in the scope it was bound in, so an op is merged only into a definer of
+/// its own scope. A block argument has no definer to take the provenance, so it is always in scope.
+fn same_error_scope(ir: &Ir, op_scope: Option<Option<OpId>>, earlier: ValueId) -> bool {
+	let definer = match ir.value(earlier).map(|value| value.def) {
+		Some(ValueDef::OpResult {
+			op,
+			..
+		}) => op,
+		_ => return true,
+	};
+	let definer_scope = ir.op(definer).map(|data| ir.error_scope_owner(data.parent));
+	matches!((op_scope, definer_scope), (Some(own), Some(other)) if own == other)
+}
+
 /// Merges, in each statement of `ir`, every candidate op into the earlier op of its key whose value
 /// dominates it and whose attributes are equal, and answers how many ops went.
 ///
@@ -365,8 +386,10 @@ pub(super) fn merge_equal_values(
 			let Some(kind) = ir.op(op).map(|data| &data.kind) else {
 				continue;
 			};
+			let op_scope = ir.op(op).map(|data| ir.error_scope_owner(data.parent));
 			let same = |earlier: ValueId| {
 				defining_kind(ir, earlier).is_some_and(|earlier| earlier.attrs_eq(kind))
+					&& same_error_scope(ir, op_scope, earlier)
 			};
 			let Some(earlier) = table.lookup_or_insert(key, result, same) else {
 				continue;
