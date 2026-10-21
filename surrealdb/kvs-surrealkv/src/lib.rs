@@ -39,10 +39,31 @@ const TARGET: &str = "surrealdb::core::kvs::surrealkv";
 )]
 fn kvs_error(e: surrealkv::Error) -> Error {
 	match e {
-		surrealkv::Error::TransactionWriteConflict => Error::TransactionConflict(e.to_string()),
+		surrealkv::Error::TransactionWriteConflict | surrealkv::Error::TransactionRetry => {
+			Error::TransactionConflict(e.to_string())
+		}
 		surrealkv::Error::TransactionReadOnly => Error::TransactionReadonly,
 		surrealkv::Error::TransactionClosed => Error::TransactionFinished,
+		surrealkv::Error::BatchTooLarge => Error::TransactionTooLarge,
 		_ => Error::Transaction(e.to_string()),
+	}
+}
+
+/// The error of a failed commit. Only the errors SurrealKV raises before it writes anything are
+/// definite; any other may come after the commit reached the WAL, or the memtable, so whether it
+/// applied is unknown: recovery may replay it.
+///
+/// The mapping is conservative. SurrealKV raises `PipelineStall`, `Io` and the other errors of
+/// a failed background task both before and after it writes, and the variant does not tell
+/// which, so a commit refused before writing anything is also reported as unknown.
+fn commit_error(e: surrealkv::Error) -> Error {
+	match e {
+		surrealkv::Error::TransactionWriteConflict
+		| surrealkv::Error::TransactionRetry
+		| surrealkv::Error::TransactionReadOnly
+		| surrealkv::Error::TransactionClosed
+		| surrealkv::Error::BatchTooLarge => kvs_error(e),
+		e => Error::CommitOutcomeUnknown(e.to_string()),
 	}
 }
 
@@ -121,14 +142,16 @@ impl Transaction {
 		// Commit the transaction, syncing the WAL before it is visible if durable.
 		// A shutdown can still close the tree after the check above, while this
 		// commit waits for its transaction or inside SurrealKV's commit pipeline,
-		// which then refuses it with `PipelineStall`. That is reported as
-		// `Error::Shutdown` too, so that callers treat the commit as interrupted
-		// by the shutdown rather than as failed.
+		// which then refuses it with `PipelineStall`. Closing the tree lets every
+		// admitted commit finish with its real outcome, so that refusal comes
+		// before anything is written. It is reported as `Error::Shutdown` too, so
+		// that callers treat the commit as interrupted by the shutdown rather
+		// than as failed.
 		inner.commit().await.map_err(|e| match e {
 			surrealkv::Error::PipelineStall if self.shutting_down.load(Ordering::Acquire) => {
 				Error::Shutdown
 			}
-			e => kvs_error(e),
+			e => commit_error(e),
 		})?;
 		// Continue
 		Ok(())
@@ -1373,4 +1396,32 @@ fn consume_vals(cursor: &mut impl Cursor, limit: u32, skip: u32) -> Result<ScanR
 		key_bytes,
 		value_bytes,
 	})
+}
+
+#[cfg(test)]
+mod commit_error_test {
+	use super::*;
+
+	#[test]
+	fn only_errors_raised_before_writing_are_definite() {
+		let conflict = commit_error(surrealkv::Error::TransactionWriteConflict);
+		assert!(matches!(conflict, Error::TransactionConflict(_)), "{conflict:?}");
+		let retry = commit_error(surrealkv::Error::TransactionRetry);
+		assert!(matches!(retry, Error::TransactionConflict(_)), "{retry:?}");
+		let readonly = commit_error(surrealkv::Error::TransactionReadOnly);
+		assert!(matches!(readonly, Error::TransactionReadonly), "{readonly:?}");
+		let closed = commit_error(surrealkv::Error::TransactionClosed);
+		assert!(matches!(closed, Error::TransactionFinished), "{closed:?}");
+		let too_large = commit_error(surrealkv::Error::BatchTooLarge);
+		assert!(matches!(too_large, Error::TransactionTooLarge), "{too_large:?}");
+
+		// Raised both before and after the write, so conservatively unknown.
+		let fsync = surrealkv::Error::Io(Arc::new(std::io::Error::other("fsync failed")));
+		for e in
+			[fsync, surrealkv::Error::Wal("short write".into()), surrealkv::Error::PipelineStall]
+		{
+			let e = commit_error(e);
+			assert!(matches!(e, Error::CommitOutcomeUnknown(_)), "{e:?}");
+		}
+	}
 }
