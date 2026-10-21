@@ -237,6 +237,16 @@ pub(super) async fn auth_rate_limit_middleware(request: Request, next: Next) -> 
 	next.run(request).await
 }
 
+/// The throttled authentication endpoint a path belongs to. The cookie
+/// variants share their token counterparts' endpoint, so both spend one budget.
+fn auth_endpoint(path: &str) -> Option<&'static str> {
+	match path {
+		"/signin" | "/signin/cookie" => Some("signin"),
+		"/signup" | "/signup/cookie" => Some("signup"),
+		_ => None,
+	}
+}
+
 /// Applies the limiter to `request` when it is an authentication attempt with
 /// a derivable client address and the limiter is enabled. Every other request
 /// is admitted untouched.
@@ -247,10 +257,8 @@ fn admit(request: &Request) -> Result<(), NetError> {
 	if request.method() != Method::POST {
 		return Ok(());
 	}
-	let endpoint = match request.uri().path() {
-		"/signin" => "signin",
-		"/signup" => "signup",
-		_ => return Ok(()),
+	let Some(endpoint) = auth_endpoint(request.uri().path()) else {
+		return Ok(());
 	};
 	let Some(key) = request_key(request) else {
 		return Ok(());
@@ -261,6 +269,15 @@ fn admit(request: &Request) -> Result<(), NetError> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn cookie_routes_share_their_counterparts_budget() {
+		assert_eq!(auth_endpoint("/signin/cookie"), auth_endpoint("/signin"));
+		assert_eq!(auth_endpoint("/signup/cookie"), auth_endpoint("/signup"));
+		assert!(auth_endpoint("/signin/cookie").is_some());
+		assert_eq!(auth_endpoint("/signout"), None);
+		assert_eq!(auth_endpoint("/signin/other"), None);
+	}
 
 	fn ip(s: &str) -> IpAddr {
 		s.parse().unwrap()

@@ -4,6 +4,8 @@ use axum::routing::options;
 use axum::{Extension, Router};
 use axum_extra::TypedHeader;
 use bytes::Bytes;
+use http::HeaderMap;
+use http::header::SET_COOKIE;
 use surrealdb::types::Value;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::signin::signin;
@@ -14,6 +16,7 @@ use surrealdb_types::SurrealValue;
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::AppState;
+use super::auth::{CookiePolicy, cookie_output, require_allowed_origin, session_cookie};
 use super::error::ResponseError;
 use super::headers::Accept;
 use super::output::Output;
@@ -44,6 +47,7 @@ where
 {
 	Router::new()
 		.route("/signin", options(|| async {}).post(handler))
+		.route("/signin/cookie", options(|| async {}).post(cookie_handler))
 		.route_layer(DefaultBodyLimit::disable())
 		.layer(RequestBodyLimitLayer::new(*HTTP_MAX_SIGNIN_BODY_SIZE))
 }
@@ -102,6 +106,49 @@ async fn handler(
 						// An incorrect content-type was requested
 						_ => Err(NetError::InvalidType.into()),
 					}
+				}
+				// There was an error with authentication
+				Err(err) => Err(ResponseError(err)),
+			}
+		}
+		// The provided value was not an object
+		_ => Err(NetError::Request.into()),
+	}
+}
+
+/// `signin` that returns the access token as an `HttpOnly` session cookie instead
+/// of in the body, for browser clients. Same body, capability gate and size
+/// limit as `/signin`; refused with 403 unless the origin gate allows the request.
+async fn cookie_handler(
+	Extension(state): Extension<AppState>,
+	Extension(mut session): Extension<Session>,
+	Extension(policy): Extension<CookiePolicy>,
+	headers: HeaderMap,
+	accept: Option<TypedHeader<Accept>>,
+	body: Bytes,
+) -> Result<(HeaderMap, Output), ResponseError> {
+	// Get a database reference
+	let kvs = &state.datastore;
+	// Check if capabilities allow querying the requested HTTP route
+	if !kvs.allows_http_route(&RouteTarget::Signin) {
+		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Signin);
+		return Err(NetError::ForbiddenRoute(RouteTarget::Signin.to_string()).into());
+	}
+	// The origin gate runs before any credential is checked
+	require_allowed_origin(&policy, &headers, "/signin/cookie")?;
+	// Convert the HTTP body into text
+	let data = bytes_to_utf8(&body).context("Non UTF-8 request body").map_err(ResponseError)?;
+	// Parse the provided data as JSON
+	match syn::json(data) {
+		// The provided value was an object
+		Ok(Value::Object(vars)) => {
+			match signin(kvs, &mut session, vars.into()).await {
+				// Authentication was successful
+				Ok(token) => {
+					let cookie = session_cookie(&token, &session)?;
+					let mut out = HeaderMap::new();
+					out.insert(SET_COOKIE, cookie);
+					Ok((out, cookie_output(accept.as_deref())?))
 				}
 				// There was an error with authentication
 				Err(err) => Err(ResponseError(err)),

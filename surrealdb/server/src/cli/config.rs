@@ -50,4 +50,6 @@ pub struct Config {
 	/// When set, client-attached HTTP RPC sessions are persisted in the
 	/// datastore and expire after this idle TTL. `None` disables persistence.
 	pub durable_session_ttl: Option<std::time::Duration>,
+	/// Whether the HTTP server issues and accepts the `HttpOnly` session cookie.
+	pub cookie_auth: bool,
 }

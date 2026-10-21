@@ -229,6 +229,12 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_ALLOW_ORIGIN", long = "allow-origin")]
 	#[arg(value_delimiter = ',', value_parser = super::validator::cors_origin)]
 	allow_origin: Vec<String>,
+	#[arg(
+		help = "Issue the access token as an HttpOnly cookie on request, and accept it from the allowed origins. Requires --allow-origin. The cookie is Secure, so a browser stores it only over HTTPS or on a loopback address"
+	)]
+	#[arg(env = "SURREAL_COOKIE_AUTH", long = "cookie-auth")]
+	#[arg(default_value_t = false)]
+	cookie_auth: bool,
 	//
 	// Postgres server
 	#[arg(
@@ -317,6 +323,7 @@ pub async fn init<
 		durable_session_gc_interval,
 		no_identification_headers,
 		allow_origin,
+		cookie_auth,
 		postgres_bind,
 		mysql_bind,
 		..
@@ -387,6 +394,7 @@ pub async fn init<
 		crt,
 		key,
 		durable_session_ttl: durable_sessions.then_some(durable_session_ttl),
+		cookie_auth,
 	};
 	composer.check_config(&config).await?;
 	// Setup the command-line options

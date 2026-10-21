@@ -33,7 +33,7 @@ async fn handler(
 	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	Path((ns, db, path)): Path<(String, String, String)>,
-	headers: HeaderMap,
+	mut headers: HeaderMap,
 	Query(Params {
 		inner: query,
 	}): Query<Params>,
@@ -97,6 +97,10 @@ async fn handler(
 	// consumed, but to the user its always simply just bytes. we could expose handlebars to
 	// describe the "internal state" of the value...
 	let body = Value::Bytes(body.into());
+
+	// User-defined API code can read and return the request headers, so the
+	// HttpOnly credential cookies never reach it.
+	super::auth::strip_credential_cookies(&mut headers);
 
 	let req = ApiRequest {
 		method,

@@ -25,6 +25,7 @@ mod ready;
 pub mod rpc;
 mod signals;
 pub mod signin;
+pub mod signout;
 pub mod signup;
 pub mod sql;
 pub mod sync;
@@ -187,6 +188,7 @@ pub fn community_router(exclude: &[&str]) -> Router<Arc<RpcState>> {
 		.merge(sync::router())
 		.merge(sql::router())
 		.merge(signin::router())
+		.merge(signout::router())
 		.merge(signup::router())
 		.merge(key::router())
 		.merge(ml::router())
@@ -251,6 +253,7 @@ pub struct Readiness {
 /// - `no_identification_headers`: `false` (include `Server` and version headers)
 /// - `allow_origin`: empty (allow all origins)
 /// - `durable_session_ttl`: `None` (HTTP RPC sessions are in-memory only)
+/// - `cookie_auth`: `false` (no session cookies)
 ///
 /// # Example
 ///
@@ -265,6 +268,7 @@ pub struct Readiness {
 ///     no_identification_headers: true,
 ///     allow_origin: vec!["https://example.com".to_string()],
 ///     durable_session_ttl: None,
+///     cookie_auth: false,
 /// };
 /// ```
 #[derive(Clone, Debug)]
@@ -281,6 +285,12 @@ pub struct RouterOptions {
 	/// — and expire after this idle TTL. `None` (the default) keeps sessions
 	/// in-memory only.
 	pub durable_session_ttl: Option<Duration>,
+	/// When `true`, `/signin/cookie` and `/signup/cookie` issue the access token
+	/// as an `HttpOnly` cookie, and the cookie is accepted as a credential
+	/// from allowed browser origins (see `ntw::auth::browser_origin_allowed`).
+	/// Requires a non-empty `allow_origin`; [`SurrealRouter::build`] refuses the
+	/// combination otherwise.
+	pub cookie_auth: bool,
 }
 
 impl Default for RouterOptions {
@@ -290,6 +300,7 @@ impl Default for RouterOptions {
 			no_identification_headers: false,
 			allow_origin: Vec::new(),
 			durable_session_ttl: None,
+			cookie_auth: false,
 		}
 	}
 }
@@ -301,8 +312,17 @@ impl From<&Config> for RouterOptions {
 			no_identification_headers: cfg.no_identification_headers,
 			allow_origin: cfg.allow_origin.clone(),
 			durable_session_ttl: cfg.durable_session_ttl,
+			cookie_auth: cfg.cookie_auth,
 		}
 	}
+}
+
+/// Parses the configured CORS origins into header values.
+fn allow_origin_values(origins: &[String]) -> Result<Vec<http::HeaderValue>> {
+	origins
+		.iter()
+		.map(|o| o.parse().map_err(|_| anyhow::anyhow!("invalid CORS origin: {o}")))
+		.collect()
 }
 
 /// A fully-configured SurrealDB router ready to be served.
@@ -416,11 +436,24 @@ impl SurrealRouter {
 		readiness: Readiness,
 	) -> Result<Self> {
 		let opt = opt.into();
+		// The origin gate that protects the cookie matches each request's Origin
+		// exactly against the list, so the list must be explicit: a wildcard entry
+		// would never match and is refused rather than left to fail silently.
+		if opt.cookie_auth && opt.allow_origin.is_empty() {
+			anyhow::bail!("cookie authentication requires an explicit --allow-origin list");
+		}
+		if opt.cookie_auth && opt.allow_origin.iter().any(|o| o == "*") {
+			anyhow::bail!("cookie authentication refuses a wildcard --allow-origin");
+		}
 		// Clone the readiness flag for the gate layer before moving `readiness`
 		// into the shared app state.
 		let gate = ready::Gate {
 			ready: Arc::clone(&readiness.ready),
 			startup_routes: F::startup_routes(),
+		};
+		let cookie_policy = auth::CookiePolicy {
+			enabled: opt.cookie_auth,
+			origins: allow_origin_values(&opt.allow_origin)?.into(),
 		};
 		let app_state = AppState {
 			client_ip: opt.client_ip,
@@ -466,12 +499,7 @@ impl SurrealRouter {
 		let allow_origin: AllowOrigin = if opt.allow_origin.is_empty() {
 			Any.into()
 		} else {
-			let origins: Vec<http::HeaderValue> = opt
-				.allow_origin
-				.iter()
-				.map(|o| o.parse().map_err(|_| anyhow::anyhow!("invalid CORS origin: {o}")))
-				.collect::<Result<Vec<_>, _>>()?;
-			AllowOrigin::list(origins)
+			AllowOrigin::list(allow_origin_values(&opt.allow_origin)?)
 		};
 
 		let allow_header = vec![
@@ -521,6 +549,7 @@ impl SurrealRouter {
 
 		let service = service
 			.layer(AddExtensionLayer::new(app_state))
+			.layer(AddExtensionLayer::new(cookie_policy))
 			.layer(middleware::from_fn(client_ip::client_ip_middleware))
 			.layer(SetSensitiveRequestHeadersLayer::from_shared(Arc::clone(&headers)))
 			.layer(
@@ -541,7 +570,7 @@ impl SurrealRouter {
 			// with Retry-After in particular — carry CORS headers that
 			// cross-origin browser clients are allowed to read.
 			.layer({
-				let cors = CorsLayer::new()
+				let mut cors = CorsLayer::new()
 					.allow_methods([
 						http::Method::GET,
 						http::Method::PUT,
@@ -553,6 +582,12 @@ impl SurrealRouter {
 					.allow_headers(allow_header)
 					.allow_origin(allow_origin)
 					.max_age(Duration::from_secs(86400));
+				// Browsers only attach the session cookie to a cross-origin
+				// request when the response allows credentials; the explicit
+				// origin list checked above makes that safe.
+				if opt.cookie_auth {
+					cors = cors.allow_credentials(true);
+				}
 
 				// Expose Retry-After so cross-origin browser clients can read
 				// the backoff hint on rate-limited responses.

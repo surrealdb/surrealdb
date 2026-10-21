@@ -2378,6 +2378,7 @@ mod tests {
 			no_identification_headers: false,
 			allow_origin: Vec::new(),
 			durable_session_ttl: None,
+			cookie_auth: false,
 		})
 	}
 

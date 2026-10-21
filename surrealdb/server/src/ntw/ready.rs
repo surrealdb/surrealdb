@@ -7,7 +7,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Extension, Router};
 use http::HeaderValue;
-use http::header::{AUTHORIZATION, RETRY_AFTER};
+use http::header::{AUTHORIZATION, COOKIE, RETRY_AFTER};
 
 use super::AppState;
 use crate::ntw::error::Error as NetError;
@@ -125,6 +125,7 @@ pub(super) async fn readiness_gate(
 	let path = request.uri().path();
 	if always_available(path) || gate.startup_routes.contains(&path) {
 		request.headers_mut().remove(AUTHORIZATION);
+		request.headers_mut().remove(COOKIE);
 		return next.run(request).await;
 	}
 	let mut response = NetError::NotReady.into_response();

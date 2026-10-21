@@ -41,6 +41,12 @@ pub enum Error {
 	#[error("The HTTP route '{0}' is forbidden")]
 	ForbiddenRoute(String),
 
+	#[error("The request origin is not allowed to use cookie authentication")]
+	ForbiddenOrigin,
+
+	#[error("A session cookie cannot be issued because the session has no expiry")]
+	CookieUnbounded,
+
 	#[error("The HTTP route '{0}' is not found")]
 	NotFound(String),
 
@@ -55,6 +61,14 @@ impl IntoResponse for Error {
 	fn into_response(self) -> Response {
 		match self {
 			Error::ForbiddenRoute(_) => {
+				ErrorMessage{
+					code: StatusCode::FORBIDDEN,
+					details: Some("Forbidden".to_string()),
+					description: Some("Not allowed to do this.".to_string()),
+					information: Some(self.to_string())
+				}.into_response()
+			}
+			Error::ForbiddenOrigin => {
 				ErrorMessage{
 					code: StatusCode::FORBIDDEN,
 					details: Some("Forbidden".to_string()),

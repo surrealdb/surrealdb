@@ -972,6 +972,26 @@ GraphQL, error formatting
   engine details, or stack traces. Internal details must be logged server-side only.
 - WebSocket upgrade handlers must validate Origin headers against the same policy
   used by the CORS layer.
+- The session cookie (`surreal_token`) is read only when cookie authentication is
+  enabled, the request has no `Authorization` header, and the browser origin gate
+  (`browser_origin_allowed` in `ntw/auth.rs`) allows the request: same-origin
+  fetch metadata, or an `Origin` exactly matching a `--allow-origin` entry. The
+  gate is the Origin policy that applies to WebSocket upgrades for cookie
+  credentials. It is never read on the credential-exchange routes or `/signout`.
+- A cookie the gate does not admit is ignored and the session is anonymous; it is
+  never an error. A cookie whose token fails verification also yields an anonymous
+  session and is cleared on the response, since an `HttpOnly` cookie cannot be
+  removed by scripts. The cookie branch runs before the `can_access_ns_db` check.
+- A session cookie is issued only by `POST /signin/cookie` and `POST /signup/cookie`,
+  after the origin gate allows the request and before any credential is checked.
+  The token is carried only in the cookie (`HttpOnly; Secure; SameSite=Strict;
+  Path=/`, `Max-Age` bounded by the token `exp` and the session expiry), never in
+  the body, and no refresh token is issued. `/signin` and `/signup` never set it.
+- Credential cookies (`CREDENTIAL_COOKIES` in `ntw/auth.rs`) are removed from the
+  request headers handed to user-defined API code (`ntw/api.rs`), so an `HttpOnly`
+  credential can never be returned in a response body.
+- Cookie authentication requires an explicit, non-empty `--allow-origin` list;
+  credentialed CORS is never combined with a wildcard.
 - Server identification headers must be suppressed by default.
 - Per-endpoint body size limits must be proportional to the endpoint's function.
 - When the router is exposed for embedding, the full middleware stack (auth, CORS,
