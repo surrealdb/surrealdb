@@ -46,8 +46,9 @@ fn kept_part(text: &str) -> Result<Part, IrError> {
 impl Ddl<'_, '_> {
 	/// `DEFINE INDEX`: the table is created when it does not exist and refused when it is a
 	/// lightweight relation. Each column is checked against the catalog before the definition is
-	/// written, and a replaced index is retired. An import that replays an unchanged definition
-	/// keeps the index's data and refreshes the definition alone.
+	/// written, and a replaced index is retired. An import that replays an unchanged definition,
+	/// and an `OVERWRITE` that restates the definition of a healthy index, keep the index's data
+	/// and refresh the definition alone.
 	pub(super) fn define_index(
 		&mut self,
 		attrs: &DefineAttrs,
@@ -181,9 +182,14 @@ impl Ddl<'_, '_> {
 			self.set_field(definition, "cols", Operand::Reg(list))?;
 		}
 
-		// An import replaying a definition whose index is unchanged keeps the index's data and
-		// its on-disk format, refreshing only the definition.
-		if matches!(attrs.mode, crate::expr::statements::define::DefineKind::Default) {
+		// A definition that leaves its index unchanged (the same table, columns and kind) keeps the
+		// index's id, data and on-disk format, and refreshes the definition alone, so its comment.
+		// An import replaying it keeps any such index. `OVERWRITE` keeps only an index fit to serve
+		// as it stands (`IndexReplayReuses`'s `healthy`); one still building, failed, or stored in
+		// an older format is retired and rebuilt below.
+		let overwrite =
+			matches!(attrs.mode, crate::expr::statements::define::DefineKind::Overwrite);
+		if overwrite || matches!(attrs.mode, crate::expr::statements::define::DefineKind::Default) {
 			let fresh = self.label()?;
 			self.emit(Instr::JumpIf {
 				cond: Operand::Reg(existing),
@@ -192,8 +198,11 @@ impl Ddl<'_, '_> {
 			});
 			let reuses = self.reg()?;
 			self.store(StoreInstr::IndexReplayReuses {
+				ns,
+				db,
 				existing,
 				template: definition,
+				healthy: overwrite,
 				dst: reuses,
 			});
 			let changed = self.label()?;

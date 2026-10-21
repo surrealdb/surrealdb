@@ -48,6 +48,9 @@ is in, and a store may hold both side by side.
   its index was defined or its rebuild committed has ended, on every node, so
   a long-held write transaction delays it. On a store several nodes write, a
   node whose heartbeat has lapsed for 30 s refuses its own write commits.
+- A `DEFINE INDEX OVERWRITE` that restates the definition of a ready index in
+  the current format keeps the index and rewrites only its definition, rather
+  than rebuilding it.
 - Index materialisation takes its workers from the node's place pool, the one
   parallel queries use. Staged HNSW batches and background index compaction
   run only as wide as that pool grants, a host with two cores or fewer runs
@@ -452,6 +455,21 @@ cleaning, and a blocking statement keeps waiting, within its timeout.
   and must be retried;
 - sets the node membership refresh interval above 10 s on a store several
   nodes write: lower it to 10 s or less.
+
+### An unchanged `DEFINE INDEX OVERWRITE` keeps its index
+
+A `DEFINE INDEX OVERWRITE` whose table, columns and index kind (with its
+parameters and any `COUNT` condition) match the existing index keeps that
+index — its id, data and format — and rewrites only the definition, so a
+changed comment is applied. It no longer rebuilds, with or without
+`CONCURRENTLY`. An index that is still building, has failed, or is stored in an
+older index format is rebuilt as before, so `OVERWRITE` still recovers it.
+
+Act if you:
+
+- redefine a full-text analyzer and then restate the index's definition with
+  `OVERWRITE` to re-tokenize the indexed text: the index keeps its entries
+  under the previous analyzer. Run `REBUILD INDEX` instead.
 
 ### A `LET` inside a cancelled transaction is undone
 

@@ -1013,6 +1013,113 @@ async fn define_index_import_changed_definition_rebuilds_with_fresh_index_id() -
 	Ok(())
 }
 
+/// The index `test` on `user`, built over one record, and its durable build state.
+async fn define_overwritten_index_test() -> Result<(Arc<Datastore>, Session, IndexKeyBase)> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:one SET email = 'one@example.com', account = 'apple' RETURN NONE;
+			DEFINE INDEX test ON user FIELDS email COMMENT 'first';
+			CREATE user:two SET email = 'two@example.com', account = 'banana' RETURN NONE;
+			",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table, ix.index_id);
+	assert_eq!(durable_build_state(&ds, &ikb).await?.phase, IndexBuildPhase::Online);
+	Ok((ds, session, ikb))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn define_index_overwrite_unchanged_keeps_a_ready_index_without_rebuild() -> Result<()> {
+	let (ds, session, ikb) = define_overwritten_index_test().await?;
+	let before = durable_build_state(&ds, &ikb).await?;
+	for sql in [
+		"DEFINE INDEX OVERWRITE test ON user FIELDS email COMMENT 'first';",
+		"DEFINE INDEX OVERWRITE test ON user FIELDS email COMMENT 'first' CONCURRENTLY;",
+		"DEFINE INDEX OVERWRITE test ON user FIELDS email COMMENT 'second';",
+	] {
+		execute_all(&ds, &session, sql).await?;
+		let (_, _, _, current) = get_table_index(&ds, "user", "test").await?;
+		assert_eq!(current.index_id, ikb.index(), "{sql} keeps the index's id");
+		assert_eq!(current.format_version, INDEX_FORMAT_VERSION);
+		let after = durable_build_state(&ds, &ikb).await?;
+		assert_eq!(after.generation, before.generation, "{sql} starts no build");
+		assert_eq!(after.phase, IndexBuildPhase::Online);
+		assert_eq!(after.initial, before.initial, "{sql} scans nothing");
+	}
+	let (_, _, _, current) = get_table_index(&ds, "user", "test").await?;
+	assert_eq!(current.comment.as_deref(), Some("second"), "the comment is refreshed");
+	// The kept index went on being maintained by the write made after its build.
+	expect_indexed_query_len(
+		&ds,
+		&session,
+		"SELECT * FROM user WITH INDEX test WHERE email = 'two@example.com'",
+		1,
+	)
+	.await?;
+	Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn define_index_overwrite_changed_definition_rebuilds_with_fresh_index_id() -> Result<()> {
+	let (ds, session, ikb) = define_overwritten_index_test().await?;
+	execute_all(&ds, &session, "DEFINE INDEX OVERWRITE test ON user FIELDS account;").await?;
+	let (ns, db, table, current) = get_table_index(&ds, "user", "test").await?;
+	assert_ne!(current.index_id, ikb.index());
+	let after =
+		durable_build_state(&ds, &IndexKeyBase::new(ns, db, table, current.index_id)).await?;
+	assert_eq!(after.phase, IndexBuildPhase::Online);
+	assert_eq!(after.initial, Some(2), "the rebuild scans every record");
+	assert!(!durable_build_state_exists(&ds, &ikb).await?, "the replaced index is retired");
+	Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn define_index_overwrite_unchanged_rebuilds_an_index_that_is_not_online() -> Result<()> {
+	for phase in [IndexBuildPhase::Error, IndexBuildPhase::Building, IndexBuildPhase::Closing] {
+		let (ds, session, ikb) = define_overwritten_index_test().await?;
+		let mut state = durable_build_state(&ds, &ikb).await?;
+		state.phase = phase;
+		state.owner = None;
+		state.report_status = Some(report_status_from_phase(phase));
+		set_durable_build_state(&ds, &ikb, state).await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE INDEX OVERWRITE test ON user FIELDS email COMMENT 'first';",
+		)
+		.await?;
+		let (ns, db, table, current) = get_table_index(&ds, "user", "test").await?;
+		assert_ne!(current.index_id, ikb.index(), "an index {phase:?} is rebuilt");
+		let after =
+			durable_build_state(&ds, &IndexKeyBase::new(ns, db, table, current.index_id)).await?;
+		assert_eq!(after.phase, IndexBuildPhase::Online);
+		assert_eq!(after.initial, Some(2));
+	}
+	Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn define_index_overwrite_unchanged_rebuilds_an_index_of_an_older_format() -> Result<()> {
+	let (ds, session, ikb) = define_overwritten_index_test().await?;
+	let (ns, db, table, current) = get_table_index(&ds, "user", "test").await?;
+	let mut older = current.as_ref().clone();
+	older.format_version = INDEX_FORMAT_VERSION - 1;
+	let tx = ds.transaction(TransactionType::Write).await?;
+	catch!(tx, tx.put_tb_index(ns, db, &table, &older).await);
+	tx.commit().await?;
+	execute_all(&ds, &session, "DEFINE INDEX OVERWRITE test ON user FIELDS email COMMENT 'first';")
+		.await?;
+	let (_, _, _, current) = get_table_index(&ds, "user", "test").await?;
+	assert_ne!(current.index_id, ikb.index(), "an index of an older format is rebuilt");
+	assert_eq!(current.format_version, INDEX_FORMAT_VERSION);
+	Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn remove_index_cancel_preserves_durable_ready_state() -> Result<()> {
 	let (ds, session) = new_index_test_ds().await?;
@@ -2289,8 +2396,10 @@ async fn assert_every_wait_survives_a_pass_failure_after_online(
 		site,
 	)
 	.await?;
+	// An overwrite that restates the index's definition keeps the index and builds nothing, so
+	// the index it replaces measures distance another way.
 	assert_a_pass_failure_after_online_keeps_the_index(
-		Some(&define),
+		Some(&define.replace("EUCLIDEAN", "COSINE")),
 		&format!("DEFINE INDEX OVERWRITE ix ON t FIELDS vec {kind}"),
 		site,
 	)
@@ -2906,8 +3015,9 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CapturedLog {
 #[tokio::test]
 async fn define_index_blocking_is_slow_logged_with_its_build() -> Result<()> {
 	const SLOW: Duration = Duration::from_millis(500);
-	// Each injected conflict holds the build for its retry pause of 100ms.
-	const HELD_BY_CONFLICTS: usize = 8;
+	// Each injected conflict holds the build for its retry pause, which for a build a statement
+	// awaits doubles from at least 1ms to at least 50ms: twenty in a row hold it for over 700ms.
+	const HELD_BY_CONFLICTS: usize = 20;
 	let log = CapturedLog::default();
 	let subscriber = tracing_subscriber::fmt()
 		.with_writer(log.clone())
@@ -20248,6 +20358,87 @@ async fn parallel_creates_over_a_fulltext_index_all_commit() -> Result<()> {
 			.await?,
 		serde_json::json!([WRITERS * CREATES])
 	);
+	Ok(())
+}
+
+/// Times a synchronous compound `UNIQUE` definition on a relation table, alone and after five
+/// `CONCURRENTLY` definitions on the same table in the same query, over a fresh database each
+/// trial, and prints the median, minimum and maximum of each. Run in release mode, with
+/// `--ignored --nocapture`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "a timing harness, not a test"]
+async fn sync_unique_after_concurrent_definitions_timing() -> Result<()> {
+	const MODELS: usize = 170;
+	const TRIALS: usize = 7;
+	const CONCURRENT: &str = "
+		DEFINE INDEX OVERWRITE idx_sr ON has_attribute FIELDS source_rel CONCURRENTLY;
+		DEFINE INDEX OVERWRITE idx_sr_in ON has_attribute FIELDS source_rel, in CONCURRENTLY;
+		DEFINE INDEX OVERWRITE idx_sr_out ON has_attribute FIELDS source_rel, out CONCURRENTLY;
+		DEFINE INDEX OVERWRITE idx_in ON has_attribute FIELDS in CONCURRENTLY;
+		DEFINE INDEX OVERWRITE idx_out ON has_attribute FIELDS out CONCURRENTLY;";
+	const UNIQUE: &str =
+		"DEFINE INDEX OVERWRITE idx_sr_in_out ON has_attribute FIELDS source_rel, in, out UNIQUE;";
+	// The datastore path, `memory` unless `SURREAL_TIMING_PATH` names another (a `rocksdb://`
+	// path needs the `kv-rocksdb` feature).
+	let path = std::env::var("SURREAL_TIMING_PATH").unwrap_or_else(|_| "memory".to_owned());
+	let ds = Datastore::builder().build_with_path(&path).await?;
+	let summary = |name: &str, mut times: Vec<Duration>| {
+		times.sort();
+		println!(
+			"{name}: median {:?} min {:?} max {:?}",
+			times[times.len() / 2],
+			times[0],
+			times[times.len() - 1]
+		);
+	};
+	let mut alone = Vec::new();
+	let mut after = Vec::new();
+	let mut batch = Vec::new();
+	for trial in 0..TRIALS * 2 {
+		let session = Session::owner().with_ns("timing").with_db(&format!("db{trial}"));
+		let tx = ds.transaction(TransactionType::Write).await?;
+		tx.ensure_ns_db(None, "timing", &format!("db{trial}")).await?;
+		tx.commit().await?;
+		execute_all(
+			&ds,
+			&session,
+			&format!(
+				"DEFINE TABLE resource SCHEMALESS;
+				 DEFINE TABLE attribute SCHEMALESS;
+				 DEFINE TABLE has_attribute TYPE RELATION IN resource OUT attribute SCHEMALESS;
+				 FOR $model IN 0..{MODELS} {{
+					LET $resource = type::record('resource', $model);
+					UPSERT $resource SET name = string::concat('model_', <string>$model);
+					FOR $column IN 0..8 {{
+						LET $attribute = type::record('attribute', $model * 8 + $column);
+						UPSERT $attribute SET name = string::concat('column_', <string>$column);
+						RELATE $resource->has_attribute->$attribute SET source_rel = 'HAS_COLUMN';
+					}};
+				 }};"
+			),
+		)
+		.await?;
+		let results = if trial % 2 == 0 {
+			let started = Instant::now();
+			let results = ds.execute(UNIQUE, &session, None).await?;
+			alone.push(started.elapsed());
+			results
+		} else {
+			let started = Instant::now();
+			let results = ds.execute(&format!("{CONCURRENT}\n{UNIQUE}"), &session, None).await?;
+			batch.push(started.elapsed());
+			after.push(results.last().map(|result| result.time).unwrap_or_default());
+			results
+		};
+		for result in results {
+			result.result?;
+		}
+		// The concurrent builds finish before the next trial.
+		sleep(Duration::from_millis(500)).await;
+	}
+	summary("sync UNIQUE alone", alone);
+	summary("sync UNIQUE after five CONCURRENTLY (its statement)", after);
+	summary("whole six-statement batch", batch);
 	Ok(())
 }
 

@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 use std::task::{Context as TaskContext, Poll};
 use std::time::Duration;
@@ -64,6 +64,25 @@ use crate::kvs::{
 /// How long to wait before retrying a conflicting index-build cleanup.
 /// Matches the reservation-release pause it runs beside.
 const INDEX_BUILD_CLEANUP_RETRY_SLEEP: Duration = Duration::from_millis(100);
+
+/// The pause before a build retries a transaction that conflicted
+/// ([`Building::conflict_pause`]): every pause of a build no statement awaits,
+/// and the longest of a build a statement awaits.
+///
+/// Builds of indexes on one table claim the records' mappings in the table's
+/// shared doc-ID space, so their batches conflict with one another: the first
+/// to commit a batch claims its mappings, and every other build retries that
+/// batch, now reading the mappings claimed. A pause this long lets the build
+/// that won run ahead, so the others follow it batch after batch rather than
+/// racing it for the next one.
+const BUILD_CONFLICT_RETRY_MAX: Duration = Duration::from_millis(100);
+
+/// The longest pause before the first retry of a build a statement awaits,
+/// after a commit of its own: each further conflict in a row doubles it, up to
+/// [`BUILD_CONFLICT_RETRY_MAX`]. A build that lost a batch to a background
+/// build retries it at once, so the statement waits for little more than its
+/// own work.
+const BUILD_CONFLICT_RETRY_MIN: Duration = Duration::from_millis(2);
 
 /// How long an owned state transition waits before retrying a conflict or a
 /// missed compare-and-swap. Matches the pause of the builder's other retries.
@@ -583,6 +602,7 @@ impl IndexBuilder {
 			Building::with_places(ctx, self.tf.clone(), opt, tb, ix, ix_key, carried)?
 				.signalling(&self.closing_settled);
 		// A sender is what a blocking statement waits on.
+		building.awaited = sdr.is_some();
 		if sdr.is_some() {
 			building.analyzer = building.statement_analyzer(ctx).await?;
 		}
@@ -1071,10 +1091,10 @@ impl IndexBuilder {
 		let carried = carried_places(ctx, blocking);
 		#[cfg(test)]
 		lent_places::note(ctx.node_id(), &ix.name, carried.is_some());
-		let building = Arc::new(
-			Building::with_places(ctx, self.tf.clone(), opt, tb, ix, key, carried)?
-				.signalling(&self.closing_settled),
-		);
+		let mut building = Building::with_places(ctx, self.tf.clone(), opt, tb, ix, key, carried)?
+			.signalling(&self.closing_settled);
+		building.awaited = blocking;
+		let building = Arc::new(building);
 		let claimed = if claimable {
 			building.claim_staged_generation(generation).await?
 		} else {
@@ -1372,6 +1392,13 @@ pub(super) struct Building {
 	/// How many waits for older write transactions this build has begun
 	/// ([`crate::kvs::write_barrier`]).
 	pub(super) write_barrier_waits_begun: AtomicU64,
+	/// How many retryable conflicts this build has met since its last commit,
+	/// which sizes the pause before its next retry
+	/// ([`Self::conflict_pause`]).
+	conflict_streak: AtomicU32,
+	/// Whether a statement awaits this build, which then retries a conflict
+	/// sooner than a background build does ([`Self::conflict_pause`]).
+	pub(super) awaited: bool,
 	/// Rendezvous controlling when durable build ownership is released.
 	///
 	/// Ownership is what keeps every node's background index compaction off an
@@ -1523,6 +1550,8 @@ impl Building {
 			build_generation: AtomicU64::new(0),
 			remote_generation: AtomicU64::new(0),
 			write_barrier_waits_begun: AtomicU64::new(0),
+			conflict_streak: AtomicU32::new(0),
+			awaited: false,
 			aborted: AtomicBool::new(false),
 			finished: AtomicBool::new(false),
 			release_gate: AtomicU8::new(RELEASE_GATE_STATEMENT),
@@ -2021,7 +2050,7 @@ impl Building {
 				for key in keys {
 					tx.del(crate::key::Key::from(key)).await?;
 				}
-				tx.commit().await?;
+				self.commit_build_tx(&tx).await?;
 				Ok(Some(more))
 			}
 			.await;
@@ -2083,7 +2112,7 @@ impl Building {
 				}
 				return Err(err);
 			}
-			match tx.commit().await {
+			match self.commit_build_tx(&tx).await {
 				Ok(()) => return Ok(()),
 				Err(err) => {
 					if self
@@ -3854,6 +3883,40 @@ impl Building {
 		Ok(())
 	}
 
+	/// The pause before retrying after a conflict: [`BUILD_CONFLICT_RETRY_MAX`]
+	/// for a build no statement awaits. For one a statement awaits, a random
+	/// time between half and all of a ceiling that starts at
+	/// [`BUILD_CONFLICT_RETRY_MIN`] and doubles with each conflict since this
+	/// build last committed, up to [`BUILD_CONFLICT_RETRY_MAX`]; the randomness
+	/// keeps awaited builds that conflict with one another from retrying in
+	/// step.
+	fn conflict_pause(&self) -> Duration {
+		use rand::Rng as _;
+		if !self.awaited {
+			return BUILD_CONFLICT_RETRY_MAX;
+		}
+		let streak = self.conflict_streak.fetch_add(1, Ordering::Relaxed).min(16);
+		let ceiling =
+			BUILD_CONFLICT_RETRY_MIN.saturating_mul(1 << streak).min(BUILD_CONFLICT_RETRY_MAX);
+		rand::rng().random_range(ceiling / 2..=ceiling)
+	}
+
+	/// Commit `tx`, a transaction of this build's, ending its run of conflicts
+	/// when the commit succeeds ([`Self::conflict_pause`]).
+	pub(super) async fn commit_build_tx(&self, tx: &Transaction) -> Result<()> {
+		let res = tx.commit().await;
+		if res.is_ok() {
+			self.note_committed();
+		}
+		res
+	}
+
+	/// Note a commit of this build's, which ends its run of conflicts
+	/// ([`Self::conflict_pause`]).
+	fn note_committed(&self) {
+		self.conflict_streak.store(0, Ordering::Relaxed);
+	}
+
 	async fn retryable_conflict(&self, err: &anyhow::Error, action: &str) -> bool {
 		if is_retryable_transaction_conflict(err) {
 			debug!(
@@ -3864,7 +3927,7 @@ impl Building {
 				error = %err,
 				"retryable conflict during concurrent index build, retrying"
 			);
-			sleep(Duration::from_millis(100)).await;
+			sleep(self.conflict_pause()).await;
 			true
 		} else {
 			false
@@ -3887,7 +3950,10 @@ impl Building {
 		action: &str,
 	) -> Result<bool> {
 		match tx.commit().await {
-			Ok(()) => Ok(false),
+			Ok(()) => {
+				self.note_committed();
+				Ok(false)
+			}
 			Err(err) => {
 				if self.cancel_and_retryable_conflict(tx, &err, action).await {
 					Ok(true)
@@ -3984,7 +4050,7 @@ impl Building {
 				from = step.next;
 				continue;
 			};
-			match tx.commit().await {
+			match self.commit_build_tx(&tx).await {
 				Ok(()) => {
 					frame.finish().await;
 					from = step.next;
@@ -4231,7 +4297,7 @@ impl Building {
 					}
 					return Err(err);
 				}
-				match tx.commit().await {
+				match self.commit_build_tx(&tx).await {
 					Ok(()) => break,
 					Err(err) => {
 						if self
@@ -4474,6 +4540,7 @@ impl Building {
 						.await;
 						match committed {
 							Ok(()) => {
+								self.note_committed();
 								if let Some(frame) = frame {
 									frame.finish().await;
 								}
@@ -4597,7 +4664,7 @@ impl Building {
 						}
 						return Err(err);
 					}
-					match tx.commit().await {
+					match self.commit_build_tx(&tx).await {
 						Ok(()) => {
 							#[cfg(test)]
 							maybe_inject_non_retryable_error(

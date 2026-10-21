@@ -1913,8 +1913,11 @@ async fn step_inner(
 			write(regs, *dst, Value::from(id as i64));
 		}
 		StoreInstr::IndexReplayReuses {
+			ns,
+			db,
 			existing,
 			template,
+			healthy,
 			dst,
 		} => {
 			use crate::catalog::FromStored as _;
@@ -1924,10 +1927,28 @@ async fn step_inner(
 			};
 			let (existing, template) =
 				(decode(&read(regs, *existing))?, decode(&read(regs, *template))?);
-			let reuses = !existing.prepare_remove
+			let mut reuses = !existing.prepare_remove
 				&& existing.table_name.as_str() == template.table_name.as_str()
 				&& existing.cols == template.cols
 				&& existing.index == template.index;
+			if reuses && *healthy {
+				reuses = existing.format_version == crate::catalog::INDEX_FORMAT_VERSION && {
+					let ikb = crate::idx::IndexKeyBase::new(
+						crate::catalog::NamespaceId(id_of(&read(regs, *ns))?),
+						crate::catalog::DatabaseId(id_of(&read(regs, *db))?),
+						existing.table_name.clone(),
+						existing.index_id,
+					);
+					let state = ctx
+						.txn()
+						.get_key(&ikb.new_bs_key(), None)
+						.await
+						.map_err(ControlFlow::Err)?;
+					state.is_none_or(|state| {
+						state.phase == crate::kvs::index::IndexBuildPhase::Online
+					})
+				};
+			}
 			write(regs, *dst, Value::Bool(reuses));
 		}
 		StoreInstr::FieldAdmitsSubFields {

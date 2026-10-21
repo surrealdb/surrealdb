@@ -215,7 +215,7 @@ impl Building {
 						return Err(err);
 					}
 				};
-				match tx.commit().await {
+				match self.commit_build_tx(&tx).await {
 					Ok(()) => {
 						self.mark_durable_report(
 							generation,
@@ -265,7 +265,7 @@ impl Building {
 					.index_durable_appending_range(&ctx, &tx, durable_keys, updates_count)
 					.await
 				{
-					Ok(()) => match tx.commit().await {
+					Ok(()) => match self.commit_build_tx(&tx).await {
 						Ok(()) => {
 							self.mark_durable_report(
 								generation,
@@ -383,7 +383,7 @@ impl Building {
 					}
 				}
 			}
-			if let Err(err) = tx.commit().await {
+			if let Err(err) = self.commit_build_tx(&tx).await {
 				if self
 					.cancel_and_retryable_conflict(
 						&tx,
@@ -481,7 +481,7 @@ impl Building {
 					}
 				}
 			}
-			if let Err(err) = tx.commit().await {
+			if let Err(err) = self.commit_build_tx(&tx).await {
 				if self
 					.cancel_and_retryable_conflict(
 						&tx,

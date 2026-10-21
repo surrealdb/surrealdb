@@ -1792,12 +1792,23 @@ pub(crate) enum StoreInstr {
 		/// As [`StoreInstr::NextId`]'s `reserved`.
 		reserved: Option<u32>,
 	},
-	/// `dst` = whether an import replaying the index defined in `template`
-	/// over the one defined in `existing` may keep the existing index's data
-	/// (`import_replay_can_reuse_index`).
+	/// `dst` = whether the index defined in `template`, replacing the one
+	/// defined in `existing` in the database whose ids `ns` and `db` hold, may
+	/// keep the existing index's id, data and format: the existing index is not
+	/// being removed, and both index the same columns of the same table the
+	/// same way.
+	///
+	/// When `healthy`, the existing index must also be fit to serve as it
+	/// stands: stored in the current [`crate::catalog::INDEX_FORMAT_VERSION`],
+	/// and with a durable build state (`!bs`) that is absent or `Online`. An
+	/// index still building, closing or failed, or stored in an older format,
+	/// is not kept.
 	IndexReplayReuses {
+		ns: Reg,
+		db: Reg,
 		existing: Reg,
 		template: Reg,
+		healthy: bool,
 		dst: Reg,
 	},
 	/// `dst` = whether the field defined in `field` admits an index on a
