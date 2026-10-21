@@ -23,9 +23,15 @@ pub(crate) async fn show_changes(
 	Ok(changes.into())
 }
 
-/// The change sets `SHOW CHANGES` reports, each as the value it shows: the session's permission
-/// to view the database's tables is checked first, then the selected namespace and database are
-/// resolved, raising where either is missing, then the feed is read as [`read`] reads it.
+/// The change sets `SHOW CHANGES` reports, each as the value it shows.
+///
+/// `SHOW CHANGES` returns changefeed entries as stored, without the per-field `PERMISSIONS FOR
+/// select` pass that a `SELECT` applies, so it is an administrator-only read. The caller must both
+/// hold an actor level that covers the database and be exempt from `View` permission checks (root,
+/// or a namespace or database user holding the Viewer role or above); a permission-checked
+/// principal is refused, so the feed never discloses a field value such a caller could not
+/// `SELECT`. The selected namespace and database are resolved after the checks, raising where
+/// either is missing, before the feed is read as [`read`] reads it.
 pub(crate) async fn changes(
 	ctx: &crate::ctx::FrozenContext,
 	opt: &crate::dbs::Options,
@@ -33,8 +39,21 @@ pub(crate) async fn changes(
 	since: ShowSince,
 	limit: Option<u32>,
 ) -> Result<Vec<crate::val::Value>> {
-	use crate::iam::{Action, ResourceKind};
+	use crate::iam::{Action, PolicyError, ResourceKind};
+	// Level gate: the caller's actor level must cover the database.
 	ctx.is_allowed(opt, Action::View, ResourceKind::Table, crate::expr::Base::Db)?;
+	// Administrator gate: a caller whose `View` is permission-checked is not an exempt
+	// administrator, and the raw feed bypasses the field permissions such a caller is subject to,
+	// so it is refused here rather than served a value it could not `SELECT`.
+	if ctx.check_perms(opt, Action::View)? {
+		let (ns, db) = opt.ns_db()?;
+		return Err(crate::err::Error::IamError(PolicyError::NotAllowed {
+			actor: opt.auth.actor().to_string(),
+			action: Action::View.to_string(),
+			resource: ResourceKind::Table.on_db(ns, db).to_string(),
+		})
+		.into());
+	}
 	let txn = ctx.tx();
 	let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 	let changes = read(&txn, ns, db, table, since, limit).await?;

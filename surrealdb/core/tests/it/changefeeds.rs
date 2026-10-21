@@ -685,3 +685,70 @@ async fn test_changefeed_gc_cycle_kept() -> Result<()> {
 
 	Ok(())
 }
+
+/// `SHOW CHANGES` reads the changefeed as stored, without the per-field
+/// `PERMISSIONS FOR select` pass a `SELECT` applies, so it is served only to a
+/// caller exempt from `View` permission checks. A database-level principal that
+/// holds no system role passes the actor-level gate yet is permission-checked,
+/// so it is refused; a database-level Viewer, and a root Viewer, are exempt and
+/// read the feed.
+#[test_log::test(tokio::test)]
+async fn show_changes_is_administrator_only() -> Result<()> {
+	use std::sync::Arc;
+
+	use surrealdb_iam::{Actor, Auth, Level, Role};
+
+	let ns = "test-cf-perms";
+	let db = "test-cf-perms";
+	let (_, dbs) = new_ds(ns, db, true).await?;
+	let owner = Session::owner().with_ns(ns).with_db(db);
+
+	// A changefeed that records a field no permission-checked caller may `SELECT`.
+	let setup = "
+		DEFINE TABLE t CHANGEFEED 1h PERMISSIONS FOR select, create, update FULL;
+		DEFINE FIELD counter ON t TYPE option<number> PERMISSIONS FOR select FULL;
+		DEFINE FIELD secret ON t TYPE option<string> PERMISSIONS FOR select NONE, FOR create, update FULL;
+		CREATE t:1 SET counter = 1, secret = 'TOPSECRET';
+		UPDATE t:1 SET counter = 2, secret = 'TOPSECRET2';
+	";
+	let res = &mut dbs.execute(setup, &owner, None).await?;
+	for r in res.drain(..) {
+		r.result?;
+	}
+
+	// A database-level principal with no system role: covered by the actor-level
+	// gate, but permission-checked, so `SHOW CHANGES` is refused.
+	let limited = Session {
+		au: Arc::new(Auth::new(Actor::new(
+			"limited".to_string(),
+			vec![],
+			Level::Database(ns.to_string(), db.to_string()),
+		))),
+		..Session::default().with_ns(ns).with_db(db)
+	};
+	let res = &mut dbs.execute("SHOW CHANGES FOR TABLE t SINCE 0", &limited, None).await?;
+	assert_eq!(res.len(), 1);
+	let err = res.remove(0).result.expect_err("a permission-checked caller must be refused");
+	assert!(
+		err.to_string().contains("Not enough permissions"),
+		"expected a permission refusal, got: {err}"
+	);
+
+	// A database-level Viewer is exempt from the check and reads the feed.
+	let viewer = Session::for_level(Level::Database(ns.to_string(), db.to_string()), Role::Viewer)
+		.with_ns(ns)
+		.with_db(db);
+	let res = &mut dbs.execute("SHOW CHANGES FOR TABLE t SINCE 0", &viewer, None).await?;
+	assert_eq!(res.len(), 1);
+	let changes = res.remove(0).result?;
+	assert_ne!(changes, Value::Array(Array::new()), "a database Viewer must still read the feed");
+
+	// A root Viewer is likewise exempt.
+	let root_viewer = Session::for_level(Level::Root, Role::Viewer).with_ns(ns).with_db(db);
+	let res = &mut dbs.execute("SHOW CHANGES FOR TABLE t SINCE 0", &root_viewer, None).await?;
+	assert_eq!(res.len(), 1);
+	let changes = res.remove(0).result?;
+	assert_ne!(changes, Value::Array(Array::new()), "a root Viewer must still read the feed");
+
+	Ok(())
+}
