@@ -260,6 +260,36 @@ pub(super) async fn delay_claimed(ctx: &ExecutionContext) {
 	}
 }
 
+/// The batches [`run_batch`](super::run::run_batch) ran for each datastore, in the order they
+/// began: the rows the batch's paging skips first, `None` for a batch that is not paged, and the
+/// rows the batch holds.
+static BATCHES: LazyLock<Mutex<HashMap<usize, Vec<BatchRun>>>> = LazyLock::new(Default::default);
+
+/// One batch [`run_batch`](super::run::run_batch) ran: the rows its paging skips first, `None` for
+/// a batch that is not paged, and the rows it holds.
+type BatchRun = (Option<usize>, usize);
+
+/// A batch of `rows` rows began running, skipping `skip` of them first where it is paged.
+pub(super) fn note_batch(ctx: &ExecutionContext, skip: Option<usize>, rows: usize) {
+	BATCHES
+		.lock()
+		.unwrap_or_else(|e| e.into_inner())
+		.entry(datastore_of(ctx))
+		.or_default()
+		.push((skip, rows));
+}
+
+/// The batches the datastore `ctx` runs under has run, in the order they began, as
+/// [`note_batch`] records them.
+pub(in crate::exec::vm) fn batches_of(ctx: &ExecutionContext) -> Vec<BatchRun> {
+	BATCHES
+		.lock()
+		.unwrap_or_else(|e| e.into_inner())
+		.get(&datastore_of(ctx))
+		.cloned()
+		.unwrap_or_default()
+}
+
 /// A morsel was handed to a worker.
 pub(super) fn note_handed(ctx: &ExecutionContext) {
 	HANDED_TO_WORKERS.fetch_add(1, Ordering::Relaxed);

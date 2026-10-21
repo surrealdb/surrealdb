@@ -2426,6 +2426,15 @@ fn emit_pipeline(
 		..
 	} = body;
 
+	// The dereferences of the projection have no step of their own to carry the decision.
+	let rows_ahead = match (rows_ahead, &io.rows_ahead) {
+		(None, Some(ahead)) if ahead.derefs => Some(RowsAheadSpec {
+			fetch: None,
+			fields: ahead.fields.iter().cloned().collect(),
+			paging: fetch::paging_slot(ahead.paging, &pipeline_limits)?,
+		}),
+		(spec, _) => spec,
+	};
 	let limit_slot = match pipeline_limits.as_slice() {
 		[limit] => Some(*limit),
 		_ => None,

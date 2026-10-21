@@ -286,6 +286,25 @@ impl TestDb {
 		.await
 	}
 
+	/// As [`Self::new_on_surrealkv`], on a datastore that enforces permissions.
+	#[cfg(feature = "kv-surrealkv")]
+	pub(crate) async fn new_on_surrealkv_with_auth(
+		setup: &str,
+		dir: &std::path::Path,
+		config: surrealdb_cnf::ConfigMap,
+	) -> Self {
+		let path = format!("surrealkv://{}", dir.display());
+		Self::build_at(
+			Datastore::builder(),
+			&path,
+			setup,
+			true,
+			config,
+			crate::dbs::Capabilities::all(),
+		)
+		.await
+	}
+
 	/// As [`Self::new_on_rocksdb`], over a datastore that `builder` prepares, such as one with a
 	/// test-owned memory governor or temporary store.
 	#[cfg(feature = "kv-rocksdb")]

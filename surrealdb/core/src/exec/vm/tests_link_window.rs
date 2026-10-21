@@ -10,9 +10,10 @@ use surrealdb_kvs::consts::NORMAL_BATCH_SIZE;
 use surrealdb_types::ToSql;
 
 use crate::dbs::Session;
-use crate::exec::ir::phys::io::{FORCE_LINK_WINDOWS, FORCE_ROWS_AHEAD};
+use crate::exec::ir::phys::io::{FORCE_LINK_WINDOWS, FORCE_MORSEL_PLACEMENT, FORCE_ROWS_AHEAD};
 use crate::exec::operators::link_window::tests::{aheads, eaches, fills, reset_fills};
 use crate::exec::operators::test_util::TestDb;
+use crate::exec::vm::morsel::{batches_of, counts_of};
 
 /// What a run answered, and how many windows it filled.
 struct Run {
@@ -24,6 +25,15 @@ struct Run {
 	ahead: (usize, usize),
 	/// The collections of links the statements fetched by overlapping reads.
 	each: usize,
+	/// The batches the statement ran through the morsel host, in the order they began: the rows
+	/// the batch's paging skips first, where it is paged, and the rows it holds.
+	batches: Vec<(Option<usize>, usize)>,
+	/// The morsels the statement handed to workers.
+	#[cfg_attr(not(feature = "kv-surrealkv"), allow(dead_code))]
+	handed: usize,
+	/// The forced morsel placement was refused by the plan's legality, so the statement did not
+	/// run as it.
+	refused: bool,
 }
 
 /// How a run is set up.
@@ -35,6 +45,11 @@ struct Setup<'a> {
 	/// Let the plan read the links of a batch of rows before the rows run. Off, the collection
 	/// windows are the only windows a run fills.
 	rows_ahead: bool,
+	/// Place every pipeline as range morsels, so its batches run through the morsel host.
+	morsels: bool,
+	/// Run on a SurrealKV datastore.
+	#[cfg(feature = "kv-surrealkv")]
+	surrealkv: bool,
 	/// Run on a SurrealKV datastore that keeps versions, which answers reads at a version; the
 	/// in-memory one refuses them.
 	#[cfg(feature = "kv-surrealkv")]
@@ -52,7 +67,11 @@ async fn run(windows: bool, how: &Setup<'_>, setup: &str, sql: &str) -> Run {
 	#[cfg(feature = "kv-surrealkv")]
 	let dir = temp_dir::TempDir::new().expect("a directory");
 	let db = match how.record_user {
+		#[cfg(feature = "kv-surrealkv")]
+		Some(_) if how.surrealkv => TestDb::new_on_surrealkv_with_auth(setup, dir.path(), config).await,
 		Some(_) => TestDb::new_with_auth_and_config(setup, config).await,
+		#[cfg(feature = "kv-surrealkv")]
+		None if how.surrealkv => TestDb::new_on_surrealkv(setup, dir.path(), config).await,
 		#[cfg(feature = "kv-surrealkv")]
 		None if how.versioned => {
 			let path = format!("surrealkv://{}?versioned=true&retention=1h", dir.path().display());
@@ -78,8 +97,12 @@ async fn run(windows: bool, how: &Setup<'_>, setup: &str, sql: &str) -> Run {
 	};
 	let session = how.record_user.clone().unwrap_or_else(TestDb::owner);
 	reset_fills();
+	let ran = batches_of(&db.exec_ctx().await).len();
+	let handed_before = counts_of(&db.exec_ctx().await).handed;
+	// The setup writes, which morsels never run: only the statement under test is placed.
+	FORCE_MORSEL_PLACEMENT.with(|forced| forced.set(how.morsels));
 	let responses = db.datastore().execute(sql, &session, None).await.expect("the request runs");
-	let answers = responses
+	let answers: Vec<String> = responses
 		.into_iter()
 		.map(|response| match response.result {
 			Ok(value) => value.to_sql(),
@@ -89,13 +112,21 @@ async fn run(windows: bool, how: &Setup<'_>, setup: &str, sql: &str) -> Run {
 	let filled = fills();
 	let ahead = aheads();
 	let each = eaches();
+	let batches = batches_of(&db.exec_ctx().await).split_off(ran);
+	let handed = counts_of(&db.exec_ctx().await).handed - handed_before;
 	FORCE_LINK_WINDOWS.with(|forced| forced.set(None));
 	FORCE_ROWS_AHEAD.with(|forced| forced.set(None));
+	FORCE_MORSEL_PLACEMENT.with(|forced| forced.set(false));
+	let refused = how.morsels
+		&& answers.first().is_some_and(|answer| answer.contains("IR verification failed"));
 	Run {
 		answers,
 		filled,
 		ahead,
 		each,
+		batches,
+		handed,
+		refused,
 	}
 }
 
@@ -153,6 +184,9 @@ async fn run_in_transaction(windows: bool, how: &Setup<'_>, setup: &str, request
 		filled,
 		ahead,
 		each,
+		batches: Vec::new(),
+		handed: 0,
+		refused: false,
 	}
 }
 
@@ -610,6 +644,15 @@ const SERIAL: &[(&str, &str)] = &[("morsel_split_rows", "18446744073709551615")]
 const MORSELS: &[(&str, &str)] =
 	&[("morsel_split_rows", "1"), ("morsel_target_bytes", "4000"), ("morsel_oltp_reserve", "0")];
 
+/// [`MORSELS`] on a datastore that offers no read views, where the policy then cuts a range
+/// without one: the in-memory datastore places a paged range as morsels that run on workers.
+const MORSELS_NO_VIEW: &[(&str, &str)] = &[
+	("morsel_split_rows", "1"),
+	("morsel_target_bytes", "4000"),
+	("morsel_oltp_reserve", "0"),
+	("morsel_needs_view", "false"),
+];
+
 #[tokio::test]
 async fn a_fetch_of_one_link_per_row_reads_the_links_of_each_batch_before_its_rows() {
 	let setup = comments(1200);
@@ -861,4 +904,626 @@ async fn a_record_a_window_decodes_serves_the_next_dereference_from_the_cache() 
 	assert_eq!(read(&with), read(&without), "with {with:?}, without {without:?}");
 	assert!(read(&with) <= 50, "{with:?}");
 	same(&Setup::default(), &setup, SQL, true).await;
+}
+
+/// Runs `sql` one task at a time with every window off, and then with rows-ahead on under the
+/// setup `how`, and requires the same answers. Answers the second run. A statement the plan's
+/// legality does not let run as the morsels `how` forces runs as it is placed, and the run says
+/// it was `refused`.
+async fn matches_unwindowed(how: &Setup<'_>, setup: &str, sql: &str) -> Run {
+	let plain = Setup {
+		config: SERIAL,
+		record_user: how.record_user.clone(),
+		..Setup::default()
+	};
+	let off = run(false, &plain, setup, sql).await;
+	let on = run(true, how, setup, sql).await;
+	assert_eq!(off.ahead.0, 0, "a run with its windows off fills none");
+	if !on.refused {
+		// Rows of a statement that pages nothing arrive in the order the morsels finish.
+		let unordered = !on.batches.is_empty() && !sql.contains("LIMIT") && !sql.contains("START");
+		assert_eq!(on.answers.len(), off.answers.len());
+		for (on, off) in on.answers.iter().zip(&off.answers) {
+			if unordered {
+				assert_eq!(fragments(on), fragments(off), "the answers of {sql}");
+			} else {
+				assert_eq!(on, off, "the answers of {sql}");
+			}
+		}
+	}
+	on
+}
+
+/// The objects of an array answer, sorted: the answer as a set of rows.
+fn fragments(answer: &str) -> Vec<&str> {
+	let inner = answer.trim_start_matches("[{").trim_end_matches("}]");
+	let mut parts: Vec<&str> = inner.split("}, {").collect();
+	parts.sort_unstable();
+	parts
+}
+
+/// The setups a batch of rows runs in: every row on one task, the batches of a few rows on
+/// workers, and the same on SurrealKV where the policy itself places a statement as morsels. The
+/// plan verifier refuses a forced placement of a projection that dereferences a link, and of some
+/// statements with a paging clause or a permission, so such a statement runs unforced
+/// ([`placed`]) wherever a forced run is refused.
+fn batched() -> Vec<Setup<'static>> {
+	let mut setups = Vec::new();
+	for config in [SERIAL, MORSELS] {
+		for morsels in [true, false] {
+			setups.push(Setup {
+				config,
+				rows_ahead: true,
+				morsels,
+				..Setup::default()
+			});
+		}
+		#[cfg(feature = "kv-surrealkv")]
+		for morsels in [true, false] {
+			setups.push(Setup {
+				config,
+				rows_ahead: true,
+				morsels,
+				surrealkv: true,
+				..Setup::default()
+			});
+		}
+	}
+	setups.push(Setup {
+		config: MORSELS_NO_VIEW,
+		rows_ahead: true,
+		..Setup::default()
+	});
+	assert!(!setups.is_empty(), "a test with no setup runs nothing");
+	setups
+}
+
+/// The setups in which the policy places a paged range as morsels, whose batches run on workers
+/// and page their rows: the in-memory datastore with ranges cut without a view, and SurrealKV,
+/// whose read views let the config cut them.
+fn paged() -> Vec<Setup<'static>> {
+	#[cfg_attr(not(feature = "kv-surrealkv"), allow(unused_mut))]
+	let mut setups = vec![Setup {
+		config: MORSELS_NO_VIEW,
+		rows_ahead: true,
+		..Setup::default()
+	}];
+	#[cfg(feature = "kv-surrealkv")]
+	setups.push(Setup {
+		config: MORSELS,
+		rows_ahead: true,
+		surrealkv: true,
+		..Setup::default()
+	});
+	setups
+}
+
+#[tokio::test]
+async fn a_fetch_over_morsel_batches_reads_the_links_of_each_batch_ahead() {
+	let setup = comments(1200);
+	let mut ran = Ran::default();
+	for how in batched() {
+		for (sql, filled) in [
+			("SELECT * FROM comment FETCH author;", true),
+			("SELECT * FROM comment FETCH author, friends;", true),
+			("SELECT * FROM comment FETCH friends.*;", true),
+			("SELECT * FROM comment LIMIT 700 START 100 FETCH author;", true),
+			("SELECT * FROM comment LIMIT 5 FETCH author;", true),
+			("SELECT * FROM comment LIMIT 0 FETCH author;", false),
+			("SELECT * FROM comment START 1100 FETCH author;", true),
+			("SELECT * FROM comment START 5000 FETCH author;", false),
+		] {
+			let on = matches_unwindowed(&how, &setup, sql).await;
+			ran.note(sql, &on);
+			if filled && how.morsels && !on.refused {
+				assert!(on.ahead.0 > 0, "{sql}: no rows window was filled under morsels");
+			}
+		}
+	}
+	ran.every_statement_ran();
+	// The plan's legality admits a plain FETCH of top-level link fields as morsels.
+	for config in [SERIAL, MORSELS] {
+		let how = Setup {
+			config,
+			rows_ahead: true,
+			morsels: true,
+			..Setup::default()
+		};
+		for sql in
+			["SELECT * FROM comment FETCH author;", "SELECT * FROM comment FETCH author, friends;"]
+		{
+			let on = matches_unwindowed(&how, &setup, sql).await;
+			assert!(!on.refused && on.ahead.0 > 0, "{sql}: {:?}", on.ahead);
+			// A batch holds more links than a window does, and is read a window at a time: the
+			// links of every row of every batch are read ahead.
+			assert!(on.ahead.1 >= 1000, "{sql}: {:?}", on.ahead);
+			assert!(on.batches.iter().all(|(skip, _)| skip.is_none()), "{:?}", on.batches);
+			if config == MORSELS {
+				assert!(on.batches.len() >= 2, "{sql}: the rows ran in {:?}", on.batches);
+			}
+		}
+	}
+}
+
+/// The setups whose placement is the plan's own: on the in-memory datastore, which offers no read
+/// views and so places a statement serially whatever the config says, and on SurrealKV, which
+/// places a paged range as morsels where the config cuts it into batches.
+fn placed() -> Vec<Setup<'static>> {
+	let setups: Vec<Setup<'static>> = batched().into_iter().filter(|how| !how.morsels).collect();
+	assert!(setups.len() >= 2, "the in-memory datastore runs every placed statement");
+	setups
+}
+
+/// The setups `sql` runs in: a projection that dereferences a link runs only as it is placed.
+fn setups_for(sql: &str) -> Vec<Setup<'static>> {
+	if sql.contains("FETCH") {
+		batched()
+	} else {
+		placed()
+	}
+}
+
+/// Which statements a test ran as its setups say. `matches_unwindowed` skips the comparison of a
+/// forced placement the plan's legality refuses, so a test must see each of its statements run
+/// unrefused in at least one setup.
+#[derive(Default)]
+struct Ran(std::collections::BTreeMap<String, bool>);
+
+impl Ran {
+	fn note(&mut self, sql: &str, on: &Run) {
+		*self.0.entry(sql.to_owned()).or_default() |= !on.refused;
+	}
+
+	fn every_statement_ran(&self) {
+		assert!(!self.0.is_empty(), "the test ran no statement");
+		for (sql, ran) in &self.0 {
+			assert!(ran, "every setup refused {sql}");
+		}
+	}
+}
+
+#[tokio::test]
+async fn a_paged_batch_reads_the_links_of_the_rows_past_its_skip_and_no_others() {
+	let setup = comments(1200);
+	for how in paged() {
+		a_paged_batch_reads_only_past_its_skip(&how, &setup).await;
+	}
+}
+
+async fn a_paged_batch_reads_only_past_its_skip(how: &Setup<'_>, setup: &str) {
+	// The policy places a paged range as morsels, and the config cuts it into batches.
+	for sql in [
+		"SELECT * FROM comment START 100 LIMIT 5 FETCH author;",
+		"SELECT author.name FROM comment START 100 LIMIT 5;",
+	] {
+		let on = matches_unwindowed(how, setup, sql).await;
+		assert!(
+			on.batches.iter().any(|(skip, rows)| skip.is_some_and(|skip| skip > 0 && skip < *rows)),
+			"{sql}: no batch holds rows past its skip: {:?}",
+			on.batches
+		);
+		assert!(on.ahead.0 > 0, "{sql}: the rows that pass the skip are read ahead");
+		// Rows 100 to 104 hold users 100 to 103 and the one user no row's link finds; a window
+		// that held the skipped rows' links would hold a hundred more.
+		assert!(on.ahead.1 <= 5, "{sql}: {} keys were read ahead of the skip", on.ahead.1);
+	}
+	// A skip past the first batch: a batch the skip covers whole reads nothing ahead, the batch it
+	// ends in reads the links of the rows after it, and the batches after read theirs. The 200
+	// rows after the skip name at most 200 authors (each is one user), where the 350 rows the
+	// clause reaches through would name more.
+	for sql in [
+		"SELECT * FROM comment START 150 LIMIT 200 FETCH author;",
+		"SELECT author.name FROM comment START 150 LIMIT 200;",
+	] {
+		let on = matches_unwindowed(how, setup, sql).await;
+		assert!(
+			on.batches.iter().any(|(skip, rows)| skip.is_some_and(|skip| skip >= *rows)),
+			"{sql}: no batch lies whole within the skip: {:?}",
+			on.batches
+		);
+		assert!(
+			on.batches.iter().any(|(skip, rows)| skip.is_some_and(|skip| skip > 0 && skip < *rows)),
+			"{sql}: no batch holds rows past its skip: {:?}",
+			on.batches
+		);
+		assert!(on.ahead.0 > 0, "{sql}");
+		assert!(on.ahead.1 <= 200, "{sql}: {} keys were read ahead of the skip", on.ahead.1);
+	}
+}
+
+#[tokio::test]
+async fn a_dereference_over_a_paged_range_reads_the_links_of_each_batch_on_its_worker() {
+	let setup = comments(1200);
+	for how in paged() {
+		a_paged_range_reads_on_its_workers(&how, &setup).await;
+	}
+}
+
+async fn a_paged_range_reads_on_its_workers(how: &Setup<'_>, setup: &str) {
+	// A paged range wide enough to be cut runs its batches on workers, each filling a window on
+	// its own state.
+	for sql in [
+		"SELECT author.name FROM comment START 20 LIMIT 900;",
+		"SELECT * FROM comment START 20 LIMIT 900 FETCH author;",
+	] {
+		let on = matches_unwindowed(how, setup, sql).await;
+		assert!(on.batches.len() >= 2, "{sql}: the rows ran in {} batches", on.batches.len());
+		assert!(on.handed > 0, "{sql}: no batch ran on a worker");
+		assert!(on.ahead.0 >= on.batches.len(), "{sql}: {:?} for {:?}", on.ahead, on.batches);
+	}
+	// A dereference that pages nothing is not run as batches of rows: the policy keeps a whole
+	// table scan in the cursor, where the scan itself fills the window of each batch it reads.
+	let sql = "SELECT author.name FROM comment;";
+	let on = matches_unwindowed(how, setup, sql).await;
+	assert!(on.batches.is_empty() && on.handed == 0, "{sql}: {:?}", on.batches);
+	assert!(on.ahead.0 > 0, "{sql}: the scan reads the links ahead");
+}
+
+#[tokio::test]
+async fn a_paging_clause_that_crosses_a_morsel_boundary_reads_what_the_serial_run_reads() {
+	let setup = comments(1200);
+	let mut ran = Ran::default();
+	for sql in [
+		"SELECT * FROM comment START 7 LIMIT 20 FETCH author;",
+		"SELECT * FROM comment START 3 LIMIT 3 FETCH author, friends;",
+		"SELECT * FROM comment START 20 LIMIT 200 FETCH author;",
+		"SELECT author.name FROM comment START 7 LIMIT 20;",
+		"SELECT author.name FROM comment START 20 LIMIT 200;",
+		"SELECT author.name, friends.name FROM comment START 1 LIMIT 600;",
+	] {
+		for how in setups_for(sql) {
+			let on = matches_unwindowed(&how, &setup, sql).await;
+			ran.note(sql, &on);
+			// The batches the config cuts a paged range into, which a clause can span.
+			#[cfg(feature = "kv-surrealkv")]
+			let surrealkv = how.surrealkv;
+			#[cfg(not(feature = "kv-surrealkv"))]
+			let surrealkv = false;
+			let cut = how.config == MORSELS_NO_VIEW || (how.config == MORSELS && surrealkv);
+			if cut && !how.morsels && sql.contains("LIMIT 200") {
+				assert!(on.batches.len() >= 2, "{sql}: the rows ran in {:?}", on.batches);
+				assert!(on.ahead.0 > 0, "{sql}: no rows window");
+			}
+			if !on.refused && !sql.contains("FETCH") {
+				assert!(on.ahead.0 > 0, "{sql}: the dereference reads no link ahead");
+			}
+		}
+	}
+	ran.every_statement_ran();
+}
+
+#[tokio::test]
+async fn a_dereference_of_one_link_per_row_reads_the_links_of_each_batch_before_its_rows() {
+	let setup = comments(1200);
+	let mut ran = Ran::default();
+	for how in placed() {
+		for (sql, filled) in [
+			("SELECT author.name FROM comment;", true),
+			("SELECT VALUE author.name FROM comment;", true),
+			("SELECT author.name, author.id AS who, text FROM comment;", true),
+			("SELECT author.name, friends.name FROM comment;", true),
+			("SELECT author.name FROM comment LIMIT 700 START 100;", true),
+			("SELECT author.name FROM comment LIMIT 5;", true),
+			("SELECT author.name FROM comment LIMIT 0;", false),
+			("SELECT author.name FROM comment START 1100;", true),
+			("SELECT author.name FROM comment START 5000;", false),
+			// A missing record and a NONE link answer NONE as they do unwindowed.
+			("SELECT author.name FROM comment:11, comment:13, comment:26;", false),
+			("SELECT author.name FROM comment WHERE text != '3';", false),
+			("SELECT author.name FROM comment ORDER BY text DESC LIMIT 10;", false),
+		] {
+			let on = matches_unwindowed(&how, &setup, sql).await;
+			ran.note(sql, &on);
+			assert!(!on.refused, "{sql}: a placed statement is never refused");
+			if filled {
+				assert!(on.ahead.0 > 0, "{sql}: no rows window was filled");
+				assert!(on.ahead.1 > 0, "{sql}: the window held no key");
+			} else {
+				assert_eq!(on.ahead.0, 0, "{sql}: a row that may not reach the projection");
+			}
+		}
+	}
+	ran.every_statement_ran();
+}
+
+#[tokio::test]
+async fn a_dereference_reads_no_link_ahead_where_the_plan_does_not_say_so() {
+	let setup = "DEFINE TABLE user SCHEMALESS; DEFINE TABLE computed SCHEMALESS;
+		DEFINE FIELD author ON computed COMPUTED type::record('user', n);
+		DEFINE TABLE walled SCHEMALESS;
+		DEFINE FIELD author ON walled PERMISSIONS FOR select WHERE true;
+		DEFINE TABLE comment SCHEMALESS;
+		FOR $i IN 0..60 {
+			CREATE type::record('user', $i) SET name = <string>$i;
+			CREATE type::record('computed', $i) SET n = $i;
+			CREATE type::record('walled', $i) SET author = type::record('user', $i);
+			CREATE type::record('comment', $i) SET author = type::record('user', $i);
+		};";
+	let how = Setup {
+		rows_ahead: true,
+		..Setup::default()
+	};
+	for sql in [
+		"SELECT author.name FROM computed;",
+		"SELECT author.name FROM walled;",
+		"SELECT author.name FROM comment WHERE author.name != '3';",
+		// The ids a write generates differ from run to run, so it answers only what it counts.
+		"SELECT author.name, (CREATE audit SET n = 1 RETURN VALUE n) AS w FROM comment;",
+	] {
+		let on = matches_unwindowed(&how, setup, sql).await;
+		assert_eq!(on.ahead.0, 0, "{sql}");
+	}
+}
+
+#[tokio::test]
+async fn a_link_that_is_not_one_record_per_row_reads_as_it_does_unwindowed() {
+	let setup = "DEFINE TABLE user SCHEMALESS; DEFINE TABLE person SCHEMALESS;
+		DEFINE TABLE comment SCHEMALESS;
+		FOR $i IN 0..40 {
+			CREATE type::record('user', $i) SET name = 'u' + <string>$i;
+			CREATE type::record('person', $i) SET name = 'p' + <string>$i;
+		};
+		FOR $i IN 0..40 {
+			CREATE type::record('comment', $i) SET author = IF $i % 5 = 0 { [user:1, person:2, user:3] }
+				ELSE IF $i % 5 = 1 { 7 } ELSE IF $i % 5 = 2 { 'text' }
+				ELSE IF $i % 2 = 0 { type::record('user', $i) } ELSE { type::record('person', $i) };
+		};";
+	let mut ran = Ran::default();
+	for sql in [
+		"SELECT author.name FROM comment;",
+		"SELECT author.name FROM comment START 3 LIMIT 20;",
+		"SELECT * FROM comment FETCH author;",
+		"SELECT * FROM comment START 3 LIMIT 20 FETCH author;",
+	] {
+		for how in setups_for(sql) {
+			let on = matches_unwindowed(&how, setup, sql).await;
+			ran.note(sql, &on);
+		}
+	}
+	ran.every_statement_ran();
+}
+
+#[tokio::test]
+async fn the_targets_of_a_window_are_judged_per_row_by_their_own_permissions() {
+	let setup = "DEFINE TABLE user SCHEMALESS PERMISSIONS FOR select WHERE n % 2 = 0;
+		DEFINE FIELD secret ON user PERMISSIONS FOR select WHERE n % 4 = 0;
+		DEFINE TABLE person SCHEMALESS PERMISSIONS FOR select NONE;
+		DEFINE TABLE comment SCHEMALESS PERMISSIONS FULL;
+		FOR $i IN 0..60 {
+			CREATE type::record('user', $i) SET n = $i, name = <string>$i, secret = 's' + <string>$i;
+			CREATE type::record('person', $i) SET n = $i, name = <string>$i;
+			CREATE type::record('comment', $i) SET
+				author = IF $i % 3 = 0 { type::record('person', $i) } ELSE { type::record('user', $i) };
+		};";
+	let session = Session::for_record(
+		"test",
+		"test",
+		"user",
+		crate::types::PublicValue::String("user:tobie".to_owned()),
+	);
+	let mut ran = Ran::default();
+	for sql in [
+		"SELECT author.name FROM comment;",
+		"SELECT author.secret, author.n FROM comment;",
+		"SELECT author.name FROM comment START 5 LIMIT 30;",
+		"SELECT * FROM comment FETCH author;",
+		"SELECT * FROM comment START 5 LIMIT 30 FETCH author;",
+	] {
+		for mut how in setups_for(sql) {
+			how.record_user = Some(session.clone());
+			let on = matches_unwindowed(&how, setup, sql).await;
+			ran.note(sql, &on);
+			// Records the principal may not read are held in the window and never leave it.
+			assert!(!on.answers[0].contains("person"), "{sql}: {}", on.answers[0]);
+			assert!(
+				on.refused || on.ahead.1 > 0,
+				"{sql}: the denied rows are read ahead: {:?}",
+				on.ahead
+			);
+		}
+	}
+	ran.every_statement_ran();
+}
+
+#[tokio::test]
+async fn the_targets_of_a_window_derive_their_computed_fields_at_their_rows() {
+	let setup = "DEFINE TABLE user SCHEMALESS;
+		DEFINE FIELD double ON user COMPUTED n * 2;
+		DEFINE FIELD kin_n ON user COMPUTED kin.n;
+		DEFINE TABLE comment SCHEMALESS;
+		FOR $i IN 0..40 {
+			CREATE type::record('kin', $i) SET n = $i + 100;
+			CREATE type::record('user', $i) SET n = $i, kin = type::record('kin', $i);
+			CREATE type::record('comment', $i) SET author = type::record('user', $i);
+		};";
+	let mut ran = Ran::default();
+	for sql in [
+		"SELECT author.double FROM comment;",
+		"SELECT author.kin_n, author.n FROM comment;",
+		"SELECT * FROM comment FETCH author;",
+		"SELECT * FROM comment START 3 LIMIT 20 FETCH author;",
+	] {
+		for how in setups_for(sql) {
+			let on = matches_unwindowed(&how, setup, sql).await;
+			ran.note(sql, &on);
+			assert!(on.refused || on.ahead.1 > 0, "{sql}: no key was read ahead");
+		}
+	}
+	ran.every_statement_ran();
+}
+
+#[cfg(feature = "kv-surrealkv")]
+#[tokio::test]
+async fn a_dereference_at_a_version_reads_no_link_ahead() {
+	let setup = comments(60);
+	let how = Setup {
+		rows_ahead: true,
+		versioned: true,
+		..Setup::default()
+	};
+	let sql = "SELECT author.name FROM comment VERSION d'2999-01-01T00:00:00Z';";
+	let off = run(false, &how, &setup, sql).await;
+	let on = run(true, &how, &setup, sql).await;
+	assert_eq!(on.answers, off.answers);
+	assert_eq!(on.ahead.0, 0, "a versioned read fills no rows window");
+}
+
+#[tokio::test]
+async fn the_links_of_a_dereferenced_batch_are_read_by_a_get_for_the_batch_and_not_for_a_link() {
+	const DEREF: &str = "SELECT author.name FROM comment;";
+	let batch = NORMAL_BATCH_SIZE as usize;
+	let rows = 20 * batch;
+	let scan = gets_of(rows, true, "SELECT * FROM comment;").await;
+	let without = gets_of(rows, false, DEREF).await - scan;
+	let with = gets_of(rows, true, DEREF).await - scan;
+	assert!(without >= rows as u32, "without windows a link is a read: {without} reads");
+	let growth = batch.next_power_of_two().ilog2() as usize - 4;
+	let bound = (3 * (rows / batch) + growth) as u32;
+	assert!(with <= bound, "{with} reads for {} batches, against {without}", rows / batch);
+	assert!(with * 4 < without, "{with} reads against {without}");
+}
+
+#[tokio::test]
+async fn a_dereferenced_batch_is_read_from_the_transactions_own_writes() {
+	let setup = "DEFINE TABLE user SCHEMALESS; DEFINE TABLE comment SCHEMALESS;";
+	let requests = [
+		"FOR $i IN 0..60 { CREATE type::record('user', $i) SET name = <string>$i RETURN NONE; };",
+		"FOR $i IN 0..60 { CREATE type::record('comment', $i) SET author = type::record('user', $i) RETURN NONE; };",
+		"UPDATE user:7 SET name = 'seven';",
+		"SELECT author.name FROM comment;",
+		"DELETE user:8;",
+		"SELECT author.name FROM comment;",
+	];
+	let how = Setup {
+		rows_ahead: true,
+		..Setup::default()
+	};
+	let on = same_in_transaction(&how, setup, &requests, true).await;
+	assert!(on.answers.iter().any(|answer| answer.contains("seven")), "{:?}", on.answers);
+	assert!(on.ahead.0 > 0);
+}
+
+#[tokio::test]
+async fn a_dereference_of_a_field_of_arrays_reads_no_key_ahead() {
+	let setup = "DEFINE TABLE user SCHEMALESS; DEFINE TABLE comment SCHEMALESS;
+		FOR $i IN 0..40 {
+			CREATE type::record('user', $i) SET name = <string>$i;
+			CREATE type::record('comment', $i) SET author = [type::record('user', $i), user:1];
+		};";
+	let how = Setup {
+		rows_ahead: true,
+		..Setup::default()
+	};
+	let on = matches_unwindowed(&how, setup, "SELECT author.name FROM comment;").await;
+	assert_eq!(on.ahead.1, 0, "the elements of an array are the collection window's to read");
+}
+
+#[tokio::test]
+async fn a_sibling_projection_that_fails_fails_where_it_fails_unwindowed() {
+	// Row 700 does not cast, so a statement that runs it fails there, whichever batch holds it, and
+	// one that skips it or stops before it does not.
+	let setup = format!("{} UPDATE comment:700 SET text = 'bad';", comments(1200));
+	let mut ran = Ran::default();
+	for (sql, fails) in [
+		("SELECT author.name, <int>text AS t FROM comment;", true),
+		("SELECT author.name, <int>text AS t FROM comment LIMIT 900;", true),
+		("SELECT author.name, <int>text AS t FROM comment START 650 LIMIT 100;", true),
+		("SELECT author.name, <int>text AS t FROM comment LIMIT 600;", false),
+		("SELECT author.name, <int>text AS t FROM comment START 705 LIMIT 20;", false),
+		("SELECT <int>text AS t, author.name FROM comment START 3 LIMIT 600;", false),
+	] {
+		for how in placed() {
+			let on = matches_unwindowed(&how, &setup, sql).await;
+			ran.note(sql, &on);
+			assert_eq!(on.answers[0].starts_with("error:"), fails, "{sql}: {:.120}", on.answers[0]);
+			assert!(on.ahead.0 > 0, "{sql}: the plan reads the links ahead");
+		}
+	}
+	ran.every_statement_ran();
+}
+
+/// Runs `sql` with the fill of every rows window failing as the process past its memory threshold
+/// fails one.
+async fn run_refused(how: &Setup<'_>, setup: &str, sql: &str) -> Run {
+	let refuse = |on: bool| {
+		crate::exec::operators::link_window::tests::REFUSE_AHEAD.with(|pinned| pinned.set(on));
+	};
+	refuse(true);
+	let on = run(true, how, setup, sql).await;
+	refuse(false);
+	on
+}
+
+#[tokio::test]
+async fn a_failed_fill_leaves_a_batch_the_merge_may_drop_rows_from_without_a_window() {
+	let setup = comments(1200);
+	let plain = Setup {
+		config: SERIAL,
+		..Setup::default()
+	};
+	// A batch the merge takes whole raises the refusal, as the scan that read its rows does.
+	let whole = Setup {
+		config: SERIAL,
+		rows_ahead: true,
+		morsels: true,
+		..Setup::default()
+	};
+	let on = run_refused(&whole, &setup, "SELECT * FROM comment FETCH author;").await;
+	assert!(!on.refused, "{:.200}", on.answers[0]);
+	assert!(
+		on.answers[0].starts_with("error:") && !on.batches.is_empty(),
+		"an unpaged batch raises the failure: {:.200}",
+		on.answers[0]
+	);
+	// A paged batch holds rows past its limit that the merge drops, so a failed fill leaves its
+	// rows to read for themselves: the statement answers as the unwindowed run.
+	for how in paged() {
+		for sql in [
+			"SELECT * FROM comment START 3 LIMIT 5 FETCH author;",
+			"SELECT author.name FROM comment START 3 LIMIT 5;",
+			"SELECT * FROM comment START 150 LIMIT 200 FETCH author, friends;",
+		] {
+			let off = run(false, &plain, &setup, sql).await;
+			let on = run_refused(&how, &setup, sql).await;
+			assert_eq!(on.answers, off.answers, "the answers of {sql}");
+			assert!(!on.answers[0].starts_with("error:"), "{sql}: {:.200}", on.answers[0]);
+			assert!(
+				on.batches.iter().any(|(skip, _)| skip.is_some()),
+				"{sql}: no batch was paged: {:?}",
+				on.batches
+			);
+		}
+	}
+}
+
+#[tokio::test]
+async fn a_subquery_in_the_projection_runs_on_a_state_of_its_own_and_leaves_the_window_to_its_rows()
+{
+	// A scan empties the window the state it ends on holds. The subquery scans on a state of its
+	// own, so the window of the outer rows survives every row of them and serves their links.
+	let setup = comments(600);
+	let how = Setup {
+		rows_ahead: true,
+		..Setup::default()
+	};
+	for sql in [
+		"SELECT author.name, (SELECT VALUE name FROM user WHERE n = 1) AS n FROM comment;",
+		"SELECT author.name, (SELECT VALUE text FROM comment LIMIT 1) AS n FROM comment;",
+	] {
+		let on = matches_unwindowed(&how, &setup, sql).await;
+		assert!(!on.answers[0].starts_with("error:"), "{:.200}", on.answers[0]);
+		assert!(on.ahead.0 >= 2, "{sql}: the batch is read a window at a time: {:?}", on.ahead);
+		let windowed = gets_of_sql(&setup, true, sql).await;
+		let unwindowed = gets_of_sql(&setup, false, sql).await;
+		assert!(
+			windowed * 2 < unwindowed,
+			"{sql}: the rows read their links for themselves: {windowed} reads against {unwindowed}"
+		);
+	}
+}
+
+/// The key reads a read transaction counts running `sql` on a datastore `setup` built, with the
+/// windows on or off, on a statement kept to one task.
+async fn gets_of_sql(setup: &str, windows: bool, sql: &str) -> u32 {
+	reads_of(setup, windows, sql).await.ops_get
 }

@@ -483,6 +483,32 @@ const SHAPES: &[Shape] = &[
 		rows: all,
 		takes_rows: false,
 	},
+	Shape {
+		name: "fetch_page",
+		query: |n| format!("SELECT * FROM t LIMIT {} FETCH friend", n / 10),
+		rows: tenth,
+		takes_rows: false,
+	},
+	Shape {
+		name: "deref",
+		query: |_| "SELECT friend.a FROM t".into(),
+		rows: all,
+		takes_rows: false,
+	},
+	Shape {
+		name: "deref_page",
+		query: |n| format!("SELECT friend.a FROM t LIMIT {}", n / 10),
+		rows: tenth,
+		takes_rows: false,
+	},
+	// A filter between the scan and the projection leaves the dereferences no window to read
+	// through: the shape `deref` is measured against.
+	Shape {
+		name: "deref_unwindowed",
+		query: |_| "SELECT friend.a FROM t WHERE a >= 0".into(),
+		rows: all,
+		takes_rows: false,
+	},
 	// Each call binds a string argument, which a call's frame accounts for.
 	Shape {
 		name: "fn_call",
@@ -1182,6 +1208,15 @@ const RESPONSE_BUDGETS: &[(&str, f64, &str)] = &[
 	("graph_1hop", 60.0, "kv-mem cursor and range key per lookup; rows built as values"),
 	("graph_2hop", 120.0, "kv-mem cursor and range key per lookup; rows built as values"),
 	("fetch", 40.0, "the fetched record decoded whole; rows built as values"),
+	("fetch_page", 10.0, "the fetched record decoded whole; rows built as values"),
+	// A dereferenced record is decoded whole to read one field of it.
+	("deref", 26.0, "the dereferenced record decoded whole for one field"),
+	("deref_page", 26.0, "the dereferenced record decoded whole for one field"),
+	(
+		"deref_unwindowed",
+		30.0,
+		"the dereferenced record decoded whole for one field, read for itself",
+	),
 ];
 
 /// Rows on the frame paths of the response cost no more allocations than
@@ -1673,5 +1708,54 @@ async fn breakers_over_a_small_budget_hold_a_bounded_heap_with_workers_on_rocksd
 	assert!(
 		rendered.contains(&BREAKERS[0]),
 		"the sort over fields renders no morsels: {rendered:?}"
+	);
+}
+
+/// The allocations of whole statements that read a fixed page of linked rows, in total: a page of
+/// a fixed size has no per-row slope between datastore sizes, so the statement is counted once on
+/// the small datastore.
+#[tokio::test]
+#[ignore = "a measurement, not a check"]
+async fn link_page_statement_allocations() {
+	let (ds, session) = datastore(SMALL).await;
+	println!("{:<44} {:>10} {:>12}", "statement", "allocs", "bytes");
+	for sql in [
+		"SELECT * FROM t LIMIT 20 FETCH friend",
+		"SELECT friend.a FROM t LIMIT 20",
+		"SELECT * FROM t LIMIT 1000 FETCH friend",
+		"SELECT friend.a FROM t LIMIT 1000",
+	] {
+		let (counts, _) = measure(&ds, &session, sql, None, 0).await;
+		println!("{sql:<44} {:>10} {:>12}", counts.allocs, counts.bytes);
+	}
+}
+
+/// The dereferences of a statement whose plan reads them through a window cost no more allocations
+/// per row than those of a statement it gives none: the window holds the stored bytes of the
+/// records, which the dereference decodes as a read of its own does. The in-memory datastore
+/// places both serially, which is the placement a window is read in here. The statement given no
+/// window differs by a filter, which the plan gives no window to, so it also judges a predicate per
+/// row: the bound is loose, an upper bound on what the window may add.
+#[tokio::test]
+async fn a_dereference_window_adds_no_allocation_per_row() {
+	let _measuring = MEASURING.lock().await;
+	const CHECK_SMALL: usize = 2_000;
+	const CHECK_LARGE: usize = 4_000;
+	let (small, session) = datastore(CHECK_SMALL).await;
+	let (large, _) = datastore(CHECK_LARGE).await;
+	let shape = |name: &str| SHAPES.iter().find(|shape| shape.name == name).expect("a shape");
+	let windowed =
+		per_row((&*small, CHECK_SMALL), (&*large, CHECK_LARGE), &session, shape("deref")).await;
+	let unwindowed = per_row(
+		(&*small, CHECK_SMALL),
+		(&*large, CHECK_LARGE),
+		&session,
+		shape("deref_unwindowed"),
+	)
+	.await;
+	println!("deref allocs/row: windowed {windowed:.2}, no window {unwindowed:.2}");
+	assert!(
+		windowed <= unwindowed + 0.5,
+		"a window adds allocations per row: {windowed:.2} against {unwindowed:.2}"
 	);
 }

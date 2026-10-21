@@ -5562,12 +5562,14 @@ pub(crate) struct FetchPlan {
 	pub(crate) windows: bool,
 }
 
-/// The top-level link fields of a pipeline's `FETCH`, whose links the host reads for a batch of
-/// source rows before the rows run, as the physical plan decided.
+/// The top-level link fields of a pipeline's `FETCH`, or of the field dereferences of its
+/// projection, whose links the host reads for a batch of source rows before the rows run, as the
+/// physical plan decided.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RowsAheadSpec {
-	/// The `FETCH` of [`Program::fetches`] whose links are read ahead.
-	pub(crate) fetch: u16,
+	/// The `FETCH` of [`Program::fetches`] whose links are read ahead, or `None` where the
+	/// field dereferences of the pipeline's projection take them.
+	pub(crate) fetch: Option<u16>,
 	/// The fields of the source rows that hold the links.
 	pub(crate) fields: Box<[Strand]>,
 	/// The paging slot ([`Program::limits`], and the index of `State::paging`) of the clause that

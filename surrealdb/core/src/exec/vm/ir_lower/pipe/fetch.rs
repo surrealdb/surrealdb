@@ -41,19 +41,13 @@ impl Body<'_, '_, '_> {
 		self.claims.extend(lowerer.take_claims());
 		self.needs = self.needs.merged(&lowerer.needs());
 		let fetch = self.em.fetch(paths, self.io.fetch_windows)?;
-		if let Some(ahead) = &self.io.rows_ahead {
+		if let Some(ahead) = self.io.rows_ahead.as_ref().filter(|ahead| !ahead.derefs) {
 			// The clause the plan names has been lowered by the time the rows reach the fetch, and
 			// holds the slot the run counts its paging in.
-			let paging = match ahead.paging {
-				None => None,
-				Some(place) => Some(self.pipeline_limits.get(place).copied().ok_or_else(|| {
-					invariant("the paging clause a fetch reads ahead of is not lowered")
-				})?),
-			};
 			self.rows_ahead = Some(RowsAheadSpec {
-				fetch,
+				fetch: Some(fetch),
 				fields: ahead.fields.iter().cloned().collect(),
-				paging,
+				paging: paging_slot(ahead.paging, &self.pipeline_limits)?,
 			});
 		}
 		let mut reach = Needs::none();
@@ -233,6 +227,18 @@ fn body_yield(ir: &Ir, region: RegionId) -> Option<ValueId> {
 		) => Some(*value),
 		_ => None,
 	}
+}
+
+/// The program's slot of the paging clause the plan names by its place among the pipeline's
+/// paging clauses, or `None` where no clause pages the rows first.
+pub(super) fn paging_slot(place: Option<usize>, limits: &[u16]) -> Result<Option<u16>, IrError> {
+	place
+		.map(|place| {
+			limits.get(place).copied().ok_or_else(|| {
+				invariant("the paging clause a rows window reads ahead of is not lowered")
+			})
+		})
+		.transpose()
 }
 
 #[cfg(test)]

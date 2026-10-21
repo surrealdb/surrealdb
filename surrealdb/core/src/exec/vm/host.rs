@@ -4346,6 +4346,18 @@ async fn run_body(
 								if pipeline.deref_windows {
 									eval_ctx.link_windows = Some(&state.link_pool);
 								}
+								// Every access of a pipeline whose plan reads dereferences ahead
+								// is offered the window, not only those of the keyed fields. The
+								// window is keyed by record id and holds bytes that no principal's
+								// permissions have touched, so an access of another field, or of a
+								// record the window does not hold, reads for itself or takes bytes
+								// it would have read, and judges them in its own frame.
+								eval_ctx.link_ahead = state.link_ahead.as_ref().filter(|_| {
+									pipeline
+										.rows_ahead
+										.as_ref()
+										.is_some_and(|spec| spec.fetch.is_none())
+								});
 								let value = out_of_line(|| {
 									crate::exec::vm::access::field::evaluate_field(
 										&base,
@@ -4438,7 +4450,7 @@ async fn run_body(
 										pipeline
 											.rows_ahead
 											.as_ref()
-											.is_some_and(|spec| spec.fetch == *fetch)
+											.is_some_and(|spec| spec.fetch == Some(*fetch))
 									}),
 								};
 								let fetched = out_of_line(|| {
@@ -6792,7 +6804,7 @@ pub(super) async fn fill_rows_ahead(
 		return Ok(rows.len());
 	};
 	let ahead = state.link_ahead.get_or_insert_with(Default::default);
-	ahead.fill(ctx, rows, &spec.fields).await
+	ahead.fill(ctx, rows, &spec.fields, spec.fetch.is_some()).await
 }
 
 /// Reads what the first hop of the lookups of `pipeline`'s projection holds for the rows of one

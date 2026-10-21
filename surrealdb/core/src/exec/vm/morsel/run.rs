@@ -245,17 +245,27 @@ pub(super) async fn run_batch(
 	ctx: &ExecutionContext,
 ) -> FlowResult<MorselResult> {
 	let started = web_time::Instant::now();
+	#[cfg(test)]
+	super::test_hooks::note_batch(ctx, paged.map(|(_, skip)| skip), rows.len());
 	let fold = under.fold.clone();
 	let mut state = batch_state(program, paged, under, ctx).await?;
 	if bound {
 		super::super::host::bound_batch(program, &mut state, ctx);
 	}
 	let pipeline = &program.pipelines[at];
-	// A batch that pages its rows keys none: which of them reach the lookups is the merge's to say.
-	if paged.is_none() {
-		super::super::host::fill_frontier_rows(program, pipeline, &rows, &mut state, ctx).await;
-	}
+	debug_assert!(
+		pipeline.rows_ahead.as_ref().is_none_or(|spec| spec.paging.is_some() == paged.is_some()),
+		"a rows window pages as the batch does"
+	);
+	// A body that pages runs each row as though it were taken, so the rows after the first `skip`
+	// are the ones its paging clause lets through to the readers of the batch's windows.
+	let reaching = paged.map_or(0, |(_, skip)| skip.min(rows.len()));
+	super::super::host::fill_frontier_rows(program, pipeline, &rows[reaching..], &mut state, ctx)
+		.await;
+	let mut rows = rows;
 	let count = rows.len();
+	// The rows before this one have their links in the rows window.
+	let mut ahead = 0;
 	if let Some(fold) = &fold {
 		fold.log(&mut state);
 		fold.open_block(&mut state, count);
@@ -263,7 +273,33 @@ pub(super) async fn run_batch(
 	let mut ends = Vec::new();
 	let distinct = distinct_rows(pipeline);
 	state.capture_distinct = distinct;
-	for row in rows {
+	for at in 0..count {
+		if at >= ahead && at >= reaching {
+			// A fill covers the rows whose keys fit one window, so a batch is read a window at
+			// a time.
+			let covered =
+				match super::super::host::fill_rows_ahead(pipeline, &rows[at..], &mut state, ctx)
+					.await
+				{
+					Ok(covered) => covered,
+					// The only failure of a fill is the process refusing work past its memory
+					// threshold, which the window may not raise on behalf of rows the merge can
+					// still drop or never reach: a paged batch holds rows past its limit, and a
+					// distinct one rows another row's key replaces. Their rows run without a
+					// window. A batch that is neither is merged whole, so the failure is the
+					// refusal of a statement that runs every one of its rows, as the scan that
+					// read them makes.
+					Err(_) if paged.is_some() || distinct => {
+						if let Some(window) = &mut state.link_ahead {
+							window.clear();
+						}
+						count - at
+					}
+					Err(failure) => return Err(failure),
+				};
+			ahead = at + covered;
+		}
+		let row = std::mem::replace(&mut rows[at], Value::None);
 		if distinct {
 			state.distinct_taken = None;
 			let before = state.output.len();

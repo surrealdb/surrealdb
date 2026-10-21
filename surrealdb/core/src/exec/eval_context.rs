@@ -17,7 +17,7 @@ use surrealdb_strand::Strand;
 use crate::dbs::Capabilities;
 use crate::exec::ExecutionContext;
 use crate::exec::context::{RowAccess, SessionInfo};
-use crate::exec::operators::link_window::LinkPool;
+use crate::exec::operators::link_window::{LinkPool, RowsWindow};
 use crate::kvs::Transaction;
 use crate::val::{RecordId, Value};
 
@@ -158,6 +158,11 @@ pub struct EvalContext<'a> {
 	/// itself, as every evaluation outside such a pipeline (a function body, a closure, a stored
 	/// expression) does.
 	pub(crate) link_windows: Option<&'a LinkPool>,
+
+	/// The records the links of a batch of source rows name, read before the rows run, where the
+	/// physical plan states that the pipeline's field dereferences take them. A dereference of a
+	/// record id the window holds is served its bytes; any other reads for itself.
+	pub(crate) link_ahead: Option<&'a RowsWindow>,
 }
 
 /// The record whose computed fields are being evaluated, and what a
@@ -214,6 +219,7 @@ impl<'a> EvalContext<'a> {
 			computing_record: exec_ctx.root().computing_record.clone(),
 			plan_depth: 0,
 			link_windows: None,
+			link_ahead: None,
 		}
 	}
 
@@ -239,6 +245,7 @@ impl<'a> EvalContext<'a> {
 			computing_record: self.computing_record.clone(),
 			plan_depth: self.plan_depth,
 			link_windows: self.link_windows,
+			link_ahead: self.link_ahead,
 		}
 	}
 
@@ -266,6 +273,7 @@ impl<'a> EvalContext<'a> {
 			computing_record: self.computing_record.clone(),
 			plan_depth: self.plan_depth,
 			link_windows: self.link_windows,
+			link_ahead: self.link_ahead,
 		}
 	}
 
@@ -307,6 +315,7 @@ impl<'a> EvalContext<'a> {
 			computing_record: self.computing_record.clone(),
 			plan_depth: self.plan_depth,
 			link_windows: self.link_windows,
+			link_ahead: self.link_ahead,
 		}
 	}
 

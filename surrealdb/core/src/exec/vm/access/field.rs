@@ -17,7 +17,17 @@ pub(crate) async fn evaluate_field(
 	match value {
 		Value::Object(obj) => Ok(obj.get(name).cloned().unwrap_or(Value::None)),
 
-		Value::RecordId(rid) => field_of_record(rid, name, &ctx, Slot::Unread).await,
+		Value::RecordId(rid) => {
+			// A window holds the bytes of the current version only. A miss reads for itself, in
+			// this frame, so permissions, computed fields and the order of errors are those of an
+			// unwindowed read.
+			let slot = ctx
+				.link_ahead
+				.filter(|_| ctx.exec_ctx.version_stamp().is_none())
+				.and_then(|ahead| ahead.slot(ctx.exec_ctx, rid))
+				.unwrap_or(Slot::Unread);
+			field_of_record(rid, name, &ctx, slot).await
+		}
 
 		Value::Array(arr) => Ok(Value::Array(field_of_each(&arr.0, name, ctx).await?.into())),
 

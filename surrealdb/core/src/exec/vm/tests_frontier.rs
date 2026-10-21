@@ -38,6 +38,10 @@ struct Run {
 	call_keys: usize,
 	/// The most ranges one multi-range read of a fill sought.
 	call_ranges: usize,
+	/// The batches the statement ran through the morsel host, in the order they began: the rows
+	/// the batch's paging skips first, where it is paged, and the rows it holds.
+	#[cfg_attr(not(feature = "kv-surrealkv"), allow(dead_code))]
+	batches: Vec<(Option<usize>, usize)>,
 }
 
 /// Which windows a run is pinned to.
@@ -84,6 +88,8 @@ enum Backend {
 	Memory,
 	#[cfg(feature = "kv-rocksdb")]
 	RocksDb,
+	#[cfg(feature = "kv-surrealkv")]
+	SurrealKv,
 }
 
 /// A fresh datastore on `backend`, with `setup` run.
@@ -96,13 +102,19 @@ async fn database(backend: Backend, config: ConfigMap, setup: &str) -> (TestDb, 
 			let db = TestDb::new_on_rocksdb(setup, dir.path(), config).await;
 			(db, Some(Directory(dir)))
 		}
+		#[cfg(feature = "kv-surrealkv")]
+		Backend::SurrealKv => {
+			let dir = temp_dir::TempDir::new().unwrap();
+			let db = TestDb::new_on_surrealkv(setup, dir.path(), config).await;
+			(db, Some(Directory(dir)))
+		}
 	}
 }
 
 /// A directory the datastore under test stands in, removed when the run is done.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-surrealkv"))]
 struct Directory(#[allow(dead_code)] temp_dir::TempDir);
-#[cfg(not(feature = "kv-rocksdb"))]
+#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-surrealkv")))]
 struct Directory;
 
 /// Runs `setup` and then `sql` on a fresh datastore with the hop windows pinned to `windowed`.
@@ -144,6 +156,7 @@ async fn run_as(
 	surrealdb_cnf::Config::parse(&mut exec, &map);
 	let (db, _directory) = database(backend, map, setup).await;
 	counters::reset();
+	let ran = super::morsel::batches_of(&db.exec_ctx().await).len();
 	// The thread's meter is what the work before the run left of it, and a fill reads no more
 	// keys than the meter holds, cutting the range it stops in. Each run starts on a full quantum
 	// of its own, as a statement first polled after a yield point does, so what a window holds
@@ -169,6 +182,7 @@ async fn run_as(
 		built: counters::built(),
 		call_keys: counters::call_keys(),
 		call_ranges: counters::call_ranges(),
+		batches: super::morsel::batches_of(&db.exec_ctx().await).split_off(ran),
 	};
 	assert_eq!(run.left, 0, "a hop window outlived its hop");
 	Pins::clear();
@@ -554,6 +568,7 @@ async fn run_in_transaction(backend: Backend, pins: Pins, setup: &str, requests:
 		built: counters::built(),
 		call_keys: counters::call_keys(),
 		call_ranges: counters::call_ranges(),
+		batches: Vec::new(),
 	};
 	assert_eq!(run.left, 0, "a hop window outlived its hop");
 	txn.commit().await.expect("the transaction commits");
@@ -826,6 +841,7 @@ async fn run_folded(windowed: bool, setup: &str, sql: &str) -> Run {
 		built: counters::built(),
 		call_keys: counters::call_keys(),
 		call_ranges: counters::call_ranges(),
+		batches: Vec::new(),
 	};
 	assert_eq!(run.left, 0, "a hop window outlived its hop");
 	Pins::clear();
@@ -1132,6 +1148,7 @@ async fn run_corrupt(pins: Pins, setup: &str, sql: &str) -> Run {
 		built: counters::built(),
 		call_keys: counters::call_keys(),
 		call_ranges: counters::call_ranges(),
+		batches: Vec::new(),
 	};
 	Pins::clear();
 	assert_eq!(run.left, 0, "a hop window outlived its hop");
@@ -1491,4 +1508,51 @@ async fn a_lookup_of_two_hops_whose_second_hop_fails_drops_its_window_as_one_wit
 	assert_eq!(on.answer, off.answer);
 	assert!(on.filled > 0, "the window was filled before the read that failed");
 	assert_eq!(on.left, 0, "the hop window outlived its failed lookup");
+}
+
+#[cfg(feature = "kv-surrealkv")]
+#[tokio::test]
+async fn a_paged_morsel_batch_keys_the_lookups_of_the_rows_past_its_skip_only() {
+	// SurrealKV places a small paged range as morsels, and a batch that pages runs each row as
+	// though it were taken: the rows its clause skips are never keyed.
+	let setup = people(60, "");
+	for sql in [
+		"SELECT ->knows->person AS f FROM person START 7 LIMIT 20",
+		"SELECT ->knows->person AS f FROM person START 3 LIMIT 40",
+	] {
+		// The ranges one source of the lookups takes, from a run of the whole table.
+		let base = run_on(
+			Backend::SurrealKv,
+			Pins::ROWS,
+			SERIAL,
+			&setup,
+			"SELECT ->knows->person AS f FROM person",
+		)
+		.await;
+		assert!(base.filled.1 > 0 && base.filled.1 % 60 == 0, "{:?}", base.filled);
+		let per_source = base.filled.1 / 60;
+		let off = run_on(Backend::SurrealKv, Pins::OFF, SERIAL, &setup, sql).await;
+		let on = run_on(Backend::SurrealKv, Pins::ROWS, MORSELS, &setup, sql).await;
+		no_errors(&on);
+		assert_eq!(on.answers, off.answers, "the answers of {sql}");
+		assert!(on.rows > 0, "{sql}: no batch of rows filled its window: {:?}", on.batches);
+		assert!(
+			on.batches.iter().any(|(skip, rows)| skip.is_some_and(|skip| skip > 0 && skip < *rows)),
+			"{sql}: no batch holds rows past its skip: {:?}",
+			on.batches
+		);
+		// The rows a batch's skip covers key no origin: every range filled is one of a row past it.
+		let reached: usize = on
+			.batches
+			.iter()
+			.map(|(skip, rows)| rows - skip.map_or(0, |skip| skip.min(*rows)))
+			.sum();
+		assert_eq!(
+			on.filled.1,
+			per_source * reached,
+			"{sql}: {:?} ranges for {reached} rows past the skip of {:?}",
+			on.filled,
+			on.batches
+		);
+	}
 }

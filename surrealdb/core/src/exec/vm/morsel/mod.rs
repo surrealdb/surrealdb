@@ -245,8 +245,8 @@ pub(super) use self::places::Statement;
 use self::set::{MorselSet, RangeSet};
 #[cfg(test)]
 pub(super) use self::test_hooks::{
-	Counts, batch_partials, counts_of, delay_morsels, encoded_ahead, fail_splits, forget_ends,
-	metrics_of, txn_reads_on_workers, writes_ended,
+	Counts, batch_partials, batches_of, counts_of, delay_morsels, encoded_ahead, fail_splits,
+	forget_ends, metrics_of, txn_reads_on_workers, writes_ended,
 };
 #[cfg(all(test, feature = "kv-rocksdb"))]
 pub(super) use self::test_hooks::{fail_grants, fail_narrows, waiting_statement};
@@ -460,8 +460,8 @@ impl<'p> Rows<'p> {
 	/// has left to skip and to admit. Answers how many leading rows of `batch` to run before the
 	/// next call, at least one where `batch` holds any: the rows the links' window covers, and the
 	/// whole batch where no link is read ahead; the frontier window is filled for those rows. The
-	/// caller runs them and asks again for the rest. The rows of a morsel batch read what they
-	/// reach as they run, and are answered whole.
+	/// caller runs them and asks again for the rest. The rows of a morsel batch are answered whole:
+	/// the batch fills its own windows as it runs ([`run::run_batch`]).
 	pub(super) async fn ahead(
 		&mut self,
 		program: &Program,

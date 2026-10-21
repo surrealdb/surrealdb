@@ -15,12 +15,24 @@
 //! - `fetch_windows`: the same for each collection of links a `FETCH` path reaches. A computed
 //!   index step of a path runs host code between positions, so the `FETCH` must write nothing.
 //!
-//! - `rows_ahead`: a `FETCH` of top-level link fields over a scan reads the links of a batch of
-//!   source rows before the rows run. Only a serial placement has it: the rows of a morsel batch
-//!   reach the `FETCH` on a worker's own schedule. Every key it reads is one the serial run reads:
-//!   the ops between the scan and the `FETCH` pass each row they take at most once and in order,
-//!   the projection is the row itself, the fields it keys are stored and unfiltered, and the
-//!   statement writes nothing, so no key is read before a write the run would have made first.
+//! - `rows_ahead`: a `FETCH` of top-level link fields, or the dereferences `link.field` of a
+//!   projection, over a scan reads the links of a batch of source rows before the rows run. A
+//!   serial placement reads them for the batches the scan yields, a morsel placement for each
+//!   morsel's batch, in a window its state owns. The ops between the scan and the reader pass each
+//!   row they take at most once and in order (a `FETCH` after the row itself, a dereferencing
+//!   projection after nothing but its paging clause), the fields it keys are stored and unfiltered,
+//!   and the statement writes nothing, so no key is read before a write the run would have made
+//!   first.
+//!
+//!   The keys a morsel batch reads are a subset of the reads its body makes: the window of a row
+//!   is filled only for rows past the paging clause's skip, which the body runs as though they
+//!   were taken, in order, until a row fails before the paging, and a window is filled before its
+//!   first row runs, so a stopping failure leaves at most one window of keys past the failing row
+//!   read. The window holds bytes only and swallows failures: a failed multi-get leaves every key
+//!   of the window absent, and a position the window lacks reads for itself, in its own frame,
+//!   where its permissions, computed fields, decoding and errors are those of an unwindowed read.
+//!   A dereferencing projection that pages nothing is not placed as batches of rows: it reads
+//!   through the window its scan fills for each batch it reads.
 //!
 //! - `scan_read_ahead`: the scan of a pipeline whose body runs inside the storage cursor reads its
 //!   next chunk on a task of its own while the body runs the current one. The datastore says a
@@ -63,9 +75,8 @@ use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
 use crate::exec::ir::iface::region_kind::{ErrorScope, RegionKind};
 use crate::exec::ir::logical::ops::LoopKind;
 use crate::exec::ir::op_kind::OpKind;
-use crate::exec::planner::placement::Decision;
 #[cfg(test)]
-use crate::exec::planner::placement::{Combine, MorselInput, SinkKind};
+use crate::exec::planner::placement::{Combine, Decision, MorselInput, SinkKind};
 use crate::expr::logical::EffectSet;
 use crate::expr::part::Part;
 use crate::val::TableName;
@@ -90,22 +101,25 @@ thread_local! {
 	pub(crate) static FORCE_RANGE_MORSELS: std::cell::Cell<bool> =
 		const { std::cell::Cell::new(false) };
 	/// Places every pipeline as range morsels before its io is decided, for tests of the rules
-	/// that depend on the placement.
-	static FORCE_MORSEL_PLACEMENT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+	/// that depend on the placement and of the runs that read through one.
+	pub(crate) static FORCE_MORSEL_PLACEMENT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// Places the pipeline of `attr` as range morsels that concatenate. The facts the decision is
-/// judged by record no write, as a pipeline of a statement that writes nothing states them.
+/// Places the pipeline of `attr` as range morsels that concatenate, replaying its one paging
+/// clause where it has one. The facts the decision is judged by record no write, as a pipeline of
+/// a statement that writes nothing states them.
 #[cfg(test)]
 fn place_as_range_morsels(attr: &mut PlacementAttr) {
+	let mut paged = false;
 	if let Some(mut facts) = attr.facts().cloned() {
 		facts.writes = false;
+		paged = facts.limits == 1;
 		attr.set_facts(Some(facts));
 	}
 	attr.set_decision(Some(Decision::Morsels {
 		input: MorselInput::Range,
 		combine: Combine::Concat,
-		paged: false,
+		paged,
 		prunes: false,
 	}));
 }
@@ -213,6 +227,7 @@ fn io_of(
 	let mut fetches =
 		rows.passes.iter().copied().filter(|op| matches!(kind_of(ir, *op), Some(PhysOp::Fetch)));
 	let Some(first) = fetches.next() else {
+		io.rows_ahead = deref_ahead(ir, cx, &rows);
 		return io;
 	};
 	let second = fetches.next();
@@ -542,6 +557,32 @@ fn producer(ir: &Ir, value: ValueId) -> Option<OpId> {
 	}
 }
 
+/// The table `rows` scan, where every pipeline the rows pass may read the links of a batch ahead:
+/// a decided placement is all the rule asks, since a serial one reads ahead the rows it runs one
+/// after another and a morsel one the rows of each batch it runs, in a window the batch's state
+/// owns. The statement writes nothing and runs nothing the plan cannot see, so a key is not read
+/// before a write the serial run would have made first. The scan decodes its rows for the body,
+/// which a `FETCH` or a dereference makes a host step.
+fn scanned_ahead<'a>(ir: &'a Ir, rows: &Rows) -> Option<&'a TableName> {
+	for pipeline in &rows.pipelines {
+		let placement = ir.placement(*pipeline)?;
+		placement.decision()?;
+		if placement.statement().refusal.is_some() {
+			return None;
+		}
+	}
+	let source = kind_of(ir, rows.source)?;
+	if let PhysOp::TableScan(attrs) = source
+		&& !attrs.lightweight
+	{
+		Some(&attrs.table)
+	} else if let PhysOp::KeyRangeScan(attrs) = source {
+		Some(&attrs.table)
+	} else {
+		None
+	}
+}
+
 /// The links of `fetch`, the one `FETCH` of `pipeline`, that its rows' source can be asked for
 /// ahead of the rows, or `None` where a rule of the module does not hold.
 fn rows_ahead(
@@ -556,28 +597,7 @@ fn rows_ahead(
 		return None;
 	}
 	debug_assert_eq!(rows.pipelines.first(), Some(&pipeline));
-	// The host reads ahead the rows it runs one after another, so only a serial placement has
-	// them: the rows of a morsel batch reach the `FETCH` on a worker's own schedule. That holds of
-	// every pipeline the rows pass, the one that scans them included. The statement writes
-	// nothing and runs nothing the plan cannot see, so a key is not read before a write the
-	// serial run would have made first.
-	for pipeline in &rows.pipelines {
-		let placement = ir.placement(*pipeline)?;
-		if placement.decision()? != Decision::Serial || placement.statement().refusal.is_some() {
-			return None;
-		}
-	}
-	// The scan decodes its rows for the body, which a `FETCH` makes a host step.
-	let source = kind_of(ir, rows.source)?;
-	let table = if let PhysOp::TableScan(attrs) = source
-		&& !attrs.lightweight
-	{
-		&attrs.table
-	} else if let PhysOp::KeyRangeScan(attrs) = source {
-		&attrs.table
-	} else {
-		return None;
-	};
+	let table = scanned_ahead(ir, rows)?;
 	// Every op the rows pass before the fetch takes each row at most once, in order: one paging
 	// clause, and the projection that is the row itself. A paging clause after it would bound
 	// the rows that reach it, not the keys.
@@ -601,10 +621,98 @@ fn rows_ahead(
 	let fields = link_fields(ir, cx, table, fetch)?;
 	Some(RowsAhead {
 		fields,
+		derefs: false,
 		// The one clause that pages before the fetch is the first the body holds, and no clause
 		// follows the fetch.
 		paging: (limits == 1).then_some(0),
 	})
+}
+
+/// The links of the dereferences `link.field` of the projection of `pipeline`, that its rows'
+/// source can be asked for ahead of the rows, or `None` where a rule of the module does not hold.
+///
+/// The ops the rows pass take each row at most once and in order: one paging clause before a
+/// single projection that is the last op to drop nothing, and no `FETCH`, so every row the batch
+/// holds past the clause reaches the projection. A link is a stored field the catalog answers
+/// the table's definitions leave as stored, read off the row by a region that does nothing else
+/// before it reads the field of the record: no branch skips the read and no earlier step of the
+/// region can fail.
+fn deref_ahead(ir: &Ir, cx: &PhysCx<'_>, rows: &Rows) -> Option<RowsAhead> {
+	#[cfg(test)]
+	if FORCE_ROWS_AHEAD.with(std::cell::Cell::get) == Some(false) {
+		return None;
+	}
+	let table = scanned_ahead(ir, rows)?;
+	let mut limits = 0;
+	let mut projection = None;
+	for op in &rows.passes {
+		let kind = kind_of(ir, *op)?;
+		let whole =
+			matches!(kind, PhysOp::Project(shape) if matches!(**shape, ProjectionShape::All));
+		if matches!(kind, PhysOp::Limit { .. }) && projection.is_none() {
+			limits += 1;
+		} else if matches!(kind, PhysOp::Project(_)) && !whole && projection.is_none() {
+			projection = Some(*op);
+		} else if !whole {
+			return None;
+		}
+	}
+	if limits > 1 {
+		return None;
+	}
+	let data = ir.op(projection?)?;
+	let mut fields: SmallVec<[Strand; 2]> = SmallVec::new();
+	for region in &data.regions {
+		if let Some(name) = dereferenced(ir, *region)
+			&& !fields.contains(&name)
+		{
+			fields.push(name);
+		}
+	}
+	if fields.is_empty() || !stored_links(cx, table, &fields) {
+		return None;
+	}
+	Some(RowsAhead {
+		fields,
+		derefs: true,
+		paging: (limits == 1).then_some(0),
+	})
+}
+
+/// The top-level field of the row that the projection region `region` dereferences: `link.name`
+/// read off the row, whose steps after the field are field reads and nothing else.
+fn dereferenced(ir: &Ir, region: RegionId) -> Option<Strand> {
+	let row = *ir.block(*ir.region(region)?.blocks.first()?)?.args.first()?;
+	let ops: Vec<OpId> = ops_in(ir, region).collect();
+	let (last, steps) = ops.split_last()?;
+	let yielded = ir.op(*last)?;
+	if !matches!(yielded.kind, OpKind::Expr(ExprOp::Yield)) {
+		return None;
+	}
+	let (first, rest) = steps.split_first()?;
+	let first = ir.op(*first)?;
+	let link = match (&first.kind, first.operands.as_slice()) {
+		(
+			OpKind::Expr(ExprOp::Field {
+				name,
+			}),
+			[from],
+		) if *from == row => name.clone(),
+		_ => return None,
+	};
+	// Every later step reads the field of what the step before it produced, and the last is
+	// what the region yields.
+	let mut produced = first.results.as_slice();
+	for step in rest {
+		let step = ir.op(*step)?;
+		if !matches!(step.kind, OpKind::Expr(ExprOp::Access { .. }))
+			|| step.operands.as_slice() != produced
+		{
+			return None;
+		}
+		produced = step.results.as_slice();
+	}
+	(!rest.is_empty() && yielded.operands.as_slice() == produced).then_some(link)
 }
 
 /// The top-level fields of `table` that the paths of `fetch` read the links of, where every path
@@ -627,24 +735,26 @@ fn link_fields(
 			fields.push(name);
 		}
 	}
-	if fields.is_empty() {
+	if fields.is_empty() || !stored_links(cx, table, &fields) {
 		return None;
 	}
+	Some(fields)
+}
+
+/// Whether the catalog answers that the definitions of `table` leave each of `fields` as it is
+/// stored: none is `COMPUTED` and none has a field permission.
+fn stored_links(cx: &PhysCx<'_>, table: &TableName, fields: &[Strand]) -> bool {
 	let snapshot = match cx.effects.catalog.table(table) {
 		CatalogAnswer::Found(snapshot) => snapshot,
-		CatalogAnswer::Absent | CatalogAnswer::NotLoaded | CatalogAnswer::Unknown => return None,
+		CatalogAnswer::Absent | CatalogAnswer::NotLoaded | CatalogAnswer::Unknown => return false,
 	};
-	for field in snapshot.fields.iter() {
+	snapshot.fields.iter().all(|field| {
 		let Some(Part::Field(first)) = field.name.0.first() else {
-			continue;
+			return true;
 		};
-		if fields.contains(first)
-			&& (field.computed.is_some() || !matches!(field.select_permission, Permission::Full))
-		{
-			return None;
-		}
-	}
-	Some(fields)
+		!fields.contains(first)
+			|| (field.computed.is_none() && matches!(field.select_permission, Permission::Full))
+	})
 }
 
 /// The field a `FETCH` path reads, for the paths `f` and `f.*` read off the row the region is
@@ -1268,14 +1378,12 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn a_pipeline_placed_as_morsels_reads_no_link_ahead() {
+	async fn a_pipeline_placed_as_morsels_reads_the_links_of_each_batch_ahead() {
 		let sql = "SELECT * FROM comment FETCH author";
-		assert_eq!(aheads(LINKS, sql).await, one(&["author"], false));
 		FORCE_MORSEL_PLACEMENT.with(|pinned| pinned.set(true));
-		let found = ios(LINKS, sql, None).await;
+		let found = aheads(LINKS, sql).await;
 		FORCE_MORSEL_PLACEMENT.with(|pinned| pinned.set(false));
-		assert!(found.iter().all(|io| io.fetch_windows), "{found:?}");
-		assert!(found.iter().all(|io| io.rows_ahead.is_none()), "{found:?}");
+		assert_eq!(found, one(&["author"], false));
 	}
 
 	/// The decision of each pipeline `sql` plans to as a container of the kind `unit`, by a
@@ -1390,6 +1498,87 @@ mod tests {
 		assert!(found.iter().all(|io| io.rows_ahead.is_none()), "{found:?}");
 	}
 
+	#[tokio::test]
+	async fn a_projection_that_dereferences_link_fields_reads_the_links_of_a_batch_ahead() {
+		for (sql, fields) in [
+			("SELECT author.name FROM comment", &["author"][..]),
+			("SELECT author.name, author.company, text FROM comment", &["author"]),
+			("SELECT author.name AS a, friends.name AS f FROM comment", &["author", "friends"]),
+			("SELECT VALUE author.name FROM comment", &["author"]),
+			("SELECT author.company.name FROM comment", &["author"]),
+		] {
+			assert_eq!(aheads(LINKS, sql).await, one(fields, false), "{sql}");
+		}
+		let found = aheads(LINKS, "SELECT author.name FROM comment LIMIT 5 START 2").await;
+		assert_eq!(found.last(), one(&["author"], true).last(), "{found:?}");
+	}
+
+	#[tokio::test]
+	async fn a_projection_that_reads_a_link_for_nothing_but_its_field_reads_no_link_ahead() {
+		for sql in [
+			"SELECT author FROM comment",
+			"SELECT author.* FROM comment",
+			"SELECT string::lowercase(author.name) AS n FROM comment",
+			"SELECT IF text = 'a' { author.name } ELSE { 1 } AS n FROM comment",
+			"SELECT (SELECT VALUE name FROM user) AS n FROM comment",
+			"SELECT * FROM comment",
+		] {
+			let found = aheads(LINKS, sql).await;
+			assert!(found.iter().all(Option::is_none), "{sql}: {found:?}");
+		}
+	}
+
+	#[tokio::test]
+	async fn a_row_that_may_not_reach_the_projection_reads_no_link_ahead() {
+		for sql in [
+			"SELECT author.name FROM comment WHERE x = 1",
+			"SELECT author.name FROM comment ORDER BY text",
+			"SELECT author.name FROM comment GROUP BY author",
+			"SELECT author.name FROM [comment:1, comment:2]",
+			"SELECT author.name, tags FROM comment SPLIT tags",
+			"SELECT author.name FROM comment FETCH friends",
+			"SELECT author.name FROM ONLY comment:1",
+		] {
+			let found = aheads(LINKS, sql).await;
+			assert!(found.iter().all(Option::is_none), "{sql}: {found:?}");
+		}
+	}
+
+	#[tokio::test]
+	async fn a_dereferenced_link_the_table_derives_or_cuts_is_read_as_the_rows_hold_it() {
+		for sql in [
+			"SELECT author.name FROM computed",
+			"SELECT author.name FROM walled",
+			"SELECT upper.name FROM derived",
+		] {
+			let found = aheads(LINKS, sql).await;
+			assert!(found.iter().all(Option::is_none), "{sql}: {found:?}");
+		}
+	}
+
+	#[tokio::test]
+	async fn a_statement_that_writes_or_reads_a_version_dereferences_no_link_ahead() {
+		let found = aheads(
+			LINKS,
+			"SELECT author.name, (CREATE audit SET at = time::now() RETURN VALUE id) AS w FROM comment",
+		)
+		.await;
+		assert!(found.iter().all(Option::is_none), "{found:?}");
+		let found = ios(
+			LINKS,
+			"SELECT author.name FROM comment VERSION d'2024-01-01T00:00:00Z'",
+			Some(true),
+		)
+		.await;
+		assert!(found.iter().all(|io| io.rows_ahead.is_none()), "{found:?}");
+		let found = ios(LINKS, "SELECT author.name FROM comment", Some(false)).await;
+		assert!(found.iter().all(|io| io.rows_ahead.is_none()), "{found:?}");
+		FORCE_ROWS_AHEAD.with(|pinned| pinned.set(Some(false)));
+		let found = ios(LINKS, "SELECT author.name FROM comment", None).await;
+		FORCE_ROWS_AHEAD.with(|pinned| pinned.set(None));
+		assert!(found.iter().all(|io| io.rows_ahead.is_none()), "{found:?}");
+	}
+
 	/// What the principal `session` is told of the rows-ahead decision of `sql`.
 	async fn aheads_as(setup: &str, session: &Session, sql: &str) -> Vec<bool> {
 		let planned = planned_request_as(setup, session, sql).await;
@@ -1433,6 +1622,12 @@ mod tests {
 		);
 		// A table the record user reads whole keeps the decision.
 		let found = aheads_as(&setup, &record, "SELECT * FROM open FETCH author").await;
+		assert_eq!(found, vec![true]);
+		let sql = "SELECT author.name FROM guarded";
+		assert_eq!(aheads_as(&setup, &owner, sql).await, vec![true]);
+		let found = aheads_as(&setup, &record, sql).await;
+		assert!(found.iter().all(|ahead| !ahead), "a permission filter before the projection");
+		let found = aheads_as(&setup, &record, "SELECT author.name FROM open").await;
 		assert_eq!(found, vec![true]);
 	}
 }

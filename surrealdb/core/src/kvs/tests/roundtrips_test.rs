@@ -43,7 +43,7 @@ const BUDGET: &[(&str, u64)] = &[
 	("count_all", 3),
 	("fetch_one", 2),
 	("fetch_many", 2),
-	("link_field", 23),
+	("link_field", 4),
 	("graph_1hop", 8),
 	("graph_2hop", 10),
 	("graph_in", 8),
@@ -64,6 +64,12 @@ const BUDGET: &[(&str, u64)] = &[
 	("create_ref", 11),
 	("txn_two_stmts", 35),
 ];
+
+/// Maximum serial round trips per read statement on SurrealKV, forward profile, for the
+/// statements whose count depends on the placement its read views allow (a paged range may run as
+/// morsels) and not only on what the store answers.
+#[cfg(feature = "kv-surrealkv")]
+const SURREALKV_BUDGET: &[(&str, u64)] = &[("fetch_many", 2), ("link_field", 4)];
 
 /// One corpus statement. `$n` and `$sn` are bound to the run number as an
 /// integer and as text, so a write names a fresh record on every run while the
@@ -421,8 +427,15 @@ fn table(label: &str, rows: &[Measured]) -> String {
 
 /// Measure the whole corpus on a wrapped datastore at `wrapped_path` against a
 /// wrapper-free one at `plain_path`, print the table, and, when `budgeted`,
-/// fail on any statement over its [`BUDGET`].
-async fn corpus_on(label: &str, wrapped_path: &str, plain_path: &str, budgeted: bool) {
+/// fail on any statement over its [`BUDGET`]; the statements `pinned` names fail over the count it
+/// gives however `budgeted` is set.
+async fn corpus_on(
+	label: &str,
+	wrapped_path: &str,
+	plain_path: &str,
+	budgeted: bool,
+	pinned: &[(&str, u64)],
+) {
 	let tracing = std::env::var("SURREAL_RT_TRACE").is_ok_and(|v| v == "1");
 	let stats = LatencyStats::new();
 	let (wrapped, wrapped_ses) = open(wrapped_path, Some(&stats)).await;
@@ -443,6 +456,17 @@ async fn corpus_on(label: &str, wrapped_path: &str, plain_path: &str, budgeted: 
 	for m in rows.iter().filter(|m| !m.trace.is_empty()) {
 		println!("{}", m.trace);
 	}
+	let mut over = Vec::new();
+	for (name, max) in pinned {
+		match rows.iter().find(|m| m.name == *name) {
+			Some(m) if m.fwd.rounds > *max => {
+				over.push(format!("{name}: {} > {max}", m.fwd.rounds))
+			}
+			Some(_) => {}
+			None => over.push(format!("{name}: pinned but not in the corpus")),
+		}
+	}
+	assert!(over.is_empty(), "round-trip budget exceeded: {over:?}");
 	if budgeted {
 		let mut over = Vec::new();
 		for m in &rows {
@@ -461,7 +485,7 @@ async fn corpus_on(label: &str, wrapped_path: &str, plain_path: &str, budgeted: 
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread")]
 async fn round_trips_memory() {
-	corpus_on("memory", "memory", "memory", true).await;
+	corpus_on("memory", "memory", "memory", true, &[]).await;
 }
 
 #[cfg(feature = "kv-surrealkv")]
@@ -475,6 +499,7 @@ async fn round_trips_surrealkv() {
 		&format!("surrealkv:{}", wrapped.path().to_string_lossy()),
 		&format!("surrealkv:{}", plain.path().to_string_lossy()),
 		false,
+		SURREALKV_BUDGET,
 	)
 	.await;
 }

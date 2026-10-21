@@ -307,7 +307,7 @@ async fn fetch_each_element<'a, S: FetchWalk, E: FetchIndex<S>>(
 	let mut windows = Windows::of(links.pool, elements, &include);
 	for at in 0..elements.len() {
 		let slot = match &elements[at] {
-			Value::RecordId(rid) => match links.ahead.and_then(|ahead| ahead.slot(rid)) {
+			Value::RecordId(rid) => match links.ahead.and_then(|ahead| ahead.slot(ctx, rid)) {
 				Some(slot) => slot,
 				None => match &mut windows {
 					Some(windows) => {
@@ -336,7 +336,7 @@ async fn fetch_value_if_record<'s>(
 		Value::RecordId(rid) => {
 			let slot = match first {
 				Slot::Unread => {
-					links.ahead.and_then(|ahead| ahead.slot(rid)).unwrap_or(Slot::Unread)
+					links.ahead.and_then(|ahead| ahead.slot(ctx, rid)).unwrap_or(Slot::Unread)
 				}
 				held => held,
 			};
@@ -847,7 +847,7 @@ pub(crate) async fn batch_fetch_in_place(
 			let Value::RecordId(rid) = &values[at] else {
 				continue;
 			};
-			let slot = match links.ahead.and_then(|ahead| ahead.slot(rid)) {
+			let slot = match links.ahead.and_then(|ahead| ahead.slot(ctx, rid)) {
 				Some(slot) => slot,
 				None => match &mut windows {
 					Some(windows) => {

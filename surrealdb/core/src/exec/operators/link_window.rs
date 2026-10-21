@@ -348,12 +348,18 @@ impl Drop for Windows<'_> {
 
 /// The records of the links a batch of source rows hold, read before the rows run.
 ///
-/// A `FETCH` of top-level link fields reads one link per row, so a collection window never sees two
-/// ids. The window reads the links of a run of the batch's rows at once instead: each is keyed by
-/// the encoded key of its record, and a position of the `FETCH` that names the key is served the
-/// bytes the window holds, whichever row it stands in. A window holds the distinct keys of a run
+/// A `FETCH` of top-level link fields, or a dereference `link.field` in a projection, reads one
+/// link per row, so a collection window never sees two ids. The window reads the links of a run of
+/// the batch's rows at once instead: each is keyed by the encoded key of its record, and a position
+/// of the `FETCH` or the dereference that names the key is served the bytes the window holds,
+/// whichever row it stands in. A window holds the distinct keys of a run
 /// of rows, sized as a collection window is; the caller runs the rows a fill covers and fills the
 /// window again for the rows after them, so a batch is read a window at a time.
+///
+/// The window's bytes are not charged to a query's memory reservation. They are bounded as a scan
+/// batch's are, by the `scan_batch_bytes` a fill is sized to (plus the one record a fill always
+/// takes) and by `NORMAL_BATCH_SIZE` keys, and a batch's state holds one window at a time, replaced
+/// by the next fill and released with the state.
 ///
 /// A key is held as its encoded bytes, not as the [`RecordId`] that names it: the rows the ids
 /// stand in are moved into the run after the fill, so the window borrows none of them, and an
@@ -406,15 +412,17 @@ impl RowsWindow {
 	}
 
 	/// Reads the records the `fields` of a run of the leading rows of `rows` hold links to: a field
-	/// that is a record id, or an array whose record-id elements are keys. Anything else gives no
-	/// key. Answers how many rows the run covers, at least one where `rows` holds any: the window
-	/// holds every key of those rows, except for a last row whose keys alone pass the size of a
-	/// window, whose keys past it read for themselves. A failed read leaves every key unread.
+	/// that is a record id, or, where `arrays` is set, an array whose record-id elements are keys.
+	/// Anything else gives no key. Answers how many rows the run covers, at least one where `rows`
+	/// holds any: the window holds every key of those rows, except for a last row whose keys alone
+	/// pass the size of a window, whose keys past it read for themselves. A failed read leaves
+	/// every key unread; the only error raised is the refusal of a query past the memory threshold.
 	pub(crate) async fn fill(
 		&mut self,
 		ctx: &ExecutionContext,
 		rows: &[Value],
 		fields: &[Strand],
+		arrays: bool,
 	) -> crate::expr::FlowResult<usize> {
 		self.encoded.clear();
 		self.spans.clear();
@@ -437,7 +445,7 @@ impl RowsWindow {
 			let before = ids.len();
 			for field in fields {
 				let links: &[Value] = match object.get(field.as_str()) {
-					Some(Value::Array(links)) => &links.0,
+					Some(Value::Array(links)) if arrays => &links.0,
 					Some(link @ Value::RecordId(_)) => std::slice::from_ref(link),
 					_ => continue,
 				};
@@ -488,12 +496,29 @@ impl RowsWindow {
 		ids.clear();
 		self.window.ids =
 			ids.into_iter().map(|_| -> &'static RecordId { unreachable!() }).collect();
+		#[cfg(test)]
+		tests::refused()?;
 		read.map(|()| covered)
 	}
 
-	/// What the window holds for the record `rid` names: its cached record or its stored bytes.
-	/// `None` for a record the window does not hold, or that it found no bytes for.
-	pub(crate) fn slot(&self, rid: &RecordId) -> Option<Slot<'_>> {
+	/// What the window holds for the record `rid` names in the namespace and database of `ctx`:
+	/// [`Self::slot_at`] for the scope `ctx` runs in. `None` where `ctx` has no database.
+	pub(crate) fn slot(&self, ctx: &ExecutionContext, rid: &RecordId) -> Option<Slot<'_>> {
+		let db_ctx = ctx.database().ok()?;
+		self.slot_at((db_ctx.ns_ctx.ns.namespace_id, db_ctx.db.database_id), rid)
+	}
+
+	/// What the window holds for the record `rid` names in `scope`: its cached record or its stored
+	/// bytes. `None` for a record the window does not hold, that it found no bytes for, or that
+	/// `scope` names in another namespace or database than the one the window was filled for.
+	pub(crate) fn slot_at(
+		&self,
+		scope: (NamespaceId, DatabaseId),
+		rid: &RecordId,
+	) -> Option<Slot<'_>> {
+		if self.scope != Some(scope) {
+			return None;
+		}
 		self.window.distinct_slot(self.find(rid)?)
 	}
 
@@ -540,6 +565,19 @@ pub(crate) mod tests {
 		static AHEAD: Cell<(usize, usize)> = const { Cell::new((0, 0)) };
 		/// How many collections of links this thread fetched by overlapping reads.
 		static EACH: Cell<usize> = const { Cell::new(0) };
+		/// Whether a rows window's fill on this thread fails as the process past its memory
+		/// threshold fails one.
+		pub(crate) static REFUSE_AHEAD: Cell<bool> = const { Cell::new(false) };
+	}
+
+	/// The failure a rows window's fill raises where the test pins one.
+	pub(super) fn refused() -> crate::expr::FlowResult<()> {
+		if REFUSE_AHEAD.with(Cell::get) {
+			return Err(crate::expr::ControlFlow::Err(anyhow::Error::new(
+				crate::kvs::DatastoreError::QueryBeyondMemoryThreshold,
+			)));
+		}
+		Ok(())
 	}
 
 	pub(crate) fn note_each() {
@@ -722,7 +760,7 @@ pub(crate) mod tests {
 			row(Some(rid("user", 4)), vec![rid("user", 1)]),
 		];
 		let mut ahead = RowsWindow::default();
-		ahead.fill(&ctx, &rows, &named(&["author", "friends"])).await.expect("fills");
+		ahead.fill(&ctx, &rows, &named(&["author", "friends"]), true).await.expect("fills");
 		let held = |n: i64| match rid("user", n) {
 			Value::RecordId(rid) => ahead.holds(&rid),
 			_ => unreachable!(),
@@ -738,11 +776,16 @@ pub(crate) mod tests {
 			unreachable!()
 		};
 		assert!(!ahead.holds(&missing), "a record the read found no bytes for is read for itself");
-		assert!(ahead.slot(&missing).is_none());
+		assert!(ahead.slot(&ctx, &missing).is_none());
 		let Value::RecordId(two) = rid("user", 2) else {
 			unreachable!()
 		};
-		assert!(matches!(ahead.slot(&two), Some(Slot::Stored(_))));
+		assert!(matches!(ahead.slot(&ctx, &two), Some(Slot::Stored(_))));
+		// The same id in another namespace or database is another record.
+		let (ns, db) = ahead.scope.expect("the fill's scope");
+		assert!(matches!(ahead.slot_at((ns, db), &two), Some(Slot::Stored(_))));
+		assert!(ahead.slot_at((NamespaceId(ns.0 + 1), db), &two).is_none(), "another namespace");
+		assert!(ahead.slot_at((ns, DatabaseId(db.0 + 1)), &two).is_none(), "another database");
 	}
 
 	#[tokio::test]
@@ -752,7 +795,7 @@ pub(crate) mod tests {
 		let ctx = db.exec_ctx().await;
 		let rows: Vec<Value> = (0..100).map(|n| row(Some(rid("user", n)), vec![])).collect();
 		let mut ahead = RowsWindow::default();
-		ahead.fill(&ctx, &rows, &named(&["author"])).await.expect("fills");
+		ahead.fill(&ctx, &rows, &named(&["author"]), true).await.expect("fills");
 		assert_eq!(ahead.window.slots.len(), 32, "the first window is a probe of 32");
 		let Value::RecordId(first) = rid("user", 0) else {
 			unreachable!()
@@ -762,7 +805,7 @@ pub(crate) mod tests {
 		};
 		assert!(ahead.holds(&first), "the keys of the first rows are taken");
 		assert!(!ahead.holds(&last), "the keys past the window read for themselves");
-		ahead.fill(&ctx, &rows, &named(&["author"])).await.expect("fills");
+		ahead.fill(&ctx, &rows, &named(&["author"]), true).await.expect("fills");
 		assert!(ahead.window.slots.len() > 32, "the next window grew from the first");
 	}
 
@@ -774,12 +817,12 @@ pub(crate) mod tests {
 		let rows: Vec<Value> = (0..300).map(|n| row(Some(rid("user", n)), vec![])).collect();
 		let mut ahead = RowsWindow::default();
 		for _ in 0..3 {
-			ahead.fill(&ctx, &rows, &named(&["author"])).await.expect("fills");
+			ahead.fill(&ctx, &rows, &named(&["author"]), true).await.expect("fills");
 		}
 		assert!(ahead.window.slots.len() > 32, "the fills of a run grow");
 		// The next run reads other records, whose size the last run says nothing of.
 		ahead.clear();
-		ahead.fill(&ctx, &rows, &named(&["author"])).await.expect("fills");
+		ahead.fill(&ctx, &rows, &named(&["author"]), true).await.expect("fills");
 		assert_eq!(ahead.window.slots.len(), 32, "a run starts from the probe");
 		// A pooled window keeps its size for the sites of one run, and forgets it with the run.
 		let pool = LinkPool::default();
@@ -803,10 +846,10 @@ pub(crate) mod tests {
 			unreachable!()
 		};
 		let mut ahead = RowsWindow::default();
-		assert!(!ahead.holds(&one) && ahead.slot(&one).is_none());
+		assert!(!ahead.holds(&one) && ahead.slot(&ctx, &one).is_none());
 		ctx.database().expect("a database context").txn().cancel().await.expect("closes");
 		let rows = vec![row(Some(rid("user", 1)), vec![rid("user", 2)])];
-		ahead.fill(&ctx, &rows, &named(&["author", "friends"])).await.expect("not raised");
+		ahead.fill(&ctx, &rows, &named(&["author", "friends"]), true).await.expect("not raised");
 		assert!(!ahead.holds(&one), "a failed read holds nothing");
 	}
 
@@ -817,7 +860,7 @@ pub(crate) mod tests {
 		let ctx = db.exec_ctx().await;
 		let rows: Vec<Value> = (0..100).map(|n| row(Some(rid("user", n)), vec![])).collect();
 		let mut ahead = RowsWindow::default();
-		ahead.fill(&ctx, &rows, &named(&["author"])).await.expect("fills");
+		ahead.fill(&ctx, &rows, &named(&["author"]), true).await.expect("fills");
 		let learned = ahead.window.len;
 		assert!(learned > 32, "the size grew from the probe: {learned}");
 		let Value::RecordId(first) = rid("user", 0) else {
@@ -825,8 +868,8 @@ pub(crate) mod tests {
 		};
 		assert!(ahead.holds(&first));
 		ahead.clear();
-		assert!(!ahead.holds(&first) && ahead.slot(&first).is_none());
-		ahead.fill(&ctx, &rows, &named(&["author"])).await.expect("fills");
+		assert!(!ahead.holds(&first) && ahead.slot(&ctx, &first).is_none());
+		ahead.fill(&ctx, &rows, &named(&["author"]), true).await.expect("fills");
 		assert_eq!(ahead.window.slots.len(), 32, "the next fill is a probe");
 	}
 }

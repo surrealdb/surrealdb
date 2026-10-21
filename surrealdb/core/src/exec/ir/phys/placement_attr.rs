@@ -32,8 +32,8 @@ pub(crate) struct PipelineIo {
 	/// The graph and reference lookups of the pipeline's projection that start from the source
 	/// row read what their first hop holds for a batch of source rows before the rows run.
 	pub(crate) frontier_rows: Option<FrontierRows>,
-	/// The top-level link fields of the pipeline's `FETCH`, read for a batch of source rows before
-	/// the rows run.
+	/// The top-level link fields of the pipeline's `FETCH` or of its projection's dereferences,
+	/// read for a batch of source rows before the rows run.
 	pub(crate) rows_ahead: Option<RowsAhead>,
 	/// The pipeline's scan reads its next chunk on a task of its own while the body runs the
 	/// current one, where the body runs in the storage cursor.
@@ -115,10 +115,14 @@ impl PipelineIo {
 	}
 }
 
-/// The fields of the source rows a pipeline's `FETCH` reads the links of ahead of the rows.
+/// The fields of the source rows a pipeline's `FETCH`, or the field dereferences of its
+/// projection, read the links of ahead of the rows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RowsAhead {
 	pub(crate) fields: SmallVec<[Strand; 2]>,
+	/// Whether the links are read for the dereferences of the projection (`link.field`) and not
+	/// for a `FETCH`.
+	pub(crate) derefs: bool,
 	/// The paging clause that stands before the `FETCH`, so the rows it skips and the rows past
 	/// the page it admits never reach the `FETCH`, as its place among the paging clauses of the
 	/// pipeline's body in the order the rows meet them; `None` where no clause pages the rows
