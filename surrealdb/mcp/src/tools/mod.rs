@@ -217,18 +217,41 @@ fn validate_record_id_key(key: &str) -> Result<(), ErrorData> {
 /// NUL bytes.
 fn consume_backtick_ident(s: &str) -> Result<&str, ErrorData> {
 	debug_assert!(s.starts_with('`'));
-	let body_and_tail = &s[1..];
-	let close = body_and_tail
-		.find('`')
-		.ok_or_else(|| crate::error::invalid_params("Unterminated backtick-quoted identifier"))?;
-	let body = &body_and_tail[..close];
-	if body.is_empty() {
-		return Err(crate::error::invalid_params("Backtick-quoted identifier cannot be empty"));
+	// Scan the body exactly as the SurrealQL lexer does (`delimited_ident` in
+	// surrealdb-parser): a backslash escapes the next byte, so an escaped
+	// backtick does not close the identifier - only an unescaped backtick ends
+	// it. The previous `str::find('`')` stopped at the first backtick, escaped
+	// or not, so a value such as `` `a\`; DROP ... `` validated as a short
+	// identifier here while the lexer read a longer one, executing the smuggled
+	// statement. Matching the lexer keeps the two in agreement.
+	let bytes = s.as_bytes();
+	let mut i = 1; // past the opening backtick
+	loop {
+		match bytes.get(i) {
+			None => {
+				return Err(crate::error::invalid_params(
+					"Unterminated backtick-quoted identifier",
+				));
+			}
+			Some(b'`') => {
+				let body = &s[1..i];
+				if body.is_empty() {
+					return Err(crate::error::invalid_params(
+						"Backtick-quoted identifier cannot be empty",
+					));
+				}
+				if body.contains('\n') || body.contains('\r') || body.contains('\0') {
+					return Err(crate::error::invalid_params(
+						"Identifier contains invalid characters",
+					));
+				}
+				return Ok(&s[i + 1..]);
+			}
+			// A backslash consumes the next byte too, matching the lexer.
+			Some(b'\\') => i += 2,
+			Some(_) => i += 1,
+		}
 	}
-	if body.contains('\n') || body.contains('\r') || body.contains('\0') {
-		return Err(crate::error::invalid_params("Identifier contains invalid characters"));
-	}
-	Ok(&body_and_tail[close + 1..])
 }
 
 /// Sentinel key that escapes a JSON object into a SurrealQL pass-through.
@@ -433,6 +456,29 @@ mod cap_tests {
 		let vars = json_to_variables(&payload, &mcp, &core).expect("within-cap payload accepted");
 		// Sanity check that conversion produced both keys.
 		assert_eq!(vars.len(), 2);
+	}
+
+	/// The backtick-identifier validator must agree with the SurrealQL lexer on
+	/// where an identifier ends, so a crafted value cannot validate as one thing
+	/// and lex as another (GHSA-cr79-9p8r-p5wx).
+	#[test]
+	fn backtick_identifier_validation_is_escape_aware() {
+		// Plain backtick identifier, and one with a trailing record-id key.
+		assert!(validate_identifier("`plain`").is_ok());
+		assert!(validate_identifier("`plain`:key").is_ok());
+		// An escaped backtick is part of the body, not the close, so a valid
+		// identifier that contains one is accepted. The previous validator
+		// stopped at the first backtick and wrongly rejected this.
+		assert!(validate_identifier("`a\\`b`").is_ok());
+		// An escaped *trailing* backtick leaves the identifier unterminated, as
+		// the lexer sees it. The previous validator stopped at the escaped
+		// backtick and accepted a short identifier, leaving the lexer to error
+		// on - or execute - the rest. It must be rejected.
+		assert!(validate_identifier("`a\\`").is_err());
+		// Raw SurrealQL after the identifier is rejected, with or without an
+		// escaped backtick smuggling it past the first-backtick scan.
+		assert!(validate_identifier("`tbl`; DROP TABLE x").is_err());
+		assert!(validate_identifier("`a\\`; DROP TABLE x; SELECT * FROM `b`").is_err());
 	}
 
 	/// `$ql` must round-trip every typed scalar that JSON cannot
