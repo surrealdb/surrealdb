@@ -1,6 +1,6 @@
 //! Function registry for storing and looking up scalar, aggregate, and projection functions.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -23,6 +23,9 @@ use crate::expr::logical::EffectSet;
 pub struct FunctionRegistry {
 	/// Scalar functions (e.g., math::abs, string::len)
 	functions: HashMap<&'static str, &'static dyn ScalarFunction>,
+	/// The scalar names [`Self::register`] has bound since their family last registered them:
+	/// each resolves to the function registered, not to the builtin of that name.
+	registered: HashSet<&'static str>,
 	/// Aggregate functions (e.g., count, math::sum, math::mean)
 	aggregates: HashMap<&'static str, Arc<dyn AggregateFunction>>,
 	/// Projection functions (e.g., type::field, type::fields)
@@ -46,6 +49,7 @@ impl FunctionRegistry {
 	pub fn new() -> Self {
 		Self {
 			functions: HashMap::new(),
+			registered: HashSet::new(),
 			aggregates: HashMap::new(),
 			projections: HashMap::new(),
 			index_functions: HashMap::new(),
@@ -73,6 +77,7 @@ impl FunctionRegistry {
 	#[allow(unused)]
 	pub fn register(&mut self, func: &'static dyn ScalarFunction) {
 		self.functions.insert(func.name(), func);
+		self.registered.insert(func.name());
 		self.id = fresh_id();
 	}
 
@@ -83,6 +88,7 @@ impl FunctionRegistry {
 		for family in families {
 			for &func in *family {
 				self.functions.insert(func.name(), func);
+				self.registered.remove(func.name());
 			}
 		}
 		self.id = fresh_id();
@@ -91,6 +97,13 @@ impl FunctionRegistry {
 	/// Look up a scalar function by name.
 	pub fn get(&self, name: &str) -> Option<&'static dyn ScalarFunction> {
 		self.functions.get(name).copied()
+	}
+
+	/// Whether `name` resolves to the scalar builtin its family registered, which code that
+	/// answers a builtin without calling it may stand in for: `false` where [`Self::register`]
+	/// has bound the name to another function, or where the registry holds no function of it.
+	pub(crate) fn is_builtin(&self, name: &str) -> bool {
+		self.functions.contains_key(name) && !self.registered.contains(name)
 	}
 
 	/// Check if a scalar function exists.

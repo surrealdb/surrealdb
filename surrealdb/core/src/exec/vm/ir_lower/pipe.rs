@@ -1772,6 +1772,7 @@ fn open_source(
 					)
 				}
 			};
+			let before_rows = query.as_ref().is_none_or(|query| query.before_rows);
 			reads.sorts.push(knn_sort_spec(attrs, em.knn_slot(), query));
 			(
 				Sink::Knn {
@@ -1780,6 +1781,7 @@ fn open_source(
 					rank: Arc::new(KnnRank {
 						vector,
 						distance: attrs.distance.clone(),
+						before_rows,
 					}),
 				},
 				Source::Sorted {
@@ -1943,6 +1945,7 @@ fn sort_spec(attrs: &SortAttrs) -> SortSpec {
 		spill: attrs.tempfiles && attrs.keep.is_none() && !attrs.random,
 		pushdown: attrs.pushdown,
 		floors_at_keep: false,
+		shares_floor: attrs.keep.is_some() && !attrs.random,
 		random: attrs.random,
 		knn_slot: None,
 		knn_query: None,
@@ -1987,7 +1990,8 @@ impl Stage {
 /// The sort of the brute-force search `attrs` stands for: the `k` rows of least distance, in
 /// order of their distance, held in memory. `slot` publishes each kept row's distance for
 /// `vector::distance::knn()`, and `query` is the query vector the host evaluates when the
-/// statement starts, where it is not a literal.
+/// statement starts, where it is not a literal. The sort takes its floor as soon as it holds `k`
+/// rows, so a row ranked farther than every kept one is dropped before it is kept from then on.
 fn knn_sort_spec(attrs: &KnnTopKAttrs, slot: u16, query: Option<KnnQuery>) -> SortSpec {
 	SortSpec {
 		keys: vec![KeyOrder {
@@ -1999,7 +2003,8 @@ fn knn_sort_spec(attrs: &KnnTopKAttrs, slot: u16, query: Option<KnnQuery>) -> So
 		held: Spill::Bounded,
 		spill: false,
 		pushdown: false,
-		floors_at_keep: false,
+		floors_at_keep: true,
+		shares_floor: true,
 		random: false,
 		knn_slot: Some(slot),
 		knn_query: query,
@@ -4504,6 +4509,76 @@ pub(super) mod tests {
 			),
 			"{code:?}"
 		);
+	}
+
+	/// A vector measure computes the builtin it stands for, so a call of a name the registry binds
+	/// to another function lowers as that call, which resolves and invokes the function bound.
+	#[test]
+	fn a_vector_builtin_the_registry_binds_elsewhere_is_called_not_measured() {
+		use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
+		use crate::exec::ir::iface::Fallibility;
+		use crate::expr::logical::EffectSet;
+
+		#[derive(Debug)]
+		struct Dot;
+
+		impl ScalarFunction for Dot {
+			fn name(&self) -> &'static str {
+				"vector::dot"
+			}
+
+			fn signature(&self) -> Signature {
+				Signature::new()
+			}
+
+			fn effects(&self) -> EffectSet {
+				EffectSet::PURE
+			}
+
+			fn fallibility(&self) -> Fallibility {
+				Fallibility::VALUE
+			}
+		}
+
+		let mut b = Builder::new();
+		pipeline(&mut b, 0, |b| {
+			let rows = scan(b);
+			let filter = step(b, PhysOp::Filter, rows, &[]);
+			row_region(b, filter, RegionKind::Clause(ClauseRole::Where), |b, row| {
+				let v = b.add(
+					ExprOp::Field {
+						name: Strand::from("v"),
+					},
+					&[row],
+				);
+				let query =
+					b.literal(Value::Array(vec![Value::from(1_i64), Value::from(2_i64)].into()));
+				let dot = b.call("vector::dot", &[v, query]);
+				let zero = b.literal(Value::from(0_i64));
+				b.binary(BinaryOperator::MoreThan, dot, zero)
+			});
+			b.result_of(filter)
+		});
+		let b = placed(b);
+		let code = |registry: &FunctionRegistry| match lower_reads(
+			&mut LowerCx::detached_over(registry),
+			&b.ir,
+			false,
+		) {
+			Ok(lowered) => lowered.program.pipelines[0].code.clone(),
+			Err(error) => panic!("the container lowers: {error}"),
+		};
+		let measured =
+			|code: &[Instr]| code.iter().any(|instr| matches!(instr, Instr::Measure { .. }));
+		let called = |code: &[Instr]| code.iter().any(|instr| matches!(instr, Instr::Call { .. }));
+
+		let builtin = code(crate::exec::ir::analysis::cx::builtin_registry());
+		assert!(measured(&builtin) && !called(&builtin), "the builtin is measured: {builtin:?}");
+
+		let mut registry = FunctionRegistry::with_builtins();
+		registry.register(&Dot);
+		let bound = code(&registry);
+		assert!(!measured(&bound) && called(&bound), "the function bound is called: {bound:?}");
 	}
 
 	#[test]

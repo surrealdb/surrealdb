@@ -82,6 +82,15 @@ pub(crate) fn weight(value: &crate::val::Value) -> u32 {
 	}
 }
 
+/// Whether a storage cursor that took `budget` units of fuel as its chunk began, and has
+/// `unspent` of them left after a unit for each record it read, has spent the fuel: the units its
+/// records cost, with what the bodies it ran charged the meter meanwhile, reach what the meter
+/// held. A body run inside the cursor yields nowhere, so the cursor ends its chunk there.
+#[inline]
+pub(crate) fn chunk_spent(budget: u32, unspent: u32) -> bool {
+	unspent == 0 || left() <= budget - unspent
+}
+
 /// The entries a storage call may take in one go: no more than `most`, nor
 /// than the fuel left, so that the units a read charges once it returns never
 /// overshoot the meter by more than the entries of one read.

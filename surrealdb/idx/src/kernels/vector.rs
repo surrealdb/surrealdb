@@ -11,7 +11,7 @@ use anyhow::Result;
 use surrealdb_runtime::util::math::ToFloat;
 use surrealdb_runtime::util::math::vector::{
 	ChebyshevDistance, CosineDistance, EuclideanDistance, HammingDistance, JaccardSimilarity,
-	ManhattanDistance, MinkowskiDistance, PearsonSimilarity, check_same_dimension,
+	ManhattanDistance, MinkowskiDistance, PearsonSimilarity, check_same_dimension, lane_sum,
 };
 
 use crate::catalog::{Distance, VectorType};
@@ -93,17 +93,14 @@ pub fn distance_compute(d: &Distance, v1: &[Number], v2: &[Number]) -> Result<Nu
 		Distance::Cosine => v1.cosine_distance(v2),
 		Distance::CosineNormalized => {
 			check_same_dimension("vector::distance::cosine_normalized", v1, v2)?;
-			Ok((1.0
-				- v1.iter().zip(v2.iter()).map(|(a, b)| a.to_float() * b.to_float()).sum::<f64>())
-			.into())
+			Ok((1.0 - float_products(v1, v2)).into())
 		}
 		Distance::Chebyshev => v1.chebyshev_distance(v2),
 		Distance::Euclidean => v1.euclidean_distance(v2),
 		Distance::Hamming => v1.hamming_distance(v2),
 		Distance::InnerProduct => {
 			check_same_dimension("vector::distance::inner_product", v1, v2)?;
-			Ok((-v1.iter().zip(v2.iter()).map(|(a, b)| a.to_float() * b.to_float()).sum::<f64>())
-				.into())
+			Ok((-float_products(v1, v2)).into())
 		}
 		Distance::Jaccard => Ok((1.0 - v1.jaccard_similarity(v2)?.to_float()).into()),
 		Distance::Manhattan => v1.manhattan_distance(v2),
@@ -122,6 +119,12 @@ pub fn distance_compute(d: &Distance, v1: &[Number], v2: &[Number]) -> Result<Nu
 			.into())
 		}
 	}
+}
+
+/// `Σ aᵢbᵢ` over two vectors of the same dimension, each product taken in
+/// floats, summed as [`lane_sum`] sums.
+fn float_products(v1: &[Number], v2: &[Number]) -> f64 {
+	lane_sum(v1, v2, |a, b| a.to_float() * b.to_float())
 }
 
 #[cfg(test)]

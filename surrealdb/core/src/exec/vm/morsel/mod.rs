@@ -334,9 +334,18 @@ pub(crate) fn effective_mode(decided: MorselInput, in_place: bool) -> MorselInpu
 
 /// [`effective_mode`] of `pipeline`: how its morsels run, or `None` when it runs serially.
 pub(crate) fn effective_input(pipeline: &Pipeline) -> Option<MorselInput> {
+	effective_input_of(pipeline, pipeline.in_place)
+}
+
+/// [`effective_input`] of a run of `pipeline` that runs its body on the stored row where
+/// `in_place` says so ([`runs_in_place`](super::host::runs_in_place)).
+pub(in crate::exec::vm) fn effective_input_of(
+	pipeline: &Pipeline,
+	in_place: bool,
+) -> Option<MorselInput> {
 	match &pipeline.parallel {
 		Parallel::Serial => None,
-		Parallel::Morsels(plan) => Some(effective_mode(plan.input, pipeline.in_place)),
+		Parallel::Morsels(plan) => Some(effective_mode(plan.input, in_place)),
 	}
 }
 
@@ -388,8 +397,20 @@ impl<'p> Rows<'p> {
 		pipeline: &Pipeline,
 		ctx: &ExecutionContext,
 	) -> Self {
+		Self::of_run(program, pipeline, pipeline.in_place, ctx)
+	}
+
+	/// [`Self::of`] for a run of `pipeline` that runs its body on the stored row where `in_place`
+	/// says so ([`runs_in_place`](super::host::runs_in_place)): a run of a pipeline planned to that
+	/// reads its rows decoded reads them as morsels of batches where the plan parallelises it.
+	pub(super) fn of_run(
+		program: &'p Arc<Program>,
+		pipeline: &Pipeline,
+		in_place: bool,
+		ctx: &ExecutionContext,
+	) -> Self {
 		match program.pipelines.iter().position(|p| std::ptr::eq(p, pipeline)) {
-			Some(at) if effective_input(pipeline) == Some(MorselInput::Batches) => {
+			Some(at) if effective_input_of(pipeline, in_place) == Some(MorselInput::Batches) => {
 				if !applies_in_order(pipeline) {
 					Rows::Morsels(Box::new(MorselSet::new(program, at, ctx)))
 				} else if write_set::holds_cut(pipeline) {

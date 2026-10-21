@@ -1,8 +1,167 @@
 use anyhow::{Result, ensure};
 use surrealdb_expr::expr::Error;
-use surrealdb_expr::val::Number;
+use surrealdb_expr::val::{Number, Value};
 
 use crate::util::math::ToFloat;
+
+/// An element of a vector the distance and similarity measures read as a
+/// [`Number`]: a number itself, or a value that holds one.
+///
+/// A [`Value`] that is not a number reads as `0`. A caller hands the
+/// measures only arrays whose every element is a number
+/// ([`NumberArray`](crate::vector::NumberArray) checks it), so the fallback
+/// is never what a measure answers.
+pub trait AsNumber {
+	fn as_number(&self) -> &Number;
+}
+
+impl AsNumber for Number {
+	#[inline(always)]
+	fn as_number(&self) -> &Number {
+		self
+	}
+}
+
+/// The number a non-number [`Value`] reads as.
+static NOT_A_NUMBER: Number = Number::Int(0);
+
+impl AsNumber for Value {
+	#[inline(always)]
+	fn as_number(&self) -> &Number {
+		match self {
+			Value::Number(n) => n,
+			_ => &NOT_A_NUMBER,
+		}
+	}
+}
+
+/// The lanes [`lane_sum`] accumulates in.
+const LANES: usize = 8;
+
+/// The sum of the partial sums `p`, combined pairwise:
+/// `((p₀ + p₄) + (p₁ + p₅)) + ((p₂ + p₆) + (p₃ + p₇))`.
+#[inline(always)]
+fn fold_lanes(p: [f64; LANES]) -> f64 {
+	let [p0, p1, p2, p3, p4, p5, p6, p7] = p;
+	((p0 + p4) + (p1 + p5)) + ((p2 + p6) + (p3 + p7))
+}
+
+/// `Σ term(aᵢ, bᵢ)` over two slices of equal length, from `-0.0` as a sum of
+/// `f64`s ([`Iterator::sum`]) starts.
+///
+/// The term of index `i` is accumulated in partial sum `i mod LANES`, over the
+/// whole chunks of [`LANES`] terms; the partial sums are combined by
+/// [`fold_lanes`] and followed by the terms of the tail in order. The partial
+/// sums carry no dependency on one another, which is what lets the loop run at
+/// the throughput of the additions rather than their latency, and vectorise
+/// over contiguous floats. The order is fixed, so a pair of slices always sums
+/// to the same value.
+///
+/// A slice shorter than [`LANES`] is summed in order, so its answer is the
+/// sequential sum's, to the last bit, an empty slice's included. A longer one is
+/// summed in another order than the sequential sum, and the two differ by
+/// rounding error of the order of `n · ε · Σ|termᵢ|`. That is small next to the
+/// sum where its terms share a sign; where they cancel, the two can differ by
+/// the whole of the sum, sign included.
+///
+/// A sum the lanes leave not finite is taken again in order from `-0.0`, and
+/// that sum is the answer: finite terms that cancel across lanes can carry one
+/// lane past the largest float while the sum in order stays finite. A sum in
+/// order that passes the largest float partway, where the lanes stay finite, is
+/// answered from the lanes.
+#[inline]
+pub fn lane_sum<T>(a: &[T], b: &[T], term: impl Fn(&T, &T) -> f64) -> f64 {
+	match try_lane_sum(a, b, |x, y| Some(term(x, y))) {
+		Some(sum) => sum,
+		None => unreachable!("every term of a lane sum exists"),
+	}
+}
+
+/// [`lane_sum`] over terms that may not exist: `None` as soon as `term` answers `None` for a
+/// pair, so a caller that sums only pairs of one kind reads each pair once.
+#[inline]
+pub fn try_lane_sum<T>(a: &[T], b: &[T], term: impl Fn(&T, &T) -> Option<f64>) -> Option<f64> {
+	let mut p = [-0.0f64; LANES];
+	let (chunks_a, chunks_b) = (a.chunks_exact(LANES), b.chunks_exact(LANES));
+	let (rest_a, rest_b) = (chunks_a.remainder(), chunks_b.remainder());
+	for (x, y) in chunks_a.zip(chunks_b) {
+		for lane in 0..LANES {
+			p[lane] += term(&x[lane], &y[lane])?;
+		}
+	}
+	let mut acc = fold_lanes(p);
+	for (x, y) in rest_a.iter().zip(rest_b) {
+		acc += term(x, y)?;
+	}
+	if acc.is_finite() {
+		Some(acc)
+	} else {
+		in_order_sum(a, b, &term)
+	}
+}
+
+/// `Σ term(aᵢ, bᵢ)` over two slices of equal length, summed in order from `-0.0`; `None` as
+/// soon as `term` answers `None` for a pair.
+fn in_order_sum<T>(a: &[T], b: &[T], term: impl Fn(&T, &T) -> Option<f64>) -> Option<f64> {
+	a.iter().zip(b).try_fold(-0.0, |acc, (x, y)| Some(acc + term(x, y)?))
+}
+
+/// `(Σ aᵢbᵢ, Σ aᵢ², Σ bᵢ²)` over two slices of equal length, in one pass; `None` as soon as
+/// `float` reads no float from an element.
+///
+/// The dot product is the one [`float_dot`] answers: accumulated as [`lane_sum`] accumulates its
+/// terms, taken again in order where that leaves it not finite, and from the integer `0`
+/// [`Number`] arithmetic sums from. Each norm is accumulated as [`lane_sum`] accumulates its
+/// terms. A norm is a sum of squares, whose terms never cancel, so a lane past the largest float
+/// leaves the sum in order past it too.
+#[inline]
+pub fn dot_and_norms<T>(
+	a: &[T],
+	b: &[T],
+	float: impl Fn(&T) -> Option<f64>,
+) -> Option<(f64, f64, f64)> {
+	let mut dot = [-0.0f64; LANES];
+	let mut na = [-0.0f64; LANES];
+	let mut nb = [-0.0f64; LANES];
+	let (chunks_a, chunks_b) = (a.chunks_exact(LANES), b.chunks_exact(LANES));
+	let (rest_a, rest_b) = (chunks_a.remainder(), chunks_b.remainder());
+	for (x, y) in chunks_a.zip(chunks_b) {
+		for lane in 0..LANES {
+			let (x, y) = (float(&x[lane])?, float(&y[lane])?);
+			dot[lane] += x * y;
+			na[lane] += x * x;
+			nb[lane] += y * y;
+		}
+	}
+	let (mut d, mut sa, mut sb) = (fold_lanes(dot), fold_lanes(na), fold_lanes(nb));
+	for (x, y) in rest_a.iter().zip(rest_b) {
+		let (x, y) = (float(x)?, float(y)?);
+		d += x * y;
+		sa += x * x;
+		sb += y * y;
+	}
+	if !d.is_finite() {
+		d = in_order_sum(a, b, |x, y| Some(float(x)? * float(y)?))?;
+	}
+	Some((from_integer_zero(d), sa, sb))
+}
+
+/// The sum `sum`, taken from `-0.0`, as a sum of the same terms from the integer `0` answers
+/// it: the two differ only where every term is `-0.0`, which sums to `-0.0` from `-0.0` and to
+/// `0.0` from `0`.
+#[inline(always)]
+fn from_integer_zero(sum: f64) -> f64 {
+	sum + 0.0
+}
+
+/// The float a [`Number::Float`] holds; `None` for any other number.
+#[inline(always)]
+fn float_of<T: AsNumber>(n: &T) -> Option<f64> {
+	match n.as_number() {
+		Number::Float(f) => Some(*f),
+		_ => None,
+	}
+}
 
 pub fn deviation<T>(v: &[T], mean: f64, sample: bool) -> f64
 where
@@ -81,23 +240,36 @@ pub trait CosineDistance {
 	fn cosine_distance(&self, other: &Self) -> Result<Number>;
 }
 
-impl CosineDistance for [Number] {
+impl<T: AsNumber> CosineDistance for [T] {
 	fn cosine_distance(&self, other: &Self) -> Result<Number> {
 		check_same_dimension("vector::distance::cosine", self, other)?;
-		let d = dot(self, other);
-		Ok(Number::from(1) - d / (self.magnitude() * other.magnitude()))
+		Ok(Number::from(1) - cosine(self, other))
 	}
+}
+
+/// The cosine similarity of two vectors of the same dimension.
+///
+/// Vectors of floats are read in one pass ([`dot_and_norms`]). A vector
+/// holding any other number takes the dot product in [`Number`] arithmetic,
+/// which keeps a product of integers exact.
+fn cosine<T: AsNumber>(a: &[T], b: &[T]) -> Number {
+	if !a.is_empty()
+		&& let Some((d, na, nb)) = dot_and_norms(a, b, float_of)
+	{
+		return Number::Float(d / (na.sqrt() * nb.sqrt()));
+	}
+	let d = dot(a, b);
+	d / (Number::from(magnitude_squared(a).sqrt()) * Number::from(magnitude_squared(b).sqrt()))
 }
 
 pub trait CosineSimilarity {
 	fn cosine_similarity(&self, other: &Self) -> Result<Number>;
 }
 
-impl CosineSimilarity for [Number] {
+impl<T: AsNumber> CosineSimilarity for [T] {
 	fn cosine_similarity(&self, other: &Self) -> Result<Number> {
 		check_same_dimension("vector::similarity::cosine", self, other)?;
-		let d = dot(self, other);
-		Ok(d / (self.magnitude() * other.magnitude()))
+		Ok(cosine(self, other))
 	}
 }
 
@@ -124,10 +296,15 @@ pub trait HammingDistance {
 	fn hamming_distance(&self, other: &Self) -> Result<Number>;
 }
 
-impl HammingDistance for [Number] {
+impl<T: AsNumber> HammingDistance for [T] {
 	fn hamming_distance(&self, other: &Self) -> Result<Number> {
 		check_same_dimension("vector::distance::hamming", self, other)?;
-		Ok(self.iter().zip(other.iter()).filter(|(a, b)| a != b).count().into())
+		Ok(self
+			.iter()
+			.zip(other.iter())
+			.filter(|(a, b)| a.as_number() != b.as_number())
+			.count()
+			.into())
 	}
 }
 
@@ -135,11 +312,13 @@ pub trait JaccardSimilarity {
 	fn jaccard_similarity(&self, other: &Self) -> Result<Number>;
 }
 
-impl JaccardSimilarity for [Number] {
+impl<T: AsNumber> JaccardSimilarity for [T] {
 	fn jaccard_similarity(&self, other: &Self) -> Result<Number> {
 		check_same_dimension("vector::similarity::jaccard", self, other)?;
 		Ok(weighted_jaccard_similarity(
-			self.iter().zip(other.iter()).map(|(a, b)| (a.to_float(), b.to_float())),
+			self.iter()
+				.zip(other.iter())
+				.map(|(a, b)| (a.as_number().to_float(), b.as_number().to_float())),
 		)
 		.into())
 	}
@@ -271,10 +450,20 @@ pub trait ManhattanDistance {
 	fn manhattan_distance(&self, other: &Self) -> Result<Number>;
 }
 
-impl ManhattanDistance for [Number] {
+impl<T: AsNumber> ManhattanDistance for [T] {
 	fn manhattan_distance(&self, other: &Self) -> Result<Number> {
 		check_same_dimension("vector::distance::manhattan", self, other)?;
+		// A sum of floats is a float whatever its terms' order; any other
+		// number keeps the integer sum exact while it fits, and an empty
+		// vector answers the empty integer sum.
+		if !self.is_empty()
+			&& let Some(sum) =
+				try_lane_sum(self, other, |a, b| Some((float_of(a)? - float_of(b)?).abs()))
+		{
+			return Ok(sum.into());
+		}
 		Ok(self.iter().zip(other.iter()).fold(Number::Int(0), |acc, (a, b)| {
+			let (a, b) = (a.as_number(), b.as_number());
 			match (acc, int_abs_diff(a, b)) {
 				// An integer sum stays an integer while it fits in an `i64`.
 				(Number::Int(acc), Some(d)) => {
@@ -300,23 +489,24 @@ fn int_abs_diff(a: &Number, b: &Number) -> Option<u64> {
 	}
 }
 
+/// `|a − b|` as a float: exact for two integers, taken in floats otherwise.
+#[inline(always)]
+fn abs_diff(a: &Number, b: &Number) -> f64 {
+	match (a, b) {
+		(Number::Float(a), Number::Float(b)) => (a - b).abs(),
+		_ => int_abs_diff(a, b).map_or_else(|| (a.to_float() - b.to_float()).abs(), |d| d as f64),
+	}
+}
+
 pub trait MinkowskiDistance {
 	fn minkowski_distance(&self, other: &Self, order: &Number) -> Result<Number>;
 }
 
-impl MinkowskiDistance for [Number] {
+impl<T: AsNumber> MinkowskiDistance for [T] {
 	fn minkowski_distance(&self, other: &Self, order: &Number) -> Result<Number> {
 		check_same_dimension("vector::distance::minkowski", self, other)?;
 		let p = order.to_float();
-		let dist: f64 = self
-			.iter()
-			.zip(other.iter())
-			.map(|(a, b)| {
-				int_abs_diff(a, b)
-					.map_or_else(|| (a.to_float() - b.to_float()).abs(), |d| d as f64)
-					.powf(p)
-			})
-			.sum();
+		let dist = lane_sum(self, other, |a, b| abs_diff(a.as_number(), b.as_number()).powf(p));
 		Ok(dist.powf(1.0 / p).into())
 	}
 }
@@ -369,15 +559,13 @@ pub trait ChebyshevDistance {
 	fn chebyshev_distance(&self, other: &Self) -> Result<Number>;
 }
 
-impl ChebyshevDistance for [Number] {
+impl<T: AsNumber> ChebyshevDistance for [T] {
 	fn chebyshev_distance(&self, other: &Self) -> Result<Number> {
 		check_same_dimension("vector::distance::chebyshev", self, other)?;
 		Ok(self
 			.iter()
 			.zip(other.iter())
-			.map(|(a, b)| {
-				int_abs_diff(a, b).map_or_else(|| (a.to_float() - b.to_float()).abs(), |d| d as f64)
-			})
+			.map(|(a, b)| abs_diff(a.as_number(), b.as_number()))
 			.fold(0.0, f64::max)
 			.into())
 	}
@@ -425,15 +613,31 @@ pub trait DotProduct {
 	fn dot(&self, other: &Self) -> Result<Number>;
 }
 
-impl DotProduct for Vec<Number> {
+impl<T: AsNumber> DotProduct for [T] {
 	fn dot(&self, other: &Self) -> Result<Number> {
 		check_same_dimension("vector::dot", self, other)?;
+		if let Some(d) = float_dot(self, other) {
+			return Ok(Number::Float(d));
+		}
 		Ok(dot(self, other))
 	}
 }
 
-fn dot(a: &[Number], b: &[Number]) -> Number {
-	a.iter().zip(b.iter()).map(|(a, b)| a * b).sum()
+/// The dot product of two vectors of floats of the same dimension, summed as
+/// [`lane_sum`] sums and from the integer `0` that [`Number`] arithmetic sums
+/// from; `None` where either holds any other number, and for empty vectors,
+/// which [`Number`] arithmetic answers with the integer `0`.
+pub fn float_dot<T: AsNumber>(a: &[T], b: &[T]) -> Option<f64> {
+	if a.is_empty() {
+		return None;
+	}
+	try_lane_sum(a, b, |x, y| Some(float_of(x)? * float_of(y)?)).map(from_integer_zero)
+}
+
+/// The dot product in [`Number`] arithmetic, which keeps a product of
+/// integers exact.
+fn dot<T: AsNumber>(a: &[T], b: &[T]) -> Number {
+	a.iter().zip(b.iter()).map(|(a, b)| a.as_number() * b.as_number()).sum()
 }
 
 pub trait EuclideanDistance {
@@ -441,23 +645,23 @@ pub trait EuclideanDistance {
 	fn euclidean_distance(&self, other: &Self) -> Result<Number>;
 }
 
-impl EuclideanDistance for [Number] {
+impl<T: AsNumber> EuclideanDistance for [T] {
 	fn euclidean_distance(&self, other: &Self) -> Result<Number> {
 		check_same_dimension("vector::distance::euclidean", self, other)?;
-		Ok(self
-			.iter()
-			.zip(other.iter())
-			.map(|(a, b)| {
-				int_abs_diff(a, b).map_or_else(|| (a - b).to_float(), |d| d as f64).powi(2)
-			})
-			.sum::<f64>()
-			.sqrt()
-			.into())
+		Ok(lane_sum(self, other, |a, b| {
+			let (a, b) = (a.as_number(), b.as_number());
+			match (a, b) {
+				(Number::Float(a), Number::Float(b)) => (a - b).powi(2),
+				_ => int_abs_diff(a, b).map_or_else(|| (a - b).to_float(), |d| d as f64).powi(2),
+			}
+		})
+		.sqrt()
+		.into())
 	}
 }
 
-fn magnitude_squared(v: &[Number]) -> f64 {
-	v.iter().map(|a| a.to_float().powi(2)).sum::<f64>()
+fn magnitude_squared<T: AsNumber>(v: &[T]) -> f64 {
+	v.iter().map(|a| a.as_number().to_float().powi(2)).sum::<f64>()
 }
 
 pub trait Magnitude {

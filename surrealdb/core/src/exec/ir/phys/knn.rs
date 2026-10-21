@@ -1242,8 +1242,10 @@ fn settle(
 /// Puts the brute-force search `ranked` above the stage that held its operator: the stage ops up
 /// to it (`kept`, as [`strip`] left them) move into a select loop of their own over the loop's
 /// rows, the search reads that loop's rows, and `looped` reads the search's. Where no stage op
-/// stands at or beneath the ranked one, the search reads the loop's rows directly. `deferred` is
-/// the query vector a `Deferred` target reads ([`settle`]).
+/// stands at or beneath the ranked one, that loop yields each row it reads: the search still reads
+/// a loop, which is the pipeline the placement pass may run in morsels, each keeping its own
+/// nearest rows, where a search reading the scan directly would read it on the statement's task
+/// alone. `deferred` is the query vector a `Deferred` target reads ([`settle`]).
 fn rank(
 	rw: &mut Rewriter<'_>,
 	looped: OpId,
@@ -1264,10 +1266,7 @@ fn rank(
 		loc: data.loc.clone(),
 	};
 	let moved: Vec<OpId> = kept[..=ranked.stage].iter().flatten().copied().collect();
-	let ranked_rows = match moved.is_empty() {
-		true => rows,
-		false => beneath(rw, looped, body, rows, &moved, &spec)?,
-	};
+	let ranked_rows = beneath(rw, looped, body, rows, &moved, &spec)?;
 	let mut operands: SmallVec<[ValueId; 4]> = smallvec![ranked_rows];
 	operands.extend(deferred);
 	let search = rw.create(
@@ -1289,7 +1288,8 @@ fn rank(
 
 /// Moves the stage ops `moved`, the head of the body `body` of the select loop `looped`, into a
 /// new select loop over `rows` that stands before `looped`, and answers its rows. The rows the
-/// last moved op delivered are `looped`'s row from then on.
+/// last moved op delivered are `looped`'s row from then on; with no op to move, the new loop
+/// yields each row of `rows` as it reads it.
 fn beneath(
 	rw: &mut Rewriter<'_>,
 	looped: OpId,
@@ -1349,7 +1349,10 @@ fn beneath(
 		mapped.extend(held.results.iter().copied().zip(made.iter().copied()));
 		clones.push(clone);
 	}
-	let delivered = result(rw.ir(), *clones.last().ok_or(IrError::Stale("moved stage"))?)?;
+	let delivered = match clones.last() {
+		Some(last) => result(rw.ir(), *last)?,
+		None => *new_args.first().ok_or(IrError::Stale("select loop row"))?,
+	};
 	rw.create(
 		InsertPoint::End(new_block),
 		spec(OpKind::Phys(PhysOp::Yield), smallvec![delivered], 0),

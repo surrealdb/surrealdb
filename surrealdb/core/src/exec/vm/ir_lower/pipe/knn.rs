@@ -26,7 +26,7 @@
 use std::sync::Arc;
 
 use super::{Body, Branching, EndJumps, end_row, row_arg, yielded_value};
-use crate::exec::field_path::FieldPath;
+use crate::exec::field_path::{FieldPath, FieldPathPart};
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::iface::ids::{FrameId, RegionId};
@@ -160,10 +160,17 @@ impl Body<'_, '_, '_> {
 	) -> Result<(), IrError> {
 		self.require_row("a KNN over a projection")?;
 		let path = self.em.path(field.clone())?;
+		let root = match field.0.split_first() {
+			Some((FieldPathPart::Field(name), rest)) => {
+				Some((self.em.field(name)?, self.em.path(FieldPath(rest.to_vec()))?))
+			}
+			_ => None,
+		};
 		let key = self.em.reg()?;
 		self.em.emit(Instr::KnnRank {
 			src: Operand::Reg(ROW),
 			path,
+			root,
 			rank: Arc::clone(rank),
 			dst: key,
 			none: self.end,
@@ -212,10 +219,13 @@ mod tests {
 	use crate::val::{Number, Value};
 
 	/// A brute-force search of the `2` rows of `rows` nearest `target` by their field `v`, the
-	/// target read from `deferred` where it is not a literal.
-	fn knn_topk(b: &mut Builder, rows: ValueId, deferred: Option<ValueId>) -> OpId {
+	/// target read from `deferred` where it is not a literal, evaluated before any row is read
+	/// where its flag says so.
+	fn knn_topk(b: &mut Builder, rows: ValueId, deferred: Option<(ValueId, bool)>) -> OpId {
 		let (vector, operands) = match deferred {
-			Some(target) => (KnnTargetShape::Deferred("$v".to_owned(), false), vec![rows, target]),
+			Some((target, before_rows)) => {
+				(KnnTargetShape::Deferred("$v".to_owned(), before_rows), vec![rows, target])
+			}
 			None => (KnnTargetShape::Literal(vec![Number::Int(1), Number::Int(2)]), vec![rows]),
 		};
 		b.create_kind(
@@ -230,10 +240,11 @@ mod tests {
 		)
 	}
 
-	/// A scan feeding a brute-force search, which a pipeline of its own reads.
-	fn searched(deferred: bool) -> Builder {
+	/// A scan feeding a brute-force search, which a pipeline of its own reads; the target is a
+	/// parameter where `deferred` is given, evaluated before any row is read where it says so.
+	fn searched(deferred: Option<bool>) -> Builder {
 		let mut b = Builder::new();
-		let target = deferred.then(|| param(&mut b, "q"));
+		let target = deferred.map(|before_rows| (param(&mut b, "q"), before_rows));
 		let feeder = pipeline(&mut b, 0, scan);
 		let fed = b.result_of(feeder);
 		pipeline(&mut b, 1, |b| {
@@ -245,7 +256,7 @@ mod tests {
 
 	#[test]
 	fn a_brute_force_search_ranks_the_rows_of_its_feeder_and_keeps_the_nearest() {
-		let lowered = lowered(&searched(false));
+		let lowered = lowered(&searched(None));
 		let program = &lowered.program;
 		assert_eq!(program.pipelines.len(), 2);
 		let feeder = &program.pipelines[0].code;
@@ -300,7 +311,7 @@ mod tests {
 
 	#[test]
 	fn a_deferred_query_vector_is_evaluated_by_the_host_when_the_statement_starts() {
-		let lowered = lowered(&searched(true));
+		let lowered = lowered(&searched(Some(false)));
 		let program = &lowered.program;
 		let KnnVector::Query(sort) = program.pipelines[0]
 			.code
@@ -320,6 +331,37 @@ mod tests {
 		assert!(matches!(query.vector.scalar, HostScalar::Code(_)));
 		assert_eq!(&*query.vector.text, "$v");
 		assert_eq!(query.group, None);
+	}
+
+	/// A ranking against a vector in hand before any row is read — a literal, or a query the run
+	/// evaluates as it starts — runs in the scan's body over the stored record, reading the vector
+	/// from the field its path starts at; one whose vector the first ranked row has the host
+	/// evaluate does not.
+	#[test]
+	fn a_ranking_against_a_vector_in_hand_runs_in_place() {
+		for (deferred, in_place) in [(None, true), (Some(true), true), (Some(false), false)] {
+			let lowered = lowered(&searched(deferred));
+			let program = &lowered.program;
+			let feeder = &program.pipelines[0];
+			let (root, rank) = feeder
+				.code
+				.iter()
+				.find_map(|instr| match instr {
+					Instr::KnnRank {
+						root,
+						rank,
+						..
+					} => Some((*root, rank)),
+					_ => None,
+				})
+				.expect("the feeder ranks each row");
+			assert_eq!(rank.before_rows, in_place, "{deferred:?}");
+			assert_eq!(feeder.in_place, in_place, "{deferred:?}");
+			let (field, rest) = root.expect("the path starts at a field");
+			assert_eq!(program.fields[field as usize].as_str(), "v");
+			assert!(program.paths[rest as usize].is_empty());
+			assert!(program.sorts[0].floors_at_keep);
+		}
 	}
 
 	fn definition() -> IndexDefinition {

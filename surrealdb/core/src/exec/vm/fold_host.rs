@@ -264,6 +264,9 @@ fn run_body(
 			| Step::KnnQuery {
 				..
 			}
+			| Step::Measure {
+				..
+			}
 			| Step::JudgeCopy {
 				..
 			}

@@ -78,6 +78,7 @@ pub(crate) mod ir_lower;
 mod knn;
 mod leaf;
 mod ledger;
+mod measure;
 pub(crate) mod row_frame;
 mod row_json;
 #[cfg(feature = "shaped")]

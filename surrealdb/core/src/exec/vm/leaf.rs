@@ -171,6 +171,12 @@ pub(super) fn step(step: &Step) -> Class {
 		Step::KnnQuery {
 			..
 		} => Class::Kernel(&[Params]),
+		// The host's answer for a row checks the capability, which reads the permissions, and
+		// reads the query parameter as `Step::Param` reads one: from the frame, or from the
+		// catalog where no frame binds it.
+		Step::Measure {
+			..
+		} => Class::Kernel(&[Permissions, Params, Catalog]),
 		Step::Write {
 			..
 		} => Class::NonLeaf(Bar::Write),
@@ -1119,6 +1125,25 @@ pub(super) fn instr(
 				at: 0,
 			})),
 		},
+		// A vector measure is the call of its builtin, settled by the host as the run starts: a
+		// literal query is the call's capability check alone, and a parameter query is read as
+		// the host's answer for a row reads it ([`Step::Measure`]).
+		Instr::Measure {
+			measure,
+			..
+		} => named(worse(
+			builtin(&program.calls[measure.call as usize].name, registry),
+			step(&match measure.query {
+				super::measure::MeasureQuery::Const(_) => Step::CallAllowed {
+					call: measure.call,
+					frame: None,
+					resume: 0,
+				},
+				super::measure::MeasureQuery::Param(_) => Step::Measure {
+					at: 0,
+				},
+			}),
+		)),
 		Instr::ExternalEnter {
 			external,
 			..

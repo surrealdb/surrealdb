@@ -2996,6 +2996,9 @@ impl<'a> Lowerer<'a> {
 				if crate::expr::method::is_writer_builtin(name) {
 					self.refuse_in_fold("ir_lower::fold: expr.call of a builtin that writes")?;
 				}
+				if let Some(measured) = self.measure_call(name, args)? {
+					return Ok(measured);
+				}
 				self.builtin_call(name, args)
 			}
 			Function::Custom(name) => self.user_call(data, call, name),
@@ -3113,13 +3116,10 @@ impl<'a> Lowerer<'a> {
 		Ok(Operand::Reg(dst))
 	}
 
-	/// A call of the builtin `name`: the capability check, the arguments in turn, then the call by
-	/// name through the function registry.
-	pub(super) fn builtin_call(
-		&mut self,
-		name: &str,
-		args: &[ValueId],
-	) -> Result<Operand, IrError> {
+	/// The call site of builtin `name`, with what calling it asks of the program: the context
+	/// level it requires, the row order its answers keep and a write transaction where it runs
+	/// statements.
+	fn call_site(&mut self, name: &str) -> Result<u32, IrError> {
 		let registry = self.registry;
 		let required = match registry.get_projection(name) {
 			Some(projection) => projection.required_context(),
@@ -3136,12 +3136,22 @@ impl<'a> Lowerer<'a> {
 		let closure_args: Vec<u16> = registry.get(name).map_or_else(Vec::new, |function| {
 			function.closure_args().iter().filter_map(|&at| u16::try_from(at).ok()).collect()
 		});
-		let call = self.em.call(CallSpec {
+		self.em.call(CallSpec {
 			name: name.to_owned(),
 			plan_depth: self.depth,
 			index: None,
 			closure_args,
-		})?;
+		})
+	}
+
+	/// A call of the builtin `name`: the capability check, the arguments in turn, then the call by
+	/// name through the function registry.
+	pub(super) fn builtin_call(
+		&mut self,
+		name: &str,
+		args: &[ValueId],
+	) -> Result<Operand, IrError> {
+		let call = self.call_site(name)?;
 		self.emit(Instr::CallAllowed {
 			call,
 			frame: self.frame.program,
@@ -3156,6 +3166,127 @@ impl<'a> Lowerer<'a> {
 			elem: self.element,
 		});
 		Ok(Operand::Reg(dst))
+	}
+
+	/// The call of the two-argument `vector::*` builtin `name` over `args` as a vector measure
+	/// ([`Instr::Measure`]), which the interpreter answers where the row lies; `None` where the
+	/// call is not one a measure answers, for [`Self::builtin_call`] to lower.
+	///
+	/// A measure answers a call in a pipeline body of a read statement, in the statement's own
+	/// frame and over no element, with one argument a field of the row of objects being read
+	/// and the other a literal or a parameter that names no part of the row: such a query is read
+	/// once, as the run starts, where the call reads it once per row, unless its read judges a
+	/// permission against the row. A measure computes the builtin itself, so a name the
+	/// registry resolves to another function lowers as its call.
+	fn measure_call(&mut self, name: &str, args: &[ValueId]) -> Result<Option<Operand>, IrError> {
+		let Some(kind) = super::super::measure::MeasureKind::of(name) else {
+			return Ok(None);
+		};
+		if !self.registry.is_builtin(name)
+			|| self.subset != Subset::Operand
+			|| self.reads.is_none()
+			|| self.aside
+			|| self.closure_row
+			|| self.element.is_some()
+			|| self.frame.program.is_some()
+		{
+			return Ok(None);
+		}
+		let [first, second] = args else {
+			return Ok(None);
+		};
+		let (field, query, query_first) = match (self.row_field(*first), self.row_field(*second)) {
+			(Some(field), _) if self.row_independent(*second) => (field, *second, false),
+			(_, Some(field)) if self.row_independent(*first) => (field, *first, true),
+			_ => return Ok(None),
+		};
+		let query = match self.defining(query).map(|data| &data.kind) {
+			Some(OpKind::Expr(
+				ExprOp::FreeParam {
+					name,
+				}
+				| ExprOp::CatalogParam {
+					name,
+				},
+			)) => super::super::measure::MeasureQuery::Param(self.em.param(ParamSpec {
+				name: name.clone(),
+				guard: None,
+			})?),
+			_ => match self.value(query)? {
+				Operand::Const(index) => super::super::measure::MeasureQuery::Const(index),
+				Operand::Reg(_) | Operand::Field(_) => return Ok(None),
+			},
+		};
+		let call = self.call_site(name)?;
+		let field = self.em.field(field.as_str())?;
+		let dst = self.em.reg()?;
+		self.emit(Instr::Measure {
+			measure: Arc::new(super::super::measure::MeasureSpec {
+				kind,
+				call,
+				query,
+				query_first,
+			}),
+			field,
+			dst,
+		});
+		Ok(Some(Operand::Reg(dst)))
+	}
+
+	/// The name of the field of the row of objects being read that `value` is, where it is one.
+	fn row_field(&self, value: ValueId) -> Option<Strand> {
+		let data = self.defining(value)?;
+		match &data.kind {
+			OpKind::Expr(ExprOp::Field {
+				name,
+			}) => match data.operands.as_slice() {
+				[row] if self.is_object_row(*row) => Some(name.clone()),
+				_ => None,
+			},
+			OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => None,
+		}
+	}
+
+	/// Whether `value` names no part of the row: a literal, or a parameter other than the names
+	/// that read the row or its document. A parameter the catalog defines may still judge its
+	/// `PERMISSIONS` against the row it is read for; the run settles which
+	/// ([`MeasureSettled::per_row`](super::super::measure::MeasureSettled)).
+	fn row_independent(&self, value: ValueId) -> bool {
+		let Some(data) = self.defining(value) else {
+			return false;
+		};
+		match &data.kind {
+			OpKind::Expr(
+				ExprOp::Literal(_)
+				| ExprOp::Constant {
+					..
+				},
+			) => true,
+			OpKind::Expr(ExprOp::CatalogParam {
+				..
+			}) => true,
+			OpKind::Expr(ExprOp::FreeParam {
+				name,
+			}) => !matches!(name.as_str(), "this" | "self" | "parent"),
+			OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => false,
+		}
+	}
+
+	/// The op whose first result is `value`, where it is held in the authority frame of the code
+	/// being lowered: an op of another frame is lowered by its own rule.
+	fn defining(&self, value: ValueId) -> Option<&OpData> {
+		match self.ir.value(value)?.def {
+			ValueDef::OpResult {
+				op,
+				index: 0,
+			} => self.ir.op(op).filter(|data| data.frame == self.frame.ir),
+			ValueDef::OpResult {
+				..
+			}
+			| ValueDef::BlockArg {
+				..
+			} => None,
+		}
 	}
 
 	/// The read of the statement clock, as the call of the clock builtin that reads the reading

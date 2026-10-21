@@ -1233,3 +1233,153 @@ async fn the_filter_and_the_probe_change_no_answer_over_packed_rows() {
 	assert!(observed::filtered() > 100, "the filter refused {} packed rows", observed::filtered());
 	assert!(observed::probed() > 20, "the probe refused {} packed rows", observed::probed());
 }
+
+/// A ranking's vector read from a packed row in place is the vector `extract_vector` reads from the
+/// record decoded whole, number for number and kind for kind, through either packed reader and
+/// whether or not the scan checked the row first, for every column shape a vector, or a path to
+/// one, can take. Neither reader decodes the record, except for a path through an object node,
+/// whose fields are columns of their own, a field step over an array that holds values, and `id`,
+/// which are read from the decoded record.
+#[tokio::test]
+async fn a_packed_rows_knn_vector_reads_in_place_as_its_whole_decode_holds_it() {
+	use super::row_packed::LazyPackedRow;
+	use crate::exec::operators::extract_vector;
+	use crate::exec::packed_view::AdmittedRow;
+	use crate::val::Number;
+	use crate::val::field_path::{FieldPath, FieldPathPart};
+	let db = serial_db(
+		"
+		DEFINE TABLE pv SCHEMAFULL;
+		DEFINE FIELD f32 ON pv TYPE array<float>;
+		DEFINE FIELD f64 ON pv TYPE option<array<float>>;
+		DEFINE FIELD ints ON pv TYPE option<array<int>>;
+		DEFINE FIELD anyv ON pv TYPE option<array>;
+		DEFINE FIELD n ON pv TYPE option<int>;
+		DEFINE FIELD s ON pv TYPE option<string>;
+		DEFINE FIELD lit ON pv TYPE option<1 | 2>;
+		DEFINE FIELD o ON pv TYPE option<object>;
+		DEFINE FIELD o.v ON pv TYPE option<array<float>>;
+		DEFINE FIELD flex ON pv TYPE option<object> FLEXIBLE;
+		CREATE pv:1 CONTENT { f32: [1f, 0f, 0f], f64: [0.1f, 0.2f, 0.3f], ints: [2, 0, 0],
+			anyv: [1, 0.5f, [2]], n: 3, s: 'x', lit: 1, o: { v: [1f, 2f, 3f] },
+			flex: { v: [4, 5, 6], w: { v: [1f] } } };
+		CREATE pv:2 CONTENT { f32: [], anyv: [[], []], o: {}, flex: {} };
+		CREATE pv:3 CONTENT { f32: [1f, 2f], anyv: [{ v: [1f] }], flex: { v: 'x' } };
+		",
+	)
+	.await;
+	let rows = rows(&db, "pv").await;
+	assert_eq!(rows.len(), 3);
+	let layouts = layouts_of(&db, "pv", &rows).await;
+	let paths: &[&[&str]] = &[
+		&["f32"],
+		&["f64"],
+		&["ints"],
+		&["anyv"],
+		&["n"],
+		&["n", "v"],
+		&["s"],
+		&["lit"],
+		&["flex"],
+		&["flex", "v"],
+		&["flex", "w", "v"],
+		&["f32", "v"],
+		&["missing"],
+		&["missing", "v"],
+		// Read from the decoded record: a field step over an array holding values may project
+		// the field of objects among them.
+		&["anyv", "v"],
+		&["o"],
+		&["o", "v"],
+		&["id"],
+	];
+	let decodes = |parts: &[&str]| matches!(parts, ["o", ..] | ["id"] | ["anyv", _, ..]);
+	let path = |parts: &[&str]| {
+		FieldPath(parts.iter().map(|p| FieldPathPart::Field((*p).to_owned())).collect())
+	};
+	let (mut got, mut want) = (vec![Number::Int(-1)], vec![Number::Int(-1)]);
+	for (key, value) in &rows {
+		assert!(StoredRecord::is_packed_bytes(value), "a packed row");
+		let decoded = decode_record_value(key, value, Some(&layouts)).expect("a row decodes");
+		let checked = AdmittedRow::of(key, value, Some(&layouts));
+		let unchecked = AdmittedRow::Bytes(value);
+		let reader = PackedRowReader::new(key, value, Some(&layouts)).expect("reads");
+		let lazy_checked = LazyPackedRow::new(key, value, Some(&layouts), &checked);
+		let lazy_unchecked = LazyPackedRow::new(key, value, Some(&layouts), &unchecked);
+		observed::reset();
+		let mut checked_in_place = false;
+		let in_place = paths.iter().filter(|parts| !decodes(parts));
+		for parts in in_place.chain(paths.iter().filter(|parts| decodes(parts))) {
+			if decodes(parts) && !checked_in_place {
+				checked_in_place = true;
+				assert!(reader.borrowed().is_none(), "the packed reader decoded nothing whole");
+				assert_eq!(observed::whole(), 0, "no lazy row was decoded whole");
+			}
+			let (full, rest) = (path(parts), path(&parts[1..]));
+			let name = FieldName::new(parts[0]);
+			for limit in [0, 1, 2, 3, 100] {
+				let expected = extract_vector(&decoded, &full, &mut want, limit);
+				let readers: [(&str, &dyn RowReader); 3] = [
+					("packed", &reader),
+					("lazy over a checked row", &lazy_checked),
+					("lazy over its bytes", &lazy_unchecked),
+				];
+				for (what, row) in readers {
+					let read = row.knn_vector(&full, &name, &rest, &mut got, limit).expect("reads");
+					assert_eq!(read, expected, "{what}: {parts:?} at most {limit}");
+					if expected {
+						assert_eq!(
+							format!("{got:?}"),
+							format!("{want:?}"),
+							"{what}: {parts:?} at most {limit}"
+						);
+					}
+				}
+			}
+		}
+		assert_eq!(observed::admitted(), 1, "a lazy row over its bytes is checked once");
+	}
+}
+
+/// A brute-force KNN over a SCHEMAFULL table, whose rows are packed, reads each row's vector where
+/// its column lies: only the rows the ranking keeps for its sort are decoded, and the answer is the
+/// one the same rows give as documents.
+#[tokio::test]
+async fn a_brute_force_knn_over_packed_rows_decodes_only_the_rows_it_keeps() {
+	const ROWS: usize = 2_000;
+	let db = serial_db(&format!(
+		"
+		DEFINE TABLE packed SCHEMAFULL;
+		DEFINE FIELD v ON packed TYPE array<float>;
+		DEFINE FIELD n ON packed TYPE int;
+		DEFINE TABLE loose SCHEMALESS;
+		FOR $i IN 0..{ROWS} {{
+			LET $v = [($i * 7919 % 1000) * 0.5f, ($i % 13) * 1f];
+			CREATE type::record('packed', $i) SET v = $v, n = $i;
+			CREATE type::record('loose', $i) SET v = $v, n = $i;
+		}};
+		"
+	))
+	.await;
+	let owner = TestDb::owner();
+	let answer = |sql: String| {
+		let db = &db;
+		let owner = &owner;
+		async move {
+			let mut responses = db.datastore().execute(&sql, owner, None).await.expect("runs");
+			Value::from(responses.pop().expect("a response").result.expect("answers"))
+		}
+	};
+	let query = |table: &str| {
+		format!("SELECT VALUE record::id(id) FROM {table} WHERE v <|5,EUCLIDEAN|> [250f, 6f]")
+	};
+	let expected = answer(query("loose")).await;
+	observed::reset();
+	let got = answer(query("packed")).await;
+	let whole = observed::whole();
+	assert_eq!(got, expected);
+	assert!(matches!(&got, Value::Array(ids) if ids.len() == 5), "{got:?}");
+	// The rows decoded are the ones the sort kept at some point: a few dozen of 2000, where a
+	// ranking that decoded every row would decode them all.
+	assert!(whole > 0 && whole < ROWS / 10, "{whole} of {ROWS} rows decoded whole");
+}

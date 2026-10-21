@@ -633,11 +633,15 @@ pub(super) async fn run_range(
 		let stats = cursor
 			.for_each(chunk, &mut |key, value| {
 				unspent = unspent.saturating_sub(1);
-				let next = if unspent == 0 {
-					spent = true;
-					std::ops::ControlFlow::Break(())
-				} else {
-					std::ops::ControlFlow::Continue(())
+				// Whether the chunk goes on past the record, judged once its body ran, so the fuel
+				// the body charged is counted.
+				let after = |spent: &mut bool| {
+					if super::super::fuel::chunk_spent(budget, unspent) {
+						*spent = true;
+						std::ops::ControlFlow::Break(())
+					} else {
+						std::ops::ControlFlow::Continue(())
+					}
 				};
 				// A breaker whose lease no longer covers the row it took is spilled at the next
 				// chunk boundary, so the chunk ends there: a morsel holds at most the rows its
@@ -681,7 +685,7 @@ pub(super) async fn run_range(
 					return Ok(if halted || ended(&state, &mut spent) {
 						std::ops::ControlFlow::Break(())
 					} else {
-						next
+						after(&mut spent)
 					});
 				}
 				let Some(paged) = paged else {
@@ -696,7 +700,7 @@ pub(super) async fn run_range(
 						&& probe.rejects(threshold, &admitted)
 					{
 						rejected += 1;
-						return Ok(next);
+						return Ok(after(&mut spent));
 					}
 					return match super::super::host::in_place_row_admitted(
 						program, pipeline, key, value, &admitted, layouts, &mut state,
@@ -704,7 +708,7 @@ pub(super) async fn run_range(
 						Ok(false) if ended(&state, &mut spent) => {
 							Ok(std::ops::ControlFlow::Break(()))
 						}
-						Ok(false) => Ok(next),
+						Ok(false) => Ok(after(&mut spent)),
 						Ok(true) => {
 							failed = Some(stopped_pipeline());
 							Ok(std::ops::ControlFlow::Break(()))
@@ -744,7 +748,7 @@ pub(super) async fn run_range(
 				Ok(if halted || ended(&state, &mut spent) {
 					std::ops::ControlFlow::Break(())
 				} else {
-					next
+					after(&mut spent)
 				})
 			})
 			.await

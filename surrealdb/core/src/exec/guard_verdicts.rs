@@ -177,6 +177,18 @@ pub(crate) fn judged_count() -> usize {
 	JUDGED.with(std::cell::Cell::get)
 }
 
+/// Whether a verdict of a predicate of `scope` stands for the whole statement `ctx` runs, which
+/// [`judged`] keeps and answers every later read of the statement with, so the verdict is the same
+/// whatever row a read is made for. A verdict that does not is judged on every read.
+pub(crate) fn stands_for_statement(ctx: &ExecutionContext, scope: GuardScope) -> bool {
+	match scope {
+		GuardScope::PerCall => false,
+		GuardScope::Statement {
+			reads_data,
+		} => !reads_data || !ctx.root().guard_verdicts.may_write,
+	}
+}
+
 /// The predicate of definition `name` of `kind`, identified by `clause`, for
 /// the principal `ctx` judges as: answered by an admission the statement
 /// already holds where `scope` lets one stand, and otherwise by `judge`, whose
@@ -193,12 +205,7 @@ where
 	Fut: std::future::Future<Output = FlowResult<()>>,
 {
 	let root = ctx.root();
-	let kept = match scope {
-		GuardScope::PerCall => false,
-		GuardScope::Statement {
-			reads_data,
-		} => !reads_data || !root.guard_verdicts.may_write,
-	};
+	let kept = stands_for_statement(ctx, scope);
 	if kept && root.guard_verdicts.admits(kind, name, clause, &root.auth) {
 		return Ok(());
 	}

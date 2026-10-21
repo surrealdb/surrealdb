@@ -465,7 +465,7 @@ async fn run_untailed(
 	state.build_budget = ctx.root().ctx.config.exec.gql_max_join_build_rows;
 	state.scan_hint = reads;
 	for (at, spec) in program.sorts.iter().enumerate() {
-		if spec.pushdown {
+		if spec.pushdown || spec.shares_floor {
 			state.topk_cells[at] =
 				Some(Arc::new(crate::exec::topk_pushdown::TopKThresholdCell::default()));
 		}
@@ -775,8 +775,9 @@ async fn start_group(
 		state.sorts[at].clear();
 		state.sort_slabs[at].clear();
 		state.sort_arrivals[at] = Default::default();
+		state.shared_floors[at] = Default::default();
 		if let Some(sort_spec) = program.sorts.get(at)
-			&& sort_spec.pushdown
+			&& (sort_spec.pushdown || sort_spec.shares_floor)
 		{
 			let cell = Arc::new(crate::exec::topk_pushdown::TopKThresholdCell::default());
 			state.topk_cells[at] = Some(cell);
@@ -983,6 +984,122 @@ pub(super) fn forget_knn_queries(program: &Program, group: Option<u16>, state: &
 	state.knn_searches.retain(|(query, _)| query.group != group);
 }
 
+/// Whether this run of `pipeline` runs its body on the stored row: the pipeline is planned so
+/// ([`Pipeline::in_place`]), and [`measures_on_host`] is clear. A run that does not reads its rows
+/// decoded, as a pipeline planned to does: in morsels of batches where the plan parallelises it,
+/// and with bulk copies that may stop for a yield.
+pub(super) fn runs_in_place(pipeline: &Pipeline, state: &State) -> bool {
+	pipeline.in_place && !measures_on_host(pipeline, state)
+}
+
+/// Whether `pipeline` holds a vector measure this run settled for the host to answer
+/// ([`MeasureSettled::Host`](super::measure::MeasureSettled)), which hands the host a step for
+/// each row.
+fn measures_on_host(pipeline: &Pipeline, state: &State) -> bool {
+	use super::measure::MeasureSettled;
+	let host = |cell: Option<&MeasureSettled>| matches!(cell, Some(MeasureSettled::Host));
+	state.measures.iter().any(|cell| host(cell.as_deref()))
+		&& pipeline.code.iter().any(|instr| match instr {
+			Instr::Measure {
+				measure,
+				..
+			} => host(state.measures.get(measure.call as usize).and_then(Option::as_deref)),
+			_ => false,
+		})
+}
+
+/// Whether a pipeline `group` owns holds a vector measure ([`Instr::Measure`]).
+fn holds_measures(program: &Program, group: Option<u16>) -> bool {
+	program
+		.pipelines
+		.iter()
+		.filter(|pipeline| pipeline.group == group)
+		.any(|pipeline| pipeline.code.iter().any(|instr| matches!(instr, Instr::Measure { .. })))
+}
+
+/// Settle the vector measures of the pipelines `group` owns for this run of
+/// them ([`super::measure`]): each measure's capability check, and its query
+/// argument where the check allows the call. A failure of either leaves the
+/// measure to the host, which raises it at the first row that reaches the
+/// measure, so settling raises nothing.
+pub(super) async fn settle_measures(
+	program: &Program,
+	group: Option<u16>,
+	state: &mut State,
+	ctx: &ExecutionContext,
+) {
+	for pipeline in program.pipelines.iter().filter(|pipeline| pipeline.group == group) {
+		for instr in &pipeline.code {
+			if let Instr::Measure {
+				measure,
+				..
+			} = instr
+			{
+				settle_measure(program, measure, state, ctx).await;
+			}
+		}
+	}
+}
+
+/// Settle `measure` for this run into its cell of [`State::measures`]: the check of its builtin
+/// against the capabilities in the statement's frame, then its query argument, read with no row
+/// as [`Instr::LoadParam`] reads it. The measure is left to the host for each row
+/// ([`MeasureSettled::Host`](super::measure::MeasureSettled)) where the check refuses the call,
+/// where a read fails, and where the query is a parameter the catalog defines whose
+/// `PERMISSIONS` predicate is judged on every read.
+async fn settle_measure(
+	program: &Program,
+	measure: &super::measure::MeasureSpec,
+	state: &mut State,
+	ctx: &ExecutionContext,
+) {
+	use super::measure::{MeasureQuery, MeasureSettled};
+	let at = measure.call as usize;
+	let eval_ctx = frame_eval(program, state, ctx, None);
+	let settled = match measured_builtin(&program.calls[at].name, &eval_ctx) {
+		None => MeasureSettled::Host,
+		Some(function) => match measure.query {
+			MeasureQuery::Const(index) => {
+				MeasureSettled::allowed(function, program.consts[index as usize].clone())
+			}
+			MeasureQuery::Param(index) => {
+				let spec = &program.params[index as usize];
+				match super::function::frame_param(spec, &eval_ctx) {
+					Ok(Some(value)) => MeasureSettled::allowed(function, value),
+					Err(_) => MeasureSettled::Host,
+					Ok(None) => {
+						match super::function::stored_param_once(program, spec, &eval_ctx).await {
+							Ok(Some(value)) => MeasureSettled::allowed(function, value),
+							Ok(None) | Err(_) => MeasureSettled::Host,
+						}
+					}
+				}
+			}
+		},
+	};
+	if state.measures.len() <= at {
+		state.measures.resize(at + 1, None);
+	}
+	state.measures[at] = Some(Arc::new(settled));
+}
+
+/// The registry's builtin `name`, where the interpreter may answer a call of it over a row itself:
+/// the capabilities in the frame `ctx` runs in allow the call, and the builtin is pure, needs no
+/// host to run and holds nothing [`call_builtin`] refuses or meters. `None` for the host to answer.
+fn measured_builtin(
+	name: &str,
+	ctx: &EvalContext<'_>,
+) -> Option<&'static dyn crate::exec::function::ScalarFunction> {
+	ctx.check_allowed_function(name).ok()?;
+	let function = ctx.exec_ctx.function_registry().get(name)?;
+	let plain = function.is_pure()
+		&& !function.is_async()
+		&& function.metered().is_none()
+		&& crate::exec::function::experimental_target(name).is_none()
+		&& refuse_mutating_builtin(function.name(), function.effects(), ctx.exec_ctx).is_ok();
+	plain.then_some(function)
+}
+
 /// Run the pipelines of `program` that `group` owns — the program's own for
 /// `None` — in order, over `state`, handing their rows to `yielder`.
 #[allow(clippy::too_many_arguments)]
@@ -996,6 +1113,10 @@ pub(super) async fn run_pipelines(
 	flush_at: usize,
 ) -> FlowResult<()> {
 	forget_knn_queries(program, group, state);
+	// Settled out of line, so the future of a run of the pipelines holds none of the evaluation.
+	if holds_measures(program, group) {
+		out_of_line(|| settle_measures(program, group, state, ctx)).await;
+	}
 	// A ranking's vector a parameter holds is evaluated before any row is read, so an unrankable
 	// one refuses the statement whatever rows it reads.
 	for (at, spec) in program.sorts.iter().enumerate() {
@@ -1010,7 +1131,7 @@ pub(super) async fn run_pipelines(
 		program.pipelines.iter().enumerate().filter(|(_, pipeline)| pipeline.group == group)
 	{
 		#[cfg(test)]
-		super::row_packed::observed::note_pipeline(pipeline);
+		super::row_packed::observed::note_pipeline(pipeline, state);
 		// The right input of a join that holds its left row is read only once
 		// the left input handed it one, as a build side is read only once a
 		// probe row arrives.
@@ -1256,7 +1377,11 @@ pub(super) async fn run_pipelines(
 				// A statement whose rows leave encoded, and whose body after the
 				// sort hands the host no step, runs a row held as stored bytes
 				// on those bytes, a unit each, charged a stretch at a time.
-				if pipeline.stored_rows && state.row_frame.is_some() && spec.knn_slot.is_none() {
+				if pipeline.stored_rows
+					&& !measures_on_host(pipeline, state)
+					&& state.row_frame.is_some()
+					&& spec.knn_slot.is_none()
+				{
 					let mut stretch = super::fuel::left().clamp(1, 256);
 					let mut taken = 0;
 					for (keys, row) in rows {
@@ -2884,7 +3009,10 @@ async fn scan_rows(
 	// The first read of storage of a run whose reader says how many rows it
 	// takes reads no more records than that before it hands its rows on.
 	let first = state.scan_hint.take();
-	if pipeline.in_place {
+	// A body holding a measure the host answers hands the host a step per row, so the run reads
+	// its rows decoded.
+	let in_place = runs_in_place(pipeline, state);
+	if in_place {
 		// A body in the storage cursor planned as morsels reads its key range in parts; a scan cut
 		// by a coarse gate reads in one cursor, which the gate stops, and a scan of a table whose
 		// records may be stamped below its newest migration step reads in one cursor, which
@@ -2976,7 +3104,7 @@ async fn scan_rows(
 			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 	}
-	let mut rows = Rows::of(program, pipeline, ctx).reading(first);
+	let mut rows = Rows::of_run(program, pipeline, in_place, ctx).reading(first);
 	while let Some(batch) = source.next().await {
 		// The source spends the records it reads and refuses before decoding
 		// them, and hands on an empty batch once that spends the fuel; the
@@ -3257,8 +3385,8 @@ async fn scan_in_place(
 			let layouts: &TableLayouts = gate.layouts();
 			// The body cannot yield inside the cursor, so the chunk counts the
 			// rows it reads against the fuel left and ends once that is spent: a
-			// unit per record read, run or refused. The body holds no backward
-			// jump (`lower`'s in-place rule), so the interpreter answers no
+			// unit per record read, run or refused, with what the bodies charge. The body holds no
+			// backward jump (`lower`'s in-place rule), so the interpreter answers no
 			// `Step::Yield` here.
 			let budget = super::fuel::left();
 			let mut unspent = budget;
@@ -3276,10 +3404,14 @@ async fn scan_in_place(
 						return Ok(std::ops::ControlFlow::Break(()));
 					}
 					unspent = unspent.saturating_sub(1);
-					let next = if unspent == 0 {
-						std::ops::ControlFlow::Break(())
-					} else {
-						std::ops::ControlFlow::Continue(())
+					// Whether the chunk goes on past the record, judged once its body ran, so the
+					// fuel the body charged is counted.
+					let after = || {
+						if super::fuel::chunk_spent(budget, unspent) {
+							std::ops::ControlFlow::Break(())
+						} else {
+							std::ops::ControlFlow::Continue(())
+						}
 					};
 					match gate.admit(value) {
 						Admission::Admit => {}
@@ -3306,7 +3438,7 @@ async fn scan_in_place(
 						Some(layouts),
 						state,
 					) {
-						Ok(false) => Ok(next),
+						Ok(false) => Ok(after()),
 						Ok(true) => {
 							stopped = true;
 							Ok(std::ops::ControlFlow::Break(()))
@@ -3488,9 +3620,11 @@ pub(super) fn in_place_row_admitted(
 			let row = super::row_packed::LazyPackedRow::new(key, value, layouts, admitted);
 			let stop = finish_in_place(run_in_place(program, pipeline, &row, state))?;
 			if state.pending.is_some() {
-				match row.into_decoded() {
-					Some(row) => state.settle(program, row),
-					None => state.settle_packed(program, key, value, layouts, admitted)?,
+				match row.into_parts() {
+					(Some(row), _) => state.settle(program, row),
+					(None, admitted) => {
+						state.settle_packed(program, key, value, layouts, &admitted)?
+					}
 				}
 			}
 			return Ok(stop);
@@ -3639,6 +3773,9 @@ fn finish_in_place(step: anyhow::Result<Step>) -> anyhow::Result<bool> {
 			..
 		})
 		| Ok(Step::KnnQuery {
+			..
+		})
+		| Ok(Step::Measure {
 			..
 		}) => Err(anyhow::anyhow!("an in-place pipeline evaluated an expression")),
 		Ok(Step::Yield {
@@ -4105,6 +4242,69 @@ async fn run_body(
 								out_of_line(|| evaluate_knn_query_of(program, sort, state, ctx))
 									.await?;
 								pc = at;
+							}
+							Step::Measure {
+								at,
+							} => {
+								let Instr::Measure {
+									measure,
+									field,
+									dst,
+								} = &pipeline.code[at]
+								else {
+									unreachable!("a measure step at a measure instruction")
+								};
+								let settled = state
+									.measures
+									.get(measure.call as usize)
+									.is_some_and(Option::is_some);
+								if !settled {
+									out_of_line(|| settle_measure(program, measure, state, ctx))
+										.await;
+									pc = at;
+								} else {
+									// The host answers the row as the call's own instructions
+									// do: the capability check, the query read with the row in
+									// scope, then the registry's builtin over the query and the
+									// row's field.
+									let spec = &program.calls[measure.call as usize];
+									frame_eval(program, state, ctx, None)
+										.check_allowed_function(&spec.name)
+										.map_err(ControlFlow::Err)?;
+									let eval_ctx = frame_eval(program, state, ctx, None);
+									let eval_ctx = row_eval(state, eval_ctx, &row);
+									let query = match measure.query {
+										super::measure::MeasureQuery::Const(index) => {
+											program.consts[index as usize].clone()
+										}
+										super::measure::MeasureQuery::Param(param) => {
+											let param = &program.params[param as usize];
+											match super::function::frame_param(param, &eval_ctx)? {
+												Some(value) => value,
+												None => {
+													out_of_line(|| {
+														super::function::stored_param(
+															program, param, &eval_ctx,
+														)
+													})
+													.await?
+												}
+											}
+										}
+									};
+									let value = interp::read_operand(
+										regs,
+										reader,
+										program,
+										super::program::Operand::Field(*field),
+									)
+									.map_err(ControlFlow::Err)?;
+									let args = measure.args(value, query);
+									let measured =
+										out_of_line(|| call_builtin(spec, args, eval_ctx)).await?;
+									regs[*dst as usize] = Scalar::Value(Cow::Owned(measured));
+									pc = at + 1;
+								}
 							}
 							Step::Param {
 								param,

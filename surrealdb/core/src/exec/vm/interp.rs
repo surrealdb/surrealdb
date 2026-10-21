@@ -176,6 +176,11 @@ pub(super) enum Step {
 	KnnQuery {
 		at: usize,
 	},
+	/// Settle the capability check and the query argument of vector measure
+	/// instruction `at`, which the run has not settled; then take `at` again.
+	Measure {
+		at: usize,
+	},
 	/// The fuel is spent: reach a yield point
 	/// ([`super::fuel::yield_point`]), then resume the row at instruction
 	/// `resume` with the same registers. Every driver of a body matches it:
@@ -321,6 +326,11 @@ pub(crate) struct State {
 	pub(super) sort_slabs: Vec<Vec<u8>>,
 	pub(super) topk_cells:
 		Vec<Option<std::sync::Arc<crate::exec::topk_pushdown::TopKThresholdCell>>>,
+	/// For each sort that shares its floor ([`SortSpec::shares_floor`]), the threshold this run
+	/// last read from its cell of [`Self::topk_cells`].
+	///
+	/// [`SortSpec::shares_floor`]: super::program::SortSpec
+	pub(super) shared_floors: Vec<SharedFloor>,
 	/// For each sort of a brute-force KNN whose query vector is computed when
 	/// the statement runs, the cell its vector is evaluated into.
 	pub(super) knn_queries: Vec<KnnQueryCell>,
@@ -328,6 +338,14 @@ pub(crate) struct State {
 	/// ([`Source::Knn`](super::program::Source)), the cell it is evaluated
 	/// into, found by the identity of the query the sources share.
 	pub(super) knn_searches: Vec<(std::sync::Arc<super::program::KnnQuery>, KnnQueryCell)>,
+	/// The numbers of the vector a brute-force ranking reads off the row it
+	/// ranks ([`Instr::KnnRank`]), kept between rows so ranking a row
+	/// allocates nothing once it has held a vector of the query's dimension.
+	pub(super) knn_vector: Vec<crate::val::Number>,
+	/// For each call site of the program, what the run settled for the vector
+	/// measure the site is ([`Instr::Measure`]) as it started; `None` for every
+	/// other site, and for a measure the run has not settled.
+	pub(super) measures: Vec<Option<std::sync::Arc<super::measure::MeasureSettled>>>,
 	/// For each sort that may spill, the rows it holds before it writes them
 	/// out as a run whatever its query's memory (a sort under `TEMPFILES`),
 	/// and its order.
@@ -685,6 +703,7 @@ pub(super) struct RunShare {
 	aggregates: std::sync::Arc<ResolvedAggregates>,
 	knn_contexts: Vec<Option<std::sync::Arc<crate::exec::function::KnnContext>>>,
 	knn_queries: Vec<KnnQueryCell>,
+	measures: Vec<Option<std::sync::Arc<super::measure::MeasureSettled>>>,
 	index_runs: Vec<Option<IndexRun>>,
 	matches_evals: Vec<Option<std::sync::Arc<crate::exec::vm::matches::MatchesEval>>>,
 	/// The threshold cell of each sort the run's scan pushes a top-k down for: the sorts of the
@@ -946,6 +965,7 @@ impl State {
 		state.aggregates = shared.aggregates;
 		state.knn_contexts = shared.knn_contexts;
 		state.knn_queries = shared.knn_queries;
+		state.measures = shared.measures;
 		state.index_runs = shared.index_runs;
 		state.matches_evals = shared.matches_evals;
 		state.topk_cells = shared.topk_cells;
@@ -977,6 +997,7 @@ impl State {
 		self.sort_slabs.resize_with(sorts, Vec::new);
 		self.sort_arrivals.resize(sorts, Arrivals::default());
 		self.topk_cells.resize(sorts, None);
+		self.shared_floors.resize(sorts, SharedFloor::default());
 		self.knn_queries.resize_with(sorts, KnnQueryCell::default);
 		self.sort_spill.resize(sorts, None);
 		self.sort_runs.resize_with(sorts, || None);
@@ -1021,8 +1042,11 @@ impl State {
 			spare_sort_bytes,
 			sort_slabs,
 			topk_cells,
+			shared_floors,
 			knn_queries,
 			knn_searches,
+			knn_vector,
+			measures,
 			sort_spill,
 			sort_runs,
 			sort_accounts,
@@ -1111,8 +1135,11 @@ impl State {
 		emptied(spare_sort_bytes);
 		emptied(sort_slabs);
 		emptied(topk_cells);
+		emptied(shared_floors);
 		emptied(knn_queries);
 		emptied(knn_searches);
+		emptied(knn_vector);
+		emptied(measures);
 		emptied(sort_spill);
 		emptied(sort_runs);
 		emptied(sort_accounts);
@@ -1236,6 +1263,7 @@ impl State {
 			aggregates: std::sync::Arc::clone(&self.aggregates),
 			knn_contexts: self.knn_contexts.clone(),
 			knn_queries: self.knn_queries.clone(),
+			measures: self.measures.clone(),
 			index_runs: self.index_runs.clone(),
 			matches_evals: self.matches_evals.clone(),
 			topk_cells: self.topk_cells.clone(),
@@ -1387,8 +1415,11 @@ impl State {
 			spare_sort_bytes: Vec::new(),
 			sort_slabs: Vec::new(),
 			topk_cells: Vec::new(),
+			shared_floors: Vec::new(),
 			knn_queries: Vec::new(),
 			knn_searches: Vec::new(),
+			knn_vector: Vec::new(),
+			measures: Vec::new(),
 			sort_spill: Vec::new(),
 			sort_runs: Vec::new(),
 			sort_accounts: Vec::new(),
@@ -1637,12 +1668,13 @@ impl State {
 	/// holds a quarter more, and take the last kept row as its floor. The
 	/// rows a prune sorts, no more than a quantum, are charged whole.
 	///
-	/// A sort that cuts a key-range scan by the second of a datetime component
+	/// A sort that floors at what it keeps
 	/// ([`SortSpec::floors_at_keep`](super::program::SortSpec)) also prunes the
-	/// first time it holds as many rows as it keeps, so the scan has a
-	/// threshold from then on rather than a quarter more rows later: a region
-	/// hands its sort no more than `keep` rows a batch, so a sort waiting for
-	/// the quarter more would publish only several batches on.
+	/// first time it holds as many rows as it keeps, so it has a floor from
+	/// then on rather than a quarter more rows later: a sort that cuts a
+	/// key-range scan by the second of a datetime component is handed no more
+	/// than `keep` rows a batch by its region, so waiting for the quarter more
+	/// would publish its threshold only several batches on.
 	fn prune(&mut self, program: &Program, sort: u16, keep: usize) {
 		let at = sort as usize;
 		let first_floor =
@@ -1672,6 +1704,10 @@ impl State {
 				&& let Some(first_key) = rows[keep - 1].0.first()
 			{
 				publish_threshold(cell, first_key, &program.sorts[at].keys);
+				// The sort reads the cell again before it next judges a row by it.
+				if let Some(floor) = self.shared_floors.get_mut(at) {
+					floor.offers_left = 0;
+				}
 			}
 		}
 	}
@@ -1802,12 +1838,41 @@ impl State {
 				&& let Some(first_key) = rows[keep - 1].0.first()
 			{
 				publish_threshold(cell, first_key, &program.sorts[at].keys);
+				// The sort reads the cell again before it next judges a row by it.
+				if let Some(floor) = self.shared_floors.get_mut(at) {
+					floor.offers_left = 0;
+				}
 			}
 		}
 		if done {
 			merge.finish(rows, arrivals, &mut self.spare_sort_keys, &mut self.spare_sort_bytes);
 		} else {
 			arrivals.merge = Some(merge);
+		}
+	}
+
+	/// Whether a row whose first key is `first` may still reach a kept place of sort `sort`, which
+	/// shares its floor ([`SortSpec::shares_floor`](super::program::SortSpec)): it may unless it
+	/// orders strictly after the threshold its cell holds, the first key of the last row some sort
+	/// sharing the cell keeps once it holds as many as it keeps. Every such sort keeps that many
+	/// rows ordering no later than the row, so the statement keeps none past them; a row whose
+	/// first key ties the threshold is kept for its other keys to order. The cell is read again
+	/// once [`SHARED_FLOOR_OFFERS`] rows have been offered to the sort since the last read, or the
+	/// sort has published to it since, and the threshold is held between, so a stale one only
+	/// drops less.
+	fn under_shared_floor(&mut self, program: &Program, sort: u16, first: &Scalar<'_>) -> bool {
+		let at = sort as usize;
+		let floor = &mut self.shared_floors[at];
+		if floor.offers_left == 0 {
+			floor.threshold =
+				self.topk_cells.get(at).and_then(Option::as_ref).and_then(|cell| cell.snapshot());
+			floor.offers_left = SHARED_FLOOR_OFFERS;
+		}
+		match (&floor.threshold, program.sorts[at].keys.first()) {
+			(Some(threshold), Some(order)) => {
+				compare_scalar_key(first, threshold, *order) != Ordering::Greater
+			}
+			_ => true,
 		}
 	}
 
@@ -2085,6 +2150,65 @@ fn closure_digest(
 			_ => None,
 		},
 	})
+}
+
+/// What vector measure `measure` answers for field `field` of the row `row` reads
+/// ([`Instr::Measure`]); `None` where the run has not settled the measure, for the host to
+/// settle first, or settled it for the host to answer ([`MeasureSettled::Host`]).
+///
+/// A field holding an array of numbers of the query's dimension is measured from its numbers where
+/// they lie, charged as a walk over their bytes ([`charge_vectors`]); any other value is answered
+/// by the registry's builtin over the field decoded, which raises the builtin's own error and is
+/// charged as a call of the builtin is: the weights of its arguments and of its result. Kept out
+/// of [`run_row`], whose frame every row's body runs in.
+///
+/// [`MeasureSettled::Host`]: super::measure::MeasureSettled::Host
+#[inline(never)]
+fn measure_row(
+	program: &Program,
+	row: &dyn RowReader,
+	state: &mut State,
+	measure: &super::measure::MeasureSpec,
+	field: u32,
+) -> anyhow::Result<Option<Scalar<'static>>> {
+	let Some(super::measure::MeasureSettled::Allowed {
+		function,
+		query,
+		numbers,
+	}) = state.measures.get(measure.call as usize).and_then(Option::as_deref)
+	else {
+		return Ok(None);
+	};
+	let name = &program.fields[field as usize];
+	let read = &mut state.knn_vector;
+	if let Some(numbers) = numbers
+		&& row.vector_field(name, read)?
+		&& read.len() == numbers.len()
+		&& let Ok(number) = measure.compute(read, numbers)
+	{
+		charge_vectors(read.len(), numbers.len());
+		return Ok(Some(Scalar::Number(number)));
+	}
+	let args = measure.args(row.field(name)?.to_value(), query.clone());
+	let weighed = args.iter().map(super::fuel::weight).fold(0, u32::saturating_add);
+	if weighed > 0 {
+		super::fuel::charge(weighed);
+	}
+	let value = function.invoke(args)?;
+	super::fuel::charge(super::fuel::weight(&value));
+	Ok(Some(Scalar::Value(std::borrow::Cow::Owned(value))))
+}
+
+/// Charge the two vectors of `a` and `b` numbers a measure or a ranking computed in the body
+/// over, as a walk over their bytes is charged ([`surrealdb_runtime::fuel::byte_units`]), a
+/// number the eight bytes of a float: the measure reads them where they lie, in one pass, with no
+/// value built for any of them. The row yields at its next yield point, and a cursor the body runs
+/// in ends its chunk once the charges spend its fuel.
+#[inline]
+fn charge_vectors(a: usize, b: usize) {
+	super::fuel::charge(surrealdb_runtime::fuel::byte_units(
+		a.saturating_add(b).saturating_mul(std::mem::size_of::<f64>()),
+	));
 }
 
 /// The value `operand` denotes, for a host step that takes its operands as
@@ -2535,7 +2659,7 @@ pub(super) fn run_row<'r>(
 					// element, yielding mid-copy once the fuel is spent.
 					Some(Value::Object(object)) => {
 						let entries = object.0.as_slice();
-						match copied(state, Bulk::at(pipeline, pc, entries), entries, |_| false) {
+						match copied(state, pipeline, pc, entries, |_| false) {
 							Copied::Done(entries) => Some(Value::Object(crate::val::Object(
 								surrealdb_collections::VecMap::from_sorted_vec_unchecked(entries),
 							))),
@@ -2548,7 +2672,7 @@ pub(super) fn run_row<'r>(
 						}
 					}
 					Some(Value::Array(array)) => {
-						match copied(state, Bulk::at(pipeline, pc, &array.0), &array.0, |item| {
+						match copied(state, pipeline, pc, &array.0, |item| {
 							matches!(item, Value::RecordId(_))
 						}) {
 							Copied::Done(values) => Some(Value::Array(values.into())),
@@ -2562,7 +2686,7 @@ pub(super) fn run_row<'r>(
 					}
 					Some(Value::Set(set)) => {
 						let elements = set.0.iter().as_slice();
-						match copied(state, Bulk::at(pipeline, pc, elements), elements, |item| {
+						match copied(state, pipeline, pc, elements, |item| {
 							matches!(item, Value::RecordId(_))
 						}) {
 							// No element is a record id, so the copy is the set
@@ -2617,7 +2741,7 @@ pub(super) fn run_row<'r>(
 						continue;
 					}
 				};
-				match copied(state, Bulk::at(pipeline, pc, elements), elements, |_| false) {
+				match copied(state, pipeline, pc, elements, |_| false) {
 					Copied::Done(elements) => {
 						regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(empty));
 						regs[*items as usize] =
@@ -2654,7 +2778,7 @@ pub(super) fn run_row<'r>(
 						continue;
 					}
 				};
-				match copied(state, Bulk::at(pipeline, pc, elements), elements, |_| false) {
+				match copied(state, pipeline, pc, elements, |_| false) {
 					Copied::Done(elements) => {
 						regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(empty));
 						regs[*items as usize] =
@@ -2851,6 +2975,7 @@ pub(super) fn run_row<'r>(
 			Instr::KnnRank {
 				src,
 				path,
+				root,
 				rank,
 				dst,
 				none,
@@ -2873,22 +2998,34 @@ pub(super) fn run_row<'r>(
 						}
 					}
 				};
-				let value = read_value(regs, *src)?;
-				// A row ranks only with a vector of the query's dimension:
-				// `extract_vector` refuses a longer one, and a shorter one is
-				// refused here, before a distance could only fail on it.
-				let mut record = Vec::with_capacity(query.len());
-				let ranked = (crate::exec::operators::extract_vector(
-					&value,
-					&program.paths[*path as usize],
-					&mut record,
-					query.len(),
-				) && record.len() == query.len())
-				.then(|| {
-					crate::idx::kernels::vector::distance_compute(&rank.distance, &record, query)
-						.ok()
-				})
-				.flatten();
+				// A row ranks only with a vector of the query's dimension: the
+				// read refuses a longer one, and a shorter one is refused here,
+				// before a distance could only fail on it. The row's vector is
+				// read through its reader from the field the path starts at,
+				// so a stored record is read where it lies.
+				let record = &mut state.knn_vector;
+				let read = match (src, root) {
+					(Operand::Reg(ROW), Some((field, rest))) => row.knn_vector(
+						&program.paths[*path as usize],
+						&program.fields[*field as usize],
+						&program.paths[*rest as usize],
+						record,
+						query.len(),
+					)?,
+					_ => crate::exec::operators::extract_vector(
+						&read_value(regs, *src)?,
+						&program.paths[*path as usize],
+						record,
+						query.len(),
+					),
+				};
+				let ranked = (read && record.len() == query.len())
+					.then(|| {
+						charge_vectors(record.len(), query.len());
+						crate::idx::kernels::vector::distance_compute(&rank.distance, record, query)
+							.ok()
+					})
+					.flatten();
 				match ranked {
 					Some(distance) => {
 						regs[*dst as usize] =
@@ -2898,6 +3035,21 @@ pub(super) fn run_row<'r>(
 					None => jump!(*none as usize),
 				}
 			}
+			Instr::Measure {
+				measure,
+				field,
+				dst,
+			} => match measure_row(program, row, state, measure, *field)? {
+				Some(measured) => {
+					regs[*dst as usize] = measured;
+					pc += 1;
+				}
+				None => {
+					return Ok(Step::Measure {
+						at: pc,
+					});
+				}
+			},
 			Instr::Extract {
 				src,
 				path,
@@ -2993,7 +3145,7 @@ pub(super) fn run_row<'r>(
 				// copies one; anything else is converted whole.
 				let field;
 				if let Some(Value::Array(array)) = peek!(*src, field) {
-					match copied(state, Bulk::at(pipeline, pc, &array.0), &array.0, |_| false) {
+					match copied(state, pipeline, pc, &array.0, |_| false) {
 						Copied::Done(values) => {
 							regs[*dst as usize] =
 								Scalar::Value(std::borrow::Cow::Owned(Value::Array(values.into())));
@@ -3598,6 +3750,15 @@ pub(super) fn run_row<'r>(
 					}
 					None => true,
 				};
+				// A row that orders after the floor another sort sharing the cell published is
+				// dropped as well. Every row offered counts toward the next read of the cell.
+				let shares = program.sorts[*sort as usize].shares_floor;
+				if shares {
+					let floor = &mut state.shared_floors[*sort as usize];
+					floor.offers_left = floor.offers_left.saturating_sub(1);
+				}
+				let reaches = reaches
+					&& (!shares || state.under_shared_floor(program, *sort, &regs[*keys as usize]));
 				if reaches {
 					// A key vector a bounded sort pruned, with room for the arrival
 					// a merging sort stamps after the keys.
@@ -4002,13 +4163,16 @@ pub(super) struct BulkAt {
 }
 
 impl Bulk {
-	fn at<T>(pipeline: &Pipeline, pc: usize, source: &[T]) -> BulkAt {
+	/// The copy instruction `pc` of `pipeline` makes of `source`, in a run that `state` holds the
+	/// settled measures of: it may stop for a yield unless the run's body runs on the stored row
+	/// ([`runs_in_place`](super::host::runs_in_place)), inside the storage cursor.
+	fn at<T>(pipeline: &Pipeline, state: &State, pc: usize, source: &[T]) -> BulkAt {
 		BulkAt {
 			pipeline: std::ptr::from_ref(pipeline) as usize,
 			pc,
 			source: source.as_ptr() as usize,
 			len: source.len(),
-			yields: !pipeline.in_place,
+			yields: !super::host::runs_in_place(pipeline, state),
 		}
 	}
 }
@@ -4060,17 +4224,19 @@ enum Copied<T> {
 	Refused,
 }
 
-/// A copy of `source` for the bulk instruction `at`, taken a stretch at a
+/// A copy of `source` for the bulk instruction `pc` of `pipeline`, taken a stretch at a
 /// time, a unit an element, from where an earlier stretch stopped: once a
 /// stretch spends the fuel the copy is kept in the state and the row yields,
 /// resuming here. Refused, with nothing kept, at the first element `refuse`
 /// holds for.
 fn copied<T: Bulked>(
 	state: &mut State,
-	at: BulkAt,
+	pipeline: &Pipeline,
+	pc: usize,
 	source: &[T],
 	refuse: impl Fn(&T) -> bool,
 ) -> Copied<Vec<T>> {
+	let at = Bulk::at(pipeline, state, pc, source);
 	let mut built = match state.bulk.take() {
 		Some(Bulk {
 			at: held,
@@ -4116,6 +4282,18 @@ thread_local! {
 /// The most rows a merging sort's arrivals place at once, held to the
 /// quantum ([`State::merge_arrived`]).
 const MERGE_STRETCH: usize = 256;
+
+/// The most rows a sort that shares its floor is offered between two reads of its cell
+/// ([`State::under_shared_floor`]).
+const SHARED_FLOOR_OFFERS: u32 = 64;
+
+/// The threshold a sort that shares its floor last read from its cell, and the rows it may still
+/// be offered before it reads the cell again ([`State::under_shared_floor`]).
+#[derive(Debug, Clone, Default)]
+pub(super) struct SharedFloor {
+	threshold: Option<std::sync::Arc<Value>>,
+	offers_left: u32,
+}
 
 /// What a sort that keeps a bounded number of rows counts across its rows
 /// ([`State::keep_sorted`]).
@@ -4343,6 +4521,47 @@ mod tests {
 
 	fn field(name: &str) -> FieldPathPart {
 		FieldPathPart::Field(name.to_owned())
+	}
+
+	/// The sorts of the morsels of one brute-force KNN share their floor through the run's cell:
+	/// once one morsel's sort holds as many rows as it keeps, a row another morsel's sort is
+	/// offered that orders after the last of them is dropped, and one that ties it or orders
+	/// before it is kept for the sort to judge.
+	#[tokio::test]
+	async fn a_sort_drops_a_row_past_the_floor_another_morsel_published() {
+		use super::{Scalar, State};
+		use crate::val::Number;
+		let db = crate::exec::operators::test_util::TestDb::new("DEFINE TABLE v;").await;
+		let ctx = db.exec_ctx().await;
+		let program = super::super::tests_morsel::lowered(
+			&ctx,
+			"SELECT id FROM v WHERE p <|2,EUCLIDEAN|> [0f]",
+		)
+		.await;
+		let sort =
+			program.sorts.iter().position(|spec| spec.knn_slot.is_some()).expect("a KNN sort");
+		assert!(program.sorts[sort].shares_floor);
+		let at = u16::try_from(sort).expect("a sort index");
+		let registry = ctx.function_registry();
+		let mut first = State::new(&program, Vec::new(), registry).expect("a state");
+		first.topk_cells[sort] = Some(std::sync::Arc::new(Default::default()));
+		let share = first.shared(&program, registry).expect("a share");
+		let mut unfloored = State::sharing(&program, Vec::new(), share);
+		let far = Scalar::Number(Number::Float(3.0));
+		assert!(
+			unfloored.under_shared_floor(&program, at, &far),
+			"no sort sharing the cell holds a floor yet"
+		);
+		for distance in [1.0, 2.0] {
+			first.sort_value(&program, at, vec![Value::from(distance)], Value::None);
+		}
+		let share = first.shared(&program, registry).expect("a share");
+		let mut second = State::sharing(&program, Vec::new(), share);
+		assert!(!second.under_shared_floor(&program, at, &far), "a farther row is dropped");
+		for kept in [2.0, 1.5] {
+			let row = Scalar::Number(Number::Float(kept));
+			assert!(second.under_shared_floor(&program, at, &row), "{kept} is kept");
+		}
 	}
 
 	/// A path removes what `Value::cut` removes for the same parts, on

@@ -19,13 +19,17 @@ use std::cell::OnceCell;
 use anyhow::anyhow;
 use storekey::{BorrowDecode, BorrowReader, EscapedSlice};
 
-use super::row::{FieldName, RowReader, scalar_from_stored};
+use super::row::{
+	FieldName, RowReader, scalar_from_stored, scalar_numbers, stored_numbers, stored_path_vector,
+};
 use super::scalar::Scalar;
 use crate::catalog::packed::{CheckedPackedRow, FieldRef};
 use crate::catalog::{StoredRecord, TableLayouts};
+use crate::exec::operators::extract_vector;
 use crate::exec::operators::scan::pipeline::decode_record_value;
 use crate::key::KVKeyDecode as _;
 use crate::key::schema::{RecordKey, TblPrefix};
+use crate::val::field_path::{FieldPath, FieldPathPart};
 use crate::val::key_read::{KeyIdRead, KeyIdRef, KeyText};
 use crate::val::{Datetime, Duration, Geometry, Number, RecordId, Uuid, Value, stored};
 
@@ -106,11 +110,63 @@ impl<'a> PackedRowReader<'a> {
 	/// Root field `name` read from column `index`, or from the root's remainder when it has no
 	/// column. A name with no column costs the one search that finds none.
 	fn read(&self, name: &FieldName) -> anyhow::Result<(Option<usize>, FieldRef<'a>)> {
-		Ok(match self.row.root_column(name.as_str(), name.column_hint()) {
-			Some(index) => (Some(index), self.row.read_column(index)?),
-			None => (None, self.row.read_root_remainder(name.as_str())?),
-		})
+		read_root(&self.row, name)
 	}
+}
+
+/// Root field `name` of the checked row `row`, read from its column, or from the root's remainder
+/// when it has no column.
+fn read_root<'a>(
+	row: &CheckedPackedRow<'a>,
+	name: &FieldName,
+) -> anyhow::Result<(Option<usize>, FieldRef<'a>)> {
+	Ok(match row.root_column(name.as_str(), name.column_hint()) {
+		Some(index) => (Some(index), row.read_column(index)?),
+		None => (None, row.read_root_remainder(name.as_str())?),
+	})
+}
+
+/// The numbers of root field `name` of the checked row `row`, read into `out` where the field
+/// lies, as [`RowReader::vector_field`] reads them; `false` for any column but an array of
+/// numbers, every one of which holds a value of another kind (an array is always a stored
+/// value).
+fn packed_numbers(
+	row: &CheckedPackedRow<'_>,
+	name: &FieldName,
+	out: &mut Vec<Number>,
+) -> anyhow::Result<bool> {
+	match read_root(row, name)?.1 {
+		FieldRef::Stored(value) => stored_numbers(value, out),
+		_ => {
+			out.clear();
+			Ok(false)
+		}
+	}
+}
+
+/// The vector at `rest` of root field `name` of the checked row `row`, read into `out` where the
+/// field lies, as [`extract_vector`] reads it from the record decoded whole; whether there is one.
+/// `None` where the field is an object node, whose fields are columns of their own, or the path
+/// crosses a value [`stored_path_vector`] does not walk, for the caller to read decoded.
+fn packed_knn_vector(
+	row: &CheckedPackedRow<'_>,
+	name: &FieldName,
+	rest: &FieldPath,
+	out: &mut Vec<Number>,
+	limit: usize,
+) -> anyhow::Result<Option<bool>> {
+	Ok(match read_root(row, name)?.1 {
+		FieldRef::Stored(value) => return stored_path_vector(value, rest, out, limit),
+		FieldRef::Literal(value) => Some(extract_vector(value, rest, out, limit)),
+		FieldRef::Object => None,
+		// Any other root is a scalar, `NONE` or `NULL`: none holds a vector, and a field step over
+		// one reaches `NONE`.
+		_ if rest.0.iter().all(|part| matches!(part, FieldPathPart::Field(_))) => {
+			out.clear();
+			Some(false)
+		}
+		_ => None,
+	})
 }
 
 /// A packed row run through a body that reads none of its fields ([`Pipeline::reads_row`] clear):
@@ -124,6 +180,9 @@ pub(super) struct LazyPackedRow<'a> {
 	value: &'a [u8],
 	layouts: Option<&'a TableLayouts>,
 	admitted: &'a crate::exec::packed_view::AdmittedRow<'a>,
+	/// The packed row the scan checked, or checked here the first time a reader asked for it;
+	/// `None` where the check refuses the row.
+	checked: OnceCell<Option<CheckedPackedRow<'a>>>,
 	decoded: OnceCell<Value>,
 }
 
@@ -141,8 +200,26 @@ impl<'a> LazyPackedRow<'a> {
 			value,
 			layouts,
 			admitted,
+			checked: OnceCell::new(),
 			decoded: OnceCell::new(),
 		}
+	}
+
+	/// The packed row the scan checked, or checked here once; `None` where the check refuses it.
+	fn checked(&self) -> Option<CheckedPackedRow<'a>> {
+		use crate::exec::packed_view::AdmittedRow;
+		*self.checked.get_or_init(|| match self.admitted {
+			AdmittedRow::Packed {
+				row,
+				..
+			} => Some(*row),
+			AdmittedRow::Bytes(_) => {
+				#[cfg(test)]
+				observed::note_admitted();
+				admit(self.key, self.value, self.layouts)
+			}
+			AdmittedRow::Refused => None,
+		})
 	}
 
 	/// The record decoded whole, once: the value [`decode_record_value`] answers for the same
@@ -153,13 +230,30 @@ impl<'a> LazyPackedRow<'a> {
 		}
 		#[cfg(test)]
 		observed::note_whole();
-		let value = self.admitted.decode(self.key, self.value, self.layouts)?;
+		let value = self.admission().decode(self.key, self.value, self.layouts)?;
 		Ok(self.decoded.get_or_init(|| value))
 	}
 
-	/// The record, when the body asked for it and so it was decoded.
-	pub(super) fn into_decoded(self) -> Option<Value> {
-		self.decoded.into_inner()
+	/// What the scan admitted the row as, with the check this row made since where it made one,
+	/// so a decode of the row reads the checked row rather than checking its bytes again.
+	fn admission(&self) -> crate::exec::packed_view::AdmittedRow<'a> {
+		use crate::exec::packed_view::AdmittedRow;
+		match self.checked.get() {
+			Some(Some(row)) => AdmittedRow::Packed {
+				row: *row,
+				key: self.key,
+			},
+			// The row is packed bytes, which the whole decode refuses where the check does.
+			Some(None) => AdmittedRow::Refused,
+			None => *self.admitted,
+		}
+	}
+
+	/// The record, when the body asked for it and so it was decoded, and what the row was
+	/// admitted as ([`Self::admission`]), for a decode made after the body to read.
+	pub(super) fn into_parts(self) -> (Option<Value>, crate::exec::packed_view::AdmittedRow<'a>) {
+		let admission = self.admission();
+		(self.decoded.into_inner(), admission)
 	}
 }
 
@@ -183,6 +277,42 @@ impl RowReader for LazyPackedRow<'_> {
 
 	fn has_any_field(&self, names: &[surrealdb_strand::Strand]) -> anyhow::Result<bool> {
 		super::row::ValueRow(self.decoded()?).has_any_field(names)
+	}
+
+	/// The numbers are read where the column lies, from the row the scan checked or checked here
+	/// ([`Self::checked`]), and the record is not decoded. Any other column, and a row the check
+	/// refuses, is read from the record decoded whole.
+	fn vector_field(&self, name: &FieldName, out: &mut Vec<Number>) -> anyhow::Result<bool> {
+		if self.decoded.get().is_none()
+			&& name.as_str() != "id"
+			&& let Some(row) = self.checked()
+		{
+			return packed_numbers(&row, name, out);
+		}
+		Ok(scalar_numbers(&self.field(name)?, out))
+	}
+
+	/// The vector is read where its column lies, from the row the scan checked or checked here,
+	/// and the record is not decoded: a row a ranking turns away leaves the scan as bytes. A row
+	/// the check refuses is decoded whole, which raises the whole decode's error.
+	fn knn_vector(
+		&self,
+		path: &FieldPath,
+		name: &FieldName,
+		rest: &FieldPath,
+		out: &mut Vec<Number>,
+		limit: usize,
+	) -> anyhow::Result<bool> {
+		if let Some(whole) = self.decoded.get() {
+			return Ok(extract_vector(whole, path, out, limit));
+		}
+		if name.as_str() != "id"
+			&& let Some(row) = self.checked()
+			&& let Some(read) = packed_knn_vector(&row, name, rest, out, limit)?
+		{
+			return Ok(read);
+		}
+		Ok(extract_vector(self.decoded()?, path, out, limit))
 	}
 }
 
@@ -369,6 +499,33 @@ impl RowReader for PackedRowReader<'_> {
 		}
 		Ok(false)
 	}
+
+	fn vector_field(&self, name: &FieldName, out: &mut Vec<Number>) -> anyhow::Result<bool> {
+		if self.decoded.get().is_none() && name.as_str() != "id" {
+			return packed_numbers(&self.row, name, out);
+		}
+		Ok(scalar_numbers(&self.field(name)?, out))
+	}
+
+	fn knn_vector(
+		&self,
+		path: &FieldPath,
+		name: &FieldName,
+		rest: &FieldPath,
+		out: &mut Vec<Number>,
+		limit: usize,
+	) -> anyhow::Result<bool> {
+		if let Some(whole) = self.decoded.get() {
+			return Ok(extract_vector(whole, path, out, limit));
+		}
+		// A record's `id` is its key, never a vector of numbers; it is read as a field.
+		if name.as_str() != "id"
+			&& let Some(read) = packed_knn_vector(&self.row, name, rest, out, limit)?
+		{
+			return Ok(read);
+		}
+		Ok(extract_vector(&self.field(name)?.to_value(), rest, out, limit))
+	}
 }
 
 /// The packed rows a test run read in place, decoded whole, or rejected from their columns by the
@@ -385,6 +542,7 @@ pub(in crate::exec) mod observed {
 		static FILTERED: Cell<usize> = const { Cell::new(0) };
 		static PROBED: Cell<usize> = const { Cell::new(0) };
 		static PROBED_BYTES: Cell<usize> = const { Cell::new(0) };
+		static ADMITTED: Cell<usize> = const { Cell::new(0) };
 		static PIPELINES: RefCell<Vec<Shape>> = const { RefCell::new(Vec::new()) };
 	}
 
@@ -397,6 +555,11 @@ pub(in crate::exec) mod observed {
 		pub(in crate::exec) count: bool,
 		/// The body runs on the stored row ([`Pipeline::in_place`]).
 		pub(in crate::exec) in_place: bool,
+		/// This run of the pipeline runs its body on the stored row
+		/// ([`runs_in_place`](super::super::host::runs_in_place)).
+		pub(in crate::exec) runs_in_place: bool,
+		/// This run of the pipeline reads its rows as morsels of batches.
+		pub(in crate::exec) batches: bool,
 		/// The body reads fields of the row and takes it whole nowhere ([`Pipeline::reads_row`]).
 		pub(in crate::exec) reads_row: bool,
 		/// The rows are put through an enforcing step before the body runs.
@@ -418,6 +581,7 @@ pub(in crate::exec) mod observed {
 		FILTERED.with(|n| n.set(0));
 		PROBED.with(|n| n.set(0));
 		PROBED_BYTES.with(|n| n.set(0));
+		ADMITTED.with(|n| n.set(0));
 		PIPELINES.with(|p| p.borrow_mut().clear());
 	}
 
@@ -426,11 +590,19 @@ pub(in crate::exec) mod observed {
 		PIPELINES.with(|p| p.borrow().clone())
 	}
 
-	pub(in crate::exec::vm) fn note_pipeline(pipeline: &Pipeline) {
+	pub(in crate::exec::vm) fn note_pipeline(
+		pipeline: &Pipeline,
+		state: &super::super::interp::State,
+	) {
+		use crate::exec::planner::placement::MorselInput;
+		let runs_in_place = super::super::host::runs_in_place(pipeline, state);
 		let shape = Shape {
 			scan: matches!(pipeline.source, Source::Scan { .. }),
 			count: matches!(pipeline.source, Source::Count { .. }),
 			in_place: pipeline.in_place,
+			runs_in_place,
+			batches: super::super::morsel::effective_input_of(pipeline, runs_in_place)
+				== Some(MorselInput::Batches),
 			reads_row: pipeline.reads_row,
 			enforced: pipeline.enforce.is_some(),
 			prefilter: pipeline.source.prefilter().is_some(),
@@ -461,6 +633,15 @@ pub(in crate::exec) mod observed {
 	/// The packed rows the top-k probe rejected from their columns since [`reset`].
 	pub(in crate::exec) fn probed() -> usize {
 		PROBED.with(Cell::get)
+	}
+
+	/// The packed rows a lazy row checked from their bytes since [`reset`].
+	pub(in crate::exec) fn admitted() -> usize {
+		ADMITTED.with(Cell::get)
+	}
+
+	pub(in crate::exec::vm) fn note_admitted() {
+		ADMITTED.with(|n| n.set(n.get() + 1));
 	}
 
 	pub(in crate::exec) fn note_filtered() {

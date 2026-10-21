@@ -1755,11 +1755,15 @@ impl<'p> RangeSet<'p> {
 				let stats = source
 					.for_each(chunk, &mut |key, value| {
 						unspent = unspent.saturating_sub(1);
-						let next = if unspent == 0 {
-							spent = true;
-							std::ops::ControlFlow::Break(())
-						} else {
-							std::ops::ControlFlow::Continue(())
+						// Whether the chunk goes on past the record, judged once its body ran, so
+						// the fuel the body charged is counted.
+						let after = |spent: &mut bool| {
+							if super::super::fuel::chunk_spent(budget, unspent) {
+								*spent = true;
+								std::ops::ControlFlow::Break(())
+							} else {
+								std::ops::ControlFlow::Continue(())
+							}
 						};
 						if let Some(cut) = &cut
 							&& (if backward {
@@ -1787,7 +1791,7 @@ impl<'p> RangeSet<'p> {
 							&& probe.rejects(threshold, &admitted)
 						{
 							rejected += 1;
-							return Ok(next);
+							return Ok(after(&mut spent));
 						}
 						match in_place_row_admitted(
 							&program,
@@ -1798,7 +1802,7 @@ impl<'p> RangeSet<'p> {
 							layouts.as_deref(),
 							state,
 						) {
-							Ok(false) => Ok(next),
+							Ok(false) => Ok(after(&mut spent)),
 							Ok(true) => {
 								stopped = true;
 								Ok(std::ops::ControlFlow::Break(()))

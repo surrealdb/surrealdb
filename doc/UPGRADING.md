@@ -56,6 +56,10 @@ is in, and a store may hold both side by side.
   run only as wide as that pool grants, a host with two cores or fewer runs
   them on one task, and `SURREAL_HNSW_BUILD_PARALLELISM` is a ceiling rather
   than a task count.
+- The vector distance and similarity measures add the terms of a vector of
+  eight or more floats in another order. A result whose terms cancel, such as
+  a dot product near zero, can change by much more than its last bits, sign
+  included, so rows whose scores almost tie can rank in another order.
 - A DiskANN index of `TYPE I8` or `TYPE U8` is limited to `DIMENSION 33025`.
   A longer one is refused when it is defined, and an existing one fails when
   it is opened.
@@ -612,6 +616,42 @@ are unchanged, and so are statements with an observable effect, which stay
 serial. A float aggregate (`math::sum`, `math::mean`, `math::stddev`,
 `math::variance`, `vector::sum`) is folded serially, so its low bits are the
 ones a serial run gives.
+
+### Vector measures add the terms of a float vector in another order
+
+For a vector of eight or more floats, these measures add the terms in eight
+running sums and then add the sums together:
+
+- `vector::dot`, `vector::distance::euclidean`, `vector::distance::manhattan`,
+  `vector::distance::minkowski` and `vector::similarity::cosine`;
+- the distances that a KNN search (`<|k, DIST|>`) computes with them, and the
+  `INNER_PRODUCT` and normalised cosine distances.
+
+Earlier releases added the terms one after another. Integer and decimal
+vectors, and vectors of fewer than eight floats, give the same results as
+before, to the last bit. A result is the same every time it is computed.
+
+The two orders round differently. For `n` terms, the difference is at most of
+the order of `n × 2⁻⁵² × Σ|termᵢ|`:
+
+- **Terms of one sign** (a Euclidean, Manhattan or Minkowski distance, or a
+  norm). A result changes in its last bits at most.
+- **Terms that cancel** (a dot product or a cosine similarity near zero). The
+  difference can be as large as the result, sign included. For example,
+  `vector::dot([1e16f, -1f, 0f, 0f, -1e16f, 0f, 0f, 0f], [1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f])`
+  returns `-1f`, where earlier releases returned `0f`.
+- **Huge terms.** Where the terms added one after another pass the largest
+  float partway but the running sums do not, the result is finite where
+  earlier releases returned `Infinity` or `NaN`.
+
+So rows whose scores almost tie can come back in another order from an
+`ORDER BY` over one of these functions, or from a KNN search by
+`INNER_PRODUCT` or `COSINE`.
+
+**What to do**: nothing, unless an application compares these results bit for
+bit with values it stored, or relies on the order of almost equal scores.
+Compare such results with a tolerance, and add a tie-breaking key to the
+`ORDER BY`.
 
 ### DiskANN `TYPE I8` and `TYPE U8` indexes are limited to 33025 dimensions
 

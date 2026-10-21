@@ -816,8 +816,26 @@ fn jumps_back(code: &[Instr]) -> bool {
 /// An instruction that yields to the host (a parameter read, a call, a method), reads a record,
 /// writes or defines is not one, and neither is any instruction this list does not name. The
 /// paging instructions ([`Instr::Skip`], [`Instr::Take`], [`Instr::JumpIfLimitReached`]) are: they
-/// read and count the statement's paging state alone, never the row.
+/// read and count the statement's paging state alone, never the row. A brute-force ranking
+/// ([`Instr::KnnRank`]) is one where its query vector is in hand before any row is read
+/// ([`KnnRank::before_rows`](crate::exec::vm::program::KnnRank)): it then reads the row's vector
+/// and computes a distance, and hands the host nothing.
 fn runs_on_the_row(instr: &Instr) -> bool {
+	if let Instr::KnnRank {
+		rank,
+		..
+	} = instr
+	{
+		return rank.before_rows;
+	}
+	// A vector measure's check and query are settled as the run starts, and it measures a row,
+	// or calls its builtin over the row's field, in the interpreter.
+	if let Instr::Measure {
+		..
+	} = instr
+	{
+		return true;
+	}
 	matches!(
 		instr,
 		Instr::Load { .. }

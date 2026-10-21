@@ -5764,6 +5764,9 @@ mod tests {
 				| Instr::KnnRank {
 					..
 				}
+				| Instr::Measure {
+					..
+				}
 				| Instr::Mock {
 					..
 				}

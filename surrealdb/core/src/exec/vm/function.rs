@@ -682,9 +682,47 @@ pub(super) async fn stored_param(
 	spec: &ParamSpec,
 	ctx: &EvalContext<'_>,
 ) -> FlowResult<Value> {
+	match stored_param_read(program, spec, ctx, Reading::EachCall).await? {
+		Some(value) => Ok(value),
+		None => unreachable!("a read made on every call answers its value"),
+	}
+}
+
+/// [`stored_param`] read once for every row of a statement, where what the read answers cannot
+/// depend on the row it is made for: `None` where the definition's `PERMISSIONS` predicate is
+/// judged on every read ([`guard_verdicts::stands_for_statement`]), unread, for each row's read to
+/// judge it with the row in scope.
+///
+/// [`guard_verdicts::stands_for_statement`]: crate::exec::guard_verdicts::stands_for_statement
+pub(super) async fn stored_param_once(
+	program: &Program,
+	spec: &ParamSpec,
+	ctx: &EvalContext<'_>,
+) -> FlowResult<Option<Value>> {
+	stored_param_read(program, spec, ctx, Reading::OnceForEveryRow).await
+}
+
+/// Which read of a `DEFINE PARAM` a caller makes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Reading {
+	/// A read made on every call, with the row of the call in scope.
+	EachCall,
+	/// One read standing for every row of the statement, made with no row in scope; a read whose
+	/// predicate would be judged on every read answers nothing.
+	OnceForEveryRow,
+}
+
+/// The value of `DEFINE PARAM` for `spec` in `ctx`, read as `reading` reads it: `None` only for a
+/// [`Reading::OnceForEveryRow`] whose predicate is judged on every read.
+async fn stored_param_read(
+	program: &Program,
+	spec: &ParamSpec,
+	ctx: &EvalContext<'_>,
+	reading: Reading,
+) -> FlowResult<Option<Value>> {
 	// Read it from the database.
 	if ctx.exec_ctx.database().is_ok() {
-		return Ok(read_db_param(program, spec, ctx).await?);
+		return Ok(read_db_param(program, spec, ctx, reading).await?);
 	}
 	// Without a database context but with options naming one, look it up by
 	// name.
@@ -711,10 +749,10 @@ pub(super) async fn stored_param(
 		{
 			let db_level = ctx.exec_ctx.with_database(ns_def, db_def);
 			let db_ctx = ctx.with_exec_ctx(&db_level);
-			return Ok(read_db_param(program, spec, &db_ctx).await?);
+			return Ok(read_db_param(program, spec, &db_ctx, reading).await?);
 		}
 		// The database does not exist yet: the parameter cannot be found.
-		return Ok(Value::None);
+		return Ok(Some(Value::None));
 	}
 	// No options available and the parameter not found locally.
 	Err(anyhow::anyhow!("Parameter not found: ${}", spec.name).into())
@@ -728,12 +766,14 @@ pub(super) async fn stored_param(
 /// clause ([`super::param_unit`]) over the row the parameter is read on. Its
 /// verdict stands for the statement where the predicate's scope lets it
 /// ([`crate::exec::guard_verdicts`]), and is judged again on every read
-/// otherwise.
+/// otherwise. A [`Reading::OnceForEveryRow`] of a predicate judged on every read
+/// answers `None`, having judged nothing.
 async fn read_db_param(
 	program: &Program,
 	spec: &ParamSpec,
 	ctx: &EvalContext<'_>,
-) -> anyhow::Result<Value> {
+	reading: Reading,
+) -> anyhow::Result<Option<Value>> {
 	let db_ctx = ctx.exec_ctx.database()?;
 	let found = EngineServices::new(ctx.exec_ctx)
 		.read_db_param(
@@ -744,7 +784,7 @@ async fn read_db_param(
 		)
 		.await?;
 	let Some(found) = found else {
-		return Ok(Value::None);
+		return Ok(Some(Value::None));
 	};
 	if !ctx.skip_fetch_perms && ctx.exec_ctx.should_check_perms(Action::View)? {
 		let denied = || ExecError::ParamPermissions {
@@ -754,10 +794,30 @@ async fn read_db_param(
 			Admission::Full => {}
 			Admission::None => return Err(denied().into()),
 			Admission::Predicate => {
+				let lowered = spec.guard.filter(|(hash, ..)| *hash == found.permission);
+				// The scope of the clause the definition holds now, where the program did not
+				// lower it.
+				let scope = match lowered {
+					Some((_, _, scope)) => scope,
+					None => match found.definition.permissions_body.logical_ref() {
+						Ok(LogicalPermissionRef::Specific(predicate)) => {
+							crate::exec::guard_verdicts::GuardScope::of(
+								predicate,
+								ctx.exec_ctx.function_registry(),
+							)
+						}
+						Ok(_) | Err(_) => crate::exec::guard_verdicts::GuardScope::PerCall,
+					},
+				};
+				if reading == Reading::OnceForEveryRow
+					&& !crate::exec::guard_verdicts::stands_for_statement(ctx.exec_ctx, scope)
+				{
+					return Ok(None);
+				}
 				// A clause other than the one the program lowered is judged as
 				// a stored clause, compiled from the clause read on this call.
-				match spec.guard {
-					Some((hash, pipeline, scope)) if hash == found.permission => {
+				match lowered {
+					Some((_, pipeline, scope)) => {
 						crate::exec::guard_verdicts::judged(
 							ctx.exec_ctx,
 							scope,
@@ -776,18 +836,7 @@ async fn read_db_param(
 						)
 						.await
 					}
-					_ => {
-						// The scope of the clause the definition holds now, which the
-						// program did not lower.
-						let scope = match found.definition.permissions_body.logical_ref() {
-							Ok(LogicalPermissionRef::Specific(predicate)) => {
-								crate::exec::guard_verdicts::GuardScope::of(
-									predicate,
-									ctx.exec_ctx.function_registry(),
-								)
-							}
-							Ok(_) | Err(_) => crate::exec::guard_verdicts::GuardScope::PerCall,
-						};
+					None => {
 						crate::exec::guard_verdicts::judged(
 							ctx.exec_ctx,
 							scope,
@@ -821,7 +870,7 @@ async fn read_db_param(
 			}
 		}
 	}
-	Ok(found.value)
+	Ok(Some(found.value))
 }
 
 #[cfg(test)]

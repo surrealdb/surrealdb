@@ -31,10 +31,12 @@ use crate::exec::object_extract::{
 	PathSegment, indexed_map_walker_from_object_bytes, lookup_value_bytes_in_map,
 	rev2_record_data_bytes,
 };
+use crate::exec::operators::extract_vector;
 use crate::exec::operators::scan::pipeline::decode_record_value;
 use crate::exec::pre_decode_filter::{int_on_wire, strand_payload_str};
 use crate::key::KVKeyDecode as _;
-use crate::val::stored::{Kind, ObjectRef, OrderedObjectRef, ValueRef};
+use crate::val::field_path::{FieldPath, FieldPathPart};
+use crate::val::stored::{ArrayRef, Kind, ObjectRef, OrderedObjectRef, ValueRef};
 use crate::val::{Datetime, Duration, Number, Uuid, Value};
 
 /// The fields of one row, as the caller may see them.
@@ -55,11 +57,40 @@ pub(super) trait RowReader {
 	/// The whole row.
 	fn record(&self) -> anyhow::Result<Value>;
 
+	/// Reads the vector at `path` of the row into `out`, replacing its contents, as
+	/// [`extract_vector`] reads it from the whole row, and answers whether there is one of at most
+	/// `limit` numbers. `path` starts at field `name`, and `rest` is the rest of it.
+	///
+	/// A reader that holds the row whole reads the path from it; any other reads field `name` and
+	/// the rest of the path from that field's value. A reader that reads its row where it lies
+	/// reads the vector's numbers from there instead, with the same answer.
+	fn knn_vector(
+		&self,
+		path: &FieldPath,
+		name: &FieldName,
+		rest: &FieldPath,
+		out: &mut Vec<Number>,
+		limit: usize,
+	) -> anyhow::Result<bool> {
+		Ok(match self.borrowed() {
+			Some(whole) => extract_vector(whole, path, out, limit),
+			None => extract_vector(&self.field(name)?.to_value(), rest, out, limit),
+		})
+	}
+
 	/// The whole row, borrowed, when the reader holds it as one value: what
 	/// [`Self::record`] answers without a copy. `None` for a reader that
 	/// assembles the row on demand.
 	fn borrowed(&self) -> Option<&Value> {
 		None
+	}
+
+	/// Reads the numbers of field `name` of the row into `out`, replacing its contents, where the
+	/// field holds an array of numbers only, and answers whether it does: the vector a two-argument
+	/// `vector::*` builtin reads from the field as its argument. `false` for any other value,
+	/// nested arrays included, which the builtin reads decoded.
+	fn vector_field(&self, name: &FieldName, out: &mut Vec<Number>) -> anyhow::Result<bool> {
+		Ok(scalar_numbers(&self.field(name)?, out))
 	}
 
 	/// Whether the row is a record id rather than a record.
@@ -345,6 +376,160 @@ fn stored_field<'a>(
 	Ok(found)
 }
 
+/// Reads the vector at `rest` of the stored value `value` into `out`, replacing its contents, as
+/// [`extract_vector`] reads the vector at that path of the value `value` decodes to, and answers
+/// whether there is one. `None` where the path crosses a value this read does not walk, for the
+/// caller to read decoded: a step other than a field, or an array that holds values rather than
+/// numbers, whose field a step projects from each element.
+pub(super) fn stored_path_vector(
+	mut value: ValueRef<'_>,
+	rest: &FieldPath,
+	out: &mut Vec<Number>,
+	limit: usize,
+) -> anyhow::Result<Option<bool>> {
+	for (at, part) in rest.0.iter().enumerate() {
+		let FieldPathPart::Field(key) = part else {
+			return Ok(None);
+		};
+		if let Some(object) = value.as_ordered_object()? {
+			match object.get(key)? {
+				Some(found) => value = found,
+				None => {
+					out.clear();
+					return Ok(Some(false));
+				}
+			}
+			continue;
+		}
+		// A field step over anything but an object reaches a vector only through an array holding
+		// objects, which projects the field of each. Over any other value (a scalar, a set, an
+		// empty array, a typed array of numbers) the field steps left reach `NONE`, a set or an
+		// array with no number, and none holds a vector.
+		let projects = value.as_array()?.is_some_and(|array| {
+			!array.is_empty() && array.floats().is_none() && array.ints().is_none()
+		});
+		if projects || rest.0[at..].iter().any(|p| !matches!(p, FieldPathPart::Field(_))) {
+			return Ok(None);
+		}
+		out.clear();
+		return Ok(Some(false));
+	}
+	stored_vector(value, out, limit).map(Some)
+}
+
+/// Reads the numbers of `scalar` into `out`, replacing its contents, where it is an array of
+/// numbers only, and answers whether it is.
+pub(super) fn scalar_numbers(scalar: &Scalar<'_>, out: &mut Vec<Number>) -> bool {
+	out.clear();
+	match scalar {
+		Scalar::Value(value) => match value.as_ref() {
+			Value::Array(array) => array.iter().all(|value| match value {
+				Value::Number(number) => {
+					out.push(*number);
+					true
+				}
+				_ => false,
+			}),
+			_ => false,
+		},
+		_ => false,
+	}
+}
+
+/// Reads the numbers of the stored value `value` into `out`, replacing its contents, where it is
+/// an array of numbers only, each the number its decode holds, and answers whether it is.
+pub(super) fn stored_numbers(value: ValueRef<'_>, out: &mut Vec<Number>) -> anyhow::Result<bool> {
+	out.clear();
+	let Some(array) = value.as_array()? else {
+		return Ok(false);
+	};
+	if let Some(floats) = array.floats() {
+		out.extend(floats.map(Number::Float));
+		return Ok(true);
+	}
+	if let Some(ints) = array.ints() {
+		out.extend(ints.map(Number::Int));
+		return Ok(true);
+	}
+	for element in array.iter() {
+		let element = element?;
+		let number = match element.kind() {
+			Kind::Int => element.as_int()?.map(Number::Int),
+			Kind::Float => element.as_float()?.map(Number::Float),
+			Kind::Decimal => element.as_decimal()?.map(Number::Decimal),
+			_ => return Ok(false),
+		};
+		let Some(number) = number else {
+			return Err(anyhow::anyhow!("a stored value whose kind and tag disagree"));
+		};
+		out.push(number);
+	}
+	Ok(true)
+}
+
+/// Reads the stored value `value` into `out`, replacing its contents, as [`extract_vector`] reads
+/// the value it decodes to: whether it is an array of numbers and nested arrays of them, at most
+/// `limit` numbers in all, flattened in order.
+fn stored_vector(value: ValueRef<'_>, out: &mut Vec<Number>, limit: usize) -> anyhow::Result<bool> {
+	out.clear();
+	let Some(array) = value.as_array()? else {
+		// Only an array holds a vector; a set, like any other value, holds none.
+		return Ok(false);
+	};
+	Ok(flatten_stored(array, out, limit)? && !out.is_empty())
+}
+
+/// Appends the numbers of `array` to `out`, descending into nested arrays in order, as
+/// [`extract_vector`] flattens a decoded array: `false` on an element that is neither a number nor
+/// an array, and as soon as `out` would hold more than `limit` numbers.
+fn flatten_stored(
+	array: ArrayRef<'_>,
+	out: &mut Vec<Number>,
+	limit: usize,
+) -> anyhow::Result<bool> {
+	// A typed array holds numbers only, each the number a whole decode builds from it.
+	if let Some(floats) = array.floats() {
+		if floats.len() > limit - out.len().min(limit) {
+			return Ok(false);
+		}
+		out.extend(floats.map(Number::Float));
+		return Ok(true);
+	}
+	if let Some(ints) = array.ints() {
+		if ints.len() > limit - out.len().min(limit) {
+			return Ok(false);
+		}
+		out.extend(ints.map(Number::Int));
+		return Ok(true);
+	}
+	for element in array.iter() {
+		let element = element?;
+		let number = match element.kind() {
+			Kind::Int => element.as_int()?.map(Number::Int),
+			Kind::Float => element.as_float()?.map(Number::Float),
+			Kind::Decimal => element.as_decimal()?.map(Number::Decimal),
+			Kind::Array => match element.as_array()? {
+				Some(inner) => {
+					if !flatten_stored(inner, out, limit)? {
+						return Ok(false);
+					}
+					continue;
+				}
+				None => None,
+			},
+			_ => return Ok(false),
+		};
+		let Some(number) = number else {
+			return Err(anyhow::anyhow!("a stored value whose kind and tag disagree"));
+		};
+		if out.len() >= limit {
+			return Ok(false);
+		}
+		out.push(number);
+	}
+	Ok(true)
+}
+
 /// The scalar a stored value denotes, borrowing a string or bytes from where
 /// it lies.
 pub(super) fn scalar_from_stored(v: ValueRef<'_>) -> anyhow::Result<Scalar<'_>> {
@@ -452,6 +637,56 @@ impl RowReader for StoredRow<'_> {
 			Some(value) => Ok(value.clone()),
 			None => decode_record_value(self.key, self.value, None),
 		}
+	}
+
+	fn vector_field(&self, name: &FieldName, out: &mut Vec<Number>) -> anyhow::Result<bool> {
+		// A record decoded already, or one no layout reads in place, is read from its decoded
+		// value; a record's `id` is its key, never an array.
+		if self.decoded.get().is_none()
+			&& name.as_str() != "id"
+			&& let Layout::Stored(object) = &self.layout
+		{
+			return match stored_field(&self.ordered(object)?, name)? {
+				Some(value) => stored_numbers(value, out),
+				None => {
+					out.clear();
+					Ok(false)
+				}
+			};
+		}
+		Ok(scalar_numbers(&self.field(name)?, out))
+	}
+
+	fn knn_vector(
+		&self,
+		path: &FieldPath,
+		name: &FieldName,
+		rest: &FieldPath,
+		out: &mut Vec<Number>,
+		limit: usize,
+	) -> anyhow::Result<bool> {
+		// A record decoded already, or one no layout reads in place, is read from its decoded
+		// value, with no copy of the field.
+		if let Some(whole) = self.decoded.get() {
+			return Ok(extract_vector(whole, path, out, limit));
+		}
+		if let Layout::Whole = self.layout {
+			return Ok(extract_vector(self.decoded()?, path, out, limit));
+		}
+		// A record's `id` is its key, never a vector of numbers; it is read as any other reader
+		// reads it.
+		if let Layout::Stored(object) = &self.layout
+			&& name.as_str() != "id"
+		{
+			let Some(value) = stored_field(&self.ordered(object)?, name)? else {
+				out.clear();
+				return Ok(false);
+			};
+			if let Some(read) = stored_path_vector(value, rest, out, limit)? {
+				return Ok(read);
+			}
+		}
+		Ok(extract_vector(&self.field(name)?.to_value(), rest, out, limit))
 	}
 
 	fn has_any_field(&self, names: &[Strand]) -> anyhow::Result<bool> {
@@ -717,6 +952,87 @@ mod tests {
 			assert!(row.has_any_field(&names(&["id"])).expect("reads"));
 			assert!(!row.has_any_field(&names(&["absent", "missing"])).expect("reads"));
 		}
+	}
+
+	/// A ranking's vector read from a stored record in place is the vector
+	/// `extract_vector` reads from the record decoded whole, number for number
+	/// and kind for kind, whatever the array's encoding, its nesting, the path
+	/// into it and the bound on its length; and the record is not decoded.
+	#[test]
+	fn a_knn_vector_reads_in_place_as_from_the_decoded_record() {
+		use crate::val::field_path::{FieldPath, FieldPathPart};
+		let rid = crate::val::RecordId::new("t".into(), crate::val::RecordIdKey::Number(1));
+		let key = key_of(&rid);
+		let mut data = val("{ f32: [1f, 0f, 0f], f64: [0.1f, 0.2f, 0.3f], ints: [2, 0, 0], \
+			 big: [1000000000000, 0, 1], mix: [1, 0.5f, 0], dec: [0dec, 1dec, 0dec], \
+			 nest: [[0f], [0f, 3f]], typed: [[1f, 2f], [3]], wide: [1f, 1f, 1f, 1f], \
+			 short: [1f], str: [1f, 'x', 0f], empty: [], empties: [[], []], scalar: 3, \
+			 obj: { v: [1f, 2f, 3f], deep: { v: [4, 5, 6] } }, arrobj: [{ v: [1f, 2f, 3f] }], \
+			 none: NONE, null: NULL }");
+		if let Value::Object(fields) = &mut data {
+			let set = |items: Vec<Value>| Value::Set(crate::val::Set::from(items));
+			let floats =
+				|| Value::from(vec![Value::from(1f64), Value::from(2f64), Value::from(3f64)]);
+			fields.insert("set".to_owned(), set(vec![Value::from(1f64), Value::from(2f64)]));
+			let mut inner = crate::val::Object::default();
+			inner.insert("v".to_owned(), floats());
+			fields.insert("setobj".to_owned(), set(vec![Value::Object(inner)]));
+		}
+		let Value::Object(fields) = &data else {
+			unreachable!()
+		};
+		let mut paths: Vec<Vec<&str>> = fields.keys().map(|name| vec![name.as_str()]).collect();
+		paths.extend([
+			vec!["obj", "v"],
+			vec!["obj", "deep", "v"],
+			vec!["obj", "missing"],
+			vec!["obj", "v", "x"],
+			vec!["arrobj", "v"],
+			vec!["arrobj", "v", "w"],
+			vec!["scalar", "v"],
+			vec!["scalar", "v", "w"],
+			vec!["f32", "v"],
+			vec!["ints", "v"],
+			vec!["set", "v"],
+			vec!["setobj", "v"],
+			vec!["none", "v"],
+			vec!["absent"],
+			vec!["absent", "v"],
+			vec!["id"],
+		]);
+		let path = |parts: &[&str]| {
+			FieldPath(parts.iter().map(|p| FieldPathPart::Field((*p).to_owned())).collect())
+		};
+		let value =
+			crate::catalog::encode_record(DOCUMENT, None, &data, Some(&rid)).expect("encodes");
+		let decoded = decode_record_value(&key, &value, None).expect("decodes");
+		let row = StoredRow::new(&key, &value);
+		assert!(matches!(row.layout, Layout::Stored(_)), "read in place");
+		let (mut got, mut want) = (vec![Number::Int(-1)], vec![Number::Int(-1)]);
+		let mut compare = |row: &StoredRow<'_>| {
+			for parts in &paths {
+				let (full, rest) = (path(parts), path(&parts[1..]));
+				for limit in [0, 1, 2, 3, 4, 100] {
+					let read = row
+						.knn_vector(&full, &FieldName::new(parts[0]), &rest, &mut got, limit)
+						.expect("reads");
+					let expected = extract_vector(&decoded, &full, &mut want, limit);
+					assert_eq!(read, expected, "{parts:?} at most {limit}");
+					if expected {
+						assert_eq!(
+							format!("{got:?}"),
+							format!("{want:?}"),
+							"{parts:?} at most {limit}"
+						);
+					}
+				}
+			}
+		};
+		compare(&row);
+		assert!(row.decoded.get().is_none(), "no ranking decoded the record");
+		// A row decoded already is read from its decoded value, with the same answers.
+		row.decoded().expect("decodes");
+		compare(&row);
 	}
 
 	/// A record whose object keys are out of order is refused by a field read,

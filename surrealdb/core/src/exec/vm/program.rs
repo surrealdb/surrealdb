@@ -469,12 +469,34 @@ pub(super) enum Instr {
 	/// computed when the statement runs that the run has not evaluated yet is
 	/// evaluated by the host first
 	/// ([`Step::KnnQuery`](super::interp::Step::KnnQuery)).
+	///
+	/// `root` is the same path where it starts at a field: the field in
+	/// [`Program::fields`] and the rest of the path in [`Program::paths`]. With
+	/// `src` the [`ROW`] register, the vector is read through the row's reader
+	/// from that field ([`RowReader::knn_vector`]), so a stored record is not
+	/// decoded to rank it.
+	///
+	/// [`RowReader::knn_vector`]: super::row::RowReader::knn_vector
 	KnnRank {
 		src: Operand,
 		path: u32,
+		root: Option<(u32, u32)>,
 		rank: Arc<KnnRank>,
 		dst: Reg,
 		none: Label,
+	},
+	/// `dst` = what the call of the two-argument `vector::*` builtin `measure`
+	/// names answers for field [`Program::fields`]`[field]` of the row and the
+	/// measure's query argument, value and error alike, as [`Instr::Call`] over
+	/// the two answers it ([`super::measure`]). The call's capability check and
+	/// its query are those the run settled as it started
+	/// ([`State::measures`](super::interp::State)); a run that has not settled
+	/// them has the host settle them first
+	/// ([`Step::Measure`](super::interp::Step::Measure)).
+	Measure {
+		measure: Arc<super::measure::MeasureSpec>,
+		field: u32,
+		dst: Reg,
 	},
 	/// `dst` = the record ids mock `mock` generates: refused when they would
 	/// take more than `limit` bytes.
@@ -3873,6 +3895,11 @@ impl CompareOp {
 pub(super) struct KnnRank {
 	pub(super) vector: KnnVector,
 	pub(super) distance: crate::catalog::Distance,
+	/// Whether the vector is in hand before any row is ranked against it: a
+	/// literal, or a query its group's run evaluates as it starts
+	/// ([`KnnQuery::before_rows`]). A ranking against such a vector hands the
+	/// host no step, so it runs in a body that runs in place.
+	pub(super) before_rows: bool,
 }
 
 /// Where the vector a brute-force KNN ranks rows against comes from.
@@ -4008,9 +4035,17 @@ pub(super) struct SortSpec {
 	/// as it keeps, rather than a quarter more: the sort of a key-range scan
 	/// cut by the second of a datetime component ([`TopKScan::coarse`]), whose
 	/// region hands it no more than `keep` rows a batch, so the cut fires
-	/// within the batch that fills it. Every other bounded sort floors at a
-	/// quarter more.
+	/// within the batch that fills it, and the sort of a brute-force KNN, which
+	/// drops a row farther than every kept one before it keeps its bytes.
+	/// Every other bounded sort floors at a quarter more.
 	pub(super) floors_at_keep: bool,
+	/// Whether the sort publishes its floor to a cell of
+	/// [`State::topk_cells`](super::interp::State) that the sorts of the morsels of one scan
+	/// share, and drops a row that orders after the floor any of them published
+	/// ([`State::under_shared_floor`](super::interp::State)): a sort that keeps a bounded number
+	/// of rows, in an order that is not random. Each morsel's sort so admits about as many rows as
+	/// one sort over the whole scan would, rather than as many as its part alone admits.
+	pub(super) shares_floor: bool,
 	pub(super) random: bool,
 	/// Where the first key of each row the sort keeps is published for
 	/// `vector::distance::knn()`: the sort of a brute-force KNN ranks rows by
@@ -6314,6 +6349,24 @@ fn row_use(instr: &Instr) -> RowUse {
 		| Instr::LoadPath {
 			..
 		} => RowUse::Fields,
+		// A measure reads its vector from a field of the row.
+		Instr::Measure {
+			..
+		} => RowUse::Fields,
+		// A ranking over the row whose path starts at a field reads the vector from that field
+		// through the row's reader; any other reads its source whole.
+		Instr::KnnRank {
+			src: Operand::Reg(ROW),
+			root: Some(_),
+			..
+		} => RowUse::Fields,
+		Instr::KnnRank {
+			src,
+			..
+		} => match src {
+			Operand::Reg(ROW) => RowUse::Whole,
+			other => RowUse::of(*other),
+		},
 		Instr::Filter {
 			cond,
 			..
@@ -6509,9 +6562,6 @@ fn row_use(instr: &Instr) -> RowUse {
 			..
 		}
 		| Instr::Extract {
-			..
-		}
-		| Instr::KnnRank {
 			..
 		}
 		| Instr::Mock {

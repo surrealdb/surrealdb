@@ -651,6 +651,221 @@ async fn a_backward_scan_reads_its_key_range_in_morsels() {
 	assert!(answer(&wide, "SELECT n, s FROM t ORDER BY id DESC").await.1);
 }
 
+/// A table of [`ROWS`] rows holding the vectors a brute-force KNN ranks: `p`, distinct along its
+/// first axis, and `q`, of three values, which ties most rows with others.
+fn vectors() -> String {
+	format!(
+		"DEFINE TABLE v;
+		 FOR $i IN 0..{ROWS} {{
+			CREATE type::record('v', $i) SET n = $i, p = [$i * 0.5f, ($i % 7) * 1f], q = [$i % 3, 0f]
+		 }};"
+	)
+}
+
+/// Brute-force KNN statements over [`vectors`]: with and without a condition beside the ranking,
+/// over distinct and heavily tied distances.
+const KNN_SCANS: &[&str] = &[
+	"SELECT id, vector::distance::knn() AS d FROM v WHERE p <|5,EUCLIDEAN|> [700f, 3f]",
+	"SELECT id, vector::distance::knn() AS d FROM v WHERE p <|5,EUCLIDEAN|> [700f, 3f] AND n % 2 = 0",
+	"SELECT id, vector::distance::knn() AS d FROM v WHERE q <|7,MANHATTAN|> [0f, 0f]",
+	"SELECT VALUE id FROM v WHERE q <|4,EUCLIDEAN|> [1f, 0f] AND n > 100",
+];
+
+/// Each of [`KNN_SCANS`] reads its table in range morsels over `wide` and answers what it answers
+/// over `serial`: the same rows at the same distances, a tie kept in the order the serial scan
+/// reaches its rows.
+async fn knn_scans_answer_as_the_serial_run(serial: &TestDb, wide: &TestDb) {
+	for sql in KNN_SCANS {
+		assert_eq!(fan_out_of(wide, sql).await, FanOut::Range, "`{sql}`");
+		let expected = answered(serial, sql).await;
+		assert!(expected.as_ref().is_ok_and(|rows| !rows.is_empty()), "`{sql}`: {expected:?}");
+		assert_eq!(answered(wide, sql).await, expected, "`{sql}`");
+	}
+}
+
+/// A brute-force KNN reads its table in range morsels, each keeping its own nearest rows, whether
+/// or not a condition stands beside the ranking, and answers what the serial run answers.
+#[tokio::test]
+async fn a_brute_force_knn_reads_its_table_in_range_morsels() {
+	let serial = TestDb::new_with_config(&vectors(), whole()).await;
+	let wide = TestDb::new_with_config(&vectors(), tiny()).await;
+	knn_scans_answer_as_the_serial_run(&serial, &wide).await;
+}
+
+/// A call of a two-argument `vector::*` builtin over a field of the row and a literal vector is a
+/// vector measure: the body that computes it runs in place, and its table is read in range
+/// morsels. Each statement answers what the same call answers where it is not a measure, its field
+/// read as `p ?? NONE`, over a datastore whose scans never split. A parameter's vector is one too:
+/// read once as the run starts where no permission is judged against the row it is read for, as
+/// here, where the statements run as the owner.
+#[tokio::test]
+async fn a_vector_measure_runs_in_place_and_reads_its_table_in_range_morsels() {
+	let setup = format!("{} DEFINE PARAM $q VALUE [700f, 3f];", vectors());
+	let serial = TestDb::new_with_config(&setup, whole()).await;
+	let wide = TestDb::new_with_config(&setup, tiny()).await;
+	for (measured, called) in [
+		(
+			"SELECT id, vector::similarity::cosine(p, [700f, 3f]) AS d FROM v ORDER BY d DESC LIMIT 5",
+			"SELECT id, vector::similarity::cosine(p ?? NONE, $q) AS d FROM v ORDER BY d DESC LIMIT 5",
+		),
+		(
+			"SELECT id, vector::distance::euclidean([700f, 3f], p) AS d FROM v ORDER BY d LIMIT 5",
+			"SELECT id, vector::distance::euclidean([700f, 3f], p ?? NONE) AS d FROM v ORDER BY d LIMIT 5",
+		),
+		(
+			"SELECT id, vector::distance::manhattan(q, [0f, 0f]) AS d FROM v ORDER BY d, id LIMIT 7",
+			"SELECT id, vector::distance::manhattan(q ?? NONE, [0f, 0f]) AS d FROM v ORDER BY d, id LIMIT 7",
+		),
+		(
+			"SELECT VALUE id FROM v WHERE vector::dot(p, [700f, 3f]) > 245000",
+			"SELECT VALUE id FROM v WHERE vector::dot(p ?? NONE, $q) > 245000",
+		),
+	] {
+		let program = lowered(&wide.exec_ctx().await, measured).await;
+		assert!(
+			program.pipelines.iter().any(|pipeline| pipeline
+				.code
+				.iter()
+				.any(|instr| matches!(instr, super::program::Instr::Measure { .. }))
+				&& pipeline.in_place),
+			"`{measured}` measures in place"
+		);
+		assert_eq!(fan_out_of(&wide, measured).await, FanOut::Range, "`{measured}`");
+		let expected = answered(&serial, called).await;
+		assert!(expected.as_ref().is_ok_and(|rows| !rows.is_empty()), "`{called}`: {expected:?}");
+		assert_eq!(answered(&wide, measured).await, expected, "`{measured}`");
+		assert_eq!(answered(&serial, measured).await, expected, "`{measured}` serially");
+	}
+	let parameter =
+		"SELECT id, vector::similarity::cosine(p, $q) AS d FROM v ORDER BY d DESC LIMIT 5";
+	let called =
+		"SELECT id, vector::similarity::cosine(p ?? NONE, $q) AS d FROM v ORDER BY d DESC LIMIT 5";
+	assert_eq!(fan_out_of(&wide, parameter).await, FanOut::Range, "`{parameter}`");
+	assert_eq!(answered(&wide, parameter).await, answered(&serial, called).await, "`{parameter}`");
+}
+
+/// What `sql` answers over `db` run as `session`, as [`answered`] answers it as the owner.
+async fn answered_as(
+	db: &TestDb,
+	session: &crate::dbs::Session,
+	sql: &str,
+) -> Result<Vec<Value>, String> {
+	let mut results = db.datastore().execute(sql, session, None).await.expect("the request runs");
+	match results.pop().expect("a result").result {
+		Ok(value) => Ok(match Value::from(value) {
+			Value::Array(rows) => rows.into_iter().collect(),
+			other => vec![other],
+		}),
+		Err(e) => Err(e.message().to_owned()),
+	}
+}
+
+/// A measure whose query is a parameter judging its `PERMISSIONS` against each row is answered by
+/// the host for each row. Its run reads the rows decoded although the pipeline is planned to run on
+/// the stored row, so it reads them as morsels of batches, as the call it stands for is read, and
+/// answers what that call answers. A parameter whose predicate reads data but not the row is
+/// judged once for a statement that only reads, as any read of it is, and its measure runs on the
+/// stored row.
+#[tokio::test]
+async fn a_measure_the_host_answers_reads_its_rows_as_batch_morsels() {
+	let setup = format!(
+		"{}
+		DEFINE TABLE OVERWRITE v PERMISSIONS FULL;
+		DEFINE ACCESS user ON DATABASE TYPE RECORD;
+		DEFINE TABLE user SCHEMALESS PERMISSIONS FULL;
+		CREATE user:alice SET ok = true;
+		DEFINE PARAM $q VALUE [700f, 3f] PERMISSIONS WHERE n >= 0;
+		DEFINE PARAM $r VALUE [700f, 3f] PERMISSIONS WHERE $auth.ok = true;",
+		vectors()
+	);
+	let db = TestDb::new_with_auth_and_config(&setup, tiny()).await;
+	let alice = crate::dbs::Session::for_record(
+		"test",
+		"test",
+		"user",
+		crate::types::PublicValue::RecordId(surrealdb_types::RecordId::new("user", "alice")),
+	);
+	for (param, on_host) in [("q", true), ("r", false)] {
+		let measured = format!(
+			"SELECT id, vector::similarity::cosine(p, ${param}) AS d FROM v ORDER BY d DESC LIMIT 5"
+		);
+		let called = format!(
+			"SELECT id, vector::similarity::cosine(p ?? NONE, ${param}) AS d FROM v ORDER BY d DESC LIMIT 5"
+		);
+		super::row_packed::observed::reset();
+		let got = answered_as(&db, &alice, &measured).await;
+		let scans = super::row_packed::observed::pipelines()
+			.into_iter()
+			.filter(|shape| shape.scan && shape.in_place)
+			.collect::<Vec<_>>();
+		assert!(
+			scans.iter().any(|shape| shape.runs_in_place != on_host && shape.batches == on_host),
+			"`{measured}`: {scans:?}"
+		);
+		let expected = answered_as(&db, &alice, &called).await;
+		assert!(expected.as_ref().is_ok_and(|rows| rows.len() == 5), "`{called}`: {expected:?}");
+		assert_eq!(got, expected, "`{measured}`");
+	}
+}
+
+/// A vector measure, and a brute-force ranking, computed in the body charge the fuel for the
+/// numbers their vectors hold, as a walk over the bytes of those numbers, and a body run inside
+/// the storage cursor ends the cursor's chunk once its charges spend the fuel. A scan over long
+/// vectors so reaches yield points as their bytes add up, where a unit for each record would reach
+/// next to none; the call, which builds a value for each element, charges each element a unit.
+#[tokio::test]
+async fn a_measure_and_a_ranking_charge_the_fuel_their_vectors_cost() {
+	const DIMS: usize = 256;
+	const ROWS: usize = 200;
+	let setup = format!(
+		"DEFINE TABLE w;
+		 FOR $i IN 0..{ROWS} {{ CREATE type::record('w', $i) SET v = array::repeat($i * 1f, {DIMS}) }};
+		 DEFINE PARAM $q VALUE array::repeat(1f, {DIMS});"
+	);
+	const QUANTUM: usize = 1024;
+	let db =
+		TestDb::new_with_config(&setup, whole().with_key_value("vm_quantum", QUANTUM.to_string()))
+			.await;
+	let checks = async |sql: &str| {
+		super::fuel::INTERRUPT_CHECKS.with(|checks| checks.set(0));
+		let answer = answered(&db, sql).await;
+		assert!(answer.is_ok(), "`{sql}`: {answer:?}");
+		super::fuel::INTERRUPT_CHECKS.with(std::cell::Cell::get)
+	};
+	let called = checks(
+		"SELECT count() FROM w WHERE vector::distance::euclidean(v ?? NONE, $q) < 0 GROUP ALL",
+	)
+	.await;
+	let measured =
+		checks("SELECT count() FROM w WHERE vector::distance::euclidean(v, $q) < 0 GROUP ALL")
+			.await;
+	let ranked = checks("SELECT id FROM w WHERE v <|3,EUCLIDEAN|> $q").await;
+	// Each row's two vectors are 4 KiB of floats, 64 units: about a dozen quanta over the table.
+	let walked = ROWS * 2 * DIMS * std::mem::size_of::<f64>() / 64 / QUANTUM;
+	assert!(called >= ROWS / 2, "the call reaches {called} yield points");
+	assert!(measured >= walked / 2, "the measure reaches {measured}, its bytes {walked} quanta");
+	assert!(ranked >= walked / 2, "the ranking reaches {ranked}, its bytes {walked} quanta");
+}
+
+/// On RocksDB, whose read-only transactions give a view, the morsels of a brute-force KNN are read
+/// by workers, and the statement answers what the serial run answers.
+#[cfg(feature = "kv-rocksdb")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_brute_force_knn_on_rocksdb_is_read_by_workers() {
+	let _turn = TURNS.lock().await;
+	let (serial_dir, wide_dir) = (
+		tempfile::tempdir().expect("temporary directory"),
+		tempfile::tempdir().expect("temporary directory"),
+	);
+	let serial = TestDb::new_on_rocksdb(&vectors(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_rocksdb(&vectors(), wide_dir.path(), tiny()).await;
+	let before = counts_of(&wide.exec_ctx().await);
+	knn_scans_answer_as_the_serial_run(&serial, &wide).await;
+	let after = counts_of(&wide.exec_ctx().await);
+	assert!(after.split > before.split + 1, "{before:?}, {after:?}");
+	assert!(after.handed > before.handed, "{before:?}, {after:?}");
+}
+
 /// Without a view (kv-mem gives none) the coordinator reads every morsel itself, in order, and
 /// answers the same.
 #[tokio::test]

@@ -423,8 +423,14 @@ impl<'a> LowerCx<'a> {
 	/// that assumes permissions apply and serves any principal, and every statement family.
 	#[cfg(test)]
 	pub(crate) fn detached() -> LowerCx<'static> {
+		LowerCx::detached_over(builtin_registry())
+	}
+
+	/// [`Self::detached`], resolving builtins against `registry`.
+	#[cfg(test)]
+	pub(crate) fn detached_over(registry: &'a FunctionRegistry) -> Self {
 		LowerCx::new(
-			builtin_registry(),
+			registry,
 			std::sync::Arc::new(crate::dbs::Capabilities::default()),
 			UnitFrame {
 				class_digest: 0,

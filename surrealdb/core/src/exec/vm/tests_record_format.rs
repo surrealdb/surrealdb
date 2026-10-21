@@ -154,6 +154,48 @@ async fn rows_of_every_generation_read_as_their_schema_says() {
 	assert!(third < fourth, "p:4 was written after a field was removed: {third} against {fourth}");
 }
 
+/// A vector a document record holds is stored in the narrowest typed array its numbers allow,
+/// which is what lets a brute-force KNN read it without decoding: floats an `f32` holds exactly
+/// as `F32_ARRAY`, any other floats as `F64_ARRAY`, integers as a typed integer array. A field
+/// declared `array<float>` stores the floats it coerces integers to. An array mixing integers
+/// and floats is a container of values, read number by number.
+#[tokio::test]
+async fn a_vector_is_stored_as_the_narrowest_typed_array_of_its_numbers() {
+	use crate::val::stored::tag::{ARRAY, F32_ARRAY, F64_ARRAY, I8_ARRAY, I64_ARRAY};
+	let db = TestDb::new(
+		"
+		DEFINE TABLE declared SCHEMALESS;
+		DEFINE FIELD v ON declared TYPE array<float>;
+		CREATE declared:ints SET v = [1, 0, 2];
+		CREATE declared:wide SET v = [0.1, 0.2];
+		CREATE loose:f32 SET v = [0.5f, 1f, -2f];
+		CREATE loose:f64 SET v = [0.1f, 0.2f];
+		CREATE loose:ints SET v = [1, 0, 2];
+		CREATE loose:big SET v = [1, 10000000000];
+		CREATE loose:mixed SET v = [0.5, 0, 1];
+		CREATE loose:nested SET v = [[0.5f], [1f, 2f]];
+		",
+	)
+	.await;
+	let tag_of_v = |row: &[u8]| {
+		let record = crate::catalog::StoredRecord::parse(row).expect("parses").expect("a record");
+		let document = record.checked_document().expect("checks").expect("a document");
+		let object =
+			document.value().expect("a value").as_ordered_object().expect("reads").expect("object");
+		let mut out = Vec::new();
+		object.get("v").expect("reads").expect("holds v").write_to(&mut out);
+		out[0]
+	};
+	let tags = |rows: Vec<Vec<u8>>| rows.iter().map(|row| tag_of_v(row)).collect::<Vec<_>>();
+	// Rows in key order: `ints`, `wide`.
+	assert_eq!(tags(rows(&db, "declared").await), [F32_ARRAY, F64_ARRAY]);
+	// Rows in key order: `big`, `f32`, `f64`, `ints`, `mixed`, `nested`.
+	let loose = tags(rows(&db, "loose").await);
+	assert_eq!(loose[..4], [I64_ARRAY, F32_ARRAY, F64_ARRAY, I8_ARRAY]);
+	assert!((ARRAY..ARRAY + 3).contains(&loose[4]), "mixed numbers: {:#x}", loose[4]);
+	assert!((ARRAY..ARRAY + 3).contains(&loose[5]), "nested arrays: {:#x}", loose[5]);
+}
+
 /// Every key and value the datastore holds, read in one transaction.
 async fn keyspace(db: &TestDb) -> Vec<(Vec<u8>, Vec<u8>)> {
 	let read = db
