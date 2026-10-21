@@ -1164,6 +1164,26 @@ const EXISTENCE: &str = "
 /// statement holds, and the strategy it runs under. The request is planned as the owner, or as a
 /// record user of `user:alice`.
 async fn subquery_limits(record_user: bool, sql: &str) -> Vec<(usize, String)> {
+	subquery_shapes(record_user, sql)
+		.await
+		.into_iter()
+		.map(|shape| (shape.limits, shape.strategy))
+		.collect()
+}
+
+/// What a subquery's statement holds once planned.
+struct SubqueryShape {
+	/// The limits its statement holds.
+	limits: usize,
+	/// The strategy it runs under.
+	strategy: String,
+	/// Each sort of its first region, in pre-order: the rows it keeps and whether it publishes a
+	/// top-k threshold.
+	sorts: Vec<(Option<usize>, bool)>,
+}
+
+/// [`subquery_limits`] with the sorts of each subquery's statement.
+async fn subquery_shapes(record_user: bool, sql: &str) -> Vec<SubqueryShape> {
 	use crate::exec::ir::phys::ops::PhysOp;
 
 	let parsed = crate::syn::parse(sql).expect("the request parses").expressions;
@@ -1211,7 +1231,22 @@ async fn subquery_limits(record_user: bool, sql: &str) -> Vec<(usize, String)> {
 					Walk::Continue
 				});
 			}
-			subqueries.push((limits, format!("{strategy:?}")));
+			let mut sorts = Vec::new();
+			if let Some(region) = data.regions.first() {
+				ir.walk(*region, WalkOrder::PreOrder, &mut |inner| {
+					if let Some(OpKind::Phys(PhysOp::Sort(attrs))) =
+						ir.op(inner).map(|data| &data.kind)
+					{
+						sorts.push((attrs.keep, attrs.pushdown));
+					}
+					Walk::Continue
+				});
+			}
+			subqueries.push(SubqueryShape {
+				limits,
+				strategy: format!("{strategy:?}"),
+				sorts,
+			});
 		}
 		Walk::Continue
 	});
@@ -1254,6 +1289,62 @@ async fn a_subquery_read_only_for_existence_is_limited_to_a_row() {
 	assert!(found[0].0 >= 1 && found[0].1.starts_with("Once"), "{sql}: {found:?}");
 	let written = "SELECT * FROM small WHERE (SELECT id FROM big WHERE fn::check(n) LIMIT 1)";
 	assert_eq!(subquery_limits(false, written).await, found, "{written}");
+}
+
+/// A correlated statement that reads the first rows of an order through an equality of an indexed
+/// field with `$parent` reads through that index, the bounded sort and the limit kept above the
+/// read and the sort publishing no threshold, in a read and in a write; a `WITH` hint, a `VERSION`,
+/// a descending table order and a field no index serves keep the table read.
+#[tokio::test]
+async fn a_correlated_top_k_statement_reads_through_the_join_index() {
+	for (sql, lookup) in [
+		(
+			"SELECT (SELECT id FROM big WHERE n = $parent.n ORDER BY s LIMIT 1) AS v FROM small",
+			true,
+		),
+		(
+			"SELECT (SELECT id FROM big WHERE n = $parent.n ORDER BY s DESC LIMIT 2) AS v FROM small",
+			true,
+		),
+		(
+			"UPDATE small SET v = (SELECT VALUE s FROM big WHERE n = $parent.n ORDER BY s LIMIT 1)[0]",
+			true,
+		),
+		(
+			"SELECT (SELECT id FROM big WITH NOINDEX WHERE n = $parent.n ORDER BY s LIMIT 1) AS v \
+			 FROM small",
+			false,
+		),
+		(
+			"SELECT (SELECT id FROM big WHERE n = $parent.n ORDER BY s LIMIT 1 VERSION \
+			 d'2024-01-01') AS v FROM small",
+			false,
+		),
+		(
+			"SELECT (SELECT id FROM big WHERE n = $parent.n ORDER BY id DESC LIMIT 1) AS v FROM small",
+			false,
+		),
+		(
+			"SELECT (SELECT id FROM big WHERE s = $parent.s ORDER BY n LIMIT 1) AS v FROM small",
+			false,
+		),
+	] {
+		let found = subquery_shapes(false, sql).await;
+		let [shape] = found.as_slice() else {
+			panic!("{sql}: {} subqueries", found.len());
+		};
+		assert_eq!(shape.strategy.starts_with("Lookup"), lookup, "{sql}: {}", shape.strategy);
+		if lookup {
+			// The sort and the limit stay above the read; with no scan to take its key the sort
+			// publishes no threshold.
+			assert!(shape.limits >= 1, "{sql}: {} limits", shape.limits);
+			assert!(
+				matches!(shape.sorts.as_slice(), [(Some(_), false)]),
+				"{sql}: {:?}",
+				shape.sorts
+			);
+		}
+	}
 }
 
 /// A subquery the shape or the work of which does not qualify keeps its whole read.

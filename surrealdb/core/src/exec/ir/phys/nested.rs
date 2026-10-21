@@ -1015,15 +1015,16 @@ fn probe_site(ir: &Ir, join: &JoinSite) -> Option<ProbeAt> {
 /// The forward table scan beneath the filter of `join`, under a permission, layers and
 /// enforcement alone, with the index of its table an equality on the join field is read through.
 ///
-/// A scan that takes a top-k key, a `WITH` hint or a `VERSION`, and a field no B-tree index over
-/// that field alone serves, have none.
+/// A scan that takes a `WITH` hint or a `VERSION`, and a field no B-tree index over that field
+/// alone serves, have none. A scan's top-k key only rejects rows the sort above it would drop, so
+/// the lookup reads without one and the sort keeps judging order and count.
 fn lookup_site(ir: &Ir, cx: &PhysCx<'_>, join: &JoinSite) -> Option<(OpId, IndexRef)> {
 	let input = *ir.op(join.filter)?.operands.first()?;
 	let scan = beneath(ir, input, lookup_crossing)?;
 	let OpKind::Phys(PhysOp::TableScan(attrs)) = &ir.op(scan)?.kind else {
 		return None;
 	};
-	if attrs.direction != Direction::Forward || attrs.topk.is_some() || attrs.read.with.is_some() {
+	if attrs.direction != Direction::Forward || attrs.read.with.is_some() {
 		return None;
 	}
 	if holds_version(ir, join.filter) {
@@ -1117,7 +1118,12 @@ fn install(
 			if let Some(plan) = hashed {
 				install_hashed(&mut rw, subquery, plan, &field, &outer)?;
 			}
-			install_lookup(&mut rw, scan, field, &outer, *index)?;
+			let lookup = install_lookup(&mut rw, scan, field, &outer, *index)?;
+			if let Some(region) =
+				rw.ir().op(subquery).and_then(|data| data.regions.first().copied())
+			{
+				quiet_sorts_over(&mut rw, region, lookup)?;
+			}
 		}
 	}
 	rw.update_kind(subquery, |kind| {
@@ -1236,14 +1242,15 @@ fn install_hashed(
 	install_probe(rw, at, counterpart(&plan.filter)?, field.clone(), outer)
 }
 
-/// Replaces the table scan `scan` with a lookup through `index` keyed by the outer path.
+/// Replaces the table scan `scan` with a lookup through `index` keyed by the outer path, and
+/// answers the lookup.
 fn install_lookup(
 	rw: &mut Rewriter<'_>,
 	scan: OpId,
 	field: Strand,
 	outer: &Outer,
 	index: IndexRef,
-) -> Result<(), IrError> {
+) -> Result<OpId, IrError> {
 	let data = rw.ir().op(scan).ok_or(IrError::Stale("op"))?.clone();
 	let OpKind::Phys(PhysOp::TableScan(attrs)) = &data.kind else {
 		return Err(IrError::Stale("a table scan"));
@@ -1275,5 +1282,36 @@ fn install_lookup(
 		.op(lookup)
 		.and_then(|created| created.results.first())
 		.ok_or(IrError::Stale("result"))?;
-	rw.replace_op(scan, &[replacement])
+	rw.replace_op(scan, &[replacement])?;
+	Ok(lookup)
+}
+
+/// Stops every sort of `region` that reads the rows of `lookup` through predicates alone from
+/// publishing a top-k threshold: a lookup takes no top-k key, so nothing reads one.
+fn quiet_sorts_over(rw: &mut Rewriter<'_>, region: RegionId, lookup: OpId) -> Result<(), IrError> {
+	let mut sorts = Vec::new();
+	let ir = rw.ir();
+	ir.walk(region, WalkOrder::PreOrder, &mut |op| {
+		if let Some(data) = ir.op(op)
+			&& let OpKind::Phys(PhysOp::Sort(attrs)) = &data.kind
+			&& attrs.pushdown
+			&& data
+				.operands
+				.first()
+				.copied()
+				.and_then(|input| super::rewrite::beneath(ir, input, super::rewrite::keeps_scan))
+				.is_some_and(|chain| chain.source == lookup)
+		{
+			sorts.push(op);
+		}
+		Walk::Continue
+	});
+	for sort in sorts {
+		rw.update_kind(sort, |kind| {
+			if let OpKind::Phys(PhysOp::Sort(attrs)) = kind {
+				attrs.pushdown = false;
+			}
+		})?;
+	}
+	Ok(())
 }
