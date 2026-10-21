@@ -322,7 +322,7 @@ impl ExprHost for TestHost {
 		self.field_base.or(self.row).ok_or(IrError::Stale("no row"))
 	}
 
-	fn current(&self) -> Result<ValueId, IrError> {
+	fn current(&mut self) -> Result<ValueId, IrError> {
 		self.current.ok_or(IrError::Stale("no current value"))
 	}
 

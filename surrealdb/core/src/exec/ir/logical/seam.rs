@@ -1243,8 +1243,23 @@ impl ExprHost for BindCx<'_> {
 		self.none_literal()
 	}
 
-	fn current(&self) -> Result<ValueId, IrError> {
-		self.current.ok_or_else(|| invariant("the current value is read where none is bound"))
+	/// The current value where one is bound. Where none is, a path that starts from it reads
+	/// `NONE`, as a field read does with no row, unless a region that receives a row is entered
+	/// without one: such a region binds its current value over its row, so the absence is an
+	/// invariant break.
+	fn current(&mut self) -> Result<ValueId, IrError> {
+		if let Some(current) = self.current {
+			return Ok(current);
+		}
+		for kind in self.kinds.iter().rev() {
+			if receives_row(*kind) {
+				return Err(invariant("the current value is read where none is bound"));
+			}
+			if kind.isolated_from_above() {
+				break;
+			}
+		}
+		self.none_literal()
 	}
 
 	fn replace_current(&mut self, value: Option<ValueId>) -> Option<ValueId> {

@@ -159,8 +159,9 @@ pub(crate) trait ExprHost {
 	/// ([`Self::replace_field_base`]), otherwise the frame's row. Where no row frame is entered the
 	/// host may answer a value it creates for the absent document.
 	fn row(&mut self) -> Result<ValueId, IrError>;
-	/// The value `LogicalExpr::Current` denotes at this point.
-	fn current(&self) -> Result<ValueId, IrError>;
+	/// The value `LogicalExpr::Current` denotes at this point. Where no value is bound, the host
+	/// may answer a value it creates for the absent document, as [`Self::row`] does.
+	fn current(&mut self) -> Result<ValueId, IrError>;
 	/// Makes `value` what `LogicalExpr::Current` denotes, and answers the previous value.
 	fn replace_current(&mut self, value: Option<ValueId>) -> Option<ValueId>;
 	/// Makes `value` the row a field read or `@` reads, and answers the previous one; `None` is no
