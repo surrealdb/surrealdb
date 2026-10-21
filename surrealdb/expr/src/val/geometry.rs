@@ -217,13 +217,15 @@ impl Geometry {
 	pub fn as_object(&self) -> Object {
 		let mut obj = Object::default();
 		obj.insert("type", self.as_type().into());
-		obj.insert(
-			match self {
-				Self::Collection(_) => "geometries",
-				_ => "coordinates",
-			},
-			self.as_coordinates(),
-		);
+		match self {
+			// A collection's members are geometry values, not their raw
+			// coordinates, so reading one back yields a geometry.
+			Self::Collection(members) => obj.insert(
+				"geometries",
+				members.iter().cloned().map(Value::Geometry).collect::<Vec<Value>>().into(),
+			),
+			_ => obj.insert("coordinates", self.as_coordinates()),
+		};
 		obj
 	}
 

@@ -290,15 +290,25 @@ impl Geometry {
 		}
 	}
 
-	/// Convert this geometry into an object
+	/// Get the GeoJSON object representation for this geometry: its `type` and
+	/// its `coordinates`, or for a collection its `geometries`, whose members
+	/// are geometry values. [`Geometry::try_from_object`] reads it back.
 	pub fn as_object(&self) -> Object {
-		object! {
-			type: Value::String(self.as_type().to_string()),
-			coordinates: self.as_coordinates(),
+		match self {
+			Self::Collection(members) => object! {
+				type: Value::String(self.as_type().to_string()),
+				geometries: members.iter().cloned().map(Value::Geometry).collect::<Vec<Value>>(),
+			},
+			_ => object! {
+				type: Value::String(self.as_type().to_string()),
+				coordinates: self.as_coordinates(),
+			},
 		}
 	}
 
-	/// Try to convert an object into a geometry
+	/// The geometry a GeoJSON object describes: exactly a `type` and its
+	/// `coordinates` (or `geometries`, for a collection, whose members are
+	/// geometries or GeoJSON objects in turn). `None` for any other object.
 	pub fn try_from_object(object: &Object) -> Option<Geometry> {
 		if object.len() != 2 {
 			return None;
@@ -339,10 +349,11 @@ impl Geometry {
 				let mut res = Vec::with_capacity(x.len());
 
 				for x in x.iter() {
-					let Value::Geometry(x) = x else {
-						return None;
-					};
-					res.push(x.clone());
+					res.push(match x {
+						Value::Geometry(x) => x.clone(),
+						Value::Object(x) => Geometry::try_from_object(x)?,
+						_ => return None,
+					});
 				}
 
 				Some(Geometry::Collection(res))
@@ -698,4 +709,65 @@ impl From<Geometry> for geo_types::Geometry<f64> {
 /// The segments of a polygon's exterior ring and then of each interior ring.
 fn polygon_lines(polygon: &Polygon) -> impl Iterator<Item = Line> + '_ {
 	polygon.exterior().lines().chain(polygon.interiors().iter().flat_map(LineString::lines))
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn collection() -> Geometry {
+		Geometry::Collection(vec![
+			Geometry::Point(Point::new(1.0, 2.0)),
+			Geometry::Line(LineString::from(vec![(0.0, 0.0), (1.0, 1.0)])),
+			Geometry::Collection(vec![Geometry::Point(Point::new(5.0, 6.0))]),
+		])
+	}
+
+	#[test]
+	fn collection_object_holds_member_geometries() {
+		let object = collection().as_object();
+		assert_eq!(object.get("type"), Some(&Value::String("GeometryCollection".to_string())));
+		assert_eq!(object.get("coordinates"), None);
+		let Some(Value::Array(members)) = object.get("geometries") else {
+			panic!("a collection's object holds its members under `geometries`");
+		};
+		assert_eq!(members.len(), 3);
+		assert_eq!(members[0], Value::Geometry(Geometry::Point(Point::new(1.0, 2.0))));
+	}
+
+	#[test]
+	fn object_round_trips_every_kind() {
+		let geometries = [
+			Geometry::Point(Point::new(1.0, 2.0)),
+			Geometry::Line(LineString::from(vec![(0.0, 0.0), (1.0, 1.0)])),
+			Geometry::MultiPoint(MultiPoint::new(vec![Point::new(1.0, 2.0)])),
+			collection(),
+		];
+		for geometry in geometries {
+			assert_eq!(Geometry::try_from_object(&geometry.as_object()), Some(geometry));
+		}
+	}
+
+	#[test]
+	fn collection_members_may_be_geojson_objects() {
+		let object = object! {
+			type: "GeometryCollection",
+			geometries: vec![
+				Value::Object(object! { type: "Point", coordinates: vec![1.0, 2.0] }),
+				Value::Geometry(Geometry::Point(Point::new(3.0, 4.0))),
+			],
+		};
+		assert_eq!(
+			Geometry::try_from_object(&object),
+			Some(Geometry::Collection(vec![
+				Geometry::Point(Point::new(1.0, 2.0)),
+				Geometry::Point(Point::new(3.0, 4.0)),
+			]))
+		);
+		let bad = object! {
+			type: "GeometryCollection",
+			geometries: vec![Value::String("x".to_string())],
+		};
+		assert_eq!(Geometry::try_from_object(&bad), None);
+	}
 }
