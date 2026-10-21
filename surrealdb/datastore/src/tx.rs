@@ -4551,6 +4551,9 @@ impl Transaction {
 			},
 			..descriptor
 		};
+		// A write of a table's layouts moves the catalog epoch by itself, whatever the statement
+		// that mints does next: read-only transactions share layouts per epoch.
+		self.touches_catalog();
 		self.put_compare_key(&layout_key, &descriptor, None).await?;
 		let written = self.get_key_raw(&layout_key, None).await?.ok_or_else(|| {
 			CatalogError::Layout(RecordLayoutError::CurrentMissing {
@@ -4772,6 +4775,8 @@ impl Transaction {
 			db,
 			tb: Cow::Borrowed(tb),
 		};
+		// As for a mint: a write of a table's layouts moves the catalog epoch by itself.
+		self.touches_catalog();
 		let written = async {
 			for part in retired {
 				self.clrr(part).await?;
@@ -7951,8 +7956,10 @@ impl Transaction {
 	/// A current read (`version` of `None`) is held for the rest of the transaction until a range
 	/// delete over the table's layout keys or a save point rollback that undid a mint or a range
 	/// delete clears it, so a table's layouts cost one point read and one range read per
-	/// transaction. A versioned read is never held: it reads the table's `!mi` and `!lg` keys at
-	/// `version`, the version the caller reads the table's rows at.
+	/// transaction. A read-only transaction under a catalog epoch is answered the layouts another
+	/// transaction of that epoch read, and keeps those it reads for that epoch
+	/// ([`crate::cache::epoch`]), so it reads none. A versioned read is never held: it reads the
+	/// table's `!mi` and `!lg` keys at `version`, the version the caller reads the table's rows at.
 	///
 	/// A table that has no `!mi` answers empty layouts. The load fails only on a storage error: a
 	/// key or descriptor this build cannot read is counted or listed as a refused generation in the
@@ -7965,12 +7972,31 @@ impl Transaction {
 		tb: &TableName,
 		version: Option<u64>,
 	) -> Result<Arc<TableLayouts>> {
-		if version.is_none()
-			&& let Some(held) = self.memoised_layouts(ns, db, tb)
-		{
-			return Ok(held);
+		if version.is_none() {
+			if let Some(held) = self.memoised_layouts(ns, db, tb) {
+				return Ok(held);
+			}
+			// Only a transaction that is not writeable: a writer's reads must see its own
+			// writes, so it neither reads nor keeps layouts here.
+			if !self.writeable()
+				&& let Some((epoch, shared)) = self.epoch_catalog()
+				&& let Some(layouts) = shared
+					.get::<TableLayouts>(&crate::cache::epoch::Lookup::Layouts(epoch, ns, db, tb))
+			{
+				// Answered as the read it stands for: open recordings note the dependency.
+				self.catalog_reads.answered(crate::catalog_reads::CatalogRead::Table(ns, db, tb));
+				self.memoise_layouts(Arc::clone(&layouts));
+				return Ok(layouts);
+			}
 		}
-		self.reload_table_layouts(ns, db, tb, version).await
+		let layouts = self.reload_table_layouts(ns, db, tb, version).await?;
+		if version.is_none() && !self.writeable() && self.epoch_catalog().is_some() {
+			self.keep_for_epoch(
+				|epoch| crate::cache::epoch::Lookup::Layouts(epoch, ns, db, tb),
+				&layouts,
+			);
+		}
+		Ok(layouts)
 	}
 
 	/// The layouts of `tb` read from storage, bypassing what this transaction holds.
@@ -10842,6 +10868,15 @@ impl Transaction {
 		if reservations.is_empty() {
 			return Ok(());
 		}
+		// Boxed: the release is a large future, and every transaction's cancel and
+		// commit awaits this one.
+		Box::pin(Self::release_taken_index_build_reservations(reservations)).await
+	}
+
+	/// Release `reservations`, taken from this transaction's queue.
+	async fn release_taken_index_build_reservations(
+		reservations: Vec<IndexBuildReservationRelease>,
+	) -> Result<()> {
 		// Try the batched delete first, then fall back to the per-reservation
 		// path on any error. The fallback preserves the per-reservation
 		// retry + build-error-marking behavior for any release that didn't

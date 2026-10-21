@@ -129,6 +129,9 @@ mod tests_range_limit;
 mod tests_read_ahead;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
+mod tests_request_wakes;
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_running_compiles;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]

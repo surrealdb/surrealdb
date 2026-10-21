@@ -122,3 +122,7 @@ harness = false
 [[bench]]
 name = "point_read"
 harness = false
+
+[[bench]]
+name = "stmt_fixed_cost"
+harness = false

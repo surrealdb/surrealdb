@@ -2508,17 +2508,17 @@ impl Executor {
 	) -> FlowResult<Value> {
 		if let LogicalOp::Let(binding) = stmt.plan {
 			let bare_return = matches!(*binding.value, LogicalOp::Return(_));
-			return self
-				.run_binding(
-					binding.name,
-					binding.kind,
-					bare_return,
-					&stmt.text,
-					|| Ok(*binding.value),
-					txn,
-					start,
-				)
-				.await;
+			// Boxed, as every statement's run is: the binding's run is a large future.
+			return Box::pin(self.run_binding(
+				binding.name,
+				binding.kind,
+				bare_return,
+				&stmt.text,
+				|| Ok(*binding.value),
+				txn,
+				start,
+			))
+			.await;
 		}
 		let (planned, logged) = match self.compiled_statement(&txn).await {
 			Some(compiled) => (compiled.plan, compiled.logged),
@@ -2959,7 +2959,8 @@ impl Executor {
 		};
 		match stmt {
 			TopLevelStatement::Ast(expr @ (TopLevelExpr::Live(_) | TopLevelExpr::Kill(_))) => {
-				self.execute_live_or_kill(kvs, start, expr, transaction_type).await
+				// Boxed: held inline, this rare run would set the size of the common one.
+				Box::pin(self.execute_live_or_kill(kvs, start, expr, transaction_type)).await
 			}
 			stmt => {
 				let mut budget = kvs.transaction_timeout();
@@ -3124,12 +3125,14 @@ impl Executor {
 			kvs.live_query_broker(),
 		);
 
+		// The run is boxed so that this future, which also awaits the commit and the
+		// cancel, does not hold it inline.
 		let exec_result = match *budget {
 			Some(left) => {
 				let executing = Instant::now();
 				let res = common::time::timeout(
 					left,
-					self.execute_plan_in_transaction(Arc::clone(&txn), start, stmt),
+					Box::pin(self.execute_plan_in_transaction(Arc::clone(&txn), start, stmt)),
 				)
 				.await;
 				*budget = Some(left.saturating_sub(executing.elapsed()));
@@ -3142,7 +3145,7 @@ impl Executor {
 					}
 				}
 			}
-			None => self.execute_plan_in_transaction(Arc::clone(&txn), start, stmt).await,
+			None => Box::pin(self.execute_plan_in_transaction(Arc::clone(&txn), start, stmt)).await,
 		};
 
 		match exec_result {
@@ -4729,15 +4732,16 @@ impl Executor {
 						Dispatch::Begin(options) => options,
 						_ => BeginOptions::default(),
 					};
-					let begin_result = self
-						.execute_begin_statement(
-							kvs,
-							stream.as_mut(),
-							&mut grouper,
-							place.emission,
-							&begin_options,
-						)
-						.await;
+					// Boxed, as the bare statement's run is below: held inline, the block's run
+					// would make this future, and every future awaiting it, its size.
+					let begin_result = Box::pin(self.execute_begin_statement(
+						kvs,
+						stream.as_mut(),
+						&mut grouper,
+						place.emission,
+						&begin_options,
+					))
+					.await;
 					let outcome = Outcome::from(&begin_result);
 					// `execute_begin_statement` returns `anyhow::Result`; on
 					// failure the result is wrapped via
@@ -4793,7 +4797,9 @@ impl Executor {
 					// the post-RETURN value shape.
 					let counters = self.install_statement_state();
 					let statement_index = self.current_index();
-					let result = self.execute_bare_statement(kvs, &start, stmt).await;
+					// Boxed: a statement's run is a large future, and each await of a future
+					// that holds it inline copies it whole.
+					let result = Box::pin(self.execute_bare_statement(kvs, &start, stmt)).await;
 					self.misplaced_control = None;
 					let outcome = Outcome::from(&result);
 					// A streamed statement's rows never reach its value, so the

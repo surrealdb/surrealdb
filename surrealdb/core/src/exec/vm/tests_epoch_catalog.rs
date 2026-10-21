@@ -137,6 +137,60 @@ async fn a_definition_read_under_an_epoch_is_served_until_it_changes() {
 	assert!(read(TransactionType::Read).await.ns.is_none(), "a removed namespace is not read");
 }
 
+/// A table's layouts are shared by the read transactions of an epoch, never
+/// kept from a writer, and read again once a definition moves the epoch.
+#[tokio::test]
+async fn a_tables_layouts_are_served_to_the_epochs_reads() {
+	let db = TestDb::new(
+		"DEFINE TABLE pk SCHEMAFULL;
+		 DEFINE FIELD name ON pk TYPE string;
+		 CREATE pk:1 SET name = 'ann';",
+	)
+	.await;
+	let (ds, owner) = (db.datastore(), TestDb::owner());
+	let pk = TableName::from("pk");
+	let read = |kind: TransactionType| {
+		let pk = pk.clone();
+		async move {
+			let txn = ds.transaction(kind).await.expect("a transaction");
+			let def = txn.get_db_by_name("test", "test", None).await.expect("read").expect("db");
+			let layouts = txn
+				.table_layouts(def.namespace_id, def.database_id, &pk, None)
+				.await
+				.expect("the layouts are read");
+			txn.cancel().await.expect("cancelled");
+			layouts
+		}
+	};
+	let written = read(TransactionType::Write).await;
+	let first = read(TransactionType::Read).await;
+	assert!(!Arc::ptr_eq(&written, &first), "a writer's read is not kept for the epoch");
+	let again = read(TransactionType::Read).await;
+	assert!(Arc::ptr_eq(&first, &again), "the layouts are served to the epoch's reads");
+	assert!(!Arc::ptr_eq(&first, &read(TransactionType::Write).await), "a writer reads the store");
+
+	run(ds, &owner, "DEFINE FIELD age ON pk TYPE option<int>").await;
+	let changed = read(TransactionType::Read).await;
+	assert!(
+		!Arc::ptr_eq(&first, &changed),
+		"a definition moves the epoch the layouts were kept in"
+	);
+	let stored = read(TransactionType::Write).await;
+	assert_ne!(first.head(), changed.head(), "the field's definition minted a generation");
+	assert_eq!(changed.head(), stored.head(), "a read of the new epoch reads the new layouts");
+	assert_eq!(changed.ring(), stored.ring(), "a read of the new epoch reads the new ring");
+
+	// A migration that only mints, with no definition written, moves the epoch too.
+	let cached = read(TransactionType::Read).await;
+	assert!(Arc::ptr_eq(&changed, &cached), "the new layouts are served to the epoch's reads");
+	run(ds, &owner, "ALTER TABLE pk MIGRATE EXISTING ROWS AS tidy REMOVE UNDECLARED FIELDS").await;
+	let migrated = read(TransactionType::Read).await;
+	let stored = read(TransactionType::Write).await;
+	assert_ne!(cached.head(), migrated.head(), "the migration minted a generation");
+	assert_eq!(migrated.head(), stored.head(), "a read after the migration reads its layouts");
+	assert_eq!(migrated.ring(), stored.ring(), "a read after the migration reads its ring");
+}
+
 #[tokio::test]
 async fn a_live_query_registered_after_reads_of_its_table_is_notified() {
 	let (send, recv) = crate::channel::bounded(100);

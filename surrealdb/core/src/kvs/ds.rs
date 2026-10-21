@@ -6989,8 +6989,11 @@ impl Datastore {
 		let statements = self.request_statements(source, read_only, transaction.is_some())?;
 		let (opt, ctx) = self.setup_query(session, variables, transaction.as_ref(), cancel)?;
 		match transaction {
+			// Boxed: held inline, the run inside a caller's transaction would make this
+			// future, which every request's caller awaits, its size.
 			Some(_) => {
-				Executor::execute_statements_with_transaction(self, ctx, opt, statements).await
+				Box::pin(Executor::execute_statements_with_transaction(self, ctx, opt, statements))
+					.await
 			}
 			None => Executor::execute_statements(self, ctx, opt, statements).await,
 		}

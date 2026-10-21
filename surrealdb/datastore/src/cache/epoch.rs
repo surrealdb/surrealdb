@@ -10,6 +10,15 @@
 //!
 //! Only definitions that exist are kept: a lookup that finds nothing reads the
 //! store each time.
+//!
+//! A table's layouts (its `!mi` ring and `!lg` generations) are kept too, empty
+//! ones included. Every write of those keys moves the epoch: a mint
+//! (`Transaction::mint_with_body`, reached from a stamped generation's
+//! settlement and from the DDL that mints a migration) and a floor move
+//! (`Transaction::move_floor`) mark the transaction as having changed the
+//! catalog, and the DDL that clears a table's keys (`DEFINE TABLE ... OVERWRITE`,
+//! `REMOVE TABLE`) stamps the table. Layouts are never answered to, or kept
+//! from, a writeable transaction, whose reads must see its own writes.
 
 use std::sync::Arc;
 
@@ -27,6 +36,7 @@ enum Key {
 	Database(u64, String, String),
 	Table(u64, String, String, TableName),
 	Version(u64, NamespaceId, DatabaseId, TableName),
+	Layouts(u64, NamespaceId, DatabaseId, TableName),
 }
 
 /// A borrowed [`Key`].
@@ -36,6 +46,7 @@ pub(crate) enum Lookup<'a> {
 	Database(u64, &'a str, &'a str),
 	Table(u64, &'a str, &'a str, &'a TableName),
 	Version(u64, NamespaceId, DatabaseId, &'a TableName),
+	Layouts(u64, NamespaceId, DatabaseId, &'a TableName),
 }
 
 impl Equivalent<Key> for Lookup<'_> {
@@ -48,7 +59,8 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Table(e, ns, db, tb), Key::Table(ke, kns, kdb, ktb)) => {
 				e == ke && *ns == kns && *db == kdb && *tb == ktb
 			}
-			(Self::Version(e, ns, db, tb), Key::Version(ke, kns, kdb, ktb)) => {
+			(Self::Version(e, ns, db, tb), Key::Version(ke, kns, kdb, ktb))
+			| (Self::Layouts(e, ns, db, tb), Key::Layouts(ke, kns, kdb, ktb)) => {
 				e == ke && ns == kns && db == kdb && *tb == ktb
 			}
 			_ => false,
@@ -63,6 +75,7 @@ impl From<Lookup<'_>> for Key {
 			Lookup::Database(e, ns, db) => Key::Database(e, ns.to_owned(), db.to_owned()),
 			Lookup::Table(e, ns, db, tb) => Key::Table(e, ns.to_owned(), db.to_owned(), tb.clone()),
 			Lookup::Version(e, ns, db, tb) => Key::Version(e, ns, db, tb.clone()),
+			Lookup::Layouts(e, ns, db, tb) => Key::Layouts(e, ns, db, tb.clone()),
 		}
 	}
 }
