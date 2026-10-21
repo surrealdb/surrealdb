@@ -472,6 +472,40 @@ mod tests {
 		assert!(!help.contains(" mod "), "{help}");
 	}
 
+	/// `--help` must not print the value of a credential environment variable:
+	/// clap shows an env var's current value in the help unless the argument
+	/// sets `hide_env_values`. Guards every subcommand, and any argument later
+	/// bound to these variables.
+	#[test]
+	fn credential_env_values_are_hidden_in_help() {
+		fn check(cmd: &clap::Command) {
+			for arg in cmd.get_arguments() {
+				let Some(env) = arg.get_env() else {
+					continue;
+				};
+				let env = env.to_string_lossy();
+				if matches!(env.as_ref(), "SURREAL_PASS" | "SURREAL_TOKEN") {
+					assert!(
+						arg.is_hide_env_values_set(),
+						"`{}` argument bound to {env} must set hide_env_values so --help does not print the secret",
+						cmd.get_name(),
+					);
+				}
+			}
+			for sub in cmd.get_subcommands() {
+				check(sub);
+			}
+		}
+		// Assert against the derive graph directly. The production `command()`
+		// runs the blanket `hide_env_values` helper over every argument, which
+		// would satisfy this check even for a credential argument that is
+		// missing its own `hide_env_values = true`. `Cli::command()` carries
+		// only the per-field annotations, so a missing one is caught here.
+		let mut command = Cli::command();
+		command.build();
+		check(&command);
+	}
+
 	#[test]
 	fn usage_names_the_executable() {
 		assert!(usage("surreal", "start").starts_with("Usage: surreal start "));

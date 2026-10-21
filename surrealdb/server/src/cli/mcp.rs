@@ -50,6 +50,8 @@ pub struct McpCommandArguments {
 	)]
 	#[arg(
 		env = "SURREAL_PASS",
+		// Keep the value out of `--help`: clap prints an env var's current value unless this is set.
+		hide_env_values = true,
 		short = 'p',
 		long = "password",
 		visible_alias = "pass",
