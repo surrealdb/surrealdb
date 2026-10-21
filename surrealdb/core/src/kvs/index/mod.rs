@@ -22,9 +22,12 @@
 //! Generation numbers fence stale queued work. Builder owner heartbeats fence
 //! stale builders. Query planning only sees durable-`Online` indexes, while
 //! document writes still see building indexes so they can enqueue mutations.
-//! A build in durable `Error` keeps admitting writes the same way, so a failed
-//! background build never blocks user writes: the errored generation's queue
-//! is never replayed — `REBUILD INDEX` wipes it and rescans the table.
+//! A build in durable `Error` keeps admitting writes the same way, and its
+//! queue is never replayed: `REBUILD INDEX` wipes it and rescans the table.
+//! The exception is a UNIQUE index in `Error`. Its queue cannot enforce
+//! uniqueness, so a write that adds a key to it is refused with
+//! `IndexBuildFailed` until the index is rebuilt or removed. Writes that add no
+//! key are still admitted.
 //! Legacy `!ig`/`!ip` appendings are still drained for committed work from older
 //! code paths, but new writes use the durable queue.
 

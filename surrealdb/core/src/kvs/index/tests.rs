@@ -5134,37 +5134,37 @@ async fn recheck_cached_admission_rejects_mid_transaction_state_changes() -> Res
 
 	// Matching state — recheck succeeds.
 	seed_build_state(&ds, &ikb, IndexBuildPhase::Building, 1).await?;
-	let outcome = run_recheck_cached_admission(&ds, ns, db, &ikb, ix.as_ref(), 1)
+	let outcome = run_recheck_cached_admission(&ds, ns, db, &ikb, ix.as_ref(), 1, None)
 		.await?
 		.expect("recheck on matching Building state should succeed");
 	assert!(matches!(outcome, CachedAdmission::Valid));
 
 	// Closing is still queueable.
 	seed_build_state(&ds, &ikb, IndexBuildPhase::Closing, 1).await?;
-	let outcome = run_recheck_cached_admission(&ds, ns, db, &ikb, ix.as_ref(), 1)
+	let outcome = run_recheck_cached_admission(&ds, ns, db, &ikb, ix.as_ref(), 1, None)
 		.await?
 		.expect("recheck on matching Closing state should succeed");
 	assert!(matches!(outcome, CachedAdmission::Valid));
 
 	// Generation rotation — recheck aborts.
 	seed_build_state(&ds, &ikb, IndexBuildPhase::Building, 2).await?;
-	let err = run_recheck_cached_admission(&ds, ns, db, &ikb, ix.as_ref(), 1)
+	let err = run_recheck_cached_admission(&ds, ns, db, &ikb, ix.as_ref(), 1, None)
 		.await?
 		.expect_err("generation mismatch must abort cached admission");
 	assert!(err.to_string().contains("generation"), "unexpected error: {err}");
 
 	// Online phase — cached writers cannot trust the cached ticket.
 	seed_build_state(&ds, &ikb, IndexBuildPhase::Online, 1).await?;
-	let err = run_recheck_cached_admission(&ds, ns, db, &ikb, ix.as_ref(), 1)
+	let err = run_recheck_cached_admission(&ds, ns, db, &ikb, ix.as_ref(), 1, None)
 		.await?
 		.expect_err("online phase must abort cached admission");
 	assert!(err.to_string().contains("online"), "unexpected error: {err}");
 
-	// Error phase — keeps queueing: a failed build must not abort user
-	// writes. The queued mutations die with the errored generation's wipe
-	// and the records are rescanned by the recovering `REBUILD INDEX`.
+	// Error phase — a non-UNIQUE index keeps queueing. The queued mutations
+	// die with the errored generation's wipe and the records are rescanned by
+	// the recovering `REBUILD INDEX`.
 	seed_build_state(&ds, &ikb, IndexBuildPhase::Error, 1).await?;
-	let outcome = run_recheck_cached_admission(&ds, ns, db, &ikb, ix.as_ref(), 1)
+	let outcome = run_recheck_cached_admission(&ds, ns, db, &ikb, ix.as_ref(), 1, None)
 		.await?
 		.expect("recheck on matching Error state should keep queueing");
 	assert!(matches!(outcome, CachedAdmission::Valid));
@@ -5174,7 +5174,7 @@ async fn recheck_cached_admission_rejects_mid_transaction_state_changes() -> Res
 	let tx = ds.transaction(TransactionType::Write).await?;
 	tx.del_key(&ikb.new_bs_key()).await?;
 	tx.commit().await?;
-	let err = run_recheck_cached_admission(&ds, ns, db, &ikb, ix.as_ref(), 1)
+	let err = run_recheck_cached_admission(&ds, ns, db, &ikb, ix.as_ref(), 1, None)
 		.await?
 		.expect_err("missing build state must abort cached admission");
 	assert!(err.to_string().contains("no longer exists"), "unexpected error: {err}");
@@ -5211,13 +5211,80 @@ async fn recheck_cached_admission_skips_a_retired_index_instead_of_failing_the_w
 	let cached_ix = Arc::clone(&ix);
 	execute_all(&ds, &session, "REMOVE INDEX test ON user").await?;
 
-	let outcome = run_recheck_cached_admission(&ds, ns, db, &ikb, cached_ix.as_ref(), 1)
+	let outcome = run_recheck_cached_admission(&ds, ns, db, &ikb, cached_ix.as_ref(), 1, None)
 		.await?
 		.expect("a retired index must not fail the write that was mid-transaction");
 	assert!(
 		matches!(outcome, CachedAdmission::Retired),
 		"the recheck must report the index retired so the mutation skips it"
 	);
+	Ok(())
+}
+
+/// A write that adds a key to a UNIQUE index whose build failed is refused,
+/// naming the index, while a write that adds no key to it is admitted.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_unique_index_in_error_refuses_a_write_that_adds_a_key() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(&ds, &session, "DEFINE INDEX ux ON t FIELDS n UNIQUE; CREATE t:1 SET n = 1;")
+		.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "ux").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	seed_build_state(&ds, &ikb, IndexBuildPhase::Error, 1).await?;
+
+	let err = execute_all(&ds, &session, "CREATE t:2 SET n = 2")
+		.await
+		.expect_err("a write adding a key to a failed UNIQUE index must be refused");
+	let message = err.to_string();
+	assert!(
+		message.contains("`ux`") && message.contains("failed to build"),
+		"unexpected error: {message}"
+	);
+	execute_all(&ds, &session, "CREATE t:3 SET m = 3").await?;
+	Ok(())
+}
+
+/// The admission a transaction cached while the build was building is
+/// rechecked against the errored state: it refuses a mutation that adds a
+/// key, and admits one that adds none.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cached_unique_admission_refuses_a_key_once_the_build_fails() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(&ds, &session, "DEFINE INDEX ux ON t FIELDS n UNIQUE").await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "ux").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	seed_build_state(&ds, &ikb, IndexBuildPhase::Error, 1).await?;
+
+	let rid = RecordId {
+		table: table.clone(),
+		key: RecordIdKey::from("two".to_owned()),
+	};
+	let adds_key = IndexMutation {
+		old_values: None,
+		new_values: Some(vec![Value::from(2i64)]),
+		rid: &rid,
+		count_cond_match: None,
+	};
+	let err = run_recheck_cached_admission(&ds, ns, db, &ikb, ix.as_ref(), 1, Some(&adds_key))
+		.await?
+		.expect_err(
+			"a cached admission must refuse a mutation adding a key to a failed UNIQUE index",
+		);
+	assert!(err.to_string().contains("failed to build"), "unexpected error: {err}");
+
+	let adds_no_key = IndexMutation {
+		old_values: None,
+		new_values: None,
+		rid: &rid,
+		count_cond_match: None,
+	};
+	let outcome =
+		run_recheck_cached_admission(&ds, ns, db, &ikb, ix.as_ref(), 1, Some(&adds_no_key))
+			.await?
+			.expect("a mutation that adds no key keeps queueing");
+	assert!(matches!(outcome, CachedAdmission::Valid));
 	Ok(())
 }
 
@@ -5296,7 +5363,8 @@ async fn recheck_cached_admission_sees_a_retirement_the_user_transaction_cannot(
 		.get_index_builder()
 		.expect("index builder should be available on the configured Datastore")
 		.clone();
-	let outcome = builder.recheck_cached_admission(&frozen, &ikb, ix.as_ref(), ns, db, 1).await;
+	let outcome =
+		builder.recheck_cached_admission(&frozen, &ikb, ix.as_ref(), ns, db, 1, None).await;
 	tx.cancel().await?;
 
 	assert!(
@@ -5351,7 +5419,8 @@ async fn recheck_cached_admission_rejects_a_replacement_the_write_cannot_see() -
 		.get_index_builder()
 		.expect("index builder should be available on the configured Datastore")
 		.clone();
-	let outcome = builder.recheck_cached_admission(&frozen, &ikb, old_ix.as_ref(), ns, db, 1).await;
+	let outcome =
+		builder.recheck_cached_admission(&frozen, &ikb, old_ix.as_ref(), ns, db, 1, None).await;
 	tx.cancel().await?;
 
 	let err = outcome.expect_err("a replacement the write cannot see must abort it");
@@ -5367,6 +5436,7 @@ async fn run_recheck_cached_admission(
 	ikb: &IndexKeyBase,
 	ix: &IndexDefinition,
 	cached_generation: u64,
+	mutation: Option<&IndexMutation<'_>>,
 ) -> Result<Result<CachedAdmission>> {
 	let tx = ds.transaction(TransactionType::Read).await?;
 	let mut ctx = ds.setup_ctx()?;
@@ -5377,8 +5447,9 @@ async fn run_recheck_cached_admission(
 		.get_index_builder()
 		.expect("index builder should be available on the configured Datastore")
 		.clone();
-	let result =
-		builder.recheck_cached_admission(&frozen, ikb, ix, ns, db, cached_generation).await;
+	let result = builder
+		.recheck_cached_admission(&frozen, ikb, ix, ns, db, cached_generation, mutation)
+		.await;
 	tx.cancel().await?;
 	Ok(result)
 }
@@ -5983,13 +6054,25 @@ async fn distributed_info_reports_durable_error_from_second_node() -> Result<()>
 		error_reason.contains("already contains"),
 		"unexpected durable index build error: {building}"
 	);
-	// A failed build must not block user writes on any node: the mutation is
-	// admitted (queued under the errored generation, to be wiped and
-	// rescanned by a recovering `REBUILD INDEX`) and the statement succeeds.
-	execute_all_retrying_conflicts(
+	// A write on any node that adds a key to the failed UNIQUE index is refused
+	// by that node: nothing enforces the constraint until a recovering `REBUILD
+	// INDEX` succeeds or the index is removed.
+	let refused = execute_all_retrying_conflicts(
 		&ds_b,
 		&session,
 		"CREATE user:three SET account = 'tesla', email = 'three@surrealdb.com' RETURN NONE",
+	)
+	.await
+	.expect_err("a write adding a key to a failed UNIQUE index must be refused on every node");
+	assert!(
+		refused.to_string().contains("`test`") && refused.to_string().contains("failed to build"),
+		"unexpected refusal: {refused}"
+	);
+	// A write that adds no key to the index is still admitted.
+	execute_all_retrying_conflicts(
+		&ds_b,
+		&session,
+		"CREATE user:four SET note = 'no key' RETURN NONE",
 	)
 	.await?;
 	Ok(())

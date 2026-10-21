@@ -51,6 +51,16 @@ pub enum Error {
 		index: String,
 	},
 
+	/// A UNIQUE index whose build failed cannot enforce uniqueness, so a write
+	/// that adds a key to it is refused until the index is rebuilt or removed.
+	#[error(
+		"Database index `{index}` on table `{table}` failed to build, so it cannot enforce UNIQUE for this write: fix the duplicate values and run REBUILD INDEX, or REMOVE INDEX"
+	)]
+	IndexBuildFailed {
+		table: String,
+		index: String,
+	},
+
 	/// The query planner did not find an index able to support the given
 	/// expression
 	#[error("There was no suitable index supporting the expression: {exp}")]
@@ -149,6 +159,9 @@ impl LeafError for Error {
 			Error::IndexExistsHidden {
 				..
 			} => TypesError::validation(message, ValidationError::InvalidRequest),
+			Error::IndexBuildFailed {
+				..
+			} => TypesError::internal(message),
 		}
 	}
 }
