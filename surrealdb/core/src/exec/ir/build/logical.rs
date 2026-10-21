@@ -656,12 +656,42 @@ pub(crate) fn bind_value_statement(cx: &mut BindCx<'_>, op: &LogicalOp) -> Resul
 }
 
 /// Whether the point being bound stands in a region whose ops run as statements: a statement's
-/// region, the region of an `expr.subquery`, or a statement list ([`BindCx::in_statement_list`]).
-/// A `FOR` loop runs only as a statement; in any other region (a clause, an operand, a loop or
-/// closure body) its value is that of a subquery holding it.
+/// region, the region of an `expr.subquery`, or a statement list ([`BindCx::in_statement_list`])
+/// other than the arm or body of a value `IF` or `FOR`. A `FOR` loop runs only as a statement; in
+/// any other region (a clause, an operand, a value arm, a loop or closure body) its value is that
+/// of a subquery holding it. A parenthesised `FOR` is an expression, so a value arm holds it in a
+/// subquery of its own, which lowers in expression position.
 fn runs_statements(cx: &BindCx<'_>) -> bool {
-	cx.in_statement_list()
-		|| matches!(cx.kinds().last(), Some(RegionKind::Statement(_) | RegionKind::Subquery))
+	let Some(kind) = cx.kinds().last() else {
+		return cx.in_statement_list();
+	};
+	match kind {
+		RegionKind::Statement(_) | RegionKind::Subquery => true,
+		RegionKind::ValueIf | RegionKind::ValueFor => false,
+		RegionKind::Request
+		| RegionKind::Transaction(_)
+		| RegionKind::Block
+		| RegionKind::ValueBlock
+		| RegionKind::StatementIf
+		| RegionKind::StatementFor
+		| RegionKind::Loop
+		| RegionKind::FunctionBody
+		| RegionKind::ClosureBody
+		| RegionKind::PermissionFrame
+		| RegionKind::FieldFrame(_)
+		| RegionKind::EventFrame
+		| RegionKind::SubscriberFrame
+		| RegionKind::Clause(_)
+		| RegionKind::LazyOperand
+		| RegionKind::ErrorScope(_)
+		| RegionKind::ChooseArm
+		| RegionKind::Pipeline
+		| RegionKind::JoinLookupArm
+		| RegionKind::WriteStage
+		| RegionKind::CatalogUnit
+		| RegionKind::Deadline
+		| RegionKind::StoredClause(_) => cx.in_statement_list(),
+	}
 }
 
 /// The `expr.subquery` whose region raises the refusal of a `LET` written as an expression, which
@@ -1161,9 +1191,19 @@ fn bind_let_as(cx: &mut BindCx<'_>, statement: &LogicalLet, local: bool) -> Resu
 	} else {
 		LetBinding::Local
 	};
-	// The value of a block's `LET` that is a statement runs as a group of its own.
+	// The value of a block's `LET` that is a statement runs as a group of its own. A `RETURN` that
+	// is the value of a block-local `LET` is a parenthesised subquery, the value scope its `RETURN`
+	// ends. A session `LET` at statement level keeps the `RETURN` as its statement's value.
 	let flow = match let_of(&statement.value) {
 		Some(valued) => bind_valued_let(cx, valued)?,
+		None if binding == LetBinding::Local
+			&& matches!(*statement.value, LogicalOp::Return(_)) =>
+		{
+			match bind_subquery(cx, &statement.value)? {
+				Built::Value(value) => Flow::Value(value),
+				Built::Diverged => Flow::Diverged,
+			}
+		}
 		None => match binding {
 			LetBinding::Local => bind_listed(cx, &statement.value, Pos::Value)?,
 			LetBinding::Session => bind_op(cx, &statement.value, Pos::Value)?,
