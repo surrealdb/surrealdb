@@ -431,3 +431,39 @@ fn wrapper_roundtrip_for_nested_arrays_and_objects() {
 		}
 	);
 }
+
+/// An IP address is stored as its text and read back from it, whichever
+/// family it is, through serde and through `SurrealValue` alike.
+#[test]
+fn ip_addresses_roundtrip_as_strings() {
+	use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+	#[derive(Clone, Debug, SurrealValue, Serialize, Deserialize, PartialEq)]
+	#[surreal(crate = "surrealdb_types")]
+	struct Peer {
+		ip: IpAddr,
+		v4: Ipv4Addr,
+		v6: Ipv6Addr,
+	}
+
+	let peer = Peer {
+		ip: "127.0.0.1".parse().unwrap(),
+		v4: Ipv4Addr::new(10, 0, 0, 1),
+		v6: "::1".parse().unwrap(),
+	};
+	let value = SerdeWrapper(peer.clone()).into_value();
+	let Value::Object(obj) = &value else {
+		panic!("peer should serialize as object");
+	};
+	assert_eq!(obj.get("ip"), Some(&Value::String("127.0.0.1".to_string())));
+	assert_eq!(obj.get("v4"), Some(&Value::String("10.0.0.1".to_string())));
+	assert_eq!(obj.get("v6"), Some(&Value::String("::1".to_string())));
+	assert_eq!(peer.clone().into_value(), value);
+
+	let restored = SerdeWrapper::<Peer>::from_value(value.clone()).expect("serde should read it");
+	assert_eq!(restored.0, peer);
+	assert_eq!(Peer::from_value(value).expect("SurrealValue should read it"), peer);
+
+	assert!(IpAddr::from_value(Value::String("not an address".to_string())).is_err());
+	assert!(Ipv4Addr::from_value(Value::String("::1".to_string())).is_err());
+}

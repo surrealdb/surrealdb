@@ -315,8 +315,8 @@ impl Kind {
 			// An array coerces to a set.
 			Kind::Array(..) | Kind::Set(..) => d::ARRAY | d::SET,
 			Kind::Record(_) => d::RECORD,
-			// A point coerces from an array of coordinates; objects are
-			// claimed too rather than proved disjoint.
+			// A point coerces from an array of coordinates, and any geometry
+			// from the GeoJSON object describing it.
 			Kind::Geometry(_) => d::GEOMETRY | d::ARRAY | d::OBJECT,
 			Kind::Regex => d::REGEX,
 			Kind::Range => d::RANGE,

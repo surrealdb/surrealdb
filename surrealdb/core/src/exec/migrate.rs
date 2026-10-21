@@ -531,6 +531,12 @@ fn preserved(original: &Value, coerced: &Value, kind: &Kind) -> bool {
 		(Value::Set(a), Value::Set(b)) => {
 			a.len() == b.len() && members_preserved(a.iter(), b, element)
 		}
+		// A geometry read from an object keeps it only when the object it
+		// renders back to is the original: no number changes representation
+		// beyond what is exact, and no ring is closed by an added point.
+		(Value::Object(_), Value::Geometry(geometry)) => {
+			preserved(original, &Value::Object(geometry.as_object()), &Kind::Any)
+		}
 		(Value::Object(a), Value::Object(b)) => {
 			a.len() == b.len()
 				&& a.iter().all(|(key, a)| {
@@ -542,11 +548,11 @@ fn preserved(original: &Value, coerced: &Value, kind: &Kind) -> bool {
 }
 
 /// The kind [`Value::coerce_to_kind`] coerces `value` to under `kind`: the
-/// first member of a union that `value` coerces to, and `kind` itself
+/// member of a union [`Value::union_member`] picks, and `kind` itself
 /// otherwise.
 fn coerced_member<'a>(value: &Value, mut kind: &'a Kind) -> &'a Kind {
 	while let Kind::Either(members) = kind {
-		match members.iter().find(|member| value.can_coerce_to_kind(member)) {
+		match value.union_member(members, Value::can_coerce_to_kind) {
 			Some(member) => kind = member,
 			None => break,
 		}

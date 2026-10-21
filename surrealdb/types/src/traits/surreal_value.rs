@@ -1562,6 +1562,39 @@ impl SurrealValue for http::StatusCode {
 	}
 }
 
+/// An IP address is stored as its text, the form serde gives it, so a value
+/// written through either is read back through the other.
+macro_rules! impl_ip_addr {
+	($($ty:ty),*) => {
+		$(
+		impl SurrealValue for $ty {
+			fn kind_of() -> Kind {
+				kind!(string)
+			}
+
+			fn is_value(value: &Value) -> bool {
+				matches!(value, Value::String(s) if s.parse::<$ty>().is_ok())
+			}
+
+			fn into_value(self) -> Value {
+				Value::String(self.to_string())
+			}
+
+			fn from_value(value: Value) -> Result<Self, Error> {
+				let Value::String(s) = &value else {
+					return Err(ConversionError::from_value(Self::kind_of(), &value).into());
+				};
+				s.parse::<$ty>().map_err(|e| {
+					Error::internal(format!("Failed to convert `{s}` to an IP address: {e}"))
+				})
+			}
+		}
+		)*
+	};
+}
+
+impl_ip_addr!(std::net::IpAddr, std::net::Ipv4Addr, std::net::Ipv6Addr);
+
 impl<T: SurrealValue> SurrealValue for LinkedList<T> {
 	fn kind_of() -> Kind {
 		kind!(array<(T::kind_of())>)

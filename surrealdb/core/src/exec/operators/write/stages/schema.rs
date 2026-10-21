@@ -240,7 +240,13 @@ fn describe(
 		(Kind::Either(members), value) => {
 			let mut admits = false;
 			let mut conformed = false;
-			for member in members.iter().filter(|member| value.can_coerce_to_kind(member)) {
+			// The members the value conforms to, less any that would convert
+			// it when the member it is taken as does not.
+			let taken = value.union_member(members, Value::can_coerce_to_kind);
+			let converts = taken.is_some_and(|k| value.converts_to(k));
+			for member in members.iter().filter(|member| {
+				value.can_coerce_to_kind(member) && (converts || !value.converts_to(member))
+			}) {
 				conformed = true;
 				admits |= describe(member, value, flexible, place, defined);
 			}

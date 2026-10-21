@@ -441,27 +441,7 @@ impl Value {
 	/// Check if this Value is a Geometry of a specific type
 	pub fn is_geometry_type(&self, types: &[GeometryKind]) -> bool {
 		match self {
-			Value::Geometry(Geometry::Point(_)) => {
-				types.iter().any(|t| matches!(t, GeometryKind::Point))
-			}
-			Value::Geometry(Geometry::Line(_)) => {
-				types.iter().any(|t| matches!(t, GeometryKind::Line))
-			}
-			Value::Geometry(Geometry::Polygon(_)) => {
-				types.iter().any(|t| matches!(t, GeometryKind::Polygon))
-			}
-			Value::Geometry(Geometry::MultiPoint(_)) => {
-				types.iter().any(|t| matches!(t, GeometryKind::MultiPoint))
-			}
-			Value::Geometry(Geometry::MultiLine(_)) => {
-				types.iter().any(|t| matches!(t, GeometryKind::MultiLine))
-			}
-			Value::Geometry(Geometry::MultiPolygon(_)) => {
-				types.iter().any(|t| matches!(t, GeometryKind::MultiPolygon))
-			}
-			Value::Geometry(Geometry::Collection(_)) => {
-				types.iter().any(|t| matches!(t, GeometryKind::Collection))
-			}
+			Value::Geometry(g) => types.contains(&g.geometry_kind()),
 			_ => false,
 		}
 	}

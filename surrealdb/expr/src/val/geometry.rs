@@ -17,6 +17,7 @@ use surrealdb_collections::bounded;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::Object;
+use crate::expr::kind::GeometryKind;
 use crate::val::number::cmp_f64;
 use crate::val::{Array, Value};
 
@@ -159,6 +160,18 @@ impl Geometry {
 			Self::Collection(_) => "GeometryCollection",
 		}
 	}
+	/// The kind a `geometry<…>` type names this geometry by.
+	pub fn geometry_kind(&self) -> GeometryKind {
+		match self {
+			Self::Point(_) => GeometryKind::Point,
+			Self::Line(_) => GeometryKind::Line,
+			Self::Polygon(_) => GeometryKind::Polygon,
+			Self::MultiPoint(_) => GeometryKind::MultiPoint,
+			Self::MultiLine(_) => GeometryKind::MultiLine,
+			Self::MultiPolygon(_) => GeometryKind::MultiPolygon,
+			Self::Collection(_) => GeometryKind::Collection,
+		}
+	}
 	/// Get the raw coordinates of this Geometry as an Array
 	pub fn as_coordinates(&self) -> Value {
 		fn point(v: &Point) -> Value {
@@ -214,6 +227,9 @@ impl Geometry {
 		obj
 	}
 
+	/// The geometry a GeoJSON object describes: exactly a `type` and its
+	/// `coordinates` (or `geometries`, for a collection, whose members are
+	/// geometries or GeoJSON objects in turn). `None` for any other object.
 	pub fn try_from_object(object: &Object) -> Option<Geometry> {
 		if object.len() != 2 {
 			return None;
@@ -254,10 +270,11 @@ impl Geometry {
 				let mut res = Vec::with_capacity(x.len());
 
 				for x in x.iter() {
-					let Value::Geometry(x) = x else {
-						return None;
-					};
-					res.push(x.clone());
+					res.push(match x {
+						Value::Geometry(x) => x.clone(),
+						Value::Object(x) => Geometry::try_from_object(x)?,
+						_ => return None,
+					});
 				}
 
 				Some(Geometry::Collection(res))

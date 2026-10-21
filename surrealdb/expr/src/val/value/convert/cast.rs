@@ -767,8 +767,36 @@ macro_rules! impl_direct {
 impl_direct! {
 	Closure => Box<Closure> = Closure,
 	Object => Object,
-	Geometry => Geometry,
 	File => File,
+}
+
+/// A geometry, or a GeoJSON object describing one
+/// ([`Geometry::try_from_object`]).
+impl Cast for Geometry {
+	fn can_cast(v: &Value) -> bool {
+		match v {
+			Value::Geometry(_) => true,
+			Value::Object(x) => Geometry::try_from_object(x).is_some(),
+			_ => false,
+		}
+	}
+
+	fn cast(v: Value) -> Result<Self, CastError> {
+		match v {
+			Value::Geometry(x) => Ok(x),
+			Value::Object(ref x) => match Geometry::try_from_object(x) {
+				Some(x) => Ok(x),
+				None => Err(CastError::InvalidKind {
+					from: v,
+					into: <Geometry as HasKind>::kind().to_sql(),
+				}),
+			},
+			v => Err(CastError::InvalidKind {
+				from: v,
+				into: <Geometry as HasKind>::kind().to_sql(),
+			}),
+		}
+	}
 }
 
 impl Value {
@@ -880,7 +908,12 @@ impl Value {
 	}
 
 	fn can_cast_to_geometry(&self, val: &[GeometryKind]) -> bool {
-		self.is_geometry_type(val)
+		match self {
+			Value::Object(x) => {
+				Geometry::try_from_object(x).is_some_and(|g| val.contains(&g.geometry_kind()))
+			}
+			_ => self.is_geometry_type(val),
+		}
 	}
 
 	fn can_cast_to_literal(&self, val: &KindLiteral) -> bool {
@@ -945,7 +978,7 @@ impl Value {
 				false => self.cast_to_geometry(t).map(Value::from),
 			},
 			Kind::Either(k) => {
-				let Some(k) = k.iter().find(|x| self.can_cast_to_kind(x)) else {
+				let Some(k) = self.union_member(k, Value::can_cast_to_kind) else {
 					return Err(CastError::InvalidKind {
 						from: self,
 						into: kind.to_sql(),
@@ -1109,6 +1142,13 @@ impl Value {
 		match self {
 			// Geometries are allowed if correct type
 			Value::Geometry(v) if self.is_geometry_type(val) => Ok(v),
+			Value::Object(ref x) => match Geometry::try_from_object(x) {
+				Some(x) if val.contains(&x.geometry_kind()) => Ok(x),
+				_ => Err(CastError::InvalidKind {
+					from: self,
+					into: "geometry".into(),
+				}),
+			},
 			Value::Array(_) => {
 				// An array of two numbers can be cast into a point
 				if val.contains(&GeometryKind::Point)

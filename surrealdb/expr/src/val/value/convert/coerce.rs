@@ -481,9 +481,38 @@ impl_direct! {
 	Array => Array,
 	RecordId => RecordId,
 	String => Strand = String,
-	Geometry => Geometry,
 	Regex => Regex,
 	Table => TableName,
+}
+
+/// A geometry, or a GeoJSON object describing one
+/// ([`Geometry::try_from_object`]): the form a geometry takes as data, such as
+/// decoded JSON or an object built from computed parts.
+impl Coerce for Geometry {
+	fn can_coerce(v: &Value) -> bool {
+		match v {
+			Value::Geometry(_) => true,
+			Value::Object(x) => Geometry::try_from_object(x).is_some(),
+			_ => false,
+		}
+	}
+
+	fn coerce(v: Value) -> Result<Self, CoerceError> {
+		match v {
+			Value::Geometry(x) => Ok(x),
+			Value::Object(ref x) => match Geometry::try_from_object(x) {
+				Some(x) => Ok(x),
+				None => Err(CoerceError::InvalidKind {
+					from: v,
+					into: Kind::of::<Geometry>().to_sql(),
+				}),
+			},
+			v => Err(CoerceError::InvalidKind {
+				from: v,
+				into: Kind::of::<Geometry>().to_sql(),
+			}),
+		}
+	}
 }
 
 impl Coerce for Set {
@@ -525,6 +554,28 @@ impl Coerce for String {
 impl Value {
 	pub fn can_coerce_to<T: Coerce>(&self) -> bool {
 		T::can_coerce(self)
+	}
+
+	/// Whether taking this value as `kind` turns it into another value: an
+	/// object read as the geometry it describes.
+	pub fn converts_to(&self, kind: &Kind) -> bool {
+		matches!((self, kind), (Value::Object(_), Kind::Geometry(_)))
+	}
+
+	/// The member of the union `members` this value is taken as, of those
+	/// `takes` admits it to: the first that takes it unchanged, and only when
+	/// none does, the first that converts it ([`Value::converts_to`]). An
+	/// object a union can hold as an object stays one; it becomes a geometry
+	/// only where no other member holds it.
+	pub fn union_member<'a>(
+		&self,
+		members: &'a [Kind],
+		takes: impl Fn(&Value, &Kind) -> bool,
+	) -> Option<&'a Kind> {
+		members
+			.iter()
+			.find(|k| !self.converts_to(k) && takes(self, k))
+			.or_else(|| members.iter().find(|k| self.converts_to(k) && takes(self, k)))
 	}
 
 	pub fn can_coerce_to_kind(&self, kind: &Kind) -> bool {
@@ -645,7 +696,12 @@ impl Value {
 	}
 
 	fn can_coerce_to_geometry(&self, val: &[GeometryKind]) -> bool {
-		self.is_geometry_type(val)
+		match self {
+			Value::Object(x) => {
+				Geometry::try_from_object(x).is_some_and(|g| val.contains(&g.geometry_kind()))
+			}
+			_ => self.is_geometry_type(val),
+		}
 	}
 
 	fn can_coerce_to_literal(&self, val: &KindLiteral) -> bool {
@@ -745,7 +801,7 @@ impl Value {
 			}
 			Kind::Either(k) => {
 				// Check first for valid kind, then convert to not consume the value
-				let Some(k) = k.iter().find(|x| self.can_coerce_to_kind(x)) else {
+				let Some(k) = self.union_member(k, Value::can_coerce_to_kind) else {
 					return Err(CoerceError::InvalidKind {
 						from: self,
 						into: kind.to_sql(),
@@ -875,17 +931,19 @@ impl Value {
 
 	/// Try to coerce this value to a `Geometry` of a certain type
 	pub fn coerce_to_geometry_kind(self, val: &[GeometryKind]) -> Result<Geometry, CoerceError> {
-		if self.is_geometry_type(val) {
-			let Value::Geometry(x) = self else {
-				// Checked above in is_geometry_type
-				unreachable!()
-			};
-			Ok(x)
-		} else {
-			Err(CoerceError::InvalidKind {
+		match self {
+			Value::Geometry(x) if val.contains(&x.geometry_kind()) => Ok(x),
+			Value::Object(ref x) => match Geometry::try_from_object(x) {
+				Some(x) if val.contains(&x.geometry_kind()) => Ok(x),
+				_ => Err(CoerceError::InvalidKind {
+					from: self,
+					into: "geometry".into(),
+				}),
+			},
+			_ => Err(CoerceError::InvalidKind {
 				from: self,
 				into: "geometry".into(),
-			})
+			}),
 		}
 	}
 

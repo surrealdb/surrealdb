@@ -221,6 +221,34 @@ mod tests {
 	}
 
 	#[test]
+	fn the_id_survives_a_datetime_that_is_not_one() {
+		// An invalid date, as a client sends one: tag 0 over text that is no
+		// datetime, and tag 12 over seconds that are no number of seconds.
+		for bad_date in [
+			Cbor::Tag(0, Box::new(text("ffff"))),
+			Cbor::Tag(12, Box::new(Cbor::Array(vec![Cbor::Float(f64::NAN), Cbor::Float(0.0)]))),
+		] {
+			let envelope = Cbor::Map(vec![
+				(text("id"), text("7")),
+				(text("method"), text("query")),
+				(
+					text("params"),
+					Cbor::Array(vec![
+						text("RETURN $cake"),
+						Cbor::Map(vec![(text("cake"), bad_date)]),
+					]),
+				),
+			]);
+			let bytes = encode_cbor(&envelope);
+			assert!(
+				decode(&bytes, 64).is_err(),
+				"the envelope must not decode, or this proves nothing"
+			);
+			assert_eq!(request_id(&bytes, 64), Some(Value::String("7".to_owned())));
+		}
+	}
+
+	#[test]
 	fn the_id_survives_parameters_nested_past_the_recursion_limit() {
 		// `params` first, then `id`: a map `{params: [[[...]]], id: "7"}` whose
 		// nesting is far beyond the limit, built by hand since the encoder
