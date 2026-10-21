@@ -11,6 +11,7 @@ use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::core::print::{PrintOpts, print};
 use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Provenance, Rewriter};
 use crate::exec::ir::expr::ops::{ExprOp, ExprTag};
+use crate::exec::ir::iface::bounds::KEYED_LITERAL_MAX_BYTES;
 use crate::exec::ir::iface::conversion::Phase;
 use crate::exec::ir::iface::fold::NotYetFolder;
 use crate::exec::ir::iface::frame::Snapshot;
@@ -21,6 +22,7 @@ use crate::exec::ir::logical::ops::LogTag;
 use crate::exec::ir::op_kind::{OpKind, OpTag};
 use crate::exec::ir::phys::ops::PhysOp;
 use crate::expr::BinaryOperator;
+use crate::val::Value;
 
 const BINARY: OpTag = OpTag::Expr(ExprTag::Binary);
 const LITERAL: OpTag = OpTag::Expr(ExprTag::Literal);
@@ -167,6 +169,32 @@ async fn cse_never_across_frames_or_statements() {
 		merge_equal_values(&mut ir, &mut facts, &env.cx(), Scope::Logical).expect("the merge runs");
 	assert_eq!(merged, 1);
 	assert_eq!(count(&ir, LITERAL), literals - 1);
+}
+
+/// A literal text of `bytes` bytes.
+fn text_literal(bytes: usize) -> OpKind {
+	OpKind::Expr(ExprOp::Literal(Box::new(Value::from("x".repeat(bytes)))))
+}
+
+/// Two equal literals under the keyed size are one; two equal literals over it stay two, and no
+/// digest of either is built.
+#[tokio::test]
+async fn cse_leaves_literals_over_the_keyed_size() {
+	let env = Env::new();
+	for (bytes, merged) in [(KEYED_LITERAL_MAX_BYTES, 1), (KEYED_LITERAL_MAX_BYTES + 1, 0)] {
+		let mut ir = bind("RETURN 1").await;
+		let mut facts = FactCache::new();
+		let at = InsertPoint::Before(first_in_statement(&ir));
+		let mut rw = Rewriter::new(&mut ir, &mut facts);
+		for _ in 0..2 {
+			rw.create(at, spec(text_literal(bytes), &[], 1)).expect("the literal is created");
+		}
+		let literals = count(&ir, LITERAL);
+		let answer = merge_equal_values(&mut ir, &mut facts, &env.cx(), Scope::Logical)
+			.expect("the merge runs");
+		assert_eq!(answer, merged, "{bytes} bytes");
+		assert_eq!(count(&ir, LITERAL), literals - merged as usize);
+	}
 }
 
 /// Two equal literals that two snapshots name as their versions are one: both snapshots name the

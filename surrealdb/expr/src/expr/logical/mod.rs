@@ -713,6 +713,52 @@ pub struct LogicalWrite {
 	pub cond: Option<LogicalExpr>,
 }
 
+impl LogicalWrite {
+	/// Every expression the write evaluates: what its source names — a
+	/// target, an `INSERT`'s `INTO` and rows — and what its clauses hold. This
+	/// is [`LogicalOp::for_each_scalar`] of the `Write` node.
+	pub fn for_each_scalar<'a>(&'a self, out: &mut dyn FnMut(&'a LogicalExpr)) {
+		let LogicalWrite {
+			source,
+			data,
+			duplicate_update,
+			cond,
+			..
+		} = self;
+		match source {
+			LogicalWriteSource::Targets(targets) => {
+				for target in targets {
+					out(target);
+				}
+			}
+			LogicalWriteSource::Inserts(inserts) => {
+				if let Some(into) = &inserts.into {
+					out(into);
+				}
+				match &inserts.rows {
+					LogicalInsertRows::Tuples(tuples) => {
+						for tuple in tuples {
+							for (_, value) in tuple {
+								out(value);
+							}
+						}
+					}
+					LogicalInsertRows::Value(expr) => out(expr),
+				}
+			}
+			LogicalWriteSource::Rows(_) => {}
+		}
+		for clause in [data, duplicate_update] {
+			for value in clause.iter().flat_map(LogicalData::values) {
+				out(value);
+			}
+		}
+		if let Some(cond) = cond {
+			out(cond);
+		}
+	}
+}
+
 /// A mutation's data clause, with its expressions in logical form.
 ///
 /// Mirrors [`crate::expr::Data`] arm for arm. The places an assignment writes
@@ -2039,45 +2085,7 @@ impl LogicalOp {
 			// hold. The clauses are here so a rule reaches them: the
 			// statement beside them keeps the surface form the per-record
 			// engine is given, and is not a scalar of this node.
-			LogicalOp::Write(LogicalWrite {
-				source,
-				data,
-				duplicate_update,
-				cond,
-				..
-			}) => {
-				match source {
-					LogicalWriteSource::Targets(targets) => {
-						for target in targets {
-							out(target);
-						}
-					}
-					LogicalWriteSource::Inserts(inserts) => {
-						if let Some(into) = &inserts.into {
-							out(into);
-						}
-						match &inserts.rows {
-							LogicalInsertRows::Tuples(tuples) => {
-								for tuple in tuples {
-									for (_, value) in tuple {
-										out(value);
-									}
-								}
-							}
-							LogicalInsertRows::Value(expr) => out(expr),
-						}
-					}
-					LogicalWriteSource::Rows(_) => {}
-				}
-				for clause in [data, duplicate_update] {
-					for value in clause.iter().flat_map(LogicalData::values) {
-						out(value);
-					}
-				}
-				if let Some(cond) = cond {
-					out(cond);
-				}
-			}
+			LogicalOp::Write(write) => write.for_each_scalar(out),
 			// A schema statement's expressions are its clauses, resolved
 			// where the catalog write is formed, so the node itself owns none.
 			LogicalOp::Ddl(_) => {}

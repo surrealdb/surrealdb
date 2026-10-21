@@ -8,8 +8,9 @@
 //! records `MergedInto`. Equal keys are a candidate only: the two ops are merged only when their
 //! attributes are equal ([`OpKind::attrs_eq`]), so a digest collision never merges two values.
 //!
-//! Only expression ops with one result and no region are candidates, and only when their
-//! transitive effects are reads of the snapshot, the catalog, the row, the session or the clock.
+//! Only expression ops with one result and no region, other than a literal over
+//! [`KEYED_LITERAL_MAX_BYTES`], are candidates, and only when their transitive effects are reads of
+//! the snapshot, the catalog, the row, the session or the clock.
 //! Ops that are not deterministic, ops whose key is opaque, and reads separated by a write of the
 //! statement are never merged. Two guards cover what the key does not state:
 //!
@@ -34,7 +35,8 @@ use crate::exec::ir::core::value::ValueDef;
 use crate::exec::ir::core::value_table::ValueTable;
 use crate::exec::ir::core::walk::{ancestors, enclosing_statement};
 use crate::exec::ir::error::IrError;
-use crate::exec::ir::expr::ops::ExprTag;
+use crate::exec::ir::expr::ops::{ExprOp, ExprTag};
+use crate::exec::ir::iface::bounds::{KEYED_LITERAL_MAX_BYTES, value_exceeds};
 use crate::exec::ir::iface::catalog::EffectCx;
 use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
 use crate::exec::ir::iface::region_kind::RegionKind;
@@ -99,6 +101,13 @@ pub(super) fn in_stored_clause(ir: &Ir, op: OpId) -> bool {
 	ancestors(ir, op).any(|(region, _)| {
 		ir.region(region).is_some_and(|held| matches!(held.kind, RegionKind::StoredClause(_)))
 	})
+}
+
+/// Whether `kind` is a literal over [`KEYED_LITERAL_MAX_BYTES`]. Building its key encodes the
+/// whole payload, so it is never a candidate: two equal literals of that size are rare, and a
+/// literal that stands once has nothing to merge.
+fn is_unkeyed_literal(kind: &OpKind) -> bool {
+	matches!(kind, OpKind::Expr(ExprOp::Literal(value)) if value_exceeds(value, KEYED_LITERAL_MAX_BYTES))
 }
 
 /// Whether the expression op `tag` is a value of its operands and effects alone, so that two ops
@@ -168,8 +177,8 @@ struct Guards {
 }
 
 /// Whether two of `ops` that have the shape of a candidate ([`is_candidate`]: an expression op of
-/// a mergeable tag with one result and no region) share their tag, operands, frame and snapshot,
-/// which every pair of equal keys ([`key_with`]) does.
+/// a mergeable tag with one result and no region, and not an unkeyed literal) share their tag,
+/// operands, frame and snapshot, which every pair of equal keys ([`key_with`]) does.
 fn has_shape_twins(ir: &Ir, ops: &[OpId]) -> bool {
 	use std::hash::{Hash, Hasher};
 	if ops.len() < 2 {
@@ -180,8 +189,11 @@ fn has_shape_twins(ir: &Ir, ops: &[OpId]) -> bool {
 		let OpKind::Expr(kind) = &data.kind else {
 			return None;
 		};
-		(data.results.len() == 1 && data.regions.is_empty() && mergeable(kind.tag()))
-			.then_some(data)
+		(data.results.len() == 1
+			&& data.regions.is_empty()
+			&& mergeable(kind.tag())
+			&& !is_unkeyed_literal(&data.kind))
+		.then_some(data)
 	};
 	let mut hashed: Vec<(u64, OpId)> = ops
 		.iter()
@@ -265,6 +277,7 @@ fn is_candidate(
 	if data.results.len() != 1
 		|| !data.regions.is_empty()
 		|| !mergeable(kind.tag())
+		|| is_unkeyed_literal(&data.kind)
 		|| in_stored_clause(ir, op)
 	{
 		return false;

@@ -27,8 +27,8 @@ use surrealdb_strand::TableName;
 
 use crate::exec::function::FunctionRegistry;
 use crate::expr::logical::{
-	EffectSet, LogicalDdlStatement, LogicalExpr, LogicalIfOp, LogicalOp, LogicalWriteSource,
-	LogicalWriteStatement, SourceRef,
+	EffectSet, LogicalDdlStatement, LogicalExpr, LogicalIfOp, LogicalOp, LogicalWrite,
+	LogicalWriteSource, LogicalWriteStatement, SourceRef,
 };
 use crate::expr::statements::{AlterStatement, DefineStatement, RemoveStatement};
 use crate::expr::{Expr, Function};
@@ -217,9 +217,23 @@ impl Footprint {
 /// triggers ([`expand`]). A write's table catalog read and every resource the
 /// statement names are in it; what it runs that is not written in it is
 /// `Unknown`.
+#[cfg_attr(
+	not(test),
+	allow(
+		dead_code,
+		reason = "the footprint of a whole plan; the engine asks for a write's by reference (`of_write`)"
+	)
+)]
 pub(crate) fn of(op: &LogicalOp, registry: &FunctionRegistry) -> Footprint {
 	let mut out = Footprint::default();
 	walk(op, registry, &mut out);
+	out
+}
+
+/// [`of`] for the write `write` as a plan on its own, without building the plan around it.
+pub(crate) fn of_write(write: &LogicalWrite, registry: &FunctionRegistry) -> Footprint {
+	let mut out = Footprint::default();
+	walk_write(write, registry, &mut out);
 	out
 }
 
@@ -252,33 +266,7 @@ pub(crate) fn of_arms(ifs: &LogicalIfOp, registry: &FunctionRegistry) -> Vec<Foo
 fn walk(op: &LogicalOp, registry: &FunctionRegistry, out: &mut Footprint) {
 	match op {
 		LogicalOp::Source(source) => source_ref(&source.source, out),
-		LogicalOp::Write(write) => {
-			let targets = write_targets(&write.source);
-			let delete = matches!(write.statement, LogicalWriteStatement::Delete(_));
-			match targets {
-				Some(targets) => {
-					for table in targets {
-						out.read(Resource::table_catalog(table.clone()));
-						// A write reads the records it writes, for its `$before`.
-						out.read(Resource::table(table.clone()));
-						out.write(Resource::table(table));
-					}
-				}
-				None => {
-					out.read(Resource::Catalog {
-						kind: CatalogKind::Table,
-						table: None,
-						name: None,
-					});
-					out.read(Resource::any_data());
-					out.write(Resource::any_data());
-				}
-			}
-			// A delete clears the references to what it deletes, in any table.
-			if delete {
-				out.write(Resource::any_data());
-			}
-		}
+		LogicalOp::Write(write) => write_footprint(write, out),
 		LogicalOp::Ddl(ddl) => ddl_footprint(&ddl.statement, out),
 		// A fetch follows links to records of any table.
 		LogicalOp::Fetch(_) => out.read(Resource::any_data()),
@@ -295,6 +283,45 @@ fn walk(op: &LogicalOp, registry: &FunctionRegistry, out: &mut Footprint) {
 	});
 	for child in op.children() {
 		walk(child, registry, out);
+	}
+}
+
+/// What the write `write` touches in itself: the tables it names, and what its statement clears.
+fn write_footprint(write: &LogicalWrite, out: &mut Footprint) {
+	let targets = write_targets(&write.source);
+	let delete = matches!(write.statement, LogicalWriteStatement::Delete(_));
+	match targets {
+		Some(targets) => {
+			for table in targets {
+				out.read(Resource::table_catalog(table.clone()));
+				// A write reads the records it writes, for its `$before`.
+				out.read(Resource::table(table.clone()));
+				out.write(Resource::table(table));
+			}
+		}
+		None => {
+			out.read(Resource::Catalog {
+				kind: CatalogKind::Table,
+				table: None,
+				name: None,
+			});
+			out.read(Resource::any_data());
+			out.write(Resource::any_data());
+		}
+	}
+	// A delete clears the references to what it deletes, in any table.
+	if delete {
+		out.write(Resource::any_data());
+	}
+}
+
+/// [`walk`] of the `Write` node of `write`: its own footprint, that of the scalars it holds, and
+/// that of the plan that feeds it rows.
+fn walk_write(write: &LogicalWrite, registry: &FunctionRegistry, out: &mut Footprint) {
+	write_footprint(write, out);
+	write.for_each_scalar(&mut |scalar| expr_footprint(scalar, registry, out));
+	if let LogicalWriteSource::Rows(input) = &write.source {
+		walk(input, registry, out);
 	}
 }
 
@@ -775,5 +802,28 @@ mod tests {
 		assert!(!read_a.conflicts(&write_a));
 		assert!(Footprint::unknown().conflicts(&read_a));
 		assert!(!write_b.conflicts(&read_a));
+	}
+
+	/// The footprint of a write taken by reference is that of the node that holds it, whatever the
+	/// source and clauses.
+	#[test]
+	fn a_borrowed_write_has_the_footprint_of_its_node() {
+		let registry = FunctionRegistry::with_builtins();
+		for sql in [
+			"CREATE a SET x = (SELECT * FROM b)",
+			"UPDATE a:1 SET y = 2 WHERE (SELECT * FROM c) = 1",
+			"DELETE a WHERE x = 1",
+			"INSERT INTO a [{ x: (SELECT * FROM d) }]",
+			"INSERT INTO a { id: 1 } ON DUPLICATE KEY UPDATE x = (SELECT * FROM e)",
+			"UPSERT a CONTENT { x: 1 }",
+			"RELATE a:1->r->b:2 SET x = 1",
+			"CREATE (SELECT VALUE id FROM f) SET x = 1",
+		] {
+			let op = super::super::lower_test(sql);
+			let LogicalOp::Write(write) = &op else {
+				panic!("{sql} lowers to a write");
+			};
+			assert_eq!(of_write(write, &registry), of(&op, &registry), "{sql}");
+		}
 	}
 }

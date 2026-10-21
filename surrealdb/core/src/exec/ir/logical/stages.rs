@@ -1726,8 +1726,7 @@ pub(crate) fn stored_of(
 /// So a table that stores no index or event has no stage to run for them.
 pub(crate) fn catalog_fixed_of(write: &LogicalWrite, registry: &FunctionRegistry) -> bool {
 	!matches!(write.statement, LogicalWriteStatement::Delete(_))
-		&& !crate::exec::logical::footprint::of(&LogicalOp::Write(write.clone()), registry)
-			.writes_catalog()
+		&& !crate::exec::logical::footprint::of_write(write, registry).writes_catalog()
 }
 
 /// What a table's field view does to an image, from its field definitions.

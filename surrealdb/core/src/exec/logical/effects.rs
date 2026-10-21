@@ -394,15 +394,24 @@ fn fold_plan(op: &LogicalOp, oracle: &dyn EffectOracle, out: &mut PlanEffects) {
 }
 
 /// `expr`'s own effects, and those of every plan written inside it.
+///
+/// The effects of `expr` are those of the whole tree under it, a nested statement not entered:
+/// each node joins its children's. They are computed once at the root, and the walk below it only
+/// finds the nested statements.
 fn fold_scalar(expr: &LogicalExpr, oracle: &dyn EffectOracle, out: &mut PlanEffects) {
 	let effects = effects_of(expr, oracle);
 	out.set |= effects.set;
 	out.impure |= effects.impure;
 	out.index_operator |= effects.index_operator;
+	fold_nested_plans(expr, oracle, out);
+}
+
+/// The effects of every plan written inside `expr`, at any depth.
+fn fold_nested_plans(expr: &LogicalExpr, oracle: &dyn EffectOracle, out: &mut PlanEffects) {
 	if let LogicalExpr::Subquery(plan) = expr {
 		fold_plan(plan, oracle, out);
 	}
-	expr.for_each_child(&mut |child| fold_scalar(child, oracle, out));
+	expr.for_each_child(&mut |child| fold_nested_plans(child, oracle, out));
 }
 
 /// What [`effects_of_plan`] answers: the union over a plan's scalars.
@@ -416,4 +425,37 @@ pub(crate) struct PlanEffects {
 	/// Whether some scalar holds a `MATCHES` or `KNN`, which an access path
 	/// answers rather than evaluation.
 	pub index_operator: bool,
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn plan_effects_of(sql: &str) -> PlanEffects {
+		let registry = FunctionRegistry::with_builtins();
+		effects_of_plan_with(&super::super::lower_test(sql), &Oracle::new(&registry))
+	}
+
+	/// A statement written at any depth of a scalar's nesting is entered once, and the scalar's
+	/// own effects are those of the whole tree under it.
+	#[test]
+	fn a_plan_nested_under_literals_is_folded() {
+		let write = plan_effects_of("RETURN [{ a: [(UPDATE t SET x = 1)] }]");
+		assert!(write.set.contains(EffectSet::WRITES_DATA));
+		let read = plan_effects_of("RETURN [{ a: [(SELECT * FROM t)] }]");
+		assert!(!read.set.contains(EffectSet::WRITES_DATA));
+		let none = plan_effects_of("RETURN [{ a: [1, 2] }]");
+		assert!(none.set.is_deterministic());
+		assert!(!none.set.contains(EffectSet::WRITES_DATA));
+	}
+
+	/// A non-deterministic call deep in a scalar reaches the plan's effects.
+	#[test]
+	fn an_effect_deep_in_a_scalar_reaches_the_plan() {
+		let deep = plan_effects_of("RETURN [{ a: [rand::float()] }]");
+		assert!(!deep.set.is_deterministic());
+		assert!(deep.impure);
+		let nested = plan_effects_of("RETURN [{ a: [(SELECT VALUE rand::float() FROM t)] }]");
+		assert!(!nested.set.is_deterministic());
+	}
 }

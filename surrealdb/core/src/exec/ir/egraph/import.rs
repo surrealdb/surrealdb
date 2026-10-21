@@ -42,6 +42,7 @@ use crate::exec::ir::core::rewriter::Provenance;
 use crate::exec::ir::core::value::ValueDef;
 use crate::exec::ir::core::walk::ops_in;
 use crate::exec::ir::expr::ops::ExprOp;
+use crate::exec::ir::iface::bounds::value_exceeds;
 use crate::exec::ir::iface::catalog::EffectCx;
 use crate::exec::ir::iface::effects::{Determinism, FieldSet, IrFootprint, IrResource, KeyOf};
 use crate::exec::ir::iface::egraph::EgraphLimits;
@@ -305,48 +306,10 @@ fn is_unknown(set: EffectSet) -> bool {
 	set.contains(EffectSet::TOP)
 }
 
-/// Spends `bytes` of `left`; answers `false` once the budget is exhausted.
-fn spend(left: &mut usize, bytes: usize) -> bool {
-	match left.checked_sub(bytes) {
-		Some(rest) => {
-			*left = rest;
-			true
-		}
-		None => false,
-	}
-}
-
-/// Whether `value` fits in the bytes `left` still allows, counting what a string or byte string
-/// holds and one byte per scalar and container element, and stopping at the first overrun.
-fn fits(value: &Value, left: &mut usize) -> bool {
-	match value {
-		Value::None | Value::Null | Value::Bool(_) => spend(left, 1),
-		Value::Number(_) | Value::Duration(_) | Value::Datetime(_) | Value::Uuid(_) => {
-			spend(left, 16)
-		}
-		Value::String(s) => spend(left, s.len()),
-		Value::Bytes(b) => spend(left, b.len()),
-		Value::Array(items) => spend(left, 1) && items.iter().all(|item| fits(item, left)),
-		Value::Set(items) => spend(left, 1) && items.0.iter().all(|item| fits(item, left)),
-		Value::Object(fields) => {
-			spend(left, 1)
-				&& fields.iter().all(|(key, item)| spend(left, key.len()) && fits(item, left))
-		}
-		Value::Geometry(_)
-		| Value::Table(_)
-		| Value::RecordId(_)
-		| Value::File(_)
-		| Value::Regex(_)
-		| Value::Range(_)
-		| Value::Closure(_) => spend(left, 64),
-	}
-}
-
 /// Whether the literal `value` is larger than [`EGRAPH_LITERAL_MAX_BYTES`]. The measure is bounded
 /// by the limit: it never walks more of `value` than the limit admits.
 pub(crate) fn literal_exceeds(value: &Value) -> bool {
-	let mut left = EGRAPH_LITERAL_MAX_BYTES;
-	!fits(value, &mut left)
+	value_exceeds(value, EGRAPH_LITERAL_MAX_BYTES)
 }
 
 /// The role `op` plays on its own, before the regions it owns are considered.
