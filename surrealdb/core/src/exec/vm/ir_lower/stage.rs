@@ -5938,6 +5938,9 @@ mod tests {
 				| Instr::JumpIfNotObject {
 					..
 				}
+				| Instr::JumpIfOpaque {
+					..
+				}
 				| Instr::InvalidControlFlow
 				| Instr::JumpIfNotRecordId {
 					..

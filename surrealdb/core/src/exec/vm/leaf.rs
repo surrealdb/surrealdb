@@ -940,6 +940,9 @@ pub(super) fn instr(
 		| Instr::JumpIfNotObject {
 			..
 		}
+		| Instr::JumpIfOpaque {
+			..
+		}
 		| Instr::InvalidControlFlow
 		| Instr::JumpIfNotRecordId {
 			..

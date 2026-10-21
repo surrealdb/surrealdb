@@ -901,6 +901,12 @@ pub(super) enum Instr {
 		cond: Operand,
 		target: Label,
 	},
+	/// Jump to `target` when `cond` is a value fields are not projected from: any value but an
+	/// object, a geometry or `NONE`.
+	JumpIfOpaque {
+		cond: Operand,
+		target: Label,
+	},
 	/// Fail with the error a `BREAK` or `CONTINUE` raises where no loop takes
 	/// it.
 	InvalidControlFlow,
@@ -3258,6 +3264,10 @@ impl Instr {
 				..
 			}
 			| Instr::JumpIfNotObject {
+				target,
+				..
+			}
+			| Instr::JumpIfOpaque {
 				target,
 				..
 			}
@@ -6602,6 +6612,9 @@ fn row_use(instr: &Instr) -> RowUse {
 			..
 		}
 		| Instr::JumpIfNotObject {
+			..
+		}
+		| Instr::JumpIfOpaque {
 			..
 		}
 		| Instr::InvalidControlFlow

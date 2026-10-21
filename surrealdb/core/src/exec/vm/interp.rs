@@ -3224,6 +3224,26 @@ pub(super) fn run_row<'r>(
 					jump!(*target as usize);
 				}
 			}
+			Instr::JumpIfOpaque {
+				cond,
+				target,
+			} => {
+				let projected = match read(regs, *cond)? {
+					Scalar::None => true,
+					Scalar::Value(value) => {
+						matches!(
+							value.as_ref(),
+							Value::Object(_) | Value::Geometry(_) | Value::None
+						)
+					}
+					_ => false,
+				};
+				if projected {
+					pc += 1;
+				} else {
+					jump!(*target as usize);
+				}
+			}
 			Instr::JumpIf {
 				cond,
 				truthy,

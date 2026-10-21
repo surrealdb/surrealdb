@@ -204,6 +204,10 @@ pub(super) fn project(
 			omit,
 		} => {
 			let object = site.emitter().reg()?;
+			if !site.objects() && !fields_make_an_object(site, ir, fields, regions)? {
+				fields_over_any_row(site, ir, object, fields, omit, regions)?;
+				return Ok(object);
+			}
 			site.emitter().emit(Instr::NewObject {
 				dst: object,
 			});
@@ -251,16 +255,7 @@ fn star_over_any_row(
 	omit: &[OmissionShape],
 	regions: &[RegionId],
 ) -> Result<(), IrError> {
-	let field_regions = regions
-		.get(..fields.len())
-		.ok_or_else(|| invariant("a projection with fewer regions than fields"))?;
-	let builds = fields.iter().zip(field_regions).any(|(field, region)| {
-		projection_call(ir, site.registry(), *region).is_some() || field.output.0.len() > 1
-	});
-	let computes = fields
-		.iter()
-		.zip(field_regions)
-		.any(|(field, region)| !reads_a_field(ir, *region) || field.output.0.len() > 1);
+	let (builds, computes) = field_effects(site, ir, fields, regions)?;
 	let not_object = site.emitter().label()?;
 	let done = site.emitter().label()?;
 	site.emitter().emit(Instr::JumpIfNotObject {
@@ -286,6 +281,75 @@ fn star_over_any_row(
 		let omissions = &regions[fields.len()..];
 		omit_all(site, object, omit, omissions, false)?;
 	}
+	site.emitter().bind(done)
+}
+
+/// Whether any of `fields` is written by a projection function or an output path of more than one
+/// part (`builds`), and whether any computes a value rather than reading a field of the row
+/// (`computes`).
+fn field_effects(
+	site: &mut dyn ProjectionSite,
+	ir: &Ir,
+	fields: &[ProjectedFieldShape],
+	regions: &[RegionId],
+) -> Result<(bool, bool), IrError> {
+	let field_regions = regions
+		.get(..fields.len())
+		.ok_or_else(|| invariant("a projection with fewer regions than fields"))?;
+	let builds = fields.iter().zip(field_regions).any(|(field, region)| {
+		projection_call(ir, site.registry(), *region).is_some() || field.output.0.len() > 1
+	});
+	let computes = fields
+		.iter()
+		.zip(field_regions)
+		.any(|(field, region)| !reads_a_field(ir, *region) || field.output.0.len() > 1);
+	Ok((builds, computes))
+}
+
+/// Whether `fields` make an object of any row: a field that computes a value or builds an output
+/// path does, and fields that only read the row do for an object, a geometry or `NONE`.
+fn fields_make_an_object(
+	site: &mut dyn ProjectionSite,
+	ir: &Ir,
+	fields: &[ProjectedFieldShape],
+	regions: &[RegionId],
+) -> Result<bool, IrError> {
+	let (builds, computes) = field_effects(site, ir, fields, regions)?;
+	Ok(builds || computes)
+}
+
+/// `fields` that only read their row, over the row loaded into `object`, which may not be an
+/// object.
+///
+/// An object, a geometry or `NONE` projects to an object of the fields. Any other row stands as it
+/// is, with its omissions walked.
+fn fields_over_any_row(
+	site: &mut dyn ProjectionSite,
+	ir: &Ir,
+	object: Reg,
+	fields: &[ProjectedFieldShape],
+	omit: &[OmissionShape],
+	regions: &[RegionId],
+) -> Result<(), IrError> {
+	site.emitter().emit(Instr::LoadRow {
+		dst: object,
+	});
+	let opaque = site.emitter().label()?;
+	let done = site.emitter().label()?;
+	site.emitter().emit(Instr::JumpIfOpaque {
+		cond: Operand::Reg(object),
+		target: opaque,
+	});
+	site.emitter().emit(Instr::NewObject {
+		dst: object,
+	});
+	write_fields(site, ir, object, fields, omit, regions)?;
+	site.emitter().emit(Instr::Jump {
+		target: done,
+	});
+	site.emitter().bind(opaque)?;
+	let omissions = &regions[fields.len()..];
+	omit_all(site, object, omit, omissions, false)?;
 	site.emitter().bind(done)
 }
 
