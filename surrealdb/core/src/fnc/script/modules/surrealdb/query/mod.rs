@@ -66,6 +66,20 @@ pub fn query<'js>(
 		let mut query_store = None;
 
 		let res = async {
+			// Running arbitrary SurrealQL through the bridge is an arbitrary
+			// query, so it must pass the same subject gate the request front door
+			// applies (mirrors fnc::eval).
+			if !query_ctx.context.get_capabilities().allows_query(
+				&crate::dbs::capabilities::ArbitraryQueryTarget::from(query_ctx.opt.auth.as_ref()),
+			) {
+				return Err(Exception::throw_message(
+					&ctx,
+					&crate::dbs::capabilities::Error::FunctionNotAllowed(
+						"surrealdb.query".to_string(),
+					)
+					.to_string(),
+				));
+			}
 			let query = if query.is_object() {
 				let borrow = OwnedBorrow::<Query>::from_js(&ctx, query)?;
 				&**borrow_store.insert(borrow)

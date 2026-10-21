@@ -111,8 +111,11 @@ fn run_clock_read(
 fn run(js_ctx: js::Ctx<'_>, name: &str, args: Vec<Value>) -> Result<Value> {
 	let res = {
 		let this = js_ctx.userdata::<QueryContext<'_>>().expect("query context should be set");
-		// Process the called function
-		if reads_the_clock(this.context, name) {
+		// The bridge dispatches a built-in function, so it is bound by the
+		// function capability (deny-funcs) like every other call site.
+		if !this.context.get_capabilities().allows_function_name(name) {
+			Err(crate::dbs::capabilities::Error::FunctionNotAllowed(name.to_string()).into())
+		} else if reads_the_clock(this.context, name) {
 			run_clock_read(this.context, this.doc, name, args)
 		} else {
 			fnc::synchronous(this.context, this.doc, name, args)
@@ -129,8 +132,13 @@ fn run(js_ctx: js::Ctx<'_>, name: &str, args: Vec<Value>) -> Result<Value> {
 async fn fut(js_ctx: js::Ctx<'_>, name: &str, args: Vec<Value>) -> Result<Value> {
 	let res = {
 		let this = js_ctx.userdata::<QueryContext<'_>>().expect("query context should be set");
-		// Process the called function
-		fnc::asynchronous(this.context, this.opt, this.doc, name, args).await
+		// The bridge dispatches a built-in function, so it is bound by the
+		// function capability (deny-funcs) like every other call site.
+		if !this.context.get_capabilities().allows_function_name(name) {
+			Err(crate::dbs::capabilities::Error::FunctionNotAllowed(name.to_string()).into())
+		} else {
+			fnc::asynchronous(this.context, this.opt, this.doc, name, args).await
+		}
 	};
 	// Convert any response error
 	res.map_err(|err| {
