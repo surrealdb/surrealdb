@@ -453,7 +453,9 @@ impl<'a> Lower<'a> {
 			Tag::NaN => Expr::Literal(Literal::Float(f64::NAN)),
 			Tag::Infinity => Expr::Literal(Literal::Float(f64::INFINITY)),
 			Tag::UnboundedRange => Expr::Literal(Literal::UnboundedRange),
-			Tag::Decimal => Expr::Literal(lit::decimal(self.text(id))?),
+			Tag::Decimal => {
+				Expr::Literal(lit::decimal(self.text(id)).map_err(|r| r.at(n.start, n.end))?)
+			}
 			Tag::Regex => Expr::Literal(lit::regex_at(self.text(id), n.start, n.end)?),
 			Tag::Path => match lit::builtin(&self.path_name(id)?, n.start, n.end)? {
 				lit::Builtin::Constant(c) => Expr::Constant(c),

@@ -31,9 +31,42 @@ where
 	s.parse().map_err(|e: T::Err| e.to_string())
 }
 
-fn normalized_as<T: DecimalExt, U>(_variant: fn(T) -> U, s: &str) -> Option<T> {
-	T::from_str_normalized(s).ok()
+fn exact_as<T: DecimalExt, U>(_variant: fn(T) -> U, s: &str) -> Result<T, String> {
+	let s = within_scale(s)?;
+	T::from_str_exact_scale(&s).map_err(|e| e.to_string())
 }
+
+fn normalized_exact_as<T: DecimalExt, U>(_variant: fn(T) -> U, s: &str) -> Result<T, String> {
+	let s = within_scale(s)?;
+	T::from_str_normalized_exact(&s).map_err(|e| e.to_string())
+}
+
+/// `s` with fractional zeros beyond the maximum scale dropped, or the error
+/// for a value that has significant digits past it.
+fn within_scale(s: &str) -> Result<String, String> {
+	let Some((int, frac)) = s.split_once('.') else {
+		return Ok(s.to_owned());
+	};
+	let mut frac = frac;
+	while frac.len() > MAX_SCALE as usize && frac.ends_with('0') {
+		frac = &frac[..frac.len() - 1];
+	}
+	if frac.len() > MAX_SCALE as usize {
+		return Err(scale_error(frac.len() as u64));
+	}
+	Ok(format!("{int}.{frac}"))
+}
+
+fn scale_error(scale: u64) -> String {
+	format!("Scale exceeds the maximum precision allowed: {scale} > {MAX_SCALE}")
+}
+
+/// The largest exponent magnitude expanded to digits; beyond it the scale
+/// alone exceeds any decimal's precision.
+const MAX_EXPANDED_EXPONENT: i64 = 1024;
+
+/// The decimal's maximum scale, as its error message reports it.
+const MAX_SCALE: i64 = 28;
 
 fn from_vec_as<T: From<Vec<u8>>, U>(_variant: fn(T) -> U, v: Vec<u8>) -> T {
 	T::from(v)
@@ -48,13 +81,19 @@ pub fn string_body(text: &str) -> R<String> {
 	Ok(s)
 }
 
-/// A decimal literal span (`1.5dec`, `-2e3dec`).
+/// A decimal literal span (`1.5dec`, `-2e3dec`). A literal the decimal type
+/// cannot hold exactly (a scale or magnitude out of range) is an error, in
+/// plain and exponent notation alike.
 pub fn decimal(text: &str) -> R<Literal> {
+	let fail = |e: String| Reject::new(format!("Failed to parser decimal: {e}"));
 	let s: String = text.trim_end_matches("dec").chars().filter(|c| *c != '_').collect();
 	let d = if let Some(i) = s.find(['e', 'E']) {
 		// Scientific notation: the exponent shifts the decimal point.
 		let (mantissa, exp) = (&s[..i], &s[i + 1..]);
 		let exp: i64 = exp.parse().map_err(|_| Reject::new("invalid decimal exponent"))?;
+		if exp.unsigned_abs() > MAX_EXPANDED_EXPONENT as u64 {
+			return Err(fail(scale_error(exp.unsigned_abs())));
+		}
 		let neg = mantissa.starts_with('-');
 		let mantissa = mantissa.trim_start_matches(['-', '+']);
 		let (int, frac) = mantissa.split_once('.').unwrap_or((mantissa, ""));
@@ -73,11 +112,11 @@ pub fn decimal(text: &str) -> R<Literal> {
 		} else {
 			plain
 		};
-		parse_as(Literal::Decimal, &plain)
+		exact_as(Literal::Decimal, &plain)
 	} else {
-		normalized_as(Literal::Decimal, &s)
+		normalized_exact_as(Literal::Decimal, &s)
 	};
-	d.map(Literal::Decimal).ok_or(Reject::new("invalid decimal"))
+	d.map(Literal::Decimal).map_err(fail)
 }
 
 /// Whether the regex literal at `start..end` of `src`, with its
@@ -802,4 +841,57 @@ pub fn prefixed_error(text: &str, prefix: u8, start: u32) -> Option<Reject> {
 		}
 	}?;
 	Some(in_token(r, text, start))
+}
+
+#[cfg(test)]
+mod decimal_tests {
+	use super::decimal;
+	use crate::expr::Literal;
+
+	fn shown(text: &str) -> Result<String, String> {
+		match decimal(text) {
+			Ok(Literal::Decimal(d)) => Ok(d.to_string()),
+			Ok(_) => unreachable!("a decimal literal"),
+			Err(r) => Err(r.msg.into_owned()),
+		}
+	}
+
+	#[test]
+	fn exact_values_are_kept() {
+		assert_eq!(
+			shown("0.0000000000000000000000000001dec").unwrap(),
+			"0.0000000000000000000000000001"
+		);
+		assert_eq!(shown("1e-28dec").unwrap(), "0.0000000000000000000000000001");
+		assert_eq!(shown("1e28dec").unwrap(), "10000000000000000000000000000");
+		assert_eq!(shown("1.500000000000000000000000000000dec").unwrap(), "1.5");
+		assert_eq!(shown("1.50e0dec").unwrap(), "1.50");
+		assert_eq!(shown("-2.5e1dec").unwrap(), "-25");
+	}
+
+	#[test]
+	fn inexact_values_name_the_scale_limit() {
+		for (text, scale) in [
+			("1.5e-28dec", 29),
+			("1e-30dec", 30),
+			("1e-400dec", 400),
+			("0.0000000000000000000000000000001dec", 31),
+			("1.2345678901234567890123456789012345dec", 34),
+			("1e-99999999999dec", 99999999999u64),
+		] {
+			assert_eq!(
+				shown(text).unwrap_err(),
+				format!(
+					"Failed to parser decimal: Scale exceeds the maximum precision allowed: {scale} > 28"
+				),
+				"{text}"
+			);
+		}
+	}
+
+	#[test]
+	fn magnitude_out_of_range_is_an_error() {
+		assert!(shown("79228162514264337593543950336dec").is_err());
+		assert!(shown("1e30dec").is_err());
+	}
 }
