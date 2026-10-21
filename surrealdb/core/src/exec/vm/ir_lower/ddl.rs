@@ -80,7 +80,7 @@ use crate::expr::Base;
 use crate::expr::module::ModuleExecutable;
 use crate::expr::statements::alter::AlterKind;
 use crate::expr::statements::define::DefineKind;
-use crate::iam::ConfigKind;
+use crate::iam::{Action, ConfigKind, ResourceKind};
 use crate::val::Value;
 
 /// The ids a speculative run of a block drew for its schema statements, and the ids the program
@@ -972,6 +972,16 @@ impl Ddl<'_, '_> {
 			truthy: true,
 			target: present,
 		});
+		// Reached only when the namespace does not exist and is about to be
+		// created to hold the definition. Creating it needs the same authority
+		// as an explicit DEFINE NAMESPACE (Edit on Namespace at root), so a
+		// database-level principal whose namespace was removed cannot recreate
+		// it through an ordinary DDL statement (GHSA-3287-hpm5-3f8r).
+		self.store(StoreInstr::Allow {
+			action: Action::Edit,
+			resource: ResourceKind::Namespace,
+			base: Base::Root,
+		});
 		let id = self.reg()?;
 		self.store(StoreInstr::NextId {
 			sequence: IdSequence::Namespace,
@@ -1023,6 +1033,15 @@ impl Ddl<'_, '_> {
 			cond: Operand::Reg(database),
 			truthy: true,
 			target: present,
+		});
+		// Reached only when the database does not exist and is about to be
+		// created to hold the definition. Creating it needs the same authority
+		// as an explicit DEFINE DATABASE (Edit on Database at the namespace),
+		// matching the USE path (GHSA-3287-hpm5-3f8r).
+		self.store(StoreInstr::Allow {
+			action: Action::Edit,
+			resource: ResourceKind::Database,
+			base: Base::Ns,
 		});
 		let id = self.reg()?;
 		self.store(StoreInstr::NextId {

@@ -1028,6 +1028,18 @@ impl Context {
 	pub(crate) async fn get_ns_id(&self, opt: &Options) -> Result<NamespaceId> {
 		let ns = opt.ns()?;
 		let tx = self.tx();
+		// Creating a missing namespace to hold a definition needs the same
+		// authority as an explicit DEFINE NAMESPACE (Edit on Namespace at root),
+		// matching the USE path, so a database-level principal cannot recreate a
+		// removed namespace through an ordinary DDL statement
+		// (GHSA-3287-hpm5-3f8r). The existence read runs unsealed because this is
+		// reached from sealed work (e.g. view maintenance); an authorization
+		// check of the live catalog is orthogonal to that work's snapshot.
+		let ns_present =
+			crate::kvs::catalog_reads::sealed(false, tx.get_ns_by_name(ns, None)).await?.is_some();
+		if !ns_present {
+			self.is_allowed(opt, Action::Edit, ResourceKind::Namespace, Base::Root)?;
+		}
 		let ns_def = tx.get_or_add_ns(Some(self), ns).await?;
 		Ok(ns_def.namespace_id)
 	}
@@ -1051,6 +1063,27 @@ impl Context {
 	pub(crate) async fn get_ns_db_ids(&self, opt: &Options) -> Result<(NamespaceId, DatabaseId)> {
 		let (ns, db) = opt.ns_db()?;
 		let txn = self.tx();
+		// Creating a missing namespace or database to hold a definition needs
+		// the same authority as creating it explicitly (Edit on Namespace at
+		// root / Edit on Database at the namespace), matching the USE path, so a
+		// database-level principal cannot recreate a removed namespace or
+		// database through an ordinary DDL statement (GHSA-3287-hpm5-3f8r). The
+		// existence reads run unsealed because this is reached from sealed work
+		// (e.g. view maintenance); an authorization check of the live catalog is
+		// orthogonal to that work's snapshot.
+		let ns_present =
+			crate::kvs::catalog_reads::sealed(false, txn.get_ns_by_name(ns, None)).await?.is_some();
+		if !ns_present {
+			self.is_allowed(opt, Action::Edit, ResourceKind::Namespace, Base::Root)?;
+		} else {
+			let db_present =
+				crate::kvs::catalog_reads::sealed(false, txn.get_db_by_name(ns, db, None))
+					.await?
+					.is_some();
+			if !db_present {
+				self.is_allowed(opt, Action::Edit, ResourceKind::Database, Base::Ns)?;
+			}
+		}
 		let db_def =
 			crate::exec::vm::descriptor::object(txn.ensure_ns_db(Some(self), ns, db)).await?;
 		Ok((db_def.namespace_id, db_def.database_id))

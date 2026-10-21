@@ -449,3 +449,79 @@ async fn use_db_accepts_a_computed_name() -> Result<()> {
 
 	Ok(())
 }
+
+/// Regression (GHSA-3287-hpm5-3f8r): a database-level Editor whose namespace
+/// and database were dropped must not recreate them through an ordinary DDL
+/// statement. `DEFINE FUNCTION` reaches the same upward creation path
+/// (`ids_creating`, which resolves the namespace through
+/// `namespace_id_creating`) as USE, and creating a namespace is a root-level
+/// operation the editor cannot perform.
+#[tokio::test]
+async fn ddl_does_not_recreate_a_dropped_namespace_for_a_database_editor() -> Result<()> {
+	let (_, ds) = new_ds("host", "host", true).await?;
+
+	// A Database-level Editor at tenant_a/app, never created here: the
+	// "namespace dropped after token issue" state.
+	let sess =
+		Session::for_level(Level::Database("tenant_a".to_owned(), "app".to_owned()), Role::Editor);
+
+	// Pre-fix this implicitly created tenant_a + app to hold the function.
+	let res =
+		ds.execute("DEFINE FUNCTION fn::probe() {RETURN 1}", &sess, None).await?.remove(0).output();
+	let err = res.unwrap_err().to_string();
+	assert!(
+		err.contains("Not enough permissions"),
+		"DEFINE FUNCTION must be refused with an authorization error, not fail for another reason; got: {err}",
+	);
+
+	let info = root_info(&ds).await?;
+	assert!(
+		!info.contains("tenant_a"),
+		"a DDL statement must not recreate a namespace the editor cannot DEFINE; INFO FOR ROOT: {info}",
+	);
+	Ok(())
+}
+
+/// The same for the resolved-apply DDL path (`get_ns_db_ids`), reached here by
+/// `DEFINE FIELD` (and equally by `DEFINE USER ON DATABASE`).
+#[tokio::test]
+async fn define_field_does_not_recreate_a_dropped_namespace_for_a_database_editor() -> Result<()> {
+	let (_, ds) = new_ds("host", "host", true).await?;
+	let sess =
+		Session::for_level(Level::Database("tenant_a".to_owned(), "app".to_owned()), Role::Editor);
+
+	let res =
+		ds.execute("DEFINE FIELD name ON thing TYPE string", &sess, None).await?.remove(0).output();
+	let err = res.unwrap_err().to_string();
+	assert!(
+		err.contains("Not enough permissions"),
+		"DEFINE FIELD must be refused with an authorization error, not fail for another reason; got: {err}",
+	);
+
+	let info = root_info(&ds).await?;
+	assert!(
+		!info.contains("tenant_a"),
+		"DEFINE FIELD must not recreate a dropped namespace; INFO FOR ROOT: {info}",
+	);
+	Ok(())
+}
+
+/// Sanity: a Root-level Editor (who legitimately has `Edit` on
+/// `Namespace`@`Root`) CAN still materialize a namespace through a DDL
+/// statement. The fix targets unauthorized creation, not all creation.
+#[tokio::test]
+async fn ddl_still_creates_a_namespace_for_a_root_editor() -> Result<()> {
+	let (_, ds) = new_ds("host", "host", true).await?;
+	let mut sess = Session::editor();
+	sess.ns = Some("fresh_ns".to_owned());
+	sess.db = Some("fresh_db".to_owned());
+
+	ds.execute("DEFINE FUNCTION fn::probe() {RETURN 1}", &sess, None).await?;
+
+	let info = root_info(&ds).await?;
+	assert!(
+		info.contains("fresh_ns"),
+		"a root Editor must still auto-create a namespace via DDL; INFO FOR ROOT: {info}",
+	);
+	Ok(())
+}
