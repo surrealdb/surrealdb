@@ -678,6 +678,36 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   derived for a predicate takes it as the field's value; neither hands it to
   the caller.
   Verified by: `reproductions/a_return_in_a_permission_block_is_its_value.surql`.
+- **A permission clause reads other tables as its definer does, whatever it
+  spells and whichever clause it is.** A table's `select`, `create`, `update` and
+  `delete` clauses and a field's `select`, `create` and `update` clauses are
+  definer code (above), and
+  every read they make of another record — a record-id dereference
+  (`lookup:[$auth, 'ok'].id`), a subquery, `record::exists`, a graph traversal
+  (`$auth->member->team`) — is unchecked: it sees the records the definer sees,
+  never the caller's view of them. A clause can therefore admit a caller through
+  a table the caller cannot read, which is how a membership or lookup table
+  defined `PERMISSIONS NONE` gates another table, and the caller learns only the
+  verdict. Every spelling and every clause kind must agree. A spelling or clause
+  kind judged under the caller's permissions instead would make two equivalent
+  clauses decide differently, so a refactor from one spelling to another, or a
+  clause copied from `select` to `create`, would silently change who is
+  admitted.
+  A clause whose value the caller can read back is the opposite case: `VALUE`,
+  `DEFAULT` and `COMPUTED` (and `ASSERT`, evaluated beside them) read other
+  records with the caller's own permissions, like the CONTEXT clause (section
+  1), so none of them can copy a record the caller cannot select into a field
+  the caller can. The rule for schema authors is that a permission clause sees
+  everything and returns only a verdict, and a value clause sees what the
+  caller sees.
+  Verified end to end by
+  `reproductions/7465_value_clauses_read_as_the_caller.surql` (the value
+  clauses), and by
+  `reproductions/7465_permission_clause_probe_forms_every_clause.surql` (each
+  spelling admits in each table clause kind and in a field select, create and
+  update clause, and denies in each when the probed record does not exist),
+  `reproductions/7465_permission_clause_probe_forms.surql` and
+  `reproductions/7466_permission_clause_graph_traversal.surql`.
 - The Auth context within Options must not be mutated by user-controlled operations.
   Only system-internal mechanisms (AuthLimit) may produce derived Options with
   modified auth, and these must never broaden permissions.
