@@ -118,29 +118,15 @@ impl SurrealValue for DbResult {
 					let PublicValue::Uuid(uuid) = id else {
 						return Err(TypesError::internal("Expected UUID for id field".to_string()));
 					};
-					let PublicValue::String(action_str) = action else {
-						return Err(TypesError::internal(
-							"Expected string for action field".to_string(),
-						));
-					};
 
 					let session = match obj.remove(SESSION_ID) {
 						Some(session) => SurrealValue::from_value(session)?,
 						None => None,
 					};
 
-					// Parse action string to PublicAction
-					let action = match action_str.as_str() {
-						"CREATE" => PublicAction::Create,
-						"UPDATE" => PublicAction::Update,
-						"DELETE" => PublicAction::Delete,
-						_ => {
-							return Err(TypesError::internal(format!(
-								"Invalid action: {}",
-								action_str
-							)));
-						}
-					};
+					// `Action` owns its wire form, so every variant `into_value` writes
+					// decodes here.
+					let action = PublicAction::from_value(action)?;
 
 					Ok(DbResult::Live(PublicNotification::new(
 						uuid, session, action, record, result,
@@ -258,4 +244,49 @@ pub fn db_response_from_bytes(bytes: &[u8]) -> Result<DbResponse, TypesError> {
 	let value: PublicValue =
 		surrealdb_types::decode(bytes).map_err(|e| TypesError::internal(e.to_string()))?;
 	DbResponse::from_value(value)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn notification(action: PublicAction) -> PublicNotification {
+		PublicNotification::new(
+			Uuid::from_u128(1).into(),
+			Some(Uuid::from_u128(2).into()),
+			action,
+			PublicValue::None,
+			PublicValue::None,
+		)
+	}
+
+	/// Every action the encoder writes for a live notification decodes back to
+	/// itself, so a `KILLED` or `ERROR` frame is not lost on a client.
+	#[test]
+	fn live_result_round_trips_every_action() {
+		for action in [
+			PublicAction::Create,
+			PublicAction::Update,
+			PublicAction::Delete,
+			PublicAction::Killed,
+			PublicAction::Error,
+		] {
+			let value = DbResult::Live(notification(action)).into_value();
+			match DbResult::from_value(value) {
+				Ok(DbResult::Live(decoded)) => assert_eq!(decoded.action, action),
+				other => panic!("{action} did not decode as a live result: {other:?}"),
+			}
+		}
+	}
+
+	#[test]
+	fn live_result_rejects_an_unknown_action() {
+		let value = PublicValue::Object(object! {
+			id: PublicValue::Uuid(Uuid::from_u128(1).into()),
+			action: PublicValue::String("REVOKED".to_string()),
+			record: PublicValue::None,
+			result: PublicValue::None,
+		});
+		assert!(DbResult::from_value(value).is_err());
+	}
 }
