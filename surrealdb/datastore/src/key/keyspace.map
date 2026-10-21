@@ -272,6 +272,8 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}*{tb}+{ix}!hh                                                                      HnswElementHashedPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!hk{doc_id}                                                                   HnswDocElementsKey ->  crate::values::ids::Ids64
 /*{ns}*{db}*{tb}+{ix}!hk                                                                        HnswDocElementsPrefix ->  (range)
+/*{ns}*{db}*{tb}+{ix}!hm{element_id}                                                               HnswElementDocsKey ->  crate::values::ids::Ids64
+/*{ns}*{db}*{tb}+{ix}!hm                                                                        HnswElementDocsPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!hl{layer}{chunk}                                                                   HnswLayerKey ->  Vec<u8>
 /*{ns}*{db}*{tb}+{ix}!hl{layer}                                                                  HnswLayerLayerPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!hn{layer}{node}                                                                     HnswNodeKey ->  Vec<u8>
@@ -288,6 +290,8 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}*{tb}+{ix}!dg                                                                         DiskannGenerationKey ->  u64
 /*{ns}*{db}*{tb}+{ix}!de{element_id}                                                                DiskannElementKey ->  crate::values::diskann::DiskAnnElement
 /*{ns}*{db}*{tb}+{ix}!de                                                                         DiskannElementPrefix ->  (range)
+/*{ns}*{db}*{tb}+{ix}!da{element_id}                                                            DiskannElementCodeKey ->  crate::values::diskann::DiskAnnElementCode
+/*{ns}*{db}*{tb}+{ix}!da                                                                     DiskannElementCodePrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!dn{element_id}                                                                   DiskannNodeKey ->  crate::values::diskann::DiskAnnNode
 /*{ns}*{db}*{tb}+{ix}!dn                                                                            DiskannNodePrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!dq{vec}                                                                   DiskannElementDocsKey ->  crate::values::diskann::DiskAnnElementDocs
@@ -296,10 +300,13 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}*{tb}+{ix}!dh                                                                   DiskannElementHashedPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!dk{doc_id}                                                                DiskannDocElementsKey ->  crate::values::ids::Ids64
 /*{ns}*{db}*{tb}+{ix}!dk                                                                     DiskannDocElementsPrefix ->  (range)
+/*{ns}*{db}*{tb}+{ix}!dm{element_id}                                                          DiskannElementDocSetKey ->  crate::values::ids::Ids64
+/*{ns}*{db}*{tb}+{ix}!dm                                                                   DiskannElementDocSetPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!dp{shard}                                                               DiskannPendingLegacyKey ->  crate::values::diskann::DiskAnnPendingState
 /*{ns}*{db}*{tb}+{ix}!dp                                                                   DiskannPendingLegacyPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!dy{shard}                                                                     DiskannPendingKey ->  crate::values::diskann::DiskAnnPendingState
 /*{ns}*{db}*{tb}+{ix}!dy                                                                         DiskannPendingPrefix ->  (range)
+/*{ns}*{db}*{tb}+{ix}!dY                                                                     DiskannPendingSummaryKey ->  crate::values::diskann::DiskAnnPendingState
 /*{ns}*{db}*{tb}+{ix}!dz{shard}{nid}                                                            DiskannWriterLeaseKey ->  crate::values::diskann::DiskAnnWriterLease
 /*{ns}*{db}*{tb}+{ix}!dz{shard}                                                         DiskannWriterLeaseShardPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!dr{id}                                                                  DiskannRecordPendingKey ->  crate::values::diskann::DiskAnnRecordPendingUpdate

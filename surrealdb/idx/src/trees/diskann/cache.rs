@@ -24,7 +24,9 @@ use quick_cache::sync::Cache;
 use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId};
 use crate::docids::DocId;
 use crate::next_compaction_generation;
-use crate::trees::diskann::{DiskAnnElement, DiskAnnNode, DiskAnnState, ElementId};
+use crate::trees::diskann::{
+	DiskAnnElement, DiskAnnElementCode, DiskAnnNode, DiskAnnState, ElementId,
+};
 use crate::trees::knn::Ids64;
 use crate::trees::vector::SerializedVector;
 use crate::val::RecordIdKey;
@@ -206,6 +208,7 @@ impl<T> AtGeneration<T> {
 #[derive(Clone, Eq, Hash, PartialEq)]
 enum DiskAnnCacheKey {
 	Element(ElementCacheKey),
+	Code(ElementCacheKey),
 	Node(NodeCacheKey),
 	DocSet(DocSetCacheKey),
 	DocId(DocIdCacheKey),
@@ -215,6 +218,7 @@ enum DiskAnnCacheKey {
 #[derive(Clone)]
 enum DiskAnnCacheValue {
 	Element(Stamped<Arc<DiskAnnElement>>),
+	Code(Stamped<Arc<DiskAnnElementCode>>),
 	Node(Stamped<Arc<DiskAnnNode>>),
 	DocSet(Stamped<Ids64>),
 	DocId(AtGeneration<Arc<RecordIdKey>>),
@@ -226,6 +230,7 @@ enum DiskAnnCacheValue {
 pub(super) enum CachedEntry {
 	State(DiskAnnState),
 	Element(ElementId, Arc<DiskAnnElement>),
+	Code(ElementId, Arc<DiskAnnElementCode>),
 	Node(ElementId, Arc<DiskAnnNode>),
 	DocSet(ElementId, Ids64),
 	DocId(DocId, Arc<RecordIdKey>),
@@ -241,6 +246,12 @@ impl Weighter<DiskAnnCacheKey, DiskAnnCacheValue> for DiskAnnCacheWeighter {
 				(serialized_vector_size(&val.value.vector)
 					+ std::mem::size_of_val(&val.value.deleted)
 					+ std::mem::size_of::<Stamped<Arc<DiskAnnElement>>>()
+					+ std::mem::size_of_val(key)) as u64
+			}
+			(DiskAnnCacheKey::Code(key), DiskAnnCacheValue::Code(val)) => {
+				(val.value.code.len()
+					+ std::mem::size_of::<DiskAnnElementCode>()
+					+ std::mem::size_of::<Stamped<Arc<DiskAnnElementCode>>>()
 					+ std::mem::size_of_val(key)) as u64
 			}
 			(DiskAnnCacheKey::Node(key), DiskAnnCacheValue::Node(val)) => {
@@ -399,6 +410,43 @@ impl DiskAnnCache {
 	/// Evicts one graph element from the cache.
 	pub(super) fn remove_element(&self, index: IndexKey, element_id: ElementId) {
 		self.0.cache.remove(&DiskAnnCacheKey::Element(Self::element_key(index, element_id)));
+	}
+
+	/// Returns a cached element code, when `view` is served it.
+	pub(super) fn get_code(
+		&self,
+		index: IndexKey,
+		element_id: ElementId,
+		view: &CacheView,
+	) -> Option<Arc<DiskAnnElementCode>> {
+		match self.0.cache.get(&DiskAnnCacheKey::Code(Self::element_key(index, element_id)))? {
+			DiskAnnCacheValue::Code(code) => code.served(view),
+			_ => None,
+		}
+	}
+
+	/// Inserts or replaces an element code and returns the shared cached payload.
+	pub(super) fn insert_code(
+		&self,
+		index: IndexKey,
+		element_id: ElementId,
+		stamp: Stamp,
+		code: DiskAnnElementCode,
+	) -> Arc<DiskAnnElementCode> {
+		let code = Arc::new(code);
+		self.0.cache.insert(
+			DiskAnnCacheKey::Code(Self::element_key(index, element_id)),
+			DiskAnnCacheValue::Code(Stamped {
+				stamp,
+				value: Arc::clone(&code),
+			}),
+		);
+		code
+	}
+
+	/// Evicts one element code from the cache.
+	pub(super) fn remove_code(&self, index: IndexKey, element_id: ElementId) {
+		self.0.cache.remove(&DiskAnnCacheKey::Code(Self::element_key(index, element_id)));
 	}
 
 	/// Returns a shared cached adjacency-list payload, when `view` is served it.
@@ -566,6 +614,7 @@ impl DiskAnnCache {
 		self.0.cache.retain(|key, _| match key {
 			DiskAnnCacheKey::State(k) => *k != index,
 			DiskAnnCacheKey::Element(k) => (k.0, k.1, k.2, k.3, k.4) != index,
+			DiskAnnCacheKey::Code(k) => (k.0, k.1, k.2, k.3, k.4) != index,
 			DiskAnnCacheKey::Node(k) => (k.0, k.1, k.2, k.3, k.4) != index,
 			DiskAnnCacheKey::DocSet(k) => (k.0, k.1, k.2, k.3, k.4) != index,
 			DiskAnnCacheKey::DocId(k) => (k.0, k.1, k.2, k.3, k.4) != index,
@@ -594,6 +643,9 @@ impl DiskAnnCache {
 				}
 				(DiskAnnCacheKey::Element(k), DiskAnnCacheValue::Element(v)) if of(&k) => {
 					Some(CachedEntry::Element(k.5, v.value))
+				}
+				(DiskAnnCacheKey::Code(k), DiskAnnCacheValue::Code(v)) if of(&k) => {
+					Some(CachedEntry::Code(k.5, v.value))
 				}
 				(DiskAnnCacheKey::Node(k), DiskAnnCacheValue::Node(v)) if of(&k) => {
 					Some(CachedEntry::Node(k.5, v.value))
@@ -685,6 +737,10 @@ mod tests {
 		}
 	}
 
+	fn code() -> DiskAnnElementCode {
+		DiskAnnElementCode::encode(&[1.0, 2.0])
+	}
+
 	fn node() -> DiskAnnNode {
 		DiskAnnNode {
 			neighbors: vec![8, 9],
@@ -696,16 +752,18 @@ mod tests {
 	fn fill(cache: &DiskAnnCache, index: IndexKey, generation: Option<u64>) {
 		cache.insert_state(index, stamp(generation), state());
 		cache.insert_element(index, 7, stamp(generation), element());
+		cache.insert_code(index, 7, stamp(generation), code());
 		cache.insert_node(index, 7, stamp(generation), node());
 		cache.insert_doc_set(index, 7, stamp(generation), Ids64::One(11));
 		cache.insert_doc_id(index, 11, generation, RecordIdKey::Number(17));
 	}
 
 	/// Which graph families `view` is served for element 7.
-	fn served(cache: &DiskAnnCache, index: IndexKey, view: &CacheView) -> [bool; 4] {
+	fn served(cache: &DiskAnnCache, index: IndexKey, view: &CacheView) -> [bool; 5] {
 		[
 			cache.get_state(index, view).is_some(),
 			cache.get_element(index, 7, view).is_some(),
+			cache.get_code(index, 7, view).is_some(),
 			cache.get_node(index, 7, view).is_some(),
 			cache.get_doc_set(index, 7, view).is_some(),
 		]
@@ -725,6 +783,7 @@ mod tests {
 				deleted: false,
 			},
 		);
+		cache.insert_code(index, 7, stamp(Some(5)), code());
 		cache.insert_node(index, 7, stamp(Some(5)), node());
 		cache.insert_doc_set(index, 7, stamp(Some(5)), Ids64::Vec2([11, 12]));
 		cache.insert_doc_id(index, 11, Some(1), RecordIdKey::Number(99));
@@ -750,6 +809,18 @@ mod tests {
 		assert_eq!(first_node.neighbors, node().neighbors);
 		assert!(Arc::ptr_eq(&first_element, &second_element));
 		assert!(Arc::ptr_eq(&first_node, &second_node));
+		let first_code = cache.get_code(index, 7, &view).unwrap();
+		assert_eq!(*first_code, code());
+		assert!(Arc::ptr_eq(&first_code, &cache.get_code(index, 7, &view).unwrap()));
+		// The listing the KV coherence checks read exists only for them.
+		#[cfg(feature = "kv-rocksdb")]
+		{
+			let held = cache.entries_of(index.0, index.1, index.2, index.3, index.4);
+			assert!(
+				held.iter().any(|e| matches!(e, CachedEntry::Code(7, c) if **c == code())),
+				"entries_of lists the cached code"
+			);
+		}
 		assert_eq!(cache.get_doc_set(index, 7, &view), Some(Ids64::One(11)));
 		assert_eq!(
 			cache.get_doc_id(index, 11, Some(5)).unwrap().as_ref(),
@@ -759,7 +830,7 @@ mod tests {
 
 		cache.remove_index(index.0, index.1, index.2, index.3, index.4).await;
 
-		assert_eq!(served(&cache, index, &view), [false; 4]);
+		assert_eq!(served(&cache, index, &view), [false; 5]);
 		assert!(cache.get_doc_id(index, 11, Some(5)).is_none());
 	}
 
@@ -777,9 +848,9 @@ mod tests {
 		cache.remove_index(legacy.0, legacy.1, legacy.2, legacy.3, legacy.4).await;
 
 		let view = at(Some(5));
-		assert_eq!(served(&cache, legacy, &view), [false; 4]);
+		assert_eq!(served(&cache, legacy, &view), [false; 5]);
 		assert!(cache.get_doc_id(legacy, 11, Some(5)).is_none());
-		assert_eq!(served(&cache, rebuilt, &view), [true; 4]);
+		assert_eq!(served(&cache, rebuilt, &view), [true; 5]);
 		assert_eq!(cache.get_doc_set(rebuilt, 7, &view), Some(Ids64::One(11)));
 		assert!(cache.get_doc_id(rebuilt, 11, Some(5)).is_some());
 	}
@@ -793,13 +864,13 @@ mod tests {
 		let index = index();
 		fill(&cache, index, Some(5));
 		for other in [None, Some(4), Some(6)] {
-			assert_eq!(served(&cache, index, &at(other)), [false; 4], "at {other:?}");
+			assert_eq!(served(&cache, index, &at(other)), [false; 5], "at {other:?}");
 			assert!(cache.get_doc_id(index, 11, other).is_none(), "doc id at {other:?}");
 		}
-		assert_eq!(served(&cache, index, &at(Some(5))), [true; 4]);
+		assert_eq!(served(&cache, index, &at(Some(5))), [true; 5]);
 		assert!(cache.get_doc_id(index, 11, Some(5)).is_some());
 		let stranger = CacheView::reader(OWNER + 1, Some(5), span(0, 9));
-		assert_eq!(served(&cache, index, &stranger), [false; 4]);
+		assert_eq!(served(&cache, index, &stranger), [false; 5]);
 
 		// A publish from another generation replaces the entry rather than joining it.
 		cache.insert_node(
@@ -825,7 +896,7 @@ mod tests {
 			[(4, false), (5, false), (6, true), (7, true), (8, true), (9, false)]
 		{
 			let view = CacheView::reader(OWNER, Some(generation), span(5, 8));
-			assert_eq!(served(&cache, index, &view), [expected; 4], "reader at {generation}");
+			assert_eq!(served(&cache, index, &view), [expected; 5], "reader at {generation}");
 		}
 		// The doc-ID family is served on generation equality alone.
 		assert!(cache.get_doc_id(index, 11, Some(7)).is_none());
@@ -835,11 +906,11 @@ mod tests {
 		fill(&cache, index, Some(4));
 		for generation in [5, 6, 8] {
 			let view = CacheView::reader(OWNER, Some(generation), span(5, 8));
-			assert_eq!(served(&cache, index, &view), [false; 4], "reader at {generation}");
+			assert_eq!(served(&cache, index, &view), [false; 5], "reader at {generation}");
 		}
 		assert_eq!(
 			served(&cache, index, &CacheView::reader(OWNER, Some(4), span(5, 8))),
-			[true; 4]
+			[true; 5]
 		);
 	}
 
@@ -903,7 +974,7 @@ mod tests {
 		let index = index();
 		fill(&cache, index, Some(5));
 		let view = at(Some(5));
-		assert_eq!(served(&cache, index, &view), [true; 4]);
+		assert_eq!(served(&cache, index, &view), [true; 5]);
 		assert!(cache.get_doc_id(index, 11, Some(4)).is_none());
 		assert_eq!(
 			cache.get_doc_id(index, 11, Some(5)).unwrap().as_ref(),
@@ -912,11 +983,12 @@ mod tests {
 
 		cache.remove_state(index);
 		cache.remove_element(index, 7);
+		cache.remove_code(index, 7);
 		cache.remove_node(index, 7);
 		cache.remove_doc_set(index, 7);
 		cache.remove_doc_id(index, 11);
 
-		assert_eq!(served(&cache, index, &view), [false; 4]);
+		assert_eq!(served(&cache, index, &view), [false; 5]);
 		assert!(cache.get_doc_id(index, 11, Some(5)).is_none());
 	}
 }

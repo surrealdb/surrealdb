@@ -27,6 +27,10 @@ macro_rules! with_hnsw {
 			$crate::trees::hnsw::flavor::HnswFlavor::H9set($h) => $body,
 			$crate::trees::hnsw::flavor::HnswFlavor::H13_25($h) => $body,
 			$crate::trees::hnsw::flavor::HnswFlavor::H13set($h) => $body,
+			$crate::trees::hnsw::flavor::HnswFlavor::H17_33($h) => $body,
+			$crate::trees::hnsw::flavor::HnswFlavor::H21_41($h) => $body,
+			$crate::trees::hnsw::flavor::HnswFlavor::H25_49($h) => $body,
+			$crate::trees::hnsw::flavor::HnswFlavor::H29_57($h) => $body,
 			$crate::trees::hnsw::flavor::HnswFlavor::H17set($h) => $body,
 			$crate::trees::hnsw::flavor::HnswFlavor::H21set($h) => $body,
 			$crate::trees::hnsw::flavor::HnswFlavor::H25set($h) => $body,
@@ -53,6 +57,10 @@ pub(super) enum HnswFlavor {
 	H9set(Hnsw<AHashSet, ArraySet<9>>),
 	H13_25(Hnsw<ArraySet<25>, ArraySet<13>>),
 	H13set(Hnsw<AHashSet, ArraySet<13>>),
+	H17_33(Hnsw<ArraySet<33>, ArraySet<17>>),
+	H21_41(Hnsw<ArraySet<41>, ArraySet<21>>),
+	H25_49(Hnsw<ArraySet<49>, ArraySet<25>>),
+	H29_57(Hnsw<ArraySet<57>, ArraySet<29>>),
 	H17set(Hnsw<AHashSet, ArraySet<17>>),
 	H21set(Hnsw<AHashSet, ArraySet<21>>),
 	H25set(Hnsw<AHashSet, ArraySet<25>>),
@@ -143,34 +151,70 @@ impl HnswFlavor {
 					format_version,
 				)?),
 			},
-			13..=16 => Self::H17set(Hnsw::<AHashSet, ArraySet<17>>::new(
-				table_id,
-				ibk,
-				p,
-				vector_cache,
-				format_version,
-			)?),
-			17..=20 => Self::H21set(Hnsw::<AHashSet, ArraySet<21>>::new(
-				table_id,
-				ibk,
-				p,
-				vector_cache,
-				format_version,
-			)?),
-			21..=24 => Self::H25set(Hnsw::<AHashSet, ArraySet<25>>::new(
-				table_id,
-				ibk,
-				p,
-				vector_cache,
-				format_version,
-			)?),
-			25..=28 => Self::H29set(Hnsw::<AHashSet, ArraySet<29>>::new(
-				table_id,
-				ibk,
-				p,
-				vector_cache,
-				format_version,
-			)?),
+			13..=16 => match p.m0 {
+				1..=32 => Self::H17_33(Hnsw::<ArraySet<33>, ArraySet<17>>::new(
+					table_id,
+					ibk,
+					p,
+					vector_cache,
+					format_version,
+				)?),
+				_ => Self::H17set(Hnsw::<AHashSet, ArraySet<17>>::new(
+					table_id,
+					ibk,
+					p,
+					vector_cache,
+					format_version,
+				)?),
+			},
+			17..=20 => match p.m0 {
+				1..=40 => Self::H21_41(Hnsw::<ArraySet<41>, ArraySet<21>>::new(
+					table_id,
+					ibk,
+					p,
+					vector_cache,
+					format_version,
+				)?),
+				_ => Self::H21set(Hnsw::<AHashSet, ArraySet<21>>::new(
+					table_id,
+					ibk,
+					p,
+					vector_cache,
+					format_version,
+				)?),
+			},
+			21..=24 => match p.m0 {
+				1..=48 => Self::H25_49(Hnsw::<ArraySet<49>, ArraySet<25>>::new(
+					table_id,
+					ibk,
+					p,
+					vector_cache,
+					format_version,
+				)?),
+				_ => Self::H25set(Hnsw::<AHashSet, ArraySet<25>>::new(
+					table_id,
+					ibk,
+					p,
+					vector_cache,
+					format_version,
+				)?),
+			},
+			25..=28 => match p.m0 {
+				1..=56 => Self::H29_57(Hnsw::<ArraySet<57>, ArraySet<29>>::new(
+					table_id,
+					ibk,
+					p,
+					vector_cache,
+					format_version,
+				)?),
+				_ => Self::H29set(Hnsw::<AHashSet, ArraySet<29>>::new(
+					table_id,
+					ibk,
+					p,
+					vector_cache,
+					format_version,
+				)?),
+			},
 			_ => Self::Hset(Hnsw::<AHashSet, AHashSet>::new(
 				table_id,
 				ibk,
@@ -185,21 +229,31 @@ impl HnswFlavor {
 	/// Returns `true` if [`check_state`](Self::check_state) would mutate the
 	/// in-memory graph. Safe to call under a shared (read) lock.
 	pub(super) async fn needs_state_reload(&self, env: &dyn IndexEnv) -> Result<bool> {
+		with_hnsw!(self, h => h.needs_state_reload(env).await)
+	}
+
+	/// The variant's name, for tests asserting which flavour parameters select.
+	#[cfg(test)]
+	pub(super) fn variant(&self) -> &'static str {
 		match self {
-			HnswFlavor::H5_9(h) => h.needs_state_reload(env).await,
-			HnswFlavor::H5_17(h) => h.needs_state_reload(env).await,
-			HnswFlavor::H5_25(h) => h.needs_state_reload(env).await,
-			HnswFlavor::H5set(h) => h.needs_state_reload(env).await,
-			HnswFlavor::H9_17(h) => h.needs_state_reload(env).await,
-			HnswFlavor::H9_25(h) => h.needs_state_reload(env).await,
-			HnswFlavor::H9set(h) => h.needs_state_reload(env).await,
-			HnswFlavor::H13_25(h) => h.needs_state_reload(env).await,
-			HnswFlavor::H13set(h) => h.needs_state_reload(env).await,
-			HnswFlavor::H17set(h) => h.needs_state_reload(env).await,
-			HnswFlavor::H21set(h) => h.needs_state_reload(env).await,
-			HnswFlavor::H25set(h) => h.needs_state_reload(env).await,
-			HnswFlavor::H29set(h) => h.needs_state_reload(env).await,
-			HnswFlavor::Hset(h) => h.needs_state_reload(env).await,
+			HnswFlavor::H5_9(_) => "H5_9",
+			HnswFlavor::H5_17(_) => "H5_17",
+			HnswFlavor::H5_25(_) => "H5_25",
+			HnswFlavor::H5set(_) => "H5set",
+			HnswFlavor::H9_17(_) => "H9_17",
+			HnswFlavor::H9_25(_) => "H9_25",
+			HnswFlavor::H9set(_) => "H9set",
+			HnswFlavor::H13_25(_) => "H13_25",
+			HnswFlavor::H13set(_) => "H13set",
+			HnswFlavor::H17_33(_) => "H17_33",
+			HnswFlavor::H21_41(_) => "H21_41",
+			HnswFlavor::H25_49(_) => "H25_49",
+			HnswFlavor::H29_57(_) => "H29_57",
+			HnswFlavor::H17set(_) => "H17set",
+			HnswFlavor::H21set(_) => "H21set",
+			HnswFlavor::H25set(_) => "H25set",
+			HnswFlavor::H29set(_) => "H29set",
+			HnswFlavor::Hset(_) => "Hset",
 		}
 	}
 
@@ -225,22 +279,7 @@ impl HnswFlavor {
 
 	/// Loads and synchronizes the in-memory graph state from the key-value store.
 	pub(super) async fn check_state(&mut self, env: &dyn IndexEnv) -> Result<()> {
-		match self {
-			HnswFlavor::H5_9(h) => h.check_state(env).await,
-			HnswFlavor::H5_17(h) => h.check_state(env).await,
-			HnswFlavor::H5_25(h) => h.check_state(env).await,
-			HnswFlavor::H5set(h) => h.check_state(env).await,
-			HnswFlavor::H9_17(h) => h.check_state(env).await,
-			HnswFlavor::H9_25(h) => h.check_state(env).await,
-			HnswFlavor::H9set(h) => h.check_state(env).await,
-			HnswFlavor::H13_25(h) => h.check_state(env).await,
-			HnswFlavor::H13set(h) => h.check_state(env).await,
-			HnswFlavor::H17set(h) => h.check_state(env).await,
-			HnswFlavor::H21set(h) => h.check_state(env).await,
-			HnswFlavor::H25set(h) => h.check_state(env).await,
-			HnswFlavor::H29set(h) => h.check_state(env).await,
-			HnswFlavor::Hset(h) => h.check_state(env).await,
-		}
+		with_hnsw!(self, h => h.check_state(env).await)
 	}
 
 	/// Inserts a vector into the graph and returns its assigned element ID.
@@ -249,41 +288,11 @@ impl HnswFlavor {
 		ctx: &HnswContext<'_>,
 		q_pt: Vector,
 	) -> Result<ElementId> {
-		match self {
-			HnswFlavor::H5_9(h) => h.insert(ctx, q_pt).await,
-			HnswFlavor::H5_17(h) => h.insert(ctx, q_pt).await,
-			HnswFlavor::H5_25(h) => h.insert(ctx, q_pt).await,
-			HnswFlavor::H5set(h) => h.insert(ctx, q_pt).await,
-			HnswFlavor::H9_17(h) => h.insert(ctx, q_pt).await,
-			HnswFlavor::H9_25(h) => h.insert(ctx, q_pt).await,
-			HnswFlavor::H9set(h) => h.insert(ctx, q_pt).await,
-			HnswFlavor::H13_25(h) => h.insert(ctx, q_pt).await,
-			HnswFlavor::H13set(h) => h.insert(ctx, q_pt).await,
-			HnswFlavor::H17set(h) => h.insert(ctx, q_pt).await,
-			HnswFlavor::H21set(h) => h.insert(ctx, q_pt).await,
-			HnswFlavor::H25set(h) => h.insert(ctx, q_pt).await,
-			HnswFlavor::H29set(h) => h.insert(ctx, q_pt).await,
-			HnswFlavor::Hset(h) => h.insert(ctx, q_pt).await,
-		}
+		with_hnsw!(self, h => h.insert(ctx, q_pt).await)
 	}
 	/// Removes an element from the graph. Returns `true` if the element was found and removed.
 	pub(super) async fn remove(&mut self, ctx: &HnswContext<'_>, e_id: ElementId) -> Result<bool> {
-		match self {
-			HnswFlavor::H5_9(h) => h.remove(ctx, e_id).await,
-			HnswFlavor::H5_17(h) => h.remove(ctx, e_id).await,
-			HnswFlavor::H5_25(h) => h.remove(ctx, e_id).await,
-			HnswFlavor::H5set(h) => h.remove(ctx, e_id).await,
-			HnswFlavor::H9_17(h) => h.remove(ctx, e_id).await,
-			HnswFlavor::H9_25(h) => h.remove(ctx, e_id).await,
-			HnswFlavor::H9set(h) => h.remove(ctx, e_id).await,
-			HnswFlavor::H13_25(h) => h.remove(ctx, e_id).await,
-			HnswFlavor::H13set(h) => h.remove(ctx, e_id).await,
-			HnswFlavor::H17set(h) => h.remove(ctx, e_id).await,
-			HnswFlavor::H21set(h) => h.remove(ctx, e_id).await,
-			HnswFlavor::H25set(h) => h.remove(ctx, e_id).await,
-			HnswFlavor::H29set(h) => h.remove(ctx, e_id).await,
-			HnswFlavor::Hset(h) => h.remove(ctx, e_id).await,
-		}
+		with_hnsw!(self, h => h.remove(ctx, e_id).await)
 	}
 	/// Performs a k-nearest neighbor search on the graph.
 	pub(super) async fn knn_search(
@@ -292,22 +301,7 @@ impl HnswFlavor {
 		search: &HnswSearch,
 		pending_docs: Option<&RoaringTreemap>,
 	) -> Result<Vec<(f64, ElementId)>> {
-		match self {
-			HnswFlavor::H5_9(h) => h.knn_search(ctx, search, pending_docs).await,
-			HnswFlavor::H5_17(h) => h.knn_search(ctx, search, pending_docs).await,
-			HnswFlavor::H5_25(h) => h.knn_search(ctx, search, pending_docs).await,
-			HnswFlavor::H5set(h) => h.knn_search(ctx, search, pending_docs).await,
-			HnswFlavor::H9_17(h) => h.knn_search(ctx, search, pending_docs).await,
-			HnswFlavor::H9_25(h) => h.knn_search(ctx, search, pending_docs).await,
-			HnswFlavor::H9set(h) => h.knn_search(ctx, search, pending_docs).await,
-			HnswFlavor::H13_25(h) => h.knn_search(ctx, search, pending_docs).await,
-			HnswFlavor::H13set(h) => h.knn_search(ctx, search, pending_docs).await,
-			HnswFlavor::H17set(h) => h.knn_search(ctx, search, pending_docs).await,
-			HnswFlavor::H21set(h) => h.knn_search(ctx, search, pending_docs).await,
-			HnswFlavor::H25set(h) => h.knn_search(ctx, search, pending_docs).await,
-			HnswFlavor::H29set(h) => h.knn_search(ctx, search, pending_docs).await,
-			HnswFlavor::Hset(h) => h.knn_search(ctx, search, pending_docs).await,
-		}
+		with_hnsw!(self, h => h.knn_search(ctx, search, pending_docs).await)
 	}
 	/// Performs a k-nearest neighbor search with a conditional document filter
 	/// and/or an allow-list bitmap gating candidate admission (#548).
@@ -319,50 +313,7 @@ impl HnswFlavor {
 		pending_docs: Option<&RoaringTreemap>,
 		allow_list: Option<&RoaringTreemap>,
 	) -> Result<Vec<(f64, ElementId)>> {
-		match self {
-			HnswFlavor::H5_9(h) => {
-				h.knn_search_with_filter(ctx, search, filter, pending_docs, allow_list).await
-			}
-			HnswFlavor::H5_17(h) => {
-				h.knn_search_with_filter(ctx, search, filter, pending_docs, allow_list).await
-			}
-			HnswFlavor::H5_25(h) => {
-				h.knn_search_with_filter(ctx, search, filter, pending_docs, allow_list).await
-			}
-			HnswFlavor::H5set(h) => {
-				h.knn_search_with_filter(ctx, search, filter, pending_docs, allow_list).await
-			}
-			HnswFlavor::H9_17(h) => {
-				h.knn_search_with_filter(ctx, search, filter, pending_docs, allow_list).await
-			}
-			HnswFlavor::H9_25(h) => {
-				h.knn_search_with_filter(ctx, search, filter, pending_docs, allow_list).await
-			}
-			HnswFlavor::H9set(h) => {
-				h.knn_search_with_filter(ctx, search, filter, pending_docs, allow_list).await
-			}
-			HnswFlavor::H13_25(h) => {
-				h.knn_search_with_filter(ctx, search, filter, pending_docs, allow_list).await
-			}
-			HnswFlavor::H13set(h) => {
-				h.knn_search_with_filter(ctx, search, filter, pending_docs, allow_list).await
-			}
-			HnswFlavor::H17set(h) => {
-				h.knn_search_with_filter(ctx, search, filter, pending_docs, allow_list).await
-			}
-			HnswFlavor::H21set(h) => {
-				h.knn_search_with_filter(ctx, search, filter, pending_docs, allow_list).await
-			}
-			HnswFlavor::H25set(h) => {
-				h.knn_search_with_filter(ctx, search, filter, pending_docs, allow_list).await
-			}
-			HnswFlavor::H29set(h) => {
-				h.knn_search_with_filter(ctx, search, filter, pending_docs, allow_list).await
-			}
-			HnswFlavor::Hset(h) => {
-				h.knn_search_with_filter(ctx, search, filter, pending_docs, allow_list).await
-			}
-		}
+		with_hnsw!(self, h => h.knn_search_with_filter(ctx, search, filter, pending_docs, allow_list).await)
 	}
 	/// Retrieves the vectors of several element IDs, in input order.
 	pub(super) async fn get_vectors(
@@ -374,45 +325,16 @@ impl HnswFlavor {
 	}
 
 	/// Retrieves the vector associated with the given element ID.
+	#[cfg(test)]
 	pub(super) async fn get_vector(
 		&self,
 		tx: &Transaction,
 		e_id: &ElementId,
 	) -> Result<Option<SharedVector>> {
-		match self {
-			HnswFlavor::H5_9(h) => h.get_vector(tx, e_id).await,
-			HnswFlavor::H5_17(h) => h.get_vector(tx, e_id).await,
-			HnswFlavor::H5_25(h) => h.get_vector(tx, e_id).await,
-			HnswFlavor::H5set(h) => h.get_vector(tx, e_id).await,
-			HnswFlavor::H9_17(h) => h.get_vector(tx, e_id).await,
-			HnswFlavor::H9_25(h) => h.get_vector(tx, e_id).await,
-			HnswFlavor::H9set(h) => h.get_vector(tx, e_id).await,
-			HnswFlavor::H13_25(h) => h.get_vector(tx, e_id).await,
-			HnswFlavor::H13set(h) => h.get_vector(tx, e_id).await,
-			HnswFlavor::H17set(h) => h.get_vector(tx, e_id).await,
-			HnswFlavor::H21set(h) => h.get_vector(tx, e_id).await,
-			HnswFlavor::H25set(h) => h.get_vector(tx, e_id).await,
-			HnswFlavor::H29set(h) => h.get_vector(tx, e_id).await,
-			HnswFlavor::Hset(h) => h.get_vector(tx, e_id).await,
-		}
+		with_hnsw!(self, h => h.get_vector(tx, e_id).await)
 	}
 	#[cfg(test)]
 	pub(super) async fn check_hnsw_properties(&self, expected_count: usize) {
-		match self {
-			HnswFlavor::H5_9(h) => h.check_hnsw_properties(expected_count).await,
-			HnswFlavor::H5_17(h) => h.check_hnsw_properties(expected_count).await,
-			HnswFlavor::H5_25(h) => h.check_hnsw_properties(expected_count).await,
-			HnswFlavor::H5set(h) => h.check_hnsw_properties(expected_count).await,
-			HnswFlavor::H9_17(h) => h.check_hnsw_properties(expected_count).await,
-			HnswFlavor::H9_25(h) => h.check_hnsw_properties(expected_count).await,
-			HnswFlavor::H9set(h) => h.check_hnsw_properties(expected_count).await,
-			HnswFlavor::H13_25(h) => h.check_hnsw_properties(expected_count).await,
-			HnswFlavor::H13set(h) => h.check_hnsw_properties(expected_count).await,
-			HnswFlavor::H17set(h) => h.check_hnsw_properties(expected_count).await,
-			HnswFlavor::H21set(h) => h.check_hnsw_properties(expected_count).await,
-			HnswFlavor::H25set(h) => h.check_hnsw_properties(expected_count).await,
-			HnswFlavor::H29set(h) => h.check_hnsw_properties(expected_count).await,
-			HnswFlavor::Hset(h) => h.check_hnsw_properties(expected_count).await,
-		}
+		with_hnsw!(self, h => h.check_hnsw_properties(expected_count).await)
 	}
 }

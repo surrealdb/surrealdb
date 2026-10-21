@@ -533,6 +533,15 @@ impl TestIndexStore {
 		self.tf.triggers().set_before_commit_hook(hook);
 	}
 
+	/// Have this datastore's next DiskANN guard step run `hook` once it has written its steps,
+	/// before it commits.
+	pub(crate) fn before_next_guard_step_commit(
+		&self,
+		hook: surrealdb_datastore::triggers::BeforeCommitHook,
+	) {
+		self.tf.triggers().set_before_guard_step_commit_hook(hook);
+	}
+
 	/// How many DiskANN guards this datastore's compaction has repaired.
 	pub(crate) fn guard_repairs(&self) -> usize {
 		self.tf.triggers().diskann_guard_repairs()

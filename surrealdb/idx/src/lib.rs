@@ -115,18 +115,19 @@ use crate::key::schema::{
 	BuildBarrierKey, BuildPrimaryGenerationPrefix, BuildPrimaryIxPrefix, BuildPrimaryKey,
 	BuildReservationGenerationPrefix, BuildReservationIxPrefix, BuildReservationKey, BuildStateKey,
 	BuildTicketIxPrefix, BuildTicketKey, DocCountKey, DocLengthKey, DocStatsBatchPrefix,
-	DocStatsKey, DocTermsKey, HnswDocElementsKey, HnswElementHashedKey, HnswElementKey,
-	HnswGenerationKey, HnswLayerKey, HnswLayerLayerPrefix, HnswNodeKey, HnswNodeLayerPrefix,
-	HnswPendingLegacyPrefix, HnswRecordPendingKey, HnswRecordPendingPrefix, HnswStateKey,
-	HnswVectorKey, IdxRoot, IndexAppendKey, IndexAppendPrefix, IndexCompactionKey, IndexPrimaryKey,
-	IndexVersionKey, TermChangeBatchPrefix, TermChangeBatchTermPrefix, TermChangeSetKey,
-	TermChangesKey, TermDocsKey, TermDocsResidualKey, TermDocsResidualPrefix, TermGenerationKey,
-	TermPostingKey,
+	DocStatsKey, DocTermsKey, HnswDocElementsKey, HnswElementDocsKey, HnswElementHashedKey,
+	HnswElementKey, HnswGenerationKey, HnswLayerKey, HnswLayerLayerPrefix, HnswNodeKey,
+	HnswNodeLayerPrefix, HnswPendingLegacyPrefix, HnswRecordPendingKey, HnswRecordPendingPrefix,
+	HnswStateKey, HnswVectorKey, IdxRoot, IndexAppendKey, IndexAppendPrefix, IndexCompactionKey,
+	IndexPrimaryKey, IndexVersionKey, TermChangeBatchPrefix, TermChangeBatchTermPrefix,
+	TermChangeSetKey, TermChangesKey, TermDocsKey, TermDocsResidualKey, TermDocsResidualPrefix,
+	TermGenerationKey, TermPostingKey,
 };
 #[cfg(diskann)]
 use crate::key::schema::{
-	DiskannDocElementsKey, DiskannElementDocsKey, DiskannElementHashedKey, DiskannElementKey,
-	DiskannGenerationKey, DiskannNodeKey, DiskannPendingKey, DiskannPendingLegacyKey,
+	DiskannDocElementsKey, DiskannElementCodeKey, DiskannElementDocSetKey, DiskannElementDocsKey,
+	DiskannElementHashedKey, DiskannElementKey, DiskannGenerationKey, DiskannNodeKey,
+	DiskannPendingLegacyKey, DiskannPendingPrefix, DiskannPendingSummaryKey,
 	DiskannRecordPendingKey, DiskannRecordPendingPrefix, DiskannRecordPendingShardKey,
 	DiskannRecordPendingShardShardPrefix, DiskannStateKey,
 };
@@ -517,6 +518,41 @@ impl IndexKeyBase {
 		}
 	}
 
+	/// Key mapping an HNSW graph element to the doc-IDs whose vector it holds.
+	fn new_hm_key(&self, element_id: ElementId) -> HnswElementDocsKey<'_> {
+		HnswElementDocsKey {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+			element_id,
+		}
+	}
+
+	/// Range covering every HNSW element's stored vector.
+	#[cfg(test)]
+	fn new_he_range(&self) -> Result<TypedRange<SerializedVector>> {
+		crate::key::schema::HnswVectorPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+		}
+		.range()
+	}
+
+	/// Range covering every HNSW element's doc-ID set.
+	#[cfg(test)]
+	fn new_hm_range(&self) -> Result<TypedRange<crate::trees::knn::Ids64>> {
+		crate::key::schema::HnswElementDocsPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+		}
+		.range()
+	}
+
 	fn new_hh_key(&self, hash: [u8; 32]) -> HnswElementHashedKey<'_> {
 		HnswElementHashedKey {
 			ns: self.0.ns,
@@ -631,14 +667,87 @@ impl IndexKeyBase {
 	/// Separate from `!dp` so a pre-change node's compactor — which only knows `!dp`/`!dr` — cannot
 	/// clear the guard for sharded data it can't see during a mixed-version rolling upgrade.
 	#[cfg(diskann)]
-	fn new_dy_key(&self, shard: u16) -> DiskannPendingKey<'_> {
-		DiskannPendingKey {
+	#[cfg(test)]
+	fn new_dy_key(&self, shard: u16) -> crate::key::schema::DiskannPendingKey<'_> {
+		crate::key::schema::DiskannPendingKey {
 			ns: self.0.ns,
 			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			shard,
 		}
+	}
+
+	/// Key storing the DiskANN pending-state summary (`!dY`), which reads `Empty` or is absent only
+	/// while every `!dy` guard reads `Empty` or is absent.
+	#[cfg(diskann)]
+	fn new_dy_summary_key(&self) -> DiskannPendingSummaryKey<'_> {
+		DiskannPendingSummaryKey {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+		}
+	}
+
+	/// Range over every shard's DiskANN pending-state guard (`!dy`).
+	#[cfg(diskann)]
+	fn new_dy_range(&self) -> Result<TypedRange<crate::trees::diskann::DiskAnnPendingState>> {
+		DiskannPendingPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+		}
+		.range()
+	}
+
+	/// Range covering every DiskANN element's 8-bit code.
+	#[cfg(all(test, diskann))]
+	fn new_da_range(&self) -> Result<TypedRange<crate::trees::diskann::DiskAnnElementCode>> {
+		crate::key::schema::DiskannElementCodePrefix {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+		}
+		.range()
+	}
+
+	/// Key storing a DiskANN graph element's 8-bit code.
+	#[cfg(diskann)]
+	fn new_da_key(&self, element_id: ElementId) -> DiskannElementCodeKey<'_> {
+		DiskannElementCodeKey {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+			element_id,
+		}
+	}
+
+	/// Key mapping a DiskANN graph element to the doc-IDs whose vector it holds.
+	#[cfg(diskann)]
+	fn new_dm_key(&self, element_id: ElementId) -> DiskannElementDocSetKey<'_> {
+		DiskannElementDocSetKey {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+			element_id,
+		}
+	}
+
+	/// Range covering every DiskANN element's doc-ID set.
+	#[cfg(all(test, diskann))]
+	fn new_dm_range(&self) -> Result<TypedRange<crate::trees::knn::Ids64>> {
+		crate::key::schema::DiskannElementDocSetPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+		}
+		.range()
 	}
 
 	/// Key mapping an exact serialized vector to its DiskANN document set.

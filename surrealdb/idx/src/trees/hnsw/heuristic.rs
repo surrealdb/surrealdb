@@ -88,7 +88,7 @@ impl Heuristic {
 		{
 			Self::extend_candidates(tx, elements, layer, q_id, q_pt, &mut graph, None).await?;
 		}
-		for (dist, id) in batch.to_vec() {
+		for (dist, id) in batch.into_sorted_vec() {
 			graph.push(dist, id);
 		}
 		match self {
@@ -173,8 +173,8 @@ impl Heuristic {
 		}
 		let mut ext = Vec::with_capacity(m_max.min(c.len()));
 		for (_, e_id) in c.to_vec() {
-			if let Some(e_conn) = layer.get_edges(e_id) {
-				for &e_adj in e_conn.iter() {
+			if let Some(e_conn) = layer.live_edges(e_id) {
+				for e_adj in e_conn {
 					if e_adj != q_id
 						&& ex.insert(e_adj)
 						&& let Some(d) = elements.get_distance(tx, q_pt, &e_adj).await?

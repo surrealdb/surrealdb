@@ -422,6 +422,11 @@ pub struct CommitTriggers {
 	/// stalls there need.
 	#[cfg(any(test, feature = "test-hooks"))]
 	before_commit: Mutex<Option<BeforeCommitHook>>,
+	/// Work the next DiskANN guard step through this datastore runs once it has
+	/// read and written what it steps, before its commit, as the tests of a
+	/// covering that lands inside a step need.
+	#[cfg(any(test, feature = "test-hooks"))]
+	before_guard_step_commit: Mutex<Option<BeforeCommitHook>>,
 	/// Whether the next commit through this datastore that has rollback
 	/// actions registered reports its outcome unknown once it has applied, as
 	/// the tests of a commit that applied but could not say so need, with the
@@ -476,6 +481,20 @@ impl CommitTriggers {
 	#[cfg(any(test, feature = "test-hooks"))]
 	pub(crate) fn take_before_commit_hook(&self) -> Option<BeforeCommitHook> {
 		self.before_commit.lock().take()
+	}
+
+	/// Have the next DiskANN guard step through this datastore run `hook` once
+	/// it has written its steps, before it commits
+	/// (`Transaction::step_diskann_pending_guards`).
+	#[cfg(any(test, feature = "test-hooks"))]
+	pub fn set_before_guard_step_commit_hook(&self, hook: BeforeCommitHook) {
+		*self.before_guard_step_commit.lock() = Some(hook);
+	}
+
+	/// The hook a test set for the next guard step, taken so it runs once.
+	#[cfg(any(test, feature = "test-hooks"))]
+	pub(crate) fn take_before_guard_step_commit_hook(&self) -> Option<BeforeCommitHook> {
+		self.before_guard_step_commit.lock().take()
 	}
 
 	/// Have the next commit through this datastore that has rollback actions

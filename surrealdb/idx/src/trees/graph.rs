@@ -46,9 +46,39 @@ where
 		S::with_capacity(self.capacity)
 	}
 
+	/// Every edge of `node`, live or not: for pruning a list and for tests. A walk
+	/// follows [`Self::live_edges`].
 	#[inline]
 	pub(super) fn get_edges(&self, node: ElementId) -> Option<&S> {
 		self.nodes.get(&node)
+	}
+
+	/// Whether `node` is a node of this graph.
+	#[inline]
+	pub(super) fn has_node(&self, node: ElementId) -> bool {
+		self.nodes.contains_key(&node)
+	}
+
+	/// The edges of `node` that lead to a node of this graph: the only edges a walk
+	/// follows.
+	///
+	/// Edge lists are directed in practice: pruning replaces a node's list
+	/// without touching the lists that point at it, and removing a node clears
+	/// it only from the lists of the nodes it points at. Other nodes can keep
+	/// an edge to a removed node, in memory and in the stored layer, as can a
+	/// list an older binary wrote. Such an edge leads to an element that no
+	/// longer exists, so a walk must not follow it: its vector may still be
+	/// cached process-wide, read there by a snapshot that predates the removal.
+	/// The edge is dropped when its list is next rewritten
+	/// ([`Self::add_node_and_bidirectional_edges`]), and until then it is never
+	/// followed and holds no neighbour slot.
+	pub(super) fn live_edges(
+		&self,
+		node: ElementId,
+	) -> Option<impl Iterator<Item = ElementId> + '_> {
+		self.nodes
+			.get(&node)
+			.map(|edges| edges.iter().copied().filter(|edge| self.nodes.contains_key(edge)))
 	}
 
 	pub(super) fn add_empty_node(&mut self, node: ElementId) -> bool {
@@ -60,14 +90,35 @@ where
 		}
 	}
 
+	/// Adds `node` with `edges`, and an edge back to it in each neighbour's list.
+	/// Returns the neighbours, whose lists changed.
+	///
+	/// An edge to a node not in the graph is not added, and no node is created
+	/// for it. Each neighbour's list drops its edges to removed nodes as it is
+	/// rewritten, so its length counts live edges only and a stale edge never
+	/// takes the slot of a live one.
 	pub(super) fn add_node_and_bidirectional_edges(
 		&mut self,
 		node: ElementId,
-		edges: S,
+		mut edges: S,
 	) -> Vec<ElementId> {
 		let mut r = Vec::with_capacity(edges.len());
-		for &e in edges.iter() {
-			self.nodes.entry(e).or_insert_with(|| S::with_capacity(self.capacity)).insert(node);
+		for e in edges.iter().copied().collect::<Vec<_>>() {
+			let dead: Vec<ElementId> = match self.nodes.get(&e) {
+				Some(list) => {
+					list.iter().copied().filter(|x| !self.nodes.contains_key(x)).collect()
+				}
+				None => {
+					edges.remove(&e);
+					continue;
+				}
+			};
+			if let Some(list) = self.nodes.get_mut(&e) {
+				for x in &dead {
+					list.remove(x);
+				}
+				list.insert(node);
+			}
 			r.push(e);
 		}
 		self.nodes.insert(node, edges);
@@ -235,6 +286,23 @@ mod tests {
 		e.insert(1);
 		g.set_node(2, e);
 		g.check(vec![(0, vec![1]), (1, vec![0, 3]), (2, vec![1]), (3, vec![0])]);
+
+		// Node 1 keeps a one-way edge to 3; remove 3, which points at 0 alone, so the edge
+		// from 1 stays, dead.
+		g.remove_node_and_bidirectional_edges(3);
+		g.check(vec![(0, vec![1]), (1, vec![0, 3]), (2, vec![1])]);
+		let live: Vec<ElementId> = g.live_edges(1).unwrap().collect();
+		assert_eq!(live, vec![0], "a walk does not follow the dead edge");
+		// Adding a node next to 1 rewrites 1's list, which drops the dead edge. An edge to a
+		// node not in the graph (9) is not added, and no node is created for it.
+		let mut e = g.new_edges();
+		e.insert(1);
+		e.insert(9);
+		let mut res = g.add_node_and_bidirectional_edges(4, e);
+		res.sort();
+		assert_eq!(res, vec![1]);
+		assert!(!g.has_node(9), "no node is created for a missing neighbour");
+		g.check(vec![(0, vec![1]), (1, vec![0, 4]), (2, vec![1]), (4, vec![1])]);
 	}
 
 	#[test]
@@ -282,6 +350,8 @@ mod tests {
 	#[test]
 	fn test_node_to_val_and_load_node() {
 		let mut g = UndirectedGraph::<ArraySet<10>>::new(10);
+		g.add_empty_node(2);
+		g.add_empty_node(3);
 
 		let mut e = ArraySet::<10>::with_capacity(10);
 		e.insert(2);

@@ -499,6 +499,9 @@ fn store(instr: &StoreInstr) -> Class {
 		| StoreInstr::ClaimDocIdsReclaim {
 			..
 		}
+		| StoreInstr::AdmitIndexFormat {
+			..
+		}
 		| StoreInstr::NextIndexId {
 			..
 		}

@@ -1103,12 +1103,35 @@ async fn define_index_overwrite_unchanged_rebuilds_an_index_that_is_not_online()
 	Ok(())
 }
 
+/// An index stamped below its kind's current layout is rebuilt, and one stamped at
+/// it is kept, whatever the global format version: a newer version that changes
+/// only other kinds' layouts gains this index nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn define_index_overwrite_unchanged_keeps_an_index_at_its_kinds_current_layout() -> Result<()>
+{
+	let (ds, session, ikb) = define_overwritten_index_test().await?;
+	let (ns, db, table, current) = get_table_index(&ds, "user", "test").await?;
+	let layout = crate::catalog::current_layout_format_version(&current.index);
+	assert!(layout < INDEX_FORMAT_VERSION, "a newer version changed only other kinds");
+	let mut stamped = current.as_ref().clone();
+	stamped.format_version = layout;
+	let tx = ds.transaction(TransactionType::Write).await?;
+	catch!(tx, tx.put_tb_index(ns, db, &table, &stamped).await);
+	tx.commit().await?;
+	execute_all(&ds, &session, "DEFINE INDEX OVERWRITE test ON user FIELDS email COMMENT 'first';")
+		.await?;
+	let (_, _, _, current) = get_table_index(&ds, "user", "test").await?;
+	assert_eq!(current.index_id, ikb.index(), "an index at its kind's current layout is kept");
+	assert_eq!(current.format_version, layout, "and keeps its stamp");
+	Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn define_index_overwrite_unchanged_rebuilds_an_index_of_an_older_format() -> Result<()> {
 	let (ds, session, ikb) = define_overwritten_index_test().await?;
 	let (ns, db, table, current) = get_table_index(&ds, "user", "test").await?;
 	let mut older = current.as_ref().clone();
-	older.format_version = INDEX_FORMAT_VERSION - 1;
+	older.format_version = crate::catalog::current_layout_format_version(&current.index) - 1;
 	let tx = ds.transaction(TransactionType::Write).await?;
 	catch!(tx, tx.put_tb_index(ns, db, &table, &older).await);
 	tx.commit().await?;
@@ -20904,5 +20927,146 @@ async fn a_running_build_defers_stalled_scans_but_not_a_stalled_closing() -> Res
 	);
 
 	txn.commit().await?;
+	Ok(())
+}
+
+/// A DiskANN definition with parameters no index can serve is refused in its own
+/// transaction, `CONCURRENTLY` included, so it never commits a definition that
+/// would fail every later write and query on its table.
+#[cfg(diskann)]
+#[tokio::test(flavor = "multi_thread")]
+async fn define_index_refuses_unservable_diskann_parameters() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	for sql in [
+		"DEFINE INDEX ix ON t FIELDS v DISKANN DIMENSION 33026 DIST EUCLIDEAN TYPE U8;",
+		"DEFINE INDEX ix ON t FIELDS v DISKANN DIMENSION 33026 DIST EUCLIDEAN TYPE U8 CONCURRENTLY;",
+	] {
+		let err = ds.execute(sql, &session, None).await?.remove(0).result.expect_err(sql);
+		assert!(err.to_string().contains("support DIMENSION up to 33025"), "{sql}: {err}");
+		let res = ds
+			.execute("(INFO FOR TABLE t).indexes.keys();", &session, None)
+			.await?
+			.remove(0)
+			.result?;
+		assert_eq!(surrealdb_types::ToSql::to_sql(&res), "[]", "{sql} left an index");
+	}
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX ix ON t FIELDS v DISKANN DIMENSION 33025 DIST EUCLIDEAN TYPE U8 CONCURRENTLY;",
+	)
+	.await?;
+	Ok(())
+}
+
+/// The format version `DEFINE INDEX` and `REBUILD INDEX` stamp is admitted to the
+/// store's feature level: the current one above `Legacy`, and no higher than
+/// [`crate::catalog::LEGACY_LEVEL_INDEX_FORMAT_VERSION`] on a store held at
+/// `Legacy`, which releases before 4.0 can still serve.
+#[cfg(feature = "kv-mem")]
+#[tokio::test]
+async fn index_format_stamp_is_admitted_to_the_feature_level() -> Result<()> {
+	use crate::catalog::{INDEX_FORMAT_VERSION, LEGACY_LEVEL_INDEX_FORMAT_VERSION};
+
+	async fn stamp(ds: &Datastore, index: &str) -> Result<u16> {
+		Ok(stamp_and_id(ds, index).await?.0)
+	}
+
+	async fn stamp_and_id(ds: &Datastore, index: &str) -> Result<(u16, crate::catalog::IndexId)> {
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let ns = tx.get_ns_by_name("test", None).await?.expect("namespace should exist");
+		let db = tx.get_db_by_name("test", "test", None).await?.expect("database should exist");
+		let ix = tx
+			.get_tb_index(ns.namespace_id, db.database_id, &TableName::from("t"), index, None)
+			.await?
+			.expect("index should exist");
+		tx.cancel().await?;
+		Ok((ix.format_version, ix.index_id))
+	}
+
+	/// An unchanged `DEFINE INDEX OVERWRITE` keeps an index whose stamp is the one
+	/// the store admits now, and keeps its stamp.
+	async fn overwrite_keeps(ds: &Datastore, session: &Session) -> Result<(u16, bool)> {
+		let (_, before) = stamp_and_id(ds, "hx").await?;
+		let sql = "DEFINE INDEX OVERWRITE hx ON t FIELDS v HNSW DIMENSION 2 DIST EUCLIDEAN;";
+		for r in ds.execute(sql, session, None).await? {
+			r.result?;
+		}
+		let (stamped, after) = stamp_and_id(ds, "hx").await?;
+		Ok((stamped, after == before))
+	}
+
+	async fn define_and_rebuild(ds: &Datastore, session: &Session) -> Result<(u16, u16)> {
+		for sql in [
+			"DEFINE TABLE t SCHEMALESS;",
+			"DEFINE INDEX hx ON t FIELDS v HNSW DIMENSION 2 DIST EUCLIDEAN;",
+		] {
+			for r in ds.execute(sql, session, None).await? {
+				r.result?;
+			}
+		}
+		let defined = stamp(ds, "hx").await?;
+		for r in ds.execute("REBUILD INDEX hx ON t;", session, None).await? {
+			r.result?;
+		}
+		Ok((defined, stamp(ds, "hx").await?))
+	}
+
+	let (ds, session) = new_index_test_ds().await?;
+	assert!(!ds.feature_level().await?.level.is_legacy(), "a new store starts above Legacy");
+	assert_eq!(
+		define_and_rebuild(&ds, &session).await?,
+		(INDEX_FORMAT_VERSION, INDEX_FORMAT_VERSION)
+	);
+	assert_eq!(overwrite_keeps(&ds, &session).await?, (INDEX_FORMAT_VERSION, true));
+	// Above `Legacy`, an HNSW index stamped with the legacy-level format lacks the
+	// layout this format gives it, so an unchanged overwrite rebuilds it.
+	{
+		let tx = ds.transaction(TransactionType::Write).await?;
+		let ns = tx.get_ns_by_name("test", None).await?.expect("namespace should exist");
+		let db = tx.get_db_by_name("test", "test", None).await?.expect("database should exist");
+		let table = TableName::from("t");
+		let mut ix = tx
+			.get_tb_index(ns.namespace_id, db.database_id, &table, "hx", None)
+			.await?
+			.expect("index should exist")
+			.as_ref()
+			.clone();
+		ix.format_version = LEGACY_LEVEL_INDEX_FORMAT_VERSION;
+		tx.put_tb_index(ns.namespace_id, db.database_id, &table, &ix).await?;
+		tx.commit().await?;
+	}
+	assert_eq!(overwrite_keeps(&ds, &session).await?, (INDEX_FORMAT_VERSION, false));
+
+	// A store an earlier release wrote, opened by this build and held at Legacy.
+	let legacy = Datastore::builder()
+		.without_maintenance_tasks()
+		.without_startup_transactions()
+		.with_legacy_feature_level()
+		.build_with_path("memory")
+		.await?;
+	let tx = legacy.transaction(TransactionType::Write).await?;
+	tx.set_key(&crate::key::schema::VersionKey {}, &crate::kvs::version::MajorVersion::latest())
+		.await?;
+	tx.set_key(
+		&crate::key::schema::StorageVersionKey {},
+		&crate::kvs::version::StorageVersion::parse("3.3.0")?,
+	)
+	.await?;
+	tx.commit().await?;
+	legacy.check_version().await?;
+	let tx = legacy.transaction(TransactionType::Write).await?;
+	tx.ensure_ns_db(None, "test", "test").await?;
+	tx.commit().await?;
+	assert!(legacy.feature_level().await?.level.is_legacy(), "the store is held at Legacy");
+	assert_eq!(
+		define_and_rebuild(&legacy, &session).await?,
+		(LEGACY_LEVEL_INDEX_FORMAT_VERSION, LEGACY_LEVEL_INDEX_FORMAT_VERSION)
+	);
+	assert_eq!(
+		overwrite_keeps(&legacy, &session).await?,
+		(LEGACY_LEVEL_INDEX_FORMAT_VERSION, true),
+		"an index at the format the store admits is current there"
+	);
 	Ok(())
 }

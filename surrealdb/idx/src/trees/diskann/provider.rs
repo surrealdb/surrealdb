@@ -2,8 +2,8 @@
 //!
 //! The upstream DiskANN graph owns search and mutation algorithms, but delegates persistence and
 //! distance/computer access through provider traits. This module maps those trait calls onto
-//! SurrealDB transactions, keeps the persisted `!de`/`!dn`/`!ds` keys authoritative, and batches
-//! cache misses so RocksDB-backed lookups avoid long chains of individual point reads.
+//! SurrealDB transactions, keeps the persisted `!de`/`!da`/`!dn`/`!ds` keys authoritative, and
+//! batches cache misses so RocksDB-backed lookups avoid long chains of individual point reads.
 //!
 //! # Cache coherency invariant
 //!
@@ -11,9 +11,10 @@
 //! and alongside every other process's commits. Every graph entry is stamped with the wrapper that
 //! published it and the `!dg` compaction generation its value holds at, and a transaction reads
 //! through a [`CacheView`] of its own wrapper's entries ([`DiskAnnProviderContext::view`]). Every
-//! commit that writes `!de`, `!dn` or `!ds`, or a vector's document mapping, also advances `!dg`
-//! with a conditional put, so one generation identifies one committed state of all of them, and an
-//! entry stamped at a reader's own generation is exactly what that reader would read from KV.
+//! commit that writes `!de`, `!da`, `!dn` or `!ds`, or a vector's document mapping, also advances
+//! `!dg` with a conditional put, so one generation identifies one committed state of all of them,
+//! and an entry stamped at a reader's own generation is exactly what that reader would read from
+//! KV.
 //!
 //! An entry also holds past its own generation while the wrapper's [`Continuity`] span covers it.
 //! Every generation in the span was committed by one of the wrapper's own frames, and each wrote
@@ -80,19 +81,23 @@ use diskann::provider::{
 };
 use diskann::utils::VectorRepr;
 use diskann::{ANNError, ANNResult, default_post_processor};
-use diskann_utils::views::Matrix;
+use diskann_utils::views::rowmajor;
 use diskann_vector::distance::Metric;
 use diskann_vector::{Half, PreprocessedDistanceFunction};
+use half::slice::HalfBitsSliceExt;
 use surrealdb_datastore::Transaction;
 use tracing::warn;
 
 use crate::IndexKeyBase;
-use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId};
-use crate::key::KVValue;
+use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId, keeps_element_codes};
 use crate::key::schema::DiskannElementKey;
+use crate::key::{KVKey, KVValue};
 use crate::trees::diskann::cache::{CacheView, Continuity, DiskAnnCache, Stamp};
 use crate::trees::diskann::frame::{DiskAnnBuildFrame, FrameKv, TaskGuard};
-use crate::trees::diskann::{DiskAnnElement, DiskAnnNode, DiskAnnState, ElementId};
+use crate::trees::diskann::{
+	DiskAnnElement, DiskAnnElementCode, DiskAnnNode, DiskAnnState, ElementId,
+};
+use crate::trees::kernels::dot_narrow;
 use crate::trees::vector::SerializedVector;
 #[cfg(test)]
 use crate::trees::vector::Vector;
@@ -196,8 +201,18 @@ pub(super) trait DiskAnnVectorElement:
 {
 	/// Converts a typed DiskANN slice into SurrealDB's revisioned vector representation.
 	fn serialized_from_slice(slice: &[Self]) -> SerializedVector;
-	/// Copies a persisted vector into a typed scratch buffer for DiskANN distance computation.
-	fn copy_from_serialized(vector: &SerializedVector, buffer: &mut [Self]) -> ANNResult<()>;
+	/// Borrows a persisted vector as a typed slice of `dim` elements, without copying.
+	///
+	/// Fails when `vector` holds another element type or another dimension.
+	fn as_slice(vector: &SerializedVector, dim: usize) -> ANNResult<&[Self]>;
+	/// Whether an index keeping codes keeps one for vectors of this type. The 8-bit types are
+	/// already that narrow, so it keeps none of theirs.
+	const CODED: bool = false;
+	/// The 8-bit code an index keeping codes stores for a vector of this type, or `None` for a
+	/// type it keeps no code of.
+	fn encode_code(_slice: &[Self]) -> Option<DiskAnnElementCode> {
+		None
+	}
 }
 
 fn vector_type_mismatch(expected: &str, vector: &SerializedVector) -> ANNError {
@@ -210,20 +225,30 @@ fn vector_len_mismatch(current: usize, expected: usize) -> ANNError {
 	))
 }
 
+/// Returns `values` when it holds exactly `dim` elements.
+fn check_dim<T>(values: &[T], dim: usize) -> ANNResult<&[T]> {
+	if values.len() != dim {
+		return Err(vector_len_mismatch(values.len(), dim));
+	}
+	Ok(values)
+}
+
 impl DiskAnnVectorElement for f32 {
 	fn serialized_from_slice(slice: &[Self]) -> SerializedVector {
 		SerializedVector::F32(slice.to_vec())
 	}
 
-	fn copy_from_serialized(vector: &SerializedVector, buffer: &mut [Self]) -> ANNResult<()> {
+	const CODED: bool = true;
+
+	fn encode_code(slice: &[Self]) -> Option<DiskAnnElementCode> {
+		Some(DiskAnnElementCode::encode(slice))
+	}
+
+	fn as_slice(vector: &SerializedVector, dim: usize) -> ANNResult<&[Self]> {
 		let SerializedVector::F32(values) = vector else {
 			return Err(vector_type_mismatch("F32", vector));
 		};
-		if values.len() != buffer.len() {
-			return Err(vector_len_mismatch(values.len(), buffer.len()));
-		}
-		buffer.copy_from_slice(values);
-		Ok(())
+		check_dim(values, dim)
 	}
 }
 
@@ -232,17 +257,19 @@ impl DiskAnnVectorElement for Half {
 		SerializedVector::F16(slice.iter().map(|v| v.to_bits()).collect())
 	}
 
-	fn copy_from_serialized(vector: &SerializedVector, buffer: &mut [Self]) -> ANNResult<()> {
+	const CODED: bool = true;
+
+	fn encode_code(slice: &[Self]) -> Option<DiskAnnElementCode> {
+		let wide: Vec<f32> = slice.iter().map(|v| v.to_f32()).collect();
+		Some(DiskAnnElementCode::encode(&wide))
+	}
+
+	fn as_slice(vector: &SerializedVector, dim: usize) -> ANNResult<&[Self]> {
 		let SerializedVector::F16(values) = vector else {
 			return Err(vector_type_mismatch("F16", vector));
 		};
-		if values.len() != buffer.len() {
-			return Err(vector_len_mismatch(values.len(), buffer.len()));
-		}
-		for (dst, bits) in buffer.iter_mut().zip(values.iter()) {
-			*dst = Half::from_bits(*bits);
-		}
-		Ok(())
+		// `Half` is `half::f16`, which has the same layout as its `u16` bits.
+		check_dim(values.reinterpret_cast::<Half>(), dim)
 	}
 }
 
@@ -251,15 +278,11 @@ impl DiskAnnVectorElement for i8 {
 		SerializedVector::I8(slice.to_vec())
 	}
 
-	fn copy_from_serialized(vector: &SerializedVector, buffer: &mut [Self]) -> ANNResult<()> {
+	fn as_slice(vector: &SerializedVector, dim: usize) -> ANNResult<&[Self]> {
 		let SerializedVector::I8(values) = vector else {
 			return Err(vector_type_mismatch("I8", vector));
 		};
-		if values.len() != buffer.len() {
-			return Err(vector_len_mismatch(values.len(), buffer.len()));
-		}
-		buffer.copy_from_slice(values);
-		Ok(())
+		check_dim(values, dim)
 	}
 }
 
@@ -268,15 +291,11 @@ impl DiskAnnVectorElement for u8 {
 		SerializedVector::U8(slice.to_vec())
 	}
 
-	fn copy_from_serialized(vector: &SerializedVector, buffer: &mut [Self]) -> ANNResult<()> {
+	fn as_slice(vector: &SerializedVector, dim: usize) -> ANNResult<&[Self]> {
 		let SerializedVector::U8(values) = vector else {
 			return Err(vector_type_mismatch("U8", vector));
 		};
-		if values.len() != buffer.len() {
-			return Err(vector_len_mismatch(values.len(), buffer.len()));
-		}
-		buffer.copy_from_slice(values);
-		Ok(())
+		check_dim(values, dim)
 	}
 }
 
@@ -334,6 +353,23 @@ impl DiskAnnProvider {
 	/// The vector dimension of this provider's index.
 	pub(super) fn dim(&self) -> usize {
 		self.dim
+	}
+
+	/// The distance metric of this provider's index.
+	pub(super) fn metric(&self) -> Metric {
+		self.metric
+	}
+
+	/// Whether this index keeps an 8-bit code of each element of a coded vector type.
+	pub(super) fn keeps_codes(&self) -> bool {
+		keeps_element_codes(self.format_version)
+	}
+
+	/// Whether a walk over vectors of type `T` can score this index's element codes: the index
+	/// keeps them for `T`, and the codes' integer dot product cannot overflow its `i32` sum.
+	pub(super) fn scores_codes<T: DiskAnnVectorElement>(&self) -> bool {
+		const MAX_DIMENSION: usize = (i32::MAX / (127 * 127)) as usize;
+		T::CODED && self.keeps_codes() && self.dim <= MAX_DIMENSION
 	}
 
 	/// Returns the cache scope tuple for this provider's index.
@@ -472,11 +508,15 @@ impl DiskAnnProvider {
 	///
 	/// Inside a frame the element is also recorded as written, in the same critical section, and a
 	/// closed frame does neither.
+	///
+	/// `code` is the element's `!da` code when this write wrote one, which is written through or
+	/// evicted with the element; `None` leaves any cached code as it is.
 	fn write_element_through(
 		&self,
 		context: &DiskAnnProviderContext,
 		element_id: ElementId,
 		element: DiskAnnElement,
+		code: Option<&DiskAnnElementCode>,
 	) {
 		let element = Arc::new(element);
 		let through = || match context.view.write_through() {
@@ -487,8 +527,16 @@ impl DiskAnnProvider {
 					stamp,
 					Arc::clone(&element),
 				);
+				if let Some(code) = code {
+					self.cache.insert_code(self.cache_index(), element_id, stamp, code.clone());
+				}
 			}
-			None => self.cache.remove_element(self.cache_index(), element_id),
+			None => {
+				self.cache.remove_element(self.cache_index(), element_id);
+				if code.is_some() {
+					self.cache.remove_code(self.cache_index(), element_id);
+				}
+			}
 		};
 		match context.frame() {
 			Some(frame) => frame.wrote_element(element_id, Some(Arc::clone(&element)), through),
@@ -539,113 +587,59 @@ impl DiskAnnProvider {
 		Ok(())
 	}
 
-	/// Reads element vector/status pairs in input order.
-	///
-	/// Inside a frame, an element the frame wrote is answered from its overlay. Every other id is
-	/// answered from the cache when the context's view is served the entry, and each distinct miss
-	/// is read once, in one batch: through the frame's read view when it has one, which publishes
-	/// what it read (see [`DiskAnnBuildFrame::publish_clean_elements`]), and through the
-	/// transaction otherwise. Missing elements remain `None` so callers can preserve the previous
-	/// single-read behavior.
+	/// Reads element vector/status pairs in input order, by [`Self::read_batched`]. A frame
+	/// answers an element it wrote from its overlay, and publishes what its view reads under the
+	/// overlay rule ([`DiskAnnBuildFrame::publish_clean_elements`]). Missing elements remain
+	/// `None`.
 	pub(super) async fn read_elements(
 		&self,
 		context: &DiskAnnProviderContext,
 		element_ids: &[ElementId],
 	) -> Result<Vec<Option<Arc<DiskAnnElement>>>> {
 		let index = self.cache_index();
-		let frame = context.frame();
-		let mut elements = vec![None; element_ids.len()];
-		let written = frame.map(|frame| frame.written_elements_of(element_ids));
-		// Each distinct missing element, at the first position asking for it.
-		let mut misses: Vec<(ElementId, usize)> = Vec::new();
-		// Each later position asking for an element already known missing,
-		// with that element's index in `misses`.
-		let mut repeats: Vec<(usize, usize)> = Vec::new();
-		let mut miss_slot: HashMap<ElementId, usize> = HashMap::default();
-		for (pos, element_id) in element_ids.iter().copied().enumerate() {
-			if let Some(own) = written.as_ref().and_then(|written| written[pos].clone()) {
-				if let Some(frame) = frame {
-					frame.stats.reads_overlay.fetch_add(1, Ordering::Relaxed);
-				}
-				elements[pos] = own;
-			} else if let Some(element) = self.cache.get_element(index, element_id, &context.view) {
-				elements[pos] = Some(element);
-			} else {
-				match miss_slot.entry(element_id) {
-					Entry::Occupied(slot) => repeats.push((*slot.get(), pos)),
-					Entry::Vacant(slot) => {
-						slot.insert(misses.len());
-						misses.push((element_id, pos));
-					}
-				}
-			}
-		}
-		if !misses.is_empty() {
-			let keys: Vec<_> = misses.iter().map(|(id, _)| context.ikb.new_de_key(*id)).collect();
-			let view = match frame {
-				Some(frame) => frame.view()?,
-				None => None,
-			};
-			match (frame, view) {
-				(Some(frame), Some(view)) => {
-					let fetched: Vec<Option<DiskAnnElement>> =
-						frame.read_through(&view, &keys).await?;
-					let fetched: Vec<(ElementId, usize, Arc<DiskAnnElement>)> = misses
-						.iter()
-						.copied()
-						.zip(fetched)
-						.filter_map(|((id, pos), element)| Some((id, pos, Arc::new(element?))))
-						.collect();
-					if let Some(stamp) = view.publication() {
-						frame.publish_clean_elements(
-							fetched.iter().map(|(id, _, element)| (*id, element)),
-							|id, element| {
-								self.cache.insert_shared_element(
-									index,
-									id,
-									stamp,
-									Arc::clone(element),
-								);
-							},
-						);
-					}
-					for (_, pos, element) in fetched {
-						elements[pos] = Some(element);
-					}
-				}
-				(frame, _) => {
-					if let Some(frame) = frame {
-						frame.stats.reads_tx.fetch_add(1, Ordering::Relaxed);
-					}
-					let fetched: Vec<Option<DiskAnnElement>> =
-						context.kv().get_many_key(keys).await?;
-					// A short answer would leave the trailing misses unread, silently.
-					ensure!(
-						fetched.len() == misses.len(),
-						"{} elements read for {} requested",
-						fetched.len(),
-						misses.len()
-					);
-					let publish = context.publication();
-					for ((element_id, pos), element) in misses.iter().copied().zip(fetched) {
-						if let Some(element) = element {
-							let element = match publish {
-								Some(stamp) => {
-									self.cache.insert_element(index, element_id, stamp, element)
-								}
-								None => Arc::new(element),
-							};
-							elements[pos] = Some(element);
-						}
-					}
-				}
-			}
-			for (slot, pos) in repeats {
-				let fetched = elements[misses[slot].1].clone();
-				elements[pos] = fetched;
-			}
-		}
-		Ok(elements)
+		self.read_batched(
+			context,
+			element_ids,
+			"elements",
+			context.frame().map(|frame| frame.written_elements_of(element_ids)),
+			|id| self.cache.get_element(index, id, &context.view),
+			|id| context.ikb.new_de_key(id),
+			|id, stamp, element| self.cache.insert_element(index, id, stamp, element),
+			|frame, stamp, read| {
+				frame.publish_clean_elements(
+					read.iter().map(|(id, _, element)| (*id, element)),
+					|id, element| {
+						self.cache.insert_shared_element(index, id, stamp, Arc::clone(element));
+					},
+				);
+			},
+		)
+		.await
+	}
+
+	/// Reads element codes in input order, by [`Self::read_batched`]. A missing code stays
+	/// `None`.
+	///
+	/// Only a query walk reads codes; an insert walk, the only walk a frame runs, scores exactly.
+	/// So a frame has no codes of its own to answer from, and what its view reads is not
+	/// published.
+	pub(super) async fn read_codes(
+		&self,
+		context: &DiskAnnProviderContext,
+		element_ids: &[ElementId],
+	) -> Result<Vec<Option<Arc<DiskAnnElementCode>>>> {
+		let index = self.cache_index();
+		self.read_batched(
+			context,
+			element_ids,
+			"element codes",
+			None,
+			|id| self.cache.get_code(index, id, &context.view),
+			|id| context.ikb.new_da_key(id),
+			|id, stamp, code| self.cache.insert_code(index, id, stamp, code),
+			|_, _, _| {},
+		)
+		.await
 	}
 
 	/// Reads adjacency lists in input order, routed as [`Self::read_elements`] routes elements.
@@ -658,77 +652,135 @@ impl DiskAnnProvider {
 		element_ids: &[ElementId],
 	) -> Result<Vec<Option<Arc<DiskAnnNode>>>> {
 		let index = self.cache_index();
+		self.read_batched(
+			context,
+			element_ids,
+			"nodes",
+			context.frame().map(|frame| {
+				frame.written_nodes_of(element_ids).into_iter().map(|own| own.map(Some)).collect()
+			}),
+			|id| self.cache.get_node(index, id, &context.view),
+			|id| context.ikb.new_dn_key(id),
+			|id, stamp, node| self.cache.insert_node(index, id, stamp, node),
+			|frame, stamp, read| {
+				frame.publish_clean_nodes(
+					read.iter().map(|(id, _, node)| (*id, node)),
+					|id, node| {
+						self.cache.insert_shared_node(index, id, stamp, Arc::clone(node));
+					},
+				);
+			},
+		)
+		.await
+	}
+
+	/// The one protocol by which the provider reads a family of graph records, in input order.
+	///
+	/// Each position is answered, in turn, from `own` (a frame's overlay: `Some(value)` for a
+	/// record it wrote, the value `None` for one it deleted), from the cache through `cached`
+	/// when the context's view is served the entry, or as a miss. Each distinct miss is read
+	/// once, in one batch, and a repeated id shares its answer:
+	/// - inside a frame with a read view, through the view, and `publish` publishes what it read
+	///   under the view's stamp, by the frame's overlay rule;
+	/// - otherwise through the transaction, publishing each value it read through `insert` at the
+	///   context's publication stamp, if it has one.
+	///
+	/// A record absent from KV stays `None`. `family` names the records in the error raised when
+	/// a batch read answers short.
+	#[expect(clippy::too_many_arguments)]
+	async fn read_batched<'k, K, V>(
+		&self,
+		context: &DiskAnnProviderContext,
+		element_ids: &[ElementId],
+		family: &str,
+		own: Option<Vec<Option<Option<Arc<V>>>>>,
+		cached: impl Fn(ElementId) -> Option<Arc<V>>,
+		key: impl Fn(ElementId) -> K,
+		insert: impl Fn(ElementId, Stamp, V) -> Arc<V>,
+		publish: impl FnOnce(&DiskAnnBuildFrame, Stamp, &[(ElementId, usize, Arc<V>)]),
+	) -> Result<Vec<Option<Arc<V>>>>
+	where
+		K: KVKey<Value = V> + 'k,
+		V: KVValue<KeyContext = ()>,
+	{
 		let frame = context.frame();
-		let mut nodes = vec![None; element_ids.len()];
-		let written = frame.map(|frame| frame.written_nodes_of(element_ids));
-		let mut miss_positions = Vec::new();
-		let mut miss_keys = Vec::new();
+		let mut values: Vec<Option<Arc<V>>> = vec![None; element_ids.len()];
+		// Each distinct missing record, at the first position asking for it.
+		let mut misses: Vec<(ElementId, usize)> = Vec::new();
+		// Each later position asking for a record already known missing, with that record's
+		// index in `misses`.
+		let mut repeats: Vec<(usize, usize)> = Vec::new();
+		let mut miss_slot: HashMap<ElementId, usize> = HashMap::default();
 		for (pos, element_id) in element_ids.iter().copied().enumerate() {
-			if let Some(own) = written.as_ref().and_then(|written| written[pos].clone()) {
+			if let Some(written) = own.as_ref().and_then(|own| own[pos].clone()) {
 				if let Some(frame) = frame {
 					frame.stats.reads_overlay.fetch_add(1, Ordering::Relaxed);
 				}
-				nodes[pos] = Some(own);
-			} else if let Some(node) = self.cache.get_node(index, element_id, &context.view) {
-				nodes[pos] = Some(node);
+				values[pos] = written;
+			} else if let Some(value) = cached(element_id) {
+				values[pos] = Some(value);
 			} else {
-				miss_positions.push((pos, element_id));
-				miss_keys.push(context.ikb.new_dn_key(element_id));
+				match miss_slot.entry(element_id) {
+					Entry::Occupied(slot) => repeats.push((*slot.get(), pos)),
+					Entry::Vacant(slot) => {
+						slot.insert(misses.len());
+						misses.push((element_id, pos));
+					}
+				}
 			}
 		}
-		if miss_keys.is_empty() {
-			return Ok(nodes);
+		if misses.is_empty() {
+			return Ok(values);
 		}
+		let keys: Vec<K> = misses.iter().map(|(id, _)| key(*id)).collect();
 		let view = match frame {
 			Some(frame) => frame.view()?,
 			None => None,
 		};
 		match (frame, view) {
 			(Some(frame), Some(view)) => {
-				let fetched: Vec<Option<DiskAnnNode>> =
-					frame.read_through(&view, &miss_keys).await?;
-				let fetched: Vec<(ElementId, usize, Arc<DiskAnnNode>)> = miss_positions
-					.into_iter()
+				let fetched: Vec<Option<V>> = frame.read_through(&view, &keys).await?;
+				let read: Vec<(ElementId, usize, Arc<V>)> = misses
+					.iter()
+					.copied()
 					.zip(fetched)
-					.filter_map(|((pos, id), node)| Some((id, pos, Arc::new(node?))))
+					.filter_map(|((id, pos), value)| Some((id, pos, Arc::new(value?))))
 					.collect();
 				if let Some(stamp) = view.publication() {
-					frame.publish_clean_nodes(
-						fetched.iter().map(|(id, _, node)| (*id, node)),
-						|id, node| {
-							self.cache.insert_shared_node(index, id, stamp, Arc::clone(node));
-						},
-					);
+					publish(frame, stamp, &read);
 				}
-				for (_, pos, node) in fetched {
-					nodes[pos] = Some(node);
+				for (_, pos, value) in read {
+					values[pos] = Some(value);
 				}
 			}
 			(frame, _) => {
 				if let Some(frame) = frame {
 					frame.stats.reads_tx.fetch_add(1, Ordering::Relaxed);
 				}
-				let fetched: Vec<Option<DiskAnnNode>> =
-					context.kv().get_many_key(miss_keys).await?;
+				let fetched: Vec<Option<V>> = context.kv().get_many_key(keys).await?;
 				// A short answer would leave the trailing misses unread, silently.
 				ensure!(
-					fetched.len() == miss_positions.len(),
-					"{} nodes read for {} requested",
+					fetched.len() == misses.len(),
+					"{} {family} read for {} requested",
 					fetched.len(),
-					miss_positions.len()
+					misses.len()
 				);
-				let publish = context.publication();
-				for ((pos, element_id), node) in miss_positions.into_iter().zip(fetched) {
-					if let Some(node) = node {
-						nodes[pos] = Some(match publish {
-							Some(stamp) => self.cache.insert_node(index, element_id, stamp, node),
-							None => Arc::new(node),
+				let stamp = context.publication();
+				for ((element_id, pos), value) in misses.iter().copied().zip(fetched) {
+					if let Some(value) = value {
+						values[pos] = Some(match stamp {
+							Some(stamp) => insert(element_id, stamp, value),
+							None => Arc::new(value),
 						});
 					}
 				}
 			}
 		}
-		Ok(nodes)
+		for (slot, pos) in repeats {
+			let value = values[misses[slot].1].clone();
+			values[pos] = value;
+		}
+		Ok(values)
 	}
 
 	/// Allocates and persists the next graph element ID.
@@ -1106,13 +1158,25 @@ where
 				park.park().await;
 			}
 		}
+		// The code is written in the element's transaction and never rewritten: an element's
+		// vector does not change, and its id is not reused once committed. It is written only
+		// where a walk can score it, so an index too wide for the codes' `i32` sum keeps none.
+		let code = if self.scores_codes::<T>() {
+			T::encode_code(element)
+		} else {
+			None
+		};
 		let key = context.ikb.new_de_key(*id);
 		let element = DiskAnnElement {
 			vector: T::serialized_from_slice(element),
 			deleted: false,
 		};
 		context.kv().set_key(&key, &element).await.map_err(|e| context.ann_err(e))?;
-		self.write_element_through(context, *id, element);
+		if let Some(code) = &code {
+			let key = context.ikb.new_da_key(*id);
+			context.kv().set_key(&key, code).await.map_err(|e| context.ann_err(e))?;
+		}
+		self.write_element_through(context, *id, element, code.as_ref());
 		Ok(NoopGuard::new(*id))
 	}
 }
@@ -1136,7 +1200,7 @@ impl Delete for DiskAnnProvider {
 		let mut element = (*element).clone();
 		element.deleted = true;
 		context.kv().set_key(&key, &element).await.map_err(|e| context.ann_err(e))?;
-		self.write_element_through(context, *gid, element);
+		self.write_element_through(context, *gid, element, None);
 		Ok(())
 	}
 
@@ -1146,8 +1210,18 @@ impl Delete for DiskAnnProvider {
 		id: Self::InternalId,
 	) -> Result<(), Self::Error> {
 		context.kv().del_key(&context.ikb.new_de_key(id)).await.map_err(|e| context.ann_err(e))?;
+		if self.keeps_codes() {
+			context
+				.kv()
+				.del_key(&context.ikb.new_da_key(id))
+				.await
+				.map_err(|e| context.ann_err(e))?;
+		}
 		// Release removes the element record entirely, so remove any cached vector/status too.
-		let evict = || self.cache.remove_element(self.cache_index(), id);
+		let evict = || {
+			self.cache.remove_element(self.cache_index(), id);
+			self.cache.remove_code(self.cache_index(), id);
+		};
 		match context.frame() {
 			Some(frame) => frame.wrote_element(id, None, evict),
 			None => evict(),
@@ -1188,8 +1262,10 @@ impl Delete for DiskAnnProvider {
 /// Search accessor used by DiskANN greedy graph search.
 ///
 /// Holds the query distance computer, preprocessed once from the query vector at
-/// construction, plus a reusable scratch buffer for decoding persisted vectors into typed
-/// slices during distance evaluation.
+/// construction. Persisted vectors are scored in place, borrowed as typed slices.
+///
+/// One accessor serves one search or insert, during which the graph's start points do not
+/// change, so they are resolved once and shared by every start-point call the search makes.
 pub(super) struct DiskAnnSearchAccessor<'a, T: DiskAnnVectorElement> {
 	/// Provider that owns KV/cache access.
 	provider: &'a DiskAnnProvider,
@@ -1197,8 +1273,10 @@ pub(super) struct DiskAnnSearchAccessor<'a, T: DiskAnnVectorElement> {
 	context: &'a DiskAnnProviderContext,
 	/// Query distance computer, preprocessed from the search/insert query vector.
 	query: <T as VectorRepr>::QueryDistance,
-	/// Reusable scratch buffer for converting persisted vectors into typed slices.
-	buffer: Box<[T]>,
+	/// Start points resolved by the first start-point call of this operation.
+	starting_points: tokio::sync::OnceCell<Vec<ElementId>>,
+	/// The query's 8-bit code, when this walk scores candidates on element codes.
+	coded: Option<DiskAnnElementCode>,
 	/// Whether a test injected a failure into the search for this query.
 	#[cfg(test)]
 	fail_search: bool,
@@ -1208,10 +1286,13 @@ impl<'a, T> DiskAnnSearchAccessor<'a, T>
 where
 	T: DiskAnnVectorElement,
 {
+	/// An accessor scoring candidates exactly from their vectors, or, when `coded` and the index
+	/// keeps codes of `T`, on their 8-bit codes (see [`Self::coded_distance`]).
 	pub(super) fn new(
 		provider: &'a DiskAnnProvider,
 		context: &'a DiskAnnProviderContext,
 		query: &[T],
+		coded: bool,
 	) -> Result<Self, ANNError> {
 		if query.len() != provider.dim {
 			return Err(vector_len_mismatch(query.len(), provider.dim));
@@ -1225,16 +1306,107 @@ where
 			provider,
 			context,
 			query: T::query_distance(query, provider.metric),
-			buffer: vec![T::default(); provider.dim].into_boxed_slice(),
+			starting_points: tokio::sync::OnceCell::new(),
+			coded: if coded && provider.scores_codes::<T>() {
+				T::encode_code(query)
+			} else {
+				None
+			},
 			#[cfg(test)]
 			fail_search,
 		})
 	}
 
-	/// Decodes `element` into the scratch buffer and returns its distance to the query.
-	fn distance_to(&mut self, element: &DiskAnnElement) -> ANNResult<f32> {
-		T::copy_from_serialized(&element.vector, &mut self.buffer)?;
-		Ok(self.query.evaluate_similarity(&self.buffer))
+	/// Returns the valid start points, resolving them on the first call.
+	///
+	/// The resolution future is boxed: inlined, its state would nest inside every walk future
+	/// that awaits this one, and the filtered walk's layout then exceeds the compiler's query
+	/// depth limit in optimised builds.
+	async fn resolved_starting_points(&self) -> ANNResult<&[ElementId]> {
+		let points = self
+			.starting_points
+			.get_or_try_init(|| Box::pin(self.provider.valid_starting_points(self.context)))
+			.await?;
+		Ok(points)
+	}
+
+	/// Returns the distance from `element` to the query, scoring the persisted vector in place.
+	fn distance_to(&self, element: &DiskAnnElement) -> ANNResult<f32> {
+		Ok(self.query.evaluate_similarity(T::as_slice(&element.vector, self.provider.dim)?))
+	}
+
+	/// The distance the walk ranks `element` at from its 8-bit code: an estimate of the exact
+	/// distance, on the same scale, from one integer dot product of the two codes.
+	///
+	/// The codes approximate `x ≈ scale · c`, so the dot product estimates `q·v`, each norm is
+	/// `scale · norm`, and cosine needs neither scale.
+	fn coded_distance(
+		query: &DiskAnnElementCode,
+		element: &DiskAnnElementCode,
+		metric: Metric,
+	) -> f32 {
+		let ip = dot_narrow::<i8>(&query.code, &element.code);
+		match metric {
+			Metric::Cosine | Metric::CosineNormalized => {
+				let norms = query.norm * element.norm;
+				if norms == 0.0 {
+					1.0
+				} else {
+					1.0 - ip / norms
+				}
+			}
+			Metric::InnerProduct => -(query.scale * element.scale * ip),
+			Metric::L2 => {
+				let q = query.scale * query.norm;
+				let v = element.scale * element.norm;
+				(q * q + v * v - 2.0 * query.scale * element.scale * ip).max(0.0)
+			}
+		}
+	}
+
+	/// Scores `ids` and reports each with `f`: on their codes when this walk is coded, falling
+	/// back to the exact distance for an element without one, and exactly otherwise. An element
+	/// that has vanished is skipped, as the `expand_beam` contract allows.
+	async fn score<F>(&self, ids: &[ElementId], mut f: F) -> ANNResult<()>
+	where
+		F: FnMut(ElementId, f32),
+	{
+		let mut exact: Vec<ElementId> = Vec::new();
+		match &self.coded {
+			Some(query) => {
+				let codes = self
+					.provider
+					.read_codes(self.context, ids)
+					.await
+					.map_err(|e| self.context.ann_err(e))?;
+				for (&id, code) in ids.iter().zip(codes) {
+					match code {
+						Some(code) => {
+							// A stored code of another length is as corrupt as a
+							// vector of another length, which `distance_to` refuses.
+							check_dim(&code.code, self.provider.dim)?;
+							f(id, Self::coded_distance(query, &code, self.provider.metric))
+						}
+						None => exact.push(id),
+					}
+				}
+			}
+			None => exact.extend_from_slice(ids),
+		}
+		if exact.is_empty() {
+			return Ok(());
+		}
+		let elements = self
+			.provider
+			.read_elements(self.context, &exact)
+			.await
+			.map_err(|e| self.context.ann_err(e))?;
+		for (id, element) in exact.into_iter().zip(elements) {
+			if let Some(element) = element {
+				f(id, self.distance_to(&element)?);
+			}
+		}
+		Ok(())
 	}
 }
 
@@ -1247,7 +1419,11 @@ where
 	T: DiskAnnVectorElement,
 {
 	async fn starting_points(&self) -> ANNResult<Vec<ElementId>> {
-		self.provider.valid_starting_points(self.context).await
+		Ok(self.resolved_starting_points().await?.to_vec())
+	}
+
+	async fn num_starting_points(&self) -> ANNResult<usize> {
+		Ok(self.resolved_starting_points().await?.len())
 	}
 
 	async fn start_point_distances<F>(&mut self, mut f: F) -> ANNResult<()>
@@ -1258,18 +1434,19 @@ where
 		if self.fail_search {
 			return Err(ANNError::message("injected candidate-generation failure"));
 		}
-		let ids = self.provider.valid_starting_points(self.context).await?;
-		let elements = self
-			.provider
-			.read_elements(self.context, &ids)
-			.await
-			.map_err(|e| self.context.ann_err(e))?;
-		for (id, element) in ids.into_iter().zip(elements) {
-			let Some(element) = element else {
-				return Err(ANNError::message(format!("DiskANN start point {id} is missing")));
-			};
-			let distance = self.distance_to(&element)?;
-			f(id, distance);
+		let ids = self.resolved_starting_points().await?.to_vec();
+		let mut scored = 0;
+		self.score(&ids, |id, distance| {
+			scored += 1;
+			f(id, distance)
+		})
+		.await?;
+		if scored != ids.len() {
+			return Err(ANNError::message(format!(
+				"DiskANN start points missing: {} of {} scored",
+				scored,
+				ids.len()
+			)));
 		}
 		Ok(())
 	}
@@ -1284,7 +1461,7 @@ where
 		&mut self,
 		ids: Itr,
 		mut pred: P,
-		mut on_neighbors: F,
+		on_neighbors: F,
 	) -> ANNResult<()>
 	where
 		Itr: Iterator<Item = ElementId> + Send,
@@ -1307,20 +1484,9 @@ where
 				}
 			}
 		}
-		let elements = self
-			.provider
-			.read_elements(self.context, &candidates)
-			.await
-			.map_err(|e| self.context.ann_err(e))?;
-		for (id, element) in candidates.into_iter().zip(elements) {
-			// A candidate whose element was compacted away mid-search is dropped: the
-			// `expand_beam` contract tolerates skipping candidates in exceptional cases.
-			if let Some(element) = element {
-				let distance = self.distance_to(&element)?;
-				on_neighbors(id, distance);
-			}
-		}
-		Ok(())
+		// A candidate whose element was compacted away mid-search is dropped: the
+		// `expand_beam` contract tolerates skipping candidates in exceptional cases.
+		self.score(&candidates, on_neighbors).await
 	}
 }
 
@@ -1418,9 +1584,7 @@ where
 			if let Some(element) = element
 				&& !element.deleted
 			{
-				let mut buffer = vec![T::default(); self.provider.dim].into_boxed_slice();
-				T::copy_from_serialized(&element.vector, &mut buffer)?;
-				decoded.insert(id, buffer);
+				decoded.insert(id, Box::from(T::as_slice(&element.vector, self.provider.dim)?));
 			}
 		}
 		let distance = T::distance(self.provider.metric, Some(self.provider.dim));
@@ -1514,17 +1678,25 @@ impl NeighborAccessorMut for DiskAnnNeighborAccessor<'_> {
 
 /// DiskANN search/insert/prune strategy using SurrealDB's provider accessors.
 #[derive(Debug)]
-pub(super) struct DiskAnnStrategy<T>(PhantomData<fn() -> T>);
+pub(super) struct DiskAnnStrategy<T>(PhantomData<fn() -> T>, bool);
+
+impl<T> DiskAnnStrategy<T> {
+	/// A strategy whose kNN walks score candidates on element codes where the index keeps them.
+	/// Insert walks always score exactly.
+	pub(super) fn coded() -> Self {
+		Self(PhantomData, true)
+	}
+}
 
 impl<T> Default for DiskAnnStrategy<T> {
 	fn default() -> Self {
-		Self(PhantomData)
+		Self(PhantomData, false)
 	}
 }
 
 impl<T> Clone for DiskAnnStrategy<T> {
 	fn clone(&self) -> Self {
-		Self::default()
+		Self(PhantomData, self.1)
 	}
 }
 
@@ -1541,7 +1713,7 @@ where
 		context: &'a DiskAnnProviderContext,
 		query: &'a [T],
 	) -> Result<DiskAnnSearchAccessor<'a, T>, ANNError> {
-		DiskAnnSearchAccessor::new(provider, context, query)
+		DiskAnnSearchAccessor::new(provider, context, query, self.1)
 	}
 }
 
@@ -1575,13 +1747,24 @@ where
 	T: DiskAnnVectorElement,
 {
 	type PruneStrategy = Self;
+	type SearchAccessorError = ANNError;
+	type SearchAccessor = DiskAnnSearchAccessor<'a, T>;
+
+	fn insert_search_accessor(
+		&'a self,
+		provider: &'a DiskAnnProvider,
+		context: &'a DiskAnnProviderContext,
+		vector: &'a [T],
+	) -> Result<DiskAnnSearchAccessor<'a, T>, ANNError> {
+		DiskAnnSearchAccessor::new(provider, context, vector, false)
+	}
 
 	fn prune_strategy(&self) -> Self::PruneStrategy {
 		self.clone()
 	}
 }
 
-impl<T> MultiInsertStrategy<DiskAnnProvider, Matrix<T>> for DiskAnnStrategy<T>
+impl<T> MultiInsertStrategy<DiskAnnProvider, rowmajor::Owned<T>> for DiskAnnStrategy<T>
 where
 	T: DiskAnnVectorElement,
 {
@@ -1600,7 +1783,7 @@ where
 		&self,
 		_: &DiskAnnProvider,
 		_: &DiskAnnProviderContext,
-		batch: &Arc<Matrix<T>>,
+		batch: &Arc<rowmajor::Owned<T>>,
 		ids: Itr,
 	) -> impl std::future::Future<Output = Result<Self::Seed, Infallible>> + Send
 	where
@@ -1640,6 +1823,76 @@ mod tests {
 
 	fn ikb() -> IndexKeyBase {
 		IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(3))
+	}
+
+	/// A coded distance estimates the exact one on its own scale, for every metric. The error is
+	/// bounded relative to the scale the metric's values span: 1 for cosine, the product of the
+	/// norms for inner product, and the sum of the squared norms for squared L2.
+	#[test]
+	fn coded_distances_estimate_exact_distances() {
+		let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+		let mut next = || {
+			seed ^= seed << 13;
+			seed ^= seed >> 7;
+			seed ^= seed << 17;
+			(seed >> 40) as f32 / (1u64 << 24) as f32 * 2.0 - 1.0
+		};
+		let dim = 768;
+		let query: Vec<f32> = (0..dim).map(|_| next()).collect();
+		let others: Vec<Vec<f32>> = (0..50).map(|_| (0..dim).map(|_| next()).collect()).collect();
+		let q = DiskAnnElementCode::encode(&query);
+		let norm = |v: &[f32]| v.iter().map(|x| x * x).sum::<f32>().sqrt();
+		for metric in [Metric::Cosine, Metric::L2, Metric::InnerProduct] {
+			let exact = <f32 as VectorRepr>::query_distance(&query, metric);
+			for other in &others {
+				let truth = exact.evaluate_similarity(other.as_slice());
+				let coded = DiskAnnSearchAccessor::<f32>::coded_distance(
+					&q,
+					&DiskAnnElementCode::encode(other),
+					metric,
+				);
+				let span = match metric {
+					Metric::L2 => norm(&query).powi(2) + norm(other).powi(2),
+					Metric::InnerProduct => norm(&query) * norm(other),
+					_ => 1.0,
+				};
+				let tolerance = 0.005 * span;
+				assert!(
+					(coded - truth).abs() <= tolerance,
+					"{metric:?}: coded {coded} vs exact {truth}"
+				);
+			}
+		}
+	}
+
+	/// An index keeping codes writes an element's code with the element, an element of a type
+	/// without codes gets none, and releasing an element deletes its code with it.
+	#[tokio::test]
+	async fn an_element_code_lives_and_dies_with_its_element() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let tx = Arc::new(ds.transaction(TransactionType::Write).await?);
+		let format = crate::catalog::INDEX_FORMAT_VERSION;
+		let provider = DiskAnnProvider::new(
+			ikb(),
+			TableId(4),
+			format,
+			DiskAnnCache::new(1024 * 1024),
+			2,
+			Metric::L2,
+		);
+		let context = provider.context(Arc::clone(&tx), None, None);
+		let code = |id| {
+			let tx = Arc::clone(&tx);
+			async move { tx.get_key(&ikb().new_da_key(id), None).await }
+		};
+		SetElement::<&[f32]>::set_element(&provider, &context, &1, &[0.5, -1.0][..]).await?;
+		assert_eq!(code(1).await?, Some(DiskAnnElementCode::encode(&[0.5, -1.0])));
+		SetElement::<&[i8]>::set_element(&provider, &context, &2, &[3, -4][..]).await?;
+		assert_eq!(code(2).await?, None, "an 8-bit vector keeps no code");
+		Delete::release(&provider, &context, 1).await?;
+		assert_eq!(code(1).await?, None);
+		tx.cancel().await?;
+		Ok(())
 	}
 
 	async fn provider_and_context() -> Result<(DiskAnnProvider, DiskAnnProviderContext)> {

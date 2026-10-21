@@ -18,7 +18,7 @@ use crate::trees::hnsw::heuristic::Heuristic;
 use crate::trees::hnsw::index::HnswContext;
 use crate::trees::hnsw::{ElementId, HnswElements, HnswSearch, VectorId};
 use crate::trees::knn::{DoublePriorityQueue, Ids64};
-use crate::trees::vector::SharedVector;
+use crate::trees::vector::{SharedVector, Vector};
 
 /// How many neighbours ahead of the one being scored a search prefetches.
 const PREFETCH_AHEAD: usize = 2;
@@ -111,13 +111,31 @@ where
 		self.m_max
 	}
 
+	/// A visited set holding `first`, sized for a search of list size `ef` on this layer.
+	///
+	/// A walk visits up to about `ef` expansions of at most `m_max + 1` neighbours each, and never
+	/// more nodes than the layer holds, so the set is reserved at the smaller of the two (capped)
+	/// rather than grown through repeated rehashes.
+	fn visited_set(&self, ef: usize, first: ElementId) -> HashSet<ElementId> {
+		const MAX_RESERVED: usize = 1 << 16;
+		let capacity =
+			ef.saturating_mul(self.m_max + 1).min(self.graph.len().max(1)).min(MAX_RESERVED);
+		let mut visited = HashSet::with_capacity_and_hasher(capacity, Default::default());
+		visited.insert(first);
+		visited
+	}
+
 	/// The number of nodes the layer holds.
 	pub(super) fn len(&self) -> usize {
 		self.graph.len()
 	}
 
-	pub(super) fn get_edges(&self, e_id: ElementId) -> Option<&S> {
-		self.graph.get_edges(e_id)
+	/// See [`UndirectedGraph::live_edges`].
+	pub(super) fn live_edges(
+		&self,
+		e_id: ElementId,
+	) -> Option<impl Iterator<Item = ElementId> + '_> {
+		self.graph.live_edges(e_id)
 	}
 
 	/// An empty edge set sized for this layer.
@@ -162,7 +180,7 @@ where
 			vec_docs: ctx.vec_docs,
 			docs: pending_docs,
 		};
-		let visited = HashSet::from_iter([ep_id]);
+		let visited = self.visited_set(ef, ep_id);
 		let candidates = DoublePriorityQueue::from(ep_dist, ep_id);
 		let mut w = DoublePriorityQueue::default();
 		if let Some(ep_pt) = elements.get_vector(&ctx.tx, &ep_id).await?
@@ -184,7 +202,7 @@ where
 		ep_id: ElementId,
 		ef: usize,
 	) -> Result<DoublePriorityQueue> {
-		let visited = HashSet::from_iter([ep_id]);
+		let visited = self.visited_set(ef, ep_id);
 		let candidates = DoublePriorityQueue::from(ep_dist, ep_id);
 		let w = candidates.clone();
 		self.search(tx, elements, pt, candidates, visited, w, ef, None).await
@@ -198,7 +216,7 @@ where
 		ignore_id: ElementId,
 		ef: usize,
 	) -> Result<Option<ElementId>> {
-		let visited = HashSet::from_iter([ignore_id]);
+		let visited = self.visited_set(ef, ignore_id);
 		let mut candidates = DoublePriorityQueue::default();
 		if let Some(dist) = elements.get_distance(&ctx.tx, pt, &ignore_id).await? {
 			candidates.push(dist, ignore_id);
@@ -221,7 +239,7 @@ where
 		pending_docs: Option<&RoaringTreemap>,
 		allow_list: Option<&RoaringTreemap>,
 	) -> Result<DoublePriorityQueue> {
-		let visited = HashSet::from_iter([ep_id]);
+		let visited = self.visited_set(search.ef, ep_id);
 		let candidates = DoublePriorityQueue::from(ep_dist, ep_id);
 		let mut w = DoublePriorityQueue::default();
 		// The entry point's admission must use ITS vector, not the query's:
@@ -309,14 +327,14 @@ where
 			if cq_dist > fq_dist {
 				break;
 			}
-			if let Some(neighbourhood) = self.graph.get_edges(doc) {
+			if let Some(neighbourhood) = self.graph.live_edges(doc) {
 				// The vectors are fetched first, in one batch, then scored in
 				// order while the next few are prefetched: each distance's loads
 				// overlap the one before it rather than waiting on memory. More
 				// in flight would outrun the lines the CPU can track and stall
 				// the loads behind them.
 				to_fetch.clear();
-				to_fetch.extend(neighbourhood.iter().copied().filter(|e_id| visited.insert(*e_id)));
+				to_fetch.extend(neighbourhood.filter(|e_id| visited.insert(*e_id)));
 				unvisited.clear();
 				if !to_fetch.is_empty() {
 					let vectors = elements.get_vectors(tx, &to_fetch).await?;
@@ -368,7 +386,10 @@ where
 		allow_list: Option<&RoaringTreemap>,
 	) -> Result<DoublePriorityQueue> {
 		let mut f_dist = w.peek_last_dist().unwrap_or(f64::MAX);
-
+		// The unvisited neighbours of the node being expanded, read in one batch.
+		let mut to_fetch: Vec<ElementId> = Vec::new();
+		// Those neighbours with their vectors and distances, in neighbourhood order.
+		let mut scored: Vec<(ElementId, SharedVector, f64)> = Vec::new();
 		while let Some((dist, doc)) = candidates.pop_first() {
 			// `f_dist` bounds the walk only once `w` holds `ef` admitted rows. Before
 			// then it is the furthest of the rows admitted so far, and a candidate the
@@ -376,49 +397,55 @@ where
 			if w.len() >= search.ef && dist > f_dist {
 				break;
 			}
-			if let Some(neighbourhood) = self.graph.get_edges(doc) {
-				// Warm the transaction record cache for this neighbourhood's
-				// filter-eligible candidates in one batch, so the per-candidate
-				// `get_record` calls inside `add_if_truthy` below become cache
-				// hits instead of each issuing an individual round-trip. The loop
-				// itself is left unchanged, so results are identical.
-				self.prefetch_neighbourhood_records(
-					ctx,
-					elements,
-					search,
-					neighbourhood,
-					&visited,
-					w.len(),
-					f_dist,
-					filter,
-					pending_docs,
-					allow_list,
-				)
-				.await?;
-				for &e_id in neighbourhood.iter() {
-					// Did we already visit it?
-					if !visited.insert(e_id) {
-						continue;
-					}
-					if let Some(e_pt) = elements.get_vector(&ctx.tx, &e_id).await? {
-						let e_dist = elements.distance(&e_pt, &search.pt);
-						if e_dist < f_dist || w.len() < search.ef {
-							candidates.push(e_dist, e_id);
-							if Self::add_if_truthy(
-								ctx,
-								search.ef,
-								&mut w,
-								&e_pt,
-								e_dist,
-								e_id,
-								filter,
-								pending_docs,
-								allow_list,
-							)
-							.await?
-							{
-								f_dist = w.peek_last_dist().expect("w is non-empty"); // w can't be empty
-							}
+			if let Some(neighbourhood) = self.graph.live_edges(doc) {
+				// Each unvisited neighbour's vector is read once, in one batch, and
+				// scored once.
+				to_fetch.clear();
+				to_fetch.extend(neighbourhood.filter(|e_id| visited.insert(*e_id)));
+				if to_fetch.is_empty() {
+					continue;
+				}
+				let vectors = elements.get_vectors(&ctx.tx, &to_fetch).await?;
+				scored.clear();
+				scored.extend(to_fetch.iter().copied().zip(vectors).filter_map(|(e_id, v)| {
+					let e_pt = v?;
+					let e_dist = elements.distance(&e_pt, &search.pt);
+					Some((e_id, e_pt, e_dist))
+				}));
+				// The admission gate below only tightens as `w` fills (see
+				// `resolve_neighbourhood_docs`), so the neighbours it passes at the start
+				// of this neighbourhood are a superset of those it admits.
+				let w_len = w.len();
+				let mut docs = self
+					.resolve_neighbourhood_docs(
+						ctx,
+						search,
+						&scored,
+						w_len,
+						f_dist,
+						filter,
+						pending_docs,
+						allow_list,
+					)
+					.await?;
+				for (pos, (e_id, _, e_dist)) in scored.iter().enumerate() {
+					let (e_id, e_dist) = (*e_id, *e_dist);
+					if e_dist < f_dist || w.len() < search.ef {
+						candidates.push(e_dist, e_id);
+						if Self::admit_docs(
+							ctx,
+							search.ef,
+							&mut w,
+							docs[pos].take(),
+							e_dist,
+							e_id,
+							filter,
+							pending_docs,
+							allow_list,
+						)
+						.await?
+						{
+							f_dist = w.peek_last_dist().expect("w is non-empty"); // w can't be empty
 						}
 					}
 				}
@@ -427,71 +454,64 @@ where
 		Ok(w)
 	}
 
-	/// Prefetches the records of a popped node's filter-eligible neighbours in a
-	/// single batch, warming the transaction cache before the (unchanged)
-	/// evaluation loop in [`Self::search_with_filter`] reads them one by one.
+	/// Resolves the doc sets of a popped node's admission-eligible neighbours,
+	/// and prefetches the records the truthy filter will read, so admitting each
+	/// neighbour in [`Self::search_with_filter`] issues no further reads.
 	///
-	/// Only neighbours that are unvisited and pass the distance gate — using the
-	/// `f_dist` / `w_len` captured at the *start* of this neighbourhood — are
-	/// considered. That start-of-neighbourhood gate is the loosest the loop will
-	/// use: while `w` is below `ef` the `w_len < ef` term holds unconditionally
-	/// (so `f_dist`, which can transiently rise in that phase, is irrelevant), and
-	/// once `w` is full `f_dist` only decreases — so the loop's evolving gate is
-	/// always a subset. The collected set is therefore a superset of what the loop
-	/// fetches, so every record it needs is already cached. Over-collecting never
-	/// affects correctness, but it is not free: a candidate the evolving gate
-	/// later skips still has its record pulled in this batch (the old one-by-one
-	/// path skipped such candidates *before* fetching), so this trades fewer
-	/// round-trips for potentially more total record bytes read — a win only on
-	/// latency-bound backends. Doc-sets are resolved cache-first and pending-only
-	/// elements are skipped, mirroring [`Self::add_if_truthy`].
+	/// Returns one entry per element of `scored`, in order: the element's doc
+	/// set, or `None` when it is not eligible or has no doc set.
+	///
+	/// Eligibility is the admission gate evaluated against the `f_dist` / `w_len`
+	/// captured at the *start* of this neighbourhood, which is the loosest form
+	/// the loop uses: while `w` is below `ef` the `w_len < ef` term holds
+	/// unconditionally (so `f_dist`, which can transiently rise in that phase, is
+	/// irrelevant), and once `w` is full `f_dist` only decreases. Every neighbour
+	/// the loop admits is therefore eligible here. The doc sets are read in one
+	/// batch; the records of eligible candidates the evolving gate later skips are
+	/// still prefetched, trading some record bytes for fewer round trips.
+	/// Pending-only elements and bitmap-rejected or pending docs are not
+	/// prefetched, mirroring [`Self::admit_docs`].
 	#[expect(clippy::too_many_arguments)]
-	async fn prefetch_neighbourhood_records(
+	async fn resolve_neighbourhood_docs(
 		&self,
 		ctx: &HnswContext<'_>,
-		elements: &HnswElements,
 		search: &HnswSearch,
-		neighbourhood: &S,
-		visited: &HashSet<ElementId>,
+		scored: &[(ElementId, SharedVector, f64)],
 		w_len: usize,
 		f_dist: f64,
 		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
 		pending_docs: Option<&RoaringTreemap>,
 		allow_list: Option<&RoaringTreemap>,
-	) -> Result<()> {
+	) -> Result<Vec<Option<Ids64>>> {
+		let mut positions = Vec::with_capacity(scored.len());
+		let mut eligible: Vec<(ElementId, Option<&Vector>)> = Vec::with_capacity(scored.len());
+		for (pos, (e_id, e_pt, e_dist)) in scored.iter().enumerate() {
+			if *e_dist < f_dist || w_len < search.ef {
+				positions.push(pos);
+				eligible.push((*e_id, Some(&**e_pt)));
+			}
+		}
+		let mut docs: Vec<Option<Ids64>> = vec![None; scored.len()];
+		if eligible.is_empty() {
+			return Ok(docs);
+		}
+		let resolved = ctx.vec_docs.get_docs_by_elements(&ctx.tx, &eligible).await?;
+		for (pos, set) in positions.into_iter().zip(resolved) {
+			docs[pos] = set;
+		}
 		// Without a truthy filter there is no record evaluation to warm up:
-		// admission is decided purely on the allow-list bitmap, with zero
-		// record fetches.
+		// admission is decided purely on the allow-list bitmap.
 		let Some(filter) = filter.as_mut() else {
-			return Ok(());
+			return Ok(docs);
 		};
 		let mut ids: Vec<VectorId> = Vec::new();
-		for &e_id in neighbourhood.iter() {
-			if visited.contains(&e_id) {
-				continue;
-			}
-			let Some(e_pt) = elements.get_vector(&ctx.tx, &e_id).await? else {
-				continue;
-			};
-			let e_dist = elements.distance(&e_pt, &search.pt);
-			// Same gate as the evaluation loop, but against the f_dist / w.len()
-			// captured at the start of this neighbourhood — the loosest form (see
-			// the method doc), so the collected set is a superset of the loop's.
-			if !(e_dist < f_dist || w_len < search.ef) {
-				continue;
-			}
-			let Some(docs) = ctx.vec_docs.get_docs_by_element(&ctx.tx, e_id, &e_pt).await? else {
-				continue;
-			};
+		for set in docs.iter().flatten() {
 			if let Some(pending_docs) = pending_docs
-				&& Self::check_all_docs_in_pending(&docs, pending_docs)
+				&& Self::check_all_docs_in_pending(set, pending_docs)
 			{
 				continue;
 			}
-			for doc_id in docs.iter() {
-				// Bitmap-rejected and individually-pending candidates are never
-				// evaluated by the filter, so their records must not be
-				// prefetched either.
+			for doc_id in set.iter() {
 				if pending_docs.is_some_and(|pending| pending.contains(doc_id)) {
 					continue;
 				}
@@ -503,7 +523,8 @@ where
 				ids.push(VectorId::DocId(doc_id));
 			}
 		}
-		filter.prefetch_records(ctx, &ids).await
+		filter.prefetch_records(ctx, &ids).await?;
+		Ok(docs)
 	}
 
 	/// Decides whether an element is admitted into the result queue `w`.
@@ -530,7 +551,25 @@ where
 		pending_docs: Option<&RoaringTreemap>,
 		allow_list: Option<&RoaringTreemap>,
 	) -> Result<bool> {
-		if let Some(docs) = ctx.vec_docs.get_docs_by_element(&ctx.tx, e_id, e_pt).await? {
+		let docs = ctx.vec_docs.get_docs_by_element(&ctx.tx, e_id, e_pt).await?;
+		Self::admit_docs(ctx, efc, w, docs, e_dist, e_id, filter, pending_docs, allow_list).await
+	}
+
+	/// [`Self::add_if_truthy`] for an element whose doc set `docs` is already
+	/// resolved; an element without a doc set is never admitted.
+	#[expect(clippy::too_many_arguments)]
+	async fn admit_docs(
+		ctx: &HnswContext<'_>,
+		efc: usize,
+		w: &mut DoublePriorityQueue,
+		docs: Option<Ids64>,
+		e_dist: f64,
+		e_id: ElementId,
+		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
+		pending_docs: Option<&RoaringTreemap>,
+		allow_list: Option<&RoaringTreemap>,
+	) -> Result<bool> {
+		if let Some(docs) = docs {
 			if let Some(pending_docs) = pending_docs
 				// Check all these docs are currently updated the pending
 				&& Self::check_all_docs_in_pending(&docs, pending_docs)
@@ -681,7 +720,9 @@ where
 	) -> Result<DoublePriorityQueue> {
 		let mut w = DoublePriorityQueue::default();
 		if let Some(e_pt) = elements.get_vector(tx, &e_id).await? {
-			for n_id in neighbors.iter() {
+			// A neighbour this layer no longer holds is left out, so the pruned
+			// list drops the edge to it.
+			for n_id in neighbors.iter().filter(|n_id| self.graph.has_node(**n_id)) {
 				if let Some(n_pt) = elements.get_vector(tx, n_id).await? {
 					let dist = elements.distance(&e_pt, &n_pt);
 					w.push(dist, *n_id);
@@ -703,6 +744,11 @@ where
 		if let Some(f_ids) = self.graph.remove_node_and_bidirectional_edges(e_id) {
 			let mut changed_nodes = Vec::with_capacity(f_ids.len());
 			for &q_id in f_ids.iter() {
+				// An edge to an element already removed is dropped with this
+				// node: re-linking it would bring the removed element back.
+				if !self.graph.has_node(q_id) {
+					continue;
+				}
 				if let Some(q_pt) = elements.get_vector(&ctx.tx, &q_id).await? {
 					let c = self
 						.search_multi_with_ignore(ctx, elements, &q_pt, vec![q_id, e_id], efc)

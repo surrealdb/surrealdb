@@ -406,9 +406,10 @@ async fn hnsw_versioned_filtered_search_reads_each_candidate_once() -> Result<()
 ///
 /// The narrowest filter is the strictest detector: `tag = <id>` qualifies one
 /// record, so a graph walk that skips the element holding it yields an empty
-/// result. The bare operator's nearest records for each probe are filtered for
-/// in turn; a bare hit the filtered operator misses is a drop. In the old
-/// snapshot, every record the round moved or deleted is also filtered for at
+/// result. Every snapshot holds far more than 10 live records, so a bare
+/// operator answering fewer than 10 is itself a drop, recorded with id `-1`. The bare operator's
+/// nearest records for each probe are filtered for in turn; a bare hit the filtered operator misses
+/// is a drop. In the old snapshot, every record the round moved or deleted is also filtered for at
 /// the vector that snapshot holds for it, where it is the nearest record.
 #[test(tokio::test(flavor = "multi_thread"))]
 async fn hnsw_filtered_knn_keeps_what_bare_knn_returns_through_churn() -> Result<()> {
@@ -551,6 +552,12 @@ async fn hnsw_filtered_knn_keeps_what_bare_knn_returns_through_churn() -> Result
 					&format!("SELECT id FROM pts WHERE vec <|10,40|> {q};"),
 				)
 				.await?;
+				// Far more than 10 records are live in every snapshot, so a
+				// short answer is a walk that lost its way, and would
+				// otherwise leave nothing to probe.
+				if bare.len() < 10 {
+					drops.push((round, snapshot.is_some(), q.clone(), -1, bare.clone()));
+				}
 				for id in bare.iter().take(3) {
 					probed += 1;
 					let filtered = ids(
@@ -588,7 +595,7 @@ async fn hnsw_filtered_knn_keeps_what_bare_knn_returns_through_churn() -> Result
 	assert!(probed > 500, "the probe must run: {probed}");
 	assert!(
 		drops.is_empty(),
-		"{} of {probed} bare hits dropped by the filter (round, old snapshot, query, id, filtered): {drops:#?}",
+		"{} of {probed} bare hits dropped by the filter, or bare answers short (id -1) (round, old snapshot, query, id, rows): {drops:#?}",
 		drops.len()
 	);
 	Ok(())

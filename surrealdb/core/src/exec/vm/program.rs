@@ -1781,6 +1781,15 @@ pub(crate) enum StoreInstr {
 		tb: Reg,
 		upgrading: Option<Reg>,
 	},
+	/// Admit the format version stamped on the index definition in `definition`
+	/// to the store's feature level, in place: on a store at the `Legacy` level a
+	/// stamp above the newest such a store admits is lowered to it
+	/// (`admitted_index_format_version`), and on any other store a stamp above it
+	/// records that the store uses this release's features, so the level cannot
+	/// be lowered beneath it.
+	AdmitIndexFormat {
+		definition: Reg,
+	},
 	/// `dst` = a fresh id for an index of the table named in `tb`.
 	NextIndexId {
 		ns: Reg,

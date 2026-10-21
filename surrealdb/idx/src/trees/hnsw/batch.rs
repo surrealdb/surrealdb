@@ -335,7 +335,7 @@ where
 	}
 	let mut chosen = Vec::with_capacity(e.level + 1);
 	for (level, mut candidates) in found.into_iter().enumerate() {
-		for (d, id) in input.nearest_members(elements, i, level, h.efc).to_vec() {
+		for (d, id) in input.nearest_members(elements, i, level, h.efc).into_sorted_vec() {
 			candidates.push(d, id);
 		}
 		while candidates.len() > h.efc {
@@ -424,13 +424,14 @@ where
 	let mut candidates: Vec<ElementId> = match input.position(job.node) {
 		Some(i) => selections[i][job.level].clone(),
 		None => {
+			// Only edges to elements the layer still holds are candidates.
 			let edges = if job.level == 0 {
-				h.layer0.get_edges(job.node).map(|s| s.iter().copied().collect::<Vec<_>>())
+				h.layer0.live_edges(job.node).map(|s| s.collect::<Vec<_>>())
 			} else {
 				h.layers
 					.get(job.level - 1)
-					.and_then(|layer| layer.get_edges(job.node))
-					.map(|s| s.iter().copied().collect::<Vec<_>>())
+					.and_then(|layer| layer.live_edges(job.node))
+					.map(|s| s.collect::<Vec<_>>())
 			};
 			let mut edges = edges.unwrap_or_default();
 			edges.sort_unstable();

@@ -1,26 +1,85 @@
 //! Distance kernels and a memory hint for the vector indexes.
 //!
-//! On 64-bit non-WASM targets (the `diskann` cfg) the `f32` kernels are
-//! `diskann-vector`'s: they select the widest instruction set the CPU offers —
-//! AVX-512, AVX2, NEON — when they first run, whatever the build targets.
-//! Elsewhere they are portable Rust. Both accumulate in `f32` and sum in
-//! different orders, so the same pair of vectors can differ in the low digits
-//! across targets; within one process a pair always scores the same.
+//! On 64-bit non-WASM targets (the `diskann` cfg) the kernels are
+//! `diskann-vector`'s runtime-dispatched comparers: the first call for an
+//! element type picks the widest instruction set the CPU offers — AVX-512,
+//! AVX2, NEON — whatever the build targets, and every later call goes through
+//! that choice. (The `PureDistanceFunction` slice entry points would not: they
+//! run the architecture the build was compiled for, which on an x86-64 build
+//! without AVX target features is the scalar fallback.) Elsewhere the `f32`
+//! kernels are portable Rust and the narrow integer kernels do not exist. The
+//! `f32` kernels accumulate in `f32` and sum in different orders, so the same
+//! pair of vectors can differ in the low digits across targets and instruction
+//! sets; within one process a pair always scores the same.
 
 #[cfg(diskann)]
-use diskann_vector::distance::{InnerProduct, SquaredL2};
+use std::sync::OnceLock;
+
 #[cfg(diskann)]
-use diskann_vector::{MathematicalValue, PureDistanceFunction};
+use diskann_vector::distance::{Distance, DistanceProvider, Metric};
+
+/// The runtime-dispatched comparers of one element type, for slices of any
+/// length.
+#[cfg(diskann)]
+pub(crate) struct Comparers<T: 'static> {
+	/// Ranks by negated inner product, so smaller is nearer.
+	negated_inner_product: Distance<T, T>,
+	squared_l2: Distance<T, T>,
+}
+
+#[cfg(diskann)]
+impl<T: DistanceProvider<T>> Comparers<T> {
+	fn new() -> Self {
+		Self {
+			negated_inner_product: T::distance_comparer(Metric::InnerProduct, None),
+			squared_l2: T::distance_comparer(Metric::L2, None),
+		}
+	}
+}
+
+/// An element type the kernels measure, with its comparers chosen on first use
+/// and kept for the life of the process.
+#[cfg(diskann)]
+pub(crate) trait KernelElement: DistanceProvider<Self> + Sized + 'static {
+	fn comparers() -> &'static Comparers<Self>;
+}
+
+#[cfg(diskann)]
+macro_rules! kernel_element {
+	($($T:ty),*) => {$(
+		impl KernelElement for $T {
+			#[inline]
+			fn comparers() -> &'static Comparers<Self> {
+				static COMPARERS: OnceLock<Comparers<$T>> = OnceLock::new();
+				COMPARERS.get_or_init(Comparers::new)
+			}
+		}
+	)*};
+}
+
+#[cfg(diskann)]
+kernel_element!(f32, i8, u8);
+
+/// The dot product of two vectors of equal length. Negating the comparer's
+/// negated inner product is exact.
+#[cfg(diskann)]
+#[inline]
+fn dot<T: KernelElement>(a: &[T], b: &[T]) -> f32 {
+	-T::comparers().negated_inner_product.call(a, b)
+}
+
+/// The squared Euclidean distance between two vectors of equal length.
+#[cfg(diskann)]
+#[inline]
+fn squared_l2<T: KernelElement>(a: &[T], b: &[T]) -> f32 {
+	T::comparers().squared_l2.call(a, b)
+}
 
 /// The dot product of two `f32` vectors of equal length.
 #[cfg(diskann)]
 #[inline]
 pub(crate) fn dot_f32(a: &[f32], b: &[f32]) -> f32 {
-	let value: MathematicalValue<f32> =
-		<InnerProduct as PureDistanceFunction<&[f32], &[f32], MathematicalValue<f32>>>::evaluate(
-			a, b,
-		);
-	value.into_inner()
+	dot(a, b)
 }
 
 /// The dot product of two `f32` vectors of equal length.
@@ -34,9 +93,7 @@ pub(crate) fn dot_f32(a: &[f32], b: &[f32]) -> f32 {
 #[cfg(diskann)]
 #[inline]
 pub(crate) fn squared_l2_f32(a: &[f32], b: &[f32]) -> f32 {
-	let value: MathematicalValue<f32> =
-		<SquaredL2 as PureDistanceFunction<&[f32], &[f32], MathematicalValue<f32>>>::evaluate(a, b);
-	value.into_inner()
+	squared_l2(a, b)
 }
 
 /// The squared Euclidean distance between two `f32` vectors of equal length.
@@ -50,6 +107,23 @@ pub(crate) fn squared_l2_f32(a: &[f32], b: &[f32]) -> f32 {
 			d * d
 		})
 		.sum()
+}
+
+/// The squared Euclidean distance between two equal-length vectors of a
+/// narrow integer element type (`i8`, `u8`), accumulated in `i32` and
+/// returned as `f32`.
+#[cfg(diskann)]
+#[inline]
+pub(crate) fn squared_l2_narrow<T: KernelElement>(a: &[T], b: &[T]) -> f32 {
+	squared_l2(a, b)
+}
+
+/// The dot product of two equal-length vectors of a narrow integer element type
+/// (`i8`, `u8`), accumulated in `i32` and returned as `f32`.
+#[cfg(diskann)]
+#[inline]
+pub(crate) fn dot_narrow<T: KernelElement>(a: &[T], b: &[T]) -> f32 {
+	dot(a, b)
 }
 
 /// The cache line size the prefetch steps by.
@@ -107,23 +181,88 @@ mod tests {
 
 	/// The kernels agree with an `f64` reference to `f32` precision, over
 	/// lengths that exercise every tail a SIMD kernel can leave, including
-	/// empty vectors.
+	/// empty vectors, and over slices that start at different offsets from
+	/// their allocation, as a vector decoded out of a stored value does.
 	#[test]
 	fn kernels_match_an_f64_reference() {
 		for len in [0, 1, 3, 7, 8, 15, 16, 17, 31, 64, 100, 768, 1023] {
-			let (a, b) = vectors(len);
-			let dot: f64 = a.iter().zip(&b).map(|(x, y)| *x as f64 * *y as f64).sum();
-			let l2: f64 = a.iter().zip(&b).map(|(x, y)| (*x as f64 - *y as f64).powi(2)).sum();
-			let scale = a.iter().zip(&b).map(|(x, y)| (*x as f64 * *y as f64).abs()).sum::<f64>();
-			assert!(
-				(dot_f32(&a, &b) as f64 - dot).abs() <= 1e-5 * scale.max(1.0),
-				"dot, len {len}"
-			);
-			assert!(
-				(squared_l2_f32(&a, &b) as f64 - l2).abs() <= 1e-5 * l2.max(1.0),
-				"squared L2, len {len}"
-			);
+			for (skip_a, skip_b) in OFFSETS {
+				let (a, _) = vectors(len + skip_a);
+				let (_, b) = vectors(len + skip_b);
+				let (a, b) = (&a[skip_a..], &b[skip_b..]);
+				let dot: f64 = a.iter().zip(b).map(|(x, y)| *x as f64 * *y as f64).sum();
+				let l2: f64 = a.iter().zip(b).map(|(x, y)| (*x as f64 - *y as f64).powi(2)).sum();
+				let scale =
+					a.iter().zip(b).map(|(x, y)| (*x as f64 * *y as f64).abs()).sum::<f64>();
+				assert!(
+					(dot_f32(a, b) as f64 - dot).abs() <= 1e-5 * scale.max(1.0),
+					"dot, len {len}, skip {skip_a}/{skip_b}"
+				);
+				assert!(
+					(squared_l2_f32(a, b) as f64 - l2).abs() <= 1e-5 * l2.max(1.0),
+					"squared L2, len {len}, skip {skip_a}/{skip_b}"
+				);
+			}
 		}
+	}
+
+	/// The pairs of offsets into their allocations the kernels are scored at.
+	const OFFSETS: [(usize, usize); 3] = [(0, 0), (1, 3), (3, 1)];
+
+	/// The narrow integer kernels agree with an exact integer reference, up to
+	/// the one rounding of the `i32` sum to `f32`, over the same lengths and
+	/// offsets as the `f32` kernels, the extremes of each type included.
+	#[cfg(diskann)]
+	#[test]
+	fn narrow_kernels_match_an_integer_reference() {
+		fn check<T: KernelElement + Copy + Into<i64> + std::fmt::Debug>(
+			element: impl Fn(usize, usize) -> T,
+		) {
+			for len in [0, 1, 3, 7, 8, 15, 16, 17, 31, 32, 33, 63, 64, 65, 100, 768, 1023] {
+				for (skip_a, skip_b) in OFFSETS {
+					let a: Vec<T> = (0..len + skip_a).map(|i| element(i, 0)).collect();
+					let b: Vec<T> = (0..len + skip_b).map(|i| element(i, 1)).collect();
+					let (a, b) = (&a[skip_a..], &b[skip_b..]);
+					let pairs = || a.iter().zip(b).map(|(x, y)| ((*x).into(), (*y).into()));
+					let dot: i64 = pairs().map(|(x, y): (i64, i64)| x * y).sum();
+					let l2: i64 = pairs().map(|(x, y): (i64, i64)| (x - y) * (x - y)).sum();
+					let close = |got: f32, want: i64| {
+						(got as f64 - want as f64).abs()
+							<= (want as f64).abs() * f64::from(f32::EPSILON)
+					};
+					assert!(close(dot_narrow(a, b), dot), "dot, len {len}, skip {skip_a}/{skip_b}");
+					assert!(
+						close(squared_l2_narrow(a, b), l2),
+						"squared L2, len {len}, skip {skip_a}/{skip_b}"
+					);
+				}
+			}
+		}
+		// Every value of each type appears, the extremes paired with each other.
+		check::<i8>(|i, side| match (i % 7, side) {
+			(0, 0) => i8::MIN,
+			(0, _) => i8::MAX,
+			(1, _) => i8::MIN,
+			_ => {
+				((i * if side == 0 {
+					37
+				} else {
+					53
+				}) % 256) as u8 as i8
+			}
+		});
+		check::<u8>(|i, side| match (i % 7, side) {
+			(0, 0) => u8::MIN,
+			(0, _) => u8::MAX,
+			(1, _) => u8::MAX,
+			_ => {
+				((i * if side == 0 {
+					37
+				} else {
+					53
+				}) % 256) as u8
+			}
+		});
 	}
 
 	/// One offset per cache line a slice spans, at every alignment and length:

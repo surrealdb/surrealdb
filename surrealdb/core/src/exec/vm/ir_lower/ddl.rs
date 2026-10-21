@@ -1382,6 +1382,9 @@ impl Ddl<'_, '_> {
 		definition: Reg,
 		name: Operand,
 	) -> Result<(), IrError> {
+		self.store(StoreInstr::AdmitIndexFormat {
+			definition,
+		});
 		self.store(StoreInstr::Put {
 			route: RouteId::named("IndexDefKey"),
 			key,

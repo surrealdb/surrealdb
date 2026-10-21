@@ -1896,6 +1896,40 @@ async fn step_inner(
 				)));
 			}
 		}
+		StoreInstr::AdmitIndexFormat {
+			definition,
+		} => {
+			let Value::Object(mut object) = read(regs, *definition) else {
+				return Err(ControlFlow::Err(anyhow::anyhow!(
+					"an index definition is not an object"
+				)));
+			};
+			let stamped = match object.get("format_version") {
+				Some(Value::Number(n)) => u16::try_from(n.to_int()).map_err(|_| {
+					ControlFlow::Err(anyhow::anyhow!("an index format version is out of range"))
+				})?,
+				_ => {
+					return Err(ControlFlow::Err(anyhow::anyhow!(
+						"an index definition holds no format version"
+					)));
+				}
+			};
+			if stamped > crate::catalog::LEGACY_LEVEL_INDEX_FORMAT_VERSION {
+				let txn = ctx.txn();
+				// The stored level, not the datastore's cell, which may lag the store.
+				let level = txn.feature_level_state().await.map_err(ControlFlow::Err)?.level;
+				let admitted =
+					crate::catalog::admitted_index_format_version(stamped, level.is_legacy());
+				if admitted == stamped {
+					txn.admit_floor(surrealdb_kvs::Release::FIRST_STORED)
+						.await
+						.map_err(ControlFlow::Err)?;
+				} else {
+					object.insert("format_version", Value::from(i64::from(admitted)));
+					write(regs, *definition, Value::Object(object));
+				}
+			}
+		}
 		StoreInstr::NextIndexId {
 			ns,
 			db,
@@ -1932,7 +1966,16 @@ async fn step_inner(
 				&& existing.cols == template.cols
 				&& existing.index == template.index;
 			if reuses && *healthy {
-				reuses = existing.format_version == crate::catalog::INDEX_FORMAT_VERSION && {
+				// An index is current when its stamp already gives it the layout a
+				// definition written now would have: its kind's current layout, as
+				// far as the store admits it (no higher than the legacy-level format
+				// on a store held at `Legacy`).
+				let level = ctx.txn().feature_level_state().await.map_err(ControlFlow::Err)?.level;
+				let current = crate::catalog::admitted_index_format_version(
+					crate::catalog::current_layout_format_version(&existing.index),
+					level.is_legacy(),
+				);
+				reuses = existing.format_version >= current && {
 					let ikb = crate::idx::IndexKeyBase::new(
 						crate::catalog::NamespaceId(id_of(&read(regs, *ns))?),
 						crate::catalog::DatabaseId(id_of(&read(regs, *db))?),
@@ -1979,6 +2022,13 @@ async fn step_inner(
 			let index: crate::catalog::StoredIndexDefinition = rust(&read(regs, *index))?;
 			let index =
 				crate::catalog::IndexDefinition::from_stored(&index).map_err(ControlFlow::Err)?;
+			// Parameters no DiskANN index can serve refuse the definition here, in its own
+			// transaction, rather than once a build or a write first opens the index.
+			#[cfg(diskann)]
+			if let crate::catalog::Index::DiskAnn(params) = &index.index {
+				crate::idx::trees::diskann::index::DiskAnnIndex::check_params(params)
+					.map_err(ControlFlow::Err)?;
+			}
 			let lending;
 			let frozen = match lent {
 				// The build counts its places as the waiting statement's.

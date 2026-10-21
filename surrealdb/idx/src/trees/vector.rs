@@ -219,6 +219,14 @@ where
 	}
 }
 
+/// The longest `I8`/`U8` vector the SIMD kernels measure. They accumulate in
+/// `i32`, and one component adds at most 255² = 65 025 to a squared distance or
+/// a `U8` dot product, so a longer vector could wrap the accumulator. HNSW
+/// measures longer ones on the exact `f64` path instead; DiskANN, which has no
+/// other path, refuses them.
+#[cfg(diskann)]
+pub(crate) const NARROW_INT_KERNEL_MAX_DIM: usize = i32::MAX as usize / 65_025;
+
 impl Vector {
 	#[inline]
 	fn dot_product<T>(a: &Array1<T>, b: &Array1<T>) -> f64
@@ -312,6 +320,67 @@ impl Vector {
 		}
 	}
 
+	/// The squared Euclidean distance through the SIMD kernels, for the integer
+	/// element types whose exact distance is a scalar `f64` loop (`I8`, `U8`).
+	///
+	/// Accumulated in `i32` and converted to `f32`, so it ranks pairs
+	/// approximately. `None` for every other type, for vectors of unequal
+	/// length, for vectors longer than [`NARROW_INT_KERNEL_MAX_DIM`], for a
+	/// non-finite result, and on targets without the kernels. `F16` keeps the
+	/// scalar path: its kernel converts every component to `f32` first, and is
+	/// slower than that path on x86-64.
+	#[cfg(diskann)]
+	fn approximate_squared_l2(&self, other: &Self) -> Option<f64> {
+		if self.len() != other.len() {
+			return None;
+		}
+		let d = match (self, other) {
+			(Self::I8(a), Self::I8(b)) if self.len() <= NARROW_INT_KERNEL_MAX_DIM => {
+				kernels::squared_l2_narrow(a.as_slice()?, b.as_slice()?)
+			}
+			(Self::U8(a), Self::U8(b)) if self.len() <= NARROW_INT_KERNEL_MAX_DIM => {
+				kernels::squared_l2_narrow(a.as_slice()?, b.as_slice()?)
+			}
+			_ => return None,
+		};
+		d.is_finite().then_some(f64::from(d))
+	}
+
+	#[cfg(not(diskann))]
+	fn approximate_squared_l2(&self, _other: &Self) -> Option<f64> {
+		None
+	}
+
+	/// The dot product through the SIMD kernels, for the same element types as
+	/// [`Self::approximate_squared_l2`] and with the same caveats.
+	#[cfg(diskann)]
+	fn approximate_dot(&self, other: &Self) -> Option<f64> {
+		if self.len() != other.len() {
+			return None;
+		}
+		let d = match (self, other) {
+			(Self::I8(a), Self::I8(b)) if self.len() <= NARROW_INT_KERNEL_MAX_DIM => {
+				kernels::dot_narrow(a.as_slice()?, b.as_slice()?)
+			}
+			(Self::U8(a), Self::U8(b)) if self.len() <= NARROW_INT_KERNEL_MAX_DIM => {
+				kernels::dot_narrow(a.as_slice()?, b.as_slice()?)
+			}
+			_ => return None,
+		};
+		d.is_finite().then_some(f64::from(d))
+	}
+
+	#[cfg(not(diskann))]
+	fn approximate_dot(&self, _other: &Self) -> Option<f64> {
+		None
+	}
+
+	/// Whether [`Self::approximate_squared_l2`] and [`Self::approximate_dot`]
+	/// can serve this vector's element type on this target.
+	fn has_approximate_kernels(&self) -> bool {
+		cfg!(diskann) && matches!(self, Self::I8(_) | Self::U8(_))
+	}
+
 	/// Asks the CPU to start loading the vector's components into its caches
 	/// ([`kernels::prefetch`]); a hint that changes nothing.
 	pub(super) fn prefetch(&self) {
@@ -395,18 +464,17 @@ impl Vector {
 		1.0 - self.dot(other)
 	}
 
+	/// `Σ (aᵢ - bᵢ)²`, measured in `f64`: the squared Euclidean distance.
 	#[inline]
-	fn euclidean<T>(a: &Array1<T>, b: &Array1<T>) -> f64
+	fn squared_euclidean<T>(a: &Array1<T>, b: &Array1<T>) -> f64
 	where
 		T: ToFloat,
 	{
 		match (a.as_slice(), b.as_slice()) {
-			(Some(a), Some(b)) => Self::sum_of_squared_differences(a, b).sqrt(),
-			_ => Zip::from(a)
-				.and(b)
-				.map_collect(|x, y| (x.to_float() - y.to_float()).powi(2))
-				.sum()
-				.sqrt(),
+			(Some(a), Some(b)) => Self::sum_of_squared_differences(a, b),
+			_ => {
+				Zip::from(a).and(b).map_collect(|x, y| (x.to_float() - y.to_float()).powi(2)).sum()
+			}
 		}
 	}
 
@@ -442,33 +510,38 @@ impl Vector {
 		acc
 	}
 	fn euclidean_distance(&self, other: &Self) -> f64 {
+		self.squared_euclidean_distance(other).sqrt()
+	}
+
+	/// The square of [`Self::euclidean_distance`], which ranks pairs identically
+	/// without taking a square root: the Euclidean distance is exactly this
+	/// value's square root.
+	fn squared_euclidean_distance(&self, other: &Self) -> f64 {
 		match (self, other) {
-			(Self::F64(a), Self::F64(b)) => a.l2_dist(b).unwrap_or(f64::INFINITY),
-			(Self::F16(a), Self::F16(b)) => Self::euclidean(a, b),
+			(Self::F64(a), Self::F64(b)) => a.sq_l2_dist(b).unwrap_or(f64::INFINITY),
+			(Self::F16(a), Self::F16(b)) => Self::squared_euclidean(a, b),
 			(Self::F32(a), Self::F32(b)) => {
 				let distance = match (a.as_slice(), b.as_slice()) {
 					(Some(s), Some(t)) if s.len() == t.len() => {
-						(kernels::squared_l2_f32(s, t) as f64).sqrt()
+						kernels::squared_l2_f32(s, t) as f64
 					}
-					_ => a.l2_dist(b).unwrap_or(f64::INFINITY),
+					_ => a.sq_l2_dist(b).map(f64::from).unwrap_or(f64::INFINITY),
 				};
 				// An `f32` accumulator overflows on large finite components:
 				// those are measured in `f64` instead.
 				if distance.is_infinite() && a.len() == b.len() {
-					Self::euclidean(a, b)
+					Self::squared_euclidean(a, b)
 				} else {
 					distance
 				}
 			}
 			// Integer components are compared as `f64`: a difference taken in
 			// the element type, or its square, overflows it.
-			(Self::I64(a), Self::I64(b)) => {
-				Self::i64_diffs(a, b).map(|d| d * d).sum::<f64>().sqrt()
-			}
-			(Self::I32(a), Self::I32(b)) => Self::euclidean(a, b),
-			(Self::I16(a), Self::I16(b)) => Self::euclidean(a, b),
-			(Self::I8(a), Self::I8(b)) => Self::euclidean(a, b),
-			(Self::U8(a), Self::U8(b)) => Self::euclidean(a, b),
+			(Self::I64(a), Self::I64(b)) => Self::i64_diffs(a, b).map(|d| d * d).sum::<f64>(),
+			(Self::I32(a), Self::I32(b)) => Self::squared_euclidean(a, b),
+			(Self::I16(a), Self::I16(b)) => Self::squared_euclidean(a, b),
+			(Self::I8(a), Self::I8(b)) => Self::squared_euclidean(a, b),
+			(Self::U8(a), Self::U8(b)) => Self::squared_euclidean(a, b),
 			_ => f64::INFINITY,
 		}
 	}
@@ -950,6 +1023,18 @@ pub(crate) trait DistanceExt {
 	fn calculate(&self, a: &Vector, b: &Vector) -> f64;
 	fn calculate_shared(&self, a: &SharedVector, b: &SharedVector) -> f64;
 	fn calculate_against(&self, query: &SharedVector, v: &Vector) -> f64;
+	/// A value that orders pairs as [`Self::calculate_shared`] does, cheaper to
+	/// compute for some metrics. When [`Self::ranking_is_exact`] holds,
+	/// [`Self::distance_from_ranking`] maps it back to the distance.
+	fn ranking_shared(&self, a: &SharedVector, b: &SharedVector) -> f64;
+	/// The distance a [`Self::ranking_shared`] value stands for, when
+	/// [`Self::ranking_is_exact`] holds.
+	fn distance_from_ranking(&self, ranking: f64) -> f64;
+	/// Whether [`Self::ranking_shared`] ranks vectors of `sample`'s element type
+	/// exactly, so [`Self::distance_from_ranking`] recovers their distance bit
+	/// for bit. Otherwise it is an `f32`-accumulated approximation, and a
+	/// distance has to come from [`Self::calculate_shared`].
+	fn ranking_is_exact(&self, sample: &Vector) -> bool;
 }
 
 /// Whether `a` and `b` can be measured against each other: the same element
@@ -1021,6 +1106,50 @@ impl DistanceExt for Distance {
 		match self {
 			Distance::Cosine => query.cosine_distance_with_norms(v, query.norm(), v.l2_norm()),
 			_ => calculate_comparable(self, query, v),
+		}
+	}
+
+	/// For [`Distance::Euclidean`] this is the squared distance, which skips the
+	/// square root of every comparison. For the `I8` and `U8` element types the
+	/// Euclidean, cosine and inner-product rankings go through the SIMD kernels,
+	/// accumulated in `i32`. Every other pair ranks by its distance.
+	fn ranking_shared(&self, a: &SharedVector, b: &SharedVector) -> f64 {
+		if !comparable(a, b) {
+			return f64::INFINITY;
+		}
+		match self {
+			Distance::Euclidean => {
+				a.approximate_squared_l2(b).unwrap_or_else(|| a.squared_euclidean_distance(b))
+			}
+			Distance::Cosine => match a.approximate_dot(b) {
+				Some(dot) => 1.0 - dot / (a.norm() * b.norm()),
+				None => a.cosine_distance_with_norms(b, a.norm(), b.norm()),
+			},
+			Distance::CosineNormalized => a
+				.approximate_dot(b)
+				.map_or_else(|| calculate_comparable(self, a, b), |dot| 1.0 - dot),
+			Distance::InnerProduct => {
+				a.approximate_dot(b).map_or_else(|| calculate_comparable(self, a, b), |dot| -dot)
+			}
+			_ => calculate_comparable(self, a, b),
+		}
+	}
+
+	fn ranking_is_exact(&self, sample: &Vector) -> bool {
+		let approximated = matches!(
+			self,
+			Distance::Euclidean
+				| Distance::Cosine
+				| Distance::CosineNormalized
+				| Distance::InnerProduct
+		);
+		!(approximated && sample.has_approximate_kernels())
+	}
+
+	fn distance_from_ranking(&self, ranking: f64) -> f64 {
+		match self {
+			Distance::Euclidean => ranking.sqrt(),
+			_ => ranking,
 		}
 	}
 }
@@ -1535,5 +1664,20 @@ mod tests {
 			)
 			.is_ok()
 		);
+	}
+
+	/// `U8` vectors beyond the SIMD kernels' `i32` range are ranked on the exact
+	/// path: the squared distance of two 40 000-component vectors of 255 and 0
+	/// would wrap an `i32` accumulator.
+	#[test]
+	fn narrow_int_ranking_never_wraps() {
+		let dim = 40_000;
+		let a: SharedVector = Vector::U8(Array1::from_elem(dim, 255u8)).into();
+		let b: SharedVector = Vector::U8(Array1::from_elem(dim, 0u8)).into();
+		let squared = Distance::Euclidean.ranking_shared(&a, &b);
+		assert_eq!(squared, (dim as f64) * 65_025.0);
+		assert_eq!(Distance::Euclidean.calculate_shared(&a, &b), squared.sqrt());
+		let dot = Distance::InnerProduct.ranking_shared(&a, &a);
+		assert_eq!(dot, -(dim as f64) * 65_025.0);
 	}
 }

@@ -119,6 +119,81 @@ impl KVValue for DiskAnnElement {
 	}
 }
 
+/// A DiskANN element's vector as a per-vector symmetric 8-bit code (`!da`).
+///
+/// Each component `x` is stored as `round(x / scale)`, clamped to ±127, with
+/// `scale = max|x| / 127`, so the code needs no codebook shared with any other
+/// element: it is a function of its own vector alone, written once in the
+/// transaction that writes the element and never rewritten. `norm` is the L2
+/// norm of the integer code, so a query scores an element with one integer dot
+/// product and two float operations whatever the metric.
+///
+/// Stored as a version byte (`1`), `scale` and `norm` as little-endian `f32`,
+/// then one byte per component.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DiskAnnElementCode {
+	/// The width of one code step in the vector's units.
+	pub scale: f32,
+	/// The L2 norm of `code`, as integers.
+	pub norm: f32,
+	/// One signed byte per vector component.
+	pub code: Vec<i8>,
+}
+
+impl DiskAnnElementCode {
+	const VERSION: u8 = 1;
+	const HEADER: usize = 9;
+
+	/// Encodes `vector`. A zero vector gets an all-zero code and a zero norm, and
+	/// so does one whose scale is not a positive finite `f32`: a non-finite
+	/// component, or components so small that `max / 127` underflows to zero.
+	pub fn encode(vector: &[f32]) -> Self {
+		let max = vector.iter().fold(0f32, |m, x| m.max(x.abs()));
+		let scale = max / 127.0;
+		if scale == 0.0 || !scale.is_finite() {
+			return Self {
+				scale: 0.0,
+				norm: 0.0,
+				code: vec![0; vector.len()],
+			};
+		}
+		let code: Vec<i8> =
+			vector.iter().map(|x| (x / scale).round().clamp(-127.0, 127.0) as i8).collect();
+		let norm = (code.iter().map(|c| (*c as i32 * *c as i32) as i64).sum::<i64>() as f32).sqrt();
+		Self {
+			scale,
+			norm,
+			code,
+		}
+	}
+}
+
+impl KVValue for DiskAnnElementCode {
+	type KeyContext = ();
+
+	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+		let mut val = Vec::with_capacity(Self::HEADER + self.code.len());
+		val.push(Self::VERSION);
+		val.extend_from_slice(&self.scale.to_le_bytes());
+		val.extend_from_slice(&self.norm.to_le_bytes());
+		val.extend(self.code.iter().map(|c| *c as u8));
+		Ok(val)
+	}
+
+	fn kv_decode_value(val: &[u8], _: ()) -> anyhow::Result<Self> {
+		anyhow::ensure!(
+			val.len() >= Self::HEADER && val[0] == Self::VERSION,
+			"unsupported DiskANN element code encoding"
+		);
+		let f = |at: usize| f32::from_le_bytes([val[at], val[at + 1], val[at + 2], val[at + 3]]);
+		Ok(Self {
+			scale: f(1),
+			norm: f(5),
+			code: val[Self::HEADER..].iter().map(|b| *b as i8).collect(),
+		})
+	}
+}
+
 /// Persisted DiskANN neighbor list for one element.
 #[revisioned(revision = 1)]
 #[derive(Default, Clone, Serialize, Deserialize)]
@@ -445,5 +520,42 @@ impl KVValue for DiskAnnElementDocs {
 	#[inline]
 	fn kv_decode_value(mut bytes: &[u8], _: ()) -> Result<Self> {
 		Ok(DeserializeRevisioned::deserialize_revisioned(&mut bytes)?)
+	}
+}
+
+#[cfg(test)]
+mod element_code_tests {
+	use surrealdb_kvs::value::KVValue;
+
+	use super::DiskAnnElementCode;
+
+	#[test]
+	fn an_element_code_round_trips_and_spans_the_byte() {
+		let code = DiskAnnElementCode::encode(&[0.5, -1.0, 0.25, 0.0]);
+		assert_eq!(code.code, vec![64, -127, 32, 0]);
+		assert_eq!(code.scale, 1.0 / 127.0);
+		let encoded = code.kv_encode_value().unwrap();
+		assert_eq!(encoded.len(), 9 + 4);
+		assert_eq!(DiskAnnElementCode::kv_decode_value(&encoded, ()).unwrap(), code);
+	}
+
+	#[test]
+	fn a_zero_vector_codes_to_zero_and_an_unknown_encoding_is_refused() {
+		let code = DiskAnnElementCode::encode(&[0.0; 3]);
+		assert_eq!((code.scale, code.norm, code.code), (0.0, 0.0, vec![0; 3]));
+		assert!(DiskAnnElementCode::kv_decode_value(&[2, 0, 0, 0, 0, 0, 0, 0, 0], ()).is_err());
+		assert!(DiskAnnElementCode::kv_decode_value(&[1, 0], ()).is_err());
+	}
+
+	/// A vector whose largest component is so small that its scale underflows to
+	/// zero codes as a zero vector, rather than dividing by a zero scale.
+	#[test]
+	fn a_vector_whose_scale_underflows_codes_to_zero() {
+		let tiny = f32::from_bits(1);
+		assert_eq!(tiny / 127.0, 0.0, "the scale underflows");
+		let code = DiskAnnElementCode::encode(&[tiny, -f32::from_bits(2), 0.0]);
+		assert_eq!((code.scale, code.norm, code.code), (0.0, 0.0, vec![0; 3]));
+		let code = DiskAnnElementCode::encode(&[f32::INFINITY, 1.0]);
+		assert_eq!((code.scale, code.norm, code.code), (0.0, 0.0, vec![0; 2]));
 	}
 }

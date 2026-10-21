@@ -7,7 +7,9 @@ use surrealdb_datastore::Transaction;
 pub(crate) use surrealdb_datastore::values::hnsw::{ElementDocs, ElementHashedDocs, RemoveResult};
 
 use crate::IndexKeyBase;
-use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId, keeps_vector_doc_elements};
+use crate::catalog::{
+	DatabaseId, IndexId, NamespaceId, TableId, keeps_element_docs, keeps_vector_doc_elements,
+};
 use crate::docids::{DocId, LegacyVectorDocIds, TableDocIds};
 use crate::env::IndexEnv;
 use crate::trees::doc_elements;
@@ -294,6 +296,29 @@ impl VecDocs {
 		Ok(())
 	}
 
+	/// Records `element`'s documents in the element → doc-IDs mapping of an
+	/// index that keeps one, beside the vector-keyed mapping that holds them.
+	async fn set_element_docs(
+		&self,
+		tx: &Transaction,
+		element: ElementId,
+		docs: &Ids64,
+	) -> Result<()> {
+		if keeps_element_docs(self.format_version) {
+			tx.set_key(&self.ikb.new_hm_key(element), docs).await?;
+		}
+		Ok(())
+	}
+
+	/// Removes `element` from the element → doc-IDs mapping of an index that
+	/// keeps one, as its last document leaves the vector-keyed mapping.
+	async fn del_element_docs(&self, tx: &Transaction, element: ElementId) -> Result<()> {
+		if keeps_element_docs(self.format_version) {
+			tx.del_key(&self.ikb.new_hm_key(element)).await?;
+		}
+		Ok(())
+	}
+
 	/// The elements holding each of `docs`' vectors, in input order, read in
 	/// one multi-get from the doc-ID → elements mapping. Only meaningful for an
 	/// index that keeps the mapping, which answers `None` for every document
@@ -325,7 +350,18 @@ impl VecDocs {
 	}
 
 	/// Retrieves document IDs for a given vector without consulting the process-local cache.
-	async fn get_docs_uncached(&self, tx: &Transaction, pt: &Vector) -> Result<Option<Ids64>> {
+	///
+	/// An index that keeps the element → doc-IDs mapping reads it by `element_id`; any other
+	/// reads the vector-keyed mapping through `pt`.
+	async fn get_docs_uncached(
+		&self,
+		tx: &Transaction,
+		element_id: ElementId,
+		pt: &Vector,
+	) -> Result<Option<Ids64>> {
+		if keeps_element_docs(self.format_version) {
+			return tx.get_key(&self.ikb.new_hm_key(element_id), None).await;
+		}
 		let ser_vec: SerializedVector = pt.into();
 		if self.use_hashed_vector {
 			return self.get_docs_hashed(tx, ser_vec).await;
@@ -351,15 +387,152 @@ impl VecDocs {
 		pt: &Vector,
 	) -> Result<Option<Ids64>> {
 		let DocSetRead::AtGeneration(generation) = self.read else {
-			return self.get_docs_uncached(tx, pt).await;
+			return self.get_docs_uncached(tx, element_id, pt).await;
 		};
 		let index = self.cache_index();
 		if let Some(docs) = self.cache.get_doc_set(index, element_id, generation).await {
 			return Ok(Some(docs));
 		}
-		let docs = self.get_docs_uncached(tx, pt).await?;
+		let docs = self.get_docs_uncached(tx, element_id, pt).await?;
 		if let Some(docs) = docs.clone() {
 			self.cache.insert_doc_set(index, element_id, generation, docs).await;
+		}
+		Ok(docs)
+	}
+
+	/// Asserts that, on an index keeping element-keyed doc sets, `!hm` holds
+	/// for every graph element exactly the documents its vector-keyed entry
+	/// (`!hv` or `!hh`) holds, and that no `!hm` entry outlives its element.
+	/// Returns the number of graph elements checked.
+	#[cfg(test)]
+	pub(super) async fn assert_element_docs_match(&self, tx: &Transaction) -> Result<usize> {
+		use std::collections::BTreeSet;
+
+		use surrealdb_kvs::Direction;
+
+		use crate::key::schema::{HnswElementDocsKey, HnswVectorKey};
+		use crate::key::{KVKeyDecode, KVValue};
+
+		if !keeps_element_docs(self.format_version) {
+			return Ok(0);
+		}
+		let by_vector = Self {
+			format_version: crate::catalog::ELEMENT_DOCS_FORMAT_VERSION - 1,
+			read: DocSetRead::Uncached,
+			..self.clone()
+		};
+		let sorted = |docs: Option<Ids64>| docs.map(|d| d.iter().collect::<Vec<DocId>>());
+		let mut elements = BTreeSet::new();
+		let mut cursor =
+			tx.open_vals_cursor(self.ikb.new_he_range()?, Direction::Forward, 0, None).await?;
+		loop {
+			let batch = cursor.next_batch(1000).await?;
+			if batch.is_empty() {
+				break;
+			}
+			for (key, value) in batch.iter() {
+				let element_id = HnswVectorKey::decode_key(key)?.element_id;
+				let vector = Vector::from(SerializedVector::kv_decode_value(value, ())?);
+				let expected = sorted(by_vector.get_docs_uncached(tx, element_id, &vector).await?);
+				let got = sorted(tx.get_key(&self.ikb.new_hm_key(element_id), None).await?);
+				assert_eq!(
+					got, expected,
+					"element {element_id}: `!hm` differs from its vector entry"
+				);
+				elements.insert(element_id);
+			}
+		}
+		let mut cursor =
+			tx.open_vals_cursor(self.ikb.new_hm_range()?, Direction::Forward, 0, None).await?;
+		loop {
+			let batch = cursor.next_batch(1000).await?;
+			if batch.is_empty() {
+				break;
+			}
+			for (key, _) in batch.iter() {
+				let element_id = HnswElementDocsKey::decode_key(key)?.element_id;
+				assert!(elements.contains(&element_id), "`!hm` outlives element {element_id}");
+			}
+		}
+		Ok(elements.len())
+	}
+
+	/// Whether this index resolves an element's documents by its id alone, so a caller need not
+	/// read the element's vector to look them up.
+	pub(super) fn reads_docs_by_element(&self) -> bool {
+		keeps_element_docs(self.format_version)
+	}
+
+	/// Retrieves the document IDs of several graph elements as `tx` sees them, in input order.
+	///
+	/// Follows the snapshot rules of [`Self::get_docs_by_element`]. The sets the shared cache
+	/// cannot serve are read in one multi-get: by element id on an index that
+	/// [`reads_docs_by_element`](Self::reads_docs_by_element), and otherwise through each
+	/// element's vector, without which an element has no documents.
+	pub(super) async fn get_docs_by_elements(
+		&self,
+		tx: &Transaction,
+		elements: &[(ElementId, Option<&Vector>)],
+	) -> Result<Vec<Option<Ids64>>> {
+		let mut docs: Vec<Option<Ids64>> = vec![None; elements.len()];
+		let index = self.cache_index();
+		let by_element = self.reads_docs_by_element();
+		let mut misses = Vec::with_capacity(elements.len());
+		for (pos, (element_id, pt)) in elements.iter().enumerate() {
+			if let DocSetRead::AtGeneration(generation) = self.read
+				&& let Some(set) = self.cache.get_doc_set(index, *element_id, generation).await
+			{
+				docs[pos] = Some(set);
+				continue;
+			}
+			let ser_vec = if by_element {
+				None
+			} else {
+				match pt {
+					Some(pt) => Some(SerializedVector::from(*pt)),
+					None => continue,
+				}
+			};
+			misses.push((pos, *element_id, ser_vec));
+		}
+		if misses.is_empty() {
+			return Ok(docs);
+		}
+		if by_element {
+			let keys = misses.iter().map(|(_, e, _)| self.ikb.new_hm_key(*e)).collect();
+			let read: Vec<Option<Ids64>> = tx.get_many_key(keys, None).await?;
+			for ((pos, _, _), set) in misses.iter().zip(read) {
+				docs[*pos] = set;
+			}
+		} else if self.use_hashed_vector {
+			let keys = misses
+				.iter()
+				.filter_map(|(_, _, v)| v.as_ref())
+				.map(|v| self.ikb.new_hh_key(v.compute_hash()))
+				.collect();
+			let read: Vec<Option<ElementHashedDocs>> = tx.get_many_key(keys, None).await?;
+			for ((pos, _, ser_vec), ehd) in misses.iter().zip(read) {
+				if let Some(ser_vec) = ser_vec {
+					docs[*pos] = ehd.and_then(|ehd| ehd.get_docs(ser_vec));
+				}
+			}
+		} else {
+			let keys = misses
+				.iter()
+				.filter_map(|(_, _, v)| v.as_ref())
+				.map(|v| self.ikb.new_hv_key(v))
+				.collect();
+			let read: Vec<Option<ElementDocs>> = tx.get_many_key(keys, None).await?;
+			for ((pos, _, _), ed) in misses.iter().zip(read) {
+				docs[*pos] = ed.map(|ed| ed.docs);
+			}
+		}
+		if let DocSetRead::AtGeneration(generation) = self.read {
+			for (pos, element_id, _) in &misses {
+				if let Some(set) = &docs[*pos] {
+					self.cache.insert_doc_set(index, *element_id, generation, set.clone()).await;
+				}
+			}
 		}
 		Ok(docs)
 	}
@@ -381,6 +554,7 @@ impl VecDocs {
 				let docs = Ids64::One(doc_id);
 				let ehd = ElementHashedDocs::new(element_id, ser_vec, doc_id);
 				ctx.tx.set_key(&key, &ehd).await?;
+				self.set_element_docs(&ctx.tx, element_id, &docs).await?;
 				self.link_doc(&ctx.tx, doc_id, element_id).await?;
 				sink.record_doc_set(self, element_id, docs).await;
 			}
@@ -392,6 +566,7 @@ impl VecDocs {
 						let element_id = ed.e_id;
 						let docs = ed.docs.clone();
 						ctx.tx.set_key(&key, &ehd).await?;
+						self.set_element_docs(&ctx.tx, element_id, &docs).await?;
 						self.link_doc(&ctx.tx, doc_id, element_id).await?;
 						sink.record_doc_set(self, element_id, docs).await;
 					};
@@ -401,6 +576,7 @@ impl VecDocs {
 					let docs = Ids64::One(doc_id);
 					ehd.add(element_id, ser_vec, doc_id);
 					ctx.tx.set_key(&key, &ehd).await?;
+					self.set_element_docs(&ctx.tx, element_id, &docs).await?;
 					self.link_doc(&ctx.tx, doc_id, element_id).await?;
 					sink.record_doc_set(self, element_id, docs).await;
 				}
@@ -442,6 +618,7 @@ impl VecDocs {
 			}
 		} {
 			ctx.tx.set_key(&key, &ed).await?;
+			self.set_element_docs(&ctx.tx, ed.e_id, &ed.docs).await?;
 			self.link_doc(&ctx.tx, doc_id, ed.e_id).await?;
 			sink.record_doc_set(self, ed.e_id, ed.docs.clone()).await;
 		}
@@ -461,17 +638,20 @@ impl VecDocs {
 			match ehd.remove(&ser_vec, d) {
 				RemoveResult::Empty(deleted_element_id) => {
 					ctx.tx.del_key(&key).await?;
+					self.del_element_docs(&ctx.tx, deleted_element_id).await?;
 					self.unlink_doc(&ctx.tx, d, deleted_element_id).await?;
 					self.remove_cached_doc_set(deleted_element_id).await;
 					h.remove(ctx, deleted_element_id).await?;
 				}
-				RemoveResult::Updated(element_id, _) => {
+				RemoveResult::Updated(element_id, docs) => {
 					ctx.tx.set_key(&key, &ehd).await?;
+					self.set_element_docs(&ctx.tx, element_id, &docs).await?;
 					self.unlink_doc(&ctx.tx, d, element_id).await?;
 					self.remove_cached_doc_set(element_id).await;
 				}
 				RemoveResult::RemovedElement(deleted_element_id) => {
 					ctx.tx.set_key(&key, &ehd).await?;
+					self.del_element_docs(&ctx.tx, deleted_element_id).await?;
 					self.unlink_doc(&ctx.tx, d, deleted_element_id).await?;
 					self.remove_cached_doc_set(deleted_element_id).await;
 					h.remove(ctx, deleted_element_id).await?;
@@ -503,11 +683,13 @@ impl VecDocs {
 			self.unlink_doc(&ctx.tx, d, ed.e_id).await?;
 			if new_docs.is_empty() {
 				ctx.tx.del_key(&key).await?;
+				self.del_element_docs(&ctx.tx, ed.e_id).await?;
 				self.remove_cached_doc_set(ed.e_id).await;
 				h.remove(ctx, ed.e_id).await?;
 			} else {
 				ed.docs = new_docs;
 				ctx.tx.set_key(&key, &ed).await?;
+				self.set_element_docs(&ctx.tx, ed.e_id, &ed.docs).await?;
 				self.remove_cached_doc_set(ed.e_id).await;
 			}
 		};
@@ -721,7 +903,11 @@ mod tests {
 	}
 
 	fn cache_key() -> (NamespaceId, DatabaseId, TableId, IndexId, u16) {
-		(NamespaceId(1), DatabaseId(2), TableId(4), IndexId(3), 0u16)
+		format_cache_key(0)
+	}
+
+	fn format_cache_key(format_version: u16) -> (NamespaceId, DatabaseId, TableId, IndexId, u16) {
+		(NamespaceId(1), DatabaseId(2), TableId(4), IndexId(3), format_version)
 	}
 
 	async fn write_mapping(
@@ -730,6 +916,7 @@ mod tests {
 		docs: Ids64,
 	) -> Result<()> {
 		let tx = ds.transaction(TransactionType::Write).await?;
+		tx.set_key(&ikb().new_hm_key(7), &docs).await?;
 		tx.set_key(
 			&ikb().new_hv_key(ser_vec),
 			&ElementDocs {
@@ -742,38 +929,67 @@ mod tests {
 		Ok(())
 	}
 
+	/// A doc set is shared through the cache only between reads at the
+	/// generation it was read at, whether it is read through the element's
+	/// vector or, on an index keeping element-keyed doc sets, by element id,
+	/// one element at a time or as a batch.
 	#[tokio::test]
 	async fn hnsw_vec_docs_share_a_cached_set_only_within_a_generation() -> Result<()> {
+		for format_version in [0, crate::catalog::INDEX_FORMAT_VERSION] {
+			for batch in [false, true] {
+				share_a_cached_set_only_within_a_generation(format_version, batch).await?;
+			}
+		}
+		Ok(())
+	}
+
+	async fn share_a_cached_set_only_within_a_generation(
+		format_version: u16,
+		batch: bool,
+	) -> Result<()> {
 		let ds = TestIndexStore::new().await;
 		let cache = VectorCache::new(1024 * 1024);
-		let vec_docs = VecDocs::new(ikb(), TableId(4), cache.clone(), false, 0);
+		let vec_docs = VecDocs::new(ikb(), TableId(4), cache.clone(), false, format_version);
+		let key = format_cache_key(format_version);
 		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
 		let vector = Vector::from(ser_vec.clone());
+		async fn read(
+			docs: &VecDocs,
+			tx: &Transaction,
+			vector: &Vector,
+			batch: bool,
+		) -> Result<Option<Ids64>> {
+			if batch {
+				Ok(docs.get_docs_by_elements(tx, &[(7, Some(vector))]).await?.remove(0))
+			} else {
+				docs.get_docs_by_element(tx, 7, vector).await
+			}
+		}
 		write_mapping(&ds, &ser_vec, Ids64::One(42)).await?;
 
 		let tx = ds.transaction(TransactionType::Read).await?;
 		let at_3 = vec_docs.at_snapshot(&tx, Some(3));
-		assert_eq!(at_3.get_docs_by_element(&tx, 7, &vector).await?, Some(Ids64::One(42)));
+		assert_eq!(read(&at_3, &tx, &vector, batch).await?, Some(Ids64::One(42)));
 		tx.cancel().await?;
-		assert_eq!(cache.get_doc_set(cache_key(), 7, Some(3)).await, Some(Ids64::One(42)));
-		assert_eq!(cache.get_doc_set(cache_key(), 7, Some(4)).await, None);
-		assert_eq!(cache.get_doc_set(cache_key(), 7, None).await, None);
+		assert_eq!(cache.get_doc_set(key, 7, Some(3)).await, Some(Ids64::One(42)));
+		assert_eq!(cache.get_doc_set(key, 7, Some(4)).await, None);
+		assert_eq!(cache.get_doc_set(key, 7, None).await, None);
 
 		// A compaction commits a new set together with a new generation.
 		write_mapping(&ds, &ser_vec, Ids64::Vec2([42, 43])).await?;
 		let tx = ds.transaction(TransactionType::Read).await?;
 		// A reader still at the old generation shares the entry read there.
 		assert_eq!(
-			vec_docs.at_snapshot(&tx, Some(3)).get_docs_by_element(&tx, 7, &vector).await?,
+			read(&vec_docs.at_snapshot(&tx, Some(3)), &tx, &vector, batch).await?,
 			Some(Ids64::One(42))
 		);
 		// A reader at the new generation never sees it, and replaces it.
 		let at_4 = vec_docs.at_snapshot(&tx, Some(4));
-		assert_eq!(at_4.get_docs_by_element(&tx, 7, &vector).await?, Some(Ids64::Vec2([42, 43])));
+		assert_eq!(read(&at_4, &tx, &vector, batch).await?, Some(Ids64::Vec2([42, 43])));
 		tx.cancel().await?;
-		assert_eq!(cache.get_doc_set(cache_key(), 7, Some(3)).await, None);
-		assert_eq!(cache.get_doc_set(cache_key(), 7, Some(4)).await, Some(Ids64::Vec2([42, 43])));
-		Ok(())
+		assert_eq!(cache.get_doc_set(key, 7, Some(3)).await, None);
+		assert_eq!(cache.get_doc_set(key, 7, Some(4)).await, Some(Ids64::Vec2([42, 43])));
+		anyhow::Ok(())
 	}
 
 	#[tokio::test]

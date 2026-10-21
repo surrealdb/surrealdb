@@ -81,6 +81,20 @@ pub struct IdxConfig {
 	pub hnsw_build_parallelism: BuildParallelism,
 	/// The maximum total size of the DiskANN ANN cache (default: 256 MiB)
 	pub diskann_cache_size: u64,
+	/// How many search-list nodes a DiskANN kNN walk expands per hop. Each
+	/// hop reads the adjacency lists, then the neighbour vectors, of its whole
+	/// beam in one batched read, so a wider beam takes fewer storage round
+	/// trips per query at the cost of expanding some nodes a narrower beam
+	/// would skip, and a filtered walk classifies more candidates per hop.
+	/// A value is clamped to between 1 and the query's search-list size.
+	/// (default: 1)
+	pub diskann_search_beam_width: usize,
+	/// Whether a DiskANN kNN walk scores candidates on the 8-bit element codes
+	/// an index of `F32` or `F16` vectors keeps from format version 6, then
+	/// ranks its nearest results exactly from the vectors, on every storage
+	/// engine. Off, the walk reads and scores every candidate's full vector.
+	/// Ignored by an index without codes. (default: true)
+	pub diskann_quantized_search: bool,
 	/// Specifies a list of paths in which files can be accessed (default: empty)
 	pub file_allowlist: Vec<PathBuf>,
 	/// Directory holding the morphological dictionaries `TOKENIZERS
@@ -129,6 +143,8 @@ impl Default for IdxConfig {
 			hnsw_cache_size: 256 * 1024 * 1024,
 			hnsw_build_parallelism: BuildParallelism::Auto,
 			diskann_cache_size: 256 * 1024 * 1024,
+			diskann_search_beam_width: 1,
+			diskann_quantized_search: true,
 			file_allowlist: Vec::new(),
 			segment_dictionary_path: None,
 			graph_fold_threshold: 64,
@@ -146,6 +162,8 @@ impl cnf::Config for IdxConfig {
 			.parse_key("hnsw_cache_size", &mut self.hnsw_cache_size)
 			.parse_key("hnsw_build_parallelism", &mut self.hnsw_build_parallelism)
 			.parse_key("diskann_cache_size", &mut self.diskann_cache_size)
+			.parse_key("diskann_search_beam_width", &mut self.diskann_search_beam_width)
+			.parse_key("diskann_quantized_search", &mut self.diskann_quantized_search)
 			.parse_key("graph_fold_batch", &mut self.graph_fold_batch)
 			.parse_key("graph_numeric_ids", &mut self.graph_numeric_ids)
 			.parse_key("graph_resolve_cache_size", &mut self.graph_resolve_cache_size)

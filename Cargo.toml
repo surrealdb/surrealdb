@@ -190,9 +190,9 @@ clap = "4.6.1"
 dashmap = "6.1.0"
 dialoguer = "0.11"
 deunicode = "1.6.2"
-diskann = { version = "=0.59.0", default-features = false, features = ["tracing"] }
-diskann-utils = "=0.59.0"
-diskann-vector = "=0.59.0"
+diskann = { version = "=0.60.0", default-features = false, features = ["tracing"] }
+diskann-utils = "=0.60.0"
+diskann-vector = "=0.60.0"
 ed25519-dalek = { version = "2.2.0", default-features = false }
 egg = "0.11"
 ext-sort = "^0.1.5"

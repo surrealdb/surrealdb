@@ -11341,6 +11341,10 @@ pub(crate) mod test {
 
 	/// A filtered kNN search must not evaluate its residual condition against a
 	/// legacy pending entry that carries no vectors to score.
+	///
+	/// Only an index with no stored format version (one an earlier release defined
+	/// and nothing rebuilt) can hold the legacy append-keyed range, so the index is
+	/// unstamped before any record is written to it.
 	#[tokio::test]
 	async fn hnsw_legacy_pending_delete_entry_is_not_where_evaluated() -> Result<()> {
 		let (ds, session) = new_index_compaction_test_ds().await?;
@@ -11348,8 +11352,31 @@ pub(crate) mod test {
 			&ds,
 			&session,
 			"DEFINE TABLE vec SCHEMALESS;
-			 DEFINE INDEX hnsw_idx ON vec FIELDS vector HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32 EFC 16 M 4;
-			 CREATE vec:2 SET vector = [5, 5], bad = 5 RETURN NONE;
+			 DEFINE INDEX hnsw_idx ON vec FIELDS vector HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32 EFC 16 M 4;",
+		)
+		.await?;
+		{
+			let txn = ds.transaction(Write).await?;
+			let ns = txn.get_ns_by_name("test", None).await?.expect("namespace should exist");
+			let db =
+				txn.get_db_by_name("test", "test", None).await?.expect("database should exist");
+			let tb = TableName::from("vec");
+			let ix = txn
+				.get_tb_index(ns.namespace_id, db.database_id, &tb, "hnsw_idx", None)
+				.await?
+				.expect("index should exist");
+			let mut unstamped = (*ix).clone();
+			unstamped.format_version = 0;
+			txn.put_tb_index(ns.namespace_id, db.database_id, &tb, &unstamped).await?;
+			// Bump the table definition so cached index lists are refreshed.
+			let tb_def = txn.expect_tb(ns.namespace_id, db.database_id, &tb).await?;
+			txn.put_tb("test", "test", &tb_def).await?;
+			txn.commit().await?;
+		}
+		execute_all(
+			&ds,
+			&session,
+			"CREATE vec:2 SET vector = [5, 5], bad = 5 RETURN NONE;
 			 CREATE vec:1 SET bad = 'x' RETURN NONE;",
 		)
 		.await?;

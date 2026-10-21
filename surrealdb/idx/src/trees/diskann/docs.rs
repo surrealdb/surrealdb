@@ -18,7 +18,9 @@ pub(crate) use surrealdb_datastore::values::diskann::{
 
 use crate::IndexKeyBase;
 #[cfg(not(target_family = "wasm"))]
-use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId, keeps_vector_doc_elements};
+use crate::catalog::{
+	DatabaseId, IndexId, NamespaceId, TableId, keeps_element_docs, keeps_vector_doc_elements,
+};
 use crate::docids::{DocId, LegacyVectorDocIds, TableDocIds};
 use crate::env::IndexEnv;
 #[cfg(not(target_family = "wasm"))]
@@ -239,6 +241,29 @@ impl DiskAnnVecDocs {
 		Ok(())
 	}
 
+	/// Records `docs` as `element`'s documents, in the element → doc-IDs
+	/// mapping of an index that keeps one.
+	async fn set_element_docs(
+		&self,
+		kv: &FrameKv<'_>,
+		element: ElementId,
+		docs: &Ids64,
+	) -> Result<()> {
+		if keeps_element_docs(self.format_version) {
+			kv.set_key(&self.ikb.new_dm_key(element), docs).await?;
+		}
+		Ok(())
+	}
+
+	/// Drops `element` from the element → doc-IDs mapping of an index that
+	/// keeps one.
+	async fn del_element_docs(&self, kv: &FrameKv<'_>, element: ElementId) -> Result<()> {
+		if keeps_element_docs(self.format_version) {
+			kv.del_key(&self.ikb.new_dm_key(element)).await?;
+		}
+		Ok(())
+	}
+
 	/// The elements holding each of `docs`' vectors, in input order, read in
 	/// one multi-get from the doc-ID → elements mapping. Only meaningful for an
 	/// index that keeps the mapping, which answers `None` for every document
@@ -323,9 +348,9 @@ impl DiskAnnVecDocs {
 
 	/// Resolves graph candidates to document id sets in input order.
 	///
-	/// Candidate vectors are only read for element IDs whose doc set is not already cached. This
-	/// keeps warmed lookup materialization on the element-doc cache path and avoids re-reading
-	/// graph vectors after search has already produced scored element IDs. `view` is used, and
+	/// Doc sets the cache cannot serve are read in one multi-get: by element id on an index that
+	/// keeps the element → doc-IDs mapping, and otherwise through each element's vector, which is
+	/// then read only for element IDs whose doc set is not already cached. `view` is used, and
 	/// published under, as [`Self::get_docs_batch`] uses it.
 	pub(super) async fn get_docs_by_element_batch(
 		&self,
@@ -343,6 +368,28 @@ impl DiskAnnVecDocs {
 			.iter()
 			.map(|(element_id, distance)| (*element_id, *distance, None))
 			.collect();
+		if keeps_element_docs(self.format_version) {
+			let mut misses = Vec::new();
+			for (pos, (element_id, _)) in candidates.iter().copied().enumerate() {
+				match self.cache.get_doc_set(index, element_id, view) {
+					Some(docs) => resolved[pos].2 = Some(docs),
+					None => misses.push((pos, element_id)),
+				}
+			}
+			if misses.is_empty() {
+				return Ok(resolved);
+			}
+			let keys =
+				misses.iter().map(|(_, element_id)| self.ikb.new_dm_key(*element_id)).collect();
+			let sets: Vec<Option<Ids64>> = tx.get_many_key(keys, None).await?;
+			for ((pos, element_id), docs) in misses.into_iter().zip(sets) {
+				if let (Some(docs), Some(stamp)) = (&docs, publish) {
+					self.cache.insert_doc_set(index, element_id, stamp, docs.clone());
+				}
+				resolved[pos].2 = docs;
+			}
+			return Ok(resolved);
+		}
 		let mut element_misses = Vec::new();
 		let mut element_keys = Vec::new();
 		for (pos, (element_id, _)) in candidates.iter().copied().enumerate() {
@@ -395,6 +442,72 @@ impl DiskAnnVecDocs {
 			resolved[pos].2 = docs;
 		}
 		Ok(resolved)
+	}
+
+	/// Asserts that, on an index keeping the element → doc-IDs mapping, `!dm`
+	/// holds for every live graph element exactly the documents its
+	/// vector-keyed entry (`!dq` or `!dh`) holds, and that no `!dm` entry
+	/// outlives its element. Returns the number of live elements checked.
+	#[cfg(test)]
+	pub(super) async fn assert_element_docs_match(&self, tx: &Transaction) -> Result<usize> {
+		use std::collections::BTreeSet;
+
+		use surrealdb_kvs::Direction;
+
+		use crate::key::schema::{DiskannElementDocSetKey, DiskannElementKey};
+		use crate::key::{KVKeyDecode, KVValue};
+
+		if !keeps_element_docs(self.format_version) {
+			return Ok(0);
+		}
+		let sorted = |docs: Option<Ids64>| docs.map(|d| d.iter().collect::<Vec<DocId>>());
+		let mut live = BTreeSet::new();
+		let mut cursor =
+			tx.open_vals_cursor(self.ikb.new_de_range()?, Direction::Forward, 0, None).await?;
+		loop {
+			let batch = cursor.next_batch(1000).await?;
+			if batch.is_empty() {
+				break;
+			}
+			for (key, value) in batch.iter() {
+				let element_id = DiskannElementKey::decode_key(key)?.element_id;
+				let element = DiskAnnElement::kv_decode_value(value, ())?;
+				if element.deleted {
+					continue;
+				}
+				let mapped = if self.use_hashed_vector {
+					let bucket: Option<DiskAnnElementHashedDocs> = tx
+						.get_key(&self.ikb.new_dh_key(element.vector.compute_hash()), None)
+						.await?;
+					bucket.and_then(|b| b.get_docs(&element.vector))
+				} else {
+					let ed: Option<DiskAnnElementDocs> =
+						tx.get_key(&self.ikb.new_dq_key(&element.vector), None).await?;
+					ed.map(|ed| (ed.e_id, ed.docs))
+				};
+				let expected =
+					sorted(mapped.filter(|(e_id, _)| *e_id == element_id).map(|(_, docs)| docs));
+				let got = sorted(tx.get_key(&self.ikb.new_dm_key(element_id), None).await?);
+				assert_eq!(
+					got, expected,
+					"element {element_id}: `!dm` differs from its vector entry"
+				);
+				live.insert(element_id);
+			}
+		}
+		let mut cursor =
+			tx.open_vals_cursor(self.ikb.new_dm_range()?, Direction::Forward, 0, None).await?;
+		loop {
+			let batch = cursor.next_batch(1000).await?;
+			if batch.is_empty() {
+				break;
+			}
+			for (key, _) in batch.iter() {
+				let element_id = DiskannElementDocSetKey::decode_key(key)?.element_id;
+				assert!(live.contains(&element_id), "`!dm` outlives element {element_id}");
+			}
+		}
+		Ok(live.len())
 	}
 
 	#[cfg(test)]
@@ -469,6 +582,7 @@ impl DiskAnnVecDocs {
 			}
 			self.evict_cached_doc_set(ed.e_id);
 			kv.set_key(&self.ikb.new_dq_key(&vector.ser_vec), &ed).await?;
+			self.set_element_docs(&kv, ed.e_id, &ed.docs).await?;
 			for doc in added {
 				self.link_doc(&kv, doc, ed.e_id).await?;
 			}
@@ -507,6 +621,7 @@ impl DiskAnnVecDocs {
 		);
 		let mut changed = vec![false; buckets.len()];
 		let mut links = Vec::new();
+		let mut doc_sets = Vec::new();
 		let mut fresh = Vec::new();
 		for (vector, bucket) in staged.into_iter().zip(bucket_of) {
 			let held =
@@ -521,12 +636,16 @@ impl DiskAnnVecDocs {
 			}
 			changed[bucket] = true;
 			self.evict_cached_doc_set(ed.e_id);
+			doc_sets.push((ed.e_id, ed.docs.clone()));
 			links.extend(added.into_iter().map(|doc| (doc, ed.e_id)));
 		}
 		for ((hash, bucket), changed) in hashes.iter().zip(&buckets).zip(changed) {
 			if let (true, Some(ehd)) = (changed, bucket) {
 				kv.set_key(&self.ikb.new_dh_key(*hash), ehd).await?;
 			}
+		}
+		for (element, docs) in doc_sets {
+			self.set_element_docs(kv, element, &docs).await?;
 		}
 		for (doc, element) in links {
 			self.link_doc(kv, doc, element).await?;
@@ -562,12 +681,14 @@ impl DiskAnnVecDocs {
 				};
 				if let Some(ed) = ehd.get_element_docs(&ser_vec) {
 					add_docs(&mut ed.docs, rest);
+					self.set_element_docs(&kv, element_id, &ed.docs).await?;
 				}
 				kv.set_key(&key, &ehd).await?;
 			} else {
 				let mut ed = DiskAnnElementDocs::new(element_id, first);
 				add_docs(&mut ed.docs, rest);
 				kv.set_key(&self.ikb.new_dq_key(&ser_vec), &ed).await?;
+				self.set_element_docs(&kv, element_id, &ed.docs).await?;
 			}
 			self.evict_cached_doc_set(element_id);
 			for doc in docs {
@@ -591,6 +712,7 @@ impl DiskAnnVecDocs {
 			match ehd.remove(&ser_vec, doc_id) {
 				RemoveResult::Empty(e_id) => {
 					kv.del_key(&key).await?;
+					self.del_element_docs(&kv, e_id).await?;
 					self.unlink_doc(&kv, doc_id, e_id).await?;
 					self.evict_cached_doc_set(e_id);
 					graph.remove(ctx, e_id).await?;
@@ -599,6 +721,9 @@ impl DiskAnnVecDocs {
 					e_id,
 				} => {
 					kv.set_key(&key, &ehd).await?;
+					if let Some(ed) = ehd.get_element_docs(&ser_vec) {
+						self.set_element_docs(&kv, e_id, &ed.docs).await?;
+					}
 					self.unlink_doc(&kv, doc_id, e_id).await?;
 					self.evict_cached_doc_set(e_id);
 				}
@@ -606,6 +731,7 @@ impl DiskAnnVecDocs {
 					e_id,
 				} => {
 					kv.set_key(&key, &ehd).await?;
+					self.del_element_docs(&kv, e_id).await?;
 					self.unlink_doc(&kv, doc_id, e_id).await?;
 					self.evict_cached_doc_set(e_id);
 					graph.remove(ctx, e_id).await?;
@@ -636,11 +762,13 @@ impl DiskAnnVecDocs {
 			self.unlink_doc(&kv, doc_id, ed.e_id).await?;
 			if new_docs.is_empty() {
 				kv.del_key(&key).await?;
+				self.del_element_docs(&kv, ed.e_id).await?;
 				self.evict_cached_doc_set(ed.e_id);
 				graph.remove(ctx, ed.e_id).await?;
 			} else {
 				ed.docs = new_docs;
 				kv.set_key(&key, &ed).await?;
+				self.set_element_docs(&kv, ed.e_id, &ed.docs).await?;
 				self.evict_cached_doc_set(ed.e_id);
 			}
 		}

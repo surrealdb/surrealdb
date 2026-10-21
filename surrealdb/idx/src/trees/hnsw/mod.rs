@@ -537,10 +537,47 @@ where
 					pending_docs,
 				)
 				.await?;
-			Ok(w.to_vec_limit(search.k))
+			self.reported(&ctx.tx, search, &w).await
 		} else {
 			Ok(vec![])
 		}
+	}
+
+	/// The `k` nearest of a search's result list `w`, with the graph's ranking distances (see
+	/// [`HnswElements::distance`]) converted into the metric's distances, the scale every result
+	/// leaves the graph on.
+	///
+	/// An exact ranking converts the `k` nearest in place. An approximate one (narrow element
+	/// types through the SIMD kernels) can misorder near ties, so every entry of `w` is re-scored
+	/// with its exact distance to the query, read from its vector, before the `k` nearest are
+	/// taken. An entry whose vector cannot be read is dropped rather than ranked on its
+	/// approximate distance, so the list holds exact distances only.
+	async fn reported(
+		&self,
+		tx: &Transaction,
+		search: &HnswSearch,
+		w: &DoublePriorityQueue,
+	) -> Result<Vec<(f64, ElementId)>> {
+		if self.elements.ranking_is_exact(&search.pt) {
+			return Ok(w
+				.to_vec_limit(search.k)
+				.into_iter()
+				.map(|(d, e_id)| (self.elements.reported_distance(d), e_id))
+				.collect());
+		}
+		let results = w.to_vec();
+		let ids: Vec<ElementId> = results.iter().map(|(_, e_id)| *e_id).collect();
+		let vectors = self.elements.get_vectors(tx, &ids).await?;
+		let mut exact: Vec<(f64, ElementId)> = results
+			.into_iter()
+			.zip(vectors)
+			.filter_map(|((_, e_id), v)| {
+				Some((self.elements.exact_distance(&v?, &search.pt), e_id))
+			})
+			.collect();
+		exact.sort_by(|a, b| a.0.total_cmp(&b.0));
+		exact.truncate(search.k);
+		Ok(exact)
 	}
 
 	/// Performs a k-nearest neighbor search with a conditional document filter
@@ -588,7 +625,7 @@ where
 					allow_list,
 				)
 				.await?;
-			return Ok(w.to_vec_limit(search.k));
+			return self.reported(&ctx.tx, search, &w).await;
 		}
 		Ok(vec![])
 	}
@@ -638,6 +675,7 @@ where
 	}
 
 	/// Retrieves the vector associated with the given element ID.
+	#[cfg(test)]
 	async fn get_vector(&self, tx: &Transaction, e_id: &ElementId) -> Result<Option<SharedVector>> {
 		self.elements.get_vector(tx, e_id).await
 	}
@@ -708,8 +746,9 @@ mod tests {
 	use crate::IndexKeyBase;
 	use crate::catalog::providers::CatalogProvider;
 	use crate::catalog::{
-		DOC_IDS_FORMAT_VERSION, DatabaseId, Distance, HnswParams, IndexId, NamespaceId,
-		StoredTableDefinition, TableId, VECTOR_DOC_ELEMENTS_FORMAT_VERSION, VectorType,
+		DOC_IDS_FORMAT_VERSION, DatabaseId, Distance, HnswParams, INDEX_FORMAT_VERSION, IndexId,
+		NamespaceId, StoredTableDefinition, TableId, VECTOR_DOC_ELEMENTS_FORMAT_VERSION,
+		VectorType, keeps_element_docs,
 	};
 	use crate::config::BuildParallelism;
 	use crate::docids::{DocId, TableDocIds};
@@ -752,12 +791,28 @@ mod tests {
 		ctx: &HnswContext<'_>,
 		h: &HnswFlavor,
 		collection: &TestCollection,
+		distance: &Distance,
 	) {
 		let max_knn = 20.min(collection.len());
 		for (_, obj) in collection.to_vec_ref() {
 			for knn in 1..max_knn {
 				let search = HnswSearch::new(obj.clone(), knn, 80);
 				let res = h.knn_search(ctx, &search, None).await.unwrap();
+				// Every reported distance is the metric's exact distance, ascending, whatever the
+				// graph ranked on internally.
+				for (d, e_id) in &res {
+					let v =
+						h.get_vector(&ctx.tx, e_id).await.unwrap().expect("result has a vector");
+					let exact = distance.calculate_shared(&v, obj);
+					assert!(
+						d.to_bits() == exact.to_bits() || (d.is_nan() && exact.is_nan()),
+						"Reported distance {d} is not the exact distance {exact} - {distance:?}"
+					);
+				}
+				assert!(
+					res.windows(2).all(|w| w[0].0.total_cmp(&w[1].0).is_le()),
+					"Results are not ascending: {res:?}"
+				);
 				if collection.is_unique() {
 					let mut found = false;
 					for (_, e_id) in &res {
@@ -844,7 +899,7 @@ mod tests {
 		{
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
 			let ctx = HnswContext::new(&ctx, ikb.clone(), &vec_docs);
-			find_collection_hnsw(&ctx, &h, collection).await;
+			find_collection_hnsw(&ctx, &h, collection, &p.distance).await;
 			ctx.tx.cancel().await.unwrap();
 		}
 		{
@@ -892,6 +947,47 @@ mod tests {
 			&p.distance,
 		);
 		test_hnsw_collection(&p, &collection).await;
+	}
+
+	/// Every `m` with an inline layer-0 flavour, at both ends of its range,
+	/// builds and searches correctly, and an `m0` beyond the inline capacity
+	/// falls back to the hashed layer-0 flavour.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn tests_hnsw_layer0_flavours() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let mut futures = Vec::new();
+		for (m, m0, variant) in [
+			(13, 13, "H17_33"),
+			(13, 26, "H17_33"),
+			(16, 32, "H17_33"),
+			(16, 33, "H17set"),
+			(17, 40, "H21_41"),
+			(21, 48, "H25_49"),
+			(25, 50, "H29_57"),
+			(28, 56, "H29_57"),
+			(28, 57, "H29set"),
+		] {
+			// Pruned connections are kept, so layer-0 sets fill to `m0` and briefly hold
+			// `m0 + 1` while a new link is pruned: the inline array's full capacity.
+			let mut p =
+				new_params(5, VectorType::F32, Distance::Euclidean, m, 100, false, true, false);
+			p.m0 = m0;
+			let flavour = HnswFlavor::new(
+				TableId(3),
+				IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4)),
+				&p,
+				ds.index_stores().vector_cache().clone(),
+				0,
+			)?;
+			assert_eq!(flavour.variant(), variant, "m={m} m0={m0}");
+			futures.push(tokio::spawn(async move {
+				test_hnsw(300, p).await;
+			}));
+		}
+		for f in futures {
+			f.await.expect("Task error");
+		}
+		Ok(())
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
@@ -942,6 +1038,27 @@ mod tests {
 		Ok(())
 	}
 
+	/// The narrow element types report each result's exact distance, whether they
+	/// rank through the SIMD kernels (`I8`, `U8`) or exactly (`F16`). (Inner product
+	/// ranks through the same kernel, but is not a metric: a vector's nearest
+	/// need not be itself, which the collection test assumes.)
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn test_hnsw_narrow_types_report_exact_distances() -> Result<()> {
+		let mut futures = Vec::new();
+		for vt in [VectorType::F16, VectorType::I8, VectorType::U8] {
+			for dist in [Distance::Euclidean, Distance::Cosine] {
+				let p = new_params(16, vt, dist, 12, 100, false, false, false);
+				futures.push(tokio::spawn(async move {
+					test_hnsw(30, p).await;
+				}));
+			}
+		}
+		for f in futures {
+			f.await.expect("Task error");
+		}
+		Ok(())
+	}
+
 	async fn insert_collection_hnsw_index(
 		ctx: &TestIndexEnv,
 		h: &mut HnswIndex,
@@ -961,6 +1078,7 @@ mod tests {
 			}
 			h.index_pendings(ctx).await?;
 			h.check_hnsw_properties(map.len()).await;
+			h.assert_element_docs_match(&ctx.tx()).await?;
 		}
 		Ok(map)
 	}
@@ -1027,6 +1145,7 @@ mod tests {
 			h.index_pendings(ctx).await?;
 			// Check properties
 			h.check_hnsw_properties(map.len()).await;
+			h.assert_element_docs_match(&ctx.tx()).await?;
 		}
 		Ok(())
 	}
@@ -1049,21 +1168,16 @@ mod tests {
 	/// and checking each record inside the transaction that writes it. That
 	/// reads the graph back before the transaction commits, which only the
 	/// in-place apply supports, so the index engines are configured serial.
-	async fn test_hnsw_index(collection_size: usize, unique: bool, p: HnswParams) {
-		info!("test_hnsw_index - coll size: {collection_size} - params: {p:?}");
+	async fn test_hnsw_index(collection: TestCollection, p: HnswParams, format_version: u16) {
+		info!(
+			"test_hnsw_index - coll size: {} - params: {p:?} - format: {format_version}",
+			collection.len()
+		);
 
 		let ds = TestIndexStore::with_idx_config(|c| {
 			c.hnsw_build_parallelism = BuildParallelism::Serial;
 		})
 		.await;
-
-		let collection = TestCollection::new(
-			unique,
-			collection_size,
-			p.vector_type,
-			p.dimension as usize,
-			&p.distance,
-		);
 
 		// Create index
 		let (mut h, map) = {
@@ -1079,7 +1193,7 @@ mod tests {
 				IndexKeyBase::new(ns, db, "tb".into(), ix),
 				tb,
 				&p,
-				DOC_IDS_FORMAT_VERSION,
+				format_version,
 			)
 			.await
 			.unwrap();
@@ -1110,20 +1224,20 @@ mod tests {
 	/// Builds a whole collection as staged batches — every record written
 	/// first, then compacted and committed batch by batch — and checks the
 	/// published graph, its answers, and its removal.
-	async fn test_hnsw_index_staged(collection_size: usize, unique: bool, p: HnswParams) {
-		info!("test_hnsw_index_staged - coll size: {collection_size} - params: {p:?}");
+	async fn test_hnsw_index_staged(
+		collection: TestCollection,
+		p: HnswParams,
+		format_version: u16,
+	) {
+		info!(
+			"test_hnsw_index_staged - coll size: {} - params: {p:?} - format: {format_version}",
+			collection.len()
+		);
 
 		let ds = TestIndexStore::with_idx_config(|c| {
 			c.hnsw_build_parallelism = BuildParallelism::Fixed(4.try_into().unwrap());
 		})
 		.await;
-		let collection = TestCollection::new(
-			unique,
-			collection_size,
-			p.vector_type,
-			p.dimension as usize,
-			&p.distance,
-		);
 		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
 		let mut h = {
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
@@ -1133,7 +1247,7 @@ mod tests {
 				ikb,
 				TableId(3),
 				&p,
-				DOC_IDS_FORMAT_VERSION,
+				format_version,
 			)
 			.await
 			.unwrap();
@@ -1155,6 +1269,7 @@ mod tests {
 		}
 		compact_committed(&ds, &h).await;
 		h.check_hnsw_properties(map.len()).await;
+		assert_committed_element_docs(&ds, &h, map.len(), format_version).await;
 
 		{
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
@@ -1174,6 +1289,23 @@ mod tests {
 		}
 		compact_committed(&ds, &h).await;
 		h.check_hnsw_properties(0).await;
+		assert_committed_element_docs(&ds, &h, 0, format_version).await;
+	}
+
+	/// Checks the element-keyed doc sets of the committed index against its
+	/// vector-keyed ones (a no-op below the element-docs format version).
+	async fn assert_committed_element_docs(
+		ds: &TestIndexStore,
+		h: &HnswIndex,
+		elements: usize,
+		format_version: u16,
+	) {
+		let ctx = new_ctx(ds, TransactionType::Read).await;
+		let checked = h.assert_element_docs_match(&ctx.tx()).await.unwrap();
+		ctx.tx().cancel().await.unwrap();
+		if keeps_element_docs(format_version) {
+			assert_eq!(checked, elements);
+		}
 	}
 
 	/// Compacts every pending update, one committed transaction per batch.
@@ -1186,6 +1318,96 @@ mod tests {
 				break;
 			}
 		}
+	}
+
+	/// A removed element that another node still has an edge to is never
+	/// walked to, even with its vector back in the process-wide cache.
+	///
+	/// Pruning leaves edges one-way, and removing an element clears it only
+	/// from the lists of the elements it points at, so another node can keep
+	/// an edge to it. A read in a snapshot that predates the removal puts the
+	/// element's vector back in the shared cache. A walk following that edge
+	/// would then score an element its own snapshot does not hold, give it a
+	/// search-list slot, and resolve no document from it.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_walk_skips_a_removed_element_it_still_has_an_edge_to() -> Result<()> {
+		let ds = TestIndexStore::with_idx_config(|c| {
+			c.hnsw_build_parallelism = BuildParallelism::Serial;
+		})
+		.await;
+		let p = new_params(4, VectorType::F32, Distance::Euclidean, 4, 20, false, false, false);
+		let collection = TestCollection::new(true, 60, p.vector_type, 4, &p.distance);
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let mut h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&ctx.tx(),
+				IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4)),
+				TableId(3),
+				&p,
+				DOC_IDS_FORMAT_VERSION,
+			)
+			.await?;
+			insert_collection_hnsw_index(&ctx, &mut h, &collection).await?;
+			ctx.tx().commit().await?;
+			h
+		};
+		// An element some node points at without pointing back, and that node.
+		let one_way = |layer0: &[(ElementId, Vec<ElementId>)]| {
+			let edges: HashMap<ElementId, &Vec<ElementId>> =
+				layer0.iter().map(|(node, edges)| (*node, edges)).collect();
+			layer0.iter().find_map(|(holder, out)| {
+				out.iter()
+					.find(|e| edges.get(*e).is_some_and(|back| !back.contains(holder)))
+					.map(|e| (*e, *holder))
+			})
+		};
+		let (dead, holder) =
+			one_way(&h.adjacency().await.1[0]).expect("pruning left a one-way edge");
+		let vector = {
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let v = h.resident().read().await.graph.get_vector(&ctx.tx(), &dead).await?;
+			ctx.tx().cancel().await?;
+			v.expect("the element's vector")
+		};
+		let (doc_id, _) = collection
+			.to_vec_ref()
+			.iter()
+			.find(|(_, v)| **v == *vector)
+			.expect("the record holding the element");
+		// Remove the element: its record is deleted and compacted away.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let id = RecordIdKey::Number(*doc_id as i64);
+			h.index(&ctx, &id, Some(vector_content(&vector)), None).await?;
+			h.index_pendings(&ctx).await?;
+			ctx.tx().commit().await?;
+		}
+		let layer0 = h.adjacency().await.1.remove(0);
+		assert!(!layer0.iter().any(|(node, _)| *node == dead), "the element is removed");
+		assert!(
+			layer0.iter().any(|(node, out)| *node == holder && out.contains(&dead)),
+			"the one-way edge to the removed element survives"
+		);
+		// A snapshot from before the removal reads the vector back into the cache.
+		h.resident()
+			.read()
+			.await
+			.graph
+			.elements()
+			.cache_committed(std::iter::once((dead, vector.clone())))
+			.await;
+		let ctx = new_ctx(&ds, TransactionType::Read).await;
+		let hctx = h.new_hnsw_context(&ctx);
+		let search = HnswSearch::new(vector.clone(), 10, 60);
+		let found = h.resident().read().await.graph.knn_search(&hctx, &search, None).await?;
+		ctx.tx().cancel().await?;
+		assert!(found.len() == 10, "the walk fills the list: {found:?}");
+		assert!(
+			!found.iter().any(|(_, e)| *e == dead),
+			"the walk reached removed element {dead}: {found:?}"
+		);
+		Ok(())
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
@@ -1227,13 +1449,81 @@ mod tests {
 						);
 						let staged = p.clone();
 						let f = tokio::spawn(async move {
-							test_hnsw_index(30, unique, p).await;
+							let c = new_collection(30, unique, &p);
+							test_hnsw_index(c, p, DOC_IDS_FORMAT_VERSION).await;
 						});
 						futures.push(f);
 						let f = tokio::spawn(async move {
-							test_hnsw_index_staged(30, unique, staged).await;
+							let c = new_collection(30, unique, &staged);
+							test_hnsw_index_staged(c, staged, DOC_IDS_FORMAT_VERSION).await;
 						});
 						futures.push(f);
+					}
+				}
+			}
+		}
+		for f in futures {
+			f.await.expect("Task error");
+		}
+		Ok(())
+	}
+
+	fn new_collection(size: usize, unique: bool, p: &HnswParams) -> TestCollection {
+		TestCollection::new(unique, size, p.vector_type, p.dimension as usize, &p.distance)
+	}
+
+	/// `distinct` unique vectors, each held by `copies` documents. The copies
+	/// of every vector are spread across the collection, so removing the
+	/// documents in order first shrinks every element's set, then removes it.
+	fn duplicated_collection(distinct: usize, copies: usize, p: &HnswParams) -> TestCollection {
+		let unique = new_collection(distinct, true, p);
+		let vectors = unique.to_vec_ref();
+		let mut docs = Vec::with_capacity(distinct * copies);
+		for copy in 0..copies {
+			for (i, (_, vector)) in vectors.iter().enumerate() {
+				docs.push(((copy * distinct + i) as DocId, vector.clone()));
+			}
+		}
+		TestCollection::NonUnique(docs)
+	}
+
+	/// An index keeping element-keyed doc sets (`!hm`) holds, after every
+	/// insert, compaction and removal, exactly the documents its vector-keyed
+	/// entries hold, and answers from them. Collections with duplicate vectors
+	/// give elements several documents, so removals shrink sets as well as
+	/// remove elements; both the plain and hashed vector layouts are covered.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn tests_hnsw_index_element_docs() -> Result<()> {
+		let mut futures = Vec::new();
+		for (dist, dim) in [(Distance::Euclidean, 5), (Distance::Cosine, 5)] {
+			for vt in [VectorType::F32, VectorType::I16] {
+				for use_hashed_vector in [false, true] {
+					for duplicated in [false, true] {
+						let p = new_params(
+							dim,
+							vt,
+							dist.clone(),
+							8,
+							150,
+							false,
+							false,
+							use_hashed_vector,
+						);
+						let collection = || {
+							if duplicated {
+								duplicated_collection(10, 3, &p)
+							} else {
+								new_collection(30, true, &p)
+							}
+						};
+						let (c, staged_c) = (collection(), collection());
+						let staged = p.clone();
+						futures.push(tokio::spawn(async move {
+							test_hnsw_index(c, p, INDEX_FORMAT_VERSION).await;
+						}));
+						futures.push(tokio::spawn(async move {
+							test_hnsw_index_staged(staged_c, staged, INDEX_FORMAT_VERSION).await;
+						}));
 					}
 				}
 			}
@@ -2394,6 +2684,28 @@ mod tests {
 		dimension: usize,
 		n: i64,
 	) -> Result<HnswIndex> {
+		new_pending_backlog_fixture_at(ds, ikb, dimension, n, DOC_IDS_FORMAT_VERSION).await
+	}
+
+	/// [`new_pending_backlog_fixture`] on an index with no stored format version: one an earlier
+	/// release defined and nothing has rebuilt. Only such an index can hold pending updates in
+	/// the legacy append-keyed `!hp` range, so the tests of how a lookup reads it build on it.
+	async fn new_unstamped_pending_backlog_fixture(
+		ds: &TestIndexStore,
+		ikb: &IndexKeyBase,
+		n: i64,
+	) -> Result<HnswIndex> {
+		new_pending_backlog_fixture_at(ds, ikb, 2, n, 0).await
+	}
+
+	/// The backlog fixtures, on an index stamped with `format_version`.
+	async fn new_pending_backlog_fixture_at(
+		ds: &TestIndexStore,
+		ikb: &IndexKeyBase,
+		dimension: usize,
+		n: i64,
+		format_version: u16,
+	) -> Result<HnswIndex> {
 		let p =
 			new_params(dimension, VectorType::I16, Distance::Euclidean, 12, 500, true, true, true);
 		let ctx = new_ctx(ds, TransactionType::Write).await;
@@ -2404,7 +2716,7 @@ mod tests {
 			ikb.clone(),
 			TableId(3),
 			&p,
-			DOC_IDS_FORMAT_VERSION,
+			format_version,
 		)
 		.await?;
 		for i in 1..=n {
@@ -2509,12 +2821,12 @@ mod tests {
 		// ends and the row cap alone decides where a page ends — which is what
 		// makes both counts below exact.
 		const _: () = assert!(PENDING_MAX_BYTES > PENDING_MAX_BATCH_KEYS * 1024);
-		// The empty append-keyed range costs one page. The record-keyed range
-		// costs a probe page, full pages for everything the probe left, and
+		// A stamped index has no append-keyed range to read. The record-keyed
+		// range costs a probe page, full pages for everything the probe left, and
 		// the empty page that ends it.
 		const AFTER_PROBE: usize = PENDING as usize - PENDING_PROBE_ROWS as usize;
 		const FULL_PAGES: usize = AFTER_PROBE.div_ceil(PENDING_MAX_ROWS as usize);
-		const EXPECTED_PAGES: usize = 1 + 1 + FULL_PAGES + 1;
+		const EXPECTED_PAGES: usize = 1 + FULL_PAGES + 1;
 
 		let ds = TestIndexStore::new().await;
 		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
@@ -2769,11 +3081,11 @@ mod tests {
 			"page and batch stay inside the residency target: {} bytes",
 			stats.peak_resident_bytes()
 		);
-		// The empty append-keyed range costs one page. The record-keyed range
-		// costs the probe, capped pages for the wide tail, and its empty page.
+		// A stamped index has no append-keyed range to read. The record-keyed
+		// range costs the probe, capped pages for the wide tail, and its empty page.
 		assert_eq!(
 			stats.pages(),
-			1 + 1 + (WIDE as usize).div_ceil(PENDING_MAX_ROWS as usize) + 1,
+			1 + (WIDE as usize).div_ceil(PENDING_MAX_ROWS as usize) + 1,
 			"the widening tail stays split by the conservative row cap"
 		);
 		Ok(())
@@ -3007,7 +3319,7 @@ mod tests {
 
 		let ds = TestIndexStore::new().await;
 		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
-		let h = new_pending_backlog_fixture(&ds, &ikb, 0).await?;
+		let h = new_unstamped_pending_backlog_fixture(&ds, &ikb, 0).await?;
 		let target = Arc::new(RecordIdKey::String("target".into()));
 		let winner = Arc::new(RecordIdKey::Number(1));
 

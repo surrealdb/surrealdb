@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 
 use ahash::{HashSet, HashSetExt};
 // A doc-ID set is what the vector-to-documents mapping stores, so its shape and
@@ -10,8 +10,36 @@ pub(crate) use surrealdb_datastore::values::ids::Ids64;
 use crate::trees::dynamicset::DynamicSet;
 use crate::trees::hnsw::{ElementId, VectorId};
 
+/// A queue of `(distance, element)` pairs that pops from either end.
+///
+/// Ordered by distance under `f64::total_cmp`; pairs at an equal distance keep
+/// their insertion order, so [`Self::pop_first`] takes the earliest-pushed of
+/// the nearest and [`Self::pop_last`] the latest-pushed of the furthest.
+///
+/// Held as a min-max heap in one `Vec`: even levels hold the minimum of their
+/// subtree, odd levels the maximum. A push and either pop are O(log n), both
+/// peeks O(1), and nothing allocates beyond the buffer's amortised growth.
 #[derive(Default, Debug, Clone)]
-pub(super) struct DoublePriorityQueue(BTreeMap<FloatKey, VecDeque<ElementId>>, usize);
+pub(super) struct DoublePriorityQueue {
+	heap: Vec<QueueEntry>,
+	/// The push sequence the next entry takes, which orders equal distances.
+	next_seq: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct QueueEntry {
+	dist: f64,
+	seq: u64,
+	id: ElementId,
+}
+
+impl QueueEntry {
+	/// The queue order: distance, then push sequence. Sequences are unique, so
+	/// no two entries compare equal.
+	fn key(&self) -> (FloatKey, u64) {
+		(FloatKey(self.dist), self.seq)
+	}
+}
 
 impl DoublePriorityQueue {
 	pub(super) fn from(d: f64, e: ElementId) -> Self {
@@ -21,102 +49,186 @@ impl DoublePriorityQueue {
 	}
 
 	pub(super) fn len(&self) -> usize {
-		self.1
+		self.heap.len()
 	}
 
 	pub(super) fn push(&mut self, dist: f64, id: ElementId) {
-		match self.0.entry(FloatKey(dist)) {
-			Entry::Vacant(e) => {
-				e.insert(VecDeque::from([id]));
-			}
-			Entry::Occupied(mut e) => {
-				e.get_mut().push_back(id);
-			}
-		}
-		self.1 += 1;
+		let seq = self.next_seq;
+		self.next_seq += 1;
+		self.heap.push(QueueEntry {
+			dist,
+			seq,
+			id,
+		});
+		self.bubble_up(self.heap.len() - 1);
 	}
 
 	pub(super) fn pop_first(&mut self) -> Option<(f64, ElementId)> {
-		if let Some(mut e) = self.0.first_entry() {
-			let d = e.key().0;
-			let q = e.get_mut();
-			if let Some(v) = q.pop_front() {
-				if q.is_empty() {
-					e.remove();
-				}
-				self.1 -= 1;
-				return Some((d, v));
-			}
-		}
-		None
+		self.remove(0)
 	}
 
 	pub(super) fn pop_last(&mut self) -> Option<(f64, ElementId)> {
-		if let Some(mut e) = self.0.last_entry() {
-			let d = e.key().0;
-			let q = e.get_mut();
-			if let Some(v) = q.pop_back() {
-				if q.is_empty() {
-					e.remove();
-				}
-				self.1 -= 1;
-				return Some((d, v));
-			}
-		}
-		None
+		self.remove(self.max_index()?)
 	}
 
 	pub(super) fn peek_first(&self) -> Option<(f64, ElementId)> {
-		self.0.first_key_value().map(|(k, q)| {
-			let k = k.0;
-			let v = *q.iter().next().expect("contains always has one element"); // By design the contains always contains one element
-			(k, v)
-		})
+		self.heap.first().map(|e| (e.dist, e.id))
 	}
 
 	pub(super) fn peek_last_dist(&self) -> Option<f64> {
-		self.0.last_key_value().map(|(k, _)| k.0)
+		self.max_index().map(|i| self.heap[i].dist)
 	}
 
 	pub(super) fn to_vec(&self) -> Vec<(f64, ElementId)> {
-		let mut v = Vec::with_capacity(self.1);
-		for (d, q) in &self.0 {
-			for e in q {
-				v.push((d.0, *e));
-			}
-		}
-		v
+		self.to_vec_limit(self.heap.len())
 	}
 
-	pub(super) fn to_vec_limit(&self, mut limit: usize) -> Vec<(f64, ElementId)> {
-		let mut v = Vec::with_capacity(self.1.min(limit));
-		for (d, q) in &self.0 {
-			for e in q {
-				v.push((d.0, *e));
-				limit -= 1;
-				if limit == 0 {
-					return v;
-				}
-			}
+	/// The `limit` nearest pairs, nearest first. Only those are sorted: the rest
+	/// are partitioned off first.
+	pub(super) fn to_vec_limit(&self, limit: usize) -> Vec<(f64, ElementId)> {
+		if limit == 0 {
+			return Vec::new();
 		}
-		v
+		let mut entries = self.heap.clone();
+		if limit < entries.len() {
+			entries.select_nth_unstable_by_key(limit - 1, QueueEntry::key);
+			entries.truncate(limit);
+		}
+		entries.sort_unstable_by_key(QueueEntry::key);
+		entries.into_iter().map(|e| (e.dist, e.id)).collect()
+	}
+
+	/// Every pair, nearest first, consuming the queue so its buffer is sorted in place.
+	pub(super) fn into_sorted_vec(self) -> Vec<(f64, ElementId)> {
+		let mut entries = self.heap;
+		entries.sort_unstable_by_key(QueueEntry::key);
+		entries.into_iter().map(|e| (e.dist, e.id)).collect()
 	}
 
 	pub(super) fn to_set(&self) -> HashSet<ElementId> {
-		let mut s = HashSet::with_capacity(self.1);
-		for q in self.0.values() {
-			for v in q {
-				s.insert(*v);
-			}
+		let mut s = HashSet::with_capacity(self.heap.len());
+		for e in &self.heap {
+			s.insert(e.id);
 		}
 		s
 	}
 
 	pub(super) fn to_dynamic_set<S: DynamicSet>(&self, set: &mut S) {
-		for q in self.0.values() {
-			for v in q {
-				set.insert(*v);
+		for e in &self.heap {
+			set.insert(e.id);
+		}
+	}
+
+	/// Whether the entry at `a` orders before the entry at `b`.
+	fn less(&self, a: usize, b: usize) -> bool {
+		self.heap[a].key() < self.heap[b].key()
+	}
+
+	/// Whether position `i` is on a min level (an even depth).
+	fn is_min_level(i: usize) -> bool {
+		(usize::BITS - 1 - (i + 1).leading_zeros()).is_multiple_of(2)
+	}
+
+	/// The position of the furthest entry: the root, or the larger of its children.
+	fn max_index(&self) -> Option<usize> {
+		match self.heap.len() {
+			0 => None,
+			1 => Some(0),
+			2 => Some(1),
+			_ => Some(if self.less(1, 2) {
+				2
+			} else {
+				1
+			}),
+		}
+	}
+
+	/// Removes the entry at `i`, restoring the heap from that position.
+	fn remove(&mut self, i: usize) -> Option<(f64, ElementId)> {
+		if i >= self.heap.len() {
+			return None;
+		}
+		let e = self.heap.swap_remove(i);
+		if i < self.heap.len() {
+			self.trickle_down(i);
+		}
+		Some((e.dist, e.id))
+	}
+
+	fn bubble_up(&mut self, i: usize) {
+		if i == 0 {
+			return;
+		}
+		let parent = (i - 1) / 2;
+		if Self::is_min_level(i) {
+			if self.less(parent, i) {
+				self.heap.swap(i, parent);
+				self.bubble_up_by(parent, false);
+			} else {
+				self.bubble_up_by(i, true);
 			}
+		} else if self.less(i, parent) {
+			self.heap.swap(i, parent);
+			self.bubble_up_by(parent, true);
+		} else {
+			self.bubble_up_by(i, false);
+		}
+	}
+
+	/// Moves the entry at `i` up through its grandparents while it orders
+	/// before them (`min`) or after them (not `min`).
+	fn bubble_up_by(&mut self, mut i: usize, min: bool) {
+		while i > 2 {
+			let grandparent = ((i - 1) / 2 - 1) / 2;
+			let out_of_order = if min {
+				self.less(i, grandparent)
+			} else {
+				self.less(grandparent, i)
+			};
+			if !out_of_order {
+				break;
+			}
+			self.heap.swap(i, grandparent);
+			i = grandparent;
+		}
+	}
+
+	fn trickle_down(&mut self, mut i: usize) {
+		let min = Self::is_min_level(i);
+		// `first(a, b)`: whether `a` belongs above `b` on this level's side.
+		let first = |q: &Self, a: usize, b: usize| {
+			if min {
+				q.less(a, b)
+			} else {
+				q.less(b, a)
+			}
+		};
+		loop {
+			let len = self.heap.len();
+			// The most extreme of the children and grandchildren.
+			let mut m = None;
+			for d in [2 * i + 1, 2 * i + 2, 4 * i + 3, 4 * i + 4, 4 * i + 5, 4 * i + 6] {
+				if d < len && m.is_none_or(|m| first(self, d, m)) {
+					m = Some(d);
+				}
+			}
+			let Some(m) = m else {
+				return;
+			};
+			if !first(self, m, i) {
+				return;
+			}
+			self.heap.swap(m, i);
+			if m <= 2 * i + 2 {
+				// A child: nothing below it can be out of order with `i`'s level.
+				return;
+			}
+			// A grandchild: the entry moved down may now belong beyond its parent.
+			let parent = (m - 1) / 2;
+			if first(self, parent, m) {
+				self.heap.swap(m, parent);
+			}
+			i = m;
 		}
 	}
 }
@@ -251,6 +363,11 @@ impl KnnResultBuilder {
 	/// The number of distinct ids the result holds.
 	pub(super) fn len(&self) -> usize {
 		self.priority_list.len()
+	}
+
+	/// How many more ids the result can take before it is full.
+	pub(super) fn remaining(&self) -> usize {
+		self.knn.saturating_sub(self.priority_list.len())
 	}
 
 	/// Returns whether the id currently holds at least one slot in the result.
@@ -671,6 +788,50 @@ pub(super) mod tests {
 		assert_eq!(q.len(), 0);
 		assert_eq!(q.peek_first(), None);
 		assert_eq!(q.peek_last_dist(), None);
+	}
+
+	/// Random pushes and pops over few distinct distances, so ties are common,
+	/// match a model ordered by `(distance, push order)`.
+	#[test]
+	fn test_double_priority_queue_matches_model() {
+		use rand::rngs::SmallRng;
+		use rand::{Rng, SeedableRng};
+
+		for distinct in [8u32, 1_000_000] {
+			let mut rng = SmallRng::seed_from_u64(7);
+			let mut q = DoublePriorityQueue::default();
+			let mut model: Vec<(FloatKey, u64, u64)> = Vec::new();
+			for seq in 0..5_000u64 {
+				// Pushes outnumber pops, so the queue grows deep enough to exercise every level.
+				match rng.random_range(0..5) {
+					0..=2 => {
+						let d = f64::from(rng.random_range(0..distinct)) / 4.0;
+						let id = rng.random_range(0..1_000u64);
+						q.push(d, id);
+						model.push((FloatKey(d), seq, id));
+						model.sort();
+					}
+					3 => {
+						let expected = (!model.is_empty()).then(|| model.remove(0));
+						assert_eq!(q.pop_first(), expected.map(|(d, _, id)| (d.0, id)));
+					}
+					_ => {
+						let expected = model.pop();
+						assert_eq!(q.pop_last(), expected.map(|(d, _, id)| (d.0, id)));
+					}
+				}
+				assert_eq!(q.len(), model.len());
+				assert_eq!(q.peek_first(), model.first().map(|(d, _, id)| (d.0, *id)));
+				assert_eq!(q.peek_last_dist(), model.last().map(|(d, _, _)| d.0));
+			}
+			let expected: Vec<_> = model.iter().map(|(d, _, id)| (d.0, *id)).collect();
+			assert_eq!(q.to_vec(), expected);
+			for limit in [0, 1, 10, expected.len(), expected.len() + 1] {
+				let prefix: Vec<_> = expected.iter().copied().take(limit).collect();
+				assert_eq!(q.to_vec_limit(limit), prefix);
+			}
+			assert_eq!(q.into_sorted_vec(), expected);
+		}
 	}
 
 	#[test]

@@ -84,7 +84,48 @@ impl From<u32> for IndexId {
 /// Bump when any index kind's persisted layout changes. An existing index keeps
 /// the version it was stamped with, and is read and written in that version's
 /// layout until `REBUILD INDEX` restamps it.
-pub const INDEX_FORMAT_VERSION: u16 = 5;
+///
+/// A store at the `Legacy` feature level is stamped no higher than
+/// [`LEGACY_LEVEL_INDEX_FORMAT_VERSION`]: see [`admitted_index_format_version`].
+pub const INDEX_FORMAT_VERSION: u16 = 6;
+
+/// The newest format version stamped on a store at the `Legacy` feature level.
+///
+/// Releases before 4.0 can serve such a store. They maintain no key that a
+/// later version introduced, and nothing stops them writing to an index stamped
+/// with one, so a stamp whose layout depends on such a key
+/// ([`ELEMENT_DOCS_FORMAT_VERSION`]) is written only once the store's level
+/// keeps those releases out.
+pub const LEGACY_LEVEL_INDEX_FORMAT_VERSION: u16 = 5;
+
+/// The format version to stamp in place of `format_version` on a store whose
+/// feature level is `Legacy` (`legacy`): no higher than
+/// [`LEGACY_LEVEL_INDEX_FORMAT_VERSION`]. Any other store keeps it.
+pub fn admitted_index_format_version(format_version: u16, legacy: bool) -> u16 {
+	if legacy {
+		format_version.min(LEGACY_LEVEL_INDEX_FORMAT_VERSION)
+	} else {
+		format_version
+	}
+}
+
+/// The oldest format version whose layout for an index of kind `index` is the
+/// current one: an index of that kind stamped at or above it is read and written
+/// exactly as one defined now would be, so nothing is gained by rebuilding it.
+///
+/// [`ELEMENT_DOCS_FORMAT_VERSION`] and [`ELEMENT_CODES_FORMAT_VERSION`] changed
+/// only the HNSW and DiskANN layouts; every other kind's layout last changed in
+/// the version before them. A bump of [`INDEX_FORMAT_VERSION`] updates this for
+/// each kind whose layout the new version changes.
+pub fn current_layout_format_version(index: &Index) -> u16 {
+	match index {
+		Index::Hnsw(_) => ELEMENT_DOCS_FORMAT_VERSION,
+		Index::DiskAnn(_) => ELEMENT_DOCS_FORMAT_VERSION.max(ELEMENT_CODES_FORMAT_VERSION),
+		Index::Idx | Index::Uniq | Index::FullText(_) | Index::Count(_) => {
+			ELEMENT_DOCS_FORMAT_VERSION - 1
+		}
+	}
+}
 
 /// Format version at which full-text, HNSW and DiskAnn indexes migrated onto
 /// the shared table-level doc-ID space.
@@ -129,6 +170,28 @@ pub const BTREE_IDENTITY_ENTRY_IDS_FORMAT_VERSION: u16 = 5;
 /// update for each, and before it a write to either replaces the other's,
 /// until `REBUILD INDEX` restamps the index.
 pub const VECTOR_PENDING_MEMBERS_FORMAT_VERSION: u16 = 5;
+
+/// Format version from which an HNSW or DiskANN index keeps an element → doc-ID
+/// mapping (`!hm` / `!dm`) beside its vector → element + doc-IDs mapping, written
+/// in the same transaction. A lookup then resolves a graph element's documents
+/// by its id, without its vector. An index stamped below it resolves them
+/// through its vector, as before.
+pub const ELEMENT_DOCS_FORMAT_VERSION: u16 = 6;
+
+/// Format version from which a DiskANN index of `F32` or `F16` vectors keeps,
+/// beside each element's vector, a per-vector 8-bit code of it (`!da`), written
+/// with the element. A kNN walk scores candidates on the codes and ranks its
+/// search list exactly from the vectors afterwards.
+pub const ELEMENT_CODES_FORMAT_VERSION: u16 = 6;
+
+/// Format version from which a DiskANN index's pending-state summary (`!dY`)
+/// is trusted by lookup: while it reads `Empty` or is absent, no `!dy` guard
+/// reads other than `Empty`, so a lookup skips the guards and every sharded
+/// pending scan. Every writer of an index stamped with it maintains the
+/// summary, since the stamp is given only on a store whose feature level keeps
+/// out the releases that maintain none. An index stamped below it may have
+/// guards armed by such a release, and a lookup reads its guards.
+pub const PENDING_SUMMARY_FORMAT_VERSION: u16 = 6;
 
 /// Format version at which HNSW and DiskANN indexes keep a doc-ID → elements
 /// mapping (`!hk` / `!dk`) alongside their vector → elements + doc-IDs mapping,
@@ -862,6 +925,39 @@ pub fn spells_identity_entry_ids(format_version: u16) -> bool {
 /// [`VECTOR_PENDING_MEMBERS_FORMAT_VERSION`].
 pub fn keeps_pending_members(format_version: u16) -> bool {
 	format_version >= VECTOR_PENDING_MEMBERS_FORMAT_VERSION
+}
+
+/// Whether a vector index with the given stored format version can hold
+/// pending updates in a legacy layout: HNSW's append-keyed `!hp`, written only
+/// by 3.0, or DiskANN's unsharded `!dr`, written only by 3.1.
+///
+/// Only an unstamped index can. A format version is stored from the index
+/// definition revision that 3.0 and 3.1 cannot decode, so those releases cannot
+/// open a stamped index, let alone write to it; and a stamp is given only when
+/// an index is defined or rebuilt, and a rebuild deletes every key the index
+/// holds. A stamped index's legacy ranges are therefore empty for good, and a
+/// lookup need not probe them.
+pub fn may_hold_legacy_vector_pending(format_version: u16) -> bool {
+	format_version < DOC_IDS_FORMAT_VERSION
+}
+
+/// Whether a vector index with the given stored format version keeps the
+/// element → doc-IDs mapping. See [`ELEMENT_DOCS_FORMAT_VERSION`].
+pub fn keeps_element_docs(format_version: u16) -> bool {
+	format_version >= ELEMENT_DOCS_FORMAT_VERSION
+}
+
+/// Whether a DiskANN index with the given stored format version keeps an 8-bit
+/// code of each element of a coded vector type. See
+/// [`ELEMENT_CODES_FORMAT_VERSION`].
+pub fn keeps_element_codes(format_version: u16) -> bool {
+	format_version >= ELEMENT_CODES_FORMAT_VERSION
+}
+
+/// Whether a lookup of a DiskANN index with the given stored format version
+/// trusts its pending-state summary. See [`PENDING_SUMMARY_FORMAT_VERSION`].
+pub fn trusts_pending_summary(format_version: u16) -> bool {
+	format_version >= PENDING_SUMMARY_FORMAT_VERSION
 }
 
 /// Whether a vector index with the given stored format version keeps the

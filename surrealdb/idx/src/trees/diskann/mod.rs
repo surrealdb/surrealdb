@@ -28,7 +28,7 @@ mod provider;
 // compaction that read them stay here.
 pub(super) use surrealdb_datastore::values::diskann::DISKANN_PENDING_STATE_SHARDS;
 pub(crate) use surrealdb_datastore::values::diskann::{
-	DiskAnnElement, DiskAnnNode, DiskAnnPendingState, DiskAnnPendingStateKind,
+	DiskAnnElement, DiskAnnElementCode, DiskAnnNode, DiskAnnPendingState, DiskAnnPendingStateKind,
 	DiskAnnRecordPendingMember, DiskAnnRecordPendingUpdate, DiskAnnState,
 };
 pub(crate) use surrealdb_datastore::values::vector::ElementId;

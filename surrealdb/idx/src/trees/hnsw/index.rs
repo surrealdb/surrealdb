@@ -16,6 +16,7 @@ use web_time::Instant;
 
 use crate::catalog::{
 	Distance, HnswParams, TableId, VectorType, keeps_pending_members, keeps_vector_doc_elements,
+	may_hold_legacy_vector_pending,
 };
 use crate::config::BuildParallelism;
 use crate::docids::{DocId, LegacyVectorDocIds};
@@ -1437,8 +1438,9 @@ impl HnswIndex {
 		// Stream the append-keyed range into bounded chunks. Each completed chunk
 		// is checked against the later append suffix and the record-keyed range
 		// before it is scored, so no liveness state survives into the next chunk.
+		// Only an index stamped before format versions can hold that range.
 		let mut legacy_chunk_end = Vec::new();
-		{
+		if may_hold_legacy_vector_pending(self.format_version) {
 			let rng = self.ikb.new_hp_range()?;
 			let mut cursor = Some(tx.open_vals_cursor(rng, Direction::Forward, 0, None).await?);
 			loop {
@@ -1697,15 +1699,61 @@ impl HnswIndex {
 		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
 		builder: &mut KnnResultBuilder,
 	) -> Result<()> {
-		for (e_dist, e_id) in neighbors {
+		// Neighbours arrive nearest first, and `check_add` only tightens as results are added.
+		// They are resolved in chunks of as many as the builder has free slots (at least one):
+		// each chunk's vectors and doc sets are read in one batch each, and once the builder is
+		// full a chunk is a single neighbour that may still displace a farther result.
+		let mut neighbors = neighbors.into_iter();
+		let mut chunk: Vec<(f64, ElementId)> = Vec::new();
+		loop {
+			let want = builder.remaining().max(1);
+			chunk.clear();
+			for (e_dist, e_id) in neighbors.by_ref() {
+				if builder.check_add(e_dist) {
+					chunk.push((e_dist, e_id));
+					if chunk.len() == want {
+						break;
+					}
+				}
+			}
+			if chunk.is_empty() {
+				return Ok(());
+			}
+			self.add_graph_chunk(ctx, hnsw, &chunk, pending_docs, allow_list, filter, builder)
+				.await?;
+		}
+	}
+
+	/// Resolves one chunk of [`Self::add_graph_results`] into `builder`.
+	#[expect(clippy::too_many_arguments)]
+	async fn add_graph_chunk(
+		&self,
+		ctx: &HnswContext<'_>,
+		hnsw: &HnswFlavor,
+		neighbors: &[(f64, ElementId)],
+		pending_docs: Option<&RoaringTreemap>,
+		allow_list: Option<&RoaringTreemap>,
+		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
+		builder: &mut KnnResultBuilder,
+	) -> Result<()> {
+		let ids: Vec<ElementId> = neighbors.iter().map(|(_, e_id)| *e_id).collect();
+		// An index that resolves documents by element id needs no vectors; any other keys
+		// each lookup by the element's vector.
+		let vectors = if ctx.vec_docs.reads_docs_by_element() {
+			Vec::new()
+		} else {
+			hnsw.get_vectors(&ctx.tx, &ids).await?
+		};
+		let elements: Vec<(ElementId, Option<&Vector>)> = ids
+			.iter()
+			.enumerate()
+			.map(|(i, e_id)| (*e_id, vectors.get(i).and_then(|v| v.as_deref())))
+			.collect();
+		let doc_sets = ctx.vec_docs.get_docs_by_elements(&ctx.tx, &elements).await?;
+		for (&(e_dist, _), docs) in neighbors.iter().zip(doc_sets) {
 			if !builder.check_add(e_dist) {
 				continue;
 			}
-			let docs = if let Some(v) = hnsw.get_vector(&ctx.tx, &e_id).await? {
-				ctx.vec_docs.get_docs_by_element(&ctx.tx, e_id, &v).await?
-			} else {
-				None
-			};
 			if let Some(docs) = docs {
 				if pending_docs.is_some() || allow_list.is_some() || filter.is_some() {
 					for doc_id in docs.iter() {
@@ -1742,6 +1790,12 @@ impl HnswIndex {
 	#[cfg(test)]
 	pub(super) async fn check_hnsw_properties(&self, expected_count: usize) {
 		self.hnsw.read().await.check_hnsw_properties(expected_count).await
+	}
+
+	/// See [`VecDocs::assert_element_docs_match`].
+	#[cfg(test)]
+	pub(super) async fn assert_element_docs_match(&self, tx: &Transaction) -> Result<usize> {
+		self.vec_docs.assert_element_docs_match(tx).await
 	}
 
 	/// Each resident layer's node count and mean out-degree, layer 0 first.

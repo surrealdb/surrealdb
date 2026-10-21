@@ -22,7 +22,11 @@ The delete that follows removes the record the old binary seeded the graph
 with, its entry point. The old binary wrote the graph state at revision 1,
 with no start points beside the entry point; the new binary must retire that
 entry point from the state it reads, and write it back at revision 2, without
-losing the graph."""
+losing the graph.
+
+pts:5 then shares pts:2's vector, so the element the old binary wrote for that
+vector holds two records: the new binary resolves both from it, and once pts:2
+is deleted, only pts:5."""
 version = ">=3.4.0-a"
 introduced = ">=3.1.0-beta.3"
 
@@ -44,6 +48,18 @@ value = "[]"
 [[test.results]]
 value = "[{ id: pts:4 }]"
 
+[[test.results]]
+value = "[{ id: pts:5, point: [10f, 20f, 30f, 40f] }]"
+
+[[test.results]]
+value = "[{ id: pts:2 }, { id: pts:5 }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ id: pts:5 }]"
+
 */
 LET $pt = [2.0, 3.0, 4.0, 5.0];
 EXPLAIN SELECT id FROM pts WHERE point <|1,100|> $pt;
@@ -54,3 +70,7 @@ SELECT id FROM pts WHERE point <|1,100|> $pt;
 -- pts:1 seeded the old binary's graph, so it is the graph's entry point.
 DELETE pts:1 RETURN NONE;
 SELECT id FROM pts WHERE point <|1,100|> [1.0, 2.0, 3.0, 4.0];
+CREATE pts:5 SET point = [10.0, 20.0, 30.0, 40.0];
+SELECT id FROM pts WHERE point <|2,100|> [10.0, 20.0, 30.0, 40.0] ORDER BY id;
+DELETE pts:2 RETURN NONE;
+SELECT id FROM pts WHERE point <|1,100|> [10.0, 20.0, 30.0, 40.0];

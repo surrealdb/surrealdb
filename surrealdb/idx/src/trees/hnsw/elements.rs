@@ -397,19 +397,42 @@ impl HnswElements {
 		Ok(vectors)
 	}
 
-	/// Computes the distance between two vectors using the configured distance metric.
+	/// The graph's ranking distance between two vectors under the configured metric.
+	///
+	/// It orders pairs exactly as the metric's distance does but may be a different value
+	/// (the squared distance for `EUCLIDEAN`), so it is only ever compared with other ranking
+	/// distances. [`Self::reported_distance`] converts it into the metric's distance.
 	pub(super) fn distance(&self, a: &SharedVector, b: &SharedVector) -> f64 {
+		self.dist.ranking_shared(a, b)
+	}
+
+	/// The metric's distance for a ranking distance returned by [`Self::distance`], when
+	/// [`Self::ranking_is_exact`] holds for the vectors it was computed on.
+	pub(super) fn reported_distance(&self, ranking: f64) -> f64 {
+		self.dist.distance_from_ranking(ranking)
+	}
+
+	/// Whether ranking distances between vectors like `sample` convert exactly into the metric's
+	/// distance through [`Self::reported_distance`]. When they do not, the distance comes from
+	/// [`Self::exact_distance`].
+	pub(super) fn ranking_is_exact(&self, sample: &Vector) -> bool {
+		self.dist.ranking_is_exact(sample)
+	}
+
+	/// The metric's distance between two vectors.
+	pub(super) fn exact_distance(&self, a: &SharedVector, b: &SharedVector) -> f64 {
 		self.dist.calculate_shared(a, b)
 	}
 
-	/// Computes the distance between a query vector and an element's stored vector.
+	/// The ranking distance (see [`Self::distance`]) between a query vector and an element's
+	/// stored vector.
 	pub(super) async fn get_distance(
 		&self,
 		tx: &Transaction,
 		q: &SharedVector,
 		e_id: &ElementId,
 	) -> Result<Option<f64>> {
-		Ok(self.get_vector(tx, e_id).await?.map(|r| self.dist.calculate_shared(&r, q)))
+		Ok(self.get_vector(tx, e_id).await?.map(|r| self.dist.ranking_shared(&r, q)))
 	}
 
 	/// Removes an element's vector from both the cache and the key-value store.

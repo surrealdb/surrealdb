@@ -838,6 +838,13 @@ keyspace! {
 						/// vector doc-elements format version or later.
 						hnsw_doc_elements = ["!hk", @, doc_id: DocId]
 							=> crate::values::ids::Ids64;
+						/// The documents of each graph element: the doc-IDs `!hv`/`!hh`
+						/// hold for it, keyed by the element's id rather than its
+						/// vector, written in the same transaction as every change to
+						/// them. Kept only by indexes stamped with the element-docs
+						/// format version or later.
+						hnsw_element_docs = ["!hm", @, element_id: ElementId]
+							=> crate::values::ids::Ids64;
 						hnsw_layer = ["!hl", layer: u16, @, chunk: u32] => Vec<u8>;
 						hnsw_node = ["!hn", layer: u16, @, node: ElementId] => Vec<u8>;
 
@@ -886,6 +893,14 @@ keyspace! {
 						#[cfg(diskann)]
 						diskann_element = ["!de", @, element_id: ElementId]
 							=> crate::values::diskann::DiskAnnElement;
+						/// An element's vector as a per-vector 8-bit code, which a query
+						/// walk scores in place of the vector. Written with the element,
+						/// never rewritten, and deleted with it. Kept only by indexes of
+						/// `F32` and `F16` vectors stamped with the element-codes format
+						/// version or later.
+						#[cfg(diskann)]
+						diskann_element_code = ["!da", @, element_id: ElementId]
+							=> crate::values::diskann::DiskAnnElementCode;
 						#[cfg(diskann)]
 						diskann_node = ["!dn", @, element_id: ElementId]
 							=> crate::values::diskann::DiskAnnNode;
@@ -903,11 +918,29 @@ keyspace! {
 						#[cfg(diskann)]
 						diskann_doc_elements = ["!dk", @, doc_id: DocId]
 							=> crate::values::ids::Ids64;
+						/// The documents of each graph element: the doc-IDs `!dq`/`!dh`
+						/// hold for it, keyed by the element's id rather than its
+						/// vector, written in the same transaction as every change to
+						/// them. Kept only by indexes stamped with the element-docs
+						/// format version or later.
+						#[cfg(diskann)]
+						diskann_element_doc_set = ["!dm", @, element_id: ElementId]
+							=> crate::values::ids::Ids64;
 						#[cfg(diskann)]
 						diskann_pending_legacy = ["!dp", @, shard: u16]
 							=> crate::values::diskann::DiskAnnPendingState;
 						#[cfg(diskann)]
 						diskann_pending = ["!dy", @, shard: u16]
+							=> crate::values::diskann::DiskAnnPendingState;
+						/// Whether any `!dy` guard of the index may read other than
+						/// `Empty`: `NonEmpty` whenever one does, in every committed
+						/// state. Armed in the transaction that arms a guard from any
+						/// other state, and stepped to `Empty` only by the guard step
+						/// that leaves every guard `Empty`. An absent key reads
+						/// `Empty`. Lookup trusts it only on an index stamped with the
+						/// pending-summary format version or later.
+						#[cfg(diskann)]
+						diskann_pending_summary = ["!dY"]
 							=> crate::values::diskann::DiskAnnPendingState;
 						/// A node's writer lease on one `!dy` guard shard: while it
 						/// holds, the node's writers commit pending updates into the
@@ -2602,7 +2635,7 @@ mod tests {
 		#[cfg(diskann)]
 		stored_tags.extend_from_slice(&[
 			"/***+!de", "/***+!dg", "/***+!dh", "/***+!dk", "/***+!dn", "/***+!dp", "/***+!dq",
-			"/***+!dr", "/***+!ds", "/***+!dw", "/***+!dy", "/***+!dz",
+			"/***+!dr", "/***+!ds", "/***+!dw", "/***+!dy", "/***+!dY", "/***+!dz",
 		]);
 
 		// Reduce every declared route the same way: drop field placeholders.

@@ -167,6 +167,11 @@ mod tests {
 		}
 		let c: IdxConfig = map_with("diskann_cache_size", "7").load();
 		assert_eq!(c.diskann_cache_size, 7);
+		let c: IdxConfig = map_with("diskann_search_beam_width", "7").load();
+		assert_eq!(c.diskann_search_beam_width, 7);
+		assert!(IdxConfig::default().diskann_quantized_search);
+		let c: IdxConfig = map_with("diskann_quantized_search", "false").load();
+		assert!(!c.diskann_quantized_search);
 		// The fold threshold is a built-in constant, not a config key: a map
 		// entry naming it must be ignored.
 		let c: IdxConfig = map_with("graph_fold_threshold", "7").load();

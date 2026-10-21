@@ -4536,7 +4536,7 @@ c2165099425e4f18 language-tests/tests/upgrade/define/3.00.00_index_fulltext_impo
 66377c604814d2e6 language-tests/tests/upgrade/define/3.00.00_index_hnsw.surql
 0b3594d71f026552 language-tests/tests/upgrade/define/3.00.00_index_hnsw_compound_id.surql
 9ccc9cf975c37a4a language-tests/tests/upgrade/define/3.00.00_index_hnsw_compound_id_import.surql
-ed30099cbd12acfc language-tests/tests/upgrade/define/3.00.00_index_hnsw_current.surql
+2c32c805ae92fc89 language-tests/tests/upgrade/define/3.00.00_index_hnsw_current.surql
 82ba62a8692d54d5 language-tests/tests/upgrade/define/3.00.00_index_hnsw_import.surql
 55dd752a5a714185 language-tests/tests/upgrade/define/3.00.00_index_hnsw_rebuild.surql
 e543a9744d5f72bb language-tests/tests/upgrade/define/3.00.00_index_numeric.surql
@@ -4632,8 +4632,12 @@ fac0459fed277d29 language-tests/tests/upgrade/define/3.01.00_index_diskann_compo
 3efba10f3fbc7d77 language-tests/tests/upgrade/define/3.01.00_index_diskann_compound_id_rebuild.surql
 576b99b68bc47a7c language-tests/tests/upgrade/define/3.01.00_index_diskann_compound_id_write.surql
 8502150b75230507 language-tests/tests/upgrade/define/3.01.00_index_diskann_compound_id_write_import.surql
-2fd62dbe68991f0f language-tests/tests/upgrade/define/3.01.00_index_diskann_current.surql
+391e776129ad6224 language-tests/tests/upgrade/define/3.01.00_index_diskann_current.surql
 599e1317799e1f26 language-tests/tests/upgrade/define/3.01.00_index_diskann_import.surql
+c2a5012ecc3618f6 language-tests/tests/upgrade/define/3.01.00_index_diskann_pending.surql
+cb0773586db161bf language-tests/tests/upgrade/define/3.01.00_index_diskann_pending_current.surql
+ce3f759b20730910 language-tests/tests/upgrade/define/3.01.00_index_diskann_pending_import.surql
+b487dd1b2fb09539 language-tests/tests/upgrade/define/3.01.00_index_diskann_pending_rebuild.surql
 06e4a947fbb3e623 language-tests/tests/upgrade/define/3.01.00_index_diskann_rebuild.surql
 bcd26cc20cc6119e language-tests/tests/upgrade/define/3.01.00_index_hnsw_compound_id.surql
 4a86b4e7893ad0d5 language-tests/tests/upgrade/define/3.01.00_index_hnsw_compound_id_import.surql

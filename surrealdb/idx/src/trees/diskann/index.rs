@@ -23,7 +23,7 @@ use std::num::{NonZeroU32, NonZeroUsize};
 use std::sync::Arc;
 
 use ahash::HashMap;
-use anyhow::{Result, bail};
+use anyhow::{Result, bail, ensure};
 use common::EngineError;
 use diskann::graph::DiskANNIndex as RawDiskAnnIndex;
 use diskann::graph::config::experimental::InsertRetry;
@@ -33,9 +33,10 @@ use diskann::graph::search::Knn;
 use diskann::graph::search_output_buffer::IdDistance;
 use diskann::neighbor::{Neighbor, NeighborPriorityQueue};
 use diskann::provider::{Delete, Guard, SetElement};
-use diskann_utils::views::Matrix;
-use diskann_vector::Half;
+use diskann::utils::VectorRepr;
+use diskann_utils::views::rowmajor;
 use diskann_vector::distance::Metric;
+use diskann_vector::{Half, PreprocessedDistanceFunction};
 use roaring::RoaringTreemap;
 use surrealdb_datastore::Transaction;
 use surrealdb_kvs::api::ValsBatch;
@@ -44,10 +45,13 @@ use tokio::sync::{RwLock, RwLockWriteGuard};
 
 use crate::catalog::{
 	DiskAnnParams, Distance, TableId, VectorType, keeps_pending_members, keeps_vector_doc_elements,
+	may_hold_legacy_vector_pending, trusts_pending_summary,
 };
 use crate::docids::{DocId, LegacyVectorDocIds};
 use crate::env::{IndexEnv, expect_not_done};
-use crate::key::schema::{DiskannRecordPendingKey, DiskannRecordPendingShardKey};
+use crate::key::schema::{
+	DiskannPendingKey, DiskannRecordPendingKey, DiskannRecordPendingShardKey,
+};
 use crate::key::{KVKey, KVKeyDecode, KVValue, Key, TypedRange};
 use crate::parallel::ReadView;
 use crate::trees::diskann::cache::{CacheView, Continuity, DiskAnnCache};
@@ -70,7 +74,8 @@ use crate::trees::pending::{
 	PendingBacklogReport, PendingScan, PendingScanStats, take_pending_record_id,
 };
 use crate::trees::vector::{
-	DistanceExt as _, SerializedVector, SharedVector, Vector, serialized_vector_from_value,
+	DistanceExt as _, NARROW_INT_KERNEL_MAX_DIM, SerializedVector, SharedVector, Vector,
+	serialized_vector_from_value,
 };
 use crate::trees::{KnnCondFilter, KnnIteratorResult, doc_elements};
 use crate::val::{Number, RecordId, RecordIdKey, Value};
@@ -170,6 +175,8 @@ pub struct DiskAnnCompactionPlan {
 	/// Shards whose pending range was fully drained this pass and may step toward empty on apply.
 	/// Only populated once the legacy `!dr` range is empty (see [`Self::prepare_compaction`]).
 	cleared_shards: Vec<u16>,
+	/// Whether the pending-state summary (`!dY`) read other than `Empty` in the plan's snapshot.
+	summary_armed: bool,
 	/// True when prepare stopped because the bounded batch limit was reached.
 	has_more: bool,
 }
@@ -186,10 +193,25 @@ impl DiskAnnCompactionPlan {
 	/// it holds no sharded data and nothing to clear (this matches the phase-2 scan, which skips
 	/// `None`/`Empty` shards). Treating `None` as applyable would make a quiescent index with
 	/// untouched shards schedule a no-op write transaction on every compaction cycle forever.
+	///
+	/// An armed summary is applyable too: over a non-`Empty` guard that adds nothing, and over
+	/// guards that all read `Empty` the step clears it, so lookup does not keep reading the guards
+	/// of an index with nothing pending.
 	pub fn requires_apply(&self) -> bool {
 		self.has_work()
+			|| self.summary_armed
 			|| self.pending_state.iter().any(|state| {
 				state.as_ref().is_some_and(|state| state.kind != DiskAnnPendingStateKind::Empty)
+			})
+	}
+
+	/// Whether the guard step after this plan may clear the summary: it read armed, and every
+	/// guard read `Empty` or absent or is one the step steps.
+	fn summary_clearable(&self) -> bool {
+		self.summary_armed
+			&& self.pending_state.iter().enumerate().all(|(shard, state)| {
+				state.as_ref().is_none_or(|s| s.kind == DiskAnnPendingStateKind::Empty)
+					|| self.cleared_shards.contains(&(shard as u16))
 			})
 	}
 
@@ -342,13 +364,14 @@ impl PendingPlanBuilder {
 		self.pending.push(pending);
 	}
 
-	fn into_plan(self, cleared_shards: Vec<u16>) -> DiskAnnCompactionPlan {
+	fn into_plan(self, cleared_shards: Vec<u16>, summary_armed: bool) -> DiskAnnCompactionPlan {
 		DiskAnnCompactionPlan {
 			generation: self.generation,
 			pending_state: self.pending_state,
 			captured_keys: self.captured_keys,
 			pending: self.pending,
 			cleared_shards,
+			summary_armed,
 			has_more: self.has_more,
 		}
 	}
@@ -358,7 +381,7 @@ impl PendingPlanBuilder {
 pub struct DiskAnnIndex {
 	/// Expected vector dimensionality.
 	dim: usize,
-	/// Public SurrealDB distance semantics for pending-vector scoring and result materialization.
+	/// Public SurrealDB distance semantics, which every reported distance follows.
 	distance: Distance,
 	/// Shared key builder for this index.
 	ikb: IndexKeyBase,
@@ -848,10 +871,11 @@ impl DiskAnnGraph {
 			Vector::check_expected_dimension(row.len(), dim)?;
 			data.extend_from_slice(row);
 		}
-		let batch: Matrix<T> = Matrix::try_from(data.into_boxed_slice(), vectors.len(), dim)
-			.map_err(|_| anyhow::anyhow!("DISKANN batch dimension mismatch"))?;
+		let batch: rowmajor::Owned<T> =
+			rowmajor::Owned::try_from_data(data.into_boxed_slice(), vectors.len(), dim)
+				.map_err(|_| anyhow::anyhow!("DISKANN batch dimension mismatch"))?;
 		self.frame_index(tasks)?
-			.multi_insert::<DiskAnnStrategy<T>, Matrix<T>>(
+			.multi_insert::<DiskAnnStrategy<T>, rowmajor::Owned<T>>(
 				DiskAnnStrategy::<T>::default(),
 				&ctx.provider_context,
 				Arc::new(batch),
@@ -929,18 +953,33 @@ impl DiskAnnGraph {
 	}
 
 	/// Dispatches a typed graph search based on the prepared query vector representation.
+	///
+	/// Returns the results and how many elements the walk's search list held: a coded walk ranks
+	/// only its `rerank` nearest exactly and returns those, so the second count, not the results',
+	/// says whether the walk ran dry. `None` ranks the whole list.
 	async fn search(
 		&self,
 		ctx: &DiskAnnContext<'_>,
 		query: &DiskAnnQuery,
 		k: usize,
 		l: usize,
-	) -> Result<Vec<DiskAnnSearchResult>> {
+		rerank: Option<usize>,
+	) -> Result<(Vec<DiskAnnSearchResult>, usize)> {
 		match query {
-			DiskAnnQuery::F32(query) => self.search_typed(ctx, query, k, l).await,
-			DiskAnnQuery::F16(query) => self.search_typed(ctx, query, k, l).await,
-			DiskAnnQuery::I8(query) => self.search_typed(ctx, query, k, l).await,
-			DiskAnnQuery::U8(query) => self.search_typed(ctx, query, k, l).await,
+			DiskAnnQuery::F32(query) => self.search_typed(ctx, query, k, l, rerank).await,
+			DiskAnnQuery::F16(query) => self.search_typed(ctx, query, k, l, rerank).await,
+			DiskAnnQuery::I8(query) => self.search_typed(ctx, query, k, l, rerank).await,
+			DiskAnnQuery::U8(query) => self.search_typed(ctx, query, k, l, rerank).await,
+		}
+	}
+
+	/// Whether a kNN walk for `query` scores candidates on element codes.
+	fn coded_query(&self, ctx: &DiskAnnContext<'_>, query: &DiskAnnQuery) -> bool {
+		match query {
+			DiskAnnQuery::F32(_) => self.coded_walk::<f32>(ctx),
+			DiskAnnQuery::F16(_) => self.coded_walk::<Half>(ctx),
+			DiskAnnQuery::I8(_) => self.coded_walk::<i8>(ctx),
+			DiskAnnQuery::U8(_) => self.coded_walk::<u8>(ctx),
 		}
 	}
 
@@ -951,28 +990,84 @@ impl DiskAnnGraph {
 		query: &[T],
 		k: usize,
 		l: usize,
-	) -> Result<Vec<DiskAnnSearchResult>>
+		rerank: Option<usize>,
+	) -> Result<(Vec<DiskAnnSearchResult>, usize)>
 	where
 		T: DiskAnnVectorElement,
 	{
-		if self.index.provider().valid_starting_points(&ctx.provider_context).await?.is_empty() {
-			return Ok(Vec::new());
-		}
+		// An index without start points yields no results: the search
+		// accessor resolves them once and the walk then has nothing to expand.
 		let limit = l.max(k).max(1);
-		let params = Knn::new_default(limit)?;
+		let params = search_params(ctx, limit)?;
 		let mut ids = vec![0; limit];
 		let mut distances = vec![0.0; limit];
 		let mut output = IdDistance::new(&mut ids, &mut distances);
-		let strategy = DiskAnnStrategy::<T>::default();
+		let coded = self.coded_walk::<T>(ctx);
+		let strategy = if coded {
+			DiskAnnStrategy::<T>::coded()
+		} else {
+			DiskAnnStrategy::<T>::default()
+		};
 		let stats =
 			self.index.search(params, &strategy, &ctx.provider_context, query, &mut output).await?;
 		let result_count = stats.result_count as usize;
-		Ok(ids
+		let results: Vec<DiskAnnSearchResult> = ids
 			.into_iter()
 			.zip(distances)
 			.take(result_count)
 			.map(|(id, distance)| (id, distance as f64))
-			.collect())
+			.collect();
+		if coded {
+			// A walk that ran dry is not retried wider, so it ranks every live result.
+			let depth = rerank.filter(|_| result_count >= limit).map(|depth| depth.max(k));
+			return Ok((self.rerank(ctx, query, results, depth).await?, result_count));
+		}
+		Ok((results, result_count))
+	}
+
+	/// Whether a kNN walk over vectors of type `T` scores candidates on element codes.
+	fn coded_walk<T: DiskAnnVectorElement>(&self, ctx: &DiskAnnContext<'_>) -> bool {
+		ctx.env.config().diskann_quantized_search && self.index.provider().scores_codes::<T>()
+	}
+
+	/// Replaces the coded distances of the nearest `depth` live results with their exact
+	/// distances from the elements' vectors, and returns those, ordered by exact distance.
+	///
+	/// `results` is nearest first on the coded distances. Its elements are read in chunks of
+	/// `depth`, so a deleted element, which the walk still navigates through but which holds no
+	/// document, does not take one of the `depth` places. `None` ranks every live result.
+	async fn rerank<T>(
+		&self,
+		ctx: &DiskAnnContext<'_>,
+		query: &[T],
+		results: Vec<DiskAnnSearchResult>,
+		depth: Option<usize>,
+	) -> Result<Vec<DiskAnnSearchResult>>
+	where
+		T: DiskAnnVectorElement,
+	{
+		if results.is_empty() {
+			return Ok(results);
+		}
+		let provider = self.index.provider();
+		let exact = T::query_distance(query, provider.metric());
+		let depth = depth.unwrap_or(results.len()).max(1);
+		let mut reranked = Vec::with_capacity(depth.min(results.len()));
+		for chunk in results.chunks(depth) {
+			let ids: Vec<ElementId> = chunk.iter().map(|(id, _)| *id).collect();
+			let elements = provider.read_elements(&ctx.provider_context, &ids).await?;
+			for (id, element) in ids.into_iter().zip(elements) {
+				if let Some(element) = element.filter(|e| !e.deleted) {
+					let vector = T::as_slice(&element.vector, provider.dim())?;
+					reranked.push((id, f64::from(exact.evaluate_similarity(vector))));
+				}
+			}
+			if reranked.len() >= depth {
+				break;
+			}
+		}
+		reranked.sort_by(|a, b| a.1.total_cmp(&b.1));
+		Ok(reranked)
 	}
 
 	/// Inline-filtered graph search: the greedy walk of [`Self::search`], with
@@ -997,20 +1092,21 @@ impl DiskAnnGraph {
 		query: &DiskAnnQuery,
 		k: usize,
 		l: usize,
+		rerank: Option<usize>,
 		classifier: &mut C,
 	) -> Result<FilteredWalk> {
 		match query {
 			DiskAnnQuery::F32(query) => {
-				self.search_filtered_typed(ctx, query, k, l, classifier).await
+				self.search_filtered_typed(ctx, query, k, l, rerank, classifier).await
 			}
 			DiskAnnQuery::F16(query) => {
-				self.search_filtered_typed(ctx, query, k, l, classifier).await
+				self.search_filtered_typed(ctx, query, k, l, rerank, classifier).await
 			}
 			DiskAnnQuery::I8(query) => {
-				self.search_filtered_typed(ctx, query, k, l, classifier).await
+				self.search_filtered_typed(ctx, query, k, l, rerank, classifier).await
 			}
 			DiskAnnQuery::U8(query) => {
-				self.search_filtered_typed(ctx, query, k, l, classifier).await
+				self.search_filtered_typed(ctx, query, k, l, rerank, classifier).await
 			}
 		}
 	}
@@ -1022,6 +1118,7 @@ impl DiskAnnGraph {
 		query: &[T],
 		k: usize,
 		l: usize,
+		rerank: Option<usize>,
 		classifier: &mut C,
 	) -> Result<FilteredWalk>
 	where
@@ -1029,15 +1126,18 @@ impl DiskAnnGraph {
 		C: ElementClassifier,
 	{
 		let provider = self.index.provider();
-		if provider.valid_starting_points(&ctx.provider_context).await?.is_empty() {
+		let limit = l.max(k).max(1);
+		let beam_width = search_params(ctx, limit)?.beam_width().get();
+		let coded = self.coded_walk::<T>(ctx);
+		let mut accessor =
+			DiskAnnSearchAccessor::<T>::new(provider, &ctx.provider_context, query, coded)?;
+		// The accessor resolves the start points here, once, and reuses them below.
+		if accessor.num_starting_points().await? == 0 {
 			return Ok(FilteredWalk {
 				results: Vec::new(),
 				exhausted: true,
 			});
 		}
-		let limit = l.max(k).max(1);
-		let beam_width = Knn::new_default(limit)?.beam_width().get();
-		let mut accessor = DiskAnnSearchAccessor::<T>::new(provider, &ctx.provider_context, query)?;
 		let mut best = NeighborPriorityQueue::new(limit);
 		let mut visited: HashSet<ElementId> = HashSet::new();
 		let mut matched: Vec<DiskAnnSearchResult> = Vec::new();
@@ -1080,15 +1180,33 @@ impl DiskAnnGraph {
 				})
 				.await?;
 		}
-		matched.sort_by(|a, b| a.1.total_cmp(&b.1));
+		let exhausted = visited.len() < limit;
+		let matched = if coded {
+			// Only the nearest admitted on the coded distances are ranked exactly, unless the walk
+			// ran dry and is not retried wider.
+			matched.sort_by(|a, b| a.1.total_cmp(&b.1));
+			let depth = rerank.filter(|_| !exhausted).map(|depth| depth.max(k));
+			self.rerank(ctx, query, matched, depth).await?
+		} else {
+			matched.sort_by(|a, b| a.1.total_cmp(&b.1));
+			matched
+		};
 		Ok(FilteredWalk {
 			results: matched,
 			// A walk that visited fewer elements than its list holds never filled
 			// the list, so it reached every element it could: a wider list walks
 			// no further.
-			exhausted: visited.len() < limit,
+			exhausted,
 		})
 	}
+}
+
+/// The kNN search parameters for a search list of `limit` entries, expanding
+/// `diskann_search_beam_width` nodes per hop. The beam is at least one node and
+/// at most the search list, which bounds what a hop can expand.
+fn search_params(ctx: &DiskAnnContext<'_>, limit: usize) -> Result<Knn> {
+	let beam_width = ctx.env.config().diskann_search_beam_width.clamp(1, limit.max(1));
+	Ok(Knn::new(limit, Some(beam_width))?)
 }
 
 /// Cancels `tx` and discards any error from a tx that is already closed.
@@ -1576,6 +1694,11 @@ struct GraphCandidateClassifier<'s, 'a, 'b> {
 	allow_list: Option<&'s RoaringTreemap>,
 	/// The result builder, holding the pending scan's candidates.
 	builder: &'s KnnResultBuilder,
+	/// Whether the walk scores candidates on codes. A coded distance is not
+	/// compared with the builder's exact ones: an element exactly within the top
+	/// k can code just past the k-th pending candidate. Its exact distance is
+	/// checked against the builder once the walk has ranked it.
+	coded: bool,
 	/// The k nearest documents admitted so far, each at the public distance of
 	/// its nearest admitted element.
 	admitted: KnnResultBuilder,
@@ -1588,7 +1711,7 @@ impl GraphCandidateClassifier<'_, '_, '_> {
 	/// Whether an element at public distance `distance` can still place in the
 	/// top k.
 	fn can_place(&self, distance: f64) -> bool {
-		self.builder.check_add(distance) && self.admitted.check_add(distance)
+		(self.coded || self.builder.check_add(distance)) && self.admitted.check_add(distance)
 	}
 
 	/// Records the admission of `doc_id` at public distance `distance`, keeping
@@ -1714,6 +1837,58 @@ struct DiskAnnPendingScan<'a, 'b> {
 	/// A shard outside this mask can hold no entry the legacy range supersedes, so
 	/// its scan resolves no ownership.
 	legacy_shards: u32,
+	/// Scores each candidate's vectors against the query.
+	scorer: PendingScorer,
+}
+
+/// Which distance a pending scan scores candidates with, chosen by what it ranks them against.
+#[derive(Clone, Copy)]
+enum PendingScoring {
+	/// Against graph elements a walk scored: with the walk's comparer.
+	Walk,
+	/// Against committed members scored with the index's public distance in `f64`: with that
+	/// distance.
+	Exact,
+}
+
+/// The distance a pending scan scores a candidate's vectors with.
+enum PendingScorer {
+	/// The comparer a graph walk scores the query with, accumulating in `f32`, its value converted
+	/// as a walk result's is ([`DiskAnnIndex::graph_distance`]). A record therefore scores the
+	/// same, bit for bit, while it is pending as once compaction moves it into the graph, and it
+	/// ranks on one scale with the graph's results.
+	Walk(PendingWalkScorer),
+	/// The index's public distance, computed in `f64` ([`DistanceExt::calculate_against`]).
+	Exact,
+}
+
+/// A walk's query comparer, per vector type.
+enum PendingWalkScorer {
+	F32(<f32 as VectorRepr>::QueryDistance),
+	F16(<Half as VectorRepr>::QueryDistance),
+	I8(<i8 as VectorRepr>::QueryDistance),
+	U8(<u8 as VectorRepr>::QueryDistance),
+}
+
+impl PendingWalkScorer {
+	fn new(query: &DiskAnnQuery, metric: Metric) -> Self {
+		match query {
+			DiskAnnQuery::F32(q) => Self::F32(f32::query_distance(q, metric)),
+			DiskAnnQuery::F16(q) => Self::F16(Half::query_distance(q, metric)),
+			DiskAnnQuery::I8(q) => Self::I8(i8::query_distance(q, metric)),
+			DiskAnnQuery::U8(q) => Self::U8(u8::query_distance(q, metric)),
+		}
+	}
+
+	/// The comparer's score of `vector`, which holds `dim` elements of the query's type.
+	fn score(&self, vector: &SerializedVector, dim: usize) -> Result<f32> {
+		Ok(match self {
+			Self::F32(q) => q.evaluate_similarity(f32::as_slice(vector, dim)?),
+			Self::F16(q) => q.evaluate_similarity(Half::as_slice(vector, dim)?),
+			Self::I8(q) => q.evaluate_similarity(i8::as_slice(vector, dim)?),
+			Self::U8(q) => q.evaluate_similarity(u8::as_slice(vector, dim)?),
+		})
+	}
 }
 
 /// Every pending shard the keyspace defines gets a bit in
@@ -1725,14 +1900,12 @@ impl DiskAnnIndex {
 		self.format_version
 	}
 
-	/// Creates a DiskANN index wrapper and validates the configured type/metric combination.
-	pub(crate) async fn new(
-		ikb: IndexKeyBase,
-		tb: TableId,
-		p: &DiskAnnParams,
-		cache: DiskAnnCache,
-		format_version: u16,
-	) -> Result<Self> {
+	/// Refuses the parameters no DiskANN index can serve: a vector type other than
+	/// `F32`, `F16`, `I8` and `U8`, `COSINE_NORMALIZED` over 8-bit integers, an
+	/// `I8`/`U8` dimension past what their `i32`-accumulating kernels can sum, and
+	/// a metric DiskANN does not measure. `DEFINE INDEX` checks them before its
+	/// definition commits, and opening an index checks them again.
+	pub fn check_params(p: &DiskAnnParams) -> Result<()> {
 		if !matches!(
 			p.vector_type,
 			VectorType::F32 | VectorType::F16 | VectorType::I8 | VectorType::U8
@@ -1744,7 +1917,28 @@ impl DiskAnnIndex {
 		{
 			bail!("DISKANN COSINE_NORMALIZED supports TYPE F32 and F16 only")
 		}
+		// The I8/U8 distance kernels accumulate in `i32`, which a longer vector can wrap.
+		if matches!(p.vector_type, VectorType::I8 | VectorType::U8)
+			&& usize::from(p.dimension) > NARROW_INT_KERNEL_MAX_DIM
+		{
+			bail!(
+				"DISKANN TYPE I8 and U8 support DIMENSION up to {NARROW_INT_KERNEL_MAX_DIM}, got {}",
+				p.dimension
+			)
+		}
 		distance_to_metric(&p.distance)?;
+		Ok(())
+	}
+
+	/// Creates a DiskANN index wrapper over parameters [`Self::check_params`] admits.
+	pub(crate) async fn new(
+		ikb: IndexKeyBase,
+		tb: TableId,
+		p: &DiskAnnParams,
+		cache: DiskAnnCache,
+		format_version: u16,
+	) -> Result<Self> {
+		Self::check_params(p)?;
 		let graph = DiskAnnGraph::new(ikb.clone(), tb, p, cache.clone(), format_version)?;
 		Ok(Self {
 			dim: p.dimension as usize,
@@ -1840,7 +2034,8 @@ impl DiskAnnIndex {
 	/// This guard tracks the sharded `!dw` layout only. It is deliberately separate from the legacy
 	/// `!dp` guard so a pre-change node's compactor (which clears `!dp` on `!dr`-emptiness, unaware
 	/// of `!dw`) can never mark a shard empty while a `!dw` entry still exists. Legacy `!dr`
-	/// records are not reflected here; lookup scans the legacy range unconditionally instead.
+	/// records are not reflected here: a lookup scans the legacy range instead, on an index that
+	/// may hold one (unstamped, so written by a release that wrote `!dr`).
 	///
 	/// The read is noted on the transaction ([`Transaction::note_diskann_guards_read`]): on a store
 	/// that validates every read, a guard this transaction read is covered by its own commit.
@@ -1853,9 +2048,17 @@ impl DiskAnnIndex {
 		tx: &Transaction,
 		ikb: &IndexKeyBase,
 	) -> Result<PendingStateSnapshot> {
-		let keys: Vec<_> =
-			(0..DISKANN_PENDING_STATE_SHARDS).map(|shard| ikb.new_dy_key(shard)).collect();
-		let mut states: PendingStateSnapshot = tx.get_many_key(keys, None).await?;
+		// One prefix scan over the guards rather than a point read per shard: an absent guard
+		// reads as `None` either way, and both are reads in this transaction's snapshot.
+		let mut states: PendingStateSnapshot =
+			vec![None; usize::from(DISKANN_PENDING_STATE_SHARDS)];
+		let guards: Vec<(Vec<u8>, DiskAnnPendingState)> =
+			tx.scan(ikb.new_dy_range()?, DISKANN_PENDING_STATE_SHARDS.into(), 0, None).await?;
+		for (key, state) in guards {
+			let shard = usize::from(DiskannPendingKey::decode_key(&key)?.shard);
+			ensure!(shard < states.len(), "DiskANN pending-state guard for unknown shard {shard}");
+			states[shard] = Some(state);
+		}
 		tx.note_diskann_guards_read(ikb.ns(), ikb.db(), ikb.table(), ikb.index());
 		let buffered =
 			tx.diskann_buffered_pending_guard_shards(ikb.ns(), ikb.db(), ikb.table(), ikb.index());
@@ -1874,6 +2077,37 @@ impl DiskAnnIndex {
 			}
 		}
 		Ok(states)
+	}
+
+	/// Reads the pending-state guards a lookup in `tx` merges `!dw` entries under.
+	///
+	/// On an index whose lookup trusts the pending-state summary (`!dY`, see
+	/// [`trusts_pending_summary`]), a summary that reads `Empty` or is absent proves in this
+	/// snapshot that every guard does too, so every shard reads absent without reading a guard.
+	/// The summary is armed in the transaction that arms a guard from any other state, which
+	/// commits before the entry the guard covers, so a snapshot holding the entry holds the
+	/// summary armed. A shard this transaction wrote a pending update into is armed only when it
+	/// commits, so while it has any, the guards are read with them overlaid
+	/// ([`Self::read_pending_state`]). The summary read is noted as a guard read
+	/// ([`Transaction::note_diskann_guards_read`]): on a store that validates every read, a guard
+	/// this transaction then writes under, and its summary, are covered by its own commit.
+	async fn read_lookup_pending_state(&self, tx: &Transaction) -> Result<PendingStateSnapshot> {
+		let ikb = &self.ikb;
+		if trusts_pending_summary(self.format_version)
+			&& tx.diskann_buffered_pending_guard_shards(
+				ikb.ns(),
+				ikb.db(),
+				ikb.table(),
+				ikb.index(),
+			) == 0
+		{
+			let summary = tx.get_key(&ikb.new_dy_summary_key(), None).await?;
+			tx.note_diskann_guards_read(ikb.ns(), ikb.db(), ikb.table(), ikb.index());
+			if summary.is_none_or(|summary| summary.kind == DiskAnnPendingStateKind::Empty) {
+				return Ok(vec![None; usize::from(DISKANN_PENDING_STATE_SHARDS)]);
+			}
+		}
+		Self::read_pending_state(tx, ikb).await
 	}
 
 	/// Covers the sharded `!dy` pending-state guard of a `!dw` update this transaction wrote.
@@ -1925,19 +2159,25 @@ impl DiskAnnIndex {
 		// shard at a time. The shard matches the `!dy` guard shard this write bumps below.
 		let shard = Self::pending_state_shard(id);
 		let key = self.ikb.new_dw_key(shard, id);
-		// Always reclaim any legacy `!dr` entry for this record, even when a sharded `!dw` entry
-		// already exists. A mixed-version cluster can leave both layouts for one record (an older
-		// node writes `!dr` after a newer node wrote `!dw`); if the stale legacy entry survived,
-		// lookup — which scans the legacy range last — would let it overwrite the newer vectors.
-		// The two layouts always chain (each write's `old_vectors` is the previous value), so fold
-		// them into a single `!dw` entry that keeps the chain head's `old_vectors`.
+		// On an index that can hold the legacy `!dr` range (see
+		// `may_hold_legacy_vector_pending`), reclaim any legacy entry for this record, even when a
+		// sharded `!dw` entry already exists. A mixed-version cluster can leave both layouts for
+		// one record (a 3.1 node writes `!dr` after a newer node wrote `!dw`); if the stale legacy
+		// entry survived, lookup — which scans the legacy range last — would let it overwrite the
+		// newer vectors. The two layouts always chain (each write's `old_vectors` is the previous
+		// value), so fold them into a single `!dw` entry that keeps the chain head's
+		// `old_vectors`. A stamped index has no legacy range, so its writes skip the read.
 		//
 		// The entry's key spells `id` without its numbers' kinds, so it may hold
 		// other records. On an index stamped for it, a write folds into its own
 		// record's state, kept apart from the others'. Only a release predating
 		// that stamp writes `!dr`, so the dual-layout arms below read an entry
 		// naming one record, and keep any others it holds.
-		let legacy = Self::take_legacy_pending(&tx, &self.ikb, id).await?;
+		let legacy = if may_hold_legacy_vector_pending(self.format_version) {
+			Self::take_legacy_pending(&tx, &self.ikb, id).await?
+		} else {
+			None
+		};
 		let members = keeps_pending_members(self.format_version);
 		let mut pending = match (tx.get_key(&key, None).await?, legacy) {
 			(Some(mut sharded), None)
@@ -2087,6 +2327,10 @@ impl DiskAnnIndex {
 		let tx = env.tx();
 		let generation = read_compaction_generation(&tx, &ikb.new_dg_key()).await?;
 		let pending_state = Self::read_pending_state(&tx, ikb).await?;
+		let summary_armed = tx
+			.get_key(&ikb.new_dy_summary_key(), None)
+			.await?
+			.is_some_and(|summary| summary.kind != DiskAnnPendingStateKind::Empty);
 		let mut builder = PendingPlanBuilder::new(generation, pending_state.clone());
 		let mut count = 0;
 		// `!dw` keys folded into phase 1 next to their legacy `!dr` counterpart, so phase 2 skips
@@ -2114,7 +2358,7 @@ impl DiskAnnIndex {
 			// entries (and the expensive full-range legacy lookup scans this change exists to
 			// drain) until the next write happens to re-enqueue the index.
 			builder.has_more = true;
-			return Ok(builder.into_plan(Vec::new()));
+			return Ok(builder.into_plan(Vec::new(), summary_armed));
 		}
 		// Phase 2: sharded `!dw` per shard that may hold data. A write commits its `!dw` key only
 		// once its shard's `!dy` guard reads `NonEmpty`, and no guard is stepped to `Empty` over
@@ -2174,7 +2418,7 @@ impl DiskAnnIndex {
 			}
 			cleared_shards.push(shard);
 		}
-		Ok(builder.into_plan(cleared_shards))
+		Ok(builder.into_plan(cleared_shards, summary_armed))
 	}
 
 	/// Captures the legacy `!dr` range for phase 1 of the dual-read migration, folding each
@@ -2384,12 +2628,14 @@ impl DiskAnnIndex {
 		env: &dyn IndexEnv,
 		plan: DiskAnnCompactionPlan,
 	) -> Result<CompactionApply> {
+		let summary_clearable = plan.summary_clearable();
 		let DiskAnnCompactionPlan {
 			generation,
 			pending_state: _,
 			captured_keys,
 			pending,
 			cleared_shards,
+			summary_armed: _,
 			has_more: _,
 		} = plan;
 		let tx = env.tx();
@@ -2397,11 +2643,13 @@ impl DiskAnnIndex {
 		// transaction never writes a guard a writer covers.
 		if captured_keys.is_empty() {
 			cancel_silently(&tx).await;
-			return Ok(if self.step_pending_guards(&tx, &cleared_shards).await? {
-				CompactionApply::Applied
-			} else {
-				CompactionApply::Empty
-			});
+			return Ok(
+				if self.step_pending_guards(&tx, &cleared_shards, summary_clearable).await? {
+					CompactionApply::Applied
+				} else {
+					CompactionApply::Empty
+				},
+			);
 		}
 		// The write transaction belongs to this call from here: it is committed or cancelled inline
 		// on every path, and the guard covers an early `?` or a panic by cancelling it in a task of
@@ -2489,7 +2737,7 @@ impl DiskAnnIndex {
 		lock.committed(committed).await;
 		// The apply has committed, so a failed step does not undo it: the guard is left as it was,
 		// which may only make lookups scan a drained shard, and the next pass steps it.
-		if let Err(e) = self.step_pending_guards(&tx, &cleared_shards).await {
+		if let Err(e) = self.step_pending_guards(&tx, &cleared_shards, summary_clearable).await {
 			tracing::warn!(
 				target: "surrealdb::idx::diskann",
 				"failed to step the DiskANN pending-state guards after a compaction: {e}"
@@ -2762,14 +3010,21 @@ impl DiskAnnIndex {
 	}
 
 	/// Steps the drained shards' guards to `Empty`, in a transaction of their own under the index's
-	/// guard fence. On a store other datastores write to, a shard under a writer lease that still
-	/// holds is skipped, and leases that no longer hold are retired with the step. See
-	/// `Transaction::step_diskann_pending_guards`.
+	/// guard fence, and the pending-state summary with them once every guard reads `Empty`. On a
+	/// store other datastores write to, a shard under a writer lease that still holds is skipped,
+	/// and leases that no longer hold are retired with the step. See
+	/// `Transaction::step_diskann_pending_guards`. With `summary_clearable` the step runs for the
+	/// summary even with no shard to step.
 	///
 	/// Boxed because the step holds a transaction of its own, which would otherwise grow the
 	/// compaction's future by its size.
-	async fn step_pending_guards(&self, tx: &Transaction, shards: &[u16]) -> Result<bool> {
-		if shards.is_empty() {
+	async fn step_pending_guards(
+		&self,
+		tx: &Transaction,
+		shards: &[u16],
+		summary_clearable: bool,
+	) -> Result<bool> {
+		if shards.is_empty() && !summary_clearable {
 			return Ok(false);
 		}
 		Box::pin(tx.step_diskann_pending_guards(
@@ -2778,6 +3033,7 @@ impl DiskAnnIndex {
 			self.ikb.table(),
 			self.ikb.index(),
 			shards,
+			summary_clearable,
 		))
 		.await
 	}
@@ -3018,7 +3274,7 @@ impl DiskAnnIndex {
 		cond_filter: Option<KnnCondFilter<'_>>,
 		allow_list: Option<&RoaringTreemap>,
 	) -> Result<VecDeque<KnnIteratorResult>> {
-		let pending_state = Self::read_pending_state(&env.tx(), &self.ikb).await?;
+		let pending_state = self.read_lookup_pending_state(&env.tx()).await?;
 		let compaction_generation =
 			read_compaction_generation(&env.tx(), &self.ikb.new_dg_key()).await?;
 		let mut filter = cond_filter.map(|f| {
@@ -3047,12 +3303,19 @@ impl DiskAnnIndex {
 			self.unlocked.unlocked_context(env.tx(), compaction_generation),
 		);
 		let mut builder = KnnResultBuilder::new(k);
-		// `pending_state` reflects only the sharded `!dy` guard; legacy `!dr` records are not
-		// tracked there, so we always scan pendings. `search_pendings` sweeps the legacy `!dr`
-		// range unconditionally and the per-shard `!dw` ranges of the non-empty `!dy` shards;
-		// when nothing is pending the cost is a single empty legacy range probe.
+		// `search_pendings` sweeps the legacy `!dr` range of an index that can hold one and the
+		// `!dw` range of every shard `pending_state` reads armed. Pending records are scored with
+		// the comparer the walk ranks graph elements with, so both tiers share one scale.
 		let pending_docs = self
-			.search_pendings(&ctx, &search, &mut filter, allow_list, &mut builder, &pending_state)
+			.search_pendings(
+				&ctx,
+				&search,
+				&mut filter,
+				allow_list,
+				&mut builder,
+				&pending_state,
+				PendingScoring::Walk,
+			)
 			.await?;
 		{
 			// The walk reads the graph through a context built under the guard
@@ -3138,8 +3401,8 @@ impl DiskAnnIndex {
 	/// Every member is scored: pending (not yet compacted) vectors by the same
 	/// pending scan the graph search runs, and committed vectors through the
 	/// doc-ID → elements mapping, with every doc-ID the pending queue names
-	/// suppressed from the committed side. Distances use the index's public
-	/// distance semantics, as pending scoring does. No graph is walked and no
+	/// suppressed from the committed side. Both sides are scored with the
+	/// index's public distance, computed in `f64`. No graph is walked and no
 	/// record is fetched; only the final `k` doc-IDs are resolved to record IDs.
 	/// A document indexing several vectors takes one slot, at its nearest
 	/// vector.
@@ -3168,7 +3431,7 @@ impl DiskAnnIndex {
 			return Ok(Some(VecDeque::new()));
 		}
 		let tx = env.tx();
-		let pending_state = Self::read_pending_state(&tx, &self.ikb).await?;
+		let pending_state = self.read_lookup_pending_state(&tx).await?;
 		let compaction_generation = read_compaction_generation(&tx, &self.ikb.new_dg_key()).await?;
 		let search = DiskAnnSearch::new(vector, k, k)?;
 		// The pending scan and the result resolution read only the transaction,
@@ -3188,6 +3451,7 @@ impl DiskAnnIndex {
 				Some(allow_list),
 				&mut builder,
 				&pending_state,
+				PendingScoring::Exact,
 			)
 			.await?;
 		// The members the pendings did not already score: the allow-list itself
@@ -3288,7 +3552,24 @@ impl DiskAnnIndex {
 		let mut l = state.search.l;
 		let retry_ceiling = l.saturating_mul(OVERQUERY_CEILING_FACTOR);
 		let mut admitted: HashSet<u64> = HashSet::default();
+		// A coded walk ranks its list on 8-bit codes, close enough to exact that
+		// the k nearest exactly lie among the 2k nearest coded: only those are
+		// read and ranked exactly, and the depth doubles with each wider retry,
+		// so a pass that names fewer than k records ranks further next time.
+		// The depth has one more place per pending document, whose element the
+		// graph still holds but the admission below suppresses. A gated
+		// post-filter ranks the whole list, since a selective allow-list may
+		// admit nothing among the nearest, and so does the last retry, which
+		// nothing follows.
+		let coded = state.graph.coded_query(ctx, &state.search.query);
+		let base_depth = state.search.k.saturating_mul(2);
+		let pending = state.pending_docs.as_ref().map_or(0, |p| p.len() as usize);
 		loop {
+			let rerank = (coded && state.allow_list.is_none() && l < retry_ceiling).then(|| {
+				base_depth
+					.saturating_mul((l / state.search.l.max(1)).max(1))
+					.saturating_add(pending)
+			});
 			// A truthy filter (a SELECT permission or a residual condition) is
 			// applied inside the walk, which returns only admitted elements; the
 			// pass below then admits their documents from the filter's verdict
@@ -3303,7 +3584,14 @@ impl DiskAnnIndex {
 						pending_docs: state.pending_docs.as_ref(),
 						allow_list: state.allow_list,
 						builder: state.builder,
-						admitted: KnnResultBuilder::new(state.search.k),
+						coded,
+						// Admission on coded distances keeps 2k, so jitter at the k-th
+						// place cannot turn away an element exactly within the top k.
+						admitted: KnnResultBuilder::new(if coded {
+							base_depth
+						} else {
+							state.search.k
+						}),
 						docs: HashMap::default(),
 					};
 					let walk = state
@@ -3313,17 +3601,20 @@ impl DiskAnnIndex {
 							&state.search.query,
 							state.search.k,
 							l,
+							rerank,
 							&mut classifier,
 						)
 						.await?;
 					(walk.results, walk.exhausted, Some(classifier.docs))
 				}
 				None => {
-					let results =
-						state.graph.search(ctx, &state.search.query, state.search.k, l).await?;
-					// Fewer results than requested means the traversal ran dry: a
-					// wider list cannot surface anything new.
-					let exhausted = results.len() < l;
+					let (results, walked) = state
+						.graph
+						.search(ctx, &state.search.query, state.search.k, l, rerank)
+						.await?;
+					// A search list shorter than requested means the traversal ran
+					// dry: a wider list cannot surface anything new.
+					let exhausted = walked < l;
 					(results, exhausted, None)
 				}
 			};
@@ -3519,6 +3810,11 @@ impl DiskAnnIndex {
 	/// outside the migration window: once on the legacy range holding anything at
 	/// all, and once on the shard being one that a legacy record actually hashes
 	/// to.
+	///
+	/// `scoring` picks the distance candidates are scored with
+	/// ([`PendingScoring`]): the one the results they are ranked against were
+	/// scored with.
+	#[expect(clippy::too_many_arguments)]
 	async fn search_pendings(
 		&self,
 		ctx: &DiskAnnContext<'_>,
@@ -3527,7 +3823,15 @@ impl DiskAnnIndex {
 		allow_list: Option<&RoaringTreemap>,
 		builder: &mut KnnResultBuilder,
 		pending_state: &[Option<DiskAnnPendingState>],
+		scoring: PendingScoring,
 	) -> Result<Option<RoaringTreemap>> {
+		let scorer = match scoring {
+			PendingScoring::Walk => PendingScorer::Walk(PendingWalkScorer::new(
+				&search.query,
+				distance_to_metric(&self.distance)?,
+			)),
+			PendingScoring::Exact => PendingScorer::Exact,
+		};
 		let mut scan = DiskAnnPendingScan {
 			search,
 			filter,
@@ -3545,12 +3849,15 @@ impl DiskAnnIndex {
 			),
 			suppressed: RoaringTreemap::new(),
 			legacy_shards: 0,
+			scorer,
 		};
-		// Phase 1: the legacy range, which owns every record it holds. Nothing
-		// writes it, so on an index that has drained it this is a single empty
-		// range probe and `legacy_shards` stays clear.
-		let rng = self.ikb.new_dr_range()?;
-		self.scan_pending_range(ctx, &mut scan, rng, PendingLayout::Legacy, false).await?;
+		// Phase 1: the legacy range, which owns every record it holds. Only an index
+		// stamped before format versions can hold it, and nothing writes it today, so
+		// on any other index it is skipped and `legacy_shards` stays clear.
+		if may_hold_legacy_vector_pending(self.format_version) {
+			let rng = self.ikb.new_dr_range()?;
+			self.scan_pending_range(ctx, &mut scan, rng, PendingLayout::Legacy, false).await?;
+		}
 		// Phase 2: the sharded ranges of every shard that may hold data. A write
 		// commits its `!dw` key only once its shard's `!dy` guard reads `NonEmpty`,
 		// and no guard is stepped to `Empty` over a committed entry
@@ -3807,12 +4114,24 @@ impl DiskAnnIndex {
 			if truthy {
 				// A document indexing several vectors takes one slot, at its
 				// nearest, as the exact tier offers a compacted one.
-				let nearest = vectors
-					.into_iter()
-					.map(|vector| {
-						self.distance.calculate_against(&scan.search.pt, &Vector::from(vector))
-					})
-					.min_by(f64::total_cmp);
+				let mut nearest: Option<f64> = None;
+				for vector in vectors {
+					let d = match &scan.scorer {
+						PendingScorer::Walk(scorer) => {
+							self.graph_distance(f64::from(scorer.score(&vector, self.dim)?))
+						}
+						PendingScorer::Exact => {
+							self.distance.calculate_against(&scan.search.pt, &Vector::from(vector))
+						}
+					};
+					nearest = Some(nearest.map_or(d, |n| {
+						if d.total_cmp(&n).is_lt() {
+							d
+						} else {
+							n
+						}
+					}));
+				}
 				if let Some(d) = nearest
 					&& scan.builder.check_add(d)
 					&& let Some(evicted_id) = scan.builder.add_vector_id_result(d, id.clone())
@@ -3908,6 +4227,7 @@ mod tests {
 			captured_keys,
 			pending: Vec::new(),
 			cleared_shards: Vec::new(),
+			summary_armed: false,
 			has_more: false,
 		}
 	}
@@ -4004,6 +4324,7 @@ mod tests {
 		k: usize,
 		allow_list: Option<&RoaringTreemap>,
 	) -> Result<Vec<i64>> {
+		assert_summary_covers_guards_of(ds, &index.ikb).await?;
 		let ctx = new_ctx(ds, TransactionType::Read).await;
 		let query = f32_query(values);
 		let res = index.knn_search(&ctx, &query, k, 8, None, allow_list).await?;
@@ -4027,6 +4348,18 @@ mod tests {
 		cache: DiskAnnCache,
 	) -> Result<DiskAnnIndex> {
 		DiskAnnIndex::new(ikb, table_id, params, cache, DOC_IDS_FORMAT_VERSION).await
+	}
+
+	/// An index with no stored format version: one an earlier release defined and nothing has
+	/// rebuilt. Only such an index can hold pending updates in the legacy `!dr` range, so the
+	/// tests of how a lookup reads that range build on it.
+	async fn new_unstamped_index(
+		ikb: IndexKeyBase,
+		table_id: TableId,
+		params: &DiskAnnParams,
+		cache: DiskAnnCache,
+	) -> Result<DiskAnnIndex> {
+		DiskAnnIndex::new(ikb, table_id, params, cache, 0).await
 	}
 
 	/// #548: the DiskANN graph tier post-filters `graph.search`'s top-`l`
@@ -4236,7 +4569,9 @@ mod tests {
 		let ctx = new_ctx(ds, TransactionType::Write).await;
 		// `apply_compaction` commits the tx itself when it reports `Applied` and
 		// cancels it otherwise, so the test must not double-commit.
-		Ok(index.apply_compaction(&ctx, plan).await?.applied())
+		let applied = index.apply_compaction(&ctx, plan).await?.applied();
+		assert_summary_covers_guards_of(ds, ikb).await?;
+		Ok(applied)
 	}
 
 	/// Drains every pending update through prepare/apply until a prepared plan
@@ -4276,6 +4611,47 @@ mod tests {
 		bail!("DiskANN compaction did not drain within {MAX_PASSES} passes")
 	}
 
+	/// Asserts that every element `tx` sees whose index keeps codes has an `!da` code equal to its
+	/// vector's encoding, and that no code outlives its element. Returns the number of codes.
+	async fn assert_codes_match(tx: &Transaction, ikb: &IndexKeyBase) -> Result<usize> {
+		use crate::key::schema::{DiskannElementCodeKey, DiskannElementKey};
+		use crate::trees::diskann::DiskAnnElementCode;
+		async fn read<V>(
+			tx: &Transaction,
+			range: crate::key::TypedRange<V>,
+		) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+			let mut cursor = tx.open_vals_cursor(range, Direction::Forward, 0, None).await?;
+			let mut out = Vec::new();
+			loop {
+				let batch = cursor.next_batch(1000).await?;
+				if batch.is_empty() {
+					return Ok(out);
+				}
+				out.extend(batch.iter().map(|(k, v)| (k.to_vec(), v.to_vec())));
+			}
+		}
+		let mut elements = HashMap::default();
+		for (key, value) in read(tx, ikb.new_de_range()?).await? {
+			let id = DiskannElementKey::decode_key(&key)?.element_id;
+			elements.insert(id, DiskAnnElement::kv_decode_value(&value, ())?);
+		}
+		let codes = read(tx, ikb.new_da_range()?).await?;
+		for (key, value) in &codes {
+			let id = DiskannElementCodeKey::decode_key(key)?.element_id;
+			let code = DiskAnnElementCode::kv_decode_value(value, ())?;
+			let element =
+				elements.get(&id).unwrap_or_else(|| panic!("`!da` outlives element {id}"));
+			let SerializedVector::F32(vector) = &element.vector else {
+				panic!("element {id} holds a vector type without codes");
+			};
+			assert_eq!(code, DiskAnnElementCode::encode(vector), "element {id}: stale code");
+		}
+		if !codes.is_empty() {
+			assert_eq!(codes.len(), elements.len(), "every element of a coded index has a code");
+		}
+		Ok(codes.len())
+	}
+
 	/// The doc set `index` has cached for `element_id`, as a reader at `generation` is served it.
 	async fn cached_doc_ids(
 		index: &DiskAnnIndex,
@@ -4287,7 +4663,7 @@ mod tests {
 		let view = index.graph.read().await.reader_view(generation);
 		cache
 			.get_doc_set(
-				(ikb.ns(), ikb.db(), TableId(4), ikb.index(), DOC_IDS_FORMAT_VERSION),
+				(ikb.ns(), ikb.db(), TableId(4), ikb.index(), index.format_version),
 				element_id,
 				&view,
 			)
@@ -4387,6 +4763,29 @@ mod tests {
 		Ok(())
 	}
 
+	/// The I8/U8 distance kernels accumulate in `i32`, so those types are refused past the
+	/// dimension a sum of squared component differences (at most 255² each) still fits in.
+	#[tokio::test]
+	async fn diskann_rejects_integer_types_past_the_i32_range() -> Result<()> {
+		let max = u16::try_from(NARROW_INT_KERNEL_MAX_DIM)?;
+		for vt in [VectorType::I8, VectorType::U8] {
+			for dist in [Distance::Euclidean, Distance::InnerProduct] {
+				let at_limit = wide_params(max, vt, dist.clone());
+				assert!(new_index(ikb(), TableId(4), &at_limit, cache()).await.is_ok(), "{vt:?}");
+				let past = wide_params(max + 1, vt, dist);
+				let err = new_index(ikb(), TableId(4), &past, cache()).await.err();
+				assert!(
+					err.is_some_and(|e| e.to_string().contains("DIMENSION up to")),
+					"{vt:?} at {} must be refused",
+					max + 1
+				);
+			}
+		}
+		let wide_float = wide_params(max + 1, VectorType::F32, Distance::Euclidean);
+		assert!(new_index(ikb(), TableId(4), &wide_float, cache()).await.is_ok());
+		Ok(())
+	}
+
 	#[tokio::test]
 	async fn diskann_graph_distance_matches_public_euclidean_distance() -> Result<()> {
 		let index =
@@ -4396,17 +4795,30 @@ mod tests {
 		Ok(())
 	}
 
+	/// A doc set a query cached is evicted by the compaction that changes it,
+	/// and the next query caches the new one, whether the index resolves doc
+	/// sets through its vectors or, on format 6, by element id.
 	#[tokio::test]
 	async fn diskann_doc_set_cache_evicted_and_refilled_for_duplicate_vector_updates() -> Result<()>
 	{
+		for format_version in [DOC_IDS_FORMAT_VERSION, crate::catalog::INDEX_FORMAT_VERSION] {
+			doc_set_cache_evicted_and_refilled_for_duplicate_vector_updates(format_version).await?;
+		}
+		Ok(())
+	}
+
+	async fn doc_set_cache_evicted_and_refilled_for_duplicate_vector_updates(
+		format_version: u16,
+	) -> Result<()> {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
 		let cache = cache();
-		let index = new_index(
+		let index = DiskAnnIndex::new(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
 			cache.clone(),
+			format_version,
 		)
 		.await?;
 		let first_id = RecordIdKey::Number(1);
@@ -4863,14 +5275,14 @@ mod tests {
 			"page and batch together stay inside the residency budget: {} bytes",
 			stats.peak_resident_bytes()
 		);
-		// The empty legacy range costs one page. The one populated shard costs a
-		// probe page, pages of the observed byte-derived size for everything the
-		// probe left, and the empty page that ends it.
+		// A stamped index has no legacy range to read. The one populated shard
+		// costs a probe page, pages of the observed byte-derived size for
+		// everything the probe left, and the empty page that ends it.
 		let after_probe = PENDING as usize - PENDING_PROBE_ROWS as usize;
 		let shard_pages = 1 + after_probe.div_ceil(stats.peak_page_entries()) + 1;
 		assert_eq!(
 			stats.pages(),
-			1 + shard_pages,
+			shard_pages,
 			"every page after the probe is the size the byte share allows"
 		);
 		Ok(())
@@ -4985,11 +5397,11 @@ mod tests {
 			"page and batch stay inside the residency target: {} bytes",
 			stats.peak_resident_bytes()
 		);
-		// The empty legacy range costs one page. The populated shard costs the
-		// probe, capped pages for the wide tail, and its empty page.
+		// A stamped index has no legacy range to read. The populated shard costs
+		// the probe, capped pages for the wide tail, and its empty page.
 		assert_eq!(
 			stats.pages(),
-			1 + 1 + (WIDE as usize).div_ceil(PENDING_MAX_ROWS as usize) + 1,
+			1 + (WIDE as usize).div_ceil(PENDING_MAX_ROWS as usize) + 1,
 			"the widening tail stays split by the conservative row cap"
 		);
 		Ok(())
@@ -5169,7 +5581,7 @@ mod tests {
 
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
-		let index = new_index(
+		let index = new_unstamped_index(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
@@ -5387,7 +5799,7 @@ mod tests {
 	async fn diskann_legacy_pending_supersedes_sharded_entry() -> Result<()> {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
-		let index = new_index(
+		let index = new_unstamped_index(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
@@ -5447,7 +5859,7 @@ mod tests {
 	async fn diskann_legacy_pending_delete_cancels_sharded_entry() -> Result<()> {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
-		let index = new_index(
+		let index = new_unstamped_index(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
@@ -5505,7 +5917,7 @@ mod tests {
 	async fn diskann_pending_scan_probes_only_shards_a_legacy_record_touches() -> Result<()> {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
-		let index = new_index(
+		let index = new_unstamped_index(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
@@ -7105,6 +7517,516 @@ mod tests {
 		Ok(())
 	}
 
+	/// The kind of the index's stored pending-state summary (`!dY`), as `ds` reads it.
+	async fn stored_summary(ds: &TestIndexStore) -> Result<Option<DiskAnnPendingStateKind>> {
+		let ctx = new_ctx(ds, TransactionType::Read).await;
+		let summary = ctx.tx().get_key(&ikb().new_dy_summary_key(), None).await?;
+		ctx.tx().cancel().await?;
+		Ok(summary.map(|summary| summary.kind))
+	}
+
+	/// Asserts the summary's invariant in one snapshot of `ds`: while any guard of the index reads
+	/// other than `Empty`, the summary reads `NonEmpty`.
+	async fn assert_summary_covers_guards(ds: &TestIndexStore) -> Result<()> {
+		assert_summary_covers_guards_of(ds, &ikb()).await
+	}
+
+	/// [`assert_summary_covers_guards`] for the index `ikb` names.
+	async fn assert_summary_covers_guards_of(
+		ds: &TestIndexStore,
+		ikb: &IndexKeyBase,
+	) -> Result<()> {
+		let ctx = new_ctx(ds, TransactionType::Read).await;
+		let tx = ctx.tx();
+		let summary = tx.get_key(&ikb.new_dy_summary_key(), None).await?;
+		let guards = diskann_pending_states(&tx, ikb).await?;
+		tx.cancel().await?;
+		if guards.iter().flatten().any(|guard| guard.kind != DiskAnnPendingStateKind::Empty) {
+			assert_eq!(
+				summary.map(|summary| summary.kind),
+				Some(DiskAnnPendingStateKind::NonEmpty),
+				"an armed guard must be covered by an armed summary: {guards:?}"
+			);
+		}
+		Ok(())
+	}
+
+	/// Two nodes over one store, each with a handle on one index stamped with the format whose
+	/// lookup trusts the pending-state summary.
+	async fn summary_lease_nodes()
+	-> Result<(TestIndexStore, DiskAnnIndex, TestIndexStore, DiskAnnIndex)> {
+		let base = TestIndexStore::new().await;
+		let (a, b) = (base.shared_node(), base.shared_node());
+		let p = params(VectorType::F32, Distance::Euclidean);
+		let index_a = new_summary_index(&p).await?;
+		let index_b = new_summary_index(&p).await?;
+		Ok((a, index_a, b, index_b))
+	}
+
+	/// An index stamped with the format whose lookup trusts the pending-state summary.
+	async fn new_summary_index(p: &DiskAnnParams) -> Result<DiskAnnIndex> {
+		assert!(trusts_pending_summary(crate::catalog::INDEX_FORMAT_VERSION));
+		DiskAnnIndex::new(ikb(), TableId(4), p, cache(), crate::catalog::INDEX_FORMAT_VERSION).await
+	}
+
+	/// A node arms a shard while another reads: the reader's snapshot holds the summary armed
+	/// once the arming has committed, before the entry has, and sees the entry only once it has
+	/// committed under the armed summary. A snapshot taken before the arming reads the summary
+	/// absent and skips every shard, and holds no entry either.
+	#[tokio::test]
+	async fn diskann_summary_is_armed_before_another_node_sees_the_entry() -> Result<()> {
+		let (a, index_a, b, index_b) = summary_lease_nodes().await?;
+		let query = [1.0, 0.0, 0.0, 0.0];
+		let before = new_ctx(&b, TransactionType::Read).await;
+		assert_eq!(before.tx().get_key(&ikb().new_dy_summary_key(), None).await?, None);
+		let writer = new_ctx(&a, TransactionType::Write).await;
+		index_a.index(&writer, &RecordIdKey::Number(1), None, Some(f32_content(&query))).await?;
+		let b_hook = b.clone();
+		a.before_next_commit(Box::new(move || {
+			Box::pin(async move {
+				let index_hook = new_summary_index(&params(VectorType::F32, Distance::Euclidean))
+					.await
+					.expect("node B's handle");
+				assert_eq!(
+					stored_summary(&b_hook).await.expect("reading the summary"),
+					Some(DiskAnnPendingStateKind::NonEmpty),
+					"the covering arms the summary before the entry commits"
+				);
+				assert!(
+					knn_keys_with_allow(&index_hook, &b_hook, &query, 1, None)
+						.await
+						.expect("node B's lookup")
+						.is_empty(),
+					"the entry has not committed"
+				);
+			})
+		}));
+		writer.tx().commit().await?;
+		let found = index_b.knn_search(&before, &f32_query(&query), 1, 8, None, None).await?;
+		before.tx().cancel().await?;
+		assert!(found.is_empty(), "a snapshot from before the arming holds no entry");
+		assert_eq!(knn_keys_with_allow(&index_b, &b, &query, 1, None).await?, vec![1]);
+		assert_summary_covers_guards(&b).await?;
+		Ok(())
+	}
+
+	/// Compaction clears the summary with the step that empties the last armed shard, and not
+	/// before: a shard still under another node's writer lease keeps it armed. A lookup over the
+	/// cleared summary still answers from the graph.
+	#[tokio::test]
+	async fn diskann_summary_is_cleared_with_the_last_armed_shard() -> Result<()> {
+		let (a, index_a, b, index_b) = summary_lease_nodes().await?;
+		let (first, second) = (
+			DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(1)),
+			DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(2)),
+		);
+		assert_ne!(first, second);
+		write_one(&index_a, &a, 1).await?;
+		write_one(&index_b, &b, 2).await?;
+		assert_eq!(stored_summary(&a).await?, Some(DiskAnnPendingStateKind::NonEmpty));
+		// Node A lets its lease go; node B's still holds over the second shard.
+		assert_eq!(a.release_writer_leases().await?, 1);
+		for _ in 0..3 {
+			compact_once(&index_a, &a, &ikb()).await?;
+		}
+		assert_eq!(stored_guard(&a, first).await?, Some(DiskAnnPendingStateKind::Empty));
+		assert_eq!(stored_guard(&a, second).await?, Some(DiskAnnPendingStateKind::NonEmpty));
+		assert_eq!(
+			stored_summary(&a).await?,
+			Some(DiskAnnPendingStateKind::NonEmpty),
+			"a foreign lease keeps its shard armed, and the summary with it"
+		);
+		assert_eq!(b.release_writer_leases().await?, 1);
+		compact_once(&index_a, &a, &ikb()).await?;
+		assert_eq!(stored_guard(&a, second).await?, Some(DiskAnnPendingStateKind::Empty));
+		assert_eq!(stored_summary(&a).await?, Some(DiskAnnPendingStateKind::Empty));
+		assert_eq!(
+			knn_keys_with_allow(&index_b, &b, &[2.0, 0.0, 0.0, 0.0], 2, None).await?,
+			vec![1, 2],
+			"the graph answers once nothing is pending"
+		);
+		assert_eq!(a.guard_repairs() + b.guard_repairs(), 0);
+		Ok(())
+	}
+
+	/// A node's step that empties the last armed shard races another node's covering of a shard
+	/// it read `Empty`: the covering commits inside the step, after the step's snapshot. The
+	/// covering writes the summary whatever it reads, so the step's conditional clear of it
+	/// fails, and the summary ends armed over the entry.
+	#[tokio::test]
+	async fn diskann_summary_cleared_while_another_node_arms_a_shard_ends_armed() -> Result<()> {
+		let (a, index_a, b, index_b) = summary_lease_nodes().await?;
+		let second = DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(2));
+		write_one(&index_a, &a, 1).await?;
+		// Node B arms the second shard once, so the race below finds its guard `Empty` rather
+		// than absent, and its own lease gone.
+		write_one(&index_b, &b, 2).await?;
+		assert_eq!(b.release_writer_leases().await?, 1);
+		assert_eq!(a.release_writer_leases().await?, 1);
+		compact_all(&index_a, &a, &ikb()).await?;
+		assert_eq!(stored_summary(&a).await?, Some(DiskAnnPendingStateKind::Empty));
+		write_one(&index_a, &a, 33).await?;
+		assert_eq!(a.release_writer_leases().await?, 1);
+		assert_eq!(stored_guard(&a, second).await?, Some(DiskAnnPendingStateKind::Empty));
+		// Node A's step reads the second shard `Empty` and the summary armed, then node B arms
+		// the second shard before the step commits.
+		let b_hook = b.clone();
+		a.before_next_guard_step_commit(Box::new(move || {
+			Box::pin(async move {
+				let index_hook = new_summary_index(&params(VectorType::F32, Distance::Euclidean))
+					.await
+					.expect("node B's handle");
+				write_one(&index_hook, &b_hook, 34).await.expect("node B's write");
+			})
+		}));
+		while compact_once(&index_a, &a, &ikb()).await? {}
+		assert_eq!(stored_guard(&a, second).await?, Some(DiskAnnPendingStateKind::NonEmpty));
+		assert_eq!(
+			stored_summary(&a).await?,
+			Some(DiskAnnPendingStateKind::NonEmpty),
+			"the step must not clear the summary over the shard node B armed"
+		);
+		assert_eq!(
+			knn_keys_with_allow(&index_a, &a, &[34.0, 0.0, 0.0, 0.0], 1, None).await?,
+			vec![34]
+		);
+		assert_summary_covers_guards(&a).await?;
+		Ok(())
+	}
+
+	/// A node repairs a guard left `Empty` over an entry while another node's step, which read
+	/// that guard `Empty` and steps the last armed shard, clears the summary: the repair lands
+	/// inside the step, after its snapshot. The repair arms no lease, yet on a store other nodes
+	/// write it writes the summary whatever it reads, so the step's conditional clear fails and
+	/// the summary ends armed over the repaired guard.
+	#[tokio::test]
+	async fn diskann_summary_cleared_while_another_node_repairs_a_guard_ends_armed() -> Result<()> {
+		let (a, _index_a, b, index_b) = summary_lease_nodes().await?;
+		let ikb = ikb();
+		let (orphan, armed) = (
+			DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(1)),
+			DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(2)),
+		);
+		assert_ne!(orphan, armed);
+		// An entry under an `Empty` guard, and another shard armed over nothing, with the
+		// summary armed for it.
+		{
+			let ctx = new_ctx(&a, TransactionType::Write).await;
+			let tx = ctx.tx();
+			let id = RecordIdKey::Number(1);
+			tx.set_key(&dw_key(&ikb, &id), &f32_pending(&[1.0, 0.0, 0.0, 0.0])).await?;
+			tx.set_key(
+				&ikb.new_dy_key(orphan),
+				&diskann_pending_state(DiskAnnPendingStateKind::Empty),
+			)
+			.await?;
+			tx.set_key(
+				&ikb.new_dy_key(armed),
+				&diskann_pending_state(DiskAnnPendingStateKind::NonEmpty),
+			)
+			.await?;
+			tx.set_key(
+				&ikb.new_dy_summary_key(),
+				&diskann_pending_state(DiskAnnPendingStateKind::NonEmpty),
+			)
+			.await?;
+			tx.commit().await?;
+		}
+		// Node B's step reads the orphaned shard `Empty` and steps the armed one; node A repairs
+		// the orphaned shard before the step commits.
+		let (a_hook, ikb_hook) = (a.clone(), ikb.clone());
+		b.before_next_guard_step_commit(Box::new(move || {
+			Box::pin(async move {
+				let ikb = ikb_hook;
+				let tx = a_hook.transaction(TransactionType::Write).await.expect("node A's tx");
+				tx.repair_diskann_pending_guards(
+					ikb.ns(),
+					ikb.db(),
+					ikb.table(),
+					ikb.index(),
+					&[orphan],
+				)
+				.await
+				.expect("node A's repair");
+				tx.cancel().await.expect("cancelling node A's tx");
+			})
+		}));
+		{
+			let tx = b.transaction(TransactionType::Write).await?;
+			tx.step_diskann_pending_guards(
+				ikb.ns(),
+				ikb.db(),
+				ikb.table(),
+				ikb.index(),
+				&[armed],
+				false,
+			)
+			.await?;
+			tx.cancel().await?;
+		}
+		assert_eq!(stored_guard(&b, orphan).await?, Some(DiskAnnPendingStateKind::NonEmpty));
+		assert_eq!(
+			stored_summary(&b).await?,
+			Some(DiskAnnPendingStateKind::NonEmpty),
+			"the step must not clear the summary over the guard node A repaired"
+		);
+		assert_eq!(
+			knn_keys_with_allow(&index_b, &b, &[1.0, 0.0, 0.0, 0.0], 1, None).await?,
+			vec![1]
+		);
+		Ok(())
+	}
+
+	/// A lookup in the transaction that wrote a pending update sees it although the stored
+	/// summary reads `Empty`: the transaction's buffered guard sends the lookup to the guards.
+	/// On a store that validates every read, a lookup that read the summary covers its guard and
+	/// the summary in its own commit.
+	#[tokio::test]
+	async fn diskann_lookup_in_the_writing_transaction_sees_its_pending_under_a_clear_summary()
+	-> Result<()> {
+		for validating in [false, true] {
+			let ds = TestIndexStore::new().await;
+			let ds = if validating {
+				ds.validating_node()
+			} else {
+				ds
+			};
+			let index = new_summary_index(&params(VectorType::F32, Distance::Euclidean)).await?;
+			write_one(&index, &ds, 1).await?;
+			compact_all(&index, &ds, &ikb()).await?;
+			assert_eq!(stored_summary(&ds).await?, Some(DiskAnnPendingStateKind::Empty));
+			let writer = new_ctx(&ds, TransactionType::Write).await;
+			let query = f32_query(&[33.0, 0.0, 0.0, 0.0]);
+			// A lookup before the write reads the summary.
+			assert_eq!(index.knn_search(&writer, &query, 2, 8, None, None).await?.len(), 1);
+			index
+				.index(
+					&writer,
+					&RecordIdKey::Number(33),
+					None,
+					Some(f32_content(&[33.0, 0.0, 0.0, 0.0])),
+				)
+				.await?;
+			let found = index.knn_search(&writer, &query, 2, 8, None, None).await?;
+			assert_eq!(found.len(), 2, "the writing transaction must see its own pending update");
+			writer.tx().commit().await?;
+			assert_eq!(stored_summary(&ds).await?, Some(DiskAnnPendingStateKind::NonEmpty));
+			assert_eq!(
+				knn_keys_with_allow(&index, &ds, &[33.0, 0.0, 0.0, 0.0], 2, None).await?,
+				vec![1, 33]
+			);
+			assert_summary_covers_guards(&ds).await?;
+		}
+		Ok(())
+	}
+
+	/// An index stamped below the summary format reads its guards whatever the summary says, so
+	/// an entry under an armed guard that no summary covers, as a release maintaining none
+	/// leaves it, stays visible. An index stamped with it trusts an absent summary to read
+	/// `Empty` and skips the guards.
+	#[tokio::test]
+	async fn diskann_index_below_the_summary_format_reads_its_guards() -> Result<()> {
+		let p = params(VectorType::F32, Distance::Euclidean);
+		for (format_version, visible) in [
+			(DOC_IDS_FORMAT_VERSION, true),
+			(crate::catalog::LEGACY_LEVEL_INDEX_FORMAT_VERSION, true),
+			(crate::catalog::INDEX_FORMAT_VERSION, false),
+		] {
+			let ds = TestIndexStore::new().await;
+			let index = DiskAnnIndex::new(ikb(), TableId(4), &p, cache(), format_version).await?;
+			let id = RecordIdKey::Number(1);
+			{
+				let ctx = new_ctx(&ds, TransactionType::Write).await;
+				let tx = ctx.tx();
+				tx.set_key(&dw_key(&ikb(), &id), &f32_pending(&[1.0, 0.0, 0.0, 0.0])).await?;
+				tx.set_key(
+					&ikb().new_dy_key(DiskAnnIndex::pending_state_shard(&id)),
+					&diskann_pending_state(DiskAnnPendingStateKind::NonEmpty),
+				)
+				.await?;
+				tx.commit().await?;
+			}
+			assert_eq!(stored_summary(&ds).await?, None);
+			assert_eq!(
+				knn_len(&index, &ds, &[1.0, 0.0, 0.0, 0.0]).await? == 1,
+				visible,
+				"format {format_version}"
+			);
+		}
+		Ok(())
+	}
+
+	/// The summary armed for a commit that then fails is stepped back with its guard by the pass
+	/// the arming queued.
+	#[tokio::test]
+	async fn diskann_summary_armed_for_a_failed_commit_is_stepped_back() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let index = new_summary_index(&params(VectorType::F32, Distance::Euclidean)).await?;
+		let contested = crate::key::Key::from(b"/summary-contested".as_slice());
+		let writer = new_ctx(&ds, TransactionType::Write).await;
+		index
+			.index(&writer, &RecordIdKey::Number(1), None, Some(f32_content(&[1.0, 0.0, 0.0, 0.0])))
+			.await?;
+		writer.tx().set(contested.clone(), b"writer".to_vec()).await?;
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			ctx.tx().set(contested, b"winner".to_vec()).await?;
+			ctx.tx().commit().await?;
+		}
+		let refused = writer.tx().commit().await;
+		assert!(refused.as_ref().is_err_and(is_retryable_transaction_conflict), "{refused:?}");
+		assert_eq!(stored_summary(&ds).await?, Some(DiskAnnPendingStateKind::NonEmpty));
+		assert!(compact_once(&index, &ds, &ikb()).await?);
+		assert_eq!(stored_summary(&ds).await?, Some(DiskAnnPendingStateKind::Empty));
+		Ok(())
+	}
+
+	/// A summary left armed over guards that all read `Empty` makes a pass apply, and the pass
+	/// clears it with no shard to step.
+	#[tokio::test]
+	async fn diskann_summary_armed_over_empty_guards_is_cleared() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let index = new_summary_index(&params(VectorType::F32, Distance::Euclidean)).await?;
+		write_one(&index, &ds, 1).await?;
+		compact_all(&index, &ds, &ikb()).await?;
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			ctx.tx()
+				.set_key(
+					&ikb().new_dy_summary_key(),
+					&diskann_pending_state(DiskAnnPendingStateKind::NonEmpty),
+				)
+				.await?;
+			ctx.tx().commit().await?;
+		}
+		assert!(
+			compact_once(&index, &ds, &ikb()).await?,
+			"the armed summary must make a pass apply"
+		);
+		assert_eq!(stored_summary(&ds).await?, Some(DiskAnnPendingStateKind::Empty));
+		assert!(!compact_once(&index, &ds, &ikb()).await?, "nothing is left to apply");
+		Ok(())
+	}
+
+	/// Another node's wipe of the index's data removes the summary with the guards, and the next
+	/// write arms it again, whether it runs after the wipe or in the wiping transaction.
+	#[tokio::test]
+	async fn diskann_write_after_another_nodes_wipe_arms_the_summary_again() -> Result<()> {
+		let (a, index_a, b, index_b) = summary_lease_nodes().await?;
+		let index = crate::catalog::Index::DiskAnn(params(VectorType::F32, Distance::Euclidean));
+		write_one(&index_a, &a, 1).await?;
+		{
+			let ctx = new_ctx(&b, TransactionType::Write).await;
+			crate::wipe_index_data(&ctx.tx(), &ikb(), &index).await?;
+			ctx.tx().commit().await?;
+		}
+		assert_eq!(stored_summary(&a).await?, None, "the wipe removes the summary");
+		write_one(&index_a, &a, 33).await?;
+		assert_eq!(stored_summary(&a).await?, Some(DiskAnnPendingStateKind::NonEmpty));
+		assert_eq!(
+			knn_keys_with_allow(&index_b, &b, &[33.0, 0.0, 0.0, 0.0], 1, None).await?,
+			vec![33]
+		);
+		{
+			let ctx = new_ctx(&b, TransactionType::Write).await;
+			crate::wipe_index_data(&ctx.tx(), &ikb(), &index).await?;
+			index_b
+				.index(
+					&ctx,
+					&RecordIdKey::Number(65),
+					None,
+					Some(f32_content(&[65.0, 0.0, 0.0, 0.0])),
+				)
+				.await?;
+			ctx.tx().commit().await?;
+		}
+		assert_eq!(stored_summary(&a).await?, Some(DiskAnnPendingStateKind::NonEmpty));
+		assert_eq!(
+			knn_keys_with_allow(&index_a, &a, &[65.0, 0.0, 0.0, 0.0], 1, None).await?,
+			vec![65]
+		);
+		assert_summary_covers_guards(&a).await?;
+		Ok(())
+	}
+
+	/// A record reports the same distance, bit for bit, while it is pending as once compaction
+	/// has moved it into the graph, for every vector type and distance an index takes, with the
+	/// coded walk on and off.
+	#[tokio::test]
+	async fn diskann_pending_record_scores_as_it_does_once_compacted() -> Result<()> {
+		let rows: [[f64; 4]; 3] =
+			[[1.0, 2.0, 3.0, 4.0], [-3.0, 5.0, 7.0, 1.0], [6.0, -2.0, 1.0, 9.0]];
+		let query = [2.0, 1.0, 5.0, 3.0];
+		let cases = [
+			(VectorType::F32, Distance::Euclidean),
+			(VectorType::F32, Distance::Cosine),
+			(VectorType::F32, Distance::InnerProduct),
+			(VectorType::F32, Distance::CosineNormalized),
+			(VectorType::F16, Distance::Euclidean),
+			(VectorType::F16, Distance::Cosine),
+			(VectorType::F16, Distance::InnerProduct),
+			(VectorType::I8, Distance::Euclidean),
+			(VectorType::I8, Distance::Cosine),
+			(VectorType::I8, Distance::InnerProduct),
+			(VectorType::U8, Distance::Euclidean),
+			(VectorType::U8, Distance::Cosine),
+			(VectorType::U8, Distance::InnerProduct),
+		];
+		let value = |vector_type: &VectorType, v: f64| match vector_type {
+			VectorType::I8 | VectorType::U8 => Value::from(v.abs() as i64),
+			_ => Value::from(v),
+		};
+		for quantized in [true, false] {
+			for (vector_type, distance) in &cases {
+				let case = format!("{vector_type:?} {distance:?}, quantized {quantized}");
+				let ds =
+					TestIndexStore::with_idx_config(|c| c.diskann_quantized_search = quantized)
+						.await;
+				let index = new_summary_index(&params(*vector_type, distance.clone())).await?;
+				for (n, row) in rows.iter().enumerate() {
+					let ctx = new_ctx(&ds, TransactionType::Write).await;
+					let content = vec![Value::from(
+						row.iter().map(|v| value(vector_type, *v)).collect::<Vec<_>>(),
+					)];
+					index.index(&ctx, &RecordIdKey::Number(n as i64), None, Some(content)).await?;
+					ctx.tx().commit().await?;
+				}
+				let query: Vec<Number> = query
+					.iter()
+					.map(|v| match vector_type {
+						VectorType::I8 | VectorType::U8 => Number::from(*v as i64),
+						_ => Number::from(*v),
+					})
+					.collect();
+				let distances = |ds: &TestIndexStore| {
+					let (ds, index, query) = (ds.clone(), &index, query.clone());
+					async move {
+						let ctx = new_ctx(&ds, TransactionType::Read).await;
+						let found =
+							index.knn_search(&ctx, &query, rows.len(), 16, None, None).await?;
+						ctx.tx().cancel().await?;
+						let mut found: Vec<(String, u64)> = found
+							.into_iter()
+							.map(|(rid, d, _)| (format!("{:?}", rid.key), d.to_bits()))
+							.collect();
+						found.sort();
+						anyhow::Ok(found)
+					}
+				};
+				let pending = distances(&ds).await?;
+				assert_eq!(pending.len(), rows.len(), "{case}");
+				compact_all(&index, &ds, &ikb()).await?;
+				assert_eq!(
+					stored_summary(&ds).await?,
+					Some(DiskAnnPendingStateKind::Empty),
+					"{case}"
+				);
+				assert_eq!(distances(&ds).await?, pending, "{case}");
+			}
+		}
+		Ok(())
+	}
+
 	/// Dual-read transition: a record left pending in the legacy unsharded `!dr` layout by an older
 	/// binary must stay visible to lookup, be drained by compaction, and not block the sharded
 	/// `!dw` layout that new writes use.
@@ -7112,7 +8034,7 @@ mod tests {
 	async fn diskann_dual_read_drains_legacy_pending_then_uses_shards() -> Result<()> {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
-		let index = new_index(
+		let index = new_unstamped_index(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
@@ -7315,7 +8237,7 @@ mod tests {
 	async fn diskann_write_folds_legacy_pending_into_shard() -> Result<()> {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
-		let index = new_index(
+		let index = new_unstamped_index(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
@@ -7371,7 +8293,7 @@ mod tests {
 	async fn diskann_write_folds_legacy_even_when_sharded_exists() -> Result<()> {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
-		let index = new_index(
+		let index = new_unstamped_index(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
@@ -7595,7 +8517,7 @@ mod tests {
 	async fn diskann_write_fold_inverse_pair_keeps_chain_head() -> Result<()> {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
-		let index = new_index(
+		let index = new_unstamped_index(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
@@ -8243,8 +9165,26 @@ mod tests {
 		ef_floors: &[(usize, f64)],
 	) -> Result<()> {
 		let ds = TestIndexStore::new().await;
+		measure_recall_in(ds, label, params, corpus, queries, k, ef_floors, DOC_IDS_FORMAT_VERSION)
+			.await
+	}
+
+	/// [`measure_recall`] on a store the caller configured, for an index stamped with
+	/// `format_version`.
+	#[allow(clippy::too_many_arguments)]
+	async fn measure_recall_in(
+		ds: TestIndexStore,
+		label: &str,
+		params: &DiskAnnParams,
+		corpus: &[Vec<f32>],
+		queries: &[Vec<f32>],
+		k: usize,
+		ef_floors: &[(usize, f64)],
+		format_version: u16,
+	) -> Result<()> {
 		let ikb = ikb();
-		let index = new_index(ikb.clone(), TableId(4), params, cache()).await?;
+		let index =
+			DiskAnnIndex::new(ikb.clone(), TableId(4), params, cache(), format_version).await?;
 
 		{
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
@@ -8281,8 +9221,8 @@ mod tests {
 			}
 			let measured = total / queries.len() as f64;
 			info!(
-				"{label}: n={} q={} DEGREE={} L_BUILD={} ef={ef} -> Recall@{k}={measured:.4} \
-				 (floor {floor}, {passes} compaction passes)",
+				"{label}: n={} q={} DEGREE={} L_BUILD={} format={format_version} ef={ef} -> \
+				 Recall@{k}={measured:.4} (floor {floor}, {passes} compaction passes)",
 				corpus.len(),
 				queries.len(),
 				params.degree,
@@ -8350,6 +9290,124 @@ mod tests {
 			&[(10, 0.55), (20, 0.67), (40, 0.77), (100, 0.89), (200, 0.94)],
 		)
 		.await
+	}
+
+	/// [`diskann_recall_starved_degree`] with the kNN walk expanding four nodes
+	/// per hop (`diskann_search_beam_width`). The walk stops on the same
+	/// condition, once every node in the search list has been expanded, so it is
+	/// held to the same floors.
+	#[test_log::test(tokio::test(flavor = "multi_thread"))]
+	async fn diskann_recall_starved_degree_beam_4() -> Result<()> {
+		let mut rng = recall_rng();
+		let mut corpus = ClusteredCorpus::new(&mut rng, 64, 1500, 0.35);
+		let base = corpus.draw(&mut rng, 4000);
+		let queries = corpus.draw(&mut rng, 100);
+		let params = graph_params(64, Distance::Cosine, 8, 24);
+		let ds = TestIndexStore::with_idx_config(|c| c.diskann_search_beam_width = 4).await;
+		measure_recall_in(
+			ds,
+			"starved-degree-beam-4",
+			&params,
+			&base,
+			&queries,
+			10,
+			&[(10, 0.55), (20, 0.67), (40, 0.77), (100, 0.89), (200, 0.94)],
+			DOC_IDS_FORMAT_VERSION,
+		)
+		.await
+	}
+
+	/// A coded walk ranks only its nearest results exactly, but neither a deleted
+	/// element, which the graph keeps navigable and which holds no document, nor a
+	/// walk that ran dry, which no wider retry follows, may leave it short: with
+	/// every element nearer than the one live record deleted, in a graph smaller
+	/// than the search list, a 1-NN still answers that record.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn diskann_coded_walk_ranks_past_deleted_elements() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = ikb();
+		let index = DiskAnnIndex::new(
+			ikb.clone(),
+			TableId(4),
+			&params(VectorType::F32, Distance::Euclidean),
+			cache(),
+			crate::catalog::INDEX_FORMAT_VERSION,
+		)
+		.await?;
+		let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+		let near = |i: i64| [0.0f32, 10.0 * i as f32, 0.0, 0.0];
+		let live = [0.0f32, 44.0, 0.0, 0.0];
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			for i in 1..=3 {
+				let id = RecordIdKey::Number(i);
+				docids.resolve_or_assign(&ctx, &id).await?;
+				index.index(&ctx, &id, None, Some(f32_content(&near(i)))).await?;
+			}
+			let id = RecordIdKey::Number(4);
+			docids.resolve_or_assign(&ctx, &id).await?;
+			index.index(&ctx, &id, None, Some(f32_content(&live))).await?;
+			ctx.tx().commit().await?;
+		}
+		compact_all(&index, &ds, &ikb).await?;
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			for i in 1..=3 {
+				let id = RecordIdKey::Number(i);
+				index.index(&ctx, &id, Some(f32_content(&near(i))), None).await?;
+				docids.remove(&ctx.tx(), &id).await?;
+			}
+			ctx.tx().commit().await?;
+		}
+		compact_all(&index, &ds, &ikb).await?;
+		assert_eq!(knn_keys_with_allow(&index, &ds, &near(1), 1, None).await?, vec![4]);
+		Ok(())
+	}
+
+	/// [`diskann_recall_many_clusters_degree_64`] on an index keeping element codes, whose walk
+	/// scores candidates on them and ranks its search list exactly. Held to the same floors.
+	#[test_log::test(tokio::test(flavor = "multi_thread"))]
+	async fn diskann_recall_many_clusters_degree_64_coded() -> Result<()> {
+		let mut rng = recall_rng();
+		let mut corpus = ClusteredCorpus::new(&mut rng, 32, 2000, 0.35);
+		let base = corpus.draw(&mut rng, 2500);
+		let queries = corpus.draw(&mut rng, 100);
+		measure_recall_in(
+			TestIndexStore::new().await,
+			"many-clusters-degree-64-coded",
+			&graph_params(32, Distance::Cosine, 64, 100),
+			&base,
+			&queries,
+			10,
+			&[(10, 0.96), (20, 0.97), (40, 0.98), (100, 0.98), (200, 0.98)],
+			crate::catalog::INDEX_FORMAT_VERSION,
+		)
+		.await
+	}
+
+	/// [`diskann_recall_starved_degree`] on an index keeping element codes, for each metric a
+	/// code scores: the starved graph moves recall with the walk's quality, so a coded walk that
+	/// navigates worse than the exact one shows. Held to the same floors.
+	#[test_log::test(tokio::test(flavor = "multi_thread"))]
+	async fn diskann_recall_starved_degree_coded() -> Result<()> {
+		for distance in [Distance::Cosine, Distance::Euclidean] {
+			let mut rng = recall_rng();
+			let mut corpus = ClusteredCorpus::new(&mut rng, 64, 1500, 0.35);
+			let base = corpus.draw(&mut rng, 4000);
+			let queries = corpus.draw(&mut rng, 100);
+			measure_recall_in(
+				TestIndexStore::new().await,
+				&format!("starved-degree-coded-{distance:?}"),
+				&graph_params(64, distance, 8, 24),
+				&base,
+				&queries,
+				10,
+				&[(10, 0.55), (20, 0.67), (40, 0.77), (100, 0.89), (200, 0.94)],
+				crate::catalog::INDEX_FORMAT_VERSION,
+			)
+			.await?;
+		}
+		Ok(())
 	}
 
 	/// Diagnostic: the DDL defaults at the reference workload's dimension and an
@@ -9213,15 +10271,27 @@ mod tests {
 	/// A vector shared by more records than the inline document-set variants
 	/// hold keeps every one of them: the set grows into, and shrinks back out
 	/// of, its bitmap form without losing a write, whether each record is
-	/// compacted on its own or all in one batch.
+	/// compacted on its own or all in one batch. A record moving onto another
+	/// element's vector joins that element. On an index keeping the element →
+	/// doc-IDs mapping, `!dm` holds what `!dq`/`!dh` hold after every step.
 	#[tokio::test(flavor = "multi_thread")]
 	async fn diskann_vector_shared_by_many_records_keeps_every_record() -> Result<()> {
-		for (hashed, per_record) in [(false, true), (false, false), (true, true), (true, false)] {
+		for (hashed, per_record, format_version) in [
+			(false, true, DOC_IDS_FORMAT_VERSION),
+			(false, false, DOC_IDS_FORMAT_VERSION),
+			(true, true, DOC_IDS_FORMAT_VERSION),
+			(true, false, DOC_IDS_FORMAT_VERSION),
+			(false, true, crate::catalog::INDEX_FORMAT_VERSION),
+			(false, false, crate::catalog::INDEX_FORMAT_VERSION),
+			(true, true, crate::catalog::INDEX_FORMAT_VERSION),
+			(true, false, crate::catalog::INDEX_FORMAT_VERSION),
+		] {
 			let ds = TestIndexStore::new().await;
 			let ikb = ikb();
 			let mut p = params(VectorType::F32, Distance::Euclidean);
 			p.use_hashed_vector = hashed;
-			let index = new_index(ikb.clone(), TableId(4), &p, cache()).await?;
+			let index =
+				DiskAnnIndex::new(ikb.clone(), TableId(4), &p, cache(), format_version).await?;
 			let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
 			let shared = [3.0f32; 4];
 			let apply = |writes: Vec<SharedVectorWrite>| {
@@ -9253,6 +10323,18 @@ mod tests {
 						}
 						ctx.tx().commit().await?;
 						compact_all(index, ds, ikb).await?;
+						let tx = ds.transaction(TransactionType::Read).await?;
+						let live = index.vec_docs.assert_element_docs_match(&tx).await?;
+						let coded = assert_codes_match(&tx, ikb).await?;
+						tx.cancel().await?;
+						assert_eq!(
+							coded > 0,
+							format_version == crate::catalog::INDEX_FORMAT_VERSION,
+							"codes are kept exactly by the coded format"
+						);
+						if format_version == crate::catalog::INDEX_FORMAT_VERSION {
+							assert!(live > 0, "the checked index has live elements");
+						}
 					}
 					anyhow::Ok(())
 				}
@@ -9261,7 +10343,7 @@ mod tests {
 			let mut writes = vec![(100i64, None, Some([9.0f32; 4]))];
 			writes.extend((1..=20).map(|key| (key, None, Some(shared))));
 			apply(writes).await?;
-			let case = format!("hashed {hashed}, per record {per_record}");
+			let case = format!("hashed {hashed}, per record {per_record}, format {format_version}");
 			let mut all: Vec<i64> = (1..=20).collect();
 			all.push(100);
 			assert_eq!(knn_keys_with_allow(&index, &ds, &shared, 50, None).await?, all, "{case}");
@@ -9270,11 +10352,14 @@ mod tests {
 			let mut left: Vec<i64> = (16..=20).collect();
 			left.push(100);
 			assert_eq!(knn_keys_with_allow(&index, &ds, &shared, 50, None).await?, left, "{case}");
+			// Record 16 moves onto the distinct vector, joining its element.
+			apply(vec![(16, Some(shared), Some([9.0f32; 4]))]).await?;
+			assert_eq!(knn_keys_with_allow(&index, &ds, &shared, 50, None).await?, left, "{case}");
 			// And the rest, which removes the shared element itself.
-			apply((16..=20).map(|key| (key, Some(shared), None)).collect()).await?;
+			apply((17..=20).map(|key| (key, Some(shared), None)).collect()).await?;
 			assert_eq!(
 				knn_keys_with_allow(&index, &ds, &shared, 50, None).await?,
-				vec![100],
+				vec![16, 100],
 				"{case}"
 			);
 		}
@@ -10612,7 +11697,8 @@ mod tests {
 		/// thread.
 		#[tokio::test(flavor = "multi_thread")]
 		async fn diskann_frame_failure_is_attributed_to_its_frame() -> Result<()> {
-			let ds = TestIndexStore::new().await.with_places(8);
+			// Places for both frames' whole batches, so each spawns its tasks whichever asks first.
+			let ds = TestIndexStore::new().await.with_places(64);
 			// Another table, so the two frames resolve no doc-ID in common.
 			let ikb_b = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb2".into(), IndexId(9));
 			let a = new_index(ikb(), TableId(4), &small_params(4), cache()).await?;
@@ -11453,8 +12539,20 @@ mod tests {
 			params: &DiskAnnParams,
 			seed: &[Vec<f32>],
 		) -> Result<(TestIndexStore, DiskAnnIndex, DiskAnnCache)> {
+			seeded_at(ds, params, seed, DOC_IDS_FORMAT_VERSION).await
+		}
+
+		/// [`seeded_on`] for an index stamped with `format_version`.
+		#[cfg(feature = "kv-rocksdb")]
+		async fn seeded_at(
+			ds: TestIndexStore,
+			params: &DiskAnnParams,
+			seed: &[Vec<f32>],
+			format_version: u16,
+		) -> Result<(TestIndexStore, DiskAnnIndex, DiskAnnCache)> {
 			let cache = cache();
-			let index = new_index(ikb(), TableId(4), params, cache.clone()).await?;
+			let index =
+				DiskAnnIndex::new(ikb(), TableId(4), params, cache.clone(), format_version).await?;
 			ingest(&index, &ds, 0, seed).await?;
 			compact_all(&index, &ds, &ikb()).await?;
 			Ok((ds, index, cache))
@@ -11491,16 +12589,12 @@ mod tests {
 		async fn assert_cache_matches_kv(
 			ds: &TestIndexStore,
 			cache: &DiskAnnCache,
+			format_version: u16,
 		) -> Result<usize> {
 			use crate::trees::diskann::cache::CachedEntry;
 			let ikb = ikb();
-			let entries = cache.entries_of(
-				ikb.ns(),
-				ikb.db(),
-				TableId(4),
-				ikb.index(),
-				DOC_IDS_FORMAT_VERSION,
-			);
+			let entries =
+				cache.entries_of(ikb.ns(), ikb.db(), TableId(4), ikb.index(), format_version);
 			let tx = ds.transaction(TransactionType::Read).await?;
 			for entry in &entries {
 				match entry {
@@ -11522,6 +12616,16 @@ mod tests {
 							(&cached.vector, cached.deleted),
 							(&stored.vector, stored.deleted),
 							"cached element {id} differs from the stored one"
+						);
+					}
+					CachedEntry::Code(id, cached) => {
+						let stored: crate::trees::diskann::DiskAnnElementCode = tx
+							.get_key(&ikb.new_da_key(*id), None)
+							.await?
+							.unwrap_or_else(|| panic!("cached code {id} is not stored"));
+						assert_eq!(
+							**cached, stored,
+							"cached code {id} differs from the stored one"
 						);
 					}
 					CachedEntry::Node(id, cached) => {
@@ -11700,16 +12804,39 @@ mod tests {
 		#[cfg(feature = "kv-rocksdb")]
 		#[tokio::test(flavor = "multi_thread")]
 		async fn diskann_frame_with_a_view_keeps_the_cache_coherent() -> Result<()> {
+			// Format 6 also keeps element codes, which a coded walk caches.
+			for format_version in [DOC_IDS_FORMAT_VERSION, crate::catalog::INDEX_FORMAT_VERSION] {
+				frame_with_a_view_keeps_the_cache_coherent(format_version).await?;
+			}
+			Ok(())
+		}
+
+		#[cfg(feature = "kv-rocksdb")]
+		async fn frame_with_a_view_keeps_the_cache_coherent(format_version: u16) -> Result<()> {
 			let dir = TempDir::new()?;
 			let seed = line(4, 0.0, 1.0, 20);
 			let (ds, index, cache) =
-				seeded_on(rocksdb_store(&dir, 2).await, &small_params(4), &seed).await?;
+				seeded_at(rocksdb_store(&dir, 2).await, &small_params(4), &seed, format_version)
+					.await?;
 			let entry = entry_point_record(&ds).await?;
 			// A cold cache, then a read-only query over part of the graph: the frame is served
 			// some entries from the cache and reads the rest through its view.
 			index.clear_local_cache_now();
 			prewarm(&index, &ds, &seed[..3]).await?;
-			assert!(assert_cache_matches_kv(&ds, &cache).await? > 0, "nothing was prewarmed");
+			assert!(
+				assert_cache_matches_kv(&ds, &cache, format_version).await? > 0,
+				"nothing was prewarmed"
+			);
+			if format_version == crate::catalog::INDEX_FORMAT_VERSION {
+				use crate::trees::diskann::cache::CachedEntry;
+				let ikb = ikb();
+				let entries =
+					cache.entries_of(ikb.ns(), ikb.db(), TableId(4), ikb.index(), format_version);
+				assert!(
+					entries.iter().any(|e| matches!(e, CachedEntry::Code(..))),
+					"the coded walk cached no element code"
+				);
+			}
 			// Fresh vectors, and moves of records other than the entry point's, so the frame
 			// changes elements, adjacency lists, doc sets and the state the prewarm cached.
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
@@ -11731,9 +12858,9 @@ mod tests {
 			let frame = index.last_frame().expect("a frame");
 			assert_eq!(frame.stats.read_txs_opened.load(Ordering::Acquire), 1);
 			assert!(frame.stats.cache_publishes.load(Ordering::Acquire) > 0);
-			assert!(assert_cache_matches_kv(&ds, &cache).await? > 0);
+			assert!(assert_cache_matches_kv(&ds, &cache, format_version).await? > 0);
 			prewarm(&index, &ds, &seed).await?;
-			assert!(assert_cache_matches_kv(&ds, &cache).await? > 0);
+			assert!(assert_cache_matches_kv(&ds, &cache, format_version).await? > 0);
 			// A frame that fails after its view has published leaves no entry of the index.
 			ingest(&index, &ds, 200, &line(4, 0.75, 1.0, 30)).await?;
 			index.clear_local_cache_now();
@@ -11743,7 +12870,11 @@ mod tests {
 			apply_with(&ds, &index, faults).await.expect_err("the frame fails");
 			let frame = index.last_frame().expect("a frame");
 			assert!(frame.stats.reads_view.load(Ordering::Acquire) > 0);
-			assert_eq!(assert_cache_matches_kv(&ds, &cache).await?, 0, "the cache kept entries");
+			assert_eq!(
+				assert_cache_matches_kv(&ds, &cache, format_version).await?,
+				0,
+				"the cache kept entries"
+			);
 			assert_eq!(*frame.stats.live_at_tx_end.lock().unwrap(), vec![0, 0]);
 			Ok(())
 		}

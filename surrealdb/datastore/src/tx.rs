@@ -94,8 +94,8 @@ use crate::key::schema::{
 };
 #[cfg(diskann)]
 use crate::key::schema::{
-	DiskannPendingKey, DiskannPendingPrefix, DiskannRecordPendingShardShardPrefix,
-	DiskannWriterLeaseKey, DiskannWriterLeaseShardPrefix,
+	DiskannPendingKey, DiskannPendingPrefix, DiskannPendingSummaryKey,
+	DiskannRecordPendingShardShardPrefix, DiskannWriterLeaseKey, DiskannWriterLeaseShardPrefix,
 };
 use crate::key::table_migration::{TableMigrationRequest, TableMigrationState, VerifiedField};
 use crate::layouts::LayoutSet;
@@ -177,6 +177,26 @@ fn diskann_writer_lease_key<'a>(
 		ix: key.ix,
 		shard: key.shard,
 		nid,
+	}
+}
+
+/// The pending-state summary (`!dY`) of the index whose guard is `key`.
+#[cfg(diskann)]
+fn diskann_pending_summary_key<'a>(key: &'a DiskannPendingKey<'_>) -> DiskannPendingSummaryKey<'a> {
+	DiskannPendingSummaryKey {
+		ns: key.ns,
+		db: key.db,
+		tb: Cow::Borrowed(key.tb.as_ref()),
+		ix: key.ix,
+	}
+}
+
+/// The summary value armed over `current`: `NonEmpty`, with the next generation.
+#[cfg(diskann)]
+fn armed_pending_summary(current: Option<&DiskAnnPendingState>) -> DiskAnnPendingState {
+	DiskAnnPendingState {
+		kind: DiskAnnPendingStateKind::NonEmpty,
+		generation: current.map_or(0, |s| s.generation).wrapping_add(1),
 	}
 }
 
@@ -9555,13 +9575,24 @@ impl Transaction {
 	/// A transaction that wrote nothing is cancelled. Two writers covering one
 	/// guard conflict only with each other, and the retry finds it covered.
 	///
+	/// A guard written from any state but `NonEmpty` arms the index's
+	/// pending-state summary (`!dY`) in the same transaction, so every snapshot
+	/// holding an armed guard holds the summary armed: written on condition that
+	/// it is still the value read, where this datastore is the sole writer only if
+	/// it does not already read `NonEmpty`, and elsewhere whatever it reads, so a
+	/// step on another node that read the guard `Empty` and is clearing the
+	/// summary conflicts with it. Writers into a shard already armed write
+	/// nothing to the summary; coverings that arm different shards conflict on
+	/// it.
+	///
 	/// To be covered, a guard is neither read nor written by this transaction,
 	/// so neither a guard step nor another covering can fail its commit. The
 	/// exception is a store that validates every read
 	/// ([`Self::validates_reads`]), where a guard this transaction already read
 	/// (a lookup in it, [`Self::note_diskann_guards_read`]) is covered in this
 	/// transaction instead: the arming transaction's write would fail this
-	/// commit, while the read already makes a step of the guard fail it.
+	/// commit, while the read already makes a step of the guard fail it. The
+	/// summary is armed with it, in this transaction too.
 	///
 	/// A guard armed for a commit that then fails is left `NonEmpty` over a
 	/// range holding nothing of it. Where this datastore is
@@ -9615,6 +9646,19 @@ impl Transaction {
 					generation: current.map_or(0, |s| s.generation).wrapping_add(1),
 				};
 				self.set_key(key, &next).await?;
+			}
+			// The index's summary is armed with its guards, once per index, and on
+			// the same terms: written whatever it reads, so a step clearing it
+			// conflicts with this commit.
+			let mut summaries: Vec<DiskannPendingSummaryKey<'_>> = Vec::new();
+			for key in &keys {
+				let summary = diskann_pending_summary_key(key);
+				if summaries.contains(&summary) {
+					continue;
+				}
+				let current = self.get_key(&summary, None).await?;
+				self.set_key(&summary, &armed_pending_summary(current.as_ref())).await?;
+				summaries.push(summary);
 			}
 			guards
 		};
@@ -9925,14 +9969,19 @@ impl Transaction {
 	/// Cover `uncovered`'s guards, each listed with its index's place among the
 	/// shared fences and the shards whose leases the fence records held, in a
 	/// transaction of its own, retried against other coverings
-	/// ([`Self::arm_diskann_pending_guards`]). Returns, on a store other
-	/// datastores write to, the earliest expiry among the leases the covering
-	/// relies on.
+	/// ([`Self::arm_diskann_pending_guards`]). With `take_leases`, each guard is
+	/// read locked and written, this datastore's writer lease on its shard is
+	/// taken with it, and the earliest expiry among the leases the covering relies
+	/// on is returned. Without, a guard is armed as a sole writer arms it, with no
+	/// lease, and a compaction pass is queued for the index. The summary is
+	/// written whatever it reads wherever this datastore is not the store's sole
+	/// writer, `take_leases` or not: a repair or a post-wipe arming takes no lease,
+	/// and another node's step may still be clearing the summary.
 	#[cfg(diskann)]
 	async fn cover_diskann_guards(
 		&self,
 		uncovered: &[(Vec<DiskannPendingKey<'static>>, usize, u64)],
-		shared_store: bool,
+		take_leases: bool,
 	) -> Result<Option<chrono::DateTime<Utc>>> {
 		let node = self.sequences.node_id();
 		let process = self.triggers.pending_guard_fences.process();
@@ -9978,11 +10027,14 @@ impl Transaction {
 						}
 					}
 					let mut index_armed = false;
+					// Whether this attempt writes a guard that read other than
+					// `NonEmpty`, which the index's summary must then cover.
+					let mut arms_summary = false;
 					let covering: Vec<_> =
 						keys.iter().filter(|key| found & (1 << key.shard) == 0).collect();
 					// Read in one batch where a plain read suffices; a locked read is
 					// taken key by key.
-					let currents = if shared_store {
+					let currents = if take_leases {
 						let mut currents = Vec::with_capacity(covering.len());
 						for key in &covering {
 							currents.push(arm.getu_key(*key).await?);
@@ -10007,7 +10059,7 @@ impl Transaction {
 					for (key, current) in covering.into_iter().zip(currents) {
 						// Where a lease is taken the guard is written even if it reads
 						// `NonEmpty`, so a step that read it before fails.
-						if shared_store
+						if take_leases
 							|| !current
 								.as_ref()
 								.is_some_and(|s| s.kind == DiskAnnPendingStateKind::NonEmpty)
@@ -10021,8 +10073,11 @@ impl Transaction {
 							};
 							arm.put_compare_key(key, &next, current.as_ref()).await?;
 							index_armed = true;
+							arms_summary |= !current
+								.as_ref()
+								.is_some_and(|s| s.kind == DiskAnnPendingStateKind::NonEmpty);
 						}
-						if shared_store {
+						if take_leases {
 							arm.set_key(
 								&diskann_writer_lease_key(key, node),
 								&DiskAnnWriterLease {
@@ -10035,11 +10090,45 @@ impl Transaction {
 							wrote = true;
 						}
 					}
+					// A guard armed from any other state arms the summary in the same
+					// transaction, so a snapshot holding the guard holds the summary
+					// armed. A guard already `NonEmpty` is covered by the summary
+					// already: no step clears it while that guard reads `NonEmpty`,
+					// and a step of the guard conflicts with this write of it.
+					//
+					// Where this datastore is the sole writer, the fence keeps every
+					// step out until this commit lands, so a summary read armed needs
+					// nothing. Elsewhere it is read locked and written even if armed,
+					// whether or not this covering takes leases: another node's step
+					// may have read this guard `Empty` in a snapshot before this
+					// commit and be about to clear the summary, and only a write of
+					// the summary conflicts with it.
+					if let (true, Some(key)) = (arms_summary, keys.first()) {
+						let summary = diskann_pending_summary_key(key);
+						let shared_store = !self.sole_writer();
+						let current = if shared_store {
+							arm.getu_key(&summary).await?
+						} else {
+							arm.get_key(&summary, None).await?
+						};
+						if shared_store
+							|| !current
+								.as_ref()
+								.is_some_and(|s| s.kind == DiskAnnPendingStateKind::NonEmpty)
+						{
+							arm.put_compare_key(
+								&summary,
+								&armed_pending_summary(current.as_ref()),
+								current.as_ref(),
+							)
+							.await?;
+						}
+					}
 					// Queue a pass for the index with the arming, so a guard this
 					// commit armed is stepped back even if the commit then fails and
 					// takes its own queue entry with it. A lease's release queues one
 					// instead.
-					if let (true, false, Some(key)) = (index_armed, shared_store, keys.first()) {
+					if let (true, false, Some(key)) = (index_armed, take_leases, keys.first()) {
 						let queued = IndexCompactionKey {
 							ns: key.ns,
 							db: key.db,
@@ -10063,7 +10152,7 @@ impl Transaction {
 					// with it.
 					match arm.tr.commit_unsynced().await {
 						Ok(()) => {
-							if !shared_store {
+							if !take_leases {
 								self.triggers.index_compaction.notify_one();
 							}
 							Ok(())
@@ -10131,6 +10220,20 @@ impl Transaction {
 	/// which is why a single step suffices. Every shard it steps, or tries to,
 	/// is forgotten by the fence as armed. A step lost to a concurrent write of
 	/// the guard is left for the next pass.
+	///
+	/// The index's pending-state summary (`!dY`) is stepped to `Empty` in the
+	/// same transaction when, in its snapshot, every guard of the index reads
+	/// `Empty` or is absent once the shards this step stepped are counted
+	/// `Empty`. A shard under a writer lease that holds is never among them:
+	/// its guard was written `NonEmpty` with the lease, and no step steps it
+	/// while the lease holds. The summary is written on condition that it is
+	/// still the value read. Where this datastore is the sole writer, the fence
+	/// keeps out every covering until the step commits; elsewhere every covering
+	/// that arms a guard from `Empty` writes the summary, so one committed after
+	/// this snapshot fails the step or is refused by it. With `summary_armed`,
+	/// set by a pass that read the summary armed over guards that all read
+	/// `Empty` or that it steps, the step runs for the summary even with no shard
+	/// to step. Returns whether a guard or the summary was stepped.
 	#[cfg(diskann)]
 	pub async fn step_diskann_pending_guards(
 		&self,
@@ -10139,8 +10242,9 @@ impl Transaction {
 		tb: &TableName,
 		ix: IndexId,
 		shards: &[u16],
+		summary_armed: bool,
 	) -> Result<bool> {
-		if shards.is_empty() {
+		if shards.is_empty() && !summary_armed {
 			return Ok(false);
 		}
 		let shared_store = !self.sole_writer();
@@ -10238,13 +10342,57 @@ impl Transaction {
 					Err(e) => return Err(e),
 				}
 			}
-			Ok(!stepping.is_empty())
+			let summary = DiskannPendingSummaryKey {
+				ns,
+				db,
+				tb: Cow::Borrowed(tb),
+				ix,
+			};
+			let mut cleared = false;
+			if let Some(current) = step.get_key(&summary, None).await?
+				&& current.kind != DiskAnnPendingStateKind::Empty
+			{
+				let guards = DiskannPendingPrefix::new(ns, db, Cow::Borrowed(tb), ix).range()?;
+				let mut every_empty = true;
+				for (raw, guard) in
+					step.scan(guards, DISKANN_PENDING_STATE_SHARDS.into(), 0, None).await?
+				{
+					if guard.kind != DiskAnnPendingStateKind::Empty
+						&& !stepping.contains(&DiskannPendingKey::decode_key(&raw)?.shard)
+					{
+						every_empty = false;
+						break;
+					}
+				}
+				if every_empty {
+					let next = DiskAnnPendingState {
+						kind: DiskAnnPendingStateKind::Empty,
+						generation: current.generation.wrapping_add(1),
+					};
+					match step.put_compare_key(&summary, &next, Some(&current)).await {
+						Ok(()) => {
+							cleared = true;
+							wrote = true;
+						}
+						// A covering armed it again since it was read: it stays armed.
+						Err(e) if Self::condition_not_met(&e) => {}
+						Err(e) => return Err(e),
+					}
+				}
+			}
+			Ok(!stepping.is_empty() || cleared)
 		}
 		.await;
 		// Committed without its own sync, since writers wait on the fence while it
 		// is held: a step that does not outlive a crash leaves the guard
 		// `NonEmpty`, which only makes lookups scan a drained shard until the next
 		// pass steps it again.
+		#[cfg(any(test, feature = "test-hooks"))]
+		if stepped.is_ok()
+			&& wrote && let Some(hook) = self.triggers.take_before_guard_step_commit_hook()
+		{
+			hook().await;
+		}
 		let result = match stepped {
 			Ok(stepped) if wrote => match step.tr.commit_unsynced().await {
 				Ok(()) => Ok(stepped),

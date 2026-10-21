@@ -56,6 +56,17 @@ is in, and a store may hold both side by side.
   run only as wide as that pool grants, a host with two cores or fewer runs
   them on one task, and `SURREAL_HNSW_BUILD_PARALLELISM` is a ceiling rather
   than a task count.
+- A DiskANN index of `TYPE I8` or `TYPE U8` is limited to `DIMENSION 33025`.
+  A longer one is refused when it is defined, and an existing one fails when
+  it is opened.
+- An HNSW or DiskANN index defined or rebuilt on a store above Legacy keeps a
+  mapping from each graph element to its records, and a KNN query resolves its
+  results through it. On a store held at Legacy, and for an index defined on an
+  earlier release until it is rebuilt, results are resolved as before.
+- A DiskANN KNN query reports the distance of a record written since the last
+  compaction from the `f32` comparer its graph walk ranks with, rather than in
+  `f64`. That distance can differ from an earlier release's in its last digits,
+  and two such records at nearly equal distances can swap places. See below.
 
 ### The switch
 
@@ -601,6 +612,78 @@ are unchanged, and so are statements with an observable effect, which stay
 serial. A float aggregate (`math::sum`, `math::mean`, `math::stddev`,
 `math::variance`, `vector::sum`) is folded serially, so its low bits are the
 ones a serial run gives.
+
+### DiskANN `TYPE I8` and `TYPE U8` indexes are limited to 33025 dimensions
+
+DiskANN measures `I8` and `U8` vectors with distance kernels that sum in a
+32-bit integer. One component adds at most 255² = 65 025 to that sum, so a
+vector longer than 33 025 components can overflow it, and the index then
+ranks and links vectors on wrong distances. A `DEFINE INDEX … DISKANN` of one
+of these types with a larger `DIMENSION` is refused with `DISKANN TYPE I8 and
+U8 support DIMENSION up to 33025`, and an index already defined that way fails
+with the same error when a query or write opens it. `F16` and `F32` indexes,
+and HNSW indexes of any type, are not limited.
+
+**What to do**: for an `I8` or `U8` DiskANN index with a `DIMENSION` above
+33025, remove it and define it again with `TYPE F16` or `TYPE F32`, or as an
+HNSW index.
+
+### Vector indexes resolve KNN results by graph element
+
+A KNN query on an HNSW or DiskANN index ends with a list of graph elements,
+which it turns into records through the index's vector → documents mapping
+(`!hv`/`!hh`, `!dq`/`!dh`). That mapping is keyed by the vector, so each result
+element's vector is read and re-encoded to look it up. An index stamped with
+index format 6 also keeps an element → documents mapping (`!hm`, `!dm`),
+written in the same transaction as every change to the vector-keyed one, and
+resolves its results by element id without reading their vectors. The saving
+is largest when the vectors are not already cached.
+
+A DiskANN index of `TYPE F32` or `TYPE F16` stamped with format 6 also keeps an
+8-bit code of each element's vector (`!da`): each component scaled by the
+vector's own largest one, so no codebook is shared between elements. The code
+is written with the element and deleted with it. On every storage engine, a
+KNN walk scores candidates on these codes, which are a quarter of an `F32`
+vector's size, then ranks its nearest results exactly from the vectors. Every
+reported distance is exact. The walk can visit a slightly different set of
+elements than one scoring exact vectors would, so recall at a given
+search-list size can differ in either direction: by up to about one point at
+the smallest lists, and by a fraction of a point from a list of twice the
+result count. `SURREAL_DISKANN_QUANTIZED_SEARCH=false` makes the walk score
+exact vectors again. Inserts always score exactly.
+
+A DiskANN index stamped with format 6 also keeps a pending-state summary
+(`!dY`), which reads armed while any of its 32 pending-state guards (`!dy`)
+does. It is armed in the transaction that arms a guard, and cleared only by the
+compaction step that leaves every guard empty. A KNN query reads the summary
+alone while it is clear, rather than every guard and the pending range of each
+armed one.
+
+`DEFINE INDEX` and `REBUILD INDEX` stamp format 6 only on a store above Legacy.
+On a store held at Legacy they stamp format 5, which keeps no element mapping,
+so a 3.x node sharing the store never writes to an index whose mapping it would
+not maintain. An index defined on an earlier release keeps its format and its
+read path. Nothing fails and no result changes.
+
+**What to do**: once the store is above Legacy, `REBUILD INDEX` the HNSW and
+DiskANN indexes whose KNN latency matters. A rebuilt `F32` or `F16` DiskANN
+index is larger by one byte per dimension and element, for its codes: about 12%
+of the index at `TYPE F32` and 20% at `TYPE F16`, for 768 dimensions.
+
+### DiskANN scores pending records as its graph walk does
+
+A record written to a DiskANN index waits in a pending range until compaction
+moves it into the graph, and a KNN query scores it there. It is scored with the
+`f32` comparer the graph walk ranks graph elements with, on every DiskANN
+index whatever its format, so a record reports the same distance while it is
+pending as once it is in the graph. An earlier release scored it in `f64`, so
+the distance reported for a pending record can differ in its last digits, by
+about one part in ten million, and two records at nearly equal distances can
+swap places in the results. The exact search a highly selective filtered KNN
+query runs over its candidates scores every candidate in `f64`, pending records
+included, as before.
+
+**What to do**: nothing.
 
 ## v3.4.0 — export/import contract changes, vector indexes that lost records sharing a vector, a doc-ID → elements mapping on vector indexes, JACCARD/PEARSON as distances, named record-id components, pre-filtered KNN choosing its strategy by cost, chronological Datetime order in new and rebuilt indexes, field definitions re-keyed at startup, exact float/decimal comparison, index entries for records whose ids differ only in a number's kind, and the type-erased doc-ID mappings retired at startup
 
