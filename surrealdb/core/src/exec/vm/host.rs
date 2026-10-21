@@ -642,8 +642,10 @@ pub(super) fn unit_state(
 
 /// Give `state`, a new state of `program` run in `ctx`, the distances of the KNN search of the
 /// statement `program` is nested in ([`ExecutionContext::inherited_knn`]) as those of its own
-/// code, where `program` publishes no distances of a search of its own: its index functions report
-/// against the enclosing statement's search, as a nested statement inherits that scope.
+/// code, where its own code publishes no distances of a search of its own: its index functions
+/// report against the enclosing statement's search, as a nested statement inherits that scope. A
+/// statement the program runs in place publishes into a slot of its own group, and leaves the
+/// program's own slot, `0`, to inherit.
 fn inherit_knn(program: &Program, state: &mut State, ctx: &ExecutionContext) {
 	fn publishes(source: &super::program::Source) -> bool {
 		match source {
@@ -651,7 +653,7 @@ fn inherit_knn(program: &Program, state: &mut State, ctx: &ExecutionContext) {
 			other => matches!(
 				other,
 				super::program::Source::Knn {
-					slot: Some(_),
+					slot: Some(0),
 					..
 				}
 			),
@@ -660,7 +662,7 @@ fn inherit_knn(program: &Program, state: &mut State, ctx: &ExecutionContext) {
 	let Some(knn) = ctx.inherited_knn() else {
 		return;
 	};
-	if program.sorts.iter().any(|sort| sort.knn_slot.is_some())
+	if program.sorts.iter().any(|sort| sort.knn_slot == Some(0))
 		|| program.pipelines.iter().any(|pipeline| publishes(&pipeline.source))
 	{
 		return;
@@ -950,8 +952,15 @@ async fn evaluate_knn_search(
 /// its own, the first time a row is ranked against it
 /// ([`evaluate_knn_query_of`]) or a source searches with it
 /// ([`evaluate_knn_search`]), where a run of a correlated statement may compute
-/// another vector than the run before.
+/// another vector than the run before. A block statement also lets go of the
+/// distances its search published (its slot, `group + 1`), which the new run
+/// publishes afresh; the program's own slot may hold the distances it inherits.
 pub(super) fn forget_knn_queries(program: &Program, group: Option<u16>, state: &mut State) {
+	if let Some(group) = group
+		&& let Some(slot) = state.knn_contexts.get_mut(usize::from(group) + 1)
+	{
+		*slot = None;
+	}
 	for (at, spec) in program.sorts.iter().enumerate() {
 		if spec.knn_query.as_ref().is_some_and(|query| query.group == group)
 			&& let Some(held) = state.knn_queries.get_mut(at)
@@ -1049,8 +1058,22 @@ pub(super) async fn run_pipelines(
 					.await
 					.map_err(ControlFlow::Err)?;
 				let db_ctx = ctx.database().context("the VM requires a database context")?;
-				let hidden = matches!(pipeline.source, Source::Scan { .. })
-					&& absence_hidden(&descriptor, db_ctx)?;
+				// A scan, and a read of the records a list names, which stands for one, read an
+				// absent table as empty where the absence is hidden, as when they run.
+				let hidden = absence_hidden(&descriptor, db_ctx)?
+					&& match &pipeline.source {
+						Source::Scan {
+							..
+						} => true,
+						Source::Record {
+							record,
+							..
+						} => matches!(
+							host_scalar(program, record, ctx, None).await?,
+							Value::Array(_)
+						),
+						_ => false,
+					};
 				if !hidden {
 					descriptor.defined().map_err(ControlFlow::Err)?;
 				}
@@ -1594,7 +1617,19 @@ pub(super) async fn run_storage_source(
 			let descriptor = crate::exec::vm::descriptor::table_at(ctx, table, version)
 				.await
 				.map_err(ControlFlow::Err)?;
-			let def = descriptor.defined().map_err(ControlFlow::Err)?;
+			// A list stands for the scan of the table it names records of, so an absent table
+			// reads as empty to a caller from whom the absence is hidden, as the scan does
+			// ([`absence_hidden`]); a record read by its id raises the absence.
+			let def = match descriptor.defined() {
+				Ok(def) => def,
+				Err(error) if absence_hidden(&descriptor, db_ctx)? => {
+					return match host_scalar(program, record, ctx, None).await? {
+						Value::Array(_) => Ok(false),
+						_ => Err(ControlFlow::Err(error)),
+					};
+				}
+				Err(error) => return Err(ControlFlow::Err(error)),
+			};
 			match host_scalar(program, record, ctx, None).await? {
 				// A locked read is of one record, and of no historical version.
 				Value::RecordId(rid) if *for_update && rid.key.is_range() => {
@@ -1661,6 +1696,39 @@ pub(super) async fn run_storage_source(
 					let step = step?;
 					flush(state, yielder, flush_at, ctx).await?;
 					Ok(step == Ended::Stop)
+				}
+				// The records a list names, in its order, each run as the record of a record id:
+				// the planner reads `id IN <list>` this way, the list holding record ids of the
+				// table in key order. A record that does not exist is no row.
+				Value::Array(records) if !*for_update => {
+					refuse_lightweight(table, def)?;
+					for record in records.iter() {
+						super::fuel::tick(ctx, 1).await?;
+						let Value::RecordId(rid) = record else {
+							return Err(ControlFlow::Err(anyhow::anyhow!(
+								"a record source listed {record:?}, not a record id"
+							)));
+						};
+						if rid.key.is_range() {
+							return Err(ControlFlow::Err(anyhow::anyhow!(
+								"a record source listed the range {rid:?}"
+							)));
+						}
+						let Some(row) = fetch_raw_record(ctx, rid, version).await? else {
+							continue;
+						};
+						let named = state.write.as_deref_mut().map(|write| write.row_named(true));
+						let step = run_value_row(program, pipeline, row, state, ctx).await;
+						if let (Some(named), Some(write)) = (named, state.write.as_deref_mut()) {
+							write.row_named(named);
+						}
+						let stop = step? == Ended::Stop;
+						flush(state, yielder, flush_at, ctx).await?;
+						if stop {
+							return Ok(true);
+						}
+					}
+					Ok(false)
 				}
 				other => Err(ControlFlow::Err(anyhow::anyhow!(
 					"a record source evaluated to {other:?}, not a record id"

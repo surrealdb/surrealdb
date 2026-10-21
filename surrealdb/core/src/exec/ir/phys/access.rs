@@ -96,9 +96,9 @@ use crate::exec::logical::{Descend, visit_binding_pruning};
 use crate::exec::operators::scan::MergeMode;
 use crate::exec::operators::scan::pipeline::determine_scan_direction;
 use crate::exec::planner::util::{
-	expr_contains_matches, extract_record_id_point_lookup, field_path_from_expr, has_knn_operator,
-	idiom_is_id, index_covers_ordering, strip_knn_and_matches_from_condition,
-	strip_knn_from_condition,
+	expr_contains_matches, extract_record_id_list_lookup, extract_record_id_point_lookup,
+	field_path_from_expr, has_knn_operator, idiom_is_id, index_covers_ordering,
+	is_record_id_list_lookup, strip_knn_and_matches_from_condition, strip_knn_from_condition,
 };
 use crate::exec::planner::{RestrictedPrefixes, decide_union_merge};
 use crate::exec::vm::payload::{CountSelect, KnnFilter, KnnPrefilter, Refusal, ValuesRead};
@@ -109,7 +109,7 @@ use crate::expr::logical::{
 use crate::expr::with::With;
 use crate::expr::{BinaryOperator, Function};
 use crate::kvs::Direction;
-use crate::val::{Number, Value};
+use crate::val::{Number, RecordId, RecordIdKey, Value};
 
 /// Which fields of a table a non-`Full` `SELECT` permission governs for the actor.
 ///
@@ -351,7 +351,7 @@ pub(crate) struct AccessChoice {
 	/// The positions of the conjuncts that remain in the filter above the read, in order.
 	pub(crate) residual: Vec<usize>,
 	/// The position of the conjunct `id = <record id>` whose record id a point read takes as its
-	/// operand, when the read is one.
+	/// operand, or of the conjunct `id IN <list>` whose record ids it takes, when the read is one.
 	pub(crate) point_lookup: Option<usize>,
 	/// The conjuncts a `KNN` scan judges, when the read is one.
 	pub(crate) knn: Option<KnnConjuncts>,
@@ -494,6 +494,30 @@ pub(crate) fn select_access(
 				table: table.table.clone(),
 				for_update: false,
 				lightweight: table.lightweight,
+				read: read_clauses(table, source.with.as_ref()),
+			})))
+		});
+	}
+	// `id IN <list>` reads the listed records of the table by key, in key order, as the table scan
+	// it replaces yields them. The whole predicate stays above the read. A lightweight relation
+	// reads one record by its own source, the subjects of a write are read by a scan their stages
+	// judge, and a table the catalog does not define, or a read that meets a catalog change, is
+	// scanned as the definitions it meets when it runs require.
+	if cx.id_bounds
+		&& table.defined
+		&& !source.may_meet_change
+		&& !table.lightweight
+		&& table.key.is_none()
+		&& !cond.as_ref().is_some_and(has_knn_operator)
+		&& let Some(at) = predicate.conjuncts.iter().find_map(|(at, conjunct)| {
+			is_record_id_list_lookup(conjunct, &table.table).then_some(*at)
+		}) {
+		return Ok(AccessChoice {
+			point_lookup: Some(at),
+			..finished(PhysOp::RecordScan(Box::new(RecordScanAttrs {
+				table: table.table.clone(),
+				for_update: false,
+				lightweight: false,
 				read: read_clauses(table, source.with.as_ref()),
 			})))
 		});
@@ -1417,8 +1441,12 @@ pub(crate) fn convert_source(
 	apply_source(rw, op, planned)
 }
 
-/// The record id a point lookup reads, from the conjunct `id = <record id>`.
+/// The record id a point lookup reads, from the conjunct `id = <record id>`, or the record ids it
+/// reads from the conjunct `id IN <list>`.
 enum PointKey {
+	/// A value known when the plan is made: the record ids of a list, in key order and without
+	/// repeats, as one array literal, or a record id the planner folded from a record path.
+	Constant(Value),
 	/// A key with no operands, built beside the scan.
 	Literal(TableName, KeyShape),
 	/// The conjunct's own record id, whose key has operands: copied out of the region of the
@@ -1727,8 +1755,14 @@ fn plan_source(ir: &Ir, op: OpId, cx: &PhysCx<'_>) -> Result<Option<Planned>, Ir
 	if (offer.enforced_above || resolved) && (offer.write_subjects || !attrs.may_meet_change) {
 		choice.enforce = None;
 	}
+	// The decision read the conjunct with the record paths the planner folded (`decide`), so the
+	// key is read from the same form when the conjunct as written names no literal record.
+	let physical = match answers.version {
+		ReadVersion::Current => Some(cx.physical),
+		ReadVersion::Stamped(_) | ReadVersion::Deferred => None,
+	};
 	let point = match choice.point_lookup {
-		Some(at) => Some(point_key(ir, &offer, &answers.table, at)?),
+		Some(at) => Some(point_key(ir, &offer, &answers.table, at, physical, cx.effects.registry)?),
 		None => None,
 	};
 	let key_operands = choice
@@ -2027,21 +2061,51 @@ fn key_operand(
 	})
 }
 
-/// The record id the point lookup chosen for the conjunct at `at` of the offer's predicate reads.
+/// The record id the point lookup chosen for the conjunct at `at` of the offer's predicate reads,
+/// or the record ids of the list it reads.
 ///
-/// The conjunct is one [`extract_record_id_point_lookup`] accepts, so it is `id = <record id>`
-/// of `table` whose key reads nothing of the row. A key with no operands is built afresh; any
-/// other is the conjunct's own record id, copied out of its filter's region. A conjunct that is
-/// not of that form is an [`IrError::Invariant`].
-fn point_key(ir: &Ir, offer: &Offer, table: &TableName, at: usize) -> Result<PointKey, IrError> {
-	let record = offer
-		.predicate
-		.conjuncts
-		.iter()
-		.find(|(position, _)| *position == at)
-		.and_then(|(_, conjunct)| extract_record_id_point_lookup(conjunct, table));
+/// The conjunct is one [`extract_record_id_point_lookup`] or [`extract_record_id_list_lookup`]
+/// accepts, as written or with the record paths `physical` folds (the form the decision read, where
+/// a projection call such as `type::field('id')` reads as the field it names). A key with no
+/// operands is built afresh, a folded record or list is its value, and any other key is the
+/// conjunct's own record id, copied out of its filter's region. A conjunct that is not of
+/// that form is an [`IrError::Invariant`].
+fn point_key(
+	ir: &Ir,
+	offer: &Offer,
+	table: &TableName,
+	at: usize,
+	physical: Option<&dyn PhysicalCatalog>,
+	registry: &FunctionRegistry,
+) -> Result<PointKey, IrError> {
+	let conjunct =
+		offer.predicate.conjuncts.iter().find(|(position, _)| *position == at).map(|(_, c)| c);
+	let list = |conjunct: &LogicalExpr| {
+		extract_record_id_list_lookup(conjunct, table).map(|records| {
+			let records: Vec<Value> = records.into_iter().map(Value::RecordId).collect();
+			PointKey::Constant(Value::Array(records.into()))
+		})
+	};
+	if let Some(key) = conjunct.and_then(list) {
+		return Ok(key);
+	}
+	let record = conjunct.and_then(|conjunct| extract_record_id_point_lookup(conjunct, table));
 	if let Some((table, key)) = record.as_ref().and_then(record_key) {
 		return Ok(PointKey::Literal(table, key));
+	}
+	let folded = match (conjunct, physical) {
+		(Some(conjunct), Some(physical)) => physical.record_folded(conjunct),
+		_ => None,
+	};
+	if let Some(folded) = folded {
+		if let Some(key) = list(&folded) {
+			return Ok(key);
+		}
+		if let Some(value) =
+			point_lookup_record(&folded, table, registry).as_ref().and_then(record_value)
+		{
+			return Ok(PointKey::Constant(value));
+		}
 	}
 	let not_a_point = || IrError::Invariant {
 		what: "access::convert_source: a point lookup whose conjunct names no record id",
@@ -2080,6 +2144,31 @@ fn point_key(ir: &Ir, offer: &Offer, table: &TableName, at: usize) -> Result<Poi
 		return Err(not_a_point());
 	}
 	Ok(PointKey::Copied(region, value))
+}
+
+/// The record id `record` names, when it is a record id whose key is built of literals alone.
+fn record_value(record: &LogicalExpr) -> Option<Value> {
+	let LogicalExpr::RecordId(record) = record else {
+		return None;
+	};
+	let literal = crate::exec::planner::util::try_literal_to_value;
+	let key = match &record.key {
+		LogicalRecordIdKey::Number(number) => RecordIdKey::Number(*number),
+		LogicalRecordIdKey::String(string) => RecordIdKey::String(string.clone()),
+		LogicalRecordIdKey::Uuid(uuid) => RecordIdKey::Uuid(*uuid),
+		LogicalRecordIdKey::Array(items) => {
+			RecordIdKey::Array(items.iter().map(literal).collect::<Option<Vec<_>>>()?.into())
+		}
+		LogicalRecordIdKey::Object(entries) => RecordIdKey::Object(
+			entries
+				.iter()
+				.map(|(name, item)| Some((name.clone(), literal(item)?)))
+				.collect::<Option<std::collections::BTreeMap<_, _>>>()?
+				.into(),
+		),
+		LogicalRecordIdKey::Generate(_) | LogicalRecordIdKey::Range(_) => return None,
+	};
+	Some(Value::RecordId(RecordId::new(record.table.clone(), key)))
 }
 
 /// The key shape of the record id `record`, when it is a literal key that fixes a record: a
@@ -2137,6 +2226,15 @@ fn apply_source(rw: &mut Rewriter<'_>, op: OpId, planned: Planned) -> Result<Con
 		match (&choice.access, point) {
 			(PhysOp::RecordScan(..), Some(PointKey::Copied(region, value))) => {
 				operands.push(value_copy(rw, region, value, op)?);
+			}
+			(PhysOp::RecordScan(..), Some(PointKey::Constant(records))) => {
+				let kind = ExprOp::Literal(Box::new(records));
+				let ty = result_type(&kind, &[]);
+				let list = rw.create(
+					InsertPoint::Before(op),
+					spec(OpKind::Expr(kind), SmallVec::new(), ty),
+				)?;
+				operands.push(first_result(rw.ir(), list)?);
 			}
 			(PhysOp::RecordScan(..), Some(PointKey::Literal(table, key))) => {
 				let kind = ExprOp::RecordId(Box::new(RecordIdAttrs {

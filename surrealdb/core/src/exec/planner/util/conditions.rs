@@ -901,6 +901,73 @@ fn check_id_recordid_pair(
 	}
 }
 
+/// The list of the conjunct `cond` when it is `id IN <list>` or `<list> CONTAINS id`, `<list>` an
+/// array or set literal.
+fn record_id_list(cond: &LogicalExpr) -> Option<&LogicalExpr> {
+	let LogicalExpr::Binary {
+		left,
+		op,
+		right,
+	} = cond
+	else {
+		return None;
+	};
+	match op {
+		BinaryOperator::Inside if idiom_is_id(left) => Some(right),
+		BinaryOperator::Contain if idiom_is_id(right) => Some(left),
+		_ => None,
+	}
+}
+
+/// Whether [`extract_record_id_list_lookup`] answers for `cond`, judged without building the list:
+/// every element is a literal, and every record id of `table` among them has a number, string or
+/// uuid key.
+pub(crate) fn is_record_id_list_lookup(cond: &LogicalExpr, table: &TableName) -> bool {
+	let Some(LogicalExpr::Array(items) | LogicalExpr::Set(items)) = record_id_list(cond) else {
+		return false;
+	};
+	items.iter().all(|item| match item {
+		LogicalExpr::RecordId(record) if &record.table == table => matches!(
+			record.key,
+			LogicalRecordIdKey::Number(_)
+				| LogicalRecordIdKey::String(_)
+				| LogicalRecordIdKey::Uuid(_)
+		),
+		other => super::literals::try_literal_to_value(other).is_some(),
+	})
+}
+
+/// The records of `table` the conjunct `cond` admits when it is `id IN <list>` or
+/// `<list> CONTAINS id`, `<list>` an array or set literal: its record ids of `table`, in key order
+/// and without repeats. An element that is not a record id of `table` names no record of it and is
+/// left out. `None` when `cond` is not of that form, or when a record id of `table` in the list
+/// has a key other than a number, a string or a uuid: only for those keys does a record id that
+/// equals the list's element name the one stored key the element spells, and do record ids
+/// compare in the order their stored keys are read in.
+pub(crate) fn extract_record_id_list_lookup(
+	cond: &LogicalExpr,
+	table: &TableName,
+) -> Option<Vec<crate::val::RecordId>> {
+	if !is_record_id_list_lookup(cond, table) {
+		return None;
+	}
+	let elements: Vec<Value> = match super::literals::try_literal_to_value(record_id_list(cond)?)? {
+		Value::Array(arr) => arr.0,
+		Value::Set(set) => set.into_iter().collect(),
+		_ => return None,
+	};
+	let mut records: Vec<crate::val::RecordId> = elements
+		.into_iter()
+		.filter_map(|element| match element {
+			Value::RecordId(record) if &record.table == table => Some(record),
+			_ => None,
+		})
+		.collect();
+	records.sort();
+	records.dedup();
+	Some(records)
+}
+
 // ============================================================================
 // MATCHES Context Extraction
 // ============================================================================
@@ -919,4 +986,53 @@ pub(crate) fn extract_table_from_matches(
 		return table.clone();
 	}
 	TableName::from("unknown".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+	use surrealdb_strand::TableName;
+	use surrealdb_types::ToSql;
+
+	use super::extract_record_id_list_lookup;
+	use crate::expr::logical::{LogicalExpr, lower_expr};
+
+	fn expr(sql: &str) -> LogicalExpr {
+		let ast = crate::syn::parse(&format!("RETURN {sql}")).expect("expression should parse");
+		let surrealdb_expr::parser::TopLevelExpr::Expr(crate::expr::Expr::Return(out)) =
+			ast.expressions.into_iter().next().expect("one statement")
+		else {
+			panic!("expected a RETURN");
+		};
+		lower_expr(out.what).expect("expression should lower")
+	}
+
+	fn listed(sql: &str) -> Option<Vec<String>> {
+		extract_record_id_list_lookup(&expr(sql), &TableName::from("t"))
+			.map(|records| records.iter().map(|r| r.to_sql()).collect())
+	}
+
+	#[test]
+	fn an_id_list_names_its_records_of_the_table_in_key_order() {
+		assert_eq!(
+			listed("id IN [t:3, t:1, t:3, u:2, 'x', t:b, t:a]"),
+			Some(vec!["t:1".into(), "t:3".into(), "t:a".into(), "t:b".into()])
+		);
+		assert_eq!(listed("[t:2, t:1] CONTAINS id"), Some(vec!["t:1".into(), "t:2".into()]));
+		assert_eq!(listed("id IN [u:1, NONE]"), Some(vec![]));
+	}
+
+	#[test]
+	fn an_id_list_with_a_composite_or_range_key_names_no_records() {
+		assert_eq!(listed("id IN [t:1, t:[1, 2]]"), None);
+		assert_eq!(listed("id IN [t:1, t:{ a: 1 }]"), None);
+		assert_eq!(listed("id IN [t:1..3]"), None);
+	}
+
+	#[test]
+	fn only_a_list_literal_against_id_names_records() {
+		assert_eq!(listed("id IN $list"), None);
+		assert_eq!(listed("other IN [t:1]"), None);
+		assert_eq!(listed("id CONTAINS t:1"), None);
+		assert_eq!(listed("id = t:1"), None);
+	}
 }

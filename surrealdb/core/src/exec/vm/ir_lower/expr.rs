@@ -292,7 +292,7 @@ pub(super) struct Lowerer<'a> {
 	/// every region the lowerer entered.
 	pub(super) region: Option<RegionId>,
 	/// The ops being lowered, innermost last: the op an instruction is emitted for.
-	owners: Vec<OpId>,
+	pub(super) owners: Vec<OpId>,
 	claims: Vec<Claim>,
 	context: ContextLevel,
 	pub(super) keeps_row_order: bool,
@@ -1410,6 +1410,25 @@ impl<'a> Lowerer<'a> {
 		Ok(())
 	}
 
+	/// The op that defines `v`, when no read has lowered it yet and `v` is its result.
+	fn unlowered_def(&self, v: ValueId) -> Option<OpId> {
+		if self.scope.values.contains_key(&v) || self.slots.contains_key(&v) {
+			return None;
+		}
+		match self.ir.value(v)?.def {
+			ValueDef::OpResult {
+				op,
+				index: 0,
+			} => Some(op),
+			ValueDef::OpResult {
+				..
+			}
+			| ValueDef::BlockArg {
+				..
+			} => None,
+		}
+	}
+
 	/// Where the value `v` is read from once the instructions emitted so far have run.
 	///
 	/// Lowers the op that defines `v` unless an earlier read did. A block argument is read from
@@ -1583,7 +1602,11 @@ impl<'a> Lowerer<'a> {
 	/// reads that is defined further out, and that no lowering of its owner put in scope (a region
 	/// a statement lowering enters itself), is lowered where the region reads it, in the region's
 	/// own scope.
-	fn lower_reads_of_regions(&mut self, owner: OpId, data: &OpData) -> Result<(), IrError> {
+	pub(super) fn lower_reads_of_regions(
+		&mut self,
+		owner: OpId,
+		data: &OpData,
+	) -> Result<(), IrError> {
 		let ir = self.ir;
 		let block = ir.block(data.parent).ok_or(IrError::Stale("ir_lower::expr: block"))?;
 		let at = block
@@ -1855,6 +1878,13 @@ impl<'a> Lowerer<'a> {
 						return Ok(typed);
 					}
 					let left = self.value(left)?;
+					if let (CompareOp::Inside | CompareOp::NotInside, Some(subquery)) =
+						(op, self.unlowered_def(right))
+						&& let Some(member) =
+							self.member(subquery, left, matches!(op, CompareOp::NotInside))?
+					{
+						return Ok(member);
+					}
 					let right = self.value(right)?;
 					let dst = self.em.reg()?;
 					self.emit(Instr::Compare {
@@ -3443,9 +3473,7 @@ fn resolved_query(ir: &Ir, value: ValueId, row: Option<ValueId>, checked: bool) 
 				..
 			}) => return false,
 			OpKind::Expr(ExprOp::RecordId(_)) if checked => return false,
-			OpKind::Expr(ExprOp::Literal(literal))
-				if checked && matches!(**literal, Value::RecordId(_)) =>
-			{
+			OpKind::Expr(ExprOp::Literal(literal)) if checked && holds_record_id(literal) => {
 				return false;
 			}
 			OpKind::Expr(_) if held.regions.is_empty() => {
@@ -3456,6 +3484,37 @@ fn resolved_query(ir: &Ir, value: ValueId, row: Option<ValueId>, checked: bool) 
 		}
 	}
 	true
+}
+
+/// Whether `value` is a record id or holds one at any depth: a collection literal holds the record
+/// ids written in it, and a step over it may read their records.
+fn holds_record_id(value: &Value) -> bool {
+	match value {
+		Value::RecordId(_) => true,
+		Value::Array(arr) => arr.iter().any(holds_record_id),
+		Value::Set(set) => set.iter().any(holds_record_id),
+		Value::Object(obj) => obj.values().any(holds_record_id),
+		Value::Range(range) => [&range.start, &range.end].into_iter().any(|bound| match bound {
+			std::ops::Bound::Included(value) | std::ops::Bound::Excluded(value) => {
+				holds_record_id(value)
+			}
+			std::ops::Bound::Unbounded => false,
+		}),
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Closure(_) => false,
+	}
 }
 
 /// The text of the `MATCHES` operator `op` as the planner rebuilds it, when the rebuild reads it
@@ -3836,6 +3895,21 @@ mod tests {
 			})),
 			operands,
 		)
+	}
+
+	/// A record id held anywhere in a literal is one a step over the literal may read, so a checked
+	/// caller's `MATCHES` query that holds one is not the plan's to resolve.
+	#[test]
+	fn a_record_id_anywhere_in_a_literal_is_held() {
+		let record = Value::RecordId(RecordId::new("t".into(), RecordIdKey::Number(1)));
+		let nested = |value: Value| Value::Array(vec![Value::from(1_i64), value].into());
+		assert!(super::holds_record_id(&record));
+		assert!(super::holds_record_id(&nested(record.clone())));
+		assert!(super::holds_record_id(&nested(nested(record.clone()))));
+		assert!(super::holds_record_id(&Value::Object(crate::val::Object::from(
+			std::collections::BTreeMap::from([(surrealdb_strand::Strand::from("a"), record)])
+		))));
+		assert!(!super::holds_record_id(&nested(Value::from("t:1"))));
 	}
 
 	#[test]

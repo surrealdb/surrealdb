@@ -57,7 +57,7 @@ mod keyed_record;
 mod knn;
 mod knn_ids;
 pub(crate) mod matches;
-mod nested;
+pub(crate) mod nested;
 mod offer;
 mod once;
 pub(crate) mod ops;

@@ -49,13 +49,16 @@
 //! outlive one evaluation, neither of which a unit run afresh holds. The kept value and the probes
 //! the group reads through are owned by the group open where the expression is lowered (`None` for
 //! the program's own code), whose start forgets the value and empties the probes' kept rows.
-//! Whether a `Once` statement is read as a membership set
-//! ([`is_membership_set`](crate::exec::ir::expr::membership::is_membership_set)), which would let
-//! it keep its rows as a membership index, changes no answer, so this lowering keeps the value
-//! the statement holds. The hashed plan of a `Lookup` is a second group, under the same owner,
-//! which the run reads through in place of the lookup past [`LOOKUP_EVALUATIONS`] evaluations of
-//! one run of that owner, and for a key the index may not list every equal record under; the
-//! spec holds it with the path into `$parent` of the key the lookup reads.
+//! A `Once` statement whose every reader tests membership in its rows
+//! ([`held_as_members`](crate::exec::ir::phys::nested::held_as_members)) keeps them as a
+//! membership index ([`BlockInstr::Member`], [`NestedSpec::members`]): each `INSIDE` or
+//! `NOT INSIDE` that reads it is lowered to the membership step of its probe ([`Lowerer::member`]),
+//! which answers what the comparison over the gathered array answers.
+//!
+//! The hashed plan of a `Lookup` is a second group, under the same owner, which the run reads
+//! through in place of the lookup past [`LOOKUP_EVALUATIONS`] evaluations of one run of that
+//! owner, and for a key the index may not list every equal record under; the spec holds it with
+//! the path into `$parent` of the key the lookup reads.
 //!
 //! The instruction binds the row it evaluates the statement for as `$parent` and `$this`, so the
 //! group's code reads that row, wherever the statement reads it from outside its regions, as
@@ -159,7 +162,7 @@ impl Lowerer<'_> {
 				// A value kept by the list of a statement program would outlive an iteration of
 				// a loop around it, which may change what the statement reads.
 				let kept = match self.lowers_a_read_pipeline() {
-					true => self.statement_in_place(region, None, true)?,
+					true => self.statement_in_place(region, None, true, None)?,
 					false => None,
 				};
 				match kept {
@@ -172,7 +175,7 @@ impl Lowerer<'_> {
 				..
 			} => {
 				let region = region_at(data, 0, 1)?;
-				match self.statement_in_place(region, None, false)? {
+				match self.statement_in_place(region, None, false, None)? {
 					Some(value) => Ok(value),
 					// Run as a unit, the probe no evaluation owns reads the rows beneath the
 					// predicate for every evaluation.
@@ -189,7 +192,7 @@ impl Lowerer<'_> {
 					true => Some(region_at(data, 1, count)?),
 					false => None,
 				};
-				match self.statement_in_place(region, hashed, false)? {
+				match self.statement_in_place(region, hashed, false, None)? {
 					Some(value) => Ok(value),
 					// The lookup's own region reads through no probe, and reads through the
 					// index for every evaluation.
@@ -199,17 +202,61 @@ impl Lowerer<'_> {
 		}
 	}
 
+	/// Whether `probe` is a member of the rows of the statement `subquery` (not a member when
+	/// `negate`), as `probe INSIDE (subquery)` (`NOT INSIDE`) answers, read through the statement's
+	/// membership index ([`BlockInstr::Member`]). `None`, with nothing emitted, unless the
+	/// statement runs once, its one reader tests membership in its rows
+	/// ([`held_as_members`](crate::exec::ir::phys::nested::held_as_members)) and the code being
+	/// lowered runs it in place, kept across evaluations; the comparison then reads the statement's
+	/// value as any other operand. A statement two comparisons read keeps its value once for both,
+	/// where an index per reader would run it once per reader.
+	pub(super) fn member(
+		&mut self,
+		subquery: OpId,
+		probe: Operand,
+		negate: bool,
+	) -> Result<Option<Operand>, IrError> {
+		let ir = self.ir;
+		let Some(data) = ir.op(subquery) else {
+			return Ok(None);
+		};
+		let one_reader = data.results.first().is_some_and(|result| ir.uses(*result).len() == 1);
+		if !matches!(data.kind, OpKind::Expr(ExprOp::Subquery(NestedStrategy::Once)))
+			|| !one_reader
+			|| !crate::exec::ir::phys::nested::held_as_members(ir, subquery)
+			|| !self.lowers_a_read_pipeline()
+		{
+			return Ok(None);
+		}
+		self.refuse_in_fold("ir_lower::fold: expr.subquery")?;
+		self.require_frame(data)?;
+		exactly::<0>(data)?;
+		let region = region_at(data, 0, 1)?;
+		self.lower_reads_of_regions(subquery, data)?;
+		self.owners.push(subquery);
+		let lowered = self.statement_in_place(region, None, true, Some((probe, negate)));
+		self.owners.pop();
+		lowered
+	}
+
 	/// The value the statement region `region` holds, run in place as a group of the program
 	/// ([`BlockInstr::Nested`]), with `hashed`, for a `Lookup` that keeps one, the region of its
 	/// hashed plan as a second group, and with `once` its value kept from the first evaluation
-	/// until the group it is evaluated in starts again. `None`, with nothing emitted, where the
-	/// code being lowered does not run the statement in place (see the module).
+	/// until the group it is evaluated in starts again. With `member`, a probe and whether the
+	/// test negates, the value is instead whether the probe is a member of the statement's rows,
+	/// kept as a membership index ([`BlockInstr::Member`]); only a statement kept with `once` is
+	/// read that way. `None`, with nothing emitted, where the code being lowered does not run the
+	/// statement in place (see the module).
 	fn statement_in_place(
 		&mut self,
 		region: RegionId,
 		hashed: Option<RegionId>,
 		once: bool,
+		member: Option<(Operand, bool)>,
 	) -> Result<Option<Operand>, IrError> {
+		if member.is_some() && !once {
+			return Err(invariant("a membership index over a statement that is not kept"));
+		}
 		if self.next_group()?.is_none()
 			|| self.sets_statement_document()
 			|| self.in_frame_of_its_own()
@@ -270,18 +317,40 @@ impl Lowerer<'_> {
 			hoist: None,
 			read_only: access_mode == AccessMode::ReadOnly,
 			probed,
-			members: false,
+			members: member.is_some(),
 			hashed: hashed.map(|(plan, path, _)| (plan, path)),
 		})?;
+		let member = match member {
+			Some((Operand::Reg(probe), negate)) => Some((probe, negate)),
+			Some((probe, negate)) => {
+				let reg = self.em.reg()?;
+				self.emit(Instr::Load {
+					dst: reg,
+					src: probe,
+				});
+				Some((reg, negate))
+			}
+			None => None,
+		};
 		let dst = self.em.reg()?;
 		let resume = self.em.label()?;
 		let caught = self.own_catch(dst, resume);
 		let frame = self.frame.program;
-		self.emit(Instr::Block(BlockInstr::Nested {
-			nested,
-			dst,
-			frame,
-			caught,
+		self.emit(Instr::Block(match member {
+			Some((probe, negate)) => BlockInstr::Member {
+				nested,
+				probe,
+				dst,
+				negate,
+				frame,
+				caught,
+			},
+			None => BlockInstr::Nested {
+				nested,
+				dst,
+				frame,
+				caught,
+			},
 		}));
 		self.em.bind(resume)?;
 		if access_mode == AccessMode::ReadWrite {

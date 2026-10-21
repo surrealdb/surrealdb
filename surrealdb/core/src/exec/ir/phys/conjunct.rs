@@ -506,24 +506,78 @@ pub(super) fn pins_record(ir: &Ir, conjunct: ValueId, record: &RecordId) -> bool
 	else {
 		return false;
 	};
-	let is_id = |value: ValueId| {
-		let Some(held) = def_op(ir, value).and_then(|def| ir.op(def)) else {
-			return false;
-		};
-		match &held.kind {
-			OpKind::Expr(ExprOp::Doc) => is_row(ir, held.operands.first()),
-			OpKind::Expr(ExprOp::Field {
-				name,
-			}) => name.as_str() == "id" && is_row(ir, held.operands.first()),
-			OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => false,
-		}
-	};
-	let other = match (is_id(*left), is_id(*right)) {
+	let other = match (reads_id(ir, *left), reads_id(ir, *right)) {
 		(true, false) => *right,
 		(false, true) => *left,
 		_ => return false,
 	};
 	literal_record(ir, other).is_some_and(|literal| literal == *record)
+}
+
+/// Whether `conjunct` is `id INSIDE list` or `list CONTAINS id`, `list` an array or set literal
+/// holding every record of `records`, which a read of those records holds true of each row it
+/// yields: the row's `id` is the record it was read as.
+pub(super) fn pins_record_list(ir: &Ir, conjunct: ValueId, records: &[RecordId]) -> bool {
+	let Some(data) = def_op(ir, strip_truthy(ir, conjunct)).and_then(|def| ir.op(def)) else {
+		return false;
+	};
+	let (
+		OpKind::Expr(ExprOp::Binary {
+			op,
+		}),
+		[left, right],
+	) = (&data.kind, data.operands.as_slice())
+	else {
+		return false;
+	};
+	let list = if *op == BinaryOperator::Inside && reads_id(ir, *left) {
+		*right
+	} else if *op == BinaryOperator::Contain && reads_id(ir, *right) {
+		*left
+	} else {
+		return false;
+	};
+	let Some(OpKind::Expr(ExprOp::Literal(held))) =
+		def_op(ir, list).and_then(|def| ir.op(def)).map(|data| &data.kind)
+	else {
+		return false;
+	};
+	if let Value::Array(items) = &**held {
+		records_in(items.iter(), records)
+	} else if let Value::Set(items) = &**held {
+		records_in(items.iter(), records)
+	} else {
+		false
+	}
+}
+
+/// Whether every record of `records` is among the record ids of `items`.
+fn records_in<'a>(items: impl Iterator<Item = &'a Value>, records: &[RecordId]) -> bool {
+	let listed: std::collections::BTreeSet<&RecordId> = items
+		.filter_map(|item| {
+			if let Value::RecordId(record) = item {
+				Some(record)
+			} else {
+				None
+			}
+		})
+		.collect();
+	records.iter().all(|record| listed.contains(record))
+}
+
+/// Whether `value` reads the row's record id: its `id` field, or the row itself where the row is
+/// a record id.
+fn reads_id(ir: &Ir, value: ValueId) -> bool {
+	let Some(held) = def_op(ir, value).and_then(|def| ir.op(def)) else {
+		return false;
+	};
+	match &held.kind {
+		OpKind::Expr(ExprOp::Doc) => is_row(ir, held.operands.first()),
+		OpKind::Expr(ExprOp::Field {
+			name,
+		}) => name.as_str() == "id" && is_row(ir, held.operands.first()),
+		OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => false,
+	}
 }
 
 /// The `AND` ops along the left side of the chain whose root is `root`, root first: the ops a

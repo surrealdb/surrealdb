@@ -37,6 +37,11 @@
 //!   included.
 //! - **Lossy values:** a value whose literal form evaluates to something else
 //!   (`substitution_is_lossy`) stays a parameter.
+//! - **Steps over a substituted value:** a field, an index or an end read off a substituted
+//!   parameter (`$rows.id`, `$rows[0].id`) is replaced by the value the steps read off the literal
+//!   (`literal_step_value`), so an index operand is the value a binding holds and not a path to it.
+//!   A chain whose steps would read a record (a record id anywhere in what a field step reads) or
+//!   whose index is not a literal keeps its steps, which run per row.
 //! - **KNN query vectors:** where a name holding an array of numbers is the query vector of a KNN
 //!   operator (`<|k, …|>`), it stays a parameter there, and only there. The operator is evaluated
 //!   as membership of the row's id in its source's result, never from its operands, and the
@@ -68,7 +73,8 @@ use super::{
 	visit_binding_pruning_mut, visit_deep,
 };
 use crate::exec::planner::util::{
-	ParamBinding, bind_param, substitution_is_lossy, value_to_logical_expr,
+	ParamBinding, bind_param, literal_step_value, substitution_is_lossy, try_value_to_logical_expr,
+	value_to_logical_expr,
 };
 use crate::expr::logical::{
 	LogicalDdl, LogicalDdlStatement, LogicalEval, LogicalExpr, LogicalFilter, LogicalForeach,
@@ -666,8 +672,62 @@ fn substitute(expr: &mut LogicalExpr, subs: &Substitutions) {
 			*e = literal.clone();
 			return Descend::Over;
 		}
+		if let Some(root) = step_root(e)
+			&& let LogicalExpr::Param(param) = root
+			&& let Some(literal) = subs.literals.get(param.as_str())
+		{
+			*root = literal.clone();
+			// The chain's own operands, an index such as `$i` in `$rows[$i].id`, are substituted
+			// before the chain is read, so it folds whole.
+			substitute(e, subs);
+			if let Some(read) = literal_step_value(e).and_then(try_value_to_logical_expr) {
+				*e = read;
+				return Descend::Over;
+			}
+		}
 		Descend::Into
 	});
+}
+
+/// The expression a chain of field, index and end steps starts from, when `expr` is such a
+/// chain.
+fn step_root(expr: &mut LogicalExpr) -> Option<&mut LogicalExpr> {
+	let base = step_base(expr)?;
+	if is_step(base) {
+		step_root(base)
+	} else {
+		Some(base)
+	}
+}
+
+/// The expression the step `expr` reads from, when `expr` is a field, index or end step.
+fn step_base(expr: &mut LogicalExpr) -> Option<&mut LogicalExpr> {
+	if let LogicalExpr::Access {
+		base,
+		..
+	}
+	| LogicalExpr::Index {
+		base,
+		..
+	}
+	| LogicalExpr::First(base)
+	| LogicalExpr::Last(base) = expr
+	{
+		Some(base.as_mut())
+	} else {
+		None
+	}
+}
+
+/// Whether `expr` is a field, index or end step.
+fn is_step(expr: &LogicalExpr) -> bool {
+	matches!(
+		expr,
+		LogicalExpr::Access { .. }
+			| LogicalExpr::Index { .. }
+			| LogicalExpr::First(_)
+			| LogicalExpr::Last(_)
+	)
 }
 
 /// Replaces the parameter that is the right operand of a `MATCHES` in `expr` with its literal in
@@ -748,6 +808,34 @@ mod tests {
 		let plan =
 			bound(lower("SELECT * FROM t WHERE a > $p"), vec![("p", int(5))]).await.to_string();
 		assert!(plan.contains("Filter[a > 5]"), "{plan}");
+	}
+
+	/// A field, index or end read off a substituted parameter is the value it reads, so an index
+	/// operand is the bound value and not a path to it; a chain that would read a record keeps its
+	/// steps.
+	#[tokio::test]
+	async fn steps_over_a_substituted_param_read_its_value() {
+		let rows = Value::from(vec![Value::from(crate::val::Object::from(
+			std::collections::BTreeMap::from([(
+				surrealdb_strand::Strand::from("id"),
+				Value::RecordId(crate::val::RecordId::new(
+					TableName::from("u"),
+					crate::val::RecordIdKey::Number(1),
+				)),
+			)]),
+		))]);
+		let plan = bound(
+			lower(
+				"SELECT * FROM t WHERE a IN $rows.id AND b = $rows[0].id AND c = $rows.id.x AND d = $rows[$i].id",
+			),
+			vec![("rows", rows), ("i", int(0))],
+		)
+		.await
+		.to_string();
+		assert!(plan.contains("a INSIDE [u:1]"), "{plan}");
+		assert!(plan.contains("b = (u:1)"), "{plan}");
+		assert!(plan.contains("c = [{ id: u:1 }].id.x"), "{plan}");
+		assert!(plan.contains("d = (u:1)"), "{plan}");
 	}
 
 	fn vector(components: &[f64]) -> Value {

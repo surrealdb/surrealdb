@@ -98,7 +98,7 @@ value = '''
 'ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: team INSIDE (subquery)]
         TableScan [ctx: Db] [table: person, direction: Forward]
-        Subquery [ctx: Db] [strategy: apply]
+        Subquery [ctx: Db] [strategy: once]
             ProjectValue [ctx: Db] [expr: id]
                 FullTextScan [ctx: Db] [table: team, index: team_name, query: A]
 ''''

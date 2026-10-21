@@ -714,6 +714,72 @@ fn record_id_key_is_inert(
 	}
 }
 
+/// The field `name` of the literal `value`, as the runtime field step
+/// (`vm::access::field::evaluate_field`) reads it: an object's field (what a
+/// resolved parameter such as `$session` becomes), a geometry's GeoJSON field,
+/// the field of each element of an array or set in order (what a resolved
+/// parameter holding a `SELECT`'s rows becomes), and `NONE` off any other
+/// scalar. `None` where a record id is reached at any depth, since the runtime
+/// step fetches that record rather than reading the literal.
+fn field_of_literal(value: &Value, name: &str) -> Option<Value> {
+	match value {
+		Value::Object(obj) => Some(obj.get(name).cloned().unwrap_or(Value::None)),
+		Value::Geometry(geo) => Some(geo.as_object().get(name).cloned().unwrap_or(Value::None)),
+		Value::RecordId(_) => None,
+		Value::Array(arr) => arr
+			.iter()
+			.map(|v| field_of_literal(v, name))
+			.collect::<Option<Vec<_>>>()
+			.map(|v| Value::Array(v.into())),
+		Value::Set(set) => set
+			.iter()
+			.map(|v| field_of_literal(v, name))
+			.collect::<Option<Vec<_>>>()
+			.map(|v| Value::Set(v.into_iter().collect())),
+		_ => Some(Value::None),
+	}
+}
+
+/// The value of `expr` when it is a chain of steps over a literal, each read as
+/// its runtime step reads it, or `None` when it is not one or a step would read
+/// storage:
+///
+/// - a field ([`field_of_literal`]), which declines a record id at any depth;
+/// - an index by a literal, whose runtime step reads no storage for any base;
+/// - the first or last element of an array or set, and `NONE` of any other value.
+///
+/// The steps are evaluated where the chain is read at plan time: by the fold,
+/// and where a parameter the chain starts from is substituted (`$rows.id`).
+pub(crate) fn literal_step_value(expr: &LogicalExpr) -> Option<Value> {
+	let base_of =
+		|base: &LogicalExpr| try_literal_to_value(base).or_else(|| literal_step_value(base));
+	match expr {
+		LogicalExpr::Access {
+			base,
+			field,
+		} => field_of_literal(&base_of(base)?, field.as_str()),
+		LogicalExpr::Index {
+			base,
+			index,
+		} => {
+			let base = base_of(base)?;
+			let index = try_literal_to_value(index)?;
+			crate::exec::vm::access::index::evaluate_index(&base, &index).ok()
+		}
+		LogicalExpr::First(base) => Some(match base_of(base)? {
+			Value::Array(arr) => arr.first().cloned().unwrap_or(Value::None),
+			Value::Set(set) => set.first().cloned().unwrap_or(Value::None),
+			_ => Value::None,
+		}),
+		LogicalExpr::Last(base) => Some(match base_of(base)? {
+			Value::Array(arr) => arr.last().cloned().unwrap_or(Value::None),
+			Value::Set(set) => set.last().cloned().unwrap_or(Value::None),
+			_ => Value::None,
+		}),
+		_ => None,
+	}
+}
+
 /// Attempt to reduce a constant expression to a literal.
 ///
 /// Handles:
@@ -721,9 +787,9 @@ fn record_id_key_is_inert(
 ///   (math::floor, string::lowercase, type::int, etc.)
 /// - Binary arithmetic on two literals (datetime ± duration, number ± number, etc.)
 /// - `AND`/`OR` with a constant boolean operand, and `x INSIDE []`
-/// - A field of an object literal, an index into a literal, and the first or last element of a
-///   collection literal (`{ a: 1 }.a`, `['x', 'y'][1]`) — the shapes a resolved parameter or a
-///   folded record path leaves behind
+/// - A field of a literal holding no record id, an index into a literal, and the first or last
+///   element of a collection literal (`{ a: 1 }.a`, `[{ id: 1 }].id`, `['x', 'y'][1]`) — the shapes
+///   a resolved parameter or a folded record path leaves behind
 ///
 /// A call that reads the clock is not folded wherever it appears, `time::now()`
 /// in a condition included: a plan holds no instant, and the call reads the
@@ -825,58 +891,16 @@ pub(crate) fn try_fold_to_literal(
 			try_value_to_logical_expr(result)
 		}
 
-		// A field of a literal, as the runtime field step reads it: an
-		// object's field (what a resolved parameter such as `$session`
-		// becomes), a geometry's GeoJSON field, and `NONE` off any other
-		// scalar. A record id keeps its runtime step, which fetches the
-		// record, and so does an array, which maps the access over elements
-		// that may be record ids.
+		// A step over a literal: a field, an index, or an end of a collection
+		// ([`literal_step_value`]).
 		LogicalExpr::Access {
-			base,
-			field,
-		} => match try_literal_to_value(base)? {
-			Value::Object(obj) => {
-				try_value_to_logical_expr(obj.get(field.as_str()).cloned().unwrap_or(Value::None))
-			}
-			Value::Geometry(geo) => try_value_to_logical_expr(
-				geo.as_object().get(field.as_str()).cloned().unwrap_or(Value::None),
-			),
-			Value::RecordId(_) | Value::Array(_) => None,
-			_ => Some(LogicalExpr::Literal(LogicalLiteral::None)),
-		},
-
-		// A literal indexed by a literal. The runtime index step reads no
-		// storage for any base, so its own evaluation is the fold.
-		LogicalExpr::Index {
-			base,
-			index,
-		} => {
-			let base = try_literal_to_value(base)?;
-			let index = try_literal_to_value(index)?;
-			let result = crate::exec::vm::access::index::evaluate_index(&base, &index).ok()?;
-			try_value_to_logical_expr(result)
+			..
 		}
-
-		// An end of a collection literal; a value that is not one answers
-		// `NONE`, as the runtime step does.
-		LogicalExpr::First(base) => match try_literal_to_value(base)? {
-			Value::Array(arr) => {
-				try_value_to_logical_expr(arr.first().cloned().unwrap_or(Value::None))
-			}
-			Value::Set(set) => {
-				try_value_to_logical_expr(set.first().cloned().unwrap_or(Value::None))
-			}
-			_ => Some(LogicalExpr::Literal(LogicalLiteral::None)),
-		},
-		LogicalExpr::Last(base) => match try_literal_to_value(base)? {
-			Value::Array(arr) => {
-				try_value_to_logical_expr(arr.last().cloned().unwrap_or(Value::None))
-			}
-			Value::Set(set) => {
-				try_value_to_logical_expr(set.last().cloned().unwrap_or(Value::None))
-			}
-			_ => Some(LogicalExpr::Literal(LogicalLiteral::None)),
-		},
+		| LogicalExpr::Index {
+			..
+		}
+		| LogicalExpr::First(_)
+		| LogicalExpr::Last(_) => try_value_to_logical_expr(literal_step_value(expr)?),
 
 		// Nothing else folds. A `Subquery` in particular is a plan of its own,
 		// bound and folded when it is planned.
@@ -1157,9 +1181,19 @@ mod tests {
 		assert_eq!(fold("'x'.a"), "NONE");
 		assert_eq!(fold("(1).a"), "NONE");
 		assert_eq!(fold("(1.0, 2.0).type"), "'Point'");
-		// A base that may fetch keeps its runtime step.
+		// A field of a collection is the field of each element, as the
+		// runtime step maps it: what `$rows.id` becomes once `$rows` holds a
+		// `SELECT`'s rows.
+		assert_eq!(fold("[{ id: 1 }, { id: 2 }].id"), "[1, 2]");
+		assert_eq!(fold("[{ id: 1 }, { x: 2 }, 3].id"), "[1, NONE, NONE]");
+		assert_eq!(fold("[[{ id: 1 }], { id: 2 }].id"), "[[1], 2]");
+		assert_eq!(fold("[{ id: { a: 1 } }].id.a"), "[1]");
+		assert_eq!(fold("[].id"), "[]");
+		assert_eq!(fold("[{ id: t:1 }].id"), "[t:1]");
+		// A base that may fetch keeps its runtime step, at any depth.
 		assert_eq!(fold("t:1.a"), "(t:1).a");
 		assert_eq!(fold("[t:1].a"), "[t:1].a");
+		assert_eq!(fold("[{ a: 1 }, [t:1]].a"), "[{ a: 1 }, [t:1]].a");
 		// A row-dependent operand keeps it too.
 		assert_eq!(fold("['x', 'y'][a]"), "['x', 'y'][a]");
 	}

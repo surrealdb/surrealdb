@@ -760,18 +760,34 @@ fn bind_collection<'e>(
 	}
 }
 
-/// The value of a literal, an array or set of collapsing elements, or an object of collapsing
-/// values; `None` for every other expression. An object is built through a sorted map, as
-/// evaluation builds it, so key order and duplicate-key resolution agree with it.
+/// The value of a literal, a record id whose key is a number, a string or a uuid, an array or set
+/// of collapsing elements, or an object of collapsing values; `None` for every other expression.
+/// An object is built through a sorted map, as evaluation builds it, so key order and
+/// duplicate-key resolution agree with it. A collection that collapses is one constant operand
+/// however many elements it holds, where one built from its elements takes an operand each.
 fn collapsed(expr: &LogicalExpr) -> Option<Value> {
 	collapse(expr, false)
 }
 
-/// [`collapsed`], and with `ids` a record id whose key collapses likewise and a table as well,
-/// each the value evaluation builds from it, at any depth.
+/// [`collapsed`], and with `ids` a record id whose key collapses likewise (an array or object key
+/// included) and a table as well, each the value evaluation builds from it, at any depth.
 fn collapse(expr: &LogicalExpr, ids: bool) -> Option<Value> {
 	match expr {
 		LogicalExpr::Literal(lit) => Some(literal_value(lit)),
+		LogicalExpr::RecordId(rid) if ids => record_id_value(rid).map(Value::RecordId),
+		LogicalExpr::Table(table) if ids => Some(Value::Table(table.clone())),
+		LogicalExpr::RecordId(record) => {
+			let key = match &record.key {
+				LogicalRecordIdKey::Number(number) => RecordIdKey::Number(*number),
+				LogicalRecordIdKey::String(string) => RecordIdKey::String(string.clone()),
+				LogicalRecordIdKey::Uuid(uuid) => RecordIdKey::Uuid(*uuid),
+				LogicalRecordIdKey::Array(_)
+				| LogicalRecordIdKey::Object(_)
+				| LogicalRecordIdKey::Generate(_)
+				| LogicalRecordIdKey::Range(_) => return None,
+			};
+			Some(Value::RecordId(RecordId::new(record.table.clone(), key)))
+		}
 		LogicalExpr::Array(items) => {
 			let values =
 				items.iter().map(|item| collapse(item, ids)).collect::<Option<Vec<_>>>()?;
@@ -791,10 +807,7 @@ fn collapse(expr: &LogicalExpr, ids: bool) -> Option<Value> {
 			}
 			Some(Value::Object(crate::val::Object::from(map)))
 		}
-		LogicalExpr::RecordId(rid) if ids => record_id_value(rid).map(Value::RecordId),
-		LogicalExpr::Table(table) if ids => Some(Value::Table(table.clone())),
-		LogicalExpr::RecordId(_)
-		| LogicalExpr::Param(_)
+		LogicalExpr::Param(_)
 		| LogicalExpr::Table(_)
 		| LogicalExpr::Mock(_)
 		| LogicalExpr::Constant(_)

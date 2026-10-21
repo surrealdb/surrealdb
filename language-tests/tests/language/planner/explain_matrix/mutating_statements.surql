@@ -306,7 +306,7 @@ value = "[m:1]"
 value = "{ attributes: { form: 'UPDATE' }, children: [{ attributes: { projections: '*' }, children: [{ attributes: { direction: 'Forward', table: 'm' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'SelectProject' }], context: 'Db', operator: 'WriteOperator' }"
 
 [[test.results]]
-value = "{ attributes: { projections: 'id' }, children: [{ attributes: { predicate: 'id INSIDE [m:1, m:3]' }, children: [{ attributes: { direction: 'Forward', table: 'm' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'SelectProject' }"
+value = "{ attributes: { projections: 'id' }, children: [{ attributes: { record_id: '[m:1, m:3]' }, context: 'Db', operator: 'RecordIdScan' }], context: 'Db', operator: 'SelectProject' }"
 
 [[test.results]]
 value = """{ attributes: { form: 'UPDATE' }, children: [{ attributes: { projections: '*' }, children: [{ attributes: { access: "['g1', 'y']", direction: 'Forward', index: 'idx_grp_tags', table: 'm' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }], context: 'Db', operator: 'WriteOperator' }"""

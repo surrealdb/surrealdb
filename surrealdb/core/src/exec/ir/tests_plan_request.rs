@@ -437,6 +437,80 @@ async fn the_placement_reads_the_strategy_of_a_nested_statement() {
 	}
 }
 
+/// A statement in value position that holds another statement running once runs once itself, and
+/// so does one whose rows come from a nearest-neighbour or full-text search: each answers the same
+/// every time it is evaluated. Correlated through a join key, a search keeps every evaluation.
+#[tokio::test]
+async fn a_statement_holding_a_constant_statement_or_a_search_runs_once() {
+	use super::expr::ops::NestedStrategy;
+
+	let schema = "
+		DEFINE TABLE person SCHEMALESS;
+		DEFINE FIELD name ON person TYPE string;
+		DEFINE INDEX person_name ON person FIELDS name;
+		DEFINE TABLE emb SCHEMALESS;
+		DEFINE INDEX emb_v ON emb FIELDS v HNSW DIMENSION 2 DIST EUCLIDEAN;
+		DEFINE TABLE company SCHEMAFULL;
+		DEFINE TABLE trial SCHEMAFULL;
+		DEFINE FIELD kind ON trial TYPE option<string>;
+		DEFINE TABLE sponsors TYPE RELATION FROM company TO trial SCHEMAFULL;
+		DEFINE INDEX sponsors_in ON sponsors FIELDS in;
+	";
+	let cases = [
+		// The inner statement runs once, so the outer one reads a constant and runs once too.
+		(
+			"SELECT * FROM person WHERE id IN (SELECT VALUE id FROM person WHERE age IN (SELECT VALUE age FROM person WHERE name = 'a'))",
+			vec!["once", "once"],
+		),
+		// The same through a relation's endpoints, counted.
+		(
+			"SELECT count() FROM company WHERE id IN (SELECT VALUE in FROM sponsors WHERE out IN (SELECT VALUE id FROM trial WHERE kind = 'a')) GROUP ALL",
+			vec!["once", "once"],
+		),
+		// A nearest-neighbour search the statement runs whole answers the same each time.
+		(
+			"SELECT * FROM person WHERE id IN (SELECT VALUE p FROM emb WHERE v <|2,10|> [0.0, 0.0])",
+			vec!["once"],
+		),
+		// Correlated, the search ranks only the rows the outer row admits: applied per row.
+		(
+			"SELECT * FROM person WHERE id IN (SELECT VALUE p FROM emb WHERE p = $parent.id AND v <|2,10|> [0.0, 0.0])",
+			vec!["apply"],
+		),
+		// An inner statement applied per row of the outer statement keeps the outer one applied.
+		(
+			"SELECT * FROM person WHERE id IN (SELECT VALUE id FROM person WHERE age IN (SELECT VALUE age FROM person WHERE name = rand::string()))",
+			vec!["apply", "apply"],
+		),
+	];
+	for (sql, arms) in cases {
+		let parsed = crate::syn::parse(sql).expect("the statement parses").expressions;
+		let statements = RequestStatement::of(&parsed);
+		let planned = plan(schema, &RequestInput::request(&statements, request_scope()))
+			.await
+			.expect("the statement plans");
+		let mut named = Vec::new();
+		planned.ir.walk(planned.ir.top(), WalkOrder::PreOrder, &mut |op| {
+			if let Some(OpKind::Expr(ExprOp::Subquery(strategy))) =
+				planned.ir.op(op).map(|data| &data.kind)
+			{
+				named.push(match strategy {
+					NestedStrategy::Apply => "apply",
+					NestedStrategy::Once => "once",
+					NestedStrategy::Hash {
+						..
+					} => "hash",
+					NestedStrategy::Lookup {
+						..
+					} => "lookup",
+				});
+			}
+			Walk::Continue
+		});
+		assert_eq!(named, arms, "{sql}");
+	}
+}
+
 /// A construct a region does not admit is the request's error, carrying the rejection's text; a
 /// unit the request did not write is not judged.
 #[tokio::test]
@@ -1012,7 +1086,8 @@ async fn a_table_scan_whose_predicate_the_bounds_decline_states_none() {
 		"SELECT * FROM t WHERE (id > t:2) = true",
 		"SELECT * FROM t WHERE id > t:2 OR n = 1",
 		"SELECT * FROM t WHERE NOT (id > t:2)",
-		"SELECT * FROM t WHERE id IN [t:2, t:3]",
+		// A list with a composite key is no keyed read either.
+		"SELECT * FROM t WHERE id IN [t:2, t:[3]]",
 		"SELECT * FROM t WHERE n > 0",
 		// Another conjunct that may raise.
 		"SELECT * FROM t WHERE id > t:2 AND <int> n > 0",

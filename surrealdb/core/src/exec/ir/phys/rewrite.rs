@@ -58,7 +58,7 @@ use crate::exec::operators::SortDirection;
 use crate::exec::topk_pushdown::{field_path_wire_segments, reads_key_component};
 use crate::exec::vm::payload::{CoarseCutoff, Spill, TopKKey};
 use crate::kvs::Direction;
-use crate::val::{Number, Value};
+use crate::val::{Number, RecordId, Value};
 
 /// How deep the walk over a sort's wire path descends when a top-k key is installed.
 const TOPK_DEPTH_LIMIT: u32 = 256;
@@ -953,11 +953,34 @@ fn keeps_id(kind: &PhysOp) -> bool {
 	matches!(kind, PhysOp::Layer(_) | PhysOp::PermissionFilter(_) | PhysOp::Enforced { .. })
 }
 
+/// The record ids a record read over a list reads: `value` is an array literal of record ids.
+fn literal_record_list(ir: &Ir, value: ValueId) -> Option<Vec<RecordId>> {
+	let data = ir.op(conjunct::def_op(ir, value)?)?;
+	let OpKind::Expr(ExprOp::Literal(held)) = &data.kind else {
+		return None;
+	};
+	let Value::Array(items) = &**held else {
+		return None;
+	};
+	items
+		.iter()
+		.map(|item| {
+			if let Value::RecordId(record) = item {
+				Some(record.clone())
+			} else {
+				None
+			}
+		})
+		.collect()
+}
+
 /// A conjunct that the record lookup beneath a predicate answers is dropped.
 ///
 /// `id = r` over the point lookup of the
-/// literal record `r` holds of the one row the lookup can yield, so a total conjunct of that form
-/// neither rejects a row nor raises, and its absence changes nothing the filter does. A table's
+/// literal record `r` holds of the one row the lookup can yield, and `id INSIDE list` over the
+/// read of the records of a list holds of every row the read yields when `list` holds each of
+/// them ([`conjunct::pins_record_list`]), so a total conjunct of either form neither rejects a row
+/// nor raises, and its absence changes nothing the filter does. A table's
 /// permission, layers and enforcement keep a row's `id`, so they may stand between the filter and
 /// the lookup; another filter does not, since the conjunct it holds may judge the row first. A
 /// predicate left with nothing to judge removes the filter. The conjuncts that stay keep their
@@ -988,20 +1011,26 @@ impl Pattern<PhysDialect> for AnsweredByLookup {
 		let Some(PhysOp::RecordScan(..)) = phys(ir, chain.source) else {
 			return Ok(false);
 		};
-		let Some(record) = ir
-			.op(chain.source)
-			.and_then(|data| data.operands.first().copied())
-			.and_then(|value| conjunct::literal_record(ir, value))
-		else {
+		let Some(read) = ir.op(chain.source).and_then(|data| data.operands.first().copied()) else {
 			return Ok(false);
+		};
+		let (record, records) = match conjunct::literal_record(ir, read) {
+			Some(record) => (Some(record), None),
+			None => match literal_record_list(ir, read) {
+				Some(records) => (None, Some(records)),
+				None => return Ok(false),
+			},
+		};
+		let pins = |leaf: ValueId| match (&record, &records) {
+			(Some(record), _) => conjunct::pins_record(ir, leaf, record),
+			(None, Some(records)) => conjunct::pins_record_list(ir, leaf, records),
+			(None, None) => false,
 		};
 		let leaves = conjunct::leaves(ir, &site);
 		let dropped: Vec<ValueId> = leaves
 			.iter()
 			.copied()
-			.filter(|leaf| {
-				conjunct::judge(ir, *leaf).total && conjunct::pins_record(ir, *leaf, &record)
-			})
+			.filter(|leaf| conjunct::judge(ir, *leaf).total && pins(*leaf))
 			.collect();
 		if dropped.is_empty() {
 			return Ok(false);

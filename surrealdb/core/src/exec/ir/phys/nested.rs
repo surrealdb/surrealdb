@@ -14,9 +14,12 @@
 //! - *correlated*: the statement reads a value defined outside it that depends on a row, a loop
 //!   element, a closure parameter or a function argument, or names `$this`, `$self`, `$parent` or
 //!   `$value` as a free name.
-//! - *repeatable*: every op of the statement is deterministic, writes nothing, is not an index
-//!   operator and is not an op whose result may differ between two evaluations: a nested statement,
-//!   a method, a closure, a field read that may fetch a record, a call of anything but a builtin.
+//! - *repeatable*: every op of the statement is deterministic, writes nothing and is not an op
+//!   whose result may differ between two evaluations: a nested statement that does not run once, a
+//!   method, a closure, a field read that may fetch a record, a call of anything but a builtin. A
+//!   `MATCHES` or nearest-neighbour operator, and the search that answers it, repeat only in a
+//!   statement that is not correlated ([`Search`]): run whole, the search answers the same each
+//!   time, but a probe or lookup would run it once over rows its per-row form never searches.
 //! - *reads rows*: the statement yields the result of a read, not of a write, an expression, a
 //!   schema statement or a block construct.
 //! - *enclosing writes*: the statement that encloses it writes, or runs a body whose effects are
@@ -228,9 +231,17 @@ fn decide(
 	}
 	let tree = Subtree::of(ir, subquery);
 	let none = HashSet::new();
+	let correlated = tree.correlated(ir, &none);
+	// Only `Once` reads `repeatable` of an uncorrelated statement, and it runs the statement
+	// whole, the search included.
+	let search = if correlated {
+		Search::Varies
+	} else {
+		Search::Repeats
+	};
 	let nested = NestedFacts {
-		correlated: tree.correlated(ir, &none),
-		repeatable: tree.repeatable(ir, facts, cx, &none),
+		correlated,
+		repeatable: tree.repeatable(ir, facts, cx, &none, search),
 		reads_rows: reads_rows(ir, region),
 		enclosing_writes: statement_writes(ir, facts, &cx.effects, owner),
 	};
@@ -440,7 +451,7 @@ fn reads_rows(ir: &Ir, region: RegionId) -> bool {
 /// membership in, so that a `Once` strategy keeps them as an index: the statement reads rows
 /// ([`reads_rows`]), yields more than the single value of an `ONLY`, and every reader of its
 /// result is the right operand of an `INSIDE` or a `NOT INSIDE`.
-pub(super) fn held_as_members(ir: &Ir, subquery: OpId) -> bool {
+pub(crate) fn held_as_members(ir: &Ir, subquery: OpId) -> bool {
 	let Some(region) = ir.op(subquery).and_then(|data| data.regions.first().copied()) else {
 		return false;
 	};
@@ -522,14 +533,16 @@ impl Subtree {
 	}
 
 	/// Whether every op of the statement, less the ops of `exclude`, may be evaluated again or
-	/// fewer times than written: it is deterministic, writes nothing, is no index operator and is
-	/// not an op whose result may differ between two evaluations.
+	/// fewer times than written: it is deterministic, writes nothing, is not an op whose result may
+	/// differ between two evaluations, and is an index operator or search only where `search`
+	/// says those repeat.
 	fn repeatable(
 		&self,
 		ir: &Ir,
 		facts: &mut FactCache,
 		cx: &PhysCx<'_>,
 		exclude: &HashSet<OpId>,
+		search: Search,
 	) -> bool {
 		self.ops.iter().filter(|op| !exclude.contains(*op)).all(|op| {
 			let Some(data) = ir.op(*op) else {
@@ -537,11 +550,13 @@ impl Subtree {
 			};
 			match &data.kind {
 				OpKind::Expr(kind) => {
-					!impure(kind)
-						&& !index_operator(kind)
+					(!impure(kind) || runs_once(kind))
+						&& (search == Search::Repeats || !index_operator(kind))
 						&& effects::local(ir, facts, &cx.effects, *op).set.is_deterministic()
 				}
-				OpKind::Phys(kind) => reads_deterministically(kind),
+				OpKind::Phys(kind) => {
+					reads_deterministically(kind) || (search == Search::Repeats && searches(kind))
+				}
 				OpKind::Logical(_) => false,
 			}
 		})
@@ -735,6 +750,33 @@ fn impure(op: &ExprOp) -> bool {
 	}
 }
 
+/// Whether `op` is a statement that runs once ([`NestedStrategy::Once`]). Statements are decided
+/// innermost first, so a statement nested in the one being judged has its strategy already: one
+/// that runs once reads nothing of a row around it, writes nothing and answers the same each time,
+/// and its value is a constant of the statement it stands in, however often that runs.
+fn runs_once(op: &ExprOp) -> bool {
+	matches!(op, ExprOp::Subquery(NestedStrategy::Once))
+}
+
+/// Whether a `MATCHES` or nearest-neighbour search repeats in the statement being judged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Search {
+	/// The statement runs whole at each evaluation it is read for, so a search in it answers the
+	/// same each time: the search reads the index under the statement's own predicate and limit.
+	Repeats,
+	/// The statement is split around a join key, so its rows would be read once and judged per
+	/// evaluation, where the per-row form searches only the rows the key admits: a
+	/// nearest-neighbour search would rank other rows and a `MATCHES` would score them apart from
+	/// the key.
+	Varies,
+}
+
+/// Whether the physical op `op` is a full-text or nearest-neighbour search, which reads the same
+/// rows each time a statement that runs whole reads it.
+fn searches(op: &PhysOp) -> bool {
+	matches!(op.tag(), PhysTag::FullTextScan | PhysTag::KnnScan | PhysTag::KnnTopK)
+}
+
 /// Whether `op` is a `MATCHES` or a nearest-neighbour operator, which an access path answers and
 /// evaluation does not.
 fn index_operator(op: &ExprOp) -> bool {
@@ -849,7 +891,7 @@ fn join_site(
 	let (field, outer) = field_and_outer(ir, tree, *left, *right)
 		.or_else(|| field_and_outer(ir, tree, *right, *left))?;
 	let exclude: HashSet<OpId> = outer.tree.iter().copied().collect();
-	if tree.correlated(ir, &exclude) || !tree.repeatable(ir, facts, cx, &exclude) {
+	if tree.correlated(ir, &exclude) || !tree.repeatable(ir, facts, cx, &exclude, Search::Varies) {
 		return None;
 	}
 	Some(JoinSite {

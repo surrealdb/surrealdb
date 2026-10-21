@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [test]
-reason = "An uncorrelated subquery on the right of IN is evaluated once using its own index while the outer table falls back to a filtered table scan and returns the matching rows"
+reason = "An uncorrelated subquery on the right of IN is evaluated once using its own index, and the outer table is scanned and each row probed against the subquery's rows, returning the matching rows. A field read off a parameter bound to a SELECT's rows (`$john.id`) is the value it reads once the parameter is bound, so the outer table is read through its index on that value."
 issue = 5439
 
 [[test.results]]
@@ -45,7 +45,7 @@ value = '''{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: "
 value = "NONE"
 
 [[test.results]]
-value = "{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'owner INSIDE [{ id: user:john }].id' }, children: [{ attributes: { direction: 'Forward', table: 'house' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }"
+value = "{ attributes: { expr: 'id' }, children: [{ attributes: { access: '= user:john', direction: 'Forward', index: 'idx_owner', table: 'house' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'ProjectValue' }"
 */
 
 DEFINE TABLE user; DEFINE TABLE house;
