@@ -145,31 +145,36 @@ impl FileStore {
 			.map_err(|e| format!("Failed to check if path exists: {}", e))
 	}
 
-	/// Convert a Path to an OsPath, checking against the allowlist
+	/// Resolve an object key to the host path an operation will use; see
+	/// [`Self::resolve_key`].
 	async fn to_os_path(&self, path: &ObjectKey) -> Result<PathBuf, String> {
-		// The mutability is needed to remove the leading slash on Windows
-		#[allow(unused_mut)]
-		let mut root_str = self.options.root.as_str();
+		self.resolve_key(path, false).await
+	}
 
-		// Handle Windows-specific path formatting
-		#[cfg(windows)]
-		{
-			// Fix paths with leading slash before drive letter like "/C:/foo"
-			if root_str.starts_with('/')
-				&& root_str.len() > 2
-				&& root_str.as_bytes()[1] != b'/' // Ensure it's not a UNC path
-				&& root_str.as_bytes()[2] == b':'
-			{
-				root_str = &root_str[1..];
-			}
-		}
+	/// Resolve a list prefix to the host directory or file it names; see
+	/// [`Self::resolve_key`]. Unlike an object key, a prefix may end in `/`.
+	async fn to_os_prefix_path(&self, prefix: &ObjectKey) -> Result<PathBuf, String> {
+		self.resolve_key(prefix, true).await
+	}
 
-		let root_path = PathBuf::from(root_str).clean();
+	/// Resolve a key to its host path, confined to this bucket's canonical
+	/// root. The containment holds for the filesystem state at call time only;
+	/// see the residual TOCTOU note at the symlink check below for the
+	/// concurrency limitation the returned path still carries.
+	async fn resolve_key(&self, path: &ObjectKey, is_prefix: bool) -> Result<PathBuf, String> {
+		// A bucket permission predicate judges the key as written, so the key
+		// must name exactly one file: no traversal segment, and no spelling
+		// that path resolution would collapse onto another key. A global
+		// bucket's `PrefixedStore` rejects traversal segments before it
+		// prepends the bucket prefix, but a direct `file://` bucket reaches
+		// this with the raw key, so both rules are enforced here. Without them
+		// `/public/../private/secret` or `//private/secret` resolves to
+		// `<root>/private/secret` while the predicate saw a key outside
+		// `/private/`.
+		path.check_no_traversal()?;
+		path.check_canonical(is_prefix, cfg!(windows))?;
 
-		// First canonicalize the root (which should exist)
-		let canonical_root = tokio::fs::canonicalize(&root_path).await.map_err(|e| {
-			format!("Failed to canonicalize root path '{}': {}", root_path.display(), e)
-		})?;
+		let canonical_root = self.canonical_root().await?;
 
 		// Get the relative path components
 		let relative_path_str = path.as_str().trim_start_matches('/');
@@ -194,6 +199,40 @@ impl FileStore {
 			return Err(format!("Path escapes the bucket root: {}", full_path.display()));
 		}
 
+		// SECURITY: `path_clean` only collapses `..` lexically; it does not
+		// follow symlinks. A symlink planted inside the bucket (e.g.
+		// `<root>/link -> /etc`) would let the key `/link/secret` pass the
+		// lexical check above and then escape the root when the real filesystem
+		// operation follows the link. Resolve the deepest existing ancestor of
+		// the target (a write target itself does not exist yet) and confirm the
+		// resolved path is still inside the canonical root.
+		let resolved = canonicalize_deepest_existing(&full_path).await?;
+		if !resolved.starts_with(&canonical_root) {
+			return Err(format!(
+				"Path escapes the bucket root through a symlink: {}",
+				full_path.display()
+			));
+		}
+
+		// SECURITY (residual TOCTOU): the containment checked above - the
+		// lexical `..` collapse, the `starts_with` root check, and the symlink
+		// resolution of the deepest existing ancestor - describes the filesystem
+		// only as it stands at this instant. `full_path` is returned unresolved
+		// and the caller's filesystem operation (`File::create`, `tokio::fs::read`,
+		// `copy`, `rename`, ...) re-resolves it by name a moment later. A process
+		// that can write inside the bucket tree can, in that gap, replace an
+		// in-root ancestor component with an out-of-root symlink, so the
+		// operation follows the link and escapes the root after the check
+		// passed. This time-of-check/time-of-use window is not closeable with a
+		// path-based check: closing it needs the operation itself to run against
+		// a pinned directory handle with beneath or no-follow semantics
+		// (`openat2(RESOLVE_BENEATH)`, per-component `O_NOFOLLOW`, or a
+		// `cap-std`/`openat`-style opened-handle API), an fd-relative filesystem
+		// primitive this crate does not currently depend on. Until then the
+		// static containment above is the enforced boundary, and callers must
+		// treat a bucket root that another process can write to as outside the
+		// trust boundary.
+
 		// Verify the path is within the allowlist
 		if !is_path_allowed(&full_path, self.options.lowercase_paths, &self.config.bucket_list) {
 			return Err(format!(
@@ -203,6 +242,34 @@ impl FileStore {
 		}
 
 		Ok(full_path)
+	}
+
+	/// The bucket root as the host resolves it, with every symlink followed.
+	/// Every containment check compares against this path.
+	async fn canonical_root(&self) -> Result<PathBuf, String> {
+		// The mutability is needed to remove the leading slash on Windows
+		#[allow(unused_mut)]
+		let mut root_str = self.options.root.as_str();
+
+		// Handle Windows-specific path formatting
+		#[cfg(windows)]
+		{
+			// Fix paths with leading slash before drive letter like "/C:/foo"
+			if root_str.starts_with('/')
+				&& root_str.len() > 2
+				&& root_str.as_bytes()[1] != b'/' // Ensure it's not a UNC path
+				&& root_str.as_bytes()[2] == b':'
+			{
+				root_str = &root_str[1..];
+			}
+		}
+
+		let root_path = PathBuf::from(root_str).clean();
+
+		// The root should exist
+		tokio::fs::canonicalize(&root_path).await.map_err(|e| {
+			format!("Failed to canonicalize root path '{}': {}", root_path.display(), e)
+		})
 	}
 
 	/// Create parent directories for a path if they don't exist
@@ -245,7 +312,44 @@ fn is_bare_root(allowed: &std::path::Path) -> bool {
 	allowed.has_root() && allowed.components().count() == 1
 }
 
-/// Check if a path is allowed according to the allowlist
+/// Canonicalize the deepest ancestor of `path` that exists, resolving every
+/// symlink along the way. A write target does not exist yet, so the whole path
+/// cannot always be canonicalized; its deepest existing ancestor can, and that
+/// is where any symlink redirection would be, since the remaining components
+/// are about to be created under it.
+///
+/// Fails closed on a dangling symlink. A symlink whose target does not exist is
+/// not canonicalizable, so the deepest-existing walk would otherwise pop past
+/// it and resolve a safe ancestor - yet the real filesystem operation follows
+/// the link and lands wherever it points, which may be outside the root. Each
+/// component that `canonicalize` cannot resolve is stat'd without following it
+/// (`symlink_metadata`): a component that is itself a symlink is refused,
+/// because its destination cannot be proven in-root; a component that simply
+/// does not exist (the write target, or a directory about to be created) is
+/// expected and the walk continues.
+async fn canonicalize_deepest_existing(path: &OsPath) -> Result<PathBuf, String> {
+	let mut current = PathBuf::from(path);
+	loop {
+		if let Ok(resolved) = tokio::fs::canonicalize(&current).await {
+			return Ok(resolved);
+		}
+		if let Ok(meta) = tokio::fs::symlink_metadata(&current).await
+			&& meta.file_type().is_symlink()
+		{
+			return Err(format!(
+				"Path escapes the bucket root through an unresolvable symlink: {}",
+				current.display()
+			));
+		}
+		if !current.pop() {
+			return Err(format!("Failed to resolve any ancestor of path: {}", path.display()));
+		}
+	}
+}
+
+/// Whether `path_to_check` falls within one of the allowlisted bucket
+/// directories, comparing component-wise so a prefix only matches on a
+/// directory boundary.
 fn is_path_allowed(
 	path_to_check: &std::path::Path,
 	lowercase_paths: bool,
@@ -555,7 +659,7 @@ impl ObjectStore for FileStore {
 			// If a prefix is provided, combine it with the store prefix
 			// If not, just use the store's prefix
 			let base_key = opts.prefix.clone().unwrap_or_default();
-			let os_path = self.to_os_path(&base_key).await?;
+			let os_path = self.to_os_prefix_path(&base_key).await?;
 
 			// Check if the directory exists
 			if !Self::path_exists(&os_path).await? {
@@ -590,12 +694,25 @@ impl ObjectStore for FileStore {
 				.await
 				.map_err(|e| format!("Failed to read directory: {}", e))?;
 
+			// An entry that is a symlink is listed only if it resolves inside the
+			// root, so the listing reports no object that `get` or `head` refuses.
+			let canonical_root = self.canonical_root().await?;
+
 			// Collect all entries first so we can sort and paginate them
 			let mut all_entries = Vec::new();
 
 			// Process each entry in the directory
 			while let Ok(Some(entry)) = read_dir.next_entry().await {
 				let path = entry.path();
+				let Ok(file_type) = entry.file_type().await else {
+					continue;
+				};
+				if file_type.is_symlink() {
+					match tokio::fs::canonicalize(&path).await {
+						Ok(target) if target.starts_with(&canonical_root) => {}
+						_ => continue,
+					}
+				}
 				let metadata = match tokio::fs::metadata(&path).await {
 					Ok(md) => md,
 					Err(e) => {
@@ -921,5 +1038,158 @@ mod tests {
 
 		let allowed = vec![PathBuf::from(OsStr::from_bytes(b"/srv/data/\xFF"))];
 		assert!(!is_path_allowed(OsPath::new("/srv/data/file.txt"), true, &allowed));
+	}
+
+	/// A direct `file://` bucket reaches the backend with the raw key, so a
+	/// key crossing a logical prefix with `..` must be refused before it is
+	/// resolved; otherwise it crosses a key-based ACL boundary the permission
+	/// predicate drew on the un-normalised key (GHSA-cph5-pm57-9w9c).
+	#[tokio::test]
+	async fn direct_bucket_rejects_a_traversal_key() {
+		let dir = TempDir::new().unwrap();
+		let (store, _root) = open_store(dir.path(), "").await;
+
+		let key = ObjectKey::new("/public/../secret.txt".to_string());
+		assert!(store.put(&key, Bytes::from_static(b"x")).await.is_err());
+		assert!(store.get(&key).await.is_err());
+		assert!(store.exists(&key).await.is_err());
+	}
+
+	/// A symlink planted inside the bucket root must not let an operation reach
+	/// a file outside the root: `path_clean` collapses `..` but does not follow
+	/// symlinks, so the resolved target has to be re-checked against the root
+	/// (GHSA-7pqw-x84x-frxc).
+	#[cfg(unix)]
+	#[tokio::test]
+	async fn an_in_bucket_symlink_cannot_escape_the_root() {
+		let root_dir = TempDir::new().unwrap();
+		let outside_dir = TempDir::new().unwrap();
+		std::fs::write(outside_dir.path().join("secret.txt"), b"top secret").unwrap();
+		std::os::unix::fs::symlink(outside_dir.path(), root_dir.path().join("link")).unwrap();
+
+		let (store, _root) = open_store(root_dir.path(), "").await;
+
+		// Reading a file outside the root through the symlink is refused.
+		let read_key = ObjectKey::new("/link/secret.txt".to_string());
+		assert!(
+			store.get(&read_key).await.is_err(),
+			"reading a file through an in-bucket symlink must be refused"
+		);
+
+		// Writing through the symlink is refused, and nothing lands outside.
+		let write_key = ObjectKey::new("/link/evil.txt".to_string());
+		assert!(
+			store.put(&write_key, Bytes::from_static(b"x")).await.is_err(),
+			"writing through an in-bucket symlink must be refused"
+		);
+		assert!(
+			!outside_dir.path().join("evil.txt").exists(),
+			"the refused write must not have landed outside the root"
+		);
+	}
+
+	/// A dangling symlink inside the root - one whose target does not yet exist
+	/// outside it - must not let a write escape. `canonicalize` cannot resolve
+	/// the missing target, so the deepest-existing walk must notice the link
+	/// itself rather than popping to a safe ancestor and allowing the write,
+	/// which would follow the link and create the target outside the root
+	/// (GHSA-7pqw-x84x-frxc).
+	#[cfg(unix)]
+	#[tokio::test]
+	async fn a_dangling_in_bucket_symlink_cannot_escape_the_root() {
+		let root_dir = TempDir::new().unwrap();
+		let outside_dir = TempDir::new().unwrap();
+		// The target does not exist yet, so this is a dangling symlink.
+		let outside_target = outside_dir.path().join("planted.txt");
+		std::os::unix::fs::symlink(&outside_target, root_dir.path().join("link")).unwrap();
+
+		let (store, _root) = open_store(root_dir.path(), "").await;
+
+		// Writing to the dangling symlink is refused, and nothing is created at
+		// its out-of-root target.
+		let write_key = ObjectKey::new("/link".to_string());
+		assert!(
+			store.put(&write_key, Bytes::from_static(b"x")).await.is_err(),
+			"writing to a dangling in-bucket symlink must be refused"
+		);
+		assert!(
+			!outside_target.exists(),
+			"the refused write must not have created the symlink's out-of-root target"
+		);
+	}
+
+	/// Keys that path resolution collapses onto another key are refused, so a
+	/// permission predicate that denies `/private/` cannot be sidestepped by
+	/// spelling the same file `//private/secret` or `/private/secret/`. A list
+	/// prefix may still end in `/`.
+	#[tokio::test]
+	async fn direct_bucket_rejects_an_aliased_key() {
+		let dir = TempDir::new().unwrap();
+		let (store, _root) = open_store(dir.path(), "").await;
+		let canonical = ObjectKey::new("/private/secret".to_string());
+		store.put(&canonical, Bytes::from_static(b"top secret")).await.unwrap();
+
+		for alias in ["//private/secret", "/private//secret", "/private/secret/"] {
+			let key = ObjectKey::new(alias.to_string());
+			assert!(store.get(&key).await.is_err(), "get {alias} must be refused");
+			assert!(store.head(&key).await.is_err(), "head {alias} must be refused");
+			assert!(
+				store.put(&key, Bytes::from_static(b"x")).await.is_err(),
+				"put {alias} must be refused"
+			);
+			assert!(store.copy(&canonical, &key).await.is_err(), "copy to {alias} must be refused");
+		}
+		assert_eq!(
+			store.get(&canonical).await.unwrap().unwrap(),
+			Bytes::from_static(b"top secret")
+		);
+
+		let opts = ListOptions {
+			prefix: Some(ObjectKey::new("/private/".to_string())),
+			..Default::default()
+		};
+		let listed = store.list(&opts).await.unwrap();
+		assert_eq!(listed.len(), 1);
+	}
+
+	/// On Windows a backslash separates path segments, so `/private\secret`
+	/// would name `/private/secret` and is refused.
+	#[cfg(windows)]
+	#[tokio::test]
+	async fn direct_bucket_rejects_a_backslash_separated_key() {
+		let dir = TempDir::new().unwrap();
+		let (store, _root) = open_store(dir.path(), "").await;
+		let key = ObjectKey::new("/private\\secret".to_string());
+		assert!(store.put(&key, Bytes::from_static(b"x")).await.is_err());
+		assert!(store.get(&key).await.is_err());
+	}
+
+	/// Listing must not report a symlink that resolves outside the root: `head`
+	/// and `get` refuse it, so its size and modification time are not the
+	/// bucket's to disclose. A symlink that stays inside the root is listed.
+	#[cfg(unix)]
+	#[tokio::test]
+	async fn list_omits_a_symlink_that_escapes_the_root() {
+		let root_dir = TempDir::new().unwrap();
+		let outside_dir = TempDir::new().unwrap();
+		std::fs::write(outside_dir.path().join("secret.txt"), b"top secret").unwrap();
+		std::fs::write(root_dir.path().join("real.txt"), b"real").unwrap();
+		std::os::unix::fs::symlink(
+			outside_dir.path().join("secret.txt"),
+			root_dir.path().join("escape.txt"),
+		)
+		.unwrap();
+		std::os::unix::fs::symlink(
+			root_dir.path().join("real.txt"),
+			root_dir.path().join("inner.txt"),
+		)
+		.unwrap();
+
+		let (store, _root) = open_store(root_dir.path(), "").await;
+
+		let listed = store.list(&ListOptions::default()).await.unwrap();
+		let mut keys: Vec<String> = listed.iter().map(|m| m.key.to_string()).collect();
+		keys.sort();
+		assert_eq!(keys, vec!["/inner.txt".to_string(), "/real.txt".to_string()]);
 	}
 }
