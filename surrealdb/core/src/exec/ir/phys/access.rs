@@ -3578,6 +3578,17 @@ mod convert_tests {
 	}
 
 	impl PhysicalCatalog for Held {
+		/// The defined indexes of a held table are the ones its answers carry, all online.
+		fn indexes(&self, table: &TableName) -> CatalogAnswer<Arc<[IndexDefinition]>> {
+			if self.unknown {
+				return CatalogAnswer::Unknown;
+			}
+			match self.answers.values().find(|answers| &answers.table == table) {
+				Some(answers) => CatalogAnswer::Found(Arc::clone(&answers.indexes)),
+				None => CatalogAnswer::NotLoaded,
+			}
+		}
+
 		fn table_answers(&self, key: &SourceKey) -> CatalogAnswer<Arc<TableAnswers>> {
 			if self.unknown {
 				return CatalogAnswer::Unknown;
