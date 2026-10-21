@@ -7508,6 +7508,7 @@ impl Datastore {
 		let mut bytes_stream = pin!(query);
 		let mut complete = false;
 		let mut filling = true;
+		let mut preamble_checked = false;
 
 		let stream = futures::stream::poll_fn(move |cx| {
 			loop {
@@ -7526,6 +7527,26 @@ impl Datastore {
 
 					buffer.extend_from_slice(&bytes);
 					filling = buffer.len() < parse_size
+				}
+
+				// The start of the input is looked at once, when the fill has stopped, so a
+				// byte order mark is never split across chunks. A UTF-8 mark is not part of
+				// the statements and is dropped. A UTF-16 mark means the whole input is
+				// UTF-16 text, which no statement of it could be read from.
+				if !preamble_checked {
+					preamble_checked = true;
+					if buffer.starts_with(&[0xEF, 0xBB, 0xBF]) {
+						let _ = buffer.split_to(3);
+					} else if buffer.starts_with(&[0xFF, 0xFE]) || buffer.starts_with(&[0xFE, 0xFF])
+					{
+						return Poll::Ready(Some(Err(anyhow::Error::new(TypesError::validation(
+							"The import is UTF-16 text, and SurrealQL is read as UTF-8. Save it as \
+							 UTF-8; an export is written as UTF-8 by `surreal export <file>`, but \
+							 not by redirecting standard output in Windows PowerShell"
+								.to_owned(),
+							surrealdb_types::ValidationError::InvalidRequest,
+						)))));
+					}
 				}
 
 				// if we finished streaming we can parse with complete so that the parser can be

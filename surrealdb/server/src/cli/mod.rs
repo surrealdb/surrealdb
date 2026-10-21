@@ -272,13 +272,17 @@ pub async fn init<
 	};
 	// Check if we are running the server
 	let server = matches!(args.command, Commands::Start(_));
-	// Under `--json`, stdout is the command's one document, so every log line
-	// goes to stderr and a failure is reported as the JSON envelope
+	// Under `--json`, stdout is the command's one document, and an export to
+	// stdout, or a model exported to it, is the data itself, so every log line
+	// goes to stderr and, for `--json`, a failure is reported as the JSON envelope
+	let stdout_is_data = json.is_some()
+		|| matches!(&args.command, Commands::Export(export) if export.writes_to_stdout())
+		|| matches!(&args.command, Commands::Ml(ml) if ml.writes_to_stdout());
 	// Initialize opentelemetry and logging
 	let telemetry = crate::telemetry::builder()
 		.with_log_level("info")
 		.with_log_format(args.log_format)
-		.with_stdout_logs(json.is_none())
+		.with_stdout_logs(!stdout_is_data)
 		.with_filter(args.log.clone())
 		.with_file_filter(args.log_file_level.clone())
 		.with_otel_filter(args.log_otel_level.clone())

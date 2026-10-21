@@ -101,6 +101,14 @@ pub struct ExportCommandArguments {
 	config: ExportConfigArguments,
 }
 
+impl ExportCommandArguments {
+	/// Whether the dump is written to standard output, which then carries the
+	/// dump and nothing else.
+	pub(crate) fn writes_to_stdout(&self) -> bool {
+		self.file == "-"
+	}
+}
+
 pub async fn init(
 	ExportCommandArguments {
 		file,

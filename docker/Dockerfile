@@ -93,9 +93,11 @@ COPY --from=tzdata /usr/share/zoneinfo /usr/share/zoneinfo
 
 COPY --from=tzdata /usr/share/zoneinfo/UTC /etc/localtime
 
-COPY --from=dev-ci /data /data
+# Chainguard's `nonroot` is uid/gid 65532. COPY creates the destination directory as
+# root, so the owner is set explicitly or the volume root is unwritable by the runtime user.
+COPY --from=dev-ci --chown=65532:65532 /data /data
 
-COPY --from=dev-ci /logs /logs
+COPY --from=dev-ci --chown=65532:65532 /logs /logs
 
 USER nonroot
 
@@ -154,9 +156,11 @@ COPY --from=tzdata /usr/share/zoneinfo /usr/share/zoneinfo
 
 COPY --from=tzdata /usr/share/zoneinfo/UTC /etc/localtime
 
-COPY --from=dev /data /data
+# Chainguard's `nonroot` is uid/gid 65532. COPY creates the destination directory as
+# root, so the owner is set explicitly or the volume root is unwritable by the runtime user.
+COPY --from=dev --chown=65532:65532 /data /data
 
-COPY --from=dev /logs /logs
+COPY --from=dev --chown=65532:65532 /logs /logs
 
 USER nonroot
 

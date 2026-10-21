@@ -36,6 +36,14 @@ pub struct ExportCommandArguments {
 	sel: DatabaseSelectionArguments,
 }
 
+impl ExportCommandArguments {
+	/// Whether the model is written to standard output, which then carries the
+	/// model and nothing else.
+	pub(crate) fn writes_to_stdout(&self) -> bool {
+		self.file == "-"
+	}
+}
+
 pub async fn init(
 	ExportCommandArguments {
 		file,

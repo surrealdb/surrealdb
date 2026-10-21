@@ -15,6 +15,14 @@ pub enum MlCommand {
 	Export(ExportCommandArguments),
 }
 
+impl MlCommand {
+	/// Whether the command writes its result to standard output, which then
+	/// carries that result and nothing else.
+	pub(crate) fn writes_to_stdout(&self) -> bool {
+		matches!(self, MlCommand::Export(args) if args.writes_to_stdout())
+	}
+}
+
 pub async fn init(command: MlCommand) -> Result<()> {
 	match command {
 		MlCommand::Import(args) => import::init(args).await,

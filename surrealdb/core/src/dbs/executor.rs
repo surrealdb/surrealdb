@@ -6504,6 +6504,49 @@ mod tests {
 		assert_eq!(held(&ctx, "x"), Some(Value::from(1i64)));
 	}
 
+	/// A UTF-8 byte order mark at the start of an import is not part of its
+	/// statements, however the stream is chunked.
+	#[tokio::test]
+	async fn import_stream_skips_a_utf8_byte_order_mark() {
+		use bytes::Bytes;
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::default().with_ns("NS").with_db("DB");
+		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
+			.await
+			.unwrap();
+
+		let sql = "\u{feff}OPTION IMPORT;\nCREATE person:1;\nCREATE person:2;\n";
+		for chunk in [sql.len(), 1] {
+			let chunks: Vec<_> =
+				sql.as_bytes().chunks(chunk).map(|c| Ok(Bytes::copy_from_slice(c))).collect();
+			let results =
+				ds.import_stream(&sess, futures::stream::iter(chunks)).await.unwrap_or_else(|e| {
+					panic!("chunks of {chunk}: {e}");
+				});
+			assert!(results.is_empty(), "chunks of {chunk}: {results:?}");
+			ds.execute("DELETE person", &sess, None).await.unwrap();
+		}
+	}
+
+	/// An import that is UTF-16 text is refused as such, rather than as a
+	/// syntax error at its first byte.
+	#[tokio::test]
+	async fn import_stream_names_utf16_input() {
+		use bytes::Bytes;
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::default().with_ns("NS").with_db("DB");
+		let sql = "OPTION IMPORT; CREATE person:1;";
+		for bom in [[0xFF, 0xFE], [0xFE, 0xFF]] {
+			let mut bytes = bom.to_vec();
+			bytes.extend(sql.encode_utf16().flat_map(|u| u.to_le_bytes()));
+			let body = futures::stream::once(async { Ok(Bytes::from(bytes)) });
+			let err = ds.import_stream(&sess, body).await.unwrap_err();
+			assert!(err.to_string().contains("UTF-16"), "got: {err}");
+		}
+	}
+
 	/// An import whose carried names cross the bound fails the `LET` that
 	/// crosses it and stops there.
 	#[tokio::test]

@@ -63,7 +63,7 @@ where
 ///
 /// WARN and ERROR go to stderr. INFO, DEBUG and TRACE go to stdout, unless
 /// `stdout_logs` is false, when they go to stderr too and nothing is written
-/// to stdout: a command whose stdout is a JSON document owns all of it.
+/// to stdout: a command whose stdout is data, a JSON document or a dump, owns all of it.
 pub fn output<S>(
 	filter: CustomFilter,
 	stdout: NonBlocking,

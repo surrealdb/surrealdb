@@ -1,0 +1,18 @@
+/**
+[env]
+imports = ["reproductions/4815_graphql_explicit_id_field_import.surql"]
+
+[test]
+reason = "A table that declares its own id field is exposed through GraphQL without a duplicate id field on its generated types"
+issue = 4815
+
+[[test.results]]
+value = "{ products: [{ id: 'product:a', name: 'a' }, { id: 'product:b', name: 'b' }] }"
+
+*/
+query {
+	products(order: {asc: name}) {
+		id
+		name
+	}
+}
