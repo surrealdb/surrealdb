@@ -32,7 +32,9 @@
 //!
 //! A subquery whose rows pass through a `SPLIT`, `FETCH`, `GROUP BY` or any other op after the
 //! projection takes no conjunct: the rows the filter judges are not the rows beneath the
-//! projection.
+//! projection. Likewise a subquery whose loop reads rows that a `LIMIT` or `START`, a `DISTINCT`, a
+//! grouping or a split produced takes no conjunct: the filter must judge the rows the subquery
+//! returns, not the rows its paging or grouping left before it.
 //!
 //! The conjuncts land in the subquery's own filter when the projection reads one, and in a new
 //! filter directly beneath the projection otherwise. Each merge is a run of the pass: a filter that
@@ -454,8 +456,12 @@ fn subquery_target(cx: &mut LoCx<'_>, filter: &WhereFilter) -> Option<Target> {
 		else {
 			return None;
 		};
-		let inner_loop = ir.op(def_op(ir, *rows)?)?;
-		if !is_select_loop(&inner_loop.kind) || ir.uses(*rows).len() != 1 {
+		let inner_loop_op = def_op(ir, *rows)?;
+		let inner_loop = ir.op(inner_loop_op)?;
+		if !is_select_loop(&inner_loop.kind)
+			|| ir.uses(*rows).len() != 1
+			|| reads_past_row_set_change(ir, inner_loop_op)
+		{
 			return None;
 		}
 		let [body] = inner_loop.regions.as_slice() else {
@@ -827,6 +833,137 @@ fn is_comparison_or_logical(op: &BinaryOperator) -> bool {
 		| BinaryOperator::RangeSkip
 		| BinaryOperator::RangeSkipInclusive => false,
 	}
+}
+
+/// Whether the rows the loop `loop_op` reads are the result of an op that changes which rows exist
+/// (a `LIMIT` or `START`, a `DISTINCT`, a grouping, a split), anywhere along the chain of the
+/// loop's source. A filter placed in such a loop's body is judged before that op's paging, which
+/// counts the rows it passes after the body, so the filter must stay above the loop.
+///
+/// The chain runs through the ops that keep the row set of their first operand, the rows they
+/// take, and ends at any other op: a read of storage, a subquery or loop whose rows its own body
+/// has already paged, or an op that holds no rows. Every logical op is classified by name, so a
+/// new one is placed in one of the three before the pass compiles.
+fn reads_past_row_set_change(ir: &Ir, loop_op: OpId) -> bool {
+	let mut next = ir.op(loop_op).and_then(|data| data.operands.first().copied());
+	while let Some(value) = next {
+		let Some(op) = def_op(ir, value).and_then(|op| ir.op(op)) else {
+			return false;
+		};
+		match &op.kind {
+			OpKind::Logical(
+				LogOp::Limit {
+					..
+				}
+				| LogOp::Distinct
+				| LogOp::Aggregate(_)
+				| LogOp::Split {
+					..
+				},
+			) => return true,
+			OpKind::Logical(
+				LogOp::Sort(_)
+				| LogOp::Filter
+				| LogOp::PermissionFilter {
+					..
+				}
+				| LogOp::Project(_)
+				| LogOp::Fetch
+				| LogOp::VersionScope
+				| LogOp::Only,
+			) => {}
+			OpKind::Logical(
+				LogOp::Request {
+					..
+				}
+				| LogOp::Txn {
+					..
+				}
+				| LogOp::Stmt {
+					..
+				}
+				| LogOp::Statement {
+					..
+				}
+				| LogOp::Source(_)
+				| LogOp::Values {
+					..
+				}
+				| LogOp::Match {
+					..
+				}
+				| LogOp::MatchRead {
+					..
+				}
+				| LogOp::MatchUpdate(_)
+				| LogOp::MatchDelete {
+					..
+				}
+				| LogOp::MatchInsert(_)
+				| LogOp::MatchOutput(_)
+				| LogOp::BindStep(_)
+				| LogOp::Subquery
+				| LogOp::Write(_)
+				| LogOp::Assign(_)
+				| LogOp::Unset {
+					..
+				}
+				| LogOp::Content {
+					..
+				}
+				| LogOp::DdlGuard {
+					..
+				}
+				| LogOp::Define(_)
+				| LogOp::Remove(_)
+				| LogOp::Alter(_)
+				| LogOp::Rebuild(_)
+				| LogOp::UnionAll
+				| LogOp::Join {
+					..
+				}
+				| LogOp::Timeout
+				| LogOp::Explain {
+					..
+				}
+				| LogOp::Eval
+				| LogOp::Block
+				| LogOp::Let(_)
+				| LogOp::Return
+				| LogOp::Loop {
+					..
+				}
+				| LogOp::If
+				| LogOp::Info {
+					..
+				}
+				| LogOp::Sleep
+				| LogOp::Use {
+					..
+				}
+				| LogOp::Option {
+					..
+				}
+				| LogOp::Access(_)
+				| LogOp::Kill
+				| LogOp::Live(_)
+				| LogOp::Subscriber(_)
+				| LogOp::Show(_)
+				| LogOp::Choose(_)
+				| LogOp::WriteStage {
+					..
+				}
+				| LogOp::Events(_)
+				| LogOp::Yield
+				| LogOp::Next
+				| LogOp::Break,
+			)
+			| OpKind::Expr(_)
+			| OpKind::Phys(_) => return false,
+		}
+		next = op.operands.first().copied();
+	}
+	false
 }
 
 /// Whether `kind` is a `SELECT` loop.

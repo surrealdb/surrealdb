@@ -150,6 +150,25 @@ async fn a_filter_that_cannot_move_stays() {
 	}
 }
 
+/// A filter stays above a subquery whose rows a `LIMIT` or `START` cut, whatever its projection
+/// and its order; an ordering alone does not cut the rows, so the filter still moves through it.
+#[tokio::test]
+async fn a_filter_stays_above_a_limit_or_start() {
+	for sql in [
+		"SELECT * FROM (SELECT * FROM t LIMIT 2) WHERE id = t:3",
+		"SELECT * FROM (SELECT * FROM t START 2) WHERE a = 1",
+		"SELECT * FROM (SELECT * FROM t LIMIT 2 START 1) WHERE a = 1",
+		"SELECT * FROM (SELECT * FROM t ORDER BY a LIMIT 2) WHERE a = 1",
+		"SELECT * FROM (SELECT a AS z, id FROM t LIMIT 2) WHERE z = 1",
+	] {
+		let mut ir = bind(sql).await;
+		let report = push(&mut ir).await;
+		assert_eq!(report.rewrites, 0, "`{sql}`");
+	}
+	let mut ir = bind("SELECT * FROM (SELECT * FROM t ORDER BY a) WHERE a = 1").await;
+	assert_eq!(push(&mut ir).await.rewrites, 1);
+}
+
 /// Conjuncts the projection admits move and the rest stay above the subquery.
 #[tokio::test]
 async fn a_filter_splits_between_the_subquery_and_its_statement() {

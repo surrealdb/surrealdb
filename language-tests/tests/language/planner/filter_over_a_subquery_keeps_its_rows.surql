@@ -59,7 +59,7 @@ value = "[{ y: NONE, z: 1 }, { y: NONE, z: 1 }]"
 value = "[{ z: 2 }, { z: 2 }]"
 
 [[test.results]]
-value = "[{ id: t:1, z: 1 }, { id: t:3, z: 1 }]"
+value = "[{ id: t:1, z: 1 }]"
 
 [[test.results]]
 value = "[{ id: t:3, z: 1 }]"
