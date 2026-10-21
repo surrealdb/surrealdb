@@ -240,6 +240,32 @@ async fn a_record_a_unique_index_refuses_is_not_committed() {
 	assert_round_trips(&ds).await;
 }
 
+/// A table event used as a guard that writes a side effect and then `THROW`s
+/// has written both the triggering record and the side effect when it throws:
+/// the record in its own store stage, the side effect in the event's nested
+/// `CREATE`, both before the `THROW`. Catching the statement's error and
+/// committing does not get past the guard: the commit is refused and neither
+/// write persists (GHSA-623g-mhxq-5hmf).
+#[tokio::test]
+async fn an_event_that_writes_then_throws_is_not_committed() {
+	let ds = ds().await;
+	run(
+		&ds,
+		"DEFINE TABLE item SCHEMALESS; DEFINE TABLE audit SCHEMALESS;
+		 DEFINE EVENT guard ON item WHEN $event = 'CREATE' AND $after.qty < 0
+		     THEN { CREATE audit SET k = 'before-throw'; THROW 'qty must be >= 0' };",
+	)
+	.await;
+	let client = client_answers(&ds, &owner(), "CREATE item:bad SET qty = -1 RETURN NONE;").await;
+	assert_err(&client[0], "qty must be >= 0");
+	assert_err(&client[1], REFUSED_COMMIT);
+	assert_eq!(
+		answer(&ds, "SELECT VALUE id FROM item, audit;").await,
+		answer(&ds, "RETURN [];").await,
+	);
+	assert_round_trips(&ds).await;
+}
+
 /// A multi-row write refused on a later row has written the rows before it.
 #[tokio::test]
 async fn a_write_refused_part_way_is_not_committed() {
