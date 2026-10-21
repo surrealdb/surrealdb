@@ -263,6 +263,6 @@ pub mod builtin_paths;
 pub mod event_kind;
 pub mod index;
 pub mod scoring;
-pub use api_method::ApiMethod;
+pub use api_method::{ApiMethod, ApiSecurity};
 pub use event_kind::EventKind;
 pub use scoring::Scoring;

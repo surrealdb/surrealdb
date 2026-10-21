@@ -785,6 +785,8 @@ pub(crate) enum AlterObject {
 	Api {
 		path: OperandSlot,
 		clauses: Box<[AlterApiClauseShape]>,
+		/// Whether the statement sets the handler security mode.
+		security: bool,
 		comment: AlterKind<String>,
 	},
 	Event(Box<AlterEvent>),

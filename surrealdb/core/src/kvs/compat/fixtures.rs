@@ -688,6 +688,7 @@ pub fn api_basic() -> StoredApiDefinition {
 		config: StoredApiConfigDefinition::default(),
 		comment: None,
 		auth_limit: AuthLimit::new_no_limit(),
+		security: ApiSecurity::Definer,
 	}
 }
 
@@ -723,6 +724,7 @@ pub fn api_with_middleware() -> StoredApiDefinition {
 			permissions: StoredPermission::Full,
 		},
 		comment: Some("Order management API".to_string()),
+		security: ApiSecurity::Definer,
 	}
 }
 
@@ -754,6 +756,7 @@ pub fn api_with_auth_limit() -> StoredApiDefinition {
 			AuthLevel::Database("prod_ns".to_string(), "prod_db".to_string()),
 			Some("Owner".to_string()),
 		),
+		security: ApiSecurity::Definer,
 	}
 }
 

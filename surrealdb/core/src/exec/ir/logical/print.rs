@@ -2625,7 +2625,12 @@ text_enum!(AlterObject {
 		System { query_timeout: AlterKind<u16>, compact: bool, compatibility: Option<u8> },
 		Namespace { compact: bool },
 		Database { name: Option<u16>, compact: bool, compatibility: Option<u8> },
-		Api { path: u16, clauses: Box<[AlterApiClauseShape]>, comment: AlterKind<String> },
+		Api {
+			path: u16,
+			clauses: Box<[AlterApiClauseShape]>,
+			security: bool,
+			comment: AlterKind<String>
+		},
 		Index { name: u16, table: u16, prepare_remove: bool, comment: AlterKind<String> },
 		Sequence { name: u16, timeout: Option<u16> },
 		Param {

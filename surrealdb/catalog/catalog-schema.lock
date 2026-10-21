@@ -44,6 +44,9 @@ type ApiMethod enum since=4.0 reserved=[]
   4 Post unit since=4.0
   5 Put unit since=4.0
   6 Trace unit since=4.0
+type ApiSecurity enum since=4.0 reserved=[]
+  1 Definer unit since=4.0
+  2 Invoker unit since=4.0
 type Auth struct since=4.0 reserved=[]
   2 actor Actor critical since=4.0 absent=required
 type AuthLevel enum since=4.0 reserved=[]
@@ -446,6 +449,7 @@ type StoredApiDefinition struct since=4.0 reserved=[]
   6 fallback option<text:expr> critical since=4.0 absent=none
   8 config StoredApiConfigDefinition critical since=4.0 absent=required
   10 auth_limit AuthLimit critical since=4.0 absent=required
+  12 security ApiSecurity critical since=4.0 absent=default(ApiSecurity::default)
 type StoredBucketDefinition struct since=4.0 reserved=[]
   1 comment option<string> ignorable since=4.0 absent=none independent="a comment is text for people and no other field reads it"
   2 id option<int:u32> critical since=4.0 absent=none

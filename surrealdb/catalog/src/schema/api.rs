@@ -88,11 +88,55 @@ impl From<ApiMethod> for runtime::ApiMethod {
 	}
 }
 
+/// Whose permissions the handler of an API runs with.
+///
+/// The stored twin of [`runtime::ApiSecurity`]: this form is persisted inside
+/// API definitions, so it owns the revision encoding and must not change shape
+/// or variant order without a revision bump.
+#[revisioned(revision = 1)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
+pub enum ApiSecurity {
+	/// The handler runs with table and field permissions lifted, bounded by
+	/// the auth of the identity that defined the API.
+	#[default]
+	#[stored(n = 1)]
+	Definer,
+	/// The handler runs under the permissions of the caller, bounded by the
+	/// auth of the identity that defined the API.
+	#[stored(n = 2)]
+	Invoker,
+}
+
+impl From<runtime::ApiSecurity> for ApiSecurity {
+	fn from(v: runtime::ApiSecurity) -> Self {
+		match v {
+			runtime::ApiSecurity::Definer => Self::Definer,
+			runtime::ApiSecurity::Invoker => Self::Invoker,
+		}
+	}
+}
+
+impl From<ApiSecurity> for runtime::ApiSecurity {
+	fn from(v: ApiSecurity) -> Self {
+		match v {
+			ApiSecurity::Definer => Self::Definer,
+			ApiSecurity::Invoker => Self::Invoker,
+		}
+	}
+}
+
+impl InfoStructure for ApiSecurity {
+	fn structure(self) -> Value {
+		Value::from(runtime::ApiSecurity::from(self).to_string().to_lowercase())
+	}
+}
+
 /// The API definition.
 ///
 /// Not `Default`: a route path has no meaningful empty value, and every
 /// construction site supplies one.
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
 #[stored(since = "4.0")]
 pub struct StoredApiDefinition {
@@ -119,6 +163,10 @@ pub struct StoredApiDefinition {
 	#[revision(start = 2, default_fn = "default_auth_limit")]
 	#[stored(n = 10)]
 	pub auth_limit: AuthLimit,
+	/// Whose permissions the handler runs with.
+	#[revision(start = 3, default_fn = "default_security")]
+	#[stored(n = 12, default = "ApiSecurity::default")]
+	pub security: ApiSecurity,
 }
 
 // This was pushed in after the first beta, so we need to add auth_limit to structs in a
@@ -155,6 +203,10 @@ impl StoredApiDefinition {
 	fn default_auth_limit(_revision: u16) -> Result<AuthLimit, revision::Error> {
 		Ok(AuthLimit::new_no_limit())
 	}
+
+	fn default_security(_revision: u16) -> Result<ApiSecurity, revision::Error> {
+		Ok(ApiSecurity::Definer)
+	}
 }
 
 impl_kv_value_catalog!(StoredApiDefinition);
@@ -167,6 +219,7 @@ impl ApiDefinition {
 			actions: self.actions.iter().map(|x| x.to_runtime_action()).collect(),
 			fallback: self.fallback.clone(),
 			config: self.config.to_runtime_config(),
+			security: self.security.into(),
 			comment: self
 				.comment
 				.clone()
@@ -188,6 +241,7 @@ impl InfoStructure for ApiDefinition {
 			"path" => self.path.to_string().into(),
 			"config" => self.config.structure(),
 			"fallback", if let Some(fallback) = self.fallback => Value::from(fallback.to_stored_sql()),
+			"security", if self.security != ApiSecurity::Definer => self.security.structure(),
 			"actions" => Value::from(self.actions.into_iter().map(InfoStructure::structure).collect::<Vec<Value>>()),
 			"comment", if let Some(comment) = self.comment => comment.into(),
 		};
@@ -418,6 +472,7 @@ pub struct ApiDefinition {
 	pub fallback: Option<Expr>,
 	pub config: ApiConfig,
 	pub auth_limit: AuthLimit,
+	pub security: ApiSecurity,
 	pub comment: Option<String>,
 }
 
@@ -436,6 +491,7 @@ impl FromStored for ApiDefinition {
 				fallback: stored.fallback.as_ref().map(|t| t.compile()).transpose()?,
 				config: ApiConfig::from_stored(&stored.config)?,
 				auth_limit: stored.auth_limit.clone(),
+				security: stored.security,
 				comment: stored.comment.clone(),
 			})
 		}
@@ -456,6 +512,7 @@ impl ApiDefinition {
 			config: self.config.to_stored(),
 			comment: self.comment.clone(),
 			auth_limit: self.auth_limit.clone(),
+			security: self.security,
 		}
 	}
 }

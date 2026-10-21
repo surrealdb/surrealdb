@@ -91,6 +91,9 @@ c74c43a32e3ef11e language-tests/tests/api/permissions/unchecked_frames_import.su
 040c7a3ba80632b1 language-tests/tests/api/response/headers.surql
 6e17091f3e2a408c language-tests/tests/api/response/raw_response.surql
 03314f5ff16578f5 language-tests/tests/api/response/status_codes.surql
+3650f1ca016ceda5 language-tests/tests/api/security/invoker.surql
+62d3fecfb239b127 language-tests/tests/api/security/invoker_import.surql
+63bbc6d8fab3b8a7 language-tests/tests/api/security/invoker_write.surql
 6b570ab453b2ccd3 language-tests/tests/bench/changefeed/create_1000.surql
 112efe291dc649a7 language-tests/tests/bench/changefeed/show_changes.surql
 2666d4f04087bf8d language-tests/tests/bench/changefeed/update_where.surql
@@ -2255,6 +2258,7 @@ a8502ddb4af07da0 language-tests/tests/language/statements/define/analyzer/search
 df25d71a6baaf2a7 language-tests/tests/language/statements/define/api/duplicates.surql
 61099ed9ccacd0ba language-tests/tests/language/statements/define/api/failures.surql
 4094b1da286ec8d3 language-tests/tests/language/statements/define/api/formatting.surql
+0984d28e36c9795f language-tests/tests/language/statements/define/api/security.surql
 e8046c90dfb801ef language-tests/tests/language/statements/define/bucket/permissions_read_unchecked_allowed.surql
 e8046c90dfb801ef language-tests/tests/language/statements/define/bucket/permissions_read_unchecked_denied.surql
 42918f1055965a68 language-tests/tests/language/statements/define/bucket/permissions_read_unchecked_import.surql
@@ -3417,6 +3421,7 @@ cb6f6b0d28a95beb language-tests/tests/parsing/glueing/no_glueing_after_minus.sur
 40b1fe97897013ff language-tests/tests/parsing/idents/empty_identifiers.surql
 03ef936ea7cfbac9 language-tests/tests/parsing/idents/escape_sequences_backtick.surql
 c42965987d6a8fec language-tests/tests/parsing/idents/escape_sequences_bracket.surql
+736d65074b95188a language-tests/tests/parsing/idents/security_invoker_definer_as_identifiers.surql
 c50095233af4dc36 language-tests/tests/parsing/recordid_string/basic.surql
 5dec1f8acf01f822 language-tests/tests/parsing/recordid_string/error/missing_seperator.surql
 064e2c82360c0218 language-tests/tests/parsing/recordid_string/error/missing_seperator_after_escape.surql
@@ -3489,6 +3494,8 @@ e92a984841fe6f5c language-tests/tests/reproductions/6297_field_already_exists_re
 4264f6b71f285310 language-tests/tests/reproductions/6382_nullish_coalescing_precedence.surql
 6370f071b48f74d5 language-tests/tests/reproductions/6479_computed_field_with_destructuring.surql
 9c43f6fdf9c134ef language-tests/tests/reproductions/6541_version_count_aggregate.surql
+d06aae10f5064ed9 language-tests/tests/reproductions/6734_define_api_body_caller_permissions.surql
+f08ac37638fb3fe8 language-tests/tests/reproductions/6734_define_api_body_runs_as_definer.surql
 3f426cffefab05ca language-tests/tests/reproductions/6932_bracket_not_resolve.surql
 dff8825d46743568 language-tests/tests/reproductions/6948_nested_destructure_in_block.surql
 d7b8c522bbba8945 language-tests/tests/reproductions/6980_type_field_record_traversal.surql
@@ -4420,7 +4427,7 @@ f1afcc38fa8cfb47 language-tests/tests/upgrade/define/3.00.00_analyzer_ngram.surq
 6cef5dcb13d4fd0d language-tests/tests/upgrade/define/3.00.00_analyzer_ngram_import.surql
 c28ec559609c7287 language-tests/tests/upgrade/define/3.00.00_analyzer_snowball.surql
 595e914fd9d3d741 language-tests/tests/upgrade/define/3.00.00_analyzer_snowball_import.surql
-3d2613d8a9ceb9bd language-tests/tests/upgrade/define/3.00.00_api.surql
+6b5c3b6877938b39 language-tests/tests/upgrade/define/3.00.00_api.surql
 03efd6aa84ae158f language-tests/tests/upgrade/define/3.00.00_api_import.surql
 b5b54d720d0f600c language-tests/tests/upgrade/define/3.00.00_bucket.surql
 00366a0f6ba2d8b9 language-tests/tests/upgrade/define/3.00.00_bucket_import.surql
@@ -4669,8 +4676,10 @@ cbf29ce484222325 surrealdb/parser-next/tests/corpus/empty_statements.surql
 29a08ddaf98d504e surrealdb/parser-next/tests/corpus/errors/access_purge_duplicate_kind.surql
 3c892fae206e6179 surrealdb/parser-next/tests/corpus/errors/access_purge_missing_kind.surql
 5c6c040a29688dd1 surrealdb/parser-next/tests/corpus/errors/access_revoke_invalid_target.surql
+37bc642b49e369ab surrealdb/parser-next/tests/corpus/errors/alter_api_security_twice.surql
 a92a30c4d3f7f06c surrealdb/parser-next/tests/corpus/errors/alter_database_without_clause.surql
 f596818238530060 surrealdb/parser-next/tests/corpus/errors/compatibility_level.surql
+3d323572e15370b8 surrealdb/parser-next/tests/corpus/errors/define_api_security_twice.surql
 a6dc56284d6f6cd5 surrealdb/parser-next/tests/corpus/errors/insert_has_no_only.surql
 377573ca7cdc8693 surrealdb/parser-next/tests/corpus/errors/invalid_clause.surql
 4b96cde4bdd7855a surrealdb/parser-next/tests/corpus/errors/migrate_incomplete.surql

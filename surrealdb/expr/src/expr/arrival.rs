@@ -834,7 +834,13 @@ impl Visitor for ArrivalVisitor {
 			session_duration: _,
 			comment: _,
 		} []
-		visit_alter_api(AlterApiStatement) { path: _, if_exists: _, clauses: _, comment: _ } []
+		visit_alter_api(AlterApiStatement) {
+			path: _,
+			if_exists: _,
+			clauses: _,
+			security: _,
+			comment: _,
+		} []
 		visit_alter_access(AlterAccessStatement) {
 			name: _,
 			base: _,
@@ -1039,6 +1045,7 @@ impl Visitor for ArrivalVisitor {
 			actions: _,
 			fallback: _,
 			config: _,
+			security: _,
 			comment: _,
 		} []
 		visit_api_action(ApiAction) { methods: _, action: _, config: _ } []

@@ -152,7 +152,17 @@ use crate::val::{Datetime, TableName, Value};
 	},
 	comment: None,
 	auth_limit: AuthLimit::default(),
-}, 48)]
+	security: ApiSecurity::Definer,
+}, 50)]
+#[case::api_invoker(StoredApiDefinition {
+	path: PathText::from_raw("/test"),
+	actions: vec![],
+	fallback: Some(ExprText::from_raw("'fallback'")),
+	config: StoredApiConfigDefinition::default(),
+	comment: None,
+	auth_limit: AuthLimit::default(),
+	security: ApiSecurity::Invoker,
+}, 31)]
 #[case::bucket(StoredBucketDefinition {
 	id: Some(BucketId(123)),
 	readonly: false,

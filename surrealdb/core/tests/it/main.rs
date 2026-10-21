@@ -17,6 +17,7 @@ mod remove_macros;
 mod access;
 mod alter;
 mod api_scope;
+mod api_security;
 mod asyncevent;
 mod auth_limit;
 mod cache;

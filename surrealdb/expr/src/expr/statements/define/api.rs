@@ -3,7 +3,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
 use super::config::api::ApiConfig;
-use crate::expr::{ApiMethod, CoverStmts, Expr, Literal};
+use crate::expr::{ApiMethod, ApiSecurity, CoverStmts, Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineApiStatement {
@@ -12,6 +12,7 @@ pub struct DefineApiStatement {
 	pub actions: Vec<ApiAction>,
 	pub fallback: Option<Expr>,
 	pub config: ApiConfig,
+	pub security: ApiSecurity,
 	pub comment: Expr,
 }
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -58,6 +59,11 @@ impl ToSql for DefineApiStatement {
 
 		for action in &self.actions {
 			write_sql!(f, sql_fmt, " {}", action);
+		}
+
+		// The default is left unwritten.
+		if self.security != ApiSecurity::Definer {
+			write_sql!(f, sql_fmt, " SECURITY {}", self.security);
 		}
 
 		if !matches!(self.comment, Expr::Literal(Literal::None)) {

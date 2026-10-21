@@ -897,10 +897,35 @@ impl<'a, 's> Parser<'a, 's> {
 			let idx = self.record(&[methods, cfg, action]);
 			self.push_clause(Cl::ApiMethods, idx, 0, t.start, first)?;
 		}
-		if self.at_kw(Kw::Comment) {
-			self.expr_clause(Cl::Comment)?;
+		let mut security = false;
+		let mut comment = false;
+		loop {
+			match self.tok.kw {
+				Kw::Security if self.tok.kind == T::Ident && !security => {
+					security = true;
+					self.api_security_clause()?;
+				}
+				Kw::Comment if self.tok.kind == T::Ident && !comment => {
+					comment = true;
+					self.expr_clause(Cl::Comment)?;
+				}
+				_ => break,
+			}
 		}
 		Ok(())
+	}
+
+	/// `SECURITY DEFINER | INVOKER`, as a [`Cl::ApiSecurity`] clause.
+	pub(crate) fn api_security_clause(&mut self) -> R<()> {
+		let t = self.bump();
+		let first = self.ast.nodes.len();
+		let invoker = match self.tok.kw {
+			Kw::Definer if self.tok.kind == T::Ident => false,
+			Kw::Invoker if self.tok.kind == T::Ident => true,
+			_ => return Err(self.unexpected("`DEFINER` or `INVOKER`")),
+		};
+		self.bump();
+		self.push_clause(Cl::ApiSecurity, u32::from(invoker), 0, t.start, first)
 	}
 
 	/// `[PERMISSIONS …] [MIDDLEWARE f(…), …]`, repeated, as a

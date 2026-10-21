@@ -3355,8 +3355,9 @@ impl Ddl<'_, '_> {
 			AlterObject::Api {
 				path,
 				clauses,
+				security,
 				comment,
-			} => self.alter_api(attrs, *path, clauses, comment),
+			} => self.alter_api(attrs, *path, clauses, *security, comment),
 			AlterObject::Event(event) => self.alter_event(attrs, event.name, event.what),
 			AlterObject::Index {
 				name,

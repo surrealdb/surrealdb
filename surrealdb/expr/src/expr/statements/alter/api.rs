@@ -4,7 +4,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use super::AlterKind;
 use crate::expr::statements::define::ApiAction;
 use crate::expr::statements::define::config::api::ApiConfig;
-use crate::expr::{ApiMethod, CoverStmts, Expr, Literal};
+use crate::expr::{ApiMethod, ApiSecurity, CoverStmts, Expr, Literal};
 
 /// A single `FOR` clause within an `ALTER API` statement.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -27,6 +27,7 @@ pub struct AlterApiStatement {
 	pub path: Expr,
 	pub if_exists: bool,
 	pub clauses: Vec<AlterApiClause>,
+	pub security: Option<ApiSecurity>,
 	pub comment: AlterKind<String>,
 }
 
@@ -36,6 +37,7 @@ impl Default for AlterApiStatement {
 			path: Expr::Literal(Literal::None),
 			if_exists: false,
 			clauses: Vec::new(),
+			security: None,
 			comment: AlterKind::None,
 		}
 	}
@@ -51,6 +53,10 @@ impl ToSql for AlterApiStatement {
 
 		for clause in &self.clauses {
 			clause.fmt_sql(f, fmt);
+		}
+
+		if let Some(security) = self.security {
+			write_sql!(f, fmt, " SECURITY {}", security);
 		}
 
 		match self.comment {

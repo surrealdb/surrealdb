@@ -389,19 +389,21 @@ impl Ddl<'_, '_> {
 		self.answer_none()
 	}
 
-	/// `ALTER API`: each clause applies in order to the definition read, then the comment is
-	/// replaced and the definition is stamped with the session's authority. The template holds,
-	/// per clause, the stored values the clause sets: the configuration and the fallback of a
-	/// `FOR ANY`, the methods and the action of a `FOR`, or the methods a `DROP` removes.
+	/// `ALTER API`: each clause applies in order to the definition read, then the security mode and
+	/// the comment are replaced and the definition is stamped with the session's authority. The
+	/// template holds, per clause, the stored values the clause sets: the configuration and the
+	/// fallback of a `FOR ANY`, the methods and the action of a `FOR`, or the methods a `DROP`
+	/// removes.
 	pub(super) fn alter_api(
 		&mut self,
 		attrs: &AlterAttrs,
 		path: OperandSlot,
 		clauses: &[AlterApiClauseShape],
+		security: bool,
 		comment: &AlterKind<String>,
 	) -> Result<(), IrError> {
 		let template = Self::alter_template(attrs)?;
-		let Value::Array(values) = &template.value else {
+		let Some(Value::Array(values)) = child(&template.value, "clauses") else {
 			return Err(IrError::Stale(
 				"ir_lower::ddl: an API alteration whose values are no list",
 			));
@@ -482,6 +484,12 @@ impl Ddl<'_, '_> {
 					self.drop_methods(definition, actions, methods)?;
 				}
 			}
+		}
+		if security {
+			let stored = child(&template.value, "security")
+				.ok_or(IrError::Stale("ir_lower::ddl: an API security mode"))?;
+			let value = self.constant(stored.clone())?;
+			self.set_field(definition, "security", value)?;
 		}
 		match comment {
 			AlterKind::Set(comment) => {

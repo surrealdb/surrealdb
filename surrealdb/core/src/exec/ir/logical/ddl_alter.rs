@@ -101,6 +101,17 @@ fn stored_api(
 	config: crate::catalog::ApiConfig,
 	fallback: Option<Expr>,
 ) -> Planned<crate::val::Object> {
+	stored_api_secured(codec, actions, config, fallback, crate::catalog::ApiSecurity::default())
+}
+
+/// As [`stored_api`], with the handler security mode `security`.
+fn stored_api_secured(
+	codec: &'static Codec,
+	actions: Vec<crate::catalog::ApiAction>,
+	config: crate::catalog::ApiConfig,
+	fallback: Option<Expr>,
+	security: crate::catalog::ApiSecurity,
+) -> Planned<crate::val::Object> {
 	let path =
 		"/".parse().map_err(|_| PlanError::Invariant("the root API path did not parse".into()))?;
 	let api = crate::catalog::ApiDefinition {
@@ -109,6 +120,7 @@ fn stored_api(
 		fallback,
 		config,
 		auth_limit: crate::catalog::auth::AuthLimit::default(),
+		security,
 		comment: None,
 	};
 	if let Value::Object(api) = stored_value(codec, &api.to_stored(), "StoredApiDefinition")? {
@@ -116,6 +128,34 @@ fn stored_api(
 	} else {
 		Err(PlanError::Invariant("a stored API that is not an object".into()))
 	}
+}
+
+/// The values an `ALTER API` sets: `clauses` holds one object per clause in order, and `security`
+/// the stored handler security mode the statement sets, or `NONE`. A `FOR ANY` clause holds the
+/// stored `config` and `fallback` it sets, a `FOR` clause the stored `methods` and `action`, and a
+/// `DROP` the `methods` it removes.
+fn api_alteration_values(
+	codec: &'static Codec,
+	clauses: &[AlterApiClause],
+	security: Option<crate::expr::ApiSecurity>,
+) -> Planned<Value> {
+	let security = match security {
+		Some(security) => {
+			let api = stored_api_secured(
+				codec,
+				Vec::new(),
+				catalog_api_config(&Default::default()),
+				None,
+				security.into(),
+			)?;
+			api.get("security").cloned().unwrap_or(Value::None)
+		}
+		None => Value::None,
+	};
+	let mut values = crate::val::Object::default();
+	values.insert("clauses".to_owned(), api_clause_values(codec, clauses)?);
+	values.insert("security".to_owned(), security);
+	Ok(Value::Object(values))
 }
 
 /// The values the clauses of an `ALTER API` set, one object per clause in order: a `FOR ANY`
@@ -380,7 +420,7 @@ pub(super) fn plan_alter<'e>(
 			}
 			template = Some(alter_template(
 				"StoredApiDefinition",
-				api_clause_values(codec, &stmt.clauses)?,
+				api_alteration_values(codec, &stmt.clauses, stmt.security)?,
 				&[],
 			));
 			(
@@ -389,6 +429,7 @@ pub(super) fn plan_alter<'e>(
 				AlterObject::Api {
 					path,
 					clauses: clauses.into_boxed_slice(),
+					security: stmt.security.is_some(),
 					comment: stmt.comment.clone(),
 				},
 				stmt.if_exists,

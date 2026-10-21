@@ -664,6 +664,44 @@ async fn a_restored_access_is_refused_rather_than_signed_with_the_redaction() ->
 	Ok(())
 }
 
+/// An API's security mode survives the round trip.
+///
+/// `SECURITY INVOKER` is the only thing that keeps a handler's queries under the
+/// caller's table and field permissions. A dump that dropped it would restore a
+/// handler that runs with those permissions lifted, and every statement of the
+/// import would still succeed: the loss is a widening of access, not an error.
+/// So the fixture states that the clause reached both the export and the
+/// compared catalog rendering, that the default mode gained no clause on the way
+/// through, and then compares the two catalogs.
+#[tokio::test]
+async fn an_api_security_mode_survives() -> Result<()> {
+	let round_trip = RoundTrip::run(
+		"DEFINE TABLE kept SCHEMALESS;
+		 CREATE kept:1 SET a = 1;
+		 DEFINE API '/invoker' FOR get THEN { RETURN { status: 200 } } SECURITY INVOKER;
+		 DEFINE API '/definer' FOR get THEN { RETURN { status: 200 } } SECURITY DEFINER;",
+	)
+	.await?;
+
+	assert!(
+		round_trip.export_a().contains("SECURITY INVOKER"),
+		"the export does not carry the invoker clause:\n{}",
+		round_trip.export_a()
+	);
+	assert_db_info_carries(&round_trip, &["SECURITY INVOKER"]).await?;
+
+	// Exactly one API carries a clause, before and after: the default mode is
+	// rendered by leaving the clause out.
+	let restored = target_info(&round_trip, "INFO FOR DB").await?;
+	assert_eq!(
+		restored.matches("SECURITY").count(),
+		1,
+		"the restored catalog does not carry the clause for exactly one API:\n{restored}"
+	);
+	round_trip.assert_query_equal("SELECT VALUE id FROM kept").await?;
+	round_trip.assert_all().await
+}
+
 /// A database config survives the round trip, for both kinds the exporter emits.
 ///
 /// A config definition renders as its body alone — `GRAPHQL ...`, `API ...` —
@@ -752,11 +790,11 @@ const EXPORTED_SECTIONS: &[(&str, &str)] = &[
 	("SEQUENCES", "a_sequence_definition_survives"),
 	("TABLE", "table_kinds_and_schema_modes_survive, and every fixture defining a table"),
 	("TABLE DATA", "table_kinds_and_schema_modes_survive, and the phase comparing records"),
-	// Sections whose definitions this file does not build: an API and an
-	// extension need a body to serve, a bucket needs a storage backend to point
-	// at. An unnamed silo extension's round trip is pinned in
+	("APIS", "an_api_security_mode_survives"),
+	// Sections whose definitions this file does not build: an extension needs a
+	// body to serve, a bucket needs a storage backend to point at. An unnamed
+	// silo extension's round trip is pinned in
 	// `kvs::tests::export_legacy_extension_test`.
-	("APIS", "not covered here"),
 	("BUCKETS", "not covered here"),
 	("EXTENSIONS", "not covered here"),
 ];
@@ -804,6 +842,7 @@ async fn every_exported_section_has_a_round_trip_fixture() -> Result<()> {
 		 DEFINE ANALYZER simple TOKENIZERS blank;
 		 DEFINE SEQUENCE order_id BATCH 100 START 0;
 		 DEFINE CONFIG GRAPHQL TABLES AUTO FUNCTIONS AUTO;
+		 DEFINE API '/noop' FOR get THEN { RETURN { status: 200 } };
 		 DEFINE TABLE person SCHEMALESS;
 		 CREATE person:1 SET name = 'ada';",
 	)

@@ -526,6 +526,9 @@ pub enum Cl {
 	/// `CAPABILITIES`: `a` expression, which lowering requires to be an object
 	/// literal.
 	Capabilities,
+	/// `SECURITY DEFINER | INVOKER` on an API: `a` 0 for `DEFINER`, 1 for
+	/// `INVOKER`.
+	ApiSecurity,
 }
 
 /// Slots of an HNSW or DiskANN record in `extra`. Absent parts are `NONE`.

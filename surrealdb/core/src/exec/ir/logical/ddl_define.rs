@@ -832,6 +832,7 @@ pub(super) fn plan_define<'e>(
 				fallback: stmt.fallback.clone(),
 				config: catalog_api_config(&stmt.config),
 				auth_limit: crate::catalog::auth::AuthLimit::default(),
+				security: stmt.security.into(),
 				comment: comment_text(&stmt.comment),
 			};
 			(

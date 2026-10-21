@@ -21,9 +21,10 @@
 //! - The `PERMISSIONS` clauses, the method's first, then the endpoint's, then the database's `API`
 //!   configuration's, in the caller's frame with permission enforcement off and writes refused, as
 //!   every permission predicate is.
-//! - The chain, under the caller's auth narrowed by the definition's `AUTH LIMIT`, with permission
-//!   enforcement off: an endpoint answers for what its owner defined, not for what its caller may
-//!   read.
+//! - The chain, under the caller's auth narrowed by the definition's `AUTH LIMIT`. A `SECURITY
+//!   DEFINER` endpoint, the default, runs with permission enforcement off: it answers for what its
+//!   owner defined, not for what its caller may read. A `SECURITY INVOKER` endpoint leaves the
+//!   caller's permission state in force, so its queries are judged as the caller's own would be.
 //! - Each stage in a context isolated from the stage that called it, so no parameter one stage
 //!   binds is seen by another. The handler reads the request as `$request`.
 //!
@@ -47,7 +48,7 @@ use crate::api::err::ApiError;
 use crate::api::request::ApiRequest;
 use crate::api::response::ApiResponse;
 use crate::catalog::providers::DatabaseProvider;
-use crate::catalog::{ApiDefinition, MiddlewareDefinition, Permission};
+use crate::catalog::{ApiDefinition, ApiSecurity, MiddlewareDefinition, Permission};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::exe::FlowResultExt as _;
@@ -169,8 +170,12 @@ async fn run_chain(
 		handler,
 	});
 
-	// The chain runs without permissions, under the definer's auth limit.
-	let opt = opt.limited_by(&AuthLimit::try_from(&api.auth_limit)?).new_with_perms(false);
+	// The chain never exceeds the auth of the identity that defined the API.
+	let opt = opt.limited_by(&AuthLimit::try_from(&api.auth_limit)?);
+	let opt = match api.security {
+		ApiSecurity::Definer => opt.new_with_perms(false),
+		ApiSecurity::Invoker => opt,
+	};
 	let frame = crate::exec::entry::frame(ctx, &opt, None).await;
 	let answered = crate::exec::trampoline::nest(run_stage(chain, 0, req.into(), frame))
 		.await
@@ -399,10 +404,9 @@ async fn call_middleware(
 			// Served from the compile cache by the call as written; the
 			// arguments it folds in are what it is kept against
 			// ([`crate::exec::vm::serve`]).
-			let compiled =
-				crate::exec::vm::serve::expr(&exec, call, Some(Arc::clone(&exec.root().auth)), 0)
-					.await
-					.map_err(ControlFlow::Err)?;
+			let compiled = crate::exec::vm::serve::expr(&exec, call, chain_principal(&exec), 0)
+				.await
+				.map_err(ControlFlow::Err)?;
 			compiled.evaluate(EvalContext::from_exec_ctx(&exec)).await
 		}
 	}
@@ -428,11 +432,24 @@ async fn run_handler(chain: &ApiChain, req: Value, exec: &ExecutionContext) -> F
 	Ok(Value::from(res))
 }
 
+/// The principal a stage of the chain is compiled for: the caller's when its
+/// reads are permission-checked, and none when they are not, so a plan that
+/// reads without permissions is shared by every caller.
+fn chain_principal(exec: &ExecutionContext) -> Option<Arc<crate::iam::Auth>> {
+	if exec.root().skip_fetch_perms {
+		None
+	} else {
+		Some(Arc::clone(&exec.root().auth))
+	}
+}
+
 /// The value of `handler` in `exec`.
 ///
 /// A handler written as a block runs as the statement it is, planned by the
-/// statement planner — on the VM where that covers it — bound without a
-/// principal, since the chain's reads are not permission-checked. Any other
+/// statement planner — on the VM where that covers it. It is bound to the
+/// caller's principal when the chain's reads are permission-checked (`SECURITY
+/// INVOKER` under a caller subject to permissions), and without one when they
+/// are not, so every caller of a `SECURITY DEFINER` handler shares one plan. Any other
 /// handler, and a block the planner declines, is an expression reached from
 /// outside a plan ([`crate::exec::entry`]).
 async fn evaluate_handler(handler: &Expr, exec: &ExecutionContext) -> Result<Value> {
@@ -450,11 +467,7 @@ async fn evaluate_handler(handler: &Expr, exec: &ExecutionContext) -> Result<Val
 			.is_none()
 		&& exec.try_txn().is_some()
 	{
-		let principal = if exec.root().skip_fetch_perms {
-			None
-		} else {
-			Some(Arc::clone(&exec.root().auth))
-		};
+		let principal = chain_principal(exec);
 		// Served from the compile cache by the handler as written
 		// ([`crate::exec::vm::serve`]).
 		match crate::exec::vm::serve::statement(exec, op.as_ref().clone(), principal, 0, Vec::new())

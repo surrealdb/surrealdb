@@ -59,7 +59,7 @@ use crate::expr::table_type::TableType;
 use crate::expr::tokenizer::{SegmentLanguage, Tokenizer};
 use crate::expr::user::PendingPassword;
 use crate::expr::{
-	AccessType, Algorithm, ApiMethod, Base, Cond, EventKind, Expr, Fields, Literal,
+	AccessType, Algorithm, ApiMethod, ApiSecurity, Base, Cond, EventKind, Expr, Fields, Literal,
 	ModuleExecutable, Scoring, SiloExecutable, SurrealismExecutable, View, table_type,
 };
 use crate::iam::ScramCredential;
@@ -407,10 +407,18 @@ impl Lower<'_> {
 						middleware: Vec::new(),
 						permissions: Permission::Full,
 					},
+					security: ApiSecurity::default(),
 					comment: Expr::Literal(Literal::None),
 				};
 				for c in clauses {
 					match cl(c) {
+						Cl::ApiSecurity => {
+							s.security = if c.a == 1 {
+								ApiSecurity::Invoker
+							} else {
+								ApiSecurity::Definer
+							}
+						}
 						Cl::ApiAny => {
 							s.config = self.api_config(c.a)?;
 							if c.b != NONE {
@@ -1833,6 +1841,13 @@ impl Lower<'_> {
 									AlterKind::Set(self.expr(c.b)?)
 								},
 							});
+						}
+						(Cl::ApiSecurity, _) => {
+							s.security = Some(if c.a == 1 {
+								ApiSecurity::Invoker
+							} else {
+								ApiSecurity::Definer
+							})
 						}
 						(Cl::ApiDropAction, _) => s.clauses.push(AlterApiClause::DropAction {
 							methods: methods(c.a),

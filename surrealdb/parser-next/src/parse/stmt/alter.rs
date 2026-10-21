@@ -283,8 +283,20 @@ impl<'a, 's> Parser<'a, 's> {
 	fn alter_clauses(&mut self, kind: u8, field_is_id: bool) -> R<()> {
 		use DefineKind as D;
 		let k = |d: D| d as u8;
+		let mark = self.vals.len();
 		loop {
 			let t = self.tok;
+			// `SECURITY` may be set once: a second one ends the clauses, so it is
+			// refused where the statement must end.
+			if kind == k(D::Api)
+				&& t.kind == T::Ident
+				&& t.kw == Kw::Security
+				&& self.vals[mark..].iter().any(|&c| {
+					let n = &self.ast.nodes[c as usize];
+					n.tag == Tag::Clause && n.op == Cl::ApiSecurity as u8
+				}) {
+				return Ok(());
+			}
 			if kind == k(D::Function) && t.kind == T::LParen {
 				self.alter_signature()?;
 				continue;
@@ -479,6 +491,7 @@ impl<'a, 's> Parser<'a, 's> {
 				return Ok(false);
 			}
 			Kw::For if is(D::Api) => self.alter_api_for()?,
+			Kw::Security if is(D::Api) => self.api_security_clause()?,
 			_ => return Ok(false),
 		}
 		Ok(true)
