@@ -226,6 +226,12 @@ pub struct Claims {
 	#[serde(alias = "https://surrealdb.com/roles")]
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub roles: Option<Vec<String>>,
+	/// The bearer grant a token issued by a `BEARER` access method was
+	/// exchanged from. Verifying the token checks that this grant is still
+	/// active, so revoking it ends the token.
+	#[serde(rename = "GR")]
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub grant: Option<String>,
 
 	#[serde(flatten)]
 	#[serde(skip_serializing_if = "Option::is_none")]
@@ -288,6 +294,10 @@ impl Claims {
 		// Add RL field if set
 		if let Some(role) = self.roles {
 			out.insert("RL", role.into_iter().map(Value::from).collect::<Vec<_>>().into());
+		}
+		// Add GR field if set
+		if let Some(grant) = self.grant {
+			out.insert("GR", grant.into());
 		}
 		// Add custom claims if set
 		if let Some(custom_claims) = self.custom_claims {

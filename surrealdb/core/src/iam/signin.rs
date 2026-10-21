@@ -915,6 +915,18 @@ pub(crate) async fn signin_bearer(
 			catalog::Subject::User(_) => Some(roles.clone()),
 			catalog::Subject::Record(_) => Default::default(),
 		},
+		// A token issued by a `BEARER` method is only as good as its grant, so
+		// it names the grant that verification checks. A record access's
+		// refresh grant is spent by the exchange that issues the token, and
+		// the token outlives it.
+		grant: matches!(
+			av.access_type,
+			catalog::AccessType::Bearer(catalog::BearerAccess {
+				kind: catalog::BearerAccessType::Bearer,
+				..
+			})
+		)
+		.then(|| gr.id.clone()),
 		..Claims::default()
 	};
 	// AUTHENTICATE clause
@@ -1136,27 +1148,30 @@ pub fn validate_grant_bearer(key: &str) -> Result<String> {
 	Ok(kid.to_string())
 }
 
-pub(crate) fn verify_grant_bearer(
-	gr: &Arc<catalog::AccessGrant>,
-	key: String,
-) -> Result<&catalog::GrantBearer> {
-	// Check if the grant is revoked or expired.
-
+/// Refuses a grant that is revoked or expired, with the opaque error that
+/// does not say which.
+pub(crate) fn require_active_grant(gr: &catalog::AccessGrant) -> Result<()> {
 	match (&gr.expiration, &gr.revocation) {
-		(None, None) => {}
+		(None, None) => Ok(()),
 		(Some(exp), None) => {
 			if exp < &Datetime::now() {
-				// Return opaque error to avoid leaking revocation status.
 				debug!("Bearer access grant `{}` for method `{}` is expired", gr.id, gr.ac);
-
 				bail!(AuthError::InvalidAuth);
 			}
+			Ok(())
 		}
 		(_, Some(_)) => {
 			debug!("Bearer access grant `{}` for method `{}` is revoked", gr.id, gr.ac);
 			bail!(AuthError::InvalidAuth);
 		}
 	}
+}
+
+pub(crate) fn verify_grant_bearer(
+	gr: &Arc<catalog::AccessGrant>,
+	key: String,
+) -> Result<&catalog::GrantBearer> {
+	require_active_grant(gr)?;
 	// Check if the provided key matches the bearer key in the grant.
 	// We use time-constant comparison to prevent timing attacks.
 	match &gr.grant {
@@ -1213,6 +1228,67 @@ mod tests {
 	}
 
 	const AVAILABLE_ROLES: [Role; 3] = [Role::Viewer, Role::Editor, Role::Owner];
+
+	/// Signing in again on the same session replaces the principal entirely: a
+	/// record user who then signs in as a root user leaves no record identity,
+	/// access method or CONTEXT payload behind, and `$auth`, `$access` and
+	/// `$session` describe the root user alone.
+	#[tokio::test]
+	async fn signing_in_as_root_after_a_record_leaves_nothing_of_the_record() {
+		use surrealdb_types::Value as PV;
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let owner = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			r#"
+			DEFINE USER root ON ROOT PASSWORD 'root' ROLES OWNER;
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
+				SIGNIN ( SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass) )
+				CONTEXT ( { org: 'acme' } )
+				DURATION FOR SESSION 2h;
+			CREATE user:test CONTENT { name: 'user', pass: crypto::argon2::generate('pass') };
+			"#,
+			&owner,
+			None,
+		)
+		.await
+		.unwrap();
+
+		let mut sess = Session::default();
+		let mut vars = PublicVariables::new();
+		vars.insert("ns", "test");
+		vars.insert("db", "test");
+		vars.insert("ac", "user");
+		vars.insert("user", "user");
+		vars.insert("pass", "pass");
+		signin(&ds, &mut sess, vars).await.expect("record signin");
+		assert!(sess.au.is_record());
+		assert!(sess.rd.is_some() && sess.ac.is_some() && sess.data.is_some());
+
+		let mut vars = PublicVariables::new();
+		vars.insert("user", "root");
+		vars.insert("pass", "root");
+		signin(&ds, &mut sess, vars).await.expect("root signin");
+		assert!(sess.au.is_root());
+		assert!(sess.rd.is_none(), "the record identity must not survive");
+		assert!(sess.ac.is_none(), "the record access method must not survive");
+		assert!(sess.data.is_none(), "the CONTEXT payload must not survive");
+
+		let res = ds
+			.execute(
+				"RETURN [$auth, $access, $session.ac, $session.rd, $token.ID, $token.AC]",
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+		let got = res.into_iter().next().unwrap().result.unwrap().into_array().unwrap().into_vec();
+		assert_eq!(
+			got,
+			vec![PV::None, PV::None, PV::None, PV::None, PV::String("root".to_owned()), PV::None],
+			"after a root signin every principal value describes the root user"
+		);
+	}
 
 	#[tokio::test]
 	async fn test_signin_record() {
@@ -3924,13 +4000,9 @@ mod context_clause_tests {
 	/// RECORD` settles a record identity through the key exchange, so it takes
 	/// a CONTEXT clause and gets a payload.
 	///
-	/// It also pins what happens to the JWT that exchange issues.
-	/// `signin_bearer` always fills the `id` claim from the grant's subject,
-	/// so presenting that JWT back matches `verify::token`'s record-access arm
-	/// — which requires the definition's access type to be `RECORD` and
-	/// rejects a `BEARER` one outright. Re-verification is a hard
-	/// AccessMethodMismatch, not a downgrade to a session with neither `$auth`
-	/// nor `$session.data`.
+	/// The JWT that exchange issues names the granted record as its `id`, and
+	/// presenting it back authenticates the same record with the same payload:
+	/// the token is usable wherever a record-access token is.
 	#[tokio::test]
 	async fn context_is_accepted_on_bearer_for_record() {
 		let ds = Datastore::new("memory").await.unwrap();
@@ -3995,12 +4067,377 @@ mod context_clause_tests {
 			} => access,
 		};
 		let mut other = Session::default();
-		let err = crate::iam::verify::token(&ds, &mut other, &access).await.unwrap_err();
-		assert!(
-			err.to_string().contains("cannot be used in the requested operation"),
-			"presenting the issued JWT back must be a hard mismatch, got: {err}"
+		crate::iam::verify::token(&ds, &mut other, &access)
+			.await
+			.expect("the JWT a bearer grant issues must verify");
+		assert_eq!(other.au.level().ns(), Some("test"));
+		assert_eq!(other.au.level().db(), Some("test"));
+		assert_eq!(
+			other.au.level().id(),
+			Some("user:1"),
+			"the token authenticates the granted record"
 		);
-		assert!(other.data.is_none());
+		assert_eq!(other.ac.as_deref(), Some("api"));
+		assert_eq!(
+			other.data.as_ref().expect("data").public().clone().into_array().unwrap().into_vec(),
+			vec![PV::String("acme".to_owned())],
+			"verifying the token recomputes the CONTEXT payload for the same record"
+		);
+	}
+
+	/// A grant on `api` at `level`, a `BEARER FOR {kind}` method whose
+	/// `access` clauses follow the subject, for `subject` (`USER tobie` or
+	/// `RECORD user:1`), exchanged for a JWT: the token, the grant's identifier
+	/// and the owner session that set it up.
+	async fn bearer_jwt(
+		ds: &Datastore,
+		level: &str,
+		kind: &str,
+		access: &str,
+		subject: &str,
+		setup: &str,
+	) -> (String, String, Session) {
+		let owner = Session::owner().with_ns("test").with_db("test");
+		let res = ds
+			.execute(
+				&format!(
+					r#"
+					{setup}
+					DEFINE ACCESS api ON {level} TYPE BEARER FOR {kind} {access};
+					ACCESS api ON {level} GRANT FOR {subject};
+					"#
+				),
+				&owner,
+				None,
+			)
+			.await
+			.unwrap();
+		let result = res.last().unwrap().result.clone().unwrap();
+		let grant_id = result.get("id").clone().into_string().unwrap();
+		let key = result
+			.get("grant")
+			.clone()
+			.into_object()
+			.unwrap()
+			.get("key")
+			.unwrap()
+			.as_string()
+			.unwrap()
+			.clone();
+		let mut vars = PublicVariables::new();
+		if level != "ROOT" {
+			vars.insert("ns", "test");
+		}
+		if level == "DATABASE" {
+			vars.insert("db", "test");
+		}
+		vars.insert("ac", "api");
+		vars.insert("key", key);
+		let mut sess = Session::default();
+		let Token::Access(access) = signin(ds, &mut sess, vars).await.expect("bearer signin")
+		else {
+			panic!("a bearer grant issues no refresh token");
+		};
+		(access, grant_id, owner)
+	}
+
+	/// Revoking a bearer grant ends every JWT it was exchanged for, at every
+	/// level and for both subjects: the next verification refuses the token.
+	#[tokio::test]
+	async fn a_bearer_jwt_is_refused_once_its_grant_is_revoked() {
+		for (level, setup, subject) in [
+			("ROOT", "DEFINE USER tobie ON ROOT ROLES EDITOR;", "USER tobie"),
+			("NAMESPACE", "DEFINE USER tobie ON NAMESPACE ROLES EDITOR;", "USER tobie"),
+			("DATABASE", "DEFINE USER tobie ON DATABASE ROLES EDITOR;", "USER tobie"),
+			("DATABASE", "CREATE user:1;", "RECORD user:1"),
+		] {
+			let ds = Datastore::new("memory").await.unwrap();
+			let kind = subject.split_once(' ').map(|(kind, _)| kind).unwrap();
+			let (access, grant_id, owner) = bearer_jwt(
+				&ds,
+				level,
+				kind,
+				"DURATION FOR TOKEN 1h, FOR SESSION 2h",
+				subject,
+				setup,
+			)
+			.await;
+			let mut sess = Session::default();
+			crate::iam::verify::token(&ds, &mut sess, &access)
+				.await
+				.unwrap_or_else(|e| panic!("{level} {subject}: the token verifies: {e}"));
+
+			ds.execute(&format!("ACCESS api ON {level} REVOKE GRANT {grant_id}"), &owner, None)
+				.await
+				.unwrap()
+				.remove(0)
+				.result
+				.unwrap();
+			let mut refused = Session::default();
+			let err = crate::iam::verify::token(&ds, &mut refused, &access).await.unwrap_err();
+			assert!(
+				matches!(err.downcast_ref(), Some(AuthError::InvalidAuth)),
+				"{level} {subject}: a revoked grant's token is refused opaquely, got: {err}"
+			);
+			assert!(refused.au.is_anon(), "{level} {subject}: the session is left untouched");
+		}
+	}
+
+	/// A grant that expires after it was exchanged ends the JWT it was
+	/// exchanged for at the next verification, though the token itself has not
+	/// expired.
+	#[tokio::test]
+	async fn a_bearer_jwt_is_refused_once_its_grant_expires() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let (access, _, _) = bearer_jwt(
+			&ds,
+			"DATABASE",
+			"RECORD",
+			"DURATION FOR GRANT 1s, FOR TOKEN 1h, FOR SESSION 2h",
+			"RECORD user:1",
+			"CREATE user:1;",
+		)
+		.await;
+		let mut sess = Session::default();
+		crate::iam::verify::token(&ds, &mut sess, &access).await.expect("the token verifies");
+
+		tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+		let mut refused = Session::default();
+		let err = crate::iam::verify::token(&ds, &mut refused, &access).await.unwrap_err();
+		assert!(
+			matches!(err.downcast_ref(), Some(AuthError::InvalidAuth)),
+			"an expired grant's token is refused opaquely, got: {err}"
+		);
+		assert!(refused.au.is_anon());
+	}
+
+	/// A `BEARER FOR USER` token acts as the user as the catalog holds it when
+	/// the token is presented: removing the user refuses the token, and
+	/// changing the user's roles changes what the token grants.
+	#[tokio::test]
+	async fn a_bearer_jwt_follows_its_user_as_it_is_now() {
+		for level in ["ROOT", "NAMESPACE", "DATABASE"] {
+			let ds = Datastore::new("memory").await.unwrap();
+			let (access, _, owner) = bearer_jwt(
+				&ds,
+				level,
+				"USER",
+				"DURATION FOR TOKEN 1h, FOR SESSION 2h",
+				"USER tobie",
+				&format!("DEFINE USER tobie ON {level} ROLES EDITOR;"),
+			)
+			.await;
+			let mut sess = Session::default();
+			crate::iam::verify::token(&ds, &mut sess, &access).await.expect("the token verifies");
+			assert!(sess.au.has_role(Role::Editor), "{level}: the user's roles at issue");
+
+			ds.execute(
+				&format!("DEFINE USER OVERWRITE tobie ON {level} ROLES VIEWER"),
+				&owner,
+				None,
+			)
+			.await
+			.unwrap()
+			.remove(0)
+			.result
+			.unwrap();
+			let mut demoted = Session::default();
+			crate::iam::verify::token(&ds, &mut demoted, &access)
+				.await
+				.expect("a demoted user's token still verifies");
+			assert!(demoted.au.has_role(Role::Viewer), "{level}: the roles the user holds now");
+			assert!(!demoted.au.has_role(Role::Editor), "{level}: not the roles at issue");
+
+			ds.execute(&format!("REMOVE USER tobie ON {level}"), &owner, None)
+				.await
+				.unwrap()
+				.remove(0)
+				.result
+				.unwrap();
+			let mut refused = Session::default();
+			let err = crate::iam::verify::token(&ds, &mut refused, &access).await.unwrap_err();
+			assert!(
+				matches!(err.downcast_ref(), Some(AuthError::InvalidAuth)),
+				"{level}: a removed user's token is refused opaquely, got: {err}"
+			);
+			assert!(refused.au.is_anon(), "{level}: the session is left untouched");
+		}
+	}
+
+	/// A token for a `BEARER` method that names no grant is refused, though
+	/// signed with the method's own key: every token such a method issues
+	/// names its grant, so one that does not was not issued against a grant
+	/// that can still be checked.
+	#[tokio::test]
+	async fn a_bearer_jwt_naming_no_grant_is_refused() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let (access, _, _) = bearer_jwt(
+			&ds,
+			"DATABASE",
+			"USER",
+			"DURATION FOR TOKEN 1h, FOR SESSION 2h",
+			"USER tobie",
+			"DEFINE USER tobie ON DATABASE ROLES EDITOR;",
+		)
+		.await;
+		let mut claims =
+			jsonwebtoken::dangerous::insecure_decode::<Claims>(&access).unwrap().claims;
+		assert!(claims.grant.is_some(), "an issued token names its grant");
+		claims.grant = None;
+
+		let tx = ds.transaction(Read).await.unwrap();
+		let db = tx.get_db_by_name("test", "test", None).await.unwrap().unwrap();
+		let de =
+			tx.get_db_access(db.namespace_id, db.database_id, "api", None).await.unwrap().unwrap();
+		tx.cancel().await.unwrap();
+		let catalog::AccessType::Bearer(at) = &de.access_type else {
+			panic!("a bearer method");
+		};
+		let iss = at.jwt.issue.as_ref().expect("a bearer method issues tokens");
+		let forged = encode(
+			&Header::new(algorithm_to_jwt_algorithm(iss.alg)),
+			&claims,
+			&config(iss.alg, &iss.key).unwrap(),
+		)
+		.unwrap();
+
+		let mut refused = Session::default();
+		let err = crate::iam::verify::token(&ds, &mut refused, &forged).await.unwrap_err();
+		assert!(
+			matches!(err.downcast_ref(), Some(AuthError::InvalidAuth)),
+			"a token naming no grant is refused opaquely, got: {err}"
+		);
+		assert!(refused.au.is_anon());
+	}
+
+	/// A `BEARER FOR RECORD` method's AUTHENTICATE clause is the generic one on
+	/// both sides of the exchange: it runs again when the issued JWT is
+	/// presented, and the record the token names stays the session's record.
+	/// `RETURN $auth` passes (the clause runs with no `$auth`), and a clause
+	/// that refuses after the exchange refuses the token.
+	#[tokio::test]
+	async fn a_bearer_for_record_jwt_runs_the_authenticate_clause_again() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let owner = Session::owner().with_ns("test").with_db("test");
+		let res = ds
+			.execute(
+				r#"
+				DEFINE ACCESS api ON DATABASE TYPE BEARER FOR RECORD
+					AUTHENTICATE {
+						IF record::exists(blocked:1) { THROW 'blocked' };
+						RETURN $auth;
+					}
+					DURATION FOR TOKEN 1h, FOR SESSION 2h;
+				CREATE user:1;
+				ACCESS api ON DATABASE GRANT FOR RECORD user:1;
+				"#,
+				&owner,
+				None,
+			)
+			.await
+			.unwrap();
+		let grant = res
+			.into_iter()
+			.next_back()
+			.unwrap()
+			.result
+			.unwrap()
+			.get("grant")
+			.clone()
+			.into_object()
+			.unwrap();
+		let key = grant.get("key").unwrap().as_string().unwrap().clone();
+
+		let mut sess = Session::default();
+		let mut vars = PublicVariables::new();
+		vars.insert("ns", "test");
+		vars.insert("db", "test");
+		vars.insert("ac", "api");
+		vars.insert("key", key);
+		let Token::Access(access) = signin(&ds, &mut sess, vars).await.expect("bearer signin")
+		else {
+			panic!("a bearer grant issues no refresh token");
+		};
+
+		let mut other = Session::default();
+		crate::iam::verify::token(&ds, &mut other, &access)
+			.await
+			.expect("the clause admits the token as it admitted the grant");
+		assert!(other.au.is_record());
+		assert_eq!(other.au.id(), "user:1");
+		assert_eq!(
+			other.rd,
+			Some(PV::RecordId(surrealdb_types::RecordId::new("user", 1))),
+			"the token's record is the session's record"
+		);
+
+		ds.execute("CREATE blocked:1", &owner, None).await.unwrap();
+		let mut refused = Session::default();
+		let err = crate::iam::verify::token(&ds, &mut refused, &access).await.unwrap_err();
+		assert!(err.to_string().contains("blocked"), "unexpected error: {err}");
+		assert!(refused.au.is_anon(), "a refused token leaves the session untouched");
+	}
+
+	/// The JWT a `BEARER FOR USER` grant is exchanged for authenticates the
+	/// granted system user at the grant's level, with the user's roles, when it
+	/// is presented back. A database-level token names the user as its `id`
+	/// like a record token names its record, and is still database access.
+	#[tokio::test]
+	async fn a_bearer_for_user_jwt_verifies_at_every_level() {
+		for (level, ns, db) in
+			[("ROOT", None, None), ("NS", Some("test"), None), ("DB", Some("test"), Some("test"))]
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let setup = Session::owner().with_ns("test").with_db("test");
+			let res = ds
+				.execute(
+					&format!(
+						r#"
+						DEFINE ACCESS api ON {level} TYPE BEARER FOR USER
+							DURATION FOR TOKEN 1h, FOR SESSION 2h;
+						DEFINE USER tobie ON {level} ROLES EDITOR;
+						ACCESS api ON {level} GRANT FOR USER tobie;
+						"#
+					),
+					&setup,
+					None,
+				)
+				.await
+				.unwrap();
+			let result = res.last().unwrap().result.clone().unwrap();
+			let grant = result.get("grant").clone().into_object().unwrap();
+			let key = grant.get("key").unwrap().as_string().unwrap().clone();
+
+			let mut sess = Session::default();
+			let mut vars = PublicVariables::new();
+			if let Some(ns) = ns {
+				vars.insert("ns", ns);
+			}
+			if let Some(db) = db {
+				vars.insert("db", db);
+			}
+			vars.insert("ac", "api");
+			vars.insert("key", key);
+			let issued = signin(&ds, &mut sess, vars).await.expect("bearer signin failed");
+			let Token::Access(access) = issued else {
+				panic!("a bearer grant issues no refresh token");
+			};
+
+			let mut other = Session::default();
+			crate::iam::verify::token(&ds, &mut other, &access)
+				.await
+				.unwrap_or_else(|e| panic!("{level} bearer JWT must verify: {e}"));
+			assert_eq!(other.ns.as_deref(), ns);
+			assert_eq!(other.db.as_deref(), db);
+			assert_eq!(other.ac.as_deref(), Some("api"));
+			assert_eq!(other.au.level().ns(), ns);
+			assert_eq!(other.au.level().db(), db);
+			assert_eq!(other.au.id(), "tobie", "{level}: the session acts as the granted user");
+			assert!(other.au.has_role(Role::Editor), "{level}: the token carries the user's roles");
+			assert!(!other.au.has_role(Role::Owner));
+			assert!(other.rd.is_none(), "{level}: a system user has no record identity");
+			assert!(other.exp.is_some(), "{level}: the session must carry a finite expiry");
+		}
 	}
 
 	/// The reject cases either side of it: a bearer method whose subject is a

@@ -20,10 +20,10 @@ value = "[2, 3]"
 value = "42"
 
 [[test.results]]
-value = "NONE"
+value = "user:bob"
 
 [[test.results]]
-value = "[[NONE, 2], [NONE, 3]]"
+value = "[[user:bob, 2], [user:bob, 3]]"
 
 [[test.results]]
 value = "[]"

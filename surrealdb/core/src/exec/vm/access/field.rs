@@ -74,7 +74,20 @@ fn reads_storage(rid: &RecordId, name: &str, ctx: &EvalContext<'_>) -> bool {
 	{
 		return false;
 	}
+	if is_signed_in_id(rid, name, ctx) {
+		return false;
+	}
 	ctx.computing_record.as_ref().is_none_or(|computing| &computing.rid != rid)
+}
+
+/// Whether the read is `id` of the record the session is signed in as: the
+/// read `$auth.id` makes. It is answered with the record id itself, which the
+/// session already holds, without reading the record. It therefore does not
+/// depend on whether the caller may select its own record, whether the record
+/// still exists, or whether its table is defined. Every other field of that
+/// record is read through the table's permissions like any record's.
+fn is_signed_in_id(rid: &RecordId, name: &str, ctx: &EvalContext<'_>) -> bool {
+	name == "id" && crate::exec::operators::fetch::is_session_record(ctx.exec_ctx, rid)
 }
 
 /// `name` of the record `rid` names, fetched from `slot` where a window holds it.
@@ -100,6 +113,9 @@ async fn field_of_record(
 		&& obj.contains_key(name)
 	{
 		return Ok(obj.get(name).cloned().unwrap_or(Value::None));
+	}
+	if is_signed_in_id(rid, name, ctx) {
+		return Ok(Value::RecordId(rid.clone()));
 	}
 	// When we are already computing fields for this record, answer the
 	// dereference directly rather than fetching the record. Otherwise

@@ -145,6 +145,22 @@ SurrealDB's security model rests on four pillars:
   names, or stack traces unless an explicitly-opted-in insecure mode is enabled.
 - Bearer token comparison must use constant-time comparison. Grant identifiers must
   correspond to active, non-revoked, non-expired grants in the correct scope.
+- A JWT a `BEARER` access method issues is only as good as the grant it was
+  exchanged from, on every verification and not only at the exchange. The token
+  names its grant (`GR`), and verification (`bearer_grant_subject` in
+  `iam/verify.rs`) requires that grant to exist for the method at the token's
+  level, to be neither revoked nor expired, and to grant the subject the token
+  names as its `id`. For a `FOR USER` grant it reads the user as the catalog
+  holds it now, so the session acts as that user with the roles it holds now,
+  never the roles the token carries. Revoking the grant, removing the user or
+  changing its roles therefore takes effect at the next verification of a token
+  already issued, and a token that names no grant is refused. Every refusal is
+  the opaque `InvalidAuth`. A record access's refresh grant is the exception:
+  the exchange that issues a token spends it, so its tokens name none.
+  Verified by `a_bearer_jwt_is_refused_once_its_grant_is_revoked`,
+  `a_bearer_jwt_is_refused_once_its_grant_expires`,
+  `a_bearer_jwt_follows_its_user_as_it_is_now` and
+  `a_bearer_jwt_naming_no_grant_is_refused` (`iam/signin.rs`).
 - JWKS cache entries must be scoped such that a JWK trusted by one
   namespace/database cannot be reused by a different namespace/database, even when
   they reference the same URL.
@@ -200,16 +216,33 @@ SurrealDB's security model rests on four pillars:
   parameter read that is not row-scoped to be a fetch
   (`exec/ir/build/membership/lift.rs::may_raise`) — `SELECT * FROM [$secret] WHERE false` must be refused, not
   answered `[]`.
-- A record user's `$auth` is the record id of the signed-in record, and a path
-  read from it (`$auth.email`, `$auth.id`) dereferences that record. Where the
-  record's table is not defined the record is absent and every field of it
-  reads `NONE`, the id included — never a `TbNotFound`, which every other
-  record id naming an undefined table raises (`exec/operators/fetch.rs::is_auth_record`).
-  The exemption keys on the id `$auth` holds and widens no access: `NONE`
-  satisfies no predicate that compares a field to a stored value, so a
-  permission written over `$auth.<field>` denies, as it does for a record
-  that exists without the field, and a rewrite must not substitute the record
-  id for the `NONE` of `$auth.id`.
+- A record user's `$auth` is the record id of the signed-in record. `$auth.id`
+  is that id, answered from the session without reading the record
+  (`is_signed_in_id` in `exec/vm/access/field.rs`, keyed on `$session.rd`
+  by `exec/operators/fetch.rs::is_session_record`, never on whatever `$auth`
+  is bound to where the read happens). It is the same in a statement, a
+  `VALUE`, `DEFAULT` or `COMPUTED` clause and a permission clause, whether or
+  not the caller may select its own record, and whether or not that record
+  still exists or its `id` field's own select permission, and a destructure
+  of it (`$auth.{ id, email }`) reads its `id` the same way. It discloses nothing: the session already holds the id.
+  A record whose key is an object holding an `id` component is the exception
+  every record id makes to the path, not to a destructure: its `.id` is that
+  component, and its `.{ id }` is the record id, as for a record the caller
+  can read. Every other path read
+  from it (`$auth.email`) dereferences the record and is judged by its
+  table's permissions where the read happens, like any record's.
+  Where the record's table is not defined the record is absent and every such
+  field reads `NONE`, never a `TbNotFound`, which every other record id naming
+  an undefined table raises (`exec/operators/fetch.rs::is_auth_record`). The
+  exemption keys on the id `$auth` holds and widens no access: `NONE` satisfies
+  no predicate that compares a field to a stored value, so a permission written
+  over `$auth.<field>` denies, as it does for a record that exists without the
+  field. Whether the signed-in record exists is `record::exists($auth)`, not
+  `$auth.id != NONE`.
+  Verified end to end by
+  `reproductions/7464_auth_id_when_the_session_cannot_read_its_record.surql`,
+  `reproductions/7464_auth_id_when_the_id_field_is_hidden.surql` and
+  `reproductions/7464_auth_id_of_a_record_that_does_not_exist.surql`.
 - Session state must only be committed after all authentication steps complete
   successfully. Partial failures must leave the session in its pre-authentication
   state.

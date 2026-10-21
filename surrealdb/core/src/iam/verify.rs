@@ -23,7 +23,7 @@ use crate::iam::issue::expiration;
 #[cfg(feature = "jwks")]
 use crate::iam::jwks;
 use crate::iam::token::Claims;
-use crate::iam::{self, Actor, Auth, Error as AuthError, Level, Role};
+use crate::iam::{Actor, Auth, Error as AuthError, Level, Role};
 use crate::kvs::Datastore;
 use crate::kvs::TransactionType::*;
 use crate::types::PublicValue;
@@ -297,14 +297,6 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					.into());
 				}
 			};
-			// Parse the record id
-			let mut rid = match syn::record_id(id) {
-				Ok(rid) => rid,
-				Err(e) => {
-					let _ = tx.cancel().await;
-					return Err(e);
-				}
-			};
 			// Get the database access method
 			let Some(de) = catch!(
 				tx,
@@ -320,51 +312,87 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			};
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
-			// Obtain the configuration to verify the token based on the access method
-			let cf = match &de.access_type {
-				catalog::AccessType::Record(at) => {
-					let mut cf = match &at.jwt.verify {
-						catalog::JwtAccessVerify::Key(key) => {
-							iam::verify::decode_key(key.alg, key.key.as_bytes())
-						}
-						#[cfg(feature = "jwks")]
-						catalog::JwtAccessVerify::Jwks(jwks) => {
-							if let Some(kid) = token_data.header.kid {
-								jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
-							} else {
-								Err(anyhow::Error::new(ExprError::InvalidFunctionArguments {
-									name: "token".to_string(),
-									message: "Missing token header 'kid'".to_string(),
-								}))
-							}
-						}
-						#[cfg(not(feature = "jwks"))]
-						_ => bail!(AuthError::AccessMethodMismatch),
-					}?;
-					apply_audience_validation(&mut cf.1, &at.jwt);
-					cf
+			// Which JWT configuration verifies the token, and whether the
+			// AUTHENTICATE clause settles the record. A `BEARER FOR RECORD`
+			// grant is exchanged for a token carrying the granted record as its
+			// `id`, and that token is verified as `signin` judged the grant: its
+			// AUTHENTICATE clause is the generic one, and the record it names is
+			// the session's record.
+			let (jwt, authenticate_settles_record) = match &de.access_type {
+				catalog::AccessType::Record(at) => (&at.jwt, true),
+				catalog::AccessType::Bearer(catalog::BearerAccess {
+					subject: catalog::BearerAccessSubject::Record,
+					jwt,
+					..
+				}) => (jwt, false),
+				// A `BEARER FOR USER` grant's token names the system user as its
+				// `id`. It is database access, verified as every other
+				// database-level access token is.
+				catalog::AccessType::Bearer(catalog::BearerAccess {
+					subject: catalog::BearerAccessSubject::User,
+					jwt,
+					..
+				}) => {
+					return access_method_token(
+						kvs,
+						session,
+						token,
+						&token_data,
+						value,
+						Some(ns),
+						Some(db),
+						GrantScope::Database(db_def.namespace_id, db_def.database_id),
+						ac,
+						&de,
+						jwt,
+					)
+					.await;
 				}
 				_ => bail!(AuthError::AccessMethodMismatch),
 			};
+			// Parse the record id
+			let mut rid = syn::record_id(id)?;
+			// Obtain the configuration to verify the token based on the access method
+			let cf = verification_config(kvs, jwt, &token_data.header).await?;
 			// Verify the token
 			verify_token(token, &cf.0, &cf.1)?;
+			// A bearer grant's token is only as good as its grant, which must
+			// still be active and grant the record the token names.
+			if !authenticate_settles_record
+				&& !matches!(
+					bearer_grant_subject(
+						kvs,
+						GrantScope::Database(db_def.namespace_id, db_def.database_id),
+						&de,
+						&token_data.claims
+					)
+					.await?,
+					BearerSubject::Record
+				) {
+				debug!("A system user bearer grant's token cannot authenticate a record");
+				bail!(AuthError::InvalidAuth);
+			}
 			// AUTHENTICATE clause
 			if let Some(au) = &de.authenticate {
-				// Setup the system session for finding the signin record
+				// Setup the system session for executing the clause
 				let mut sess = access_session(&de, Some(ns.as_str()), Some(db.as_str()), session)?;
-				sess.rd = Some(
-					crate::val::convert_value_to_public_value(crate::val::Value::RecordId(
-						rid.clone().into(),
-					))
-					.expect("record id conversion should succeed"),
-				);
 				sess.tk = Some(
 					crate::val::convert_value_to_public_value(
 						token_data.claims.clone().into_claims_object().into(),
 					)
 					.expect("claims conversion should succeed"),
 				);
-				rid = authenticate_record(kvs, &sess, au).await?;
+				if authenticate_settles_record {
+					sess.rd = Some(
+						crate::val::convert_value_to_public_value(crate::val::Value::RecordId(
+							rid.clone().into(),
+						))
+						.expect("record id conversion should succeed"),
+					);
+					rid = authenticate_record(kvs, &sess, au).await?;
+				} else {
+					authenticate_generic(kvs, &sess, au).await?;
+				}
 			}
 			// CONTEXT clause. Evaluated after the identity has settled — and
 			// after `verify_token` above — so `$auth` is the final record and
@@ -457,74 +485,20 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					jwt,
 					..
 				}) => {
-					let mut cf = match &jwt.verify {
-						catalog::JwtAccessVerify::Key(key) => {
-							decode_key(key.alg, key.key.as_bytes())
-						}
-						#[cfg(feature = "jwks")]
-						catalog::JwtAccessVerify::Jwks(jwks) => {
-							if let Some(kid) = token_data.header.kid {
-								jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
-							} else {
-								Err(anyhow::Error::new(ExprError::InvalidFunctionArguments {
-									name: "token".to_string(),
-									message: "Missing token header 'kid'".to_string(),
-								}))
-							}
-						}
-						#[cfg(not(feature = "jwks"))]
-						_ => bail!(AuthError::AccessMethodMismatch),
-					}?;
-					apply_audience_validation(&mut cf.1, jwt);
-					// Verify the token
-					verify_token(token, &cf.0, &cf.1)?;
-					// AUTHENTICATE clause
-					if let Some(au) = &de.authenticate {
-						// Setup the system session for executing the clause
-						let mut sess =
-							access_session(&de, Some(ns.as_str()), Some(db.as_str()), session)?;
-						sess.tk = Some(
-							crate::val::convert_value_to_public_value(
-								token_data.claims.clone().into_claims_object().into(),
-							)
-							.expect("claims conversion should succeed"),
-						);
-						authenticate_generic(kvs, &sess, au).await?;
-					}
-					// Parse the roles
-					let roles = match &token_data.claims.roles {
-						// If no role is provided, grant the viewer role
-						None => vec![Role::Viewer],
-						// If roles are provided, parse them
-						Some(roles) => roles
-							.iter()
-							.map(|r| -> Result<Role> {
-								Role::from_str(r.as_str())
-									.map_err(Error::IamError)
-									.map_err(anyhow::Error::new)
-							})
-							.collect::<Result<Vec<_>, _>>()?,
-					};
-					// Log the success
-					debug!("Authenticated to database `{}` with access method `{}`", db, ac);
-					// Every fallible step is taken before the session is touched: a partial
-					// failure must leave the session in its pre-authentication state.
-					let session_exp = expiration(de.session_duration)?;
-					// Set the session
-					reset_previous_principal(session);
-					session.tk = Some(
-						crate::val::convert_value_to_public_value(value)
-							.expect("value conversion should succeed"),
-					);
-					session.ns = Some(ns.to_owned());
-					session.db = Some(db.to_owned());
-					session.ac = Some(ac.to_owned());
-					session.exp = session_exp;
-					session.au = Arc::new(Auth::new(Actor::new(
-						access_actor_id(&de.name, &token_data.claims),
-						roles,
-						Level::Database(ns.clone(), db.clone()),
-					)));
+					access_method_token(
+						kvs,
+						session,
+						token,
+						&token_data,
+						value,
+						Some(ns),
+						Some(db),
+						GrantScope::Database(db_def.namespace_id, db_def.database_id),
+						ac,
+						&de,
+						jwt,
+					)
+					.await?;
 				}
 				// If the access type is Record, this is record access
 				// Record access without an "id" claim is only possible if there is an AUTHENTICATE
@@ -533,25 +507,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				catalog::AccessType::Record(at) => match &de.authenticate {
 					Some(au) => {
 						trace!("Access method `{}` is record access with AUTHENTICATE clause", ac);
-						let mut cf = match &at.jwt.verify {
-							catalog::JwtAccessVerify::Key(key) => {
-								decode_key(key.alg, key.key.as_bytes())
-							}
-							#[cfg(feature = "jwks")]
-							catalog::JwtAccessVerify::Jwks(jwks) => {
-								if let Some(kid) = token_data.header.kid {
-									jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
-								} else {
-									Err(anyhow::Error::new(ExprError::InvalidFunctionArguments {
-										name: "token".to_string(),
-										message: "Missing token header 'kid'".to_string(),
-									}))
-								}
-							}
-							#[cfg(not(feature = "jwks"))]
-							_ => bail!(AuthError::AccessMethodMismatch),
-						}?;
-						apply_audience_validation(&mut cf.1, &at.jwt);
+						let cf = verification_config(kvs, &at.jwt, &token_data.header).await?;
 
 						// Verify the token
 						verify_token(token, &cf.0, &cf.1)?;
@@ -714,84 +670,30 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				.into());
 			};
 
-			// Obtain the configuration to verify the token based on the access method
-			let cf = match &de.access_type {
+			// Verify the token and authenticate the session
+			match &de.access_type {
 				catalog::AccessType::Jwt(jwt)
 				| catalog::AccessType::Bearer(catalog::BearerAccess {
 					jwt,
 					..
 				}) => {
-					let mut cf = match &jwt.verify {
-						catalog::JwtAccessVerify::Key(key) => {
-							decode_key(key.alg, key.key.as_bytes())
-						}
-						#[cfg(feature = "jwks")]
-						catalog::JwtAccessVerify::Jwks(jwks) => {
-							if let Some(kid) = token_data.header.kid {
-								jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
-							} else {
-								bail!(ExprError::InvalidFunctionArguments {
-									name: "token".to_string(),
-									message: "Missing token header 'kid'".to_string()
-								})
-							}
-						}
-						#[cfg(not(feature = "jwks"))]
-						_ => bail!(AuthError::AccessMethodMismatch),
-					}?;
-					apply_audience_validation(&mut cf.1, jwt);
-					cf
+					access_method_token(
+						kvs,
+						session,
+						token,
+						&token_data,
+						value,
+						Some(ns),
+						None,
+						GrantScope::Namespace(ns_def.namespace_id),
+						ac,
+						&de,
+						jwt,
+					)
+					.await
 				}
 				_ => bail!(AuthError::AccessMethodMismatch),
-			};
-			// Verify the token
-			verify_token(token, &cf.0, &cf.1)?;
-			// AUTHENTICATE clause
-			if let Some(au) = &de.authenticate {
-				// Setup the system session for executing the clause
-				let mut sess = access_session(&de, Some(ns.as_str()), None, session)?;
-				sess.tk = Some(
-					crate::val::convert_value_to_public_value(
-						token_data.claims.clone().into_claims_object().into(),
-					)
-					.expect("claims conversion should succeed"),
-				);
-				authenticate_generic(kvs, &sess, au).await?;
 			}
-			// Parse the roles
-			let roles = match &token_data.claims.roles {
-				// If no role is provided, grant the viewer role
-				None => vec![Role::Viewer],
-				// If roles are provided, parse them
-				Some(roles) => roles
-					.iter()
-					.map(|r| -> Result<Role> {
-						Role::from_str(r.as_str())
-							.map_err(Error::IamError)
-							.map_err(anyhow::Error::new)
-					})
-					.collect::<Result<Vec<_>, _>>()?,
-			};
-			// Log the success
-			debug!("Authenticated to namespace `{}` with access method `{}`", ns, ac);
-			// Every fallible step is taken before the session is touched: a partial
-			// failure must leave the session in its pre-authentication state.
-			let session_exp = expiration(de.session_duration)?;
-			// Set the session
-			reset_previous_principal(session);
-			session.tk = Some(
-				crate::val::convert_value_to_public_value(value)
-					.expect("value conversion should succeed"),
-			);
-			session.ns = Some(ns.to_owned());
-			session.ac = Some(ac.to_owned());
-			session.exp = session_exp;
-			session.au = Arc::new(Auth::new(Actor::new(
-				access_actor_id(&de.name, &token_data.claims),
-				roles,
-				Level::Namespace(ns.clone()),
-			)));
-			Ok(())
 		}
 		// Check if this is namespace authentication with user credentials
 		Claims {
@@ -877,83 +779,30 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				.into());
 			};
 
-			// Obtain the configuration to verify the token based on the access method
-			let cf = match &de.access_type {
+			// Verify the token and authenticate the session
+			match &de.access_type {
 				catalog::AccessType::Jwt(jwt)
 				| catalog::AccessType::Bearer(catalog::BearerAccess {
 					jwt,
 					..
 				}) => {
-					let mut cf = match &jwt.verify {
-						catalog::JwtAccessVerify::Key(key) => {
-							decode_key(key.alg, key.key.as_bytes())
-						}
-						#[cfg(feature = "jwks")]
-						catalog::JwtAccessVerify::Jwks(jwks) => {
-							if let Some(kid) = token_data.header.kid {
-								jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
-							} else {
-								bail!(ExprError::InvalidFunctionArguments {
-									name: "token".to_string(),
-									message: "Missing token header 'kid'".to_string()
-								})
-							}
-						}
-						#[cfg(not(feature = "jwks"))]
-						_ => bail!(AuthError::AccessMethodMismatch),
-					}?;
-					apply_audience_validation(&mut cf.1, jwt);
-					cf
+					access_method_token(
+						kvs,
+						session,
+						token,
+						&token_data,
+						value,
+						None,
+						None,
+						GrantScope::Root,
+						ac,
+						&de,
+						jwt,
+					)
+					.await
 				}
 				_ => bail!(AuthError::AccessMethodMismatch),
-			};
-			// Verify the token
-			verify_token(token, &cf.0, &cf.1)?;
-			// AUTHENTICATE clause
-			if let Some(au) = &de.authenticate {
-				// Setup the system session for executing the clause
-				let mut sess = access_session(&de, None, None, session)?;
-				sess.tk = Some(
-					crate::val::convert_value_to_public_value(
-						token_data.claims.clone().into_claims_object().into(),
-					)
-					.expect("claims conversion should succeed"),
-				);
-				authenticate_generic(kvs, &sess, au).await?;
 			}
-			// Parse the roles
-			let roles = match &token_data.claims.roles {
-				// If no role is provided, grant the viewer role
-				None => vec![Role::Viewer],
-				// If roles are provided, parse them
-				Some(roles) => roles
-					.iter()
-					.map(|r| -> Result<Role> {
-						Role::from_str(r.as_str())
-							.map_err(Error::IamError)
-							.map_err(anyhow::Error::new)
-					})
-					.collect::<Result<Vec<_>, _>>()?,
-			};
-			// Log the success
-			debug!("Authenticated to root with access method `{}`", ac);
-			// Every fallible step is taken before the session is touched: a partial
-			// failure must leave the session in its pre-authentication state.
-			let session_exp = expiration(de.session_duration)?;
-			// Set the session
-			reset_previous_principal(session);
-			session.tk = Some(
-				crate::val::convert_value_to_public_value(value)
-					.expect("value conversion should succeed"),
-			);
-			session.ac = Some(ac.to_owned());
-			session.exp = session_exp;
-			session.au = Arc::new(Auth::new(Actor::new(
-				access_actor_id(&de.name, &token_data.claims),
-				roles,
-				Level::Root,
-			)));
-			Ok(())
 		}
 		// Check if this is root authentication with user credentials
 		Claims {
@@ -1243,6 +1092,231 @@ fn verify_pass(pass: &str, hash: &str) -> Result<()> {
 		Ok(_) => Ok(()),
 		_ => Err(anyhow::Error::new(AuthError::InvalidPass)),
 	}
+}
+
+/// The key and validation that verify a token issued under `jwt`: the
+/// configured key, or the JWKS entry the token's `kid` header names, with the
+/// method's audience applied.
+#[cfg_attr(not(feature = "jwks"), expect(unused_variables))]
+async fn verification_config(
+	kvs: &Datastore,
+	jwt: &catalog::JwtAccess,
+	header: &jsonwebtoken::Header,
+) -> Result<(DecodingKey, Validation)> {
+	let mut cf = match &jwt.verify {
+		catalog::JwtAccessVerify::Key(key) => decode_key(key.alg, key.key.as_bytes())?,
+		#[cfg(feature = "jwks")]
+		catalog::JwtAccessVerify::Jwks(jwks) => {
+			let Some(kid) = &header.kid else {
+				bail!(ExprError::InvalidFunctionArguments {
+					name: "token".to_string(),
+					message: "Missing token header 'kid'".to_string(),
+				});
+			};
+			jwks::config(kvs, kid, &jwks.url, header.alg).await?
+		}
+		#[cfg(not(feature = "jwks"))]
+		catalog::JwtAccessVerify::Jwks(_) => bail!(AuthError::AccessMethodMismatch),
+	};
+	apply_audience_validation(&mut cf.1, jwt);
+	Ok(cf)
+}
+
+/// Verifies a token issued by a `JWT` access method or a `BEARER` grant at the
+/// level `ns` and `db` name (root when neither), and on success authenticates
+/// the session there.
+///
+/// A `JWT` method's token carries its principal: its roles (`Viewer` when it
+/// carries none) and the identity [`access_actor_id`] derives. A `BEARER`
+/// method's token is only as good as the grant it was exchanged from, which
+/// [`bearer_grant_subject`] requires to be active still; the session acts as
+/// the granted system user, with the roles that user holds now. The session is
+/// left untouched on every failure.
+#[expect(clippy::too_many_arguments)]
+async fn access_method_token(
+	kvs: &Datastore,
+	session: &mut Session,
+	token: &str,
+	token_data: &TokenData<Claims>,
+	value: crate::val::Value,
+	ns: Option<&str>,
+	db: Option<&str>,
+	scope: GrantScope,
+	ac: &str,
+	de: &catalog::AccessDefinition,
+	jwt: &catalog::JwtAccess,
+) -> Result<()> {
+	let cf = verification_config(kvs, jwt, &token_data.header).await?;
+	// Verify the token
+	verify_token(token, &cf.0, &cf.1)?;
+	// The principal the token authenticates
+	let (actor, roles) = match &de.access_type {
+		catalog::AccessType::Bearer(_) => {
+			match bearer_grant_subject(kvs, scope, de, &token_data.claims).await? {
+				BearerSubject::User {
+					name,
+					roles,
+				} => (name, roles),
+				BearerSubject::Record => {
+					debug!("A record bearer grant's token cannot authenticate a system user");
+					bail!(AuthError::InvalidAuth);
+				}
+			}
+		}
+		_ => {
+			let roles = match &token_data.claims.roles {
+				// If no role is provided, grant the viewer role
+				None => vec![Role::Viewer],
+				// If roles are provided, parse them
+				Some(roles) => roles
+					.iter()
+					.map(|r| -> Result<Role> {
+						Role::from_str(r.as_str())
+							.map_err(Error::IamError)
+							.map_err(anyhow::Error::new)
+					})
+					.collect::<Result<Vec<_>, _>>()?,
+			};
+			(access_actor_id(&de.name, &token_data.claims), roles)
+		}
+	};
+	// AUTHENTICATE clause
+	if let Some(au) = &de.authenticate {
+		// Setup the system session for executing the clause
+		let mut sess = access_session(de, ns, db, session)?;
+		sess.tk = Some(
+			crate::val::convert_value_to_public_value(
+				token_data.claims.clone().into_claims_object().into(),
+			)
+			.expect("claims conversion should succeed"),
+		);
+		authenticate_generic(kvs, &sess, au).await?;
+	}
+	let level = match (ns, db) {
+		(Some(ns), Some(db)) => Level::Database(ns.to_owned(), db.to_owned()),
+		(Some(ns), None) => Level::Namespace(ns.to_owned()),
+		(None, None) => Level::Root,
+		(None, Some(_)) => bail!(AuthError::InvalidAuth),
+	};
+	// Log the success
+	debug!("Authenticated at {level:?} with access method `{ac}`");
+	// Every fallible step is taken before the session is touched: a partial
+	// failure must leave the session in its pre-authentication state.
+	let session_exp = expiration(de.session_duration)?;
+	// Set the session
+	reset_previous_principal(session);
+	session.tk = Some(
+		crate::val::convert_value_to_public_value(value).expect("value conversion should succeed"),
+	);
+	if let Some(ns) = ns {
+		session.ns = Some(ns.to_owned());
+	}
+	if let Some(db) = db {
+		session.db = Some(db.to_owned());
+	}
+	session.ac = Some(ac.to_owned());
+	session.exp = session_exp;
+	session.au = Arc::new(Auth::new(Actor::new(actor, roles, level)));
+	Ok(())
+}
+
+/// Who a token issued by a `BEARER` access method authenticates.
+enum BearerSubject {
+	/// The granted record, which the token names as its `id`.
+	Record,
+	/// The granted system user, with the roles the user holds now.
+	User {
+		name: String,
+		roles: Vec<Role>,
+	},
+}
+
+/// Where the grants of an access method are stored: the level the method is
+/// defined at, resolved to ids.
+#[derive(Clone, Copy)]
+enum GrantScope {
+	Root,
+	Namespace(catalog::NamespaceId),
+	Database(catalog::NamespaceId, catalog::DatabaseId),
+}
+
+/// The subject of the grant a `BEARER` method's token was exchanged from,
+/// checked against the catalog as it stands: the token must name a grant
+/// (`GR`), and that grant must exist for the method `de` in `scope`, be
+/// neither revoked nor expired, and grant the subject the token names as its
+/// `id`. A system user must still exist, and is read with the roles it holds
+/// now. Revoking the grant, removing the user or changing the user's roles
+/// therefore takes effect at the next verification of a token already issued.
+///
+/// Every refusal is the opaque `InvalidAuth`, so a token never learns whether
+/// its grant was revoked, expired or never existed, or its user removed.
+async fn bearer_grant_subject(
+	kvs: &Datastore,
+	scope: GrantScope,
+	de: &catalog::AccessDefinition,
+	claims: &Claims,
+) -> Result<BearerSubject> {
+	let Some(grant_id) = claims.grant.as_deref() else {
+		debug!("A token for bearer access method `{}` names no grant", de.name);
+		bail!(AuthError::InvalidAuth);
+	};
+	let tx = kvs.transaction(Read).await?;
+	let subject = catch!(tx, bearer_grant_subject_in(&tx, scope, de, grant_id, claims).await);
+	tx.cancel().await?;
+	Ok(subject)
+}
+
+/// [`bearer_grant_subject`] within the transaction `tx`.
+async fn bearer_grant_subject_in(
+	tx: &crate::kvs::Transaction,
+	scope: GrantScope,
+	de: &catalog::AccessDefinition,
+	grant_id: &str,
+	claims: &Claims,
+) -> Result<BearerSubject> {
+	let invalid = || anyhow::Error::new(AuthError::InvalidAuth);
+	let grant = match scope {
+		GrantScope::Database(ns, db) => {
+			tx.get_db_access_grant(ns, db, &de.name, grant_id, None).await?
+		}
+		GrantScope::Namespace(ns) => tx.get_ns_access_grant(ns, &de.name, grant_id, None).await?,
+		GrantScope::Root => tx.get_root_access_grant(&de.name, grant_id, None).await?,
+	};
+	let Some(grant) = grant else {
+		debug!("Bearer access grant `{grant_id}` for method `{}` does not exist", de.name);
+		return Err(invalid());
+	};
+	crate::iam::signin::require_active_grant(&grant)?;
+	if claims.id.as_deref() != Some(grant.subject.id().as_str()) {
+		debug!("A token names a subject other than its bearer grant `{grant_id}`'s");
+		return Err(invalid());
+	}
+	let name = match &grant.subject {
+		catalog::Subject::Record(_) => return Ok(BearerSubject::Record),
+		catalog::Subject::User(name) => name,
+	};
+	let user = match scope {
+		GrantScope::Database(ns, db) => tx.get_db_user(ns, db, name, None).await?,
+		GrantScope::Namespace(ns) => tx.get_ns_user(ns, name, None).await?,
+		GrantScope::Root => tx.get_root_user(name, None).await?,
+	};
+	let Some(user) = user else {
+		debug!("The user of bearer access grant `{grant_id}` no longer exists");
+		return Err(invalid());
+	};
+	let roles =
+		user.roles.iter().map(|r| Role::from_str(r)).collect::<Result<Vec<_>, _>>().map_err(
+			|e| {
+				debug!(
+					"The user of bearer access grant `{grant_id}` holds a role that is not valid: {e}"
+				);
+				invalid()
+			},
+		)?;
+	Ok(BearerSubject::User {
+		name: name.clone(),
+		roles,
+	})
 }
 
 fn verify_token(token: &str, key: &DecodingKey, validation: &Validation) -> Result<()> {

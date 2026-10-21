@@ -4,16 +4,19 @@ imports = ["reproductions/a_record_user_of_an_undefined_table_reads_as_none_thro
 auth = { namespace = "test", database = "test", access = "user", rid = "user:b" }
 
 [test]
-reason = """A record user signed in with a record of a table that is not defined reads every field of `$auth` as `NONE`, `$auth.id` included, in a permission and in a query alike: the record is absent, so no field is, and a permission comparing a field to one of them is satisfied only by a `NONE`. The exemption is the signed-in record's own: a record id naming an undefined table anywhere else, another record of the user's own table included, and the signed-in record read as a scan source, still fails with `TbNotFound`."""
+reason = """A record user signed in with a record of a table that is not defined reads every field of `$auth` as `NONE`, in a permission and in a query alike: the record is absent, so no field is, and a permission comparing a field to one of them is satisfied only by a `NONE`. `$auth.id` is the exception, being the signed-in id itself, answered from the session without reading the record, so a permission over it admits the user's own rows. The exemption is the signed-in record's own: a record id naming an undefined table anywhere else, another record of the user's own table included, and the signed-in record read as a scan source, still fails with `TbNotFound`. The signed-in record is recognised from the session, so a binding that rebinds `$auth` does not take the exemption from it."""
 
 [[test.results]]
-value = "[]"
+value = "[{ author: user:b, id: post:1 }]"
 
 [[test.results]]
 value = "[{ id: post2:1 }]"
 
 [[test.results]]
 value = "[{ a: 1, id: post3:1 }]"
+
+[[test.results]]
+value = "user:b"
 
 [[test.results]]
 value = "user:b"
@@ -28,10 +31,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "NONE"
+value = "{ email: NONE, id: user:b }"
 
 [[test.results]]
 value = "'dflt'"
@@ -43,10 +43,10 @@ value = "NONE"
 value = "[NONE]"
 
 [[test.results]]
-value = "[]"
+value = "[{ e: NONE }]"
 
 [[test.results]]
-value = "[]"
+value = "[{ author: NONE, id: post:1 }]"
 
 [[test.results]]
 value = "NONE"
@@ -68,6 +68,9 @@ error = "The table 'user' does not exist"
 
 [[test.results]]
 error = "The table 'user' does not exist"
+
+[[test.results]]
+value = "[user:b, { email: NONE, id: user:b }]"
 
 */
 
@@ -91,3 +94,4 @@ RETURN user:c.email;
 RETURN user:c.id;
 SELECT * FROM user:c;
 SELECT * FROM user:b;
+FOR $auth IN [1] { RETURN [$session.rd.id, $session.rd.{ id, email }]; };

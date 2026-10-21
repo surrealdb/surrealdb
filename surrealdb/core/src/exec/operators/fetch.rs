@@ -902,8 +902,25 @@ pub(crate) async fn batch_fetch_in_place(
 /// comparison against a stored value would not. Only a dereference of this
 /// record is exempt; every other record id naming a table that is not defined
 /// fails with `TbNotFound`.
+///
+/// The session's own record ([`is_session_record`]) is this record wherever it
+/// is read, including beneath a `FOR`, closure or function argument that
+/// rebinds `$auth`.
 pub(crate) fn is_auth_record(ctx: &ExecutionContext, rid: &RecordId) -> bool {
 	matches!(ctx.value("auth"), Some(Value::RecordId(auth)) if auth == rid)
+		|| is_session_record(ctx, rid)
+}
+
+/// Whether `rid` is the record the session is signed in as (`$session.rd`).
+///
+/// Unlike [`is_auth_record`], this reads the session itself rather than
+/// whatever `$auth` is bound to where the read happens, so a `FOR`, closure or
+/// function argument named `$auth` never stands in for it.
+pub(crate) fn is_session_record(ctx: &ExecutionContext, rid: &RecordId) -> bool {
+	matches!(
+		ctx.session().and_then(|session| session.rd.as_ref()),
+		Some(Value::RecordId(signed_in)) if signed_in == rid
+	)
 }
 
 /// Raise `TbNotFound` when the table of `rid` does not exist, unless `rid` is

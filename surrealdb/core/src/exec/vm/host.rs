@@ -7728,8 +7728,24 @@ async fn destructure(
 			Ok(Value::Object(crate::val::Object::from(result)))
 		}
 		Value::RecordId(ref rid) => {
-			let fetched = fetch(rid).await?;
-			if fetched.is_none() {
+			let mut fetched = fetch(rid).await?;
+			// The record the session is signed in as reads its own `id`
+			// whether or not the record, or its `id` field, can be read
+			// (`$auth.{ id, email }` is `{ id: $auth, email: NONE }`), as a
+			// path does.
+			if crate::exec::operators::fetch::is_session_record(ctx, rid) {
+				let id = Value::RecordId(rid.clone());
+				match &mut fetched {
+					Value::Object(obj) => {
+						obj.insert("id".to_owned(), id);
+					}
+					_ => {
+						fetched = Value::Object(crate::val::Object::from(
+							std::collections::BTreeMap::from([("id".to_owned(), id)]),
+						));
+					}
+				}
+			} else if fetched.is_none() {
 				return Ok(Value::None);
 			}
 			crate::exec::vm::host::out_of_line(|| {
