@@ -71,11 +71,9 @@ value = "[{ m: NaN }]"
 value = "[{ m: 2.5f }]"
 
 [[test.results]]
-error = "Incorrect arguments for function math::max(). Argument 1 was the wrong type. Expected `number` but found `'x'`"
-
+value = "[{ m: -Infinity }]"
 [[test.results]]
-error = "Incorrect arguments for function math::min(). Argument 1 was the wrong type. Expected `number` but found `'x'`"
-
+value = "[{ m: Infinity }]"
 [[test.results]]
 value = "[{ m: 7 }]"
 
@@ -107,10 +105,9 @@ value = "[{ m: 8 }]"
 value = "[{ m: 4 }]"
 
 [[test.results]]
-error = "Incorrect arguments for function math::max(). Argument 1 was the wrong type. Expected `number` but found `[1, 5]`"
-
+value = "[{ m: -Infinity }]"
 [[test.results]]
-error = "Incorrect arguments for function math::min(). Argument 1 was the wrong type. Expected `number` but found `[1, 5]`"
+value = "[{ m: Infinity }]"
 */
 {
 	-- Declared kinds that are not `int`.

@@ -571,6 +571,12 @@ async fn group_delete(
 	let Some(count) = AggregationStat::get_count(stats) else {
 		return Err(no_record_count(table));
 	};
+	if count == 1 && view.group.is_empty() {
+		// The `GROUP ALL` row outlives its last record: it is emptied to the stats of
+		// a group no record is in.
+		record.metadata = new_group(view.analysis).metadata;
+		return store_group(m, state, view, key, record, before, Action::Update).await;
+	}
 	if count == 1 {
 		del_view_row(&m.ctx, table, &key).await?;
 		let row = RecordId {

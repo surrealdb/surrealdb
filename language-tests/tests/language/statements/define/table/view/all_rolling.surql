@@ -29,11 +29,9 @@ value = "[{ age: 39, id: person:two, score: 91 }]"
 value = "[{ age: 39, average: 81.5f, count: 2, id: person_by_age:[39], max: 91, min: 72, total: 78f }]"
 
 [[test.results]]
-error = "Incorrect arguments for function math::mean(). Argument 1 was the wrong type. Expected `number` but found `'test'`"
-
+value = "[{ age: 39, id: person:two, score: 'test' }]"
 [[test.results]]
-value = "[{ age: 39, average: 81.5f, count: 2, id: person_by_age:[39], max: 91, min: 72, total: 78f }]"
-
+value = "[{ age: 39, average: 72f, count: 2, id: person_by_age:[39], max: 72, min: 72, total: 78 }]"
 */
 DEFINE TABLE person SCHEMALESS;
 DEFINE TABLE person_by_age AS

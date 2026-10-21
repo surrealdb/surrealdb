@@ -3,7 +3,7 @@
 timeout = 5000
 
 [test]
-reason = "Pins current behaviour, by design: in a GROUP BY, math::mean aggregates one number per row of the group, so a per-row array value is refused with a clear type error (outside GROUP BY the same call averages each row's array). Nesting a per-row mean inside the aggregate is refused as a nested aggregate."
+reason = "Pins current behaviour, by design: in a GROUP BY, math::mean aggregates one number per row of the group, so a per-row array value is skipped like any other value that is not a number, and a group with no numbers answers NaN (outside GROUP BY the same call averages each row's array). Nesting a per-row mean inside the aggregate is refused as a nested aggregate."
 issue = 3758
 
 [[test.results]]
@@ -16,8 +16,7 @@ value = "[{ id: r:2, p: 1, serie: { a: 5f, b: 7f } }]"
 value = "[{ id: r:3, p: 2, serie: { a: 2f } }]"
 
 [[test.results]]
-error = "Incorrect arguments for function math::mean(). Argument 1 was the wrong type. Expected `number` but found `[1f, 3f]`"
-
+value = "[{ m: NaN, p: 1 }, { m: NaN, p: 2 }]"
 [[test.results]]
 value = "[{ m: 2f, p: 1 }, { m: 6f, p: 1 }, { m: 2f, p: 2 }]"
 

@@ -20,8 +20,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[]"
-
+value = "[{ count: 0, id: view:[] }]"
 [[test.results]]
 value = "[{ a: 1, id: test:1 }]"
 

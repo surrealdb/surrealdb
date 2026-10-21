@@ -9,8 +9,7 @@ reason = """
 	Rows written before a field is declared `int` and indexed may hold what the declaration would
 	refuse: text, NULL, a boolean, no value, a float above every integer, NaN, and a float equal to
 	an integer. The extreme of such a field answers as the fold over the rows does: numbers fold
-	and keep the first of equal ones in scan order, NONE and NULL are skipped, and a table with no
-	number answers an infinity or names the first value that is not one.
+	and keep the first of equal ones in scan order, values that are not numbers are skipped, and a table with no number answers an infinity.
 """
 
 [[test.results]]
@@ -137,11 +136,9 @@ value = "[{ m: 1 }]"
 value = "[{ m: 9 }]"
 
 [[test.results]]
-error = "Incorrect arguments for function math::max(). Argument 1 was the wrong type. Expected `number` but found `'x'`"
-
+value = "[{ m: -Infinity }]"
 [[test.results]]
-error = "Incorrect arguments for function math::min(). Argument 1 was the wrong type. Expected `number` but found `'x'`"
-
+value = "[{ m: Infinity }]"
 [[test.results]]
 value = "[{ m: -Infinity }]"
 
@@ -155,23 +152,17 @@ value = "[{ m: NaN }]"
 value = "[{ m: 3 }]"
 
 [[test.results]]
-error = "Incorrect arguments for function math::max(). Argument 1 was the wrong type. Expected `number` but found `'y'`"
-
+value = "[{ m: -Infinity }]"
 [[test.results]]
-error = "Incorrect arguments for function math::min(). Argument 1 was the wrong type. Expected `number` but found `'y'`"
-
+value = "[{ m: Infinity }]"
 [[test.results]]
-error = "Incorrect arguments for function math::max(). Argument 1 was the wrong type. Expected `number` but found `'x'`"
-
+value = "[{ m: -Infinity }]"
 [[test.results]]
-error = "Incorrect arguments for function math::min(). Argument 1 was the wrong type. Expected `number` but found `'x'`"
-
+value = "[{ m: Infinity }]"
 [[test.results]]
-error = "Incorrect arguments for function math::max(). Argument 1 was the wrong type. Expected `number` but found `'y'`"
-
+value = "[{ m: -Infinity }]"
 [[test.results]]
-error = "Incorrect arguments for function math::min(). Argument 1 was the wrong type. Expected `number` but found `'y'`"
-
+value = "[{ m: Infinity }]"
 [[test.results]]
 value = "[{ m: 3 }]"
 
@@ -203,8 +194,7 @@ value = "false"
 value = "1000.5f"
 
 [[test.results]]
-error = "Incorrect arguments for function math::min(). Argument 1 was the wrong type. Expected `number` but found `'x'`"
-
+value = "[{ id: d:1, m: Infinity }, { id: d:2, m: Infinity }]"
 [[test.results]]
 value = "[{ m: 1000.5f }]"
 */

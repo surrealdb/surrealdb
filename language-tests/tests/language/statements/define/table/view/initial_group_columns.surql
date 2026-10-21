@@ -162,8 +162,7 @@ value = "NONE"
 value = "[]"
 
 [[test.results]]
-value = "[]"
-
+value = "[{ c: 0, id: empty_all:[] }]"
 [[test.results]]
 value = "[]"
 
@@ -186,8 +185,7 @@ value = "[]"
 value = "[]"
 
 [[test.results]]
-value = "[]"
-
+value = "[{ c: 0, id: empty_all:[] }]"
 [[test.results]]
 value = "NONE"
 

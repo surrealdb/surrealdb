@@ -8,29 +8,14 @@ use crate::val::{Number, Value};
 /// Tracks what an aggregate could not accumulate, and whether it accumulated
 /// anything at all.
 ///
-/// An aggregate reduces a group by folding one value per row, so it has to say
-/// what happens when a row's value is not of the kind it folds. Neither extreme
-/// is right:
+/// A numeric aggregate skips every input that is not a number, in every group,
+/// whether or not the group also holds a number. `NONE`, `NULL`, strings,
+/// booleans and arrays are all skipped, so one malformed row never fails a
+/// group, and a group with no numbers answers its identity: `0` for a sum, the
+/// accumulator's empty value for the rest.
 ///
-/// - Dropping every wrong value silently reports the accumulator's identity — `0` for a sum,
-///   `-Infinity` for a maximum — as though it were the answer. The caller cannot tell that from a
-///   real result, which makes it the worst outcome.
-/// - Refusing every wrong value fails a whole group because one row is malformed, and over
-///   heterogeneous data in a schemaless store that is ordinary rather than exceptional.
-///
-/// So the distinction drawn here is whether the group has an answer at all:
-///
-/// - `NONE` and `NULL` are absent rather than wrong, and are always skipped. This matches SQL's
-///   treatment of nulls in aggregates and keeps a missing field from failing a group.
-/// - A value of the wrong kind is skipped **if the group folded at least one real value**, so a
-///   single malformed row among good ones does not lose the rest.
-/// - A value of the wrong kind **raises** if the group folded nothing, because that is precisely
-///   when the identity would be returned as though it were an answer. The error is the same
-///   argument-type error the scalar form raises.
-///
-/// The identity is thereby reserved for a group that genuinely saw no values,
-/// which is what the scalar form returns for empty input (`math::sum([])` is
-/// `0`, `math::max([])` is `-Infinity`).
+/// Datetime aggregates keep the stricter rule: a value of the wrong kind is
+/// skipped only if the group folded at least one datetime, and raises otherwise.
 ///
 /// The rejection is reported from `finalize` rather than from `update` because
 /// only at `finalize` is it known whether anything else folded.
@@ -47,22 +32,15 @@ pub(super) struct Rejected {
 }
 
 impl Rejected {
-	/// Take a numeric input, recording a rejection for a value that is neither
-	/// a number nor absent.
-	///
-	/// Returns `None` both for an absent value and for a rejected one; a caller
-	/// folds only what comes back as `Some`.
-	pub(super) fn number(&mut self, func: &str, value: &Value) -> Option<Number> {
+	/// Take a numeric input. Returns the number for a number and `None` for any
+	/// other value, which is skipped without being recorded.
+	pub(super) fn number(&mut self, _func: &str, value: &Value) -> Option<Number> {
 		match value {
 			Value::Number(n) => {
 				self.folded = true;
 				Some(*n)
 			}
-			Value::None | Value::Null => None,
-			other => {
-				self.reject(func, "number", other);
-				None
-			}
+			_ => None,
 		}
 	}
 

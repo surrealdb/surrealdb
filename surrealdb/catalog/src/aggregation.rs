@@ -521,26 +521,36 @@ impl AggregationStat {
 		Ok(0.0.into())
 	}
 
-	/// Returns a per group record count this aggregation list keeps track of, if any.
+	/// Returns the per group record count: the `Count` stat, which counts every
+	/// record of the group. A list without one answers the count of a numeric
+	/// stat (`Mean`, `StdDev`, `Variance`), which equals the record count only
+	/// when every record of the group holds a number.
 	pub fn get_count(aggregation_stats: &[AggregationStat]) -> Option<i64> {
-		aggregation_stats.iter().find_map(|x| match x {
-			AggregationStat::Count {
-				count,
-			}
-			| AggregationStat::Mean {
-				count,
-				..
-			}
-			| AggregationStat::Variance {
-				count,
-				..
-			}
-			| AggregationStat::StdDev {
-				count,
-				..
-			} => Some(*count),
-			_ => None,
-		})
+		aggregation_stats
+			.iter()
+			.find_map(|x| match x {
+				AggregationStat::Count {
+					count,
+				} => Some(*count),
+				_ => None,
+			})
+			.or_else(|| {
+				aggregation_stats.iter().find_map(|x| match x {
+					AggregationStat::Mean {
+						count,
+						..
+					}
+					| AggregationStat::Variance {
+						count,
+						..
+					}
+					| AggregationStat::StdDev {
+						count,
+						..
+					} => Some(*count),
+					_ => None,
+				})
+			})
 	}
 }
 
@@ -610,7 +620,7 @@ pub fn remove_from_aggregation_stats(
 	let mut recalculations = Vec::new();
 	for (idx, stat) in stats.iter_mut().enumerate() {
 		if let Some((arg, _)) = skipping_stat(stat)
-			&& is_absent(&arguments[arg])
+			&& skips(stat, &arguments[arg])
 		{
 			continue;
 		}
@@ -757,7 +767,7 @@ pub fn update_aggregation_stats(
 	let mut recalculations = Vec::new();
 	for (idx, stat) in stats.iter_mut().enumerate() {
 		if let Some((arg, name)) = skipping_stat(stat) {
-			match (is_absent(&before_args[arg]), is_absent(&after_args[arg])) {
+			match (skips(stat, &before_args[arg]), skips(stat, &after_args[arg])) {
 				(true, true) => continue,
 				(true, false) => {
 					fold_in(stat, &after_args[arg], name)?;
@@ -988,14 +998,37 @@ pub fn apply_recalculations(
 	Ok(())
 }
 
-/// Whether an aggregate's argument is absent rather than wrong: `NONE` and
-/// `NULL` are skipped by `math::sum`, `math::min` and `math::max`, so a record
-/// that lacks the field contributes nothing to a group and takes nothing out.
-fn is_absent(value: &Value) -> bool {
-	matches!(value, Value::None | Value::Null)
+/// Whether `value` is skipped by `stat`, which must be one of [`skipping_stat`]'s.
+///
+/// The numeric stats skip every value that is not a number, as the `math::`
+/// aggregates do. The datetime stats skip only `NONE` and `NULL` and refuse any
+/// other kind, so a record that lacks the field contributes nothing to a group
+/// and takes nothing out.
+fn skips(stat: &AggregationStat, value: &Value) -> bool {
+	match stat {
+		AggregationStat::NumberMax {
+			..
+		}
+		| AggregationStat::NumberMin {
+			..
+		}
+		| AggregationStat::Sum {
+			..
+		}
+		| AggregationStat::Mean {
+			..
+		}
+		| AggregationStat::StdDev {
+			..
+		}
+		| AggregationStat::Variance {
+			..
+		} => !matches!(value, Value::Number(_)),
+		_ => matches!(value, Value::None | Value::Null),
+	}
 }
 
-/// The argument and function name of a stat that skips absent values.
+/// The argument and function name of a stat that skips values [`skips`] names.
 fn skipping_stat(stat: &AggregationStat) -> Option<(usize, &'static str)> {
 	match stat {
 		AggregationStat::NumberMax {
@@ -1010,6 +1043,18 @@ fn skipping_stat(stat: &AggregationStat) -> Option<(usize, &'static str)> {
 			arg,
 			..
 		} => Some((*arg, "math::sum")),
+		AggregationStat::Mean {
+			arg,
+			..
+		} => Some((*arg, "math::mean")),
+		AggregationStat::StdDev {
+			arg,
+			..
+		} => Some((*arg, "math::stddev")),
+		AggregationStat::Variance {
+			arg,
+			..
+		} => Some((*arg, "math::variance")),
 		AggregationStat::TimeMax {
 			arg,
 			..
@@ -1048,6 +1093,28 @@ fn fold_in(stat: &mut AggregationStat, value: &Value, function: &str) -> Result<
 			sum,
 			..
 		} => *sum = (*sum).try_add(number(value, function)?)?,
+		AggregationStat::Mean {
+			sum,
+			count,
+			..
+		} => {
+			*sum = sum.add_exact(number(value, function)?)?;
+			*count += 1;
+		}
+		AggregationStat::StdDev {
+			shift,
+			sum,
+			sum_of_squares,
+			count,
+			..
+		}
+		| AggregationStat::Variance {
+			shift,
+			sum,
+			sum_of_squares,
+			count,
+			..
+		} => shifted_accumulate(shift, sum, sum_of_squares, count, number(value, function)?)?,
 		AggregationStat::TimeMax {
 			max,
 			..
@@ -1111,20 +1178,57 @@ fn fold_out(
 		(
 			AggregationStat::Sum {
 				..
+			}
+			| AggregationStat::Mean {
+				..
+			}
+			| AggregationStat::StdDev {
+				..
+			}
+			| AggregationStat::Variance {
+				..
 			},
 			Value::Number(_),
 		) => None,
 		_ => fail!("Old record wasn't the kind its aggregate was created with"),
 	};
-	if let (
-		AggregationStat::Sum {
-			sum,
-			..
-		},
-		Value::Number(n),
-	) = (&mut *stat, value)
-	{
-		*sum = (*sum).try_sub(*n)?;
+	match (&mut *stat, value) {
+		(
+			AggregationStat::Sum {
+				sum,
+				..
+			},
+			Value::Number(n),
+		) => *sum = (*sum).try_sub(*n)?,
+		(
+			AggregationStat::Mean {
+				sum,
+				count,
+				..
+			},
+			Value::Number(n),
+		) => {
+			*sum = (*sum).sub_exact(*n)?;
+			*count -= 1;
+		}
+		(
+			AggregationStat::StdDev {
+				shift,
+				sum,
+				sum_of_squares,
+				count,
+				..
+			}
+			| AggregationStat::Variance {
+				shift,
+				sum,
+				sum_of_squares,
+				count,
+				..
+			},
+			Value::Number(n),
+		) => shifted_remove(shift, sum, sum_of_squares, count, *n)?,
+		_ => {}
 	}
 	if let Some((arg, function)) = held_extreme {
 		recalculations.push(Recalculation {
@@ -1177,7 +1281,7 @@ fn datetime(value: &Value, function: &str) -> Result<Datetime> {
 pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationStat]) -> Result<()> {
 	for stat in stats {
 		if let Some((arg, _)) = skipping_stat(stat)
-			&& is_absent(&arguments[arg])
+			&& skips(stat, &arguments[arg])
 		{
 			continue;
 		}
@@ -2018,18 +2122,10 @@ impl AggregationAnalysis {
 			}
 		}
 
-		// Ensure there is atleast one count aggregation to delete the record when the number of
-		// entries reaches zero.
-		if materialized_view
-			&& !aggregations.iter().any(|x| {
-				matches!(
-					x,
-					Aggregation::Count
-						| Aggregation::Mean(_)
-						| Aggregation::StdDev(_)
-						| Aggregation::Variance(_)
-				)
-			}) {
+		// A materialized view keeps a count of every record in each group: the row is
+		// removed when the count reaches zero, and a numeric stat counts only the numbers
+		// it was handed.
+		if materialized_view && !aggregations.iter().any(|x| matches!(x, Aggregation::Count)) {
 			aggregations.push(Aggregation::Count)
 		}
 
@@ -2209,10 +2305,17 @@ impl AggregationAnalysis {
 /// with the grand total, which stands for no group and whose extremes are each
 /// aggregate's answer over no values rather than a group's. Every view's
 /// analysis carries a count, which is what tells the two apart.
+/// The stats of the group a backfill row stands for, or `None` for a row that
+/// stands for no group.
+///
+/// A `GROUP ALL` view (`group_all`) holds its one row whatever its count, so a
+/// count of zero answers the stats of a group no record is in, as
+/// [`Aggregation::to_stat`] starts them.
 pub fn backfill_stats(
 	aggregations: &[Aggregation],
 	values: &[BackfillValue],
 	computed: &[Value],
+	group_all: bool,
 ) -> Result<Option<Vec<AggregationStat>>> {
 	let at = |value: BackfillValue| -> Result<&Value> {
 		let Some(idx) = values.iter().position(|v| *v == value) else {
@@ -2246,7 +2349,10 @@ pub fn backfill_stats(
 		fail!("a materialised view's aggregations did not include a count");
 	}
 	if count_of()? == 0 {
-		return Ok(None);
+		if !group_all {
+			return Ok(None);
+		}
+		return Ok(Some(aggregations.iter().map(Aggregation::to_stat).collect()));
 	}
 	let mut stats = Vec::with_capacity(aggregations.len());
 	for a in aggregations.iter() {
@@ -2433,9 +2539,9 @@ mod backfill_tests {
 	#[test]
 	fn a_backfill_row_counting_no_records_has_no_stats() {
 		let values = vec![BackfillValue::Aggregate(Aggregation::Count)];
-		let none = backfill_stats(&[Aggregation::Count], &values, &[Value::from(0i64)]);
+		let none = backfill_stats(&[Aggregation::Count], &values, &[Value::from(0i64)], false);
 		assert!(matches!(none, Ok(None)));
-		let some = backfill_stats(&[Aggregation::Count], &values, &[Value::from(3i64)])
+		let some = backfill_stats(&[Aggregation::Count], &values, &[Value::from(3i64)], false)
 			.expect("the count reads")
 			.expect("three records stand for a group");
 		assert!(matches!(

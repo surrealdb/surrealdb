@@ -11,8 +11,7 @@ error = "The table 'test' does not exist"
 value = "[]"
 
 [[test.results]]
-value = "[{ before: { mean: 3f }, even: 'DELETE', id: test:triggered_on_view }]"
-
+value = "[{ after: { mean: NaN }, before: { mean: 3f }, even: 'UPDATE', id: test:triggered_on_view }]"
 */
 
 {

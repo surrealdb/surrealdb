@@ -54,11 +54,9 @@ pub(super) struct Groups {
 /// run. Only `GROUP ALL`'s one group keeps a log.
 ///
 /// An accumulator that folds numbers one at a time ([`Accumulator::update`] of
-/// the sum, mean, variance and deviation) skips an absent value, folds a
-/// number, and records the first value of another kind it was handed. The log
-/// keeps each of these and nothing else: the numbers in order, and the first
-/// value of another kind, whose place among the numbers no fold's result
-/// depends on.
+/// the sum, mean, variance and deviation) skips every value that is not a
+/// number, and folds a number. The log keeps the numbers in the order they were
+/// handed over and nothing else.
 ///
 /// The numbers of a slot are kept in blocks, each allocated at its full size
 /// before the rows it holds the numbers of run ([`Groups::open_log_block`]), so
@@ -72,8 +70,6 @@ struct Logged {
 	numbers: Vec<Vec<Vec<Number>>>,
 	/// The numbers a block of a slot holds.
 	block: usize,
-	/// By slot, the first value that is neither a number nor absent.
-	rejected: Vec<Option<Value>>,
 	/// What the numbers hold, in bytes.
 	bytes: usize,
 	/// What keeps the memory the blocks hold charged to the query, released
@@ -88,11 +84,6 @@ impl Logged {
 		self.bytes += later.bytes;
 		for (mine, theirs) in self.numbers.iter_mut().zip(later.numbers) {
 			mine.extend(theirs);
-		}
-		for (mine, theirs) in self.rejected.iter_mut().zip(later.rejected) {
-			if mine.is_none() {
-				*mine = theirs;
-			}
 		}
 		self.holds.extend(later.holds);
 		Ok(())
@@ -556,7 +547,6 @@ impl Groups {
 			slots: Arc::clone(slots),
 			numbers: vec![Vec::new(); kept],
 			block: 0,
-			rejected: vec![None; kept],
 			bytes: 0,
 			holds: Vec::new(),
 		}));
@@ -610,22 +600,16 @@ impl Groups {
 		let Ok(at) = logged.slots.binary_search(&(start + call)) else {
 			return Ok(Some(value));
 		};
-		match value {
-			Value::Number(number) => {
-				let Some(block) =
-					logged.numbers[at].last_mut().filter(|block| block.len() < block.capacity())
-				else {
-					anyhow::bail!("a row handed a logged accumulator a number past its block");
-				};
-				block.push(number);
-				logged.bytes += std::mem::size_of::<Number>();
-			}
-			Value::None | Value::Null => {}
-			other => {
-				if logged.rejected[at].is_none() {
-					logged.rejected[at] = Some(other);
-				}
-			}
+		// An absent or non-numeric value is skipped by every logged aggregate, so only a
+		// number is kept.
+		if let Value::Number(number) = value {
+			let Some(block) =
+				logged.numbers[at].last_mut().filter(|block| block.len() < block.capacity())
+			else {
+				anyhow::bail!("a row handed a logged accumulator a number past its block");
+			};
+			block.push(number);
+			logged.bytes += std::mem::size_of::<Number>();
 		}
 		Ok(None)
 	}
@@ -653,19 +637,15 @@ impl Groups {
 		let Logged {
 			slots,
 			numbers,
-			rejected,
 			..
 		} = later;
-		for ((slot, numbers), rejected) in slots.iter().zip(numbers).zip(rejected) {
+		for (slot, numbers) in slots.iter().zip(numbers) {
 			let state = self
 				.accumulators
 				.get_mut(*slot)
 				.ok_or_else(|| anyhow::anyhow!("a logged accumulator is not in the group"))?;
 			for number in numbers.into_iter().flatten() {
 				fold(state, Value::Number(number));
-			}
-			if let Some(value) = rejected {
-				fold(state, value);
 			}
 		}
 		Ok(())

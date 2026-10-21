@@ -245,7 +245,8 @@ fn stats(
 	backfill: &Backfill,
 	computed: &[Value],
 ) -> FlowResult<Option<Vec<aggregation::AggregationStat>>> {
-	backfill_stats(&backfill.aggregations, &backfill.values, computed).map_err(ControlFlow::Err)
+	backfill_stats(&backfill.aggregations, &backfill.values, computed, backfill.groups == 0)
+		.map_err(ControlFlow::Err)
 }
 
 /// Delete each record of view table `table` and run it through the table's

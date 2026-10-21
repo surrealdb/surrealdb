@@ -6,11 +6,10 @@ reason = """
 What an aggregate does with a row whose value it cannot fold. The contract
 turns on whether the group has an answer at all:
 
-- A wrong-kind value is skipped when the group folded at least one usable
-  value, so one malformed row in heterogeneous data does not discard the rest.
-- A wrong-kind value raises when the group folded nothing -- the third query.
-  Returning the accumulator's identity (`0` here) instead is indistinguishable
-  from a real sum.
+- A wrong-kind value is skipped in every group, whether or not the group also
+  folded a number, so one malformed row in heterogeneous data does not discard
+  the rest, and a group of wrong-kind values alone answers the identity (`0`
+  for the sum, the third query).
 - An absent value is skipped rather than ordered. `NONE` sorts below every
   other value, so ordering it would make the minimum of any sparsely populated
   column `NONE` -- the fourth query. Ignoring nulls is what SQL specifies for
@@ -45,8 +44,7 @@ value = "[{ t: 30 }]"
 value = "[{ lo: 10 }]"
 
 [[test.results]]
-error = "Incorrect arguments for function math::sum(). Argument 1 was the wrong type. Expected `number` but found `'bad'`"
-
+value = "[{ t: 0 }]"
 [[test.results]]
 value = "[{ hi: 'pear', lo: 'pear' }]"
 

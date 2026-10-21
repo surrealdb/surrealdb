@@ -17,8 +17,7 @@ value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibi
 value = "{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: { view: 'DEFINE TABLE view TYPE ANY SCHEMALESS AS SELECT count() FROM test GROUP ALL PERMISSIONS NONE' } }"
 
 [[test.results]]
-value = "[]"
-
+value = "[{ count: 0, id: view:[] }]"
 [[test.results]]
 value = "[{ id: test:awx1vt2p5722v4siq2ny }]"
 skip-record-id-key = true

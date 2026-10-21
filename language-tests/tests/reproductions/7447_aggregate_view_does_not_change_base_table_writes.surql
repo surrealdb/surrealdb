@@ -3,7 +3,7 @@
 timeout = 5000
 
 [test]
-reason = "A view over math::sum, math::min and math::max skips a record that lacks the field, as the ad hoc GROUP BY does, instead of making the base table reject it; adding, giving, changing and removing the field keeps the view equal to the ad hoc query"
+reason = "A view over math::sum, math::min and math::max skips a record whose field is not a number, as the ad hoc GROUP BY does, instead of making the base table reject it; adding, giving, changing and removing the field keeps the view equal to the ad hoc query"
 issue = 7447
 
 [[test.results]]
@@ -67,8 +67,7 @@ value = "[{ g: 'a', hi: 3, lo: 3, total: 3 }, { g: 'b', hi: -Infinity, lo: Infin
 value = "[{ g: 'a', hi: 3, lo: 3, total: 3 }, { g: 'b', hi: -Infinity, lo: Infinity, total: 0 }]"
 
 [[test.results]]
-error = "Incorrect arguments for function math::sum(). Argument 1 was the wrong type. Expected `number` but found `'text'`"
-
+value = "[{ g: 'a', id: person:n4, v: 'text' }]"
 [[test.results]]
 value = "NONE"
 

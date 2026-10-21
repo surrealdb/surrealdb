@@ -6,22 +6,13 @@ auth = { level = "owner" }
 
 [test]
 reason = """
-A materialised view's contract is the incremental path's, not the query's: a
-view row stands for a group that source rows are in, created with the group's
-first row and deleted with its last. `GROUP ALL` answers a query over no rows
-with the grand total, which stands for no group, so a view defined over a
-source that is empty — or one a `WHERE` narrows to nothing — holds nothing
-until a row arrives.
-
-That makes `SELECT * FROM v` and the view's own query disagree over an empty
-source, deliberately: the query reports the total of no rows, the table reports
-the groups it holds. Closing the gap the other way would mean an emptied group
-keeping a row whose extremes the incremental path cannot recompute, since the
-recalculation it runs has no value to read.
-
-The last two statements are the control on the delete side: removing the last
-source row removes the group's row rather than zeroing it, which is the
-invariant the initialisation has to agree with.
+A materialised view's `GROUP ALL` row is the one group of the whole source, and it
+is held from the view's definition on: a source that is empty, or that a `WHERE`
+narrows to nothing, still gives the row, with the aggregates of no rows (`count`
+is `0`), as the view's own query does. Removing the last source row empties that
+row rather than removing it. A view over `GROUP BY` keys is different: each of its
+rows stands for a group that source rows are in, is created with the group's first
+row and is deleted with its last.
 """
 
 [[test.results]]
@@ -34,11 +25,9 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[]"
-
+value = "[{ count: 0, id: total:[], total: 0 }]"
 [[test.results]]
-value = "[]"
-
+value = "[{ count: 0, id: big:[] }]"
 [[test.results]]
 value = "[{ count: 0, total: 0 }]"
 
@@ -52,11 +41,9 @@ value = "[{ count: 1, id: total:[], total: 5 }]"
 value = "[]"
 
 [[test.results]]
-value = "[]"
-
+value = "[{ count: 0, id: total:[], total: 0 }]"
 [[test.results]]
-value = "[]"
-
+value = "[{ count: 0, id: big:[] }]"
 [[test.results]]
 value = "[{ count: 0, total: 0 }]"
 */
