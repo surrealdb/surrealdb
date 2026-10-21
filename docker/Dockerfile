@@ -12,7 +12,7 @@ ENV OPENSSL_NO_VENDOR=1
 
 # Install rust
 ARG RUST_VERSION=1.95.0
-ARG RUSTUP_SHA256=7d0ea0f8eba7fa1ebfe998091cd7ec4501e33ec5ca6b884eb4d894d7da5170af
+ARG RUSTUP_SHA256=9502b514362a21096210d498f143b8cdacda365d3dfcf45e8f5541e089ccafc0
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh \
     && echo "${RUSTUP_SHA256}  /tmp/rustup.sh" | sha256sum -c - \
     && bash /tmp/rustup.sh -y --default-toolchain ${RUST_VERSION}
