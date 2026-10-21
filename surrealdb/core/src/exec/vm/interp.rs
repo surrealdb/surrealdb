@@ -570,8 +570,16 @@ pub(crate) struct State {
 	pub(super) methods: Vec<Option<std::sync::Arc<crate::exec::function::MethodDescriptor>>>,
 	/// The function and index context each of the program's index-function
 	/// [`CallSpec`](super::program::CallSpec)s resolved to, by index, on the
-	/// call's first use in the run.
+	/// call's first use in a read-only run. A run that writes keeps none.
 	pub(super) index_runs: Vec<Option<IndexRun>>,
+	/// The full-text context of each clause the run's index calls and
+	/// full-text scans name, shared by all of them
+	/// ([`Self::shared_match_context`]).
+	pub(super) match_contexts: Vec<std::sync::Arc<crate::exec::function::MatchContext>>,
+	/// Whether the program run is read-only, so a record holds what its
+	/// full-text contexts read of it while it runs
+	/// ([`crate::exec::function::MatchContext::of_path`]).
+	pub(super) read_only: bool,
 	/// The distances each statement's `KNN` scan has published, by
 	/// [`Source::Knn::slot`](super::program::Source::Knn).
 	pub(super) knn_contexts: Vec<Option<std::sync::Arc<crate::exec::function::KnnContext>>>,
@@ -705,6 +713,7 @@ pub(super) struct RunShare {
 	knn_queries: Vec<KnnQueryCell>,
 	measures: Vec<Option<std::sync::Arc<super::measure::MeasureSettled>>>,
 	index_runs: Vec<Option<IndexRun>>,
+	match_contexts: Vec<std::sync::Arc<crate::exec::function::MatchContext>>,
 	matches_evals: Vec<Option<std::sync::Arc<crate::exec::vm::matches::MatchesEval>>>,
 	/// The threshold cell of each sort the run's scan pushes a top-k down for: the sorts of the
 	/// morsels publish into the statement's cell, so that every morsel's scan rejects by the
@@ -875,6 +884,19 @@ pub(super) struct IndexRun {
 	pub(super) query: Option<String>,
 }
 
+/// The function whose calls a full-text scan scores the hits of, in the
+/// batches it lists them in, so each call finds its row's score remembered.
+const SCORE_FUNCTION: &str = "search::score";
+
+/// The context a full-text scan shares with the calls of its program that
+/// name its clause ([`State::scan_match_context`]).
+pub(super) struct ScanMatch {
+	pub(super) context: std::sync::Arc<crate::exec::function::MatchContext>,
+	/// Whether one of those calls scores the clause, so the scan scores each
+	/// batch it lists.
+	pub(super) scored: bool,
+}
+
 /// The query index function call `spec` reads when it runs, taken from the
 /// end of `args`, where the call's clause reads one
 /// ([`super::program::IndexBinding::FullText::query_arg`]). A value that is no
@@ -967,6 +989,7 @@ impl State {
 		state.knn_queries = shared.knn_queries;
 		state.measures = shared.measures;
 		state.index_runs = shared.index_runs;
+		state.match_contexts = shared.match_contexts;
 		state.matches_evals = shared.matches_evals;
 		state.topk_cells = shared.topk_cells;
 		state.start(program, paging);
@@ -1024,6 +1047,7 @@ impl State {
 		self.verdicts.resize(program.verdicts.len(), None);
 		self.seen.resize_with(program.distincts.len(), crate::exec::operators::SeenSet::new);
 		self.reserved_taken.resize(program.reservations.len(), false);
+		self.read_only = program.access_mode.is_read_only();
 	}
 
 	/// Let go of everything a run left in this state, keeping the room its
@@ -1113,6 +1137,8 @@ impl State {
 			units,
 			methods: _,
 			index_runs,
+			match_contexts,
+			read_only,
 			knn_contexts,
 			matches_evals,
 			backfill,
@@ -1205,6 +1231,8 @@ impl State {
 		emptied(reserved_taken);
 		*units = None;
 		emptied(index_runs);
+		emptied(match_contexts);
+		*read_only = false;
 		emptied(knn_contexts);
 		emptied(matches_evals);
 		*backfill = None;
@@ -1265,6 +1293,7 @@ impl State {
 			knn_queries: self.knn_queries.clone(),
 			measures: self.measures.clone(),
 			index_runs: self.index_runs.clone(),
+			match_contexts: self.match_contexts.clone(),
 			matches_evals: self.matches_evals.clone(),
 			topk_cells: self.topk_cells.clone(),
 		})
@@ -1360,7 +1389,10 @@ impl State {
 		if self.index_runs.len() <= at {
 			self.index_runs.resize(at + 1, None);
 		}
-		if let Some(run) = &self.index_runs[at]
+		// A run that writes resolves the call afresh each time, so its context
+		// reads the index as the run's writes left it ([`Self::read_only`]).
+		if self.read_only
+			&& let Some(run) = &self.index_runs[at]
 			&& run.query.as_deref() == query
 		{
 			return Ok(run.clone());
@@ -1377,13 +1409,14 @@ impl State {
 				path,
 				query: planned,
 				..
-			}) => crate::exec::function::IndexContext::FullText(std::sync::Arc::new(
-				crate::exec::function::MatchContext::of_path(
-					path.clone(),
-					query.map_or_else(|| planned.clone(), str::to_owned),
-					table.clone(),
-				),
-			)),
+			}) => {
+				let query = query.map_or_else(|| planned.clone(), str::to_owned);
+				crate::exec::function::IndexContext::FullText(self.match_context(
+					table,
+					path.as_ref(),
+					&query,
+				))
+			}
 			Some(
 				IndexBinding::Knn {
 					slot,
@@ -1399,8 +1432,94 @@ impl State {
 			context,
 			query: query.map(str::to_owned),
 		};
-		self.index_runs[at] = Some(run.clone());
+		if self.read_only {
+			self.index_runs[at] = Some(run.clone());
+		}
 		Ok(run)
+	}
+
+	/// The full-text context of the clause reading `path` of `table` for
+	/// `query`, shared by every index call and full-text scan of the run that
+	/// names the clause: made by the first to ask, and found by the rest.
+	///
+	/// Sharing it is what has the index opened, the query's terms read and the
+	/// scorer built once per run rather than once per reader: `search::score(1)`
+	/// in a projection and again in an `ORDER BY`, and the scan answering the
+	/// clause, read the index once between them.
+	///
+	/// Only a read-only run shares it ([`Self::read_only`]). In a run that
+	/// writes, a reader can follow a write to the index that a context made
+	/// before it would not see, so each asker gets a context of its own, which
+	/// reads the index when it is first used.
+	pub(super) fn match_context(
+		&mut self,
+		table: &crate::val::TableName,
+		path: Option<&crate::expr::logical::FieldPath>,
+		query: &str,
+	) -> std::sync::Arc<crate::exec::function::MatchContext> {
+		if self.read_only
+			&& let Some(shared) = self
+				.match_contexts
+				.iter()
+				.find(|ctx| ctx.table == *table && ctx.path.as_ref() == path && ctx.query == query)
+		{
+			return std::sync::Arc::clone(shared);
+		}
+		let ctx = std::sync::Arc::new(crate::exec::function::MatchContext::of_path(
+			path.cloned(),
+			query.to_owned(),
+			table.clone(),
+			self.read_only,
+		));
+		if self.read_only {
+			self.match_contexts.push(std::sync::Arc::clone(&ctx));
+		}
+		ctx
+	}
+
+	/// The context a full-text scan of `index` for `query` shares with the
+	/// index calls of `program` that name its clause, or `None` when no call
+	/// does or the run writes, so a scan nothing shares with resolves nothing
+	/// beyond its own hits.
+	///
+	/// A call names the scan's clause when it reads the scan's query, planned
+	/// rather than read when the call runs, from a column of the scan's index.
+	pub(super) fn scan_match_context(
+		&mut self,
+		program: &super::program::Program,
+		table: &crate::val::TableName,
+		index: &crate::catalog::IndexDefinition,
+		query: &str,
+	) -> Option<ScanMatch> {
+		// A run that writes shares no context between its scan and its calls
+		// ([`Self::match_context`]).
+		if !self.read_only {
+			return None;
+		}
+		let mut naming = program.calls.iter().filter_map(|call| match &call.index {
+			Some(super::program::IndexBinding::FullText {
+				table: called,
+				path: Some(path),
+				query: planned,
+				query_arg: false,
+			}) if called == table
+				&& planned == query
+				&& index.cols.iter().any(|col| {
+					crate::expr::logical::FieldPath::from_idiom(col).as_ref() == Some(path)
+				}) =>
+			{
+				Some((path, call.name.as_str()))
+			}
+			_ => None,
+		});
+		let (path, name) = naming.next()?;
+		let scored = name == SCORE_FUNCTION
+			|| naming.any(|(other, name)| other == path && name == SCORE_FUNCTION);
+		let path = path.clone();
+		Some(ScanMatch {
+			context: self.match_context(table, Some(&path), query),
+			scored,
+		})
 	}
 
 	/// A state holding nothing, which allocates nothing: what a state is
@@ -1486,6 +1605,8 @@ impl State {
 			units: None,
 			methods: Vec::new(),
 			index_runs: Vec::new(),
+			match_contexts: Vec::new(),
+			read_only: false,
 			knn_contexts: Vec::new(),
 			matches_evals: Vec::new(),
 			backfill: None,
@@ -1671,16 +1792,20 @@ impl State {
 	/// A sort that floors at what it keeps
 	/// ([`SortSpec::floors_at_keep`](super::program::SortSpec)) also prunes the
 	/// first time it holds as many rows as it keeps, so it has a floor from
-	/// then on rather than a quarter more rows later: a sort that cuts a
-	/// key-range scan by the second of a datetime component is handed no more
-	/// than `keep` rows a batch by its region, so waiting for the quarter more
-	/// would publish its threshold only several batches on.
+	/// then on rather than a quarter more rows later: its region may hand it no
+	/// more than `keep` rows a batch, so waiting for the quarter more would
+	/// publish its threshold only several batches on. After that it prunes once
+	/// it holds a quarter more, or one more where a quarter is less than one,
+	/// rather than at least sixteen more: each row it takes between prunes is
+	/// one a stale threshold let in.
 	fn prune(&mut self, program: &Program, sort: u16, keep: usize) {
 		let at = sort as usize;
-		let first_floor =
-			program.sorts[at].floors_at_keep && keep > 0 && !self.sort_arrivals[at].floored;
+		let floors_at_keep = program.sorts[at].floors_at_keep;
+		let first_floor = floors_at_keep && keep > 0 && !self.sort_arrivals[at].floored;
 		let margin = if first_floor {
 			0
+		} else if floors_at_keep {
+			(keep / 4).max(1)
 		} else {
 			(keep / 4).max(16)
 		};

@@ -23,6 +23,11 @@ default = ["cjk-tokenizer", "fulltext", "vector-index"]
 # this feature.
 fulltext = ["dep:deunicode", "dep:rust-stemmers"]
 
+# Tracing spans on the full-text index's per-query and per-batch functions
+# (`#[instrument]`). Without it those functions run with no span wrapper; log
+# events are not affected.
+observability = []
+
 # The HNSW vector index. Without it `HNSW` index definitions still parse and
 # stored HNSW state still decodes, and building, loading or searching an HNSW
 # index fails with an error naming this feature. Brute-force KNN and the

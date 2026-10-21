@@ -90,7 +90,7 @@ use crate::key::schema::{
 	RootGrantKey, RootGrantPrefix, RootUserKey, RootUserPrefix, SequenceKey, SequencePrefix,
 	StoreDefaultsKey, SubscriptionPrefix, TableConformanceKey, TableKey, TableMigrationKey,
 	TableMigrationRequestKey, TableMigrationRequestTbPrefix, TableMigrationsKey, TablePrefix,
-	TermChangeBatchKey, VersionKey,
+	TermChangeBatchKey, TermChangePostingsKey, VersionKey,
 };
 #[cfg(diskann)]
 use crate::key::schema::{
@@ -114,7 +114,7 @@ use crate::values::changefeed::Changefeed;
 use crate::values::diskann::{
 	DISKANN_PENDING_STATE_SHARDS, DiskAnnPendingState, DiskAnnPendingStateKind, DiskAnnWriterLease,
 };
-use crate::values::fulltext::DocLengthAndCount;
+use crate::values::fulltext::{ChangePostings, DocLengthAndCount};
 use crate::values::graph::{AdjacencyBlock, BlockEntries, GraphFoldScope};
 use crate::values::ids::DocId;
 use crate::values::index_build::{
@@ -10458,6 +10458,10 @@ impl Transaction {
 	/// that caller committed, because nothing else in the statement writes a key
 	/// per term any more. The count is the same either way; only when the caller
 	/// learns of it differs.
+	///
+	/// `posting` is the term's frequency in the document and the document's
+	/// length, given for an addition to an index that keeps its postings in
+	/// blocks: the flush writes them beside the addition (`!tf`).
 	#[expect(clippy::too_many_arguments, reason = "the index identity is four fields")]
 	pub fn buffer_term_change(
 		&self,
@@ -10468,6 +10472,7 @@ impl Transaction {
 		term: &str,
 		doc_id: u64,
 		add: bool,
+		posting: Option<(u64, u64)>,
 		nid: Uuid,
 	) -> Result<()> {
 		let fresh =
@@ -10483,9 +10488,10 @@ impl Transaction {
 				},
 				doc_id,
 				add,
+				posting,
 				nid,
 			);
-		if fresh {
+		for _ in 0..fresh {
 			let _changed = self.reserve_write_slot()?;
 		}
 		Ok(())
@@ -10640,6 +10646,20 @@ impl Transaction {
 		};
 		for (term, delta) in term_changes {
 			let index = &term.index;
+			// One posting per added document, in the order the addition's bitmap
+			// iterates in, so the two pair one for one. A document whose last
+			// change carried no posting takes a frequency of zero.
+			let postings = (!delta.postings.is_empty()).then(|| {
+				let mut current = delta.current_postings().peekable();
+				delta
+					.added
+					.iter()
+					.map(|doc_id| match current.next_if(|(posted, ..)| *posted == doc_id) {
+						Some((_, frequency, length)) => (frequency, length),
+						None => (0, 0),
+					})
+					.collect::<Vec<_>>()
+			});
 			for (add, docs) in [(true, delta.added), (false, delta.removed)] {
 				if docs.is_empty() {
 					continue;
@@ -10655,6 +10675,18 @@ impl Transaction {
 					add,
 				};
 				self.set_key_prereserved(&key, &docs).await?;
+			}
+			if let Some(postings) = postings.filter(|postings| !postings.is_empty()) {
+				let key = TermChangePostingsKey {
+					ns: index.ns,
+					db: index.db,
+					tb: Cow::Borrowed(&index.tb),
+					ix: index.ix,
+					term: Cow::Borrowed(&term.term),
+					nid: delta.nid,
+					uid,
+				};
+				self.set_key_prereserved(&key, &ChangePostings::from_postings(postings)).await?;
 			}
 		}
 		for (index, stats, nid) in doc_stats {

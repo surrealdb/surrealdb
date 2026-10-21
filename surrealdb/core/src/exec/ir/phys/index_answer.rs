@@ -7,7 +7,8 @@
 //! the ones the index analysis recognises, by one definition.
 //!
 //! A full-text scan lists the records its probe admits; [`answers_search`] decides whether one
-//! conjunct is that probe.
+//! conjunct is that probe, and [`answers_union`] whether one conjunct is the disjunction of the
+//! probes of an index union's full-text branches.
 //!
 //! A conjunct the access covers judges nothing an exact scan has not already judged
 //! ([`IndexScanAttrs::exact`]), and a filter of such conjuncts alone is the scan's own recheck of
@@ -59,17 +60,77 @@ pub(super) fn answers_search(
 	query: &str,
 ) -> bool {
 	let mut operands = Vec::new();
-	let Ok(LogicalExpr::Binary {
+	read_conjunct(ir, conjunct, &mut operands).is_ok_and(|expr| {
+		is_probe(
+			&expr,
+			&SearchProbe {
+				column,
+				operator,
+				query,
+			},
+		)
+	})
+}
+
+/// What a full-text scan searches for: its index column, its operator (which names its clause)
+/// and its query.
+pub(super) struct SearchProbe<'a> {
+	pub(super) column: &'a Idiom,
+	pub(super) operator: &'a MatchesOperator,
+	pub(super) query: &'a str,
+}
+
+/// Whether `expr` is the probe `probe` states: a `MATCHES` with its operator whose left side is
+/// its column and whose right side is its query as a string literal.
+fn is_probe(expr: &LogicalExpr, probe: &SearchProbe<'_>) -> bool {
+	let LogicalExpr::Binary {
 		left,
 		op: BinaryOperator::Matches(held),
 		right,
-	}) = read_conjunct(ir, conjunct, &mut operands)
+	} = expr
 	else {
 		return false;
 	};
-	held == *operator
-		&& matches!(try_literal_to_value(&right), Some(Value::String(text)) if text.as_str() == query)
-		&& idiom_matches_column(&left, column)
+	held == probe.operator
+		&& matches!(try_literal_to_value(right), Some(Value::String(text)) if text.as_str() == probe.query)
+		&& idiom_matches_column(left, probe.column)
+}
+
+/// Whether the conjunct `conjunct` is the disjunction of the probes of an index union's
+/// full-text branches, `branches`: an `OR` of terms each the probe of one branch, with every
+/// branch's probe among them. A union lists exactly the records some branch lists, and each
+/// branch exactly the records its probe admits, so such a conjunct holds of every row the union
+/// lists. A term that is no branch's probe, or a branch no term probes, leaves it unanswered.
+pub(super) fn answers_union(ir: &Ir, conjunct: ValueId, branches: &[SearchProbe<'_>]) -> bool {
+	let mut operands = Vec::new();
+	let Ok(expr) = read_conjunct(ir, conjunct, &mut operands) else {
+		return false;
+	};
+	let mut terms = Vec::new();
+	disjuncts(&expr, &mut terms);
+	let mut probed = vec![false; branches.len()];
+	for term in terms {
+		let Some(at) = branches.iter().position(|branch| is_probe(term, branch)) else {
+			return false;
+		};
+		probed[at] = true;
+	}
+	probed.iter().all(|probed| *probed)
+}
+
+/// The terms of `expr` read as a disjunction: the operands of every `OR` it nests, left to right.
+fn disjuncts<'a>(expr: &'a LogicalExpr, into: &mut Vec<&'a LogicalExpr>) {
+	if let LogicalExpr::Binary {
+		left,
+		op: BinaryOperator::Or,
+		right,
+	} = expr
+	{
+		disjuncts(left, into);
+		disjuncts(right, into);
+	} else {
+		into.push(expr);
+	}
 }
 
 /// The value `value` is when it is built of literals alone ([`literal_value`]).

@@ -58,7 +58,7 @@ use super::super::payload::{BranchRead, IndexBranch};
 use super::super::plain::ValueData;
 use super::super::program::{
 	CountSource, CountVia, CountedValue, DeferredVector, HostScalar, KnnGate, KnnPrefilterSpec,
-	ScanRange, ScanSpec, Source, TopKScan, UnitId,
+	ScanRange, ScanSpec, Source, TopKScan, UnionTopK, UnitId,
 };
 use super::dispatch::phys_refusal;
 use super::emit::Emitter;
@@ -220,6 +220,13 @@ pub(super) fn lower_source_under(
 					branches,
 					merge: attrs.merge.clone(),
 					decode: attrs.decode.clone(),
+					topk: match (&attrs.topk, topk_sort) {
+						(Some((key, sum)), Some(sort)) if key.rejects_entries => Some(UnionTopK {
+							scan: TopKScan::new(key, sort),
+							sum: sum.clone(),
+						}),
+						_ => None,
+					},
 				},
 				table: Some(attrs.table.clone()),
 			})
@@ -267,6 +274,12 @@ pub(super) fn lower_source_under(
 				query: attrs.query.clone(),
 				operator: attrs.operator.clone(),
 				decode: attrs.decode.clone(),
+				topk: match (&attrs.topk, topk_sort) {
+					(Some(key), Some(sort)) if key.rejects_entries => {
+						Some(TopKScan::new(key, sort))
+					}
+					_ => None,
+				},
 			},
 			table: Some(attrs.table.clone()),
 		}),
@@ -1060,6 +1073,7 @@ fn branch(
 			BranchReadShape::FullText {
 				query,
 				operator,
+				..
 			} => BranchRead::FullText {
 				query: query.clone(),
 				operator: operator.clone(),
@@ -1379,6 +1393,7 @@ pub(super) mod tests {
 				column: None,
 				decode: None,
 				read: Default::default(),
+				topk: None,
 			})),
 		);
 		assert!(matches!(
@@ -1457,12 +1472,15 @@ pub(super) mod tests {
 		let op = rows(
 			&mut b,
 			PhysOp::IndexUnion(Box::new(IndexUnionAttrs {
+				topk: None,
 				table: TableName::from("t"),
 				branches: vec![IndexBranchShape {
 					index: named("by_a"),
 					read: BranchReadShape::FullText {
 						query: "q".to_owned(),
 						operator: matches_operator(),
+						column: None,
+						shared_doc_ids: true,
 					},
 					direction: Direction::Forward,
 				}],

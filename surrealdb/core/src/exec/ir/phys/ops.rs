@@ -46,7 +46,7 @@ use crate::exec::pre_decode_filter::PreDecodeShape;
 use crate::exec::vm::payload::{CountSelect, JoinBuild, JoinMatch, Spill, TopKKey, ValuesRead};
 use crate::exec::vm::plain::ValueData;
 use crate::expr::logical::{GuardKind, OutputPath};
-use crate::expr::operator::MatchesOperator;
+use crate::expr::operator::{MatchRef, MatchesOperator};
 use crate::expr::{Dir, ExplainFormat, With};
 use crate::kvs::Direction;
 use crate::val::{Number, RecordId, Value};
@@ -685,6 +685,11 @@ pub(crate) enum BranchReadShape {
 	FullText {
 		query: String,
 		operator: MatchesOperator,
+		/// The first column of the index: the field the `MATCHES` the branch answers reads.
+		column: Option<crate::expr::Idiom>,
+		/// Whether the index keys its documents by the table's shared doc ids, so a hit it lists
+		/// can be scored under the clause of another full-text index of the table.
+		shared_doc_ids: bool,
 	},
 }
 
@@ -706,6 +711,35 @@ pub(crate) struct IndexUnionAttrs {
 	pub(crate) merge: Option<MergeMode>,
 	pub(crate) ordered_by: Option<Vec<FieldPath>>,
 	pub(crate) decode: Option<DecodeFields>,
+	/// Where a bounded sort above orders first by a sum of `search::score` calls over the
+	/// clauses the union's full-text branches answer, the top-k key the branches reject hits by,
+	/// with the sum. A branch scores each hit under every clause of the sum, adds the scores as
+	/// the sort's key adds them, and passes over a hit whose sum the sort's threshold shows worse
+	/// than every row the sort keeps, before its record is read. The key's path is empty.
+	pub(crate) topk: Option<(TopKKey, ScoreSum)>,
+}
+
+/// A sum of `search::score` calls, shaped as the expression that adds them: a clause's score,
+/// or the sum of two sums, left before right.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum ScoreSum {
+	/// The score of the hit under clause `N`, the value of `search::score(N)`.
+	Clause(MatchRef),
+	/// The first sum plus the second.
+	Add(Box<ScoreSum>, Box<ScoreSum>),
+}
+
+impl ScoreSum {
+	/// The clauses the sum scores, left to right, each once per appearance.
+	pub(crate) fn clauses(&self, into: &mut Vec<MatchRef>) {
+		match self {
+			Self::Clause(clause) => into.push(*clause),
+			Self::Add(left, right) => {
+				left.clauses(into);
+				right.clauses(into);
+			}
+		}
+	}
 }
 
 /// A fused bitmap plan.
@@ -776,6 +810,11 @@ pub(crate) struct FullTextScanAttrs {
 	/// The first column of the index: the field the `MATCHES` the scan answers reads.
 	pub(crate) column: Option<crate::expr::Idiom>,
 	pub(crate) decode: Option<DecodeFields>,
+	/// Where a bounded sort above orders first by the clause's `search::score`, the top-k key
+	/// the scan rejects hits by: a hit whose score the sort's threshold shows worse than every
+	/// row the sort keeps is passed over before its record is read. The key is the score the
+	/// scan computes for the hit, so its path is empty.
+	pub(crate) topk: Option<TopKKey>,
 }
 
 /// One bound of a key-range access.

@@ -701,6 +701,18 @@ keyspace! {
 						term_docs_residual = ["!tr", @, term: Str]
 							=> crate::values::fulltext::TermDocsResidual;
 
+						/// A term's posting blocks: the summary of each, in order of
+						/// start. Written with the blocks by compaction, on an index
+						/// that keeps its postings in blocks.
+						term_blocks = ["!tk", @, term: Str]
+							=> crate::values::fulltext::TermBlocks;
+
+						/// One posting block of a term, keyed by the lowest document
+						/// id it covers. A term's blocks sort together, so one range
+						/// read answers all of them.
+						term_block = ["!tp", @, term: Str, @, start: DocId]
+							=> crate::values::fulltext::PostingBlock;
+
 						/// One document's postings, keyed by the document rather than
 						/// by term.
 						///
@@ -755,6 +767,17 @@ keyspace! {
 						/// full-text compaction spends its limit as a document budget.
 						term_change_batch = ["!tx", @, term: Str, @, nid: Uuid, uid: Uuid, add: bool]
 							=> roaring::RoaringTreemap;
+
+						/// The frequency and length of each document one transaction
+						/// added to a term, beside the `!tx` entry (same `nid` and
+						/// `uid`) that adds it, in the order of that entry's bitmap,
+						/// which names the documents. Written only for an index that
+						/// keeps its postings in blocks, so compaction fills a block
+						/// entry from the change that placed it rather than by
+						/// reading the document's `!dt` and `!dl`. Removed with that
+						/// `!tx` entry.
+						term_change_postings = ["!tf", @, term: Str, @, nid: Uuid, uid: Uuid]
+							=> crate::values::fulltext::ChangePostings;
 
 						/// Document length and count, compacted at the bound and
 						/// accumulated in deltas beneath it.

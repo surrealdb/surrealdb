@@ -454,6 +454,7 @@ impl TestIndexStore {
 			config.hnsw_cache_size,
 			config.diskann_cache_size,
 			config.graph_resolve_cache_size,
+			config.fulltext_cache_size,
 			config.segment_dictionary_path.clone(),
 		);
 		Self {
@@ -514,6 +515,7 @@ impl TestIndexStore {
 			config.hnsw_cache_size,
 			config.diskann_cache_size,
 			config.graph_resolve_cache_size,
+			config.fulltext_cache_size,
 			config.segment_dictionary_path.clone(),
 		);
 		Self {

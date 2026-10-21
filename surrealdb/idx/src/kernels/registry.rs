@@ -61,6 +61,11 @@ kernels! {
 	/// The documents matching a query from its terms' document sets under a
 	/// boolean operator.
 	FullTextCombine = "fulltext.combine";
+	/// A term's compacted documents, with each one's frequency and length,
+	/// from its posting blocks.
+	FullTextPostings = "fulltext.postings";
+	/// The posting-block writes one compaction round's edits to a term come to.
+	FullTextBlockEdit = "fulltext.block_edit";
 	/// The BM25 score of one term in one document.
 	FullTextBm25 = "fulltext.bm25";
 	/// A document's field with the occurrences of a query's terms wrapped.

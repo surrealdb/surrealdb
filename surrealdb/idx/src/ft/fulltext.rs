@@ -11,7 +11,8 @@ use surrealdb_datastore::Transaction;
 // A posting and the index's document statistics are stored values, so both are
 // declared below this layer; the indexing and scoring code here maintains them.
 pub use surrealdb_datastore::values::fulltext::{
-	DocLengthAndCount, DocumentTerms, TermDocsResidual, TermDocument,
+	BlockSummary, ChangePostings, DocLengthAndCount, DocumentTerms, PostingBlock, TermBlocks,
+	TermDocsResidual, TermDocument,
 };
 use surrealdb_kvs::Direction;
 use surrealdb_kvs::consts::COUNT_BATCH_SIZE;
@@ -38,6 +39,7 @@ use crate::ft::analyzer::tokenizer::Tokens;
 use crate::ft::analyzer::{Analyzer, AnalyzerFunction};
 use crate::ft::highlighter::HighlightParams;
 use crate::ft::{DocLength, MatchesHitsIterator, Score, TermFrequency};
+use crate::kernels::postings::{BlockWindow, TermPostings};
 use crate::key::schema::{
 	DocStatsBatchKey, DocStatsDeltaKey, DocStatsKey, TermChangeBatchKey, TermChangeKey,
 	TermDocsResidualKey,
@@ -48,6 +50,23 @@ use crate::val::{RecordId, Value};
 use crate::{
 	CompactionApply, IndexKeyBase, bump_compaction_generation, kernels, read_compaction_generation,
 };
+
+/// One document's frequency of each term a compaction round folds that it
+/// carries, in term order, and its length: what its postings (`!dt`) and
+/// length (`!dl`) hold for the round.
+type StoredDocument = (Vec<(String, TermFrequency)>, DocLength);
+
+/// A document's frequency of a term and its length, as a change carries them.
+type Posting = (TermFrequency, DocLength);
+
+/// The node and transaction ids a change is tagged with.
+type ChangeTags = (Uuid, Uuid);
+
+/// A round's additions or removals of a term, by document: the posting and tags
+/// of its one addition, or the tags of its one removal, `None` for a document
+/// more than one names.
+type OneChange<T> = HashMap<DocId, Option<T>>;
+
 /// Represents the terms in a search query and their associated document sets
 pub struct QueryTerms {
 	/// The tokenized query terms
@@ -59,6 +78,22 @@ pub struct QueryTerms {
 	/// Indicates if any terms in the query are not found in the index
 	#[allow(dead_code)]
 	has_unknown_terms: bool,
+	/// Each term's compacted postings, aligned with `docs`, where the index
+	/// keeps them in blocks: a document no term holds uncompacted state for is
+	/// scored from them.
+	postings: Vec<Option<Arc<TermPostings>>>,
+	/// Whether a term's compacted documents were read from a bitmap, which
+	/// holds no frequency and so bounds no score.
+	bitmaps: bool,
+	/// Every document any of the terms holds uncompacted state for: a change
+	/// not yet folded, one the reading transaction buffered, or a residual.
+	/// Such a document may have been rewritten since the generation the
+	/// node's cache is keyed by, so its stored state is never served from or
+	/// put into the cache ([`crate::ft::cache`]).
+	uncompacted: RoaringTreemap,
+	/// The scope the terms were read at, when the node's cache may serve
+	/// this query.
+	scope: Option<crate::ft::cache::TermScope>,
 }
 
 /// A query's terms, analyzed, and what each reads of the index
@@ -80,8 +115,55 @@ pub struct TermState {
 	pub pending_removed: RoaringTreemap,
 	/// The value at [`kernels::fulltext::TermReads::residual`].
 	pub residual: Option<TermDocsResidual>,
-	/// The value at [`kernels::fulltext::TermReads::bitmap`].
-	pub bitmap: Option<RoaringTreemap>,
+	/// The term's compacted documents, as
+	/// [`kernels::fulltext::TermReads::compacted`] keeps them.
+	pub compacted: Compacted,
+}
+
+/// A term's compacted documents, as the index's format keeps them.
+#[derive(Clone, Default)]
+pub enum Compacted {
+	/// None: the term holds no compacted document.
+	#[default]
+	Absent,
+	/// The value at a [`kernels::fulltext::CompactedReads::Bitmap`] key.
+	Bitmap(RoaringTreemap),
+	/// The blocks a [`kernels::fulltext::CompactedReads::Blocks`] range holds.
+	Postings(Arc<TermPostings>),
+}
+
+impl Compacted {
+	/// The documents a term's compacted bitmap holds, absent for a term with
+	/// none.
+	pub fn from_bitmap(bitmap: Option<RoaringTreemap>) -> Self {
+		bitmap.map_or(Self::Absent, Self::Bitmap)
+	}
+
+	/// The postings `blocks` hold, given in order of start. Fails on a block
+	/// whose bytes do not decode to its entries.
+	pub fn from_blocks(blocks: &[PostingBlock]) -> Result<Self> {
+		if blocks.is_empty() {
+			return Ok(Self::Absent);
+		}
+		Ok(Self::Postings(Arc::new(TermPostings::from_blocks(blocks)?)))
+	}
+
+	/// The compacted document set.
+	fn docs(&self) -> Option<RoaringTreemap> {
+		match self {
+			Self::Absent => None,
+			Self::Bitmap(bitmap) => Some(bitmap.clone()),
+			Self::Postings(postings) => Some(postings.docs().clone()),
+		}
+	}
+
+	/// The postings, where the index keeps them in blocks.
+	fn postings(&self) -> Option<Arc<TermPostings>> {
+		match self {
+			Self::Postings(postings) => Some(Arc::clone(postings)),
+			Self::Absent | Self::Bitmap(_) => None,
+		}
+	}
 }
 
 impl QueryPlan {
@@ -105,6 +187,9 @@ impl QueryPlan {
 			self.terms.len()
 		);
 		let mut docs = Vec::with_capacity(states.len());
+		let mut postings = Vec::with_capacity(states.len());
+		let mut bitmaps = false;
+		let mut uncompacted = RoaringTreemap::new();
 		for state in states {
 			let deltas = kernels::fulltext::term_deltas(&kernels::fulltext::TermChanges {
 				change_keys: &state.change_keys,
@@ -112,20 +197,144 @@ impl QueryPlan {
 				pending_added: &state.pending_added,
 				pending_removed: &state.pending_removed,
 			})?;
-			docs.push(kernels::fulltext::term_docs(state.bitmap, state.residual.as_ref(), deltas));
+			uncompacted.extend(deltas.keys().copied());
+			if let Some(residual) = &state.residual {
+				uncompacted.extend(residual.counts.iter().map(|(doc_id, _)| *doc_id));
+			}
+			bitmaps |= matches!(state.compacted, Compacted::Bitmap(_));
+			postings.push(state.compacted.postings());
+			docs.push(kernels::fulltext::term_docs(
+				state.compacted.docs(),
+				state.residual.as_ref(),
+				deltas,
+			));
 		}
 		let has_unknown_terms = docs.iter().any(Option::is_none);
 		Ok(QueryTerms {
 			tokens: self.tokens,
 			docs,
 			has_unknown_terms,
+			postings,
+			bitmaps,
+			uncompacted,
+			scope: None,
 		})
 	}
 }
 
 impl QueryTerms {
+	/// The terms, read at `scope`: the node's cache may serve their documents'
+	/// stored state.
+	pub fn with_scope(mut self, scope: Option<crate::ft::cache::TermScope>) -> Self {
+		self.scope = scope;
+		self
+	}
+
+	/// These terms, scoring every document from its stored postings and
+	/// bounding no score: for a statement that may rewrite a document after
+	/// reading them, whose blocks then no longer describe it.
+	pub fn scored_as_stored(mut self) -> Self {
+		self.postings.iter_mut().for_each(|postings| *postings = None);
+		self.bitmaps = true;
+		self
+	}
+
+	/// The scope a document's stored state may be cached and served at for
+	/// these terms: `None` for a query the cache does not serve, and for a
+	/// document the terms hold uncompacted state for.
+	fn document_scope(&self, doc_id: DocId) -> Option<&crate::ft::cache::TermScope> {
+		self.scope.as_ref().filter(|_| !self.uncompacted.contains(doc_id))
+	}
+
 	pub fn is_empty(&self) -> bool {
 		self.tokens.list().is_empty()
+	}
+
+	/// Whether the terms hold uncompacted state for document `doc_id`, which
+	/// is then scored from its stored postings rather than from any block.
+	pub fn is_uncompacted(&self, doc_id: DocId) -> bool {
+		self.uncompacted.contains(doc_id)
+	}
+
+	/// Upper bounds on the score `scorer` gives these terms in a document,
+	/// over ranges of doc ids, from the impacts of the terms' posting blocks;
+	/// `None` where no bound holds: a term's compacted documents were read
+	/// from a bitmap, or the scorer's parameters do not make its score rise
+	/// with frequency and fall with length
+	/// ([`kernels::fulltext::Bm25::bounded_by_extremes`]).
+	///
+	/// A range starts at the first document of any term's block and ends at
+	/// the next such start. Its bound sums, over each distinct term, the best
+	/// score among the impacts of the term's block covering the range
+	/// ([`TermPostings::block_impacts`]), so it is at least the score of every
+	/// document in the range that the terms hold no uncompacted state for: such
+	/// a document carries a term only where that term's blocks hold it, at a
+	/// frequency and length one of the block's impacts dominates. It says nothing of an uncompacted
+	/// document ([`Self::is_uncompacted`]).
+	pub fn block_bounds(&self, scorer: &Scorer) -> Option<BlockBounds> {
+		if self.bitmaps || !scorer.bm25.bounded_by_extremes() {
+			return None;
+		}
+		// Each distinct term once, as a document's score takes it.
+		let tl = self.tokens.list();
+		let mut taken = HashSet::new();
+		let mut terms = Vec::new();
+		for (i, docs) in self.docs.iter().enumerate() {
+			let (Some(docs), Some(token)) = (docs, tl.get(i)) else {
+				continue;
+			};
+			let term = self.tokens.get_token_string(token).ok()?;
+			if !taken.insert(term) {
+				continue;
+			}
+			if let Some(postings) = self.postings.get(i).and_then(Option::as_ref) {
+				terms.push((postings, docs.len() as f64));
+			}
+		}
+		// Each term's blocks, scored once: a block's first document and the best score
+		// among its impacts.
+		let scored: Vec<Vec<(DocId, f64)>> = terms
+			.iter()
+			.map(|(postings, n)| {
+				postings
+					.block_impacts()
+					.map(|(first, impacts)| {
+						let best = impacts.iter().fold(0.0f64, |best, (frequency, length)| {
+							best.max(scorer.bm25.score(*frequency as f64, *n, *length as f64))
+						});
+						(first, best)
+					})
+					.collect()
+			})
+			.collect();
+		let mut starts: Vec<DocId> =
+			scored.iter().flat_map(|blocks| blocks.iter().map(|(first, _)| *first)).collect();
+		starts.sort_unstable();
+		starts.dedup();
+		// The ranges in order, each term's block covering a range found by a cursor
+		// that only moves forward.
+		let mut at = vec![0usize; scored.len()];
+		let bounds = starts
+			.iter()
+			.map(|start| {
+				let mut bound = 0.0f64;
+				for (blocks, at) in scored.iter().zip(at.iter_mut()) {
+					while blocks.get(*at + 1).is_some_and(|(first, _)| first <= start) {
+						*at += 1;
+					}
+					if let Some((first, best)) = blocks.get(*at)
+						&& first <= start
+					{
+						bound += best;
+					}
+				}
+				round_up(bound)
+			})
+			.collect();
+		Some(BlockBounds {
+			starts,
+			bounds,
+		})
 	}
 
 	/// Whether the document matches the query under `op`: it carries every
@@ -139,6 +348,11 @@ impl QueryTerms {
 			}
 			BooleanOperator::Or => self.docs.iter().flatten().any(|d| d.contains(doc_id)),
 		}
+	}
+
+	/// Whether document `doc_id` carries any of the query's terms.
+	pub fn carries_any(&self, doc_id: DocId) -> bool {
+		self.docs.iter().flatten().any(|d| d.contains(doc_id))
 	}
 
 	pub(in crate::ft) fn matches_or(&self, tks: &[Tokens]) -> Result<bool> {
@@ -190,6 +404,12 @@ pub struct FullTextIndex {
 	doc_ids: FullTextDocIds,
 	/// BM25 scoring parameters, if scoring is enabled
 	bm25: Option<Bm25Params>,
+	/// Whether the index keeps its terms' compacted documents in posting
+	/// blocks ([`surrealdb_catalog::keeps_posting_blocks`]) rather than in one
+	/// bitmap per term.
+	blocks: bool,
+	/// The node's cache of terms' compacted document sets.
+	cache: Arc<crate::ft::cache::FullTextCache>,
 }
 
 /// The document-ID resolver used by one full-text index.
@@ -256,6 +476,28 @@ impl FullTextDocIds {
 			Self::Legacy => {
 				LegacyFullTextDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone(), ikb.index())
 					.resolve_or_assign(env, id)
+					.await
+			}
+		}
+	}
+
+	/// The record keys of `doc_ids`, in one batched read, in input order;
+	/// `None` in the slot of an id no record maps to.
+	async fn get_record_ids(
+		&self,
+		ikb: &IndexKeyBase,
+		tx: &Transaction,
+		doc_ids: &[DocId],
+	) -> Result<Vec<Option<crate::val::RecordIdKey>>> {
+		match self {
+			Self::Shared => {
+				TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone())
+					.get_record_ids_batch(tx, doc_ids)
+					.await
+			}
+			Self::Legacy => {
+				LegacyFullTextDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone(), ikb.index())
+					.get_record_ids_batch(tx, doc_ids)
 					.await
 			}
 		}
@@ -382,6 +624,11 @@ struct TermDocsCompactionPlan {
 	tt_keys: Vec<TermChangeKey<'static>>,
 	/// The per-transaction `!tx` deltas this snapshot saw.
 	tx_keys: Vec<TermChangeBatchKey<'static>>,
+	/// The documents of each `!tx` entry in `tx_keys`, in the same order, for
+	/// an index that keeps its postings in blocks: an addition's are the
+	/// documents its `!tf` postings pair with, and a removal's tell which
+	/// documents a transaction also removed ([`FullTextIndex::changed_postings`]).
+	batch_docs: Vec<RoaringTreemap>,
 	/// The first term either scan stopped inside, before which every term's
 	/// deltas were captured whole. `None` where both scans reached the end of
 	/// their range, so every term this snapshot names was captured whole.
@@ -471,13 +718,30 @@ impl FullTextIndex {
 			doc_ids: FullTextDocIds::new(format_version),
 			ikb,
 			bm25,
+			blocks: surrealdb_catalog::keeps_posting_blocks(format_version),
+			cache: Arc::clone(ixs.fulltext_cache()),
 		})
 	}
 
-	/// Removes content from the full-text index
+	/// Removes a document's postings, length and term memberships from the
+	/// index, returning its doc id, or `None` for a record with none.
 	///
-	/// This method removes the specified content for a document from the index.
-	/// It returns the document ID if the document was found and removed.
+	/// A removal is recorded only for a term the index holds for the document,
+	/// because a term's changes within one transaction sum: a removal of a term
+	/// the document never carried would cancel the re-addition an `UPDATE`
+	/// records next, and the document would drop out of a term it keeps. So the
+	/// terms come from what the index stored, not from `content`:
+	///
+	/// - the document's `!dt` entry, written for every document indexed since it existed, lists
+	///   them exactly;
+	/// - a document indexed before then has no `!dt` but has a length (`!dl`), and its terms are
+	///   `content` analysed again, which is what was indexed while the analyzer is unchanged;
+	/// - a document with no length was never indexed here — its doc id was assigned for another
+	///   index on the table — so it has nothing to remove.
+	///
+	/// `!dl` is read first because it decides all three: [`Self::index_content`]
+	/// writes `!dt` only beside `!dl`, and this method deletes both together, so
+	/// a document without `!dl` has no `!dt` either.
 	pub(crate) async fn remove_content(
 		&self,
 		env: &dyn IndexEnv,
@@ -486,62 +750,60 @@ impl FullTextIndex {
 		content: Vec<Value>,
 		require_compaction: &mut bool,
 	) -> Result<Option<DocId>> {
-		// Collect the tokens.
-		let tokens =
-			self.analyzer.analyze_content(az_fn, content, FilteringStage::Indexing).await?;
-		let mut set = HashSet::new();
 		let tx = env.tx();
 		let nid = env.node_id();
-		// Get the doc id (if it exists)
-		let doc_id = self.get_doc_id(&tx, rid).await?;
-		if let Some(doc_id) = doc_id {
-			// Where this document's postings live decides what has to be
-			// deleted: one entry for a document written since `!dt` existed, or
-			// the legacy per-term keys for one written before. Both cases still
-			// record a removal per term in the delta log, because the term's
-			// document set is maintained separately from its postings.
-			let has_entry = tx.exists_key(&self.ikb.new_dt(doc_id), None).await?;
-			if has_entry {
-				tx.del_key(&self.ikb.new_dt(doc_id)).await?;
-			}
-			// Delete the terms
-			for tks in &tokens {
-				for t in tks.list() {
-					// Extract the term
-					let s = tks.get_token_string(t)?;
-					// Check if the term has already been deleted
-					if set.insert(s) {
-						if !has_entry {
-							// Delete the legacy per-term posting
-							let key = self.ikb.new_td(s, doc_id);
-							tx.del_key(&key).await?;
+		let Some(doc_id) = self.get_doc_id(&tx, rid).await? else {
+			return Ok(None);
+		};
+		let dl_key = self.ikb.new_dl(doc_id);
+		if let Some(dl) = tx.get_key(&dl_key, None).await? {
+			let dt_key = self.ikb.new_dt(doc_id);
+			if let Some(doc) = tx.get_key(&dt_key, None).await? {
+				tx.del_key(&dt_key).await?;
+				for term in doc.terms.keys() {
+					self.ikb.buffer_tt(
+						&tx,
+						term,
+						doc_id,
+						nid,
+						false,
+						self.blocks.then_some((0, 0)),
+					)?;
+				}
+			} else {
+				let tokens =
+					self.analyzer.analyze_content(az_fn, content, FilteringStage::Indexing).await?;
+				let mut set = HashSet::new();
+				for tks in &tokens {
+					for t in tks.list() {
+						let s = tks.get_token_string(t)?;
+						if set.insert(s) {
+							tx.del_key(&self.ikb.new_td(s, doc_id)).await?;
+							self.ikb.buffer_tt(
+								&tx,
+								s,
+								doc_id,
+								nid,
+								false,
+								self.blocks.then_some((0, 0)),
+							)?;
 						}
-						self.ikb.buffer_tt(&tx, s, doc_id, nid, false)?;
 					}
 				}
 			}
-			{
-				let key = self.ikb.new_dl(doc_id);
-				// get the doc length
-				if let Some(dl) = tx.get_key(&key, None).await? {
-					// Delete the doc length
-					tx.del_key(&key).await?;
-					// Decrease the doc count and total doc length
-					let dcl = DocLengthAndCount {
-						total_docs_length: -(dl as i128),
-						doc_count: -1,
-					};
-					self.ikb.buffer_dx(&tx, dcl, nid);
-					*require_compaction = true;
-				}
-			}
-			if !self.doc_ids.uses_shared() {
-				self.doc_ids.remove_legacy_doc_id(&self.ikb, &tx, doc_id).await?;
-			}
-			Ok(Some(doc_id))
-		} else {
-			Ok(None)
+			tx.del_key(&dl_key).await?;
+			// Decrease the doc count and total doc length
+			let dcl = DocLengthAndCount {
+				total_docs_length: -(dl as i128),
+				doc_count: -1,
+			};
+			self.ikb.buffer_dx(&tx, dcl, nid);
+			*require_compaction = true;
 		}
+		if !self.doc_ids.uses_shared() {
+			self.doc_ids.remove_legacy_doc_id(&self.ikb, &tx, doc_id).await?;
+		}
+		Ok(Some(doc_id))
 	}
 
 	/// Indexes content in the full-text index
@@ -587,11 +849,6 @@ impl FullTextIndex {
 		Ok(())
 	}
 
-	async fn get_doc_length(&self, tx: &Transaction, doc_id: DocId) -> Result<Option<DocLength>> {
-		let key = self.ikb.new_dl(doc_id);
-		tx.get_key(&key, None).await
-	}
-
 	async fn index_with_offsets(
 		&self,
 		nid: &Uuid,
@@ -605,14 +862,15 @@ impl FullTextIndex {
 		// single sort does not.
 		let mut postings = Vec::with_capacity(offsets.len());
 		for (t, o) in offsets {
+			let f = o.len() as TermFrequency;
 			postings.push((
 				t.into(),
 				TermDocument {
-					f: o.len() as TermFrequency,
+					f,
 					o,
 				},
 			));
-			self.ikb.buffer_tt(tx, t, id, *nid, true)?;
+			self.ikb.buffer_tt(tx, t, id, *nid, true, self.blocks.then_some((f, dl)))?;
 		}
 		let doc = DocumentTerms {
 			terms: postings.into_iter().collect(),
@@ -638,7 +896,7 @@ impl FullTextIndex {
 					o: Vec::new(),
 				},
 			));
-			self.ikb.buffer_tt(tx, t, id, *nid, true)?;
+			self.ikb.buffer_tt(tx, t, id, *nid, true, self.blocks.then_some((f, dl)))?;
 		}
 		let doc = DocumentTerms {
 			terms: postings.into_iter().collect(),
@@ -668,13 +926,78 @@ impl FullTextIndex {
 		}
 		let reads = terms
 			.iter()
-			.map(|term| kernels::fulltext::term_reads(&self.ikb, term))
+			.map(|term| kernels::fulltext::term_reads(&self.ikb, term, self.blocks))
 			.collect::<Result<_>>()?;
 		Ok(QueryPlan {
 			tokens,
 			terms,
 			reads,
 		})
+	}
+
+	/// The scope `tx` reads this index's compacted terms at, when the node
+	/// caches them and `tx` may read the cache ([`crate::ft::cache`]).
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::idx::fulltext", skip_all)
+	)]
+	pub async fn term_scope(
+		&self,
+		tx: &Transaction,
+	) -> Result<Option<crate::ft::cache::TermScope>> {
+		if !self.cache.enabled() {
+			return Ok(None);
+		}
+		crate::ft::cache::TermScope::of(tx, &self.ikb).await
+	}
+
+	/// The compacted state of each of `plan`'s terms, its documents and its
+	/// residual, as the node's cache holds it at `scope`, in order; `None` for a
+	/// term the caller reads and hands to [`Self::settle_states`].
+	pub fn cached_states(
+		&self,
+		scope: Option<&crate::ft::cache::TermScope>,
+		plan: &QueryPlan,
+	) -> Vec<Option<(Compacted, Option<TermDocsResidual>)>> {
+		plan.terms
+			.iter()
+			.map(|term| {
+				let cached = self.cache.term(scope?, term)?;
+				Some((cached.compacted.clone(), cached.residual.clone()))
+			})
+			.collect()
+	}
+
+	/// Gives each of `states`, one per term of `plan`, its compacted documents
+	/// and residual: the cached state where `cached` ([`Self::cached_states`])
+	/// holds one, and otherwise the next of `read`, the uncached terms' states
+	/// in order as the caller read them, which is cached at `scope`.
+	pub fn settle_states(
+		&self,
+		scope: Option<&crate::ft::cache::TermScope>,
+		plan: &QueryPlan,
+		states: &mut [TermState],
+		cached: Vec<Option<(Compacted, Option<TermDocsResidual>)>>,
+		read: impl IntoIterator<Item = (Compacted, Option<TermDocsResidual>)>,
+	) -> Result<()> {
+		let mut read = read.into_iter();
+		for ((state, cached), term) in states.iter_mut().zip(cached).zip(&plan.terms) {
+			let (compacted, residual) = match cached {
+				Some(cached) => cached,
+				None => {
+					let (compacted, residual) = read
+						.next()
+						.ok_or_else(|| anyhow::anyhow!("a term's state the read did not answer"))?;
+					if let Some(scope) = scope {
+						self.cache.insert_term(scope, term, compacted.clone(), residual.clone());
+					}
+					(compacted, residual)
+				}
+			};
+			state.compacted = compacted;
+			state.residual = residual;
+		}
+		Ok(())
 	}
 
 	/// The changes to `term` the transaction `tx` buffered and has not yet
@@ -693,6 +1016,10 @@ impl FullTextIndex {
 	///
 	/// The residual and the bitmap are read for every term, not only for
 	/// terms that have changes: see [`kernels::fulltext`].
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::idx::fulltext", skip_all)
+	)]
 	pub async fn extract_querying_terms(
 		&self,
 		env: &dyn IndexEnv,
@@ -712,18 +1039,48 @@ impl FullTextIndex {
 				pending_added,
 				pending_removed,
 				residual: None,
-				bitmap: None,
+				compacted: Compacted::Absent,
 			});
 		}
-		let residual_keys: Vec<_> = plan.terms.iter().map(|t| self.ikb.new_tr_root(t)).collect();
-		let bitmap_keys: Vec<_> = plan.terms.iter().map(|t| self.ikb.new_td_root(t)).collect();
+		// The compacted state of a term the node has cached for this snapshot's
+		// generation is taken from memory; the rest is read, and cached.
+		let scope = self.term_scope(&tx).await?;
+		let cached = self.cached_states(scope.as_ref(), &plan);
+		let missing: Vec<&str> = plan
+			.terms
+			.iter()
+			.zip(&cached)
+			.filter(|(_, cached)| cached.is_none())
+			.map(|(term, _)| term.as_str())
+			.collect();
+		let residual_keys: Vec<_> = missing.iter().map(|term| self.ikb.new_tr_root(term)).collect();
 		let residuals = tx.get_many_key(residual_keys, None).await?;
-		let bitmaps = tx.get_many_key(bitmap_keys, None).await?;
-		for ((state, residual), bitmap) in states.iter_mut().zip(residuals).zip(bitmaps) {
-			state.residual = residual;
-			state.bitmap = bitmap;
+		let mut compacted = Vec::with_capacity(missing.len());
+		if self.blocks {
+			for term in &missing {
+				let blocks: Vec<PostingBlock> = tx
+					.getr(self.ikb.new_tp_term_range(term)?, None)
+					.await?
+					.into_iter()
+					.map(|(_, block)| block)
+					.collect();
+				compacted.push(Compacted::from_blocks(&blocks)?);
+			}
+		} else {
+			let bitmap_keys: Vec<_> =
+				missing.iter().map(|term| self.ikb.new_td_root(term)).collect();
+			compacted.extend(
+				tx.get_many_key(bitmap_keys, None).await?.into_iter().map(Compacted::from_bitmap),
+			);
 		}
-		plan.resolve(states)
+		self.settle_states(
+			scope.as_ref(),
+			&plan,
+			&mut states,
+			cached,
+			compacted.into_iter().zip(residuals),
+		)?;
+		Ok(plan.resolve(states)?.with_scope(scope))
 	}
 
 	pub async fn matches_value(
@@ -797,16 +1154,177 @@ impl FullTextIndex {
 		} else {
 			tx.set_key(&td, &docs).await?;
 		}
+		self.write_residual(tx, term, !carried.is_empty(), false, left_over).await
+	}
+
+	/// Writes what a round left of `term`'s totals as its residual, or removes
+	/// the residual it `carried` where nothing is left. Where `split`, the round
+	/// stopped inside the term, and the residual is written even where it holds
+	/// no total.
+	async fn write_residual(
+		&self,
+		tx: &Transaction,
+		term: &str,
+		carried: bool,
+		split: bool,
+		left_over: Vec<(DocId, i64)>,
+	) -> Result<()> {
 		let tr = self.ikb.new_tr_root(term);
-		if left_over.is_empty() {
+		if left_over.is_empty() && !split {
 			// Only where one is there to remove: the residual is absent for all
 			// but the terms a round stopped inside, and a delete of a key that was
 			// never written is a write nonetheless.
-			if !carried.is_empty() {
+			if carried {
 				tx.del_key(&tr).await?;
 			}
 		} else {
 			tx.set_key(&tr, &TermDocsResidual::new(left_over)).await?;
+		}
+		Ok(())
+	}
+
+	/// [`Self::fold_term_docs`] for an index that keeps its postings in
+	/// blocks: the same totals decide which documents the term's blocks hold,
+	/// and each document they hold takes its frequency of the term and its
+	/// length from `changed`, the posting of the one addition that is its only
+	/// change in the round ([`Self::changed_postings`]), and otherwise from
+	/// `stored`, its postings (`!dt`) and length (`!dl`) as the round read them.
+	/// A round that stops inside the term leaves it a residual, even an empty
+	/// one, after which an addition's posting places only a document the blocks
+	/// do not hold yet.
+	/// The two agree: an addition's posting is what it wrote to `!dt` and `!dl`,
+	/// and a later write to either is a change of its own.
+	///
+	/// A document folded present has its entry put afresh, whether or not the
+	/// blocks held it already: a rewrite of a document records a change for
+	/// every term it carries, so the round that folds that change is the one
+	/// that brings the entry up to date. A document whose stored postings no
+	/// longer carry the term — removed by a change the round did not capture —
+	/// is placed with a frequency of zero, and stays uncompacted until a later
+	/// round folds that change.
+	#[expect(clippy::too_many_arguments, reason = "the round's view of one term")]
+	async fn fold_term_blocks(
+		&self,
+		tx: &Transaction,
+		term: &str,
+		mut totals: HashMap<DocId, i64>,
+		residual: Option<TermDocsResidual>,
+		captured_whole: bool,
+		changed: Option<&HashMap<DocId, Posting>>,
+		stored: &HashMap<DocId, StoredDocument>,
+	) -> Result<()> {
+		let tk = self.ikb.new_tk(term);
+		let listed: Option<TermBlocks> = tx.get_key(&tk, None).await?;
+		let had_blocks = listed.is_some();
+		let mut window = BlockWindow::new(listed);
+
+		let had_residual = residual.is_some();
+		let carried = residual.unwrap_or_default().counts;
+		for (doc_id, count) in carried.iter() {
+			*totals.entry(*doc_id).or_default() += *count;
+		}
+		let starts = window.starts_for(totals.keys().copied());
+		self.load_blocks(tx, term, &mut window, starts).await?;
+		// After a round that stopped inside the term, a document the blocks hold
+		// is read rather than placed from a change (below), and the round read
+		// none a change answered.
+		let mut held_stored = HashMap::new();
+		if had_residual && let Some(changed) = changed {
+			let held: Vec<DocId> =
+				changed.keys().copied().filter(|doc_id| window.contains(*doc_id)).collect();
+			if !held.is_empty() {
+				let term_only = HashSet::from([term.to_owned()]);
+				self.read_stored(tx, held, &term_only, &mut held_stored).await?;
+			}
+		}
+		let mut folded: Vec<(DocId, i64)> = totals.into_iter().collect();
+		folded.sort_unstable();
+		let mut left_over = Vec::new();
+		for (doc_id, total) in folded {
+			let held = window.contains(doc_id);
+			let total = i64::from(held) + total;
+			match 0.cmp(&total) {
+				Ordering::Less => {
+					// From the change that placed the document where that is its
+					// only change, and otherwise from what it stores. After a round
+					// that stopped inside the term, an addition may be older than one
+					// that placed the document, so only one placing it first counts.
+					let changed = changed
+						.and_then(|changed| changed.get(&doc_id))
+						.filter(|_| !(had_residual && held) && carried.get(&doc_id).is_none());
+					let (frequency, length) = match changed {
+						Some(posting) => *posting,
+						None => {
+							let (frequencies, length) = stored
+								.get(&doc_id)
+								.or_else(|| held_stored.get(&doc_id))
+								.map_or((&[][..], 0), |(f, l)| (f.as_slice(), *l));
+							let frequency = frequencies
+								.binary_search_by(|(t, _)| t.as_str().cmp(term))
+								.map_or(0, |at| frequencies[at].1);
+							(frequency, length)
+						}
+					};
+					window.put(doc_id, frequency, length);
+					if !captured_whole && total > 1 {
+						left_over.push((doc_id, total - 1));
+					}
+				}
+				Ordering::Greater => {
+					window.remove(doc_id);
+					if !captured_whole {
+						left_over.push((doc_id, total));
+					}
+				}
+				Ordering::Equal => {
+					window.remove(doc_id);
+					// Changes newer than an addition a later round folds may net to
+					// nothing here; the residual names the document so that round
+					// reads it rather than taking the older addition's posting.
+					if !captured_whole {
+						left_over.push((doc_id, 0));
+					}
+				}
+			}
+		}
+		let partners = window.merge_partners();
+		self.load_blocks(tx, term, &mut window, partners).await?;
+
+		let (writes, blocks) = window.finish();
+		for (start, block) in writes {
+			let key = self.ikb.new_tp(term, start);
+			match block {
+				Some(block) => tx.set_key(&key, &block).await?,
+				None => tx.del_key(&key).await?,
+			}
+		}
+		match blocks {
+			Some(blocks) => tx.set_key(&tk, &blocks).await?,
+			None if had_blocks => tx.del_key(&tk).await?,
+			None => {}
+		}
+		// A round that stops inside the term leaves a residual even where no total
+		// is left over, so the next round knows an addition it folds may be older
+		// than one this round placed ([`Self::changed_postings`]).
+		self.write_residual(tx, term, had_residual, !captured_whole, left_over).await
+	}
+
+	/// Loads `term`'s blocks starting at `starts` into `window`, in one batched
+	/// read. A block its list names that is not stored loads as an empty one.
+	async fn load_blocks(
+		&self,
+		tx: &Transaction,
+		term: &str,
+		window: &mut BlockWindow,
+		starts: std::collections::BTreeSet<DocId>,
+	) -> Result<()> {
+		if starts.is_empty() {
+			return Ok(());
+		}
+		let keys = starts.iter().map(|start| self.ikb.new_tp(term, *start)).collect();
+		let blocks: Vec<Option<PostingBlock>> = tx.get_many_key(keys, None).await?;
+		for (start, block) in starts.into_iter().zip(blocks) {
+			window.load(start, &block.unwrap_or_default())?;
 		}
 		Ok(())
 	}
@@ -829,6 +1347,7 @@ impl FullTextIndex {
 		let limit = limit.max(1);
 		let mut tt_keys = Vec::new();
 		let mut tx_keys = Vec::new();
+		let mut batch_docs = Vec::new();
 		let mut deltas_by_term: HashMap<String, HashMap<DocId, i64>> = HashMap::new();
 		// Both delta shapes are drained in one pass, so an index carrying entries in
 		// either shape compacts to the same document set. Either family having more
@@ -940,6 +1459,9 @@ impl FullTextIndex {
 				for doc_id in &docs {
 					*by_doc.entry(doc_id).or_default() += step;
 				}
+				if self.blocks {
+					batch_docs.push(docs);
+				}
 				tx_keys.push(tx_key.into_owned());
 				if last {
 					// Rows after this one in the page are entries this round did not reach.
@@ -1026,6 +1548,7 @@ impl FullTextIndex {
 			deltas_by_term,
 			tt_keys,
 			tx_keys,
+			batch_docs,
 			captured_below,
 			standalone_residuals,
 			has_more,
@@ -1088,15 +1611,221 @@ impl FullTextIndex {
 		// round folds as many terms as its budget allows, and all but the term it
 		// stopped inside and the standalone residuals have no residual to read.
 		let keys: Vec<_> = folded.iter().map(|(term, ..)| self.ikb.new_tr_root(term)).collect();
-		let residuals = tx.get_many_key(keys, None).await?;
-		for ((term, deltas, captured_whole), residual) in folded.into_iter().zip(residuals) {
-			self.fold_term_docs(tx, &term, deltas, residual, captured_whole).await?;
+		let residuals: Vec<Option<TermDocsResidual>> = tx.get_many_key(keys, None).await?;
+		if self.blocks {
+			let changed = self.changed_postings(tx, &plan, &folded).await?;
+			let terms: HashSet<String> = folded.iter().map(|(term, ..)| term.clone()).collect();
+			let stored = self.stored_postings(tx, &folded, &residuals, &changed, &terms).await?;
+			for ((term, deltas, captured_whole), residual) in folded.into_iter().zip(residuals) {
+				let changed = changed.get(&term);
+				self.fold_term_blocks(
+					tx,
+					&term,
+					deltas,
+					residual,
+					captured_whole,
+					changed,
+					&stored,
+				)
+				.await?;
+			}
+			for key in plan.tx_keys.iter().filter(|key| key.add) {
+				tx.del_key(&self.ikb.new_tf(&key.term, key.nid, key.uid)).await?;
+			}
+		} else {
+			for ((term, deltas, captured_whole), residual) in folded.into_iter().zip(residuals) {
+				self.fold_term_docs(tx, &term, deltas, residual, captured_whole).await?;
+			}
 		}
 		for key in &plan.tt_keys {
 			tx.del_key(key).await?;
 		}
 		for key in &plan.tx_keys {
 			tx.del_key(key).await?;
+		}
+		Ok(())
+	}
+
+	/// The postings the round's additions carry (`!tf`), by term, for each
+	/// document whose only changes to the term in the round are one such
+	/// addition and, at most, a removal by the same transaction: its total is
+	/// one, or zero for a transaction that kept the term (removed it and gave it
+	/// back), and no other change or per-document change (`!tt`) names it.
+	/// Every addition to an index that keeps its postings in blocks carries its
+	/// posting, so such a document's current posting is that addition's.
+	///
+	/// Additions to a term are ordered by node rather than by time, but a
+	/// snapshot that sees an addition sees every earlier one, so an addition is
+	/// folded after a later one only where a round stopped inside the term
+	/// between them, and such a round leaves the term a residual. In a term
+	/// holding none, an addition folded alone is the document's newest. In one
+	/// holding a residual, it is only where the term's blocks do not hold the
+	/// document yet, so no later addition has placed it
+	/// ([`Self::fold_term_blocks`]).
+	async fn changed_postings(
+		&self,
+		tx: &Transaction,
+		plan: &TermDocsCompactionPlan,
+		folded: &[(String, HashMap<DocId, i64>, bool)],
+	) -> Result<HashMap<String, HashMap<DocId, Posting>>> {
+		let batches = || plan.tx_keys.iter().zip(&plan.batch_docs);
+		let additions: Vec<(&TermChangeBatchKey<'static>, &RoaringTreemap)> =
+			batches().filter(|(key, _)| key.add).collect();
+		if additions.is_empty() {
+			return Ok(HashMap::new());
+		}
+		let postings: Vec<Option<ChangePostings>> = tx
+			.get_many_key(
+				additions
+					.iter()
+					.map(|(key, _)| self.ikb.new_tf(&key.term, key.nid, key.uid))
+					.collect(),
+				None,
+			)
+			.await?;
+		// The posting and transaction of each document's one addition, `None`
+		// for a document more than one addition names.
+		let mut found: HashMap<&str, OneChange<(Posting, ChangeTags)>> = HashMap::new();
+		for ((key, docs), batch) in additions.into_iter().zip(postings) {
+			let by_doc = found.entry(key.term.as_ref()).or_default();
+			// An addition whose postings are missing or do not pair one for one
+			// with its documents tells nothing of them, and it is still one of the
+			// additions that name them: they are read from what they store.
+			let postings = match batch {
+				Some(batch) => {
+					let postings = batch.postings();
+					if postings.as_ref().is_none_or(|postings| postings.len() as u64 != docs.len())
+					{
+						tracing::warn!(
+							target: "surrealdb::idx::fulltext",
+							"Full-text index {} on table {} holds change postings that do not pair \
+							 with their change ({} documents, {} postings); reading the documents",
+							self.ikb.index().0,
+							self.ikb.table(),
+							docs.len(),
+							batch.len(),
+						);
+						None
+					} else {
+						postings
+					}
+				}
+				None => None,
+			};
+			let Some(postings) = postings else {
+				for doc_id in docs {
+					by_doc.insert(doc_id, None);
+				}
+				continue;
+			};
+			for (doc_id, posting) in docs.iter().zip(postings) {
+				// A frequency of zero: the transaction's last change to the
+				// document carried no posting.
+				let posting = (posting.0 > 0).then_some((posting, (key.nid, key.uid)));
+				by_doc.entry(doc_id).and_modify(|added| *added = None).or_insert(posting);
+			}
+		}
+		// The transaction of each document's one removal, `None` for a document
+		// more than one removal names.
+		let mut removed: HashMap<&str, OneChange<ChangeTags>> = HashMap::new();
+		for (key, docs) in batches().filter(|(key, _)| !key.add) {
+			let by_doc = removed.entry(key.term.as_ref()).or_default();
+			for doc_id in docs {
+				by_doc
+					.entry(doc_id)
+					.and_modify(|tags| *tags = None)
+					.or_insert(Some((key.nid, key.uid)));
+			}
+		}
+		for key in &plan.tt_keys {
+			if let Some(added) =
+				found.get_mut(key.term.as_ref()).and_then(|by_doc| by_doc.get_mut(&key.doc_id))
+			{
+				*added = None;
+			}
+		}
+		let totals_by_term: HashMap<&str, &HashMap<DocId, i64>> =
+			folded.iter().map(|(term, totals, _)| (term.as_str(), totals)).collect();
+		Ok(found
+			.into_iter()
+			.map(|(term, by_doc)| {
+				let totals = totals_by_term.get(term);
+				let removed = removed.get(term);
+				let by_doc = by_doc
+					.into_iter()
+					.filter_map(|(doc_id, added)| {
+						let (posting, tags) = added?;
+						let total = totals.and_then(|totals| totals.get(&doc_id));
+						let removal = removed.and_then(|removed| removed.get(&doc_id));
+						let alone = match (total, removal) {
+							(Some(1), None) => true,
+							(Some(0), Some(Some(removed_by))) => *removed_by == tags,
+							_ => false,
+						};
+						alone.then_some((doc_id, posting))
+					})
+					.collect();
+				(term.to_owned(), by_doc)
+			})
+			.collect())
+	}
+
+	/// The stored postings and length of every document `folded` or
+	/// `residuals` name that `changed` does not answer for the term, read in
+	/// one batch of each, for the entries a round puts in posting blocks. A
+	/// document with no stored postings or length reads as having none.
+	async fn stored_postings(
+		&self,
+		tx: &Transaction,
+		folded: &[(String, HashMap<DocId, i64>, bool)],
+		residuals: &[Option<TermDocsResidual>],
+		changed: &HashMap<String, HashMap<DocId, Posting>>,
+		terms: &HashSet<String>,
+	) -> Result<HashMap<DocId, StoredDocument>> {
+		let mut doc_ids: Vec<DocId> = folded
+			.iter()
+			.flat_map(|(term, deltas, _)| {
+				let changed = changed.get(term);
+				deltas.keys().copied().filter(move |doc_id| {
+					changed.is_none_or(|changed| !changed.contains_key(doc_id))
+				})
+			})
+			.chain(residuals.iter().flatten().flat_map(|r| r.counts.iter().map(|(id, _)| *id)))
+			.collect();
+		doc_ids.sort_unstable();
+		doc_ids.dedup();
+		let mut stored = HashMap::with_capacity(doc_ids.len());
+		self.read_stored(tx, doc_ids, terms, &mut stored).await?;
+		Ok(stored)
+	}
+
+	/// Reads the postings and length of each of `doc_ids` into `stored`,
+	/// keeping each document's frequency of the round's `terms` only, in one
+	/// batched read of each. A document with no stored postings or length
+	/// reads as having none.
+	async fn read_stored(
+		&self,
+		tx: &Transaction,
+		doc_ids: Vec<DocId>,
+		terms: &HashSet<String>,
+		stored: &mut HashMap<DocId, StoredDocument>,
+	) -> Result<()> {
+		let lengths: Vec<Option<DocLength>> =
+			tx.get_many_key(doc_ids.iter().map(|id| self.ikb.new_dl(*id)).collect(), None).await?;
+		let postings: Vec<Option<DocumentTerms>> =
+			tx.get_many_key(doc_ids.iter().map(|id| self.ikb.new_dt(*id)).collect(), None).await?;
+		for ((doc_id, length), postings) in doc_ids.into_iter().zip(lengths).zip(postings) {
+			// In term order, as the entry keeps them, so a lookup can search.
+			let frequencies = postings
+				.map(|doc| {
+					doc.terms
+						.iter()
+						.filter(|(term, _)| terms.contains(term.as_str()))
+						.map(|(term, posting)| (term.as_str().to_owned(), posting.f))
+						.collect()
+				})
+				.unwrap_or_default();
+			stored.insert(doc_id, (frequencies, length.unwrap_or_default()));
 		}
 		Ok(())
 	}
@@ -1359,12 +2088,18 @@ impl FullTextIndex {
 
 	/// Each of the query's terms that document `doc_id` carries, in query
 	/// order, with its offsets in the document.
+	///
+	/// A document in none of the terms' document sets carries none of them,
+	/// so it is answered without reading its postings.
 	async fn term_hits(
 		&self,
 		tx: &Transaction,
 		doc_id: DocId,
 		qt: &QueryTerms,
 	) -> Result<Vec<kernels::fulltext::TermHit>> {
+		if !qt.carries_any(doc_id) {
+			return Ok(Vec::new());
+		}
 		let mut hits = Vec::new();
 		let mut loaded = self.get_document_terms(tx, doc_id).await?;
 		for tk in qt.tokens.list() {
@@ -1379,26 +2114,19 @@ impl FullTextIndex {
 		Ok(hits)
 	}
 
-	/// Highlights search terms in a document
-	///
-	/// This method highlights the occurrences of search terms in the document
-	/// value. It uses the provided highlighting parameters to format the
-	/// highlighted text.
-	pub async fn highlight(
+	/// Highlights the occurrences of the query's terms in the document `doc_id`,
+	/// as this index numbers it, whose value is `doc`, formatted as `hlp` asks.
+	pub async fn highlight_doc(
 		&self,
 		tx: &Transaction,
-		thg: &RecordId,
+		doc_id: DocId,
 		qt: &QueryTerms,
 		hlp: HighlightParams,
 		idiom: &Idiom,
 		doc: &Value,
 	) -> Result<Value> {
-		let doc_id = self.get_doc_id(tx, thg).await?;
-		if let Some(doc_id) = doc_id {
-			let hits = self.term_hits(tx, doc_id, qt).await?;
-			return kernels::fulltext::highlight(&hlp, idiom, doc, &hits);
-		}
-		Ok(Value::None)
+		let hits = self.term_hits(tx, doc_id, qt).await?;
+		kernels::fulltext::highlight(&hlp, idiom, doc, &hits)
 	}
 
 	/// One document's posting for one term.
@@ -1456,19 +2184,17 @@ impl FullTextIndex {
 		}
 	}
 
-	pub async fn read_offsets(
+	/// The offsets of the query's terms in the document `doc_id`, as this index
+	/// numbers it.
+	pub async fn read_offsets_doc(
 		&self,
 		tx: &Transaction,
-		thg: &RecordId,
+		doc_id: DocId,
 		qt: &QueryTerms,
 		partial: bool,
 	) -> Result<Value> {
-		let doc_id = self.get_doc_id(tx, thg).await?;
-		if let Some(doc_id) = doc_id {
-			let hits = self.term_hits(tx, doc_id, qt).await?;
-			return Ok(kernels::fulltext::offsets(partial, &hits));
-		}
-		Ok(Value::None)
+		let hits = self.term_hits(tx, doc_id, qt).await?;
+		Ok(kernels::fulltext::offsets(partial, &hits))
 	}
 }
 
@@ -1494,6 +2220,37 @@ impl FullTextHitsIterator {
 			doc_ids,
 			iter: hits.into_iter(),
 		}
+	}
+}
+
+impl FullTextHitsIterator {
+	/// The doc ids of up to `limit` hits not yet taken, in doc-id order; empty
+	/// once the hits have run out.
+	pub fn take_doc_ids(&mut self, limit: usize) -> Vec<DocId> {
+		self.iter.by_ref().take(limit).collect()
+	}
+
+	/// The record each of `doc_ids` maps to, in order, in one batched read;
+	/// `None` for a doc id whose mapping is gone.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::idx::fulltext", skip_all, fields(docs = doc_ids.len()))
+	)]
+	pub async fn records(
+		&self,
+		tx: &Transaction,
+		doc_ids: &[DocId],
+	) -> Result<Vec<Option<RecordId>>> {
+		let keys = self.doc_ids.get_record_ids(&self.ikb, tx, doc_ids).await?;
+		Ok(keys
+			.into_iter()
+			.map(|key| {
+				key.map(|key| RecordId {
+					table: self.ikb.table().clone(),
+					key,
+				})
+			})
+			.collect())
 	}
 }
 
@@ -1525,6 +2282,40 @@ impl MatchesHitsIterator for FullTextHitsIterator {
 	}
 }
 
+/// Upper bounds on the score of a query's terms over ranges of doc ids
+/// ([`QueryTerms::block_bounds`]).
+pub struct BlockBounds {
+	/// Where each range starts, in order.
+	starts: Vec<DocId>,
+	/// Each range's bound.
+	bounds: Vec<f32>,
+}
+
+impl BlockBounds {
+	/// The bound on the score of a document at `doc_id` the terms hold no
+	/// uncompacted state for; `None` before every range, where no such
+	/// document carries a term.
+	pub fn bound(&self, doc_id: DocId) -> Option<f32> {
+		let at = self.starts.partition_point(|start| *start <= doc_id);
+		at.checked_sub(1).map(|at| self.bounds[at])
+	}
+}
+
+/// `bound` as the `f32` a score is compared in, at or above every score it
+/// bounds.
+///
+/// A score is summed in `f64` and narrowed to the nearest `f32`, and narrowing
+/// to the nearest never orders two values the other way, so a bound at or
+/// above a score in `f64` stays at or above it once both are narrowed. The
+/// bound is first raised by a few units of `f64` rounding, so a logarithm the
+/// platform rounds differently for two near inputs cannot leave a dominated
+/// document's score above it. A document whose own frequency and length set
+/// the bound computes the same `f64` and so mostly narrows to the same `f32`,
+/// which a single-key order's tie then passes over.
+fn round_up(bound: f64) -> f32 {
+	(bound * (1.0 + 8.0 * f64::EPSILON)) as f32
+}
+
 /// Implements BM25 scoring for relevance ranking of search results
 pub struct Scorer {
 	bm25: kernels::fulltext::Bm25,
@@ -1552,6 +2343,10 @@ impl Scorer {
 	/// This method computes the sum of BM25 scores for all matching terms in
 	/// the document. The score represents the relevance of the document to the
 	/// query.
+	///
+	/// A document carrying none of the terms scores zero, answered without
+	/// reading its length or postings: a row another clause of an `OR`
+	/// produced reaches this clause's score that way.
 	pub async fn score(
 		&self,
 		fti: &FullTextIndex,
@@ -1559,21 +2354,179 @@ impl Scorer {
 		qt: &QueryTerms,
 		doc_id: DocId,
 	) -> Result<Score> {
+		if !qt.carries_any(doc_id) {
+			return Ok(0.0);
+		}
+		if let Some(score) = self.score_from_postings(qt, doc_id)? {
+			return Ok(score);
+		}
+		let documents = Self::stored_documents(fti, tx, qt, &[doc_id]).await?;
+		let document = documents
+			.first()
+			.ok_or_else(|| anyhow::anyhow!("a document the read did not answer"))?;
+		self.score_loaded(fti, tx, qt, doc_id, document.length, document.terms.as_ref()).await
+	}
+
+	/// [`Self::score`] of each of `doc_ids`, in input order, reading the
+	/// lengths and postings of the documents that carry a term in two batched
+	/// reads rather than two point reads per document, or from the node's
+	/// cache where it may serve them.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::idx::fulltext", skip_all, fields(docs = doc_ids.len()))
+	)]
+	pub async fn score_batch(
+		&self,
+		fti: &FullTextIndex,
+		tx: &Transaction,
+		qt: &QueryTerms,
+		doc_ids: &[DocId],
+	) -> Result<Vec<Score>> {
+		let mut scored = HashMap::with_capacity(doc_ids.len());
+		let mut carriers = Vec::new();
+		for doc_id in doc_ids.iter().copied().filter(|doc_id| qt.carries_any(*doc_id)) {
+			match self.score_from_postings(qt, doc_id)? {
+				Some(score) => {
+					scored.insert(doc_id, score);
+				}
+				None => carriers.push(doc_id),
+			}
+		}
+		if carriers.is_empty() {
+			return Ok(doc_ids
+				.iter()
+				.map(|doc_id| scored.get(doc_id).copied().unwrap_or(0.0))
+				.collect());
+		}
+		let documents = Self::stored_documents(fti, tx, qt, &carriers).await?;
+		for (doc_id, document) in carriers.into_iter().zip(documents) {
+			let score = self
+				.score_loaded(fti, tx, qt, doc_id, document.length, document.terms.as_ref())
+				.await?;
+			scored.insert(doc_id, score);
+		}
+		Ok(doc_ids.iter().map(|doc_id| scored.get(doc_id).copied().unwrap_or(0.0)).collect())
+	}
+
+	/// The length and postings of each of `doc_ids`, in order: from the node's
+	/// cache where the terms' scope lets it serve the document
+	/// ([`QueryTerms::document_scope`]), and otherwise read, the lengths and
+	/// the postings of the misses in one batched read each, and cached where
+	/// the scope lets them be.
+	async fn stored_documents(
+		fti: &FullTextIndex,
+		tx: &Transaction,
+		qt: &QueryTerms,
+		doc_ids: &[DocId],
+	) -> Result<Vec<Arc<crate::ft::cache::StoredDocument>>> {
+		let mut documents: Vec<Option<Arc<crate::ft::cache::StoredDocument>>> = doc_ids
+			.iter()
+			.map(|doc_id| {
+				qt.document_scope(*doc_id).and_then(|scope| fti.cache.document(scope, *doc_id))
+			})
+			.collect();
+		let missing: Vec<usize> =
+			(0..doc_ids.len()).filter(|at| documents[*at].is_none()).collect();
+		if !missing.is_empty() {
+			let lengths: Vec<Option<DocLength>> = tx
+				.get_many_key(missing.iter().map(|at| fti.ikb.new_dl(doc_ids[*at])).collect(), None)
+				.await?;
+			let postings: Vec<Option<DocumentTerms>> = tx
+				.get_many_key(missing.iter().map(|at| fti.ikb.new_dt(doc_ids[*at])).collect(), None)
+				.await?;
+			for ((at, length), terms) in missing.into_iter().zip(lengths).zip(postings) {
+				let document = Arc::new(crate::ft::cache::StoredDocument {
+					length,
+					terms,
+				});
+				if let Some(scope) = qt.document_scope(doc_ids[at]) {
+					fti.cache.insert_document(scope, doc_ids[at], Arc::clone(&document));
+				}
+				documents[at] = Some(document);
+			}
+		}
+		Ok(documents.into_iter().flatten().collect())
+	}
+
+	/// The score of document `doc_id` from the posting blocks of the terms
+	/// that carry it, or `None` where they cannot answer it alone: the terms
+	/// hold uncompacted state for the document, or one of the terms carrying it
+	/// keeps no block entry for it with a frequency.
+	///
+	/// A block entry holds the frequency and length the document's postings
+	/// (`!dt`) and length (`!dl`) held when compaction placed it, and a
+	/// document rewritten since holds uncompacted state for every term it
+	/// carries, so the score equals [`Self::score_loaded`]'s, term for term and
+	/// in the same order.
+	fn score_from_postings(&self, qt: &QueryTerms, doc_id: DocId) -> Result<Option<Score>> {
+		if qt.uncompacted.contains(doc_id) {
+			return Ok(None);
+		}
 		let mut sc = 0.0;
 		let tl = qt.tokens.list();
-		let doc_length = fti.get_doc_length(tx, doc_id).await?.unwrap_or(0) as f64;
-		// The document's postings, read once for the whole query rather than
-		// once per term: the entry carries every term the document holds.
-		let mut loaded = fti.get_document_terms(tx, doc_id).await?;
+		let mut taken = HashSet::new();
+		for (i, d) in qt.docs.iter().enumerate() {
+			if let Some(docs) = d
+				&& docs.contains(doc_id)
+				&& let Some(token) = tl.get(i)
+			{
+				let Some((frequency, length)) =
+					qt.postings.get(i).and_then(Option::as_ref).and_then(|p| p.entry(doc_id))
+				else {
+					return Ok(None);
+				};
+				if frequency == 0 {
+					return Ok(None);
+				}
+				let term = qt.tokens.get_token_string(token)?;
+				if taken.insert(term) {
+					sc += self.bm25.score(frequency as f64, docs.len() as f64, length as f64);
+				}
+			}
+		}
+		Ok(Some(sc as f32))
+	}
+
+	/// The score of document `doc_id`, of length `doc_length`, from its
+	/// postings entry `loaded`; `None` for a document whose postings predate
+	/// the per-document entry, which are read per term.
+	///
+	/// A term the query repeats is taken from the entry once, as a posting
+	/// moved out of it would be; a per-term read answers it each time.
+	async fn score_loaded(
+		&self,
+		fti: &FullTextIndex,
+		tx: &Transaction,
+		qt: &QueryTerms,
+		doc_id: DocId,
+		doc_length: Option<DocLength>,
+		loaded: Option<&DocumentTerms>,
+	) -> Result<Score> {
+		let mut sc = 0.0;
+		let tl = qt.tokens.list();
+		let doc_length = doc_length.unwrap_or(0) as f64;
+		let mut taken = HashSet::new();
 		for (i, d) in qt.docs.iter().enumerate() {
 			if let Some(docs) = d
 				&& docs.contains(doc_id)
 				&& let Some(token) = tl.get(i)
 			{
 				let term = qt.tokens.get_token_string(token)?;
-				let td = fti.take_term_document(tx, doc_id, &mut loaded, term).await?;
-				if let Some(td) = td {
-					sc += self.bm25.score(td.f as f64, docs.len() as f64, doc_length)
+				let frequency = match loaded {
+					Some(doc) => {
+						if taken.insert(term) {
+							doc.terms.get(term).map(|td| td.f)
+						} else {
+							None
+						}
+					}
+					None => tx
+						.get_key(&fti.ikb.new_td(term, doc_id), None)
+						.await?
+						.map(|td: TermDocument| td.f),
+				};
+				if let Some(frequency) = frequency {
+					sc += self.bm25.score(frequency as f64, docs.len() as f64, doc_length)
 				}
 			}
 		}
@@ -1668,6 +2621,8 @@ mod tests {
 	use crate::catalog::{AnalyzerDefinition, DatabaseId, FullTextParams, IndexId, NamespaceId};
 	use crate::expr::Tokenizer;
 	#[cfg(feature = "cjk-embed-korean")]
+	use crate::expr::operator::BooleanOperator;
+	#[cfg(feature = "cjk-embed-korean")]
 	use crate::expr::tokenizer::SegmentLanguage;
 	use crate::ft::analyzer::{AnalyzerFunction, BoxAnalyzerFut};
 	use crate::ft::offset::Offset;
@@ -1712,6 +2667,15 @@ mod tests {
 		/// by the caller. The default corpus is still what `index_doc` writes;
 		/// a test wanting different text passes it to `index_batch_in_one_tx`.
 		async fn with_analyzer(highlight: bool, tokenizers: Vec<Tokenizer>) -> Self {
+			Self::build(highlight, tokenizers, crate::catalog::DOC_IDS_FORMAT_VERSION).await
+		}
+
+		/// An index stamped with `format_version`, without highlights.
+		async fn at_format(format_version: u16) -> Self {
+			Self::build(false, vec![Tokenizer::Blank], format_version).await
+		}
+
+		async fn build(highlight: bool, tokenizers: Vec<Tokenizer>, format_version: u16) -> Self {
 			let ds = TestIndexStore::new().await;
 			let tx = ds.env(TransactionType::Write).await.tx();
 			// `DEFINE ANALYZER test TOKENIZERS blank`, as the definition the
@@ -1772,7 +2736,7 @@ mod tests {
 					ikb.clone(),
 					&ft_params,
 					&[],
-					crate::catalog::DOC_IDS_FORMAT_VERSION,
+					format_version,
 				)
 				.await
 				.unwrap(),
@@ -2002,6 +2966,434 @@ mod tests {
 				all
 			})
 		}
+	}
+
+	impl TestContext {
+		/// Rewrites `rid` from `old` to `new` in one transaction: an index of a
+		/// new document where `old` is `None`, a removal where `new` is.
+		async fn rewrite(&self, rid: &RecordId, old: Option<&str>, new: Option<&str>) {
+			let ctx = self.ds.env(TransactionType::Write).await;
+			let tx = ctx.tx();
+			let az_fn = NoAnalyzerFunction;
+			let mut require_compaction = false;
+			if let Some(old) = old {
+				self.fti
+					.remove_content(
+						&ctx,
+						&az_fn,
+						rid,
+						vec![Value::from(old)],
+						&mut require_compaction,
+					)
+					.await
+					.unwrap();
+			}
+			if let Some(new) = new {
+				self.fti
+					.index_content(
+						&ctx,
+						&az_fn,
+						rid,
+						vec![Value::from(new)],
+						&mut require_compaction,
+					)
+					.await
+					.unwrap();
+			}
+			tx.commit().await.unwrap();
+		}
+
+		/// Every document's score for `query`, by record, as a read sees it.
+		async fn scores(&self, query: &str, rids: &[RecordId]) -> Vec<(String, u32)> {
+			let (ctx, tx) = self.new_read_env().await;
+			let az_fn = NoAnalyzerFunction;
+			let qt = self.fti.extract_querying_terms(&ctx, &az_fn, query.to_owned()).await.unwrap();
+			let scorer = self.fti.new_scorer(&ctx).await.unwrap().expect("a BM25 index");
+			let mut scored = Vec::new();
+			for rid in rids {
+				if let Some(doc_id) = self.fti.get_doc_id(&tx, rid).await.unwrap() {
+					let score = scorer.score(&self.fti, &tx, &qt, doc_id).await.unwrap();
+					if score != 0.0 {
+						scored.push((format!("{rid:?}"), score.to_bits()));
+					}
+				}
+			}
+			tx.cancel().await.unwrap();
+			scored
+		}
+	}
+
+	/// An index keeping its postings in blocks scores every document exactly
+	/// as one keeping a bitmap per term, through documents being indexed,
+	/// rewritten and removed, and compaction rounds too small to fold a term
+	/// whole, which leave residuals and changes behind.
+	#[test(tokio::test)]
+	async fn posting_blocks_score_as_the_bitmap_index() {
+		let bitmaps = TestContext::at_format(crate::catalog::DOC_IDS_FORMAT_VERSION).await;
+		let blocks =
+			TestContext::at_format(crate::catalog::FULLTEXT_POSTING_BLOCKS_FORMAT_VERSION).await;
+		let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+		let mut next = move |bound: u64| {
+			seed ^= seed << 13;
+			seed ^= seed >> 7;
+			seed ^= seed << 17;
+			seed % bound
+		};
+		let words = ["alpha", "beta", "gamma", "delta", "omega", "zeta", "theta", "kappa"];
+		let rids: Vec<RecordId> =
+			(0..120).map(|i| RecordId::new("t".into(), format!("d{i}"))).collect();
+		let mut held: Vec<Option<String>> = vec![None; rids.len()];
+		let queries = ["alpha", "beta gamma", "omega", "kappa theta delta"];
+		for step in 0..40 {
+			for _ in 0..25 {
+				let at = next(rids.len() as u64) as usize;
+				let new = (next(5) > 0).then(|| {
+					let len = 1 + next(12);
+					(0..len)
+						.map(|_| words[next(words.len() as u64) as usize])
+						.collect::<Vec<_>>()
+						.join(" ")
+				});
+				let old = held[at].clone();
+				for test in [&bitmaps, &blocks] {
+					test.rewrite(&rids[at], old.as_deref(), new.as_deref()).await;
+				}
+				held[at] = new;
+			}
+			// Rounds of a few entries leave terms captured in part.
+			if step % 3 != 2 {
+				for test in [&bitmaps, &blocks] {
+					let tx = test.new_tx(TransactionType::Write).await;
+					let plan =
+						test.fti.prepare_term_docs_compaction_with_limit(&tx, 7).await.unwrap();
+					test.fti.apply_term_docs_compaction(&tx, plan).await.unwrap();
+					tx.commit().await.unwrap();
+				}
+			} else {
+				for test in [&bitmaps, &blocks] {
+					test.drain_term_docs(13).await;
+				}
+			}
+			for query in queries {
+				assert_eq!(
+					blocks.scores(query, &rids).await,
+					bitmaps.scores(query, &rids).await,
+					"step {step}, `{query}`"
+				);
+			}
+		}
+	}
+
+	/// Compaction fills a block entry from the change that placed the document,
+	/// which carries its frequency and length (`!tf`), not by reading the
+	/// document: an entry is right with the document's `!dt` and `!dl` gone, and
+	/// no change's postings outlive the round that folds it.
+	#[test(tokio::test)]
+	async fn a_block_entry_is_filled_from_the_change_that_placed_it() {
+		let test =
+			TestContext::at_format(crate::catalog::FULLTEXT_POSTING_BLOCKS_FORMAT_VERSION).await;
+		let rid = RecordId::new("t".into(), "d1".to_owned());
+		test.rewrite(&rid, None, Some("hello hello world")).await;
+		let tx = test.new_tx(TransactionType::Write).await;
+		let doc_id = test.fti.get_doc_id(&tx, &rid).await.unwrap().expect("indexed");
+		tx.del_key(&test.ikb.new_dt(doc_id)).await.unwrap();
+		tx.del_key(&test.ikb.new_dl(doc_id)).await.unwrap();
+		tx.commit().await.unwrap();
+		test.drain_term_docs(1024).await;
+		let tx = test.new_tx(TransactionType::Read).await;
+		let listed: super::TermBlocks =
+			tx.get_key(&test.ikb.new_tk("hello"), None).await.unwrap().expect("blocks");
+		let start = listed.blocks.first().expect("a block").start;
+		let block: super::PostingBlock =
+			tx.get_key(&test.ikb.new_tp("hello", start), None).await.unwrap().expect("the block");
+		assert_eq!(block.entries(), Some(vec![(doc_id, 2, 3)]));
+		let range = crate::key::schema::TermChangePostingsPrefix {
+			ns: test.ikb.ns(),
+			db: test.ikb.db(),
+			tb: Cow::Borrowed(test.ikb.table()),
+			ix: test.ikb.index(),
+		}
+		.range()
+		.unwrap();
+		assert_eq!(tx.count(range, None).await.unwrap(), 0, "a change's postings were left");
+		tx.cancel().await.unwrap();
+	}
+
+	/// A rewrite of a document the blocks already hold takes its entry from the
+	/// change too: the rewritten entry is right with the document's `!dt` and
+	/// `!dl` gone.
+	#[test(tokio::test)]
+	async fn a_rewritten_block_entry_is_filled_from_the_change() {
+		let test =
+			TestContext::at_format(crate::catalog::FULLTEXT_POSTING_BLOCKS_FORMAT_VERSION).await;
+		let rid = RecordId::new("t".into(), "d1".to_owned());
+		test.rewrite(&rid, None, Some("hello world")).await;
+		test.drain_term_docs(1024).await;
+		test.rewrite(&rid, Some("hello world"), Some("hello hello there")).await;
+		let tx = test.new_tx(TransactionType::Write).await;
+		let doc_id = test.fti.get_doc_id(&tx, &rid).await.unwrap().expect("indexed");
+		tx.del_key(&test.ikb.new_dt(doc_id)).await.unwrap();
+		tx.del_key(&test.ikb.new_dl(doc_id)).await.unwrap();
+		tx.commit().await.unwrap();
+		test.drain_term_docs(1024).await;
+		let tx = test.new_tx(TransactionType::Read).await;
+		let listed: super::TermBlocks =
+			tx.get_key(&test.ikb.new_tk("hello"), None).await.unwrap().expect("blocks");
+		let start = listed.blocks.first().expect("a block").start;
+		let block: super::PostingBlock =
+			tx.get_key(&test.ikb.new_tp("hello", start), None).await.unwrap().expect("the block");
+		tx.cancel().await.unwrap();
+		assert_eq!(block.entries(), Some(vec![(doc_id, 2, 3)]));
+	}
+
+	/// A change's postings pair one for one with the documents of the addition
+	/// beside it. Postings that hold another number pair with none of them: the
+	/// round still folds, reading each document's entry from what it stores, and
+	/// removes the change and its postings, so no later round meets them again.
+	#[test(tokio::test)]
+	async fn change_postings_that_miss_a_document_are_read_around() {
+		let test =
+			TestContext::at_format(crate::catalog::FULLTEXT_POSTING_BLOCKS_FORMAT_VERSION).await;
+		let tx = test.new_tx(TransactionType::Write).await;
+		test.write_tx_delta(&tx, "hello", 1, true, &RoaringTreemap::from_iter([3u64, 7])).await;
+		let posting = super::ChangePostings::from_postings([(2, 10)]);
+		tx.set_key(&test.ikb.new_tf("hello", Uuid::from_u128(1), Uuid::from_u128(9)), &posting)
+			.await
+			.unwrap();
+		for (doc_id, frequency, length) in [(3u64, 4, 40), (7, 5, 50)] {
+			let stored = DocumentTerms {
+				terms: [(
+					"hello".into(),
+					TermDocument {
+						f: frequency,
+						o: Vec::new(),
+					},
+				)]
+				.into_iter()
+				.collect(),
+			};
+			tx.set_key(&test.ikb.new_dt(doc_id), &stored).await.unwrap();
+			tx.set_key(&test.ikb.new_dl(doc_id), &length).await.unwrap();
+		}
+		tx.commit().await.unwrap();
+		assert_eq!(test.drain_term_docs(1024).await, 1, "the round folds");
+		let tx = test.new_tx(TransactionType::Read).await;
+		let listed: super::TermBlocks =
+			tx.get_key(&test.ikb.new_tk("hello"), None).await.unwrap().expect("blocks");
+		let start = listed.blocks.first().expect("a block").start;
+		let block: super::PostingBlock =
+			tx.get_key(&test.ikb.new_tp("hello", start), None).await.unwrap().expect("the block");
+		assert_eq!(block.entries(), Some(vec![(3, 4, 40), (7, 5, 50)]));
+		let changes = tx.count(test.ikb.new_tx_terms_range().unwrap(), None).await.unwrap();
+		let range = crate::key::schema::TermChangePostingsPrefix {
+			ns: test.ikb.ns(),
+			db: test.ikb.db(),
+			tb: Cow::Borrowed(test.ikb.table()),
+			ix: test.ikb.index(),
+		}
+		.range()
+		.unwrap();
+		let postings = tx.count(range, None).await.unwrap();
+		tx.cancel().await.unwrap();
+		assert_eq!((changes, postings), (0, 0), "the change and its postings were left");
+	}
+
+	#[test(tokio::test)]
+	async fn changes_netted_to_nothing_before_a_split_keep_the_current_posting() {
+		let test =
+			TestContext::at_format(crate::catalog::FULLTEXT_POSTING_BLOCKS_FORMAT_VERSION).await;
+		let doc_id: DocId = 5;
+		let docs = RoaringTreemap::from_iter([doc_id]);
+		let tx = test.new_tx(TransactionType::Write).await;
+		// The oldest change: an addition on node 2.
+		test.write_tx_delta(&tx, "hello", 2, true, &docs).await;
+		let older = super::ChangePostings::from_postings([(1, 10)]);
+		tx.set_key(&test.ikb.new_tf("hello", Uuid::from_u128(2), Uuid::from_u128(9)), &older)
+			.await
+			.unwrap();
+		// The newer changes, on node 1: a removal, then a re-addition.
+		test.write_tx_delta(&tx, "hello", 1, false, &docs).await;
+		test.write_tx_delta(&tx, "hello", 1, true, &docs).await;
+		let newer = super::ChangePostings::from_postings([(3, 30)]);
+		tx.set_key(&test.ikb.new_tf("hello", Uuid::from_u128(1), Uuid::from_u128(9)), &newer)
+			.await
+			.unwrap();
+		let current = DocumentTerms {
+			terms: [(
+				"hello".into(),
+				TermDocument {
+					f: 3,
+					o: Vec::new(),
+				},
+			)]
+			.into_iter()
+			.collect(),
+		};
+		tx.set_key(&test.ikb.new_dt(doc_id), &current).await.unwrap();
+		tx.set_key(&test.ikb.new_dl(doc_id), &30).await.unwrap();
+		tx.commit().await.unwrap();
+		// A round of two entries folds node 1's changes; the next folds node 2's.
+		for limit in [2, 1024] {
+			let tx = test.new_tx(TransactionType::Write).await;
+			let plan = test.fti.prepare_term_docs_compaction_with_limit(&tx, limit).await.unwrap();
+			assert!(test.fti.apply_term_docs_compaction(&tx, plan).await.unwrap());
+			tx.commit().await.unwrap();
+		}
+		let tx = test.new_tx(TransactionType::Read).await;
+		let listed: super::TermBlocks =
+			tx.get_key(&test.ikb.new_tk("hello"), None).await.unwrap().expect("blocks");
+		let start = listed.blocks.first().expect("a block").start;
+		let block: super::PostingBlock =
+			tx.get_key(&test.ikb.new_tp("hello", start), None).await.unwrap().expect("the block");
+		tx.cancel().await.unwrap();
+		assert_eq!(block.entries(), Some(vec![(doc_id, 3, 30)]));
+	}
+
+	/// A removal and an addition that total nothing take the addition's posting
+	/// only when one transaction made both, keeping the term. From two
+	/// transactions, nothing orders them, and the document is read instead.
+	#[test(tokio::test)]
+	async fn a_removal_and_an_addition_from_two_transactions_read_the_document() {
+		let test =
+			TestContext::at_format(crate::catalog::FULLTEXT_POSTING_BLOCKS_FORMAT_VERSION).await;
+		let doc_id: DocId = 5;
+		let docs = RoaringTreemap::from_iter([doc_id]);
+		let current = |f| DocumentTerms {
+			terms: [(
+				"hello".into(),
+				TermDocument {
+					f,
+					o: Vec::new(),
+				},
+			)]
+			.into_iter()
+			.collect(),
+		};
+		// The document placed in the term's blocks.
+		let tx = test.new_tx(TransactionType::Write).await;
+		test.write_tx_delta(&tx, "hello", 3, true, &docs).await;
+		let placed = super::ChangePostings::from_postings([(1, 10)]);
+		tx.set_key(&test.ikb.new_tf("hello", Uuid::from_u128(3), Uuid::from_u128(9)), &placed)
+			.await
+			.unwrap();
+		tx.commit().await.unwrap();
+		test.drain_term_docs(1024).await;
+		// A removal on node 1 and an addition on node 2, and the document as it
+		// is now.
+		let tx = test.new_tx(TransactionType::Write).await;
+		test.write_tx_delta(&tx, "hello", 1, false, &docs).await;
+		test.write_tx_delta(&tx, "hello", 2, true, &docs).await;
+		let added = super::ChangePostings::from_postings([(2, 20)]);
+		tx.set_key(&test.ikb.new_tf("hello", Uuid::from_u128(2), Uuid::from_u128(9)), &added)
+			.await
+			.unwrap();
+		tx.set_key(&test.ikb.new_dt(doc_id), &current(3)).await.unwrap();
+		tx.set_key(&test.ikb.new_dl(doc_id), &30).await.unwrap();
+		tx.commit().await.unwrap();
+		test.drain_term_docs(1024).await;
+		let tx = test.new_tx(TransactionType::Read).await;
+		let listed: super::TermBlocks =
+			tx.get_key(&test.ikb.new_tk("hello"), None).await.unwrap().expect("blocks");
+		let start = listed.blocks.first().expect("a block").start;
+		let block: super::PostingBlock =
+			tx.get_key(&test.ikb.new_tp("hello", start), None).await.unwrap().expect("the block");
+		tx.cancel().await.unwrap();
+		assert_eq!(block.entries(), Some(vec![(doc_id, 3, 30)]));
+	}
+
+	/// An addition whose postings hold a frequency of zero for a document, the
+	/// transaction's last change to it having carried none, places nothing from
+	/// it: the document is read.
+	#[test(tokio::test)]
+	async fn a_zero_posting_reads_the_document() {
+		let test =
+			TestContext::at_format(crate::catalog::FULLTEXT_POSTING_BLOCKS_FORMAT_VERSION).await;
+		let doc_id: DocId = 5;
+		let tx = test.new_tx(TransactionType::Write).await;
+		test.write_tx_delta(&tx, "hello", 1, true, &RoaringTreemap::from_iter([doc_id])).await;
+		let none = super::ChangePostings::from_postings([(0, 0)]);
+		tx.set_key(&test.ikb.new_tf("hello", Uuid::from_u128(1), Uuid::from_u128(9)), &none)
+			.await
+			.unwrap();
+		let current = DocumentTerms {
+			terms: [(
+				"hello".into(),
+				TermDocument {
+					f: 3,
+					o: Vec::new(),
+				},
+			)]
+			.into_iter()
+			.collect(),
+		};
+		tx.set_key(&test.ikb.new_dt(doc_id), &current).await.unwrap();
+		tx.set_key(&test.ikb.new_dl(doc_id), &30).await.unwrap();
+		tx.commit().await.unwrap();
+		test.drain_term_docs(1024).await;
+		let tx = test.new_tx(TransactionType::Read).await;
+		let listed: super::TermBlocks =
+			tx.get_key(&test.ikb.new_tk("hello"), None).await.unwrap().expect("blocks");
+		let start = listed.blocks.first().expect("a block").start;
+		let block: super::PostingBlock =
+			tx.get_key(&test.ikb.new_tp("hello", start), None).await.unwrap().expect("the block");
+		tx.cancel().await.unwrap();
+		assert_eq!(block.entries(), Some(vec![(doc_id, 3, 30)]));
+	}
+
+	/// Two additions of a document to a term, made on two nodes, sort by node
+	/// rather than by when they were made, so rounds can fold the newer before
+	/// the older. The entry the blocks keep is the document's current posting
+	/// whatever order they are folded in.
+	#[test(tokio::test)]
+	async fn an_older_addition_folded_last_leaves_the_current_posting() {
+		let test =
+			TestContext::at_format(crate::catalog::FULLTEXT_POSTING_BLOCKS_FORMAT_VERSION).await;
+		let doc_id: DocId = 5;
+		let tx = test.new_tx(TransactionType::Write).await;
+		let docs = RoaringTreemap::from_iter([doc_id]);
+		// The newer addition sorts first (node 1), the older second (node 2).
+		for (nid, frequency, length) in [(1u128, 3, 30), (2, 1, 10)] {
+			test.write_tx_delta(&tx, "hello", nid, true, &docs).await;
+			let posting = super::ChangePostings::from_postings([(frequency, length)]);
+			tx.set_key(
+				&test.ikb.new_tf("hello", Uuid::from_u128(nid), Uuid::from_u128(9)),
+				&posting,
+			)
+			.await
+			.unwrap();
+		}
+		let current = DocumentTerms {
+			terms: [(
+				"hello".into(),
+				TermDocument {
+					f: 3,
+					o: Vec::new(),
+				},
+			)]
+			.into_iter()
+			.collect(),
+		};
+		tx.set_key(&test.ikb.new_dt(doc_id), &current).await.unwrap();
+		tx.set_key(&test.ikb.new_dl(doc_id), &30).await.unwrap();
+		tx.commit().await.unwrap();
+		// A round of one entry folds the newer addition; the next takes the
+		// older one with the rest of the term, leaving nothing for a later
+		// round to read the document again for.
+		for limit in [1, 1024] {
+			let tx = test.new_tx(TransactionType::Write).await;
+			let plan = test.fti.prepare_term_docs_compaction_with_limit(&tx, limit).await.unwrap();
+			assert!(test.fti.apply_term_docs_compaction(&tx, plan).await.unwrap());
+			tx.commit().await.unwrap();
+		}
+		assert_eq!(test.term_residual("hello").await, None, "the term was folded whole");
+		let tx = test.new_tx(TransactionType::Read).await;
+		let listed: super::TermBlocks =
+			tx.get_key(&test.ikb.new_tk("hello"), None).await.unwrap().expect("blocks");
+		let start = listed.blocks.first().expect("a block").start;
+		let block: super::PostingBlock =
+			tx.get_key(&test.ikb.new_tp("hello", start), None).await.unwrap().expect("the block");
+		tx.cancel().await.unwrap();
+		assert_eq!(block.entries(), Some(vec![(doc_id, 3, 30)]));
 	}
 
 	async fn concurrent_doc_update(test: TestContext, rid: Arc<RecordId>, mut count: usize) {
@@ -2275,10 +3667,11 @@ mod tests {
 
 	/// Indexing a document leaves one term delta per distinct term and one
 	/// statistics delta. A remove followed by a re-index of the same record
-	/// within one transaction nets to what the index already said: the term is
-	/// still present, so the transaction contributes one addition per term, and
-	/// the statistics do not move at all, so it contributes no statistics entry.
-	/// The earlier transaction's deltas are untouched either way.
+	/// within one transaction leaves every term's membership where it was, but
+	/// still names the document as changed in each of them: it contributes a
+	/// removal and an addition per term, which sum to zero. The statistics do not
+	/// move at all, so it contributes no statistics entry. The earlier
+	/// transaction's deltas are untouched either way.
 	#[test(tokio::test)]
 	async fn every_term_and_transaction_keeps_its_own_delta() {
 		for highlight in [false, true] {
@@ -2295,15 +3688,175 @@ mod tests {
 			tx.cancel().await.unwrap();
 
 			// A second transaction removing and re-indexing the same content:
-			// one addition per term on top of the first transaction's, and no
-			// statistics entry, because removing and re-adding one document of
-			// unchanged length nets to zero.
+			// a removal and an addition per term on top of the first
+			// transaction's, and no statistics entry, because removing and
+			// re-adding one document of unchanged length nets to zero.
 			test.remove_insert_task(&doc).await;
 			let tx = test.new_tx(TransactionType::Read).await;
-			assert_eq!(test.tt_delta_count(&tx).await, terms * 2, "highlight={highlight}");
+			assert_eq!(test.tt_delta_count(&tx).await, terms * 3, "highlight={highlight}");
 			assert_eq!(test.dc_delta_count(&tx).await, 1, "highlight={highlight}");
 			tx.cancel().await.unwrap();
+
+			// The re-index kept every term, so each still holds the document once.
+			let doc_id = {
+				let tx = test.new_tx(TransactionType::Read).await;
+				let doc_id = test.fti.get_doc_id(&tx, &doc).await.unwrap().unwrap();
+				tx.cancel().await.unwrap();
+				doc_id
+			};
+			test.drain_term_docs(1024).await;
+			let tx = test.new_tx(TransactionType::Read).await;
+			assert_eq!(test.tt_delta_count(&tx).await, 0, "highlight={highlight}");
+			tx.cancel().await.unwrap();
+			assert!(test.term_docs("blog").await.is_some_and(|docs| docs.contains(doc_id)));
+			assert_eq!(test.term_residual("blog").await, None, "highlight={highlight}");
 		}
+	}
+
+	/// One transaction's removal and re-indexing of a document, as an `UPDATE`
+	/// that changes the indexed text from `old` to `new` writes it.
+	async fn update_in_one_tx(test: &TestContext, rid: &RecordId, old: &str, new: &str) {
+		let ctx = test.ds.env(TransactionType::Write).await;
+		let tx = ctx.tx();
+		let az_fn = NoAnalyzerFunction;
+		let mut require_compaction = false;
+		test.fti
+			.remove_content(&ctx, &az_fn, rid, vec![Value::from(old)], &mut require_compaction)
+			.await
+			.unwrap();
+		test.fti
+			.index_content(&ctx, &az_fn, rid, vec![Value::from(new)], &mut require_compaction)
+			.await
+			.unwrap();
+		tx.commit().await.unwrap();
+	}
+
+	/// One transaction's removal of a document, as a `DELETE` writes it.
+	async fn delete_in_one_tx(test: &TestContext, rid: &RecordId, old: &str) {
+		let ctx = test.ds.env(TransactionType::Write).await;
+		let tx = ctx.tx();
+		let az_fn = NoAnalyzerFunction;
+		let mut require_compaction = false;
+		test.fti
+			.remove_content(&ctx, &az_fn, rid, vec![Value::from(old)], &mut require_compaction)
+			.await
+			.unwrap();
+		tx.commit().await.unwrap();
+	}
+
+	/// An `UPDATE` that keeps a term leaves the document carrying it once, so
+	/// a later `DELETE` takes it out of every term, kept or not.
+	#[test(tokio::test)]
+	async fn a_document_updated_then_deleted_leaves_the_terms_it_kept() {
+		let test = TestContext::with_highlighting(false).await;
+		let rid = RecordId::new("t".into(), "doc1".to_owned());
+		test.index_batch_in_one_tx(std::slice::from_ref(&rid), &Value::from("hello world")).await;
+		test.drain_term_docs(1024).await;
+		assert_eq!(test.query_docs("hello").await.len(), 1);
+
+		update_in_one_tx(&test, &rid, "hello world", "hello there").await;
+		assert_eq!(test.query_docs("hello").await.len(), 1);
+		assert!(test.query_docs("world").await.is_empty());
+
+		delete_in_one_tx(&test, &rid, "hello there").await;
+		assert!(test.query_docs("hello").await.is_empty());
+		assert!(test.query_docs("there").await.is_empty());
+	}
+
+	/// The same sequence, compacted: no stale membership is folded into the
+	/// kept term's bitmap.
+	#[test(tokio::test)]
+	async fn compaction_folds_an_update_then_delete_out_of_the_terms_it_kept() {
+		let test = TestContext::with_highlighting(false).await;
+		let rid = RecordId::new("t".into(), "doc1".to_owned());
+		test.index_batch_in_one_tx(std::slice::from_ref(&rid), &Value::from("hello world")).await;
+		test.drain_term_docs(1024).await;
+		update_in_one_tx(&test, &rid, "hello world", "hello there").await;
+		delete_in_one_tx(&test, &rid, "hello there").await;
+		test.drain_term_docs(1024).await;
+		assert_eq!(test.term_docs("hello").await, None);
+		assert_eq!(test.term_residual("hello").await, None);
+	}
+
+	/// A removal takes its terms from what the index stored for the document,
+	/// not from the old value it is handed: a term the old value lacks is still
+	/// removed, and one only the old value has is not.
+	#[test(tokio::test)]
+	async fn a_removal_takes_its_terms_from_the_stored_document() {
+		let test = TestContext::with_highlighting(false).await;
+		let rid = RecordId::new("t".into(), "doc1".to_owned());
+		test.index_batch_in_one_tx(std::slice::from_ref(&rid), &Value::from("hello world")).await;
+		test.drain_term_docs(1024).await;
+
+		update_in_one_tx(&test, &rid, "hello again", "hello again").await;
+		assert_eq!(test.query_docs("hello").await.len(), 1);
+		assert_eq!(test.query_docs("again").await.len(), 1, "a term only the old value has");
+		assert!(test.query_docs("world").await.is_empty(), "a term the old value lacks");
+
+		test.drain_term_docs(1024).await;
+		assert_eq!(test.term_docs("hello").await.map(|docs| docs.len()), Some(1));
+		assert_eq!(test.term_docs("again").await.map(|docs| docs.len()), Some(1));
+		assert_eq!(test.term_docs("world").await, None);
+	}
+
+	/// A record whose doc id exists in the table's shared space but which this
+	/// index never indexed — another index on the table assigned the id — has
+	/// nothing to remove. Its first indexing, even in the same transaction as
+	/// the removal an `UPDATE` makes, gives it every term.
+	#[test(tokio::test)]
+	async fn a_removal_of_a_document_the_index_never_held_records_nothing() {
+		let test = TestContext::with_highlighting(false).await;
+		let rid = RecordId::new("t".into(), "doc1".to_owned());
+		{
+			let ctx = test.ds.env(TransactionType::Write).await;
+			let tx = ctx.tx();
+			test.fti.doc_ids.resolve_or_assign(&test.ikb, &ctx, &rid.key).await.unwrap();
+			tx.commit().await.unwrap();
+		}
+
+		update_in_one_tx(&test, &rid, "hello world", "hello there").await;
+		assert_eq!(test.query_docs("hello").await.len(), 1);
+		assert_eq!(test.query_docs("there").await.len(), 1);
+		assert!(test.query_docs("world").await.is_empty());
+		let tx = test.new_tx(TransactionType::Read).await;
+		assert_eq!(test.tt_delta_count(&tx).await, 2, "one addition per term, no removal");
+		tx.cancel().await.unwrap();
+	}
+
+	/// A document indexed before the per-document entry existed has a length
+	/// and per-term postings but no `!dt`, so its removal analyses the old value
+	/// again. An update that keeps a term and a later delete leave it carrying
+	/// nothing, before and after compaction.
+	#[test(tokio::test)]
+	async fn a_document_without_its_per_document_entry_is_updated_then_deleted() {
+		let test = TestContext::with_highlighting(false).await;
+		let rid = RecordId::new("t".into(), "doc1".to_owned());
+		test.index_batch_in_one_tx(std::slice::from_ref(&rid), &Value::from("hello world")).await;
+		test.drain_term_docs(1024).await;
+		// Reshape it as an older server wrote it: per-term postings, no `!dt`.
+		{
+			let tx = test.new_tx(TransactionType::Write).await;
+			let doc_id = test.fti.get_doc_id(&tx, &rid).await.unwrap().unwrap();
+			let doc = tx.get_key(&test.ikb.new_dt(doc_id), None).await.unwrap().unwrap();
+			for (term, td) in doc.terms.iter() {
+				tx.set_key(&test.ikb.new_td(term, doc_id), td).await.unwrap();
+			}
+			tx.del_key(&test.ikb.new_dt(doc_id)).await.unwrap();
+			assert!(tx.get_key(&test.ikb.new_dl(doc_id), None).await.unwrap().is_some());
+			tx.commit().await.unwrap();
+		}
+
+		update_in_one_tx(&test, &rid, "hello world", "hello there").await;
+		assert_eq!(test.query_docs("hello").await.len(), 1, "the kept term");
+		assert_eq!(test.query_docs("there").await.len(), 1);
+		assert!(test.query_docs("world").await.is_empty());
+
+		delete_in_one_tx(&test, &rid, "hello there").await;
+		assert!(test.query_docs("hello").await.is_empty());
+		assert!(test.query_docs("there").await.is_empty());
+		test.drain_term_docs(1024).await;
+		assert_eq!(test.term_docs("hello").await, None);
+		assert_eq!(test.term_residual("hello").await, None);
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
@@ -3129,5 +4682,211 @@ mod tests {
 		);
 		let dlc = test.fti.compute_doc_length_and_count(&tx, None).await.unwrap();
 		assert_eq!(dlc.doc_count, 2);
+	}
+
+	/// Hits are taken a batch at a time in doc-id order and resolved to their
+	/// records in one read per batch; a hit whose record mapping is gone resolves
+	/// to none.
+	#[test(tokio::test)]
+	async fn hits_resolve_in_batches_and_pass_over_unmapped_documents() {
+		let test = TestContext::with_highlighting(false).await;
+		let rids: Vec<RecordId> =
+			(0..5).map(|n| RecordId::new("t".into(), format!("doc{n}"))).collect();
+		test.index_batch_in_one_tx(&rids, &Value::from("hello")).await;
+		// Drop the mapping of the second document, as a record purge does.
+		let tx = test.new_tx(TransactionType::Write).await;
+		crate::docids::TableDocIds::new(test.ikb.ns(), test.ikb.db(), test.ikb.table().clone())
+			.remove(&tx, &rids[1].key)
+			.await
+			.unwrap();
+		tx.commit().await.unwrap();
+
+		let (ctx, tx) = test.new_read_env().await;
+		let qt = test
+			.fti
+			.extract_querying_terms(&ctx, &NoAnalyzerFunction, "hello".to_owned())
+			.await
+			.unwrap();
+		let mut hits =
+			test.fti.new_hits_iterator(&qt, crate::expr::operator::BooleanOperator::And).unwrap();
+		let mut batches = Vec::new();
+		loop {
+			let doc_ids = hits.take_doc_ids(2);
+			if doc_ids.is_empty() {
+				break;
+			}
+			let records = hits.records(&tx, &doc_ids).await.unwrap();
+			batches.push((doc_ids, records));
+		}
+		tx.cancel().await.unwrap();
+
+		let resolved: Vec<Vec<Option<RecordId>>> =
+			batches.iter().map(|(_, records)| records.clone()).collect();
+		assert_eq!(
+			resolved,
+			vec![
+				vec![Some(rids[0].clone()), None],
+				vec![Some(rids[2].clone()), Some(rids[3].clone())],
+				vec![Some(rids[4].clone())],
+			],
+			"the purged document resolves to none"
+		);
+		let doc_ids: Vec<DocId> = batches.iter().flat_map(|(ids, _)| ids.clone()).collect();
+		assert!(doc_ids.windows(2).all(|w| w[0] < w[1]), "in doc-id order: {doc_ids:?}");
+	}
+
+	/// A document carrying none of the query's terms scores zero and has no
+	/// term to highlight; one carrying a term scores above zero.
+	#[test(tokio::test)]
+	async fn a_document_carrying_no_term_scores_zero() {
+		let test = TestContext::new().await;
+		let hello = RecordId::new("t".into(), "hello".to_owned());
+		let others: Vec<RecordId> =
+			(0..3).map(|n| RecordId::new("t".into(), format!("other{n}"))).collect();
+		test.index_batch_in_one_tx(std::slice::from_ref(&hello), &Value::from("hello world")).await;
+		test.index_batch_in_one_tx(&others, &Value::from("goodbye moon")).await;
+
+		let (ctx, tx) = test.new_read_env().await;
+		let qt = test
+			.fti
+			.extract_querying_terms(&ctx, &NoAnalyzerFunction, "hello".to_owned())
+			.await
+			.unwrap();
+		let scorer = test.fti.new_scorer(&ctx).await.unwrap().expect("BM25 is configured");
+		let carrier = test.fti.get_doc_id(&tx, &hello).await.unwrap().unwrap();
+		let other = test.fti.get_doc_id(&tx, &others[0]).await.unwrap().unwrap();
+		assert!(scorer.score(&test.fti, &tx, &qt, carrier).await.unwrap() > 0.0);
+		assert_eq!(scorer.score(&test.fti, &tx, &qt, other).await.unwrap(), 0.0);
+		assert!(test.fti.term_hits(&tx, other, &qt).await.unwrap().is_empty());
+		assert_eq!(test.fti.term_hits(&tx, carrier, &qt).await.unwrap().len(), 1);
+		tx.cancel().await.unwrap();
+	}
+
+	/// Scoring a batch answers what scoring each document alone answers, in
+	/// input order, for documents that carry the terms and documents that do
+	/// not, in either indexing path.
+	#[test(tokio::test)]
+	async fn a_batch_scores_as_its_documents_do_alone() {
+		for highlight in [false, true] {
+			let test = TestContext::with_highlighting(highlight).await;
+			let texts = ["hello world", "hello hello there", "goodbye", "world peace", "hello"];
+			let mut rids = Vec::new();
+			for (n, text) in texts.iter().enumerate() {
+				let rid = RecordId::new("t".into(), format!("doc{n}"));
+				test.index_batch_in_one_tx(std::slice::from_ref(&rid), &Value::from(*text)).await;
+				rids.push(rid);
+			}
+			let (ctx, tx) = test.new_read_env().await;
+			let qt = test
+				.fti
+				.extract_querying_terms(&ctx, &NoAnalyzerFunction, "hello world".to_owned())
+				.await
+				.unwrap();
+			let scorer = test.fti.new_scorer(&ctx).await.unwrap().expect("BM25 is configured");
+			let mut doc_ids = Vec::new();
+			for rid in rids.iter().rev() {
+				doc_ids.push(test.fti.get_doc_id(&tx, rid).await.unwrap().unwrap());
+			}
+			let batch = scorer.score_batch(&test.fti, &tx, &qt, &doc_ids).await.unwrap();
+			let mut alone = Vec::new();
+			for doc_id in &doc_ids {
+				alone.push(scorer.score(&test.fti, &tx, &qt, *doc_id).await.unwrap());
+			}
+			assert_eq!(batch, alone, "highlight={highlight}");
+			assert!(batch.iter().any(|s| *s > 0.0), "some document scores: {batch:?}");
+			assert!(batch.contains(&0.0), "the document carrying no term scores zero");
+			tx.cancel().await.unwrap();
+		}
+	}
+
+	/// Times a full compaction of a large-vocabulary corpus on the bitmap
+	/// layout and on posting blocks. Run by hand:
+	/// `cargo test --locked --release -p surrealdb-idx --features fulltext -- --ignored --nocapture
+	/// compaction_cost_by_format`.
+	#[ignore]
+	#[test(tokio::test)]
+	async fn compaction_cost_by_format() {
+		let docs: usize =
+			std::env::var("FT_DOCS").ok().and_then(|v| v.parse().ok()).unwrap_or(10_000);
+		let words: usize =
+			std::env::var("FT_WORDS").ok().and_then(|v| v.parse().ok()).unwrap_or(600);
+		let vocabulary: u64 = 3000;
+		// Term i is drawn with weight 1/i over `vocabulary` terms.
+		let weights: Vec<f64> = (1..=vocabulary).map(|i| 1.0 / i as f64).collect();
+		let total: f64 = weights.iter().sum();
+		let mut cumulative = Vec::with_capacity(weights.len());
+		let mut acc = 0.0;
+		for w in &weights {
+			acc += w / total;
+			cumulative.push(acc);
+		}
+		let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+		let mut next = move || {
+			state ^= state << 13;
+			state ^= state >> 7;
+			state ^= state << 17;
+			(state >> 11) as f64 / (1u64 << 53) as f64
+		};
+		let corpus: Vec<String> = (0..docs)
+			.map(|_| {
+				(0..words)
+					.map(|_| {
+						let r = next();
+						let i = cumulative.partition_point(|c| *c < r);
+						format!("t{}", i + 1)
+					})
+					.collect::<Vec<_>>()
+					.join(" ")
+			})
+			.collect();
+		for format in [
+			crate::catalog::LEGACY_LEVEL_INDEX_FORMAT_VERSION,
+			crate::catalog::FULLTEXT_POSTING_BLOCKS_FORMAT_VERSION,
+		] {
+			let highlight = std::env::var("FT_HIGHLIGHT").is_ok();
+			let test = TestContext::build(highlight, vec![Tokenizer::Blank], format).await;
+			let start = Instant::now();
+			for (chunk, texts) in corpus.chunks(250).enumerate() {
+				let ctx = test.ds.env(TransactionType::Write).await;
+				let tx = ctx.tx();
+				let mut require_compaction = false;
+				for (i, text) in texts.iter().enumerate() {
+					let rid = RecordId::new("t".into(), format!("d{}", chunk * 250 + i));
+					test.fti
+						.index_content(
+							&ctx,
+							&NoAnalyzerFunction,
+							&rid,
+							vec![Value::from(text.as_str())],
+							&mut require_compaction,
+						)
+						.await
+						.unwrap();
+				}
+				tx.commit().await.unwrap();
+			}
+			let indexed = start.elapsed();
+			let start = Instant::now();
+			let mut rounds = 0;
+			loop {
+				let tx = test.new_tx(TransactionType::Write).await;
+				let plan = test
+					.fti
+					.prepare_term_docs_compaction_with_limit(&tx, super::COUNT_BATCH_SIZE)
+					.await
+					.unwrap();
+				let has_more = plan.has_more();
+				let applied = test.fti.apply_term_docs_compaction(&tx, plan).await.unwrap();
+				tx.commit().await.unwrap();
+				rounds += 1;
+				if !applied || !has_more {
+					break;
+				}
+			}
+			eprintln!(
+				"format {format}: {docs} docs x {words} words: indexed in {indexed:?}, compacted in {:?} over {rounds} rounds",
+				start.elapsed()
+			);
+		}
 	}
 }

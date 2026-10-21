@@ -57,6 +57,7 @@
 //! the transaction's own and is never popped — the storage layer has no save point
 //! matching it.
 
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
 use parking_lot::Mutex;
@@ -86,49 +87,158 @@ pub struct BufferedTerm {
 
 /// The document ids one transaction added to, and removed from, one term.
 ///
-/// The two sets are disjoint: a document appears in whichever direction was
-/// recorded for it last, so a reader can apply them in either order. That is
-/// upheld by the only two things that write a delta — [`Self::buffer_term_change`]
-/// clears the opposite set for the document it records, and [`Self::apply`]
-/// preserves disjointness when both sides already hold it.
+/// Each document carries a net change, the sum of the additions (+1) and
+/// removals (−1) recorded for it, and the two sets encode that sum:
 ///
-/// [`Self::buffer_term_change`]: IndexDeltaBuffer::buffer_term_change
+/// - in `added` only: +1, the transaction gave the document the term;
+/// - in `removed` only: −1, the transaction took the term away;
+/// - in both: 0, the transaction removed the term and gave it back, or the other way round.
+///
+/// Every reader of the flushed `!tx` pair, and of [`IndexDeltaBuffer::pending_term_change`],
+/// counts an `added` entry as +1 and a `removed` entry as −1, so a document in
+/// both leaves the term's membership as it was. It is still named as changed:
+/// a re-index records a change for every term the document carries before and
+/// after it, including the terms it keeps, and a reader that needs to know
+/// which documents changed since the last compaction takes that from which
+/// documents the uncompacted changes name, not from their sum.
+///
+/// The sum is held to −1..=+1. A document's membership of a term moves by one
+/// at a time, so on every path that indexes correctly the sum never leaves that
+/// range; the clamp only absorbs a change repeated in one direction.
+///
+/// [`IndexDeltaBuffer::buffer_term_change`] and [`Self::apply`] are the only
+/// writers, and both keep that encoding.
 #[derive(Default)]
 pub struct FullTextDelta {
 	pub added: RoaringTreemap,
 	pub removed: RoaringTreemap,
+	/// On an index that keeps its postings in blocks, each document's last
+	/// posting, `(document, frequency, length)`, in ascending document order,
+	/// one entry per document. A frequency of zero: the document's last change
+	/// carried no posting (a removal), or one too large to hold, so no posting
+	/// of it holds. Empty on any other index.
+	pub postings: Vec<(u64, u32, u32)>,
 	pub nid: Uuid,
 }
 
 impl FullTextDelta {
-	/// Folds `other` in, with its direction winning per document: a document the
-	/// inner scope added supersedes an outer removal and the other way round.
+	/// Records one addition (`add`) or removal of `doc_id`, and returns whether
+	/// the set the change lands in was empty before it.
+	fn record(&mut self, doc_id: u64, add: bool) -> bool {
+		let (this, other) = if add {
+			(&mut self.added, &mut self.removed)
+		} else {
+			(&mut self.removed, &mut self.added)
+		};
+		let first = this.is_empty();
+		if this.contains(doc_id) && other.contains(doc_id) {
+			// A sum of 0 moves to ±1 in this direction.
+			other.remove(doc_id);
+		} else {
+			// No change, or one in the opposite direction, moves to ±1 or to 0.
+			// One already in this direction stays where it is: the clamp.
+			this.insert(doc_id);
+		}
+		first
+	}
+
+	/// Folds `other`, recorded after `self`, into `self`: each document's sum is
+	/// the clamped sum of the two, and a document either one names stays named.
+	/// Its postings replace these, so a document `other` names keeps the posting
+	/// `other` holds for it, or none.
 	fn apply(&mut self, other: &Self) {
-		self.removed -= &other.added;
-		self.added |= &other.added;
-		self.added -= &other.removed;
-		self.removed |= &other.removed;
-		if !other.nid.is_nil() {
-			self.nid = other.nid;
+		self.apply_membership(other);
+		// A document `other` names with no posting of its own changed last in
+		// `other` without one, so no earlier posting of it holds.
+		if !self.postings.is_empty() {
+			for doc_id in other.added.iter().chain(other.removed.iter()) {
+				if other.posting_at(doc_id).is_err() {
+					self.set_posting(doc_id, 0, 0);
+				}
+			}
+		}
+		for (doc_id, frequency, length) in &other.postings {
+			self.set_posting(*doc_id, *frequency, *length);
 		}
 	}
 
-	/// Drops the documents present in both sets, which cancelled out.
-	///
-	/// A guard on the disjointness the two writers uphold, rather than the thing
-	/// that establishes it: on every path they cover there is nothing to drop, and
-	/// the early exit is what keeps that path from paying for an intersection.
-	fn normalise(&mut self) {
-		if self.added.is_disjoint(&self.removed) {
+	/// Where document `doc_id`'s entry is in `postings`, or where it would go.
+	fn posting_at(&self, doc_id: u64) -> Result<usize, usize> {
+		match self.postings.last() {
+			// A bulk write records documents in ascending order, each past the last.
+			Some((last, ..)) if *last < doc_id => Err(self.postings.len()),
+			Some(_) => self.postings.binary_search_by_key(&doc_id, |(posted, ..)| *posted),
+			None => Err(0),
+		}
+	}
+
+	/// Makes `frequency` and `length` document `doc_id`'s last posting; a
+	/// frequency of zero leaves it none.
+	fn set_posting(&mut self, doc_id: u64, frequency: u32, length: u32) {
+		match self.posting_at(doc_id) {
+			Ok(at) => self.postings[at] = (doc_id, frequency, length),
+			// A document with no entry needs none to say it has no posting.
+			Err(_) if frequency == 0 => {}
+			Err(at) => self.postings.insert(at, (doc_id, frequency, length)),
+		}
+	}
+
+	/// [`Self::apply`] for the document sets alone, leaving the postings.
+	fn apply_membership(&mut self, other: &Self) {
+		if !other.nid.is_nil() {
+			self.nid = other.nid;
+		}
+		// A transaction's own view of a term folds every frame into an empty
+		// delta, and the first can name every document of a bulk write.
+		if self.is_empty() {
+			self.added |= &other.added;
+			self.removed |= &other.removed;
 			return;
 		}
-		let both: RoaringTreemap = &self.added & &self.removed;
-		self.added -= &both;
-		self.removed -= &both;
+		let pos = &self.added - &self.removed;
+		let neg = &self.removed - &self.added;
+		let other_pos = &other.added - &other.removed;
+		let other_neg = &other.removed - &other.added;
+		// A sum of +1 is +1 beside 0 or nothing, either way round, or +1 beside
+		// +1 clamped; −1 alike. Every other document either side names sums to 0.
+		let sum_pos = (&other_pos - &neg) | (&pos - &other_neg);
+		let sum_neg = (&other_neg - &pos) | (&neg - &other_pos);
+		// The two are disjoint, so `added` is every named document but those
+		// summing to −1, and `removed` every one but those summing to +1.
+		let mut named = &self.added | &self.removed;
+		named |= &other.added;
+		named |= &other.removed;
+		self.added = &named - &sum_neg;
+		self.removed = named - sum_pos;
+	}
+
+	/// The postings of the documents `added` holds whose last change carried
+	/// one, in ascending document order.
+	pub fn current_postings(&self) -> impl Iterator<Item = (u64, u64, u64)> + '_ {
+		self.postings
+			.iter()
+			.filter(|(doc_id, frequency, _)| *frequency > 0 && self.added.contains(*doc_id))
+			.map(|(doc_id, frequency, length)| (*doc_id, u64::from(*frequency), u64::from(*length)))
 	}
 
 	fn is_empty(&self) -> bool {
 		self.added.is_empty() && self.removed.is_empty()
+	}
+}
+
+/// Folds the term changes of `frame` into the enclosing `into`. A term `into`
+/// holds no change of takes `frame`'s delta as it is.
+fn fold_term_changes(
+	into: &mut HashMap<BufferedTerm, FullTextDelta>,
+	frame: HashMap<BufferedTerm, FullTextDelta>,
+) {
+	for (term, delta) in frame {
+		match into.entry(term) {
+			Entry::Occupied(mut held) => held.get_mut().apply(&delta),
+			Entry::Vacant(slot) => {
+				slot.insert(delta);
+			}
+		}
 	}
 }
 
@@ -260,13 +370,20 @@ impl IndexDeltaBuffer {
 
 	/// Record that `doc_id` gained (`add`) or lost a full-text term.
 	///
-	/// Re-recording the same document in the opposite direction supersedes the
-	/// first: a document removed and then re-indexed within one transaction ends
-	/// up only in `added`, which is the net truth the compactor needs.
-	/// Returns whether this change is the first in its direction for the term
-	/// *within the frame it lands in*, which is what the caller charges the
-	/// write-cardinality guard on: the flush emits one key per (term, direction)
-	/// whose set is non-empty, so a first change is a key the flush will write.
+	/// `posting` is `Some` on an index that keeps its postings in blocks, and
+	/// `None` on any other. For an addition it is the term's frequency in the
+	/// document and the document's length. A change that carries none, a
+	/// removal, passes a frequency of zero, which no real posting has.
+	///
+	/// A document's changes sum, as [`FullTextDelta`] describes: one removed and
+	/// then re-indexed within one transaction keeps the membership it had, and is
+	/// flushed in both directions so the uncompacted changes still name it.
+	///
+	/// Returns how many keys the flush will write that it would not have
+	/// written before this change, *within the frame it lands in*, which is
+	/// what the caller charges the write-cardinality guard on: the flush emits
+	/// one key per (term, direction) whose set is non-empty, and one more per
+	/// term whose additions carry postings.
 	///
 	/// Per frame rather than per term, so a term first touched inside a save point
 	/// that already has it in an enclosing scope is charged twice, and a charge for
@@ -279,25 +396,38 @@ impl IndexDeltaBuffer {
 		term: BufferedTerm,
 		doc_id: u64,
 		add: bool,
+		posting: Option<(u64, u64)>,
 		nid: Uuid,
-	) -> bool {
+	) -> u32 {
 		let mut frames = self.term_changes.lock();
 		let frame = frames.last_mut().expect("the transaction frame is always present");
 		let delta = frame.entry(term).or_default();
 		delta.nid = nid;
-		// A direction emptied again by a later cancellation keeps the charge it
+		// A direction emptied again by a later change keeps the charge it
 		// already took, over-counting by one in that case — the safe direction
 		// for a limit.
-		if add {
-			let first = delta.added.is_empty();
-			delta.removed.remove(doc_id);
-			delta.added.insert(doc_id);
-			first
-		} else {
-			let first = delta.removed.is_empty();
-			delta.added.remove(doc_id);
-			delta.removed.insert(doc_id);
-			first
+		let first = u32::from(delta.record(doc_id, add));
+		match posting {
+			Some((frequency, length)) if add && frequency > 0 => {
+				// A posting too large to hold is kept as none, so its document is
+				// read from what it stores.
+				let (frequency, length) = match (u32::try_from(frequency), u32::try_from(length)) {
+					(Ok(frequency), Ok(length)) => (frequency, length),
+					_ => (0, 0),
+				};
+				// Charged once the frame holds a posting for the term, as the flush
+				// writes a `!tf` entry only for a term with one.
+				let first_posting = u32::from(frequency > 0 && delta.postings.is_empty());
+				delta.set_posting(doc_id, frequency, length);
+				first + first_posting
+			}
+			// A change carrying no posting on an index that keeps them: an
+			// earlier posting of the document no longer holds.
+			Some(_) => {
+				delta.set_posting(doc_id, 0, 0);
+				first
+			}
+			None => first,
 		}
 	}
 
@@ -310,10 +440,9 @@ impl IndexDeltaBuffer {
 		let mut merged = FullTextDelta::default();
 		for frame in self.term_changes.lock().iter() {
 			if let Some(delta) = frame.get(term) {
-				merged.apply(delta);
+				merged.apply_membership(delta);
 			}
 		}
-		merged.normalise();
 		(merged.added, merged.removed)
 	}
 
@@ -337,23 +466,22 @@ impl IndexDeltaBuffer {
 		total
 	}
 
-	/// Drain the accumulated term changes, dropping any that cancelled out.
+	/// Drain the accumulated term changes.
+	///
+	/// A document whose changes summed to zero is flushed in both directions
+	/// rather than dropped, so the term's uncompacted changes name it.
 	pub fn take_term_changes(&self) -> Vec<(BufferedTerm, FullTextDelta)> {
 		let mut frames = self.term_changes.lock();
-		let mut merged: HashMap<BufferedTerm, FullTextDelta> = HashMap::new();
-		for frame in frames.drain(..) {
-			for (term, delta) in frame {
-				merged.entry(term).or_default().apply(&delta);
+		let merged = {
+			let mut drained = frames.drain(..);
+			let mut merged = drained.next().unwrap_or_default();
+			for frame in drained {
+				fold_term_changes(&mut merged, frame);
 			}
-		}
+			merged
+		};
 		frames.push(HashMap::new());
-		merged
-			.into_iter()
-			.filter_map(|(term, mut delta)| {
-				delta.normalise();
-				(!delta.is_empty()).then_some((term, delta))
-			})
-			.collect()
+		merged.into_iter().filter(|(_, delta)| !delta.is_empty()).collect()
 	}
 
 	/// Drain the accumulated document statistics.
@@ -553,9 +681,7 @@ impl IndexDeltaBuffer {
 			let mut frames = self.term_changes.lock();
 			if let Some(top) = pop_save_point(&mut frames) {
 				let parent = frames.last_mut().expect("popping left at least one frame");
-				for (term, delta) in top {
-					parent.entry(term).or_default().apply(&delta);
-				}
+				fold_term_changes(parent, top);
 			}
 		}
 		{
@@ -640,13 +766,73 @@ mod tests {
 		assert!(buffer.is_empty());
 	}
 
+	/// The postings a flush writes beside a term's additions are those of the
+	/// changes recorded last, on an index that keeps its postings: a document's
+	/// last addition, none after a later removal (even one that sums its changes
+	/// to nothing), none after a removal in a save point released into the
+	/// transaction, and none from a rolled-back save point.
+	#[test]
+	fn the_postings_flushed_are_those_of_the_changes_that_won() {
+		let buffer = IndexDeltaBuffer::new();
+		let nid = Uuid::nil();
+		let removed = Some((0, 0));
+		assert_eq!(buffer.buffer_term_change(term(), 7, true, Some((1, 10)), nid), 2);
+		assert_eq!(buffer.buffer_term_change(term(), 9, true, Some((2, 20)), nid), 0);
+		let _ = buffer.buffer_term_change(term(), 5, true, Some((3, 30)), nid);
+		let _ = buffer.buffer_term_change(term(), 7, true, Some((4, 40)), nid);
+		// Added then removed: the sum is nothing, the document is still named,
+		// and its posting no longer holds.
+		let _ = buffer.buffer_term_change(term(), 9, false, removed, nid);
+		buffer.push_save_point();
+		let _ = buffer.buffer_term_change(term(), 5, true, Some((5, 50)), nid);
+		buffer.rollback_save_point();
+		buffer.push_save_point();
+		let _ = buffer.buffer_term_change(term(), 11, true, Some((6, 60)), nid);
+		buffer.release_save_point();
+		// Added in the transaction, removed in a save point released into it.
+		let _ = buffer.buffer_term_change(term(), 21, true, Some((8, 80)), nid);
+		buffer.push_save_point();
+		let _ = buffer.buffer_term_change(term(), 21, false, removed, nid);
+		buffer.release_save_point();
+		// Removed, then re-added: the re-addition's posting holds.
+		let _ = buffer.buffer_term_change(term(), 23, false, removed, nid);
+		let _ = buffer.buffer_term_change(term(), 23, true, Some((9, 90)), nid);
+		let changes = buffer.take_term_changes();
+		let [(_, delta)] = changes.as_slice() else {
+			panic!("one term changed: {}", changes.len());
+		};
+		assert!(delta.added.contains(9) && delta.removed.contains(9), "9 sums to nothing");
+		assert_eq!(
+			delta.current_postings().collect::<Vec<_>>(),
+			vec![(5, 3, 30), (7, 4, 40), (11, 6, 60), (23, 9, 90)]
+		);
+	}
+
+	/// A transaction that updates one record over and over keeps one posting
+	/// for it, its last, however many times it does.
+	#[test]
+	fn repeated_updates_of_one_record_keep_one_posting() {
+		let buffer = IndexDeltaBuffer::new();
+		let nid = Uuid::nil();
+		for update in 1..=1000u64 {
+			let _ = buffer.buffer_term_change(term(), 7, false, Some((0, 0)), nid);
+			let _ = buffer.buffer_term_change(term(), 7, true, Some((update, 10 + update)), nid);
+		}
+		let changes = buffer.take_term_changes();
+		let [(_, delta)] = changes.as_slice() else {
+			panic!("one term changed: {}", changes.len());
+		};
+		assert_eq!(delta.postings.len(), 1);
+		assert_eq!(delta.current_postings().collect::<Vec<_>>(), vec![(7, 1000, 1010)]);
+	}
+
 	#[test]
 	fn a_rolled_back_save_point_keeps_none_of_its_deltas() {
 		let buffer = IndexDeltaBuffer::new();
 		let nid = Uuid::nil();
 
 		buffer.push_save_point();
-		let _ = buffer.buffer_term_change(term(), 7, true, nid);
+		let _ = buffer.buffer_term_change(term(), 7, true, None, nid);
 		buffer.buffer_doc_stats(term().index, stats(100, 1), nid);
 		buffer.rollback_save_point();
 
@@ -723,7 +909,7 @@ mod tests {
 		let nid = Uuid::nil();
 
 		buffer.push_save_point();
-		let _ = buffer.buffer_term_change(term(), 7, true, nid);
+		let _ = buffer.buffer_term_change(term(), 7, true, None, nid);
 		buffer.buffer_doc_stats(term().index, stats(100, 1), nid);
 		buffer.release_save_point();
 
@@ -748,12 +934,12 @@ mod tests {
 
 		// The abandoned create attempt indexed a term the final record lacks.
 		buffer.push_save_point();
-		let _ = buffer.buffer_term_change(term(), 7, true, nid);
+		let _ = buffer.buffer_term_change(term(), 7, true, None, nid);
 		buffer.buffer_doc_stats(term().index, stats(100, 1), nid);
 		buffer.rollback_save_point();
 
 		// The retry indexes the record it actually stored.
-		let _ = buffer.buffer_term_change(term(), 9, true, nid);
+		let _ = buffer.buffer_term_change(term(), 9, true, None, nid);
 		buffer.buffer_doc_stats(term().index, stats(40, 1), nid);
 
 		let flushed = buffer.take_term_changes();
@@ -763,22 +949,91 @@ mod tests {
 		assert_eq!(buffer.take_doc_stats()[0].1, stats(40, 1));
 	}
 
-	/// A document removed and re-indexed within one transaction is still
-	/// present, so the net contribution is one addition and no statistics move.
+	/// A document removed and re-indexed within one transaction keeps the
+	/// membership it had, so the term's changes sum to zero for it and no
+	/// statistics move. It is flushed in both directions, so the term's
+	/// uncompacted changes still name it as changed.
 	#[test]
-	fn a_remove_then_reindex_nets_to_an_addition_and_no_statistics() {
+	fn a_remove_then_reindex_nets_to_no_change_but_names_the_document() {
 		let buffer = IndexDeltaBuffer::new();
 		let nid = Uuid::nil();
 
-		let _ = buffer.buffer_term_change(term(), 7, false, nid);
+		let _ = buffer.buffer_term_change(term(), 7, false, None, nid);
 		buffer.buffer_doc_stats(term().index, stats(-100, -1), nid);
-		let _ = buffer.buffer_term_change(term(), 7, true, nid);
+		let _ = buffer.buffer_term_change(term(), 7, true, None, nid);
 		buffer.buffer_doc_stats(term().index, stats(100, 1), nid);
+
+		let (added, removed) = buffer.pending_term_change(&term());
+		assert!(added.contains(7) && removed.contains(7), "a read in the transaction sums to 0");
 
 		let flushed = buffer.take_term_changes();
 		assert_eq!(flushed.len(), 1);
 		assert!(flushed[0].1.added.contains(7));
-		assert!(flushed[0].1.removed.is_empty(), "the removal was superseded");
+		assert!(flushed[0].1.removed.contains(7), "the removal cancels the re-addition");
 		assert!(buffer.take_doc_stats().is_empty(), "unchanged statistics need no entry");
+	}
+
+	/// The sum of a document's changes, as the flushed pair encodes it.
+	fn net(delta: &FullTextDelta, doc_id: u64) -> Option<i64> {
+		match (delta.added.contains(doc_id), delta.removed.contains(doc_id)) {
+			(false, false) => None,
+			(added, removed) => Some(i64::from(added) - i64::from(removed)),
+		}
+	}
+
+	/// Changes to one document sum in the order they are recorded, and every
+	/// document a change names stays named.
+	#[test]
+	fn changes_to_one_document_sum() {
+		let cases: [(&[bool], i64); 6] = [
+			(&[true], 1),
+			(&[false], -1),
+			(&[false, true], 0),
+			(&[true, false], 0),
+			(&[false, true, false], -1),
+			(&[true, false, true], 1),
+		];
+		for (changes, expected) in cases {
+			let mut delta = FullTextDelta::default();
+			for add in changes {
+				let _ = delta.record(7, *add);
+			}
+			assert_eq!(net(&delta, 7), Some(expected), "{changes:?}");
+		}
+	}
+
+	/// A save point folds into its parent by the same sum, whatever the
+	/// parent's sum: a scope that removed and re-indexed a document leaves the
+	/// parent's sum where it was, and one that reversed the parent's change
+	/// leaves 0 rather than its own direction.
+	#[test]
+	fn a_released_save_point_sums_into_its_parent() {
+		let cases: [(&[bool], &[bool], i64); 7] = [
+			(&[false], &[true], 0),
+			(&[true], &[false], 0),
+			(&[false], &[false, true], -1),
+			(&[true], &[false, true], 1),
+			(&[false, true], &[false], -1),
+			(&[false, true], &[false, true], 0),
+			(&[], &[false, true], 0),
+		];
+		for (parent, child, expected) in cases {
+			let buffer = IndexDeltaBuffer::new();
+			let nid = Uuid::nil();
+			for add in parent {
+				let _ = buffer.buffer_term_change(term(), 7, *add, None, nid);
+			}
+			buffer.push_save_point();
+			for add in child {
+				let _ = buffer.buffer_term_change(term(), 7, *add, None, nid);
+			}
+			let (added, removed) = buffer.pending_term_change(&term());
+			let pending = i64::from(added.contains(7)) - i64::from(removed.contains(7));
+			assert_eq!(pending, expected, "pending {parent:?} then {child:?}");
+			buffer.release_save_point();
+			let flushed = buffer.take_term_changes();
+			assert_eq!(flushed.len(), 1);
+			assert_eq!(net(&flushed[0].1, 7), Some(expected), "{parent:?} then {child:?}");
+		}
 	}
 }

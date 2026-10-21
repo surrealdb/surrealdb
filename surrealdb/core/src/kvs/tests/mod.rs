@@ -32,6 +32,8 @@ mod export_implied_element_fields_test;
 mod export_legacy_extension_test;
 #[cfg(feature = "kv-mem")]
 mod export_views_test;
+#[cfg(all(feature = "search", any(feature = "kv-mem", feature = "kv-tikv")))]
+mod fulltext_nodes_test;
 #[cfg(feature = "kv-mem")]
 mod graph_degree_test;
 #[cfg(feature = "kv-mem")]
@@ -42,6 +44,8 @@ mod graph_migration_test;
 mod graph_ordered_limit_test;
 #[cfg(feature = "kv-mem")]
 mod graph_semijoin_test;
+#[cfg(feature = "kv-mem")]
+mod index_format_level_test;
 #[cfg(feature = "kv-mem")]
 mod index_key_kernel_test;
 #[cfg(feature = "kv-mem")]

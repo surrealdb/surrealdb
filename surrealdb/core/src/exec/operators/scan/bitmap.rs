@@ -526,9 +526,16 @@ async fn build_fulltext_bitmap(
 	.context("Failed to open full-text index")?;
 	let query_terms = {
 		let az_fn = StreamingAnalyzerFunction::new(bctx.ctx);
-		fti.extract_querying_terms(frozen_ctx, &az_fn, query.to_owned())
-			.await
-			.context("Failed to extract query terms")?
+		// The terms are read through the node's cache, keyed by the table's
+		// catalog version, which the run reads as it reads the version a
+		// compiled unit is kept under.
+		crate::exec::compiles::seam(fti.extract_querying_terms(
+			frozen_ctx,
+			&az_fn,
+			query.to_owned(),
+		))
+		.await
+		.context("Failed to extract query terms")?
 	};
 	if query_terms.is_empty() {
 		return Ok(RoaringTreemap::new());

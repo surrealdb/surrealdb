@@ -209,7 +209,10 @@ impl IndexFunction for SearchHighlight {
 				partial,
 			};
 
-			ft.index.highlight(&tx, &rid, &ft.terms, hlp, &ft.column, doc).await
+			let Some(doc_id) = match_ctx.doc_id(ctx, ft, &rid).await? else {
+				return Ok(Value::None);
+			};
+			ft.index.highlight_doc(&tx, doc_id, &ft.terms, hlp, &ft.column, doc).await
 		})
 	}
 }
@@ -274,21 +277,27 @@ impl IndexFunction for SearchScore {
 				return Ok(Value::None);
 			};
 
-			let scorer = match &ft.scorer {
-				Some(s) => s,
-				None => return Ok(Value::None),
+			// The scan that listed the row scored it with its batch.
+			if let Some(score) = match_ctx.remembered_score(&rid) {
+				return Ok(Value::Number(Number::Float(score as f64)));
+			}
+			#[cfg(test)]
+			crate::exec::function::ROW_SCORES.with(|scores| scores.set(scores.get() + 1));
+
+			let Some(scorer) = match_ctx.scorer(ctx, ft).await? else {
+				return Ok(Value::None);
 			};
 
 			let tx = ctx.txn();
 
 			// Get the document ID from the record ID
-			let doc_id = match ft.index.get_doc_id(&tx, &rid).await? {
-				Some(id) => id,
-				None => return Ok(Value::None),
+			let Some(doc_id) = match_ctx.doc_id(ctx, ft, &rid).await? else {
+				return Ok(Value::None);
 			};
 
 			// Compute the BM25 score
 			let score = scorer.score(&ft.index, &tx, &ft.terms, doc_id).await?;
+			match_ctx.remember_score(&rid, doc_id, score);
 			Ok(Value::Number(Number::Float(score as f64)))
 		})
 	}
@@ -364,7 +373,10 @@ impl IndexFunction for SearchOffsets {
 
 			let tx = ctx.txn();
 
-			ft.index.read_offsets(&tx, &rid, &ft.terms, partial).await
+			let Some(doc_id) = match_ctx.doc_id(ctx, ft, &rid).await? else {
+				return Ok(Value::None);
+			};
+			ft.index.read_offsets_doc(&tx, doc_id, &ft.terms, partial).await
 		})
 	}
 }

@@ -1046,6 +1046,7 @@ fn map_decision(
 				column: index.cols.first().cloned(),
 				decode: None,
 				read,
+				topk: None,
 			}));
 		}
 		AccessPath::KnnSearch {
@@ -1314,6 +1315,8 @@ fn index_union(
 				read: BranchReadShape::FullText {
 					query,
 					operator,
+					column: index.cols.first().cloned(),
+					shared_doc_ids: index.uses_shared_doc_ids(),
 				},
 				direction: Direction::Forward,
 			}),
@@ -1355,6 +1358,7 @@ fn index_union(
 		ordered_by,
 		decode: None,
 		read: read.clone(),
+		topk: None,
 	})))
 }
 

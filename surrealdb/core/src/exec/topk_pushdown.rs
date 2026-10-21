@@ -241,22 +241,34 @@ impl TopKThresholdProbe {
 
 	/// Whether a row whose first ORDER BY key is `candidate` cannot beat `threshold`.
 	fn rejects_candidate(&self, threshold: &Value, candidate: &Value) -> bool {
-		// Same comparison the sort heap uses (collate/numeric keys are
-		// ineligible for pushdown, so plain Value ordering applies).
-		let ord = compare_values(candidate, threshold, false, false);
-		let ord = match self.direction {
-			SortDirection::Asc => ord,
-			SortDirection::Desc => ord.reverse(),
-		};
-		match ord {
-			// Strictly worse than the heap's worst: can never be admitted.
-			Ordering::Greater => true,
-			// Ties with the heap's worst: the heap admits only on strict
-			// Less, so a single-key tie can never be admitted either. With
-			// more keys the tail could still win — fall through.
-			Ordering::Equal => self.single_key,
-			Ordering::Less => false,
-		}
+		cannot_beat(threshold, candidate, self.direction, self.single_key)
+	}
+}
+
+/// Whether a row whose first ORDER BY key is `candidate` cannot beat `threshold`, the first key
+/// of the worst row a sort in `direction` keeps: it orders strictly after it, or ties it where
+/// the order has `single_key`.
+pub(crate) fn cannot_beat(
+	threshold: &Value,
+	candidate: &Value,
+	direction: SortDirection,
+	single_key: bool,
+) -> bool {
+	// Same comparison the sort heap uses (collate/numeric keys are
+	// ineligible for pushdown, so plain Value ordering applies).
+	let ord = compare_values(candidate, threshold, false, false);
+	let ord = match direction {
+		SortDirection::Asc => ord,
+		SortDirection::Desc => ord.reverse(),
+	};
+	match ord {
+		// Strictly worse than the heap's worst: can never be admitted.
+		Ordering::Greater => true,
+		// Ties with the heap's worst: the heap admits only on strict
+		// Less, so a single-key tie can never be admitted either. With
+		// more keys the tail could still win — fall through.
+		Ordering::Equal => single_key,
+		Ordering::Less => false,
 	}
 }
 

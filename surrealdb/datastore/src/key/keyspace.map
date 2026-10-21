@@ -233,6 +233,11 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}*{tb}+{ix}!td{term}{id}                                                                     TermPostingKey ->  crate::values::fulltext::TermDocument
 /*{ns}*{db}*{tb}+{ix}!tr{term}                                                                    TermDocsResidualKey ->  crate::values::fulltext::TermDocsResidual
 /*{ns}*{db}*{tb}+{ix}!tr                                                                       TermDocsResidualPrefix ->  (range)
+/*{ns}*{db}*{tb}+{ix}!tk{term}                                                                          TermBlocksKey ->  crate::values::fulltext::TermBlocks
+/*{ns}*{db}*{tb}+{ix}!tk                                                                             TermBlocksPrefix ->  (range)
+/*{ns}*{db}*{tb}+{ix}!tp{term}{start}                                                                    TermBlockKey ->  crate::values::fulltext::PostingBlock
+/*{ns}*{db}*{tb}+{ix}!tp                                                                              TermBlockPrefix ->  (range)
+/*{ns}*{db}*{tb}+{ix}!tp{term}                                                                    TermBlockTermPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!dt{id}                                                                              DocTermsKey ->  crate::values::fulltext::DocumentTerms
 /*{ns}*{db}*{tb}+{ix}!dt                                                                               DocTermsPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!tt                                                                               TermChangesKey ->  String
@@ -241,6 +246,9 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}*{tb}+{ix}!tx{term}{nid}{uid}{add}                                                      TermChangeBatchKey ->  roaring::RoaringTreemap
 /*{ns}*{db}*{tb}+{ix}!tx                                                                        TermChangeBatchPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!tx{term}                                                              TermChangeBatchTermPrefix ->  (range)
+/*{ns}*{db}*{tb}+{ix}!tf{term}{nid}{uid}                                                        TermChangePostingsKey ->  crate::values::fulltext::ChangePostings
+/*{ns}*{db}*{tb}+{ix}!tf                                                                     TermChangePostingsPrefix ->  (range)
+/*{ns}*{db}*{tb}+{ix}!tf{term}                                                           TermChangePostingsTermPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!dc                                                                                  DocStatsKey ->  crate::values::fulltext::DocLengthAndCount
 /*{ns}*{db}*{tb}+{ix}!dc{doc_id}{nid}{uid}                                                           DocStatsDeltaKey ->  crate::values::fulltext::DocLengthAndCount
 /*{ns}*{db}*{tb}+{ix}!dx{nid}{uid}                                                                   DocStatsBatchKey ->  crate::values::fulltext::DocLengthAndCount

@@ -1981,6 +1981,7 @@ pub(super) async fn run_storage_source(
 			branches,
 			merge,
 			decode,
+			topk,
 		} => {
 			let branch_distinct =
 				matches!(merge, Some(MergeMode::ById(_) | MergeMode::ByIndexKey { .. }));
@@ -1991,9 +1992,84 @@ pub(super) async fn run_storage_source(
 			let by_encoding = branches
 				.iter()
 				.all(|b| crate::catalog::spells_identity_entry_ids(b.index.format_version));
-			let mut branches = branches
+			// Each full-text branch's clause context, shared with the program's calls on it.
+			let mut contexts: Vec<Option<super::interp::ScanMatch>> = branches
 				.iter()
 				.map(|b| match &b.read {
+					super::payload::BranchRead::FullText {
+						query,
+						..
+					} => {
+						let definition = b.index.definition();
+						state.scan_match_context(program, &definition.table_name, definition, query)
+					}
+					super::payload::BranchRead::BTree(_) => None,
+				})
+				.collect();
+			// Where the sort above orders by a sum of the branches' clause scores, every
+			// full-text branch passes over the hits whose sum cannot enter its top k. Every
+			// clause of the sum is scored in its own context, read before any branch lists
+			// a hit; a clause no call scores leaves the branches rejecting nothing.
+			let union_scores = match topk {
+				Some(topk) => {
+					let mut scored = Vec::new();
+					topk.sum.clauses(&mut scored);
+					let clauses = scored
+						.iter()
+						.map(|clause| {
+							branches.iter().zip(&contexts).find_map(|(b, context)| {
+								let super::payload::BranchRead::FullText {
+									query,
+									operator,
+								} = &b.read
+								else {
+									return None;
+								};
+								let context = context.as_ref().filter(|context| context.scored)?;
+								(operator.rf == Some(*clause)).then(|| {
+									super::fulltext::UnionClause {
+										clause: *clause,
+										table: b.index.definition().table_name.clone(),
+										index: b.index.clone(),
+										query: query.clone(),
+										context: std::sync::Arc::clone(&context.context),
+									}
+								})
+							})
+						})
+						.collect::<Option<Vec<_>>>();
+					let cell = state.topk_cells.get(topk.scan.sort as usize).cloned().flatten();
+					match (clauses, cell) {
+						(Some(clauses), Some(cell)) => {
+							Some(std::sync::Arc::new(super::fulltext::UnionScores {
+								cell,
+								direction: topk.scan.direction,
+								single_key: topk.scan.single_key,
+								sum: topk.sum.clone(),
+								clauses,
+							}))
+						}
+						_ => None,
+					}
+				}
+				None => None,
+			};
+			if let Some(union_scores) = &union_scores {
+				let services = EngineServices::new(ctx);
+				if let Err(e) = union_scores.prepare(ctx, &services).await {
+					let mut rows = Rows::of(program, pipeline, ctx);
+					return rows.fail(e, state, ctx, yielder, flush_at).await;
+				}
+			}
+			// The first batch of a branch rejecting by the sum is as large as the sort keeps.
+			let first_batch = topk
+				.as_ref()
+				.and_then(|topk| program.sorts.get(topk.scan.sort as usize)?.keep)
+				.map_or(FULL_TEXT_BATCH_SIZE, |keep| keep.clamp(1, FULL_TEXT_BATCH_SIZE));
+			let mut branches = branches
+				.iter()
+				.zip(contexts.iter_mut())
+				.map(|(b, context)| match &b.read {
 					super::payload::BranchRead::BTree(access) => {
 						let distinct = branch_distinct && access_repeats_records(&b.index, access);
 						IndexRecords::open(
@@ -2014,8 +2090,11 @@ pub(super) async fn run_storage_source(
 						&b.index,
 						query,
 						operator,
+						context.take(),
 						version,
 						decode.as_ref(),
+						union_scores.clone(),
+						first_batch,
 					)),
 				})
 				.collect::<FlowResult<Vec<_>>>()?;
@@ -2162,6 +2241,7 @@ pub(super) async fn run_storage_source(
 			query,
 			operator,
 			decode,
+			topk,
 		} => {
 			let services = EngineServices::new(ctx);
 			let mut rows = Rows::of(program, pipeline, ctx);
@@ -2173,19 +2253,60 @@ pub(super) async fn run_storage_source(
 					}
 				};
 			}
-			let Some(mut hits) = read!(
-				super::fulltext::candidates(ctx, &services, table, index, query, operator).await
+			// The calls of the program that name this scan's clause read the
+			// terms the scan reads, through the context they share.
+			let shared = state.scan_match_context(program, table, index.definition(), query);
+			let Some(mut listing) = read!(
+				super::fulltext::candidates(
+					ctx,
+					&services,
+					table,
+					index,
+					query,
+					operator,
+					shared.as_ref().map(|shared| &*shared.context)
+				)
+				.await
 			) else {
 				return rows.finish(state, ctx, yielder, flush_at).await;
 			};
-			let txn = ctx.txn();
 			let mut reader = RecordReader::stored(ctx, RESOLVE_BATCH_SIZE, version, decode.clone());
+			// A scan passing hits over by the sort's threshold starts with batches as
+			// large as the sort keeps and doubles them, so it reads the threshold
+			// often while it is still loose, which is when it is tightening fastest.
+			let mut limit = topk
+				.as_ref()
+				.and_then(|topk| program.sorts.get(topk.sort as usize)?.keep)
+				.map_or(FULL_TEXT_BATCH_SIZE, |keep| keep.clamp(1, FULL_TEXT_BATCH_SIZE));
 			loop {
-				let rids = read!(hits.next_batch(&txn, FULL_TEXT_BATCH_SIZE).await);
-				if rids.is_empty() {
-					return rows.finish(state, ctx, yielder, flush_at).await;
+				// The hits whose score cannot enter the sort's top k are passed
+				// over before anything else is read of them.
+				let threshold = topk.as_ref().and_then(|topk| {
+					let cell = state.topk_cells.get(topk.sort as usize)?.as_ref()?;
+					Some(super::fulltext::Threshold::Clause(topk, cell.snapshot()?))
+				});
+				// Until the sort publishes a threshold, a batch stays as large as the
+				// sort keeps, so it publishes one after as few records as it can.
+				let batch = limit;
+				if threshold.is_some() {
+					limit = limit.saturating_mul(2).min(FULL_TEXT_BATCH_SIZE);
 				}
-				read!(super::fuel::tick(ctx, super::fuel::units(rids.len())).await);
+				let Some(rids) = read!(
+					super::fulltext::next_records(
+						ctx,
+						&mut listing,
+						batch,
+						shared.as_ref(),
+						index.definition().index_id,
+						threshold,
+					)
+					.await
+				) else {
+					return rows.finish(state, ctx, yielder, flush_at).await;
+				};
+				if rids.is_empty() {
+					continue;
+				}
 				reader.push(rids);
 				while !reader.is_drained() {
 					let records = read!(reader.next_rows(ctx).await);
@@ -2504,7 +2625,17 @@ enum Listing {
 		index: crate::exec::index::access_path::IndexRef,
 		query: String,
 		operator: crate::expr::operator::MatchesOperator,
+		/// The context of the clause the listing answers, shared with the
+		/// program's calls that name it
+		/// ([`super::interp::State::scan_match_context`]).
+		shared: Option<super::interp::ScanMatch>,
 		hits: Option<Option<Box<crate::exec::operators::scan::FullTextHits>>>,
+		/// What the branch of an index union rejects hits by, where the sort above
+		/// orders by a sum of the union's clause scores.
+		union: Option<std::sync::Arc<super::fulltext::UnionScores>>,
+		/// How many hits the next batch takes: as many as the sort keeps until it
+		/// publishes a threshold, then twice the last, up to the full batch size.
+		limit: usize,
 	},
 }
 
@@ -2532,20 +2663,32 @@ impl IndexRecords {
 		})
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	fn full_text(
 		ctx: &ExecutionContext,
 		index: &crate::exec::index::access_path::IndexRef,
 		query: &str,
 		operator: &crate::expr::operator::MatchesOperator,
+		shared: Option<super::interp::ScanMatch>,
 		version: Option<u64>,
 		decode: Option<&DecodeFields>,
+		union: Option<std::sync::Arc<super::fulltext::UnionScores>>,
+		first_batch: usize,
 	) -> Self {
+		let limit = if union.is_some() {
+			first_batch
+		} else {
+			FULL_TEXT_BATCH_SIZE
+		};
 		Self {
 			listing: Listing::FullText {
 				index: index.clone(),
 				query: query.to_owned(),
 				operator: operator.clone(),
+				shared,
 				hits: None,
+				union,
+				limit,
 			},
 			reader: RecordReader::stored(ctx, RESOLVE_BATCH_SIZE, version, decode.cloned()),
 			rows: Default::default(),
@@ -2566,19 +2709,56 @@ impl IndexRecords {
 				index,
 				query,
 				operator,
+				shared,
 				hits,
+				union,
+				limit,
 			} => {
 				if hits.is_none() {
 					let table = index.definition().table_name.clone();
 					*hits = Some(
-						super::fulltext::candidates(ctx, &services, &table, index, query, operator)
-							.await?
-							.map(Box::new),
+						super::fulltext::candidates(
+							ctx,
+							&services,
+							&table,
+							index,
+							query,
+							operator,
+							shared.as_ref().map(|shared| &*shared.context),
+						)
+						.await?
+						.map(Box::new),
 					);
 				}
-				match hits.as_mut().and_then(Option::as_mut) {
-					Some(hits) => hits.next_batch(&ctx.txn(), FULL_TEXT_BATCH_SIZE).await,
-					None => Ok(Vec::new()),
+				let Some(listing) = hits.as_mut().and_then(Option::as_mut) else {
+					return Ok(Vec::new());
+				};
+				// A batch the listing hands on empty is not the end of the hits: only the
+				// end of the hits ends the listing.
+				loop {
+					// A branch rejecting by the sum reads the sort's threshold each batch,
+					// with batches doubling from the sort's size once it has one.
+					let threshold = union.as_deref().and_then(|union| {
+						Some(super::fulltext::Threshold::Sum(union, union.cell.snapshot()?))
+					});
+					let batch = *limit;
+					if threshold.is_some() {
+						*limit = limit.saturating_mul(2).min(FULL_TEXT_BATCH_SIZE);
+					}
+					let next = super::fulltext::next_records(
+						ctx,
+						listing,
+						batch,
+						shared.as_ref(),
+						index.definition().index_id,
+						threshold,
+					)
+					.await?;
+					match next {
+						Some(rids) if rids.is_empty() => continue,
+						Some(rids) => return Ok(rids),
+						None => return Ok(Vec::new()),
+					}
 				}
 			}
 		}

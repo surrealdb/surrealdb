@@ -1346,6 +1346,11 @@ impl<'a> TreeWalk<'a> {
 					}
 					None => {}
 				}
+				// The branches reject a hit whose sum of clause scores cannot enter the
+				// sort's top k.
+				if attrs.topk.as_ref().is_some_and(|(key, _)| key.rejects_entries) {
+					union.push(("topk_pushdown".to_string(), "score".to_string()));
+				}
 				Ok(self.node("UnionIndexScan", ContextLevel::Database, union, children))
 			}
 			PhysOp::Bitmap(attrs) => {
@@ -1363,16 +1368,18 @@ impl<'a> TreeWalk<'a> {
 				let children = self.bitmap_nodes(&plan);
 				Ok(self.node("BitmapScan", ContextLevel::Database, table, children))
 			}
-			PhysOp::FullTextScan(attrs) => Ok(self.node(
-				"FullTextScan",
-				ContextLevel::Database,
-				vec![
+			PhysOp::FullTextScan(attrs) => {
+				let mut scan = vec![
 					("table".to_string(), attrs.table.to_string()),
 					("index".to_string(), attrs.index.index.to_string()),
 					("query".to_string(), attrs.query.clone()),
-				],
-				vec![],
-			)),
+				];
+				// The scan rejects a hit whose score cannot enter the sort's top k.
+				if attrs.topk.as_ref().is_some_and(|key| key.rejects_entries) {
+					scan.push(("topk_pushdown".to_string(), "score".to_string()));
+				}
+				Ok(self.node("FullTextScan", ContextLevel::Database, scan, vec![]))
+			}
 			PhysOp::KnnScan(attrs) => self.knn_scan(attrs, operands, regions),
 			PhysOp::Count(attrs) => self.count(attrs, operands, regions),
 			PhysOp::RecordScan(attrs) => {

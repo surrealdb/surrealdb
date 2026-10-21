@@ -84,7 +84,7 @@ Total rows: 2"'''
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id] {rows: 2}
-    Filter [ctx: Db] [predicate: tag = 'x' AND (search_title @1@ 'hello' OR search_body @2@ 'hello')] {rows: 2}
+    Filter [ctx: Db] [predicate: tag = 'x'] {rows: 2}
         UnionIndexScan [ctx: Db] [table: asset, branches: 2] {rows: 2}
             FullTextScan [ctx: Db] [table: asset, index: asset_search_title_ft, query: hello] {rows: 2}
             FullTextScan [ctx: Db] [table: asset, index: asset_search_body_ft, query: hello] {rows: 2}

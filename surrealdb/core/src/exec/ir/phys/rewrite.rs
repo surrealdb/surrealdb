@@ -30,7 +30,10 @@
 use smallvec::SmallVec;
 
 use super::facts::NestedReading;
-use super::ops::{KeyEqShape, KeyRangeShape, PhysOp, PhysTag, SortAttrs, SortKeyReadShape};
+use super::ops::{
+	BranchReadShape, KeyEqShape, KeyRangeShape, PhysOp, PhysTag, ScoreSum, SortAttrs,
+	SortKeyReadShape,
+};
 use super::placement::{Placement, install, place_all_reading};
 use super::{
 	chain, conjunct, hold_left, hop_key, index_answer, io, join_lookup, knn_ids, nested, once,
@@ -40,7 +43,7 @@ use crate::catalog::KeyStructure;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
 use crate::exec::index::key_range::DeliveredKeyOrder;
 use crate::exec::ir::core::facts::FactCache;
-use crate::exec::ir::core::ir::Ir;
+use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::pattern::{GREEDY_DEFAULT, GreedyReport, Pattern, apply_greedy};
 use crate::exec::ir::core::rewriter::Rewriter;
 use crate::exec::ir::core::value::ValueDef;
@@ -73,6 +76,7 @@ pub(crate) fn patterns() -> Vec<Box<dyn Pattern<PhysDialect>>> {
 		Box::new(AnsweredByLookup),
 		Box::new(AnsweredByIndex),
 		Box::new(AnsweredBySearch),
+		Box::new(AnsweredByUnion),
 		Box::new(ConjunctOrder),
 	]
 }
@@ -149,11 +153,42 @@ pub(crate) async fn run(
 		cx.physical.backend(),
 		NestedReading::Strategy,
 	)?;
-	let pruning: Vec<(OpId, bool)> = placed.iter().map(|(op, attr)| (*op, attr.prunes())).collect();
+	let mut placed = placed;
+	let pruning = settle_pruning(ir, facts, &cx.effects, &mut placed);
 	install(ir.placement_table_mut(), placed);
-	settle_thresholds(ir, facts, &pruning)?;
+	// A full-text scan whose threshold the settle dropped was placed serially for it. With the
+	// threshold gone it rejects no hit, so the pipelines are placed again, which leaves it to the
+	// policy; its pruning is unchanged, and the settle has nothing more to drop.
+	if settle_thresholds(ir, facts, &pruning)? {
+		let mut placed = place_all_reading(
+			ir,
+			facts,
+			cx.effects.registry,
+			placement,
+			cx.physical.backend(),
+			NestedReading::Strategy,
+		)?;
+		settle_pruning(ir, facts, &cx.effects, &mut placed);
+		install(ir.placement_table_mut(), placed);
+	}
 	io::run(ir, facts, cx)?;
 	Ok(report)
+}
+
+/// Marks each of `placed` that may reject a hit by its sort's score threshold though it does not
+/// prune ([`prunes_by_score`]), and answers, for each, whether its scan may reject entries.
+fn settle_pruning(
+	ir: &Ir,
+	facts: &mut FactCache,
+	effects: &crate::exec::ir::iface::catalog::EffectCx<'_>,
+	placed: &mut [(OpId, super::placement_attr::PlacementAttr)],
+) -> Vec<(OpId, bool)> {
+	for (pipeline, attr) in placed.iter_mut() {
+		if !attr.prunes() && prunes_by_score(ir, facts, effects, *pipeline, attr) {
+			attr.set_prunes_by_score(true);
+		}
+	}
+	placed.iter().map(|(op, attr)| (*op, attr.prunes() || attr.prunes_by_score())).collect()
 }
 
 /// States that the scan of every pipeline whose placement does not prune rejects no entry by a
@@ -165,12 +200,16 @@ pub(crate) async fn run(
 /// pipeline, whether its placement does ([`PlacementAttr::prunes`]). The plan keeps the key, which
 /// `EXPLAIN` shows as written; a scan that a datetime component of its keys cuts keeps its cutoff,
 /// which stops the scan and rejects no single entry.
+///
+/// Answers whether it dropped the threshold of a full-text scan or an index union, which placement
+/// ran serially for it ([`super::placement`]).
 fn settle_thresholds(
 	ir: &mut Ir,
 	facts: &mut FactCache,
 	pruning: &[(OpId, bool)],
-) -> Result<(), IrError> {
+) -> Result<bool, IrError> {
 	let mut keyed = Vec::new();
+	let mut full_text = false;
 	for (pipeline, prunes) in pruning {
 		if *prunes {
 			continue;
@@ -181,9 +220,15 @@ fn settle_thresholds(
 		let key = match phys(ir, source) {
 			Some(PhysOp::TableScan(attrs)) => attrs.topk.as_ref(),
 			Some(PhysOp::KeyRangeScan(attrs)) => attrs.topk.as_ref(),
+			Some(PhysOp::FullTextScan(attrs)) => attrs.topk.as_ref(),
+			Some(PhysOp::IndexUnion(attrs)) => attrs.topk.as_ref().map(|(key, _)| key),
 			Some(_) | None => None,
 		};
 		if key.is_some_and(|key| key.rejects_entries) {
+			full_text |= matches!(
+				phys(ir, source),
+				Some(PhysOp::FullTextScan(_)) | Some(PhysOp::IndexUnion(_))
+			);
 			keyed.push(source);
 		}
 	}
@@ -193,6 +238,8 @@ fn settle_thresholds(
 			let key = match kind {
 				OpKind::Phys(PhysOp::TableScan(attrs)) => attrs.topk.as_mut(),
 				OpKind::Phys(PhysOp::KeyRangeScan(attrs)) => attrs.topk.as_mut(),
+				OpKind::Phys(PhysOp::FullTextScan(attrs)) => attrs.topk.as_mut(),
+				OpKind::Phys(PhysOp::IndexUnion(attrs)) => attrs.topk.as_mut().map(|(key, _)| key),
 				OpKind::Phys(_) | OpKind::Logical(_) | OpKind::Expr(_) => None,
 			};
 			if let Some(key) = key {
@@ -200,7 +247,81 @@ fn settle_thresholds(
 			}
 		})?;
 	}
-	Ok(())
+	Ok(full_text)
+}
+
+/// Whether the full-text scan or index union of `pipeline`, which does not prune, may still reject
+/// a hit by the threshold of the sort ordered first by a sum of clause scores
+/// ([`PlacementAttr::prunes_by_score`], [`score_target`]).
+///
+/// A rejected hit skips its record's read and the ops between the scan and the sort: the
+/// predicates crossed and the sort's keys. It may be skipped when none of those raises for the
+/// hit. Every crossed predicate and every key after the first must raise for no row; the first
+/// key is the sum of `search::score` calls whose value the scan computed for the hit, every score
+/// a number, so it can raise nothing the scan did not raise first. The logical legality is not
+/// read: it still counts the `MATCHES` the scan answers, which no op of the pipeline evaluates. A
+/// pipeline holding a block or a nested statement is refused, as for [`PlacementAttr::prunes`].
+fn prunes_by_score(
+	ir: &Ir,
+	facts: &mut FactCache,
+	effects: &crate::exec::ir::iface::catalog::EffectCx<'_>,
+	pipeline: OpId,
+	attr: &super::placement_attr::PlacementAttr,
+) -> bool {
+	let Some(physical) = attr.facts() else {
+		return false;
+	};
+	if physical.host_blocks || physical.nested != crate::exec::planner::placement::NestedUse::None {
+		return false;
+	}
+	let Some(source) = super::facts::source_of(ir, pipeline) else {
+		return false;
+	};
+	let keyed = match phys(ir, source) {
+		Some(PhysOp::FullTextScan(scan)) => scan.topk.is_some(),
+		Some(PhysOp::IndexUnion(union)) => union.topk.is_some(),
+		Some(_) | None => false,
+	};
+	if !keyed {
+		return false;
+	}
+	let mut sorts = Vec::new();
+	ir.walk(ir.top(), WalkOrder::PreOrder, &mut |op| {
+		if matches!(phys(ir, op), Some(PhysOp::Sort(_))) {
+			sorts.push(op);
+		}
+		Walk::Continue
+	});
+	sorts.into_iter().any(|sort| {
+		let Some(PhysOp::Sort(attrs)) = phys(ir, sort) else {
+			return false;
+		};
+		let Some((target, _, computing)) = score_target(ir, sort, attrs) else {
+			return false;
+		};
+		if target.op() != source {
+			return false;
+		}
+		let raises = |facts: &mut FactCache, op: OpId| {
+			!crate::exec::ir::analysis::fallibility::of_with(ir, facts, effects, op).is_infallible()
+		};
+		let Some(chain) = ir
+			.op(sort)
+			.and_then(|data| data.operands.first().copied())
+			.and_then(|input| beneath(ir, input, keeps_scan))
+		else {
+			return false;
+		};
+		if chain.crossed.iter().any(|op| raises(facts, *op)) {
+			return false;
+		}
+		let regions = ir.op(sort).map(|data| data.regions.clone()).unwrap_or_default();
+		regions.iter().all(|region| {
+			ops_in_region(ir, *region)
+				.iter()
+				.all(|op| computing.contains(op) || !raises(facts, *op))
+		})
+	})
 }
 
 /// The physical op `op` is, or `None` for an op of another dialect or one that is gone.
@@ -727,6 +848,248 @@ fn topk_key(ir: &Ir, op: OpId, sort: &SortAttrs) -> Option<TopKKey> {
 	})
 }
 
+/// What answers the first key of a bounded sort when that key is a sum of full-text clause
+/// scores.
+#[derive(Clone, Debug)]
+pub(super) enum ScoreTarget {
+	/// The full-text scan of the one clause the key scores.
+	Scan(OpId),
+	/// The index union whose full-text branches answer every clause the sum scores.
+	Union(OpId, ScoreSum),
+}
+
+impl ScoreTarget {
+	/// The op that rejects hits by the key.
+	pub(super) fn op(&self) -> OpId {
+		match self {
+			Self::Scan(op) | Self::Union(op, _) => *op,
+		}
+	}
+}
+
+/// What answers the first key of the sort `op` beneath it, with the top-k key it rejects hits by
+/// and the ops of the key's region that compute the score.
+///
+/// The first key must be a sum of `search::score(N)` calls with literal clauses, a lone call
+/// included ([`score_sum`]), with no `COLLATE` or `NUMERIC`. Reached through predicates alone, it
+/// is answered by:
+/// - the full-text scan of clause `N`, where the key is that clause's score alone;
+/// - an index union of full-text branches over the table's shared doc ids, merging nothing, where
+///   every clause the sum scores is a branch's. A branch scores each hit under every such clause, a
+///   clause the hit does not match scoring zero as `search::score` does, and adds the scores as the
+///   key adds them.
+///
+/// The scan computes the very value the sort orders by before reading a hit's record
+/// ([`crate::exec::function::MatchContext::scores`]), so it compares that value against the
+/// sort's threshold.
+fn score_target(ir: &Ir, op: OpId, sort: &SortAttrs) -> Option<(ScoreTarget, TopKKey, Vec<OpId>)> {
+	let first = sort.keys.first()?;
+	if first.collate || first.numeric || !matches!(first.read, SortKeyReadShape::Computed) {
+		return None;
+	}
+	let (sum, computing) = score_sum(ir, *ir.op(op)?.regions.first()?)?;
+	let input = ir.op(op)?.operands.first().copied()?;
+	let chain = beneath(ir, input, keeps_scan)?;
+	let source = phys(ir, chain.source)?;
+	let target = if let PhysOp::FullTextScan(scan) = source {
+		match sum {
+			ScoreSum::Clause(clause) if scan.operator.rf == Some(clause) => {
+				ScoreTarget::Scan(chain.source)
+			}
+			ScoreSum::Clause(_) | ScoreSum::Add(..) => return None,
+		}
+	} else if let PhysOp::IndexUnion(union) = source {
+		if union.merge.is_some() {
+			return None;
+		}
+		{
+			let mut answered = Vec::with_capacity(union.branches.len());
+			for branch in &union.branches {
+				let BranchReadShape::FullText {
+					operator,
+					shared_doc_ids: true,
+					..
+				} = &branch.read
+				else {
+					return None;
+				};
+				answered.push(operator.rf?);
+			}
+			let mut scored = Vec::new();
+			sum.clauses(&mut scored);
+			if !scored.iter().all(|clause| answered.contains(clause)) {
+				return None;
+			}
+			// One branch per reference, so the branch answering a summed clause is the one
+			// branch carrying its reference.
+			let mut distinct = answered.clone();
+			distinct.sort_unstable();
+			distinct.dedup();
+			if distinct.len() != answered.len() {
+				return None;
+			}
+			ScoreTarget::Union(chain.source, sum)
+		}
+	} else {
+		return None;
+	};
+	// Each summed call scores the clause its reference resolves to, the last `MATCHES` written
+	// with it ([`super::matches::IndexScope::resolve`]). That must be the clause the scan or the
+	// branch carrying the reference answers: its column and its literal query. A reference
+	// written on several `MATCHES` may otherwise name one clause to the sort and another to the
+	// scan, which would then reject hits by a score the sort does not order by.
+	for call in computing.iter().copied().filter(|op| is_score_call(ir, *op)) {
+		let rf = score_clause_of(ir, call)?;
+		let clause = ir.index_scope(call)?.resolve(rf)?;
+		let super::matches::ClauseQuery::Text(text) = &clause.query else {
+			return None;
+		};
+		let (column, query) = answering(ir, &target, rf)?;
+		if text != query || column_path(column)? != *clause.field.as_ref()? {
+			return None;
+		}
+	}
+	Some((
+		target,
+		TopKKey {
+			path: std::sync::Arc::from([]),
+			direction: if first.ascending {
+				SortDirection::Asc
+			} else {
+				SortDirection::Desc
+			},
+			single_key: sort.keys.len() == 1,
+			depth_limit: 0,
+			packed_rows: false,
+			coarse_cutoff: None,
+			rejects_entries: true,
+		},
+		computing,
+	))
+}
+
+/// The column and the query of the scan or union branch of `target` that answers reference `rf`.
+fn answering<'a>(
+	ir: &'a Ir,
+	target: &ScoreTarget,
+	rf: crate::expr::operator::MatchRef,
+) -> Option<(&'a crate::expr::Idiom, &'a str)> {
+	match target {
+		ScoreTarget::Scan(op) => {
+			let Some(PhysOp::FullTextScan(scan)) = phys(ir, *op) else {
+				return None;
+			};
+			Some((scan.column.as_ref()?, scan.query.as_str()))
+		}
+		ScoreTarget::Union(op, _) => {
+			let Some(PhysOp::IndexUnion(union)) = phys(ir, *op) else {
+				return None;
+			};
+			union.branches.iter().find_map(|branch| match &branch.read {
+				BranchReadShape::FullText {
+					query,
+					operator,
+					column: Some(column),
+					..
+				} if operator.rf == Some(rf) => Some((column, query.as_str())),
+				BranchReadShape::FullText {
+					..
+				}
+				| BranchReadShape::BTree(_) => None,
+			})
+		}
+	}
+}
+
+/// The path a `MATCHES` clause over `column` reads off the row
+/// ([`super::matches::field_path`]), when `column` is a chain of field names.
+fn column_path(column: &crate::expr::Idiom) -> Option<crate::expr::logical::FieldPath> {
+	let name = |part: &crate::expr::Part| {
+		if let crate::expr::Part::Field(name) = part {
+			Some(name.clone())
+		} else {
+			None
+		}
+	};
+	let (first, rest) = column.0.split_first()?;
+	rest.iter().try_fold(crate::expr::logical::FieldPath::field(name(first)?), |path, part| {
+		Some(path.child(crate::expr::logical::FieldSegment::Field(name(part)?)))
+	})
+}
+
+/// The sum of clause scores a region yields, when it yields exactly one: `search::score(N)` calls
+/// with literal clauses ([`score_call`]) joined by `+`, shaped as written. Answers the sum with
+/// the ops that compute it, every call and every addition.
+fn score_sum(ir: &Ir, region: RegionId) -> Option<(ScoreSum, Vec<OpId>)> {
+	let last = ops_in_region(ir, region).last().copied()?;
+	let closing = ir.op(last)?;
+	let (OpKind::Expr(ExprOp::Yield), [value]) = (&closing.kind, closing.operands.as_slice())
+	else {
+		return None;
+	};
+	let mut computing = Vec::new();
+	let sum = score_term(ir, *value, &mut computing, SCORE_SUM_DEPTH)?;
+	Some((sum, computing))
+}
+
+/// How many additions deep a sum of clause scores is read.
+const SCORE_SUM_DEPTH: usize = 16;
+
+/// The sum of clause scores `value` is, adding the ops computing it to `computing`.
+fn score_term(
+	ir: &Ir,
+	value: ValueId,
+	computing: &mut Vec<OpId>,
+	depth: usize,
+) -> Option<ScoreSum> {
+	let depth = depth.checked_sub(1)?;
+	let op = conjunct::def_op(ir, value)?;
+	let data = ir.op(op)?;
+	if let (
+		OpKind::Expr(ExprOp::Binary {
+			op: crate::expr::BinaryOperator::Add,
+			..
+		}),
+		[left, right],
+	) = (&data.kind, data.operands.as_slice())
+	{
+		computing.push(op);
+		let left = score_term(ir, *left, computing, depth)?;
+		let right = score_term(ir, *right, computing, depth)?;
+		return Some(ScoreSum::Add(Box::new(left), Box::new(right)));
+	}
+	let clause = score_clause_of(ir, op)?;
+	computing.push(op);
+	Some(ScoreSum::Clause(clause))
+}
+
+/// The clause `N` of the call `op` when it is `search::score(N)` with a literal `N` and no other
+/// argument ([`is_score_call`]).
+fn score_clause_of(ir: &Ir, op: OpId) -> Option<crate::expr::operator::MatchRef> {
+	let call = ir.op(op)?;
+	if !is_score_call(ir, op) {
+		return None;
+	}
+	u8::try_from(literal_count(ir, *call.operands.first()?)?).ok()
+}
+
+/// Whether `op` is a `search::score` call with one argument, its clause, beside the row names
+/// every index function is passed. A call with more arguments raises however it is answered, so
+/// it is not the call a scan answers.
+fn is_score_call(ir: &Ir, op: OpId) -> bool {
+	let Some(data) = ir.op(op) else {
+		return false;
+	};
+	let OpKind::Expr(ExprOp::Call(attrs)) = &data.kind else {
+		return false;
+	};
+	matches!(&attrs.function, crate::expr::Function::Normal(name) if name == SCORE_FUNCTION)
+		&& data.operands.len() == 1 + usize::from(attrs.row_names)
+}
+
+/// The index function whose value a full-text scan computes for each hit it lists.
+const SCORE_FUNCTION: &str = "search::score";
+
 /// A sort under a literal `LIMIT` keeps only the rows the limit can reach.
 ///
 /// The bound is sound because the sort
@@ -807,7 +1170,15 @@ impl Pattern<PhysDialect> for BoundSortTopK {
 			return Ok(false);
 		}
 		let key = topk_key(ir, sort, attrs);
-		let pushdown = key.is_some();
+		// A sort ordered first by a full-text clause's score has the scan answering the clause
+		// reject hits by it, before their records are read.
+		let score = key.is_none().then(|| score_target(ir, sort, attrs)).flatten();
+		let score_takes = score.clone().filter(|(target, ..)| match phys(ir, target.op()) {
+			Some(PhysOp::FullTextScan(attrs)) => attrs.topk.is_none(),
+			Some(PhysOp::IndexUnion(attrs)) => attrs.topk.is_none(),
+			Some(_) | None => false,
+		});
+		let pushdown = key.is_some() || score.is_some();
 		let scan = key.as_ref().and_then(|key| {
 			let input = ir.op(sort)?.operands.first().copied()?;
 			let chain = beneath(ir, input, keeps_scan)?;
@@ -825,8 +1196,27 @@ impl Pattern<PhysDialect> for BoundSortTopK {
 			Some(PhysOp::KeyRangeScan(attrs)) => attrs.topk.is_none(),
 			Some(_) | None => false,
 		});
-		if attrs.keep == Some(keep) && attrs.pushdown == pushdown && scan_takes.is_none() {
+		if attrs.keep == Some(keep)
+			&& attrs.pushdown == pushdown
+			&& scan_takes.is_none()
+			&& score_takes.is_none()
+		{
 			return Ok(false);
+		}
+		if let Some((target, key, _)) = score_takes {
+			rw.update_kind(target.op(), |kind| {
+				if let (OpKind::Phys(PhysOp::FullTextScan(attrs)), ScoreTarget::Scan(_)) =
+					(&mut *kind, &target)
+				{
+					attrs.topk = Some(key.clone());
+				} else if let (
+					OpKind::Phys(PhysOp::IndexUnion(attrs)),
+					ScoreTarget::Union(_, sum),
+				) = (kind, &target)
+				{
+					attrs.topk = Some((key.clone(), sum.clone()));
+				}
+			})?;
 		}
 		if let (Some(scan), Some(key)) = (scan_takes, key) {
 			rw.update_kind(scan, |kind| {
@@ -1155,6 +1545,77 @@ impl Pattern<PhysDialect> for AnsweredBySearch {
 			.filter(|leaf| {
 				index_answer::answers_search(ir, *leaf, column, &scan.operator, &scan.query)
 			})
+			.collect();
+		if dropped.is_empty() {
+			return Ok(false);
+		}
+		conjunct::drop_conjuncts(rw, &site, &leaves, &dropped)
+	}
+}
+
+/// A conjunct that is the disjunction of the probes of the index union beneath a predicate is
+/// dropped.
+///
+/// An index union whose branches are all full-text scans lists exactly the records some branch's
+/// probe admits, so a conjunct that is the `OR` of those probes, each once or more and none other
+/// ([`index_answer::answers_union`]), holds of every row it lists. The ops between the filter and
+/// the union pass its rows on in order ([`keeps_order`]). The conjuncts that stay keep their order
+/// and their laziness, as for [`AnsweredBySearch`].
+struct AnsweredByUnion;
+
+impl Pattern<PhysDialect> for AnsweredByUnion {
+	fn name(&self) -> &'static str {
+		"answered_by_union"
+	}
+
+	fn root(&self) -> PhysTag {
+		PhysTag::Filter
+	}
+
+	fn benefit(&self) -> u16 {
+		14
+	}
+
+	fn apply(&self, op: OpId, rw: &mut Rewriter<'_>) -> Result<bool, IrError> {
+		let ir = rw.ir();
+		let Some(site) = conjunct::site(ir, op) else {
+			return Ok(false);
+		};
+		let Some(chain) = beneath(ir, site.input, keeps_order) else {
+			return Ok(false);
+		};
+		let Some(PhysOp::IndexUnion(union)) = phys(ir, chain.source) else {
+			return Ok(false);
+		};
+		let Some(probes) = union
+			.branches
+			.iter()
+			.map(|branch| match &branch.read {
+				BranchReadShape::FullText {
+					query,
+					operator,
+					column: Some(column),
+					..
+				} => Some(index_answer::SearchProbe {
+					column,
+					operator,
+					query,
+				}),
+				BranchReadShape::FullText {
+					column: None,
+					..
+				}
+				| BranchReadShape::BTree(_) => None,
+			})
+			.collect::<Option<Vec<_>>>()
+		else {
+			return Ok(false);
+		};
+		let leaves = conjunct::leaves(ir, &site);
+		let dropped: Vec<ValueId> = leaves
+			.iter()
+			.copied()
+			.filter(|leaf| index_answer::answers_union(ir, *leaf, &probes))
 			.collect();
 		if dropped.is_empty() {
 			return Ok(false);

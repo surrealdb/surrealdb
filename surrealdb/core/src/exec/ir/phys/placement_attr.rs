@@ -150,6 +150,14 @@ pub(crate) struct PlacementAttr {
 	/// Whether the pipeline raises for no row, so an entry that a top-k threshold shows worse than
 	/// every row the sort keeps may be rejected before the body runs.
 	prunes: bool,
+	/// Whether the full-text scan of the pipeline may reject a hit by the threshold of the sort
+	/// ordered first by the clause's score, though the pipeline does not prune.
+	///
+	/// Narrower than [`Self::prunes`] and read by nothing else: it holds where every op a rejected
+	/// hit would skip raises for no row except that clause's `search::score` call, whose value the
+	/// scan computed for the hit before rejecting it. A hit the scan holds no score for is never
+	/// rejected, so its call still runs.
+	prunes_by_score: bool,
 	/// How the pipeline reads storage. Placement is not part of op identity, so it changes no
 	/// digest and is never printed.
 	io: PipelineIo,
@@ -176,6 +184,7 @@ impl PlacementAttr {
 			facts: None,
 			chain: None,
 			prunes: false,
+			prunes_by_score: false,
 			io: PipelineIo::default(),
 			write_cut: None,
 			merge: MergeOrder::Serial,
@@ -205,6 +214,10 @@ impl PlacementAttr {
 
 	pub(super) fn set_prunes(&mut self, prunes: bool) {
 		self.prunes = prunes;
+	}
+
+	pub(super) fn set_prunes_by_score(&mut self, prunes_by_score: bool) {
+		self.prunes_by_score = prunes_by_score;
 	}
 
 	pub(super) fn set_io(&mut self, io: PipelineIo) {
@@ -245,6 +258,10 @@ impl PlacementAttr {
 
 	pub(crate) fn prunes(&self) -> bool {
 		self.prunes
+	}
+
+	pub(crate) fn prunes_by_score(&self) -> bool {
+		self.prunes_by_score
 	}
 
 	pub(crate) fn io(&self) -> &PipelineIo {

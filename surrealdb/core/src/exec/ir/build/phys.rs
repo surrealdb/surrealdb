@@ -218,6 +218,8 @@ pub(crate) fn index_branch_shape(branch: &IndexBranch) -> IndexBranchShape {
 			} => BranchReadShape::FullText {
 				query: query.clone(),
 				operator: operator.clone(),
+				column: branch.index.cols.first().cloned(),
+				shared_doc_ids: branch.index.uses_shared_doc_ids(),
 			},
 		},
 		direction: branch.direction,

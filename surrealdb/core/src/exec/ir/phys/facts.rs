@@ -1385,6 +1385,7 @@ mod tests {
 			read: ReadClauses::default(),
 		}));
 		let union = PhysOp::IndexUnion(Box::new(IndexUnionAttrs {
+			topk: None,
 			table: table("t"),
 			branches: Vec::new(),
 			merge: None,
@@ -1403,6 +1404,7 @@ mod tests {
 			column: None,
 			decode: None,
 			read: ReadClauses::default(),
+			topk: None,
 		}));
 		let key_range = PhysOp::KeyRangeScan(Box::new(KeyRangeScanAttrs {
 			prefilter: None,

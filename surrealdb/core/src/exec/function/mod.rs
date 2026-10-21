@@ -33,9 +33,16 @@ use std::fmt::Debug;
 pub use aggregate::{Accumulator, AggregateFunction};
 use anyhow::Result;
 pub(crate) use builtin::aggregates::AccumulatorState;
+// Read only by the full-text tests that run a datastore, and by `search::score`.
+#[cfg(all(test, feature = "kv-mem"))]
+pub(crate) use index::DOC_ID_READS;
+#[cfg(all(test, any(feature = "kv-mem", feature = "search")))]
+pub(crate) use index::ROW_SCORES;
 pub use index::{
 	IndexContext, IndexContextKind, IndexFunction, KnnContext, MatchContext, MatchesContext,
 };
+#[cfg(test)]
+pub(crate) use index::{TERM_READS, TERM_STATES_READ};
 pub use method::{MethodDescriptor, ValueKind};
 pub use projection::ProjectionFunction;
 pub use registry::FunctionRegistry;

@@ -45,6 +45,8 @@ struct Inner {
 	vector_cache: VectorCache,
 	/// Doc-ID → record-key cache for numeric adjacency resolution.
 	adjacency_resolve: crate::adjacency::AdjacencyResolveCache,
+	/// Full-text terms' compacted document sets, shared by read-only queries.
+	fulltext: Arc<crate::ft::cache::FullTextCache>,
 }
 
 impl IndexStores {
@@ -52,6 +54,7 @@ impl IndexStores {
 		hnsw_cache_size: u64,
 		diskann_cache_size: u64,
 		adjacency_resolve_cache_size: u64,
+		fulltext_cache_size: u64,
 		segment_dictionary_path: Option<PathBuf>,
 	) -> Self {
 		#[cfg(not(diskann))]
@@ -68,6 +71,7 @@ impl IndexStores {
 			adjacency_resolve: crate::adjacency::AdjacencyResolveCache::new(
 				adjacency_resolve_cache_size,
 			),
+			fulltext: Arc::new(crate::ft::cache::FullTextCache::new(fulltext_cache_size)),
 		}))
 	}
 
@@ -86,6 +90,7 @@ impl IndexStores {
 		hnsw_cache_size: u64,
 		diskann_cache_size: u64,
 		adjacency_resolve_cache_size: u64,
+		fulltext_cache_size: u64,
 	) -> Self {
 		#[cfg(not(diskann))]
 		let _ = diskann_cache_size;
@@ -101,12 +106,18 @@ impl IndexStores {
 			adjacency_resolve: crate::adjacency::AdjacencyResolveCache::new(
 				adjacency_resolve_cache_size,
 			),
+			fulltext: Arc::new(crate::ft::cache::FullTextCache::new(fulltext_cache_size)),
 		}))
 	}
 
 	/// The doc-ID → record-key cache for numeric adjacency resolution.
 	pub fn adjacency_resolve(&self) -> &crate::adjacency::AdjacencyResolveCache {
 		&self.0.adjacency_resolve
+	}
+
+	/// The cache of full-text terms' compacted document sets.
+	pub fn fulltext_cache(&self) -> &Arc<crate::ft::cache::FullTextCache> {
+		&self.0.fulltext
 	}
 
 	pub async fn get_index_hnsw(
@@ -249,8 +260,8 @@ mod tests {
 	/// notice it being lost.
 	#[test]
 	fn derive_shares_the_dictionaries_but_not_the_store() {
-		let parent = IndexStores::new(1024, 1024, 1024, None);
-		let child = parent.derive(1024, 1024, 1024);
+		let parent = IndexStores::new(1024, 1024, 1024, 1024, None);
+		let child = parent.derive(1024, 1024, 1024, 1024);
 		assert!(
 			!Arc::ptr_eq(&parent.0, &child.0),
 			"a derived store must have its own caches, not alias the parent wholesale"

@@ -77,7 +77,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use roaring::RoaringTreemap;
-use surrealdb_datastore::values::fulltext::{DocLengthAndCount, TermDocsResidual};
+use surrealdb_datastore::values::fulltext::{DocLengthAndCount, PostingBlock, TermDocsResidual};
 use surrealdb_datastore::values::index_build::{
 	Appending, AppendingId, BatchId, BuildGeneration, BuildTicket, BuildTicketMutationSeq,
 	IndexBuildReservation, PrimaryAppendingTicket,
@@ -110,6 +110,7 @@ pub fn check_index_kernel(index: &catalog::Index) -> Result<()> {
 }
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::docids::DocId;
+use crate::ft::{DocLength, TermFrequency};
 use crate::key::schema::{
 	BuildAppendGenerationPrefix, BuildAppendIxPrefix, BuildAppendKey, BuildAppendTicketPrefix,
 	BuildBarrierKey, BuildPrimaryGenerationPrefix, BuildPrimaryIxPrefix, BuildPrimaryKey,
@@ -119,9 +120,10 @@ use crate::key::schema::{
 	HnswElementKey, HnswGenerationKey, HnswLayerKey, HnswLayerLayerPrefix, HnswNodeKey,
 	HnswNodeLayerPrefix, HnswPendingLegacyPrefix, HnswRecordPendingKey, HnswRecordPendingPrefix,
 	HnswStateKey, HnswVectorKey, IdxRoot, IndexAppendKey, IndexAppendPrefix, IndexCompactionKey,
-	IndexPrimaryKey, IndexVersionKey, TermChangeBatchPrefix, TermChangeBatchTermPrefix,
-	TermChangeSetKey, TermChangesKey, TermDocsKey, TermDocsResidualKey, TermDocsResidualPrefix,
-	TermGenerationKey, TermPostingKey,
+	IndexPrimaryKey, IndexVersionKey, TermBlockKey, TermBlockTermPrefix, TermBlocksKey,
+	TermChangeBatchPrefix, TermChangeBatchTermPrefix, TermChangePostingsKey, TermChangeSetKey,
+	TermChangesKey, TermDocsKey, TermDocsResidualKey, TermDocsResidualPrefix, TermGenerationKey,
+	TermPostingKey,
 };
 #[cfg(diskann)]
 use crate::key::schema::{
@@ -1217,6 +1219,41 @@ impl IndexKeyBase {
 		}
 	}
 
+	/// The list of `term`'s posting blocks.
+	fn new_tk<'a>(&'a self, term: &'a str) -> TermBlocksKey<'a> {
+		TermBlocksKey {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+			term: Cow::Borrowed(term),
+		}
+	}
+
+	/// The posting block of `term` that starts at `start`.
+	fn new_tp<'a>(&'a self, term: &'a str, start: DocId) -> TermBlockKey<'a> {
+		TermBlockKey {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+			term: Cow::Borrowed(term),
+			start,
+		}
+	}
+
+	/// Every posting block of `term`, in order of start.
+	fn new_tp_term_range<'a>(&'a self, term: &'a str) -> Result<TypedRange<PostingBlock>> {
+		TermBlockTermPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+			term: Cow::Borrowed(term),
+		}
+		.range()
+	}
+
 	/// Key holding every posting for one document.
 	fn new_dt(&self, doc_id: DocId) -> DocTermsKey<'_> {
 		DocTermsKey {
@@ -1273,6 +1310,19 @@ impl IndexKeyBase {
 		.range()
 	}
 
+	/// The postings beside the `!tx` addition of `term` tagged `nid`, `uid`.
+	fn new_tf<'a>(&'a self, term: &'a str, nid: Uuid, uid: Uuid) -> TermChangePostingsKey<'a> {
+		TermChangePostingsKey {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+			term: Cow::Borrowed(term),
+			nid,
+			uid,
+		}
+	}
+
 	fn new_tx_terms_range(&self) -> Result<TypedRange<RoaringTreemap>> {
 		TermChangeBatchPrefix {
 			ns: self.0.ns,
@@ -1284,7 +1334,9 @@ impl IndexKeyBase {
 	}
 
 	/// Buffers this index's contribution to one term until the transaction
-	/// commits, where it becomes one `!tx` entry per term and direction.
+	/// commits, where it becomes one `!tx` entry per term and direction, and
+	/// one `!tf` entry per term whose additions carry a `posting`: the term's
+	/// frequency in the document and the document's length.
 	fn buffer_tt(
 		&self,
 		tx: &Transaction,
@@ -1292,8 +1344,11 @@ impl IndexKeyBase {
 		doc_id: DocId,
 		nid: Uuid,
 		add: bool,
+		posting: Option<(TermFrequency, DocLength)>,
 	) -> Result<()> {
-		tx.buffer_term_change(self.0.ns, self.0.db, &self.0.tb, self.0.ix, term, doc_id, add, nid)
+		tx.buffer_term_change(
+			self.0.ns, self.0.db, &self.0.tb, self.0.ix, term, doc_id, add, posting, nid,
+		)
 	}
 
 	/// What this transaction has buffered for one term, as `(added, removed)`.

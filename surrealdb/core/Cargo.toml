@@ -113,6 +113,7 @@ egraph = ["dep:egg"]
 # also wants the events gone sets tracing's own `max_level_off`.
 observability = [
     "surrealdb-datastore/observability",
+    "surrealdb-idx/observability",
     "surrealdb-kvs/observability",
     "surrealdb-kvs-any/observability",
 ]

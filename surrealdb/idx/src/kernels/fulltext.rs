@@ -7,7 +7,8 @@
 //!
 //! A term's document set is spread over four places, and is their sum:
 //!
-//! - its compacted bitmap (`!td`), one document set;
+//! - its compacted documents: one membership bitmap (`!td`), or, on an index that keeps its
+//!   postings in blocks, its posting blocks (`!tp`, [`super::postings`]);
 //! - its residual (`!tr`), per-document totals the bitmap cannot hold;
 //! - its uncompacted changes: per-document `!tt` keys an older server wrote, whose key alone
 //!   records an addition or a removal, and batched `!tx` bitmaps;
@@ -15,7 +16,8 @@
 //!
 //! [`term_reads`] names the keys and ranges of the first three, which the
 //! caller reads; [`term_deltas`] folds the changes into signed per-document
-//! counts and [`term_docs`] applies them, with the residual, to the bitmap. A
+//! counts and [`term_docs`] applies them, with the residual, to the compacted
+//! documents. A
 //! document belongs to the term when its total is positive; only the sign of a
 //! change matters.
 
@@ -27,7 +29,7 @@ use crate::IndexKeyBase;
 use crate::docids::DocId;
 use crate::expr::Idiom;
 use crate::expr::operator::BooleanOperator;
-use crate::ft::fulltext::TermDocsResidual;
+use crate::ft::fulltext::{PostingBlock, TermDocsResidual};
 use crate::ft::highlighter::{HighlightParams, Highlighter, Offseter};
 use crate::ft::offset::Offset;
 use crate::key::schema::{TermChangeBatchKey, TermChangeKey};
@@ -43,17 +45,34 @@ pub struct TermReads {
 	pub batches: TypedRange<RoaringTreemap>,
 	/// The residual's key, holding a [`TermDocsResidual`].
 	pub residual: Key<'static>,
-	/// The compacted bitmap's key, holding a [`RoaringTreemap`].
-	pub bitmap: Key<'static>,
+	/// Where the term's compacted documents are kept.
+	pub compacted: CompactedReads,
 }
 
-/// What a query reads of `term` in the index `ikb` names.
-pub fn term_reads(ikb: &IndexKeyBase, term: &str) -> Result<TermReads> {
+/// Where a term's compacted documents are kept, as the index's format keeps
+/// them.
+#[derive(Debug)]
+pub enum CompactedReads {
+	/// The key of the term's membership bitmap, holding a [`RoaringTreemap`].
+	Bitmap(Key<'static>),
+	/// The range of the term's posting blocks, each a [`PostingBlock`], in
+	/// order of start.
+	Blocks(TypedRange<PostingBlock>),
+}
+
+/// What a query reads of `term` in the index `ikb` names; `blocks` where the
+/// index keeps its postings in blocks
+/// ([`crate::catalog::keeps_posting_blocks`]).
+pub fn term_reads(ikb: &IndexKeyBase, term: &str, blocks: bool) -> Result<TermReads> {
 	Ok(TermReads {
 		changes: ikb.new_tt_term_range(term)?,
 		batches: ikb.new_tx_term_range(term)?,
 		residual: ikb.new_tr_root(term).encode_key()?,
-		bitmap: ikb.new_td_root(term).encode_key()?,
+		compacted: if blocks {
+			CompactedReads::Blocks(ikb.new_tp_term_range(term)?)
+		} else {
+			CompactedReads::Bitmap(ikb.new_td_root(term).encode_key()?)
+		},
 	})
 }
 
@@ -217,6 +236,15 @@ impl Bm25 {
 	/// idf   = ln(1 + (N − n + 0.5) / (n + 0.5))
 	/// tf′   = 1 + ln(tf)
 	/// ```
+	/// Whether the score rises with the term's frequency and does not rise
+	/// with the document's length, so that the score of a block's highest
+	/// frequency at its shortest length bounds the score of every document in
+	/// it: `k1 ≥ 0` and `0 ≤ b ≤ 1`, which keep `k1 + 1`, the length norm and
+	/// the denominator non-negative.
+	pub fn bounded_by_extremes(&self) -> bool {
+		self.k1 >= 0.0 && (0.0..=1.0).contains(&self.one_minus_b) && self.b_over_avg_len >= 0.0
+	}
+
 	pub fn score(&self, term_freq: f64, term_doc_count: f64, doc_length: f64) -> f64 {
 		if term_freq <= 0.0 {
 			return 0.0;

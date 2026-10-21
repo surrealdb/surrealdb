@@ -180,6 +180,8 @@ mod tests_expression_ranges;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod tests_link_window;
+#[cfg(all(test, feature = "search"))]
+mod tests_match_context;
 #[cfg(test)]
 mod tests_methods;
 #[cfg(all(test, feature = "kv-mem"))]

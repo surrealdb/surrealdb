@@ -18,8 +18,9 @@
 //! [`btree`] holds the B-tree and `UNIQUE` key kernels, [`docids`] the keys of
 //! the reverse doc-ID mapping and the record keys they name, [`fulltext`] the
 //! resolution of a query's terms into document sets, their combination and
-//! BM25, and [`vector`] the exact tier's query conversion and scoring and the
-//! distance functions.
+//! BM25, [`postings`] a term's compacted postings as posting blocks hold them
+//! and the edits compaction makes to those blocks, and [`vector`] the exact tier's query conversion
+//! and scoring and the distance functions.
 //!
 //! Every kernel is named in the [`registry`], so a description of what a
 //! program may run (a capability manifest) can name the kernels it calls.
@@ -27,6 +28,7 @@
 pub mod btree;
 pub mod docids;
 pub mod fulltext;
+pub mod postings;
 pub mod registry;
 pub mod vector;
 

@@ -1,4 +1,5 @@
 pub mod analyzer;
+pub mod cache;
 pub mod fulltext;
 pub mod highlighter;
 pub mod offset;

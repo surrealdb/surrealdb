@@ -258,6 +258,10 @@ impl Ddl<'_, '_> {
 			reserved: None,
 		});
 		self.set_field(definition, "index_id", Operand::Reg(id))?;
+		// A (re)defined index is stamped with the current format, which storing the
+		// definition admits to the store's feature level (`AdmitIndexFormat`).
+		let format_version = self.constant(Value::from(crate::catalog::INDEX_FORMAT_VERSION))?;
+		self.set_field(definition, "format_version", format_version)?;
 		self.put_index_definition((ns, db, tb), key, definition, name.operand)?;
 		self.replace_table((ns, db, tb), tb_key, table_def, "cache_indexes_ts")?;
 		self.store(StoreInstr::ClearCache);

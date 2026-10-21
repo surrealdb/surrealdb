@@ -783,6 +783,46 @@ async fn an_index_scan_is_an_ordinal_source() {
 	);
 }
 
+/// A ranked full-text scan runs serially only while it passes hits over by its sort's score
+/// threshold. Where the pipeline may raise for a hit, a fallible cast here, the threshold is
+/// dropped and the scan rejects nothing, so the pipeline is placed as the policy places any other:
+/// the statement ranking the clause alone stays serial, and the one with the cast does not.
+#[tokio::test]
+async fn a_ranked_full_text_scan_is_serial_only_while_its_threshold_holds() {
+	let db = TestDb::new_with_config(
+		"
+		DEFINE ANALYZER simple TOKENIZERS blank;
+		DEFINE TABLE doc SCHEMALESS;
+		DEFINE INDEX doc_body ON doc FIELDS body FULLTEXT ANALYZER simple BM25;
+		FOR $i IN 0..20 { CREATE type::record('doc', $i) SET body = 'x y', n = '4' };
+		",
+		viewless(),
+	)
+	.await;
+	let ctx = db.exec_ctx().await;
+	let decisions = |statement: &Statement| -> Vec<Option<Decision>> {
+		statement
+			.decided
+			.iter()
+			.filter(|d| d.attr.facts().is_some_and(|facts| facts.source == SourceKind::FullText))
+			.map(|d| d.attr.decision())
+			.collect()
+	};
+	let planned = statements_of(
+		&ctx,
+		&[
+			"SELECT id, search::score(1) AS s FROM doc WHERE body @1@ 'x' ORDER BY s DESC LIMIT 10",
+			"SELECT id, search::score(1) AS s FROM doc WHERE body @1@ 'x' AND <int>n > 3 \
+			 ORDER BY s DESC LIMIT 10",
+		],
+	)
+	.await;
+	assert_eq!(decisions(&planned[0]), vec![Some(Decision::Serial)], "{}", planned[0].sql);
+	let cast = decisions(&planned[1]);
+	assert_eq!(cast.len(), 1, "{}", planned[1].sql);
+	assert_ne!(cast[0], Some(Decision::Serial), "{}", planned[1].sql);
+}
+
 /// The decision of the policy for a pipeline of `legality` and `facts`, in a statement that
 /// refuses nothing, and for a pipeline that runs serially the reason.
 fn judged(legality: &Legality, facts: &PhysicalFacts) -> Result<Decision, &'static str> {

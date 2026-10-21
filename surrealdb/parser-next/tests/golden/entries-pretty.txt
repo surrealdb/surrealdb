@@ -126,6 +126,11 @@ d2bd8d1bdb6edd16 language-tests/tests/bench/crud/update_10000_return_diff.surql
 fed0110a1d17020b language-tests/tests/bench/executor/rt_import.surql
 1b87e0cc27a668c2 language-tests/tests/bench/fulltext/multi_and.surql
 a2a585ada1fe5e8d language-tests/tests/bench/fulltext/multi_or.surql
+6032af344f48c904 language-tests/tests/bench/fulltext/ranked_and.surql
+92017abb0c57f847 language-tests/tests/bench/fulltext/ranked_common.surql
+c91f0032475c6b43 language-tests/tests/bench/fulltext/ranked_highlight.surql
+9baa0a64e06b0ee8 language-tests/tests/bench/fulltext/ranked_or.surql
+a62302de0cbebf68 language-tests/tests/bench/fulltext/ranked_rare.surql
 d70dc655e1b02dbd language-tests/tests/bench/fulltext/single.surql
 70a831d8420bdedb language-tests/tests/bench/geo/contains_polygon.surql
 c54e8c544ef86202 language-tests/tests/bench/geo/distance_nearest.surql
@@ -290,6 +295,7 @@ fff1852c3b0eaf7d language-tests/tests/bench/udf/trivial_plain_pair.surql
 be300fb1cb289d14 language-tests/tests/bench/util/changefeed-off.surql
 ee7b658043317a3b language-tests/tests/bench/util/changefeed-on.surql
 4564510d5fa65e42 language-tests/tests/bench/util/changefeed-populated.surql
+f349046bb3879658 language-tests/tests/bench/util/docs-100000-ranked-fulltext.surql
 1581f5acb3cc2338 language-tests/tests/bench/util/embeddings-data-768d-1000.surql
 7651b887d42c251b language-tests/tests/bench/util/embeddings-data-768d-20000.surql
 a390db3d2315131a language-tests/tests/bench/util/embeddings-diskann-5000.surql
@@ -3477,6 +3483,7 @@ e8d4bfcae8c45156 language-tests/tests/reproductions/1712_write_over_a_table_and_
 d2fbcd614ac33270 language-tests/tests/reproductions/1713_an_expression_range_in_from_reads_its_records.surql
 aa3b8be07b556aca language-tests/tests/reproductions/1718_a_mixed_write_stores_the_record_not_the_callers_view.surql
 0b1dae4b93a02626 language-tests/tests/reproductions/1718_a_mixed_write_stores_the_record_not_the_callers_view_import.surql
+712c97d6c82db9a2 language-tests/tests/reproductions/2066_an_update_keeping_a_term_then_a_delete_leaves_no_posting.surql
 54595c82f82a2974 language-tests/tests/reproductions/215474_remove_database_tombstone.surql
 95a7e66a7cc86268 language-tests/tests/reproductions/252_or_eq_set_membership.surql
 bca505cf6a35e067 language-tests/tests/reproductions/3290_multi_column_unique_index_none.surql
@@ -4530,7 +4537,7 @@ ab507bce321646c8 language-tests/tests/upgrade/define/3.00.00_index_datetime_coll
 23007f39414448b4 language-tests/tests/upgrade/define/3.00.00_index_datetime_nested.surql
 321ce7819b781cf7 language-tests/tests/upgrade/define/3.00.00_index_datetime_nested_import.surql
 fda31259fd7b781a language-tests/tests/upgrade/define/3.00.00_index_fulltext.surql
-4785092f96d4e6ff language-tests/tests/upgrade/define/3.00.00_index_fulltext_current.surql
+49b23dc99d98c418 language-tests/tests/upgrade/define/3.00.00_index_fulltext_current.surql
 c2165099425e4f18 language-tests/tests/upgrade/define/3.00.00_index_fulltext_import.surql
 8152d8e76245f111 language-tests/tests/upgrade/define/3.00.00_index_fulltext_rebuild.surql
 66377c604814d2e6 language-tests/tests/upgrade/define/3.00.00_index_hnsw.surql

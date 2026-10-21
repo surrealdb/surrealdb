@@ -444,7 +444,15 @@ impl MatchesEval {
 
 		let query_terms = {
 			let az_fn = StreamingAnalyzerFunction::new(ctx.exec_ctx);
-			fti.extract_querying_terms(frozen, &az_fn, query.to_owned()).await?
+			// The terms are read through the node's cache, keyed by the table's
+			// catalog version, which the run reads as it reads the version a
+			// compiled unit is kept under.
+			crate::exec::compiles::seam(fti.extract_querying_terms(
+				frozen,
+				&az_fn,
+				query.to_owned(),
+			))
+			.await?
 		};
 
 		Ok((fti, query_terms))

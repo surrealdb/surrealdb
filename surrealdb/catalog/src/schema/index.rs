@@ -114,22 +114,35 @@ pub fn admitted_index_format_version(format_version: u16, legacy: bool) -> u16 {
 /// exactly as one defined now would be, so nothing is gained by rebuilding it.
 ///
 /// [`ELEMENT_DOCS_FORMAT_VERSION`] and [`ELEMENT_CODES_FORMAT_VERSION`] changed
-/// only the HNSW and DiskANN layouts; every other kind's layout last changed in
-/// the version before them. A bump of [`INDEX_FORMAT_VERSION`] updates this for
-/// each kind whose layout the new version changes.
+/// only the HNSW and DiskANN layouts, and
+/// [`FULLTEXT_POSTING_BLOCKS_FORMAT_VERSION`] only the full-text one; every
+/// other kind's layout last changed in the version before them. A bump of
+/// [`INDEX_FORMAT_VERSION`] updates this for each kind whose layout the new
+/// version changes.
 pub fn current_layout_format_version(index: &Index) -> u16 {
 	match index {
 		Index::Hnsw(_) => ELEMENT_DOCS_FORMAT_VERSION,
 		Index::DiskAnn(_) => ELEMENT_DOCS_FORMAT_VERSION.max(ELEMENT_CODES_FORMAT_VERSION),
-		Index::Idx | Index::Uniq | Index::FullText(_) | Index::Count(_) => {
-			ELEMENT_DOCS_FORMAT_VERSION - 1
-		}
+		Index::FullText(_) => FULLTEXT_POSTING_BLOCKS_FORMAT_VERSION,
+		Index::Idx | Index::Uniq | Index::Count(_) => ELEMENT_DOCS_FORMAT_VERSION - 1,
 	}
 }
 
 /// Format version at which full-text, HNSW and DiskAnn indexes migrated onto
 /// the shared table-level doc-ID space.
 pub const DOC_IDS_FORMAT_VERSION: u16 = 1;
+
+/// Format version from which a full-text index keeps each term's compacted
+/// documents in posting blocks (`!tk`, `!tp`), each document with its term
+/// frequency and length, rather than in one membership bitmap (`!td`). A query
+/// scores a compacted document from its blocks without reading the document's
+/// postings (`!dt`) or length (`!dl`). An index stamped below it keeps the
+/// bitmap until `REBUILD INDEX` restamps it.
+///
+/// A 3.x node would read such an index as one it knows, find no bitmap and
+/// answer no documents, so the format is above
+/// [`LEGACY_LEVEL_INDEX_FORMAT_VERSION`].
+pub const FULLTEXT_POSTING_BLOCKS_FORMAT_VERSION: u16 = 6;
 
 /// Format version at which b-tree (`Idx`/`Uniq`) index entry values carry the
 /// record's table-level doc-ID appended to the record ID (8 bytes big-endian).
@@ -906,6 +919,13 @@ pub fn uses_shared_doc_ids(format_version: u16) -> bool {
 	format_version >= DOC_IDS_FORMAT_VERSION
 }
 
+/// Whether a full-text index stamped with `format_version` keeps its terms'
+/// compacted documents in posting blocks. See
+/// [`FULLTEXT_POSTING_BLOCKS_FORMAT_VERSION`].
+pub fn keeps_posting_blocks(format_version: u16) -> bool {
+	format_version >= FULLTEXT_POSTING_BLOCKS_FORMAT_VERSION
+}
+
 /// Whether a b-tree index stamped with `format_version` spells the decimals of
 /// its keys without trailing zeros. See
 /// [`BTREE_NORMALISED_DECIMAL_KEYS_FORMAT_VERSION`].
@@ -1037,6 +1057,29 @@ mod tests {
 	use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
 
 	use super::*;
+
+	/// Format 6 changes the full-text layout as well as the HNSW and DiskANN
+	/// ones, and no other kind's, so a b-tree or count index stamped 5 is
+	/// current and a full-text index stamped 5 is not.
+	#[test]
+	fn the_full_text_layout_is_current_from_format_6() {
+		let full_text = Index::FullText(FullTextParams {
+			analyzer: "simple".into(),
+			highlight: false,
+			scoring: Scoring::default(),
+		});
+		assert_eq!(
+			current_layout_format_version(&full_text),
+			FULLTEXT_POSTING_BLOCKS_FORMAT_VERSION
+		);
+		for index in [Index::Idx, Index::Uniq, Index::Count(None)] {
+			assert_eq!(
+				current_layout_format_version(&index),
+				LEGACY_LEVEL_INDEX_FORMAT_VERSION,
+				"{index:?}"
+			);
+		}
+	}
 
 	#[revisioned(revision = 1)]
 	#[derive(Clone, Debug, Eq, PartialEq, Hash)]

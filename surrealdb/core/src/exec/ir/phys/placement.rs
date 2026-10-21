@@ -532,6 +532,32 @@ fn prunes_of(legality: &Legality, facts: &PhysicalFacts) -> bool {
 	!legality.may_raise && !facts.host_blocks && facts.nested == NestedUse::None
 }
 
+/// Whether `pipeline` reads a full-text scan, or an index union of full-text branches, that passes
+/// hits over by the score threshold of the sort it feeds, which then runs serially. A scan whose
+/// threshold rejects no entry ([`TopKKey::rejects_entries`], which the rewrite settles once every
+/// pipeline's pruning is known) passes nothing over, and leaves the pipeline to the policy.
+///
+/// [`TopKKey::rejects_entries`]: crate::exec::ir::phys::ops::TopKKey::rejects_entries
+///
+/// The scan does a hit's index and storage work itself, before the row is handed on; the body
+/// left takes the score the scan remembered and pushes the row into the sort. Morsels would
+/// gather rows into batches before any of them reached the sort, which delays the first
+/// threshold and every tightening after it, and so lets the scan read the records of hits the
+/// sort would never keep.
+fn passes_over_by_score(ir: &Ir, pipeline: OpId) -> bool {
+	super::facts::source_of(ir, pipeline).is_some_and(|source| {
+		match ir.op(source).map(|data| &data.kind) {
+			Some(OpKind::Phys(PhysOp::FullTextScan(scan))) => {
+				scan.topk.as_ref().is_some_and(|key| key.rejects_entries)
+			}
+			Some(OpKind::Phys(PhysOp::IndexUnion(union))) => {
+				union.topk.as_ref().is_some_and(|(key, _)| key.rejects_entries)
+			}
+			Some(_) | None => false,
+		}
+	})
+}
+
 /// Decides every pipeline of `ir`, in an order that places each after the pipelines that feed it.
 ///
 /// For a pipeline: the legality inputs, the physical facts, the policy's pick (never stronger than
@@ -581,6 +607,11 @@ pub(crate) fn place_all_reading(
 			.map_err(|stronger| stronger_than_legality(*op, stronger))?;
 		let decision = apply_backend(decision, loop_in(ir, *op).map(|(_, kind)| kind), caps);
 		let decision = placement.narrowed(decision);
+		let decision = if passes_over_by_score(ir, *op) {
+			Decision::Serial
+		} else {
+			decision
+		};
 		let prunes = prunes_of(&legality, &physical);
 		judged.insert(
 			*op,

@@ -7,7 +7,7 @@ use crate::catalog::{Index, IndexDefinition};
 use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::idx::IndexKeyBase;
-use crate::idx::ft::MatchesHitsIterator;
+use crate::idx::docids::DocId;
 use crate::idx::ft::fulltext::{FullTextHitsIterator, FullTextIndex};
 use crate::kvs::Transaction;
 use crate::val::{RecordId, TableName};
@@ -36,22 +36,20 @@ impl FullTextHits {
 		}
 	}
 
-	/// The next `limit` record IDs the query matches, fewer only when the
-	/// hits run out; empty once they have. A hit whose record ID no longer
-	/// resolves is passed over.
-	pub(crate) async fn next_batch(
-		&mut self,
+	/// The doc ids of up to `limit` hits not yet taken, in doc-id order; empty
+	/// once the hits have run out.
+	pub(crate) fn take_doc_ids(&mut self, limit: usize) -> Vec<DocId> {
+		self.iter.take_doc_ids(limit)
+	}
+
+	/// The record each of `doc_ids` maps to, in order, in one batched read;
+	/// `None` for a doc id whose mapping is gone.
+	pub(crate) async fn records(
+		&self,
 		txn: &Transaction,
-		limit: usize,
-	) -> FlowResult<Vec<RecordId>> {
-		let mut batch = Vec::with_capacity(limit);
-		while batch.len() < limit {
-			match self.iter.next(txn).await.context("Failed to get next hit")? {
-				Some((rid, _doc_id)) => batch.push(rid),
-				None => break,
-			}
-		}
-		Ok(batch)
+		doc_ids: &[DocId],
+	) -> FlowResult<Vec<Option<RecordId>>> {
+		self.iter.records(txn, doc_ids).await.context("Failed to resolve hits")
 	}
 }
 

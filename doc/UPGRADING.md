@@ -56,6 +56,19 @@ is in, and a store may hold both side by side.
   run only as wide as that pool grants, a host with two cores or fewer runs
   them on one task, and `SURREAL_HNSW_BUILD_PARALLELISM` is a ceiling rather
   than a task count.
+- A full-text index defined or rebuilt on a store above Legacy keeps each
+  term's postings in blocks, and an existing full-text index keeps its format
+  until `REBUILD INDEX`. See below.
+- On a store at Legacy, an index defined or rebuilt here still uses the key
+  spellings the v3.4.0 notes describe, which a 3.3 node does not know and
+  overwrites in its own spelling. Finish upgrading every node before running
+  `DEFINE INDEX` or `REBUILD INDEX`, as those notes say.
+- A full-text index in which a document was updated with text that kept a
+  term, and later deleted, still counts that document under the term. Query
+  rows are unaffected, but BM25 scores weigh the term as more common than it
+  is. This release stops new stale entries; an index already affected keeps
+  them until `REBUILD INDEX`, and a node running an earlier release keeps
+  writing them. See below.
 - The vector distance and similarity measures add the terms of a vector of
   eight or more floats in another order. A result whose terms cancel, such as
   a dot product near zero, can change by much more than its last bits, sign
@@ -616,6 +629,104 @@ are unchanged, and so are statements with an observable effect, which stay
 serial. A float aggregate (`math::sum`, `math::mean`, `math::stddev`,
 `math::variance`, `vector::sum`) is folded serially, so its low bits are the
 ones a serial run gives.
+
+### Full-text queries share a per-node cache of compacted terms
+
+A read-only query against a full-text index takes each term's compacted
+document set from a cache that every query on the node shares. An entry holds
+until the index is next compacted, rebuilt or redefined, or until any catalog
+change to its table. Write transactions read around the cache. Uncompacted
+changes are always read from storage, so a query sees every committed write as
+before.
+
+**Impact**:
+
+- Each node holds up to 128 MiB more memory for this cache once full-text
+  queries have filled it. The `fulltext_cache_size` setting (in bytes; the
+  `SURREAL_FULLTEXT_CACHE_SIZE` environment variable, as for the other index
+  caches) changes the bound, and `0` turns the cache off.
+- Nothing needs to change on an existing store: no data is rewritten and no
+  index has to be rebuilt.
+
+### New full-text indexes keep their postings in blocks
+
+A full-text index defined, or rebuilt with `REBUILD INDEX`, on a store above
+Legacy keeps each term's compacted documents in posting blocks. Each document in
+a block carries how often it holds the term and its length, so a query that
+scores with `search::score` reads no per-document state for a document whose
+changes have been compacted. Scores and results are the same in either format.
+
+On a store at Legacy, a new or rebuilt full-text index keeps the previous
+format, in which each term's documents are one set and scoring reads every
+matching document's postings. A 3.x node may still be writing such a store, and
+it would read an index in the new format as holding no documents.
+
+**Impact**:
+
+- On a store raised to 4.0 at startup (memory, RocksDB, SurrealKV), every
+  full-text index defined or rebuilt from then on uses the new format. On a
+  store that stays at Legacy (TiKV, IndxDB), none does until an operator
+  raises the store's level.
+- An index in the new format stores a few bytes more per document and term.
+  Each write to it also records, beside every term it adds a document to, the
+  document's frequency of the term and its length, which background compaction
+  folds into the blocks without reading the document. Indexing a document
+  costs somewhat more in exchange, and a transaction writes one more key per
+  term it adds documents to, which counts against
+  `SURREAL_TRANSACTION_MAX_WRITE_KEYS` where that guard is set.
+- An existing full-text index keeps its format, and is read and written in it,
+  until `REBUILD INDEX`, or a `DEFINE INDEX OVERWRITE` of it, moves it to the
+  new one. Nothing is rewritten at startup. An unchanged `DEFINE INDEX
+  OVERWRITE` (an import replay, a migration script) of a b-tree or COUNT index
+  keeps that index, as its layout is the same in both formats.
+- A release before this one cannot read an index in the new format. The
+  feature level keeps 3.x nodes off a store holding one; development builds of
+  this release from before the format do not know it, and must not share a
+  store with builds that write it.
+
+**What to do**: nothing for correctness. To have an existing full-text index
+use the new format, raise the store's feature level if it is at Legacy, then
+run `REBUILD INDEX` on the index.
+
+### Full-text term counts after an update that keeps a term
+
+A full-text index keeps, for each term, the set of documents that carry it.
+That set is the sum of signed changes: an `UPDATE` removes the document's old
+terms and adds its new ones in one transaction. An earlier release recorded
+only the last of those two changes for each term. For a term the update kept,
+that left an extra addition, so the document was counted under the term twice,
+and a later `DELETE` took away only one of the two. The document stayed in the
+term's set after it was gone, and index compaction made that permanent.
+
+This release records both changes, so a kept term's removal and re-addition
+cancel. A removal also takes its terms from what the index stored for the
+document, not from the record's previous value, so a removal never cancels the
+addition of a term the document did not carry before.
+
+- **Rows are unaffected.** A deleted document's id resolves to no record, so a
+  full-text query never returned it.
+- **Scores and counts are.** A stale entry raises the term's document count,
+  which lowers the term's BM25 weight in every query that uses it. Anything
+  that reads the term's raw document set before it resolves records sees the
+  stale entries too. The term's document set also does not shrink when such
+  documents are deleted.
+- **Existing indexes keep what they hold.** Stale entries written before the
+  upgrade stay until the index is rebuilt.
+- **Nodes running an earlier release keep writing them.** On a store several
+  nodes write, an `UPDATE` served by a node on an earlier release still records
+  the extra addition. Upgrade every node before rebuilding.
+- **An `UPDATE` writes more term changes.** For each term an update keeps, it
+  now writes a removal and an addition rather than one addition. The number of
+  term-change entries a transaction writes is still bounded by twice its
+  number of distinct terms per index. Where `SURREAL_TRANSACTION_MAX_WRITE_KEYS`
+  is set, those entries count against it, so a transaction of updates that
+  stayed just under the limit can now exceed it.
+
+**What to do**: after every node runs this release, run
+`REBUILD INDEX <index> ON <table>` for each full-text index on a table whose
+records have been updated and then deleted. An index on a table that is only
+appended to, or whose records are never deleted after an update, holds no
+stale entries.
 
 ### Vector measures add the terms of a float vector in another order
 

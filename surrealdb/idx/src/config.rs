@@ -127,6 +127,10 @@ pub struct IdxConfig {
 	/// The maximum total size of the doc-ID → record-key cache that
 	/// resolves numeric adjacency entries (default: 64 MiB)
 	pub graph_resolve_cache_size: u64,
+	/// The maximum total size of the cache of full-text terms' compacted
+	/// document sets, which read-only queries share on a node; `0` disables
+	/// it (default: 128 MiB)
+	pub fulltext_cache_size: u64,
 	/// The maximum encoded size, in bytes, of one edge's inline property
 	/// payload. A payload past the cap is written spilled — the values live
 	/// only in the edge record and filtered traversals fall back to it.
@@ -151,6 +155,7 @@ impl Default for IdxConfig {
 			graph_fold_batch: 1024,
 			graph_numeric_ids: false,
 			graph_resolve_cache_size: 64 * 1024 * 1024,
+			fulltext_cache_size: 128 * 1024 * 1024,
 			graph_inline_props_cap: 64,
 		}
 	}
@@ -167,6 +172,7 @@ impl cnf::Config for IdxConfig {
 			.parse_key("graph_fold_batch", &mut self.graph_fold_batch)
 			.parse_key("graph_numeric_ids", &mut self.graph_numeric_ids)
 			.parse_key("graph_resolve_cache_size", &mut self.graph_resolve_cache_size)
+			.parse_key("fulltext_cache_size", &mut self.fulltext_cache_size)
 			.parse_key("graph_inline_props_cap", &mut self.graph_inline_props_cap)
 			.parse_key_option("segment_dictionary_path", &mut self.segment_dictionary_path)
 			.parse_key_with("file_allowlist", &mut self.file_allowlist, |x| {

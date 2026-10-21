@@ -1836,10 +1836,11 @@ pub(crate) enum StoreInstr {
 	/// same way.
 	///
 	/// When `healthy`, the existing index must also be fit to serve as it
-	/// stands: stored in the current [`crate::catalog::INDEX_FORMAT_VERSION`],
-	/// and with a durable build state (`!bs`) that is absent or `Online`. An
-	/// index still building, closing or failed, or stored in an older format,
-	/// is not kept.
+	/// stands: stored in its kind's current layout, as far as the store's level
+	/// admits it ([`crate::catalog::current_layout_format_version`],
+	/// [`crate::catalog::admitted_index_format_version`]), and with a durable
+	/// build state (`!bs`) that is absent or `Online`. An index still building,
+	/// closing or failed, or stored in an older layout, is not kept.
 	IndexReplayReuses {
 		ns: Reg,
 		db: Reg,
@@ -5727,6 +5728,10 @@ pub(super) enum Source {
 		merge: Option<crate::exec::operators::scan::MergeMode>,
 		/// As for [`Source::Index`], for every branch.
 		decode: Option<crate::exec::operators::scan::common::DecodeFields>,
+		/// Where the sort above keeps the rows of the best sums of clause scores, the threshold
+		/// every full-text branch rejects a hit by before reading its record: the hit's sum,
+		/// computed with its batch, against the sort's ([`UnionTopK`]).
+		topk: Option<UnionTopK>,
 	},
 	/// The records of `table` whose doc-IDs survive fused bitmap plan `root`,
 	/// in doc-ID order; `fallback` answers instead when an unanchored root
@@ -5746,6 +5751,10 @@ pub(super) enum Source {
 		operator: crate::expr::operator::MatchesOperator,
 		/// As for [`Source::Index`].
 		decode: Option<crate::exec::operators::scan::common::DecodeFields>,
+		/// Where the sort above keeps the rows of the best scores of the clause, the threshold
+		/// the scan rejects a hit by before reading its record: the hit's score, computed with
+		/// its batch, against the sort's ([`TopKScan::sort`]). Its path is empty.
+		topk: Option<TopKScan>,
 	},
 	/// The records KNN index `index` lists for nearest neighbors of `vector`.
 	Knn {
@@ -5978,6 +5987,17 @@ pub(super) struct TopKScan {
 	pub(super) coarse: Option<super::payload::CoarseCutoff>,
 }
 
+/// The threshold the full-text branches of an index union reject hits by
+/// ([`Source::IndexUnion`]): the sort's, against the sum of the hit's clause
+/// scores the sort's first key adds up.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct UnionTopK {
+	/// The sort's threshold; its path is empty.
+	pub(super) scan: TopKScan,
+	/// The sum the sort's first key is.
+	pub(super) sum: crate::exec::ir::phys::ops::ScoreSum,
+}
+
 impl TopKScan {
 	/// The scan of `key`, fed by sort `sort`.
 	pub(super) fn new(key: &super::payload::TopKKey, sort: u16) -> Self {
@@ -6084,7 +6104,21 @@ impl Source {
 	/// key the threshold shows worse than every row the sort keeps never runs. A scan that a
 	/// datetime component of its keys cuts rejects no single entry.
 	pub(super) fn rejects_by_threshold(&self) -> bool {
-		matches!(self, Source::Scan { topk: Some(topk), .. } if topk.coarse.is_none())
+		match self {
+			Source::Scan {
+				topk: Some(topk),
+				..
+			} => topk.coarse.is_none(),
+			Source::FullText {
+				topk,
+				..
+			} => topk.is_some(),
+			Source::IndexUnion {
+				topk,
+				..
+			} => topk.is_some(),
+			_ => false,
+		}
 	}
 
 	/// Whether every row comes from storage, so a body with no instruction

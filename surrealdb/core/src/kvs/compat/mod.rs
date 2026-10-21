@@ -46,6 +46,7 @@ pub(crate) mod fixtures;
 mod generator;
 mod index_build_state;
 mod module_definition;
+mod posting_blocks;
 mod stored_record;
 mod table_migration_state;
 mod tests;

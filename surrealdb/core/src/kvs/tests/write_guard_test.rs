@@ -507,7 +507,7 @@ async fn a_bare_commit_refuses_buffered_index_deltas() {
 			"counts" => tx.buffer_count_delta(ns, db, &tb, ix, 1, nid),
 			"compactions" => tx.buffer_compaction_trigger(ns, db, &tb, ix, nid),
 			"term_changes" => {
-				tx.buffer_term_change(ns, db, &tb, ix, "hello", 7, true, nid).unwrap()
+				tx.buffer_term_change(ns, db, &tb, ix, "hello", 7, true, None, nid).unwrap()
 			}
 			_ => tx.buffer_doc_stats(ns, db, &tb, ix, stats, nid),
 		}

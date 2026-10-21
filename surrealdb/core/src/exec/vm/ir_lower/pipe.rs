@@ -1638,16 +1638,27 @@ fn open_source(
 		let mut needs = Needs::none();
 		let leaf = lower_source_under(em, cx, ir, input, topk_sort, &mut needs)?;
 		reads.needs = reads.needs.merged(&needs);
-		// A sort that cuts the scan by the second publishes its threshold as soon as it holds what
-		// it keeps.
-		if let (
+		// A sort that cuts the scan by the second, or that a full-text scan or an index union of
+		// full-text branches passes hits over by the score of, publishes its threshold as soon as
+		// it holds what it keeps: each row the sort takes before then is a record the scan read
+		// in full.
+		let floors_early = match &leaf.source {
 			Source::Scan {
 				topk: Some(topk),
 				..
-			},
-			Some(sort),
-		) = (&leaf.source, topk_sort)
-			&& topk.coarse.is_some()
+			} => topk.coarse.is_some(),
+			Source::FullText {
+				topk,
+				..
+			} => topk.is_some(),
+			Source::IndexUnion {
+				topk,
+				..
+			} => topk.is_some(),
+			_ => false,
+		};
+		if let Some(sort) = topk_sort
+			&& floors_early
 			&& let Some(spec) = usize::from(sort)
 				.checked_sub(usize::from(reads.base.sorts))
 				.and_then(|at| reads.sorts.get_mut(at))
@@ -2145,10 +2156,23 @@ fn lower_part(
 			let opened = open_source(em, cx, ir, facts, reads, head.input, topk_sort)?;
 			// A threshold rejects an entry before the body runs, which only a pipeline that
 			// raises for no row may leave unrun. The source is the first pipeline's, and so is
-			// the placement, which states whether the pipeline prunes.
+			// the placement, which states whether the pipeline prunes. A full-text scan, or an
+			// index union of full-text branches, rejecting by a sum of clause scores may do so
+			// under the narrower verdict that every op a rejected hit skips raises for no row but
+			// the scores the scan already computed.
 			let first = stages.first().map_or(op, |stage| stage.op);
+			let scored = matches!(
+				opened.source,
+				Source::FullText { .. }
+					| Source::IndexUnion {
+						topk: Some(_),
+						..
+					}
+			);
 			if opened.source.rejects_by_threshold()
-				&& !ir.placement(first).is_some_and(|placed| placed.prunes())
+				&& !ir
+					.placement(first)
+					.is_some_and(|placed| placed.prunes() || (scored && placed.prunes_by_score()))
 			{
 				return Err(invariant(
 					"a scan rejects entries by a threshold in a pipeline that may raise",

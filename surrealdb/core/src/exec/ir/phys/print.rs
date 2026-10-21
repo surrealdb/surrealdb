@@ -64,8 +64,9 @@ use super::ops::{
 	KnnPrefilterShape, KnnScanAttrs, KnnTargetShape, KnnTopKAttrs, LayerAttrs, LookupKeyShape,
 	MatchStepAttrs, MaterializeImage, OmissionShape, PermissionFilterAttrs, PhysOp, PhysTag,
 	PhysWriteAttrs, PipelineAttrs, PipelineEdge, PipelineId, PrefetchKeys, ProjectedFieldShape,
-	ProjectionShape, ReadClauses, RecordScanAttrs, SortAttrs as PhysSortAttrs, SortKeyReadShape,
-	SortKeySpecShape, TableScanAttrs, WalkActionShape, WalkStepShape, WriteSubjectsShape,
+	ProjectionShape, ReadClauses, RecordScanAttrs, ScoreSum, SortAttrs as PhysSortAttrs,
+	SortKeyReadShape, SortKeySpecShape, TableScanAttrs, WalkActionShape, WalkStepShape,
+	WriteSubjectsShape,
 };
 use crate::catalog::{Distance, IndexId, KeyOrigin, KeyStructure};
 use crate::doc::Action as DocAction;
@@ -129,7 +130,7 @@ use crate::expr::match_plan::{
 	PathMode, PathPrefixPlan, PathSearch,
 };
 use crate::expr::module::ModuleName;
-use crate::expr::operator::{BooleanOperator, MatchesOperator};
+use crate::expr::operator::{BooleanOperator, MatchRef, MatchesOperator};
 use crate::expr::part::Recurse;
 use crate::expr::statements::access::PurgeKind;
 use crate::expr::{
@@ -2489,7 +2490,7 @@ text_enum!(BTreeAccess {
 text_enum!(BranchReadShape {
 	unit []
 	tuple [BTree(access: ValueData<BTreeAccess>)]
-	named [FullText { query: String, operator: MatchesOperator }]
+	named [FullText { query: String, operator: MatchesOperator, column: Option<Idiom>, shared_doc_ids: bool }]
 });
 
 text_enum!(BitmapShape {
@@ -2702,7 +2703,13 @@ text_struct!(IndexUnionAttrs {
 	branches: Vec<IndexBranchShape>,
 	merge: Option<MergeMode>,
 	ordered_by: Option<Vec<FieldPath>>,
-	decode: Option<DecodeFields>
+	decode: Option<DecodeFields>,
+	topk: Option<(TopKKey, ScoreSum)>
+});
+text_enum!(ScoreSum {
+	unit []
+	tuple [Clause(clause: MatchRef), Add(left: Box<ScoreSum>, right: Box<ScoreSum>)]
+	named []
 });
 text_struct!(BitmapAttrs {
 	table: TableName,
@@ -2725,7 +2732,8 @@ text_struct!(FullTextScanAttrs {
 	query: String,
 	operator: MatchesOperator,
 	column: Option<Idiom>,
-	decode: Option<DecodeFields>
+	decode: Option<DecodeFields>,
+	topk: Option<TopKKey>
 });
 text_struct!(ReadClauses { schema: Option<Arc<Schema>>, with: Option<With> });
 text_struct!(ComputedReadsShape {
@@ -3434,6 +3442,7 @@ mod tests {
 				read: ReadClauses::default(),
 			})),
 			PhysTag::IndexUnion => PhysOp::IndexUnion(Box::new(IndexUnionAttrs {
+				topk: None,
 				table: table("t"),
 				read: ReadClauses::default(),
 				branches: vec![
@@ -3453,6 +3462,8 @@ mod tests {
 						read: BranchReadShape::FullText {
 							query: "needle".to_owned(),
 							operator: matches_operator(),
+							column: None,
+							shared_doc_ids: true,
 						},
 						direction: Direction::Backward,
 					},
@@ -3499,6 +3510,15 @@ mod tests {
 				column: None,
 				decode: None,
 				read: ReadClauses::default(),
+				topk: Some(TopKKey {
+					path: Arc::from([]),
+					direction: SortDirection::Desc,
+					single_key: true,
+					depth_limit: 0,
+					packed_rows: false,
+					coarse_cutoff: None,
+					rejects_entries: true,
+				}),
 			})),
 			PhysTag::KeyRangeScan => PhysOp::KeyRangeScan(Box::new(KeyRangeScanAttrs {
 				table: table("t"),
@@ -4642,6 +4662,7 @@ mod tests {
 			column: None,
 			decode: None,
 			read: ReadClauses::default(),
+			topk: None,
 		}));
 		let text = print_op(&op);
 		assert!(!text.contains('\n'), "{text}");

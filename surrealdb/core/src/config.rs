@@ -182,6 +182,8 @@ mod tests {
 		assert!(c.graph_numeric_ids);
 		let c: IdxConfig = map_with("graph_resolve_cache_size", "7").load();
 		assert_eq!(c.graph_resolve_cache_size, 7);
+		let c: IdxConfig = map_with("fulltext_cache_size", "7").load();
+		assert_eq!(c.fulltext_cache_size, 7);
 		let c: IdxConfig = map_with("graph_inline_props_cap", "7").load();
 		assert_eq!(c.graph_inline_props_cap, 7);
 		let c: IdxConfig = map_with("segment_dictionary_path", "/dictionaries").load();
