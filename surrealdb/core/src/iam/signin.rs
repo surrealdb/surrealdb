@@ -3603,21 +3603,15 @@ mod context_clause_tests {
 	/// `LET $session = ...` is refused, by any of the three routes a client
 	/// has to it.
 	///
-	/// That is the whole of the claim, and it is worth being precise about
-	/// what it is not. `$session.data` is exactly as trustworthy as `$auth` —
-	/// no better, no worse. `$session` being in `PROTECTED_PARAM_NAMES` closes
-	/// `LET`, `db.set` and the RPC `let`; it does not close every route. A
-	/// `FOR $session IN [...] { ... }` loop rebinds the name for its body, and
-	/// so does a closure parameter, and a permission clause evaluated inside
-	/// one reads the rebound value. `FOR $auth IN [user:2] { ... }` does the
-	/// same to `$auth`, which every record permission written before this
-	/// clause existed already depends on.
-	///
-	/// That is a pre-existing, engine-wide property of parameter binding, not
-	/// something this clause introduces, and it is being addressed separately.
-	/// `$session.data` simply inherits the trust boundary `$auth` already had:
-	/// a permission that is safe to write against `$auth` is exactly as safe
-	/// written against `$session.data`.
+	/// `$session.data` is exactly as trustworthy as `$auth`, no better, no
+	/// worse. `$session` being in `PROTECTED_PARAM_NAMES` closes `LET`,
+	/// `db.set` and the RPC `let`, and every other route that binds a
+	/// user-chosen name closes it too: a `FOR` variable, a closure parameter
+	/// and a user-defined function argument each refuse `$session` and `$auth`,
+	/// so neither can be rebound for a body a query controls and a permission
+	/// clause reads the authenticated value (GHSA-ffvm-mqh3-7986). A permission
+	/// that is safe to write against `$auth` is exactly as safe written against
+	/// `$session.data`.
 	#[tokio::test]
 	async fn let_session_is_refused_by_every_client_route() {
 		let ds = setup(SETUP).await;

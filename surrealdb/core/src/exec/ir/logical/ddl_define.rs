@@ -10,7 +10,7 @@ use surrealdb_strand::{Strand, TableName};
 
 use super::ddl::{
 	DdlForm, DdlOperand, DdlPlan, PlanError, Planned, Slots, alias_refusal, comment_text,
-	literal_value, stored_value, template, written_comment, written_text,
+	literal_value, protected_arg_refusal, stored_value, template, written_comment, written_text,
 };
 use super::ops::{DefineAttrs, LogOp};
 use crate::exec::ir::iface::region_kind::StoredRole;
@@ -282,7 +282,8 @@ pub(super) fn plan_define<'e>(
 					FUNCTION_HOLES,
 				),
 				stmt.kind.clone(),
-				alias_refusal(&stmt.graphql_alias, "function"),
+				protected_arg_refusal(&stmt.args)
+					.or_else(|| alias_refusal(&stmt.graphql_alias, "function")),
 			)
 		}
 		DefineStatement::Analyzer(stmt) => {

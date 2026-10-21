@@ -193,28 +193,22 @@ impl Planner<'_> {
 	///
 	/// * A literal — already a constant in the plan, so reading it needs no environment at all.
 	/// * `$session` — read out of the very context this plan will run in, so the value folded in is
-	///   the one the evaluator would have read. `LET`, `UNSET`, `db.set` and RPC `set` all refuse
-	///   the name (it is in `PROTECTED_PARAM_NAMES`), so no *statement* can rebind it mid-plan, and
-	///   the constructs that can — a `FOR` loop parameter, a closure parameter, a user-defined
-	///   function argument — are recorded by the planner they compile their body with, so a read
-	///   beneath one of them is left to the evaluator
-	///   ([`Planner::param_is_shadowed`](super::Planner::param_is_shadowed)).
+	///   the one the evaluator would have read. Every route that binds the name refuses it: `LET`,
+	///   `UNSET`, `db.set` and RPC `set` because it is in `PROTECTED_PARAM_NAMES`, and the
+	///   constructs that bind a user-chosen name (a `FOR` loop parameter, a closure parameter, a
+	///   user-defined function argument) because they refuse a protected name too
+	///   (GHSA-ffvm-mqh3-7986). The name is therefore never rebound, so the folded value is always
+	///   the session's.
 	///
 	/// Every other parameter is left alone. A `DEFINE PARAM` carries permissions
 	/// that belong at runtime, and an ordinary binding may be rebound by an
 	/// enclosing construct after the plan is built.
 	///
-	/// SECURITY: `$session` is **not** unshadowable, and nothing here should be
-	/// read as claiming it is. `PROTECTED_PARAM_NAMES` is consulted only by the
-	/// statement forms listed above; the constructs that bind a user-chosen
-	/// parameter name — `FOR $session IN [...]`, closure parameters, user-defined
-	/// function arguments — bind it unchecked, and `Context::value` prefers a
-	/// local insert over the parent chain. Folding beneath one of them would
-	/// read the ambient session where the evaluator reads the binding, so the
-	/// planner records those names and declines. The same routes shadow `$auth`,
-	/// which every record permission already depends on, so folding `$session`
-	/// here neither adds nor removes trust: it inherits exactly `$auth`'s
-	/// boundary.
+	/// SECURITY: folding `$session` is sound because no construct can shadow it:
+	/// a body that bound its own `$session` or `$auth` would otherwise read its
+	/// binding where the fold read the ambient session, so the names are refused
+	/// where they would be bound. The `param_is_shadowed` guard below is kept as
+	/// a belt-and-suspenders check and never fires for a protected name.
 	///
 	/// SECURITY: folding bakes one session's values into a physical plan, which
 	/// is sound only because a plan belongs to the session it was built for. A

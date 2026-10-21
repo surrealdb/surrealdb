@@ -860,6 +860,22 @@ pub(super) fn alter_template(ty: &'static str, value: Value, fields: &[&str]) ->
 	}
 }
 
+/// The refusal the body raises for a user-defined function argument that takes a
+/// protected name, if one does.
+///
+/// SECURITY: a function body reads its argument of a protected name
+/// (`$auth`, `$access`, `$token`, `$session`) in place of the session's value,
+/// so a permission predicate judged beneath such a body would be handed a
+/// caller-chosen identity. `DEFINE FUNCTION` refuses the argument, the way a
+/// `FOR` variable and a closure parameter are refused (GHSA-ffvm-mqh3-7986).
+pub(super) fn protected_arg_refusal<K>(args: &[(String, K)]) -> Option<Refusal> {
+	args.iter().find(|(name, _)| surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&name.as_str())).map(
+		|(name, _)| Refusal::ProtectedParam {
+			name: name.clone(),
+		},
+	)
+}
+
 /// The refusal the body raises for an alias that is no GraphQL name, if it raises one.
 pub(super) fn alias_refusal(alias: &Option<String>, kind: &str) -> Option<Refusal> {
 	let error = crate::ddl::define::validate_graphql_alias(alias, kind).err()?;

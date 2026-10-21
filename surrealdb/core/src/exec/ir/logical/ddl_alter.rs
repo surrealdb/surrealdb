@@ -10,7 +10,7 @@ use surrealdb_strand::Strand;
 
 use super::ddl::{
 	DdlForm, DdlOperand, DdlPlan, PlanError, Planned, Slots, alter_template, canonical_field_name,
-	stored_value, written_text,
+	protected_arg_refusal, stored_value, written_text,
 };
 use super::ddl_define::catalog_api_config;
 use super::ops::{AlterAttrs, LogOp};
@@ -251,6 +251,10 @@ pub(super) fn plan_alter<'e>(
 ) -> Planned<DdlPlan<'e>> {
 	let mut s = Slots::new();
 	let mut template = None;
+	// The refusal the body raises after the checks, for an `ALTER FUNCTION` that
+	// sets a protected argument name ([`protected_arg_refusal`]). `DEFINE
+	// FUNCTION` refuses one the same way (GHSA-ffvm-mqh3-7986).
+	let mut refusal = None;
 	let (form, allow, object, if_exists) = match alter {
 		AlterStatement::System(stmt) => {
 			let query_timeout = match &stmt.query_timeout {
@@ -893,6 +897,13 @@ pub(super) fn plan_alter<'e>(
 			let mut fields = Vec::new();
 			match &stmt.args {
 				AlterKind::Set(args) => {
+					// SECURITY: an argument may not take a protected name, for the
+					// reason `DEFINE FUNCTION` refuses one: a function body reads
+					// its argument of `$auth`, `$access`, `$token` or `$session` in
+					// place of the session's value, so a permission predicate judged
+					// beneath the body would be handed a caller-chosen identity
+					// (GHSA-ffvm-mqh3-7986).
+					refusal = protected_arg_refusal(args);
 					altered.args.clone_from(args);
 					fields.push("args");
 				}
@@ -1082,5 +1093,7 @@ pub(super) fn plan_alter<'e>(
 		template,
 		checks,
 	}));
-	Ok(s.finish(form, allow, op))
+	let mut plan = s.finish(form, allow, op);
+	plan.refusal = refusal;
+	Ok(plan)
 }

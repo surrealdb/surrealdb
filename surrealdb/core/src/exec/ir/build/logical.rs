@@ -1195,6 +1195,31 @@ pub(super) fn raise_refused(cx: &mut BindCx<'_>, refusal: Refusal) -> Result<Flo
 	Ok(Flow::Diverged)
 }
 
+/// Refuses a protected name (`$auth`, `$access`, `$token`, `$session`) bound as
+/// a `FOR` variable or a closure parameter, the way [`bind_let_as`] refuses one
+/// a `LET` names. Answers `Some` with the diverging flow when `name` is
+/// protected and so refused, and `None` when it is free to bind.
+///
+/// SECURITY: a permission predicate reads the session's value of a protected
+/// name from the frame it runs in, so a construct that bound its own would hand
+/// the predicate a caller-chosen identity (GHSA-ffvm-mqh3-7986). These names are
+/// refused by `LET`, `UNSET` and the `set` RPCs; the constructs that bind a
+/// user-chosen name must refuse them too.
+fn refuse_protected_binding(cx: &mut BindCx<'_>, name: &str) -> Result<Option<Flow>, IrError> {
+	if !surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&name) {
+		return Ok(None);
+	}
+	let refusal = Refusal::ProtectedParam {
+		name: name.to_owned(),
+	};
+	if cx.eager() {
+		cx.hoist_refusal(refusal.clone());
+		return raise_refused(cx, refusal).map(Some);
+	}
+	cx.raise(RaiseKind::Refused(Box::new(refusal)))?;
+	Ok(Some(Flow::Diverged))
+}
+
 /// The answer for `owner`, an op whose region held a statement list that bound `refusal`: the op
 /// stands when none was bound, and is replaced by the raise of the refusal otherwise.
 pub(super) fn owner_flow(
@@ -1227,6 +1252,15 @@ fn bind_sequence(
 /// `FOR`: a loop over the value of its range, whose body is the statement list of the block and
 /// binds the parameter to the element.
 fn bind_foreach(cx: &mut BindCx<'_>, foreach: &LogicalForeach, pos: Pos) -> Result<Flow, IrError> {
+	// SECURITY: a `FOR` variable may not take a protected name. `LET`, `UNSET`
+	// and the `set` RPCs refuse these names, but the constructs that bind a
+	// user-chosen name once bound them unchecked, and a permission predicate
+	// reads the session's value of a protected name from the frame it runs in,
+	// so a loop binding `$auth`, `$access`, `$token` or `$session` would hand the
+	// predicate a caller-chosen identity (GHSA-ffvm-mqh3-7986).
+	if let Some(refused) = refuse_protected_binding(cx, foreach.param.as_str())? {
+		return Ok(refused);
+	}
 	let Built::Value(source) =
 		bind_instant(cx, &foreach.range, |cx| bind_expr(cx, &foreach.range))?
 	else {
@@ -5156,6 +5190,56 @@ pub(crate) fn bind_closure(
 	cx: &mut BindCx<'_>,
 	closure: &LogicalClosure,
 ) -> Result<ValueId, IrError> {
+	// SECURITY: a closure parameter may not take a protected name, for the
+	// reason a `FOR` variable may not ([`refuse_protected_binding`]): a body that
+	// bound its own `$auth`, `$access`, `$token` or `$session` would hand a
+	// permission predicate judged beneath it a caller-chosen identity
+	// (GHSA-ffvm-mqh3-7986).
+	if let Some((param, _)) = closure
+		.args
+		.iter()
+		.find(|(param, _)| surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&param.as_str()))
+	{
+		// SECURITY: a closure parameter is refused the way a protected `LET` or
+		// `FOR` variable is (GHSA-ffvm-mqh3-7986), and like them its refusal is the
+		// whole statement's where it is planned eagerly, and raised where it stands
+		// otherwise. A closure stands inside an expression whose binder appends more
+		// ops to this block after this returns, so a `raise` emitted into this block
+		// would not be its last op; both paths keep the raise out of it.
+		if cx.eager() {
+			// Planned with the top-level statement: the refusal is the whole
+			// statement's, raised before any of it runs. `take_hoisted` erases what
+			// the statement bound and raises it ([`bind_logical_statement`],
+			// [`raise_if_refused`]); the placeholder only stands in until then.
+			cx.hoist_refusal(Refusal::ProtectedParam {
+				name: param.as_str().to_owned(),
+			});
+			let none = cx.emit(
+				OpKind::Expr(ExprOp::Literal(Box::new(crate::val::Value::None))),
+				&[],
+				&[TypeKnowledge::Unknown],
+			)?;
+			return first_result(cx, none);
+		}
+		// Bound after a catalog change in the same block, where the statements
+		// before it may already have run: the refusal is raised only if the closure
+		// is reached, so those statements stand. It is the terminator of the region
+		// of an `expr.subquery` whose value stands for the closure, so the raise is
+		// the last op of its own block and is reached only when that value is
+		// evaluated ([`refusing_subquery`]).
+		let subquery = cx.emit(
+			OpKind::Expr(ExprOp::Subquery(NestedStrategy::Apply)),
+			&[],
+			&[TypeKnowledge::Unknown],
+		)?;
+		let result = first_result(cx, subquery)?;
+		cx.within(subquery, RegionKind::Subquery, &[], |cx, _| {
+			cx.raise(RaiseKind::Refused(Box::new(Refusal::ProtectedParam {
+				name: param.as_str().to_owned(),
+			})))
+		})?;
+		return Ok(result);
+	}
 	let in_place = cx.take_closure_in_place();
 	let params: Vec<Strand> =
 		closure.args.iter().map(|(param, _)| Strand::new(param.as_str())).collect();

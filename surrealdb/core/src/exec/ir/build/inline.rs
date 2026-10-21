@@ -24,10 +24,25 @@ use crate::expr::logical::{LogicalEval, LogicalExpr, LogicalOp, LogicalReturn, L
 use crate::expr::{BinaryOperator, Function, Kind};
 
 /// The expression `definition`'s body yields, when the body is one that may stand in the caller.
+///
+/// SECURITY: a definition whose declared arguments include a protected name
+/// (`$auth`, `$access`, `$token`, `$session`) is never inlined, even when its
+/// body otherwise qualifies. Inlining replaces the call with the body, past the
+/// invoke-time refusal in [`bind_args`](crate::exec::vm::function); declining
+/// here leaves the call standing, so that refusal runs and the stored definition
+/// (one persisted before the define-time refusal, or on an earlier version) is
+/// refused whether its body would have been inlined or not (GHSA-ffvm-mqh3-7986).
 pub(crate) fn inlinable_body<'d>(
 	definition: &'d FunctionDefinition,
 	registry: &FunctionRegistry,
 ) -> Option<&'d LogicalExpr> {
+	if definition
+		.args
+		.iter()
+		.any(|(name, _)| surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&name.as_str()))
+	{
+		return None;
+	}
 	let expr = return_expr(definition.logical_body().ok()?)?;
 	body_is_inlinable(expr, &definition.args, registry).then_some(expr)
 }
@@ -227,5 +242,23 @@ mod tests {
 		] {
 			assert!(!inlinable(sql), "`{sql}`");
 		}
+	}
+
+	#[test]
+	fn a_protected_argument_name_may_not_stand_in_the_caller() {
+		// A definition may declare a protected argument only when it was written
+		// before the define-time refusal, or on an earlier version; the parser
+		// still accepts the name, so the catalog of an upgraded database can hold
+		// one. Its body may be inlinable, and inlining would replace the call with
+		// the body, bypassing the invoke-time refusal in `bind_args`. The
+		// definition is refused inlining so the call stands and `bind_args` refuses
+		// it, inlined or not (GHSA-ffvm-mqh3-7986).
+		for protected in surrealdb_cnf::PROTECTED_PARAM_NAMES {
+			let sql =
+				format!("DEFINE FUNCTION fn::id(${protected}: any) {{ RETURN ${protected} }}");
+			assert!(!inlinable(&sql), "`{sql}`");
+		}
+		// The same body under a free argument name still stands in the caller.
+		assert!(inlinable("DEFINE FUNCTION fn::id($row: any) { RETURN $row }"));
 	}
 }

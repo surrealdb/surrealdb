@@ -220,20 +220,13 @@ pub struct Session {
 	/// do each name the system binds in a frame
 	/// ([`surrealdb_cnf::SYSTEM_BOUND_PARAM_NAMES`]).
 	///
-	/// SECURITY: that is not the same as unforgeable, and this field must not
-	/// be documented as if it were. Only those statement forms consult the
-	/// protected list. The constructs that bind a *user-chosen* parameter name
-	/// — `FOR $session IN [...]`, a closure parameter, a user-defined function
-	/// argument — bind it with no check at all, and
-	/// [`crate::ctx::Context::value`] prefers a key inserted locally over the
-	/// parent chain, so a query can shadow `$session` for a body it controls.
-	///
-	/// The identical routes shadow `$auth`, which every record permission
-	/// written before this field already depends on. So the honest boundary is
-	/// this: `$session.data` is exactly as trustworthy as `$auth` — no more, no
-	/// less — and a permission that reads it is no weaker than one that reads
-	/// `$auth`. Closing the hole is an engine-wide change to how parameters are
-	/// bound, not a property this field can hold on its own.
+	/// SECURITY: every route that binds a user-chosen parameter name refuses a
+	/// protected one as well: a `FOR` variable, a closure parameter and a
+	/// user-defined function argument all reject `$session`, `$auth`, `$access`
+	/// and `$token`, the way `LET` does (GHSA-ffvm-mqh3-7986). No query can
+	/// therefore shadow `$session` for a body it controls, so a permission
+	/// predicate that reads `$session.data` reads the authenticated value, as
+	/// one reading `$auth` does.
 	pub data: Option<SessionData>,
 	/// The current expiration time of the session
 	pub exp: Option<i64>,

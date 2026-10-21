@@ -331,6 +331,23 @@ pub(super) async fn judge(
 	}
 }
 
+/// The error a call raises for a function whose declared arguments include a
+/// protected name (`$auth`, `$access`, `$token`, `$session`), if they do.
+///
+/// SECURITY: `DEFINE`/`ALTER FUNCTION` refuse a protected argument name, but a
+/// definition persisted before that refusal, or on an earlier version, keeps
+/// one. Binding its value into the body would read the caller's argument in
+/// place of the session's protected value, handing a permission predicate judged
+/// beneath the body a caller-chosen identity (GHSA-ffvm-mqh3-7986). The error is
+/// the one `LET` of a protected name raises.
+fn protected_arg_refused<K>(args: &[(String, K)]) -> Option<ExecError> {
+	args.iter().find(|(name, _)| surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&name.as_str())).map(
+		|(name, _)| ExecError::InvalidParam {
+			name: name.clone(),
+		},
+	)
+}
+
 /// The arguments `evaluated` bound as the entered definition declares them:
 /// counted, then each coerced to its parameter's kind.
 pub(super) fn bind_args(
@@ -341,6 +358,16 @@ pub(super) fn bind_args(
 	let func_name = spec.qualified.as_str();
 	let definition = &entered.definition;
 	validate_arg_count(func_name, evaluated.len(), &definition.args)?;
+	// SECURITY: an argument may not take a protected name. `DEFINE`/`ALTER
+	// FUNCTION` refuse one, but a definition persisted before that refusal (or on
+	// an earlier version) keeps a protected-name argument, and binding it into the
+	// body would read the caller's value in place of the session's `$auth`,
+	// `$access`, `$token` or `$session`, handing a permission predicate judged
+	// beneath the body a caller-chosen identity (GHSA-ffvm-mqh3-7986). The call
+	// refuses it, so such a stored definition is never run.
+	if let Some(error) = protected_arg_refused(&definition.args) {
+		return Err(ControlFlow::from(anyhow::Error::new(error)));
+	}
 	let mut bound = Vec::with_capacity(evaluated.len());
 	for ((param_name, kind), arg_value) in definition.args.iter().zip(evaluated) {
 		let coerced =
@@ -885,6 +912,29 @@ mod tests {
 		let caller = Arc::new(Auth::for_root(Role::Owner));
 		for _ in 0..3 {
 			assert!(narrowed_for(&caller, &broken, "fn::f").is_err());
+		}
+	}
+
+	#[test]
+	fn a_call_refuses_a_protected_argument_name() {
+		// A free argument name raises nothing, so an ordinary function binds its
+		// arguments as before.
+		assert!(protected_arg_refused::<()>(&[("row".to_owned(), ())]).is_none());
+		// A definition that still declares a protected argument - one persisted
+		// before the define-time refusal, or on an earlier version - is refused
+		// wherever the name stands, and the error names it, exactly as `LET` of a
+		// protected name is refused (GHSA-ffvm-mqh3-7986). `bind_args` is the one
+		// point every non-inlined body passes through, so such a stored definition
+		// never binds a caller-chosen `$auth`, `$access`, `$token` or `$session`.
+		for protected in surrealdb_cnf::PROTECTED_PARAM_NAMES {
+			let args = [("row".to_owned(), ()), ((*protected).to_owned(), ())];
+			let Some(ExecError::InvalidParam {
+				name,
+			}) = protected_arg_refused(&args)
+			else {
+				panic!("a protected argument name `{protected}` is refused");
+			};
+			assert_eq!(name, *protected);
 		}
 	}
 }
