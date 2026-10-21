@@ -299,6 +299,12 @@ fn every_idx_variant() -> Vec<(&'static str, IdxError)> {
 			},
 		),
 		(
+			"IndexExistsHidden",
+			IdxError::IndexExistsHidden {
+				index: "sample".to_string(),
+			},
+		),
+		(
 			"NoIndexFoundForMatch",
 			IdxError::NoIndexFoundForMatch {
 				exp: "sample".to_string(),

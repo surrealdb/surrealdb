@@ -170,13 +170,21 @@ async fn run_chain(
 		handler,
 	});
 
-	// The chain never exceeds the auth of the identity that defined the API.
+	// The chain runs under the definer's auth limit: permissions suppressed for
+	// a definer-authored API, or the caller's own permissions for an invoker
+	// one. Either way it carries whether the caller's own reads are permission
+	// checked, so a UNIQUE-index conflict a write in the chain raises names
+	// neither the stored record nor its value to a caller who cannot read them:
+	// the response body carries the error's text.
+	let caller_view_checked = ctx.check_perms(opt, Action::View)?;
 	let opt = opt.limited_by(&AuthLimit::try_from(&api.auth_limit)?);
 	let opt = match api.security {
 		ApiSecurity::Definer => opt.new_with_perms(false),
 		ApiSecurity::Invoker => opt,
 	};
-	let frame = crate::exec::entry::frame(ctx, &opt, None).await;
+	let frame = crate::exec::entry::frame(ctx, &opt, None)
+		.await
+		.with_caller_view_checked(caller_view_checked);
 	let answered = crate::exec::trampoline::nest(run_stage(chain, 0, req.into(), frame))
 		.await
 		.map_err(|signal| match signal {

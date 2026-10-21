@@ -77,6 +77,7 @@ FeatureDisabled	{ cause: NONE, code: -32000, kind: 'Configuration', message: 'sa
 InvalidVectorDimension	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Incorrect vector dimension (1). Expected a vector of 1 dimension.' }
 InvalidVectorValue	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The value cannot be converted to a vector: sample' }
 IndexExists	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Database index `sample` already contains sample, with record `t:`1``' }
+IndexExistsHidden	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'Database index `sample` already contains a conflicting value in another record' }
 NoIndexFoundForMatch	{ cause: NONE, code: -32000, kind: 'Internal', message: 'There was no suitable index supporting the expression: sample' }
 AnalyzerError	{ cause: NONE, code: -32000, kind: 'Internal', message: "A value can't be analyzed: sample" }
 HighlightError	{ cause: NONE, code: -32000, kind: 'Internal', message: "A value can't be highlighted: sample" }

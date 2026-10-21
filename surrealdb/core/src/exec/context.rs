@@ -320,6 +320,18 @@ pub struct RootContext {
 	/// else a method names every argument error raised beneath it as its own
 	/// (`InvalidMethodArguments`).
 	pub(crate) writing: bool,
+	/// Whether the caller whose write this is has permission-checked reads,
+	/// captured once as the outermost write begins and carried unchanged into
+	/// every frame the write reaches. It records the caller's real status before
+	/// any privileged event or reference-cascade frame can mask it, so a redacted
+	/// UNIQUE-index conflict can be withheld from a permission-checked caller even
+	/// where a nested write stringifies the error (an event clause, a reference
+	/// repair) before the write boundary inspects its typed form. A frame that
+	/// runs definer code on a caller's behalf with permissions off (a `DEFINE
+	/// API` chain) is seeded with the caller's status before any write begins
+	/// ([`ExecutionContext::with_caller_view_checked`]); a write never clears a
+	/// recorded `true`. See [`ExecutionContext::caller_view_checked`].
+	pub(crate) caller_view_checked: bool,
 	/// Where the statement's program records the changes it makes to the request's session.
 	///
 	/// `Some` only on the context of a top-level statement of the request. The derivations that
@@ -805,6 +817,7 @@ impl ExecutionContext {
 			version_stamp: None,
 			guard_verdicts: Default::default(),
 			writing: false,
+			caller_view_checked: false,
 			forbidden_row: None,
 			inherited_knn: None,
 			session_effects: None,
@@ -1002,6 +1015,7 @@ impl ExecutionContext {
 				version_stamp: r.version_stamp,
 				guard_verdicts: Arc::clone(&r.guard_verdicts),
 				writing: r.writing,
+				caller_view_checked: r.caller_view_checked,
 				session_effects: None,
 			}),
 			Self::Namespace(n) => Self::Namespace(NamespaceContext {
@@ -1024,6 +1038,7 @@ impl ExecutionContext {
 					version_stamp: n.root.version_stamp,
 					guard_verdicts: Arc::clone(&n.root.guard_verdicts),
 					writing: n.root.writing,
+					caller_view_checked: n.root.caller_view_checked,
 					session_effects: None,
 				},
 				ns: Arc::clone(&n.ns),
@@ -1049,6 +1064,7 @@ impl ExecutionContext {
 						version_stamp: d.ns_ctx.root.version_stamp,
 						guard_verdicts: Arc::clone(&d.ns_ctx.root.guard_verdicts),
 						writing: d.ns_ctx.root.writing,
+						caller_view_checked: d.ns_ctx.root.caller_view_checked,
 						session_effects: None,
 					},
 					ns: Arc::clone(&d.ns_ctx.ns),
@@ -1510,10 +1526,19 @@ impl ExecutionContext {
 
 	/// Derive a context for code a write statement reaches
 	/// ([`RootContext::writing`]).
+	///
+	/// The first hop, which enters the caller's own write, records whether the
+	/// caller's reads are permission checked ([`RootContext::caller_view_checked`]):
+	/// checked when this frame checks them or when the frame was seeded as
+	/// checked on a caller's behalf. A nested write already runs inside the
+	/// caller's frame, so it keeps that recorded status rather than reading its
+	/// own suppressed frame.
 	pub(crate) fn in_write(self) -> Self {
 		if self.root().writing {
 			return self;
 		}
+		let caller_view_checked = self.root().caller_view_checked
+			|| self.should_check_perms(Action::View).unwrap_or(true);
 		let mut new = self;
 		let root = match &mut new {
 			Self::Root(r) => r,
@@ -1521,7 +1546,31 @@ impl ExecutionContext {
 			Self::Database(d) => &mut d.ns_ctx.root,
 		};
 		root.writing = true;
+		root.caller_view_checked = caller_view_checked;
 		new
+	}
+
+	/// Whether the caller whose write this context runs inside has
+	/// permission-checked reads, as recorded when the outermost write began
+	/// ([`RootContext::caller_view_checked`]).
+	///
+	/// Read where a UNIQUE-index conflict a nested write raised is redacted
+	/// before it is stringified, so the decision reflects the caller rather than
+	/// the privileged event or reference-cascade frame the conflict is raised in.
+	/// `false` before any write, which withholds nothing, unless the frame was
+	/// seeded with [`Self::with_caller_view_checked`].
+	pub(crate) fn caller_view_checked(&self) -> bool {
+		self.root().caller_view_checked
+	}
+
+	/// This context with the caller's read-check status recorded as `checked`
+	/// ([`RootContext::caller_view_checked`]), for a frame that runs definer
+	/// code on a caller's behalf with permissions off, so a UNIQUE-index
+	/// conflict a write in it raises is withheld from a permission-checked
+	/// caller as it is from the caller's own write.
+	pub(crate) fn with_caller_view_checked(mut self, checked: bool) -> Self {
+		self.root_mut().caller_view_checked = checked;
+		self
 	}
 
 	/// Derive a context in which a write is refused because a `COMPUTED` field
@@ -2033,6 +2082,7 @@ pub(crate) async fn statement_context(
 		version_stamp: None,
 		guard_verdicts: Arc::new(crate::exec::guard_verdicts::GuardVerdicts::for_statement(writes)),
 		writing: false,
+		caller_view_checked: false,
 		session_effects: None,
 	};
 

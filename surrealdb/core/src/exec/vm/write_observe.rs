@@ -24,7 +24,7 @@
 use std::sync::Arc;
 
 use super::data::statement_input;
-use super::{State, internal, run_image};
+use super::{State, hide_conflict_record, internal, run_image};
 use crate::catalog::EventDefinition;
 use crate::doc::Action;
 use crate::exec::operators::fetch::fetch_fields_with;
@@ -627,7 +627,21 @@ async fn clause(
 	};
 	match ran {
 		Ok(value) | Err(ControlFlow::Return(value)) => Ok(value),
-		Err(signal) => Err(ControlFlow::Err(event_failure(&event.name, signal))),
+		Err(signal) => {
+			// A UNIQUE-index conflict a clause's write raises is redacted before
+			// the event's failure stringifies it: once folded into the message
+			// `event_failure` builds, the typed `IndexExists` is gone and the
+			// stream exit can no longer match it, so the stored record and its
+			// indexed value would otherwise leak to a caller whose reads are
+			// permission checked (GHSA-cff7-q66j-4hc8). The caller's own status
+			// decides it, taken from the write boundary rather than this event's
+			// privileged frame; reading the frame would miss a permission-checked
+			// caller whose write fired an event that fired this one, since each
+			// event frame suppresses the read check.
+			let hide = exec.caller_view_checked();
+			let signal = hide_conflict_record(signal, hide);
+			Err(ControlFlow::Err(event_failure(&event.name, signal)))
+		}
 	}
 }
 

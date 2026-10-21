@@ -13,7 +13,7 @@
 
 use common::{LeafError, internal_todo};
 use fst::Error as FstError;
-use surrealdb_types::{Error as TypesError, QueryError, ToSql};
+use surrealdb_types::{Error as TypesError, QueryError, ToSql, ValidationError};
 
 use crate::ft::MatchRef;
 use crate::val::RecordId;
@@ -39,6 +39,16 @@ pub enum Error {
 		record: RecordId,
 		index: String,
 		value: String,
+	},
+
+	/// The same, with the conflicting value and the record that holds it
+	/// withheld from a caller whose SELECT is permission checked: naming either
+	/// would disclose a row or field value the caller cannot read. The conflict
+	/// itself is still reported, as a uniqueness constraint cannot be enforced
+	/// without it.
+	#[error("Database index `{index}` already contains a conflicting value in another record")]
+	IndexExistsHidden {
+		index: String,
 	},
 
 	/// The query planner did not find an index able to support the given
@@ -130,6 +140,15 @@ impl LeafError for Error {
 				..
 			}
 			| Error::FileAccessDenied(_) => internal_todo(message),
+			// A UNIQUE-index conflict with the stored record and its indexed value
+			// redacted for a permission-checked caller. The write is refused by a
+			// uniqueness constraint the caller can resolve by choosing another
+			// value, so it is a validation fault rather than an engine one. The
+			// released sibling `IndexExists` stays untyped above: a shipped error
+			// keeps its public kind, so only this new variant is typed.
+			Error::IndexExistsHidden {
+				..
+			} => TypesError::validation(message, ValidationError::InvalidRequest),
 		}
 	}
 }

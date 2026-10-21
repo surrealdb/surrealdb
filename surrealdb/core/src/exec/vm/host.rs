@@ -827,6 +827,16 @@ async fn start_group(
 	let version = out_of_line(|| resolve_version_stamp(frame, None)).await?;
 	match &spec.write {
 		Some(write) => {
+			// Whether a unique-index conflict must withhold the stored record and
+			// value. Read before `in_write`, so it reflects the caller's own
+			// permission status rather than the suppressed write frame, or the
+			// status a frame running on a caller's behalf was seeded with. A
+			// grouped write does not pass through the stream, so its conflict is
+			// redacted here instead ([`write::hide_conflict_record`]).
+			let hide_index_conflict = frame
+				.should_check_perms(crate::iam::Action::View)
+				.map_err(|e| ControlFlow::Err(anyhow::Error::new(e)))?
+				|| frame.caller_view_checked();
 			// What a write reaches runs in the write's frame.
 			let writing;
 			let frame = if frame.root().writing {
@@ -847,7 +857,9 @@ async fn start_group(
 					fresh
 				}
 			});
-			write::run_write(program, Some(group), version, state, frame, out, flush_at).await
+			write::run_write(program, Some(group), version, state, frame, out, flush_at)
+				.await
+				.map_err(|err| write::hide_conflict_record(err, hide_index_conflict))
 		}
 		None => run_pipelines(program, Some(group), version, state, frame, out, flush_at).await,
 	}

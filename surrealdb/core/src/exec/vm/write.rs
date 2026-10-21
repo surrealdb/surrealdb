@@ -1558,10 +1558,60 @@ async fn run_host_image(
 ///
 /// A stream of its own rather than the read host's, so a statement nested in
 /// a record's write carries only what writing needs on the stack.
+/// Replace a unique-index conflict error with one that names neither the stored
+/// record nor its indexed value, when the caller's reads are permission checked
+/// (`hide`). Naming either would disclose a row or field value the caller cannot
+/// read; the conflict itself is still reported (GHSA-cff7-q66j-4hc8). Applied
+/// where the write's error leaves the operator, after any UPSERT/INSERT retry
+/// that needs the record has run: at the stream exit for a streaming write, and
+/// at the grouped-write exit for a write a block, `IF` or `FOR` runs, which does
+/// not pass through the stream.
+pub(super) fn hide_conflict_record(flow: ControlFlow, hide: bool) -> ControlFlow {
+	if hide
+		&& let ControlFlow::Err(err) = &flow
+		&& let Some(index) = index_conflict_name(err)
+	{
+		ControlFlow::Err(anyhow::Error::new(crate::idx::Error::IndexExistsHidden {
+			index,
+		}))
+	} else {
+		flow
+	}
+}
+
+/// The index name a unique-index conflict `err` reports, in whichever of the two
+/// shapes the write path hands one up: a bare `idx::Error::IndexExists`, or one
+/// wrapped in `crate::err::Error::Idx` before `anyhow`. `anyhow`'s downcast does
+/// not look through the wrapping enum, so both are checked; any other error is
+/// `None`.
+fn index_conflict_name(err: &anyhow::Error) -> Option<String> {
+	if let Some(crate::idx::Error::IndexExists {
+		index,
+		..
+	}) = err.downcast_ref::<crate::idx::Error>()
+	{
+		return Some(index.clone());
+	}
+	if let Some(crate::err::Error::Idx(crate::idx::Error::IndexExists {
+		index,
+		..
+	})) = err.downcast_ref::<crate::err::Error>()
+	{
+		return Some(index.clone());
+	}
+	None
+}
+
 pub(super) fn stream(program: Arc<Program>, ctx: ExecutionContext) -> ValueBatchStream {
 	Box::pin(common::future::stream::try_async_stream(async move |mut stream: Yielder<_>| {
 		let mut yielder = Out::Stream(&mut stream);
 		let spec = program.write.as_ref().ok_or_else(|| internal("a write stream for a read"))?;
+		// Whether a unique-index conflict must withhold the stored record and
+		// value. Read before `in_write`, so it reflects the caller's own
+		// permission status rather than the suppressed write frame, or the
+		// status a frame running on a caller's behalf was seeded with.
+		let hide_index_conflict =
+			ctx.should_check_perms(crate::iam::Action::View)? || ctx.caller_view_checked();
 		// What a write reaches runs in the write's frame.
 		let ctx = ctx.in_write();
 		let flush_at = ctx.root().ctx.config.exec.scan_batch_size.max(1);
@@ -1586,7 +1636,9 @@ pub(super) fn stream(program: Arc<Program>, ctx: ExecutionContext) -> ValueBatch
 		state.permissions_bypassed = ctx.root().skip_fetch_perms;
 		state.frames = program.permissions.iter().map(|spec| spec.context(&ctx)).collect();
 		state.write = Some(Box::new(WriteState::new(spec, &ctx)?));
-		run_write(&program, None, version, &mut state, &ctx, &mut yielder, flush_at).await?;
+		run_write(&program, None, version, &mut state, &ctx, &mut yielder, flush_at)
+			.await
+			.map_err(|err| hide_conflict_record(err, hide_index_conflict))?;
 		let rest = state.take_output();
 		if !rest.is_empty() {
 			stream.emit(ValueBatch::new(rest)).await;

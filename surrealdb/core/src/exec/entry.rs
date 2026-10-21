@@ -83,6 +83,7 @@ pub(crate) async fn frame(
 		version_stamp: opt.version,
 		guard_verdicts: Default::default(),
 		writing: false,
+		caller_view_checked: false,
 		session_effects: None,
 	});
 	let (Ok(ns), Ok(db)) = (opt.ns(), opt.db()) else {

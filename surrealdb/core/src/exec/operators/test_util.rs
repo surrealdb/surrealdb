@@ -57,6 +57,7 @@ pub(crate) fn root_ctx() -> ExecutionContext {
 		version_stamp: None,
 		guard_verdicts: Default::default(),
 		writing: false,
+		caller_view_checked: false,
 		session_effects: None,
 	})
 }
@@ -456,6 +457,7 @@ impl TestDb {
 			version_stamp: None,
 			guard_verdicts: Default::default(),
 			writing: false,
+			caller_view_checked: false,
 			session_effects: None,
 		};
 

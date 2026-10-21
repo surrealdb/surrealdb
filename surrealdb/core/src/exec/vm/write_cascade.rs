@@ -315,6 +315,15 @@ async fn repair(program: &Program, tables: &[TableRepairs], state: &mut State) -
 				name: field.clone(),
 			}))
 		})?;
+	// A UNIQUE-index conflict a repair's write raises is redacted before
+	// `purge::wrap` stringifies it into the referential failure: the wrapper
+	// embeds the inner error's text and drops the typed `IndexExists`, so the
+	// stored record and its indexed value would otherwise leak to a caller whose
+	// reads are permission checked (GHSA-cff7-q66j-4hc8). The caller's own status
+	// decides it, taken from the write boundary rather than this suppressed
+	// cascade frame, which holds whether the caller's reads are checked however
+	// deep the repair runs beneath events or other cascades.
+	let hide = ctx.exec().caller_view_checked();
 	match strategy {
 		RepairStrategy::Ignore => Ok(()),
 		RepairStrategy::Reject => Err(ControlFlow::Err(anyhow::anyhow!(
@@ -330,7 +339,7 @@ async fn repair(program: &Program, tables: &[TableRepairs], state: &mut State) -
 			run_statement(program, *unit, frame, state)
 				.await
 				.map(|_| ())
-				.map_err(|err| purge::wrap(&rid, err))
+				.map_err(|err| purge::wrap(&rid, super::hide_conflict_record(err, hide)))
 		}
 		RepairStrategy::Unset {
 			field,
@@ -339,7 +348,7 @@ async fn repair(program: &Program, tables: &[TableRepairs], state: &mut State) -
 			subtract,
 		} => unset_link(program, [*read, *unset, *subtract], field, &rid, &referencing, state)
 			.await
-			.map_err(|err| purge::wrap(&rid, err)),
+			.map_err(|err| purge::wrap(&rid, super::hide_conflict_record(err, hide))),
 		RepairStrategy::Custom {
 			clause,
 		} => custom(program, *clause, &rid, referencing, state).await,
@@ -572,6 +581,12 @@ async fn custom(
 	state: &mut State,
 ) -> FlowResult<()> {
 	let exec = held_exec(state)?;
+	// A UNIQUE-index conflict the clause raises is redacted before `purge::wrap`
+	// stringifies it, so the stored record and its indexed value do not leak to a
+	// caller whose reads are permission checked (GHSA-cff7-q66j-4hc8). The
+	// caller's own status decides it, taken from the write boundary rather than
+	// this suppressed cascade frame.
+	let hide = exec.caller_view_checked();
 	let frame = exec
 		.with_caller_perms()
 		.with_params([(purge::REFERENCE, Value::from(rid.clone()))])
@@ -584,6 +599,6 @@ async fn custom(
 			rid,
 			ControlFlow::Err(anyhow::Error::new(ExecError::InvalidControlFlow)),
 		)),
-		Err(failure) => Err(purge::wrap(rid, failure)),
+		Err(failure) => Err(purge::wrap(rid, super::hide_conflict_record(failure, hide))),
 	}
 }

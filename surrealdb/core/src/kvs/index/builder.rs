@@ -1766,6 +1766,7 @@ impl Building {
 			version_stamp: None,
 			guard_verdicts: Default::default(),
 			writing: false,
+			caller_view_checked: false,
 			session_effects: None,
 		};
 		Ok(ExecutionContext::Database(DatabaseContext {
