@@ -102,6 +102,25 @@ impl Transactor {
 		self.written.lock().wrote_build_state()
 	}
 
+	/// The count of this transaction's writes that may have reached a doc-ID forward mapping, or
+	/// `None` where no count stands for them
+	/// ([`crate::triggers::WrittenTables::doc_lookup_writes`]). Every write reaches the storage
+	/// through this transactor, so no path writes one unseen; a speculation's writes reach no
+	/// storage and are not counted.
+	pub(crate) fn doc_lookup_writes(&self) -> Option<u64> {
+		self.written.lock().doc_lookup_writes()
+	}
+
+	/// End a write of the storage that [`WrittenTables`](crate::triggers::WrittenTables) recorded
+	/// before it was made, `doc` being what recording it answered. The count of forward-mapping
+	/// writes stands still only from the end of one to the beginning of the next, so a read of a
+	/// mapping that ran alongside the write is not taken for one that did not.
+	fn end_write(&self, doc: bool) {
+		if doc {
+			self.written.lock().end_doc_lookup_write();
+		}
+	}
+
 	/// End the speculation, answering the writes it holds. The view refuses
 	/// every write after, so a task still holding it once the speculation has
 	/// ended reaches neither the overlay nor the storage.
@@ -421,8 +440,10 @@ impl Transactor {
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.set(&key, val));
 		}
-		self.written.lock().note_key(key.as_slice());
-		self.inner.set(key, val).await
+		let doc = self.written.lock().note_key(key.as_slice());
+		let written = self.inner.set(key, val).await;
+		self.end_write(doc);
+		written
 	}
 
 	/// Insert or replace a key in the datastore.
@@ -438,8 +459,10 @@ impl Transactor {
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.set(&key, val));
 		}
-		self.written.lock().note_key(key.as_slice());
-		self.inner.replace(key, val).await
+		let doc = self.written.lock().note_key(key.as_slice());
+		let written = self.inner.replace(key, val).await;
+		self.end_write(doc);
+		written
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
@@ -458,8 +481,10 @@ impl Transactor {
 			}
 			return self.overlay_mut(|overlay| overlay.set(&key, val));
 		}
-		self.written.lock().note_key(key.as_slice());
-		self.inner.put(key, val).await
+		let doc = self.written.lock().note_key(key.as_slice());
+		let written = self.inner.put(key, val).await;
+		self.end_write(doc);
+		written
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
@@ -479,8 +504,10 @@ impl Transactor {
 			}
 			return self.overlay_mut(|overlay| overlay.set(&key, val));
 		}
-		self.written.lock().note_key(key.as_slice());
-		self.inner.putc(key, val, chk).await
+		let doc = self.written.lock().note_key(key.as_slice());
+		let written = self.inner.putc(key, val, chk).await;
+		self.end_write(doc);
+		written
 	}
 
 	/// Delete a key from the datastore.
@@ -492,8 +519,10 @@ impl Transactor {
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.delete(&key));
 		}
-		self.written.lock().note_key(key.as_slice());
-		self.inner.del(key).await
+		let doc = self.written.lock().note_key(key.as_slice());
+		let written = self.inner.del(key).await;
+		self.end_write(doc);
+		written
 	}
 
 	/// Delete a key from the datastore if the current value matches a
@@ -509,8 +538,10 @@ impl Transactor {
 			}
 			return self.overlay_mut(|overlay| overlay.delete(&key));
 		}
-		self.written.lock().note_key(key.as_slice());
-		self.inner.delc(key, chk).await
+		let doc = self.written.lock().note_key(key.as_slice());
+		let written = self.inner.delc(key, chk).await;
+		self.end_write(doc);
+		written
 	}
 
 	/// Delete a range of keys from the datastore.
@@ -525,8 +556,10 @@ impl Transactor {
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.clear(&rng));
 		}
-		self.written.lock().note_range(rng.start.as_slice(), rng.end.as_slice());
-		self.inner.delr(rng).await
+		let doc = self.written.lock().note_range(rng.start.as_slice(), rng.end.as_slice());
+		let written = self.inner.delr(rng).await;
+		self.end_write(doc);
+		written
 	}
 
 	/// Delete all versions of a key from the datastore.
@@ -538,8 +571,10 @@ impl Transactor {
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.delete(&key));
 		}
-		self.written.lock().note_key(key.as_slice());
-		self.inner.clr(key).await
+		let doc = self.written.lock().note_key(key.as_slice());
+		let written = self.inner.clr(key).await;
+		self.end_write(doc);
+		written
 	}
 
 	/// Delete all versions of a key from the datastore if the current value
@@ -555,8 +590,10 @@ impl Transactor {
 			}
 			return self.overlay_mut(|overlay| overlay.delete(&key));
 		}
-		self.written.lock().note_key(key.as_slice());
-		self.inner.clrc(key, chk).await
+		let doc = self.written.lock().note_key(key.as_slice());
+		let written = self.inner.clrc(key, chk).await;
+		self.end_write(doc);
+		written
 	}
 
 	/// Delete all versions of a range of keys from the datastore.
@@ -571,8 +608,10 @@ impl Transactor {
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.clear(&rng));
 		}
-		self.written.lock().note_range(rng.start.as_slice(), rng.end.as_slice());
-		self.inner.clrr(rng).await
+		let doc = self.written.lock().note_range(rng.start.as_slice(), rng.end.as_slice());
+		let written = self.inner.clrr(rng).await;
+		self.end_write(doc);
+		written
 	}
 
 	// --------------------------------------------------

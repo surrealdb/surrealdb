@@ -253,6 +253,19 @@ impl Transactable for Transaction {
 		self.serializable
 	}
 
+	/// The write-write check alone rejects a commit whose write set overlaps that of a
+	/// transaction that committed in its conflict window, under snapshot isolation and under
+	/// serializable snapshot isolation alike: `check_concurrent_commit` runs
+	/// `is_disjoint_writeset_bloom` on any transaction with writes, and answers
+	/// `Error::KeyWriteConflict`, before the serializable-only read-set check (surrealmx 1.0.0,
+	/// `src/tx.rs`; the write set holds every key set or deleted, whether or not it was read).
+	/// A caller's earlier read of the key has registered it already, so under serializable
+	/// snapshot isolation `put`'s own read adds a read the check does not need, and `set` adds
+	/// none.
+	fn blind_write_conflicts(&self) -> bool {
+		true
+	}
+
 	/// One acquisition of the transaction's lock serves every range of
 	/// [`Transactable::visit_key_ranges`], and `getm` reads all its keys under one acquisition, so
 	/// a batch pays the lock once where the same reads one by one pay each.

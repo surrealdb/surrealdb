@@ -1073,6 +1073,28 @@ pub trait Transactable: Send + Sync {
 		true
 	}
 
+	/// Whether this transaction's commit fails when a key it wrote was also written by a
+	/// transaction that committed after this one's snapshot was taken: first-committer-wins on
+	/// write-write overlap.
+	///
+	/// `true` is a promise that holds whether or not either transaction read the key, and
+	/// including a key the other transaction also wrote blindly, with `set` and no read. A caller
+	/// that has read a key through this transaction and found it absent, and not written it
+	/// through this transaction since the read, may therefore claim it with `set` in place of
+	/// `put`: a transaction that committed the key since the snapshot makes this commit fail, as
+	/// the existence check would not have prevented, so the check adds no protection. The
+	/// precondition is "absent, and not written by this transaction since the read": the
+	/// promise is about other transactions' commits, and a write of this transaction between
+	/// the read and the `set` is overwritten, which `put` would have refused. The promise is
+	/// about a key written by key (`set`, `put`, `replace`, `del`); a range delete is not part of
+	/// it. `false` is always correct, and is the default; a backend
+	/// whose commit is last-writer-wins on a blind write, or that cannot be shown to detect one,
+	/// answers it. It is the same answer for every transaction of a datastore, so it is a static
+	/// fact the datastore may read once.
+	fn blind_write_conflicts(&self) -> bool {
+		false
+	}
+
 	/// Whether the next chunk of a scan is worth reading on another task while the caller works on
 	/// the current one.
 	///

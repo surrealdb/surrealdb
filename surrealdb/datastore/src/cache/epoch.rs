@@ -44,11 +44,40 @@
 //! (`!bs`) is `Online` with no build owner, or absent while the catalog still names the index,
 //! and nothing else is kept (index ids are never reused and a rename stamps the catalog, so the
 //! id alone names the index): a building, closing, failed, replaced or retired index is read from
-//! the store each time. Every commit that writes a `!bs` key, or deletes a range that may hold one
-//! (a phase change, a generation or owner change, a heartbeat, a removal of the index or of its
-//! table), moves the build epoch, and a transaction that has itself written one names none. A
-//! transaction answers or keeps the entry only while it names both epochs, so the build state it
-//! would read is the build state the entry was read from.
+//! the store each time. Every commit that writes a `!bs` key or a value shape key of an index
+//! (`!it`, `!ia`, `!ir`), or deletes a range that may hold one (a phase change, a generation or
+//! owner change, a heartbeat, a removal of the index or of its table), moves the build epoch, and a
+//! transaction that has itself written one names none. A transaction answers or keeps the entry
+//! only while it names both epochs, so the build state it would read is the build state the entry
+//! was read from.
+//!
+//! The value shapes a settled online B-tree index has stored (its `!it` marker, `!ia` and `!ir`
+//! keys) are kept per index under the same pair of epochs, and only for an index the online entry
+//! above names. Every writer of those keys moves the build epoch by writing them, and the
+//! following also hold:
+//!
+//! - `Transaction::record_index_shapes` for a document write (`!ia`) stamps the table's catalog
+//!   version in the same transaction, which moves the catalog epoch.
+//! - `Transaction::track_index_shapes` (`!it` and `!ir`, at the beginning of a build) runs in the
+//!   builder's transaction after `maintain_build_ownership` has rewritten the index's `!bs` in it,
+//!   which moves the build epoch, and after `wipe_index_data` has deleted the index's range, which
+//!   holds the same keys.
+//! - `Transaction::record_index_shapes` for a build (`!ir`) runs between the `!bs` write that left
+//!   `Online` and the one that returns to it, so no entry is kept or served for the index.
+//! - A deletion of an index's range is a build's wipe or the cleanup of a retired build, each with
+//!   a `!bs` write in the same transaction, or the cleanup of a removed index, which the catalog no
+//!   longer names: the removal stamped it, and index ids are never reused.
+//!
+//! A transaction that has written a shape key of its own neither answers nor keeps shapes from the
+//! epochs: a build's recording stamps nothing, so it still names both, and a rollback to a save
+//! point could otherwise return its reads to the snapshot's shapes while an enclosing write stands.
+//!
+//! What a database's catalog state names (its table keys, and the catalog versions proven against
+//! them) and which tables its `REFERENCE` fields can target are pure functions of its table
+//! definitions (`!tb`), version stamps (`!cv`) and field definitions (`!fd`). They are kept whole
+//! under the catalog epoch, on the same contract as the listings above: a write of a table
+//! definition marks the writing transaction as having changed the catalog, a stamp writes `!cv`
+//! and counts, and a write of a field marks it.
 
 use std::sync::Arc;
 
@@ -73,6 +102,9 @@ enum Key {
 	Fields(u64, NamespaceId, DatabaseId, TableName),
 	Views(u64, NamespaceId, DatabaseId, TableName),
 	OnlineIndex(u64, u64, NamespaceId, DatabaseId, TableName, IndexId),
+	IndexShapes(u64, u64, NamespaceId, DatabaseId, TableName, IndexId),
+	CatalogState(u64, NamespaceId, DatabaseId),
+	ReferenceTargets(u64, NamespaceId, DatabaseId),
 }
 
 /// A borrowed [`Key`].
@@ -90,6 +122,12 @@ pub(crate) enum Lookup<'a> {
 	Views(u64, NamespaceId, DatabaseId, &'a TableName),
 	/// An index read as settled online under a catalog epoch and a build epoch.
 	OnlineIndex(u64, u64, NamespaceId, DatabaseId, &'a TableName, IndexId),
+	/// The value shapes of an index settled online, under a catalog epoch and a build epoch.
+	IndexShapes(u64, u64, NamespaceId, DatabaseId, &'a TableName, IndexId),
+	/// What identifies the catalog of every table of a database.
+	CatalogState(u64, NamespaceId, DatabaseId),
+	/// Which tables the `REFERENCE` fields of a database can target.
+	ReferenceTargets(u64, NamespaceId, DatabaseId),
 }
 
 impl Equivalent<Key> for Lookup<'_> {
@@ -112,12 +150,18 @@ impl Equivalent<Key> for Lookup<'_> {
 			| (Self::Views(e, ns, db, tb), Key::Views(ke, kns, kdb, ktb)) => {
 				e == ke && ns == kns && db == kdb && *tb == ktb
 			}
-			(Self::Tables(e, ns, db), Key::Tables(ke, kns, kdb)) => {
+			(Self::Tables(e, ns, db), Key::Tables(ke, kns, kdb))
+			| (Self::CatalogState(e, ns, db), Key::CatalogState(ke, kns, kdb))
+			| (Self::ReferenceTargets(e, ns, db), Key::ReferenceTargets(ke, kns, kdb)) => {
 				e == ke && ns == kns && db == kdb
 			}
 			(
 				Self::OnlineIndex(e, b, ns, db, tb, ix),
 				Key::OnlineIndex(ke, kb, kns, kdb, ktb, kix),
+			)
+			| (
+				Self::IndexShapes(e, b, ns, db, tb, ix),
+				Key::IndexShapes(ke, kb, kns, kdb, ktb, kix),
 			) => e == ke && b == kb && ns == kns && db == kdb && *tb == ktb && ix == kix,
 			_ => false,
 		}
@@ -140,6 +184,11 @@ impl From<Lookup<'_>> for Key {
 			Lookup::OnlineIndex(e, b, ns, db, tb, ix) => {
 				Key::OnlineIndex(e, b, ns, db, tb.clone(), ix)
 			}
+			Lookup::IndexShapes(e, b, ns, db, tb, ix) => {
+				Key::IndexShapes(e, b, ns, db, tb.clone(), ix)
+			}
+			Lookup::CatalogState(e, ns, db) => Key::CatalogState(e, ns, db),
+			Lookup::ReferenceTargets(e, ns, db) => Key::ReferenceTargets(e, ns, db),
 		}
 	}
 }

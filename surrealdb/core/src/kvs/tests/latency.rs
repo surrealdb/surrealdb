@@ -221,6 +221,9 @@ pub(super) struct LatencyStats {
 	enabled: AtomicBool,
 	lsm: AtomicBool,
 	tracing: AtomicBool,
+	/// Whether the wrapped transactions answer that their backend does not detect
+	/// write-write overlap on a blind write, whatever it does.
+	blind_off: AtomicBool,
 	trace: Mutex<Vec<TraceEntry>>,
 }
 
@@ -245,6 +248,7 @@ impl LatencyStats {
 			enabled: AtomicBool::new(false),
 			lsm: AtomicBool::new(false),
 			tracing: AtomicBool::new(false),
+			blind_off: AtomicBool::new(false),
 			trace: Mutex::new(Vec::new()),
 		})
 	}
@@ -299,6 +303,12 @@ impl LatencyStats {
 
 	pub(super) fn set_tracing(&self, on: bool) {
 		self.tracing.store(on, Ordering::SeqCst);
+	}
+
+	/// Make the wrapped transactions answer `false` for
+	/// [`Transactable::blind_write_conflicts`], as a backend without the capability does.
+	pub(super) fn force_blind_write_conflicts_off(&self, off: bool) {
+		self.blind_off.store(off, Ordering::SeqCst);
 	}
 
 	fn count_view(&self) {
@@ -915,6 +925,10 @@ impl Transactable for LatencyTx {
 
 	fn plain_reads_tracked(&self) -> bool {
 		self.inner.plain_reads_tracked()
+	}
+
+	fn blind_write_conflicts(&self) -> bool {
+		self.inner.blind_write_conflicts() && !self.stats.blind_off.load(Ordering::SeqCst)
 	}
 
 	fn scan_read_ahead(&self) -> bool {

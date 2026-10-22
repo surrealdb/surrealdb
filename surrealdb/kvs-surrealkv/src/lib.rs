@@ -321,6 +321,17 @@ impl Transactable for Transaction {
 		false
 	}
 
+	/// A commit hands the keys of every entry of its batch to the commit pipeline, which
+	/// validates them in `CommitPipeline::validate` against the keys of each commit in the
+	/// transaction's window that its snapshot does not see (`CommitEntry::is_disjoint_writeset`),
+	/// and answers `Error::TransactionWriteConflict` (surrealkv 1.0.0, `src/ring/pipeline.rs`).
+	/// The keys are the batch's own, not the read set, so a key set or deleted without a read is
+	/// validated; a `put` is a plain read of the key and a `set`, so a blind `set` is validated as
+	/// the `put` is.
+	fn blind_write_conflicts(&self) -> bool {
+		true
+	}
+
 	/// A chunk read re-seeks the range and copies each entry out, which another task may do while
 	/// the caller runs its rows; each chunk takes the transaction's lock for its own length only.
 	fn scan_read_ahead(&self) -> bool {

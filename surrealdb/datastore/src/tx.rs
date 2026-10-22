@@ -765,6 +765,9 @@ pub struct Transaction {
 	/// holds of them, and of their tables' catalog versions, since the writes
 	/// it undoes may be among them.
 	shaped_indexes: parking_lot::Mutex<Vec<(NamespaceId, DatabaseId, TableName, IndexId)>>,
+	/// The doc-ID forward mappings this transaction has read lately
+	/// ([`Self::resolve_doc_id`]).
+	doc_lookups: parking_lot::Mutex<DocLookupMemo>,
 	/// The count of the datastore's catalog commits finished when this
 	/// transaction opened, with none under way, where the datastore is the
 	/// store's sole writer; [`NO_CATALOG_EPOCH`] otherwise
@@ -1493,6 +1496,55 @@ impl<'a> MeteredValsCursor<'a> {
 	}
 }
 
+/// How many doc-ID forward mappings [`Transaction::resolve_doc_id`] keeps.
+const DOC_LOOKUP_MEMO: usize = 16;
+
+/// The doc-ID forward mappings a transaction has read lately, by the encoded key of the mapping,
+/// each `None` for a record with no mapping.
+///
+/// An entry answers only while the transaction has written no forward mapping since it was read,
+/// which `writes`, the count of such writes ([`crate::triggers::WrittenTables::doc_lookup_writes`])
+/// the entries were read at, tells; a read at another count empties the memo first. A read is kept
+/// only if the count was known, with no such write under way, before it and was the same after it,
+/// so a write that landed while the read was in flight is never behind an entry. A rollback to a
+/// save point moves the count, since the writes it undoes may stand behind an entry. At most
+/// [`DOC_LOOKUP_MEMO`] entries are held, the oldest replaced first, so a statement over many
+/// records holds a bounded number of keys.
+#[derive(Default)]
+struct DocLookupMemo {
+	writes: u64,
+	entries: Vec<(Key<'static>, Option<DocId>)>,
+	next: usize,
+}
+
+impl DocLookupMemo {
+	fn get(&mut self, writes: u64, key: &Key<'_>) -> Option<Option<DocId>> {
+		if self.writes != writes {
+			self.clear(writes);
+			return None;
+		}
+		self.entries.iter().find(|(held, _)| held.as_slice() == key.as_slice()).map(|(_, id)| *id)
+	}
+
+	fn keep(&mut self, writes: u64, key: Key<'static>, id: Option<DocId>) {
+		if self.writes != writes {
+			self.clear(writes);
+		}
+		if self.entries.len() < DOC_LOOKUP_MEMO {
+			self.entries.push((key, id));
+		} else {
+			self.entries[self.next] = (key, id);
+			self.next = (self.next + 1) % DOC_LOOKUP_MEMO;
+		}
+	}
+
+	fn clear(&mut self, writes: u64) {
+		self.writes = writes;
+		self.entries.clear();
+		self.next = 0;
+	}
+}
+
 /// Database-wide summary of which tables any `REFERENCE` field can target,
 /// memoized per transaction for the DELETE reference-purge gate
 /// ([`Transaction::table_may_have_incoming_references`]).
@@ -1594,6 +1646,13 @@ impl Transaction {
 		if let Some(entry) = self.cache.get(&qey) {
 			return entry.try_into_type::<ReferenceTargets>();
 		}
+		if let Some((epoch, shared)) = self.epoch_catalog()
+			&& let Some(held) = shared.get::<ReferenceTargets>(
+				&crate::cache::epoch::Lookup::ReferenceTargets(epoch, ns, db),
+			) {
+			self.cache.insert(qey, cache::tx::Entry::Any(Arc::clone(&held) as _));
+			return Ok(held);
+		}
 		let mut any = false;
 		let mut tables = HashSet::new();
 		// Walk the stored catalog. Whether a field carries a `REFERENCE` is
@@ -1670,6 +1729,10 @@ impl Transaction {
 			tables,
 		});
 		self.cache.insert(qey, cache::tx::Entry::Any(targets.clone()));
+		self.keep_for_epoch(
+			|epoch| crate::cache::epoch::Lookup::ReferenceTargets(epoch, ns, db),
+			&targets,
+		);
 		Ok(targets)
 	}
 
@@ -1787,6 +1850,7 @@ impl Transaction {
 			stamped_tables: Default::default(),
 			creations: Default::default(),
 			shaped_indexes: Default::default(),
+			doc_lookups: Default::default(),
 			catalog_epoch,
 			build_epoch,
 			state_changes: Arc::new(AtomicU64::new(0)),
@@ -4101,7 +4165,16 @@ impl Transaction {
 		for &ix in ixs {
 			match self.cache.get(&cache::tx::Lookup::Ish(ns, db, tb.as_str(), ix)) {
 				Some(entry) => shapes.push((ix, entry.try_into_type::<IndexShapes>()?)),
-				None => unread.push(ix),
+				None => match self.shapes_of_epoch(ns, db, tb, ix) {
+					Some(held) => {
+						self.cache.insert(
+							cache::tx::Lookup::Ish(ns, db, tb.as_str(), ix),
+							cache::tx::Entry::Any(Arc::clone(&held) as _),
+						);
+						shapes.push((ix, held));
+					}
+					None => unread.push(ix),
+				},
 			}
 		}
 		if !unread.is_empty() {
@@ -4120,10 +4193,69 @@ impl Transaction {
 					cache::tx::Lookup::Ish(ns, db, tb.as_str(), ix),
 					cache::tx::Entry::Any(Arc::clone(&read) as _),
 				);
+				self.keep_shapes_for_epoch(ns, db, tb, ix, &read);
 				shapes.push((ix, read));
 			}
 		}
 		Ok(TableIndexShapes(shapes.into()))
+	}
+
+	/// The catalog epoch and build epoch under which the value shapes of an
+	/// index may be answered from, or kept for, the datastore's epochs.
+	///
+	/// This transaction must name both epochs, must not add a plain read to its
+	/// conflict set where it writes ([`Self::plans_from_known_online`]), and
+	/// must have written no shape key itself: a transaction that has, reads
+	/// the shapes through its own cache and the store, which a rollback to a
+	/// save point can return to the shapes of its snapshot while an enclosing
+	/// write stands.
+	fn shapes_epochs(&self) -> Option<(u64, u64)> {
+		if !self.plans_from_known_online() || !self.shaped_indexes.lock().is_empty() {
+			return None;
+		}
+		self.settled_epochs()
+	}
+
+	/// The value shapes of index `ix` of `tb` that an earlier transaction of
+	/// this transaction's epochs read, where the index is settled online
+	/// ([`Self::index_known_online`]): the shapes this transaction's snapshot
+	/// holds, since every write of a shape key of an index so settled moves one
+	/// of the epochs (see the epoch cache's module documentation).
+	fn shapes_of_epoch(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+	) -> Option<Arc<IndexShapes>> {
+		let (catalog, build) = self.shapes_epochs()?;
+		if !self.index_known_online(ns, db, tb, ix) {
+			return None;
+		}
+		self.triggers.epoch_catalog.get::<IndexShapes>(&crate::cache::epoch::Lookup::IndexShapes(
+			catalog, build, ns, db, tb, ix,
+		))
+	}
+
+	/// Keep the value shapes this transaction has read of index `ix` of `tb`
+	/// for its epochs, where the index is settled online. The epochs and the
+	/// online entry are asked after the read, which they then cover.
+	fn keep_shapes_for_epoch(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+		read: &Arc<IndexShapes>,
+	) {
+		if let Some((catalog, build)) = self.shapes_epochs()
+			&& self.index_known_online(ns, db, tb, ix)
+		{
+			self.triggers.epoch_catalog.insert(
+				crate::cache::epoch::Lookup::IndexShapes(catalog, build, ns, db, tb, ix),
+				Arc::clone(read),
+			);
+		}
 	}
 
 	/// Record that index `ix` of `tb` has stored `shapes`, each a column and
@@ -6154,6 +6286,13 @@ impl Transaction {
 				return Ok(Arc::clone(&read.1));
 			}
 		}
+		if let Some((epoch, shared)) = self.epoch_catalog()
+			&& let Some(state) = shared.get::<DatabaseCatalogState>(
+				&crate::cache::epoch::Lookup::CatalogState(epoch, ns, db),
+			) {
+			self.cache.insert(qey, cache::tx::Entry::Any(Arc::new((stamps, Arc::clone(&state)))));
+			return Ok(state);
+		}
 		let defined = self
 			.scan_raw(
 				TablePrefix {
@@ -6202,6 +6341,10 @@ impl Transaction {
 		if held {
 			self.cache.insert(qey, cache::tx::Entry::Any(Arc::new((stamps, Arc::clone(&state)))));
 		}
+		self.keep_for_epoch(
+			|epoch| crate::cache::epoch::Lookup::CatalogState(epoch, ns, db),
+			&state,
+		);
 		Ok(state)
 	}
 
@@ -7696,6 +7839,23 @@ impl Transaction {
 	/// datastore, the same for every transaction of it.
 	pub fn plain_reads_tracked(&self) -> bool {
 		self.tr.inner.plain_reads_tracked()
+	}
+
+	/// Whether a commit of this transaction fails when a key it wrote was also
+	/// written by a transaction that committed after its snapshot
+	/// ([`surrealdb_kvs::api::Transactable::blind_write_conflicts`]): a static
+	/// fact of the datastore, the same for every transaction of it. A
+	/// speculation's view answers `false`.
+	pub fn blind_write_conflicts(&self) -> bool {
+		self.tr.inner.blind_write_conflicts()
+	}
+
+	/// The count of this transaction's writes that may have reached a doc-ID forward mapping
+	/// (`!dj`), or `None` while one is under way or where no count stands for them
+	/// ([`crate::triggers::WrittenTables::doc_lookup_writes`]). Two reads of it that answer the
+	/// same `Some` bracket a stretch in which this transaction wrote no forward mapping.
+	pub fn doc_lookup_writes(&self) -> Option<u64> {
+		self.tr.doc_lookup_writes()
 	}
 
 	/// What read views the datastore can hand out, the same for every transaction opened on it
@@ -9237,6 +9397,7 @@ impl Transaction {
 			stamped_tables: Default::default(),
 			creations: Default::default(),
 			shaped_indexes: Default::default(),
+			doc_lookups: Default::default(),
 			catalog_epoch: NO_CATALOG_EPOCH,
 			build_epoch: NO_BUILD_EPOCH,
 			state_changes: Arc::new(AtomicU64::new(0)),
@@ -9410,6 +9571,10 @@ impl Transaction {
 		// The rollback may undo a shape write and the catalog stamp beside it,
 		// and a later write of the same shape must find it unrecorded.
 		self.forget_shaped_indexes();
+		// A forward mapping read since the save point may stand over a write the rollback undid,
+		// and one still being read may have run alongside it: the count of forward-mapping writes
+		// moves, which empties the memo and refuses to keep a read the rollback overlapped.
+		self.tr.written.lock().note_rollback();
 		let snapshot = self.provisional_save_points.lock().await.pop();
 		if let Some(snapshot) = snapshot {
 			self.restore_provisional_sequences(snapshot).await;
@@ -14740,7 +14905,28 @@ impl Transaction {
 		version: Option<u64>,
 	) -> Result<Option<DocId>> {
 		let dj = DocLookupIdentityKey::new(ns, db, Cow::Borrowed(tb), RecordIdentity(id.clone()));
-		self.get_key(&dj, version).await
+		if version.is_some() || self.tr.speculating() {
+			return self.get_key(&dj, version).await;
+		}
+		let encoded = dj.encode_key()?;
+		let writes = self.tr.doc_lookup_writes();
+		if let Some(writes) = writes
+			&& let Some(held) = self.doc_lookups.lock().get(writes, &encoded)
+		{
+			return Ok(held);
+		}
+		let read = match self.get_encoded(encoded.as_borrowed(), None).await? {
+			Some(v) => Some(<DocId as KVValue>::kv_decode_value(&v, dj.value_context())?),
+			None => None,
+		};
+		// Kept only if no write of a forward mapping began, ended or was under way
+		// between the count read before the read and the count read after it.
+		if let Some(writes) = writes
+			&& self.tr.doc_lookup_writes() == Some(writes)
+		{
+			self.doc_lookups.lock().keep(writes, encoded, read);
+		}
+		Ok(read)
 	}
 
 	/// Whether a decoded packed chunk holds the edge `(id -> r)`, matching
@@ -16090,8 +16276,9 @@ mod build_epoch_tests {
 
 	/// A range delete is judged by the span of the table it covers: the database's whole range
 	/// may hold a build state key of any table and moves the count, as does a range that starts
-	/// at the tag of the build state keys; a range that starts at the next build tag (`!bt`) and
-	/// runs to the end of the table's subtree holds none and moves nothing.
+	/// at the tag of the build state keys, and one that reaches the table's indexes' subtrees,
+	/// which hold the value shape keys; a range that starts at the next build tag (`!bt`) and
+	/// ends where the indexes' subtrees begin holds neither and moves nothing.
 	#[tokio::test]
 	async fn a_range_delete_is_judged_by_the_span_it_covers() {
 		let (tf, sq) = factory().await;
@@ -16104,13 +16291,26 @@ mod build_epoch_tests {
 		let tickets = BuildTicketKey::new(NS, DB, Cow::Borrowed(&tb), IX, 0).encode_key().unwrap();
 		let subtree = root.raw_range().unwrap();
 		let states = state_key(&tb);
+		let indexes_begin = RecordPrefix {
+			ns: NS,
+			db: DB,
+			tb: Cow::Borrowed(&tb),
+		}
+		.raw_range()
+		.unwrap();
+		let indexes_begin = indexes_begin.bounds().1;
 		let cases = [
 			("a database", DbRoot::new(NS, DB).raw_range().unwrap(), true),
 			("from the build state tag", subtree.part(states.as_slice(), subtree.bounds().1), true),
 			(
-				"from the next build tag",
-				subtree.part(tickets.as_slice(), subtree.bounds().1),
+				"from the next build tag to the indexes",
+				subtree.part(tickets.as_slice(), indexes_begin),
 				false,
+			),
+			(
+				"from the next build tag to the end of the table",
+				subtree.part(tickets.as_slice(), subtree.bounds().1),
+				true,
 			),
 		];
 		for (name, range, moves) in cases {

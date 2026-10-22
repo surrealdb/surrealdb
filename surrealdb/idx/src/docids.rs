@@ -496,6 +496,18 @@ impl LegacyFullTextDocIds {
 	}
 }
 
+/// Whether a claim of a forward mapping may be a blind `set`, given `read_at`, the transaction's
+/// count of forward-mapping writes ([`Transaction::doc_lookup_writes`]) before it read the
+/// mapping absent. The precondition is that the mapping is absent, and not written by this
+/// transaction since the read: the count is known and unchanged, and the backend's commit fails
+/// a blind write that overlaps one committed after its snapshot
+/// ([`Transaction::blind_write_conflicts`]). The caller writes the claim with no await between
+/// this check and the write, and claims one mapping of a transaction at a time; two claims that
+/// both checked before either wrote would both be blind.
+fn claim_may_be_blind(tx: &Transaction, read_at: Option<u64>) -> bool {
+	read_at.is_some() && tx.doc_lookup_writes() == read_at && tx.blind_write_conflicts()
+}
+
 impl TableDocIds {
 	/// Creates a doc-ID store for the given table scope.
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: TableName) -> Self {
@@ -540,21 +552,33 @@ impl TableDocIds {
 	/// distributed sequence (batched via `config.idx.table_doc_ids_batch_size`) and
 	/// the forward (`!dj`) and reverse (`!dd`) mappings are written.
 	///
-	/// The forward mapping is claimed with a conditional create (`putc`) rather
-	/// than a blind `set`. When two doc-ID-consuming indexes first touch the same
-	/// record concurrently (e.g. concurrent `DEFINE`/`REBUILD` of full-text /
-	/// HNSW / DiskANN), each observes no mapping and allocates a *different* id
-	/// from the shared sequence. On last-writer-wins backends (TiKV) a blind `set`
-	/// would let the later writer overwrite the forward mapping — leaving one
-	/// record with two doc-IDs and breaking the cross-index identity scans rely
-	/// on. `putc` reads `!dj` before writing, which arms the write-conflict check,
-	/// so only one writer wins; the loser's commit is rejected and its caller
-	/// retries, at which point the fast path returns the committed id (making the
-	/// operation idempotent). The abandoned speculative id is never reused, which
-	/// is fine — the space is monotonic and `u64` does not exhaust (see the module
-	/// invariants).
+	/// The forward mapping is claimed with a conditional create (`put`) rather than a blind
+	/// `set`, unless the claim may be blind: the backend's commit fails a transaction whose
+	/// blind write overlaps one that committed after its snapshot
+	/// ([`Transaction::blind_write_conflicts`]), and the mapping was read absent by this
+	/// transaction and not written by it since. Then an existence check adds nothing to the
+	/// commit's own conflict check, and the claim is a `set`. The second condition is the
+	/// transaction's count of forward-mapping writes ([`Transaction::doc_lookup_writes`]),
+	/// taken before the read and known and unchanged at the claim. The allocation between the
+	/// read and the claim awaits, and another claim of the mapping made by this transaction
+	/// meanwhile would be overwritten by a `set`, which no commit-time check detects, leaving
+	/// two reverse mappings for one record.
+	///
+	/// When two doc-ID-consuming indexes first touch the same record concurrently (e.g.
+	/// concurrent `DEFINE`/`REBUILD` of full-text / HNSW / DiskANN), each observes no mapping
+	/// and allocates a *different* id from the shared sequence. On last-writer-wins backends
+	/// (TiKV) a blind `set` would let the later writer overwrite the forward mapping — leaving
+	/// one record with two doc-IDs and breaking the cross-index identity scans rely on. `put`
+	/// reads `!dj` before writing, which arms the write-conflict check, so only one writer
+	/// wins; the loser's commit is rejected and its caller retries, at which point the fast
+	/// path returns the committed id (making the operation idempotent). The abandoned
+	/// speculative id is never reused, which is fine — the space is monotonic and `u64` does
+	/// not exhaust (see the module invariants).
 	pub async fn resolve_or_assign(&self, env: &dyn IndexEnv, id: &RecordIdKey) -> Result<DocId> {
 		let tx = env.tx();
+		// Counted before the read, so the claim can tell that this transaction wrote no forward
+		// mapping since.
+		let written = tx.doc_lookup_writes();
 		// Fast path: the record already has an id in this table's space.
 		if let Some(doc_id) = self.get_doc_id(&tx, id).await? {
 			return Ok(doc_id);
@@ -570,10 +594,18 @@ impl TableDocIds {
 				env.config().table_doc_ids_batch_size,
 			)
 			.await?;
-		// Claim the forward mapping. `putc` with no expected value only writes if
-		// `!dj` is still absent, and reading it arms the write-conflict check.
+		// Claim the forward mapping. `put` only writes if `!dj` is still absent, and
+		// reading it arms the write-conflict check. The blind `set` is the same claim
+		// where the read above answered absent, this transaction has written no
+		// forward mapping since, and the backend's commit rejects any overlapping
+		// write: it is rejected exactly as the `put` would be.
 		let dj = self.identity_key(id);
-		match tx.put_key(&dj, &doc_id).await {
+		let claimed = if claim_may_be_blind(&tx, written) {
+			tx.set_key(&dj, &doc_id).await
+		} else {
+			tx.put_key(&dj, &doc_id).await
+		};
+		match claimed {
 			Ok(()) => {
 				// We won the race: publish the reverse mapping too. Written only
 				// after the forward claim succeeds, so a loser leaves no dangling
@@ -581,11 +613,11 @@ impl TableDocIds {
 				tx.set_key(&self.doc_key(doc_id), id).await?;
 				Ok(doc_id)
 			}
-			// Another index published the mapping first and it is already visible
-			// in our snapshot: adopt the committed id and drop our speculative
-			// one. (Under snapshot isolation the primary defence is the
-			// commit-time conflict above plus the caller's retry; this branch
-			// covers the mapping becoming visible between our two reads.)
+			// Reachable only on the `put` path: another index published the mapping
+			// first and it is already visible in our snapshot, so adopt the committed
+			// id and drop our speculative one. (Under snapshot isolation the primary
+			// defence is the commit-time conflict above plus the caller's retry; this
+			// branch covers the mapping becoming visible between our two reads.)
 			Err(e) if matches!(storage_error(&e), Some(KvsError::TransactionKeyAlreadyExists)) => {
 				tx.get_key(&dj, None).await?.ok_or_else(|| {
 					anyhow::anyhow!("doc-ID mapping missing after a conditional-create conflict")
@@ -987,6 +1019,142 @@ mod tests {
 		let (ctx, d) = new_op(&ds, Write).await;
 		assert_eq!(d.resolve_or_assign(&ctx, &rid("a")).await.unwrap(), 2);
 		finish(ctx).await;
+	}
+
+	/// A forward mapping, present or absent, is read from the store once per
+	/// transaction until the transaction writes a forward mapping.
+	#[tokio::test]
+	async fn a_forward_mapping_is_read_once_per_transaction() {
+		let ds = TestIndexStore::new().await;
+		{
+			let (ctx, d) = new_op(&ds, Write).await;
+			d.resolve_or_assign(&ctx, &rid("a")).await.unwrap();
+			finish(ctx).await;
+		}
+		let (ctx, d) = new_op(&ds, Write).await;
+		let tx = ctx.tx();
+		let gets = || tx.metrics_snapshot_for_test().ops_get;
+		let before = gets();
+		for _ in 0..3 {
+			assert_eq!(d.get_doc_id(&tx, &rid("a")).await.unwrap(), Some(0));
+		}
+		assert_eq!(gets() - before, 1, "a mapping is read once");
+		let before = gets();
+		for _ in 0..3 {
+			assert_eq!(d.get_doc_id(&tx, &rid("z")).await.unwrap(), None);
+		}
+		assert_eq!(gets() - before, 1, "an absent mapping is read once");
+		tx.cancel().await.unwrap();
+	}
+
+	/// A read after this transaction wrote or removed a forward mapping answers
+	/// what it wrote, not what it read before.
+	#[tokio::test]
+	async fn a_forward_mapping_read_sees_this_transactions_writes() {
+		let ds = TestIndexStore::new().await;
+		let (ctx, d) = new_op(&ds, Write).await;
+		let tx = ctx.tx();
+		assert_eq!(d.get_doc_id(&tx, &rid("a")).await.unwrap(), None);
+		let first = d.resolve_or_assign(&ctx, &rid("a")).await.unwrap();
+		assert_eq!(d.get_doc_id(&tx, &rid("a")).await.unwrap(), Some(first));
+		assert_eq!(d.remove(&tx, &rid("a")).await.unwrap(), Some(first));
+		assert_eq!(d.get_doc_id(&tx, &rid("a")).await.unwrap(), None, "the removal is read");
+		let second = d.resolve_or_assign(&ctx, &rid("a")).await.unwrap();
+		assert_ne!(first, second, "an id is never reused");
+		assert_eq!(d.get_doc_id(&tx, &rid("a")).await.unwrap(), Some(second));
+		tx.cancel().await.unwrap();
+	}
+
+	/// A mapping read after a write that a rollback to a save point then undoes
+	/// is read again, not answered from what was read in between.
+	#[tokio::test]
+	async fn a_forward_mapping_read_follows_a_save_point_rollback() {
+		let ds = TestIndexStore::new().await;
+		let (ctx, d) = new_op(&ds, Write).await;
+		let tx = ctx.tx();
+		tx.new_save_point().await.unwrap();
+		let id = d.resolve_or_assign(&ctx, &rid("a")).await.unwrap();
+		assert_eq!(d.get_doc_id(&tx, &rid("a")).await.unwrap(), Some(id));
+		tx.rollback_to_save_point().await.unwrap();
+		assert_eq!(d.get_doc_id(&tx, &rid("a")).await.unwrap(), None, "the rollback is read");
+		tx.cancel().await.unwrap();
+	}
+
+	/// A claim of a mapping is blind only while this transaction has written no forward mapping
+	/// since it read the mapping absent: its own claim in between makes the claim an
+	/// existence-checked `put`, which refuses to overwrite it.
+	#[tokio::test]
+	async fn a_claim_after_this_transactions_own_claim_is_not_blind() {
+		let ds = TestIndexStore::new().await;
+		let (ctx, d) = new_op(&ds, Write).await;
+		let tx = ctx.tx();
+		assert!(tx.blind_write_conflicts(), "the memory backend rejects overlapping writes");
+		let read_at = tx.doc_lookup_writes();
+		assert!(claim_may_be_blind(&tx, read_at), "nothing written since the read");
+		assert!(!claim_may_be_blind(&tx, None), "no count stands");
+		let first = d.resolve_or_assign(&ctx, &rid("a")).await.unwrap();
+		assert!(!claim_may_be_blind(&tx, read_at), "a forward mapping written since the read");
+		let put_before = tx.metrics_snapshot_for_test().ops_put;
+		assert_eq!(d.resolve_or_assign(&ctx, &rid("a")).await.unwrap(), first, "idempotent");
+		assert_eq!(tx.metrics_snapshot_for_test().ops_put, put_before);
+		tx.cancel().await.unwrap();
+	}
+
+	/// Two claims of one record made through one transaction at once end with one mapping in
+	/// each direction.
+	#[tokio::test]
+	async fn two_claims_in_one_transaction_leave_one_reverse_mapping() {
+		let ds = TestIndexStore::new().await;
+		let (ctx, d) = new_op(&ds, Write).await;
+		let key = rid("a");
+		let (a, b) = tokio::join!(d.resolve_or_assign(&ctx, &key), d.resolve_or_assign(&ctx, &key));
+		assert_eq!(a.unwrap(), b.unwrap(), "both claims answer the one id");
+		let tx = ctx.tx();
+		let tb = "t".into();
+		let reverse = tx
+			.getr(DocKeyPrefix::new(NS, DB, Cow::Borrowed(&tb)).range().unwrap(), None)
+			.await
+			.unwrap();
+		assert_eq!(reverse.len(), 1, "exactly one reverse mapping");
+		tx.cancel().await.unwrap();
+	}
+
+	/// Where the backend rejects an overlapping write, the claim of a mapping is a blind `set`,
+	/// and a claim made on a snapshot another writer has since claimed fails at commit as the
+	/// existence-checked `put` does: one mapping survives, the first committer's.
+	#[tokio::test]
+	async fn a_blind_claim_on_a_stale_snapshot_fails_at_commit() {
+		let ds = TestIndexStore::new().await;
+		let rid = rid("rec");
+		let ctx_b = ds.env(Write).await;
+		assert!(
+			ctx_b.tx().blind_write_conflicts(),
+			"the memory backend rejects overlapping writes"
+		);
+		let d = TableDocIds::new(NS, DB, "t".into());
+		assert_eq!(d.get_doc_id(&ctx_b.tx(), &rid).await.unwrap(), None);
+		let a_doc = {
+			let ctx_a = ds.env(Write).await;
+			let id = d.resolve_or_assign(&ctx_a, &rid).await.unwrap();
+			ctx_a.tx().commit().await.unwrap();
+			id
+		};
+		let sets_before = ctx_b.tx().metrics_snapshot_for_test().ops_set;
+		d.resolve_or_assign(&ctx_b, &rid).await.unwrap();
+		let tx_b = ctx_b.tx();
+		let snapshot = tx_b.metrics_snapshot_for_test();
+		assert_eq!(snapshot.ops_put, 0, "the claim is not an existence-checked put");
+		assert!(snapshot.ops_set > sets_before, "the claim is a blind set");
+		assert!(tx_b.commit().await.is_err(), "the commit overlaps the first claim");
+		let tx = ds.transaction(TransactionType::Read).await.unwrap();
+		assert_eq!(d.get_doc_id(&tx, &rid).await.unwrap(), Some(a_doc));
+		let tb = "t".into();
+		let reverse = tx
+			.getr(DocKeyPrefix::new(NS, DB, Cow::Borrowed(&tb)).range().unwrap(), None)
+			.await
+			.unwrap();
+		assert_eq!(reverse.len(), 1, "exactly one reverse mapping");
+		tx.cancel().await.unwrap();
 	}
 }
 

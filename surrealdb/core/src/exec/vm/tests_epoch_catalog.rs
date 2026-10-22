@@ -491,3 +491,249 @@ async fn a_surrealkv_writer_commits_after_a_concurrent_define_field_it_read_arou
 		commit_after_concurrent_define(db.datastore(), surrealdb_kvs::Isolation::Snapshot).await;
 	assert!(outcome.is_ok(), "plain reads join no conflict set: {outcome:?}");
 }
+
+const INDEXED: &str = "
+	DEFINE TABLE person SCHEMALESS;
+	DEFINE INDEX age_idx ON person FIELDS age;
+	DEFINE INDEX email_uniq ON person FIELDS email UNIQUE;
+	CREATE person:1 SET age = 1, email = 'a@x.io';
+";
+
+/// An indexed table that nothing has written or planned over since the index was defined.
+const UNSETTLED: &str = "
+	DEFINE TABLE person SCHEMALESS;
+	DEFINE INDEX age_idx ON person FIELDS age;
+";
+
+/// The shapes a transaction answers for the `age_idx` index of `person`, and the index.
+async fn age_shapes(
+	txn: &crate::kvs::Transaction,
+) -> (crate::catalog::IndexId, Arc<surrealdb_datastore::index_shapes::IndexShapes>) {
+	let person = TableName::from("person");
+	let ns = txn.get_ns_by_name("test", None).await.expect("read").expect("defined").namespace_id;
+	let db =
+		txn.get_db_by_name("test", "test", None).await.expect("read").expect("defined").database_id;
+	let indexes = txn.all_tb_indexes(ns, db, &person, None).await.expect("read");
+	let age = indexes.iter().find(|ix| ix.name == "age_idx").expect("defined").index_id;
+	let shapes = txn.table_index_shapes(ns, db, &person, &indexes).await.expect("read");
+	(age, Arc::clone(shapes.of(age).expect("read for the index")))
+}
+
+/// Plan a read over the index, which reads it as settled online and keeps that for the epochs.
+async fn settle_online(ds: &Datastore, session: &Session) {
+	run(ds, session, "SELECT * FROM person WHERE age = 1").await;
+}
+
+#[tokio::test]
+async fn the_shapes_of_a_settled_index_are_served_from_its_epochs() {
+	let db = TestDb::new(INDEXED).await;
+	let (ds, owner) = (db.datastore(), TestDb::owner());
+	settle_online(ds, &owner).await;
+
+	let reader = ds.transaction(TransactionType::Read).await.expect("a transaction");
+	let (_, first) = age_shapes(&reader).await;
+	reader.cancel().await.expect("cancelled");
+	assert!(first.is_tracked(), "the index records the shapes it stores");
+
+	let reader = ds.transaction(TransactionType::Read).await.expect("a transaction");
+	let (_, again) = age_shapes(&reader).await;
+	reader.cancel().await.expect("cancelled");
+	assert!(Arc::ptr_eq(&first, &again), "a reader of the epoch is served the shapes");
+
+	let writer = ds.transaction(TransactionType::Write).await.expect("a transaction");
+	let (_, served) = age_shapes(&writer).await;
+	writer.cancel().await.expect("cancelled");
+	assert!(Arc::ptr_eq(&first, &served), "a writer that changed nothing is served the shapes");
+
+	// A backend that tracks plain reads keeps the writer's reads real.
+	let tracked = ds
+		.transaction_at(TransactionType::Write, surrealdb_kvs::Isolation::Serializable)
+		.await
+		.expect("a transaction");
+	let (_, read) = age_shapes(&tracked).await;
+	tracked.cancel().await.expect("cancelled");
+	assert!(!Arc::ptr_eq(&first, &read), "a tracking writer reads the store");
+}
+
+#[tokio::test]
+async fn the_shapes_of_an_index_not_read_as_settled_are_read_from_the_store() {
+	let db = TestDb::new(UNSETTLED).await;
+	let ds = db.datastore();
+	let mut reads = Vec::new();
+	for _ in 0..2 {
+		let reader = ds.transaction(TransactionType::Read).await.expect("a transaction");
+		reads.push(age_shapes(&reader).await.1);
+		reader.cancel().await.expect("cancelled");
+	}
+	assert!(!Arc::ptr_eq(&reads[0], &reads[1]), "nothing is kept for an index not known online");
+}
+
+#[tokio::test]
+async fn a_document_write_that_records_a_shape_moves_the_epoch_the_shapes_are_kept_under() {
+	let db = TestDb::new(INDEXED).await;
+	let (ds, owner) = (db.datastore(), TestDb::owner());
+	settle_online(ds, &owner).await;
+	let reader = ds.transaction(TransactionType::Read).await.expect("a transaction");
+	let (_, before) = age_shapes(&reader).await;
+	reader.cancel().await.expect("cancelled");
+	assert!(!before.records_all([(0, surrealdb_datastore::index_shapes::ValueShape::Array)]));
+	let epoch_before = epoch(ds).await;
+
+	run(ds, &owner, "CREATE person:2 SET age = [1, 2], email = 'b@x.io'").await;
+	assert!(epoch(ds).await > epoch_before, "the recording stamps the table's version");
+	settle_online(ds, &owner).await;
+	let reader = ds.transaction(TransactionType::Read).await.expect("a transaction");
+	let (_, after) = age_shapes(&reader).await;
+	reader.cancel().await.expect("cancelled");
+	assert!(
+		after.records_all([(0, surrealdb_datastore::index_shapes::ValueShape::Array)]),
+		"the new shape is read, not the old epoch's"
+	);
+}
+
+#[tokio::test]
+async fn a_writer_that_wrote_a_shape_reads_its_own_after_a_rollback_and_keeps_none() {
+	use surrealdb_datastore::index_shapes::{ShapeRecorder, ValueShape};
+	let db = TestDb::new(INDEXED).await;
+	let (ds, owner) = (db.datastore(), TestDb::owner());
+	settle_online(ds, &owner).await;
+	let reader = ds.transaction(TransactionType::Read).await.expect("a transaction");
+	let (age, first) = age_shapes(&reader).await;
+	let (ns, dbid) = (
+		reader.get_ns_by_name("test", None).await.unwrap().unwrap().namespace_id,
+		reader.get_db_by_name("test", "test", None).await.unwrap().unwrap().database_id,
+	);
+	reader.cancel().await.expect("cancelled");
+
+	// A build's recording stamps no catalog version, so the writer still names its epochs and
+	// only what it wrote itself keeps the epoch's shapes from answering for it.
+	let person = TableName::from("person");
+	let writer = ds.transaction(TransactionType::Write).await.expect("a transaction");
+	let build = |shape| [(0u16, shape)];
+	writer
+		.record_index_shapes(
+			ns,
+			dbid,
+			&person,
+			age,
+			&build(ValueShape::Array),
+			ShapeRecorder::Build,
+		)
+		.await
+		.unwrap();
+	assert!(writer.catalog_epoch().is_some(), "a build's recording stamps no version");
+	writer.new_save_point().await.unwrap();
+	writer
+		.record_index_shapes(
+			ns,
+			dbid,
+			&person,
+			age,
+			&[(1, ValueShape::Whole)],
+			ShapeRecorder::Build,
+		)
+		.await
+		.unwrap();
+	writer.rollback_to_save_point().await.unwrap();
+	let (_, read) = age_shapes(&writer).await;
+	assert!(
+		read.records_all(build(ValueShape::Array)),
+		"the writer reads the shape it wrote before the save point"
+	);
+	assert!(
+		!read.records_all([(1, ValueShape::Whole)]),
+		"the writer does not read the shape its rollback undid"
+	);
+	writer.cancel().await.expect("cancelled");
+
+	let reader = ds.transaction(TransactionType::Read).await.expect("a transaction");
+	let (_, after) = age_shapes(&reader).await;
+	reader.cancel().await.expect("cancelled");
+	assert!(Arc::ptr_eq(&first, &after), "a writer that wrote shapes keeps none for the epoch");
+}
+
+const REFERENCED: &str = "
+	DEFINE TABLE person SCHEMALESS;
+	DEFINE TABLE refd SCHEMALESS;
+	DEFINE FIELD target ON refd TYPE record<person>;
+";
+
+/// Whether a transaction's reference purge gate says `person` may have incoming references.
+async fn purge_gate(txn: &crate::kvs::Transaction) -> bool {
+	let person = TableName::from("person");
+	let ns = txn.get_ns_by_name("test", None).await.expect("read").expect("defined").namespace_id;
+	let db =
+		txn.get_db_by_name("test", "test", None).await.expect("read").expect("defined").database_id;
+	txn.table_may_have_incoming_references(ns, db, &person).await.expect("read")
+}
+
+async fn catalog_state(
+	txn: &crate::kvs::Transaction,
+) -> Arc<surrealdb_datastore::tx::DatabaseCatalogState> {
+	let ns = txn.get_ns_by_name("test", None).await.expect("read").expect("defined").namespace_id;
+	let db =
+		txn.get_db_by_name("test", "test", None).await.expect("read").expect("defined").database_id;
+	txn.database_catalog_state(ns, db).await.expect("read")
+}
+
+#[tokio::test]
+async fn a_deletes_catalog_state_is_served_from_the_epoch_until_a_definition_changes() {
+	let db = TestDb::new(REFERENCED).await;
+	let (ds, owner) = (db.datastore(), TestDb::owner());
+
+	let reader = ds.transaction(TransactionType::Read).await.expect("a transaction");
+	let may = purge_gate(&reader).await;
+	let state = catalog_state(&reader).await;
+	reader.cancel().await.expect("cancelled");
+	assert!(!may, "no reference field targets `person`");
+
+	let reader = ds.transaction(TransactionType::Read).await.expect("a transaction");
+	assert!(Arc::ptr_eq(&state, &catalog_state(&reader).await), "a reader of the epoch is served");
+	reader.cancel().await.expect("cancelled");
+	let writer = ds.transaction(TransactionType::Write).await.expect("a transaction");
+	assert!(Arc::ptr_eq(&state, &catalog_state(&writer).await), "a writer of the epoch is served");
+	writer.cancel().await.expect("cancelled");
+
+	// A backend that tracks plain reads keeps the writer's catalog reads real.
+	let tracked = ds
+		.transaction_at(TransactionType::Write, surrealdb_kvs::Isolation::Serializable)
+		.await
+		.expect("a transaction");
+	let read = catalog_state(&tracked).await;
+	tracked.cancel().await.expect("cancelled");
+	assert!(!Arc::ptr_eq(&state, &read), "a tracking writer reads the store");
+
+	// A reference field moves the epoch, and the next delete's gate sees it.
+	run(ds, &owner, "DEFINE FIELD OVERWRITE target ON refd TYPE record<person> REFERENCE").await;
+	let writer = ds.transaction(TransactionType::Write).await.expect("a transaction");
+	let may = purge_gate(&writer).await;
+	let after = catalog_state(&writer).await;
+	writer.cancel().await.expect("cancelled");
+	assert!(may, "a table a reference field targets may have incoming references");
+	assert_ne!(*state, *after, "the stamp of the changed table is in the state");
+}
+
+#[tokio::test]
+async fn a_writer_that_changed_a_field_reads_its_own_catalog_for_its_gate_and_publishes_none() {
+	let db = TestDb::new(REFERENCED).await;
+	let (ds, owner) = (db.datastore(), TestDb::owner());
+	let reader = ds.transaction(TransactionType::Read).await.expect("a transaction");
+	assert!(!purge_gate(&reader).await);
+	reader.cancel().await.expect("cancelled");
+
+	let writer = Arc::new(ds.transaction(TransactionType::Write).await.expect("a transaction"));
+	let sql = "DEFINE FIELD OVERWRITE target ON refd TYPE record<person> REFERENCE";
+	let request = crate::kvs::QueryRequest::new(sql, &owner).with_transaction(Arc::clone(&writer));
+	for response in ds.run(request).await.expect("the request runs") {
+		response.result.expect("the field is defined");
+	}
+	assert!(
+		purge_gate(&writer).await,
+		"a writer reads the field it defined, not the epoch's catalog"
+	);
+	writer.cancel().await.expect("cancelled");
+
+	let reader = ds.transaction(TransactionType::Read).await.expect("a transaction");
+	assert!(!purge_gate(&reader).await, "nothing the writer wrote is served");
+	reader.cancel().await.expect("cancelled");
+}

@@ -74,8 +74,8 @@ impl CatalogEpoch {
 /// datastore is the store's sole writer, the build state a transaction sees is
 /// named by the count of such commits finished before it opened, as long as none
 /// was under way when it opened and none has started since. Every write of a
-/// `!bs` key, and every range delete that may cover one, marks the writing
-/// transaction ([`WrittenTables::wrote_build_state`]), so a phase change, a
+/// `!bs` key or index value shape key, and every range delete that may cover one, marks the
+/// writing transaction ([`WrittenTables::wrote_build_state`]), so a phase change, a
 /// generation rotation, an owner change, a heartbeat or a removal of an index's
 /// build state is a commit of this kind.
 #[derive(Default)]
@@ -797,9 +797,18 @@ pub struct WrittenTables {
 	/// Whether a write may have reached any table.
 	every: bool,
 	/// Whether a write may have reached a durable index build state key
-	/// (`!bs`, directly under a table's root). Kept for the transaction's life:
-	/// a rollback to a save point does not clear it.
+	/// (`!bs`, directly under a table's root) or a value shape key of an
+	/// index (`!it`, `!ia`, `!ir`, under the index's subtree). Kept for the
+	/// transaction's life: a rollback to a save point does not clear it.
 	build_state: bool,
+	/// A count of the events of writes that may reach a doc-ID forward mapping (`!dj`, directly
+	/// under a table's root), a range delete that may hold one included: each such write adds one
+	/// when it begins and one when it ends. It only grows, so two reads of it with no write under
+	/// way at either bracket a stretch in which none began or ended
+	/// ([`Self::doc_lookup_writes`]).
+	doc_lookups: u64,
+	/// How many of those writes have begun and not ended.
+	doc_lookups_open: u32,
 }
 
 /// What [`WrittenTables`] held at a save point, for a rollback to it to return to.
@@ -813,26 +822,46 @@ pub struct WrittenMark {
 const TABLE_SPACE: (&[u8], &[u8]) = (b"/*", b"/+");
 
 impl WrittenTables {
-	/// Record a write of `key`.
-	pub fn note_key(&mut self, key: &[u8]) {
+	/// Record a write of `key`, before it is made. Answers whether it may reach a doc-ID forward
+	/// mapping, in which case the caller ends it with [`Self::end_doc_lookup_write`] once the
+	/// write has returned, whatever it returned.
+	#[must_use]
+	pub fn note_key(&mut self, key: &[u8]) -> bool {
 		if self.every {
-			return;
+			return false;
 		}
 		if let Some(root) = self.roots.iter().find(|root| key.starts_with(root)) {
 			self.build_state |= is_build_state_tail(&key[root.len()..]);
-			return;
+			return self.begin_doc_lookup_write(is_doc_lookup_tail(&key[root.len()..]));
 		}
 		match table_root(key) {
 			Some(Some(len)) => {
 				self.build_state |= is_build_state_tail(&key[len..]);
-				self.roots.push(key[..len].to_vec())
+				self.roots.push(key[..len].to_vec());
+				self.begin_doc_lookup_write(is_doc_lookup_tail(&key[len..]))
 			}
 			Some(None) => {
 				self.every = true;
 				self.build_state = true;
+				false
 			}
-			None => {}
+			None => false,
 		}
+	}
+
+	/// Count the beginning of a write that may reach a doc-ID forward mapping, if `may`.
+	fn begin_doc_lookup_write(&mut self, may: bool) -> bool {
+		if may {
+			self.doc_lookups += 1;
+			self.doc_lookups_open += 1;
+		}
+		may
+	}
+
+	/// Count the end of a write [`Self::note_key`] or [`Self::note_range`] answered `true` for.
+	pub fn end_doc_lookup_write(&mut self) {
+		self.doc_lookups += 1;
+		self.doc_lookups_open -= 1;
 	}
 
 	/// What is recorded now, for [`Self::restore`]: the record only grows, so its length and
@@ -851,59 +880,122 @@ impl WrittenTables {
 		self.every = mark.every;
 	}
 
-	/// Record a write of every key in `[start, end)`.
-	pub fn note_range(&mut self, start: &[u8], end: &[u8]) {
+	/// Count a rollback to a save point as a write of a doc-ID forward mapping: it undoes writes
+	/// a read of one may have run alongside, so no read it overlapped is covered by the count
+	/// ([`Self::doc_lookup_writes`]).
+	pub fn note_rollback(&mut self) {
+		self.doc_lookups += 1;
+	}
+
+	/// Record a write of every key in `[start, end)`, before it is made. The answer is that of
+	/// [`Self::note_key`].
+	#[must_use]
+	pub fn note_range(&mut self, start: &[u8], end: &[u8]) -> bool {
 		if self.every || start >= end {
-			return;
+			return false;
 		}
 		if let Some(root) =
 			self.roots.iter().find(|root| start.starts_with(root) && within_subtree(root, end))
 		{
 			self.build_state |= range_may_hold_build_state(root.len(), start, end);
-			return;
+			let may = range_may_hold_doc_lookups(root.len(), start, end);
+			return self.begin_doc_lookup_write(may);
 		}
 		match table_root(start) {
 			Some(Some(len)) if within_subtree(&start[..len], end) => {
 				self.build_state |= range_may_hold_build_state(len, start, end);
-				self.roots.push(start[..len].to_vec())
+				self.roots.push(start[..len].to_vec());
+				self.begin_doc_lookup_write(range_may_hold_doc_lookups(len, start, end))
 			}
 			_ if start < TABLE_SPACE.1 && end > TABLE_SPACE.0 => {
 				self.every = true;
 				self.build_state = true;
+				false
 			}
-			_ => {}
+			_ => false,
 		}
 	}
 
-	/// Whether a key written may be a durable index build state key, or a range deleted may hold
-	/// one (`CommitTriggers::build_epoch`): a key's tag directly under a table's root is `!bs`,
-	/// a range is judged by the span of the table's subtree it covers, and a write whose table
-	/// cannot be told, or a range that leaves its table, may have reached one.
+	/// Whether a key written may be a durable index build state key or an index's value shape
+	/// key, or a range deleted may hold one (`CommitTriggers::build_epoch`): a key's tag directly
+	/// under a table's root is `!bs`, a key's tag under an index's subtree is `!it`, `!ia` or
+	/// `!ir`, a range is judged by the spans of the table's subtree it covers, and a write whose
+	/// table cannot be told, or a range that leaves its table, may have reached one.
 	pub fn wrote_build_state(&self) -> bool {
 		self.build_state
 	}
+
+	/// The count of doc-ID forward mapping write events, or `None` while
+	/// a write that may reach a forward mapping is under way, or once a write whose table cannot
+	/// be told has been recorded: from then on later writes are not examined, so no count stands
+	/// for them.
+	///
+	/// A read of a forward mapping is covered by a count read before it and again after it only if
+	/// both are `Some` and equal: no such write began, ended or was under way in between, so the
+	/// store held no write of this transaction's that the read could have missed. A rollback to a
+	/// save point moves the count, so a read it overlapped is not covered.
+	pub fn doc_lookup_writes(&self) -> Option<u64> {
+		(!self.every && self.doc_lookups_open == 0).then_some(self.doc_lookups)
+	}
+}
+
+/// The key under a table's root that holds a record id's doc-ID forward mapping: the tag, then
+/// the record id's identity.
+const DOC_LOOKUP_TAG: &[u8] = b"!dj";
+
+/// Whether `tail`, the bytes of a key after its table's root, begins a doc-ID forward mapping.
+fn is_doc_lookup_tail(tail: &[u8]) -> bool {
+	tail.starts_with(DOC_LOOKUP_TAG)
+}
+
+/// Whether the range `[start, end)`, which starts in the subtree of the table whose root is the
+/// first `root` bytes of `start` and ends no later than that subtree's successor
+/// ([`within_subtree`]), may hold a doc-ID forward mapping: it starts before the tags after `!dj`
+/// and ends after the tag itself.
+fn range_may_hold_doc_lookups(root: usize, start: &[u8], end: &[u8]) -> bool {
+	let before_tag_after = &start[root..] < b"!dk".as_slice();
+	let after_tag = match end.get(..root) {
+		Some(head) if head == &start[..root] => &end[root..] > DOC_LOOKUP_TAG,
+		_ => true,
+	};
+	before_tag_after && after_tag
 }
 
 /// The key under a table's root that holds an index's durable build state: the tag, then the
 /// index id.
 const BUILD_STATE_TAG: &[u8] = b"!bs";
 
-/// Whether `tail`, the bytes of a key after its table's root, begins a build state key.
+/// The keys under an index's own subtree (`+`, the index id, then the tag) that hold the value
+/// shapes of a B-tree index: `!it`, `!ia` and `!ir`.
+const INDEX_SHAPE_TAGS: [&[u8]; 3] = [b"!it", b"!ia", b"!ir"];
+
+/// The byte that begins the tail of every key in an index's subtree, and the byte after it.
+const INDEX_SUBTREE: (&[u8], &[u8]) = (b"+", b",");
+
+/// Whether `tail`, the bytes of a key after its table's root, begins a build state key or is a
+/// value shape key of an index: `+`, a four-byte index id and a shape tag. A write of the second
+/// kind moves the build epoch by itself, so the shapes kept under it do not depend on a `!bs`
+/// write beside them.
 fn is_build_state_tail(tail: &[u8]) -> bool {
 	tail.starts_with(BUILD_STATE_TAG)
+		|| (tail.starts_with(INDEX_SUBTREE.0)
+			&& tail.get(5..8).is_some_and(|tag| INDEX_SHAPE_TAGS.contains(&tag)))
 }
 
 /// Whether the range `[start, end)`, which starts in the subtree of the table whose root is the
 /// first `root` bytes of `start` and ends no later than that subtree's successor
-/// ([`within_subtree`]), may hold a build state key: it starts before the tags after `!bs` and
-/// ends after the tag itself.
+/// ([`within_subtree`]), may hold a build state key or a value shape key: it overlaps the
+/// span of the table's subtree that holds `!bs` or the span that holds its indexes' subtrees.
 fn range_may_hold_build_state(root: usize, start: &[u8], end: &[u8]) -> bool {
-	let before_tag_after = &start[root..] < b"!bt".as_slice();
-	let after_tag = match end.get(..root) {
-		Some(head) if head == &start[..root] => &end[root..] > BUILD_STATE_TAG,
-		_ => true,
+	let overlaps = |first: &[u8], after: &[u8]| {
+		let before_after = &start[root..] < after;
+		let after_first = match end.get(..root) {
+			Some(head) if head == &start[..root] => &end[root..] > first,
+			_ => true,
+		};
+		before_after && after_first
 	};
-	before_tag_after && after_tag
+	overlaps(BUILD_STATE_TAG, b"!bt") || overlaps(INDEX_SUBTREE.0, INDEX_SUBTREE.1)
 }
 
 /// The length of the encoded root of the table whose subtree holds `key` — `/*{ns}*{db}*{tb}`,
@@ -1368,9 +1460,114 @@ mod tests {
 	fn written(keys: &[&[u8]]) -> WrittenTables {
 		let mut written = WrittenTables::default();
 		for key in keys {
-			written.note_key(key);
+			let _ = written.note_key(key);
 		}
 		written
+	}
+
+	fn dj_key(tb: &str) -> Vec<u8> {
+		use surrealdb_kvs::key::KVKey;
+		let tb = surrealdb_expr::val::TableName::from(tb);
+		crate::key::schema::DocLookupIdentityKey::new(
+			crate::catalog::NamespaceId(1),
+			crate::catalog::DatabaseId(2),
+			std::borrow::Cow::Borrowed(&tb),
+			crate::val::RecordIdentity(crate::val::RecordIdKey::Number(1)),
+		)
+		.encode_key()
+		.unwrap()
+		.as_slice()
+		.to_vec()
+	}
+
+	/// A forward mapping write is under way from its recording to its end, and the count it
+	/// leaves differs from the count before it, so a read that began before the write and ended
+	/// after it is not covered by the count whichever way it overlapped the write.
+	#[test]
+	fn a_forward_mapping_write_is_bracketed_by_its_begin_and_end() {
+		let mut w = WrittenTables::default();
+		let before = w.doc_lookup_writes();
+		assert!(before.is_some());
+		let before_n = before.unwrap();
+		let began = w.note_key(&dj_key("a"));
+		assert!(began, "a forward mapping key");
+		assert_eq!(w.doc_lookup_writes(), None, "none is known while it is under way");
+		w.end_doc_lookup_write();
+		let after = w.doc_lookup_writes();
+		assert!(after.is_some());
+		assert_eq!(after, Some(before_n + 2), "the write counts when it begins and when it ends");
+		assert!(!w.note_key(&record_key(1, 2, "a")), "a record is not a forward mapping");
+		assert_eq!(w.doc_lookup_writes(), after, "and moves nothing");
+		let mut other = w.doc_lookup_writes();
+		w.note_rollback();
+		assert_ne!(w.doc_lookup_writes(), other, "a rollback moves the count");
+		other = w.doc_lookup_writes();
+		let began = w.note_range(b"/*", b"/+");
+		assert!(!began && w.doc_lookup_writes().is_none(), "no count stands past every table");
+		let _ = other;
+	}
+
+	/// A write of an index's value shape key marks the transaction as having written build
+	/// state, as does one of the build state key and a range delete over either.
+	#[test]
+	fn an_index_shape_key_is_a_build_state_write() {
+		use surrealdb_kvs::key::{KVKey, KVSubspace};
+
+		use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+		use crate::key::schema::{
+			BuildStateKey, IndexBuildShapesKey, IndexShapesKey, IndexShapesTrackedKey,
+		};
+		let tb = surrealdb_expr::val::TableName::from("t");
+		let (ns, db, ix) = (NamespaceId(1), DatabaseId(2), IndexId(7));
+		let keys = [
+			IndexShapesKey {
+				ns,
+				db,
+				tb: std::borrow::Cow::Borrowed(&tb),
+				ix,
+			}
+			.encode_key()
+			.unwrap(),
+			IndexBuildShapesKey {
+				ns,
+				db,
+				tb: std::borrow::Cow::Borrowed(&tb),
+				ix,
+			}
+			.encode_key()
+			.unwrap(),
+			IndexShapesTrackedKey {
+				ns,
+				db,
+				tb: std::borrow::Cow::Borrowed(&tb),
+				ix,
+			}
+			.encode_key()
+			.unwrap(),
+			BuildStateKey {
+				ns,
+				db,
+				tb: std::borrow::Cow::Borrowed(&tb),
+				ix,
+			}
+			.encode_key()
+			.unwrap(),
+		];
+		for key in &keys {
+			assert!(written(&[key.as_slice()]).wrote_build_state(), "{key:?}");
+		}
+		assert!(!written(&[&record_key(1, 2, "t")]).wrote_build_state(), "a record");
+		assert!(!written(&[&dj_key("t")]).wrote_build_state(), "a forward mapping");
+		let root = crate::key::schema::TblRoot {
+			ns,
+			db,
+			tb: std::borrow::Cow::Borrowed(&tb),
+		};
+		let subtree = root.raw_range().unwrap();
+		let (start, end) = subtree.bounds();
+		let mut w = WrittenTables::default();
+		let _ = w.note_range(start, end);
+		assert!(w.wrote_build_state(), "a table's whole subtree");
 	}
 
 	fn tables(written: &WrittenTables) -> Vec<Vec<u8>> {
@@ -1441,21 +1638,21 @@ mod tests {
 		let subtree = root.raw_range().unwrap();
 		let (start, end) = subtree.bounds();
 		let mut w = WrittenTables::default();
-		w.note_range(start, end);
+		let _ = w.note_range(start, end);
 		assert_eq!(tables(&w), vec![root_of(1, 2, "a")], "a table's whole subtree");
 		assert!(!w.every);
 		let bound = root.encode_bound().unwrap();
 		let mut w = WrittenTables::default();
-		w.note_range(bound.as_slice(), end);
+		let _ = w.note_range(bound.as_slice(), end);
 		assert_eq!(tables(&w), vec![root_of(1, 2, "a")], "the subtree from its own bound");
 		let mut w = WrittenTables::default();
-		w.note_range(start, &record_key(1, 2, "b"));
+		let _ = w.note_range(start, &record_key(1, 2, "b"));
 		assert!(w.every, "a range past the table's subtree");
 		let mut w = WrittenTables::default();
-		w.note_range(b"/*", b"/+");
+		let _ = w.note_range(b"/*", b"/+");
 		assert!(w.every, "every table");
 		let mut w = WrittenTables::default();
-		w.note_range(b"/!wt", b"/!wu");
+		let _ = w.note_range(b"/!wt", b"/!wu");
 		assert!(tables(&w).is_empty() && !w.every, "a range outside every table");
 	}
 
@@ -1541,7 +1738,7 @@ mod tests {
 		assert!(!passed.refuses(&written(&[&record_key(1, 3, "b")])), "another database's table");
 		assert!(!passed.refuses(&written(&[])), "a transaction that wrote no table");
 		let mut every = WrittenTables::default();
-		every.note_range(b"/*", b"/+");
+		let _ = every.note_range(b"/*", b"/+");
 		assert!(passed.refuses(&every), "a write that may be of any table");
 		// A wait on every table refuses every write.
 		let parked = live.park();
@@ -1652,7 +1849,7 @@ mod tests {
 		assert!(!refused(written(&[&record_key(1, 3, "a")])), "another database's table");
 		assert!(!refused(written(&[])), "a transaction that wrote no table");
 		let mut every = WrittenTables::default();
-		every.note_range(b"/*", b"/+");
+		let _ = every.note_range(b"/*", b"/+");
 		assert!(refused(every), "a write that may be of any table");
 		let later = live.advance();
 		assert!(

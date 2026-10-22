@@ -24,6 +24,8 @@ mod caller_owned_transaction_test;
 mod changefeed_gc_test;
 #[cfg(feature = "kv-mem")]
 mod compatibility_test;
+#[cfg(any(feature = "kv-mem", feature = "kv-surrealkv"))]
+mod doc_id_claim_test;
 #[cfg(feature = "kv-mem")]
 mod export_id_components_test;
 #[cfg(feature = "kv-mem")]
@@ -91,5 +93,7 @@ mod tx_engine_test;
 mod tx_metrics;
 #[cfg(feature = "kv-mem")]
 mod version_test;
+#[cfg(feature = "kv-mem")]
+mod warm_write_reads_test;
 #[cfg(feature = "kv-mem")]
 mod write_guard_test;
