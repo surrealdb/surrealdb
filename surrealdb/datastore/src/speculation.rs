@@ -521,6 +521,22 @@ impl Transactable for Base {
 		self.storage().estimate(rng, version)
 	}
 
+	fn estimate_many<'a>(
+		&'a self,
+		ranges: Vec<KeyRange<'a>>,
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<Vec<Estimate>>> {
+		self.storage().estimate_many(ranges, version)
+	}
+
+	fn approximate<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<Option<Estimate>>> {
+		self.storage().approximate(rng, version)
+	}
+
 	fn split<'a>(
 		&'a self,
 		rng: KeyRange<'a>,

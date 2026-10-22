@@ -7874,6 +7874,35 @@ impl Transaction {
 		Ok(self.tr.estimate(rng.into_key_range(), version).await?)
 	}
 
+	/// What each of several ranges or regions holds, in their order
+	/// ([`Transactor::estimate_many`]).
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
+	pub async fn estimate_many<R: AnyRange>(
+		&self,
+		ranges: impl IntoIterator<Item = R>,
+		version: Option<u64>,
+	) -> Result<Vec<Estimate>> {
+		let ranges = ranges.into_iter().map(AnyRange::into_key_range).collect();
+		Ok(self.tr.estimate_many(ranges, version).await?)
+	}
+
+	/// What the storage's metadata says a range or region holds, read without visiting its
+	/// entries ([`Transactor::approximate`]).
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
+	pub async fn approximate(
+		&self,
+		rng: impl AnyRange,
+		version: Option<u64>,
+	) -> Result<Option<Estimate>> {
+		Ok(self.tr.approximate(rng.into_key_range(), version).await?)
+	}
+
 	/// Boundary keys that divide a range or region into parts
 	/// ([`Transactor::split`]).
 	#[cfg_attr(

@@ -634,6 +634,10 @@ pub(crate) struct State {
 	/// the rows it is handed and reads no source, starts with none and makes
 	/// none.
 	pub(super) places: Option<super::morsel::Statement>,
+	/// The rows a filter instruction of a body run on this state has dropped, over the life of
+	/// the state: a body's `WHERE` and those of the nested queries it runs. A morsel coordinator
+	/// reads its change over a chunk to measure what share of the entries it read passed.
+	pub(super) rejected: u64,
 }
 
 /// The query vector of a brute-force KNN sort, or of a KNN search, that is
@@ -1152,7 +1156,9 @@ impl State {
 			linked,
 			row_frame,
 			places,
+			rejected,
 		} = self;
+		*rejected = 0;
 		emptied(paging);
 		emptied(sorts);
 		emptied(sort_arrivals);
@@ -1620,6 +1626,7 @@ impl State {
 			linked: Vec::new(),
 			row_frame: None,
 			places: None,
+			rejected: 0,
 		}
 	}
 
@@ -2600,6 +2607,7 @@ pub(super) fn run_row<'r>(
 					}
 				};
 				if holds == *reject {
+					state.rejected += 1;
 					return Ok(Step::Next);
 				}
 				pc += 1;
@@ -2642,6 +2650,7 @@ pub(super) fn run_row<'r>(
 				let answer = op.apply_scalar(&left, &right)?;
 				charge_walked(&left, &right);
 				if answer.is_truthy() == *reject {
+					state.rejected += 1;
 					return Ok(Step::Next);
 				}
 				pc += 1;
@@ -3587,6 +3596,7 @@ pub(super) fn run_row<'r>(
 			} => {
 				let answer = read(regs, *cond)?.is_truthy();
 				if answer == *reject {
+					state.rejected += 1;
 					return Ok(Step::Next);
 				}
 				pc += 1;

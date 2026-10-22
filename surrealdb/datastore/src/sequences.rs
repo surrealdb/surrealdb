@@ -2756,6 +2756,20 @@ mod tests {
 			) -> BoxFut<'a, KvsResult<Estimate>> {
 				self.inner.estimate(rng, version)
 			}
+			fn estimate_many<'a>(
+				&'a self,
+				ranges: Vec<KeyRange<'a>>,
+				version: Option<u64>,
+			) -> BoxFut<'a, KvsResult<Vec<Estimate>>> {
+				self.inner.estimate_many(ranges, version)
+			}
+			fn approximate<'a>(
+				&'a self,
+				rng: KeyRange<'a>,
+				version: Option<u64>,
+			) -> BoxFut<'a, KvsResult<Option<Estimate>>> {
+				self.inner.approximate(rng, version)
+			}
 			fn split<'a>(
 				&'a self,
 				rng: KeyRange<'a>,

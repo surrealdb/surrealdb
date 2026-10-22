@@ -49,6 +49,7 @@ fn setup() -> Vec<String> {
 fn fanning(ceiling: usize) -> surrealdb_cnf::ConfigMap {
 	surrealdb_cnf::ConfigMap::empty()
 		.with_key_value("morsel_split_rows", SPLIT_ROWS.to_string())
+		.with_key_value("morsel_split_pass_ppm", "1000000")
 		.with_key_value("morsel_needs_view", "false")
 		.with_key_value("morsel_target_bytes", "1")
 		.with_key_value("morsel_oltp_reserve", "0")

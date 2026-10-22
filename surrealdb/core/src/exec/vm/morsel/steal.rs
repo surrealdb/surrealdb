@@ -46,12 +46,17 @@ pub(super) struct Slot {
 	/// Asks the owner has answered, by donating or declining.
 	answers: AtomicU64,
 	declines: AtomicU64,
-	/// What the owner estimated it has left at its last chunk boundary.
+	/// What the owner estimated it has left at its last chunk boundary. `left_keys` holds
+	/// [`UNCOUNTED`] when the estimate counted no keys.
 	left_keys: AtomicU64,
 	left_bytes: AtomicU64,
 	/// The owner's morsel has ended.
 	ended: AtomicBool,
 }
+
+/// What [`Slot::left_keys`] holds for an estimate that counted no keys. No count reaches it: a
+/// range holds fewer keys than there are values of a `u64`.
+const UNCOUNTED: u64 = u64::MAX;
 
 impl Slot {
 	/// A thief asks the owner to donate.
@@ -85,13 +90,13 @@ impl Slot {
 
 	/// The owner's estimate of what it has left, at its last chunk boundary.
 	pub(super) fn publish(&self, left: Estimate) {
-		self.left_keys.store(left.keys, Ordering::Relaxed);
+		self.left_keys.store(left.keys.unwrap_or(UNCOUNTED), Ordering::Relaxed);
 		self.left_bytes.store(left.bytes, Ordering::Relaxed);
 	}
 
 	pub(super) fn left(&self) -> Estimate {
 		Estimate {
-			keys: self.left_keys.load(Ordering::Relaxed),
+			keys: Some(self.left_keys.load(Ordering::Relaxed)).filter(|&keys| keys != UNCOUNTED),
 			bytes: self.left_bytes.load(Ordering::Relaxed),
 			exact: false,
 		}
@@ -224,7 +229,7 @@ pub(super) fn remaining_between(
 		((1.0 - read) / read).clamp(0.0, 1024.0)
 	};
 	Estimate {
-		keys: (visited as f64 * left) as u64,
+		keys: Some((visited as f64 * left) as u64),
 		bytes: (bytes as f64 * left) as u64,
 		exact: false,
 	}
@@ -257,6 +262,9 @@ pub(super) struct Progress {
 	pub(super) first: Vec<u8>,
 	pub(super) visited: u64,
 	pub(super) bytes: u64,
+	/// The entries of `visited` the pipeline's filters passed, as far as the coordinator counts
+	/// them; a worker leaves it unread.
+	pub(super) passed: u64,
 	/// The entries read since the morsel was last cut, and every entry when it never was.
 	pub(super) since_cut: u64,
 	/// The times the morsel has been cut.
@@ -551,24 +559,39 @@ mod tests {
 		let span = range(&[0, 0, 0, 0], &[0, 0, 1, 0]);
 		let first = [0u8, 0, 0, 0];
 		let half = remaining(&span, Direction::Forward, &first, &[0, 0, 0, 128], 100, 4_000);
-		assert_eq!((half.keys, half.bytes), (100, 4_000));
+		assert_eq!((half.keys, half.bytes), (Some(100), 4_000));
 		let quarter = remaining(&span, Direction::Forward, &first, &[0, 0, 0, 64], 100, 4_000);
-		assert_eq!(quarter.keys, 300);
+		assert_eq!(quarter.keys, Some(300));
 		let unmeasurable = remaining(&range(b"a", b"a"), Direction::Forward, b"a", b"a", 10, 50);
-		assert_eq!((unmeasurable.keys, unmeasurable.bytes), (10, 50));
+		assert_eq!((unmeasurable.keys, unmeasurable.bytes), (Some(10), 50));
 		let tiny = remaining(&span, Direction::Forward, &first, &[0, 0, 0, 0], 10, 50);
-		assert_eq!(tiny.keys, 10);
+		assert_eq!(tiny.keys, Some(10));
 		let unread = remaining(&span, Direction::Forward, &[], &[0, 0, 0, 0], 0, 0);
-		assert_eq!(unread.keys, 0);
+		assert_eq!(unread.keys, Some(0));
 		// Scanning backward from the top of the range, a quarter read leaves three times that.
 		let top = [0u8, 0, 0, 255];
 		let backward = remaining(&span, Direction::Backward, &top, &[0, 0, 0, 192], 100, 4_000);
-		assert!((250..=350).contains(&backward.keys), "{backward:?}");
+		assert!(backward.keys.is_some_and(|keys| (250..=350).contains(&keys)), "{backward:?}");
 		// A key range whose lower bound is shorter than the keys read, as a table's is, does not
 		// read as finished: the share is measured from the first key read.
 		let table = range(&[1], &[2]);
 		let hot = remaining(&table, Direction::Forward, &[1, 7, 0, 0], &[1, 7, 0, 5], 100, 4_000);
-		assert!(hot.keys >= 100, "{hot:?}");
+		assert!(hot.keys.is_some_and(|keys| keys >= 100), "{hot:?}");
+	}
+
+	/// A published estimate reads back as published, an uncounted one with no keys.
+	#[test]
+	fn a_published_estimate_keeps_whether_it_counted_keys() {
+		let slot = Slot::default();
+		for keys in [Some(0), Some(12), None] {
+			slot.publish(Estimate {
+				keys,
+				bytes: 4_096,
+				exact: false,
+			});
+			assert_eq!(slot.left().keys, keys);
+			assert_eq!(slot.left().bytes, 4_096);
+		}
 	}
 
 	/// An owner that declines is skipped by the thief, which asks the next largest.
@@ -578,12 +601,12 @@ mod tests {
 		let first = Registered::new(&shared);
 		let second = Registered::new(&shared);
 		first.slot().publish(Estimate {
-			keys: 100,
+			keys: Some(100),
 			bytes: 10_000,
 			exact: false,
 		});
 		second.slot().publish(Estimate {
-			keys: 10,
+			keys: Some(10),
 			bytes: 1_000,
 			exact: false,
 		});
@@ -664,6 +687,7 @@ mod tests {
 			first: span.bounds().0.to_vec(),
 			visited: 1,
 			bytes: 10,
+			passed: 0,
 			since_cut: 1,
 			cuts: 0,
 			quanta: 1,
@@ -739,6 +763,7 @@ mod tests {
 			first: span.bounds().0.to_vec(),
 			visited: 100,
 			bytes: 3_000,
+			passed: 0,
 			since_cut,
 			cuts,
 			quanta: 0,
@@ -819,6 +844,7 @@ mod tests {
 			first: span.bounds().0.to_vec(),
 			visited: 1,
 			bytes: 10,
+			passed: 0,
 			since_cut: 1,
 			cuts: 0,
 			quanta: 1,

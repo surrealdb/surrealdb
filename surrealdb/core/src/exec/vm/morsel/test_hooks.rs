@@ -146,6 +146,10 @@ pub(in crate::exec::vm) struct Counts {
 	/// Times the results of two morsels next to one another were combined before either was next
 	/// to what the statement had merged.
 	pub(in crate::exec::vm) combined: usize,
+	/// Times a scan asked the storage what its range holds as it opened.
+	pub(in crate::exec::vm) asked_at_open: usize,
+	/// Morsels cut off a range as its scan opened, before an entry of it was read.
+	pub(in crate::exec::vm) opened: usize,
 }
 
 static COUNTS: LazyLock<Mutex<HashMap<usize, Counts>>> = LazyLock::new(Default::default);
@@ -168,6 +172,7 @@ pub(crate) fn forget_datastore(units: usize) {
 	clear(&DELAYS, units);
 	clear(&METRICS, units);
 	clear(&FAULTS, units);
+	clear(&SEEDS, units);
 }
 
 fn bump(ctx: &ExecutionContext, change: impl FnOnce(&mut Counts)) {
@@ -309,6 +314,77 @@ pub(super) fn note_cut_short(ctx: &ExecutionContext) {
 /// The candidates of a write, not yet applied, hold `held` bytes.
 pub(super) fn note_held(ctx: &ExecutionContext, held: usize) {
 	bump(ctx, |counts| counts.most_held = counts.most_held.max(held));
+}
+
+/// A scan asked the storage what its range holds as it opened.
+pub(super) fn note_asked_at_open(ctx: &ExecutionContext) {
+	bump(ctx, |counts| counts.asked_at_open += 1);
+}
+
+/// `parts` morsels were cut off a range as its scan opened.
+pub(super) fn note_opened(ctx: &ExecutionContext, parts: usize) {
+	bump(ctx, |counts| counts.opened += parts);
+}
+
+/// What a test seeded for a datastore: the storage's answer of a range a scan opens, and the share
+/// of the range's rows its filters pass, known before the scan opens.
+#[derive(Clone, Copy, Default)]
+struct Seed {
+	opened: Option<surrealdb_kvs::Estimate>,
+	pass_ppm: Option<u32>,
+}
+
+static SEEDS: LazyLock<Mutex<HashMap<usize, Seed>>> = LazyLock::new(Default::default);
+
+/// What a test seeded for the datastore `ctx` runs under, until the answer is dropped.
+pub(in crate::exec::vm) struct Seeded(usize);
+
+impl Drop for Seeded {
+	fn drop(&mut self) {
+		SEEDS.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.0);
+	}
+}
+
+/// Seed, for every range a scan of the datastore `ctx` runs under opens, what the storage answers
+/// of it (`opened`, in place of what its metadata says) and the share of its rows the filters pass
+/// (`pass_ppm`, in rows a million).
+pub(in crate::exec::vm) fn seed_opened(
+	ctx: &ExecutionContext,
+	opened: Option<surrealdb_kvs::Estimate>,
+	pass_ppm: Option<u32>,
+) -> Seeded {
+	let datastore = datastore_of(ctx);
+	SEEDS.lock().unwrap_or_else(|e| e.into_inner()).insert(
+		datastore,
+		Seed {
+			opened,
+			pass_ppm,
+		},
+	);
+	Seeded(datastore)
+}
+
+fn seed(ctx: &ExecutionContext) -> Option<Seed> {
+	SEEDS.lock().unwrap_or_else(|e| e.into_inner()).get(&datastore_of(ctx)).copied()
+}
+
+/// What a test seeded the storage to answer of a range a scan opens, if it did.
+pub(super) fn seeded(ctx: &ExecutionContext) -> Option<surrealdb_kvs::Estimate> {
+	seed(ctx).and_then(|seed| seed.opened)
+}
+
+/// The share of a range's rows a test seeded its filters to pass, as the planner's estimate.
+pub(super) fn seeded_selectivity(
+	ctx: &ExecutionContext,
+) -> Option<crate::exec::ir::iface::Estimate> {
+	let ppm = seed(ctx)?.pass_ppm?;
+	Some(crate::exec::ir::iface::Estimate {
+		rows: None,
+		bytes: None,
+		selectivity_ppm: Some(ppm),
+		exact: false,
+		source: crate::exec::ir::iface::EstimateSource::KvRange,
+	})
 }
 
 /// `parts` morsels were cut off a range by the policy's first split.

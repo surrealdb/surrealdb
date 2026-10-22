@@ -815,6 +815,7 @@ async fn a_paged_select_answers_its_slice_over_frames_and_values() {
 	let owner = Session::owner().with_ns("test").with_db("test");
 	let morsels = surrealdb_cnf::ConfigMap::empty()
 		.with_key_value("morsel_split_rows", "1")
+		.with_key_value("morsel_split_pass_ppm", "1000000")
 		.with_key_value("morsel_target_bytes", "4000")
 		.with_key_value("morsel_oltp_reserve", "0");
 	for db in

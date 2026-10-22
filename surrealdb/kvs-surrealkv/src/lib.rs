@@ -295,6 +295,9 @@ impl TransactionBuilder for Datastore {
 	}
 }
 
+// TODO: answer `estimate`, `estimate_many` and `approximate` from SurrealKV's own metadata once it
+// exposes the size of a key range without reading its entries; until then the trait's defaults
+// answer, and `approximate` answers `None`.
 impl Transactable for Transaction {
 	fn kind(&self) -> &'static str {
 		"surrealkv"

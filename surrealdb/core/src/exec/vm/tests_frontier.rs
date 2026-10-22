@@ -910,8 +910,12 @@ async fn explain_analyze_of_a_windowed_lookup_shows_what_the_unwindowed_run_show
 
 /// Morsel knobs that split a statement's rows into batches of a few rows where the policy places
 /// the statement as morsels; a statement it keeps serial runs as it does without them.
-const MORSELS: &[(&str, &str)] =
-	&[("morsel_split_rows", "1"), ("morsel_target_bytes", "4000"), ("morsel_oltp_reserve", "0")];
+const MORSELS: &[(&str, &str)] = &[
+	("morsel_split_rows", "1"),
+	("morsel_split_pass_ppm", "1000000"),
+	("morsel_target_bytes", "4000"),
+	("morsel_oltp_reserve", "0"),
+];
 /// One task runs every row of a statement, in order.
 const SERIAL: &[(&str, &str)] = &[("morsel_split_rows", "18446744073709551615")];
 /// [`SERIAL`] on a quantum no statement here spends. A window is cut where the meter runs out, so

@@ -893,6 +893,7 @@ async fn a_packed_scan_split_into_morsels_answers_the_serial_scan() {
 		&dataset(),
 		surrealdb_cnf::ConfigMap::empty()
 			.with_key_value("morsel_split_rows", "1")
+			.with_key_value("morsel_split_pass_ppm", "1000000")
 			.with_key_value("morsel_target_bytes", "1"),
 	)
 	.await;

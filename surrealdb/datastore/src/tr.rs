@@ -804,6 +804,38 @@ impl Transactor {
 		self.inner.estimate(rng, version).await
 	}
 
+	/// What each of several ranges holds, in their order, as [`Self::estimate`] answers one.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::estimate_many`].
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub async fn estimate_many(
+		&self,
+		ranges: Vec<KeyRange<'_>>,
+		version: Option<u64>,
+	) -> Result<Vec<Estimate>> {
+		self.inner.estimate_many(ranges, version).await
+	}
+
+	/// What the storage's metadata says a range holds, read without visiting its entries; `None`
+	/// where the storage keeps no such metadata. A speculating transaction answers for the storage,
+	/// as [`Self::estimate`] does.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::approximate`].
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub async fn approximate(
+		&self,
+		rng: KeyRange<'_>,
+		version: Option<u64>,
+	) -> Result<Option<Estimate>> {
+		self.inner.approximate(rng, version).await
+	}
+
 	/// Boundary keys that divide a range into parts, strictly inside it and ascending.
 	///
 	/// A range the speculation touches is not divided: the storage cannot see the keys the

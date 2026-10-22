@@ -43,10 +43,13 @@ const SMALL_MORSELS: (&str, &str) = ("morsel_target_bytes", "8KiB");
 /// the next chunk is already being read.
 const DONATING: (&str, &str) = ("morsel_steal_always", "true");
 /// The settings `pairs` names. A range is cut where workers get no read view, so the front run
-/// over an in-memory datastore is cut as it is over one with views.
+/// over an in-memory datastore is cut as it is over one with views, and whatever share of its
+/// rows passes.
 fn config(pairs: &[(&str, &str)]) -> ConfigMap {
 	pairs.iter().fold(
-		ConfigMap::empty().with_key_value("morsel_needs_view", "false"),
+		ConfigMap::empty()
+			.with_key_value("morsel_needs_view", "false")
+			.with_key_value("morsel_split_pass_ppm", "1000000"),
 		|config, (key, value)| config.with_key_value(*key, *value),
 	)
 }

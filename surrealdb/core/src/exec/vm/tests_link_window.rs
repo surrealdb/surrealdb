@@ -641,13 +641,18 @@ fn comments(n: usize) -> String {
 const SERIAL: &[(&str, &str)] = &[("morsel_split_rows", "18446744073709551615")];
 /// Morsel knobs that split a statement's rows into batches of a few rows where the policy places
 /// the statement as morsels; a statement it keeps serial runs as it does without them.
-const MORSELS: &[(&str, &str)] =
-	&[("morsel_split_rows", "1"), ("morsel_target_bytes", "4000"), ("morsel_oltp_reserve", "0")];
+const MORSELS: &[(&str, &str)] = &[
+	("morsel_split_rows", "1"),
+	("morsel_split_pass_ppm", "1000000"),
+	("morsel_target_bytes", "4000"),
+	("morsel_oltp_reserve", "0"),
+];
 
 /// [`MORSELS`] on a datastore that offers no read views, where the policy then cuts a range
 /// without one: the in-memory datastore places a paged range as morsels that run on workers.
 const MORSELS_NO_VIEW: &[(&str, &str)] = &[
 	("morsel_split_rows", "1"),
+	("morsel_split_pass_ppm", "1000000"),
 	("morsel_target_bytes", "4000"),
 	("morsel_oltp_reserve", "0"),
 	("morsel_needs_view", "false"),

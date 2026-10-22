@@ -1546,6 +1546,7 @@ impl<'p> RangeSet<'p> {
 			remaining,
 			visited: progress.visited,
 			visited_bytes: progress.bytes,
+			passed: progress.passed,
 			places_held: self.places_held(),
 			since_cut: progress.since_cut,
 			cuts: progress.cuts,
@@ -1713,10 +1714,32 @@ impl<'p> RangeSet<'p> {
 		let backward = self.dir == Direction::Backward;
 		let txn = ctx.txn();
 		let reader: Arc<dyn super::super::read_ahead::Reader> = Arc::clone(&txn) as _;
+		let shared = Arc::clone(&self.shared);
+		let running = Registered::new(&shared);
+		// What this part has read, and where it ends: once the range is cut, the first entry at or
+		// past the cut (before it, scanning backward) belongs to the next morsel.
+		let mut progress = Progress::default();
+		let mut own = span;
+		// The policy's first split is asked for once: as the scan opens, from what the storage's
+		// metadata says the range holds, and otherwise once the coordinator has read enough of it.
+		let mut asked = !may_cut;
+		if may_cut {
+			let gate = Gate {
+				shared: &shared,
+				slot: running.slot(),
+				policy: self.policy,
+			};
+			let signals = self.signals(&progress, *hint, state);
+			if self.cut_at_open(&txn, &mut own, &gate, &signals, ctx).await? {
+				asked = true;
+				progress.cuts = 1;
+				self.top_up(state, ctx).await?;
+			}
+		}
 		let budget = pipeline.read_ahead.then(|| ctx.root().ctx.config.exec.scan_batch_bytes);
 		let mut source = super::super::read_ahead::ChunkSource::open(
 			&reader,
-			span.clone(),
+			own.clone(),
 			self.dir,
 			self.version,
 			budget,
@@ -1726,19 +1749,12 @@ impl<'p> RangeSet<'p> {
 		// The front run's chunk is no larger than the split threshold, so its producer starts after
 		// one such chunk.
 		source.starting_after(self.policy.chunk(&Signals::default(), self.policy.scan_chunk()));
-		// What this part has read, and where it ends: once the range is cut, the first entry at or
-		// past the cut (before it, scanning backward) belongs to the next morsel.
-		let mut progress = Progress::default();
 		let mut cut: Option<Vec<u8>> = None;
-		let mut asked = !may_cut;
 		let mut first = true;
 		let mut last: Vec<u8> = Vec::new();
-		let mut own = span.clone();
 		// The far end of the range, read once: the last key a forward scan reaches, the first a
 		// backward one does; `None` inside when the range holds nothing past what was read.
 		let mut far: Option<Option<Vec<u8>>> = None;
-		let shared = Arc::clone(&self.shared);
-		let running = Registered::new(&shared);
 		// The source ends its producer on every exit path, so the loop runs in a block whose
 		// result is returned once the source has finished.
 		let outcome: FlowResult<bool> = async {
@@ -1756,6 +1772,7 @@ impl<'p> RangeSet<'p> {
 				// The threshold is read once a chunk: a stale one only rejects less.
 				let threshold = probe.as_ref().and_then(|probe| probe.snapshot());
 				let mut rejected = 0usize;
+				let filtered_before = state.rejected;
 				let stats = source
 					.for_each(chunk, &mut |key, value| {
 						unspent = unspent.saturating_sub(1);
@@ -1825,12 +1842,15 @@ impl<'p> RangeSet<'p> {
 				}
 				#[cfg(test)]
 				super::test_hooks::note_pruned(ctx, rejected);
-				#[cfg(not(test))]
-				let _ = rejected;
 				let read = stats.rows as usize;
 				let bytes = stats.key_bytes + stats.value_bytes;
 				progress.visited += stats.rows;
 				progress.bytes += bytes;
+				// The entries the probe or a filter dropped did not pass; a nested query's filter
+				// counts too, which only makes the scan read as more selective.
+				let dropped =
+					state.rejected.saturating_sub(filtered_before).saturating_add(rejected as u64);
+				progress.passed += stats.rows.saturating_sub(dropped);
 				progress.since_cut += stats.rows;
 				stat.rows += stats.rows;
 				stat.bytes += bytes;
@@ -1971,6 +1991,92 @@ impl<'p> RangeSet<'p> {
 		.await;
 		source.finish().await;
 		outcome
+	}
+
+	/// As the front run opens `own`, before an entry of it is read and with what the run has
+	/// observed in `signals`: ask the storage's metadata what
+	/// the range holds, once, and when the policy cuts on that answer, queue every part but the
+	/// first for workers and narrow `own` to the first. `true` when the range was cut.
+	///
+	/// The storage is asked only where a split could follow: where the share of the range's rows
+	/// its filters pass is known before the scan opens and is within the policy's pass threshold.
+	/// Nothing supplies that share yet outside tests, so no range is cut here and the storage is
+	/// not asked. A failed answer, or none, leaves the
+	/// range whole, as does a split that finds no boundary; the coordinator's measured split still
+	/// judges it once it has read the split threshold's entries.
+	async fn cut_at_open(
+		&mut self,
+		txn: &crate::kvs::Transaction,
+		own: &mut RawRange,
+		gate: &Gate<'_>,
+		signals: &Signals,
+		ctx: &ExecutionContext,
+	) -> FlowResult<bool> {
+		let signals = Signals {
+			no_view: self.read_view(ctx).is_none(),
+			selectivity: None,
+			..*signals
+		};
+		#[cfg(test)]
+		let signals = Signals {
+			selectivity: super::test_hooks::seeded_selectivity(ctx),
+			..signals
+		};
+		if !self.policy.asks_at_open(&signals) {
+			return Ok(false);
+		}
+		#[cfg(test)]
+		super::test_hooks::note_asked_at_open(ctx);
+		let answer = txn.approximate(own.clone(), self.version).await;
+		#[cfg(test)]
+		let answer = match super::test_hooks::seeded(ctx) {
+			Some(seeded) => Ok(Some(seeded)),
+			None => answer,
+		};
+		let opened = answer.unwrap_or_else(|failure| {
+			tracing::debug!(%failure, "a scan could not size its range as it opened");
+			None
+		});
+		let signals = Signals {
+			opened: opened.map(crate::exec::ir::iface::Estimate::kv_range),
+			..signals
+		};
+		let Split::Split {
+			target,
+		} = self.policy.split_at_open(&signals)
+		else {
+			return Ok(false);
+		};
+		let (lo, hi) = own.bounds();
+		if lo >= hi {
+			return Ok(false);
+		}
+		let split = txn.split(own.clone(), target, self.version).await.map_err(|e| e.to_string());
+		#[cfg(test)]
+		let split = if super::test_hooks::split_fails(ctx) {
+			Err("a split the test fails".to_owned())
+		} else {
+			split
+		};
+		let bounds = split.unwrap_or_else(|failure| {
+			tracing::debug!(%failure, "a scan could not be split as it opened; its range is read whole");
+			Vec::new()
+		});
+		if bounds.is_empty() {
+			return Ok(false);
+		}
+		let parts = steal::cut(own, self.dir, bounds);
+		*own = match self.dir {
+			Direction::Forward => own.part(own.bounds().0, &parts.edge),
+			Direction::Backward => own.part(&parts.edge, own.bounds().1),
+		};
+		#[cfg(test)]
+		{
+			super::test_hooks::note_split(ctx, parts.donated.len());
+			super::test_hooks::note_opened(ctx, parts.donated.len());
+		}
+		gate.gave(parts.donated, self.dir, Origin::Split, false);
+		Ok(true)
 	}
 
 	/// Publish what the coordinator's morsel has left, for an idle worker choosing whom to ask, and

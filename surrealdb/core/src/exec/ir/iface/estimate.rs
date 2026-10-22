@@ -1,7 +1,17 @@
-//! Plan-time size estimates.
+//! Size estimates of streams, ranges and predicates.
 //!
-//! Every plan-time consumer takes an `Option<Estimate>` and applies its fixed rule on `None`.
-//! An [`Estimate`] never enters a program key; a [`SizeBucket`] may enter a premise.
+//! Every consumer takes an `Option<Estimate>` and applies its fixed rule on `None`. An
+//! [`Estimate`] never enters a program key; a [`SizeBucket`] may enter a premise.
+//!
+//! Which consumer may read an estimate depends on its [`EstimateSource`]:
+//!
+//! | source | read by |
+//! |---|---|
+//! | [`EstimateSource::KvRange`] | run-time decisions only: the placement policy's questions about a range a scan has opened, and the arm a compiled choice takes |
+//! | [`EstimateSource::PriorRun`], [`EstimateSource::Statistics`] | the plan-time cost slots (`ClassFacts::estimate`, `PhysTableFacts::estimate`), behind the premise that names the bucket or epoch |
+//!
+//! So a decision that varies with the data either reads a premise-guarded estimate while
+//! planning, or is compiled as alternatives the run chooses between with a `KvRange` estimate.
 
 use super::premise::ShapeDigest;
 
@@ -14,6 +24,20 @@ pub(crate) struct Estimate {
 	pub(crate) selectivity_ppm: Option<u32>,
 	pub(crate) exact: bool,
 	pub(crate) source: EstimateSource,
+}
+
+impl Estimate {
+	/// The storage layer's answer for a key range a scan has opened: the keys it counted, where it
+	/// counted any, and the bytes it measured. Read at run time only.
+	pub(crate) fn kv_range(kv: surrealdb_kvs::Estimate) -> Self {
+		Self {
+			rows: kv.keys,
+			bytes: Some(kv.bytes),
+			selectivity_ppm: None,
+			exact: kv.exact,
+			source: EstimateSource::KvRange,
+		}
+	}
 }
 
 /// Where an estimate came from.
@@ -75,6 +99,23 @@ impl SizeBucket {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn a_kv_range_answer_keeps_what_storage_measured() {
+		let counted = Estimate::kv_range(surrealdb_kvs::Estimate {
+			keys: Some(10),
+			bytes: 400,
+			exact: true,
+		});
+		assert_eq!((counted.rows, counted.bytes, counted.exact), (Some(10), Some(400), true));
+		assert_eq!(counted.source, EstimateSource::KvRange);
+		let measured = Estimate::kv_range(surrealdb_kvs::Estimate {
+			keys: None,
+			bytes: 1 << 30,
+			exact: false,
+		});
+		assert_eq!((measured.rows, measured.bytes), (None, Some(1 << 30)));
+	}
 
 	#[test]
 	fn buckets_are_base_four_and_saturate() {

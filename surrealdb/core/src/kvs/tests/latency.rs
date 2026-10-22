@@ -950,7 +950,31 @@ impl Transactable for LatencyTx {
 		Box::pin(async move {
 			let k = rng.start.as_slice().to_vec();
 			let op = self.inner.estimate(rng, version);
-			self.stats.round(Class::RangeFirst, &k, op, |e| Some(e.keys)).await
+			self.stats.round(Class::RangeFirst, &k, op, |e| e.keys).await
+		})
+	}
+
+	fn estimate_many<'a>(
+		&'a self,
+		ranges: Vec<KeyRange<'a>>,
+		version: Option<u64>,
+	) -> BoxFut<'a, KvsResult<Vec<Estimate>>> {
+		Box::pin(async move {
+			let k = ranges.first().map(|rng| rng.start.as_slice().to_vec()).unwrap_or_default();
+			let op = self.inner.estimate_many(ranges, version);
+			self.stats.round(Class::RangeFirst, &k, op, |e| Some(e.len() as u64)).await
+		})
+	}
+
+	fn approximate<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		version: Option<u64>,
+	) -> BoxFut<'a, KvsResult<Option<Estimate>>> {
+		Box::pin(async move {
+			let k = rng.start.as_slice().to_vec();
+			let op = self.inner.approximate(rng, version);
+			self.stats.round(Class::RangeFirst, &k, op, |e| e.and_then(|e| e.keys)).await
 		})
 	}
 
@@ -1211,7 +1235,7 @@ impl Snapshot for LatencyView {
 		Box::pin(async move {
 			let k = rng.start.as_slice().to_vec();
 			let op = self.inner.estimate(rng, version);
-			self.stats.round(Class::RangeFirst, &k, op, |e| Some(e.keys)).await
+			self.stats.round(Class::RangeFirst, &k, op, |e| e.keys).await
 		})
 	}
 

@@ -414,11 +414,21 @@ pub(crate) struct Signals {
 	/// values they held.
 	pub(crate) visited: u64,
 	pub(crate) visited_bytes: u64,
+	/// The entries of `visited` the pipeline's filters passed.
+	pub(crate) passed: u64,
 	/// Whether the transaction gives workers no read view, so that no worker can read a morsel.
 	pub(crate) no_view: bool,
 	/// What is left of the range being run, when the coordinator has measured it from the
 	/// entries it has read; `None` otherwise.
 	pub(crate) remaining_estimate: Option<Estimate>,
+	/// What the storage's metadata says the range holds as the scan opens, before an entry of it
+	/// is read ([`EstimateSource::KvRange`](crate::exec::ir::iface::EstimateSource::KvRange));
+	/// `None` where the storage keeps no such metadata. Only [`Policy::split_at_open`] reads it:
+	/// once the coordinator has read entries, what it measured answers.
+	pub(crate) opened: Option<PlanEstimate>,
+	/// The share of the range's rows its pipeline's filters pass (`selectivity_ppm`), known before
+	/// the scan opens; `None` where nothing supplies one. Only [`Policy::split_at_open`] reads it.
+	pub(crate) selectivity: Option<PlanEstimate>,
 	/// The places of the node's worker pool the statement holds.
 	pub(crate) places_held: usize,
 	/// The morsels of the scan that wait for a worker or the coordinator.
@@ -466,6 +476,8 @@ pub(crate) struct Policy {
 	explain_analyze: bool,
 	/// Whether a range is cut only where workers can read the parts through a read view.
 	needs_view: bool,
+	/// The most rows in a million of a range its filters may pass for the range to be cut.
+	split_pass_ppm: u32,
 }
 
 impl Policy {
@@ -481,6 +493,7 @@ impl Policy {
 			place_quantum: config.morsel_place_quantum,
 			explain_analyze: config.morsel_explain_analyze,
 			needs_view: config.morsel_needs_view,
+			split_pass_ppm: config.morsel_split_pass_ppm,
 		}
 	}
 
@@ -810,9 +823,36 @@ impl Policy {
 	/// reader that takes few rows is waiting for the first, the paging does not need fewer rows
 	/// than that, and the transaction gives workers a read view where the policy needs one.
 	/// [`Self::split`] answers the cut, from what [`Signals::remaining_estimate`] says is left.
+	///
+	/// The rows the filters passed (`signals.passed`) must also be a share of those entries no
+	/// larger than the policy's pass threshold: a scan most of whose rows pass is bound by reading
+	/// them, which morsels do not speed up, so it stays whole. A pipeline with no filter passes
+	/// every row.
 	pub(crate) fn may_split(self, signals: &Signals) -> bool {
+		signals.visited >= self.split_rows as u64
+			&& self.selective(signals.passed, signals.visited)
+			&& self.may_split_unread(signals)
+	}
+
+	/// Whether `passed` of `of` rows is a share no larger than the pass threshold.
+	fn selective(self, passed: u64, of: u64) -> bool {
+		u128::from(passed) * 1_000_000 <= u128::from(self.split_pass_ppm) * u128::from(of)
+	}
+
+	/// Whether a share known before the scan opens (`signals.selectivity`) is no larger than the
+	/// pass threshold; `false` where none is known.
+	fn known_selective(self, signals: &Signals) -> bool {
+		signals
+			.selectivity
+			.and_then(|selectivity| selectivity.selectivity_ppm)
+			.is_some_and(|ppm| ppm <= self.split_pass_ppm)
+	}
+
+	/// The gates of a split other than the entries read: splits are on, no reader that takes few
+	/// rows is waiting for the first, the paging does not need fewer rows than the split
+	/// threshold, and the transaction gives workers a read view where the policy needs one.
+	fn may_split_unread(self, signals: &Signals) -> bool {
 		if self.split_rows == usize::MAX
-			|| signals.visited < self.split_rows as u64
 			|| signals.scan_hint.is_some()
 			|| (self.needs_view && signals.no_view)
 		{
@@ -824,6 +864,50 @@ impl Policy {
 			&& signals
 				.remaining
 				.is_some_and(|remaining| signals.skip.saturating_add(remaining) < self.split_rows))
+	}
+
+	/// Run time: whether the coordinator asks the storage what a range holds as the scan opens,
+	/// for [`Self::split_at_open`]: only when a split could follow from the answer, which needs
+	/// a known share of passing rows within the pass threshold.
+	pub(crate) fn asks_at_open(self, signals: &Signals) -> bool {
+		self.known_selective(signals) && self.may_split_unread(signals)
+	}
+
+	/// Run time: what to do with a range as its scan opens, before an entry of it is read, from
+	/// what the storage's metadata says it holds (`signals.opened`).
+	///
+	/// A range is cut here only where the share of its rows the filters pass is known before the
+	/// scan opens (`signals.selectivity`) and is within the pass threshold: starting morsels costs
+	/// latency that only a selective scan repays. It is then cut into as many morsels as its bytes
+	/// fill of the target size, no more than the rows the storage counted where it counted them,
+	/// and kept whole when that is fewer than two, when the storage gave no measure, or when a gate
+	/// of [`Self::may_split`] other than the entries read is shut. A range kept whole here is still
+	/// judged by [`Self::split`] once the coordinator has read the split threshold's entries.
+	pub(crate) fn split_at_open(self, signals: &Signals) -> Split {
+		if !self.asks_at_open(signals) {
+			return Split::Whole;
+		}
+		let Some(bytes) = signals.opened.and_then(|opened| opened.bytes) else {
+			return Split::Whole;
+		};
+		let rows = signals.opened.and_then(|opened| opened.rows).unwrap_or(u64::MAX);
+		self.parts_of(bytes, rows, self.target_bytes as u64)
+	}
+
+	/// A remainder of `bytes` in `rows` cut into morsels of about `target` bytes: no more parts
+	/// than rows or than a split answers, and whole when that is fewer than two.
+	fn parts_of(self, bytes: u64, rows: u64, target: u64) -> Split {
+		let parts = bytes
+			.div_ceil(target.max(1))
+			.min(rows)
+			.min(u64::from(surrealdb_kvs::split::MAX_SPLIT_PARTS));
+		if parts < 2 {
+			Split::Whole
+		} else {
+			Split::Split {
+				target: SplitTarget::Parts(parts as u32),
+			}
+		}
 	}
 
 	/// Run time: what to do with the remainder of the range the coordinator is running, once
@@ -845,20 +929,7 @@ impl Policy {
 			None => Split::Split {
 				target: SplitTarget::Bytes(target),
 			},
-			Some(left) => {
-				let parts = left
-					.bytes
-					.div_ceil(target)
-					.min(left.keys)
-					.min(u64::from(surrealdb_kvs::split::MAX_SPLIT_PARTS));
-				if parts < 2 {
-					Split::Whole
-				} else {
-					Split::Split {
-						target: SplitTarget::Parts(parts as u32),
-					}
-				}
-			}
+			Some(left) => self.parts_of(left.bytes, left.keys.unwrap_or(u64::MAX), target),
 		}
 	}
 
@@ -1237,11 +1308,12 @@ mod tests {
 		let read = Signals {
 			visited: 256,
 			visited_bytes: 256_000,
+			passed: 2,
 			..Signals::default()
 		};
 		let left = |bytes: u64, keys: u64| Signals {
 			remaining_estimate: Some(Estimate {
-				keys,
+				keys: Some(keys),
 				bytes,
 				exact: false,
 			}),
@@ -1283,5 +1355,123 @@ mod tests {
 			},
 			"unmeasured: the datastore sizes the parts"
 		);
+	}
+
+	/// Past the split threshold, a range is cut only where few of the entries read passed the
+	/// filters: a scan passing one row in a hundred splits, one passing nine in ten or every row
+	/// (no filter) stays whole, and the threshold is the configured share.
+	#[test]
+	fn a_range_is_cut_only_where_few_rows_pass() {
+		let policy = Policy::from_config(&ExecConfig {
+			morsel_needs_view: false,
+			..ExecConfig::default()
+		});
+		let target = ExecConfig::default().morsel_target_bytes as u64;
+		let read = |passed: u64| Signals {
+			visited: 1_000,
+			visited_bytes: 1_000_000,
+			passed,
+			remaining_estimate: Some(Estimate {
+				keys: Some(100_000),
+				bytes: 10 * target,
+				exact: false,
+			}),
+			..Signals::default()
+		};
+		assert!(policy.may_split(&read(10)), "one in a hundred passes");
+		assert!(matches!(policy.split(&read(10)), Split::Split { .. }));
+		assert!(!policy.may_split(&read(900)), "nine in ten pass");
+		assert_eq!(policy.split(&read(900)), Split::Whole);
+		assert!(!policy.may_split(&read(1_000)), "no filter passes every row");
+		let threshold = u64::from(ExecConfig::default().morsel_split_pass_ppm) / 1_000;
+		assert!(policy.may_split(&read(threshold)), "the threshold itself splits");
+		assert!(!policy.may_split(&read(threshold + 1)));
+		let any = Policy::from_config(&ExecConfig {
+			morsel_needs_view: false,
+			morsel_split_pass_ppm: 1_000_000,
+			..ExecConfig::default()
+		});
+		assert!(any.may_split(&read(1_000)), "a threshold of a million cuts whatever passes");
+	}
+
+	/// As a scan opens, a range the storage measures as many morsels' worth is cut before an entry
+	/// of it is read, and a small or unmeasured one is kept whole for the coordinator to judge
+	/// once it has read the split threshold's entries.
+	#[test]
+	fn a_range_the_storage_measures_large_is_cut_as_it_opens() {
+		use crate::exec::ir::iface::EstimateSource;
+		let policy = Policy::from_config(&ExecConfig::default());
+		let target = ExecConfig::default().morsel_target_bytes as u64;
+		let one_in_a_hundred = PlanEstimate {
+			rows: None,
+			bytes: None,
+			selectivity_ppm: Some(10_000),
+			exact: false,
+			source: EstimateSource::KvRange,
+		};
+		let selective = Some(one_in_a_hundred);
+		let opened = |bytes: u64, rows: Option<u64>| Signals {
+			opened: Some(PlanEstimate {
+				rows,
+				bytes: Some(bytes),
+				selectivity_ppm: None,
+				exact: false,
+				source: EstimateSource::KvRange,
+			}),
+			selectivity: selective,
+			..Signals::default()
+		};
+		assert_eq!(
+			policy.split_at_open(&opened(10 * target, None)),
+			Split::Split {
+				target: SplitTarget::Parts(10)
+			},
+			"ten morsels' worth of bytes, rows uncounted"
+		);
+		assert_eq!(
+			policy.split_at_open(&opened(10 * target, Some(3))),
+			Split::Split {
+				target: SplitTarget::Parts(3)
+			},
+			"no more morsels than counted rows"
+		);
+		assert_eq!(policy.split_at_open(&opened(target, None)), Split::Whole, "one morsel's worth");
+		let unmeasured = Signals {
+			selectivity: selective,
+			..Signals::default()
+		};
+		assert_eq!(policy.split_at_open(&unmeasured), Split::Whole, "no measure");
+		assert!(policy.asks_at_open(&unmeasured));
+		let unknown = Signals {
+			selectivity: None,
+			..opened(10 * target, None)
+		};
+		assert!(!policy.asks_at_open(&unknown), "no share of passing rows is known");
+		assert_eq!(policy.split_at_open(&unknown), Split::Whole);
+		let broad = Signals {
+			selectivity: Some(PlanEstimate {
+				selectivity_ppm: Some(900_000),
+				..one_in_a_hundred
+			}),
+			..opened(10 * target, None)
+		};
+		assert!(!policy.asks_at_open(&broad), "most rows pass");
+		assert_eq!(policy.split_at_open(&broad), Split::Whole);
+		let hinted = Signals {
+			scan_hint: Some(1),
+			..opened(10 * target, None)
+		};
+		assert!(!policy.asks_at_open(&hinted), "a reader waits for its first rows");
+		assert_eq!(policy.split_at_open(&hinted), Split::Whole);
+		let no_view = Signals {
+			no_view: true,
+			..opened(10 * target, None)
+		};
+		assert_eq!(policy.split_at_open(&no_view), Split::Whole, "no worker can read a part");
+		let serial = Policy::from_config(&ExecConfig {
+			morsel_split_rows: usize::MAX,
+			..ExecConfig::default()
+		});
+		assert!(!serial.asks_at_open(&unmeasured), "splits are off");
 	}
 }

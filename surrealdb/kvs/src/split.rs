@@ -14,7 +14,10 @@
 //! band, or a table whose keys cluster -- costs balance and never correctness: an empty extent
 //! finishes at once and the rows it did not hold are read by whichever extent does hold them.
 //! [`position_fraction`] measures a key's place in a range on the same numeric window, so an
-//! estimate extrapolated from a prefix of the range is as good as the division is.
+//! estimate extrapolated from a prefix of the range is as good as the division is. The estimate
+//! measures that place between the first and last keys the range holds, as the division does,
+//! not between its bounds: keys that cluster in a corner of their bounds (integer ids under a
+//! table's prefix) would otherwise read as a sliver of the range and scale to far too many.
 
 use crate::types::{Key, KeyRange};
 
@@ -27,11 +30,12 @@ pub const MAX_SPLIT_PARTS: u32 = 1024;
 /// What a range holds, as an estimate answers it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Estimate {
-	/// Keys in the range.
-	pub keys: u64,
-	/// Key bytes plus value bytes in the range.
+	/// Keys in the range; `None` when the answer measured bytes without counting keys.
+	pub keys: Option<u64>,
+	/// Key bytes plus value bytes in the range. An answer read from a backend's metadata measures
+	/// the bytes the backend stores, which compression makes fewer than the entries hold.
 	pub bytes: u64,
-	/// Whether `keys` and `bytes` were counted rather than extrapolated.
+	/// Whether `keys` and `bytes` were counted rather than extrapolated or read from metadata.
 	pub exact: bool,
 }
 
@@ -145,35 +149,44 @@ pub fn position_fraction(lo: &[u8], hi: &[u8], at: &[u8]) -> f64 {
 	(offset as f64 / span as f64).clamp(0.0, 1.0)
 }
 
-/// What a range holds, from the `keys` and `bytes` of the entries read from its start, `last`
-/// being the final key read.
+/// What a range holds, from the `read` entries and their `bytes` read from its start: `first`
+/// and `last` the first and final keys read, `far` the last key the range holds.
 ///
 /// `read` fewer than [`ESTIMATE_BUDGET`] entries means the range ended inside the budget and the
-/// answer is exact. Otherwise the entries read are scaled by the share of the range they span,
-/// measured with [`position_fraction`]; a share that cannot be measured leaves them unscaled.
+/// answer is exact; `far` is not read then. Otherwise the entries read are scaled by the share of
+/// the keys from `first` to `far` they span, measured with [`position_fraction`]; a share that
+/// cannot be measured leaves them unscaled. A caller seeks `far` only on that path.
 pub fn estimate_from_prefix(
-	rng: &KeyRange<'_>,
 	read: u64,
 	bytes: u64,
+	first: Option<&[u8]>,
 	last: Option<&[u8]>,
+	far: Option<&[u8]>,
 ) -> Estimate {
 	if read < u64::from(ESTIMATE_BUDGET) {
 		return Estimate {
-			keys: read,
+			keys: Some(read),
 			bytes,
 			exact: true,
 		};
 	}
-	let fraction = last.map_or(0.0, |last| position_fraction(&rng.start, &rng.end, last));
+	let fraction = match (first, last, far) {
+		(Some(first), Some(last), Some(far)) => {
+			let mut end = far.to_vec();
+			end.push(0);
+			position_fraction(first, &end, last)
+		}
+		_ => 0.0,
+	};
 	if fraction <= 0.0 {
 		return Estimate {
-			keys: read,
+			keys: Some(read),
 			bytes,
 			exact: false,
 		};
 	}
 	Estimate {
-		keys: ((read as f64 / fraction).round() as u64).max(read),
+		keys: Some(((read as f64 / fraction).round() as u64).max(read)),
 		bytes: ((bytes as f64 / fraction).round() as u64).max(bytes),
 		exact: false,
 	}
@@ -354,12 +367,11 @@ mod tests {
 
 	#[test]
 	fn an_estimate_within_the_budget_is_exact() {
-		let rng = KeyRange::from(&b"k"[..]..&b"l"[..]);
-		let est = estimate_from_prefix(&rng, 100, 4000, Some(b"k\x10"));
+		let est = estimate_from_prefix(100, 4000, Some(b"k\x01"), Some(b"k\x10"), None);
 		assert_eq!(
 			est,
 			Estimate {
-				keys: 100,
+				keys: Some(100),
 				bytes: 4000,
 				exact: true
 			}
@@ -368,14 +380,27 @@ mod tests {
 
 	#[test]
 	fn an_estimate_past_the_budget_scales_by_the_share_read() {
-		let rng = KeyRange::from(&b"k\x00\x00"[..]..&b"k\x40\x00"[..]);
-		// A quarter of the range read, in `ESTIMATE_BUDGET` keys.
-		let est = estimate_from_prefix(&rng, 1024, 10_240, Some(b"k\x10\x00"));
+		let (first, far) = (&b"k\x00\x00"[..], &b"k\x3f\xff\xff"[..]);
+		// A quarter of the keys from the first to the last read, in `ESTIMATE_BUDGET` keys.
+		let est = estimate_from_prefix(1024, 10_240, Some(first), Some(b"k\x10\x00"), Some(far));
 		assert!(!est.exact);
-		assert_eq!(est.keys, 4096);
+		assert_eq!(est.keys, Some(4096));
 		assert_eq!(est.bytes, 40_960);
 		// A share that cannot be measured leaves the counts as read.
-		let est = estimate_from_prefix(&rng, 1024, 10_240, Some(b"k\x00\x00"));
-		assert_eq!((est.keys, est.bytes, est.exact), (1024, 10_240, false));
+		let est = estimate_from_prefix(1024, 10_240, Some(first), Some(first), Some(far));
+		assert_eq!((est.keys, est.bytes, est.exact), (Some(1024), 10_240, false));
+		let est = estimate_from_prefix(1024, 10_240, Some(first), Some(b"k\x10\x00"), None);
+		assert_eq!(est.keys, Some(1024));
+	}
+
+	#[test]
+	fn an_estimate_measures_between_the_keys_held_not_the_bounds() {
+		// Ids 0..3000 under a table's prefix, two bytes each: the bounds span 0x00..0xff, the
+		// keys a sliver at the bottom. Reading the first 1024 is about a third of what is held.
+		let key = |id: u16| [&b"t"[..], &id.to_be_bytes()].concat();
+		let est =
+			estimate_from_prefix(1024, 10_240, Some(&key(0)), Some(&key(1023)), Some(&key(2999)));
+		let keys = est.keys.expect("counted");
+		assert!((2_900..=3_100).contains(&keys), "{keys} estimated for 3000 held");
 	}
 }

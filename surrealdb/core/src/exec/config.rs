@@ -37,6 +37,10 @@ const DEFAULT_FAN_OUT_ROW_THRESHOLD: usize = 4;
 /// `morsel_split_rows` key.
 const DEFAULT_MORSEL_SPLIT_ROWS: usize = 256;
 
+/// Default most rows in a million a range's `WHERE` may pass for the range to be cut into
+/// morsels. Overridable per deployment via the `morsel_split_pass_ppm` key.
+const DEFAULT_MORSEL_SPLIT_PASS_PPM: u32 = 50_000;
+
 /// Default bytes a morsel over a key range aims at. Overridable per deployment
 /// via the `morsel_target_bytes` key.
 const DEFAULT_MORSEL_TARGET_BYTES: usize = 1 << 20;
@@ -198,6 +202,13 @@ pub(crate) struct ExecConfig {
 	/// statement's task, so a cut costs and gains nothing; `false` cuts the
 	/// range anyway, which runs the merge under the same load on every backend.
 	pub morsel_needs_view: bool,
+	/// The most rows in a million of a range that its pipeline's filters may pass for the range
+	/// to be cut into morsels (default: 50 000, one in twenty). A scan most of whose rows pass is
+	/// bound by reading them, which morsels do not speed up, and starting them costs latency; a
+	/// selective scan is bound by judging rows, which workers share. The share is measured from
+	/// the entries the coordinator has read, or known before the scan opens; a scan whose share
+	/// is not known is not cut. `1000000` cuts whatever passes.
+	pub morsel_split_pass_ppm: u32,
 	/// The bytes a morsel over a key range aims at (default: 1 MiB). `1` makes
 	/// every entry a morsel of its own.
 	pub morsel_target_bytes: usize,
@@ -329,6 +340,7 @@ impl Default for ExecConfig {
 			fan_out_row_threshold: DEFAULT_FAN_OUT_ROW_THRESHOLD,
 			morsel_split_rows: DEFAULT_MORSEL_SPLIT_ROWS,
 			morsel_needs_view: true,
+			morsel_split_pass_ppm: DEFAULT_MORSEL_SPLIT_PASS_PPM,
 			morsel_target_bytes: DEFAULT_MORSEL_TARGET_BYTES,
 			morsel_places: usize::MAX,
 			morsel_oltp_reserve: DEFAULT_MORSEL_OLTP_RESERVE,
@@ -373,6 +385,7 @@ impl cnf::Config for ExecConfig {
 			.parse_key("fan_out_row_threshold", &mut self.fan_out_row_threshold)
 			.parse_key("morsel_split_rows", &mut self.morsel_split_rows)
 			.parse_key_bool("morsel_needs_view", &mut self.morsel_needs_view)
+			.parse_key("morsel_split_pass_ppm", &mut self.morsel_split_pass_ppm)
 			.parse_key_with("morsel_target_bytes", &mut self.morsel_target_bytes, |x| {
 				x.parse_bytes::<usize>().ok().filter(|&n| n > 0)
 			})

@@ -55,8 +55,9 @@ to the server and are configured where that was started.
 The `--unordered-rows` flag grades the rows of a `SELECT` of a table or a record
 range that has no `ORDER BY`, `LIMIT` or `START` as a multiset, for a run under
 settings that leave the order of such rows unspecified, such as
-`--config morsel_split_rows=1` (add `--config morsel_needs_view=false` on a backend that gives
-workers no read view, to cut ranges there as well). A row nested in a result, the rows of every
+`--config morsel_split_rows=1 --config morsel_split_pass_ppm=1000000` (the second cuts a range
+whatever share of its rows passes its `WHERE`; add `--config morsel_needs_view=false` on a backend
+that gives workers no read view, to cut ranges there as well). A row nested in a result, the rows of every
 other statement, and every error are still compared exactly: a test that must
 accept one of several errors states them with a `match` expression.
 

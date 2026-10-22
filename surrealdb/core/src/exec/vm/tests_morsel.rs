@@ -16,6 +16,7 @@ use super::compile::compile;
 use super::golden::Golden;
 use super::morsel::{
 	Counts, counts_of, delay_morsels, effective_input, fail_splits, forget_ends, metrics_of,
+	seed_opened,
 };
 #[cfg(feature = "kv-rocksdb")]
 use super::morsel::{fail_grants, fail_narrows, waiting_statement};
@@ -50,6 +51,7 @@ fn setup() -> String {
 pub(super) fn tiny() -> surrealdb_cnf::ConfigMap {
 	surrealdb_cnf::ConfigMap::empty()
 		.with_key_value("morsel_split_rows", "1")
+		.with_key_value("morsel_split_pass_ppm", "1000000")
 		.with_key_value("morsel_needs_view", "false")
 		.with_key_value("morsel_target_bytes", "1")
 		.with_key_value("morsel_oltp_reserve", "0")
@@ -450,6 +452,8 @@ async fn same_answers_in(
 		collected_early: after.collected_early - before.collected_early,
 		most_results_held: after.most_results_held,
 		combined: after.combined - before.combined,
+		asked_at_open: after.asked_at_open - before.asked_at_open,
+		opened: after.opened - before.opened,
 	}
 }
 
@@ -643,6 +647,95 @@ async fn range_morsels_tile_an_in_place_scan() {
 	assert!(counts.split > 1, "{counts:?}");
 	assert!(counts.handed > 0, "{counts:?}");
 	assert!(counts.scanned >= ROWS, "{counts:?}");
+}
+
+/// Settings whose measured split never comes within [`ROWS`] entries, so a range is cut only as its
+/// scan opens, into morsels of a few KiB.
+fn cut_only_at_open() -> surrealdb_cnf::ConfigMap {
+	surrealdb_cnf::ConfigMap::empty()
+		.with_key_value("morsel_split_rows", (10 * ROWS).to_string())
+		.with_key_value("morsel_needs_view", "false")
+		.with_key_value("morsel_target_bytes", "4096")
+		.with_key_value("morsel_oltp_reserve", "0")
+}
+
+/// A range whose filters are known to pass few rows, and that the storage measures as many
+/// morsels' worth, is cut as its scan opens, before an entry of it is read, and answers what the
+/// serial run answers. One the storage measures as less than a morsel stays whole, and so does a
+/// large one whose share of passing rows is not known, for which the storage is not asked. The
+/// storage is asked at most once per scan, however many morsels the scan runs.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_selective_range_the_storage_measures_large_fans_out_as_it_opens() {
+	let _turn = TURNS.lock().await;
+	let serial = TestDb::new_with_config(&setup(), whole()).await;
+	let wide = TestDb::new_with_config(&setup(), cut_only_at_open()).await;
+	let sql = "SELECT n, s FROM t WHERE n % 100 = 0";
+	let expected = answered(&serial, sql).await.expect("the serial run answers");
+	assert!(reads_ranges(&*lowered(&wide.exec_ctx().await, sql).await), "{sql} reads a key range");
+	let ctx = wide.exec_ctx().await;
+	let large = surrealdb_kvs::Estimate {
+		keys: None,
+		bytes: 64 * 4096,
+		exact: false,
+	};
+	let small = surrealdb_kvs::Estimate {
+		keys: Some(1),
+		bytes: 64,
+		exact: true,
+	};
+	// (what the storage answers, the share passing, storage asked, cut as it opens)
+	for (opened, pass_ppm, asked, cut) in [
+		(large, Some(10_000), 1, true),
+		(small, Some(10_000), 1, false),
+		(large, None, 0, false),
+		(large, Some(900_000), 0, false),
+	] {
+		let seeded = seed_opened(&ctx, Some(opened), pass_ppm);
+		let before = counts_of(&ctx);
+		let got = answered(&wide, sql).await.expect("the wide run answers");
+		let after = counts_of(&ctx);
+		drop(seeded);
+		let case = format!("{opened:?} passing {pass_ppm:?}: {after:?}");
+		assert_eq!(multiset(&got), multiset(&expected), "{case}");
+		assert_eq!(after.asked_at_open - before.asked_at_open, asked, "{case}");
+		assert_eq!(after.opened > before.opened, cut, "{case}");
+		assert_eq!(after.opened - before.opened, after.split - before.split, "{case}");
+	}
+}
+
+/// Settings that split a range once the coordinator has read a few hundred entries of it, at the
+/// default share of passing rows, cutting it into morsels of a few KiB.
+fn measured_split() -> surrealdb_cnf::ConfigMap {
+	surrealdb_cnf::ConfigMap::empty()
+		.with_key_value("morsel_split_rows", "200")
+		.with_key_value("morsel_needs_view", "false")
+		.with_key_value("morsel_target_bytes", "4096")
+		.with_key_value("morsel_oltp_reserve", "0")
+}
+
+/// Past the split threshold the coordinator cuts a range whose filter passed about one row in a
+/// hundred, and keeps whole a range whose filter passed about nine in ten or that has no filter:
+/// a scan most of whose rows pass is bound by reading them. Each answers what the serial run does.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_range_splits_by_the_share_its_filter_passed() {
+	let _turn = TURNS.lock().await;
+	let serial = TestDb::new_with_config(&setup(), whole()).await;
+	let wide = TestDb::new_with_config(&setup(), measured_split()).await;
+	let ctx = wide.exec_ctx().await;
+	for (sql, splits) in [
+		("SELECT n FROM t WHERE n % 100 = 0", true),
+		("SELECT n FROM t WHERE n % 10 != 0", false),
+		("SELECT n FROM t", false),
+	] {
+		assert!(reads_ranges(&*lowered(&ctx, sql).await), "{sql} reads a key range");
+		let expected = answered(&serial, sql).await.expect("the serial run answers");
+		let before = counts_of(&ctx);
+		let got = answered(&wide, sql).await.expect("the wide run answers");
+		let after = counts_of(&ctx);
+		assert_eq!(multiset(&got), multiset(&expected), "{sql}");
+		assert_eq!(after.split > before.split, splits, "{sql}: {after:?}");
+		assert_eq!(after.asked_at_open, before.asked_at_open, "{sql}: no share is known at open");
+	}
 }
 
 /// The backward scan of a table reads its key range in morsels too.
@@ -929,6 +1022,7 @@ async fn a_plain_select_fans_out_under_the_datastores_morsel_settings() {
 async fn a_plain_select_reads_ranges_without_a_view_only_where_the_settings_allow_it() {
 	let needs_view = surrealdb_cnf::ConfigMap::empty()
 		.with_key_value("morsel_split_rows", "1")
+		.with_key_value("morsel_split_pass_ppm", "1000000")
 		.with_key_value("morsel_target_bytes", "1")
 		.with_key_value("morsel_oltp_reserve", "0");
 	let sql = "SELECT * FROM t";
@@ -2458,6 +2552,7 @@ fn spilling() -> surrealdb_cnf::ConfigMap {
 		.with_key_value("query_memory_minimum", "4096")
 		.with_key_value("memory_reserve_chunk", "4096")
 		.with_key_value("morsel_split_rows", "1")
+		.with_key_value("morsel_split_pass_ppm", "1000000")
 		.with_key_value("morsel_needs_view", "false")
 		.with_key_value("morsel_target_bytes", "30000")
 		.with_key_value("morsel_oltp_reserve", "0")
@@ -3063,6 +3158,7 @@ const CORPUS_SETUP: &str = "
 fn region_config() -> surrealdb_cnf::ConfigMap {
 	surrealdb_cnf::ConfigMap::empty()
 		.with_key_value("morsel_split_rows", "1")
+		.with_key_value("morsel_split_pass_ppm", "1000000")
 		.with_key_value("morsel_needs_view", "false")
 }
 

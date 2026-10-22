@@ -2904,3 +2904,60 @@ async fn vals_cursor_rereads_the_entry_written_under_it() {
 		assert_eq!(seen, expected, "{dir:?}");
 	}
 }
+
+/// A range the files store at least [`crate::METADATA_ESTIMATE_FROM`] bytes of is estimated from
+/// their metadata, counting no keys and never exactly; a range they store little of is read and
+/// counted; one call answers many ranges as one answers each; and the metadata answers nothing of a
+/// range the files hold none of.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_large_flushed_range_is_estimated_from_metadata() {
+	use rand::rngs::StdRng;
+	use rand::{RngCore, SeedableRng};
+	use surrealdb_kvs::api::Transactable;
+
+	use crate::{Datastore as RocksDbDatastore, METADATA_ESTIMATE_FROM, RocksDbConfig};
+
+	let dir = TempDir::new().unwrap();
+	let path = dir.path().to_string_lossy().to_string();
+	let ds = RocksDbDatastore::new(&path, RocksDbConfig::default()).await.unwrap();
+	// Random values, so compression leaves the files well past the threshold.
+	let mut rng = StdRng::seed_from_u64(0xE571_3A7E);
+	for batch in 0..16u32 {
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		for i in 0..256u32 {
+			let mut value = vec![0u8; 1024];
+			rng.fill_bytes(&mut value);
+			tx.set(format!("est/{batch:04}{i:04}").into_bytes().into(), value).await.unwrap();
+		}
+		tx.commit().await.unwrap();
+	}
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
+	for i in 0..10u32 {
+		tx.set(format!("small/{i:04}").into_bytes().into(), vec![7u8; 16]).await.unwrap();
+	}
+	tx.commit().await.unwrap();
+	{
+		let tx = ds.transaction(TransactionType::Read).await.unwrap();
+		Transactable::compact(tx.as_ref(), None).await.unwrap();
+		tx.cancel().await.unwrap();
+	}
+
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
+	let large = tx.approximate(prefix_byte_range("est/"), None).await.unwrap().expect("flushed");
+	assert_eq!(large.keys, None);
+	assert!(!large.exact);
+	assert!(large.bytes >= METADATA_ESTIMATE_FROM, "{large:?}");
+	assert_eq!(tx.estimate(prefix_byte_range("est/"), None).await.unwrap(), large);
+
+	let small = tx.estimate(prefix_byte_range("small/"), None).await.unwrap();
+	assert_eq!((small.keys, small.exact), (Some(10), true), "{small:?}");
+
+	let many = tx
+		.estimate_many(vec![prefix_byte_range("small/"), prefix_byte_range("est/")], None)
+		.await
+		.unwrap();
+	assert_eq!(many, vec![small, large]);
+
+	assert_eq!(tx.approximate(prefix_byte_range("none/"), None).await.unwrap(), None);
+	tx.cancel().await.unwrap();
+}

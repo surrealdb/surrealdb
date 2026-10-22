@@ -55,10 +55,11 @@ use surrealdb_kvs::config::SyncMode;
 use surrealdb_kvs::consts::{ESTIMATED_BYTES_PER_KEY, ESTIMATED_BYTES_PER_KV};
 use surrealdb_kvs::err::{Error, Result};
 use surrealdb_kvs::snapshot::ViewCapabilities;
+use surrealdb_kvs::split::{ESTIMATE_BUDGET, estimate_from_prefix};
 use surrealdb_kvs::timestamp::HlcTimeStamp;
 use surrealdb_kvs::{
-	Direction, Key, KeyRange, Metric, Metrics, SavepointStack, Snapshot, TransactionBuilder,
-	TransactionType, Val,
+	Direction, Estimate, Key, KeyRange, Metric, Metrics, SavepointStack, Snapshot,
+	TransactionBuilder, TransactionType, Val,
 };
 use tokio::sync::{Mutex, MutexGuard};
 use tracing::{error, info, instrument, warn};
@@ -66,6 +67,11 @@ use tracing::{error, info, instrument, warn};
 use crate::owned_tx::{Db, OwnedTx};
 
 const TARGET: &str = "surrealdb::core::kvs::rocksdb";
+
+/// The bytes the database's files store of a range from which its estimate is answered from the
+/// files' metadata. Below it the range is estimated by reading up to [`ESTIMATE_BUDGET`] entries,
+/// which counts the writes the memtables still hold and answers a small range exactly.
+const METADATA_ESTIMATE_FROM: u64 = 1 << 20;
 
 /// How long [`Datastore::shutdown`] waits, once it has closed commit
 /// admission, for the commits admitted before it. Long enough for a write
@@ -1252,6 +1258,44 @@ impl Transaction {
 	{
 		let guard = self.inner.lock().await;
 		self.inline_guard.try_inline_or_offload(move || op(guard)).await
+	}
+
+	/// The bytes the database's files store of each of `ranges`, in their order, read from the
+	/// files' metadata without visiting an entry. The writes the memtables hold, and this
+	/// transaction's own, are not counted, and the bytes are compressed. `None` for a versioned
+	/// datastore, whose stored keys carry a timestamp the bounds do not.
+	async fn stored_bytes(&self, ranges: &[KeyRange<'_>]) -> Result<Option<Vec<u64>>> {
+		if self.versioned {
+			return Ok(None);
+		}
+		self.run_blocking(move |guard| {
+			let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
+			let bounds: Vec<rocksdb::Range<'_>> = ranges
+				.iter()
+				.map(|rng| rocksdb::Range::new(rng.start.as_slice(), rng.end.as_slice()))
+				.collect();
+			Ok(Some(inner.db().get_approximate_sizes(&bounds)))
+		})
+		.await
+	}
+
+	/// What `rng` holds, from the first [`ESTIMATE_BUDGET`] entries it holds, as the trait's
+	/// default answers.
+	async fn estimate_by_scan(&self, rng: KeyRange<'_>, version: Option<u64>) -> Result<Estimate> {
+		let res = self.scan(rng.as_borrowed(), ESTIMATE_BUDGET, 0, version).await?;
+		let read = res.values.len() as u64;
+		let far = if read < u64::from(ESTIMATE_BUDGET) {
+			None
+		} else {
+			self.keysr(rng.as_borrowed(), 1, 0, version).await?.keys.pop()
+		};
+		Ok(estimate_from_prefix(
+			read,
+			res.key_bytes + res.value_bytes,
+			res.values.first().map(|(key, _)| key.as_slice()),
+			res.values.last().map(|(key, _)| key.as_slice()),
+			far.as_deref(),
+		))
 	}
 
 	/// Synchronous implementation of `count` taking an already-acquired lock
@@ -2619,6 +2663,87 @@ impl Transactable for Transaction {
 				Ok(())
 			})
 			.await
+		})
+	}
+
+	/// What `rng` holds: from the files' metadata where they store at least
+	/// [`METADATA_ESTIMATE_FROM`] bytes of it, counting no keys and never exact; otherwise, and
+	/// for a versioned datastore, from the first [`ESTIMATE_BUDGET`] entries it holds.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	fn estimate<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<Estimate>> {
+		Box::pin(async move {
+			self.ensure_versioned(version)?;
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			let stored = self.stored_bytes(std::slice::from_ref(&rng)).await?;
+			match stored.as_deref() {
+				Some(&[bytes]) if bytes >= METADATA_ESTIMATE_FROM => Ok(Estimate {
+					keys: None,
+					bytes,
+					exact: false,
+				}),
+				_ => self.estimate_by_scan(rng, version).await,
+			}
+		})
+	}
+
+	/// What each of `ranges` holds, as [`Self::estimate`] answers one, with one read of the files'
+	/// metadata for them all.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip_all, fields(ranges = ranges.len()))]
+	fn estimate_many<'a>(
+		&'a self,
+		ranges: Vec<KeyRange<'a>>,
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<Vec<Estimate>>> {
+		Box::pin(async move {
+			self.ensure_versioned(version)?;
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			let stored = self.stored_bytes(&ranges).await?;
+			let mut out = Vec::with_capacity(ranges.len());
+			for (at, rng) in ranges.into_iter().enumerate() {
+				let bytes = stored.as_ref().and_then(|stored| stored.get(at).copied());
+				out.push(match bytes {
+					Some(bytes) if bytes >= METADATA_ESTIMATE_FROM => Estimate {
+						keys: None,
+						bytes,
+						exact: false,
+					},
+					_ => self.estimate_by_scan(rng, version).await?,
+				});
+			}
+			Ok(out)
+		})
+	}
+
+	/// What the files' metadata says `rng` holds: the bytes they store of it, counting no keys,
+	/// and `None` where they store none of it or the datastore is versioned.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	fn approximate<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<Option<Estimate>>> {
+		Box::pin(async move {
+			self.ensure_versioned(version)?;
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			let stored = self.stored_bytes(std::slice::from_ref(&rng)).await?;
+			Ok(match stored.as_deref() {
+				Some(&[bytes]) if bytes > 0 => Some(Estimate {
+					keys: None,
+					bytes,
+					exact: false,
+				}),
+				_ => None,
+			})
 		})
 	}
 

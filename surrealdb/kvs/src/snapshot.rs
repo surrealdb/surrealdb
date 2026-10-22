@@ -152,7 +152,8 @@ pub trait Snapshot: Send + Sync + 'static {
 
 	/// What `rng` holds. The default reads up to [`ESTIMATE_BUDGET`] entries through
 	/// [`open`](Self::open): exact when the range ends within the budget, otherwise extrapolated
-	/// with [`position_fraction`](crate::split::position_fraction) and not exact.
+	/// with [`position_fraction`](crate::split::position_fraction) over the keys from the first to
+	/// the last the range holds, sought with one more seek, and not exact.
 	fn estimate<'a>(
 		&'a self,
 		rng: KeyRange<'a>,
@@ -160,16 +161,31 @@ pub trait Snapshot: Send + Sync + 'static {
 	) -> BoxFut<'a, Result<Estimate>> {
 		Box::pin(async move {
 			let mut cursor = self.open(rng.as_borrowed(), Direction::Forward, version).await?;
-			let mut last = Vec::new();
+			let (mut first, mut last) = (Vec::new(), Vec::new());
 			let stats = cursor
 				.for_each(ESTIMATE_BUDGET, &mut |key, _| {
+					if first.is_empty() {
+						first.extend_from_slice(key);
+					}
 					last.clear();
 					last.extend_from_slice(key);
 					Ok(ControlFlow::Continue(()))
 				})
 				.await?;
-			let last = (stats.rows > 0).then_some(last.as_slice());
-			Ok(estimate_from_prefix(&rng, stats.rows, stats.key_bytes + stats.value_bytes, last))
+			let far = if stats.rows < u64::from(ESTIMATE_BUDGET) {
+				None
+			} else {
+				cursor.aim(rng.as_borrowed(), Direction::Backward)?;
+				first_key(&mut *cursor).await?
+			};
+			let read = stats.rows > 0;
+			Ok(estimate_from_prefix(
+				stats.rows,
+				stats.key_bytes + stats.value_bytes,
+				read.then_some(first.as_slice()),
+				read.then_some(last.as_slice()),
+				far.as_deref(),
+			))
 		})
 	}
 

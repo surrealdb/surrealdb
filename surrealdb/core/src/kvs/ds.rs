@@ -1540,6 +1540,7 @@ impl Datastore {
 		vec![
 			("morsel_split_rows", exec.morsel_split_rows.to_string()),
 			("morsel_needs_view", exec.morsel_needs_view.to_string()),
+			("morsel_split_pass_ppm", exec.morsel_split_pass_ppm.to_string()),
 			("morsel_target_bytes", exec.morsel_target_bytes.to_string()),
 			("morsel_places", exec.morsel_places.to_string()),
 			("morsel_oltp_reserve", exec.morsel_oltp_reserve.to_string()),

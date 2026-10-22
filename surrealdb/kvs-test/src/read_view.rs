@@ -191,7 +191,7 @@ async fn estimate_is_exact_within_the_budget(b: &TestBackend) {
 	assert_eq!(
 		small,
 		Estimate {
-			keys: 100,
+			keys: Some(100),
 			bytes: 100 * (key_bytes + value().len() as u64),
 			exact: true,
 		}
@@ -199,11 +199,95 @@ async fn estimate_is_exact_within_the_budget(b: &TestBackend) {
 
 	let large = tx.estimate(range_of(b"large/"), None).await.unwrap();
 	assert!(!large.exact);
-	assert!((2500..=10_000).contains(&large.keys), "{} keys estimated for 5000 held", large.keys);
+	assert!(
+		large.keys.is_some_and(|keys| (2500..=10_000).contains(&keys)),
+		"{:?} keys estimated for 5000 held",
+		large.keys
+	);
 	tx.cancel().await.unwrap();
 }
 
 kvs_test!(estimate_is_exact_within_the_budget);
+
+/// Keys that cluster at the bottom of their bounds, as integer ids under a table's prefix do, are
+/// estimated from the share of the keys held that the budget's read spans, not the share of the
+/// bounds: within a small factor of the count, as keys spread over their bounds are.
+async fn estimate_of_clustered_keys_is_near_the_count(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	let tx = ds.transaction(Write).await.unwrap();
+	for i in 0..3000u32 {
+		let mut key = b"clustered/".to_vec();
+		key.extend_from_slice(&i.to_be_bytes());
+		tx.set(key.into(), value()).await.unwrap();
+	}
+	tx.commit().await.unwrap();
+	seed(&ds, b"sparse/", 3000).await;
+	let tx = ds.transaction(Read).await.unwrap();
+	for prefix in [&b"clustered/"[..], b"sparse/"] {
+		let est = tx.estimate(range_of(prefix), None).await.unwrap();
+		assert!(!est.exact);
+		assert!(
+			est.keys.is_some_and(|keys| (1500..=6000).contains(&keys)),
+			"{:?} keys estimated for 3000 held under {}",
+			est.keys,
+			String::from_utf8_lossy(prefix)
+		);
+	}
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(estimate_of_clustered_keys_is_near_the_count);
+
+/// Many ranges are estimated together as each is alone, in the order asked: an empty range holds
+/// nothing, exactly, and a range past the budget is extrapolated. No ranges get no answers.
+async fn estimate_many_answers_each_range_as_estimate_does(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	seed(&ds, b"small/", 100).await;
+	seed(&ds, b"large/", 5000).await;
+	let tx = ds.transaction(Read).await.unwrap();
+
+	let ranges = vec![range_of(b"large/"), range_of(b"empty/"), range_of(b"small/")];
+	let many = tx.estimate_many(ranges.clone(), None).await.unwrap();
+	assert_eq!(many.len(), 3);
+	for (rng, got) in ranges.into_iter().zip(&many) {
+		assert_eq!(*got, tx.estimate(rng, None).await.unwrap());
+	}
+	assert!(!many[0].exact);
+	assert!(
+		many[0].keys.is_some_and(|keys| keys > u64::from(surrealdb_kvs::split::ESTIMATE_BUDGET)),
+		"{:?}",
+		many[0]
+	);
+	assert_eq!(
+		many[1],
+		Estimate {
+			keys: Some(0),
+			bytes: 0,
+			exact: true,
+		}
+	);
+	assert_eq!(many[2].keys, Some(100));
+	assert!(many[2].exact);
+	assert!(tx.estimate_many(Vec::new(), None).await.unwrap().is_empty());
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(estimate_many_answers_each_range_as_estimate_does);
+
+/// A metadata answer is never exact: a backend with no metadata answers none, and one whose
+/// metadata has not yet seen the writes answers none of an unflushed range.
+async fn approximate_is_never_exact(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	seed(&ds, b"large/", 5000).await;
+	let tx = ds.transaction(Read).await.unwrap();
+	for rng in [range_of(b"large/"), range_of(b"empty/")] {
+		let got = tx.approximate(rng, None).await.unwrap();
+		assert!(got.is_none_or(|got| !got.exact), "{got:?}");
+	}
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(approximate_is_never_exact);
 
 /// A cursor reads what its transaction began with, whatever commits after.
 async fn a_view_does_not_see_later_commits(b: &TestBackend) {

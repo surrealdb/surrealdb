@@ -1118,10 +1118,13 @@ pub trait Transactable: Send + Sync {
 
 	/// What `rng` holds, as of `version`.
 	///
-	/// Exact when the range holds fewer than [`ESTIMATE_BUDGET`] keys, otherwise extrapolated from
-	/// the first `ESTIMATE_BUDGET` of them and flagged inexact.
+	/// Exact when the range holds fewer than [`ESTIMATE_BUDGET`] keys and the backend counts it,
+	/// otherwise flagged inexact: extrapolated from the first `ESTIMATE_BUDGET` keys by the share
+	/// they span of the keys the range holds, or answered
+	/// from what [`Self::approximate`] reads of a range its metadata measures as large.
 	///
-	/// The default reads up to `ESTIMATE_BUDGET` entries through [`Self::scan`].
+	/// The default reads up to `ESTIMATE_BUDGET` entries through [`Self::scan`], and past the
+	/// budget the range's last key with one [`Self::keysr`] of one key.
 	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string())))]
 	fn estimate<'a>(
 		&'a self,
@@ -1133,13 +1136,60 @@ pub trait Transactable: Send + Sync {
 				return Err(Error::TransactionFinished);
 			}
 			let res = self.scan(rng.as_borrowed(), ESTIMATE_BUDGET, 0, version).await?;
-			let last = res.values.last().map(|(key, _)| key.as_slice());
+			let read = res.values.len() as u64;
+			let far = if read < u64::from(ESTIMATE_BUDGET) {
+				None
+			} else {
+				self.keysr(rng.as_borrowed(), 1, 0, version).await?.keys.pop()
+			};
 			Ok(estimate_from_prefix(
-				&rng,
-				res.values.len() as u64,
+				read,
 				res.key_bytes + res.value_bytes,
-				last,
+				res.values.first().map(|(key, _)| key.as_slice()),
+				res.values.last().map(|(key, _)| key.as_slice()),
+				far.as_deref(),
 			))
+		})
+	}
+
+	/// What each of `ranges` holds, as of `version`, answered as [`Self::estimate`] answers one
+	/// range and in the order of `ranges`.
+	///
+	/// The default estimates the ranges one by one; a backend that measures many ranges in one
+	/// call of its metadata answers them together.
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip_all, fields(ranges = ranges.len())))]
+	fn estimate_many<'a>(
+		&'a self,
+		ranges: Vec<KeyRange<'a>>,
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<Vec<Estimate>>> {
+		Box::pin(async move {
+			let mut out = Vec::with_capacity(ranges.len());
+			for rng in ranges {
+				out.push(self.estimate(rng, version).await?);
+			}
+			Ok(out)
+		})
+	}
+
+	/// What the backend's metadata says `rng` holds, as of `version`, read without visiting the
+	/// range's entries: `None` where the backend keeps no such metadata, or has none for the
+	/// range. An answer is never exact and may count no keys; its bytes are what the backend
+	/// stores, and may leave out writes it has not yet persisted.
+	///
+	/// A caller that must not read the entries of a range to size it asks this, never
+	/// [`Self::estimate`]. The default answers `None`.
+	fn approximate<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<Option<Estimate>>> {
+		let _ = (rng, version);
+		Box::pin(async move {
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			Ok(None)
 		})
 	}
 
