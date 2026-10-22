@@ -35,6 +35,7 @@ use super::ops::{
 	SortKeyReadShape,
 };
 use super::placement::{Placement, install, place_all_reading};
+use super::placement_attr::PlacementAttr;
 use super::{
 	chain, conjunct, hold_left, hop_key, index_answer, io, join_lookup, knn_ids, nested, once,
 	prefilter, recheck, topk_packed,
@@ -107,9 +108,11 @@ pub(crate) fn patterns() -> Vec<Box<dyn Pattern<PhysDialect>>> {
 /// Then every pipeline is placed again through `placement`, using the facts of the container the
 /// rules left and the strategies ([`NestedReading::Strategy`]). The new placements replace the
 /// ones [`super::plan_physical`] installed. The facts of a pipeline come from the sorts the rules
-/// removed, the limits they bounded and the statements that took an arm. A pipeline whose
-/// placement does not prune has its scan reject no entry by a top-k threshold
-/// ([`settle_thresholds`]).
+/// removed, the limits they bounded and the statements that took an arm. Placement judges whether
+/// each pipeline that does not prune by its legality prunes by score ([`prunes_by_score`]) before
+/// it decides the pipeline, so it holds serial exactly the full-text pipelines whose scan keeps
+/// rejecting hits. A pipeline whose placement does not prune has its scan reject no entry by a
+/// top-k threshold ([`settle_thresholds`]).
 ///
 /// A container in another phase is left as it is, and the report is empty. The caller verifies the
 /// container afterwards.
@@ -152,43 +155,14 @@ pub(crate) async fn run(
 		placement,
 		cx.physical.backend(),
 		NestedReading::Strategy,
+		&mut |ir, facts, pipeline, physical| {
+			prunes_by_score(ir, facts, &cx.effects, pipeline, physical)
+		},
 	)?;
-	let mut placed = placed;
-	let pruning = settle_pruning(ir, facts, &cx.effects, &mut placed);
+	settle_thresholds(ir, facts, &placed)?;
 	install(ir.placement_table_mut(), placed);
-	// A full-text scan whose threshold the settle dropped was placed serially for it. With the
-	// threshold gone it rejects no hit, so the pipelines are placed again, which leaves it to the
-	// policy; its pruning is unchanged, and the settle has nothing more to drop.
-	if settle_thresholds(ir, facts, &pruning)? {
-		let mut placed = place_all_reading(
-			ir,
-			facts,
-			cx.effects.registry,
-			placement,
-			cx.physical.backend(),
-			NestedReading::Strategy,
-		)?;
-		settle_pruning(ir, facts, &cx.effects, &mut placed);
-		install(ir.placement_table_mut(), placed);
-	}
 	io::run(ir, facts, cx)?;
 	Ok(report)
-}
-
-/// Marks each of `placed` that may reject a hit by its sort's score threshold though it does not
-/// prune ([`prunes_by_score`]), and answers, for each, whether its scan may reject entries.
-fn settle_pruning(
-	ir: &Ir,
-	facts: &mut FactCache,
-	effects: &crate::exec::ir::iface::catalog::EffectCx<'_>,
-	placed: &mut [(OpId, super::placement_attr::PlacementAttr)],
-) -> Vec<(OpId, bool)> {
-	for (pipeline, attr) in placed.iter_mut() {
-		if !attr.prunes() && prunes_by_score(ir, facts, effects, *pipeline, attr) {
-			attr.set_prunes_by_score(true);
-		}
-	}
-	placed.iter().map(|(op, attr)| (*op, attr.prunes() || attr.prunes_by_score())).collect()
 }
 
 /// States that the scan of every pipeline whose placement does not prune rejects no entry by a
@@ -196,22 +170,19 @@ fn settle_pruning(
 ///
 /// A scan that rejects an entry whose key the sort's threshold shows worse than every row the sort
 /// keeps leaves the entry's body unrun. The serial run runs the body of every entry, so only a
-/// pipeline that raises for no row may leave one unrun: `pruning` states, for each placed
-/// pipeline, whether its placement does ([`PlacementAttr::prunes`]). The plan keeps the key, which
-/// `EXPLAIN` shows as written; a scan that a datetime component of its keys cuts keeps its cutoff,
-/// which stops the scan and rejects no single entry.
-///
-/// Answers whether it dropped the threshold of a full-text scan or an index union, which placement
-/// ran serially for it ([`super::placement`]).
+/// pipeline that raises for no row may leave one unrun: the placement of each pipeline in `placed`
+/// states whether it prunes, by its legality or by score alone ([`PlacementAttr::prunes`],
+/// [`PlacementAttr::prunes_by_score`]). The plan keeps the key, which `EXPLAIN` shows as written; a
+/// scan that a datetime component of its keys cuts keeps its cutoff, which stops the scan and
+/// rejects no single entry.
 fn settle_thresholds(
 	ir: &mut Ir,
 	facts: &mut FactCache,
-	pruning: &[(OpId, bool)],
-) -> Result<bool, IrError> {
+	placed: &[(OpId, PlacementAttr)],
+) -> Result<(), IrError> {
 	let mut keyed = Vec::new();
-	let mut full_text = false;
-	for (pipeline, prunes) in pruning {
-		if *prunes {
+	for (pipeline, attr) in placed {
+		if attr.prunes() || attr.prunes_by_score() {
 			continue;
 		}
 		let Some(source) = super::facts::source_of(ir, *pipeline) else {
@@ -225,10 +196,6 @@ fn settle_thresholds(
 			Some(_) | None => None,
 		};
 		if key.is_some_and(|key| key.rejects_entries) {
-			full_text |= matches!(
-				phys(ir, source),
-				Some(PhysOp::FullTextScan(_)) | Some(PhysOp::IndexUnion(_))
-			);
 			keyed.push(source);
 		}
 	}
@@ -247,7 +214,7 @@ fn settle_thresholds(
 			}
 		})?;
 	}
-	Ok(full_text)
+	Ok(())
 }
 
 /// Whether the full-text scan or index union of `pipeline`, which does not prune, may still reject
@@ -266,11 +233,8 @@ fn prunes_by_score(
 	facts: &mut FactCache,
 	effects: &crate::exec::ir::iface::catalog::EffectCx<'_>,
 	pipeline: OpId,
-	attr: &super::placement_attr::PlacementAttr,
+	physical: &crate::exec::planner::placement::PhysicalFacts,
 ) -> bool {
-	let Some(physical) = attr.facts() else {
-		return false;
-	};
 	if physical.host_blocks || physical.nested != crate::exec::planner::placement::NestedUse::None {
 		return false;
 	}

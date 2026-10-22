@@ -1638,6 +1638,125 @@ async fn a_range_read_plans_serially_where_the_datastore_gives_no_view() {
 	assert_eq!(admission_of(&default_ctx, sql).await, admission_of(&cut_ctx, sql).await);
 }
 
+/// Documents whose `body` a full-text index answers: 300 carry `x` in a body of a length of its
+/// own, so no two of them score alike, a third of those carry `z` too, and as many again and a half
+/// carry neither, so both terms weigh well above the scores' rounding. `n` numbers them.
+const RANKED_SETUP: &str = "
+	DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase;
+	DEFINE TABLE doc SCHEMALESS;
+	DEFINE INDEX doc_body ON doc FIELDS body FULLTEXT ANALYZER simple BM25;
+	FOR $i IN 0..300 {
+		CREATE type::record('doc', $i) SET
+			body = 'x' + string::repeat(' y', $i) + ['', ' z', ''][$i % 3],
+			n = $i
+	};
+	FOR $i IN 300..750 {
+		CREATE type::record('doc', $i) SET body = 'filler', n = $i
+	};
+";
+
+/// Whether the one full-text scan or index union the statement `op` plans holds a key that rejects
+/// entries by a top-k threshold, or `None` where it holds no top-k key.
+async fn score_key_of(ctx: &ExecutionContext, op: &LogicalOp) -> Option<bool> {
+	let planned = planned_of(ctx, op).await.expect("the statement plans");
+	let mut keys = Vec::new();
+	planned.ir.walk(planned.ir.top(), WalkOrder::PreOrder, &mut |at| {
+		match planned.ir.op(at).map(|data| &data.kind) {
+			Some(OpKind::Phys(PhysOp::FullTextScan(scan))) => {
+				keys.push(scan.topk.as_ref().map(|key| key.rejects_entries));
+			}
+			Some(OpKind::Phys(PhysOp::IndexUnion(union))) => {
+				keys.push(union.topk.as_ref().map(|(key, _)| key.rejects_entries));
+			}
+			Some(_) | None => {}
+		}
+		Walk::Continue
+	});
+	let [key] = keys.as_slice() else {
+		panic!("the plan holds {} full-text sources", keys.len());
+	};
+	*key
+}
+
+/// A ranked full-text read, ordered by a clause's score or by a sum of clauses' scores under a
+/// `LIMIT`, and whether its scan or index union rejects hits by the sort's threshold. A read whose
+/// pipeline may raise for a hit its scan would pass over, through a cast in its `WHERE` or a later
+/// sort key, rejects none.
+const RANKED: &[(&str, bool)] = &[
+	("SELECT id, search::score(1) AS s FROM doc WHERE body @1@ 'x' ORDER BY s DESC LIMIT 10", true),
+	(
+		"SELECT id, search::score(1) AS s FROM doc WHERE body @1@ 'x' AND <int> n > 3 \
+		 ORDER BY s DESC LIMIT 10",
+		false,
+	),
+	(
+		"SELECT id, search::score(1) + search::score(2) AS s FROM doc \
+		 WHERE body @1@ 'x' OR body @2@ 'z' ORDER BY s DESC LIMIT 10",
+		true,
+	),
+	(
+		"SELECT id, search::score(1) + search::score(2) AS s, <int> n AS m FROM doc \
+		 WHERE body @1@ 'x' OR body @2@ 'z' ORDER BY s DESC, m LIMIT 10",
+		false,
+	),
+	(
+		"SELECT id, search::score(1) + search::score(2) AS s FROM doc \
+		 WHERE (body @1@ 'x' OR body @2@ 'z') AND <int> n > 3 ORDER BY s DESC LIMIT 10",
+		false,
+	),
+];
+
+/// A ranked full-text read whose scan rejects hits by the sort's threshold runs serially, so each
+/// row reaches the sort as it is read and tightens the threshold at once: the policy admits the
+/// pipeline as morsels, and the score rule narrows it. One whose scan holds the sort's key but
+/// rejects no hit, because its pipeline may raise for a hit it would pass over, is placed as any
+/// other read of its source and runs as morsels. The same holds of an index union of full-text
+/// branches ordered by the sum of their clauses' scores. `EXPLAIN` shows the pushdown exactly where
+/// the scan rejects hits, and whichever way the read runs it answers what it answers with no index.
+#[tokio::test]
+async fn a_ranked_full_text_read_runs_serially_only_where_its_scan_rejects_hits() {
+	let db = TestDb::new_with_config(RANKED_SETUP, tiny()).await;
+	let ctx = db.exec_ctx().await;
+	for (sql, rejects) in RANKED {
+		let op = bind(&ctx, sql).await;
+		assert_eq!(score_key_of(&ctx, &op).await, Some(*rejects), "`{sql}`");
+		let decided = decided(&ctx, &op).await.expect("the statement plans");
+		let verdicts: Vec<String> = decided.iter().map(verdict_of).collect();
+		let ranked: Vec<&Decided> = decided
+			.iter()
+			.filter(|decided| {
+				decided.attr.facts().is_some_and(|facts| {
+					matches!(facts.source, SourceKind::FullText | SourceKind::IndexUnion)
+				})
+			})
+			.collect();
+		let [scan] = ranked.as_slice() else {
+			panic!("`{sql}` reads no one full-text source: {verdicts:?}");
+		};
+		assert_eq!(scan.attr.prunes() || scan.attr.prunes_by_score(), *rejects, "`{sql}`");
+		let verdict = verdict_of(scan);
+		if *rejects {
+			assert_eq!(
+				verdict, "serial: narrowed by the pipeline around it or by the backend",
+				"`{sql}`: {verdicts:?}"
+			);
+		} else {
+			assert!(
+				matches!(scan.attr.decision(), Some(Decision::Morsels { .. })),
+				"`{sql}`: {verdicts:?}"
+			);
+		}
+		let program = program_of(&ctx, sql).await;
+		assert_eq!(fans_out(&program), !rejects, "`{sql}`:\n{}", final_placement_of(&program));
+		let plan = format!("{:?}", answered(&db, &format!("EXPLAIN {sql}")).await);
+		assert_eq!(plan.contains("topk_pushdown: score"), *rejects, "`{sql}`\n{plan}");
+		let answer = answered(&db, sql).await;
+		assert_eq!(answer.as_ref().map(Vec::len), Ok(10), "`{sql}`: {answer:?}");
+		let unindexed = sql.replacen("FROM doc", "FROM doc WITH NOINDEX", 1);
+		assert_eq!(answer, answered(&db, &unindexed).await, "`{sql}`");
+	}
+}
+
 /// The policy of a write that fans out refuses each fact it states on its own, with the reason it
 /// names: the facts of a write over a table scan are admitted, and each of these alone is not.
 #[test]

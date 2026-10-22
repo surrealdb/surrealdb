@@ -519,8 +519,18 @@ struct Judged {
 	facts: PhysicalFacts,
 	chain: usize,
 	prunes: bool,
+	prunes_by_score: bool,
 	write_cut: Result<WriteCut, &'static str>,
 }
+
+/// Whether the full-text scan or index union of a pipeline that does not prune may still reject a
+/// hit by the score threshold of the sort it feeds ([`PlacementAttr::prunes_by_score`]), judged
+/// from the container, the pipeline and the pipeline's physical facts.
+///
+/// The verdict reads no placement decision, so [`place_all_reading`] takes it before it decides
+/// the pipeline.
+pub(crate) type ScoreVerdict<'v> =
+	dyn FnMut(&Ir, &mut FactCache, OpId, &PhysicalFacts) -> bool + 'v;
 
 /// Whether an entry of the pipeline may be rejected before its body runs, by a threshold the
 /// serial run would have judged it against: no row the pipeline reads raises.
@@ -533,29 +543,33 @@ fn prunes_of(legality: &Legality, facts: &PhysicalFacts) -> bool {
 }
 
 /// Whether `pipeline` reads a full-text scan, or an index union of full-text branches, that passes
-/// hits over by the score threshold of the sort it feeds, which then runs serially. A scan whose
-/// threshold rejects no entry ([`TopKKey::rejects_entries`], which the rewrite settles once every
-/// pipeline's pruning is known) passes nothing over, and leaves the pipeline to the policy.
-///
-/// [`TopKKey::rejects_entries`]: crate::exec::ir::phys::ops::TopKKey::rejects_entries
+/// hits over by the score threshold of the sort it feeds, which then runs serially.
 ///
 /// The scan does a hit's index and storage work itself, before the row is handed on; the body
 /// left takes the score the scan remembered and pushes the row into the sort. Morsels would
 /// gather rows into batches before any of them reached the sort, which delays the first
 /// threshold and every tightening after it, and so lets the scan read the records of hits the
 /// sort would never keep.
-fn passes_over_by_score(ir: &Ir, pipeline: OpId) -> bool {
-	super::facts::source_of(ir, pipeline).is_some_and(|source| {
-		match ir.op(source).map(|data| &data.kind) {
-			Some(OpKind::Phys(PhysOp::FullTextScan(scan))) => {
-				scan.topk.as_ref().is_some_and(|key| key.rejects_entries)
+///
+/// The scan passes hits over only where it holds a key that rejects entries
+/// ([`TopKKey::rejects_entries`]) and the pipeline prunes, by its legality or by score alone
+/// (`prunes`): the physical rewrites state that the scan of every other pipeline rejects no entry,
+/// and its pipeline is left to the policy as any other.
+///
+/// [`TopKKey::rejects_entries`]: crate::exec::vm::payload::TopKKey::rejects_entries
+fn passes_over_by_score(ir: &Ir, pipeline: OpId, prunes: bool) -> bool {
+	prunes
+		&& super::facts::source_of(ir, pipeline).is_some_and(|source| {
+			match ir.op(source).map(|data| &data.kind) {
+				Some(OpKind::Phys(PhysOp::FullTextScan(scan))) => {
+					scan.topk.as_ref().is_some_and(|key| key.rejects_entries)
+				}
+				Some(OpKind::Phys(PhysOp::IndexUnion(union))) => {
+					union.topk.as_ref().is_some_and(|(key, _)| key.rejects_entries)
+				}
+				Some(_) | None => false,
 			}
-			Some(OpKind::Phys(PhysOp::IndexUnion(union))) => {
-				union.topk.as_ref().is_some_and(|(key, _)| key.rejects_entries)
-			}
-			Some(_) | None => false,
-		}
-	})
+		})
 }
 
 /// Decides every pipeline of `ir`, in an order that places each after the pipelines that feed it.
@@ -565,8 +579,8 @@ fn passes_over_by_score(ir: &Ir, pipeline: OpId) -> bool {
 /// then the nesting rule: a pipeline inside a pipeline that fans out runs serially. `prunes` is
 /// whether the plan states the pipeline raises for no row ([`prunes_of`]).
 ///
-/// The statements in value position are read under [`NestedReading::Hedged`]; see
-/// [`place_all_reading`].
+/// The statements in value position are read under [`NestedReading::Hedged`], and no pipeline is
+/// judged to prune by score alone; see [`place_all_reading`].
 pub(crate) fn place_all(
 	ir: &Ir,
 	facts: &mut FactCache,
@@ -574,13 +588,29 @@ pub(crate) fn place_all(
 	placement: &Placement,
 	caps: BackendCaps,
 ) -> Result<Vec<(OpId, PlacementAttr)>, IrError> {
-	place_all_reading(ir, facts, registry, placement, caps, NestedReading::Hedged)
+	place_all_reading(
+		ir,
+		facts,
+		registry,
+		placement,
+		caps,
+		NestedReading::Hedged,
+		&mut |_, _, _, _| false,
+	)
 }
 
-/// [`place_all`] with the statements in value position read as `reading` states.
+/// [`place_all`] with the statements in value position read as `reading` states, and each pipeline
+/// that does not prune judged by `by_score` ([`ScoreVerdict`]).
 ///
 /// A container whose nested strategies are decided is placed under [`NestedReading::Strategy`]:
 /// what the container holds is what runs, so a statement left `Apply` is evaluated for each row.
+///
+/// Whether a pipeline prunes, by its legality or by score alone, is judged before its decision
+/// and recorded in its placement ([`PlacementAttr::prunes`], [`PlacementAttr::prunes_by_score`]).
+/// Neither verdict reads a decision, so the one pass decides every pipeline, and the nesting rule
+/// reads the final decision of each pipeline around it. A full-text scan or index union whose
+/// pipeline prunes passes hits over by the score threshold of the sort it feeds, and its pipeline
+/// runs serially ([`passes_over_by_score`]); one whose pipeline does not is placed as any other.
 pub(crate) fn place_all_reading(
 	ir: &Ir,
 	facts: &mut FactCache,
@@ -588,6 +618,7 @@ pub(crate) fn place_all_reading(
 	placement: &Placement,
 	caps: BackendCaps,
 	reading: NestedReading,
+	by_score: &mut ScoreVerdict<'_>,
 ) -> Result<Vec<(OpId, PlacementAttr)>, IrError> {
 	let dag = PipelineDag::of(ir);
 	let order = dag.topological_order().map_err(IrError::Verify)?;
@@ -607,12 +638,13 @@ pub(crate) fn place_all_reading(
 			.map_err(|stronger| stronger_than_legality(*op, stronger))?;
 		let decision = apply_backend(decision, loop_in(ir, *op).map(|(_, kind)| kind), caps);
 		let decision = placement.narrowed(decision);
-		let decision = if passes_over_by_score(ir, *op) {
+		let prunes = prunes_of(&legality, &physical);
+		let prunes_by_score = !prunes && by_score(ir, facts, *op, &physical);
+		let decision = if passes_over_by_score(ir, *op, prunes || prunes_by_score) {
 			Decision::Serial
 		} else {
 			decision
 		};
-		let prunes = prunes_of(&legality, &physical);
 		judged.insert(
 			*op,
 			Judged {
@@ -622,6 +654,7 @@ pub(crate) fn place_all_reading(
 				facts: physical,
 				chain: chain_pipelines(ir, *op),
 				prunes,
+				prunes_by_score,
 				write_cut,
 			},
 		);
@@ -653,6 +686,7 @@ pub(crate) fn place_all_reading(
 		attr.set_facts(Some(entry.facts));
 		attr.set_chain(Some(entry.chain));
 		attr.set_prunes(entry.prunes);
+		attr.set_prunes_by_score(entry.prunes_by_score);
 		// Only a write that fans out is cut: a serial run holds the cut in no placement.
 		attr.set_write_cut(entry.write_cut.ok().filter(|_| is_ordered_apply(entry.decision)));
 		placed.push((*op, attr));
