@@ -42,6 +42,19 @@ fn is_identifier_token(parser: &Parser<'_>, token: Token, ident: &str) -> bool {
 	token.kind == TokenKind::Identifier && parser.span_str(token.span).eq_ignore_ascii_case(ident)
 }
 
+/// Returns a human-readable name for the kind of index, for use in error messages
+/// about conflicting `DEFINE INDEX` options.
+fn index_kind_name(index: &Index) -> &'static str {
+	match index {
+		Index::Idx => "IDX",
+		Index::Uniq => "UNIQUE",
+		Index::Hnsw(_) => "HNSW",
+		Index::DiskAnn(_) => "DISKANN",
+		Index::FullText(_) => "FULLTEXT",
+		Index::Count(_) => "COUNT",
+	}
+}
+
 impl Parser<'_> {
 	pub(crate) async fn parse_define_stmt(
 		&mut self,
@@ -1083,15 +1096,24 @@ impl Parser<'_> {
 				}
 				t!("UNIQUE") => {
 					self.pop_peek();
+					if !matches!(res.index, Index::Idx) {
+						bail!("Cannot combine UNIQUE with {}", index_kind_name(&res.index), @self.last_span() => "an index can only be one of IDX, UNIQUE, FULLTEXT, COUNT, HNSW, or DISKANN");
+					}
 					res.index = Index::Uniq;
 				}
 				t!("COUNT") => {
 					self.pop_peek();
+					if !matches!(res.index, Index::Idx) {
+						bail!("Cannot combine COUNT with {}", index_kind_name(&res.index), @self.last_span() => "an index can only be one of IDX, UNIQUE, FULLTEXT, COUNT, HNSW, or DISKANN");
+					}
 					let cond = self.try_parse_condition(stk).await?;
 					res.index = Index::Count(cond);
 				}
 				t!("FULLTEXT") => {
 					self.pop_peek();
+					if !matches!(res.index, Index::Idx) {
+						bail!("Cannot combine FULLTEXT with {}", index_kind_name(&res.index), @self.last_span() => "an index can only be one of IDX, UNIQUE, FULLTEXT, COUNT, HNSW, or DISKANN");
+					}
 					let mut analyzer: Option<String> = None;
 					let mut scoring = None;
 					let mut hl = false;
@@ -1132,6 +1154,9 @@ impl Parser<'_> {
 				}
 				t!("HNSW") => {
 					self.pop_peek();
+					if !matches!(res.index, Index::Idx) {
+						bail!("Cannot combine HNSW with {}", index_kind_name(&res.index), @self.last_span() => "an index can only be one of IDX, UNIQUE, FULLTEXT, COUNT, HNSW, or DISKANN");
+					}
 					expected!(self, t!("DIMENSION"));
 					let dimension = self.next_token_value()?;
 					let mut distance = Distance::Euclidean;
@@ -1227,6 +1252,9 @@ impl Parser<'_> {
 					} =>
 				{
 					self.pop_peek();
+					if !matches!(res.index, Index::Idx) {
+						bail!("Cannot combine DISKANN with {}", index_kind_name(&res.index), @self.last_span() => "an index can only be one of IDX, UNIQUE, FULLTEXT, COUNT, HNSW, or DISKANN");
+					}
 					expected!(self, t!("DIMENSION"));
 					let dimension = self.next_token_value()?;
 					let mut distance = Distance::Euclidean;
