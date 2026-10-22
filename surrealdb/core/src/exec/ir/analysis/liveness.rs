@@ -98,7 +98,9 @@ pub(super) fn demand_over(ir: &Ir, seeds: &[ValueId], regions: &[RegionId]) -> F
 /// `phys.limit`, `phys.sort`) reads it through the block arguments of its regions and delivers it
 /// on, a sort reading a path key off the row as a read of the path's first field; a
 /// `phys.project` reads it through its regions and delivers a value of its own, unless its shape
-/// keeps the row whole (`*`, a sort key, or an omission). The record id of a row (`expr.doc`) is
+/// keeps the row whole (`*`, a sort key, or an omission); a `phys.aggregate` does the same through
+/// its key and field regions and delivers its groups, so a `count()` reads no field of the row.
+/// The record id of a row (`expr.doc`) is
 /// a read of `id`. Any other step over the row, a step that takes the row as more than its input,
 /// and a record the last run ends with, which the pipeline hands on, need the whole record.
 pub(crate) fn pipeline_demand(ir: &Ir, rows: ValueId, runs: &[(ValueId, &[OpId])]) -> FieldDemand {
@@ -167,6 +169,12 @@ pub(crate) fn pipeline_demand(ir: &Ir, rows: ValueId, runs: &[(ValueId, &[OpId])
 							| ProjectionShape::SortedValue(_)
 					) || !shape.omissions().is_empty(),
 				),
+				// An aggregate reads the row through its key and field regions and delivers its
+				// groups, not the row, so the rows end here and a field no region reads is not
+				// demanded.
+				OpKind::Phys(PhysOp::Aggregate(attrs)) => {
+					(false, shape_reads_whole_row(&attrs.fields))
+				}
 				OpKind::Phys(_) | OpKind::Expr(_) | OpKind::Logical(_) => (false, true),
 			};
 			if whole || later_is_row {

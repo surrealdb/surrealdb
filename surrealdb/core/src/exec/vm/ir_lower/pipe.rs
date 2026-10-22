@@ -1385,9 +1385,11 @@ enum Sink {
 		field: FieldPath,
 		rank: Arc<KnnRank>,
 	},
-	/// The aggregate `id`, whose fields `plan` reads: the row is folded into its group.
+	/// The aggregate `id`, which the op `op` is and whose fields `plan` reads: the row is folded
+	/// into its group.
 	Aggregate {
 		id: u16,
+		op: OpId,
 		plan: Box<aggregate::Plan>,
 	},
 	/// The split `id`: the row is split into the rows of the pipeline the split is the source of.
@@ -1851,6 +1853,7 @@ fn open_source(
 			(
 				Sink::Aggregate {
 					id,
+					op: input,
 					plan: Box::new(plan),
 				},
 				Source::Groups {
@@ -2757,7 +2760,9 @@ fn emit_pipeline(
 ///
 /// Rows the pipeline hands a sort are read by the sort's keys and then by the streaming ops that
 /// read the sorted rows, so the demand follows them there; a sort whose rows another pipeline
-/// reads hands on the record, which needs it whole.
+/// reads hands on the record, which needs it whole. Rows the pipeline hands an aggregate are read
+/// by the aggregate's key and field regions alone, since the groups it delivers are no longer the
+/// record.
 fn enforced_demand(
 	ir: &Ir,
 	runs: &[Run<'_>],
@@ -2792,6 +2797,16 @@ fn enforced_demand(
 		sorted = reader_runs(ir, *op)?;
 		parts.push((input, &sort_op));
 		parts.extend(sorted.iter().map(|(from, ops)| (*from, ops.as_slice())));
+	}
+	if let Sink::Aggregate {
+		op,
+		..
+	} = sink
+	{
+		let data = ir.op(*op).ok_or(IrError::Stale("ir_lower::pipe: op"))?;
+		let input =
+			*data.operands.first().ok_or_else(|| invariant("an aggregate with no input"))?;
+		parts.push((input, std::slice::from_ref(op)));
 	}
 	let demand = liveness::pipeline_demand(ir, rows, &parts);
 	Ok(match demand.stored {
@@ -3396,6 +3411,7 @@ impl Body<'_, '_, '_> {
 			Sink::Aggregate {
 				id,
 				plan,
+				..
 			} => {
 				self.require_row("an aggregate over a projection")?;
 				self.fold_into(*id, plan)?;
