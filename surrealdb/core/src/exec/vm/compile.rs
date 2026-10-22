@@ -1323,7 +1323,7 @@ impl UnitPlanner for StatementPlanner<'_> {
 	}
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "kv-mem"))]
 mod tests {
 	use surrealdb_strand::TableName;
 

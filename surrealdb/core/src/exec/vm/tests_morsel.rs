@@ -910,42 +910,84 @@ async fn a_measure_the_host_answers_reads_its_rows_as_batch_morsels() {
 }
 
 /// A vector measure, and a brute-force ranking, computed in the body charge the fuel for the
-/// numbers their vectors hold, as a walk over the bytes of those numbers, and a body run inside
-/// the storage cursor ends the cursor's chunk once its charges spend the fuel. A scan over long
-/// vectors so reaches yield points as their bytes add up, where a unit for each record would reach
-/// next to none; the call, which builds a value for each element, charges each element a unit.
+/// numbers their vectors hold, as a walk over the bytes of those numbers, settled onto the calling
+/// task's meter as each cursor chunk returns whether the storage cursor runs on the task's thread
+/// or on a blocking worker thread.
 #[tokio::test]
 async fn a_measure_and_a_ranking_charge_the_fuel_their_vectors_cost() {
 	const DIMS: usize = 256;
-	const ROWS: usize = 200;
+	const ROWS: u32 = 1200;
+	const QUANTUM: u32 = 8192;
+	const UNBOUNDED: u32 = 1 << 30;
 	let setup = format!(
 		"DEFINE TABLE w;
 		 FOR $i IN 0..{ROWS} {{ CREATE type::record('w', $i) SET v = array::repeat($i * 1f, {DIMS}) }};
 		 DEFINE PARAM $q VALUE array::repeat(1f, {DIMS});"
 	);
-	const QUANTUM: usize = 1024;
-	let db =
-		TestDb::new_with_config(&setup, whole().with_key_value("vm_quantum", QUANTUM.to_string()))
-			.await;
-	let checks = async |sql: &str| {
-		super::fuel::INTERRUPT_CHECKS.with(|checks| checks.set(0));
-		let answer = answered(&db, sql).await;
-		assert!(answer.is_ok(), "`{sql}`: {answer:?}");
-		super::fuel::INTERRUPT_CHECKS.with(std::cell::Cell::get)
+	// A row's two vectors are 512 floats, 4 KiB: 65 units as a walk over bytes.
+	let per_row = surrealdb_runtime::fuel::byte_units(2 * DIMS * 8);
+	let plain = "SELECT count() FROM w WHERE id IS NOT NONE GROUP ALL";
+	let measure = "SELECT count() FROM w WHERE vector::distance::euclidean(v, $q) < 0 GROUP ALL";
+	let rank = "SELECT id FROM w WHERE v <|3,EUCLIDEAN|> $q";
+
+	let verify = async |quantum_db: TestDb, unbounded_db: TestDb| {
+		let checks = async |sql: &str| {
+			super::fuel::refill(QUANTUM);
+			super::fuel::INTERRUPT_CHECKS.with(|checks| checks.set(0));
+			let answer = answered(&quantum_db, sql).await;
+			assert!(answer.is_ok(), "`{sql}`: {answer:?}");
+			super::fuel::INTERRUPT_CHECKS.with(std::cell::Cell::get)
+		};
+		assert_eq!(checks(plain).await, 0, "record count alone stays under the quantum");
+		assert!(checks(measure).await >= 2, "each full chunk of the measure spends the quantum");
+		assert!(checks(rank).await >= 2, "each full chunk of the ranking spends the quantum");
+
+		let spent = async |sql: &str| {
+			super::fuel::refill(UNBOUNDED);
+			let answer = answered(&unbounded_db, sql).await;
+			assert!(answer.is_ok(), "`{sql}`: {answer:?}");
+			UNBOUNDED - super::fuel::left()
+		};
+		assert!(spent(plain).await < 2 * ROWS);
+		assert!(spent(measure).await >= ROWS * per_row, "the measure charges each row's vectors");
+		assert!(spent(rank).await >= ROWS * per_row, "the ranking charges each row's vectors");
 	};
-	let called = checks(
-		"SELECT count() FROM w WHERE vector::distance::euclidean(v ?? NONE, $q) < 0 GROUP ALL",
+
+	let q_cfg = || whole().with_key_value("vm_quantum", QUANTUM.to_string());
+	let u_cfg = || whole().with_key_value("vm_quantum", UNBOUNDED.to_string());
+	verify(
+		TestDb::new_with_config(&setup, q_cfg()).await,
+		TestDb::new_with_config(&setup, u_cfg()).await,
 	)
 	.await;
-	let measured =
-		checks("SELECT count() FROM w WHERE vector::distance::euclidean(v, $q) < 0 GROUP ALL")
-			.await;
-	let ranked = checks("SELECT id FROM w WHERE v <|3,EUCLIDEAN|> $q").await;
-	// Each row's two vectors are 4 KiB of floats, 64 units: about a dozen quanta over the table.
-	let walked = ROWS * 2 * DIMS * std::mem::size_of::<f64>() / 64 / QUANTUM;
-	assert!(called >= ROWS / 2, "the call reaches {called} yield points");
-	assert!(measured >= walked / 2, "the measure reaches {measured}, its bytes {walked} quanta");
-	assert!(ranked >= walked / 2, "the ranking reaches {ranked}, its bytes {walked} quanta");
+
+	#[cfg(feature = "kv-rocksdb")]
+	{
+		let (q_dir, u_dir) = (
+			tempfile::tempdir().expect("temporary directory"),
+			tempfile::tempdir().expect("temporary directory"),
+		);
+		verify(
+			TestDb::new_on_rocksdb(&setup, q_dir.path(), q_cfg()).await,
+			TestDb::new_on_rocksdb(&setup, u_dir.path(), u_cfg()).await,
+		)
+		.await;
+	}
+}
+
+/// In memory, whose read-only transactions give a view, the morsels of a brute-force KNN are read
+/// by workers, and the statement answers what the serial run answers.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_brute_force_knn_in_memory_is_read_by_workers() {
+	let _turn = TURNS.lock().await;
+	let serial = TestDb::new_with_config(&vectors(), whole()).await;
+	let wide = TestDb::new_with_config(&vectors(), tiny()).await;
+	assert!(wide.exec_ctx().await.txn().snapshot().is_some());
+	let before = counts_of(&wide.exec_ctx().await);
+	knn_scans_answer_as_the_serial_run(&serial, &wide).await;
+	let after = counts_of(&wide.exec_ctx().await);
+	assert!(after.split > before.split + 1, "{before:?}, {after:?}");
+	assert!(after.handed > before.handed, "{before:?}, {after:?}");
 }
 
 /// On RocksDB, whose read-only transactions give a view, the morsels of a brute-force KNN are read
@@ -967,12 +1009,12 @@ async fn a_brute_force_knn_on_rocksdb_is_read_by_workers() {
 	assert!(after.handed > before.handed, "{before:?}, {after:?}");
 }
 
-/// Without a view (kv-mem gives none) the coordinator reads every morsel itself, in order, and
-/// answers the same.
+/// Without a view (a datastore built to give none) the coordinator reads every morsel itself, in
+/// order, and answers the same.
 #[tokio::test]
 async fn range_morsels_run_on_the_coordinator_without_a_view() {
 	let serial = TestDb::new_with_config(&setup(), whole()).await;
-	let wide = TestDb::new_with_config(&setup(), tiny()).await;
+	let wide = TestDb::new_viewless(&setup(), tiny()).await;
 	assert!(wide.exec_ctx().await.txn().snapshot().is_none());
 	// A body that runs over decoded rows is read by the coordinator and handed on in batches,
 	// which needs no view. A range morsel is read by whoever runs it, and with no view that is the
@@ -1016,7 +1058,7 @@ async fn a_plain_select_fans_out_under_the_datastores_morsel_settings() {
 }
 
 /// Where the settings cut a range only for workers that read through a view, a plain `SELECT` over
-/// a datastore whose transactions give none (kv-mem) is placed serially; with that requirement off
+/// a datastore whose transactions give none is placed serially; with that requirement off
 /// the same settings place it as range morsels, which the request's run splits.
 #[tokio::test]
 async fn a_plain_select_reads_ranges_without_a_view_only_where_the_settings_allow_it() {
@@ -1026,10 +1068,10 @@ async fn a_plain_select_reads_ranges_without_a_view_only_where_the_settings_allo
 		.with_key_value("morsel_target_bytes", "1")
 		.with_key_value("morsel_oltp_reserve", "0");
 	let sql = "SELECT * FROM t";
-	let held = TestDb::new_with_config(&setup(), needs_view).await;
+	let held = TestDb::new_viewless(&setup(), needs_view).await;
 	assert!(held.exec_ctx().await.txn().snapshot().is_none());
 	assert_eq!(fan_out_of(&held, sql).await, FanOut::No);
-	let cut = TestDb::new_with_config(&setup(), tiny()).await;
+	let cut = TestDb::new_viewless(&setup(), tiny()).await;
 	assert_eq!(fan_out_of(&cut, sql).await, FanOut::Range);
 	let expected = answered(&held, sql).await;
 	let before = counts_of(&cut.exec_ctx().await);
@@ -2042,7 +2084,7 @@ fn resplitting() -> surrealdb_cnf::ConfigMap {
 #[tokio::test]
 async fn a_coordinator_alone_has_nobody_to_take_what_it_gives() {
 	let serial = TestDb::new_with_config(&skewed_setup(), whole()).await;
-	let wide = TestDb::new_with_config(&skewed_setup(), resplitting()).await;
+	let wide = TestDb::new_viewless(&skewed_setup(), resplitting()).await;
 	let counts = same_answers(&serial, &wide, STEALS).await;
 	assert_eq!((counts.stolen, counts.resplit), (0, 0), "{counts:?}");
 }

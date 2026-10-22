@@ -619,7 +619,10 @@ definitions as `mod::`.
 ### Parallel scans leave row order and the choice of error unspecified
 
 A statement that runs its scan as morsels, which the default configuration
-allows, specifies two properties less than 3.x did:
+allows, specifies two properties less than 3.x did. This holds on every engine:
+a memory datastore reads the key range of a read-only statement in parts on
+worker threads, as RocksDB and SurrealKV do, except in a browser (wasm), which
+has no workers.
 
 - **Row order without `ORDER BY`.** Rows may come back in any order, and a
   `LIMIT` or `START` without `ORDER BY` returns some rows rather than the first

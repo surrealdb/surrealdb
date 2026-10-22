@@ -22,6 +22,9 @@ observability = []
 # `Transactable::timestamp` implementation instead of an HLC timestamp.
 # Intended for tests only.
 test-inc-timestamp = []
+# Test doubles of the backends ([`testing`](src/testing.rs)), for the tests of this crate's
+# callers. Never enabled by a release build.
+test-utils = []
 
 [dependencies]
 anyhow.workspace = true

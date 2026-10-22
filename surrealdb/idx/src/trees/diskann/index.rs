@@ -8841,7 +8841,7 @@ mod tests {
 	/// committed.
 	#[tokio::test]
 	async fn diskann_failed_compaction_clears_cache_and_keeps_knn_working() -> Result<()> {
-		let ds = TestIndexStore::new().await;
+		let ds = TestIndexStore::new_viewless().await;
 		let ikb = ikb();
 		let p = params(VectorType::F32, Distance::Euclidean);
 		let index = new_index(ikb.clone(), TableId(4), &p, cache()).await?;
@@ -10242,8 +10242,8 @@ mod tests {
 	#[tokio::test]
 	async fn diskann_frames_keep_foreign_edges_and_invalidate_nothing_on_one_node() -> Result<()> {
 		frames_keep_foreign_edges_and_invalidate_nothing_on_one_node(
-			TestIndexStore::new().await,
-			TestIndexStore::new().await,
+			TestIndexStore::new_viewless().await,
+			TestIndexStore::new_viewless().await,
 			false,
 		)
 		.await
@@ -11552,6 +11552,20 @@ mod tests {
 			Ok((ds, index, cache))
 		}
 
+		/// [`seeded`] on a viewless store, for tests whose subject is a frame with no read view.
+		async fn seeded_viewless(
+			places: usize,
+			params: &DiskAnnParams,
+			seed: &[Vec<f32>],
+		) -> Result<(TestIndexStore, DiskAnnIndex, DiskAnnCache)> {
+			let ds = TestIndexStore::new_viewless().await.with_places(places);
+			let cache = cache();
+			let index = new_index(ikb(), TableId(4), params, cache.clone()).await?;
+			ingest(&index, &ds, 0, seed).await?;
+			compact_all(&index, &ds, &ikb()).await?;
+			Ok((ds, index, cache))
+		}
+
 		/// T-4: a frame inserting many fresh vectors into a non-empty graph writes the graph state
 		/// once, for the whole batch's element ids.
 		#[tokio::test(flavor = "multi_thread")]
@@ -11851,7 +11865,7 @@ mod tests {
 		async fn diskann_frame_stops_with_its_statement() -> Result<()> {
 			for threshold in [false, true] {
 				let (ds, index, cache) =
-					seeded(4, &small_params(4), &line(4, 0.0, 1.0, 20)).await?;
+					seeded_viewless(4, &small_params(4), &line(4, 0.0, 1.0, 20)).await?;
 				ingest(&index, &ds, 100, &line(4, 0.5, 1.0, 30)).await?;
 				let before = captured(&ds, &ikb()).await?;
 				let park = Park::new();
@@ -11912,7 +11926,8 @@ mod tests {
 		/// siblings. The frame still drains them before its transaction ends.
 		#[tokio::test(flavor = "multi_thread")]
 		async fn diskann_frame_drains_tasks_upstream_detached() -> Result<()> {
-			let (ds, index, cache) = seeded(4, &small_params(4), &line(4, 0.0, 1.0, 20)).await?;
+			let (ds, index, cache) =
+				seeded_viewless(4, &small_params(4), &line(4, 0.0, 1.0, 20)).await?;
 			ingest(&index, &ds, 100, &line(4, 0.5, 1.0, 30)).await?;
 			let before = captured(&ds, &ikb()).await?;
 			let park = Park::new();
@@ -11955,7 +11970,8 @@ mod tests {
 		/// cancelled exactly once, with no task alive, and nothing of the batch commits.
 		#[tokio::test(flavor = "multi_thread")]
 		async fn diskann_frame_panic_keeps_its_places_until_its_tasks_exit() -> Result<()> {
-			let (ds, index, cache) = seeded(4, &small_params(4), &line(4, 0.0, 1.0, 20)).await?;
+			let (ds, index, cache) =
+				seeded_viewless(4, &small_params(4), &line(4, 0.0, 1.0, 20)).await?;
 			ingest(&index, &ds, 100, &line(4, 0.5, 1.0, 30)).await?;
 			let before = captured(&ds, &ikb()).await?;
 			let park = Park::new();
@@ -12784,7 +12800,8 @@ mod tests {
 				assert_eq!(assert_adjacency_valid(&ds, &ikb()).await?, 50);
 				Ok(())
 			}
-			check(TestIndexStore::new().await.with_places(4), FrameFaults::default()).await?;
+			check(TestIndexStore::new_viewless().await.with_places(4), FrameFaults::default())
+				.await?;
 			#[cfg(feature = "kv-rocksdb")]
 			{
 				let dir = TempDir::new()?;
@@ -13112,7 +13129,8 @@ mod tests {
 		/// commits.
 		#[tokio::test(flavor = "multi_thread")]
 		async fn diskann_sink_frame_dropped_on_a_panic_commits_nothing() -> Result<()> {
-			sink_frame_dropped_on_a_panic_commits_nothing(TestIndexStore::new().await, 1).await
+			sink_frame_dropped_on_a_panic_commits_nothing(TestIndexStore::new_viewless().await, 1)
+				.await
 		}
 
 		/// The same on RocksDB: the frame's read transaction and the build transaction both end

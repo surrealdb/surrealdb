@@ -43,8 +43,8 @@ const SMALL_MORSELS: (&str, &str) = ("morsel_target_bytes", "8KiB");
 /// the next chunk is already being read.
 const DONATING: (&str, &str) = ("morsel_steal_always", "true");
 /// The settings `pairs` names. A range is cut where workers get no read view, so the front run
-/// over an in-memory datastore is cut as it is over one with views, and whatever share of its
-/// rows passes.
+/// over the in-memory datastore, built to give none, is cut as it is over one with views, and
+/// whatever share of its rows passes.
 fn config(pairs: &[(&str, &str)]) -> ConfigMap {
 	pairs.iter().fold(
 		ConfigMap::empty()
@@ -63,10 +63,11 @@ enum Disk<'a> {
 	SurrealKv(&'a std::path::Path),
 }
 
-/// A fresh datastore holding `setup`: in memory, or on the disk `disk` names.
+/// A fresh datastore holding `setup`: in memory, giving workers no view so its morsels run on the
+/// coordinator as front runs, or on the disk `disk` names.
 async fn open(setup: &str, disk: Option<Disk<'_>>, pairs: &[(&str, &str)]) -> TestDb {
 	match disk {
-		None => TestDb::new_with_config(setup, config(pairs)).await,
+		None => TestDb::new_viewless(setup, config(pairs)).await,
 		#[cfg(feature = "kv-rocksdb")]
 		Some(Disk::Rocks(dir)) => TestDb::new_on_rocksdb(setup, dir, config(pairs)).await,
 		#[cfg(not(feature = "kv-rocksdb"))]

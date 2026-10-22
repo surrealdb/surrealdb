@@ -103,6 +103,37 @@ pub fn cap(quantum: u32) {
 	QUANTUM.with(|held| held.set(quantum));
 }
 
+/// Run `f` — a synchronous body inside a storage cursor's `for_each` — under
+/// `quantum`, accumulating any fuel it charges into `spent` without altering
+/// the meter of the thread `f` runs on.
+///
+/// A storage backend may run `for_each` on a blocking worker thread rather than
+/// the calling task's thread; setting `quantum` and accumulating the body's
+/// charges here lets `f` observe the statement's quantum and lets the caller
+/// settle the charges onto the task's meter once `for_each` returns.
+#[inline]
+pub fn measure<R>(spent: &mut u32, quantum: u32, f: impl FnOnce() -> R) -> R {
+	struct Guard<'a> {
+		spent: &'a mut u32,
+		saved_left: u32,
+		saved_quantum: u32,
+	}
+	impl Drop for Guard<'_> {
+		#[inline]
+		fn drop(&mut self) {
+			let burned = u32::MAX - LEFT.with(|left| left.replace(self.saved_left));
+			QUANTUM.with(|held| held.set(self.saved_quantum));
+			*self.spent = self.spent.saturating_add(burned);
+		}
+	}
+	let _guard = Guard {
+		spent,
+		saved_left: LEFT.with(|left| left.replace(u32::MAX)),
+		saved_quantum: QUANTUM.with(|held| held.replace(quantum.max(1))),
+	};
+	f()
+}
+
 /// The units a walk of `len` elements costs, saturated at the meter's width.
 #[inline]
 pub fn units(len: usize) -> u32 {
@@ -381,6 +412,46 @@ mod tests {
 		};
 		assert_eq!(total, 4950);
 		assert_eq!(asked, 10);
+		refill(INITIAL);
+	}
+
+	/// `measure` exposes the supplied `quantum` to `f` (even on a worker thread whose
+	/// own meter is at `INITIAL`) and accumulates the fuel `f` spends into `spent`,
+	/// while restoring the thread's original `left()` (even when `0`) and `quantum()`
+	/// on return.
+	#[test]
+	fn measure_counts_charges_without_altering_the_meter() {
+		refill(64);
+		charge(50);
+		assert_eq!(left(), 14);
+		assert_eq!(quantum(), 64);
+
+		let mut spent = 3;
+		let observed_quantum = measure(&mut spent, 16, || {
+			charge(25);
+			quantum()
+		});
+		assert_eq!(observed_quantum, 16);
+		assert_eq!(spent, 28);
+		assert_eq!(left(), 14);
+		assert_eq!(quantum(), 64);
+
+		// Exhaust the remaining fuel to 0 and verify `measure` preserves `left() == 0`.
+		charge(14);
+		assert_eq!(left(), 0);
+		let worker_observed = std::thread::spawn(move || {
+			assert_eq!(quantum(), INITIAL);
+			let inside = measure(&mut spent, 16, || {
+				charge(10);
+				quantum()
+			});
+			(inside, spent, left(), quantum())
+		})
+		.join()
+		.expect("worker thread completes");
+		assert_eq!(worker_observed, (16, 38, INITIAL, INITIAL));
+		assert_eq!(left(), 0);
+		assert_eq!(quantum(), 64);
 		refill(INITIAL);
 	}
 }

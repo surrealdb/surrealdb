@@ -255,3 +255,41 @@ async fn a_block_over_a_stale_snapshot_rejects_writes_and_names_a_refusal() {
 	let message = results.iter().find_map(|r| r.result.as_ref().err()).unwrap().to_string();
 	assert!(message.contains("ReadSnapshotTooStale"), "{message}");
 }
+
+#[tokio::test]
+async fn viewless_builder_strips_views_from_stale_tier_transactions() {
+	use surrealdb_kvs::snapshot::ViewCapabilities;
+	use surrealdb_kvs::testing::ViewlessBuilder;
+
+	let (ds, tier) = tiered(None).await;
+	*tier.newest_age.lock().unwrap() = Some(Duration::from_secs(3));
+	let (tx, _) = ds.read_transaction(request(5, false)).await.unwrap();
+	assert!(tx.snapshot().is_some(), "unwrapped memory stale read exposes a snapshot");
+	tx.cancel().await.unwrap();
+
+	let wrapped = ViewlessBuilder(Box::new(TieredBuilder {
+		inner: Arc::clone(&tier.inner),
+		tier: Arc::clone(&tier),
+	}));
+	let handle = wrapped
+		.extension(TypeId::of::<StaleReadsHandle>())
+		.expect("stale tier extension")
+		.downcast::<StaleReadsHandle>()
+		.expect("StaleReadsHandle");
+	let ReadOutcome::Opened {
+		transaction,
+		..
+	} = handle
+		.0
+		.open(ReadSnapshotRequest {
+			max_staleness: Duration::from_secs(5),
+		})
+		.await
+		.unwrap()
+	else {
+		panic!("expected ReadOutcome::Opened");
+	};
+	assert!(transaction.snapshot().is_none());
+	assert_eq!(transaction.view_capabilities(), ViewCapabilities::default());
+	transaction.cancel().await.unwrap();
+}

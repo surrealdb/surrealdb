@@ -1622,7 +1622,7 @@ async fn a_read_only_pipeline_is_admitted_by_its_shape() {
 	}
 }
 
-/// On a datastore whose read-only transactions give no read view (mem), a pipeline the policy
+/// On a datastore whose read-only transactions give no read view, a pipeline the policy
 /// would read as range morsels plans serially while the policy cuts a range only for workers that
 /// read through a view, and as range morsels where it cuts one without; morsels over batches are
 /// kept either way.
@@ -1630,9 +1630,9 @@ async fn a_read_only_pipeline_is_admitted_by_its_shape() {
 async fn a_range_read_plans_serially_where_the_datastore_gives_no_view() {
 	let narrowed =
 		("serial: narrowed by the pipeline around it or by the backend".to_owned(), false);
-	let default = TestDb::new(ADMISSION_SETUP).await;
+	let default = TestDb::new_viewless(ADMISSION_SETUP, surrealdb_cnf::ConfigMap::empty()).await;
 	let default_ctx = default.exec_ctx().await;
-	let cut = TestDb::new_with_config(ADMISSION_SETUP, viewless()).await;
+	let cut = TestDb::new_viewless(ADMISSION_SETUP, viewless()).await;
 	let cut_ctx = cut.exec_ctx().await;
 	let sql = "SELECT * FROM t";
 	assert_eq!(admission_of(&default_ctx, sql).await, vec![narrowed], "`{sql}`");

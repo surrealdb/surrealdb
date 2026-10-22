@@ -1766,8 +1766,10 @@ impl<'p> RangeSet<'p> {
 				};
 				first = false;
 				let chunk = super::super::fuel::batch(self.policy.chunk(&signals, most));
+				let quantum = super::super::fuel::quantum(ctx);
 				let budget = super::super::fuel::left();
 				let mut unspent = budget;
+				let mut body_spent = 0;
 				let (mut failed, mut stopped, mut ended, mut spent) = (None, false, false, false);
 				// The threshold is read once a chunk: a stale one only rejects less.
 				let threshold = probe.as_ref().and_then(|probe| probe.snapshot());
@@ -1776,15 +1778,11 @@ impl<'p> RangeSet<'p> {
 				let stats = source
 					.for_each(chunk, &mut |key, value| {
 						unspent = unspent.saturating_sub(1);
-						// Whether the chunk goes on past the record, judged once its body ran, so
-						// the fuel the body charged is counted.
-						let after = |spent: &mut bool| {
-							if super::super::fuel::chunk_spent(budget, unspent) {
-								*spent = true;
-								std::ops::ControlFlow::Break(())
-							} else {
-								std::ops::ControlFlow::Continue(())
-							}
+						let next = if unspent == 0 {
+							spent = true;
+							std::ops::ControlFlow::Break(())
+						} else {
+							std::ops::ControlFlow::Continue(())
 						};
 						if let Some(cut) = &cut
 							&& (if backward {
@@ -1812,18 +1810,20 @@ impl<'p> RangeSet<'p> {
 							&& probe.rejects(threshold, &admitted)
 						{
 							rejected += 1;
-							return Ok(after(&mut spent));
+							return Ok(next);
 						}
-						match in_place_row_admitted(
-							&program,
-							pipeline,
-							key,
-							value,
-							&admitted,
-							layouts.as_deref(),
-							state,
-						) {
-							Ok(false) => Ok(after(&mut spent)),
+						match super::super::fuel::measure(&mut body_spent, quantum, || {
+							in_place_row_admitted(
+								&program,
+								pipeline,
+								key,
+								value,
+								&admitted,
+								layouts.as_deref(),
+								state,
+							)
+						}) {
+							Ok(false) => Ok(next),
 							Ok(true) => {
 								stopped = true;
 								Ok(std::ops::ControlFlow::Break(()))
@@ -1836,7 +1836,7 @@ impl<'p> RangeSet<'p> {
 					})
 					.await
 					.context("Failed to scan record")?;
-				super::super::fuel::charge(budget - unspent);
+				super::super::fuel::charge((budget - unspent).saturating_add(body_spent));
 				if let Some(e) = failed {
 					return Err(ControlFlow::Err(e));
 				}

@@ -2,6 +2,8 @@
 #![allow(clippy::absolute_paths)]
 
 mod cnf;
+#[cfg(not(target_family = "wasm"))]
+mod snapshot;
 
 use std::any::{Any, TypeId};
 use std::sync::Arc;
@@ -17,6 +19,8 @@ use tracing::info;
 #[cfg(not(target_family = "wasm"))]
 const TARGET: &str = "surrealdb::core::kvs::mem";
 
+#[cfg(not(target_family = "wasm"))]
+use surrealdb_kvs::Snapshot;
 use surrealdb_kvs::api::{
 	BoxFut, GetMultiResult, KeySpan, KeyValSpan, KeyVisitor, KeysBatch, KeysResult,
 	RangeKeyVisitor, ScanChunkStats, ScanCursorKeys, ScanCursorVals, ScanResult, Transactable,
@@ -26,6 +30,8 @@ use surrealdb_kvs::api::{
 use surrealdb_kvs::config::{AolMode, SnapshotMode, SyncMode};
 use surrealdb_kvs::cursor::{fill_vals_batch, update_range};
 use surrealdb_kvs::err::{Error, Result};
+#[cfg(not(target_family = "wasm"))]
+use surrealdb_kvs::snapshot::ViewCapabilities;
 use surrealdb_kvs::{
 	Direction, Isolation, IsolationLevels, IsolationLevelsHandle, Key, KeyRange, Metrics,
 	TransactionBuilder, TransactionType, Val,
@@ -96,22 +102,22 @@ fn open_transaction(
 		txn.with_snapshot_isolation()
 	};
 	Box::new(Transaction {
-		done: AtomicBool::new(false),
+		done: Arc::new(AtomicBool::new(false)),
 		write,
 		serializable,
-		inner: RwLock::new(txn),
+		inner: Arc::new(RwLock::new(txn)),
 	})
 }
 
 pub struct Transaction {
-	/// Is the transaction complete?
-	done: AtomicBool,
+	/// Is the transaction complete? Shared with the transaction's read view.
+	done: Arc<AtomicBool>,
 	/// Is the transaction writeable?
 	write: bool,
 	/// Does the commit validate everything the transaction read?
 	serializable: bool,
-	/// The underlying datastore transaction
-	inner: RwLock<Tx>,
+	/// The underlying datastore transaction, shared with its read view.
+	inner: Arc<RwLock<Tx>>,
 }
 
 impl Datastore {
@@ -245,6 +251,33 @@ impl Transactable for Transaction {
 	/// Check if writeable
 	fn writeable(&self) -> bool {
 		self.write
+	}
+
+	/// A read-only transaction gives a view of its engine snapshot, and a writable one gives none.
+	///
+	/// A read-only transaction holds one fixed engine snapshot and an empty write set, so every
+	/// read through it is the view ([`snapshot::MemSnapshot`]). The engine's reads always merge
+	/// the transaction's write set, so a view of a writable transaction would show the owner's
+	/// later writes through it. On wasm there are no workers to read a view from, so a transaction
+	/// gives none there, and a scan is not cut into parts only its own task would read.
+	#[cfg(not(target_family = "wasm"))]
+	fn snapshot(&self) -> Option<Arc<dyn Snapshot>> {
+		if self.write || self.done.load(Ordering::Acquire) {
+			return None;
+		}
+		Some(Arc::new(snapshot::MemSnapshot {
+			inner: Arc::clone(&self.inner),
+			done: Arc::clone(&self.done),
+		}))
+	}
+
+	/// Read-only transactions give a view; writable ones never do. Neither does on wasm.
+	#[cfg(not(target_family = "wasm"))]
+	fn view_capabilities(&self) -> ViewCapabilities {
+		ViewCapabilities {
+			read_only: true,
+			writable: false,
+		}
 	}
 
 	/// A snapshot-isolation commit checks write-write overlap only, so a plain read never joins
@@ -943,25 +976,35 @@ impl Transactable for Transaction {
 		})
 	}
 
-	/// Set a new save point on the transaction.
+	/// Set a new save point on the transaction. A read-only transaction takes none: it takes no
+	/// write lock except in `cancel`, so its view's cursors never wait on the owner.
 	fn new_save_point(&self) -> BoxFut<'_, Result<()>> {
 		Box::pin(async move {
+			if !self.write {
+				return Err(Error::TransactionReadonly);
+			}
 			self.inner.write().await.set_savepoint().map_err(kvs_error)?;
 			Ok(())
 		})
 	}
 
-	/// Rollback to the last save point.
+	/// Rollback to the last save point. A read-only transaction has none to roll back to.
 	fn rollback_to_save_point(&self) -> BoxFut<'_, Result<()>> {
 		Box::pin(async move {
+			if !self.write {
+				return Err(Error::NoSavepoint);
+			}
 			self.inner.write().await.rollback_to_savepoint().map_err(kvs_error)?;
 			Ok(())
 		})
 	}
 
-	/// Release the last save point.
+	/// Release the last save point. A read-only transaction has none, so the release is inert.
 	fn release_last_save_point(&self) -> BoxFut<'_, Result<()>> {
 		Box::pin(async move {
+			if !self.write {
+				return Ok(());
+			}
 			// Releasing with no scope open is inert, so the engine refusing to
 			// pop an empty stack satisfies the contract rather than breaking it.
 			match self.inner.write().await.release_savepoint() {

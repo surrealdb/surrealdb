@@ -3738,11 +3738,14 @@ async fn scan_in_place(
 			let layouts: &TableLayouts = gate.layouts();
 			// The body cannot yield inside the cursor, so the chunk counts the
 			// rows it reads against the fuel left and ends once that is spent: a
-			// unit per record read, run or refused, with what the bodies charge. The body holds no
+			// unit per record read, run or refused. What the bodies charge besides
+			// is drawn on the meter as they run and settled at the chunk's end. The body holds no
 			// backward jump (`lower`'s in-place rule), so the interpreter answers no
 			// `Step::Yield` here.
+			let quantum = super::fuel::quantum(ctx);
 			let budget = super::fuel::left();
 			let mut unspent = budget;
+			let mut body_spent = 0;
 			if let Some(coarse) = coarse.as_deref_mut() {
 				coarse.refresh();
 			}
@@ -3757,14 +3760,10 @@ async fn scan_in_place(
 						return Ok(std::ops::ControlFlow::Break(()));
 					}
 					unspent = unspent.saturating_sub(1);
-					// Whether the chunk goes on past the record, judged once its body ran, so the
-					// fuel the body charged is counted.
-					let after = || {
-						if super::fuel::chunk_spent(budget, unspent) {
-							std::ops::ControlFlow::Break(())
-						} else {
-							std::ops::ControlFlow::Continue(())
-						}
+					let next = if unspent == 0 {
+						std::ops::ControlFlow::Break(())
+					} else {
+						std::ops::ControlFlow::Continue(())
 					};
 					match gate.admit(value) {
 						Admission::Admit => {}
@@ -3781,17 +3780,19 @@ async fn scan_in_place(
 						stale = Some((key.to_vec(), value.to_vec()));
 						return Ok(std::ops::ControlFlow::Break(()));
 					}
-					match scan_row(
-						program,
-						pipeline,
-						topk_probe.as_ref(),
-						topk_threshold.as_deref(),
-						key,
-						value,
-						Some(layouts),
-						state,
-					) {
-						Ok(false) => Ok(after()),
+					match super::fuel::measure(&mut body_spent, quantum, || {
+						scan_row(
+							program,
+							pipeline,
+							topk_probe.as_ref(),
+							topk_threshold.as_deref(),
+							key,
+							value,
+							Some(layouts),
+							state,
+						)
+					}) {
+						Ok(false) => Ok(next),
 						Ok(true) => {
 							stopped = true;
 							Ok(std::ops::ControlFlow::Break(()))
@@ -3804,7 +3805,7 @@ async fn scan_in_place(
 				})
 				.await
 				.context("Failed to scan record")?;
-			super::fuel::charge(budget - unspent);
+			super::fuel::charge((budget - unspent).saturating_add(body_spent));
 			if let Some(e) = failed {
 				return Err(ControlFlow::Err(e));
 			}

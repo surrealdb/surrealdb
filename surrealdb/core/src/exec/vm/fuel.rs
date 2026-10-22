@@ -56,7 +56,7 @@ use std::task::Poll;
 
 // The meter is the thread's, held one crate down so that the builtins there
 // draw on it too.
-pub(crate) use surrealdb_runtime::fuel::{cap, charge, left, refill, spent, units};
+pub(crate) use surrealdb_runtime::fuel::{cap, charge, left, measure, refill, spent, units};
 
 use crate::err::EngineError;
 use crate::exec::{ExecutionContext, FlowResult};
@@ -93,15 +93,6 @@ pub(crate) fn weight(value: &crate::val::Value) -> u32 {
 		| Value::Range(_)
 		| Value::Closure(_) => 0,
 	}
-}
-
-/// Whether a storage cursor that took `budget` units of fuel as its chunk began, and has
-/// `unspent` of them left after a unit for each record it read, has spent the fuel: the units its
-/// records cost, with what the bodies it ran charged the meter meanwhile, reach what the meter
-/// held. A body run inside the cursor yields nowhere, so the cursor ends its chunk there.
-#[inline]
-pub(crate) fn chunk_spent(budget: u32, unspent: u32) -> bool {
-	unspent == 0 || left() <= budget - unspent
 }
 
 /// The entries a storage call may take in one go: no more than `most`, nor

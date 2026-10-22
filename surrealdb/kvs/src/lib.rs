@@ -33,6 +33,8 @@ pub mod savepoint;
 pub mod snapshot;
 pub mod split;
 pub mod stale;
+#[cfg(any(test, feature = "test-utils"))]
+pub mod testing;
 pub mod threadpool;
 pub mod timestamp;
 mod types;

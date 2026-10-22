@@ -373,7 +373,7 @@ mimalloc-sys = { workspace = true, optional = true }
 regex.workspace = true
 surrealdb-datastore = { workspace = true, features = ["test-hooks"] }
 fst.workspace = true
-surrealdb-kvs = { workspace = true, features = ["test-inc-timestamp"] }
+surrealdb-kvs = { workspace = true, features = ["test-inc-timestamp", "test-utils"] }
 criterion = { workspace = true, features = ["async_tokio"] }
 env_logger.workspace = true
 flate2.workspace = true

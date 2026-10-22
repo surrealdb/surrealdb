@@ -409,12 +409,25 @@ impl TestIndexStore {
 		Self::with_path("mem://").await
 	}
 
+	/// Opens an in-memory store wrapped in [`surrealdb_kvs::testing::ViewlessBuilder`],
+	/// for tests whose subject is a datastore that gives no read view.
+	pub(crate) async fn new_viewless() -> Self {
+		Self::open("mem://", IdxConfig::default(), true).await
+	}
+
 	/// Opens an in-memory store with a modified engine configuration. The ANN
 	/// caches are sized from the modified configuration.
 	pub(crate) async fn with_idx_config(configure: impl FnOnce(&mut IdxConfig)) -> Self {
 		let mut config = IdxConfig::default();
 		configure(&mut config);
-		Self::open("mem://", config).await
+		Self::open("mem://", config, false).await
+	}
+
+	/// [`Self::with_idx_config`] wrapped in [`surrealdb_kvs::testing::ViewlessBuilder`].
+	pub(crate) async fn with_idx_config_viewless(configure: impl FnOnce(&mut IdxConfig)) -> Self {
+		let mut config = IdxConfig::default();
+		configure(&mut config);
+		Self::open("mem://", config, true).await
 	}
 
 	/// The engine configuration this store hands out.
@@ -431,14 +444,19 @@ impl TestIndexStore {
 
 	/// Opens a store on `path`, for the tests pinned to a specific backend.
 	pub(crate) async fn with_path(path: &str) -> Self {
-		Self::open(path, IdxConfig::default()).await
+		Self::open(path, IdxConfig::default(), false).await
 	}
 
-	async fn open(path: &str, config: IdxConfig) -> Self {
+	async fn open(path: &str, config: IdxConfig, viewless: bool) -> Self {
 		let builder = surrealdb_kvs_any::Backends::community()
 			.new_transaction_builder(path, Default::default(), ConfigMap::default())
 			.await
 			.unwrap();
+		let builder: Box<dyn TransactionBuilder> = if viewless {
+			Box::new(surrealdb_kvs::testing::ViewlessBuilder(builder))
+		} else {
+			builder
+		};
 		let reads_opened = Arc::new(AtomicUsize::new(0));
 		let builder = Box::new(CountingBuilder {
 			inner: builder,

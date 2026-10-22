@@ -130,6 +130,9 @@ serial_test.workspace = true
 # The engines' own tests open a transaction against an in-memory backend.
 # Nothing in the library selects a backend.
 surrealdb-kvs-any = { workspace = true, features = ["kv-mem"] }
+# The tests whose subject is a store that gives workers no read view open one
+# through the viewless test double.
+surrealdb-kvs = { workspace = true, features = ["test-utils"] }
 # The writer-lease tests run two datastores over one in-memory store, which
 # reports itself the sole writer; the hook has them run the lease protocol.
 surrealdb-datastore = { workspace = true, features = ["test-hooks"] }

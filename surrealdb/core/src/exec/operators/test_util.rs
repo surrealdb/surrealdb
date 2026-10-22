@@ -369,6 +369,29 @@ impl TestDb {
 			.build_with_path(path)
 			.await
 			.expect("datastore");
+		Self::seeded(ds, setup).await
+	}
+
+	/// As [`Self::new_with_config`], over a memory datastore whose transactions give no read view
+	/// and declare none ([`Transactable::snapshot`] answers `None`): for a test whose subject is a
+	/// datastore that gives workers nothing to read a range through.
+	///
+	/// [`Transactable::snapshot`]: surrealdb_kvs::Transactable::snapshot
+	#[cfg(feature = "kv-mem")]
+	pub(crate) async fn new_viewless(setup: &str, config: surrealdb_cnf::ConfigMap) -> Self {
+		let ds = Datastore::builder()
+			.with_capabilities(crate::dbs::Capabilities::all())
+			.with_auth(false)
+			.with_config(config)
+			.build_with_factory_path("memory", ViewlessComposer)
+			.await
+			.expect("datastore");
+		Self::seeded(ds, setup).await
+	}
+
+	/// The test database over `ds`: its `test`/`test` namespace and database created, then `setup`
+	/// run as owner.
+	async fn seeded(ds: Arc<Datastore>, setup: &str) -> Self {
 		{
 			let txn = ds.transaction(TransactionType::Write).await.expect("write transaction");
 			txn.ensure_ns_db(None, "test", "test").await.expect("ensure test/test");
@@ -510,5 +533,33 @@ fn session_info(session: &Session) -> SessionInfo {
 		rd: session.rd.clone().map(convert_public_value_to_internal),
 		token: session.tk.clone().map(convert_public_value_to_internal),
 		exp: None,
+	}
+}
+
+/// A composer that opens the community backend at the given path and hands its transactions out
+/// as [`ViewlessTransaction`](surrealdb_kvs::testing::ViewlessTransaction)s, which give no read
+/// view ([`TestDb::new_viewless`]).
+#[cfg(feature = "kv-mem")]
+struct ViewlessComposer;
+
+#[cfg(feature = "kv-mem")]
+impl crate::kvs::ds::TransactionBuilderFactory for ViewlessComposer {
+	type RouterState = ();
+
+	async fn new_transaction_builder(
+		&self,
+		path: &str,
+		canceller: tokio_util::sync::CancellationToken,
+		config: surrealdb_cnf::ConfigMap,
+	) -> anyhow::Result<crate::kvs::ds::TransactionBuilderParts<Self::RouterState>> {
+		let parts =
+			crate::CommunityComposer().new_transaction_builder(path, canceller, config).await?;
+		Ok(crate::kvs::ds::TransactionBuilderParts::without_router_state(Box::new(
+			surrealdb_kvs::testing::ViewlessBuilder(parts.builder),
+		)))
+	}
+
+	fn path_valid(&self, v: &str) -> anyhow::Result<String> {
+		crate::CommunityComposer().path_valid(v)
 	}
 }

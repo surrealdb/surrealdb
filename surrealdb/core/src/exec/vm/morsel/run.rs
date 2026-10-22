@@ -657,8 +657,10 @@ pub(super) async fn run_range(
 				});
 			}
 		}
+		let quantum = super::super::fuel::quantum(ctx);
 		let budget = super::super::fuel::left();
 		let mut unspent = budget;
+		let mut body_spent = 0;
 		let mut failed = None;
 		let mut halted = false;
 		let mut spent = false;
@@ -669,15 +671,11 @@ pub(super) async fn run_range(
 		let stats = cursor
 			.for_each(chunk, &mut |key, value| {
 				unspent = unspent.saturating_sub(1);
-				// Whether the chunk goes on past the record, judged once its body ran, so the fuel
-				// the body charged is counted.
-				let after = |spent: &mut bool| {
-					if super::super::fuel::chunk_spent(budget, unspent) {
-						*spent = true;
-						std::ops::ControlFlow::Break(())
-					} else {
-						std::ops::ControlFlow::Continue(())
-					}
+				let next = if unspent == 0 {
+					spent = true;
+					std::ops::ControlFlow::Break(())
+				} else {
+					std::ops::ControlFlow::Continue(())
 				};
 				// A breaker whose lease no longer covers the row it took is spilled at the next
 				// chunk boundary, so the chunk ends there: a morsel holds at most the rows its
@@ -699,13 +697,16 @@ pub(super) async fn run_range(
 				if distinct {
 					state.distinct_taken = None;
 					let before = state.output.len();
-					let failure = match super::super::host::in_place_row(
-						program, pipeline, key, value, layouts, &mut state,
-					) {
-						Ok(false) => None,
-						Ok(true) => Some(ControlFlow::Err(stopped_pipeline())),
-						Err(e) => Some(ControlFlow::Err(e)),
-					};
+					let failure =
+						match super::super::fuel::measure(&mut body_spent, quantum, || {
+							super::super::host::in_place_row(
+								program, pipeline, key, value, layouts, &mut state,
+							)
+						}) {
+							Ok(false) => None,
+							Ok(true) => Some(ControlFlow::Err(stopped_pipeline())),
+							Err(e) => Some(ControlFlow::Err(e)),
+						};
 					let taken = state.distinct_taken.take();
 					// A row that failed before the set leaves nothing to take past it.
 					halted = failure.is_some() && taken.is_none();
@@ -721,7 +722,7 @@ pub(super) async fn run_range(
 					return Ok(if halted || ended(&state, &mut spent) {
 						std::ops::ControlFlow::Break(())
 					} else {
-						after(&mut spent)
+						next
 					});
 				}
 				let Some(paged) = paged else {
@@ -736,15 +737,17 @@ pub(super) async fn run_range(
 						&& probe.rejects(threshold, &admitted)
 					{
 						rejected += 1;
-						return Ok(after(&mut spent));
+						return Ok(next);
 					}
-					return match super::super::host::in_place_row_admitted(
-						program, pipeline, key, value, &admitted, layouts, &mut state,
-					) {
+					return match super::super::fuel::measure(&mut body_spent, quantum, || {
+						super::super::host::in_place_row_admitted(
+							program, pipeline, key, value, &admitted, layouts, &mut state,
+						)
+					}) {
 						Ok(false) if ended(&state, &mut spent) => {
 							Ok(std::ops::ControlFlow::Break(()))
 						}
-						Ok(false) => Ok(after(&mut spent)),
+						Ok(false) => Ok(next),
 						Ok(true) => {
 							failed = Some(stopped_pipeline());
 							Ok(std::ops::ControlFlow::Break(()))
@@ -757,9 +760,11 @@ pub(super) async fn run_range(
 				};
 				state.reached_paging = false;
 				let before = state.output.len();
-				let failure = match super::super::host::in_place_row(
-					program, pipeline, key, value, layouts, &mut state,
-				) {
+				let failure = match super::super::fuel::measure(&mut body_spent, quantum, || {
+					super::super::host::in_place_row(
+						program, pipeline, key, value, layouts, &mut state,
+					)
+				}) {
 					Ok(false) => None,
 					Ok(true) => Some(ControlFlow::Err(stopped_pipeline())),
 					Err(e) => Some(ControlFlow::Err(e)),
@@ -784,12 +789,12 @@ pub(super) async fn run_range(
 				Ok(if halted || ended(&state, &mut spent) {
 					std::ops::ControlFlow::Break(())
 				} else {
-					after(&mut spent)
+					next
 				})
 			})
 			.await
 			.context("Failed to scan record")?;
-		super::super::fuel::charge(budget - unspent);
+		super::super::fuel::charge((budget - unspent).saturating_add(body_spent));
 		// The view's cursor is not the transaction's, so the chunk is counted into the
 		// transaction's scan metrics here, as its own cursors count theirs.
 		ctx.txn().record_view_scan(stats.rows, stats.key_bytes, stats.value_bytes);

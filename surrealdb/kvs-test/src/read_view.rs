@@ -3,9 +3,10 @@
 //! `split` and `estimate` are answered by every backend, natively or from the defaults, and the
 //! tests of them run against all of them. A view is offered only by a backend with a native one,
 //! and only for a read-only transaction; RocksDB also gives one to a writable transaction until
-//! its first buffered write. The tests of the cursors a view opens run against RocksDB and
-//! SurrealKV. The test of batched point reads runs against every backend: through the view where
-//! there is one, and through the transaction, as a caller falls back to, where there is none.
+//! its first buffered write. The tests of the cursors a view opens run against the memory backend,
+//! RocksDB and SurrealKV. The test of batched point reads runs against every backend: through the
+//! view where there is one, and through the transaction, as a caller falls back to, where there is
+//! none.
 
 #[cfg(not(target_family = "wasm"))]
 use std::collections::BTreeMap;
@@ -204,6 +205,10 @@ async fn estimate_is_exact_within_the_budget(b: &TestBackend) {
 		"{:?} keys estimated for 5000 held",
 		large.keys
 	);
+	if let Some(view) = tx.snapshot() {
+		assert_eq!(view.estimate(range_of(b"small/"), None).await.unwrap(), small);
+		assert_eq!(view.estimate(range_of(b"large/"), None).await.unwrap(), large);
+	}
 	tx.cancel().await.unwrap();
 }
 
@@ -232,6 +237,9 @@ async fn estimate_of_clustered_keys_is_near_the_count(b: &TestBackend) {
 			est.keys,
 			String::from_utf8_lossy(prefix)
 		);
+		if let Some(view) = tx.snapshot() {
+			assert_eq!(view.estimate(range_of(prefix), None).await.unwrap(), est);
+		}
 	}
 	tx.cancel().await.unwrap();
 }
@@ -316,7 +324,7 @@ async fn a_view_does_not_see_later_commits(b: &TestBackend) {
 	fresh.cancel().await.unwrap();
 }
 
-kvs_test!(a_view_does_not_see_later_commits, only = [rocksdb, surrealkv, surrealkv_versioned]);
+kvs_test!(a_view_does_not_see_later_commits, only = [mem, rocksdb, surrealkv, surrealkv_versioned]);
 
 /// A cursor stopped part-way, re-aimed at what it says remains, reads the rest and nothing twice.
 async fn a_cursor_resumes_where_it_stopped(b: &TestBackend) {
@@ -353,7 +361,7 @@ async fn a_cursor_resumes_where_it_stopped(b: &TestBackend) {
 	tx.cancel().await.unwrap();
 }
 
-kvs_test!(a_cursor_resumes_where_it_stopped, only = [rocksdb, surrealkv, surrealkv_versioned]);
+kvs_test!(a_cursor_resumes_where_it_stopped, only = [mem, rocksdb, surrealkv, surrealkv_versioned]);
 
 /// The entry a visitor answers `Break` for is spent: the cursor goes on after it.
 async fn a_break_consumes_the_entry_it_stops_on(b: &TestBackend) {
@@ -391,7 +399,10 @@ async fn a_break_consumes_the_entry_it_stops_on(b: &TestBackend) {
 	tx.cancel().await.unwrap();
 }
 
-kvs_test!(a_break_consumes_the_entry_it_stops_on, only = [rocksdb, surrealkv, surrealkv_versioned]);
+kvs_test!(
+	a_break_consumes_the_entry_it_stops_on,
+	only = [mem, rocksdb, surrealkv, surrealkv_versioned]
+);
 
 /// Narrowing a cursor ends its read at the new bound, without a seek, and only inside what is left.
 async fn narrow_stops_a_cursor_without_reseeking(b: &TestBackend) {
@@ -435,7 +446,7 @@ async fn narrow_stops_a_cursor_without_reseeking(b: &TestBackend) {
 
 kvs_test!(
 	narrow_stops_a_cursor_without_reseeking,
-	only = [rocksdb, surrealkv, surrealkv_versioned]
+	only = [mem, rocksdb, surrealkv, surrealkv_versioned]
 );
 
 /// A page takes what it can hold; an entry too large for any page arrives alone.
@@ -493,7 +504,7 @@ async fn fill_copies_into_a_caller_page(b: &TestBackend) {
 	tx.cancel().await.unwrap();
 }
 
-kvs_test!(fill_copies_into_a_caller_page, only = [rocksdb, surrealkv, surrealkv_versioned]);
+kvs_test!(fill_copies_into_a_caller_page, only = [mem, rocksdb, surrealkv, surrealkv_versioned]);
 
 /// A read-only transaction refuses commit where a writable one would wait for open cursors.
 /// The refusal leaves any open cursor alive and readable.
@@ -515,7 +526,7 @@ async fn commit_waits_for_an_open_cursor(b: &TestBackend) {
 }
 
 #[cfg(not(target_family = "wasm"))]
-kvs_test!(commit_waits_for_an_open_cursor, only = [rocksdb, surrealkv, surrealkv_versioned]);
+kvs_test!(commit_waits_for_an_open_cursor, only = [mem, rocksdb, surrealkv, surrealkv_versioned]);
 
 /// Cancelling does not finish while a cursor is alive, and finishes once it is dropped.
 #[cfg(not(target_family = "wasm"))]
@@ -548,7 +559,7 @@ async fn cancel_waits_for_an_open_cursor(b: &TestBackend) {
 }
 
 #[cfg(not(target_family = "wasm"))]
-kvs_test!(cancel_waits_for_an_open_cursor, only = [rocksdb, surrealkv, surrealkv_versioned]);
+kvs_test!(cancel_waits_for_an_open_cursor, only = [mem, rocksdb, surrealkv, surrealkv_versioned]);
 
 /// Once the transaction has finished, its view opens nothing.
 async fn a_finished_transaction_opens_no_cursor(b: &TestBackend) {
@@ -566,7 +577,10 @@ async fn a_finished_transaction_opens_no_cursor(b: &TestBackend) {
 	assert!(tx.snapshot().is_none(), "a finished transaction gives no view");
 }
 
-kvs_test!(a_finished_transaction_opens_no_cursor, only = [rocksdb, surrealkv, surrealkv_versioned]);
+kvs_test!(
+	a_finished_transaction_opens_no_cursor,
+	only = [mem, rocksdb, surrealkv, surrealkv_versioned]
+);
 
 /// A writable transaction has a view while it holds no buffered write, since its reads are then
 /// the snapshot's. Once it buffers a put its reads merge that write, which a view over the
@@ -638,12 +652,11 @@ async fn get_many_at_the_views_moment_with_or_without_a_view(b: &TestBackend) {
 
 kvs_test!(get_many_at_the_views_moment_with_or_without_a_view);
 
-/// A backend with no native view answers none, and still divides a range.
-async fn memory_backends_give_no_view_and_split_by_default(b: &TestBackend) {
+/// A backend with no native split still divides a range, through the defaults.
+async fn the_memory_backend_splits_a_range_by_default(b: &TestBackend) {
 	let ds = b.create_ds().await;
 	seed(&ds, b"mem/", 1000).await;
 	let tx = ds.transaction(Read).await.unwrap();
-	assert!(tx.snapshot().is_none());
 	let rng = range_of(b"mem/");
 	let bounds = tx.split(rng.as_borrowed(), SplitTarget::Parts(8), None).await.unwrap();
 	assert!(!bounds.is_empty() && bounds.len() < 8, "{} boundaries", bounds.len());
@@ -654,7 +667,7 @@ async fn memory_backends_give_no_view_and_split_by_default(b: &TestBackend) {
 	tx.cancel().await.unwrap();
 }
 
-kvs_test!(memory_backends_give_no_view_and_split_by_default, only = [mem]);
+kvs_test!(the_memory_backend_splits_a_range_by_default, only = [mem]);
 
 /// A generator whose draws are the same on every run, so the ranges and chunk sizes a test reads
 /// are reproducible.
@@ -1008,7 +1021,7 @@ async fn view_equals_transaction_reads(b: &TestBackend) {
 }
 
 #[cfg(not(target_family = "wasm"))]
-kvs_test!(view_equals_transaction_reads, only = [surrealkv, surrealkv_versioned]);
+kvs_test!(view_equals_transaction_reads, only = [mem, surrealkv, surrealkv_versioned]);
 
 /// A range read in chunks of any size, by visitor or into a page, with a visitor that stops early,
 /// makes the entries one scan returns, and its cursor has nowhere to resume exactly at the end.
@@ -1079,7 +1092,7 @@ async fn chunked_view_reads_equal_one_scan(b: &TestBackend) {
 }
 
 #[cfg(not(target_family = "wasm"))]
-kvs_test!(chunked_view_reads_equal_one_scan, only = [surrealkv, surrealkv_versioned]);
+kvs_test!(chunked_view_reads_equal_one_scan, only = [mem, surrealkv, surrealkv_versioned]);
 
 /// The range a cursor as of `version` has left to read once it has read `count` entries, or
 /// `None` when it has nowhere to resume.
@@ -1206,7 +1219,7 @@ async fn view_get_many_equals_getm(b: &TestBackend) {
 }
 
 #[cfg(not(target_family = "wasm"))]
-kvs_test!(view_get_many_equals_getm, only = [surrealkv, surrealkv_versioned]);
+kvs_test!(view_get_many_equals_getm, only = [mem, surrealkv, surrealkv_versioned]);
 
 /// The owner reads while cursors of its view are open, and the cursors read on.
 #[cfg(not(target_family = "wasm"))]
@@ -1237,7 +1250,7 @@ async fn owner_reads_while_a_cursor_is_open(b: &TestBackend) {
 }
 
 #[cfg(not(target_family = "wasm"))]
-kvs_test!(owner_reads_while_a_cursor_is_open, only = [surrealkv, surrealkv_versioned]);
+kvs_test!(owner_reads_while_a_cursor_is_open, only = [mem, surrealkv, surrealkv_versioned]);
 
 /// A savepoint on a read-only transaction is refused at once, whatever cursors are open.
 #[cfg(not(target_family = "wasm"))]
@@ -1270,7 +1283,7 @@ async fn savepoint_on_a_read_only_transaction_does_not_wait(b: &TestBackend) {
 #[cfg(not(target_family = "wasm"))]
 kvs_test!(
 	savepoint_on_a_read_only_transaction_does_not_wait,
-	only = [surrealkv, surrealkv_versioned]
+	only = [mem, surrealkv, surrealkv_versioned]
 );
 
 /// While `cancel` waits for a cursor, the view opens no further cursor and does not wait for the
@@ -1316,7 +1329,7 @@ async fn open_during_cancel_is_refused_not_blocked(b: &TestBackend) {
 }
 
 #[cfg(not(target_family = "wasm"))]
-kvs_test!(open_during_cancel_is_refused_not_blocked, only = [surrealkv, surrealkv_versioned]);
+kvs_test!(open_during_cancel_is_refused_not_blocked, only = [mem, surrealkv, surrealkv_versioned]);
 
 /// A view taken before the transaction cancelled opens nothing and answers nothing afterwards.
 async fn open_after_cancel_completes_is_refused(b: &TestBackend) {
@@ -1332,7 +1345,7 @@ async fn open_after_cancel_completes_is_refused(b: &TestBackend) {
 	assert!(matches!(many, Err(Error::TransactionFinished)), "a batched read after the cancel");
 }
 
-kvs_test!(open_after_cancel_completes_is_refused, only = [surrealkv, surrealkv_versioned]);
+kvs_test!(open_after_cancel_completes_is_refused, only = [mem, surrealkv, surrealkv_versioned]);
 
 /// A read at a version is refused by a datastore that keeps none, before anything is read.
 async fn unsupported_version_is_refused_by_open(b: &TestBackend) {
@@ -1348,7 +1361,7 @@ async fn unsupported_version_is_refused_by_open(b: &TestBackend) {
 	tx.cancel().await.unwrap();
 }
 
-kvs_test!(unsupported_version_is_refused_by_open, only = [surrealkv]);
+kvs_test!(unsupported_version_is_refused_by_open, only = [mem, surrealkv]);
 
 /// Reads through a view put nothing in anyone's conflict set, and a writable transaction, which
 /// gives no view, reads without joining its own.
@@ -1383,10 +1396,10 @@ async fn view_reads_add_no_conflicts(b: &TestBackend) {
 	tx.commit().await.unwrap();
 }
 
-kvs_test!(view_reads_add_no_conflicts, only = [surrealkv, surrealkv_versioned]);
+kvs_test!(view_reads_add_no_conflicts, only = [mem, surrealkv, surrealkv_versioned]);
 
 /// A writable transaction gives no view, before or after it writes, and says so up front.
-async fn a_writable_surrealkv_transaction_gives_no_view(b: &TestBackend) {
+async fn a_writable_transaction_gives_no_view_where_only_read_only_ones_do(b: &TestBackend) {
 	let ds = b.create_ds().await;
 	let tx = ds.transaction(Write).await.unwrap();
 	assert!(tx.snapshot().is_none());
@@ -1402,10 +1415,13 @@ async fn a_writable_surrealkv_transaction_gives_no_view(b: &TestBackend) {
 	tx.cancel().await.unwrap();
 }
 
-kvs_test!(a_writable_surrealkv_transaction_gives_no_view, only = [surrealkv, surrealkv_versioned]);
+kvs_test!(
+	a_writable_transaction_gives_no_view_where_only_read_only_ones_do,
+	only = [mem, surrealkv, surrealkv_versioned]
+);
 
 /// A read-only transaction gives a view of its snapshot, and says so up front.
-async fn a_read_only_surrealkv_transaction_gives_a_view(b: &TestBackend) {
+async fn a_read_only_transaction_gives_a_view_where_only_read_only_ones_do(b: &TestBackend) {
 	let ds = b.create_ds().await;
 	let tx = ds.transaction(Read).await.unwrap();
 	assert!(tx.snapshot().is_some());
@@ -1419,4 +1435,7 @@ async fn a_read_only_surrealkv_transaction_gives_a_view(b: &TestBackend) {
 	tx.cancel().await.unwrap();
 }
 
-kvs_test!(a_read_only_surrealkv_transaction_gives_a_view, only = [surrealkv, surrealkv_versioned]);
+kvs_test!(
+	a_read_only_transaction_gives_a_view_where_only_read_only_ones_do,
+	only = [mem, surrealkv, surrealkv_versioned]
+);

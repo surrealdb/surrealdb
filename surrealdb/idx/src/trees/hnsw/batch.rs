@@ -1057,7 +1057,7 @@ mod tests {
 	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 	async fn without_a_view_a_staged_batch_runs_on_its_tasks_through_its_transaction() -> Result<()>
 	{
-		let ds = TestIndexStore::new().await;
+		let ds = TestIndexStore::new_viewless().await;
 		let h = seed(&ds, &params(false, false), 150).await?;
 		for tasks in [1, 4, 16] {
 			let env = ds.env(TransactionType::Write).await;
@@ -1081,7 +1081,7 @@ mod tests {
 	/// transaction.
 	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 	async fn without_a_view_an_insert_only_plan_is_still_staged() -> Result<()> {
-		let ds = TestIndexStore::with_idx_config(|c| {
+		let ds = TestIndexStore::with_idx_config_viewless(|c| {
 			c.hnsw_build_parallelism = BuildParallelism::Fixed(4.try_into().unwrap());
 		})
 		.await;
@@ -1155,7 +1155,7 @@ mod tests {
 
 	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 	async fn one_plan_writes_one_graph_without_a_view() -> Result<()> {
-		one_plan_writes_one_graph(&TestIndexStore::new().await).await
+		one_plan_writes_one_graph(&TestIndexStore::new_viewless().await).await
 	}
 
 	#[cfg(feature = "kv-rocksdb")]

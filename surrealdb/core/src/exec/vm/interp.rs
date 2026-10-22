@@ -2340,8 +2340,11 @@ fn measure_row(
 /// Charge the two vectors of `a` and `b` numbers a measure or a ranking computed in the body
 /// over, as a walk over their bytes is charged ([`surrealdb_runtime::fuel::byte_units`]), a
 /// number the eight bytes of a float: the measure reads them where they lie, in one pass, with no
-/// value built for any of them. The row yields at its next yield point, and a cursor the body runs
-/// in ends its chunk once the charges spend its fuel.
+/// value built for any of them. The row yields at its next yield point. Inside a storage cursor,
+/// where a body yields nowhere, the charges are accumulated by [`super::fuel::measure`] and
+/// settled onto the calling task's meter when the chunk returns, while the cursor ends its chunk
+/// by the records it reads: a chunk boundary of a scan read in morsels costs far more than the
+/// few rows of long vectors a quantum covers.
 #[inline]
 fn charge_vectors(a: usize, b: usize) {
 	super::fuel::charge(surrealdb_runtime::fuel::byte_units(
@@ -4768,6 +4771,7 @@ mod tests {
 	/// once one morsel's sort holds as many rows as it keeps, a row another morsel's sort is
 	/// offered that orders after the last of them is dropped, and one that ties it or orders
 	/// before it is kept for the sort to judge.
+	#[cfg(feature = "kv-mem")]
 	#[tokio::test]
 	async fn a_sort_drops_a_row_past_the_floor_another_morsel_published() {
 		use super::{Scalar, State};
@@ -4803,6 +4807,67 @@ mod tests {
 			let row = Scalar::Number(Number::Float(kept));
 			assert!(second.under_shared_floor(&program, at, &row), "{kept} is kept");
 		}
+	}
+
+	/// A bounded sort driven from inside a scan's `fuel::measure` sees the statement's
+	/// `vm_quantum`, so a limit whose prune would exceed that quantum merges runs of at most a
+	/// quantum rather than pruning the whole buffer at once.
+	#[cfg(feature = "kv-mem")]
+	#[tokio::test]
+	async fn an_in_place_scan_sort_honours_the_threads_quantum_under_measure() {
+		use super::{LARGEST_PRUNE, State};
+		use crate::exec::operators::test_util::TestDb;
+		let db = TestDb::new_with_config(
+			"DEFINE TABLE t SCHEMALESS;
+			 FOR $i IN 0..120 { CREATE type::record('t', $i) SET k = (120 - $i) };",
+			surrealdb_cnf::ConfigMap::empty()
+				.with_key_value("vm_quantum", "16")
+				.with_key_value("morsel_split_rows", "18446744073709551615"),
+		)
+		.await;
+		LARGEST_PRUNE.with(|largest| largest.set(0));
+		let responses = db
+			.datastore()
+			.execute("SELECT VALUE k FROM t ORDER BY k ASC LIMIT 40", &TestDb::owner(), None)
+			.await
+			.expect("the query runs");
+		let got = convert_public_value_to_internal(
+			responses.into_iter().next().expect("one response").result.expect("rows"),
+		);
+		let expected: Vec<Value> = (1..=40).map(Value::from).collect();
+		assert_eq!(got, Value::Array(expected.into()));
+		let largest = LARGEST_PRUNE.with(std::cell::Cell::get);
+		assert!(
+			largest > 0 && largest <= 16,
+			"expected bounded merge runs of at most the quantum (16), got largest prune/run {largest}"
+		);
+
+		// Also verify when `fuel::measure` runs on a blocking worker thread whose own
+		// `QUANTUM` was never set by the statement's task (e.g. `affinitypool::spawn_local`).
+		let ctx = db.exec_ctx().await;
+		let quantum = super::super::fuel::quantum(&ctx);
+		let program = super::super::tests_morsel::lowered(
+			&ctx,
+			"SELECT VALUE k FROM t ORDER BY k ASC LIMIT 40",
+		)
+		.await;
+		let mut state = State::new(&program, Vec::new(), ctx.function_registry()).expect("a state");
+		let worker_largest = std::thread::spawn(move || {
+			LARGEST_PRUNE.with(|largest| largest.set(0));
+			let mut spent = 0;
+			for i in 0..120i64 {
+				super::super::fuel::measure(&mut spent, quantum, || {
+					state.sort_value(&program, 0, vec![Value::from(120 - i)], Value::from(120 - i));
+				});
+			}
+			LARGEST_PRUNE.with(std::cell::Cell::get)
+		})
+		.join()
+		.expect("worker thread completes");
+		assert!(
+			worker_largest > 0 && worker_largest <= 16,
+			"expected worker thread under measure to bound merge runs to <= 16, got {worker_largest}"
+		);
 	}
 
 	/// A path removes what `Value::cut` removes for the same parts, on
