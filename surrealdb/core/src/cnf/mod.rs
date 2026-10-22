@@ -503,6 +503,7 @@ impl Config for CommonConfig {
 				&mut self.surrealism_max_kv_value_bytes,
 			)
 			.parse_key("surrealism_max_fs_bytes", &mut self.surrealism_max_fs_bytes)
+			.parse_key("surrealism_max_pool_size", &mut self.surrealism_max_pool_size)
 			.parse_key_with("surrealism_log_level", &mut self.surrealism_log_level, |s| {
 				Some(s.to_string())
 			})
@@ -782,6 +783,19 @@ mod tests {
 		let map = ConfigMap::empty().with_key_value("memory_threshold", "garbage");
 		config.parse(&map);
 		assert_eq!(config.memory_threshold, 0, "unparseable value must not change the field");
+	}
+
+	/// `surrealism_max_pool_size` must be read from the config map, so that
+	/// `SURREAL_SURREALISM_MAX_POOL_SIZE` reaches the Surrealism runtime instead
+	/// of the ceiling staying at the default of 8 (#7463).
+	#[test]
+	fn surrealism_max_pool_size_parses_from_config_map() {
+		let mut config = CommonConfig::default();
+		assert_eq!(config.surrealism_max_pool_size, 8);
+
+		let map = ConfigMap::empty().with_key_value("surrealism_max_pool_size", "32");
+		config.parse(&map);
+		assert_eq!(config.surrealism_max_pool_size, 32);
 	}
 
 	/// `SURREAL_MEMORY_THRESHOLD` must accept human-readable byte suffixes
