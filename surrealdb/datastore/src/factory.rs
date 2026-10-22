@@ -202,6 +202,7 @@ impl TransactionFactory {
 		}
 		// Counted, and dated, as `Self::open` counts and dates a transaction it opens.
 		let settled = self.triggers.catalog_epoch.settled();
+		let build_settled = self.triggers.build_epoch.settled();
 		let live_bucket = self.triggers.live.open();
 		let live_write = self.open_live_write(write);
 		let (inner, local) = match handle.0.open(write, isolation).await {
@@ -216,6 +217,8 @@ impl TransactionFactory {
 		};
 		let sole_writer = inner.sole_writer();
 		let catalog_epoch = settled.filter(|_| sole_writer).unwrap_or(crate::tx::NO_CATALOG_EPOCH);
+		let build_epoch =
+			build_settled.filter(|_| sole_writer).unwrap_or(crate::tx::NO_BUILD_EPOCH);
 		Ok(Transaction::new(
 			local,
 			sequences,
@@ -224,6 +227,7 @@ impl TransactionFactory {
 			Transactor::new(inner),
 			&self.config,
 			catalog_epoch,
+			build_epoch,
 			sole_writer,
 			Arc::clone(&self.feature),
 		)
@@ -322,6 +326,7 @@ impl TransactionFactory {
 		sequences: Sequences,
 	) -> Result<std::result::Result<(Transaction, SnapshotInfo), Duration>> {
 		let settled = self.triggers.catalog_epoch.settled();
+		let build_settled = self.triggers.build_epoch.settled();
 		let live_bucket = self.triggers.live.open();
 		let outcome = match tier.open(request).await {
 			Ok(outcome) => outcome,
@@ -348,6 +353,8 @@ impl TransactionFactory {
 				let sole_writer = transaction.sole_writer() && !info.stale;
 				let catalog_epoch =
 					settled.filter(|_| sole_writer).unwrap_or(crate::tx::NO_CATALOG_EPOCH);
+				let build_epoch =
+					build_settled.filter(|_| sole_writer).unwrap_or(crate::tx::NO_BUILD_EPOCH);
 				let tx = Transaction::new(
 					local,
 					sequences,
@@ -356,6 +363,7 @@ impl TransactionFactory {
 					Transactor::new(transaction),
 					&self.config,
 					catalog_epoch,
+					build_epoch,
 					sole_writer,
 					Arc::clone(&self.feature),
 				)
@@ -396,6 +404,7 @@ impl TransactionFactory {
 		// The catalog commits finished before the transaction opens, read
 		// before it opens so that its snapshot holds at least those.
 		let settled = self.triggers.catalog_epoch.settled();
+		let build_settled = self.triggers.build_epoch.settled();
 		// Counted live before its snapshot is taken, so a wait for the
 		// transactions older than a moment never misses this one.
 		let live_bucket = self.triggers.live.open();
@@ -413,6 +422,8 @@ impl TransactionFactory {
 		};
 		let sole_writer = inner.sole_writer();
 		let catalog_epoch = settled.filter(|_| sole_writer).unwrap_or(crate::tx::NO_CATALOG_EPOCH);
+		let build_epoch =
+			build_settled.filter(|_| sole_writer).unwrap_or(crate::tx::NO_BUILD_EPOCH);
 		Ok(Transaction::new(
 			local,
 			sequences,
@@ -421,6 +432,7 @@ impl TransactionFactory {
 			Transactor::new(inner),
 			&self.config,
 			catalog_epoch,
+			build_epoch,
 			sole_writer,
 			Arc::clone(&self.feature),
 		)

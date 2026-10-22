@@ -329,6 +329,10 @@ impl Drop for StateChange<'_> {
 /// [`Transaction::catalog_epoch`].
 pub const NO_CATALOG_EPOCH: u64 = u64::MAX;
 
+/// The build epoch of a transaction that names none; see
+/// [`Transaction::build_epoch`].
+pub const NO_BUILD_EPOCH: u64 = u64::MAX;
+
 /// The slot a transaction holds for a sequence it defined: the allocator it
 /// owns for that sequence, empty until something draws from it.
 ///
@@ -766,6 +770,11 @@ pub struct Transaction {
 	/// store's sole writer; [`NO_CATALOG_EPOCH`] otherwise
 	/// ([`Self::catalog_epoch`]).
 	catalog_epoch: u64,
+	/// The count of the datastore's commits of durable index build state
+	/// finished when this transaction opened, with none under way, where the
+	/// datastore is the store's sole writer; [`NO_BUILD_EPOCH`] otherwise
+	/// ([`Self::build_epoch`]).
+	build_epoch: u64,
 	/// How many writes and save-point rollbacks this transaction has taken
 	/// ([`Self::state_changes`]).
 	state_changes: Arc<AtomicU64>,
@@ -1728,6 +1737,9 @@ impl Transaction {
 	/// opened, where the datastore is the store's sole writer, and
 	/// [`NO_CATALOG_EPOCH`] otherwise ([`Self::catalog_epoch`]).
 	///
+	/// `build_epoch` is the same for the datastore's commits of durable index
+	/// build state, and [`NO_BUILD_EPOCH`] otherwise ([`Self::build_epoch`]).
+	///
 	/// `sole_writer` is whether the engine the transaction opened on admits no other writer of the
 	/// store ([`Self::sole_writer`]).
 	///
@@ -1742,6 +1754,7 @@ impl Transaction {
 		tr: Transactor,
 		config: &TransactionConfig,
 		catalog_epoch: u64,
+		build_epoch: u64,
 		sole_writer: bool,
 		feature: Arc<FeatureLevelCell>,
 	) -> Transaction {
@@ -1775,6 +1788,7 @@ impl Transaction {
 			creations: Default::default(),
 			shaped_indexes: Default::default(),
 			catalog_epoch,
+			build_epoch,
 			state_changes: Arc::new(AtomicU64::new(0)),
 			catalog_reads: Default::default(),
 			changefeed: OnceLock::new(),
@@ -6596,11 +6610,93 @@ impl Transaction {
 			.then_some(self.catalog_epoch)
 	}
 
+	/// The count of the datastore's commits of durable index build state
+	/// (`!bs`) whose state this transaction sees, where that count names it:
+	/// the datastore is the store's sole writer, no such commit was under way
+	/// when the transaction opened and none has started since, and the
+	/// transaction has written no build state key (nor deleted a range that may
+	/// hold one) and is not a speculation. Two transactions answering the same
+	/// count see the same build state of every index.
+	///
+	/// The snapshot a transaction reads is taken at or after it opens, and no
+	/// commit that writes build state overlapped the stretch from the opening
+	/// to this call, so the snapshot holds exactly the build-state commits
+	/// finished before the opening. A phase change, a generation rotation, an
+	/// owner change, a heartbeat and a removal each write `!bs` and so move the
+	/// count; the writes of every transaction reach the storage through its
+	/// [`Transactor`], which records them ([`Transactor::wrote_build_state`]).
+	pub fn build_epoch(&self) -> Option<u64> {
+		if self.build_epoch == NO_BUILD_EPOCH
+			|| self.tr.wrote_build_state()
+			|| self.tr.speculating()
+		{
+			return None;
+		}
+		(self.triggers.build_epoch.settled() == Some(self.build_epoch)).then_some(self.build_epoch)
+	}
+
+	/// The catalog epoch and the build epoch of this transaction, where it
+	/// names both ([`Self::catalog_epoch`], [`Self::build_epoch`]): the pair
+	/// names the catalog and every index's build state it sees.
+	fn settled_epochs(&self) -> Option<(u64, u64)> {
+		Some((self.catalog_epoch()?, self.build_epoch()?))
+	}
+
+	/// Whether the index `ix` of `tb` is known to be online in the state this
+	/// transaction sees, from a read another transaction of the same epochs
+	/// made ([`Self::keep_index_online`]).
+	///
+	/// A transaction that names both epochs reads the catalog and build state
+	/// the entry was read from, so answering from it is answering from a read.
+	/// Only an index found settled online is ever kept; a building, closing,
+	/// failed, replaced or retired one is always read from the store.
+	pub fn index_known_online(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+	) -> bool {
+		let Some((catalog, build)) = self.settled_epochs() else {
+			return false;
+		};
+		self.triggers
+			.epoch_catalog
+			.get::<()>(&crate::cache::epoch::Lookup::OnlineIndex(catalog, build, ns, db, tb, ix))
+			.is_some()
+	}
+
+	/// Whether [`Self::index_known_online`] may stand in for this
+	/// transaction's own read of the build state, where the read serves a plan.
+	///
+	/// A writer on a backend whose plain reads join its conflict set keeps the
+	/// read, so a build-state commit made after it still conflicts with it.
+	pub fn plans_from_known_online(&self) -> bool {
+		!(self.writeable() && self.plain_reads_tracked())
+	}
+
+	/// Keep the index `ix` of `tb`, which this transaction has just read as
+	/// settled online, for the transactions of its epochs: its build state
+	/// holds `Online` with no owner, or holds nothing while the catalog names the
+	/// index. The epochs are asked after the read, which they then cover.
+	pub fn keep_index_online(&self, ns: NamespaceId, db: DatabaseId, tb: &TableName, ix: IndexId) {
+		if let Some((catalog, build)) = self.settled_epochs() {
+			self.triggers.epoch_catalog.insert(
+				crate::cache::epoch::Lookup::OnlineIndex(catalog, build, ns, db, tb, ix),
+				Arc::new(()),
+			);
+		}
+	}
+
 	/// Commit the underlying transaction, counted among the datastore's
 	/// catalog commits ([`crate::triggers::CatalogEpoch`]) from before it
-	/// starts until it has returned, where it stamped a catalog version.
+	/// starts until it has returned, where it stamped a catalog version, and
+	/// among the build-state commits ([`crate::triggers::BuildEpoch`]) in the same
+	/// way where it may have written a durable index build state key.
 	async fn commit_store(&self) -> std::result::Result<(), KvsError> {
 		let _counted = self.changed_catalog().then(|| self.triggers.catalog_epoch.committing());
+		let _build_counted =
+			self.tr.wrote_build_state().then(|| self.triggers.build_epoch.committing());
 		let committed = self.tr.commit().await;
 		self.end_live_write();
 		committed
@@ -9142,6 +9238,7 @@ impl Transaction {
 			creations: Default::default(),
 			shaped_indexes: Default::default(),
 			catalog_epoch: NO_CATALOG_EPOCH,
+			build_epoch: NO_BUILD_EPOCH,
 			state_changes: Arc::new(AtomicU64::new(0)),
 			changefeed: OnceLock::new(),
 			live_events: OnceLock::new(),
@@ -15813,6 +15910,258 @@ mod catalog_epoch_tests {
 		drop(view);
 		before.cancel().await.unwrap();
 		after.cancel().await.unwrap();
+	}
+}
+
+// Every in-process backend (memory, SurrealKV, RocksDB) is its store's sole writer, so these tests
+// cover the sole-writer path only. A store that other datastores write names no build epoch
+// (`NO_BUILD_EPOCH`, as for the catalog epoch) and is not exercised here, since no in-process
+// backend answers `sole_writer() == false`.
+#[cfg(test)]
+mod build_epoch_tests {
+	use std::borrow::Cow;
+	use std::sync::Arc;
+
+	use surrealdb_cnf::ConfigMap;
+	use surrealdb_kvs::key::{KVKey, KVSubspace};
+	use surrealdb_kvs::{Key, TransactionType};
+
+	use super::Transaction;
+	use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+	use crate::factory::TransactionFactory;
+	use crate::key::schema::{
+		BuildStateKey, BuildTicketKey, DbRoot, RecordKey, RecordPrefix, TblRoot,
+	};
+	use crate::sequences::Sequences;
+	use crate::val::TableName;
+
+	const NS: NamespaceId = NamespaceId(1);
+	const DB: DatabaseId = DatabaseId(1);
+	const IX: IndexId = IndexId(4);
+
+	async fn factory() -> (TransactionFactory, Sequences) {
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
+			.await
+			.unwrap();
+		let tf = TransactionFactory::new(
+			Arc::new(crate::triggers::CommitTriggers::new()),
+			builder,
+			Arc::new(Default::default()),
+		);
+		let sequences = Sequences::new(tf.clone(), uuid::Uuid::new_v4());
+		(tf, sequences)
+	}
+
+	async fn open(tf: &TransactionFactory, sq: &Sequences, kind: TransactionType) -> Transaction {
+		tf.transaction(kind, sq.clone()).await.unwrap()
+	}
+
+	fn state_key(tb: &TableName) -> Key<'static> {
+		BuildStateKey {
+			ns: NS,
+			db: DB,
+			tb: Cow::Borrowed(tb),
+			ix: IX,
+		}
+		.encode_key()
+		.unwrap()
+	}
+
+	/// A commit that wrote a build state key moves the count; a commit of
+	/// records, or of another key under the table, does not; a transaction that
+	/// wrote the key, one open across the commit and a speculation name none.
+	#[tokio::test]
+	async fn a_build_state_commit_moves_the_build_epoch() {
+		let (tf, sq) = factory().await;
+		let tb = TableName::new("t");
+		let before = open(&tf, &sq, TransactionType::Read).await;
+		let epoch = before.build_epoch().expect("a memory store is written by its datastore");
+		let data = open(&tf, &sq, TransactionType::Write).await;
+		let record = RecordKey {
+			ns: NS,
+			db: DB,
+			tb: Cow::Borrowed(&tb),
+			id: Cow::Owned(crate::val::RecordIdKey::Number(1)),
+		}
+		.encode_key()
+		.unwrap();
+		data.set(record, b"1".to_vec()).await.unwrap();
+		data.commit().await.unwrap();
+		assert_eq!(before.build_epoch(), Some(epoch), "a record commit moved the count");
+		let writer = open(&tf, &sq, TransactionType::Write).await;
+		assert_eq!(writer.build_epoch(), Some(epoch));
+		writer.set(state_key(&tb), b"state".to_vec()).await.unwrap();
+		assert_eq!(writer.build_epoch(), None, "a transaction that wrote a build state key");
+		writer.commit().await.unwrap();
+		assert_eq!(before.build_epoch(), None, "a transaction open across the commit");
+		let after = Arc::new(open(&tf, &sq, TransactionType::Read).await);
+		assert_eq!(after.build_epoch(), Some(epoch + 1));
+		let view = after.speculate(crate::speculation::Overlay::default()).expect("not a view");
+		assert_eq!(view.txn().build_epoch(), None, "a speculation");
+		drop(view);
+		before.cancel().await.unwrap();
+		after.cancel().await.unwrap();
+	}
+
+	/// A build state key, or a range over it, written after another write to the same table is
+	/// counted as it is when it is the table's first write.
+	#[tokio::test]
+	async fn a_build_state_write_after_a_record_write_moves_the_build_epoch() {
+		let (tf, sq) = factory().await;
+		let tb = TableName::new("t");
+		let root = TblRoot {
+			ns: NS,
+			db: DB,
+			tb: Cow::Borrowed(&tb),
+		};
+		for (name, delete_range) in [("key", false), ("range", true)] {
+			let before = open(&tf, &sq, TransactionType::Read).await;
+			let epoch = before.build_epoch().unwrap();
+			let writer = open(&tf, &sq, TransactionType::Write).await;
+			let record = RecordKey {
+				ns: NS,
+				db: DB,
+				tb: Cow::Borrowed(&tb),
+				id: Cow::Owned(crate::val::RecordIdKey::Number(1)),
+			}
+			.encode_key()
+			.unwrap();
+			writer.set(record, b"1".to_vec()).await.unwrap();
+			assert_eq!(writer.build_epoch(), Some(epoch), "{name}: a record write");
+			if delete_range {
+				writer.delr(root.raw_range().unwrap()).await.unwrap();
+			} else {
+				writer.set(state_key(&tb), b"state".to_vec()).await.unwrap();
+			}
+			assert_eq!(writer.build_epoch(), None, "{name}: after a record write");
+			writer.commit().await.unwrap();
+			assert_ne!(before.build_epoch(), Some(epoch), "{name}: the commit moved nothing");
+			before.cancel().await.unwrap();
+		}
+	}
+
+	/// A rolled-back writer of a build state key counts nothing.
+	#[tokio::test]
+	async fn a_cancelled_build_state_write_moves_nothing() {
+		let (tf, sq) = factory().await;
+		let tb = TableName::new("t");
+		let before = open(&tf, &sq, TransactionType::Read).await;
+		let epoch = before.build_epoch().unwrap();
+		let writer = open(&tf, &sq, TransactionType::Write).await;
+		writer.set(state_key(&tb), b"state".to_vec()).await.unwrap();
+		writer.cancel().await.unwrap();
+		assert_eq!(before.build_epoch(), Some(epoch));
+		before.cancel().await.unwrap();
+	}
+
+	/// Deleting a range that may hold a build state key counts as writing one:
+	/// a table's whole subtree and its removal do, the range of its records
+	/// does not.
+	#[tokio::test]
+	async fn a_range_delete_over_build_state_moves_the_build_epoch() {
+		let (tf, sq) = factory().await;
+		let tb = TableName::new("t");
+		let root = TblRoot {
+			ns: NS,
+			db: DB,
+			tb: Cow::Borrowed(&tb),
+		};
+		let records = RecordPrefix {
+			ns: NS,
+			db: DB,
+			tb: Cow::Borrowed(&tb),
+		};
+		for (name, covers) in [("records", false), ("subtree", true)] {
+			let before = open(&tf, &sq, TransactionType::Read).await;
+			let epoch = before.build_epoch().unwrap();
+			let writer = open(&tf, &sq, TransactionType::Write).await;
+			if covers {
+				writer.delr(root.raw_range().unwrap()).await.unwrap();
+			} else {
+				writer.delr(records.raw_range().unwrap()).await.unwrap();
+			}
+			writer.commit().await.unwrap();
+			let moved = before.build_epoch() != Some(epoch);
+			assert_eq!(moved, covers, "{name}");
+			before.cancel().await.unwrap();
+		}
+	}
+
+	/// A range delete is judged by the span of the table it covers: the database's whole range
+	/// may hold a build state key of any table and moves the count, as does a range that starts
+	/// at the tag of the build state keys; a range that starts at the next build tag (`!bt`) and
+	/// runs to the end of the table's subtree holds none and moves nothing.
+	#[tokio::test]
+	async fn a_range_delete_is_judged_by_the_span_it_covers() {
+		let (tf, sq) = factory().await;
+		let tb = TableName::new("t");
+		let root = TblRoot {
+			ns: NS,
+			db: DB,
+			tb: Cow::Borrowed(&tb),
+		};
+		let tickets = BuildTicketKey::new(NS, DB, Cow::Borrowed(&tb), IX, 0).encode_key().unwrap();
+		let subtree = root.raw_range().unwrap();
+		let states = state_key(&tb);
+		let cases = [
+			("a database", DbRoot::new(NS, DB).raw_range().unwrap(), true),
+			("from the build state tag", subtree.part(states.as_slice(), subtree.bounds().1), true),
+			(
+				"from the next build tag",
+				subtree.part(tickets.as_slice(), subtree.bounds().1),
+				false,
+			),
+		];
+		for (name, range, moves) in cases {
+			let before = open(&tf, &sq, TransactionType::Read).await;
+			let epoch = before.build_epoch().unwrap();
+			let writer = open(&tf, &sq, TransactionType::Write).await;
+			writer.delr(range).await.unwrap();
+			assert_eq!(writer.build_epoch().is_none(), moves, "{name}: the deleting transaction");
+			writer.commit().await.unwrap();
+			assert_eq!(before.build_epoch() != Some(epoch), moves, "{name}");
+			before.cancel().await.unwrap();
+		}
+	}
+
+	/// An index kept online is known online to the transactions of its two
+	/// epochs, and to none once either epoch has moved.
+	#[tokio::test]
+	async fn a_kept_online_index_is_known_only_under_its_epochs() {
+		let (tf, sq) = factory().await;
+		let tb = TableName::new("t");
+		let first = open(&tf, &sq, TransactionType::Read).await;
+		assert!(!first.index_known_online(NS, DB, &tb, IX));
+		first.keep_index_online(NS, DB, &tb, IX);
+		assert!(first.index_known_online(NS, DB, &tb, IX));
+		let same = open(&tf, &sq, TransactionType::Read).await;
+		assert!(same.index_known_online(NS, DB, &tb, IX), "a transaction of the same epochs");
+		// A build state commit moves the build epoch.
+		let writer = open(&tf, &sq, TransactionType::Write).await;
+		writer.set(state_key(&tb), b"state".to_vec()).await.unwrap();
+		writer.commit().await.unwrap();
+		assert!(!first.index_known_online(NS, DB, &tb, IX), "open across a build commit");
+		let later = open(&tf, &sq, TransactionType::Read).await;
+		assert!(!later.index_known_online(NS, DB, &tb, IX), "opened after a build commit");
+		// A catalog commit moves the catalog epoch.
+		later.keep_index_online(NS, DB, &tb, IX);
+		assert!(later.index_known_online(NS, DB, &tb, IX));
+		let ddl = open(&tf, &sq, TransactionType::Write).await;
+		ddl.bump_catalog_version(NS, DB, &tb).await.unwrap();
+		ddl.commit().await.unwrap();
+		assert!(!later.index_known_online(NS, DB, &tb, IX), "open across a catalog commit");
+		let latest = open(&tf, &sq, TransactionType::Read).await;
+		assert!(!latest.index_known_online(NS, DB, &tb, IX), "opened after a catalog commit");
+		// A writer that wrote a build state key keeps and knows nothing.
+		let wrote = open(&tf, &sq, TransactionType::Write).await;
+		wrote.set(state_key(&tb), b"state".to_vec()).await.unwrap();
+		wrote.keep_index_online(NS, DB, &tb, IX);
+		assert!(!wrote.index_known_online(NS, DB, &tb, IX));
+		wrote.cancel().await.unwrap();
+		for tx in [first, same, later, latest] {
+			tx.cancel().await.unwrap();
+		}
 	}
 }
 

@@ -304,6 +304,13 @@ pub async fn catalog_index_state(
 /// remote point read per index on distributed engines.
 /// Document write paths intentionally read the full catalog so they can enqueue
 /// updates for building indexes.
+///
+/// An index that a transaction of the same catalog epoch and build epoch read
+/// as settled online ([`Transaction::index_known_online`]) is online without a
+/// read, and the batch covers only the rest: none when none remains. An index
+/// found settled online by a read here, with no build owner holding it or with
+/// no build state while the catalog names it, is kept for those epochs
+/// ([`Transaction::keep_index_online`]); no other state is.
 pub async fn filter_online_indexes(
 	tx: &Transaction,
 	ns: NamespaceId,
@@ -313,44 +320,71 @@ pub async fn filter_online_indexes(
 	if indexes.is_empty() {
 		return Ok(indexes);
 	}
+	let from_known = tx.plans_from_known_online();
+	let known_online = |ix: &IndexDefinition| {
+		from_known && tx.index_known_online(ns, db, &ix.table_name, ix.index_id)
+	};
+	// Every index known online answers without allocating; the set of those
+	// that are not is built only once one is not.
+	if indexes.iter().all(known_online) {
+		return Ok(indexes);
+	}
+	let known: Vec<bool> = indexes.iter().map(known_online).collect();
 	let state_keys: Vec<_> = indexes
 		.iter()
-		.map(|ix| BuildStateKey {
+		.zip(&known)
+		.filter(|(_, known)| !**known)
+		.map(|(ix, _)| BuildStateKey {
 			ns,
 			db,
-			tb: Cow::Owned(ix.table_name.clone()),
+			tb: Cow::Borrowed(&ix.table_name),
 			ix: ix.index_id,
 		})
 		.collect();
-	let states = tx.get_many_key(state_keys, None).await?;
+	let mut states = tx.get_many_key(state_keys, None).await?.into_iter();
 	let defined_unseen = tx.defined_unseen_indexes();
 	let mut filtered = Vec::new();
 	let mut filtered_any = false;
-	for (ix, state) in indexes.iter().zip(states) {
+	for (ix, known) in indexes.iter().zip(&known) {
+		if *known {
+			filtered.push(ix.clone());
+			continue;
+		}
+		let Some(state) = states.next() else {
+			fail!("build state read answered fewer values than keys");
+		};
 		// An index the transaction defined and cannot read answers nothing,
 		// whatever its durable state says: the entries it holds are committed
 		// past the transaction's snapshot, or not written yet. What is compiled
 		// from this answer is right for this transaction alone, and no catalog
 		// version names that, so nothing compiled from it is kept for another.
-		let online = if defined_unseen && tx.index_unseen(ns, db, &ix.table_name, ix.index_id) {
-			tx.note_opaque_read();
-			false
-		} else {
-			match state {
-				Some(state) => state.phase == IndexBuildPhase::Online,
-				None => {
-					catalog_still_references_index(
-						tx,
-						ns,
-						db,
-						&ix.table_name,
-						&ix.name,
-						ix.index_id,
-					)
-					.await?
+		let (online, settled) =
+			if defined_unseen && tx.index_unseen(ns, db, &ix.table_name, ix.index_id) {
+				tx.note_opaque_read();
+				(false, false)
+			} else {
+				match state {
+					Some(state) => (
+						state.phase == IndexBuildPhase::Online,
+						state.phase == IndexBuildPhase::Online && state.owner.is_none(),
+					),
+					None => {
+						let present = catalog_still_references_index(
+							tx,
+							ns,
+							db,
+							&ix.table_name,
+							&ix.name,
+							ix.index_id,
+						)
+						.await?;
+						(present, present)
+					}
 				}
-			}
-		};
+			};
+		if settled {
+			tx.keep_index_online(ns, db, &ix.table_name, ix.index_id);
+		}
 		if online {
 			filtered.push(ix.clone());
 		} else {

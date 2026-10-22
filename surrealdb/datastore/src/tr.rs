@@ -94,6 +94,14 @@ impl Transactor {
 		self.speculating
 	}
 
+	/// Whether this transaction may have written a durable index build state key, or deleted a
+	/// range that holds one ([`crate::triggers::WrittenTables::wrote_build_state`]). Every write
+	/// reaches the storage through this transactor, so no path writes one unseen; a speculation's
+	/// writes reach no storage and are not counted.
+	pub(crate) fn wrote_build_state(&self) -> bool {
+		self.written.lock().wrote_build_state()
+	}
+
 	/// End the speculation, answering the writes it holds. The view refuses
 	/// every write after, so a task still holding it once the speculation has
 	/// ended reaches neither the overlay nor the storage.
@@ -302,11 +310,16 @@ impl Transactor {
 	/// See [`surrealdb_kvs::api::Transactable::commit_unsynced`]. Crate-private:
 	/// only for a commit a later synced commit through the same store makes
 	/// durable.
+	///
+	/// It is not counted among the build-state commits
+	/// ([`crate::triggers::BuildEpoch`]), so a transaction committed through it writes no
+	/// durable index build state.
 	#[cfg_attr(
 		not(diskann),
 		allow(dead_code, reason = "only DiskANN guard coverings and steps commit unsynced")
 	)]
 	pub(crate) async fn commit_unsynced(&self) -> Result<()> {
+		debug_assert!(!self.wrote_build_state(), "an unsynced commit is not a counted commit");
 		self.inner.commit_unsynced().await
 	}
 

@@ -497,6 +497,16 @@ impl IndexBuilder {
 	/// mutation that adds a key ([`refuses_on_failed_build`]) before the
 	/// reservation commits. The queued mutations are wiped and the table
 	/// rescanned when a `REBUILD INDEX` recovers the index.
+	///
+	/// An index the user transaction already knows to be settled online
+	/// ([`crate::kvs::Transaction::index_known_online`]) is indexed normally
+	/// without a transaction of its own. The user transaction answers that only
+	/// while it names both its catalog epoch and its build epoch, so no catalog
+	/// commit and no commit of any index's build state has started since it
+	/// opened: a transaction opened now would read the same `!bs` and the same
+	/// catalog the entry was read from, and so reach the same decision. An index
+	/// that is building, closing, failed, replaced or retired is never known
+	/// online and takes the path below.
 	async fn reserve_durable_admission(
 		&self,
 		ctx: &FrozenContext,
@@ -506,6 +516,9 @@ impl IndexBuilder {
 		db: DatabaseId,
 		mutation: Option<&IndexMutation<'_>>,
 	) -> Result<DurableAdmissionDecision> {
+		if ctx.tx().index_known_online(ns, db, &ix.table_name, ix.index_id) {
+			return Ok(DurableAdmissionDecision::IndexNormally);
+		}
 		loop {
 			if let Some(reason) = ctx.done(true)? {
 				return Err(Error::from(reason).into());
@@ -538,6 +551,9 @@ impl IndexBuilder {
 							return Err(err);
 						}
 					};
+				if matches!(catalog, CatalogIndexState::Present) {
+					tx.keep_index_online(ns, db, &ix.table_name, ix.index_id);
+				}
 				tx.cancel().await?;
 				return match catalog {
 					CatalogIndexState::Present => Ok(DurableAdmissionDecision::IndexNormally),
@@ -560,6 +576,9 @@ impl IndexBuilder {
 			};
 			match state.phase {
 				IndexBuildPhase::Online => {
+					if state.owner.is_none() {
+						tx.keep_index_online(ns, db, &ix.table_name, ix.index_id);
+					}
 					tx.cancel().await?;
 					return Ok(DurableAdmissionDecision::IndexNormally);
 				}

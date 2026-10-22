@@ -37,12 +37,24 @@
 //! catalog, and the DDL that clears a table's keys (`DEFINE TABLE ... OVERWRITE`,
 //! `REMOVE TABLE`) stamps the table. Layouts are never answered to, or kept
 //! from, a writeable transaction, whose reads must see its own writes.
+//!
+//! An index's build state is kept in one form only: that the index is settled online, under the
+//! catalog epoch and the build epoch together ([`crate::tx::Transaction::build_epoch`]) and its
+//! namespace, database, table and index id. The entry says that the index's durable build state
+//! (`!bs`) is `Online` with no build owner, or absent while the catalog still names the index,
+//! and nothing else is kept (index ids are never reused and a rename stamps the catalog, so the
+//! id alone names the index): a building, closing, failed, replaced or retired index is read from
+//! the store each time. Every commit that writes a `!bs` key, or deletes a range that may hold one
+//! (a phase change, a generation or owner change, a heartbeat, a removal of the index or of its
+//! table), moves the build epoch, and a transaction that has itself written one names none. A
+//! transaction answers or keeps the entry only while it names both epochs, so the build state it
+//! would read is the build state the entry was read from.
 
 use std::sync::Arc;
 
 use quick_cache::sync::Cache;
 use quick_cache::{Equivalent, UnitWeighter};
-use surrealdb_catalog::{DatabaseId, NamespaceId};
+use surrealdb_catalog::{DatabaseId, IndexId, NamespaceId};
 use surrealdb_strand::TableName;
 
 /// How many definitions the cache keeps, across epochs.
@@ -60,6 +72,7 @@ enum Key {
 	Events(u64, NamespaceId, DatabaseId, TableName),
 	Fields(u64, NamespaceId, DatabaseId, TableName),
 	Views(u64, NamespaceId, DatabaseId, TableName),
+	OnlineIndex(u64, u64, NamespaceId, DatabaseId, TableName, IndexId),
 }
 
 /// A borrowed [`Key`].
@@ -75,6 +88,8 @@ pub(crate) enum Lookup<'a> {
 	Events(u64, NamespaceId, DatabaseId, &'a TableName),
 	Fields(u64, NamespaceId, DatabaseId, &'a TableName),
 	Views(u64, NamespaceId, DatabaseId, &'a TableName),
+	/// An index read as settled online under a catalog epoch and a build epoch.
+	OnlineIndex(u64, u64, NamespaceId, DatabaseId, &'a TableName, IndexId),
 }
 
 impl Equivalent<Key> for Lookup<'_> {
@@ -100,6 +115,10 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Tables(e, ns, db), Key::Tables(ke, kns, kdb)) => {
 				e == ke && ns == kns && db == kdb
 			}
+			(
+				Self::OnlineIndex(e, b, ns, db, tb, ix),
+				Key::OnlineIndex(ke, kb, kns, kdb, ktb, kix),
+			) => e == ke && b == kb && ns == kns && db == kdb && *tb == ktb && ix == kix,
 			_ => false,
 		}
 	}
@@ -118,6 +137,9 @@ impl From<Lookup<'_>> for Key {
 			Lookup::Events(e, ns, db, tb) => Key::Events(e, ns, db, tb.clone()),
 			Lookup::Fields(e, ns, db, tb) => Key::Fields(e, ns, db, tb.clone()),
 			Lookup::Views(e, ns, db, tb) => Key::Views(e, ns, db, tb.clone()),
+			Lookup::OnlineIndex(e, b, ns, db, tb, ix) => {
+				Key::OnlineIndex(e, b, ns, db, tb.clone(), ix)
+			}
 		}
 	}
 }

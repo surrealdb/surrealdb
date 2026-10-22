@@ -724,6 +724,18 @@ async fn index_prefix_key_count(
 	table: &TableName,
 	ix: IndexId,
 ) -> Result<usize> {
+	Ok(index_entries(ds, ns, db, table, ix).await?.len())
+}
+
+/// The keys and values under index `ix`'s root, in key order, leaving out the
+/// keys that record the value shapes it stored.
+async fn index_entries(
+	ds: &Datastore,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table: &TableName,
+	ix: IndexId,
+) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
 	use crate::key::schema::{IndexBuildShapesKey, IndexShapesKey, IndexShapesTrackedKey};
 	let tx = ds.transaction(TransactionType::Read).await?;
 	let key = IdxRoot {
@@ -758,7 +770,10 @@ async fn index_prefix_key_count(
 		}
 		.encode_key()?,
 	];
-	Ok(keys.iter().filter(|(k, _)| !shapes.iter().any(|s| s.as_slice() == k.as_slice())).count())
+	Ok(keys
+		.into_iter()
+		.filter(|(k, _)| !shapes.iter().any(|s| s.as_slice() == k.as_slice()))
+		.collect())
 }
 
 async fn seed_durable_queue_generation(
@@ -3315,6 +3330,619 @@ async fn filter_online_indexes_batches_durable_state_reads() -> Result<()> {
 	tx.cancel().await?;
 	assert_eq!(filtered.len(), 3);
 	assert_eq!(metrics.ops_get, 1, "durable build states should be read with one batched get");
+	Ok(())
+}
+
+/// An index read as settled online is served to the transactions of its catalog and build epochs
+/// without a read. Every other state is read from the store each time, never kept, and a build
+/// state commit moves the build epoch, so an index that goes `Online` -> `Building` mid-epoch is
+/// not served as online and one that goes back `Online` is used by the next plan.
+#[tokio::test(flavor = "multi_thread")]
+async fn filter_online_indexes_serves_only_settled_online_indexes_of_its_epochs() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:one SET email = 'one@example.com' RETURN NONE;
+			DEFINE INDEX one ON user FIELDS email;
+			",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "one").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	let indexes: Arc<[IndexDefinition]> = Arc::from(vec![ix.as_ref().clone()]);
+	let online = durable_build_state_for_phase(IndexBuildPhase::Online, 1, None);
+	set_durable_build_state(&ds, &ikb, online.clone()).await?;
+
+	// One read settles it; the next transaction of the epochs reads nothing.
+	let first = ds.transaction(TransactionType::Read).await?;
+	assert_eq!(filter_online_indexes(&first, ns, db, Arc::clone(&indexes)).await?.len(), 1);
+	assert_eq!(first.metrics_snapshot_for_test().ops_get, 1);
+	assert!(first.index_known_online(ns, db, &table, ix.index_id));
+	let same = ds.transaction(TransactionType::Read).await?;
+	assert_eq!(filter_online_indexes(&same, ns, db, Arc::clone(&indexes)).await?.len(), 1);
+	assert_eq!(same.metrics_snapshot_for_test().ops_get, 0, "served from the epochs' entry");
+	let settled = same.build_epoch();
+	assert!(settled.is_some());
+
+	// A builder commits `Building` after those reads cached the online set.
+	let owner = Some(ds.id());
+	let building = durable_build_state_for_phase(IndexBuildPhase::Building, 2, owner);
+	set_durable_build_state(&ds, &ikb, building).await?;
+	assert!(!same.index_known_online(ns, db, &table, ix.index_id), "open across the commit");
+	let later = ds.transaction(TransactionType::Read).await?;
+	assert_ne!(later.build_epoch(), settled, "a phase change moves the build epoch");
+	assert!(filter_online_indexes(&later, ns, db, Arc::clone(&indexes)).await?.is_empty());
+	assert!(!later.index_known_online(ns, db, &table, ix.index_id));
+	later.cancel().await?;
+
+	// No other state is ever kept, however often it is read.
+	for (phase, owner) in [
+		(IndexBuildPhase::Closing, Some(ds.id())),
+		(IndexBuildPhase::Error, None),
+		(IndexBuildPhase::Online, Some(ds.id())),
+	] {
+		let state = durable_build_state_for_phase(phase, 3, owner);
+		set_durable_build_state(&ds, &ikb, state).await?;
+		for _ in 0..2 {
+			let tx = ds.transaction(TransactionType::Read).await?;
+			let kept = filter_online_indexes(&tx, ns, db, Arc::clone(&indexes)).await?;
+			assert_eq!(kept.len(), usize::from(phase == IndexBuildPhase::Online), "{phase:?}");
+			assert!(!tx.index_known_online(ns, db, &table, ix.index_id), "{phase:?} was kept");
+			assert_eq!(tx.metrics_snapshot_for_test().ops_get, 1, "{phase:?} is read each time");
+			tx.cancel().await?;
+		}
+	}
+
+	// The build completes: the epoch moves again and the next plan uses the index.
+	let before = ds.transaction(TransactionType::Read).await?;
+	let before_epoch = before.build_epoch();
+	set_durable_build_state(
+		&ds,
+		&ikb,
+		durable_build_state_for_phase(IndexBuildPhase::Online, 3, None),
+	)
+	.await?;
+	assert!(!before.index_known_online(ns, db, &table, ix.index_id));
+	let after = ds.transaction(TransactionType::Read).await?;
+	assert_ne!(after.build_epoch(), before_epoch, "going online moves the build epoch");
+	assert_eq!(filter_online_indexes(&after, ns, db, Arc::clone(&indexes)).await?.len(), 1);
+	assert!(after.index_known_online(ns, db, &table, ix.index_id));
+	for tx in [first, same, before, after] {
+		tx.cancel().await?;
+	}
+	Ok(())
+}
+
+/// Decide the write of one row of `table` to `ix` in `tx`, as a document write does.
+async fn consume_one(
+	ds: &Datastore,
+	tx: &Arc<crate::kvs::Transaction>,
+	table: &TableName,
+	ix: &IndexDefinition,
+) -> Result<ConsumeResult> {
+	let db_def = tx.get_db_by_name("test", "test", None).await?.expect("database should exist");
+	let mut ctx = ds.setup_ctx()?;
+	ctx.set_transaction(Arc::clone(tx));
+	let ctx = ctx.freeze();
+	let rid = RecordId {
+		table: table.clone(),
+		key: RecordIdKey::from("one".to_owned()),
+	};
+	ctx.get_index_builder()
+		.expect("index builder should be present")
+		.consume(
+			db_def.as_ref(),
+			&ctx,
+			ix,
+			IndexMutation {
+				old_values: None,
+				new_values: None,
+				rid: &rid,
+				count_cond_match: None,
+			},
+		)
+		.await
+}
+
+/// The admission of a write to an online index opens a transaction of its own only when the user
+/// transaction cannot name the build state it would read: the first decision of an epoch settles
+/// it, a later user transaction of the epoch opens none, and one that was open across a build
+/// state commit, or opened after one that left the index building, decides for real.
+#[tokio::test(flavor = "multi_thread")]
+async fn online_index_admission_is_served_only_within_its_epochs() -> Result<()> {
+	let observer = Arc::new(CompletedTransactions::default());
+	let ds = Datastore::builder()
+		.with_observer(Arc::clone(&observer) as Arc<dyn crate::observe::ExecutionObserver>)
+		.without_maintenance_tasks()
+		.build_with_path("memory")
+		.await?;
+	let session = Session::owner().with_ns("test").with_db("test");
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.ensure_ns_db(None, "test", "test").await?;
+	tx.commit().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE TABLE user SCHEMALESS; DEFINE INDEX test ON user FIELDS email;",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	let decide = async |tx: &Arc<crate::kvs::Transaction>| -> Result<(u64, ConsumeResult)> {
+		let before = observer.count();
+		let result = consume_one(&ds, tx, &table, &ix).await?;
+		Ok((observer.count() - before, result))
+	};
+
+	let tx = Arc::new(ds.transaction(TransactionType::Write).await?);
+	let (opened, result) = decide(&tx).await?;
+	assert!(opened >= 1 && matches!(result, ConsumeResult::Ignored(..)), "the first decides");
+	tx.cancel().await?;
+
+	let tx = Arc::new(ds.transaction(TransactionType::Write).await?);
+	let (opened, result) = decide(&tx).await?;
+	assert_eq!(opened, 0, "a later transaction of the epochs opens none");
+	assert!(matches!(result, ConsumeResult::Ignored(..)));
+	tx.cancel().await?;
+
+	// A builder commit lands after the user transaction opened.
+	let straddling = Arc::new(ds.transaction(TransactionType::Write).await?);
+	set_durable_build_state(
+		&ds,
+		&ikb,
+		durable_build_state_for_phase(IndexBuildPhase::Online, 1, None),
+	)
+	.await?;
+	let (opened, result) = decide(&straddling).await?;
+	assert!(opened >= 1, "a build state commit since it opened forces a real admission");
+	assert!(matches!(result, ConsumeResult::Ignored(..)));
+	straddling.cancel().await?;
+
+	// The index is building when the user transaction opens.
+	let building = durable_build_state_for_phase(IndexBuildPhase::Building, 2, Some(ds.id()));
+	set_durable_build_state(&ds, &ikb, building).await?;
+	// The generation owns a ticket counter, so an admission writes no `!bs` and moves no epoch:
+	// only the state of the index keeps it from being served.
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.set_key(&ikb.new_bt_key(2), &0u64).await?;
+	tx.commit().await?;
+	for _ in 0..2 {
+		let tx = Arc::new(ds.transaction(TransactionType::Write).await?);
+		assert!(tx.build_epoch().is_some() && tx.catalog_epoch().is_some());
+		let (opened, result) = decide(&tx).await?;
+		assert!(opened >= 1, "a building index is admitted for real every time");
+		assert!(!matches!(result, ConsumeResult::Ignored(..)), "a building index is not online");
+		tx.cancel().await?;
+	}
+
+	// An `Online` state a build owner still holds is admitted as online but never kept.
+	let held = durable_build_state_for_phase(IndexBuildPhase::Online, 3, Some(ds.id()));
+	set_durable_build_state(&ds, &ikb, held).await?;
+	for _ in 0..2 {
+		let tx = Arc::new(ds.transaction(TransactionType::Write).await?);
+		let (opened, result) = decide(&tx).await?;
+		assert!(opened >= 1, "an online index with a build owner is read every time");
+		assert!(matches!(result, ConsumeResult::Ignored(..)));
+		tx.cancel().await?;
+	}
+	Ok(())
+}
+
+/// A definition replaced after its online state was kept is retired, not online.
+#[tokio::test(flavor = "multi_thread")]
+async fn online_index_admission_does_not_keep_a_replaced_definition() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE TABLE user SCHEMALESS; DEFINE INDEX test ON user FIELDS email;",
+	)
+	.await?;
+	let (_, _, table, old_ix) = get_table_index(&ds, "user", "test").await?;
+	let tx = Arc::new(ds.transaction(TransactionType::Write).await?);
+	assert!(matches!(consume_one(&ds, &tx, &table, &old_ix).await?, ConsumeResult::Ignored(..)));
+	tx.cancel().await?;
+	execute_all(&ds, &session, "DEFINE INDEX OVERWRITE test ON user FIELDS account").await?;
+	let tx = Arc::new(ds.transaction(TransactionType::Write).await?);
+	assert!(matches!(consume_one(&ds, &tx, &table, &old_ix).await?, ConsumeResult::Retired));
+	tx.cancel().await?;
+	Ok(())
+}
+
+/// A datastore whose completed transactions are counted, with `user` defined and its index `one`
+/// online, and that index's online state settled for the current epochs by one plan and one
+/// write admission.
+async fn new_observed_ds_with_online_index()
+-> Result<(Arc<Datastore>, Arc<CompletedTransactions>, Session)> {
+	let observer = Arc::new(CompletedTransactions::default());
+	let ds = Datastore::builder()
+		.with_observer(Arc::clone(&observer) as Arc<dyn crate::observe::ExecutionObserver>)
+		.without_maintenance_tasks()
+		.build_with_path("memory")
+		.await?;
+	let session = Session::owner().with_ns("test").with_db("test");
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.ensure_ns_db(None, "test", "test").await?;
+	tx.commit().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:one SET email = 'one@example.com', account = 1 RETURN NONE;
+			DEFINE INDEX one ON user FIELDS email;
+			",
+	)
+	.await?;
+	let (ns, db, _, ix) = get_table_index(&ds, "user", "one").await?;
+	let indexes: Arc<[IndexDefinition]> = Arc::from(vec![ix.as_ref().clone()]);
+	let tx = ds.transaction(TransactionType::Read).await?;
+	assert_eq!(filter_online_indexes(&tx, ns, db, indexes).await?.len(), 1);
+	tx.cancel().await?;
+	let tx = Arc::new(ds.transaction(TransactionType::Write).await?);
+	let table = TableName::from("user");
+	assert!(matches!(consume_one(&ds, &tx, &table, &ix).await?, ConsumeResult::Ignored(..)));
+	tx.cancel().await?;
+	Ok((ds, observer, session))
+}
+
+/// A `DEFINE INDEX ... CONCURRENTLY` that commits after other sessions' reads cached the online
+/// set is not served as online: the next plan reads the new index's build state and leaves it
+/// out, and the next write admission of it queues instead of indexing normally, while the index
+/// that was online stays so.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_concurrent_define_after_cached_online_reads_is_not_served_online() -> Result<()> {
+	let (ds, observer, session) = new_observed_ds_with_online_index().await?;
+	let (ns, db, table, one) = get_table_index(&ds, "user", "one").await?;
+	let cached = ds.transaction(TransactionType::Read).await?;
+	assert!(cached.index_known_online(ns, db, &table, one.index_id), "the set is cached");
+	cached.cancel().await?;
+
+	let _guard = start_index_build_paused(
+		&ds,
+		&session,
+		"DEFINE INDEX two ON user FIELDS account CONCURRENTLY",
+	)
+	.await?;
+	let (_, _, _, two) = get_table_index(&ds, "user", "two").await?;
+	let both: Arc<[IndexDefinition]> = Arc::from(vec![one.as_ref().clone(), two.as_ref().clone()]);
+
+	for (kind, label) in [(TransactionType::Read, "read"), (TransactionType::Write, "write")] {
+		let tx = ds.transaction(kind).await?;
+		let online = filter_online_indexes(&tx, ns, db, Arc::clone(&both)).await?;
+		let names: Vec<_> = online.iter().map(|ix| ix.name.to_string()).collect();
+		assert_eq!(names, ["one"], "{label}: the building index is not online");
+		assert!(!tx.index_known_online(ns, db, &table, two.index_id), "{label}");
+		tx.cancel().await?;
+	}
+
+	let tx = Arc::new(ds.transaction(TransactionType::Write).await?);
+	let before = observer.count();
+	let result = consume_one(&ds, &tx, &table, &two).await?;
+	assert!(observer.count() > before, "the building index is admitted by a read of its state");
+	assert!(!matches!(result, ConsumeResult::Ignored(..)), "a building index is not online");
+	assert!(matches!(consume_one(&ds, &tx, &table, &one).await?, ConsumeResult::Ignored(..)));
+	tx.cancel().await?;
+	Ok(())
+}
+
+/// A `DEFINE INDEX` or a `REBUILD INDEX` run inside a user transaction leaves that transaction
+/// naming neither epoch, so its plans and its write admissions read the build state themselves
+/// rather than take what other transactions of the epochs kept.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_define_or_rebuild_in_a_transaction_turns_off_the_epoch_lookups() -> Result<()> {
+	for sql in ["DEFINE INDEX two ON user FIELDS account", "REBUILD INDEX one ON user"] {
+		let (ds, observer, session) = new_observed_ds_with_online_index().await?;
+		let (ns, db, table, one) = get_table_index(&ds, "user", "one").await?;
+		let indexes: Arc<[IndexDefinition]> = Arc::from(vec![one.as_ref().clone()]);
+
+		let tx = Arc::new(ds.transaction(TransactionType::Write).await?);
+		assert!(tx.build_epoch().is_some() && tx.catalog_epoch().is_some(), "{sql}");
+		assert!(tx.index_known_online(ns, db, &table, one.index_id), "{sql}: before");
+		for result in
+			ds.run(QueryRequest::new(sql, &session).with_transaction(Arc::clone(&tx))).await?
+		{
+			result.result?;
+		}
+		assert_eq!(tx.build_epoch(), None, "{sql}");
+		assert_eq!(tx.catalog_epoch(), None, "{sql}");
+		assert!(!tx.index_known_online(ns, db, &table, one.index_id), "{sql}: after");
+
+		let reads = tx.metrics_snapshot_for_test().ops_get;
+		let online = filter_online_indexes(&tx, ns, db, indexes).await?;
+		assert!(tx.metrics_snapshot_for_test().ops_get > reads, "{sql}: the plan reads for real");
+		assert!(online.len() <= 1);
+
+		let before = observer.count();
+		consume_one(&ds, &tx, &table, &one).await?;
+		assert!(observer.count() > before, "{sql}: the admission reads for real");
+		tx.cancel().await?;
+	}
+	Ok(())
+}
+
+/// A writer on a backend whose plain reads join its conflict set reads the build state of its
+/// plan itself, though the epochs' entry holds it; a writer that is not tracked is served.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_tracked_writer_reads_the_build_state_of_its_plan() -> Result<()> {
+	let (ds, _, _) = new_observed_ds_with_online_index().await?;
+	let (ns, db, table, one) = get_table_index(&ds, "user", "one").await?;
+	let indexes: Arc<[IndexDefinition]> = Arc::from(vec![one.as_ref().clone()]);
+
+	let tracked =
+		ds.transaction_at(TransactionType::Write, crate::kvs::Isolation::Serializable).await?;
+	assert!(tracked.plain_reads_tracked() && !tracked.plans_from_known_online());
+	assert!(tracked.index_known_online(ns, db, &table, one.index_id), "the entry is present");
+	assert_eq!(filter_online_indexes(&tracked, ns, db, Arc::clone(&indexes)).await?.len(), 1);
+	assert_eq!(tracked.metrics_snapshot_for_test().ops_get, 1, "a tracked writer reads");
+	tracked.cancel().await?;
+
+	let snapshot = ds.transaction(TransactionType::Write).await?;
+	assert!(snapshot.plans_from_known_online());
+	assert_eq!(filter_online_indexes(&snapshot, ns, db, indexes).await?.len(), 1);
+	assert_eq!(snapshot.metrics_snapshot_for_test().ops_get, 0, "a snapshot writer is served");
+	snapshot.cancel().await?;
+	Ok(())
+}
+
+/// A datastore of `t` with an online index `ix` of `define`'s kind, whose completed transactions
+/// are counted, and whose online state is settled for the current epochs by one plan and one
+/// write admission, so a user transaction opened now skips its admission of `ix`.
+#[cfg(feature = "kv-mem")]
+struct AdmissionRace {
+	ds: Arc<Datastore>,
+	observer: Arc<CompletedTransactions>,
+	session: Session,
+	define: &'static str,
+}
+
+/// The two kinds of index the admission race is run over: one whose entries a second application
+/// of a write overwrites, and one whose entries it doubles.
+#[cfg(feature = "kv-mem")]
+const ADMISSION_RACE_INDEXES: [&str; 2] =
+	["DEFINE INDEX ix ON t FIELDS f", "DEFINE INDEX ix ON t COUNT"];
+
+/// The write the race decides the admission of: a record that sorts after every seeded one.
+#[cfg(feature = "kv-mem")]
+const ADMISSION_RACE_WRITE: &str = "CREATE t:zzz SET f = 'vzzz' RETURN NONE";
+
+#[cfg(feature = "kv-mem")]
+impl AdmissionRace {
+	async fn new(path: &str, define: &'static str) -> Result<Self> {
+		let observer = Arc::new(CompletedTransactions::default());
+		let ds = Datastore::builder()
+			.with_observer(Arc::clone(&observer) as Arc<dyn crate::observe::ExecutionObserver>)
+			.without_maintenance_tasks()
+			.build_with_path(path)
+			.await?;
+		let session = Session::owner().with_ns("test").with_db("test");
+		let tx = ds.transaction(TransactionType::Write).await?;
+		tx.ensure_ns_db(None, "test", "test").await?;
+		tx.commit().await?;
+		let seed: String =
+			(0..5).map(|i| format!("CREATE t:r{i} SET f = 'v{i}' RETURN NONE;")).collect();
+		execute_all(&ds, &session, &format!("DEFINE TABLE t SCHEMALESS; {seed} {define};")).await?;
+		wait_for_index_ready(&ds, &session, "t", "ix").await?;
+		let race = Self {
+			ds,
+			observer,
+			session,
+			define,
+		};
+		let (ns, db, table, ix) = get_table_index(&race.ds, "t", "ix").await?;
+		let indexes: Arc<[IndexDefinition]> = Arc::from(vec![ix.as_ref().clone()]);
+		let tx = race.ds.transaction(TransactionType::Read).await?;
+		assert_eq!(filter_online_indexes(&tx, ns, db, indexes).await?.len(), 1);
+		tx.cancel().await?;
+		let tx = Arc::new(race.ds.transaction(TransactionType::Write).await?);
+		assert!(matches!(
+			consume_one(&race.ds, &tx, &table, &ix).await?,
+			ConsumeResult::Ignored(..)
+		));
+		tx.cancel().await?;
+		race.assert_known_online(true).await?;
+		Ok(race)
+	}
+
+	/// Whether a transaction opened now is served the online state of `ix`.
+	async fn assert_known_online(&self, expected: bool) -> Result<()> {
+		let (ns, db, table, ix) = get_table_index(&self.ds, "t", "ix").await?;
+		let tx = self.ds.transaction(TransactionType::Read).await?;
+		assert_eq!(tx.index_known_online(ns, db, &table, ix.index_id), expected);
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	/// Run `sql` in `tx`, and answer how many transactions completed meanwhile: the
+	/// admissions it opened.
+	async fn write_in(&self, tx: &Arc<crate::kvs::Transaction>, sql: &str) -> Result<u64> {
+		let before = self.observer.count();
+		for result in self
+			.ds
+			.run(QueryRequest::new(sql, &self.session).with_transaction(Arc::clone(tx)))
+			.await?
+		{
+			result.result?;
+		}
+		Ok(self.observer.count() - before)
+	}
+
+	/// Start a blocking `REBUILD INDEX` on its own task.
+	fn rebuild(&self) -> tokio::task::JoinHandle<Result<()>> {
+		tokio::spawn({
+			let (ds, session) = (Arc::clone(&self.ds), self.session.clone());
+			async move { execute_all(&ds, &session, "REBUILD INDEX ix ON t").await }
+		})
+	}
+
+	/// The phase of the index's durable build state.
+	async fn phase(&self) -> Result<IndexBuildPhase> {
+		let (ns, db, table, ix) = get_table_index(&self.ds, "t", "ix").await?;
+		let ikb = IndexKeyBase::new(ns, db, table, ix.index_id);
+		Ok(durable_build_state(&self.ds, &ikb).await?.phase)
+	}
+
+	/// Wait until the index's durable build state is `Online` with no build owner and its builder
+	/// task on this datastore, if any, has exited: the build that was running has finished. An
+	/// index status of `ready` read before then can be the previous build's.
+	async fn wait_for_build_to_settle(&self) -> Result<()> {
+		let (ns, db, table, ix) = get_table_index(&self.ds, "t", "ix").await?;
+		let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+		timeout(Duration::from_secs(30), async {
+			loop {
+				let state = durable_build_state(&self.ds, &ikb).await?;
+				if state.phase == IndexBuildPhase::Online && state.owner.is_none() {
+					return Ok::<(), anyhow::Error>(());
+				}
+				sleep(Duration::from_millis(10)).await;
+			}
+		})
+		.await
+		.map_err(|_| anyhow::anyhow!("timed out waiting for the build to settle"))??;
+		match local_builder_for_key(&self.ds, ns, db, &table, ix.index_id).await? {
+			Some(building) => wait_for_finished_builder(&building).await,
+			None => Ok(()),
+		}
+	}
+
+	/// The index answers for the written record exactly once, and still does after a fresh
+	/// `REBUILD INDEX` over the final table; a plain index also holds exactly the entries that
+	/// rebuild produces. A COUNT index keeps its total as a base and deltas whose split between
+	/// the two depends on compaction, so only its answer is compared.
+	async fn assert_matches_a_fresh_rebuild(&self, case: &str) -> Result<()> {
+		let answer = async || -> Result<()> {
+			wait_for_index_ready(&self.ds, &self.session, "t", "ix").await?;
+			if self.define.ends_with("COUNT") {
+				let (indexed, expected) =
+					RebuiltIndexKind::Count.answers(&self.ds, &self.session).await?;
+				assert_eq!(indexed, expected, "{case}: the count");
+				assert_eq!(indexed, serde_json::json!(6), "{case}: the count");
+			} else {
+				expect_indexed_query_len(
+					&self.ds,
+					&self.session,
+					"SELECT id FROM t WITH INDEX ix WHERE f = 'vzzz'",
+					1,
+				)
+				.await?;
+			}
+			Ok(())
+		};
+		let entries = async || -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+			let (ns, db, table, ix) = get_table_index(&self.ds, "t", "ix").await?;
+			index_entries(&self.ds, ns, db, &table, ix.index_id).await
+		};
+		answer().await?;
+		let built = entries().await?;
+		execute_all(&self.ds, &self.session, "REBUILD INDEX ix ON t").await?;
+		answer().await?;
+		if !self.define.ends_with("COUNT") {
+			assert_eq!(built, entries().await?, "{case}: the entries of a fresh rebuild");
+		}
+		Ok(())
+	}
+}
+
+/// A write whose admission was skipped, because its transaction named the epochs of the online
+/// state it read, is still accounted for by a `REBUILD INDEX` that starts while the transaction is
+/// open: the rebuild commits its generation, then reads only once every write transaction opened
+/// before that commit has ended, so the write has committed before the wipe and the scan, which
+/// index it once.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_writer_that_skips_admission_is_accounted_for_by_a_later_rebuild() -> Result<()> {
+	for define in ADMISSION_RACE_INDEXES {
+		for engine in storage_engines()? {
+			let case = format!("{} {define}", engine.label);
+			let race = AdmissionRace::new(&engine.path, define).await?;
+			let writer = Arc::new(race.ds.transaction(TransactionType::Write).await?);
+			assert!(writer.build_epoch().is_some() && writer.catalog_epoch().is_some(), "{case}");
+			assert_eq!(race.write_in(&writer, ADMISSION_RACE_WRITE).await?, 0, "{case}: skipped");
+
+			let waited = super::builder::write_barrier_waits::count(race.ds.id());
+			let rebuild = race.rebuild();
+			wait_for_a_build_at_the_write_barrier(race.ds.id(), waited).await?;
+			assert_eq!(race.phase().await?, IndexBuildPhase::Building, "{case}");
+			sleep(Duration::from_millis(200)).await;
+			assert!(!rebuild.is_finished(), "{case}: the rebuild waits for the open writer");
+
+			writer.commit().await?;
+			timeout(Duration::from_secs(30), rebuild)
+				.await
+				.map_err(|_| anyhow::anyhow!("{case}: timed out waiting for the rebuild"))???;
+			race.assert_matches_a_fresh_rebuild(&case).await?;
+			race.ds.shutdown().await?;
+		}
+	}
+	Ok(())
+}
+
+/// A writer that opens after a `REBUILD INDEX` committed its generation is not served the online
+/// state kept before it: its admission reads the index as building and queues the write for the
+/// build, which indexes it once.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_writer_opened_after_a_rebuild_commits_its_generation_is_queued() -> Result<()> {
+	for define in ADMISSION_RACE_INDEXES {
+		for engine in storage_engines()? {
+			let case = format!("{} {define}", engine.label);
+			let race = AdmissionRace::new(&engine.path, define).await?;
+			let guard = start_index_build_paused(
+				&race.ds,
+				&race.session,
+				"REBUILD INDEX ix ON t CONCURRENTLY",
+			)
+			.await?;
+			assert_eq!(race.phase().await?, IndexBuildPhase::Building, "{case}");
+			race.assert_known_online(false).await?;
+
+			let writer = Arc::new(race.ds.transaction(TransactionType::Write).await?);
+			assert!(race.write_in(&writer, ADMISSION_RACE_WRITE).await? >= 1, "{case}: admitted");
+			writer.commit().await?;
+			drop(guard);
+			race.wait_for_build_to_settle().await?;
+			race.assert_matches_a_fresh_rebuild(&case).await?;
+			race.ds.shutdown().await?;
+		}
+	}
+	Ok(())
+}
+
+/// A writer that opened before a `REBUILD INDEX` committed its generation, and makes its first
+/// write to the table only after, is not served the online state kept for the epochs it opened
+/// in: the build epoch moved, so its admission reads the index as building and queues the write.
+/// The rebuild waits for the writer's transaction before it reads, and indexes the write once.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_writer_open_across_a_rebuilds_generation_commit_is_queued() -> Result<()> {
+	for define in ADMISSION_RACE_INDEXES {
+		for engine in storage_engines()? {
+			let case = format!("{} {define}", engine.label);
+			let race = AdmissionRace::new(&engine.path, define).await?;
+			let writer = Arc::new(race.ds.transaction(TransactionType::Write).await?);
+			assert!(writer.build_epoch().is_some() && writer.catalog_epoch().is_some(), "{case}");
+
+			let waited = super::builder::write_barrier_waits::count(race.ds.id());
+			let rebuild = race.rebuild();
+			wait_for_a_build_at_the_write_barrier(race.ds.id(), waited).await?;
+			assert_eq!(race.phase().await?, IndexBuildPhase::Building, "{case}");
+			assert!(writer.build_epoch().is_none(), "{case}: the commit moved the build epoch");
+
+			assert!(race.write_in(&writer, ADMISSION_RACE_WRITE).await? >= 1, "{case}: admitted");
+			assert!(!rebuild.is_finished(), "{case}: the rebuild waits for the open writer");
+			writer.commit().await?;
+			timeout(Duration::from_secs(30), rebuild)
+				.await
+				.map_err(|_| anyhow::anyhow!("{case}: timed out waiting for the rebuild"))???;
+			race.assert_matches_a_fresh_rebuild(&case).await?;
+			race.ds.shutdown().await?;
+		}
+	}
 	Ok(())
 }
 

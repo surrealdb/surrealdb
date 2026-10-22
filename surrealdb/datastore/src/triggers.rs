@@ -66,6 +66,35 @@ impl CatalogEpoch {
 	}
 }
 
+/// How many commits of transactions that wrote durable index build state
+/// (`!bs`) have started and finished through one datastore.
+///
+/// Counted exactly as [`CatalogEpoch`] counts catalog commits, and named by a
+/// transaction the same way ([`crate::tx::Transaction::build_epoch`]): where the
+/// datastore is the store's sole writer, the build state a transaction sees is
+/// named by the count of such commits finished before it opened, as long as none
+/// was under way when it opened and none has started since. Every write of a
+/// `!bs` key, and every range delete that may cover one, marks the writing
+/// transaction ([`WrittenTables::wrote_build_state`]), so a phase change, a
+/// generation rotation, an owner change, a heartbeat or a removal of an index's
+/// build state is a commit of this kind.
+#[derive(Default)]
+pub(crate) struct BuildEpoch(CatalogEpoch);
+
+impl BuildEpoch {
+	/// The count of finished build-state commits, where none is under way.
+	pub(crate) fn settled(&self) -> Option<u64> {
+		self.0.settled()
+	}
+
+	/// Count a build-state commit as under way until the guard is dropped,
+	/// which the caller does once the commit has returned, whether or not it
+	/// took.
+	pub(crate) fn committing(&self) -> CatalogCommit<'_> {
+		self.0.committing()
+	}
+}
+
 /// A catalog commit under way; see [`CatalogEpoch::committing`].
 pub(crate) struct CatalogCommit<'a>(&'a CatalogEpoch);
 
@@ -386,6 +415,8 @@ impl PendingGuardFences {
 pub struct CommitTriggers {
 	/// The catalog commits made through the datastore.
 	pub(crate) catalog_epoch: CatalogEpoch,
+	/// The commits of durable index build state made through the datastore.
+	pub(crate) build_epoch: BuildEpoch,
 	/// The catalog definitions read under each catalog epoch
 	/// ([`crate::cache::epoch`]).
 	pub(crate) epoch_catalog: crate::cache::epoch::EpochCatalog,
@@ -765,6 +796,10 @@ pub struct WrittenTables {
 	roots: Vec<Vec<u8>>,
 	/// Whether a write may have reached any table.
 	every: bool,
+	/// Whether a write may have reached a durable index build state key
+	/// (`!bs`, directly under a table's root). Kept for the transaction's life:
+	/// a rollback to a save point does not clear it.
+	build_state: bool,
 }
 
 /// What [`WrittenTables`] held at a save point, for a rollback to it to return to.
@@ -780,12 +815,22 @@ const TABLE_SPACE: (&[u8], &[u8]) = (b"/*", b"/+");
 impl WrittenTables {
 	/// Record a write of `key`.
 	pub fn note_key(&mut self, key: &[u8]) {
-		if self.every || self.roots.iter().any(|root| key.starts_with(root)) {
+		if self.every {
+			return;
+		}
+		if let Some(root) = self.roots.iter().find(|root| key.starts_with(root)) {
+			self.build_state |= is_build_state_tail(&key[root.len()..]);
 			return;
 		}
 		match table_root(key) {
-			Some(Some(len)) => self.roots.push(key[..len].to_vec()),
-			Some(None) => self.every = true,
+			Some(Some(len)) => {
+				self.build_state |= is_build_state_tail(&key[len..]);
+				self.roots.push(key[..len].to_vec())
+			}
+			Some(None) => {
+				self.every = true;
+				self.build_state = true;
+			}
 			None => {}
 		}
 	}
@@ -799,7 +844,8 @@ impl WrittenTables {
 		}
 	}
 
-	/// Forget what was recorded since `mark`, whose writes a rollback undid.
+	/// Forget what was recorded since `mark`, whose writes a rollback undid. Whether a build
+	/// state key may have been written is not forgotten.
 	pub fn restore(&mut self, mark: WrittenMark) {
 		self.roots.truncate(mark.roots);
 		self.every = mark.every;
@@ -807,20 +853,57 @@ impl WrittenTables {
 
 	/// Record a write of every key in `[start, end)`.
 	pub fn note_range(&mut self, start: &[u8], end: &[u8]) {
-		if self.every
-			|| start >= end
-			|| self.roots.iter().any(|root| start.starts_with(root) && within_subtree(root, end))
+		if self.every || start >= end {
+			return;
+		}
+		if let Some(root) =
+			self.roots.iter().find(|root| start.starts_with(root) && within_subtree(root, end))
 		{
+			self.build_state |= range_may_hold_build_state(root.len(), start, end);
 			return;
 		}
 		match table_root(start) {
 			Some(Some(len)) if within_subtree(&start[..len], end) => {
+				self.build_state |= range_may_hold_build_state(len, start, end);
 				self.roots.push(start[..len].to_vec())
 			}
-			_ if start < TABLE_SPACE.1 && end > TABLE_SPACE.0 => self.every = true,
+			_ if start < TABLE_SPACE.1 && end > TABLE_SPACE.0 => {
+				self.every = true;
+				self.build_state = true;
+			}
 			_ => {}
 		}
 	}
+
+	/// Whether a key written may be a durable index build state key, or a range deleted may hold
+	/// one (`CommitTriggers::build_epoch`): a key's tag directly under a table's root is `!bs`,
+	/// a range is judged by the span of the table's subtree it covers, and a write whose table
+	/// cannot be told, or a range that leaves its table, may have reached one.
+	pub fn wrote_build_state(&self) -> bool {
+		self.build_state
+	}
+}
+
+/// The key under a table's root that holds an index's durable build state: the tag, then the
+/// index id.
+const BUILD_STATE_TAG: &[u8] = b"!bs";
+
+/// Whether `tail`, the bytes of a key after its table's root, begins a build state key.
+fn is_build_state_tail(tail: &[u8]) -> bool {
+	tail.starts_with(BUILD_STATE_TAG)
+}
+
+/// Whether the range `[start, end)`, which starts in the subtree of the table whose root is the
+/// first `root` bytes of `start` and ends no later than that subtree's successor
+/// ([`within_subtree`]), may hold a build state key: it starts before the tags after `!bs` and
+/// ends after the tag itself.
+fn range_may_hold_build_state(root: usize, start: &[u8], end: &[u8]) -> bool {
+	let before_tag_after = &start[root..] < b"!bt".as_slice();
+	let after_tag = match end.get(..root) {
+		Some(head) if head == &start[..root] => &end[root..] > BUILD_STATE_TAG,
+		_ => true,
+	};
+	before_tag_after && after_tag
 }
 
 /// The length of the encoded root of the table whose subtree holds `key` — `/*{ns}*{db}*{tb}`,
