@@ -3611,13 +3611,6 @@ mod convert_tests {
 				None => CatalogAnswer::NotLoaded,
 			}
 		}
-
-		fn indexes(&self, _table: &TableName) -> CatalogAnswer<Arc<[IndexDefinition]>> {
-			if self.unknown {
-				return CatalogAnswer::Unknown;
-			}
-			CatalogAnswer::Found(Arc::from([]))
-		}
 	}
 
 	fn index(id: u32, name: &str, col: &str, kind: Index) -> IndexDefinition {
