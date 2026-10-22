@@ -1,6 +1,8 @@
 #![recursion_limit = "256"]
 
 mod helpers;
+use std::io::Write;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -8,6 +10,31 @@ use helpers::Test;
 use surrealdb_core::dbs::{Capabilities, Session};
 #[allow(unused_imports)]
 use surrealdb_core::kvs::Datastore;
+
+/// A writer that appends everything written to it into a shared buffer, so
+/// a test can install it as a `tracing` subscriber's output and assert on
+/// what got logged.
+#[derive(Clone)]
+struct VecWriter(Arc<Mutex<Vec<u8>>>);
+
+impl Write for VecWriter {
+	fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+		self.0.lock().expect("VecWriter mutex poisoned").extend_from_slice(buf);
+		Ok(buf.len())
+	}
+
+	fn flush(&mut self) -> std::io::Result<()> {
+		Ok(())
+	}
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for VecWriter {
+	type Writer = Self;
+
+	fn make_writer(&'a self) -> Self::Writer {
+		self.clone()
+	}
+}
 
 #[tokio::test]
 async fn statement_timeouts() -> Result<()> {
@@ -116,6 +143,61 @@ async fn transaction_timeout_begin_commit() -> Result<()> {
 		})
 	});
 	assert!(has_timeout_err, "Expected transaction timeout error in BEGIN block results: {res:?}");
+
+	Ok(())
+}
+
+/// When a batch of statements collectively hits the overall query timeout,
+/// the statements that never got a chance to run are correctly reported as
+/// timed out, but nothing in the batch individually exceeds the slow-log
+/// threshold on its own. The timeout itself is "slow" by definition, so it
+/// should still produce exactly one slow-log entry for the batch, not zero
+/// (the bug) and not one per unexecuted statement (log spam).
+#[tokio::test]
+async fn query_timeout_batch_emits_single_slow_log() -> Result<()> {
+	let ds = Datastore::builder()
+		.with_capabilities(Capabilities::all())
+		.with_query_timeout(Some(Duration::from_millis(800)))
+		.with_slow_log(Duration::from_millis(500), vec![], vec![])
+		.build_with_path("memory")
+		.await
+		.expect("success");
+	let session = Session::owner();
+
+	let buf = Arc::new(Mutex::new(Vec::new()));
+	let subscriber = tracing_subscriber::fmt().with_writer(VecWriter(Arc::clone(&buf))).finish();
+	let guard = tracing::subscriber::set_default(subscriber);
+
+	// Each statement takes 10ms nominally, far below the 500ms slow-log
+	// threshold, so none of them trips it on its own even under heavy
+	// scheduling jitter. A hundred of them back to back exceed the 800ms
+	// query timeout partway through, which is itself comfortably below
+	// the slow-log threshold plus the elapsed time at cancellation, so the
+	// test only depends on the relative ordering of these three values,
+	// not on hitting a precise millisecond boundary.
+	let sql = "SLEEP 10ms;".repeat(100);
+	let res = ds.execute(&sql, &session, None).await.unwrap();
+
+	drop(guard);
+
+	let timed_out = res
+		.iter()
+		.filter(|r| {
+			r.result.as_ref().is_err_and(|e| e.to_string().contains("exceeded the timeout"))
+		})
+		.count();
+	assert!(timed_out > 0, "expected at least one statement to be timed out, got: {res:?}");
+
+	let output = String::from_utf8(buf.lock().unwrap().clone()).unwrap();
+	let slow_log_lines = output.lines().filter(|l| l.contains("Slow query detected")).count();
+	assert_eq!(
+		slow_log_lines, 1,
+		"expected exactly one slow-log line for the whole batch, got {slow_log_lines}: {output}"
+	);
+	assert!(
+		output.contains("batch did not complete"),
+		"expected the batch-cancellation slow-log message, got: {output}"
+	);
 
 	Ok(())
 }

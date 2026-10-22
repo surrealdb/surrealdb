@@ -60,6 +60,13 @@ pub struct Executor {
 	/// broker was already present (higher layer) or this statement skipped installation.
 	/// Drives conditional [`clear_broker`] so we never remove an externally supplied broker.
 	broker_owned_by_executor: bool,
+	/// Set once this executor has emitted a slow-log entry for a batch or
+	/// transaction cut short by cancellation or a timeout. A single
+	/// cancellation can be observed from multiple statements in the same
+	/// batch (each remaining statement independently notices the context is
+	/// done), so this guards against logging the same cancellation more
+	/// than once.
+	cancellation_slow_log_emitted: bool,
 }
 
 impl Executor {
@@ -144,6 +151,26 @@ impl Executor {
 			ctx,
 			cached_session: None,
 			broker_owned_by_executor: false,
+			cancellation_slow_log_emitted: false,
+		}
+	}
+
+	/// Log a cancelled or timed-out batch as a slow query, once, if its
+	/// elapsed duration exceeds the configured slow-log threshold.
+	///
+	/// `next_statement_sql` should be the SQL of the statement that was
+	/// about to run when cancellation was detected, for context in the log
+	/// line. Subsequent calls after the first successful emission are
+	/// no-ops, since the whole batch is already accounted for.
+	fn maybe_log_cancelled_batch(&mut self, next_statement_sql: &str, start: &Instant) {
+		if self.cancellation_slow_log_emitted {
+			return;
+		}
+		let Some(slow_log) = self.ctx.slow_log() else {
+			return;
+		};
+		if slow_log.check_log_cancelled(start.elapsed(), next_statement_sql) {
+			self.cancellation_slow_log_emitted = true;
 		}
 	}
 
@@ -1208,6 +1235,7 @@ impl Executor {
 		let receiver = self.prepare_broker(true, kvs.live_query_broker());
 		let start_results = self.results.len();
 		let mut skip_remaining = false;
+		let txn_start = Instant::now();
 
 		// loop over the statements until we hit a cancel or a commit statement.
 		while let Some(stmt) = stream.next().await {
@@ -1225,6 +1253,7 @@ impl Executor {
 			if let Some(done) = self.ctx.done(true)? {
 				// A cancellation happened. Cancel the transaction, fast-forward the remaining
 				// results and then return.
+				self.maybe_log_cancelled_batch(&stmt.to_sql(), &txn_start);
 				let _ = txn.cancel().await;
 
 				let cancelled_count = self.results.len().saturating_sub(start_results);
@@ -1985,6 +2014,15 @@ impl Executor {
 				}
 				stmt => {
 					let query_type: QueryType = QueryType::for_toplevel_expr(&stmt);
+
+					// If the batch has already been cancelled or timed out,
+					// `execute_bare_statement` below will bail without
+					// running `stmt`. Log that as a slow query here, while
+					// `stmt` is still available to describe what was about
+					// to run, before it's moved into the call.
+					if this.ctx.done(true)?.is_some() {
+						this.maybe_log_cancelled_batch(&stmt.to_sql(), &batch_start);
+					}
 
 					// Install fresh per-statement counters so DML
 					// iterators can record affected rows independently of

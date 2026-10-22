@@ -151,6 +151,30 @@ impl SlowLog {
 		warn!("Slow query detected - time: {elapsed:#?} - query: {stm} - params: [ {params} ]");
 	}
 
+	/// Emit a slow-log entry for a batch or transaction that was cut short by
+	/// cancellation or a timeout before it could complete, if the elapsed
+	/// time up to that point exceeds the configured threshold.
+	///
+	/// Unlike `check_log`, this does not visit an AST for bound parameters:
+	/// cancellation applies to the whole batch, not to any single statement,
+	/// so there is no one set of parameters to attribute. `next_statement_sql`
+	/// is the statement that was about to run when execution stopped, shown
+	/// for context.
+	///
+	/// Returns `true` if a log line was emitted.
+	pub(crate) fn check_log_cancelled(&self, elapsed: Duration, next_statement_sql: &str) -> bool {
+		if elapsed < self.0.duration {
+			return false;
+		}
+		let next_statement_sql =
+			next_statement_sql.split_whitespace().collect::<Vec<_>>().join(" ");
+		warn!(
+			"Slow query detected - time: {elapsed:#?} - batch did not complete \
+			 (cancelled or timed out) - next statement: {next_statement_sql}"
+		);
+		true
+	}
+
 	fn extract_params<S: SlowLogVisit + ToSql>(&self, ctx: &FrozenContext, stm: &S) -> String {
 		let mut visitor = ParamVisitor {
 			params: String::new(),
