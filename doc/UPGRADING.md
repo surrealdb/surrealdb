@@ -41,6 +41,17 @@ is in, and a store may hold both side by side.
   it builds, a `DEFINE INDEX` whose build fails has its definition removed
   afterwards rather than rolled back, and the query timeout, the transaction
   timeout and a cancellation end the wait during the build.
+- A transaction that defines an index over rows committed before it does not
+  read that index until it commits, because the build's entries are committed
+  past its snapshot. Its reads go around the index: a full-text match fails
+  for want of an index to run on, and a nearest-neighbour search ranks the
+  rows of the table, as it does while a vector index builds. A duplicate of a
+  committed value in a `UNIQUE` index is a uniqueness error at the statement,
+  and a statement that changes the indexed value of a row the build indexed is
+  refused, naming the record and the index. These statements failed the
+  `COMMIT` with a write conflict that a retry met again, and the reads
+  answered from an index that lacked the rows. Define the index
+  `CONCURRENTLY`, or commit the definition before changing the rows.
 - A `REBUILD INDEX` that moves an index onto the current index format builds
   once its transaction has committed, so a cancelled one leaves the index as it
   was.

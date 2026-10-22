@@ -744,6 +744,47 @@ by the build instruction behind phase 1 for every queued kind):
     background compaction. On a datastore with no background task, such a
     caller gets an `Online` and correct index whose backlog is merged at
     read time and waits for maintenance to fold it.
+- **What the defining transaction reads.** A blocking build that runs inside
+  the transaction (the last bullet of phase 1) reads and writes in
+  transactions of its own, so its entries are committed past the snapshot of
+  the transaction that defined the index, and a `CONCURRENTLY` build writes
+  none until that transaction has closed. The transaction records every new
+  index of that kind it cannot read
+  (`surrealdb/datastore/src/unseen_indexes.rs`), unless a blocking build found
+  no record of the table to index:
+  - Its reads go around the index. `filter_online_indexes` leaves the index
+    out for that transaction, and what is compiled from that answer is kept
+    for no other. A full-text match, which only the index can answer, finds
+    none to run on until the commit, as over an index still building. A
+    nearest-neighbour search ranks the rows of the table, as it does while a
+    vector index builds.
+  - A write that adds a `UNIQUE` entry checks its key through a view opened
+    once the build had returned, which reads what the build wrote: the
+    transaction's own read of the key would not. A duplicate of a committed
+    value is a uniqueness error where it is written, not a write conflict at
+    `COMMIT` that a retry meets again.
+  - A write that changes what the build wrote for a record, an update or a
+    delete of a row that existed when the index was built, is refused
+    (`EntryOfUnseenBuild`): writing the key fails the commit against the
+    build's own write however often the transaction is retried. A row the
+    transaction creates after the definition is its own, and it changes it as
+    it likes. A row it wrote before the definition is neither: the build never
+    saw it, so the index does not hold it, yet nothing here tells it from a
+    row the build indexed, and a change to it is refused too. A count index
+    keeps nothing of a row, so every change to one is written.
+  - A build over a table that held no record is built with nothing to write,
+    and its index is read and written as any other. It lists the rows the
+    transaction writes after the definition, and no other: a row the
+    transaction wrote before it, or one its snapshot holds that another
+    transaction has since deleted, has no entry, and an indexed read leaves it
+    out. The transaction's own view of the table cannot say which of the two
+    it holds, since it shows what the transaction wrote together with its
+    snapshot's.
+  - A `REBUILD INDEX` inside a larger transaction is not recorded: its build
+    runs in transactions of its own as well, and a statement of the
+    transaction that then changes an indexed value of a row the rebuild wrote
+    again fails the commit with a write conflict. The rules above are for a
+    `DEFINE INDEX`, which has no entries before its build.
 - **Outside the transaction timer.**
   - [V] A statement in its own transaction already runs its after-commit work
     outside the timer. It executes under the transaction timeout, commits,

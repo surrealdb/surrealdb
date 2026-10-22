@@ -323,14 +323,32 @@ pub async fn filter_online_indexes(
 		})
 		.collect();
 	let states = tx.get_many_key(state_keys, None).await?;
+	let defined_unseen = tx.defined_unseen_indexes();
 	let mut filtered = Vec::new();
 	let mut filtered_any = false;
 	for (ix, state) in indexes.iter().zip(states) {
-		let online = match state {
-			Some(state) => state.phase == IndexBuildPhase::Online,
-			None => {
-				catalog_still_references_index(tx, ns, db, &ix.table_name, &ix.name, ix.index_id)
+		// An index the transaction defined and cannot read answers nothing,
+		// whatever its durable state says: the entries it holds are committed
+		// past the transaction's snapshot, or not written yet. What is compiled
+		// from this answer is right for this transaction alone, and no catalog
+		// version names that, so nothing compiled from it is kept for another.
+		let online = if defined_unseen && tx.index_unseen(ns, db, &ix.table_name, ix.index_id) {
+			tx.note_opaque_read();
+			false
+		} else {
+			match state {
+				Some(state) => state.phase == IndexBuildPhase::Online,
+				None => {
+					catalog_still_references_index(
+						tx,
+						ns,
+						db,
+						&ix.table_name,
+						&ix.name,
+						ix.index_id,
+					)
 					.await?
+				}
 			}
 		};
 		if online {

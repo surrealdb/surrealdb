@@ -40,6 +40,7 @@ mod kind;
 pub(crate) mod materialise;
 mod replay;
 mod state;
+mod unseen;
 
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests;

@@ -335,6 +335,13 @@ fn every_idx_variant() -> Vec<(&'static str, IdxError)> {
 				what: "sample",
 			},
 		),
+		(
+			"EntryOfUnseenBuild",
+			IdxError::EntryOfUnseenBuild {
+				index: "sample".to_string(),
+				record: RecordId::new("t".into(), "1".to_string()),
+			},
+		),
 	]
 }
 

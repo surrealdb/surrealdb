@@ -7,6 +7,10 @@
 //! - A statement that fails after writing part of its change leaves the caller nothing to commit:
 //!   the commit is refused, and cancels the transaction. One that fails before writing anything
 //!   leaves the transaction as it was, so the caller commits what the other statements wrote.
+//! - An index the caller's transaction defines is built in transactions of its own, past the
+//!   caller's snapshot, for as long as the caller holds the transaction open: its reads go around
+//!   the index, and a write that would fail the commit against the build's own is refused where it
+//!   is made, across the requests of the one transaction and the save points it rolls back.
 
 #![allow(clippy::unwrap_used)]
 
@@ -17,7 +21,7 @@ use surrealdb_types::Value as PublicValue;
 
 use crate::catalog::providers::CatalogProvider;
 use crate::dbs::Session;
-use crate::kvs::{Datastore, QueryRequest};
+use crate::kvs::{Datastore, QueryRequest, Transaction};
 
 /// What a commit refused for a statement that failed after writing answers.
 const REFUSED_COMMIT: &str = "A statement failed after writing part of its change";
@@ -68,15 +72,28 @@ async fn client_answers(
 	session: &Session,
 	sql: &str,
 ) -> Vec<Result<PublicValue, String>> {
+	client_answers_by_request(ds, session, &[sql]).await
+}
+
+/// The answers of each of `requests`, run by `session` one after the other in
+/// one transaction its caller owns, then the answer of the caller's commit.
+async fn client_answers_by_request(
+	ds: &Datastore,
+	session: &Session,
+	requests: &[&str],
+) -> Vec<Result<PublicValue, String>> {
 	let txn = Arc::new(ds.transaction(Write).await.unwrap());
-	let request = QueryRequest::new(sql, session).with_transaction(Arc::clone(&txn));
-	let mut out: Vec<Result<PublicValue, String>> = ds
-		.run(request)
-		.await
-		.unwrap()
-		.into_iter()
-		.map(|response| response.result.map_err(|e| e.to_string()))
-		.collect();
+	let mut out = Vec::new();
+	for sql in requests {
+		let request = QueryRequest::new(*sql, session).with_transaction(Arc::clone(&txn));
+		out.extend(
+			ds.run(request)
+				.await
+				.unwrap()
+				.into_iter()
+				.map(|response| response.result.map_err(|e| e.to_string())),
+		);
+	}
 	out.push(txn.commit().await.map(|()| PublicValue::None).map_err(|e| e.to_string()));
 	out
 }
@@ -373,4 +390,273 @@ async fn a_table_definition_refused_for_its_clauses_or_a_step_writes_nothing() {
 		answer(&ds, "SELECT VALUE id FROM p ORDER BY id;").await,
 		answer(&ds, "RETURN [p:0, p:1, p:10, p:11];").await,
 	);
+}
+
+// ------------------------------------------------------------------------------------------------
+// An index the transaction defines
+// ------------------------------------------------------------------------------------------------
+
+/// The index a caller's transaction defined holds what its build wrote, which
+/// the transaction's snapshot predates: its reads answer for every row, in the
+/// request that defined the index and in the requests after it, and the index
+/// serves the rows it indexed once the caller commits.
+#[tokio::test]
+async fn an_index_the_callers_transaction_defined_is_read_around_until_it_commits() {
+	let ds = ds().await;
+	run(
+		&ds,
+		"DEFINE TABLE item SCHEMALESS;
+		 CREATE item:1 SET k = 1 RETURN NONE;
+		 CREATE item:2 SET k = 2 RETURN NONE;",
+	)
+	.await;
+	let read = "SELECT VALUE id FROM item WITH INDEX by_k WHERE k = 1 ORDER BY id;";
+	let client = client_answers_by_request(
+		&ds,
+		&owner(),
+		&[
+			&format!("DEFINE INDEX by_k ON item FIELDS k; {read}"),
+			&format!(
+				"CREATE item:3 SET k = 1 RETURN NONE; {read} SELECT count() FROM item GROUP ALL;"
+			),
+		],
+	)
+	.await;
+	assert_ok(&client[0]);
+	assert_eq!(client[1], Ok(answer(&ds, "RETURN [item:1];").await), "the row the build indexed");
+	assert_ok(&client[2]);
+	assert_eq!(
+		client[3],
+		Ok(answer(&ds, "RETURN [item:1, item:3];").await),
+		"the build's row and the caller's own, in a request after the definition",
+	);
+	assert_eq!(client[4], Ok(answer(&ds, "RETURN [{ count: 3 }];").await));
+	assert_eq!(client[5], Ok(PublicValue::None), "the caller's commit");
+	assert_eq!(
+		answer(&ds, read).await,
+		answer(&ds, "RETURN [item:1, item:3];").await,
+		"the index serves every row it indexed once the caller has committed",
+	);
+}
+
+/// A duplicate of a committed value is a uniqueness error where it is written.
+/// It is not a write conflict at the caller's commit, which the caller would
+/// retry into the same conflict.
+#[tokio::test]
+async fn a_duplicate_of_a_committed_value_is_refused_in_the_callers_transaction() {
+	let ds = ds().await;
+	run(&ds, "DEFINE TABLE item SCHEMALESS; CREATE item:1 SET k = 1 RETURN NONE;").await;
+	let client = client_answers_by_request(
+		&ds,
+		&owner(),
+		&["DEFINE INDEX u ON item FIELDS k UNIQUE;", "CREATE item:2 SET k = 1 RETURN NONE;"],
+	)
+	.await;
+	assert_ok(&client[0]);
+	assert_err(&client[1], "Database index `u` already contains 1, with record `item:1`");
+	assert_err(&client[2], REFUSED_COMMIT);
+	assert_eq!(
+		answer(&ds, "SELECT VALUE id FROM item ORDER BY id;").await,
+		answer(&ds, "RETURN [item:1];").await,
+	);
+	assert_eq!(
+		answer(&ds, "(INFO FOR TABLE item).indexes;").await,
+		answer(&ds, "RETURN {};").await
+	);
+}
+
+/// A value no committed row holds is written, and the index enforces it, and
+/// every committed value, once the caller has committed.
+#[tokio::test]
+async fn a_free_value_is_written_in_the_callers_transaction_and_enforced_after_it() {
+	let ds = ds().await;
+	run(&ds, "DEFINE TABLE item SCHEMALESS; CREATE item:1 SET k = 1 RETURN NONE;").await;
+	let client = client_answers_by_request(
+		&ds,
+		&owner(),
+		&["DEFINE INDEX u ON item FIELDS k UNIQUE;", "CREATE item:2 SET k = 2 RETURN NONE;"],
+	)
+	.await;
+	client.iter().for_each(assert_ok);
+	assert_err(
+		&answers(&ds, "CREATE item:3 SET k = 1;").await[0],
+		"Database index `u` already contains 1, with record `item:1`",
+	);
+	assert_err(
+		&answers(&ds, "CREATE item:3 SET k = 2;").await[0],
+		"Database index `u` already contains 2, with record `item:2`",
+	);
+}
+
+/// A change that leaves the indexed value of a row alone writes nothing the
+/// build wrote, so the transaction that defined the index makes it, and the
+/// index serves the row once the caller has committed.
+#[tokio::test]
+async fn a_change_that_leaves_the_indexed_value_alone_is_made_in_the_callers_transaction() {
+	let ds = ds().await;
+	run(&ds, "DEFINE TABLE item SCHEMALESS; CREATE item:1 SET k = 1, other = 1 RETURN NONE;").await;
+	let client = client_answers_by_request(
+		&ds,
+		&owner(),
+		&["DEFINE INDEX by_k ON item FIELDS k;", "UPDATE item:1 SET other = 2 RETURN NONE;"],
+	)
+	.await;
+	client.iter().for_each(assert_ok);
+	assert_eq!(
+		answer(&ds, "SELECT * FROM item WITH INDEX by_k WHERE k = 1;").await,
+		answer(&ds, "RETURN [{ id: item:1, k: 1, other: 2 }];").await,
+	);
+}
+
+/// A row the build indexed is not given another indexed value by the
+/// transaction that defined the index, whichever request makes the change. The
+/// refusal names the record and the index. It leaves the caller nothing to
+/// commit, as does any statement that fails after writing part of its change.
+#[tokio::test]
+async fn a_row_the_build_indexed_is_not_given_another_value_in_the_callers_transaction() {
+	let ds = ds().await;
+	run(&ds, "DEFINE TABLE item SCHEMALESS; CREATE item:1 SET k = 1, other = 1 RETURN NONE;").await;
+	let client = client_answers_by_request(
+		&ds,
+		&owner(),
+		&["DEFINE INDEX by_k ON item FIELDS k;", "UPDATE item:1 SET k = 9 RETURN NONE;"],
+	)
+	.await;
+	assert_ok(&client[0]);
+	assert_err(
+		&client[1],
+		"Cannot change record `item:1`: index `by_k` was defined by this transaction",
+	);
+	assert_err(&client[2], REFUSED_COMMIT);
+	assert_eq!(
+		answer(&ds, "SELECT * FROM item;").await,
+		answer(&ds, "RETURN [{ id: item:1, k: 1, other: 1 }];").await,
+	);
+}
+
+/// The answers of `sql`, run by `session` in `txn`, which the caller keeps open
+/// across requests.
+async fn in_transaction(
+	ds: &Datastore,
+	session: &Session,
+	txn: &Arc<Transaction>,
+	sql: &str,
+) -> Vec<Result<PublicValue, String>> {
+	let request = QueryRequest::new(sql, session).with_transaction(Arc::clone(txn));
+	ds.run(request)
+		.await
+		.unwrap()
+		.into_iter()
+		.map(|response| response.result.map_err(|e| e.to_string()))
+		.collect()
+}
+
+/// A save point rolls back to a row the caller's transaction deleted, or away
+/// from one it created, after it defined the index. A row the caller created
+/// is its own however the save points fall: it changes the row as it likes
+/// whether the rollback restored it or created it afresh, and the index serves
+/// it once the caller has committed.
+#[tokio::test]
+async fn a_row_the_callers_save_point_restores_is_still_the_callers_own() {
+	let ds = ds().await;
+	run(&ds, "DEFINE TABLE item SCHEMALESS; CREATE item:1 SET k = 1 RETURN NONE;").await;
+	let session = owner();
+	let txn = Arc::new(ds.transaction(Write).await.unwrap());
+	let step = |sql: &'static str| in_transaction(&ds, &session, &txn, sql);
+
+	step("DEFINE INDEX by_k ON item FIELDS k; CREATE item:2 SET k = 2 RETURN NONE;")
+		.await
+		.iter()
+		.for_each(assert_ok);
+
+	// The row the caller created is deleted, and the rollback brings it back.
+	txn.new_save_point().await.unwrap();
+	step("DELETE item:2 RETURN NONE;").await.iter().for_each(assert_ok);
+	txn.rollback_to_save_point().await.unwrap();
+	step("UPDATE item:2 SET k = 3 RETURN NONE;").await.iter().for_each(assert_ok);
+
+	// The row the caller creates is rolled back, and the caller creates it again.
+	txn.new_save_point().await.unwrap();
+	step("CREATE item:3 SET k = 4 RETURN NONE;").await.iter().for_each(assert_ok);
+	txn.rollback_to_save_point().await.unwrap();
+	step("CREATE item:3 SET k = 5 RETURN NONE; UPDATE item:3 SET k = 6 RETURN NONE;")
+		.await
+		.iter()
+		.for_each(assert_ok);
+
+	txn.commit().await.unwrap();
+	assert_eq!(
+		answer(&ds, "SELECT * FROM item WITH INDEX by_k WHERE k >= 0 ORDER BY id;").await,
+		answer(&ds, "RETURN [{ id: item:1, k: 1 }, { id: item:2, k: 3 }, { id: item:3, k: 6 }];")
+			.await,
+	);
+}
+
+/// A save point rollback does not hand the rows the build indexed to the
+/// caller's transaction: the build wrote their entries, and a change of them
+/// is refused after the rollback as it was before.
+#[tokio::test]
+async fn a_row_the_build_indexed_stays_out_of_reach_across_the_callers_save_points() {
+	let ds = ds().await;
+	run(&ds, "DEFINE TABLE item SCHEMALESS; CREATE item:1 SET k = 1 RETURN NONE;").await;
+	let session = owner();
+	let txn = Arc::new(ds.transaction(Write).await.unwrap());
+	let refused = "Cannot change record `item:1`: index `by_k` was defined by this transaction";
+
+	in_transaction(&ds, &session, &txn, "DEFINE INDEX by_k ON item FIELDS k;")
+		.await
+		.iter()
+		.for_each(assert_ok);
+	for _ in 0..2 {
+		txn.new_save_point().await.unwrap();
+		let answers =
+			in_transaction(&ds, &session, &txn, "UPDATE item:1 SET k = 9 RETURN NONE;").await;
+		assert_err(&answers[0], refused);
+		txn.rollback_to_save_point().await.unwrap();
+	}
+	txn.cancel().await.unwrap();
+	assert_eq!(
+		answer(&ds, "SELECT * FROM item;").await,
+		answer(&ds, "RETURN [{ id: item:1, k: 1 }];").await,
+	);
+}
+
+/// A row the caller's snapshot holds and the store no longer does, because
+/// another transaction deleted it after the snapshot, is a row no build indexed.
+/// The store held no record of the table, so the index is not recorded as one
+/// the caller cannot read: the caller reads the index its snapshot has, which
+/// lists the rows it writes after the definition. An indexed read leaves the
+/// snapshot's row out where a read of the table finds it.
+#[tokio::test]
+async fn an_index_defined_over_rows_only_the_callers_snapshot_holds_has_no_entry_for_them() {
+	let ds = ds().await;
+	run(&ds, "DEFINE TABLE item SCHEMALESS; CREATE item:1 SET k = 1 RETURN NONE;").await;
+	let session = owner();
+	let txn = Arc::new(ds.transaction(Write).await.unwrap());
+	let step = |sql: &'static str| in_transaction(&ds, &session, &txn, sql);
+	let held = answer(&ds, "RETURN [item:1];").await;
+	let none = answer(&ds, "RETURN [];").await;
+
+	assert_eq!(step("SELECT VALUE id FROM item ORDER BY id;").await, [Ok(held.clone())]);
+	run(&ds, "DELETE item:1;").await;
+	assert_eq!(answer(&ds, "SELECT VALUE id FROM item;").await, none);
+
+	step("DEFINE INDEX by_k ON item FIELDS k;").await.iter().for_each(assert_ok);
+	assert_eq!(
+		step("SELECT VALUE id FROM item WITH NOINDEX WHERE k = 1 ORDER BY id;").await,
+		[Ok(held)],
+		"a read of the table finds the row the caller's snapshot holds",
+	);
+	assert_eq!(
+		step("SELECT VALUE id FROM item WITH INDEX by_k WHERE k = 1 ORDER BY id;").await,
+		[Ok(none)],
+		"the index has no entry for it",
+	);
+	step("CREATE item:2 SET k = 1 RETURN NONE;").await.iter().for_each(assert_ok);
+	assert_eq!(
+		step("SELECT VALUE id FROM item WITH INDEX by_k WHERE k = 1 ORDER BY id;").await,
+		[Ok(answer(&ds, "RETURN [item:2];").await)],
+		"the index lists the row the caller wrote after the definition",
+	);
+	txn.cancel().await.unwrap();
 }

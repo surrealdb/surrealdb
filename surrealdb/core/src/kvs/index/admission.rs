@@ -136,6 +136,14 @@ impl IndexBuilder {
 		ix: &IndexDefinition,
 		mutation: IndexMutation<'_>,
 	) -> Result<ConsumeResult> {
+		// An index this transaction defined and cannot read may refuse the
+		// write before it reaches any decision about the build.
+		{
+			let tx = ctx.tx();
+			if tx.defined_unseen_indexes() {
+				super::unseen::judge_write(&tx, db, ix, &mutation)?;
+			}
+		}
 		let table_name = &ix.table_name;
 		let ikb =
 			IndexKeyBase::new(db.namespace_id, db.database_id, table_name.clone(), ix.index_id);

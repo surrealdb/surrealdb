@@ -118,12 +118,32 @@ pub enum Error {
 		index_id: u32,
 		element: u64,
 	},
+
+	/// A transaction changed a record that an index it defined holds an entry
+	/// for, written by the build the definition ran.
+	///
+	/// A blocking build reads and writes in transactions of its own, so the
+	/// transaction that defined the index cannot see that entry, and writing
+	/// the key fails the transaction's commit against the build's own write
+	/// whatever it is retried with. The change is refused where it is made,
+	/// not at the commit.
+	#[error(
+		"Cannot change record `{record}`: index `{index}` was defined by this transaction, and the build that ran for it wrote an entry for the record that this transaction cannot see. Define the index CONCURRENTLY, or commit the definition before changing the record.",
+		record = record.to_sql()
+	)]
+	EntryOfUnseenBuild {
+		index: String,
+		record: RecordId,
+	},
 }
 
 impl LeafError for Error {
 	fn map_kind(self, message: String) -> TypesError {
 		match self {
 			Error::DuplicatedMatchRef {
+				..
+			}
+			| Error::EntryOfUnseenBuild {
 				..
 			} => TypesError::validation(message, None),
 			Error::NoIndexFoundForMatch {

@@ -14,6 +14,8 @@
 // Runtime support for the instructions the IR lowering emits.
 #![allow(dead_code)]
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -949,21 +951,35 @@ async fn move_entries(
 				txn.set_key(&key, &value).await.map_err(ControlFlow::Err)?;
 				continue;
 			}
-			match txn.put_compare_key(&key, &value, None).await {
-				Ok(()) => continue,
-				// The key is taken: report the record that holds it.
-				Err(e) if condition_not_met(&e) => {}
-				Err(e) => return Err(ControlFlow::Err(e)),
+			// An entry the build of an index this transaction defined wrote is
+			// no entry of the transaction's snapshot, so a write over it would
+			// pass the check below and fail the commit instead.
+			let built = if txn.defined_unseen_indexes() {
+				written_by_unseen_build(&txn, ctx, ix, &key).await?
+			} else {
+				None
+			};
+			if built.is_none() {
+				match txn.put_compare_key(&key, &value, None).await {
+					Ok(()) => continue,
+					// The key is taken: report the record that holds it.
+					Err(e) if condition_not_met(&e) => {}
+					Err(e) => return Err(ControlFlow::Err(e)),
+				}
 			}
-			let held: IndexEntryValue =
-				txn.get_key(&key, None).await.map_err(ControlFlow::Err)?.ok_or_else(|| {
-					ControlFlow::Err(
-						crate::kvs::DatastoreError::CorruptedIndex(
-							"a unique entry refused a write and is absent",
+			let held: IndexEntryValue = match built {
+				Some(held) => held,
+				None => {
+					txn.get_key(&key, None).await.map_err(ControlFlow::Err)?.ok_or_else(|| {
+						ControlFlow::Err(
+							crate::kvs::DatastoreError::CorruptedIndex(
+								"a unique entry refused a write and is absent",
+							)
+							.into(),
 						)
-						.into(),
-					)
-				})?;
+					})?
+				}
+			};
 			let mut n = n;
 			return Err(ControlFlow::Err(anyhow::Error::new(crate::idx::Error::IndexExists {
 				record: held.rid,
@@ -976,6 +992,57 @@ async fn move_entries(
 		}
 	}
 	Ok(false)
+}
+
+/// The entry at `key` of `UNIQUE` index `ix`, when `ix` is an index this
+/// transaction defined whose build wrote it. Asked only of a transaction that
+/// defined an index it cannot read, so every other write pays nothing for it.
+///
+/// The build commits in transactions of its own, past this transaction's
+/// snapshot, so this transaction's reads of the key do not show it. The entry is
+/// read through the view opened once the build had returned, which nothing but
+/// the build writes to while this transaction is open, and which a record this
+/// transaction created never reaches: those entries are its own, and its own
+/// reads show them.
+///
+/// The future is built here and returned boxed, so that the caller, on the
+/// path every write takes, holds a pointer to it and not its size.
+#[inline(never)]
+fn written_by_unseen_build<'a>(
+	txn: &'a crate::kvs::Transaction,
+	ctx: &'a WriteCtx,
+	ix: &'a IndexDefinition,
+	key: &'a crate::idx::kernels::btree::StoredKey,
+) -> Pin<Box<impl Future<Output = FlowResult<Option<IndexEntryValue>>> + 'a>> {
+	Box::pin(read_written_by_unseen_build(txn, ctx, ix, key))
+}
+
+async fn read_written_by_unseen_build(
+	txn: &crate::kvs::Transaction,
+	ctx: &WriteCtx,
+	ix: &IndexDefinition,
+	key: &crate::idx::kernels::btree::StoredKey,
+) -> FlowResult<Option<IndexEntryValue>> {
+	use surrealdb_datastore::unseen_indexes::Unseen;
+	let view = txn
+		.with_unseen_index(
+			ctx.db.namespace_id,
+			ctx.db.database_id,
+			&ix.table_name,
+			ix.index_id,
+			|unseen| match unseen {
+				Unseen::Built {
+					view,
+					..
+				} => view.clone(),
+				Unseen::Queued => None,
+			},
+		)
+		.flatten();
+	match view {
+		Some(view) => view.get_key(key, None).await.map_err(ControlFlow::Err),
+		None => Ok(None),
+	}
 }
 
 /// Record the shapes of the values `n` B-tree index `ix` stores beyond those

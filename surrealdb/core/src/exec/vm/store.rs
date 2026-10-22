@@ -2119,6 +2119,9 @@ async fn step_inner(
 				}
 				_ => None,
 			};
+			let built_inside = after_commit.is_none();
+			let index_id = index.index_id;
+			let unique = matches!(index.index, crate::catalog::Index::Uniq);
 			let materialise =
 				(*blocking && index.index.queues_compaction() && txn.accepts_materialise_waits())
 					.then(|| {
@@ -2177,6 +2180,21 @@ async fn step_inner(
 				}
 			}
 			.map_err(ControlFlow::Err)?;
+			// A build that ran inside this transaction wrote its entries in
+			// transactions of its own, which this one's snapshot predates.
+			if *fresh && built_inside {
+				builder
+					.note_unseen_definition(
+						&txn,
+						(table.namespace_id, table.database_id),
+						&table.name,
+						index_id,
+						unique,
+						*blocking,
+					)
+					.await
+					.map_err(ControlFlow::Err)?;
+			}
 			// Phase 2: once the transaction has committed and phase 1 has
 			// brought the index online, wait for it to be materialised. Queued
 			// behind phase 1, which the owner awaits first and which ends the

@@ -69,6 +69,7 @@ pub mod tasklease;
 pub mod tr;
 pub mod triggers;
 pub mod tx;
+pub mod unseen_indexes;
 pub mod util;
 pub mod version;
 

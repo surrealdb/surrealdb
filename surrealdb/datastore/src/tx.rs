@@ -896,6 +896,17 @@ pub struct Transaction {
 	/// speculation.
 	cached_index_admissions:
 		parking_lot::Mutex<HashMap<CachedIndexBuildReservationKey, (u64, CachedIndexAdmission)>>,
+	/// The indexes this transaction defined and cannot read
+	/// ([`Self::mark_index_unseen`]).
+	///
+	/// Set once, by the first `DEFINE INDEX` of the transaction whose build
+	/// leaves entries it cannot see, so every other transaction holds a null
+	/// pointer. Each of its speculations takes a copy, because the views they
+	/// read through choose indexes as it does and what they record is their
+	/// own. Out of line, because `Transaction` is held on the stack through
+	/// deep recursive paths where the inline size matters.
+	pub(crate) unseen_indexes:
+		OnceLock<Arc<parking_lot::Mutex<crate::unseen_indexes::UnseenIndexes>>>,
 	/// Allocators for sequences this transaction has defined and not committed.
 	///
 	/// The node's allocator reads definitions through transactions of its own,
@@ -1788,6 +1799,7 @@ impl Transaction {
 			pending_index_build_reservations: Mutex::new(Vec::new()),
 			cached_index_build_reservations: Mutex::new(HashMap::new()),
 			cached_index_admissions: Default::default(),
+			unseen_indexes: OnceLock::new(),
 			provisional_sequences: Mutex::new(HashMap::new()),
 			defines_any_sequence: AtomicBool::new(false),
 			provisional_save_points: Mutex::new(Vec::new()),
@@ -4684,7 +4696,12 @@ impl Transaction {
 
 	/// Whether `tb` holds a record key, as this transaction sees it. The probe reads one key
 	/// through this transaction, so it sees the transaction's own writes.
-	async fn holds_record(&self, ns: NamespaceId, db: DatabaseId, tb: &TableName) -> Result<bool> {
+	pub async fn holds_record(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<bool> {
 		let records = RecordPrefix {
 			ns,
 			db,
@@ -9148,6 +9165,14 @@ impl Transaction {
 			pending_index_build_reservations: Mutex::new(Vec::new()),
 			cached_index_build_reservations: Mutex::new(HashMap::new()),
 			cached_index_admissions: Default::default(),
+			// The view chooses indexes as this transaction does, so it reads
+			// what this transaction cannot read of them. What it records is
+			// its own, so it takes a copy.
+			unseen_indexes: self
+				.unseen_indexes
+				.get()
+				.map(|registry| Arc::new(parking_lot::Mutex::new(registry.lock().clone())))
+				.map_or_else(OnceLock::new, OnceLock::from),
 			provisional_sequences: Mutex::new(HashMap::new()),
 			defines_any_sequence: AtomicBool::new(false),
 			provisional_save_points: Mutex::new(Vec::new()),
@@ -10920,7 +10945,9 @@ impl Transaction {
 	// Index functions
 	// --------------------------------------------------
 
-	/// Drain and release every queued durable index-build reservation.
+	/// Drain and release every queued durable index-build reservation, and close
+	/// the views this transaction holds of what the builds of the indexes it
+	/// defined wrote ([`Self::release_unseen_indexes`]).
 	///
 	/// Called from both the commit and cancel paths so that each admitted
 	/// ticket is released exactly once after the user transaction terminates.
@@ -10942,6 +10969,9 @@ impl Transaction {
 	}
 
 	async fn release_index_build_reservations_body(&self) -> Result<()> {
+		if self.defined_unseen_indexes() {
+			Box::pin(self.release_unseen_indexes()).await;
+		}
 		// Take the queued reservations under the lock so concurrent registrations
 		// see an empty queue while releases are in flight.
 		let reservations = {
