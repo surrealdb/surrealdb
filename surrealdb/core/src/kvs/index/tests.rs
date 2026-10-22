@@ -8339,6 +8339,75 @@ async fn a_transaction_is_not_refused_for_its_own_nodes_answer_to_its_build() ->
 	Ok(())
 }
 
+/// Commit a client-owned transaction on node A of two that runs `writes` and then
+/// `DEFINE INDEX ia ON a`, whose build is held while node B rebuilds `ix ON t`, which reads only
+/// once node A has answered its write barrier. Answers the commit's outcome.
+#[cfg(feature = "kv-mem")]
+async fn commit_past_another_nodes_build(writes: &str) -> Result<Result<()>> {
+	let (ds_a, ds_b, session, answering) = two_nodes_with_a_count_index().await?;
+	tokio::spawn({
+		let (ds, answering) = (Arc::clone(&ds_a), answering.clone());
+		async move {
+			while !answering.is_cancelled() {
+				let _ = ds.answer_write_barrier(&answering).await;
+				sleep(Duration::from_millis(20)).await;
+			}
+		}
+	});
+	execute_all(&ds_a, &session, "DEFINE TABLE a SCHEMALESS;").await?;
+	let site = RetryableConflictSite::ConcurrentIndexInitialCleanup;
+	let guard = inject_retryable_conflicts(site, ds_a.id(), REPEATED_RETRY_CONFLICTS);
+	let txn = Arc::new(ds_a.transaction(TransactionType::Write).await?);
+	for result in
+		ds_a.run(QueryRequest::new(writes, &session).with_transaction(Arc::clone(&txn))).await?
+	{
+		result.result?;
+	}
+	let own = tokio::spawn({
+		let (ds, session, txn) = (Arc::clone(&ds_a), session.clone(), Arc::clone(&txn));
+		async move {
+			let request =
+				QueryRequest::new("DEFINE INDEX ia ON a FIELDS f", &session).with_transaction(txn);
+			for result in ds.run(request).await? {
+				result.result?;
+			}
+			Ok::<_, anyhow::Error>(())
+		}
+	});
+	wait_for_retry_conflict(site, ds_a.id(), REPEATED_RETRY_CONFLICTS).await?;
+	// Node A answers node B's barrier while the transaction is set aside for its own build.
+	timeout(Duration::from_secs(20), async {
+		execute_all(&ds_b, &session, "REBUILD INDEX ix ON t").await?;
+		wait_for_index_ready(&ds_b, &session, "t", "ix").await
+	})
+	.await
+	.map_err(|_| anyhow::anyhow!("timed out waiting for the other node's rebuild"))??;
+	drop(guard);
+	timeout(Duration::from_secs(20), own)
+		.await
+		.map_err(|_| anyhow::anyhow!("timed out waiting for the own build"))???;
+	let committed = txn.commit().await;
+	answering.cancel();
+	Ok(committed)
+}
+
+/// On a store several nodes write, a transaction whose own blocking build ran while its node
+/// answered another node's build's barrier commits when it writes nothing of that build's table,
+/// and is refused with a retryable conflict when it does: the answer let that build read without
+/// waiting for the transaction.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_transaction_another_nodes_build_passed_is_refused_only_for_its_table() -> Result<()> {
+	commit_past_another_nodes_build("CREATE a:1 SET f = 'y'")
+		.await?
+		.expect("a build of another table on another node passed it");
+	let refused = commit_past_another_nodes_build("CREATE t:9")
+		.await?
+		.expect_err("a build on another node of a table it writes passed it");
+	assert!(is_retryable_transaction_conflict(&refused), "{refused}");
+	Ok(())
+}
+
 /// On a store several nodes write, a node whose heartbeat has lapsed refuses its own write
 /// commits, still commits the heartbeat that ends the lapse, and after it refuses a transaction
 /// that was open across the lapse, while a fresh one commits.
@@ -8403,25 +8472,26 @@ async fn a_transaction_counts_again_once_its_own_build_has_ended() -> Result<()>
 	expect_indexed_query_len(&ds, &session, "SELECT id FROM b WITH INDEX ib WHERE f = 'x'", 1).await
 }
 
-/// A transaction whose own blocking build ran while another build began its wait for older write
-/// transactions is refused at commit with a retryable conflict, even when that wait is still
-/// running once the transaction is counted back in: the wait read its epoch while the transaction
-/// was set aside, and may end without it.
-#[cfg(feature = "kv-mem")]
-#[tokio::test(flavor = "multi_thread")]
-async fn a_transaction_a_build_passed_while_it_awaited_its_own_is_refused() -> Result<()> {
-	let (ds, session) = new_index_test_ds().await?;
-	execute_all(
-		&ds,
-		&session,
-		"DEFINE TABLE a SCHEMALESS; DEFINE TABLE b SCHEMALESS; CREATE b:1 SET f = 'x';",
-	)
-	.await?;
+/// Commit a client-owned transaction that runs `writes` and then `DEFINE INDEX ia ON a`, whose
+/// build is held while `DEFINE INDEX ib ON b CONCURRENTLY`, run in `elsewhere`, begins its wait
+/// for older write transactions, and a newer writer keeps that wait running past the
+/// transaction's return. Answers the commit's outcome.
+async fn commit_past_another_build(
+	ds: &Arc<Datastore>,
+	session: &Session,
+	writes: &str,
+	elsewhere: &Session,
+) -> Result<Result<()>> {
 	let site = RetryableConflictSite::ConcurrentIndexInitialCleanup;
 	let guard = inject_retryable_conflicts(site, ds.id(), REPEATED_RETRY_CONFLICTS);
 	let txn = Arc::new(ds.transaction(TransactionType::Write).await?);
+	for result in
+		ds.run(QueryRequest::new(writes, session).with_transaction(Arc::clone(&txn))).await?
+	{
+		result.result?;
+	}
 	let own = tokio::spawn({
-		let (ds, session, txn) = (Arc::clone(&ds), session.clone(), Arc::clone(&txn));
+		let (ds, session, txn) = (Arc::clone(ds), session.clone(), Arc::clone(&txn));
 		async move {
 			let request =
 				QueryRequest::new("DEFINE INDEX ia ON a FIELDS f", &session).with_transaction(txn);
@@ -8437,9 +8507,9 @@ async fn a_transaction_a_build_passed_while_it_awaited_its_own_is_refused() -> R
 	let newer = ds.transaction(TransactionType::Write).await?;
 	let (begun, _) = ds.transaction_factory().live_writes().waits();
 	let waited = super::builder::write_barrier_waits::count(ds.id());
-	let elsewhere = tokio::spawn({
-		let (ds, session) = (Arc::clone(&ds), session.clone());
-		async move { execute_all(&ds, &session, "DEFINE INDEX ib ON b FIELDS f CONCURRENTLY").await }
+	let other = tokio::spawn({
+		let (ds, elsewhere) = (Arc::clone(ds), elsewhere.clone());
+		async move { execute_all(&ds, &elsewhere, "DEFINE INDEX ib ON b FIELDS f CONCURRENTLY").await }
 	});
 	timeout(Duration::from_secs(20), async {
 		while ds.transaction_factory().live_writes().waits().0 <= begun {
@@ -8453,12 +8523,59 @@ async fn a_transaction_a_build_passed_while_it_awaited_its_own_is_refused() -> R
 		.await
 		.map_err(|_| anyhow::anyhow!("timed out waiting for the own build"))???;
 	wait_for_a_build_at_the_write_barrier(ds.id(), waited).await?;
-	let refused = txn.commit().await.expect_err("the transaction a build passed is refused");
-	assert!(is_retryable_transaction_conflict(&refused), "{refused}");
+	let committed = txn.commit().await;
 	newer.cancel().await?;
-	timeout(Duration::from_secs(20), elsewhere)
+	timeout(Duration::from_secs(20), other)
 		.await
 		.map_err(|_| anyhow::anyhow!("timed out waiting for the other definition"))???;
+	Ok(committed)
+}
+
+/// A transaction whose own blocking build ran while another build began its wait for older write
+/// transactions, and that writes the other build's table, is refused at commit with a retryable
+/// conflict, even when that wait is still running once the transaction is counted back in: the
+/// wait read its epoch while the transaction was set aside, and may end without it.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_transaction_a_build_passed_while_it_awaited_its_own_is_refused() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE TABLE a SCHEMALESS; DEFINE TABLE b SCHEMALESS; CREATE b:1 SET f = 'x';",
+	)
+	.await?;
+	let refused = commit_past_another_build(&ds, &session, "CREATE b:2 SET f = 'y'", &session)
+		.await?
+		.expect_err("the transaction a build of a table it writes passed is refused");
+	assert!(is_retryable_transaction_conflict(&refused), "{refused}");
+	Ok(())
+}
+
+/// A transaction whose own blocking build ran while another build began its wait for older write
+/// transactions commits when it writes nothing of the other build's table, whether that table is
+/// in the same database or another one: the other build reads nothing the transaction commits.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_transaction_a_build_of_another_table_passed_commits() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	let other = Session::owner().with_ns("test").with_db("other");
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.ensure_ns_db(None, "test", "other").await?;
+	tx.commit().await?;
+	let tables = "DEFINE TABLE a SCHEMALESS; DEFINE TABLE b SCHEMALESS; CREATE b:1 SET f = 'x';";
+	execute_all(&ds, &session, tables).await?;
+	execute_all(&ds, &other, tables).await?;
+	// The other build in another database, as concurrent tests each in their own database run.
+	commit_past_another_build(&ds, &session, "CREATE a:1 SET f = 'y'", &other)
+		.await?
+		.expect("a build in another database passed it");
+	execute_all(&ds, &other, "REMOVE INDEX ib ON b").await?;
+	execute_all(&ds, &session, "REMOVE INDEX ia ON a").await?;
+	// The other build of another table in the same database.
+	commit_past_another_build(&ds, &session, "CREATE a:2 SET f = 'z'", &session)
+		.await?
+		.expect("a build of another table passed it");
 	Ok(())
 }
 

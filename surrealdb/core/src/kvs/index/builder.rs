@@ -502,7 +502,11 @@ impl Future for BuildCompletion {
 		if polled.is_ready()
 			&& let Some(mut parked) = this.parked.take()
 		{
-			parked.own_waits(this.building.write_barrier_waits_begun.load(Ordering::SeqCst));
+			let key = &this.building.ix_key;
+			parked.own_waits(
+				this.building.write_barrier_waits_begun.load(Ordering::SeqCst),
+				(key.ns, key.db, key.tb.clone()),
+			);
 		}
 		polled
 	}

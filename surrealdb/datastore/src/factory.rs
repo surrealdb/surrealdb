@@ -445,11 +445,13 @@ impl TransactionFactory {
 		self.triggers.live_writes()
 	}
 
-	/// Count a wait for older write transactions that is about to begin, for as long as the
-	/// returned guard lives ([`crate::triggers::LiveWrites::waits`]).
-	pub fn begin_write_wait(&self) -> WriteWait {
-		self.triggers.live_writes.begin_wait();
-		WriteWait(Arc::clone(&self.triggers))
+	/// Count a wait for older write transactions on `tables`, the tables of the builds it lets
+	/// read, or on every table for `None`, that is about to begin, for as long as the returned
+	/// guard lives ([`crate::triggers::LiveWrites::begin_wait`]). A wait that cannot tell which
+	/// tables those builds are on passes `None`.
+	pub fn begin_write_wait(&self, tables: Option<&[crate::triggers::FencedTable]>) -> WriteWait {
+		let id = self.triggers.live_writes.begin_wait(tables);
+		WriteWait(Arc::clone(&self.triggers), id)
 	}
 
 	/// The heartbeat fence on this datastore's writes ([`crate::triggers::WriteFence`]).
@@ -525,10 +527,10 @@ impl TransactionFactory {
 /// A wait for older write transactions, counted as running by its datastore's
 /// [`crate::triggers::LiveWrites`] until dropped.
 #[must_use]
-pub struct WriteWait(Arc<CommitTriggers>);
+pub struct WriteWait(Arc<CommitTriggers>, u64);
 
 impl Drop for WriteWait {
 	fn drop(&mut self) {
-		self.0.live_writes.end_wait();
+		self.0.live_writes.end_wait(self.1);
 	}
 }

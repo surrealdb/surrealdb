@@ -107,7 +107,7 @@ use crate::testing::{
 	NonRetryableErrorSite, RetryableConflictSite, maybe_inject_non_retryable_error,
 	maybe_inject_retryable_conflict,
 };
-use crate::triggers::CommitTriggers;
+use crate::triggers::{CommitTriggers, FencedTable};
 use crate::values::catalog_version::{CatalogObject, CatalogObjectKind, CatalogVersion};
 use crate::values::changefeed::Changefeed;
 #[cfg(diskann)]
@@ -809,9 +809,11 @@ pub struct Transaction {
 	/// Whether the heartbeat fence lets this transaction commit whatever it finds: the heartbeat's
 	/// own transaction ([`Self::exempt_from_write_fence`]).
 	write_fence_exempt: AtomicBool,
-	/// Whether a build's wait for older write transactions ended while this one was set aside for
-	/// its own build ([`Self::rejoin_live_writes`]), so its commit is refused.
-	passed_a_wait: AtomicBool,
+	/// The waits for older write transactions, other than its own build's, that may have passed
+	/// this one while it was set aside for its own build ([`Self::rejoin_live_writes`]). Its
+	/// commit is refused if it writes one of their tables, or one of them is on every table
+	/// ([`crate::triggers::PassedWaits::refuses`]).
+	passed_waits: parking_lot::Mutex<crate::triggers::PassedWaits>,
 	/// Write-cardinality guard: maximum number of individual key writes this
 	/// transaction may buffer before further writes fail. Unset by default,
 	/// leaving the transaction unbounded. Armed once — by the executor for
@@ -1361,23 +1363,26 @@ impl Drop for LiveCommit<'_> {
 #[must_use]
 pub struct ParkedWrite {
 	txn: Arc<Transaction>,
-	/// How many waits had begun, and how many were running, when it was set aside.
-	waits: (u64, u64),
-	/// How many of the waits that begin while it is set aside are its own build's.
-	own: u64,
+	/// The id [`crate::triggers::LiveWrites::park`] set it aside as.
+	parked: u64,
+	/// How many of the waits that begin while it is set aside are its own build's, and the table
+	/// that build builds an index of.
+	own: Option<(u64, FencedTable)>,
 }
 
 impl ParkedWrite {
-	/// Record that the build the transaction awaits began `own` of the waits that begin while it
-	/// is set aside. A guard dropped without it counts every such wait as another build's.
-	pub fn own_waits(&mut self, own: u64) {
-		self.own = own;
+	/// Record that the build the transaction awaits, of an index on `table`, began `own` of the
+	/// waits that begin while it is set aside. A guard dropped without it counts every such wait
+	/// as another build's.
+	pub fn own_waits(&mut self, own: u64, table: FencedTable) {
+		self.own = Some((own, table));
 	}
 }
 
 impl Drop for ParkedWrite {
 	fn drop(&mut self) {
-		self.txn.rejoin_live_writes(self.waits, self.own);
+		let own = self.own.as_ref().map(|(own, table)| (*own, table));
+		self.txn.rejoin_live_writes(self.parked, own);
 	}
 }
 
@@ -1773,7 +1778,7 @@ impl Transaction {
 			live_write_epoch: AtomicU64::new(NO_LIVE_EPOCH),
 			opened_at: None,
 			write_fence_exempt: AtomicBool::new(false),
-			passed_a_wait: AtomicBool::new(false),
+			passed_waits: Default::default(),
 			write_keys_limit: OnceLock::new(),
 			write_guard_poisoned: AtomicBool::new(false),
 			save_point_poisoned: AtomicBool::new(false),
@@ -6605,15 +6610,20 @@ impl Transaction {
 	/// dropped, so a wait for older write transactions does not end while it may still land; or
 	/// answer why it may not commit. Every write commit passes this, bare ones included:
 	///
-	/// - A build elsewhere may have read without waiting for this transaction while it awaited its
-	///   own index build ([`Self::rejoin_live_writes`]).
+	/// - A build of a table this transaction writes, or a wait on every table, may have read
+	///   without waiting for this transaction while it awaited its own index build
+	///   ([`Self::rejoin_live_writes`]).
 	/// - A wait that ran its bound fenced the epoch it opened in, for every table or for one it
 	///   wrote ([`crate::triggers::LiveWrites::begin_commit`]).
 	/// - This node's heartbeat has lapsed, so a build may have left it out of its wait for the
 	///   writes older than its commit, and it commits no write to a store it shares
 	///   ([`crate::triggers::WriteFence`]). The heartbeat's own transaction is exempt.
 	fn admit_commit(&self) -> std::result::Result<Option<LiveCommit<'_>>, KvsError> {
-		if self.passed_a_wait.load(Ordering::SeqCst) {
+		let passed = self.passed_waits.lock();
+		// No build read past a transaction no wait passed, so its written tables need no reading.
+		let refused = !passed.is_empty() && passed.refuses(&self.tr.written.lock());
+		drop(passed);
+		if refused {
 			return Err(KvsError::TransactionConflict(
 				"another index build read while this transaction awaited its own index build"
 					.to_string(),
@@ -7868,37 +7878,43 @@ impl Transaction {
 		if self.live_write_epoch.load(Ordering::SeqCst) == NO_LIVE_EPOCH {
 			return None;
 		}
-		// Read before the transaction leaves its bucket: a wait counted after this reads the epoch
-		// after the transaction may have left, so it counts as one begun while it was set aside.
-		let waits = self.triggers.live_writes.waits();
+		// Set aside before the transaction leaves its epoch: a wait that reads the epoch after the
+		// transaction may have left is recorded as one that may pass it.
+		let parked = self.triggers.live_writes.park();
 		self.end_live_write();
 		Some(ParkedWrite {
 			txn: Arc::clone(self),
-			waits,
-			own: 0,
+			parked,
+			own: None,
 		})
 	}
 
-	/// Count this transaction, set aside when `waits` had begun and were running, back among the
-	/// writes a build waits for, its own build having begun `own` of the waits begun since.
+	/// Count this transaction, set aside as `parked`, back among the writes a build waits for,
+	/// its own build having begun `own` of the waits begun since, all on the table it builds.
 	///
 	/// A wait that was running when the transaction was set aside, or that began while it was set
 	/// aside and is not its own build's, may not wait for it, and the build behind that wait may
-	/// read before what the transaction wrote or will write commits. Its commit is then refused
-	/// with a retryable conflict. A wait that begins after the transaction is counted back in
-	/// waits for it. A transaction already closed counts nothing.
-	fn rejoin_live_writes(&self, waits: (u64, u64), own: u64) {
+	/// read before what the transaction wrote or will write commits. Each such wait is kept with
+	/// its tables, and the commit is refused with a retryable conflict if the transaction writes
+	/// one of those tables, or one of those waits is on every table ([`Self::admit_commit`]).
+	/// A wait that begins after the transaction is counted back in waits for it. A transaction
+	/// already closed counts nothing.
+	fn rejoin_live_writes(&self, parked: u64, own: Option<(u64, &FencedTable)>) {
+		let live = &self.triggers.live_writes;
 		if self.closed() {
+			live.rejoin(parked);
 			return;
 		}
-		let live = &self.triggers.live_writes;
 		// Counted back into the current epoch, so a fence of the epochs before it, which the
-		// transaction's own build may set, does not refuse it.
+		// transaction's own build may set, does not refuse it. Counted in before the waits stop
+		// being recorded, so every wait either waits for it or is recorded.
 		self.live_write_epoch.store(live.open(), Ordering::SeqCst);
-		let (begun, running) = waits;
-		let (begun_now, _) = live.waits();
-		if running > 0 || begun_now.saturating_sub(begun) > own {
-			self.passed_a_wait.store(true, Ordering::SeqCst);
+		let mut passed = live.rejoin(parked);
+		if let Some((own, table)) = own {
+			passed.credit(own, table);
+		}
+		if !passed.is_empty() {
+			self.passed_waits.lock().merge(passed);
 		}
 	}
 
@@ -9122,7 +9138,7 @@ impl Transaction {
 			live_write_epoch: AtomicU64::new(NO_LIVE_EPOCH),
 			opened_at: None,
 			write_fence_exempt: AtomicBool::new(false),
-			passed_a_wait: AtomicBool::new(false),
+			passed_waits: Default::default(),
 			write_keys_limit: OnceLock::new(),
 			write_guard_poisoned: AtomicBool::new(false),
 			save_point_poisoned: AtomicBool::new(false),
@@ -16321,6 +16337,127 @@ mod older_build_write_tests {
 		let tx = txn(&tf, &sq).await;
 		assert_eq!(tx.catalog_version(NS, DB, &tb).await.unwrap(), Some(version));
 		tx.cancel().await.unwrap();
+	}
+}
+
+#[cfg(test)]
+mod parked_write_tests {
+	use std::sync::Arc;
+
+	use surrealdb_cnf::ConfigMap;
+	use surrealdb_kvs::key::KVKey;
+	use surrealdb_kvs::{Key, TransactionType};
+
+	use crate::factory::TransactionFactory;
+	use crate::sequences::Sequences;
+	use crate::triggers::FencedTable;
+
+	async fn factory() -> (TransactionFactory, Sequences) {
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
+			.await
+			.unwrap();
+		let tf = TransactionFactory::new(
+			Arc::new(crate::triggers::CommitTriggers::new()),
+			builder,
+			Arc::new(Default::default()),
+		);
+		let sequences = Sequences::new(tf.clone(), uuid::Uuid::new_v4());
+		(tf, sequences)
+	}
+
+	fn table(tb: &str) -> FencedTable {
+		(crate::catalog::NamespaceId(1), crate::catalog::DatabaseId(2), tb.into())
+	}
+
+	fn record(tb: &str) -> Key<'static> {
+		let tb = crate::val::TableName::from(tb);
+		crate::key::schema::RecordKey {
+			ns: crate::catalog::NamespaceId(1),
+			db: crate::catalog::DatabaseId(2),
+			tb: std::borrow::Cow::Borrowed(&tb),
+			id: std::borrow::Cow::Owned(crate::val::RecordIdKey::Number(1)),
+		}
+		.encode_key()
+		.unwrap()
+	}
+
+	/// Whether a transaction that writes table `a` commits, set aside for its own build of an
+	/// index on `a`, which begins one wait while it is set aside, as do waits on each of `others`'
+	/// tables (`None` for a wait on every table).
+	async fn commits_past(others: &[Option<&[&str]>]) -> bool {
+		let (tf, sq) = factory().await;
+		let tx = Arc::new(tf.transaction(TransactionType::Write, sq).await.unwrap());
+		tx.set(record("a"), b"v".to_vec()).await.unwrap();
+		let mut parked = tx.park_live_write().expect("a write transaction is counted");
+		let own = tf.begin_write_wait(Some(&[table("a")]));
+		let waits: Vec<_> = others
+			.iter()
+			.map(|tbs| {
+				let tables = tbs.map(|tbs| tbs.iter().copied().map(table).collect::<Vec<_>>());
+				tf.begin_write_wait(tables.as_deref())
+			})
+			.collect();
+		drop(own);
+		drop(waits);
+		parked.own_waits(1, table("a"));
+		drop(parked);
+		match tx.commit().await {
+			Ok(()) => true,
+			Err(err) => {
+				assert!(err.to_string().contains("awaited its own index build"), "{err}");
+				false
+			}
+		}
+	}
+
+	/// A transaction set aside for its own build is refused at commit only where a wait that may
+	/// have passed it, other than its own build's, is on a table it writes or on every table.
+	#[tokio::test]
+	async fn a_parked_writer_is_refused_only_by_a_wait_on_a_table_it_writes() {
+		assert!(commits_past(&[]).await, "only its own build's wait passed it");
+		assert!(commits_past(&[Some(&["b"])]).await, "a build of another table");
+		assert!(!commits_past(&[Some(&["a"])]).await, "another build of its own table");
+		assert!(!commits_past(&[None]).await, "a wait on every table");
+		assert!(!commits_past(&[Some(&["b"]), Some(&["a"])]).await, "one of several on its table");
+		assert!(commits_past(&[Some(&["b", "c"])]).await, "an answer on other tables");
+		assert!(!commits_past(&[Some(&["c", "a"])]).await, "an answer on its table among others");
+	}
+
+	/// A transaction set aside while a wait on a table it writes is running is refused, though
+	/// the wait began before it was set aside; one counted back in before a wait begins is waited
+	/// for, so that wait refuses nothing.
+	#[tokio::test]
+	async fn a_wait_running_when_a_writer_is_parked_passes_it() {
+		let (tf, sq) = factory().await;
+		let tx = Arc::new(tf.transaction(TransactionType::Write, sq.clone()).await.unwrap());
+		tx.set(record("a"), b"v".to_vec()).await.unwrap();
+		let running = tf.begin_write_wait(Some(&[table("a")]));
+		let parked = tx.park_live_write().expect("a write transaction is counted");
+		drop(running);
+		drop(parked);
+		assert!(tx.commit().await.is_err(), "the running wait may not have waited for it");
+
+		let tx = Arc::new(tf.transaction(TransactionType::Write, sq).await.unwrap());
+		tx.set(record("a"), b"v".to_vec()).await.unwrap();
+		drop(tx.park_live_write().expect("a write transaction is counted"));
+		let later = tf.begin_write_wait(Some(&[table("a")]));
+		tx.commit().await.expect("a wait begun after it was counted back in waits for it");
+		drop(later);
+	}
+
+	/// A transaction that writes a table only after it is counted back in is refused by a wait on
+	/// that table that passed it: the build behind the wait may read before the write commits.
+	#[tokio::test]
+	async fn a_write_after_the_rejoin_counts_against_a_passed_wait() {
+		let (tf, sq) = factory().await;
+		let tx = Arc::new(tf.transaction(TransactionType::Write, sq).await.unwrap());
+		tx.set(record("a"), b"v".to_vec()).await.unwrap();
+		let parked = tx.park_live_write().expect("a write transaction is counted");
+		drop(tf.begin_write_wait(Some(&[table("b")])));
+		drop(parked);
+		tx.set(record("b"), b"v".to_vec()).await.unwrap();
+		assert!(tx.commit().await.is_err());
 	}
 }
 

@@ -736,10 +736,9 @@ pub struct LiveWrites {
 	/// Whether [`Self::table_fences`] holds any fence, set once one is, so a commit that no
 	/// table fence can refuse reads neither the fences nor the tables it wrote.
 	has_table_fences: AtomicBool,
-	/// How many waits have begun, and how many are running, so a transaction set aside for a
-	/// while can tell whether a wait may have passed it ([`Self::waits`]).
-	waits_begun: AtomicU64,
-	waits_running: AtomicU64,
+	/// The waits running and the transactions set aside, so a transaction set aside for a while
+	/// learns which tables the waits that may have passed it wait on ([`Self::park`]).
+	waits: parking_lot::Mutex<Waits>,
 	/// The write barriers builds through this datastore raised and its answer has not yet passed
 	/// ([`Self::answers_only_own`]).
 	own_barriers: parking_lot::Mutex<std::collections::BTreeSet<u64>>,
@@ -868,6 +867,126 @@ fn encoded_root(table: &FencedTable) -> Option<Vec<u8>> {
 	.encode_bound()
 	.ok()
 	.map(|bound| bound.as_slice().to_vec())
+}
+
+/// The tables one wait for older write transactions waits on, each once, as the encoded root of
+/// its subtree ([`encoded_root`]), or `None` for a wait on every table.
+type WaitScope = Option<Vec<Vec<u8>>>;
+
+/// The scope of a wait on `tables`: every table for `None`, or where one of them cannot be named.
+fn wait_scope(tables: Option<&[FencedTable]>) -> WaitScope {
+	let mut roots: Vec<Vec<u8>> = Vec::new();
+	for table in tables? {
+		let root = encoded_root(table)?;
+		if !roots.contains(&root) {
+			roots.push(root);
+		}
+	}
+	Some(roots)
+}
+
+/// The waits running through one datastore, and what each transaction set aside has learned of
+/// the waits that may pass it ([`LiveWrites::park`]).
+#[derive(Default)]
+struct Waits {
+	/// How many waits have begun: the id of the next one.
+	begun: u64,
+	/// The scope of each wait running, by id.
+	running: HashMap<u64, WaitScope>,
+	/// How many transactions have been set aside: the id of the next one.
+	parked_count: u64,
+	/// The waits that may pass each transaction set aside, by the id [`LiveWrites::park`]
+	/// answered.
+	parked: HashMap<u64, PassedWaits>,
+}
+
+/// The waits that may have passed a write transaction while it was set aside
+/// ([`LiveWrites::park`]): each may not have waited for it, so the build behind it may read
+/// before the transaction commits. Counted per table, so the waits of the transaction's own build
+/// can be taken back out ([`Self::credit`]).
+///
+/// The transaction's commit is refused when one of these waits is on a table it writes, or on
+/// every table ([`Self::refuses`]). A build's wait is on the table it builds an index of, whose
+/// writes are all its read depends on — the scope a fence refuses by
+/// ([`LiveWrites::fence_tables_through`]) — and a node's answer to other nodes' barriers is on the
+/// tables of the builds it lets read, so a transaction that writes none of the passed waits'
+/// tables commits nothing such a build reads.
+#[derive(Default, Debug)]
+pub struct PassedWaits {
+	/// How many passed waits are on each table, by its encoded root.
+	tables: HashMap<Vec<u8>, u64>,
+	/// How many passed waits are on every table.
+	every: u64,
+}
+
+impl PassedWaits {
+	fn add(&mut self, scope: &WaitScope) {
+		let Some(roots) = scope else {
+			self.every += 1;
+			return;
+		};
+		for root in roots {
+			match self.tables.get_mut(root) {
+				Some(count) => *count += 1,
+				None => {
+					self.tables.insert(root.clone(), 1);
+				}
+			}
+		}
+	}
+
+	/// The waits of a set-aside [`LiveWrites::park`] holds no record of: one on every table, so
+	/// the transaction commits nothing a build may have read past.
+	fn unrecorded() -> Self {
+		Self {
+			tables: HashMap::new(),
+			every: 1,
+		}
+	}
+
+	/// Take back out `own` waits on `table`, begun by the build the transaction was set aside for,
+	/// which waits for the transaction by awaiting it, not by reading its epoch.
+	pub fn credit(&mut self, own: u64, table: &FencedTable) {
+		if own == 0 {
+			return;
+		}
+		match encoded_root(table) {
+			Some(root) => {
+				if let Some(count) = self.tables.get_mut(&root) {
+					*count = count.saturating_sub(own);
+					if *count == 0 {
+						self.tables.remove(&root);
+					}
+				}
+			}
+			None => self.every = self.every.saturating_sub(own),
+		}
+	}
+
+	/// Count the waits of `other` among these: a transaction set aside more than once is judged
+	/// by every wait that passed it.
+	pub fn merge(&mut self, other: PassedWaits) {
+		for (root, count) in other.tables {
+			*self.tables.entry(root).or_default() += count;
+		}
+		self.every += other.every;
+	}
+
+	/// Whether no wait passed.
+	pub fn is_empty(&self) -> bool {
+		self.tables.is_empty() && self.every == 0
+	}
+
+	/// Whether a transaction that wrote `written` may not commit: a passed wait is on every table,
+	/// a write may have reached any table, or a passed wait is on a table written.
+	pub fn refuses(&self, written: &WrittenTables) -> bool {
+		if self.is_empty() {
+			return false;
+		}
+		self.every > 0
+			|| written.every
+			|| written.roots.iter().any(|root| self.tables.contains_key(root))
+	}
 }
 
 #[derive(Default)]
@@ -1026,22 +1145,57 @@ impl LiveWrites {
 		self.epochs.lock().range(..=since).all(|(_, counts)| counts.committing == 0)
 	}
 
-	/// Count a wait that is about to read the epoch it waits past, until
-	/// [`Self::end_wait`]: a build's, or a node's answer to a write barrier another node's build
-	/// raised. See [`crate::factory::WriteWait`].
-	pub(crate) fn begin_wait(&self) {
-		self.waits_running.fetch_add(1, Ordering::SeqCst);
-		self.waits_begun.fetch_add(1, Ordering::SeqCst);
+	/// Count a wait that is about to read the epoch it waits past, on `tables`, or on every table
+	/// for `None`, until [`Self::end_wait`] with the id answered: a build's, on the table it
+	/// builds, or a node's answer to write barriers other nodes' builds raised, on their tables.
+	/// Every transaction set aside learns of it ([`Self::park`]). See
+	/// [`crate::factory::WriteWait`].
+	pub(crate) fn begin_wait(&self, tables: Option<&[FencedTable]>) -> u64 {
+		let scope = wait_scope(tables);
+		let mut waits = self.waits.lock();
+		for passed in waits.parked.values_mut() {
+			passed.add(&scope);
+		}
+		let id = waits.begun;
+		waits.begun += 1;
+		waits.running.insert(id, scope);
+		id
 	}
 
-	/// Count a wait counted by [`Self::begin_wait`] as no longer running.
-	pub(crate) fn end_wait(&self) {
-		self.waits_running.fetch_sub(1, Ordering::SeqCst);
+	/// Count the wait [`Self::begin_wait`] answered `id` for as no longer running.
+	pub(crate) fn end_wait(&self, id: u64) {
+		self.waits.lock().running.remove(&id);
 	}
 
 	/// How many waits have begun, and how many are running.
 	pub fn waits(&self) -> (u64, u64) {
-		(self.waits_begun.load(Ordering::SeqCst), self.waits_running.load(Ordering::SeqCst))
+		let waits = self.waits.lock();
+		(waits.begun, waits.running.len() as u64)
+	}
+
+	/// Set aside a write transaction about to count itself out of its epoch, answering the id to
+	/// hand to [`Self::rejoin`]. Every wait running now, and every wait that begins before the
+	/// rejoin, may read its epoch once the transaction has left it, so may not wait for it: each
+	/// is recorded as one that may pass it. Called before the transaction counts itself out, so no
+	/// wait reads its epoch without it and goes unrecorded.
+	pub(crate) fn park(&self) -> u64 {
+		let mut waits = self.waits.lock();
+		let mut passed = PassedWaits::default();
+		for scope in waits.running.values() {
+			passed.add(scope);
+		}
+		let id = waits.parked_count;
+		waits.parked_count += 1;
+		waits.parked.insert(id, passed);
+		id
+	}
+
+	/// Stop recording the waits that may pass the transaction set aside as `id`, answering those
+	/// recorded. Called once the transaction has counted itself back into an epoch, so a wait that
+	/// begins after this waits for it. An `id` with no record answers a wait on every table, so
+	/// the transaction is refused rather than admitted unjudged.
+	pub(crate) fn rejoin(&self, id: u64) -> PassedWaits {
+		self.waits.lock().parked.remove(&id).unwrap_or_else(PassedWaits::unrecorded)
 	}
 
 	/// Serialise a raise of the write barrier, with its record as this datastore's own, against an
@@ -1067,6 +1221,17 @@ impl LiveWrites {
 		own.retain(|barrier| *barrier > answered);
 		let covered = own.range(answered.saturating_add(1)..=asked).count() as u64;
 		covered == asked.saturating_sub(answered)
+	}
+
+	/// The write barriers after `answered` up to `asked`, which an answer of `asked` covers, that a
+	/// build through this datastore raised. Read while the raises are held ([`Self::lock_raises`]),
+	/// so none of them is between its commit and its record as this datastore's own.
+	pub fn own_barriers_covered(
+		&self,
+		answered: u64,
+		asked: u64,
+	) -> std::collections::BTreeSet<u64> {
+		self.own_barriers.lock().range(answered.saturating_add(1)..=asked).copied().collect()
 	}
 
 	/// Forget the barriers this datastore raised through `answered`, whose answer is recorded.
@@ -1277,6 +1442,101 @@ mod tests {
 		assert!(live.begin_commit(epoch, &written), "the fenced table's write");
 		live.end_commit(epoch);
 		live.close(epoch);
+	}
+
+	#[test]
+	fn a_wait_passes_a_parked_transaction_only_for_the_tables_it_waits_on() {
+		let live = LiveWrites::default();
+		let (writes_a, writes_b) =
+			(written(&[&record_key(1, 2, "a")]), written(&[&record_key(1, 2, "b")]));
+		let parked = live.park();
+		let wait = live.begin_wait(Some(&[table(1, 2, "b")]));
+		let passed = live.rejoin(parked);
+		live.end_wait(wait);
+		assert!(!passed.refuses(&writes_a), "a wait on another table");
+		assert!(passed.refuses(&writes_b), "a wait on a table it writes");
+		assert!(!passed.refuses(&written(&[&record_key(1, 3, "b")])), "another database's table");
+		assert!(!passed.refuses(&written(&[])), "a transaction that wrote no table");
+		let mut every = WrittenTables::default();
+		every.note_range(b"/*", b"/+");
+		assert!(passed.refuses(&every), "a write that may be of any table");
+		// A wait on every table refuses every write.
+		let parked = live.park();
+		let wait = live.begin_wait(None);
+		live.end_wait(wait);
+		let passed = live.rejoin(parked);
+		assert!(passed.refuses(&writes_a) && passed.refuses(&written(&[])));
+		// A wait running when the transaction is set aside may pass it too.
+		let wait = live.begin_wait(Some(&[table(1, 2, "a")]));
+		let parked = live.park();
+		live.end_wait(wait);
+		assert!(live.rejoin(parked).refuses(&writes_a), "a wait running when it was set aside");
+		// One that began and ended before, or begins after the rejoin, does not.
+		let wait = live.begin_wait(Some(&[table(1, 2, "a")]));
+		live.end_wait(wait);
+		let parked = live.park();
+		let passed = live.rejoin(parked);
+		live.end_wait(live.begin_wait(None));
+		assert!(passed.is_empty(), "{passed:?}");
+		assert!(live.waits.lock().parked.is_empty(), "a rejoined transaction is forgotten");
+		assert!(live.rejoin(parked).refuses(&written(&[])), "a set-aside with no record refuses");
+		assert_eq!(live.waits(), (5, 0));
+	}
+
+	#[test]
+	fn a_parked_transaction_is_credited_only_its_own_builds_waits() {
+		let live = LiveWrites::default();
+		let writes_a = written(&[&record_key(1, 2, "a")]);
+		let parked = live.park();
+		// Its own build's wait, and another build's of the same table.
+		live.end_wait(live.begin_wait(Some(&[table(1, 2, "a")])));
+		live.end_wait(live.begin_wait(Some(&[table(1, 2, "a")])));
+		let mut passed = live.rejoin(parked);
+		passed.credit(1, &table(1, 2, "b"));
+		assert!(passed.refuses(&writes_a), "a credit on another table takes nothing back");
+		passed.credit(1, &table(1, 2, "a"));
+		assert!(passed.refuses(&writes_a), "the other build's wait still passed it");
+		passed.credit(1, &table(1, 2, "a"));
+		assert!(passed.is_empty());
+		// Passed waits gathered over two set-asides are judged together.
+		let mut gathered = PassedWaits::default();
+		let parked = live.park();
+		live.end_wait(live.begin_wait(Some(&[table(1, 2, "a")])));
+		gathered.merge(live.rejoin(parked));
+		let parked = live.park();
+		gathered.merge(live.rejoin(parked));
+		assert!(gathered.refuses(&writes_a), "a wait that passed an earlier set-aside");
+	}
+
+	#[test]
+	fn a_wait_on_several_tables_passes_a_parked_transaction_for_each() {
+		let live = LiveWrites::default();
+		let writes = |tb: &str| written(&[&record_key(1, 2, tb)]);
+		let parked = live.park();
+		// An answer to barriers on `b` and `c`, two of them on `b`.
+		let tables = [table(1, 2, "b"), table(1, 2, "c"), table(1, 2, "b")];
+		live.end_wait(live.begin_wait(Some(&tables)));
+		let mut passed = live.rejoin(parked);
+		assert!(!passed.refuses(&writes("a")), "a table it does not wait on");
+		assert!(passed.refuses(&writes("b")) && passed.refuses(&writes("c")));
+		// Counted once on each of its tables.
+		passed.credit(1, &table(1, 2, "b"));
+		assert!(!passed.refuses(&writes("b")), "{passed:?}");
+		assert!(passed.refuses(&writes("c")));
+		// A wait on no table passes nothing.
+		let parked = live.park();
+		live.end_wait(live.begin_wait(Some(&[])));
+		assert!(live.rejoin(parked).is_empty());
+	}
+
+	#[test]
+	fn an_answer_learns_which_barriers_it_covers_are_its_own() {
+		let live = LiveWrites::default();
+		live.note_own_barrier(2);
+		live.note_own_barrier(4);
+		assert_eq!(live.own_barriers_covered(1, 4), [2, 4].into());
+		assert_eq!(live.own_barriers_covered(0, 3), [2].into());
+		assert!(live.own_barriers_covered(2, 3).is_empty(), "barrier 3 is another datastore's");
 	}
 
 	#[test]

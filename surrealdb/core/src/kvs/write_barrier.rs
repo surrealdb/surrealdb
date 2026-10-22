@@ -156,8 +156,8 @@ pub(crate) struct WriteBarrier {
 	/// The table whose index the build builds: the only one whose writes a wait that has run
 	/// its bound refuses.
 	target: FencedTable,
-	/// Counts the wait as running for as long as it lives, for a transaction set aside while it
-	/// runs ([`surrealdb_datastore::triggers::LiveWrites::waits`]).
+	/// Counts the wait, on `target`, as running for as long as it lives, for a transaction set
+	/// aside while it runs ([`surrealdb_datastore::triggers::LiveWrites::begin_wait`]).
 	_running: surrealdb_datastore::factory::WriteWait,
 }
 
@@ -171,7 +171,7 @@ impl WriteBarrier {
 		target: FencedTable,
 	) -> Result<Self> {
 		// Counted before the epoch is read, so a transaction set aside after that read sees it.
-		let running = tf.begin_write_wait();
+		let running = tf.begin_write_wait(Some(std::slice::from_ref(&target)));
 		let since = tf.live_writes().advance();
 		let tx = tf.transaction(TransactionType::Read, sequences.clone()).await?;
 		let sole_writer = tx.sole_writer();
@@ -503,10 +503,15 @@ impl Datastore {
 		// Any other answer is a wait that may pass a transaction set aside for its own build, and
 		// is counted as running from before it reads the epoch.
 		let only_own = answered.is_some_and(|answered| live.answers_only_own(answered, asked));
+		let own = match answered {
+			Some(answered) => live.own_barriers_covered(answered, asked),
+			None => std::collections::BTreeSet::new(),
+		};
 		drop(raises);
-		// The tables the barriers this answer covers were raised for; every table where one of them
-		// is no longer kept, or the answer covers more than are kept.
-		let targets = match answered {
+		// The tables the barriers this answer covers were raised for, and those of the ones other
+		// nodes' builds raised; every table where one of them is no longer kept, or the answer
+		// covers more than are kept.
+		let (targets, others) = match answered {
 			Some(answered) if asked.saturating_sub(answered) <= KEPT_TARGETS => {
 				// The targets of `(answered, asked]`, one key per barrier, in order.
 				let covered = WriteBarrierTargetSeqPrefix {
@@ -531,21 +536,30 @@ impl Datastore {
 				tx.cancel().await?;
 				let mut seen = std::collections::BTreeSet::new();
 				let mut tables: Vec<FencedTable> = Vec::new();
+				let mut others: Vec<FencedTable> = Vec::new();
 				for key in keys {
 					let key = WriteBarrierTargetKey::decode_key(&key)?;
 					if key.seq > answered && key.seq <= asked {
 						seen.insert(key.seq);
 						let table = (key.ns, key.db, key.tb.into_owned());
+						if !own.contains(&key.seq) && !others.contains(&table) {
+							others.push(table.clone());
+						}
 						if !tables.contains(&table) {
 							tables.push(table);
 						}
 					}
 				}
-				(seen.len() as u64 == asked.saturating_sub(answered)).then_some(tables)
+				(seen.len() as u64 == asked.saturating_sub(answered)).then_some((tables, others))
 			}
 			_ => None,
-		};
-		let _running = (!only_own).then(|| self.transaction_factory().begin_write_wait());
+		}
+		.unzip();
+		// On the tables of the barriers other nodes' builds raised, the builds it lets read: this
+		// node's own builds wait for its transactions themselves, through waits of their own on
+		// their tables ([`WriteBarrier::start`]). On every table where those tables are unknown.
+		let _running =
+			(!only_own).then(|| self.transaction_factory().begin_write_wait(others.as_deref()));
 		let since = live.advance();
 		let began = web_time::Instant::now();
 		while !local_writes_settled(live, since, began, self.id(), targets.as_deref()) {
