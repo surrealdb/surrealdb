@@ -1591,20 +1591,29 @@ fn plan_source(ir: &Ir, op: OpId, cx: &PhysCx<'_>) -> Result<Option<Planned>, Ir
 		// index cannot answer, and no search answering would admit no row.
 		// `WITH NOINDEX` keeps its contract: no index, no answer.
 		(Some(stages), ReadVersion::Current, SourceRefShape::Table(_))
-			if !matches!(attrs.with, Some(With::NoIndex)) =>
+			if !matches!(attrs.with, Some(With::NoIndex))
+				&& !matches!(answers.restricted, RestrictedSelect::Unresolved) =>
 		{
 			match cx.physical.indexes(&key.0) {
 				CatalogAnswer::Found(defined) => {
+					let restricted = answers.restricted.prefixes();
+					// A vector index already online over the same field answers the
+					// operator; an unrelated build beside it must not change its ranking.
 					let building: Vec<_> = defined
 						.iter()
-						.filter(|ix| !answers.indexes.iter().any(|online| online.name == ix.name))
-						// A vector index already online over the same field answers the
-						// operator; an unrelated build beside it must not change its ranking.
 						.filter(|ix| {
-							!answers.indexes.iter().any(|online| {
-								matches!(online.index, Index::Hnsw(_) | Index::DiskAnn(_))
-									&& online.cols.first() == ix.cols.first()
-							})
+							!ix.prepare_remove
+								&& matches!(ix.index, Index::Hnsw(_) | Index::DiskAnn(_))
+								&& !restricted.index_touches(&ix.cols)
+								&& !answers.indexes.iter().any(|online| {
+									online.name == ix.name
+										|| (!online.prepare_remove
+											&& matches!(
+												online.index,
+												Index::Hnsw(_) | Index::DiskAnn(_)
+											) && !restricted.index_touches(&online.cols)
+											&& online.cols.first() == ix.cols.first())
+								})
 						})
 						.cloned()
 						.collect();
@@ -3601,6 +3610,13 @@ mod convert_tests {
 				Some(answers) => CatalogAnswer::Found(Arc::clone(answers)),
 				None => CatalogAnswer::NotLoaded,
 			}
+		}
+
+		fn indexes(&self, _table: &TableName) -> CatalogAnswer<Arc<[IndexDefinition]>> {
+			if self.unknown {
+				return CatalogAnswer::Unknown;
+			}
+			CatalogAnswer::Found(Arc::from([]))
 		}
 	}
 

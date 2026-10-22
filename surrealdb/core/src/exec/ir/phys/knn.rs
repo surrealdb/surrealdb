@@ -288,6 +288,9 @@ pub(super) fn exact_at_stamp(
 	stages: &Stages,
 	indexes: &[crate::catalog::IndexDefinition],
 ) -> Result<Vec<Exact>, IrError> {
+	if indexes.is_empty() {
+		return Ok(Vec::new());
+	}
 	if stages.united {
 		return Ok(Vec::new());
 	}
