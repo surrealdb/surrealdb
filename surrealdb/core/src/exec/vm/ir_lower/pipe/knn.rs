@@ -316,12 +316,16 @@ mod tests {
 		let KnnVector::Query(sort) = program.pipelines[0]
 			.code
 			.iter()
-			.find_map(|instr| match instr {
-				Instr::KnnRank {
+			.find_map(|instr| {
+				if let Instr::KnnRank {
 					rank,
 					..
-				} => Some(rank.vector.clone()),
-				_ => None,
+				} = instr
+				{
+					Some(rank.vector.clone())
+				} else {
+					None
+				}
 			})
 			.expect("the feeder ranks each row")
 		else {
@@ -346,13 +350,17 @@ mod tests {
 			let (root, rank) = feeder
 				.code
 				.iter()
-				.find_map(|instr| match instr {
-					Instr::KnnRank {
+				.find_map(|instr| {
+					if let Instr::KnnRank {
 						root,
 						rank,
 						..
-					} => Some((*root, rank)),
-					_ => None,
+					} = instr
+					{
+						Some((*root, rank))
+					} else {
+						None
+					}
 				})
 				.expect("the feeder ranks each row");
 			assert_eq!(rank.before_rows, in_place, "{deferred:?}");

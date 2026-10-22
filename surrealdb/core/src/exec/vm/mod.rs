@@ -289,11 +289,12 @@ pub(crate) fn plan_checked<'a>(
 	Box::pin(async move {
 		// Nothing of the explained statement runs under a plain `EXPLAIN`: the
 		// ids its planning held are released once it is rendered.
-		let explained = match op {
-			LogicalOp::Explain(explain) if !explain.analyze => {
-				planner.speculation.as_ref().map(|speculating| speculating.held.mark())
-			}
-			_ => None,
+		let explained = if let LogicalOp::Explain(explain) = op
+			&& !explain.analyze
+		{
+			planner.speculation.as_ref().map(|speculating| speculating.held.mark())
+		} else {
+			None
 		};
 		if speculate::hides_a_change_point(planner, op).await {
 			let late = planner.binding_late_after_schema();
@@ -587,7 +588,18 @@ impl From<IrError> for NotCovered {
 			IrError::NotYet {
 				what,
 			} => Self::not_yet(what),
-			other => Self::internal(other.to_string()),
+			other @ (IrError::Stale(_)
+			| IrError::Refused(_)
+			| IrError::HasUses(_)
+			| IrError::TagChanged(_)
+			| IrError::Capacity(_)
+			| IrError::Verify(_)
+			| IrError::NotLoaded {
+				..
+			}
+			| IrError::Invariant {
+				..
+			}) => Self::internal(other.to_string()),
 		}
 	}
 }

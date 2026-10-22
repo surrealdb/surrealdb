@@ -1225,9 +1225,10 @@ pub(crate) async fn compute_fields_for_value(
 /// name is present by construction, so the test would match on every table
 /// that has one.
 fn shadowed_stored_view(state: &FieldState, value: &Value) -> Option<Value> {
-	let shadowed = match value {
-		Value::Object(obj) => state.dep_map.keys().any(|name| obj.contains_key(name.as_str())),
-		_ => false,
+	let shadowed = if let Value::Object(obj) = value {
+		state.dep_map.keys().any(|name| obj.contains_key(name.as_str()))
+	} else {
+		false
 	};
 	shadowed.then(|| stored_fields_view(state, value))
 }
@@ -1272,17 +1273,17 @@ async fn derive_fields(
 	// Extract the record ID before entering the loop so that field
 	// dereferences that target this same record are answered directly
 	// instead of re-computing fields (which would loop forever).
-	eval_ctx.computing_record = match &*value {
-		Value::Object(obj) => match obj.get("id") {
-			Some(Value::RecordId(rid)) => {
-				Some(Arc::new(crate::exec::eval_context::ComputingRecord {
-					rid: rid.clone(),
-					stored: stored_view,
-				}))
-			}
-			_ => None,
-		},
-		_ => None,
+	eval_ctx.computing_record = if let Value::Object(obj) = &*value {
+		if let Some(Value::RecordId(rid)) = obj.get("id") {
+			Some(Arc::new(crate::exec::eval_context::ComputingRecord {
+				rid: rid.clone(),
+				stored: stored_view,
+			}))
+		} else {
+			None
+		}
+	} else {
+		None
 	};
 
 	// SECURITY: the body is definer code, so it runs in a privileged frame that

@@ -9,6 +9,8 @@
 //! declaration order of [`Value`]'s variants, which is what its derived
 //! ordering ranks them by.
 
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use std::borrow::Cow;
 use std::cmp::Ordering;
 
@@ -40,9 +42,10 @@ impl<'a> Scalar<'a> {
 	/// on — borrowed; `None` for a scalar held unboxed.
 	#[inline]
 	pub(crate) fn as_whole(&self) -> Option<&Value> {
-		match self {
-			Scalar::Value(value) => Some(value.as_ref()),
-			_ => None,
+		if let Scalar::Value(value) = self {
+			Some(value.as_ref())
+		} else {
+			None
 		}
 	}
 
@@ -58,7 +61,16 @@ impl<'a> Scalar<'a> {
 			Value::Datetime(v) => Scalar::Datetime(*v),
 			Value::Uuid(v) => Scalar::Uuid(*v),
 			Value::Bytes(v) => Scalar::Bytes(v.0.as_ref()),
-			other => Scalar::Value(Cow::Borrowed(other)),
+			other @ (Value::Array(_)
+			| Value::Set(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_)) => Scalar::Value(Cow::Borrowed(other)),
 		}
 	}
 
@@ -79,12 +91,24 @@ impl<'a> Scalar<'a> {
 		}
 	}
 
+	/// Consumes this scalar and returns the [`Value`] it denotes without cloning
+	/// an owned [`Scalar::Value`].
+	#[inline]
+	pub(crate) fn into_value(self) -> Value {
+		if let Scalar::Value(Cow::Owned(v)) = self {
+			v
+		} else {
+			self.to_value()
+		}
+	}
+
 	/// The [`Value`] this scalar denotes, borrowed where the scalar holds one.
 	/// Allocates only for a string and bytes.
 	pub(crate) fn as_value(&self) -> Cow<'_, Value> {
-		match self {
-			Scalar::Value(v) => Cow::Borrowed(v.as_ref()),
-			other => Cow::Owned(other.to_value()),
+		if let Scalar::Value(v) = self {
+			Cow::Borrowed(v.as_ref())
+		} else {
+			Cow::Owned(self.to_value())
 		}
 	}
 

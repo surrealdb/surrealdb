@@ -101,25 +101,23 @@ pub(crate) type JoinKey = Vec<Value>;
 /// object — a bare value from a `VALUE` projection — has no field to hold
 /// the alias, and is emitted as it is.
 pub(crate) fn with_alias(probe_row: &Value, alias: &str, value: Value) -> Value {
-	match probe_row {
-		Value::Object(row) => {
-			let mut row = row.clone();
-			row.insert(alias.to_string(), value);
-			Value::Object(row)
-		}
-		other => other.clone(),
+	if let Value::Object(row) = probe_row {
+		let mut row = row.clone();
+		row.insert(alias.to_string(), value);
+		Value::Object(row)
+	} else {
+		probe_row.clone()
 	}
 }
 
 /// [`with_alias`] over a probe row that is given up: the row itself carries
 /// the alias, with no copy of it.
 pub(crate) fn with_alias_owned(probe_row: Value, alias: &str, value: Value) -> Value {
-	match probe_row {
-		Value::Object(mut row) => {
-			row.insert(alias.to_string(), value);
-			Value::Object(row)
-		}
-		other => other,
+	if let Value::Object(mut row) = probe_row {
+		row.insert(alias.to_string(), value);
+		Value::Object(row)
+	} else {
+		probe_row
 	}
 }
 
@@ -168,9 +166,10 @@ fn binding_id(slot: Option<&Value>) -> Option<Value> {
 /// carried over. Both rows are objects in practice; a non-object row defaults
 /// to empty so the merge never panics.
 pub(crate) fn merge_rows(build_row: &Value, probe_row: &Value) -> Value {
-	let mut merged = match build_row {
-		Value::Object(o) => o.clone(),
-		_ => Object::default(),
+	let mut merged = if let Value::Object(o) = build_row {
+		o.clone()
+	} else {
+		Object::default()
 	};
 	if let Value::Object(probe) = probe_row {
 		for (k, v) in probe.iter() {
@@ -183,9 +182,10 @@ pub(crate) fn merge_rows(build_row: &Value, probe_row: &Value) -> Value {
 /// Build a null-filled output for a `Left` miss: the probe row plus every
 /// `null_template` binding set to `Value::Null`.
 pub(crate) fn null_filled(probe_row: &Value, null_template: &[String]) -> Value {
-	let mut row = match probe_row {
-		Value::Object(o) => o.clone(),
-		_ => Object::default(),
+	let mut row = if let Value::Object(o) = probe_row {
+		o.clone()
+	} else {
+		Object::default()
 	};
 	for name in null_template {
 		row.insert(name.clone(), Value::Null);
@@ -352,10 +352,10 @@ mod tests {
 		assert!(table.insert(vec![Value::from(1)], Value::from(10), 1).is_ok());
 		// A second distinct row past the budget errors and names the knob.
 		let err = table.insert(vec![Value::from(2)], Value::from(20), 1).unwrap_err();
-		let msg = match err {
-			ControlFlow::Err(e) => e.to_string(),
-			other => panic!("expected error, got {other:?}"),
+		let ControlFlow::Err(e) = err else {
+			panic!("expected error, got {err:?}");
 		};
+		let msg = e.to_string();
 		assert!(
 			msg.contains("SURREAL_GQL_MAX_JOIN_BUILD_ROWS"),
 			"guard error must name the knob, got: {msg}"

@@ -2265,15 +2265,21 @@ fn closure_digest(
 	find: impl FnOnce(&Value) -> Option<super::program::ClosureDigest>,
 ) -> anyhow::Result<Option<super::program::ClosureDigest>> {
 	Ok(match operand {
-		Operand::Reg(reg) => match &regs[reg as usize] {
-			Scalar::Value(value) => find(value),
-			_ => None,
-		},
+		Operand::Reg(reg) => {
+			if let Scalar::Value(value) = &regs[reg as usize] {
+				find(value)
+			} else {
+				None
+			}
+		}
 		Operand::Const(index) => find(&program.consts[index as usize]),
-		Operand::Field(name) => match row.field(&program.fields[name as usize])? {
-			Scalar::Value(value) => find(&value),
-			_ => None,
-		},
+		Operand::Field(name) => {
+			if let Scalar::Value(value) = row.field(&program.fields[name as usize])? {
+				find(&value)
+			} else {
+				None
+			}
+		}
 	})
 }
 
@@ -2444,9 +2450,9 @@ pub(super) fn run_row<'r>(
 				names,
 			} => {
 				let names = &program.computed_names[*names as usize];
-				state.computing = match row.field(&program.fields[*id as usize])? {
-					Scalar::Value(id) => match id.as_ref() {
-						Value::RecordId(rid) => {
+				state.computing =
+					if let Scalar::Value(id) = row.field(&program.fields[*id as usize])? {
+						if let Value::RecordId(rid) = id.as_ref() {
 							let stored = match doc {
 								Some(ROW) => Some(row.record()?),
 								Some(doc) => Some(regs[*doc as usize].to_value()),
@@ -2465,25 +2471,26 @@ pub(super) fn run_row<'r>(
 								rid: rid.clone(),
 								stored,
 							}))
+						} else {
+							None
 						}
-						_ => None,
-					},
-					_ => None,
-				};
+					} else {
+						None
+					};
 				pc += 1;
 			}
 			Instr::LandRow {
 				sets,
 				cuts,
 			} => {
-				let take = |regs: &mut [Scalar<'r>], reg: Reg| match std::mem::replace(
-					&mut regs[reg as usize],
-					Scalar::None,
-				)
-				.to_value()
-				{
-					Value::Object(obj) => obj,
-					_ => crate::val::Object::default(),
+				let take = |regs: &mut [Scalar<'r>], reg: Reg| {
+					if let Value::Object(obj) =
+						std::mem::replace(&mut regs[reg as usize], Scalar::None).to_value()
+					{
+						obj
+					} else {
+						crate::val::Object::default()
+					}
 				};
 				let cuts = take(regs, *cuts);
 				let sets = take(regs, *sets);
@@ -2671,11 +2678,12 @@ pub(super) fn run_row<'r>(
 				value,
 			} => {
 				let value = read_value(regs, *value)?;
-				match &mut regs[*array as usize] {
-					Scalar::Value(std::borrow::Cow::Owned(Value::Array(items))) => {
-						items.push(value)
-					}
-					other => bail!("appending to {other:?}, which is not an array"),
+				if let Scalar::Value(std::borrow::Cow::Owned(Value::Array(items))) =
+					&mut regs[*array as usize]
+				{
+					items.push(value);
+				} else {
+					bail!("appending to {:?}, which is not an array", &regs[*array as usize]);
 				}
 				pc += 1;
 			}
@@ -2746,7 +2754,20 @@ pub(super) fn run_row<'r>(
 						| Value::Array(_)
 						| Value::Set(_)
 						| Value::Geometry(_) => None,
-						_ => Some(Scalar::None),
+						Value::None
+						| Value::Null
+						| Value::Bool(_)
+						| Value::Number(_)
+						| Value::String(_)
+						| Value::Duration(_)
+						| Value::Datetime(_)
+						| Value::Uuid(_)
+						| Value::Bytes(_)
+						| Value::Table(_)
+						| Value::File(_)
+						| Value::Regex(_)
+						| Value::Range(_)
+						| Value::Closure(_) => Some(Scalar::None),
 					},
 					Scalar::Value(value) => match value.as_ref() {
 						Value::Object(object) => Some(Scalar::Value(std::borrow::Cow::Owned(
@@ -2756,9 +2777,30 @@ pub(super) fn run_row<'r>(
 						| Value::Array(_)
 						| Value::Set(_)
 						| Value::Geometry(_) => None,
-						_ => Some(Scalar::None),
+						Value::None
+						| Value::Null
+						| Value::Bool(_)
+						| Value::Number(_)
+						| Value::String(_)
+						| Value::Duration(_)
+						| Value::Datetime(_)
+						| Value::Uuid(_)
+						| Value::Bytes(_)
+						| Value::Table(_)
+						| Value::File(_)
+						| Value::Regex(_)
+						| Value::Range(_)
+						| Value::Closure(_) => Some(Scalar::None),
 					},
-					_ => Some(Scalar::None),
+					Scalar::None
+					| Scalar::Null
+					| Scalar::Bool(_)
+					| Scalar::Number(_)
+					| Scalar::Str(_)
+					| Scalar::Duration(_)
+					| Scalar::Datetime(_)
+					| Scalar::Uuid(_)
+					| Scalar::Bytes(_) => Some(Scalar::None),
 				};
 				match answer {
 					Some(answer) => {
@@ -2926,12 +2968,10 @@ pub(super) fn run_row<'r>(
 				if let Scalar::Value(std::borrow::Cow::Owned(held)) =
 					&mut regs[*collection as usize]
 				{
-					match held {
-						Value::Array(array) => array.push(value),
-						Value::Set(set) => {
-							set.insert(value);
-						}
-						_ => {}
+					if let Value::Array(array) = held {
+						array.push(value);
+					} else if let Value::Set(set) = held {
+						set.insert(value);
 					}
 				}
 				pc += 1;
@@ -3230,12 +3270,14 @@ pub(super) fn run_row<'r>(
 				dst,
 			} => {
 				let recv = read_value(regs, *recv)?;
-				let closure = match &recv {
-					Value::Object(obj) => match obj.get(name.as_str()) {
-						Some(closure @ Value::Closure(_)) => Some(closure.clone()),
-						_ => None,
-					},
-					_ => None,
+				let closure = if let Value::Object(obj) = &recv {
+					if let Some(closure @ Value::Closure(_)) = obj.get(name.as_str()) {
+						Some(closure.clone())
+					} else {
+						None
+					}
+				} else {
+					None
 				};
 				let Some(closure) = closure else {
 					return Err(crate::exec::Error::InvalidFunction {
@@ -3302,16 +3344,19 @@ pub(super) fn run_row<'r>(
 				index,
 				done,
 			} => {
-				let at = match &regs[*pos as usize] {
-					Scalar::Number(crate::val::Number::Int(at)) => *at as usize,
-					_ => 0,
+				let at = if let Scalar::Number(crate::val::Number::Int(at)) = &regs[*pos as usize] {
+					*at as usize
+				} else {
+					0
 				};
-				let next = match &regs[*array as usize] {
-					Scalar::Value(value) => match value.as_ref() {
-						Value::Array(items) => items.get(at).cloned(),
-						_ => None,
-					},
-					_ => None,
+				let next = if let Scalar::Value(value) = &regs[*array as usize] {
+					if let Value::Array(items) = value.as_ref() {
+						items.get(at).cloned()
+					} else {
+						None
+					}
+				} else {
+					None
 				};
 				match next {
 					Some(item) => {
@@ -3396,14 +3441,8 @@ pub(super) fn run_row<'r>(
 				// Only a heap value is borrowed; any other scalar is cheap to
 				// make a value of.
 				let scalar = read(regs, *recv)?;
-				let owned;
-				let value = match &scalar {
-					Scalar::Value(value) => &**value,
-					other => {
-						owned = other.to_value();
-						&owned
-					}
-				};
+				let value = scalar.as_value();
+				let value = value.as_ref();
 				if spec.resolves(value) {
 					pc += 1;
 				} else if let Some(closure) = closure
@@ -3444,9 +3483,12 @@ pub(super) fn run_row<'r>(
 				..
 			} => {
 				let name = program.methods[*method as usize].name.as_str();
-				let digest = closure_digest(program, row, regs, *recv, |value| match value {
-					Value::Object(object) => object.get(name).and_then(super::closure::digest_of),
-					_ => None,
+				let digest = closure_digest(program, row, regs, *recv, |value| {
+					if let Value::Object(object) = value {
+						object.get(name).and_then(super::closure::digest_of)
+					} else {
+						None
+					}
 				})?;
 				if digest.is_some_and(|digest| !state.has_linked(*frame, digest)) {
 					return Ok(Step::NeedUnit {
@@ -3513,7 +3555,14 @@ pub(super) fn run_row<'r>(
 							Value::Object(_) | Value::Geometry(_) | Value::None
 						)
 					}
-					_ => false,
+					Scalar::Null
+					| Scalar::Bool(_)
+					| Scalar::Number(_)
+					| Scalar::Str(_)
+					| Scalar::Duration(_)
+					| Scalar::Datetime(_)
+					| Scalar::Uuid(_)
+					| Scalar::Bytes(_) => false,
 				};
 				if projected {
 					pc += 1;
@@ -3580,7 +3629,23 @@ pub(super) fn run_row<'r>(
 				let seed = match regs[*dst as usize].to_value() {
 					Value::Object(object) => object,
 					Value::Geometry(geometry) => geometry.as_object(),
-					_ => Object::default(),
+					Value::None
+					| Value::Null
+					| Value::Bool(_)
+					| Value::Number(_)
+					| Value::String(_)
+					| Value::Duration(_)
+					| Value::Datetime(_)
+					| Value::Uuid(_)
+					| Value::Array(_)
+					| Value::Set(_)
+					| Value::Bytes(_)
+					| Value::Table(_)
+					| Value::RecordId(_)
+					| Value::File(_)
+					| Value::Regex(_)
+					| Value::Range(_)
+					| Value::Closure(_) => Object::default(),
 				};
 				regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(Value::Object(seed)));
 				pc += 1;
@@ -3742,15 +3807,12 @@ pub(super) fn run_row<'r>(
 						state.pending = Some(Pending::Emit);
 					}
 					Operand::Reg(reg) => {
-						let value = match std::mem::replace(&mut regs[*reg as usize], Scalar::None)
-						{
-							Scalar::Value(std::borrow::Cow::Owned(value)) => value,
-							other => other.to_value(),
-						};
+						let value =
+							std::mem::replace(&mut regs[*reg as usize], Scalar::None).into_value();
 						state.output.push(value);
 					}
-					other => {
-						let value = read_value(regs, *other)?;
+					Operand::Const(_) | Operand::Field(_) => {
+						let value = read_value(regs, *src)?;
 						state.output.push(value);
 					}
 				}
@@ -3762,10 +3824,8 @@ pub(super) fn run_row<'r>(
 				if *src == ROW {
 					state.pending = Some(Pending::Emit);
 				} else {
-					let value = match std::mem::replace(&mut regs[*src as usize], Scalar::None) {
-						Scalar::Value(std::borrow::Cow::Owned(value)) => value,
-						other => other.to_value(),
-					};
+					let value =
+						std::mem::replace(&mut regs[*src as usize], Scalar::None).into_value();
 					state.output.push(value);
 				}
 				pc += 1;
@@ -3775,10 +3835,7 @@ pub(super) fn run_row<'r>(
 				src,
 			} => {
 				let value = (*src != ROW).then(|| {
-					match std::mem::replace(&mut regs[*src as usize], Scalar::None) {
-						Scalar::Value(std::borrow::Cow::Owned(value)) => value,
-						other => other.to_value(),
-					}
+					std::mem::replace(&mut regs[*src as usize], Scalar::None).into_value()
 				});
 				state.pending = Some(Pending::Split {
 					split: *split,
@@ -3900,11 +3957,8 @@ pub(super) fn run_row<'r>(
 							keys,
 						});
 					} else {
-						let value = match std::mem::replace(&mut regs[*src as usize], Scalar::None)
-						{
-							Scalar::Value(std::borrow::Cow::Owned(value)) => value,
-							other => other.to_value(),
-						};
+						let value =
+							std::mem::replace(&mut regs[*src as usize], Scalar::None).into_value();
 						state.sort_value(program, *sort, keys, value);
 					}
 				}
@@ -4030,14 +4084,50 @@ pub(super) fn run_row<'r>(
 			} => {
 				let index = match &regs[*at as usize] {
 					Scalar::Number(crate::val::Number::Int(i)) => *i as usize,
-					other => bail!("a list position that is not an integer: {other:?}"),
+					other @ (Scalar::None
+					| Scalar::Null
+					| Scalar::Bool(_)
+					| Scalar::Number(_)
+					| Scalar::Str(_)
+					| Scalar::Duration(_)
+					| Scalar::Datetime(_)
+					| Scalar::Uuid(_)
+					| Scalar::Bytes(_)
+					| Scalar::Value(_)) => bail!("a list position that is not an integer: {other:?}"),
 				};
 				let element = match &regs[*list as usize] {
 					Scalar::Value(value) => match value.as_ref() {
 						Value::Array(array) => array.get(index).cloned(),
-						other => bail!("stepping through {other:?}, which is not an array"),
+						other @ (Value::None
+						| Value::Null
+						| Value::Bool(_)
+						| Value::Number(_)
+						| Value::String(_)
+						| Value::Duration(_)
+						| Value::Datetime(_)
+						| Value::Uuid(_)
+						| Value::Set(_)
+						| Value::Object(_)
+						| Value::Geometry(_)
+						| Value::Bytes(_)
+						| Value::Table(_)
+						| Value::RecordId(_)
+						| Value::File(_)
+						| Value::Regex(_)
+						| Value::Range(_)
+						| Value::Closure(_)) => {
+							bail!("stepping through {other:?}, which is not an array")
+						}
 					},
-					other => bail!("stepping through {other:?}, which is not an array"),
+					other @ (Scalar::None
+					| Scalar::Null
+					| Scalar::Bool(_)
+					| Scalar::Number(_)
+					| Scalar::Str(_)
+					| Scalar::Duration(_)
+					| Scalar::Datetime(_)
+					| Scalar::Uuid(_)
+					| Scalar::Bytes(_)) => bail!("stepping through {other:?}, which is not an array"),
 				};
 				match element {
 					Some(element) => {
@@ -4144,7 +4234,23 @@ fn remove_path(value: &mut Value, path: &[FieldPathPart]) {
 			}
 			FieldPathPart::Lookup(_) => {}
 		},
-		_ => {}
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Set(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => {}
 	}
 }
 

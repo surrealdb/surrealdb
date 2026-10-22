@@ -61,9 +61,12 @@ pub(crate) fn ancestors(ir: &Ir, op: OpId) -> impl Iterator<Item = (RegionId, Op
 /// Value keys are compared only within one statement, so a consumer of keys groups ops by this
 /// answer.
 pub(crate) fn enclosing_statement(ir: &Ir, op: OpId) -> Option<OpId> {
-	ancestors(ir, op).find_map(|(region, owner)| match ir.region(region)?.kind {
-		RegionKind::Statement(_) => owner,
-		_ => None,
+	ancestors(ir, op).find_map(|(region, owner)| {
+		if let RegionKind::Statement(_) = ir.region(region)?.kind {
+			owner
+		} else {
+			None
+		}
 	})
 }
 
@@ -138,6 +141,6 @@ pub(crate) fn control_target(ir: &Ir, op: OpId) -> ControlTarget {
 			}
 			ControlTarget::Barrier(top)
 		}
-		_ => ControlTarget::NotControl,
+		OpTag::Expr(_) | OpTag::Logical(_) | OpTag::Phys(_) => ControlTarget::NotControl,
 	}
 }

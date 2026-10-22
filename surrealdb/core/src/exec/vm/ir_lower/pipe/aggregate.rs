@@ -352,12 +352,15 @@ fn output_keys(path: &OutputPath) -> Vec<String> {
 
 /// The field `name` is read as: a plain field name, or the computed field of that name.
 fn field_name(op: &ExprOp) -> Option<&str> {
-	match op {
-		ExprOp::Field {
-			name,
-		} => Some(name.as_str()),
-		ExprOp::ComputedRead(attrs) => Some(attrs.field.as_str()),
-		_ => None,
+	if let ExprOp::Field {
+		name,
+	} = op
+	{
+		Some(name.as_str())
+	} else if let ExprOp::ComputedRead(attrs) = op {
+		Some(attrs.field.as_str())
+	} else {
+		None
 	}
 }
 
@@ -436,13 +439,12 @@ fn literal_position(ir: &Ir, value: ValueId) -> Option<i64> {
 	else {
 		return None;
 	};
-	match &ir.op(op)?.kind {
-		OpKind::Expr(ExprOp::Literal(held)) => match &**held {
-			Value::Number(Number::Int(position)) => Some(*position),
-			_ => None,
-		},
-		_ => None,
+	if let OpKind::Expr(ExprOp::Literal(held)) = &ir.op(op)?.kind
+		&& let Value::Number(Number::Int(position)) = &**held
+	{
+		return Some(*position);
 	}
+	None
 }
 
 /// The ops of the region `region` and of the regions beneath it, in the order they are written.
@@ -500,7 +502,9 @@ fn calls_of(ir: &Ir, region: RegionId) -> Result<Vec<Call>, IrError> {
 		let (args, raises) = match &closing.kind {
 			OpKind::Expr(ExprOp::Yield) => (closing.operands.to_vec(), false),
 			OpKind::Expr(ExprOp::Throw | ExprOp::Raise(_)) => (Vec::new(), true),
-			_ => return Err(invariant("an aggregate call whose region neither yields nor raises")),
+			OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => {
+				return Err(invariant("an aggregate call whose region neither yields nor raises"));
+			}
 		};
 		let raises_after_first = raises && {
 			let mut ops: Vec<OpId> = ops_in(ir, inner).collect();
@@ -673,9 +677,51 @@ fn depends(
 					&& !crate::expr::method::is_writer_builtin(name);
 				!free || operands_depend(seen)
 			}
-			_ => true,
+			Function::Custom(_)
+			| Function::Script(_)
+			| Function::Model(_)
+			| Function::Module(..)
+			| Function::Silo {
+				..
+			} => true,
 		},
-		_ => true,
+		ExprOp::Table {
+			..
+		}
+		| ExprOp::Mock(_)
+		| ExprOp::Field {
+			..
+		}
+		| ExprOp::ComputedRead(_)
+		| ExprOp::Doc
+		| ExprOp::Deref {
+			..
+		}
+		| ExprOp::Dispatch(_)
+		| ExprOp::Method {
+			..
+		}
+		| ExprOp::Destructure {
+			..
+		}
+		| ExprOp::Optional
+		| ExprOp::RepeatRecurse
+		| ExprOp::TupleRow {
+			..
+		}
+		| ExprOp::Invoke
+		| ExprOp::ClosureCreate(_)
+		| ExprOp::If
+		| ExprOp::Throw
+		| ExprOp::Subquery(_)
+		| ExprOp::Yield
+		| ExprOp::Agg {
+			..
+		}
+		| ExprOp::Raise(_)
+		| ExprOp::DepthCharge {
+			..
+		} => true,
 	}
 }
 

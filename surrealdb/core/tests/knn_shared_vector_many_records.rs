@@ -1,4 +1,5 @@
 #![recursion_limit = "256"]
+#![deny(clippy::wildcard_enum_match_arm)]
 //! A vector shared by more records than a vector index's inline document-set
 //! variants hold: every record must stay reachable through KNN once the index
 //! is compacted, and removed ones must stop being returned.

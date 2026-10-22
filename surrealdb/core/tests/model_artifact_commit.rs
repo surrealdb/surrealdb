@@ -1,4 +1,5 @@
 #![recursion_limit = "256"]
+#![deny(clippy::wildcard_enum_match_arm)]
 //! `REMOVE MODEL` deletes the model's `.surml` artifact only once the removal
 //! of its definition has committed, so a transaction that is cancelled leaves
 //! the catalog and the object store agreeing.

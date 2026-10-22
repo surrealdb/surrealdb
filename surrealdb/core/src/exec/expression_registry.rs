@@ -112,7 +112,64 @@ fn exact_output_path(expr: &LogicalExpr) -> Option<OutputPath> {
 				current = base;
 			}
 			LogicalExpr::Current => break,
-			_ => return None,
+			LogicalExpr::Literal(_)
+			| LogicalExpr::Array(_)
+			| LogicalExpr::Set(_)
+			| LogicalExpr::Object(_)
+			| LogicalExpr::RecordId(_)
+			| LogicalExpr::Param(_)
+			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_)
+			| LogicalExpr::Constant(_)
+			| LogicalExpr::Doc
+			| LogicalExpr::Index {
+				..
+			}
+			| LogicalExpr::First(_)
+			| LogicalExpr::Last(_)
+			| LogicalExpr::Each(_)
+			| LogicalExpr::Flatten {
+				..
+			}
+			| LogicalExpr::Filter {
+				..
+			}
+			| LogicalExpr::Method {
+				..
+			}
+			| LogicalExpr::Destructure {
+				..
+			}
+			| LogicalExpr::Optional {
+				..
+			}
+			| LogicalExpr::Recurse(_)
+			| LogicalExpr::RepeatRecurse(_)
+			| LogicalExpr::Broadcast {
+				..
+			}
+			| LogicalExpr::SetField {
+				..
+			}
+			| LogicalExpr::Prefix {
+				..
+			}
+			| LogicalExpr::Postfix {
+				..
+			}
+			| LogicalExpr::Invoke {
+				..
+			}
+			| LogicalExpr::Binary {
+				..
+			}
+			| LogicalExpr::Call(_)
+			| LogicalExpr::Closure(_)
+			| LogicalExpr::If(_)
+			| LogicalExpr::Throw(_)
+			| LogicalExpr::Break
+			| LogicalExpr::Continue
+			| LogicalExpr::Subquery(_) => return None,
 		}
 	}
 	if parts.is_empty() {
@@ -124,9 +181,10 @@ fn exact_output_path(expr: &LogicalExpr) -> Option<OutputPath> {
 
 /// The name of a single-field read, `None` for any other shape.
 fn single_field_name(expr: &LogicalExpr) -> Option<&str> {
-	match expr {
-		LogicalExpr::Field(name) => Some(name.as_str()),
-		_ => None,
+	if let LogicalExpr::Field(name) = expr {
+		Some(name.as_str())
+	} else {
+		None
 	}
 }
 

@@ -112,7 +112,22 @@ pub(crate) async fn evaluate_recurse_path_with(
 					}
 					continue;
 				}
-				other => vec![other],
+				other @ (Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Set(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Range(_)
+				| Value::Closure(_)) => vec![other],
 			};
 
 			// Single pass: extend paths for valid recursion targets, detect dead ends.

@@ -77,7 +77,9 @@ pub(crate) fn id_field_restrictions(def: &catalog::FieldDefinition) -> Result<()
 						component: name,
 					}
 				}
-				_ => ExecError::IdFieldUnsupportedKind(kind.to_sql()),
+				catalog::KeyStructureError::Names(_)
+				| catalog::KeyStructureError::NotATuple
+				| _ => ExecError::IdFieldUnsupportedKind(kind.to_sql()),
 			}
 			.into());
 		}
@@ -189,7 +191,19 @@ impl Step {
 			Part::Field(_) => Some(Self::Field),
 			Part::All => Some(Self::Element),
 			Part::Value(Expr::Literal(Literal::Integer(_))) => Some(Self::Index),
-			_ => None,
+			Part::Flatten
+			| Part::Last
+			| Part::First
+			| Part::Where(_)
+			| Part::Lookup(_)
+			| Part::Value(_)
+			| Part::Start(_)
+			| Part::Method(..)
+			| Part::Destructure(_)
+			| Part::Optional
+			| Part::Recurse(..)
+			| Part::Doc
+			| Part::RepeatRecurse => None,
 		}
 	}
 
@@ -215,7 +229,28 @@ impl Step {
 			Kind::Array(..) | Kind::Set(..) | Kind::Literal(KindLiteral::Array(_)) => {
 				matches!(self, Self::Element | Self::Index)
 			}
-			_ => false,
+			Kind::Any
+			| Kind::None
+			| Kind::Null
+			| Kind::Bool
+			| Kind::Bytes
+			| Kind::Datetime
+			| Kind::Decimal
+			| Kind::Duration
+			| Kind::Float
+			| Kind::Int
+			| Kind::Number
+			| Kind::String
+			| Kind::Uuid
+			| Kind::Regex
+			| Kind::Table(_)
+			| Kind::Record(_)
+			| Kind::Geometry(_)
+			| Kind::Either(_)
+			| Kind::Function(..)
+			| Kind::Range
+			| Kind::Literal(_)
+			| Kind::File(_) => false,
 		};
 		let held = match kind {
 			Some(Kind::Either(kinds)) => {
@@ -252,20 +287,25 @@ fn implied_element_kind(kind: &Kind) -> Option<Kind> {
 	if holds_elements_no_collection_describes(kind) {
 		return None;
 	}
-	match kind.inner_kind()? {
-		Kind::Any => None,
-		element if admits_anything(&element) => Some(Kind::Any),
-		element => Some(element),
+	let element = kind.inner_kind()?;
+	if let Kind::Any = element {
+		None
+	} else if admits_anything(&element) {
+		Some(Kind::Any)
+	} else {
+		Some(element)
 	}
 }
 
 /// Whether `kind` is `any` or a union with an `any` member, nested unions
 /// included.
 fn admits_anything(kind: &Kind) -> bool {
-	match kind {
-		Kind::Any => true,
-		Kind::Either(members) => members.iter().any(admits_anything),
-		_ => false,
+	if let Kind::Any = kind {
+		true
+	} else if let Kind::Either(members) = kind {
+		members.iter().any(admits_anything)
+	} else {
+		false
 	}
 }
 
@@ -634,17 +674,39 @@ pub(crate) fn define_field_statement_validate_reference_options(
 				Kind::Literal(KindLiteral::Array(kinds)) => {
 					outer && kinds.iter().all(|k| valid(k, false))
 				}
-				_ => false,
+				Kind::Any
+				| Kind::Null
+				| Kind::Bool
+				| Kind::Bytes
+				| Kind::Datetime
+				| Kind::Decimal
+				| Kind::Duration
+				| Kind::Float
+				| Kind::Int
+				| Kind::Number
+				| Kind::Object
+				| Kind::String
+				| Kind::Uuid
+				| Kind::Regex
+				| Kind::Table(_)
+				| Kind::Geometry(_)
+				| Kind::Either(_)
+				| Kind::Function(..)
+				| Kind::Range
+				| Kind::Literal(_)
+				| Kind::File(_) => false,
 			}
 		}
 
 		let is_record_id = match definition.field_kind.as_ref() {
 			Some(Kind::Either(kinds)) => kinds.iter().all(|k| valid(k, true)),
-			Some(Kind::Array(kind, _)) | Some(Kind::Set(kind, _)) => match kind.as_ref() {
-				Kind::Either(kinds) => kinds.iter().all(|k| valid(k, true)),
-				Kind::Record(_) => true,
-				_ => false,
-			},
+			Some(Kind::Array(kind, _)) | Some(Kind::Set(kind, _)) => {
+				if let Kind::Either(kinds) = kind.as_ref() {
+					kinds.iter().all(|k| valid(k, true))
+				} else {
+					matches!(kind.as_ref(), Kind::Record(_))
+				}
+			}
 			Some(Kind::Literal(KindLiteral::Array(kinds))) => kinds.iter().all(|k| valid(k, true)),
 			Some(Kind::Record(_)) => true,
 			_ => false,

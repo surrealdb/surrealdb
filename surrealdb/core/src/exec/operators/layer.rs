@@ -14,11 +14,10 @@ use crate::val::Value;
 /// The record a coercion error names: the row's id, or the row itself when
 /// it has none.
 pub(crate) fn record_of(row: &Value) -> String {
-	match row {
-		Value::Object(obj) => match obj.get("id") {
-			Some(Value::RecordId(rid)) => rid.to_sql(),
-			_ => row.to_sql(),
-		},
-		other => other.to_sql(),
+	if let Value::Object(obj) = row
+		&& let Some(Value::RecordId(rid)) = obj.get("id")
+	{
+		return rid.to_sql();
 	}
+	row.to_sql()
 }

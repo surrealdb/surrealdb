@@ -41,7 +41,21 @@ pub(crate) async fn evaluate_all(value: &Value, ctx: EvalContext<'_>) -> FlowRes
 		}
 		// Anything else (NONE, NULL, scalars, geometries) returns NONE rather than a
 		// single-element array: `none.*` is `NONE`, not `[NONE]`.
-		_ => Ok(Value::None),
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => Ok(Value::None),
 	}
 }
 
@@ -71,18 +85,17 @@ async fn fetch_record_elements(
 	let mut windows = Windows::of(ctx.link_windows, elements, &|_| true);
 	let mut results = Vec::with_capacity(elements.len());
 	for (at, item) in elements.iter().enumerate() {
-		let processed = match item {
-			Value::RecordId(rid) => {
-				let slot = match &mut windows {
-					Some(windows) => {
-						windows.prepare(ctx.exec_ctx, elements, at, &|_| true).await?;
-						windows.slot(at)
-					}
-					None => Slot::Unread,
-				};
-				Box::pin(fetch_linked(rid, &ctx, slot)).await?
-			}
-			_ => item.clone(),
+		let processed = if let Value::RecordId(rid) = item {
+			let slot = match &mut windows {
+				Some(windows) => {
+					windows.prepare(ctx.exec_ctx, elements, at, &|_| true).await?;
+					windows.slot(at)
+				}
+				None => Slot::Unread,
+			};
+			Box::pin(fetch_linked(rid, &ctx, slot)).await?
+		} else {
+			item.clone()
 		};
 		results.push(processed);
 	}
@@ -95,18 +108,18 @@ async fn fetch_record_elements(
 
 /// Flatten nested arrays.
 pub(crate) fn evaluate_flatten(value: &Value) -> anyhow::Result<Value> {
-	match value {
-		Value::Array(arr) => {
-			let mut result = Vec::new();
-			for item in arr.iter() {
-				match item {
-					Value::Array(inner) => result.extend(inner.iter().cloned()),
-					other => result.push(other.clone()),
-				}
+	if let Value::Array(arr) = value {
+		let mut result = Vec::new();
+		for item in arr.iter() {
+			if let Value::Array(inner) = item {
+				result.extend(inner.iter().cloned());
+			} else {
+				result.push(item.clone());
 			}
-			Ok(Value::Array(result.into()))
 		}
-		other => Ok(other.clone()),
+		Ok(Value::Array(result.into()))
+	} else {
+		Ok(value.clone())
 	}
 }
 
@@ -163,14 +176,48 @@ mod tests {
 		// Test first element
 		let first = match &arr {
 			Value::Array(a) => a.first().cloned().unwrap_or(Value::None),
-			_ => arr.clone(),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Set(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => arr.clone(),
 		};
 		assert_eq!(first, Value::Number(Number::Int(1)));
 
 		// Test last element
 		let last = match &arr {
 			Value::Array(a) => a.last().cloned().unwrap_or(Value::None),
-			_ => arr.clone(),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Set(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => arr.clone(),
 		};
 		assert_eq!(last, Value::Number(Number::Int(3)));
 
@@ -178,11 +225,45 @@ mod tests {
 		let empty = Value::Array(Array::from(Vec::<Value>::new()));
 		let first_empty = match &empty {
 			Value::Array(a) => a.first().cloned().unwrap_or(Value::None),
-			_ => empty.clone(),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Set(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => empty.clone(),
 		};
 		let last_empty = match &empty {
 			Value::Array(a) => a.last().cloned().unwrap_or(Value::None),
-			_ => empty.clone(),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Set(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => empty.clone(),
 		};
 		assert_eq!(first_empty, Value::None);
 		assert_eq!(last_empty, Value::None);

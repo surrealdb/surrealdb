@@ -304,13 +304,10 @@ pub(crate) fn stats_of(record: &mut Record) -> Result<&mut [AggregationStat], Co
 ///
 /// An aggregated view keys each group row by the array of its group values, so
 /// a key of any other shape belongs to no group and names none.
-#[allow(
-	clippy::wildcard_enum_match_arm,
-	reason = "only an array key carries group values; every other key shape carries none"
-)]
 pub(crate) fn group_values(key: &RecordIdKey) -> Vec<Value> {
-	match key {
-		RecordIdKey::Array(Array(values)) => values.clone(),
-		_ => Vec::new(),
+	if let RecordIdKey::Array(Array(values)) = key {
+		values.clone()
+	} else {
+		Vec::new()
 	}
 }

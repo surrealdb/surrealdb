@@ -78,7 +78,20 @@ pub(crate) fn weight(value: &crate::val::Value) -> u32 {
 		Value::Set(set) => units(set.len()),
 		Value::String(string) => units(string.len() / BYTES_PER_UNIT),
 		Value::Bytes(bytes) => units(bytes.len() / BYTES_PER_UNIT),
-		_ => 0,
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => 0,
 	}
 }
 

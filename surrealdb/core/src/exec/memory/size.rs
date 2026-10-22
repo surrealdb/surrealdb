@@ -26,7 +26,18 @@ pub(crate) fn kept_bytes(value: &Value) -> usize {
 		| Value::Duration(_)
 		| Value::Datetime(_)
 		| Value::Uuid(_) => 0,
-		_ => value_bytes(value),
+		Value::String(_)
+		| Value::Array(_)
+		| Value::Set(_)
+		| Value::Object(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => value_bytes(value),
 	}
 }
 
@@ -53,7 +64,7 @@ fn heap_bytes(value: &Value, depth: usize) -> usize {
 					RecordIdKey::String(s) => s.len(),
 					RecordIdKey::Array(a) => a.len() * SLOT,
 					RecordIdKey::Object(o) => o.len() * (SLOT + 32),
-					_ => 0,
+					RecordIdKey::Number(_) | RecordIdKey::Uuid(_) | RecordIdKey::Range(_) => 0,
 				}
 		}
 		Value::Geometry(_) => 64,
@@ -74,7 +85,17 @@ fn heap_bytes(value: &Value, depth: usize) -> usize {
 				.map(|v| SLOT + heap_bytes(v, depth.saturating_sub(1)))
 				.sum(),
 		},
-		_ => 0,
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Table(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_) => 0,
 	}
 }
 

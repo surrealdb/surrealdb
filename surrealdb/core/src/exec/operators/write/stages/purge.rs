@@ -195,17 +195,7 @@ pub(crate) fn subtract_data(field: &Idiom) -> Data {
 /// Report a failed repair as the referential failure it is, naming the record
 /// whose deletion triggered it.
 pub(crate) fn wrap(rid: &RecordId, err: ControlFlow) -> ControlFlow {
-	#[allow(
-		clippy::wildcard_enum_match_arm,
-		reason = "a repair carries an error; every other signal passes through untouched"
-	)]
-	match err {
-		ControlFlow::Err(err) => ControlFlow::Err(anyhow::anyhow!(DocError::RefsUpdateFailure(
-			rid.to_sql(),
-			err.to_string()
-		))),
-		signal => signal,
-	}
+	err.map_err(|err| anyhow::anyhow!(DocError::RefsUpdateFailure(rid.to_sql(), err.to_string())))
 }
 
 // ===========================================================================

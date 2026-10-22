@@ -125,7 +125,10 @@ pub(super) async fn config(
 			KeyAlgorithm::RS256 => RS256,
 			KeyAlgorithm::RS384 => RS384,
 			KeyAlgorithm::RS512 => RS512,
-			_ => {
+			KeyAlgorithm::RSA1_5
+			| KeyAlgorithm::RSA_OAEP
+			| KeyAlgorithm::RSA_OAEP_256
+			| KeyAlgorithm::UNKNOWN_ALGORITHM => {
 				warn!("Unspported value for parameter 'alg' in JWK object: '{:?}'", alg);
 				bail!(AuthError::InvalidAuth); // Return opaque error
 			}
@@ -136,7 +139,7 @@ pub(super) async fn config(
 		// In the case of "jsonwebtoken", the "none" algorithm is not part of the enumeration
 		// Source: https://docs.rs/jsonwebtoken/latest/jsonwebtoken/enum.Algorithm.html
 		// Confirmation: https://github.com/Keats/jsonwebtoken/issues/381
-		_ => {
+		None => {
 			// Ensure that the algorithm specified in the token matches the key type defined
 			// in the JWK
 			match (&jwk.algorithm, token_alg) {

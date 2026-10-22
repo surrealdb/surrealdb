@@ -391,7 +391,22 @@ pub(super) fn encode(value: &Value, w: &mut Writer) -> Result<()> {
 			w.u8(*b as u8);
 			Ok(())
 		}
-		other => w.varlen(|w| encode_body(other, w)),
+		other @ (Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Array(_)
+		| Value::Set(_)
+		| Value::Object(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_)) => w.varlen(|w| encode_body(other, w)),
 	}
 }
 

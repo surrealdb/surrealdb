@@ -1427,7 +1427,31 @@ impl<'a> Blocks<'a> {
 						.ok_or(IrError::Stale("ir_lower::block: a region with no owner"))?;
 					region = self.ir.enclosing_region(owner);
 				}
-				_ => return Ok(Collect::Block),
+				RegionKind::Request
+				| RegionKind::Transaction(_)
+				| RegionKind::Statement(_)
+				| RegionKind::Block
+				| RegionKind::ValueBlock
+				| RegionKind::ValueIf
+				| RegionKind::ValueFor
+				| RegionKind::Loop
+				| RegionKind::Subquery
+				| RegionKind::FunctionBody
+				| RegionKind::ClosureBody
+				| RegionKind::PermissionFrame
+				| RegionKind::FieldFrame(_)
+				| RegionKind::EventFrame
+				| RegionKind::SubscriberFrame
+				| RegionKind::Clause(_)
+				| RegionKind::LazyOperand
+				| RegionKind::ErrorScope(_)
+				| RegionKind::ChooseArm
+				| RegionKind::Pipeline
+				| RegionKind::JoinLookupArm
+				| RegionKind::WriteStage
+				| RegionKind::CatalogUnit
+				| RegionKind::Deadline
+				| RegionKind::StoredClause(_) => return Ok(Collect::Block),
 			}
 		}
 	}
@@ -1610,7 +1634,326 @@ impl<'a> Blocks<'a> {
 						param,
 						..
 					} => em.param_name(*param) == Some(scope.name.as_str()),
-					_ => false,
+					Instr::CoerceField {
+						..
+					}
+					| Instr::BeginComputing {
+						..
+					}
+					| Instr::LandRow {
+						..
+					}
+					| Instr::BindRow {
+						..
+					}
+					| Instr::JumpIfPermissionsBypassed {
+						..
+					}
+					| Instr::CompareFieldInt {
+						..
+					}
+					| Instr::JumpIfFieldInt {
+						..
+					}
+					| Instr::JumpIfCompare {
+						..
+					}
+					| Instr::Compare {
+						..
+					}
+					| Instr::Arith {
+						..
+					}
+					| Instr::Unary {
+						..
+					}
+					| Instr::NewArray {
+						..
+					}
+					| Instr::ArrayPush {
+						..
+					}
+					| Instr::LoadSlot {
+						..
+					}
+					| Instr::SortKey {
+						..
+					}
+					| Instr::Fetch {
+						..
+					}
+					| Instr::Access {
+						..
+					}
+					| Instr::Each {
+						..
+					}
+					| Instr::Throw {
+						..
+					}
+					| Instr::FilterBegin {
+						..
+					}
+					| Instr::MapBegin {
+						..
+					}
+					| Instr::CollectPush {
+						..
+					}
+					| Instr::Nav {
+						..
+					}
+					| Instr::CallAllowed {
+						..
+					}
+					| Instr::Call {
+						..
+					}
+					| Instr::FunctionEnter {
+						..
+					}
+					| Instr::FunctionBind {
+						..
+					}
+					| Instr::FunctionReturn {
+						..
+					}
+					| Instr::FunctionCall {
+						..
+					}
+					| Instr::ArrayArg {
+						..
+					}
+					| Instr::ElemNext {
+						..
+					}
+					| Instr::ClosureBind {
+						..
+					}
+					| Instr::ClosureReturn {
+						..
+					}
+					| Instr::Dive {
+						..
+					}
+					| Instr::Subquery {
+						..
+					}
+					| Instr::MakeClosure {
+						..
+					}
+					| Instr::ClosureField {
+						..
+					}
+					| Instr::RequireClosure {
+						..
+					}
+					| Instr::Invoke {
+						..
+					}
+					| Instr::Lookup {
+						..
+					}
+					| Instr::Signal {
+						..
+					}
+					| Instr::Extract {
+						..
+					}
+					| Instr::KnnRank {
+						..
+					}
+					| Instr::Measure {
+						..
+					}
+					| Instr::Mock {
+						..
+					}
+					| Instr::Recurse {
+						..
+					}
+					| Instr::Destructure {
+						..
+					}
+					| Instr::RecordId {
+						..
+					}
+					| Instr::MethodResolve {
+						..
+					}
+					| Instr::Method {
+						..
+					}
+					| Instr::MethodClosure {
+						..
+					}
+					| Instr::JumpIfNullish {
+						..
+					}
+					| Instr::JumpIfNone {
+						..
+					}
+					| Instr::JumpIf {
+						..
+					}
+					| Instr::Skip {
+						..
+					}
+					| Instr::Take {
+						..
+					}
+					| Instr::JumpIfLimitReached {
+						..
+					}
+					| Instr::NewObject {
+						..
+					}
+					| Instr::SeedObject {
+						..
+					}
+					| Instr::BuildObject {
+						..
+					}
+					| Instr::LoadPath {
+						..
+					}
+					| Instr::LoadRow {
+						..
+					}
+					| Instr::FetchRow {
+						..
+					}
+					| Instr::RemoveField {
+						..
+					}
+					| Instr::RemovePath {
+						..
+					}
+					| Instr::Omit {
+						..
+					}
+					| Instr::SetField {
+						..
+					}
+					| Instr::WriteProjection {
+						..
+					}
+					| Instr::Load {
+						..
+					}
+					| Instr::Emit {
+						..
+					}
+					| Instr::EmitEnd {
+						..
+					}
+					| Instr::BuildObjectEmit {
+						..
+					}
+					| Instr::FilterFieldInt {
+						..
+					}
+					| Instr::FilterCompare {
+						..
+					}
+					| Instr::Filter {
+						..
+					}
+					| Instr::SplitPush {
+						..
+					}
+					| Instr::SortPush {
+						..
+					}
+					| Instr::Distinct {
+						..
+					}
+					| Instr::JoinProbe {
+						..
+					}
+					| Instr::VerdictJump {
+						..
+					}
+					| Instr::VerdictSet {
+						..
+					}
+					| Instr::JoinPair {
+						..
+					}
+					| Instr::GroupKey {
+						..
+					}
+					| Instr::GroupSelect {
+						..
+					}
+					| Instr::AccUpdate {
+						..
+					}
+					| Instr::Jump {
+						..
+					}
+					| Instr::Next {
+						..
+					}
+					| Instr::Write(_)
+					| Instr::Store(_)
+					| Instr::Block(_)
+					| Instr::EndRow
+					| Instr::StopPipeline
+					| Instr::TryNone {
+						..
+					}
+					| Instr::TryEnd
+					| Instr::MethodRegion {
+						..
+					}
+					| Instr::PermissionRegion {
+						..
+					}
+					| Instr::GroupFirstNeeded {
+						..
+					}
+					| Instr::GroupFirstSet {
+						..
+					}
+					| Instr::CallIndexFn {
+						..
+					}
+					| Instr::Matches {
+						..
+					}
+					| Instr::ExternalEnter {
+						..
+					}
+					| Instr::ExternalCall {
+						..
+					}
+					| Instr::NewSet {
+						..
+					}
+					| Instr::Degree {
+						..
+					}
+					| Instr::RepeatRecurse {
+						..
+					}
+					| Instr::JumpIfNotObject {
+						..
+					}
+					| Instr::JumpIfOpaque {
+						..
+					}
+					| Instr::InvalidControlFlow
+					| Instr::JumpIfNotRecordId {
+						..
+					}
+					| Instr::DocumentRoot {
+						..
+					}
+					| Instr::JudgeCopy {
+						..
+					}
+					| Instr::Ir(_) => false,
 				});
 			if frame_free {
 				em.set_bind_frame(scope.bind, false)?;
@@ -1681,7 +2024,33 @@ impl<'a> Blocks<'a> {
 		let catches = match self.kind_of(region)? {
 			RegionKind::ValueIf => true,
 			RegionKind::StatementIf => false,
-			_ => return Err(IrError::Stale("ir_lower::block: an arm of another region kind")),
+			RegionKind::Request
+			| RegionKind::Transaction(_)
+			| RegionKind::Statement(_)
+			| RegionKind::Block
+			| RegionKind::ValueBlock
+			| RegionKind::StatementFor
+			| RegionKind::ValueFor
+			| RegionKind::Loop
+			| RegionKind::Subquery
+			| RegionKind::FunctionBody
+			| RegionKind::ClosureBody
+			| RegionKind::PermissionFrame
+			| RegionKind::FieldFrame(_)
+			| RegionKind::EventFrame
+			| RegionKind::SubscriberFrame
+			| RegionKind::Clause(_)
+			| RegionKind::LazyOperand
+			| RegionKind::ErrorScope(_)
+			| RegionKind::ChooseArm
+			| RegionKind::Pipeline
+			| RegionKind::JoinLookupArm
+			| RegionKind::WriteStage
+			| RegionKind::CatalogUnit
+			| RegionKind::Deadline
+			| RegionKind::StoredClause(_) => {
+				return Err(IrError::Stale("ir_lower::block: an arm of another region kind"));
+			}
 		};
 		self.scope(region, dst, catches)?;
 		Ok(())
@@ -2009,9 +2378,12 @@ mod tests {
 	fn blocks(program: &Program) -> Vec<&BlockInstr> {
 		code(program)
 			.iter()
-			.filter_map(|instr| match instr {
-				Instr::Block(block) => Some(block),
-				_ => None,
+			.filter_map(|instr| {
+				if let Instr::Block(block) = instr {
+					Some(block)
+				} else {
+					None
+				}
 			})
 			.collect()
 	}
@@ -2019,13 +2391,17 @@ mod tests {
 	fn binds(program: &Program) -> Vec<(u16, bool)> {
 		blocks(program)
 			.into_iter()
-			.filter_map(|block| match block {
-				BlockInstr::Bind {
+			.filter_map(|block| {
+				if let BlockInstr::Bind {
 					slot,
 					frame,
 					..
-				} => Some((*slot, *frame)),
-				_ => None,
+				} = block
+				{
+					Some((*slot, *frame))
+				} else {
+					None
+				}
 			})
 			.collect()
 	}
@@ -2172,7 +2548,37 @@ mod tests {
 				BlockInstr::Bind {
 					..
 				} => Some("bind"),
-				_ => None,
+				BlockInstr::RunEmbedded {
+					..
+				}
+				| BlockInstr::Save
+				| BlockInstr::Restore
+				| BlockInstr::Resolve
+				| BlockInstr::Clock
+				| BlockInstr::Return {
+					..
+				}
+				| BlockInstr::IterStart {
+					..
+				}
+				| BlockInstr::IterNext {
+					..
+				}
+				| BlockInstr::Sleep {
+					..
+				}
+				| BlockInstr::Nested {
+					..
+				}
+				| BlockInstr::Member {
+					..
+				}
+				| BlockInstr::RunServed {
+					..
+				}
+				| BlockInstr::RunAnalyzed {
+					..
+				} => None,
 			})
 			.collect();
 		assert_eq!(order, vec!["coerce", "depth", "bind"]);
@@ -2461,12 +2867,13 @@ mod tests {
 			.iter()
 			.position(|instr| matches!(instr, Instr::Store(StoreInstr::Refuse { .. })))
 			.expect("the program raises the refusal");
-		match &code[refuse] {
-			Instr::Store(StoreInstr::Refuse {
-				refusal: held,
-			}) => assert_eq!(**held, refusal),
-			_ => unreachable!(),
-		}
+		let Instr::Store(StoreInstr::Refuse {
+			refusal: held,
+		}) = &code[refuse]
+		else {
+			unreachable!();
+		};
+		assert_eq!(**held, refusal);
 		// What follows the refusal answers `NONE`, as the statement does when it is not reached.
 		assert!(matches!(code.last(), Some(Instr::EndRow)));
 	}
@@ -2872,12 +3279,16 @@ mod tests {
 		assert_eq!(program.groups[0].permissions.end, program.groups[1].permissions.start);
 		let statements: Vec<u16> = runs(&program)
 			.into_iter()
-			.filter_map(|run| match run {
-				BlockInstr::RunEmbedded {
+			.filter_map(|run| {
+				if let BlockInstr::RunEmbedded {
 					statement,
 					..
-				} => Some(*statement),
-				_ => None,
+				} = run
+				{
+					Some(*statement)
+				} else {
+					None
+				}
 			})
 			.collect();
 		assert_eq!(statements, vec![0, 1]);
@@ -2932,7 +3343,42 @@ mod tests {
 					..
 				} => Some(("run", *resolve)),
 				BlockInstr::Resolve => Some(("resolve", None)),
-				_ => None,
+				BlockInstr::Bind {
+					..
+				}
+				| BlockInstr::CoerceKind {
+					..
+				}
+				| BlockInstr::CheckDepth {
+					..
+				}
+				| BlockInstr::Save
+				| BlockInstr::Restore
+				| BlockInstr::Clock
+				| BlockInstr::Return {
+					..
+				}
+				| BlockInstr::IterStart {
+					..
+				}
+				| BlockInstr::IterNext {
+					..
+				}
+				| BlockInstr::Sleep {
+					..
+				}
+				| BlockInstr::Nested {
+					..
+				}
+				| BlockInstr::Member {
+					..
+				}
+				| BlockInstr::RunServed {
+					..
+				}
+				| BlockInstr::RunAnalyzed {
+					..
+				} => None,
 			})
 			.collect();
 		assert_eq!(
@@ -3000,11 +3446,14 @@ mod tests {
 			.iter()
 			.filter(|pipeline| pipeline.group == group)
 			.flat_map(|pipeline| pipeline.code.iter())
-			.filter_map(|instr| match instr {
-				Instr::Store(store) => Some(
-					format!("{store:?}").split([' ', '{', '(']).next().unwrap_or("").to_owned(),
-				),
-				_ => None,
+			.filter_map(|instr| {
+				if let Instr::Store(store) = instr {
+					Some(
+						format!("{store:?}").split([' ', '{', '(']).next().unwrap_or("").to_owned(),
+					)
+				} else {
+					None
+				}
 			})
 			.collect()
 	}
@@ -3139,9 +3588,12 @@ mod tests {
 		assert!(program.groups.is_empty());
 		let stores: Vec<&StoreInstr> = code(&program)
 			.iter()
-			.filter_map(|instr| match instr {
-				Instr::Store(store) => Some(store),
-				_ => None,
+			.filter_map(|instr| {
+				if let Instr::Store(store) = instr {
+					Some(store)
+				} else {
+					None
+				}
 			})
 			.collect();
 		assert!(matches!(

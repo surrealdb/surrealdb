@@ -81,7 +81,7 @@ fn reads_truthiness(ir: &Ir, read: Use, depth: usize) -> bool {
 					.is_some_and(|result| existence_only_at(ir, *result, depth + 1))
 		}
 		OpKind::Expr(ExprOp::Yield) => yields_truthiness(ir, read.user, depth),
-		_ => false,
+		OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => false,
 	}
 }
 
@@ -496,7 +496,71 @@ fn op_total(ir: &Ir, op: OpId, select_loop: OpId) -> bool {
 			}
 			ExprOp::Prefix(op) => matches!(**op, PrefixOperator::Not),
 			ExprOp::Yield => true,
-			_ => false,
+			ExprOp::Array
+			| ExprOp::Set
+			| ExprOp::Object {
+				..
+			}
+			| ExprOp::RecordId(_)
+			| ExprOp::FreeParam {
+				..
+			}
+			| ExprOp::CatalogParam {
+				..
+			}
+			| ExprOp::Table {
+				..
+			}
+			| ExprOp::Mock(_)
+			| ExprOp::Constant {
+				..
+			}
+			| ExprOp::ComputedRead(_)
+			| ExprOp::Deref {
+				..
+			}
+			| ExprOp::Index
+			| ExprOp::First
+			| ExprOp::Last
+			| ExprOp::Each
+			| ExprOp::Flatten {
+				..
+			}
+			| ExprOp::Dispatch(_)
+			| ExprOp::Method {
+				..
+			}
+			| ExprOp::Destructure {
+				..
+			}
+			| ExprOp::Optional
+			| ExprOp::RepeatRecurse
+			| ExprOp::SetField {
+				..
+			}
+			| ExprOp::TupleRow {
+				..
+			}
+			| ExprOp::Convert(_)
+			| ExprOp::Postfix {
+				..
+			}
+			| ExprOp::Invoke
+			| ExprOp::Call(_)
+			| ExprOp::ClosureCreate(_)
+			| ExprOp::If
+			| ExprOp::Throw
+			| ExprOp::Subquery(_)
+			| ExprOp::Agg {
+				..
+			}
+			| ExprOp::Now {
+				..
+			}
+			| ExprOp::Raise(_)
+			| ExprOp::DepthCharge {
+				..
+			} => false,
 		},
 		OpKind::Logical(log) => match log {
 			LogOp::Filter | LogOp::Yield => true,
@@ -505,7 +569,101 @@ fn op_total(ir: &Ir, op: OpId, select_loop: OpId) -> bool {
 				..
 			} => computed.is_none(),
 			LogOp::Project(attrs) => plain_projection(attrs),
-			_ => false,
+			LogOp::Request {
+				..
+			}
+			| LogOp::Txn {
+				..
+			}
+			| LogOp::Stmt {
+				..
+			}
+			| LogOp::Statement {
+				..
+			}
+			| LogOp::Source(_)
+			| LogOp::Values {
+				..
+			}
+			| LogOp::Match {
+				..
+			}
+			| LogOp::MatchRead {
+				..
+			}
+			| LogOp::MatchUpdate(_)
+			| LogOp::MatchDelete {
+				..
+			}
+			| LogOp::MatchInsert(_)
+			| LogOp::MatchOutput(_)
+			| LogOp::BindStep(_)
+			| LogOp::Subquery
+			| LogOp::Write(_)
+			| LogOp::Assign(_)
+			| LogOp::Unset {
+				..
+			}
+			| LogOp::Content {
+				..
+			}
+			| LogOp::DdlGuard {
+				..
+			}
+			| LogOp::Define(_)
+			| LogOp::Remove(_)
+			| LogOp::Alter(_)
+			| LogOp::Rebuild(_)
+			| LogOp::UnionAll
+			| LogOp::Join {
+				..
+			}
+			| LogOp::Split {
+				..
+			}
+			| LogOp::Aggregate(_)
+			| LogOp::Distinct
+			| LogOp::Sort(_)
+			| LogOp::Limit {
+				..
+			}
+			| LogOp::Fetch
+			| LogOp::Timeout
+			| LogOp::VersionScope
+			| LogOp::Only
+			| LogOp::Explain {
+				..
+			}
+			| LogOp::Eval
+			| LogOp::Block
+			| LogOp::Let(_)
+			| LogOp::Return
+			| LogOp::Loop {
+				..
+			}
+			| LogOp::If
+			| LogOp::Info {
+				..
+			}
+			| LogOp::Sleep
+			| LogOp::Use {
+				..
+			}
+			| LogOp::Option {
+				..
+			}
+			| LogOp::Access(_)
+			| LogOp::Kill
+			| LogOp::Live(_)
+			| LogOp::Subscriber(_)
+			| LogOp::Show(_)
+			| LogOp::Choose(_)
+			| LogOp::WriteStage {
+				..
+			}
+			| LogOp::Events(_)
+			| LogOp::Next
+			| LogOp::Break => false,
 		},
 		OpKind::Phys(_) => false,
 	}
@@ -551,7 +709,7 @@ fn row_loop(ir: &Ir, value: ValueId) -> Option<OpId> {
 				) => {
 					at = *ir.op(op)?.operands.first()?;
 				}
-				_ => return None,
+				OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => return None,
 			},
 			ValueDef::BlockArg {
 				block,

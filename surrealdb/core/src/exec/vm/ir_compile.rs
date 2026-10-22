@@ -1851,7 +1851,39 @@ pub(crate) fn region_unit(ask: &Ask<'_>) -> Result<Option<Resolved>, NotCovered>
 				takes_row: true,
 			},
 		),
-		_ => return Ok(None),
+		UnitRequest::FunctionBody {
+			..
+		}
+		| UnitRequest::FunctionGuard {
+			..
+		}
+		| UnitRequest::TableUnit {
+			..
+		}
+		| UnitRequest::ViewRows {
+			..
+		}
+		| UnitRequest::ViewRecalc {
+			..
+		}
+		| UnitRequest::StageBundle {
+			..
+		}
+		| UnitRequest::Events {
+			..
+		}
+		| UnitRequest::Cascade {
+			..
+		}
+		| UnitRequest::ClosureBody {
+			..
+		}
+		| UnitRequest::Subscription {
+			..
+		}
+		| UnitRequest::ServedStatement {
+			..
+		} => return Ok(None),
 	};
 	let unit = ask.by.ir.copy_region(region)?;
 	let inputs = u16::try_from(unit.inputs.len()).map_err(|_| IrError::Capacity("unit inputs"))?;
@@ -1896,7 +1928,39 @@ pub(crate) fn region_limit(ask: &Ask<'_>) -> Result<Option<crate::iam::AuthLimit
 		| UnitRequest::LoopBody {
 			region,
 		} => *region,
-		_ => return Ok(None),
+		UnitRequest::FunctionBody {
+			..
+		}
+		| UnitRequest::FunctionGuard {
+			..
+		}
+		| UnitRequest::TableUnit {
+			..
+		}
+		| UnitRequest::ViewRows {
+			..
+		}
+		| UnitRequest::ViewRecalc {
+			..
+		}
+		| UnitRequest::StageBundle {
+			..
+		}
+		| UnitRequest::Events {
+			..
+		}
+		| UnitRequest::Cascade {
+			..
+		}
+		| UnitRequest::ClosureBody {
+			..
+		}
+		| UnitRequest::Subscription {
+			..
+		}
+		| UnitRequest::ServedStatement {
+			..
+		} => return Ok(None),
 	};
 	let ir = ask.by.ir;
 	let owner = ir
@@ -2258,7 +2322,42 @@ mod tests {
 						let held = self.tables.get(&(table.clone(), *unchecked));
 						Ok(Resolved::Table(held.and_then(|reach| reach.clone()).map(Reach::Tables)))
 					}
-					request => {
+					request @ (UnitRequest::FunctionBody {
+						..
+					}
+					| UnitRequest::FunctionGuard {
+						..
+					}
+					| UnitRequest::Subquery {
+						..
+					}
+					| UnitRequest::ViewRows {
+						..
+					}
+					| UnitRequest::ViewRecalc {
+						..
+					}
+					| UnitRequest::StageBundle {
+						..
+					}
+					| UnitRequest::Events {
+						..
+					}
+					| UnitRequest::Cascade {
+						..
+					}
+					| UnitRequest::ClosureBody {
+						..
+					}
+					| UnitRequest::LoopBody {
+						..
+					}
+					| UnitRequest::Subscription {
+						..
+					}
+					| UnitRequest::ServedStatement {
+						..
+					}) => {
 						if let Some(op) = self.served.get(request) {
 							return Ok(Resolved::Served(Arc::clone(op)));
 						}
@@ -2896,9 +2995,14 @@ mod tests {
 	}
 
 	fn use_slot(operands: UseOperands, computed: bool) -> Slot {
-		let written = |operand: &UseOperand| match operand {
-			UseOperand::Written(name) if !computed => Some(name.clone()),
-			_ => None,
+		let written = |operand: &UseOperand| {
+			if let UseOperand::Written(name) = operand
+				&& !computed
+			{
+				Some(name.clone())
+			} else {
+				None
+			}
 		};
 		Slot::Use {
 			ns: written(&operands.ns),

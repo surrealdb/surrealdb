@@ -291,7 +291,16 @@ impl Refusal {
 			}) => Some(Self::NoIndexForMatch {
 				exp: exp.clone(),
 			}),
-			_ => None,
+			crate::err::Error::Engine(_)
+			| crate::err::Error::Exec(_)
+			| crate::err::Error::Catalog(_)
+			| crate::err::Error::Idx(_)
+			| crate::err::Error::Kvs(_)
+			| crate::err::Error::IamError(_)
+			| crate::err::Error::ApiError(_)
+			| crate::err::Error::InvalidPath(_)
+			| crate::err::Error::InvalidUrl(_)
+			| crate::err::Error::Http(_) => None,
 		}
 	}
 }

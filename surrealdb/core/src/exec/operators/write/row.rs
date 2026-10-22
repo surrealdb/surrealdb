@@ -291,11 +291,16 @@ impl WriteRow {
 				value: value.to_sql(),
 			})))
 		};
-		match target {
-			Value::RecordId(id) if id.key.is_range() => unsupported(Value::RecordId(id)),
-			Value::RecordId(id) => Ok(Self::empty(Some(id), None)),
-			Value::Table(table) => Ok(Self::empty(None, Some(table))),
-			other => unsupported(other),
+		if let Value::RecordId(id) = target {
+			if id.key.is_range() {
+				unsupported(Value::RecordId(id))
+			} else {
+				Ok(Self::empty(Some(id), None))
+			}
+		} else if let Value::Table(table) = target {
+			Ok(Self::empty(None, Some(table)))
+		} else {
+			unsupported(target)
 		}
 	}
 

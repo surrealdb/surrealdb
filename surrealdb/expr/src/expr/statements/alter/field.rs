@@ -79,9 +79,10 @@ impl AlterFieldStatement {
 		names: AlterKind<KeyNames>,
 	) -> Result<(), KeyNamesError> {
 		if let AlterKind::Set(names) = &names {
-			let kinds = match &kind {
-				AlterKind::Set(Kind::Literal(KindLiteral::Array(kinds))) => kinds.len(),
-				_ => 0,
+			let kinds = if let AlterKind::Set(Kind::Literal(KindLiteral::Array(kinds))) = &kind {
+				kinds.len()
+			} else {
+				0
 			};
 			if kinds != names.len() {
 				return Err(KeyNamesError::Arity {

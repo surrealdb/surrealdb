@@ -961,8 +961,9 @@ async fn test_live_reduction_is_per_subscriber() {
 /// Register a `LIVE SELECT` on `item` and return the subscription's id.
 async fn live_query_id(ds: &Datastore, ses: &Session) -> crate::types::PublicUuid {
 	let mut res = ds.execute("LIVE SELECT * FROM item", ses, None).await.unwrap();
-	match res.remove(0).result.unwrap() {
-		PublicValue::Uuid(id) => id,
-		other => panic!("LIVE SELECT should answer with a subscription id, got: {other:?}"),
-	}
+	let val = res.remove(0).result.unwrap();
+	let PublicValue::Uuid(id) = val else {
+		panic!("LIVE SELECT should answer with a subscription id, got: {val:?}");
+	};
+	id
 }

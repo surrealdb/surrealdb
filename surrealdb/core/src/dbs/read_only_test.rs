@@ -621,7 +621,7 @@ mod vm {
 		}
 		match planned.outcome {
 			Outcome::Program(AccessMode::ReadOnly) => Ok(()),
-			ref outcome => Err(format!(
+			ref outcome @ (Outcome::Program(_) | Outcome::Declined(_)) => Err(format!(
 				"{label}: `{sql}` has nothing nested, so it must plan to ReadOnly: {outcome:?}"
 			)),
 		}
@@ -670,10 +670,12 @@ mod vm {
 				"{label}: `{sql}` holds `{nested}` but planned to a ReadOnly program, so the \
 				 derivation did not reach the position"
 			)),
-			outcome if outcome.is_vm_decline() || outcome.is_region_refusal() => {
+			outcome @ Outcome::Declined(_)
+				if outcome.is_vm_decline() || outcome.is_region_refusal() =>
+			{
 				Ok(Reach::Declined)
 			}
-			outcome => Err(format!(
+			outcome @ Outcome::Declined(_) => Err(format!(
 				"{label}: `{sql}` failed to plan for a reason other than the VM declining it or \
 				 its region refusing it: {outcome:?}"
 			)),

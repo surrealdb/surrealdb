@@ -497,7 +497,7 @@ impl Future for BuildCompletion {
 		let this = self.get_mut();
 		let polled = match this.finished.as_mut().poll(cx) {
 			Poll::Ready(Err(err)) if this.excused_once_online(&err) => Poll::Ready(Ok(())),
-			finished => finished,
+			finished @ (Poll::Ready(_) | Poll::Pending) => finished,
 		};
 		if polled.is_ready()
 			&& let Some(mut parked) = this.parked.take()
@@ -3257,7 +3257,9 @@ impl Building {
 		// while it waits; a published build's keeper, as its ownership is.
 		let heartbeat_every = match phase {
 			IndexBuildPhase::Online => self.ownership_heartbeat_every(),
-			_ => BUILD_WAITING_HEARTBEAT,
+			IndexBuildPhase::Building | IndexBuildPhase::Closing | IndexBuildPhase::Error => {
+				BUILD_WAITING_HEARTBEAT
+			}
 		};
 		let mut heartbeat_at = Instant::now();
 		// Register for the wake-up before checking the gate or `aborted`, as

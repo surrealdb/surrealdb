@@ -888,19 +888,27 @@ mod tests {
 		assert_eq!(program.computed_names.len(), 1);
 		assert_eq!(program.computed_names[0], vec![Strand::from("c")]);
 		let code = &program.pipelines[0].code;
-		let reduced = code.iter().find_map(|instr| match instr {
-			Instr::LoadRow {
+		let reduced = code.iter().find_map(|instr| {
+			if let Instr::LoadRow {
 				dst,
-			} => Some(*dst),
-			_ => None,
+			} = instr
+			{
+				Some(*dst)
+			} else {
+				None
+			}
 		});
 		assert!(reduced.is_some(), "{code:?}");
-		let begin = code.iter().find_map(|instr| match instr {
-			Instr::BeginComputing {
+		let begin = code.iter().find_map(|instr| {
+			if let Instr::BeginComputing {
 				doc,
 				..
-			} => Some(*doc),
-			_ => None,
+			} = instr
+			{
+				Some(*doc)
+			} else {
+				None
+			}
 		});
 		assert_eq!(begin, Some(reduced), "{code:?}");
 		// The computed column reads the reduced record and not the row.

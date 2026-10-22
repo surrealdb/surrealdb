@@ -12473,10 +12473,10 @@ pub(crate) mod test {
 
 	async fn logged_count(ds: &Datastore, session: &Session) -> Result<usize> {
 		let mut res = ds.execute("SELECT * FROM logged", session, None).await?;
-		match res.remove(0).result? {
-			PublicValue::Array(a) => Ok(a.len()),
-			other => panic!("expected an array, got {other:?}"),
-		}
+		let PublicValue::Array(a) = res.remove(0).result? else {
+			panic!("expected an array");
+		};
+		Ok(a.len())
 	}
 
 	/// Defines an async event with the given `RETRY` budget and queues exactly

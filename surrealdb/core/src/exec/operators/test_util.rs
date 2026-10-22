@@ -133,10 +133,11 @@ pub(crate) fn parse_path(src: &str) -> crate::expr::logical::LogicalExpr {
 /// `DEFINE FIELD` name is stored as and the form the value layer's navigation
 /// (`Value::pick`, `Value::each`) takes.
 pub(crate) fn field_idiom(src: &str) -> crate::expr::Idiom {
-	match parse_sql_expr(src) {
-		crate::expr::Expr::Idiom(idiom) => idiom,
-		other => panic!("expected an idiom for {src:?}, got {other:?}"),
-	}
+	let expr = parse_sql_expr(src);
+	let crate::expr::Expr::Idiom(idiom) = expr else {
+		panic!("expected an idiom for {src:?}, got {expr:?}");
+	};
+	idiom
 }
 
 /// Lower, bind and plan one SurrealQL statement against `ctx`, the way the

@@ -55,7 +55,7 @@ impl Body {
 	pub fn used(&self) -> bool {
 		match self.data.replace(BodyData::Used) {
 			BodyData::Used => true,
-			x => {
+			x @ (BodyData::Buffer(_) | BodyData::Stream(_)) => {
 				self.data.set(x);
 				false
 			}
@@ -138,7 +138,22 @@ impl<'js> FromJs<'js> for Body {
 				return Ok(Body::buffer(BodyKind::String, string));
 			}
 			Type::Object => value.as_object().expect("type checked as object"),
-			x => {
+			x @ (Type::Uninitialized
+			| Type::Undefined
+			| Type::Null
+			| Type::Bool
+			| Type::Int
+			| Type::Float
+			| Type::Symbol
+			| Type::Array
+			| Type::Constructor
+			| Type::Function
+			| Type::Promise
+			| Type::Exception
+			| Type::Proxy
+			| Type::Module
+			| Type::BigInt
+			| Type::Unknown) => {
 				return Err(Error::FromJs {
 					from: x.as_str(),
 					to: "Blob, TypedArray, FormData, URLSearchParams, or String",

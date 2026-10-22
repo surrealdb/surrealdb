@@ -86,21 +86,28 @@ enum Side {
 /// a uuid, whose encoding is that record id's alone.
 pub(crate) fn equality_element(kind: &ComponentKind, value: &Value) -> Option<Value> {
 	match kind {
-		ComponentKind::Int => match value {
-			Value::Number(n) => n.as_int_lossless().map(|i| Value::Number(Number::Int(i))),
-			_ => None,
-		},
-		ComponentKind::Record(_) => match value {
-			Value::RecordId(rid)
+		ComponentKind::Int => {
+			if let Value::Number(n) = value {
+				n.as_int_lossless().map(|i| Value::Number(Number::Int(i)))
+			} else {
+				None
+			}
+		}
+		ComponentKind::Record(_) => {
+			if let Value::RecordId(rid) = value {
 				if matches!(
 					rid.key,
 					RecordIdKey::String(_) | RecordIdKey::Number(_) | RecordIdKey::Uuid(_)
-				) && kind.refusal(value).is_none() =>
-			{
-				Some(value.clone())
+				) && kind.refusal(value).is_none()
+				{
+					Some(value.clone())
+				} else {
+					None
+				}
+			} else {
+				None
 			}
-			_ => None,
-		},
+		}
 		ComponentKind::String
 		| ComponentKind::Datetime
 		| ComponentKind::Uuid
@@ -123,7 +130,20 @@ pub(crate) fn equality_element(kind: &ComponentKind, value: &Value) -> Option<Va
 			{
 				Some(value.clone())
 			}
-			_ => None,
+			Value::None
+			| Value::Null
+			| Value::Number(_)
+			| Value::Array(_)
+			| Value::Set(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => None,
 		},
 		// A kind added to the catalog is not one a key range reasons about.
 		_ => None,
@@ -177,7 +197,7 @@ fn side_element(
 				| Value::Datetime(_)
 		)
 		.then(|| (value.clone(), inclusive)),
-		_ => None,
+		ComponentKind::Record(_) | _ => None,
 	}
 }
 
@@ -388,9 +408,10 @@ pub(crate) fn past_second(element: &Value, floor: &Value, direction: Direction) 
 /// The element at `position` of the array key of the record id `key`, if it
 /// has one.
 pub(crate) fn key_element(key: &RecordIdKey, position: u32) -> Option<&Value> {
-	match key {
-		RecordIdKey::Array(elements) => elements.get(position as usize),
-		_ => None,
+	if let RecordIdKey::Array(elements) = key {
+		elements.get(position as usize)
+	} else {
+		None
 	}
 }
 

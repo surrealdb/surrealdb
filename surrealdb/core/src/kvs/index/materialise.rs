@@ -669,7 +669,7 @@ impl Materialiser {
 					BuildOwner::Lapsed(state) if ix.is_some() => {
 						build_basis_is_stale(&txn, ikb, state).await?
 					}
-					_ => false,
+					BuildOwner::Released | BuildOwner::Held | BuildOwner::Lapsed(_) => false,
 				};
 				Ok::<_, anyhow::Error>((ix, live, lapsed, stale))
 			}

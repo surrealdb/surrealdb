@@ -66,12 +66,11 @@ pub(crate) async fn open_full_text_index(
 	// Legacy (pre-shared-doc-ID) indexes resolve postings through their
 	// historical private doc-ID layout until explicitly rebuilt; the format
 	// version selects the resolver.
-	let ft_params = match &index_def.index {
-		Index::FullText(params) => params,
-		_ => Err(ControlFlow::Err(anyhow::anyhow!(
+	let Index::FullText(ft_params) = &index_def.index else {
+		return Err(ControlFlow::Err(anyhow::anyhow!(
 			"Index '{}' is not a full-text index",
 			index_def.name
-		)))?,
+		)));
 	};
 	let ikb = IndexKeyBase::new(
 		db_ctx.ns_ctx.ns.namespace_id,

@@ -146,12 +146,12 @@ impl StageSetUnit {
 						| LogicalExpr::RepeatRecurse(_)
 						| LogicalExpr::Subquery(_)
 				);
-			match e {
-				LogicalExpr::Param(param) if bound => {
+			if let LogicalExpr::Param(param) = e {
+				if bound {
 					names.insert(param.as_str().to_owned());
 				}
-				LogicalExpr::Subquery(plan) => op(plan, bound, names),
-				_ => {}
+			} else if let LogicalExpr::Subquery(plan) = e {
+				op(plan, bound, names);
 			}
 			e.for_each_child(&mut |child| expr(child, bound, names));
 		}

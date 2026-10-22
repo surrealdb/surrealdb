@@ -108,9 +108,10 @@ impl<'a> Kind<'a> {
 	/// The name of the analyzer a full-text index analyses with, for the build to load the one
 	/// its statement sees. `None` for every other kind.
 	pub(super) fn analyzer(self) -> Option<&'a str> {
-		match &self.0.index {
-			Index::FullText(p) => Some(p.analyzer.as_str()),
-			_ => None,
+		if let Index::FullText(p) = &self.0.index {
+			Some(p.analyzer.as_str())
+		} else {
+			None
 		}
 	}
 
@@ -123,12 +124,10 @@ impl<'a> Kind<'a> {
 		analyzer: Option<std::sync::Arc<crate::catalog::AnalyzerDefinition>>,
 		_range: Option<BatchRange<'_>>,
 	) -> Result<BatchContext> {
-		let fulltext = match self.0.index {
-			Index::FullText(_) => {
-				IndexOperation::create_fulltext_index(ctx, ix_key.0, ix_key.1, self.0, analyzer)
-					.await?
-			}
-			_ => None,
+		let fulltext = if let Index::FullText(_) = self.0.index {
+			IndexOperation::create_fulltext_index(ctx, ix_key.0, ix_key.1, self.0, analyzer).await?
+		} else {
+			None
 		};
 		Ok(BatchContext {
 			fulltext,

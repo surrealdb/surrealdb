@@ -88,9 +88,10 @@ pub(super) struct Loading(std::vec::IntoIter<Value>);
 
 impl Loading {
 	pub(super) fn new(state: Value) -> Result<Self> {
-		match state {
-			Value::Array(array) => Ok(Self(array.0.into_iter())),
-			_ => anyhow::bail!("A spilled aggregate state is not an array"),
+		if let Value::Array(array) = state {
+			Ok(Self(array.0.into_iter()))
+		} else {
+			anyhow::bail!("A spilled aggregate state is not an array")
 		}
 	}
 
@@ -99,9 +100,10 @@ impl Loading {
 	}
 
 	pub(super) fn number(&mut self) -> Result<Number> {
-		match self.next()? {
-			Value::Number(n) => Ok(n),
-			_ => anyhow::bail!("A spilled aggregate state holds no number where one was saved"),
+		if let Value::Number(n) = self.next()? {
+			Ok(n)
+		} else {
+			anyhow::bail!("A spilled aggregate state holds no number where one was saved")
 		}
 	}
 
@@ -110,63 +112,75 @@ impl Loading {
 	}
 
 	pub(super) fn option_number(&mut self) -> Result<Option<Number>> {
-		match self.next()? {
-			Value::Number(n) => Ok(Some(n)),
-			_ => Ok(None),
+		if let Value::Number(n) = self.next()? {
+			Ok(Some(n))
+		} else {
+			Ok(None)
 		}
 	}
 
 	pub(super) fn option_datetime(&mut self) -> Result<Option<Datetime>> {
-		match self.next()? {
-			Value::Datetime(d) => Ok(Some(d)),
-			_ => Ok(None),
+		if let Value::Datetime(d) = self.next()? {
+			Ok(Some(d))
+		} else {
+			Ok(None)
 		}
 	}
 
 	pub(super) fn option_string(&mut self) -> Result<Option<String>> {
-		match self.next()? {
-			Value::String(s) => Ok(Some(s.as_str().to_owned())),
-			_ => Ok(None),
+		if let Value::String(s) = self.next()? {
+			Ok(Some(s.as_str().to_owned()))
+		} else {
+			Ok(None)
 		}
 	}
 
 	pub(super) fn option_value(&mut self) -> Result<Option<Value>> {
 		let value = self.next()?;
-		match self.next()? {
-			Value::Bool(true) => Ok(Some(value)),
-			_ => Ok(None),
+		if let Value::Bool(true) = self.next()? {
+			Ok(Some(value))
+		} else {
+			Ok(None)
 		}
 	}
 
 	pub(super) fn values(&mut self) -> Result<Vec<Value>> {
-		match self.next()? {
-			Value::Array(array) => Ok(array.0),
-			_ => anyhow::bail!("A spilled aggregate state holds no array where one was saved"),
+		if let Value::Array(array) = self.next()? {
+			Ok(array.0)
+		} else {
+			anyhow::bail!("A spilled aggregate state holds no array where one was saved")
 		}
 	}
 
 	pub(super) fn numbers(&mut self) -> Result<Vec<Number>> {
 		self.values()?
 			.into_iter()
-			.map(|v| match v {
-				Value::Number(n) => Ok(n),
-				_ => anyhow::bail!("A spilled aggregate state holds a value that is no number"),
+			.map(|v| {
+				if let Value::Number(n) = v {
+					Ok(n)
+				} else {
+					anyhow::bail!("A spilled aggregate state holds a value that is no number")
+				}
 			})
 			.collect()
 	}
 
 	pub(super) fn option_numbers(&mut self) -> Result<Option<Vec<Number>>> {
-		match self.next()? {
-			Value::Array(array) => array
+		if let Value::Array(array) = self.next()? {
+			array
 				.0
 				.into_iter()
-				.map(|v| match v {
-					Value::Number(n) => Ok(n),
-					_ => anyhow::bail!("A spilled aggregate state holds a value that is no number"),
+				.map(|v| {
+					if let Value::Number(n) = v {
+						Ok(n)
+					} else {
+						anyhow::bail!("A spilled aggregate state holds a value that is no number")
+					}
 				})
 				.collect::<Result<Vec<_>>>()
-				.map(Some),
-			_ => Ok(None),
+				.map(Some)
+		} else {
+			Ok(None)
 		}
 	}
 

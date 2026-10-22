@@ -79,10 +79,10 @@ mod tests {
 		assert_eq!(seen.insert(&Value::from(1), 1).unwrap(), false);
 		// A new distinct value past the budget errors and names the knob.
 		let err = seen.insert(&Value::from(2), 1).unwrap_err();
-		let msg = match err {
-			ControlFlow::Err(e) => e.to_string(),
-			other => panic!("expected error, got {other:?}"),
+		let ControlFlow::Err(e) = err else {
+			panic!("expected error, got {err:?}");
 		};
+		let msg = e.to_string();
 		assert!(
 			msg.contains("SURREAL_GQL_MAX_JOIN_BUILD_ROWS"),
 			"guard error must name the knob, got: {msg}"

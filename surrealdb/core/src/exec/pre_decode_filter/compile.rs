@@ -28,24 +28,22 @@ fn literal_hashset_element_safe(v: &Value) -> bool {
 /// the shape is not a collection or any element fails [`literal_hashset_element_safe`].
 fn try_build_inside_literal_hashset(literal: &Value) -> Option<Arc<HashSet<Value>>> {
 	let mut set = HashSet::new();
-	match literal {
-		Value::Array(a) => {
-			for v in a.iter() {
-				if !literal_hashset_element_safe(v) {
-					return None;
-				}
-				set.insert(v.clone());
+	if let Value::Array(a) = literal {
+		for v in a.iter() {
+			if !literal_hashset_element_safe(v) {
+				return None;
 			}
+			set.insert(v.clone());
 		}
-		Value::Set(s) => {
-			for v in s.iter() {
-				if !literal_hashset_element_safe(v) {
-					return None;
-				}
-				set.insert(v.clone());
+	} else if let Value::Set(s) = literal {
+		for v in s.iter() {
+			if !literal_hashset_element_safe(v) {
+				return None;
 			}
+			set.insert(v.clone());
 		}
-		_ => return None,
+	} else {
+		return None;
 	}
 	Some(Arc::new(set))
 }
@@ -65,50 +63,26 @@ fn try_compile_leaf_streaming(
 		literal: literal.clone(),
 		reversed: false,
 	};
-	match op {
-		BinaryOperator::Contain | BinaryOperator::NotContain => {
-			if let Value::String(s) = literal {
-				let finder = memmem::Finder::new(s.as_str().as_bytes()).into_owned();
-				let negated = matches!(op, BinaryOperator::NotContain);
-				let evaluator: Arc<dyn StreamingLeafEvaluator> = Arc::new(SubstringMatch {
-					finder,
-					negated,
-				});
-				Some(PredNode::LeafStreaming {
-					path,
-					evaluator,
-					fallback,
-				})
-			} else {
-				let negated = matches!(op, BinaryOperator::NotContain);
-				let needle_wire = Arc::new(LiteralWire::from_value(literal));
-				let evaluator: Arc<dyn StreamingLeafEvaluator> = Arc::new(ArrayElementContains {
-					needle: Arc::new(literal.clone()),
-					needle_wire,
-					negated,
-				});
-				Some(PredNode::LeafStreaming {
-					path,
-					evaluator,
-					fallback,
-				})
-			}
-		}
-		BinaryOperator::ContainAny | BinaryOperator::ContainNone | BinaryOperator::ContainAll => {
-			let set = try_build_inside_literal_hashset(literal)?;
-			let tables = overlap_streaming_from_set(set.as_ref());
-			let mode = match op {
-				BinaryOperator::ContainAny => OverlapMode::Any,
-				BinaryOperator::ContainNone => OverlapMode::None,
-				BinaryOperator::ContainAll => OverlapMode::All,
-				_ => return None,
-			};
-			let evaluator: Arc<dyn StreamingLeafEvaluator> = Arc::new(ArrayOverlapsLiteralSet {
-				literal_to_idx: tables.literal_to_idx,
-				wire_to_idx: tables.wire_to_idx,
-				literal_set: tables.literal_set,
-				literal_count: tables.literal_count,
-				mode,
+	if matches!(op, BinaryOperator::Contain | BinaryOperator::NotContain) {
+		if let Value::String(s) = literal {
+			let finder = memmem::Finder::new(s.as_str().as_bytes()).into_owned();
+			let negated = matches!(op, BinaryOperator::NotContain);
+			let evaluator: Arc<dyn StreamingLeafEvaluator> = Arc::new(SubstringMatch {
+				finder,
+				negated,
+			});
+			Some(PredNode::LeafStreaming {
+				path,
+				evaluator,
+				fallback,
+			})
+		} else {
+			let negated = matches!(op, BinaryOperator::NotContain);
+			let needle_wire = Arc::new(LiteralWire::from_value(literal));
+			let evaluator: Arc<dyn StreamingLeafEvaluator> = Arc::new(ArrayElementContains {
+				needle: Arc::new(literal.clone()),
+				needle_wire,
+				negated,
 			});
 			Some(PredNode::LeafStreaming {
 				path,
@@ -116,7 +90,33 @@ fn try_compile_leaf_streaming(
 				fallback,
 			})
 		}
-		_ => None,
+	} else if matches!(
+		op,
+		BinaryOperator::ContainAny | BinaryOperator::ContainNone | BinaryOperator::ContainAll
+	) {
+		let set = try_build_inside_literal_hashset(literal)?;
+		let tables = overlap_streaming_from_set(set.as_ref());
+		let mode = if matches!(op, BinaryOperator::ContainAny) {
+			OverlapMode::Any
+		} else if matches!(op, BinaryOperator::ContainNone) {
+			OverlapMode::None
+		} else {
+			OverlapMode::All
+		};
+		let evaluator: Arc<dyn StreamingLeafEvaluator> = Arc::new(ArrayOverlapsLiteralSet {
+			literal_to_idx: tables.literal_to_idx,
+			wire_to_idx: tables.wire_to_idx,
+			literal_set: tables.literal_set,
+			literal_count: tables.literal_count,
+			mode,
+		});
+		Some(PredNode::LeafStreaming {
+			path,
+			evaluator,
+			fallback,
+		})
+	} else {
+		None
 	}
 }
 
@@ -246,18 +246,31 @@ fn fuse_tree(node: PredNode) -> PredNode {
 			fuse_or_combine(parts)
 		}
 		PredNode::Not(inner) => PredNode::Not(Box::new(fuse_tree(*inner))),
-		other => other,
+		other @ (PredNode::Leaf {
+			..
+		}
+		| PredNode::LeafSetMembership {
+			..
+		}
+		| PredNode::LeafStreaming {
+			..
+		}
+		| PredNode::FusedFlatMapAnd {
+			..
+		}
+		| PredNode::NavigatePrefix {
+			..
+		}) => other,
 	}
 }
 
 fn flatten_and_into(acc: &mut Vec<PredNode>, node: PredNode) {
-	match node {
-		PredNode::And(xs) => {
-			for x in xs {
-				flatten_and_into(acc, x);
-			}
+	if let PredNode::And(xs) = node {
+		for x in xs {
+			flatten_and_into(acc, x);
 		}
-		x => acc.push(x),
+	} else {
+		acc.push(node);
 	}
 }
 
@@ -276,13 +289,12 @@ fn fuse_and_combine(children: Vec<PredNode>) -> PredNode {
 /// Flattening lets [`fuse_or_combine`] see every arm at once so same-field equalities
 /// across nesting levels fuse into one set.
 fn flatten_or_into(acc: &mut Vec<PredNode>, node: PredNode) {
-	match node {
-		PredNode::Or(xs) => {
-			for x in xs {
-				flatten_or_into(acc, x);
-			}
+	if let PredNode::Or(xs) = node {
+		for x in xs {
+			flatten_or_into(acc, x);
 		}
-		x => acc.push(x),
+	} else {
+		acc.push(node);
 	}
 }
 
@@ -332,22 +344,27 @@ fn fuse_or_combine(children: Vec<PredNode>) -> PredNode {
 	'arm: for arm in bucket {
 		// Read the path + literals this arm would contribute, without moving it: a
 		// non-fuseable arm must pass through unchanged.
-		let contribution: Option<(Vec<PathSegment>, Vec<Value>)> = match &arm {
-			PredNode::Leaf {
-				path,
-				op: BinaryOperator::Equal,
-				literal,
-				reversed: false,
-				..
-			} if literal_hashset_element_safe(literal) => Some((path.clone(), vec![literal.clone()])),
-			PredNode::LeafSetMembership {
-				path,
-				op: BinaryOperator::Inside,
-				set,
-				reversed: false,
-				..
-			} => Some((path.clone(), set.iter().cloned().collect())),
-			_ => None,
+		let contribution: Option<(Vec<PathSegment>, Vec<Value>)> = if let PredNode::Leaf {
+			path,
+			op: BinaryOperator::Equal,
+			literal,
+			reversed: false,
+			..
+		} = &arm
+			&& literal_hashset_element_safe(literal)
+		{
+			Some((path.clone(), vec![literal.clone()]))
+		} else if let PredNode::LeafSetMembership {
+			path,
+			op: BinaryOperator::Inside,
+			set,
+			reversed: false,
+			..
+		} = &arm
+		{
+			Some((path.clone(), set.iter().cloned().collect()))
+		} else {
+			None
 		};
 
 		let Some((path, literals)) = contribution else {
@@ -416,22 +433,20 @@ fn partition_and_fuse(bucket: Vec<PredNode>) -> PredNode {
 	let mut rest = Vec::new();
 
 	for n in bucket {
-		match n {
-			PredNode::LeafSetMembership {
-				..
-			} => rest.push(n),
-			PredNode::LeafStreaming {
-				..
-			} => rest.push(n),
-			PredNode::Leaf {
-				ref path,
-				..
-			} if path.len() == 1 => root_fusible.push(n),
-			PredNode::Leaf {
-				ref path,
-				..
-			} if path.len() > 1 => multi_leaves.push(n),
-			other => rest.push(other),
+		if let PredNode::Leaf {
+			ref path,
+			..
+		} = n
+		{
+			if path.len() == 1 {
+				root_fusible.push(n);
+			} else if path.len() > 1 {
+				multi_leaves.push(n);
+			} else {
+				rest.push(n);
+			}
+		} else {
+			rest.push(n);
 		}
 	}
 
@@ -534,24 +549,21 @@ fn flat_clauses_from_specs(specs: &[FuseLeaf]) -> Option<FusedFlatClauses> {
 fn fuse_multi_segment_leaves(leaves: Vec<PredNode>) -> PredNode {
 	let mut specs: Vec<FuseLeaf> = Vec::new();
 	for n in leaves {
-		match n {
-			PredNode::Leaf {
-				path,
-				op,
-				literal,
-				literal_wire: _,
-				reversed,
-			} => {
-				if let Ok(fl) = leaf_to_spec(path, op, literal, reversed) {
-					specs.push(fl);
-				}
-			}
-			other => {
-				unreachable!(
-					"fuse_multi_segment_leaves expects only multi-segment leaves, got {:?}",
-					other
-				);
-			}
+		let PredNode::Leaf {
+			path,
+			op,
+			literal,
+			literal_wire: _,
+			reversed,
+		} = n
+		else {
+			unreachable!(
+				"fuse_multi_segment_leaves expects only multi-segment leaves, got {:?}",
+				n
+			);
+		};
+		if let Ok(fl) = leaf_to_spec(path, op, literal, reversed) {
+			specs.push(fl);
 		}
 	}
 	cluster_multi_specs(specs)

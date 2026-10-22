@@ -228,76 +228,88 @@ pub(crate) fn importable(kind: RegionKind) -> bool {
 /// Every other logical op is skeleton. Every tag is named, so a new tag fails the build here
 /// until it is classified.
 fn logical_is_node(op: &LogOp) -> bool {
-	match op {
-		LogOp::Loop {
-			kind,
-			..
-		} => matches!(
-			kind,
-			LoopKind::Select | LoopKind::ElementFilter | LoopKind::GraphStep | LoopKind::Broadcast
-		),
-		LogOp::Project(attrs) => !attrs.layer,
-		other => match other.tag() {
-			LogTag::Source
-			| LogTag::Values
-			| LogTag::Subquery
-			| LogTag::UnionAll
-			| LogTag::Join
-			| LogTag::Filter
-			| LogTag::PermissionFilter
-			| LogTag::Split
-			| LogTag::Aggregate
-			| LogTag::Distinct
-			| LogTag::Sort
-			| LogTag::Limit
-			| LogTag::Fetch
-			| LogTag::Only => true,
-			LogTag::Request
-			| LogTag::Txn
-			| LogTag::Stmt
-			| LogTag::Statement
-			| LogTag::Match
-			| LogTag::MatchRead
-			| LogTag::MatchUpdate
-			| LogTag::MatchDelete
-			| LogTag::MatchInsert
-			| LogTag::MatchOutput
-			| LogTag::BindStep
-			| LogTag::Write
-			| LogTag::Assign
-			| LogTag::Unset
-			| LogTag::Content
-			| LogTag::DdlGuard
-			| LogTag::Define
-			| LogTag::Remove
-			| LogTag::Alter
-			| LogTag::Rebuild
-			| LogTag::Project
-			| LogTag::Timeout
-			| LogTag::VersionScope
-			| LogTag::Explain
-			| LogTag::Eval
-			| LogTag::Block
-			| LogTag::Let
-			| LogTag::Return
-			| LogTag::Loop
-			| LogTag::If
-			| LogTag::Info
-			| LogTag::Sleep
-			| LogTag::Use
-			| LogTag::Option
-			| LogTag::Access
-			| LogTag::Kill
-			| LogTag::Live
-			| LogTag::Subscriber
-			| LogTag::Show
-			| LogTag::Choose
-			| LogTag::WriteStage
-			| LogTag::Events
-			| LogTag::Yield
-			| LogTag::Next
-			| LogTag::Break => false,
-		},
+	match op.tag() {
+		LogTag::Loop => {
+			if let LogOp::Loop {
+				kind,
+				..
+			} = op
+			{
+				matches!(
+					kind,
+					LoopKind::Select
+						| LoopKind::ElementFilter
+						| LoopKind::GraphStep
+						| LoopKind::Broadcast
+				)
+			} else {
+				false
+			}
+		}
+		LogTag::Project => {
+			if let LogOp::Project(attrs) = op {
+				!attrs.layer
+			} else {
+				false
+			}
+		}
+		LogTag::Source
+		| LogTag::Values
+		| LogTag::Subquery
+		| LogTag::UnionAll
+		| LogTag::Join
+		| LogTag::Filter
+		| LogTag::PermissionFilter
+		| LogTag::Split
+		| LogTag::Aggregate
+		| LogTag::Distinct
+		| LogTag::Sort
+		| LogTag::Limit
+		| LogTag::Fetch
+		| LogTag::Only => true,
+		LogTag::Request
+		| LogTag::Txn
+		| LogTag::Stmt
+		| LogTag::Statement
+		| LogTag::Match
+		| LogTag::MatchRead
+		| LogTag::MatchUpdate
+		| LogTag::MatchDelete
+		| LogTag::MatchInsert
+		| LogTag::MatchOutput
+		| LogTag::BindStep
+		| LogTag::Write
+		| LogTag::Assign
+		| LogTag::Unset
+		| LogTag::Content
+		| LogTag::DdlGuard
+		| LogTag::Define
+		| LogTag::Remove
+		| LogTag::Alter
+		| LogTag::Rebuild
+		| LogTag::Timeout
+		| LogTag::VersionScope
+		| LogTag::Explain
+		| LogTag::Eval
+		| LogTag::Block
+		| LogTag::Let
+		| LogTag::Return
+		| LogTag::If
+		| LogTag::Info
+		| LogTag::Sleep
+		| LogTag::Use
+		| LogTag::Option
+		| LogTag::Access
+		| LogTag::Kill
+		| LogTag::Live
+		| LogTag::Subscriber
+		| LogTag::Show
+		| LogTag::Choose
+		| LogTag::WriteStage
+		| LogTag::Events
+		| LogTag::Yield
+		| LogTag::Next
+		| LogTag::Break => false,
 	}
 }
 

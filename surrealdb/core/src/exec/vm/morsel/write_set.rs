@@ -127,12 +127,12 @@ async fn stored_markers(
 ) -> FlowResult<Vec<Option<crate::catalog::Metadata>>> {
 	let mut markers = Vec::with_capacity(rows.len());
 	for row in rows {
-		markers.push(match row.rid() {
-			Value::RecordId(id) => {
-				crate::exec::operators::write::row::stored_metadata(ctx, &id).await?
-			}
-			_ => None,
-		});
+		let marker = if let Value::RecordId(id) = row.rid() {
+			crate::exec::operators::write::row::stored_metadata(ctx, &id).await?
+		} else {
+			None
+		};
+		markers.push(marker);
 	}
 	Ok(markers)
 }
@@ -148,9 +148,12 @@ fn passed_over(rows: &[Value], state: &State) -> FlowResult<Vec<bool>> {
 		return Err(ControlFlow::Err(anyhow::anyhow!("a write with no write state")));
 	};
 	rows.iter()
-		.map(|row| match row.rid() {
-			Value::RecordId(id) => write.read_after_created(Some(&id)),
-			_ => Ok(false),
+		.map(|row| {
+			if let Value::RecordId(id) = row.rid() {
+				write.read_after_created(Some(&id))
+			} else {
+				Ok(false)
+			}
 		})
 		.collect()
 }

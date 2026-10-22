@@ -30,7 +30,23 @@ pub(super) fn numeric_variants(id: &RecordIdKey, cap: usize) -> Vec<RecordIdKey>
 	let rebuild = |v: Value| match v {
 		Value::Array(a) => Some(RecordIdKey::Array(a)),
 		Value::Object(o) => Some(RecordIdKey::Object(o)),
-		_ => None,
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Set(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => None,
 	};
 	match id {
 		RecordIdKey::Array(a) => {
@@ -39,7 +55,10 @@ pub(super) fn numeric_variants(id: &RecordIdKey, cap: usize) -> Vec<RecordIdKey>
 		RecordIdKey::Object(o) => {
 			value_variants(&Value::Object(o.clone()), cap).into_iter().filter_map(rebuild).collect()
 		}
-		other => vec![other.clone()],
+		other @ (RecordIdKey::Number(_)
+		| RecordIdKey::String(_)
+		| RecordIdKey::Uuid(_)
+		| RecordIdKey::Range(_)) => vec![other.clone()],
 	}
 }
 
@@ -59,7 +78,22 @@ pub(super) fn value_variants(value: &Value, cap: usize) -> Vec<Value> {
 				.map(|vs| Value::Object(Object(keys.iter().cloned().zip(vs).collect())))
 				.collect()
 		}
-		other => vec![other.clone()],
+		other @ (Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Set(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_)) => vec![other.clone()],
 	}
 }
 

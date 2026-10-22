@@ -126,21 +126,20 @@ impl TopLevelStatement {
 	/// an operand here: the statement stores it unevaluated, and only the
 	/// build and later writes run it.
 	pub(crate) fn awaits_its_build_after_commit(&self) -> bool {
-		match self {
-			TopLevelStatement::Ast(TopLevelExpr::Expr(expr::Expr::Define(stmt))) => match &**stmt {
-				expr::statements::DefineStatement::Index(ix) => {
-					!ix.concurrently
-						&& evaluates_inertly(&ix.name)
-						&& evaluates_inertly(&ix.what)
-						&& evaluates_inertly(&ix.comment)
-						&& ix.cols.iter().all(evaluates_inertly)
-				}
-				_ => false,
-			},
-			TopLevelStatement::Ast(TopLevelExpr::Expr(expr::Expr::Rebuild(stmt))) => {
-				matches!(&**stmt, expr::statements::RebuildStatement::Index(ix) if !ix.concurrently)
+		if let TopLevelStatement::Ast(TopLevelExpr::Expr(expr::Expr::Define(stmt))) = self {
+			if let expr::statements::DefineStatement::Index(ix) = &**stmt {
+				!ix.concurrently
+					&& evaluates_inertly(&ix.name)
+					&& evaluates_inertly(&ix.what)
+					&& evaluates_inertly(&ix.comment)
+					&& ix.cols.iter().all(evaluates_inertly)
+			} else {
+				false
 			}
-			_ => false,
+		} else if let TopLevelStatement::Ast(TopLevelExpr::Expr(expr::Expr::Rebuild(stmt))) = self {
+			matches!(&**stmt, expr::statements::RebuildStatement::Index(ix) if !ix.concurrently)
+		} else {
+			false
 		}
 	}
 
@@ -209,9 +208,51 @@ fn evaluates_inertly(operand: &expr::Expr) -> bool {
 			| expr::Part::First
 			| expr::Part::Last => true,
 			expr::Part::Start(part) | expr::Part::Value(part) => evaluates_inertly(part),
-			_ => false,
+			expr::Part::Where(_)
+			| expr::Part::Lookup(_)
+			| expr::Part::Method(..)
+			| expr::Part::Destructure(_)
+			| expr::Part::Optional
+			| expr::Part::Recurse(..)
+			| expr::Part::Doc
+			| expr::Part::RepeatRecurse => false,
 		}),
-		_ => false,
+		expr::Expr::Mock(_)
+		| expr::Expr::Block(_)
+		| expr::Expr::Prefix {
+			..
+		}
+		| expr::Expr::Postfix {
+			..
+		}
+		| expr::Expr::Binary {
+			..
+		}
+		| expr::Expr::FunctionCall(_)
+		| expr::Expr::Closure(_)
+		| expr::Expr::Break
+		| expr::Expr::Continue
+		| expr::Expr::Return(_)
+		| expr::Expr::Throw(_)
+		| expr::Expr::IfElse(_)
+		| expr::Expr::Select(_)
+		| expr::Expr::Create(_)
+		| expr::Expr::Update(_)
+		| expr::Expr::Upsert(_)
+		| expr::Expr::Delete(_)
+		| expr::Expr::Relate(_)
+		| expr::Expr::Insert(_)
+		| expr::Expr::Define(_)
+		| expr::Expr::Remove(_)
+		| expr::Expr::Rebuild(_)
+		| expr::Expr::Alter(_)
+		| expr::Expr::Info(_)
+		| expr::Expr::Foreach(_)
+		| expr::Expr::Let(_)
+		| expr::Expr::Sleep(_)
+		| expr::Expr::Explain {
+			..
+		} => false,
 	}
 }
 
@@ -246,10 +287,12 @@ fn kind_reads_only(kind: StatementType) -> bool {
 /// reason as [`kind_reads_only`]; no `Expr` variant is a `LIVE` or `KILL`, so
 /// these two kinds come only from the top level.
 fn query_type(kind: StatementType) -> QueryType {
-	match kind {
-		StatementType::Live => QueryType::Live,
-		StatementType::Kill => QueryType::Kill,
-		_ => QueryType::Other,
+	if matches!(kind, StatementType::Live) {
+		QueryType::Live
+	} else if matches!(kind, StatementType::Kill) {
+		QueryType::Kill
+	} else {
+		QueryType::Other
 	}
 }
 

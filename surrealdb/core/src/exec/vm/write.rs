@@ -669,13 +669,13 @@ impl WriteState {
 		let next = at + 1;
 		Ok(match instr {
 			WriteInstr::Record => {
-				let record = match std::mem::take(row) {
+				let record = match std::mem::take(row).try_into_record() {
 					// A record id names the record, as a target does.
-					Value::RecordId(id) if !id.key.is_range() => {
-						read_subject(self.scope.exec(), id).await?
-					}
-					value => {
-						WriteRow::for_record(value).map_err(|err| refused_by(err, spec.form))?
+					Ok(id) if !id.key.is_range() => read_subject(self.scope.exec(), id).await?,
+					Ok(id) => WriteRow::for_record(Value::RecordId(id))
+						.map_err(|err| refused_by(err, spec.form))?,
+					Err(subject) => {
+						WriteRow::for_record(subject).map_err(|err| refused_by(err, spec.form))?
 					}
 				};
 				self.row = Some(record);
@@ -1058,7 +1058,56 @@ pub(super) async fn step(
 		WriteInstr::Permissions(instr) => Some(gate::step(program, instr, at + 1, state).await),
 		WriteInstr::Observe(instr) => Some(observe::step(program, instr, at + 1, state).await),
 		WriteInstr::Storage(instr) => Some(storage::step(program, instr, at + 1, state).await),
-		_ => None,
+		WriteInstr::Record
+		| WriteInstr::Gate {
+			..
+		}
+		| WriteInstr::Begin
+		| WriteInstr::LoadNamedSubject
+		| WriteInstr::JumpIfNew {
+			..
+		}
+		| WriteInstr::JumpIfNotIterationInitial {
+			..
+		}
+		| WriteInstr::SavepointPush
+		| WriteInstr::SavepointRelease
+		| WriteInstr::SavepointRollback
+		| WriteInstr::TryBegin {
+			..
+		}
+		| WriteInstr::TryEnd
+		| WriteInstr::ClearMutated
+		| WriteInstr::RethrowSignal
+		| WriteInstr::ClassifyCreateFailure {
+			..
+		}
+		| WriteInstr::JumpIfDone {
+			..
+		}
+		| WriteInstr::ReloadForUpdate
+		| WriteInstr::CarryBegin
+		| WriteInstr::CarryEnd
+		| WriteInstr::RaiseCarried
+		| WriteInstr::End {
+			..
+		}
+		| WriteInstr::JumpIfImport {
+			..
+		}
+		| WriteInstr::JumpIfNoPostImage {
+			..
+		}
+		| WriteInstr::ClearCurrentReduced
+		| WriteInstr::ShowImage {
+			..
+		}
+		| WriteInstr::SetOutput {
+			..
+		}
+		| WriteInstr::DispatchTable {
+			..
+		} => None,
 	};
 	if let Some(routed) = routed {
 		let write = state
@@ -1408,7 +1457,55 @@ fn show_settled(instr: &WriteInstr, write: &mut WriteState) -> FlowResult<bool> 
 			write.row()?.output = value;
 			Ok(true)
 		}
-		_ => Err(internal("an image step at an instruction that is not one")),
+		WriteInstr::Record
+		| WriteInstr::Gate {
+			..
+		}
+		| WriteInstr::Begin
+		| WriteInstr::LoadNamedSubject
+		| WriteInstr::JumpIfNew {
+			..
+		}
+		| WriteInstr::JumpIfNotIterationInitial {
+			..
+		}
+		| WriteInstr::SavepointPush
+		| WriteInstr::SavepointRelease
+		| WriteInstr::SavepointRollback
+		| WriteInstr::TryBegin {
+			..
+		}
+		| WriteInstr::TryEnd
+		| WriteInstr::ClearMutated
+		| WriteInstr::RethrowSignal
+		| WriteInstr::ClassifyCreateFailure {
+			..
+		}
+		| WriteInstr::JumpIfDone {
+			..
+		}
+		| WriteInstr::ReloadForUpdate
+		| WriteInstr::CarryBegin
+		| WriteInstr::CarryEnd
+		| WriteInstr::RaiseCarried
+		| WriteInstr::End {
+			..
+		}
+		| WriteInstr::JumpIfImport {
+			..
+		}
+		| WriteInstr::JumpIfNoPostImage {
+			..
+		}
+		| WriteInstr::ClearCurrentReduced
+		| WriteInstr::DispatchTable {
+			..
+		}
+		| WriteInstr::Data(_)
+		| WriteInstr::Schema(_)
+		| WriteInstr::Permissions(_)
+		| WriteInstr::Observe(_)
+		| WriteInstr::Storage(_) => Err(internal("an image step at an instruction that is not one")),
 	}
 }
 
@@ -1485,7 +1582,63 @@ async fn show(program: &Program, instr: &WriteInstr, state: &mut State) -> FlowR
 				.ok_or_else(|| internal("a write body with no write state"))?;
 			write.row()?.output = Some(value);
 		}
-		_ => return Err(internal("an image step that runs no pipeline left untaken")),
+		WriteInstr::ShowImage {
+			..
+		}
+		| WriteInstr::SetOutput {
+			..
+		}
+		| WriteInstr::Record
+		| WriteInstr::Gate {
+			..
+		}
+		| WriteInstr::Begin
+		| WriteInstr::LoadNamedSubject
+		| WriteInstr::JumpIfNew {
+			..
+		}
+		| WriteInstr::JumpIfNotIterationInitial {
+			..
+		}
+		| WriteInstr::SavepointPush
+		| WriteInstr::SavepointRelease
+		| WriteInstr::SavepointRollback
+		| WriteInstr::TryBegin {
+			..
+		}
+		| WriteInstr::TryEnd
+		| WriteInstr::ClearMutated
+		| WriteInstr::RethrowSignal
+		| WriteInstr::ClassifyCreateFailure {
+			..
+		}
+		| WriteInstr::JumpIfDone {
+			..
+		}
+		| WriteInstr::ReloadForUpdate
+		| WriteInstr::CarryBegin
+		| WriteInstr::CarryEnd
+		| WriteInstr::RaiseCarried
+		| WriteInstr::End {
+			..
+		}
+		| WriteInstr::JumpIfImport {
+			..
+		}
+		| WriteInstr::JumpIfNoPostImage {
+			..
+		}
+		| WriteInstr::ClearCurrentReduced
+		| WriteInstr::DispatchTable {
+			..
+		}
+		| WriteInstr::Data(_)
+		| WriteInstr::Schema(_)
+		| WriteInstr::Permissions(_)
+		| WriteInstr::Observe(_)
+		| WriteInstr::Storage(_) => {
+			return Err(internal("an image step that runs no pipeline left untaken"));
+		}
 	}
 	Ok(())
 }
@@ -1769,7 +1922,47 @@ async fn run_write_pipelines(
 			| Source::Count {
 				..
 			} => return Err(internal("a write over rows a read holds")),
-			source => {
+			source @ (Source::Scan {
+				..
+			}
+			| Source::Record {
+				..
+			}
+			| Source::Index {
+				..
+			}
+			| Source::Lookup {
+				..
+			}
+			| Source::IndexUnion {
+				..
+			}
+			| Source::Bitmap {
+				..
+			}
+			| Source::FullText {
+				..
+			}
+			| Source::Knn {
+				..
+			}
+			| Source::Union(_)
+			| Source::Split {
+				..
+			}
+			| Source::Join {
+				..
+			}
+			| Source::Once
+			| Source::Changes {
+				..
+			}
+			| Source::LightweightEdges {
+				..
+			}
+			| Source::Vacant {
+				..
+			}) => {
 				super::host::out_of_line(|| {
 					run_storage_source(
 						program, pipeline, source, version, state, ctx, yielder, flush_at,
@@ -2124,12 +2317,31 @@ async fn insert_into(
 	state: &mut State,
 	ctx: &ExecutionContext,
 ) -> FlowResult<crate::val::TableName> {
-	match insert_scalar(program, &into.scalar, state, ctx).await? {
+	let val = insert_scalar(program, &into.scalar, state, ctx).await?;
+	match val {
 		Value::Table(into) => Ok(into),
 		Value::String(into) => Ok(crate::val::TableName::new(into)),
-		_ => Err(ControlFlow::Err(anyhow::anyhow!(crate::exec::Error::InsertStatement {
-			value: into.sql.clone(),
-		}))),
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Array(_)
+		| Value::Set(_)
+		| Value::Object(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => {
+			Err(ControlFlow::Err(anyhow::anyhow!(crate::exec::Error::InsertStatement {
+				value: into.sql.clone(),
+			})))
+		}
 	}
 }
 
@@ -2171,9 +2383,27 @@ async fn insert_values(
 		InsertRowsSpec::Value(scalar) => match insert_scalar(program, scalar, state, ctx).await? {
 			Value::Array(array) => Ok(array.into_iter().collect()),
 			object @ Value::Object(_) => Ok(vec![object]),
-			other => Err(ControlFlow::Err(anyhow::anyhow!(crate::exec::Error::InsertStatement {
-				value: other.to_sql(),
-			}))),
+			other @ (Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Set(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_)) => {
+				Err(ControlFlow::Err(anyhow::anyhow!(crate::exec::Error::InsertStatement {
+					value: other.to_sql(),
+				})))
+			}
 		},
 	}
 }

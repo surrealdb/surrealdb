@@ -31,10 +31,10 @@ impl PagingClause {
 /// large to fit is an error rather than a wrap — so the answer does not depend
 /// on the width of a pointer on the machine running the query.
 pub(crate) fn paging_count(value: &Value, clause: PagingClause) -> Result<u32, anyhow::Error> {
-	match value {
-		Value::Number(Number::Int(count)) if *count >= 0 => {
-			u32::try_from(*count).map_err(|_| clause.rejects(count.to_string()))
-		}
-		other => Err(clause.rejects(other.clone().into_raw_string())),
+	if let Value::Number(Number::Int(count)) = value
+		&& *count >= 0
+	{
+		return u32::try_from(*count).map_err(|_| clause.rejects(count.to_string()));
 	}
+	Err(clause.rejects(value.clone().into_raw_string()))
 }

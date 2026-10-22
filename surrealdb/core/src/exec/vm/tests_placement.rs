@@ -226,9 +226,12 @@ const FINAL_JOINS: &[(&str, JoinKind, &str, &str)] = &[
 /// `SELECT * FROM {left}` with its source replaced by `left` joined to `right` on their field
 /// `k`, as the SQL front ends build a join.
 async fn joined(ctx: &ExecutionContext, kind: JoinKind, left: &str, right: &str) -> LogicalOp {
-	let source = |op: LogicalOp| match op {
-		LogicalOp::Project(project) => *project.input,
-		other => other,
+	let source = |op: LogicalOp| {
+		if let LogicalOp::Project(project) = op {
+			*project.input
+		} else {
+			op
+		}
 	};
 	let right = source(bind(ctx, &format!("SELECT * FROM {right}")).await);
 	let mut statement = bind(ctx, &format!("SELECT * FROM {left}")).await;
@@ -253,9 +256,10 @@ async fn joined(ctx: &ExecutionContext, kind: JoinKind, left: &str, right: &str)
 /// no SurrealQL statement writes.
 async fn distinct_of(ctx: &ExecutionContext, sql: &str) -> LogicalOp {
 	let mut distinct = bind(ctx, sql).await;
-	let rows = match &mut distinct {
-		LogicalOp::Project(project) => &mut *project.input,
-		other => other,
+	let rows = if let LogicalOp::Project(project) = &mut distinct {
+		&mut *project.input
+	} else {
+		&mut distinct
 	};
 	let input = std::mem::replace(rows, LogicalOp::Break(LogicalBreak));
 	*rows = LogicalOp::Distinct(LogicalDistinct {
@@ -981,7 +985,10 @@ fn the_policy_refuses_each_fact_on_its_own() {
 		SinkCombine::TopK => SinkKind::Sort {
 			bounded: true,
 		},
-		_ => SinkKind::Split,
+		SinkCombine::Concat
+		| SinkCombine::Distinct
+		| SinkCombine::NotSplittable
+		| SinkCombine::OrderedApply => SinkKind::Split,
 	};
 	// A float fold's states combine and the logical plan says so, but the answer must equal the
 	// serial fold bit for bit, so the policy declines it unless the plan states its terms may be

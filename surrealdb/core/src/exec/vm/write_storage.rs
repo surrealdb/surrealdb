@@ -829,12 +829,11 @@ async fn index_step(
 	let mut values = [None, None];
 	for (image, values) in [&initial, &current].into_iter().zip(values.iter_mut()) {
 		if !image.is_nullish() {
-			*values = Some(
-				match super::run_image(program, columns, image.clone(), None, state, exec).await? {
-					Value::Array(values) => values.0,
-					_ => return Err(internal("an index's columns that answered no list")),
-				},
-			);
+			let res = super::run_image(program, columns, image.clone(), None, state, exec).await?;
+			let Value::Array(vals) = res else {
+				return Err(internal("an index's columns that answered no list"));
+			};
+			*values = Some(vals.0);
 		}
 	}
 	let [o, n] = values;
@@ -844,17 +843,17 @@ async fn index_step(
 		for (image, answer) in [&initial, &current].into_iter().zip(answers.iter_mut()) {
 			// The image names itself: a self-dereference in the guard answers
 			// from the image under test, and an image with no id binds nothing.
-			let computing = match image {
-				Value::Object(object) => match object.get("id") {
-					Some(Value::RecordId(rid)) => {
-						Some(Arc::new(crate::exec::eval_context::ComputingRecord {
-							rid: rid.clone(),
-							stored: Some(image.clone()),
-						}))
-					}
-					_ => None,
-				},
-				_ => None,
+			let computing = if let Value::Object(object) = image {
+				if let Some(Value::RecordId(rid)) = object.get("id") {
+					Some(Arc::new(crate::exec::eval_context::ComputingRecord {
+						rid: rid.clone(),
+						stored: Some(image.clone()),
+					}))
+				} else {
+					None
+				}
+			} else {
+				None
 			};
 			let outer = std::mem::replace(&mut state.computing, computing);
 			let verdict = super::run_image(program, guard, image.clone(), None, state, exec).await;
@@ -1300,7 +1299,9 @@ fn record_id(row: &WriteRow) -> FlowResult<crate::val::RecordId> {
 fn related(row: &WriteRow) -> FlowResult<(crate::val::RecordId, crate::val::RecordId)> {
 	match &row.extras {
 		WriteExtras::Relate(l, r, _) => Ok((l.clone(), r.clone())),
-		_ => Err(internal("an edge instruction for a record the statement does not relate")),
+		WriteExtras::Normal | WriteExtras::Insert(_) => {
+			Err(internal("an edge instruction for a record the statement does not relate"))
+		}
 	}
 }
 

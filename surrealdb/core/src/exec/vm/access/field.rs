@@ -43,7 +43,20 @@ pub(crate) async fn evaluate_field(
 			Ok(obj.get(name).cloned().unwrap_or(Value::None))
 		}
 
-		_ => Ok(Value::None),
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => Ok(Value::None),
 	}
 }
 
@@ -59,19 +72,21 @@ async fn field_of_each(
 	let mut windows = Windows::of(ctx.link_windows, elements, &include);
 	let mut results = Vec::with_capacity(elements.len());
 	for (at, v) in elements.iter().enumerate() {
-		results.push(match v {
-			Value::RecordId(rid) if include(rid) => {
-				let slot = match &mut windows {
-					Some(windows) => {
-						windows.prepare(ctx.exec_ctx, elements, at, &include).await?;
-						windows.slot(at)
-					}
-					None => Slot::Unread,
-				};
-				Box::pin(field_of_record(rid, name, &ctx, slot)).await?
-			}
-			_ => Box::pin(evaluate_field(v, name, ctx.clone())).await?,
-		});
+		let res = if let Value::RecordId(rid) = v
+			&& include(rid)
+		{
+			let slot = match &mut windows {
+				Some(windows) => {
+					windows.prepare(ctx.exec_ctx, elements, at, &include).await?;
+					windows.slot(at)
+				}
+				None => Slot::Unread,
+			};
+			Box::pin(field_of_record(rid, name, &ctx, slot)).await?
+		} else {
+			Box::pin(evaluate_field(v, name, ctx.clone())).await?
+		};
+		results.push(res);
 	}
 	Ok(results)
 }
@@ -140,9 +155,10 @@ async fn field_of_record(
 	if let Some(computing) = ctx.computing_record.as_ref().filter(|computing| &computing.rid == rid)
 	{
 		if let Some(stored) = &computing.stored {
-			return Ok(match stored {
-				Value::Object(obj) => obj.get(name).cloned().unwrap_or(Value::None),
-				_ => Value::None,
+			return Ok(if let Value::Object(obj) = stored {
+				obj.get(name).cloned().unwrap_or(Value::None)
+			} else {
+				Value::None
 			});
 		}
 		let version = ctx.exec_ctx.version_stamp();
@@ -163,9 +179,10 @@ async fn field_of_record(
 	} else {
 		crate::exec::operators::fetch::fetch_record_slot(&exec_ctx, rid, slot).await?
 	};
-	match fetched {
-		Value::Object(obj) => Ok(obj.get(name).cloned().unwrap_or(Value::None)),
-		_ => Ok(Value::None),
+	if let Value::Object(obj) = fetched {
+		Ok(obj.get(name).cloned().unwrap_or(Value::None))
+	} else {
+		Ok(Value::None)
 	}
 }
 

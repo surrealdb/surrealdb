@@ -124,11 +124,128 @@ pub(super) fn rows(ir: &Ir, cx: &PhysCx<'_>, pipeline: OpId, rows: &Rows) -> Opt
 	if placement.statement().refusal.is_some() {
 		return None;
 	}
-	match kind_of(ir, rows.source)? {
-		PhysOp::TableScan(attrs) if !attrs.lightweight && attrs.topk.is_none() => {}
-		PhysOp::KeyRangeScan(attrs) if attrs.topk.is_none() => {}
-		PhysOp::RecordScan(attrs) if !attrs.for_update && !attrs.lightweight => {}
-		_ => return None,
+	let source_ok = match kind_of(ir, rows.source)? {
+		PhysOp::TableScan(attrs) => !attrs.lightweight && attrs.topk.is_none(),
+		PhysOp::KeyRangeScan(attrs) => attrs.topk.is_none(),
+		PhysOp::RecordScan(attrs) => !attrs.for_update && !attrs.lightweight,
+		PhysOp::IndexScan(_)
+		| PhysOp::IndexUnion(_)
+		| PhysOp::Bitmap(_)
+		| PhysOp::IndexLookup(_)
+		| PhysOp::FullTextScan(_)
+		| PhysOp::KnnScan(_)
+		| PhysOp::KnnTopK(_)
+		| PhysOp::Count(_)
+		| PhysOp::Vacant {
+			..
+		}
+		| PhysOp::Enforced {
+			..
+		}
+		| PhysOp::Values {
+			..
+		}
+		| PhysOp::Subquery
+		| PhysOp::Probe {
+			..
+		}
+		| PhysOp::Union
+		| PhysOp::Join(_)
+		| PhysOp::Distinct {
+			..
+		}
+		| PhysOp::PermissionFilter(_)
+		| PhysOp::Layer(_)
+		| PhysOp::Filter
+		| PhysOp::Fetch
+		| PhysOp::Split {
+			..
+		}
+		| PhysOp::Sort(_)
+		| PhysOp::Aggregate(_)
+		| PhysOp::Limit {
+			..
+		}
+		| PhysOp::Project(_)
+		| PhysOp::Timeout
+		| PhysOp::VersionScope
+		| PhysOp::Only
+		| PhysOp::Explain {
+			..
+		}
+		| PhysOp::Eval
+		| PhysOp::Request {
+			..
+		}
+		| PhysOp::Txn {
+			..
+		}
+		| PhysOp::Stmt {
+			..
+		}
+		| PhysOp::Statement {
+			..
+		}
+		| PhysOp::Match {
+			..
+		}
+		| PhysOp::MatchStep(_)
+		| PhysOp::DdlGuard {
+			..
+		}
+		| PhysOp::Define(_)
+		| PhysOp::Remove(_)
+		| PhysOp::Alter(_)
+		| PhysOp::Rebuild(_)
+		| PhysOp::Info {
+			..
+		}
+		| PhysOp::Use {
+			..
+		}
+		| PhysOp::Option {
+			..
+		}
+		| PhysOp::Access(_)
+		| PhysOp::Kill
+		| PhysOp::Live(_)
+		| PhysOp::Subscriber(_)
+		| PhysOp::Show(_)
+		| PhysOp::Write(_)
+		| PhysOp::WriteStage {
+			..
+		}
+		| PhysOp::Events(_)
+		| PhysOp::Assign(_)
+		| PhysOp::Unset {
+			..
+		}
+		| PhysOp::Content {
+			..
+		}
+		| PhysOp::Block
+		| PhysOp::Let(_)
+		| PhysOp::Sleep
+		| PhysOp::If {
+			..
+		}
+		| PhysOp::Loop {
+			..
+		}
+		| PhysOp::Pipeline(_)
+		| PhysOp::Choose(_)
+		| PhysOp::Prefetch(_)
+		| PhysOp::Materialize {
+			..
+		}
+		| PhysOp::LoadUnit(_)
+		| PhysOp::Yield
+		| PhysOp::Return
+		| PhysOp::Break
+		| PhysOp::Next => false,
+	};
+	if !source_ok {
+		return None;
 	}
 	// The ops before the projection take each row at most once, in order: one paging clause. The
 	// ops after it end nothing early, so every row the batch keys reaches the lookups.
@@ -144,11 +261,13 @@ pub(super) fn rows(ir: &Ir, cx: &PhysCx<'_>, pipeline: OpId, rows: &Rows) -> Opt
 	let at = at?;
 	let mut limits = 0;
 	for op in &rows.passes[..at] {
-		match kind_of(ir, *op)? {
-			PhysOp::Limit {
-				..
-			} => limits += 1,
-			_ => return None,
+		if let Some(PhysOp::Limit {
+			..
+		}) = kind_of(ir, *op)
+		{
+			limits += 1;
+		} else {
+			return None;
 		}
 	}
 	if limits > 1 {
@@ -290,7 +409,122 @@ fn hops_in(ir: &Ir, region: RegionId, found: &mut Hops) {
 					}
 				}
 			}
-			_ => {}
+			PhysOp::TableScan(_)
+			| PhysOp::IndexScan(_)
+			| PhysOp::IndexUnion(_)
+			| PhysOp::Bitmap(_)
+			| PhysOp::IndexLookup(_)
+			| PhysOp::FullTextScan(_)
+			| PhysOp::KeyRangeScan(_)
+			| PhysOp::KnnScan(_)
+			| PhysOp::KnnTopK(_)
+			| PhysOp::Count(_)
+			| PhysOp::RecordScan(_)
+			| PhysOp::Vacant {
+				..
+			}
+			| PhysOp::Enforced {
+				..
+			}
+			| PhysOp::Values {
+				..
+			}
+			| PhysOp::Subquery
+			| PhysOp::Probe {
+				..
+			}
+			| PhysOp::Union
+			| PhysOp::Join(_)
+			| PhysOp::Distinct {
+				..
+			}
+			| PhysOp::PermissionFilter(_)
+			| PhysOp::Layer(_)
+			| PhysOp::Filter
+			| PhysOp::Fetch
+			| PhysOp::Split {
+				..
+			}
+			| PhysOp::Sort(_)
+			| PhysOp::Aggregate(_)
+			| PhysOp::Limit {
+				..
+			}
+			| PhysOp::Project(_)
+			| PhysOp::Timeout
+			| PhysOp::VersionScope
+			| PhysOp::Only
+			| PhysOp::Explain {
+				..
+			}
+			| PhysOp::Eval
+			| PhysOp::Request {
+				..
+			}
+			| PhysOp::Txn {
+				..
+			}
+			| PhysOp::Stmt {
+				..
+			}
+			| PhysOp::Statement {
+				..
+			}
+			| PhysOp::Match {
+				..
+			}
+			| PhysOp::MatchStep(_)
+			| PhysOp::DdlGuard {
+				..
+			}
+			| PhysOp::Define(_)
+			| PhysOp::Remove(_)
+			| PhysOp::Alter(_)
+			| PhysOp::Rebuild(_)
+			| PhysOp::Info {
+				..
+			}
+			| PhysOp::Use {
+				..
+			}
+			| PhysOp::Option {
+				..
+			}
+			| PhysOp::Access(_)
+			| PhysOp::Kill
+			| PhysOp::Live(_)
+			| PhysOp::Subscriber(_)
+			| PhysOp::Show(_)
+			| PhysOp::Write(_)
+			| PhysOp::WriteStage {
+				..
+			}
+			| PhysOp::Events(_)
+			| PhysOp::Assign(_)
+			| PhysOp::Unset {
+				..
+			}
+			| PhysOp::Content {
+				..
+			}
+			| PhysOp::Let(_)
+			| PhysOp::Sleep
+			| PhysOp::If {
+				..
+			}
+			| PhysOp::Loop {
+				..
+			}
+			| PhysOp::Choose(_)
+			| PhysOp::Prefetch(_)
+			| PhysOp::Materialize {
+				..
+			}
+			| PhysOp::LoadUnit(_)
+			| PhysOp::Yield
+			| PhysOp::Return
+			| PhysOp::Break
+			| PhysOp::Next => {}
 		}
 	}
 }

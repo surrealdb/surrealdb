@@ -282,24 +282,24 @@ enum Numbers {
 }
 
 /// The numbers the collection `set` holds as elements.
-#[allow(clippy::wildcard_enum_match_arm)]
 fn numbers_of(set: &Value) -> Numbers {
-	match set {
-		Value::Array(array) => numbers_among(array.iter()),
-		Value::Set(set) => numbers_among(set.iter()),
-		_ => Numbers::None,
+	if let Value::Array(array) = set {
+		numbers_among(array.iter())
+	} else if let Value::Set(set) = set {
+		numbers_among(set.iter())
+	} else {
+		Numbers::None
 	}
 }
 
 /// The numbers among `elements`.
-#[allow(clippy::wildcard_enum_match_arm)]
 fn numbers_among<'a>(elements: impl Iterator<Item = &'a Value>) -> Numbers {
 	let mut found = Numbers::None;
 	for element in elements {
-		match element {
-			Value::Number(Number::Float(_) | Number::Decimal(_)) => return Numbers::Inexact,
-			Value::Number(Number::Int(_)) => found = Numbers::Ints,
-			_ => {}
+		if let Value::Number(Number::Float(_) | Number::Decimal(_)) = element {
+			return Numbers::Inexact;
+		} else if let Value::Number(Number::Int(_)) = element {
+			found = Numbers::Ints;
 		}
 	}
 	found
@@ -308,18 +308,19 @@ fn numbers_among<'a>(elements: impl Iterator<Item = &'a Value>) -> Numbers {
 /// Whether the table declares the field `path` names as an integer, or as a union of `none` and
 /// `int` that holds the integer: the field whose name is the path of object keys `path` holds, at
 /// the root or nested, and that is not computed.
-#[allow(clippy::wildcard_enum_match_arm)]
 fn declares_int(fields: &[FieldDefinition], path: &[PathSegment]) -> bool {
 	if path.is_empty() {
 		return false;
 	}
-	let int_valued = |kind: &Kind| match kind {
-		Kind::Int => true,
-		Kind::Either(kinds) => {
+	let int_valued = |kind: &Kind| {
+		if let Kind::Int = kind {
+			true
+		} else if let Kind::Either(kinds) = kind {
 			kinds.iter().any(|kind| matches!(kind, Kind::Int))
 				&& kinds.iter().all(|kind| matches!(kind, Kind::Int | Kind::None))
+		} else {
+			false
 		}
-		_ => false,
 	};
 	let named = |field: &FieldDefinition| {
 		field.name.0.len() == path.len()
@@ -339,7 +340,6 @@ fn declares_int(fields: &[FieldDefinition], path: &[PathSegment]) -> bool {
 ///
 /// The rows of a scan the filter reads directly are the scan's result; those of a select loop are
 /// the loop's row, the block argument its body starts from.
-#[allow(clippy::wildcard_enum_match_arm)]
 pub(super) fn predicate_region(ir: &Ir, scan: OpId) -> Option<(OpId, ValueId)> {
 	let [rows] = ir.op(scan)?.results.as_slice() else {
 		return None;
@@ -354,28 +354,27 @@ pub(super) fn predicate_region(ir: &Ir, scan: OpId) -> Option<(OpId, ValueId)> {
 	let OpKind::Phys(kind) = &reader.kind else {
 		return None;
 	};
-	match kind {
-		PhysOp::Filter => {
-			let row = filter_row(ir, read.user)?;
-			Some((read.user, row))
+	if let PhysOp::Filter = kind {
+		let row = filter_row(ir, read.user)?;
+		Some((read.user, row))
+	} else if let PhysOp::Loop {
+		kind: LoopKind::Select,
+		..
+	} = kind
+	{
+		let [body] = <[RegionId; 1]>::try_from(reader.regions.as_slice()).ok()?;
+		let element = *ir.block(*ir.region(body)?.blocks.first()?)?.args.first()?;
+		let first = ops_in(ir, body).next()?;
+		let filter = ir.op(first)?;
+		if !matches!(filter.kind, OpKind::Phys(PhysOp::Filter))
+			|| filter.operands.first() != Some(&element)
+		{
+			return None;
 		}
-		PhysOp::Loop {
-			kind: LoopKind::Select,
-			..
-		} => {
-			let [body] = <[RegionId; 1]>::try_from(reader.regions.as_slice()).ok()?;
-			let element = *ir.block(*ir.region(body)?.blocks.first()?)?.args.first()?;
-			let first = ops_in(ir, body).next()?;
-			let filter = ir.op(first)?;
-			if !matches!(filter.kind, OpKind::Phys(PhysOp::Filter))
-				|| filter.operands.first() != Some(&element)
-			{
-				return None;
-			}
-			let row = filter_row(ir, first)?;
-			Some((first, row))
-		}
-		_ => None,
+		let row = filter_row(ir, first)?;
+		Some((first, row))
+	} else {
+		None
 	}
 }
 
@@ -391,42 +390,44 @@ fn filter_row(ir: &Ir, filter: OpId) -> Option<ValueId> {
 ///
 /// The tree is the predicate's own: `a AND b AND c` is a conjunction of a conjunction and a leaf,
 /// as the left-nested `AND` is written.
-#[allow(clippy::wildcard_enum_match_arm)]
 fn shape_of(ir: &Ir, row: ValueId, value: ValueId) -> Option<PreDecodeShape> {
 	let data = ir.op(def_op(ir, strip_truthy(ir, value))?)?;
 	let OpKind::Expr(kind) = &data.kind else {
 		return None;
 	};
-	match (kind, data.operands.as_slice()) {
-		(
-			ExprOp::ShortCircuit {
-				op: op @ (ShortCircuitOp::And | ShortCircuitOp::Or),
-			},
-			[left],
-		) => {
-			let right = lazy_yield(ir, data.regions.as_slice())?;
-			let parts = vec![shape_of(ir, row, *left)?, shape_of(ir, row, right)?];
-			Some(match op {
-				ShortCircuitOp::And => PreDecodeShape::And(parts),
-				_ => PreDecodeShape::Or(parts),
-			})
-		}
-		(ExprOp::Prefix(op), [operand]) if matches!(**op, PrefixOperator::Not) => {
+	if let (
+		ExprOp::ShortCircuit {
+			op: op @ (ShortCircuitOp::And | ShortCircuitOp::Or),
+		},
+		[left],
+	) = (kind, data.operands.as_slice())
+	{
+		let right = lazy_yield(ir, data.regions.as_slice())?;
+		let parts = vec![shape_of(ir, row, *left)?, shape_of(ir, row, right)?];
+		Some(if matches!(op, ShortCircuitOp::And) {
+			PreDecodeShape::And(parts)
+		} else {
+			PreDecodeShape::Or(parts)
+		})
+	} else if let (ExprOp::Prefix(op), [operand]) = (kind, data.operands.as_slice()) {
+		if matches!(**op, PrefixOperator::Not) {
 			Some(PreDecodeShape::Not(Box::new(shape_of(ir, row, *operand)?)))
+		} else {
+			None
 		}
-		(
-			ExprOp::Binary {
-				op,
-			},
-			[left, right],
-		) => {
-			if !eligible(op) {
-				return None;
-			}
-			leaf(ir, row, *left, *right, false, op)
-				.or_else(|| leaf(ir, row, *right, *left, true, op))
+	} else if let (
+		ExprOp::Binary {
+			op,
+		},
+		[left, right],
+	) = (kind, data.operands.as_slice())
+	{
+		if !eligible(op) {
+			return None;
 		}
-		_ => None,
+		leaf(ir, row, *left, *right, false, op).or_else(|| leaf(ir, row, *right, *left, true, op))
+	} else {
+		None
 	}
 }
 
@@ -437,9 +438,10 @@ fn lazy_yield(ir: &Ir, regions: &[RegionId]) -> Option<ValueId> {
 	};
 	let last = ops_in(ir, *region).last()?;
 	let closing = ir.op(last)?;
-	match (&closing.kind, closing.operands.as_slice()) {
-		(OpKind::Expr(ExprOp::Yield), [value]) => Some(*value),
-		_ => None,
+	if let (OpKind::Expr(ExprOp::Yield), [value]) = (&closing.kind, closing.operands.as_slice()) {
+		Some(*value)
+	} else {
+		None
 	}
 }
 

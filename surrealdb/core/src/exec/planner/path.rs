@@ -229,7 +229,69 @@ impl Planner<'_> {
 			{
 				self.ctx.value("session").cloned()
 			}
-			_ => None,
+			LogicalExpr::Set(_)
+			| LogicalExpr::RecordId(_)
+			| LogicalExpr::Param(_)
+			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_)
+			| LogicalExpr::Constant(_)
+			| LogicalExpr::Field(_)
+			| LogicalExpr::Doc
+			| LogicalExpr::Current
+			| LogicalExpr::Access {
+				..
+			}
+			| LogicalExpr::Index {
+				..
+			}
+			| LogicalExpr::First(_)
+			| LogicalExpr::Last(_)
+			| LogicalExpr::Each(_)
+			| LogicalExpr::Flatten {
+				..
+			}
+			| LogicalExpr::Filter {
+				..
+			}
+			| LogicalExpr::Method {
+				..
+			}
+			| LogicalExpr::Destructure {
+				..
+			}
+			| LogicalExpr::Optional {
+				..
+			}
+			| LogicalExpr::Lookup {
+				..
+			}
+			| LogicalExpr::Recurse(_)
+			| LogicalExpr::RepeatRecurse(_)
+			| LogicalExpr::Broadcast {
+				..
+			}
+			| LogicalExpr::SetField {
+				..
+			}
+			| LogicalExpr::Prefix {
+				..
+			}
+			| LogicalExpr::Postfix {
+				..
+			}
+			| LogicalExpr::Invoke {
+				..
+			}
+			| LogicalExpr::Binary {
+				..
+			}
+			| LogicalExpr::Call(_)
+			| LogicalExpr::Closure(_)
+			| LogicalExpr::If(_)
+			| LogicalExpr::Throw(_)
+			| LogicalExpr::Break
+			| LogicalExpr::Continue
+			| LogicalExpr::Subquery(_) => None,
 		}
 	}
 }
@@ -368,9 +430,12 @@ mod tests {
 
 	#[test]
 	fn repeat_recurse_is_found_along_the_path_and_in_alias_bodies_only() {
-		let body = |src: &str| match parse_expr(src) {
-			LogicalExpr::Recurse(recurse) => recurse.path.expect("a body").body().clone(),
-			other => panic!("expected a recursion, got {other:?}"),
+		let body = |src: &str| {
+			let expr = parse_expr(src);
+			let LogicalExpr::Recurse(recurse) = expr else {
+				panic!("expected a recursion, got {expr:?}");
+			};
+			recurse.path.expect("a body").body().clone()
 		};
 		assert!(contains_repeat_recurse(&body("a.{..}.b.@")));
 		assert!(contains_repeat_recurse(&body("a.{..}.{ id, kids: b.@ }")));

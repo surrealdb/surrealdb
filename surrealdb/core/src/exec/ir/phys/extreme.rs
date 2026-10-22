@@ -499,7 +499,9 @@ fn aggregate_of(rw: &Rewriter<'_>, top: OpId) -> Result<OpId, IrError> {
 				let input = *data.operands.first().ok_or(IrError::Stale("extreme: a paging op"))?;
 				at = definer(rw, input)?;
 			}
-			_ => return Err(IrError::Stale("extreme: the aggregate of a copied statement")),
+			OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => {
+				return Err(IrError::Stale("extreme: the aggregate of a copied statement"));
+			}
 		}
 	}
 }

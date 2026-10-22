@@ -377,7 +377,22 @@ pub(super) fn closures_from_outside<'o>(
 			Value::Closure(_) => true,
 			Value::Array(items) => items.iter().any(holds_closure),
 			Value::Object(fields) => fields.values().any(holds_closure),
-			_ => false,
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Set(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_) => false,
 		}
 	}
 	let ctx = planner.frozen();
@@ -444,7 +459,36 @@ impl Reach {
 				}
 				self.deletes |= matches!(write.statement, LogicalWriteStatement::Delete(_));
 			}
-			_ => {}
+			LogicalOp::Source(_)
+			| LogicalOp::Values(_)
+			| LogicalOp::Match(_)
+			| LogicalOp::Subquery(_)
+			| LogicalOp::UnionAll(_)
+			| LogicalOp::Join(_)
+			| LogicalOp::Filter(_)
+			| LogicalOp::PermissionFilter(_)
+			| LogicalOp::Split(_)
+			| LogicalOp::Aggregate(_)
+			| LogicalOp::Distinct(_)
+			| LogicalOp::Sort(_)
+			| LogicalOp::Limit(_)
+			| LogicalOp::Project(_)
+			| LogicalOp::Fetch(_)
+			| LogicalOp::Timeout(_)
+			| LogicalOp::VersionScope(_)
+			| LogicalOp::Only(_)
+			| LogicalOp::Explain(_)
+			| LogicalOp::Eval(_)
+			| LogicalOp::Sequence(_)
+			| LogicalOp::Let(_)
+			| LogicalOp::Return(_)
+			| LogicalOp::Foreach(_)
+			| LogicalOp::If(_)
+			| LogicalOp::Throw(_)
+			| LogicalOp::Break(_)
+			| LogicalOp::Continue(_)
+			| LogicalOp::Info(_)
+			| LogicalOp::Sleep(_) => {}
 		}
 		let _ = op.visit_scalars(&mut |scalar| {
 			self.logical(scalar);
@@ -479,7 +523,70 @@ impl Reach {
 					name,
 					..
 				} if !crate::expr::method::is_builtin_method(name) => self.invoked(),
-				_ => {}
+				LogicalExpr::Literal(_)
+				| LogicalExpr::Array(_)
+				| LogicalExpr::Set(_)
+				| LogicalExpr::Object(_)
+				| LogicalExpr::RecordId(_)
+				| LogicalExpr::Param(_)
+				| LogicalExpr::Table(_)
+				| LogicalExpr::Mock(_)
+				| LogicalExpr::Constant(_)
+				| LogicalExpr::Field(_)
+				| LogicalExpr::Doc
+				| LogicalExpr::Current
+				| LogicalExpr::Access {
+					..
+				}
+				| LogicalExpr::Index {
+					..
+				}
+				| LogicalExpr::First(_)
+				| LogicalExpr::Last(_)
+				| LogicalExpr::Each(_)
+				| LogicalExpr::Flatten {
+					..
+				}
+				| LogicalExpr::Filter {
+					..
+				}
+				| LogicalExpr::Method {
+					..
+				}
+				| LogicalExpr::Destructure {
+					..
+				}
+				| LogicalExpr::Optional {
+					..
+				}
+				| LogicalExpr::Lookup {
+					..
+				}
+				| LogicalExpr::Recurse(_)
+				| LogicalExpr::RepeatRecurse(_)
+				| LogicalExpr::Broadcast {
+					..
+				}
+				| LogicalExpr::SetField {
+					..
+				}
+				| LogicalExpr::Prefix {
+					..
+				}
+				| LogicalExpr::Postfix {
+					..
+				}
+				| LogicalExpr::Invoke {
+					..
+				}
+				| LogicalExpr::Binary {
+					..
+				}
+				| LogicalExpr::Closure(_)
+				| LogicalExpr::If(_)
+				| LogicalExpr::Throw(_)
+				| LogicalExpr::Break
+				| LogicalExpr::Continue => {}
 			}
 			std::ops::ControlFlow::<()>::Continue(())
 		});
@@ -501,7 +608,15 @@ impl Reach {
 		for statement in ast.expressions {
 			match statement {
 				surrealdb_expr::parser::TopLevelExpr::Expr(expr) => self.expr(&expr),
-				_ => self.schema = true,
+				surrealdb_expr::parser::TopLevelExpr::Begin(_)
+				| surrealdb_expr::parser::TopLevelExpr::Cancel
+				| surrealdb_expr::parser::TopLevelExpr::Commit
+				| surrealdb_expr::parser::TopLevelExpr::Access(_)
+				| surrealdb_expr::parser::TopLevelExpr::Kill(_)
+				| surrealdb_expr::parser::TopLevelExpr::Live(_)
+				| surrealdb_expr::parser::TopLevelExpr::Option(_)
+				| surrealdb_expr::parser::TopLevelExpr::Use(_)
+				| surrealdb_expr::parser::TopLevelExpr::Show(_) => self.schema = true,
 			}
 		}
 	}
@@ -511,7 +626,13 @@ impl Reach {
 			crate::expr::Function::Custom(name) => {
 				self.calls.insert(name.clone());
 			}
-			other => self.schema |= !other.read_only(),
+			other @ (crate::expr::Function::Normal(_)
+			| crate::expr::Function::Script(_)
+			| crate::expr::Function::Model(_)
+			| crate::expr::Function::Module(..)
+			| crate::expr::Function::Silo {
+				..
+			}) => self.schema |= !other.read_only(),
 		}
 	}
 
@@ -540,7 +661,46 @@ impl StoredReach<'_> {
 			crate::expr::Expr::Literal(crate::expr::Literal::RecordId(rid)) => {
 				self.0.written.insert(rid.table.clone());
 			}
-			_ => self.0.every_table = true,
+			crate::expr::Expr::Literal(_)
+			| crate::expr::Expr::Param(_)
+			| crate::expr::Expr::Idiom(_)
+			| crate::expr::Expr::Mock(_)
+			| crate::expr::Expr::Block(_)
+			| crate::expr::Expr::Constant(_)
+			| crate::expr::Expr::Prefix {
+				..
+			}
+			| crate::expr::Expr::Postfix {
+				..
+			}
+			| crate::expr::Expr::Binary {
+				..
+			}
+			| crate::expr::Expr::FunctionCall(_)
+			| crate::expr::Expr::Closure(_)
+			| crate::expr::Expr::Break
+			| crate::expr::Expr::Continue
+			| crate::expr::Expr::Return(_)
+			| crate::expr::Expr::Throw(_)
+			| crate::expr::Expr::IfElse(_)
+			| crate::expr::Expr::Select(_)
+			| crate::expr::Expr::Create(_)
+			| crate::expr::Expr::Update(_)
+			| crate::expr::Expr::Upsert(_)
+			| crate::expr::Expr::Delete(_)
+			| crate::expr::Expr::Relate(_)
+			| crate::expr::Expr::Insert(_)
+			| crate::expr::Expr::Define(_)
+			| crate::expr::Expr::Remove(_)
+			| crate::expr::Expr::Rebuild(_)
+			| crate::expr::Expr::Alter(_)
+			| crate::expr::Expr::Info(_)
+			| crate::expr::Expr::Foreach(_)
+			| crate::expr::Expr::Let(_)
+			| crate::expr::Expr::Sleep(_)
+			| crate::expr::Expr::Explain {
+				..
+			} => self.0.every_table = true,
 		}
 	}
 }
@@ -576,7 +736,37 @@ impl crate::expr::visit::Visitor for StoredReach<'_> {
 				op: PostfixOperator::MethodCall(name, _),
 				..
 			} if !crate::expr::method::is_builtin_method(name) => self.0.invoked(),
-			_ => {}
+			Expr::Literal(_)
+			| Expr::Param(_)
+			| Expr::Idiom(_)
+			| Expr::Table(_)
+			| Expr::Mock(_)
+			| Expr::Block(_)
+			| Expr::Constant(_)
+			| Expr::Prefix {
+				..
+			}
+			| Expr::Postfix {
+				..
+			}
+			| Expr::Binary {
+				..
+			}
+			| Expr::FunctionCall(_)
+			| Expr::Closure(_)
+			| Expr::Break
+			| Expr::Continue
+			| Expr::Return(_)
+			| Expr::Throw(_)
+			| Expr::IfElse(_)
+			| Expr::Select(_)
+			| Expr::Info(_)
+			| Expr::Foreach(_)
+			| Expr::Let(_)
+			| Expr::Sleep(_)
+			| Expr::Explain {
+				..
+			} => {}
 		}
 		expr.visit(self)
 	}
@@ -611,9 +801,68 @@ pub(crate) async fn hides_a_change_point(planner: &Planner<'_>, op: &LogicalOp) 
 		LogicalOp::Sequence(sequence) => (sequence.stmts.as_slice(), false),
 		LogicalOp::Foreach(foreach) => match foreach.body.as_ref() {
 			LogicalOp::Sequence(sequence) => (sequence.stmts.as_slice(), true),
-			body => (std::slice::from_ref(body), true),
+			body @ (LogicalOp::Source(_)
+			| LogicalOp::Values(_)
+			| LogicalOp::Match(_)
+			| LogicalOp::Subquery(_)
+			| LogicalOp::Write(_)
+			| LogicalOp::Ddl(_)
+			| LogicalOp::UnionAll(_)
+			| LogicalOp::Join(_)
+			| LogicalOp::Filter(_)
+			| LogicalOp::PermissionFilter(_)
+			| LogicalOp::Split(_)
+			| LogicalOp::Aggregate(_)
+			| LogicalOp::Distinct(_)
+			| LogicalOp::Sort(_)
+			| LogicalOp::Limit(_)
+			| LogicalOp::Project(_)
+			| LogicalOp::Fetch(_)
+			| LogicalOp::Timeout(_)
+			| LogicalOp::VersionScope(_)
+			| LogicalOp::Only(_)
+			| LogicalOp::Explain(_)
+			| LogicalOp::Eval(_)
+			| LogicalOp::Let(_)
+			| LogicalOp::Return(_)
+			| LogicalOp::Foreach(_)
+			| LogicalOp::If(_)
+			| LogicalOp::Throw(_)
+			| LogicalOp::Break(_)
+			| LogicalOp::Continue(_)
+			| LogicalOp::Info(_)
+			| LogicalOp::Sleep(_)) => (std::slice::from_ref(body), true),
 		},
-		_ => return false,
+		LogicalOp::Source(_)
+		| LogicalOp::Values(_)
+		| LogicalOp::Match(_)
+		| LogicalOp::Subquery(_)
+		| LogicalOp::Write(_)
+		| LogicalOp::Ddl(_)
+		| LogicalOp::UnionAll(_)
+		| LogicalOp::Join(_)
+		| LogicalOp::Filter(_)
+		| LogicalOp::PermissionFilter(_)
+		| LogicalOp::Split(_)
+		| LogicalOp::Aggregate(_)
+		| LogicalOp::Distinct(_)
+		| LogicalOp::Sort(_)
+		| LogicalOp::Limit(_)
+		| LogicalOp::Project(_)
+		| LogicalOp::Fetch(_)
+		| LogicalOp::Timeout(_)
+		| LogicalOp::VersionScope(_)
+		| LogicalOp::Only(_)
+		| LogicalOp::Explain(_)
+		| LogicalOp::Eval(_)
+		| LogicalOp::Let(_)
+		| LogicalOp::Return(_)
+		| LogicalOp::If(_)
+		| LogicalOp::Throw(_)
+		| LogicalOp::Break(_)
+		| LogicalOp::Continue(_)
+		| LogicalOp::Info(_)
+		| LogicalOp::Sleep(_) => return false,
 	};
 	let judged = match looped {
 		true => statements,
@@ -671,7 +920,37 @@ pub(crate) async fn catalog_within(
 		|| op
 			.visit_ops_deep(&mut |node| match node {
 				LogicalOp::Write(_) => std::ops::ControlFlow::Break(()),
-				_ => std::ops::ControlFlow::Continue(()),
+				LogicalOp::Source(_)
+				| LogicalOp::Values(_)
+				| LogicalOp::Match(_)
+				| LogicalOp::Subquery(_)
+				| LogicalOp::Ddl(_)
+				| LogicalOp::UnionAll(_)
+				| LogicalOp::Join(_)
+				| LogicalOp::Filter(_)
+				| LogicalOp::PermissionFilter(_)
+				| LogicalOp::Split(_)
+				| LogicalOp::Aggregate(_)
+				| LogicalOp::Distinct(_)
+				| LogicalOp::Sort(_)
+				| LogicalOp::Limit(_)
+				| LogicalOp::Project(_)
+				| LogicalOp::Fetch(_)
+				| LogicalOp::Timeout(_)
+				| LogicalOp::VersionScope(_)
+				| LogicalOp::Only(_)
+				| LogicalOp::Explain(_)
+				| LogicalOp::Eval(_)
+				| LogicalOp::Sequence(_)
+				| LogicalOp::Let(_)
+				| LogicalOp::Return(_)
+				| LogicalOp::Foreach(_)
+				| LogicalOp::If(_)
+				| LogicalOp::Throw(_)
+				| LogicalOp::Break(_)
+				| LogicalOp::Continue(_)
+				| LogicalOp::Info(_)
+				| LogicalOp::Sleep(_) => std::ops::ControlFlow::Continue(()),
 			})
 			.is_break();
 	crate::exec::planner::CatalogWithin {

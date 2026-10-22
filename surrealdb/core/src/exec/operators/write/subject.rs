@@ -71,7 +71,20 @@ pub(crate) fn extract_table_and_rid_key(
 		// There is no record id field
 		Value::None => None,
 		// Any other value cannot be converted to a record id key
-		v => {
+		v @ (Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Set(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_)) => {
 			bail!(ExecError::InsertStatementId {
 				value: v.to_sql(),
 			});

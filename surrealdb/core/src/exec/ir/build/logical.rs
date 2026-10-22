@@ -3635,21 +3635,17 @@ struct ValueTargets {
 ///
 /// The rows path keeps a table alone, a union naming only stored records (whose read of a table
 /// can take an index), a nested `SELECT` alone, and a locked target.
-#[allow(clippy::wildcard_enum_match_arm)]
 fn value_targets(rows: &LogicalOp) -> Option<ValueTargets> {
 	let mut targets = Vec::new();
-	let listed = match rows {
-		LogicalOp::UnionAll(union) => {
-			let listed = listed_targets(&union.inputs, &mut targets)?;
-			if !listed.valued {
-				return None;
-			}
-			listed
+	let listed = if let LogicalOp::UnionAll(union) = rows {
+		let listed = listed_targets(&union.inputs, &mut targets)?;
+		if !listed.valued {
+			return None;
 		}
-		leaf => {
-			targets.push(value_target(leaf)?);
-			Listed::default()
-		}
+		listed
+	} else {
+		targets.push(value_target(rows)?);
+		Listed::default()
 	};
 	Some(ValueTargets {
 		targets,
@@ -3674,36 +3670,36 @@ struct Listed {
 
 /// Pushes the target each leaf of `inputs` names onto `targets`, in order, nested unions
 /// flattened. `None` when a leaf is neither a value, a nested `SELECT`, nor stored records.
-#[allow(clippy::wildcard_enum_match_arm)]
 fn listed_targets(inputs: &[LogicalOp], targets: &mut Vec<LogicalExpr>) -> Option<Listed> {
 	let mut listed = Listed::default();
 	for input in inputs {
-		match input {
-			LogicalOp::UnionAll(union) => {
-				let nested = listed_targets(&union.inputs, targets)?;
-				listed.valued |= nested.valued;
-				listed.stored |= nested.stored;
-				listed.table |= nested.table;
-				listed.subquery |= nested.subquery;
-			}
-			LogicalOp::Subquery(subquery) => {
-				targets.push(LogicalExpr::Subquery(subquery.input.clone()));
-				listed.valued = true;
-				listed.subquery = true;
-			}
-			LogicalOp::Source(LogicalSource {
-				source,
-				for_update: false,
-				..
-			}) if stored_target(source).is_some() => {
-				targets.extend(stored_target(source));
+		if let LogicalOp::UnionAll(union) = input {
+			let nested = listed_targets(&union.inputs, targets)?;
+			listed.valued |= nested.valued;
+			listed.stored |= nested.stored;
+			listed.table |= nested.table;
+			listed.subquery |= nested.subquery;
+		} else if let LogicalOp::Subquery(subquery) = input {
+			targets.push(LogicalExpr::Subquery(subquery.input.clone()));
+			listed.valued = true;
+			listed.subquery = true;
+		} else if let LogicalOp::Source(LogicalSource {
+			source,
+			for_update: false,
+			..
+		}) = input
+		{
+			if let Some(stored) = stored_target(source) {
+				targets.push(stored);
 				listed.stored = true;
 				listed.table |= matches!(source, SourceRef::Table(_));
-			}
-			leaf => {
-				targets.push(value_target(leaf)?);
+			} else {
+				targets.push(value_target(input)?);
 				listed.valued = true;
 			}
+		} else {
+			targets.push(value_target(input)?);
+			listed.valued = true;
 		}
 	}
 	Some(listed)
@@ -3722,16 +3718,21 @@ fn stored_target(source: &SourceRef) -> Option<LogicalExpr> {
 
 /// The value a leaf of a write's rows is, unlocked: a literal, a parameter or a dynamic
 /// expression. `None` for any other leaf.
-#[allow(clippy::wildcard_enum_match_arm)]
 fn value_target(leaf: &LogicalOp) -> Option<LogicalExpr> {
-	match leaf {
-		LogicalOp::Values(values) => (!values.for_update).then(|| values.expr.clone()),
-		LogicalOp::Source(source) if !source.for_update => match &source.source {
-			SourceRef::Param(param) => Some(LogicalExpr::Param(param.clone())),
-			SourceRef::Dynamic(expr) => Some(expr.clone()),
-			SourceRef::Table(_) | SourceRef::RecordId(_) | SourceRef::Mock(_) => None,
-		},
-		_ => None,
+	if let LogicalOp::Values(values) = leaf {
+		(!values.for_update).then(|| values.expr.clone())
+	} else if let LogicalOp::Source(source) = leaf {
+		if !source.for_update {
+			match &source.source {
+				SourceRef::Param(param) => Some(LogicalExpr::Param(param.clone())),
+				SourceRef::Dynamic(expr) => Some(expr.clone()),
+				SourceRef::Table(_) | SourceRef::RecordId(_) | SourceRef::Mock(_) => None,
+			}
+		} else {
+			None
+		}
+	} else {
+		None
 	}
 }
 

@@ -324,9 +324,10 @@ mod tests {
 
 	/// A top-level field of an object row, `NONE` when the key is absent.
 	fn field(row: &Value, name: &str) -> Value {
-		match row {
-			Value::Object(obj) => obj.get(name).cloned().unwrap_or(Value::None),
-			_ => Value::None,
+		if let Value::Object(obj) = row {
+			obj.get(name).cloned().unwrap_or(Value::None)
+		} else {
+			Value::None
 		}
 	}
 

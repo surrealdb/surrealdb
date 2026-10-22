@@ -155,20 +155,18 @@ mod tests {
 	fn test_json_decode_object() {
 		let input = r#"{"name":"test","value":42}"#.to_string();
 		let result = json::decode((input,)).unwrap();
-		match result {
-			Value::Object(_) => {}
-			other => panic!("expected object, got: {other:?}"),
-		}
+		let Value::Object(_) = result else {
+			panic!("expected object, got: {result:?}");
+		};
 	}
 
 	#[test]
 	fn test_json_decode_array() {
 		let input = r#"[1, 2, 3]"#.to_string();
 		let result = json::decode((input,)).unwrap();
-		match result {
-			Value::Array(_) => {}
-			other => panic!("expected array, got: {other:?}"),
-		}
+		let Value::Array(_) = result else {
+			panic!("expected array, got: {result:?}");
+		};
 	}
 
 	#[test]

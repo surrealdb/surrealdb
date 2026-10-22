@@ -594,9 +594,8 @@ async fn delete_filtered_live_notification() -> Result<()> {
 		&mut dbs.execute("LIVE SELECT * FROM person WHERE condition = true", &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	let live_id = res.remove(0).result?;
-	let live_id = match live_id {
-		Value::Uuid(id) => id,
-		_ => panic!("expected uuid"),
+	let Value::Uuid(live_id) = live_id else {
+		panic!("expected uuid");
 	};
 
 	// Validate delete response

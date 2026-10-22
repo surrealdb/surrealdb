@@ -341,7 +341,22 @@ impl<'a> IndexAnalyzer<'a> {
 					// and would error otherwise.
 					continue;
 				}
-				_ => {
+				AccessPath::BTreeScan {
+					..
+				}
+				| AccessPath::FullTextSearch {
+					..
+				}
+				| AccessPath::KnnSearch {
+					..
+				}
+				| AccessPath::BitmapFusion {
+					..
+				}
+				| AccessPath::Union {
+					..
+				}
+				| AccessPath::KeyRange(_) => {
 					branch_paths.push(path);
 					min_score = min_score.min(branch_score);
 				}
@@ -538,23 +553,26 @@ impl<'a> IndexAnalyzer<'a> {
 		// OR / IN / containment conjuncts become union members when every
 		// branch is independently bitmap-capable.
 		for conjunct in &conjuncts {
-			let path = match conjunct {
-				LogicalExpr::Binary {
-					op: BinaryOperator::Or,
-					..
-				} => self.or_union_from_expr(conjunct, Direction::Forward).map(|(p, _)| p),
-				LogicalExpr::Binary {
-					op:
-						BinaryOperator::Inside
-						| BinaryOperator::ContainAll
-						| BinaryOperator::ContainAny
-						| BinaryOperator::AllInside
-						| BinaryOperator::AnyInside,
-					..
-				} => self
-					.try_in_expansion(Some(conjunct), Direction::Forward)
-					.or_else(|| self.try_containment_expansion(Some(conjunct), Direction::Forward)),
-				_ => None,
+			let path = if let LogicalExpr::Binary {
+				op: BinaryOperator::Or,
+				..
+			} = conjunct
+			{
+				self.or_union_from_expr(conjunct, Direction::Forward).map(|(p, _)| p)
+			} else if let LogicalExpr::Binary {
+				op:
+					BinaryOperator::Inside
+					| BinaryOperator::ContainAll
+					| BinaryOperator::ContainAny
+					| BinaryOperator::AllInside
+					| BinaryOperator::AnyInside,
+				..
+			} = conjunct
+			{
+				self.try_in_expansion(Some(conjunct), Direction::Forward)
+					.or_else(|| self.try_containment_expansion(Some(conjunct), Direction::Forward))
+			} else {
+				None
 			};
 			if let Some(path) = path
 				&& let Some(node) = Self::bitmap_plan_from_access_path(&path)
@@ -664,13 +682,13 @@ impl<'a> IndexAnalyzer<'a> {
 			return None;
 		}
 		let (path, _) = self.or_union_from_expr(cond, direction)?;
-		match Self::bitmap_plan_from_access_path(&path)? {
-			BitmapPlan::Or(children)
-				if children.len() >= 2 && !Self::equality_branches_disjoint(&children) =>
-			{
-				Some((BitmapPlan::Or(children), path))
-			}
-			_ => None,
+		if let BitmapPlan::Or(children) = Self::bitmap_plan_from_access_path(&path)?
+			&& children.len() >= 2
+			&& !Self::equality_branches_disjoint(&children)
+		{
+			Some((BitmapPlan::Or(children), path))
+		} else {
+			None
 		}
 	}
 
@@ -711,21 +729,21 @@ impl<'a> IndexAnalyzer<'a> {
 	/// `not()` function — the parsed form of `NOT (...)`. Both negate
 	/// truthiness identically.
 	pub(crate) fn as_negated_expr(expr: &LogicalExpr) -> Option<&LogicalExpr> {
-		match expr {
-			LogicalExpr::Prefix {
-				op: PrefixOperator::Not,
-				expr: inner,
-			} => Some(inner),
-			LogicalExpr::Call(call)
-				if call.args.len() == 1
-					&& matches!(
-						&call.receiver,
-						crate::expr::function::Function::Normal(name) if name == "not"
-					) =>
-			{
-				Some(&call.args[0])
-			}
-			_ => None,
+		if let LogicalExpr::Prefix {
+			op: PrefixOperator::Not,
+			expr: inner,
+		} = expr
+		{
+			Some(inner)
+		} else if let LogicalExpr::Call(call) = expr
+			&& call.args.len() == 1
+			&& matches!(
+				&call.receiver,
+				crate::expr::function::Function::Normal(name) if name == "not"
+			) {
+			Some(&call.args[0])
+		} else {
+			None
 		}
 	}
 
@@ -800,7 +818,15 @@ impl<'a> IndexAnalyzer<'a> {
 				range,
 				..
 			} => range.is_none() && prefix.len() >= c.index_ref.definition().cols.len(),
-			_ => false,
+			BTreeAccess::Range {
+				..
+			}
+			| BTreeAccess::FullText {
+				..
+			}
+			| BTreeAccess::Knn {
+				..
+			} => false,
 		}
 	}
 
@@ -899,24 +925,30 @@ impl<'a> IndexAnalyzer<'a> {
 	/// `<->`, ranges, edge conditions, unfolded parameters — keeps the
 	/// per-row evaluation.
 	fn graph_semijoin_leaf(conjunct: &LogicalExpr) -> Option<BitmapPlan> {
-		let (path, lit) = match conjunct {
-			LogicalExpr::Binary {
-				left,
-				op: BinaryOperator::Contain,
-				right,
-			} => match (&**left, &**right) {
-				(path, lit) if path.is_path() => (path, lit),
-				_ => return None,
-			},
-			LogicalExpr::Binary {
-				left,
-				op: BinaryOperator::Inside,
-				right,
-			} => match (&**left, &**right) {
-				(lit, path) if path.is_path() => (path, lit),
-				_ => return None,
-			},
-			_ => return None,
+		let (path, lit) = if let LogicalExpr::Binary {
+			left,
+			op: BinaryOperator::Contain,
+			right,
+		} = conjunct
+		{
+			if left.is_path() {
+				(&**left, &**right)
+			} else {
+				return None;
+			}
+		} else if let LogicalExpr::Binary {
+			left,
+			op: BinaryOperator::Inside,
+			right,
+		} = conjunct
+		{
+			if right.is_path() {
+				(&**right, &**left)
+			} else {
+				return None;
+			}
+		} else {
+			return None;
 		};
 		let Some(Value::RecordId(anchor)) = try_literal_to_value(lit) else {
 			return None;
@@ -924,13 +956,15 @@ impl<'a> IndexAnalyzer<'a> {
 		// Two hops over the row: lowering places a run of lookups that
 		// continues nowhere inside a `Broadcast` over the current value, or
 		// bare when nothing follows; both spell the same path.
-		let hops = match path {
-			LogicalExpr::Broadcast {
-				base,
-				body,
-				..
-			} if matches!(**base, LogicalExpr::Current) => &**body,
-			other => other,
+		let hops = if let LogicalExpr::Broadcast {
+			base,
+			body,
+			..
+		} = path && matches!(**base, LogicalExpr::Current)
+		{
+			&**body
+		} else {
+			path
 		};
 		let LogicalExpr::Lookup {
 			base,
@@ -1012,12 +1046,14 @@ impl<'a> IndexAnalyzer<'a> {
 		}
 		let mut tables = Vec::with_capacity(what.len());
 		for s in what {
-			match s {
-				LogicalLookupSubject::Table {
-					table,
-					referencing_field: None,
-				} => tables.push(table.clone()),
-				_ => return None,
+			if let LogicalLookupSubject::Table {
+				table,
+				referencing_field: None,
+			} = s
+			{
+				tables.push(table.clone());
+			} else {
+				return None;
 			}
 		}
 		Some((tables, *dir))
@@ -1113,7 +1149,16 @@ impl<'a> IndexAnalyzer<'a> {
 			// whose datetime lies in the second of a bound, not beyond it, so
 			// its bitmap is a superset of the truth set.
 			access if super::derived_columns::range_is_widened(&c.index_ref, access) => false,
-			_ => {
+			BTreeAccess::Equality(_)
+			| BTreeAccess::Range {
+				..
+			}
+			| BTreeAccess::Compound {
+				..
+			}
+			| BTreeAccess::Knn {
+				..
+			} => {
 				super::access_path::range_matches_comparison(&c.index_ref, &c.access)
 					&& Self::equality_keys_cover(&c.index_ref, &c.access)
 					&& (0..Self::candidate_pinned_columns(c).len())
@@ -1140,7 +1185,15 @@ impl<'a> IndexAnalyzer<'a> {
 				prefix,
 				..
 			} => prefix.iter().all(covers),
-			_ => true,
+			BTreeAccess::Range {
+				..
+			}
+			| BTreeAccess::FullText {
+				..
+			}
+			| BTreeAccess::Knn {
+				..
+			} => true,
 		}
 	}
 
@@ -1208,23 +1261,24 @@ impl<'a> IndexAnalyzer<'a> {
 	/// every string and `[1, 2]` under its numbers — and a containment by a
 	/// string holding the sought one as a substring, stored whole.
 	fn bitmap_superset_plan(&self, inner: &LogicalExpr) -> Option<BitmapPlan> {
-		match inner {
-			LogicalExpr::Binary {
-				op: BinaryOperator::Or,
-				..
-			} => {
-				let mut branches = Vec::new();
-				Self::flatten_or(inner, &mut branches);
-				let children = branches
-					.into_iter()
-					.map(|branch| self.bitmap_superset_plan(branch))
-					.collect::<Option<Vec<_>>>()?;
-				Some(BitmapPlan::Or(children))
-			}
-			LogicalExpr::Binary {
-				op: BinaryOperator::Equal | BinaryOperator::ExactEqual,
-				..
-			} => self.bitmap_plan_of(inner, &|c| {
+		if let LogicalExpr::Binary {
+			op: BinaryOperator::Or,
+			..
+		} = inner
+		{
+			let mut branches = Vec::new();
+			Self::flatten_or(inner, &mut branches);
+			let children = branches
+				.into_iter()
+				.map(|branch| self.bitmap_superset_plan(branch))
+				.collect::<Option<Vec<_>>>()?;
+			Some(BitmapPlan::Or(children))
+		} else if let LogicalExpr::Binary {
+			op: BinaryOperator::Equal | BinaryOperator::ExactEqual,
+			..
+		} = inner
+		{
+			self.bitmap_plan_of(inner, &|c| {
 				let pinned_plain = || {
 					Self::candidate_pinned_columns(c)
 						.iter()
@@ -1237,7 +1291,18 @@ impl<'a> IndexAnalyzer<'a> {
 						range: None,
 						..
 					} => prefix,
-					_ => return false,
+					BTreeAccess::Range {
+						..
+					}
+					| BTreeAccess::Compound {
+						..
+					}
+					| BTreeAccess::FullText {
+						..
+					}
+					| BTreeAccess::Knn {
+						..
+					} => return false,
 				};
 				let normalised = spells_normalised_decimal_keys(c.index_ref.format_version);
 				// An operand that reads the clock is no value fixed before the scan opens.
@@ -1246,8 +1311,9 @@ impl<'a> IndexAnalyzer<'a> {
 						.as_literal()
 						.is_some_and(|value| Self::key_equality_covers(value, normalised))
 				}) && pinned_plain()
-			}),
-			_ => None,
+			})
+		} else {
+			None
 		}
 	}
 
@@ -1576,78 +1642,72 @@ impl<'a> IndexAnalyzer<'a> {
 		expr: &LogicalExpr,
 		results: &mut Vec<(LogicalExpr, Vec<Value>)>,
 	) {
-		match expr {
-			LogicalExpr::Binary {
-				left,
-				op: BinaryOperator::And,
-				right,
-			} => {
-				Self::collect_containment_expressions(left, results);
-				Self::collect_containment_expressions(right, results);
+		if let LogicalExpr::Binary {
+			left,
+			op: BinaryOperator::And,
+			right,
+		} = expr
+		{
+			Self::collect_containment_expressions(left, results);
+			Self::collect_containment_expressions(right, results);
+		} else if let LogicalExpr::Binary {
+			left,
+			op: BinaryOperator::ContainAll | BinaryOperator::ContainAny,
+			right,
+		} = expr
+		{
+			if left.is_path()
+				&& let Some(Value::Array(arr)) = index_literal(right)
+			{
+				results.push((left.as_ref().clone(), arr.0));
 			}
-			LogicalExpr::Binary {
-				left,
-				op: BinaryOperator::ContainAll | BinaryOperator::ContainAny,
-				right,
-			} => {
-				if left.is_path()
-					&& let Some(Value::Array(arr)) = index_literal(right)
-				{
-					results.push((left.as_ref().clone(), arr.0));
-				}
+		} else if let LogicalExpr::Binary {
+			left,
+			op: BinaryOperator::AllInside | BinaryOperator::AnyInside,
+			right,
+		} = expr
+		{
+			if right.is_path()
+				&& let Some(Value::Array(arr)) = index_literal(left)
+			{
+				results.push((right.as_ref().clone(), arr.0));
 			}
-			LogicalExpr::Binary {
-				left,
-				op: BinaryOperator::AllInside | BinaryOperator::AnyInside,
-				right,
-			} => {
-				if right.is_path()
-					&& let Some(Value::Array(arr)) = index_literal(left)
-				{
-					results.push((right.as_ref().clone(), arr.0));
-				}
-			}
-			LogicalExpr::Prefix {
-				op,
-				expr: inner,
-			} if !matches!(op, PrefixOperator::Not) => {
-				Self::collect_containment_expressions(inner, results);
-			}
-			_ => {}
+		} else if let LogicalExpr::Prefix {
+			op,
+			expr: inner,
+		} = expr && !matches!(op, PrefixOperator::Not)
+		{
+			Self::collect_containment_expressions(inner, results);
 		}
 	}
 
 	/// Collect `field INSIDE [values]` expressions from an AND tree.
 	fn collect_in_expressions(expr: &LogicalExpr, results: &mut Vec<(LogicalExpr, Vec<Value>)>) {
-		match expr {
-			LogicalExpr::Binary {
-				left,
-				op: BinaryOperator::And,
-				right,
-			} => {
-				Self::collect_in_expressions(left, results);
-				Self::collect_in_expressions(right, results);
+		if let LogicalExpr::Binary {
+			left,
+			op: BinaryOperator::And,
+			right,
+		} = expr
+		{
+			Self::collect_in_expressions(left, results);
+			Self::collect_in_expressions(right, results);
+		} else if let LogicalExpr::Binary {
+			left,
+			op: BinaryOperator::Inside,
+			right,
+		} = expr
+		{
+			if left.is_path()
+				&& let Some(Value::Array(arr)) = index_literal(right)
+			{
+				results.push((left.as_ref().clone(), arr.0));
 			}
-			LogicalExpr::Binary {
-				left,
-				op: BinaryOperator::Inside,
-				right,
-			} => {
-				if left.is_path()
-					&& let Some(Value::Array(arr)) = index_literal(right)
-				{
-					results.push((left.as_ref().clone(), arr.0));
-				}
-			}
-			// Do NOT recurse into NOT — expanding `NOT (field IN [...])`
-			// into index lookups would produce the wrong result set.
-			LogicalExpr::Prefix {
-				op,
-				expr: inner,
-			} if !matches!(op, PrefixOperator::Not) => {
-				Self::collect_in_expressions(inner, results);
-			}
-			_ => {}
+		} else if let LogicalExpr::Prefix {
+			op,
+			expr: inner,
+		} = expr && !matches!(op, PrefixOperator::Not)
+		{
+			Self::collect_in_expressions(inner, results);
 		}
 	}
 
@@ -1655,18 +1715,16 @@ impl<'a> IndexAnalyzer<'a> {
 	///
 	/// `A OR B OR C` (parsed as `(A OR B) OR C`) becomes `[A, B, C]`.
 	fn flatten_or<'b>(expr: &'b LogicalExpr, branches: &mut Vec<&'b LogicalExpr>) {
-		match expr {
-			LogicalExpr::Binary {
-				left,
-				op: BinaryOperator::Or,
-				right,
-			} => {
-				Self::flatten_or(left, branches);
-				Self::flatten_or(right, branches);
-			}
-			_ => {
-				branches.push(expr);
-			}
+		if let LogicalExpr::Binary {
+			left,
+			op: BinaryOperator::Or,
+			right,
+		} = expr
+		{
+			Self::flatten_or(left, branches);
+			Self::flatten_or(right, branches);
+		} else {
+			branches.push(expr);
 		}
 	}
 
@@ -1676,18 +1734,16 @@ impl<'a> IndexAnalyzer<'a> {
 	/// Non-AND nodes (including OR sub-trees) are returned as single
 	/// conjuncts so the caller can inspect them.
 	fn flatten_and<'b>(expr: &'b LogicalExpr, conjuncts: &mut Vec<&'b LogicalExpr>) {
-		match expr {
-			LogicalExpr::Binary {
-				left,
-				op: BinaryOperator::And,
-				right,
-			} => {
-				Self::flatten_and(left, conjuncts);
-				Self::flatten_and(right, conjuncts);
-			}
-			_ => {
-				conjuncts.push(expr);
-			}
+		if let LogicalExpr::Binary {
+			left,
+			op: BinaryOperator::And,
+			right,
+		} = expr
+		{
+			Self::flatten_and(left, conjuncts);
+			Self::flatten_and(right, conjuncts);
+		} else {
+			conjuncts.push(expr);
 		}
 	}
 
@@ -1696,58 +1752,52 @@ impl<'a> IndexAnalyzer<'a> {
 	/// the WHERE before residual filtering, so it must not be left behind as a
 	/// residual by an index substitution (see `try_and_nested_or_union`).
 	fn expr_contains_knn(expr: &LogicalExpr) -> bool {
-		match expr {
-			LogicalExpr::Binary {
-				left,
-				op,
-				right,
-			} => {
-				matches!(op, BinaryOperator::NearestNeighbor(_))
-					|| Self::expr_contains_knn(left)
-					|| Self::expr_contains_knn(right)
-			}
-			LogicalExpr::Prefix {
-				expr: inner,
-				..
-			} => Self::expr_contains_knn(inner),
-			_ => false,
+		if let LogicalExpr::Binary {
+			left,
+			op,
+			right,
+		} = expr
+		{
+			matches!(op, BinaryOperator::NearestNeighbor(_))
+				|| Self::expr_contains_knn(left)
+				|| Self::expr_contains_knn(right)
+		} else if let LogicalExpr::Prefix {
+			expr: inner,
+			..
+		} = expr
+		{
+			Self::expr_contains_knn(inner)
+		} else {
+			false
 		}
 	}
 
 	/// Collect all simple conditions from an AND tree.
 	fn collect_conditions(&self, expr: &LogicalExpr, conditions: &mut Vec<SimpleCondition>) {
-		match expr {
-			LogicalExpr::Binary {
-				left,
-				op,
-				right,
-			} => {
-				match op {
-					BinaryOperator::And => {
-						// Recurse into AND branches
-						self.collect_conditions(left, conditions);
-						self.collect_conditions(right, conditions);
-					}
-					BinaryOperator::Or => {
-						// Don't collect from OR branches
-					}
-					_ => {
-						// Try to extract a simple condition
-						if let Some(cond) = self.extract_simple_condition(left, op, right) {
-							conditions.push(cond);
-						}
-					}
+		if let LogicalExpr::Binary {
+			left,
+			op,
+			right,
+		} = expr
+		{
+			if matches!(op, BinaryOperator::And) {
+				// Recurse into AND branches
+				self.collect_conditions(left, conditions);
+				self.collect_conditions(right, conditions);
+			} else if matches!(op, BinaryOperator::Or) {
+				// Don't collect from OR branches
+			} else {
+				// Try to extract a simple condition
+				if let Some(cond) = self.extract_simple_condition(left, op, right) {
+					conditions.push(cond);
 				}
 			}
-			// Do NOT recurse into NOT — `NOT (field > 5)` must not
-			// generate an index candidate for `field > 5`.
-			LogicalExpr::Prefix {
-				op,
-				expr: inner,
-			} if !matches!(op, PrefixOperator::Not) => {
-				self.collect_conditions(inner, conditions);
-			}
-			_ => {}
+		} else if let LogicalExpr::Prefix {
+			op,
+			expr: inner,
+		} = expr && !matches!(op, PrefixOperator::Not)
+		{
+			self.collect_conditions(inner, conditions);
 		}
 	}
 
@@ -2084,7 +2134,7 @@ impl<'a> IndexAnalyzer<'a> {
 		// Sort by index and score (higher score first)
 		candidates.sort_by(|a, b| match a.index_ref.idx.cmp(&b.index_ref.idx) {
 			std::cmp::Ordering::Equal => b.score().cmp(&a.score()),
-			other => other,
+			other @ (std::cmp::Ordering::Less | std::cmp::Ordering::Greater) => other,
 		});
 
 		// Keep only the best candidate per index
@@ -2093,54 +2143,82 @@ impl<'a> IndexAnalyzer<'a> {
 
 	/// Analyze a single expression for index opportunities.
 	fn analyze_condition(&self, expr: &LogicalExpr, candidates: &mut Vec<IndexCandidate>) {
-		match expr {
-			// Binary expression - check for indexable patterns
-			LogicalExpr::Binary {
-				left,
-				op,
-				right,
-			} => {
-				// Handle AND/OR by recursing into children
-				match op {
-					BinaryOperator::And => {
-						// For AND, both sides contribute candidates independently
-						self.analyze_condition(left, candidates);
-						self.analyze_condition(right, candidates);
-					}
-					BinaryOperator::Or => {
-						// For OR, we need all branches to use the same index
-						// This is more complex. OR conditions are not indexed here; the OR union
-						// analysis covers them.
-					}
-					// MATCHES operator for full-text search
-					BinaryOperator::Matches(mo) => {
-						self.try_match_fulltext(left, mo, right, candidates);
-					}
-					// KNN operator for vector search
-					BinaryOperator::NearestNeighbor(nn) => {
-						self.try_match_knn(left, right, nn, candidates);
-					}
-					BinaryOperator::Contain | BinaryOperator::Inside => {
-						self.try_match_containment(left, op, right, candidates);
-						self.try_match_comparison(left, op, right, candidates);
-					}
-					_ => {
-						self.try_match_comparison(left, op, right, candidates);
-					}
+		if let LogicalExpr::Binary {
+			left,
+			op,
+			right,
+		} = expr
+		{
+			// Handle AND/OR by recursing into children
+			match op {
+				BinaryOperator::And => {
+					// For AND, both sides contribute candidates independently
+					self.analyze_condition(left, candidates);
+					self.analyze_condition(right, candidates);
+				}
+				BinaryOperator::Or => {
+					// For OR, we need all branches to use the same index
+					// This is more complex. OR conditions are not indexed here; the OR union
+					// analysis covers them.
+				}
+				// MATCHES operator for full-text search
+				BinaryOperator::Matches(mo) => {
+					self.try_match_fulltext(left, mo, right, candidates);
+				}
+				// KNN operator for vector search
+				BinaryOperator::NearestNeighbor(nn) => {
+					self.try_match_knn(left, right, nn, candidates);
+				}
+				BinaryOperator::Contain | BinaryOperator::Inside => {
+					self.try_match_containment(left, op, right, candidates);
+					self.try_match_comparison(left, op, right, candidates);
+				}
+				BinaryOperator::Subtract
+				| BinaryOperator::Add
+				| BinaryOperator::Multiply
+				| BinaryOperator::Divide
+				| BinaryOperator::Remainder
+				| BinaryOperator::Power
+				| BinaryOperator::Equal
+				| BinaryOperator::ExactEqual
+				| BinaryOperator::NotEqual
+				| BinaryOperator::AllEqual
+				| BinaryOperator::AnyEqual
+				| BinaryOperator::NullCoalescing
+				| BinaryOperator::TenaryCondition
+				| BinaryOperator::LessThan
+				| BinaryOperator::LessThanEqual
+				| BinaryOperator::MoreThan
+				| BinaryOperator::MoreThanEqual
+				| BinaryOperator::NotContain
+				| BinaryOperator::ContainAll
+				| BinaryOperator::ContainAny
+				| BinaryOperator::ContainNone
+				| BinaryOperator::NotInside
+				| BinaryOperator::AllInside
+				| BinaryOperator::AnyInside
+				| BinaryOperator::NoneInside
+				| BinaryOperator::Outside
+				| BinaryOperator::Intersects
+				| BinaryOperator::Range
+				| BinaryOperator::RangeInclusive
+				| BinaryOperator::RangeSkip
+				| BinaryOperator::RangeSkipInclusive => {
+					self.try_match_comparison(left, op, right, candidates);
 				}
 			}
+		} else if let LogicalExpr::Call(call) = expr {
 			// A prefix test names a contiguous stretch of the key space.
-			LogicalExpr::Call(call) => self.try_match_prefix_call(call, candidates),
+			self.try_match_prefix_call(call, candidates);
+		} else if let LogicalExpr::Prefix {
+			op,
+			expr: inner,
+		} = expr && !matches!(op, PrefixOperator::Not)
+		{
 			// Nested expression in parentheses (but NOT negation).
 			// Do NOT recurse into NOT — negated predicates invert
 			// the result set and index candidates would be wrong.
-			LogicalExpr::Prefix {
-				op,
-				expr: inner,
-			} if !matches!(op, PrefixOperator::Not) => {
-				self.analyze_condition(inner, candidates);
-			}
-			_ => {}
+			self.analyze_condition(inner, candidates);
 		}
 	}
 
@@ -2190,13 +2268,14 @@ impl<'a> IndexAnalyzer<'a> {
 				// columns.  E.g. WHERE a = 1 on INDEX (a, b) must scan the
 				// prefix [1] to find all (1, *) entries.
 				let access = if ix_def.cols.len() > 1 {
-					match access {
-						BTreeAccess::Equality(v) => BTreeAccess::Compound {
+					if let BTreeAccess::Equality(v) = access {
+						BTreeAccess::Compound {
 							prefix: vec![v],
 							range: None,
 							upper: None,
-						},
-						other => other,
+						}
+					} else {
+						access
 					}
 				} else {
 					access
@@ -2274,19 +2353,22 @@ impl<'a> IndexAnalyzer<'a> {
 			}
 			// IN clause (field IN [values])
 			(BinaryOperator::Inside, IdiomPosition::Left) => {
-				match value.as_literal()? {
+				let lit = value.as_literal()?;
+				if let Value::Array(arr) = lit
+					&& arr.len() == 1
+				{
 					// Single-element array: treat as equality (field IN [v] → field = v)
-					Value::Array(arr) if arr.len() == 1 => {
-						Some(BTreeAccess::literal_equality(arr[0].clone()))
-					}
+					Some(BTreeAccess::literal_equality(arr[0].clone()))
+				} else if let Value::Range(r) = lit {
 					// A range literal states the bounds directly, so it is
 					// the same access as the two comparisons that spell it
 					// out: `field IN 1..9` reads the keys `>= 1` and `< 9`.
 					// The literal's own bounds carry which end is open, so
 					// every spelling (`..`, `..=`, `>..`, `>..=`) maps
 					// without a case of its own.
-					Value::Range(r) => Some(BTreeAccess::literal_range((**r).clone())),
-					_ => None,
+					Some(BTreeAccess::literal_range((**r).clone()))
+				} else {
+					None
 				}
 			}
 
@@ -2391,16 +2473,24 @@ impl<'a> IndexAnalyzer<'a> {
 		right: &LogicalExpr,
 		candidates: &mut Vec<IndexCandidate>,
 	) {
-		let (path, value) = match op {
-			BinaryOperator::Contain if left.is_path() => match index_literal(right) {
-				Some(v) => (left, v),
-				None => return,
-			},
-			BinaryOperator::Inside if right.is_path() => match index_literal(left) {
-				Some(v) => (right, v),
-				None => return,
-			},
-			_ => return,
+		let (path, value) = if let BinaryOperator::Contain = op {
+			if left.is_path()
+				&& let Some(v) = index_literal(right)
+			{
+				(left, v)
+			} else {
+				return;
+			}
+		} else if let BinaryOperator::Inside = op {
+			if right.is_path()
+				&& let Some(v) = index_literal(left)
+			{
+				(right, v)
+			} else {
+				return;
+			}
+		} else {
+			return;
 		};
 
 		for (idx, ix_def) in self.indexes.iter().enumerate() {
@@ -2500,9 +2590,10 @@ impl<'a> IndexAnalyzer<'a> {
 		// the empty vector here, and the scan takes the operator's operand as
 		// its query. One that reads the row being scanned matches no index:
 		// the planner refuses it before an access path is chosen.
-		let resolved = match right {
-			LogicalExpr::Param(param) => self.knn_query_vectors.and_then(|v| v.get(param.as_str())),
-			_ => None,
+		let resolved = if let LogicalExpr::Param(param) = right {
+			self.knn_query_vectors.and_then(|v| v.get(param.as_str()))
+		} else {
+			None
 		};
 		let vector = match resolved {
 			Some(vector) => Arc::clone(vector),
@@ -2536,7 +2627,7 @@ impl<'a> IndexAnalyzer<'a> {
 					}
 					user_ef.unwrap_or_else(|| k.max(diskann.l_build as u32))
 				}
-				_ => continue,
+				Index::Idx | Index::Uniq | Index::FullText(_) | Index::Count(_) => continue,
 			};
 
 			// An ANN index is matched by its column as written, as the KNN
@@ -2861,7 +2952,13 @@ impl IndexCandidate {
 				// attaches it after path selection.
 				prefilter: None,
 			},
-			_ => AccessPath::BTreeScan {
+			BTreeAccess::Equality(_)
+			| BTreeAccess::Range {
+				..
+			}
+			| BTreeAccess::Compound {
+				..
+			} => AccessPath::BTreeScan {
 				index_ref: self.index_ref.clone(),
 				access: self.access.clone(),
 				direction,
@@ -2923,7 +3020,18 @@ fn keyed_as_compared(value: &Value, range: bool) -> bool {
 				Bound::Included(v) | Bound::Excluded(v) => element_keyed(v, range),
 				Bound::Unbounded => true,
 			}),
-			_ => true,
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::File(_)
+			| Value::Closure(_) => true,
 		}
 	}
 	fn key_keyed(key: &RecordIdKey, range: bool) -> bool {
@@ -2934,7 +3042,7 @@ fn keyed_as_compared(value: &Value, range: bool) -> bool {
 				Bound::Included(k) | Bound::Excluded(k) => key_keyed(k, range),
 				Bound::Unbounded => true,
 			}),
-			_ => true,
+			RecordIdKey::Number(_) | RecordIdKey::String(_) | RecordIdKey::Uuid(_) => true,
 		}
 	}
 	match value {
@@ -2946,7 +3054,20 @@ fn keyed_as_compared(value: &Value, range: bool) -> bool {
 			Bound::Included(v) | Bound::Excluded(v) => keyed_as_compared(v, true),
 			Bound::Unbounded => true,
 		}),
-		_ => true,
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Closure(_) => true,
 	}
 }
 
@@ -3003,17 +3124,20 @@ fn path_matches_containment(path: &LogicalExpr, index_col: &Idiom) -> bool {
 /// object and follows a record link (see `IndexAnalyzer::seeks_containment`).
 fn path_takes_each(mut path: &LogicalExpr) -> bool {
 	loop {
-		match path {
-			LogicalExpr::Each(_) => return true,
-			LogicalExpr::Broadcast {
-				body,
-				..
-			} if path_takes_each(body) => return true,
-			LogicalExpr::Optional {
-				then,
-				..
-			} if path_takes_each(then) => return true,
-			_ => {}
+		if let LogicalExpr::Each(_) = path {
+			return true;
+		} else if let LogicalExpr::Broadcast {
+			body,
+			..
+		} = path && path_takes_each(body)
+		{
+			return true;
+		} else if let LogicalExpr::Optional {
+			then,
+			..
+		} = path && path_takes_each(then)
+		{
+			return true;
 		}
 		match path.step_base() {
 			Some(base) => path = base,
@@ -3074,20 +3198,32 @@ fn bound_is_tighter(
 /// Returns `None` for non-range operators (equality, MATCHES, etc.).
 fn normalize_range_op(op: &BinaryOperator, position: IdiomPosition) -> Option<BinaryOperator> {
 	match position {
-		IdiomPosition::Left => match op {
-			BinaryOperator::MoreThan
-			| BinaryOperator::MoreThanEqual
-			| BinaryOperator::LessThan
-			| BinaryOperator::LessThanEqual => Some(op.clone()),
-			_ => None,
-		},
-		IdiomPosition::Right => match op {
-			BinaryOperator::LessThan => Some(BinaryOperator::MoreThan),
-			BinaryOperator::LessThanEqual => Some(BinaryOperator::MoreThanEqual),
-			BinaryOperator::MoreThan => Some(BinaryOperator::LessThan),
-			BinaryOperator::MoreThanEqual => Some(BinaryOperator::LessThanEqual),
-			_ => None,
-		},
+		IdiomPosition::Left => {
+			if matches!(
+				op,
+				BinaryOperator::MoreThan
+					| BinaryOperator::MoreThanEqual
+					| BinaryOperator::LessThan
+					| BinaryOperator::LessThanEqual
+			) {
+				Some(op.clone())
+			} else {
+				None
+			}
+		}
+		IdiomPosition::Right => {
+			if let BinaryOperator::LessThan = op {
+				Some(BinaryOperator::MoreThan)
+			} else if let BinaryOperator::LessThanEqual = op {
+				Some(BinaryOperator::MoreThanEqual)
+			} else if let BinaryOperator::MoreThan = op {
+				Some(BinaryOperator::LessThan)
+			} else if let BinaryOperator::MoreThanEqual = op {
+				Some(BinaryOperator::LessThanEqual)
+			} else {
+				None
+			}
+		}
 	}
 }
 
@@ -3195,29 +3331,34 @@ mod tests {
 		let ast = crate::syn::parse(&src).expect("parse");
 		let mut exprs = ast.expressions;
 		assert_eq!(exprs.len(), 1, "expected one statement from {src:?}");
-		let plan = match exprs.remove(0) {
-			surrealdb_expr::parser::TopLevelExpr::Expr(select @ crate::expr::Expr::Select(_)) => {
-				lower(select).expect("SELECT lowers")
-			}
-			other => panic!("expected SELECT, got {other:?}"),
+		let first_expr = exprs.remove(0);
+		let surrealdb_expr::parser::TopLevelExpr::Expr(select @ crate::expr::Expr::Select(_)) =
+			first_expr
+		else {
+			panic!("expected SELECT, got {first_expr:?}");
 		};
+		let plan = lower(select).expect("SELECT lowers");
 		let (mut cond, mut order, mut with) = (None, None, None);
 		let mut stack = vec![&plan];
 		while let Some(op) = stack.pop() {
-			match op {
-				LogicalOp::Filter(LogicalFilter {
-					predicate,
-					..
-				}) => cond = Some(predicate.clone()),
-				LogicalOp::Sort(LogicalSort {
-					ordering,
-					..
-				}) => order = Some(ordering.clone()),
-				LogicalOp::Source(LogicalSource {
-					with: hint,
-					..
-				}) => with = hint.clone(),
-				_ => {}
+			if let LogicalOp::Filter(LogicalFilter {
+				predicate,
+				..
+			}) = op
+			{
+				cond = Some(predicate.clone());
+			} else if let LogicalOp::Sort(LogicalSort {
+				ordering,
+				..
+			}) = op
+			{
+				order = Some(ordering.clone());
+			} else if let LogicalOp::Source(LogicalSource {
+				with: hint,
+				..
+			}) = op
+			{
+				with = hint.clone();
 			}
 			stack.extend(op.children());
 		}
@@ -3662,15 +3803,14 @@ mod tests {
 				None,
 				crate::kvs::Direction::Forward,
 			);
-			match path {
-				AccessPath::BTreeScan {
-					index_ref,
-					..
-				} => {
-					assert_eq!(index_ref.name.as_str(), "ix_a_uniq", "uniq must win");
-				}
-				other => panic!("expected BTreeScan, got {other:?}"),
-			}
+			let AccessPath::BTreeScan {
+				index_ref,
+				..
+			} = path
+			else {
+				panic!("expected BTreeScan, got {path:?}");
+			};
+			assert_eq!(index_ref.name.as_str(), "ix_a_uniq", "uniq must win");
 		}
 
 		#[test]
@@ -3681,17 +3821,16 @@ mod tests {
 			let cond = parse_cond("a = 5");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_ab").expect("ix_ab candidate");
-			match &c.access {
-				BTreeAccess::Compound {
-					prefix,
-					range,
-					..
-				} => {
-					assert_eq!(prefix.len(), 1);
-					assert!(range.is_none());
-				}
-				other => panic!("expected Compound, got {other:?}"),
-			}
+			let BTreeAccess::Compound {
+				prefix,
+				range,
+				..
+			} = &c.access
+			else {
+				panic!("expected Compound, got {:?}", c.access);
+			};
+			assert_eq!(prefix.len(), 1);
+			assert!(range.is_none());
 		}
 
 		#[test]
@@ -3717,15 +3856,14 @@ mod tests {
 			let cond = parse_cond("a > 5");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_a").expect("ix_a");
-			match &c.access {
-				BTreeAccess::Range {
-					range,
-				} => {
-					assert!(matches!(range.start, Bound::Excluded(_)));
-					assert!(matches!(range.end, Bound::Unbounded));
-				}
-				other => panic!("expected Range, got {other:?}"),
-			}
+			let BTreeAccess::Range {
+				range,
+			} = &c.access
+			else {
+				panic!("expected Range, got {:?}", c.access);
+			};
+			assert!(matches!(range.start, Bound::Excluded(_)));
+			assert!(matches!(range.end, Bound::Unbounded));
 		}
 
 		#[test]
@@ -3734,15 +3872,14 @@ mod tests {
 			let cond = parse_cond("a >= 5");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_a").expect("ix_a");
-			match &c.access {
-				BTreeAccess::Range {
-					range,
-					..
-				} => {
-					assert!(matches!(range.start, Bound::Included(_)));
-				}
-				other => panic!("expected Range, got {other:?}"),
-			}
+			let BTreeAccess::Range {
+				range,
+				..
+			} = &c.access
+			else {
+				panic!("expected Range, got {:?}", c.access);
+			};
+			assert!(matches!(range.start, Bound::Included(_)));
 		}
 
 		#[test]
@@ -3752,15 +3889,14 @@ mod tests {
 			let cond = parse_cond("a > 5 AND a < 10");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_a").expect("ix_a");
-			match &c.access {
-				BTreeAccess::Range {
-					range,
-				} => {
-					assert!(!matches!(range.start, Bound::Unbounded));
-					assert!(!matches!(range.end, Bound::Unbounded));
-				}
-				other => panic!("expected merged Range, got {other:?}"),
-			}
+			let BTreeAccess::Range {
+				range,
+			} = &c.access
+			else {
+				panic!("expected merged Range, got {:?}", c.access);
+			};
+			assert!(!matches!(range.start, Bound::Unbounded));
+			assert!(!matches!(range.end, Bound::Unbounded));
 		}
 
 		#[test]
@@ -3770,15 +3906,14 @@ mod tests {
 			let cond = parse_cond("5 < a");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_a").expect("ix_a");
-			match &c.access {
-				BTreeAccess::Range {
-					range,
-				} => {
-					assert!(!matches!(range.start, Bound::Unbounded));
-					assert!(matches!(range.end, Bound::Unbounded));
-				}
-				other => panic!("expected Range from-bound, got {other:?}"),
-			}
+			let BTreeAccess::Range {
+				range,
+			} = &c.access
+			else {
+				panic!("expected Range from-bound, got {:?}", c.access);
+			};
+			assert!(!matches!(range.start, Bound::Unbounded));
+			assert!(matches!(range.end, Bound::Unbounded));
 		}
 	}
 
@@ -3850,17 +3985,16 @@ mod tests {
 			let cond = parse_cond("a = 1 AND b = 2");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_abc").expect("ix_abc");
-			match &c.access {
-				BTreeAccess::Compound {
-					prefix,
-					range,
-					..
-				} => {
-					assert_eq!(prefix.len(), 2, "two equalities → prefix length 2");
-					assert!(range.is_none());
-				}
-				other => panic!("expected Compound, got {other:?}"),
-			}
+			let BTreeAccess::Compound {
+				prefix,
+				range,
+				..
+			} = &c.access
+			else {
+				panic!("expected Compound, got {:?}", c.access);
+			};
+			assert_eq!(prefix.len(), 2, "two equalities → prefix length 2");
+			assert!(range.is_none());
 		}
 
 		#[test]
@@ -3869,17 +4003,16 @@ mod tests {
 			let cond = parse_cond("a = 1 AND b > 5");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_abc").expect("ix_abc");
-			match &c.access {
-				BTreeAccess::Compound {
-					prefix,
-					range,
-					..
-				} => {
-					assert_eq!(prefix.len(), 1);
-					assert!(range.is_some(), "range on b captured");
-				}
-				other => panic!("expected Compound with range, got {other:?}"),
-			}
+			let BTreeAccess::Compound {
+				prefix,
+				range,
+				..
+			} = &c.access
+			else {
+				panic!("expected Compound with range, got {:?}", c.access);
+			};
+			assert_eq!(prefix.len(), 1);
+			assert!(range.is_some(), "range on b captured");
 		}
 
 		#[test]
@@ -4079,17 +4212,16 @@ mod tests {
 			let cond = parse_cond("a = 1 AND b > 5 AND c = 2");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_abc").expect("ix_abc");
-			match &c.access {
-				BTreeAccess::Compound {
-					prefix,
-					range,
-					..
-				} => {
-					assert_eq!(prefix.len(), 1);
-					assert!(range.is_some());
-				}
-				other => panic!("expected Compound, got {other:?}"),
-			}
+			let BTreeAccess::Compound {
+				prefix,
+				range,
+				..
+			} = &c.access
+			else {
+				panic!("expected Compound, got {:?}", c.access);
+			};
+			assert_eq!(prefix.len(), 1);
+			assert!(range.is_some());
 		}
 
 		#[test]
@@ -4100,17 +4232,16 @@ mod tests {
 			let cond = parse_cond("account = 1 AND emails.*.norm CONTAINS 'x'");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_ae").expect("ix_ae");
-			match &c.access {
-				BTreeAccess::Compound {
-					prefix,
-					range,
-					..
-				} => {
-					assert_eq!(prefix.len(), 2, "both columns pinned, not just the account");
-					assert!(range.is_none());
-				}
-				other => panic!("expected Compound, got {other:?}"),
-			}
+			let BTreeAccess::Compound {
+				prefix,
+				range,
+				..
+			} = &c.access
+			else {
+				panic!("expected Compound, got {:?}", c.access);
+			};
+			assert_eq!(prefix.len(), 2, "both columns pinned, not just the account");
+			assert!(range.is_none());
 		}
 
 		#[test]
@@ -4119,13 +4250,14 @@ mod tests {
 			let cond = parse_cond("account = 1 AND 'x' INSIDE emails.*.norm");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_ae").expect("ix_ae");
-			match &c.access {
-				BTreeAccess::Compound {
-					prefix,
-					..
-				} => assert_eq!(prefix.len(), 2),
-				other => panic!("expected Compound, got {other:?}"),
-			}
+			let BTreeAccess::Compound {
+				prefix,
+				..
+			} = &c.access
+			else {
+				panic!("expected Compound, got {:?}", c.access);
+			};
+			assert_eq!(prefix.len(), 2);
 		}
 
 		#[test]
@@ -4137,17 +4269,16 @@ mod tests {
 			let cond = parse_cond("account = 1 AND emails.*.norm CONTAINS 'x' AND b > 5");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_aeb").expect("ix_aeb");
-			match &c.access {
-				BTreeAccess::Compound {
-					prefix,
-					range,
-					..
-				} => {
-					assert_eq!(prefix.len(), 2);
-					assert!(range.is_some(), "the range on b terminates the prefix");
-				}
-				other => panic!("expected Compound, got {other:?}"),
-			}
+			let BTreeAccess::Compound {
+				prefix,
+				range,
+				..
+			} = &c.access
+			else {
+				panic!("expected Compound, got {:?}", c.access);
+			};
+			assert_eq!(prefix.len(), 2);
+			assert!(range.is_some(), "the range on b terminates the prefix");
 		}
 
 		#[test]
@@ -4159,17 +4290,16 @@ mod tests {
 			let cond = parse_cond("tags.* CONTAINS 'x' AND nums.* CONTAINS 1");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_tn").expect("ix_tn");
-			match &c.access {
-				BTreeAccess::Compound {
-					prefix,
-					range,
-					..
-				} => {
-					assert_eq!(prefix.len(), 2, "both fanning columns pinned");
-					assert!(range.is_none());
-				}
-				other => panic!("expected Compound, got {other:?}"),
-			}
+			let BTreeAccess::Compound {
+				prefix,
+				range,
+				..
+			} = &c.access
+			else {
+				panic!("expected Compound, got {:?}", c.access);
+			};
+			assert_eq!(prefix.len(), 2, "both fanning columns pinned");
+			assert!(range.is_none());
 		}
 
 		#[test]
@@ -4275,10 +4405,10 @@ mod tests {
 			let cond = parse_cond("tags.* CONTAINS 'x'");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "by_tag").expect("by_tag");
-			match &c.access {
-				BTreeAccess::Equality(v) => assert_eq!(v.as_literal(), Some(&Value::from("x"))),
-				other => panic!("expected Equality, got {other:?}"),
-			}
+			let BTreeAccess::Equality(v) = &c.access else {
+				panic!("expected Equality, got {:?}", c.access);
+			};
+			assert_eq!(v.as_literal(), Some(&Value::from("x")));
 		}
 
 		#[test]
@@ -4287,10 +4417,10 @@ mod tests {
 			let cond = parse_cond("tags[*] CONTAINS 'x'");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "by_tag").expect("by_tag");
-			match &c.access {
-				BTreeAccess::Equality(v) => assert_eq!(v.as_literal(), Some(&Value::from("x"))),
-				other => panic!("expected Equality, got {other:?}"),
-			}
+			let BTreeAccess::Equality(v) = &c.access else {
+				panic!("expected Equality, got {:?}", c.access);
+			};
+			assert_eq!(v.as_literal(), Some(&Value::from("x")));
 		}
 
 		#[test]
@@ -4537,21 +4667,20 @@ mod tests {
 			let cond = parse_cond("a != NONE");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_a").expect("ix_a candidate for != NONE");
-			match &c.access {
-				BTreeAccess::Range {
-					range: OperandRange {
-						start,
-						end,
-					},
-				} => {
-					assert!(matches!(
-						start,
-						Bound::Excluded(BoundOperand::Literal(crate::val::Value::None))
-					));
-					assert!(matches!(end, Bound::Unbounded));
-				}
-				other => panic!("expected exclusive Range from NONE, got {other:?}"),
-			}
+			let BTreeAccess::Range {
+				range: OperandRange {
+					start,
+					end,
+				},
+			} = &c.access
+			else {
+				panic!("expected exclusive Range from NONE, got {:?}", c.access);
+			};
+			assert!(matches!(
+				start,
+				Bound::Excluded(BoundOperand::Literal(crate::val::Value::None))
+			));
+			assert!(matches!(end, Bound::Unbounded));
 		}
 	}
 
@@ -4568,16 +4697,15 @@ mod tests {
 			let path = a
 				.try_in_expansion(Some(&cond), crate::kvs::Direction::Forward)
 				.expect("IN expansion");
-			match path {
-				AccessPath::Union {
-					paths,
-					dedupe,
-				} => {
-					assert_eq!(paths.len(), 3);
-					assert!(!dedupe, "scalar IN-expansion branches are record-disjoint");
-				}
-				other => panic!("expected Union, got {other:?}"),
-			}
+			let AccessPath::Union {
+				paths,
+				dedupe,
+			} = path
+			else {
+				panic!("expected Union, got {path:?}");
+			};
+			assert_eq!(paths.len(), 3);
+			assert!(!dedupe, "scalar IN-expansion branches are record-disjoint");
 		}
 
 		#[test]
@@ -4598,16 +4726,15 @@ mod tests {
 			let path = a
 				.try_in_expansion(Some(&cond), crate::kvs::Direction::Forward)
 				.expect("32-element IN expands");
-			match path {
-				AccessPath::Union {
-					paths,
-					dedupe,
-				} => {
-					assert_eq!(paths.len(), 32);
-					assert!(!dedupe);
-				}
-				other => panic!("expected Union, got {other:?}"),
-			}
+			let AccessPath::Union {
+				paths,
+				dedupe,
+			} = path
+			else {
+				panic!("expected Union, got {path:?}");
+			};
+			assert_eq!(paths.len(), 32);
+			assert!(!dedupe);
 		}
 	}
 
@@ -4623,16 +4750,15 @@ mod tests {
 			let a = analyzer(defs, None);
 			let cond = parse_cond("a = 1 OR b = 2");
 			let path = a.try_or_union(Some(&cond), crate::kvs::Direction::Forward).expect("union");
-			match path {
-				AccessPath::Union {
-					paths,
-					dedupe,
-				} => {
-					assert_eq!(paths.len(), 2);
-					assert!(dedupe, "OR branches may both hold on the same row");
-				}
-				other => panic!("expected Union, got {other:?}"),
-			}
+			let AccessPath::Union {
+				paths,
+				dedupe,
+			} = path
+			else {
+				panic!("expected Union, got {path:?}");
+			};
+			assert_eq!(paths.len(), 2);
+			assert!(dedupe, "OR branches may both hold on the same row");
 		}
 
 		#[test]
@@ -4659,22 +4785,19 @@ mod tests {
 			let path = a
 				.try_or_union(Some(&cond), crate::kvs::Direction::Forward)
 				.expect("union or degenerate path");
-			match path {
-				AccessPath::BTreeScan {
-					index_ref,
-					access,
-					..
-				} => {
-					assert_eq!(index_ref.name.as_str(), "ix_b");
-					assert!(matches!(access, BTreeAccess::Equality(_)));
+			let AccessPath::BTreeScan {
+				index_ref,
+				access,
+				..
+			} = path
+			else {
+				if matches!(path, AccessPath::Union { .. }) {
+					panic!("empty branch should have been dropped, leaving a single path");
 				}
-				AccessPath::Union {
-					..
-				} => {
-					panic!("empty branch should have been dropped, leaving a single path")
-				}
-				other => panic!("expected BTreeScan(ix_b), got {other:?}"),
-			}
+				panic!("expected BTreeScan(ix_b), got {path:?}");
+			};
+			assert_eq!(index_ref.name.as_str(), "ix_b");
+			assert!(matches!(access, BTreeAccess::Equality(_)));
 		}
 
 		#[test]
@@ -4703,16 +4826,15 @@ mod tests {
 			let (path, score) = a
 				.try_and_nested_or_union(Some(&cond), crate::kvs::Direction::Forward)
 				.expect("nested OR union");
-			match path {
-				AccessPath::Union {
-					paths,
-					dedupe,
-				} => {
-					assert_eq!(paths.len(), 2, "one branch per FT match");
-					assert!(dedupe, "a row may match both FT branches");
-				}
-				other => panic!("expected Union, got {other:?}"),
-			}
+			let AccessPath::Union {
+				paths,
+				dedupe,
+			} = path
+			else {
+				panic!("expected Union, got {path:?}");
+			};
+			assert_eq!(paths.len(), 2, "one branch per FT match");
+			assert!(dedupe, "a row may match both FT branches");
 			// Effective score is the min branch score. Both branches are
 			// full-text (800), which outranks the non-unique `type` equality
 			// (500), so the SELECT planner switches to the union.
@@ -4973,18 +5095,17 @@ mod tests {
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_a").expect("ix_a candidate");
 			assert!(!c.empty, "inclusive both sides on same value is non-empty");
-			match &c.access {
-				BTreeAccess::Range {
-					range: OperandRange {
-						start,
-						end,
-					},
-				} => {
-					assert!(matches!(start, Bound::Included(_)));
-					assert!(matches!(end, Bound::Included(_)));
-				}
-				other => panic!("expected Range, got {other:?}"),
-			}
+			let BTreeAccess::Range {
+				range: OperandRange {
+					start,
+					end,
+				},
+			} = &c.access
+			else {
+				panic!("expected Range, got {:?}", c.access);
+			};
+			assert!(matches!(start, Bound::Included(_)));
+			assert!(matches!(end, Bound::Included(_)));
 		}
 
 		#[test]
@@ -5005,17 +5126,16 @@ mod tests {
 			let cond = parse_cond("a > 5 AND a > 10");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_a").expect("ix_a");
-			match &c.access {
-				BTreeAccess::Range {
-					range,
-				} => {
-					assert!(
-						matches!(range.start, Bound::Excluded(BoundOperand::Literal(crate::val::Value::Number(n))) if n.to_int() == 10)
-					);
-					assert!(matches!(range.end, Bound::Unbounded));
-				}
-				other => panic!("expected single tightened Range, got {other:?}"),
-			}
+			let BTreeAccess::Range {
+				range,
+			} = &c.access
+			else {
+				panic!("expected single tightened Range, got {:?}", c.access);
+			};
+			assert!(
+				matches!(range.start, Bound::Excluded(BoundOperand::Literal(crate::val::Value::Number(n))) if n.to_int() == 10)
+			);
+			assert!(matches!(range.end, Bound::Unbounded));
 		}
 
 		#[test]
@@ -5025,17 +5145,16 @@ mod tests {
 			let cond = parse_cond("a < 100 AND a < 50");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_a").expect("ix_a");
-			match &c.access {
-				BTreeAccess::Range {
-					range,
-				} => {
-					assert!(matches!(range.start, Bound::Unbounded));
-					assert!(
-						matches!(range.end, Bound::Excluded(BoundOperand::Literal(crate::val::Value::Number(n))) if n.to_int() == 50)
-					);
-				}
-				other => panic!("expected single tightened Range, got {other:?}"),
-			}
+			let BTreeAccess::Range {
+				range,
+			} = &c.access
+			else {
+				panic!("expected single tightened Range, got {:?}", c.access);
+			};
+			assert!(matches!(range.start, Bound::Unbounded));
+			assert!(
+				matches!(range.end, Bound::Excluded(BoundOperand::Literal(crate::val::Value::Number(n))) if n.to_int() == 50)
+			);
 		}
 
 		#[test]
@@ -5045,15 +5164,15 @@ mod tests {
 			let cond = parse_cond("a > 5 AND a >= 5");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_a").expect("ix_a");
-			match &c.access {
-				BTreeAccess::Range {
-					range: OperandRange {
-						start: Bound::Excluded(_),
-						..
-					},
-				} => {}
-				other => panic!("expected Range with inclusive start bound, got {other:?}"),
-			}
+			let BTreeAccess::Range {
+				range: OperandRange {
+					start: Bound::Excluded(_),
+					..
+				},
+			} = &c.access
+			else {
+				panic!("expected Range with inclusive start bound, got {:?}", c.access);
+			};
 		}
 	}
 
@@ -5318,12 +5437,10 @@ mod tests {
 			let cond = parse_cond("at = d'2025-01-01T10:00:05.500Z'");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "by_at").expect("by_at");
-			match &c.access {
-				BTreeAccess::Equality(value) => {
-					assert_eq!(value, &BoundOperand::from(datetime("2025-01-01T10:00:05.500Z")));
-				}
-				other => panic!("expected Equality, got {other:?}"),
-			}
+			let BTreeAccess::Equality(value) = &c.access else {
+				panic!("expected Equality, got {:?}", c.access);
+			};
+			assert_eq!(value, &BoundOperand::from(datetime("2025-01-01T10:00:05.500Z")));
 			assert!(!range_is_widened(&c.index_ref, &c.access));
 		}
 

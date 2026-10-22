@@ -246,9 +246,10 @@ pub(super) async fn step(
 		} => {
 			let source = read(regs, *src);
 			// The iterator holds the array it walks until the loop ends.
-			let kept = match &source {
-				Value::Array(_) => crate::exec::memory::size::kept_bytes(&source),
-				_ => 0,
+			let kept = if let Value::Array(_) = &source {
+				crate::exec::memory::size::kept_bytes(&source)
+			} else {
+				0
 			};
 			let iter = match source {
 				Value::Array(array) => ForIter::Array(array.0.into_iter()),
@@ -260,7 +261,23 @@ pub(super) async fn step(
 						.map_err(ControlFlow::Err)?;
 					ForIter::Range(range.iter())
 				}
-				value => {
+				value @ (Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Set(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Closure(_)) => {
 					return Err(ControlFlow::Err(anyhow::Error::new(
 						crate::exec::Error::InvalidStatementTarget {
 							value: value.to_raw_string(),
@@ -371,7 +388,7 @@ fn value_of(mut values: Vec<Value>, scalar: bool, collect: Collect) -> Value {
 		Collect::Let if scalar => values.into_iter().next().unwrap_or(Value::None),
 		Collect::Return if scalar && values.len() == 1 => values.pop().expect("one value"),
 		Collect::Return if scalar && values.is_empty() => Value::None,
-		_ => Value::Array(crate::val::Array(values)),
+		Collect::Block | Collect::Return | Collect::Let => Value::Array(crate::val::Array(values)),
 	}
 }
 

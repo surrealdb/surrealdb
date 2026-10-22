@@ -124,17 +124,19 @@ fn extract_record_id(ctx: &EvalContext<'_>) -> Result<crate::val::RecordId> {
 		)
 	})?;
 
-	match current {
-		Value::Object(obj) => match obj.get("id") {
+	if let Value::Object(obj) = current {
+		match obj.get("id") {
 			Some(Value::RecordId(rid)) => Ok(rid.clone()),
 			Some(_) => Err(anyhow::anyhow!("Current document 'id' field is not a RecordId")),
 			None => Err(anyhow::anyhow!("Current document has no 'id' field")),
-		},
-		Value::RecordId(rid) => Ok(rid.clone()),
-		_ => Err(anyhow::anyhow!(
+		}
+	} else if let Value::RecordId(rid) = current {
+		Ok(rid.clone())
+	} else {
+		Err(anyhow::anyhow!(
 			"Expected current document to be an Object, got: {}",
 			current.kind_of()
-		)),
+		))
 	}
 }
 

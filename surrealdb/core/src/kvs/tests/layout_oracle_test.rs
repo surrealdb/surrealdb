@@ -811,9 +811,12 @@ fn path_sql(path: &[String]) -> String {
 fn names(parts: &[Part]) -> Option<FieldPath> {
 	parts
 		.iter()
-		.map(|part| match part {
-			Part::Field(name) => Some(name.as_str().to_owned()),
-			_ => None,
+		.map(|part| {
+			if let Part::Field(name) = part {
+				Some(name.as_str().to_owned())
+			} else {
+				None
+			}
 		})
 		.collect()
 }
@@ -821,9 +824,10 @@ fn names(parts: &[Part]) -> Option<FieldPath> {
 fn at_path<'a>(value: &'a PublicValue, path: &[String]) -> Option<&'a PublicValue> {
 	let mut value = value;
 	for name in path {
-		match value {
-			PublicValue::Object(object) => value = object.get(name.as_str())?,
-			_ => return None,
+		if let PublicValue::Object(object) = value {
+			value = object.get(name.as_str())?;
+		} else {
+			return None;
 		}
 	}
 	Some(value)
@@ -835,12 +839,13 @@ fn remove_path(value: &mut PublicValue, path: &[String]) {
 	};
 	let mut value = value;
 	for name in parents {
-		match value {
-			PublicValue::Object(object) => match object.get_mut(name.as_str()) {
+		if let PublicValue::Object(object) = value {
+			match object.get_mut(name.as_str()) {
 				Some(child) => value = child,
 				None => return,
-			},
-			_ => return,
+			}
+		} else {
+			return;
 		}
 	}
 	if let PublicValue::Object(object) = value {
@@ -1069,11 +1074,10 @@ fn stripped(mut value: PublicValue, computed: &[FieldPath]) -> PublicValue {
 
 /// The id of a row the engine answered, as SurrealQL.
 fn id_of(value: &PublicValue) -> String {
-	match value {
-		PublicValue::Object(object) => {
-			object.get("id").map(|id| id.to_sql()).unwrap_or_else(|| "<no id>".to_owned())
-		}
-		other => format!("<not an object: {}>", cut(&other.to_sql(), 60)),
+	if let PublicValue::Object(object) = value {
+		object.get("id").map(|id| id.to_sql()).unwrap_or_else(|| "<no id>".to_owned())
+	} else {
+		format!("<not an object: {}>", cut(&value.to_sql(), 60))
 	}
 }
 

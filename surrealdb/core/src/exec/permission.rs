@@ -273,9 +273,10 @@ impl ComputedFieldGuard {
 		};
 		let mut derived = Vec::with_capacity(values.len());
 		for row in values {
-			derived.push(match row {
-				Value::Object(_) => Self::derive(&frame, state, row).await?,
-				other => other.clone(),
+			derived.push(if matches!(row, Value::Object(_)) {
+				Self::derive(&frame, state, row).await?
+			} else {
+				row.clone()
 			});
 		}
 		self.guard.evaluate_batch(ctx, &derived).await

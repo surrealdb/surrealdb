@@ -17,11 +17,12 @@ pub fn ensure_formats(s: &str) {
 	let lowered = parsed
 		.expressions
 		.iter()
-		.map(|stmt| match stmt {
-			surrealdb_expr::parser::TopLevelExpr::Expr(expr) => {
+		.map(|stmt| {
+			if let surrealdb_expr::parser::TopLevelExpr::Expr(expr) = stmt {
 				format!("{};", expr.to_sql())
+			} else {
+				format!("{};", stmt.to_sql())
 			}
-			other => format!("{};", other.to_sql()),
 		})
 		.collect::<Vec<_>>()
 		.join("\n");

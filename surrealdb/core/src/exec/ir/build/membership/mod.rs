@@ -88,12 +88,72 @@ fn unlifted(op: &LogicalOp) -> Result<Cow<'_, LogicalOp>, IrError> {
 									right: Box::new(membership.predicate),
 								},
 							}),
-							input => LogicalOp::Filter(LogicalFilter {
+							input @ (LogicalOp::Source(_)
+							| LogicalOp::Values(_)
+							| LogicalOp::Match(_)
+							| LogicalOp::Subquery(_)
+							| LogicalOp::Write(_)
+							| LogicalOp::Ddl(_)
+							| LogicalOp::UnionAll(_)
+							| LogicalOp::Join(_)
+							| LogicalOp::PermissionFilter(_)
+							| LogicalOp::Split(_)
+							| LogicalOp::Aggregate(_)
+							| LogicalOp::Distinct(_)
+							| LogicalOp::Sort(_)
+							| LogicalOp::Limit(_)
+							| LogicalOp::Project(_)
+							| LogicalOp::Fetch(_)
+							| LogicalOp::Timeout(_)
+							| LogicalOp::VersionScope(_)
+							| LogicalOp::Only(_)
+							| LogicalOp::Explain(_)
+							| LogicalOp::Eval(_)
+							| LogicalOp::Sequence(_)
+							| LogicalOp::Let(_)
+							| LogicalOp::Return(_)
+							| LogicalOp::Foreach(_)
+							| LogicalOp::If(_)
+							| LogicalOp::Throw(_)
+							| LogicalOp::Break(_)
+							| LogicalOp::Continue(_)
+							| LogicalOp::Info(_)
+							| LogicalOp::Sleep(_)) => LogicalOp::Filter(LogicalFilter {
 								input: Box::new(input),
 								predicate: membership.predicate,
 							}),
 						},
-						other => other,
+						other @ (LogicalOp::Source(_)
+						| LogicalOp::Values(_)
+						| LogicalOp::Match(_)
+						| LogicalOp::Subquery(_)
+						| LogicalOp::Write(_)
+						| LogicalOp::Ddl(_)
+						| LogicalOp::UnionAll(_)
+						| LogicalOp::Join(_)
+						| LogicalOp::PermissionFilter(_)
+						| LogicalOp::Split(_)
+						| LogicalOp::Aggregate(_)
+						| LogicalOp::Distinct(_)
+						| LogicalOp::Sort(_)
+						| LogicalOp::Limit(_)
+						| LogicalOp::Project(_)
+						| LogicalOp::Fetch(_)
+						| LogicalOp::Timeout(_)
+						| LogicalOp::VersionScope(_)
+						| LogicalOp::Only(_)
+						| LogicalOp::Explain(_)
+						| LogicalOp::Eval(_)
+						| LogicalOp::Sequence(_)
+						| LogicalOp::Let(_)
+						| LogicalOp::Return(_)
+						| LogicalOp::Foreach(_)
+						| LogicalOp::If(_)
+						| LogicalOp::Throw(_)
+						| LogicalOp::Break(_)
+						| LogicalOp::Continue(_)
+						| LogicalOp::Info(_)
+						| LogicalOp::Sleep(_)) => other,
 					}
 				}
 				LogicalOp::Filter(outer) => match *outer.input {
@@ -107,12 +167,73 @@ fn unlifted(op: &LogicalOp) -> Result<Cow<'_, LogicalOp>, IrError> {
 							},
 						})
 					}
-					input => LogicalOp::Filter(LogicalFilter {
+					input @ (LogicalOp::Source(_)
+					| LogicalOp::Values(_)
+					| LogicalOp::Match(_)
+					| LogicalOp::Subquery(_)
+					| LogicalOp::Write(_)
+					| LogicalOp::Ddl(_)
+					| LogicalOp::UnionAll(_)
+					| LogicalOp::Join(_)
+					| LogicalOp::Filter(_)
+					| LogicalOp::PermissionFilter(_)
+					| LogicalOp::Split(_)
+					| LogicalOp::Aggregate(_)
+					| LogicalOp::Distinct(_)
+					| LogicalOp::Sort(_)
+					| LogicalOp::Limit(_)
+					| LogicalOp::Project(_)
+					| LogicalOp::Fetch(_)
+					| LogicalOp::Timeout(_)
+					| LogicalOp::VersionScope(_)
+					| LogicalOp::Only(_)
+					| LogicalOp::Explain(_)
+					| LogicalOp::Eval(_)
+					| LogicalOp::Sequence(_)
+					| LogicalOp::Let(_)
+					| LogicalOp::Return(_)
+					| LogicalOp::Foreach(_)
+					| LogicalOp::If(_)
+					| LogicalOp::Throw(_)
+					| LogicalOp::Break(_)
+					| LogicalOp::Continue(_)
+					| LogicalOp::Info(_)
+					| LogicalOp::Sleep(_)) => LogicalOp::Filter(LogicalFilter {
 						input: Box::new(input),
 						predicate: outer.predicate,
 					}),
 				},
-				other => other,
+				other @ (LogicalOp::Source(_)
+				| LogicalOp::Values(_)
+				| LogicalOp::Match(_)
+				| LogicalOp::Subquery(_)
+				| LogicalOp::Write(_)
+				| LogicalOp::Ddl(_)
+				| LogicalOp::UnionAll(_)
+				| LogicalOp::Join(_)
+				| LogicalOp::PermissionFilter(_)
+				| LogicalOp::Split(_)
+				| LogicalOp::Aggregate(_)
+				| LogicalOp::Distinct(_)
+				| LogicalOp::Sort(_)
+				| LogicalOp::Limit(_)
+				| LogicalOp::Project(_)
+				| LogicalOp::Fetch(_)
+				| LogicalOp::Timeout(_)
+				| LogicalOp::VersionScope(_)
+				| LogicalOp::Only(_)
+				| LogicalOp::Explain(_)
+				| LogicalOp::Eval(_)
+				| LogicalOp::Sequence(_)
+				| LogicalOp::Let(_)
+				| LogicalOp::Return(_)
+				| LogicalOp::Foreach(_)
+				| LogicalOp::If(_)
+				| LogicalOp::Throw(_)
+				| LogicalOp::Break(_)
+				| LogicalOp::Continue(_)
+				| LogicalOp::Info(_)
+				| LogicalOp::Sleep(_)) => other,
 			};
 			node.visit_scalars_mut(&mut |scalar| {
 				scalar.visit_mut(&mut |expr| {
@@ -164,7 +285,72 @@ fn holds_a_membership(predicate: &LogicalExpr) -> bool {
 			right,
 			..
 		} => matches!(right.as_ref(), LogicalExpr::Subquery(_)),
-		_ => false,
+		LogicalExpr::Literal(_)
+		| LogicalExpr::Array(_)
+		| LogicalExpr::Set(_)
+		| LogicalExpr::Object(_)
+		| LogicalExpr::RecordId(_)
+		| LogicalExpr::Param(_)
+		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
+		| LogicalExpr::Constant(_)
+		| LogicalExpr::Field(_)
+		| LogicalExpr::Doc
+		| LogicalExpr::Current
+		| LogicalExpr::Access {
+			..
+		}
+		| LogicalExpr::Index {
+			..
+		}
+		| LogicalExpr::First(_)
+		| LogicalExpr::Last(_)
+		| LogicalExpr::Each(_)
+		| LogicalExpr::Flatten {
+			..
+		}
+		| LogicalExpr::Filter {
+			..
+		}
+		| LogicalExpr::Method {
+			..
+		}
+		| LogicalExpr::Destructure {
+			..
+		}
+		| LogicalExpr::Optional {
+			..
+		}
+		| LogicalExpr::Lookup {
+			..
+		}
+		| LogicalExpr::Recurse(_)
+		| LogicalExpr::RepeatRecurse(_)
+		| LogicalExpr::Broadcast {
+			..
+		}
+		| LogicalExpr::SetField {
+			..
+		}
+		| LogicalExpr::Prefix {
+			..
+		}
+		| LogicalExpr::Postfix {
+			..
+		}
+		| LogicalExpr::Invoke {
+			..
+		}
+		| LogicalExpr::Binary {
+			..
+		}
+		| LogicalExpr::Call(_)
+		| LogicalExpr::Closure(_)
+		| LogicalExpr::If(_)
+		| LogicalExpr::Throw(_)
+		| LogicalExpr::Break
+		| LogicalExpr::Continue
+		| LogicalExpr::Subquery(_) => false,
 	}
 }
 
@@ -174,7 +360,38 @@ fn lifts_a_membership(op: &LogicalOp) -> bool {
 		LogicalOp::Join(join) if matches!(join.kind, JoinKind::Semi | JoinKind::Anti) => {
 			ControlFlow::Break(())
 		}
-		_ => ControlFlow::Continue(()),
+		LogicalOp::Source(_)
+		| LogicalOp::Values(_)
+		| LogicalOp::Match(_)
+		| LogicalOp::Subquery(_)
+		| LogicalOp::Write(_)
+		| LogicalOp::Ddl(_)
+		| LogicalOp::UnionAll(_)
+		| LogicalOp::Join(_)
+		| LogicalOp::Filter(_)
+		| LogicalOp::PermissionFilter(_)
+		| LogicalOp::Split(_)
+		| LogicalOp::Aggregate(_)
+		| LogicalOp::Distinct(_)
+		| LogicalOp::Sort(_)
+		| LogicalOp::Limit(_)
+		| LogicalOp::Project(_)
+		| LogicalOp::Fetch(_)
+		| LogicalOp::Timeout(_)
+		| LogicalOp::VersionScope(_)
+		| LogicalOp::Only(_)
+		| LogicalOp::Explain(_)
+		| LogicalOp::Eval(_)
+		| LogicalOp::Sequence(_)
+		| LogicalOp::Let(_)
+		| LogicalOp::Return(_)
+		| LogicalOp::Foreach(_)
+		| LogicalOp::If(_)
+		| LogicalOp::Throw(_)
+		| LogicalOp::Break(_)
+		| LogicalOp::Continue(_)
+		| LogicalOp::Info(_)
+		| LogicalOp::Sleep(_) => ControlFlow::Continue(()),
 	})
 	.is_break()
 }
@@ -196,7 +413,9 @@ fn membership_filter(join: LogicalJoin) -> Result<LogicalOp, IrError> {
 		EvalMode::Caller if join.frame == EvalFrame::caller() => None,
 		EvalMode::Permission => Some(GuardKind::Read),
 		EvalMode::MutablePermission => Some(GuardKind::Write),
-		_ => return Err(invariant("a semi or anti join in a frame with no predicate form")),
+		EvalMode::Caller | EvalMode::Computed => {
+			return Err(invariant("a semi or anti join in a frame with no predicate form"));
+		}
 	};
 	let alias = join.alias.clone();
 	let frame_auth = join.frame.auth.clone();
@@ -310,7 +529,31 @@ fn yields_object_rows(op: &LogicalOp) -> bool {
 		LogicalOp::Limit(inner) => yields_object_rows(&inner.input),
 		LogicalOp::Sort(inner) => yields_object_rows(&inner.input),
 		LogicalOp::Distinct(inner) => yields_object_rows(&inner.input),
-		_ => false,
+		LogicalOp::Values(_)
+		| LogicalOp::Match(_)
+		| LogicalOp::Subquery(_)
+		| LogicalOp::Write(_)
+		| LogicalOp::Ddl(_)
+		| LogicalOp::UnionAll(_)
+		| LogicalOp::Join(_)
+		| LogicalOp::Split(_)
+		| LogicalOp::Aggregate(_)
+		| LogicalOp::Fetch(_)
+		| LogicalOp::Timeout(_)
+		| LogicalOp::VersionScope(_)
+		| LogicalOp::Only(_)
+		| LogicalOp::Explain(_)
+		| LogicalOp::Eval(_)
+		| LogicalOp::Sequence(_)
+		| LogicalOp::Let(_)
+		| LogicalOp::Return(_)
+		| LogicalOp::Foreach(_)
+		| LogicalOp::If(_)
+		| LogicalOp::Throw(_)
+		| LogicalOp::Break(_)
+		| LogicalOp::Continue(_)
+		| LogicalOp::Info(_)
+		| LogicalOp::Sleep(_) => false,
 	}
 }
 
@@ -327,7 +570,71 @@ fn in_subquery_frame(expr: LogicalExpr, alias: &RelationAlias) -> LogicalExpr {
 			base: Box::new(LogicalExpr::Param(crate::expr::Param::from("parent".to_owned()))),
 			field: name,
 		},
-		mut other => {
+		mut other @ (LogicalExpr::Literal(_)
+		| LogicalExpr::Array(_)
+		| LogicalExpr::Set(_)
+		| LogicalExpr::Object(_)
+		| LogicalExpr::RecordId(_)
+		| LogicalExpr::Param(_)
+		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
+		| LogicalExpr::Constant(_)
+		| LogicalExpr::Doc
+		| LogicalExpr::Current
+		| LogicalExpr::Access {
+			..
+		}
+		| LogicalExpr::Index {
+			..
+		}
+		| LogicalExpr::First(_)
+		| LogicalExpr::Last(_)
+		| LogicalExpr::Each(_)
+		| LogicalExpr::Flatten {
+			..
+		}
+		| LogicalExpr::Filter {
+			..
+		}
+		| LogicalExpr::Method {
+			..
+		}
+		| LogicalExpr::Destructure {
+			..
+		}
+		| LogicalExpr::Optional {
+			..
+		}
+		| LogicalExpr::Lookup {
+			..
+		}
+		| LogicalExpr::Recurse(_)
+		| LogicalExpr::RepeatRecurse(_)
+		| LogicalExpr::Broadcast {
+			..
+		}
+		| LogicalExpr::SetField {
+			..
+		}
+		| LogicalExpr::Prefix {
+			..
+		}
+		| LogicalExpr::Postfix {
+			..
+		}
+		| LogicalExpr::Invoke {
+			..
+		}
+		| LogicalExpr::Binary {
+			..
+		}
+		| LogicalExpr::Call(_)
+		| LogicalExpr::Closure(_)
+		| LogicalExpr::If(_)
+		| LogicalExpr::Throw(_)
+		| LogicalExpr::Break
+		| LogicalExpr::Continue
+		| LogicalExpr::Subquery(_)) => {
 			for child in other.children_mut() {
 				let taken = std::mem::replace(child, LogicalExpr::Break);
 				*child = in_subquery_frame(taken, alias);

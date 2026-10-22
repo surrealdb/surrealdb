@@ -36,9 +36,11 @@ pub fn request_id(value: &[u8]) -> Option<PublicValue> {
 	let serde_json::Value::Object(mut envelope) = serde_json::from_slice(value).ok()? else {
 		return None;
 	};
-	match json_to_value(envelope.remove("id")?) {
-		id @ (PublicValue::Null | PublicValue::Number(_) | PublicValue::String(_)) => Some(id),
-		_ => None,
+	let id = json_to_value(envelope.remove("id")?);
+	if matches!(id, PublicValue::Null | PublicValue::Number(_) | PublicValue::String(_)) {
+		Some(id)
+	} else {
+		None
 	}
 }
 

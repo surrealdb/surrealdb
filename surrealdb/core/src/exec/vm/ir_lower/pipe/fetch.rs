@@ -206,7 +206,9 @@ fn collect(
 				collect(lowerer, ir, operand(0)?, root, out)?;
 				out.push(FetchStepSpec::Unsupported);
 			}
-			_ => out.push(FetchStepSpec::Unsupported),
+			LoopKind::Select | LoopKind::Write | LoopKind::For | LoopKind::Closure => {
+				out.push(FetchStepSpec::Unsupported);
+			}
 		},
 		OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => {
 			out.push(FetchStepSpec::Unsupported)

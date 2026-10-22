@@ -211,7 +211,10 @@ pub(super) async fn enter(
 			ControlFlow::Err(e) if !writing => {
 				ControlFlow::Err(anyhow::anyhow!("Function '{func_name}' not found: {e}"))
 			}
-			other => other,
+			other @ (ControlFlow::Break
+			| ControlFlow::Continue
+			| ControlFlow::Return(_)
+			| ControlFlow::Err(_)) => other,
 		})?;
 	let stands = known.definition.as_ref().is_some_and(|known| Arc::ptr_eq(known, &definition));
 	let redefined = spec.per_call
@@ -865,7 +868,9 @@ async fn read_db_param(
 					ControlFlow::Err(e) => e,
 					// A guard raises nothing else: `judge` turns every other
 					// signal into a denial before it returns.
-					_ => anyhow::Error::new(denied()),
+					ControlFlow::Break | ControlFlow::Continue | ControlFlow::Return(_) => {
+						anyhow::Error::new(denied())
+					}
 				})?;
 			}
 		}

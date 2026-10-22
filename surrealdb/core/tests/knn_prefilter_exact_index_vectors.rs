@@ -1,4 +1,5 @@
 #![recursion_limit = "256"]
+#![deny(clippy::wildcard_enum_match_arm)]
 //! The exact prefilter tier scores allow-list members from the vectors the
 //! HNSW or DiskANN index stores whenever nothing has to be evaluated per
 //! record. These tests pin that it answers exactly what the record-scoring

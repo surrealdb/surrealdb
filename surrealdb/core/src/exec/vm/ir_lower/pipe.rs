@@ -1159,9 +1159,9 @@ fn consumer_of(ir: &Ir, region: RegionId, pipeline: OpId) -> Result<Consumer, Ir
 	let data = ir.op(pipeline).ok_or(IrError::Stale("ir_lower::pipe: op"))?;
 	let mut consumer = Consumer::Output;
 	for result in &data.results {
-		match consumer_of_value(ir, region, *result)? {
-			Consumer::Output => {}
-			found => consumer = found,
+		let found = consumer_of_value(ir, region, *result)?;
+		if !matches!(found, Consumer::Output) {
+			consumer = found;
 		}
 	}
 	Ok(consumer)
@@ -1300,7 +1300,61 @@ fn yields_records(source: &Source) -> bool {
 		| Source::Count {
 			..
 		} => false,
-		_ => true,
+		Source::Scan {
+			..
+		}
+		| Source::Record {
+			..
+		}
+		| Source::Index {
+			..
+		}
+		| Source::Lookup {
+			..
+		}
+		| Source::IndexUnion {
+			..
+		}
+		| Source::Bitmap {
+			..
+		}
+		| Source::FullText {
+			..
+		}
+		| Source::Knn {
+			..
+		}
+		| Source::Probe {
+			..
+		}
+		| Source::Sorted {
+			..
+		}
+		| Source::Groups {
+			..
+		}
+		| Source::Split {
+			..
+		}
+		| Source::Once
+		| Source::Changes {
+			..
+		}
+		| Source::WriteTargets {
+			..
+		}
+		| Source::WriteInserts {
+			..
+		}
+		| Source::WriteEdges {
+			..
+		}
+		| Source::LightweightEdges {
+			..
+		}
+		| Source::Vacant {
+			..
+		} => true,
 	}
 }
 
@@ -1655,7 +1709,68 @@ fn open_source(
 				topk,
 				..
 			} => topk.is_some(),
-			_ => false,
+			Source::Scan {
+				..
+			}
+			| Source::Record {
+				..
+			}
+			| Source::Index {
+				..
+			}
+			| Source::Lookup {
+				..
+			}
+			| Source::Bitmap {
+				..
+			}
+			| Source::Knn {
+				..
+			}
+			| Source::Count {
+				..
+			}
+			| Source::Union(_)
+			| Source::Values {
+				..
+			}
+			| Source::Nested {
+				..
+			}
+			| Source::Probe {
+				..
+			}
+			| Source::Sorted {
+				..
+			}
+			| Source::Groups {
+				..
+			}
+			| Source::Split {
+				..
+			}
+			| Source::Join {
+				..
+			}
+			| Source::Once
+			| Source::Changes {
+				..
+			}
+			| Source::WriteTargets {
+				..
+			}
+			| Source::WriteInserts {
+				..
+			}
+			| Source::WriteEdges {
+				..
+			}
+			| Source::LightweightEdges {
+				..
+			}
+			| Source::Vacant {
+				..
+			} => false,
 		};
 		if let Some(sort) = topk_sort
 			&& floors_early
@@ -1813,7 +1928,9 @@ fn open_source(
 				},
 			)
 		}
-		_ => return Err(invariant("a breaker that is not a sort, an aggregate or a split")),
+		OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => {
+			return Err(invariant("a breaker that is not a sort, an aggregate or a split"));
+		}
 	};
 	let fed = lower_feeder(em, cx, ir, facts, feeder, &trail, &sink, reads)?;
 	// The rows of a sort are those its feeder handed it, record ids where the feeder's may be.
@@ -1824,7 +1941,71 @@ fn open_source(
 		Source::Split {
 			..
 		} => fed && !data.operands.first().is_some_and(|rows| projects_value(ir, *rows)),
-		_ => true,
+		Source::Scan {
+			..
+		}
+		| Source::Record {
+			..
+		}
+		| Source::Index {
+			..
+		}
+		| Source::Lookup {
+			..
+		}
+		| Source::IndexUnion {
+			..
+		}
+		| Source::Bitmap {
+			..
+		}
+		| Source::FullText {
+			..
+		}
+		| Source::Knn {
+			..
+		}
+		| Source::Count {
+			..
+		}
+		| Source::Union(_)
+		| Source::Values {
+			..
+		}
+		| Source::Nested {
+			..
+		}
+		| Source::Probe {
+			..
+		}
+		| Source::Sorted {
+			..
+		}
+		| Source::Groups {
+			..
+		}
+		| Source::Join {
+			..
+		}
+		| Source::Once
+		| Source::Changes {
+			..
+		}
+		| Source::WriteTargets {
+			..
+		}
+		| Source::WriteInserts {
+			..
+		}
+		| Source::WriteEdges {
+			..
+		}
+		| Source::LightweightEdges {
+			..
+		}
+		| Source::Vacant {
+			..
+		} => true,
 	};
 	Ok(Opened {
 		source,
@@ -1873,7 +2054,7 @@ fn projects_value(ir: &Ir, rows: ValueId) -> bool {
 				_ => None,
 			})
 			.is_some_and(|delivered| projects_value(ir, delivered)),
-		_ => false,
+		OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => false,
 	}
 }
 
@@ -2353,17 +2534,21 @@ fn emit_pipeline(
 	let schema = opened.schema;
 	let rows_are_objects = opened.objects;
 	let rows_may_be_ids = opened.ids || yields_ids(&source);
-	let split_source = match &source {
-		Source::Split {
-			split,
-		} => Some(*split),
-		_ => None,
+	let split_source = if let Source::Split {
+		split,
+	} = &source
+	{
+		Some(*split)
+	} else {
+		None
 	};
-	let join_source = match &source {
-		Source::Join {
-			join,
-		} => Some(*join),
-		_ => None,
+	let join_source = if let Source::Join {
+		join,
+	} = &source
+	{
+		Some(*join)
+	} else {
+		None
 	};
 
 	let mut body = Body {
@@ -2500,7 +2685,7 @@ fn emit_pipeline(
 				{
 					Parallel::Serial
 				}
-				parallel => parallel,
+				parallel @ (Parallel::Serial | Parallel::Morsels(_)) => parallel,
 			}
 		}
 		None => Parallel::Serial,
@@ -2681,7 +2866,70 @@ fn yields_ids(source: &Source) -> bool {
 			..
 		} => true,
 		Source::Union(sources) => sources.iter().any(yields_ids),
-		_ => false,
+		Source::Scan {
+			..
+		}
+		| Source::Record {
+			..
+		}
+		| Source::Index {
+			..
+		}
+		| Source::Lookup {
+			..
+		}
+		| Source::IndexUnion {
+			..
+		}
+		| Source::Bitmap {
+			..
+		}
+		| Source::FullText {
+			..
+		}
+		| Source::Knn {
+			..
+		}
+		| Source::Count {
+			..
+		}
+		| Source::Values {
+			..
+		}
+		| Source::Probe {
+			..
+		}
+		| Source::Sorted {
+			..
+		}
+		| Source::Groups {
+			..
+		}
+		| Source::Split {
+			..
+		}
+		| Source::Join {
+			..
+		}
+		| Source::Once
+		| Source::Changes {
+			..
+		}
+		| Source::WriteTargets {
+			..
+		}
+		| Source::WriteInserts {
+			..
+		}
+		| Source::WriteEdges {
+			..
+		}
+		| Source::LightweightEdges {
+			..
+		}
+		| Source::Vacant {
+			..
+		} => false,
 	}
 }
 
@@ -2803,7 +3051,109 @@ impl Body<'_, '_, '_> {
 				self.jumps.other += 1;
 			}
 			// The check above admits only the ops `streams` admits, and each has an arm here.
-			other => return Err(invariant(non_step(other.tag()))),
+			other @ (PhysOp::TableScan(_)
+			| PhysOp::IndexScan(_)
+			| PhysOp::IndexUnion(_)
+			| PhysOp::Bitmap(_)
+			| PhysOp::IndexLookup(_)
+			| PhysOp::FullTextScan(_)
+			| PhysOp::KeyRangeScan(_)
+			| PhysOp::KnnScan(_)
+			| PhysOp::KnnTopK(_)
+			| PhysOp::Count(_)
+			| PhysOp::RecordScan(_)
+			| PhysOp::Vacant {
+				..
+			}
+			| PhysOp::Values {
+				..
+			}
+			| PhysOp::Subquery
+			| PhysOp::Probe {
+				..
+			}
+			| PhysOp::Union
+			| PhysOp::Join(_)
+			| PhysOp::Split {
+				..
+			}
+			| PhysOp::Sort(_)
+			| PhysOp::Aggregate(_)
+			| PhysOp::Timeout
+			| PhysOp::VersionScope
+			| PhysOp::Only
+			| PhysOp::Explain {
+				..
+			}
+			| PhysOp::Eval
+			| PhysOp::Request {
+				..
+			}
+			| PhysOp::Txn {
+				..
+			}
+			| PhysOp::Stmt {
+				..
+			}
+			| PhysOp::Statement {
+				..
+			}
+			| PhysOp::Match {
+				..
+			}
+			| PhysOp::DdlGuard {
+				..
+			}
+			| PhysOp::Define(_)
+			| PhysOp::Remove(_)
+			| PhysOp::Alter(_)
+			| PhysOp::Rebuild(_)
+			| PhysOp::Info {
+				..
+			}
+			| PhysOp::Use {
+				..
+			}
+			| PhysOp::Option {
+				..
+			}
+			| PhysOp::Access(_)
+			| PhysOp::Kill
+			| PhysOp::Live(_)
+			| PhysOp::Subscriber(_)
+			| PhysOp::Show(_)
+			| PhysOp::Write(_)
+			| PhysOp::WriteStage {
+				..
+			}
+			| PhysOp::Events(_)
+			| PhysOp::Assign(_)
+			| PhysOp::Unset {
+				..
+			}
+			| PhysOp::Content {
+				..
+			}
+			| PhysOp::Block
+			| PhysOp::Let(_)
+			| PhysOp::Sleep
+			| PhysOp::If {
+				..
+			}
+			| PhysOp::Loop {
+				..
+			}
+			| PhysOp::Pipeline(_)
+			| PhysOp::Choose(_)
+			| PhysOp::Prefetch(_)
+			| PhysOp::Materialize {
+				..
+			}
+			| PhysOp::LoadUnit(_)
+			| PhysOp::Yield
+			| PhysOp::Return
+			| PhysOp::Break
+			| PhysOp::Next) => return Err(invariant(non_step(other.tag()))),
 		}
 		first_result(step_data)
 	}
@@ -2992,7 +3342,14 @@ impl Body<'_, '_, '_> {
 			ProjectionShape::Star {
 				..
 			} => self.ids && !self.objects,
-			_ => false,
+			ProjectionShape::Value
+			| ProjectionShape::OmittedValue {
+				..
+			}
+			| ProjectionShape::SortedValue(_)
+			| ProjectionShape::Fields {
+				..
+			} => false,
 		};
 		if fetches {
 			self.needs.reach = Some(match self.needs.reach.take() {
@@ -3715,7 +4072,320 @@ fn to_filter(instr: &mut Instr) {
 				reject: truthy,
 			};
 		}
-		_ => {}
+		Instr::CoerceField {
+			..
+		}
+		| Instr::BeginComputing {
+			..
+		}
+		| Instr::LandRow {
+			..
+		}
+		| Instr::BindRow {
+			..
+		}
+		| Instr::JumpIfPermissionsBypassed {
+			..
+		}
+		| Instr::CompareFieldInt {
+			..
+		}
+		| Instr::Compare {
+			..
+		}
+		| Instr::Arith {
+			..
+		}
+		| Instr::Unary {
+			..
+		}
+		| Instr::NewArray {
+			..
+		}
+		| Instr::ArrayPush {
+			..
+		}
+		| Instr::LoadParam {
+			..
+		}
+		| Instr::LoadSlot {
+			..
+		}
+		| Instr::SortKey {
+			..
+		}
+		| Instr::Fetch {
+			..
+		}
+		| Instr::Access {
+			..
+		}
+		| Instr::Each {
+			..
+		}
+		| Instr::Throw {
+			..
+		}
+		| Instr::FilterBegin {
+			..
+		}
+		| Instr::MapBegin {
+			..
+		}
+		| Instr::CollectPush {
+			..
+		}
+		| Instr::Nav {
+			..
+		}
+		| Instr::CallAllowed {
+			..
+		}
+		| Instr::Call {
+			..
+		}
+		| Instr::FunctionEnter {
+			..
+		}
+		| Instr::FunctionBind {
+			..
+		}
+		| Instr::FunctionReturn {
+			..
+		}
+		| Instr::FunctionCall {
+			..
+		}
+		| Instr::ArrayArg {
+			..
+		}
+		| Instr::ElemNext {
+			..
+		}
+		| Instr::ClosureBind {
+			..
+		}
+		| Instr::ClosureReturn {
+			..
+		}
+		| Instr::Dive {
+			..
+		}
+		| Instr::Subquery {
+			..
+		}
+		| Instr::MakeClosure {
+			..
+		}
+		| Instr::ClosureField {
+			..
+		}
+		| Instr::RequireClosure {
+			..
+		}
+		| Instr::Invoke {
+			..
+		}
+		| Instr::Lookup {
+			..
+		}
+		| Instr::Signal {
+			..
+		}
+		| Instr::Extract {
+			..
+		}
+		| Instr::KnnRank {
+			..
+		}
+		| Instr::Measure {
+			..
+		}
+		| Instr::Mock {
+			..
+		}
+		| Instr::Recurse {
+			..
+		}
+		| Instr::Destructure {
+			..
+		}
+		| Instr::RecordId {
+			..
+		}
+		| Instr::MethodResolve {
+			..
+		}
+		| Instr::Method {
+			..
+		}
+		| Instr::MethodClosure {
+			..
+		}
+		| Instr::JumpIfNullish {
+			..
+		}
+		| Instr::JumpIfNone {
+			..
+		}
+		| Instr::Skip {
+			..
+		}
+		| Instr::Take {
+			..
+		}
+		| Instr::JumpIfLimitReached {
+			..
+		}
+		| Instr::NewObject {
+			..
+		}
+		| Instr::SeedObject {
+			..
+		}
+		| Instr::BuildObject {
+			..
+		}
+		| Instr::LoadPath {
+			..
+		}
+		| Instr::LoadRow {
+			..
+		}
+		| Instr::FetchRow {
+			..
+		}
+		| Instr::RemoveField {
+			..
+		}
+		| Instr::RemovePath {
+			..
+		}
+		| Instr::Omit {
+			..
+		}
+		| Instr::SetField {
+			..
+		}
+		| Instr::WriteProjection {
+			..
+		}
+		| Instr::Load {
+			..
+		}
+		| Instr::Emit {
+			..
+		}
+		| Instr::EmitEnd {
+			..
+		}
+		| Instr::BuildObjectEmit {
+			..
+		}
+		| Instr::FilterFieldInt {
+			..
+		}
+		| Instr::FilterCompare {
+			..
+		}
+		| Instr::Filter {
+			..
+		}
+		| Instr::SplitPush {
+			..
+		}
+		| Instr::SortPush {
+			..
+		}
+		| Instr::Distinct {
+			..
+		}
+		| Instr::JoinProbe {
+			..
+		}
+		| Instr::VerdictJump {
+			..
+		}
+		| Instr::VerdictSet {
+			..
+		}
+		| Instr::JoinPair {
+			..
+		}
+		| Instr::GroupKey {
+			..
+		}
+		| Instr::GroupSelect {
+			..
+		}
+		| Instr::AccUpdate {
+			..
+		}
+		| Instr::Jump {
+			..
+		}
+		| Instr::Next {
+			..
+		}
+		| Instr::Write(_)
+		| Instr::Store(_)
+		| Instr::Block(_)
+		| Instr::EndRow
+		| Instr::StopPipeline
+		| Instr::TryNone {
+			..
+		}
+		| Instr::TryEnd
+		| Instr::MethodRegion {
+			..
+		}
+		| Instr::PermissionRegion {
+			..
+		}
+		| Instr::GroupFirstNeeded {
+			..
+		}
+		| Instr::GroupFirstSet {
+			..
+		}
+		| Instr::CallIndexFn {
+			..
+		}
+		| Instr::Matches {
+			..
+		}
+		| Instr::ExternalEnter {
+			..
+		}
+		| Instr::ExternalCall {
+			..
+		}
+		| Instr::NewSet {
+			..
+		}
+		| Instr::Degree {
+			..
+		}
+		| Instr::RepeatRecurse {
+			..
+		}
+		| Instr::JumpIfNotObject {
+			..
+		}
+		| Instr::JumpIfOpaque {
+			..
+		}
+		| Instr::InvalidControlFlow
+		| Instr::JumpIfNotRecordId {
+			..
+		}
+		| Instr::DocumentRoot {
+			..
+		}
+		| Instr::JudgeCopy {
+			..
+		}
+		| Instr::Ir(_) => {}
 	}
 }
 
@@ -5349,18 +6019,18 @@ pub(super) mod tests {
 		assert_eq!(program.pipelines[0].group, Some(0));
 		assert!(matches!(program.pipelines[0].source, Source::Scan { .. }));
 		assert_eq!(program.pipelines[1].group, None);
-		match &program.pipelines[1].source {
-			Source::Union(inputs) => assert!(matches!(
-				inputs.as_slice(),
-				[
-					Source::Nested {
-						group: 0
-					},
-					Source::Scan { .. }
-				]
-			)),
-			other => panic!("an unexpected source: {other:?}"),
-		}
+		let Source::Union(inputs) = &program.pipelines[1].source else {
+			panic!("an unexpected source: {:?}", program.pipelines[1].source);
+		};
+		assert!(matches!(
+			inputs.as_slice(),
+			[
+				Source::Nested {
+					group: 0
+				},
+				Source::Scan { .. }
+			]
+		));
 		assert!(!program.groups[0].scalar);
 		assert!(program.groups[0].version.is_none());
 		assert!(program.groups[0].timeout.is_none());
@@ -6669,11 +7339,14 @@ pub(super) mod tests {
 		);
 		// Each later pipeline reads the rows of its own sort; the sorts are numbered in the order
 		// lowering reaches them, which is no order of the pipelines.
-		let sorted = |at: usize| match program.pipelines[at].source {
-			Source::Sorted {
+		let sorted = |at: usize| {
+			let Source::Sorted {
 				sort,
-			} => sort,
-			ref other => panic!("pipeline {at} reads a sort: {other:?}"),
+			} = program.pipelines[at].source
+			else {
+				panic!("pipeline {at} reads a sort: {:?}", program.pipelines[at].source);
+			};
+			sort
 		};
 		let mut sorts = vec![sorted(1), sorted(2)];
 		sorts.sort_unstable();

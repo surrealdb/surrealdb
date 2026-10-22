@@ -352,7 +352,37 @@ impl Datastore {
 				let bare_return = matches!(*value, LogicalOp::Return(_));
 				(*value, Some((name, kind, bare_return)))
 			}
-			op => (op, None),
+			op @ (LogicalOp::Source(_)
+			| LogicalOp::Values(_)
+			| LogicalOp::Match(_)
+			| LogicalOp::Subquery(_)
+			| LogicalOp::Write(_)
+			| LogicalOp::Ddl(_)
+			| LogicalOp::UnionAll(_)
+			| LogicalOp::Join(_)
+			| LogicalOp::Filter(_)
+			| LogicalOp::PermissionFilter(_)
+			| LogicalOp::Split(_)
+			| LogicalOp::Aggregate(_)
+			| LogicalOp::Distinct(_)
+			| LogicalOp::Sort(_)
+			| LogicalOp::Limit(_)
+			| LogicalOp::Project(_)
+			| LogicalOp::Fetch(_)
+			| LogicalOp::Timeout(_)
+			| LogicalOp::VersionScope(_)
+			| LogicalOp::Only(_)
+			| LogicalOp::Explain(_)
+			| LogicalOp::Eval(_)
+			| LogicalOp::Sequence(_)
+			| LogicalOp::Return(_)
+			| LogicalOp::Foreach(_)
+			| LogicalOp::If(_)
+			| LogicalOp::Throw(_)
+			| LogicalOp::Break(_)
+			| LogicalOp::Continue(_)
+			| LogicalOp::Info(_)
+			| LogicalOp::Sleep(_)) => (op, None),
 		};
 		let planned = plan_statement_inner(
 			op,

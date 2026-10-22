@@ -188,7 +188,67 @@ pub(crate) fn reads_row(expr: &LogicalExpr) -> bool {
 				|| captures.reads_root()
 				|| captures.names.iter().any(|name| name == "parent")
 		}
-		_ => {
+		LogicalExpr::Literal(_)
+		| LogicalExpr::Array(_)
+		| LogicalExpr::Set(_)
+		| LogicalExpr::Object(_)
+		| LogicalExpr::RecordId(_)
+		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
+		| LogicalExpr::Constant(_)
+		| LogicalExpr::Access {
+			..
+		}
+		| LogicalExpr::Index {
+			..
+		}
+		| LogicalExpr::First(_)
+		| LogicalExpr::Last(_)
+		| LogicalExpr::Each(_)
+		| LogicalExpr::Flatten {
+			..
+		}
+		| LogicalExpr::Filter {
+			..
+		}
+		| LogicalExpr::Method {
+			..
+		}
+		| LogicalExpr::Destructure {
+			..
+		}
+		| LogicalExpr::Optional {
+			..
+		}
+		| LogicalExpr::Lookup {
+			..
+		}
+		| LogicalExpr::Recurse(_)
+		| LogicalExpr::RepeatRecurse(_)
+		| LogicalExpr::Broadcast {
+			..
+		}
+		| LogicalExpr::SetField {
+			..
+		}
+		| LogicalExpr::Prefix {
+			..
+		}
+		| LogicalExpr::Postfix {
+			..
+		}
+		| LogicalExpr::Invoke {
+			..
+		}
+		| LogicalExpr::Binary {
+			..
+		}
+		| LogicalExpr::Call(_)
+		| LogicalExpr::If(_)
+		| LogicalExpr::Throw(_)
+		| LogicalExpr::Break
+		| LogicalExpr::Continue
+		| LogicalExpr::Subquery(_) => {
 			let mut reads = false;
 			expr.for_each_child(&mut |child| reads = reads || reads_row(child));
 			reads
@@ -225,9 +285,10 @@ fn calls_reading_row(expr: &LogicalExpr) -> bool {
 		return false;
 	}
 	if let LogicalExpr::Call(call) = expr {
-		let reads = match &call.receiver {
-			Function::Normal(name) => PROJECTION_FUNCTIONS.contains(&name.as_str()),
-			_ => true,
+		let reads = if let Function::Normal(name) = &call.receiver {
+			PROJECTION_FUNCTIONS.contains(&name.as_str())
+		} else {
+			true
 		};
 		if reads {
 			return true;
@@ -368,7 +429,7 @@ impl<'a> Walker<'a> {
 				if !scope.rescoped && matches!(scope.frame, Frame::Body | Frame::Statement) {
 					let name = match kind {
 						RowScopeKind::This => "this",
-						_ => "self",
+						RowScopeKind::Self_ | RowScopeKind::Parent => "self",
 					};
 					if !self.captures.row_names.contains(&name) {
 						self.captures.row_names.push(name);
@@ -449,9 +510,10 @@ impl<'a> Walker<'a> {
 			LogicalExpr::Subquery(op) => self.op(op, scope),
 			LogicalExpr::Call(call) => {
 				let custom = !matches!(call.receiver, Function::Normal(_));
-				let reads = match &call.receiver {
-					Function::Normal(name) => PROJECTION_FUNCTIONS.contains(&name.as_str()),
-					_ => true,
+				let reads = if let Function::Normal(name) = &call.receiver {
+					PROJECTION_FUNCTIONS.contains(&name.as_str())
+				} else {
+					true
 				};
 				if reads {
 					self.current_read(scope);
@@ -542,7 +604,46 @@ impl<'a> Walker<'a> {
 					self.expr(expects, scope);
 				}
 			}
-			_ => expr.for_each_child(&mut |child| self.expr(child, scope)),
+			LogicalExpr::Literal(_)
+			| LogicalExpr::Array(_)
+			| LogicalExpr::Set(_)
+			| LogicalExpr::Object(_)
+			| LogicalExpr::RecordId(_)
+			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_)
+			| LogicalExpr::Constant(_)
+			| LogicalExpr::Access {
+				..
+			}
+			| LogicalExpr::First(_)
+			| LogicalExpr::Last(_)
+			| LogicalExpr::Each(_)
+			| LogicalExpr::Flatten {
+				..
+			}
+			| LogicalExpr::Lookup {
+				..
+			}
+			| LogicalExpr::RepeatRecurse(_)
+			| LogicalExpr::SetField {
+				..
+			}
+			| LogicalExpr::Prefix {
+				..
+			}
+			| LogicalExpr::Postfix {
+				..
+			}
+			| LogicalExpr::Invoke {
+				..
+			}
+			| LogicalExpr::Binary {
+				..
+			}
+			| LogicalExpr::If(_)
+			| LogicalExpr::Throw(_)
+			| LogicalExpr::Break
+			| LogicalExpr::Continue => expr.for_each_child(&mut |child| self.expr(child, scope)),
 		}
 	}
 

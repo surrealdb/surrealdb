@@ -103,7 +103,23 @@ async fn test_hnsw_filtered_knn_batches_record_fetches() -> Result<()> {
 			ds.run(QueryRequest::new(query, session).with_transaction(Arc::clone(&tx))).await?;
 		let len = match response.remove(0).result? {
 			surrealdb_types::Value::Array(a) => a.len(),
-			_ => 0,
+			surrealdb_types::Value::None
+			| surrealdb_types::Value::Null
+			| surrealdb_types::Value::Bool(_)
+			| surrealdb_types::Value::Number(_)
+			| surrealdb_types::Value::String(_)
+			| surrealdb_types::Value::Bytes(_)
+			| surrealdb_types::Value::Duration(_)
+			| surrealdb_types::Value::Datetime(_)
+			| surrealdb_types::Value::Uuid(_)
+			| surrealdb_types::Value::Geometry(_)
+			| surrealdb_types::Value::Table(_)
+			| surrealdb_types::Value::RecordId(_)
+			| surrealdb_types::Value::File(_)
+			| surrealdb_types::Value::Range(_)
+			| surrealdb_types::Value::Regex(_)
+			| surrealdb_types::Value::Object(_)
+			| surrealdb_types::Value::Set(_) => 0,
 		};
 		Ok((len, tx.metrics_snapshot_for_test()))
 	}
@@ -197,11 +213,33 @@ async fn hnsw_filtered_knn_spans_pending_materialisation_batches() -> Result<()>
 				surrealdb_types::Value::Object(o) => match o.get("id") {
 					Some(surrealdb_types::Value::RecordId(rid)) => match &rid.key {
 						surrealdb_types::RecordIdKey::Number(n) => *n,
-						other => panic!("unexpected record key: {other:?}"),
+						other @ (surrealdb_types::RecordIdKey::String(_)
+						| surrealdb_types::RecordIdKey::Uuid(_)
+						| surrealdb_types::RecordIdKey::Array(_)
+						| surrealdb_types::RecordIdKey::Object(_)
+						| surrealdb_types::RecordIdKey::Range(_)) => {
+							panic!("unexpected record key: {other:?}")
+						}
 					},
 					other => panic!("unexpected id field: {other:?}"),
 				},
-				other => panic!("unexpected row: {other:?}"),
+				other @ (surrealdb_types::Value::None
+				| surrealdb_types::Value::Null
+				| surrealdb_types::Value::Bool(_)
+				| surrealdb_types::Value::Number(_)
+				| surrealdb_types::Value::String(_)
+				| surrealdb_types::Value::Bytes(_)
+				| surrealdb_types::Value::Duration(_)
+				| surrealdb_types::Value::Datetime(_)
+				| surrealdb_types::Value::Uuid(_)
+				| surrealdb_types::Value::Geometry(_)
+				| surrealdb_types::Value::Table(_)
+				| surrealdb_types::Value::RecordId(_)
+				| surrealdb_types::Value::File(_)
+				| surrealdb_types::Value::Range(_)
+				| surrealdb_types::Value::Regex(_)
+				| surrealdb_types::Value::Array(_)
+				| surrealdb_types::Value::Set(_)) => panic!("unexpected row: {other:?}"),
 			})
 			.collect();
 		ids.sort();
@@ -347,7 +385,23 @@ async fn hnsw_versioned_filtered_knn_reads_each_candidate_once() -> Result<()> {
 			ds.run(QueryRequest::new(query, session).with_transaction(Arc::clone(&tx))).await?;
 		let len = match response.remove(0).result? {
 			surrealdb_types::Value::Array(a) => a.len(),
-			_ => 0,
+			surrealdb_types::Value::None
+			| surrealdb_types::Value::Null
+			| surrealdb_types::Value::Bool(_)
+			| surrealdb_types::Value::Number(_)
+			| surrealdb_types::Value::String(_)
+			| surrealdb_types::Value::Bytes(_)
+			| surrealdb_types::Value::Duration(_)
+			| surrealdb_types::Value::Datetime(_)
+			| surrealdb_types::Value::Uuid(_)
+			| surrealdb_types::Value::Geometry(_)
+			| surrealdb_types::Value::Table(_)
+			| surrealdb_types::Value::RecordId(_)
+			| surrealdb_types::Value::File(_)
+			| surrealdb_types::Value::Range(_)
+			| surrealdb_types::Value::Regex(_)
+			| surrealdb_types::Value::Object(_)
+			| surrealdb_types::Value::Set(_) => 0,
 		};
 		Ok((len, tx.metrics_snapshot_for_test().keys_read))
 	}
@@ -473,11 +527,33 @@ async fn hnsw_filtered_knn_keeps_what_bare_knn_returns_through_churn() -> Result
 				surrealdb_types::Value::Object(o) => match o.get("id") {
 					Some(surrealdb_types::Value::RecordId(rid)) => match &rid.key {
 						surrealdb_types::RecordIdKey::Number(n) => *n,
-						other => panic!("unexpected record key: {other:?}"),
+						other @ (surrealdb_types::RecordIdKey::String(_)
+						| surrealdb_types::RecordIdKey::Uuid(_)
+						| surrealdb_types::RecordIdKey::Array(_)
+						| surrealdb_types::RecordIdKey::Object(_)
+						| surrealdb_types::RecordIdKey::Range(_)) => {
+							panic!("unexpected record key: {other:?}")
+						}
 					},
 					other => panic!("unexpected id field: {other:?}"),
 				},
-				other => panic!("unexpected row: {other:?}"),
+				other @ (surrealdb_types::Value::None
+				| surrealdb_types::Value::Null
+				| surrealdb_types::Value::Bool(_)
+				| surrealdb_types::Value::Number(_)
+				| surrealdb_types::Value::String(_)
+				| surrealdb_types::Value::Bytes(_)
+				| surrealdb_types::Value::Duration(_)
+				| surrealdb_types::Value::Datetime(_)
+				| surrealdb_types::Value::Uuid(_)
+				| surrealdb_types::Value::Geometry(_)
+				| surrealdb_types::Value::Table(_)
+				| surrealdb_types::Value::RecordId(_)
+				| surrealdb_types::Value::File(_)
+				| surrealdb_types::Value::Range(_)
+				| surrealdb_types::Value::Regex(_)
+				| surrealdb_types::Value::Array(_)
+				| surrealdb_types::Value::Set(_)) => panic!("unexpected row: {other:?}"),
 			})
 			.collect())
 	}

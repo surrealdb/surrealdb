@@ -839,10 +839,12 @@ mod tests {
 
 	// Helper to extract f64 from Value
 	fn as_float(v: &Value) -> f64 {
-		match v {
-			Value::Number(Number::Float(f)) => *f,
-			Value::Number(Number::Int(i)) => *i as f64,
-			_ => panic!("Expected Number, got {:?}", v),
+		if let Value::Number(Number::Float(f)) = v {
+			*f
+		} else if let Value::Number(Number::Int(i)) = v {
+			*i as f64
+		} else {
+			panic!("Expected Number, got {:?}", v);
 		}
 	}
 

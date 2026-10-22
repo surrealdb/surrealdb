@@ -178,7 +178,115 @@ fn collect(ir: &Ir, region: RegionId, slots: &mut Vec<Slot>) -> Result<(), IrErr
 			PhysOp::Stmt {
 				..
 			} => slots.push(statement(ir, only_region(ir, op)?)?),
-			_ => {
+			PhysOp::TableScan(_)
+			| PhysOp::IndexScan(_)
+			| PhysOp::IndexUnion(_)
+			| PhysOp::Bitmap(_)
+			| PhysOp::IndexLookup(_)
+			| PhysOp::FullTextScan(_)
+			| PhysOp::KeyRangeScan(_)
+			| PhysOp::KnnScan(_)
+			| PhysOp::KnnTopK(_)
+			| PhysOp::Count(_)
+			| PhysOp::RecordScan(_)
+			| PhysOp::Vacant {
+				..
+			}
+			| PhysOp::Enforced {
+				..
+			}
+			| PhysOp::Values {
+				..
+			}
+			| PhysOp::Subquery
+			| PhysOp::Probe {
+				..
+			}
+			| PhysOp::Union
+			| PhysOp::Join(_)
+			| PhysOp::Distinct {
+				..
+			}
+			| PhysOp::PermissionFilter(_)
+			| PhysOp::Layer(_)
+			| PhysOp::Filter
+			| PhysOp::Fetch
+			| PhysOp::Split {
+				..
+			}
+			| PhysOp::Sort(_)
+			| PhysOp::Aggregate(_)
+			| PhysOp::Limit {
+				..
+			}
+			| PhysOp::Project(_)
+			| PhysOp::Timeout
+			| PhysOp::VersionScope
+			| PhysOp::Only
+			| PhysOp::Explain {
+				..
+			}
+			| PhysOp::Eval
+			| PhysOp::Statement {
+				..
+			}
+			| PhysOp::Match {
+				..
+			}
+			| PhysOp::MatchStep(_)
+			| PhysOp::DdlGuard {
+				..
+			}
+			| PhysOp::Define(_)
+			| PhysOp::Remove(_)
+			| PhysOp::Alter(_)
+			| PhysOp::Rebuild(_)
+			| PhysOp::Info {
+				..
+			}
+			| PhysOp::Use {
+				..
+			}
+			| PhysOp::Option {
+				..
+			}
+			| PhysOp::Access(_)
+			| PhysOp::Kill
+			| PhysOp::Live(_)
+			| PhysOp::Subscriber(_)
+			| PhysOp::Show(_)
+			| PhysOp::Write(_)
+			| PhysOp::WriteStage {
+				..
+			}
+			| PhysOp::Events(_)
+			| PhysOp::Assign(_)
+			| PhysOp::Unset {
+				..
+			}
+			| PhysOp::Content {
+				..
+			}
+			| PhysOp::Block
+			| PhysOp::Let(_)
+			| PhysOp::Sleep
+			| PhysOp::If {
+				..
+			}
+			| PhysOp::Loop {
+				..
+			}
+			| PhysOp::Pipeline(_)
+			| PhysOp::Choose(_)
+			| PhysOp::Prefetch(_)
+			| PhysOp::Materialize {
+				..
+			}
+			| PhysOp::LoadUnit(_)
+			| PhysOp::Yield
+			| PhysOp::Return
+			| PhysOp::Break
+			| PhysOp::Next => {
 				return Err(IrError::Stale(
 					"ir_lower::control: a top-level op that is not a statement",
 				));
@@ -377,13 +485,12 @@ fn written_name(ir: &Ir, value: ValueId) -> Option<String> {
 	else {
 		return None;
 	};
-	match &ir.op(op)?.kind {
-		OpKind::Expr(ExprOp::Literal(literal)) => match literal.as_ref() {
-			Value::String(name) => Some(name.as_str().to_owned()),
-			_ => None,
-		},
-		_ => None,
+	if let OpKind::Expr(ExprOp::Literal(literal)) = &ir.op(op)?.kind
+		&& let Value::String(name) = literal.as_ref()
+	{
+		return Some(name.as_str().to_owned());
 	}
+	None
 }
 
 #[cfg(test)]
@@ -706,16 +813,17 @@ mod tests {
 
 	/// The names, the `computed` flag and the operands of a `USE` slot.
 	fn use_parts(slot: Slot) -> (Option<String>, Option<String>, bool, UseOperands) {
-		match slot {
-			Slot::Use {
-				ns,
-				db,
-				computed,
-				operands,
-				..
-			} => (ns, db, computed, operands),
-			other => panic!("expected a USE, got {other:?}"),
-		}
+		let Slot::Use {
+			ns,
+			db,
+			computed,
+			operands,
+			..
+		} = slot
+		else {
+			panic!("expected a USE, got {slot:?}");
+		};
+		(ns, db, computed, operands)
 	}
 
 	#[test]
@@ -844,7 +952,14 @@ mod tests {
 					statement,
 					..
 				} => *statement,
-				other => panic!("unexpected slot {other:?}"),
+				other @ (Slot::Begin
+				| Slot::Commit
+				| Slot::Cancel
+				| Slot::Run {
+					..
+				}) => {
+					panic!("unexpected slot {other:?}")
+				}
 			})
 			.collect();
 		assert_eq!(regions, vec![option, used, bound]);

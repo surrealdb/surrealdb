@@ -93,135 +93,117 @@ impl<'ctx> Planner<'ctx> {
 		&self,
 		expr: LogicalExpr,
 	) -> Result<Vec<LogicalExpr>, crate::err::Error> {
-		match expr {
-			path if path.is_path() => Ok(vec![path]),
-			// A parameter holds a path as text. The error names the value it
-			// held rather than the parameter.
-			LogicalExpr::Param(param) => {
-				let value =
-					self.resolve_param(param.as_str()).await.unwrap_or(crate::val::Value::None);
-				let invalid = || crate::exec::Error::InvalidFetch {
-					value: surrealdb_types::ToSql::to_sql(&value.clone().into_literal()),
-				};
-				let s = value.clone().coerce_to::<String>().map_err(|_| invalid())?;
-				let path = parse_field_path(&s).ok_or_else(invalid)?;
-				Ok(vec![path])
-			}
-			LogicalExpr::Call(ref call) => match &call.receiver {
-				crate::expr::Function::Normal(name)
-					if self.function_registry().is_projection(name) =>
-				{
-					// Generic projection function handling: resolve each argument
-					// as a string (single field) or array of strings (multiple fields)
-					// and parse each as a path.
-					let mut paths = Vec::new();
-					for arg in &call.args {
-						match self.resolve_expr_to_string(arg).await {
-							Ok(s) => {
-								paths.push(parse_field_path(&s).ok_or_else(|| {
-									crate::exec::Error::Query {
-										message: format!("Failed to parse field path '{s}'"),
-									}
-								})?);
-							}
-							Err(_) => {
-								// Try resolving as an array of strings
-								let strings = self
-									.resolve_expr_to_string_array(arg)
-									.await
-									.map_err(|_| crate::exec::Error::Query {
-										message: format!(
-											"Projection function '{}' argument could not \
-												 be resolved to a field path",
-											name
-										),
-									})?;
-								for s in strings {
-									paths.push(parse_field_path(&s).ok_or_else(|| {
-										crate::exec::Error::Query {
-											message: format!("Failed to parse field path '{s}'"),
-										}
-									})?);
-								}
-							}
-						}
-					}
-					if paths.is_empty() {
-						return Err(crate::exec::Error::Query {
-							message: format!(
-								"Projection function '{}' requires at least one argument",
-								name
-							),
-						}
-						.into());
-					}
-					Ok(paths)
-				}
-				_ => Err(crate::exec::Error::InvalidFetch {
-					value: surrealdb_types::ToSql::to_sql(&expr),
-				}
-				.into()),
-			},
-			other => Err(crate::exec::Error::InvalidFetch {
-				value: surrealdb_types::ToSql::to_sql(&other),
-			}
-			.into()),
+		if expr.is_path() {
+			return Ok(vec![expr]);
 		}
+		if let LogicalExpr::Param(ref param) = expr {
+			let value = self.resolve_param(param.as_str()).await.unwrap_or(crate::val::Value::None);
+			let invalid = || crate::exec::Error::InvalidFetch {
+				value: surrealdb_types::ToSql::to_sql(&value.clone().into_literal()),
+			};
+			let s = value.clone().coerce_to::<String>().map_err(|_| invalid())?;
+			let path = parse_field_path(&s).ok_or_else(invalid)?;
+			return Ok(vec![path]);
+		}
+		if let LogicalExpr::Call(ref call) = expr
+			&& let crate::expr::Function::Normal(name) = &call.receiver
+			&& self.function_registry().is_projection(name)
+		{
+			// Generic projection function handling: resolve each argument
+			// as a string (single field) or array of strings (multiple fields)
+			// and parse each as a path.
+			let mut paths = Vec::new();
+			for arg in &call.args {
+				match self.resolve_expr_to_string(arg).await {
+					Ok(s) => {
+						paths.push(parse_field_path(&s).ok_or_else(|| {
+							crate::exec::Error::Query {
+								message: format!("Failed to parse field path '{s}'"),
+							}
+						})?);
+					}
+					Err(_) => {
+						// Try resolving as an array of strings
+						let strings =
+							self.resolve_expr_to_string_array(arg).await.map_err(|_| {
+								crate::exec::Error::Query {
+									message: format!(
+										"Projection function '{name}' argument could not \
+										 be resolved to a field path",
+									),
+								}
+							})?;
+						for s in strings {
+							paths.push(parse_field_path(&s).ok_or_else(|| {
+								crate::exec::Error::Query {
+									message: format!("Failed to parse field path '{s}'"),
+								}
+							})?);
+						}
+					}
+				}
+			}
+			if paths.is_empty() {
+				return Err(crate::exec::Error::Query {
+					message: format!("Projection function '{name}' requires at least one argument",),
+				}
+				.into());
+			}
+			return Ok(paths);
+		}
+		Err(crate::exec::Error::InvalidFetch {
+			value: surrealdb_types::ToSql::to_sql(&expr),
+		}
+		.into())
 	}
 
 	async fn resolve_expr_to_string(
 		&self,
 		expr: &LogicalExpr,
 	) -> Result<String, crate::err::Error> {
-		match expr {
-			LogicalExpr::Literal(crate::expr::logical::LogicalLiteral::String(s)) => {
-				Ok(s.as_str().to_owned())
-			}
-			LogicalExpr::Param(param) => {
-				let value =
-					self.resolve_param(param.as_str()).await.unwrap_or(crate::val::Value::None);
-				value.coerce_to::<String>().map_err(|_| {
-					crate::exec::Error::Query {
-						message: "OMIT/FETCH parameter did not resolve to a string".to_string(),
-					}
-					.into()
-				})
-			}
-			_ => Err(crate::exec::Error::Query {
-				message: "OMIT/FETCH with computed expressions not yet supported".to_string(),
-			}
-			.into()),
+		if let LogicalExpr::Literal(crate::expr::logical::LogicalLiteral::String(s)) = expr {
+			return Ok(s.as_str().to_owned());
 		}
+		if let LogicalExpr::Param(param) = expr {
+			let value = self.resolve_param(param.as_str()).await.unwrap_or(crate::val::Value::None);
+			return value.coerce_to::<String>().map_err(|_| {
+				crate::exec::Error::Query {
+					message: "OMIT/FETCH parameter did not resolve to a string".to_string(),
+				}
+				.into()
+			});
+		}
+		Err(crate::exec::Error::Query {
+			message: "OMIT/FETCH with computed expressions not yet supported".to_string(),
+		}
+		.into())
 	}
 
 	async fn resolve_expr_to_string_array(
 		&self,
 		expr: &LogicalExpr,
 	) -> Result<Vec<String>, crate::err::Error> {
-		match expr {
-			LogicalExpr::Array(items) => {
-				let mut result = Vec::with_capacity(items.len());
-				for item in items {
-					result.push(self.resolve_expr_to_string(item).await?);
-				}
-				Ok(result)
+		if let LogicalExpr::Array(items) = expr {
+			let mut result = Vec::with_capacity(items.len());
+			for item in items {
+				result.push(self.resolve_expr_to_string(item).await?);
 			}
-			LogicalExpr::Param(param) => {
-				let value =
-					self.resolve_param(param.as_str()).await.unwrap_or(crate::val::Value::None);
-				value.coerce_to::<Vec<String>>().map_err(|_| {
-					crate::exec::Error::Query {
-						message: "OMIT/FETCH parameter did not resolve to an array of strings"
-							.to_string(),
-					}
-					.into()
-				})
-			}
-			_ => Err(crate::exec::Error::Query {
-				message: "OMIT/FETCH with computed expressions not yet supported".to_string(),
-			}
-			.into()),
+			return Ok(result);
 		}
+		if let LogicalExpr::Param(param) = expr {
+			let value = self.resolve_param(param.as_str()).await.unwrap_or(crate::val::Value::None);
+			return value.coerce_to::<Vec<String>>().map_err(|_| {
+				crate::exec::Error::Query {
+					message: "OMIT/FETCH parameter did not resolve to an array of strings"
+						.to_string(),
+				}
+				.into()
+			});
+		}
+		Err(crate::exec::Error::Query {
+			message: "OMIT/FETCH with computed expressions not yet supported".to_string(),
+		}
+		.into())
 	}
 
 	// ========================================================================
@@ -610,7 +592,17 @@ pub(crate) fn adjust_direction_for_order(
 		BTreeAccess::Equality(_) => {
 			ix_def.cols.iter().filter_map(|s| field_path_from_column(s).ok()).collect()
 		}
-		_ => vec![],
+		BTreeAccess::Range {
+			..
+		}
+		| BTreeAccess::FullText {
+			..
+		}
+		| BTreeAccess::Knn {
+			..
+		} => {
+			vec![]
+		}
 	};
 
 	// Skip leading ORDER BY fields that match equality-pinned columns.
@@ -646,7 +638,15 @@ pub(crate) fn adjust_direction_for_order(
 			..
 		} => prefix.len(),
 		BTreeAccess::Equality(_) => ix_def.cols.len(),
-		_ => 0,
+		BTreeAccess::Range {
+			..
+		}
+		| BTreeAccess::FullText {
+			..
+		}
+		| BTreeAccess::Knn {
+			..
+		} => 0,
 	};
 
 	// If all index columns are equality-pinned, the effective ordering
@@ -759,17 +759,21 @@ pub(crate) fn decide_union_merge(
 		};
 		paths
 			.into_iter()
-			.map(|p| match p {
-				AccessPath::BTreeScan {
+			.map(|p| {
+				if let AccessPath::BTreeScan {
 					index_ref,
 					access,
 					..
-				} => AccessPath::BTreeScan {
-					index_ref,
-					access,
-					direction: target,
-				},
-				other => other,
+				} = p
+				{
+					AccessPath::BTreeScan {
+						index_ref,
+						access,
+						direction: target,
+					}
+				} else {
+					p
+				}
 			})
 			.collect::<Vec<_>>()
 	} else {
@@ -857,20 +861,20 @@ pub(crate) fn detect_order_for_composite_union(
 	// index_ref as the reference and check every branch against it.
 	let mut branches = paths.iter();
 	let first = branches.next()?;
-	let (first_index_ref, first_prefix_len) = match first {
-		AccessPath::BTreeScan {
-			index_ref,
-			access: BTreeAccess::Compound {
-				prefix,
-				range: None,
-				..
-			},
+	let AccessPath::BTreeScan {
+		index_ref: first_index_ref,
+		access: BTreeAccess::Compound {
+			prefix: first_compound_prefix,
+			range: None,
 			..
-		} => (index_ref.clone(), prefix.len()),
-		// Single-column equality on the ORDER BY column itself wouldn't
-		// give us a "next column" to merge on.
-		_ => return None,
+		},
+		..
+	} = first
+	else {
+		return None;
 	};
+	let first_index_ref = first_index_ref.clone();
+	let first_prefix_len = first_compound_prefix.len();
 	// Composite index must have an additional column after the prefix
 	// that is exactly the ORDER BY target.
 	let ix_def = first_index_ref.definition();
@@ -893,40 +897,25 @@ pub(crate) fn detect_order_for_composite_union(
 	// each branch's scan direction to align with ORDER BY before
 	// constructing the sub-operators. Branch prefixes must be distinct
 	// so no record appears twice.
-	let first_prefix = match first {
-		AccessPath::BTreeScan {
-			access: BTreeAccess::Compound {
-				prefix,
-				..
-			},
-			..
-		} => prefix.as_slice(),
-		_ => return None,
-	};
+	let first_prefix = first_compound_prefix.as_slice();
 	let mut seen_prefixes: Vec<&[BoundOperand]> = Vec::with_capacity(paths.len());
 	seen_prefixes.push(first_prefix);
 	for path in branches {
-		let (idx, access) = match path {
-			AccessPath::BTreeScan {
-				index_ref,
-				access: access @ BTreeAccess::Compound {
-					range: None,
-					..
-				},
+		let AccessPath::BTreeScan {
+			index_ref: idx,
+			access: BTreeAccess::Compound {
+				prefix,
+				range: None,
 				..
-			} => (index_ref, access),
-			_ => return None,
+			},
+			..
+		} = path
+		else {
+			return None;
 		};
 		if idx != &first_index_ref {
 			return None;
 		}
-		let BTreeAccess::Compound {
-			prefix,
-			..
-		} = access
-		else {
-			return None;
-		};
 		if prefix.len() != first_prefix_len {
 			return None;
 		}

@@ -572,18 +572,16 @@ pub async fn ns_access(
 	tx.cancel().await?;
 
 	// Check the access method type
-	match av.access_type.clone() {
-		catalog::AccessType::Bearer(at) => {
-			// Extract key identifier and key from the provided variables.
-			let key = match vars.get("key") {
-				Some(key) => key.as_string().ok_or(AuthError::InvalidAuth)?.clone(),
-				None => bail!(AuthError::AccessBearerMissingKey),
-			};
+	let catalog::AccessType::Bearer(at) = av.access_type.clone() else {
+		return Err(anyhow::Error::new(AuthError::AccessMethodMismatch));
+	};
+	// Extract key identifier and key from the provided variables.
+	let key = match vars.get("key") {
+		Some(key) => key.as_string().ok_or(AuthError::InvalidAuth)?.clone(),
+		None => bail!(AuthError::AccessBearerMissingKey),
+	};
 
-			signin_bearer(kvs, session, Some(&ns_def), None, av, &at, key).await
-		}
-		_ => Err(anyhow::Error::new(AuthError::AccessMethodMismatch)),
-	}
+	signin_bearer(kvs, session, Some(&ns_def), None, av, &at, key).await
 }
 
 pub async fn ns_user(
@@ -716,18 +714,15 @@ pub async fn root_access(
 	tx.cancel().await?;
 
 	// Check the access method type
-	match av.access_type.clone() {
-		catalog::AccessType::Bearer(at) => {
-			// Extract key identifier and key from the provided variables.
-			let key = match vars.get("key") {
-				Some(PublicValue::String(key)) => key.clone(),
-				_ => return Err(anyhow::Error::new(AuthError::AccessBearerMissingKey)),
-			};
+	let catalog::AccessType::Bearer(at) = av.access_type.clone() else {
+		return Err(anyhow::Error::new(AuthError::AccessMethodMismatch));
+	};
+	// Extract key identifier and key from the provided variables.
+	let Some(PublicValue::String(key)) = vars.get("key") else {
+		return Err(anyhow::Error::new(AuthError::AccessBearerMissingKey));
+	};
 
-			signin_bearer(kvs, session, None, None, av, &at, key).await
-		}
-		_ => Err(anyhow::Error::new(AuthError::AccessMethodMismatch)),
-	}
+	signin_bearer(kvs, session, None, None, av, &at, key.clone()).await
 }
 
 /// Authenticates a user using bearer token authentication (refresh token flow).
@@ -1174,27 +1169,25 @@ pub(crate) fn verify_grant_bearer(
 	require_active_grant(gr)?;
 	// Check if the provided key matches the bearer key in the grant.
 	// We use time-constant comparison to prevent timing attacks.
-	match &gr.grant {
-		catalog::Grant::Bearer(bearer) => {
-			// Hash provided signin bearer key.
+	let catalog::Grant::Bearer(bearer) = &gr.grant else {
+		return Err(anyhow::Error::new(AuthError::AccessMethodMismatch));
+	};
+	// Hash provided signin bearer key.
 
-			let mut hasher = Sha256::new();
-			hasher.update(key);
-			let hash = hasher.finalize();
-			let hash_hex = format!("{hash:x}");
-			// Compare hashed key to stored bearer key.
-			let signin_key_bytes: &[u8] = hash_hex.as_bytes();
-			let bearer_key_bytes: &[u8] = bearer.key.as_bytes();
-			let ok: bool = bearer_key_bytes.ct_eq(signin_key_bytes).into();
+	let mut hasher = Sha256::new();
+	hasher.update(key);
+	let hash = hasher.finalize();
+	let hash_hex = format!("{hash:x}");
+	// Compare hashed key to stored bearer key.
+	let signin_key_bytes: &[u8] = hash_hex.as_bytes();
+	let bearer_key_bytes: &[u8] = bearer.key.as_bytes();
+	let ok: bool = bearer_key_bytes.ct_eq(signin_key_bytes).into();
 
-			if ok {
-				Ok(bearer)
-			} else {
-				debug!("Bearer access grant `{}` for method `{}` is invalid", gr.id, gr.ac);
-				Err(anyhow::Error::new(AuthError::InvalidAuth))
-			}
-		}
-		_ => Err(anyhow::Error::new(AuthError::AccessMethodMismatch)),
+	if ok {
+		Ok(bearer)
+	} else {
+		debug!("Bearer access grant `{}` for method `{}` is invalid", gr.id, gr.ac);
+		Err(anyhow::Error::new(AuthError::InvalidAuth))
 	}
 }
 
@@ -1607,10 +1600,9 @@ mod tests {
 			.await;
 
 			let e = res.unwrap_err();
-			match e.downcast().expect("Unexpected error kind") {
-				AuthError::InvalidAuth => {}
-				e => panic!("Unexpected error, expected InvalidAuth found {e}"),
-			}
+			let AuthError::InvalidAuth = e.downcast().expect("Unexpected error kind") else {
+				panic!("Unexpected error, expected InvalidAuth");
+			};
 		}
 		// Test with expired refresh
 		{
@@ -1681,10 +1673,9 @@ mod tests {
 			.await;
 			// Should fail due to the refresh token being expired
 			let e = res.unwrap_err();
-			match e.downcast().expect("Unexpected error kind") {
-				AuthError::InvalidAuth => {}
-				e => panic!("Unexpected error, expected InvalidAuth found {e}"),
-			}
+			let AuthError::InvalidAuth = e.downcast().expect("Unexpected error kind") else {
+				panic!("Unexpected error, expected InvalidAuth");
+			};
 		}
 		// Test that only the hash of the refresh token is stored
 		{
@@ -1756,10 +1747,10 @@ mod tests {
 				.await
 				.unwrap()
 				.unwrap();
-			let key = match &grant.grant {
-				catalog::Grant::Bearer(grant) => grant.key.clone(),
-				_ => panic!("Incorrect grant type returned, expected a bearer grant"),
+			let catalog::Grant::Bearer(grant) = &grant.grant else {
+				panic!("Incorrect grant type returned, expected a bearer grant");
 			};
+			let key = grant.key.clone();
 			tx.cancel().await.unwrap();
 
 			// Test that the returned key is a SHA-256 hash
@@ -2515,10 +2506,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			.await;
 
 			let e = res.unwrap_err();
-			match e.downcast().expect("Unexpected error kind") {
-				ExecError::Thrown(e) => assert_eq!(e, "This user is not enabled"),
-				e => panic!("Unexpected error, expected Thrown found {e:?}"),
-			}
+			let ExecError::Thrown(e) = e.downcast().expect("Unexpected error kind") else {
+				panic!("Unexpected error, expected Thrown");
+			};
+			assert_eq!(e, "This user is not enabled");
 		}
 
 		// Test AUTHENTICATE clause not returning a value
@@ -2562,10 +2553,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			.await;
 
 			let e = res.unwrap_err();
-			match e.downcast().expect("Unexpected error kind") {
-				AuthError::InvalidAuth => {}
-				e => panic!("Unexpected error, expected InvalidAuth found {e}"),
-			}
+			let AuthError::InvalidAuth = e.downcast().expect("Unexpected error kind") else {
+				panic!("Unexpected error, expected InvalidAuth");
+			};
 		}
 	}
 
@@ -2650,14 +2640,18 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"Expected authentication to fail in one instance, but instead received: {:?} and {:?}",
 					e1, e2
 				),
-				(Err(e1), Ok(_)) => match e1.downcast().expect("Unexpected error kind") {
-					AuthError::InvalidAuth => {}
-					e => panic!("Unexpected error, expected InvalidAuth found {e}"),
-				},
-				(Ok(_), Err(e2)) => match e2.downcast().expect("Unexpected error kind") {
-					AuthError::InvalidAuth => {}
-					e => panic!("Unexpected error, expected InvalidAuth found {e}"),
-				},
+				(Err(e1), Ok(_)) => {
+					let AuthError::InvalidAuth = e1.downcast().expect("Unexpected error kind")
+					else {
+						panic!("Unexpected error, expected InvalidAuth");
+					};
+				}
+				(Ok(_), Err(e2)) => {
+					let AuthError::InvalidAuth = e2.downcast().expect("Unexpected error kind")
+					else {
+						panic!("Unexpected error, expected InvalidAuth");
+					};
+				}
 			}
 		}
 
@@ -2732,14 +2726,18 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"Expected authentication to fail in one instance, but instead received: {:?} and {:?}",
 					e1, e2
 				),
-				(Err(e1), Ok(_)) => match e1.downcast().expect("Unexpected error kind") {
-					AuthError::InvalidAuth => {}
-					e => panic!("Unexpected error, expected InvalidAuth found {e:?}"),
-				},
-				(Ok(_), Err(e2)) => match e2.downcast().expect("Unexpected error kind") {
-					AuthError::InvalidAuth => {}
-					e => panic!("Unexpected error, expected InvalidAuth found {e:?}"),
-				},
+				(Err(e1), Ok(_)) => {
+					let AuthError::InvalidAuth = e1.downcast().expect("Unexpected error kind")
+					else {
+						panic!("Unexpected error, expected InvalidAuth");
+					};
+				}
+				(Ok(_), Err(e2)) => {
+					let AuthError::InvalidAuth = e2.downcast().expect("Unexpected error kind")
+					else {
+						panic!("Unexpected error, expected InvalidAuth");
+					};
+				}
 			}
 		}
 	}
@@ -2982,38 +2980,35 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 	}
 
 	fn expect_invalid_auth(e: anyhow::Error) {
-		match e.downcast().expect("Unexpected error kind") {
-			AuthError::InvalidAuth => {}
-			e => panic!("Unexpected error, expected InvalidAuth found {e}"),
-		}
+		let AuthError::InvalidAuth = e.downcast().expect("Unexpected error kind") else {
+			panic!("Unexpected error, expected InvalidAuth");
+		};
 	}
 
 	fn expect_access_not_found(e: anyhow::Error) {
-		match e.downcast().expect("Unexpected error kind") {
-			AuthError::AccessNotFound => {}
-			e => panic!("Unexpected error, expected AccessNotFound found {e}"),
-		}
+		let AuthError::AccessNotFound = e.downcast().expect("Unexpected error kind") else {
+			panic!("Unexpected error, expected AccessNotFound");
+		};
 	}
 
 	fn expect_access_bearer_missing_key(e: anyhow::Error) {
-		match e.downcast().expect("Unexpected error kind") {
-			AuthError::AccessBearerMissingKey => {}
-			e => panic!("Unexpected error, expected AccessBearerMissingKey found {e}"),
-		}
+		let AuthError::AccessBearerMissingKey = e.downcast().expect("Unexpected error kind") else {
+			panic!("Unexpected error, expected AccessBearerMissingKey");
+		};
 	}
 
 	fn expect_access_grant_bearer_invalid(e: anyhow::Error) {
-		match e.downcast().expect("Unexpected error kind") {
-			AuthError::AccessGrantBearerInvalid => {}
-			e => panic!("Unexpected error, expected AccessGrantBearerInvalid found {e}"),
-		}
+		let AuthError::AccessGrantBearerInvalid = e.downcast().expect("Unexpected error kind")
+		else {
+			panic!("Unexpected error, expected AccessGrantBearerInvalid");
+		};
 	}
 
 	fn expect_thrown_authentication_error(e: anyhow::Error) {
-		match e.downcast().expect("Unexpected error kind") {
-			ExecError::Thrown(e) => assert_eq!(e, "Test authentication error"),
-			e => panic!("Unexpected error, expected Thrown found {e:?}"),
-		}
+		let ExecError::Thrown(e) = e.downcast().expect("Unexpected error kind") else {
+			panic!("Unexpected error, expected Thrown");
+		};
+		assert_eq!(e, "Test authentication error");
 	}
 
 	/// Asserts the session state produced by a successful bearer-for-user
@@ -3103,10 +3098,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			_ => panic!("Unsupported level"),
 		}
 		.unwrap();
-		let key = match &grant.grant {
-			catalog::Grant::Bearer(grant) => grant.key.clone(),
-			_ => panic!("Incorrect grant type returned, expected a bearer grant"),
+		let catalog::Grant::Bearer(grant) = &grant.grant else {
+			panic!("Incorrect grant type returned, expected a bearer grant");
 		};
+		let key = grant.key.clone();
 		tx.cancel().await.unwrap();
 
 		// Test that the returned key is a SHA-256 hash
@@ -3138,10 +3133,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			.await
 			.unwrap()
 			.unwrap();
-		let key = match &grant.grant {
-			catalog::Grant::Bearer(grant) => grant.key.clone(),
-			_ => panic!("Incorrect grant type returned, expected a bearer grant"),
+		let catalog::Grant::Bearer(grant) = &grant.grant else {
+			panic!("Incorrect grant type returned, expected a bearer grant");
 		};
+		let key = grant.key.clone();
 		tx.cancel().await.unwrap();
 
 		// Test that the returned key is a SHA-256 hash
@@ -3527,12 +3522,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			};
 
 			let e = res.unwrap_err();
-			match e.downcast().expect("Unexpected error kind") {
-				Error::IamError(PolicyError::InvalidRole(_)) => {}
-				e => panic!(
-					"Unexpected error, expected IamError(PolicyError::InvalidRole) found {e}"
-				),
-			}
+			let Error::IamError(PolicyError::InvalidRole(_)) =
+				e.downcast().expect("Unexpected error kind")
+			else {
+				panic!("Unexpected error, expected IamError(PolicyError::InvalidRole)");
+			};
 		}
 	}
 }

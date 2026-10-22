@@ -131,9 +131,70 @@ impl Planner<'_> {
 							)
 							.await?;
 						}
-						_ => {}
+						Function::Normal(_)
+						| Function::Custom(_)
+						| Function::Script(_)
+						| Function::Model(_) => {}
 					},
-					_ => {}
+					LogicalExpr::Literal(_)
+					| LogicalExpr::Array(_)
+					| LogicalExpr::Set(_)
+					| LogicalExpr::Object(_)
+					| LogicalExpr::RecordId(_)
+					| LogicalExpr::Param(_)
+					| LogicalExpr::Table(_)
+					| LogicalExpr::Mock(_)
+					| LogicalExpr::Constant(_)
+					| LogicalExpr::Field(_)
+					| LogicalExpr::Doc
+					| LogicalExpr::Current
+					| LogicalExpr::Access {
+						..
+					}
+					| LogicalExpr::Index {
+						..
+					}
+					| LogicalExpr::First(_)
+					| LogicalExpr::Last(_)
+					| LogicalExpr::Each(_)
+					| LogicalExpr::Flatten {
+						..
+					}
+					| LogicalExpr::Filter {
+						..
+					}
+					| LogicalExpr::Method {
+						..
+					}
+					| LogicalExpr::Destructure {
+						..
+					}
+					| LogicalExpr::Optional {
+						..
+					}
+					| LogicalExpr::Lookup {
+						..
+					}
+					| LogicalExpr::RepeatRecurse(_)
+					| LogicalExpr::Broadcast {
+						..
+					}
+					| LogicalExpr::SetField {
+						..
+					}
+					| LogicalExpr::Postfix {
+						..
+					}
+					| LogicalExpr::Invoke {
+						..
+					}
+					| LogicalExpr::Binary {
+						..
+					}
+					| LogicalExpr::If(_)
+					| LogicalExpr::Throw(_)
+					| LogicalExpr::Break
+					| LogicalExpr::Continue => {}
 				}
 				let start = pending.len();
 				expr.for_each_child(&mut |child| pending.push(child));

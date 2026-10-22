@@ -434,11 +434,41 @@ async fn traversal_from_a_dead_edge_id_expands_to_nothing() {
 				.flat_map(|v| match v {
 					Value::Array(inner) => inner.into_iter().collect::<Vec<_>>(),
 					Value::None => Vec::new(),
-					other => vec![other],
+					other @ (Value::Null
+					| Value::Bool(_)
+					| Value::Number(_)
+					| Value::String(_)
+					| Value::Bytes(_)
+					| Value::Duration(_)
+					| Value::Datetime(_)
+					| Value::Uuid(_)
+					| Value::Geometry(_)
+					| Value::Table(_)
+					| Value::RecordId(_)
+					| Value::File(_)
+					| Value::Range(_)
+					| Value::Regex(_)
+					| Value::Object(_)
+					| Value::Set(_)) => vec![other],
 				})
 				.collect(),
 			Value::None => Vec::new(),
-			other => vec![other],
+			other @ (Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Bytes(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Regex(_)
+			| Value::Object(_)
+			| Value::Set(_)) => vec![other],
 		};
 		assert!(rows.is_empty(), "{query} must expand to nothing, got {rows:?}");
 	}

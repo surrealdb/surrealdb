@@ -105,9 +105,10 @@ impl PrefilterSettings {
 		Self {
 			exact_threshold: *surrealdb_cnf::KNN_PREFILTER_EXACT_THRESHOLD,
 			boost_threshold: *surrealdb_cnf::KNN_PREFILTER_EF_BOOST_THRESHOLD,
-			boost: match index {
-				Index::Hnsw(_) => *surrealdb_cnf::KNN_PREFILTER_HNSW_EF_BOOST,
-				_ => *surrealdb_cnf::KNN_PREFILTER_EF_BOOST,
+			boost: if let Index::Hnsw(_) = index {
+				*surrealdb_cnf::KNN_PREFILTER_HNSW_EF_BOOST
+			} else {
+				*surrealdb_cnf::KNN_PREFILTER_EF_BOOST
 			},
 			ef_max: *surrealdb_cnf::KNN_PREFILTER_EF_MAX,
 			exact_cost: *surrealdb_cnf::KNN_PREFILTER_EXACT_COST,
@@ -144,7 +145,7 @@ pub(crate) fn plan_prefilter(
 	let walk_ef = match tier {
 		PrefilterTier::Exact => return (tier, ef),
 		PrefilterTier::Graph => boosted_ef(ef, settings.boost, settings.ef_max),
-		_ => ef,
+		PrefilterTier::Fallback | PrefilterTier::GraphUnboosted => ef,
 	};
 	if let Some(graph) = graph {
 		let members = u128::from(allow_len);

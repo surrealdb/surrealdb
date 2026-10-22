@@ -181,80 +181,76 @@ pub(crate) async fn live_register(
 	let nid = ctx.node_id();
 	// Get the id
 	let live_query_id = subscription_definition.id;
-	match target {
-		Value::Table(tb) => {
-			// Store the current Node ID
-			subscription_definition.node = nid;
-			// Get the NS and DB
-			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-			// Get the transaction
-			let txn = ctx.tx();
-			// Ensure that the table definition exists.
-			{
-				let (ns, db) = opt.ns_db()?;
-				let tbdef = txn.expect_tb_by_name(ns, db, &tb).await?;
-				// Lightweight relations have no stored records, which the
-				// notification path assumes, so a LIVE query on one is rejected.
-				anyhow::ensure!(
-					crate::kvs::lightweight::lightweight_relation(&tbdef.table_type).is_none(),
-					crate::exec::Error::Thrown(
-						"a LIVE query cannot subscribe to a LIGHTWEIGHT relation".to_owned()
-					)
-				);
-			}
-			// If the WHERE clause is document-independent (no field references or
-			// document-event params), evaluate it now while we still have a full
-			// execution context. This catches obviously broken expressions such as
-			// `WHERE string::len(NONE)` at registration time instead of silently
-			// suppressing every future notification.
-			if let Some(cond) =
-				subscription_definition.query.compiled().and_then(|query| query.cond.as_ref())
-				&& !is_document_dependent(cond)
-			{
-				let exec = crate::exec::entry::frame(ctx, opt, None).await;
-				if let Err(e) = crate::exec::entry::scalar(&exec, cond).await {
-					bail!("LIVE query WHERE clause is invalid and will never match: {e}");
-				}
-			}
-			// Insert the node live query
-			let key = NodeLiveQueryKey {
-				nd: nid,
-				lq: live_query_id,
-			};
-			txn.replace_key(
-				&key,
-				&NodeLiveQuery {
-					ns,
-					db,
-					tb: tb.clone(),
-				},
-			)
-			.await?;
-			// Insert the table live query
-			let key = SubscriptionKey {
-				ns,
-				db,
-				tb: std::borrow::Cow::Borrowed(&tb),
-				lq: live_query_id,
-			};
-			txn.replace_key(&key, &subscription_definition.to_stored()).await?;
-			// Bump the table's committed live-query cache timestamp, in the
-			// same transaction as the row write above, so writers observe the
-			// new subscription. A concurrent writer with a pre-commit snapshot
-			// reads the OLD timestamp and cannot poison the cache.
-			txn.bump_table_lives_cache(ns, db, &tb).await?;
-			// Clear the cache
-			txn.clear_cache();
-			// Hold the unit compiled as the statement arrived; nothing is
-			// compiled in this transaction.
-			vm_live::registered(ctx, (ns, db), &tb, &subscription_definition, arrived).await?;
-		}
-		v => {
-			bail!(ExecError::LiveStatement {
-				value: v.to_sql(),
-			});
-		}
+	let Value::Table(tb) = target else {
+		bail!(ExecError::LiveStatement {
+			value: target.to_sql(),
+		});
 	};
+	// Store the current Node ID
+	subscription_definition.node = nid;
+	// Get the NS and DB
+	let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+	// Get the transaction
+	let txn = ctx.tx();
+	// Ensure that the table definition exists.
+	{
+		let (ns, db) = opt.ns_db()?;
+		let tbdef = txn.expect_tb_by_name(ns, db, &tb).await?;
+		// Lightweight relations have no stored records, which the
+		// notification path assumes, so a LIVE query on one is rejected.
+		anyhow::ensure!(
+			crate::kvs::lightweight::lightweight_relation(&tbdef.table_type).is_none(),
+			crate::exec::Error::Thrown(
+				"a LIVE query cannot subscribe to a LIGHTWEIGHT relation".to_owned()
+			)
+		);
+	}
+	// If the WHERE clause is document-independent (no field references or
+	// document-event params), evaluate it now while we still have a full
+	// execution context. This catches obviously broken expressions such as
+	// `WHERE string::len(NONE)` at registration time instead of silently
+	// suppressing every future notification.
+	if let Some(cond) =
+		subscription_definition.query.compiled().and_then(|query| query.cond.as_ref())
+		&& !is_document_dependent(cond)
+	{
+		let exec = crate::exec::entry::frame(ctx, opt, None).await;
+		if let Err(e) = crate::exec::entry::scalar(&exec, cond).await {
+			bail!("LIVE query WHERE clause is invalid and will never match: {e}");
+		}
+	}
+	// Insert the node live query
+	let key = NodeLiveQueryKey {
+		nd: nid,
+		lq: live_query_id,
+	};
+	txn.replace_key(
+		&key,
+		&NodeLiveQuery {
+			ns,
+			db,
+			tb: tb.clone(),
+		},
+	)
+	.await?;
+	// Insert the table live query
+	let key = SubscriptionKey {
+		ns,
+		db,
+		tb: std::borrow::Cow::Borrowed(&tb),
+		lq: live_query_id,
+	};
+	txn.replace_key(&key, &subscription_definition.to_stored()).await?;
+	// Bump the table's committed live-query cache timestamp, in the
+	// same transaction as the row write above, so writers observe the
+	// new subscription. A concurrent writer with a pre-commit snapshot
+	// reads the OLD timestamp and cannot poison the cache.
+	txn.bump_table_lives_cache(ns, db, &tb).await?;
+	// Clear the cache
+	txn.clear_cache();
+	// Hold the unit compiled as the statement arrived; nothing is
+	// compiled in this transaction.
+	vm_live::registered(ctx, (ns, db), &tb, &subscription_definition, arrived).await?;
 	// Return the query id
 	Ok(crate::val::Uuid(live_query_id).into())
 }
@@ -311,9 +307,8 @@ mod tests {
 		let live_query_response = &mut dbs.execute(&lq_stmt, &ses, None).await.unwrap();
 
 		let live_id = live_query_response.remove(0).result.unwrap();
-		let live_id = match live_id {
-			PublicValue::Uuid(id) => id,
-			_ => panic!("expected uuid"),
+		let PublicValue::Uuid(live_id) = live_id else {
+			panic!("expected uuid");
 		};
 
 		// Verify that the table definition has been created.

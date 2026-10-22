@@ -460,12 +460,16 @@ async fn a_held_block_sends_each_statement_whole_after_it_commits() {
 	);
 	let rows: Vec<_> = items
 		.iter()
-		.filter_map(|i| match i {
-			QueryStreamItem::Rows {
+		.filter_map(|i| {
+			if let QueryStreamItem::Rows {
 				index: 1,
 				values,
-			} => Some(values.len()),
-			_ => None,
+			} = i
+			{
+				Some(values.len())
+			} else {
+				None
+			}
 		})
 		.collect();
 	assert_eq!(rows, vec![3], "statement 1 is sent as one batch of every row");
@@ -683,12 +687,16 @@ fn assert_each_terminated_once(items: &[QueryStreamItem], count: usize, sql: &st
 	}
 	let order: Vec<usize> = items
 		.iter()
-		.filter_map(|i| match i {
-			QueryStreamItem::Finished {
+		.filter_map(|i| {
+			if let QueryStreamItem::Finished {
 				index,
 				..
-			} => Some(*index),
-			_ => None,
+			} = i
+			{
+				Some(*index)
+			} else {
+				None
+			}
 		})
 		.collect();
 	assert_eq!(order, (0..count).collect::<Vec<_>>(), "{sql}: terminal items out of order");

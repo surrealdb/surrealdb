@@ -529,7 +529,32 @@ impl<'a> Walk<'a> {
 						format!("a statement stands in {enclosing:?}")
 					});
 				}
-				_ => {}
+				RegionKind::Request
+				| RegionKind::Statement(_)
+				| RegionKind::Block
+				| RegionKind::ValueBlock
+				| RegionKind::StatementIf
+				| RegionKind::ValueIf
+				| RegionKind::StatementFor
+				| RegionKind::ValueFor
+				| RegionKind::Loop
+				| RegionKind::Subquery
+				| RegionKind::FunctionBody
+				| RegionKind::ClosureBody
+				| RegionKind::PermissionFrame
+				| RegionKind::FieldFrame(_)
+				| RegionKind::EventFrame
+				| RegionKind::SubscriberFrame
+				| RegionKind::Clause(_)
+				| RegionKind::LazyOperand
+				| RegionKind::ErrorScope(_)
+				| RegionKind::ChooseArm
+				| RegionKind::Pipeline
+				| RegionKind::JoinLookupArm
+				| RegionKind::WriteStage
+				| RegionKind::CatalogUnit
+				| RegionKind::Deadline
+				| RegionKind::StoredClause(_) => {}
 			}
 		}
 		let inherited_frame = match (data.kind.frame_rule(), owner.and_then(|op| ir.op(op))) {
@@ -540,9 +565,10 @@ impl<'a> Walk<'a> {
 			Some(cx) => (cx.error_scope, cx.in_stored_clause),
 			None => (None, false),
 		};
-		let error_scope = match data.kind {
-			RegionKind::ErrorScope(_) => data.parent,
-			_ => outer_scope,
+		let error_scope = if let RegionKind::ErrorScope(_) = data.kind {
+			data.parent
+		} else {
+			outer_scope
 		};
 		self.regions.push(RegionCx {
 			kind: data.kind,
@@ -1172,7 +1198,7 @@ fn opens_frame(ir: &Ir, data: &OpData, inherited: FrameId) -> bool {
 			..
 		})
 		| OpKind::Phys(PhysOp::Join(_)) => None,
-		_ => return false,
+		OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => return false,
 	};
 	let (Some(own), Some(outer)) = (ir.frame(data.frame), ir.frame(inherited)) else {
 		return false;

@@ -109,9 +109,10 @@ pub(crate) async fn validate_records_survive_type_change(
 		}
 		crate::exec::vm::fuel::tick(exec, crate::exec::vm::fuel::units(page.result.len()))
 			.await
-			.map_err(|flow| match flow {
-				crate::expr::ControlFlow::Err(error) => error,
-				other => anyhow::anyhow!("the scan of the records was interrupted by {other}"),
+			.map_err(|flow| {
+				flow.into_error_or(|other| {
+					anyhow::anyhow!("the scan of the records was interrupted by {other}")
+				})
 			})?;
 	}
 	Ok(())

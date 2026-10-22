@@ -986,7 +986,11 @@ impl Shared {
 						return Step::Wait;
 					}
 				}
-				step => return step,
+				step @ (Step::Merge(..)
+				| Step::Rows(..)
+				| Step::Collect(..)
+				| Step::Run(_)
+				| Step::Empty) => return step,
 			}
 		}
 	}

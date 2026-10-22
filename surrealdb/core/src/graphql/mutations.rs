@@ -105,9 +105,12 @@ fn graphql_input_to_sql_object(
 			matches!(&fd.name.0[0], Part::Field(n) if n == key_str)
 		});
 		let storage_key: String = matched
-			.and_then(|fd| match &fd.name.0[0] {
-				Part::Field(n) => Some(n.as_str().to_owned()),
-				_ => None,
+			.and_then(|fd| {
+				if let Part::Field(n) = &fd.name.0[0] {
+					Some(n.as_str().to_owned())
+				} else {
+					None
+				}
 			})
 			.unwrap_or_else(|| key_str.to_owned());
 		let kind: Kind = matched.and_then(|fd| fd.field_kind.clone()).unwrap_or(Kind::Any);
@@ -133,18 +136,17 @@ fn kind_to_input_type_ref(
 	// Check if the kind (after stripping option) is a record type.
 	// Record fields should be represented as ID in input types (the user passes
 	// a record ID string, not a nested object).
-	match &kind {
-		Kind::Record(_) => {
-			let ty = TypeRef::named(TypeRef::ID);
-			return Ok(if optional {
-				ty
-			} else {
-				TypeRef::NonNull(Box::new(ty))
-			});
-		}
+	if let Kind::Record(_) = &kind {
+		let ty = TypeRef::named(TypeRef::ID);
+		return Ok(if optional {
+			ty
+		} else {
+			TypeRef::NonNull(Box::new(ty))
+		});
+	} else if let Kind::Array(inner, _) = &kind {
 		// `array<record<T>>` — same reasoning: the inner Object output type is
 		// not a valid input. Map to `[ID!]` (or `[ID!]!` when non-optional).
-		Kind::Array(inner, _) if matches!(**inner, Kind::Record(_)) => {
+		if matches!(**inner, Kind::Record(_)) {
 			let inner_ty = TypeRef::NonNull(Box::new(TypeRef::named(TypeRef::ID)));
 			let list_ty = TypeRef::List(Box::new(inner_ty));
 			return Ok(if optional {
@@ -153,24 +155,22 @@ fn kind_to_input_type_ref(
 				TypeRef::NonNull(Box::new(list_ty))
 			});
 		}
-		Kind::Either(ks) => {
-			// Strip None/Null variants to see what's underneath
-			let non_none: Vec<&Kind> =
-				ks.iter().filter(|k| !matches!(k, Kind::None | Kind::Null)).collect();
-			if non_none.len() == 1 {
-				match non_none[0] {
-					// option<record<T>> -> nullable ID
-					Kind::Record(_) => return Ok(TypeRef::named(TypeRef::ID)),
-					// option<array<record<T>>> -> nullable [ID!]
-					Kind::Array(inner, _) if matches!(**inner, Kind::Record(_)) => {
-						let inner_ty = TypeRef::NonNull(Box::new(TypeRef::named(TypeRef::ID)));
-						return Ok(TypeRef::List(Box::new(inner_ty)));
-					}
-					_ => {}
+	} else if let Kind::Either(ks) = &kind {
+		// Strip None/Null variants to see what's underneath
+		let non_none: Vec<&Kind> =
+			ks.iter().filter(|k| !matches!(k, Kind::None | Kind::Null)).collect();
+		if non_none.len() == 1 {
+			if let Kind::Record(_) = non_none[0] {
+				// option<record<T>> -> nullable ID
+				return Ok(TypeRef::named(TypeRef::ID));
+			} else if let Kind::Array(inner, _) = non_none[0] {
+				// option<array<record<T>>> -> nullable [ID!]
+				if matches!(**inner, Kind::Record(_)) {
+					let inner_ty = TypeRef::NonNull(Box::new(TypeRef::named(TypeRef::ID)));
+					return Ok(TypeRef::List(Box::new(inner_ty)));
 				}
 			}
 		}
-		_ => {}
 	}
 
 	// For all other kinds, delegate to the standard kind_to_type with is_input=true
@@ -820,9 +820,10 @@ fn add_delete_many_field(mutation: Object, tc: &MutationTableContext) -> Object 
 						TopLevelExpr::Expr(Expr::Delete(Box::new(stmt))),
 					)
 					.await?;
-					let count = match res {
-						Value::Array(a) => a.len() as i64,
-						_ => 0,
+					let count = if let Value::Array(a) = res {
+						a.len() as i64
+					} else {
+						0
 					};
 					Ok(Some(FieldValue::value(GraphqlValue::Number(count.into()))))
 				})
@@ -973,23 +974,21 @@ async fn execute_relate_create(
 /// The full result object is cached in a [`CachedRecord`] so that field
 /// resolvers can extract values directly without additional database queries.
 fn extract_single_record(val: Value) -> Result<Option<FieldValue<'static>>, async_graphql::Error> {
-	match val {
-		Value::Object(obj) => {
-			let rid = match obj.get("id") {
-				Some(Value::RecordId(rid)) => rid.clone(),
-				_ => return Err(resolver_error("Mutation result missing 'id' field").into()),
-			};
-			Ok(Some(FieldValue::owned_any(CachedRecord {
-				rid,
-				version: None,
-				data: obj,
-			})))
-		}
-		Value::None | Value::Null => Ok(None),
-		_ => {
-			error!("Unexpected mutation result type: {val:?}");
-			Err(resolver_error("Unexpected mutation result").into())
-		}
+	if let Value::Object(obj) = val {
+		let rid = match obj.get("id") {
+			Some(Value::RecordId(rid)) => rid.clone(),
+			_ => return Err(resolver_error("Mutation result missing 'id' field").into()),
+		};
+		Ok(Some(FieldValue::owned_any(CachedRecord {
+			rid,
+			version: None,
+			data: obj,
+		})))
+	} else if matches!(val, Value::None | Value::Null) {
+		Ok(None)
+	} else {
+		error!("Unexpected mutation result type: {val:?}");
+		Err(resolver_error("Unexpected mutation result").into())
 	}
 }
 
@@ -998,34 +997,30 @@ fn extract_single_record(val: Value) -> Result<Option<FieldValue<'static>>, asyn
 /// Each result object is cached in a [`CachedRecord`] for efficient field
 /// resolution.
 fn extract_record_list(val: Value) -> Result<Option<FieldValue<'static>>, async_graphql::Error> {
-	match val {
-		Value::Array(arr) => {
-			let items: Result<Vec<FieldValue>, GraphqlError> = arr
-				.0
-				.into_iter()
-				.map(|v| match v {
-					Value::Object(obj) => {
-						let rid = match obj.get("id") {
-							Some(Value::RecordId(rid)) => rid.clone(),
-							_ => return Err(resolver_error("Mutation result missing 'id' field")),
-						};
-						Ok(FieldValue::owned_any(CachedRecord {
-							rid,
-							version: None,
-							data: obj,
-						}))
-					}
-					_ => {
-						error!("Expected object in mutation result, found: {v:?}");
-						Err(resolver_error("Unexpected mutation result format"))
-					}
-				})
-				.collect();
-			Ok(Some(FieldValue::list(items?)))
-		}
-		_ => {
-			error!("Expected array result for bulk mutation, found: {val:?}");
-			Err(resolver_error("Unexpected bulk mutation result format").into())
-		}
+	if let Value::Array(arr) = val {
+		let items: Result<Vec<FieldValue>, GraphqlError> = arr
+			.0
+			.into_iter()
+			.map(|v| {
+				if let Value::Object(obj) = v {
+					let rid = match obj.get("id") {
+						Some(Value::RecordId(rid)) => rid.clone(),
+						_ => return Err(resolver_error("Mutation result missing 'id' field")),
+					};
+					Ok(FieldValue::owned_any(CachedRecord {
+						rid,
+						version: None,
+						data: obj,
+					}))
+				} else {
+					error!("Expected object in mutation result, found: {v:?}");
+					Err(resolver_error("Unexpected mutation result format"))
+				}
+			})
+			.collect();
+		Ok(Some(FieldValue::list(items?)))
+	} else {
+		error!("Expected array result for bulk mutation, found: {val:?}");
+		Err(resolver_error("Unexpected bulk mutation result format").into())
 	}
 }

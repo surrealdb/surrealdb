@@ -1,4 +1,5 @@
 #![recursion_limit = "256"]
+#![deny(clippy::wildcard_enum_match_arm)]
 //! Nanoseconds per row of `SELECT *` over packed (SCHEMAFULL) rows written into frames, beside the
 //! same rows in a schemaless twin. A measurement, `#[ignore]`d; run it with an optimised profile:
 //!

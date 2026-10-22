@@ -2399,7 +2399,6 @@ text_unit_enum!(SortDirection {
 });
 /// A role prints as its name. A role this syntax does not name prints `unsupported(Role)` and is
 /// not read back.
-#[allow(clippy::wildcard_enum_match_arm)]
 impl Text for Role {
 	fn put(&self, out: &mut String) {
 		out.push_str(match self {

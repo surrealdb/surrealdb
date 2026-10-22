@@ -296,10 +296,10 @@ pub(crate) fn field_path_wire_segments(path: &FieldPath) -> Option<Vec<PathSegme
 	}
 	let mut segments = Vec::with_capacity(path.len());
 	for part in &path.0 {
-		match part {
-			FieldPathPart::Field(name) => segments.push(PathSegment::new(name.as_str())),
-			_ => return None,
-		}
+		let FieldPathPart::Field(name) = part else {
+			return None;
+		};
+		segments.push(PathSegment::new(name.as_str()));
 	}
 	if segments[0].as_str() == "id" {
 		return None;

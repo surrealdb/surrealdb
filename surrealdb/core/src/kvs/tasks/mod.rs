@@ -674,9 +674,10 @@ fn slots(jobs: &[(MaintenanceJob, Duration)]) -> Vec<Slot> {
 			// utilisation rather than zeroes. Every other job waits out one full
 			// interval, which keeps startup from firing several lease acquisitions
 			// at the same moment.
-			next_due: match job {
-				MaintenanceJob::SystemMetricsRefresh => now,
-				_ => now + interval,
+			next_due: if matches!(job, MaintenanceJob::SystemMetricsRefresh) {
+				now
+			} else {
+				now + interval
 			},
 		})
 		.collect()
@@ -1097,9 +1098,12 @@ mod test {
 				slot(MaintenanceJob::NodeExpire, Duration::from_millis(5)),
 			],
 			20,
-			|job| match job {
-				MaintenanceJob::ReclaimTombstones => Duration::from_millis(100),
-				_ => Duration::ZERO,
+			|job| {
+				if matches!(job, MaintenanceJob::ReclaimTombstones) {
+					Duration::from_millis(100)
+				} else {
+					Duration::ZERO
+				}
 			},
 		)
 		.await;

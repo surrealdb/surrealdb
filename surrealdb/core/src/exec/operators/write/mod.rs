@@ -90,18 +90,21 @@ pub(crate) fn relate_endpoints(
 	side: RelateSide,
 ) -> Result<Vec<RecordId>, ControlFlow> {
 	fn one(value: Value, side: RelateSide) -> Result<RecordId, ControlFlow> {
-		match value {
-			Value::RecordId(id) => Ok(id),
-			Value::Object(object) => match object.rid() {
+		if let Value::RecordId(id) = value {
+			Ok(id)
+		} else if let Value::Object(object) = value {
+			match object.rid() {
 				Some(id) => Ok(id),
 				None => Err(side.refuse(&Value::Object(object))),
-			},
-			other => Err(side.refuse(&other)),
+			}
+		} else {
+			Err(side.refuse(&value))
 		}
 	}
-	match value {
-		Value::Array(array) => array.into_iter().map(|value| one(value, side)).collect(),
-		value => Ok(vec![one(value, side)?]),
+	if let Value::Array(array) = value {
+		array.into_iter().map(|value| one(value, side)).collect()
+	} else {
+		Ok(vec![one(value, side)?])
 	}
 }
 
@@ -113,13 +116,12 @@ pub(crate) fn relate_endpoints(
 /// which is where every stage keying on them reads them from — they are the
 /// statement's, and a data clause naming `in` or `out` does not move them.
 pub(crate) fn relate_row(at: Value, from: RecordId, to: RecordId) -> Result<WriteRow, ControlFlow> {
-	let mut row = match at {
-		at @ (Value::RecordId(_) | Value::Table(_)) => WriteRow::for_target(at)?,
-		other => {
-			return Err(ControlFlow::Err(anyhow::anyhow!(ExecError::RelateStatementOut {
-				value: other.to_sql()
-			})));
-		}
+	let mut row = if matches!(at, Value::RecordId(_) | Value::Table(_)) {
+		WriteRow::for_target(at)?
+	} else {
+		return Err(ControlFlow::Err(anyhow::anyhow!(ExecError::RelateStatementOut {
+			value: at.to_sql()
+		})));
 	};
 	row.extras = row::WriteExtras::Relate(from, to, None);
 	Ok(row)
@@ -216,7 +218,21 @@ pub(crate) fn target_subjects(
 			Some(id) => out.push(record_subject(id, form, deferable)?),
 			None => return Err(refuse_target(&Value::Object(object))),
 		},
-		other => return Err(refuse_target(&other)),
+		other @ (Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Set(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_)) => return Err(refuse_target(&other)),
 	}
 	Ok(())
 }
@@ -477,9 +493,11 @@ fn insert_endpoint(
 	path: &[Part],
 	refuse: impl FnOnce(String) -> ExecError,
 ) -> Result<RecordId, ControlFlow> {
-	match value.pick(path) {
-		Value::RecordId(id) => Ok(id),
-		other => Err(ControlFlow::Err(anyhow::anyhow!(refuse(other.to_sql())))),
+	let picked = value.pick(path);
+	if let Value::RecordId(id) = picked {
+		Ok(id)
+	} else {
+		Err(ControlFlow::Err(anyhow::anyhow!(refuse(picked.to_sql()))))
 	}
 }
 

@@ -30,9 +30,10 @@ impl ToSql for ClosureExpr {
 				write_sql!(f, fmt, ", ");
 			}
 			write_sql!(f, fmt, "{name}: ");
-			match kind {
-				k @ Kind::Either(_) => write_sql!(f, fmt, "<{}>", k),
-				k => write_sql!(f, fmt, "{}", k),
+			if matches!(kind, Kind::Either(_)) {
+				write_sql!(f, fmt, "<{}>", kind);
+			} else {
+				write_sql!(f, fmt, "{}", kind);
 			}
 		}
 		write_sql!(f, fmt, "|");

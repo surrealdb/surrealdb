@@ -106,7 +106,35 @@ fn clause_of(op: &LogicalOp) -> Option<(Clause, &[LogicalExpr])> {
 		LogicalOp::Project(project) => Some((Clause::Omit, &project.omit)),
 		LogicalOp::Fetch(fetch) => Some((Clause::Fetch, &fetch.fetches)),
 		LogicalOp::Return(statement) => Some((Clause::Fetch, &statement.fetch)),
-		_ => None,
+		LogicalOp::Source(_)
+		| LogicalOp::Values(_)
+		| LogicalOp::Match(_)
+		| LogicalOp::Subquery(_)
+		| LogicalOp::Write(_)
+		| LogicalOp::Ddl(_)
+		| LogicalOp::UnionAll(_)
+		| LogicalOp::Join(_)
+		| LogicalOp::Filter(_)
+		| LogicalOp::PermissionFilter(_)
+		| LogicalOp::Split(_)
+		| LogicalOp::Aggregate(_)
+		| LogicalOp::Distinct(_)
+		| LogicalOp::Sort(_)
+		| LogicalOp::Limit(_)
+		| LogicalOp::Timeout(_)
+		| LogicalOp::VersionScope(_)
+		| LogicalOp::Only(_)
+		| LogicalOp::Explain(_)
+		| LogicalOp::Eval(_)
+		| LogicalOp::Sequence(_)
+		| LogicalOp::Let(_)
+		| LogicalOp::Foreach(_)
+		| LogicalOp::If(_)
+		| LogicalOp::Throw(_)
+		| LogicalOp::Break(_)
+		| LogicalOp::Continue(_)
+		| LogicalOp::Info(_)
+		| LogicalOp::Sleep(_) => None,
 	}
 }
 
@@ -116,7 +144,35 @@ fn clause_of_mut(op: &mut LogicalOp) -> Option<(Clause, &mut Vec<LogicalExpr>)> 
 		LogicalOp::Project(project) => Some((Clause::Omit, &mut project.omit)),
 		LogicalOp::Fetch(fetch) => Some((Clause::Fetch, &mut fetch.fetches)),
 		LogicalOp::Return(statement) => Some((Clause::Fetch, &mut statement.fetch)),
-		_ => None,
+		LogicalOp::Source(_)
+		| LogicalOp::Values(_)
+		| LogicalOp::Match(_)
+		| LogicalOp::Subquery(_)
+		| LogicalOp::Write(_)
+		| LogicalOp::Ddl(_)
+		| LogicalOp::UnionAll(_)
+		| LogicalOp::Join(_)
+		| LogicalOp::Filter(_)
+		| LogicalOp::PermissionFilter(_)
+		| LogicalOp::Split(_)
+		| LogicalOp::Aggregate(_)
+		| LogicalOp::Distinct(_)
+		| LogicalOp::Sort(_)
+		| LogicalOp::Limit(_)
+		| LogicalOp::Timeout(_)
+		| LogicalOp::VersionScope(_)
+		| LogicalOp::Only(_)
+		| LogicalOp::Explain(_)
+		| LogicalOp::Eval(_)
+		| LogicalOp::Sequence(_)
+		| LogicalOp::Let(_)
+		| LogicalOp::Foreach(_)
+		| LogicalOp::If(_)
+		| LogicalOp::Throw(_)
+		| LogicalOp::Break(_)
+		| LogicalOp::Continue(_)
+		| LogicalOp::Info(_)
+		| LogicalOp::Sleep(_) => None,
 	}
 }
 
@@ -209,7 +265,70 @@ fn walk_scalar(expr: &mut LogicalExpr, bound: &mut Vec<String>, f: &mut ClauseVi
 	match expr {
 		LogicalExpr::Subquery(plan) => walk(plan, bound, f),
 		LogicalExpr::Closure(_) => {}
-		_ => {
+		LogicalExpr::Literal(_)
+		| LogicalExpr::Array(_)
+		| LogicalExpr::Set(_)
+		| LogicalExpr::Object(_)
+		| LogicalExpr::RecordId(_)
+		| LogicalExpr::Param(_)
+		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
+		| LogicalExpr::Constant(_)
+		| LogicalExpr::Field(_)
+		| LogicalExpr::Doc
+		| LogicalExpr::Current
+		| LogicalExpr::Access {
+			..
+		}
+		| LogicalExpr::Index {
+			..
+		}
+		| LogicalExpr::First(_)
+		| LogicalExpr::Last(_)
+		| LogicalExpr::Each(_)
+		| LogicalExpr::Flatten {
+			..
+		}
+		| LogicalExpr::Filter {
+			..
+		}
+		| LogicalExpr::Method {
+			..
+		}
+		| LogicalExpr::Destructure {
+			..
+		}
+		| LogicalExpr::Optional {
+			..
+		}
+		| LogicalExpr::Lookup {
+			..
+		}
+		| LogicalExpr::Recurse(_)
+		| LogicalExpr::RepeatRecurse(_)
+		| LogicalExpr::Broadcast {
+			..
+		}
+		| LogicalExpr::SetField {
+			..
+		}
+		| LogicalExpr::Prefix {
+			..
+		}
+		| LogicalExpr::Postfix {
+			..
+		}
+		| LogicalExpr::Invoke {
+			..
+		}
+		| LogicalExpr::Binary {
+			..
+		}
+		| LogicalExpr::Call(_)
+		| LogicalExpr::If(_)
+		| LogicalExpr::Throw(_)
+		| LogicalExpr::Break
+		| LogicalExpr::Continue => {
 			for child in expr.children_mut() {
 				walk_scalar(child, bound, f);
 			}

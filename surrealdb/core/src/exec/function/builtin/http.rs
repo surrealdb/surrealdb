@@ -225,11 +225,14 @@ async fn http_request(
 		// Add body if present
 		if let Some(b) = body {
 			let public_body = crate::val::convert_value_to_public_value(b)?;
-			req = match public_body {
-				PublicValue::Bytes(v) => req.body(v.into_inner()),
-				PublicValue::String(v) => req.body(v),
-				_ if !public_body.is_nullish() => req.json(&public_body.into_json_value()),
-				_ => req,
+			req = if let PublicValue::Bytes(v) = public_body {
+				req.body(v.into_inner())
+			} else if let PublicValue::String(v) = public_body {
+				req.body(v)
+			} else if !public_body.is_nullish() {
+				req.json(&public_body.into_json_value())
+			} else {
+				req
 			};
 		}
 

@@ -302,9 +302,10 @@ pub(crate) async fn expand_shortest(
 		);
 		return Ok(true);
 	};
-	let source_obj = match row {
-		Value::Object(obj) => obj.get(&params.source).cloned().unwrap_or(Value::Null),
-		_ => Value::Null,
+	let source_obj = if let Value::Object(obj) = row {
+		obj.get(&params.source).cloned().unwrap_or(Value::Null)
+	} else {
+		Value::Null
 	};
 
 	// Per-source budget (frontier pushes + emits) and selector state.

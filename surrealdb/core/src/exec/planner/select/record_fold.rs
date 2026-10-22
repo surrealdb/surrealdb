@@ -215,11 +215,12 @@ async fn fold_record_walk(
 								return None;
 							}
 						};
-					match &record.data {
-						Value::Object(obj) => obj.get(name).cloned().unwrap_or(Value::None),
+					if let Value::Object(obj) = &record.data {
+						obj.get(name).cloned().unwrap_or(Value::None)
+					} else {
 						// Missing record (or non-object data): field access
 						// yields NONE, as at runtime.
-						_ => Value::None,
+						Value::None
 					}
 				}
 			}
@@ -228,7 +229,21 @@ async fn fold_record_walk(
 			// expose GeoJSON fields; neither walk is replicated here.
 			Value::Array(_) | Value::Geometry(_) => return None,
 			// Field access on any other value yields NONE at runtime.
-			_ => Value::None,
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Set(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => Value::None,
 		};
 	}
 	Some(pivot)
@@ -294,16 +309,20 @@ fn candidate_record_path(expr: &LogicalExpr) -> Option<(RecordId, Vec<Strand>)> 
 	let mut fields = Vec::new();
 	let mut current = expr;
 	let rid = loop {
-		match current {
-			LogicalExpr::Access {
-				base,
-				field,
-			} => {
-				fields.push(field.clone());
-				current = base;
+		if let LogicalExpr::Access {
+			base,
+			field,
+		} = current
+		{
+			fields.push(field.clone());
+			current = base;
+		} else if let LogicalExpr::RecordId(rid) = current {
+			if !fields.is_empty() {
+				break rid;
 			}
-			LogicalExpr::RecordId(rid) if !fields.is_empty() => break rid,
-			_ => return None,
+			return None;
+		} else {
+			return None;
 		}
 	};
 	fields.reverse();

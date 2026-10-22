@@ -226,6 +226,22 @@ fn value_to_file(value: Value) -> Result<DestinationFile> {
 			bucket: None,
 			key: s.into_string(),
 		}),
-		_ => Err(anyhow::anyhow!("Invalid destination file value")),
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Array(_)
+		| Value::Set(_)
+		| Value::Object(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => Err(anyhow::anyhow!("Invalid destination file value")),
 	}
 }

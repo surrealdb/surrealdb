@@ -76,7 +76,7 @@
 
 // Adding a `LogicalOp` variant must break every pass that has not stated its
 // position on it, which a wildcard arm would silently absorb.
-#![warn(clippy::wildcard_enum_match_arm)]
+#![deny(clippy::wildcard_enum_match_arm)]
 
 pub(crate) mod constants;
 pub(crate) mod effects;
@@ -602,47 +602,41 @@ pub(crate) fn unplannable_context_change(op: &LogicalOp) -> Option<String> {
 	/// reaches them. It never becomes true again once false: a block inside a
 	/// `FOR` is compiled once for every iteration the loop runs, and one
 	/// inside an expression is compiled with the statement holding it.
-	#[expect(
-		clippy::wildcard_enum_match_arm,
-		reason = "every other operator is judged by the schema statements beneath it"
-	)]
 	fn nested(op: &LogicalOp, covered: bool) -> Option<String> {
-		match op {
-			LogicalOp::Ddl(ddl) => {
-				let why = |what: &str| Some(format!("{} {what}", ddl.statement.kind()));
-				if changes_name_resolution(ddl) {
-					// The execution context resolved the session's names
-					// before the plan ran, and no later compilation revisits
-					// it.
-					why("inside another statement changes the name the plan resolved")
-				} else if covered {
-					None
-				} else {
-					why("inside another statement")
-				}
+		if let LogicalOp::Ddl(ddl) = op {
+			let why = |what: &str| Some(format!("{} {what}", ddl.statement.kind()));
+			if changes_name_resolution(ddl) {
+				// The execution context resolved the session's names
+				// before the plan ran, and no later compilation revisits
+				// it.
+				why("inside another statement changes the name the plan resolved")
+			} else if covered {
+				None
+			} else {
+				why("inside another statement")
 			}
-			LogicalOp::Sequence(seq) => seq.stmts.iter().find_map(|op| nested(op, covered)),
+		} else if let LogicalOp::Sequence(seq) = op {
+			seq.stmts.iter().find_map(|op| nested(op, covered))
+		} else {
 			// Nothing below here is covered, however it nests, so the whole
 			// subtree is one question. The walk reaches plans held in scalars
 			// too — an `IF` is an expression, and the block in its branch is a
 			// subquery rather than an operator child.
-			other => {
-				let mut found = None;
-				let mut seen_self = false;
-				let _ = other.visit_ops_deep(&mut |node| {
-					if !seen_self {
-						seen_self = true;
-						return std::ops::ControlFlow::Continue(());
-					}
-					if let LogicalOp::Ddl(ddl) = node {
-						found = nested(node, false);
-						let _ = ddl;
-						return std::ops::ControlFlow::Break(());
-					}
-					std::ops::ControlFlow::Continue(())
-				});
-				found
-			}
+			let mut found = None;
+			let mut seen_self = false;
+			let _ = op.visit_ops_deep(&mut |node| {
+				if !seen_self {
+					seen_self = true;
+					return std::ops::ControlFlow::Continue(());
+				}
+				if let LogicalOp::Ddl(ddl) = node {
+					found = nested(node, false);
+					let _ = ddl;
+					return std::ops::ControlFlow::Break(());
+				}
+				std::ops::ControlFlow::Continue(())
+			});
+			found
 		}
 	}
 

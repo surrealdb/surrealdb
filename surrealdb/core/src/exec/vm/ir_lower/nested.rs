@@ -481,7 +481,9 @@ impl Lowerer<'_> {
 			return match this {
 				Some(&root) if self.is_closure_root(root) => match self.value(root)? {
 					Operand::Reg(root) => Ok(Some(root)),
-					_ => Err(invariant("a closure body's document root read into no register")),
+					Operand::Const(_) | Operand::Field(_) => {
+						Err(invariant("a closure body's document root read into no register"))
+					}
 				},
 				_ => Ok(None),
 			};
@@ -1120,13 +1122,17 @@ mod tests {
 		program.pipelines[0]
 			.code
 			.iter()
-			.find_map(|instr| match instr {
-				Instr::Block(
+			.find_map(|instr| {
+				if let Instr::Block(
 					block @ BlockInstr::Nested {
 						..
 					},
-				) => Some(block),
-				_ => None,
+				) = instr
+				{
+					Some(block)
+				} else {
+					None
+				}
 			})
 			.expect("the nested statement is emitted")
 	}
@@ -1612,12 +1618,15 @@ mod tests {
 			})
 			.collect();
 		assert!(read.iter().all(|read| *read < at));
-		let param = |at: usize| match &code[at] {
-			Instr::LoadParam {
+		let param = |at: usize| {
+			let Instr::LoadParam {
 				param,
 				..
-			} => program.params[*param as usize].name.clone(),
-			_ => panic!("an input is read as a parameter"),
+			} = &code[at]
+			else {
+				panic!("an input is read as a parameter");
+			};
+			program.params[*param as usize].name.clone()
 		};
 		assert_eq!(param(read[0]), Strand::new("y"));
 		assert_eq!(param(read[1]), Strand::new("x"));
@@ -1680,12 +1689,16 @@ mod tests {
 		let names: Vec<_> = program.pipelines[0]
 			.code
 			.iter()
-			.filter_map(|i| match i {
-				Instr::LoadParam {
+			.filter_map(|i| {
+				if let Instr::LoadParam {
 					param,
 					..
-				} => Some(program.params[*param as usize].name.clone()),
-				_ => None,
+				} = i
+				{
+					Some(program.params[*param as usize].name.clone())
+				} else {
+					None
+				}
 			})
 			.collect();
 		assert_eq!(names, vec![unit_input_name(0)]);
@@ -1735,12 +1748,16 @@ mod tests {
 		let code = &program.pipelines[0].code;
 		let root = code
 			.iter()
-			.find_map(|instr| match instr {
-				Instr::DocumentRoot {
+			.find_map(|instr| {
+				if let Instr::DocumentRoot {
 					dst,
 					..
-				} => Some(*dst),
-				_ => None,
+				} = instr
+				{
+					Some(*dst)
+				} else {
+					None
+				}
 			})
 			.expect("the document root is read");
 		let (
@@ -1814,24 +1831,31 @@ mod tests {
 		let (enter, entered_frame) = code
 			.iter()
 			.enumerate()
-			.find_map(|(at, instr)| match instr {
-				Instr::FunctionEnter {
+			.find_map(|(at, instr)| {
+				if let Instr::FunctionEnter {
 					frame,
 					..
-				} => Some((at, *frame)),
-				_ => None,
+				} = instr
+				{
+					Some((at, *frame))
+				} else {
+					None
+				}
 			})
 			.expect("the call enters its function");
 		let (call, args) = code
 			.iter()
 			.enumerate()
-			.find_map(|(at, instr)| match instr {
-				Instr::FunctionCall {
+			.find_map(|(at, instr)| {
+				if let Instr::FunctionCall {
 					frame,
 					args,
 					..
-				} if *frame == entered_frame => Some((at, args.as_slice())),
-				_ => None,
+				} = instr && *frame == entered_frame
+				{
+					return Some((at, args.as_slice()));
+				}
+				None
 			})
 			.expect("the call runs the body in the frame it entered");
 		(enter, call, entered_frame, args)
@@ -1896,12 +1920,16 @@ mod tests {
 			.code
 			.iter()
 			.enumerate()
-			.find_map(|(at, instr)| match instr {
-				Instr::Call {
+			.find_map(|(at, instr)| {
+				if let Instr::Call {
 					frame,
 					..
-				} => Some((at, *frame)),
-				_ => None,
+				} = instr
+				{
+					Some((at, *frame))
+				} else {
+					None
+				}
 			})
 			.expect("the argument calls its builtin");
 		assert!(at > enter, "the call checks what it may call before its arguments");
@@ -2059,12 +2087,16 @@ mod tests {
 				..
 			}
 		)));
-		let outer = program.pipelines[0].code.iter().find_map(|instr| match instr {
-			Instr::FunctionEnter {
+		let outer = program.pipelines[0].code.iter().find_map(|instr| {
+			if let Instr::FunctionEnter {
 				outer,
 				..
-			} => Some(*outer),
-			_ => None,
+			} = instr
+			{
+				Some(*outer)
+			} else {
+				None
+			}
 		});
 		assert_eq!(outer, Some(Some(guard)), "the call returns to the frame it was made in");
 	}
@@ -2135,10 +2167,10 @@ mod tests {
 		assert_eq!(stated, 2);
 		let callee = |value: ValueId| {
 			let op = crate::exec::vm::ir_lower::read::producer_of(&b.ir, value).expect("a call");
-			match &b.ir.op(op).expect("the call").kind {
-				OpKind::Expr(ExprOp::Call(call)) => call.callee.clone(),
-				other => panic!("not a call: {other:?}"),
-			}
+			let OpKind::Expr(ExprOp::Call(call)) = &b.ir.op(op).expect("the call").kind else {
+				panic!("not a call: {:?}", b.ir.op(op).expect("the call").kind);
+			};
+			call.callee.clone()
 		};
 		assert_eq!(callee(gone), Some(CalleeFacts::Absent));
 		assert_eq!(callee(unknown), Some(CalleeFacts::LateBound));

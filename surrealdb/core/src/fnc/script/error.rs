@@ -17,7 +17,7 @@ impl From<js::CaughtError<'_>> for Error {
 			js::CaughtError::Error(js::Error::Unknown) => ExecError::InvalidScript {
 				message: "An unknown error occurred".to_string(),
 			},
-			_ => ExecError::InvalidScript {
+			js::CaughtError::Error(_) | js::CaughtError::Value(_) => ExecError::InvalidScript {
 				message: e.to_string(),
 			},
 		}

@@ -48,10 +48,11 @@ async fn assert_cases(ds: &Datastore, ses: &Session, cases: &[(&str, &str)]) {
 /// re-quote it as a SQL string literal and escape its newlines, breaking
 /// a per-line search.
 async fn analyze_text(ds: &Datastore, ses: &Session, query: &str) -> String {
-	match run(ds, ses, query).await.remove(0) {
-		Value::String(text) => text,
-		other => panic!("expected EXPLAIN ANALYZE to answer a string, got {other:?}"),
-	}
+	let res = run(ds, ses, query).await.remove(0);
+	let Value::String(text) = res else {
+		panic!("expected EXPLAIN ANALYZE to answer a string, got {res:?}");
+	};
+	text
 }
 
 /// Persons 1..=8 with `flag = true` on the even ones, an indexed `flag`

@@ -493,7 +493,13 @@ impl SpilledJoin {
 	fn spec(&self, kind: BreakerKind) -> RunSpec {
 		let arity = match kind {
 			BreakerKind::JoinOut => 2,
-			_ => self.width + 1,
+			BreakerKind::Sort
+			| BreakerKind::Groups
+			| BreakerKind::DistinctSeen
+			| BreakerKind::DistinctDeferred
+			| BreakerKind::DistinctKept
+			| BreakerKind::JoinBuild
+			| BreakerKind::JoinProbe => self.width + 1,
 		};
 		RunSpec::new(kind, self.index, arity, RunOrder::Plain)
 	}
@@ -621,7 +627,7 @@ impl SpilledJoin {
 				while let Some((build_keys, _)) = &head {
 					match build_keys[..width].cmp(&keys[..]) {
 						Ordering::Greater => break,
-						order => {
+						order @ (Ordering::Less | Ordering::Equal) => {
 							let (build_keys, build_row) = head.take().expect("checked above");
 							self.offer(&build_keys[..width], &build_row, &mut regex_matches);
 							if order == Ordering::Equal {

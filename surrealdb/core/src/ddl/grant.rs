@@ -228,23 +228,22 @@ pub(crate) async fn create_grant(
 
 			// Create the grant.
 			// On the very unlikely event of a collision, "put" will return an error.
-			let res = match base {
-				Base::Db => {
-					// Create a hashed version of the grant for storage.
-					let mut gr_store = gr.clone();
-					gr_store.grant = catalog::Grant::Bearer(grant.hashed());
+			if !matches!(base, Base::Db) {
+				bail!(ExecError::AccessLevelMismatch);
+			}
 
-					let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-					let key = DbGrantKey {
-						ns,
-						db,
-						ac: Cow::Borrowed(&gr.ac),
-						gr: Cow::Borrowed(&gr.id),
-					};
-					txn.put_key(&key, &gr_store).await
-				}
-				_ => bail!(ExecError::AccessLevelMismatch),
+			// Create a hashed version of the grant for storage.
+			let mut gr_store = gr.clone();
+			gr_store.grant = catalog::Grant::Bearer(grant.hashed());
+
+			let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+			let key = DbGrantKey {
+				ns,
+				db,
+				ac: Cow::Borrowed(&gr.ac),
+				gr: Cow::Borrowed(&gr.id),
 			};
+			let res = txn.put_key(&key, &gr_store).await;
 
 			// Check if a collision was found in order to log a specific error on the server.
 			// For an access method with a billion grants, this chance is of only one in 295

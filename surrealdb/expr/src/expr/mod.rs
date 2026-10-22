@@ -1,5 +1,7 @@
 //! The type definitions for the computation format of the surreaql executor.
 
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use anyhow::Result;
 
 use crate::val::Value;
@@ -178,6 +180,37 @@ impl ControlFlow {
 				// Unknown error types are not ignorable
 				None => false,
 			},
+		}
+	}
+
+	/// Extracts the inner [`anyhow::Error`] if `self` is [`ControlFlow::Err`],
+	/// or returns `Err(self)` for `Break`, `Continue`, or `Return`.
+	pub fn try_into_err(self) -> std::result::Result<anyhow::Error, Self> {
+		match self {
+			ControlFlow::Err(e) => Ok(e),
+			other @ (ControlFlow::Break | ControlFlow::Continue | ControlFlow::Return(_)) => {
+				Err(other)
+			}
+		}
+	}
+
+	/// Extracts the inner [`anyhow::Error`] if `self` is [`ControlFlow::Err`],
+	/// or converts a non-error control flow signal into an error via `f`.
+	pub fn into_error_or(self, f: impl FnOnce(Self) -> anyhow::Error) -> anyhow::Error {
+		match self {
+			ControlFlow::Err(e) => e,
+			other @ (ControlFlow::Break | ControlFlow::Continue | ControlFlow::Return(_)) => {
+				f(other)
+			}
+		}
+	}
+
+	/// Maps a [`ControlFlow::Err`] payload with `f`, leaving `Break`,
+	/// `Continue`, and `Return` untouched.
+	pub fn map_err(self, f: impl FnOnce(anyhow::Error) -> anyhow::Error) -> Self {
+		match self {
+			ControlFlow::Err(e) => ControlFlow::Err(f(e)),
+			other @ (ControlFlow::Break | ControlFlow::Continue | ControlFlow::Return(_)) => other,
 		}
 	}
 }

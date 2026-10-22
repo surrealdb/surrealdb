@@ -206,10 +206,10 @@ pub(crate) fn evaluate_leaf_on_wire(
 			}
 			let haystack = &r[..len];
 			let hit = memchr::memmem::find(haystack, utf8).is_some();
-			let truth = match op {
-				BinaryOperator::Contain => hit,
-				BinaryOperator::NotContain => !hit,
-				_ => unreachable!(),
+			let truth = if matches!(op, BinaryOperator::Contain) {
+				hit
+			} else {
+				!hit
 			};
 			Some(evidence_bool(truth))
 		}
@@ -239,16 +239,45 @@ pub(crate) fn evaluate_leaf_on_wire(
 			} else {
 				order
 			};
-			let truth = match op {
-				BinaryOperator::LessThan => order == std::cmp::Ordering::Less,
-				BinaryOperator::LessThanEqual => order != std::cmp::Ordering::Greater,
-				BinaryOperator::MoreThan => order == std::cmp::Ordering::Greater,
-				BinaryOperator::MoreThanEqual => order != std::cmp::Ordering::Less,
-				_ => unreachable!(),
+			let truth = if matches!(op, BinaryOperator::LessThan) {
+				order == std::cmp::Ordering::Less
+			} else if matches!(op, BinaryOperator::LessThanEqual) {
+				order != std::cmp::Ordering::Greater
+			} else if matches!(op, BinaryOperator::MoreThan) {
+				order == std::cmp::Ordering::Greater
+			} else {
+				order != std::cmp::Ordering::Less
 			};
 			Some(evidence_bool(truth))
 		}
-		_ => None,
+		BinaryOperator::Subtract
+		| BinaryOperator::Add
+		| BinaryOperator::Multiply
+		| BinaryOperator::Divide
+		| BinaryOperator::Remainder
+		| BinaryOperator::Power
+		| BinaryOperator::AllEqual
+		| BinaryOperator::AnyEqual
+		| BinaryOperator::Or
+		| BinaryOperator::And
+		| BinaryOperator::NullCoalescing
+		| BinaryOperator::TenaryCondition
+		| BinaryOperator::ContainAll
+		| BinaryOperator::ContainAny
+		| BinaryOperator::ContainNone
+		| BinaryOperator::Inside
+		| BinaryOperator::NotInside
+		| BinaryOperator::AllInside
+		| BinaryOperator::AnyInside
+		| BinaryOperator::NoneInside
+		| BinaryOperator::Outside
+		| BinaryOperator::Intersects
+		| BinaryOperator::Range
+		| BinaryOperator::RangeInclusive
+		| BinaryOperator::RangeSkip
+		| BinaryOperator::RangeSkipInclusive
+		| BinaryOperator::Matches(_)
+		| BinaryOperator::NearestNeighbor(_) => None,
 	}
 }
 
@@ -509,21 +538,21 @@ fn wire_eq(value_bytes: &[u8], lit: &LiteralWire) -> Option<bool> {
 /// equalities disagree on, a Strand literal and a Regex-tagged field, is one
 /// it bails on.
 fn wire_exact_eq(value_bytes: &[u8], lit: &LiteralWire) -> Option<bool> {
-	match lit {
-		LiteralWire::Regex {
-			regex: _,
-			full_wire,
-		} => {
-			let peek = peek_value(value_bytes)?;
-			if peek.tag.variant_id() != variant_id::REGEX {
-				return Some(false);
-			}
-			// A regex's wire holds its pattern, which is all `Regex`'s
-			// `PartialEq` compares, and the serialiser writes one wire per
-			// pattern, so byte-eq decides it.
-			Some(value_bytes == full_wire.as_slice())
+	if let LiteralWire::Regex {
+		full_wire,
+		..
+	} = lit
+	{
+		let peek = peek_value(value_bytes)?;
+		if peek.tag.variant_id() != variant_id::REGEX {
+			return Some(false);
 		}
-		_ => wire_eq(value_bytes, lit),
+		// A regex's wire holds its pattern, which is all `Regex`'s
+		// `PartialEq` compares, and the serialiser writes one wire per
+		// pattern, so byte-eq decides it.
+		Some(value_bytes == full_wire.as_slice())
+	} else {
+		wire_eq(value_bytes, lit)
 	}
 }
 

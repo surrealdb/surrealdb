@@ -1,4 +1,5 @@
 #![recursion_limit = "256"]
+#![deny(clippy::wildcard_enum_match_arm)]
 // The crate's `allocator` feature installs the crate's own global allocator,
 // and a binary has one, so with it this harness compiles to nothing.
 #![cfg(not(feature = "allocator"))]

@@ -69,7 +69,14 @@ impl ValueKind {
 			Value::Geometry(_) => Some(ValueKind::Geometry),
 			Value::RecordId(_) => Some(ValueKind::Record),
 			Value::File(_) => Some(ValueKind::File),
-			_ => None,
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Uuid(_)
+			| Value::Table(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => None,
 		}
 	}
 }

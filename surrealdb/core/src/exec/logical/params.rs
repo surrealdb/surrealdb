@@ -372,44 +372,43 @@ fn referenced_and_bound(op: &LogicalOp) -> ReferencedNames {
 
 /// Adds the names `rows` reads as a whole source to `names`: its own, or those of the leaves of the
 /// union it is. Every other plan reads no parameter as a whole source.
-#[allow(clippy::wildcard_enum_match_arm)]
 fn source_params(rows: &LogicalOp, names: &mut HashSet<String>) {
-	match rows {
-		LogicalOp::Source(LogicalSource {
-			source: SourceRef::Param(param),
-			..
-		}) => {
-			names.insert(param.as_str().to_owned());
+	if let LogicalOp::Source(LogicalSource {
+		source: SourceRef::Param(param),
+		..
+	}) = rows
+	{
+		names.insert(param.as_str().to_owned());
+	} else if let LogicalOp::UnionAll(union) = rows {
+		for input in &union.inputs {
+			source_params(input, names);
 		}
-		LogicalOp::UnionAll(union) => {
-			for input in &union.inputs {
-				source_params(input, names);
-			}
-		}
-		_ => {}
 	}
 }
 
 /// Replaces the `Values` leaf [`substitute_node`] made of each record id list parameter among the
 /// subjects `rows` is, directly or as a leaf of the union it is, with the list's literal.
-#[allow(clippy::wildcard_enum_match_arm)]
 fn subject_literals(rows: &mut LogicalOp, subs: &Substitutions) {
-	let literal = match rows {
-		LogicalOp::Values(LogicalValues {
-			expr: LogicalExpr::Param(param),
-			for_update,
-			..
-		}) if subs.record_id_lists.contains(param.as_str()) => subs
-			.literals
-			.get(param.as_str())
-			.map(|literal| classify_source(literal.clone(), None, None, *for_update)),
-		LogicalOp::UnionAll(union) => {
-			for input in &mut union.inputs {
-				subject_literals(input, subs);
-			}
+	let literal = if let LogicalOp::Values(LogicalValues {
+		expr: LogicalExpr::Param(param),
+		for_update,
+		..
+	}) = rows
+	{
+		if subs.record_id_lists.contains(param.as_str()) {
+			subs.literals
+				.get(param.as_str())
+				.map(|literal| classify_source(literal.clone(), None, None, *for_update))
+		} else {
 			None
 		}
-		_ => None,
+	} else if let LogicalOp::UnionAll(union) = rows {
+		for input in &mut union.inputs {
+			subject_literals(input, subs);
+		}
+		None
+	} else {
+		None
 	};
 	if let Some(literal) = literal {
 		*rows = literal;
@@ -995,7 +994,6 @@ mod tests {
 	/// the literal at the write alone: the write names the tables of the ids when the plan is
 	/// planned, and every read of the list keeps the parameter.
 	#[tokio::test]
-	#[allow(clippy::wildcard_enum_match_arm)]
 	async fn a_record_id_list_is_a_write_subject_and_a_source_in_one_plan() {
 		let list = ids("person", &[2, 1]);
 		for statement in [
@@ -1006,16 +1004,20 @@ mod tests {
 			let plan = bound(lower(statement), vec![("ids", list.clone())]).await;
 			let mut subjects = Vec::new();
 			let mut reads = 0;
-			visit_deep(&plan, &mut |node| match node {
-				LogicalOp::Write(LogicalWrite {
+			visit_deep(&plan, &mut |node| {
+				if let LogicalOp::Write(LogicalWrite {
 					source,
 					..
-				}) => subjects.push(super::super::footprint::write_targets(source)),
-				LogicalOp::Values(LogicalValues {
+				}) = node
+				{
+					subjects.push(super::super::footprint::write_targets(source));
+				} else if let LogicalOp::Values(LogicalValues {
 					expr: LogicalExpr::Param(_),
 					..
-				}) => reads += 1,
-				_ => {}
+				}) = node
+				{
+					reads += 1;
+				}
 			});
 			let person = TableName::from("person");
 			assert_eq!(subjects, [Some(vec![person.clone(), person])], "{statement}:\n{plan}");

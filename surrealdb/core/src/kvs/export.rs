@@ -936,10 +936,12 @@ const FAN_OUT_SAMPLE: usize = 8;
 /// record, per batch.
 fn index_fan_out(data: &val::Value, cols: &[Idiom]) -> usize {
 	fn entries(v: &val::Value) -> usize {
-		match v {
-			val::Value::Array(a) => a.len().max(1),
-			val::Value::Set(set) => set.len().max(1),
-			_ => 1,
+		if let val::Value::Array(a) = v {
+			a.len().max(1)
+		} else if let val::Value::Set(set) = v {
+			set.len().max(1)
+		} else {
+			1
 		}
 	}
 	cols.iter()
@@ -974,7 +976,22 @@ fn reference_fan_out(data: &val::Value, name: &Idiom) -> usize {
 			val::Value::Array(a) => a.iter().filter(|v| v.is_record()).count(),
 			val::Value::Set(set) => set.iter().filter(|v| v.is_record()).count(),
 			val::Value::RecordId(_) => 1,
-			_ => 0,
+			val::Value::None
+			| val::Value::Null
+			| val::Value::Bool(_)
+			| val::Value::Number(_)
+			| val::Value::String(_)
+			| val::Value::Duration(_)
+			| val::Value::Datetime(_)
+			| val::Value::Uuid(_)
+			| val::Value::Object(_)
+			| val::Value::Geometry(_)
+			| val::Value::Bytes(_)
+			| val::Value::Table(_)
+			| val::Value::File(_)
+			| val::Value::Regex(_)
+			| val::Value::Range(_)
+			| val::Value::Closure(_) => 0,
 		}
 	}
 	let mut ids = 0;

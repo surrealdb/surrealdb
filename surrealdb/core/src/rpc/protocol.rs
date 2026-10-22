@@ -41,9 +41,10 @@ use crate::types::{
 
 /// utility function converting a `Value::String` into a `Expr::Table`
 fn value_to_table(value: PublicValue) -> Expr {
-	match value {
-		PublicValue::String(s) => Expr::Table(surrealdb_strand::TableName::new(s)),
-		x => Expr::from_surface_value(x),
+	if let PublicValue::String(s) = value {
+		Expr::Table(surrealdb_strand::TableName::new(s))
+	} else {
+		Expr::from_surface_value(value)
 	}
 }
 
@@ -52,10 +53,12 @@ fn value_to_table(value: PublicValue) -> Expr {
 /// As this rpc is some what convuluted the singular conditions is not the same
 /// for all cases.
 fn singular(value: &PublicValue) -> bool {
-	match value {
-		PublicValue::Object(_) => true,
-		PublicValue::RecordId(t) => !matches!(t.key, PublicRecordIdKey::Range(_)),
-		_ => false,
+	if matches!(value, PublicValue::Object(_)) {
+		true
+	} else if let PublicValue::RecordId(t) = value {
+		!matches!(t.key, PublicRecordIdKey::Range(_))
+	} else {
+		false
 	}
 }
 
@@ -70,7 +73,39 @@ const fn method_to_auth_action(method: Method) -> Option<AuthAction> {
 		Method::Refresh => Some(AuthAction::Refresh),
 		Method::Invalidate => Some(AuthAction::Invalidate),
 		Method::Revoke => Some(AuthAction::Revoke),
-		_ => None,
+		Method::Unknown
+		| Method::Ping
+		| Method::Info
+		| Method::Use
+		| Method::Reset
+		| Method::Kill
+		| Method::Live
+		| Method::Set
+		| Method::Unset
+		| Method::Select
+		| Method::Insert
+		| Method::Create
+		| Method::Upsert
+		| Method::Update
+		| Method::Merge
+		| Method::Patch
+		| Method::Delete
+		| Method::Version
+		| Method::Query
+		| Method::Gql
+		| Method::Graphql
+		| Method::Relate
+		| Method::Run
+		| Method::InsertRelation
+		| Method::Attach
+		| Method::Sessions
+		| Method::Detach
+		| Method::Begin
+		| Method::Commit
+		| Method::Cancel
+		| Method::QueryStream
+		| Method::QueryCancel
+		| _ => None,
 	}
 }
 
@@ -568,6 +603,7 @@ pub trait RpcProtocol {
 				// absent.
 				Method::QueryStream => Err(method_not_found(method.to_string())),
 				Method::QueryCancel => self.query_cancel(params).await,
+				Method::Unknown => Err(method_not_found(method.to_string())),
 				_ => Err(method_not_found(method.to_string())),
 			};
 			// On success, persist the session if dispatch changed it (or
@@ -731,17 +767,19 @@ pub trait RpcProtocol {
 		// anonymous (`Level::No`, e.g. `use` before `signin`) principals are
 		// unrestricted by `can_access_ns_db`, preserving the pre-signin pattern.
 		{
-			let resolved_ns = match &ns {
-				PublicValue::String(ns) => Some(ns.as_str()),
-				PublicValue::Null => None,
-				// `None` (leave unchanged) or an invalid type (rejected below)
-				// keeps the current selection for the boundary check.
-				_ => session.ns.as_deref(),
+			let resolved_ns = if let PublicValue::String(ns) = &ns {
+				Some(ns.as_str())
+			} else if let PublicValue::Null = &ns {
+				None
+			} else {
+				session.ns.as_deref()
 			};
-			let resolved_db = match &db {
-				PublicValue::String(db) => Some(db.as_str()),
-				PublicValue::Null => None,
-				_ => session.db.as_deref(),
+			let resolved_db = if let PublicValue::String(db) = &db {
+				Some(db.as_str())
+			} else if let PublicValue::Null = &db {
+				None
+			} else {
+				session.db.as_deref()
 			};
 			if let Some(ns_name) = resolved_ns {
 				let db_name = resolved_db.unwrap_or_default();
@@ -842,91 +880,81 @@ pub trait RpcProtocol {
 			// See `SECURITY_GUIDE.md` section 3.
 			//
 			// Update the selected namespace
-			match ns {
-				PublicValue::None => (),
-				PublicValue::Null => session.ns = None,
-				PublicValue::String(ns) => {
-					let kvs = self.kvs();
-					let tx = kvs
-						.transaction(TransactionType::Write)
-						.await
-						.map_err(types_error_from_anyhow)?;
-					// Cancel before returning: this check runs with `tx` already
-					// open, so propagating its error directly would drop a
-					// writeable transaction without committing or cancelling it,
-					// tripping `Transactor::drop`'s "a transaction was dropped
-					// without being committed or cancelled" error and leaving the
-					// transaction to be reaped instead of rolled back promptly.
-					let create =
-						match kvs.should_materialize_ns_on_use(&tx, session.au.as_ref(), &ns).await
-						{
-							Ok(create) => create,
-							Err(e) => {
-								let _ = tx.cancel().await;
-								return Err(types_error_from_anyhow(e));
-							}
-						};
-					if create {
-						run!(tx, tx.get_or_add_ns(None, &ns).await)
-							.map_err(types_error_from_anyhow)?;
-					} else {
-						let _ = tx.cancel().await;
-					}
-					session.ns = Some(ns)
-				}
-				unexpected => {
-					return Err(invalid_params(format!(
-						"Expected ns to be string, got {unexpected:?}"
-					)));
-				}
-			}
-			// Update the selected database
-			match db {
-				PublicValue::None => (),
-				PublicValue::Null => session.db = None,
-				PublicValue::String(db) => {
-					// SECURITY: a `use` call that sets `db` without a namespace
-					// previously hit `.expect("namespace should be set")`, and the
-					// crate's `panic = 'abort'` setting would have aborted the
-					// whole server process — a one-RPC remote DoS. Return a clean
-					// error instead.
-					let Some(ns) = session.ns.clone() else {
-						return Err(invalid_params(
-							"Cannot set database without first selecting a namespace".to_string(),
-						));
-					};
-					let kvs = self.kvs();
-					let tx = kvs
-						.transaction(TransactionType::Write)
-						.await
-						.map_err(types_error_from_anyhow)?;
-					// Cancel before returning, as in the namespace branch above: a
-					// bare `?` here would drop `tx` while it is still open. A
-					// single `use(ns, db)` call passes through both branches, so
-					// the unguarded form could leak two transactions per call.
-					let create = match kvs
-						.should_materialize_db_on_use(&tx, session.au.as_ref(), &ns, &db)
-						.await
-					{
+			if let PublicValue::None = ns {
+			} else if let PublicValue::Null = ns {
+				session.ns = None;
+			} else if let PublicValue::String(ns) = ns {
+				let kvs = self.kvs();
+				let tx = kvs
+					.transaction(TransactionType::Write)
+					.await
+					.map_err(types_error_from_anyhow)?;
+				// Cancel before returning: this check runs with `tx` already
+				// open, so propagating its error directly would drop a
+				// writeable transaction without committing or cancelling it,
+				// tripping `Transactor::drop`'s "a transaction was dropped
+				// without being committed or cancelled" error and leaving the
+				// transaction to be reaped instead of rolled back promptly.
+				let create =
+					match kvs.should_materialize_ns_on_use(&tx, session.au.as_ref(), &ns).await {
 						Ok(create) => create,
 						Err(e) => {
 							let _ = tx.cancel().await;
 							return Err(types_error_from_anyhow(e));
 						}
 					};
-					if create {
-						run!(tx, tx.ensure_ns_db(None, &ns, &db).await)
-							.map_err(types_error_from_anyhow)?;
-					} else {
+				if create {
+					run!(tx, tx.get_or_add_ns(None, &ns).await).map_err(types_error_from_anyhow)?;
+				} else {
+					let _ = tx.cancel().await;
+				}
+				session.ns = Some(ns);
+			} else {
+				return Err(invalid_params(format!("Expected ns to be string, got {ns:?}")));
+			}
+			// Update the selected database
+			if let PublicValue::None = db {
+			} else if let PublicValue::Null = db {
+				session.db = None;
+			} else if let PublicValue::String(db) = db {
+				// SECURITY: a `use` call that sets `db` without a namespace
+				// previously hit `.expect("namespace should be set")`, and the
+				// crate's `panic = 'abort'` setting would have aborted the
+				// whole server process — a one-RPC remote DoS. Return a clean
+				// error instead.
+				let Some(ns) = session.ns.clone() else {
+					return Err(invalid_params(
+						"Cannot set database without first selecting a namespace".to_string(),
+					));
+				};
+				let kvs = self.kvs();
+				let tx = kvs
+					.transaction(TransactionType::Write)
+					.await
+					.map_err(types_error_from_anyhow)?;
+				// Cancel before returning, as in the namespace branch above: a
+				// bare `?` here would drop `tx` while it is still open. A
+				// single `use(ns, db)` call passes through both branches, so
+				// the unguarded form could leak two transactions per call.
+				let create = match kvs
+					.should_materialize_db_on_use(&tx, session.au.as_ref(), &ns, &db)
+					.await
+				{
+					Ok(create) => create,
+					Err(e) => {
 						let _ = tx.cancel().await;
+						return Err(types_error_from_anyhow(e));
 					}
-					session.db = Some(db)
+				};
+				if create {
+					run!(tx, tx.ensure_ns_db(None, &ns, &db).await)
+						.map_err(types_error_from_anyhow)?;
+				} else {
+					let _ = tx.cancel().await;
 				}
-				unexpected => {
-					return Err(invalid_params(format!(
-						"Expected db to be string, got {unexpected:?}"
-					)));
-				}
+				session.db = Some(db);
+			} else {
+				return Err(invalid_params(format!("Expected db to be string, got {db:?}")));
 			}
 		}
 		// Clear any residual database
@@ -1338,9 +1366,10 @@ pub trait RpcProtocol {
 			.ok_or(invalid_params("Expected (what, diff)".to_string()))?;
 
 		// If value is a strand, handle it as if it was a table.
-		let what = match what {
-			PublicValue::String(x) => Expr::Table(surrealdb_strand::TableName::new(x)),
-			x => Expr::from_surface_value(x),
+		let what = if let PublicValue::String(x) = what {
+			Expr::Table(surrealdb_strand::TableName::new(x))
+		} else {
+			Expr::from_surface_value(what)
 		};
 
 		let fields = if diff.unwrap_or_default().is_true() {
@@ -1395,9 +1424,10 @@ pub trait RpcProtocol {
 
 		// If the what is a single record with a non range value, make it return only a
 		// single result.
-		let only = match what {
-			PublicValue::RecordId(ref x) => !x.key.is_range(),
-			_ => false,
+		let only = if let PublicValue::RecordId(ref x) = what {
+			!x.key.is_range()
+		} else {
+			false
 		};
 
 		// Specify the query parameters
@@ -1406,13 +1436,13 @@ pub trait RpcProtocol {
 		// A single record is read through a variable, so the statement is one
 		// text whichever record it names, kept compiled for later requests. If
 		// value is a string, handle it as if it was a table.
-		let what = match what {
-			PublicValue::RecordId(id) if only => {
-				vars.insert(SELECT_RECORD_PARAM, PublicValue::RecordId(id));
-				Expr::Param(crate::expr::Param::from(SELECT_RECORD_PARAM.to_owned()))
-			}
-			PublicValue::String(x) => Expr::Table(surrealdb_strand::TableName::new(x)),
-			x => Expr::from_surface_value(x),
+		let what = if only && let PublicValue::RecordId(id) = what {
+			vars.insert(SELECT_RECORD_PARAM, PublicValue::RecordId(id));
+			Expr::Param(crate::expr::Param::from(SELECT_RECORD_PARAM.to_owned()))
+		} else if let PublicValue::String(x) = what {
+			Expr::Table(surrealdb_strand::TableName::new(x))
+		} else {
+			Expr::from_surface_value(what)
 		};
 
 		// Build the runtime statement.
@@ -1467,13 +1497,14 @@ pub trait RpcProtocol {
 		let (what, data) = extract_args::<(PublicValue, PublicValue)>(params.into_vec())
 			.ok_or(invalid_params("Expected (what:Value, data:Value)".to_string()))?;
 
-		let into = match what {
-			PublicValue::Null | PublicValue::None => None,
-			PublicValue::Table(x) => {
-				Some(Expr::Table(surrealdb_strand::TableName::new(x.into_string())))
-			}
-			PublicValue::String(x) => Some(Expr::Table(surrealdb_strand::TableName::new(x))),
-			x => Some(Expr::from_surface_value(x)),
+		let into = if matches!(what, PublicValue::Null | PublicValue::None) {
+			None
+		} else if let PublicValue::Table(x) = what {
+			Some(Expr::Table(surrealdb_strand::TableName::new(x.into_string())))
+		} else if let PublicValue::String(x) = what {
+			Some(Expr::Table(surrealdb_strand::TableName::new(x)))
+		} else {
+			Some(Expr::from_surface_value(what))
 		};
 
 		// Build the runtime statement.
@@ -1514,13 +1545,14 @@ pub trait RpcProtocol {
 		let (what, data) = extract_args::<(PublicValue, PublicValue)>(params.to_vec())
 			.ok_or(invalid_params("Expected (what, data)".to_string()))?;
 
-		let table_name = match what {
-			PublicValue::Null | PublicValue::None => None,
-			PublicValue::Table(x) => {
-				Some(Expr::Table(surrealdb_strand::TableName::new(x.into_string())))
-			}
-			PublicValue::String(x) => Some(Expr::Table(surrealdb_strand::TableName::new(x))),
-			x => Some(Expr::from_surface_value(x)),
+		let table_name = if matches!(what, PublicValue::Null | PublicValue::None) {
+			None
+		} else if let PublicValue::Table(x) = what {
+			Some(Expr::Table(surrealdb_strand::TableName::new(x.into_string())))
+		} else if let PublicValue::String(x) = what {
+			Some(Expr::Table(surrealdb_strand::TableName::new(x)))
+		} else {
+			Some(Expr::from_surface_value(what))
 		};
 
 		let data = SqlData::SingleExpression(Expr::from_surface_value(data));
@@ -1567,10 +1599,12 @@ pub trait RpcProtocol {
 		let (what, data) = extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
 			.ok_or(invalid_params("Expected (what:Value, data:Value)".to_string()))?;
 
-		let only = match what {
-			PublicValue::String(_) => true,
-			PublicValue::RecordId(ref x) => !matches!(x.key, PublicRecordIdKey::Range(_)),
-			_ => false,
+		let only = if matches!(what, PublicValue::String(_)) {
+			true
+		} else if let PublicValue::RecordId(ref x) = what {
+			!matches!(x.key, PublicRecordIdKey::Range(_))
+		} else {
+			false
 		};
 
 		let data = data
@@ -1621,9 +1655,10 @@ pub trait RpcProtocol {
 		let (what, data) = extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
 			.ok_or(invalid_params("Expected (what:Value, data:Value)".to_string()))?;
 
-		let only = match what {
-			PublicValue::RecordId(ref x) => !matches!(x.key, PublicRecordIdKey::Range(_)),
-			_ => false,
+		let only = if let PublicValue::RecordId(ref x) = what {
+			!matches!(x.key, PublicRecordIdKey::Range(_))
+		} else {
+			false
 		};
 
 		let data = data
@@ -1679,9 +1714,10 @@ pub trait RpcProtocol {
 		let (what, data) = extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
 			.ok_or(invalid_params("Expected (what, data)".to_string()))?;
 
-		let only = match what {
-			PublicValue::RecordId(ref x) => !matches!(x.key, PublicRecordIdKey::Range(_)),
-			_ => false,
+		let only = if let PublicValue::RecordId(ref x) = what {
+			!matches!(x.key, PublicRecordIdKey::Range(_))
+		} else {
+			false
 		};
 
 		let data = data
@@ -1734,9 +1770,10 @@ pub trait RpcProtocol {
 		let (what, data) = extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
 			.ok_or(invalid_params("Expected (what:Value, data:Value)".to_string()))?;
 
-		let only = match what {
-			PublicValue::RecordId(ref x) => !matches!(x.key, PublicRecordIdKey::Range(_)),
-			_ => false,
+		let only = if let PublicValue::RecordId(ref x) = what {
+			!matches!(x.key, PublicRecordIdKey::Range(_))
+		} else {
+			false
 		};
 
 		let data = data
@@ -1792,9 +1829,10 @@ pub trait RpcProtocol {
 			.ok_or(invalid_params("Expected (what:Value, data:Value, diff:Value)".to_string()))?;
 
 		// Process the method arguments
-		let only = match what {
-			PublicValue::RecordId(ref x) => !matches!(x.key, PublicRecordIdKey::Range(_)),
-			_ => false,
+		let only = if let PublicValue::RecordId(ref x) = what {
+			!matches!(x.key, PublicRecordIdKey::Range(_))
+		} else {
+			false
 		};
 
 		let data = data
@@ -2419,13 +2457,8 @@ pub trait RpcProtocol {
 		)>(params.into_vec())
 		.ok_or(invalid_params("Expected (name:string, version:string, args:array)".to_string()))?;
 		// Parse the function name argument
-		let name = match name {
-			PublicValue::String(v) => v,
-			unexpected => {
-				return Err(invalid_params(format!(
-					"Expected name to be string, got {unexpected:?}"
-				)));
-			}
+		let PublicValue::String(name) = name else {
+			return Err(invalid_params(format!("Expected name to be string, got {name:?}")));
 		};
 		// Parse any function version argument
 		let version = match version {
@@ -3165,10 +3198,11 @@ mod tests {
 		method: Method,
 		params: Vec<PublicValue>,
 	) -> Result<PublicValue, surrealdb_types::Error> {
-		match rpc.execute(None, sid, Some(sid), method, params.into()).await? {
-			DbResult::Other(value) => Ok(value),
-			other => panic!("`{method}` answered {other:?}"),
-		}
+		let res = rpc.execute(None, sid, Some(sid), method, params.into()).await?;
+		let DbResult::Other(value) = res else {
+			panic!("`{method}` answered {res:?}");
+		};
+		Ok(value)
 	}
 
 	/// `select` of one record reads it through a variable, so the statement is

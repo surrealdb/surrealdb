@@ -38,7 +38,17 @@ fn proven_kind(value: &Value) -> Kind {
 			Kind::Array(Box::new(join(array.iter().map(proven_kind).collect())), None)
 		}
 		Value::Set(set) => Kind::Set(Box::new(join(set.iter().map(proven_kind).collect())), None),
-		_ => Kind::Any,
+		Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => Kind::Any,
 	}
 }
 

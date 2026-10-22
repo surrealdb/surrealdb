@@ -217,7 +217,9 @@ fn build_public_variables(
 			GraphqlValue::Boolean(b) => vars.insert(key_str.to_string(), *b),
 			GraphqlValue::Enum(s) => vars.insert(key_str.to_string(), s.as_str().to_string()),
 			// For complex types (lists, nested objects), convert to string
-			other => vars.insert(key_str.to_string(), other.to_string()),
+			other @ (GraphqlValue::Binary(_) | GraphqlValue::List(_) | GraphqlValue::Object(_)) => {
+				vars.insert(key_str.to_string(), other.to_string())
+			}
 		}
 	}
 

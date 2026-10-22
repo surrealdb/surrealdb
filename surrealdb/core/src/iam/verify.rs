@@ -348,7 +348,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					)
 					.await;
 				}
-				_ => bail!(AuthError::AccessMethodMismatch),
+				catalog::AccessType::Jwt(_) => bail!(AuthError::AccessMethodMismatch),
 			};
 			// Parse the record id
 			let mut rid = syn::record_id(id)?;
@@ -1163,7 +1163,7 @@ async fn access_method_token(
 				}
 			}
 		}
-		_ => {
+		catalog::AccessType::Record(_) | catalog::AccessType::Jwt(_) => {
 			let roles = match &token_data.claims.roles {
 				// If no role is provided, grant the viewer role
 				None => vec![Role::Viewer],
@@ -1324,14 +1324,11 @@ fn verify_token(token: &str, key: &DecodingKey, validation: &Validation) -> Resu
 		Ok(_) => Ok(()),
 		Err(err) => {
 			// Only transparently return certain token verification errors
-			match err.kind() {
-				jsonwebtoken::errors::ErrorKind::ExpiredSignature => {
-					Err(anyhow::Error::new(AuthError::ExpiredToken))
-				}
-				_ => {
-					debug!("Error verifying authentication token: {err}");
-					Err(anyhow::Error::new(AuthError::InvalidAuth))
-				}
+			if let jsonwebtoken::errors::ErrorKind::ExpiredSignature = err.kind() {
+				Err(anyhow::Error::new(AuthError::ExpiredToken))
+			} else {
+				debug!("Error verifying authentication token: {err}");
+				Err(anyhow::Error::new(AuthError::InvalidAuth))
 			}
 		}
 	}
@@ -2495,10 +2492,9 @@ mod tests {
 		let res = token(&ds, &mut sess, &enc).await;
 
 		let e = res.unwrap_err();
-		match e.downcast().expect("Unexpected error kind") {
-			AuthError::ExpiredToken => {}
-			e => panic!("Unexpected error, expected ExpiredToken found {e}"),
-		}
+		let AuthError::ExpiredToken = e.downcast().expect("Unexpected error kind") else {
+			panic!("Unexpected error, expected ExpiredToken");
+		};
 	}
 
 	#[tokio::test]
@@ -2745,10 +2741,10 @@ mod tests {
 			res.is_err(),
 			"Token was accepted despite a root-level statement in a {clause} AUTHENTICATE clause"
 		);
-		match res.unwrap_err().downcast().expect("Unexpected error kind") {
-			AuthError::InvalidAuth => {}
-			e => panic!("Unexpected error, expected InvalidAuth found {e}"),
-		}
+		let AuthError::InvalidAuth = res.unwrap_err().downcast().expect("Unexpected error kind")
+		else {
+			panic!("Unexpected error, expected InvalidAuth");
+		};
 	}
 
 	#[tokio::test]
@@ -3179,10 +3175,10 @@ mod tests {
 			let res = token(&ds, &mut sess, &enc).await;
 
 			let e = res.unwrap_err();
-			match e.downcast().expect("Unexpected error kind") {
-				ExecError::Thrown(e) => assert_eq!(e, "This user is not enabled"),
-				e => panic!("Unexpected error, expected Thrown found {e:?}"),
-			}
+			let ExecError::Thrown(e) = e.downcast().expect("Unexpected error kind") else {
+				panic!("Unexpected error, expected Thrown");
+			};
+			assert_eq!(e, "This user is not enabled");
 		}
 
 		// Test AUTHENTICATE clause not returning a value
@@ -3232,10 +3228,9 @@ mod tests {
 			let res = token(&ds, &mut sess, &enc).await;
 
 			let e = res.unwrap_err();
-			match e.downcast().expect("Unexpected error kind") {
-				AuthError::InvalidAuth => {}
-				e => panic!("Unexpected error, expected InvalidAuth found {e}"),
-			}
+			let AuthError::InvalidAuth = e.downcast().expect("Unexpected error kind") else {
+				panic!("Unexpected error, expected InvalidAuth");
+			};
 		}
 	}
 

@@ -119,7 +119,17 @@ pub(crate) fn approx_value_size(value: &Value) -> usize {
 				+ approx_bound_size(&r.start, approx_value_size)
 				+ approx_bound_size(&r.end, approx_value_size)
 		}
-		_ => inline,
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Table(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Closure(_) => inline,
 	}
 }
 
@@ -520,7 +530,20 @@ pub(crate) fn value_to_record_id_key(val: Value) -> RecordIdKey {
 		Value::Array(a) => RecordIdKey::Array(a),
 		Value::Object(o) => RecordIdKey::Object(o),
 		// For other types, convert to string representation
-		other => RecordIdKey::String(other.to_raw_string().into()),
+		other @ (Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Set(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_)) => RecordIdKey::String(other.to_raw_string().into()),
 	}
 }
 
@@ -544,7 +567,22 @@ pub(crate) fn extract_record_ids_into(val: Value, rids: &mut Vec<RecordId>) {
 				extract_record_ids_into(v, rids);
 			}
 		}
-		_ => {}
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Set(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => {}
 	}
 }
 

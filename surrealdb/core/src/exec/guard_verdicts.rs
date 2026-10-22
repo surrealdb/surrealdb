@@ -60,11 +60,13 @@ impl GuardScope {
 		}
 		// Every parameter it reads, at any depth, is one of the session's
 		// values.
-		let foreign_param = clause.visit_deep(&mut |node| match node {
-			LogicalExpr::Param(name) if !SESSION_VALUES.contains(&name.as_str()) => {
-				ControlFlow::Break(())
+		let foreign_param = clause.visit_deep(&mut |node| {
+			if let LogicalExpr::Param(name) = node
+				&& !SESSION_VALUES.contains(&name.as_str())
+			{
+				return ControlFlow::Break(());
 			}
-			_ => ControlFlow::Continue(()),
+			ControlFlow::Continue(())
 		});
 		if foreign_param.is_break() || reads_row(clause) {
 			return Self::PerCall;
@@ -81,7 +83,68 @@ fn reads_row(expr: &LogicalExpr) -> bool {
 	match expr {
 		LogicalExpr::Field(_) | LogicalExpr::Doc | LogicalExpr::Current => true,
 		LogicalExpr::Subquery(_) => false,
-		_ => {
+		LogicalExpr::Literal(_)
+		| LogicalExpr::Array(_)
+		| LogicalExpr::Set(_)
+		| LogicalExpr::Object(_)
+		| LogicalExpr::RecordId(_)
+		| LogicalExpr::Param(_)
+		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
+		| LogicalExpr::Constant(_)
+		| LogicalExpr::Access {
+			..
+		}
+		| LogicalExpr::Index {
+			..
+		}
+		| LogicalExpr::First(_)
+		| LogicalExpr::Last(_)
+		| LogicalExpr::Each(_)
+		| LogicalExpr::Flatten {
+			..
+		}
+		| LogicalExpr::Filter {
+			..
+		}
+		| LogicalExpr::Method {
+			..
+		}
+		| LogicalExpr::Destructure {
+			..
+		}
+		| LogicalExpr::Optional {
+			..
+		}
+		| LogicalExpr::Lookup {
+			..
+		}
+		| LogicalExpr::Recurse(_)
+		| LogicalExpr::RepeatRecurse(_)
+		| LogicalExpr::Broadcast {
+			..
+		}
+		| LogicalExpr::SetField {
+			..
+		}
+		| LogicalExpr::Prefix {
+			..
+		}
+		| LogicalExpr::Postfix {
+			..
+		}
+		| LogicalExpr::Invoke {
+			..
+		}
+		| LogicalExpr::Binary {
+			..
+		}
+		| LogicalExpr::Call(_)
+		| LogicalExpr::Closure(_)
+		| LogicalExpr::If(_)
+		| LogicalExpr::Throw(_)
+		| LogicalExpr::Break
+		| LogicalExpr::Continue => {
 			let mut found = false;
 			expr.for_each_child(&mut |child| found = found || reads_row(child));
 			found

@@ -347,16 +347,18 @@ impl DestinationFile {
 }
 
 fn value_to_file(value: Value) -> Result<DestinationFile> {
-	match value {
-		Value::File(file) => Ok(DestinationFile {
+	if let Value::File(file) = value {
+		Ok(DestinationFile {
 			bucket: Some(file.bucket),
 			key: file.key,
-		}),
-		Value::String(s) => Ok(DestinationFile {
+		})
+	} else if let Value::String(s) = value {
+		Ok(DestinationFile {
 			bucket: None,
 			key: s.into_string(),
-		}),
-		_ => Err(anyhow::anyhow!("Invalid destination file value")),
+		})
+	} else {
+		Err(anyhow::anyhow!("Invalid destination file value"))
 	}
 }
 

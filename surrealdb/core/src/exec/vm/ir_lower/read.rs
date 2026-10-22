@@ -413,7 +413,107 @@ pub(super) fn lower_source_under(
 		}
 		// A pipeline opens this only for a source tag. Under a union or a bitmap's fallback, an
 		// input that is not a scan is an internal error as well.
-		other => Err(IrError::Invariant {
+		other @ (PhysOp::KnnTopK(_)
+		| PhysOp::Enforced {
+			..
+		}
+		| PhysOp::Subquery
+		| PhysOp::Probe {
+			..
+		}
+		| PhysOp::Join(_)
+		| PhysOp::Distinct {
+			..
+		}
+		| PhysOp::PermissionFilter(_)
+		| PhysOp::Layer(_)
+		| PhysOp::Filter
+		| PhysOp::Fetch
+		| PhysOp::Split {
+			..
+		}
+		| PhysOp::Sort(_)
+		| PhysOp::Aggregate(_)
+		| PhysOp::Limit {
+			..
+		}
+		| PhysOp::Project(_)
+		| PhysOp::Timeout
+		| PhysOp::VersionScope
+		| PhysOp::Only
+		| PhysOp::Explain {
+			..
+		}
+		| PhysOp::Eval
+		| PhysOp::Request {
+			..
+		}
+		| PhysOp::Txn {
+			..
+		}
+		| PhysOp::Stmt {
+			..
+		}
+		| PhysOp::Statement {
+			..
+		}
+		| PhysOp::Match {
+			..
+		}
+		| PhysOp::MatchStep(_)
+		| PhysOp::DdlGuard {
+			..
+		}
+		| PhysOp::Define(_)
+		| PhysOp::Remove(_)
+		| PhysOp::Alter(_)
+		| PhysOp::Rebuild(_)
+		| PhysOp::Info {
+			..
+		}
+		| PhysOp::Use {
+			..
+		}
+		| PhysOp::Option {
+			..
+		}
+		| PhysOp::Access(_)
+		| PhysOp::Kill
+		| PhysOp::Live(_)
+		| PhysOp::Subscriber(_)
+		| PhysOp::Show(_)
+		| PhysOp::Write(_)
+		| PhysOp::WriteStage {
+			..
+		}
+		| PhysOp::Events(_)
+		| PhysOp::Assign(_)
+		| PhysOp::Unset {
+			..
+		}
+		| PhysOp::Content {
+			..
+		}
+		| PhysOp::Block
+		| PhysOp::Let(_)
+		| PhysOp::Sleep
+		| PhysOp::If {
+			..
+		}
+		| PhysOp::Loop {
+			..
+		}
+		| PhysOp::Pipeline(_)
+		| PhysOp::Choose(_)
+		| PhysOp::Prefetch(_)
+		| PhysOp::Materialize {
+			..
+		}
+		| PhysOp::LoadUnit(_)
+		| PhysOp::Yield
+		| PhysOp::Return
+		| PhysOp::Break
+		| PhysOp::Next) => Err(IrError::Invariant {
 			what: phys_refusal(other.tag()),
 		}),
 	}
@@ -520,7 +620,23 @@ fn named_tables(
 					of_value(item, depth + 1, tables);
 				}
 			}
-			_ => {}
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Array(_)
+			| Value::Set(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => {}
 		}
 	}
 	if let Some(known) = static_value(ir, value) {
@@ -555,7 +671,7 @@ fn named_tables(
 			}
 			known
 		}
-		_ => false,
+		OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => false,
 	}
 }
 
@@ -620,7 +736,84 @@ pub(super) fn static_value(ir: &Ir, value: ValueId) -> Option<Value> {
 			};
 			Some(Value::RecordId(RecordId::new(attrs.table.clone(), key)))
 		}
-		_ => None,
+		ExprOp::FreeParam {
+			..
+		}
+		| ExprOp::SessionParam {
+			..
+		}
+		| ExprOp::CatalogParam {
+			..
+		}
+		| ExprOp::Table {
+			..
+		}
+		| ExprOp::Mock(_)
+		| ExprOp::Constant {
+			..
+		}
+		| ExprOp::Field {
+			..
+		}
+		| ExprOp::ComputedRead(_)
+		| ExprOp::Doc
+		| ExprOp::Access {
+			..
+		}
+		| ExprOp::Deref {
+			..
+		}
+		| ExprOp::Index
+		| ExprOp::First
+		| ExprOp::Last
+		| ExprOp::Each
+		| ExprOp::Flatten {
+			..
+		}
+		| ExprOp::Dispatch(_)
+		| ExprOp::Method {
+			..
+		}
+		| ExprOp::Destructure {
+			..
+		}
+		| ExprOp::Optional
+		| ExprOp::RepeatRecurse
+		| ExprOp::SetField {
+			..
+		}
+		| ExprOp::TupleRow {
+			..
+		}
+		| ExprOp::Prefix(_)
+		| ExprOp::Convert(_)
+		| ExprOp::Postfix {
+			..
+		}
+		| ExprOp::Invoke
+		| ExprOp::Binary {
+			..
+		}
+		| ExprOp::ShortCircuit {
+			..
+		}
+		| ExprOp::Call(_)
+		| ExprOp::ClosureCreate(_)
+		| ExprOp::If
+		| ExprOp::Throw
+		| ExprOp::Subquery(_)
+		| ExprOp::Yield
+		| ExprOp::Truthy
+		| ExprOp::Agg {
+			..
+		}
+		| ExprOp::Now {
+			..
+		}
+		| ExprOp::Raise(_)
+		| ExprOp::DepthCharge {
+			..
+		} => None,
 	}
 }
 
@@ -641,7 +834,115 @@ pub(super) fn schema_of(ir: &Ir, op: OpId) -> Option<std::sync::Arc<Schema>> {
 		PhysOp::RecordScan(attrs) => attrs.read.schema.clone(),
 		PhysOp::KeyRangeScan(attrs) => attrs.read.schema.clone(),
 		PhysOp::KnnScan(attrs) => attrs.read.schema.clone(),
-		_ => None,
+		PhysOp::KnnTopK(_)
+		| PhysOp::Count(_)
+		| PhysOp::Vacant {
+			..
+		}
+		| PhysOp::Enforced {
+			..
+		}
+		| PhysOp::Values {
+			..
+		}
+		| PhysOp::Subquery
+		| PhysOp::Probe {
+			..
+		}
+		| PhysOp::Union
+		| PhysOp::Join(_)
+		| PhysOp::Distinct {
+			..
+		}
+		| PhysOp::PermissionFilter(_)
+		| PhysOp::Layer(_)
+		| PhysOp::Filter
+		| PhysOp::Fetch
+		| PhysOp::Split {
+			..
+		}
+		| PhysOp::Sort(_)
+		| PhysOp::Aggregate(_)
+		| PhysOp::Limit {
+			..
+		}
+		| PhysOp::Project(_)
+		| PhysOp::Timeout
+		| PhysOp::VersionScope
+		| PhysOp::Only
+		| PhysOp::Explain {
+			..
+		}
+		| PhysOp::Eval
+		| PhysOp::Request {
+			..
+		}
+		| PhysOp::Txn {
+			..
+		}
+		| PhysOp::Stmt {
+			..
+		}
+		| PhysOp::Statement {
+			..
+		}
+		| PhysOp::Match {
+			..
+		}
+		| PhysOp::MatchStep(_)
+		| PhysOp::DdlGuard {
+			..
+		}
+		| PhysOp::Define(_)
+		| PhysOp::Remove(_)
+		| PhysOp::Alter(_)
+		| PhysOp::Rebuild(_)
+		| PhysOp::Info {
+			..
+		}
+		| PhysOp::Use {
+			..
+		}
+		| PhysOp::Option {
+			..
+		}
+		| PhysOp::Access(_)
+		| PhysOp::Kill
+		| PhysOp::Live(_)
+		| PhysOp::Subscriber(_)
+		| PhysOp::Show(_)
+		| PhysOp::Write(_)
+		| PhysOp::WriteStage {
+			..
+		}
+		| PhysOp::Events(_)
+		| PhysOp::Assign(_)
+		| PhysOp::Unset {
+			..
+		}
+		| PhysOp::Content {
+			..
+		}
+		| PhysOp::Block
+		| PhysOp::Let(_)
+		| PhysOp::Sleep
+		| PhysOp::If {
+			..
+		}
+		| PhysOp::Loop {
+			..
+		}
+		| PhysOp::Pipeline(_)
+		| PhysOp::Choose(_)
+		| PhysOp::Prefetch(_)
+		| PhysOp::Materialize {
+			..
+		}
+		| PhysOp::LoadUnit(_)
+		| PhysOp::Yield
+		| PhysOp::Return
+		| PhysOp::Break
+		| PhysOp::Next => None,
 	}
 }
 
@@ -845,7 +1146,33 @@ fn lower_count(
 		match kind {
 			RegionKind::Clause(ClauseRole::Where) => {}
 			RegionKind::Subquery if beside.is_none() => beside = Some(*region),
-			_ => {
+			RegionKind::Request
+			| RegionKind::Transaction(_)
+			| RegionKind::Statement(_)
+			| RegionKind::Block
+			| RegionKind::ValueBlock
+			| RegionKind::StatementIf
+			| RegionKind::ValueIf
+			| RegionKind::StatementFor
+			| RegionKind::ValueFor
+			| RegionKind::Loop
+			| RegionKind::Subquery
+			| RegionKind::FunctionBody
+			| RegionKind::ClosureBody
+			| RegionKind::PermissionFrame
+			| RegionKind::FieldFrame(_)
+			| RegionKind::EventFrame
+			| RegionKind::SubscriberFrame
+			| RegionKind::Clause(_)
+			| RegionKind::LazyOperand
+			| RegionKind::ErrorScope(_)
+			| RegionKind::ChooseArm
+			| RegionKind::Pipeline
+			| RegionKind::JoinLookupArm
+			| RegionKind::WriteStage
+			| RegionKind::CatalogUnit
+			| RegionKind::Deadline
+			| RegionKind::StoredClause(_) => {
 				return Err(invariant("a count region that is neither its condition nor its plan"));
 			}
 		}

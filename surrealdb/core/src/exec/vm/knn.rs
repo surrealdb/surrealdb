@@ -248,11 +248,10 @@ async fn exact(
 				continue;
 			}
 			// The record's vector is scored in place.
-			let scored = match field.extract(&row).as_ref() {
-				Value::Array(record) => {
-					score_raw_values(&distance, vector_type, dimension, &query, &record.0)
-				}
-				_ => None,
+			let scored = if let Value::Array(record) = field.extract(&row).as_ref() {
+				score_raw_values(&distance, vector_type, dimension, &query, &record.0)
+			} else {
+				None
 			};
 			let Some(scored) = scored else {
 				continue;

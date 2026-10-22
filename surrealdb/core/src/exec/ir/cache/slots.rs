@@ -234,9 +234,10 @@ impl Walker {
 	/// A `VERSION` or `TIMEOUT` clause. The parser holds an absent clause as `NONE`, which is not a
 	/// literal of the statement text, so it is not visited.
 	fn optional_clause(&mut self, clause: &crate::expr::Expr) -> Result<(), Infallible> {
-		match clause {
-			crate::expr::Expr::Literal(Literal::None) => Ok(()),
-			clause => self.visit_expr(clause),
+		if matches!(clause, crate::expr::Expr::Literal(Literal::None)) {
+			Ok(())
+		} else {
+			self.visit_expr(clause)
 		}
 	}
 

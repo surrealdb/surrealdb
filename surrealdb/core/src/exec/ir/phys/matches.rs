@@ -135,9 +135,10 @@ impl IndexScope {
 			.clauses
 			.iter()
 			.filter_map(|clause| {
-				let query = match &clause.query {
-					ClauseQuery::Bound(value) => ClauseQuery::Bound(values(*value)?),
-					other => other.clone(),
+				let query = if let ClauseQuery::Bound(value) = &clause.query {
+					ClauseQuery::Bound(values(*value)?)
+				} else {
+					clause.query.clone()
 				};
 				Some(Clause {
 					rf: clause.rf,
@@ -625,7 +626,87 @@ fn collect(
 				collect(ir, *inner, out, written, depth + 1);
 			}
 		}
-		_ => {}
+		ExprOp::Literal(_)
+		| ExprOp::Array
+		| ExprOp::Set
+		| ExprOp::Object {
+			..
+		}
+		| ExprOp::RecordId(_)
+		| ExprOp::FreeParam {
+			..
+		}
+		| ExprOp::SessionParam {
+			..
+		}
+		| ExprOp::CatalogParam {
+			..
+		}
+		| ExprOp::Table {
+			..
+		}
+		| ExprOp::Mock(_)
+		| ExprOp::Constant {
+			..
+		}
+		| ExprOp::Field {
+			..
+		}
+		| ExprOp::ComputedRead(_)
+		| ExprOp::Doc
+		| ExprOp::Access {
+			..
+		}
+		| ExprOp::Deref {
+			..
+		}
+		| ExprOp::Index
+		| ExprOp::First
+		| ExprOp::Last
+		| ExprOp::Each
+		| ExprOp::Flatten {
+			..
+		}
+		| ExprOp::Dispatch(_)
+		| ExprOp::Method {
+			..
+		}
+		| ExprOp::Destructure {
+			..
+		}
+		| ExprOp::Optional
+		| ExprOp::RepeatRecurse
+		| ExprOp::SetField {
+			..
+		}
+		| ExprOp::TupleRow {
+			..
+		}
+		| ExprOp::Prefix(_)
+		| ExprOp::Convert(_)
+		| ExprOp::Postfix {
+			..
+		}
+		| ExprOp::Invoke
+		| ExprOp::ShortCircuit {
+			..
+		}
+		| ExprOp::Call(_)
+		| ExprOp::ClosureCreate(_)
+		| ExprOp::If
+		| ExprOp::Throw
+		| ExprOp::Subquery(_)
+		| ExprOp::Yield
+		| ExprOp::Agg {
+			..
+		}
+		| ExprOp::Now {
+			..
+		}
+		| ExprOp::Raise(_)
+		| ExprOp::DepthCharge {
+			..
+		} => {}
 	}
 }
 
@@ -685,7 +766,7 @@ fn operator_of(ir: &Ir, registry: &FunctionRegistry, op: OpId, out: &mut Held) {
 				out.calls.push(op);
 			}
 		}
-		_ => {}
+		OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => {}
 	}
 }
 
@@ -748,7 +829,84 @@ pub(crate) fn field_path(ir: &Ir, value: ValueId) -> Option<FieldPath> {
 			field,
 		} => Some(field_path(ir, base)?.child(FieldSegment::Field(field.clone()))),
 		ExprOp::Each => Some(field_path(ir, base)?.child(FieldSegment::All)),
-		_ => None,
+		ExprOp::Literal(_)
+		| ExprOp::Array
+		| ExprOp::Set
+		| ExprOp::Object {
+			..
+		}
+		| ExprOp::RecordId(_)
+		| ExprOp::FreeParam {
+			..
+		}
+		| ExprOp::SessionParam {
+			..
+		}
+		| ExprOp::CatalogParam {
+			..
+		}
+		| ExprOp::Table {
+			..
+		}
+		| ExprOp::Mock(_)
+		| ExprOp::Constant {
+			..
+		}
+		| ExprOp::ComputedRead(_)
+		| ExprOp::Doc
+		| ExprOp::Deref {
+			..
+		}
+		| ExprOp::Index
+		| ExprOp::First
+		| ExprOp::Last
+		| ExprOp::Flatten {
+			..
+		}
+		| ExprOp::Dispatch(_)
+		| ExprOp::Method {
+			..
+		}
+		| ExprOp::Destructure {
+			..
+		}
+		| ExprOp::Optional
+		| ExprOp::RepeatRecurse
+		| ExprOp::SetField {
+			..
+		}
+		| ExprOp::TupleRow {
+			..
+		}
+		| ExprOp::Prefix(_)
+		| ExprOp::Convert(_)
+		| ExprOp::Postfix {
+			..
+		}
+		| ExprOp::Invoke
+		| ExprOp::Binary {
+			..
+		}
+		| ExprOp::ShortCircuit {
+			..
+		}
+		| ExprOp::Call(_)
+		| ExprOp::ClosureCreate(_)
+		| ExprOp::If
+		| ExprOp::Throw
+		| ExprOp::Subquery(_)
+		| ExprOp::Yield
+		| ExprOp::Truthy
+		| ExprOp::Agg {
+			..
+		}
+		| ExprOp::Now {
+			..
+		}
+		| ExprOp::Raise(_)
+		| ExprOp::DepthCharge {
+			..
+		} => None,
 	}
 }
 
@@ -888,7 +1046,9 @@ fn executor_tables(ir: &Ir, looped: OpId, targets: bool) -> ExecutorTables {
 			// resolver layer over one source of several) yields that read's rows.
 			_ if yields_its_rows(ir, op) => pending.extend(data.operands.first().copied()),
 			// Any other rows (a subquery, a lookup, an expression) are built, not read.
-			_ => return ExecutorTables::none(),
+			OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => {
+				return ExecutorTables::none();
+			}
 		}
 	}
 	ExecutorTables::new(sources.known, sources.excluded, sources.open)
@@ -942,18 +1102,27 @@ fn source_rows(ir: &Ir, value: ValueId) -> SourceRows {
 	let Some((op, kind)) = expr_def(ir, value) else {
 		return SourceRows::Values;
 	};
-	match kind {
-		ExprOp::Table {
-			name,
-		} => SourceRows::Table(name.clone()),
-		ExprOp::Call(call) => match &call.function {
-			Function::Normal(name) if name == "type::table" => SourceRows::AnyTable,
-			Function::Normal(name) if name == "type::record" => SourceRows::Records(
-				ir.op(op).and_then(|data| record_call_table(ir, &data.operands)),
-			),
-			_ => SourceRows::Values,
-		},
-		_ => SourceRows::Values,
+	if let ExprOp::Table {
+		name,
+	} = kind
+	{
+		SourceRows::Table(name.clone())
+	} else if let ExprOp::Call(call) = kind {
+		if let Function::Normal(name) = &call.function {
+			if name == "type::table" {
+				SourceRows::AnyTable
+			} else if name == "type::record" {
+				SourceRows::Records(
+					ir.op(op).and_then(|data| record_call_table(ir, &data.operands)),
+				)
+			} else {
+				SourceRows::Values
+			}
+		} else {
+			SourceRows::Values
+		}
+	} else {
+		SourceRows::Values
 	}
 }
 
@@ -969,7 +1138,23 @@ fn record_call_table(ir: &Ir, args: &[ValueId]) -> Option<TableName> {
 		((_, ExprOp::Literal(literal)), 2) => match &**literal {
 			crate::val::Value::String(name) => Some(TableName::from(name.as_str())),
 			crate::val::Value::Table(table) => Some(table.clone()),
-			_ => None,
+			crate::val::Value::None
+			| crate::val::Value::Null
+			| crate::val::Value::Bool(_)
+			| crate::val::Value::Number(_)
+			| crate::val::Value::Duration(_)
+			| crate::val::Value::Datetime(_)
+			| crate::val::Value::Uuid(_)
+			| crate::val::Value::Array(_)
+			| crate::val::Value::Set(_)
+			| crate::val::Value::Object(_)
+			| crate::val::Value::Geometry(_)
+			| crate::val::Value::Bytes(_)
+			| crate::val::Value::RecordId(_)
+			| crate::val::Value::File(_)
+			| crate::val::Value::Regex(_)
+			| crate::val::Value::Range(_)
+			| crate::val::Value::Closure(_) => None,
 		},
 		_ => None,
 	}
@@ -981,7 +1166,24 @@ fn record_table(ir: &Ir, value: ValueId) -> Option<TableName> {
 		(_, ExprOp::RecordId(attrs)) => Some(attrs.table.clone()),
 		(_, ExprOp::Literal(literal)) => match &**literal {
 			crate::val::Value::RecordId(rid) => Some(rid.table.clone()),
-			_ => None,
+			crate::val::Value::None
+			| crate::val::Value::Null
+			| crate::val::Value::Bool(_)
+			| crate::val::Value::Number(_)
+			| crate::val::Value::String(_)
+			| crate::val::Value::Duration(_)
+			| crate::val::Value::Datetime(_)
+			| crate::val::Value::Uuid(_)
+			| crate::val::Value::Array(_)
+			| crate::val::Value::Set(_)
+			| crate::val::Value::Object(_)
+			| crate::val::Value::Geometry(_)
+			| crate::val::Value::Bytes(_)
+			| crate::val::Value::Table(_)
+			| crate::val::Value::File(_)
+			| crate::val::Value::Regex(_)
+			| crate::val::Value::Range(_)
+			| crate::val::Value::Closure(_) => None,
 		},
 		_ => None,
 	}

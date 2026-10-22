@@ -535,18 +535,18 @@ mod tests {
 
 	// Helper to extract array from Value
 	fn as_array(v: &Value) -> &Array {
-		match v {
-			Value::Array(a) => a,
-			_ => panic!("Expected Array, got {:?}", v),
-		}
+		let Value::Array(a) = v else {
+			panic!("Expected Array, got {:?}", v);
+		};
+		a
 	}
 
 	// Helper to extract string from Value
 	fn as_string(v: &Value) -> &str {
-		match v {
-			Value::String(s) => s.as_str(),
-			_ => panic!("Expected String, got {:?}", v),
-		}
+		let Value::String(s) = v else {
+			panic!("Expected String, got {:?}", v);
+		};
+		s.as_str()
 	}
 
 	// -------------------------------------------------------------------------

@@ -109,7 +109,28 @@ pub(super) fn open_step(
 			let (kind, build_writes) = join_step(em, cx, ir, facts, reads, data, join)?;
 			(kind, false, 1, build_writes)
 		}
-		_ => {
+		BindStepShape::Bind {
+			..
+		}
+		| BindStepShape::Endpoint {
+			..
+		}
+		| BindStepShape::Expand(_)
+		| BindStepShape::Path(_)
+		| BindStepShape::DistinctEdges {
+			..
+		}
+		| BindStepShape::Distinct
+		| BindStepShape::Drain
+		| BindStepShape::Update {
+			..
+		}
+		| BindStepShape::Delete {
+			..
+		}
+		| BindStepShape::Insert {
+			..
+		} => {
 			let (kind, writes) = program_step(em, cx, ir, facts, reads, data, shape)?;
 			(kind, writes, 0, false)
 		}
@@ -629,9 +650,11 @@ mod tests {
 	fn a_clause_of_a_step_is_a_constant_or_a_host_pipeline_over_the_row() {
 		let expansion = BindStepShape::Expand(Box::new(BindExpandShape {
 			predicate: true,
-			..match expansion() {
-				BindStepShape::Expand(expand) => *expand,
-				_ => unreachable!("an expansion"),
+			..{
+				let BindStepShape::Expand(expand) = expansion() else {
+					unreachable!("an expansion");
+				};
+				*expand
 			}
 		}));
 		let mut b = Builder::new();

@@ -50,24 +50,25 @@ impl<'ctx> Planner<'ctx> {
 				}
 
 				// Extract the match_ref argument at plan time (not passed at runtime)
-				let match_ref = match args.remove(ref_idx) {
-					LogicalExpr::Literal(LogicalLiteral::Integer(n)) if (0..=255).contains(&n) => {
-						n as u8
+				let arg = args.remove(ref_idx);
+				let match_ref = if let LogicalExpr::Literal(lit) = &arg {
+					if let LogicalLiteral::Integer(n) = lit {
+						(0..=255).contains(n).then_some(*n as u8)
+					} else if let LogicalLiteral::Float(n) = lit {
+						((0.0..=255.0).contains(n) && n.fract() == 0.0).then_some(*n as u8)
+					} else {
+						None
 					}
-					LogicalExpr::Literal(LogicalLiteral::Float(n))
-						if (0.0..=255.0).contains(&n) && n.fract() == 0.0 =>
-					{
-						n as u8
+				} else {
+					None
+				};
+				let Some(match_ref) = match_ref else {
+					return Err(ExecError::Query {
+						message: format!(
+							"Index function '{name}': index_ref argument must be a literal integer in range 0..255"
+						),
 					}
-					_ => {
-						return Err(ExecError::Query {
-							message: format!(
-								"Index function '{}': index_ref argument must be a literal integer in range 0..255",
-								name
-							),
-						}
-						.into());
-					}
+					.into());
 				};
 
 				// Resolve the MatchContext from the MATCHES context

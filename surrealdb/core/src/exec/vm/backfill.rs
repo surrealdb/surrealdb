@@ -207,7 +207,326 @@ pub(super) async fn step(
 			let table = table_name_of(&read(regs, *table))?;
 			retire(state, ctx, &table).await?;
 		}
-		_ => return Err(internal("a store instruction taken as a backfill instruction")),
+		StoreInstr::RefuseNoWrite
+		| StoreInstr::Allow {
+			..
+		}
+		| StoreInstr::Get {
+			..
+		}
+		| StoreInstr::StampCatalog {
+			..
+		}
+		| StoreInstr::Put {
+			..
+		}
+		| StoreInstr::Replace {
+			..
+		}
+		| StoreInstr::GetField {
+			..
+		}
+		| StoreInstr::NextId {
+			..
+		}
+		| StoreInstr::SessionDb {
+			..
+		}
+		| StoreInstr::RealRunOnly
+		| StoreInstr::ShowGrants {
+			..
+		}
+		| StoreInstr::IssueGrant {
+			..
+		}
+		| StoreInstr::RevokeGrants {
+			..
+		}
+		| StoreInstr::PurgeGrants {
+			..
+		}
+		| StoreInstr::NewUuid {
+			..
+		}
+		| StoreInstr::SessionAuthLimit {
+			..
+		}
+		| StoreInstr::Lock {
+			..
+		}
+		| StoreInstr::Delete {
+			..
+		}
+		| StoreInstr::DeleteModelArtifact {
+			..
+		}
+		| StoreInstr::DeleteRange {
+			..
+		}
+		| StoreInstr::BufferTableChange {
+			..
+		}
+		| StoreInstr::SessionNs {
+			..
+		}
+		| StoreInstr::Increment {
+			..
+		}
+		| StoreInstr::ClearDatastoreCache
+		| StoreInstr::JumpIfImport {
+			..
+		}
+		| StoreInstr::Raise {
+			..
+		}
+		| StoreInstr::RefuseRedefiningTable {
+			..
+		}
+		| StoreInstr::CheckTableChange {
+			..
+		}
+		| StoreInstr::RefuseNamedIdConversion {
+			..
+		}
+		| StoreInstr::ValidateRecordKeys {
+			..
+		}
+		| StoreInstr::RefuseRemovingViewed {
+			..
+		}
+		| StoreInstr::RefuseRemovingLightweight {
+			..
+		}
+		| StoreInstr::PurgeEdgePointers {
+			..
+		}
+		| StoreInstr::ClearViewTable {
+			..
+		}
+		| StoreInstr::RefuseViewCycle {
+			..
+		}
+		| StoreInstr::RefuseClauseEffects {
+			..
+		}
+		| StoreInstr::ViewSources {
+			..
+		}
+		| StoreInstr::Refuse {
+			..
+		}
+		| StoreInstr::ClearCache
+		| StoreInstr::Scan {
+			..
+		}
+		| StoreInstr::ScanAt {
+			..
+		}
+		| StoreInstr::VersionStamp {
+			..
+		}
+		| StoreInstr::Clear {
+			..
+		}
+		| StoreInstr::ClearRange {
+			..
+		}
+		| StoreInstr::Compact {
+			..
+		}
+		| StoreInstr::CompactAll
+		| StoreInstr::SetQueryTimeout {
+			..
+		}
+		| StoreInstr::NewDatabaseCompatibility {
+			..
+		}
+		| StoreInstr::SetDefaultCompatibility {
+			..
+		}
+		| StoreInstr::VerifyCompatibility {
+			..
+		}
+		| StoreInstr::DropMethods {
+			..
+		}
+		| StoreInstr::Push {
+			..
+		}
+		| StoreInstr::Render {
+			..
+		}
+		| StoreInstr::RenderOne {
+			..
+		}
+		| StoreInstr::CoerceString {
+			..
+		}
+		| StoreInstr::CoerceName {
+			..
+		}
+		| StoreInstr::Convert {
+			..
+		}
+		| StoreInstr::AccessCheck {
+			..
+		}
+		| StoreInstr::ParseApiPath {
+			..
+		}
+		| StoreInstr::CastComment {
+			..
+		}
+		| StoreInstr::ProcessInfo {
+			..
+		}
+		| StoreInstr::InfoIndex {
+			..
+		}
+		| StoreInstr::JumpIfNoService {
+			..
+		}
+		| StoreInstr::RefuseField {
+			..
+		}
+		| StoreInstr::FieldCheck {
+			..
+		}
+		| StoreInstr::PurgeDroppedReferences {
+			..
+		}
+		| StoreInstr::RefuseLightweight {
+			..
+		}
+		| StoreInstr::ClaimDocIdsReclaim {
+			..
+		}
+		| StoreInstr::AdmitIndexFormat {
+			..
+		}
+		| StoreInstr::NextIndexId {
+			..
+		}
+		| StoreInstr::IndexReplayReuses {
+			..
+		}
+		| StoreInstr::FieldAdmitsSubFields {
+			..
+		}
+		| StoreInstr::BuildIndex {
+			..
+		}
+		| StoreInstr::RetireIndexLocally {
+			..
+		}
+		| StoreInstr::KillOnCommit {
+			..
+		}
+		| StoreInstr::RealtimeChecks
+		| StoreInstr::Live {
+			..
+		}
+		| StoreInstr::Kill {
+			..
+		}
+		| StoreInstr::SessionOption {
+			..
+		}
+		| StoreInstr::SessionUseName {
+			..
+		}
+		| StoreInstr::SessionUse {
+			..
+		}
+		| StoreInstr::SessionLetChecks {
+			..
+		}
+		| StoreInstr::SessionLet {
+			..
+		}
+		| StoreInstr::SharesDocIds {
+			..
+		}
+		| StoreInstr::LoadAnalyzer {
+			..
+		}
+		| StoreInstr::CleanupMappers {
+			..
+		}
+		| StoreInstr::EvictModule {
+			..
+		}
+		| StoreInstr::VerifyModule {
+			..
+		}
+		| StoreInstr::LoadModule {
+			..
+		}
+		| StoreInstr::ConnectBucket {
+			..
+		}
+		| StoreInstr::CheckDepth {
+			..
+		}
+		| StoreInstr::SequenceDefinedHere {
+			..
+		}
+		| StoreInstr::EvictSequence {
+			..
+		}
+		| StoreInstr::JumpIfSpeculating {
+			..
+		}
+		| StoreInstr::JumpIfSessionBase {
+			..
+		}
+		| StoreInstr::ResolvePath {
+			..
+		}
+		| StoreInstr::ResolveColumns {
+			..
+		}
+		| StoreInstr::DefineField {
+			..
+		}
+		| StoreInstr::RemoveFieldDefinition {
+			..
+		}
+		| StoreInstr::InfoMigrations {
+			..
+		}
+		| StoreInstr::Migrate {
+			..
+		}
+		| StoreInstr::QueueVerification {
+			..
+		}
+		| StoreInstr::CheckFieldChange {
+			..
+		}
+		| StoreInstr::RemoveFieldStep {
+			..
+		}
+		| StoreInstr::MigrateTable {
+			..
+		}
+		| StoreInstr::CheckIndexMigrations {
+			..
+		}
+		| StoreInstr::AlterFieldDefinition {
+			..
+		}
+		| StoreInstr::AlterFieldClauses {
+			..
+		}
+		| StoreInstr::CheckIndexColumns {
+			..
+		}
+		| StoreInstr::CheckTableAlter {
+			..
+		} => {
+			return Err(internal("a store instruction taken as a backfill instruction"));
+		}
 	}
 	Ok(None)
 }

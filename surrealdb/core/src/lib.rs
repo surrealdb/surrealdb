@@ -13,6 +13,7 @@
 
 // This triggers because we have regex's in our Value type which have a unsafecell inside.
 #![allow(clippy::mutable_key_type)]
+#![deny(clippy::wildcard_enum_match_arm)]
 // Increased to support #[instrument] on complex async functions. Those are compiled out in release
 // builds.
 #![recursion_limit = "256"]

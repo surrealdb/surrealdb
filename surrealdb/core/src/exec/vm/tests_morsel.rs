@@ -172,10 +172,14 @@ pub(super) async fn answered(db: &TestDb, sql: &str) -> Result<Vec<Value>, Strin
 	let mut results =
 		db.datastore().execute(sql, &TestDb::owner(), None).await.expect("the request runs");
 	match results.pop().expect("a result").result {
-		Ok(value) => Ok(match Value::from(value) {
-			Value::Array(rows) => rows.into_iter().collect(),
-			other => vec![other],
-		}),
+		Ok(value) => {
+			let value = Value::from(value);
+			Ok(if let Value::Array(rows) = value {
+				rows.into_iter().collect()
+			} else {
+				vec![value]
+			})
+		}
 		Err(e) => Err(e.message().to_owned()),
 	}
 }
@@ -206,10 +210,10 @@ enum Rows {
 /// order or page its rows.
 fn sorts_and_pages(sql: &str) -> (bool, bool) {
 	fn walk(op: &LogicalOp, sorted: &mut bool, paged: &mut bool) {
-		match op {
-			LogicalOp::Sort(_) => *sorted = true,
-			LogicalOp::Limit(_) => *paged = true,
-			_ => {}
+		if let LogicalOp::Sort(_) = op {
+			*sorted = true;
+		} else if let LogicalOp::Limit(_) = op {
+			*paged = true;
 		}
 		for child in op.children() {
 			walk(child, sorted, paged);
@@ -752,10 +756,14 @@ async fn answered_as(
 ) -> Result<Vec<Value>, String> {
 	let mut results = db.datastore().execute(sql, session, None).await.expect("the request runs");
 	match results.pop().expect("a result").result {
-		Ok(value) => Ok(match Value::from(value) {
-			Value::Array(rows) => rows.into_iter().collect(),
-			other => vec![other],
-		}),
+		Ok(value) => {
+			let value = Value::from(value);
+			Ok(if let Value::Array(rows) = value {
+				rows.into_iter().collect()
+			} else {
+				vec![value]
+			})
+		}
 		Err(e) => Err(e.message().to_owned()),
 	}
 }
@@ -1592,13 +1600,17 @@ async fn explain_analyze_row_counts_are_width_invariant() {
 #[tokio::test]
 async fn a_paged_scan_in_the_cursor_reads_ranges() {
 	let range = |plans: &[Parallel], paged: bool| {
-		plans.iter().any(|plan| match plan {
-			Parallel::Morsels(MorselPlan {
+		plans.iter().any(|plan| {
+			if let Parallel::Morsels(MorselPlan {
 				input: MorselInput::Range,
 				paged: at,
 				..
-			}) => at.is_some() == paged,
-			_ => false,
+			}) = plan
+			{
+				at.is_some() == paged
+			} else {
+				false
+			}
 		})
 	};
 	assert!(range(&plans_of("SELECT n, s FROM t WHERE n > 1500 LIMIT 3").await, true));
@@ -2321,13 +2333,15 @@ async fn prunes_topk_scan(db: &TestDb, sql: &str) -> (bool, bool) {
 	let scans: Vec<_> =
 		program.pipelines.iter().filter(|pipeline| pipeline.source.topk().is_some()).collect();
 	assert_eq!(scans.len(), 1, "`{sql}` carries one top-k pushdown");
-	match &scans[0].parallel {
-		Parallel::Morsels(MorselPlan {
-			input: MorselInput::Range,
-			prunes,
-			..
-		}) => (*prunes, true),
-		_ => (false, false),
+	if let Parallel::Morsels(MorselPlan {
+		input: MorselInput::Range,
+		prunes,
+		..
+	}) = &scans[0].parallel
+	{
+		(*prunes, true)
+	} else {
+		(false, false)
 	}
 }
 
@@ -2880,9 +2894,10 @@ async fn a_failing_morsel_held_for_the_morsels_before_it_fails_the_statement_ove
 /// projected: a node of the plan that no SurrealQL statement writes, and the SQL front ends do.
 async fn distinct_plan(ctx: &ExecutionContext, sql: &str) -> LogicalOp {
 	let mut bound = bind(ctx, sql).await;
-	let rows = match &mut bound {
-		LogicalOp::Project(project) => &mut *project.input,
-		other => other,
+	let rows = if let LogicalOp::Project(project) = &mut bound {
+		&mut *project.input
+	} else {
+		&mut bound
 	};
 	let input = std::mem::replace(rows, LogicalOp::Break(LogicalBreak));
 	*rows = LogicalOp::Distinct(LogicalDistinct {

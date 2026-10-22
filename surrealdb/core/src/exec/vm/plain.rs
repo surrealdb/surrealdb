@@ -157,7 +157,19 @@ impl<'a> Walk<'a> {
 					self.bound(&range.end);
 				}
 				Value::RecordId(rid) => self.key(&rid.key),
-				_ => {}
+				Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::File(_)
+				| Value::Regex(_) => {}
 			}
 		}
 		self.closure

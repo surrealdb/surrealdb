@@ -204,11 +204,14 @@ fn admits_interior(kind: Option<&Kind>, flexible: bool) -> bool {
 /// the element kind of an array or set: a kind whose shape describes places
 /// beneath a value of it that no definition names.
 fn describes_places(kind: &Kind) -> bool {
-	match kind {
-		Kind::Literal(KindLiteral::Object(_) | KindLiteral::Array(_)) => true,
-		Kind::Either(members) => members.iter().any(describes_places),
-		Kind::Array(element, _) | Kind::Set(element, _) => describes_places(element),
-		_ => false,
+	if let Kind::Literal(KindLiteral::Object(_) | KindLiteral::Array(_)) = kind {
+		true
+	} else if let Kind::Either(members) = kind {
+		members.iter().any(describes_places)
+	} else if let Kind::Array(element, _) | Kind::Set(element, _) = kind {
+		describes_places(element)
+	} else {
+		false
 	}
 }
 
@@ -308,9 +311,6 @@ fn describe_held(
 /// never does, and anything else does. An array is walked so that a `NONE`
 /// nested inside one of its objects is still removed, but a `NONE` that *is* an
 /// element stays — dropping it would shift every element after it.
-// The rule is about the two container shapes; every other value is carried
-// through unchanged, so the wildcard is the rule rather than an omission.
-#[allow(clippy::wildcard_enum_match_arm)]
 pub(crate) fn clean_none(v: &mut Value) -> bool {
 	match v {
 		Value::None => false,
@@ -324,7 +324,22 @@ pub(crate) fn clean_none(v: &mut Value) -> bool {
 			});
 			true
 		}
-		_ => true,
+		Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Set(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Range(_)
+		| Value::Regex(_)
+		| Value::Closure(_) => true,
 	}
 }
 

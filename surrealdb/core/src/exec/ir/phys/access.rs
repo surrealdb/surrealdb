@@ -2840,34 +2840,37 @@ mod tests {
 	}
 
 	/// The condition, ordering and `WITH` hint of `SELECT * FROM t <snippet>`.
-	#[allow(clippy::wildcard_enum_match_arm)]
 	fn parts(snippet: &str) -> (Option<LogicalExpr>, Option<LogicalOrdering>, Option<With>) {
 		let sql = format!("SELECT * FROM t {snippet}");
 		let ast = crate::syn::parse(&sql).expect("parse");
 		let mut exprs = ast.expressions;
-		let plan = match exprs.remove(0) {
-			surrealdb_expr::parser::TopLevelExpr::Expr(select @ crate::expr::Expr::Select(_)) => {
-				lower(select).expect("SELECT lowers")
-			}
-			other => panic!("expected SELECT, got {other:?}"),
+		let surrealdb_expr::parser::TopLevelExpr::Expr(select @ crate::expr::Expr::Select(_)) =
+			exprs.remove(0)
+		else {
+			panic!("expected SELECT");
 		};
+		let plan = lower(select).expect("SELECT lowers");
 		let (mut cond, mut order, mut with) = (None, None, None);
 		let mut stack = vec![&plan];
 		while let Some(op) = stack.pop() {
-			match op {
-				LogicalOp::Filter(LogicalFilter {
-					predicate,
-					..
-				}) => cond = Some(predicate.clone()),
-				LogicalOp::Sort(LogicalSort {
-					ordering,
-					..
-				}) => order = Some(ordering.clone()),
-				LogicalOp::Source(LogicalSource {
-					with: hint,
-					..
-				}) => with = hint.clone(),
-				_ => {}
+			if let LogicalOp::Filter(LogicalFilter {
+				predicate,
+				..
+			}) = op
+			{
+				cond = Some(predicate.clone());
+			} else if let LogicalOp::Sort(LogicalSort {
+				ordering,
+				..
+			}) = op
+			{
+				order = Some(ordering.clone());
+			} else if let LogicalOp::Source(LogicalSource {
+				with: hint,
+				..
+			}) = op
+			{
+				with = hint.clone();
 			}
 			stack.extend(op.children());
 		}
@@ -3485,7 +3488,6 @@ mod tests {
 	}
 
 	#[test]
-	#[allow(clippy::wildcard_enum_match_arm)]
 	fn a_value_source_reads_values() {
 		let source = |source_ref, for_update| SourceAttrs {
 			source_ref,
@@ -3495,11 +3497,15 @@ mod tests {
 			may_meet_change: false,
 			resolved: false,
 		};
-		let read = |source: &SourceAttrs, call_shaped| match value_source(source, call_shaped) {
-			Ok(Some(PhysOp::Values {
+		let read = |source: &SourceAttrs, call_shaped| {
+			if let Ok(Some(PhysOp::Values {
 				read,
-			})) => Some(read),
-			_ => None,
+			})) = value_source(source, call_shaped)
+			{
+				Some(read)
+			} else {
+				None
+			}
 		};
 		assert_eq!(
 			read(&source(SourceRefShape::Mock, false), false),

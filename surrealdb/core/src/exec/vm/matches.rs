@@ -416,9 +416,8 @@ impl MatchesEval {
 	) -> Result<(FullTextIndex, QueryTerms), anyhow::Error> {
 		// The index's format version selects how its postings are resolved.
 		// Indexes without shared doc ids use the private doc-ID layout.
-		let ft_params = match &index_def.index {
-			Index::FullText(params) => params,
-			_ => unreachable!("Caller checked for FullText"),
+		let Index::FullText(ft_params) = &index_def.index else {
+			unreachable!("Caller checked for FullText");
 		};
 
 		let db_ctx = ctx
@@ -612,12 +611,16 @@ fn index_columns_touch_restricted(cols: &[Idiom], fields: &[FieldDefinition]) ->
 
 /// Extract the RecordId from the current row value, if it has one.
 fn extract_record_id(value: Option<&Value>) -> Option<crate::val::RecordId> {
-	match value? {
-		Value::Object(obj) => match obj.get("id") {
-			Some(Value::RecordId(rid)) => Some(rid.clone()),
-			_ => None,
-		},
-		Value::RecordId(rid) => Some(rid.clone()),
-		_ => None,
+	let v = value?;
+	if let Value::Object(obj) = v {
+		if let Some(Value::RecordId(rid)) = obj.get("id") {
+			Some(rid.clone())
+		} else {
+			None
+		}
+	} else if let Value::RecordId(rid) = v {
+		Some(rid.clone())
+	} else {
+		None
 	}
 }

@@ -134,31 +134,30 @@ pub(crate) fn evaluate_repeat_recurse<'a>(
 		// return input as-is. Only RecordIds (and arrays of them) are
 		// valid recursion targets.
 		if let Some(ref sink) = rec_ctx.discovery_sink {
-			let values_to_write: Vec<Value> = match value {
-				Value::Array(arr) => {
-					let mut targets = Vec::new();
-					for v in arr.iter() {
-						if is_final(v) {
-							continue;
-						}
-						if !is_recursion_target(v) {
-							return Err(crate::exec::Error::InvalidRecursionTarget {
-								value: v.to_sql(),
-							}
-							.into());
-						}
-						targets.push(v.clone());
+			let values_to_write: Vec<Value> = if let Value::Array(arr) = value {
+				let mut targets = Vec::new();
+				for v in arr.iter() {
+					if is_final(v) {
+						continue;
 					}
-					targets
-				}
-				v if is_final(v) => vec![],
-				v if is_recursion_target(v) => vec![v.clone()],
-				v => {
-					return Err(crate::exec::Error::InvalidRecursionTarget {
-						value: v.to_sql(),
+					if !is_recursion_target(v) {
+						return Err(crate::exec::Error::InvalidRecursionTarget {
+							value: v.to_sql(),
+						}
+						.into());
 					}
-					.into());
+					targets.push(v.clone());
 				}
+				targets
+			} else if is_final(value) {
+				vec![]
+			} else if is_recursion_target(value) {
+				vec![value.clone()]
+			} else {
+				return Err(crate::exec::Error::InvalidRecursionTarget {
+					value: value.to_sql(),
+				}
+				.into());
 			};
 			if !values_to_write.is_empty() {
 				sink.lock().extend(values_to_write);
@@ -173,41 +172,37 @@ pub(crate) fn evaluate_repeat_recurse<'a>(
 		// semantics where the recursive call would happen at `depth + 1`.
 		if let Some(ref cache) = rec_ctx.assembly_cache {
 			let next_depth = rec_ctx.depth + 1;
-			return match value {
-				Value::Array(arr) => {
-					let mut results = Vec::with_capacity(arr.len());
-					for elem in arr.iter() {
-						if is_final(elem) {
-							continue;
-						}
-						let hash = value_hash(elem);
-						if let Some(cached) = cache.get(&hash) {
-							results.push(cached.clone());
-						}
-						// If not in cache, the value was never discovered
-						// (shouldn't happen), skip it.
+			return if let Value::Array(arr) = value {
+				let mut results = Vec::with_capacity(arr.len());
+				for elem in arr.iter() {
+					if is_final(elem) {
+						continue;
 					}
-					let result = clean_iteration(Value::Array(results.into()));
-					if is_final(&result) && next_depth < rec_ctx.min_depth {
-						return Err(ControlFlow::Err(anyhow::Error::new(PathEliminationSignal)));
+					let hash = value_hash(elem);
+					if let Some(cached) = cache.get(&hash) {
+						results.push(cached.clone());
 					}
-					Ok(result)
+					// If not in cache, the value was never discovered
+					// (shouldn't happen), skip it.
 				}
-				v if !is_final(v) => {
-					let hash = value_hash(v);
-					let result = cache.get(&hash).cloned().unwrap_or(Value::None);
-					if is_final(&result) && next_depth < rec_ctx.min_depth {
-						return Err(ControlFlow::Err(anyhow::Error::new(PathEliminationSignal)));
-					}
-					Ok(result)
+				let result = clean_iteration(Value::Array(results.into()));
+				if is_final(&result) && next_depth < rec_ctx.min_depth {
+					return Err(ControlFlow::Err(anyhow::Error::new(PathEliminationSignal)));
 				}
+				Ok(result)
+			} else if !is_final(value) {
+				let hash = value_hash(value);
+				let result = cache.get(&hash).cloned().unwrap_or(Value::None);
+				if is_final(&result) && next_depth < rec_ctx.min_depth {
+					return Err(ControlFlow::Err(anyhow::Error::new(PathEliminationSignal)));
+				}
+				Ok(result)
+			} else {
 				// Final values (None, Null) -- check path elimination.
-				_ => {
-					if next_depth < rec_ctx.min_depth {
-						return Err(ControlFlow::Err(anyhow::Error::new(PathEliminationSignal)));
-					}
-					Ok(Value::None)
+				if next_depth < rec_ctx.min_depth {
+					return Err(ControlFlow::Err(anyhow::Error::new(PathEliminationSignal)));
 				}
+				Ok(Value::None)
 			};
 		}
 

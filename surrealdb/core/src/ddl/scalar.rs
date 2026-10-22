@@ -107,11 +107,12 @@ pub(crate) async fn idiom(exec: &ExecutionContext, expr: &Expr, into: &str) -> R
 /// Anything else (a parameter, a function call, a path starting from an
 /// expression) is evaluated, coerced to a string, and re-parsed as a path.
 pub(crate) async fn raw_idiom(exec: &ExecutionContext, expr: &Expr, into: &str) -> Result<Idiom> {
-	match expr {
-		Expr::Idiom(idiom) if matches!(idiom.0.first(), Some(Part::Field(_))) => {
-			substitute_indices(idiom.clone(), &eval_frame(exec)).await
-		}
-		_ => parse_path(scalar(exec, expr).await?, into),
+	if let Expr::Idiom(idiom) = expr
+		&& matches!(idiom.0.first(), Some(Part::Field(_)))
+	{
+		substitute_indices(idiom.clone(), &eval_frame(exec)).await
+	} else {
+		parse_path(scalar(exec, expr).await?, into)
 	}
 }
 
@@ -148,26 +149,20 @@ pub(crate) fn type_field_path(value: Value) -> Result<Idiom> {
 pub(crate) async fn fields(exec: &ExecutionContext, exprs: &[Expr]) -> Result<Vec<Idiom>> {
 	let mut out = Vec::new();
 	for expr in exprs {
-		match expr {
-			Expr::FunctionCall(call) if matches!(&call.receiver, Function::Normal(name) if name == "type::fields") =>
-			{
-				let Some(arg) = call.arguments.first() else {
-					return Err(anyhow::anyhow!(
-						"Expected an argument for type::fields function call"
-					));
-				};
+		if let Expr::FunctionCall(call) = expr
+			&& let Function::Normal(ref name) = call.receiver
+			&& (name == "type::fields" || name == "type::field")
+		{
+			let Some(arg) = call.arguments.first() else {
+				return Err(anyhow::anyhow!("Expected an argument for {name} function call"));
+			};
+			if name == "type::fields" {
 				out.extend(type_fields_paths(scalar(exec, arg).await?)?);
-			}
-			Expr::FunctionCall(call) if matches!(&call.receiver, Function::Normal(name) if name == "type::field") =>
-			{
-				let Some(arg) = call.arguments.first() else {
-					return Err(anyhow::anyhow!(
-						"Expected an argument for type::field function call"
-					));
-				};
+			} else {
 				out.push(type_field_path(scalar(exec, arg).await?)?);
 			}
-			_ => out.push(raw_idiom(exec, expr, "field name").await?),
+		} else {
+			out.push(raw_idiom(exec, expr, "field name").await?);
 		}
 	}
 	Ok(out)
@@ -221,7 +216,20 @@ async fn substitute_indices(this: Idiom, frame: &EvalContext<'_>) -> Result<Idio
 			Part::Value(Expr::Literal(Literal::String(s))) => Part::Field(s),
 			Part::Value(Expr::Literal(lit)) => Part::Value(Expr::Literal(lit)),
 			Part::Value(expr) => subscript(evaluate(&expr, frame).await?)?,
-			other => other,
+			other @ (Part::All
+			| Part::Flatten
+			| Part::Last
+			| Part::First
+			| Part::Field(_)
+			| Part::Where(_)
+			| Part::Lookup(_)
+			| Part::Start(_)
+			| Part::Method(..)
+			| Part::Destructure(_)
+			| Part::Optional
+			| Part::Recurse(..)
+			| Part::Doc
+			| Part::RepeatRecurse) => other,
 		};
 		out.push(part);
 	}
@@ -230,13 +238,15 @@ async fn substitute_indices(this: Idiom, frame: &EvalContext<'_>) -> Result<Idio
 
 /// The path part a parameterised subscript's value stands for.
 fn subscript(value: Value) -> Result<Part> {
-	match value {
-		Value::Number(Number::Int(i)) => Ok(Part::Value(Expr::Literal(Literal::Integer(i)))),
-		Value::String(s) => Ok(Part::Field(s)),
-		other => Err(anyhow::anyhow!(
+	if let Value::Number(Number::Int(i)) = value {
+		Ok(Part::Value(Expr::Literal(Literal::Integer(i))))
+	} else if let Value::String(s) = value {
+		Ok(Part::Field(s))
+	} else {
+		Err(anyhow::anyhow!(
 			"Field path index must evaluate to an integer or string, found {}",
-			other.kind_of()
-		)),
+			value.kind_of()
+		))
 	}
 }
 
@@ -253,7 +263,20 @@ pub(crate) fn substitute_evaluated(this: Idiom, evaluated: Vec<Value>) -> Result
 			Part::Value(_) => subscript(values.next().ok_or_else(|| {
 				anyhow::anyhow!("a path holds a subscript with no evaluated value")
 			})?)?,
-			other => other,
+			other @ (Part::All
+			| Part::Flatten
+			| Part::Last
+			| Part::First
+			| Part::Field(_)
+			| Part::Where(_)
+			| Part::Lookup(_)
+			| Part::Start(_)
+			| Part::Method(..)
+			| Part::Destructure(_)
+			| Part::Optional
+			| Part::Recurse(..)
+			| Part::Doc
+			| Part::RepeatRecurse) => other,
 		};
 		out.push(part);
 	}
@@ -281,82 +304,80 @@ mod tests {
 		let ast = crate::syn::parse(src).expect("statement should parse");
 		let mut exprs = ast.expressions;
 		assert_eq!(exprs.len(), 1, "expected exactly one statement in {src:?}");
-		match exprs.remove(0) {
-			surrealdb_expr::parser::TopLevelExpr::Expr(expr) => expr,
-			other => panic!("expected a plain statement for {src:?}, got {other:?}"),
-		}
+		let surrealdb_expr::parser::TopLevelExpr::Expr(expr) = exprs.remove(0) else {
+			panic!("expected a plain statement for {src:?}");
+		};
+		expr
 	}
 
 	/// Parse a `DEFINE`, the form a schema statement is carried and executed
 	/// as.
 	fn define(src: &str) -> DefineStatement {
-		match parse_one(src) {
-			crate::expr::Expr::Define(stmt) => *stmt,
-			other => panic!("expected a DEFINE for {src:?}, got {other:?}"),
-		}
+		let crate::expr::Expr::Define(stmt) = parse_one(src) else {
+			panic!("expected a DEFINE for {src:?}");
+		};
+		*stmt
 	}
 
 	/// Parse a `REMOVE`, as [`define`] does.
 	fn remove(src: &str) -> RemoveStatement {
-		match parse_one(src) {
-			crate::expr::Expr::Remove(stmt) => *stmt,
-			other => panic!("expected a REMOVE for {src:?}, got {other:?}"),
-		}
+		let crate::expr::Expr::Remove(stmt) = parse_one(src) else {
+			panic!("expected a REMOVE for {src:?}");
+		};
+		*stmt
 	}
 
 	/// The `name` of a `DEFINE ANALYZER`, the shortest statement whose name
 	/// takes the field-shaped parse.
 	fn analyzer_name(src: &str) -> Expr {
-		match define(src) {
-			DefineStatement::Analyzer(stmt) => stmt.name,
-			other => panic!("expected a DEFINE ANALYZER, got {other:?}"),
-		}
+		let DefineStatement::Analyzer(stmt) = define(src) else {
+			panic!("expected a DEFINE ANALYZER");
+		};
+		stmt.name
 	}
 
 	/// The `name` of a `DEFINE TABLE`, the statement whose name takes the
 	/// table-shaped parse.
 	fn define_table_name(src: &str) -> Expr {
-		match define(src) {
-			DefineStatement::Table(stmt) => stmt.name,
-			other => panic!("expected a DEFINE TABLE, got {other:?}"),
-		}
+		let DefineStatement::Table(stmt) = define(src) else {
+			panic!("expected a DEFINE TABLE");
+		};
+		stmt.name
 	}
 
 	/// The `name` of a `REMOVE TABLE`.
 	fn remove_table_name(src: &str) -> Expr {
-		match remove(src) {
-			RemoveStatement::Table(stmt) => stmt.name,
-			other => panic!("expected a REMOVE TABLE, got {other:?}"),
-		}
+		let RemoveStatement::Table(stmt) = remove(src) else {
+			panic!("expected a REMOVE TABLE");
+		};
+		stmt.name
 	}
 
 	/// The `name` and `what` of a `DEFINE FIELD`.
 	fn define_field_parts(src: &str) -> (Expr, Expr) {
-		match define(src) {
-			DefineStatement::Field(stmt) => (stmt.name, stmt.what),
-			other => panic!("expected a DEFINE FIELD, got {other:?}"),
-		}
+		let DefineStatement::Field(stmt) = define(src) else {
+			panic!("expected a DEFINE FIELD");
+		};
+		(stmt.name, stmt.what)
 	}
 
 	/// The `FIELDS` list of a `DEFINE INDEX`.
 	fn define_index_cols(src: &str) -> Vec<Expr> {
-		match define(src) {
-			DefineStatement::Index(stmt) => stmt.cols,
-			other => panic!("expected a DEFINE INDEX, got {other:?}"),
-		}
+		let DefineStatement::Index(stmt) = define(src) else {
+			panic!("expected a DEFINE INDEX");
+		};
+		stmt.cols
 	}
 
 	/// The `NAMESPACE` and `DATABASE` of a `DEFINE CONFIG DEFAULT`.
 	fn default_config_parts(src: &str) -> (Expr, Expr) {
-		match define(src) {
-			DefineStatement::Config(stmt) => match stmt.inner {
-				crate::expr::statements::define::config::ConfigInner::Default(cfg) => {
-					(cfg.namespace, cfg.database)
-				}
-				other => panic!("expected a DEFINE CONFIG DEFAULT, got {other:?}"),
-			},
-			other => panic!("expected a DEFINE CONFIG, got {other:?}"),
-		}
+		let DefineStatement::Config(stmt) = define(src) else {
+			panic!("expected a DEFINE CONFIG");
+		};
+		let crate::expr::statements::define::config::ConfigInner::Default(cfg) = stmt.inner else {
+			panic!("expected a DEFINE CONFIG DEFAULT");
+		};
+		(cfg.namespace, cfg.database)
 	}
 
 	/// A context with `row` as the row in scope, so that an expression

@@ -1,4 +1,5 @@
 #![recursion_limit = "256"]
+#![deny(clippy::wildcard_enum_match_arm)]
 //! #548: KNN prefilter overflow fallback.
 //!
 //! Lives in its own integration-test binary (not the shared `it` binary) so
@@ -46,9 +47,9 @@ async fn knn_prefilter_overflow_falls_back_to_in_traversal_filtering() -> anyhow
 			None,
 		)
 		.await?;
-	let plan = match results.remove(0).result? {
-		Value::String(plan) => plan,
-		other => anyhow::bail!("unexpected EXPLAIN result: {other:?}"),
+	let res = results.remove(0).result?;
+	let Value::String(plan) = res else {
+		anyhow::bail!("unexpected EXPLAIN result: {res:?}");
 	};
 	assert!(plan.contains("prefilter_tier: fallback"), "expected fallback tier:\n{plan}");
 	// The fallback pushed the full residual into the traversal, which

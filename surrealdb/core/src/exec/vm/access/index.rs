@@ -37,12 +37,13 @@ pub(crate) fn evaluate_index(value: &Value, index: &Value) -> anyhow::Result<Val
 			Ok(obj.get(&key).cloned().unwrap_or(Value::None))
 		}
 		// RecordId with numeric index - only array keys support indexing
-		(Value::RecordId(rid), Value::Number(n)) => match &rid.key {
-			RecordIdKey::Array(arr) => {
+		(Value::RecordId(rid), Value::Number(n)) => {
+			if let RecordIdKey::Array(arr) = &rid.key {
 				Ok(n.as_array_index().and_then(|idx| arr.get(idx).cloned()).unwrap_or(Value::None))
+			} else {
+				Ok(Value::None)
 			}
-			_ => Ok(Value::None),
-		},
+		}
 		_ => Ok(Value::None),
 	}
 }

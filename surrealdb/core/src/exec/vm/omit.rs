@@ -40,9 +40,10 @@ pub(super) async fn apply(
 
 /// The index a value spells: a position in an array, and a key in an object.
 fn index_of(value: &Value) -> Option<usize> {
-	match value {
-		Value::Number(n) => usize::try_from(n.to_int()).ok(),
-		_ => None,
+	if let Value::Number(n) = value {
+		usize::try_from(n.to_int()).ok()
+	} else {
+		None
 	}
 }
 
@@ -106,7 +107,23 @@ fn descend<'a>(
 						descend(program, rest, action, nested, state, ctx).await?;
 					}
 				}
-				_ => {}
+				Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Set(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Range(_)
+				| Value::Closure(_) => {}
 			},
 			WalkStep::First => {
 				if let Value::Array(arr) = value
@@ -169,7 +186,23 @@ async fn descend_index(
 				descend(program, rest, action, nested, state, ctx).await?;
 			}
 		}
-		_ => {}
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Set(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => {}
 	}
 	Ok(())
 }
@@ -239,7 +272,23 @@ fn perform<'a>(
 			WalkAction::Clear => match value {
 				Value::Object(obj) => obj.clear(),
 				Value::Array(arr) => arr.clear(),
-				_ => {}
+				Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Set(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Range(_)
+				| Value::Closure(_) => {}
 			},
 			WalkAction::Destructure(fields) => {
 				if let Value::Object(obj) = value {
@@ -261,7 +310,24 @@ fn remove_index(value: &mut Value, index: usize) {
 		Value::Object(obj) => {
 			obj.remove(index.to_string().as_str());
 		}
-		_ => {}
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Array(_)
+		| Value::Set(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => {}
 	}
 }
 

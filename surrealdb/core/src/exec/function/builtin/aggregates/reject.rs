@@ -35,28 +35,25 @@ impl Rejected {
 	/// Take a numeric input. Returns the number for a number and `None` for any
 	/// other value, which is skipped without being recorded.
 	pub(super) fn number(&mut self, _func: &str, value: &Value) -> Option<Number> {
-		match value {
-			Value::Number(n) => {
-				self.folded = true;
-				Some(*n)
-			}
-			_ => None,
+		if let Value::Number(n) = value {
+			self.folded = true;
+			Some(*n)
+		} else {
+			None
 		}
 	}
 
 	/// Take a datetime input, recording a rejection for a value that is neither
 	/// a datetime nor absent.
 	pub(super) fn datetime(&mut self, func: &str, value: &Value) -> Option<crate::val::Datetime> {
-		match value {
-			Value::Datetime(d) => {
-				self.folded = true;
-				Some(*d)
-			}
-			Value::None | Value::Null => None,
-			other => {
-				self.reject(func, "datetime", other);
-				None
-			}
+		if let Value::Datetime(d) = value {
+			self.folded = true;
+			Some(*d)
+		} else if matches!(value, Value::None | Value::Null) {
+			None
+		} else {
+			self.reject(func, "datetime", value);
+			None
 		}
 	}
 

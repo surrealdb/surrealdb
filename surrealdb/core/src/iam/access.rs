@@ -249,15 +249,14 @@ pub(crate) async fn authenticate_generic(
 ) -> Result<()> {
 	match kvs.evaluate(authenticate, session, None).await {
 		Ok(val) => {
-			match val {
+			if let PublicValue::None = val {
 				// If the AUTHENTICATE clause returns nothing, authentication continues
-				PublicValue::None => Ok(()),
+				Ok(())
+			} else {
 				// If the AUTHENTICATE clause returns anything else, authentication fails
 				// generically
-				_ => {
-					debug!("Authentication attempt as system user rejected by AUTHENTICATE clause");
-					Err(anyhow::Error::new(AuthError::InvalidAuth))
-				}
+				debug!("Authentication attempt as system user rejected by AUTHENTICATE clause");
+				Err(anyhow::Error::new(AuthError::InvalidAuth))
 			}
 		}
 		// If the AUTHENTICATE clause throws a specific error, authentication fails with
@@ -310,10 +309,10 @@ pub(crate) async fn create_refresh_token_record(
 			})
 	)?;
 	// Return the key string from the bearer grant
-	match grant.grant {
-		catalog::Grant::Bearer(bearer) => Ok(bearer.key),
-		_ => Err(anyhow::Error::new(AuthError::AccessMethodMismatch)),
-	}
+	let catalog::Grant::Bearer(bearer) = grant.grant else {
+		return Err(anyhow::Error::new(AuthError::AccessMethodMismatch));
+	};
+	Ok(bearer.key)
 }
 
 // Revoke a bearer key that acted as a refresh token for a record user

@@ -50,7 +50,19 @@ impl Expr {
 					right: Box::new(bound(end)),
 				}
 			}
-			value => convert_public_value_to_internal(value).into_literal(),
+			value @ (PublicValue::None
+			| PublicValue::Null
+			| PublicValue::Bool(_)
+			| PublicValue::Number(_)
+			| PublicValue::String(_)
+			| PublicValue::Bytes(_)
+			| PublicValue::Duration(_)
+			| PublicValue::Datetime(_)
+			| PublicValue::Uuid(_)
+			| PublicValue::Geometry(_)
+			| PublicValue::Table(_)
+			| PublicValue::File(_)
+			| PublicValue::Regex(_)) => convert_public_value_to_internal(value).into_literal(),
 		}
 	}
 	fn surface_record_id_key(key: surrealdb_types::RecordIdKey) -> RecordIdKeyLit {

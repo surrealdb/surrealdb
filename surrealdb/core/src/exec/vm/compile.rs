@@ -145,7 +145,7 @@ fn statement_region(ir: &Ir) -> Lowered<RegionId> {
 					ir.region(*inner)
 						.is_some_and(|held| matches!(held.kind, RegionKind::Statement(_)))
 				})),
-				_ => {
+				OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => {
 					return Err(NotCovered::internal(format!(
 						"a request container holds {:?} beside its statement",
 						data.kind
@@ -565,12 +565,16 @@ pub(super) async fn closure_body(
 /// planner of that body ([`StatementPlanner::caller`]): the frame its [`UnitKind::FunctionBody`]
 /// unit is lowered for.
 fn requester_frame(caller: &Planner<'_>, path: &[UnitRequest]) -> super::program::UnitFrame {
-	let unchecked = path.iter().rev().find_map(|request| match request {
-		UnitRequest::FunctionBody {
+	let unchecked = path.iter().rev().find_map(|request| {
+		if let UnitRequest::FunctionBody {
 			unchecked,
 			..
-		} => Some(*unchecked),
-		_ => None,
+		} = request
+		{
+			Some(*unchecked)
+		} else {
+			None
+		}
 	});
 	super::program::UnitFrame {
 		checked: !unchecked.unwrap_or(false),
@@ -644,7 +648,39 @@ impl<'a> StatementPlanner<'a> {
 					let calling = limited_by(&planner, limit.as_ref());
 					planner = Self::prepared_body(&calling, name, *unchecked).await?.1.planner;
 				}
-				_ => {}
+				UnitRequest::Subquery {
+					..
+				}
+				| UnitRequest::TableUnit {
+					..
+				}
+				| UnitRequest::ViewRows {
+					..
+				}
+				| UnitRequest::ViewRecalc {
+					..
+				}
+				| UnitRequest::StageBundle {
+					..
+				}
+				| UnitRequest::Events {
+					..
+				}
+				| UnitRequest::Cascade {
+					..
+				}
+				| UnitRequest::ClosureBody {
+					..
+				}
+				| UnitRequest::LoopBody {
+					..
+				}
+				| UnitRequest::Subscription {
+					..
+				}
+				| UnitRequest::ServedStatement {
+					..
+				} => {}
 			}
 		}
 		Ok(planner)
@@ -1061,7 +1097,37 @@ impl StatementPlanner<'_> {
 				..
 			} => match purge::select_all_of(referencing()) {
 				LogicalOp::Subquery(read) => (Ok(*read.input), vec![PURGE_REFERENCING]),
-				read => (Ok(read), vec![PURGE_REFERENCING]),
+				read @ (LogicalOp::Source(_)
+				| LogicalOp::Values(_)
+				| LogicalOp::Match(_)
+				| LogicalOp::Write(_)
+				| LogicalOp::Ddl(_)
+				| LogicalOp::UnionAll(_)
+				| LogicalOp::Join(_)
+				| LogicalOp::Filter(_)
+				| LogicalOp::PermissionFilter(_)
+				| LogicalOp::Split(_)
+				| LogicalOp::Aggregate(_)
+				| LogicalOp::Distinct(_)
+				| LogicalOp::Sort(_)
+				| LogicalOp::Limit(_)
+				| LogicalOp::Project(_)
+				| LogicalOp::Fetch(_)
+				| LogicalOp::Timeout(_)
+				| LogicalOp::VersionScope(_)
+				| LogicalOp::Only(_)
+				| LogicalOp::Explain(_)
+				| LogicalOp::Eval(_)
+				| LogicalOp::Sequence(_)
+				| LogicalOp::Let(_)
+				| LogicalOp::Return(_)
+				| LogicalOp::Foreach(_)
+				| LogicalOp::If(_)
+				| LogicalOp::Throw(_)
+				| LogicalOp::Break(_)
+				| LogicalOp::Continue(_)
+				| LogicalOp::Info(_)
+				| LogicalOp::Sleep(_)) => (Ok(read), vec![PURGE_REFERENCING]),
 			},
 			CascadeKind::Unset {
 				field,
@@ -1320,7 +1386,22 @@ mod tests {
 			Value::Uuid(uuid) => *uuid = Uuid::default(),
 			Value::Object(object) => object.values_mut().for_each(zero_uuids),
 			Value::Array(array) => array.iter_mut().for_each(zero_uuids),
-			_ => {}
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Set(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => {}
 		}
 	}
 

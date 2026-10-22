@@ -194,14 +194,13 @@ pub(crate) fn envelope(
 	// A session id is a uuid, written either as one or as the text of one. Any
 	// other value names no session, and a subscriber's own `$session` is
 	// whatever the definition stored, so every other variant is reachable.
-	#[allow(
-		clippy::wildcard_enum_match_arm,
-		reason = "two variants name a session; the rest are one answer, not a per-variant decision"
-	)]
-	let session_id = match session.pick(ID.as_ref()) {
-		Value::Uuid(uuid) => Some(uuid.into()),
-		Value::String(text) => text.parse::<crate::val::Uuid>().ok().map(|uuid| uuid.into()),
-		_ => None,
+	let picked = session.pick(ID.as_ref());
+	let session_id = if let Value::Uuid(uuid) = picked {
+		Some(uuid.into())
+	} else if let Value::String(text) = picked {
+		text.parse::<crate::val::Uuid>().ok().map(|uuid| uuid.into())
+	} else {
+		None
 	};
 	let record = match convert_value_to_public_value(Value::RecordId(rid.clone())) {
 		Ok(value) => value,

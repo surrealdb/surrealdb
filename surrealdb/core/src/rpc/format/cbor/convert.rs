@@ -64,16 +64,22 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 		CborValue::Tag(t, v) => {
 			match t {
 				// A literal datetime
-				TAG_SPEC_DATETIME => match *v {
-					CborValue::Text(v) => match syn::datetime(v.as_str()) {
-						Ok(v) => Ok(PublicValue::Datetime(v)),
-						_ => Err(anyhow!("Expected a valid Datetime value")),
-					},
-					_ => Err(anyhow!("Expected a CBOR text data type")),
-				},
+				TAG_SPEC_DATETIME => {
+					if let CborValue::Text(v) = *v {
+						if let Ok(v) = syn::datetime(v.as_str()) {
+							Ok(PublicValue::Datetime(v))
+						} else {
+							Err(anyhow!("Expected a valid Datetime value"))
+						}
+					} else {
+						Err(anyhow!("Expected a CBOR text data type"))
+					}
+				}
 				// A custom [seconds: i64, nanos: u32] datetime
-				TAG_CUSTOM_DATETIME => match *v {
-					CborValue::Array(v) if v.len() == 2 => {
+				TAG_CUSTOM_DATETIME => {
+					if let CborValue::Array(v) = *v
+						&& v.len() == 2
+					{
 						let mut iter = v.into_iter();
 
 						let seconds = match iter.next() {
@@ -96,40 +102,55 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 							Ok(v) => Ok(PublicValue::Datetime(v)),
 							_ => Err(anyhow!("Expected a valid Datetime value")),
 						}
+					} else {
+						Err(anyhow!("Expected a CBOR array with 2 elements"))
 					}
-					_ => Err(anyhow!("Expected a CBOR array with 2 elements")),
-				},
+				}
 				// A literal NONE
 				TAG_NONE => Ok(PublicValue::None),
 				// A literal uuid
-				TAG_STRING_UUID => match *v {
-					CborValue::Text(v) => match v.parse::<PublicUuid>() {
-						Ok(v) => Ok(PublicValue::Uuid(v)),
-						_ => Err(anyhow!("Expected a valid UUID value")),
-					},
-					_ => Err(anyhow!("Expected a CBOR text data type")),
-				},
+				TAG_STRING_UUID => {
+					if let CborValue::Text(v) = *v {
+						if let Ok(v) = v.parse::<PublicUuid>() {
+							Ok(PublicValue::Uuid(v))
+						} else {
+							Err(anyhow!("Expected a valid UUID value"))
+						}
+					} else {
+						Err(anyhow!("Expected a CBOR text data type"))
+					}
+				}
 				// A byte string uuid
 				TAG_SPEC_UUID => to_uuid(*v).map(PublicValue::Uuid),
 				// A literal decimal
-				TAG_STRING_DECIMAL => match *v {
-					CborValue::Text(v) => match Decimal::from_str_normalized(v.as_str()) {
-						Ok(v) => Ok(PublicValue::Number(PublicNumber::Decimal(v))),
-						_ => Err(anyhow!("Expected a valid Decimal value")),
-					},
-					_ => Err(anyhow!("Expected a CBOR text data type")),
-				},
+				TAG_STRING_DECIMAL => {
+					if let CborValue::Text(v) = *v {
+						if let Ok(v) = Decimal::from_str_normalized(v.as_str()) {
+							Ok(PublicValue::Number(PublicNumber::Decimal(v)))
+						} else {
+							Err(anyhow!("Expected a valid Decimal value"))
+						}
+					} else {
+						Err(anyhow!("Expected a CBOR text data type"))
+					}
+				}
 				// A literal duration
-				TAG_STRING_DURATION => match *v {
-					CborValue::Text(v) => match v.parse::<PublicDuration>() {
-						Ok(v) => Ok(PublicValue::Duration(v)),
-						_ => Err(anyhow!("Expected a valid Duration value")),
-					},
-					_ => Err(anyhow!("Expected a CBOR text data type")),
-				},
+				TAG_STRING_DURATION => {
+					if let CborValue::Text(v) = *v {
+						if let Ok(v) = v.parse::<PublicDuration>() {
+							Ok(PublicValue::Duration(v))
+						} else {
+							Err(anyhow!("Expected a valid Duration value"))
+						}
+					} else {
+						Err(anyhow!("Expected a CBOR text data type"))
+					}
+				}
 				// A custom [seconds: Option<u64>, nanos: Option<u32>] duration
-				TAG_CUSTOM_DURATION => match *v {
-					CborValue::Array(v) if v.len() <= 2 => {
+				TAG_CUSTOM_DURATION => {
+					if let CborValue::Array(v) = *v
+						&& v.len() <= 2
+					{
 						let mut iter = v.into_iter();
 
 						let seconds = match iter.next() {
@@ -149,16 +170,19 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 						};
 
 						Ok(PublicValue::Duration(PublicDuration::new(seconds, nanos)))
+					} else {
+						Err(anyhow!("Expected a CBOR array with at most 2 elements"))
 					}
-					_ => Err(anyhow!("Expected a CBOR array with at most 2 elements")),
-				},
+				}
 				// A literal recordid
-				TAG_RECORDID => match *v {
-					CborValue::Text(v) => match syn::record_id(v.as_str()) {
-						Ok(v) => Ok(PublicValue::RecordId(v)),
-						_ => Err(anyhow!("Expected a valid RecordID value")),
-					},
-					CborValue::Array(v) => {
+				TAG_RECORDID => {
+					if let CborValue::Text(v) = *v {
+						if let Ok(v) = syn::record_id(v.as_str()) {
+							Ok(PublicValue::RecordId(v))
+						} else {
+							Err(anyhow!("Expected a valid RecordID value"))
+						}
+					} else if let CborValue::Array(v) = *v {
 						let mut v = v.into_iter();
 						let table = v.next().context(
 							"Expected a CBOR text data type, or a CBOR array with 2 elements: got empty array",
@@ -178,20 +202,24 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 							table: table.into(),
 							key,
 						}))
+					} else {
+						Err(anyhow!(
+							"Expected a CBOR text data type, or a CBOR array with 2 elements"
+						))
 					}
-					_ => Err(anyhow!(
-						"Expected a CBOR text data type, or a CBOR array with 2 elements"
-					)),
-				},
+				}
 				// A literal table
-				TAG_TABLE => match *v {
-					CborValue::Text(v) => Ok(PublicValue::Table(PublicTable::new(v))),
-					_ => Err(anyhow!("Expected a CBOR text data type")),
-				},
+				TAG_TABLE => {
+					if let CborValue::Text(v) = *v {
+						Ok(PublicValue::Table(PublicTable::new(v)))
+					} else {
+						Err(anyhow!("Expected a CBOR text data type"))
+					}
+				}
 				// A range
 				TAG_RANGE => Ok(PublicValue::Range(Box::new(to_range(*v)?))),
-				TAG_GEOMETRY_POINT => match *v {
-					CborValue::Array(v) => {
+				TAG_GEOMETRY_POINT => {
+					if let CborValue::Array(v) = *v {
 						let err_msg = "Expected a CBOR array with 2 decimal values";
 						let mut iter = v.into_iter();
 						let x = iter.next().ok_or_else(|| anyhow!(err_msg))?;
@@ -203,44 +231,49 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 						let x = to_value(x)?;
 						let y = to_value(y)?;
 
-						match (x, y) {
-							(PublicValue::Number(x), PublicValue::Number(y)) => {
-								Ok(PublicValue::Geometry(PublicGeometry::Point(
-									(
-										x.to_f64().unwrap_or_default(),
-										y.to_f64().unwrap_or_default(),
-									)
-										.into(),
-								)))
-							}
-							_ => Err(anyhow!("Expected a CBOR array with 2 decimal values")),
+						if let (PublicValue::Number(x), PublicValue::Number(y)) = (x, y) {
+							Ok(PublicValue::Geometry(PublicGeometry::Point(
+								(x.to_f64().unwrap_or_default(), y.to_f64().unwrap_or_default())
+									.into(),
+							)))
+						} else {
+							Err(anyhow!("Expected a CBOR array with 2 decimal values"))
 						}
+					} else {
+						Err(anyhow!("Expected a CBOR array with 2 decimal values"))
 					}
-					_ => Err(anyhow!("Expected a CBOR array with 2 decimal values")),
-				},
-				TAG_GEOMETRY_LINE => match *v {
-					CborValue::Array(v) => {
+				}
+				TAG_GEOMETRY_LINE => {
+					if let CborValue::Array(v) = *v {
 						let points = v
 							.into_iter()
-							.map(|v| match to_value(v)? {
-								PublicValue::Geometry(PublicGeometry::Point(v)) => Ok(v),
-								_ => {
+							.map(|v| {
+								if let PublicValue::Geometry(PublicGeometry::Point(v)) =
+									to_value(v)?
+								{
+									Ok(v)
+								} else {
 									Err(anyhow!("Expected a CBOR array with Geometry Point values"))
 								}
 							})
 							.collect::<Result<Vec<Point>>>()?;
 
 						Ok(PublicValue::Geometry(PublicGeometry::Line(LineString::from(points))))
+					} else {
+						Err(anyhow!("Expected a CBOR array with Geometry Point values"))
 					}
-					_ => Err(anyhow!("Expected a CBOR array with Geometry Point values")),
-				},
-				TAG_GEOMETRY_POLYGON => match *v {
-					CborValue::Array(v) if !v.is_empty() => {
+				}
+				TAG_GEOMETRY_POLYGON => {
+					if let CborValue::Array(v) = *v
+						&& !v.is_empty()
+					{
 						let lines = v
 							.into_iter()
-							.map(|v| match to_value(v)? {
-								PublicValue::Geometry(PublicGeometry::Line(v)) => Ok(v),
-								_ => {
+							.map(|v| {
+								if let PublicValue::Geometry(PublicGeometry::Line(v)) = to_value(v)?
+								{
+									Ok(v)
+								} else {
 									Err(anyhow!("Expected a CBOR array with Geometry Line values"))
 								}
 							})
@@ -260,18 +293,20 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 							exterior.clone(),
 							interiors,
 						))))
-					}
-					_ => {
+					} else {
 						Err(anyhow!("Expected a CBOR array with at least one Geometry Line values"))
 					}
-				},
-				TAG_GEOMETRY_MULTIPOINT => match *v {
-					CborValue::Array(v) => {
+				}
+				TAG_GEOMETRY_MULTIPOINT => {
+					if let CborValue::Array(v) = *v {
 						let points = v
 							.into_iter()
-							.map(|v| match to_value(v)? {
-								PublicValue::Geometry(PublicGeometry::Point(v)) => Ok(v),
-								_ => {
+							.map(|v| {
+								if let PublicValue::Geometry(PublicGeometry::Point(v)) =
+									to_value(v)?
+								{
+									Ok(v)
+								} else {
 									Err(anyhow!("Expected a CBOR array with Geometry Point values"))
 								}
 							})
@@ -280,16 +315,19 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 						Ok(PublicValue::Geometry(PublicGeometry::MultiPoint(MultiPoint::from(
 							points,
 						))))
+					} else {
+						Err(anyhow!("Expected a CBOR array with Geometry Point values"))
 					}
-					_ => Err(anyhow!("Expected a CBOR array with Geometry Point values")),
-				},
-				TAG_GEOMETRY_MULTILINE => match *v {
-					CborValue::Array(v) => {
+				}
+				TAG_GEOMETRY_MULTILINE => {
+					if let CborValue::Array(v) = *v {
 						let lines = v
 							.into_iter()
-							.map(|v| match to_value(v)? {
-								PublicValue::Geometry(PublicGeometry::Line(v)) => Ok(v),
-								_ => {
+							.map(|v| {
+								if let PublicValue::Geometry(PublicGeometry::Line(v)) = to_value(v)?
+								{
+									Ok(v)
+								} else {
 									Err(anyhow!("Expected a CBOR array with Geometry Line values"))
 								}
 							})
@@ -298,43 +336,56 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 						Ok(PublicValue::Geometry(PublicGeometry::MultiLine(MultiLineString::new(
 							lines,
 						))))
+					} else {
+						Err(anyhow!("Expected a CBOR array with Geometry Line values"))
 					}
-					_ => Err(anyhow!("Expected a CBOR array with Geometry Line values")),
-				},
-				TAG_GEOMETRY_MULTIPOLYGON => match *v {
-					CborValue::Array(v) => {
+				}
+				TAG_GEOMETRY_MULTIPOLYGON => {
+					if let CborValue::Array(v) = *v {
 						let polygons = v
 							.into_iter()
-							.map(|v| match to_value(v)? {
-								PublicValue::Geometry(PublicGeometry::Polygon(v)) => Ok(v),
-								_ => Err(anyhow!(
-									"Expected a CBOR array with Geometry Polygon values"
-								)),
+							.map(|v| {
+								if let PublicValue::Geometry(PublicGeometry::Polygon(v)) =
+									to_value(v)?
+								{
+									Ok(v)
+								} else {
+									Err(anyhow!(
+										"Expected a CBOR array with Geometry Polygon values"
+									))
+								}
 							})
 							.collect::<Result<Vec<Polygon>>>()?;
 
 						Ok(PublicValue::Geometry(PublicGeometry::MultiPolygon(MultiPolygon::from(
 							polygons,
 						))))
+					} else {
+						Err(anyhow!("Expected a CBOR array with Geometry Polygon values"))
 					}
-					_ => Err(anyhow!("Expected a CBOR array with Geometry Polygon values")),
-				},
-				TAG_GEOMETRY_COLLECTION => match *v {
-					CborValue::Array(v) => {
+				}
+				TAG_GEOMETRY_COLLECTION => {
+					if let CborValue::Array(v) = *v {
 						let geometries = v
 							.into_iter()
-							.map(|v| match to_value(v)? {
-								PublicValue::Geometry(v) => Ok(v),
-								_ => Err(anyhow!("Expected a CBOR array with Geometry values")),
+							.map(|v| {
+								if let PublicValue::Geometry(v) = to_value(v)? {
+									Ok(v)
+								} else {
+									Err(anyhow!("Expected a CBOR array with Geometry values"))
+								}
 							})
 							.collect::<Result<Vec<PublicGeometry>>>()?;
 
 						Ok(PublicValue::Geometry(PublicGeometry::Collection(geometries)))
+					} else {
+						Err(anyhow!("Expected a CBOR array with Geometry values"))
 					}
-					_ => Err(anyhow!("Expected a CBOR array with Geometry values")),
-				},
-				TAG_FILE => match *v {
-					CborValue::Array(mut v) if v.len() == 2 => {
+				}
+				TAG_FILE => {
+					if let CborValue::Array(mut v) = *v
+						&& v.len() == 2
+					{
 						let CborValue::Text(bucket) = v.remove(0) else {
 							return Err(anyhow!("Expected the bucket name to be a string value"));
 						};
@@ -344,17 +395,21 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 						};
 
 						Ok(PublicValue::File(PublicFile::new(bucket, key)))
-					}
-					_ => {
+					} else {
 						Err(anyhow!("Expected a CBOR array with two String bucket and key values"))
 					}
-				},
-				TAG_SET => match *v {
-					CborValue::Array(v) => Ok(PublicValue::Set(PublicSet::from(
-						v.into_iter().map(to_value).collect::<Result<BTreeSet<PublicValue>>>()?,
-					))),
-					_ => Err(anyhow!("Expected a CBOR array with Set values")),
-				},
+				}
+				TAG_SET => {
+					if let CborValue::Array(v) = *v {
+						Ok(PublicValue::Set(PublicSet::from(
+							v.into_iter()
+								.map(to_value)
+								.collect::<Result<BTreeSet<PublicValue>>>()?,
+						)))
+					} else {
+						Err(anyhow!("Expected a CBOR array with Set values"))
+					}
+				}
 				// An unknown tag
 				_ => Err(anyhow!("Encountered an unknown CBOR tag")),
 			}
@@ -509,22 +564,25 @@ fn from_geometry(v: PublicGeometry) -> Result<CborValue> {
 
 fn to_range(val: CborValue) -> Result<PublicRange> {
 	fn decode_bound(v: CborValue) -> Result<Bound<PublicValue>> {
-		match v {
-			CborValue::Tag(TAG_BOUND_INCLUDED, v) => Ok(Bound::Included(to_value(*v)?)),
-			CborValue::Tag(TAG_BOUND_EXCLUDED, v) => Ok(Bound::Excluded(to_value(*v)?)),
-			CborValue::Null => Ok(Bound::Unbounded),
-			_ => Err(anyhow!("Expected a bound tag")),
+		if let CborValue::Tag(TAG_BOUND_INCLUDED, v) = v {
+			Ok(Bound::Included(to_value(*v)?))
+		} else if let CborValue::Tag(TAG_BOUND_EXCLUDED, v) = v {
+			Ok(Bound::Excluded(to_value(*v)?))
+		} else if let CborValue::Null = v {
+			Ok(Bound::Unbounded)
+		} else {
+			Err(anyhow!("Expected a bound tag"))
 		}
 	}
 
-	match val {
-		CborValue::Array(v) if v.len() == 2 => {
-			let mut v = v;
-			let beg = decode_bound(v.remove(0))?;
-			let end = decode_bound(v.remove(0))?;
-			Ok(PublicRange::new(beg, end))
-		}
-		_ => Err(anyhow!("Expected a CBOR array with 2 bounds")),
+	if let CborValue::Array(mut v) = val
+		&& v.len() == 2
+	{
+		let beg = decode_bound(v.remove(0))?;
+		let end = decode_bound(v.remove(0))?;
+		Ok(PublicRange::new(beg, end))
+	} else {
+		Err(anyhow!("Expected a CBOR array with 2 bounds"))
 	}
 }
 
@@ -559,26 +617,29 @@ fn from_record_id_key_range(r: PublicRecordIdKeyRange) -> Result<CborValue> {
 
 fn to_record_id_key_range(val: CborValue) -> Result<PublicRecordIdKeyRange> {
 	fn decode_bound(v: CborValue) -> Result<Bound<PublicRecordIdKey>> {
-		match v {
-			CborValue::Tag(TAG_BOUND_INCLUDED, v) => Ok(Bound::Included(to_record_id_key(*v)?)),
-			CborValue::Tag(TAG_BOUND_EXCLUDED, v) => Ok(Bound::Excluded(to_record_id_key(*v)?)),
-			CborValue::Null => Ok(Bound::Unbounded),
-			_ => Err(anyhow!("Expected a bound tag")),
+		if let CborValue::Tag(TAG_BOUND_INCLUDED, v) = v {
+			Ok(Bound::Included(to_record_id_key(*v)?))
+		} else if let CborValue::Tag(TAG_BOUND_EXCLUDED, v) = v {
+			Ok(Bound::Excluded(to_record_id_key(*v)?))
+		} else if let CborValue::Null = v {
+			Ok(Bound::Unbounded)
+		} else {
+			Err(anyhow!("Expected a bound tag"))
 		}
 	}
 
-	match val {
-		CborValue::Array(v) if v.len() == 2 => {
-			let mut v = v;
-			let start = decode_bound(v.remove(0))?;
-			let end = decode_bound(v.remove(0))?;
+	if let CborValue::Array(mut v) = val
+		&& v.len() == 2
+	{
+		let start = decode_bound(v.remove(0))?;
+		let end = decode_bound(v.remove(0))?;
 
-			Ok(PublicRecordIdKeyRange {
-				start,
-				end,
-			})
-		}
-		_ => Err(anyhow!("Expected a CBOR array with 2 bounds")),
+		Ok(PublicRecordIdKeyRange {
+			start,
+			end,
+		})
+	} else {
+		Err(anyhow!("Expected a CBOR array with 2 bounds"))
 	}
 }
 
@@ -606,14 +667,23 @@ fn to_record_id_key(val: CborValue) -> Result<PublicRecordIdKey> {
 		CborValue::Tag(TAG_RANGE, v) => {
 			Ok(PublicRecordIdKey::Range(Box::new(to_record_id_key_range(*v)?)))
 		}
-		CborValue::Tag(TAG_STRING_UUID, v) => match *v {
-			CborValue::Text(v) => match PublicUuid::try_from(v) {
-				Ok(v) => Ok(PublicRecordIdKey::Uuid(v)),
-				_ => Err(anyhow!("Expected a valid UUID value")),
-			},
-			_ => Err(anyhow!("Expected a CBOR text data type")),
-		},
+		CborValue::Tag(TAG_STRING_UUID, v) => {
+			if let CborValue::Text(v) = *v {
+				if let Ok(v) = PublicUuid::try_from(v) {
+					Ok(PublicRecordIdKey::Uuid(v))
+				} else {
+					Err(anyhow!("Expected a valid UUID value"))
+				}
+			} else {
+				Err(anyhow!("Expected a CBOR text data type"))
+			}
+		}
 		CborValue::Tag(TAG_SPEC_UUID, v) => to_uuid(*v).map(PublicRecordIdKey::Uuid),
+		CborValue::Bytes(_)
+		| CborValue::Float(_)
+		| CborValue::Bool(_)
+		| CborValue::Null
+		| CborValue::Tag(..) => Err(anyhow!("Expected a CBOR integer, text, array or map")),
 		_ => Err(anyhow!("Expected a CBOR integer, text, array or map")),
 	}
 }
@@ -623,12 +693,16 @@ fn from_uuid(val: PublicUuid) -> CborValue {
 }
 
 fn to_uuid(val: CborValue) -> Result<PublicUuid> {
-	match val {
-		CborValue::Bytes(v) if v.len() == 16 => match v.as_slice().try_into() {
-			Ok(v) => Ok(PublicUuid::from(uuid::Uuid::from_bytes(v))),
-			Err(_) => Err(anyhow!("Expected a CBOR byte array with 16 elements")),
-		},
-		_ => Err(anyhow!("Expected a CBOR byte array with 16 elements")),
+	if let CborValue::Bytes(v) = val
+		&& v.len() == 16
+	{
+		if let Ok(v) = v.as_slice().try_into() {
+			Ok(PublicUuid::from(uuid::Uuid::from_bytes(v)))
+		} else {
+			Err(anyhow!("Expected a CBOR byte array with 16 elements"))
+		}
+	} else {
+		Err(anyhow!("Expected a CBOR byte array with 16 elements"))
 	}
 }
 

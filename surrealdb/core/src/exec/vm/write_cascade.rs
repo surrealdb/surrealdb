@@ -179,7 +179,13 @@ pub(super) async fn step(
 			repair(program, tables, state).await?;
 			return Ok(next);
 		}
-		_ => {}
+		ReferenceInstr::Drain {
+			..
+		}
+		| ReferenceInstr::Next {
+			..
+		}
+		| ReferenceInstr::Release => {}
 	}
 	let write =
 		state.write.as_deref_mut().ok_or_else(|| internal("a write body with no write state"))?;

@@ -66,7 +66,6 @@ pub(crate) fn run(ir: &mut Ir, facts: &mut FactCache, cx: &PhysCx<'_>) -> Result
 }
 
 /// Whether the KNN scan `scan` meets the conditions of the module.
-#[allow(clippy::wildcard_enum_match_arm)]
 fn ids_only(ir: &Ir, cx: &PhysCx<'_>, scan: OpId) -> bool {
 	let Some(data) = ir.op(scan) else {
 		return false;
@@ -139,16 +138,16 @@ fn ids_only(ir: &Ir, cx: &PhysCx<'_>, scan: OpId) -> bool {
 		return false;
 	}
 	let demand = liveness::pipeline_demand(ir, element, &[(element, &steps)]);
-	let reads_only_id = match &demand.stored {
-		FieldSet::All => false,
-		FieldSet::Some(names) => names.iter().all(|name| name.as_str() == "id"),
+	let reads_only_id = if let FieldSet::Some(names) = &demand.stored {
+		names.iter().all(|name| name.as_str() == "id")
+	} else {
+		false
 	};
 	reads_only_id && demand.computed.is_empty() && id_reads_as_stored(cx, attrs)
 }
 
 /// Whether every definition of the `id` field of the scanned table reads as stored, as the
 /// physical catalog answers for the scan's read.
-#[allow(clippy::wildcard_enum_match_arm)]
 fn id_reads_as_stored(cx: &PhysCx<'_>, attrs: &super::ops::KnnScanAttrs) -> bool {
 	use crate::expr::part::Part;
 	let key: SourceKey = (attrs.table.clone(), attrs.read.with.clone(), ReadVersion::Current);
@@ -158,13 +157,13 @@ fn id_reads_as_stored(cx: &PhysCx<'_>, attrs: &super::ops::KnnScanAttrs) -> bool
 	answers
 		.fields
 		.iter()
-		.filter(|field| match field.name.0.as_slice() {
-			[Part::Field(root), rest @ ..]
-				if rest.iter().all(|part| matches!(part, Part::Field(_) | Part::All)) =>
+		.filter(|field| {
+			if let [Part::Field(root), rest @ ..] = field.name.0.as_slice()
+				&& rest.iter().all(|part| matches!(part, Part::Field(_) | Part::All))
 			{
-				root.as_str() == "id"
+				return root.as_str() == "id";
 			}
-			_ => true,
+			true
 		})
 		.all(|field| {
 			field.computed.is_none()

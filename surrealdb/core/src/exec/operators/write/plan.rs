@@ -21,7 +21,7 @@
 // The orders and the stage registry both match on `StageId`; a wildcard arm in
 // either lets a stage be added with nowhere to run, or run with no order
 // naming it.
-#![warn(clippy::wildcard_enum_match_arm)]
+#![deny(clippy::wildcard_enum_match_arm)]
 
 use super::ctx::TableExistence;
 use super::row::WriteRow;

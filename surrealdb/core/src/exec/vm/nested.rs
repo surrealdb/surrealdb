@@ -207,7 +207,65 @@ pub(super) async fn run_source(
 			};
 			run_rows(program, pipeline, rows, state, ctx, yielder, flush_at).await
 		}
-		_ => Err(ControlFlow::Err(anyhow::anyhow!("a source that is not a value or a statement"))),
+		Source::Scan {
+			..
+		}
+		| Source::Record {
+			..
+		}
+		| Source::Index {
+			..
+		}
+		| Source::Lookup {
+			..
+		}
+		| Source::IndexUnion {
+			..
+		}
+		| Source::Bitmap {
+			..
+		}
+		| Source::FullText {
+			..
+		}
+		| Source::Knn {
+			..
+		}
+		| Source::Count {
+			..
+		}
+		| Source::Union(_)
+		| Source::Sorted {
+			..
+		}
+		| Source::Groups {
+			..
+		}
+		| Source::Split {
+			..
+		}
+		| Source::Join {
+			..
+		}
+		| Source::Once
+		| Source::Changes {
+			..
+		}
+		| Source::WriteTargets {
+			..
+		}
+		| Source::WriteInserts {
+			..
+		}
+		| Source::WriteEdges {
+			..
+		}
+		| Source::LightweightEdges {
+			..
+		}
+		| Source::Vacant {
+			..
+		} => Err(ControlFlow::Err(anyhow::anyhow!("a source that is not a value or a statement"))),
 	}
 }
 
@@ -248,9 +306,9 @@ pub(super) fn key_at<'a>(
 ) -> Option<&'a Value> {
 	let mut value = parent?;
 	for field in path {
-		match value {
-			Value::Object(object) => value = object.get(field.as_str()).unwrap_or(&Value::None),
-			_ => return None,
+		match value.as_object() {
+			Some(object) => value = object.get(field.as_str()).unwrap_or(&Value::None),
+			None => return None,
 		}
 	}
 	Some(value)
@@ -287,9 +345,9 @@ impl Probe {
 			loose: Vec::new(),
 		};
 		for (at, row) in rows.iter().enumerate() {
-			let key = match row {
-				Value::Object(object) => object.get(field).unwrap_or(&Value::None),
-				_ => &Value::None,
+			let key = match row.as_object() {
+				Some(object) => object.get(field).unwrap_or(&Value::None),
+				None => &Value::None,
 			};
 			if key.hash_agrees_with_eq() {
 				probe.hashed.entry(key.clone()).or_default().push(at)
@@ -427,7 +485,25 @@ async fn values(
 					for value in array {
 						match value {
 							Value::Array(inner) if written => rows.extend(inner),
-							other => rows.push(other),
+							other @ (Value::None
+							| Value::Null
+							| Value::Bool(_)
+							| Value::Number(_)
+							| Value::String(_)
+							| Value::Duration(_)
+							| Value::Datetime(_)
+							| Value::Uuid(_)
+							| Value::Array(_)
+							| Value::Set(_)
+							| Value::Object(_)
+							| Value::Geometry(_)
+							| Value::Bytes(_)
+							| Value::Table(_)
+							| Value::RecordId(_)
+							| Value::File(_)
+							| Value::Regex(_)
+							| Value::Range(_)
+							| Value::Closure(_)) => rows.push(other),
 						}
 					}
 					records_of(ctx, rows, links).await?
@@ -440,12 +516,27 @@ async fn values(
 				}
 				table @ Value::Table(_) => return found(table, zeroed, reads, links, ctx).await,
 				Value::RecordId(rid) => {
-					match crate::exec::operators::fetch::fetch_record(ctx, &rid).await? {
-						Value::None => Vec::new(),
-						record => vec![record],
+					let record = crate::exec::operators::fetch::fetch_record(ctx, &rid).await?;
+					if record.is_none() {
+						Vec::new()
+					} else {
+						vec![record]
 					}
 				}
-				other => vec![other],
+				other @ (Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Set(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Range(_)
+				| Value::Closure(_)) => vec![other],
 			};
 			Ok(Values::Rows(rows, None))
 		}
@@ -535,12 +626,46 @@ async fn stored_records(value: Value, written: bool, ctx: &ExecutionContext) -> 
 					Value::Array(inner) if written => {
 						subjects.extend(inner.into_iter().filter_map(stored_subject))
 					}
-					other => subjects.extend(stored_subject(other)),
+					other @ (Value::None
+					| Value::Null
+					| Value::Bool(_)
+					| Value::Number(_)
+					| Value::String(_)
+					| Value::Duration(_)
+					| Value::Datetime(_)
+					| Value::Uuid(_)
+					| Value::Array(_)
+					| Value::Set(_)
+					| Value::Object(_)
+					| Value::Geometry(_)
+					| Value::Bytes(_)
+					| Value::Table(_)
+					| Value::RecordId(_)
+					| Value::File(_)
+					| Value::Regex(_)
+					| Value::Range(_)
+					| Value::Closure(_)) => subjects.extend(stored_subject(other)),
 				}
 			}
 			subjects
 		}
-		other => stored_subject(other).into_iter().collect(),
+		other @ (Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Set(_)
+		| Value::Object(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_)) => stored_subject(other).into_iter().collect(),
 	};
 	Ok(Values::Rows(stored_rows(ctx, subjects, version).await?, None))
 }
@@ -583,7 +708,22 @@ fn stored_subject(value: Value) -> Option<Value> {
 			Some(rid) => Some(Value::RecordId(rid)),
 			None => Some(Value::Object(object)),
 		},
-		other => Some(other),
+		other @ (Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Array(_)
+		| Value::Set(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_)) => Some(other),
 	}
 }
 
@@ -598,10 +738,7 @@ async fn stored_rows(
 	let (at, rids): (Vec<usize>, Vec<RecordId>) = subjects
 		.iter()
 		.enumerate()
-		.filter_map(|(at, subject)| match subject {
-			Value::RecordId(rid) => Some((at, rid.clone())),
-			_ => None,
-		})
+		.filter_map(|(at, subject)| subject.as_record().map(|rid| (at, rid.clone())))
 		.unzip();
 	if rids.is_empty() {
 		return Ok(subjects);
@@ -692,7 +829,20 @@ async fn found(
 			undispatched_table(ctx, &table, None, version, reads).await
 		}
 		Value::None | Value::Null => Ok(Values::Rows(Vec::new(), None)),
-		other => Ok(Values::Rows(vec![other], None)),
+		other @ (Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Set(_)
+		| Value::Object(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_)) => Ok(Values::Rows(vec![other], None)),
 	}
 }
 
@@ -707,7 +857,23 @@ async fn reads_through(
 	let table = match value {
 		Value::RecordId(rid) => &rid.table,
 		Value::Table(table) => table,
-		_ => return Ok(true),
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Array(_)
+		| Value::Set(_)
+		| Value::Object(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => return Ok(true),
 	};
 	Ok(deref.serving(ctx, table, ctx.root().skip_fetch_perms).await?.is_some())
 }
@@ -809,9 +975,9 @@ async fn dispatched(
 								let mut rows = Vec::new();
 								for raw in batch.into_values() {
 									super::fuel::tick(&ctx, 1).await?;
-									match deref.read(&ctx, &table, raw, unchecked).await? {
-										Value::None => {}
-										row => rows.push(row),
+									let row = deref.read(&ctx, &table, raw, unchecked).await?;
+									if !row.is_none() {
+										rows.push(row);
 									}
 								}
 								Ok(crate::exec::ValueBatch::from(rows))
@@ -820,12 +986,25 @@ async fn dispatched(
 						rid.table.clone(),
 					));
 				}
-				_ if let Some(view) = own_record(ctx, &rid, version).await? => rows.extend(view),
-				_ => {
+				RecordIdKey::Number(_)
+				| RecordIdKey::String(_)
+				| RecordIdKey::Uuid(_)
+				| RecordIdKey::Array(_)
+				| RecordIdKey::Object(_)
+					if let Some(view) = own_record(ctx, &rid, version).await? =>
+				{
+					rows.extend(view)
+				}
+				RecordIdKey::Number(_)
+				| RecordIdKey::String(_)
+				| RecordIdKey::Uuid(_)
+				| RecordIdKey::Array(_)
+				| RecordIdKey::Object(_) => {
 					if let Some(raw) = fetch_raw_record(ctx, &rid, version).await? {
-						match deref.read(ctx, &rid.table, raw, ctx.root().skip_fetch_perms).await? {
-							Value::None => {}
-							row => rows.push(row),
+						let row =
+							deref.read(ctx, &rid.table, raw, ctx.root().skip_fetch_perms).await?;
+						if !row.is_none() {
+							rows.push(row);
 						}
 					}
 				}
@@ -853,7 +1032,20 @@ async fn dispatched(
 			Ok(Values::Stream(execute_program_reading(&program, ctx, reads)?, table))
 		}
 		Value::None | Value::Null => Ok(Values::Rows(Vec::new(), None)),
-		other => Ok(Values::Rows(vec![other], None)),
+		other @ (Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Set(_)
+		| Value::Object(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_)) => Ok(Values::Rows(vec![other], None)),
 	}
 }
 
@@ -1009,12 +1201,12 @@ async fn undispatched_table(
 				let read = batch.len();
 				let mut rows = Vec::new();
 				for mut record in batch.into_values() {
-					let rid = match &record {
-						Value::Object(object) => match object.get("id") {
-							Some(Value::RecordId(rid)) => rid.clone(),
-							_ => continue,
+					let rid = match record.as_object() {
+						Some(object) => match object.get("id").and_then(Value::as_record) {
+							Some(rid) => rid.clone(),
+							None => continue,
 						},
-						_ => continue,
+						None => continue,
 					};
 					if crate::exec::operators::fetch::process_fetched_record(
 						&ctx,

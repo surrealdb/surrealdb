@@ -388,9 +388,8 @@ impl MatchContext {
 					// offsets yield NONE.
 					return Ok(None);
 				};
-				let ft_params = match &index_def.index {
-					Index::FullText(params) => params,
-					_ => unreachable!("covering_index answers a full-text index"),
+				let Index::FullText(ft_params) = &index_def.index else {
+					unreachable!("covering_index answers a full-text index");
 				};
 				let frozen = ctx.exec_ctx.ctx();
 				let db_ctx = ctx.exec_ctx.database()?;
@@ -589,12 +588,11 @@ impl MatchContext {
 		// A score's threshold is a float, compared as the sort compares it: a bound
 		// below it cannot beat it, nor can one equal to it where the order has a
 		// single key. Any other threshold is compared as a value.
-		let beats = |bound: f32| match threshold {
-			crate::val::Value::Number(crate::val::Number::Float(threshold)) => {
+		let beats = |bound: f32| {
+			if let crate::val::Value::Number(crate::val::Number::Float(threshold)) = threshold {
 				let bound = f64::from(bound);
 				bound > *threshold || (bound == *threshold && !single_key)
-			}
-			_ => {
+			} else {
 				let bound = crate::val::Value::Number(crate::val::Number::Float(f64::from(bound)));
 				!crate::exec::topk_pushdown::cannot_beat(
 					threshold,

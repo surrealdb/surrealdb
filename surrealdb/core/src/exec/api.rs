@@ -187,11 +187,12 @@ async fn run_chain(
 		.with_caller_view_checked(caller_view_checked);
 	let answered = crate::exec::trampoline::nest(run_stage(chain, 0, req.into(), frame))
 		.await
-		.map_err(|signal| match signal {
-			ControlFlow::Err(e) => e,
-			other => anyhow::anyhow!(crate::err::EngineError::Internal(format!(
-				"unexpected control flow from an API chain: {other}"
-			))),
+		.map_err(|signal| {
+			signal.into_error_or(|other| {
+				anyhow::anyhow!(crate::err::EngineError::Internal(format!(
+					"unexpected control flow from an API chain: {other}"
+				)))
+			})
 		})?;
 	let mut res: ApiResponse = answered.try_into()?;
 	res.ensure_request_id_header();
@@ -391,7 +392,12 @@ async fn call_middleware(
 			crate::exec::vm::invoke_stored_function(name, 0, args, &eval).await
 		}
 
-		other => {
+		other @ (crate::expr::Function::Script(_)
+		| crate::expr::Function::Model(_)
+		| crate::expr::Function::Module(..)
+		| crate::expr::Function::Silo {
+			..
+		}) => {
 			// Any other kind of function — a module, a silo package, a script
 			// or a model — is compiled as the call it is, over the arguments
 			// bound as parameters of a context of its own, and evaluated by
@@ -503,10 +509,9 @@ async fn evaluate_handler(handler: &Expr, exec: &ExecutionContext) -> Result<Val
 }
 
 fn flow_error(signal: ControlFlow) -> anyhow::Error {
-	match signal {
-		ControlFlow::Err(e) => e,
-		other => anyhow::anyhow!(crate::err::EngineError::Internal(format!(
+	signal.into_error_or(|other| {
+		anyhow::anyhow!(crate::err::EngineError::Internal(format!(
 			"unexpected control flow from an API handler: {other}"
-		))),
-	}
+		)))
+	})
 }

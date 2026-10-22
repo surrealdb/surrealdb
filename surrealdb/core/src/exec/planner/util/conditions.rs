@@ -169,7 +169,65 @@ pub(crate) fn is_plan_time_computable(expr: &LogicalExpr) -> bool {
 			right,
 			..
 		} => is_plan_time_computable(left) && is_plan_time_computable(right),
-		_ => false,
+		LogicalExpr::Literal(_)
+		| LogicalExpr::Set(_)
+		| LogicalExpr::Object(_)
+		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
+		| LogicalExpr::Constant(_)
+		| LogicalExpr::Field(_)
+		| LogicalExpr::Doc
+		| LogicalExpr::Current
+		| LogicalExpr::Access {
+			..
+		}
+		| LogicalExpr::Index {
+			..
+		}
+		| LogicalExpr::First(_)
+		| LogicalExpr::Last(_)
+		| LogicalExpr::Each(_)
+		| LogicalExpr::Flatten {
+			..
+		}
+		| LogicalExpr::Filter {
+			..
+		}
+		| LogicalExpr::Method {
+			..
+		}
+		| LogicalExpr::Destructure {
+			..
+		}
+		| LogicalExpr::Optional {
+			..
+		}
+		| LogicalExpr::Lookup {
+			..
+		}
+		| LogicalExpr::Recurse(_)
+		| LogicalExpr::RepeatRecurse(_)
+		| LogicalExpr::Broadcast {
+			..
+		}
+		| LogicalExpr::SetField {
+			..
+		}
+		| LogicalExpr::Prefix {
+			..
+		}
+		| LogicalExpr::Postfix {
+			..
+		}
+		| LogicalExpr::Invoke {
+			..
+		}
+		| LogicalExpr::Closure(_)
+		| LogicalExpr::If(_)
+		| LogicalExpr::Throw(_)
+		| LogicalExpr::Break
+		| LogicalExpr::Continue
+		| LogicalExpr::Subquery(_) => false,
 	}
 }
 
@@ -369,7 +427,65 @@ pub(crate) fn expr_contains_matches(expr: &LogicalExpr) -> bool {
 			..
 		} => expr_contains_matches(inner),
 		LogicalExpr::Call(call) => call.args.iter().any(expr_contains_matches),
-		_ => false,
+		LogicalExpr::Literal(_)
+		| LogicalExpr::Array(_)
+		| LogicalExpr::Set(_)
+		| LogicalExpr::Object(_)
+		| LogicalExpr::RecordId(_)
+		| LogicalExpr::Param(_)
+		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
+		| LogicalExpr::Constant(_)
+		| LogicalExpr::Field(_)
+		| LogicalExpr::Doc
+		| LogicalExpr::Current
+		| LogicalExpr::Access {
+			..
+		}
+		| LogicalExpr::Index {
+			..
+		}
+		| LogicalExpr::First(_)
+		| LogicalExpr::Last(_)
+		| LogicalExpr::Each(_)
+		| LogicalExpr::Flatten {
+			..
+		}
+		| LogicalExpr::Filter {
+			..
+		}
+		| LogicalExpr::Method {
+			..
+		}
+		| LogicalExpr::Destructure {
+			..
+		}
+		| LogicalExpr::Optional {
+			..
+		}
+		| LogicalExpr::Lookup {
+			..
+		}
+		| LogicalExpr::Recurse(_)
+		| LogicalExpr::RepeatRecurse(_)
+		| LogicalExpr::Broadcast {
+			..
+		}
+		| LogicalExpr::SetField {
+			..
+		}
+		| LogicalExpr::Postfix {
+			..
+		}
+		| LogicalExpr::Invoke {
+			..
+		}
+		| LogicalExpr::Closure(_)
+		| LogicalExpr::If(_)
+		| LogicalExpr::Throw(_)
+		| LogicalExpr::Break
+		| LogicalExpr::Continue
+		| LogicalExpr::Subquery(_) => false,
 	}
 }
 
@@ -590,13 +706,17 @@ pub(crate) fn strip_index_conditions_in(
 		access,
 		key,
 	};
-	strip_and_simplify(cond.clone(), |e| match e {
-		LogicalExpr::Binary {
+	strip_and_simplify(cond.clone(), |e| {
+		if let LogicalExpr::Binary {
 			left,
 			op,
 			right,
-		} => matcher.matches_access(left, op, right),
-		_ => false,
+		} = e
+		{
+			matcher.matches_access(left, op, right)
+		} else {
+			false
+		}
 	})
 }
 
@@ -639,7 +759,39 @@ impl IndexConditionMatcher<'_> {
 						BinaryOperator::LessThanEqual => BinaryOperator::MoreThanEqual,
 						BinaryOperator::MoreThan => BinaryOperator::LessThan,
 						BinaryOperator::MoreThanEqual => BinaryOperator::LessThanEqual,
-						other => other.clone(),
+						other @ BinaryOperator::Subtract
+						| other @ BinaryOperator::Add
+						| other @ BinaryOperator::Multiply
+						| other @ BinaryOperator::Divide
+						| other @ BinaryOperator::Remainder
+						| other @ BinaryOperator::Power
+						| other @ BinaryOperator::Equal
+						| other @ BinaryOperator::ExactEqual
+						| other @ BinaryOperator::NotEqual
+						| other @ BinaryOperator::AllEqual
+						| other @ BinaryOperator::AnyEqual
+						| other @ BinaryOperator::Or
+						| other @ BinaryOperator::And
+						| other @ BinaryOperator::NullCoalescing
+						| other @ BinaryOperator::TenaryCondition
+						| other @ BinaryOperator::Contain
+						| other @ BinaryOperator::NotContain
+						| other @ BinaryOperator::ContainAll
+						| other @ BinaryOperator::ContainAny
+						| other @ BinaryOperator::ContainNone
+						| other @ BinaryOperator::Inside
+						| other @ BinaryOperator::NotInside
+						| other @ BinaryOperator::AllInside
+						| other @ BinaryOperator::AnyInside
+						| other @ BinaryOperator::NoneInside
+						| other @ BinaryOperator::Outside
+						| other @ BinaryOperator::Intersects
+						| other @ BinaryOperator::Range
+						| other @ BinaryOperator::RangeInclusive
+						| other @ BinaryOperator::RangeSkip
+						| other @ BinaryOperator::RangeSkipInclusive
+						| other @ BinaryOperator::Matches(_)
+						| other @ BinaryOperator::NearestNeighbor(_) => other.clone(),
 					};
 					(i, v, flipped, false)
 				}
@@ -812,7 +964,12 @@ impl IndexConditionMatcher<'_> {
 				false
 			}
 			// FullText and KNN access types have their own stripping logic.
-			_ => false,
+			BTreeAccess::FullText {
+				..
+			}
+			| BTreeAccess::Knn {
+				..
+			} => false,
 		}
 	}
 }
@@ -829,7 +986,72 @@ fn extract_literal_vector(expr: &LogicalExpr) -> Option<Vec<Number>> {
 			LogicalExpr::Literal(LogicalLiteral::Integer(i)) => nums.push(Number::Int(*i)),
 			LogicalExpr::Literal(LogicalLiteral::Float(f)) => nums.push(Number::Float(*f)),
 			LogicalExpr::Literal(LogicalLiteral::Decimal(d)) => nums.push(Number::Decimal(*d)),
-			_ => return None,
+			LogicalExpr::Literal(_)
+			| LogicalExpr::Array(_)
+			| LogicalExpr::Set(_)
+			| LogicalExpr::Object(_)
+			| LogicalExpr::RecordId(_)
+			| LogicalExpr::Param(_)
+			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_)
+			| LogicalExpr::Constant(_)
+			| LogicalExpr::Field(_)
+			| LogicalExpr::Doc
+			| LogicalExpr::Current
+			| LogicalExpr::Access {
+				..
+			}
+			| LogicalExpr::Index {
+				..
+			}
+			| LogicalExpr::First(_)
+			| LogicalExpr::Last(_)
+			| LogicalExpr::Each(_)
+			| LogicalExpr::Flatten {
+				..
+			}
+			| LogicalExpr::Filter {
+				..
+			}
+			| LogicalExpr::Method {
+				..
+			}
+			| LogicalExpr::Destructure {
+				..
+			}
+			| LogicalExpr::Optional {
+				..
+			}
+			| LogicalExpr::Lookup {
+				..
+			}
+			| LogicalExpr::Recurse(_)
+			| LogicalExpr::RepeatRecurse(_)
+			| LogicalExpr::Broadcast {
+				..
+			}
+			| LogicalExpr::SetField {
+				..
+			}
+			| LogicalExpr::Prefix {
+				..
+			}
+			| LogicalExpr::Postfix {
+				..
+			}
+			| LogicalExpr::Invoke {
+				..
+			}
+			| LogicalExpr::Binary {
+				..
+			}
+			| LogicalExpr::Call(_)
+			| LogicalExpr::Closure(_)
+			| LogicalExpr::If(_)
+			| LogicalExpr::Throw(_)
+			| LogicalExpr::Break
+			| LogicalExpr::Continue
+			| LogicalExpr::Subquery(_) => return None,
 		}
 	}
 	Some(nums)
@@ -879,7 +1101,72 @@ fn find_id_equality_in_and_chain(
 			.or_else(|| check_id_recordid_pair(right, left, table_name)),
 
 		// Any other node (OR, comparisons, etc.): no match
-		_ => None,
+		LogicalExpr::Literal(_)
+		| LogicalExpr::Array(_)
+		| LogicalExpr::Set(_)
+		| LogicalExpr::Object(_)
+		| LogicalExpr::RecordId(_)
+		| LogicalExpr::Param(_)
+		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
+		| LogicalExpr::Constant(_)
+		| LogicalExpr::Field(_)
+		| LogicalExpr::Doc
+		| LogicalExpr::Current
+		| LogicalExpr::Access {
+			..
+		}
+		| LogicalExpr::Index {
+			..
+		}
+		| LogicalExpr::First(_)
+		| LogicalExpr::Last(_)
+		| LogicalExpr::Each(_)
+		| LogicalExpr::Flatten {
+			..
+		}
+		| LogicalExpr::Filter {
+			..
+		}
+		| LogicalExpr::Method {
+			..
+		}
+		| LogicalExpr::Destructure {
+			..
+		}
+		| LogicalExpr::Optional {
+			..
+		}
+		| LogicalExpr::Lookup {
+			..
+		}
+		| LogicalExpr::Recurse(_)
+		| LogicalExpr::RepeatRecurse(_)
+		| LogicalExpr::Broadcast {
+			..
+		}
+		| LogicalExpr::SetField {
+			..
+		}
+		| LogicalExpr::Prefix {
+			..
+		}
+		| LogicalExpr::Postfix {
+			..
+		}
+		| LogicalExpr::Invoke {
+			..
+		}
+		| LogicalExpr::Binary {
+			..
+		}
+		| LogicalExpr::Call(_)
+		| LogicalExpr::Closure(_)
+		| LogicalExpr::If(_)
+		| LogicalExpr::Throw(_)
+		| LogicalExpr::Break
+		| LogicalExpr::Continue
+		| LogicalExpr::Subquery(_) => None,
 	}
 }
 
@@ -912,10 +1199,16 @@ fn record_id_list(cond: &LogicalExpr) -> Option<&LogicalExpr> {
 	else {
 		return None;
 	};
-	match op {
-		BinaryOperator::Inside if idiom_is_id(left) => Some(right),
-		BinaryOperator::Contain if idiom_is_id(right) => Some(left),
-		_ => None,
+	if let BinaryOperator::Inside = op
+		&& idiom_is_id(left)
+	{
+		Some(right)
+	} else if let BinaryOperator::Contain = op
+		&& idiom_is_id(right)
+	{
+		Some(left)
+	} else {
+		None
 	}
 }
 
@@ -933,7 +1226,72 @@ pub(crate) fn is_record_id_list_lookup(cond: &LogicalExpr, table: &TableName) ->
 				| LogicalRecordIdKey::String(_)
 				| LogicalRecordIdKey::Uuid(_)
 		),
-		other => super::literals::try_literal_to_value(other).is_some(),
+		other @ LogicalExpr::Literal(_)
+		| other @ LogicalExpr::Array(_)
+		| other @ LogicalExpr::Set(_)
+		| other @ LogicalExpr::Object(_)
+		| other @ LogicalExpr::RecordId(_)
+		| other @ LogicalExpr::Param(_)
+		| other @ LogicalExpr::Table(_)
+		| other @ LogicalExpr::Mock(_)
+		| other @ LogicalExpr::Constant(_)
+		| other @ LogicalExpr::Field(_)
+		| other @ LogicalExpr::Doc
+		| other @ LogicalExpr::Current
+		| other @ LogicalExpr::Access {
+			..
+		}
+		| other @ LogicalExpr::Index {
+			..
+		}
+		| other @ LogicalExpr::First(_)
+		| other @ LogicalExpr::Last(_)
+		| other @ LogicalExpr::Each(_)
+		| other @ LogicalExpr::Flatten {
+			..
+		}
+		| other @ LogicalExpr::Filter {
+			..
+		}
+		| other @ LogicalExpr::Method {
+			..
+		}
+		| other @ LogicalExpr::Destructure {
+			..
+		}
+		| other @ LogicalExpr::Optional {
+			..
+		}
+		| other @ LogicalExpr::Lookup {
+			..
+		}
+		| other @ LogicalExpr::Recurse(_)
+		| other @ LogicalExpr::RepeatRecurse(_)
+		| other @ LogicalExpr::Broadcast {
+			..
+		}
+		| other @ LogicalExpr::SetField {
+			..
+		}
+		| other @ LogicalExpr::Prefix {
+			..
+		}
+		| other @ LogicalExpr::Postfix {
+			..
+		}
+		| other @ LogicalExpr::Invoke {
+			..
+		}
+		| other @ LogicalExpr::Binary {
+			..
+		}
+		| other @ LogicalExpr::Call(_)
+		| other @ LogicalExpr::Closure(_)
+		| other @ LogicalExpr::If(_)
+		| other @ LogicalExpr::Throw(_)
+		| other @ LogicalExpr::Break
+		| other @ LogicalExpr::Continue
+		| other @ LogicalExpr::Subquery(_) => super::literals::try_literal_to_value(other).is_some(),
 	})
 }
 
@@ -951,16 +1309,24 @@ pub(crate) fn extract_record_id_list_lookup(
 	if !is_record_id_list_lookup(cond, table) {
 		return None;
 	}
-	let elements: Vec<Value> = match super::literals::try_literal_to_value(record_id_list(cond)?)? {
-		Value::Array(arr) => arr.0,
-		Value::Set(set) => set.into_iter().collect(),
-		_ => return None,
+	let val = super::literals::try_literal_to_value(record_id_list(cond)?)?;
+	let elements: Vec<Value> = if let Value::Array(arr) = val {
+		arr.0
+	} else if let Value::Set(set) = val {
+		set.into_iter().collect()
+	} else {
+		return None;
 	};
 	let mut records: Vec<crate::val::RecordId> = elements
 		.into_iter()
-		.filter_map(|element| match element {
-			Value::RecordId(record) if &record.table == table => Some(record),
-			_ => None,
+		.filter_map(|element| {
+			if let Value::RecordId(record) = element
+				&& &record.table == table
+			{
+				Some(record)
+			} else {
+				None
+			}
 		})
 		.collect();
 	records.sort();

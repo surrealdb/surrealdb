@@ -742,9 +742,10 @@ async fn clause(
 	subject: &Value,
 	state: &mut State,
 ) -> FlowResult<Value> {
-	let pipeline = match subject {
-		Value::Object(_) => clause.object,
-		_ => clause.any,
+	let pipeline = if let Value::Object(_) = subject {
+		clause.object
+	} else {
+		clause.any
 	};
 	let exec = m.ctx.exec();
 	match run_image_in_frame(m.program, pipeline, subject.clone(), state, exec).await {

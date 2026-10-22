@@ -136,117 +136,114 @@ pub(crate) async fn execute_record_lookup(
 		ScanPipeline::compute_needs_row_filtering(&select_permission, predicate);
 
 	// 3. Dispatch based on key type
-	match &rid.key {
-		RecordIdKey::Range(range) => {
-			// --- Range scan ---
-			let range = record_key_range(ns.namespace_id, db.database_id, &rid.table, range)?;
+	if let RecordIdKey::Range(range) = &rid.key {
+		// --- Range scan ---
+		let range = record_key_range(ns.namespace_id, db.database_id, &rid.table, range)?;
 
-			let pre_skip = if !needs_row_filtering {
-				start
-			} else {
-				0
-			};
-			let effective_storage_limit = if !needs_row_filtering {
-				limit
-			} else {
-				None
-			};
-			let limit_hint = limit.map(|l| (l + start).try_into().unwrap_or(u32::MAX));
+		let pre_skip = if !needs_row_filtering {
+			start
+		} else {
+			0
+		};
+		let effective_storage_limit = if !needs_row_filtering {
+			limit
+		} else {
+			None
+		};
+		let limit_hint = limit.map(|l| (l + start).try_into().unwrap_or(u32::MAX));
 
-			let epoch = txn.layout_epoch();
-			let layouts = txn
-				.table_layouts(ns.namespace_id, db.database_id, &rid.table, version)
-				.await
-				.map_err(ControlFlow::Err)?;
-			let gate = crate::kvs::RowGate::new(
-				layouts,
-				ns.namespace_id,
-				db.database_id,
-				&rid.table,
-				version,
-				epoch,
-			)
+		let epoch = txn.layout_epoch();
+		let layouts = txn
+			.table_layouts(ns.namespace_id, db.database_id, &rid.table, version)
+			.await
 			.map_err(ControlFlow::Err)?;
-			let replay = crate::exec::migrate::replay_for(ctx, &rid.table, version).await?;
-			let mut source = kv_scan_stream(
-				Arc::clone(&txn),
-				range,
-				gate,
-				version,
-				effective_storage_limit,
-				crate::kvs::Direction::Forward,
-				pre_skip,
-				limit_hint,
-				None,
-				// TopK threshold pushdown targets full table scans only.
-				None,
-				replay.clone(),
-			);
+		let gate = crate::kvs::RowGate::new(
+			layouts,
+			ns.namespace_id,
+			db.database_id,
+			&rid.table,
+			version,
+			epoch,
+		)
+		.map_err(ControlFlow::Err)?;
+		let replay = crate::exec::migrate::replay_for(ctx, &rid.table, version).await?;
+		let mut source = kv_scan_stream(
+			Arc::clone(&txn),
+			range,
+			gate,
+			version,
+			effective_storage_limit,
+			crate::kvs::Direction::Forward,
+			pre_skip,
+			limit_hint,
+			None,
+			// TopK threshold pushdown targets full table scans only.
+			None,
+			replay.clone(),
+		);
 
-			let mut pipeline = ScanPipeline::new(
-				select_permission,
-				predicate.cloned(),
-				field_state,
-				check_perms,
-				limit,
-				start.saturating_sub(pre_skip),
-			);
+		let mut pipeline = ScanPipeline::new(
+			select_permission,
+			predicate.cloned(),
+			field_state,
+			check_perms,
+			limit,
+			start.saturating_sub(pre_skip),
+		);
 
-			let mut results = Vec::new();
-			while let Some(batch_result) = source.next().await {
-				if ctx.cancellation().is_cancelled() {
-					return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
-				}
-				let mut batch = batch_result?;
-				if let Some(replay) = &replay {
-					replay.apply_batch(ctx, &mut batch).await?;
-				}
-				let cont = pipeline.process_batch(batch.values_mut(), ctx).await?;
-				results.extend(batch.into_values());
-				if !cont {
-					break;
-				}
+		let mut results = Vec::new();
+		while let Some(batch_result) = source.next().await {
+			if ctx.cancellation().is_cancelled() {
+				return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
 			}
-			Ok(results)
+			let mut batch = batch_result?;
+			if let Some(replay) = &replay {
+				replay.apply_batch(ctx, &mut batch).await?;
+			}
+			let cont = pipeline.process_batch(batch.values_mut(), ctx).await?;
+			results.extend(batch.into_values());
+			if !cont {
+				break;
+			}
 		}
-		_ => {
-			// --- Point lookup ---
-			let fetched = if for_update {
-				let fetched =
-					crate::exec::operators::fetch::fetch_raw_record_for_update(ctx, rid).await?;
-				if limit == Some(0) {
-					return Ok(vec![]);
-				}
-				fetched
-			} else {
-				crate::exec::operators::fetch::fetch_raw_record(ctx, rid, version).await?
-			};
-			let Some(value) = fetched else {
+		Ok(results)
+	} else {
+		// --- Point lookup ---
+		let fetched = if for_update {
+			let fetched =
+				crate::exec::operators::fetch::fetch_raw_record_for_update(ctx, rid).await?;
+			if limit == Some(0) {
 				return Ok(vec![]);
-			};
+			}
+			fetched
+		} else {
+			crate::exec::operators::fetch::fetch_raw_record(ctx, rid, version).await?
+		};
+		let Some(value) = fetched else {
+			return Ok(vec![]);
+		};
 
-			let mut batch = vec![value];
-			if needs_processing {
-				filter_and_process_batch(
-					&mut batch,
-					&select_permission,
-					predicate,
-					ctx,
-					&field_state,
-					check_perms,
-				)
-				.await?;
-			}
-			// Apply start/limit for point lookups (0-1 rows after filtering).
-			// Start skips the first N post-filter rows; with at most one row,
-			// any non-zero start discards it.
-			if !batch.is_empty() && start > 0 {
-				batch.clear();
-			}
-			if !batch.is_empty() && limit == Some(0) {
-				batch.clear();
-			}
-			Ok(batch)
+		let mut batch = vec![value];
+		if needs_processing {
+			filter_and_process_batch(
+				&mut batch,
+				&select_permission,
+				predicate,
+				ctx,
+				&field_state,
+				check_perms,
+			)
+			.await?;
 		}
+		// Apply start/limit for point lookups (0-1 rows after filtering).
+		// Start skips the first N post-filter rows; with at most one row,
+		// any non-zero start discards it.
+		if !batch.is_empty() && start > 0 {
+			batch.clear();
+		}
+		if !batch.is_empty() && limit == Some(0) {
+			batch.clear();
+		}
+		Ok(batch)
 	}
 }

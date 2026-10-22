@@ -64,10 +64,12 @@ impl RecursionBounds {
 /// All other types (String, Number, Object, Uuid, etc.) are treated as
 /// terminal and stop recursion at that branch.
 pub(crate) fn is_recursion_target(value: &Value) -> bool {
-	match value {
-		Value::RecordId(_) => true,
-		Value::Array(arr) => arr.iter().any(is_recursion_target),
-		_ => false,
+	if let Value::RecordId(_) = value {
+		true
+	} else if let Value::Array(arr) = value {
+		arr.iter().any(is_recursion_target)
+	} else {
+		false
 	}
 }
 
@@ -222,10 +224,10 @@ mod tests {
 		let err = eval_buffered(vec![delayed(0, 1), failing("boom"), delayed(0, 3)])
 			.await
 			.expect_err("the failing future aborts the batch");
-		match err {
-			ControlFlow::Err(e) => assert_eq!(e.to_string(), "boom"),
-			other => panic!("expected an error, got {other}"),
-		}
+		let ControlFlow::Err(e) = err else {
+			panic!("expected an error, got {err}");
+		};
+		assert_eq!(e.to_string(), "boom");
 	}
 
 	#[tokio::test]

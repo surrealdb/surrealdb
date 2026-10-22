@@ -478,52 +478,50 @@ fn checks_of(ir: &Ir, region: RegionId, row: ValueId) -> Option<Vec<KeyCompariso
 }
 
 /// Pushes onto `out` the comparisons `value` is joined from, left to right.
-#[allow(clippy::wildcard_enum_match_arm)]
 fn collect(ir: &Ir, row: ValueId, value: ValueId, out: &mut Vec<KeyComparison>) -> Option<()> {
 	let data = ir.op(def_op(ir, strip_truthy(ir, value))?)?;
 	let OpKind::Expr(kind) = &data.kind else {
 		return None;
 	};
-	match (kind, data.operands.as_slice()) {
-		(
-			ExprOp::ShortCircuit {
-				op: ShortCircuitOp::And,
-			},
-			[left],
-		) => {
-			collect(ir, row, *left, out)?;
-			let [region] = data.regions.as_slice() else {
-				return None;
-			};
-			let last = ops_in(ir, *region).last()?;
-			let closing = ir.op(last)?;
-			let (OpKind::Expr(ExprOp::Yield), [right]) =
-				(&closing.kind, closing.operands.as_slice())
-			else {
-				return None;
-			};
-			collect(ir, row, *right, out)
-		}
-		(
-			ExprOp::Binary {
-				op,
-			},
-			[left, right],
-		) => {
-			let (field, literal, swapped) = match (root(ir, row, *left), root(ir, row, *right)) {
-				(Some(field), None) => (field, *right, false),
-				(None, Some(field)) => (field, *left, true),
-				_ => return None,
-			};
-			out.push(KeyComparison {
-				field,
-				op: op.clone(),
-				value: super::index_answer::literal(ir, literal)?,
-				swapped,
-			});
-			Some(())
-		}
-		_ => None,
+	if let (
+		ExprOp::ShortCircuit {
+			op: ShortCircuitOp::And,
+		},
+		[left],
+	) = (kind, data.operands.as_slice())
+	{
+		collect(ir, row, *left, out)?;
+		let [region] = data.regions.as_slice() else {
+			return None;
+		};
+		let last = ops_in(ir, *region).last()?;
+		let closing = ir.op(last)?;
+		let (OpKind::Expr(ExprOp::Yield), [right]) = (&closing.kind, closing.operands.as_slice())
+		else {
+			return None;
+		};
+		collect(ir, row, *right, out)
+	} else if let (
+		ExprOp::Binary {
+			op,
+		},
+		[left, right],
+	) = (kind, data.operands.as_slice())
+	{
+		let (field, literal, swapped) = match (root(ir, row, *left), root(ir, row, *right)) {
+			(Some(field), None) => (field, *right, false),
+			(None, Some(field)) => (field, *left, true),
+			(Some(_), Some(_)) | (None, None) => return None,
+		};
+		out.push(KeyComparison {
+			field,
+			op: op.clone(),
+			value: super::index_answer::literal(ir, literal)?,
+			swapped,
+		});
+		Some(())
+	} else {
+		None
 	}
 }
 

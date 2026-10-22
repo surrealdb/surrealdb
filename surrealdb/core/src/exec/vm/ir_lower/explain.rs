@@ -162,13 +162,12 @@ fn refused_statement(ir: &Ir, value: ValueId) -> Option<crate::exec::vm::payload
 		let [raise] = ir.block(*block)?.ops.as_slice() else {
 			return None;
 		};
-		match &ir.op(*raise)?.kind {
-			OpKind::Expr(ExprOp::Raise(kind)) => match kind.as_ref() {
-				RaiseKind::Refused(refusal) => Some(refusal.as_ref().clone()),
-				_ => None,
-			},
-			_ => None,
+		if let OpKind::Expr(ExprOp::Raise(kind)) = &ir.op(*raise)?.kind
+			&& let RaiseKind::Refused(refusal) = kind.as_ref()
+		{
+			return Some(refusal.as_ref().clone());
 		}
+		None
 	};
 	let mut found = refused(root);
 	for region in ir.op(root)?.regions.iter().copied() {
@@ -897,15 +896,18 @@ impl<'a> TreeWalk<'a> {
 		let region = *data.regions.first().ok_or_else(|| invariant("a FOR has no body"))?;
 		// The parameter the loop states; a loop built with none prints the name the binder gave
 		// its element, if any.
-		let param = match &data.kind {
-			OpKind::Phys(PhysOp::Loop {
-				step,
-				..
-			}) => match step.as_deref() {
-				Some(StepAttrs::Param(name)) => Some(name.clone()),
-				_ => None,
-			},
-			_ => None,
+		let param = if let OpKind::Phys(PhysOp::Loop {
+			step,
+			..
+		}) = &data.kind
+		{
+			if let Some(StepAttrs::Param(name)) = step.as_deref() {
+				Some(name.clone())
+			} else {
+				None
+			}
+		} else {
+			None
 		};
 		let param = param
 			.or_else(|| {
@@ -988,7 +990,15 @@ impl<'a> TreeWalk<'a> {
 				let key = match &attrs.key_shape {
 					KeyShape::Number(number) => Some(crate::val::RecordIdKey::from(*number)),
 					KeyShape::String(string) => Some(crate::val::RecordIdKey::from(string.clone())),
-					_ => None,
+					KeyShape::Uuid(_)
+					| KeyShape::Generate(_)
+					| KeyShape::Array {
+						..
+					}
+					| KeyShape::Object {
+						..
+					}
+					| KeyShape::Range(_) => None,
 				};
 				match key {
 					Some(key) => crate::val::RecordId {
@@ -1092,7 +1102,41 @@ impl<'a> TreeWalk<'a> {
 		let word = match operator {
 			BinaryOperator::Inside => "INSIDE",
 			BinaryOperator::NotInside => "NOT INSIDE",
-			_ => return None,
+			BinaryOperator::Subtract
+			| BinaryOperator::Add
+			| BinaryOperator::Multiply
+			| BinaryOperator::Divide
+			| BinaryOperator::Remainder
+			| BinaryOperator::Power
+			| BinaryOperator::Equal
+			| BinaryOperator::ExactEqual
+			| BinaryOperator::NotEqual
+			| BinaryOperator::AllEqual
+			| BinaryOperator::AnyEqual
+			| BinaryOperator::Or
+			| BinaryOperator::And
+			| BinaryOperator::NullCoalescing
+			| BinaryOperator::TenaryCondition
+			| BinaryOperator::LessThan
+			| BinaryOperator::LessThanEqual
+			| BinaryOperator::MoreThan
+			| BinaryOperator::MoreThanEqual
+			| BinaryOperator::Contain
+			| BinaryOperator::NotContain
+			| BinaryOperator::ContainAll
+			| BinaryOperator::ContainAny
+			| BinaryOperator::ContainNone
+			| BinaryOperator::AllInside
+			| BinaryOperator::AnyInside
+			| BinaryOperator::NoneInside
+			| BinaryOperator::Outside
+			| BinaryOperator::Intersects
+			| BinaryOperator::Range
+			| BinaryOperator::RangeInclusive
+			| BinaryOperator::RangeSkip
+			| BinaryOperator::RangeSkipInclusive
+			| BinaryOperator::Matches(_)
+			| BinaryOperator::NearestNeighbor(_) => return None,
 		};
 		let [left, right] = <[ValueId; 2]>::try_from(data.operands.as_slice()).ok()?;
 		let ValueDef::OpResult {
@@ -1407,7 +1451,107 @@ impl<'a> TreeWalk<'a> {
 				}
 				Ok(self.node("Union", ContextLevel::Database, vec![], children))
 			}
-			_ => Err(invariant("a source op that is no source")),
+			PhysOp::KnnTopK(_)
+			| PhysOp::Enforced {
+				..
+			}
+			| PhysOp::Subquery
+			| PhysOp::Probe {
+				..
+			}
+			| PhysOp::Join(_)
+			| PhysOp::Distinct {
+				..
+			}
+			| PhysOp::PermissionFilter(_)
+			| PhysOp::Layer(_)
+			| PhysOp::Filter
+			| PhysOp::Fetch
+			| PhysOp::Split {
+				..
+			}
+			| PhysOp::Sort(_)
+			| PhysOp::Aggregate(_)
+			| PhysOp::Limit {
+				..
+			}
+			| PhysOp::Project(_)
+			| PhysOp::Timeout
+			| PhysOp::VersionScope
+			| PhysOp::Only
+			| PhysOp::Explain {
+				..
+			}
+			| PhysOp::Eval
+			| PhysOp::Request {
+				..
+			}
+			| PhysOp::Txn {
+				..
+			}
+			| PhysOp::Stmt {
+				..
+			}
+			| PhysOp::Statement {
+				..
+			}
+			| PhysOp::Match {
+				..
+			}
+			| PhysOp::MatchStep(_)
+			| PhysOp::DdlGuard {
+				..
+			}
+			| PhysOp::Define(_)
+			| PhysOp::Remove(_)
+			| PhysOp::Alter(_)
+			| PhysOp::Rebuild(_)
+			| PhysOp::Info {
+				..
+			}
+			| PhysOp::Use {
+				..
+			}
+			| PhysOp::Option {
+				..
+			}
+			| PhysOp::Access(_)
+			| PhysOp::Kill
+			| PhysOp::Live(_)
+			| PhysOp::Subscriber(_)
+			| PhysOp::Show(_)
+			| PhysOp::Write(_)
+			| PhysOp::WriteStage {
+				..
+			}
+			| PhysOp::Events(_)
+			| PhysOp::Assign(_)
+			| PhysOp::Unset {
+				..
+			}
+			| PhysOp::Content {
+				..
+			}
+			| PhysOp::Block
+			| PhysOp::Let(_)
+			| PhysOp::Sleep
+			| PhysOp::If {
+				..
+			}
+			| PhysOp::Loop {
+				..
+			}
+			| PhysOp::Pipeline(_)
+			| PhysOp::Choose(_)
+			| PhysOp::Prefetch(_)
+			| PhysOp::Materialize {
+				..
+			}
+			| PhysOp::LoadUnit(_)
+			| PhysOp::Yield
+			| PhysOp::Return
+			| PhysOp::Break
+			| PhysOp::Next => Err(invariant("a source op that is no source")),
 		}
 	}
 
@@ -1760,7 +1904,107 @@ impl<'a> TreeWalk<'a> {
 				let child = self.row_chain(source, ops, at)?;
 				self.relational_over(op, kind, child)
 			}
-			_ => Err(invariant("a loop body holds an op that is not per-row")),
+			PhysOp::TableScan(_)
+			| PhysOp::IndexScan(_)
+			| PhysOp::IndexUnion(_)
+			| PhysOp::Bitmap(_)
+			| PhysOp::IndexLookup(_)
+			| PhysOp::FullTextScan(_)
+			| PhysOp::KeyRangeScan(_)
+			| PhysOp::KnnScan(_)
+			| PhysOp::KnnTopK(_)
+			| PhysOp::Count(_)
+			| PhysOp::RecordScan(_)
+			| PhysOp::Vacant {
+				..
+			}
+			| PhysOp::Values {
+				..
+			}
+			| PhysOp::Subquery
+			| PhysOp::Probe {
+				..
+			}
+			| PhysOp::Union
+			| PhysOp::Join(_)
+			| PhysOp::Sort(_)
+			| PhysOp::Aggregate(_)
+			| PhysOp::Timeout
+			| PhysOp::VersionScope
+			| PhysOp::Only
+			| PhysOp::Explain {
+				..
+			}
+			| PhysOp::Eval
+			| PhysOp::Request {
+				..
+			}
+			| PhysOp::Txn {
+				..
+			}
+			| PhysOp::Stmt {
+				..
+			}
+			| PhysOp::Statement {
+				..
+			}
+			| PhysOp::Match {
+				..
+			}
+			| PhysOp::MatchStep(_)
+			| PhysOp::DdlGuard {
+				..
+			}
+			| PhysOp::Define(_)
+			| PhysOp::Remove(_)
+			| PhysOp::Alter(_)
+			| PhysOp::Rebuild(_)
+			| PhysOp::Info {
+				..
+			}
+			| PhysOp::Use {
+				..
+			}
+			| PhysOp::Option {
+				..
+			}
+			| PhysOp::Access(_)
+			| PhysOp::Kill
+			| PhysOp::Live(_)
+			| PhysOp::Subscriber(_)
+			| PhysOp::Show(_)
+			| PhysOp::Write(_)
+			| PhysOp::WriteStage {
+				..
+			}
+			| PhysOp::Events(_)
+			| PhysOp::Assign(_)
+			| PhysOp::Unset {
+				..
+			}
+			| PhysOp::Content {
+				..
+			}
+			| PhysOp::Block
+			| PhysOp::Let(_)
+			| PhysOp::Sleep
+			| PhysOp::If {
+				..
+			}
+			| PhysOp::Loop {
+				..
+			}
+			| PhysOp::Pipeline(_)
+			| PhysOp::Choose(_)
+			| PhysOp::Prefetch(_)
+			| PhysOp::Materialize {
+				..
+			}
+			| PhysOp::LoadUnit(_)
+			| PhysOp::Yield
+			| PhysOp::Return
+			| PhysOp::Break
+			| PhysOp::Next => Err(invariant("a loop body holds an op that is not per-row")),
 		}
 	}
 
@@ -1855,7 +2099,112 @@ impl<'a> TreeWalk<'a> {
 				ops.pop();
 				self.body_takes_paging(*source, &ops)
 			}
-			_ => false,
+			PhysOp::IndexUnion(_)
+			| PhysOp::Bitmap(_)
+			| PhysOp::IndexLookup(_)
+			| PhysOp::FullTextScan(_)
+			| PhysOp::KnnScan(_)
+			| PhysOp::KnnTopK(_)
+			| PhysOp::Count(_)
+			| PhysOp::RecordScan(_)
+			| PhysOp::Values {
+				..
+			}
+			| PhysOp::Subquery
+			| PhysOp::Probe {
+				..
+			}
+			| PhysOp::Union
+			| PhysOp::Join(_)
+			| PhysOp::Distinct {
+				..
+			}
+			| PhysOp::PermissionFilter(_)
+			| PhysOp::Fetch
+			| PhysOp::Split {
+				..
+			}
+			| PhysOp::Sort(_)
+			| PhysOp::Aggregate(_)
+			| PhysOp::Limit {
+				..
+			}
+			| PhysOp::Project(_)
+			| PhysOp::Timeout
+			| PhysOp::VersionScope
+			| PhysOp::Only
+			| PhysOp::Explain {
+				..
+			}
+			| PhysOp::Eval
+			| PhysOp::Request {
+				..
+			}
+			| PhysOp::Txn {
+				..
+			}
+			| PhysOp::Stmt {
+				..
+			}
+			| PhysOp::Statement {
+				..
+			}
+			| PhysOp::Match {
+				..
+			}
+			| PhysOp::MatchStep(_)
+			| PhysOp::DdlGuard {
+				..
+			}
+			| PhysOp::Define(_)
+			| PhysOp::Remove(_)
+			| PhysOp::Alter(_)
+			| PhysOp::Rebuild(_)
+			| PhysOp::Info {
+				..
+			}
+			| PhysOp::Use {
+				..
+			}
+			| PhysOp::Option {
+				..
+			}
+			| PhysOp::Access(_)
+			| PhysOp::Kill
+			| PhysOp::Live(_)
+			| PhysOp::Subscriber(_)
+			| PhysOp::Show(_)
+			| PhysOp::Write(_)
+			| PhysOp::WriteStage {
+				..
+			}
+			| PhysOp::Events(_)
+			| PhysOp::Assign(_)
+			| PhysOp::Unset {
+				..
+			}
+			| PhysOp::Content {
+				..
+			}
+			| PhysOp::Block
+			| PhysOp::Let(_)
+			| PhysOp::Sleep
+			| PhysOp::If {
+				..
+			}
+			| PhysOp::Loop {
+				..
+			}
+			| PhysOp::Choose(_)
+			| PhysOp::Prefetch(_)
+			| PhysOp::Materialize {
+				..
+			}
+			| PhysOp::LoadUnit(_)
+			| PhysOp::Yield
+			| PhysOp::Return
+			| PhysOp::Break
+			| PhysOp::Next => false,
 		}
 	}
 
@@ -1928,7 +2277,100 @@ impl<'a> TreeWalk<'a> {
 				self.topk = false;
 				self.relational_over(op, kind, child?)
 			}
-			_ => Err(invariant("an op that is no relational op")),
+			PhysOp::TableScan(_)
+			| PhysOp::IndexScan(_)
+			| PhysOp::IndexUnion(_)
+			| PhysOp::Bitmap(_)
+			| PhysOp::IndexLookup(_)
+			| PhysOp::FullTextScan(_)
+			| PhysOp::KeyRangeScan(_)
+			| PhysOp::KnnScan(_)
+			| PhysOp::Count(_)
+			| PhysOp::RecordScan(_)
+			| PhysOp::Vacant {
+				..
+			}
+			| PhysOp::Values {
+				..
+			}
+			| PhysOp::Subquery
+			| PhysOp::Union
+			| PhysOp::Timeout
+			| PhysOp::VersionScope
+			| PhysOp::Only
+			| PhysOp::Explain {
+				..
+			}
+			| PhysOp::Eval
+			| PhysOp::Request {
+				..
+			}
+			| PhysOp::Txn {
+				..
+			}
+			| PhysOp::Stmt {
+				..
+			}
+			| PhysOp::Statement {
+				..
+			}
+			| PhysOp::Match {
+				..
+			}
+			| PhysOp::MatchStep(_)
+			| PhysOp::DdlGuard {
+				..
+			}
+			| PhysOp::Define(_)
+			| PhysOp::Remove(_)
+			| PhysOp::Alter(_)
+			| PhysOp::Rebuild(_)
+			| PhysOp::Info {
+				..
+			}
+			| PhysOp::Use {
+				..
+			}
+			| PhysOp::Option {
+				..
+			}
+			| PhysOp::Access(_)
+			| PhysOp::Kill
+			| PhysOp::Live(_)
+			| PhysOp::Subscriber(_)
+			| PhysOp::Show(_)
+			| PhysOp::Write(_)
+			| PhysOp::WriteStage {
+				..
+			}
+			| PhysOp::Events(_)
+			| PhysOp::Assign(_)
+			| PhysOp::Unset {
+				..
+			}
+			| PhysOp::Content {
+				..
+			}
+			| PhysOp::Block
+			| PhysOp::Let(_)
+			| PhysOp::Sleep
+			| PhysOp::If {
+				..
+			}
+			| PhysOp::Loop {
+				..
+			}
+			| PhysOp::Pipeline(_)
+			| PhysOp::Choose(_)
+			| PhysOp::Prefetch(_)
+			| PhysOp::Materialize {
+				..
+			}
+			| PhysOp::LoadUnit(_)
+			| PhysOp::Yield
+			| PhysOp::Return
+			| PhysOp::Break
+			| PhysOp::Next => Err(invariant("an op that is no relational op")),
 		}
 	}
 
@@ -2154,7 +2596,110 @@ impl<'a> TreeWalk<'a> {
 				let (name, project) = self.projection(shape, regions)?;
 				Ok(self.node(name, ContextLevel::Database, project, vec![child]))
 			}
-			_ => Err(invariant("an op that is no relational op over one input")),
+			PhysOp::TableScan(_)
+			| PhysOp::IndexScan(_)
+			| PhysOp::IndexUnion(_)
+			| PhysOp::Bitmap(_)
+			| PhysOp::IndexLookup(_)
+			| PhysOp::FullTextScan(_)
+			| PhysOp::KeyRangeScan(_)
+			| PhysOp::KnnScan(_)
+			| PhysOp::Count(_)
+			| PhysOp::RecordScan(_)
+			| PhysOp::Vacant {
+				..
+			}
+			| PhysOp::Enforced {
+				..
+			}
+			| PhysOp::Values {
+				..
+			}
+			| PhysOp::Subquery
+			| PhysOp::Probe {
+				..
+			}
+			| PhysOp::Union
+			| PhysOp::Join(_)
+			| PhysOp::Limit {
+				..
+			}
+			| PhysOp::Timeout
+			| PhysOp::VersionScope
+			| PhysOp::Only
+			| PhysOp::Explain {
+				..
+			}
+			| PhysOp::Eval
+			| PhysOp::Request {
+				..
+			}
+			| PhysOp::Txn {
+				..
+			}
+			| PhysOp::Stmt {
+				..
+			}
+			| PhysOp::Statement {
+				..
+			}
+			| PhysOp::Match {
+				..
+			}
+			| PhysOp::MatchStep(_)
+			| PhysOp::DdlGuard {
+				..
+			}
+			| PhysOp::Define(_)
+			| PhysOp::Remove(_)
+			| PhysOp::Alter(_)
+			| PhysOp::Rebuild(_)
+			| PhysOp::Info {
+				..
+			}
+			| PhysOp::Use {
+				..
+			}
+			| PhysOp::Option {
+				..
+			}
+			| PhysOp::Access(_)
+			| PhysOp::Kill
+			| PhysOp::Live(_)
+			| PhysOp::Subscriber(_)
+			| PhysOp::Show(_)
+			| PhysOp::Write(_)
+			| PhysOp::WriteStage {
+				..
+			}
+			| PhysOp::Events(_)
+			| PhysOp::Assign(_)
+			| PhysOp::Unset {
+				..
+			}
+			| PhysOp::Content {
+				..
+			}
+			| PhysOp::Block
+			| PhysOp::Let(_)
+			| PhysOp::Sleep
+			| PhysOp::If {
+				..
+			}
+			| PhysOp::Loop {
+				..
+			}
+			| PhysOp::Pipeline(_)
+			| PhysOp::Choose(_)
+			| PhysOp::Prefetch(_)
+			| PhysOp::Materialize {
+				..
+			}
+			| PhysOp::LoadUnit(_)
+			| PhysOp::Yield
+			| PhysOp::Return
+			| PhysOp::Break
+			| PhysOp::Next => Err(invariant("an op that is no relational op over one input")),
 		}
 	}
 
@@ -2768,12 +3313,14 @@ pub(super) fn lower_explained(
 	let [input] = <[ValueId; 1]>::try_from(data.operands.as_slice())
 		.map_err(|_| invariant("a phys.explain with other than one operand"))?;
 	let producer = producer_of(ir, input)?;
-	let rendered = match &ir.op(producer).ok_or(IrError::Stale("ir_lower::explain: op"))?.kind {
-		OpKind::Phys(PhysOp::Explain {
-			analyze: false,
-			..
-		}) => Some(render_plain(cx, ir, producer)?),
-		_ => None,
+	let rendered = if let OpKind::Phys(PhysOp::Explain {
+		analyze: false,
+		..
+	}) = &ir.op(producer).ok_or(IrError::Stale("ir_lower::explain: op"))?.kind
+	{
+		Some(render_plain(cx, ir, producer)?)
+	} else {
+		None
 	};
 	if rendered.is_some() || reads_no_rows(ir, producer) {
 		let mut lowerer = Lowerer::in_context(em, ir, cx);

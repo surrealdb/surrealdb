@@ -177,11 +177,12 @@ pub(crate) async fn statement(exec: &ExecutionContext, expr: &Expr) -> Result<Va
 		}
 		.into());
 	}
-	let op = match logical {
-		LogicalExpr::Subquery(op) => *op,
-		expr => LogicalOp::Eval(LogicalEval {
-			expr,
-		}),
+	let op = if let LogicalExpr::Subquery(op) = logical {
+		*op
+	} else {
+		LogicalOp::Eval(LogicalEval {
+			expr: logical,
+		})
 	};
 	let plan = crate::exec::vm::serve::statement(
 		exec,

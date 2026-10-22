@@ -2164,7 +2164,9 @@ mod tests {
 		let person = |i: i64| RecordId::new(TableName::from("person"), RecordIdKey::Number(i));
 		let shown = |failed: ControlFlow| match failed {
 			ControlFlow::Err(error) => format!("{error:#}"),
-			other => format!("{other}"),
+			other @ (ControlFlow::Break | ControlFlow::Continue | ControlFlow::Return(_)) => {
+				format!("{other}")
+			}
 		};
 		// The inline cache of `person:3` names an edge of `knows` whose key decodes as none, and
 		// the cache of `person:7` an edge that decodes and a target that does not: the two

@@ -22,7 +22,30 @@ impl From<surrealdb_sqlplan::PlanError> for LowerError {
 				LowerError::UnsupportedExpr(s)
 			}
 			surrealdb_sqlplan::PlanError::UnsupportedStatement(s) => LowerError::UnsupportedStmt(s),
-			other => LowerError::Custom(other.to_string()),
+			other @ (surrealdb_sqlplan::PlanError::UndefinedTable(_)
+			| surrealdb_sqlplan::PlanError::UndefinedColumn(_)
+			| surrealdb_sqlplan::PlanError::AmbiguousColumn(_)
+			| surrealdb_sqlplan::PlanError::MissingFromClauseEntry(_)
+			| surrealdb_sqlplan::PlanError::InvalidGroupByPosition(_)
+			| surrealdb_sqlplan::PlanError::InvalidOrderByPosition(_)
+			| surrealdb_sqlplan::PlanError::ColumnNotInGroupBy(_)
+			| surrealdb_sqlplan::PlanError::AggregateNotAllowed(_)
+			| surrealdb_sqlplan::PlanError::WindowNotAllowed(_)
+			| surrealdb_sqlplan::PlanError::UndefinedFunction(_)
+			| surrealdb_sqlplan::PlanError::FunctionArgumentCountMismatch {
+				..
+			}
+			| surrealdb_sqlplan::PlanError::WindowFunctionWithoutOver(_)
+			| surrealdb_sqlplan::PlanError::SubqueryMustHaveAlias
+			| surrealdb_sqlplan::PlanError::ParameterOutOfRange(_)
+			| surrealdb_sqlplan::PlanError::DivisionByZero
+			| surrealdb_sqlplan::PlanError::InvalidTextRepresentation(_)
+			| surrealdb_sqlplan::PlanError::NoActiveTransaction
+			| surrealdb_sqlplan::PlanError::InFailedTransaction
+			| surrealdb_sqlplan::PlanError::SavepointDoesNotExist(_)
+			| surrealdb_sqlplan::PlanError::ActiveTransactionAlreadyInProgress
+			| surrealdb_sqlplan::PlanError::UndefinedObject(_)
+			| surrealdb_sqlplan::PlanError::Custom(_)) => LowerError::Custom(other.to_string()),
 		}
 	}
 }
@@ -40,11 +63,10 @@ pub enum NoLogicalForm<'a> {
 /// or `Err(NoLogicalForm)` for statements lowered to SurrealQL statements instead (e.g.
 /// `INSERT`, `CREATE`).
 pub fn lower_stmt(stmt: &Statement) -> Result<LogicalOp, NoLogicalForm<'_>> {
-	match stmt {
-		Statement::Select(select) => {
-			lower_select(select).map_err(|_| NoLogicalForm::NonSelectStatement(stmt))
-		}
-		_ => Err(NoLogicalForm::NonSelectStatement(stmt)),
+	if let Statement::Select(select) = stmt {
+		lower_select(select).map_err(|_| NoLogicalForm::NonSelectStatement(stmt))
+	} else {
+		Err(NoLogicalForm::NonSelectStatement(stmt))
 	}
 }
 
@@ -66,13 +88,11 @@ mod tests {
 	fn test_lower_simple_select() {
 		let stmts = surrealdb_mysql::parse_statements("SELECT 1 AS num").expect("parse");
 		let op = lower_stmt(&stmts[0]).expect("lower");
-		match op {
-			LogicalOp::Project(proj) => {
-				assert!(matches!(proj.input.as_ref(), LogicalOp::Values(_)));
-				assert!(matches!(&proj.fields, LogicalFields::Select(f) if f.len() == 1));
-			}
-			other => panic!("expected Project, got {other:?}"),
-		}
+		let LogicalOp::Project(proj) = op else {
+			panic!("expected Project, got {op:?}");
+		};
+		assert!(matches!(proj.input.as_ref(), LogicalOp::Values(_)));
+		assert!(matches!(&proj.fields, LogicalFields::Select(f) if f.len() == 1));
 	}
 
 	#[test]
@@ -82,28 +102,24 @@ mod tests {
 		)
 		.expect("parse");
 		let op = lower_stmt(&stmts[0]).expect("lower");
-		match op {
-			LogicalOp::Project(proj) => match proj.input.as_ref() {
-				LogicalOp::Limit(lim) => {
-					assert!(lim.limit.is_some());
-					assert!(lim.start.is_some());
-					match lim.input.as_ref() {
-						LogicalOp::Sort(sort) => match sort.input.as_ref() {
-							LogicalOp::Filter(filter) => match filter.input.as_ref() {
-								LogicalOp::Source(src) => {
-									assert!(matches!(src.source, SourceRef::Table(_)));
-								}
-								other => panic!("expected Source, got {other:?}"),
-							},
-							other => panic!("expected Filter, got {other:?}"),
-						},
-						other => panic!("expected Sort, got {other:?}"),
-					}
-				}
-				other => panic!("expected Limit, got {other:?}"),
-			},
-			other => panic!("expected Project, got {other:?}"),
-		}
+		let LogicalOp::Project(proj) = op else {
+			panic!("expected Project, got {op:?}");
+		};
+		let LogicalOp::Limit(lim) = proj.input.as_ref() else {
+			panic!("expected Limit, got {:?}", proj.input);
+		};
+		assert!(lim.limit.is_some());
+		assert!(lim.start.is_some());
+		let LogicalOp::Sort(sort) = lim.input.as_ref() else {
+			panic!("expected Sort, got {:?}", lim.input);
+		};
+		let LogicalOp::Filter(filter) = sort.input.as_ref() else {
+			panic!("expected Filter, got {:?}", sort.input);
+		};
+		let LogicalOp::Source(src) = filter.input.as_ref() else {
+			panic!("expected Source, got {:?}", filter.input);
+		};
+		assert!(matches!(src.source, SourceRef::Table(_)));
 	}
 
 	#[test]
@@ -113,32 +129,28 @@ mod tests {
 		)
 		.expect("parse");
 		let op = lower_stmt(&stmts[0]).expect("lower");
-		match op {
-			LogicalOp::Project(proj) => match proj.input.as_ref() {
-				LogicalOp::Join(join) => {
-					assert_eq!(join.kind, surrealdb_expr::expr::logical::JoinKind::Inner);
-					assert_eq!(join.on.len(), 1);
-				}
-				other => panic!("expected Join, got {other:?}"),
-			},
-			other => panic!("expected Project, got {other:?}"),
-		}
+		let LogicalOp::Project(proj) = op else {
+			panic!("expected Project, got {op:?}");
+		};
+		let LogicalOp::Join(join) = proj.input.as_ref() else {
+			panic!("expected Join, got {:?}", proj.input);
+		};
+		assert_eq!(join.kind, surrealdb_expr::expr::logical::JoinKind::Inner);
+		assert_eq!(join.on.len(), 1);
 	}
 
 	#[test]
 	fn test_lower_aggregate_without_group_by() {
 		let stmts = surrealdb_mysql::parse_statements("SELECT count(*) FROM users").expect("parse");
 		let op = lower_stmt(&stmts[0]).expect("lower");
-		match op {
-			LogicalOp::Project(proj) => match proj.input.as_ref() {
-				LogicalOp::Aggregate(agg) => {
-					assert!(agg.group.is_empty(), "whole-table aggregate has empty group");
-					assert!(matches!(agg.input.as_ref(), LogicalOp::Source(_)));
-				}
-				other => panic!("expected Aggregate, got {other:?}"),
-			},
-			other => panic!("expected Project, got {other:?}"),
-		}
+		let LogicalOp::Project(proj) = op else {
+			panic!("expected Project, got {op:?}");
+		};
+		let LogicalOp::Aggregate(agg) = proj.input.as_ref() else {
+			panic!("expected Aggregate, got {:?}", proj.input);
+		};
+		assert!(agg.group.is_empty(), "whole-table aggregate has empty group");
+		assert!(matches!(agg.input.as_ref(), LogicalOp::Source(_)));
 	}
 
 	#[test]

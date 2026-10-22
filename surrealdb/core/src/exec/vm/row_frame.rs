@@ -1231,7 +1231,10 @@ impl<'b> Stored<'b, '_> {
 							text_buf,
 						)
 					}
-					_ => super::row_json::encode_json(self.out, &whole(), depth, text_buf),
+					RecordIdKey::Uuid(_)
+					| RecordIdKey::Array(_)
+					| RecordIdKey::Object(_)
+					| RecordIdKey::Range(_) => super::row_json::encode_json(self.out, &whole(), depth, text_buf),
 				}
 			}
 			None => encode_record_id(self.out, decoded.tb.as_str(), &decoded.id, depth, whole),
@@ -1334,7 +1337,25 @@ impl<'b> Stored<'b, '_> {
 					let key = match key.kind() {
 						Kind::Int => key.as_int()?.map(StoredKey::Number),
 						Kind::String => key.as_str()?.map(StoredKey::String),
-						_ => None,
+						Kind::None
+						| Kind::Null
+						| Kind::Bool
+						| Kind::Float
+						| Kind::Decimal
+						| Kind::Duration
+						| Kind::Datetime
+						| Kind::Uuid
+						| Kind::Bytes
+						| Kind::Table
+						| Kind::RecordId
+						| Kind::File
+						| Kind::Regex
+						| Kind::Range
+						| Kind::Geometry
+						| Kind::Array
+						| Kind::Set
+						| Kind::Object
+						| Kind::Unknown => None,
 					};
 					if let Some(key) = key {
 						too_deep(depth + 1)?;
@@ -1343,7 +1364,24 @@ impl<'b> Stored<'b, '_> {
 					}
 				}
 			}
-			_ => {}
+			Kind::None
+			| Kind::Null
+			| Kind::Bool
+			| Kind::Int
+			| Kind::Float
+			| Kind::Decimal
+			| Kind::String
+			| Kind::Duration
+			| Kind::Datetime
+			| Kind::Uuid
+			| Kind::Bytes
+			| Kind::Table
+			| Kind::File
+			| Kind::Regex
+			| Kind::Range
+			| Kind::Geometry
+			| Kind::Set
+			| Kind::Unknown => {}
 		}
 		let scalar = super::row::scalar_from_stored(value)?;
 		#[cfg(test)]
@@ -1577,7 +1615,16 @@ impl<'a> PackedVisitor<'a> for PackedSink<'a, '_> {
 					int(out, v.timestamp());
 					int(out, v.timestamp_subsec_nanos() as i64);
 				}
-				_ => return self.field_value(field, depth),
+				FieldRef::Absent
+				| FieldRef::Object
+				| FieldRef::Decimal(_)
+				| FieldRef::Uuid(_)
+				| FieldRef::Duration(_)
+				| FieldRef::Point(..)
+				| FieldRef::Bytes(_)
+				| FieldRef::Literal(_)
+				| FieldRef::RecordId(..)
+				| FieldRef::Stored(_) => return self.field_value(field, depth),
 			}
 			return Ok(());
 		}
@@ -1632,7 +1679,25 @@ impl<'a> PackedSink<'a, '_> {
 				let in_place = match link.kind() {
 					Kind::Int => link.as_int()?.map(StoredKey::Number),
 					Kind::String => link.as_str()?.map(StoredKey::String),
-					_ => None,
+					Kind::None
+					| Kind::Null
+					| Kind::Bool
+					| Kind::Float
+					| Kind::Decimal
+					| Kind::Duration
+					| Kind::Datetime
+					| Kind::Uuid
+					| Kind::Bytes
+					| Kind::Table
+					| Kind::RecordId
+					| Kind::File
+					| Kind::Regex
+					| Kind::Range
+					| Kind::Geometry
+					| Kind::Array
+					| Kind::Set
+					| Kind::Object
+					| Kind::Unknown => None,
 				};
 				if let Some(link) = in_place {
 					too_deep(depth + 1)?;

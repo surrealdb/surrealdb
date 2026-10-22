@@ -1,4 +1,5 @@
 #![recursion_limit = "256"]
+#![deny(clippy::wildcard_enum_match_arm)]
 //! The VM runs every statement the fuzzer's generator writes: no statement of a
 //! generated script is answered with the engine's decline ("The engine cannot
 //! run this statement"), which a statement the language accepts must never

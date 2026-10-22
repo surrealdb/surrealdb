@@ -35,7 +35,6 @@ async fn assert_versioned_search_reads_each_candidate_once(index_ddl: &str) -> a
 	use crate::catalog::providers::{CatalogProvider, TableProvider};
 	use crate::exec::operators::scan::knn_candidates;
 	use crate::exec::operators::test_util::TestDb;
-	use crate::expr::ControlFlow;
 	use crate::idx::trees::KnnCondFilter;
 	use crate::idx::trees::gate::{BoxGateFut, CachedTableSelect, CandidateCondition};
 	use crate::kvs::{Datastore, TransactionType};
@@ -124,9 +123,8 @@ async fn assert_versioned_search_reads_each_candidate_once(index_ddl: &str) -> a
 		let found =
 			knn_candidates(&ctx, &table, index, query, K as u32, 400, version, Some(filter), None)
 				.await
-				.map_err(|flow| match flow {
-					ControlFlow::Err(e) => e,
-					_ => anyhow::anyhow!("the search signalled control flow"),
+				.map_err(|flow| {
+					flow.into_error_or(|_| anyhow::anyhow!("the search signalled control flow"))
 				})?;
 		Ok((found.len(), txn.metrics_snapshot_for_test().keys_read))
 	}

@@ -77,7 +77,58 @@ pub(crate) fn fetch_parts(expr: &LogicalExpr) -> Vec<FetchPart<'_>> {
 				collect(base, out);
 				collect(body, out);
 			}
-			other => {
+			other @ (LogicalExpr::Literal(_)
+			| LogicalExpr::Array(_)
+			| LogicalExpr::Set(_)
+			| LogicalExpr::Object(_)
+			| LogicalExpr::RecordId(_)
+			| LogicalExpr::Param(_)
+			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_)
+			| LogicalExpr::Constant(_)
+			| LogicalExpr::Doc
+			| LogicalExpr::Flatten {
+				..
+			}
+			| LogicalExpr::Filter {
+				..
+			}
+			| LogicalExpr::Method {
+				..
+			}
+			| LogicalExpr::Destructure {
+				..
+			}
+			| LogicalExpr::Optional {
+				..
+			}
+			| LogicalExpr::Lookup {
+				..
+			}
+			| LogicalExpr::Recurse(_)
+			| LogicalExpr::RepeatRecurse(_)
+			| LogicalExpr::SetField {
+				..
+			}
+			| LogicalExpr::Prefix {
+				..
+			}
+			| LogicalExpr::Postfix {
+				..
+			}
+			| LogicalExpr::Invoke {
+				..
+			}
+			| LogicalExpr::Binary {
+				..
+			}
+			| LogicalExpr::Call(_)
+			| LogicalExpr::Closure(_)
+			| LogicalExpr::If(_)
+			| LogicalExpr::Throw(_)
+			| LogicalExpr::Break
+			| LogicalExpr::Continue
+			| LogicalExpr::Subquery(_)) => {
 				if let Some(base) = other.step_base() {
 					collect(base, out);
 				}
@@ -191,15 +242,14 @@ fn fetch_field_path<'a, S: FetchWalk, E: FetchIndex<S>>(
 			}
 
 			match path[depth].step() {
-				WalkStep::Field(name) => match current {
-					Value::Object(obj) => {
+				WalkStep::Field(name) => {
+					if let Value::Object(obj) = current {
 						current = match obj.get_mut(name.as_str()) {
 							Some(child) => child,
 							None => return Ok(()),
 						};
 						depth += 1;
-					}
-					Value::Array(arr) => {
+					} else if let Value::Array(arr) = current {
 						// Fan-out: apply the same field path to each array element
 						return fetch_each_element(
 							ctx,
@@ -209,11 +259,12 @@ fn fetch_field_path<'a, S: FetchWalk, E: FetchIndex<S>>(
 							links,
 						)
 						.await;
+					} else {
+						return Ok(());
 					}
-					_ => return Ok(()),
-				},
-				WalkStep::All => match current {
-					Value::Array(arr) => {
+				}
+				WalkStep::All => {
+					if let Value::Array(arr) = current {
 						return fetch_each_element(
 							ctx,
 							arr.as_mut_slice(),
@@ -222,31 +273,31 @@ fn fetch_field_path<'a, S: FetchWalk, E: FetchIndex<S>>(
 							links,
 						)
 						.await;
-					}
-					Value::Object(obj) => {
+					} else if let Value::Object(obj) = current {
 						return fetch_each(ctx, obj.values_mut(), &path[depth + 1..], index, links)
 							.await;
+					} else {
+						return Ok(());
 					}
-					_ => return Ok(()),
-				},
+				}
 				WalkStep::First => {
-					current = match current {
-						Value::Array(arr) => match arr.first_mut() {
-							Some(v) => v,
-							None => return Ok(()),
-						},
-						_ => return Ok(()),
+					let Value::Array(arr) = current else {
+						return Ok(());
 					};
+					let Some(v) = arr.first_mut() else {
+						return Ok(());
+					};
+					current = v;
 					depth += 1;
 				}
 				WalkStep::Last => {
-					current = match current {
-						Value::Array(arr) => match arr.last_mut() {
-							Some(v) => v,
-							None => return Ok(()),
-						},
-						_ => return Ok(()),
+					let Value::Array(arr) = current else {
+						return Ok(());
 					};
+					let Some(v) = arr.last_mut() else {
+						return Ok(());
+					};
+					current = v;
 					depth += 1;
 				}
 				// A computed index/key part, e.g. `refs[0]`, `refs[-1]`, `refs[$i]`.
@@ -306,8 +357,8 @@ async fn fetch_each_element<'a, S: FetchWalk, E: FetchIndex<S>>(
 	let include = |rid: &RecordId| links.ahead.is_none_or(|ahead| !ahead.holds(rid));
 	let mut windows = Windows::of(links.pool, elements, &include);
 	for at in 0..elements.len() {
-		let slot = match &elements[at] {
-			Value::RecordId(rid) => match links.ahead.and_then(|ahead| ahead.slot(ctx, rid)) {
+		let slot = if let Value::RecordId(rid) = &elements[at] {
+			match links.ahead.and_then(|ahead| ahead.slot(ctx, rid)) {
 				Some(slot) => slot,
 				None => match &mut windows {
 					Some(windows) => {
@@ -316,8 +367,9 @@ async fn fetch_each_element<'a, S: FetchWalk, E: FetchIndex<S>>(
 					}
 					None => Slot::Unread,
 				},
-			},
-			_ => Slot::Unread,
+			}
+		} else {
+			Slot::Unread
 		};
 		fetch_field_path(ctx, &mut elements[at], remaining_path, index, links, slot).await?;
 	}
@@ -332,22 +384,18 @@ async fn fetch_value_if_record<'s>(
 	links: FetchLinks<'s>,
 	first: Slot<'s>,
 ) -> crate::expr::FlowResult<()> {
-	match value {
-		Value::RecordId(rid) => {
-			let slot = match first {
-				Slot::Unread => {
-					links.ahead.and_then(|ahead| ahead.slot(ctx, rid)).unwrap_or(Slot::Unread)
-				}
-				held => held,
-			};
-			let fetched = fetch_record_slot(ctx, rid, slot).await?;
-			*value = fetched;
-		}
-		Value::Array(arr) => {
-			// Use batch fetch for arrays - more efficient for larger arrays
-			batch_fetch_in_place(ctx, arr.as_mut_slice(), links).await?;
-		}
-		_ => {}
+	if let Value::RecordId(rid) = value {
+		let slot = match first {
+			Slot::Unread => {
+				links.ahead.and_then(|ahead| ahead.slot(ctx, rid)).unwrap_or(Slot::Unread)
+			}
+			held @ (Slot::Cached(..) | Slot::Stored(_)) => held,
+		};
+		let fetched = fetch_record_slot(ctx, rid, slot).await?;
+		*value = fetched;
+	} else if let Value::Array(arr) = value {
+		// Use batch fetch for arrays - more efficient for larger arrays
+		batch_fetch_in_place(ctx, arr.as_mut_slice(), links).await?;
 	}
 	Ok(())
 }
@@ -787,17 +835,20 @@ pub(crate) async fn record_exists(
 /// `failure` raised dereferencing a record, a computed field's failed
 /// coercion named as the dereference names it.
 fn computed_coercion(failure: crate::expr::ControlFlow) -> crate::expr::ControlFlow {
-	match failure {
-		crate::expr::ControlFlow::Err(e) => match e.downcast_ref::<crate::doc::Error>() {
-			Some(crate::doc::Error::FieldCoerce {
-				field_name,
-				..
-			}) => crate::expr::ControlFlow::Err(anyhow::anyhow!(
+	if let crate::expr::ControlFlow::Err(e) = failure {
+		if let Some(crate::doc::Error::FieldCoerce {
+			field_name,
+			..
+		}) = e.downcast_ref::<crate::doc::Error>()
+		{
+			crate::expr::ControlFlow::Err(anyhow::anyhow!(
 				"Failed to coerce computed field '{field_name}'"
-			)),
-			_ => crate::expr::ControlFlow::Err(e),
-		},
-		other => other,
+			))
+		} else {
+			crate::expr::ControlFlow::Err(e)
+		}
+	} else {
+		failure
 	}
 }
 

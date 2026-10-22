@@ -317,10 +317,13 @@ fn keeps_the_record(rest: &[Part]) -> bool {
 /// Whether a `type::field` or `type::fields` call names its paths as literals
 /// whose roots are static field names.
 fn names_static_paths(name: &str, arguments: &[Expr]) -> bool {
-	let static_root = |path: &Expr| match path {
-		Expr::Literal(Literal::String(path)) => crate::syn::idiom(path.as_str())
-			.is_ok_and(|idiom| matches!(idiom.0.first(), Some(Part::Field(_)))),
-		_ => false,
+	let static_root = |path: &Expr| {
+		if let Expr::Literal(Literal::String(path)) = path {
+			crate::syn::idiom(path.as_str())
+				.is_ok_and(|idiom| matches!(idiom.0.first(), Some(Part::Field(_))))
+		} else {
+			false
+		}
 	};
 	match (name, arguments) {
 		("type::field", [path]) => static_root(path),
@@ -465,7 +468,41 @@ impl RecordReach {
 				.map(|(_, then)| then)
 				.chain(branches.close.as_ref())
 				.fold(Carry::Nothing, |carry, then| carry.either(self.carry(then))),
-			_ => Carry::Nothing,
+			Expr::Literal(_)
+			| Expr::Table(_)
+			| Expr::Mock(_)
+			| Expr::Constant(_)
+			| Expr::Prefix {
+				..
+			}
+			| Expr::Postfix {
+				..
+			}
+			| Expr::Binary {
+				..
+			}
+			| Expr::FunctionCall(_)
+			| Expr::Break
+			| Expr::Continue
+			| Expr::Throw(_)
+			| Expr::Select(_)
+			| Expr::Create(_)
+			| Expr::Update(_)
+			| Expr::Upsert(_)
+			| Expr::Delete(_)
+			| Expr::Relate(_)
+			| Expr::Insert(_)
+			| Expr::Define(_)
+			| Expr::Remove(_)
+			| Expr::Rebuild(_)
+			| Expr::Alter(_)
+			| Expr::Info(_)
+			| Expr::Foreach(_)
+			| Expr::Let(_)
+			| Expr::Sleep(_)
+			| Expr::Explain {
+				..
+			} => Carry::Nothing,
 		}
 	}
 
@@ -502,8 +539,46 @@ impl RecordReach {
 					carry = carry.either(inner.block_carry(&statement.block));
 					inner.aliases.pop();
 				}
-				_ if at + 1 == block.0.len() => carry = carry.either(inner.carry(statement)),
-				_ => {}
+				Expr::Literal(_)
+				| Expr::Param(_)
+				| Expr::Idiom(_)
+				| Expr::Table(_)
+				| Expr::Mock(_)
+				| Expr::Constant(_)
+				| Expr::Prefix {
+					..
+				}
+				| Expr::Postfix {
+					..
+				}
+				| Expr::Binary {
+					..
+				}
+				| Expr::FunctionCall(_)
+				| Expr::Closure(_)
+				| Expr::Break
+				| Expr::Continue
+				| Expr::Throw(_)
+				| Expr::Select(_)
+				| Expr::Create(_)
+				| Expr::Update(_)
+				| Expr::Upsert(_)
+				| Expr::Delete(_)
+				| Expr::Relate(_)
+				| Expr::Insert(_)
+				| Expr::Define(_)
+				| Expr::Remove(_)
+				| Expr::Rebuild(_)
+				| Expr::Alter(_)
+				| Expr::Info(_)
+				| Expr::Sleep(_)
+				| Expr::Explain {
+					..
+				} => {
+					if at + 1 == block.0.len() {
+						carry = carry.either(inner.carry(statement));
+					}
+				}
 			}
 		}
 		carry
@@ -513,11 +588,10 @@ impl RecordReach {
 	/// the elements of an array or set it spells, or else what the range
 	/// holds.
 	fn element_carry(&self, range: &Expr) -> Carry {
-		match range {
-			Expr::Literal(Literal::Array(items) | Literal::Set(items)) => {
-				items.iter().fold(Carry::Nothing, |carry, item| carry.either(self.carry(item)))
-			}
-			other => self.carry(other),
+		if let Expr::Literal(Literal::Array(items) | Literal::Set(items)) = range {
+			items.iter().fold(Carry::Nothing, |carry, item| carry.either(self.carry(item)))
+		} else {
+			self.carry(range)
 		}
 	}
 
@@ -631,7 +705,40 @@ impl RecordReach {
 			// the record it inserts.
 			Expr::Relate(s) => (vec![&s.from, &s.to, &s.through], false),
 			Expr::Insert(s) => (s.into.iter().collect(), false),
-			_ => (Vec::new(), false),
+			Expr::Literal(_)
+			| Expr::Param(_)
+			| Expr::Idiom(_)
+			| Expr::Table(_)
+			| Expr::Mock(_)
+			| Expr::Block(_)
+			| Expr::Constant(_)
+			| Expr::Prefix {
+				..
+			}
+			| Expr::Postfix {
+				..
+			}
+			| Expr::Binary {
+				..
+			}
+			| Expr::FunctionCall(_)
+			| Expr::Closure(_)
+			| Expr::Break
+			| Expr::Continue
+			| Expr::Return(_)
+			| Expr::Throw(_)
+			| Expr::IfElse(_)
+			| Expr::Define(_)
+			| Expr::Remove(_)
+			| Expr::Rebuild(_)
+			| Expr::Alter(_)
+			| Expr::Info(_)
+			| Expr::Foreach(_)
+			| Expr::Let(_)
+			| Expr::Sleep(_)
+			| Expr::Explain {
+				..
+			} => (Vec::new(), false),
 		};
 		let carried =
 			targets.iter().fold(Carry::Nothing, |carry, target| carry.either(self.carry(target)));
@@ -749,7 +856,25 @@ impl crate::expr::visit::Visitor for RecordReach {
 			| Expr::Delete(_)
 			| Expr::Relate(_)
 			| Expr::Insert(_) => self.nested(expr),
-			_ => expr.visit(self)?,
+			Expr::Literal(_)
+			| Expr::Idiom(_)
+			| Expr::Table(_)
+			| Expr::Mock(_)
+			| Expr::Constant(_)
+			| Expr::Break
+			| Expr::Continue
+			| Expr::Return(_)
+			| Expr::Throw(_)
+			| Expr::IfElse(_)
+			| Expr::Define(_)
+			| Expr::Remove(_)
+			| Expr::Rebuild(_)
+			| Expr::Alter(_)
+			| Expr::Info(_)
+			| Expr::Sleep(_)
+			| Expr::Explain {
+				..
+			} => expr.visit(self)?,
 		}
 		Ok(())
 	}
@@ -805,7 +930,18 @@ impl crate::expr::visit::Visitor for RecordReach {
 					}
 				});
 			}
-			_ => part.visit(self)?,
+			Part::All
+			| Part::Flatten
+			| Part::Last
+			| Part::First
+			| Part::Field(_)
+			| Part::Value(_)
+			| Part::Start(_)
+			| Part::Destructure(_)
+			| Part::Optional
+			| Part::Recurse(..)
+			| Part::Doc
+			| Part::RepeatRecurse => part.visit(self)?,
 		}
 		Ok(())
 	}
@@ -1212,13 +1348,15 @@ fn declared_type(key: &KeyStructure) -> String {
 /// How a record id differs from the structure, as a phrase for the message
 /// that follows the record.
 fn nonconformance_reason(why: &Nonconformance) -> String {
-	match why {
-		Nonconformance::Component {
-			name: Some(name),
-			reason,
-			..
-		} => format!("`{name}` {reason}"),
-		other => other.to_string(),
+	if let Nonconformance::Component {
+		name: Some(name),
+		reason,
+		..
+	} = why
+	{
+		format!("`{name}` {reason}")
+	} else {
+		why.to_string()
 	}
 }
 
@@ -1268,9 +1406,10 @@ fn body_field(
 		Extracted::Missing => Ok(None),
 		Extracted::Bail => {
 			let record = catalog::Record::decode_admitted(value, Some(layouts), rid())?;
-			Ok(match &record.data {
-				Value::Object(object) => object.get(segment.as_str()).cloned(),
-				_ => None,
+			Ok(if let Value::Object(object) = &record.data {
+				object.get(segment.as_str()).cloned()
+			} else {
+				None
 			})
 		}
 	}
@@ -1341,10 +1480,9 @@ fn check_record(
 
 /// The error of an interrupted scan, as the statement reports it.
 fn interrupted(flow: ControlFlow) -> anyhow::Error {
-	match flow {
-		ControlFlow::Err(error) => error,
-		other => anyhow::anyhow!("the scan of the records was interrupted by {other}"),
-	}
+	flow.into_error_or(|other| {
+		anyhow::anyhow!("the scan of the records was interrupted by {other}")
+	})
 }
 
 /// Refuse the record ids and bodies of `table` that `key` does not admit.

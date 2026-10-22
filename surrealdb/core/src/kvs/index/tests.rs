@@ -1539,9 +1539,11 @@ async fn ordered_result_ids(ds: &Datastore, session: &Session, sql: &str) -> Res
 		anyhow::bail!("query returned non-array value: {value:?}");
 	};
 	rows.iter()
-		.map(|row| match row {
-			surrealdb_types::Value::RecordId(rid) => Ok(rid.to_sql()),
-			other => anyhow::bail!("row is not a record id: {other:?}"),
+		.map(|row| {
+			let surrealdb_types::Value::RecordId(rid) = row else {
+				anyhow::bail!("row is not a record id: {row:?}");
+			};
+			Ok(rid.to_sql())
 		})
 		.collect()
 }
@@ -13979,7 +13981,24 @@ async fn bitmap_count_performs_zero_record_fetches() -> Result<()> {
 					},
 					other => anyhow::bail!("unexpected count row: {other:?}"),
 				},
-				other => anyhow::bail!("unexpected count result: {other:?}"),
+				other @ (PublicValue::None
+				| PublicValue::Null
+				| PublicValue::Bool(_)
+				| PublicValue::Number(_)
+				| PublicValue::String(_)
+				| PublicValue::Bytes(_)
+				| PublicValue::Duration(_)
+				| PublicValue::Datetime(_)
+				| PublicValue::Uuid(_)
+				| PublicValue::Geometry(_)
+				| PublicValue::Table(_)
+				| PublicValue::RecordId(_)
+				| PublicValue::File(_)
+				| PublicValue::Range(_)
+				| PublicValue::Regex(_)
+				| PublicValue::Array(_)
+				| PublicValue::Object(_)
+				| PublicValue::Set(_)) => anyhow::bail!("unexpected count result: {other:?}"),
 			}
 		}
 	};
@@ -14063,9 +14082,10 @@ async fn planner_result_ids(ds: &Datastore, sql: &str) -> Result<Vec<String>> {
 	};
 	let mut ids = Vec::with_capacity(rows.len());
 	for row in rows.iter() {
-		let id = match row {
-			surrealdb_types::Value::Object(obj) => obj.get("id"),
-			other => Some(other),
+		let id = if let surrealdb_types::Value::Object(obj) = row {
+			obj.get("id")
+		} else {
+			Some(row)
 		};
 		match id {
 			Some(surrealdb_types::Value::RecordId(rid)) => ids.push(rid.to_sql()),
@@ -16829,10 +16849,10 @@ async fn knn_prefilter_narrows_the_search_to_the_allow_list() -> Result<()> {
 		async move {
 			let mut results = ds.execute(sql, session, None).await?;
 			let value = results.remove(0).result?;
-			match value {
-				PublicValue::String(plan) => Ok::<String, anyhow::Error>(plan),
-				other => anyhow::bail!("unexpected EXPLAIN result: {other:?}"),
-			}
+			let PublicValue::String(plan) = value else {
+				anyhow::bail!("unexpected EXPLAIN result: {value:?}");
+			};
+			Ok::<String, anyhow::Error>(plan)
 		}
 	};
 
@@ -18510,10 +18530,11 @@ async fn a_marker_naming_another_record_is_not_the_scanned_records_baseline() ->
 		let ds = &ds;
 		let session = &session;
 		async move {
-			match ds.execute(sql, session, None).await?.remove(0).result? {
-				PublicValue::Array(rows) => Ok(rows.len()),
-				other => anyhow::bail!("unexpected result: {other:?}"),
-			}
+			let res = ds.execute(sql, session, None).await?.remove(0).result?;
+			let PublicValue::Array(rows) = res else {
+				anyhow::bail!("unexpected result: {res:?}");
+			};
+			Ok(rows.len())
 		}
 	};
 	assert_eq!(
@@ -18982,11 +19003,11 @@ async fn int_rows(ds: &Datastore, session: &Session, sql: &str) -> Result<Vec<i6
 		anyhow::bail!("query returned non-array value: {value:?}");
 	};
 	rows.iter()
-		.map(|row| match row {
-			surrealdb_types::Value::Number(n) => {
-				n.to_int().ok_or_else(|| anyhow::anyhow!("row is not an integer: {row:?}"))
-			}
-			other => anyhow::bail!("row is not a number: {other:?}"),
+		.map(|row| {
+			let surrealdb_types::Value::Number(n) = row else {
+				anyhow::bail!("row is not a number: {row:?}");
+			};
+			n.to_int().ok_or_else(|| anyhow::anyhow!("row is not an integer: {row:?}"))
 		})
 		.collect()
 }
@@ -18995,10 +19016,11 @@ async fn int_rows(ds: &Datastore, session: &Session, sql: &str) -> Result<Vec<i6
 #[cfg(feature = "kv-mem")]
 async fn plan_text(ds: &Datastore, session: &Session, sql: &str) -> Result<String> {
 	let mut results = ds.execute(&format!("EXPLAIN {sql}"), session, None).await?;
-	match results.remove(0).result? {
-		surrealdb_types::Value::String(plan) => Ok(plan),
-		other => anyhow::bail!("unexpected EXPLAIN result: {other:?}"),
-	}
+	let res = results.remove(0).result?;
+	let surrealdb_types::Value::String(plan) = res else {
+		anyhow::bail!("unexpected EXPLAIN result: {res:?}");
+	};
+	Ok(plan)
 }
 
 /// Seeds `t`, whose id names `[feed: string, n: int]`, with `['f', 1]`,

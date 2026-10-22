@@ -1,4 +1,5 @@
 #![recursion_limit = "256"]
+#![deny(clippy::wildcard_enum_match_arm)]
 //! KNN under the JACCARD and PEARSON metrics ranks by a distance: the vector
 //! identical to the query comes first, at distance zero, and an HNSW index
 //! returns the same neighbours at the same distances as a brute-force scan.

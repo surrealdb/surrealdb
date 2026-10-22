@@ -195,9 +195,10 @@ impl WrittenClosures {
 	/// Whether `expr` may evaluate to a closure whose body is not in the
 	/// clause.
 	fn unseen(&self, expr: &LogicalExpr) -> bool {
-		match expr {
-			LogicalExpr::Param(param) => self.0.get(param.as_str()) != Some(&true),
-			_ => may_carry_unseen_closure(expr),
+		if let LogicalExpr::Param(param) = expr {
+			self.0.get(param.as_str()) != Some(&true)
+		} else {
+			may_carry_unseen_closure(expr)
 		}
 	}
 }
@@ -261,7 +262,35 @@ fn refused_statement(op: &LogicalOp) -> Option<String> {
 			ControlFlow::Break(format!("`{}` changes the schema", ddl.statement.kind()))
 		}
 		LogicalOp::Sleep(_) => ControlFlow::Break(SLEEP_TEXT.to_owned()),
-		_ => ControlFlow::Continue(()),
+		LogicalOp::Source(_)
+		| LogicalOp::Values(_)
+		| LogicalOp::Match(_)
+		| LogicalOp::Subquery(_)
+		| LogicalOp::UnionAll(_)
+		| LogicalOp::Join(_)
+		| LogicalOp::Filter(_)
+		| LogicalOp::PermissionFilter(_)
+		| LogicalOp::Split(_)
+		| LogicalOp::Aggregate(_)
+		| LogicalOp::Distinct(_)
+		| LogicalOp::Sort(_)
+		| LogicalOp::Limit(_)
+		| LogicalOp::Project(_)
+		| LogicalOp::Fetch(_)
+		| LogicalOp::Timeout(_)
+		| LogicalOp::VersionScope(_)
+		| LogicalOp::Only(_)
+		| LogicalOp::Explain(_)
+		| LogicalOp::Eval(_)
+		| LogicalOp::Sequence(_)
+		| LogicalOp::Let(_)
+		| LogicalOp::Return(_)
+		| LogicalOp::Foreach(_)
+		| LogicalOp::If(_)
+		| LogicalOp::Throw(_)
+		| LogicalOp::Break(_)
+		| LogicalOp::Continue(_)
+		| LogicalOp::Info(_) => ControlFlow::Continue(()),
 	});
 	match found {
 		ControlFlow::Break(construct) => Some(construct),
@@ -328,7 +357,64 @@ fn refused_at(
 			 clause is defined"
 				.to_owned()
 		}),
-		_ => None,
+		LogicalExpr::Literal(_)
+		| LogicalExpr::Array(_)
+		| LogicalExpr::Set(_)
+		| LogicalExpr::Object(_)
+		| LogicalExpr::RecordId(_)
+		| LogicalExpr::Param(_)
+		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
+		| LogicalExpr::Constant(_)
+		| LogicalExpr::Field(_)
+		| LogicalExpr::Doc
+		| LogicalExpr::Current
+		| LogicalExpr::Access {
+			..
+		}
+		| LogicalExpr::Index {
+			..
+		}
+		| LogicalExpr::First(_)
+		| LogicalExpr::Last(_)
+		| LogicalExpr::Each(_)
+		| LogicalExpr::Flatten {
+			..
+		}
+		| LogicalExpr::Filter {
+			..
+		}
+		| LogicalExpr::Destructure {
+			..
+		}
+		| LogicalExpr::Optional {
+			..
+		}
+		| LogicalExpr::Lookup {
+			..
+		}
+		| LogicalExpr::Recurse(_)
+		| LogicalExpr::RepeatRecurse(_)
+		| LogicalExpr::Broadcast {
+			..
+		}
+		| LogicalExpr::SetField {
+			..
+		}
+		| LogicalExpr::Prefix {
+			..
+		}
+		| LogicalExpr::Postfix {
+			..
+		}
+		| LogicalExpr::Binary {
+			..
+		}
+		| LogicalExpr::Closure(_)
+		| LogicalExpr::If(_)
+		| LogicalExpr::Throw(_)
+		| LogicalExpr::Break
+		| LogicalExpr::Continue => None,
 	}
 }
 

@@ -249,9 +249,12 @@ mod tests {
 	fn forms(em: &Emitter) -> Vec<Option<&IrForm>> {
 		em.code()
 			.iter()
-			.map(|instr| match instr {
-				Instr::Ir(ir) => Some(ir.form()),
-				_ => None,
+			.map(|instr| {
+				if let Instr::Ir(ir) = instr {
+					Some(ir.form())
+				} else {
+					None
+				}
 			})
 			.collect()
 	}

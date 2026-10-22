@@ -173,7 +173,14 @@ async fn store_view(ds: &Datastore, table: &str, like: &str, source: &str) {
 			condition,
 			condition_body,
 		},
-		other => panic!("the template view must be a plain one: {other:?}"),
+		other @ (ViewDefinition::Aggregated {
+			..
+		}
+		| ViewDefinition::Select {
+			..
+		}) => {
+			panic!("the template view must be a plain one: {other:?}")
+		}
 	};
 	let rewritten = TableDefinition {
 		view: Some(view),

@@ -832,22 +832,20 @@ impl PreDecodeFilter {
 	/// `Inside`/`NotInside` operator; anything else maps to [`Evidence::Unknown`].
 	#[inline]
 	fn set_evidence_for(op: &BinaryOperator, inside: bool) -> Evidence {
-		match op {
-			BinaryOperator::Inside => {
-				if inside {
-					Evidence::ProvablyTrue
-				} else {
-					Evidence::ProvablyFalse
-				}
+		if matches!(op, BinaryOperator::Inside) {
+			if inside {
+				Evidence::ProvablyTrue
+			} else {
+				Evidence::ProvablyFalse
 			}
-			BinaryOperator::NotInside => {
-				if inside {
-					Evidence::ProvablyFalse
-				} else {
-					Evidence::ProvablyTrue
-				}
+		} else if matches!(op, BinaryOperator::NotInside) {
+			if inside {
+				Evidence::ProvablyFalse
+			} else {
+				Evidence::ProvablyTrue
 			}
-			_ => Evidence::Unknown,
+		} else {
+			Evidence::Unknown
 		}
 	}
 }
@@ -956,7 +954,9 @@ fn apply_binary(op: &BinaryOperator, left: &Value, right: &Value) -> Option<Valu
 		AllInside => operate::inside_all(left, right).ok(),
 		AnyInside => operate::inside_any(left, right).ok(),
 		NoneInside => operate::inside_none(left, right).ok(),
-		_ => None,
+		Subtract | Add | Multiply | Divide | Remainder | Power | AllEqual | AnyEqual | Or | And
+		| NullCoalescing | TenaryCondition | Outside | Intersects | Range | RangeInclusive
+		| RangeSkip | RangeSkipInclusive | Matches(_) | NearestNeighbor(_) => None,
 	}
 }
 
@@ -1157,9 +1157,10 @@ mod tests {
 				];
 				for (shape, fused) in &shapes {
 					let pf = shape.filter(TEST_DEPTH_LIMIT);
-					let comparison = match &pf.root {
-						PredNode::Not(inner) => inner.as_ref(),
-						root => root,
+					let comparison = if let PredNode::Not(inner) = &pf.root {
+						inner.as_ref()
+					} else {
+						&pf.root
 					};
 					if *fused {
 						assert!(
@@ -2229,12 +2230,13 @@ mod tests {
 		let pick = |p: &[PathSegment]| -> Option<Value> {
 			let mut v = data;
 			for segment in prefix.iter().copied().chain(p.iter().map(PathSegment::as_str)) {
-				v = match v {
-					Value::Object(o) => match o.get(segment) {
+				v = if let Value::Object(o) = v {
+					match o.get(segment) {
 						Some(inner) => inner,
 						None => return Some(Value::None),
-					},
-					_ => return None,
+					}
+				} else {
+					return None;
 				};
 			}
 			Some(v.clone())
@@ -2327,11 +2329,8 @@ mod tests {
 		for object in differential_records() {
 			let mut with_id = object.clone();
 			with_id.0.insert(Strand::from("id"), Value::RecordId(rid.clone()));
+			let revision = wire_record_plain_object(with_id.clone());
 			let data = Value::Object(with_id);
-			let revision = wire_record_plain_object(match &data {
-				Value::Object(o) => o.clone(),
-				_ => unreachable!(),
-			});
 			let keyed =
 				crate::catalog::encode_record(DOCUMENT, None, &data, Some(&rid)).expect("encodes");
 			let bare =

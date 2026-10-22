@@ -375,16 +375,12 @@ impl Cx<'_> {
 				} => (MAY_BE_ABSENT | MAY_BE_NULL, bit),
 			};
 			// The wire offset of a stored fixed slot, and its width.
-			let fixed = match column.location {
-				Location::Fixed(offset) => {
-					let width = column.kind.fixed_width().unwrap_or(0);
-					anyhow::ensure!(
-						offset >= self.presence_len,
-						"a fixed slot in the presence region"
-					);
-					Some((offset - self.presence_len, width))
-				}
-				_ => None,
+			let fixed = if let Location::Fixed(offset) = column.location {
+				let width = column.kind.fixed_width().unwrap_or(0);
+				anyhow::ensure!(offset >= self.presence_len, "a fixed slot in the presence region");
+				Some((offset - self.presence_len, width))
+			} else {
+				None
 			};
 			let (kind, slot, fill, junk) = match (column.kind, column.location) {
 				(PhysicalKind::Bool, Location::Bit(bit)) => (Kind::Bit, bit, Fill::Copied, None),
@@ -417,7 +413,15 @@ impl Cx<'_> {
 							(Kind::Bytes, NO_SLOT, Fill::Bytes, Some((offset, width)))
 						}
 						// A point and a literal code are held as CBOR.
-						_ => (Kind::Dynamic, NO_SLOT, Fill::Dynamic, Some((offset, width))),
+						PhysicalKind::Bool
+						| PhysicalKind::Point
+						| PhysicalKind::LiteralCode(_)
+						| PhysicalKind::String
+						| PhysicalKind::Bytes
+						| PhysicalKind::RecordKey
+						| PhysicalKind::DecimalVar
+						| PhysicalKind::Value
+						| PhysicalKind::Object => (Kind::Dynamic, NO_SLOT, Fill::Dynamic, Some((offset, width))),
 					}
 				}
 				(PhysicalKind::String, _) => (Kind::String, NO_SLOT, Fill::String, None),
@@ -451,9 +455,10 @@ impl Cx<'_> {
 				column: WireColumn {
 					name: column.path[depth].clone(),
 					kind,
-					element: match fill {
-						Fill::Array(element) => Some(element),
-						_ => None,
+					element: if let Fill::Array(element) = fill {
+						Some(element)
+					} else {
+						None
 					},
 					flags,
 					presence,
@@ -465,9 +470,10 @@ impl Cx<'_> {
 				source: Source::Column(at),
 				fill,
 				junk,
-				var: match column.location {
-					Location::Var(var) => var,
-					_ => NO_SLOT,
+				var: if let Location::Var(var) = column.location {
+					var
+				} else {
+					NO_SLOT
 				},
 				kids: kids_of,
 			});
@@ -570,10 +576,12 @@ fn declared(kind: &crate::expr::Kind) -> (Kind, Option<Kind>, u8, String) {
 			let mut flags = 0;
 			let mut rest = Vec::new();
 			for kind in kinds {
-				match kind {
-					K::None => flags |= MAY_BE_ABSENT,
-					K::Null => flags |= MAY_BE_NULL,
-					other => rest.push(other),
+				if matches!(kind, K::None) {
+					flags |= MAY_BE_ABSENT;
+				} else if matches!(kind, K::Null) {
+					flags |= MAY_BE_NULL;
+				} else {
+					rest.push(kind);
 				}
 			}
 			match rest.as_slice() {
@@ -584,6 +592,16 @@ fn declared(kind: &crate::expr::Kind) -> (Kind, Option<Kind>, u8, String) {
 				_ => (Kind::Dynamic, None, flags, String::new()),
 			}
 		}
-		_ => plain(Kind::Dynamic),
+		K::Any
+		| K::Number
+		| K::Object
+		| K::Regex
+		| K::Table(_)
+		| K::Geometry(_)
+		| K::Set(..)
+		| K::Function(..)
+		| K::Range
+		| K::Literal(_)
+		| K::File(_) => plain(Kind::Dynamic),
 	}
 }

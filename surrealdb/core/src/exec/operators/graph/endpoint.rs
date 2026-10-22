@@ -160,11 +160,12 @@ pub(crate) fn extract_endpoint_id(
 /// Assemble the output row: clone the input object and insert the target node
 /// binding.
 pub(crate) fn bound_row(input: &Value, target_binding: &str, target: Value) -> Value {
-	let mut obj = match input {
-		Value::Object(o) => o.clone(),
+	let mut obj = if let Value::Object(o) = input {
+		o.clone()
+	} else {
 		// `extract_endpoint_id` only yields `Some` for object rows, so this is
 		// unreachable in practice; default to an empty object defensively.
-		_ => Object::default(),
+		Object::default()
 	};
 	obj.insert(target_binding, target);
 	Value::Object(obj)

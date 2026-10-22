@@ -2013,9 +2013,10 @@ fn expr_planner<'ctx>(
 fn session_ns_db(ctx: &FrozenContext) -> (Option<String>, Option<String>) {
 	let read = |key: &str| {
 		ctx.value("session").and_then(|v| v.as_object()).and_then(|o| o.get(key)).and_then(|v| {
-			match v {
-				Value::String(s) => Some(s.as_str().to_owned()),
-				_ => None,
+			if let Value::String(s) = v {
+				Some(s.as_str().to_owned())
+			} else {
+				None
 			}
 		})
 	};

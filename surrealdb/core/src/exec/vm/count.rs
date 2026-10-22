@@ -66,7 +66,23 @@ pub(super) async fn count(
 			let (name, rid) = match value {
 				Value::Table(name) => (name, None),
 				Value::RecordId(rid) => (rid.table.clone(), Some(rid)),
-				_ => {
+				Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Array(_)
+				| Value::Set(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Range(_)
+				| Value::Closure(_) => {
 					return Err(ControlFlow::Err(anyhow::anyhow!(
 						"CountScan received a non-table source"
 					)));
@@ -90,7 +106,11 @@ pub(super) async fn count(
 							.count_keys(services.record_range(&rid.table, range)?, version)
 							.await?
 					}
-					_ => usize::from(services.record_exists(rid, version).await?),
+					RecordIdKey::Number(_)
+					| RecordIdKey::String(_)
+					| RecordIdKey::Uuid(_)
+					| RecordIdKey::Array(_)
+					| RecordIdKey::Object(_) => usize::from(services.record_exists(rid, version).await?),
 				},
 				None => match deltas {
 					Some(index) if version.is_none() => {

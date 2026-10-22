@@ -555,9 +555,10 @@ pub(super) fn plan_define<'e>(
 				table_name: TableName::new(written_text(&stmt.what).unwrap_or_default()),
 				cols: written_index_columns(&stmt.cols).unwrap_or_default(),
 				index: stmt.index.clone().into(),
-				count_cond: match &stmt.index {
-					Index::Count(Some(cond)) => Some(cond.clone()),
-					_ => None,
+				count_cond: if let Index::Count(Some(cond)) = &stmt.index {
+					Some(cond.clone())
+				} else {
+					None
 				},
 				comment: comment_text(&stmt.comment),
 				prepare_remove: false,
@@ -900,13 +901,15 @@ pub(super) fn plan_define<'e>(
 			let start = s.evaluated(DdlOperand::Start, &stmt.start)?;
 			let definition = crate::catalog::SequenceDefinition {
 				name: Strand::new(written_text(&stmt.name).unwrap_or_default()),
-				batch: match &stmt.batch {
-					Expr::Literal(Literal::Integer(i)) => u32::try_from(*i).unwrap_or(0),
-					_ => 0,
+				batch: if let Expr::Literal(Literal::Integer(i)) = &stmt.batch {
+					u32::try_from(*i).unwrap_or(0)
+				} else {
+					0
 				},
-				start: match &stmt.start {
-					Expr::Literal(Literal::Integer(i)) => *i,
-					_ => 0,
+				start: if let Expr::Literal(Literal::Integer(i)) = &stmt.start {
+					*i
+				} else {
+					0
 				},
 				timeout: cast_duration(&stmt.timeout),
 			};
@@ -1127,7 +1130,20 @@ fn written_index_columns(cols: &[Expr]) -> Option<Vec<crate::expr::Idiom>> {
 					Part::Value(Expr::Literal(Literal::String(s))) => Some(Part::Field(s.clone())),
 					Part::Value(Expr::Literal(_)) => Some(part.clone()),
 					Part::Value(_) => None,
-					other => Some(other.clone()),
+					other @ (Part::All
+					| Part::Flatten
+					| Part::Last
+					| Part::First
+					| Part::Field(_)
+					| Part::Where(_)
+					| Part::Lookup(_)
+					| Part::Start(_)
+					| Part::Method(..)
+					| Part::Destructure(_)
+					| Part::Optional
+					| Part::Recurse(..)
+					| Part::Doc
+					| Part::RepeatRecurse) => Some(other.clone()),
 				})
 				.collect::<Option<Vec<_>>>()?;
 			Some(crate::expr::Idiom(parts))
@@ -1442,9 +1458,12 @@ pub(super) fn catalog_api_config(
 				args: m
 					.args
 					.iter()
-					.map(|arg| match arg {
-						Expr::Literal(literal) => literal.as_static_value().unwrap_or(Value::None),
-						_ => Value::None,
+					.map(|arg| {
+						if let Expr::Literal(literal) = arg {
+							literal.as_static_value().unwrap_or(Value::None)
+						} else {
+							Value::None
+						}
 					})
 					.collect(),
 			})

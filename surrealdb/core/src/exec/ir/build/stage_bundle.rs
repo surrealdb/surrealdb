@@ -177,7 +177,9 @@ mod tests {
 		};
 		match &ir.op(events).expect("the op exists").kind {
 			OpKind::Logical(LogOp::Events(attrs)) => (events, attrs.as_ref().clone()),
-			other => panic!("the first op is the events op, found {other:?}"),
+			other @ (OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_)) => {
+				panic!("the first op is the events op, found {other:?}")
+			}
 		}
 	}
 

@@ -55,7 +55,7 @@
 
 // Adding a `LogicalOp` variant must break the walk until it states whether the
 // variant is collected, which a wildcard arm would silently absorb.
-#![warn(clippy::wildcard_enum_match_arm)]
+#![deny(clippy::wildcard_enum_match_arm)]
 
 use std::collections::HashSet;
 use std::sync::Arc;

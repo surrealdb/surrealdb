@@ -1,4 +1,5 @@
 #![recursion_limit = "256"]
+#![deny(clippy::wildcard_enum_match_arm)]
 //! #548: graph-tier sibling verification.
 //!
 //! Lives in its own integration-test binary so the exact-threshold override
@@ -62,9 +63,9 @@ async fn graph_tier_verifies_each_sibling_doc() -> anyhow::Result<()> {
 			None,
 		)
 		.await?;
-	let plan = match results.remove(0).result? {
-		Value::String(plan) => plan,
-		other => anyhow::bail!("unexpected EXPLAIN result: {other:?}"),
+	let res = results.remove(0).result?;
+	let Value::String(plan) = res else {
+		anyhow::bail!("unexpected EXPLAIN result: {res:?}");
 	};
 	assert!(plan.contains("prefilter_tier: graph"), "expected graph tier:\n{plan}");
 

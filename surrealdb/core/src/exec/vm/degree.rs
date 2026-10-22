@@ -184,7 +184,11 @@ impl DegreeCounter {
 					// The specs' bounds are all `Unbounded`, so no bound
 					// expression is ever evaluated and no other control
 					// flow can surface.
-					_ => anyhow::anyhow!("unexpected control flow while computing degree ranges"),
+					crate::expr::ControlFlow::Break
+					| crate::expr::ControlFlow::Continue
+					| crate::expr::ControlFlow::Return(_) => {
+						anyhow::anyhow!("unexpected control flow while computing degree ranges")
+					}
 				})?;
 			let resolve = exec.root().ctx.get_index_stores().adjacency_resolve();
 			let mut dir_degree = 0u64;

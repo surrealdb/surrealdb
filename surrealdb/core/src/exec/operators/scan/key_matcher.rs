@@ -53,21 +53,19 @@ impl KeyPredicateMatcher {
 		let mut tests = Vec::new();
 		let mut stack = vec![cond];
 		while let Some(expr) = stack.pop() {
-			match expr {
-				LogicalExpr::Binary {
-					left,
-					op: BinaryOperator::And,
-					right,
-				} => {
-					stack.push(left);
-					stack.push(right);
-				}
-				LogicalExpr::Binary {
-					left,
-					op,
-					right,
-				} => tests.push(compile_test(left, op, right)?),
-				_ => return None,
+			let LogicalExpr::Binary {
+				left,
+				op,
+				right,
+			} = expr
+			else {
+				return None;
+			};
+			if matches!(op, BinaryOperator::And) {
+				stack.push(left);
+				stack.push(right);
+			} else {
+				tests.push(compile_test(left, op, right)?);
 			}
 		}
 		Some(Self {
@@ -96,7 +94,36 @@ fn compile_test(left: &LogicalExpr, op: &BinaryOperator, right: &LogicalExpr) ->
 			op,
 			operand,
 		}),
-		_ => None,
+		BinaryOperator::Subtract
+		| BinaryOperator::Add
+		| BinaryOperator::Multiply
+		| BinaryOperator::Divide
+		| BinaryOperator::Remainder
+		| BinaryOperator::Power
+		| BinaryOperator::AllEqual
+		| BinaryOperator::AnyEqual
+		| BinaryOperator::Or
+		| BinaryOperator::And
+		| BinaryOperator::NullCoalescing
+		| BinaryOperator::TenaryCondition
+		| BinaryOperator::Contain
+		| BinaryOperator::NotContain
+		| BinaryOperator::ContainAll
+		| BinaryOperator::ContainAny
+		| BinaryOperator::ContainNone
+		| BinaryOperator::Inside
+		| BinaryOperator::NotInside
+		| BinaryOperator::AllInside
+		| BinaryOperator::AnyInside
+		| BinaryOperator::NoneInside
+		| BinaryOperator::Outside
+		| BinaryOperator::Intersects
+		| BinaryOperator::Range
+		| BinaryOperator::RangeInclusive
+		| BinaryOperator::RangeSkip
+		| BinaryOperator::RangeSkipInclusive
+		| BinaryOperator::Matches(_)
+		| BinaryOperator::NearestNeighbor(_) => None,
 	}
 }
 
@@ -110,7 +137,36 @@ fn flip(op: &BinaryOperator) -> Option<BinaryOperator> {
 		BinaryOperator::LessThanEqual => BinaryOperator::MoreThanEqual,
 		BinaryOperator::MoreThan => BinaryOperator::LessThan,
 		BinaryOperator::MoreThanEqual => BinaryOperator::LessThanEqual,
-		_ => return None,
+		BinaryOperator::Subtract
+		| BinaryOperator::Add
+		| BinaryOperator::Multiply
+		| BinaryOperator::Divide
+		| BinaryOperator::Remainder
+		| BinaryOperator::Power
+		| BinaryOperator::AllEqual
+		| BinaryOperator::AnyEqual
+		| BinaryOperator::Or
+		| BinaryOperator::And
+		| BinaryOperator::NullCoalescing
+		| BinaryOperator::TenaryCondition
+		| BinaryOperator::Contain
+		| BinaryOperator::NotContain
+		| BinaryOperator::ContainAll
+		| BinaryOperator::ContainAny
+		| BinaryOperator::ContainNone
+		| BinaryOperator::Inside
+		| BinaryOperator::NotInside
+		| BinaryOperator::AllInside
+		| BinaryOperator::AnyInside
+		| BinaryOperator::NoneInside
+		| BinaryOperator::Outside
+		| BinaryOperator::Intersects
+		| BinaryOperator::Range
+		| BinaryOperator::RangeInclusive
+		| BinaryOperator::RangeSkip
+		| BinaryOperator::RangeSkipInclusive
+		| BinaryOperator::Matches(_)
+		| BinaryOperator::NearestNeighbor(_) => return None,
 	})
 }
 

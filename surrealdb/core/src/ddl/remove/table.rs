@@ -235,10 +235,7 @@ impl Purge<'_> {
 /// The error a purge interrupted by its statement's cancellation or deadline
 /// reports.
 fn interrupted(flow: ControlFlow) -> anyhow::Error {
-	match flow {
-		ControlFlow::Err(error) => error,
-		other => {
-			anyhow::anyhow!("the purge of the removed table's edges was interrupted by {other}")
-		}
-	}
+	flow.into_error_or(|other| {
+		anyhow::anyhow!("the purge of the removed table's edges was interrupted by {other}")
+	})
 }

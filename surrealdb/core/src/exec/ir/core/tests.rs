@@ -2797,12 +2797,13 @@ fn stored_clause_leaves_ops_outside_the_clause_free_to_change() {
 
 /// The integer a literal op holds.
 fn literal_int(ir: &Ir, op: OpId) -> Option<i64> {
-	match &ir.op(op)?.kind {
-		OpKind::Expr(ExprOp::Literal(held)) => match **held {
-			Value::Number(Number::Int(n)) => Some(n),
-			_ => None,
-		},
-		_ => None,
+	if let Some(data) = ir.op(op)
+		&& let OpKind::Expr(ExprOp::Literal(held)) = &data.kind
+		&& let Value::Number(Number::Int(n)) = **held
+	{
+		Some(n)
+	} else {
+		None
 	}
 }
 
@@ -3672,7 +3673,24 @@ impl AttrSyntax for TextSyntax {
 				out.push_str("str ");
 				out.push_str(text.as_str());
 			}
-			_ => out.push_str("unsupported"),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Array(_)
+			| Value::Set(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => out.push_str("unsupported"),
 		}
 	}
 
@@ -3699,7 +3717,7 @@ impl AttrSyntax for TextSyntax {
 				Ok(OpKind::Expr(ExprOp::Subquery(NestedStrategy::Apply)))
 			}
 			OpTag::Expr(ExprTag::If) => Ok(OpKind::Expr(ExprOp::If)),
-			_ => Err(unreadable()),
+			OpTag::Expr(_) | OpTag::Logical(_) | OpTag::Phys(_) => Err(unreadable()),
 		}
 	}
 }
@@ -4205,7 +4223,7 @@ fn quoted_attrs_round_trip_escapes() {
 		OpKind::Expr(ExprOp::Literal(value)) => {
 			assert_eq!(**value, Value::String(Strand::from(raw)));
 		}
-		other => panic!("{other:?}"),
+		other @ (OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_)) => panic!("{other:?}"),
 	}
 	assert_eq!(text_of(&parsed, &registry), text);
 }

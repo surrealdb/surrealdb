@@ -357,9 +357,10 @@ pub(crate) async fn expand_paths(
 
 	// The source node object as it appears in the input row (already
 	// permission-filtered upstream by the anchor scan).
-	let source_obj = match row {
-		Value::Object(obj) => obj.get(&params.source).cloned().unwrap_or(Value::Null),
-		_ => Value::Null,
+	let source_obj = if let Value::Object(obj) = row {
+		obj.get(&params.source).cloned().unwrap_or(Value::Null)
+	} else {
+		Value::Null
 	};
 
 	// Per-source path budget: counts every path pushed on the DFS stack plus
@@ -610,11 +611,12 @@ pub(crate) fn assemble_row(
 	path_binding: Option<&str>,
 	path_arr: &[Value],
 ) -> Value {
-	let mut obj: Object = match input_row {
-		Value::Object(o) => o.clone(),
+	let mut obj: Object = if let Value::Object(o) = input_row {
+		o.clone()
+	} else {
 		// The binding-row convention guarantees objects; an unexpected shape
 		// degrades to an empty row rather than panicking.
-		_ => Object::default(),
+		Object::default()
 	};
 	obj.insert(target_binding.to_string(), target_obj);
 	if let Some(group_name) = group_binding {

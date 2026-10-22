@@ -824,7 +824,15 @@ pub(crate) fn access_fans_out(cols: &[Idiom], access: &BTreeAccess) -> bool {
 			..
 		} => prefix.len(),
 		BTreeAccess::Equality(_) => 1,
-		_ => 0,
+		BTreeAccess::Range {
+			..
+		}
+		| BTreeAccess::FullText {
+			..
+		}
+		| BTreeAccess::Knn {
+			..
+		} => 0,
 	};
 	cols.iter().skip(pinned).any(|c| c.0.iter().any(|p| matches!(p, Part::All)))
 }
@@ -848,7 +856,15 @@ pub(crate) fn access_repeats_records(index: &IndexRef, access: &BTreeAccess) -> 
 			..
 		} => prefix.len(),
 		BTreeAccess::Equality(_) => 1,
-		_ => 0,
+		BTreeAccess::Range {
+			..
+		}
+		| BTreeAccess::FullText {
+			..
+		}
+		| BTreeAccess::Knn {
+			..
+		} => 0,
 	};
 	(pinned..index.cols.len()).any(|col| index.may_hold_array(col))
 }
@@ -884,19 +900,62 @@ pub(crate) fn access_misses_arrays(index: &IndexRef, access: &BTreeAccess) -> bo
 				BinaryOperator::MoreThanEqual => (Bound::Included(value), Bound::Unbounded),
 				BinaryOperator::LessThan => (Bound::Unbounded, Bound::Excluded(value)),
 				BinaryOperator::LessThanEqual => (Bound::Unbounded, Bound::Included(value)),
-				_ => return false,
+				BinaryOperator::Subtract
+				| BinaryOperator::Add
+				| BinaryOperator::Multiply
+				| BinaryOperator::Divide
+				| BinaryOperator::Remainder
+				| BinaryOperator::Power
+				| BinaryOperator::Equal
+				| BinaryOperator::ExactEqual
+				| BinaryOperator::NotEqual
+				| BinaryOperator::AllEqual
+				| BinaryOperator::AnyEqual
+				| BinaryOperator::Or
+				| BinaryOperator::And
+				| BinaryOperator::NullCoalescing
+				| BinaryOperator::TenaryCondition
+				| BinaryOperator::Contain
+				| BinaryOperator::NotContain
+				| BinaryOperator::ContainAll
+				| BinaryOperator::ContainAny
+				| BinaryOperator::ContainNone
+				| BinaryOperator::Inside
+				| BinaryOperator::NotInside
+				| BinaryOperator::AllInside
+				| BinaryOperator::AnyInside
+				| BinaryOperator::NoneInside
+				| BinaryOperator::Outside
+				| BinaryOperator::Intersects
+				| BinaryOperator::Range
+				| BinaryOperator::RangeInclusive
+				| BinaryOperator::RangeSkip
+				| BinaryOperator::RangeSkipInclusive
+				| BinaryOperator::Matches(_)
+				| BinaryOperator::NearestNeighbor(_) => return false,
 			};
 			if let Some((op, value)) = upper {
 				let value = value.witness();
-				match op {
-					BinaryOperator::LessThan => end = Bound::Excluded(value),
-					BinaryOperator::LessThanEqual => end = Bound::Included(value),
-					_ => return false,
+				if matches!(op, BinaryOperator::LessThan) {
+					end = Bound::Excluded(value);
+				} else if matches!(op, BinaryOperator::LessThanEqual) {
+					end = Bound::Included(value);
+				} else {
+					return false;
 				}
 			}
 			(prefix.len(), start, end)
 		}
-		_ => return false,
+		BTreeAccess::Equality(_)
+		| BTreeAccess::Compound {
+			..
+		}
+		| BTreeAccess::FullText {
+			..
+		}
+		| BTreeAccess::Knn {
+			..
+		} => return false,
 	};
 	if matches!((&start, &end), (Bound::Unbounded, Bound::Unbounded)) || !index.may_hold_array(col)
 	{
@@ -925,7 +984,12 @@ pub(crate) fn range_matches_comparison(index: &IndexDefinition, access: &BTreeAc
 			range,
 			upper,
 		} => !prefix.iter().any(inexact) && range.iter().chain(upper).all(|(_, v)| !inexact(v)),
-		_ => true,
+		BTreeAccess::FullText {
+			..
+		}
+		| BTreeAccess::Knn {
+			..
+		} => true,
 	}
 }
 
@@ -1179,25 +1243,33 @@ fn kind_at_admits_set(kind: &Kind, path: &[Part]) -> bool {
 		Kind::Either(kinds) => kinds.iter().any(|kind| kind_at_admits_set(kind, path)),
 		// A field read yields that field's value; `.*` leaves an object
 		// unchanged.
-		Kind::Literal(KindLiteral::Object(fields)) => match part {
-			Part::Field(name) => {
+		Kind::Literal(KindLiteral::Object(fields)) => {
+			if let Part::Field(name) = part {
 				fields.get(name.as_str()).is_some_and(|kind| kind_at_admits_set(kind, rest))
+			} else if let Part::All = part {
+				kind_at_admits_set(kind, rest)
+			} else {
+				true
 			}
-			Part::All => kind_at_admits_set(kind, rest),
-			_ => true,
-		},
+		}
 		// A position (`[0]`, `[$]`, a number) selects one element. Any other
 		// part read through a set is read on each element and the results are
 		// collected back into a set, so the value is a set.
-		Kind::Set(element, _) => match part {
-			Part::First | Part::Last => kind_at_admits_set(element, rest),
-			Part::Value(crate::expr::Expr::Literal(
-				crate::expr::Literal::Integer(_)
-				| crate::expr::Literal::Float(_)
-				| crate::expr::Literal::Decimal(_),
-			)) => kind_at_admits_set(element, rest),
-			_ => true,
-		},
+		Kind::Set(element, _) => {
+			if matches!(part, Part::First | Part::Last)
+				|| matches!(
+					part,
+					Part::Value(crate::expr::Expr::Literal(
+						crate::expr::Literal::Integer(_)
+							| crate::expr::Literal::Float(_)
+							| crate::expr::Literal::Decimal(_)
+					))
+				) {
+				kind_at_admits_set(element, rest)
+			} else {
+				true
+			}
+		}
 		// `.*` and a position (any index expression, `[0]`, `[0.0]` or a
 		// computed one) yield elements; a field read maps over them; a filter
 		// keeps the array.
@@ -1207,7 +1279,15 @@ fn kind_at_admits_set(kind: &Kind, path: &[Part]) -> bool {
 			}
 			Part::Field(_) => kind_at_admits_set(element, path),
 			Part::Where(_) => kind_at_admits_set(kind, rest),
-			_ => true,
+			Part::Flatten
+			| Part::Lookup(_)
+			| Part::Start(_)
+			| Part::Method(..)
+			| Part::Destructure(_)
+			| Part::Optional
+			| Part::Recurse(..)
+			| Part::Doc
+			| Part::RepeatRecurse => true,
 		},
 		// A tuple reads its declared element at a known position, and may
 		// yield any element at a position known only when the query runs.
@@ -1216,13 +1296,38 @@ fn kind_at_admits_set(kind: &Kind, path: &[Part]) -> bool {
 				kinds.get(position).is_some_and(|kind| kind_at_admits_set(kind, rest))
 			}
 			Some(None) => kinds.iter().any(|kind| kind_at_admits_set(kind, rest)),
-			None => match part {
-				Part::Field(_) => kinds.iter().any(|kind| kind_at_admits_set(kind, path)),
-				Part::Where(_) => kind_at_admits_set(kind, rest),
-				_ => true,
-			},
+			None => {
+				if let Part::Field(_) = part {
+					kinds.iter().any(|kind| kind_at_admits_set(kind, path))
+				} else if let Part::Where(_) = part {
+					kind_at_admits_set(kind, rest)
+				} else {
+					true
+				}
+			}
 		},
-		_ => false,
+		Kind::Any
+		| Kind::None
+		| Kind::Null
+		| Kind::Bool
+		| Kind::Bytes
+		| Kind::Datetime
+		| Kind::Decimal
+		| Kind::Duration
+		| Kind::Float
+		| Kind::Int
+		| Kind::Number
+		| Kind::Object
+		| Kind::String
+		| Kind::Uuid
+		| Kind::Regex
+		| Kind::Table(_)
+		| Kind::Record(_)
+		| Kind::Geometry(_)
+		| Kind::Function(..)
+		| Kind::Range
+		| Kind::Literal(_)
+		| Kind::File(_) => false,
 	}
 }
 
@@ -1237,7 +1342,17 @@ fn tuple_position(part: &Part, len: usize) -> Option<Option<usize>> {
 		Part::Last => Some(len.checked_sub(1)),
 		Part::Value(Expr::Literal(Literal::Integer(i))) => Some(usize::try_from(*i).ok()),
 		Part::All | Part::Value(_) => Some(None),
-		_ => None,
+		Part::Flatten
+		| Part::Field(_)
+		| Part::Where(_)
+		| Part::Lookup(_)
+		| Part::Start(_)
+		| Part::Method(..)
+		| Part::Destructure(_)
+		| Part::Optional
+		| Part::Recurse(..)
+		| Part::Doc
+		| Part::RepeatRecurse => None,
 	}
 }
 
@@ -1598,22 +1713,26 @@ fn links_along<'a>(
 	match kind {
 		// `.*` on a link fetches the record, so the path after it is read on
 		// the linked table; a link read by any other part reads that part there.
-		Kind::Record(tables) => match part {
-			Part::All if rest.is_empty() => {}
-			Part::All => links.push((tables.as_slice(), rest)),
-			_ => links.push((tables.as_slice(), path)),
-		},
+		Kind::Record(tables) => {
+			if let Part::All = part {
+				if !rest.is_empty() {
+					links.push((tables.as_slice(), rest));
+				}
+			} else {
+				links.push((tables.as_slice(), path));
+			}
+		}
 		Kind::Either(kinds) => kinds.iter().for_each(|kind| links_along(kind, path, links)),
 		// A field read reads that field; `.*` leaves an object unchanged.
-		Kind::Literal(KindLiteral::Object(fields)) => match part {
-			Part::Field(name) => {
+		Kind::Literal(KindLiteral::Object(fields)) => {
+			if let Part::Field(name) = part {
 				if let Some(kind) = fields.get(name.as_str()) {
 					links_along(kind, rest, links);
 				}
+			} else if let Part::All = part {
+				links_along(kind, rest, links);
 			}
-			Part::All => links_along(kind, rest, links),
-			_ => {}
-		},
+		}
 		// `.*` and a position (any index expression) yield elements; a field
 		// read maps over them; a filter keeps the collection.
 		Kind::Array(element, _) | Kind::Set(element, _) => match part {
@@ -1622,7 +1741,15 @@ fn links_along<'a>(
 			}
 			Part::Field(_) => links_along(element, path, links),
 			Part::Where(_) => links_along(kind, rest, links),
-			_ => {}
+			Part::Flatten
+			| Part::Lookup(_)
+			| Part::Start(_)
+			| Part::Method(..)
+			| Part::Destructure(_)
+			| Part::Optional
+			| Part::Recurse(..)
+			| Part::Doc
+			| Part::RepeatRecurse => {}
 		},
 		Kind::Literal(KindLiteral::Array(kinds)) => match tuple_position(part, kinds.len()) {
 			Some(Some(position)) => {
@@ -1631,13 +1758,35 @@ fn links_along<'a>(
 				}
 			}
 			Some(None) => kinds.iter().for_each(|kind| links_along(kind, rest, links)),
-			None => match part {
-				Part::Field(_) => kinds.iter().for_each(|kind| links_along(kind, path, links)),
-				Part::Where(_) => links_along(kind, rest, links),
-				_ => {}
-			},
+			None => {
+				if let Part::Field(_) = part {
+					kinds.iter().for_each(|kind| links_along(kind, path, links));
+				} else if let Part::Where(_) = part {
+					links_along(kind, rest, links);
+				}
+			}
 		},
-		_ => {}
+		Kind::Any
+		| Kind::None
+		| Kind::Null
+		| Kind::Bool
+		| Kind::Bytes
+		| Kind::Datetime
+		| Kind::Decimal
+		| Kind::Duration
+		| Kind::Float
+		| Kind::Int
+		| Kind::Number
+		| Kind::Object
+		| Kind::String
+		| Kind::Uuid
+		| Kind::Regex
+		| Kind::Table(_)
+		| Kind::Geometry(_)
+		| Kind::Function(..)
+		| Kind::Range
+		| Kind::Literal(_)
+		| Kind::File(_) => {}
 	}
 }
 
@@ -1648,10 +1797,12 @@ fn strip_name<'a>(name: &[Part], path: &'a [Part]) -> Option<&'a [Part]> {
 	let mut at = 0;
 	let mut next = name.next();
 	while let Some(part) = next {
-		match path.get(at)? {
-			Part::Optional => {}
-			p if p == part => next = name.next(),
-			_ => return None,
+		let p = path.get(at)?;
+		if matches!(p, Part::Optional) {
+		} else if p == part {
+			next = name.next();
+		} else {
+			return None;
 		}
 		at += 1;
 	}
@@ -1705,10 +1856,12 @@ fn view_source_path(
 			None => selector.expr.to_idiom(),
 		};
 		let rest = strip_name(&name.0, path)?;
-		Some(match &selector.expr {
-			Expr::Idiom(source) => Some(source.0.iter().chain(rest).cloned().collect()),
-			_ => None,
-		})
+		let target = if let Expr::Idiom(source) = &selector.expr {
+			Some(source.0.iter().chain(rest).cloned().collect())
+		} else {
+			None
+		};
+		Some(target)
 	});
 	match named {
 		Some(traced) => Some(traced),
@@ -1744,7 +1897,17 @@ fn declared_kind<'a>(col: &[Part], fields: &'a [FieldDefinition]) -> Option<&'a 
 					tuple_element(kind, |_| usize::try_from(*i).ok())
 				}
 				Part::All => collection_element(kind),
-				_ => None,
+				Part::Flatten
+				| Part::Where(_)
+				| Part::Lookup(_)
+				| Part::Value(_)
+				| Part::Start(_)
+				| Part::Method(..)
+				| Part::Destructure(_)
+				| Part::Optional
+				| Part::Recurse(..)
+				| Part::Doc
+				| Part::RepeatRecurse => None,
 			});
 		}
 		if produces_value(fd) {
@@ -1758,16 +1921,16 @@ fn declared_kind<'a>(col: &[Part], fields: &'a [FieldDefinition]) -> Option<&'a 
 /// `.*` reads. As for [`object_literal_field`], only one collection
 /// alternative is read.
 fn collection_element(kind: &Kind) -> Option<&Kind> {
-	match kind {
-		Kind::Array(element, _) | Kind::Set(element, _) => Some(element),
-		Kind::Either(kinds) => {
-			let mut collections = kinds.iter().filter(|k| !matches!(k, Kind::None | Kind::Null));
-			match (collections.next(), collections.next()) {
-				(Some(collection), None) => collection_element(collection),
-				_ => None,
-			}
+	if let Kind::Array(element, _) | Kind::Set(element, _) = kind {
+		Some(element)
+	} else if let Kind::Either(kinds) = kind {
+		let mut collections = kinds.iter().filter(|k| !matches!(k, Kind::None | Kind::Null));
+		match (collections.next(), collections.next()) {
+			(Some(collection), None) => collection_element(collection),
+			_ => None,
 		}
-		_ => None,
+	} else {
+		None
 	}
 }
 
@@ -1775,16 +1938,16 @@ fn collection_element(kind: &Kind) -> Option<&Kind> {
 /// `position` picks out of its length. As for [`object_literal_field`], only
 /// the tuple's declaration is returned.
 fn tuple_element(kind: &Kind, position: impl Fn(usize) -> Option<usize>) -> Option<&Kind> {
-	match kind {
-		Kind::Literal(KindLiteral::Array(kinds)) => kinds.get(position(kinds.len())?),
-		Kind::Either(kinds) => {
-			let mut tuples = kinds.iter().filter(|k| !matches!(k, Kind::None | Kind::Null));
-			match (tuples.next(), tuples.next()) {
-				(Some(tuple), None) => tuple_element(tuple, position),
-				_ => None,
-			}
+	if let Kind::Literal(KindLiteral::Array(kinds)) = kind {
+		kinds.get(position(kinds.len())?)
+	} else if let Kind::Either(kinds) = kind {
+		let mut tuples = kinds.iter().filter(|k| !matches!(k, Kind::None | Kind::Null));
+		match (tuples.next(), tuples.next()) {
+			(Some(tuple), None) => tuple_element(tuple, position),
+			_ => None,
 		}
-		_ => None,
+	} else {
+		None
 	}
 }
 
@@ -1793,16 +1956,16 @@ fn tuple_element(kind: &Kind, position: impl Fn(usize) -> Option<usize>) -> Opti
 /// field's own kind need not admit, so only the literal's declaration is
 /// returned; any other alternative leaves the field's kind unknown.
 fn object_literal_field<'a>(kind: &'a Kind, name: &str) -> Option<&'a Kind> {
-	match kind {
-		Kind::Literal(KindLiteral::Object(fields)) => fields.get(name),
-		Kind::Either(kinds) => {
-			let mut objects = kinds.iter().filter(|k| !matches!(k, Kind::None | Kind::Null));
-			match (objects.next(), objects.next()) {
-				(Some(object), None) => object_literal_field(object, name),
-				_ => None,
-			}
+	if let Kind::Literal(KindLiteral::Object(fields)) = kind {
+		fields.get(name)
+	} else if let Kind::Either(kinds) = kind {
+		let mut objects = kinds.iter().filter(|k| !matches!(k, Kind::None | Kind::Null));
+		match (objects.next(), objects.next()) {
+			(Some(object), None) => object_literal_field(object, name),
+			_ => None,
 		}
-		_ => None,
+	} else {
+		None
 	}
 }
 
@@ -1812,11 +1975,14 @@ fn kind_holds_only_arrays(kind: &Kind) -> bool {
 	/// `None` when some value of `kind` is neither an array, `NONE` nor
 	/// `NULL`; otherwise whether some value is an array.
 	fn arrays(kind: &Kind) -> Option<bool> {
-		match kind {
-			Kind::Array(..) | Kind::Literal(KindLiteral::Array(_)) => Some(true),
-			Kind::None | Kind::Null => Some(false),
-			Kind::Either(kinds) => kinds.iter().try_fold(false, |seen, k| Some(arrays(k)? || seen)),
-			_ => None,
+		if matches!(kind, Kind::Array(..) | Kind::Literal(KindLiteral::Array(_))) {
+			Some(true)
+		} else if matches!(kind, Kind::None | Kind::Null) {
+			Some(false)
+		} else if let Kind::Either(kinds) = kind {
+			kinds.iter().try_fold(false, |seen, k| Some(arrays(k)? || seen))
+		} else {
+			None
 		}
 	}
 	arrays(kind) == Some(true)
@@ -1865,7 +2031,15 @@ pub(crate) fn scan_ordering(
 			..
 		} => prefix.len(),
 		BTreeAccess::Equality(_) => ix_def.cols.len(),
-		_ => 0,
+		BTreeAccess::Range {
+			..
+		}
+		| BTreeAccess::FullText {
+			..
+		}
+		| BTreeAccess::Knn {
+			..
+		} => 0,
 	};
 	let free = ix_def.cols.iter().enumerate().skip(pinned);
 	let mut ordering: Vec<SortProperty> = free

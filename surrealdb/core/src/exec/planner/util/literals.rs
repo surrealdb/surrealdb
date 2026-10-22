@@ -267,13 +267,15 @@ pub(crate) fn try_literal_to_value(expr: &LogicalExpr) -> Option<Value> {
 		} => {
 			let start = try_literal_to_value(left)?;
 			let end = try_literal_to_value(right)?;
-			let start = match op {
-				BinaryOperator::Range | BinaryOperator::RangeInclusive => Bound::Included(start),
-				_ => Bound::Excluded(start),
+			let start = if let BinaryOperator::Range | BinaryOperator::RangeInclusive = op {
+				Bound::Included(start)
+			} else {
+				Bound::Excluded(start)
 			};
-			let end = match op {
-				BinaryOperator::Range | BinaryOperator::RangeSkip => Bound::Excluded(end),
-				_ => Bound::Included(end),
+			let end = if let BinaryOperator::Range | BinaryOperator::RangeSkip = op {
+				Bound::Excluded(end)
+			} else {
+				Bound::Included(end)
 			};
 			Some(Value::Range(Box::new(Range {
 				start,
@@ -408,10 +410,12 @@ pub(crate) fn try_clock_bound(expr: &LogicalExpr) -> Option<ClockBound> {
 	else {
 		return None;
 	};
-	let sign = match op {
-		BinaryOperator::Add => ClockSign::Plus,
-		BinaryOperator::Subtract => ClockSign::Minus,
-		_ => return None,
+	let sign = if let BinaryOperator::Add = op {
+		ClockSign::Plus
+	} else if let BinaryOperator::Subtract = op {
+		ClockSign::Minus
+	} else {
+		return None;
 	};
 	if !is_now(left) {
 		return None;
@@ -736,7 +740,20 @@ fn field_of_literal(value: &Value, name: &str) -> Option<Value> {
 			.map(|v| field_of_literal(v, name))
 			.collect::<Option<Vec<_>>>()
 			.map(|v| Value::Set(v.into_iter().collect())),
-		_ => Some(Value::None),
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => Some(Value::None),
 	}
 }
 
@@ -766,17 +783,84 @@ pub(crate) fn literal_step_value(expr: &LogicalExpr) -> Option<Value> {
 			let index = try_literal_to_value(index)?;
 			crate::exec::vm::access::index::evaluate_index(&base, &index).ok()
 		}
-		LogicalExpr::First(base) => Some(match base_of(base)? {
-			Value::Array(arr) => arr.first().cloned().unwrap_or(Value::None),
-			Value::Set(set) => set.first().cloned().unwrap_or(Value::None),
-			_ => Value::None,
-		}),
-		LogicalExpr::Last(base) => Some(match base_of(base)? {
-			Value::Array(arr) => arr.last().cloned().unwrap_or(Value::None),
-			Value::Set(set) => set.last().cloned().unwrap_or(Value::None),
-			_ => Value::None,
-		}),
-		_ => None,
+		LogicalExpr::First(base) => {
+			let base_val = base_of(base)?;
+			Some(if let Value::Array(arr) = &base_val {
+				arr.first().cloned().unwrap_or(Value::None)
+			} else if let Value::Set(set) = &base_val {
+				set.first().cloned().unwrap_or(Value::None)
+			} else {
+				Value::None
+			})
+		}
+		LogicalExpr::Last(base) => {
+			let base_val = base_of(base)?;
+			Some(if let Value::Array(arr) = &base_val {
+				arr.last().cloned().unwrap_or(Value::None)
+			} else if let Value::Set(set) = &base_val {
+				set.last().cloned().unwrap_or(Value::None)
+			} else {
+				Value::None
+			})
+		}
+		LogicalExpr::Literal(_)
+		| LogicalExpr::Array(_)
+		| LogicalExpr::Set(_)
+		| LogicalExpr::Object(_)
+		| LogicalExpr::RecordId(_)
+		| LogicalExpr::Param(_)
+		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
+		| LogicalExpr::Constant(_)
+		| LogicalExpr::Field(_)
+		| LogicalExpr::Doc
+		| LogicalExpr::Current
+		| LogicalExpr::Each(_)
+		| LogicalExpr::Flatten {
+			..
+		}
+		| LogicalExpr::Filter {
+			..
+		}
+		| LogicalExpr::Method {
+			..
+		}
+		| LogicalExpr::Destructure {
+			..
+		}
+		| LogicalExpr::Optional {
+			..
+		}
+		| LogicalExpr::Lookup {
+			..
+		}
+		| LogicalExpr::Recurse(_)
+		| LogicalExpr::RepeatRecurse(_)
+		| LogicalExpr::Broadcast {
+			..
+		}
+		| LogicalExpr::SetField {
+			..
+		}
+		| LogicalExpr::Prefix {
+			..
+		}
+		| LogicalExpr::Postfix {
+			..
+		}
+		| LogicalExpr::Invoke {
+			..
+		}
+		| LogicalExpr::Binary {
+			..
+		}
+		| LogicalExpr::Call(_)
+		| LogicalExpr::Closure(_)
+		| LogicalExpr::If(_)
+		| LogicalExpr::Throw(_)
+		| LogicalExpr::Break
+		| LogicalExpr::Continue
+		| LogicalExpr::Subquery(_) => None,
 	}
 }
 
@@ -1003,9 +1087,12 @@ fn try_short_circuit_bool(
 	right: &LogicalExpr,
 	restricted_fields: Option<&RestrictedFields>,
 ) -> Option<LogicalExpr> {
-	let as_bool = |e: &LogicalExpr| match e {
-		LogicalExpr::Literal(LogicalLiteral::Bool(b)) => Some(*b),
-		_ => None,
+	let as_bool = |e: &LogicalExpr| {
+		if let LogicalExpr::Literal(LogicalLiteral::Bool(b)) = e {
+			Some(*b)
+		} else {
+			None
+		}
 	};
 	let bool_lit = |b: bool| LogicalExpr::Literal(LogicalLiteral::Bool(b));
 	let l_bool = as_bool(left);
@@ -1041,13 +1128,15 @@ fn try_short_circuit_bool(
 fn try_eval_binary(op: &BinaryOperator, left: Value, right: Value) -> Option<Value> {
 	use crate::val::{TryAdd, TrySub};
 
-	match op {
-		BinaryOperator::Add => left.try_add(right).ok(),
-		BinaryOperator::Subtract => left.try_sub(right).ok(),
-		// Folding is limited to add/sub to avoid unexpected behaviour with
-		// division-by-zero, overflow, etc. These cover the common
-		// datetime ± duration patterns.
-		_ => None,
+	// Folding is limited to add/sub to avoid unexpected behaviour with
+	// division-by-zero, overflow, etc. These cover the common
+	// datetime ± duration patterns.
+	if let BinaryOperator::Add = op {
+		left.try_add(right).ok()
+	} else if let BinaryOperator::Subtract = op {
+		left.try_sub(right).ok()
+	} else {
+		None
 	}
 }
 

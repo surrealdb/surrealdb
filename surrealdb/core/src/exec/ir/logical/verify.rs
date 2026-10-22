@@ -173,16 +173,19 @@ pub(crate) enum TopRole {
 	Other,
 }
 
-#[allow(clippy::wildcard_enum_match_arm)]
 fn top_role(log: &LogOp) -> TopRole {
-	match log {
-		LogOp::Txn {
-			..
-		} => TopRole::Txn,
-		LogOp::Stmt {
-			..
-		} => TopRole::Stmt,
-		_ => TopRole::Other,
+	if let LogOp::Txn {
+		..
+	} = log
+	{
+		TopRole::Txn
+	} else if let LogOp::Stmt {
+		..
+	} = log
+	{
+		TopRole::Stmt
+	} else {
+		TopRole::Other
 	}
 }
 
@@ -382,19 +385,23 @@ fn has_position(log: &LogOp) -> bool {
 /// that purges a deleted record hosts the `THEN` expressions of the references it repairs. An
 /// assignment or removal hosts the filters of its place. A live query holds the filter and the
 /// fetch paths of its subscription after its projection, each when the statement has it.
-#[allow(clippy::wildcard_enum_match_arm)]
 pub(crate) fn tail_kinds(log: &LogOp) -> &'static [RegionKind] {
-	match log {
-		LogOp::WriteStage {
-			stage,
-			..
-		} => stage_tail(*stage),
-		LogOp::Assign(..)
-		| LogOp::Unset {
-			..
-		} => PLACE_TAIL,
-		LogOp::Live(..) => LIVE_TAIL,
-		_ => &[],
+	if let LogOp::WriteStage {
+		stage,
+		..
+	} = log
+	{
+		stage_tail(*stage)
+	} else if let LogOp::Assign(..)
+	| LogOp::Unset {
+		..
+	} = log
+	{
+		PLACE_TAIL
+	} else if let LogOp::Live(..) = log {
+		LIVE_TAIL
+	} else {
+		&[]
 	}
 }
 

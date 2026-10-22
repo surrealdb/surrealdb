@@ -215,16 +215,19 @@ fn own_rules(ir: &Ir, op: OpId, data: &OpData, kind: &PhysOp) -> Result<(), Veri
 }
 
 /// The part `kind` plays among the top-level regions of a request, as its logical twin does.
-#[allow(clippy::wildcard_enum_match_arm)]
 fn top_role(kind: &PhysOp) -> TopRole {
-	match kind {
-		PhysOp::Txn {
-			..
-		} => TopRole::Txn,
-		PhysOp::Stmt {
-			..
-		} => TopRole::Stmt,
-		_ => TopRole::Other,
+	if let PhysOp::Txn {
+		..
+	} = kind
+	{
+		TopRole::Txn
+	} else if let PhysOp::Stmt {
+		..
+	} = kind
+	{
+		TopRole::Stmt
+	} else {
+		TopRole::Other
 	}
 }
 

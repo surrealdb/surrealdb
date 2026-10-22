@@ -813,14 +813,13 @@ pub(super) fn bind_fold(cx: &mut BindCx<'_>, statement: &LogicalMatch) -> Result
 		None => return Err(invariant("a MATCH fold that waits")),
 	};
 	// A plan that does not end in a projection ends in one of `*`.
-	let root = match *root {
-		FoldNode::Project {
-			..
-		} => root,
-		_ => Arc::new(FoldNode::Project {
+	let root = if matches!(*root, FoldNode::Project { .. }) {
+		root
+	} else {
+		Arc::new(FoldNode::Project {
 			input: root,
 			columns: LogicalFields::all(),
-		}),
+		})
 	};
 	let op = cx.emit(
 		OpKind::Logical(LogOp::Match {
@@ -972,7 +971,7 @@ mod tests {
 			.into_iter()
 			.filter_map(|op| match &ir.op(op).expect("the op exists").kind {
 				OpKind::Logical(LogOp::BindStep(shape)) => Some((**shape).clone()),
-				_ => None,
+				OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => None,
 			})
 			.collect()
 	}
@@ -1160,7 +1159,7 @@ mod tests {
 			.into_iter()
 			.filter_map(|op| match &ir.op(op).expect("the op exists").kind {
 				OpKind::Logical(LogOp::Write(attrs)) => Some(attrs.statement.is_some()),
-				_ => None,
+				OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => None,
 			})
 			.collect()
 	}

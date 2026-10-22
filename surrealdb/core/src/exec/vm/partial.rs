@@ -471,7 +471,9 @@ impl Partial {
 			let adopted = Run::adopt(memory, name.clone(), spec.clone(), records).and_then(|run| {
 				runs.push(run).map_err(|flow| match flow {
 					ControlFlow::Err(e) => e,
-					_ => anyhow::anyhow!("Internal error: adopted runs of two breakers"),
+					ControlFlow::Break | ControlFlow::Continue | ControlFlow::Return(_) => {
+						anyhow::anyhow!("Internal error: adopted runs of two breakers")
+					}
 				})
 			});
 			if let Err(error) = adopted {

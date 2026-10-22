@@ -212,12 +212,16 @@ pub(crate) fn plan_key_range(
 	let mut eq: Vec<KeyEq> = Vec::new();
 	let mut ranges = 1usize;
 	for position in 0..key.arity() as u32 {
-		let mut ones = constraints.iter().filter_map(|c| match c {
-			Constraint::Eq {
+		let mut ones = constraints.iter().filter_map(|c| {
+			if let Constraint::Eq {
 				position: p,
 				bound,
-			} if *p == position => Some(bound),
-			_ => None,
+			} = c
+			{
+				(*p == position).then_some(bound)
+			} else {
+				None
+			}
 		});
 		let first = ones.next();
 		let one = match first {
@@ -228,12 +232,17 @@ pub(crate) fn plan_key_range(
 			eq.push(KeyEq::One(bound.clone()));
 			continue;
 		}
-		let within_cap = constraints.iter().find_map(|c| match c {
-			Constraint::In {
+		let within_cap = constraints.iter().find_map(|c| {
+			if let Constraint::In {
 				position: p,
 				values,
-			} if *p == position && ranges.saturating_mul(values.len()) <= MAX_KEY_RANGES => Some(values),
-			_ => None,
+			} = c
+			{
+				(*p == position && ranges.saturating_mul(values.len()) <= MAX_KEY_RANGES)
+					.then_some(values)
+			} else {
+				None
+			}
 		});
 		match within_cap {
 			Some(values) => {
@@ -249,9 +258,10 @@ pub(crate) fn plan_key_range(
 	let range = (k < key.arity() as u32 && key.order(k) != ComponentOrder::EqualityOnly)
 		.then(|| range_on(&constraints, k))
 		.flatten();
-	let range = match key.origin {
-		KeyOrigin::AggregateView => range.and_then(view_range),
-		_ => range,
+	let range = if key.origin == KeyOrigin::AggregateView {
+		range.and_then(view_range)
+	} else {
+		range
 	};
 
 	// Step 4: applicability.
@@ -426,17 +436,17 @@ fn delivered_order(
 	};
 	let mut delivers = DeliveredKeyOrder::Exact;
 	for (position, _) in &free {
-		match key.order(*position) {
-			ComponentOrder::Exact => {}
-			ComponentOrder::CoarseSecond => {
-				delivers = DeliveredKeyOrder::Coarse {
-					position: *position,
-				};
-				break;
-			}
+		let order = key.order(*position);
+		if order == ComponentOrder::Exact {
+		} else if order == ComponentOrder::CoarseSecond {
+			delivers = DeliveredKeyOrder::Coarse {
+				position: *position,
+			};
+			break;
+		} else {
 			// A record orders by nothing a key range claims; an unknown or
 			// newer order is not reasoned about.
-			_ => return undelivered(default),
+			return undelivered(default);
 		}
 	}
 	(direction, delivers, positions)
@@ -448,16 +458,28 @@ fn delivered_order(
 /// including a path beneath a component (`city.x`, `id[0].x`).
 pub(crate) fn component_position(key: &KeyStructure, expr: &LogicalExpr) -> Option<u32> {
 	let is_id = |e: &LogicalExpr| matches!(e, LogicalExpr::Field(name) if name.as_str() == "id");
-	let position = match expr {
-		LogicalExpr::Index {
-			base,
-			index,
-		} if is_id(base) => match index.as_ref() {
-			LogicalExpr::Literal(LogicalLiteral::Integer(i)) => u32::try_from(*i).ok(),
-			_ => None,
-		},
-		LogicalExpr::First(base) if is_id(base) => Some(0),
-		_ => None,
+	let position = if let LogicalExpr::Index {
+		base,
+		index,
+	} = expr
+	{
+		if is_id(base) {
+			if let LogicalExpr::Literal(LogicalLiteral::Integer(i)) = index.as_ref() {
+				u32::try_from(*i).ok()
+			} else {
+				None
+			}
+		} else {
+			None
+		}
+	} else if let LogicalExpr::First(base) = expr {
+		if is_id(base) {
+			Some(0)
+		} else {
+			None
+		}
+	} else {
+		None
 	};
 	if let Some(position) = position {
 		return ((position as usize) < key.arity()).then_some(position);
@@ -584,7 +606,35 @@ impl Classifier<'_> {
 					});
 				}
 			}
-			_ => {}
+			BinaryOperator::Subtract
+			| BinaryOperator::Add
+			| BinaryOperator::Multiply
+			| BinaryOperator::Divide
+			| BinaryOperator::Remainder
+			| BinaryOperator::Power
+			| BinaryOperator::NotEqual
+			| BinaryOperator::AllEqual
+			| BinaryOperator::AnyEqual
+			| BinaryOperator::And
+			| BinaryOperator::NullCoalescing
+			| BinaryOperator::TenaryCondition
+			| BinaryOperator::Contain
+			| BinaryOperator::NotContain
+			| BinaryOperator::ContainAll
+			| BinaryOperator::ContainAny
+			| BinaryOperator::ContainNone
+			| BinaryOperator::NotInside
+			| BinaryOperator::AllInside
+			| BinaryOperator::AnyInside
+			| BinaryOperator::NoneInside
+			| BinaryOperator::Outside
+			| BinaryOperator::Intersects
+			| BinaryOperator::Range
+			| BinaryOperator::RangeInclusive
+			| BinaryOperator::RangeSkip
+			| BinaryOperator::RangeSkipInclusive
+			| BinaryOperator::Matches(_)
+			| BinaryOperator::NearestNeighbor(_) => {}
 		}
 	}
 
@@ -744,10 +794,13 @@ fn literal_bound(
 		// A component of unknown type is pushed only for a view's key, by the
 		// literal's own kind; from an `id` field the rule is declined before a
 		// bound is read.
-		ComponentKind::Unknown => match origin {
-			KeyOrigin::AggregateView => view_literal_bound(value, using, inclusive),
-			_ => None,
-		},
+		ComponentKind::Unknown => {
+			if origin == KeyOrigin::AggregateView {
+				view_literal_bound(value, using, inclusive)
+			} else {
+				None
+			}
+		}
 		ComponentKind::String
 		| ComponentKind::Datetime
 		| ComponentKind::Uuid
@@ -805,16 +858,16 @@ fn view_literal_bound(value: Value, using: Use, inclusive: bool) -> Option<(Valu
 	if matches!(value, Value::String(_) | Value::Uuid(_) | Value::Duration(_) | Value::Bool(_)) {
 		return Some((value, inclusive));
 	}
-	match &value {
-		Value::Datetime(datetime) => view_datetime_bound(datetime, using, inclusive),
-		Value::RecordId(rid) => {
-			let scalar = matches!(
-				rid.key,
-				RecordIdKey::String(_) | RecordIdKey::Number(_) | RecordIdKey::Uuid(_)
-			);
-			(using == Use::Equality && scalar).then_some((value, inclusive))
-		}
-		_ => None,
+	if let Value::Datetime(datetime) = &value {
+		view_datetime_bound(datetime, using, inclusive)
+	} else if let Value::RecordId(rid) = &value {
+		let scalar = matches!(
+			rid.key,
+			RecordIdKey::String(_) | RecordIdKey::Number(_) | RecordIdKey::Uuid(_)
+		);
+		(using == Use::Equality && scalar).then_some((value, inclusive))
+	} else {
+		None
 	}
 }
 
@@ -878,15 +931,15 @@ fn push_distinct(values: &mut Vec<KeyBound>, bound: KeyBound) {
 
 /// The branches of a tree of `OR`s.
 fn flatten_or<'a>(expr: &'a LogicalExpr, out: &mut Vec<&'a LogicalExpr>) {
-	match expr {
-		LogicalExpr::Binary {
-			left,
-			op: BinaryOperator::Or,
-			right,
-		} => {
-			flatten_or(left, out);
-			flatten_or(right, out);
-		}
-		other => out.push(other),
+	if let LogicalExpr::Binary {
+		left,
+		op: BinaryOperator::Or,
+		right,
+	} = expr
+	{
+		flatten_or(left, out);
+		flatten_or(right, out);
+	} else {
+		out.push(expr);
 	}
 }

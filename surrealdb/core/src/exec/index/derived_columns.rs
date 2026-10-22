@@ -148,7 +148,7 @@ fn widen_bound(bound: &Bound<BoundOperand>, side: Side) -> Option<Bound<BoundOpe
 		Bound::Included(BoundOperand::Literal(Value::Datetime(datetime)))
 		| Bound::Excluded(BoundOperand::Literal(Value::Datetime(datetime))) => widened(datetime, side)
 			.map(|datetime| Bound::Included(BoundOperand::Literal(Value::Datetime(datetime)))),
-		other => Some(other.clone()),
+		other @ (Bound::Included(_) | Bound::Excluded(_) | Bound::Unbounded) => Some(other.clone()),
 	}
 }
 
@@ -205,7 +205,39 @@ pub(crate) fn widen_access(index: &IndexRef, access: &mut BTreeAccess) -> bool {
 					BinaryOperator::LessThan | BinaryOperator::LessThanEqual => {
 						(Side::Upper, BinaryOperator::LessThanEqual)
 					}
-					_ => continue,
+					BinaryOperator::Subtract
+					| BinaryOperator::Add
+					| BinaryOperator::Multiply
+					| BinaryOperator::Divide
+					| BinaryOperator::Remainder
+					| BinaryOperator::Power
+					| BinaryOperator::Equal
+					| BinaryOperator::ExactEqual
+					| BinaryOperator::NotEqual
+					| BinaryOperator::AllEqual
+					| BinaryOperator::AnyEqual
+					| BinaryOperator::Or
+					| BinaryOperator::And
+					| BinaryOperator::NullCoalescing
+					| BinaryOperator::TenaryCondition
+					| BinaryOperator::Contain
+					| BinaryOperator::NotContain
+					| BinaryOperator::ContainAll
+					| BinaryOperator::ContainAny
+					| BinaryOperator::ContainNone
+					| BinaryOperator::Inside
+					| BinaryOperator::NotInside
+					| BinaryOperator::AllInside
+					| BinaryOperator::AnyInside
+					| BinaryOperator::NoneInside
+					| BinaryOperator::Outside
+					| BinaryOperator::Intersects
+					| BinaryOperator::Range
+					| BinaryOperator::RangeInclusive
+					| BinaryOperator::RangeSkip
+					| BinaryOperator::RangeSkipInclusive
+					| BinaryOperator::Matches(_)
+					| BinaryOperator::NearestNeighbor(_) => continue,
 				};
 				let Some(datetime) = widened(datetime, side) else {
 					return false;
@@ -218,7 +250,19 @@ pub(crate) fn widen_access(index: &IndexRef, access: &mut BTreeAccess) -> bool {
 				}
 			}
 		}
-		_ => {}
+		BTreeAccess::Equality(_)
+		| BTreeAccess::Range {
+			..
+		}
+		| BTreeAccess::Compound {
+			..
+		}
+		| BTreeAccess::FullText {
+			..
+		}
+		| BTreeAccess::Knn {
+			..
+		} => {}
 	}
 	true
 }
@@ -245,7 +289,13 @@ pub(crate) fn range_is_widened(index: &IndexRef, access: &BTreeAccess) -> bool {
 			index.orders_coarsely(prefix.len())
 				&& range.iter().chain(upper).any(|(_, operand)| is_datetime(operand))
 		}
-		_ => false,
+		BTreeAccess::Equality(_)
+		| BTreeAccess::FullText {
+			..
+		}
+		| BTreeAccess::Knn {
+			..
+		} => false,
 	}
 }
 

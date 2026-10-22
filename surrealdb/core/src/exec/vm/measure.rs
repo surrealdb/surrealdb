@@ -141,15 +141,19 @@ impl MeasureSettled {
 	/// The outcome of a call `function` answers that the capability check allowed, whose query
 	/// argument is `query`.
 	pub(super) fn allowed(function: &'static dyn ScalarFunction, query: Value) -> Self {
-		let numbers = match &query {
-			Value::Array(array) => array
+		let numbers = if let Value::Array(array) = &query {
+			array
 				.iter()
-				.map(|value| match value {
-					Value::Number(number) => Some(*number),
-					_ => None,
+				.map(|value| {
+					if let Value::Number(number) = value {
+						Some(*number)
+					} else {
+						None
+					}
 				})
-				.collect::<Option<Box<[Number]>>>(),
-			_ => None,
+				.collect::<Option<Box<[Number]>>>()
+		} else {
+			None
 		};
 		Self::Allowed {
 			function,

@@ -386,10 +386,13 @@ pub(crate) fn checks_of(
 ) -> DdlChecks {
 	let _ = catalog;
 	match statement {
-		LogicalDdlStatement::Define(define) => match define.as_ref() {
-			DefineStatement::Table(stmt) => define_table_checks(stmt),
-			_ => DdlChecks::None,
-		},
+		LogicalDdlStatement::Define(define) => {
+			if let DefineStatement::Table(stmt) = define.as_ref() {
+				define_table_checks(stmt)
+			} else {
+				DdlChecks::None
+			}
+		}
 		LogicalDdlStatement::Remove(_)
 		| LogicalDdlStatement::Alter(_)
 		| LogicalDdlStatement::Rebuild(_) => DdlChecks::None,
@@ -656,12 +659,13 @@ impl<'e> Slots<'e> {
 				let mut parts = Vec::with_capacity(idiom.0.len());
 				let mut subscripts = Vec::new();
 				for part in &idiom.0 {
-					match part {
-						Part::Value(subscript) if !matches!(subscript, Expr::Literal(_)) => {
-							parts.push(Part::Value(field_hole()));
-							subscripts.push(subscript);
-						}
-						other => parts.push(other.clone()),
+					if let Part::Value(subscript) = part
+						&& !matches!(subscript, Expr::Literal(_))
+					{
+						parts.push(Part::Value(field_hole()));
+						subscripts.push(subscript);
+					} else {
+						parts.push(part.clone());
 					}
 				}
 				let text = crate::expr::Idiom(parts).to_raw_string();
@@ -772,9 +776,10 @@ impl<'e> Slots<'e> {
 /// The name `expr` gives by being written, an identifier or a string literal, or `None` when it
 /// gives one only by being evaluated.
 pub(super) fn written_text(expr: &Expr) -> Option<String> {
-	match expr {
-		Expr::Literal(Literal::String(text)) => Some(text.as_str().to_owned()),
-		expr => crate::ddl::scalar::written_name(expr),
+	if let Expr::Literal(Literal::String(text)) = expr {
+		Some(text.as_str().to_owned())
+	} else {
+		crate::ddl::scalar::written_name(expr)
 	}
 }
 
@@ -784,34 +789,96 @@ pub(super) fn written_comment(expr: &Expr) -> Option<Value> {
 	match expr {
 		Expr::Literal(Literal::None) => Some(Value::None),
 		Expr::Literal(Literal::String(text)) => Some(Value::String(text.clone())),
-		_ => None,
+		Expr::Literal(
+			Literal::Null
+			| Literal::UnboundedRange
+			| Literal::Bool(_)
+			| Literal::Float(_)
+			| Literal::Integer(_)
+			| Literal::Decimal(_)
+			| Literal::Bytes(_)
+			| Literal::Regex(_)
+			| Literal::RecordId(_)
+			| Literal::Array(_)
+			| Literal::Set(_)
+			| Literal::Object(_)
+			| Literal::Duration(_)
+			| Literal::Datetime(_)
+			| Literal::Uuid(_)
+			| Literal::Geometry(_)
+			| Literal::File(_),
+		)
+		| Expr::Param(_)
+		| Expr::Idiom(_)
+		| Expr::Table(_)
+		| Expr::Mock(_)
+		| Expr::Block(_)
+		| Expr::Constant(_)
+		| Expr::Prefix {
+			..
+		}
+		| Expr::Postfix {
+			..
+		}
+		| Expr::Binary {
+			..
+		}
+		| Expr::FunctionCall(_)
+		| Expr::Closure(_)
+		| Expr::Break
+		| Expr::Continue
+		| Expr::Return(_)
+		| Expr::Throw(_)
+		| Expr::IfElse(_)
+		| Expr::Select(_)
+		| Expr::Create(_)
+		| Expr::Update(_)
+		| Expr::Upsert(_)
+		| Expr::Delete(_)
+		| Expr::Relate(_)
+		| Expr::Insert(_)
+		| Expr::Define(_)
+		| Expr::Remove(_)
+		| Expr::Rebuild(_)
+		| Expr::Alter(_)
+		| Expr::Info(_)
+		| Expr::Foreach(_)
+		| Expr::Let(_)
+		| Expr::Sleep(_)
+		| Expr::Explain {
+			..
+		} => None,
 	}
 }
 
 /// The comment a definition is formed with: the written string, or none where the comment is
 /// evaluated or `NONE`.
 pub(super) fn comment_text(expr: &Expr) -> Option<String> {
-	match written_comment(expr) {
-		Some(Value::String(text)) => Some(text.as_str().to_owned()),
-		_ => None,
+	if let Some(Value::String(text)) = written_comment(expr) {
+		Some(text.as_str().to_owned())
+	} else {
+		None
 	}
 }
 
 /// A duration clause written as a duration (`Some(Some(_))`) or as `NONE` (`Some(None)`); `None`
 /// for one that is evaluated.
 pub(super) fn literal_duration(expr: &Expr) -> Option<Option<Duration>> {
-	match expr {
-		Expr::Literal(Literal::None) => Some(None),
-		Expr::Literal(Literal::Duration(duration)) => Some(Some(duration.0)),
-		_ => None,
+	if let Expr::Literal(Literal::None) = expr {
+		Some(None)
+	} else if let Expr::Literal(Literal::Duration(duration)) = expr {
+		Some(Some(duration.0))
+	} else {
+		None
 	}
 }
 
 /// A clause's value when it is written as a literal; `None` when it is evaluated.
 pub(super) fn literal_value(expr: &Expr) -> Option<Value> {
-	match expr {
-		Expr::Literal(literal) => literal.as_static_value(),
-		_ => None,
+	if let Expr::Literal(literal) = expr {
+		literal.as_static_value()
+	} else {
+		None
 	}
 }
 
@@ -910,7 +977,16 @@ pub(super) fn canonical_field_name(idiom: &crate::expr::Idiom) -> Option<crate::
 			Part::Value(Expr::Literal(Literal::Integer(i))) => {
 				out.push(Part::Value(Expr::Literal(Literal::Integer(*i))))
 			}
-			_ => return None,
+			Part::Where(_)
+			| Part::Lookup(_)
+			| Part::Value(_)
+			| Part::Start(_)
+			| Part::Method(..)
+			| Part::Destructure(_)
+			| Part::Optional
+			| Part::Recurse(..)
+			| Part::Doc
+			| Part::RepeatRecurse => return None,
 		}
 	}
 	Some(crate::expr::Idiom(out))

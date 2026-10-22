@@ -72,13 +72,18 @@ pub fn request_id(bytes: &[u8], recursion_limit: usize) -> Option<Value> {
 				recursion_limit,
 			)
 			.ok()?;
-			return match convert::to_value(id).ok()? {
-				id @ (Value::Null
-				| Value::Uuid(_)
-				| Value::Number(_)
-				| Value::String(_)
-				| Value::Datetime(_)) => Some(id),
-				_ => None,
+			let val = convert::to_value(id).ok()?;
+			return if matches!(
+				val,
+				Value::Null
+					| Value::Uuid(_)
+					| Value::Number(_)
+					| Value::String(_)
+					| Value::Datetime(_)
+			) {
+				Some(val)
+			} else {
+				None
 			};
 		}
 	}

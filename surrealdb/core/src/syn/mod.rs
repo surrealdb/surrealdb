@@ -341,7 +341,12 @@ fn extract_tables_from_kind_impl(kind: &Kind, tables: &mut HashSet<String>) {
 					extract_tables_from_kind_impl(kind, tables);
 				}
 			}
-			_ => {}
+			KindLiteral::String(_)
+			| KindLiteral::Integer(_)
+			| KindLiteral::Float(_)
+			| KindLiteral::Decimal(_)
+			| KindLiteral::Duration(_)
+			| KindLiteral::Bool(_) => {}
 		},
 		Kind::File(_) => {}
 	}

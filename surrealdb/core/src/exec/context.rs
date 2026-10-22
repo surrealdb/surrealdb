@@ -160,20 +160,28 @@ impl SessionInfo {
 		use crate::expr::paths::{AC, DB, ID, IP, NS, OR, RD, TK};
 
 		let session = ctx.value("session")?;
-		let strand = |path: &[crate::expr::Part]| match session.pick(path) {
-			Value::String(s) => Some(s),
-			_ => None,
+		let strand = |path: &[crate::expr::Part]| {
+			if let Value::String(s) = session.pick(path) {
+				Some(s)
+			} else {
+				None
+			}
 		};
-		let value = |path: &[crate::expr::Part]| match session.pick(path) {
-			Value::None => None,
-			v => Some(v),
+		let value = |path: &[crate::expr::Part]| {
+			let v = session.pick(path);
+			if let Value::None = v {
+				None
+			} else {
+				Some(v)
+			}
 		};
 		Some(Self {
 			ns: strand(NS.as_ref()),
 			db: strand(DB.as_ref()),
-			id: match session.pick(ID.as_ref()) {
-				Value::Uuid(u) => Some(*u.as_ref()),
-				_ => None,
+			id: if let Value::Uuid(u) = session.pick(ID.as_ref()) {
+				Some(*u.as_ref())
+			} else {
+				None
 			},
 			ip: strand(IP.as_ref()),
 			origin: strand(OR.as_ref()),

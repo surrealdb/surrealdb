@@ -59,7 +59,7 @@ fn store_for_url(url: &Url) -> object_store::Result<Box<dyn ObjectStore>> {
 						.build()?,
 				));
 			}
-			_ => {}
+			ObjectStoreScheme::Local | ObjectStoreScheme::Memory | ObjectStoreScheme::Http | _ => {}
 		}
 	}
 	parse_url(url).map(|(store, _)| store)

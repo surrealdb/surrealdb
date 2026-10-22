@@ -117,7 +117,7 @@ fn stage_of(ir: &Ir, op: OpId) -> Option<Stage> {
 		})
 		| OpKind::Phys(PhysOp::PermissionFilter(..) | PhysOp::Layer(..)) => Some(Stage::Guard),
 		OpKind::Logical(LogOp::Project(attrs)) if attrs.layer => Some(Stage::Guard),
-		_ => None,
+		OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => None,
 	}
 }
 
@@ -157,7 +157,7 @@ pub(super) fn stages_over(ir: &Ir, mut rows: ValueId) -> Option<Stages> {
 					..stages_of_loop(ir, only.user)
 				});
 			}
-			_ => return None,
+			OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => return None,
 		}
 		rows = *user.results.first()?;
 	}
@@ -462,7 +462,71 @@ fn known_query_vector(
 				ExactAnswer::Value(_) | ExactAnswer::RunTime => return Ok(None),
 			}
 		}
-		other => match crate::exec::planner::static_value(other) {
+		other @ (LogicalExpr::Literal(_)
+		| LogicalExpr::Array(_)
+		| LogicalExpr::Set(_)
+		| LogicalExpr::Object(_)
+		| LogicalExpr::RecordId(_)
+		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
+		| LogicalExpr::Constant(_)
+		| LogicalExpr::Field(_)
+		| LogicalExpr::Doc
+		| LogicalExpr::Current
+		| LogicalExpr::Access {
+			..
+		}
+		| LogicalExpr::Index {
+			..
+		}
+		| LogicalExpr::First(_)
+		| LogicalExpr::Last(_)
+		| LogicalExpr::Each(_)
+		| LogicalExpr::Flatten {
+			..
+		}
+		| LogicalExpr::Filter {
+			..
+		}
+		| LogicalExpr::Method {
+			..
+		}
+		| LogicalExpr::Destructure {
+			..
+		}
+		| LogicalExpr::Optional {
+			..
+		}
+		| LogicalExpr::Lookup {
+			..
+		}
+		| LogicalExpr::Recurse(_)
+		| LogicalExpr::RepeatRecurse(_)
+		| LogicalExpr::Broadcast {
+			..
+		}
+		| LogicalExpr::SetField {
+			..
+		}
+		| LogicalExpr::Prefix {
+			..
+		}
+		| LogicalExpr::Postfix {
+			..
+		}
+		| LogicalExpr::Invoke {
+			..
+		}
+		| LogicalExpr::Binary {
+			..
+		}
+		| LogicalExpr::Call(_)
+		| LogicalExpr::Closure(_)
+		| LogicalExpr::If(_)
+		| LogicalExpr::Throw(_)
+		| LogicalExpr::Break
+		| LogicalExpr::Continue
+		| LogicalExpr::Subquery(_)) => match crate::exec::planner::static_value(other) {
 			Some(value) => value,
 			None => return Ok(None),
 		},
@@ -510,7 +574,7 @@ fn value_name(ir: &Ir, value: ValueId) -> Option<String> {
 	match &ir.op(op)?.kind {
 		OpKind::Phys(PhysOp::Let(attrs)) => Some(attrs.name.to_string()),
 		OpKind::Logical(LogOp::Let(attrs)) => Some(attrs.name.to_string()),
-		_ => None,
+		OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => None,
 	}
 }
 
@@ -771,7 +835,7 @@ fn pending_scans(ir: &Ir, looped: OpId) -> Vec<OpId> {
 			{
 				scans.push(op);
 			}
-			_ => {}
+			OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => {}
 		}
 	}
 	scans
@@ -924,7 +988,7 @@ fn united(ir: &Ir, looped: OpId) -> bool {
 				..
 			}) => rows = data.operands.first().copied(),
 			OpKind::Phys(PhysOp::Union) => return true,
-			_ => return false,
+			OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => return false,
 		}
 	}
 	false
@@ -1047,7 +1111,102 @@ fn read_beneath(ir: &Ir, looped: OpId) -> Option<bool> {
 			| PhysOp::Vacant {
 				..
 			} => {}
-			_ => return None,
+			PhysOp::KnnTopK(_)
+			| PhysOp::Count(_)
+			| PhysOp::Probe {
+				..
+			}
+			| PhysOp::Join(_)
+			| PhysOp::Distinct {
+				..
+			}
+			| PhysOp::Filter
+			| PhysOp::Fetch
+			| PhysOp::Split {
+				..
+			}
+			| PhysOp::Sort(_)
+			| PhysOp::Aggregate(_)
+			| PhysOp::Limit {
+				..
+			}
+			| PhysOp::Project(_)
+			| PhysOp::Timeout
+			| PhysOp::VersionScope
+			| PhysOp::Only
+			| PhysOp::Explain {
+				..
+			}
+			| PhysOp::Eval
+			| PhysOp::Request {
+				..
+			}
+			| PhysOp::Txn {
+				..
+			}
+			| PhysOp::Stmt {
+				..
+			}
+			| PhysOp::Statement {
+				..
+			}
+			| PhysOp::Match {
+				..
+			}
+			| PhysOp::MatchStep(_)
+			| PhysOp::DdlGuard {
+				..
+			}
+			| PhysOp::Define(_)
+			| PhysOp::Remove(_)
+			| PhysOp::Alter(_)
+			| PhysOp::Rebuild(_)
+			| PhysOp::Info {
+				..
+			}
+			| PhysOp::Use {
+				..
+			}
+			| PhysOp::Option {
+				..
+			}
+			| PhysOp::Access(_)
+			| PhysOp::Kill
+			| PhysOp::Live(_)
+			| PhysOp::Subscriber(_)
+			| PhysOp::Show(_)
+			| PhysOp::Write(_)
+			| PhysOp::WriteStage {
+				..
+			}
+			| PhysOp::Events(_)
+			| PhysOp::Assign(_)
+			| PhysOp::Unset {
+				..
+			}
+			| PhysOp::Content {
+				..
+			}
+			| PhysOp::Block
+			| PhysOp::Let(_)
+			| PhysOp::Sleep
+			| PhysOp::If {
+				..
+			}
+			| PhysOp::Loop {
+				..
+			}
+			| PhysOp::Pipeline(_)
+			| PhysOp::Choose(_)
+			| PhysOp::Prefetch(_)
+			| PhysOp::Materialize {
+				..
+			}
+			| PhysOp::LoadUnit(_)
+			| PhysOp::Yield
+			| PhysOp::Return
+			| PhysOp::Break
+			| PhysOp::Next => return None,
 		}
 	}
 	Some(searched)
@@ -1100,9 +1259,12 @@ fn target_of(ir: &Ir, cx: &PhysCx<'_>, ranked: &Ranked) -> Result<Option<Target>
 			) {
 				ExactAnswer::Value(Value::Array(array)) if !array.is_empty() => array
 					.iter()
-					.map(|value| match value {
-						Value::Number(number) => Some(*number),
-						_ => None,
+					.map(|value| {
+						if let Value::Number(number) = value {
+							Some(*number)
+						} else {
+							None
+						}
 					})
 					.collect::<Option<Vec<Number>>>(),
 				ExactAnswer::NotLoaded => {
@@ -1113,7 +1275,71 @@ fn target_of(ir: &Ir, cx: &PhysCx<'_>, ranked: &Ranked) -> Result<Option<Target>
 				ExactAnswer::Value(_) | ExactAnswer::RunTime => None,
 			}
 		}
-		other => crate::exec::planner::static_value(other)
+		other @ (LogicalExpr::Literal(_)
+		| LogicalExpr::Array(_)
+		| LogicalExpr::Set(_)
+		| LogicalExpr::Object(_)
+		| LogicalExpr::RecordId(_)
+		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
+		| LogicalExpr::Constant(_)
+		| LogicalExpr::Field(_)
+		| LogicalExpr::Doc
+		| LogicalExpr::Current
+		| LogicalExpr::Access {
+			..
+		}
+		| LogicalExpr::Index {
+			..
+		}
+		| LogicalExpr::First(_)
+		| LogicalExpr::Last(_)
+		| LogicalExpr::Each(_)
+		| LogicalExpr::Flatten {
+			..
+		}
+		| LogicalExpr::Filter {
+			..
+		}
+		| LogicalExpr::Method {
+			..
+		}
+		| LogicalExpr::Destructure {
+			..
+		}
+		| LogicalExpr::Optional {
+			..
+		}
+		| LogicalExpr::Lookup {
+			..
+		}
+		| LogicalExpr::Recurse(_)
+		| LogicalExpr::RepeatRecurse(_)
+		| LogicalExpr::Broadcast {
+			..
+		}
+		| LogicalExpr::SetField {
+			..
+		}
+		| LogicalExpr::Prefix {
+			..
+		}
+		| LogicalExpr::Postfix {
+			..
+		}
+		| LogicalExpr::Invoke {
+			..
+		}
+		| LogicalExpr::Binary {
+			..
+		}
+		| LogicalExpr::Call(_)
+		| LogicalExpr::Closure(_)
+		| LogicalExpr::If(_)
+		| LogicalExpr::Throw(_)
+		| LogicalExpr::Break
+		| LogicalExpr::Continue
+		| LogicalExpr::Subquery(_)) => crate::exec::planner::static_value(other)
 			.and_then(|value| value.coerce_to::<Vec<Number>>().ok()),
 	};
 	if let Some(vector) = resolved {
@@ -1443,7 +1669,7 @@ fn collect_operators(ir: &Ir, region: RegionId, out: &mut Vec<OpId>) {
 			}) if matches!(**nn, NearestNeighbor::K(..) | NearestNeighbor::Approximate(..)) => {
 				out.push(op);
 			}
-			_ => {}
+			OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => {}
 		}
 		for nested in &data.regions {
 			collect_operators(ir, *nested, out);

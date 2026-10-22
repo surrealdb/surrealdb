@@ -17,7 +17,7 @@
 // A stage list is only a contract while every stage is named. A wildcard arm
 // over `StageId` — in the registry, or in an order's assembly — absorbs a new
 // stage silently, which is the one failure this module is shaped to prevent.
-#![warn(clippy::wildcard_enum_match_arm)]
+#![deny(clippy::wildcard_enum_match_arm)]
 
 use crate::doc::Action;
 

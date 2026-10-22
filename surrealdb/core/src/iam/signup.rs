@@ -725,10 +725,9 @@ mod tests {
 			)
 			.await;
 			let e = res.unwrap_err();
-			match e.downcast().expect("Unexpected error kind") {
-				AuthError::InvalidAuth => {}
-				e => panic!("Unexpected error, expected InvalidAuth found {e}"),
-			}
+			let AuthError::InvalidAuth = e.downcast().expect("Unexpected error kind") else {
+				panic!("Unexpected error, expected InvalidAuth");
+			};
 		}
 	}
 
@@ -1107,10 +1106,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			.await;
 
 			let e = res.unwrap_err();
-			match e.downcast().expect("Unexpected error kind") {
-				ExecError::Thrown(e) => assert_eq!(e, "This user is not enabled"),
-				e => panic!("Unexpected error, expected Thrown found {e:?}"),
-			}
+			let ExecError::Thrown(e) = e.downcast().expect("Unexpected error kind") else {
+				panic!("Unexpected error, expected Thrown");
+			};
+			assert_eq!(e, "This user is not enabled");
 		}
 
 		// Test AUTHENTICATE clause not returning a value
@@ -1152,10 +1151,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			.await;
 
 			let e = res.unwrap_err();
-			match e.downcast().expect("Unexpected error kind") {
-				AuthError::InvalidAuth => {}
-				e => panic!("Unexpected error, expected InvalidAuth found {e}"),
-			}
+			let AuthError::InvalidAuth = e.downcast().expect("Unexpected error kind") else {
+				panic!("Unexpected error, expected InvalidAuth");
+			};
 		}
 	}
 
@@ -1235,14 +1233,18 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"Expected authentication to fail in one instance, but instead received: {:?} and {:?}",
 					e1, e2
 				),
-				(Err(e1), Ok(_)) => match e1.downcast().expect("Unexpected error kind") {
-					AuthError::UnexpectedAuth => {}
-					e => panic!("Unexpected error, expected UnexpectedAuth found {e}"),
-				},
-				(Ok(_), Err(e2)) => match e2.downcast().expect("Unexpected error kind") {
-					AuthError::UnexpectedAuth => {}
-					e => panic!("Unexpected error, expected UnexpectedAuth found {e}"),
-				},
+				(Err(e1), Ok(_)) => {
+					let AuthError::UnexpectedAuth = e1.downcast().expect("Unexpected error kind")
+					else {
+						panic!("Unexpected error, expected UnexpectedAuth");
+					};
+				}
+				(Ok(_), Err(e2)) => {
+					let AuthError::UnexpectedAuth = e2.downcast().expect("Unexpected error kind")
+					else {
+						panic!("Unexpected error, expected UnexpectedAuth");
+					};
+				}
 			}
 		}
 
@@ -1315,14 +1317,18 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"Expected authentication to fail in one instance, but instead received: {:?} and {:?}",
 					e1, e2
 				),
-				(Err(e1), Ok(_)) => match e1.downcast().expect("Unexpected error kind") {
-					AuthError::UnexpectedAuth => {}
-					e => panic!("Unexpected error, expected UnexpectedAuth found {e}"),
-				},
-				(Ok(_), Err(e2)) => match e2.downcast().expect("Unexpected error kind") {
-					AuthError::UnexpectedAuth => {}
-					e => panic!("Unexpected error, expected UnexpectedAuth found {e}"),
-				},
+				(Err(e1), Ok(_)) => {
+					let AuthError::UnexpectedAuth = e1.downcast().expect("Unexpected error kind")
+					else {
+						panic!("Unexpected error, expected UnexpectedAuth");
+					};
+				}
+				(Ok(_), Err(e2)) => {
+					let AuthError::UnexpectedAuth = e2.downcast().expect("Unexpected error kind")
+					else {
+						panic!("Unexpected error, expected UnexpectedAuth");
+					};
+				}
 			}
 		}
 	}

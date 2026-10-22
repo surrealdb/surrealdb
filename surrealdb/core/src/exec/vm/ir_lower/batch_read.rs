@@ -213,10 +213,10 @@ mod tests {
 	}
 
 	fn read_of(instr: &IrInstr) -> &BatchRead {
-		match instr.form() {
-			IrForm::BatchRead(read) => read,
-			other => panic!("expected a BatchRead, got {other:?}"),
-		}
+		let IrForm::BatchRead(read) = instr.form() else {
+			panic!("expected a BatchRead, got {:?}", instr.form());
+		};
+		read
 	}
 
 	#[test]

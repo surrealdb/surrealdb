@@ -81,74 +81,80 @@ pub(crate) fn written_table(write: &LogicalWrite) -> Option<TableName> {
 			Mock::Count(table, _) | Mock::Range(table, _) => table.clone(),
 		}
 	}
-	#[allow(clippy::wildcard_enum_match_arm)]
 	fn named(expr: &LogicalExpr) -> Option<TableName> {
-		match expr {
-			LogicalExpr::Table(table) => Some(table.clone()),
-			LogicalExpr::RecordId(rid) => Some(rid.table.clone()),
-			LogicalExpr::Mock(mock) => Some(mock_table(mock)),
-			LogicalExpr::Call(call) => {
-				let Function::Normal(name) = &call.receiver else {
+		if let LogicalExpr::Table(table) = expr {
+			Some(table.clone())
+		} else if let LogicalExpr::RecordId(rid) = expr {
+			Some(rid.table.clone())
+		} else if let LogicalExpr::Mock(mock) = expr {
+			Some(mock_table(mock))
+		} else if let LogicalExpr::Call(call) = expr {
+			let Function::Normal(name) = &call.receiver else {
+				return None;
+			};
+			let table = if let Some(LogicalExpr::Literal(LogicalLiteral::String(table))) =
+				call.args.first()
+			{
+				if !table.is_empty() {
+					TableName::new(table.as_str())
+				} else {
 					return None;
-				};
-				let table = match call.args.first() {
-					Some(LogicalExpr::Literal(LogicalLiteral::String(table)))
-						if !table.is_empty() =>
-					{
-						TableName::new(table.as_str())
-					}
-					_ => return None,
-				};
-				match (name.as_str(), call.args.len()) {
-					("type::table", 1) | ("type::record", 2) => Some(table),
-					_ => None,
 				}
+			} else {
+				return None;
+			};
+			match (name.as_str(), call.args.len()) {
+				("type::table", 1) | ("type::record", 2) => Some(table),
+				_ => None,
 			}
-			_ => None,
+		} else {
+			None
 		}
 	}
 	/// Pushes the table `expr`, or each element of it where it is a literal list, names.
-	#[allow(clippy::wildcard_enum_match_arm)]
 	fn each_named(expr: &LogicalExpr, tables: &mut Vec<TableName>) -> bool {
-		let mut push = |expr: &LogicalExpr| match named(expr) {
-			Some(table) => {
+		let mut push = |expr: &LogicalExpr| {
+			if let Some(table) = named(expr) {
 				tables.push(table);
 				true
+			} else {
+				false
 			}
-			None => false,
 		};
-		match expr {
-			LogicalExpr::Array(items) => items.iter().all(push),
-			other => push(other),
+		if let LogicalExpr::Array(items) = expr {
+			items.iter().all(push)
+		} else {
+			push(expr)
 		}
 	}
 	/// Pushes the table of the record id literal each literal row of `rows` is written with.
-	#[allow(clippy::wildcard_enum_match_arm)]
 	fn row_ids(rows: &LogicalExpr, tables: &mut Vec<TableName>) -> bool {
 		let mut row = |row: &LogicalExpr| {
 			let LogicalExpr::Object(fields) = row else {
 				return false;
 			};
-			match fields.iter().find(|(field, _)| field == "id") {
-				Some((_, LogicalExpr::RecordId(rid))) => {
-					tables.push(rid.table.clone());
-					true
-				}
-				_ => false,
+			if let Some((_, LogicalExpr::RecordId(rid))) =
+				fields.iter().find(|(field, _)| field == "id")
+			{
+				tables.push(rid.table.clone());
+				true
+			} else {
+				false
 			}
 		};
-		match rows {
-			LogicalExpr::Array(items) => items.iter().all(row),
-			other => row(other),
+		if let LogicalExpr::Array(items) = rows {
+			items.iter().all(row)
+		} else {
+			row(rows)
 		}
 	}
-	#[allow(clippy::wildcard_enum_match_arm)]
 	fn read(op: &LogicalOp, tables: &mut Vec<TableName>) -> bool {
-		match op {
-			LogicalOp::Source(LogicalSource {
-				source,
-				..
-			}) => match source {
+		if let LogicalOp::Source(LogicalSource {
+			source,
+			..
+		}) = op
+		{
+			match source {
 				SourceRef::Table(table) => tables.push(table.clone()),
 				SourceRef::RecordId(rid) => tables.push(rid.table.clone()),
 				SourceRef::Mock(mock) => tables.push(mock_table(mock)),
@@ -157,13 +163,17 @@ pub(crate) fn written_table(write: &LogicalWrite) -> Option<TableName> {
 					None => return false,
 				},
 				SourceRef::Param(_) => return false,
-			},
-			LogicalOp::Values(LogicalValues {
-				expr,
-				..
-			}) if !each_named(expr, tables) => return false,
-			LogicalOp::Subquery(_) => return false,
-			_ => {}
+			}
+		} else if let LogicalOp::Values(LogicalValues {
+			expr,
+			..
+		}) = op
+		{
+			if !each_named(expr, tables) {
+				return false;
+			}
+		} else if let LogicalOp::Subquery(_) = op {
+			return false;
 		}
 		op.children().iter().all(|child| read(child, tables))
 	}
@@ -755,37 +765,38 @@ pub(crate) fn when_never_fires(when: &LogicalExpr, action: Action) -> bool {
 
 /// Whether every node of `expr` is of the form [`when_never_fires`] admits, including the operand
 /// of an `AND` or an `OR` that the evaluation does not reach.
-#[allow(clippy::wildcard_enum_match_arm)]
 fn admitted(expr: &LogicalExpr) -> bool {
-	match expr {
-		LogicalExpr::Literal(_) | LogicalExpr::Array(_) | LogicalExpr::Object(_) => {
-			is_literal(expr)
-		}
-		LogicalExpr::Param(param) => param.as_str() == "event",
-		LogicalExpr::Prefix {
-			op: PrefixOperator::Not,
-			expr,
-		} => admitted(expr),
-		LogicalExpr::Binary {
-			left,
+	if let LogicalExpr::Literal(_) | LogicalExpr::Array(_) | LogicalExpr::Object(_) = expr {
+		is_literal(expr)
+	} else if let LogicalExpr::Param(param) = expr {
+		param.as_str() == "event"
+	} else if let LogicalExpr::Prefix {
+		op: PrefixOperator::Not,
+		expr,
+	} = expr
+	{
+		admitted(expr)
+	} else if let LogicalExpr::Binary {
+		left,
+		op,
+		right,
+	} = expr
+	{
+		matches!(
 			op,
-			right,
-		} => {
-			matches!(
-				op,
-				BinaryOperator::And
-					| BinaryOperator::Or
-					| BinaryOperator::Equal
-					| BinaryOperator::ExactEqual
-					| BinaryOperator::NotEqual
-					| BinaryOperator::Inside
-					| BinaryOperator::NotInside
-					| BinaryOperator::Contain
-					| BinaryOperator::NotContain
-			) && admitted(left)
-				&& admitted(right)
-		}
-		_ => false,
+			BinaryOperator::And
+				| BinaryOperator::Or
+				| BinaryOperator::Equal
+				| BinaryOperator::ExactEqual
+				| BinaryOperator::NotEqual
+				| BinaryOperator::Inside
+				| BinaryOperator::NotInside
+				| BinaryOperator::Contain
+				| BinaryOperator::NotContain
+		) && admitted(left)
+			&& admitted(right)
+	} else {
+		false
 	}
 }
 
@@ -1566,12 +1577,15 @@ fn needed_fields(order: &[(String, Vec<String>)], reads: &[String]) -> Vec<Strin
 
 /// Whether `expr` holds something lowered for the principal that runs it: a statement, a closure,
 /// or a call of a user-defined function.
-#[allow(clippy::wildcard_enum_match_arm)]
 pub(crate) fn needs_caller(expr: &LogicalExpr) -> bool {
-	expr.any(|node| match node {
-		LogicalExpr::Subquery(_) | LogicalExpr::Closure(_) => true,
-		LogicalExpr::Call(call) => matches!(call.receiver, crate::expr::Function::Custom(_)),
-		_ => false,
+	expr.any(|node| {
+		if let LogicalExpr::Subquery(_) | LogicalExpr::Closure(_) = node {
+			true
+		} else if let LogicalExpr::Call(call) = node {
+			matches!(call.receiver, crate::expr::Function::Custom(_))
+		} else {
+			false
+		}
 	})
 }
 

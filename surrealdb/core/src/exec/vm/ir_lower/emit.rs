@@ -187,7 +187,20 @@ impl ConstKey {
 			Value::Number(Number::Float(f)) => Self::Float(f.to_bits()),
 			Value::Number(Number::Decimal(d)) => Self::Decimal(d.serialize()),
 			Value::String(s) => Self::Strand(s.as_str().to_owned()),
-			other => Self::Text(format!("{other:?}")),
+			other @ (Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Array(_)
+			| Value::Set(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_)) => Self::Text(format!("{other:?}")),
 		}
 	}
 

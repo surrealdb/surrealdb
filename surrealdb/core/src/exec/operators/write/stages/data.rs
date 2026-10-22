@@ -357,15 +357,15 @@ pub(crate) fn check_default_id(
 	table: &TableName,
 	value: &Value,
 ) -> Result<(), ControlFlow> {
-	match ctx.key.as_deref() {
-		Some(key) if value.is_none() => {
-			// The `DEFAULT` runs only where a component is absent, so the
-			// written components always name one; the first is the fallback.
-			let absent = components_written(key, components_doc(row)).err().unwrap_or(0);
-			Err(fail(missing_component(key, table, absent)))
-		}
-		_ => Ok(()),
+	if let Some(key) = ctx.key.as_deref()
+		&& value.is_none()
+	{
+		// The `DEFAULT` runs only where a component is absent, so the
+		// written components always name one; the first is the fallback.
+		let absent = components_written(key, components_doc(row)).err().unwrap_or(0);
+		return Err(fail(missing_component(key, table, absent)));
 	}
+	Ok(())
 }
 
 // ===========================================================================
@@ -581,13 +581,14 @@ fn coerce_id_key(
 /// Whether `kind` admits `key` through a literal kind: `kind` itself, or the
 /// first arm of a union that accepts it, which is the arm coercion selects.
 fn admitted_by_literal(kind: &Kind, key: &Value) -> bool {
-	match kind {
-		Kind::Literal(_) => key.can_coerce_to_kind(kind),
-		Kind::Either(arms) => arms
-			.iter()
+	if let Kind::Literal(_) = kind {
+		key.can_coerce_to_kind(kind)
+	} else if let Kind::Either(arms) = kind {
+		arms.iter()
 			.find(|arm| key.can_coerce_to_kind(arm))
-			.is_some_and(|arm| admitted_by_literal(arm, key)),
-		_ => false,
+			.is_some_and(|arm| admitted_by_literal(arm, key))
+	} else {
+		false
 	}
 }
 
@@ -645,9 +646,14 @@ fn components_written(key: &KeyStructure, doc: &Value) -> Result<Vec<Value>, u32
 	};
 	let mut elements = Vec::with_capacity(key.arity());
 	for component in key.components.iter() {
-		match key.name_of(component.position).and_then(|name| object.get(name)) {
-			Some(value) if !value.is_none() => elements.push(value.clone()),
-			_ => return Err(component.position),
+		if let Some(value) = key
+			.name_of(component.position)
+			.and_then(|name| object.get(name))
+			.filter(|value| !value.is_none())
+		{
+			elements.push(value.clone());
+		} else {
+			return Err(component.position);
 		}
 	}
 	Ok(elements)
@@ -726,9 +732,10 @@ fn component_value(component: &KeyComponent, value: Value) -> Result<Value, Stri
 /// addresses the record: numbers of different kinds that are equal by value are
 /// not the same element.
 fn same_element(a: &Value, b: &Value) -> bool {
-	match (try_encode_component(a), try_encode_component(b)) {
-		(Some(a), Some(b)) => a == b,
-		_ => false,
+	if let (Some(a), Some(b)) = (try_encode_component(a), try_encode_component(b)) {
+		a == b
+	} else {
+		false
 	}
 }
 
@@ -746,10 +753,12 @@ fn restates(component: &KeyComponent, element: Option<&Value>, written: &Value) 
 		| ComponentKind::Uuid
 		| ComponentKind::Duration
 		| ComponentKind::Bool => written == element,
-		_ => match component_value(component, written.clone()) {
-			Ok(converted) => same_element(&converted, element),
-			Err(_) => false,
-		},
+		ComponentKind::Int | ComponentKind::Record(_) | ComponentKind::Unknown | _ => {
+			match component_value(component, written.clone()) {
+				Ok(converted) => same_element(&converted, element),
+				Err(_) => false,
+			}
+		}
 	}
 }
 
@@ -775,10 +784,12 @@ enum Addressed {
 fn addressed(input: Option<&ComputedInput>, name: &str) -> Addressed {
 	/// The number of parts of `path` when it starts at the field `name`.
 	fn depth(path: &Idiom, name: &str) -> Option<usize> {
-		match path.0.first() {
-			Some(Part::Field(field)) if field.as_str() == name => Some(path.0.len()),
-			_ => None,
+		if let Some(Part::Field(field)) = path.0.first()
+			&& field.as_str() == name
+		{
+			return Some(path.0.len());
 		}
+		None
 	}
 	let mut whole = false;
 	match input {
@@ -914,13 +925,17 @@ fn settle_components<'k>(
 	input: Option<&ComputedInput>,
 	initial: &Value,
 ) -> Result<Vec<&'k str>, DocError> {
-	let elements: &[Value] = match &rid.key {
-		RecordIdKey::Array(array) => &array.0,
-		_ => &[],
+	let elements: &[Value] = if let RecordIdKey::Array(array) = &rid.key {
+		&array.0
+	} else {
+		&[]
 	};
-	let held = |image: &'_ Value, name: &str| match image {
-		Value::Object(object) => object.get(name).filter(|value| !value.is_none()).cloned(),
-		_ => None,
+	let held = |image: &'_ Value, name: &str| {
+		if let Value::Object(object) = image {
+			object.get(name).filter(|value| !value.is_none()).cloned()
+		} else {
+			None
+		}
 	};
 	let mut cut = Vec::new();
 	for component in key.components.iter() {
@@ -1023,10 +1038,10 @@ mod tests {
 
 	/// The document error a refusal carries.
 	fn refusal<T: std::fmt::Debug>(result: Result<T, ControlFlow>) -> DocError {
-		match result {
-			Err(ControlFlow::Err(error)) => error.downcast::<DocError>().expect("a document error"),
-			other => panic!("expected a refusal, found {other:?}"),
-		}
+		let Err(ControlFlow::Err(error)) = result else {
+			panic!("expected a refusal, found {result:?}");
+		};
+		error.downcast::<DocError>().expect("a document error")
 	}
 
 	fn is_int(value: &Value, expected: i64) -> bool {
@@ -1103,18 +1118,18 @@ mod tests {
 		let key = reading();
 		for elements in [vec![text("London")], vec![text("London"), at(2024), int(1)], vec![]] {
 			let found = elements.len();
-			match refusal(coerce_elements(TableName::from("reading"), elements, &key)) {
-				DocError::IdComponentArity {
-					table,
-					expected,
-					found: given,
-				} => {
-					assert_eq!(table, "reading");
-					assert_eq!(expected, "[city, time]");
-					assert_eq!(given, found);
-				}
-				other => panic!("expected an arity refusal, found {other:?}"),
-			}
+			let refused = refusal(coerce_elements(TableName::from("reading"), elements, &key));
+			let DocError::IdComponentArity {
+				table,
+				expected,
+				found: given,
+			} = refused
+			else {
+				panic!("expected an arity refusal, found {refused:?}");
+			};
+			assert_eq!(table, "reading");
+			assert_eq!(expected, "[city, time]");
+			assert_eq!(given, found);
 		}
 	}
 
@@ -1142,17 +1157,16 @@ mod tests {
 			vec![text("London"), int(5)],
 			&key,
 		));
-		match refused {
-			DocError::IdComponentCoerce {
-				table,
-				component,
-				..
-			} => {
-				assert_eq!(table, "reading");
-				assert_eq!(component, "time");
-			}
-			other => panic!("expected a coercion refusal, found {other:?}"),
-		}
+		let DocError::IdComponentCoerce {
+			table,
+			component,
+			..
+		} = refused
+		else {
+			panic!("expected a coercion refusal, found {refused:?}");
+		};
+		assert_eq!(table, "reading");
+		assert_eq!(component, "time");
 	}
 
 	#[test]
@@ -1198,18 +1212,17 @@ mod tests {
 		let refused = settle_components(&key, &rid, &current, None, &Value::None)
 			.expect_err("a different city");
 		let message = refused.to_string();
-		match &refused {
-			DocError::IdComponentMismatch {
-				table,
-				component,
-				value,
-			} => {
-				assert_eq!(table, "reading");
-				assert_eq!(component, "city");
-				assert_eq!(value, "'Paris'");
-			}
-			other => panic!("expected a mismatch, found {other:?}"),
-		}
+		let DocError::IdComponentMismatch {
+			table,
+			component,
+			value,
+		} = &refused
+		else {
+			panic!("expected a mismatch, found {refused:?}");
+		};
+		assert_eq!(table, "reading");
+		assert_eq!(component, "city");
+		assert_eq!(value, "'Paris'");
 		assert!(!message.contains("London"), "the key's own value is shown: {message}");
 	}
 

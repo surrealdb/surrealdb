@@ -83,11 +83,12 @@ async fn shaped_stream_frames_decode_as_cbor_frames_decode() {
 		let mut scope = ShapeScope::new();
 		let mut shaper = ValueShaper::new();
 		std::iter::from_fn(|| frames.pop_outgoing())
-			.map(|frame| match format {
-				RowFormat::Shaped => {
+			.map(|frame| {
+				if format == RowFormat::Shaped {
 					super::encoded::shaped_outgoing(frame, &mut shaper).expect("shapes")
+				} else {
+					frame
 				}
-				_ => frame,
 			})
 			.map(|frame| match frame {
 				OutgoingFrame::Frame(frame) => encode_response(
@@ -123,11 +124,10 @@ async fn shaped_stream_frames_decode_as_cbor_frames_decode() {
 			let mut announced = 0;
 			for s in &shaped {
 				let item: ciborium::Value = ciborium::de::from_reader(s.as_slice()).expect("CBOR");
-				let frame = match &item {
-					ciborium::Value::Map(entries) => {
-						entries.iter().find(|(k, _)| k.as_text() == Some("result")).map(|(_, v)| v)
-					}
-					_ => None,
+				let frame = if let ciborium::Value::Map(entries) = &item {
+					entries.iter().find(|(k, _)| k.as_text() == Some("result")).map(|(_, v)| v)
+				} else {
+					None
 				};
 				if let Some(ciborium::Value::Map(frame)) = frame
 					&& frame
@@ -159,24 +159,27 @@ async fn shaped_stream_frames_decode_as_cbor_frames_decode() {
 /// The SHAPE messages in the blocks of a CBOR response.
 pub(crate) fn count_shape_messages(bytes: &[u8]) -> usize {
 	fn walk(item: &ciborium::Value) -> usize {
-		match item {
-			ciborium::Value::Tag(tag, inner) if *tag == surrealdb_types::shaped::CBOR_TAG => {
-				let ciborium::Value::Bytes(contents) = &**inner else {
-					return 0;
-				};
-				let mut at = 1;
-				let mut n = 0;
-				while at + 5 <= contents.len() {
-					let len = u32::from_le_bytes(contents[at + 1..at + 5].try_into().expect("4"))
-						as usize;
-					n += usize::from(contents[at] == surrealdb_types::shaped::MESSAGE_SHAPE);
-					at += 5 + len;
-				}
-				n
+		if let ciborium::Value::Tag(tag, inner) = item
+			&& *tag == surrealdb_types::shaped::CBOR_TAG
+		{
+			let ciborium::Value::Bytes(contents) = &**inner else {
+				return 0;
+			};
+			let mut at = 1;
+			let mut n = 0;
+			while at + 5 <= contents.len() {
+				let len =
+					u32::from_le_bytes(contents[at + 1..at + 5].try_into().expect("4")) as usize;
+				n += usize::from(contents[at] == surrealdb_types::shaped::MESSAGE_SHAPE);
+				at += 5 + len;
 			}
-			ciborium::Value::Map(entries) => entries.iter().map(|(_, v)| walk(v)).sum(),
-			ciborium::Value::Array(items) => items.iter().map(walk).sum(),
-			_ => 0,
+			n
+		} else if let ciborium::Value::Map(entries) = item {
+			entries.iter().map(|(_, v)| walk(v)).sum()
+		} else if let ciborium::Value::Array(items) = item {
+			items.iter().map(walk).sum()
+		} else {
+			0
 		}
 	}
 	let item: ciborium::Value = ciborium::de::from_reader(bytes).expect("CBOR");

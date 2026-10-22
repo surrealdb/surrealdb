@@ -117,16 +117,15 @@ pub(crate) fn is_value_error(error: &anyhow::Error) -> bool {
 			return false;
 		}
 		if let Some(e) = cause.downcast_ref::<crate::expr::Error>() {
-			match e {
-				crate::expr::Error::ValueTooDeep {
-					..
-				}
-				| crate::expr::Error::FeatureDisabled {
-					..
-				}
-				| crate::expr::Error::Serialization(_) => return false,
-				_ => value = true,
+			if matches!(
+				e,
+				crate::expr::Error::ValueTooDeep { .. }
+					| crate::expr::Error::FeatureDisabled { .. }
+					| crate::expr::Error::Serialization(_)
+			) {
+				return false;
 			}
+			value = true;
 		}
 		if cause.is::<crate::val::CastError>()
 			|| cause.is::<crate::val::CoerceError>()
@@ -190,8 +189,9 @@ pub(crate) fn check_transform(
 	let dispatched =
 		|name: &str| registry.get_method(name).is_some_and(|d| d.dispatches_for_an_object());
 	let mut refusal = None;
-	let _ = using.visit_deep(&mut |expr| {
-		let reason = match expr {
+	let _ =
+		using.visit_deep(&mut |expr| {
+			let reason = match expr {
 			LogicalExpr::Subquery(_) => Some("the transform may not hold a statement".to_owned()),
 			LogicalExpr::Lookup {
 				..
@@ -236,16 +236,44 @@ pub(crate) fn check_transform(
 						.to_owned(),
 				),
 			},
-			_ => None,
+			LogicalExpr::Literal(_)
+			| LogicalExpr::Array(_)
+			| LogicalExpr::Set(_)
+			| LogicalExpr::Object(_)
+			| LogicalExpr::RecordId(_)
+			| LogicalExpr::Param(_)
+			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_)
+			| LogicalExpr::Constant(_)
+			| LogicalExpr::Index { .. }
+			| LogicalExpr::First(_)
+			| LogicalExpr::Last(_)
+			| LogicalExpr::Flatten { .. }
+			| LogicalExpr::Filter { .. }
+			| LogicalExpr::Method { .. }
+			| LogicalExpr::Optional { .. }
+			| LogicalExpr::Recurse(_)
+			| LogicalExpr::RepeatRecurse(_)
+			| LogicalExpr::Broadcast { .. }
+			| LogicalExpr::SetField { .. }
+			| LogicalExpr::Prefix { .. }
+			| LogicalExpr::Postfix { .. }
+			| LogicalExpr::Invoke { .. }
+			| LogicalExpr::Binary { .. }
+			| LogicalExpr::Closure(_)
+			| LogicalExpr::If(_)
+			| LogicalExpr::Throw(_)
+			| LogicalExpr::Break
+			| LogicalExpr::Continue => None,
 		};
-		match reason {
-			Some(reason) => {
-				refusal = Some(reason);
-				std::ops::ControlFlow::Break(())
+			match reason {
+				Some(reason) => {
+					refusal = Some(reason);
+					std::ops::ControlFlow::Break(())
+				}
+				None => std::ops::ControlFlow::Continue(()),
 			}
-			None => std::ops::ControlFlow::Continue(()),
-		}
-	});
+		});
 	if let Some(reason) = refusal {
 		return Err(reason);
 	}
@@ -268,17 +296,15 @@ fn undeclared_param(expr: &LogicalExpr, scope: &mut Vec<String>) -> Option<Strin
 		if found.is_some() {
 			return Descend::Over;
 		}
-		match node {
-			LogicalExpr::Param(param) if !scope.iter().any(|name| name == param.as_str()) => {
+		if let LogicalExpr::Param(param) = node {
+			if !scope.iter().any(|name| name == param.as_str()) {
 				found = Some(param.as_str().to_owned());
 			}
-			LogicalExpr::Closure(closure) => {
-				let depth = scope.len();
-				scope.extend(closure.args.iter().map(|(param, _)| param.as_str().to_owned()));
-				found = undeclared_param(&closure.body, scope);
-				scope.truncate(depth);
-			}
-			_ => {}
+		} else if let LogicalExpr::Closure(closure) = node {
+			let depth = scope.len();
+			scope.extend(closure.args.iter().map(|(param, _)| param.as_str().to_owned()));
+			found = undeclared_param(&closure.body, scope);
+			scope.truncate(depth);
 		}
 		Descend::Into
 	});
@@ -305,13 +331,73 @@ fn kind_of(expr: &LogicalExpr, params: &HashMap<String, Kind>) -> Kind {
 		LogicalExpr::Index {
 			base,
 			..
-		} => match kind_of(base, params) {
-			kind @ (Kind::Array(..) | Kind::Set(..) | Kind::Literal(KindLiteral::Array(_))) => {
+		} => {
+			let kind = kind_of(base, params);
+			if matches!(
+				kind,
+				Kind::Array(..) | Kind::Set(..) | Kind::Literal(KindLiteral::Array(_))
+			) {
 				element_kind(&kind)
+			} else {
+				Kind::Any
 			}
-			_ => Kind::Any,
-		},
-		_ => Kind::Any,
+		}
+		LogicalExpr::Array(_)
+		| LogicalExpr::Set(_)
+		| LogicalExpr::Object(_)
+		| LogicalExpr::RecordId(_)
+		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
+		| LogicalExpr::Constant(_)
+		| LogicalExpr::Field(_)
+		| LogicalExpr::Doc
+		| LogicalExpr::Current
+		| LogicalExpr::Each(_)
+		| LogicalExpr::Flatten {
+			..
+		}
+		| LogicalExpr::Filter {
+			..
+		}
+		| LogicalExpr::Method {
+			..
+		}
+		| LogicalExpr::Destructure {
+			..
+		}
+		| LogicalExpr::Optional {
+			..
+		}
+		| LogicalExpr::Lookup {
+			..
+		}
+		| LogicalExpr::Recurse(_)
+		| LogicalExpr::RepeatRecurse(_)
+		| LogicalExpr::Broadcast {
+			..
+		}
+		| LogicalExpr::SetField {
+			..
+		}
+		| LogicalExpr::Prefix {
+			..
+		}
+		| LogicalExpr::Postfix {
+			..
+		}
+		| LogicalExpr::Invoke {
+			..
+		}
+		| LogicalExpr::Binary {
+			..
+		}
+		| LogicalExpr::Call(_)
+		| LogicalExpr::Closure(_)
+		| LogicalExpr::If(_)
+		| LogicalExpr::Throw(_)
+		| LogicalExpr::Break
+		| LogicalExpr::Continue
+		| LogicalExpr::Subquery(_) => Kind::Any,
 	}
 }
 
@@ -325,7 +411,26 @@ fn may_link(kind: &Kind) -> bool {
 			kinds.iter().any(may_link)
 		}
 		Kind::Array(inner, _) | Kind::Set(inner, _) => may_link(inner),
-		_ => false,
+		Kind::None
+		| Kind::Null
+		| Kind::Bool
+		| Kind::Bytes
+		| Kind::Datetime
+		| Kind::Decimal
+		| Kind::Duration
+		| Kind::Float
+		| Kind::Int
+		| Kind::Number
+		| Kind::Object
+		| Kind::String
+		| Kind::Uuid
+		| Kind::Regex
+		| Kind::Table(_)
+		| Kind::Geometry(_)
+		| Kind::Function(..)
+		| Kind::Range
+		| Kind::Literal(_)
+		| Kind::File(_) => false,
 	}
 }
 
@@ -347,7 +452,24 @@ fn field_kind(kind: &Kind, name: &str) -> Kind {
 		| Kind::Record(_)
 		| Kind::Geometry(_)
 		| Kind::Literal(KindLiteral::Array(_)) => Kind::Any,
-		_ => Kind::None,
+		Kind::None
+		| Kind::Null
+		| Kind::Bool
+		| Kind::Bytes
+		| Kind::Datetime
+		| Kind::Decimal
+		| Kind::Duration
+		| Kind::Float
+		| Kind::Int
+		| Kind::Number
+		| Kind::String
+		| Kind::Uuid
+		| Kind::Regex
+		| Kind::Table(_)
+		| Kind::Function(..)
+		| Kind::Range
+		| Kind::Literal(_)
+		| Kind::File(_) => Kind::None,
 	}
 }
 
@@ -358,7 +480,28 @@ fn element_kind(kind: &Kind) -> Kind {
 		Kind::Array(inner, _) | Kind::Set(inner, _) => (**inner).clone(),
 		Kind::Literal(KindLiteral::Array(kinds)) => Kind::Either(kinds.clone()),
 		Kind::Either(kinds) => Kind::Either(kinds.iter().map(element_kind).collect()),
-		kind => kind.clone(),
+		kind @ (Kind::Any
+		| Kind::None
+		| Kind::Null
+		| Kind::Bool
+		| Kind::Bytes
+		| Kind::Datetime
+		| Kind::Decimal
+		| Kind::Duration
+		| Kind::Float
+		| Kind::Int
+		| Kind::Number
+		| Kind::Object
+		| Kind::String
+		| Kind::Uuid
+		| Kind::Regex
+		| Kind::Table(_)
+		| Kind::Record(_)
+		| Kind::Geometry(_)
+		| Kind::Function(..)
+		| Kind::Range
+		| Kind::Literal(_)
+		| Kind::File(_)) => kind.clone(),
 	}
 }
 
@@ -510,9 +653,10 @@ pub(crate) fn lossless_coerce(value: &Value, kind: &Kind) -> Option<Value> {
 /// held apart, so the only elements merged are the duplicates an array held.
 fn preserved(original: &Value, coerced: &Value, kind: &Kind) -> bool {
 	let kind = coerced_member(original, kind);
-	let element = match kind {
-		Kind::Array(element, _) | Kind::Set(element, _) => element.as_ref(),
-		_ => &Kind::Any,
+	let element = if let Kind::Array(element, _) | Kind::Set(element, _) = kind {
+		element.as_ref()
+	} else {
+		&Kind::Any
 	};
 	match (original, coerced) {
 		(Value::Number(a), Value::Number(b)) => match (a, b) {
@@ -1074,10 +1218,7 @@ pub(crate) async fn replay_record(
 /// The error a step's failure is, for a caller that holds no control flow: a
 /// step runs in a frame that signals nothing but its failure.
 pub(crate) fn into_error(flow: ControlFlow) -> anyhow::Error {
-	match flow {
-		ControlFlow::Err(e) => e,
-		other => anyhow::anyhow!("a migration step signalled {other:?}"),
-	}
+	flow.into_error_or(|other| anyhow::anyhow!("a migration step signalled {other:?}"))
 }
 
 /// What a `MIGRATE EXISTING ROWS` clause asks of its statement.
@@ -1337,20 +1478,21 @@ async fn proven_total(
 	let new = step.test.kind.as_ref();
 	let is_value =
 		|expr: &LogicalExpr| matches!(expr, LogicalExpr::Param(p) if p.as_str() == "value");
-	Ok(match using {
-		expr if is_value(expr) => new.is_none_or(|new| old.widens_to(new)),
-		LogicalExpr::Prefix {
-			op: PrefixOperator::Cast(target),
-			expr,
-		} if is_value(expr) => {
-			let numeric = |kind: &Kind| {
-				matches!(kind, Kind::Int | Kind::Float | Kind::Number | Kind::Decimal)
-			};
-			numeric(old)
-				&& matches!(target, Kind::Float | Kind::Number)
-				&& new.is_none_or(|new| target.widens_to(new))
-		}
-		_ => false,
+	Ok(if is_value(using) {
+		new.is_none_or(|new| old.widens_to(new))
+	} else if let LogicalExpr::Prefix {
+		op: PrefixOperator::Cast(target),
+		expr,
+	} = using
+		&& is_value(expr)
+	{
+		let numeric =
+			|kind: &Kind| matches!(kind, Kind::Int | Kind::Float | Kind::Number | Kind::Decimal);
+		numeric(old)
+			&& matches!(target, Kind::Float | Kind::Number)
+			&& new.is_none_or(|new| target.widens_to(new))
+	} else {
+		false
 	})
 }
 
@@ -1483,13 +1625,34 @@ fn holds(kind: &Kind, segment: &Part, flexible: bool) -> bool {
 		Kind::Array(inner, _) | Kind::Set(inner, _) => {
 			matches!(segment, Part::All) || holds(inner, segment, flexible)
 		}
-		Kind::Literal(KindLiteral::Object(shape)) => match segment {
-			Part::Field(key) => flexible || shape.keys().any(|k| k.as_str() == key.as_str()),
-			Part::All => true,
-			_ => false,
-		},
+		Kind::Literal(KindLiteral::Object(shape)) => {
+			if let Part::Field(key) = segment {
+				flexible || shape.keys().any(|k| k.as_str() == key.as_str())
+			} else {
+				matches!(segment, Part::All)
+			}
+		}
 		Kind::Literal(KindLiteral::Array(_)) => matches!(segment, Part::All),
-		_ => false,
+		Kind::None
+		| Kind::Null
+		| Kind::Bool
+		| Kind::Bytes
+		| Kind::Datetime
+		| Kind::Decimal
+		| Kind::Duration
+		| Kind::Float
+		| Kind::Int
+		| Kind::Number
+		| Kind::String
+		| Kind::Uuid
+		| Kind::Regex
+		| Kind::Table(_)
+		| Kind::Record(_)
+		| Kind::Geometry(_)
+		| Kind::Function(..)
+		| Kind::Range
+		| Kind::Literal(_)
+		| Kind::File(_) => false,
 	}
 }
 
@@ -1498,17 +1661,41 @@ fn holds(kind: &Kind, segment: &Part, flexible: bool) -> bool {
 fn literal_slot<'a>(kind: &'a Kind, segment: &Part) -> Option<&'a Kind> {
 	use crate::expr::kind::KindLiteral;
 	match kind {
-		Kind::Literal(KindLiteral::Object(shape)) => match segment {
-			Part::Field(key) => {
+		Kind::Literal(KindLiteral::Object(shape)) => {
+			if let Part::Field(key) = segment {
 				shape.iter().find(|(k, _)| k.as_str() == key.as_str()).map(|(_, kind)| kind)
+			} else {
+				None
 			}
-			_ => None,
-		},
+		}
 		Kind::Either(arms) => arms.iter().find_map(|arm| literal_slot(arm, segment)),
 		Kind::Array(inner, _) | Kind::Set(inner, _) if matches!(segment, Part::Field(_)) => {
 			literal_slot(inner, segment)
 		}
-		_ => None,
+		Kind::Any
+		| Kind::None
+		| Kind::Null
+		| Kind::Bool
+		| Kind::Bytes
+		| Kind::Datetime
+		| Kind::Decimal
+		| Kind::Duration
+		| Kind::Float
+		| Kind::Int
+		| Kind::Number
+		| Kind::Object
+		| Kind::String
+		| Kind::Uuid
+		| Kind::Regex
+		| Kind::Table(_)
+		| Kind::Record(_)
+		| Kind::Geometry(_)
+		| Kind::Set(..)
+		| Kind::Array(..)
+		| Kind::Function(..)
+		| Kind::Range
+		| Kind::Literal(_)
+		| Kind::File(_) => None,
 	}
 }
 
@@ -1638,9 +1825,10 @@ fn fold_children(
 				Some((_, element)) => Box::new(element.clone()),
 				None => inner.clone(),
 			};
-			Ok(match arm {
-				Kind::Set(..) => Kind::Set(inner, *len),
-				_ => Kind::Array(inner, *len),
+			Ok(if let Kind::Set(..) = arm {
+				Kind::Set(inner, *len)
+			} else {
+				Kind::Array(inner, *len)
 			})
 		}
 		Kind::Object => match element_name {
@@ -1660,11 +1848,31 @@ fn fold_children(
 			Some(name) => Err(name.clone()),
 			None => Ok(arm.clone()),
 		},
-		other => Ok(other.clone()),
+		other @ (Kind::None
+		| Kind::Null
+		| Kind::Bool
+		| Kind::Bytes
+		| Kind::Datetime
+		| Kind::Decimal
+		| Kind::Duration
+		| Kind::Float
+		| Kind::Int
+		| Kind::Number
+		| Kind::String
+		| Kind::Uuid
+		| Kind::Regex
+		| Kind::Table(_)
+		| Kind::Record(_)
+		| Kind::Geometry(_)
+		| Kind::Either(_)
+		| Kind::Function(..)
+		| Kind::Range
+		| Kind::File(_)) => Ok(other.clone()),
 	};
-	match kind {
-		Kind::Either(arms) => Ok(Kind::Either(arms.iter().map(fold).collect::<Result<_, _>>()?)),
-		kind => fold(kind),
+	if let Kind::Either(arms) = kind {
+		Ok(Kind::Either(arms.iter().map(fold).collect::<Result<_, _>>()?))
+	} else {
+		fold(kind)
 	}
 }
 
@@ -2267,10 +2475,10 @@ fn reads_any_field(expr: &crate::expr::Expr, wanted: impl Fn(&str) -> bool) -> b
 	};
 	let mut reads = false;
 	let _ = logical.visit_deep(&mut |expr| {
-		let hit = match expr {
-			LogicalExpr::Field(field) => wanted(field.as_str()),
-			LogicalExpr::Doc | LogicalExpr::Current => true,
-			_ => false,
+		let hit = if let LogicalExpr::Field(field) = expr {
+			wanted(field.as_str())
+		} else {
+			matches!(expr, LogicalExpr::Doc | LogicalExpr::Current)
 		};
 		if hit {
 			reads = true;

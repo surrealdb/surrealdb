@@ -17,13 +17,21 @@ fn encode_body(req: RequestBuilder, body: PublicValue) -> RequestBuilder {
 	match body {
 		PublicValue::Bytes(v) => req.body(v.into_inner()),
 		PublicValue::String(v) => req.body(v),
-		// Any other non-nullish value is sent as a JSON body. `into_json_value` is a
-		// total conversion that handles every value variant, so this never fails: types
-		// without a native JSON representation (for example record ids, ranges and
-		// durations) are sent as their string form.
-		_ if !body.is_nullish() => req.json(&body.into_json_value()),
-		// `NONE`/`NULL` bodies are sent without a request body.
-		_ => req,
+		PublicValue::None | PublicValue::Null => req,
+		PublicValue::Bool(_)
+		| PublicValue::Number(_)
+		| PublicValue::Duration(_)
+		| PublicValue::Datetime(_)
+		| PublicValue::Uuid(_)
+		| PublicValue::Geometry(_)
+		| PublicValue::Table(_)
+		| PublicValue::RecordId(_)
+		| PublicValue::File(_)
+		| PublicValue::Range(_)
+		| PublicValue::Regex(_)
+		| PublicValue::Array(_)
+		| PublicValue::Object(_)
+		| PublicValue::Set(_) => req.json(&body.into_json_value()),
 	}
 }
 

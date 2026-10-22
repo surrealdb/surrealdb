@@ -15,20 +15,17 @@ use crate::val::{RecordId, Value};
 
 /// One endpoint read off the before-image, which is what the stored pointer
 /// keys were derived from.
-#[allow(
-	clippy::wildcard_enum_match_arm,
-	reason = "an edge's endpoint is a record id, or the before-image is not an edge"
-)]
 pub(crate) fn endpoint(
 	initial: &Value,
 	path: &[crate::expr::Part],
 	which: &'static str,
 ) -> Result<RecordId, ControlFlow> {
-	match initial.pick(path) {
-		Value::RecordId(id) => Ok(id),
-		_ => Err(ControlFlow::Err(anyhow::Error::new(EngineError::unreachable(format!(
+	if let Value::RecordId(id) = initial.pick(path) {
+		Ok(id)
+	} else {
+		Err(ControlFlow::Err(anyhow::Error::new(EngineError::unreachable(format!(
 			"Expected a record id for the `{which}` field of an edge"
-		))))),
+		)))))
 	}
 }
 

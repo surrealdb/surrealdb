@@ -204,15 +204,16 @@ pub(crate) async fn backfill_reference_keys(
 					let record =
 						catalog::Record::decode_admitted(value, Some(&layouts), rid.clone())?;
 					for (_, found) in record.data.walk(&field.name) {
-						match &found {
-							Value::RecordId(target) => links.push((rid.clone(), target.clone())),
-							Value::Array(items) => links.extend(items.iter().filter_map(|item| {
+						if let Value::RecordId(target) = &found {
+							links.push((rid.clone(), target.clone()));
+						} else if let Value::Array(items) = &found {
+							links.extend(items.iter().filter_map(|item| {
 								item.as_record().map(|target| (rid.clone(), target.clone()))
-							})),
-							Value::Set(items) => links.extend(items.iter().filter_map(|item| {
+							}));
+						} else if let Value::Set(items) = &found {
+							links.extend(items.iter().filter_map(|item| {
 								item.as_record().map(|target| (rid.clone(), target.clone()))
-							})),
-							_ => {}
+							}));
 						}
 					}
 					Ok(())

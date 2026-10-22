@@ -58,7 +58,16 @@ pub(crate) fn value_hash(value: &Value) -> u64 {
 				value_hash(v).hash(&mut hasher);
 			}
 		}
-		_ => {
+		Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Set(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => {
 			255u8.hash(&mut hasher);
 			format!("{:?}", value).hash(&mut hasher);
 		}

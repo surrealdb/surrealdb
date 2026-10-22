@@ -186,15 +186,16 @@ pub(crate) fn prepare(
 	// do not belong nested inside the caller's transaction.
 	let mut statements = Vec::with_capacity(ast.expressions.len());
 	for expr in ast.expressions {
-		match expr {
-			surrealdb_expr::parser::TopLevelExpr::Expr(expr) => statements.push(expr),
-			_ => bail!(ExecError::InvalidFunction {
+		if let surrealdb_expr::parser::TopLevelExpr::Expr(expr) = expr {
+			statements.push(expr);
+		} else {
+			bail!(ExecError::InvalidFunction {
 				name: name.to_string(),
 				message: "only query statements may be evaluated; transaction-control and \
 				          session statements (BEGIN, CANCEL, COMMIT, USE, LIVE, KILL, OPTION, \
 				          SHOW, and access statements) are not allowed inside eval"
 					.to_string(),
-			}),
+			});
 		}
 	}
 	// `eval::surql` evaluates a *single* statement so its returned value is

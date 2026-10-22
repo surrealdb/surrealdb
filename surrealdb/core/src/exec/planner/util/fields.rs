@@ -78,7 +78,66 @@ fn collect_steps<'a>(expr: &'a LogicalExpr, out: &mut Vec<&'a LogicalExpr>) {
 				explicit: false,
 				..
 			} => {}
-			_ => out.push(step),
+			LogicalExpr::Literal(_)
+			| LogicalExpr::Array(_)
+			| LogicalExpr::Set(_)
+			| LogicalExpr::Object(_)
+			| LogicalExpr::RecordId(_)
+			| LogicalExpr::Param(_)
+			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_)
+			| LogicalExpr::Constant(_)
+			| LogicalExpr::Field(_)
+			| LogicalExpr::Doc
+			| LogicalExpr::Current
+			| LogicalExpr::Access {
+				..
+			}
+			| LogicalExpr::Index {
+				..
+			}
+			| LogicalExpr::First(_)
+			| LogicalExpr::Last(_)
+			| LogicalExpr::Each(_)
+			| LogicalExpr::Flatten {
+				..
+			}
+			| LogicalExpr::Filter {
+				..
+			}
+			| LogicalExpr::Method {
+				..
+			}
+			| LogicalExpr::Destructure {
+				..
+			}
+			| LogicalExpr::Lookup {
+				..
+			}
+			| LogicalExpr::Recurse(_)
+			| LogicalExpr::RepeatRecurse(_)
+			| LogicalExpr::SetField {
+				..
+			}
+			| LogicalExpr::Prefix {
+				..
+			}
+			| LogicalExpr::Postfix {
+				..
+			}
+			| LogicalExpr::Invoke {
+				..
+			}
+			| LogicalExpr::Binary {
+				..
+			}
+			| LogicalExpr::Call(_)
+			| LogicalExpr::Closure(_)
+			| LogicalExpr::If(_)
+			| LogicalExpr::Throw(_)
+			| LogicalExpr::Break
+			| LogicalExpr::Continue
+			| LogicalExpr::Subquery(_) => out.push(step),
 		}
 	}
 }
@@ -118,12 +177,15 @@ pub(crate) fn field_path_from_expr(expr: &LogicalExpr) -> Result<FieldPath, Erro
 			LogicalExpr::Index {
 				index,
 				..
-			} => match index.as_ref() {
-				LogicalExpr::Literal(LogicalLiteral::Integer(i)) if *i >= 0 => {
-					parts.push(FieldPathPart::Index(*i as usize))
+			} => {
+				if let LogicalExpr::Literal(LogicalLiteral::Integer(i)) = index.as_ref()
+					&& *i >= 0
+				{
+					parts.push(FieldPathPart::Index(*i as usize));
+				} else {
+					return Err(unsupported());
 				}
-				_ => return Err(unsupported()),
-			},
+			}
 			// A graph traversal keys the output by its rendering, `->table`.
 			LogicalExpr::Lookup {
 				lookup,
@@ -133,7 +195,57 @@ pub(crate) fn field_path_from_expr(expr: &LogicalExpr) -> Result<FieldPath, Erro
 				..
 			} => {}
 			start if !start.is_path() => {}
-			_ => return Err(unsupported()),
+			LogicalExpr::Literal(_)
+			| LogicalExpr::Array(_)
+			| LogicalExpr::Set(_)
+			| LogicalExpr::Object(_)
+			| LogicalExpr::RecordId(_)
+			| LogicalExpr::Param(_)
+			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_)
+			| LogicalExpr::Constant(_)
+			| LogicalExpr::Doc
+			| LogicalExpr::Current
+			| LogicalExpr::Each(_)
+			| LogicalExpr::Flatten {
+				..
+			}
+			| LogicalExpr::Filter {
+				..
+			}
+			| LogicalExpr::Method {
+				..
+			}
+			| LogicalExpr::Optional {
+				..
+			}
+			| LogicalExpr::Recurse(_)
+			| LogicalExpr::RepeatRecurse(_)
+			| LogicalExpr::Broadcast {
+				..
+			}
+			| LogicalExpr::SetField {
+				..
+			}
+			| LogicalExpr::Prefix {
+				..
+			}
+			| LogicalExpr::Postfix {
+				..
+			}
+			| LogicalExpr::Invoke {
+				..
+			}
+			| LogicalExpr::Binary {
+				..
+			}
+			| LogicalExpr::Call(_)
+			| LogicalExpr::Closure(_)
+			| LogicalExpr::If(_)
+			| LogicalExpr::Throw(_)
+			| LogicalExpr::Break
+			| LogicalExpr::Continue
+			| LogicalExpr::Subquery(_) => return Err(unsupported()),
 		}
 	}
 	Ok(FieldPath(parts))
@@ -220,7 +332,55 @@ mod tests {
 				LogicalExpr::Optional {
 					..
 				} => "optional".to_owned(),
-				other => other.to_sql(),
+				other @ LogicalExpr::Literal(_)
+				| other @ LogicalExpr::Array(_)
+				| other @ LogicalExpr::Set(_)
+				| other @ LogicalExpr::Object(_)
+				| other @ LogicalExpr::RecordId(_)
+				| other @ LogicalExpr::Param(_)
+				| other @ LogicalExpr::Table(_)
+				| other @ LogicalExpr::Mock(_)
+				| other @ LogicalExpr::Constant(_)
+				| other @ LogicalExpr::Doc
+				| other @ LogicalExpr::Current
+				| other @ LogicalExpr::First(_)
+				| other @ LogicalExpr::Last(_)
+				| other @ LogicalExpr::Flatten {
+					..
+				}
+				| other @ LogicalExpr::Method {
+					..
+				}
+				| other @ LogicalExpr::Destructure {
+					..
+				}
+				| other @ LogicalExpr::Recurse(_)
+				| other @ LogicalExpr::RepeatRecurse(_)
+				| other @ LogicalExpr::Broadcast {
+					..
+				}
+				| other @ LogicalExpr::SetField {
+					..
+				}
+				| other @ LogicalExpr::Prefix {
+					..
+				}
+				| other @ LogicalExpr::Postfix {
+					..
+				}
+				| other @ LogicalExpr::Invoke {
+					..
+				}
+				| other @ LogicalExpr::Binary {
+					..
+				}
+				| other @ LogicalExpr::Call(_)
+				| other @ LogicalExpr::Closure(_)
+				| other @ LogicalExpr::If(_)
+				| other @ LogicalExpr::Throw(_)
+				| other @ LogicalExpr::Break
+				| other @ LogicalExpr::Continue
+				| other @ LogicalExpr::Subquery(_) => other.to_sql(),
 			})
 			.collect()
 	}

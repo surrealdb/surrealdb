@@ -158,7 +158,101 @@ pub(crate) async fn fill(
 					}
 				}
 			}
-			_ => {}
+			LogOp::Request {
+				..
+			}
+			| LogOp::Txn {
+				..
+			}
+			| LogOp::Stmt {
+				..
+			}
+			| LogOp::Statement {
+				..
+			}
+			| LogOp::Values {
+				..
+			}
+			| LogOp::Match {
+				..
+			}
+			| LogOp::MatchRead {
+				..
+			}
+			| LogOp::MatchUpdate(_)
+			| LogOp::MatchDelete {
+				..
+			}
+			| LogOp::MatchInsert(_)
+			| LogOp::MatchOutput(_)
+			| LogOp::BindStep(_)
+			| LogOp::Subquery
+			| LogOp::Assign(_)
+			| LogOp::Unset {
+				..
+			}
+			| LogOp::Content {
+				..
+			}
+			| LogOp::DdlGuard {
+				..
+			}
+			| LogOp::UnionAll
+			| LogOp::Join {
+				..
+			}
+			| LogOp::Filter
+			| LogOp::PermissionFilter {
+				..
+			}
+			| LogOp::Split {
+				..
+			}
+			| LogOp::Aggregate(_)
+			| LogOp::Distinct
+			| LogOp::Sort(_)
+			| LogOp::Limit {
+				..
+			}
+			| LogOp::Project(_)
+			| LogOp::Fetch
+			| LogOp::Timeout
+			| LogOp::VersionScope
+			| LogOp::Only
+			| LogOp::Explain {
+				..
+			}
+			| LogOp::Eval
+			| LogOp::Block
+			| LogOp::Let(_)
+			| LogOp::Return
+			| LogOp::Loop {
+				..
+			}
+			| LogOp::If
+			| LogOp::Info {
+				..
+			}
+			| LogOp::Sleep
+			| LogOp::Use {
+				..
+			}
+			| LogOp::Option {
+				..
+			}
+			| LogOp::Access(_)
+			| LogOp::Kill
+			| LogOp::Live(_)
+			| LogOp::Subscriber(_)
+			| LogOp::Show(_)
+			| LogOp::Choose(_)
+			| LogOp::WriteStage {
+				..
+			}
+			| LogOp::Events(_)
+			| LogOp::Yield
+			| LogOp::Next
+			| LogOp::Break => {}
 		}
 		Walk::Continue
 	});
@@ -298,7 +392,7 @@ pub(crate) async fn fill_record_folds(
 					})
 				}));
 			}
-			_ => {}
+			OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => {}
 		}
 		Walk::Continue
 	});
@@ -374,12 +468,96 @@ fn written_tables(ir: &Ir, write: crate::exec::ir::iface::ids::OpId) -> Vec<Tabl
 		};
 		match kind {
 			ExprOp::RecordId(record) => tables.push(record.table.clone()),
-			ExprOp::Literal(value) => match &**value {
-				Value::Table(table) => tables.push(table.clone()),
-				Value::RecordId(record) => tables.push(record.table.clone()),
-				_ => {}
-			},
-			_ => {}
+			ExprOp::Literal(value) => {
+				if let Value::Table(table) = &**value {
+					tables.push(table.clone());
+				} else if let Value::RecordId(record) = &**value {
+					tables.push(record.table.clone());
+				}
+			}
+			ExprOp::Array
+			| ExprOp::Set
+			| ExprOp::Object {
+				..
+			}
+			| ExprOp::FreeParam {
+				..
+			}
+			| ExprOp::SessionParam {
+				..
+			}
+			| ExprOp::CatalogParam {
+				..
+			}
+			| ExprOp::Table {
+				..
+			}
+			| ExprOp::Mock(_)
+			| ExprOp::Constant {
+				..
+			}
+			| ExprOp::Field {
+				..
+			}
+			| ExprOp::ComputedRead(_)
+			| ExprOp::Doc
+			| ExprOp::Access {
+				..
+			}
+			| ExprOp::Deref {
+				..
+			}
+			| ExprOp::Index
+			| ExprOp::First
+			| ExprOp::Last
+			| ExprOp::Each
+			| ExprOp::Flatten {
+				..
+			}
+			| ExprOp::Dispatch(_)
+			| ExprOp::Method {
+				..
+			}
+			| ExprOp::Destructure {
+				..
+			}
+			| ExprOp::Optional
+			| ExprOp::RepeatRecurse
+			| ExprOp::SetField {
+				..
+			}
+			| ExprOp::TupleRow {
+				..
+			}
+			| ExprOp::Prefix(_)
+			| ExprOp::Convert(_)
+			| ExprOp::Postfix {
+				..
+			}
+			| ExprOp::Invoke
+			| ExprOp::Binary {
+				..
+			}
+			| ExprOp::ShortCircuit {
+				..
+			}
+			| ExprOp::Call(_)
+			| ExprOp::ClosureCreate(_)
+			| ExprOp::If
+			| ExprOp::Throw
+			| ExprOp::Subquery(_)
+			| ExprOp::Yield
+			| ExprOp::Truthy
+			| ExprOp::Agg {
+				..
+			}
+			| ExprOp::Now {
+				..
+			}
+			| ExprOp::Raise(_)
+			| ExprOp::DepthCharge {
+				..
+			} => {}
 		}
 	}
 	tables
@@ -425,7 +603,9 @@ fn inline_of(
 ) -> Option<Arc<InlineFields>> {
 	match &table.table_type {
 		crate::catalog::TableType::Relation(relation) if !relation.lightweight => {}
-		_ => return None,
+		crate::catalog::TableType::Any
+		| crate::catalog::TableType::Normal
+		| crate::catalog::TableType::Relation(_) => return None,
 	}
 	let names = crate::doc::inline_fields(fields)
 		.into_iter()
@@ -692,7 +872,104 @@ fn field_statement(ir: &Ir, op: OpId, kind: &LogOp) -> Result<Option<FieldStatem
 				}
 			}))
 		}
-		_ => Ok(None),
+		LogOp::Request {
+			..
+		}
+		| LogOp::Txn {
+			..
+		}
+		| LogOp::Stmt {
+			..
+		}
+		| LogOp::Statement {
+			..
+		}
+		| LogOp::Source(_)
+		| LogOp::Values {
+			..
+		}
+		| LogOp::Match {
+			..
+		}
+		| LogOp::MatchRead {
+			..
+		}
+		| LogOp::MatchUpdate(_)
+		| LogOp::MatchDelete {
+			..
+		}
+		| LogOp::MatchInsert(_)
+		| LogOp::MatchOutput(_)
+		| LogOp::BindStep(_)
+		| LogOp::Subquery
+		| LogOp::Write(_)
+		| LogOp::Assign(_)
+		| LogOp::Unset {
+			..
+		}
+		| LogOp::Content {
+			..
+		}
+		| LogOp::DdlGuard {
+			..
+		}
+		| LogOp::Rebuild(_)
+		| LogOp::UnionAll
+		| LogOp::Join {
+			..
+		}
+		| LogOp::Filter
+		| LogOp::PermissionFilter {
+			..
+		}
+		| LogOp::Split {
+			..
+		}
+		| LogOp::Aggregate(_)
+		| LogOp::Distinct
+		| LogOp::Sort(_)
+		| LogOp::Limit {
+			..
+		}
+		| LogOp::Project(_)
+		| LogOp::Fetch
+		| LogOp::Timeout
+		| LogOp::VersionScope
+		| LogOp::Only
+		| LogOp::Explain {
+			..
+		}
+		| LogOp::Eval
+		| LogOp::Block
+		| LogOp::Let(_)
+		| LogOp::Return
+		| LogOp::Loop {
+			..
+		}
+		| LogOp::If
+		| LogOp::Info {
+			..
+		}
+		| LogOp::Sleep
+		| LogOp::Use {
+			..
+		}
+		| LogOp::Option {
+			..
+		}
+		| LogOp::Access(_)
+		| LogOp::Kill
+		| LogOp::Live(_)
+		| LogOp::Subscriber(_)
+		| LogOp::Show(_)
+		| LogOp::Choose(_)
+		| LogOp::WriteStage {
+			..
+		}
+		| LogOp::Events(_)
+		| LogOp::Yield
+		| LogOp::Next
+		| LogOp::Break => Ok(None),
 	}
 }
 

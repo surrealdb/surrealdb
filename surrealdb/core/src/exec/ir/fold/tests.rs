@@ -234,7 +234,12 @@ async fn outcome_mapping() {
 			assert_eq!(premises, PremiseSet::new());
 			assert_eq!(depth, 2);
 		}
-		other => panic!("a small value is not a constant: {other:?}"),
+		other @ (FoldOutcome::Raises {
+			..
+		}
+		| FoldOutcome::NotFoldable(_)) => {
+			panic!("a small value is not a constant: {other:?}")
+		}
 	}
 
 	let folder = VmFolder::new(CapabilityPolicy::AllowAll, &TOO_BIG);
@@ -254,7 +259,12 @@ async fn outcome_mapping() {
 			assert_eq!(premises, PremiseSet::new());
 			assert_eq!(depth, 0);
 		}
-		other => panic!("a raise is not a raise: {other:?}"),
+		other @ (FoldOutcome::Constant {
+			..
+		}
+		| FoldOutcome::NotFoldable(_)) => {
+			panic!("a raise is not a raise: {other:?}")
+		}
 	}
 
 	let folder = VmFolder::new(CapabilityPolicy::AllowAll, &REFUSES);

@@ -137,7 +137,21 @@ fn packed_numbers(
 ) -> anyhow::Result<bool> {
 	match read_root(row, name)?.1 {
 		FieldRef::Stored(value) => stored_numbers(value, out),
-		_ => {
+		FieldRef::Absent
+		| FieldRef::Null
+		| FieldRef::Object
+		| FieldRef::Bool(_)
+		| FieldRef::Int(_)
+		| FieldRef::Float(_)
+		| FieldRef::Decimal(_)
+		| FieldRef::Uuid(_)
+		| FieldRef::Datetime(_)
+		| FieldRef::Duration(_)
+		| FieldRef::Point(..)
+		| FieldRef::String(_)
+		| FieldRef::Bytes(_)
+		| FieldRef::Literal(_)
+		| FieldRef::RecordId(..) => {
 			out.clear();
 			Ok(false)
 		}
@@ -161,11 +175,37 @@ fn packed_knn_vector(
 		FieldRef::Object => None,
 		// Any other root is a scalar, `NONE` or `NULL`: none holds a vector, and a field step over
 		// one reaches `NONE`.
-		_ if rest.0.iter().all(|part| matches!(part, FieldPathPart::Field(_))) => {
+		FieldRef::Absent
+		| FieldRef::Null
+		| FieldRef::Bool(_)
+		| FieldRef::Int(_)
+		| FieldRef::Float(_)
+		| FieldRef::Decimal(_)
+		| FieldRef::Uuid(_)
+		| FieldRef::Datetime(_)
+		| FieldRef::Duration(_)
+		| FieldRef::Point(..)
+		| FieldRef::String(_)
+		| FieldRef::Bytes(_)
+		| FieldRef::RecordId(..)
+			if rest.0.iter().all(|part| matches!(part, FieldPathPart::Field(_))) =>
+		{
 			out.clear();
 			Some(false)
 		}
-		_ => None,
+		FieldRef::Absent
+		| FieldRef::Null
+		| FieldRef::Bool(_)
+		| FieldRef::Int(_)
+		| FieldRef::Float(_)
+		| FieldRef::Decimal(_)
+		| FieldRef::Uuid(_)
+		| FieldRef::Datetime(_)
+		| FieldRef::Duration(_)
+		| FieldRef::Point(..)
+		| FieldRef::String(_)
+		| FieldRef::Bytes(_)
+		| FieldRef::RecordId(..) => None,
 	})
 }
 
@@ -259,11 +299,10 @@ impl<'a> LazyPackedRow<'a> {
 
 impl RowReader for LazyPackedRow<'_> {
 	fn field(&self, name: &FieldName) -> anyhow::Result<Scalar<'_>> {
-		match self.decoded()? {
-			Value::Object(object) => {
-				Ok(object.get(name.as_str()).map(Scalar::of).unwrap_or(Scalar::None))
-			}
-			_ => anyhow::bail!("the VM read a field from a row that is not an object"),
+		if let Value::Object(object) = self.decoded()? {
+			Ok(object.get(name.as_str()).map(Scalar::of).unwrap_or(Scalar::None))
+		} else {
+			anyhow::bail!("the VM read a field from a row that is not an object")
 		}
 	}
 
@@ -475,7 +514,20 @@ impl RowReader for PackedRowReader<'_> {
 			// An integer a `Value` column holds, or a literal union's literal, is an integer.
 			FieldRef::Stored(v) => v.as_int()?,
 			FieldRef::Literal(Value::Number(Number::Int(v))) => Some(*v),
-			_ => None,
+			FieldRef::Absent
+			| FieldRef::Null
+			| FieldRef::Object
+			| FieldRef::Bool(_)
+			| FieldRef::Float(_)
+			| FieldRef::Decimal(_)
+			| FieldRef::Uuid(_)
+			| FieldRef::Datetime(_)
+			| FieldRef::Duration(_)
+			| FieldRef::Point(..)
+			| FieldRef::String(_)
+			| FieldRef::Bytes(_)
+			| FieldRef::Literal(_)
+			| FieldRef::RecordId(..) => None,
 		})
 	}
 
@@ -945,9 +997,10 @@ mod tests {
 				agree(&mutant);
 			}
 			for value in values() {
-				let with = match id {
-					RecordIdKey::Array(_) => RecordIdKey::Array(Array::from(vec![value.clone()])),
-					_ => RecordIdKey::Object(object_of(vec![("k", value.clone())])),
+				let with = if let RecordIdKey::Array(_) = id {
+					RecordIdKey::Array(Array::from(vec![value.clone()]))
+				} else {
+					RecordIdKey::Object(object_of(vec![("k", value.clone())]))
 				};
 				let key = key_of("t", &with);
 				assert_eq!(key[slot], tag(&value), "{value:?}");

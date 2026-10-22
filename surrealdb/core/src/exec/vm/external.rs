@@ -162,7 +162,15 @@ async fn judge(
 				super::program::ExternalCallee::Model {
 					..
 				} => crate::exec::guard_verdicts::GuardKind::Model,
-				_ => crate::exec::guard_verdicts::GuardKind::Module,
+				super::program::ExternalCallee::Script {
+					..
+				}
+				| super::program::ExternalCallee::Module {
+					..
+				}
+				| super::program::ExternalCallee::Function {
+					..
+				} => crate::exec::guard_verdicts::GuardKind::Module,
 			};
 			crate::exec::guard_verdicts::judged(ctx.exec_ctx, scope, kind, name, hash.0, || {
 				super::function::judge(

@@ -41,15 +41,20 @@ impl SplitTarget {
 	pub(crate) fn read(&self, value: &Value) -> Value {
 		match self {
 			SplitTarget::At(path) | SplitTarget::Every(path) => path.extract(value).into_owned(),
-			SplitTarget::Through(path, inner) => match path.extract(value).as_ref() {
-				Value::Array(arr) => Value::Array(
-					arr.iter().map(|element| inner.read(element)).collect::<Vec<_>>().into(),
-				),
-				Value::Object(obj) => Value::Array(
-					obj.values().map(|element| inner.read(element)).collect::<Vec<_>>().into(),
-				),
-				_ => Value::None,
-			},
+			SplitTarget::Through(path, inner) => {
+				let extracted = path.extract(value);
+				if let Value::Array(arr) = extracted.as_ref() {
+					Value::Array(
+						arr.iter().map(|element| inner.read(element)).collect::<Vec<_>>().into(),
+					)
+				} else if let Value::Object(obj) = extracted.as_ref() {
+					Value::Array(
+						obj.values().map(|element| inner.read(element)).collect::<Vec<_>>().into(),
+					)
+				} else {
+					Value::None
+				}
+			}
 			SplitTarget::Nowhere => Value::None,
 		}
 	}
@@ -61,36 +66,35 @@ impl SplitTarget {
 			SplitTarget::Every(path) => {
 				// Each position takes the element, so the collection keeps its
 				// shape and every slot holds what this row was split on.
-				let filled = match path.extract(value).as_ref() {
-					Value::Array(arr) => Value::Array(vec![element; arr.len()].into()),
-					Value::Object(obj) => {
-						let mut out = crate::val::Object::default();
-						for key in obj.keys().cloned().collect::<Vec<_>>() {
-							out.insert(key, element.clone());
-						}
-						Value::Object(out)
+				let extracted = path.extract(value);
+				let filled = if let Value::Array(arr) = extracted.as_ref() {
+					Value::Array(vec![element; arr.len()].into())
+				} else if let Value::Object(obj) = extracted.as_ref() {
+					let mut out = crate::val::Object::default();
+					for key in obj.keys().cloned().collect::<Vec<_>>() {
+						out.insert(key, element.clone());
 					}
+					Value::Object(out)
+				} else {
 					// Not a collection: there are no positions to fill, and
 					// the read yielded nothing to split on either.
-					_ => return,
+					return;
 				};
 				value.set_at_field_path_owned(path, filled);
 			}
 			SplitTarget::Through(path, inner) => {
 				let mut collection = path.extract(value).into_owned();
-				match &mut collection {
-					Value::Array(arr) => {
-						for slot in arr.iter_mut() {
-							inner.write(slot, element.clone());
-						}
+				if let Value::Array(arr) = &mut collection {
+					for slot in arr.iter_mut() {
+						inner.write(slot, element.clone());
 					}
-					Value::Object(obj) => {
-						for slot in obj.values_mut() {
-							inner.write(slot, element.clone());
-						}
+				} else if let Value::Object(obj) = &mut collection {
+					for slot in obj.values_mut() {
+						inner.write(slot, element.clone());
 					}
+				} else {
 					// Not a collection: no element holds a position to write.
-					_ => return,
+					return;
 				}
 				value.set_at_field_path_owned(path, collection);
 			}
@@ -153,11 +157,16 @@ pub(crate) fn split_target(expr: &LogicalExpr) -> Option<SplitTarget> {
 			} => {
 				walk(base, w)?;
 				w.ends_on_every = false;
-				let number = match index.as_ref() {
-					LogicalExpr::Literal(LogicalLiteral::Integer(i)) => Number::Int(*i),
-					LogicalExpr::Literal(LogicalLiteral::Float(f)) => Number::Float(*f),
-					LogicalExpr::Literal(LogicalLiteral::Decimal(d)) => Number::Decimal(*d),
-					_ => return None,
+				let number = if let LogicalExpr::Literal(LogicalLiteral::Integer(i)) =
+					index.as_ref()
+				{
+					Number::Int(*i)
+				} else if let LogicalExpr::Literal(LogicalLiteral::Float(f)) = index.as_ref() {
+					Number::Float(*f)
+				} else if let LogicalExpr::Literal(LogicalLiteral::Decimal(d)) = index.as_ref() {
+					Number::Decimal(*d)
+				} else {
+					return None;
 				};
 				match number.as_array_index() {
 					Some(i) => w.parts.push(FieldPathPart::Index(i)),
@@ -205,7 +214,55 @@ pub(crate) fn split_target(expr: &LogicalExpr) -> Option<SplitTarget> {
 				w.ends_on_every = false;
 				Some(())
 			}
-			_ => None,
+			LogicalExpr::Literal(_)
+			| LogicalExpr::Array(_)
+			| LogicalExpr::Set(_)
+			| LogicalExpr::Object(_)
+			| LogicalExpr::RecordId(_)
+			| LogicalExpr::Param(_)
+			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_)
+			| LogicalExpr::Constant(_)
+			| LogicalExpr::Doc
+			| LogicalExpr::Flatten {
+				..
+			}
+			| LogicalExpr::Filter {
+				..
+			}
+			| LogicalExpr::Method {
+				..
+			}
+			| LogicalExpr::Destructure {
+				..
+			}
+			| LogicalExpr::Optional {
+				..
+			}
+			| LogicalExpr::Recurse(_)
+			| LogicalExpr::RepeatRecurse(_)
+			| LogicalExpr::SetField {
+				..
+			}
+			| LogicalExpr::Prefix {
+				..
+			}
+			| LogicalExpr::Postfix {
+				..
+			}
+			| LogicalExpr::Invoke {
+				..
+			}
+			| LogicalExpr::Binary {
+				..
+			}
+			| LogicalExpr::Call(_)
+			| LogicalExpr::Closure(_)
+			| LogicalExpr::If(_)
+			| LogicalExpr::Throw(_)
+			| LogicalExpr::Break
+			| LogicalExpr::Continue
+			| LogicalExpr::Subquery(_) => None,
 		}
 	}
 
@@ -278,49 +335,45 @@ pub(crate) fn split_row(value: Value, targets: &[SplitTarget], output: &mut Vec<
 /// the position `target` names set to that element. An empty array or set,
 /// and any other value, leaves `value` as one row, unchanged.
 fn split_value_on_path(value: Value, on: Value, target: &SplitTarget, output: &mut Vec<Value>) {
-	match on {
-		Value::Array(arr) => {
-			if arr.is_empty() {
-				output.push(value);
-			} else {
-				let len = arr.len();
-				for (i, element) in arr.into_iter().enumerate() {
-					if i == len - 1 {
-						// Last element: move value instead of cloning
-						let mut val = value;
-						target.write(&mut val, element);
-						output.push(val);
-						return;
-					}
-					let mut cloned = value.clone();
-					target.write(&mut cloned, element);
-					output.push(cloned);
-				}
-			}
-		}
-		Value::Set(set) => {
-			if set.is_empty() {
-				output.push(value);
-			} else {
-				let len = set.len();
-				for (i, element) in set.into_iter().enumerate() {
-					if i == len - 1 {
-						// Last element: move value instead of cloning
-						let mut val = value;
-						target.write(&mut val, element);
-						output.push(val);
-						return;
-					}
-					let mut cloned = value.clone();
-					target.write(&mut cloned, element);
-					output.push(cloned);
-				}
-			}
-		}
-		// Non-array/set values pass through unchanged
-		_ => {
+	if let Value::Array(arr) = on {
+		if arr.is_empty() {
 			output.push(value);
+		} else {
+			let len = arr.len();
+			for (i, element) in arr.into_iter().enumerate() {
+				if i == len - 1 {
+					// Last element: move value instead of cloning
+					let mut val = value;
+					target.write(&mut val, element);
+					output.push(val);
+					return;
+				}
+				let mut cloned = value.clone();
+				target.write(&mut cloned, element);
+				output.push(cloned);
+			}
 		}
+	} else if let Value::Set(set) = on {
+		if set.is_empty() {
+			output.push(value);
+		} else {
+			let len = set.len();
+			for (i, element) in set.into_iter().enumerate() {
+				if i == len - 1 {
+					// Last element: move value instead of cloning
+					let mut val = value;
+					target.write(&mut val, element);
+					output.push(val);
+					return;
+				}
+				let mut cloned = value.clone();
+				target.write(&mut cloned, element);
+				output.push(cloned);
+			}
+		}
+	} else {
+		// Non-array/set values pass through unchanged
+		output.push(value);
 	}
 }
 

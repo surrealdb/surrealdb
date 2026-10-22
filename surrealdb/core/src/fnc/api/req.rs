@@ -121,7 +121,24 @@ pub(crate) fn check_body_size(req: &ApiRequest, limit: &Value) -> Result<()> {
 				message: format!("'{s}' is not a valid byte size (expected e.g. '1mb', '512kb')"),
 			})?
 		}
-		_ => {
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Array(_)
+		| Value::Set(_)
+		| Value::Object(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => {
 			anyhow::bail!(Error::InvalidFunctionArguments {
 				name: "api::req::max_body".to_string(),
 				message: "Expected a non-negative integer byte count or a byte-size string"
@@ -133,7 +150,22 @@ pub(crate) fn check_body_size(req: &ApiRequest, limit: &Value) -> Result<()> {
 	let size = match req.body {
 		PublicValue::Bytes(ref b) => Some(b.len() as u64),
 		PublicValue::String(ref s) => Some(s.len() as u64),
-		_ => None,
+		PublicValue::None
+		| PublicValue::Null
+		| PublicValue::Bool(_)
+		| PublicValue::Number(_)
+		| PublicValue::Duration(_)
+		| PublicValue::Datetime(_)
+		| PublicValue::Uuid(_)
+		| PublicValue::Geometry(_)
+		| PublicValue::Table(_)
+		| PublicValue::RecordId(_)
+		| PublicValue::File(_)
+		| PublicValue::Range(_)
+		| PublicValue::Regex(_)
+		| PublicValue::Array(_)
+		| PublicValue::Object(_)
+		| PublicValue::Set(_) => None,
 	};
 
 	if size.is_some_and(|size| size > limit.0) {

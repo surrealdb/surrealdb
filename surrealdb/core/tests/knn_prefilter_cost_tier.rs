@@ -1,4 +1,5 @@
 #![recursion_limit = "256"]
+#![deny(clippy::wildcard_enum_match_arm)]
 //! The cost model of the KNN prefilter, end to end.
 //!
 //! Lives in its own integration-test binary so the overrides below are set

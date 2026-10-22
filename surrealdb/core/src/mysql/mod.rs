@@ -97,7 +97,27 @@ pub(crate) fn parse_to_statements(
 				statements
 					.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Use(use_expr)));
 			}
-			_ => {
+			surrealdb_mysql::ast::stmt::Statement::CreateDatabase(_)
+			| surrealdb_mysql::ast::stmt::Statement::DropDatabase(_)
+			| surrealdb_mysql::ast::stmt::Statement::CreateIndex(_)
+			| surrealdb_mysql::ast::stmt::Statement::DropIndex(_)
+			| surrealdb_mysql::ast::stmt::Statement::CreateView(_)
+			| surrealdb_mysql::ast::stmt::Statement::DropView(_)
+			| surrealdb_mysql::ast::stmt::Statement::AlterTable(_)
+			| surrealdb_mysql::ast::stmt::Statement::CreateUser(_)
+			| surrealdb_mysql::ast::stmt::Statement::DropUser(_)
+			| surrealdb_mysql::ast::stmt::Statement::Grant(_)
+			| surrealdb_mysql::ast::stmt::Statement::Revoke(_)
+			| surrealdb_mysql::ast::stmt::Statement::LockTables(_)
+			| surrealdb_mysql::ast::stmt::Statement::UnlockTables(_)
+			| surrealdb_mysql::ast::stmt::Statement::Prepare(_)
+			| surrealdb_mysql::ast::stmt::Statement::Execute(_)
+			| surrealdb_mysql::ast::stmt::Statement::Deallocate(_)
+			| surrealdb_mysql::ast::stmt::Statement::Set(_)
+			| surrealdb_mysql::ast::stmt::Statement::Show(_)
+			| surrealdb_mysql::ast::stmt::Statement::Describe(_)
+			| surrealdb_mysql::ast::stmt::Statement::Explain(_)
+			| surrealdb_mysql::ast::stmt::Statement::Transaction(_) => {
 				let mut surql_text = String::new();
 				surrealdb_mysql::translate::translate_statement(
 					&stmt,

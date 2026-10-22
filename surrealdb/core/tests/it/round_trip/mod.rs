@@ -451,21 +451,22 @@ fn assert_records_match(table: &str, source: &Value, target: &Value) {
 /// The rows a `SELECT * FROM <table>` answered with.
 #[track_caller]
 fn expect_rows<'a>(table: &str, side: &str, value: &'a Value) -> &'a [Value] {
-	match value {
-		Value::Array(rows) => rows,
-		other => panic!("selecting from `{table}` on the {side} answered with {other:?}, not rows"),
-	}
+	let Value::Array(rows) = value else {
+		panic!("selecting from `{table}` on the {side} answered with {value:?}, not rows");
+	};
+	rows
 }
 
 /// How a record is addressed in a failure message: its own id where it has one,
 /// its position in the ordered scan otherwise.
 fn record_label(index: usize, record: &Value) -> String {
-	match record {
-		Value::Object(fields) => match fields.get("id") {
+	if let Value::Object(fields) = record {
+		match fields.get("id") {
 			Some(id) => id.to_sql(),
 			None => format!("#{index} (no id)"),
-		},
-		_ => format!("#{index}"),
+		}
+	} else {
+		format!("#{index}")
 	}
 }
 

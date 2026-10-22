@@ -194,7 +194,7 @@ impl Printer<'_> {
 			Phase::Bound => {
 				let _ = writeln!(self.out, "ir {}", region_kind_name(top));
 			}
-			phase => {
+			phase @ (Phase::Logical | Phase::Physical | Phase::Lowered) => {
 				let _ =
 					writeln!(self.out, "ir {} phase({})", region_kind_name(top), phase_name(phase));
 			}

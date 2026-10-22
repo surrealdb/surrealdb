@@ -266,21 +266,16 @@ fn parse_fetch_arg(
 		return Ok(None);
 	}
 
-	let values: Vec<String> = match fetch_value {
-		GraphqlValue::List(items) => {
-			let mut out = Vec::with_capacity(items.len());
-			for item in items {
-				let Some(path) = item.as_string() else {
-					return Err(async_graphql::Error::new("fetch must be a list of strings"));
-				};
-				out.push(path);
-			}
-			out
-		}
-		_ => {
-			return Err(async_graphql::Error::new("fetch must be a list of strings"));
-		}
+	let GraphqlValue::List(items) = fetch_value else {
+		return Err(async_graphql::Error::new("fetch must be a list of strings"));
 	};
+	let mut values: Vec<String> = Vec::with_capacity(items.len());
+	for item in items {
+		let Some(path) = item.as_string() else {
+			return Err(async_graphql::Error::new("fetch must be a list of strings"));
+		};
+		values.push(path);
+	}
 
 	if values.is_empty() {
 		return Ok(None);
@@ -313,12 +308,12 @@ fn notification_to_field_value(notification: PublicNotification) -> Option<Field
 }
 
 fn extract_record_id(obj: &crate::val::Object, fallback: &Value) -> Option<RecordId> {
-	match obj.get("id") {
-		Some(Value::RecordId(rid)) => Some(rid.clone()),
-		_ => match fallback {
-			Value::RecordId(rid) => Some(rid.clone()),
-			_ => None,
-		},
+	if let Some(Value::RecordId(rid)) = obj.get("id") {
+		Some(rid.clone())
+	} else if let Value::RecordId(rid) = fallback {
+		Some(rid.clone())
+	} else {
+		None
 	}
 }
 
@@ -374,12 +369,11 @@ async fn start_table_live_query(
 	};
 	let res = execute_statement(ds, sess, TopLevelExpr::Live(Box::new(stmt))).await?;
 
-	match res {
-		Value::Uuid(id) => Ok(id.into()),
-		value => {
-			Err(resolver_error(format!("LIVE query did not return a UUID, got {}", value.to_sql()))
-				.into())
-		}
+	if let Value::Uuid(id) = res {
+		Ok(id.into())
+	} else {
+		Err(resolver_error(format!("LIVE query did not return a UUID, got {}", res.to_sql()))
+			.into())
 	}
 }
 

@@ -69,7 +69,320 @@ pub(in crate::exec::vm) fn body_breakers(code: &[Instr]) -> BodyBreakers {
 				aggregate,
 				..
 			} if !aggregates.contains(aggregate) => aggregates.push(*aggregate),
-			_ => {}
+			Instr::CoerceField {
+				..
+			}
+			| Instr::BeginComputing {
+				..
+			}
+			| Instr::LandRow {
+				..
+			}
+			| Instr::BindRow {
+				..
+			}
+			| Instr::JumpIfPermissionsBypassed {
+				..
+			}
+			| Instr::CompareFieldInt {
+				..
+			}
+			| Instr::JumpIfFieldInt {
+				..
+			}
+			| Instr::JumpIfCompare {
+				..
+			}
+			| Instr::Compare {
+				..
+			}
+			| Instr::Arith {
+				..
+			}
+			| Instr::Unary {
+				..
+			}
+			| Instr::NewArray {
+				..
+			}
+			| Instr::ArrayPush {
+				..
+			}
+			| Instr::LoadParam {
+				..
+			}
+			| Instr::LoadSlot {
+				..
+			}
+			| Instr::SortKey {
+				..
+			}
+			| Instr::Fetch {
+				..
+			}
+			| Instr::Access {
+				..
+			}
+			| Instr::Each {
+				..
+			}
+			| Instr::Throw {
+				..
+			}
+			| Instr::FilterBegin {
+				..
+			}
+			| Instr::MapBegin {
+				..
+			}
+			| Instr::CollectPush {
+				..
+			}
+			| Instr::Nav {
+				..
+			}
+			| Instr::CallAllowed {
+				..
+			}
+			| Instr::Call {
+				..
+			}
+			| Instr::FunctionEnter {
+				..
+			}
+			| Instr::FunctionBind {
+				..
+			}
+			| Instr::FunctionReturn {
+				..
+			}
+			| Instr::FunctionCall {
+				..
+			}
+			| Instr::ArrayArg {
+				..
+			}
+			| Instr::ElemNext {
+				..
+			}
+			| Instr::ClosureBind {
+				..
+			}
+			| Instr::ClosureReturn {
+				..
+			}
+			| Instr::Dive {
+				..
+			}
+			| Instr::Subquery {
+				..
+			}
+			| Instr::MakeClosure {
+				..
+			}
+			| Instr::ClosureField {
+				..
+			}
+			| Instr::RequireClosure {
+				..
+			}
+			| Instr::Invoke {
+				..
+			}
+			| Instr::Lookup {
+				..
+			}
+			| Instr::Signal {
+				..
+			}
+			| Instr::Extract {
+				..
+			}
+			| Instr::KnnRank {
+				..
+			}
+			| Instr::Measure {
+				..
+			}
+			| Instr::Mock {
+				..
+			}
+			| Instr::Recurse {
+				..
+			}
+			| Instr::Destructure {
+				..
+			}
+			| Instr::RecordId {
+				..
+			}
+			| Instr::MethodResolve {
+				..
+			}
+			| Instr::Method {
+				..
+			}
+			| Instr::MethodClosure {
+				..
+			}
+			| Instr::JumpIfNullish {
+				..
+			}
+			| Instr::JumpIfNone {
+				..
+			}
+			| Instr::JumpIf {
+				..
+			}
+			| Instr::JumpIfLimitReached {
+				..
+			}
+			| Instr::NewObject {
+				..
+			}
+			| Instr::SeedObject {
+				..
+			}
+			| Instr::BuildObject {
+				..
+			}
+			| Instr::LoadPath {
+				..
+			}
+			| Instr::LoadRow {
+				..
+			}
+			| Instr::FetchRow {
+				..
+			}
+			| Instr::RemoveField {
+				..
+			}
+			| Instr::RemovePath {
+				..
+			}
+			| Instr::Omit {
+				..
+			}
+			| Instr::SetField {
+				..
+			}
+			| Instr::WriteProjection {
+				..
+			}
+			| Instr::Load {
+				..
+			}
+			| Instr::Emit {
+				..
+			}
+			| Instr::EmitEnd {
+				..
+			}
+			| Instr::BuildObjectEmit {
+				..
+			}
+			| Instr::FilterFieldInt {
+				..
+			}
+			| Instr::FilterCompare {
+				..
+			}
+			| Instr::Filter {
+				..
+			}
+			| Instr::SplitPush {
+				..
+			}
+			| Instr::SortPush {
+				..
+			}
+			| Instr::JoinProbe {
+				..
+			}
+			| Instr::VerdictJump {
+				..
+			}
+			| Instr::VerdictSet {
+				..
+			}
+			| Instr::JoinPair {
+				..
+			}
+			| Instr::GroupKey {
+				..
+			}
+			| Instr::GroupSelect {
+				..
+			}
+			| Instr::AccUpdate {
+				..
+			}
+			| Instr::Jump {
+				..
+			}
+			| Instr::Next {
+				..
+			}
+			| Instr::Write(_)
+			| Instr::Store(_)
+			| Instr::Block(_)
+			| Instr::EndRow
+			| Instr::StopPipeline
+			| Instr::TryNone {
+				..
+			}
+			| Instr::TryEnd
+			| Instr::MethodRegion {
+				..
+			}
+			| Instr::PermissionRegion {
+				..
+			}
+			| Instr::GroupFirstNeeded {
+				..
+			}
+			| Instr::GroupFirstSet {
+				..
+			}
+			| Instr::CallIndexFn {
+				..
+			}
+			| Instr::Matches {
+				..
+			}
+			| Instr::ExternalEnter {
+				..
+			}
+			| Instr::ExternalCall {
+				..
+			}
+			| Instr::NewSet {
+				..
+			}
+			| Instr::Degree {
+				..
+			}
+			| Instr::RepeatRecurse {
+				..
+			}
+			| Instr::JumpIfNotObject {
+				..
+			}
+			| Instr::JumpIfOpaque {
+				..
+			}
+			| Instr::InvalidControlFlow
+			| Instr::JumpIfNotRecordId {
+				..
+			}
+			| Instr::DocumentRoot {
+				..
+			}
+			| Instr::JudgeCopy {
+				..
+			}
+			| Instr::Ir(_) => {}
 		}
 	}
 	BodyBreakers {

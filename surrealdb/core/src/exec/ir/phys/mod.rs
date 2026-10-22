@@ -253,7 +253,6 @@ impl PhysOp {
 	/// The kinds the op may own beyond the regions [`PhysOp::region_kinds`] names: the clause
 	/// regions of the write stage, assignment or live query it was converted from, which the
 	/// logical op hosts the same way, and the predicate a filter judges once.
-	#[allow(clippy::wildcard_enum_match_arm)]
 	pub(crate) fn tail_region_kinds(&self) -> &'static [RegionKind] {
 		use crate::exec::ir::logical::verify::{LIVE_TAIL, PLACE_TAIL, stage_tail};
 		match self {
@@ -268,14 +267,121 @@ impl PhysOp {
 			PhysOp::Live(..) => LIVE_TAIL,
 			// The predicate judged once, when the filter holds one.
 			PhysOp::Filter => &[RegionKind::Clause(ClauseRole::Where)],
-			_ => &[],
+			PhysOp::Yield
+			| PhysOp::Return
+			| PhysOp::Break
+			| PhysOp::Next
+			| PhysOp::TableScan(..)
+			| PhysOp::IndexScan(..)
+			| PhysOp::IndexUnion(..)
+			| PhysOp::Bitmap(..)
+			| PhysOp::IndexLookup(..)
+			| PhysOp::FullTextScan(..)
+			| PhysOp::KeyRangeScan(..)
+			| PhysOp::KnnScan(..)
+			| PhysOp::KnnTopK(..)
+			| PhysOp::Count(..)
+			| PhysOp::RecordScan(..)
+			| PhysOp::Vacant {
+				..
+			}
+			| PhysOp::Enforced {
+				..
+			}
+			| PhysOp::Values {
+				..
+			}
+			| PhysOp::Subquery
+			| PhysOp::Probe {
+				..
+			}
+			| PhysOp::Union
+			| PhysOp::Join(..)
+			| PhysOp::Distinct {
+				..
+			}
+			| PhysOp::PermissionFilter(..)
+			| PhysOp::Layer(..)
+			| PhysOp::Fetch
+			| PhysOp::Split {
+				..
+			}
+			| PhysOp::Sort(..)
+			| PhysOp::Aggregate(..)
+			| PhysOp::Limit {
+				..
+			}
+			| PhysOp::Project(..)
+			| PhysOp::Eval
+			| PhysOp::Timeout
+			| PhysOp::VersionScope
+			| PhysOp::Only
+			| PhysOp::Explain {
+				..
+			}
+			| PhysOp::Content {
+				..
+			}
+			| PhysOp::Request {
+				..
+			}
+			| PhysOp::Txn {
+				..
+			}
+			| PhysOp::Stmt {
+				..
+			}
+			| PhysOp::Statement {
+				..
+			}
+			| PhysOp::Match {
+				..
+			}
+			| PhysOp::MatchStep(..)
+			| PhysOp::DdlGuard {
+				..
+			}
+			| PhysOp::Define(..)
+			| PhysOp::Remove(..)
+			| PhysOp::Alter(..)
+			| PhysOp::Rebuild(..)
+			| PhysOp::Info {
+				..
+			}
+			| PhysOp::Use {
+				..
+			}
+			| PhysOp::Option {
+				..
+			}
+			| PhysOp::Access(..)
+			| PhysOp::Kill
+			| PhysOp::Subscriber(..)
+			| PhysOp::Show(..)
+			| PhysOp::Write(..)
+			| PhysOp::Events(..)
+			| PhysOp::Block
+			| PhysOp::Let(..)
+			| PhysOp::Sleep
+			| PhysOp::If {
+				..
+			}
+			| PhysOp::Loop {
+				..
+			}
+			| PhysOp::Pipeline(..)
+			| PhysOp::Choose(..)
+			| PhysOp::Prefetch(..)
+			| PhysOp::Materialize {
+				..
+			}
+			| PhysOp::LoadUnit(..) => &[],
 		}
 	}
 
 	/// The position in [`PhysOp::region_kinds`] of the entry that stands for any number of regions
 	/// of its kind, none included: the clauses of a split, a fetch, and an access statement's
 	/// filter, whose count the attributes do not hold.
-	#[allow(clippy::wildcard_enum_match_arm)]
 	pub(crate) fn open_region_position(&self) -> Option<usize> {
 		match self {
 			PhysOp::Split {
@@ -296,7 +402,119 @@ impl PhysOp {
 					..
 				} => None,
 			},
-			_ => None,
+			PhysOp::Yield
+			| PhysOp::Return
+			| PhysOp::Break
+			| PhysOp::Next
+			| PhysOp::TableScan(..)
+			| PhysOp::IndexScan(..)
+			| PhysOp::IndexUnion(..)
+			| PhysOp::Bitmap(..)
+			| PhysOp::IndexLookup(..)
+			| PhysOp::FullTextScan(..)
+			| PhysOp::KeyRangeScan(..)
+			| PhysOp::KnnScan(..)
+			| PhysOp::KnnTopK(..)
+			| PhysOp::Count(..)
+			| PhysOp::RecordScan(..)
+			| PhysOp::Vacant {
+				..
+			}
+			| PhysOp::Enforced {
+				..
+			}
+			| PhysOp::Values {
+				..
+			}
+			| PhysOp::Subquery
+			| PhysOp::Probe {
+				..
+			}
+			| PhysOp::Union
+			| PhysOp::Join(..)
+			| PhysOp::Distinct {
+				..
+			}
+			| PhysOp::PermissionFilter(..)
+			| PhysOp::Layer(..)
+			| PhysOp::Filter
+			| PhysOp::Sort(..)
+			| PhysOp::Aggregate(..)
+			| PhysOp::Limit {
+				..
+			}
+			| PhysOp::Project(..)
+			| PhysOp::Eval
+			| PhysOp::Timeout
+			| PhysOp::VersionScope
+			| PhysOp::Only
+			| PhysOp::Explain {
+				..
+			}
+			| PhysOp::Assign(..)
+			| PhysOp::Unset {
+				..
+			}
+			| PhysOp::Content {
+				..
+			}
+			| PhysOp::Request {
+				..
+			}
+			| PhysOp::Txn {
+				..
+			}
+			| PhysOp::Stmt {
+				..
+			}
+			| PhysOp::Statement {
+				..
+			}
+			| PhysOp::Match {
+				..
+			}
+			| PhysOp::MatchStep(..)
+			| PhysOp::DdlGuard {
+				..
+			}
+			| PhysOp::Define(..)
+			| PhysOp::Remove(..)
+			| PhysOp::Alter(..)
+			| PhysOp::Rebuild(..)
+			| PhysOp::Info {
+				..
+			}
+			| PhysOp::Use {
+				..
+			}
+			| PhysOp::Option {
+				..
+			}
+			| PhysOp::Kill
+			| PhysOp::Live(..)
+			| PhysOp::Subscriber(..)
+			| PhysOp::Show(..)
+			| PhysOp::Write(..)
+			| PhysOp::WriteStage {
+				..
+			}
+			| PhysOp::Events(..)
+			| PhysOp::Block
+			| PhysOp::Let(..)
+			| PhysOp::Sleep
+			| PhysOp::If {
+				..
+			}
+			| PhysOp::Loop {
+				..
+			}
+			| PhysOp::Pipeline(..)
+			| PhysOp::Choose(..)
+			| PhysOp::Prefetch(..)
+			| PhysOp::Materialize {
+				..
+			}
+			| PhysOp::LoadUnit(..) => None,
 		}
 	}
 
@@ -1108,23 +1326,31 @@ pub(crate) async fn plan_physical(
 	knn::hoist_vectors(ir, facts)?;
 	let report = convert(ir, facts, &registry::build().conversion, cx, folder, &PHYSICAL_PHASE)
 		.await
-		.map_err(|error| match error {
-			IrError::NotLoaded {
+		.map_err(|error| {
+			if let IrError::NotLoaded {
 				what,
-			} => IrError::Invariant {
-				what,
-			},
-			other => other,
+			} = error
+			{
+				IrError::Invariant {
+					what,
+				}
+			} else {
+				error
+			}
 		})?;
 	let (deps, deps_complete) = conversion::value_deps(ir, facts);
 	callee::read_callees(ir, facts, cx.effects.catalog, cx.effects.registry)?;
-	knn::run(ir, facts, cx).map_err(|error| match error {
-		IrError::NotLoaded {
+	knn::run(ir, facts, cx).map_err(|error| {
+		if let IrError::NotLoaded {
 			what,
-		} => IrError::Invariant {
-			what,
-		},
-		other => other,
+		} = error
+		{
+			IrError::Invariant {
+				what,
+			}
+		} else {
+			error
+		}
 	})?;
 	write_prune::run(ir, facts, cx)?;
 	let top = ir.top();

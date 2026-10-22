@@ -503,14 +503,11 @@ async fn build_fulltext_bitmap(
 	operator: &MatchesOperator,
 ) -> std::result::Result<RoaringTreemap, ControlFlow> {
 	let index_def = index_ref.definition();
-	let ft_params = match &index_def.index {
-		Index::FullText(params) => params,
-		_ => {
-			return Err(ControlFlow::Err(anyhow::anyhow!(
-				"Index '{}' is not a full-text index",
-				index_def.name
-			)));
-		}
+	let Index::FullText(ft_params) = &index_def.index else {
+		return Err(ControlFlow::Err(anyhow::anyhow!(
+			"Index '{}' is not a full-text index",
+			index_def.name
+		)));
 	};
 	let frozen_ctx = &bctx.ctx.root().ctx;
 	let ikb = IndexKeyBase::new(bctx.ns, bctx.db, bctx.table.clone(), index_def.index_id);

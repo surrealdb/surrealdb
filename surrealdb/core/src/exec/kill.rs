@@ -393,10 +393,10 @@ mod tests {
 			.with_rt(true);
 
 		let lid = start_live_query(&ds, &ses, tb).await;
-		let live_uuid = match &lid {
-			PublicValue::Uuid(u) => (*u).into_inner(),
-			_ => panic!("expected uuid"),
+		let PublicValue::Uuid(u) = &lid else {
+			panic!("expected uuid");
 		};
+		let live_uuid = (*u).into_inner();
 
 		// Simulate a legacy live query by clearing auth on the stored StoredSubscriptionDefinition.
 		{
@@ -436,10 +436,10 @@ mod tests {
 		let root_ses = Session::owner().with_ns(ns).with_db(db).with_rt(true);
 
 		let lid = start_live_query(&ds, &db_ses, tb).await;
-		let live_uuid = match &lid {
-			PublicValue::Uuid(u) => (*u).into_inner(),
-			_ => panic!("expected uuid"),
+		let PublicValue::Uuid(u) = &lid else {
+			panic!("expected uuid");
 		};
+		let live_uuid = (*u).into_inner();
 
 		// Simulate a legacy live query by clearing auth on the stored StoredSubscriptionDefinition.
 		{
@@ -479,10 +479,10 @@ mod tests {
 		let other_ses = db_session(ns, db, "bob", Role::Editor);
 
 		let lid = start_live_query(&ds, &owner_ses, tb).await;
-		let live_uuid = match &lid {
-			PublicValue::Uuid(u) => (*u).into_inner(),
-			_ => panic!("expected uuid"),
+		let PublicValue::Uuid(u) = &lid else {
+			panic!("expected uuid");
 		};
+		let live_uuid = (*u).into_inner();
 
 		// Delete the table-level subscription record to simulate data corruption or a
 		// concurrent cleanup race, then verify that KILL is denied for a non-root user.

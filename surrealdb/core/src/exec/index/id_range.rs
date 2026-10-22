@@ -146,7 +146,39 @@ fn comparison(conjunct: &LogicalExpr) -> Option<(Side, bool, &LogicalExpr)> {
 		BinaryOperator::MoreThanEqual => (Side::Low, true),
 		BinaryOperator::LessThan => (Side::High, false),
 		BinaryOperator::LessThanEqual => (Side::High, true),
-		_ => return None,
+		BinaryOperator::Subtract
+		| BinaryOperator::Add
+		| BinaryOperator::Multiply
+		| BinaryOperator::Divide
+		| BinaryOperator::Remainder
+		| BinaryOperator::Power
+		| BinaryOperator::Equal
+		| BinaryOperator::ExactEqual
+		| BinaryOperator::NotEqual
+		| BinaryOperator::AllEqual
+		| BinaryOperator::AnyEqual
+		| BinaryOperator::Or
+		| BinaryOperator::And
+		| BinaryOperator::NullCoalescing
+		| BinaryOperator::TenaryCondition
+		| BinaryOperator::Contain
+		| BinaryOperator::NotContain
+		| BinaryOperator::ContainAll
+		| BinaryOperator::ContainAny
+		| BinaryOperator::ContainNone
+		| BinaryOperator::Inside
+		| BinaryOperator::NotInside
+		| BinaryOperator::AllInside
+		| BinaryOperator::AnyInside
+		| BinaryOperator::NoneInside
+		| BinaryOperator::Outside
+		| BinaryOperator::Intersects
+		| BinaryOperator::Range
+		| BinaryOperator::RangeInclusive
+		| BinaryOperator::RangeSkip
+		| BinaryOperator::RangeSkipInclusive
+		| BinaryOperator::Matches(_)
+		| BinaryOperator::NearestNeighbor(_) => return None,
 	};
 	if idiom_is_id(left) && !idiom_is_id(right) {
 		return Some((side, inclusive, right));
@@ -179,22 +211,25 @@ fn bound_of(
 	registry: &FunctionRegistry,
 ) -> Bounding {
 	if let Some(value) = try_literal_to_value(other) {
-		return Bounding::Literal(match value {
-			Value::RecordId(record)
-				if record.table == *table
-					&& matches!(
-						record.key,
-						RecordIdKey::Number(_) | RecordIdKey::String(_) | RecordIdKey::Uuid(_)
-					) =>
-			{
+		let key = if let Value::RecordId(record) = value {
+			if record.table == *table
+				&& matches!(
+					record.key,
+					RecordIdKey::Number(_) | RecordIdKey::String(_) | RecordIdKey::Uuid(_)
+				) {
 				Some(record.key)
+			} else {
+				None
 			}
-			_ => None,
-		});
+		} else {
+			None
+		};
+		return Bounding::Literal(key);
 	}
-	match other {
-		LogicalExpr::Param(_) if !permissioned && deferrable(other, registry) => Bounding::Deferred,
-		_ => Bounding::Neither,
+	if matches!(other, LogicalExpr::Param(_)) && !permissioned && deferrable(other, registry) {
+		Bounding::Deferred
+	} else {
+		Bounding::Neither
 	}
 }
 

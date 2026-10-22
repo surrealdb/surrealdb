@@ -524,7 +524,12 @@ impl Ir {
 					} if enclosure.blocks.contains(&block) => {
 						return Ok(Err(OutsideRead));
 					}
-					_ => continue,
+					ValueDef::OpResult {
+						..
+					}
+					| ValueDef::BlockArg {
+						..
+					} => continue,
 				};
 				if moved.contains(&definer) {
 					continue;
@@ -1360,7 +1365,14 @@ impl<'s, 'd> Transplant<'s, 'd> {
 						None => EliminationReason::DeadPure,
 					}
 				}
-				other => *other,
+				other @ (EliminationReason::DeadPure
+				| EliminationReason::AnsweredByAccessPath
+				| EliminationReason::FoldedConstant
+				| EliminationReason::DeadBeforeCertainError
+				| EliminationReason::InvisibleToPrincipal
+				| EliminationReason::Unreferenced
+				| EliminationReason::DeadLayerColumn
+				| EliminationReason::Unreachable) => *other,
 			};
 			reasons.entry(id).or_insert(reason);
 		}

@@ -817,9 +817,10 @@ async fn state_legalities(
 			true => LegalityIndex::binding(plan, registry, &summaries),
 			false => LegalityIndex::with_summaries(plan, registry, &summaries),
 		};
-		let refusal = match plan {
-			LogicalOp::Write(_) => write_statement_legality(plan, registry, &summaries),
-			_ => statement_legality_with(plan, registry, &summaries),
+		let refusal = if let LogicalOp::Write(_) = plan {
+			write_statement_legality(plan, registry, &summaries)
+		} else {
+			statement_legality_with(plan, registry, &summaries)
 		};
 		for holder in holders {
 			stated.statements.insert(holder, refusal);

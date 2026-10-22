@@ -50,7 +50,16 @@ pub(super) trait RowReader {
 	fn field_int(&self, name: &FieldName) -> anyhow::Result<Option<i64>> {
 		Ok(match self.field(name)? {
 			Scalar::Number(Number::Int(v)) => Some(v),
-			_ => None,
+			Scalar::None
+			| Scalar::Null
+			| Scalar::Bool(_)
+			| Scalar::Number(_)
+			| Scalar::Str(_)
+			| Scalar::Duration(_)
+			| Scalar::Datetime(_)
+			| Scalar::Uuid(_)
+			| Scalar::Bytes(_)
+			| Scalar::Value(_) => None,
 		})
 	}
 
@@ -100,9 +109,9 @@ pub(super) trait RowReader {
 
 	/// Whether the row holds a key under any of `names`, whatever its value.
 	fn has_any_field(&self, names: &[surrealdb_strand::Strand]) -> anyhow::Result<bool> {
-		Ok(match self.record()? {
-			Value::Object(object) => names.iter().any(|name| object.contains_key(name.as_str())),
-			_ => false,
+		Ok(match self.record()?.as_object() {
+			Some(object) => names.iter().any(|name| object.contains_key(name.as_str())),
+			None => false,
 		})
 	}
 
@@ -342,9 +351,9 @@ impl<'a> StoredRow<'a> {
 	}
 
 	fn decoded_field(&self, name: &str) -> anyhow::Result<Scalar<'_>> {
-		Ok(match self.decoded()? {
-			Value::Object(object) => object.get(name).map(Scalar::of).unwrap_or(Scalar::None),
-			_ => Scalar::None,
+		Ok(match self.decoded()?.as_object() {
+			Some(object) => object.get(name).map(Scalar::of).unwrap_or(Scalar::None),
+			None => Scalar::None,
 		})
 	}
 
@@ -422,17 +431,25 @@ pub(super) fn stored_path_vector(
 pub(super) fn scalar_numbers(scalar: &Scalar<'_>, out: &mut Vec<Number>) -> bool {
 	out.clear();
 	match scalar {
-		Scalar::Value(value) => match value.as_ref() {
-			Value::Array(array) => array.iter().all(|value| match value {
-				Value::Number(number) => {
+		Scalar::Value(value) => match value.as_ref().as_array() {
+			Some(array) => array.iter().all(|value| match value.as_number() {
+				Some(number) => {
 					out.push(*number);
 					true
 				}
-				_ => false,
+				None => false,
 			}),
-			_ => false,
+			None => false,
 		},
-		_ => false,
+		Scalar::None
+		| Scalar::Null
+		| Scalar::Bool(_)
+		| Scalar::Number(_)
+		| Scalar::Str(_)
+		| Scalar::Duration(_)
+		| Scalar::Datetime(_)
+		| Scalar::Uuid(_)
+		| Scalar::Bytes(_) => false,
 	}
 }
 
@@ -457,7 +474,24 @@ pub(super) fn stored_numbers(value: ValueRef<'_>, out: &mut Vec<Number>) -> anyh
 			Kind::Int => element.as_int()?.map(Number::Int),
 			Kind::Float => element.as_float()?.map(Number::Float),
 			Kind::Decimal => element.as_decimal()?.map(Number::Decimal),
-			_ => return Ok(false),
+			Kind::None
+			| Kind::Null
+			| Kind::Bool
+			| Kind::String
+			| Kind::Duration
+			| Kind::Datetime
+			| Kind::Uuid
+			| Kind::Bytes
+			| Kind::Table
+			| Kind::RecordId
+			| Kind::File
+			| Kind::Regex
+			| Kind::Range
+			| Kind::Geometry
+			| Kind::Array
+			| Kind::Set
+			| Kind::Object
+			| Kind::Unknown => return Ok(false),
 		};
 		let Some(number) = number else {
 			return Err(anyhow::anyhow!("a stored value whose kind and tag disagree"));
@@ -517,7 +551,23 @@ fn flatten_stored(
 				}
 				None => None,
 			},
-			_ => return Ok(false),
+			Kind::None
+			| Kind::Null
+			| Kind::Bool
+			| Kind::String
+			| Kind::Duration
+			| Kind::Datetime
+			| Kind::Uuid
+			| Kind::Bytes
+			| Kind::Table
+			| Kind::RecordId
+			| Kind::File
+			| Kind::Regex
+			| Kind::Range
+			| Kind::Geometry
+			| Kind::Set
+			| Kind::Object
+			| Kind::Unknown => return Ok(false),
 		};
 		let Some(number) = number else {
 			return Err(anyhow::anyhow!("a stored value whose kind and tag disagree"));
@@ -548,7 +598,16 @@ pub(super) fn scalar_from_stored(v: ValueRef<'_>) -> anyhow::Result<Scalar<'_>> 
 		Kind::Datetime => Scalar::Datetime(Datetime(some(v.as_datetime()?)?)),
 		Kind::Uuid => Scalar::Uuid(Uuid(some(v.as_uuid()?)?)),
 		Kind::Bytes => Scalar::Bytes(some(v.as_bytes())?),
-		_ => Scalar::Value(Cow::Owned(v.decode()?)),
+		Kind::Table
+		| Kind::RecordId
+		| Kind::File
+		| Kind::Regex
+		| Kind::Range
+		| Kind::Geometry
+		| Kind::Array
+		| Kind::Set
+		| Kind::Object
+		| Kind::Unknown => Scalar::Value(Cow::Owned(v.decode()?)),
 	})
 }
 
@@ -627,7 +686,16 @@ impl RowReader for StoredRow<'_> {
 			Some(None) => Ok(None),
 			None => Ok(match self.field(name)? {
 				Scalar::Number(Number::Int(v)) => Some(v),
-				_ => None,
+				Scalar::None
+				| Scalar::Null
+				| Scalar::Bool(_)
+				| Scalar::Number(_)
+				| Scalar::Str(_)
+				| Scalar::Duration(_)
+				| Scalar::Datetime(_)
+				| Scalar::Uuid(_)
+				| Scalar::Bytes(_)
+				| Scalar::Value(_) => None,
 			}),
 		}
 	}
@@ -700,9 +768,9 @@ impl RowReader for StoredRow<'_> {
 			}
 			return Ok(false);
 		}
-		Ok(match self.decoded()? {
-			Value::Object(object) => names.iter().any(|name| object.contains_key(name.as_str())),
-			_ => false,
+		Ok(match self.decoded()?.as_object() {
+			Some(object) => names.iter().any(|name| object.contains_key(name.as_str())),
+			None => false,
 		})
 	}
 }
@@ -713,11 +781,9 @@ pub(super) struct ValueRow<'a>(pub(super) &'a Value);
 
 impl RowReader for ValueRow<'_> {
 	fn field(&self, name: &FieldName) -> anyhow::Result<Scalar<'_>> {
-		match self.0 {
-			Value::Object(object) => {
-				Ok(object.get(name.as_str()).map(Scalar::of).unwrap_or(Scalar::None))
-			}
-			_ => anyhow::bail!("the VM read a field from a row that is not an object"),
+		match self.0.as_object() {
+			Some(object) => Ok(object.get(name.as_str()).map(Scalar::of).unwrap_or(Scalar::None)),
+			None => anyhow::bail!("the VM read a field from a row that is not an object"),
 		}
 	}
 
@@ -734,9 +800,9 @@ impl RowReader for ValueRow<'_> {
 	}
 
 	fn has_any_field(&self, names: &[surrealdb_strand::Strand]) -> anyhow::Result<bool> {
-		Ok(match self.0 {
-			Value::Object(object) => names.iter().any(|name| object.contains_key(name.as_str())),
-			_ => false,
+		Ok(match self.0.as_object() {
+			Some(object) => names.iter().any(|name| object.contains_key(name.as_str())),
+			None => false,
 		})
 	}
 }
@@ -827,7 +893,18 @@ pub(super) fn scalar_from_wire(bytes: &[u8]) -> anyhow::Result<Scalar<'_>> {
 		Value::Duration(v) => Scalar::Duration(v),
 		Value::Datetime(v) => Scalar::Datetime(v),
 		Value::Uuid(v) => Scalar::Uuid(v),
-		other => Scalar::Value(Cow::Owned(other)),
+		other @ (Value::String(_)
+		| Value::Array(_)
+		| Value::Set(_)
+		| Value::Object(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_)) => Scalar::Value(Cow::Owned(other)),
 	})
 }
 
@@ -937,7 +1014,25 @@ mod tests {
 				}
 				let int = match stored {
 					Value::Number(crate::val::Number::Int(i)) => Some(*i),
-					_ => None,
+					Value::None
+					| Value::Null
+					| Value::Bool(_)
+					| Value::Number(_)
+					| Value::String(_)
+					| Value::Duration(_)
+					| Value::Datetime(_)
+					| Value::Uuid(_)
+					| Value::Array(_)
+					| Value::Set(_)
+					| Value::Object(_)
+					| Value::Geometry(_)
+					| Value::Bytes(_)
+					| Value::Table(_)
+					| Value::RecordId(_)
+					| Value::File(_)
+					| Value::Regex(_)
+					| Value::Range(_)
+					| Value::Closure(_) => None,
 				};
 				if name != "id" {
 					assert_eq!(row.field_int(&FieldName::new(name)).expect("reads"), int, "{name}");

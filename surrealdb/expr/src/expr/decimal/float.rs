@@ -357,10 +357,7 @@ fn lt_half(d: &D) -> bool {
 			}
 		}
 	};
-	match ord {
-		Ordering::Equal => false,
-		o => o == Ordering::Less,
-	}
+	ord == Ordering::Less
 }
 
 /// Rounds to an integer half-even on the first guard digit alone, so a guard

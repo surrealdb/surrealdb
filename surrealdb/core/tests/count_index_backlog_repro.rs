@@ -1,4 +1,5 @@
 #![recursion_limit = "256"]
+#![deny(clippy::wildcard_enum_match_arm)]
 //! Reproduction: COUNT-index read latency scales with the un-compacted
 //! `!iu` delta backlog, independently of how many records the table holds.
 //!

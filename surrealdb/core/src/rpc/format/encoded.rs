@@ -73,9 +73,10 @@ pub fn decode_rows(rows: &EncodedRows) -> Result<Vec<Value>, TypesError> {
 			text.push(b']');
 			let json: serde_json::Value =
 				serde_json::from_slice(&text).map_err(|e| fail(e.to_string()))?;
-			match super::json::json_to_value(json) {
-				Value::Array(rows) => Ok(rows.into_inner()),
-				_ => Err(fail("not a list".to_owned())),
+			if let Value::Array(rows) = super::json::json_to_value(json) {
+				Ok(rows.into_inner())
+			} else {
+				Err(fail("not a list".to_owned()))
 			}
 		}
 	}
@@ -119,14 +120,18 @@ fn shaped_item(
 	reader: &mut surrealdb_types::shaped::BlockReader,
 ) -> anyhow::Result<Value> {
 	match item {
-		ciborium::Value::Tag(tag, inner) if tag == surrealdb_types::shaped::CBOR_TAG => {
-			let ciborium::Value::Bytes(contents) = *inner else {
-				anyhow::bail!("a shaped block that is not a byte string");
-			};
-			let rows = reader
-				.read_block(&contents, &mut decode_dynamic)
-				.map_err(|e| anyhow::anyhow!(e))?;
-			Ok(Value::Array(rows.into()))
+		ciborium::Value::Tag(tag, inner) => {
+			if tag == surrealdb_types::shaped::CBOR_TAG {
+				let ciborium::Value::Bytes(contents) = *inner else {
+					anyhow::bail!("a shaped block that is not a byte string");
+				};
+				let rows = reader
+					.read_block(&contents, &mut decode_dynamic)
+					.map_err(|e| anyhow::anyhow!(e))?;
+				Ok(Value::Array(rows.into()))
+			} else {
+				super::cbor::to_value(ciborium::Value::Tag(tag, inner))
+			}
 		}
 		ciborium::Value::Map(entries) => {
 			let mut object = std::collections::BTreeMap::new();
@@ -145,15 +150,22 @@ fn shaped_item(
 				.collect::<anyhow::Result<Vec<_>>>()?
 				.into(),
 		)),
-		other => super::cbor::to_value(other),
+		ciborium::Value::Integer(v) => super::cbor::to_value(ciborium::Value::Integer(v)),
+		ciborium::Value::Bytes(v) => super::cbor::to_value(ciborium::Value::Bytes(v)),
+		ciborium::Value::Float(v) => super::cbor::to_value(ciborium::Value::Float(v)),
+		ciborium::Value::Text(v) => super::cbor::to_value(ciborium::Value::Text(v)),
+		ciborium::Value::Bool(v) => super::cbor::to_value(ciborium::Value::Bool(v)),
+		ciborium::Value::Null => super::cbor::to_value(ciborium::Value::Null),
+		_ => anyhow::bail!("Encountered an unknown CBOR data type"),
 	}
 }
 
 /// Encode a public value in `format`, as the response encoder does.
 fn encode_public(format: RowFormat, value: Value, out: &mut Vec<u8>) -> anyhow::Result<()> {
-	match format.envelope() {
-		RowFormat::Json => out.extend_from_slice(super::json::encode_str(value)?.as_bytes()),
-		_ => out.extend_from_slice(&super::cbor::encode(value)?),
+	if format.envelope() == RowFormat::Json {
+		out.extend_from_slice(super::json::encode_str(value)?.as_bytes());
+	} else {
+		out.extend_from_slice(&super::cbor::encode(value)?);
 	}
 	Ok(())
 }
@@ -392,9 +404,10 @@ struct ObjectWriter<'o> {
 impl<'o> ObjectWriter<'o> {
 	fn open(format: RowFormat, out: &'o mut Vec<u8>, entries: usize) -> Self {
 		let format = format.envelope();
-		match format {
-			RowFormat::Json => out.push(b'{'),
-			_ => cbor_head(out, 5, entries as u64),
+		if format == RowFormat::Json {
+			out.push(b'{');
+		} else {
+			cbor_head(out, 5, entries as u64);
 		}
 		Self {
 			format,
@@ -405,18 +418,15 @@ impl<'o> ObjectWriter<'o> {
 
 	/// Start the entry `key`; its value is written next.
 	fn key(&mut self, key: &str) -> anyhow::Result<()> {
-		match self.format {
-			RowFormat::Json => {
-				if self.written > 0 {
-					self.out.push(b',');
-				}
-				serde_json::to_writer(&mut *self.out, key)?;
-				self.out.push(b':');
+		if self.format == RowFormat::Json {
+			if self.written > 0 {
+				self.out.push(b',');
 			}
-			_ => {
-				cbor_head(self.out, 3, key.len() as u64);
-				self.out.extend_from_slice(key.as_bytes());
-			}
+			serde_json::to_writer(&mut *self.out, key)?;
+			self.out.push(b':');
+		} else {
+			cbor_head(self.out, 3, key.len() as u64);
+			self.out.extend_from_slice(key.as_bytes());
 		}
 		self.written += 1;
 		Ok(())
@@ -470,9 +480,10 @@ pub fn encode_results(
 	results: &[EncodedQueryResult],
 	out: &mut Vec<u8>,
 ) -> anyhow::Result<()> {
-	match format.envelope() {
-		RowFormat::Json => out.push(b'['),
-		_ => cbor_head(out, 4, results.len() as u64),
+	if format.envelope() == RowFormat::Json {
+		out.push(b'[');
+	} else {
+		cbor_head(out, 4, results.len() as u64);
 	}
 	for (i, result) in results.iter().enumerate() {
 		if format == RowFormat::Json && i > 0 {
@@ -564,7 +575,10 @@ pub fn shaped_outgoing(
 			index,
 			rows: shaped(&rows.to_values()?, shaper)?,
 		},
-		frame => frame,
+		frame @ (OutgoingFrame::Frame(_)
+		| OutgoingFrame::Rows {
+			..
+		}) => frame,
 	})
 }
 
@@ -1084,10 +1098,11 @@ pub(crate) mod tests {
 		// The kinds above, checked as kinds, so a lossy decode that happened to
 		// match on both sides cannot pass.
 		let (rows, _) = encoded(&ds, "SELECT * FROM t:5", RowFormat::Cbor).await;
-		let row = match super::into_query_results(rows).remove(0).result.expect("a row") {
-			Value::Array(rows) => rows.into_inner().remove(0),
-			other => panic!("not rows: {other:?}"),
+		let Value::Array(rows) = super::into_query_results(rows).remove(0).result.expect("a row")
+		else {
+			panic!("not rows");
 		};
+		let row = rows.into_inner().remove(0);
 		let Value::Object(row) = row else {
 			panic!("not an object: {row:?}")
 		};

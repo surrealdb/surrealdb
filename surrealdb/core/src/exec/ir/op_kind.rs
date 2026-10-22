@@ -35,6 +35,36 @@ pub(crate) enum OpKind {
 }
 
 impl OpKind {
+	/// Returns a reference to the expression op if `self` is [`OpKind::Expr`].
+	#[inline]
+	pub(crate) fn as_expr(&self) -> Option<&ExprOp> {
+		if let OpKind::Expr(op) = self {
+			Some(op)
+		} else {
+			None
+		}
+	}
+
+	/// Returns a reference to the logical op if `self` is [`OpKind::Logical`].
+	#[inline]
+	pub(crate) fn as_logical(&self) -> Option<&LogOp> {
+		if let OpKind::Logical(op) = self {
+			Some(op)
+		} else {
+			None
+		}
+	}
+
+	/// Returns a reference to the physical op if `self` is [`OpKind::Phys`].
+	#[inline]
+	pub(crate) fn as_phys(&self) -> Option<&PhysOp> {
+		if let OpKind::Phys(op) = self {
+			Some(op)
+		} else {
+			None
+		}
+	}
+
 	/// The op ids the attributes of the op hold, which name other ops of its container.
 	pub(crate) fn attr_op_ids_mut(&mut self) -> impl Iterator<Item = &mut OpId> {
 		match self {

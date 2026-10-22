@@ -193,24 +193,43 @@ pub(super) fn render_one(kind: Definitions, structured: bool, value: &Value) -> 
 		}
 		// Absent, the root's defaults are an empty object; present, they are
 		// the `default` config's, which is the only kind stored under it.
-		Definitions::Defaults => match value {
-			Value::None => Ok(Value::Object(Object::default())),
-			value => {
+		Definitions::Defaults => {
+			if let Value::None = value {
+				Ok(Value::Object(Object::default()))
+			} else {
 				let [config] = compiled::<catalog::ConfigDefinition>(std::slice::from_ref(value))
 					.map_err(ControlFlow::Err)?
 					.try_into()
 					.map_err(|_| ControlFlow::Err(anyhow!("one config rendered as several")))?;
 				match config {
 					catalog::ConfigDefinition::Default(defaults) => Ok(defaults.structure()),
-					other => Err(ControlFlow::Err(anyhow::Error::new(
+					other @ (catalog::ConfigDefinition::GraphQL(_)
+					| catalog::ConfigDefinition::Api(_)) => Err(ControlFlow::Err(anyhow::Error::new(
 						crate::err::EngineError::Internal(format!(
 							"Expected a default config but found {other:?} instead"
 						)),
 					))),
 				}
 			}
-		},
-		other => Err(ControlFlow::Err(anyhow!("{other:?} rendered as one definition"))),
+		}
+		other @ (Definitions::Access
+		| Definitions::Api
+		| Definitions::Analyzer
+		| Definitions::Bucket
+		| Definitions::Function
+		| Definitions::Extension
+		| Definitions::Model
+		| Definitions::Param
+		| Definitions::Table
+		| Definitions::Config
+		| Definitions::Sequence
+		| Definitions::Namespace
+		| Definitions::Database
+		| Definitions::Event
+		| Definitions::Field
+		| Definitions::Index
+		| Definitions::Live
+		| Definitions::Node) => Err(ControlFlow::Err(anyhow!("{other:?} rendered as one definition"))),
 	}
 }
 

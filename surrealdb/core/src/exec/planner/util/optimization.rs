@@ -96,7 +96,17 @@ pub(crate) fn index_covers_ordering(
 		BTreeAccess::Equality(_) => {
 			ix_def.cols.iter().filter_map(|s| column_path(s).ok()).collect()
 		}
-		_ => vec![],
+		BTreeAccess::Range {
+			..
+		}
+		| BTreeAccess::FullText {
+			..
+		}
+		| BTreeAccess::Knn {
+			..
+		} => {
+			vec![]
+		}
 	};
 
 	// Strip leading ORDER BY fields that reference equality-pinned columns.

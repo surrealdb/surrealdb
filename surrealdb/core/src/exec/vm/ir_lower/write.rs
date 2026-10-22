@@ -179,8 +179,6 @@ enum Touch {
 ///
 /// An instruction with no entry answers `false` and appends nothing: the caller counts it as
 /// reading and writing every register.
-// `Instr` is not a frozen enum, so a variant without an entry answers `false`.
-#[allow(clippy::wildcard_enum_match_arm)]
 fn touched(instr: &Instr, out: &mut Vec<Touch>) -> bool {
 	let read = |out: &mut Vec<Touch>, operand: &Operand| {
 		if let Operand::Reg(reg) = operand {
@@ -382,7 +380,219 @@ fn touched(instr: &Instr, out: &mut Vec<Touch>) -> bool {
 		// carries nothing in the registers.
 		Instr::Write(_) => {}
 		Instr::Ir(ir) => return ir_touched(ir, out),
-		_ => return false,
+		Instr::BeginComputing {
+			..
+		}
+		| Instr::LandRow {
+			..
+		}
+		| Instr::BindRow {
+			..
+		}
+		| Instr::JumpIfPermissionsBypassed {
+			..
+		}
+		| Instr::SortKey {
+			..
+		}
+		| Instr::Fetch {
+			..
+		}
+		| Instr::FilterBegin {
+			..
+		}
+		| Instr::MapBegin {
+			..
+		}
+		| Instr::FunctionEnter {
+			..
+		}
+		| Instr::FunctionBind {
+			..
+		}
+		| Instr::FunctionReturn {
+			..
+		}
+		| Instr::FunctionCall {
+			..
+		}
+		| Instr::ArrayArg {
+			..
+		}
+		| Instr::ElemNext {
+			..
+		}
+		| Instr::ClosureBind {
+			..
+		}
+		| Instr::ClosureReturn {
+			..
+		}
+		| Instr::Dive {
+			..
+		}
+		| Instr::Subquery {
+			..
+		}
+		| Instr::MakeClosure {
+			..
+		}
+		| Instr::ClosureField {
+			..
+		}
+		| Instr::RequireClosure {
+			..
+		}
+		| Instr::Invoke {
+			..
+		}
+		| Instr::Lookup {
+			..
+		}
+		| Instr::Signal {
+			..
+		}
+		| Instr::Extract {
+			..
+		}
+		| Instr::KnnRank {
+			..
+		}
+		| Instr::Measure {
+			..
+		}
+		| Instr::Mock {
+			..
+		}
+		| Instr::Recurse {
+			..
+		}
+		| Instr::Destructure {
+			..
+		}
+		| Instr::RecordId {
+			..
+		}
+		| Instr::MethodResolve {
+			..
+		}
+		| Instr::MethodClosure {
+			..
+		}
+		| Instr::Skip {
+			..
+		}
+		| Instr::Take {
+			..
+		}
+		| Instr::JumpIfLimitReached {
+			..
+		}
+		| Instr::SeedObject {
+			..
+		}
+		| Instr::FetchRow {
+			..
+		}
+		| Instr::RemoveField {
+			..
+		}
+		| Instr::RemovePath {
+			..
+		}
+		| Instr::Omit {
+			..
+		}
+		| Instr::WriteProjection {
+			..
+		}
+		| Instr::BuildObjectEmit {
+			..
+		}
+		| Instr::SplitPush {
+			..
+		}
+		| Instr::SortPush {
+			..
+		}
+		| Instr::Distinct {
+			..
+		}
+		| Instr::JoinProbe {
+			..
+		}
+		| Instr::VerdictJump {
+			..
+		}
+		| Instr::VerdictSet {
+			..
+		}
+		| Instr::JoinPair {
+			..
+		}
+		| Instr::GroupKey {
+			..
+		}
+		| Instr::GroupSelect {
+			..
+		}
+		| Instr::AccUpdate {
+			..
+		}
+		| Instr::Next {
+			..
+		}
+		| Instr::Store(_)
+		| Instr::Block(_)
+		| Instr::TryNone {
+			..
+		}
+		| Instr::MethodRegion {
+			..
+		}
+		| Instr::PermissionRegion {
+			..
+		}
+		| Instr::GroupFirstNeeded {
+			..
+		}
+		| Instr::GroupFirstSet {
+			..
+		}
+		| Instr::CallIndexFn {
+			..
+		}
+		| Instr::Matches {
+			..
+		}
+		| Instr::ExternalEnter {
+			..
+		}
+		| Instr::ExternalCall {
+			..
+		}
+		| Instr::Degree {
+			..
+		}
+		| Instr::RepeatRecurse {
+			..
+		}
+		| Instr::JumpIfNotObject {
+			..
+		}
+		| Instr::JumpIfOpaque {
+			..
+		}
+		| Instr::InvalidControlFlow
+		| Instr::JumpIfNotRecordId {
+			..
+		}
+		| Instr::DocumentRoot {
+			..
+		}
+		| Instr::JudgeCopy {
+			..
+		} => return false,
 	}
 	true
 }

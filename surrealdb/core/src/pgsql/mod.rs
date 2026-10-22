@@ -88,7 +88,19 @@ pub(crate) fn parse_to_statements(
 						.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
 				}
 			}
-			_ => {
+			surrealdb_pgsql::ast::stmt::Statement::Copy(_)
+			| surrealdb_pgsql::ast::stmt::Statement::CreateSchema(_)
+			| surrealdb_pgsql::ast::stmt::Statement::Transaction(_)
+			| surrealdb_pgsql::ast::stmt::Statement::Set(_)
+			| surrealdb_pgsql::ast::stmt::Statement::Show(_)
+			| surrealdb_pgsql::ast::stmt::Statement::Reset(_)
+			| surrealdb_pgsql::ast::stmt::Statement::Explain(_)
+			| surrealdb_pgsql::ast::stmt::Statement::Prepare(_)
+			| surrealdb_pgsql::ast::stmt::Statement::Execute(_)
+			| surrealdb_pgsql::ast::stmt::Statement::Deallocate(_)
+			| surrealdb_pgsql::ast::stmt::Statement::CreatePropertyGraph(_)
+			| surrealdb_pgsql::ast::stmt::Statement::DropPropertyGraph(_)
+			| surrealdb_pgsql::ast::stmt::Statement::Empty => {
 				let mut surql_text = String::new();
 				surrealdb_pgsql::translate::translate_statement(
 					&stmt,

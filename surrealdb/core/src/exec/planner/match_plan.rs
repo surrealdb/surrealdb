@@ -1539,13 +1539,15 @@ fn conjoin(mut exprs: Vec<LogicalExpr>) -> Option<LogicalExpr> {
 /// through a step other than a field access (`binding[0].x`, `binding->e`),
 /// which has no record-row spelling here.
 fn prefix_strip(expr: &LogicalExpr, binding: &str) -> Option<LogicalExpr> {
+	if expr.is_path() {
+		if let LogicalExpr::Field(root) = expr.path_root()
+			&& root.as_str() == binding
+		{
+			return strip_binding_root(expr, binding);
+		}
+		return Some(expr.clone());
+	}
 	match expr {
-		path if path.is_path() => match path.path_root() {
-			LogicalExpr::Field(root) if root.as_str() == binding => {
-				strip_binding_root(path, binding)
-			}
-			_ => Some(path.clone()),
-		},
 		LogicalExpr::Binary {
 			left,
 			op,
@@ -1576,7 +1578,60 @@ fn prefix_strip(expr: &LogicalExpr, binding: &str) -> Option<LogicalExpr> {
 			target: Box::new(prefix_strip(target, binding)?),
 			args: args.clone(),
 		}),
-		other => Some(other.clone()),
+		other @ (LogicalExpr::Literal(_)
+		| LogicalExpr::Array(_)
+		| LogicalExpr::Set(_)
+		| LogicalExpr::Object(_)
+		| LogicalExpr::RecordId(_)
+		| LogicalExpr::Param(_)
+		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
+		| LogicalExpr::Constant(_)
+		| LogicalExpr::Field(_)
+		| LogicalExpr::Doc
+		| LogicalExpr::Current
+		| LogicalExpr::Access {
+			..
+		}
+		| LogicalExpr::Index {
+			..
+		}
+		| LogicalExpr::First(_)
+		| LogicalExpr::Last(_)
+		| LogicalExpr::Each(_)
+		| LogicalExpr::Flatten {
+			..
+		}
+		| LogicalExpr::Filter {
+			..
+		}
+		| LogicalExpr::Method {
+			..
+		}
+		| LogicalExpr::Destructure {
+			..
+		}
+		| LogicalExpr::Optional {
+			..
+		}
+		| LogicalExpr::Lookup {
+			..
+		}
+		| LogicalExpr::Recurse(_)
+		| LogicalExpr::RepeatRecurse(_)
+		| LogicalExpr::Broadcast {
+			..
+		}
+		| LogicalExpr::SetField {
+			..
+		}
+		| LogicalExpr::Call(_)
+		| LogicalExpr::Closure(_)
+		| LogicalExpr::If(_)
+		| LogicalExpr::Throw(_)
+		| LogicalExpr::Break
+		| LogicalExpr::Continue
+		| LogicalExpr::Subquery(_)) => Some(other.clone()),
 	}
 }
 
@@ -1585,21 +1640,22 @@ fn prefix_strip(expr: &LogicalExpr, binding: &str) -> Option<LogicalExpr> {
 /// whose root is `Field(binding)`; the result is `None` unless every step
 /// between the root and `path` is an [`LogicalExpr::Access`].
 fn strip_binding_root(path: &LogicalExpr, binding: &str) -> Option<LogicalExpr> {
-	match path {
-		LogicalExpr::Access {
-			base,
-			field,
-		} => match base.as_ref() {
-			LogicalExpr::Field(root) if root.as_str() == binding => {
-				Some(LogicalExpr::Field(field.clone()))
-			}
-			base => Some(LogicalExpr::Access {
-				base: Box::new(strip_binding_root(base, binding)?),
-				field: field.clone(),
-			}),
-		},
-		_ => None,
+	let LogicalExpr::Access {
+		base,
+		field,
+	} = path
+	else {
+		return None;
+	};
+	if let LogicalExpr::Field(root) = base.as_ref()
+		&& root.as_str() == binding
+	{
+		return Some(LogicalExpr::Field(field.clone()));
 	}
+	Some(LogicalExpr::Access {
+		base: Box::new(strip_binding_root(base, binding)?),
+		field: field.clone(),
+	})
 }
 
 #[cfg(test)]

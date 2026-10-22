@@ -89,10 +89,10 @@ fn thresholds(key: &Value) -> Vec<Value> {
 fn at(decoded: &Value, path: &[&str]) -> Option<Value> {
 	let mut value = decoded.clone();
 	for segment in path {
-		value = match value {
-			Value::Object(object) => object.get(segment).cloned().unwrap_or(Value::None),
-			_ => return None,
+		let Value::Object(object) = value else {
+			return None;
 		};
+		value = object.get(segment).cloned().unwrap_or(Value::None);
 	}
 	Some(value)
 }

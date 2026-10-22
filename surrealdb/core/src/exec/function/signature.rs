@@ -108,10 +108,13 @@ impl Signature {
 			}
 			// An empty collection or an index past its end answers `NONE`.
 			ReturnRule::ArrayElement(index) => match args.get(index) {
-				Some(Kind::Array(element, _) | Kind::Set(element, _)) => match &**element {
-					Kind::Any => Kind::Any,
-					element => Kind::Either(vec![element.clone(), Kind::None]),
-				},
+				Some(Kind::Array(element, _) | Kind::Set(element, _)) => {
+					if let Kind::Any = &**element {
+						Kind::Any
+					} else {
+						Kind::Either(vec![element.as_ref().clone(), Kind::None])
+					}
+				}
 				_ => self.returns.clone(),
 			},
 			ReturnRule::NumericAggregate(index) => match args.get(index) {

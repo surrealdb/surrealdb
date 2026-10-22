@@ -86,15 +86,31 @@ async fn evaluate_idiom_on_value(
 			Part::All => {
 				evaluate_all(&current, ctx.clone()).await.map_err(|cf| anyhow::anyhow!("{cf}"))?
 			}
-			Part::First => match &current {
-				Value::Array(arr) => arr.first().cloned().unwrap_or(Value::None),
-				_ => Value::None,
-			},
-			Part::Last => match &current {
-				Value::Array(arr) => arr.last().cloned().unwrap_or(Value::None),
-				_ => Value::None,
-			},
-			_ => current.pick(std::slice::from_ref(part)),
+			Part::First => {
+				if let Value::Array(arr) = &current {
+					arr.first().cloned().unwrap_or(Value::None)
+				} else {
+					Value::None
+				}
+			}
+			Part::Last => {
+				if let Value::Array(arr) = &current {
+					arr.last().cloned().unwrap_or(Value::None)
+				} else {
+					Value::None
+				}
+			}
+			Part::Flatten
+			| Part::Where(_)
+			| Part::Lookup(_)
+			| Part::Value(_)
+			| Part::Start(_)
+			| Part::Method(..)
+			| Part::Destructure(_)
+			| Part::Optional
+			| Part::Recurse(..)
+			| Part::Doc
+			| Part::RepeatRecurse => current.pick(std::slice::from_ref(part)),
 		};
 	}
 	Ok(current)

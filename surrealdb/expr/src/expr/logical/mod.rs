@@ -152,7 +152,7 @@
 
 // Adding a `LogicalOp` variant must break every pass that has not stated its
 // position on it, which a wildcard arm would silently absorb.
-#![warn(clippy::wildcard_enum_match_arm)]
+#![deny(clippy::wildcard_enum_match_arm)]
 
 pub mod dag;
 mod effects;

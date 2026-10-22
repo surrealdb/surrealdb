@@ -19,9 +19,7 @@
 //! closures invoked by value, run code the footprint cannot see, so it widens
 //! to `Unknown` unless the catalog shows there is nothing to run ([`expand`]).
 
-// A statement, expression or definition kind this layer does not name is
-// read conservatively: as every resource of a kind, or as unknown.
-#![expect(clippy::wildcard_enum_match_arm, reason = "unnamed kinds widen the footprint")]
+#![deny(clippy::wildcard_enum_match_arm)]
 
 use surrealdb_strand::TableName;
 
@@ -98,56 +96,61 @@ impl Resource {
 	/// resource in common.
 	pub(crate) fn overlaps(&self, other: &Resource) -> bool {
 		fn same<T: PartialEq>(a: &Option<T>, b: &Option<T>) -> bool {
-			match (a, b) {
-				(Some(a), Some(b)) => a == b,
-				_ => true,
+			if let (Some(a), Some(b)) = (a, b) {
+				a == b
+			} else {
+				true
 			}
 		}
-		match (self, other) {
-			(Resource::Unknown, _) | (_, Resource::Unknown) => true,
-			(
-				Resource::Data {
-					table: ta,
-				},
-				Resource::Data {
-					table: tb,
-				},
-			) => same(ta, tb),
-			(
-				Resource::Catalog {
-					kind: ka,
-					table: ta,
-					name: na,
-				},
-				Resource::Catalog {
-					kind: kb,
-					table: tb,
-					name: nb,
-				},
-			) => {
-				if !same(ta, tb) {
-					return false;
-				}
-				// A table's definition covers every definition on it.
-				let tabled = |kind: &CatalogKind| {
-					matches!(
-						kind,
-						CatalogKind::Field
-							| CatalogKind::Index | CatalogKind::Event
-							| CatalogKind::View
-					)
-				};
-				match (ka, kb) {
-					(CatalogKind::Table, other) | (other, CatalogKind::Table)
-						if *other == CatalogKind::Table || tabled(other) =>
-					{
-						ka != kb || same(na, nb)
-					}
-					_ => ka == kb && same(na, nb),
-				}
-			}
-			_ => false,
+		if matches!(self, Resource::Unknown) || matches!(other, Resource::Unknown) {
+			return true;
 		}
+		if let (
+			Resource::Data {
+				table: ta,
+			},
+			Resource::Data {
+				table: tb,
+			},
+		) = (self, other)
+		{
+			return same(ta, tb);
+		}
+		if let (
+			Resource::Catalog {
+				kind: ka,
+				table: ta,
+				name: na,
+			},
+			Resource::Catalog {
+				kind: kb,
+				table: tb,
+				name: nb,
+			},
+		) = (self, other)
+		{
+			if !same(ta, tb) {
+				return false;
+			}
+			// A table's definition covers every definition on it.
+			let tabled = |kind: &CatalogKind| {
+				matches!(
+					kind,
+					CatalogKind::Field
+						| CatalogKind::Index
+						| CatalogKind::Event
+						| CatalogKind::View
+				)
+			};
+			return if matches!(ka, CatalogKind::Table) && (*kb == CatalogKind::Table || tabled(kb))
+				|| matches!(kb, CatalogKind::Table) && (*ka == CatalogKind::Table || tabled(ka))
+			{
+				ka != kb || same(na, nb)
+			} else {
+				ka == kb && same(na, nb)
+			};
+		}
+		false
 	}
 }
 
@@ -264,18 +267,21 @@ pub(crate) fn of_arms(ifs: &LogicalIfOp, registry: &FunctionRegistry) -> Vec<Foo
 }
 
 fn walk(op: &LogicalOp, registry: &FunctionRegistry, out: &mut Footprint) {
-	match op {
-		LogicalOp::Source(source) => source_ref(&source.source, out),
-		LogicalOp::Write(write) => write_footprint(write, out),
-		LogicalOp::Ddl(ddl) => ddl_footprint(&ddl.statement, out),
+	if let LogicalOp::Source(source) = op {
+		source_ref(&source.source, out);
+	} else if let LogicalOp::Write(write) = op {
+		write_footprint(write, out);
+	} else if let LogicalOp::Ddl(ddl) = op {
+		ddl_footprint(&ddl.statement, out);
+	} else if let LogicalOp::Fetch(_) = op {
 		// A fetch follows links to records of any table.
-		LogicalOp::Fetch(_) => out.read(Resource::any_data()),
-		LogicalOp::Info(_) => out.read(Resource::Catalog {
+		out.read(Resource::any_data());
+	} else if let LogicalOp::Info(_) = op {
+		out.read(Resource::Catalog {
 			kind: CatalogKind::Other,
 			table: None,
 			name: None,
-		}),
-		_ => {}
+		});
 	}
 	let _ = op.visit_scalars(&mut |scalar| {
 		expr_footprint(scalar, registry, out);
@@ -331,35 +337,40 @@ pub(crate) fn write_targets(source: &LogicalWriteSource) -> Option<Vec<TableName
 		LogicalWriteSource::Targets(targets) => {
 			let mut out = Vec::new();
 			for target in targets {
-				match target {
-					LogicalExpr::Table(table) => out.push(table.clone()),
-					LogicalExpr::RecordId(rid) => out.push(rid.table.clone()),
-					_ => return None,
+				if let LogicalExpr::Table(table) = target {
+					out.push(table.clone());
+				} else if let LogicalExpr::RecordId(rid) = target {
+					out.push(rid.table.clone());
+				} else {
+					return None;
 				}
 			}
 			Some(out)
 		}
-		LogicalWriteSource::Inserts(inserts) => match &inserts.into {
-			Some(LogicalExpr::Table(table)) => Some(vec![table.clone()]),
-			_ => None,
-		},
+		LogicalWriteSource::Inserts(inserts) => {
+			if let Some(LogicalExpr::Table(table)) = &inserts.into {
+				Some(vec![table.clone()])
+			} else {
+				None
+			}
+		}
 		LogicalWriteSource::Rows(rows) => {
 			let mut tables = Vec::new();
 			let mut named = true;
 			let _ = rows.visit(&mut |op| {
-				match op {
-					LogicalOp::Source(source) => match &source.source {
-						SourceRef::Table(table) => tables.push(table.clone()),
-						SourceRef::RecordId(rid) => tables.push(rid.table.clone()),
-						_ => named = false,
-					},
+				if let LogicalOp::Source(source) = op {
+					if let SourceRef::Table(table) = &source.source {
+						tables.push(table.clone());
+					} else if let SourceRef::RecordId(rid) = &source.source {
+						tables.push(rid.table.clone());
+					} else {
+						named = false;
+					}
+				} else if let LogicalOp::Values(values) = op {
 					// A list of records written out, or a parameter's list a pass
 					// replaced with one: it names the tables of its elements, and
 					// any value it does not name leaves the tables open.
-					LogicalOp::Values(values) => {
-						named &= named_tables(&values.expr, &mut tables);
-					}
-					_ => {}
+					named &= named_tables(&values.expr, &mut tables);
 				}
 				std::ops::ControlFlow::<()>::Continue(())
 			});
@@ -371,20 +382,21 @@ pub(crate) fn write_targets(source: &LogicalWriteSource) -> Option<Vec<TableName
 /// Pushes the table `expr`, or each element of it where it is a literal list, names, as a table
 /// or a record id; whether every one is named so.
 fn named_tables(expr: &LogicalExpr, tables: &mut Vec<TableName>) -> bool {
-	let mut push = |expr: &LogicalExpr| match expr {
-		LogicalExpr::Table(table) => {
+	let mut push = |expr: &LogicalExpr| {
+		if let LogicalExpr::Table(table) = expr {
 			tables.push(table.clone());
 			true
-		}
-		LogicalExpr::RecordId(rid) => {
+		} else if let LogicalExpr::RecordId(rid) = expr {
 			tables.push(rid.table.clone());
 			true
+		} else {
+			false
 		}
-		_ => false,
 	};
-	match expr {
-		LogicalExpr::Array(items) => items.iter().all(push),
-		other => push(other),
+	if let LogicalExpr::Array(items) = expr {
+		items.iter().all(push)
+	} else {
+		push(expr)
 	}
 }
 
@@ -451,7 +463,12 @@ fn expr_footprint(expr: &LogicalExpr, registry: &FunctionRegistry, out: &mut Foo
 					// footprint widens to unknown.
 					out.absorb(Footprint::unknown());
 				}
-				_ => out.absorb(Footprint::unknown()),
+				Function::Script(_)
+				| Function::Model(_)
+				| Function::Module(..)
+				| Function::Silo {
+					..
+				} => out.absorb(Footprint::unknown()),
 			},
 			// A value that is invoked, or a lookup over edges, runs or reads
 			// things this footprint cannot name, so it widens to unknown.
@@ -488,7 +505,44 @@ fn expr_footprint(expr: &LogicalExpr, registry: &FunctionRegistry, out: &mut Foo
 			| LogicalExpr::Continue => {}
 			// A path into a value, a lookup or a method may follow a record link
 			// whose table is not known here, so it reads records of any table.
-			_ => out.read(Resource::any_data()),
+			LogicalExpr::Mock(_)
+			| LogicalExpr::Doc
+			| LogicalExpr::Closure(_)
+			| LogicalExpr::Access {
+				..
+			}
+			| LogicalExpr::Index {
+				..
+			}
+			| LogicalExpr::First(_)
+			| LogicalExpr::Last(_)
+			| LogicalExpr::Each(_)
+			| LogicalExpr::Flatten {
+				..
+			}
+			| LogicalExpr::Filter {
+				..
+			}
+			| LogicalExpr::Method {
+				..
+			}
+			| LogicalExpr::Destructure {
+				..
+			}
+			| LogicalExpr::Optional {
+				..
+			}
+			| LogicalExpr::Lookup {
+				..
+			}
+			| LogicalExpr::Recurse(_)
+			| LogicalExpr::RepeatRecurse(_)
+			| LogicalExpr::Broadcast {
+				..
+			}
+			| LogicalExpr::SetField {
+				..
+			} => out.read(Resource::any_data()),
 		}
 		std::ops::ControlFlow::<()>::Continue(())
 	});
@@ -496,9 +550,10 @@ fn expr_footprint(expr: &LogicalExpr, registry: &FunctionRegistry, out: &mut Foo
 
 /// The name an identifier or string literal gives by being written.
 pub(crate) fn written(expr: &Expr) -> Option<String> {
-	match expr {
-		Expr::Literal(crate::expr::Literal::String(s)) => Some(s.as_str().to_owned()),
-		expr => crate::ddl::scalar::written_name(expr),
+	if let Expr::Literal(crate::expr::Literal::String(s)) = expr {
+		Some(s.as_str().to_owned())
+	} else {
+		crate::ddl::scalar::written_name(expr)
 	}
 }
 
@@ -593,7 +648,13 @@ fn ddl_footprint(statement: &LogicalDdlStatement, out: &mut Footprint) {
 			DefineStatement::Namespace(_) | DefineStatement::Database(_) => {
 				out.absorb(Footprint::unknown())
 			}
-			_ => {
+			DefineStatement::Analyzer(_)
+			| DefineStatement::Model(_)
+			| DefineStatement::Config(_)
+			| DefineStatement::Api(_)
+			| DefineStatement::Bucket(_)
+			| DefineStatement::Sequence(_)
+			| DefineStatement::Module(_) => {
 				out.read(catalog(CatalogKind::Other, None, None));
 				out.write(catalog(CatalogKind::Other, None, None));
 			}
@@ -654,7 +715,15 @@ fn ddl_footprint(statement: &LogicalDdlStatement, out: &mut Footprint) {
 			RemoveStatement::Namespace(_) | RemoveStatement::Database(_) => {
 				out.absorb(Footprint::unknown())
 			}
-			_ => {
+			RemoveStatement::Analyzer(_)
+			| RemoveStatement::Access(_)
+			| RemoveStatement::User(_)
+			| RemoveStatement::Model(_)
+			| RemoveStatement::Api(_)
+			| RemoveStatement::Bucket(_)
+			| RemoveStatement::Sequence(_)
+			| RemoveStatement::Module(_)
+			| RemoveStatement::Config(_) => {
 				out.read(catalog(CatalogKind::Other, None, None));
 				out.write(catalog(CatalogKind::Other, None, None));
 			}
@@ -701,7 +770,14 @@ fn ddl_footprint(statement: &LogicalDdlStatement, out: &mut Footprint) {
 			AlterStatement::System(_)
 			| AlterStatement::Namespace(_)
 			| AlterStatement::Database(_) => out.absorb(Footprint::unknown()),
-			_ => {
+			AlterStatement::Api(_)
+			| AlterStatement::Sequence(_)
+			| AlterStatement::Bucket(_)
+			| AlterStatement::Config(_)
+			| AlterStatement::Analyzer(_)
+			| AlterStatement::User(_)
+			| AlterStatement::Access(_)
+			| AlterStatement::Module(_) => {
 				out.read(catalog(CatalogKind::Other, None, None));
 				out.write(catalog(CatalogKind::Other, None, None));
 			}

@@ -72,11 +72,15 @@ fn slot_edge_ids(slot: Option<&Value>) -> Vec<RecordId> {
 		// Group variable (quantified edge): an ordered list of edges.
 		Some(Value::Array(group)) => group
 			.iter()
-			.filter_map(|elem| match elem {
-				Value::Object(edge) => edge_id_from_object(edge),
-				Value::RecordId(rid) => Some(rid.clone()),
-				// Non-edge group element: nothing to compare.
-				_ => None,
+			.filter_map(|elem| {
+				if let Value::Object(edge) = elem {
+					edge_id_from_object(edge)
+				} else if let Value::RecordId(rid) = elem {
+					Some(rid.clone())
+				} else {
+					// Non-edge group element: nothing to compare.
+					None
+				}
 			})
 			.collect(),
 		// Optional miss (PR-C) or a missing/non-edge binding: contributes no id.

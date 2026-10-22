@@ -34,7 +34,24 @@ pub async fn expect(
 				};
 				bail!(ExecError::Thrown(format!("value::expect assertion failed{suffix}")))
 			}
-			other => {
+			other @ (Value::None
+			| Value::Null
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Array(_)
+			| Value::Set(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_)) => {
 				bail!(ExprError::InvalidFunctionArguments {
 					name: "value::expect".to_owned(),
 					message: format!(

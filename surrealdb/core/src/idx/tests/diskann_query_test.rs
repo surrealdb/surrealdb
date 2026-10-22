@@ -69,7 +69,23 @@ async fn test_diskann_filtered_knn_batches_record_fetches() -> Result<()> {
 			ds.run(QueryRequest::new(query, session).with_transaction(Arc::clone(&tx))).await?;
 		let len = match response.remove(0).result? {
 			surrealdb_types::Value::Array(a) => a.len(),
-			_ => 0,
+			surrealdb_types::Value::None
+			| surrealdb_types::Value::Null
+			| surrealdb_types::Value::Bool(_)
+			| surrealdb_types::Value::Number(_)
+			| surrealdb_types::Value::String(_)
+			| surrealdb_types::Value::Bytes(_)
+			| surrealdb_types::Value::Duration(_)
+			| surrealdb_types::Value::Datetime(_)
+			| surrealdb_types::Value::Uuid(_)
+			| surrealdb_types::Value::Geometry(_)
+			| surrealdb_types::Value::Table(_)
+			| surrealdb_types::Value::RecordId(_)
+			| surrealdb_types::Value::File(_)
+			| surrealdb_types::Value::Range(_)
+			| surrealdb_types::Value::Regex(_)
+			| surrealdb_types::Value::Object(_)
+			| surrealdb_types::Value::Set(_) => 0,
 		};
 		Ok((len, tx.metrics_snapshot_for_test()))
 	}
@@ -680,7 +696,23 @@ async fn diskann_versioned_filtered_knn_reads_each_candidate_once() -> Result<()
 			ds.run(QueryRequest::new(query, session).with_transaction(Arc::clone(&tx))).await?;
 		let len = match response.remove(0).result? {
 			surrealdb_types::Value::Array(a) => a.len(),
-			_ => 0,
+			surrealdb_types::Value::None
+			| surrealdb_types::Value::Null
+			| surrealdb_types::Value::Bool(_)
+			| surrealdb_types::Value::Number(_)
+			| surrealdb_types::Value::String(_)
+			| surrealdb_types::Value::Bytes(_)
+			| surrealdb_types::Value::Duration(_)
+			| surrealdb_types::Value::Datetime(_)
+			| surrealdb_types::Value::Uuid(_)
+			| surrealdb_types::Value::Geometry(_)
+			| surrealdb_types::Value::Table(_)
+			| surrealdb_types::Value::RecordId(_)
+			| surrealdb_types::Value::File(_)
+			| surrealdb_types::Value::Range(_)
+			| surrealdb_types::Value::Regex(_)
+			| surrealdb_types::Value::Object(_)
+			| surrealdb_types::Value::Set(_) => 0,
 		};
 		Ok((len, tx.metrics_snapshot_for_test().keys_read))
 	}

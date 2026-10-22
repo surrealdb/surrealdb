@@ -177,13 +177,12 @@ fn int_literal(ir: &crate::exec::ir::core::ir::Ir, value: ValueId) -> Option<i64
 	else {
 		return None;
 	};
-	match &ir.op(op)?.kind {
-		OpKind::Expr(ExprOp::Literal(literal)) => match &**literal {
-			Value::Number(Number::Int(n)) => Some(*n),
-			_ => None,
-		},
-		_ => None,
+	if let OpKind::Expr(ExprOp::Literal(literal)) = &ir.op(op)?.kind
+		&& let Value::Number(Number::Int(n)) = &**literal
+	{
+		return Some(*n);
 	}
+	None
 }
 
 /// Whether a value with the knowledge `ty` may be an integer.

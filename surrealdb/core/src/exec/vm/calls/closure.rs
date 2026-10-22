@@ -466,9 +466,11 @@ impl ClosureEvaluator for StreamingClosureEvaluator<'_> {
 			super::helpers::invoke_closure(closure, args, self.ctx).await.map_err(|ctrl| match ctrl
 			{
 				ControlFlow::Err(e) => e,
-				other => anyhow::Error::new(crate::err::EngineError::Internal(format!(
-					"unexpected control flow from a closure body: {other}"
-				))),
+				other @ (ControlFlow::Break | ControlFlow::Continue | ControlFlow::Return(_)) => {
+					anyhow::Error::new(crate::err::EngineError::Internal(format!(
+						"unexpected control flow from a closure body: {other}"
+					)))
+				}
 			})
 		})
 	}

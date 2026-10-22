@@ -229,7 +229,329 @@ fn dml_inner(
 				value: std::sync::Arc::new(bound),
 			});
 		}
-		_ => {
+		StoreInstr::Allow {
+			..
+		}
+		| StoreInstr::Get {
+			..
+		}
+		| StoreInstr::StampCatalog {
+			..
+		}
+		| StoreInstr::Put {
+			..
+		}
+		| StoreInstr::Replace {
+			..
+		}
+		| StoreInstr::GetField {
+			..
+		}
+		| StoreInstr::NextId {
+			..
+		}
+		| StoreInstr::SessionDb {
+			..
+		}
+		| StoreInstr::RealRunOnly
+		| StoreInstr::ShowGrants {
+			..
+		}
+		| StoreInstr::IssueGrant {
+			..
+		}
+		| StoreInstr::RevokeGrants {
+			..
+		}
+		| StoreInstr::PurgeGrants {
+			..
+		}
+		| StoreInstr::NewUuid {
+			..
+		}
+		| StoreInstr::SessionAuthLimit {
+			..
+		}
+		| StoreInstr::Lock {
+			..
+		}
+		| StoreInstr::Delete {
+			..
+		}
+		| StoreInstr::DeleteModelArtifact {
+			..
+		}
+		| StoreInstr::DeleteRange {
+			..
+		}
+		| StoreInstr::BufferTableChange {
+			..
+		}
+		| StoreInstr::SessionNs {
+			..
+		}
+		| StoreInstr::Increment {
+			..
+		}
+		| StoreInstr::ClearDatastoreCache
+		| StoreInstr::JumpIfImport {
+			..
+		}
+		| StoreInstr::Raise {
+			..
+		}
+		| StoreInstr::RefuseRedefiningTable {
+			..
+		}
+		| StoreInstr::CheckTableChange {
+			..
+		}
+		| StoreInstr::RefuseNamedIdConversion {
+			..
+		}
+		| StoreInstr::ValidateRecordKeys {
+			..
+		}
+		| StoreInstr::RefuseRemovingViewed {
+			..
+		}
+		| StoreInstr::RefuseRemovingLightweight {
+			..
+		}
+		| StoreInstr::PurgeEdgePointers {
+			..
+		}
+		| StoreInstr::ClearViewTable {
+			..
+		}
+		| StoreInstr::RefuseViewCycle {
+			..
+		}
+		| StoreInstr::RefuseClauseEffects {
+			..
+		}
+		| StoreInstr::ViewSources {
+			..
+		}
+		| StoreInstr::ClearCache
+		| StoreInstr::Scan {
+			..
+		}
+		| StoreInstr::ScanAt {
+			..
+		}
+		| StoreInstr::VersionStamp {
+			..
+		}
+		| StoreInstr::Clear {
+			..
+		}
+		| StoreInstr::ClearRange {
+			..
+		}
+		| StoreInstr::Compact {
+			..
+		}
+		| StoreInstr::CompactAll
+		| StoreInstr::SetQueryTimeout {
+			..
+		}
+		| StoreInstr::NewDatabaseCompatibility {
+			..
+		}
+		| StoreInstr::SetDefaultCompatibility {
+			..
+		}
+		| StoreInstr::VerifyCompatibility {
+			..
+		}
+		| StoreInstr::DropMethods {
+			..
+		}
+		| StoreInstr::Push {
+			..
+		}
+		| StoreInstr::Render {
+			..
+		}
+		| StoreInstr::RenderOne {
+			..
+		}
+		| StoreInstr::CoerceString {
+			..
+		}
+		| StoreInstr::CoerceName {
+			..
+		}
+		| StoreInstr::Convert {
+			..
+		}
+		| StoreInstr::AccessCheck {
+			..
+		}
+		| StoreInstr::ParseApiPath {
+			..
+		}
+		| StoreInstr::CastComment {
+			..
+		}
+		| StoreInstr::ProcessInfo {
+			..
+		}
+		| StoreInstr::InfoIndex {
+			..
+		}
+		| StoreInstr::JumpIfNoService {
+			..
+		}
+		| StoreInstr::RefuseField {
+			..
+		}
+		| StoreInstr::FieldCheck {
+			..
+		}
+		| StoreInstr::PurgeDroppedReferences {
+			..
+		}
+		| StoreInstr::RefuseLightweight {
+			..
+		}
+		| StoreInstr::ClaimDocIdsReclaim {
+			..
+		}
+		| StoreInstr::AdmitIndexFormat {
+			..
+		}
+		| StoreInstr::NextIndexId {
+			..
+		}
+		| StoreInstr::IndexReplayReuses {
+			..
+		}
+		| StoreInstr::FieldAdmitsSubFields {
+			..
+		}
+		| StoreInstr::BuildIndex {
+			..
+		}
+		| StoreInstr::RetireIndexLocally {
+			..
+		}
+		| StoreInstr::KillOnCommit {
+			..
+		}
+		| StoreInstr::RealtimeChecks
+		| StoreInstr::Live {
+			..
+		}
+		| StoreInstr::Kill {
+			..
+		}
+		| StoreInstr::SessionOption {
+			..
+		}
+		| StoreInstr::SessionUseName {
+			..
+		}
+		| StoreInstr::SessionUse {
+			..
+		}
+		| StoreInstr::SharesDocIds {
+			..
+		}
+		| StoreInstr::LoadAnalyzer {
+			..
+		}
+		| StoreInstr::CleanupMappers {
+			..
+		}
+		| StoreInstr::EvictModule {
+			..
+		}
+		| StoreInstr::VerifyModule {
+			..
+		}
+		| StoreInstr::LoadModule {
+			..
+		}
+		| StoreInstr::ConnectBucket {
+			..
+		}
+		| StoreInstr::CheckDepth {
+			..
+		}
+		| StoreInstr::SequenceDefinedHere {
+			..
+		}
+		| StoreInstr::EvictSequence {
+			..
+		}
+		| StoreInstr::JumpIfSpeculating {
+			..
+		}
+		| StoreInstr::EvaluateOver {
+			..
+		}
+		| StoreInstr::BackfillRow {
+			..
+		}
+		| StoreInstr::BackfillGroup {
+			..
+		}
+		| StoreInstr::BackfillGroupRow {
+			..
+		}
+		| StoreInstr::RetireViewRows {
+			..
+		}
+		| StoreInstr::JumpIfSessionBase {
+			..
+		}
+		| StoreInstr::ResolvePath {
+			..
+		}
+		| StoreInstr::ResolveColumns {
+			..
+		}
+		| StoreInstr::DefineField {
+			..
+		}
+		| StoreInstr::RemoveFieldDefinition {
+			..
+		}
+		| StoreInstr::InfoMigrations {
+			..
+		}
+		| StoreInstr::Migrate {
+			..
+		}
+		| StoreInstr::QueueVerification {
+			..
+		}
+		| StoreInstr::CheckFieldChange {
+			..
+		}
+		| StoreInstr::RemoveFieldStep {
+			..
+		}
+		| StoreInstr::MigrateTable {
+			..
+		}
+		| StoreInstr::CheckIndexMigrations {
+			..
+		}
+		| StoreInstr::AlterFieldDefinition {
+			..
+		}
+		| StoreInstr::AlterFieldClauses {
+			..
+		}
+		| StoreInstr::CheckIndexColumns {
+			..
+		}
+		| StoreInstr::CheckTableAlter {
+			..
+		} => {
 			return Err(ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(
 				"a store instruction of a schema statement taken as a data statement's".to_owned(),
 			))));
@@ -362,14 +684,15 @@ async fn step_inner(
 		} => {
 			let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
 			let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
-			let tb = match read(regs, *tb) {
-				Value::String(name) => crate::val::TableName::from(name.as_str()),
-				Value::Table(name) => name,
-				other => {
-					return Err(ControlFlow::Err(anyhow!(
-						"stamping the catalog version of {other:?}, which names no table"
-					)));
-				}
+			let tb_val = read(regs, *tb);
+			let tb = if let Value::String(name) = &tb_val {
+				crate::val::TableName::from(name.as_str())
+			} else if let Value::Table(name) = &tb_val {
+				name.clone()
+			} else {
+				return Err(ControlFlow::Err(anyhow!(
+					"stamping the catalog version of {tb_val:?}, which names no table"
+				)));
 			};
 			let version =
 				take_reserved(program, *reserved, reserved_taken).map(uuid::Uuid::from_u128);
@@ -404,14 +727,13 @@ async fn step_inner(
 			dst,
 		} => {
 			let name = program.fields[*name as usize].as_str();
-			let value = match read(regs, *src) {
-				Value::Object(object) => object.get(name).cloned().unwrap_or(Value::None),
-				other => {
-					return Err(ControlFlow::Err(anyhow!(
-						"reading field `{name}` of {other:?}, which is not an object"
-					)));
-				}
+			let src_val = read(regs, *src);
+			let Value::Object(object) = &src_val else {
+				return Err(ControlFlow::Err(anyhow!(
+					"reading field `{name}` of {src_val:?}, which is not an object"
+				)));
 			};
+			let value = object.get(name).cloned().unwrap_or(Value::None);
 			write(regs, *dst, value);
 		}
 		StoreInstr::NextId {
@@ -542,10 +864,11 @@ async fn step_inner(
 		} => {
 			let ns = crate::catalog::NamespaceId(id_of(&read(regs, *ns))?);
 			let db = crate::catalog::DatabaseId(id_of(&read(regs, *db))?);
-			let tb = match read(regs, *tb) {
-				Value::String(s) => crate::val::TableName::new(s.as_str()),
-				other => return Err(ControlFlow::Err(anyhow!("a table name {other:?}"))),
+			let tb_val = read(regs, *tb);
+			let Value::String(s) = &tb_val else {
+				return Err(ControlFlow::Err(anyhow!("a table name {tb_val:?}")));
 			};
+			let tb = crate::val::TableName::new(s.as_str());
 			// The changefeed buffer holds the Rust definition it writes at
 			// commit.
 			let stored: crate::catalog::StoredTableDefinition = rust(&read(regs, *definition))?;
@@ -920,17 +1243,78 @@ async fn step_inner(
 								db: field("db"),
 							}
 						}
-						_ => crate::catalog::Error::ApNotFound {
+						StatementError::ApNotFound => crate::catalog::Error::ApNotFound {
 							value: field("value"),
 						},
+						StatementError::NsAlreadyExists
+						| StatementError::DbAlreadyExists
+						| StatementError::TbAlreadyExists
+						| StatementError::NsNotFound
+						| StatementError::DbNotFound
+						| StatementError::TbNotFound
+						| StatementError::FdAlreadyExists
+						| StatementError::PaAlreadyExists
+						| StatementError::EvAlreadyExists
+						| StatementError::FcAlreadyExists
+						| StatementError::AzAlreadyExists
+						| StatementError::SeqAlreadyExists
+						| StatementError::ApAlreadyExists
+						| StatementError::CgAlreadyExists
+						| StatementError::BuAlreadyExists
+						| StatementError::MdAlreadyExists
+						| StatementError::MlAlreadyExists
+						| StatementError::IxAlreadyExists
+						| StatementError::ComputedFieldCannotBeIndexed
+						| StatementError::CgNotFound
+						| StatementError::EvNotFound
+						| StatementError::FdNotFound
+						| StatementError::IxNotFound
+						| StatementError::PaNotFound
+						| StatementError::FcNotFound
+						| StatementError::SeqNotFound
+						| StatementError::AzNotFound
+						| StatementError::BuNotFound
+						| StatementError::MdNotFound
+						| StatementError::MlNotFound
+						| StatementError::MdNeedsTrust => unreachable!(),
 					};
 					return Err(ControlFlow::Err(anyhow::Error::new(err)));
 				}
-				_ => {}
+				StatementError::NsAlreadyExists
+				| StatementError::DbAlreadyExists
+				| StatementError::TbAlreadyExists
+				| StatementError::NsNotFound
+				| StatementError::DbNotFound
+				| StatementError::TbNotFound
+				| StatementError::FdAlreadyExists
+				| StatementError::PaAlreadyExists
+				| StatementError::EvAlreadyExists
+				| StatementError::FcAlreadyExists
+				| StatementError::AzAlreadyExists
+				| StatementError::SeqAlreadyExists
+				| StatementError::ApAlreadyExists
+				| StatementError::CgAlreadyExists
+				| StatementError::BuAlreadyExists
+				| StatementError::MdAlreadyExists
+				| StatementError::MlAlreadyExists
+				| StatementError::IxAlreadyExists
+				| StatementError::CgNotFound
+				| StatementError::EvNotFound
+				| StatementError::FdNotFound
+				| StatementError::IxNotFound
+				| StatementError::PaNotFound
+				| StatementError::FcNotFound
+				| StatementError::SeqNotFound
+				| StatementError::AzNotFound
+				| StatementError::BuNotFound
+				| StatementError::MdNotFound
+				| StatementError::MlNotFound => {}
 			}
-			let name = match read(regs, *arg) {
-				Value::String(s) => s.as_str().to_owned(),
-				other => surrealdb_types::ToSql::to_sql(&other),
+			let arg_val = read(regs, *arg);
+			let name = if let Value::String(s) = &arg_val {
+				s.as_str().to_owned()
+			} else {
+				surrealdb_types::ToSql::to_sql(&arg_val)
 			};
 			let err = match error {
 				StatementError::NsAlreadyExists => crate::catalog::Error::NsAlreadyExists {
@@ -1119,10 +1503,13 @@ async fn step_inner(
 		StoreInstr::SetQueryTimeout {
 			timeout,
 		} => {
-			let timeout = match read(regs, *timeout) {
-				Value::Duration(d) => Some(d.0),
-				Value::None => None,
-				other => return Err(ControlFlow::Err(anyhow!("a query timeout {other:?}"))),
+			let timeout_val = read(regs, *timeout);
+			let timeout = if let Value::Duration(d) = &timeout_val {
+				Some(d.0)
+			} else if timeout_val.is_none() {
+				None
+			} else {
+				return Err(ControlFlow::Err(anyhow!("a query timeout {timeout_val:?}")));
 			};
 			ctx.ctx().dynamic_configuration().set_query_timeout(timeout);
 		}
@@ -1178,15 +1565,15 @@ async fn step_inner(
 			};
 			let mut i = 0;
 			while i < list.len() {
-				let empty = match &mut list[i] {
-					Value::Object(action) => match action.get_mut("methods") {
-						Some(Value::Array(methods)) => {
-							methods.retain(|m| !drop.contains(m));
-							methods.is_empty()
-						}
-						_ => return Err(ControlFlow::Err(anyhow!("an action with no methods"))),
-					},
-					other => return Err(ControlFlow::Err(anyhow!("an action {other:?}"))),
+				let empty = if let Value::Object(action) = &mut list[i] {
+					if let Some(Value::Array(methods)) = action.get_mut("methods") {
+						methods.retain(|m| !drop.contains(m));
+						methods.is_empty()
+					} else {
+						return Err(ControlFlow::Err(anyhow!("an action with no methods")));
+					}
+				} else {
+					return Err(ControlFlow::Err(anyhow!("an action {:?}", &list[i])));
 				};
 				if empty {
 					list.swap_remove(i);
@@ -1346,9 +1733,13 @@ async fn step_inner(
 				{
 					return Err(ControlFlow::Err(anyhow::Error::new(
 						crate::exec::Error::AccessRedactedKey {
-							ac: match read(regs, *name) {
-								Value::String(s) => s.as_str().to_owned(),
-								other => surrealdb_types::ToSql::to_sql(&other),
+							ac: {
+								let name_val = read(regs, *name);
+								if let Value::String(s) = &name_val {
+									s.as_str().to_owned()
+								} else {
+									surrealdb_types::ToSql::to_sql(&name_val)
+								}
 							},
 						},
 					)));
@@ -1359,17 +1750,17 @@ async fn step_inner(
 				overwrite,
 			} => {
 				let import = ctx.options().is_some_and(|opt| opt.import);
-				let existing_uses_es512 = match read(regs, *existing) {
-					Value::Object(_) => {
-						if let Ok(stored) =
-							rust::<crate::catalog::StoredAccessDefinition>(&read(regs, *existing))
-						{
-							stored.access_type.uses_es512()
-						} else {
-							false
-						}
+				let existing_val = read(regs, *existing);
+				let existing_uses_es512 = if let Value::Object(_) = &existing_val {
+					if let Ok(stored) =
+						rust::<crate::catalog::StoredAccessDefinition>(&existing_val)
+					{
+						stored.access_type.uses_es512()
+					} else {
+						false
 					}
-					_ => false,
+				} else {
+					false
 				};
 				if !(import || (existing_uses_es512 && *overwrite)) {
 					return Err(ControlFlow::Err(anyhow::Error::new(
@@ -1392,13 +1783,11 @@ async fn step_inner(
 			text,
 			rendered,
 		} => {
-			let given = match read(regs, *src) {
-				Value::String(s) => s,
-				other => {
-					return Err(ControlFlow::Err(anyhow!(
-						"an API path evaluated to {other:?}, not a string"
-					)));
-				}
+			let src_val = read(regs, *src);
+			let Value::String(given) = &src_val else {
+				return Err(ControlFlow::Err(anyhow!(
+					"an API path evaluated to {src_val:?}, not a string"
+				)));
 			};
 			let path: crate::api::path::Path = given.parse().map_err(ControlFlow::Err)?;
 			write(regs, *text, Value::String(surrealdb_types::ToSql::to_sql(&path).into()));
@@ -1422,9 +1811,11 @@ async fn step_inner(
 			dst,
 		} => {
 			let table = table_name_of(&read(regs, *table))?;
-			let index = match read(regs, *index) {
-				Value::String(s) => s.to_string(),
-				other => surrealdb_types::ToSql::to_sql(&other),
+			let index_val = read(regs, *index);
+			let index = if let Value::String(s) = &index_val {
+				s.to_string()
+			} else {
+				surrealdb_types::ToSql::to_sql(&index_val)
 			};
 			let descriptor = crate::exec::vm::descriptor::table_at(ctx, &table, None)
 				.await
@@ -1537,14 +1928,13 @@ async fn step_inner(
 				ControlFlow::Err(anyhow!("a KILL run without the session's options"))
 			})?;
 			let id = read(regs, *id);
-			let written = match read(regs, *written) {
-				Value::String(text) => text.as_str().to_owned(),
-				other => {
-					return Err(ControlFlow::Err(anyhow!(
-						"the written id of a KILL is {other:?}, which is no string"
-					)));
-				}
+			let written_val = read(regs, *written);
+			let Value::String(text) = &written_val else {
+				return Err(ControlFlow::Err(anyhow!(
+					"the written id of a KILL is {written_val:?}, which is no string"
+				)));
 			};
+			let written = text.as_str().to_owned();
 			crate::exec::kill::kill_subscription(id, || written.clone(), ctx.ctx(), options)
 				.await
 				.map_err(ControlFlow::Err)?;
@@ -2238,17 +2628,16 @@ async fn step_inner(
 		StoreInstr::CleanupMappers {
 			analyzers,
 		} => {
-			let analyzers = match read(regs, *analyzers) {
-				Value::Array(analyzers) => analyzers
-					.iter()
-					.map(rust::<crate::catalog::AnalyzerDefinition>)
-					.collect::<FlowResult<Vec<_>>>()?,
-				other => {
-					return Err(ControlFlow::Err(anyhow!(
-						"analyzers that are not a list: {other:?}"
-					)));
-				}
+			let analyzers_val = read(regs, *analyzers);
+			let Value::Array(analyzers) = &analyzers_val else {
+				return Err(ControlFlow::Err(anyhow!(
+					"analyzers that are not a list: {analyzers_val:?}"
+				)));
 			};
+			let analyzers = analyzers
+				.iter()
+				.map(rust::<crate::catalog::AnalyzerDefinition>)
+				.collect::<FlowResult<Vec<_>>>()?;
 			ctx.ctx().get_index_stores().mappers().cleanup(&analyzers);
 		}
 		StoreInstr::EvictModule {
@@ -2449,9 +2838,9 @@ async fn step_inner(
 		} => {
 			let ns = crate::catalog::NamespaceId(id_of(&read(regs, *ns))?);
 			let db = crate::catalog::DatabaseId(id_of(&read(regs, *db))?);
-			let name = match read(regs, *name) {
-				Value::String(s) => s,
-				other => return Err(ControlFlow::Err(anyhow!("a sequence name {other:?}"))),
+			let name_val = read(regs, *name);
+			let Value::String(name) = &name_val else {
+				return Err(ControlFlow::Err(anyhow!("a sequence name {name_val:?}")));
 			};
 			ctx.txn().sequence_defined_here(ns, db, name.to_string()).await;
 		}
@@ -2463,9 +2852,9 @@ async fn step_inner(
 			if let Some(sequences) = ctx.ctx().get_sequences() {
 				let ns = crate::catalog::NamespaceId(id_of(&read(regs, *ns))?);
 				let db = crate::catalog::DatabaseId(id_of(&read(regs, *db))?);
-				let name = match read(regs, *name) {
-					Value::String(s) => s,
-					other => return Err(ControlFlow::Err(anyhow!("a sequence name {other:?}"))),
+				let name_val = read(regs, *name);
+				let Value::String(name) = &name_val else {
+					return Err(ControlFlow::Err(anyhow!("a sequence name {name_val:?}")));
 				};
 				sequences.sequence_removed(ns, db, name.as_str()).await;
 			}
@@ -2841,9 +3230,11 @@ async fn step_inner(
 			let ns = crate::catalog::NamespaceId(id_of(&read(regs, *ns))?);
 			let db = crate::catalog::DatabaseId(id_of(&read(regs, *db))?);
 			let table = table_name_of(&read(regs, *table))?;
-			let index = match read(regs, *index) {
-				Value::String(s) => s.to_string(),
-				other => surrealdb_types::ToSql::to_sql(&other),
+			let index_val = read(regs, *index);
+			let index = if let Value::String(s) = &index_val {
+				s.to_string()
+			} else {
+				surrealdb_types::ToSql::to_sql(&index_val)
 			};
 			let schemafull = matches!(read(regs, *schemafull), Value::Bool(true));
 			let Value::Array(columns) = read(regs, *columns) else {
@@ -2965,47 +3356,45 @@ fn resolve_path(source: &PathSource, regs: &[Scalar<'_>]) -> anyhow::Result<crat
 /// The field path the text in `value` names.
 fn idiom_of(value: &Value) -> FlowResult<crate::expr::Idiom> {
 	use std::str::FromStr as _;
-	match value {
-		Value::String(text) => crate::expr::Idiom::from_str(text.as_str())
-			.map_err(|e| ControlFlow::Err(anyhow!("a field path that does not parse: {e}"))),
-		other => Err(ControlFlow::Err(anyhow!("a field path that is {other:?}, not text"))),
+	if let Value::String(text) = value {
+		crate::expr::Idiom::from_str(text.as_str())
+			.map_err(|e| ControlFlow::Err(anyhow!("a field path that does not parse: {e}")))
+	} else {
+		Err(ControlFlow::Err(anyhow!("a field path that is {value:?}, not text")))
 	}
 }
 
 /// The compatibility level held in a register: 3 or 4.
 fn compatibility_of(value: &Value) -> FlowResult<crate::catalog::DatabaseCompatibility> {
-	match value {
-		Value::Number(crate::val::Number::Int(level)) => u8::try_from(*level)
+	if let Value::Number(crate::val::Number::Int(level)) = value {
+		u8::try_from(*level)
 			.ok()
 			.and_then(crate::catalog::DatabaseCompatibility::new)
-			.ok_or_else(|| {
-				ControlFlow::Err(anyhow!("a compatibility level {level} is not 3 or 4"))
-			}),
-		other => Err(ControlFlow::Err(anyhow!("a compatibility level that is {other:?}"))),
+			.ok_or_else(|| ControlFlow::Err(anyhow!("a compatibility level {level} is not 3 or 4")))
+	} else {
+		Err(ControlFlow::Err(anyhow!("a compatibility level that is {value:?}")))
 	}
 }
 
 /// The field definition a register holds: `None` for `NONE` and `NULL`, which
 /// stand for a field with no definition before the statement.
 fn field_definition_of(value: &Value) -> FlowResult<Option<crate::catalog::FieldDefinition>> {
-	match value {
-		Value::None | Value::Null => Ok(None),
-		value => {
-			use crate::catalog::FromStored as _;
-			let stored: crate::catalog::StoredFieldDefinition = rust(value)?;
-			crate::catalog::FieldDefinition::from_stored(&stored)
-				.map(Some)
-				.map_err(ControlFlow::Err)
-		}
+	if matches!(value, Value::None | Value::Null) {
+		Ok(None)
+	} else {
+		use crate::catalog::FromStored as _;
+		let stored: crate::catalog::StoredFieldDefinition = rust(value)?;
+		crate::catalog::FieldDefinition::from_stored(&stored).map(Some).map_err(ControlFlow::Err)
 	}
 }
 
 /// The version stamp a [`StoreInstr::VersionStamp`] left in a register.
 fn stamp_of(value: &Value) -> FlowResult<u64> {
-	match value {
-		Value::Number(crate::val::Number::Int(stamp)) => u64::try_from(*stamp)
-			.map_err(|_| ControlFlow::Err(anyhow!("a version stamp {stamp} out of range"))),
-		other => Err(ControlFlow::Err(anyhow!("a version stamp {other:?}"))),
+	if let Value::Number(crate::val::Number::Int(stamp)) = value {
+		u64::try_from(*stamp)
+			.map_err(|_| ControlFlow::Err(anyhow!("a version stamp {stamp} out of range")))
+	} else {
+		Err(ControlFlow::Err(anyhow!("a version stamp {value:?}")))
 	}
 }
 
@@ -3087,31 +3476,34 @@ fn views_error(
 
 /// The string field `name` of the object `value`, as its text.
 fn string_field(value: &Value, name: &str) -> String {
-	match value {
-		Value::Object(object) => match object.get(name) {
+	if let Value::Object(object) = value {
+		match object.get(name) {
 			Some(Value::String(s)) => s.as_str().to_owned(),
 			Some(other) => surrealdb_types::ToSql::to_sql(other),
 			None => String::new(),
-		},
-		_ => String::new(),
+		}
+	} else {
+		String::new()
 	}
 }
 
 /// The table a register names, as a string.
 /// Fails when the value is neither a string nor a table.
 pub(super) fn table_name_of(value: &Value) -> FlowResult<crate::val::TableName> {
-	match value {
-		Value::String(s) => Ok(crate::val::TableName::new(s.as_str())),
-		Value::Table(t) => Ok(t.clone()),
-		other => Err(ControlFlow::Err(anyhow!("a table name {other:?}"))),
+	if let Value::String(s) = value {
+		Ok(crate::val::TableName::new(s.as_str()))
+	} else if let Value::Table(t) = value {
+		Ok(t.clone())
+	} else {
+		Err(ControlFlow::Err(anyhow!("a table name {value:?}")))
 	}
 }
 
 fn id_of(value: &Value) -> FlowResult<u32> {
-	match value {
-		Value::Number(crate::val::Number::Int(v)) => u32::try_from(*v)
-			.map_err(|_| ControlFlow::Err(anyhow!("a catalog id out of range: {v}"))),
-		other => Err(ControlFlow::Err(anyhow!("a catalog id that is not an integer: {other:?}"))),
+	if let Value::Number(crate::val::Number::Int(v)) = value {
+		u32::try_from(*v).map_err(|_| ControlFlow::Err(anyhow!("a catalog id out of range: {v}")))
+	} else {
+		Err(ControlFlow::Err(anyhow!("a catalog id that is not an integer: {value:?}")))
 	}
 }
 
@@ -3301,9 +3693,11 @@ fn take_reserved(program: &Program, reserved: Option<u32>, taken: &mut [bool]) -
 
 /// The table `value` names.
 fn table_named(value: &Value) -> FlowResult<crate::val::TableName> {
-	match value {
-		Value::String(name) => Ok(crate::val::TableName::from(name.as_str())),
-		Value::Table(name) => Ok(name.clone()),
-		other => Err(ControlFlow::Err(anyhow!("{other:?} names no table"))),
+	if let Value::String(name) = value {
+		Ok(crate::val::TableName::from(name.as_str()))
+	} else if let Value::Table(name) = value {
+		Ok(name.clone())
+	} else {
+		Err(ControlFlow::Err(anyhow!("{value:?} names no table")))
 	}
 }

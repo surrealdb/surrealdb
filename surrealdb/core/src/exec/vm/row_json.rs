@@ -117,7 +117,10 @@ pub(super) fn encode_json(
 				crate::val::RecordIdKey::String(s) => {
 					record_id_text_str(out, rid.table.as_str(), s.as_str(), scratch)?
 				}
-				_ => public(out, value, depth)?,
+				crate::val::RecordIdKey::Uuid(_)
+				| crate::val::RecordIdKey::Array(_)
+				| crate::val::RecordIdKey::Object(_)
+				| crate::val::RecordIdKey::Range(_) => public(out, value, depth)?,
 			}
 		}
 		Value::Set(_)
@@ -175,7 +178,12 @@ pub(super) fn record_id_text(
 	match key {
 		crate::val::RecordIdKey::Number(n) => record_id_text_int(out, table, *n, scratch),
 		crate::val::RecordIdKey::String(s) => record_id_text_str(out, table, s.as_str(), scratch),
-		_ => anyhow::bail!("a record id key rendered in place that is not a number or a string"),
+		crate::val::RecordIdKey::Uuid(_)
+		| crate::val::RecordIdKey::Array(_)
+		| crate::val::RecordIdKey::Object(_)
+		| crate::val::RecordIdKey::Range(_) => {
+			anyhow::bail!("a record id key rendered in place that is not a number or a string")
+		}
 	}
 }
 

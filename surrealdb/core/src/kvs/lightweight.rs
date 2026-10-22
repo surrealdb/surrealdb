@@ -152,10 +152,12 @@ pub(crate) async fn lightweight_relation_is_empty(
 
 /// The lightweight relation definition of a table, if it is one.
 pub(crate) fn lightweight_relation(table_type: &TableType) -> Option<&Relation> {
-	match table_type {
-		TableType::Relation(rel) if rel.lightweight => Some(rel),
-		_ => None,
+	if let TableType::Relation(rel) = table_type
+		&& rel.lightweight
+	{
+		return Some(rel);
 	}
+	None
 }
 
 /// The two endpoints of a lightweight edge id — re-exported so core paths

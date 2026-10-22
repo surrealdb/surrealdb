@@ -114,7 +114,13 @@ impl Visitor for DepthWalk {
 					self.found.api_invoke =
 						Some(self.found.api_invoke.map_or(depth, |at| at.min(depth)));
 				}
-				_ => {}
+				Function::Normal(_)
+				| Function::Script(_)
+				| Function::Model(_)
+				| Function::Module(..)
+				| Function::Silo {
+					..
+				} => {}
 			}
 		}
 		let processes_records = matches!(
@@ -154,9 +160,10 @@ impl Visitor for DepthWalk {
 	/// which binds what its value spends and spends nothing of its own.
 	fn visit_block(&mut self, block: &Block) -> Result<(), Self::Error> {
 		for statement in block.iter() {
-			match statement {
-				Expr::Let(_) => statement.visit(self)?,
-				_ => self.visit_expr(statement)?,
+			if let Expr::Let(_) = statement {
+				statement.visit(self)?;
+			} else {
+				self.visit_expr(statement)?;
 			}
 		}
 		Ok(())

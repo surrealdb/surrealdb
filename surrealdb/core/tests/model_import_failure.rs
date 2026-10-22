@@ -1,4 +1,5 @@
 #![recursion_limit = "256"]
+#![deny(clippy::wildcard_enum_match_arm)]
 //! An import whose `DEFINE MODEL` does not commit leaves no `.surml` artifact
 //! behind, and an import of content a model already references keeps it.
 //!

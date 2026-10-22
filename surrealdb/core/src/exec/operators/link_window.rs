@@ -761,9 +761,11 @@ pub(crate) mod tests {
 		];
 		let mut ahead = RowsWindow::default();
 		ahead.fill(&ctx, &rows, &named(&["author", "friends"]), true).await.expect("fills");
-		let held = |n: i64| match rid("user", n) {
-			Value::RecordId(rid) => ahead.holds(&rid),
-			_ => unreachable!(),
+		let held = |n: i64| {
+			let Value::RecordId(rid) = rid("user", n) else {
+				unreachable!()
+			};
+			ahead.holds(&rid)
 		};
 		assert!(held(1) && held(2) && held(3) && held(4), "every link of a keyed field is held");
 		assert!(!held(5), "a record no row links is not held");

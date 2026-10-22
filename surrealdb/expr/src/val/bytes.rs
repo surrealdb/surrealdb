@@ -83,6 +83,13 @@ impl ToSql for Bytes {
 	}
 }
 
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for Bytes {
+	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		Ok(Bytes(::bytes::Bytes::copy_from_slice(u.arbitrary()?)))
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use crate::val::{Bytes, Value};
@@ -94,12 +101,5 @@ mod tests {
 		println!("{serialized:?}");
 		let deserialized: Value = revision::from_slice(&serialized).unwrap();
 		assert_eq!(val, deserialized);
-	}
-}
-
-#[cfg(feature = "arbitrary")]
-impl<'a> arbitrary::Arbitrary<'a> for Bytes {
-	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-		Ok(Bytes(::bytes::Bytes::copy_from_slice(u.arbitrary()?)))
 	}
 }

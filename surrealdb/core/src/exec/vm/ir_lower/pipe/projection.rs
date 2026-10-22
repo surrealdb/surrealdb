@@ -370,7 +370,7 @@ fn reads_a_field(ir: &Ir, region: RegionId) -> bool {
 fn in_register(em: &mut Emitter, value: Operand) -> Result<Reg, IrError> {
 	match value {
 		Operand::Reg(reg) => Ok(reg),
-		other => {
+		other @ (Operand::Const(_) | Operand::Field(_)) => {
 			let dst = em.reg()?;
 			em.emit(Instr::Load {
 				dst,
@@ -630,16 +630,14 @@ fn projection_call(
 	let yielded = yielded_value(ir, region).ok()?;
 	let op = producer_of(ir, yielded).ok()?;
 	let data = ir.op(op)?;
-	match &data.kind {
-		OpKind::Expr(ExprOp::Call(function)) => match &function.function {
-			Function::Normal(name) if registry.is_projection(name) => {
-				let arguments = call_args(data, function).ok()?;
-				Some((name.clone(), arguments.to_vec()))
-			}
-			_ => None,
-		},
-		_ => None,
+	if let OpKind::Expr(ExprOp::Call(function)) = &data.kind
+		&& let Function::Normal(name) = &function.function
+		&& registry.is_projection(name)
+	{
+		let arguments = call_args(data, function).ok()?;
+		return Some((name.clone(), arguments.to_vec()));
 	}
+	None
 }
 
 /// The walk that removes the value at `path`: the fields and indices before the last part reach

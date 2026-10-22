@@ -2955,11 +2955,12 @@ fn writeback_provenance_complete() {
 		// reason. Every other eliminated op is dead and pure.
 		let reused = matches!(built.swaps[0].to, Operand::Value(_));
 		for (op, reason) in fx.ir.eliminated() {
-			match merged {
-				Elimination::Reason(planned) if reused && *op == done.root => {
-					assert_eq!(*reason, planned);
-				}
-				_ => assert_eq!(*reason, EliminationReason::DeadPure),
+			if let Elimination::Reason(planned) = merged
+				&& reused && *op == done.root
+			{
+				assert_eq!(*reason, planned);
+			} else {
+				assert_eq!(*reason, EliminationReason::DeadPure);
 			}
 		}
 		assert_eq!(fx.ir.eliminated().iter().any(|(op, _)| *op == done.root), reused);

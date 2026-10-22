@@ -223,11 +223,10 @@ async fn a_decoded_value_carries_its_contents() {
 		// the id the decode produced is compared against the one derived from the
 		// key's own fields, which is the only check that the context is applied and
 		// applied the right way round.
-		let expected = match &any {
-			AnyKey::Record(record) => {
-				Some(RecordId::new(record.tb.as_ref().clone(), record.id.as_ref().clone()))
-			}
-			_ => None,
+		let expected = if let AnyKey::Record(record) = &any {
+			Some(RecordId::new(record.tb.as_ref().clone(), record.id.as_ref().clone()))
+		} else {
+			None
 		};
 		match decode_value(&tx, &any, value).await {
 			Ok(AnyValue::NamespaceDefinition(ns)) => namespaces.push(ns.name.to_string()),

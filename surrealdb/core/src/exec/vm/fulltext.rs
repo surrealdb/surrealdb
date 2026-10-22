@@ -1109,14 +1109,16 @@ mod tests {
 			panic!("rows: {rows:?}");
 		};
 		rows.iter()
-			.map(|row| match row {
-				surrealdb_types::Value::Object(row) => match row.get("s") {
-					Some(surrealdb_types::Value::Number(n)) => {
+			.map(|row| {
+				if let surrealdb_types::Value::Object(row) = row {
+					if let Some(surrealdb_types::Value::Number(n)) = row.get("s") {
 						n.to_f64().expect("a float").to_bits()
+					} else {
+						panic!("a score: {:?}", row.get("s"));
 					}
-					other => panic!("a score: {other:?}"),
-				},
-				other => panic!("a row: {other:?}"),
+				} else {
+					panic!("a row: {row:?}");
+				}
 			})
 			.collect()
 	}

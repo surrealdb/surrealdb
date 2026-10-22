@@ -703,7 +703,18 @@ fn estimate_bytes(value: &Value) -> usize {
 					}
 				}
 			}
-			_ => {}
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Closure(_) => {}
 		}
 	}
 	total
@@ -1839,44 +1850,30 @@ impl Executor {
 
 		// Extract fields from the session Value. `Value::String` holds a `Strand`, so it is
 		// moved into `SessionInfo` as it is, with no `Strand -> String -> Strand` round-trip.
-		let ns = match session_value.pick(NS.as_ref()) {
-			Value::String(s) => Some(s),
-			_ => None,
+		let ns = session_value.pick(NS.as_ref()).into_strand();
+
+		let db = session_value.pick(DB.as_ref()).into_strand();
+
+		let id = if let Value::Uuid(u) = session_value.pick(ID.as_ref()) {
+			Some(*u.as_ref())
+		} else {
+			None
 		};
 
-		let db = match session_value.pick(DB.as_ref()) {
-			Value::String(s) => Some(s),
-			_ => None,
+		let ip = session_value.pick(IP.as_ref()).into_strand();
+
+		let origin = session_value.pick(OR.as_ref()).into_strand();
+
+		let ac = session_value.pick(AC.as_ref()).into_strand();
+
+		let rd = {
+			let v = session_value.pick(RD.as_ref());
+			v.is_some().then_some(v)
 		};
 
-		let id = match session_value.pick(ID.as_ref()) {
-			Value::Uuid(u) => Some(*u.as_ref()),
-			_ => None,
-		};
-
-		let ip = match session_value.pick(IP.as_ref()) {
-			Value::String(s) => Some(s),
-			_ => None,
-		};
-
-		let origin = match session_value.pick(OR.as_ref()) {
-			Value::String(s) => Some(s),
-			_ => None,
-		};
-
-		let ac = match session_value.pick(AC.as_ref()) {
-			Value::String(s) => Some(s),
-			_ => None,
-		};
-
-		let rd = match session_value.pick(RD.as_ref()) {
-			Value::None => None,
-			v => Some(v),
-		};
-
-		let token = match session_value.pick(TK.as_ref()) {
-			Value::None => None,
-			v => Some(v),
+		let token = {
+			let v = session_value.pick(TK.as_ref());
+			v.is_some().then_some(v)
 		};
 
 		// Note: exp is not in the session object; it lives in the Session struct.
@@ -2962,7 +2959,9 @@ impl Executor {
 				// Boxed: held inline, this rare run would set the size of the common one.
 				Box::pin(self.execute_live_or_kill(kvs, start, expr, transaction_type)).await
 			}
-			stmt => {
+			stmt @ (TopLevelStatement::Ast(_)
+			| TopLevelStatement::Plan(_)
+			| TopLevelStatement::Surreal(_)) => {
 				let mut budget = kvs.transaction_timeout();
 				self.execute_in_own_transaction(kvs, start, stmt, transaction_type, &mut budget)
 					.await
@@ -2999,10 +2998,12 @@ impl Executor {
 		if matches!(expr, TopLevelExpr::Live(_)) {
 			expr.prepare_credentials();
 		}
-		let live: Option<crate::expr::statements::LiveStatement> = match &expr {
-			TopLevelExpr::Live(live) => Some((**live).clone()),
-			_ => None,
-		};
+		let live: Option<crate::expr::statements::LiveStatement> =
+			if let TopLevelExpr::Live(live) = &expr {
+				Some((**live).clone())
+			} else {
+				None
+			};
 		let mut budget = kvs.transaction_timeout();
 		let mut attempt = 1;
 		loop {
@@ -3564,7 +3565,10 @@ impl Executor {
 					let end = match place.role {
 						StatementRole::Commit => FailedEnd::Commit,
 						StatementRole::Cancel => FailedEnd::Cancel,
-						_ => FailedEnd::RequestEnd,
+						StatementRole::Run
+						| StatementRole::Option
+						| StatementRole::Begin
+						| StatementRole::Misplaced(_) => FailedEnd::RequestEnd,
 					};
 					let terminates = !matches!(end, FailedEnd::RequestEnd);
 					let mut rewrite = finalise_slots(&BlockEnd::BeginFailed {
@@ -3798,7 +3802,12 @@ impl Executor {
 						| StatementRole::Misplaced(MisplacedControl::CommitOutsideBlock) => InterruptEnd::Commit,
 						StatementRole::Cancel
 						| StatementRole::Misplaced(MisplacedControl::CancelOutsideBlock) => InterruptEnd::Cancel,
-						_ => InterruptEnd::RequestEnd,
+						StatementRole::Run
+						| StatementRole::Option
+						| StatementRole::Begin
+						| StatementRole::Misplaced(
+							MisplacedControl::NestedBegin | MisplacedControl::BeginInSession,
+						) => InterruptEnd::RequestEnd,
 					};
 					let interrupted = BlockEnd::Interrupted {
 						reason: done,
@@ -3899,7 +3908,10 @@ impl Executor {
 						let end = match place.role {
 							StatementRole::Commit => FailedEnd::Commit,
 							StatementRole::Cancel => FailedEnd::Cancel,
-							_ => FailedEnd::RequestEnd,
+							StatementRole::Run
+							| StatementRole::Option
+							| StatementRole::Begin
+							| StatementRole::Misplaced(_) => FailedEnd::RequestEnd,
 						};
 						let failed = BlockEnd::Failed {
 							cause: FailCause::NestedBegin,
@@ -4066,9 +4078,10 @@ impl Executor {
 							| ControlFlow::Break
 							| ControlFlow::Continue),
 						) => {
-							let e = match flow {
-								ControlFlow::Err(e) => e,
-								_ => anyhow!(ExecError::InvalidControlFlow),
+							let e = if let ControlFlow::Err(e) = flow {
+								e
+							} else {
+								anyhow!(ExecError::InvalidControlFlow)
 							};
 							let rewrite = finalise_slots(&BlockEnd::Failed {
 								cause: FailCause::Error,
@@ -4114,7 +4127,10 @@ impl Executor {
 								let end = match place.role {
 									StatementRole::Commit => FailedEnd::Commit,
 									StatementRole::Cancel => FailedEnd::Cancel,
-									_ => FailedEnd::RequestEnd,
+									StatementRole::Run
+									| StatementRole::Option
+									| StatementRole::Begin
+									| StatementRole::Misplaced(_) => FailedEnd::RequestEnd,
 								};
 								let failed = BlockEnd::Failed {
 									cause: FailCause::Error,
@@ -4728,9 +4744,10 @@ impl Executor {
 						});
 					}
 
-					let begin_options = match stmt.dispatch() {
-						Dispatch::Begin(options) => options,
-						_ => BeginOptions::default(),
+					let begin_options = if let Dispatch::Begin(options) = stmt.dispatch() {
+						options
+					} else {
+						BeginOptions::default()
 					};
 					// Boxed, as the bare statement's run is below: held inline, the block's run
 					// would make this future, and every future awaiting it, its size.
@@ -4898,18 +4915,21 @@ impl Executor {
 				op: Some(op.as_ref().clone()),
 				read_only,
 			},
-			TopLevelStatement::Surreal(stmt) => match &stmt.plan {
-				LogicalOp::Let(binding) => RequestEntry::Let {
-					name: binding.name.clone(),
-					kind: binding.kind.clone(),
-					read_only,
-					value: Some(Ok(*binding.value.clone())),
-				},
-				op => RequestEntry::Run {
-					op: Some(Ok(op.clone())),
-					read_only,
-				},
-			},
+			TopLevelStatement::Surreal(stmt) => {
+				if let LogicalOp::Let(binding) = &stmt.plan {
+					RequestEntry::Let {
+						name: binding.name.clone(),
+						kind: binding.kind.clone(),
+						read_only,
+						value: Some(Ok(*binding.value.clone())),
+					}
+				} else {
+					RequestEntry::Run {
+						op: Some(Ok(stmt.plan.clone())),
+						read_only,
+					}
+				}
+			}
 			TopLevelStatement::Ast(stmt) => match stmt {
 				TopLevelExpr::Begin(_) => RequestEntry::Begin,
 				TopLevelExpr::Commit => RequestEntry::Commit,
@@ -5474,12 +5494,11 @@ fn may_be_rejected(op: &LogicalOp) -> bool {
 	op.visit_ops_deep(&mut |node| {
 		visited += 1;
 		let nested = visited > 1;
-		let held = match node {
-			LogicalOp::Write(_) | LogicalOp::Ddl(_) | LogicalOp::Let(_) | LogicalOp::Sleep(_) => {
-				nested
-			}
-			_ => false,
-		};
+		let held = nested
+			&& matches!(
+				node,
+				LogicalOp::Write(_) | LogicalOp::Ddl(_) | LogicalOp::Let(_) | LogicalOp::Sleep(_)
+			);
 		if held
 			|| node
 				.visit_scalars(&mut |expr| {
@@ -5645,16 +5664,18 @@ fn visit_scalar_params<V: Visitor<Error = ()>>(
 	visitor: &mut V,
 ) -> Result<(), ()> {
 	use std::ops::ControlFlow as Walk;
-	let walked = scalar.visit(&mut |expr| match expr {
-		LogicalExpr::Param(param) => match visitor.visit_param(param) {
+	let walked = scalar.visit(&mut |expr| {
+		let res = if let LogicalExpr::Param(param) = expr {
+			visitor.visit_param(param)
+		} else if let LogicalExpr::Subquery(op) = expr {
+			visit_plan_params(op, visitor)
+		} else {
+			Ok(())
+		};
+		match res {
 			Ok(()) => Walk::Continue(()),
 			Err(()) => Walk::Break(()),
-		},
-		LogicalExpr::Subquery(op) => match visit_plan_params(op, visitor) {
-			Ok(()) => Walk::Continue(()),
-			Err(()) => Walk::Break(()),
-		},
-		_ => Walk::Continue(()),
+		}
 	});
 	match walked {
 		Walk::Continue(()) => Ok(()),

@@ -663,15 +663,12 @@ mod tests {
 			);
 
 			if let Ok(Expr::FunctionCall(call)) = res {
-				match call.receiver {
-					Function::Normal(parsed_name) => {
-						if parsed_name != name {
-							problems.push(format!("function `{name}` parsed as `{parsed_name}`"));
-						}
+				if let Function::Normal(parsed_name) = call.receiver {
+					if parsed_name != name {
+						problems.push(format!("function `{name}` parsed as `{parsed_name}`"));
 					}
-					_ => {
-						problems.push(format!("couldn't parse {name} function"));
-					}
+				} else {
+					problems.push(format!("couldn't parse {name} function"));
 				}
 			} else {
 				problems.push(format!("couldn't parse {name} function"));

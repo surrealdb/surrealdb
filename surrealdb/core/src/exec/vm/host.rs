@@ -650,13 +650,77 @@ fn inherit_knn(program: &Program, state: &mut State, ctx: &ExecutionContext) {
 	fn publishes(source: &super::program::Source) -> bool {
 		match source {
 			super::program::Source::Union(members) => members.iter().any(publishes),
-			other => matches!(
-				other,
-				super::program::Source::Knn {
-					slot: Some(0),
-					..
-				}
-			),
+			super::program::Source::Knn {
+				slot: Some(0),
+				..
+			} => true,
+			super::program::Source::Scan {
+				..
+			}
+			| super::program::Source::Record {
+				..
+			}
+			| super::program::Source::Index {
+				..
+			}
+			| super::program::Source::Lookup {
+				..
+			}
+			| super::program::Source::IndexUnion {
+				..
+			}
+			| super::program::Source::Bitmap {
+				..
+			}
+			| super::program::Source::FullText {
+				..
+			}
+			| super::program::Source::Knn {
+				..
+			}
+			| super::program::Source::Count {
+				..
+			}
+			| super::program::Source::Values {
+				..
+			}
+			| super::program::Source::Nested {
+				..
+			}
+			| super::program::Source::Probe {
+				..
+			}
+			| super::program::Source::Sorted {
+				..
+			}
+			| super::program::Source::Groups {
+				..
+			}
+			| super::program::Source::Split {
+				..
+			}
+			| super::program::Source::Join {
+				..
+			}
+			| super::program::Source::Once
+			| super::program::Source::Changes {
+				..
+			}
+			| super::program::Source::WriteTargets {
+				..
+			}
+			| super::program::Source::WriteInserts {
+				..
+			}
+			| super::program::Source::WriteEdges {
+				..
+			}
+			| super::program::Source::LightweightEdges {
+				..
+			}
+			| super::program::Source::Vacant {
+				..
+			} => false,
 		}
 	}
 	let Some(knn) = ctx.inherited_knn() else {
@@ -999,12 +1063,16 @@ fn measures_on_host(pipeline: &Pipeline, state: &State) -> bool {
 	use super::measure::MeasureSettled;
 	let host = |cell: Option<&MeasureSettled>| matches!(cell, Some(MeasureSettled::Host));
 	state.measures.iter().any(|cell| host(cell.as_deref()))
-		&& pipeline.code.iter().any(|instr| match instr {
-			Instr::Measure {
+		&& pipeline.code.iter().any(|instr| {
+			if let Instr::Measure {
 				measure,
 				..
-			} => host(state.measures.get(measure.call as usize).and_then(Option::as_deref)),
-			_ => false,
+			} = instr
+			{
+				host(state.measures.get(measure.call as usize).and_then(Option::as_deref))
+			} else {
+				false
+			}
 		})
 }
 
@@ -1205,7 +1273,68 @@ pub(super) async fn run_pipelines(
 							host_scalar(program, record, ctx, None).await?,
 							Value::Array(_)
 						),
-						_ => false,
+						Source::Index {
+							..
+						}
+						| Source::Lookup {
+							..
+						}
+						| Source::IndexUnion {
+							..
+						}
+						| Source::Bitmap {
+							..
+						}
+						| Source::FullText {
+							..
+						}
+						| Source::Knn {
+							..
+						}
+						| Source::Count {
+							..
+						}
+						| Source::Union(_)
+						| Source::Values {
+							..
+						}
+						| Source::Nested {
+							..
+						}
+						| Source::Probe {
+							..
+						}
+						| Source::Sorted {
+							..
+						}
+						| Source::Groups {
+							..
+						}
+						| Source::Split {
+							..
+						}
+						| Source::Join {
+							..
+						}
+						| Source::Once
+						| Source::Changes {
+							..
+						}
+						| Source::WriteTargets {
+							..
+						}
+						| Source::WriteInserts {
+							..
+						}
+						| Source::WriteEdges {
+							..
+						}
+						| Source::LightweightEdges {
+							..
+						}
+						| Source::Vacant {
+							..
+						} => false,
 					};
 				if !hidden {
 					descriptor.defined().map_err(ControlFlow::Err)?;
@@ -1760,9 +1889,11 @@ pub(super) async fn run_storage_source(
 			let def = match descriptor.defined() {
 				Ok(def) => def,
 				Err(error) if absence_hidden(&descriptor, db_ctx)? => {
-					return match host_scalar(program, record, ctx, None).await? {
-						Value::Array(_) => Ok(false),
-						_ => Err(ControlFlow::Err(error)),
+					let val = host_scalar(program, record, ctx, None).await?;
+					return if val.is_array() {
+						Ok(false)
+					} else {
+						Err(ControlFlow::Err(error))
 					};
 				}
 				Err(error) => return Err(ControlFlow::Err(error)),
@@ -1867,7 +1998,24 @@ pub(super) async fn run_storage_source(
 					}
 					Ok(false)
 				}
-				other => Err(ControlFlow::Err(anyhow::anyhow!(
+				other @ (Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Array(_)
+				| Value::Set(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Range(_)
+				| Value::Closure(_)) => Err(ControlFlow::Err(anyhow::anyhow!(
 					"a record source evaluated to {other:?}, not a record id"
 				))),
 			}
@@ -2445,7 +2593,24 @@ pub(super) async fn run_storage_source(
 						flush(state, yielder, flush_at, ctx).await?;
 						return Ok(step == Ended::Stop);
 					}
-					other => {
+					other @ (Value::None
+					| Value::Null
+					| Value::Bool(_)
+					| Value::Number(_)
+					| Value::String(_)
+					| Value::Duration(_)
+					| Value::Datetime(_)
+					| Value::Uuid(_)
+					| Value::Array(_)
+					| Value::Set(_)
+					| Value::Object(_)
+					| Value::Geometry(_)
+					| Value::Bytes(_)
+					| Value::Table(_)
+					| Value::File(_)
+					| Value::Regex(_)
+					| Value::Range(_)
+					| Value::Closure(_)) => {
 						return Err(ControlFlow::Err(anyhow::anyhow!(
 							"a record source evaluated to {other:?}, not a record id"
 						)));
@@ -2598,7 +2763,16 @@ pub(super) fn lookup_key(key: &Value) -> bool {
 				RecordIdKey::Number(_) | RecordIdKey::String(_) | RecordIdKey::Uuid(_)
 			)
 		}
-		_ => false,
+		Value::Number(_)
+		| Value::Array(_)
+		| Value::Set(_)
+		| Value::Object(_)
+		| Value::Geometry(_)
+		| Value::Table(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => false,
 	}
 }
 
@@ -2912,12 +3086,11 @@ fn merge_key(merge: &MergeMode, row: &Value, by_encoding: bool) -> Option<MergeK
 
 /// The record id a row carries at `id`.
 fn record_id(row: &Value) -> Option<crate::val::RecordId> {
-	match row {
-		Value::Object(object) => match object.get("id") {
-			Some(Value::RecordId(rid)) => Some(rid.clone()),
-			_ => None,
-		},
-		_ => None,
+	let object = row.as_object()?;
+	if let Some(Value::RecordId(rid)) = object.get("id") {
+		Some(rid.clone())
+	} else {
+		None
 	}
 }
 
@@ -4249,13 +4422,7 @@ async fn enforce_row(
 	use crate::exec::operators::scan::pipeline::{
 		build_field_state, filter_fields_by_permission, materialise_fields_with_permissions,
 	};
-	let record = match &*row {
-		Value::Object(object) => match object.get("id") {
-			Some(Value::RecordId(rid)) => Some(rid.clone()),
-			_ => None,
-		},
-		_ => None,
-	};
+	let record = record_id(row);
 	let frame = frame_ctx(state, ctx, None);
 	match enforce {
 		Enforce::Rows {
@@ -4825,22 +4992,26 @@ async fn run_body(
 								at,
 							} => {
 								let (method_index, recv, args, dst, frame, closure) =
-									match &pipeline.code[at] {
-										Instr::Method {
-											method,
-											recv,
-											args,
-											dst,
-											frame,
-										} => (method, recv, args, dst, frame, false),
-										Instr::MethodClosure {
-											method,
-											recv,
-											args,
-											dst,
-											frame,
-										} => (method, recv, args, dst, frame, true),
-										_ => unreachable!("a method step at a method instruction"),
+									if let Instr::Method {
+										method,
+										recv,
+										args,
+										dst,
+										frame,
+									} = &pipeline.code[at]
+									{
+										(method, recv, args, dst, frame, false)
+									} else if let Instr::MethodClosure {
+										method,
+										recv,
+										args,
+										dst,
+										frame,
+									} = &pipeline.code[at]
+									{
+										(method, recv, args, dst, frame, true)
+									} else {
+										unreachable!("a method step at a method instruction")
 									};
 								let recv = interp::read_operand(regs, reader, program, *recv)
 									.map_err(ControlFlow::Err)?;
@@ -5038,7 +5209,314 @@ async fn run_body(
 											.dive()
 											.map_err(ControlFlow::Err)?;
 									}
-									_ => unreachable!("a function step at a function instruction"),
+									Instr::CoerceField {
+										..
+									}
+									| Instr::BeginComputing {
+										..
+									}
+									| Instr::LandRow {
+										..
+									}
+									| Instr::BindRow {
+										..
+									}
+									| Instr::JumpIfPermissionsBypassed {
+										..
+									}
+									| Instr::CompareFieldInt {
+										..
+									}
+									| Instr::JumpIfFieldInt {
+										..
+									}
+									| Instr::JumpIfCompare {
+										..
+									}
+									| Instr::Compare {
+										..
+									}
+									| Instr::Arith {
+										..
+									}
+									| Instr::Unary {
+										..
+									}
+									| Instr::NewArray {
+										..
+									}
+									| Instr::ArrayPush {
+										..
+									}
+									| Instr::LoadParam {
+										..
+									}
+									| Instr::LoadSlot {
+										..
+									}
+									| Instr::SortKey {
+										..
+									}
+									| Instr::Fetch {
+										..
+									}
+									| Instr::Access {
+										..
+									}
+									| Instr::Each {
+										..
+									}
+									| Instr::Throw {
+										..
+									}
+									| Instr::FilterBegin {
+										..
+									}
+									| Instr::MapBegin {
+										..
+									}
+									| Instr::CollectPush {
+										..
+									}
+									| Instr::Nav {
+										..
+									}
+									| Instr::CallAllowed {
+										..
+									}
+									| Instr::Call {
+										..
+									}
+									| Instr::ArrayArg {
+										..
+									}
+									| Instr::ElemNext {
+										..
+									}
+									| Instr::ClosureBind {
+										..
+									}
+									| Instr::ClosureReturn {
+										..
+									}
+									| Instr::Subquery {
+										..
+									}
+									| Instr::MakeClosure {
+										..
+									}
+									| Instr::ClosureField {
+										..
+									}
+									| Instr::RequireClosure {
+										..
+									}
+									| Instr::Invoke {
+										..
+									}
+									| Instr::Lookup {
+										..
+									}
+									| Instr::Signal {
+										..
+									}
+									| Instr::Extract {
+										..
+									}
+									| Instr::KnnRank {
+										..
+									}
+									| Instr::Measure {
+										..
+									}
+									| Instr::Mock {
+										..
+									}
+									| Instr::Recurse {
+										..
+									}
+									| Instr::Destructure {
+										..
+									}
+									| Instr::RecordId {
+										..
+									}
+									| Instr::MethodResolve {
+										..
+									}
+									| Instr::Method {
+										..
+									}
+									| Instr::MethodClosure {
+										..
+									}
+									| Instr::JumpIfNullish {
+										..
+									}
+									| Instr::JumpIfNone {
+										..
+									}
+									| Instr::JumpIf {
+										..
+									}
+									| Instr::Skip {
+										..
+									}
+									| Instr::Take {
+										..
+									}
+									| Instr::JumpIfLimitReached {
+										..
+									}
+									| Instr::NewObject {
+										..
+									}
+									| Instr::SeedObject {
+										..
+									}
+									| Instr::BuildObject {
+										..
+									}
+									| Instr::LoadPath {
+										..
+									}
+									| Instr::LoadRow {
+										..
+									}
+									| Instr::FetchRow {
+										..
+									}
+									| Instr::RemoveField {
+										..
+									}
+									| Instr::RemovePath {
+										..
+									}
+									| Instr::Omit {
+										..
+									}
+									| Instr::SetField {
+										..
+									}
+									| Instr::WriteProjection {
+										..
+									}
+									| Instr::Load {
+										..
+									}
+									| Instr::Emit {
+										..
+									}
+									| Instr::EmitEnd {
+										..
+									}
+									| Instr::BuildObjectEmit {
+										..
+									}
+									| Instr::FilterFieldInt {
+										..
+									}
+									| Instr::FilterCompare {
+										..
+									}
+									| Instr::Filter {
+										..
+									}
+									| Instr::SplitPush {
+										..
+									}
+									| Instr::SortPush {
+										..
+									}
+									| Instr::Distinct {
+										..
+									}
+									| Instr::JoinProbe {
+										..
+									}
+									| Instr::VerdictJump {
+										..
+									}
+									| Instr::VerdictSet {
+										..
+									}
+									| Instr::JoinPair {
+										..
+									}
+									| Instr::GroupKey {
+										..
+									}
+									| Instr::GroupSelect {
+										..
+									}
+									| Instr::AccUpdate {
+										..
+									}
+									| Instr::Jump {
+										..
+									}
+									| Instr::Next {
+										..
+									}
+									| Instr::Write(_)
+									| Instr::Store(_)
+									| Instr::Block(_)
+									| Instr::EndRow
+									| Instr::StopPipeline
+									| Instr::TryNone {
+										..
+									}
+									| Instr::TryEnd
+									| Instr::MethodRegion {
+										..
+									}
+									| Instr::PermissionRegion {
+										..
+									}
+									| Instr::GroupFirstNeeded {
+										..
+									}
+									| Instr::GroupFirstSet {
+										..
+									}
+									| Instr::CallIndexFn {
+										..
+									}
+									| Instr::Matches {
+										..
+									}
+									| Instr::ExternalEnter {
+										..
+									}
+									| Instr::ExternalCall {
+										..
+									}
+									| Instr::NewSet {
+										..
+									}
+									| Instr::Degree {
+										..
+									}
+									| Instr::RepeatRecurse {
+										..
+									}
+									| Instr::JumpIfNotObject {
+										..
+									}
+									| Instr::JumpIfOpaque {
+										..
+									}
+									| Instr::InvalidControlFlow
+									| Instr::JumpIfNotRecordId {
+										..
+									}
+									| Instr::DocumentRoot {
+										..
+									}
+									| Instr::JudgeCopy {
+										..
+									}
+									| Instr::Ir(_) => unreachable!("a function step at a function instruction"),
 								}
 								pc = at + 1;
 							}
@@ -5136,126 +5614,119 @@ async fn run_body(
 							Step::Closure {
 								at,
 							} => {
-								let (value, dst) = match &pipeline.code[at] {
-									Instr::MakeClosure {
-										closure,
-										slots,
-										dst,
-									} => {
-										let index = *closure as usize;
-										let spec = &program.closure_values[index];
-										let mut captures = crate::dbs::Variables::new();
-										for (name, slot) in spec.slots.iter().zip(slots) {
-											let value =
-												interp::read_operand(regs, reader, program, *slot)
-													.map_err(ControlFlow::Err)?;
-											captures.insert(name.as_str(), value);
-										}
-										let eval_ctx = frame_eval(program, state, ctx, spec.frame);
-										// A parameter the body reads that is bound to a KNN
-										// query vector's row being scanned has no value to
-										// capture: the closure captures the refusal, which an
-										// invocation raises.
-										let mut forbidden = None;
-										for name in &spec.framed {
-											let bound = match eval_ctx.write_binding(name) {
-												Some(value) => Some(value),
-												None => match eval_ctx
-													.exec_ctx
-													.lexical_binding(name)
-												{
-													Some(crate::ctx::Binding::Value(value)) => {
-														Some(value.as_ref())
-													}
-													Some(crate::ctx::Binding::Forbidden(row)) => {
-														forbidden = Some(Arc::clone(row));
-														None
-													}
-													None => None,
-												},
-											};
-											if let Some(value) = bound {
-												captures.insert(name.as_str(), value.clone());
-											}
-										}
-										let compiled =
-											crate::exec::vm::calls::CompiledClosure::planned(
-												&spec.closure,
-												spec.digest,
-												captures,
-											)
-											.reading_row(spec.reads_row);
-										let compiled = match forbidden {
-											Some(row) => compiled.capturing_forbidden_row(row),
-											None => compiled,
-										};
-										(
-											Value::Closure(Box::new(crate::val::Closure::Builtin(
-												Arc::new(compiled),
-											))),
-											*dst,
-										)
-									}
-									Instr::Invoke {
-										target,
-										args,
-										dst,
-										frame,
-										elem,
-									} => {
-										let target =
-											interp::read_operand(regs, reader, program, *target)
+								let (value, dst) = if let Instr::MakeClosure {
+									closure,
+									slots,
+									dst,
+								} = &pipeline.code[at]
+								{
+									let index = *closure as usize;
+									let spec = &program.closure_values[index];
+									let mut captures = crate::dbs::Variables::new();
+									for (name, slot) in spec.slots.iter().zip(slots) {
+										let value =
+											interp::read_operand(regs, reader, program, *slot)
 												.map_err(ControlFlow::Err)?;
-										let Value::Closure(closure) = &target else {
-											unreachable!(
-												"an invocation's target was checked a closure"
-											)
+										captures.insert(name.as_str(), value);
+									}
+									let eval_ctx = frame_eval(program, state, ctx, spec.frame);
+									// A parameter the body reads that is bound to a KNN
+									// query vector's row being scanned has no value to
+									// capture: the closure captures the refusal, which an
+									// invocation raises.
+									let mut forbidden = None;
+									for name in &spec.framed {
+										let bound = match eval_ctx.write_binding(name) {
+											Some(value) => Some(value),
+											None => match eval_ctx.exec_ctx.lexical_binding(name) {
+												Some(crate::ctx::Binding::Value(value)) => {
+													Some(value.as_ref())
+												}
+												Some(crate::ctx::Binding::Forbidden(row)) => {
+													forbidden = Some(Arc::clone(row));
+													None
+												}
+												None => None,
+											},
 										};
-										let mut values = Vec::with_capacity(args.len());
-										for arg in args {
-											values.push(
-												interp::read_operand(regs, reader, program, *arg)
-													.map_err(ControlFlow::Err)?,
-											);
+										if let Some(value) = bound {
+											captures.insert(name.as_str(), value.clone());
 										}
-										let element =
-											elem.map(|elem| regs[elem as usize].to_value());
-										let eval_ctx = frame_eval(program, state, ctx, *frame);
-										let eval_ctx = row_eval(state, eval_ctx, &row);
-										let eval_ctx = match &element {
-											Some(element) => eval_ctx.with_element(element),
-											None => eval_ctx,
-										};
-										// A unit the instruction linked runs; one the run's
-										// table no longer holds standing is linked again.
-										let relinking = relinked == Some(at);
-										let value = match super::closure::compiled_of(&target) {
-											Some(compiled) => {
-												let ran = out_of_line(|| {
-													compiled
-														.invoke_linked(&eval_ctx, values, relinking)
-												})
-												.await;
-												let Some(ran) = ran else {
-													let digest = compiled.digest();
-													state.forget_linked(*frame, digest);
-													pc = at;
-													continue;
-												};
-												ran?
-											}
-											None => {
-												out_of_line(|| {
-													crate::exec::vm::calls::helpers::invoke_uncompiled_closure(
+									}
+									let compiled =
+										crate::exec::vm::calls::CompiledClosure::planned(
+											&spec.closure,
+											spec.digest,
+											captures,
+										)
+										.reading_row(spec.reads_row);
+									let compiled = match forbidden {
+										Some(row) => compiled.capturing_forbidden_row(row),
+										None => compiled,
+									};
+									(
+										Value::Closure(Box::new(crate::val::Closure::Builtin(
+											Arc::new(compiled),
+										))),
+										*dst,
+									)
+								} else if let Instr::Invoke {
+									target,
+									args,
+									dst,
+									frame,
+									elem,
+								} = &pipeline.code[at]
+								{
+									let target =
+										interp::read_operand(regs, reader, program, *target)
+											.map_err(ControlFlow::Err)?;
+									let Value::Closure(closure) = &target else {
+										unreachable!("an invocation's target was checked a closure")
+									};
+									let mut values = Vec::with_capacity(args.len());
+									for arg in args {
+										values.push(
+											interp::read_operand(regs, reader, program, *arg)
+												.map_err(ControlFlow::Err)?,
+										);
+									}
+									let element = elem.map(|elem| regs[elem as usize].to_value());
+									let eval_ctx = frame_eval(program, state, ctx, *frame);
+									let eval_ctx = row_eval(state, eval_ctx, &row);
+									let eval_ctx = match &element {
+										Some(element) => eval_ctx.with_element(element),
+										None => eval_ctx,
+									};
+									// A unit the instruction linked runs; one the run's
+									// table no longer holds standing is linked again.
+									let relinking = relinked == Some(at);
+									let value = match super::closure::compiled_of(&target) {
+										Some(compiled) => {
+											let ran = out_of_line(|| {
+												compiled.invoke_linked(&eval_ctx, values, relinking)
+											})
+											.await;
+											let Some(ran) = ran else {
+												let digest = compiled.digest();
+												state.forget_linked(*frame, digest);
+												pc = at;
+												continue;
+											};
+											ran?
+										}
+										None => {
+											out_of_line(|| {
+												crate::exec::vm::calls::helpers::invoke_uncompiled_closure(
 														closure, values, &eval_ctx,
 													)
-												})
-												.await?
-											}
-										};
-										(value, *dst)
-									}
-									_ => unreachable!("a closure step at a closure instruction"),
+											})
+											.await?
+										}
+									};
+									(value, *dst)
+								} else {
+									unreachable!("a closure step at a closure instruction")
 								};
 								regs[dst as usize] = Scalar::Value(Cow::Owned(value));
 								relinked = None;
@@ -5337,40 +5808,39 @@ async fn run_body(
 							Step::Recurse {
 								at,
 							} => {
-								let (src, spec, target, dst) = match &pipeline.code[at] {
-									Instr::Recurse {
-										src,
-										spec,
-										target,
-										dst,
-									} => (src, spec, target, dst),
-									Instr::RepeatRecurse {
-										src,
-										dst,
-									} => {
-										let value =
-											interp::read_operand(regs, reader, program, *src)
-												.map_err(ControlFlow::Err)?;
-										let eval_ctx = frame_eval(program, state, ctx, None);
-										let eval_ctx = match &state.recursion {
-											Some(recursion) => {
-												eval_ctx.with_recursion_ctx(recursion.clone())
-											}
-											None => eval_ctx,
-										};
-										let value = out_of_line(|| {
-											crate::exec::operators::recursion::evaluate_repeat_recurse(
-												&value, eval_ctx,
-											)
-										})
-										.await?;
-										regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
-										pc = at + 1;
-										continue;
-									}
-									_ => {
-										unreachable!("a recursion step at a recursion instruction")
-									}
+								let (src, spec, target, dst) = if let Instr::Recurse {
+									src,
+									spec,
+									target,
+									dst,
+								} = &pipeline.code[at]
+								{
+									(src, spec, target, dst)
+								} else if let Instr::RepeatRecurse {
+									src,
+									dst,
+								} = &pipeline.code[at]
+								{
+									let value = interp::read_operand(regs, reader, program, *src)
+										.map_err(ControlFlow::Err)?;
+									let eval_ctx = frame_eval(program, state, ctx, None);
+									let eval_ctx = match &state.recursion {
+										Some(recursion) => {
+											eval_ctx.with_recursion_ctx(recursion.clone())
+										}
+										None => eval_ctx,
+									};
+									let value = out_of_line(|| {
+										crate::exec::operators::recursion::evaluate_repeat_recurse(
+											&value, eval_ctx,
+										)
+									})
+									.await?;
+									regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+									pc = at + 1;
+									continue;
+								} else {
+									unreachable!("a recursion step at a recursion instruction")
 								};
 								let value = interp::read_operand(regs, reader, program, *src)
 									.map_err(ControlFlow::Err)?;
@@ -5516,27 +5986,27 @@ async fn run_body(
 								} = instr
 								{
 									let doc = (!state.rowless).then_some(&*row);
-									let evaluated = match instr {
-										super::program::BlockInstr::Member {
-											probe,
-											..
-										} => {
-											let probe = regs[*probe as usize].to_value();
-											out_of_line(|| {
-												super::nested::member(
-													program, instr, doc, &probe, state, ctx,
-												)
-											})
-											.await
-											.map(Scalar::Bool)
-										}
-										_ => out_of_line(|| {
+									let evaluated = if let super::program::BlockInstr::Member {
+										probe,
+										..
+									} = instr
+									{
+										let probe = regs[*probe as usize].to_value();
+										out_of_line(|| {
+											super::nested::member(
+												program, instr, doc, &probe, state, ctx,
+											)
+										})
+										.await
+										.map(Scalar::Bool)
+									} else {
+										out_of_line(|| {
 											super::nested::statement(
 												program, instr, doc, state, ctx,
 											)
 										})
 										.await
-										.map(|value| Scalar::Value(Cow::Owned(value))),
+										.map(|value| Scalar::Value(Cow::Owned(value)))
 									};
 									match (evaluated, caught) {
 										(Ok(value), _) => {
@@ -5637,12 +6107,14 @@ async fn run_body(
 									} else {
 										// A blocking build lends the statement's registration
 										// with the node's place pool to the build it waits on.
-										let lent = match instr {
-											StoreInstr::BuildIndex {
-												blocking: true,
-												..
-											} => Some(super::morsel::places::of(state).clone()),
-											_ => None,
+										let lent = if let StoreInstr::BuildIndex {
+											blocking: true,
+											..
+										} = instr
+										{
+											Some(super::morsel::places::of(state).clone())
+										} else {
+											None
 										};
 										schema
 											.step(
@@ -5703,86 +6175,84 @@ async fn run_body(
 							Step::External {
 								at,
 							} => {
-								match &pipeline.code[at] {
-									Instr::ExternalEnter {
-										external,
-										frame,
-									} => {
-										let spec = &program.externals[*external as usize];
+								if let Instr::ExternalEnter {
+									external,
+									frame,
+								} = &pipeline.code[at]
+								{
+									let spec = &program.externals[*external as usize];
+									let eval_ctx = frame_eval(program, state, ctx, *frame);
+									let eval_ctx = row_eval(state, eval_ctx, &row);
+									let entered = out_of_line(|| {
+										super::external::enter(program, spec, &eval_ctx)
+									})
+									.await?;
+									let at = *external as usize;
+									if state.externals.len() <= at {
+										state.externals.resize_with(at + 1, || None);
+									}
+									state.externals[at] = Some(entered);
+								} else if let Instr::ExternalCall {
+									external,
+									args,
+									this,
+									dst,
+									frame,
+								} = &pipeline.code[at]
+								{
+									let spec = &program.externals[*external as usize];
+									let args = args
+										.iter()
+										.map(|arg| {
+											interp::read_operand(regs, reader, program, *arg)
+										})
+										.collect::<anyhow::Result<Vec<_>>>()
+										.map_err(ControlFlow::Err)?;
+									let this = this
+										.map(|this| {
+											interp::read_operand(regs, reader, program, this)
+										})
+										.transpose()
+										.map_err(ControlFlow::Err)?;
+									let entered = state
+										.externals
+										.get_mut(*external as usize)
+										.and_then(Option::take)
+										.ok_or_else(|| {
+											ControlFlow::Err(anyhow::Error::new(
+												crate::err::EngineError::Internal(
+													"an external call made before it was entered"
+														.to_owned(),
+												),
+											))
+										})?;
+									let site = *external as usize;
+									let mut held =
+										state.call_units.get_mut(site).and_then(Option::take);
+									let value = {
 										let eval_ctx = frame_eval(program, state, ctx, *frame);
 										let eval_ctx = row_eval(state, eval_ctx, &row);
-										let entered = out_of_line(|| {
-											super::external::enter(program, spec, &eval_ctx)
-										})
-										.await?;
-										let at = *external as usize;
-										if state.externals.len() <= at {
-											state.externals.resize_with(at + 1, || None);
-										}
-										state.externals[at] = Some(entered);
-									}
-									Instr::ExternalCall {
-										external,
-										args,
-										this,
-										dst,
-										frame,
-									} => {
-										let spec = &program.externals[*external as usize];
-										let args = args
-											.iter()
-											.map(|arg| {
-												interp::read_operand(regs, reader, program, *arg)
-											})
-											.collect::<anyhow::Result<Vec<_>>>()
-											.map_err(ControlFlow::Err)?;
-										let this = this
-											.map(|this| {
-												interp::read_operand(regs, reader, program, this)
-											})
-											.transpose()
-											.map_err(ControlFlow::Err)?;
-										let entered = state
-											.externals
-											.get_mut(*external as usize)
-											.and_then(Option::take)
-											.ok_or_else(|| {
-												ControlFlow::Err(anyhow::Error::new(
-													crate::err::EngineError::Internal(
-														"an external call made before it was entered"
-															.to_owned(),
-													),
-												))
-											})?;
-										let site = *external as usize;
-										let mut held =
-											state.call_units.get_mut(site).and_then(Option::take);
-										let value = {
-											let eval_ctx = frame_eval(program, state, ctx, *frame);
-											let eval_ctx = row_eval(state, eval_ctx, &row);
-											let eval_ctx = match &this {
-												Some(this) => eval_ctx.with_value(this),
-												None => eval_ctx,
-											};
-											out_of_line(|| {
-												super::external::call(
-													spec, entered, args, &eval_ctx, &mut held,
-												)
-											})
-											.await
+										let eval_ctx = match &this {
+											Some(this) => eval_ctx.with_value(this),
+											None => eval_ctx,
 										};
-										if held.is_some() {
-											if state.call_units.len() <= site {
-												state.call_units.resize_with(site + 1, || None);
-											}
-											state.call_units[site] = held;
+										out_of_line(|| {
+											super::external::call(
+												spec, entered, args, &eval_ctx, &mut held,
+											)
+										})
+										.await
+									};
+									if held.is_some() {
+										if state.call_units.len() <= site {
+											state.call_units.resize_with(site + 1, || None);
 										}
-										let value = value?;
-										regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+										state.call_units[site] = held;
 									}
-									_ => {
-										unreachable!("an external step at an external instruction")
-									}
+									let value = value?;
+									regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+								} else {
+									unreachable!("an external step at an external instruction")
 								}
 								pc = at + 1;
 							}
@@ -6209,15 +6679,12 @@ async fn pair_built(
 		let held = probe.as_ref().expect("the probe row is held until it is paired");
 		let paired = match &spec.residual {
 			Some(residual) => {
-				let row = match held {
-					Value::Object(_) => {
-						crate::exec::operators::with_alias(held, &spec.alias, build.clone())
-					}
-					_ => {
-						let mut row = crate::val::Object::default();
-						row.insert(spec.alias.clone(), build.clone());
-						Value::Object(row)
-					}
+				let row = if let Value::Object(_) = held {
+					crate::exec::operators::with_alias(held, &spec.alias, build.clone())
+				} else {
+					let mut row = crate::val::Object::default();
+					row.insert(spec.alias.clone(), build.clone());
+					Value::Object(row)
 				};
 				let eval = match &mut eval {
 					Some(eval) => eval,
@@ -6228,10 +6695,11 @@ async fn pair_built(
 				if !answer.is_truthy() {
 					continue;
 				}
-				match held {
+				if let Value::Object(_) = held {
 					// The row the residual judged is the pairing.
-					Value::Object(_) => row,
-					_ => held.clone(),
+					row
+				} else {
+					held.clone()
 				}
 			}
 			None if builds.peek().is_none() => {
@@ -6418,13 +6886,12 @@ async fn pair_held(
 	let held = state.held[join as usize].as_mut().expect("a join pairs only the row it holds");
 	let paired = match &spec.residual {
 		Some(residual) => {
-			let row = match probe {
-				Value::Object(_) => crate::exec::operators::with_alias(probe, &spec.alias, build),
-				_ => {
-					let mut row = crate::val::Object::default();
-					row.insert(spec.alias.clone(), build);
-					Value::Object(row)
-				}
+			let row = if let Value::Object(_) = probe {
+				crate::exec::operators::with_alias(probe, &spec.alias, build)
+			} else {
+				let mut row = crate::val::Object::default();
+				row.insert(spec.alias.clone(), build);
+				Value::Object(row)
 			};
 			let mut eval = match held.eval.take() {
 				Some(eval) => eval,
@@ -6438,9 +6905,10 @@ async fn pair_held(
 			if !answer?.is_truthy() {
 				return Ok(Ended::Next);
 			}
-			match probe {
-				Value::Object(_) => row,
-				_ => probe.clone(),
+			if let Value::Object(_) = probe {
+				row
+			} else {
+				probe.clone()
 			}
 		}
 		None => crate::exec::operators::with_alias(probe, &spec.alias, build),
@@ -6524,9 +6992,10 @@ async fn build_key(
 	for scalar in &spec.build_keys {
 		key.push(out_of_line(|| host_scalar_in(program, scalar, ctx, &seen, eval)).await?);
 	}
-	let row = match seen {
-		Value::Object(mut seen) => seen.remove(spec.alias.as_str()).unwrap_or(Value::None),
-		other => other,
+	let row = if let Value::Object(mut seen) = seen {
+		seen.remove(spec.alias.as_str()).unwrap_or(Value::None)
+	} else {
+		seen
 	};
 	Ok((key, row))
 }
@@ -6584,17 +7053,16 @@ impl super::join_spill::Pairer for PlanPairer<'_> {
 				super::fuel::tick(ctx, 1).await?;
 				let paired = match &spec.residual {
 					Some(residual) => {
-						let row = match &probe {
-							Value::Object(_) => crate::exec::operators::with_alias(
+						let row = if let Value::Object(_) = &probe {
+							crate::exec::operators::with_alias(
 								&probe,
 								&spec.alias,
 								(*build).clone(),
-							),
-							_ => {
-								let mut row = crate::val::Object::default();
-								row.insert(spec.alias.clone(), (*build).clone());
-								Value::Object(row)
-							}
+							)
+						} else {
+							let mut row = crate::val::Object::default();
+							row.insert(spec.alias.clone(), (*build).clone());
+							Value::Object(row)
 						};
 						let eval = match &mut self.eval {
 							Some(eval) => eval,
@@ -6607,9 +7075,10 @@ impl super::join_spill::Pairer for PlanPairer<'_> {
 						if !answer.is_truthy() {
 							continue;
 						}
-						match &probe {
-							Value::Object(_) => row,
-							_ => probe.clone(),
+						if let Value::Object(_) = &probe {
+							row
+						} else {
+							probe.clone()
 						}
 					}
 					None => {
@@ -7568,7 +8037,11 @@ fn column_frame(program: &Program, frame: Option<u16>) -> bool {
 fn escaped_signal(program: &Program, frame: Option<u16>, signal: ControlFlow) -> ControlFlow {
 	match signal {
 		ControlFlow::Err(_) => signal,
-		signal if column_frame(program, frame) => column_signal(signal),
+		signal @ (ControlFlow::Break | ControlFlow::Continue | ControlFlow::Return(_))
+			if column_frame(program, frame) =>
+		{
+			column_signal(signal)
+		}
 		ControlFlow::Break | ControlFlow::Continue
 			if super::program::is_permission_frame(frame) =>
 		{
@@ -7579,7 +8052,7 @@ fn escaped_signal(program: &Program, frame: Option<u16>, signal: ControlFlow) ->
 				"unexpected control flow in a permission predicate: return".to_owned(),
 			)))
 		}
-		signal => signal,
+		signal @ (ControlFlow::Break | ControlFlow::Continue | ControlFlow::Return(_)) => signal,
 	}
 }
 
@@ -7590,9 +8063,11 @@ fn column_signal(signal: ControlFlow) -> ControlFlow {
 		ControlFlow::Break | ControlFlow::Continue => {
 			ControlFlow::Err(anyhow::Error::new(crate::exec::Error::InvalidControlFlow))
 		}
-		signal => ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(format!(
-			"unexpected control flow in a layer column: {signal}"
-		)))),
+		signal @ (ControlFlow::Return(_) | ControlFlow::Err(_)) => {
+			ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(format!(
+				"unexpected control flow in a layer column: {signal}"
+			))))
+		}
 	}
 }
 
@@ -8036,14 +8511,14 @@ impl crate::exec::operators::fetch::FetchIndex<super::program::FetchStepSpec> fo
 		step: &'a super::program::FetchStepSpec,
 	) -> crate::exec::BoxFut<'a, FlowResult<Value>> {
 		crate::exec::vm::host::out_of_line(|| async move {
-			match step {
-				super::program::FetchStepSpec::Index {
-					pipeline,
-				} => {
-					let scalar = super::program::HostScalar::Code(*pipeline);
-					host_scalar(self.program, &scalar, ctx, None).await
-				}
-				_ => Ok(Value::None),
+			if let super::program::FetchStepSpec::Index {
+				pipeline,
+			} = step
+			{
+				let scalar = super::program::HostScalar::Code(*pipeline);
+				host_scalar(self.program, &scalar, ctx, None).await
+			} else {
+				Ok(Value::None)
 			}
 		})
 	}
@@ -8127,15 +8602,12 @@ async fn destructure(
 			// path does.
 			if crate::exec::operators::fetch::is_session_record(ctx, rid) {
 				let id = Value::RecordId(rid.clone());
-				match &mut fetched {
-					Value::Object(obj) => {
-						obj.insert("id".to_owned(), id);
-					}
-					_ => {
-						fetched = Value::Object(crate::val::Object::from(
-							std::collections::BTreeMap::from([("id".to_owned(), id)]),
-						));
-					}
+				if let Value::Object(obj) = &mut fetched {
+					obj.insert("id".to_owned(), id);
+				} else {
+					fetched = Value::Object(crate::val::Object::from(
+						std::collections::BTreeMap::from([("id".to_owned(), id)]),
+					));
 				}
 			} else if fetched.is_none() {
 				return Ok(Value::None);
@@ -8181,7 +8653,21 @@ async fn destructure(
 			}
 			Ok(Value::Set(results.into_iter().collect()))
 		}
-		_ => Ok(Value::None),
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => Ok(Value::None),
 	}
 }
 
@@ -8203,39 +8689,46 @@ fn closures_handed(
 			.map(|&arg| read(arg))
 			.collect()
 	};
-	Ok(match instr {
-		Instr::Invoke {
-			target,
-			frame,
-			..
-		} => (*frame, vec![read(*target)?]),
-		Instr::Call {
-			call,
-			args,
-			frame,
-			..
-		} => (*frame, at(args, &program.calls[*call as usize].closure_args)?),
-		Instr::Method {
-			method,
-			args,
-			frame,
-			..
-		} => (*frame, at(args, &program.methods[*method as usize].closure_args)?),
-		Instr::MethodClosure {
-			method,
-			recv,
-			frame,
-			..
-		} => {
-			let name = program.methods[*method as usize].name.as_str();
-			let field = match read(*recv)? {
-				Value::Object(mut object) => object.remove(name),
-				_ => None,
-			};
-			(*frame, field.into_iter().collect())
-		}
-		_ => (None, Vec::new()),
-	})
+	if let Instr::Invoke {
+		target,
+		frame,
+		..
+	} = instr
+	{
+		Ok((*frame, vec![read(*target)?]))
+	} else if let Instr::Call {
+		call,
+		args,
+		frame,
+		..
+	} = instr
+	{
+		Ok((*frame, at(args, &program.calls[*call as usize].closure_args)?))
+	} else if let Instr::Method {
+		method,
+		args,
+		frame,
+		..
+	} = instr
+	{
+		Ok((*frame, at(args, &program.methods[*method as usize].closure_args)?))
+	} else if let Instr::MethodClosure {
+		method,
+		recv,
+		frame,
+		..
+	} = instr
+	{
+		let name = program.methods[*method as usize].name.as_str();
+		let field = if let Value::Object(mut object) = read(*recv)? {
+			object.remove(name)
+		} else {
+			None
+		};
+		Ok((*frame, field.into_iter().collect()))
+	} else {
+		Ok((None, Vec::new()))
+	}
 }
 
 /// Apply method `method` to the receiver `recv` and `args`, once the

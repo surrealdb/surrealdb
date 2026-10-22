@@ -207,10 +207,10 @@ mod tests {
 
 	// Helper to extract i64 from Value
 	fn as_int(v: &Value) -> i64 {
-		match v {
-			Value::Number(Number::Int(i)) => *i,
-			_ => panic!("Expected Int, got {:?}", v),
-		}
+		let Value::Number(Number::Int(i)) = v else {
+			panic!("Expected Int, got {:?}", v);
+		};
+		*i
 	}
 
 	// -------------------------------------------------------------------------

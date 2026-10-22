@@ -689,9 +689,10 @@ async fn a_write_over_mixed_targets_reads_records_through_their_migration_steps(
 		let reference = TestDb::new_with_auth(MIGRATED).await;
 		let mut written = Vec::new();
 		for rows in values_as(&reference, &TestDb::owner(), alone).await {
-			match rows {
-				Value::Array(rows) => written.extend(rows.0),
-				other => written.push(other),
+			if let Value::Array(rows) = rows {
+				written.extend(rows.0);
+			} else {
+				written.push(rows);
 			}
 		}
 		assert_eq!(answer, vec![Value::from(written)], "{mixed} against {alone}");

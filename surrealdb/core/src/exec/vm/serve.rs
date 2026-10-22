@@ -601,7 +601,7 @@ pub(crate) fn source_only_request_variables(
 				SourceRef::Param(param) => {
 					*as_sources.entry(param.as_str().to_owned()).or_default() += 1;
 				}
-				_ => {}
+				SourceRef::Table(_) | SourceRef::RecordId(_) | SourceRef::Mock(_) => {}
 			}
 		}
 		std::ops::ControlFlow::<()>::Continue(())
@@ -651,36 +651,45 @@ fn reads_only_its_source(op: &LogicalOp) -> bool {
 	use std::ops::ControlFlow;
 
 	use crate::expr::logical::LogicalSource;
-	let shape = op.visit_ops_deep(&mut |node| match node {
-		LogicalOp::Source(LogicalSource {
-			with: None,
-			for_update: false,
-			..
-		})
-		| LogicalOp::Project(_)
-		| LogicalOp::Fetch(_)
-		| LogicalOp::Limit(_)
-		| LogicalOp::Only(_) => ControlFlow::Continue(()),
-		_ => ControlFlow::Break(()),
+	let shape = op.visit_ops_deep(&mut |node| {
+		if matches!(
+			node,
+			LogicalOp::Source(LogicalSource {
+				with: None,
+				for_update: false,
+				..
+			}) | LogicalOp::Project(_)
+				| LogicalOp::Fetch(_)
+				| LogicalOp::Limit(_)
+				| LogicalOp::Only(_)
+		) {
+			ControlFlow::Continue(())
+		} else {
+			ControlFlow::Break(())
+		}
 	});
 	if shape.is_break() {
 		return false;
 	}
-	op.visit_scalars_deep(&mut |scalar| match scalar.visit_deep(&mut |node| match node {
-		LogicalExpr::Subquery(_) => ControlFlow::Break(()),
-		LogicalExpr::Binary {
-			op:
-				crate::expr::BinaryOperator::Matches(_)
-				| crate::expr::BinaryOperator::NearestNeighbor(_),
-			..
-		} => ControlFlow::Break(()),
-		LogicalExpr::Call(call) => match &call.receiver {
-			crate::expr::Function::Normal(name) if name.starts_with("search::") => {
-				ControlFlow::Break(())
-			}
-			_ => ControlFlow::Continue(()),
-		},
-		_ => ControlFlow::Continue(()),
+	op.visit_scalars_deep(&mut |scalar| match scalar.visit_deep(&mut |node| {
+		if matches!(
+			node,
+			LogicalExpr::Subquery(_)
+				| LogicalExpr::Binary {
+					op: crate::expr::BinaryOperator::Matches(_)
+						| crate::expr::BinaryOperator::NearestNeighbor(_),
+					..
+				}
+		) {
+			ControlFlow::Break(())
+		} else if let LogicalExpr::Call(call) = node
+			&& let crate::expr::Function::Normal(name) = &call.receiver
+			&& name.starts_with("search::")
+		{
+			ControlFlow::Break(())
+		} else {
+			ControlFlow::Continue(())
+		}
 	}) {
 		ControlFlow::Break(()) => Err(()),
 		ControlFlow::Continue(()) => Ok(()),
@@ -695,29 +704,30 @@ fn reads_only_its_source(op: &LogicalOp) -> bool {
 fn source_class(value: &crate::val::Value) -> Option<SourceClass> {
 	use crate::val::Value;
 	fn one(value: &Value) -> Option<&crate::val::TableName> {
-		match value {
-			Value::RecordId(id) if !id.key.is_range() => Some(&id.table),
-			_ => None,
+		if let Value::RecordId(id) = value
+			&& !id.key.is_range()
+		{
+			return Some(&id.table);
 		}
+		None
 	}
 	if crate::exec::planner::util::substitution_is_lossy(value) {
 		return None;
 	}
-	match value {
-		Value::Array(items) => {
-			// Borrowed until the distinct tables are known, so an array of
-			// many ids of few tables clones each table once.
-			let mut tables = Vec::new();
-			for item in items.iter() {
-				let table = one(item)?;
-				if !tables.contains(&table) {
-					tables.push(table);
-				}
+	if let Value::Array(items) = value {
+		// Borrowed until the distinct tables are known, so an array of
+		// many ids of few tables clones each table once.
+		let mut tables = Vec::new();
+		for item in items.iter() {
+			let table = one(item)?;
+			if !tables.contains(&table) {
+				tables.push(table);
 			}
-			tables.sort();
-			Some(SourceClass::Records(tables.into_iter().cloned().collect()))
 		}
-		_ => one(value).cloned().map(SourceClass::Record),
+		tables.sort();
+		Some(SourceClass::Records(tables.into_iter().cloned().collect()))
+	} else {
+		one(value).cloned().map(SourceClass::Record)
 	}
 }
 
@@ -881,11 +891,13 @@ mod tests {
 	#[tokio::test]
 	async fn a_served_statement_reads_the_value_its_source_parameter_holds() {
 		let db = TestDb::new("CREATE t:1 SET n = 1; CREATE t:2 SET n = 2;").await;
-		let op =
-			|| match crate::exec::operators::test_util::parse_expr("(SELECT VALUE n FROM $src)") {
-				crate::expr::logical::LogicalExpr::Subquery(op) => (*op).clone(),
-				other => panic!("not a statement: {other:?}"),
+		let op = || {
+			let expr = crate::exec::operators::test_util::parse_expr("(SELECT VALUE n FROM $src)");
+			let crate::expr::logical::LogicalExpr::Subquery(op) = expr else {
+				panic!("not a statement: {expr:?}");
 			};
+			(*op).clone()
+		};
 		for n in [1, 2] {
 			let ctx = db.exec_ctx().await;
 			let rid = crate::val::RecordId::new("t".into(), crate::val::RecordIdKey::from(n));
@@ -915,11 +927,14 @@ mod tests {
 	#[tokio::test]
 	async fn a_served_statement_reads_the_callers_auth() {
 		let db = TestDb::new_with_auth(OWNED).await;
-		let op = || match crate::exec::operators::test_util::parse_expr(
-			"(SELECT VALUE id FROM doc WHERE owner = $auth)",
-		) {
-			crate::expr::logical::LogicalExpr::Subquery(op) => (*op).clone(),
-			other => panic!("not a statement: {other:?}"),
+		let op = || {
+			let expr = crate::exec::operators::test_util::parse_expr(
+				"(SELECT VALUE id FROM doc WHERE owner = $auth)",
+			);
+			let crate::expr::logical::LogicalExpr::Subquery(op) = expr else {
+				panic!("not a statement: {expr:?}");
+			};
+			(*op).clone()
 		};
 		for (user, sees) in [("alice", 1), ("bob", 2), ("alice", 1)] {
 			let ctx = db.exec_ctx_as(&record_user(user), crate::kvs::TransactionType::Read).await;

@@ -108,7 +108,21 @@ fn payload_digest(value: &PublicValue) -> PayloadDigest {
 				hasher.update(payload_digest(field));
 			}
 		}
-		scalar => {
+		scalar @ (PublicValue::None
+		| PublicValue::Null
+		| PublicValue::Bool(_)
+		| PublicValue::Number(_)
+		| PublicValue::String(_)
+		| PublicValue::Bytes(_)
+		| PublicValue::Duration(_)
+		| PublicValue::Datetime(_)
+		| PublicValue::Uuid(_)
+		| PublicValue::Geometry(_)
+		| PublicValue::Table(_)
+		| PublicValue::RecordId(_)
+		| PublicValue::File(_)
+		| PublicValue::Range(_)
+		| PublicValue::Regex(_)) => {
 			hasher.update([b'V']);
 			let rendered = scalar.to_sql();
 			hasher.update((rendered.len() as u64).to_be_bytes());
@@ -349,7 +363,7 @@ impl Session {
 				sess.ns = Some(ns);
 				sess.db = Some(db);
 			}
-			_ => {}
+			Level::No | Level::Record(..) => {}
 		}
 		sess
 	}
@@ -606,9 +620,8 @@ mod tests {
 			let values = session.values();
 			let (_, session_value) =
 				values.iter().find(|(k, _)| *k == "session").expect("a `session` entry");
-			let obj = match session_value.as_ref() {
-				Value::Object(o) => o,
-				other => panic!("expected an object, got {other:?}"),
+			let Value::Object(obj) = session_value.as_ref() else {
+				panic!("expected an object, got {session_value:?}");
 			};
 			let mut keys: Vec<String> = obj.keys().map(|k| k.as_str().to_owned()).collect();
 			keys.sort();

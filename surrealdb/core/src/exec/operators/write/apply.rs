@@ -86,10 +86,13 @@ where
 		match &computed.operator {
 			// Assigning nothing is removing: `SET a = NONE` leaves no `a`
 			// rather than an `a` holding `NONE`.
-			AssignOperator::Assign => match value {
-				Value::None => del(target, steps, ev).await?,
-				value => set_with(target, steps, value, ev).await?,
-			},
+			AssignOperator::Assign => {
+				if let Value::None = value {
+					del(target, steps, ev).await?;
+				} else {
+					set_with(target, steps, value, ev).await?;
+				}
+			}
 			AssignOperator::Add => increment(target, steps, value, ev).await?,
 			AssignOperator::Subtract => decrement(target, steps, value, ev).await?,
 			AssignOperator::Extend => extend(target, steps, value, ev).await?,
@@ -131,119 +134,110 @@ pub(crate) fn set_with<'a, X: PlaceEval>(
 			match &steps[at] {
 				// A lookup is a constant object key like a field, spelled as
 				// the lookup renders.
-				PlaceStep::Field(name) | PlaceStep::Lookup(name) => match place {
-					Value::Object(obj) => match obj.entry(name.as_str()) {
-						Entry::Vacant(vacant) => {
-							let dead_end = vacant.insert(Value::None);
-							return assign(dead_end, val, rest, ev).await;
+				PlaceStep::Field(name) | PlaceStep::Lookup(name) => {
+					if let Value::Object(obj) = place {
+						match obj.entry(name.as_str()) {
+							Entry::Vacant(vacant) => {
+								let dead_end = vacant.insert(Value::None);
+								return assign(dead_end, val, rest, ev).await;
+							}
+							Entry::Occupied(occupied) => place = occupied.into_mut(),
 						}
-						Entry::Occupied(occupied) => place = occupied.into_mut(),
-					},
-					// A key named on an array is named on each of its
-					// elements, so `a.b = 1` sets `b` on every element of `a`.
-					Value::Array(arr) => {
+					} else if let Value::Array(arr) = place {
 						for element in arr.iter_mut() {
 							set_with(element, from_here, val.clone(), ev).await?;
 						}
 						return Ok(());
+					} else {
+						return Ok(());
 					}
-					_ => return Ok(()),
-				},
+				}
 				PlaceStep::Subscript {
 					expr,
 					..
 				} => {
 					let key = ev.subscript(expr).await?;
-					match place {
-						// On an object the subscript is a key: a string is the
-						// key itself, anything else the text it renders to.
-						Value::Object(obj) => {
-							let key = match key {
-								Value::String(key) => key.as_str().to_owned(),
-								key => key.to_sql(),
-							};
-							match obj.entry(key) {
-								Entry::Vacant(vacant) => {
-									let dead_end = vacant.insert(Value::None);
-									return assign(dead_end, val, rest, ev).await;
-								}
-								Entry::Occupied(occupied) => place = occupied.into_mut(),
+					if let Value::Object(obj) = place {
+						let key = if let Value::String(key) = key {
+							key.as_str().to_owned()
+						} else {
+							key.to_sql()
+						};
+						match obj.entry(key) {
+							Entry::Vacant(vacant) => {
+								let dead_end = vacant.insert(Value::None);
+								return assign(dead_end, val, rest, ev).await;
 							}
+							Entry::Occupied(occupied) => place = occupied.into_mut(),
 						}
-						Value::Array(arr) => match key {
-							// A range selects a run of elements, and the rest
-							// of the walk applies to each.
-							Value::Range(range) => {
-								let range = range
-									.coerce_to_typed::<i64>()
-									.map_err(|err| ControlFlow::Err(anyhow::Error::new(err)))?;
-								if let Some(selected) = range.slice_mut(arr) {
-									for element in selected.iter_mut() {
-										set_with(element, rest, val.clone(), ev).await?;
-									}
+					} else if let Value::Array(arr) = place {
+						if let Value::Range(range) = key {
+							let range = range
+								.coerce_to_typed::<i64>()
+								.map_err(|err| ControlFlow::Err(anyhow::Error::new(err)))?;
+							if let Some(selected) = range.slice_mut(arr) {
+								for element in selected.iter_mut() {
+									set_with(element, rest, val.clone(), ev).await?;
 								}
+							}
+							return Ok(());
+						} else if let Value::Number(index) = key {
+							let Some(index) = index.as_array_index() else {
 								return Ok(());
-							}
-							Value::Number(index) => {
-								let Some(index) = index.as_array_index() else {
-									return Ok(());
-								};
-								// An index past the end names no element, and
-								// an assignment does not grow the array.
-								let Some(element) = arr.get_mut(index) else {
-									return Ok(());
-								};
-								place = element;
-							}
-							_ => return Ok(()),
-						},
-						_ => return Ok(()),
+							};
+							// An index past the end names no element, and
+							// an assignment does not grow the array.
+							let Some(element) = arr.get_mut(index) else {
+								return Ok(());
+							};
+							place = element;
+						} else {
+							return Ok(());
+						}
+					} else {
+						return Ok(());
 					}
 				}
-				PlaceStep::First => match place {
-					Value::Array(arr) => {
+				PlaceStep::First => {
+					if let Value::Array(arr) = place {
 						let Some(element) = arr.first_mut() else {
 							return Ok(());
 						};
 						place = element;
-					}
-					Value::Set(set) => {
+					} else if let Value::Set(set) = place {
 						let Some(element) = set.first_mut() else {
 							return Ok(());
 						};
 						place = element;
+					} else {
+						return Ok(());
 					}
-					_ => return Ok(()),
-				},
-				PlaceStep::Last => match place {
-					Value::Array(arr) => {
+				}
+				PlaceStep::Last => {
+					if let Value::Array(arr) = place {
 						let Some(element) = arr.last_mut() else {
 							return Ok(());
 						};
 						place = element;
-					}
-					Value::Set(set) => {
+					} else if let Value::Set(set) = place {
 						let Some(element) = set.last_mut() else {
 							return Ok(());
 						};
 						place = element;
+					} else {
+						return Ok(());
 					}
-					_ => return Ok(()),
-				},
+				}
 				// Every member, and nothing when the value has no members.
 				PlaceStep::All => {
-					match place {
-						Value::Array(arr) => {
-							for element in arr.iter_mut() {
-								set_with(element, rest, val.clone(), ev).await?;
-							}
+					if let Value::Array(arr) = place {
+						for element in arr.iter_mut() {
+							set_with(element, rest, val.clone(), ev).await?;
 						}
-						Value::Object(obj) => {
-							for (_, element) in obj.iter_mut() {
-								set_with(element, rest, val.clone(), ev).await?;
-							}
+					} else if let Value::Object(obj) = place {
+						for (_, element) in obj.iter_mut() {
+							set_with(element, rest, val.clone(), ev).await?;
 						}
-						_ => (),
 					}
 					return Ok(());
 				}
@@ -323,7 +317,21 @@ async fn assign<X: PlaceEval>(
 				Value::RecordId(key) => key.to_sql().into(),
 				Value::Number(key) => key.to_sql().into(),
 				Value::Range(key) => key.to_sql().into(),
-				_ => return Ok(()),
+				Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Array(_)
+				| Value::Set(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Closure(_) => return Ok(()),
 			},
 			PlaceStep::Where(_)
 			| PlaceStep::First
@@ -369,8 +377,8 @@ fn del<'a, X: PlaceEval>(
 		};
 		let last = steps.len() == 1;
 		let rest = &steps[1..];
-		match this {
-			Value::Object(obj) => match step {
+		if let Value::Object(obj) = this {
+			match step {
 				PlaceStep::All => {
 					if last {
 						obj.clear();
@@ -400,7 +408,22 @@ fn del<'a, X: PlaceEval>(
 						Value::Number(key) => key.to_sql(),
 						Value::String(key) => key.as_str().to_owned(),
 						Value::RecordId(key) => key.to_sql(),
-						_ => return Ok(()),
+						Value::None
+						| Value::Null
+						| Value::Bool(_)
+						| Value::Duration(_)
+						| Value::Datetime(_)
+						| Value::Uuid(_)
+						| Value::Array(_)
+						| Value::Set(_)
+						| Value::Object(_)
+						| Value::Geometry(_)
+						| Value::Bytes(_)
+						| Value::Table(_)
+						| Value::File(_)
+						| Value::Regex(_)
+						| Value::Range(_)
+						| Value::Closure(_) => return Ok(()),
 					};
 					if last {
 						obj.remove(key.as_str());
@@ -417,8 +440,9 @@ fn del<'a, X: PlaceEval>(
 				| PlaceStep::First
 				| PlaceStep::Last
 				| PlaceStep::Unaddressed => {}
-			},
-			Value::Array(arr) => match step {
+			}
+		} else if let Value::Array(arr) = this {
+			match step {
 				PlaceStep::All => {
 					if last {
 						arr.clear();
@@ -478,11 +502,11 @@ fn del<'a, X: PlaceEval>(
 						// still to be written. What is removed is counted in
 						// the selection, what is written back in the array.
 						for (index, position) in positions.into_iter().enumerate().rev() {
-							match element_at(&selection, index) {
-								Value::None => {
-									arr.remove(index);
-								}
-								element => arr[position] = element,
+							let element = element_at(&selection, index);
+							if let Value::None = element {
+								arr.remove(index);
+							} else {
+								arr[position] = element;
 							}
 						}
 					} else {
@@ -520,9 +544,7 @@ fn del<'a, X: PlaceEval>(
 					}
 				}
 				PlaceStep::Unaddressed => {}
-			},
-			// Nothing else holds anything a place can take away.
-			_ => (),
+			}
 		}
 		Ok(())
 	})
@@ -561,7 +583,22 @@ pub(crate) fn read_with<'a, X: PlaceEval>(
 						Value::String(key) => key.as_str().to_owned(),
 						Value::Number(key) => key.to_sql(),
 						Value::RecordId(key) => key.to_sql(),
-						_ => return Ok(Value::None),
+						Value::None
+						| Value::Null
+						| Value::Bool(_)
+						| Value::Duration(_)
+						| Value::Datetime(_)
+						| Value::Uuid(_)
+						| Value::Array(_)
+						| Value::Set(_)
+						| Value::Object(_)
+						| Value::Geometry(_)
+						| Value::Bytes(_)
+						| Value::Table(_)
+						| Value::File(_)
+						| Value::Regex(_)
+						| Value::Range(_)
+						| Value::Closure(_) => return Ok(Value::None),
 					};
 					match obj.get(key.as_str()) {
 						Some(value) => read_with(value, rest, ev).await,
@@ -616,16 +653,14 @@ pub(crate) fn read_with<'a, X: PlaceEval>(
 				PlaceStep::Subscript {
 					expr,
 					..
-				} => match ev.subscript(expr).await? {
-					Value::Number(index) => {
+				} => {
+					let sub = ev.subscript(expr).await?;
+					if let Value::Number(index) = sub {
 						match index.as_array_index().and_then(|index| arr.get(index)) {
 							Some(element) => read_with(element, rest, ev).await,
 							None => Ok(Value::None),
 						}
-					}
-					// A range selects a run of elements, read as an array of
-					// its own.
-					Value::Range(range) => {
+					} else if let Value::Range(range) = sub {
 						let range = range
 							.coerce_to_typed::<i64>()
 							.map_err(|err| ControlFlow::Err(anyhow::Error::new(err)))?;
@@ -634,10 +669,10 @@ pub(crate) fn read_with<'a, X: PlaceEval>(
 							.map(|selected| Value::from(selected.to_vec()))
 							.unwrap_or(Value::None);
 						read_with(&selection, rest, ev).await
+					} else {
+						Ok(Value::None)
 					}
-					// Only a number and a range name elements of an array.
-					_ => Ok(Value::None),
-				},
+				}
 				PlaceStep::Unaddressed => Ok(Value::None),
 			},
 			// A set holds what an array holds, and reads back as a set.
@@ -677,14 +712,14 @@ pub(crate) fn read_with<'a, X: PlaceEval>(
 				PlaceStep::Subscript {
 					expr,
 					..
-				} => match ev.subscript(expr).await? {
-					Value::Number(index) => {
+				} => {
+					let sub = ev.subscript(expr).await?;
+					if let Value::Number(index) = sub {
 						match index.as_array_index().and_then(|index| set.nth(index)) {
 							Some(element) => read_with(element, rest, ev).await,
 							None => Ok(Value::None),
 						}
-					}
-					Value::Range(range) => {
+					} else if let Value::Range(range) = sub {
 						let range = range
 							.coerce_to_typed::<i64>()
 							.map_err(|err| ControlFlow::Err(anyhow::Error::new(err)))?;
@@ -694,15 +729,31 @@ pub(crate) fn read_with<'a, X: PlaceEval>(
 							.map(|selected| Value::Set(selected.iter().cloned().collect()))
 							.unwrap_or(Value::None);
 						read_with(&selection, rest, ev).await
+					} else {
+						Ok(Value::None)
 					}
-					_ => Ok(Value::None),
-				},
+				}
 				PlaceStep::Unaddressed => Ok(Value::None),
 			},
 			// Nothing else holds a place to read: a record id is the link
 			// itself rather than the record it names, and no other kind has
 			// members a step addresses.
-			_ => Ok(Value::None),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => Ok(Value::None),
 		}
 	})
 }
@@ -731,28 +782,59 @@ async fn increment<X: PlaceEval>(
 			Value::Duration(x) => Value::Duration(x),
 			Value::Array(x) => Value::Array(x),
 			Value::Set(x) => Value::Set(x),
-			x => Value::from(vec![x]),
+			other @ (Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::String(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_)) => Value::from(vec![other]),
 		},
-		Value::Array(current) => match val {
-			Value::Array(x) => Value::Array(current.concat(x)),
-			Value::Set(x) => Value::Array(current.concat_set(x)),
-			x => Value::Array(current.with_push(x)),
-		},
-		Value::Set(mut current) => match val {
-			Value::Set(x) => {
+		Value::Array(current) => {
+			if let Value::Array(x) = val {
+				Value::Array(current.concat(x))
+			} else if let Value::Set(x) = val {
+				Value::Array(current.concat_set(x))
+			} else {
+				Value::Array(current.with_push(val))
+			}
+		}
+		Value::Set(mut current) => {
+			if let Value::Set(x) = val {
 				current.0.extend(x);
 				Value::Set(current)
-			}
-			Value::Array(x) => {
+			} else if let Value::Array(x) = val {
 				current.0.extend(x.0);
 				Value::Set(current)
-			}
-			x => {
-				current.insert(x);
+			} else {
+				current.insert(val);
 				Value::Set(current)
 			}
-		},
-		current => current.try_add(val).map_err(ControlFlow::Err)?,
+		}
+		current @ (Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Object(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_)) => current.try_add(val).map_err(ControlFlow::Err)?,
 	};
 	set_with(target, steps, next, ev).await
 }
@@ -771,34 +853,52 @@ async fn decrement<X: PlaceEval>(
 	ev: &mut X,
 ) -> Result<(), ControlFlow> {
 	let next = match read_with(target, steps, ev).await? {
-		Value::Array(current) => match val {
-			Value::Array(x) => Value::from(current.remove_all(&x.0)),
-			Value::Set(x) => Value::from(current.remove_all_set(&x)),
-			x => Value::from(current.remove_value(&x)),
-		},
+		Value::Array(current) => {
+			if let Value::Array(x) = val {
+				Value::from(current.remove_all(&x.0))
+			} else if let Value::Set(x) = val {
+				Value::from(current.remove_all_set(&x))
+			} else {
+				Value::from(current.remove_value(&val))
+			}
+		}
 		Value::Set(mut current) => {
-			match val {
-				Value::Array(x) => {
-					for item in x {
-						current.remove(&item);
-					}
+			if let Value::Array(x) = val {
+				for item in x {
+					current.remove(&item);
 				}
-				Value::Set(x) => {
-					for item in x {
-						current.remove(&item);
-					}
+			} else if let Value::Set(x) = val {
+				for item in x {
+					current.remove(&item);
 				}
-				x => {
-					current.remove(&x);
-				}
+			} else {
+				current.remove(&val);
 			}
 			Value::from(current)
 		}
-		Value::None => match val {
-			Value::Number(x) => Value::from(Number::from(0) - x),
-			_ => return Ok(()),
-		},
-		current => current.try_sub(val).map_err(ControlFlow::Err)?,
+		Value::None => {
+			if let Value::Number(x) = val {
+				Value::from(Number::from(0) - x)
+			} else {
+				return Ok(());
+			}
+		}
+		current @ (Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Object(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_)) => current.try_sub(val).map_err(ControlFlow::Err)?,
 	};
 	set_with(target, steps, next, ev).await
 }
@@ -815,20 +915,23 @@ async fn extend<X: PlaceEval>(
 	val: Value,
 	ev: &mut X,
 ) -> Result<(), ControlFlow> {
-	let next = match read_with(target, steps, ev).await? {
-		Value::Array(current) => match val {
-			Value::Array(x) => Value::from(current.concat(x).uniq()),
-			x => Value::from(current.with_push(x).uniq()),
-		},
-		Value::None => match val {
-			Value::Array(x) => Value::from(x),
-			x => Value::from(vec![x]),
-		},
-		current => {
-			return Err(ControlFlow::Err(anyhow::Error::new(ExprError::TryExtend(
-				current.kind_of().to_owned(),
-			))));
+	let target_val = read_with(target, steps, ev).await?;
+	let next = if let Value::Array(current) = target_val {
+		if let Value::Array(x) = val {
+			Value::from(current.concat(x).uniq())
+		} else {
+			Value::from(current.with_push(val).uniq())
 		}
+	} else if let Value::None = target_val {
+		if let Value::Array(x) = val {
+			Value::from(x)
+		} else {
+			Value::from(vec![val])
+		}
+	} else {
+		return Err(ControlFlow::Err(anyhow::Error::new(ExprError::TryExtend(
+			target_val.kind_of().to_owned(),
+		))));
 	};
 	set_with(target, steps, next, ev).await
 }
@@ -843,9 +946,10 @@ async fn extend<X: PlaceEval>(
 /// through this, so an index the walk removed reads as absent rather than
 /// shifting the one after it into its place.
 fn element_at(value: &Value, index: usize) -> Value {
-	match value {
-		Value::Array(arr) => arr.get(index).cloned().unwrap_or(Value::None),
-		_ => Value::None,
+	if let Value::Array(arr) = value {
+		arr.get(index).cloned().unwrap_or(Value::None)
+	} else {
+		Value::None
 	}
 }
 

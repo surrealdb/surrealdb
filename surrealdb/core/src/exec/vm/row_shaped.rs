@@ -47,12 +47,20 @@ impl<'v> CoreShaped<'v> {
 					RecordIdKey::Number(n) => KeyLeaf::Int(*n),
 					RecordIdKey::String(s) => KeyLeaf::String(s.as_str()),
 					RecordIdKey::Uuid(u) => KeyLeaf::Uuid(*u.0.as_bytes()),
-					_ => KeyLeaf::Other,
+					RecordIdKey::Array(_) | RecordIdKey::Object(_) | RecordIdKey::Range(_) => {
+						KeyLeaf::Other
+					}
 				},
 			),
 			Value::Object(_) => Leaf::Object,
 			Value::Array(_) => Leaf::Array,
-			_ => Leaf::Other,
+			Value::Set(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => Leaf::Other,
 		}
 	}
 }
@@ -88,26 +96,22 @@ impl<'v> ShapedValue<'v> for CoreShaped<'v> {
 				.ok()
 				.map(|at| CoreShaped::Scalar(&fields[at].1)),
 			CoreShaped::Value(Value::Object(o)) => o.get(key).map(CoreShaped::Value),
-			CoreShaped::Scalar(Scalar::Value(value)) => match value.as_ref() {
-				Value::Object(o) => o.get(key).map(CoreShaped::Value),
-				_ => None,
-			},
-			_ => None,
+			CoreShaped::Scalar(Scalar::Value(value)) => {
+				value.as_ref().as_object().and_then(|o| o.get(key)).map(CoreShaped::Value)
+			}
+			CoreShaped::Value(_) | CoreShaped::Scalar(_) => None,
 		}
 	}
 
 	fn entries(self) -> impl Iterator<Item = (&'v str, Self)> {
 		let object = match self {
 			CoreShaped::Value(Value::Object(o)) => Some(o),
-			CoreShaped::Scalar(Scalar::Value(value)) => match value.as_ref() {
-				Value::Object(o) => Some(o),
-				_ => None,
-			},
-			_ => None,
+			CoreShaped::Scalar(Scalar::Value(value)) => value.as_ref().as_object(),
+			CoreShaped::Value(_) | CoreShaped::Scalar(_) | CoreShaped::Fields(_) => None,
 		};
 		let fields = match self {
 			CoreShaped::Fields(fields) => Some(fields),
-			_ => None,
+			CoreShaped::Value(_) | CoreShaped::Scalar(_) => None,
 		};
 		object
 			.into_iter()
@@ -120,11 +124,8 @@ impl<'v> ShapedValue<'v> for CoreShaped<'v> {
 	fn elements(self) -> impl Iterator<Item = Self> {
 		let array = match self {
 			CoreShaped::Value(Value::Array(a)) => Some(a),
-			CoreShaped::Scalar(Scalar::Value(value)) => match value.as_ref() {
-				Value::Array(a) => Some(a),
-				_ => None,
-			},
-			_ => None,
+			CoreShaped::Scalar(Scalar::Value(value)) => value.as_ref().as_array(),
+			CoreShaped::Value(_) | CoreShaped::Scalar(_) | CoreShaped::Fields(_) => None,
 		};
 		array.into_iter().flat_map(|a| a.iter().map(CoreShaped::Value))
 	}
@@ -251,7 +252,20 @@ pub(super) fn write_packed(
 				let raw = u64::from_le_bytes(w.out()[at..at + 8].try_into()?);
 				let escaped = match op.fill {
 					Fill::DatetimeNs => raw as i64 == i64::MIN || raw as i64 == i64::MAX,
-					_ => raw == u64::MAX,
+					Fill::Id
+					| Fill::Copied
+					| Fill::DurationNs
+					| Fill::String
+					| Fill::RawBytes
+					| Fill::Bytes
+					| Fill::InRun
+					| Fill::Decimal
+					| Fill::Record
+					| Fill::Dynamic
+					| Fill::Array(_)
+					| Fill::Object {
+						..
+					} => raw == u64::MAX,
 				};
 				if escaped {
 					let Source::Column(index) = op.source else {
@@ -262,7 +276,22 @@ pub(super) fn write_packed(
 							(v.timestamp().to_le_bytes(), v.timestamp_subsec_nanos())
 						}
 						FieldRef::Duration(v) => (v.as_secs().to_le_bytes(), v.subsec_nanos()),
-						_ => anyhow::bail!("an escaped slot of another kind"),
+						FieldRef::Absent
+						| FieldRef::Null
+						| FieldRef::Object
+						| FieldRef::Bool(_)
+						| FieldRef::Int(_)
+						| FieldRef::Float(_)
+						| FieldRef::Decimal(_)
+						| FieldRef::Uuid(_)
+						| FieldRef::Point(..)
+						| FieldRef::String(_)
+						| FieldRef::Bytes(_)
+						| FieldRef::Literal(_)
+						| FieldRef::RecordId(..)
+						| FieldRef::Stored(_) => {
+							anyhow::bail!("an escaped slot of another kind")
+						}
 					};
 					w.open_var(op.rest_slot)?;
 					w.out().extend_from_slice(&secs);
@@ -270,7 +299,8 @@ pub(super) fn write_packed(
 					w.close_var()?;
 				}
 			}
-			fill => {
+			fill
+			@ (Fill::Bytes | Fill::Decimal | Fill::Record | Fill::Dynamic | Fill::Array(_)) => {
 				let Source::Column(index) = op.source else {
 					anyhow::bail!("a column without a source");
 				};
@@ -404,7 +434,24 @@ fn native_array(
 				}
 				None => anyhow::bail!("an array element of another kind"),
 			},
-			_ => anyhow::bail!("an array element kind not written natively"),
+			Wire::String
+			| Wire::Bytes
+			| Wire::Decimal
+			| Wire::Record
+			| Wire::Dynamic
+			| Wire::Object
+			| Wire::Bit
+			| Wire::Array
+			| Wire::I8
+			| Wire::I16
+			| Wire::I32
+			| Wire::U8
+			| Wire::U16
+			| Wire::U32
+			| Wire::U64
+			| Wire::F32
+			| Wire::DatetimeNs
+			| Wire::DurationNs => anyhow::bail!("an array element kind not written natively"),
 		}
 	}
 	Ok(())
@@ -501,7 +548,25 @@ fn write_link(
 	let leaf = match link.kind() {
 		StoredKind::Int => link.as_int()?.map(KeyLeaf::Int),
 		StoredKind::String => link.as_str()?.map(KeyLeaf::String),
-		_ => None,
+		StoredKind::None
+		| StoredKind::Null
+		| StoredKind::Bool
+		| StoredKind::Float
+		| StoredKind::Decimal
+		| StoredKind::Duration
+		| StoredKind::Datetime
+		| StoredKind::Uuid
+		| StoredKind::Bytes
+		| StoredKind::Table
+		| StoredKind::RecordId
+		| StoredKind::File
+		| StoredKind::Regex
+		| StoredKind::Range
+		| StoredKind::Geometry
+		| StoredKind::Array
+		| StoredKind::Set
+		| StoredKind::Object
+		| StoredKind::Unknown => None,
 	};
 	// A table too long for the slice's `u16` length is carried in a whole record id.
 	let carried_too_long = column_table.is_empty() && table.len() > usize::from(u16::MAX);
@@ -623,7 +688,7 @@ fn write_key_id(
 	out.push(match id {
 		KeyIdRef::Number(_) => 0,
 		KeyIdRef::String(_) => 1,
-		_ => 2,
+		KeyIdRef::Uuid(_) | KeyIdRef::Other => 2,
 	});
 	if let Some(table) = table {
 		let at = out.len();

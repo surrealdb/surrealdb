@@ -500,10 +500,10 @@ fn detect_nested_objects(
 		}
 
 		// Get the parent field name (first part must be a Field)
-		let parent_name = match &parts[0] {
-			expr::Part::Field(name) => name.as_str().to_owned(),
-			_ => continue,
+		let expr::Part::Field(name) = &parts[0] else {
+			continue;
 		};
+		let parent_name = name.as_str().to_owned();
 
 		// Get the child field name (last part must be a Field)
 		let child_name = match parts.last() {
@@ -658,29 +658,34 @@ fn detect_nested_objects(
 fn extract_literal_object(
 	kind: &Kind,
 ) -> Option<(&std::collections::BTreeMap<surrealdb_strand::Strand, Kind>, bool, bool)> {
-	match kind {
-		Kind::Literal(KindLiteral::Object(map)) => Some((map, false, false)),
-		Kind::Array(inner, _) => match inner.as_ref() {
-			Kind::Literal(KindLiteral::Object(map)) => Some((map, true, false)),
-			_ => None,
-		},
-		Kind::Either(ks) => {
-			let has_none = ks.iter().any(|k| matches!(k, Kind::None | Kind::Null));
-			let non_none: Vec<&Kind> =
-				ks.iter().filter(|k| !matches!(k, Kind::None | Kind::Null)).collect();
-			if non_none.len() != 1 {
-				return None;
-			}
-			match non_none[0] {
-				Kind::Literal(KindLiteral::Object(map)) => Some((map, false, has_none)),
-				Kind::Array(inner, _) => match inner.as_ref() {
-					Kind::Literal(KindLiteral::Object(map)) => Some((map, true, has_none)),
-					_ => None,
-				},
-				_ => None,
-			}
+	if let Kind::Literal(KindLiteral::Object(map)) = kind {
+		Some((map, false, false))
+	} else if let Kind::Array(inner, _) = kind {
+		if let Kind::Literal(KindLiteral::Object(map)) = inner.as_ref() {
+			Some((map, true, false))
+		} else {
+			None
 		}
-		_ => None,
+	} else if let Kind::Either(ks) = kind {
+		let has_none = ks.iter().any(|k| matches!(k, Kind::None | Kind::Null));
+		let non_none: Vec<&Kind> =
+			ks.iter().filter(|k| !matches!(k, Kind::None | Kind::Null)).collect();
+		if non_none.len() != 1 {
+			return None;
+		}
+		if let Kind::Literal(KindLiteral::Object(map)) = non_none[0] {
+			Some((map, false, has_none))
+		} else if let Kind::Array(inner, _) = non_none[0] {
+			if let Kind::Literal(KindLiteral::Object(map)) = inner.as_ref() {
+				Some((map, true, has_none))
+			} else {
+				None
+			}
+		} else {
+			None
+		}
+	} else {
+		None
 	}
 }
 
@@ -763,7 +768,21 @@ fn make_sub_field_resolver(
 						};
 						Ok(Some(field_val))
 					}
-					v => {
+					v @ (Value::Bool(_)
+					| Value::Number(_)
+					| Value::String(_)
+					| Value::Duration(_)
+					| Value::Datetime(_)
+					| Value::Uuid(_)
+					| Value::Array(_)
+					| Value::Set(_)
+					| Value::Object(_)
+					| Value::Bytes(_)
+					| Value::Table(_)
+					| Value::File(_)
+					| Value::Regex(_)
+					| Value::Range(_)
+					| Value::Closure(_)) => {
 						let graphql_val = sql_value_to_graphql_value_with_kind(
 							v.clone(),
 							field_kind.as_ref(),
@@ -826,30 +845,29 @@ fn resolve_nested_object_value(
 	is_array: bool,
 ) -> Result<Option<FieldValue<'static>>, async_graphql::Error> {
 	if is_array {
-		match val {
-			Value::Array(arr) => {
-				let items: Vec<FieldValue> = arr
-					.0
-					.into_iter()
-					.filter_map(|v| match v {
-						Value::Object(obj) => Some(FieldValue::owned_any(obj)),
-						_ => None,
-					})
-					.collect();
-				Ok(Some(FieldValue::list(items)))
-			}
-			Value::None | Value::Null => Ok(None),
-			_ => Ok(None),
+		if let Value::Array(arr) = val {
+			let items: Vec<FieldValue> = arr
+				.0
+				.into_iter()
+				.filter_map(|v| {
+					if let Value::Object(obj) = v {
+						Some(FieldValue::owned_any(obj))
+					} else {
+						None
+					}
+				})
+				.collect();
+			Ok(Some(FieldValue::list(items)))
+		} else {
+			Ok(None)
 		}
+	} else if let Value::Object(obj) = val {
+		Ok(Some(FieldValue::owned_any(obj)))
+	} else if matches!(val, Value::None | Value::Null) {
+		Ok(None)
 	} else {
-		match val {
-			Value::Object(obj) => Ok(Some(FieldValue::owned_any(obj))),
-			Value::None | Value::Null => Ok(None),
-			_ => {
-				let out = sql_value_to_graphql_value(val).map_err(async_graphql::Error::from)?;
-				Ok(Some(FieldValue::value(out)))
-			}
-		}
+		let out = sql_value_to_graphql_value(val).map_err(async_graphql::Error::from)?;
+		Ok(Some(FieldValue::value(out)))
 	}
 }
 
@@ -874,22 +892,20 @@ fn objects_to_cached_records(
 	let out: Result<Vec<FieldValue>, GraphqlError> = arr
 		.0
 		.into_iter()
-		.map(|v| match v {
-			Value::Object(obj) => {
-				let rid = match obj.get("id") {
-					Some(Value::RecordId(rid)) => rid.clone(),
-					_ => {
-						error!("Object missing 'id' field or id is not a RecordId: {obj:?}");
-						return Err(internal_error("Record missing 'id' field"));
-					}
+		.map(|v| {
+			if let Value::Object(obj) = v {
+				let rid = if let Some(Value::RecordId(rid)) = obj.get("id") {
+					rid.clone()
+				} else {
+					error!("Object missing 'id' field or id is not a RecordId: {obj:?}");
+					return Err(internal_error("Record missing 'id' field"));
 				};
 				Ok(FieldValue::owned_any(CachedRecord {
 					rid,
 					version,
 					data: obj,
 				}))
-			}
-			_ => {
+			} else {
 				error!("Expected object in result, found: {v:?}");
 				Err(internal_error("Expected object in result"))
 			}
@@ -949,12 +965,11 @@ fn make_table_list_field(
 				select_all_from_table(Expr::Table(tb_name), cond, order, limit, start, &version);
 			let res = execute_select(&kvs, sess, stmt).await?;
 
-			match res {
-				Value::Array(a) => objects_to_cached_records(a, version),
-				v => {
-					error!("Found top level value, in result which should be array: {v:?}");
-					Err(internal_error("Unexpected result type from table query").into())
-				}
+			if let Value::Array(a) = res {
+				objects_to_cached_records(a, version)
+			} else {
+				error!("Found top level value, in result which should be array: {res:?}");
+				Err(internal_error("Unexpected result type from table query").into())
 			}
 		})
 	})
@@ -1009,19 +1024,19 @@ fn make_table_get_field(tb: &TableDefinition, kvs: Arc<Datastore>) -> Field {
 			let stmt = select_all_from_record(&record_id, &version);
 			let res = execute_select(&kvs, sess, stmt).await?;
 
-			match res {
-				Value::Object(obj) => {
-					let rid = match obj.get("id") {
-						Some(Value::RecordId(rid)) => rid.clone(),
-						_ => return Ok(None),
-					};
-					Ok(Some(FieldValue::owned_any(CachedRecord {
-						rid,
-						version,
-						data: obj,
-					})))
-				}
-				_ => Ok(None),
+			if let Value::Object(obj) = res {
+				let rid = if let Some(Value::RecordId(rid)) = obj.get("id") {
+					rid.clone()
+				} else {
+					return Ok(None);
+				};
+				Ok(Some(FieldValue::owned_any(CachedRecord {
+					rid,
+					version,
+					data: obj,
+				})))
+			} else {
+				Ok(None)
 			}
 		})
 	})
@@ -1072,23 +1087,23 @@ fn make_generic_get_field(kvs: Arc<Datastore>) -> Field {
 			let stmt = select_all_from_record(&record_id, &version);
 			let res = execute_select(&kvs, sess, stmt).await?;
 
-			match res {
-				Value::Object(obj) => {
-					let rid = match obj.get("id") {
-						Some(Value::RecordId(rid)) => rid.clone(),
-						_ => return Ok(None),
-					};
-					let table_name = rid.table.clone();
-					Ok(Some(
-						FieldValue::owned_any(CachedRecord {
-							rid,
-							version,
-							data: obj,
-						})
-						.with_type(table_name),
-					))
-				}
-				_ => Ok(None),
+			if let Value::Object(obj) = res {
+				let rid = if let Some(Value::RecordId(rid)) = obj.get("id") {
+					rid.clone()
+				} else {
+					return Ok(None);
+				};
+				let table_name = rid.table.clone();
+				Ok(Some(
+					FieldValue::owned_any(CachedRecord {
+						rid,
+						version,
+						data: obj,
+					})
+					.with_type(table_name),
+				))
+			} else {
+				Ok(None)
 			}
 		})
 	})
@@ -1239,10 +1254,9 @@ fn build_table_type(
 		orderable = orderable.item(fd_name.to_string());
 
 		let type_filter_name = format!("_filter_{}", filter_type_name(&fd_type));
-		let filter_already_exists = types.iter().any(|t| match t {
-			Type::InputObject(io) => io.type_name() == type_filter_name,
-			_ => false,
-		});
+		let filter_already_exists = types
+			.iter()
+			.any(|t| matches!(t, Type::InputObject(io) if io.type_name() == type_filter_name));
 		if !filter_already_exists {
 			let type_filter = Type::InputObject(filter_from_type(
 				&kind,
@@ -1363,10 +1377,7 @@ fn register_relation_filter(
 	let name = format!("_relation_filter_{tb_name}_{field_name}_{dir_token}");
 	// Guard against duplicate registrations — async-graphql errors out on type
 	// redefinition.
-	if types.iter().any(|t| match t {
-		Type::InputObject(io) => io.type_name() == name,
-		_ => false,
-	}) {
+	if types.iter().any(|t| matches!(t, Type::InputObject(io) if io.type_name() == name)) {
 		return name;
 	}
 	let io = InputObject::new(&name)
@@ -1659,38 +1670,49 @@ async fn resolve_field_value(
 			let stmt = select_all_from_record(&target_rid, version);
 			let target_val = execute_select(ds, sess, stmt).await?;
 
-			match target_val {
-				Value::Object(obj) => {
-					let field_val = FieldValue::owned_any(CachedRecord {
-						rid: target_rid.clone(),
-						version: *version,
-						data: obj,
-					});
-					let field_val = match field_kind {
-						Some(Kind::Record(ts)) if ts.is_empty() || ts.len() > 1 => {
-							field_val.with_type(target_rid.table)
-						}
-						_ => field_val,
-					};
-					Ok(Some(field_val))
+			if let Value::Object(obj) = target_val {
+				let mut field_val = FieldValue::owned_any(CachedRecord {
+					rid: target_rid.clone(),
+					version: *version,
+					data: obj,
+				});
+				if let Some(Kind::Record(ts)) = &field_kind
+					&& (ts.is_empty() || ts.len() > 1)
+				{
+					field_val = field_val.with_type(target_rid.table);
 				}
-				Value::None | Value::Null => Ok(None),
-				_ => Ok(None),
+				Ok(Some(field_val))
+			} else {
+				Ok(None)
 			}
 		}
 		Value::Geometry(g) => {
 			let type_name = geometry_graphql_type_name(&g);
-			let field_val = FieldValue::owned_any(g);
-			let field_val = match field_kind {
-				Some(Kind::Geometry(ks)) if ks.is_empty() || ks.len() > 1 => {
-					field_val.with_type(type_name)
-				}
-				_ => field_val,
-			};
+			let mut field_val = FieldValue::owned_any(g);
+			if let Some(Kind::Geometry(ks)) = &field_kind
+				&& (ks.is_empty() || ks.len() > 1)
+			{
+				field_val = field_val.with_type(type_name);
+			}
 			Ok(Some(field_val))
 		}
 		Value::None | Value::Null => Ok(None),
-		v => {
+		v @ (Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Array(_)
+		| Value::Set(_)
+		| Value::Object(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_)) => {
 			let out = sql_value_to_graphql_value_with_kind(v, field_kind.as_ref(), enum_scope)
 				.map_err(async_graphql::Error::from)?;
 			Ok(Some(FieldValue::value(out)))
@@ -1824,12 +1846,11 @@ fn make_relation_field_resolver(
 
 			let res = execute_select(ds, sess, stmt).await?;
 
-			match res {
-				Value::Array(a) => objects_to_cached_records(a, version),
-				v => {
-					error!("Expected array result for relation query, found: {v:?}");
-					Err(internal_error("Unexpected result type for relation query").into())
-				}
+			if let Value::Array(a) = res {
+				objects_to_cached_records(a, version)
+			} else {
+				error!("Expected array result for relation query, found: {res:?}");
+				Err(internal_error("Unexpected result type for relation query").into())
 			}
 		})
 	}
@@ -1878,17 +1899,16 @@ fn filter_from_type(
 ) -> Result<InputObject, GraphqlError> {
 	// Normalise `option<record<T>>` (Kind::Either([None, Record([T])])) down to the
 	// inner record kind so filters are generated correctly with ID-based filtering.
-	let effective_kind = match kind {
-		Kind::Either(ks) => {
-			let non_none: Vec<&Kind> =
-				ks.iter().filter(|k| !matches!(k, Kind::None | Kind::Null)).collect();
-			if non_none.len() == 1 {
-				non_none[0].clone()
-			} else {
-				kind.clone()
-			}
+	let effective_kind = if let Kind::Either(ks) = kind {
+		let non_none: Vec<&Kind> =
+			ks.iter().filter(|k| !matches!(k, Kind::None | Kind::Null)).collect();
+		if non_none.len() == 1 {
+			(*non_none[0]).clone()
+		} else {
+			kind.clone()
 		}
-		_ => kind.clone(),
+	} else {
+		kind.clone()
 	};
 
 	// Determine the input type used for eq/ne. For record-typed fields we use
@@ -1896,23 +1916,31 @@ fn filter_from_type(
 	// type and not valid as an input). For arrays of records we drop eq/ne
 	// entirely — comparing full record arrays by content rarely makes sense and
 	// would otherwise pull an output Object type into input position.
-	let (eq_ne_ty, supports_eq_ne) = match &effective_kind {
-		Kind::Record(ts) => match ts.len() {
-			1 => (
+	let (eq_ne_ty, supports_eq_ne) = if let Kind::Record(ts) = &effective_kind {
+		if ts.len() == 1 {
+			(
 				TypeRef::named(filter_name_from_table(
 					ts.first().expect("ts should have exactly one element").as_str(),
 				)),
 				true,
-			),
-			_ => (TypeRef::named(TypeRef::ID), true),
-		},
-		// `array<record<T>>` — leave eq/ne off; expose `contains` further below.
-		Kind::Array(inner, _) if matches!(**inner, Kind::Record(_)) => {
-			(TypeRef::named(TypeRef::ID), false)
+			)
+		} else {
+			(TypeRef::named(TypeRef::ID), true)
 		}
-		k => {
-			(unwrap_type(kind_to_type_with_enum_prefix(k.clone(), types, true, enum_scope)?), true)
-		}
+	} else if let Kind::Array(inner, _) = &effective_kind
+		&& matches!(**inner, Kind::Record(_))
+	{
+		(TypeRef::named(TypeRef::ID), false)
+	} else {
+		(
+			unwrap_type(kind_to_type_with_enum_prefix(
+				effective_kind.clone(),
+				types,
+				true,
+				enum_scope,
+			)?),
+			true,
+		)
 	};
 
 	let mut filter = InputObject::new(filter_name);
@@ -2371,9 +2399,12 @@ fn translate_id_range(lhs: Expr, val: &GraphqlValue) -> Result<Expr, GraphqlErro
 	let to = obj.get("to").filter(|v| !matches!(v, GraphqlValue::Null));
 	let inclusive = obj
 		.get("inclusive")
-		.and_then(|v| match v {
-			GraphqlValue::Boolean(b) => Some(*b),
-			_ => None,
+		.and_then(|v| {
+			if let GraphqlValue::Boolean(b) = v {
+				Some(*b)
+			} else {
+				None
+			}
 		})
 		.unwrap_or(false);
 
@@ -2435,10 +2466,10 @@ fn binop_for_id(obj: &IndexMap<Name, GraphqlValue>) -> Result<Expr, GraphqlError
 			// left side; expand `id: { in: [a, b, c] }` into
 			// `id = a OR id = b OR id = c`.
 			let rhs = graphql_to_sql_kind(v, Kind::Array(Box::new(Kind::Record(vec![])), None))?;
-			let ids = match rhs {
-				Value::Array(arr) => arr.0,
-				_ => return Err(resolver_error("`id.in` expected an array of IDs")),
+			let Value::Array(arr) = rhs else {
+				return Err(resolver_error("`id.in` expected an array of IDs"));
 			};
+			let ids = arr.0;
 			if ids.is_empty() {
 				return Err(resolver_error("`id.in` must contain at least one ID"));
 			}
@@ -2687,49 +2718,48 @@ struct PageInfoValue {
 
 /// Unwrap `Kind::Either([None|Null, T])` to `T`, leaving other kinds unchanged.
 fn strip_option(kind: &Kind) -> Kind {
-	match kind {
-		Kind::Either(ks) => {
-			let non_none: Vec<&Kind> =
-				ks.iter().filter(|k| !matches!(k, Kind::None | Kind::Null)).collect();
-			if non_none.len() == 1 {
-				non_none[0].clone()
-			} else {
-				kind.clone()
-			}
+	if let Kind::Either(ks) = kind {
+		let non_none: Vec<&Kind> =
+			ks.iter().filter(|k| !matches!(k, Kind::None | Kind::Null)).collect();
+		if non_none.len() == 1 {
+			non_none[0].clone()
+		} else {
+			kind.clone()
 		}
-		_ => kind.clone(),
+	} else {
+		kind.clone()
 	}
 }
 
 /// If `kind` is an `array<T>` (recursing through `Either`/`Option`) whose
 /// element kind is numeric, return the inner numeric kind.
 fn numeric_array_inner(kind: &Kind) -> Option<Kind> {
-	match kind {
-		Kind::Array(inner, _) => match inner.as_ref() {
-			Kind::Float | Kind::Int | Kind::Number | Kind::Decimal => Some(*inner.clone()),
-			Kind::Either(ks) => {
-				let non_none: Vec<&Kind> =
-					ks.iter().filter(|k| !matches!(k, Kind::None | Kind::Null)).collect();
-				if non_none.len() == 1
-					&& matches!(non_none[0], Kind::Float | Kind::Int | Kind::Number | Kind::Decimal)
-				{
-					Some(non_none[0].clone())
-				} else {
-					None
-				}
-			}
-			_ => None,
-		},
-		Kind::Either(ks) => {
+	if let Kind::Array(inner, _) = kind {
+		if matches!(inner.as_ref(), Kind::Float | Kind::Int | Kind::Number | Kind::Decimal) {
+			Some(*inner.clone())
+		} else if let Kind::Either(ks) = inner.as_ref() {
 			let non_none: Vec<&Kind> =
 				ks.iter().filter(|k| !matches!(k, Kind::None | Kind::Null)).collect();
-			if non_none.len() == 1 {
-				numeric_array_inner(non_none[0])
+			if non_none.len() == 1
+				&& matches!(non_none[0], Kind::Float | Kind::Int | Kind::Number | Kind::Decimal)
+			{
+				Some(non_none[0].clone())
 			} else {
 				None
 			}
+		} else {
+			None
 		}
-		_ => None,
+	} else if let Kind::Either(ks) = kind {
+		let non_none: Vec<&Kind> =
+			ks.iter().filter(|k| !matches!(k, Kind::None | Kind::Null)).collect();
+		if non_none.len() == 1 {
+			numeric_array_inner(non_none[0])
+		} else {
+			None
+		}
+	} else {
+		None
 	}
 }
 
@@ -2784,10 +2814,12 @@ fn take_enum<'a>(
 	let Some(v) = obj.get(key) else {
 		return Err(resolver_error(format!("missing `{key}` in filter operator input")));
 	};
-	match v {
-		GraphqlValue::Enum(n) => Ok(n.as_str()),
-		GraphqlValue::String(s) => Ok(s.as_str()),
-		_ => Err(resolver_error(format!("`{key}` must be an enum or string"))),
+	if let GraphqlValue::Enum(n) = v {
+		Ok(n.as_str())
+	} else if let GraphqlValue::String(s) = v {
+		Ok(s.as_str())
+	} else {
+		Err(resolver_error(format!("`{key}` must be an enum or string")))
 	}
 }
 
@@ -2854,9 +2886,12 @@ fn translate_matches(field: Expr, val: &GraphqlValue) -> Result<Expr, GraphqlErr
 	let obj = val.as_object().ok_or(resolver_error("`matches` value must be an object"))?;
 	let q = obj
 		.get("query")
-		.and_then(|v| match v {
-			GraphqlValue::String(s) => Some(s.as_str()),
-			_ => None,
+		.and_then(|v| {
+			if let GraphqlValue::String(s) = v {
+				Some(s.as_str())
+			} else {
+				None
+			}
 		})
 		.ok_or(resolver_error("`matches.query` must be a string"))?;
 	let query = graphql_to_sql_kind(&GraphqlValue::String(q.to_string()), Kind::String)?;
@@ -2876,9 +2911,12 @@ fn translate_call(field: Expr, val: &GraphqlValue) -> Result<Expr, GraphqlError>
 
 	let fn_name = obj
 		.get("fn")
-		.and_then(|v| match v {
-			GraphqlValue::String(s) => Some(s.as_str()),
-			_ => None,
+		.and_then(|v| {
+			if let GraphqlValue::String(s) = v {
+				Some(s.as_str())
+			} else {
+				None
+			}
 		})
 		.ok_or(resolver_error("`call.fn` must be a string"))?;
 
@@ -2940,42 +2978,44 @@ struct AggregateRow(SurObject);
 /// `math::mean` answer for no values, which is what every column of a
 /// `GROUP ALL` over no rows holds.
 fn aggregate_field_value(v: Value) -> Result<Option<FieldValue<'static>>, async_graphql::Error> {
-	match sql_value_to_graphql_value(v).map_err(async_graphql::Error::from)? {
-		GraphqlValue::Null => Ok(None),
-		out => Ok(Some(FieldValue::value(out))),
+	let out = sql_value_to_graphql_value(v).map_err(async_graphql::Error::from)?;
+	if let GraphqlValue::Null = out {
+		Ok(None)
+	} else {
+		Ok(Some(FieldValue::value(out)))
 	}
 }
 
 /// Return `true` if `kind` is numeric (Float/Int/Number/Decimal), recursing
 /// through `Either`/`Option` once.
 fn is_numeric_kind(kind: &Kind) -> bool {
-	match kind {
-		Kind::Float | Kind::Int | Kind::Number | Kind::Decimal => true,
-		Kind::Either(ks) => {
-			let non_none: Vec<&Kind> =
-				ks.iter().filter(|k| !matches!(k, Kind::None | Kind::Null)).collect();
-			non_none.len() == 1
-				&& matches!(non_none[0], Kind::Float | Kind::Int | Kind::Number | Kind::Decimal)
-		}
-		_ => false,
+	if matches!(kind, Kind::Float | Kind::Int | Kind::Number | Kind::Decimal) {
+		true
+	} else if let Kind::Either(ks) = kind {
+		let non_none: Vec<&Kind> =
+			ks.iter().filter(|k| !matches!(k, Kind::None | Kind::Null)).collect();
+		non_none.len() == 1
+			&& matches!(non_none[0], Kind::Float | Kind::Int | Kind::Number | Kind::Decimal)
+	} else {
+		false
 	}
 }
 
 /// Return the field's effective numeric kind (stripping `option<…>`), or
 /// `Kind::Number` as a fallback.
 fn numeric_kind(kind: &Kind) -> Kind {
-	match kind {
-		Kind::Float | Kind::Int | Kind::Number | Kind::Decimal => kind.clone(),
-		Kind::Either(ks) => {
-			let non_none: Vec<Kind> =
-				ks.iter().filter(|k| !matches!(k, Kind::None | Kind::Null)).cloned().collect();
-			if non_none.len() == 1 {
-				non_none.into_iter().next().expect("len == 1")
-			} else {
-				Kind::Number
-			}
+	if matches!(kind, Kind::Float | Kind::Int | Kind::Number | Kind::Decimal) {
+		kind.clone()
+	} else if let Kind::Either(ks) = kind {
+		let non_none: Vec<Kind> =
+			ks.iter().filter(|k| !matches!(k, Kind::None | Kind::Null)).cloned().collect();
+		if non_none.len() == 1 {
+			non_none.into_iter().next().expect("len == 1")
+		} else {
+			Kind::Number
 		}
-		_ => Kind::Number,
+	} else {
+		Kind::Number
 	}
 }
 
@@ -3137,15 +3177,12 @@ fn make_table_aggregate_field(
 					.as_list()
 					.ok_or(resolver_error("`groupBy` must be a list"))?;
 				for v in list {
-					let name = match v {
-						GraphqlValue::Enum(n) => n.as_str(),
-						GraphqlValue::String(s) => s.as_str(),
-						_ => {
-							return Err(resolver_error(
-								"`groupBy` items must be enum values",
-							)
-							.into());
-						}
+					let name = if let GraphqlValue::Enum(n) = v {
+						n.as_str()
+					} else if let GraphqlValue::String(s) = v {
+						s.as_str()
+					} else {
+						return Err(resolver_error("`groupBy` items must be enum values").into());
 					};
 					if name != "_NONE" {
 						group_keys.push(name.to_string());
@@ -3215,17 +3252,19 @@ fn make_table_aggregate_field(
 			};
 			let res = execute_select(&kvs, sess, stmt).await?;
 
-			let arr = match res {
-				Value::Array(a) => a,
-				v => SurArray::from(vec![v]),
+			let arr = if let Value::Array(a) = res {
+				a
+			} else {
+				SurArray::from(vec![res])
 			};
 
 			let items: Vec<FieldValue> = arr
 				.iter()
 				.map(|v| {
-					let obj = match v {
-						Value::Object(o) => o.clone(),
-						_ => SurObject::default(),
+					let obj = if let Value::Object(o) = v {
+						o.clone()
+					} else {
+						SurObject::default()
 					};
 					FieldValue::owned_any(AggregateRow(obj))
 				})
@@ -3414,9 +3453,8 @@ async fn run_connection_total_count(
 		for_update: false,
 	};
 	let res = execute_select(&q.kvs, sess, stmt).await?;
-	let arr = match res {
-		Value::Array(a) => a,
-		_ => return Ok(0),
+	let Value::Array(arr) = res else {
+		return Ok(0);
 	};
 	let Some(first) = arr.0.into_iter().next() else {
 		return Ok(0);
@@ -3424,9 +3462,10 @@ async fn run_connection_total_count(
 	let Value::Object(obj) = first else {
 		return Ok(0);
 	};
-	match obj.get("count") {
-		Some(Value::Number(n)) => Ok(n.to_int()),
-		_ => Ok(0),
+	if let Some(Value::Number(n)) = obj.get("count") {
+		Ok(n.to_int())
+	} else {
+		Ok(0)
 	}
 }
 
@@ -3564,12 +3603,11 @@ fn make_table_connection_field(
 				&version,
 			);
 			let res = execute_select(&kvs, sess, stmt).await?;
-			let arr = match res {
-				Value::Array(a) => a.0,
-				v => {
-					error!("connection query returned non-array: {v:?}");
-					return Err(internal_error("connection query result not an array").into());
-				}
+			let arr = if let Value::Array(a) = res {
+				a.0
+			} else {
+				error!("connection query returned non-array: {res:?}");
+				return Err(internal_error("connection query result not an array").into());
 			};
 
 			let returned = arr.len() as i64;

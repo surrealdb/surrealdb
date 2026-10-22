@@ -293,11 +293,12 @@ fn candidate_row(
 	target_binding: &str,
 	target: Value,
 ) -> Value {
-	let mut obj = match input {
-		Value::Object(o) => o.clone(),
+	let mut obj = if let Value::Object(o) = input {
+		o.clone()
+	} else {
 		// `extract_source_id` only yields `Found` for object rows, so this is
 		// unreachable in practice; default to an empty object defensively.
-		_ => Object::default(),
+		Object::default()
 	};
 	obj.insert(edge_name, edge);
 	obj.insert(target_binding, target);
@@ -594,19 +595,19 @@ mod tests {
 	#[test]
 	fn extract_source_id_from_full_object() {
 		let row = obj_row(&[("a", obj_row(&[("id", Value::RecordId(rid("person", "alice")))]))]);
-		match extract_source_id(&row, "a") {
-			SourceId::Found(r) => assert_eq!(r, rid("person", "alice")),
-			_ => panic!("expected Found"),
-		}
+		let SourceId::Found(r) = extract_source_id(&row, "a") else {
+			panic!("expected Found");
+		};
+		assert_eq!(r, rid("person", "alice"));
 	}
 
 	#[test]
 	fn extract_source_id_from_bare_record_id() {
 		let row = obj_row(&[("a", Value::RecordId(rid("person", "bob")))]);
-		match extract_source_id(&row, "a") {
-			SourceId::Found(r) => assert_eq!(r, rid("person", "bob")),
-			_ => panic!("expected Found"),
-		}
+		let SourceId::Found(r) = extract_source_id(&row, "a") else {
+			panic!("expected Found");
+		};
+		assert_eq!(r, rid("person", "bob"));
 	}
 
 	#[test]

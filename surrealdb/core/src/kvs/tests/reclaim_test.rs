@@ -824,7 +824,11 @@ async fn assert_removal_reclaims_in_bounded_pages(removal: Removal) {
 			seed_range(&ds, &tenant, to_seed / 2).await;
 			seed_range(&ds, &other, to_seed - to_seed / 2).await;
 		}
-		_ => seed_range(&ds, &target, to_seed).await,
+		Removal::Database {
+			..
+		}
+		| Removal::Index
+		| Removal::IndexExpunged => seed_range(&ds, &target, to_seed).await,
 	}
 
 	let statement = match removal {
@@ -889,7 +893,13 @@ async fn assert_removal_reclaims_in_bounded_pages(removal: Removal) {
 	// takes the whole prefix and has nothing to defer separately.
 	let expected_doc_entries = match removal {
 		Removal::Index => ALL_DOC_ID_KINDS.len(),
-		_ => 0,
+		Removal::Namespace {
+			..
+		}
+		| Removal::Database {
+			..
+		}
+		| Removal::IndexExpunged => 0,
 	};
 	assert_eq!(
 		count_doc_kinds(&kinds),

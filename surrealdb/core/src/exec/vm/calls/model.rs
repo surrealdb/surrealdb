@@ -201,7 +201,22 @@ pub(crate) async fn compute_model(
 			Ok(outcome.into_iter().map(|x| Value::Number(Number::Float(x as f64))).collect())
 		}
 		// Invalid argument type
-		_ => Err(ExprError::InvalidFunctionArguments {
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Set(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => Err(ExprError::InvalidFunctionArguments {
 			name: format!("ml::{}<{}>", name, version),
 			message: ARGUMENTS.into(),
 		}

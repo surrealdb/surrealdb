@@ -309,7 +309,9 @@ fn default_of(ty: &Ty) -> Result<Value> {
 		Ty::Option(_) => Value::None,
 		Ty::Vec(_) => Value::Array(Default::default()),
 		Ty::Uuid => Value::Uuid(Default::default()),
-		other => bail!("no default for a missing {other:?}"),
+		other @ (Ty::Tuple(_) | Ty::Named(_) | Ty::Native(_)) => {
+			bail!("no default for a missing {other:?}")
+		}
 	})
 }
 
@@ -487,9 +489,10 @@ fn located(e: anyhow::Error, at: impl FnOnce() -> String) -> anyhow::Error {
 }
 
 fn object(value: &Value) -> Result<&Object> {
-	match value {
-		Value::Object(object) => Ok(object),
-		other => bail!("expected an object, found {other:?}"),
+	if let Value::Object(object) = value {
+		Ok(object)
+	} else {
+		bail!("expected an object, found {value:?}")
 	}
 }
 
@@ -544,53 +547,117 @@ fn encode_shape(shape: &Shape, revision: u16, value: &Value, w: &mut Writer) -> 
 }
 
 fn array(value: &Value) -> Result<&[Value]> {
-	match value {
-		Value::Array(array) => Ok(array.0.as_slice()),
-		other => bail!("expected an array, found {other:?}"),
+	if let Value::Array(array) = value {
+		Ok(array.0.as_slice())
+	} else {
+		bail!("expected an array, found {value:?}")
 	}
 }
 
 fn integer(value: &Value) -> Result<i128> {
-	match value {
-		Value::Number(Number::Int(v)) => Ok(*v as i128),
-		Value::Number(Number::Decimal(d)) if d.fract().is_zero() => {
-			d.mantissa().checked_div(10i128.pow(d.scale())).context("an integer decimal")
-		}
-		other => bail!("expected an integer, found {other:?}"),
+	if let Value::Number(Number::Int(v)) = value {
+		Ok(*v as i128)
+	} else if let Value::Number(Number::Decimal(d)) = value
+		&& d.fract().is_zero()
+	{
+		d.mantissa().checked_div(10i128.pow(d.scale())).context("an integer decimal")
+	} else {
+		bail!("expected an integer, found {value:?}")
 	}
 }
 
 fn encode_ty(ty: &Ty, value: &Value, w: &mut Writer) -> Result<()> {
 	match ty {
-		Ty::Bool => match value {
-			Value::Bool(b) => w.u8(*b as u8),
-			other => bail!("expected a bool, found {other:?}"),
-		},
+		Ty::Bool => {
+			if let Value::Bool(b) = value {
+				w.u8(*b as u8);
+			} else {
+				bail!("expected a bool, found {value:?}");
+			}
+		}
 		Ty::Uint => w.varint(u128::try_from(integer(value)?)?),
 		Ty::Int => w.zigzag(integer(value)?),
 		Ty::String => match value {
 			Value::String(s) => w.bytes(s.as_bytes()),
 			Value::Table(t) => w.bytes(t.as_str().as_bytes()),
-			other => bail!("expected a string, found {other:?}"),
+			other @ (Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Array(_)
+			| Value::Set(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_)) => bail!("expected a string, found {other:?}"),
 		},
-		Ty::Bytes => match value {
-			Value::Bytes(b) => w.bytes(&b.0),
-			other => bail!("expected bytes, found {other:?}"),
-		},
-		Ty::Uuid => match value {
-			Value::Uuid(u) => w.raw(u.0.as_bytes()),
-			other => bail!("expected a uuid, found {other:?}"),
-		},
+		Ty::Bytes => {
+			if let Value::Bytes(b) = value {
+				w.bytes(&b.0);
+			} else {
+				bail!("expected bytes, found {value:?}");
+			}
+		}
+		Ty::Uuid => {
+			if let Value::Uuid(u) = value {
+				w.raw(u.0.as_bytes());
+			} else {
+				bail!("expected a uuid, found {value:?}");
+			}
+		}
 		Ty::Option(inner) => match value {
 			Value::None => w.u8(0),
-			some if holds_none(inner) => {
+			some @ (Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Array(_)
+			| Value::Set(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_))
+				if holds_none(inner) =>
+			{
 				let [some] = array(some)? else {
 					bail!("an option of a value is NONE or a one-element array");
 				};
 				w.u8(1);
 				encode_ty(inner, some, w)?;
 			}
-			some => {
+			some @ (Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Array(_)
+			| Value::Set(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_)) => {
 				w.u8(1);
 				encode_ty(inner, some, w)?;
 			}

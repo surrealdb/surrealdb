@@ -218,12 +218,12 @@ fn where_literal(ir: &Ir, loop_op: OpId) -> Option<bool> {
 	else {
 		return None;
 	};
-	match &ir.op(op)?.kind {
-		OpKind::Expr(ExprOp::Literal(value)) => match **value {
-			Value::Bool(truth) => Some(truth),
-			_ => None,
-		},
-		_ => None,
+	if let OpKind::Expr(ExprOp::Literal(value)) = &ir.op(op)?.kind
+		&& let Value::Bool(truth) = **value
+	{
+		Some(truth)
+	} else {
+		None
 	}
 }
 

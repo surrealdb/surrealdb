@@ -178,19 +178,19 @@ pub(crate) fn only_in(expr: &LogicalExpr) -> bool {
 
 /// `expr` with `ONLY` taken off every lookup of the path it ends in.
 pub(crate) fn without_only(expr: &LogicalExpr) -> LogicalExpr {
-	match expr {
+	if let LogicalExpr::Lookup {
+		base,
+		lookup,
+	} = expr
+	{
+		let mut lookup = lookup.clone();
+		lookup.only = false;
 		LogicalExpr::Lookup {
-			base,
+			base: Box::new(without_only(base)),
 			lookup,
-		} => {
-			let mut lookup = lookup.clone();
-			lookup.only = false;
-			LogicalExpr::Lookup {
-				base: Box::new(without_only(base)),
-				lookup,
-			}
 		}
-		other => other.clone(),
+	} else {
+		expr.clone()
 	}
 }
 
@@ -212,15 +212,18 @@ pub(crate) fn run_source(base: &LogicalExpr) -> &LogicalExpr {
 /// `base` with `ONLY` taken off every lookup of the path below its hops ([`run_source`]); the
 /// hops keep theirs.
 pub(crate) fn unwrapped_below_run(base: &LogicalExpr) -> LogicalExpr {
-	match base {
+	if let LogicalExpr::Lookup {
+		base: inner_base,
+		lookup,
+	} = base
+		&& is_hop(lookup, false)
+	{
 		LogicalExpr::Lookup {
-			base,
-			lookup,
-		} if is_hop(lookup, false) => LogicalExpr::Lookup {
-			base: Box::new(unwrapped_below_run(base)),
+			base: Box::new(unwrapped_below_run(inner_base)),
 			lookup: lookup.clone(),
-		},
-		other => without_only(other),
+		}
+	} else {
+		without_only(base)
 	}
 }
 

@@ -107,23 +107,24 @@ pub async fn process_fns(
 							.await?;
 
 					// Convert the SurrealQL result to a GraphQL value
-					let graphql_res = match res {
-						Value::RecordId(rid) => {
-							let field_val = FieldValue::owned_any(rid.clone());
-							// Untyped record returns need `.with_type()` for
-							// interface resolution; typed `record<T>` do not.
-							let field_val = match &return_kind1 {
-								Kind::Record(ts) if ts.is_empty() => field_val.with_type(rid.table),
-								_ => field_val,
-							};
-							Some(field_val)
+					let graphql_res = if let Value::None = res {
+						None
+					} else if let Value::RecordId(rid) = res {
+						let mut field_val = FieldValue::owned_any(rid.clone());
+						// Untyped record returns need `.with_type()` for
+						// interface resolution; typed `record<T>` do not.
+						if let Kind::Record(ts) = &return_kind1
+							&& ts.is_empty()
+						{
+							field_val = field_val.with_type(rid.table);
 						}
-						Value::None => None,
-						_ => Some(FieldValue::value(sql_value_to_graphql_value_with_kind(
+						Some(field_val)
+					} else {
+						Some(FieldValue::value(sql_value_to_graphql_value_with_kind(
 							res,
 							Some(&return_kind1),
 							Some(&format!("fn_{}_return", fnd1.name)),
-						)?)),
+						)?))
 					};
 
 					Ok(graphql_res)

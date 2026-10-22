@@ -283,9 +283,10 @@ fn name_end(rest: &[u8]) -> Option<usize> {
 /// The sequence name a legacy definition key spells, or `None` otherwise.
 #[cfg(test)]
 fn legacy_name(key: &[u8], prefix: &[u8]) -> Option<String> {
-	match classify(key, prefix) {
-		Legacy::Definition(name) => Some(name),
-		_ => None,
+	if let Legacy::Definition(name) = classify(key, prefix) {
+		Some(name)
+	} else {
+		None
 	}
 }
 

@@ -259,7 +259,7 @@ fn widened(
 		Bound::Excluded(KeyBound::Array {
 			len,
 		}) => (*len, false),
-		other => {
+		other @ (Bound::Included(_) | Bound::Excluded(_) | Bound::Unbounded) => {
 			return (
 				other.clone(),
 				operands.iter().copied().map(Element::Held).collect(),

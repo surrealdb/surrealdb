@@ -469,9 +469,12 @@ async fn the_change_feed_holds_the_records_in_serial_order() {
 	let read = async |db: &TestDb| {
 		let rows = answered(db, "SHOW CHANGES FOR TABLE t SINCE 0").await.expect("the feed reads");
 		rows.into_iter()
-			.filter_map(|row| match row {
-				Value::Object(object) => object.get("changes").cloned(),
-				_ => None,
+			.filter_map(|row| {
+				if let Value::Object(object) = row {
+					object.get("changes").cloned()
+				} else {
+					None
+				}
 			})
 			.collect::<Vec<_>>()
 	};
@@ -1281,9 +1284,12 @@ async fn the_change_feed_of_a_create_holds_the_records_in_the_order_of_the_ids()
 	let read = async |db: &TestDb| {
 		let rows = answered(db, "SHOW CHANGES FOR TABLE c SINCE 0").await.expect("the feed reads");
 		rows.into_iter()
-			.filter_map(|row| match row {
-				Value::Object(object) => object.get("changes").cloned(),
-				_ => None,
+			.filter_map(|row| {
+				if let Value::Object(object) = row {
+					object.get("changes").cloned()
+				} else {
+					None
+				}
 			})
 			.collect::<Vec<_>>()
 	};
@@ -1652,9 +1658,11 @@ async fn ids_held_after(db: &TestDb, sql: &str) -> (Result<Vec<Value>, String>, 
 	ctx.txn().cancel().await.expect("the transaction ends");
 	let ids = ids
 		.into_iter()
-		.map(|id| match id {
-			Value::Number(Number::Int(id)) => id,
-			other => panic!("an id that is no integer: {other:?}"),
+		.map(|id| {
+			let Value::Number(Number::Int(id)) = id else {
+				panic!("an id that is no integer: {id:?}");
+			};
+			id
 		})
 		.collect();
 	(answer, ids)

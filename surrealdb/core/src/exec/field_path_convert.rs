@@ -27,7 +27,15 @@ pub(crate) fn field_path_from_idiom(idiom: &Idiom) -> Result<FieldPath, Error> {
 			}
 			// Skip parts that don't affect output path structure
 			Part::Destructure(_) | Part::Start(_) => {}
-			_ => {
+			Part::All
+			| Part::Flatten
+			| Part::Where(_)
+			| Part::Value(_)
+			| Part::Method(..)
+			| Part::Optional
+			| Part::Recurse(..)
+			| Part::Doc
+			| Part::RepeatRecurse => {
 				return Err(ExecError::Query {
 					message: format!(
 						"FieldPath cannot contain complex parts like where clauses or method calls. \

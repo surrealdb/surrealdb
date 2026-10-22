@@ -35,9 +35,10 @@ pub(crate) fn write_facts(write: &LogicalWrite) -> WriteFacts {
 		form,
 		has_data: write.data.is_some(),
 		on_duplicate_key_update: write.duplicate_update.is_some(),
-		ignore: match statement {
-			LogicalWriteStatement::Insert(stmt) => stmt.ignore,
-			_ => false,
+		ignore: if let LogicalWriteStatement::Insert(stmt) = statement {
+			stmt.ignore
+		} else {
+			false
 		},
 		repeatable: matches!(statement, LogicalWriteStatement::Upsert(_))
 			&& write.cond.is_none()

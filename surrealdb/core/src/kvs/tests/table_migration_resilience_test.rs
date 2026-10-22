@@ -295,13 +295,19 @@ fn describe(section: &Value) -> String {
 		None => String::new(),
 		other => panic!("{key}: {other:?}"),
 	};
-	let text = |value: &Value| match value {
-		Value::String(text) => text.clone(),
-		other => other.to_sql(),
+	let text = |value: &Value| {
+		if let Value::String(text) = value {
+			text.clone()
+		} else {
+			value.to_sql()
+		}
 	};
-	let member = |value: &Value, key: &str| match value {
-		Value::Object(object) => object.get(key).map(text).unwrap_or_default(),
-		_ => String::new(),
+	let member = |value: &Value, key: &str| {
+		if let Value::Object(object) = value {
+			object.get(key).map(text).unwrap_or_default()
+		} else {
+			String::new()
+		}
 	};
 	let steps = match object.get("migrations") {
 		Some(Value::Array(array)) => array
@@ -2575,9 +2581,11 @@ async fn the_job_deletes_the_values_a_removal_step_hid() {
 		 CREATE tb:1 SET a = 1, b = 'x', c = 5; CREATE tb:2 SET a = 2, b = 'y';",
 	)
 	.await;
-	let holds = |data: Stored, field: &str| match data {
-		Stored::Object(object) => object.get(field).is_some(),
-		other => panic!("{other:?}"),
+	let holds = |data: Stored, field: &str| {
+		let Stored::Object(object) = data else {
+			panic!("{data:?}");
+		};
+		object.get(field).is_some()
 	};
 	run(&ds, "REMOVE FIELD b ON tb; DEFINE FIELD OVERWRITE c ON tb COMPUTED a * 2;").await;
 	assert_eq!(steps_run(&ds, "tb").await, 2);

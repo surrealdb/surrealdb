@@ -124,7 +124,20 @@ fn sample_value(kind: &Kind) -> Option<Value> {
 		Kind::Uuid => Value::Uuid(Uuid::default()),
 		Kind::Bytes => Value::Bytes(Bytes::default()),
 		Kind::Object => Value::Object(Object::default()),
-		_ => return None,
+		Kind::None
+		| Kind::Null
+		| Kind::Decimal
+		| Kind::Regex
+		| Kind::Table(_)
+		| Kind::Record(_)
+		| Kind::Geometry(_)
+		| Kind::Either(_)
+		| Kind::Set(..)
+		| Kind::Array(..)
+		| Kind::Function(..)
+		| Kind::Range
+		| Kind::Literal(_)
+		| Kind::File(_) => return None,
 	})
 }
 
@@ -146,7 +159,16 @@ fn kind_matches(value: &Value, kind: &Kind) -> bool {
 		Kind::Object => matches!(value, Value::Object(_)),
 		Kind::Array(..) => matches!(value, Value::Array(_)),
 		Kind::Set(..) => matches!(value, Value::Set(_)),
-		_ => true,
+		Kind::Null
+		| Kind::Regex
+		| Kind::Table(_)
+		| Kind::Record(_)
+		| Kind::Geometry(_)
+		| Kind::Either(_)
+		| Kind::Function(..)
+		| Kind::Range
+		| Kind::Literal(_)
+		| Kind::File(_) => true,
 	}
 }
 

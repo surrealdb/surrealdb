@@ -301,10 +301,10 @@ mod tests {
 		let bytes = [0x01u8, 0x00];
 		let mut r: &[u8] = &bytes;
 		let err = skip_value_wire(&mut r).expect_err("must bail on rev != 2");
-		match err {
-			RevisionError::Deserialize(s) => assert!(s.contains("revision 2")),
-			other => panic!("expected Deserialize error, got {other:?}"),
-		}
+		let RevisionError::Deserialize(s) = err else {
+			panic!("expected Deserialize error, got {err:?}");
+		};
+		assert!(s.contains("revision 2"));
 	}
 
 	#[test]
@@ -334,12 +334,10 @@ mod tests {
 		let bytes = [0x02u8, (2u8 | (0b01u8 << 5))];
 		let mut r: &[u8] = &bytes;
 		let err = skip_value_wire(&mut r).expect_err("truncated Fixed payload must error");
-		match err {
-			RevisionError::Deserialize(s) => {
-				assert!(s.contains("fixed payload"), "unexpected error message: {s}")
-			}
-			other => panic!("expected Deserialize error, got {other:?}"),
-		}
+		let RevisionError::Deserialize(s) = err else {
+			panic!("expected Deserialize error, got {err:?}");
+		};
+		assert!(s.contains("fixed payload"), "unexpected error message: {s}");
 	}
 
 	#[test]

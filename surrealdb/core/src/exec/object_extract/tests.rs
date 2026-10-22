@@ -78,10 +78,9 @@ fn extract_existing_top_level_field() {
 	]));
 	let rec = wire_record_plain_object(obj);
 	let result = extract_field_from_record_bytes(&rec, &p(&["b"]), TEST_DEPTH_LIMIT);
-	match result {
-		Extracted::Found(Value::Bool(true)) => {}
-		other => panic!("expected Found(Bool(true)), got {:?}", other),
-	}
+	let Extracted::Found(Value::Bool(true)) = result else {
+		panic!("expected Found(Bool(true)), got {:?}", result);
+	};
 }
 
 #[test]
@@ -124,10 +123,9 @@ fn edge_metadata_extracts_data() {
 	let mut bytes = Vec::new();
 	rec.serialize_revisioned(&mut bytes).unwrap();
 	let result = extract_field_from_record_bytes(&bytes, &p(&["score"]), TEST_DEPTH_LIMIT);
-	match result {
-		Extracted::Found(Value::Number(Number::Int(7))) => {}
-		other => panic!("expected Found(Int(7)) for edge data, got {:?}", other),
-	}
+	let Extracted::Found(Value::Number(Number::Int(7))) = result else {
+		panic!("expected Found(Int(7)) for edge data, got {:?}", result);
+	};
 }
 
 #[test]
@@ -153,10 +151,9 @@ fn aggregation_view_metadata_extracts_data() {
 	let mut bytes = Vec::new();
 	rec.serialize_revisioned(&mut bytes).unwrap();
 	let result = extract_field_from_record_bytes(&bytes, &p(&["total"]), TEST_DEPTH_LIMIT);
-	match result {
-		Extracted::Found(Value::Number(Number::Int(42))) => {}
-		other => panic!("expected Found(Int(42)) for aggregation row data, got {:?}", other),
-	}
+	let Extracted::Found(Value::Number(Number::Int(42))) = result else {
+		panic!("expected Found(Int(42)) for aggregation row data, got {:?}", result);
+	};
 }
 
 #[test]
@@ -175,10 +172,10 @@ fn descend_value_slice_path_decodes_field() {
 	let mut wire = Vec::new();
 	value.serialize_revisioned(&mut wire).unwrap();
 	let result = descend_value_slice_path(&wire, &p(&["k"]));
-	match result {
-		Extracted::Found(Value::String(s)) => assert_eq!(s.as_str(), "v"),
-		other => panic!("unexpected: {:?}", other),
-	}
+	let Extracted::Found(Value::String(s)) = result else {
+		panic!("unexpected: {:?}", result);
+	};
+	assert_eq!(s.as_str(), "v");
 }
 
 #[test]
@@ -192,10 +189,10 @@ fn descend_record_value_path_round_trips_all_supported_types() {
 
 	for (key, expected) in [("alpha", 1), ("middle", 2), ("zeta", 3)] {
 		let result = descend_record_value_path(&rec, &p(&[key]));
-		match result {
-			Extracted::Found(Value::Number(Number::Int(v))) => assert_eq!(v, expected),
-			other => panic!("unexpected for {key}: {other:?}"),
-		}
+		let Extracted::Found(Value::Number(Number::Int(v))) = result else {
+			panic!("unexpected for {key}: {result:?}");
+		};
+		assert_eq!(v, expected);
 	}
 }
 
@@ -218,28 +215,24 @@ fn scan_sparse_needles_against_wide_indexed_object_returns_correct_slots() {
 	// 2 needles against 16 entries → 4*2 < 16 → needle-driven branch.
 	let needles: &[&[u8]] = &[b"k03", b"k12"];
 	let result = scan_slots_decoded(&rec, &[], needles);
-	match result {
-		SlotScanResult::Found(values) => {
-			assert_eq!(values.len(), 2);
-			assert!(matches!(values[0], Value::Number(Number::Int(30))));
-			assert!(matches!(values[1], Value::Number(Number::Int(120))));
-		}
-		other => panic!("expected Found, got {other:?}"),
-	}
+	let SlotScanResult::Found(values) = result else {
+		panic!("expected Found, got {result:?}");
+	};
+	assert_eq!(values.len(), 2);
+	assert!(matches!(values[0], Value::Number(Number::Int(30))));
+	assert!(matches!(values[1], Value::Number(Number::Int(120))));
 
 	// Absent needle in the sparse path stays `Value::None`. Keep the
 	// needle slice strictly UTF-8-ascending: `k03 < k12 < zzz`.
 	let needles: &[&[u8]] = &[b"k03", b"k12", b"zzz"];
 	let result = scan_slots_decoded(&rec, &[], needles);
-	match result {
-		SlotScanResult::Found(values) => {
-			assert_eq!(values.len(), 3);
-			assert!(matches!(values[0], Value::Number(Number::Int(30))));
-			assert!(matches!(values[1], Value::Number(Number::Int(120))));
-			assert!(matches!(values[2], Value::None));
-		}
-		other => panic!("expected Found with sparse-needle miss, got {other:?}"),
-	}
+	let SlotScanResult::Found(values) = result else {
+		panic!("expected Found with sparse-needle miss, got {result:?}");
+	};
+	assert_eq!(values.len(), 3);
+	assert!(matches!(values[0], Value::Number(Number::Int(30))));
+	assert!(matches!(values[1], Value::Number(Number::Int(120))));
+	assert!(matches!(values[2], Value::None));
 }
 
 /// Symmetric coverage: same wide object, but with **dense** needles
@@ -258,17 +251,15 @@ fn scan_dense_needles_against_wide_indexed_object_returns_correct_slots() {
 	let needle_strings: Vec<String> = (0..12).map(|i| format!("k{i:02}")).collect();
 	let needles: Vec<&[u8]> = needle_strings.iter().map(|s| s.as_bytes()).collect();
 	let result = scan_slots_decoded(&rec, &[], &needles);
-	match result {
-		SlotScanResult::Found(values) => {
-			assert_eq!(values.len(), 12);
-			for (i, v) in values.iter().enumerate() {
-				assert!(
-					matches!(v, Value::Number(Number::Int(n)) if *n == (i as i64) * 10),
-					"slot {i}: {v:?}",
-				);
-			}
-		}
-		other => panic!("expected Found, got {other:?}"),
+	let SlotScanResult::Found(values) = result else {
+		panic!("expected Found, got {result:?}");
+	};
+	assert_eq!(values.len(), 12);
+	for (i, v) in values.iter().enumerate() {
+		assert!(
+			matches!(v, Value::Number(Number::Int(n)) if *n == (i as i64) * 10),
+			"slot {i}: {v:?}",
+		);
 	}
 }
 
@@ -284,15 +275,13 @@ fn scan_record_root_returns_values_for_present_keys_and_none_for_absent() {
 	// Sorted needle list with a missing key in the middle.
 	let needles: &[&[u8]] = &[b"a", b"missing", b"z"];
 	let result = scan_slots_decoded(&rec, &[], needles);
-	match result {
-		SlotScanResult::Found(values) => {
-			assert_eq!(values.len(), 3);
-			assert!(matches!(values[0], Value::Bool(false)));
-			assert!(matches!(values[1], Value::None));
-			assert!(matches!(values[2], Value::Bool(true)));
-		}
-		other => panic!("expected Found at root, got {other:?}"),
-	}
+	let SlotScanResult::Found(values) = result else {
+		panic!("expected Found at root, got {result:?}");
+	};
+	assert_eq!(values.len(), 3);
+	assert!(matches!(values[0], Value::Bool(false)));
+	assert!(matches!(values[1], Value::None));
+	assert!(matches!(values[2], Value::Bool(true)));
 }
 
 #[test]
@@ -314,15 +303,13 @@ fn scan_record_object_at_path_walks_nested_object() {
 	let path = p(&["outer"]);
 	let path_refs: Vec<&PathSegment> = path.iter().collect();
 	let result = scan_slots_decoded(&rec, &path_refs, needles);
-	match result {
-		SlotScanResult::Found(values) => {
-			assert_eq!(values.len(), 3);
-			assert!(matches!(values[0], Value::Number(Number::Int(1))));
-			assert!(matches!(values[1], Value::Number(Number::Int(2))));
-			assert!(matches!(values[2], Value::None));
-		}
-		other => panic!("expected Found, got {other:?}"),
-	}
+	let SlotScanResult::Found(values) = result else {
+		panic!("expected Found, got {result:?}");
+	};
+	assert_eq!(values.len(), 3);
+	assert!(matches!(values[0], Value::Number(Number::Int(1))));
+	assert!(matches!(values[1], Value::Number(Number::Int(2))));
+	assert!(matches!(values[2], Value::None));
 }
 
 #[test]
@@ -376,28 +363,25 @@ fn extract_handles_non_ascii_keys() {
 	]));
 	let rec = wire_record_plain_object(obj);
 	for (key, expected) in [("café", 1i64), ("naïve", 2), ("日本", 3)] {
-		match extract_field_from_record_bytes(&rec, &p(&[key]), TEST_DEPTH_LIMIT) {
-			Extracted::Found(Value::Number(Number::Int(n))) => {
-				assert_eq!(n, expected, "wrong value for key {key:?}")
-			}
-			other => panic!("expected Found(Int({expected})) for {key:?}, got {other:?}"),
-		}
+		let result = extract_field_from_record_bytes(&rec, &p(&[key]), TEST_DEPTH_LIMIT);
+		let Extracted::Found(Value::Number(Number::Int(n))) = result else {
+			panic!("expected Found(Int({expected})) for {key:?}, got {result:?}");
+		};
+		assert_eq!(n, expected, "wrong value for key {key:?}");
 	}
 	// Multi-needle scan over the same object exercises the byte-borrowed
 	// `find_value_bytes` path.
 	let needles: &[&[u8]] = &["café".as_bytes(), "naïve".as_bytes(), "日本".as_bytes()];
 	let result = scan_slots_decoded(&rec, &[], needles);
-	match result {
-		SlotScanResult::Found(scanned) => {
-			assert_eq!(scanned.len(), 3);
-			for (got, expected) in scanned.iter().zip([1i64, 2, 3]) {
-				match got {
-					Value::Number(Number::Int(n)) => assert_eq!(*n, expected),
-					other => panic!("expected Int({expected}), got {other:?}"),
-				}
-			}
-		}
-		other => panic!("expected Found, got {other:?}"),
+	let SlotScanResult::Found(scanned) = result else {
+		panic!("expected Found, got {result:?}");
+	};
+	assert_eq!(scanned.len(), 3);
+	for (got, expected) in scanned.iter().zip([1i64, 2, 3]) {
+		let Value::Number(Number::Int(n)) = got else {
+			panic!("expected Int({expected}), got {got:?}");
+		};
+		assert_eq!(*n, expected);
 	}
 }
 
@@ -448,12 +432,9 @@ fn descent_succeeds_at_exact_depth_limit() {
 	let limit: u32 = depth as u32;
 
 	let extracted = super::extract_field_from_record_bytes(&rec, &path, limit);
-	match extracted {
-		Extracted::Found(Value::Bool(true)) => {}
-		other => {
-			panic!("expected Found(true) at depth == depth_limit == {}, got {:?}", depth, other)
-		}
-	}
+	let Extracted::Found(Value::Bool(true)) = extracted else {
+		panic!("expected Found(true) at depth == depth_limit == {}, got {:?}", depth, extracted);
+	};
 }
 
 #[test]
@@ -478,15 +459,13 @@ fn scan_record_object_at_path_with_empty_path_resolves_against_root() {
 
 	let needles: &[&[u8]] = &[b"a", b"missing", b"z"];
 	let result = scan_slots_decoded(&rec, &[], needles);
-	match result {
-		SlotScanResult::Found(values) => {
-			assert_eq!(values.len(), 3);
-			assert!(matches!(values[0], Value::Bool(false)));
-			assert!(matches!(values[1], Value::None));
-			assert!(matches!(values[2], Value::Bool(true)));
-		}
-		other => panic!("expected Found, got {other:?}"),
-	}
+	let SlotScanResult::Found(values) = result else {
+		panic!("expected Found, got {result:?}");
+	};
+	assert_eq!(values.len(), 3);
+	assert!(matches!(values[0], Value::Bool(false)));
+	assert!(matches!(values[1], Value::None));
+	assert!(matches!(values[2], Value::Bool(true)));
 }
 
 /// Diverse rev-2 records: data-only (small object, indexed-map object,
@@ -776,17 +755,16 @@ fn project_record_bytes_matches_a_full_decode_restricted_to_the_keys() {
 				keys.iter().copied().map(PathSegment::from).collect();
 			segments.sort();
 			let projected = project_record_bytes(&bytes, &segments);
-			match &data {
-				Value::Object(object) => {
-					let mut expected = Object::default();
-					for key in keys {
-						if let Some(v) = object.get(key) {
-							expected.0.insert(Strand::from(*key), v.clone());
-						}
+			if let Value::Object(object) = &data {
+				let mut expected = Object::default();
+				for key in keys {
+					if let Some(v) = object.get(key) {
+						expected.0.insert(Strand::from(*key), v.clone());
 					}
-					assert_eq!(projected, Some(expected), "keys {keys:?} of {data:?}");
 				}
-				other => assert_eq!(projected, None, "non-object data {other:?} must not project"),
+				assert_eq!(projected, Some(expected), "keys {keys:?} of {data:?}");
+			} else {
+				assert_eq!(projected, None, "non-object data {data:?} must not project");
 			}
 		}
 	}
@@ -821,15 +799,14 @@ fn project_record_bytes_excluding_matches_a_full_decode_without_the_keys() {
 				keys.iter().copied().map(PathSegment::from).collect();
 			segments.sort();
 			let projected = project_record_bytes_excluding(&bytes, &segments);
-			match &data {
-				Value::Object(object) => {
-					let mut expected = object.clone();
-					for key in keys {
-						expected.0.remove(*key);
-					}
-					assert_eq!(projected, Some(expected), "excluding {keys:?} of {data:?}");
+			if let Value::Object(object) = &data {
+				let mut expected = object.clone();
+				for key in keys {
+					expected.0.remove(*key);
 				}
-				other => assert_eq!(projected, None, "non-object data {other:?} must not project"),
+				assert_eq!(projected, Some(expected), "excluding {keys:?} of {data:?}");
+			} else {
+				assert_eq!(projected, None, "non-object data {data:?} must not project");
 			}
 		}
 	}

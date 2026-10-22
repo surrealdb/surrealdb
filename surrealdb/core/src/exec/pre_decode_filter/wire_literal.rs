@@ -90,10 +90,12 @@ impl NumberSubVariant {
 #[inline]
 pub(crate) fn hash_miss_is_decisive(value: &Value, set: &LiteralSet) -> bool {
 	let miss_rules_out_eq = set.hash_agrees_with_eq() || value.hash_agrees_with_eq();
-	let eq_decides_equal = match value {
-		Value::String(_) => !set.has_strand_asymmetric_match(),
-		Value::Regex(_) => set.has_no_strings(),
-		_ => true,
+	let eq_decides_equal = if let Value::String(_) = value {
+		!set.has_strand_asymmetric_match()
+	} else if let Value::Regex(_) = value {
+		set.has_no_strings()
+	} else {
+		true
 	};
 	miss_rules_out_eq && eq_decides_equal
 }
@@ -261,7 +263,16 @@ impl LiteralWire {
 					full_wire: full,
 				}
 			}
-			_ => LiteralWire::Other,
+			Value::Array(_)
+			| Value::Set(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Closure(_) => LiteralWire::Other,
 		}
 	}
 
@@ -269,12 +280,14 @@ impl LiteralWire {
 	/// substring search path consumes these as the `memchr::memmem` needle.
 	/// Returns `None` for any other variant.
 	pub(crate) fn strand_utf8(&self) -> Option<&[u8]> {
-		match self {
-			LiteralWire::Strand {
-				full_wire,
-				utf8_range,
-			} => Some(&full_wire[utf8_range.clone()]),
-			_ => None,
+		if let LiteralWire::Strand {
+			full_wire,
+			utf8_range,
+		} = self
+		{
+			Some(&full_wire[utf8_range.clone()])
+		} else {
+			None
 		}
 	}
 }
@@ -346,40 +359,35 @@ impl LiteralSet {
 		let mut out = LiteralSet::default();
 		for v in set {
 			out.hash_eq_mismatch |= !v.hash_agrees_with_eq();
-			match v {
-				Value::String(_) => {
-					let mut full = Vec::new();
-					v.serialize_revisioned(&mut full).expect("serialize Strand into Vec");
-					out.strands.insert(full);
+			if let Value::String(_) = v {
+				let mut full = Vec::new();
+				v.serialize_revisioned(&mut full).expect("serialize Strand into Vec");
+				out.strands.insert(full);
+			} else if let Value::Number(n) = v {
+				out.number_sub_variants |= 1u8 << (NumberSubVariant::from_number(n) as u8);
+				if let Number::Decimal(d) = n {
+					out.decimals.insert(*d);
 				}
-				Value::Number(n) => {
-					out.number_sub_variants |= 1u8 << (NumberSubVariant::from_number(n) as u8);
-					if let Number::Decimal(d) = n {
-						out.decimals.insert(*d);
-					}
-					let mut full = Vec::new();
-					v.serialize_revisioned(&mut full).expect("serialize Number into Vec");
-					out.numbers.insert(full);
-				}
-				Value::Regex(_) => {
-					// Defense-in-depth only: the planner's
-					// `literal_hashset_element_safe` (see
-					// `pre_decode_filter::compile`) excludes `Value::Regex`
-					// from the input to `try_build_inside_literal_hashset`,
-					// so in production a `LeafSetMembership` never reaches
-					// `LiteralSet::from_set` with a Regex element. This arm
-					// (and the `strand_asymmetric` flag it sets) is reachable
-					// today only from direct test construction. Do not
-					// "simplify" it away without first relaxing the planner
-					// filter — otherwise the runtime loses its safety net
-					// against the Strand ↔ Regex asymmetric equality in
-					// `Value::equal`.
-					out.strand_asymmetric = true;
-					out.fallback.insert(v.clone());
-				}
-				_ => {
-					out.fallback.insert(v.clone());
-				}
+				let mut full = Vec::new();
+				v.serialize_revisioned(&mut full).expect("serialize Number into Vec");
+				out.numbers.insert(full);
+			} else if let Value::Regex(_) = v {
+				// Defense-in-depth only: the planner's
+				// `literal_hashset_element_safe` (see
+				// `pre_decode_filter::compile`) excludes `Value::Regex`
+				// from the input to `try_build_inside_literal_hashset`,
+				// so in production a `LeafSetMembership` never reaches
+				// `LiteralSet::from_set` with a Regex element. This arm
+				// (and the `strand_asymmetric` flag it sets) is reachable
+				// today only from direct test construction. Do not
+				// "simplify" it away without first relaxing the planner
+				// filter — otherwise the runtime loses its safety net
+				// against the Strand ↔ Regex asymmetric equality in
+				// `Value::equal`.
+				out.strand_asymmetric = true;
+				out.fallback.insert(v.clone());
+			} else {
+				out.fallback.insert(v.clone());
 			}
 		}
 		out
@@ -677,18 +685,17 @@ mod tests {
 			Value::Duration(SurrealDuration(StdDuration::from_secs(42))),
 		];
 		for lit in inputs {
-			match LiteralWire::from_value(&lit) {
-				LiteralWire::Canonical {
-					full_wire,
-				} => {
-					let mut r: &[u8] = &full_wire;
-					let decoded =
-						<Value as revision::DeserializeRevisioned>::deserialize_revisioned(&mut r)
-							.unwrap();
-					assert_eq!(decoded, lit, "round-trip mismatch for {lit:?}");
-				}
-				other => panic!("expected Canonical for {lit:?}, got {other:?}"),
-			}
+			let wire = LiteralWire::from_value(&lit);
+			let LiteralWire::Canonical {
+				full_wire,
+			} = wire
+			else {
+				panic!("expected Canonical for {lit:?}, got {wire:?}");
+			};
+			let mut r: &[u8] = &full_wire;
+			let decoded =
+				<Value as revision::DeserializeRevisioned>::deserialize_revisioned(&mut r).unwrap();
+			assert_eq!(decoded, lit, "round-trip mismatch for {lit:?}");
 		}
 	}
 

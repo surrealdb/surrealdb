@@ -54,7 +54,7 @@ pub fn assert_write_refused(
 	let outside = match level {
 		Level::Namespace(own) => own != ns,
 		Level::Database(own_ns, own_db) => own_ns != ns || own_db != db,
-		_ => false,
+		Level::No | Level::Root | Level::Record(..) => false,
 	};
 	match res {
 		Err(err) if outside => {
@@ -194,7 +194,22 @@ pub fn zero_volatile_system_block(value: &mut Value) {
 			}
 			// `load_average` is an array of three floats.
 			Value::Array(values) => values.iter_mut().for_each(zero),
-			_ => {}
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::String(_)
+			| Value::Bytes(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Regex(_)
+			| Value::Object(_)
+			| Value::Set(_) => {}
 		}
 	}
 

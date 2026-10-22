@@ -2719,7 +2719,143 @@ impl FieldRefusal {
 				table: table.clone(),
 				view: view.clone(),
 			},
-			_ => return None,
+			E::NsEmpty
+			| E::DbEmpty
+			| E::Query {
+				..
+			}
+			| E::InvalidKnnVector {
+				..
+			}
+			| E::UncoercibleKnnVector {
+				..
+			}
+			| E::InvalidParam {
+				..
+			}
+			| E::InvalidFetch {
+				..
+			}
+			| E::InvalidLimit {
+				..
+			}
+			| E::InvalidStart {
+				..
+			}
+			| E::InvalidScript {
+				..
+			}
+			| E::InvalidModel {
+				..
+			}
+			| E::InvalidFunction {
+				..
+			}
+			| E::InvalidControlFlow
+			| E::NsNotAllowed {
+				..
+			}
+			| E::DbNotAllowed {
+				..
+			}
+			| E::ComputationDepthExceeded
+			| E::InvalidStatementTarget {
+				..
+			}
+			| E::CreateStatement {
+				..
+			}
+			| E::UpsertStatement {
+				..
+			}
+			| E::UpdateStatement {
+				..
+			}
+			| E::RelateStatementIn {
+				..
+			}
+			| E::RelateStatementId {
+				..
+			}
+			| E::RelateStatementOut {
+				..
+			}
+			| E::DeleteStatement {
+				..
+			}
+			| E::InsertStatement {
+				..
+			}
+			| E::InsertStatementIn {
+				..
+			}
+			| E::InsertStatementId {
+				..
+			}
+			| E::InsertStatementOut {
+				..
+			}
+			| E::LiveStatement {
+				..
+			}
+			| E::KillStatement {
+				..
+			}
+			| E::SingleOnlyOutput
+			| E::ParamPermissions {
+				..
+			}
+			| E::FunctionPermissions {
+				..
+			}
+			| E::SurrealismReadOnlySideEffect
+			| E::SetCoerce {
+				..
+			}
+			| E::ReturnCoerce {
+				..
+			}
+			| E::Unimplemented(_)
+			| E::PlannerUnsupported {
+				..
+			}
+			| E::AccessLevelMismatch
+			| E::AccessUnsupportedAlgorithm
+			| E::AccessRedactedKey {
+				..
+			}
+			| E::AccessRecordTokenDurationRequired
+			| E::AccessContextNotReadOnly
+			| E::AccessContextRequiresRecord
+			| E::AccessGrantInvalidSubject
+			| E::AccessGrantRevoked
+			| E::InvalidBound {
+				..
+			}
+			| E::IdiomRecursionLimitExceeded {
+				..
+			}
+			| E::UnsupportedRepeatRecurse
+			| E::RecursionInstructionPlanConflict
+			| E::InvalidRecursionTarget {
+				..
+			}
+			| E::ComputedFieldReadByView {
+				..
+			}
+			| E::ComputedFieldReadByViewUnresolved {
+				..
+			}
+			| E::ExtensionNeedsTrust
+			| E::TableTypeRelationOverRecord {
+				..
+			}
+			| E::TableTypeNormalOverEdge {
+				..
+			}
+			| E::ViewReadsItself {
+				..
+			} => return None,
 		})
 	}
 
@@ -3456,10 +3592,277 @@ impl Instr {
 				WriteInstr::Permissions(instr) => instr.target_mut().into_iter().collect(),
 				WriteInstr::Observe(instr) => instr.target_mut().into_iter().collect(),
 				WriteInstr::Storage(instr) => instr.target_mut().into_iter().collect(),
-				_ => Vec::new(),
+				WriteInstr::Record
+				| WriteInstr::Begin
+				| WriteInstr::LoadNamedSubject
+				| WriteInstr::SavepointPush
+				| WriteInstr::SavepointRelease
+				| WriteInstr::SavepointRollback
+				| WriteInstr::TryEnd
+				| WriteInstr::ClearMutated
+				| WriteInstr::RethrowSignal
+				| WriteInstr::ReloadForUpdate
+				| WriteInstr::CarryBegin
+				| WriteInstr::CarryEnd
+				| WriteInstr::RaiseCarried
+				| WriteInstr::End {
+					..
+				}
+				| WriteInstr::ClearCurrentReduced
+				| WriteInstr::ShowImage {
+					..
+				}
+				| WriteInstr::SetOutput {
+					..
+				} => Vec::new(),
 			},
 			Instr::Ir(instr) => instr.labels_mut(),
-			_ => Vec::new(),
+			Instr::CoerceField {
+				..
+			}
+			| Instr::BeginComputing {
+				..
+			}
+			| Instr::LandRow {
+				..
+			}
+			| Instr::BindRow {
+				..
+			}
+			| Instr::CompareFieldInt {
+				..
+			}
+			| Instr::Compare {
+				..
+			}
+			| Instr::Arith {
+				..
+			}
+			| Instr::Unary {
+				..
+			}
+			| Instr::NewArray {
+				..
+			}
+			| Instr::ArrayPush {
+				..
+			}
+			| Instr::LoadParam {
+				..
+			}
+			| Instr::LoadSlot {
+				..
+			}
+			| Instr::SortKey {
+				..
+			}
+			| Instr::Fetch {
+				..
+			}
+			| Instr::Access {
+				..
+			}
+			| Instr::Each {
+				..
+			}
+			| Instr::Throw {
+				..
+			}
+			| Instr::CollectPush {
+				..
+			}
+			| Instr::Nav {
+				..
+			}
+			| Instr::CallAllowed {
+				..
+			}
+			| Instr::Call {
+				..
+			}
+			| Instr::FunctionEnter {
+				..
+			}
+			| Instr::FunctionBind {
+				..
+			}
+			| Instr::FunctionReturn {
+				..
+			}
+			| Instr::FunctionCall {
+				..
+			}
+			| Instr::ArrayArg {
+				..
+			}
+			| Instr::ClosureBind {
+				..
+			}
+			| Instr::ClosureReturn {
+				..
+			}
+			| Instr::Dive {
+				..
+			}
+			| Instr::MakeClosure {
+				..
+			}
+			| Instr::ClosureField {
+				..
+			}
+			| Instr::RequireClosure {
+				..
+			}
+			| Instr::Invoke {
+				..
+			}
+			| Instr::Lookup {
+				..
+			}
+			| Instr::Signal {
+				..
+			}
+			| Instr::Extract {
+				..
+			}
+			| Instr::Measure {
+				..
+			}
+			| Instr::Mock {
+				..
+			}
+			| Instr::Recurse {
+				..
+			}
+			| Instr::Destructure {
+				..
+			}
+			| Instr::RecordId {
+				..
+			}
+			| Instr::Method {
+				..
+			}
+			| Instr::MethodClosure {
+				..
+			}
+			| Instr::Take {
+				..
+			}
+			| Instr::NewObject {
+				..
+			}
+			| Instr::SeedObject {
+				..
+			}
+			| Instr::BuildObject {
+				..
+			}
+			| Instr::LoadPath {
+				..
+			}
+			| Instr::LoadRow {
+				..
+			}
+			| Instr::RemoveField {
+				..
+			}
+			| Instr::RemovePath {
+				..
+			}
+			| Instr::Omit {
+				..
+			}
+			| Instr::SetField {
+				..
+			}
+			| Instr::WriteProjection {
+				..
+			}
+			| Instr::Load {
+				..
+			}
+			| Instr::Emit {
+				..
+			}
+			| Instr::EmitEnd {
+				..
+			}
+			| Instr::BuildObjectEmit {
+				..
+			}
+			| Instr::FilterFieldInt {
+				..
+			}
+			| Instr::FilterCompare {
+				..
+			}
+			| Instr::Filter {
+				..
+			}
+			| Instr::SplitPush {
+				..
+			}
+			| Instr::SortPush {
+				..
+			}
+			| Instr::JoinProbe {
+				..
+			}
+			| Instr::VerdictSet {
+				..
+			}
+			| Instr::JoinPair {
+				..
+			}
+			| Instr::GroupKey {
+				..
+			}
+			| Instr::GroupSelect {
+				..
+			}
+			| Instr::AccUpdate {
+				..
+			}
+			| Instr::Store(_)
+			| Instr::Block(_)
+			| Instr::EndRow
+			| Instr::StopPipeline
+			| Instr::TryEnd
+			| Instr::MethodRegion {
+				..
+			}
+			| Instr::PermissionRegion {
+				..
+			}
+			| Instr::GroupFirstSet {
+				..
+			}
+			| Instr::CallIndexFn {
+				..
+			}
+			| Instr::Matches {
+				..
+			}
+			| Instr::ExternalEnter {
+				..
+			}
+			| Instr::ExternalCall {
+				..
+			}
+			| Instr::NewSet {
+				..
+			}
+			| Instr::RepeatRecurse {
+				..
+			}
+			| Instr::InvalidControlFlow
+			| Instr::DocumentRoot {
+				..
+			}
+			| Instr::JudgeCopy {
+				..
+			} => Vec::new(),
 		}
 	}
 }
@@ -3619,7 +4022,20 @@ impl IntCmp {
 			CompareOp::LessThanEqual => IntCmp::Le,
 			CompareOp::MoreThan => IntCmp::Gt,
 			CompareOp::MoreThanEqual => IntCmp::Ge,
-			_ => return None,
+			CompareOp::AllEqual
+			| CompareOp::AnyEqual
+			| CompareOp::Contain
+			| CompareOp::NotContain
+			| CompareOp::ContainAll
+			| CompareOp::ContainAny
+			| CompareOp::ContainNone
+			| CompareOp::Inside
+			| CompareOp::NotInside
+			| CompareOp::AllInside
+			| CompareOp::AnyInside
+			| CompareOp::NoneInside
+			| CompareOp::Outside
+			| CompareOp::Intersects => return None,
 		})
 	}
 
@@ -3630,7 +4046,7 @@ impl IntCmp {
 			IntCmp::Le => IntCmp::Ge,
 			IntCmp::Gt => IntCmp::Lt,
 			IntCmp::Ge => IntCmp::Le,
-			same => same,
+			same @ (IntCmp::Eq | IntCmp::Ne) => same,
 		}
 	}
 
@@ -3716,7 +4132,33 @@ impl ArithOp {
 				start_excluded: true,
 				end_included: true,
 			},
-			_ => return None,
+			BinaryOperator::Equal
+			| BinaryOperator::ExactEqual
+			| BinaryOperator::NotEqual
+			| BinaryOperator::AllEqual
+			| BinaryOperator::AnyEqual
+			| BinaryOperator::Or
+			| BinaryOperator::And
+			| BinaryOperator::NullCoalescing
+			| BinaryOperator::TenaryCondition
+			| BinaryOperator::LessThan
+			| BinaryOperator::LessThanEqual
+			| BinaryOperator::MoreThan
+			| BinaryOperator::MoreThanEqual
+			| BinaryOperator::Contain
+			| BinaryOperator::NotContain
+			| BinaryOperator::ContainAll
+			| BinaryOperator::ContainAny
+			| BinaryOperator::ContainNone
+			| BinaryOperator::Inside
+			| BinaryOperator::NotInside
+			| BinaryOperator::AllInside
+			| BinaryOperator::AnyInside
+			| BinaryOperator::NoneInside
+			| BinaryOperator::Outside
+			| BinaryOperator::Intersects
+			| BinaryOperator::Matches(_)
+			| BinaryOperator::NearestNeighbor(_) => return None,
 		})
 	}
 
@@ -3829,7 +4271,22 @@ impl CompareOp {
 			BinaryOperator::NoneInside => CompareOp::NoneInside,
 			BinaryOperator::Outside => CompareOp::Outside,
 			BinaryOperator::Intersects => CompareOp::Intersects,
-			_ => return None,
+			BinaryOperator::Subtract
+			| BinaryOperator::Add
+			| BinaryOperator::Multiply
+			| BinaryOperator::Divide
+			| BinaryOperator::Remainder
+			| BinaryOperator::Power
+			| BinaryOperator::Or
+			| BinaryOperator::And
+			| BinaryOperator::NullCoalescing
+			| BinaryOperator::TenaryCondition
+			| BinaryOperator::Range
+			| BinaryOperator::RangeInclusive
+			| BinaryOperator::RangeSkip
+			| BinaryOperator::RangeSkipInclusive
+			| BinaryOperator::Matches(_)
+			| BinaryOperator::NearestNeighbor(_) => return None,
 		})
 	}
 
@@ -3853,10 +4310,40 @@ impl CompareOp {
 			CompareOp::MoreThan => ordered(&[Greater]),
 			CompareOp::MoreThanEqual => ordered(&[Greater, Equal]),
 			CompareOp::AllEqual | CompareOp::AnyEqual if !left.is_collection() => left.equal(right),
-			_ => {
+			CompareOp::AllEqual
+			| CompareOp::AnyEqual
+			| CompareOp::Contain
+			| CompareOp::NotContain
+			| CompareOp::ContainAll
+			| CompareOp::ContainAny
+			| CompareOp::ContainNone
+			| CompareOp::Inside
+			| CompareOp::NotInside
+			| CompareOp::AllInside
+			| CompareOp::AnyInside
+			| CompareOp::NoneInside
+			| CompareOp::Outside
+			| CompareOp::Intersects => {
 				return Ok(match self.apply(&left.as_value(), &right.as_value())? {
 					Value::Bool(v) => Scalar::Bool(v),
-					other => Scalar::Value(std::borrow::Cow::Owned(other)),
+					other @ (Value::None
+					| Value::Null
+					| Value::Number(_)
+					| Value::String(_)
+					| Value::Duration(_)
+					| Value::Datetime(_)
+					| Value::Uuid(_)
+					| Value::Array(_)
+					| Value::Set(_)
+					| Value::Object(_)
+					| Value::Geometry(_)
+					| Value::Bytes(_)
+					| Value::Table(_)
+					| Value::RecordId(_)
+					| Value::File(_)
+					| Value::Regex(_)
+					| Value::Range(_)
+					| Value::Closure(_)) => Scalar::Value(std::borrow::Cow::Owned(other)),
 				});
 			}
 		};
@@ -4260,12 +4747,44 @@ impl NavOp {
 			NavOp::First => match value {
 				Value::Array(array) => array.first().cloned().unwrap_or(Value::None),
 				Value::Set(set) => set.first().cloned().unwrap_or(Value::None),
-				_ => Value::None,
+				Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Range(_)
+				| Value::Closure(_) => Value::None,
 			},
 			NavOp::Last => match value {
 				Value::Array(array) => array.last().cloned().unwrap_or(Value::None),
 				Value::Set(set) => set.last().cloned().unwrap_or(Value::None),
-				_ => Value::None,
+				Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Range(_)
+				| Value::Closure(_) => Value::None,
 			},
 			NavOp::Flatten => crate::exec::vm::access::array_ops::evaluate_flatten(value)?,
 			NavOp::Identity => crate::exec::vm::access::doc::record_identity(value),
@@ -5353,11 +5872,45 @@ impl KeyShape {
 			KeyShape::Generate(generator) => generator.compute(),
 			KeyShape::Array(operand) => match read(*operand)? {
 				Value::Array(array) => RecordIdKey::Array(array),
-				other => anyhow::bail!("an array key built as {}", other.kind_of()),
+				other @ (Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Set(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Range(_)
+				| Value::Closure(_)) => anyhow::bail!("an array key built as {}", other.kind_of()),
 			},
 			KeyShape::Object(operand) => match read(*operand)? {
 				Value::Object(object) => RecordIdKey::Object(object),
-				other => anyhow::bail!("an object key built as {}", other.kind_of()),
+				other @ (Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Array(_)
+				| Value::Set(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Range(_)
+				| Value::Closure(_)) => anyhow::bail!("an object key built as {}", other.kind_of()),
 			},
 			KeyShape::Range(start, end) => {
 				let start = bound(start, read)?;
@@ -6073,7 +6626,53 @@ impl Source {
 				table,
 				..
 			} => Some(table),
-			_ => None,
+			Source::Index {
+				..
+			}
+			| Source::IndexUnion {
+				..
+			}
+			| Source::Count {
+				..
+			}
+			| Source::Union(_)
+			| Source::Values {
+				..
+			}
+			| Source::Nested {
+				..
+			}
+			| Source::Probe {
+				..
+			}
+			| Source::Sorted {
+				..
+			}
+			| Source::Groups {
+				..
+			}
+			| Source::Split {
+				..
+			}
+			| Source::Join {
+				..
+			}
+			| Source::Once
+			| Source::Changes {
+				..
+			}
+			| Source::WriteTargets {
+				..
+			}
+			| Source::WriteInserts {
+				..
+			}
+			| Source::WriteEdges {
+				..
+			}
+			| Source::Vacant {
+				..
+			} => None,
 		}
 	}
 
@@ -6085,7 +6684,71 @@ impl Source {
 				prefilter,
 				..
 			} => prefilter.as_deref(),
-			_ => None,
+			Source::Record {
+				..
+			}
+			| Source::Index {
+				..
+			}
+			| Source::Lookup {
+				..
+			}
+			| Source::IndexUnion {
+				..
+			}
+			| Source::Bitmap {
+				..
+			}
+			| Source::FullText {
+				..
+			}
+			| Source::Knn {
+				..
+			}
+			| Source::Count {
+				..
+			}
+			| Source::Union(_)
+			| Source::Values {
+				..
+			}
+			| Source::Nested {
+				..
+			}
+			| Source::Probe {
+				..
+			}
+			| Source::Sorted {
+				..
+			}
+			| Source::Groups {
+				..
+			}
+			| Source::Split {
+				..
+			}
+			| Source::Join {
+				..
+			}
+			| Source::Once
+			| Source::Changes {
+				..
+			}
+			| Source::WriteTargets {
+				..
+			}
+			| Source::WriteInserts {
+				..
+			}
+			| Source::WriteEdges {
+				..
+			}
+			| Source::LightweightEdges {
+				..
+			}
+			| Source::Vacant {
+				..
+			} => None,
 		}
 	}
 
@@ -6096,7 +6759,71 @@ impl Source {
 				topk,
 				..
 			} => topk.as_ref(),
-			_ => None,
+			Source::Record {
+				..
+			}
+			| Source::Index {
+				..
+			}
+			| Source::Lookup {
+				..
+			}
+			| Source::IndexUnion {
+				..
+			}
+			| Source::Bitmap {
+				..
+			}
+			| Source::FullText {
+				..
+			}
+			| Source::Knn {
+				..
+			}
+			| Source::Count {
+				..
+			}
+			| Source::Union(_)
+			| Source::Values {
+				..
+			}
+			| Source::Nested {
+				..
+			}
+			| Source::Probe {
+				..
+			}
+			| Source::Sorted {
+				..
+			}
+			| Source::Groups {
+				..
+			}
+			| Source::Split {
+				..
+			}
+			| Source::Join {
+				..
+			}
+			| Source::Once
+			| Source::Changes {
+				..
+			}
+			| Source::WriteTargets {
+				..
+			}
+			| Source::WriteInserts {
+				..
+			}
+			| Source::WriteEdges {
+				..
+			}
+			| Source::LightweightEdges {
+				..
+			}
+			| Source::Vacant {
+				..
+			} => None,
 		}
 	}
 
@@ -6117,7 +6844,68 @@ impl Source {
 				topk,
 				..
 			} => topk.is_some(),
-			_ => false,
+			Source::Scan {
+				..
+			}
+			| Source::Record {
+				..
+			}
+			| Source::Index {
+				..
+			}
+			| Source::Lookup {
+				..
+			}
+			| Source::Bitmap {
+				..
+			}
+			| Source::Knn {
+				..
+			}
+			| Source::Count {
+				..
+			}
+			| Source::Union(_)
+			| Source::Values {
+				..
+			}
+			| Source::Nested {
+				..
+			}
+			| Source::Probe {
+				..
+			}
+			| Source::Sorted {
+				..
+			}
+			| Source::Groups {
+				..
+			}
+			| Source::Split {
+				..
+			}
+			| Source::Join {
+				..
+			}
+			| Source::Once
+			| Source::Changes {
+				..
+			}
+			| Source::WriteTargets {
+				..
+			}
+			| Source::WriteInserts {
+				..
+			}
+			| Source::WriteEdges {
+				..
+			}
+			| Source::LightweightEdges {
+				..
+			}
+			| Source::Vacant {
+				..
+			} => false,
 		}
 	}
 
@@ -6401,7 +7189,7 @@ fn row_use(instr: &Instr) -> RowUse {
 			..
 		} => match src {
 			Operand::Reg(ROW) => RowUse::Whole,
-			other => RowUse::of(*other),
+			other @ (Operand::Reg(_) | Operand::Const(_) | Operand::Field(_)) => RowUse::of(*other),
 		},
 		Instr::Filter {
 			cond,

@@ -228,7 +228,9 @@ fn encode_borrowed(ty: &str, value: KeyField<'_>, indexed: bool, out: &mut Vec<u
 		KeyField::Dir(dir) if ty == "Dir" => {
 			storekey::encode(&mut *out, &dir).map_err(|e| anyhow::anyhow!("{e}"))
 		}
-		other => bail!("the VM does not encode a `{ty}` key field from {other:?}"),
+		other @ (KeyField::Str(_) | KeyField::Id(_) | KeyField::Dir(_)) => {
+			bail!("the VM does not encode a `{ty}` key field from {other:?}")
+		}
 	}
 }
 

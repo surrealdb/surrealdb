@@ -235,10 +235,10 @@ mod tests {
 
 	// Helper to extract Datetime from Value
 	fn as_datetime(v: &Value) -> &Datetime {
-		match v {
-			Value::Datetime(d) => d,
-			_ => panic!("Expected Datetime, got {:?}", v),
-		}
+		let Value::Datetime(d) = v else {
+			panic!("Expected Datetime, got {:?}", v);
+		};
+		d
 	}
 
 	// Helper to create a test datetime

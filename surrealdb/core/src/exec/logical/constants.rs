@@ -101,48 +101,44 @@ fn propagate_op(op: &mut LogicalOp, scope: &mut Scope) {
 
 /// An expression statement. An `IF`, a block or a `THROW` in it is control
 /// flow, its arms and values read as the statements they hold do.
-#[expect(clippy::wildcard_enum_match_arm, reason = "any other expression is a value read in place")]
 fn propagate_expr(expr: &mut LogicalExpr, scope: &mut Scope) {
-	match expr {
-		LogicalExpr::If(ifs) => {
-			for (_, value) in &mut ifs.branches {
-				propagate_branch(value, scope);
-			}
-			if let Some(value) = &mut ifs.otherwise {
-				propagate_branch(value, scope);
-			}
+	if let LogicalExpr::If(ifs) = expr {
+		for (_, value) in &mut ifs.branches {
+			propagate_branch(value, scope);
 		}
-		LogicalExpr::Subquery(op) => propagate_op(op, scope),
-		LogicalExpr::Throw(value) => substitute(value, scope),
-		_ => substitute(expr, scope),
+		if let Some(value) = &mut ifs.otherwise {
+			propagate_branch(value, scope);
+		}
+	} else if let LogicalExpr::Subquery(op) = expr {
+		propagate_op(op, scope);
+	} else if let LogicalExpr::Throw(value) = expr {
+		substitute(value, scope);
+	} else {
+		substitute(expr, scope);
 	}
 }
 
 /// A value of an `IF` expression: a statement it holds, or an expression.
-#[expect(
-	clippy::wildcard_enum_match_arm,
-	reason = "any other value is an expression read in place"
-)]
 fn propagate_branch(value: &mut LogicalExpr, scope: &mut Scope) {
-	match value {
-		LogicalExpr::Subquery(op) => propagate_op(op, scope),
-		_ => substitute(value, scope),
+	if let LogicalExpr::Subquery(op) = value {
+		propagate_op(op, scope);
+	} else {
+		substitute(value, scope);
 	}
 }
 
 /// The constant a `LET` binds its name to: its value, where it is a literal
 /// with no declared kind.
-#[expect(clippy::wildcard_enum_match_arm, reason = "only an expression statement is a literal")]
 fn constant_of(stmt: &LogicalLet) -> Option<LogicalExpr> {
 	if stmt.kind.is_some() {
 		return None;
 	}
-	match stmt.value.as_ref() {
-		LogicalOp::Eval(eval) if try_literal_to_value(&eval.expr).is_some() => {
-			Some(eval.expr.clone())
-		}
-		_ => None,
+	if let LogicalOp::Eval(eval) = stmt.value.as_ref()
+		&& try_literal_to_value(&eval.expr).is_some()
+	{
+		return Some(eval.expr.clone());
 	}
+	None
 }
 
 /// The constants in scope, each name once at its innermost binding, where
@@ -175,27 +171,24 @@ fn substitute(expr: &mut LogicalExpr, scope: &Scope) {
 /// `expr` with each read of parameter `name` replaced by `constant`, in the
 /// statements it holds too, but not in a closure's body, which reads the
 /// name where the closure is called, nor in an `IF` condition.
-#[expect(
-	clippy::wildcard_enum_match_arm,
-	reason = "any other expression is read through its children"
-)]
 fn with_constant(expr: &mut LogicalExpr, name: &str, constant: &LogicalExpr) {
-	match expr {
-		LogicalExpr::Param(param) if param.as_str() == name => *expr = constant.clone(),
-		LogicalExpr::Closure(_) => {}
-		LogicalExpr::Subquery(op) => with_constant_op(op, name, constant),
-		LogicalExpr::If(ifs) => {
-			for (_, value) in &mut ifs.branches {
-				with_constant(value, name, constant);
-			}
-			if let Some(value) = &mut ifs.otherwise {
-				with_constant(value, name, constant);
-			}
+	if let LogicalExpr::Param(param) = expr {
+		if param.as_str() == name {
+			*expr = constant.clone();
 		}
-		other => {
-			for child in other.children_mut() {
-				with_constant(child, name, constant);
-			}
+	} else if let LogicalExpr::Closure(_) = expr {
+	} else if let LogicalExpr::Subquery(op) = expr {
+		with_constant_op(op, name, constant);
+	} else if let LogicalExpr::If(ifs) = expr {
+		for (_, value) in &mut ifs.branches {
+			with_constant(value, name, constant);
+		}
+		if let Some(value) = &mut ifs.otherwise {
+			with_constant(value, name, constant);
+		}
+	} else {
+		for child in expr.children_mut() {
+			with_constant(child, name, constant);
 		}
 	}
 }
@@ -262,14 +255,15 @@ fn rebinds(op: &LogicalOp, name: &str) -> bool {
 }
 
 /// [`rebinds`] for an expression.
-#[expect(clippy::wildcard_enum_match_arm, reason = "only a closure binds a name in an expression")]
 fn rebinds_in_expr(expr: &LogicalExpr, name: &str) -> bool {
-	expr.any(|node| match node {
-		LogicalExpr::Closure(closure) => {
+	expr.any(|node| {
+		if let LogicalExpr::Closure(closure) = node {
 			closure.args.iter().any(|(param, _)| param.as_str() == name)
+		} else if let LogicalExpr::Subquery(op) = node {
+			rebinds(op, name)
+		} else {
+			false
 		}
-		LogicalExpr::Subquery(op) => rebinds(op, name),
-		_ => false,
 	})
 }
 

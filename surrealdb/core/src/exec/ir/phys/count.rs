@@ -269,7 +269,7 @@ fn body_nodes(ir: &Ir, body: RegionId) -> Option<(SmallVec<[OpId; 2]>, Option<Op
 				permissions.push(op);
 			}
 			OpKind::Logical(LogOp::Filter) if filter.is_none() => filter = Some(op),
-			_ => return None,
+			OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => return None,
 		}
 		row = *data.results.first()?;
 	}
@@ -572,9 +572,10 @@ fn replace(
 	let Some(result) = aggregate.results.first().and_then(|value| before.value(*value)) else {
 		return Ok(false);
 	};
-	let operands: SmallVec<[ValueId; 4]> = match m.source_ref {
-		SourceRefShape::Table(_) => SmallVec::new(),
-		_ => source.operands.clone(),
+	let operands: SmallVec<[ValueId; 4]> = if let SourceRefShape::Table(_) = m.source_ref {
+		SmallVec::new()
+	} else {
+		source.operands.clone()
 	};
 	let spec = OpSpec {
 		kind: OpKind::Phys(PhysOp::Count(Box::new(CountAttrs {

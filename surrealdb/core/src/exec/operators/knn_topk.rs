@@ -127,20 +127,26 @@ pub(crate) fn extract_vector(
 	limit: usize,
 ) -> bool {
 	fn flatten(values: &[Value], out: &mut Vec<Number>, limit: usize) -> bool {
-		values.iter().all(|v| match v {
-			Value::Number(n) if out.len() < limit => {
-				out.push(*n);
-				true
+		values.iter().all(|v| {
+			if let Value::Number(n) = v {
+				if out.len() < limit {
+					out.push(*n);
+					true
+				} else {
+					false
+				}
+			} else if let Value::Array(a) = v {
+				flatten(&a.0, out, limit)
+			} else {
+				false
 			}
-			Value::Number(_) => false,
-			Value::Array(a) => flatten(&a.0, out, limit),
-			_ => false,
 		})
 	}
 	out.clear();
-	match field.extract(value).as_ref() {
-		Value::Array(arr) => flatten(&arr.0, out, limit) && !out.is_empty(),
-		_ => false,
+	if let Value::Array(arr) = field.extract(value).as_ref() {
+		flatten(&arr.0, out, limit) && !out.is_empty()
+	} else {
+		false
 	}
 }
 

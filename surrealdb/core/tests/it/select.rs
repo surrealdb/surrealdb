@@ -12,9 +12,10 @@ async fn query_row_count(
 ) -> Result<usize> {
 	let mut res = ds.execute(sql, sess, None).await?;
 	let val = res.remove(0).result?;
-	Ok(match &val {
-		Value::Array(arr) => arr.len(),
-		_ => 0,
+	Ok(if let Value::Array(arr) = &val {
+		arr.len()
+	} else {
+		0
 	})
 }
 
@@ -37,12 +38,10 @@ async fn query_count_value(
 		.get("count")
 		.or_else(|| obj.get("c"))
 		.ok_or_else(|| anyhow::anyhow!("Expected count field in count query result"))?;
-	match count_val {
-		Value::Number(n) => {
-			n.to_int().ok_or_else(|| anyhow::anyhow!("Expected count value convertible to i64"))
-		}
-		_ => anyhow::bail!("Expected numeric count value"),
-	}
+	let Value::Number(n) = count_val else {
+		anyhow::bail!("Expected numeric count value");
+	};
+	n.to_int().ok_or_else(|| anyhow::anyhow!("Expected count value convertible to i64"))
 }
 
 // ---------------------------------------------------------------------------

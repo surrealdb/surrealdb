@@ -154,16 +154,13 @@ pub(crate) fn set_nested_value(obj: &mut Object, path: &[String], value: Value) 
 	// Get or create the nested object
 	let nested = obj.entry(key.as_str()).or_insert_with(|| Value::Object(Object::default()));
 
-	match nested {
-		Value::Object(nested_obj) => {
-			set_nested_value(nested_obj, rest, value);
-		}
-		_ => {
-			// Replace non-object with new object containing the nested path
-			let mut new_obj = Object::default();
-			set_nested_value(&mut new_obj, rest, value);
-			*nested = Value::Object(new_obj);
-		}
+	if let Value::Object(nested_obj) = nested {
+		set_nested_value(nested_obj, rest, value);
+	} else {
+		// Replace non-object with new object containing the nested path
+		let mut new_obj = Object::default();
+		set_nested_value(&mut new_obj, rest, value);
+		*nested = Value::Object(new_obj);
 	}
 }
 

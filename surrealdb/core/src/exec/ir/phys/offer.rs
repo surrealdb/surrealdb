@@ -220,7 +220,98 @@ fn offer_walk(ir: &Ir, source: OpId, across: bool) -> Result<Offer, IrError> {
 				state.limited = !offer.united;
 				break;
 			}
-			_ => break,
+			LogOp::Request {
+				..
+			}
+			| LogOp::Txn {
+				..
+			}
+			| LogOp::Stmt {
+				..
+			}
+			| LogOp::Statement {
+				..
+			}
+			| LogOp::Source(_)
+			| LogOp::Values {
+				..
+			}
+			| LogOp::Match {
+				..
+			}
+			| LogOp::MatchRead {
+				..
+			}
+			| LogOp::MatchUpdate(_)
+			| LogOp::MatchDelete {
+				..
+			}
+			| LogOp::MatchInsert(_)
+			| LogOp::MatchOutput(_)
+			| LogOp::BindStep(_)
+			| LogOp::Subquery
+			| LogOp::Write(_)
+			| LogOp::Assign(_)
+			| LogOp::Unset {
+				..
+			}
+			| LogOp::Content {
+				..
+			}
+			| LogOp::DdlGuard {
+				..
+			}
+			| LogOp::Define(_)
+			| LogOp::Remove(_)
+			| LogOp::Alter(_)
+			| LogOp::Rebuild(_)
+			| LogOp::UnionAll
+			| LogOp::Join {
+				..
+			}
+			| LogOp::Split {
+				..
+			}
+			| LogOp::Aggregate(_)
+			| LogOp::Distinct
+			| LogOp::Fetch
+			| LogOp::Timeout
+			| LogOp::VersionScope
+			| LogOp::Only
+			| LogOp::Explain {
+				..
+			}
+			| LogOp::Eval
+			| LogOp::Block
+			| LogOp::Let(_)
+			| LogOp::Return
+			| LogOp::Loop {
+				..
+			}
+			| LogOp::If
+			| LogOp::Info {
+				..
+			}
+			| LogOp::Sleep
+			| LogOp::Use {
+				..
+			}
+			| LogOp::Option {
+				..
+			}
+			| LogOp::Access(_)
+			| LogOp::Kill
+			| LogOp::Live(_)
+			| LogOp::Subscriber(_)
+			| LogOp::Show(_)
+			| LogOp::Choose(_)
+			| LogOp::WriteStage {
+				..
+			}
+			| LogOp::Events(_)
+			| LogOp::Yield
+			| LogOp::Next
+			| LogOp::Break => break,
 		}
 		let Some(next) = user.results.first().copied() else {
 			break;
@@ -258,7 +349,101 @@ fn read_body(ir: &Ir, body: RegionId, offer: &mut Offer, state: &mut State) -> R
 				offer.enforced_above |= attrs.layer;
 				reshape(ir, op, attrs, state);
 			}
-			_ => {
+			LogOp::Request {
+				..
+			}
+			| LogOp::Txn {
+				..
+			}
+			| LogOp::Stmt {
+				..
+			}
+			| LogOp::Statement {
+				..
+			}
+			| LogOp::Source(_)
+			| LogOp::Values {
+				..
+			}
+			| LogOp::Match {
+				..
+			}
+			| LogOp::MatchRead {
+				..
+			}
+			| LogOp::MatchUpdate(_)
+			| LogOp::MatchDelete {
+				..
+			}
+			| LogOp::MatchInsert(_)
+			| LogOp::MatchOutput(_)
+			| LogOp::BindStep(_)
+			| LogOp::Subquery
+			| LogOp::Write(_)
+			| LogOp::Assign(_)
+			| LogOp::Unset {
+				..
+			}
+			| LogOp::Content {
+				..
+			}
+			| LogOp::DdlGuard {
+				..
+			}
+			| LogOp::Define(_)
+			| LogOp::Remove(_)
+			| LogOp::Alter(_)
+			| LogOp::Rebuild(_)
+			| LogOp::UnionAll
+			| LogOp::Join {
+				..
+			}
+			| LogOp::Split {
+				..
+			}
+			| LogOp::Aggregate(_)
+			| LogOp::Distinct
+			| LogOp::Sort(_)
+			| LogOp::Limit {
+				..
+			}
+			| LogOp::Fetch
+			| LogOp::Timeout
+			| LogOp::VersionScope
+			| LogOp::Only
+			| LogOp::Explain {
+				..
+			}
+			| LogOp::Eval
+			| LogOp::Block
+			| LogOp::Let(_)
+			| LogOp::Return
+			| LogOp::Loop {
+				..
+			}
+			| LogOp::If
+			| LogOp::Info {
+				..
+			}
+			| LogOp::Sleep
+			| LogOp::Use {
+				..
+			}
+			| LogOp::Option {
+				..
+			}
+			| LogOp::Access(_)
+			| LogOp::Kill
+			| LogOp::Live(_)
+			| LogOp::Subscriber(_)
+			| LogOp::Show(_)
+			| LogOp::Choose(_)
+			| LogOp::WriteStage {
+				..
+			}
+			| LogOp::Events(_)
+			| LogOp::Next
+			| LogOp::Break => {
 				state.collecting = false;
 				state.ordering_open = false;
 				state.layered = None;

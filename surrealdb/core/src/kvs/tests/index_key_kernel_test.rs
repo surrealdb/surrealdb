@@ -275,9 +275,10 @@ fn exact(rid: &RecordId) -> String {
 /// A value compared with its float bits, sign and NaN payload included,
 /// which `Value` equality and `Debug` both erase.
 fn bits(v: &Value) -> String {
-	match v {
-		Value::Number(Number::Float(f)) => format!("f64({:#018x})", f.to_bits()),
-		v => format!("{v:?}"),
+	if let Value::Number(Number::Float(f)) = v {
+		format!("f64({:#018x})", f.to_bits())
+	} else {
+		format!("{v:?}")
 	}
 }
 
@@ -285,13 +286,18 @@ fn bits(v: &Value) -> String {
 fn exact_ids(values: Vec<Value>) -> Vec<String> {
 	let mut out: Vec<String> = values
 		.into_iter()
-		.flat_map(|v| match v {
-			Value::Array(Array(items)) => items,
-			v => vec![v],
+		.flat_map(|v| {
+			if let Value::Array(Array(items)) = v {
+				items
+			} else {
+				vec![v]
+			}
 		})
-		.map(|v| match v {
-			Value::RecordId(rid) => exact(&rid),
-			v => panic!("not a record id: {v:?}"),
+		.map(|v| {
+			let Value::RecordId(rid) = v else {
+				panic!("not a record id: {v:?}");
+			};
+			exact(&rid)
 		})
 		.collect();
 	out.sort();
@@ -558,9 +564,12 @@ async fn a_range_crossing_special_numbers_agrees(unique: bool) {
 
 	// Above every finite number: `+inf`, then every NaN.
 	let above = read_both_ways(&ds, &ses, "r", "v > $x", &[("x", &float(1e300))]).await;
-	let inf_or_nan = |v: &Value| match v {
-		Value::Number(Number::Float(f)) => f.is_nan() || *f == f64::INFINITY,
-		_ => false,
+	let inf_or_nan = |v: &Value| {
+		if let Value::Number(Number::Float(f)) = v {
+			f.is_nan() || *f == f64::INFINITY
+		} else {
+			false
+		}
 	};
 	assert_eq!(above, id_of(&inf_or_nan), "v > 1e300");
 	assert!(above.iter().any(|id| id_of(&is_nan).contains(id)), "v > 1e300 finds no NaN");
@@ -571,11 +580,16 @@ async fn a_range_crossing_special_numbers_agrees(unique: bool) {
 	assert!(!below.is_empty(), "v < 0 finds nothing");
 	// Both zeros, of every kind, equal zero.
 	let zero = read_both_ways(&ds, &ses, "r", "v = $x", &[("x", &int(0))]).await;
-	let is_zero = |v: &Value| match v {
-		Value::Number(Number::Int(i)) => *i == 0,
-		Value::Number(Number::Float(f)) => *f == 0.0,
-		Value::Number(Number::Decimal(d)) => d.is_zero(),
-		_ => false,
+	let is_zero = |v: &Value| {
+		if let Value::Number(n) = v {
+			match n {
+				Number::Int(i) => *i == 0,
+				Number::Float(f) => *f == 0.0,
+				Number::Decimal(d) => d.is_zero(),
+			}
+		} else {
+			false
+		}
 	};
 	assert_eq!(zero, id_of(&is_zero), "v = 0");
 }

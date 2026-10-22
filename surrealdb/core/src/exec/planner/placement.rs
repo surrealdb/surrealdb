@@ -573,9 +573,10 @@ impl Policy {
 		if !legality.weaker_or_equal(&picked.as_sink()) {
 			return Err("the physical sink needs a combine the logical plan does not state");
 		}
-		let input = match facts.source {
-			SourceKind::Scan | SourceKind::Record => MorselInput::Range,
-			_ => MorselInput::Batches,
+		let input = if matches!(facts.source, SourceKind::Scan | SourceKind::Record) {
+			MorselInput::Range
+		} else {
+			MorselInput::Batches
 		};
 		// Only the pipeline that feeds a top-k sort has a threshold to reject entries by.
 		Ok(Decision::Morsels {
@@ -633,7 +634,12 @@ impl Policy {
 			{
 				MergeOrder::Positioned
 			}
-			_ => MergeOrder::Serial,
+			Combine::Concat
+			| Combine::StableMerge
+			| Combine::TopK
+			| Combine::Aggregate
+			| Combine::Distinct
+			| Combine::OrderedApply => MergeOrder::Serial,
 		};
 		debug_assert!(picked.fits(combine));
 		picked

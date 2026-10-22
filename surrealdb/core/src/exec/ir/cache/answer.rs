@@ -100,7 +100,22 @@ pub(crate) fn kind_class(value: &Value) -> ValueKindClass {
 		Value::RecordId(_) => ValueKindClass::RecordId,
 		Value::Table(_) => ValueKindClass::Table,
 		Value::Array(_) => ValueKindClass::Array,
-		_ => ValueKindClass::Other,
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Set(_)
+		| Value::Object(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => ValueKindClass::Other,
 	}
 }
 

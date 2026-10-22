@@ -148,12 +148,11 @@ macro_rules! define_api_middleware_function {
 /// Run `next`, the rest of an API chain, with `req` in `ctx`.
 async fn call_next(next: &Closure, req: Value, ctx: &EvalContext<'_>) -> Result<Value> {
 	crate::exec::vm::calls::helpers::invoke_closure(next, vec![req], ctx).await.map_err(|signal| {
-		match signal {
-			crate::expr::ControlFlow::Err(e) => e,
-			other => anyhow::anyhow!(EngineError::Internal(format!(
+		signal.into_error_or(|other| {
+			anyhow::anyhow!(EngineError::Internal(format!(
 				"unexpected control flow from an API continuation: {other}"
-			))),
-		}
+			)))
+		})
 	})
 }
 

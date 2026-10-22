@@ -177,7 +177,30 @@ impl UnitKind {
 				..
 			} => args.extend(std::iter::repeat_n(TypeKnowledge::Unknown, SUBSCRIBER_ARGS)),
 			UnitKind::Guard | UnitKind::FunctionBody => args.push(TypeKnowledge::Unknown),
-			_ => {}
+			UnitKind::Request
+			| UnitKind::RequestStatement {
+				..
+			}
+			| UnitKind::ServedStatement {
+				..
+			}
+			| UnitKind::TableRead
+			| UnitKind::Subquery {
+				..
+			}
+			| UnitKind::MatchStage
+			| UnitKind::Cascade
+			| UnitKind::StageBundle {
+				..
+			}
+			| UnitKind::Events {
+				..
+			}
+			| UnitKind::ViewRows {
+				..
+			}
+			| UnitKind::ClosureBody
+			| UnitKind::LoopBody => {}
 		}
 		args
 	}

@@ -136,7 +136,24 @@ pub(super) async fn lookup(
 			1 => Ok(items.0.into_iter().next().expect("one result")),
 			_ => Err(ControlFlow::Err(anyhow::anyhow!(ExecError::SingleOnlyOutput))),
 		},
-		other => Ok(other),
+		other @ (Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Set(_)
+		| Value::Object(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_)) => Ok(other),
 	}
 }
 
@@ -163,7 +180,22 @@ impl Run<'_> {
 				self.answer_array(items, room, &mut results).await?;
 				Ok(Value::Array(results.into()))
 			}
-			_ => Ok(Value::None),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Set(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => Ok(Value::None),
 		}
 	}
 
@@ -178,13 +210,30 @@ impl Run<'_> {
 		match origin {
 			Value::RecordId(_) | Value::Object(_) => {
 				let left = room.map(|room| room.saturating_sub(out.len()));
-				match self.one(origin, left).await? {
-					Value::Array(inner) => out.extend(inner),
-					other => out.push(other),
+				let res = self.one(origin, left).await?;
+				if let Value::Array(inner) = res {
+					out.extend(inner);
+				} else {
+					out.push(res);
 				}
 			}
 			Value::Array(items) => self.answer_array(items, room, out).await?,
-			_ => out.push(Value::None),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Set(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => out.push(Value::None),
 		}
 		Ok(())
 	}
@@ -312,12 +361,14 @@ impl Run<'_> {
 		let results = if self.spec.extract_id {
 			values
 				.into_iter()
-				.filter_map(|value| match value {
-					Value::Object(ref obj) => {
+				.filter_map(|value| {
+					if let Value::Object(ref obj) = value {
 						obj.get("id").filter(|id| matches!(id, Value::RecordId(_))).cloned()
+					} else if let Value::RecordId(_) = value {
+						Some(value)
+					} else {
+						None
 					}
-					Value::RecordId(_) => Some(value),
-					_ => None,
 				})
 				.collect()
 		} else {
@@ -988,13 +1039,16 @@ async fn fill_level<S: frontier::Source>(
 /// The record id a lookup reads from `origin` as one origin: a record id, or the `id` an object
 /// holds.
 fn origin_id(origin: &Value) -> Option<&RecordId> {
-	match origin {
-		Value::RecordId(id) => Some(id),
-		Value::Object(object) => match object.get("id") {
-			Some(Value::RecordId(id)) => Some(id),
-			_ => None,
-		},
-		_ => None,
+	if let Value::RecordId(id) = origin {
+		Some(id)
+	} else if let Value::Object(object) = origin {
+		if let Some(Value::RecordId(id)) = object.get("id") {
+			Some(id)
+		} else {
+			None
+		}
+	} else {
+		None
 	}
 }
 
@@ -1073,7 +1127,7 @@ fn candidate_fields(
 	{
 		let (from, to) = match entry.dir {
 			Dir::In => (far, source),
-			_ => (source, far),
+			Dir::Out | Dir::Both => (source, far),
 		};
 		if cond.needs_in {
 			out.push(("in".to_owned(), Value::RecordId(from.clone())));

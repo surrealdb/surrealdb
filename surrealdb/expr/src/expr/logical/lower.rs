@@ -314,12 +314,11 @@ fn lower_if_statement(stmt: IfelseStatement) -> Lowered<LogicalOp> {
 /// an `IF` written as an arm. An arm that is a block holding a `LET` is not:
 /// the `LET` is a statement of the block.
 fn if_arm_is_a_let(stmt: &IfelseStatement) -> bool {
-	#[expect(clippy::wildcard_enum_match_arm, reason = "any other arm is a value or a statement")]
 	fn is_a_let(arm: &surface::Expr) -> bool {
-		match arm {
-			surface::Expr::Let(_) => true,
-			surface::Expr::IfElse(nested) => if_arm_is_a_let(nested),
-			_ => false,
+		if let surface::Expr::IfElse(nested) = arm {
+			if_arm_is_a_let(nested)
+		} else {
+			matches!(arm, surface::Expr::Let(_))
 		}
 	}
 	stmt.exprs.iter().any(|(_, then)| is_a_let(then)) || stmt.close.as_ref().is_some_and(is_a_let)

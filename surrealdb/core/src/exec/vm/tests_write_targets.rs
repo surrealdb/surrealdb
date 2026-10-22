@@ -114,9 +114,13 @@ async fn written(
 		1 => answers.remove(0),
 		_ => answers
 			.into_iter()
-			.map(|answer| match answer? {
-				Value::Array(rows) => Ok(rows.0),
-				other => Ok(vec![other]),
+			.map(|answer| {
+				let val = answer?;
+				if let Value::Array(rows) = val {
+					Ok(rows.0)
+				} else {
+					Ok(vec![val])
+				}
 			})
 			.collect::<Result<Vec<Vec<Value>>, String>>()
 			.map(|rows| Value::from(rows.into_iter().flatten().collect::<Vec<_>>())),

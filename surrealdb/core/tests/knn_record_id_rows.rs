@@ -1,4 +1,5 @@
 #![recursion_limit = "256"]
+#![deny(clippy::wildcard_enum_match_arm)]
 //! An index-backed KNN whose rows need only their id builds them from the
 //! record ids the search returned instead of reading the records. Its answer
 //! is the one the record path gives: the same records, in the same order, at

@@ -251,9 +251,10 @@ fn inner_ops(ir: &Ir, op: OpId) -> Vec<OpId> {
 
 /// The value of `op` when it is an `expr.literal`.
 fn literal_value(ir: &Ir, op: OpId) -> Option<Value> {
-	match kind_of(ir, op) {
-		OpKind::Expr(ExprOp::Literal(value)) => Some((**value).clone()),
-		_ => None,
+	if let OpKind::Expr(ExprOp::Literal(value)) = kind_of(ir, op) {
+		Some((**value).clone())
+	} else {
+		None
 	}
 }
 
