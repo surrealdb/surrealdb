@@ -207,8 +207,17 @@ runs:
     # is configured - starts the daemon that prefetches from S3 while cargo is
     # still fetching. Credentials reach the daemon as masked job environment
     # variables, which it holds for the job's lifetime.
+    #
+    # Windows is excluded: the cc crate treats a RUSTC_WRAPPER named kache as a
+    # C/C++ compiler wrapper and prefixes it to the MSVC driver (cl.exe), which
+    # kache cannot launch, so every vendored C/C++ build script (ring,
+    # aws-lc-sys, zstd-sys) fails. cargo hands the wrapper to build scripts
+    # whether it comes from RUSTC_WRAPPER or CARGO_BUILD_RUSTC_WRAPPER, so rustc
+    # cannot be cached through kache without cc also wrapping the compiler. The
+    # Windows jobs therefore build on the toolchain's own cl.exe without the
+    # compile cache.
     - name: Setup kache
-      if: inputs.enable-kache == 'true'
+      if: inputs.enable-kache == 'true' && runner.os != 'Windows'
       uses: kunobi-ninja/kache-action@78ff455251aa37139061201a39113a1924994035 # (Actions must be pinned by commit hash) v1
       with:
         version: ${{ inputs.kache-version }}
@@ -232,12 +241,9 @@ runs:
         # cached alongside the crates that link them. RUSTC_WRAPPER alone never
         # sees those compiles, so without this the vendored C++ dependencies
         # are rebuilt from source on every runner regardless of cache state.
-        #
-        # Unix only: the Windows path substitutes `kache clang-cl` for the
-        # compiler driver rather than wrapping cc, and the only Windows build
-        # here ships a release artifact, so it stays on the toolchain's own
-        # driver.
-        cache-c-cpp: ${{ runner.os != 'Windows' }}
+        # This step never runs on Windows (see the condition above), so the
+        # driver is always a Unix compiler kache can wrap.
+        cache-c-cpp: 'true'
         # The GitHub Actions cache is a fixed 10GB per repository, already spent
         # on the registry caches below. A kache store persisted there would
         # evict them, so a job without a bucket caches locally or not at all -
@@ -248,7 +254,7 @@ runs:
         pr-comment: 'false'
 
     - name: Configure cargo for kache
-      if: inputs.enable-kache == 'true'
+      if: inputs.enable-kache == 'true' && runner.os != 'Windows'
       shell: bash
       # Incremental artifacts are per-machine and defeat a shared cache: they
       # would be recompiled on every runner and stored by none.
