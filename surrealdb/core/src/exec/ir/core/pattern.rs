@@ -261,7 +261,7 @@ fn check_created<D: Dialect>(rw: &mut Rewriter<'_>) -> Result<(), IrError> {
 	Ok(())
 }
 
-/// Awaits each request of `pending` through `folder`, in order, and stores its outcome.
+/// Awaits the requests of `pending` through `folder` in one batch and stores each outcome.
 pub(super) async fn await_folds(
 	ir: &Ir,
 	facts: &mut FactCache,
@@ -269,8 +269,11 @@ pub(super) async fn await_folds(
 	cx: &EffectCx<'_>,
 	pending: Vec<FoldRequest>,
 ) {
-	for req in pending {
-		let outcome = folder.fold(ir, cx, req).await;
+	if pending.is_empty() {
+		return;
+	}
+	let outcomes = folder.fold_all(ir, cx, &pending).await;
+	for (req, outcome) in pending.iter().zip(outcomes) {
 		facts.store_fold(req.value, outcome);
 	}
 }

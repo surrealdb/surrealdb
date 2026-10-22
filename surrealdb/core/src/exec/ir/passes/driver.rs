@@ -253,12 +253,13 @@ async fn settle_folds(
 	folder: &dyn PlanTimeFolder,
 	effects: &EffectCx<'_>,
 ) {
-	let pending: Vec<FoldRequest> = facts.pending_folds().collect();
-	for req in pending {
-		if ir.value(req.value).is_none() {
-			continue;
-		}
-		let outcome = folder.fold(ir, effects, req).await;
+	let pending: Vec<FoldRequest> =
+		facts.pending_folds().filter(|req| ir.value(req.value).is_some()).collect();
+	if pending.is_empty() {
+		return;
+	}
+	let outcomes = folder.fold_all(ir, effects, &pending).await;
+	for (req, outcome) in pending.iter().zip(outcomes) {
 		facts.store_fold(req.value, outcome);
 	}
 }

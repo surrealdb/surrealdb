@@ -42,6 +42,15 @@ pub(crate) struct FoldProgram {
 	pub(crate) result: u16,
 }
 
+/// Several expression values lowered into one program: pipeline `i` computes the value of the
+/// `i`-th slot that holds `Ok((i, register))`, whose result is in `register` of that pipeline.
+/// A slot that holds an error is a value that was not lowered, with the error its lowering alone
+/// answers.
+pub(crate) struct FoldBatch {
+	pub(crate) program: Program,
+	pub(crate) slots: Vec<Result<(usize, u16), IrError>>,
+}
+
 /// Lowers one expression value of a container into a fold program.
 pub(crate) trait ExprLowering: Send + Sync {
 	/// The program that computes `root`, with the callees resolved against `registry`, or the
@@ -53,6 +62,18 @@ pub(crate) trait ExprLowering: Send + Sync {
 		registry: &FunctionRegistry,
 		root: ValueId,
 	) -> Result<FoldProgram, IrError>;
+
+	/// The values of `roots` lowered into one program, one slot each in order, or `None` when
+	/// the lowering does not lower in batches or cannot assemble this batch, in which case the
+	/// caller lowers each value alone with [`ExprLowering::lower`].
+	fn lower_all(
+		&self,
+		_ir: &Ir,
+		_registry: &FunctionRegistry,
+		_roots: &[ValueId],
+	) -> Option<FoldBatch> {
+		None
+	}
 }
 
 /// A row with no fields: every field is `NONE` and the record is `NONE`.
@@ -98,7 +119,60 @@ impl FoldHost {
 		capabilities: &CapabilityPolicy,
 	) -> FoldRun {
 		let _meter = Meter::enter(u32::try_from(FOLD_FUEL).unwrap_or(u32::MAX));
-		run_body(program, registry, capabilities)
+		if program.program.pipelines.len() != 1 {
+			return refused("lowering");
+		}
+		run_body(&program.program, 0, program.result, registry, capabilities)
+	}
+
+	/// Lowers and runs one value alone.
+	fn run_one(
+		&self,
+		ir: &Ir,
+		registry: &FunctionRegistry,
+		value: ValueId,
+		capabilities: &CapabilityPolicy,
+	) -> FoldRun {
+		match self.lowering.lower(ir, registry, value) {
+			Ok(program) => self.run_program(&program, registry, capabilities),
+			Err(error) => refusal_of(&error),
+		}
+	}
+
+	/// Lowers `values` together where the lowering can and runs each value's pipeline on its own,
+	/// and answers the runs in the order of `values`.
+	///
+	/// Each value runs under a fuel budget of its own and has its own errors classified, so its
+	/// answer is the one [`FoldHost::run`] gives it alone: a raise, a refusal or an exhausted
+	/// budget of one value changes no other. Where the lowering answers no batch, each value is
+	/// lowered and run alone. A slot whose lowering answered `Capacity` is lowered and run alone,
+	/// since the pool it overflowed may be one the batch shares.
+	pub(crate) fn run_batch(
+		&self,
+		ir: &Ir,
+		registry: &FunctionRegistry,
+		values: &[ValueId],
+		capabilities: &CapabilityPolicy,
+	) -> Vec<FoldRun> {
+		let Some(batch) = self.lowering.lower_all(ir, registry, values) else {
+			return values
+				.iter()
+				.map(|value| self.run_one(ir, registry, *value, capabilities))
+				.collect();
+		};
+		batch
+			.slots
+			.iter()
+			.enumerate()
+			.map(|(at, slot)| match slot {
+				Ok((pipeline, result)) => {
+					let _meter = Meter::enter(u32::try_from(FOLD_FUEL).unwrap_or(u32::MAX));
+					run_body(&batch.program, *pipeline, *result, registry, capabilities)
+				}
+				Err(IrError::Capacity(_)) => self.run_one(ir, registry, values[at], capabilities),
+				Err(error) => refusal_of(error),
+			})
+			.collect()
 	}
 }
 
@@ -110,35 +184,46 @@ impl FoldRunner for FoldHost {
 		value: ValueId,
 		capabilities: &'a CapabilityPolicy,
 	) -> Pin<Box<dyn Future<Output = FoldRun> + Send + 'a>> {
-		Box::pin(async move {
-			match self.lowering.lower(ir, registry, value) {
-				Ok(program) => self.run_program(&program, registry, capabilities),
-				Err(IrError::NotYet {
-					..
-				}) => FoldRun::Refused(NotFoldable::NotYet),
-				Err(
-					IrError::Stale(_)
-					| IrError::Refused(_)
-					| IrError::HasUses(_)
-					| IrError::TagChanged(_)
-					| IrError::Capacity(_)
-					| IrError::Verify(_)
-					| IrError::Rejected(_)
-					| IrError::Unsupported {
-						..
-					}
-					| IrError::NotLoaded {
-						..
-					}
-					| IrError::LateBind {
-						..
-					}
-					| IrError::Invariant {
-						..
-					},
-				) => FoldRun::Refused(NotFoldable::HostRefused("lowering")),
-			}
-		})
+		Box::pin(async move { self.run_one(ir, registry, value, capabilities) })
+	}
+
+	fn run_all(
+		&self,
+		ir: &Ir,
+		registry: &FunctionRegistry,
+		values: &[ValueId],
+		capabilities: &CapabilityPolicy,
+	) -> Option<Vec<FoldRun>> {
+		Some(self.run_batch(ir, registry, values, capabilities))
+	}
+}
+
+/// What a value answers when its lowering fails with `error`: a value with no lowering yet is
+/// `NotYet`, and any other error refuses the fold.
+fn refusal_of(error: &IrError) -> FoldRun {
+	match error {
+		IrError::NotYet {
+			..
+		} => FoldRun::Refused(NotFoldable::NotYet),
+		IrError::Stale(_)
+		| IrError::Refused(_)
+		| IrError::HasUses(_)
+		| IrError::TagChanged(_)
+		| IrError::Capacity(_)
+		| IrError::Verify(_)
+		| IrError::Rejected(_)
+		| IrError::Unsupported {
+			..
+		}
+		| IrError::NotLoaded {
+			..
+		}
+		| IrError::LateBind {
+			..
+		}
+		| IrError::Invariant {
+			..
+		} => FoldRun::Refused(NotFoldable::HostRefused("lowering")),
 	}
 }
 
@@ -168,17 +253,19 @@ impl Drop for Meter {
 	}
 }
 
-/// Runs the one pipeline of `fold` for an empty row, serving calls, until the row ends.
+/// Runs pipeline `index` of `program` for an empty row, serving calls, until the row ends, and
+/// answers register `result`.
 fn run_body(
-	fold: &FoldProgram,
+	program: &Program,
+	index: usize,
+	result: u16,
 	registry: &FunctionRegistry,
 	capabilities: &CapabilityPolicy,
 ) -> FoldRun {
-	let program = &fold.program;
-	let [pipeline] = program.pipelines.as_slice() else {
+	let Some(pipeline) = program.pipelines.get(index) else {
 		return refused("lowering");
 	};
-	let result = usize::from(fold.result);
+	let result = usize::from(result);
 	if !program.groups.is_empty() || result >= pipeline.registers {
 		return refused("lowering");
 	}
@@ -718,5 +805,144 @@ pub(in crate::exec::vm) mod tests {
 			),
 			FoldRun::Refused(NotFoldable::HostRefused("host step"))
 		));
+	}
+
+	/// A batch of two constant pipelines, `3` and `4`, whose middle slot is a value that lowered
+	/// `NotYet`.
+	struct NotYetMiddle;
+
+	impl ExprLowering for NotYetMiddle {
+		fn lower(
+			&self,
+			_ir: &Ir,
+			_registry: &FunctionRegistry,
+			_root: ValueId,
+		) -> Result<FoldProgram, IrError> {
+			Err(IrError::NotYet {
+				what: "fold_host::tests",
+			})
+		}
+
+		fn lower_all(
+			&self,
+			_ir: &Ir,
+			_registry: &FunctionRegistry,
+			_roots: &[ValueId],
+		) -> Option<FoldBatch> {
+			let load = |at: u32| {
+				vec![
+					Instr::Load {
+						dst: 1,
+						src: Operand::Const(at),
+					},
+					Instr::EndRow,
+				]
+			};
+			let mut program =
+				program_with(vec![Value::from(3i64), Value::from(4i64)], Vec::new(), load(0), 2);
+			let mut second = program_with(Vec::new(), Vec::new(), load(1), 2);
+			program.pipelines.push(second.pipelines.remove(0));
+			Some(FoldBatch {
+				program,
+				slots: vec![
+					Ok((0, 1)),
+					Err(IrError::NotYet {
+						what: "fold_host::tests",
+					}),
+					Ok((1, 1)),
+				],
+			})
+		}
+	}
+
+	/// A value that lowers `NotYet` is not folded, and the values around it run.
+	#[test]
+	fn a_batch_value_that_lowers_not_yet_does_not_stop_the_others() {
+		let ir = Ir::new(
+			IrScope::Request {
+				fragment: None,
+			},
+			RegionKind::Request,
+		);
+		let host = FoldHost {
+			lowering: &NotYetMiddle,
+			catalog: None,
+		};
+		let values = [ValueId::default(); 3];
+		let runs = host.run_batch(
+			&ir,
+			crate::exec::ir::analysis::cx::builtin_registry(),
+			&values,
+			&CapabilityPolicy::AllowAll,
+		);
+		assert!(matches!(&runs[0], FoldRun::Value(v, _) if *v == Value::from(3i64)), "{runs:?}");
+		assert!(matches!(&runs[1], FoldRun::Refused(NotFoldable::NotYet)), "{runs:?}");
+		assert!(matches!(&runs[2], FoldRun::Value(v, _) if *v == Value::from(4i64)), "{runs:?}");
+	}
+
+	/// A batch whose middle slot overflowed a shared pool, and a lowering that answers the
+	/// value `5` when lowered alone.
+	struct CapacityMiddle;
+
+	impl ExprLowering for CapacityMiddle {
+		fn lower(
+			&self,
+			_ir: &Ir,
+			_registry: &FunctionRegistry,
+			_root: ValueId,
+		) -> Result<FoldProgram, IrError> {
+			Ok(FoldProgram {
+				program: program_with(
+					vec![Value::from(5i64)],
+					Vec::new(),
+					vec![
+						Instr::Load {
+							dst: 1,
+							src: Operand::Const(0),
+						},
+						Instr::EndRow,
+					],
+					2,
+				),
+				result: 1,
+			})
+		}
+
+		fn lower_all(
+			&self,
+			ir: &Ir,
+			registry: &FunctionRegistry,
+			roots: &[ValueId],
+		) -> Option<FoldBatch> {
+			let mut batch = NotYetMiddle.lower_all(ir, registry, roots)?;
+			batch.slots[1] = Err(IrError::Capacity("fold_host::tests"));
+			Some(batch)
+		}
+	}
+
+	/// A value whose batch lowering overflowed a shared pool runs alone and answers its own
+	/// outcome, and the values around it keep theirs.
+	#[test]
+	fn a_batch_value_that_overflows_a_shared_pool_runs_alone() {
+		let ir = Ir::new(
+			IrScope::Request {
+				fragment: None,
+			},
+			RegionKind::Request,
+		);
+		let host = FoldHost {
+			lowering: &CapacityMiddle,
+			catalog: None,
+		};
+		let values = [ValueId::default(); 3];
+		let runs = host.run_batch(
+			&ir,
+			crate::exec::ir::analysis::cx::builtin_registry(),
+			&values,
+			&CapabilityPolicy::AllowAll,
+		);
+		assert!(matches!(&runs[0], FoldRun::Value(v, _) if *v == Value::from(3i64)), "{runs:?}");
+		assert!(matches!(&runs[1], FoldRun::Value(v, _) if *v == Value::from(5i64)), "{runs:?}");
+		assert!(matches!(&runs[2], FoldRun::Value(v, _) if *v == Value::from(4i64)), "{runs:?}");
 	}
 }

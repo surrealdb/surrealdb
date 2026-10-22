@@ -59,6 +59,19 @@ pub(crate) trait FoldRunner: Send + Sync {
 		value: ValueId,
 		capabilities: &'a CapabilityPolicy,
 	) -> Pin<Box<dyn Future<Output = FoldRun> + Send + 'a>>;
+
+	/// Evaluates `values`, answering one run per value in order, each the run [`FoldRunner::run`]
+	/// gives that value alone, or `None` when the runner has no batched form, in which case the
+	/// caller runs each value with [`FoldRunner::run`]. Never suspends.
+	fn run_all(
+		&self,
+		_ir: &Ir,
+		_registry: &FunctionRegistry,
+		_values: &[ValueId],
+		_capabilities: &CapabilityPolicy,
+	) -> Option<Vec<FoldRun>> {
+		None
+	}
 }
 
 /// The runner that refuses every value. It is used while no restricted host is installed.
@@ -73,6 +86,16 @@ impl FoldRunner for NoRunner {
 		_capabilities: &'a CapabilityPolicy,
 	) -> Pin<Box<dyn Future<Output = FoldRun> + Send + 'a>> {
 		Box::pin(ready(FoldRun::Refused(NotFoldable::NotYet)))
+	}
+
+	fn run_all(
+		&self,
+		_ir: &Ir,
+		_registry: &FunctionRegistry,
+		values: &[ValueId],
+		_capabilities: &CapabilityPolicy,
+	) -> Option<Vec<FoldRun>> {
+		Some(values.iter().map(|_| FoldRun::Refused(NotFoldable::NotYet)).collect())
 	}
 }
 
@@ -149,27 +172,90 @@ impl PlanTimeFolder for VmFolder {
 		}
 		drop(facts);
 		Box::pin(async move {
-			match self.runner.run(ir, cx.registry, req.value, &self.capabilities).await {
-				FoldRun::Value(value, depth) => {
-					if value_bytes(&value) > FOLD_MAX_BYTES {
-						FoldOutcome::NotFoldable(NotFoldable::TooLarge)
-					} else {
-						FoldOutcome::Constant {
-							value,
-							premises: PremiseSet::new(),
-							depth,
-						}
-					}
-				}
-				FoldRun::Raised(error) => FoldOutcome::Raises {
-					error,
-					premises: PremiseSet::new(),
-					depth: 0,
-				},
-				FoldRun::Refused(why) => FoldOutcome::NotFoldable(why),
-			}
+			outcome_of(self.runner.run(ir, cx.registry, req.value, &self.capabilities).await)
 		})
 	}
+
+	/// The outcomes of [`PlanTimeFolder::fold`] for each request, judged against one fact cache
+	/// and evaluated through one batched run where the runner has one.
+	///
+	/// Sharing the cache is sound because the container does not change during the batch and the
+	/// cache holds only answers that are functions of the container and the context: it holds no
+	/// fold outcome, so no judgement reads another request's answer. Each eligible value is run
+	/// under a budget of its own and keeps its own classification and size check, so the outcome
+	/// of a value is the one it gets alone.
+	fn fold_all<'a>(
+		&'a self,
+		ir: &'a Ir,
+		cx: &'a EffectCx<'a>,
+		reqs: &'a [FoldRequest],
+	) -> Pin<Box<dyn Future<Output = Vec<FoldOutcome>> + Send + 'a>> {
+		let mut facts = FactCache::new();
+		let mut judged: Vec<Option<FoldOutcome>> = Vec::with_capacity(reqs.len());
+		let mut eligible: Vec<ValueId> = Vec::new();
+		for req in reqs {
+			match eligible_under(ir, &mut facts, cx, req.value, &self.capabilities) {
+				Ok(()) => {
+					eligible.push(req.value);
+					judged.push(None);
+				}
+				Err(why) => judged.push(Some(FoldOutcome::NotFoldable(why))),
+			}
+		}
+		drop(facts);
+		if eligible.is_empty() {
+			return Box::pin(ready(assemble(judged, Vec::new())));
+		}
+		match self.runner.run_all(ir, cx.registry, &eligible, &self.capabilities) {
+			Some(runs) => Box::pin(ready(assemble(judged, runs))),
+			None => Box::pin(async move {
+				let mut runs = Vec::with_capacity(eligible.len());
+				for value in eligible {
+					runs.push(self.runner.run(ir, cx.registry, value, &self.capabilities).await);
+				}
+				assemble(judged, runs)
+			}),
+		}
+	}
+}
+
+/// The outcome a run answers. A value past [`FOLD_MAX_BYTES`] is [`NotFoldable::TooLarge`].
+fn outcome_of(run: FoldRun) -> FoldOutcome {
+	match run {
+		FoldRun::Value(value, depth) => {
+			if value_bytes(&value) > FOLD_MAX_BYTES {
+				FoldOutcome::NotFoldable(NotFoldable::TooLarge)
+			} else {
+				FoldOutcome::Constant {
+					value,
+					premises: PremiseSet::new(),
+					depth,
+				}
+			}
+		}
+		FoldRun::Raised(error) => FoldOutcome::Raises {
+			error,
+			premises: PremiseSet::new(),
+			depth: 0,
+		},
+		FoldRun::Refused(why) => FoldOutcome::NotFoldable(why),
+	}
+}
+
+/// The outcome of each request in order: the judgement where one refused, otherwise the outcome
+/// of the next run of `runs`.
+fn assemble(judged: Vec<Option<FoldOutcome>>, runs: Vec<FoldRun>) -> Vec<FoldOutcome> {
+	let mut runs = runs.into_iter();
+	judged
+		.into_iter()
+		.map(|held| match held {
+			Some(outcome) => outcome,
+			None => match runs.next() {
+				Some(run) => outcome_of(run),
+				None => FoldOutcome::NotFoldable(NotFoldable::NotYet),
+			},
+		})
+		.collect()
 }
 
 /// The ops a value is computed from, and whether it reads a value no op of the tree defines.

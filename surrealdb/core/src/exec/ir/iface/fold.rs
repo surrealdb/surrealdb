@@ -92,6 +92,26 @@ pub(crate) trait PlanTimeFolder: Send + Sync {
 		cx: &'a EffectCx<'a>,
 		req: FoldRequest,
 	) -> Pin<Box<dyn Future<Output = FoldOutcome> + Send + 'a>>;
+
+	/// Evaluates every request of `reqs`, answering one outcome per request in order.
+	///
+	/// Each outcome is the one [`PlanTimeFolder::fold`] answers for that request alone: the
+	/// requests are independent, and no request's answer depends on another's or on the order.
+	/// The default folds the requests one after another.
+	fn fold_all<'a>(
+		&'a self,
+		ir: &'a Ir,
+		cx: &'a EffectCx<'a>,
+		reqs: &'a [FoldRequest],
+	) -> Pin<Box<dyn Future<Output = Vec<FoldOutcome>> + Send + 'a>> {
+		Box::pin(async move {
+			let mut outcomes = Vec::with_capacity(reqs.len());
+			for req in reqs {
+				outcomes.push(self.fold(ir, cx, *req).await);
+			}
+			outcomes
+		})
+	}
 }
 
 /// A folder that folds nothing: every request is answered [`NotFoldable::NotYet`], so every

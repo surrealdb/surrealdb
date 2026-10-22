@@ -520,3 +520,66 @@ async fn the_literal_on_the_right_decides_a_boolean_left() {
 	fold(&mut ir, &ScriptedFolder::new(), &mut RecordingObserver::default()).await;
 	assert_eq!(ops_of_tag(&ir, SHORT_CIRCUIT).len(), 1, "a value is not read for its truthiness");
 }
+
+/// A comparison operand that is already the record-id op its constant would be rebuilt as is
+/// folded once and left as it stands: the pass settles without reaching its round bound.
+#[tokio::test]
+async fn a_record_id_operand_is_folded_once_and_left_in_place() {
+	let mut ir = bind("SELECT * FROM t WHERE id = t:1").await;
+	let id = crate::val::RecordId::new(
+		surrealdb_strand::TableName::new(surrealdb_strand::Strand::new("t")),
+		1_i64,
+	);
+	let folder = ScriptedFolder::new().on("RecordId(RecordIdAttrs", constant(Value::RecordId(id)));
+	let report = fold(&mut ir, &folder, &mut RecordingObserver::default()).await;
+	let record_ids = |ir: &Ir| ops_of_tag(ir, OpTag::Expr(ExprTag::RecordId)).len();
+	assert_eq!(record_ids(&ir), 1);
+	assert_eq!(report.stopped_by, None);
+	let asked = folder
+		.asked()
+		.iter()
+		.filter(|req| {
+			ir.value(req.value).is_none_or(|data| {
+				matches!(data.def, crate::exec::ir::core::value::ValueDef::OpResult { op, .. }
+					if ir.op(op).is_some_and(|op| matches!(op.kind, OpKind::Expr(ExprOp::RecordId(_)))))
+			})
+		})
+		.count();
+	assert_eq!(asked, 1, "the record-id operand is folded once");
+	let env = Env::new();
+	verify_logical(&ir, &mut FactCache::new(), &env).expect("the container verifies");
+}
+
+/// The shape `WHERE id = $id`: a parameter operand is replaced by the record-id op its value is
+/// built as in the first round, and the second round leaves that op as it stands, so the pass
+/// settles with the record-id op folded once.
+#[tokio::test]
+async fn a_param_operand_folded_to_a_record_id_is_left_in_place() {
+	let mut ir = bind("SELECT * FROM t WHERE id = $id").await;
+	let id = crate::val::RecordId::new(
+		surrealdb_strand::TableName::new(surrealdb_strand::Strand::new("t")),
+		1_i64,
+	);
+	let folder = ScriptedFolder::new()
+		.on("FreeParam", constant(Value::RecordId(id.clone())))
+		.on("RecordId(RecordIdAttrs", constant(Value::RecordId(id)));
+	let report = fold(&mut ir, &folder, &mut RecordingObserver::default()).await;
+	assert_eq!(report.stopped_by, None);
+	assert_eq!(ops_of_tag(&ir, OpTag::Expr(ExprTag::RecordId)).len(), 1);
+	assert!(ops_of_tag(&ir, OpTag::Expr(ExprTag::FreeParam)).is_empty());
+	let asked_of = |tag: ExprTag| {
+		folder
+			.asked()
+			.iter()
+			.filter(|req| {
+				ir.value(req.value).is_some_and(|data| {
+					matches!(data.def, crate::exec::ir::core::value::ValueDef::OpResult { op, .. }
+						if ir.op(op).is_some_and(|op| op.kind.tag() == OpTag::Expr(tag)))
+				})
+			})
+			.count()
+	};
+	assert_eq!(asked_of(ExprTag::RecordId), 1, "the record-id op is folded once");
+	let env = Env::new();
+	verify_logical(&ir, &mut FactCache::new(), &env).expect("the container verifies");
+}

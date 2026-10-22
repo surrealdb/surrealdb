@@ -5,11 +5,11 @@
 //! folder's eligibility check (`ir::fold::evaluate::eligible_under`) refuses each of those before
 //! the fold host lowers a value, so one reached here answers `IrError::Invariant`.
 
-use super::super::fold_host::{ExprLowering, FoldProgram};
-use super::super::program::{Instr, Operand, Program, Source};
+use super::super::fold_host::{ExprLowering, FoldBatch, FoldProgram};
+use super::super::program::{Instr, Operand, Pipeline, Program, Source};
 use super::dispatch::check_claims;
 use super::emit::Emitter;
-use super::expr::Lowerer;
+use super::expr::{Claim, Lowerer, Needs};
 use crate::exec::AccessMode;
 use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::core::ir::Ir;
@@ -34,7 +34,26 @@ pub(crate) fn lower_expr_parts(
 	root: ValueId,
 ) -> Result<(Program, u16), IrError> {
 	let mut em = Emitter::new();
-	let mut lowerer = Lowerer::for_fold(&mut em, ir, registry);
+	let (pipeline, result, claims, needs) = lower_pipeline(&mut em, ir, registry, root)?;
+	let mut program = em.finish_program(vec![pipeline], AccessMode::ReadOnly)?;
+	program.required_context = needs.context;
+	program.keeps_row_order = needs.keeps_row_order;
+	if let Some(pipeline) = program.pipelines.first() {
+		check_claims(ir, &claims, &pipeline.code, &program, registry)?;
+	}
+	Ok((program, result))
+}
+
+/// Lowers `root` into `em` as one finished pipeline, with the register that holds the value, the
+/// claims its instructions made and what its lowering needs. The emitter holds no pipeline in
+/// flight on entry. On an error the pipeline in flight is whatever the lowering left.
+fn lower_pipeline(
+	em: &mut Emitter,
+	ir: &Ir,
+	registry: &FunctionRegistry,
+	root: ValueId,
+) -> Result<(Pipeline, u16, Vec<Claim>, Needs), IrError> {
+	let mut lowerer = Lowerer::for_fold(em, ir, registry);
 	let value = lowerer.value(root)?;
 	let needs = lowerer.needs();
 	let claims = lowerer.take_claims();
@@ -51,13 +70,58 @@ pub(crate) fn lower_expr_parts(
 	};
 	em.emit(Instr::EndRow);
 	let pipeline = em.finish_pipeline(Source::Once)?;
-	let mut program = em.finish_program(vec![pipeline], AccessMode::ReadOnly)?;
-	program.required_context = needs.context;
-	program.keeps_row_order = needs.keeps_row_order;
-	if let Some(pipeline) = program.pipelines.first() {
-		check_claims(ir, &claims, &pipeline.code, &program, registry)?;
+	Ok((pipeline, result, claims, needs))
+}
+
+/// Lowers every value of `roots` into one program of one pipeline each, in the order of `roots`,
+/// over one set of pools.
+///
+/// Each value is lowered and checked on its own: the answer for a value is the answer
+/// [`lower_expr_parts`] gives it alone, an error included. A value whose lowering or claim check
+/// fails leaves no pipeline behind it that any other value uses; its slot holds the error and its
+/// pipeline is never run. A slot that holds [`IrError::Capacity`] may have overflowed a pool the
+/// values share, so the caller lowers that value alone. The program holds no more than the pools
+/// and pipelines, and does not carry the context or row-order needs of its values, which a run of a
+/// fold program never reads.
+///
+/// Answers `Err` only when the program of the whole batch cannot be assembled, in which case the
+/// caller lowers each value alone.
+pub(crate) fn lower_batch_parts(
+	ir: &Ir,
+	registry: &FunctionRegistry,
+	roots: &[ValueId],
+) -> Result<FoldBatch, IrError> {
+	let mut em = Emitter::new();
+	let mut pipelines = Vec::with_capacity(roots.len());
+	let mut claimed: Vec<Vec<Claim>> = Vec::with_capacity(roots.len());
+	let mut slots: Vec<Result<(usize, u16), IrError>> = Vec::with_capacity(roots.len());
+	for root in roots {
+		match lower_pipeline(&mut em, ir, registry, *root) {
+			Ok((pipeline, result, claims, _needs)) => {
+				slots.push(Ok((pipelines.len(), result)));
+				pipelines.push(pipeline);
+				claimed.push(claims);
+			}
+			Err(error) => {
+				em.abandon_pipeline();
+				slots.push(Err(error));
+			}
+		}
 	}
-	Ok((program, result))
+	let program = em.finish_program(pipelines, AccessMode::ReadOnly)?;
+	for slot in &mut slots {
+		if let Ok((pipeline, _)) = slot
+			&& let Some(held) = program.pipelines.get(*pipeline)
+			&& let Err(error) =
+				check_claims(ir, &claimed[*pipeline], &held.code, &program, registry)
+		{
+			*slot = Err(error);
+		}
+	}
+	Ok(FoldBatch {
+		program,
+		slots,
+	})
 }
 
 /// The lowering the fold host installs. A unit struct, so a `&'static` reference to it exists
@@ -78,6 +142,17 @@ impl ExprLowering for IrExprLowering {
 			program,
 			result,
 		})
+	}
+
+	/// The batch of [`lower_batch_parts`], or `None` when the program of the whole batch cannot
+	/// be assembled.
+	fn lower_all(
+		&self,
+		ir: &Ir,
+		registry: &FunctionRegistry,
+		roots: &[ValueId],
+	) -> Option<FoldBatch> {
+		lower_batch_parts(ir, registry, roots).ok()
 	}
 }
 
@@ -422,5 +497,45 @@ mod tests {
 			regs[usize::from(result)].to_value(),
 			Value::RecordId(RecordId::new("t".into(), key))
 		);
+	}
+
+	/// A value whose lowering fails halfway leaves no trace: the values around it answer what
+	/// they answer alone, and it answers the refusal it gets alone.
+	#[test]
+	fn lower_batch_contains_a_failing_value() {
+		use crate::exec::ir::fold::evaluate::{CapabilityPolicy, FoldRun};
+		use crate::exec::ir::iface::fold::NotFoldable;
+		use crate::exec::vm::fold_host::HOST_RUNNER;
+
+		let mut b = Builder::new();
+		let first = one_plus_two_times_three(&mut b);
+		let param = b.add(
+			ExprOp::FreeParam {
+				name: "x".into(),
+			},
+			&[],
+		);
+		let one = b.literal(Value::from(1_i64));
+		let bad = b.binary(BinaryOperator::Add, one, param);
+		let two = b.literal(Value::from(2_i64));
+		let three = b.literal(Value::from(3_i64));
+		let last = b.binary(BinaryOperator::LessThan, two, three);
+		let registry = crate::exec::ir::analysis::cx::builtin_registry();
+		let batch = lower_batch_parts(&b.ir, registry, &[first, bad, last]).expect("assembles");
+		assert!(matches!(batch.slots[0], Ok((0, _))));
+		assert!(matches!(batch.slots[1], Err(IrError::Invariant { .. })));
+		assert!(matches!(batch.slots[2], Ok((1, _))));
+		assert_eq!(batch.program.pipelines.len(), 2);
+
+		let policy = CapabilityPolicy::AllowAll;
+		let runs = HOST_RUNNER.run_batch(&b.ir, registry, &[first, bad, last], &policy);
+		let alone: Vec<FoldRun> = [first, bad, last]
+			.iter()
+			.map(|v| HOST_RUNNER.run_batch(&b.ir, registry, &[*v], &policy).remove(0))
+			.collect();
+		assert_eq!(format!("{runs:?}"), format!("{alone:?}"));
+		assert!(matches!(&runs[0], FoldRun::Value(v, _) if *v == Value::from(7_i64)), "{runs:?}");
+		assert!(matches!(&runs[1], FoldRun::Refused(NotFoldable::HostRefused("lowering"))));
+		assert!(matches!(&runs[2], FoldRun::Value(v, _) if *v == Value::Bool(true)), "{runs:?}");
 	}
 }

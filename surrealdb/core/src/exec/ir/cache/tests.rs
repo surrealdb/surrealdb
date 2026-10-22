@@ -2146,6 +2146,20 @@ mod datastore {
 		}
 	}
 
+	/// A record id compared with `id` through a bound variable is read when the statement runs,
+	/// after the plan-time fold settles the comparison: the plan consumes no value of `$id`.
+	#[tokio::test]
+	async fn a_record_id_variable_compared_with_id_is_read_when_the_statement_runs() {
+		let planned = planned_on(
+			"DEFINE TABLE pk SCHEMALESS;",
+			"SELECT * FROM pk WHERE id = $id",
+			&[("id", val("pk:1"))],
+		)
+		.await;
+		assert!(!consumed_a_plan_time_value(&planned));
+		assert!(run_time_reads(&planned).contains(&"id".to_owned()));
+	}
+
 	/// A literal of the statement text is planned from where it stands, whatever the whitespace,
 	/// the comments or the statement's place in the request, and the plan keeps no record of it.
 	#[tokio::test]

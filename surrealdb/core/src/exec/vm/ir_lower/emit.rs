@@ -26,6 +26,7 @@
 //! a frame is shared only with an equal frame of the same group.
 
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::ops::Range;
 
 use surrealdb_strand::Strand;
@@ -44,7 +45,7 @@ use crate::exec::ir::phys::placement_attr::FrontierHops;
 use crate::exec::planner::placement::Parallel;
 use crate::exec::{AccessMode, ContextLevel};
 use crate::expr::Kind;
-use crate::val::Value;
+use crate::val::{Number, Value};
 
 /// Where a value a block binds is read from.
 #[derive(Debug, Clone)]
@@ -67,8 +68,9 @@ pub(crate) struct Emitter {
 	/// The instruction index each label handed out is bound to, once it is.
 	targets: Vec<Option<Label>>,
 	consts: Vec<Value>,
-	/// The index in `consts` of each distinct constant, keyed by its representation.
-	const_index: HashMap<String, u32>,
+	/// The index in `consts` of each distinct constant, keyed by its representation. The keys
+	/// derive from user-controlled content, so the map keeps the default hasher.
+	const_index: HashMap<ConstKey, u32>,
 	kinds: Vec<Kind>,
 	calls: Vec<CallSpec>,
 	matches: Vec<MatchesSpec>,
@@ -154,6 +156,45 @@ pub(super) struct Aside {
 	targets: Vec<Option<Label>>,
 	frontier_hops: FrontierHops,
 	pipeline_lookups: Vec<u32>,
+}
+
+/// The identity under which a constant is pooled: two constants share an entry only when their
+/// keys are equal. A scalar's key holds its exact content, so an equal key is a hit without a
+/// further comparison. Any other value is keyed by its `Debug` text and confirmed with `==`.
+/// A scalar's key partitions constants as the `Debug` text confirmed by `==` does: `Int(1)` and
+/// `Float(1.0)` differ, as do `Float(0.0)` and `Float(-0.0)` and decimals of different scale, and
+/// every NaN, whatever its sign or payload, shares one key as `Value` equality treats them as one.
+#[derive(Hash, PartialEq, Eq)]
+enum ConstKey {
+	None,
+	Null,
+	Bool(bool),
+	Int(i64),
+	Float(u64),
+	Decimal([u8; 16]),
+	Strand(String),
+	Text(String),
+}
+
+impl ConstKey {
+	fn of(value: &Value) -> Self {
+		match value {
+			Value::None => Self::None,
+			Value::Null => Self::Null,
+			Value::Bool(b) => Self::Bool(*b),
+			Value::Number(Number::Int(i)) => Self::Int(*i),
+			Value::Number(Number::Float(f)) if f.is_nan() => Self::Float(f64::NAN.to_bits()),
+			Value::Number(Number::Float(f)) => Self::Float(f.to_bits()),
+			Value::Number(Number::Decimal(d)) => Self::Decimal(d.serialize()),
+			Value::String(s) => Self::Strand(s.as_str().to_owned()),
+			other => Self::Text(format!("{other:?}")),
+		}
+	}
+
+	/// Whether the key holds the constant's whole content.
+	fn is_exact(&self) -> bool {
+		!matches!(self, Self::Text(_))
+	}
 }
 
 #[allow(dead_code)] // Called by the lowering of chunks 4 to 8.
@@ -358,18 +399,20 @@ impl Emitter {
 
 	/// The index of `value` in the constant pool, appended on its first appearance.
 	pub(super) fn constant(&mut self, value: Value) -> Result<u32, IrError> {
-		let key = format!("{value:?}");
-		if let Some(&index) = self.const_index.get(&key)
-			&& self.consts[index as usize] == value
-		{
-			return Ok(index);
-		}
-		let index =
-			u32::try_from(self.consts.len()).map_err(|_| IrError::Capacity("vm constants"))?;
+		let next = |consts: &[Value]| {
+			u32::try_from(consts.len()).map_err(|_| IrError::Capacity("vm constants"))
+		};
+		let index = match self.const_index.entry(ConstKey::of(&value)) {
+			Entry::Occupied(held) => {
+				let index = *held.get();
+				if held.key().is_exact() || self.consts[index as usize] == value {
+					return Ok(index);
+				}
+				next(&self.consts)?
+			}
+			Entry::Vacant(slot) => *slot.insert(next(&self.consts)?),
+		};
 		self.consts.push(value);
-		// A constant that shares its text with an earlier one but is not equal to it (a NaN) is
-		// appended and never found again.
-		self.const_index.entry(key).or_insert(index);
 		Ok(index)
 	}
 
@@ -688,6 +731,17 @@ impl Emitter {
 		})
 	}
 
+	/// Drops the pipeline in flight, which began with no code: its instructions, labels, registers
+	/// and lookups. The pools keep every entry the pipeline added, and nothing refers to one it
+	/// added.
+	pub(super) fn abandon_pipeline(&mut self) {
+		self.code.clear();
+		self.targets.clear();
+		self.registers = ROW + 1;
+		self.frontier_hops = FrontierHops::default();
+		self.pipeline_lookups.clear();
+	}
+
 	/// The program of `pipelines`, over the pools this emitter filled.
 	///
 	/// Every field of [`Program`] is set.
@@ -969,6 +1023,44 @@ mod tests {
 		let zero = em.constant(Value::from(0.0_f64)).unwrap();
 		let negative_zero = em.constant(Value::from(-0.0_f64)).unwrap();
 		assert_ne!(zero, negative_zero);
+	}
+
+	#[test]
+	fn scalar_constants_keep_their_dedup_classes() {
+		use rust_decimal::Decimal;
+		let mut em = Emitter::new();
+		let int = em.constant(Value::from(1_i64)).unwrap();
+		let float = em.constant(Value::from(1.0_f64)).unwrap();
+		let dec = em.constant(Value::from(Decimal::from(1))).unwrap();
+		let zero = em.constant(Value::from(0.0_f64)).unwrap();
+		let neg_zero = em.constant(Value::from(-0.0_f64)).unwrap();
+		let nan = em.constant(Value::from(f64::NAN)).unwrap();
+		let all = [int, float, dec, zero, neg_zero, nan];
+		for (i, a) in all.iter().enumerate() {
+			for b in &all[i + 1..] {
+				assert_ne!(a, b);
+			}
+		}
+		assert_eq!(em.constant(Value::from(1_i64)).unwrap(), int);
+		assert_eq!(em.constant(Value::from(1.0_f64)).unwrap(), float);
+		assert_eq!(em.constant(Value::from(Decimal::from(1))).unwrap(), dec);
+		assert_eq!(em.constant(Value::from(-0.0_f64)).unwrap(), neg_zero);
+		// Every NaN, whatever its sign or payload, shares the first NaN's entry.
+		assert_eq!(em.constant(Value::from(f64::NAN)).unwrap(), nan);
+		assert_eq!(em.constant(Value::from(-f64::NAN)).unwrap(), nan);
+		assert_eq!(em.constant(Value::from(f64::from_bits(0x7ff8_0000_0000_0001))).unwrap(), nan);
+		// Decimals of different scale and strings keep their own classes.
+		let scaled = em.constant(Value::from(Decimal::new(10, 1))).unwrap();
+		assert_ne!(scaled, dec);
+		let a = em.constant(Value::from("a")).unwrap();
+		assert_eq!(em.constant(Value::from("a")).unwrap(), a);
+		assert_ne!(em.constant(Value::from("b")).unwrap(), a);
+		assert_eq!(em.constant(Value::None).unwrap(), em.constant(Value::None).unwrap());
+		assert_ne!(em.constant(Value::Null).unwrap(), em.constant(Value::None).unwrap());
+		assert_eq!(
+			em.constant(Value::Bool(true)).unwrap(),
+			em.constant(Value::Bool(true)).unwrap()
+		);
 	}
 
 	#[test]

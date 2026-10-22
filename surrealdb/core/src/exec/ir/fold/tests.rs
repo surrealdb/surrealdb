@@ -23,6 +23,7 @@ use crate::exec::ir::iface::region_kind::RegionKind;
 use crate::exec::ir::logical::ops::LogTag;
 use crate::exec::ir::op_kind::{OpKind, OpTag};
 use crate::exec::ir::{RequestInput, RequestStatement};
+use crate::exec::vm::fold_host::HOST_RUNNER;
 use crate::expr::logical::EffectSet;
 use crate::val::Value;
 
@@ -271,4 +272,104 @@ async fn an_ineligible_value_is_not_run() {
 	let folder = VmFolder::new(CapabilityPolicy::AllowAll, &SMALL);
 	let outcome = folder.fold(&ir, &env.cx(), request(first_return_operand(&ir))).await;
 	assert!(matches!(outcome, FoldOutcome::NotFoldable(NotFoldable::Effect(_))), "{outcome:?}");
+}
+
+/// The operand of every `Return` of `ir`, in program order.
+fn return_operands(ir: &Ir) -> Vec<ValueId> {
+	all_ops(ir)
+		.into_iter()
+		.filter_map(|op| {
+			let data = ir.op(op)?;
+			(data.kind.tag() == OpTag::Logical(LogTag::Return)).then(|| data.operands[0])
+		})
+		.collect()
+}
+
+/// Folds the values the `RETURN`s of `sql` return through the real host, once as a batch and once
+/// request by request, and answers both.
+async fn fold_both(sql: &str) -> (Vec<FoldOutcome>, Vec<FoldOutcome>) {
+	let env = Env::new();
+	let ir = bind(sql).await;
+	let reqs: Vec<FoldRequest> = return_operands(&ir).into_iter().map(request).collect();
+	let folder = VmFolder::new(CapabilityPolicy::AllowAll, &HOST_RUNNER);
+	let batch = folder.fold_all(&ir, &env.cx(), &reqs).await;
+	let mut alone = Vec::new();
+	for req in &reqs {
+		alone.push(folder.fold(&ir, &env.cx(), *req).await);
+	}
+	(batch, alone)
+}
+
+/// Whether two outcomes are the same answer.
+fn same(a: &FoldOutcome, b: &FoldOutcome) -> bool {
+	format!("{a:?}") == format!("{b:?}")
+}
+
+fn assert_batch_equals_alone(batch: &[FoldOutcome], alone: &[FoldOutcome]) {
+	assert_eq!(batch.len(), alone.len());
+	for (at, (b, a)) in batch.iter().zip(alone).enumerate() {
+		assert!(same(b, a), "request {at}: batch {b:?}, alone {a:?}");
+	}
+}
+
+/// A value that raises between two that fold leaves the outer two folded and is itself a raise.
+#[tokio::test]
+async fn batch_with_a_raising_middle_value() {
+	let (batch, alone) =
+		fold_both("RETURN 1 + 2; RETURN array::repeat(0, 100000000); RETURN 3 + 4").await;
+	assert_batch_equals_alone(&batch, &alone);
+	assert!(
+		matches!(&batch[0], FoldOutcome::Constant { value, .. } if *value == Value::from(3i64))
+	);
+	assert!(matches!(&batch[1], FoldOutcome::Raises { .. }), "{:?}", batch[1]);
+	assert!(
+		matches!(&batch[2], FoldOutcome::Constant { value, .. } if *value == Value::from(7i64))
+	);
+}
+
+/// Two raising values in one batch each keep the raise they get alone.
+#[tokio::test]
+async fn batch_with_two_raising_values() {
+	let (batch, alone) = fold_both(
+		"RETURN array::repeat(0, 100000000); RETURN 1 + 2; \
+		 RETURN array::repeat(1, 200000000); RETURN 5",
+	)
+	.await;
+	assert_batch_equals_alone(&batch, &alone);
+	for at in [0, 2] {
+		assert!(matches!(&batch[at], FoldOutcome::Raises { .. }), "{:?}", batch[at]);
+	}
+	assert!(matches!(&batch[1], FoldOutcome::Constant { .. }));
+}
+
+/// A value that exhausts its fuel does not take the fuel of the values after it.
+#[tokio::test]
+async fn batch_with_a_fuel_exhausting_value() {
+	// Each term charges its array twice, as a result and as an argument, and the sum of eight is
+	// past the fold budget.
+	let term = "array::len(array::repeat(NONE, 10000))";
+	let hungry = [term; 8].join(" + ");
+	let (batch, alone) =
+		fold_both(&format!("RETURN 1 + 2; RETURN {hungry}; RETURN 3 + 4; RETURN math::abs(-3)"))
+			.await;
+	assert_batch_equals_alone(&batch, &alone);
+	assert!(
+		matches!(&batch[1], FoldOutcome::NotFoldable(NotFoldable::FuelExhausted)),
+		"{:?}",
+		batch[1]
+	);
+	for at in [0, 2, 3] {
+		assert!(matches!(&batch[at], FoldOutcome::Constant { .. }), "{:?}", batch[at]);
+	}
+}
+
+/// Values judged ineligible, folded and raising mix in one batch in request order.
+#[tokio::test]
+async fn batch_equals_per_request_over_mixed_values() {
+	let (batch, alone) = fold_both(
+		"RETURN 1; RETURN rand::float(); RETURN [1, 2] + [3]; RETURN time::now(); \
+		 RETURN math::abs(-3); RETURN array::repeat(0, 100000000); RETURN 'a' + 'b'",
+	)
+	.await;
+	assert_batch_equals_alone(&batch, &alone);
 }

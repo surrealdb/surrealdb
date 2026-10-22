@@ -109,9 +109,7 @@ async fn run_fold(cx: &mut LoCx<'_>) -> Result<PassReport, IrError> {
 	let mut folded: HashSet<OpId> = HashSet::new();
 	for round in 0..MAX_ROUNDS {
 		let sites = sweep(cx.ir, cx.cfg.unroll);
-		for (value, consumer) in requests(cx.ir, &sites) {
-			fold_value(cx, value, consumer).await;
-		}
+		fold_requests(cx, requests(cx.ir, &sites)).await;
 		let mut applied = apply_ifs(cx, &sites.ifs)?;
 		applied += apply_clauses(cx, &sites.clauses, &mut folded)?;
 		applied += apply_operands(cx, &sites.operands)?;
@@ -565,21 +563,32 @@ fn is_scalar_kind(kind: &Kind) -> bool {
 	}
 }
 
-/// Asks the folder for `value` and stores the answer. A literal needs no fold, and a value that
-/// already holds an outcome is not asked again.
-async fn fold_value(cx: &mut LoCx<'_>, value: ValueId, consumer: FoldConsumer) {
-	if cx.ir.value(value).is_none()
-		|| literal_of(cx.ir, value).is_some()
-		|| cx.facts.fold_outcome(value).is_some()
-	{
+/// Asks the folder for the values of `wanted` in one batch and stores each answer. A literal
+/// needs no fold, a value that already holds an outcome is not asked again, and a value requested
+/// twice is asked once, for the consumer that requested it first.
+async fn fold_requests(cx: &mut LoCx<'_>, wanted: Vec<(ValueId, FoldConsumer)>) {
+	let mut batch: Vec<FoldRequest> = Vec::new();
+	let mut held: HashSet<ValueId> = HashSet::new();
+	for (value, consumer) in wanted {
+		if cx.ir.value(value).is_none()
+			|| literal_of(cx.ir, value).is_some()
+			|| cx.facts.fold_outcome(value).is_some()
+			|| !held.insert(value)
+		{
+			continue;
+		}
+		batch.push(FoldRequest {
+			value,
+			consumer,
+		});
+	}
+	if batch.is_empty() {
 		return;
 	}
-	let request = FoldRequest {
-		value,
-		consumer,
-	};
-	let outcome = cx.folder.fold(&*cx.ir, cx.effects, request).await;
-	cx.facts.store_fold(value, outcome);
+	let outcomes = cx.folder.fold_all(&*cx.ir, cx.effects, &batch).await;
+	for (request, outcome) in batch.iter().zip(outcomes) {
+		cx.facts.store_fold(request.value, outcome);
+	}
 }
 
 /// The literal `value` is defined by, if it is the result of an `expr.literal`.
@@ -908,6 +917,19 @@ fn record_id_op(value: &Value) -> Option<ExprOp> {
 	})))
 }
 
+/// Whether `def` is already the operand-free record-id op `kind`: replacing it would make the same
+/// op again.
+fn already_built_as(ir: &Ir, def: OpId, kind: &ExprOp) -> bool {
+	let ExprOp::RecordId(wanted) = kind else {
+		return false;
+	};
+	ir.op(def).is_some_and(|data| {
+		data.operands.is_empty()
+			&& data.regions.is_empty()
+			&& matches!(&data.kind, OpKind::Expr(ExprOp::RecordId(held)) if held == wanted)
+	})
+}
+
 /// Replaces each comparison operand that folded to a constant by a literal of it, and answers the
 /// rewrites made. The operand keeps the text it was written as. A fold that raised is not applied.
 fn apply_operands(cx: &mut LoCx<'_>, operands: &[ValueId]) -> Result<u32, IrError> {
@@ -926,9 +948,13 @@ fn apply_operands(cx: &mut LoCx<'_>, operands: &[ValueId]) -> Result<u32, IrErro
 		let Some(def) = single_result_def(cx.ir, *operand) else {
 			continue;
 		};
+		let replacement = record_id_op(&value);
+		if replacement.as_ref().is_some_and(|kind| already_built_as(cx.ir, def, kind)) {
+			continue;
+		}
 		cx.observer.consumed(&*cx.ir, *operand, FoldConsumer::IndexChoice);
 		let mut rw = Rewriter::new(&mut *cx.ir, &mut *cx.facts);
-		match record_id_op(&value) {
+		match replacement {
 			Some(kind) => replace_with_expr(&mut rw, def, kind)?,
 			None => replace_with_literal(&mut rw, def, value)?,
 		};
