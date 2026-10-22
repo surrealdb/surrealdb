@@ -609,43 +609,118 @@ enum Interrupt {
 	Timeout,
 }
 
+/// The timeout a request first runs under.
+const FIRST_WINDOW: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// The longest timeout a request is given: the statements ahead of the pull that outlast it have
+/// stalled.
+const LONGEST_WINDOW: std::time::Duration = std::time::Duration::from_secs(150);
+
 /// Each statement's answer, as text, when `sql` is interrupted as its
 /// `pull`-th statement is taken from the input (counting from one).
+///
+/// A timeout is observed by the first statement taken after its deadline has passed. The run
+/// waits for the deadline when it takes the `pull`-th statement, so the deadline has passed by
+/// that statement, but it has passed earlier when the statements before it took longer than the
+/// timeout, as on a loaded machine, and then an earlier statement observed it and the run shows
+/// nothing of the `pull`-th. Such a run is repeated with a timeout four times as long, up to
+/// [`LONGEST_WINDOW`], until the statements before the pull end within it.
 async fn interrupted(sql: &str, pull: usize, interrupt: Interrupt) -> Vec<String> {
+	let mut window = FIRST_WINDOW;
+	loop {
+		if let Some(answers) = interrupted_within(sql, pull, interrupt, window).await {
+			return answers;
+		}
+		let Some(longer) = longer_window(window) else {
+			panic!("the statements before the pull of `{sql}` outlasted a timeout of {window:?}");
+		};
+		window = longer;
+	}
+}
+
+/// The timeout to retry under once the statements before the pull have outlasted `window`: four
+/// times as long, and never longer than [`LONGEST_WINDOW`], which is the last timeout tried.
+/// `None` when `window` is already the longest.
+fn longer_window(window: std::time::Duration) -> Option<std::time::Duration> {
+	(window < LONGEST_WINDOW).then(|| (window * 4).min(LONGEST_WINDOW))
+}
+
+/// The timeouts a request is retried under rise to [`LONGEST_WINDOW`] and stop there, so the
+/// bound is tried and not stepped over.
+#[test]
+fn the_retried_timeouts_end_at_the_longest() {
+	let mut windows = vec![FIRST_WINDOW];
+	while let Some(longer) = longer_window(*windows.last().expect("a first window")) {
+		windows.push(longer);
+	}
+	assert_eq!(windows.last(), Some(&LONGEST_WINDOW), "{windows:?}");
+	assert!(windows.windows(2).all(|pair| pair[0] < pair[1]), "{windows:?}");
+}
+
+/// [`interrupted`] under a timeout of `window`: `None` when the deadline had passed before the
+/// `pull`-th statement was taken. A cancellation has no deadline, so it always answers.
+async fn interrupted_within(
+	sql: &str,
+	pull: usize,
+	interrupt: Interrupt,
+	window: std::time::Duration,
+) -> Option<Vec<String>> {
+	use std::sync::atomic::{AtomicBool, Ordering};
+
 	use futures::StreamExt;
+	use web_time::Instant;
 
 	let ds = datastore().await;
 	let ses = session();
 	let opt = ds.setup_options(&ses);
 	let mut ctx = ds.setup_ctx().expect("a context");
 	let canceller = ctx.add_cancel();
+	let deadline = Instant::now() + window;
 	if let Interrupt::Timeout = interrupt {
-		ctx.add_timeout(std::time::Duration::from_millis(500)).expect("a timeout");
+		ctx.add_deadline(deadline, window);
 	}
 	ctx.attach_session(&ses).expect("the session attaches");
 
 	let ast = crate::syn::parse(sql).expect("the request parses");
+	let outlasted = Arc::new(AtomicBool::new(false));
+	let passed = Arc::clone(&outlasted);
 	let mut pulled = 0;
-	let stream = futures::stream::iter(ast.expressions).map(move |expr| {
+	// The `pull`-th statement is handed to the executor only once the deadline has passed, and
+	// the executor reads the deadline when it takes a statement.
+	let stream = futures::stream::iter(ast.expressions).then(move |expr| {
 		pulled += 1;
+		let mut wait = None;
 		if pulled == pull {
 			match interrupt {
 				Interrupt::Cancel => canceller.cancel(),
-				Interrupt::Timeout => std::thread::sleep(std::time::Duration::from_millis(700)),
+				Interrupt::Timeout => match deadline.checked_duration_since(Instant::now()) {
+					Some(left) => wait = Some(left + std::time::Duration::from_millis(50)),
+					None => passed.store(true, Ordering::Relaxed),
+				},
 			}
 		}
-		Ok(expr)
+		async move {
+			if let Some(wait) = wait {
+				common::time::sleep(wait).await;
+			}
+			Ok(expr)
+		}
 	});
 	let results = super::executor::Executor::execute_stream(&ds, ctx.freeze(), opt, false, stream)
 		.await
 		.expect("the request runs");
-	results
-		.iter()
-		.map(|res| match &res.result {
-			Ok(value) => format!("{value:?}"),
-			Err(e) => e.to_string(),
-		})
-		.collect()
+	if outlasted.load(Ordering::Relaxed) {
+		return None;
+	}
+	Some(
+		results
+			.iter()
+			.map(|res| match &res.result {
+				Ok(value) => format!("{value:?}"),
+				Err(e) => e.to_string(),
+			})
+			.collect(),
+	)
 }
 
 /// The statement observed at a cancellation inside `BEGIN` has a slot of its

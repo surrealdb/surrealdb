@@ -295,7 +295,10 @@ mod tests {
 	///
 	/// The scenario runs on its own `current_thread` runtime, so a caller that
 	/// blocked its thread on the cache would stop the runtime outright; the
-	/// test thread observes that as a timeout instead of hanging.
+	/// test thread observes that as a timeout instead of hanging. The bound
+	/// only decides how long a blocked runtime takes to be reported, so it is
+	/// far beyond what the scenario takes on a runner whose cores other tests
+	/// hold.
 	#[test]
 	fn a_slow_connect_does_not_block_other_callers() {
 		let (done_tx, done_rx) = std::sync::mpsc::channel();
@@ -303,7 +306,7 @@ mod tests {
 			let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
 			done_tx.send(rt.block_on(slow_connect_scenario())).ok();
 		});
-		match done_rx.recv_timeout(Duration::from_secs(10)) {
+		match done_rx.recv_timeout(Duration::from_secs(120)) {
 			Ok(result) => result.unwrap(),
 			Err(_) => panic!("a caller blocked the runtime while another was connecting"),
 		}

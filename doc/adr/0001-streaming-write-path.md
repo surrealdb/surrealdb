@@ -102,12 +102,13 @@ write behaviour. The obvious formulation is wrong, and the corpus is what shows 
 The two predicates answer different questions. `read_only()` asks whether a statement writes
 storage. `AccessMode::ReadWrite` means "may write **or have side effects**" and doubles as the
 dependency barrier of Decision 3, so operators report it for reasons that are not writes. A sweep
-of the language-test corpus (`dbs::read_only_test::access_mode_read_write_implies_not_read_only`,
-8,469 statements compiled through a transaction-less planner) finds 424 plans reporting
-`ReadWrite`, of which 62 are called read-only by `read_only()` — and every one of the 62 originates
-at `Sleep`, whose side effect is the pause, or at a closure or user-defined function whose body the
-planner could not see and must assume writes. Asserting the implication as stated would force
-`SELECT sleep(1s)` onto a write transaction.
+of the language-test corpus
+(`dbs::read_only_test::vm::access_mode_read_write_implies_not_read_only_NN`, twelve slices of the
+corpus that together compile 8,469 statements through a transaction-less planner) finds 424 plans
+reporting `ReadWrite`, of which 62 are called read-only by `read_only()` — and every one of the 62
+originates at `Sleep`, whose side effect is the pause, or at a closure or user-defined function
+whose body the planner could not see and must assume writes. Asserting the implication as stated
+would force `SELECT sleep(1s)` onto a write transaction.
 
 Both are the physical layer being *more* conservative than the AST predicate, which is the safe
 direction: an over-approximating `access_mode()` never lets a write reach a read-only transaction.

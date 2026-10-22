@@ -40,6 +40,8 @@ extern crate common;
 
 #[macro_use]
 mod mac;
+#[cfg(all(test, feature = "kv-mem"))]
+mod corpus_slices;
 #[cfg(test)]
 mod sql_test;
 #[cfg(test)]

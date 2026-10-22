@@ -11,6 +11,7 @@ use surrealdb_types::ToSql;
 
 use super::graph::frontier::counters;
 use crate::dbs::Session;
+use crate::exec::config::ExecConfig;
 use crate::exec::ir::phys::frontier::{FORCE_FRONTIER_HOPS, FORCE_FRONTIER_ROWS};
 use crate::exec::operators::test_util::TestDb;
 
@@ -138,6 +139,15 @@ async fn run_on(
 	run_as(&TestDb::owner(), backend, pins, config, setup, sql).await
 }
 
+/// The units of fuel a statement run with `config` starts on: the `vm_quantum` it names, or the
+/// datastore's default.
+fn quantum_of(config: &[(&str, &str)]) -> u32 {
+	config.iter().find(|(key, _)| *key == "vm_quantum").map_or_else(
+		|| ExecConfig::default().vm_quantum,
+		|(_, value)| value.parse().expect("`vm_quantum` is a number of units"),
+	)
+}
+
 /// [`run_on`] as the session `session`.
 async fn run_as(
 	session: &Session,
@@ -155,6 +165,11 @@ async fn run_as(
 	let mut exec = crate::exec::config::ExecConfig::default();
 	surrealdb_cnf::Config::parse(&mut exec, &map);
 	let (db, _directory) = database(backend, map, setup).await;
+	// A window is filled no wider than the fuel the thread's meter holds, and the setup leaves
+	// the meter at whatever phase its own work ended in. The statement starts on the whole
+	// quantum the run is configured with, so a window is as wide as the knobs the test names make
+	// it and not as the setup's cost left it.
+	super::fuel::refill(quantum_of(config));
 	counters::reset();
 	let ran = super::morsel::batches_of(&db.exec_ctx().await).len();
 	// The thread's meter is what the work before the run left of it, and a fill reads no more
@@ -404,8 +419,8 @@ async fn a_read_a_window_holds_a_range_for_builds_no_range() {
 		"SELECT ->knows AS e, ->likes AS l FROM person",
 		"SELECT <-knows AS e, ->knows AS g FROM person",
 	] {
-		let off = run_on(Backend::Memory, Pins::OFF, SERIAL, &setup, sql).await;
-		let rows = run_on(Backend::Memory, Pins::ROWS, SERIAL, &setup, sql).await;
+		let off = run_on(Backend::Memory, Pins::OFF, UNSPENT, &setup, sql).await;
+		let rows = run_on(Backend::Memory, Pins::ROWS, UNSPENT, &setup, sql).await;
 		no_errors(&rows);
 		assert_eq!(rows.answers, off.answers, "{sql}");
 		assert!(off.built >= 60, "{sql}: the reads of a run without windows build {}", off.built);
@@ -414,8 +429,8 @@ async fn a_read_a_window_holds_a_range_for_builds_no_range() {
 	}
 	// Two hops over the same persons read one range, which the window names for both.
 	let sql = "SELECT ->knows->person->knows->person AS f FROM person";
-	let off = run_on(Backend::Memory, Pins::OFF, SERIAL, &setup, sql).await;
-	let rows = run_on(Backend::Memory, Pins::ROWS, SERIAL, &setup, sql).await;
+	let off = run_on(Backend::Memory, Pins::OFF, UNSPENT, &setup, sql).await;
+	let rows = run_on(Backend::Memory, Pins::ROWS, UNSPENT, &setup, sql).await;
 	no_errors(&rows);
 	assert_eq!(rows.answers, off.answers, "{sql}");
 	assert!(off.built >= 60, "{sql}: the reads of a run without windows build {}", off.built);
@@ -423,8 +438,8 @@ async fn a_read_a_window_holds_a_range_for_builds_no_range() {
 	// The sources of a later hop are read from the window of the hop, whose reads build none of
 	// the ranges it holds.
 	let sql = "SELECT ->knows->person AS f FROM person";
-	let off = run_on(Backend::Memory, Pins::OFF, SERIAL, &setup, sql).await;
-	let hops = run_on(Backend::Memory, Pins::HOPS, SERIAL, &setup, sql).await;
+	let off = run_on(Backend::Memory, Pins::OFF, UNSPENT, &setup, sql).await;
+	let hops = run_on(Backend::Memory, Pins::HOPS, UNSPENT, &setup, sql).await;
 	assert_eq!(hops.answers, off.answers);
 	assert!(hops.built < off.built, "{} against {}", hops.built, off.built);
 }
@@ -471,8 +486,8 @@ async fn a_hop_window_reads_nothing_the_window_of_the_rows_holds() {
 	// left to read.
 	let setup = people(60, "");
 	let sql = "SELECT ->knows->person AS f FROM person";
-	let rows = run_on(Backend::Memory, Pins::ROWS, SERIAL, &setup, sql).await;
-	let all = run_on(Backend::Memory, Pins::ALL, SERIAL, &setup, sql).await;
+	let rows = run_on(Backend::Memory, Pins::ROWS, UNSPENT, &setup, sql).await;
+	let all = run_on(Backend::Memory, Pins::ALL, UNSPENT, &setup, sql).await;
 	no_errors(&all);
 	assert_eq!(all.answers, rows.answers);
 	assert_eq!(all.filled, rows.filled, "both windows hold what the rows window alone holds");
@@ -899,6 +914,10 @@ const MORSELS: &[(&str, &str)] =
 	&[("morsel_split_rows", "1"), ("morsel_target_bytes", "4000"), ("morsel_oltp_reserve", "0")];
 /// One task runs every row of a statement, in order.
 const SERIAL: &[(&str, &str)] = &[("morsel_split_rows", "18446744073709551615")];
+/// [`SERIAL`] on a quantum no statement here spends. A window is cut where the meter runs out, so
+/// a test that requires a window to hold every range it was asked for cannot let the fuel bound it.
+const UNSPENT: &[(&str, &str)] =
+	&[("morsel_split_rows", "18446744073709551615"), ("vm_quantum", "1073741824")];
 
 /// Runs `sql` with no window, with only the window of the batch of rows, and with every window,
 /// requires the same answers of the three, and answers the run with the rows window only.

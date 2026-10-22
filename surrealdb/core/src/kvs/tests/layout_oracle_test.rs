@@ -41,10 +41,15 @@
 //!
 //! A finding [`KNOWN`] names is a warning, and one it names that no longer occurs is a failure.
 //!
-//! The language tests of field migrations run as scenarios too. `LAYOUT_ORACLE_FILTER` runs only
-//! the scenarios whose name contains it, `LAYOUT_ORACLE_CORPUS=0` leaves the language tests out,
-//! `LAYOUT_ORACLE_REPORT` names a file the findings are written to, `LAYOUT_ORACLE_ANSWERS` a
-//! directory each run's answers are written to, and `LAYOUT_ORACLE_DUMP` one each export is.
+//! The language tests of field migrations run as scenarios too. The scenarios are split into
+//! slices, each a test of its own (`layout_oracle_00` …) so the runner runs them in parallel: a
+//! scenario is in the slice its position in the list of every scenario names. A slice judges the
+//! scenarios it holds alone, so each entry of [`KNOWN`] names exactly one scenario.
+//!
+//! `LAYOUT_ORACLE_FILTER` runs only the scenarios whose name contains it, `LAYOUT_ORACLE_CORPUS=0`
+//! leaves the language tests out, `LAYOUT_ORACLE_REPORT` names a file each slice writes its
+//! findings to, with its number appended, `LAYOUT_ORACLE_ANSWERS` a directory each run's answers
+//! are written to, and `LAYOUT_ORACLE_DUMP` one each export is.
 
 #![allow(clippy::unwrap_used)]
 
@@ -64,6 +69,7 @@ use crate::catalog::TableType;
 use crate::catalog::providers::{
 	CatalogProvider, DatabaseProvider, NamespaceProvider, TableProvider,
 };
+use crate::corpus_slices::{assert_slices_cover, slice, sliced_tests};
 use crate::dbs::Session;
 use crate::exec::migrate::{Replay, into_error, migration_frame, verification_test};
 use crate::expr::Part;
@@ -426,10 +432,16 @@ fn with_imports(text: &str) -> String {
 	out
 }
 
-/// Every scenario the filter admits: this suite's own, then the language tests.
+/// Every scenario the environment's filter admits: this suite's own, then the language tests.
 fn scenarios() -> Vec<Scenario> {
 	let filter = std::env::var("LAYOUT_ORACLE_FILTER").unwrap_or_default();
 	let corpus = std::env::var("LAYOUT_ORACLE_CORPUS").map_or(true, |v| v != "0");
+	scenarios_matching(&filter, corpus)
+}
+
+/// Every scenario whose name contains `filter`: this suite's own, then the language tests when
+/// `corpus` is set.
+fn scenarios_matching(filter: &str, corpus: bool) -> Vec<Scenario> {
 	let mut out = Vec::new();
 	let mut read = |dir: &str, prefix: &str, imports: bool| {
 		let Ok(entries) = std::fs::read_dir(dir) else {
@@ -443,7 +455,7 @@ fn scenarios() -> Vec<Scenario> {
 		for path in paths {
 			let stem = path.file_stem().unwrap().to_string_lossy();
 			let name = format!("{prefix}{stem}");
-			if !name.contains(&filter) {
+			if !name.contains(filter) {
 				continue;
 			}
 			let text = std::fs::read_to_string(&path).unwrap();
@@ -1732,17 +1744,25 @@ fn compare(a: &Run, b: &Run, upgraded_only: bool, findings: &mut Vec<Finding>) {
 	}
 }
 
-#[test]
-fn layout_oracle() {
+/// The worker threads a slice runs its jobs on, which is also how many jobs it runs at once.
+const WORKERS: usize = 2;
+
+/// Runs the scenarios of slice `k` in every mode and requires every finding to be one [`KNOWN`]
+/// names, and every one it names to occur.
+fn layout_oracle(k: usize) {
+	let admitted = scenarios();
+	assert!(!admitted.is_empty(), "no scenario matches the filter");
+	let scenarios = slice(admitted, k);
+	if scenarios.is_empty() {
+		return;
+	}
 	let runtime = tokio::runtime::Builder::new_multi_thread()
-		.worker_threads(8)
+		.worker_threads(WORKERS)
 		.thread_stack_size(32 * 1024 * 1024)
 		.enable_all()
 		.build()
 		.unwrap();
 	runtime.block_on(async {
-		let scenarios = scenarios();
-		assert!(!scenarios.is_empty(), "no scenario matches the filter");
 		let jobs: Vec<(Scenario, Mode)> = scenarios
 			.iter()
 			.flat_map(|scenario| Mode::ALL.iter().map(move |mode| (scenario.clone(), *mode)))
@@ -1765,7 +1785,7 @@ fn layout_oracle() {
 				});
 				(name, mode, outcome)
 			})
-			.buffer_unordered(16)
+			.buffer_unordered(WORKERS)
 			.collect()
 			.await;
 
@@ -1862,10 +1882,53 @@ fn layout_oracle() {
 		);
 		println!("{report}");
 		if let Ok(path) = std::env::var("LAYOUT_ORACLE_REPORT") {
-			std::fs::write(path, &report).unwrap();
+			std::fs::write(format!("{path}.{k:02}"), &report).unwrap();
 		}
 		assert_eq!(failures, 0, "the layout oracle found failures:\n{report}");
 	});
+}
+
+sliced_tests! {
+	layout_oracle, ORACLE_SLICES;
+	layout_oracle_00 => 0,
+	layout_oracle_01 => 1,
+	layout_oracle_02 => 2,
+	layout_oracle_03 => 3,
+	layout_oracle_04 => 4,
+	layout_oracle_05 => 5,
+	layout_oracle_06 => 6,
+	layout_oracle_07 => 7,
+	layout_oracle_08 => 8,
+	layout_oracle_09 => 9,
+	layout_oracle_10 => 10,
+	layout_oracle_11 => 11,
+}
+
+/// The slices of the scenarios hold each one once between them and none is empty, so the sliced
+/// tests judge every scenario and each has work to do.
+#[test]
+fn slices_cover_the_scenarios() {
+	let names: Vec<String> =
+		scenarios_matching("", true).into_iter().map(|scenario| scenario.name).collect();
+	assert!(names.iter().any(|name| name.starts_with("lt/")), "the language tests are listed");
+	assert!(names.iter().any(|name| !name.starts_with("lt/")), "this suite's scenarios are listed");
+	assert_slices_cover("scenarios", &names);
+}
+
+/// A slice reports a [`KNOWN`] finding gone when it holds a scenario the entry names and none of
+/// its scenarios has the finding. An entry that named several scenarios could be reported gone by
+/// a slice that does not hold the one that has the finding, so each entry names exactly one.
+#[test]
+fn each_known_finding_names_one_scenario() {
+	let scenarios = scenarios_matching("", true);
+	for known in KNOWN {
+		let named: Vec<&str> = scenarios
+			.iter()
+			.filter(|scenario| scenario.name.contains(known.scenario))
+			.map(|scenario| scenario.name.as_str())
+			.collect();
+		assert_eq!(named.len(), 1, "{} names {named:?}", known.scenario);
+	}
 }
 
 #[test]

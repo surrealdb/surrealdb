@@ -263,6 +263,7 @@ mod vm {
 	use std::path::{Path, PathBuf};
 	use std::sync::Arc;
 
+	use crate::corpus_slices::{assert_slices_cover, slice, sliced_tests};
 	use crate::err::Error;
 	use crate::exec::operators::test_util::TestDb;
 	use crate::exec::{AccessMode, ExecOperator, ExecutionContext};
@@ -1269,20 +1270,69 @@ mod vm {
 	/// end requires the sweep to have proved something in both halves: at
 	/// least one statement planned, and at least one that planned to
 	/// `ReadWrite`.
-	#[tokio::test]
-	async fn access_mode_read_write_implies_not_read_only() {
+	///
+	/// The sweep is split into slices that run as tests of their own, each
+	/// taking the files whose position in path order is congruent to its
+	/// number, so each slice holds the assertion over its files.
+	fn access_mode_read_write_implies_not_read_only(k: usize) {
+		tokio::runtime::Builder::new_current_thread()
+			.enable_all()
+			.build()
+			.expect("a runtime")
+			.block_on(access_mode_sweep(k));
+	}
+
+	sliced_tests! {
+		access_mode_read_write_implies_not_read_only, ACCESS_MODE_SLICES;
+		access_mode_read_write_implies_not_read_only_00 => 0,
+		access_mode_read_write_implies_not_read_only_01 => 1,
+		access_mode_read_write_implies_not_read_only_02 => 2,
+		access_mode_read_write_implies_not_read_only_03 => 3,
+		access_mode_read_write_implies_not_read_only_04 => 4,
+		access_mode_read_write_implies_not_read_only_05 => 5,
+		access_mode_read_write_implies_not_read_only_06 => 6,
+		access_mode_read_write_implies_not_read_only_07 => 7,
+		access_mode_read_write_implies_not_read_only_08 => 8,
+		access_mode_read_write_implies_not_read_only_09 => 9,
+		access_mode_read_write_implies_not_read_only_10 => 10,
+		access_mode_read_write_implies_not_read_only_11 => 11,
+	}
+
+	/// The files of the language-test corpus, in path order, with the
+	/// directory they are under.
+	fn corpus_sources() -> (PathBuf, Vec<(PathBuf, String)>) {
 		let corpus = Path::new(env!("CARGO_MANIFEST_DIR"))
 			.join("..")
 			.join("..")
 			.join("language-tests")
 			.join("tests");
 		assert!(corpus.is_dir(), "language-test corpus not found at {}", corpus.display());
-
-		let h = Harness::new("").await;
 		let mut sources: Vec<(PathBuf, String)> = Vec::new();
 		walk_surql(&corpus, &mut |path, source| {
 			sources.push((path.to_path_buf(), source.to_string()));
 		});
+		sources.sort_by(|a, b| a.0.cmp(&b.0));
+		(corpus, sources)
+	}
+
+	/// The slices of the corpus hold every file once between them and none
+	/// is empty, so the sliced sweeps together walk the whole corpus.
+	#[test]
+	fn access_mode_slices_cover_the_corpus() {
+		let (corpus, sources) = corpus_sources();
+		let paths: Vec<String> = sources
+			.iter()
+			.map(|(path, _)| path.strip_prefix(&corpus).unwrap_or(path).display().to_string())
+			.collect();
+		assert!(paths.len() > 100, "the language tests number {}", paths.len());
+		assert_slices_cover("language-test files", &paths);
+	}
+
+	/// The sweep over the files of slice `k`.
+	async fn access_mode_sweep(k: usize) {
+		let h = Harness::new("").await;
+		let (corpus, sources) = corpus_sources();
+		let sources = slice(sources, k);
 
 		let mut sweep = Sweep::default();
 		let mut unexplained: Vec<String> = Vec::new();
